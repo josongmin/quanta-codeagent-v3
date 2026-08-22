@@ -20,15 +20,15 @@ import { describe, expect, test } from "bun:test"
 import {
   type ActivitySnapshot,
   createActivityStore,
-  worktreeOpNodeId,
   worktreeOpenActivity,
+  worktreeOpNodeId,
   worktreeStepId,
   worktreeStepOpen,
 } from "@/activity"
 import {
-  type WorktreeCreateProgress,
   checkoutPercentage,
   makeWorktreeActivityObserver,
+  type WorktreeCreateProgress,
   worktreeProgressToActivity,
 } from "@/runner/session-ops/worktree/activity-adapter"
 
@@ -126,14 +126,18 @@ describe("worktreeProgressToActivity — exhaustive pure mapping", () => {
   })
 
   test("pure mapper is exhaustive: every arm yields at least the expected events", () => {
-    expect(worktreeProgressToActivity(OP, { kind: "stage-started", stage: "workspace" })).toHaveLength(1)
+    expect(
+      worktreeProgressToActivity(OP, { kind: "stage-started", stage: "workspace" }),
+    ).toHaveLength(1)
     expect(
       worktreeProgressToActivity(OP, { kind: "checkout-progress", completed: 5, total: 10 }),
     ).toHaveLength(1)
     expect(
       worktreeProgressToActivity(OP, { kind: "checkout-progress", completed: 5, total: 0 }),
     ).toHaveLength(0) // indeterminate ⇒ empty
-    expect(worktreeProgressToActivity(OP, { kind: "stage-completed", stage: "checkout" })).toHaveLength(1)
+    expect(
+      worktreeProgressToActivity(OP, { kind: "stage-completed", stage: "checkout" }),
+    ).toHaveLength(1)
     expect(
       worktreeProgressToActivity(OP, { kind: "failed", stage: "checkout", code: "x" }),
     ).toHaveLength(1)

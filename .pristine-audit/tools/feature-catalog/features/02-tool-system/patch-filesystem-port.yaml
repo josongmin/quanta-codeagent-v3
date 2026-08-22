@@ -1,0 +1,60 @@
+id: patch-filesystem-port
+title: PatchFileSystemPort — apply_patch FS abstraction (pure applier)
+section: 2
+subsystem: V4A apply_patch — storage-agnostic IO seam
+order: 5
+maturity: L4
+status: stable
+ui_surfaces: [cli]
+monitoring: integrated
+telemetry_keys: ["quanta.patch", "quanta.patch.fuzzy_match_tier", "quanta.patch.fuzzy_matched", "quanta.patch.op"]
+modes: [interactive, headless, batch, daemon, ide, ci-bot]
+configurable: n-a
+owners: ["@songmin"]
+labels: [absorbed:codex, surface:cli]
+depends_on: [apply-patch-v4a]
+config_refs:
+  env: ["QUANTA_FS_JAIL"]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 6/6 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "pure internal IO-port abstraction, no UI affordance on any surface"
+purpose: |
+  Patch-specific FS port (read / write / delete / rename / exists) injected
+  into the V4A `applyPatch` so the applier stays pure-functional w.r.t. the
+  host filesystem and can be unit-tested in-memory. DIFFERENT shape and
+  different name than the general `@/storage` `FileSystemPort` — on purpose,
+  so the patch slice doesn't drag the broader storage interface. The
+  `FsJailFileSystemPort` adapter in `src/tool/apply-patch.ts` satisfies the
+  port by routing every path through the jail-aware resolver so writes can't
+  escape the workspace. Bridge from the pure `@/patch` slice (parser +
+  applier + port) to the `tool/` adapter layer.
+evidence:
+  code:
+    - src/patch/types.ts
+    - src/patch/applier.ts
+    - src/patch/index.ts
+    - src/tool/apply-patch.ts
+    - src/shared/runtime-config.ts
+    - src/patch/parser.ts
+  adrs: [28]
+  tests:
+    unit:
+      - tests/unit/patch/applier.test.ts
+      - tests/unit/tool/apply-patch.test.ts
+    integration:
+      - tests/unit/patch/integration.test.ts
+      - tests/integration/apply-patch-tool.test.ts
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  Companion of `apply-patch-v4a` (grammar + 2-tier fuzzy applier). Distinct
+  port (not the general FileSystemPort) — keeps the patch slice's IO
+  surface area minimal (5 methods) and decoupled from storage's broader
+  contract. In-memory test harness drives the applier through a fake
+  port without touching disk.

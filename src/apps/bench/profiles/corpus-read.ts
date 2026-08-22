@@ -17,6 +17,7 @@
  *    `[]` (readable but empty), which callers already branch on.
  */
 import { readFileSync } from "node:fs"
+import { errMessage, logger } from "@/shared"
 import type { DatasetFamily } from "../dataset-family-token"
 import { RemoteDatasetPreflightError } from "../remote/box-session/dataset-rows"
 import type { FamilyCorpusRow } from "./corpus-row"
@@ -39,7 +40,12 @@ export const readFamilyCorpusFile = (
   let text: string
   try {
     text = readFileSync(path, "utf8")
-  } catch {
+  } catch (e) {
+    // `undefined` stays the caller-visible answer ("unreadable", vs `[]` for
+    // "readable but empty"), but WHICH fs fault it was — absent vs permission
+    // vs a directory — never reached anyone: `readFamilyDatasetInstanceIds`
+    // degrades it to `[]` and the refusing wrapper only says "could not be read".
+    logger.warn(`corpus-read.readFamilyCorpusFile: ${path}: ${errMessage(e)}`)
     return undefined
   }
   return readFamilyCorpusText(text, family)

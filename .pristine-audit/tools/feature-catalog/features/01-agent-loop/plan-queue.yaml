@@ -1,0 +1,47 @@
+id: plan-queue
+title: Plan-queue — mid-turn user input capture/replay (Codex absorption)
+section: 1
+subsystem: 큐드 follow-ups (ADR-0128)
+order: 94
+maturity: L4
+status: stable
+ui_surfaces: [cli]
+monitoring: integrated
+modes: [n-a]
+configurable: n-a
+telemetry_keys: ["plan_queue.enqueue.total", "plan_queue.enqueue.collapsed.total", "plan_queue.drain.total", "plan_queue.clear.total", "plan_queue.mutate.total"]
+owners: ["@songmin"]
+labels: [absorbed:codex, surface:core, held-promotion, tier:core]
+depends_on: [mid-turn-steering, queued-follow-ups]
+surface_integration:
+  cli: full
+  web: missing
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 1/1 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "user mechanism is the /queue slash command (SlashPalette server-routed is a prefill stub per B2) and needs a B3-absent queue verb on SessionCommand; not reachable in browser"
+purpose: |
+  Pure in-memory queue of follow-up user inputs captured WHILE a turn is in
+  progress, replayed when the turn ends. Codex's unique `queued-follow-ups`
+  pattern — no other modern agent has it (Claude Code / Cursor / v0 freeze
+  the UI mid-turn). quanta absorbs the STRUCTURAL surface: 12-field FollowUp
+  envelope + per-thread LRU + dedup, so a future consumer (mid-turn-steering
+  wire, CLI typed-while-running keystroke) can plug in on its own schedule.
+  Plane-clean: imports only `node:crypto`. Default-OFF — callers
+  (apps/agent bootstrap, future mid-turn-steering wire) opt in by
+  constructing `defaultPlanQueueStore()` and calling `enqueue(...)` then
+  `drain(threadId, currentTurn)` at turn boundary.
+evidence:
+  code:
+    - src/agent/plan-queue.ts
+    - src/observability/metrics/instrument-plan-queue.ts
+  adrs: [128]
+  tests:
+    unit:
+      - tests/unit/plan-queue-hellgate.test.ts
+      - tests/unit/plan-queue-hardening-hellgate.test.ts
+    integration: []
+    contract: []
+knobs: []
+notes: 'LIVE (jun-06 catalog truth-up — prior "No consumer wired" hold is STALE). `defaultPlanQueueStore({sendNowSink})` is built in `repl/surface-compose.ts:870`; `/queue` is a registered SlashCommand (`queue-cmd.ts` + `slash/registry-surface.ts`); also consumed by `edit-plan-cmd` / `voice-cmd` / playbook auto-dispatch (via `adaptPlanQueueStoreToSink`). Remaining follow-up is ONLY the mid-turn keystroke-capture UX (typed-while-running editor calling `enqueue` on Enter), NOT the queue itself. `pausedReason` slot supported on the FollowUp envelope (Codex parity).'

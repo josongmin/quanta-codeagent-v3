@@ -24,6 +24,9 @@ afterAll(() => {
   for (const d of BUDGET_DIRS) rmSync(d, { recursive: true, force: true })
 })
 
+/** The AMI id the fake `aws ssm get-parameter` resolves to. */
+const RESOLVED_AMI = "ami-0123456789abcdef0"
+
 const mockSpawn = () => {
   const calls: Array<{ cmd: string; args: string[]; input?: string }> = []
   const ok = (s: string): SpawnResult => ({ code: 0, stdout: s, stderr: "" })
@@ -36,6 +39,12 @@ const mockSpawn = () => {
     }
     const a = [...args]
     if (cmd === "curl") return ok("9.9.9.9") // ifconfig.me public-IP probe (SG ingress)
+    // aug-22 regression repair (`9d5369d31`): the default AMI is now an `ssm:`
+    // reference that `resolveLaunchAmi` dereferences BEFORE RunInstances. Without
+    // this branch the stub returned empty stdout ⇒ resolution threw ⇒ the pool
+    // aborted before a single status snapshot was written. The resolution contract
+    // itself stays pinned by src/apps/bench/remote/box-session/ami-resolution.test.ts.
+    if (a.includes("get-parameter")) return ok(`${RESOLVED_AMI}\n`)
     if (a.includes("run-instances")) return ok("i-box")
     if (a.includes("describe-instances")) return ok("1.2.3.4")
     if (a.includes("terminate-instances")) return ok("")

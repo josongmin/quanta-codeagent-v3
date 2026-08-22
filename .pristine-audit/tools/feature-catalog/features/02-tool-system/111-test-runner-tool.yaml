@@ -1,0 +1,58 @@
+id: test-runner-tool
+title: test_runner — bun→npm→pytest auto-detect + heuristic verdict
+section: 2
+subsystem: 코어 mutating 도구 — test suite execution
+order: 111
+maturity: L4
+status: stable
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [n-a]
+configurable: static
+owners: ["@songmin"]
+labels: [surface:cli]
+depends_on: [isconcurrencysafe]
+surface_integration:
+  cli: full
+  web: full
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 2/2 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "agent-callable test_runner renders as tool.invoked/tool.completed in session-hooks.ts (verdict + output preview)"
+purpose: |
+  Runs the project's test suite. Explicit `command` arg skips auto-detection;
+  otherwise `detectCommand` probes in order: (1) bun if `bun.lockb` OR
+  `bunfig.toml` OR `package.json.scripts.test` exists → `bun test`; (2)
+  `package.json` only → `npm test`; (3) pytest markers (`pytest.ini` /
+  `pyproject.toml` / `setup.py`) → `pytest`. `path` optional arg appends as
+  filter. Timeout: default 120s, max 600s. Tail-capped at TAIL_CAP=12000
+  chars with truncation header. `verdict()` derives one-line `passed | failed
+  | timed out | unknown` from exit code + output regex (`\d+ fail|failed|
+  ✗|✖` for fail, `pass|ok|✓|✔|\d+ passed` for pass). `hitlTier:
+  "pre-approval-ok"` opt-in — running the project's own tests is the
+  canonical inner-loop action; without this opt-in the `inferToolTier`
+  fallback would force confirmation on every `bun test` in `bypass` mode.
+evidence:
+  code:
+    - src/tool/test-runner/index.ts
+    - src/tool/index.ts
+  adrs: []
+  tests:
+    unit:
+      - tests/unit/tool/test-runner-verdict-hellgate.test.ts
+      - tests/unit/test-runner-local-env-hellgate.test.ts
+      - tests/unit/test-runner-path-harddeny-hellgate.test.ts
+    integration:
+      - tests/integration/test-runner.test.ts
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  `isReadOnly: false` + `isConcurrencySafe: false` — arbitrary project tests
+  have side effects and may contend for resources, so test_runner always
+  serializes. Companion of `02-testrunner` (section 1, ADR-0013 verify-guard
+  wiring) — that entry covers "test_runner counts as verification";
+  THIS entry covers the tool surface itself (detection + verdict + HITL).
+  `evidence.exitCode` + 4KB stderr tail attached per result (typed via
+  `ToolResultEvidence`, not duck-smuggled).

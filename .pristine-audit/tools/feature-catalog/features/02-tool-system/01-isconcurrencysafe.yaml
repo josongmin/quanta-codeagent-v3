@@ -1,0 +1,39 @@
+id: isconcurrencysafe
+title: isConcurrencySafe
+section: 2
+subsystem: 디스패치/배칭
+order: 1
+maturity: L3
+status: stable
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [n-a]
+configurable: n-a
+owners: ['@songmin']
+labels: [surface:cli]
+depends_on: [model-swap-retry, assert-never-exhaustiveness, byte-stable-string-comparator, errors-helper-fix, fallback-kinds-policy]
+config_refs:
+  env: [QUANTA_CAP_ENFORCE]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 4/4 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "pure dispatch/batching primitive; ui_surfaces n-a, no user-visible affordance on any surface"
+purpose: per-input isConcurrencySafe 동시성 배칭
+evidence:
+  code:
+    - src/tool/types.ts
+    - src/agent/streaming-dispatch.ts
+    - src/apps/cli/help-render.ts
+    - src/shared/runtime-config.ts
+  adrs: []
+  tests:
+    unit: [tests/unit/streaming-dispatch.test.ts, tests/unit/streaming-dispatch-hellgate.test.ts, tests/unit/streaming-dispatch-refusal-shortcircuit.test.ts]
+    integration: [tests/integration/streaming-dispatch-in-progress-e2e.test.ts, tests/integration/streaming-dispatch-rejection-e2e.test.ts]
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: ''

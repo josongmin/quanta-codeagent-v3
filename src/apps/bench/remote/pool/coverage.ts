@@ -8,6 +8,7 @@
 import {
   mergeOfficialGradeReceipts,
   type OfficialGradeReceipt,
+  type OfficialGradeReceiptFailure,
 } from "@/runner/batch/eval/official-grade"
 import {
   assertSafeArtifactSuffix,
@@ -63,25 +64,53 @@ export const accumulateChunkCoverage = (
   absorbFullRemoteResult(acc, result)
 }
 
-/** The chunk's MERGED receipt, or `undefined` when there is none — or when the
- *  pieces refuse to merge, in which case the chunk is deliberately left looking
- *  UNCOVERED (so it requeues) rather than silently reported from the lossier
- *  four-bucket view. */
-const mergedChunkReceipt = (acc: ChunkCoverageAccumulator): OfficialGradeReceipt | undefined => {
+/**
+ * The chunk's MERGED receipt, or the typed reason there is none.
+ *
+ * Two things this owes the chunk it belongs to:
+ *
+ *  - the DENOMINATOR. The chunk's declared instance set is unioned in, so a
+ *    chunk that graded 2 of 3 and lost its box merges to a receipt that still
+ *    says 3 assigned and names the third as missing. Without it the merged
+ *    receipt shrank to whatever came back — the flattering denominator, on the
+ *    artifact every downstream surface reads.
+ *  - the FAILURE CODE. A refused merge (a duplicate disposition across two
+ *    pieces, two evaluator builds) used to return `undefined`, which is exactly
+ *    what a dead box returns. Two very different operator problems were byte-
+ *    indistinguishable; the codes are carried out so the refusal can be read.
+ */
+const mergedChunkReceipt = (
+  acc: ChunkCoverageAccumulator,
+  chunk: PoolChunk,
+):
+  | { readonly receipt: OfficialGradeReceipt }
+  | { readonly failures: readonly OfficialGradeReceiptFailure[] }
+  | undefined => {
   if (acc.officialGrades.length === 0) return undefined
-  const merged = mergeOfficialGradeReceipts({ receipts: acc.officialGrades })
-  return merged.ok ? merged.receipt : undefined
+  const merged = mergeOfficialGradeReceipts({
+    receipts: acc.officialGrades,
+    ...(chunk.instanceIds !== undefined
+      ? { additionalAssignedInstanceIds: chunk.instanceIds }
+      : {}),
+  })
+  return merged.ok ? { receipt: merged.receipt } : { failures: merged.failures }
 }
 
-export const chunkCoverageResult = (acc: ChunkCoverageAccumulator): FullRemoteResult => {
-  const officialGrade = mergedChunkReceipt(acc)
+export const chunkCoverageResult = (
+  acc: ChunkCoverageAccumulator,
+  chunk: PoolChunk,
+): FullRemoteResult => {
+  const merged = mergedChunkReceipt(acc, chunk)
   return {
     ...(acc.reportPath !== undefined ? { reportPath: acc.reportPath } : {}),
     ...(acc.resolved.size > 0 ? { resolved: [...acc.resolved] } : {}),
     ...(acc.unresolved.size > 0 ? { unresolved: [...acc.unresolved] } : {}),
     ...(acc.errored.size > 0 ? { errored: [...acc.errored] } : {}),
     ...(acc.emptyPatch.size > 0 ? { emptyPatch: [...acc.emptyPatch] } : {}),
-    ...(officialGrade !== undefined ? { officialGrade } : {}),
+    ...(merged !== undefined && "receipt" in merged ? { officialGrade: merged.receipt } : {}),
+    ...(merged !== undefined && "failures" in merged
+      ? { officialGradeFailures: merged.failures }
+      : {}),
     ...(acc.rateLimited ? { rateLimited: true } : {}),
   }
 }
@@ -162,9 +191,9 @@ export const coverageComplete = (r: FullRemoteResult, chunk: PoolChunk): boolean
 export const accumulatedMissingInstances = (
   acc: ChunkCoverageAccumulator,
   chunk: PoolChunk,
-): string[] => missingInstances(chunkCoverageResult(acc), chunk)
+): string[] => missingInstances(chunkCoverageResult(acc, chunk), chunk)
 
 export const accumulatedCoverageComplete = (
   acc: ChunkCoverageAccumulator,
   chunk: PoolChunk,
-): boolean => coverageComplete(chunkCoverageResult(acc), chunk)
+): boolean => coverageComplete(chunkCoverageResult(acc, chunk), chunk)

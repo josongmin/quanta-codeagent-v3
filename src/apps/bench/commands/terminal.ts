@@ -23,7 +23,7 @@
 import { accessSync, constants, existsSync, readFileSync } from "node:fs"
 import { dirname, join, resolve } from "node:path"
 import { writeReport } from "@/runner/batch/report"
-import { errMessage } from "@/shared"
+import { errMessage, logger } from "@/shared"
 import { TERMINAL_CANARY_MANIFEST } from "../terminal/canary"
 import {
   assertNoSweDatasetFamilySelector,
@@ -145,7 +145,12 @@ const defaultCanWriteDir = (path: string): boolean => {
       try {
         accessSync(probe, constants.W_OK)
         return true
-      } catch {
+      } catch (e) {
+        // `false` stays the verdict, but this feeds a DOCTOR check, whose whole
+        // job is an accurate diagnosis. `accessSync` throws for EACCES *and* for
+        // ELOOP / EIO / a lost race with the ancestor's removal; collapsing all of
+        // them to "not writable" hands the operator a plausible wrong cause.
+        logger.warn(`terminal-doctor.canWriteDir: ${probe}: ${errMessage(e)}`)
         return false
       }
     }

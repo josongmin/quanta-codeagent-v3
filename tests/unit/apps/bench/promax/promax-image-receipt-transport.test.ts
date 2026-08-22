@@ -48,7 +48,7 @@ const dockerFake =
       }
     }
     if (argv[0] === "exec") {
-      return { code: 0, stdout: "QUANTA_SENTINEL=ABSENT\nQUANTA_CP=OK\n", stderr: "" }
+      return { code: 0, stdout: "__QPMX_SENTINEL__=ABSENT\n__QPMX_CP__=OK\n", stderr: "" }
     }
     return { code: 0, stdout: "", stderr: "" }
   }

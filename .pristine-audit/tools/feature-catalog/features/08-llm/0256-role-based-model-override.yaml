@@ -1,0 +1,57 @@
+id: role-based-model-override
+title: Role-based model override — {role → modelId} resolver (Roo orchestrator)
+section: 8
+subsystem: 모델 라우팅 — role-based override (Roo 흡수, ADR-0256)
+order: 256
+maturity: L4
+status: new
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [interactive, headless, batch, daemon, ide]
+configurable: integrated
+config_refs:
+  env: []
+owners: ["@songmin"]
+labels: [absorbed:roo, surface:core, tier:core]
+depends_on: []
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 4/4 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "pure internal in-memory resolver primitive ({role to modelId} override), no UI affordance on any surface"
+purpose: |
+  Roo Code orchestrator의 "역할별 모델 선택" 패턴 흡수. plan-writer는 deep-reasoning model
+  (o1/claude-opus), executor는 fast minimal-diff (claude-haiku/gpt-5-mini), reviewer/explorer 동.
+  ADR-0212 sticky-model은 workflow phase (plan/audit/review) 축이고, role-override는 그 안의
+  dispatched sub-task 축 — orthogonal. 신규 슬라이스 src/llm/role-model-override/: types(Role
+  closed union: plan-writer | executor | reviewer | explorer | default + ModelId alias +
+  OverrideError QuantaError subclass) / port(RoleModelResolver — resolve/setOverride/
+  clearOverride/listOverrides 4 method + SetOverrideResult typed shape) / default-resolver
+  (Map-backed override + fallback to defaultModel — sync, in-memory, last-write-wins) / index.
+  Precedence: explicit role override > defaultModel arg (caller composes sticky-model을 통해
+  defaultModel로 패스). resolve는 throw 안 함 — unknown role도 default fallback. setOverride
+  empty modelId → typed error (no silent poison). listOverrides Object.freeze 반환.
+evidence:
+  code:
+    - src/llm/role-model-override/types.ts
+    - src/llm/role-model-override/port.ts
+    - src/llm/role-model-override/default-resolver.ts
+    - src/llm/role-model-override/index.ts
+  adrs: [256, 212]
+  tests:
+    unit:
+      - tests/unit/llm/role-model-override-hellgate.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  hellgate 15 케이스: resolve no override → default / setOverride+resolve → override / listOverrides
+  정확 / 5-role exhaustive / empty modelId → OverrideError / unknown role → default (no throw) /
+  override 덮어쓰기 / default-OFF byte-identical / 5-role 독립 / listOverrides frozen / concurrent
+  setOverride 안전 (last-write-wins) / resolve 순수 / 1000 resolve perf / ADR-0212 sticky 호환
+  (sticky가 defaultModel로 흘러옴) / clearOverride 후 default 복귀. Persistence는 의도적 out of
+  scope — per-process in-memory만, fs-backed는 future ADR.

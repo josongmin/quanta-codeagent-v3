@@ -1,0 +1,89 @@
+id: llm-provider-fork
+title: LLM provider fork — Anthropic 4-transport closed port (default/bedrock/vertex/foundry)
+section: 9
+subsystem: LLM transport — vendor/transport separation
+order: 139
+maturity: L4
+status: stable
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [n-a]
+configurable: integrated
+config_refs:
+  env:
+    - QUANTA_LLM_TRANSPORT
+    - ANTHROPIC_BEDROCK_BASE_URL
+    - ANTHROPIC_VERTEX_BASE_URL
+    - ANTHROPIC_FOUNDRY_BASE_URL
+    - ANTHROPIC_FOUNDRY_RESOURCE
+    - QUANTA_USE_FOUNDRY
+    - CLAUDE_CODE_USE_FOUNDRY
+owners: ["@songmin"]
+labels: ["surface:core"]
+depends_on: [llm-adapter-bedrock, llm-adapter-foundry, llm-adapter-mantle, llm-adapter-vertex, llm-stream-timeout]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 10/10 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "Pure internal transport-selection port; env-only with no browser affordance. The transportId field rides llm.request but no web component renders llm.request."
+purpose: |
+  Hexagonal port that separates Anthropic vendor (wire grammar) from
+  transport (api.anthropic.com vs AWS Bedrock vs GCP Vertex vs Azure
+  Foundry). 4-arm ProviderId union + 3-code ProviderError
+  (provider-unsupported / provider-misconfigured /
+  provider-missing-dependency) + 5-tier resolveProvider(explicit?, env?)
+  precedence. Default-OFF — legacy
+  adapter path untouched (byte-identical when ProviderId resolves to
+  "default"). Bedrock/Vertex/Foundry are all REAL stream (ADR-0172,
+  optional cloud sub-SDK, missing-dep typed-throw when absent); Mantle is a
+  real stream skeleton HELD on its unpublished @anthropic-ai/mantle-sdk
+  (same missing-dep typed-throw, install-to-enable — NOT a stub).
+  FACTORY WIRE NOW LIVE (H7): createMulticloudLLM in src/llm/factory.ts
+  consults this registry's precedence ladder to select the transport AND
+  injects the H7 CredentialSource into the Bedrock/Vertex adapters, so the
+  slice is no longer unwired from the main factory. END-USER REACHABILITY
+  NOW LIVE: selectLlmTransport + buildMainLLMCore (src/runner/assemble/llm.ts)
+  route the MAIN agent LLM (CLI buildLLM) through createMulticloudLLM when
+  QUANTA_LLM_TRANSPORT or a cloud env signal selects a non-default transport;
+  default-OFF byte-identical otherwise. First OSS implementation to make
+  Anthropic transport-selection typed; Claude Code keeps it closed via
+  env-only, Codex/Cursor/v0.dev don't separate transport.
+evidence:
+  code:
+    - src/llm/providers/provider-port.ts
+    - src/llm/providers/default-adapter.ts
+    - src/llm/providers/bedrock-adapter.ts
+    - src/llm/providers/vertex-adapter.ts
+    - src/llm/providers/foundry-adapter.ts
+    - src/llm/providers/registry.ts
+    - src/llm/providers/index.ts
+    - src/llm/factory.ts
+    - src/runner/assemble/llm.ts
+    - src/apps/cli/internal.ts
+  adrs: [139]
+  tests:
+    unit:
+      - tests/unit/llm-providers/port-hellgate.test.ts
+      - tests/unit/llm-providers/registry-hellgate.test.ts
+      - tests/unit/llm-providers/default-adapter-hellgate.test.ts
+      - tests/unit/llm-providers/bedrock-adapter-hellgate.test.ts
+      - tests/unit/llm-providers/vertex-adapter-hellgate.test.ts
+      - tests/unit/h7-multicloud-rotation-wire-hellgate.test.ts
+      - tests/unit/h7-main-llm-transport-routing-hellgate.test.ts
+    integration: []
+    contract: []
+knobs:
+  - name: QUANTA_LLM_TRANSPORT
+    default: 'undefined'
+    purpose: 'Explicit MAIN-agent transport selector — default | bedrock | vertex | foundry | mantle. Unset ⇒ the registry env precedence ladder (ANTHROPIC_{BEDROCK,VERTEX,FOUNDRY}_BASE_URL / _RESOURCE / _USE_*) decides; neither set ⇒ legacy vendor path (byte-identical).'
+deliberate_hold: null
+notes: |
+  Wire is opt-in: legacy AnthropicAdapter still default. Foundry adapter
+  graduated to a REAL stream (ADR-0172) once @anthropic-ai/foundry-sdk@0.2.3
+  shipped; Mantle is a real stream skeleton awaiting its unpublished SDK
+  (install-to-enable). ProviderError closes 3 cases: provider-unsupported /
+  provider-misconfigured / provider-missing-dependency — caller maps to
+  typed LLMErrorKind upstream.

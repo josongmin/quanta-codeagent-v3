@@ -1,0 +1,38 @@
+id: aug02-rfc01-context-headroom-advisory
+title: RFC01 A7 — context-headroom advisory (edge-latched crossing event)
+section: 1
+subsystem: Compaction / context-window advisory (aug-02 RFC01 A7)
+order: 550
+maturity: L3
+status: new
+ui_surfaces: [cli]
+monitoring: partial
+modes: [interactive, headless]
+configurable: integrated
+owners: ["@songmin"]
+labels: ["rfc:aug02-01", "gate:default-off"]
+config_refs:
+  env: ["QUANTA_CONTEXT_HEADROOM_ADVISORY"]
+  runtime: ["contextHeadroomAdvisory"]
+purpose: |
+  RFC-01 A7 opt-in context-headroom advisory: when
+  QUANTA_CONTEXT_HEADROOM_ADVISORY is strict-1, the compaction wire emits ONE
+  edge-latched `context_headroom_crossed` stream event per upward threshold
+  crossing (no re-fire until it drops back and re-crosses). Default OFF ⇒ the
+  compaction/stream path is byte-identical (no event, no latch). Read via
+  runtimeConfig().contextHeadroomAdvisory (declared in runtime-config-knobs,
+  discoverable in /config as a runtime-config knob).
+evidence:
+  code:
+    - src/agent/loop/compaction-wire.ts
+    - src/stream/types.ts
+    - src/shared/runtime-config.ts
+  adrs: ["docs/plans/aug-02-absorption/rfc-01-persistence-resume.md"]
+  tests:
+    unit:
+      - tests/unit/context-headroom-advisory.test.ts
+knobs:
+  - name: QUANTA_CONTEXT_HEADROOM_ADVISORY
+    where: runtime-config
+    default: false
+    purpose: strict-1 opt-in; emits edge-latched context_headroom_crossed event

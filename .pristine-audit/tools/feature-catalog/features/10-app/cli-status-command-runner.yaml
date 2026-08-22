@@ -1,0 +1,91 @@
+id: cli-status-command-runner
+title: Scriptable statusLine runner — CC stdin contract, args-based spawn, ANSI-aware truncated first line
+section: 10
+subsystem: CLI chrome — scriptable status line (operator-authored command)
+order: 26
+maturity: L3
+status: new
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [interactive]
+configurable: integrated
+config_refs:
+  env: [QUANTA_STATUS_LINE, QUANTA_STATUS_LINE_CONFIG]
+  runtime: [statusLineConfig]
+owners: ['@songmin']
+labels: [surface:cli, absorbed:claude-code, ticket-15, seam]
+depends_on:
+  - 0297-cli-runtime-feature-config
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-07-10"
+  evidence:
+    cli: "LIVE at the composition root (UUX-1-25 drift fix) — `setupSession` (src/apps/cli/repl/session-setup.ts:404, the #15 block) builds `createStatusLineDriver({cfg: runtimeConfig().statusLineConfig, view: buildSessionStatusView(...), pills, width})`, fires the initial `tick()` and `start()`s the refresh poll; the driver tick calls `buildStatusPayload`/`runStatusCommand` (src/apps/cli/status-line-driver.ts:107-108) and routes the rendered first line into the pills row as the far-right segment; `shutdownMcp` stops the poll on session end. Double-gated default-OFF (`statusLineConfig` is undefined unless QUANTA_STATUS_LINE is on AND QUANTA_STATUS_LINE_CONFIG parses) ⇒ no driver, byte-identical"
+    web: "terminal-specific scriptable status line (ANSI/OSC-aware first-line render on the CLI prompt); no browser equivalent"
+purpose: |
+  Mirrors Claude Code's scriptable `statusLine { type:"command", command,
+  padding?, refreshInterval?, hideVimModeIndicator? }` (CC settings schema:737)
+  so a CC-authored status script runs verbatim under quanta. On a status tick
+  the operator command is invoked with a `{"hook_event_name":"Status", …}` JSON
+  object on STDIN; its FIRST stdout line is taken, ANSI preserved, truncated to
+  terminal width.
+
+  Defensive contract, layered:
+    - `runStatusCommand` spawns ARGS-BASED (NO `shell:true` — no shell-injection
+      surface; a string command is whitespace-split, an array used verbatim;
+      empty ⇒ inert), routes the child env through the `scrubEnv` allowlist
+      chokepoint (`@/runtime` `DEFAULT_ENV_ALLOWLIST` — PATH/HOME/LANG/proxy
+      only) via the typed `spawnScrubbed` boundary so a parent-secret leak is a
+      tsc error, and SILENTLY DEGRADES (warn-once + `{text:"",degraded:true}`)
+      on spawn error / non-zero exit / timeout / hard-cap — NEVER throws (a
+      status line must not break the REPL).
+    - Soft timeout 500ms (CC default) kills the child; an ABSOLUTE wall-clock
+      hard-cap watchdog (5s) `Promise.race`s the work so a child that never
+      closes stdout AND never resolves `exited` can never wedge the prompt, and
+      the orphaned stdout reader is cancelled (lock + pending read released).
+    - `buildStatusPayload` copies ONLY cost/model/cwd/workspace/context facts
+      from a structurally-declared `SessionStatusView` (NO token/key slot by
+      design); absent fields are OMITTED not nulled, and non-finite numbers are
+      dropped so `JSON.stringify` never emits a `null` a CC script misreads.
+    - `formatStatusOutput` truncates to VISIBLE columns via an OSC-aware width
+      oracle (`stripStatusAnsi` — the shared SGR-only `stripAnsi` miscounts a
+      line carrying an OSC-8 hyperlink/title), and on EVERY return path appends
+      an SGR reset iff a style is left open AND an OSC-8 close iff a hyperlink is
+      left open (idempotent) so no color/clickable state bleeds into the prompt.
+
+  Lives in `src/apps/cli` (the REPL owns the status tick) — no new tsconfig
+  path / slice fence. The config knob is double-gated default-OFF
+  (`QUANTA_STATUS_LINE` master gate + `QUANTA_STATUS_LINE_CONFIG` JSON), homed
+  in `@/shared` runtime-config; byte-identical when absent.
+evidence:
+  code:
+    - src/apps/cli/status-command-runner.ts
+    - src/apps/cli/status-line-driver.ts
+    - src/apps/cli/repl/session-setup.ts
+  adrs:
+    - docs/decisions/0526-scriptable-statusline-runner.md
+  tests:
+    unit:
+      - src/apps/cli/__tests__/status-command-runner.test.ts
+      - tests/unit/statusline-config-knob-hellgate.test.ts
+      - tests/unit/cli/status-line-driver-hellgate.test.ts
+    integration: []
+    contract: []
+knobs:
+  - name: QUANTA_STATUS_LINE
+    where: src/shared/runtime-config-knobs.ts
+    default: "off"
+    purpose: master gate (gateOn vocab) for the scriptable status line — OFF ⇒ the fixed formatContextUsage line stays the only render
+  - name: QUANTA_STATUS_LINE_CONFIG
+    where: src/shared/runtime-config-knobs.ts
+    purpose: JSON `statusLine{}` config (command/padding/refreshInterval/hideVimModeIndicator); ignored unless the master gate is on and it parses to an object with a usable command
+notes: |
+  Distinct from `cli-status-bar` (DECSTBM scroll-region pinned bottom row,
+  FIXED renderer) and `cli-status-pills` (top session chrome row): this is the
+  surface-agnostic SCRIPTABLE single-line runner — an operator-authored command
+  emits the line, quanta only spawns/formats it. Absorbed from Claude Code's
+  `statusLine{}` contract (ticket-15 §11.7 part A). The runner's own
+  `StatusLineConfig` is structurally assignable to the `@/shared` runtime-config
+  `StatusLineConfig` so `@/shared` stays a leaf (no `@/apps/cli` import).

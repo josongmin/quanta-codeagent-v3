@@ -1,0 +1,92 @@
+id: runner-assemble-builders
+title: runner/assemble — surface-agnostic per-collaborator builder family
+section: 6
+subsystem: surface-agnostic 오케스트레이션 드라이버
+order: 117
+maturity: L4
+status: new
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [interactive, headless]
+configurable: integrated
+config_refs:
+  env: ["QUANTA_COMPACT_BREAKER", "QUANTA_COMPACT_BREAKER_PROACTIVE_MAX", "QUANTA_COMPACT_BREAKER_REACTIVE_MAX", "QUANTA_COMPACT_MODEL", "QUANTA_COMPACT_PROVIDER", "QUANTA_MEMORY", "QUANTA_MEMORY_CONSOLIDATE", "QUANTA_MEMORY_DISTILL", "QUANTA_MEMORY_EMBED", "QUANTA_MEMORY_EMBED_MODEL", "QUANTA_MEMORY_RECALL_LIMIT", "QUANTA_MEMORY_RECALL_TIERS", "QUANTA_MEMORY_SELF_EDIT", "QUANTA_MODEL_FALLBACK", "QUANTA_OBSERVE_DIR", "QUANTA_SKILLS", "QUANTA_SKILLS_DIR", "QUANTA_SUBAGENT", "QUANTA_SUBAGENT_MAX_DEPTH", "QUANTA_VERIFY_GUARD", "QUANTA_VERIFY_GUARD_MAX_TRIPS"]
+owners: ["@songmin"]
+labels: ["surface:core", "tier:1"]
+depends_on: [effort-5-tier, repo-rules-tree, assemble-config, assemble-llm-core, assemble-compaction-core]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 12/13 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "pure internal collaborator-composition builders, no user-visible affordance on any surface"
+purpose: |
+  `apps/cli/internal.ts#buildTooling` 의 단일 GodFn (env 읽기 + collaborator
+  생성 + 레지스트리 와이어링 한 곳) 을 9 개 per-subsystem builder + 1 composer
+  로 분해. 각 builder 는 SRP — 단일 collaborator 또는 단일 config 블록만 책임.
+
+  9 builders + 1 composer (`src/runner/assemble/`):
+    - `llm.ts`        — `buildLLMCore` / `composeLLMCore` / `pickProviderCore`
+                        / `parseFallbackModels` / RetryingLLM + FallbackLLM 합성
+                        + auto-mode classifier port 부착
+    - `store.ts`      — `buildStoreCore` + `buildEmbedderCore` (PersistentStorePort
+                        / EmbedderPort 생성)
+    - `memory.ts`     — `buildMemoryConfigCore` + `parseRecallTiers`
+    - `skill.ts`      — `buildSkillsConfigCore`
+    - `subagent.ts`   — `buildSubagentConfigCore`
+    - `compaction.ts` — `buildCompactionBreakerConfigCore` +
+                        `buildSummarizerLlmCore`
+    - `verify.ts`     — `buildVerifyGuardConfigCore`
+    - `streaming.ts`  — `buildStreamingCore` (StreamPort 생성)
+    - `tooling.ts`    — `buildToolingCore` (위 8 의 결과 + opt-in tool 배열을
+                        `ToolRegistry` 로 와이어링; memory-self-edit gate +
+                        per-config slog.info 보존)
+    - `config.ts`     — `assembleConfig` (collaborators + history → 불변
+                        `AgentConfig` 합성; 조건부 spread 100% byte-identical)
+
+  SLICE INVARIANT: 모든 builder 가 `process.env` / `process.argv` 직접 읽기
+  ZERO — surface 가 자체 ENV/HTTP/IPC 를 typed `*AssembleInput` 으로 1 회
+  매핑 후 호출. 이게 동일 builder 가 Web/Tauri surface 를 fork 없이 백킹할 수
+  있게 하는 핵심. biome `noRestrictedImports` 규칙으로 `apps/**` import
+  강제 차단.
+
+  Composer ("assemble") vs Factory ("build") 명명 구분: build* 는 단일
+  collaborator 를 instantiate, `assembleConfig` 는 이미 만들어진 조각들을
+  type-safe 으로 composing 만. 새 collaborator 추가 비용 일정 (단일 builder
+  + barrel re-export + composer fold).
+evidence:
+  code:
+    - src/runner/assemble/index.ts
+    - src/runner/assemble/llm.ts
+    - src/runner/assemble/store.ts
+    - src/runner/assemble/memory.ts
+    - src/runner/assemble/skill.ts
+    - src/runner/assemble/subagent.ts
+    - src/runner/assemble/compaction.ts
+    - src/runner/assemble/verify.ts
+    - src/runner/assemble/streaming.ts
+    - src/runner/assemble/tooling.ts
+    - src/runner/assemble/config.ts
+    - src/runner/index.ts
+    - src/apps/cli/internal.ts
+  adrs: []
+  tests:
+    unit:
+      - tests/unit/assemble.test.ts
+      - tests/unit/apps/agent/assemble.test.ts
+      - tests/unit/runner-slice-boundary.test.ts
+      - tests/unit/defaults-registration-hellgate.test.ts
+    integration:
+      - tests/integration/cli-export-assembly.test.ts
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  CLI env/argv envelope은 `apps/cli/internal.ts`에 남고, 별도
+  `apps/cli/config-assemble.ts` shim은 제거됐다. 현재 compatibility는
+  CLI helper exports + direct `src/runner/assemble/config.ts` import 조합으로
+  유지된다. byte-identical 게이트: 모든 default-OFF (store 없음, fallback 모델
+  없음, classifier 비활성, …) 시 `runOnce` / `runAgent`가 prior inline 거동과
+  정확히 동일 path 통과.

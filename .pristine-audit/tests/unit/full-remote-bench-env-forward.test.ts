@@ -1,0 +1,172 @@
+import { describe, expect, test } from "bun:test"
+import { buildForwardedBenchEnv } from "@/apps/bench/remote/full"
+
+/**
+ * Hellgate: full-remote forwards the operator's local `QUANTA_BENCH_*` knobs to
+ * the box. Without this, env-only experiment knobs (spec-fidelity-steer,
+ * verification-plan — NOT bundled in any preset) are SILENTLY INERT on the box
+ * and a remote A/B reads as a null effect (jun-16 env-forwarding bug class).
+ *
+ * Scope is `QUANTA_BENCH_*` PLUS a small explicit `FORWARD_EXTRA_ENV` allowlist
+ * of non-prefixed runtime-config dials the bench runner reads directly
+ * (`QUANTA_MAX_TURNS` → `maxTurnsBatch`; jun-20).
+ *
+ * Red-on-injection:
+ *  - drop the forward ⇒ FWD-1/FWD-2 RED.
+ *  - forward the explicitly-handled keys too ⇒ FWD-3 RED (double-assignment).
+ *  - widen scope to arbitrary non-allowlisted vars ⇒ FWD-4 RED (secret leak).
+ *  - drop QUANTA_MAX_TURNS from the allowlist ⇒ FWD-7 RED (turn budget stuck at
+ *    the box default 60 → complex instances max_turns_exhausted).
+ */
+describe("buildForwardedBenchEnv", () => {
+  test("FWD-1: experiment knobs (spec-fidelity, verification-plan) are forwarded", () => {
+    const out = buildForwardedBenchEnv({
+      QUANTA_BENCH_SPEC_FIDELITY_STEER: "1",
+      QUANTA_BENCH_VERIFICATION_PLAN: "1",
+    })
+    expect(out).toContain("QUANTA_BENCH_SPEC_FIDELITY_STEER='1' ")
+    expect(out).toContain("QUANTA_BENCH_VERIFICATION_PLAN='1' ")
+  })
+
+  test("FWD-2: values are shell-quoted (no command injection)", () => {
+    const out = buildForwardedBenchEnv({ QUANTA_BENCH_LSP_STEER: "off; rm -rf /" })
+    expect(out).toBe("QUANTA_BENCH_LSP_STEER='off; rm -rf /' ")
+  })
+
+  test("FWD-3: explicitly-handled keys are NOT re-forwarded (no double-assign)", () => {
+    const out = buildForwardedBenchEnv({
+      QUANTA_BENCH_PRESET: "agentless-v1-nosteer",
+      QUANTA_BENCH_CONCURRENCY: "6",
+      QUANTA_BENCH_RECORD_TRAJECTORY: "1",
+      QUANTA_BENCH_SPEC_FIDELITY_STEER: "1",
+    })
+    expect(out).not.toContain("QUANTA_BENCH_PRESET")
+    expect(out).not.toContain("QUANTA_BENCH_CONCURRENCY")
+    expect(out).not.toContain("QUANTA_BENCH_RECORD_TRAJECTORY")
+    expect(out).toContain("QUANTA_BENCH_SPEC_FIDELITY_STEER='1' ")
+  })
+
+  test("FWD-4: scope is QUANTA_BENCH_* only — secrets / other vars never forwarded", () => {
+    const out = buildForwardedBenchEnv({
+      QUANTA_BENCH_SPEC_FIDELITY_STEER: "1",
+      OPENAI_API_KEY: "sk-secret",
+      AWS_SECRET_ACCESS_KEY: "secret",
+      QUANTA_PROVIDER: "chatgpt-oauth",
+      HOME: "/Users/x",
+    })
+    expect(out).toBe("QUANTA_BENCH_SPEC_FIDELITY_STEER='1' ")
+  })
+
+  test("FWD-5: empty / unset values are skipped; deterministic sorted order", () => {
+    const out = buildForwardedBenchEnv({
+      QUANTA_BENCH_Z: "1",
+      QUANTA_BENCH_A: "1",
+      QUANTA_BENCH_EMPTY: "",
+    })
+    expect(out).toBe("QUANTA_BENCH_A='1' QUANTA_BENCH_Z='1' ")
+  })
+
+  test("FWD-6: no bench knobs ⇒ empty string (byte-identical box command)", () => {
+    expect(buildForwardedBenchEnv({ HOME: "/x", QUANTA_PROVIDER: "chatgpt-oauth" })).toBe("")
+  })
+
+  test("FWD-7: QUANTA_MAX_TURNS (non-BENCH allowlist) reaches the box", () => {
+    // Without forwarding, the box falls back to the preset default (60) and
+    // complex instances exhaust turns even when the operator raised the budget.
+    const out = buildForwardedBenchEnv({ QUANTA_MAX_TURNS: "120", QUANTA_BENCH_A: "1" })
+    expect(out).toContain("QUANTA_MAX_TURNS='120' ")
+    // still NOT a blanket widening — a sibling non-allowlisted var stays home.
+    // (QUANTA_RUN_ID USED to be the example here, but C5 now forwards it — see
+    // FWD-11b — so pick a genuinely non-allowlisted var for the negative.)
+    expect(buildForwardedBenchEnv({ QUANTA_PROVIDER: "chatgpt-oauth" })).toBe("")
+  })
+
+  test("FWD-9: QUANTA_REASONING_SUMMARY override (non-BENCH allowlist) reaches the box", () => {
+    // jun-26 audit: reasoning-summary is DEFAULT-ON for bench as a CODE default
+    // (rides rsync), so the default needs no forwarding. But an operator OPT-OUT
+    // (`QUANTA_REASONING_SUMMARY=0`, to A/B the reasoning-model silent-stall fix
+    // on the box) must reach the box — otherwise it is silently dropped and the
+    // box stays default-ON, so the experiment arm reads as a null effect (the
+    // jun-16/jun-20 env-forwarding bug class). It is NOT QUANTA_BENCH_*-prefixed,
+    // so it must be in the explicit FORWARD_EXTRA_ENV allowlist.
+    const off = buildForwardedBenchEnv({ QUANTA_REASONING_SUMMARY: "0", QUANTA_BENCH_A: "1" })
+    expect(off).toContain("QUANTA_REASONING_SUMMARY='0' ")
+    const on = buildForwardedBenchEnv({ QUANTA_REASONING_SUMMARY: "1" })
+    expect(on).toBe("QUANTA_REASONING_SUMMARY='1' ")
+    // shell-quoted (no injection) and still NOT a blanket widening.
+    const inj = buildForwardedBenchEnv({ QUANTA_REASONING_SUMMARY: "0; rm -rf /" })
+    expect(inj).toBe("QUANTA_REASONING_SUMMARY='0; rm -rf /' ")
+  })
+
+  test("FWD-10: OTLP live-trace endpoint + service name reach the box (live span stream)", () => {
+    // jun-26 ADR-0268: the box's agent loop attaches the OTLP exporter ONLY when
+    // QUANTA_OTEL_ENDPOINT is in its env. Without forwarding, the box stays
+    // Default-OFF and the operator gets NO live span stream (falls back to the
+    // flaky box→local run.log push). Both vars are non-BENCH-prefixed, so they
+    // must be in the explicit FORWARD_EXTRA_ENV allowlist.
+    const out = buildForwardedBenchEnv({
+      QUANTA_OTEL_ENDPOINT: "http://127.0.0.1:4318",
+      QUANTA_OTEL_SERVICE_NAME: "quanta-bench-box",
+      QUANTA_BENCH_A: "1",
+    })
+    expect(out).toContain("QUANTA_OTEL_ENDPOINT='http://127.0.0.1:4318' ")
+    expect(out).toContain("QUANTA_OTEL_SERVICE_NAME='quanta-bench-box' ")
+    // shell-quoted (no injection) and still NOT a blanket widening — a sibling
+    // OTEL knob NOT in the allowlist stays home.
+    const inj = buildForwardedBenchEnv({ QUANTA_OTEL_ENDPOINT: "http://x; rm -rf /" })
+    expect(inj).toBe("QUANTA_OTEL_ENDPOINT='http://x; rm -rf /' ")
+    expect(buildForwardedBenchEnv({ QUANTA_OTEL_BATCH_SIZE: "128" })).toBe("")
+  })
+
+  test("FWD-11: OTLP run id reaches the box (so its spans carry quanta.run.id → ?run= filter)", () => {
+    // jun-27: the run-id deep-link only works if the BOX's spans carry the run id.
+    // QUANTA_OTEL_RUN_ID is non-BENCH-prefixed ⇒ must be in the FORWARD allowlist.
+    const out = buildForwardedBenchEnv({
+      QUANTA_OTEL_ENDPOINT: "http://127.0.0.1:4318",
+      QUANTA_OTEL_RUN_ID: "ab-closure-repair-A2",
+    })
+    expect(out).toContain("QUANTA_OTEL_RUN_ID='ab-closure-repair-A2' ")
+  })
+
+  test("FWD-11b: C5 — the ARTIFACT run id (QUANTA_RUN_ID) reaches the box too (observe==OTLP join)", () => {
+    // C5 run-id unification: the box's observe/cassette ctx.runId comes from
+    // QUANTA_RUN_ID (→ runtimeConfig().runId), and the operator side seeds it to
+    // the SAME value as QUANTA_OTEL_RUN_ID. Forwarding it makes the box's OTLP
+    // `quanta.run.id` and its trajectory `<runId>/...` one joinable id. Without
+    // this the box would mint its own `run-<ts>` and the join would break.
+    const out = buildForwardedBenchEnv({
+      QUANTA_RUN_ID: "campaign-A2",
+      QUANTA_OTEL_RUN_ID: "campaign-A2",
+    })
+    expect(out).toContain("QUANTA_RUN_ID='campaign-A2' ")
+    expect(out).toContain("QUANTA_OTEL_RUN_ID='campaign-A2' ")
+  })
+
+  test("FWD-12: T-B4 — QUANTA_TRACE_CONTEXT (context-only span-sink gate) reaches the box", () => {
+    // jul-13 T-B4: QUANTA_TRACE_CONTEXT gates the box's context-only span sink /
+    // unified {traceId,spanId} stamping on its cassettes+observe. It is NOT
+    // QUANTA_BENCH_*-prefixed, so it must be in the explicit FORWARD_EXTRA_ENV
+    // allowlist — otherwise a full-remote run records with NO sink and the FETCHED
+    // per-box cassettes/observe the trajectory viewer loads degrade to no-trace.
+    // Red-on-injection: remove "QUANTA_TRACE_CONTEXT" from FORWARD_EXTRA_ENV
+    // (box-session.ts) ⇒ this assertion goes RED (knob silently dropped on the box).
+    const out = buildForwardedBenchEnv({
+      QUANTA_TRACE_CONTEXT: "1",
+      QUANTA_BENCH_A: "1",
+    })
+    expect(out).toContain("QUANTA_TRACE_CONTEXT='1' ")
+    // shell-quoted (no injection) and still NOT a blanket widening — a sibling
+    // non-allowlisted var stays home.
+    const inj = buildForwardedBenchEnv({ QUANTA_TRACE_CONTEXT: "1; rm -rf /" })
+    expect(inj).toBe("QUANTA_TRACE_CONTEXT='1; rm -rf /' ")
+    expect(buildForwardedBenchEnv({ QUANTA_PROVIDER: "chatgpt-oauth" })).toBe("")
+  })
+
+  test("FWD-8: local bench replay cassette path is rejected for full-remote/pool runs", () => {
+    expect(() =>
+      buildForwardedBenchEnv({
+        QUANTA_BENCH_REPLAY_TRAJECTORY: "/tmp/bench-trajectory.jsonl",
+      }),
+    ).toThrow(/QUANTA_BENCH_REPLAY_TRAJECTORY/)
+  })
+})

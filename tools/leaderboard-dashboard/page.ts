@@ -12,6 +12,7 @@
  * the projector registry (`suiteClientAssets`), and the shell dispatches on the
  * `SUITE_VIEWS` registrations those bundles make.
  */
+import { FAMILY_CARDS_SCRIPT } from "./page-family-cards"
 import { suiteClientAssets } from "./projectors/registry"
 
 export interface DashboardPageOpts {
@@ -49,6 +50,8 @@ ${suiteClientAssets().style}
   .benchsel button:hover { border-color: #388bfd; color: #e6edf3; }
   .benchsel button.active { background: #1f6feb; color: #fff; border-color: #2f81f7; font-weight: 600; }
   .benchsel button .bn { font-size: 10px; color: inherit; opacity: .75; margin-left: 6px; }
+  /* C-D: the badge's coverage, printed BESIDE the pair it qualifies. */
+  .benchsel button .bn i.cov { font-style: normal; opacity: .7; margin-left: 4px; }
   .cards { display: flex; gap: 10px; flex-wrap: wrap; padding: 12px 18px; }
   .card { background: #161b22; border: 1px solid #21262d; border-radius: 8px;
           padding: 10px 14px; min-width: 120px; }
@@ -381,7 +384,12 @@ function renderBenchSel() {
     const camps = (DATA.campaigns || []).filter(c => c.viewId === id);
     if (!camps.length) return "";
     const best = camps.slice().sort((a,b)=> (b.resolved/Math.max(1,b.total)) - (a.resolved/Math.max(1,a.total)))[0];
-    return best ? '<span class="bn">'+best.resolved+'/'+best.total+'</span>' : "";
+    // C-D: the badge is a scoreboard, so it prints a rate — and therefore its
+    // coverage. resolved/assigned can only understate, but "8/16 with 8 of 16
+    // validly graded" and "8/16 with 16 of 16" are different claims.
+    if (!best) return "";
+    var cov = best.coverage ? '<i class="cov" title="공식 채점 커버리지 = grading_valid/assigned">'+esc(best.coverage)+'</i>' : "";
+    return '<span class="bn">'+best.resolved+'/'+best.total+cov+'</span>';
   };
   el.innerHTML = bs.map(b =>
     '<button data-bench="'+esc(b.id)+'" class="'+(BENCH===b.id?"active":"")+'">'+esc(b.label)+badge(b.id)+'</button>'
@@ -390,58 +398,7 @@ function renderBenchSel() {
     btn.onclick = function(){ BENCH = btn.dataset.bench; TAB = (TAB==="knobs"||TAB==="trace"||TAB==="manage")?TAB:"matrix"; render(); };
   });
 }
-// Any-pass fold over ONE SWE family view's runs (the pro/live view scope), unsplit
-// (no arm semantics here). Pure over DATA.runs. Measurement-hole EXCLUSION mirrors the
-// sibling folds so pro/live stays consistent with them: a re-runnable throttle/infra
-// hole (FLAG-B fail.reRunnable, like the verified view) or an agent-crash (D1) is NOT a
-// capability miss — skip it (else the jun-20 throttle/miss confound re-opens here).
-function famOurResults(fam) {
-  const out = {};
-  for (const r of (DATA.runs || []).filter(r => r.viewId === fam)) {
-    for (const pi of (r.perInstance || [])) {
-      if (pi.error && pi.error.kind === "agent-crash") continue;
-      if (!pi.passed && pi.fail && pi.fail.reRunnable) continue;
-      if (out[pi.id] === undefined || pi.passed) out[pi.id] = pi.passed;
-    }
-  }
-  return out;
-}
-
-// pro/live summary cards — FAMILY-scoped (P3-D: a pro/live title must never sit over verified
-// numbers). any-pass across the family's runs; campaign best from the same family only.
-function renderFamCards() {
-  const fold = famOurResults(BENCH);
-  const ids = Object.keys(fold);
-  const solved = ids.filter(function(i){ return fold[i] === true; }).length;
-  const camps = (DATA.campaigns || []).filter(c => c.viewId === BENCH);
-  const best = camps.slice().sort((a,b)=> (b.resolved/Math.max(1,b.total)) - (a.resolved/Math.max(1,a.total)))[0];
-  const runCount = (DATA.runs || []).filter(r => r.viewId === BENCH).length;
-  const cards = [
-    ["해결 / 실행", solved + " / " + ids.length, "family=" + BENCH + " · any-pass(런 합산)"],
-    ["best 캠페인", best ? (best.resolved + "/" + best.total) : "—", best ? best.key : "이 family 캠페인 없음"],
-    ["리포트 파일", runCount, camps.length + " 캠페인"],
-  ];
-  document.getElementById("cards").innerHTML = cards.map(c =>
-    '<div class="card"><div class="n">'+esc(c[1])+'</div><div class="l">'+esc(c[0])+'</div>'+
-    (c[2]? '<div class="muted" style="font-size:10px">'+esc(c[2])+'</div>':'')+'</div>').join("");
-}
-
-// pro/live per-instance matrix — the family's own rows (misses first), never verified data.
-function renderFamMatrix(v) {
-  const fold = famOurResults(BENCH);
-  const ids = Object.keys(fold).sort(function(a,b){
-    if (fold[a] !== fold[b]) return fold[a] ? 1 : -1; // misses first
-    return a.localeCompare(b);
-  });
-  const runCount = (DATA.runs || []).filter(r => r.viewId === BENCH).length;
-  let h = '<p class="muted">family='+esc(BENCH)+' · '+ids.length+' instances · ✅=any-pass across '+runCount+' run(s)</p>';
-  h += '<table><thead><tr><th class="inst" style="text-align:left">instance</th><th>결과</th></tr></thead><tbody>';
-  for (const id of ids) {
-    h += '<tr><td class="inst">'+esc(id)+'</td><td style="text-align:center">'+
-      (fold[id] ? '<span class="q-ok">✅</span>' : '<span class="q-no">❌</span>')+'</td></tr>';
-  }
-  v.innerHTML = h + (ids.length ? '' : '<tr><td colspan="2" class="muted">이 family 리포트 없음</td></tr>') + '</tbody></table>';
-}
+${FAMILY_CARDS_SCRIPT}
 
 function renderCards() {
   // A suite that owns its own cards renders them; otherwise the SWE shell decides.
@@ -463,15 +420,14 @@ function renderCards() {
     const row = DATA.rows[id];
     if (row && row.hash <= 1) ceilMiss++; else realMiss++;
   }
-  const best = (DATA.campaigns||[]).slice().sort((a,b)=> (b.resolved/Math.max(1,b.total)) - (a.resolved/Math.max(1,a.total)))[0];
-  const cards = [
+  const cards = withRefusedCard([
     ["해결 / 실행", solved + " / " + ran, DATA.coverage ? "데이터셋 "+DATA.coverage.datasetTotal : ""],
     ["천장보정 점수", solved + " / " + (solved + realMiss), "ceiling("+ceilMiss+") · 미측정("+unmeasured+") 제외"],
     ["진짜 격차", realMiss, "프론티어는 푸는데 미스 · 미측정("+unmeasured+") 제외"],
-    ["best 캠페인", best ? (best.resolved+"/"+best.total) : "—", best ? best.key : ""],
+    bestCampaignCard(DATA.campaigns, ""),
     ["리포트 파일", DATA.runs.length, (DATA.campaigns||[]).length+" 캠페인"],
     ["라이브 박스", DATA.live.length],
-  ];
+  ]);
   document.getElementById("cards").innerHTML = cards.map(c =>
     '<div class="card"><div class="n">'+esc(c[1])+'</div><div class="l">'+esc(c[0])+'</div>'+
     (c[2]? '<div class="muted" style="font-size:10px">'+esc(c[2])+'</div>':'')+'</div>').join("");
@@ -526,7 +482,7 @@ function renderRuns() {
   const showExt = !!DATA.externalBaselines &&
     camps.some(c => { const f = c.datasetFamily; return (f === "pro" || f === "live") && !!extSotaForFamily(f); });
   const extHead = showExt ? '<th title="이 데이터셋의 공개 외부 SOTA 해결률 (pro=public-731 · live=verified/lite) — 우리 % 옆에 나란히 (R4: verified는 비교 안 함)">외부 SOTA</th>' : '';
-  h += '<table><thead><tr><th class="inst" style="text-align:left">캠페인</th><th>모델</th><th>preset</th><th>멤버</th><th>해결</th><th>%</th>'+extHead+'<th title="throttle/인프라/env로 측정 못해 분모서 제외 — 재런 대상">미측정</th><th>갱신</th></tr></thead><tbody>';
+  h += '<table><thead><tr><th class="inst" style="text-align:left">캠페인</th><th>모델</th><th>preset</th><th>멤버</th><th>해결</th><th title="공식 채점 캠페인은 resolved/assigned(raw) — 옆의 cov가 유효 분모 손실">%</th>'+extHead+'<th title="throttle/인프라/env로 측정 못해 분모서 제외 — 재런 대상">미측정</th><th>갱신</th></tr></thead><tbody>';
   for (const r of camps) {
     const pct = r.total ? Math.round(100*r.resolved/r.total) : 0;
     const unmeasured = r.unmeasured || 0;
@@ -542,7 +498,7 @@ function renderRuns() {
     h += '<tr><td class="inst" title="'+esc(r.members.join(", "))+'">'+famChip(r.datasetFamily)+esc(r.key)+'</td><td class="muted">'+esc(r.model)+'</td><td class="muted">'+esc(r.preset)+'</td>'+
       '<td class="muted">'+r.members.length+'</td>'+
       '<td>'+r.resolved+'/'+r.total+'</td>'+
-      '<td><span class="bar"><i style="width:'+pct+'%"></i></span> '+pct+'%</td>'+
+      '<td><span class="bar"><i style="width:'+pct+'%"></i></span> '+pct+'%'+(r.coverage? ' <span class="muted" style="font-size:10px" title="공식 채점 커버리지 = grading_valid/assigned. 분모가 줄어든 만큼 여기 보인다">cov '+esc(r.coverage)+'</span>':'')+'</td>'+
       extCell+
       '<td class="muted" title="재런 가능한 측정 구멍 — 해결률 분모서 제외됨">'+(unmeasured? '⟳ '+unmeasured : '·')+'</td>'+
       '<td class="muted">'+ (r.mtime? new Date(r.mtime).toLocaleString() : '—') +'</td></tr>';

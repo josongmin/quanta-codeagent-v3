@@ -1,0 +1,64 @@
+id: lsp-expansion-4-tools
+title: LSP 4-tool expansion — code-action / rename-apply / format / signature-help
+section: 2
+subsystem: LSP mutating + signature-help tools (ADR-0141)
+order: 141
+maturity: L4
+status: new
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [n-a]
+configurable: n-a
+owners: ["@songmin"]
+labels: [surface:cli, held-promotion]
+depends_on: [cross-slice-mirror, deferred-tool-registry, evidence-toolresultevidence, git-review-diff, hitltier-hand-off-required-always-confirm-pre-approval-ok-no]
+surface_integration:
+  cli: full
+  web: full
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 13/13 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "Model-invokable tools; their tool_call/tool_result emit through the bridged tool_call/tool_result events and render as the generic tool.invoked/completed card (session-hooks.ts:420-435). Rich diff result not shown (DiffPanel unmounted) but tool name+preview render."
+purpose: |
+  Expands the Codex-absorbed ADR-0015 read-only LSP nav surface
+  (8 nav tools) with 4 mutating + signature-help capabilities the
+  model previously had to fake via raw bash/sed:
+    1. code_action — quickfix/refactor/organizeImports/fixAll suggest+apply
+    2. rename_apply — real textDocument/rename after prepareRename probe
+    3. format — whole-file / range formatting
+    4. signature_help — overload + active-parameter at call-site cursor
+  Mirrors ADR-0119 shadow_rewind first-class tool pattern. Default
+  adapters are "not-implemented" throws — tools catch and convert to
+  typed ok:false. Assembly seam (actual LspClient wire) deferred to
+  follow-up ADR; surface lands plane-clean first.
+evidence:
+  code:
+    - src/lsp/ports/code-action-port.ts
+    - src/lsp/ports/format-port.ts
+    - src/lsp/ports/signature-help-port.ts
+    - src/lsp/ports/rename-apply-port.ts
+    - src/lsp/adapters/default-code-action.ts
+    - src/lsp/adapters/default-format.ts
+    - src/lsp/adapters/default-signature-help.ts
+    - src/tool/lsp_nav/code-action.ts
+    - src/tool/lsp_nav/rename-apply.ts
+    - src/tool/lsp_nav/format.ts
+    - src/tool/lsp_nav/signature-help.ts
+    - src/lsp/index.ts
+    - src/tool/lsp_nav/index.ts
+  adrs: [141]
+  tests:
+    unit:
+      - tests/unit/tool/lsp-code-action-hellgate.test.ts
+      - tests/unit/tool/lsp-rename-apply-hellgate.test.ts
+      - tests/unit/tool/lsp-format-hellgate.test.ts
+      - tests/unit/tool/lsp-signature-help-hellgate.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  Each tool factory carries its own duck-typed mirror port to keep
+  the closed-port boundary clean. 60-case hellgate across the 4 tools
+  (15/16/14/15) seals contract before wire lands.

@@ -1,0 +1,59 @@
+id: repl-interactive-surface
+title: Interactive REPL (continuous conversation + in-REPL slash routing)
+section: 10
+subsystem: CLI REPL surface
+order: 13
+maturity: L4
+status: new
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [interactive]
+configurable: static
+owners: ["@songmin"]
+labels: ["surface:cli", "tier:repl", "absorbed:codex"]
+depends_on: [slashctx-6-ports-wire-completion, cli-export-2026-05-21-l2-l3, repl-code-smell-cleanup, runner-assemble-builders, model-swap-retry]
+config_refs:
+  env: ["QUANTA_COST_PANEL", "QUANTA_DIFF_PREVIEW", "QUANTA_EFFORT", "QUANTA_HISTORY", "QUANTA_HISTORY_FILE", "QUANTA_HISTORY_MAX", "QUANTA_IDLE_MS", "QUANTA_IDLE_SUPPRESS", "QUANTA_IMAGE_MAX_QUEUE", "QUANTA_IMAGE_QUEUE", "QUANTA_MAX_TURNS", "QUANTA_METRICS", "QUANTA_MODEL", "QUANTA_MULTILINE", "QUANTA_PERMISSION", "QUANTA_PILLS", "QUANTA_PREFS_HOME", "QUANTA_REJECT_LIMIT", "QUANTA_SANDBOX", "QUANTA_SNOOZE_DEFAULT_MS", "QUANTA_SPINNER", "QUANTA_SPINNER_INTERVAL_MS", "QUANTA_SUBAGENT"]
+surface_integration:
+  cli: full
+  web: missing
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 7/7 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "the terminal REPL surface does not exist in the browser; the web app is a separate apps/web-frontend surface, not this readline loop"
+purpose: |
+  `quanta` (인자 없는) 호출 시 진입하는 readline 기반 인터랙티브 REPL — 연속 대화,
+  per-turn agent run, /skills / /reload-skills / /retry-with / /login / /status 등
+  슬래시 명령 in-REPL 라우팅 (Codex parity). 매 턴: 사용자 입력 → 이미지 첨부 파싱
+  (argvImages) → 메시지 빌드 → `runAgent(config)` → AgentOutcome → 다음 readline 프롬프트.
+  세션 영속(--state / --resume) + cost dashboard (`buildCostDashboard` / `renderDashboardText`)
+  + work metrics 요약 (`summarizeWorkMetrics`) + structured logger + shell OTel observer
+  모두 와이어 됨. 슬래시 명령 라우팅은 BUILTINS 레지스트리 재사용 (10-app/built-in-slash-
+  commands) — REPL 입력 첫 토큰이 `/<letter>` 패턴이면 short-circuit, 아니면 agent로
+  흘러감. headless / interactive / batch / ci-bot mode preset (ADR-0092 run-mode 매트릭스)
+  중 interactive mode 가 본 REPL 을 default surface 로 사용.
+evidence:
+  code:
+    - src/apps/cli/repl.ts
+    - src/apps/cli/slash-commands.ts
+    - src/apps/cli/image-loader.ts
+    - src/apps/cli/diff-preview.ts
+    - src/apps/cli/internal.ts
+    - src/apps/cli/status-pills.ts
+    - src/shared/runtime-config.ts
+    - src/apps/cli/repl/session-picker.ts
+  adrs: []
+  tests:
+    unit:
+      - tests/unit/cli-image-loader.test.ts
+      - tests/unit/slash-commands.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  Codex parity — in-REPL slash routing. CLI argv 진입(slash-commands feature) 과 같은
+  BUILTINS 레지스트리를 재사용 → 명령 추가 시 양 surface 자동 노출. surface-model
+  invariant: REPL 슬래시는 surface 별이 아니라 BUILTINS SSOT 재사용 (12-invariant
+  surface-model).

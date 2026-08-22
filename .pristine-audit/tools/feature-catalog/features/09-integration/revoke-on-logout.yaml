@@ -1,0 +1,86 @@
+id: auth-revoke-on-logout
+title: Revoke OAuth tokens on logout (RFC 7009, best-effort, NO-THROW, default-OFF)
+section: 9
+subsystem: ChatGPT-OAuth logout lifecycle (ADR-0094)
+order: 479
+maturity: L2
+status: new
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [interactive, headless]
+configurable: integrated
+owners: ["@songmin"]
+labels: [security, surface:core]
+depends_on: [chatgpt-oauth-provider, refresh-coordinator, token-store-atomic]
+config_refs:
+  env: [QUANTA_OAUTH_REVOKE_ON_LOGOUT]
+  runtime: [oauthRevokeOnLogout]
+surface_integration:
+  cli: full
+  web: missing
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 4/4 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "the web /auth/logout route (auth-routes.ts:139) calls deleteToken only and never invokes revokeRefreshToken — the revoke behavior is CLI-only and does not reach the browser logout"
+purpose: |
+  Close a credential-lifetime hole at `/logout` (jun-6 RFC). Today logout deletes
+  ONLY the local token file (`deleteToken` → `unlink`); the server-side refresh
+  token stays valid until it naturally expires, so anyone who captured it (a
+  leaked backup, a stale process, a compromised disk before the delete) keeps
+  access AFTER the user believed they signed out.
+
+  When the knob `QUANTA_OAUTH_REVOKE_ON_LOGOUT` is ON, logout first best-effort
+  POSTs the refresh token to the IdP's revocation endpoint
+  (`${issuer}/oauth/revoke`, RFC 7009: `token=<rt>&token_type_hint=refresh_token
+  &client_id=<id>` in the BODY) so the server-side credential is invalidated, not
+  merely forgotten locally. A successful revoke (RFC §2.1) also invalidates the
+  associated access tokens; RFC §2.2 makes it idempotent (an already-revoked /
+  unknown token returns 200) so a double-logout is harmless.
+
+  `revokeRefreshToken` (`src/auth/chatgpt-oauth/revoke.ts`) is a closed-port leaf:
+  the only side effect is an injected `fetchPort` (same seam as the OAuth
+  refresh/token POST) — no global fetch, no `process.env`, no `Date.now`. It NEVER
+  throws: every failure (empty token, network error, non-2xx incl. a 404 from an
+  IdP without a revoke endpoint) resolves to a typed `RevokeOutcome` so the caller
+  logs a reason code (NEVER the token) and proceeds.
+
+  Invariants (RFC §4.5): the LOCAL delete is unconditional and first-class —
+  revoke runs BEFORE `deleteToken` but its outcome NEVER gates the delete, so a
+  hung/failing revoke can never leave a stale local token (logout can only
+  match-or-beat today). The token rides the POST body only — never a URL/argv/log
+  (bearer-redaction discipline). Codex-managed tokens are NEVER revoked: the
+  `source === "codex"` branch returns BEFORE revoke (we don't own that
+  credential).
+
+  Default-OFF is byte-identical: knob unset ⇒ `/logout` constructs no revoke
+  endpoint, issues no network call, and renders the exact pre-RFC box (no
+  `revoke` kvLine). The knob threads as a `LogoutDeps.revokeOnLogout` param from
+  the composition root (`runtimeConfig().oauthRevokeOnLogout`); the revoke module
+  itself reads no env.
+
+  Phase 2 (not yet wired): MCP OAuth (H18) server-side revoke before
+  `rotator.forget` in `McpOAuthProviderPort.invalidate`, reusing
+  `revokeRefreshToken` + RFC 8414 discovery.
+evidence:
+  code:
+    - src/auth/chatgpt-oauth/revoke.ts
+    - src/auth/chatgpt-oauth/index.ts
+    - src/apps/cli/logout-cmd.ts
+    - src/shared/runtime-config.ts
+  adrs: [94]
+  tests:
+    unit:
+      - tests/unit/cli/token-revoke-on-logout-hellgate.test.ts
+knobs:
+  - name: QUANTA_OAUTH_REVOKE_ON_LOGOUT
+    default: 'undefined'
+    purpose: 'Strict =="1" opt-in. ON ⇒ /logout best-effort revokes the refresh token server-side (RFC 7009) BEFORE the unconditional local delete; NO-THROW (failures logged w/o the token, delete still proceeds), codex-managed skipped. OFF ⇒ byte-identical to today (local delete only, no network call, no revoke kvLine).'
+notes: |
+  jun-6 RFC. Honest divergence from Codex (which does NOT wire a ChatGPT-path
+  revoke — `codex-rs/login/src/auth/revoke.rs` is auth-mode-specific): quanta
+  gains the option, gated + best-effort, rather than copying Codex's local-only
+  logout. `revokeRefreshToken` is closed-port (injected fetchPort) and NEVER
+  throws. The local delete (`deleteToken`) is UNCHANGED and unconditional — the
+  load-bearing safety property (hellgate cases: network-fail / non-2xx ⇒ local
+  delete STILL happens). Phase 2 = MCP OAuth (H18) server-side revoke, deferred.

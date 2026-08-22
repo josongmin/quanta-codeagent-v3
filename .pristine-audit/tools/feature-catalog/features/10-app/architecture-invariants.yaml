@@ -1,0 +1,59 @@
+id: architecture-invariants
+title: 슬라이스 architecture invariants — biome (정적) + test (런타임) 이중 강제
+section: 10
+subsystem: Surface-agnostic Layer-2 (RFC may-22)
+order: 25
+maturity: L4
+status: new
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [n-a]
+configurable: static
+owners: ["@songmin"]
+labels: ["surface:cli"]
+surface_integration:
+  cli: na
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "no src evidence (pure docs/tooling/tests) — no interactive-CLI code"
+    web: "static lint + runtime slice-boundary invariant guard, no user-visible affordance on any surface"
+purpose: |
+  4 신규 슬라이스 (@/runner, @/ipc, @/ui, @/auth) × 10 invariants = 20+ enforced guard.
+  정적 (biome.json `src/runner/**` + `src/ipc/**` override) + 런타임 (slice-boundary test)
+  의 이중 강제로 file:line + offending specifier 1-step 진단. 추가로 `agent-import-cycle.
+  test.ts` 는 Tarjan SCC + lazy-usage 로 `src/agent/*.ts` 의 알려진 SCC ({features.ts,
+  loop.ts, subagent-runner.ts, branch-search-runner.ts}) 를 whitelist + 그 외 cycle/
+  module-top-level 동기 사용을 차단 (deadlock 봉합).
+evidence:
+  code:
+    - biome.json
+    - tsconfig.json
+  adrs: []
+  tests:
+    unit:
+      - tests/unit/runner-slice-boundary.test.ts
+      - tests/unit/ipc-slice-boundary.test.ts
+      - tests/unit/agent-import-cycle.test.ts
+      - tests/unit/cross-slice-mirrors.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  Invariants (per-slice 미러 + slice-specific calibration):
+  (1) apps/** import 금지 — 표면이 슬라이스에 의존, 역방향 X.
+  (2) @/rules / @/patch / @/migration 직접 import 금지 — 좁은 owner 슬라이스.
+  (3) process.env / process.argv read 금지 — 표면 entry 가 파싱 후 typed config 전달.
+  (4) sub-slice barrel(index.ts) 존재 — 호출자가 슬라이스 contract 에 의존.
+  (5) raw process.stdin/stdout/stderr 금지 — WriteSink/InputStream/StdioReader/Writer
+      port 주입 (@/ipc 의 stdio transport 도 슬라이스 자체는 process.stdio.* 직접 read X).
+  (6) console.* 금지 — @/shared#logger 또는 주입된 log port.
+  (7) Bun.env / Bun.argv / Deno.env / Deno.args / import.meta.env 금지 — alt-runtime
+      bypass 차단.
+  (8) node:readline / readline/promises / tty / repl 금지 — CLI-only, apps/cli 만.
+  (9) `import { env, argv, stdin } from "node:process"` 명명 import 금지 — literal-rename
+      bypass 차단 (default import 은 #3 regex 가 잡음).
+  (10) tsconfig `@/<slice>` alias 등록 + biome `src/<slice>/**` override (slice deny-list
+       + surface isolation + alt-runtime + node-module + node:process-named 5축).

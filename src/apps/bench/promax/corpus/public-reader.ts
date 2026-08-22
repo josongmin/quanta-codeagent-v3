@@ -26,6 +26,7 @@
  * field, so no amount of gold in the input can reach the agent through it — with
  * or without a preflight, on the local path as much as the remote one.
  */
+import { errMessage, logger } from "@/shared"
 import { parseProMaxPublicTasksArtifact } from "./artifacts"
 import type { PromaxAgentTaskView } from "./types"
 
@@ -110,8 +111,11 @@ const rowsFromJsonl = (text: string): ProMaxPublicRow[] => {
     try {
       const row = toRow(JSON.parse(trimmed))
       if (row !== undefined) out.push(row)
-    } catch {
-      // skip malformed line — same tolerance as the official JSONL reader
+    } catch (e) {
+      // Skip malformed line — same tolerance as the official JSONL reader, and
+      // now the same attribution: a dropped line is a task the run will never
+      // attempt, which used to leave no trace at all.
+      logger.warn(`promax-public-reader.rowsFromJsonl: skipped malformed line: ${errMessage(e)}`)
     }
   }
   return out
@@ -130,7 +134,15 @@ export const readProMaxCorpusRows = (text: string): readonly ProMaxPublicRow[] =
     try {
       const parsed: unknown = JSON.parse(trimmed)
       return Array.isArray(parsed) ? rowsFromArray(parsed) : []
-    } catch {
+    } catch (e) {
+      // The text OPENS with `[`, so it is declaring itself the bare-JSON-array
+      // form; a parse fault is a corrupt corpus, not a format mismatch. Returning
+      // `[]` unattributed made a corrupt dataset indistinguishable from an empty
+      // one — the exact silence the gold-leak preflight (header, format 2) relies
+      // on NOT happening. Control flow is unchanged; the fault is now nameable.
+      logger.warn(
+        `promax-public-reader.readProMaxCorpusRows: corpus array unparseable: ${errMessage(e)}`,
+      )
       return []
     }
   }

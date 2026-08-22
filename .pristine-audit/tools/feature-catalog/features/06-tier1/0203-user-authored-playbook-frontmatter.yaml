@@ -1,0 +1,65 @@
+id: user-authored-playbook-frontmatter
+title: User-authored playbook frontmatter (procedure / success-criteria / forbidden-actions / macros / inline-trigger) — ADR-0203
+section: 6
+subsystem: 스킬 — 사용자 저작 playbook frontmatter (Devin Playbooks + Windsurf + Aider AI! + Cody + Codex .system 5-vendor 융합)
+order: 237
+maturity: L4
+status: new
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [interactive, headless, batch, daemon, ide, ci-bot]
+configurable: integrated
+config_refs:
+  env: []
+owners: ["@songmin"]
+labels: ["surface:core", "tier:1", "absorbed:devin", "absorbed:windsurf", "absorbed:aider", "absorbed:cody", "absorbed:codex"]
+depends_on: [skill-md-frontmatter, repo-rules-tree, skill-7-scope-tiering, engineering-skills-bundle]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 7/7 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "dormant leaf parser primitive (0 host wiring; slash surface is an explicit follow-up), no UI affordance on any surface yet"
+purpose: |
+  ADR-0040의 strict 6-field SKILL.md frontmatter 위에 author-facing
+  procedural 슬롯 4개 + inline trigger 1개를 추가하는 누적 슬라이스.
+  기존 lenient/strict parser는 손대지 않고 `src/skill/playbook/` 신설 leaf
+  슬라이스로 PARALLEL parser 제공. 5-vendor convergence: Devin Playbooks
+  (procedure + spec + forbidden + !macro), Windsurf workflows (12KB cap,
+  workflow-from-workflow), Aider AI! (saved-file inline trigger), Cody
+  commands (prompt mode), Codex .system/SKILL.md (allowed-tools 정합).
+  주요 필드:
+    - procedure[]          — MECE action-verb 단계 목록
+    - success-criteria[]   — 선언적 성공 조건
+    - forbidden-actions[]  — case-insensitive substring HARD_DENY
+    - macros{name→exp}     — `!name` 매크로 (kebab-case 강제)
+    - trigger.comment-marker + trigger.watch-glob — Aider 스타일 inline
+      dispatch (fs.watch 기반; chokidar swap-target 동일 port)
+  validator는 (frontmatter, actionRepr) → ValidatorVerdict 순수함수. ADR-0098
+  repo-rules tree는 READ-ONLY로 cross-check helper에서만 참조 — 절대 verdict를
+  바꾸지 않음. 매크로 expansion은 1-pass (recursion 금지; Devin spec 동일).
+  inline-trigger watcher는 default 200ms debounce + fnmatch-style glob filter
+  + 실패 시 typed `ok:false`(root-not-found/root-not-dir/io-error) — 절대
+  throw 안 함.
+  PLAYBOOK_MAX_BYTES=12 KB (Windsurf parity). Default-OFF: 어떤 0203 슬롯도
+  없는 SKILL.md는 pre-0203과 byte-identical (HELL-PB-01 봉인).
+evidence:
+  code:
+    - src/skill/playbook/types.ts
+    - src/skill/playbook/port.ts
+    - src/skill/playbook/frontmatter-parser.ts
+    - src/skill/playbook/validator.ts
+    - src/skill/playbook/dispatcher.ts
+    - src/skill/playbook/inline-trigger-watcher.ts
+    - src/skill/playbook/index.ts
+  adrs: [203]
+  tests:
+    unit:
+      - tests/unit/playbook-frontmatter-hellgate.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: '슬라이스는 leaf-only — @/agent, @/tool, @/permission, @/storage import 0. host가 명시적으로 parsePlaybookFrontmatter + evaluatePlaybookAction + createInlineTriggerWatcher를 wire하기 전까지 dormant. chokidar는 install 차단(verify-workflow memory)으로 node:fs.watch fallback 채택; port shape 동일하므로 chokidar swap은 adapter body 1-line 변경. 후속: discoverSkills 합성 / permission seam wire / CLI session-bind wire / slash command 표면(Windsurf parity).'

@@ -26,10 +26,12 @@
  * pure resolvers/ports. `~/.quanta/bench/results` is asserted untouched by the
  * parent's before/after count.
  */
+
 import { describe, expect, test } from "bun:test"
 import { mkdtempSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import { errMessage } from "@/shared"
 import {
   decodeBenchRunConfig,
   isBenchmarkSuite,
@@ -241,7 +243,7 @@ describe("PMX-01 — `promax` is a member of the ONE canonical family union", ()
     try {
       resolveBenchRunConfig({ argvFamily: "promaxx", env: {} })
     } catch (err) {
-      message = err instanceof Error ? err.message : String(err)
+      message = errMessage(err)
     }
     expect(message).toContain("promaxx")
     for (const fam of ALL_FAMILIES) expect(message).toContain(fam)
@@ -519,7 +521,7 @@ describe("PMX-01 — promax preflight refuses a mislabeled or gold-bearing datas
     try {
       assertProMaxDatasetShape({ rows: promaxRows(path), surface: "t" })
     } catch (err) {
-      message = err instanceof Error ? err.message : String(err)
+      message = errMessage(err)
     }
     expect(message).toMatch(/ProMax-required columns/i)
     expect(message).toContain("a__b-1")
@@ -538,7 +540,7 @@ describe("PMX-01 — promax preflight refuses a mislabeled or gold-bearing datas
     try {
       assertProMaxDatasetShape({ rows: promaxRows(path), surface: "t" })
     } catch (err) {
-      message = err instanceof Error ? err.message : String(err)
+      message = errMessage(err)
     }
     expect(message).toMatch(/GRADER-ONLY/)
     expect(message).toContain("patch")
@@ -585,7 +587,7 @@ describe("PMX-01 — promax preflight refuses a mislabeled or gold-bearing datas
         family: "promax",
       })
     } catch (err) {
-      message = err instanceof Error ? err.message : String(err)
+      message = errMessage(err)
     }
     expect(message).toMatch(/REMOTE ProMax lane/)
     expect(message).toMatch(/PMX-04/)

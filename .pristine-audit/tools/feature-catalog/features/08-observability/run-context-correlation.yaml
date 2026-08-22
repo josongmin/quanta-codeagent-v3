@@ -1,0 +1,52 @@
+id: run-context-correlation
+title: RunContext — run/instance/attempt/turn/toolUseId correlation primitive
+section: 8
+subsystem: 텔레메트리 — span correlation
+order: 10
+maturity: L4
+status: stable
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [n-a]
+configurable: static
+owners: ["@songmin"]
+labels: ["surface:core", "observability-primitive"]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 4/4 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "pure run-graph correlation primitive struct, no UI affordance on any surface"
+purpose: |
+  Correlation context threaded through an agent run (RFC-0002 §5.1). Carries
+  `runId` (required) + optional `instanceId` / `attempt` / `turn` / `toolUseId`
+  so every `TrajectoryEvent` can be sliced run → instance → attempt → turn →
+  tool_use. Propagated via `AgentConfig.run?`; all fields except `runId` are
+  optional so the agent behaves byte-identically when the surface doesn't wire
+  it (project-standard optional-context pattern, RFC §1.2 default-OFF).
+
+  This is the canonical "where am I in the run-graph" primitive. The agent
+  loop stamps `turn` per turn; the dispatch seam stamps `toolUseId` per tool
+  call. Bench drivers stamp `runId` + `instanceId` + `attempt` (best-of-N).
+evidence:
+  code:
+    - src/shared/run-context.ts
+    - src/agent/loop.ts
+    - src/agent/types.ts
+    - src/runner/assemble/config.ts
+  adrs: []
+  tests:
+    unit:
+      - tests/unit/probe-funnel.test.ts
+      - tests/unit/eval-trajectory-diff.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  The shape is intentionally a flat readonly-ish struct (no methods, no
+  builders) so it can be JSON-stringified into the trajectory envelope without
+  conversion. `01-agentevent.yaml` references RunContext as the agent-event ↔
+  trajectory correlation bridge; this entry registers the primitive itself.

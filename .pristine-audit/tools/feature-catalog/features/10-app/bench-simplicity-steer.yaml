@@ -1,0 +1,40 @@
+id: bench-simplicity-steer
+title: Bench simplicity steer — minimal-mechanism philosophy (DEFAULT-ON)
+section: 10
+subsystem: 벤치 — over-engineer guard steer
+order: 2422
+maturity: L3
+status: new
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [batch]
+configurable: integrated
+owners: ["@songmin"]
+labels: [surface:bench, default-on]
+depends_on: [bench-eval-driver]
+config_refs:
+  env: [QUANTA_BENCH_SIMPLICITY]
+surface_integration:
+  cli: missing
+  web: na
+  method: audited
+  verified: "2026-06-19"
+  evidence:
+    cli: "SWE-bench prompt steer line in buildConfig"
+    web: "no browser affordance"
+purpose: |
+  DEFAULT-ON simplicity steer in the SWE-bench system prompt (OpenHands/Linus
+  minimal-mechanism philosophy). Measured flips on django-13417 / sympy-24562.
+  Explicit QUANTA_BENCH_SIMPLICITY=0 restores pre-absorption baseline.
+evidence:
+  code:
+    - src/runner/batch/eval/driver.ts
+    - src/config/knob-inventory.ts
+  adrs: [117]
+  tests:
+    unit:
+      - tests/unit/bench-prompt-steer-hellgate.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null

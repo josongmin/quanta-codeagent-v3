@@ -31,6 +31,7 @@ import {
   type OfficialGradeReceiptFailure,
   parseOfficialGradeReceipt,
 } from "@/runner/batch/eval/official-grade"
+import { errMessage } from "@/shared"
 
 /** Read a file's text off the box. The ONLY process boundary this module has. */
 export type OnBoxTextFetch = (
@@ -57,11 +58,18 @@ export type OfficialGradeTransportOutcome =
  *  specification; nothing here hard-codes a family. */
 export const DEFAULT_OFFICIAL_GRADE_RECEIPT_BOX_PATH = "~/official-grade-receipt.json"
 
-const asJson = (text: string): { readonly ok: true; readonly value: unknown } | undefined => {
+const asJson = (
+  text: string,
+):
+  | { readonly ok: true; readonly value: unknown }
+  | { readonly ok: false; readonly why: string } => {
   try {
     return { ok: true, value: JSON.parse(text) as unknown }
-  } catch {
-    return undefined
+  } catch (e) {
+    // The rejection below was already loud about WHAT happened; binding the fault
+    // is what makes it loud about WHY. "Not a JSON document" alone cannot separate
+    // a truncated fetch from a shell error the grader printed over its receipt.
+    return { ok: false, why: errMessage(e) }
   }
 }
 
@@ -80,7 +88,7 @@ export const receiveOfficialGradeReceipt = async (args: {
     }
   }
   const parsedJson = asJson(read.stdout)
-  if (parsedJson === undefined) {
+  if (!parsedJson.ok) {
     // Not JSON at all — a raw grader stream, a shell error, a truncated fetch.
     // Reported with the PMX-03 vocabulary so a caller has ONE thing to narrow on.
     return {
@@ -90,8 +98,8 @@ export const receiveOfficialGradeReceipt = async (args: {
         {
           code: "receipt_unparseable",
           message:
-            `the bytes at ${args.remotePath} are not a JSON document — remote transport does ` +
-            "not promote raw grader output to a verdict",
+            `the bytes at ${args.remotePath} are not a JSON document (${parsedJson.why}) — ` +
+            "remote transport does not promote raw grader output to a verdict",
         },
       ],
     }

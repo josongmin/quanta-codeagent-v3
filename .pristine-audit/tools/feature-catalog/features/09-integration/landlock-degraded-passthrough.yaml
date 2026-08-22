@@ -1,0 +1,65 @@
+id: landlock-degraded-passthrough
+title: Landlock sandbox — phase-1 typed-degrade passthrough
+section: 9
+subsystem: runtime/os-sandbox — Linux backend (phase 1)
+order: 42
+maturity: L2
+status: new
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [interactive, headless, batch, daemon, ide, ci-bot]
+configurable: partial
+owners: ["@songmin"]
+labels: ["surface:core", "absorbed:codex"]
+depends_on: [seatbelt-profile-compiler]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 2/2 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "pure internal os-sandbox primitive (ui_surfaces n-a, phase-1 typed-degrade) — no UI affordance on any surface"
+purpose: |
+  Linux Landlock + seccomp implementation, deliberately phase-1. A
+  production wire on Linux would need either a native binding
+  (`napi-rs landlock`) with ongoing kernel-ABI-drift maintenance, or a
+  shell-out to `bwrap` / `firejail` adding a system dependency we don't
+  want to require for first-cut. Phase 1 instead runs the command
+  *unsandboxed* and tags the result with `sandboxApplied: false` +
+  `degradeReason: "landlock-not-implemented"`. This keeps the surface
+  honest — no silent "sandbox claimed but didn't fire" — and follows the
+  ADR-0006 prior-art pattern (`DockerSandbox` throws, never silently
+  degrades). The os-sandbox port's contract is NO-THROW (callers spec a
+  policy, the port decides), so degradation surfaces here as a typed
+  result field instead, equally honest and programmatic to detect.
+evidence:
+  code:
+    - src/runtime/os-sandbox/landlock.ts
+    - src/runtime/os-sandbox/types.ts
+  adrs: [6]
+  tests:
+    unit: []
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold:
+  reason: |
+    Real Landlock wire requires a native binding or external sandboxing
+    binary. Phase 1 ships the closed-port shape + typed-degrade so callers
+    can already write the surface code; phase 2 will land the binding
+    behind the same port without changing call sites.
+  promotion_path: |
+    phase 2: probe `/proc/self/status` for Landlock support + add napi
+    binding, then wire `spawnViaLandlock` to install the ruleset before
+    spawn → integration test → L5.
+notes: |
+  Pairs with `seatbelt-profile-compiler` (macOS backend) and the
+  `OsSandbox` port (the platform-aware router that picks the right
+  backend for the current OS).
+  SUPERSEDED behavior (DOF-40): the phase-1 "run unsandboxed + tag
+  degradeReason" fallback described above was FAIL-OPEN. As of DOF-40 the
+  live port (`linux.ts` / `default.ts` / `landlock-native.ts`) is FAIL-CLOSED:
+  a REQUESTED-but-unenforceable sandbox emits a typed refusal
+  (`refusal.ts::sandboxUnavailableRefusal`, exit 126, empty stdout) and the
+  command NEVER runs. See feature `landlock-phase2`.

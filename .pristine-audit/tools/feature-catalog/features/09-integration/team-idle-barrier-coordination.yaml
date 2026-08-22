@@ -1,0 +1,86 @@
+id: team-idle-barrier-coordination
+title: Multi-agent team-idle barrier + idle beacon (Capability C)
+section: 9
+subsystem: Multi-agent coordination (§4, Claude --agent-teams 흡수)
+order: 165
+maturity: L3
+status: refined
+config_refs:
+  env: [QUANTA_TEAM_IDLE]
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [headless, daemon, interactive]
+configurable: integrated
+owners: ["@songmin"]
+labels: ["surface:core", "absorbed:claude"]
+depends_on: [team-dag-coordination, team-broker-coordination]
+surface_integration:
+  cli: full
+  web: missing
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 5/5 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "idle beacons/barrier are backend side-agent coordination; no bridged AgentEvent and no web affordance reaches the browser (dropped at context-binding.ts default arm)"
+purpose: |
+  Claude --agent-teams의 team-idle 배리어 흡수. 리더가 "전원 끝났나"를 폴링하는 대신
+  fan-in 배리어로 await. 각 멤버가 turn-end에 idle beacon emit, 리더는 teamIdle(전원
+  beacon) 감지 시 다음 phase/handoff/종료.
+
+  PURE 코어 (`src/subagent/coordination/idle-barrier.ts`, @/shared만, no Date.now):
+    - `IdleBeacon { agentId, idleSince }`.
+    - `teamIdle(beacons, members)` — 모든 member id가 beacon 보유 시 true. empty
+      members ⇒ false(문서화 선택: 팀 없음 ⇒ 배리어 release 없음). stray beacon(members
+      밖)은 무시 — 배리어 안 뒤집음.
+    - `idleSince(beacons, members)` — 전원 idle일 때만 member 중 MAX idleSince
+      (= 마지막 멤버가 idle된 순간 = release ts), 아니면 undefined.
+    - `upsertBeacon`(agent당 1개 latest 교체) / `clearBeacon`(재활성=drop), 둘 다 pure.
+
+  포트 (`createIdleBarrier({now})`): 주입 클럭 위 in-memory `beacon`/`reactivate`/
+  `teamIdle`/`idleSince`. `QUANTA_TEAM_IDLE` default-OFF (beacon 0 ⇒ 배리어 없음,
+  byte-identical 폴링).
+
+  WIRING (LIVE): host 바인딩 위치 = side-agent daemon supervise loop(persistent
+  team — in-process batch는 이미 Promise.all로 fan-in하므로 barrier 불필요). 컴포지션
+  루트 `src/agent/side-agent-runner.ts#wireSideAgentDaemons`가 `QUANTA_TEAM_IDLE`
+  ON일 때만 `createIdleBarrier({now})`를 registry opts.idleBarrier로 주입. registry
+  (`src/side-agent/registry.ts`)가 pass 라이프사이클에 배선: spawn + pass-complete
+  ⇒ `beacon(id)`(idle), pass in-flight ⇒ `reactivate(id)`(busy), finish ⇒ beacon
+  clear. 신규 `registry.teamIdle()`/`idleSince()`가 running daemon을 멤버로 배리어
+  쿼리 — 리더가 폴링 대신 "전 데몬 quiescent" O(1) 판정. knob OFF ⇒ teamIdle() false,
+  byte-identical.
+evidence:
+  adrs: [482]
+  code:
+    - src/subagent/coordination/idle-barrier.ts
+    - src/subagent/coordination/index.ts
+    - src/side-agent/registry.ts
+    - src/side-agent/types.ts
+    - src/agent/side-agent-runner.ts
+  tests:
+    unit:
+      - tests/unit/coordination/team-idle-barrier-hellgate.test.ts
+      - tests/unit/coordination/team-idle-side-agent-live-e2e-hellgate.test.ts
+    integration:
+      - tests/unit/coordination/team-idle-barrier-e2e-hellgate.test.ts
+    contract: []
+knobs:
+  - name: QUANTA_TEAM_IDLE
+    where: src/shared/runtime-config.ts
+    default: 'false'
+    purpose: |
+      Strict `=== "1"` opt-in. Default false ⇒ side-agent registry는 배리어 없음,
+      `teamIdle()` false / `idleSince()` undefined (byte-identical 폴링). ON ⇒
+      `wireSideAgentDaemons`가 실제 `createIdleBarrier`를 주입, registry가 데몬 pass
+      라이프사이클에 beacon/reactivate 구동 → 리더가 `teamIdle()`로 fan-in.
+notes: |
+  LIVE end-to-end (Capability C): pure 코어 + 주입-클럭 포트 + side-agent registry
+  배선 + 컴포지션(knob-gated) 완비. 7 live-e2e hellgate(REAL createIdleBarrier가 REAL
+  registry 구동): default-OFF(barrier 없음 ⇒ teamIdle false), spawn beacon ⇒ idle
+  true+idleSince=spawn ts, empty team ⇒ false, pass in-flight ⇒ busy(beacon clear),
+  pass complete ⇒ re-idle+release ts 전진, 2데몬 MAX idleSince + 하나 busy면 not-all-
+  idle, stopped 데몬은 팀 이탈. 코어 hellgate(NaN/±Infinity idleSince ⇒ undefined,
+  stray beacon 무시, empty members false). What this is NOT: 메인 loop turn-end
+  beacon(batch는 Promise.all이 이미 fan-in)은 의도적 미배선 — persistent team이 진짜
+  가치 지점. Slice fence: side-agent는 duck-typed `SideAgentIdleBarrierPort`로 주입
+  (coordination 직접 import 안 함).

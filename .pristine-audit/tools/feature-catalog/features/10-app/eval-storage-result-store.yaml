@@ -1,0 +1,54 @@
+id: eval-storage-result-store
+title: eval storage — JSONL append-only ResultStore (per-runId serialisation)
+section: 10
+subsystem: eval 앱 — 저장 레이어
+order: 89
+maturity: L4
+status: stable
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [headless, batch]
+configurable: integrated
+owners: ["@songmin"]
+labels: ["surface:bench"]
+depends_on: [eval-schema-additive, eval-five-tier]
+surface_integration:
+  cli: missing
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "src evidence not reachable from the interactive CLI entry (src/apps/cli/index.ts) — wired only into other apps (eval/bench/probe/headless) or unwired"
+    web: "pure internal eval storage I/O primitive, no UI affordance on any surface"
+purpose: |
+  Tier-agnostic JSONL store. 한 runId당 하나의 파일 (`<dir>/<runId>.jsonl`) —
+  tier 간 isolation + 단순 diff. Schema validation은 `schema.ts`, aggregation은
+  `report/`에 두고 이 모듈은 I/O만 담당 (dependency-light).
+  WRITE ATOMICITY (Phase B): 동일 runId에 대한 concurrent `append`/`finish`는
+  per-runId promise queue로 serialise — `appendFileSync` 호출이 line 경계에서
+  interleave 못 함. Tier 4 compare가 N adapters를 parallel로 한 runId에 쓰는
+  현실 케이스에서 line corruption 방지. 다른 runId는 cross-serialise 안 함.
+  READ VALIDATION: unknown `payload.kind` / schema mismatch / malformed JSON /
+  envelope 필드 누락은 모두 DROP + warn log — silent yield 금지로 operator가
+  "왜 비어 보이는지" 추적 가능. `makeRunId`는 sortable `YYYYMMDD-HHMMSS-<tier>-
+  <rand>` + 4 random bytes + hrtime ns fragment → 같은 ms 내 collision 무시
+  가능 (appendFileSync가 unrelated runs를 silently merge하는 위험 차단).
+  `drain()`이 모든 in-flight write의 awaiter 합쳐 finalisation 가능.
+evidence:
+  code:
+    - src/apps/eval/storage/result-store.ts
+    - src/apps/eval/storage/index.ts
+    - src/apps/eval/storage/schema.ts
+  adrs: []
+  tests:
+    unit:
+      - tests/unit/eval-storage-roundtrip.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  Schema shape는 별도 [eval-schema-additive] + [eval-five-tier]가 cover —
+  이 항목은 I/O atomicity contract + makeRunId collision-safety + drop-vs-yield
+  policy를 잠금. dataset이 수백 MB 넘어가면 readFile → `Bun.file().stream()`
+  교체 seam 존재. `run_summary` line이 EOF marker — readers는 의도적으로 skip.

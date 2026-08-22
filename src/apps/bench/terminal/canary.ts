@@ -17,9 +17,10 @@
  *     of a stale id is an aborted canary, not a four-figure run. Catching it
  *     here means the abort happens before a container is ever provisioned.
  *
- * The selection deliberately does NOT reuse the TB2.0 smoke list
- * (`tools/tb-smoke/run-tb-smoke.sh`); `canary.test.ts` reads that script's bytes
- * and enforces disjointness.
+ * The selection deliberately does NOT reuse the TB2.0 smoke list. That list used
+ * to live in a shell driver; TB21-06 deleted the driver and MIGRATED the list to
+ * `./retired-tb-2-0-smoke.ts` as retired evidence, so `canary.test.ts` still
+ * enforces disjointness against real data rather than a memory.
  */
 
 import { isCanonicalTask, TERMINAL_BENCH_DATASET, TERMINAL_BENCH_DATASET_REF } from "./dataset"

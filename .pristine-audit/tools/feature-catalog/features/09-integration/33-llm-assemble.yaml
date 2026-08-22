@@ -1,0 +1,54 @@
+id: llm-assemble
+title: assembleFromEvents — stream → Message + ADR-0076 thinking accumulation
+section: 9
+subsystem: LLM stream assembly
+order: 33
+maturity: L4
+status: stable
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [interactive, headless, batch, daemon, ide, ci-bot]
+configurable: integrated
+owners: ["@songmin"]
+labels: ["surface:core"]
+depends_on: [agent-loop-branch-hardening, fallback-kinds-policy, llm-stream-timeout, message-id-rewind, model-swap-retry]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 2/2 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "pure internal stream assembler; assembled text reaches web via assistant_text but the assembler itself has no UI affordance"
+purpose: |
+  Single SSOT for folding a `StreamEvent` iterator into one `AssembledTurn`
+  ({message, stopReason}). Three explicit fold rules: (1) `text_delta`
+  extends the trailing TextBlock OR opens a new one — text never merges into
+  thinking/tool_use; (2) ADR-0076 Gap-2 — consecutive `thinking_delta`
+  events fold into ONE ThinkingBlock; first non-thinking block forces a
+  fresh thinking block on the next thinking_delta, so provider-ordered
+  multi-block thinking is preserved; `redacted` flag is sticky — opaque
+  ciphertext never merges with plaintext; (3) `signature_delta` attaches to
+  the last ThinkingBlock in assembly order. Post-pass (ADR-0077) tags each
+  TextBlock with `phase: "commentary" | "final_answer"` deterministically:
+  text is commentary IFF a later tool_use exists in `content[]`, else
+  final_answer. Consumers that ignore phase observe byte-identical behaviour.
+evidence:
+  code:
+    - src/llm/assemble.ts
+    - src/llm/types.ts
+  adrs: [76, 77]
+  tests:
+    unit:
+      - tests/unit/llm/assemble-thinking.test.ts
+      - tests/unit/llm/assemble-thinking-hell.test.ts
+      - tests/unit/llm/assemble-phase.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  Same assembler used by `FallbackLLM` partial-tombstone path — when a provider
+  fails mid-stream the consumer discards the dead partial via `stream_reset`
+  tombstone before the fallback's events feed back into `assembleFromEvents`.
+  Single backward scan for phase tagging — no probabilistic classifier.

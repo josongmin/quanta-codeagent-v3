@@ -1,0 +1,135 @@
+id: byok-apikey-helper-legacy-vendor
+title: BYOK apiKeyHelper mint for the LEGACY vendor key path (anthropic/openai)
+section: 8
+subsystem: LLM provider seam — credential rotation
+order: 10
+maturity: L4
+status: refined
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [n-a]
+configurable: integrated
+owners: ["@songmin"]
+labels: ["surface:cli", "auth", "credential-rotation", "trust-gated", "h7", "absorbed:claude-code"]
+depends_on: [rotating-cloud-credentials]
+config_refs:
+  env:
+    - QUANTA_API_KEY_HELPER
+    - QUANTA_API_KEY_HELPER_TTL_MS
+    - QUANTA_API_KEY_HELPER_LEGACY_VENDOR
+    - QUANTA_LLM_CREDENTIAL_TRUSTED
+  runtime:
+    - apiKeyHelper
+    - apiKeyHelperTtlMs
+    - apiKeyHelperLegacyVendor
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 8/8 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "pure internal credential-resolution seam; credential knobs are deliberately excluded from the served knob catalog, no browser affordance"
+purpose: |
+  Extends the H7 `CredentialSource.mintApiKey()` (already hardened — TTL cache,
+  single-flight, empty-stdout guard, trust gate, no-leak) to feed the LEGACY
+  `anthropic` / `openai` vendor key path that `createLLM` resolves from
+  `ANTHROPIC_API_KEY` / `OPENAI_API_KEY`. Before this, only the SIBLING
+  `refreshCloudCreds(...)` capability had a live consumer (Bedrock/Vertex); the
+  `mintApiKey()` path was dead for the legacy `Authorization` / `x-api-key`
+  header. This is Claude Code's `apiKeyHelper` + `CLAUDE_CODE_API_KEY_HELPER_TTL_MS`
+  applied to the vendor key: a short-lived, broker-minted key is injected in place
+  of the static env var.
+
+  The single load-bearing constraint is that `createLLM` is SYNCHRONOUS while
+  `mintApiKey()` is async. Resolved by a composition-root pre-resolution step,
+  `resolveVendorApiKey(provider, opts, source)` (`src/llm/factory.ts`): the root
+  `await`s the mint and passes the minted key in as `opts.apiKey` (which already
+  wins over env), THEN calls the unchanged sync `createLLM`. The factory, the
+  adapters, and `MissingApiKeyError` are byte-identical otherwise.
+
+  GUARD: only `anthropic`/`openai` are mintable (`MINTABLE_PROVIDERS`).
+  `chatgpt-oauth` (on-disk token) and the cloud transports (`bedrock`/`vertex`,
+  which use `refreshCloudCreds`) are returned unchanged with ZERO shell calls.
+
+  PRECEDENCE (deterministic): explicit `opts.apiKey` wins over the mint (mint not
+  even consulted) > `apiKeyHelper` mint (above env — a configured helper is the
+  operator's stated rotation intent) > `env[API_KEY_ENV[provider]]` > else
+  `MissingApiKeyError`. The H7 empty-stdout guard makes "mint above env" SAFE — a
+  broken helper THROWS `helper-failed` rather than shadowing a working env key
+  with `""`.
+
+  DEFAULT-OFF: `source === undefined` (no H7 knob, or the legacy-vendor gate off)
+  ⇒ the SAME `opts` reference is returned and `createLLM` resolves from env
+  exactly as today (byte-identical). A configured-but-broken / untrusted helper
+  FAILS LOUDLY (typed `CredentialHelperError`) — matching the H7 fail-before-wire
+  posture, never a silent fall-through to a stale env key.
+evidence:
+  code:
+    - src/llm/factory.ts
+    - src/llm/credential-helper.ts
+    - src/llm/index.ts
+    - src/runner/assemble/llm.ts
+    - src/apps/cli/internal.ts
+    - src/apps/cli/repl.ts
+    - src/host/bootstrap/types.ts
+    - src/host/bootstrap/bootstrap-session.ts
+  adrs: []
+  tests:
+    unit:
+      - tests/unit/byok-apikey-resolve-hellgate.test.ts
+      - tests/unit/byok-apikey-e2e-hellgate.test.ts
+      - tests/unit/host/bootstrap-host-extraction-hellgate.test.ts
+      # Reachability e2e: knob-on+helper ⇒ minted key reaches createLLM as
+      # opts.apiKey (overrides env); helper-empty ⇒ throws (env not clobbered);
+      # untrusted ⇒ fail-closed (0 shell); knob-off ⇒ env key, 0 shell.
+      - tests/unit/ai-title-byok-reachability-hellgate.test.ts
+    integration: []
+    contract: []
+knobs:
+  - name: QUANTA_API_KEY_HELPER
+    default: 'undefined'
+    purpose: 'Shell command that mints an API key on stdout (TTL-cached). Reused from H7 — absent ⇒ mintApiKey() no-op ⇒ legacy env path.'
+  - name: QUANTA_API_KEY_HELPER_TTL_MS
+    where: DEFAULT_HELPER_TTL_MS
+    default: 300000
+    purpose: 'TTL (ms) for the minted-key cache. Reused from H7. Default 5min (mirrors Claude).'
+  - name: QUANTA_API_KEY_HELPER_LEGACY_VENDOR
+    default: '0'
+    purpose: 'Gate the legacy-vendor consumption of the mint. Only the literal 1 makes the composition root pass the H7 CredentialSource into resolveVendorApiKey for anthropic/openai. Unset ⇒ source NOT passed ⇒ byte-identical env-key path. Orthogonal to the cloud-refresh path (always available when its knobs are set).'
+  - name: QUANTA_LLM_CREDENTIAL_TRUSTED
+    default: '0'
+    purpose: 'FAIL-CLOSED trust attestation reused from H7 — only the literal 1 authorizes the mint shell to run; unset/anything else ⇒ typed untrusted decline, NEVER a run.'
+notes: |
+  L4 — slice + hellgate + LIVE composition-root threading complete (jun-6). The
+  full chain is reachable by config: CLI `cliBuildLlm` (async, `src/apps/cli/repl.ts`)
+  → `buildLLMWithByok` (`src/apps/cli/internal.ts`, gated on
+  `apiKeyHelperLegacyVendor` + legacy transport) → `buildLLMWithByokCore`
+  (`src/runner/assemble/llm.ts`) → `resolveVendorApiKey` → sync `createLLM`.
+  `resolveVendorApiKey` (src/llm/factory.ts) is the proven async pre-resolution
+  helper; `MINTABLE_PROVIDERS = {anthropic, openai}` pins the guard.
+
+  The load-bearing host edit: `BuildLlmFactory` (`src/host/bootstrap/types.ts`)
+  now returns `LLMPort | Promise<LLMPort>` and `bootstrapSession`
+  (`src/host/bootstrap/bootstrap-session.ts`) `await`s `deps.buildLlm(...)`, so the
+  async mint-then-build resolves before `result.llm` is consumed (a leaked Promise
+  would have no `.stream`). Without this the async `cliBuildLlm` was a TYPE ERROR
+  against the prior sync factory and the Promise would have been assigned where an
+  `LLMPort` was expected. Locked by bootstrap hellgate cases 10b (async build is
+  awaited → resolved adapter, not a Promise) + 10c (rejecting async build → typed
+  `llm_build_failed`).
+
+  DEFAULT-OFF BYTE-IDENTITY preserved: knob unset OR cloud transport ⇒
+  `buildLLMWithByok` delegates verbatim to the sync `buildLLM` (immediate resolve);
+  knob on but no `apiKeyHelper` ⇒ `buildCredentialSource` returns undefined ⇒
+  `resolveVendorApiKey(source=undefined)` returns the same opts ⇒ env-key path.
+
+  TESTS (14): byok-apikey-resolve (10) — mint feeds opts.apiKey for
+  anthropic/openai; explicit opts.apiKey wins (0 shell); knob-off (source
+  undefined) ⇒ ===-identical opts; helper-unset ⇒ undefined ⇒ unchanged;
+  non-mintable (chatgpt-oauth/bedrock-cast) skipped (0 shell); empty mint ⇒
+  helper-failed (env not clobbered); untrusted ⇒ untrusted (fail-closed); no-leak
+  (secret never in a thrown message). byok-apikey-e2e (4) — minted key is what
+  AnthropicAdapter is built with (env ignored); 2nd resolve within TTL re-uses
+  the cached mint (shell ran ONCE); knob-off ⇒ env key; knob-off + empty env ⇒
+  MissingApiKeyError.

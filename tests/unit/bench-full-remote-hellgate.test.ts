@@ -34,6 +34,7 @@ import {
   createSpawnRecorder,
   fail,
   ok,
+  type SpawnHandler,
   when,
   whenArgsInclude,
   whenCmd,
@@ -49,6 +50,24 @@ const FULL_AUTH = JSON.stringify({
   account_id: "acct-123",
   expires_at: "2099-01-01T00:00:00Z",
 })
+
+/** The image id the fake `aws ssm get-parameter` resolves to (see
+ *  {@link createFullSpawnRecorder}). */
+const SSM_RESOLVED_AMI = "ami-0123456789abcdef0"
+
+/** Every recorder in this file goes through here so the AMI lookup the box
+ *  lifecycle makes BEFORE RunInstances is answered exactly once. aug-22
+ *  regression repair (`9d5369d31`): the default AMI became an `ssm:` reference
+ *  that `resolveLaunchAmi` dereferences at launch time. An unanswered lookup
+ *  falls through to the recorder's empty-stdout fallback, the resolver fails
+ *  loud, and the run dies at provisioning — so the security/hardening teeth
+ *  below were silently measuring a box that never launched. That the launch
+ *  actually CONSUMES the resolved id is pinned by the "resolves the ssm: AMI
+ *  reference…" test; the resolver's own pass-through / refusal contract is
+ *  pinned by src/apps/bench/remote/box-session/ami-resolution.test.ts.
+ */
+const createFullSpawnRecorder = (...handlers: readonly SpawnHandler[]) =>
+  createSpawnRecorder(whenArgsInclude("get-parameter", ok(`${SSM_RESOLVED_AMI}\n`)), ...handlers)
 
 const TEMP_DIRS = new Set<string>()
 
@@ -155,7 +174,7 @@ const mockSpawn = (
     snapshotWriteResult?: SpawnResult
   } = {},
 ): { fn: SpawnFn; calls: Array<{ cmd: string; args: string[]; input?: string }> } => {
-  return createSpawnRecorder(
+  return createFullSpawnRecorder(
     whenArgsInclude("describe-security-groups", ok("sg-abc")),
     whenCmd("curl", ok("9.9.9.9")),
     whenArgsInclude("run-instances", ok("i-deadbeef")),
@@ -250,6 +269,45 @@ describe("full-remote executor (injected spawn — no real box/token)", () => {
     // R3 teeth (the SSH-timeout bug): launch MUST attach a security group, else
     // the box lands in the default SG with no inbound :22 ⇒ ssh times out.
     expect(argstr).toContain("--security-group-ids")
+  })
+
+  // Wiring pin for the recorder's SSM responder: the launch carries NO baked AMI
+  // id — it dereferences the `ssm:` default and hands RunInstances exactly what
+  // came back. Without this the responder would be an unobserved convenience; a
+  // launch that stopped consuming the resolved id (or shipped the raw `ssm:`
+  // string, which RunInstances rejects as InvalidAMIID) turns this red.
+  test("resolves the ssm: AMI reference and launches with exactly that image id", async () => {
+    const { fn, calls } = mockSpawn()
+    await createFullRemoteBackend({ ...baseCfg, spawn: fn })
+      .run()
+      .catch(() => undefined)
+    const ssmIdx = calls.findIndex((c) => c.args.includes("get-parameter"))
+    const runIdx = calls.findIndex((c) => c.args.includes("run-instances"))
+    expect(ssmIdx).toBeGreaterThanOrEqual(0) // the lookup HAPPENED …
+    expect(ssmIdx).toBeLessThan(runIdx) // … and BEFORE the launch it feeds
+    expect(calls[ssmIdx]?.args).toContain(
+      "/aws/service/canonical/ubuntu/server/22.04/stable/current/amd64/hvm/ebs-gp2/ami-id",
+    )
+    const launch = calls[runIdx]?.args ?? []
+    expect(launch[launch.indexOf("--image-id") + 1]).toBe(SSM_RESOLVED_AMI)
+    expect(launch.some((a) => a.startsWith("ssm:"))).toBe(false)
+  })
+
+  // …and the refusal half, through the REAL executor (not the isolated resolver
+  // unit): a lookup that answers something that is not an ami id must abort
+  // BEFORE RunInstances rather than launch with junk.
+  test("a malformed SSM answer refuses the launch (no RunInstances with junk)", async () => {
+    // raw recorder, NOT createFullSpawnRecorder: this test owns the SSM answer.
+    const { fn, calls } = createSpawnRecorder(
+      whenArgsInclude("get-parameter", ok("not-an-ami\n")),
+      whenArgsInclude("describe-security-groups", ok("sg-abc")),
+      whenCmd("curl", ok("9.9.9.9")),
+      whenArgsInclude("run-instances", ok("i-SHOULD-NOT-LAUNCH")),
+    )
+    await expect(createFullRemoteBackend({ ...baseCfg, spawn: fn }).run()).rejects.toThrow(
+      /AMI SSM resolution failed/,
+    )
+    expect(countCalls(calls, (c) => c.args.includes("run-instances"))).toBe(0)
   })
 
   test("launch tags expose preset/model/dataset/selection before box-side snapshots exist", async () => {
@@ -547,7 +605,7 @@ describe("full-remote executor (injected spawn — no real box/token)", () => {
       releaseFirstRun = resolve
     })
     let firstBenchStarted = false
-    const { fn, calls } = createSpawnRecorder(
+    const { fn, calls } = createFullSpawnRecorder(
       whenArgsInclude("describe-security-groups", ok("sg-abc")),
       whenCmd("curl", ok("9.9.9.9")),
       whenArgsInclude("run-instances", () => {
@@ -634,6 +692,7 @@ describe("full-remote executor (injected spawn — no real box/token)", () => {
         const ok = (stdout) => ({ code: 0, stdout, stderr: "" })
         if (args.includes("describe-security-groups")) return ok("sg-abc")
         if (cmd === "curl") return ok("9.9.9.9")
+        if (args.includes("get-parameter")) return ok(${JSON.stringify(SSM_RESOLVED_AMI)})
         if (args.includes("run-instances")) return ok("i-deadbeef")
         if (args.includes("wait")) return ok("")
         if (args.includes("describe-instances")) return ok("1.2.3.4")
@@ -794,7 +853,7 @@ describe("full-remote executor (injected spawn — no real box/token)", () => {
   })
 
   test("thin-strict family fails closed when pyright grounding is inert on a fresh box", async () => {
-    const { fn, calls } = createSpawnRecorder(
+    const { fn, calls } = createFullSpawnRecorder(
       whenArgsInclude("describe-security-groups", ok("sg-abc")),
       whenCmd("curl", ok("9.9.9.9")),
       whenArgsInclude("run-instances", ok("i-strict")),
@@ -947,7 +1006,7 @@ describe("full-remote executor (injected spawn — no real box/token)", () => {
 
   test("warm thin-strict boxes re-prove LSP grounding instead of bypassing on attach", async () => {
     let pyrightProbeCount = 0
-    const { fn, calls } = createSpawnRecorder(
+    const { fn, calls } = createFullSpawnRecorder(
       whenArgsInclude("describe-instances", ok("1.2.3.4")),
       whenSshRemoteIncludes("test -x ~/.bun/bin/bun", ok("OK\n")),
       whenSshRemoteIncludes("command -v pyright-langserver", () => {
@@ -983,7 +1042,7 @@ describe("full-remote executor (injected spawn — no real box/token)", () => {
     // every clean reuse. Preset agentless-v2 does NOT require LSP grounding, so
     // the path is: bootstrapped-OK → (no re-bootstrap) → self-heal.
     const logs: string[] = []
-    const { fn, calls } = createSpawnRecorder(
+    const { fn, calls } = createFullSpawnRecorder(
       whenArgsInclude("describe-instances", ok("1.2.3.4")),
       whenSshRemoteIncludes("test -x ~/.bun/bin/bun", ok("OK\n")),
       // the self-heal rsync reports the box was STALE (one drifted file).
@@ -1026,7 +1085,9 @@ describe("full-remote executor (injected spawn — no real box/token)", () => {
     // bootstrapBox (which seed-syncs fresh src+config), so the reuse self-heal
     // must NOT additionally fire — that would be a redundant double-rsync. The
     // isBootstrapped probe is left unmocked → defaults to ok("") (no "OK") → false.
-    const { fn, calls } = createSpawnRecorder(whenArgsInclude("describe-instances", ok("1.2.3.4")))
+    const { fn, calls } = createFullSpawnRecorder(
+      whenArgsInclude("describe-instances", ok("1.2.3.4")),
+    )
     await attachBox({ ...baseCfg, spawn: fn, preset: "agentless-v2" }, "i-cold")
     // bootstrapBox ran its SEED rsync (byte-identical historical args — NO checksum).
     expect(calls.some((c) => c.cmd === "rsync" && !c.args.includes("--checksum"))).toBe(true)
@@ -1041,6 +1102,8 @@ describe("full-remote executor (injected spawn — no real box/token)", () => {
       if (args.includes("describe-security-groups"))
         return { code: 0, stdout: "sg-abc", stderr: "" }
       if (cmd === "curl") return { code: 0, stdout: "9.9.9.9", stderr: "" }
+      if (args.includes("get-parameter"))
+        return { code: 0, stdout: `${SSM_RESOLVED_AMI}\n`, stderr: "" }
       if (args.includes("run-instances")) return { code: 0, stdout: "i-xyz", stderr: "" }
       if (args.includes("describe-instances")) return { code: 0, stdout: "1.2.3.4", stderr: "" }
       // make every ssh FAIL (incl. the readiness probe) — the run never gets going,
@@ -1067,7 +1130,7 @@ describe("full-remote executor (injected spawn — no real box/token)", () => {
     // the throw. Red-on-injection: drop the stderr capture and both halves fail.
     const TIMEOUT_STDERR = "ssh: connect to host 1.2.3.4 port 22: Operation timed out"
     const logs: string[] = []
-    const { fn } = createSpawnRecorder(
+    const { fn } = createFullSpawnRecorder(
       whenArgsInclude("describe-security-groups", ok("sg-abc")),
       whenCmd("curl", ok("9.9.9.9")),
       whenArgsInclude("run-instances", ok("i-stuck")),
@@ -1133,7 +1196,7 @@ describe("full-remote executor (injected spawn — no real box/token)", () => {
     // after a few consecutive hits. Red-on-injection: drop the terminal
     // classification and this exhausts the 30 polls instead of bailing after ~3.
     let probes = 0
-    const { fn } = createSpawnRecorder(
+    const { fn } = createFullSpawnRecorder(
       whenArgsInclude("describe-security-groups", ok("sg-abc")),
       whenCmd("curl", ok("9.9.9.9")),
       whenArgsInclude("run-instances", ok("i-doomed")),
@@ -1165,7 +1228,7 @@ describe("full-remote executor (injected spawn — no real box/token)", () => {
     // transient the 90-poll window exists to tolerate). Red-on-injection: add
     // "Permission denied" back to SSH_TERMINAL_ERROR and `probes` drops below 5.
     let probes = 0
-    const { fn } = createSpawnRecorder(
+    const { fn } = createFullSpawnRecorder(
       whenArgsInclude("describe-security-groups", ok("sg-abc")),
       whenCmd("curl", ok("9.9.9.9")),
       whenArgsInclude("run-instances", ok("i-keyinject")),
@@ -1195,7 +1258,7 @@ describe("full-remote executor (injected spawn — no real box/token)", () => {
     // killed mid-boot. Polls the full (small) window, then gives the generic
     // not-ready error — never the NON-RECOVERABLE one.
     let probes = 0
-    const { fn } = createSpawnRecorder(
+    const { fn } = createFullSpawnRecorder(
       whenArgsInclude("describe-security-groups", ok("sg-abc")),
       whenCmd("curl", ok("9.9.9.9")),
       whenArgsInclude("run-instances", ok("i-slowboot")),
@@ -1222,7 +1285,7 @@ describe("full-remote executor (injected spawn — no real box/token)", () => {
   })
 
   test("a grade-phase termination failure preserves BOTH the primary run error and cleanup error", async () => {
-    const { fn } = createSpawnRecorder(
+    const { fn } = createFullSpawnRecorder(
       whenArgsInclude("describe-security-groups", ok("sg-abc")),
       whenCmd("curl", ok("9.9.9.9")),
       whenArgsInclude("run-instances", ok("i-xyz")),
@@ -1240,7 +1303,7 @@ describe("full-remote executor (injected spawn — no real box/token)", () => {
   })
 
   test("a bootstrap cleanup termination failure surfaces explicitly instead of silently succeeding", async () => {
-    const { fn } = createSpawnRecorder(
+    const { fn } = createFullSpawnRecorder(
       whenArgsInclude("describe-security-groups", ok("sg-abc")),
       whenCmd("curl", ok("9.9.9.9")),
       whenArgsInclude("run-instances", ok("i-xyz")),
@@ -1303,7 +1366,7 @@ describe("full-remote executor (injected spawn — no real box/token)", () => {
   })
 
   test("reuses a warm idle box instead of auto-launching a fresh one", async () => {
-    const { fn, calls } = createSpawnRecorder(
+    const { fn, calls } = createFullSpawnRecorder(
       whenArgsInclude("describe-instances", ({ args }) =>
         ok(args.includes("--filters") ? "i-warm\t9.9.9.9" : "9.9.9.9"),
       ),
@@ -1330,7 +1393,7 @@ describe("full-remote executor (injected spawn — no real box/token)", () => {
   })
 
   test("a warm-box lock race ABORTS instead of auto-launching a second box", async () => {
-    const { fn, calls } = createSpawnRecorder(
+    const { fn, calls } = createFullSpawnRecorder(
       whenArgsInclude("describe-instances", ({ args }) =>
         ok(args.includes("--filters") ? "i-warm\t9.9.9.9" : "9.9.9.9"),
       ),
@@ -1358,7 +1421,7 @@ describe("full-remote executor (injected spawn — no real box/token)", () => {
   })
 
   test("a warm-box grade-lock release failure ABORTS instead of silently leaving the box busy", async () => {
-    const { fn, calls } = createSpawnRecorder(
+    const { fn, calls } = createFullSpawnRecorder(
       whenArgsInclude("describe-instances", ({ args }) =>
         ok(args.includes("--filters") ? "i-warm\t9.9.9.9" : "9.9.9.9"),
       ),
@@ -1386,7 +1449,7 @@ describe("full-remote executor (injected spawn — no real box/token)", () => {
   })
 
   test("refuses to auto-launch a second box while another quanta-bench box is already running", async () => {
-    const { fn, calls } = createSpawnRecorder(
+    const { fn, calls } = createFullSpawnRecorder(
       when(
         ({ args }) => args.includes("describe-instances") && args.includes("--filters"),
         ok("i-busy\t9.9.9.9"),
@@ -1402,7 +1465,7 @@ describe("full-remote executor (injected spawn — no real box/token)", () => {
   })
 
   test("refuses to auto-launch while another quanta-bench box is still pending", async () => {
-    const { fn, calls } = createSpawnRecorder(
+    const { fn, calls } = createFullSpawnRecorder(
       when(
         ({ args }) => args.includes("describe-instances") && args.includes("--filters"),
         ok("i-pending"),
@@ -1418,7 +1481,7 @@ describe("full-remote executor (injected spawn — no real box/token)", () => {
   })
 
   test("explicit extra-box opt-in can launch past the single-box guard", async () => {
-    const { fn, calls } = createSpawnRecorder(
+    const { fn, calls } = createFullSpawnRecorder(
       whenArgsInclude("describe-security-groups", ok("sg-abc")),
       whenCmd("curl", ok("9.9.9.9")),
       whenArgsInclude("describe-instances", ({ args }) =>
@@ -1463,7 +1526,7 @@ describe("full-remote executor (injected spawn — no real box/token)", () => {
 
   test("falls back to the next instance type on InsufficientInstanceCapacity", async () => {
     const launchedTypes: string[] = []
-    const { fn } = createSpawnRecorder(
+    const { fn } = createFullSpawnRecorder(
       whenArgsInclude("describe-security-groups", ok("sg-abc")),
       whenCmd("curl", ok("9.9.9.9")),
       whenArgsInclude("run-instances", ({ args }) => {

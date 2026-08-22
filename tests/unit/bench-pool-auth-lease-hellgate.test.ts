@@ -30,6 +30,15 @@ const authJsonFor = (label: string): string =>
     account_id: label,
   })
 
+/** The AMI id the fake `aws ssm get-parameter` resolves to. aug-22 regression
+ *  repair (`9d5369d31`): the default AMI became an `ssm:` reference that
+ *  `resolveLaunchAmi` dereferences BEFORE RunInstances, so every mock spawn here
+ *  must answer that lookup — otherwise it falls through to empty stdout, the
+ *  resolver throws, and the worker aborts before a single lease/launch teeth
+ *  assertion is reachable. The resolution contract itself stays pinned by
+ *  src/apps/bench/remote/box-session/ami-resolution.test.ts. */
+const RESOLVED_AMI = "ami-0123456789abcdef0"
+
 const BUDGET_DIRS = new Set<string>()
 const allocBudgetDir = (): string => {
   const dir = mkdtempSync(join(tmpdir(), "bench-pool-auth-"))
@@ -64,6 +73,7 @@ const mockSpawn = (opts: { rateLimited?: Set<string>; eventLog?: string[] } = {}
         (args[args.length - 1] ?? "").match(/~\/runs\/([^/]+)\/instances\.jsonl/)?.[1] ?? "unknown"
       o?.onData?.(`[PASS] ${runId}__inst-1 (turns=2)\n`)
     }
+    if (args.includes("get-parameter")) return ok(`${RESOLVED_AMI}\n`)
     if (args.includes("run-instances")) opts.eventLog?.push("launch")
     return cmd === "ssh"
       ? routeSsh([...args])
@@ -106,6 +116,33 @@ const poolCfg = (
   authProvider,
   ...over,
 })
+
+/** Await `p`, but fail LOUDLY (with the event trace) instead of hanging if the
+ *  awaited signal never arrives. The timer is cleared on settle so a passing
+ *  test never leaves a pending timer behind. The bound is generous on purpose:
+ *  it is a deadlock backstop, NOT the thing that decides the verdict — every
+ *  assertion below hangs off an explicit event, so CPU load cannot flip it. */
+const withTestDeadline = async <T>(
+  p: Promise<T>,
+  label: string,
+  events: readonly string[],
+  ms = 15_000,
+): Promise<T> => {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  try {
+    return await Promise.race([
+      p,
+      new Promise<never>((_resolve, reject) => {
+        timer = setTimeout(
+          () => reject(new Error(`timed out waiting for ${label}: ${events.join(" | ")}`)),
+          ms,
+        )
+      }),
+    ])
+  } finally {
+    if (timer !== undefined) clearTimeout(timer)
+  }
+}
 
 const TWO_ACCOUNTS: readonly AuthPoolEntry[] = [
   { label: "acct-a", authFile: "/a.json", maxParallel: 6, cooldownBaseSec: 30 },
@@ -174,6 +211,7 @@ describe("T-3 pool account-aware scheduler", () => {
         o?.onData?.(`[PASS] ${runId}__inst-1 (turns=2)\n`)
       }
       const a = [...args]
+      if (a.includes("get-parameter")) return ok(`${RESOLVED_AMI}\n`)
       if (a.includes("run-instances")) return ok("i-box")
       if (a.includes("describe-instances")) return ok("1.2.3.4")
       if (a.includes("terminate-instances")) return ok("")
@@ -291,23 +329,74 @@ describe("T-3 pool account-aware scheduler", () => {
     expect(mgr.snapshot()[0]?.activeBoxes).toBe(0)
   })
 
-  test("maxBoxes holds until the prior live box terminates; a second launch must not race ahead", async () => {
+  /**
+   * `maxBoxes` = cap on boxes SIMULTANEOUSLY DRAWING ON one account's OAuth
+   * budget (i.e. concurrent chunk leases) — NOT a cap on how many EC2 boxes are
+   * alive. Sources for that reading:
+   *  - jun-20 README §2 Decision: "routing unit = chunk", "allocation = per-chunk
+   *    AuthLease", "execution = box-sticky preference, not hard pin"; per-box
+   *    fixed account pinning was explicitly REJECTED.
+   *  - T-3 acceptance criteria: "worker releases the lease on success, requeue,
+   *    and throw" — the lease is chunk-scoped by contract.
+   *  - T-2 hellgate pins the core as "maxBoxes caps concurrent leases even when
+   *    slots remain" (tests/unit/bench-auth-lease-manager-hellgate.test.ts).
+   *  - The sibling "clean run leaks no slots" test above runs with the DEFAULT
+   *    keepWarm=true — every worker box is deliberately left ALIVE for reuse —
+   *    and still asserts `activeBoxes === 0`. A live-box reading of the counter
+   *    would make these two tests contradict each other.
+   * Live-box count has its OWN governor: the launch-window gate ("refusing to
+   * launch a fresh box while N quanta-bench box(es) are already live"), pinned in
+   * tests/unit/bench-pool-hellgate.test.ts. This test opts OUT of it
+   * (allowExtraBoxes) precisely so ONLY the auth cap is under test.
+   *
+   * NON-VACUITY: `maxParallel` is set well ABOVE the granted slot count
+   * (requestedSlots = clampPatchGenConcurrency(concurrency=8) = 8), so the slot
+   * cap CANNOT refuse c2 and `maxBoxes` is the only thing that can. With the old
+   * `maxParallel: 6`, the 8-slot request saturated the account outright and the
+   * maxBoxes teeth were inert (verified: the whole file stayed green with the
+   * `maxBoxes` check deleted from `isReady`).
+   *
+   * DETERMINISM: the verdict hangs off OBSERVABLE events raced against each
+   * other — "the account refused a lease while c1 is mid-grade" vs "a second box
+   * launched" — never on counting microtasks, so CPU load cannot flip it.
+   */
+  test("maxBoxes caps CONCURRENT account leases: no second box launches while the account's only box-lease is grading", async () => {
     const events: string[] = []
     const ok = (s: string): SpawnResult => ({ code: 0, stdout: s, stderr: "" })
     let launches = 0
-    let releaseTerminate!: () => void
-    const terminateBlocked = new Promise<void>((resolve) => {
-      releaseTerminate = resolve
+    // Gate c1's grade open so the account's single box-lease is provably HELD
+    // while we observe whether a second worker can slip past the cap.
+    let releaseGrade!: () => void
+    const gradeBlocked = new Promise<void>((resolve) => {
+      releaseGrade = resolve
     })
-    let resolveTerminateStarted!: () => void
-    const terminateStarted = new Promise<void>((resolve) => {
-      resolveTerminateStarted = resolve
+    let resolveGradeInFlight!: () => void
+    const gradeInFlight = new Promise<void>((resolve) => {
+      resolveGradeInFlight = resolve
     })
+    // Signal A: the account REFUSED a lease while c1 holds the only box-slot.
+    let resolveCapRefusal!: (tag: string) => void
+    const capRefusedWhileGrading = new Promise<string>((resolve) => {
+      resolveCapRefusal = resolve
+    })
+    // Signal B: a second box launched anyway ⇒ the cap leaked.
+    let resolveSecondLaunch!: (tag: string) => void
+    const secondBoxLaunched = new Promise<string>((resolve) => {
+      resolveSecondLaunch = resolve
+    })
+    let gradeIsInFlight = false
     const fn: SpawnFn = async (cmd, args, o) => {
       if (cmd === "curl") return ok("9.9.9.9")
       if (cmd === "ssh" && args.some((a) => a.includes("cli.ts run"))) {
         const runId =
           (args[args.length - 1] ?? "").match(/~\/runs\/([^/]+)\/instances\.jsonl/)?.[1] ?? "x"
+        if (runId === "c1") {
+          events.push("grade:c1:start")
+          gradeIsInFlight = true
+          resolveGradeInFlight()
+          await gradeBlocked
+          events.push("grade:c1:done")
+        }
         o?.onData?.(`[PASS] ${runId}__inst-1 (turns=2)\n`)
       }
       if (cmd === "ssh") {
@@ -320,28 +409,53 @@ describe("T-3 pool account-aware scheduler", () => {
         if (r) return ok(JSON.stringify({ resolved_ids: [`x__${r[1]}-1`] }))
         return ok("")
       }
+      if (args.includes("get-parameter")) return ok(`${RESOLVED_AMI}\n`)
       if (args.includes("run-instances")) {
         launches += 1
         events.push(`launch:${launches}`)
+        if (launches > 1) resolveSecondLaunch("second-box-launched")
         return ok(`i-box-${launches}`)
       }
       if (args.includes("describe-instances")) return ok("1.2.3.4")
       if (args.includes("terminate-instances")) {
-        events.push("terminate:start")
-        resolveTerminateStarted()
-        await terminateBlocked
-        events.push("terminate:done")
+        events.push("terminate")
         return ok("")
       }
       return ok("")
     }
     const mgr = new AuthLeaseManager(
-      [{ label: "solo", authFile: "/s.json", maxParallel: 6, maxBoxes: 1 }],
+      // maxParallel deliberately >> the 8 slots one chunk requests, so ONLY
+      // maxBoxes can refuse the second chunk. See NON-VACUITY above.
+      [{ label: "solo", authFile: "/s.json", maxParallel: 24, maxBoxes: 1 }],
       {
         now: () => 1_000_000,
       },
     )
-    const provider = createLeasePoolAuthProvider(mgr, () => authJsonFor("solo"))
+    const base = createLeasePoolAuthProvider(mgr, () => authJsonFor("solo"))
+    // Recording decorator: turns the cap into an OBSERVABLE signal (a refusal
+    // while c1's grade is in flight) instead of something we can only infer from
+    // the absence of an event after N microtasks.
+    const provider: PoolAuthProvider = {
+      acquire: (req) => {
+        const lease = base.acquire(req)
+        if (lease === null) {
+          events.push(`lease:refused:${req.runId}`)
+          if (gradeIsInFlight) resolveCapRefusal("cap-refused-while-c1-grades")
+          return null
+        }
+        events.push(`lease:granted:${req.runId}`)
+        return {
+          accountLabel: lease.accountLabel,
+          readAuthJson: () => lease.readAuthJson(),
+          release: (result) => {
+            events.push(`lease:released:${req.runId}`)
+            lease.release(result)
+          },
+        }
+      },
+      canEventuallySchedule: () => base.canEventuallySchedule(),
+      nextReadyAt: () => base.nextReadyAt(),
+    }
     const runPromise = runPool(
       [
         { runId: "c1", datasetPath: "/tmp/c1.jsonl" },
@@ -350,6 +464,8 @@ describe("T-3 pool account-aware scheduler", () => {
       poolCfg(fn, provider, {
         workers: 2,
         allowExtraWorkers: true,
+        // Opt OUT of the live-box launch-window governor so the ONLY thing that
+        // can hold worker 2 back is the account's maxBoxes cap.
         allowExtraBoxes: true,
         keepWarm: false,
         reuseWarm: false,
@@ -358,30 +474,38 @@ describe("T-3 pool account-aware scheduler", () => {
         },
       }),
     )
-    await Promise.race([
-      terminateStarted,
-      new Promise<never>((_, reject) =>
-        setTimeout(
-          () => reject(new Error(`timed out waiting for first terminate: ${events.join(" | ")}`)),
-          2_000,
-        ),
-      ),
-    ])
-    await Promise.resolve()
-    await Promise.resolve()
-    expect(events.filter((e) => e.startsWith("launch:"))).toEqual(["launch:1"])
-    releaseTerminate()
-    const out = await Promise.race([
-      runPromise,
-      new Promise<never>((_, reject) =>
-        setTimeout(
-          () => reject(new Error(`timed out waiting for run completion: ${events.join(" | ")}`)),
-          2_000,
-        ),
-      ),
-    ])
+    // If runPool blows up early, surface THAT error rather than a timeout.
+    const runFinishedEarly = runPromise.then(() => "run-finished-before-c1-graded")
+    await withTestDeadline(gradeInFlight, "c1's grade to start", events)
+    const verdict = await withTestDeadline(
+      Promise.race([capRefusedWhileGrading, secondBoxLaunched, runFinishedEarly]),
+      "the account cap to refuse worker 2 (or a second box to race past it)",
+      events,
+    )
+    // Snapshot the observations BEFORE unblocking, then always unblock — a red
+    // assertion must never wedge the still-running pool.
+    const launchesWhileHeld = events.filter((e) => e.startsWith("launch:"))
+    const boxesWhileHeld = mgr.snapshot()[0]?.activeBoxes
+    const slotsWhileHeld = mgr.snapshot()[0]?.activeSlots
+    releaseGrade()
+    const out = await withTestDeadline(runPromise, "run completion", events)
+
+    // TEETH 1 — the cap actually refused, and it refused BECAUSE of maxBoxes:
+    // slots were still available (8 of 24 used) yet the box budget was spent.
+    expect(verdict).toBe("cap-refused-while-c1-grades")
+    expect(boxesWhileHeld).toBe(1)
+    expect(slotsWhileHeld).toBe(8)
+    // TEETH 2 — exactly ONE box existed while the account's lease was held.
+    expect(launchesWhileHeld).toEqual(["launch:1"])
+    // TEETH 3 — the lease RELEASE is what opens the cap (T-3: released on
+    // success), so the second launch may only follow c1's release.
+    expect(events.indexOf("lease:released:c1")).toBeGreaterThanOrEqual(0)
+    expect(events.indexOf("launch:2")).toBeGreaterThan(events.indexOf("lease:released:c1"))
+    // TEETH 4 — and the run still completes with no chunk lost and no leak.
     expect(out.every((r) => !r.lost)).toBe(true)
-  })
+    expect(mgr.snapshot()[0]?.activeSlots).toBe(0)
+    expect(mgr.snapshot()[0]?.activeBoxes).toBe(0)
+  }, 30_000)
 })
 
 // cleanup

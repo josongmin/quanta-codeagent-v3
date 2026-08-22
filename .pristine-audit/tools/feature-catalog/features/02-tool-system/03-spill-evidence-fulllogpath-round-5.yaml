@@ -1,0 +1,39 @@
+id: spill-evidence-fulllogpath-round-5
+title: Spill → `evidence.fullLogPath` 라우팅 (Round 5)
+section: 2
+subsystem: 결과 cap + disk-spill (Tier 0)
+order: 3
+maturity: L3
+status: stable
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [n-a]
+configurable: n-a
+owners: ['@songmin']
+labels: [surface:cli]
+depends_on: [tool-registry, assert-never-exhaustiveness, byte-stable-string-comparator, errors-helper-fix, runtime-config-ssot]
+config_refs:
+  env: [QUANTA_CAP_ENFORCE, QUANTA_TOOL_OUTPUT_MAX, QUANTA_TOOL_OUTPUT_SPILL_KEEP]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 3/4 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "Pure internal evidence/trajectory plumbing (spillPath merged into ToolResult.evidence.fullLogPath then flattened to trajectory tool_end); ui_surfaces n-a, no UI affordance."
+purpose: Spill → evidence.fullLogPath 라우팅 (Round 5) — registry의 post-execute 경로가 capToolOutput.spillPath를 ToolResult.evidence.fullLogPath에 머지. 이전엔 duck-typed extra-prop, 이제 타입 surface 단일 경로 — dispatch seam evidenceOf가 그대로 trajectory tool_end.fullLogPath로 평탄화.
+evidence:
+  code:
+    - src/tool/registry.ts
+    - src/tool/output-spill.ts
+    - src/tool/types.ts
+    - src/shared/runtime-config.ts
+  adrs: []
+  tests:
+    unit: [tests/unit/output-spill.test.ts]
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: ''

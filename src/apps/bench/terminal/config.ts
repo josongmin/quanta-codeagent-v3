@@ -4,7 +4,8 @@
  *
  * ── What this module replaces ────────────────────────────────────────────────
  *
- * Terminal-Bench 2.0 was driven by `tools/tb-smoke/*.sh`: knobs were `export`ed
+ * Terminal-Bench 2.0 was driven by shell smoke drivers (deleted by TB21-06;
+ * git is the archive): knobs were `export`ed
  * into the ambient shell, harbor argv was assembled by string concatenation, and
  * the report's `knobs.preset` was free text. Two measurement lies follow
  * structurally from that shape:
@@ -176,6 +177,18 @@ const coerceKnobValue = (key: string, raw: string): KnobValue => {
     return n
   }
   return raw
+}
+
+/** Coerce a RETIRED knob's raw text WITHOUT consulting the registry.
+ *
+ *  `QUANTA_TB_BEST_OF_N` was removed from the knob inventory by TB21-06 (SR-6),
+ *  so {@link coerceKnobValue} now reports it as merely "unregistered" — which
+ *  would hide the real reason and make {@link assertNoTerminalBestOfN}
+ *  unreachable. Both refusal entry points parse it here instead, so an operator
+ *  who still exports it is told WHY it is gone. */
+const readRetiredKnobText = (raw: string): KnobValue => {
+  const n = Number(raw.trim())
+  return Number.isFinite(n) ? n : raw
 }
 
 /** Refuse a knob table that would put a SECOND sampling layer under Harbor's
@@ -398,10 +411,21 @@ const resolveKnobs = (
       throw new Error(`terminal: --knob expects KEY=VALUE (got ${JSON.stringify(override)})`)
     }
     const key = override.slice(0, eq)
-    knobs[key] = coerceKnobValue(key, override.slice(eq + 1))
+    const value = override.slice(eq + 1)
+    if (key === TERMINAL_BEST_OF_N_KNOB) {
+      assertNoTerminalBestOfN({ [key]: readRetiredKnobText(value) }, "a --knob override")
+      knobs[key] = readRetiredKnobText(value)
+      continue
+    }
+    knobs[key] = coerceKnobValue(key, value)
   }
-  assertKnobsRegistered(knobs, "the resolved profile")
+  // ORDER IS LOAD-BEARING. `QUANTA_TB_BEST_OF_N` is no longer in the knob
+  // inventory (TB21-06 SR-6), so the generic registration check would swallow it
+  // with an "unregistered knob" message and `assertNoTerminalBestOfN` would
+  // become unreachable. The SPECIFIC refusal — trials belong to the harness `-k`
+  // — is the one an operator needs, so it runs first.
   assertNoTerminalBestOfN(knobs, "the resolved profile")
+  assertKnobsRegistered(knobs, "the resolved profile")
   return knobs
 }
 
@@ -452,7 +476,7 @@ export const resolveTerminalRunConfig = (input: {
   const ambientBestOfN = env[TERMINAL_BEST_OF_N_KNOB]
   if (ambientBestOfN !== undefined) {
     assertNoTerminalBestOfN(
-      { [TERMINAL_BEST_OF_N_KNOB]: coerceKnobValue(TERMINAL_BEST_OF_N_KNOB, ambientBestOfN) },
+      { [TERMINAL_BEST_OF_N_KNOB]: readRetiredKnobText(ambientBestOfN) },
       "the ambient environment",
     )
   }

@@ -1,0 +1,34 @@
+id: aug02-rfc02-worktree-activity-producer
+title: RFC02-5 / RFC06-2 — operation-correlation activity + worktree activity producer
+section: 8
+subsystem: Activity spine — operation-correlation + worktree producer (aug-02 RFC02-5, RFC06-2)
+order: 556
+maturity: L3
+status: new
+ui_surfaces: [cli]
+monitoring: integrated
+modes: [interactive, headless]
+configurable: static
+owners: ["@songmin"]
+labels: ["rfc:aug02-02", "rfc:aug02-06", "surface:cli"]
+purpose: |
+  RFC02-5 operation-correlation contract + RFC06-2 worktree producer: the
+  activity spine gains an operation-correlation id so multi-step operations
+  (e.g. a worktree switch) group under one correlated activity, and a live
+  worktree-activity PRODUCER emits begin/end activity records around a
+  current-thread worktree transition (with crash reconcile). Additive activity
+  rows on the existing spine — no producer emits unless the operation runs.
+evidence:
+  code:
+    - src/activity/producers/worktree.ts
+    - src/activity/spine.ts
+    - src/activity/types.ts
+    - src/runner/session-ops/current-thread-worktree.ts
+  adrs:
+    - docs/plans/aug-02-absorption/rfc-02-observability.md
+    - docs/plans/aug-02-absorption/rfc-06-worktree-review-ux.md
+  tests:
+    unit:
+      - tests/unit/activity/worktree-producer-hellgate.test.ts
+      - tests/unit/session-ops/worktree-cmd-activity-e2e.test.ts
+      - tests/unit/session-ops/current-thread-worktree.test.ts

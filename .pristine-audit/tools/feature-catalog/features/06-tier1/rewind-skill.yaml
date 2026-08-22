@@ -1,0 +1,65 @@
+id: rewind-skill
+title: rewind 시스템 스킬 — shadow-snapshot 복원 워크플로 (ADR-0122)
+section: 6
+subsystem: 스킬 — 번들 시스템 스킬 (shadow-store rewind UX, LLM path)
+order: 122
+maturity: L4
+status: stable
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [interactive, headless, batch, daemon, ide, ci-bot]
+configurable: n-a
+owners: ["@songmin"]
+labels: ["surface:core", "tier:1", "absorbed:claude-code"]
+depends_on: [snapshot-slash-cmd]
+config_refs:
+  env: ["QUANTA_SKILLS_DIR"]
+surface_integration:
+  cli: full
+  web: partial
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 3/3 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "Backend runs the agent loop on web too and its shadow_* tool calls render as tool.invoked/tool.completed cards (session-hooks.ts), but there is no web /rewind slash and the skill itself plus its decision events are invisible; default-OFF on shadowOdb"
+purpose: |
+  사용자가 "rewind" / "undo" / "rollback" / "go back" / "revert changes"라고
+  말할 때 워크스페이스를 이전 shadow snapshot으로 복원하는 시스템 스킬.
+  3개의 `shadow_*` 도구 (`shadow_snapshots`, `shadow_rewind`,
+  `shadow_restore_partial`)를 결정 트리로 묶어, 모델이 (1) 스냅샷 리스트
+  조회 → (2) 대상 인덱스 확정 → (3) 전체 또는 파일-단위 복원 중 선택을
+  안전하게 수행하도록 한다. `allowedTools`는 `Bash`/`Read`/`shadow_*` 셋만
+  허용해 mutator(Edit/Write/apply_patch) dispatch를 자동 거절 — "report +
+  shadow-restore only" 의도를 skill 레이어에서 강제. `REWIND_SKILL_NAME` +
+  `triggerRewind()` 헬퍼를 노출하므로 slash router (`/rewind`)가
+  router-agnostic하게 wire 가능 (ADR-0045 progress-audit seam pattern과 동일).
+
+  ADR-0122 lineage 주의: `/snapshot` slash command 는 같은 ADR이지만 다른
+  surface — agent loop 바깥에서 도는 CLI UX이고, `/rewind` slash command는
+  세션 transcript 되감기(Claude Code v1.7196 pattern)에 이미 점유돼 있어
+  shadow-store UX는 `/snapshot`으로 등록됐다. 그러나 "rewind" 키워드 활성화
+  시 LLM 경로의 이 system skill은 여전히 트리거된다 — 두 surface가 같은
+  ShadowOdb 포트를 공유하지만 독립적으로 진화한다.
+evidence:
+  code:
+    - src/skill/system-skills/rewind/SKILL.md
+    - src/skill/system-skills/rewind/index.ts
+    - src/skill/system-skills/index.ts
+    - src/apps/cli/internal.ts
+  adrs: [122]
+  tests:
+    unit:
+      - tests/unit/shadow-odb-rewind-extensions-hellgate.test.ts
+      - tests/unit/cli-rewind-slash-hellgate.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  Default-OFF — `ctx.shadowOdb` 부재 시 도구가 "shadow store not configured"
+  로 노옵하므로 skill 자체도 효과적으로 disabled (byte-identical to NOT
+  registering). System-wins-on-collision 보호: user-supplied "rewind" skill이
+  shadow-restore discipline을 silent shadow하지 못함. `/snapshot` 슬래시
+  커맨드(`snapshot-slash-cmd.yaml`, section 10)는 동일 ShadowOdb 포트를
+  agent loop 밖에서 surface한 sibling이며, 두 entry point는 독립적으로
+  유지된다.

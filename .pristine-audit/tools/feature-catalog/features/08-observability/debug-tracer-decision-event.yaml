@@ -1,0 +1,87 @@
+id: debug-tracer-decision-event
+title: 게이트 결정 trace surface — `AgentEvent.decision` variant + stderr debug-tracer + `/debug` + `QUANTA_DEBUG` (ADR-0239)
+section: 8
+subsystem: observability — pre-dispatch gate live trace (developer mode Phase 1)
+order: 239
+maturity: L4
+status: stable
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [interactive, headless, daemon, ide, ci-bot]
+configurable: partial
+owners: ["@songmin"]
+labels: ["surface:cli", "tier:observability", "absorbed:cursor", "absorbed:claude-desktop", "absorbed:codex"]
+depends_on: [agentevent, jsonlrecorder]
+config_refs:
+  env: ["QUANTA_DEBUG"]
+surface_integration:
+  cli: full
+  web: missing
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 8/8 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "AgentEvent.decision dropped at context-binding.ts default arm; /debug is a CLI-only SlashPalette prefill stub (B1+B2)"
+purpose: |
+  CLI에서 "왜 이 도구 호출이 deny / ask / allow 됐는지" 실시간으로 보는 surface.
+  pre-dispatch 게이트 스택 (permission / rule / hook / cap / jail / budget)은
+  로직상 도구 호출의 진로를 정하지만 status-bar / cost-panel / turn-summary
+  어디에도 보이지 않는 가장 큰 비관측 결정면이었음. 이 슬라이스는 그 첫 단계.
+
+  세 가지 한 묶음: (1) `AgentEvent`에 `decision` closed-union variant 추가
+  (6 kind × 3 outcome × `reason`/`toolCallId`/`ruleId`/`hookName`/`metadata`),
+  (2) `createDebugTracer` consumer가 ANSI-color stderr 한 줄 per event 출력,
+  (3) `QUANTA_DEBUG=<categories>` boot 자동 enable + `/debug` runtime toggle.
+  session JSONL envelope에도 `event_msg{kind:"decision"}` record로 동시에
+  persist돼서 post-hoc replay (`/inspect`, `/replay`)와 같은 source-of-truth.
+
+  Research grounding: Cursor "debug panel" (chat surface inline), Claude
+  Desktop developer toggle (stderr stream), Codex `--trace` (OTel collector
+  필수) — 3-vendor 수렴 surface shape. quanta는 *live in-process* 형태로
+  흡수 (collector 무필요, stderr 직행). OTel path (ADR-0032)는 그대로 두고
+  *additive*로 추가.
+
+  Default-OFF byte-identical: `QUANTA_DEBUG` 미설정 + `/debug` 미invoke이면
+  tee fan-out에 tracer attach 안 됨 → stderr / JSONL / turn-summary 모두
+  pre-ADR baseline과 동일. TTY-only auto-enable로 scripted CI 폴루션 방지
+  (non-TTY context에서는 env 값과 무관하게 disable). NO-THROW posture: tracer
+  format crash가 agent loop을 절대 무너뜨리면 안 됨 (tee error isolation).
+
+  Phase 1 only — 게이트들이 실제로 이 event를 emit하는 wiring은 sibling
+  slice인 ADR-0267 (Phase 2: permission/rule/hook) + ADR-0269 (Phase 3:
+  cap/jail/budget)가 closing. 이 ADR은 contract + consumer만 fix.
+evidence:
+  code:
+    - src/stream/types.ts
+    - src/session/envelope.ts
+    - src/session/envelope-encoder.ts
+    - src/apps/cli/debug-tracer.ts
+    - src/apps/cli/debug-cmd.ts
+    - src/apps/cli/repl/session-setup.ts
+    - src/apps/cli/repl.ts
+    - src/apps/cli/slash-commands.ts
+  adrs: [239]
+  tests:
+    unit:
+      - tests/unit/cli/debug-tracer-hellgate.test.ts
+    integration: []
+    contract: []
+knobs:
+  - name: QUANTA_DEBUG
+    default: 'undefined'
+    purpose: '(no description)'
+deliberate_hold: null
+notes: |
+  EXACT-OPTIONAL discipline on `DecisionEvent` 필드 (absent fields는 omitted,
+  `undefined`-set 절대 금지). Metadata는 caller-sanitised (secret/PII scrub은
+  ADR-0078 redactValue가 content plane에서 처리 — tracer는 100자 truncate만).
+  No full input/output in tracer line — summary (length, kind, top-level key)
+  only; 풀 payload는 envelope JSONL (ADR-0034)이 보유. Persistent ring buffer
+  없음 (purely streamed) — `/debug` invoke 전 fire한 event는 retroactive 못
+  봄 (Codex/Cursor와 같은 posture). Cross-session 집계는 OTel collector path
+  (ADR-0032 + ADR-0268) 또는 JSONL 직접 projection (`/inspect` / `/replay`)
+  로만.
+
+  Categories closed union: `tools` / `decisions` / `llm` / `memory` / `plan`
+  / `stream` / `other`. `QUANTA_DEBUG=all` 단축 + comma-separated subset.
+  parseDebugEnv는 non-TTY에서 빈 filter return (boot-time gate).

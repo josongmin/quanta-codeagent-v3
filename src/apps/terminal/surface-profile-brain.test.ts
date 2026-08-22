@@ -1,7 +1,7 @@
 /**
- * The terminal brain declares its surface via a SurfaceProfile (RFC
- * `jul-2-terminal-bench-levers/00` §X) — the multi-surface-correct form of the
- * env-posture lever.
+ * The terminal brain declares its surface via a SurfaceProfile (TB21-06 TC-4 —
+ * `docs/plans/aug-21-bench-terminal-2-1/TB21-06-transferred-contracts.md`) — the
+ * multi-surface-correct form of the env-posture lever.
  *
  * HELLGATE:
  *   - The brain owned-env prompt now arrives via a DECLARED profile

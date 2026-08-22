@@ -40,7 +40,6 @@
 
 import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test"
 import { createApprovalStateMachine } from "@/agent/approval-state-machine"
-import { createObjectiveStore } from "@/objective"
 import { createRunLedger } from "@/agent/run-ledger"
 import { createAgentStateSource } from "@/apps/web-daemon/agent-state-source"
 import {
@@ -50,6 +49,7 @@ import {
   type WebDaemonServerConfig,
 } from "@/apps/web-daemon/server"
 import type { WebDaemonHandle } from "@/apps/web-daemon/types"
+import { createObjectiveStore } from "@/objective"
 import { type AgentStateMessage, decodeAgentStateFrame } from "@/protocol/agent-state"
 import { decodeObservabilityFrame, type ObservabilityMessage } from "@/protocol/observability"
 import { supported } from "@/protocol/session"

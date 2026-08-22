@@ -90,3 +90,47 @@ export function parseDiffNameStatus(stdout: string): DiffFile[] {
   }
   return out
 }
+
+/**
+ * Parse `git ls-files --others --exclude-standard` — one path per line, no
+ * status column. Every such path is a file git has never seen, so it is an
+ * ADDED file for this gate's purposes.
+ *
+ * Splitting on newline (not whitespace) is load-bearing: a path may contain
+ * spaces, and a truncated path silently stops matching fc evidence, which would
+ * turn a real block into a phantom one.
+ */
+export function parseUntrackedFiles(stdout: string): DiffFile[] {
+  const out: DiffFile[] = []
+  for (const line of stdout.split("\n")) {
+    if (line.trim() === "") continue
+    out.push({ path: line, status: "A" })
+  }
+  return out
+}
+
+/**
+ * Union several diff sources into one list, at most one record per path.
+ *
+ * `A` OUTRANKS every other status: a file that this branch introduced and then
+ * modified again in the working tree is still a NEW file, and demoting it to
+ * `M` would move it from the blocking list to the advisory one — the precise
+ * downgrade this gate exists to prevent. Order of arguments therefore cannot
+ * change the verdict.
+ *
+ * First-seen order is preserved so operator output stays stable run to run.
+ */
+export function mergeDiffSources(...sources: ReadonlyArray<readonly DiffFile[]>): DiffFile[] {
+  const byPath = new Map<string, DiffFile>()
+  for (const source of sources) {
+    for (const file of source) {
+      const existing = byPath.get(file.path)
+      if (existing === undefined) {
+        byPath.set(file.path, file)
+        continue
+      }
+      if (existing.status !== "A" && file.status === "A") byPath.set(file.path, file)
+    }
+  }
+  return [...byPath.values()]
+}

@@ -1,0 +1,58 @@
+id: slash-cost-panel
+title: /cost — cumulative session cost panel
+section: 10
+subsystem: REPL panels (R10)
+order: 20
+maturity: L4
+status: new
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [interactive]
+configurable: integrated
+config_refs:
+  env: [QUANTA_COST_PANEL]
+owners: ["@songmin"]
+labels: ["surface:cli", "absorbed:claude-code"]
+depends_on: [slashctx-6-ports-wire-completion, built-in-slash-commands, chatgpt-oauth-provider, idle-monitor-snooze, slash-permission-inspect]
+surface_integration:
+  cli: full
+  web: partial
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 2/2 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "the /cost slash panel mechanism is CLI-only (B2), but the cumulative-spend user value is rendered on web via TokenCounter from the bridged usage event, so the value surfaces with collapsed fidelity"
+purpose: |
+  Sticky cumulative session-spend dashboard surfaced via `/cost` — Claude SOTA
+  inspired (Claude Code's `costPanel` 누적 spend ticker). Complements the existing
+  per-turn `renderTurnDashboard` (fresh snapshot at each turn end) by aggregating
+  input/output/cache-read tokens + USD across the WHOLE REPL session so the
+  operator sees TOTAL spend even when idle. Two renderers share one mutable
+  state: `CostPanel.render` (single-line status-bar) + `CostPanel.renderDetailed`
+  (boxed `/cost` body). Source-of-truth for $/token is `@/observability/pricing.costUsd`
+  — unknown model returns `null` ⇒ "n/a" (NEVER silent $0). Default-ON for TTY
+  via `isCostPanelEnabled`; non-TTY surfaces (pipes, redirects, eval/bench) get
+  a disabled instance and `/cost` prints "not wired in this surface" (byte-
+  identical default-OFF parity).
+evidence:
+  code:
+    - src/apps/cli/cost-panel.ts
+    - src/apps/cli/slash-commands.ts
+  adrs: []
+  tests:
+    unit:
+      - tests/unit/cli/cost-panel.test.ts
+      - tests/unit/slash-commands.test.ts
+    integration: []
+    contract: []
+knobs:
+  - name: QUANTA_COST_PANEL
+    default: 'undefined'
+    purpose: '(no description)'
+deliberate_hold: null
+notes: |
+  Pure DI — `now` injectable so tests drive duration clock without `Date.now()`.
+  Slice fence: imports `@/observability` + `@/ui/ui-helpers` only (no `@/agent`,
+  `@/llm`, `@/stream`). SlashContext.cost is `() => string | undefined` — absent
+  ⇒ `/cost` no-op exit 0. Byte-identical default: disabling the panel (env=0 or
+  non-TTY) returns the same bytes the surface produced before the R10 wire-up.

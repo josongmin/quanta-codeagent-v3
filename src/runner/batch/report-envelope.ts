@@ -8,7 +8,7 @@
  *
  * The two branches stay SEPARATE interfaces on purpose. A SWE report carries
  * official-grade dispositions (`scoreTotals` / `proofTotals` / per-instance grade
- * breakdowns); a Terminal report carries Harbor trial receipts. Forcing them into
+ * breakdowns); a Terminal report carries per-trial grader receipts. Forcing them into
  * one payload type would make every consumer defensive about fields that cannot
  * coexist — so the union shares only the *identity* (`benchmarkSuite`) and the
  * persistence path, never the receipt semantics.
@@ -26,10 +26,14 @@
  * ref — because there is no legacy encoding to be compatible with, and because
  * identity must never be guessed from a filename, a field, or a dataset string.
  */
-import { quantaHomePath, runtimeConfig } from "@/shared"
+import { errMessage, logger, quantaHomePath, runtimeConfig } from "@/shared"
 import type { BenchReport } from "./report"
 import { CanonicalReportIdentityError, isRecord, refuse } from "./report-decode"
-import { decodeOfficialGradeSection } from "./report-official-grade"
+import { assertOfficialGradeSectionCoversReportBody } from "./report-official-grade-coverage"
+import {
+  decodeOfficialGradeSection,
+  type OfficialGradeSection,
+} from "./report-official-grade"
 import { decodeTerminalBenchReport, type TerminalBenchReport } from "./report-terminal"
 
 /** Canonical SWE dataset-family union (RFC jun-29 R4). ProMax (PMX-05) is a
@@ -224,10 +228,26 @@ const decodeSweReport = (raw: Record<string, unknown>, legacy: boolean): SweBenc
     // fails closed here instead of putting a flattering number on a dashboard.
     // Re-assigning an EXISTING key keeps its original position, so the persisted
     // byte order survives a decode → encode round trip.
+    // C-B: …and it is RECONCILED against the report's own `perInstance` rows.
+    // The partition checks are properties of the section alone, so an edit that
+    // deletes the missing ids and shrinks `assigned` to match is internally
+    // consistent and reads 100% coverage. The run rows are the one independent
+    // record of what the campaign attempted; an instance that appears there and
+    // nowhere in the section is a deleted denominator.
     ...(raw.officialGrade !== undefined
-      ? { officialGrade: decodeOfficialGradeSection(raw.officialGrade) }
+      ? { officialGrade: decodeAndReconcileOfficialGrade(raw.officialGrade, raw) }
       : {}),
   }
+}
+
+/** Decode the section, then anchor it to the body that carries it. */
+const decodeAndReconcileOfficialGrade = (
+  section: unknown,
+  body: Record<string, unknown>,
+): OfficialGradeSection => {
+  const decoded = decodeOfficialGradeSection(section)
+  assertOfficialGradeSectionCoversReportBody(decoded, body)
+  return decoded
 }
 
 /**
@@ -284,8 +304,11 @@ export const mirrorReportToSsot = async (sourceFile: string, content: string): P
     if (dirname(absolute) === resolve(dir)) return
     const mirrorName = absolute.replace(/^[/\\]+/, "").replace(/[^a-zA-Z0-9._-]/g, "__")
     await Bun.write(`${dir}/${mirrorName}`, content)
-  } catch {
-    // canonical mirror is best-effort — the source report already landed
+  } catch (e) {
+    // canonical mirror is best-effort — the source report already landed — but a
+    // silently-missing mirror makes the SSOT dir look like the run never happened,
+    // so the failure is attributed instead of swallowed.
+    logger.warn(`report-envelope.mirrorReportToSsot: ${errMessage(e)}`)
   }
 }
 

@@ -1,0 +1,58 @@
+id: slice-ipc-bridge
+title: '`@/ipc` 슬라이스 — CLI ↔ Web ↔ Tauri EventBridge + portable session'
+section: 10
+subsystem: Surface-agnostic Layer-2 (RFC may-22)
+order: 21
+maturity: L2
+status: stable
+ui_surfaces: [cli, api]
+monitoring: integrated
+telemetry_keys: [quanta.ipc.v, quanta.session.portable]
+modes: [daemon, ide]
+configurable: static
+owners: ["@songmin"]
+labels: ["surface:cli"]
+depends_on: [ipc-event-bridge, ipc-transports, portable-session-v1, session-jsonl-envelope, session-root-provider-port]
+surface_integration:
+  cli: missing
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "src evidence not reachable from the interactive CLI entry (src/apps/cli/index.ts) — wired only into other apps (eval/bench/probe/headless) or unwired"
+    web: "Pure internal protocol/library (event bridge, transport byte-shuttle, portable-session codec) with no user-visible affordance on any surface; not a UI feature."
+purpose: |
+  `src/ipc/` — Claude A11 deep-dive 흡수 (importCliSession + logCliEvent pattern). 두
+  컨트랙트: (1) `EventBridge` — typed `BridgePayload` 위 publish/subscribe + loopback 로컬
+  배달 + transport-agnostic wire encoding. (2) `BridgeTransport` — 저수준 byte shuttle,
+  4 구현 동봉: `in-memory` (테스트 fixture) / `stdio` (line-delimited JSON, CLI↔daemon) /
+  `uds` (Unix domain socket, framing은 stdio 재사용) / `websocket` (interface + adapter,
+  서버 본체는 follow-up). PortableSessionV1 export/import (snake_case wire) 로 표면 간
+  세션 round-trip — import 시 신선한 id 발행으로 충돌 회피. byte-identical default-OFF:
+  어느 표면도 강제 와이어링 X, 옵트인 flag는 follow-up.
+evidence:
+  code:
+    - src/ipc/index.ts
+    - src/ipc/event-bridge.ts
+    - src/ipc/session-export.ts
+    - src/ipc/session-import.ts
+    - src/ipc/transports/in-memory.ts
+    - src/ipc/transports/stdio.ts
+    - src/ipc/transports/uds.ts
+    - src/ipc/transports/websocket.ts
+  adrs: []
+  tests:
+    unit:
+      - tests/unit/ipc-slice-boundary.test.ts
+      - tests/unit/ipc/event-bridge.test.ts
+      - tests/unit/ipc/session-export-import.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  10 invariants — `@/runner` 패턴 미러 + 한 가지 calibrated 차이: stdio transports 가
+  **목적상** process.stdin/stdout 을 frame 하므로 슬라이스 자체는 결코 process.stdio.*
+  를 직접 읽지 않고 `StdioReader` / `StdioWriter` port 를 받는다. 위반 시 file:line +
+  offending specifier 로 1-step 진단 가능. tsconfig `@/ipc` alias 등록 + biome
+  `src/ipc/**` override.

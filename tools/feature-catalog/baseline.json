@@ -35,7 +35,6 @@
     "updated_at": "2026-06-03T05:00:21.322Z",
     "l3_reachability_grandfathered": [
       "adversarial-repro-knob",
-      "bench-full-remote-ami",
       "bench-leaderboard-analyze",
       "bridge-attestation",
       "color-palettes",

@@ -1,0 +1,63 @@
+id: web-agent-state-channel
+title: QUANTA_WEB_AGENT_STATE — agent-state WS push + out-of-band user-input port (jun-9 parity)
+section: 9
+subsystem: Web daemon observability — live agent-state frames
+order: 175
+maturity: L3
+status: new
+ui_surfaces: [web]
+monitoring: integrated
+modes: [daemon, interactive]
+configurable: integrated
+config_refs:
+  env: [QUANTA_WEB_AGENT_STATE]
+owners: ["@songmin"]
+labels: ["surface:web", "absorbed:cursor", "default-off", "jun-9-cli-web-parity"]
+depends_on: [web-daemon-surface]
+surface_integration:
+  cli: missing
+  web: full
+  method: audited
+  verified: "2026-06-11"
+  evidence:
+    cli: "gate is daemon-side only; the interactive CLI never forwards agent-state frames"
+    web: "web-daemon runtime-factory mints agent-state source + inbound user-input port when QUANTA_WEB_AGENT_STATE=1; frontend hooks (plan-reducer, agent-state-hooks) decode the out-of-band channel"
+purpose: |
+  Closes jun-9-cli-web-parity Phase 1 observability: *what is the agent doing /
+  why stopped / what's next* over an OUT-OF-BAND WebSocket channel (plan /
+  mode / tool-progress / compaction / ratelimit), plus the mirror INBOUND port
+  so the web client can answer `request_user_input` without stealing the turn
+  lease. Default-OFF (`QUANTA_WEB_AGENT_STATE`); gate OFF ⇒ byte-identical —
+  no `agentState` frames, no inbound answer port.
+
+  Layers: protocol (`src/protocol/agent-state/messages.ts`) · daemon source
+  (`agent-state-source.ts`) · inbound port (`web-user-input-port.ts`) ·
+  composition root (`runtime-factory.ts` gateOn) · optional agent tap
+  (`optional-ports.ts`) · frontend reducer/hooks (`plan-reducer.ts`,
+  `agent-state-hooks.ts`, `ws/client.ts`). Frontend copy-not-import mirror
+  drift-blocked by `web-frontend-agent-state-drift-contract-hellgate`.
+evidence:
+  code:
+    - src/apps/web-daemon/agent-state-source.ts
+    - src/apps/web-daemon/web-user-input-port.ts
+    - src/apps/web-daemon/runtime-factory.ts
+    - src/protocol/agent-state/messages.ts
+    - src/agent/optional-ports.ts
+    - apps/web-frontend/src/ws/agent-state-hooks.ts
+    - apps/web-frontend/src/ws/plan-reducer.ts
+    - apps/web-frontend/src/types/protocol.ts
+  adrs: []
+  tests:
+    unit:
+      - tests/unit/agent-state-daemon-e2e-flow-hellgate.test.ts
+      - tests/unit/web-user-input-port-lifecycle-hellgate.test.ts
+      - tests/unit/agent-state-tap-byte-identical-hellgate.test.ts
+      - tests/unit/surface-protocol-inventory-hellgate.test.ts
+      - tests/unit/web-frontend-agent-state-drift-contract-hellgate.test.ts
+    integration:
+      - tests/integration/web-user-input-port-e2e.test.ts
+      - tests/integration/agent-state-observability-ws-daemon-e2e.test.ts
+knobs:
+  - name: QUANTA_WEB_AGENT_STATE
+    default: "false"
+    purpose: "Forward agent-state WS frames + inbound user-input port (opt-in)."

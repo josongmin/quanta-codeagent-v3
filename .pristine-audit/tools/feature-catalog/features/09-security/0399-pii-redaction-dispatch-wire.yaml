@@ -1,0 +1,49 @@
+id: pii-redaction-dispatch-wire
+title: PII redaction을 dispatch.applyRedaction에 wire (ADR-0399)
+section: 9
+subsystem: 보안 — PII content-plane redaction
+order: 399
+maturity: L3
+status: new
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [interactive, headless, batch, daemon, ide, ci-bot]
+configurable: integrated
+owners: ["@songmin"]
+labels: ["surface:core", "security-touched"]
+depends_on: [secret-redaction-content-plane, sensitivity-classifier]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 4/4 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "content-plane PII masking fence spliced after secret redaction; no browser UI affordance of its own"
+purpose: |
+  PII 모듈(`src/security/pii-redaction/`)은 sync + masking(redactText)이라
+  ADR-0078 sync masking 슬롯에 drop-in 가능(secret-detection 신모듈은
+  async + detection-only라 안 됐던 그 대비). dispatch.applyRedaction에 PII
+  브랜치 추가 — secret-first 후 PII pass가 post-secret 텍스트에 splice
+  (REDACTED placeholder가 PII regex와 매칭 안 돼서 cross-talk 없음). Default
+  -OFF: config.redaction.pii 미설정 ⇒ PII 미적용 + 기존 secret redaction
+  byte-identical. secret/PII 독립 — 한쪽만 켜도 다른쪽 동작 불변(C3 hellgate
+  로 봉인: secret disabled + acknowledgedRisk + PII ON ⇒ AWS key 통과,
+  이메일 마스킹).
+evidence:
+  code:
+    - src/security/redaction-config.ts
+    - src/security/index.ts
+    - src/agent/dispatch.ts
+    - src/security/pii-redaction/port.ts
+  adrs: [399]
+  tests:
+    unit:
+      - tests/unit/dispatch-pii-redaction-hellgate.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  secret-detection 신모듈(async + detection-only)은 별도 ADR-0412
+  check_secrets LLM tool으로 wired(같은 path 안 됨). 두 신모듈은 정반대 shape.

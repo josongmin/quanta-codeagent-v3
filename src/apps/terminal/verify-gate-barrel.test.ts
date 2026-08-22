@@ -2,7 +2,7 @@
  * BARREL PARITY wiring test — the terminal surface's `./verify-gate` re-export must expose the
  * converge core's full public API, and each re-export must be the LIVE function (not a stale stub).
  * If the thin barrel (`verify-gate.ts`) drifts or the hoist breaks a symbol, this goes RED — so
- * every `./verify-gate` consumer (brain-mode / best-of-n) stays byte-identical after the hoist.
+ * every `./verify-gate` consumer (brain-mode) stays byte-identical after the hoist.
  */
 import { describe, expect, test } from "bun:test"
 import type { AgentEvent } from "@/stream"

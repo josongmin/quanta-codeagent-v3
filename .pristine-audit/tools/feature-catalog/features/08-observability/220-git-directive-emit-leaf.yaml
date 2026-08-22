@@ -1,0 +1,56 @@
+id: git-directive-emit-leaf
+title: Git `::git-*` directive emit — wire/serdes leaf (ADR-0220)
+section: 8
+subsystem: Out-of-band UI sync wire format
+order: 220
+maturity: L3
+status: new
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [n-a]
+configurable: integrated
+owners: ["@songmin"]
+labels: ["surface:cli", "observability-primitive", "default-off"]
+depends_on: []
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 4/4 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "Pure internal wire/serdes leaf (alpha-sorted JSON serializer/parser), no UI affordance on any surface."
+purpose: |
+  Codex 의 `::git-*` 5-directive 와이어 포맷을 직렬화/역직렬화 하는 leaf
+  슬라이스. canonical alpha-sorted JSON 으로 byte-deterministic. ADR-0221
+  (phase-guarded 프로토콜) + ADR-0232 (turn-collector wire) 의 sibling —
+  본 슬라이스는 wire/serdes 만 담당하고 phase 가드 + collector 는
+  별도 슬라이스. UI-tail 소비자 형상 (`stage.paths` /
+  `push.{remote, branch}`) 모델링. 두 슬라이스 모두 alpha-sorted 직렬화로
+  같은 호스트가 어느 형상이든 결정성 있게 처리.
+evidence:
+  code:
+    - src/agent/git-directives/index.ts
+    - src/agent/git-directives/types.ts
+    - src/agent/git-directives/serializer.ts
+    - src/agent/git-directives/parser.ts
+  adrs:
+    - docs/decisions/0220-git-directive-emit.md
+  tests:
+    unit:
+      - tests/unit/git-directive-emit-hellgate.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold:
+  reason: |
+    Wire/serdes 만 — phase 가드 + collector + emitter 는 ADR-0221 슬라이스
+    (`src/git/directive-emit/`) 에서 처리. 호출자가 leaf 헬퍼만 import 해도
+    프로토콜 동작 없이 사용 가능 (테스트 / 헤드리스 dump).
+  promotion_path: |
+    ADR-0221 슬라이스로 wire 가 합쳐졌으므로 본 entry 는 leaf 보존용 —
+    별도 promotion 없음.
+notes: |
+  ADR-0221 entry 와 직교 — 본 entry 는 leaf 형상 (`stage.paths`,
+  `push.{remote,branch}`); ADR-0221 entry 는 call-site intent
+  (`stage.files`, `push.{ref,force}`). 두 형상 모두 alpha-sorted 직렬화.

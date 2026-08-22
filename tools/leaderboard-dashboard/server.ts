@@ -28,8 +28,8 @@ import { basename, join } from "node:path"
 import { ActionError } from "./bench-actions"
 import { BenchControl } from "./bench-control"
 import { iidFromBody, launchSpecFromBody, presetsFromCatalog } from "./bench-request"
+import { groupRuns, instanceIsUnmeasured, shortId } from "./campaign-rollup"
 import type { ExternalBaselines } from "./external-baselines"
-import { campaignKeyOf } from "./family-partition"
 import { renderDashboardPage } from "./page"
 import {
   benchmarkViewsOf,
@@ -100,12 +100,6 @@ function argsOf(flag: string): string[] {
       if (value) out.push(value)
     }
   return out
-}
-
-const shortId = (full: string): string => {
-  if (!full) return ""
-  if (!full.includes("__")) return full
-  return full.split("__")[1] ?? ""
 }
 
 type JsonRecord = Record<string, unknown>
@@ -239,9 +233,6 @@ function parseMatrix(): MatrixData {
 // artifact. A suite whose rows are its own (see `ProjectedRun.rows`) therefore
 // supplies rows with no re-runnable channel at all, and this predicate is once
 // again exactly the SWE rule it is named after.
-const instanceIsUnmeasured = (pi: { passed: boolean; fail?: FailInfo | null }): boolean =>
-  !pi.passed && pi.fail?.reRunnable === true
-
 // Canonical re-runnable terminations — byte-identical to verdicts.ts's
 // RE_RUNNABLE_TERMINATIONS. throttle(429/usage-limit), harness/runner infra,
 // grader output failures. timeout / hung_stream / generation_error /
@@ -611,112 +602,6 @@ function loadFrontierTrajs() {
   }
   FRONTIER_CACHE = map
   return map
-}
-
-interface Campaign {
-  key: string
-  members: string[] // file labels that rolled up into this campaign
-  model: string
-  preset: string
-  /** Dataset family (RFC jun-29 R4) — the SWE axis only. Lets the UI chip/filter
-   *  by dataset so a pro resolved-rate is never shown beside (or averaged into)
-   *  the verified leaderboard number. Absent on family-less suites. */
-  datasetFamily?: string
-  /** Top-level view tab this campaign belongs to (see Run.viewId). */
-  viewId: string
-  mtime: number
-  resolved: number
-  // Denominator EXCLUDING re-runnable holes (FLAG-B). An instance counts as
-  // unmeasured only if EVERY run failed to measure it (a measured/passing run
-  // anywhere wins), mirroring verdicts.ts dedup semantics.
-  total: number
-  unmeasured: number
-}
-
-// Per-instance rollup state inside one campaign. passed wins over everything;
-// among non-passing, a measured failure (real miss) wins over an unmeasured
-// hole — so an instance only counts as unmeasured when no run ever measured it.
-interface SeenInstance {
-  passed: boolean
-  measured: boolean // at least one run produced a graded/real outcome (not a hole)
-}
-
-// campaignKeyOf moved to ./family-partition (testable — server.ts calls Bun.serve at
-// import, so a unit test cannot import it). RFC jun-29 R4 partition lives there.
-
-const addRunToCampaign = (
-  groups: Map<string, Campaign & { seen: Map<string, SeenInstance> }>,
-  run: Run,
-): void => {
-  const key = campaignKeyOf(run)
-  let group = groups.get(key)
-  if (!group) {
-    group = {
-      key,
-      members: [],
-      model: run.model,
-      preset: run.preset,
-      ...(run.datasetFamily !== undefined ? { datasetFamily: run.datasetFamily } : {}),
-      viewId: run.viewId,
-      mtime: 0,
-      resolved: 0,
-      total: 0,
-      unmeasured: 0,
-      seen: new Map(),
-    }
-    groups.set(key, group)
-  }
-  group.members.push(run.label)
-  group.mtime = Math.max(group.mtime, run.mtime)
-  for (const perInstance of run.perInstance) {
-    const sid = shortId(perInstance.id)
-    if (!sid) continue
-    const prev = group.seen.get(sid)
-    const measured = perInstance.passed || !instanceIsUnmeasured(perInstance)
-    group.seen.set(sid, {
-      passed: (prev?.passed ?? false) || perInstance.passed,
-      measured: (prev?.measured ?? false) || measured,
-    })
-  }
-}
-
-// Roll many report files into logical campaigns:
-//   - shards (`clean-shard3`)         → one run (SOTA-clean = 16/36)
-//   - full-remote `report-i-*` sidecars → one campaign per (dir, model)
-//   - `local-*` single targets         → one bucket
-// resolved/total dedupe by instance (union) so overlapping sidecars don't
-// double-count.
-function groupRuns(runs: Run[]): Campaign[] {
-  const groups = new Map<string, Campaign & { seen: Map<string, SeenInstance> }>()
-  for (const run of runs) addRunToCampaign(groups, run)
-  const out: Campaign[] = []
-  for (const group of groups.values()) {
-    const seen = [...group.seen.values()]
-    // FLAG-B: unmeasured = instances NO run ever measured (all-throttle/infra).
-    // They leave the denominator; surfaced separately as `unmeasured`.
-    const unmeasured = seen.filter((s) => !s.passed && !s.measured).length
-    group.total = group.seen.size - unmeasured
-    group.unmeasured = unmeasured
-    group.resolved = seen.filter((s) => s.passed).length
-    out.push({
-      key: group.key,
-      members: group.members,
-      model: group.model,
-      preset: group.preset,
-      mtime: group.mtime,
-      resolved: group.resolved,
-      total: group.total,
-      unmeasured: group.unmeasured,
-      ...(group.datasetFamily !== undefined ? { datasetFamily: group.datasetFamily } : {}),
-      viewId: group.viewId,
-    })
-  }
-  // Rank on the REAL solve-rate (resolved / measured-total), so throttle noise
-  // can no longer reorder the leaderboard. Ties broken by larger measured set.
-  return out.sort(
-    (a, b) =>
-      b.resolved / Math.max(1, b.total) - a.resolved / Math.max(1, a.total) || b.total - a.total,
-  )
 }
 
 interface QuantaSummary {

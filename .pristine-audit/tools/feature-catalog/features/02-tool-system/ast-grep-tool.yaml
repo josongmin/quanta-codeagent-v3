@@ -1,0 +1,38 @@
+id: ast-grep-tool
+title: ast_grep — structural AST code search via ast-grep CLI (QUANTA_AST_GREP, default-OFF)
+section: 2
+subsystem: 도구 시스템 — 구조적 코드 검색 (AST 패턴, 텍스트 false-positive 0)
+order: 651
+maturity: L3
+status: new
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [interactive, headless, batch, daemon]
+configurable: partial
+owners: ["@songmin"]
+labels: [surface:cli, default-off, search]
+depends_on: []
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-15"
+  evidence:
+    cli: "QUANTA_AST_GREP gate read at src/apps/cli/internal.ts:1516 (astGrepEnabled() ? [astGrepTool] : []); threaded as features.astGrepTools into buildTooling at src/host/bootstrap/bootstrap-session.ts:423; eval driver mirrors the gate at src/runner/batch/eval/driver.ts"
+    web: "no web mint site — gate read only in CLI internal/bench surfaces"
+purpose: 'Structural code search using ast-grep patterns — finds code by AST shape, not text, so no false positives from comments/strings (pattern console.log($A) matches all calls regardless of whitespace/args). Wraps the ast-grep CLI binary (probed once per session, success-only cached so install-then-use works without restart). Read-only + concurrency-safe. Hardening: fs-jail validation of the path arg (blocks /etc/passwd escape via the subprocess), 2 MB stdout slice before JSON.parse (OOM guard), 30s timeout, 50-match cap, internal-newline flattening (one output line per match). Default-OFF: gate unset => astGrepTools is [] => tool unregistered => byte-identical.'
+evidence:
+  code:
+    - src/tool/ast-grep/index.ts
+  adrs: []
+  tests:
+    unit:
+      - tests/unit/ast-grep-tool-hellgate.test.ts
+      - tests/unit/ast-grep-bugs-hellgate.test.ts
+      - tests/unit/ast-grep-scenarios.test.ts
+    integration:
+      - tests/unit/ast-grep-e2e-hellgate.test.ts
+    contract: []
+knobs: [QUANTA_AST_GREP]
+deliberate_hold: null
+notes: 'Gate SSOT = tool/surface/manifest.ts. Requires the ast-grep binary on PATH; absent binary => ok:false with install hint, never a throw. Probe failure NOT cached (only success) so a mid-session install is picked up. No numbered ADR — knob/RFC-driven.'

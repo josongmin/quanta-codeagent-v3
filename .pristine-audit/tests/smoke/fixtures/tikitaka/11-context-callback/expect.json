@@ -1,0 +1,12 @@
+{
+  "stopReason": "completed",
+  "turns": { "count": { "min": 3 } },
+  "toolCalls": {
+    "required": ["read"],
+    "forbidden": ["write", "edit", "bash"],
+    "counts": { "read": { "min": 2, "max": 2 } }
+  },
+  "contextRetention": [{ "inRun": 2, "assistantTranscriptContains": ["util.ts"] }],
+  "files": [{ "path": "util.ts", "contains": ["slugify"] }],
+  "budget": { "wallSeconds": { "max": 20 } }
+}

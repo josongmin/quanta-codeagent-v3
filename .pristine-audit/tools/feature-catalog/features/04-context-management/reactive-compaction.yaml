@@ -1,0 +1,53 @@
+id: reactive-compaction
+title: reactiveCompact — PTL-recovery aggressive squeeze + continuation summary
+section: 4
+subsystem: 압축 — reactive (proactive 보다 더 강한 squeeze)
+order: 20
+maturity: L4
+status: stable
+ui_surfaces: [cli]
+monitoring: integrated
+telemetry_keys: [quanta.conversation.id]
+modes: [n-a]
+configurable: integrated
+owners: ["@songmin"]
+labels: [surface:core]
+depends_on: [plan-mode, secret-redaction-content-plane, durable-state-belongs-in-workspace-files, response-in-progress, src-agent-working-state-ts]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 3/3 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "pure internal compaction primitive; context_compacted has no event surface and would be B1-dropped"
+purpose: |
+  Proactive `compactIfNeeded` 가 `DEFAULT_KEEP_TURNS=6` 으로 부드럽게 줄이는 반면,
+  `reactiveCompact` 는 loop 이 이미 "prompt is too long" API 에러를 맞은 뒤 호출되는
+  harder squeeze. `REACTIVE_KEEP_TURNS=2` 만 verbatim 유지하고 CONTINUATION_SYSTEM
+  프롬프트로 요약 — "history recall" 이 아니라 "fresh context 에서 task resume" 을
+  목표로 한다. `findBoundary` 재사용으로 tool_use / tool_result pair 는 절대 쪼개지
+  않음. Fail-fast 가드 2개: (1) boundary <= 0 ⇒ "no summarizable prefix"; (2)
+  inputTokens >= `REACTIVE_MIN_INPUT_TOKENS(4_000)` 인데 drop ratio <
+  `REACTIVE_MIN_DROP_RATIO(15%)` ⇒ "limiting payload in retained suffix" — 의미없는
+  retry 로 PTL 을 다시 맞지 않게 한다.
+evidence:
+  code:
+    - src/agent/compaction.ts
+    - src/agent/compaction-breaker.ts
+    - src/agent/loop.ts
+  adrs: []
+  tests:
+    unit:
+      - tests/unit/compaction.test.ts
+      - tests/unit/compaction-breaker-hellgate.test.ts
+      - tests/unit/compaction-breaker-hellgate.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  CC `rapid_refill_breaker` intent 거울 — drop-ratio 가드가 그 역할. CONTINUATION_SYSTEM
+  은 (1) task/goal, (2) verified vs assumed 표시한 진행상황, (3) 핵심 파일·상태,
+  (4) 다음 정확한 명령/edit 를 `<summary></summary>` 로 감싸도록 강제 — 막연한
+  방향이 아니라 즉시 실행 가능한 continuation 만 emit.

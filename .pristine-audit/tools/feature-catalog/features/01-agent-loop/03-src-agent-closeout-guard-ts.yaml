@@ -1,0 +1,41 @@
+id: src-agent-closeout-guard-ts
+title: src/agent/closeout-guard.ts
+section: 1
+subsystem: Closeout 4-rule (ADR-0017)
+order: 3
+maturity: L4
+status: stable
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [interactive, headless, batch, daemon, ide, ci-bot]
+configurable: static
+owners: ["@songmin"]
+labels: [absorbed:codex, surface:core, tier:core]
+depends_on: [mode-repo-rules-active-skills-working-state-memory-hints, build-turn-context, durable-state-belongs-in-workspace-files, mode-notice-block, plan-mode]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 4/4 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "pure internal closeout guard and baked prompt scaffold (closeout-guard.ts / prompt.ts); no UI affordance"
+purpose: ', prompt scaffold는 buildSystemPrompt에 정적 박힘'
+evidence:
+  code:
+    - src/agent/closeout-guard.ts
+    - src/agent/guards/closeout-guard.ts
+    - src/agent/prompt.ts
+    - src/agent/loop.ts
+    - src/runner/knobs/knobs/closeout-guard.ts
+  adrs: [17]
+  tests:
+    unit:
+      - tests/unit/closeout-guard.test.ts
+      - tests/unit/code-mod-closeout.test.ts
+      - tests/unit/wire-audit-closeout-hellgate.test.ts
+    integration: [tests/integration/closeout-forces-none.test.ts, tests/integration/fallback-x-verify-closeout-hell-e2e.test.ts]
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: ''

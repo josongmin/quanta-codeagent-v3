@@ -1,0 +1,62 @@
+/**
+ * Plan → stream-mirror projector (ADR-0095 P7).
+ *
+ * The stream slice (`@/stream/types`) declares minimalist mirrors of plan
+ * shapes (`PlanReadonlyMirror`, `TodoReadonlyMirror`) so cross-slice flow
+ * stays by-value (RFC §3.1 — `@/stream` MUST NOT import `@/agent/plan`).
+ * This file is the single coercion site from canonical {@link Plan} to the
+ * minimalist mirror shape.
+ *
+ * No heuristics — `id` is a deterministic function of `createdAt` so the
+ * mirror has a stable identifier across emits without requiring `Plan` to
+ * carry one. Adding a field to the mirror MUST also extend this projector
+ * (closed-shape drift gate).
+ */
+
+import type { PlanReadonlyMirror, TodoReadonlyMirror, TodoStatusMirror } from "@/stream"
+import type { Plan, TodoItem, TodoStatus } from "./types"
+
+/** Coerce canonical `TodoStatus` → mirror `TodoStatusMirror`. Closed switch
+ *  with `never` default arm: adding a status to canonical forces a compile
+ *  error here. The mirror happens to use the SAME literals today; if they
+ *  ever diverge, the mapping stays explicit. */
+const todoStatusMirror = (s: TodoStatus): TodoStatusMirror => {
+  switch (s) {
+    case "pending":
+    case "in_progress":
+    case "completed":
+    case "cancelled":
+    case "blocked":
+      return s
+    default: {
+      const _e: never = s
+      return _e
+    }
+  }
+}
+
+const todoToMirror = (t: TodoItem): TodoReadonlyMirror => ({
+  id: t.id,
+  title: t.content,
+  status: todoStatusMirror(t.status),
+  // S2 unified-observability (append-only): carry the DAG blocked-by edges +
+  // owner + active label so the folded `plan` item core can render the full
+  // graph. Emitted ONLY when present (exactOptionalPropertyTypes) so an
+  // edge-free / owner-less todo keeps the legacy 3-field byte shape.
+  ...(t.dependencies.length > 0 ? { dependencies: t.dependencies } : {}),
+  ...(t.assignee !== undefined ? { assignee: t.assignee } : {}),
+  ...(t.activeForm !== undefined ? { activeForm: t.activeForm } : {}),
+})
+
+/**
+ * Project a canonical {@link Plan} into the stream-mirror
+ * {@link PlanReadonlyMirror} shape. The mirror's `id` is derived
+ * deterministically from `createdAt` — closed-shape, no heuristic, stable
+ * across mutations until {@link PlanStore.clear} resets the plan.
+ */
+export const planToStreamMirror = (plan: Plan): PlanReadonlyMirror => ({
+  id: `plan-${plan.createdAt}`,
+  name: plan.name,
+  version: plan.version,
+  todos: Object.values(plan.todos).map(todoToMirror),
+})

@@ -1,0 +1,98 @@
+id: side-agent-os-process-daemon
+title: Side-agent OS-PROCESS daemon V1 — forked child + supervised backoff respawn (§4.3)
+section: 9
+subsystem: Side-agent (§4.3, Codex side-agent fleet 흡수)
+order: 168
+maturity: L4
+status: stable
+ui_surfaces: [none]
+monitoring: n-a
+modes: [daemon]
+configurable: integrated
+owners: ["@songmin"]
+labels: ["surface:core", "absorbed:codex", "default-off"]
+depends_on: [background-side-agent]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-15"
+  evidence:
+    cli: "LIVE-wired: assembleAgentConfig reads runtimeConfig().sideAgentProcess (agent-config-assembler.ts:535) and mints cfg.sideAgentDaemons = createProcessSideAgentDaemonRegistry({...}) (:536) — a forked-child OS-process registry backed by nodeProcessForkPort + runCharterPassLLM, reachable from src/apps/cli/index.ts. QUANTA_SIDE_AGENT_PROCESS on ⇒ side-agent runs as a supervised OS child."
+    web: "no web affordance — internal OS-process daemon; not produced on any web event."
+purpose: |
+  §4.3 OS-PROCESS side-agent daemon V1 — Codex side-agent fleet 흡수. ADR-0483의
+  IN-PROCESS resident registry(메인스레드 per-wake runner)와 같은 축의 OS-process
+  COUNTERPART: side-agent를 별도 OS child로 fork하고 socket/pipe IPC + supervised
+  crash-respawn(exponential backoff)로 감독한다. ADR-0483이 명시적으로 Phase-1
+  NON-GOAL("spawned as a separate OS process")으로 미룬 HIGH OS-integration 항목의
+  V1 CORE.
+
+  코어 (`src/side-agent/process.ts`, PURE LEAF — concrete import/IO/clock/timer/RNG
+  ZERO, 모든 effect 주입 포트, `@/side-agent`는 아무것도 안 닿음):
+  `SideAgentIpcMessage`(closed union: charter/shutdown parent→child, ready/finding
+  child→parent — auditable wire), `ProcessForkSpec`/`ChildProcessHandle`(send/
+  onMessage/onExit/kill, NO-THROW: dead child send/kill=no-op, onExit가 권위 liveness),
+  `ProcessForkPort`(단일 OS seam), `DelayScheduler`(주입 backoff timer),
+  `backoffForAttempt`(pure exponential `base*2^(n-1)` cap clamp + exponent≤30
+  overflow guard), `createSupervisedProcessDaemon`(supervisor: fork→ready→charter
+  hand→running; UNEXPECTED exit⇒backoff respawn bounded by maxRestarts⇒
+  crashed-permanently runaway guard; clean stop()=no respawn; stop() mid-backoff
+  cancels pending respawn).
+
+  REAL OS 어댑터 (`src/host/runtime/side-agent-fork-port.ts`, composition root —
+  순수 supervisor를 `node:child_process.fork`에 커플하는 SINGLE place):
+  `nodeProcessForkPort: ProcessForkPort`. serialization:"advanced"=typed IPC
+  structured-clone fidelity, stdio ipc 채널, wrapChild가 racing exit의
+  ERR_IPC_CHANNEL_CLOSED/EPIPE swallow + inbound trust-boundary filter(well-formed
+  `{kind}` only).
+
+  Default-OFF: `QUANTA_SIDE_AGENT_PROCESS`(runtimeConfig().sideAgentProcess) 없으면
+  supervisor 미구성 ⇒ side-agent registry는 in-process 그대로 (byte-identical).
+  V1 EXCLUDES: launchctl/systemd unit, multi-daemon OS manager, dedicated unix-socket
+  transport (depth follow-up).
+evidence:
+  code:
+    - src/side-agent/process.ts
+    - src/side-agent/process-registry.ts
+    - src/side-agent/worker-charter-runner.ts
+    - src/host/runtime/side-agent-fork-port.ts
+    - src/host/runtime/agent-config-assembler.ts
+  adrs: [522]
+  tests:
+    unit:
+      - tests/unit/side-agent-process-supervisor-hellgate.test.ts
+      - tests/unit/side-agent-process-registry-hellgate.test.ts
+      - tests/unit/side-agent-assembler-process-wire-hellgate.test.ts
+    integration:
+      - tests/integration/side-agent-process-os-fork-e2e.test.ts
+      - tests/integration/side-agent-process-llm-charter-e2e.test.ts
+      - tests/integration/side-agent-ipc-kill-mid-result-e2e.test.ts
+    contract: []
+knobs:
+  - name: QUANTA_SIDE_AGENT_PROCESS
+    where: src/shared/runtime-config-knobs.ts
+    default: false
+    purpose: '§4.3 opt-in (gateOn) that flips runtimeConfig().sideAgentProcess; absent ⇒ side-agent registry runs IN-PROCESS (byte-identical). On ⇒ assembleAgentConfig mints a forked-child OS-process registry (agent-config-assembler.ts:535-536). V1 core only — NOT a launchctl/systemd manager.'
+deliberate_hold:
+  reason: |
+    LIVE-wired as of jun-15 (the L2→L4 promotion): assembleAgentConfig reads
+    runtimeConfig().sideAgentProcess (agent-config-assembler.ts:535) and mints
+    cfg.sideAgentDaemons = createProcessSideAgentDaemonRegistry({...}) — a
+    forked-child OS-process registry (process-registry.ts) running the real
+    LLM-backed bounded charter pass (worker-charter-runner.ts) per child. The
+    RESIDUAL deferrals are transport/packaging depth only: dedicated unix-socket
+    transport (V1 uses the default Node IPC structured-message pipe), launchctl/
+    systemd unit generation, and a multi-daemon OS manager.
+  promotion_path: |
+    Land a dedicated unix-socket transport + launchctl/systemd unit generation +
+    multi-daemon OS manager to retire the residual transport/packaging deferrals.
+notes: |
+  L4: pure supervisor core + real OS fork adapter + IPC union + exponential-backoff
+  respawn + the multi-daemon process-registry, LIVE-wired through assembleAgentConfig
+  (QUANTA_SIDE_AGENT_PROCESS ⇒ cfg.sideAgentDaemons = createProcessSideAgentDaemonRegistry)
+  and proven over a REAL fork (integration e2e) + the LLM charter pass + IPC kill-mid-result.
+  V1 transport = default Node IPC pipe (structured-message channel satisfies the
+  audit's "socket IPC"); dedicated unix-socket transport + launchctl/systemd unit
+  generation + multi-daemon OS manager are explicit depth follow-ups. NO-THROW handle:
+  send/kill on a dead child are swallowed (onExit is the authoritative liveness signal).

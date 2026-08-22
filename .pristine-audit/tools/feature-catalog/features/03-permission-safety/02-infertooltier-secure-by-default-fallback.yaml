@@ -1,0 +1,35 @@
+id: infertooltier-secure-by-default-fallback
+title: '`inferToolTier` secure-by-default fallback'
+section: 3
+subsystem: HITL 4-tier (ADR-0020)
+order: 2
+maturity: L5
+status: stable
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [n-a]
+configurable: integrated
+owners: ["@songmin"]
+labels: [surface:cli, default-off]
+depends_on: [assert-never-exhaustiveness, auto-approval-reviewer, branch-only-guard, byte-stable-string-comparator, default-acceptedits-bypass-auto]
+surface_integration:
+  cli: full
+  web: partial
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 2/2 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "internal tier-classification policy whose only user-visible effect is whether a confirm prompt fires; that prompt reaches web via the approval card (approve|deny only)"
+purpose: "inferToolTier secure-by-default fallback (R3-P1): 도구의 hitlTier?(input) 미선언 시 read-only ⇒ \"none\", mutating ⇒ \"always-confirm\". 기본 도구 write/edit/test_runner/scripted_replace는 pre-approval-ok 명시 opt-in."
+evidence:
+  code:
+    - src/agent/hitl-tier.ts
+    - src/agent/hitl-tier-registry.ts
+  adrs: []
+  tests:
+    unit: [tests/unit/hitl-tier-classifier.test.ts, tests/unit/hitl-tier-dispatch.test.ts, tests/unit/hitl-tier-gate.test.ts, tests/unit/hitl-tier-registry.test.ts]
+    integration: [tests/integration/hitl-tier-dispatch-e2e.test.ts]
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: 신규 mutating 도구가 hitlTier() 깜빡 → 모든 변경 confirm 강제, silent privilege escalation 차단

@@ -1,0 +1,49 @@
+id: gh-pr-blame
+title: gh_pr_blame — PR review-thread blame
+section: 2
+subsystem: GitHub PR tools (ADR-0103)
+order: 103
+maturity: L3
+status: stable
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [n-a]
+configurable: n-a
+owners: ['@songmin']
+labels: [absorbed:codex, surface:cli]
+depends_on: [cross-slice-mirror, deferred-tool-registry, dockersandbox, evidence-toolresultevidence, git-review-diff]
+surface_integration:
+  cli: full
+  web: full
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 6/6 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "read-only gh tool runs in web-daemon; invocation+text result render as tool.invoked/tool.completed in session-hooks.ts:420-438"
+purpose: |
+  gh CLI tool that maps PR review-thread comments onto file:line anchors —
+  one step beyond commit blame ("who last touched this line" → "what did
+  reviewers say about this line"). Filters by optional file path and/or line
+  number with ±5 line proximity. Parses gh pr view --json reviewThreads to
+  extract path / line / originalLine / isResolved / isOutdated / comment
+  body+author per thread.
+evidence:
+  code:
+    - src/tool/gh/index.ts
+    - src/tool/gh/pr-blame.ts
+    - src/tool/gh/pr-blame-parser.ts
+    - src/tool/gh/pr-blame-types.ts
+    - src/tool/gh/ref.ts
+    - src/tool/gh/runner.ts
+  adrs: [103, 112]
+  tests:
+    unit:
+      - tests/unit/gh-pr-tools-hellgate.test.ts
+      - tests/unit/gh-pr-blame-injection-hellgate.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  Read-only tool; no posture gating needed beyond the standard gh CLI auth
+  surface. Sibling to ADR-0104 batch (review-diff / auto-merge / draft option).

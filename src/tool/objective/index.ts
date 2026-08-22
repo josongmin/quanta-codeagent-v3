@@ -26,15 +26,13 @@
  *  Nothing from `@/agent` core. */
 
 import { z } from "zod"
-import {
-  asObjectiveAuthority,
-  type CommitResult,
-  type Objective,
-  type ObjectiveAuthority,
-  type ObjectiveMutation,
-  type ObjectivePort,
-  type ObjectiveStatus,
-  type WaitingOn,
+import type {
+  CommitResult,
+  Objective,
+  ObjectiveAuthority,
+  ObjectiveMutation,
+  ObjectiveStatus,
+  WaitingOn,
 } from "@/objective"
 import { errMessage } from "@/shared"
 import type { Tool, ToolContext, ToolEvent, ToolResult } from "../types"
@@ -398,12 +396,18 @@ const buildObjectiveGet = (authority: ObjectiveAuthority): Tool<ObjectiveGetInpu
   },
 })
 
-/** Build the 3 objective tools routed through the revisioned mutation AUTHORITY
- *  (RFC-03 C1). `port` may be the authority itself (production) or a bare
- *  `ObjectivePort` double (tests); `asObjectiveAuthority` recovers the protocol.
- *  Model-originated mutations carry `actor:"model"` + a SESSION-bound thread id. */
-export const objectiveTools = (port: ObjectivePort): Tool[] => {
-  const authority = asObjectiveAuthority(port)
+/** Build the 3 objective tools over the revisioned mutation AUTHORITY (RFC-03 C1).
+ *  Model-originated mutations carry `actor:"model"` + a SESSION-bound thread id.
+ *
+ *  SLICE FENCE: this slice takes the authority INJECTED and only ever imports
+ *  `@/objective` as TYPES. Recovering it from a bare `ObjectivePort` needs the
+ *  `asObjectiveAuthority` VALUE, which `@/tool` is denied (see
+ *  `tests/unit/_arch/slice-boundary-configs.ts` — "`@/objective` … added to the
+ *  explicit deny lists of the hand-written peer slices … so a future VALUE
+ *  import of `@/objective` from any of them fires"). So the BRIDGE composes it:
+ *  production via `buildObjectiveBlock` (`@/agent/tier1/objective.ts`), tests by
+ *  wrapping their double themselves. */
+export const objectiveTools = (authority: ObjectiveAuthority): Tool[] => {
   return [
     buildObjectiveSet(authority) as Tool,
     buildObjectiveUpdate(authority) as Tool,

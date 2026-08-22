@@ -1,0 +1,59 @@
+id: localize-tool
+title: localize — Stage-2 ranked fault-localization with FrameTier + JS-sibling penalty
+section: 2
+subsystem: Fault-localization aids — Stage-2 ranked symbol search
+order: 114
+maturity: L4
+status: stable
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [n-a]
+configurable: integrated
+owners: ["@songmin"]
+labels: [surface:cli]
+depends_on: [localize-calibration-corpus]
+surface_integration:
+  cli: full
+  web: full
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 1/1 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "Agent tool — ranked-search result renders in browser via tool.completed resultPreview (session-hooks.ts:455), mapped tool_result (session-host-turn-event-bridge.ts tool_result arm (via context-binding))."
+purpose: |
+  Stage-2 of the 3-stage fault-localization triangle: ranked search for
+  symbol/definition lines that match the model's natural-language query,
+  bounded to the workspace via `resolveJailed`. Drives ripgrep with a
+  definition-pattern grammar (line-leading shapes of declarations across
+  JS/TS/Python/Rust/Go/etc.) and scores hits with BM25-style ranking. Two
+  additive penalties: (1) `TIER_PENALTY` mirrors `parse_test_failure`'s
+  `FrameTier` classifier (user=0, test=−2, vendored=−50) so `node_modules/`
+  / `.venv/` hits are returned (visible to the model) but cannot push
+  user-code matches out of `max_results`. (2) `JS_SIBLING_PENALTY=−10`
+  buries compiled `.js` artifacts when their `.ts/.tsx/.mts/.cts` twin
+  exists in the SAME path (detection by full-path stem, NOT bare basename,
+  so unrelated co-named files don't trigger). Tier-1 and Tier-2 are pure
+  additive penalties — they re-rank, never filter; the model still sees the
+  hit and chooses.
+evidence:
+  code:
+    - src/tool/localize/index.ts
+  adrs: []
+  tests:
+    unit:
+      - tests/unit/localize.test.ts
+      - tests/unit/localize-phase-guard-hellgate.test.ts
+      - tests/unit/localize-phase-guard-hellgate.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  Companion of `20-file-tree-summary` (Stage-1 topology) and `21-parse-test-
+  failure` (Stage-3 stack-trace extraction — the FrameTier classifier this
+  tool reuses lives there). Separate from `localize-calibration-corpus`
+  (section 8, order 85) which is the empirical measurement instrument for
+  the ranking algorithm (recall@K / MRR), NOT a regression gate. R-Phase9
+  introduced FrameTier penalties; R-Phase10 added the JS-sibling penalty
+  (10 sits between `test:−2` non-bury and `vendored:−50` hard-bury). `verbose`
+  flag includes per-candidate score + tier in the output for debugging.

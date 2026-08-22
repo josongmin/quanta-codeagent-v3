@@ -1,0 +1,49 @@
+id: conversation-checkpoint
+title: ConversationCheckpoint — message-level resume + restore
+section: 7
+subsystem: Crash / cancel 복원
+order: 18
+maturity: L4
+status: stable
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [n-a]
+configurable: static
+owners: ["@songmin"]
+labels: ["surface:core", "resilience-primitive", "absorbed:claude-code"]
+depends_on: [shadow-checkpoint-policy, verify-checkpoint-bridge]
+surface_integration:
+  cli: full
+  web: missing
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 2/2 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "rewindToMessage needs a resume/rewind verb absent from protocol.ts SessionCommand (B3), so it does not reach the browser"
+purpose: |
+  Per-message conversation checkpoint — 같은 session 내에서 특정 message id로
+  rewind + restart. AgentLoop이 destructive tool dispatch 전후로 checkpoint를
+  emit하면, surface가 `rewindToMessage(id)`로 transcript을 truncate하고 같은
+  세션에서 이어 실행. hellgate suite는 (a) snapshot한 위치 이전에 emit된
+  effect가 leak하지 않음 (b) rewind 후 같은 toolUseId로 재dispatch해도 dedup이
+  올바르게 트립 (c) verify-checkpoint-bridge가 verify-success boundary에서
+  checkpoint를 anchor로 promote 같은 적대 케이스를 봉인.
+evidence:
+  code:
+    - src/agent/conversation-checkpoint.ts
+    - src/agent/verify-checkpoint-bridge.ts
+  adrs: [124]
+  tests:
+    unit:
+      - tests/unit/conversation-checkpoint-hellgate.test.ts
+      - tests/unit/verify-checkpoint-bridge-wire-hellgate.test.ts
+      - tests/unit/subagent-checkpoint.test.ts
+    integration:
+      - tests/integration/subagent-checkpoint-e2e.test.ts
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  shadow-checkpoint-policy(ADR-0121)와 직교 — 본 모듈은 transcript-level
+  resume / shadow-odb는 file-tree 시간선 rewind. 둘 다 dispatch seam에서 함께
+  활성화되는 dispatch-wires-checkpoint-and-image hellgate에서 봉인.

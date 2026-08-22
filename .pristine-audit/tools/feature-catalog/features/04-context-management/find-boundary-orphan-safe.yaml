@@ -1,0 +1,47 @@
+id: find-boundary-orphan-safe
+title: findBoundary — orphan-safe tool_use/tool_result pair boundary
+section: 4
+subsystem: 압축 boundary 계산 — Anthropic unpaired tool_result 거부 회피
+order: 21
+maturity: L4
+status: stable
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [interactive, headless, batch, daemon, ide, ci-bot]
+configurable: integrated
+owners: ["@songmin"]
+labels: [surface:core]
+depends_on: [plan-mode, secret-redaction-content-plane, durable-state-belongs-in-workspace-files, response-in-progress, src-agent-working-state-ts]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 2/2 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "pure stateless boundary-calc function inside compaction, no UI affordance"
+purpose: |
+  `findBoundary(messages, keepTurns)` 는 압축에서 가장 미묘한 invariant 를 보존한다 —
+  Anthropic 은 suffix 안에 `tool_result` 가 있는데 짝지어진 `tool_use` 가 summarized
+  prefix 로 빠지면 400 으로 거부한다. 알고리즘: (1) 끝에서부터 assistant 메시지를
+  `keepTurns` 만큼 세서 초기 cut 산정; (2) suffix 의 tool_use id 집합을 한번에 시드;
+  (3) suffix 의 head 메시지가 orphan tool_result 를 갖는 한 boundary 를 한 칸씩
+  earlier 로 walk, 각 walk-step 에서 해당 message 의 tool_use id 를 incrementally
+  set 에 추가(O(n²) → O(n)). 빈 suffix(`idx === messages.length`)는 dereference 가드.
+  proactive + reactive 모두 이 한 함수를 공유.
+evidence:
+  code:
+    - src/agent/compaction.ts
+    - src/agent/loop.ts
+  adrs: []
+  tests:
+    unit:
+      - tests/unit/compaction.test.ts
+      - tests/unit/compaction-precompact.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  `keepTurns=0` 같은 극단 인풋도 boundary 가 안전 — 빈 suffix 는 self-consistent 이므로
+  walk 가 no-op. 본 함수는 stateless / no-IO 라 단위테스트만으로 모든 분기 커버.

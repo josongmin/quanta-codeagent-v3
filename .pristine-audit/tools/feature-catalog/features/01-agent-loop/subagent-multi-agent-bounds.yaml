@@ -1,0 +1,94 @@
+id: subagent-multi-agent-bounds
+title: Subagent bounds — tool namespace / wait-timeout clamp / concurrency cap
+section: 1
+subsystem: 에이전트 코어 — subagent 안전장치 (Codex multi_agent_v2 흡수)
+order: 77
+maturity: L3
+status: new
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [interactive, headless, batch, daemon, ide, ci-bot]
+configurable: partial
+owners: ["@songmin"]
+labels: ["surface:core"]
+depends_on: [agent, guarded-spawn]
+surface_integration:
+  cli: full
+  web: partial
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 8/8 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "the spawn/wait subagent tools surface as tool.invoked/tool.completed in the browser; the namespace/timeout/concurrency bounds are internal-only and not separately rendered, so the web render is thin"
+purpose: |
+  Three opt-in subagent hardenings from Codex's multi_agent_v2, all default-OFF =
+  byte-identical. (B1 tool_namespace) a closed ToolNamespaceStrategy injected into
+  SubagentRunnerOptions: when set, a spawned child's filtered ToolRegistry is rewritten
+  so each tool name is scoped (default prefixToolNamespace keyed by the child's
+  deterministic mailbox label root/0,root/1…), giving concurrent siblings disjoint tool
+  surfaces; dispatch resolves the scoped name straight back to the real tool. Absent ⇒
+  raw names exactly as today. (B2 wait-timeout) a WaitTimeoutPolicy{minMs,maxMs,defaultMs}
+  that CLAMPS (never rejects) the caller-supplied timeout for both wait_agent and
+  task_output(block:true); default {1, 3_600_000, 30_000} preserves the prior 30s default
+  + a generous 1h ceiling so no existing override is affected. Closes the previously
+  unbounded per-call timeout hole. (B3 concurrency cap) an optional maxConcurrent dep on
+  handleSpawnAgent counting running tasks via the registry's pendingIds(); over-cap spawns
+  return a structured {kind:"error", cause:"concurrency_cap"} mirroring the pty_cap pattern.
+  Default = unlimited (opt-in) so every existing spawn path is byte-identical.
+  2026-06-02 PROMOTION + GAP-CLOSE: the three seams are top-level config.subagent
+  knobs (SubagentBlock.{toolNamespace, waitTimeoutPolicy, maxConcurrent}) threaded by
+  buildSubagentBlock, AND the 6-tool router now has a LIVE assembly site
+  (createSubagent6Tools, gated by config.subagent.enable6Tools). B1 (toolNamespace)
+  + B2/task_output were already wired; B2/wait_agent + B3/maxConcurrent are NOW
+  behavior-live through the 6-tool spawn_agent/wait_agent handlers when enable6Tools
+  is set (COEXIST with the trio, sharing the one TaskRegistry — ADR-0041).
+evidence:
+  code:
+    - src/agent/subagent-runner.ts
+    - src/subagent/handlers-6.ts
+    - src/subagent/task-tools.ts
+    - src/subagent/dispatch-6.ts
+    - src/subagent/agent-tools-6.ts
+    - src/agent/types/agent-capabilities.ts
+    - src/agent/tier1/subagent.ts
+    - src/subagent/index.ts
+  adrs: []
+  tests:
+    unit:
+      - tests/unit/subagent-tool-namespace-hellgate.test.ts
+      - tests/unit/subagent-bounds-hellgate.test.ts
+      - tests/unit/subagent-config-knobs-hellgate.test.ts
+      - tests/unit/subagent6-live-assembly-hellgate.test.ts
+    integration: []
+    contract: []
+knobs:
+  - name: config.subagent.toolNamespace
+    default: 'undefined'
+    purpose: 'WIRED: absent ⇒ raw tool names (byte-identical); set ⇒ per-child scoped names'
+  - name: config.subagent.enable6Tools
+    default: 'undefined (trio only)'
+    purpose: 'WIRED: true ⇒ 6-tool router (exec_command/write_stdin/spawn_agent/wait_agent/close_agent/send_input) COEXISTS with trio, sharing one TaskRegistry'
+  - name: config.subagent.waitTimeoutPolicy {minMs,maxMs,defaultMs}
+    default: '{1, 3_600_000, 30_000}'
+    purpose: 'WIRED: task_output clamp always; wait_agent clamp live when enable6Tools; default preserves 30s'
+  - name: config.subagent.maxConcurrent
+    default: 'undefined (unlimited)'
+    purpose: 'WIRED (when enable6Tools): spawn_agent over-cap ⇒ concurrency_cap error via Tool.execute'
+deliberate_hold:
+  reason: |
+    GAP CLOSED 2026-06-02: createSubagent6Tools (src/subagent/agent-tools-6.ts) is the
+    Subagent6Deps assembly site that was missing — buildSubagentBlock now builds the
+    6-tool router when config.subagent.enable6Tools is set, threading maxConcurrent /
+    waitTimeoutPolicy straight into the spawn_agent / wait_agent handlers (proven
+    behavior-live through Tool.execute by subagent6-live-assembly-hellgate). The only
+    remaining HOLD is the default posture: enable6Tools defaults OFF (trio only) so no
+    existing session changes; flipping it on per-mode is a deliberate operator choice.
+  promotion_path: |
+    Optionally enable6Tools per-mode (e.g. parallel-heavy automation modes) once the
+    6-tool surface has soaked; consider eventually unifying trio + 6-tool into one router
+    (ADR-0041 trajectory) so the COEXIST duplication retires.
+notes: |
+  B3 default is unlimited (not a number) on purpose — the foreground spawn path had no
+  cap before, so any finite default would be a behavior change. Namespacing round-trips
+  for free because the registry is keyed by the scoped name. The trio `agent` tool has no
+  concurrency gauge, so maxConcurrent is inherently a 6-tool-router-only knob.

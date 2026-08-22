@@ -1,0 +1,68 @@
+id: task-budget-soft
+title: Soft task-budget (model self-moderation)
+section: 4
+subsystem: dynamic context — per-turn system-reminder tail (jun-02)
+order: 220
+maturity: L3
+status: stable
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [interactive, headless, batch, daemon, ide]
+configurable: partial
+owners: ["@songmin"]
+labels: ["absorbed:claude-task-budget", "surface:context", "tier:hint"]
+depends_on: [token-estimator-chars-quarter]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 2/2 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "pure internal model-facing system-reminder line; not user-visible on any surface"
+purpose: |
+  SOFT, model-facing token budget — the quanta mirror of Claude's
+  `task_budget: { type: "tokens", total: N }`. When the operator sets a budget
+  (via the `task-budget` knob / `QUANTA_TASK_BUDGET`), the loop accumulates the
+  session's observed input+output token usage and forwards `{ tokens, spent }`
+  into `buildTurnContext`, which renders ONE advisory guidance line into the
+  trailing `<system-reminder>` so the model can self-moderate: prioritize, then
+  "wrap up" as remaining nears zero.
+
+  ORTHOGONAL to the hard `BudgetMeter` enforcement breaker (ADR-0138): this
+  NEVER returns a stop signal, NEVER throws, NEVER mutates enforcement state.
+  Phrasing escalates (low → near 90% → over) but the line is explicitly labelled
+  "guidance, not a hard limit". `spent` is poison-proofed (NaN / negative /
+  Infinity coerced to 0) and `remaining` clamps to `[0, tokens]`.
+
+  Default-OFF: budget absent (or `tokens <= 0`) ⇒ `renderTaskBudgetBlock`
+  returns `undefined` and the dynamic context is BYTE-IDENTICAL to the pre-slice
+  path. The renderer is pure (no clock / process / I/O) — replay-deterministic.
+evidence:
+  code:
+    - src/agent/budget/task-budget.ts
+    - src/runner/knobs/knobs/task-budget.ts
+  adrs: []
+  tests:
+    unit:
+      - tests/unit/prompt-task-budget-hellgate.test.ts
+      - tests/unit/runner/knobs/task-budget-knob-hellgate.test.ts
+    integration:
+      - tests/integration/task-budget-loop-e2e.test.ts
+    contract: []
+knobs: ["task-budget"]
+config_refs:
+  env: ["QUANTA_TASK_BUDGET"]
+deliberate_hold: null
+notes: |
+  The `task-budget` knob (surfaces: cli / agent-batch / agent-interactive) is
+  PURE — its `apply` sets `config.taskBudget`. The loop wire lives in
+  `prepareTurnContext` (src/agent/loop.ts): it builds `{ tokens, spent }` from
+  `config.taskBudget` + the per-session `taskSpend` box (incremented in
+  `emitUsage` off the SAME usage events the meter/recorder observe) and
+  forwards it via the existing `TurnContextInput.taskBudget` slot.
+
+  `configurable: partial` (not integrated) is structurally honest: the env knob
+  + loop forward are wired, but the CLI entry does not yet auto-fold the
+  resolved knob map into its live AgentConfig — that final `applyKnobs` call
+  site is the remaining promotion step shared with the other cli-surface knobs.

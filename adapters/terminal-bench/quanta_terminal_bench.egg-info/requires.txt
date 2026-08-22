@@ -1,6 +1,0 @@
-
-[dev]
-pytest<9,>=7
-
-[harbor]
-harbor==0.21.0

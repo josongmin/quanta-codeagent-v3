@@ -1,0 +1,47 @@
+id: context-warning-banner
+title: "Pre-compaction context-usage warning banner"
+section: 10
+subsystem: 앱 — CLI 컨텍스트 사전경고 (claude 'too long' 흡수, ADR-0445)
+order: 3
+maturity: L3
+status: stable
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [interactive]
+configurable: partial
+owners: ["@songmin"]
+labels: ["surface:core", "observability-primitive"]
+depends_on: [context-usage-breakdown]
+surface_integration:
+  cli: full
+  web: missing
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 3/3 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "CLI stderr-TTY warning preamble; no web render, not reachable from web-daemon"
+purpose: |
+  A one-line warning surfaced near the prompt BEFORE auto-compaction fires,
+  computed from the SAME retained token count the /context breakdown uses (no new
+  heuristic) vs the compaction threshold (DEFAULT 120k). Forward-looking ratio at
+  prompt time — deliberately does NOT reuse the post-threshold preCompact hooks
+  (too late). stderr-TTY gated; absent ⇒ no preamble (byte-identical).
+evidence:
+  code:
+    - src/apps/cli/context-warning.ts
+    - src/apps/cli/repl/factories/notify-and-warning.ts
+    - src/apps/cli/repl/prompt-pipeline.ts
+  adrs: [445]
+  tests:
+    unit:
+      - src/apps/cli/__tests__/context-warning.hellgate.test.ts
+    integration: []
+    contract: []
+knobs:
+  - name: stderr TTY gate
+    default: "on when stderr is a TTY"
+    purpose: "non-TTY ⇒ no warning preamble (byte-identical)"
+deliberate_hold:
+  reason: "no model→context-window table; warning is vs the compaction threshold, not the model's true max."
+  promotion_path: "add a model→window source to warn vs the real window too."
+notes: "read-only over the retained count — does not mutate the compaction policy."

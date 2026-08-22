@@ -51,9 +51,9 @@ import type {
   ApprovalAttributionGap,
   ApprovalStateMachinePort,
 } from "@/agent/approval-state-machine"
-import type { ObjectivePort } from "@/objective"
 import type { RunLedgerPort } from "@/agent/run-ledger"
 import type { ShadowVerifyPort } from "@/agent/shadow-verify"
+import type { ObjectivePort } from "@/objective"
 
 /**
  * Minimum hook-bus surface the wire requires. Duck-typed so the slice fence

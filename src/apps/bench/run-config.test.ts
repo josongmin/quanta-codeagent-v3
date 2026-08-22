@@ -36,8 +36,10 @@ describe("resolveBenchRunConfig — typed family field, parse-once", () => {
   test("case-insensitive explicit selector", () => {
     expect(resolveBenchRunConfig({ argvFamily: "PRO", env: {} }).datasetFamily).toBe("pro")
     expect(
-      resolveBenchRunConfig({ argvFamily: undefined, env: { QUANTA_SWEBENCH_DATASET_FAMILY: "LIVE" } })
-        .datasetFamily,
+      resolveBenchRunConfig({
+        argvFamily: undefined,
+        env: { QUANTA_SWEBENCH_DATASET_FAMILY: "LIVE" },
+      }).datasetFamily,
     ).toBe("live")
   })
 
@@ -50,7 +52,10 @@ describe("resolveBenchRunConfig — typed family field, parse-once", () => {
 
   test("explicit-invalid env family ⇒ THROW", () => {
     expect(() =>
-      resolveBenchRunConfig({ argvFamily: undefined, env: { QUANTA_SWEBENCH_DATASET_FAMILY: "nope" } }),
+      resolveBenchRunConfig({
+        argvFamily: undefined,
+        env: { QUANTA_SWEBENCH_DATASET_FAMILY: "nope" },
+      }),
     ).toThrow()
   })
 

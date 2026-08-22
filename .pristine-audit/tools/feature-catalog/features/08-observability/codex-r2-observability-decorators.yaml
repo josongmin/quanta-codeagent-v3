@@ -1,0 +1,57 @@
+id: codex-r2-observability-decorators
+title: Cache + registry observability metric decorators (ADR-0352)
+section: 8
+subsystem: codex-r2 cache/registry telemetry via wrapping decorators
+order: 101
+maturity: L3
+status: stable
+ui_surfaces: [n-a]
+monitoring: integrated
+modes: [n-a]
+configurable: n-a
+owners: ["@songmin"]
+labels: ["surface:core", "absorbed:codex", "default-off"]
+depends_on:
+  - codex-r2-system-prompt-cache-and-audit
+  - codex-r2-composition-install-and-registry
+surface_integration:
+  cli: partial
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "auto-wrap is reachable only when the host supplies ADR-0144 MetricsRegistry; the normal CLI supplies legacy Metrics, and its prebuilt system prompt bypasses cache getOrBuild."
+    web: "Pure internal telemetry decorators (emit hit/miss/eviction counters to a metric port), no UI affordance on any surface."
+purpose: |
+  Two NO-THROW wrapping decorators emit hit/miss/eviction counters as
+  the ADR-0326 system-prompt cache + ADR-0345/0348 session-resource
+  registry are exercised. `withCacheMetrics(inner, cfg)` emits
+  `codex_r2.cache.{hits,misses,peek_hits,peek_misses,invalidations,size}`;
+  `withRegistryMetrics(inner, cfg)` mirrors on the registry port. Each
+  decorator preserves the underlying port's return value byte-identical
+  and swallows emitter exceptions so instrumentation cannot break the
+  cache/registry hot path. The slice declares its own minimal
+  `MetricEmitterPort` (plane-clean — no transitive dependency on
+  `@/observability/metrics`); composition roots adapt the ADR-0144
+  `MetricsRegistry` via a one-line shim.
+evidence:
+  code:
+    - src/observability/codex-r2-metrics/types.ts
+    - src/observability/codex-r2-metrics/cache-metrics-decorator.ts
+    - src/observability/codex-r2-metrics/registry-metrics-decorator.ts
+    - src/observability/codex-r2-metrics/index.ts
+  adrs:
+    - docs/decisions/0352-codex-r2-observability-metrics.md
+  tests:
+    unit:
+      - tests/unit/codex-r2-metrics-cache-hellgate.test.ts
+      - tests/unit/codex-r2-metrics-registry-hellgate.test.ts
+    integration: []
+    contract: []
+knobs:
+  - name: CodexR2MetricsConfig.prefix
+    type: string?
+    default: '"codex_r2"'
+    notes: 'Prefix prepended to every metric name. Override per-deploy to namespace into a multi-tenant metrics store.'
+deliberate_hold: null
+notes: 'Auto-wrap exists in the shared assembler, but the normal CLI passes legacy Metrics rather than ADR-0144 MetricsRegistry. In addition, the normal prebuilt system prompt bypasses systemPromptCache.getOrBuild, so cache counters have no live producer. Promotion requires a production MetricsRegistry adapter and an explicit cache-ownership decision; do not treat import reachability as emitted telemetry.'

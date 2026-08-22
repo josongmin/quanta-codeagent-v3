@@ -54,9 +54,7 @@ export const setupFollowerApproval = (
   // (a direct dispatch would race the re-issue on the single-writer lease).
   // Gate OFF ⇒ `undefined` options ⇒ the historical direct dispatch,
   // byte-identical.
-  const respondOptions = gateOn(env, WEB_INLINE_APPROVAL_GATE)
-    ? { enqueue: true }
-    : undefined
+  const respondOptions = gateOn(env, WEB_INLINE_APPROVAL_GATE) ? { enqueue: true } : undefined
   const followerApproval =
     config.followerCoControl !== undefined
       ? createFollowerApprovalCoordinator({

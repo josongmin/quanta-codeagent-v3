@@ -17,12 +17,12 @@
 import { describe, expect, test } from "bun:test"
 import { type ApprovalGateRequest, createApprovalGate } from "@/agent/approval-gate-wire"
 import { createApprovalStateMachine } from "@/agent/approval-state-machine"
-import { createObjectiveStore } from "@/objective"
 import { createRunLedger } from "@/agent/run-ledger"
 import {
   createRuntimeApprovalProtocolController,
   RuntimeApprovalRequiredError,
 } from "@/host/runtime/internal/context-binding"
+import { createObjectiveStore } from "@/objective"
 import type { ToolAction } from "@/permission"
 
 type Ctrl = ReturnType<typeof createRuntimeApprovalProtocolController>

@@ -26,10 +26,12 @@
  * Each test is paired with a REAL-OWNER control run, so "it moved" is measured
  * against "what it does normally" rather than against a hardcoded expectation.
  */
+
 import { afterAll, afterEach, beforeAll, describe, expect, mock, test } from "bun:test"
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import { errMessage } from "@/shared"
 import type { DatasetFamily } from "./dataset-family-token"
 import * as runConfigModule from "./run-config"
 
@@ -207,7 +209,7 @@ describe("consumer: createSshBackend grade (harness fork + image namespace)", ()
     if (script === undefined) {
       throw new Error(
         `the grade backend piped no evaluation script; inputs=${inputs.length}; ` +
-          `error: ${gradeErr instanceof Error ? gradeErr.message : String(gradeErr)}`,
+          `error: ${errMessage(gradeErr)}`,
       )
     }
     return script

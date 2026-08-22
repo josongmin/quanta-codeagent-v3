@@ -213,12 +213,32 @@ describe("ChatGPTOAuthAdapter (Phase 2)", () => {
     // Two fetches: catalog GET first, then responses POST.
     expect(captured.length).toBe(2)
     // `client_version` query param is REQUIRED by the backend (probe-verified
-    // 400 otherwise) — assert it's present on the URL. The value tracks the
-    // shipped `MODELS_CLIENT_VERSION` (bumped 0.0.1 → 0.131.0; stale 0.0.1
-    // returned an empty catalog — see chatgpt-oauth client-version gating).
-    expect(captured[0]?.url).toBe(
-      "https://chatgpt.com/backend-api/codex/models?client_version=0.131.0",
-    )
+    // 400 otherwise) — assert it's present, on the exact catalog path, and
+    // carries a real semver. The value tracks the shipped
+    // `MODELS_CLIENT_VERSION` (module-private in @/llm/adapters/chatgpt-oauth),
+    // so the teeth are STRUCTURAL + a monotone FLOOR rather than a literal that
+    // rots on every routine bump: the stale `0.0.1` returned an EMPTY catalog,
+    // and `0.131.0` is the first version probe-verified to return a populated
+    // one, so the shipped version may never regress below it.
+    const modelsUrl = captured[0]?.url ?? ""
+    const modelsMatch =
+      /^https:\/\/chatgpt\.com\/backend-api\/codex\/models\?client_version=(\d+\.\d+\.\d+)$/.exec(
+        modelsUrl,
+      )
+    expect(modelsMatch).not.toBeNull()
+    const shippedClientVersion = modelsMatch?.[1] ?? ""
+    // Numeric (not lexicographic) semver compare — "0.9.0" must not outrank
+    // "0.131.0".
+    const cmpSemver = (a: string, b: string): number => {
+      const pa = a.split(".").map(Number)
+      const pb = b.split(".").map(Number)
+      for (let i = 0; i < 3; i += 1) {
+        const d = (pa[i] ?? 0) - (pb[i] ?? 0)
+        if (d !== 0) return d
+      }
+      return 0
+    }
+    expect(cmpSemver(shippedClientVersion, "0.131.0")).toBeGreaterThanOrEqual(0)
     expect(captured[0]?.init.method).toBe("GET")
     expect(captured[1]?.url).toBe("https://chatgpt.com/backend-api/codex/responses")
     expect(captured[1]?.init.method).toBe("POST")

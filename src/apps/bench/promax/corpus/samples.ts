@@ -190,8 +190,23 @@ const resolveQuotas = (
   return out
 }
 
-const manifestDigest = (manifest: Omit<ProMaxSampleManifest, "sha256">): string =>
-  sha256Hex(canonicalJson(manifest))
+/**
+ * THE manifest digest recipe — one definition, three consumers (the writer
+ * below, `sample-select.ts`'s self-verification, and PMX-06's campaign freeze).
+ *
+ * It takes the manifest WITH or WITHOUT its `sha256` and always hashes the body
+ * without it, so a caller cannot accidentally hash a digest into its own digest.
+ * A second spelling of this recipe would let a manifest verify in one place and
+ * fail in another, which is the one failure mode a self-digest exists to remove.
+ */
+export const proMaxSampleManifestDigest = (
+  manifest: Omit<ProMaxSampleManifest, "sha256"> & { readonly sha256?: string },
+): string => {
+  const { sha256: _declared, ...body } = manifest as ProMaxSampleManifest
+  return sha256Hex(canonicalJson(body))
+}
+
+const manifestDigest = proMaxSampleManifestDigest
 
 /**
  * Build ONE sample manifest. Exported so an operator can materialize a single

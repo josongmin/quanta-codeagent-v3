@@ -1,0 +1,62 @@
+id: agent-dispatch-seam-guard
+title: checkDispatchAllowed — pure dispatch-seam mutating-tool guard (ADR-0036)
+section: 1
+subsystem: 코어 루프 dispatch seam
+order: 207
+maturity: L4
+status: new
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [n-a]
+configurable: n-a
+owners: ["@songmin"]
+labels: [surface:core, tier:core]
+depends_on: [plan-mode-dispatch-block]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 2/2 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "pure internal guard predicate, no user-visible UI affordance on any surface"
+purpose: |
+  ADR-0036 (Cluster D Feature 1) — `ToolRegistry.run()` 직전에 호출되는
+  pure 함수로, 활성 collaboration mode (default / plan) 하에서 해당 tool 호출이
+  허용되는지 결정. throws 가 아닌 tagged `DispatchAllowedResult` 반환 —
+  caller (`dispatch.ts`) 는 unhandled exception 없이 rejection 을 `tool_result`
+  text body 로 LLM 에 반사 가능.
+
+  Decision matrix:
+    - `default` mode  → 항상 `{ ok: true }` (no work)
+    - `plan` mode     → 명시적 mutating-tool 테이블 (`assertNotMutatingInPlanMode`)
+                        조회:
+        - 테이블 부재 ⇒ `{ ok: false, reason: UnknownToolError }`
+        - 존재 + mutating ⇒ `{ ok: false, reason: PlanModeMutatingBlockedError }`
+        - 존재 + read-only ⇒ `{ ok: true }`
+
+  Minimal surface area: `DispatchTurnState` 는 `collaborationMode` 한 field
+  만, `DispatchToolCall` 은 `name` 한 field 만 — loop.ts 의 full turn-state
+  에 결합 ZERO 으로 standalone-callable. happy path 에 throw 0, unhappy
+  path 에 silent allow 0 (default-deny + typed-error 동시 강제).
+evidence:
+  code:
+    - src/agent/dispatch-seam-guard.ts
+    - src/agent/mode.ts
+  adrs: []
+  tests:
+    unit:
+      - tests/unit/plan-mode-dispatch-block-hellgate.test.ts
+      - tests/unit/mode-plan-block.test.ts
+      - tests/unit/mode.test.ts
+    integration:
+      - tests/integration/plan-mode-dispatch-hell-e2e.test.ts
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  `plan-mode-dispatch-block` 카탈로그 항목은 plan-mode 의 inline dispatch-block
+  거동을 다루고, 본 항목은 그 거동을 backed 하는 pure helper 본체. wiring 은
+  `dispatch.ts` 가 `checkDispatchAllowed(...)` 1 회 호출 + deny short-circuit
+  으로 ADR-0036 한계 (deferred wiring) 가 후속 패치에서 정확히 본 함수 import +
+  call 한 줄로 완료 — 새 로직 ZERO.

@@ -1,0 +1,55 @@
+id: eval-taxonomy-classifier
+title: eval taxonomy classifier — query → UseCaseId (LLM, JSON-block tolerant)
+section: 10
+subsystem: eval 앱 — Tier 3 분류 primitive
+order: 82
+maturity: L4
+status: stable
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [headless, batch]
+configurable: static
+owners: ["@songmin"]
+labels: ["surface:bench"]
+depends_on: [eval-taxonomy-tree, eval-five-tier, fallback-kinds-policy, llm-factory, model-swap-retry]
+surface_integration:
+  cli: missing
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "src evidence not reachable from the interactive CLI entry (src/apps/cli/index.ts) — wired only into other apps (eval/bench/probe/headless) or unwired"
+    web: "eval-harness internal classification primitive, no web UI affordance"
+purpose: |
+  Pure classification primitive `(LLMPort, query) → ClassifyResult`. System
+  prompt가 모든 leaf id + label + 대표 example을 enumerate하고, 모델은 단일
+  JSON 객체 `{ id, confidence, alt? }`로 응답. `extractJsonObject`가 balanced
+  brace로 첫 객체를 추출하므로 non-JSON-disciplined provider도 동작.
+  ERROR SURFACE CONTRACT (critical): `error:undefined + id:null` =모델이
+  "none-of-above" 선택, `error:defined` = INFRA failure (stream 에러, no JSON).
+  caller가 둘을 절대 conflate 금지 — 후자를 unclassified로 묻으면 overloaded
+  provider가 silently 분류 distribution을 왜곡함. `alt`는 unknown id 자동
+  필터, primary와 같은 id 제거, maxAlt(default 2) 캡. Tier 3 trajectory
+  labelling + ad-hoc CLI `eval classify <text>` 양쪽이 consume. Confidence는
+  [0,1] 범위 밖이면 0으로 강등.
+evidence:
+  code:
+    - src/apps/eval/taxonomy/classifier.ts
+    - src/apps/eval/taxonomy/index.ts
+    - src/apps/eval/taxonomy/usecases.ts
+    - src/apps/eval/taxonomy/doc-sync.ts
+    - src/apps/eval/index.ts
+  adrs: []
+  tests:
+    unit:
+      - tests/unit/eval-classifier-parse.test.ts
+      - tests/unit/eval-error-channels.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  의도적으로 tool 아님 — pure primitive. Tier 3 `trajectory/classifier.ts`는
+  meta sidecar의 `userPrompt`만 권위로 받고 이 함수에 위임 (no heuristic
+  trajectory body inference). `tests/unit/eval-error-channels.test.ts`가
+  parseFailed vs id:null 경로 분리 잠금.

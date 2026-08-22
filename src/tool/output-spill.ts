@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto"
 import { readdirSync, rmSync, statSync } from "node:fs"
 import { mkdir, readdir, rm, stat, writeFile } from "node:fs/promises"
 import { join } from "node:path"
+import { errMessage, logger } from "@/shared"
 
 /**
  * Oversized tool-output spill — Phase 1 absorption of Claude Code v2's
@@ -118,7 +119,12 @@ export function pruneSpillDir(
   let names: string[]
   try {
     names = fs.readdir(spillDir)
-  } catch {
+  } catch (e) {
+    // The caller only prunes AFTER a successful spill write into this same dir,
+    // so an unreadable dir here is a real anomaly (perm/fs fault), not the benign
+    // "nothing spilled yet" case — attribute it instead of masking it as "nothing
+    // to prune", which would let the dir grow unbounded in silence.
+    logger.warn(`output-spill.pruneSpillDir.readdir: ${errMessage(e)}`)
     return []
   }
 
@@ -142,8 +148,11 @@ export function pruneSpillDir(
     try {
       fs.remove(path)
       removed.push(path)
-    } catch {
-      // Best-effort: skip this file, keep pruning the rest.
+    } catch (e) {
+      // Best-effort: skip this file, keep pruning the rest — but attribute it:
+      // an undeletable spill file defeats the retention bound this function
+      // exists to enforce, and silence makes the growth undiagnosable.
+      logger.warn(`output-spill.pruneSpillDir.remove: ${errMessage(e)}`)
     }
   }
   return removed
@@ -177,7 +186,10 @@ export async function pruneSpillDirAsync(
   let names: string[]
   try {
     names = await fs.readdir(spillDir)
-  } catch {
+  } catch (e) {
+    // Same anomaly as the sync twin: prune only runs after a successful spill
+    // write, so an unreadable dir is a real fault, never "nothing spilled yet".
+    logger.warn(`output-spill.pruneSpillDirAsync.readdir: ${errMessage(e)}`)
     return []
   }
 
@@ -201,8 +213,10 @@ export async function pruneSpillDirAsync(
     try {
       await fs.remove(path)
       removed.push(path)
-    } catch {
-      // Best-effort: skip this file, keep pruning the rest.
+    } catch (e) {
+      // Best-effort: skip this file, keep pruning the rest — attributed for the
+      // same reason as the sync twin (an undeletable file defeats retention).
+      logger.warn(`output-spill.pruneSpillDirAsync.remove: ${errMessage(e)}`)
     }
   }
   return removed

@@ -61,7 +61,10 @@ const makeNeverExitingProc = (): BashSubprocess & { killCount: number } => {
 
 /** Minimal `AgentConfig`-shaped stub: only the fields `cleanupFinishedSession`
  *  reads (stream sink + sessionId + the optional dispose hooks, all absent). */
-const cfgStub = (sink: { emit: (e: unknown) => void }, bgShellRegistry?: { killAll(): Promise<void> }) =>
+const cfgStub = (
+  sink: { emit: (e: unknown) => void },
+  bgShellRegistry?: { killAll(): Promise<void> },
+) =>
   ({
     sessionId: "sess-killall",
     stream: sink,
@@ -105,9 +108,12 @@ describe("session-end killAll wiring (M1)", () => {
     const emitted: unknown[] = []
     await expect(
       cleanupFinishedSession({
-        cfg: cfgStub({ emit: (e) => emitted.push(e) }, {
-          killAll: () => Promise.reject(new Error("boom")),
-        }),
+        cfg: cfgStub(
+          { emit: (e) => emitted.push(e) },
+          {
+            killAll: () => Promise.reject(new Error("boom")),
+          },
+        ),
         features: {} as never,
       }),
     ).resolves.toBeUndefined()

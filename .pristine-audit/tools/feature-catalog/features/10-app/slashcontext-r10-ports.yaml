@@ -1,0 +1,69 @@
+id: slashcontext-r10-ports
+title: SlashContext R10 ports — 5 default-OFF surface seams
+section: 10
+subsystem: REPL panels (R10)
+order: 29
+maturity: L4
+status: new
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [interactive]
+configurable: static
+owners: ["@songmin"]
+labels: ["surface:cli"]
+depends_on: [slashctx-6-ports-wire-completion, built-in-slash-commands, chatgpt-oauth-provider, agent-loop-branch-hardening, llm-error-taxonomy]
+config_refs:
+  env: ["QUANTA_COST_PANEL", "QUANTA_PREFS_HOME"]
+surface_integration:
+  cli: full
+  web: missing
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 3/3 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "CLI-only SlashContext surface seam (cost/plan/workingState/history/branchSearch); the web frontend supplies none of these ports, so every R10 panel they feed is absent in browser"
+purpose: |
+  R10 extends the `SlashContext` interface in `src/apps/cli/slash-commands.ts`
+  with FIVE optional surface ports — one per R10 panel that needs live session
+  data: `cost: () => string | undefined` (R10 F cost-panel render seam),
+  `planSnapshot: () => Plan | null` (R10 G plan-store accessor — read-only),
+  `workingState: () => WorkingState | undefined` (R10 H scratchpad snapshot —
+  read-only), `history: HistorySessionState` (R10 I recent-turns + tool
+  breadcrumb), `branchSearch: () => BranchProgressState` (R10 L N-best
+  candidate tracker snapshot). All FIVE share one invariant: ABSENT ⇒ the
+  slash command prints "not wired in this surface" and exits 0 — byte-
+  identical to NOT registering the command. Per-surface wiring is opt-in: the
+  REPL surface (`src/apps/cli/repl/*`) injects the live snapshots; one-shot /
+  CLI-entry / pipe surfaces leave the fields undefined and inherit the no-op
+  fallback. The 5 ports follow the SAME default-OFF parity contract the
+  pre-R10 ports (`retry`, `side`, `idle`, `skills`, `memory`, `mcp`) already
+  use — appending entries to BUILTINS is the only growth axis; dispatch
+  switch stays closed.
+evidence:
+  code:
+    - src/apps/cli/slash-commands.ts
+    - src/apps/cli/help-render.ts
+    - src/llm/factory.ts
+  adrs: []
+  tests:
+    unit:
+      - tests/unit/cli/cost-panel.test.ts
+      - tests/unit/cli/plan-panel.test.ts
+      - tests/unit/cli/working-state-panel.test.ts
+      - tests/unit/cli/history-cmd.test.ts
+      - tests/unit/cli/branch-search-progress.test.ts
+      - tests/unit/slash-commands.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  Slice: `src/apps/cli/slash-commands.ts` uses `import("…")` type-only
+  references for the three agent-adjacent types (`Plan`, `WorkingState`,
+  `BranchProgressState`) so the run-time graph stays untouched — the surface
+  fence holds. `exactOptionalPropertyTypes: true` means `{ cost: undefined }`
+  and `{}` are distinct types: every R10 port is explicitly `| undefined` so
+  test callers can pass either shape. SlashContext growth axis: APPEND
+  entries to the registry, NEVER edit the dispatch switch (12-invariant
+  surface-model). The 5 ports represent the FULL R10 visibility surface;
+  future panels add new ports here without revisiting existing commands.

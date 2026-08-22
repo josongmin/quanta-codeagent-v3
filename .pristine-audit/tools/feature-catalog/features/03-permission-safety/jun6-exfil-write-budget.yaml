@@ -1,0 +1,80 @@
+id: exfil-write-budget
+title: jun-6 exfil-rail (a) — per-turn write/edit-count budget (untrusted-gated drip-exfil guard)
+section: 3
+subsystem: Exfil-prevention enforcement — mechanical teeth behind the Data-Exfil taxonomy
+order: 481
+maturity: L3
+status: new
+ui_surfaces: [cli]
+monitoring: integrated
+modes: [interactive, headless, batch, daemon, ide, ci-bot]
+configurable: integrated
+config_refs:
+  env: [QUANTA_WRITE_BUDGET, QUANTA_WRITE_BUDGET_MAX, QUANTA_UNTRUSTED_ENVELOPE]
+owners: ["@songmin"]
+labels: [surface:core, security, security-touched, absorbed:claude]
+depends_on: [untrusted-source-envelope, typed-tool-failure-modes, agent-dispatch-core]
+surface_integration:
+  cli: full
+  web: partial
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 9/9 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "the budget-exceeded rejection surfaces only as a generic tool.completed error preview via the bridged tool_result event; no dedicated budget affordance"
+purpose: |
+  prompt-injection 후 "다수의 작은 write 로 조금씩 유출(drip-exfil)" shape 를 막는
+  deterministic non-LLM rail(RFC jun-6-exfil-egress-rails (a), Claude CLI exfil-rail 흡수).
+  closed-port `WriteBudgetPort`(ctx-facing seam: `{maxWritesPerTurn; recordWrite():
+  "ok"|"confirm"|"deny"}`) + 세션-장수 turn-keyed `SessionWriteBudget`
+  (`recordWrite(turn)` 가 turn ordinal 진행 시 카운터 리셋 — pure-by-state, clock/random 0)
+  를 `bindWriteBudgetTurn(budget,turn,max)` 로 per-call seam 에 어댑트(`src/tool/_shared/
+  write-budget.ts`). FALSE-POSITIVE 핵심제어: cap 은 `untrustedContext === true`(턴이
+  web/MCP/file untrusted 입력 처리 — 기존 untrusted-envelope 시그널) 일 때만 발화 —
+  trusted codegen 턴은 무제한 write(legit bulk authoring 미파손). cap N 은 설정 KNOB
+  값(`QUANTA_WRITE_BUDGET_MAX`)이고 HARDCODED DEFAULT 없음(no-heuristics 규칙) —
+  코퍼스 캘리브레이션 전 magic number 미출시. write/edit 가 static+stale 가드 후·commit
+  전 `writeBudgetDeny`/`writeBudgetEvent`(`_shared/exfil-rail-guards.ts`) 호출, 초과 시
+  `{mode:"rejected", reason:"write_budget_exceeded"}`(over-verdict default `confirm` —
+  사용자 wave-through 가능). DEFAULT-OFF byte-identical(`ctx.writeBudget` 부재 ⇒ 카운터 0).
+evidence:
+  code:
+    - src/tool/_shared/write-budget.ts
+    - src/tool/_shared/exfil-rail-guards.ts
+    - src/tool/write/index.ts
+    - src/tool/edit/index.ts
+    - src/tool/types.ts
+    - src/agent/types.ts
+    - src/agent/dispatch.ts
+    - src/host/runtime/agent-config-assembler.ts
+    - src/shared/runtime-config.ts
+  adrs: []
+  tests:
+    unit:
+      - tests/unit/exfil-rails-write-budget.test.ts
+      - tests/unit/exfil-rails-dispatch-wire-hellgate.test.ts
+    integration: []
+    contract: []
+knobs:
+  - name: QUANTA_WRITE_BUDGET
+    default: 'undefined'
+    purpose: Strict opt-in (`=== "1"`). OFF 면 budget 포트 미구성, `ctx.writeBudget` 부재(byte-identical). ON + cap + untrusted 일 때만 발화.
+  - name: QUANTA_WRITE_BUDGET_MAX
+    default: 'undefined'
+    purpose: per-turn cap N (양의 정수). HARDCODED DEFAULT 없음(no-heuristics) — 부재/무효 ⇒ budget INERT even when 활성. 코퍼스 캘리브레이션 후 설정.
+  - name: QUANTA_UNTRUSTED_ENVELOPE
+    default: 'undefined'
+    purpose: budget 의 `untrustedContext` 게이트 재사용(기존 H2 untrusted-envelope 시그널). OFF ⇒ trusted ⇒ budget INERT(무제한 write). 신규 도입 아님 — 재사용.
+deliberate_hold: null
+notes: |
+  설계/증명: RFC `docs/plans/jun-6-exfil-egress-rails.md` §4.1 (✅ IMPLEMENTED jun-06).
+  ADR 미발행이나 LIVE-wired + hellgate 완비라 L3(tested + wired).
+  배선(LIVE): host `agent-config-assembler.ts#maybeWireWriteBudget` 가 `QUANTA_WRITE_BUDGET=1`
+  AND `QUANTA_WRITE_BUDGET_MAX` 정수 BOTH 일 때만 세션당 1개 `SessionWriteBudget` mint
+  (`untrustedContext`=`untrustedEnvelopeEnabled(env)`, over-verdict `confirm`); dispatch
+  `buildToolContext` 가 `config.run?.turn ?? 0` 를 bind(per-turn 리셋) + `runtimeConfig().
+  writeBudgetMax` 부재 시 thread 안 함(no magic default). write `writePreCommitDeny`
+  (stale-guard ?? budget), edit `editPreCommitDeny` 동일 — fs commit 전(부분쓰기 0).
+  untrusted-gating 검증: `exfil-rails-dispatch-wire-hellgate.test.ts` 가 host-assembler
+  routing(untrusted OFF ⇒ INERT 무제한 / ON ⇒ cap 초과 confirm) + dispatch per-turn 리셋
+  + "MAX 부재 ⇒ no magic default" 봉인. default-OFF byte-identical.

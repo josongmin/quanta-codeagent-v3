@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test"
 import { buildSystemPrompt } from "@/agent/prompt"
 
 /**
- * Lever #1 (RFC jul-2-terminal-bench-levers/01) — `envPosture` opt on buildSystemPrompt.
+ * Lever #1 (TB21-06 TC-6) — `envPosture` opt on buildSystemPrompt.
  *
  * HARD invariant: `frozen` / absent is byte-identical to today (the cached system-prompt
  * prefix must not shift for any existing caller). `owned` swaps ONLY the env-rule TEXT.

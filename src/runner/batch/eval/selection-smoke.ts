@@ -1,10 +1,10 @@
 import { rm } from "node:fs/promises"
 import { join } from "node:path"
-import { errMessage, logger } from "@/shared"
 import {
   extractIssueReproSeed,
   type IssueReproSeed,
 } from "@/agent/verification-plan/extract-issue-repro"
+import { errMessage, logger } from "@/shared"
 import type { Instance } from "../types"
 import { execArgv } from "./exec"
 import { resetToBase, withCandidatePatch } from "./rematerialize"

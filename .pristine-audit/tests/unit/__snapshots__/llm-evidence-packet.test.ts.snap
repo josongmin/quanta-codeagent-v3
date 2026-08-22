@@ -1,0 +1,215 @@
+// Bun Snapshot v1, https://bun.sh/docs/test/snapshots
+
+exports[`OPC-07 3-case golden snapshots (full-shape regression fence) astropy env-failure intake packet 1`] = `
+"## LLM Evidence Packet
+Use only the bounded packet below. Do not assume hidden tests, gold patches, benchmark labels, or undocumented authority.
+\`\`\`json
+{
+  "stage": "intake",
+  "instanceIdHash": "5ba36fed5f18d4ae",
+  "evidenceRevision": "intake-v2",
+  "question": "Which allowed evidence source should be collected next?",
+  "allowedActions": [
+    "run_public_mwe_base",
+    "discover_public_regression",
+    "inspect_owner_slice",
+    "generate_candidate"
+  ],
+  "forbiddenSources": [
+    "hidden_tests",
+    "gold_patch",
+    "official_harness_results",
+    "contaminated_case_labels"
+  ],
+  "publicIssueFacts": [
+    "issue summary: astropy: import fails building C extension on the target env.",
+    "issue symbols: <none>",
+    "issue files: <none>"
+  ],
+  "ownerEvidence": [
+    {
+      "file": "astropy/io/fits/header.py",
+      "symbols": [],
+      "provenance": "localize-stage1"
+    }
+  ],
+  "proofReceipts": [
+    {
+      "source": "public_mwe",
+      "sourcePolicy": "public_issue",
+      "state": "static_only"
+    },
+    {
+      "source": "public_mwe",
+      "sourcePolicy": "infra",
+      "state": "execution_failed"
+    }
+  ],
+  "contractFacts": [],
+  "staticFacts": [
+    {
+      "kind": "fault_evidence",
+      "value": "missing"
+    },
+    {
+      "kind": "localize_candidates",
+      "value": "astropy/io/fits/header.py"
+    }
+  ],
+  "missingEvidence": [
+    {
+      "kind": "fault_evidence",
+      "reason": "no_fault_evidence_packet"
+    },
+    {
+      "kind": "verification_plan",
+      "reason": "no_verification_plan"
+    },
+    {
+      "kind": "public_mwe_seed",
+      "reason": "no_public_issue_mwe_seed"
+    }
+  ]
+}
+\`\`\`"
+`;
+
+exports[`OPC-07 3-case golden snapshots (full-shape regression fence) django-11138 contract-only repair packet 1`] = `
+"## LLM Evidence Packet
+Use only the bounded packet below. Do not assume hidden tests, gold patches, benchmark labels, or undocumented authority.
+\`\`\`json
+{
+  "stage": "repair_seed",
+  "instanceIdHash": "d64dd86c7ad16b48",
+  "evidenceRevision": "selector-repair-v2",
+  "candidatePatchHash": "fixedhash11138",
+  "question": "Generate a bounded repair instruction for the next candidate that satisfies the named public proof.",
+  "allowedActions": [
+    "bounded_repair_only",
+    "preserve_stronger_structural_coverage",
+    "satisfy_named_public_proof"
+  ],
+  "forbiddenSources": [
+    "hidden_tests",
+    "gold_patch",
+    "official_harness_results",
+    "benchmark_case_tables",
+    "try_harder_generic_retry"
+  ],
+  "publicIssueFacts": [
+    "issue summary: django-11138: tz conversion wrong across DB backends.",
+    "issue symbols: <none>",
+    "issue files: <none>"
+  ],
+  "ownerEvidence": [
+    {
+      "file": "django/db/backends/mysql/operations.py",
+      "symbols": [],
+      "provenance": "repair-owner"
+    }
+  ],
+  "proofReceipts": [
+    {
+      "source": "hard:proofRequiredMissing",
+      "state": "not_run",
+      "sourcePolicy": "static"
+    }
+  ],
+  "contractFacts": [
+    {
+      "contractId": "owner-touch",
+      "authority": "static-witness/weak",
+      "satisfied": true
+    }
+  ],
+  "staticFacts": [
+    {
+      "kind": "repair_guidance",
+      "value": "Satisfy the public proof before submit."
+    }
+  ],
+  "missingEvidence": [
+    {
+      "kind": "executed_public_proof",
+      "reason": "no_positive_executed_public_proof_attached"
+    },
+    {
+      "kind": "owner_slice",
+      "reason": "no_resolvable_slice:django/db/backends/mysql/operations.py"
+    }
+  ]
+}
+\`\`\`"
+`;
+
+exports[`OPC-07 3-case golden snapshots (full-shape regression fence) django-14315 shell/env generation packet 1`] = `
+"## LLM Evidence Packet
+Use only the bounded packet below. Do not assume hidden tests, gold patches, benchmark labels, or undocumented authority.
+\`\`\`json
+{
+  "stage": "candidate_generation",
+  "instanceIdHash": "8b62cc9c409e9d03",
+  "evidenceRevision": "selection-generation-v3",
+  "question": "Produce one minimal candidate patch that satisfies the active proof target against the bounded owner surface below.",
+  "allowedActions": [
+    "edit_candidate_sandbox_only",
+    "inspect_named_owner_files",
+    "produce_minimal_patch"
+  ],
+  "forbiddenSources": [
+    "hidden_tests",
+    "gold_patch",
+    "official_harness_results",
+    "benchmark_case_tables",
+    "broad_multifile_drift_without_public_evidence"
+  ],
+  "publicIssueFacts": [
+    "issue summary: django-14315: dbshell ignores connection settings.",
+    "issue symbols: <none>",
+    "issue files: <none>"
+  ],
+  "ownerEvidence": [
+    {
+      "file": "django/db/backends/base/client.py",
+      "symbols": [
+        "runshell"
+      ],
+      "provenance": "selection-owner"
+    }
+  ],
+  "proofReceipts": [
+    {
+      "source": "public_mwe",
+      "sourcePolicy": "public_repro",
+      "state": "base_red",
+      "command": "python -m pytest dbshell/tests -q",
+      "baseValidatedRed": true
+    }
+  ],
+  "contractFacts": [],
+  "staticFacts": [],
+  "verificationTarget": {
+    "primaryRail": {
+      "kind": "repro",
+      "cmd": "python -m pytest dbshell/tests -q",
+      "authority": "execution"
+    },
+    "required": [
+      {
+        "kind": "repro",
+        "cmd": "python -m pytest dbshell/tests -q",
+        "authority": "execution"
+      }
+    ],
+    "optional": [],
+    "baseValidatedRed": true
+  },
+  "missingEvidence": [
+    {
+      "kind": "owner_slice",
+      "reason": "no_resolvable_slice:django/db/backends/base/client.py"
+    }
+  ]
+}
+\`\`\`"
+`;

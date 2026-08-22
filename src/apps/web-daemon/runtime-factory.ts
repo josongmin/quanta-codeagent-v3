@@ -18,7 +18,6 @@ import {
   createConversationActionSurface,
 } from "@/agent/conversation-action-surface"
 import { type InboundMode, parseInboundMode } from "@/agent/inbound-mode"
-import type { ObjectivePort } from "@/objective"
 import {
   type ObservabilityHookBus,
   type ObservabilityWireHandle,
@@ -52,6 +51,7 @@ import {
 import type { LLMPort } from "@/llm"
 import { pickProvider, tryCreateLLM } from "@/llm"
 import type { PersistentStorePort } from "@/memory"
+import type { ObjectivePort } from "@/objective"
 import { StructuredLogger } from "@/observability"
 import type { PermissionContext } from "@/permission"
 import {

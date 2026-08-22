@@ -1,0 +1,97 @@
+id: codex-2-phase-consolidator
+title: Codex 2-phase memory consolidator — per-thread distill + cross-session synthesizer
+section: 5
+subsystem: 장기 메모리 — LLM 합성 distill (Codex 흡수, ADR-0068)
+order: 4
+maturity: L4
+status: stable
+ui_surfaces: [cli]
+monitoring: integrated
+telemetry_keys: ["quanta.conversation.id"]
+modes: [interactive, headless, batch, daemon, ide, ci-bot]
+configurable: static
+owners: ["@songmin"]
+labels: ["surface:core", "absorbed:codex", "absorbed:cursor"]
+depends_on: [phase1-stage1-store, memory-outcome-enum, phase2-auto-trigger-wire, phase2-promotion-gate, agent-types-split]
+config_refs:
+  env: ["QUANTA_BENCH_LOCALIZE_PHASE", "QUANTA_CAP_ENFORCE", "QUANTA_MEMORY_SUBDIR"]
+surface_integration:
+  cli: full
+  web: missing
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 16/17 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "session-end distill + cross-session synthesizer writes git-tracked markdown server-side; runs in the web-daemon backend but emits no bridged event (consolidator outcome rides an error AgentEvent only on failure — error is bridged but the success/distilled value never reaches the browser); no consolidation UI"
+purpose: |
+  Codex memory model의 2-phase distill+consolidator 흡수 — 기존 SOTA++ hybrid recall
+  (ADR-0008, embedding+lexical+tag+freshness+tier+reinforcement)이 메우지 못한 두 구조적
+  갭을 닫음. (1) **사용자-검수가능 distilled 지식 부재** — embedding store는 opaque sqlite blob,
+  세션 간 학습 내용을 한 파일로 열어볼 수 없었음. (2) **세션 간 LLM consolidator 부재** —
+  per-turn 신호는 embed되지만 LLM이 합성된 뷰(선호 / 반복 패턴 / 결정된 아키텍처 규칙)로
+  해석한 적 없음. Phase 1 = per-thread distill orchestrator(runPhase1) — 세션 종료 시 thread
+  신호를 LLM으로 1차 distill해 Stage1Store에 적재. Phase 2 = cross-session consolidator
+  (phase2-llm) — 전역 워터마크 기반으로 stage1 출력을 LLM으로 통합해 사용자-가시 markdown
+  3-file(role/preferences/architecture)에 git-tracked write. WatermarkConflictError /
+  RolloutTaintedError로 동시 실행 / 중단 회복을 통제. constants.ts에 caps / thresholds /
+  OTel 키 SSOT.
+evidence:
+  code:
+    - src/memory/consolidate/index.ts
+    - src/memory/consolidate/phase1.ts
+    - src/memory/consolidate/phase2.ts
+    - src/memory/consolidate/phase2-llm.ts
+    - src/memory/consolidate/writer.ts
+    - src/memory/consolidate/store.ts
+    - src/memory/consolidate/git.ts
+    - src/memory/consolidate/schema.ts
+    - src/memory/consolidate/paths.ts
+    - src/memory/consolidate/constants.ts
+    - src/agent/memory-consolidator-hook.ts
+    - src/agent/loop.ts
+    - src/agent/types.ts
+    - src/memory/index.ts
+    - src/apps/bench/eval/driver.ts
+    - src/shared/runtime-config.ts
+    - src/apps/cli/help-render.ts
+  adrs: ["docs/decisions/0068-codex-2-phase-memory-consolidator.md"]
+  tests:
+    unit:
+      - tests/unit/memory-consolidate.test.ts
+      - tests/unit/memory/consolidate-store.test.ts
+      - tests/unit/memory/consolidate-writer.test.ts
+      - tests/unit/memory/consolidate-phase1.test.ts
+      - tests/unit/memory/consolidate-phase2.test.ts
+      - tests/unit/memory-consolidator-hook-hellgate.test.ts
+      - tests/unit/memory-hellgate.test.ts
+    integration: [tests/integration/consolidate-phase2-end-to-end.test.ts]
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  L4 wire-up (2026-05-23):
+  - `AgentConfig.memoryConsolidator?: { enabled, forceSummarization, port,
+    store, threadId }` (default-OFF — absent ⇒ no hook fires; RFC §1.2).
+  - `runAgent` finally calls `runMemoryConsolidatorHook(...)` ONLY when
+    spanStatus === "ok" (failed sessions skip; forceSummarization does
+    NOT override this — force is intent-to-distill on a successful run).
+  - Hook is NO-THROW: every internal failure (port throw, store throw,
+    missing port/store, missing threadId) is converted to a structured
+    outcome (`distilled` | `skipped` | `error`) surfaced via injected
+    logger. The `error` outcome is mirrored as an `error` AgentEvent so
+    operators see consolidator failures; the session is already
+    finishing so we never derail the return.
+  - SOTA (Cursor `force_summarization`): when set, the consolidator's
+    `memoryMode: "enabled"` arm fires even without `enabled: true`. The
+    MIN_TURN_THRESHOLD floor still applies (no signal in tiny chats).
+  - Phase 2 (cross-session synthesizer + writer) is intentionally NOT
+    triggered from the session-end hook — per audit, Phase 2 is
+    threshold / explicit-trigger driven, not cron. The host runs it on
+    its own schedule. **REMAINING SCOPE**: a Phase-2 host trigger
+    (CLI command / cron / per-N-Phase1s) is a separate follow-up.
+
+  Original notes:
+  v1 self-audit에서 7 SOTA++ 결함(파일 역할 오매핑/주입 섹션 오류/사이즈 cap 부재/
+  수동 편집 보존 누락/부분 원자성/default-on opt-in flip 민감 누출 위험/LLM provider
+  미정)을 잡아 v2로 재설계. ADR-0008 hybrid recall(per-turn 페어와이즈)와 직교 —
+  recall은 즉시 검색용, consolidator는 사용자-가시 종합용.

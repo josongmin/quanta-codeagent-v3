@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test"
 import { CORE_RULES, OWNED_RULES, renderOwnedRules } from "@/agent/prompt-rules"
 
 /**
- * Lever #1 (RFC jul-2-terminal-bench-levers/01) — the `owned` environment posture
+ * Lever #1 (TB21-06 TC-6) — the `owned` environment posture
  * rule list. Structural invariants that pin the posture's contract:
  *
  *   1. OMITS the frozen install-prohibition rules (R-ENV, R-STOP-ENV).

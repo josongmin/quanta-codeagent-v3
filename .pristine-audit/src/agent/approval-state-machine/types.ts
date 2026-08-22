@@ -1,0 +1,213 @@
+/**
+ * ADR-0403 — Approval state machine (types).
+ *
+ * quanta's HITL / `request_user_input` already lets the agent stop and ask the
+ * user a question, but the *product experience* is weak: when the agent halts
+ * for approval the operator does not see (a) WHY now, (b) exactly which step
+ * resumes after approval, (c) the pause attributed to the per-thread Objective
+ * (ADR-0394) or to the Run Ledger (ADR-0395).
+ *
+ * This slice closes that gap with a CLOSED port + in-memory store that wraps
+ * approval / clarification requests as first-class records and attributes the
+ * pause to:
+ *   - `Objective.blockers` (waitingOn:"user") via `ObjectivePort.addBlocker` /
+ *     `clearBlocker` (ADR-0394).
+ *   - `RunLedger.waiting()` via `RunLedgerPort.start` + `touch` + `settle`
+ *     (ADR-0395), so a single UI surface can render the pause across all
+ *     long-running work.
+ *
+ * Slice fence: imports allowed = `@/agent/objective` (types) + `@/agent/run-ledger`
+ * (types) + `@/shared`. NO `@/agent` core, NO `@/apps`, NO `@/tool`. Pure data +
+ * a closed port. The store is the only mutator.
+ *
+ * THIS WAVE IS THE PORT + STORE LAYER. The slice is NOT yet wired into
+ * `admissibility-gate.ts` / `request_user_input`. Existing HITL code is
+ * UNCHANGED — wiring is a follow-up wave.
+ *
+ * exactOptional: optional fields are OMITTED when absent (never `: undefined`).
+ */
+
+/** What flavour of approval the agent is asking for.
+ *
+ *  - `permission`    — pre-execute gate for a mutating tool / boundary action.
+ *  - `clarification` — mid-turn question (ambiguous goal, missing parameter).
+ *  - `escalation`    — terminal halt requiring an operator decision; closer to
+ *                      HITL `hand-off-required`.
+ */
+export type ApprovalKind = "permission" | "clarification" | "escalation"
+
+/** What the user decided.
+ *
+ *  - `approve` — proceed with `proposedAction` verbatim.
+ *  - `deny`    — refuse; the agent must not execute `proposedAction`.
+ *  - `modify`  — proceed with `modifiedAction` instead of `proposedAction`.
+ */
+export type ApprovalDecision = "approve" | "deny" | "modify"
+
+/** Lifecycle status of an approval request. `pending` is the only mutable
+ *  status; `approved` / `denied` / `expired` / `cancelled` are terminal. */
+export type ApprovalStatus = "pending" | "approved" | "denied" | "expired" | "cancelled"
+
+/** A single approval record.
+ *
+ *  IDs are minted internally via `crypto.randomUUID()` unless a kernel-owned
+ *  approval id is supplied at request time. `blockerId` / `runEntryId` are populated only when the matching port
+ *  (objective / ledger) was supplied to `createApprovalStateMachine` AND the
+ *  attribution call did not throw.
+ *
+ *  All fields are readonly: returned records are frozen so a reader cannot
+ *  mutate machine state by holding a reference. */
+export interface ApprovalRequest {
+  /** Unique approval id. */
+  readonly id: string
+  /** Thread that initiated the approval — drives Objective attribution. */
+  readonly threadId: string
+  readonly kind: ApprovalKind
+  /** User-facing string: WHY the agent stopped right now. */
+  readonly reason: string
+  /** Exact action that will execute upon `approve` (e.g. command preview). */
+  readonly proposedAction: string
+  /** Human-readable step label the agent will resume from after approval. */
+  readonly resumeStep: string
+  /** Optional clarification options (max 3) for `modify`-style decisions. */
+  readonly options?: readonly string[]
+  readonly status: ApprovalStatus
+  readonly createdAt: number
+  /** Stamped when the request transitions out of `pending`. */
+  readonly settledAt?: number
+  readonly decision?: ApprovalDecision
+  /** Populated only when `decision === "modify"`. */
+  readonly modifiedAction?: string
+  /** Back-ref to the Objective blocker (only when attribution succeeded). */
+  readonly blockerId?: string
+  /** Back-ref to the Run Ledger entry (only when attribution succeeded). */
+  readonly runEntryId?: string
+  /**
+   * RFC03-3 — optional binding to an immutable staged proposal artifact. When
+   * present, the decision is bound to EXACTLY these bytes: a promotion re-reads
+   * the staged artifact by `artifactHash` and refuses if it (or the target
+   * preimage) drifted. `artifactRef` is an opaque locator (e.g. proposalId);
+   * `artifactHash` is the content hash the CAS promote re-verifies. These
+   * additive fields DO NOT change status/settle/store semantics — absent ⇒
+   * byte-identical legacy record.
+   */
+  readonly artifactRef?: string
+  readonly artifactHash?: string
+}
+
+/** Serializable point-in-time view of every approval in a machine. */
+export interface ApprovalSnapshot {
+  readonly approvals: readonly ApprovalRequest[]
+}
+
+/** The terminal operation that reached the machine with NO matching pending
+ *  record — i.e. a producer never `request()`ed this id, so the resolution can
+ *  attribute NOTHING to the Objective / Run Ledger. */
+export type ApprovalGapOp = "settle" | "expire" | "cancel"
+
+/**
+ * FAIL-CLOSED audit-gap signal (DOF-40 producer→consumer wire).
+ *
+ * A HITL escalation resolves through a terminal mutator (`settle` / `expire` /
+ * `cancel`) keyed by an `approvalId`. When the machine holds NO record for that
+ * id, the resolution CANNOT be attributed to the Objective / Run Ledger — the
+ * audit trail for that escalation would be SILENTLY dropped (the mutator's
+ * `null` return is indistinguishable from a benign already-settled no-op).
+ *
+ * This record is emitted to the injected `onUnattributed` observer so the
+ * missing attribution is SURFACED, never swallowed. It is the explicit
+ * fail-closed path for the case where the deferred (web/SDK) approval producer
+ * did not feed the machine a `request(id)` before the host relayed the decision.
+ */
+export interface ApprovalAttributionGap {
+  /** The kernel/host approvalId that had no pending SM record. */
+  readonly approvalId: string
+  /** Which terminal operation hit the missing record. */
+  readonly op: ApprovalGapOp
+  /** The decision carried by a `settle` gap (absent for expire / cancel). */
+  readonly decision?: ApprovalDecision
+  /** Machine clock at the moment the gap was detected. */
+  readonly at: number
+}
+
+/**
+ * Closed port over the approval state machine.
+ *
+ * EVERY method is NO-THROW. Unknown id ⇒ `null` on mutators / `null` on `get`.
+ * `now` is an injected clock seam (default `Date.now`) for deterministic tests.
+ *
+ * Attribution invariants:
+ *   - `request()` MAY attribute the pause to the injected ports:
+ *       - `objective.addBlocker({ reason, waitingOn: "user" })` — the returned
+ *         Objective's NEWEST blocker id is captured as `blockerId`.
+ *       - `ledger.start({ id, kind: "exec", owner: threadId, title: reason,
+ *                         resumeAction: resumeStep })`
+ *         then `ledger.touch(id, { status: "waiting", waitingOn: "user" })` —
+ *         the entry id is captured as `runEntryId`.
+ *   - `settle()` MUST:
+ *       - clear the objective blocker via `clearBlocker(threadId, blockerId)`
+ *         (when present), and
+ *       - call `ledger.settle(id, "completed" | "stopped")` mapped from the
+ *         decision: `approve` / `modify` ⇒ `completed`,
+ *                   `deny` ⇒ `stopped`.
+ *     `expire` ⇒ `stopped`. `cancel` ⇒ `stopped`.
+ *   - When `deps.objective` / `deps.ledger` are absent, attribution is a
+ *     compile-time-noop: the approval state itself still tracks correctly.
+ *   - Attribution failure (a misbehaving objective / ledger port throws) MUST
+ *     NOT break the approval state — the request is still recorded with no
+ *     `blockerId` / `runEntryId`.
+ *
+ * Status transitions (pinned by hellgate):
+ *   - `request`                       ⇒ `"pending"`
+ *   - `settle(approve|modify)`        ⇒ `"approved"`  (sets decision + settledAt;
+ *                                                     idempotent on already-settled)
+ *   - `settle(deny)`                  ⇒ `"denied"`
+ *   - `expire` from `pending`         ⇒ `"expired"`   (no-op if already settled)
+ *   - `cancel` from `pending`         ⇒ `"cancelled"` (no-op if already settled)
+ *   - Any mutator on unknown id       ⇒ `null`        (no exception)
+ *
+ * FAIL-CLOSED audit-gap (DOF-40): a terminal mutator (`settle` / `expire` /
+ * `cancel`) on an UNKNOWN id still returns `null`, but ALSO emits an
+ * `ApprovalAttributionGap` to the injected `onUnattributed` observer (when
+ * supplied) so a missing producer (`request(id)` never called) surfaces the
+ * un-attributed escalation instead of silently dropping the audit trail. When
+ * `onUnattributed` is absent this is a compile-/run-time noop — byte-identical
+ * to the legacy null return.
+ */
+export interface ApprovalStateMachinePort {
+  request(req: {
+    /** Kernel-owned identity for a deferred approval. Absent ⇒ mint locally. */
+    id?: string
+    threadId: string
+    kind: ApprovalKind
+    reason: string
+    proposedAction: string
+    resumeStep: string
+    options?: readonly string[]
+    /** RFC03-3 — optional staged-artifact binding (opaque ref + content hash). */
+    artifactRef?: string
+    artifactHash?: string
+  }): ApprovalRequest
+
+  settle(
+    id: string,
+    decision: ApprovalDecision,
+    opts?: { modifiedAction?: string },
+  ): ApprovalRequest | null
+
+  expire(id: string): ApprovalRequest | null
+
+  cancel(id: string): ApprovalRequest | null
+
+  get(id: string): ApprovalRequest | null
+
+  list(filter?: { status?: ApprovalStatus; threadId?: string }): readonly ApprovalRequest[]
+
+  pending(): readonly ApprovalRequest[]
+
+  toSnapshot(): ApprovalSnapshot
+
+  /** Replace all approvals from a snapshot (not a merge). Malformed entries
+   *  are silently dropped; a malformed snapshot is a no-op. */
+  fromSnapshot(snap: ApprovalSnapshot): void
+}

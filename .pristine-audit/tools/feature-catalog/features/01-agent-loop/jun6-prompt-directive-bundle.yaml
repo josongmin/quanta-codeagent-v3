@@ -1,0 +1,137 @@
+id: prompt-directive-bundle
+title: §5 prompt-level directive bundle — seven DEFAULT-OFF behavioral directives
+section: 1
+subsystem: Per-turn dynamic system-reminder — behavioral prompt directives
+order: 120
+maturity: L4
+status: refined
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [interactive, headless, batch, daemon, ide, ci-bot]
+configurable: integrated
+config_refs:
+  env:
+    - QUANTA_DIRECTIVE_AUTONOMOUS
+    - QUANTA_DIRECTIVE_READ_COMPLETE
+    - QUANTA_DIRECTIVE_PROGRESS
+    - QUANTA_DIRECTIVE_MEMORY_VERIFY
+    - QUANTA_DIRECTIVE_THINK_FREQ
+    - QUANTA_DIRECTIVE_ANTI_PLATITUDE
+    - QUANTA_DIRECTIVE_PARALLEL_TOOLS
+    - QUANTA_ADVISOR_RAIL
+owners: ["@songmin"]
+labels: [surface:core]
+depends_on: [mode-repo-rules-active-skills-working-state-memory-hints, build-turn-context]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 3/3 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "pure internal per-turn system-reminder prompt-assembly primitive (buildDynamicContext splice); ui_surfaces n-a, no user-visible affordance on any surface"
+purpose: |
+  Seven cheap, high-value behavioral PROMPT DIRECTIVES, each an independent
+  DEFAULT-OFF gated section. Each mirrors the C3 brief-mode mechanism: the
+  directive text is spliced into the per-turn DYNAMIC `<system-reminder>` slot by
+  `buildDynamicContext` (`src/agent/prompt.ts`) ONLY when its knob is ON — never
+  into the static cached prefix. So flipping any knob never invalidates the
+  provider cache prefix, and ALL knobs unset ⇒ the bundle contributes ZERO bytes
+  ⇒ the per-turn reminder is byte-for-bit identical to the pre-bundle output.
+
+  The seven directives:
+    1. AUTONOMOUS (QUANTA_DIRECTIVE_AUTONOMOUS) — unattended/headless posture:
+       bias to safe forward progress, do not block on questions, checkpoint, do
+       not fabricate completion.
+    2. READ_COMPLETE (QUANTA_DIRECTIVE_READ_COMPLETE) — read the relevant span of
+       a large file COMPLETELY before concluding; truncate-and-guess is a defect.
+    3. PROGRESS (QUANTA_DIRECTIVE_PROGRESS) — concise, information-dense status;
+       narration only; never suppresses error/verification/evidence reporting.
+    4. MEMORY_VERIFY (QUANTA_DIRECTIVE_MEMORY_VERIFY) — a recalled memory is a
+       hint; verify a named file/symbol/flag still exists in the CURRENT code
+       before acting on or citing it.
+    5. THINK_FREQ (QUANTA_DIRECTIVE_THINK_FREQ) — match reasoning depth to task
+       complexity; deliberate on hard steps, move fast on mechanical ones.
+    6. ANTI_PLATITUDE (QUANTA_DIRECTIVE_ANTI_PLATITUDE) — substance only; no empty
+       affirmations / filler praise; disagree plainly when evidence warrants.
+    7. PARALLEL_TOOLS (QUANTA_DIRECTIVE_PARALLEL_TOOLS) — batch INDEPENDENT tool
+       calls in a single turn; sequential only on a real data dependency.
+    8. ADVISOR_RAIL (QUANTA_ADVISOR_RAIL, RFC jun-6 §5.2) — when the `advisor`
+       tool is available, consult it BEFORE committing to an approach and BEFORE
+       declaring done; mentions forwardHistory:true (cc-cli advisor timing rail).
+
+  BYTE-IDENTITY (headline invariant): the pure selector `selectActiveDirectives`
+  returns "" when no knob is on, so nothing is pushed onto the dynamic parts and
+  the assembled reminder equals the frozen golden. Determinism: active directives
+  concatenate in a fixed source-declared order (`DIRECTIVE_ORDER`) — no
+  Math.random, no Set-iteration ambiguity. The texts are constants; the selector
+  is pure (no clock/random/env/IO); the loop layer (`prompt.ts`) is the single
+  env reader, projecting `runtimeConfig()` onto the narrow `DirectiveConfig` slice
+  (test/caller-overridable via `TurnContextInput.directiveConfig`).
+evidence:
+  code:
+    - src/agent/prompt-directives.ts
+    - src/agent/prompt.ts
+    - src/shared/runtime-config.ts
+  adrs: []
+  tests:
+    unit:
+      # each knob ON ⇒ text present / OFF ⇒ absent; ALL-OFF golden byte-identity
+      # (both injected all-false slice AND env-unset via the production path);
+      # multiple-ON stable deterministic order; static prefix untouched + no
+      # duplication into the cache body; defang safety; strict `=== "1"` wiring.
+      - tests/unit/prompt-directives-hellgate.test.ts
+      # registers all 7 knobs in the session default-OFF byte-identity battery.
+      - tests/unit/session-knobs-default-off-byte-identity-hellgate.test.ts
+    integration: []
+    contract: []
+knobs:
+  - name: QUANTA_DIRECTIVE_AUTONOMOUS
+    default: 'undefined'
+    purpose: Strict opt-in (`=== "1"`). ON ⇒ autonomous/unattended posture directive in the per-turn reminder. OFF ⇒ absent (byte-identical).
+  - name: QUANTA_DIRECTIVE_READ_COMPLETE
+    default: 'undefined'
+    purpose: Strict opt-in (`=== "1"`). ON ⇒ read-completeness directive. OFF ⇒ absent (byte-identical).
+  - name: QUANTA_DIRECTIVE_PROGRESS
+    default: 'undefined'
+    purpose: Strict opt-in (`=== "1"`). ON ⇒ progress-narration discipline directive. OFF ⇒ absent (byte-identical).
+  - name: QUANTA_DIRECTIVE_MEMORY_VERIFY
+    default: 'undefined'
+    purpose: Strict opt-in (`=== "1"`). ON ⇒ memory-drift verify-before-trust directive. OFF ⇒ absent (byte-identical).
+  - name: QUANTA_DIRECTIVE_THINK_FREQ
+    default: 'undefined'
+    purpose: Strict opt-in (`=== "1"`). ON ⇒ thinking-frequency self-regulation directive. OFF ⇒ absent (byte-identical).
+  - name: QUANTA_DIRECTIVE_ANTI_PLATITUDE
+    default: 'undefined'
+    purpose: Strict opt-in (`=== "1"`). ON ⇒ anti-platitude voice directive. OFF ⇒ absent (byte-identical).
+  - name: QUANTA_DIRECTIVE_PARALLEL_TOOLS
+    default: 'undefined'
+    purpose: Strict opt-in (`=== "1"`). ON ⇒ parallel tool-call nudge directive. OFF ⇒ absent (byte-identical).
+  - name: QUANTA_ADVISOR_RAIL
+    default: 'undefined'
+    purpose: Strict opt-in (`=== "1"`, RFC jun-6 §5.2). ON ⇒ advisor timing-rail directive (consult before approach / before done). OFF ⇒ absent (byte-identical).
+deliberate_hold: null
+notes: |
+  Mechanism mirrors C3 brief-mode (`src/agent/brief.ts` + `BRIEF_NOTICE`): the
+  per-turn DYNAMIC slot, never the static cached prefix, so default-OFF is
+  byte-identical and an ON toggle never invalidates the provider cache prefix.
+  Splice point: `appendActiveDirectives` (extracted helper, called from
+  `buildDynamicContext`) pushes after the brief notice and before repo-rules —
+  the helper keeps `buildDynamicContext` cognitive complexity unchanged.
+
+  WIRING NOTE (loop-decomposition avoidance): the production `buildTurnContext`
+  call sites live in `src/agent/loop/*` (context-assembler / compaction-wire),
+  which is the active loop-decomposition zone and OFF-LIMITS this session. Rather
+  than thread a new field through those hot sites, the directive knobs are
+  resolved at the PROMPT layer: `appendActiveDirectives` reads
+  `runtimeConfig()` (via `resolveDirectiveConfig`) directly inside `prompt.ts`,
+  the one place already responsible for assembling the dynamic block. Tests drive
+  selection via the optional `TurnContextInput.directiveConfig` override (no env
+  mutation needed) and also exercise the env production path. Zero edits to
+  loop.ts / loop/* / coordination / nickname-table / appgen / appshot.
+
+  Adjacencies (NOT duplicated — these are distinct, gated, opt-in directives):
+  the STATIC body already carries a generic "Parallelism budget" line and a
+  weak-signal "stale memory" caution and a review-mode "cut generic praise"
+  clause, but none is a dedicated default-OFF per-turn directive for these seven
+  behaviors. Confirmed absent as gated prompt directives by grep before building.

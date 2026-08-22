@@ -1,0 +1,221 @@
+id: code-mode-js-runtime
+title: code_cell — JS-runtime tool-calling (code-mode, Phase 1-3, RFC jun-6-code-mode)
+section: 2
+subsystem: code-mode (QuickJS-WASM JS-runtime tool-calling)
+order: 620
+maturity: L3
+status: refined
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [interactive, headless]
+configurable: integrated
+owners: ["@songmin"]
+labels: [surface:cli, category:agent-loop, category:tool-system, default-off]
+depends_on: [read-write-edit, isconcurrencysafe]
+config_refs:
+  env:
+    - QUANTA_CODE_MODE
+    - QUANTA_CODE_MODE_ONLY
+    - QUANTA_CODE_MODE_MEM_BYTES
+    - QUANTA_CODE_MODE_TIMEOUT_MS
+    - QUANTA_CODE_MODE_MAX_CALLS
+    - QUANTA_CODE_MODE_OUTPUT_CAP
+  runtime: ["codeMode", "codeModeOnly", "codeModeMemBytes", "codeModeTimeoutMs", "codeModeMaxCalls", "codeModeOutputCap"]
+surface_integration:
+  cli: full
+  web: full
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 18/19 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "code_cell is an ordinary tool call -> renders as tool.invoked/completed card via the bridged tool_call/tool_result events (cell-lifecycle stream events remain a CLI follow-up)"
+purpose: |
+  code-mode (Phase 1-3, LIVE jun-07) — invert the one-tool-per-LLM-turn dispatch model. The model
+  authors a small JS PROGRAM (a "code cell") that calls tools as ordinary async
+  functions — `const a = await tools.read({path}); for (...) await tools.grep(...)`
+  — and the program runs in a SANDBOXED QuickJS-WASM isolate. Each in-cell
+  `await tools.X(args)` round-trips to the REAL `dispatchTool`, so permission /
+  HARD_DENY / plan-mode gate EVERY call; loops/conditionals/fan-out happen in ONE
+  cell = ONE model turn (the token + latency win on multi-step sequences).
+
+  THE SECURITY MODEL (make-or-break, proven): there is exactly ONE dispatch path.
+  `src/codemode/` is a DUMB sandbox that reaches the host ONLY via an injected
+  `CodeCellDispatchPort`. The ONLY implementation of that port
+  (`src/agent/codemode-wire.ts#buildCodeCellDispatchPort`) closes over the loop's
+  LIVE `config`/`permission` (and optionally `autoClassifier`) and routes EACH
+  in-cell call through the SAME `dispatchTool` the loop uses with a synthesized
+  `cell_<cellId>_<seq>` ToolUseBlock. A code cell IS, to the permission system, N
+  ordinary gated tool calls. (The composition-root wire leaves `autoClassifier`
+  absent ⇒ in-cell read-only ops do NOT auto-pass — STRICTLY more restrictive than
+  the direct path, never a bypass.) `@/codemode` CANNOT reach `dispatchTool` (biome fence) — inversion-of-
+  control is the boundary. The cell has NO require/fetch/process/Bun/FS/network
+  surface (QuickJS gives none; we add none). Cell output is redacted through the
+  SAME `redactSecrets` chokepoint a normal tool result passes.
+
+  PHASE 2 — FULL TOOL SURFACE (jun-07, LIVE): the cell binds `tools.<name>` for
+  the agent's ACTUAL registered set (`registry.toolNames()`), surfaced through
+  `AgentConfig.codeCellSurfaceTools` → `ToolContext.codeCellSurface` →
+  `RunCodeCellOptions.surfaceTools`. A cell can call ANY tool the agent has —
+  EACH still routes through the SAME injected port → the real `dispatchTool` (the
+  security invariant is UNCHANGED; only which NAMES are bound widened). A tool the
+  agent lacks is absent from the surface ⇒ unbound (the cell can never widen
+  itself). Snake_case names (`gh_pr_view`) are dot-reachable (`tools.gh_pr_view`,
+  RFC §4.2). A MUTATING in-cell call (`tools.bash`/`tools.write`) hits the SAME
+  admissibility gate / HARD_DENY / plan-mode as a direct call; a malformed arg is
+  a typed tool failure (the tool safeParses inside dispatchTool), not a host
+  crash; the per-cell call cap + output cap apply ACROSS the full surface.
+  ABSENT surfaceTools ⇒ the sandbox falls back to the Phase-1 3-tool surface
+  (`read`/`grep`/`write`) — byte-identical for a host that wired the port but not
+  the surface.
+
+  PHASE 3 — code_mode_only (jun-07, LIVE, default-OFF): `QUANTA_CODE_MODE_ONLY=1`
+  splices a gated prompt directive (`CODE_MODE_ONLY_DIRECTIVE`, the §5 directive
+  bundle) into the per-turn DYNAMIC `<system-reminder>` steering the model to drive
+  multi-step work through `code_cell` programs as the PRIMARY tool-calling surface.
+  PER THE RFC §5.3 decision: the directive STEERS via prompt; it does NOT hide
+  individual tools from the menu (the tool catalog is byte-identical whether or not
+  the steering is on — mutating tools stay directly reachable AND re-gated inside
+  cells). Default-OFF ⇒ zero bytes (byte-identical dynamic tail). Independent of
+  `codeMode` (the security gate); a host that wants the model to actually USE cells
+  sets BOTH. Phase-2 cell-lifecycle stream events remain a follow-up (the per-cell
+  ledger on the single tool result is the current observability surface).
+
+  CAPS (RFC §4.4): WASM memory limit (setMemoryLimit), deadline interrupt
+  (an infinite loop → typed timeout), per-cell tool-call cap (a runaway fan-out is
+  refused at the binding BEFORE the host port), output cap (truncated), abort
+  (the loop's AbortSignal interrupts + the runtime is disposed). Every
+  QuickJSHandle is disposed (no heap leak). NO-THROW: every failure (parse /
+  uncaught throw / deny / timeout / memory / cap / abort) is a typed result.
+evidence:
+  code:
+    - src/codemode/types.ts
+    - src/codemode/runtime.ts
+    - src/codemode/exec-main.ts
+    - src/codemode/limits.ts
+    - src/codemode/index.ts
+    - src/agent/codemode-wire.ts
+    - src/agent/optional-ports.ts
+    - src/tool/codemode-tool.ts
+    - src/tool/index.ts
+    - src/tool/types.ts
+    - src/tool/registry.ts
+    - src/tool/surface/manifest.ts
+    - src/agent/mode.ts
+    - src/agent/dispatch.ts
+    - src/agent/types.ts
+    - src/agent/prompt.ts
+    - src/agent/prompt-directives.ts
+    - src/host/runtime/agent-arg-builder.ts
+    - src/shared/runtime-config.ts
+    - biome.json
+    - tsconfig.base.json
+  adrs: [488]
+  tests:
+    unit:
+      - tests/unit/code-mode-hellgate.test.ts
+      - tests/unit/code-mode-default-off-hellgate.test.ts
+      - tests/unit/code-mode-phase2-full-surface.test.ts
+      - tests/unit/code-mode-phase2-wire.test.ts
+      - tests/unit/prompt-directives-hellgate.test.ts
+    integration:
+      - tests/integration/code-mode-real-quickjs-wire-hellgate.test.ts
+      - tests/integration/code-mode-full-surface-e2e.test.ts
+    contract: []
+knobs:
+  - name: QUANTA_CODE_MODE
+    where: src/shared/runtime-config.ts
+    default: false
+    purpose: |
+      Strict `=== "1"` opt-in. Default-OFF ⇒ the composition root wires NO
+      `DefaultToolPorts.codeMode` flag / `AgentConfig.codeCellDispatchFactory` ⇒
+      `code_cell` NOT registered ⇒ byte-identical default tool menu, AND the
+      QuickJS-WASM module is NEVER instantiated (lazily imported only when a cell
+      runs). Opt-in EVERYWHERE: runs model-authored code (exec-class) and can
+      invoke mutating tools, so it never auto-seeds (mirrors image_gen / appshot).
+      Phase 2 (full surface) rides this SAME knob — the wire sets BOTH the dispatch
+      factory AND the surface thunk (`registry.toolNames()`) when it is on.
+  - name: QUANTA_CODE_MODE_ONLY
+    where: src/shared/runtime-config.ts
+    default: false
+    purpose: |
+      Phase 3 — strict `=== "1"` opt-in. Default-OFF ⇒ the per-turn dynamic
+      `<system-reminder>` carries NO code-mode steering directive (byte-identical
+      dynamic tail). When ON, `buildDynamicContext` splices the
+      `CODE_MODE_ONLY_DIRECTIVE` steering the model to drive multi-step work through
+      `code_cell` programs as the PRIMARY tool-calling surface. Per RFC §5.3 it
+      STEERS via prompt only — it does NOT hide individual tools (the menu is
+      byte-identical; mutating tools stay reachable AND re-gated inside cells) and
+      NEVER relaxes any gate. Independent of `codeMode` (the security gate that
+      registers the tool + wires the port); a host wanting the model to USE cells
+      sets BOTH.
+  - name: QUANTA_CODE_MODE_MEM_BYTES
+    where: src/shared/runtime-config.ts
+    default: false
+    purpose: WASM heap cap (bytes). Unset ⇒ 64 MiB default.
+  - name: QUANTA_CODE_MODE_TIMEOUT_MS
+    where: src/shared/runtime-config.ts
+    default: false
+    purpose: Wall-clock deadline (ms). Unset ⇒ 30 s default. An infinite loop is interrupted.
+  - name: QUANTA_CODE_MODE_MAX_CALLS
+    where: src/shared/runtime-config.ts
+    default: false
+    purpose: Per-cell tool-call cap. Unset ⇒ 64 default. A runaway fan-out is refused at the cap.
+  - name: QUANTA_CODE_MODE_OUTPUT_CAP
+    where: src/shared/runtime-config.ts
+    default: false
+    purpose: Model-facing output cap (bytes). Unset ⇒ 16 KiB default; over-cap is truncated.
+notes: |
+  RUNTIME (RESOLVED jun-07): the sandbox uses the SYNC (non-asyncify)
+  quickjs-emscripten variant via the shared `getQuickJS()` module +
+  `module.newContext()` per cell, driven by a native-promise + `executePendingJobs`
+  event loop. Each in-cell `await tools.X(args)` is a PLAIN `ctx.newFunction` that
+  returns a QuickJS NATIVE promise (`ctx.newPromise()`); the host resolves/rejects
+  the deferred OUT-OF-BAND after the REAL `dispatch(...)` settles, then pumps the
+  job queue. The host drives the top-level cell promise to settlement by draining
+  pending jobs + awaiting real macrotasks until `getPromiseState` settles or the
+  deadline fires. NO asyncify stack suspension ⇒ ARBITRARY in-cell nesting depth
+  (proven to 8) with clean handle disposal; arguments pass NORMALLY (the prior
+  `__cmReq` global-stash workaround is removed). The old asyncify build
+  (`newQuickJSAsyncWASMModule` + `newAsyncifiedFunction`) faulted past ~3 nested
+  host-promise suspensions ("out of bounds memory access") and on arg-marshalling
+  — both gone with the sync variant.
+
+  HANDLE DISCIPLINE (two WASM-abort guards): (1) every minted deferred is tracked
+  and disposed in `finally` if still alive at an early-terminated cell (timeout /
+  abort / cap / dangling promise), with a `disposed` fence stopping any late
+  out-of-band resolve from touching a freed VM; (2) `getPromiseState` allocates a
+  FRESH heap handle for a settled promise's value/error EACH call, so the poll loop
+  disposes it. Without these the runtime aborts at `JS_FreeRuntime`
+  (`list_empty(&rt->gc_obj_list)`).
+
+  WIRING (LIVE): `DefaultToolPorts.codeMode` is set by `buildGatedToolPorts`
+  (`src/host/runtime/agent-arg-builder.ts`, `codeModePortSlot`, behind
+  `cfg.codeMode`), and `AgentConfig.codeCellDispatchFactory` is wired by
+  `wireCodeCellDispatch` (`src/agent/optional-ports.ts`, behind
+  `QUANTA_CODE_MODE=1`) building `buildCodeCellDispatchPort` over the LIVE assembled
+  AgentConfig + its `permission`. With the knob ON the tool runs gated cells (no
+  longer `not_wired`); with it unset the config + tool menu are byte-identical AND
+  the QuickJS-WASM module is never instantiated (lazy import).
+
+  PHASE 2 WIRING (LIVE jun-07): the full surface flows
+  registry.toolNames() → AgentConfig.codeCellSurfaceTools (a THUNK read lazily at
+  cell-dispatch time, set alongside codeCellDispatchFactory by `wireCodeCellDispatch`
+  behind QUANTA_CODE_MODE=1) → ToolContext.codeCellSurface (surfaced in the dispatch
+  seam's buildToolContext, parallel to codeCellDispatch) → RunCodeCellOptions.
+  surfaceTools → installToolsBinding (binds `tools[name]` for every surface name,
+  deduped). The thunk reads the LIVE registry so a tool registered after assembly
+  appears automatically. ABSENT ⇒ the Phase-1 3-tool default (byte-identical).
+
+  PHASE 3 WIRING (LIVE jun-07): codeModeOnly (runtime-config, QUANTA_CODE_MODE_ONLY)
+  → DirectiveConfig.codeModeOnly (projected in prompt.ts resolveDirectiveConfig) →
+  DIRECTIVE_ORDER selector → CODE_MODE_ONLY_DIRECTIVE spliced into the dynamic tail.
+  Default-OFF ⇒ zero bytes (the all-OFF golden in prompt-directives-hellgate holds).
+
+  As-built deviations from the RFC §10 code-location plan:
+    - The cell-lifecycle stream events (code_cell.started / .tool_call / .result)
+      remain a follow-up — the per-cell ledger on the single tool result is the
+      current observability surface.
+  Slice fence: `@/codemode` imports ONLY node:* / quickjs-emscripten / @/shared /
+  @/security (biome override on src/codemode/** blocks @/agent / @/tool /
+  @/permission). The dispatch port arrives via ToolContext.codeCellDispatch,
+  surfaced by the dispatch seam from AgentConfig.codeCellDispatchFactory.

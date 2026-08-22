@@ -1,0 +1,55 @@
+id: atomic-write-and-hash-precondition
+title: storage atomic write + edit expected_hash stale-precondition (ADR-0398)
+section: 2
+subsystem: 도구 시스템 — file write atomicity + optimistic-lock
+order: 398
+maturity: L4
+status: new
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [interactive, headless, batch, daemon, ide, ci-bot]
+configurable: integrated
+owners: ["@songmin"]
+labels: ["surface:core"]
+depends_on: [edit-tool, storage-fs-jail]
+surface_integration:
+  cli: full
+  web: full
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 5/5 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "Enhancement to the edit tool; the edit tool_call/tool_result render as the generic tool card and a stale_precondition typed failure surfaces in the result preview (session-hooks.ts:420-435). The atomic-write itself is internal but the user-visible value rides the edit tool surface."
+purpose: |
+  storage/atomic-write.ts(신규 leaf) — 2-phase temp+rename adapter
+  (writeFileAtomic). EXDEV → copyFile+unlink fallback; non-EXDEV rename
+  실패 시 temp on disk(replay용). lsp/adapters/file-write-atomic.ts와
+  격리 — slice fence(storage → lsp 금지) 위반 회피, 알고리즘만 미러.
+  FileSystemPort에 optional writeFileAtomic. edit 도구 입력에 optional
+  `expected_hash`(sha256 64-hex) — 주어지면 현재 파일 hash와 비교, 불일치
+  ⇒ stale_precondition typed ToolFailure(파일 미변경, no-throw). 미입력 ⇒
+  byte-identical(과정만 atomic으로 강화).
+evidence:
+  code:
+    - src/storage/atomic-write.ts
+    - src/storage/service.ts
+    - src/storage/index.ts
+    - src/tool/edit/index.ts
+    - src/tool/types.ts
+  adrs: [398]
+  tests:
+    unit:
+      - tests/unit/edit-atomic-precondition-hellgate.test.ts
+      - src/storage/__tests__/atomic-write-fsync-hellgate.test.ts
+      - tests/unit/storage-atomic-mode-preserve.test.ts
+      - tests/unit/edit-write-atomic-default.test.ts
+      - tests/unit/edit-write-atomic-default-e2e.hellgate.test.ts
+      - tests/unit/scripted-replace-atomic-stale-hellgate.test.ts
+      - tests/unit/edittrace-real-edit-vocabulary-hellgate.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  hash 컨벤션 sha256Hex (FIPS 180-4 vectors pin). 8 hellgate(default-OFF
+  byte-identical + hash 일치 정상 + 불일치 stale + crash 시 원본 보존).

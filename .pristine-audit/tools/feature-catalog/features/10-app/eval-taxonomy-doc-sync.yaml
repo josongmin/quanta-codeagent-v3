@@ -1,0 +1,50 @@
+id: eval-taxonomy-doc-sync
+title: eval taxonomy doc-sync — code → markdown one-way renderer
+section: 10
+subsystem: eval 앱 — 분류 체계 view generator
+order: 83
+maturity: L1
+status: stable
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [headless, batch]
+configurable: static
+owners: ["@songmin"]
+labels: ["surface:bench"]
+depends_on: [eval-taxonomy-classifier, eval-taxonomy-tree]
+surface_integration:
+  cli: missing
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "src evidence not reachable from the interactive CLI entry (src/apps/cli/index.ts) — wired only into other apps (eval/bench/probe/headless) or unwired"
+    web: "pure internal doc-render generator primitive, no UI affordance on any surface"
+purpose: |
+  `TAXONOMY` 배열을 `docs/analysis/may-21-coding-agent-query-usecase.md` §1
+  포맷(major별 `중분류 | 소분류 | 트리거 | 커버 | 담당 | 검증` 테이블)으로
+  렌더. SINGLE DIRECTION: code → doc. Markdown을 손으로 편집하면 unit test가
+  drift를 못 잡으므로 명시적으로 generated view로 격하 — leaf 추가/이름변경은
+  `usecases.ts` 편집 후 doc-sync 재실행이 표준 워크플로우. `escapeCell`이
+  `|` escape + `\n` → space로 cell-safe 변환. `empiricalShare`는 column header
+  옆에 percentage로 렌더. 의도적으로 작고 dep-free.
+evidence:
+  code:
+    - src/apps/eval/taxonomy/doc-sync.ts
+  adrs: []
+  tests:
+    unit: []
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold:
+  reason: 'L1 manual-trigger generator. mon=N/A (one-shot CLI render, no recurring emit point). hellgate=deferred until taxonomy schema stabilizes (current 4-line render is too thin to adversarial-test meaningfully). wire=`configurable: static` because doc-sync is invoked manually from CLI on demand — no env knob.'
+  promotion_path: 'Promote to L2+hellgate once taxonomy schema sees first breaking change (then drift-detection hellgate becomes load-bearing). Promote to L3+monitoring when re-render auto-hook lands.'
+notes: |
+  rendered output에 `TBD | (empty) | (empty)` cells 들어가는 건 의도 — 운영자
+  채우라는 plain prompt. Curated cells (담당 컴포넌트·검증 수단)은 doc-sync가
+  덮어쓰지 않게 향후 round-trip path 추가 시 주의. taxonomy 갱신 이후
+  re-render 자동화는 별도 hook seam (현재 manual).
+
+  L3→L2→L1: no test imports `doc-sync.ts` (renderTaxonomyMarkdown). The
+  sibling taxonomy test covers TAXONOMY structure only.

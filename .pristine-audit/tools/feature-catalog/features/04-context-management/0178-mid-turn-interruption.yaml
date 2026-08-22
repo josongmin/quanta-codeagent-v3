@@ -1,0 +1,70 @@
+id: mid-turn-interruption
+title: Mid-turn user interruption — capture facade over PlanQueueStore + 3-arm mode + InterruptionPolicy port
+section: 4
+subsystem: Mid-turn capture facade
+order: 88
+maturity: L3
+status: stable
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [interactive]
+configurable: integrated
+config_refs:
+  env: ["QUANTA_MIDTURN_CAPTURE"]
+owners: ["@songmin"]
+labels: ["adr-0178", "tier:1", "plan-queue", "interruption"]
+depends_on:
+  - plan-queue
+surface_integration:
+  cli: full
+  web: missing
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 4/4 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "Captured lines ride externalPromptQueue/response_queued; no protocol.ts queue/turn verb (B3) and no web handler reach the browser."
+purpose: |
+  Capture facade that maps the CLI "user submitted while streaming"
+  signal onto ADR-0128's PlanQueueStore. 3-arm closed `InterruptionMode`
+  (`queue` / `cancel-and-replace` / `cancel-and-amend`) — caller picks
+  based on UI surface (typed-ahead = queue; `Cmd-K` = replace; "wait I
+  forgot..." = amend). `InterruptionPolicy` port + 3 stock impls
+  (`defaultInterruptionPolicy` defensive-queue on unknown mode;
+  `alwaysQueuePolicy` / `alwaysCancelPolicy` testing stocks).
+  `defaultMidTurnCapture` no-throw — policy crashes collapse to
+  `{action:"queue", reason:"policy-error"}` so typing never silently
+  drops. Closes the SOTA gap where the store existed but no capture
+  surface knew when/how to call it.
+evidence:
+  code:
+    - src/agent/mid-turn-interruption/types.ts
+    - src/agent/mid-turn-interruption/default.ts
+    - src/agent/mid-turn-interruption/index.ts
+    - src/apps/cli/repl/mid-turn-capture-wire.ts
+    - src/apps/cli/repl/input-lane.ts
+    - src/apps/cli/repl/mid-turn-approval-channel.ts
+  adrs:
+    - docs/decisions/0178-mid-turn-interruption.md
+  tests:
+    unit:
+      - tests/unit/mid-turn-interruption-hellgate.test.ts
+      - tests/unit/mid-turn-capture-wire-hellgate.test.ts
+      - tests/unit/apps/cli/input-lane-hellgate.test.ts
+      - tests/unit/apps/cli/mid-turn-approval-channel.test.ts
+    integration:
+      - tests/integration/plan-queue-mid-turn-e2e.test.ts
+    contract: []
+knobs: ["midturn-capture", "midturn-visible"]
+deliberate_hold: null
+notes: |
+  `MidTurnCancelCause = "user-abort"` defined locally to keep plane
+  clean — structural assign across ADR-0177-sibling cancel-cause union
+  is closed-string-union widening only.
+
+  jun-6 #8 last-mile: `mid-turn-capture-wire.ts` is the CLI SURFACE binding
+  that was previously missing — it builds `defaultMidTurnCapture` over the live
+  plan-queue and mirrors captured lines onto the `externalPromptQueue` so the
+  existing turn-boundary race drains them as the next prompt. Gated by
+  `QUANTA_MIDTURN_CAPTURE=1` (default-OFF, byte-identical). The seam is wired
+  + tested; the CONCURRENT raw-mode keystroke SOURCE that runs alongside a
+  streaming turn is a deliberate residual (a hot-path change to the input loop).

@@ -1,6 +1,6 @@
 /**
  * `ContainerExec` — run a one-shot command INSIDE a bounded container, get its full result
- * (stdout + stderr + exit code). RFC jun-29 §13 SOTA lever #1/#2: a structured exec tool (the
+ * (stdout + stderr + exit code). TB21-06 TC-1a (spec S3): a structured exec tool (the
  * edge product agents have over raw keystroke-typing) whose **exit code is the strongest
  * completion signal** — no pane-scraping / "is it done?" guesswork.
  *

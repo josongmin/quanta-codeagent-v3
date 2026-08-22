@@ -115,7 +115,7 @@ export const renderPackByMode = (mode: AgentMode): readonly string[] => [
  *  for interactive sessions never shifts. */
 export const renderToolUseRules = (): readonly string[] => renderPackByMode("interactive")
 
-/** Render the `owned` environment posture rule list (RFC jul-2 TB levers /01).
+/** Render the `owned` environment posture rule list (TB21-06 TC-6).
  *  Byte-identical to `renderPostureBase("owned")` — kept as the named legacy entry the
  *  terminal surface calls; `frozen` callers never reach this path. */
 export const renderOwnedRules = (): readonly string[] => renderPostureBase("owned")

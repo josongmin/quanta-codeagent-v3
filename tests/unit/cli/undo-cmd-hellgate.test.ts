@@ -31,7 +31,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { BUILTINS } from "@/apps/cli/slash-commands"
 import type { SlashContext } from "@/apps/cli/slash-contract"
-import { __test as undoTest, undoCmd } from "@/apps/cli/undo-cmd"
+import { undoCmd, __test as undoTest } from "@/apps/cli/undo-cmd"
 import {
   applyHunkSelectionWithReceipt,
   type HunkMutationJournalStore,

@@ -129,6 +129,10 @@ export interface FamilyBootstrapCommand {
    * `agent` — runs on the box the AGENT will run on, before patch generation.
    * `grader` — runs only once model patches are captured, on grading material
    *   that invariant 3 forbids from co-existing with the agent.
+   * `teardown` — REMOVES what the grader phase materialized. Bound to the same
+   *   executor call as `grader` (it runs in that call's `finally`), because a
+   *   teardown with its own call site is a teardown someone forgets: the box
+   *   then carries the answer key into the NEXT chunk's agent phase.
    */
   readonly phase: FamilyBootstrapPhase
   /**
@@ -156,11 +160,33 @@ export interface FamilyBootstrapCommand {
    * than to a remote shell's exit status.
    */
   readonly verifies?: FamilyBootstrapDigestExpectation
+  /**
+   * The ABSENCE this command proves. See {@link FamilyBootstrapAbsenceProbe} —
+   * a non-zero exit is classified as "the path EXISTS", not as a broken step.
+   */
+  readonly absenceProbe?: FamilyBootstrapAbsenceProbe
+}
+
+/**
+ * This command PROVES an on-box path is ABSENT. A non-zero exit means the path
+ * EXISTS, and for a gold-bearing path that is the leak itself, so the executor
+ * refuses with the path named rather than reporting a generic step failure.
+ *
+ * It is a typed marker rather than a naming convention because the agent-phase
+ * absence claim is asserted on the RENDERED command list: a probe is the ONE
+ * kind of agent-phase command allowed to name a gold-bearing path (it names it
+ * in order to assert nothing is there), and a classifier that cannot tell a
+ * probe from a leak has to choose between forbidding the probe and permitting
+ * the leak.
+ */
+export interface FamilyBootstrapAbsenceProbe {
+  /** The ON-BOX absolute path this command proves is absent. */
+  readonly absolutePath: string
 }
 
 /** The campaign phases a bootstrap command can belong to. Closed union: adding
  *  a member forces every construction site and classifier to be revisited. */
-export const FAMILY_BOOTSTRAP_PHASES = ["agent", "grader"] as const
+export const FAMILY_BOOTSTRAP_PHASES = ["agent", "grader", "teardown"] as const
 
 export type FamilyBootstrapPhase = (typeof FAMILY_BOOTSTRAP_PHASES)[number]
 
@@ -204,6 +230,18 @@ export interface BoxSetupInput {
   readonly ssh: (
     cmd: string,
   ) => Promise<{ readonly code: number; readonly stdout: string; readonly stderr: string }>
+  readonly log: (m: string) => void
+}
+
+/**
+ * Input to the family ADMISSION gate.
+ *
+ * 🔴 It carries NO `ssh` ON PURPOSE. Admission's whole job is to run BEFORE the
+ * box has been mutated on this family's behalf, and a port that cannot reach the
+ * box cannot mutate it — the ordering guarantee is a property of the TYPE rather
+ * than of where the call happens to sit today.
+ */
+export interface FamilyAdmissionInput {
   readonly log: (m: string) => void
 }
 
@@ -284,6 +322,23 @@ export interface DatasetFamilyProfile {
    *  Non-empty ONLY for Pro (Scale harness dir / venv python / raw-sample path +
    *  overrides). "" for verified/live ⇒ byte-identical. */
   readonly onBoxEnvPrefix: (input: OnBoxEnvInput) => string
+  /**
+   * layer 3b′ — ADMISSION. "May this family run on a box at all?"
+   *
+   * REQUIRED, and separate from {@link setupBox}, because those are two
+   * different questions that were conflated into one late call: `setupBox` both
+   * REFUSES (ProMax) and MUTATES (Pro clones a harness + builds a venv), and it
+   * runs at the END of `bootstrapBox` — after mkdir, after a full `src/` rsync,
+   * after an scp and a `bun install`. So a family that refuses this lane refused
+   * it only once the box had already been provisioned and rewritten on its
+   * behalf, which is how a refusal that a receipt cites as its guard ends up
+   * firing against a box that has already been mutated.
+   *
+   * Throw to refuse; return to admit. Admitting families implement it as a
+   * no-op, so their provisioning stays byte-identical — it cannot even issue an
+   * ssh round trip ({@link FamilyAdmissionInput} carries no transport).
+   */
+  readonly admitBox: (input: FamilyAdmissionInput) => void
   /** layer 3c — extra ON-BOX provisioning this family needs during bootstrap.
    *  Pro ⇒ clone the Scale harness + build its venv; verified/live ⇒ no-op (not
    *  even an ssh round-trip, so their bootstrap is byte-identical). */

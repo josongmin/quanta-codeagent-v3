@@ -14,12 +14,16 @@
  * supplied `ObjectivePort` into the tool factory at session-start.
  *
  * RFC-03 C1: in production `config.objective` IS the revisioned mutation
- * authority (`createObjectiveStore` now returns it), so the tool factory's
- * `asObjectiveAuthority` recovers the SAME instance — model-originated tool
- * mutations and internal system mutations share one revision/CAS domain. This
- * builder stays a thin adapter; it does not construct or unwrap the authority.
+ * authority (`createObjectiveStore` now returns it), so `asObjectiveAuthority`
+ * recovers the SAME instance — model-originated tool mutations and internal
+ * system mutations share one revision/CAS domain. The unwrap happens HERE, not
+ * in the tool slice: `@/tool` is denied a VALUE import of `@/objective` (the
+ * leaf-domain fence in `tests/unit/_arch/slice-boundary-configs.ts`), and this
+ * builder is exactly the agent BRIDGE that fence names as the composer. It adds
+ * no policy — for a port that is already the authority the call is identity.
  */
 
+import { asObjectiveAuthority } from "@/objective"
 import type { Tool } from "@/tool"
 import { objectiveTools } from "@/tool/objective"
 import type { AgentConfig } from "../types"
@@ -28,5 +32,5 @@ import type { AgentConfig } from "../types"
 export const buildObjectiveBlock = (config: AgentConfig): Tool[] => {
   const port = config.objective
   if (port === undefined) return []
-  return objectiveTools(port)
+  return objectiveTools(asObjectiveAuthority(port))
 }

@@ -1,7 +1,10 @@
 /**
- * RED→GREEN invariants for the Terminal-Bench `terminal` ToolSurface (RFC jun-29).
+ * RED→GREEN invariants for the Terminal-Bench `terminal` ToolSurface.
  *
- * These pin the RFC's HARD spec (S1-S4) + the ownership-boundary audit checks so a future
+ * AUTHORITY: TB21-06 transferred contracts TC-1 (ownership boundary) + TC-1a (spec
+ * S1-S4) — `docs/plans/aug-21-bench-terminal-2-1/TB21-06-transferred-contracts.md`.
+ *
+ * These pin that HARD spec (S1-S4) + the ownership-boundary audit checks so a future
  * "TB-only branch" can't sneak in:
  *   S1  terminal is a first-class ToolSurface (not bench).
  *   S2  terminal registry is BASE-free (no repo-edit tools inherited).
@@ -110,11 +113,68 @@ describe("ownership boundary — no Terminal-Bench naming leaks outside src/apps
     const SCAN =
       "**/{*.{ts,tsx,py,sh,json,mjs,cjs,mts,cts,yaml,yml,toml,cfg,ini,txt,env},Dockerfile,*.Dockerfile}"
     const isTest = (p: string) => /\.(test|spec)\.[a-z]+$/.test(p) || p.includes("/__")
+    /**
+     * aug-22 — TWO RATCHETS IN DIRECT CONFLICT, resolved by splitting the rule
+     * rather than by raising a ceiling.
+     *
+     * BFND-02 made the persisted report a discriminated union
+     * (`CanonicalBenchReport = SweBenchReport | TerminalBenchReport`) with ONE
+     * writer. The runner-slice boundary forbids `@/runner` from referencing
+     * `apps/**` even in TYPE position, so the Terminal branch's SHAPE had to be
+     * declared DOWN in `src/runner/batch/` — which is exactly the region this
+     * fence forbids Terminal naming in. One of the two rails had to give.
+     *
+     * The split: this fence exists to stop the Terminal-Bench INTEGRATION from
+     * sprawling — the Harbor client, the `BaseAgent` Python shim, a stray
+     * compose/Dockerfile. Those tokens stay forbidden EVERYWHERE outside
+     * `apps/` with no exceptions (verified: zero hits in `src/` outside
+     * `apps/`). What is structurally forced is only the SUITE DISCRIMINANT —
+     * the type name and the `"terminal-bench"` string literal — inside the
+     * canonical report union. That is data-model, not integration: it names a
+     * branch, it cannot reach Harbor, and the runner still imports nothing from
+     * `apps/`.
+     *
+     * So the exemption is enumerated, per-file, and narrow: only these three
+     * modules, and only for the discriminant tokens. `Harbor`/`BaseAgent` in
+     * any of them is still an offence (asserted below), and a NEW file that
+     * wants in must be added here deliberately with a reason.
+     *
+     * NOT an inherited failure: at the session base `9d5369d31` this fence was
+     * GREEN and none of these three files existed. It was first reported as
+     * "pre-existing" only because a concurrent session had already committed
+     * this campaign's own work into HEAD, which made a `git show HEAD:` control
+     * circular.
+     */
+    const DISCRIMINANT_ONLY = /TerminalBench|terminal-bench/i
+    const INTEGRATION_ONLY = /\bHarbor\b|\bBaseAgent\b/i
+    const CANONICAL_REPORT_UNION: readonly string[] = [
+      "runner/batch/report.ts",
+      "runner/batch/report-envelope.ts",
+      "runner/batch/report-terminal.ts",
+    ]
+    const integrationOffenders: string[] = []
     for (const rel of new Bun.Glob(SCAN).scanSync(srcDir)) {
       if (rel.startsWith("apps/") || isTest(rel)) continue
-      if (FORBIDDEN.test(readFileSync(join(srcDir, rel), "utf8"))) offenders.push(rel)
+      const text = readFileSync(join(srcDir, rel), "utf8")
+      // The integration tokens are forbidden everywhere outside apps/ — no
+      // exemption, including inside the canonical report union.
+      if (INTEGRATION_ONLY.test(text)) integrationOffenders.push(rel)
+      if (!FORBIDDEN.test(text)) continue
+      // Discriminant naming is tolerated ONLY in the enumerated union modules.
+      if (CANONICAL_REPORT_UNION.includes(rel) && !INTEGRATION_ONLY.test(text)) continue
+      offenders.push(rel)
     }
+    expect(integrationOffenders).toEqual([])
     expect(offenders).toEqual([])
+
+    // Anti-vacuity: the exemption must be LIVE, not a dead list. Each enumerated
+    // module must actually exist and actually carry the discriminant — otherwise
+    // the carve-out is stale and should be deleted rather than kept "just in case".
+    for (const rel of CANONICAL_REPORT_UNION) {
+      const text = readFileSync(join(srcDir, rel), "utf8")
+      expect(DISCRIMINANT_ONLY.test(text)).toBe(true)
+      expect(INTEGRATION_ONLY.test(text)).toBe(false)
+    }
 
     // Meta-guard: the SCAN pattern must actually match a literal `Dockerfile` + a `.py` shim +
     // a `.toml` (regression tripwire — a future glob edit that drops these silently re-opens the gap).

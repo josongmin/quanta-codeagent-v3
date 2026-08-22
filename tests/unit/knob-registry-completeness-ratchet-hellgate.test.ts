@@ -141,6 +141,19 @@ const EXCEPTIONS: ReadonlyMap<string, string> = new Map<string, string>([
   // DEV / BENCH-INTERNAL toggles — read at their own call site, intentionally NOT
   // surfaced in /config (an internal bench/experiment seam, not a user setting).
   [
+    // TB21-06 SR-6. This knob was RETIRED with the terminal-local best-of-N
+    // sampler (trials belong to the run harness's `-k`, one fresh container per
+    // trial). Its only remaining appearance is a REFUSAL: the 2.1 run config
+    // names it so an operator who still exports it is told why it is gone. It is
+    // deliberately absent from the inventory — re-registering it would need a
+    // readSite for a module that no longer exists, i.e. a fabricated declaration
+    // for a knob that changes nothing. Reachability of the refusal (env, --knob,
+    // and decoded-manifest paths) is pinned in
+    // tests/unit/apps/bench/terminal/tb-2-0-retirement.test.ts.
+    "QUANTA_TB_BEST_OF_N",
+    "retired (TB21-06 SR-6): a refusal-only literal in apps/bench/terminal/config.ts; the sampler, its runner and its inventory entry are deleted, so there is nothing left to declare",
+  ],
+  [
     "QUANTA_FORK_EXPERIMENT",
     "dev-experiment: counterfactual trajectory-fork troubleshooting seam (jun-23 fork-experiments), not a user knob",
   ],

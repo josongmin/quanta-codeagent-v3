@@ -1,0 +1,50 @@
+id: image-downsample
+title: read_image downsample codec port — over-cap images shrink instead of reject (ADR-0507)
+section: 2
+subsystem: 도구 — vision input (oversized-image downsample via injected codec)
+order: 209
+maturity: L4
+status: new
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [interactive, headless, batch, daemon, ide]
+configurable: integrated
+owners: ["@songmin"]
+labels: ["surface:core", "absorbed:codex"]
+depends_on: [pdf-read-tool, def-tool-registry]
+config_refs:
+  env: ["QUANTA_IMAGE_DOWNSAMPLE"]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 4/4 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "pure internal codec port, no distinct UI affordance; the downsample is invisible behavior of read_image"
+purpose: |
+  Instead of hard-rejecting images over MAX_IMAGE_BYTES (5 MB), downsample them so
+  large screenshots stay usable (Codex parity). Decision is split from execution:
+  pure planImageRead (ok/downsample/reject) + scaleToMaxDim (aspect-preserving, no
+  upscale, ≥1px, finite-guarded); the decode→resize→encode rides a host-injected
+  ImageDownsamplePort (WASM/native codec — quanta vendors none). read_image becomes
+  makeReadImageTool(port?): over-cap + port ⇒ downsample (longest edge →
+  DOWNSAMPLE_MAX_DIM); over-cap + no port ⇒ reject exactly as before (byte-identical
+  default-OFF). The over-cap decision moves from stat-time to actual bytes; a port
+  "unable" result falls back to the rejection (no throw).
+evidence:
+  code:
+    - src/tool/image/downsample-plan.ts
+    - src/tool/image/downsample-port.ts
+    - src/tool/image/read.ts
+    - src/host/runtime/sips-image-downsample.ts
+  adrs: [507]
+  tests:
+    unit:
+      - tests/unit/image-downsample-plan-hellgate.test.ts
+      - tests/unit/image-downsample-wire-hellgate.test.ts
+      - tests/unit/sips-image-downsample-hellgate.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null

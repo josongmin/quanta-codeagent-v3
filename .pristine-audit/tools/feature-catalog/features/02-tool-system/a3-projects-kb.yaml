@@ -1,0 +1,83 @@
+id: projects-kb
+title: projects_kb — context-offloading knowledge-base tool (A3)
+section: 2
+subsystem: tool-system — Projects knowledge-base (context offloading, jul-03 absorption)
+order: 209
+maturity: L2
+status: new
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [interactive, headless, ide]
+configurable: integrated
+owners: ["@songmin"]
+labels: ["surface:tool", "tier:tool-system", "default-off"]
+depends_on: [def-tool-registry]
+config_refs:
+  env: [QUANTA_PROJECTS_KB]
+surface_integration:
+  cli: full
+  web: missing
+  method: audited
+  verified: "2026-07-03"
+  evidence:
+    cli: "gated leaf tool minted at the host composition root (src/host/runtime/agent-arg-builder/gated-tool-ports.ts) when QUANTA_PROJECTS_KB is on — a per-session ProjectsKbStore is threaded onto DefaultToolPorts and the tool registers in buildDefaultTools (src/tool/index.ts); reachable from the interactive CLI"
+    web: "no dedicated web affordance — the tool's op results render as ordinary tool.invoked/completed cards if invoked, but the KB itself is a per-session server-side store with no browser surface"
+purpose: |
+  A context-OFFLOADING knowledge base: the agent WRITES a local file into a
+  session KB (`project_write`), then SEARCHES / inspects it WITHOUT the raw bytes
+  ever entering its own context window. The entire value prop is the "never
+  enters context" invariant — `project_write` returns ONLY metadata (`doc_uuid`
+  + byte size); `project_search` returns pipeline-chosen SNIPPETS + `doc_uuid`s;
+  NO op ever places a doc's raw body into `ToolResult.output` / `structured`.
+
+  Ops (op-dispatch, NO-THROW — a thrown store/port/pipeline collapses to a
+  leak-safe `ok:false`, never propagates past the loop):
+    - `project_info`   — knowledge{} byte-budget accounting.
+    - `project_read`   — METADATA for one doc by uuid (NOT the body).
+    - `project_search` — delegate to the wired SearchPipeline (KB namespace),
+                         else lexical-substring fallback; hits → {name, doc_uuid, text}.
+    - `project_write`  — resolve local_path THROUGH resolveJailedDoc, read bytes,
+                         index, return {doc_uuid, bytes} ONLY.
+    - `project_delete` — drop a doc by uuid.
+
+  READ-ish bookkeeping (records into the SESSION store; the raw file is READ,
+  never mutated) — self-reports `isReadOnly: true` / `hitlTier: none`.
+
+  LEAK DISCIPLINE: error branches use FIXED, doc-content-free messages — a
+  backend error message could echo the doc bytes, so only the op label + a
+  stable reason ever leave the tool.
+
+  Gate: `QUANTA_PROJECTS_KB` default-OFF. Absent ⇒ the store is never minted and
+  the tool never registers (byte-identical tool menu). PURE leaf — the tool
+  layer takes no I/O of its own; the host wires a per-session ProjectsKbStore.
+evidence:
+  code:
+    - src/tool/projects-kb/tool.ts
+    - src/tool/projects-kb/port.ts
+    - src/tool/projects-kb/store.ts
+    - src/tool/projects-kb/index.ts
+    - src/tool/index.ts
+    - src/tool/default-tool-ports.ts
+    - src/host/runtime/agent-arg-builder/gated-tool-ports.ts
+    - src/tool/surface/gated-tools.ts
+  adrs: ["docs/analysis/jul-03-competitor-ux-absorption.md"]
+  tests:
+    unit:
+      - tests/unit/projects-kb.test.ts
+    integration: []
+    contract: []
+knobs:
+  - name: QUANTA_PROJECTS_KB
+    where: src/host/runtime/agent-arg-builder/gated-tool-ports.ts
+    default: 'off'
+    purpose: |
+      ON ⇒ the host mints ONE per-session ProjectsKbStore and threads it onto
+      DefaultToolPorts so the projects_kb tool registers. Unset ⇒ store absent,
+      tool absent, registry byte-identical.
+deliberate_hold: null
+notes: |
+  A3 (jul-03) — the "context-offloading KB" absorption: a way for the agent to
+  stash and query large local docs WITHOUT paying the context-window cost. The
+  never-enters-context invariant is the load-bearing property (pinned by
+  projects-kb.test.ts) — every op returns metadata/snippets only, and error
+  branches are content-free so a backend throw can never echo doc bytes.

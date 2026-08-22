@@ -21,11 +21,7 @@
  * probe/`resume` shape). No `@/agent` core, no reactor internals.
  */
 
-import {
-  type ContinuationDeps,
-  ContinuationSemaphore,
-  runIdleContinuation,
-} from "@/objective"
+import { type ContinuationDeps, ContinuationSemaphore, runIdleContinuation } from "@/objective"
 
 /** The host-bound probes + resume sink (everything in `ContinuationDeps` except
  *  the pieces this driver owns: `enabled`, `semaphore`, `now`). */

@@ -1,0 +1,53 @@
+id: permission-scope-4-tier
+title: PermissionScope 4-tier (managed > project > user > open)
+section: 3
+subsystem: 권한 스택 (ADR-0135)
+order: 22
+maturity: L4
+status: new
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [n-a]
+configurable: static
+owners: ["@songmin"]
+labels: [absorbed:codex, surface:cli]
+depends_on: [permission-profile-2-layer, permission-store-json, permission-4-pillar, special-path-resolver, cr3-rule-catalog-ssot-fu1-rule-per-concern-invert]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 4/4 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "pure internal RBAC precedence helper (configurable static); no user-visible affordance on any surface"
+purpose: |
+  **Codex `Scope.{user, project, managed, open}` 4-tier RBAC 흡수.** Skill scope
+  ([[0134-skill-scope-tiering]])의 7-tier보다 단순 — permission은 admin enforce
+  channel + project repo-level만 있으면 충분 (admin/team 통합 = managed).
+
+  Precedence (높을수록 강함):
+    1. **managed** — admin/team enforced. user/project override 불가.
+    2. **project** — 현 repo/project 한정.
+    3. **user** — 사용자 개인 권한 (default).
+    4. **open** — 공개 (anyone — drift surface — opt-in 필요).
+
+  `strongerScope(a, b)` helper로 두 scope 충돌 시 강한 쪽 선택.
+  `PERMISSION_SCOPE_PRECEDENCE_DESC` 배열은 strongest→weakest 순서.
+evidence:
+  code:
+    - src/permission/permission-profile.ts
+    - src/permission/two-layer-manager.ts
+    - src/permission/access-check.ts
+    - src/permission/index.ts
+  adrs: [135]
+  tests:
+    unit:
+      - tests/unit/permission-profile-types.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  - Skill scope (7-tier)과는 별도 개념 — 통합 안 함 (ADR-0135 §Out of scope).
+  - open scope의 정확한 의미는 V2 결정 (현재는 placeholder — opt-in 필요).
+  - isPermissionScope() type guard는 JSON parse boundary 안전 narrow.

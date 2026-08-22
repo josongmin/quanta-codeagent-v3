@@ -1,0 +1,48 @@
+id: anthropic-service-tier
+title: Anthropic service_tier request control (auto / standard_only, priority→auto) (ADR-0506)
+section: 8
+subsystem: LLM — request capacity tier (latency/cost posture)
+order: 206
+maturity: L4
+status: new
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [interactive, headless, batch, daemon, ide, ci-bot]
+configurable: integrated
+owners: ["@songmin"]
+labels: ["surface:core", "absorbed:claude"]
+depends_on: [llm-factory]
+config_refs:
+  env: ["QUANTA_SERVICE_TIER", "QUANTA_FAST"]
+surface_integration:
+  cli: full
+  web: full
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 3/3 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "QUANTA_SERVICE_TIER and QUANTA_FAST are both in CONFIG_ALLOWED_KEYS; web /fast /standard /flex slash commands write them via real POST /config (slash-llm-config.ts) and KnobsPanel can write SERVICE_TIER"
+purpose: |
+  Send the Anthropic `service_tier` so a run can opt into priority capacity or pin
+  standard-only. `resolveServiceTier` resolves the intent at the composition root
+  (`QUANTA_FAST` ⇒ priority; else `QUANTA_SERVICE_TIER`); the adapter threads it
+  (public-readonly, mirroring betaHeaders) to the codec, which normalizes onto the
+  value SENT: auto for {auto,priority,fast}, standard_only for {standard,
+  standard_only}, else dropped. priority/fast collapse to auto deliberately (auto
+  falls back to standard when priority capacity is unavailable). Absent ⇒ no key
+  (byte-identical); the optional 5th codec param keeps bedrock/vertex/foundry/mantle
+  byte-identical.
+evidence:
+  code:
+    - src/llm/anthropic-messages-codec.ts
+    - src/llm/adapters/anthropic.ts
+    - src/llm/factory.ts
+  adrs: [506]
+  tests:
+    unit:
+      - tests/unit/anthropic-service-tier-hellgate.test.ts
+      - tests/unit/service-tier-factory-e2e-hellgate.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null

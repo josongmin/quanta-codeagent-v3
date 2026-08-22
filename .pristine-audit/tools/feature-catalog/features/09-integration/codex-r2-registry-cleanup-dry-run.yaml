@@ -1,0 +1,61 @@
+id: codex-r2-registry-cleanup-dry-run
+title: Session registry cleanup --dry-run (preview without commit) ADR-0387
+section: 9
+subsystem: codex-r2 — cleanup preview flag extending ADR-0379
+order: 107
+maturity: L3
+status: stable
+ui_surfaces: [cli]
+monitoring: integrated
+modes: [n-a]
+configurable: n-a
+owners: ["@songmin"]
+labels: ["surface:core", "absorbed:codex", "production-wired", "tdd-strict"]
+depends_on:
+  - codex-r2-registry-r14-partial
+surface_integration:
+  cli: full
+  web: missing
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 3/3 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "user affordance is a CLI slash command; web SlashPalette server-routed commands are prefill stubs (B2), no real web handler for /session-registry"
+purpose: |
+  ADR-0387 extends ADR-0379 `/session-registry cleanup` with a `--dry-run`
+  flag so operators can preview retention sweep candidate counts (TTL
+  axis + sliding-window byte-cap axis) WITHOUT committing the eviction.
+  Adds two NEW leaf functions — `countDiskRegistryCleanupCandidates` +
+  `countSqliteRegistryCleanupCandidates` — that mirror the sweep
+  algorithm with SELECT/scan-only semantics (no `DELETE`, no `unlink`,
+  no `writeFile`). Sweep functions are NOT mutated so ADR-0379 byte
+  identical contract holds. SQLite count inverts the outermost DELETE
+  in the cumulative-bytes sliding window (`WHERE cum > maxTotalBytes`
+  becomes `SELECT COUNT(*)`); pre-filtered by TTL cutoff so size axis
+  matches what sweep would do AFTER TTL deletion. Both functions are
+  NO-THROW (open-fail / missing dir ⇒ zero values) + idempotent (zero
+  writes ⇒ DB rows + fs bytes byte-identical before/after the call).
+  Slash flag dispatch parses argv: `--dry-run` anywhere triggers the
+  preview handler; unknown flags ignored. No-flag path preserves
+  ADR-0379 exactly (case [25] explicitly pins this).
+evidence:
+  code:
+    - src/agent/session-resource-registry/disk-adapter/gc.ts
+    - src/agent/session-resource-registry/sqlite-adapter/gc.ts
+    - src/apps/cli/session-registry-cmd.ts
+  adrs:
+    - docs/decisions/0387-cleanup-dry-run.md
+  tests:
+    unit:
+      - src/agent/session-resource-registry/disk-adapter/__tests__/gc.hellgate.test.ts
+      - src/agent/session-resource-registry/sqlite-adapter/__tests__/gc.hellgate.test.ts
+      - tests/unit/session-registry-slash.test.ts
+    integration: []
+    contract: []
+knobs:
+  - name: '--dry-run flag'
+    type: 'cli flag'
+    default: 'absent (sweep commits per ADR-0379)'
+    notes: 'When present anywhere in sub-args after `cleanup`, switches to preview-only mode.'
+deliberate_hold: null
+notes: 'TTL-count-matches-sweep + size-count-matches-sweep cases [TT] + [UU] (renumbered from [JJ]+[KK] during R15 cherry-pick to avoid collision with ADR-0385 [II]..[RR]) prove the SELECT WHERE clause inverts the DELETE WHERE clause correctly. Idempotent guarantee enforced by case [5] (disk) + case [WW] (sqlite, was [MM]). Non-goals: per-session-ID detail listing + truncation byte estimates + dry-run for evict.'

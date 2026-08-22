@@ -1,0 +1,105 @@
+id: reasoning-carryover
+title: Reasoning carry-over via `encrypted_content` — OpenAI Responses / o-series (H15, Codex `ResponseItem` absorption)
+section: 8
+subsystem: LLM Responses wire — cross-turn chain-of-thought continuity (OpenAI-Responses ONLY)
+order: 1500
+maturity: L2
+status: new
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [n-a]
+configurable: integrated
+config_refs:
+  env:
+    - QUANTA_REASONING_CARRYOVER
+  runtime:
+    - reasoningCarryover
+owners: ["@songmin"]
+labels: [absorbed:codex, surface:core, tier:core, h15, default-off, provider:openai-responses, zdr]
+depends_on: [llm-stream-timeout]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 4/4 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "pure internal provider-wire mechanism, no user-visible affordance on any surface"
+purpose: |
+  Codex `encrypted_content` carry-over 흡수 (codex-rs 0.135 `ResponseItem` +
+  rollout-trace reducer/normalize + `x-reasoning-included` 헤더 + body
+  `include: ["reasoning.encrypted_content"]`). quanta는
+  `src/llm/openai-responses-wire.ts`에서 reasoning thinking을 의도적으로 DROP
+  ("non-resumable") → 멀티스텝 추론 연속성 상실 (ChatGPT-OAuth/o-series 구독 경로
+  직격). 이 슬라이스는 각 reasoning output 아이템의 opaque `encrypted_content`(+id/summary)를
+  CAPTURE → 턴별 store에 persist → 다음 턴 Responses INPUT 머리에 reasoning 아이템으로
+  RE-EMIT (`store:false` + `include:["reasoning.encrypted_content"]`). ZDR 호환 —
+  ciphertext는 로컬에서 절대 복호화하지 않음.
+
+  default-OFF byte-identity (HOT PATH 비협상): `QUANTA_REASONING_CARRYOVER` strict
+  `=== "1"` opt-in. OFF ⇒ responses-wire 경로가 오늘과 BYTE-IDENTICAL — thinking 여전히
+  drop, capture 없음, `reasoningItem` 키 미부착(legacy 2-field done payload), `include`
+  필드 없음, prior reasoning 재투입 없음. ON ⇒ capture+carry-over. Anthropic 어댑터와
+  chat-completions 경로는 NEVER 영향 (provider-scoped to the Responses surface — Anthropic
+  thinking-signature는 이미 자체 채널로 재제출하므로 OpenAI-Responses 한정 갭).
+
+  3 레이어: (1) capture — `parseResponsesEvents` `response.output_item.done` reasoning
+  arm이 `normalizeResponsesReasoningItem`로 재투입가능 input 아이템 추출 →
+  `ResponsesOutputItemDone.reasoningItem`에 surface (gate ON일 때만). (2) persist —
+  `streamResponsesSurface`가 per-route `ResponsesReasoningCarryoverStore`에 put
+  (latest supersedes; reasoning-없는 턴은 route clear → stale 미재투입). (3) re-emit —
+  `prepareResponsesContinuationRequest`/`buildResponsesBody`가 prior reasoning을 input
+  머리에 prepend + `include` 부착. typed-event `ReasoningEchoEvent.carryover`(opaque
+  Record)에 재투입 아이템 보존 필드 배선 (Anthropic producer는 undefined로 byte-identical).
+
+  안전: missing/empty/non-string `encrypted_content` ⇒ null safe-skip (no crash, Codex
+  reducer "contained no … encrypted_content" 스킵 미러). 다중 reasoning 아이템 순서보존.
+  fingerprint은 OFF에서 `include` 부재로 byte-identical (ON일 때만 달라짐).
+evidence:
+  code:
+    - src/llm/openai-responses-wire.ts
+    - src/llm/responses-stream.ts
+    - src/memory/typed-event/types.ts
+    - src/shared/runtime-config.ts
+    - src/llm/factory.ts
+    - src/llm/adapters/openai-responses.ts
+    - src/llm/adapters/chatgpt-oauth.ts
+  adrs: []
+  tests:
+    unit:
+      - tests/unit/reasoning-carryover-hellgate.test.ts
+      - tests/unit/reasoning-carryover-e2e-hellgate.test.ts
+      - tests/unit/reasoning-carryover-live-e2e-hellgate.test.ts
+    integration: []
+    contract: []
+knobs:
+  - name: QUANTA_REASONING_CARRYOVER
+    where: src/shared/runtime-config.ts (reasoningCarryover)
+    default: false
+    purpose: |
+      Strict `=== "1"` opt-in. Default false ⇒ responses-wire byte-identical
+      (encrypted reasoning dropped, no `include`, no re-emit). OpenAI-Responses /
+      o-series ONLY (the ChatGPT-OAuth subscription path). When "1" the wire
+      captures each reasoning item's opaque `encrypted_content`, persists it
+      per-route, and re-emits it at the head of the next turn's Responses input
+      with `store:false`.
+deliberate_hold: null
+notes: |
+  Composition-root adapter wire LANDED (2026-07): `src/llm/factory.ts:163`
+  (OpenAIResponsesAdapter) and `:219` (ChatGPTOAuthAdapter) thread
+  `reasoningCarryover: true` when `resolveReasoningCarryover(env)`
+  (`QUANTA_REASONING_CARRYOVER`, factory.ts:291) is on; each adapter consumes it
+  and allocates one per-session `defaultResponsesReasoningCarryoverStore()` at
+  construction (`src/llm/adapters/openai-responses.ts:84-88`,
+  `src/llm/adapters/chatgpt-oauth.ts:212-214`). OFF ⇒ adapters allocate no store
+  and are byte-identical (proven live in
+  `tests/unit/reasoning-carryover-live-e2e-hellgate.test.ts`). Still default-OFF
+  by knob; the `x-reasoning-included` transport header remains an optional
+  adapter-side seam (the body-level `include` field is the functional SSOT).
+
+  ZDR-compatible: `encrypted_content` is opaque ciphertext — captured, stored,
+  and re-fed verbatim, NEVER decoded locally. Orthogonal to prompt-cache resume
+  (`previous_response_id`): carry-over re-emit applies to the full-body path; the
+  `previous_response_id` resume path already carries server-side reasoning, so it
+  is intentionally NOT double-fed. Provider-scoped: Anthropic + chat-completions
+  paths never touch this code.

@@ -1,0 +1,59 @@
+id: codex-r2-loop-activation-hook
+title: Loop hook for plugin activation + auto-wire (ADR-0346 / 0350)
+section: 4
+subsystem: per-turn plugin activation trigger from user mentions
+order: 104
+maturity: L3
+status: stable
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [n-a]
+configurable: n-a
+owners: ["@songmin"]
+labels: ["surface:core", "absorbed:codex", "production-wired"]
+depends_on:
+  - codex-r2-mention-injection-pipeline
+  - codex-r2-composition-install-and-registry
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 3/4 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "Pure internal per-turn loop hook (plugin activation + activeSkills union); no user-visible surface affordance."
+purpose: |
+  Closes the gap between ADR-0340 `cfg.activatePlugins` slot (per-session
+  closure) and the per-turn invocation. ADR-0346 ships
+  `src/agent/loop-activation-hook.ts` — `prepareTurnContext` calls
+  `resolvePluginActivationForTurn(config, latestUserText, turnId)` BEFORE
+  `buildTurnContext`, unions the resolved skills into
+  `TurnContextInput.activeSkills` via `unionActiveSkills` (caller-wins).
+  ADR-0350 auto-wires the slot at the primary composition root
+  (`apps/agent/assemble.ts`): `autoWirePluginActivation(cfg)` runs after
+  `installCodexR2Wires`, scans `<cwd>/.quanta/plugins` for manifests, and
+  populates `cfg.activatePlugins` if any are found. NO-THROW throughout —
+  empty discovery / fs errors / handler construction failures all degrade
+  to the legacy "no activation" path.
+evidence:
+  code:
+    - src/agent/loop-activation-hook.ts
+    - src/agent/plugin-activation-handler/auto-wire.ts
+    - src/agent/loop.ts
+    - src/apps/agent/assemble.ts
+  adrs:
+    - docs/decisions/0346-loop-activation-hook.md
+    - docs/decisions/0350-composition-activation-auto-wire.md
+  tests:
+    unit:
+      - tests/unit/loop-adr-0346-activation-hook-hellgate.test.ts
+      - tests/unit/composition-activation-auto-wire-hellgate.test.ts
+    integration: []
+    contract: []
+knobs:
+  - name: AgentConfig.activatePlugins
+    type: '(mentions, opts?) => Promise<AggregatedActivation>'
+    default: 'undefined (auto-wired by assemble.ts if <cwd>/.quanta/plugins/*/.codex-plugin/plugin.json exists)'
+    notes: 'Caller-override-precedence: an explicit set bypasses auto-wire. Bench surface (sessionId-less) skips registry-keyed emit.'
+deliberate_hold: null
+notes: 'ADR-0350 deliberately omits skillRegistry from auto-wire — building it requires the async `buildSkillBlock` path and assemble.ts is sync. Hosts wanting plugin-declared skills set cfg.activatePlugins themselves with a fully-baked handler.'

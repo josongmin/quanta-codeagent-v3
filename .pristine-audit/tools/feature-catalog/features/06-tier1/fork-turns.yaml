@@ -1,0 +1,49 @@
+id: fork-turns
+title: fork_turns — spawned subagent inherits parent's recent (redacted) turns (ADR-0511)
+section: 6
+subsystem: subagent — parent-context inheritance (Codex fork_turns parity)
+order: 215
+maturity: L4
+status: new
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [interactive, headless, ide]
+configurable: integrated
+owners: ["@songmin"]
+labels: ["surface:core", "absorbed:codex"]
+depends_on: [agent-loop-core]
+config_refs:
+  env: []
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 3/3 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "internal per-spawn tool parameter (selectForkTurns/redact/composeForkedPrompt) affecting child prompt; no distinct browser UI affordance"
+purpose: |
+  The `agent` spawn gains a `fork_turns` input (none[default] | all | N): a child
+  inherits the parent's recent conversation instead of starting cold (Codex
+  fork_turns parity; the other peer verbs already existed). A "turn" is a
+  user-message boundary; N keeps the last N user exchanges. The selected
+  transcript is REDACTED (secret + PII scrubbed via the advisor's redactTranscript)
+  and prepended to the child prompt framed as DATA (not instructions). Pure core
+  (selectForkTurns/buildForkTurnsPreamble/composeForkedPrompt) + a plane-clean
+  forkPrompt callback injected by the tier-1 builder (the @/subagent leaf never
+  imports @/agent). Default `none` ⇒ prompt unchanged (byte-identical cold start).
+  No env gate — it's a per-spawn tool input. The 3-tool-plane consolidation
+  (GAP8b) is a cosmetic refactor, deliberately skipped.
+evidence:
+  code:
+    - src/agent/fork-turns.ts
+    - src/subagent/agent-tool.ts
+    - src/agent/tier1/subagent.ts
+  adrs: [511]
+  tests:
+    unit:
+      - tests/unit/fork-turns-hellgate.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null

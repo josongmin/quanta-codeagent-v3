@@ -34,8 +34,9 @@
  * attach path did not even carry the declared bootstrap: an unverified reuse
  * silently defeats the pin, and a report that cites the pin would then be false.
  */
-import { resolveDatasetFamilyProfile } from "../../profiles/registry"
+
 import type { DatasetFamily } from "../../dataset-family-token"
+import { resolveDatasetFamilyProfile } from "../../profiles/registry"
 import type { FamilyRemoteBootstrap } from "../../profiles/types"
 import type { SpawnResult } from "../backend"
 import { executeFamilyRemoteBootstrap } from "./family-bootstrap-exec"
@@ -51,6 +52,28 @@ export interface FamilyBoxSetupInput {
 }
 
 /**
+ * The family ADMISSION gate, on its own — the FIRST thing `bootstrapBox` does,
+ * ahead of `mkdir ~/quanta`, the `src/` rsync, the config scp and `bun install`.
+ *
+ * 🔴 WHY IT IS SEPARATE FROM `setupBox` (aug-22 A-C). `setupBox` conflates two
+ * questions — "may this family run here at all?" (ProMax: no) and "make the box
+ * ready" (Pro: clone a harness, build a venv) — and it was called at the END of
+ * `bootstrapBox`. So on the FRESH-PROVISION path a refusing family's refusal
+ * arrived after the box had been created, mkdir'd, rsynced and installed into:
+ * the guard fired, but everything it was guarding had already happened. The
+ * attach path had been fixed; this is the same fix for the path that provisions.
+ *
+ * It takes no `ssh` ({@link FamilyAdmissionInput} has none), so "admission
+ * cannot mutate the box" is a property of the type, not of the call site.
+ */
+export const assertFamilyAdmitsBox = (args: {
+  readonly family: DatasetFamily
+  readonly log: (m: string) => void
+}): void => {
+  resolveDatasetFamilyProfile(args.family).admitBox({ log: args.log })
+}
+
+/**
  * ON-BOX family bootstrap. `bootstrapBox`'s callee: run the family's own
  * admission gate, then its declared AGENT-phase bootstrap.
  *
@@ -58,15 +81,22 @@ export interface FamilyBoxSetupInput {
  * with a fake ssh.
  */
 export const setupBoxForFamily = async (args: FamilyBoxSetupInput): Promise<void> => {
-  // 1. ADMISSION. A family that refuses this lane refuses it BEFORE the box is
-  //    asked to do anything on its behalf.
+  // 0. ADMISSION, again. `bootstrapBox` already ran this before it touched the
+  //    box (see `assertFamilyAdmitsBox`); repeating it here costs nothing (the
+  //    port issues no command) and keeps the ordering true for every OTHER
+  //    caller of this callee, including the warm-box reuse gate below.
+  assertFamilyAdmitsBox({ family: args.family, log: args.log })
+  // 1. The family's imperative on-box setup. Still second, and still ahead of
+  //    the declared bootstrap.
+  await resolveDatasetFamilyProfile(args.family).setupBox({ ssh: args.ssh, log: args.log })
+  // 2. The declared AGENT-phase bootstrap. Gold-bearing commands are grader
+  //    phase and are refused here by the executor's cross-check.
   await executeFamilyRemoteBootstrap({
     bootstrap: args.bootstrap,
     phase: "agent",
     ssh: args.ssh,
     log: args.log,
   })
-  await resolveDatasetFamilyProfile(args.family).setupBox({ ssh: args.ssh, log: args.log })
 }
 
 /**
@@ -86,6 +116,12 @@ export const setupBoxForFamily = async (args: FamilyBoxSetupInput): Promise<void
  * byte-identical reuse.
  */
 export const ensureWarmBoxFamilyBootstrap = async (args: FamilyBoxSetupInput): Promise<void> => {
+  // ADMISSION FIRST, ahead of the `declares` early-return below. A family that
+  // refuses this lane refuses a REUSED box too, and gating that on "does it
+  // declare a bootstrap?" made the refusal reachable only for families that
+  // happen to have one — a refusing family without a declared bootstrap was
+  // silently handed a warm box. Free for admitting families: no ssh, no branch.
+  assertFamilyAdmitsBox({ family: args.family, log: args.log })
   const declares = resolveDatasetFamilyProfile(args.family).remoteBootstrap !== undefined
   if (!declares) return
   if (args.bootstrap === undefined) {

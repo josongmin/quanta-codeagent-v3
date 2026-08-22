@@ -27,6 +27,15 @@
  *     `rollback_failed` terminal (fail-closed) — the op is resolved, not left
  *     dangling, and the tree is NOT restored over.
  *   - No pending ⇒ empty recovery (default-OFF / clean-session no-op).
+ *
+ * SLICE FENCE (ADR-0024): this file is on the `biome.json` allowlist for
+ * `src/apps/cli/**` imports — same mechanism as the sibling
+ * `tests/unit/cli-rewind-slash-hellgate.test.ts`, which drives the same
+ * `rewind-cmd` front door. Legitimate because the CLI front door IS the subject:
+ * the dead seam being closed is `/rewind --recover`'s wire into the coordinator,
+ * which cannot be observed from a library-side surface. `src/apps/cli/internal.ts`
+ * is inside the same fenced group, so routing through it would launder the
+ * coupling rather than remove it. NO production code is touched by this test.
  */
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"

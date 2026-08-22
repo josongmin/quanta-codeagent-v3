@@ -1,0 +1,67 @@
+id: oauth-refresh-lock
+title: Distributed OAuth refresh lock (port + 3 impls + fallback chain)
+section: 8
+subsystem: Authentication — distributed coordination
+order: 7
+maturity: L2
+status: stable
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [n-a]
+configurable: integrated
+owners: ["@songmin"]
+labels: ["surface:core", "auth", "oauth", "distributed-lock", "adr-0163"]
+depends_on: [github-token-rotation, oidc-federation]
+config_refs:
+  env: []
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 2/4 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "pure internal distributed-lock primitive (memory/file/redis-stub + fallback chain, ui_surfaces n-a), no UI affordance"
+purpose: |
+  `OAuthRefreshLockPort` is the single port behind 3 concrete implementations:
+  `InMemoryLock` (per-process Map, re-entrant), `FileBasedLock` (cross-process
+  same-machine via `~/.quanta/locks/{key}.lock` + JSON payload with PID +
+  holderId + expiresAt), `RedisLockStub` (Phase-1 stub returning `redis-error`
+  on every call; Phase 2 wires `SETNX … EX ttl NX` + Lua EVAL release script).
+  `FallbackLock` chains ports: `(redis → file → memory)` — try each in order,
+  fall through on `redis-error`, return on `acquired`/`would-wait`/
+  `would-acquire`. The `LockResult` discriminator names mirror Cursor's
+  `MCP_O_AUTH_REFRESH_LOCK_*` telemetry verbatim (`acquired` / `would-wait` /
+  `would-acquire` / `redis-error`) so cross-tool observability stays
+  comparable. Negative invariant: no setTimeout reapers — stale locks are
+  detected lazily at the next `tryAcquire` via TTL comparison against the
+  injected `ClockPort`. Re-entrant: same holder re-acquire RENEWS the TTL.
+  Holder mismatch on release is a no-op (no stale holder can clear someone
+  else's lock).
+evidence:
+  code:
+    - src/auth/oauth-refresh-lock.ts
+    - src/auth/lock-in-memory.ts
+    - src/auth/lock-file-based.ts
+    - src/auth/lock-redis-stub.ts
+  adrs:
+    - docs/decisions/0163-multicloud-oauth-lock.md
+  tests:
+    unit:
+      - tests/unit/oauth-refresh-lock-hellgate.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold:
+  scope: real-redis-implementation
+  reason: |
+    Phase 1 ships the stub so callers can wire the fallback chain in advance;
+    Phase 2 wires `ioredis` SETNX + Lua release once the auth layer needs
+    cross-machine coordination. Avoiding `ioredis` in Phase 1 keeps the
+    install footprint clean for the (vast majority) single-instance users.
+notes: |
+  L4: 30-test hellgate covers per-impl semantics + fallback chain + concurrent
+  storm (5 holders, exactly 1 acquires) + clock skew (backwards) + corrupt
+  JSON treated as stale + wrong-holder release no-op + ttlMs<=0 throws.
+  Closed-port `ClockPort` injection eliminates `Date.now()` from every impl
+  so tests are byte-deterministic.

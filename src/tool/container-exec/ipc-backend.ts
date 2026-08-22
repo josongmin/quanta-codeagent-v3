@@ -1,5 +1,5 @@
 /**
- * IPC-bridge {@link ContainerExec} (RFC jun-29 §11 F2 — impl-B). The cross-language transport: a
+ * IPC-bridge {@link ContainerExec} (TB21-06 TC-1a — the impl-B IPC bridge). The cross-language transport: a
  * brain process (this TS side) decides WHAT command to run; a separate hands process (e.g. a
  * Python shim holding a container-orchestrator `environment`) actually runs it and returns the
  * result. They speak a line-delimited JSON protocol over an injected duplex — backend-agnostic

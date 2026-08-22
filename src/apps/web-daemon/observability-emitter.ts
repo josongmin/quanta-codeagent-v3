@@ -27,8 +27,8 @@
  */
 
 import type { ApprovalRequest, ApprovalStateMachinePort } from "@/agent/approval-state-machine"
-import type { Objective, ObjectivePort } from "@/objective"
 import type { RunEntry, RunLedgerPort } from "@/agent/run-ledger"
+import type { Objective, ObjectivePort } from "@/objective"
 // Generic id-keyed-map structural-delta reconciler — the diff PROTOCOL lives in
 // core so this push surface only shapes store reads + forwards the computed
 // delta (thin-surface audit).

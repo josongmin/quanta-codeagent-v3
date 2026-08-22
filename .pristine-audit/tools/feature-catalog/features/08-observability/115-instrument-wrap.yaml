@@ -1,0 +1,53 @@
+id: instrument-wrap
+title: Metrics instrument wrap helpers + Grafana + alerts + E2E coverage
+section: 8
+subsystem: metrics export (ADR-0144/0158)
+order: 115
+maturity: L2
+status: stable
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [n-a]
+configurable: partial
+owners: ["@songmin"]
+labels: ["surface:observability", "tier:wrap"]
+depends_on: [metrics-typed-port-slice, otel-sink, instrument-extra-and-helper, background-subagent, budget-ledger]
+surface_integration:
+  cli: missing
+  web: missing
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "src evidence not reachable from the interactive CLI entry (src/apps/cli/index.ts) — wired only into other apps (eval/bench/probe/headless) or unwired"
+    web: "metrics emitted to OTel/Prometheus plus Grafana dashboard, never to the quanta web frontend"
+purpose: |
+  Closes the loop from ADR-0158 recipe (24-metric table) to actual end-to-end
+  monitoring: (a) `instrumentLlmProvider` + `instrumentSubagentScheduler` +
+  `withCallCounter` typed wrappers that emit the recipe metrics from caller's
+  composition root without slice-side imports; (b) `docs/observability/grafana-quanta.json`
+  24-panel dashboard import-ready; (c) `docs/observability/alerts-quanta.yaml`
+  9 AlertManager rules across 3 severity tiers; (d) `instrumentation-coverage-e2e.test.ts`
+  drift-catching test that 1-turn flow records ALL expected metrics.
+evidence:
+  code:
+    - src/observability/metrics/instrument.ts
+    - src/observability/metrics/instrument-tool.ts
+    - src/observability/metrics/instrument-shadow.ts
+    - src/observability/metrics/instrument-budget.ts
+    - src/observability/metrics/instrument-lsp.ts
+    - src/observability/metrics/observability-helper.ts
+  adrs: ["docs/decisions/0158-monitoring-recipe.md", "docs/decisions/0159-monitoring-impl-wrap-dashboard-alerts.md"]
+  tests:
+    unit:
+      - tests/unit/observability-metrics-instrument-hellgate.test.ts
+      - tests/unit/observability-metrics-instrument-shadow-tool-hellgate.test.ts
+      - tests/unit/observability-metrics-instrument-extra-hellgate.test.ts
+    integration:
+      - tests/integration/instrumentation-coverage-e2e.test.ts
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  All wraps are PURE forwarding (method contract preserved, metrics.increment
+  failures swallowed via `safe()`). Slice itself never imports `@/observability`
+  (plane-clean preserved — caller wires).

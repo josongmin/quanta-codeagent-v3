@@ -30,10 +30,10 @@
  *    HELL-ARGS-05: `--mode interactive` needs none of them.
  */
 
+import { describe, expect, test } from "bun:test"
 import { mkdtempSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { describe, expect, test } from "bun:test"
 import { AgentArgsError, parseAgentArgs } from "../../../src/apps/agent/cli-args"
 import {
   dispatchReplSlash,

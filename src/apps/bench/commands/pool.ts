@@ -15,7 +15,7 @@ import {
 import { resolveBenchmarkRunConfig } from "../benchmark-suite"
 import type { DatasetFamily } from "../dataset-family-token"
 import { resolveRemoteBenchExecutionPreset } from "../preset"
-import { readFamilyCorpusText } from "../profiles/corpus-read"
+import { loadFamilyCorpusRowsOrThrow, readFamilyCorpusText } from "../profiles/corpus-read"
 import { familyPlanNotes } from "../profiles/plan"
 import { refreshRemoteAuthJson } from "../remote/fresh-auth"
 import { buildForwardedBenchEnv } from "../remote/full"
@@ -79,8 +79,25 @@ const runIdFromDataset = (path: string): string => {
 /** Allocate UNIQUE pool chunk runIds from dataset paths. Basenames may collide
  *  (`a/same.jsonl`, `b/same.jsonl`) — suffix duplicates deterministically so the
  *  box-side `~/runs/<runId>/...` dirs and the pool's per-runId result map never
- *  collide. */
-const buildPoolChunks = (datasetPaths: readonly string[]): PoolChunk[] => {
+ *  collide.
+ *
+ *  C-A (aug-22): each chunk also DECLARES the instance set it is accountable
+ *  for. Every denominator guard downstream — `missingInstances`,
+ *  `coverageComplete`, and the merged receipt's `additionalAssignedInstanceIds`
+ *  — is conditional on `chunk.instanceIds`, and this builder (the DEFAULT one,
+ *  taken whenever `--chunk-size` is absent) left it unset. A chunk whose box
+ *  died after grading 2 of N therefore merged to a receipt claiming N=2 assigned:
+ *  the flattering denominator, on the artifact every surface reads. The ids come
+ *  from the FAMILY's own reader — the same decode the run itself performs — so a
+ *  chunk can never declare a set the run would not have executed.
+ *
+ *  Fail-closed on an unreadable/empty dataset: the pool is about to scp that
+ *  exact file to a box and spend a grade on it, so a dataset that cannot be read
+ *  here is a refusal, never a chunk with an unknown denominator. */
+const buildPoolChunks = (
+  datasetPaths: readonly string[],
+  family: DatasetFamily,
+): PoolChunk[] => {
   const seen = new Map<string, number>()
   return datasetPaths.map((datasetPath) => {
     const base = runIdFromDataset(datasetPath)
@@ -89,6 +106,9 @@ const buildPoolChunks = (datasetPaths: readonly string[]): PoolChunk[] => {
     return {
       runId: nth === 1 ? base : `${base}_${nth}`,
       datasetPath,
+      instanceIds: loadFamilyCorpusRowsOrThrow({ datasetPath, surface: "pool", family }).map(
+        (row) => row.instanceId,
+      ),
     }
   })
 }
@@ -122,7 +142,7 @@ const microchunkToPoolChunk = (m: Microchunk): PoolChunk => ({
  * when `--chunk-size` is set. In dry-run, microchunks are PLANNED only (no slice
  * files written); a real run materializes them on disk.
  */
-const resolvePoolChunks = (
+export const resolvePoolChunks = (
   datasets: readonly string[],
   dryRun: boolean,
   // PMX-02 — the family whose reader slices these chunks. Resolved once at the
@@ -130,7 +150,7 @@ const resolvePoolChunks = (
   family: DatasetFamily,
 ): PoolChunk[] => {
   const size = microchunkSizeArg()
-  if (size === undefined) return buildPoolChunks(datasets)
+  if (size === undefined) return buildPoolChunks(datasets, family)
   const readRows = (text: string) => readFamilyCorpusText(text, family)
   const outDirOverride = argValue("--microchunk-dir")
   const chunks: PoolChunk[] = []

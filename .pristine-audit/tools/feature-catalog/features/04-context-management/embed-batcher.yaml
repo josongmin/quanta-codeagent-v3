@@ -1,0 +1,74 @@
+id: embed-batcher
+title: EmbedBatcher — 50ms window + single-flight dedupe + provider batch_size
+section: 4
+subsystem: retrieval slice — embed-batcher (ADR-0264)
+order: 95
+maturity: L2
+status: new
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [n-a]
+configurable: integrated
+owners: ["@songmin"]
+labels: ["surface:core", "adr:0264", "adr:0254"]
+depends_on: []
+surface_integration:
+  cli: missing
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "src evidence not reachable from the interactive CLI entry (src/apps/cli/index.ts) — wired only into other apps (eval/bench/probe/headless) or unwired"
+    web: "Pure internal coalesce/dedupe primitive, no UI affordance on any surface."
+purpose: |
+  Wrap any `embed(texts): Promise<vectors>` underlying with a closed-port
+  batcher that fixes three failure modes of the single-text caller API:
+    - N-call amplification: N concurrent same-tick `embed(text)` calls
+      collapse into 1 underlying HTTP call (window coalesce).
+    - Duplicate-text fan-out: identical texts in the same window — or
+      currently in-flight from a prior flush — share a single underlying
+      call (single-flight dedupe, in-batch AND cross-flush).
+    - Provider batch_size violation: a flush larger than `maxBatchSize`
+      splits into chunks issued in parallel.
+  AbortSignal propagation: pre-enqueue → immediate `aborted`; post-enqueue
+  → removed from pending, resolved with `aborted`, other callers in the
+  same batch unaffected. Config validation surfaces as `config-invalid`
+  result, never a thrown construction error.
+  Default-OFF / byte-identical: no production caller is re-pointed in
+  this round — the slice is wire-shape only.
+evidence:
+  code:
+    - src/retrieval/batching/types.ts
+    - src/retrieval/batching/port.ts
+    - src/retrieval/batching/single-flight.ts
+    - src/retrieval/batching/default-batcher.ts
+    - src/retrieval/batching/index.ts
+  adrs: [264, 254]
+  tests:
+    unit:
+      - tests/unit/retrieval/embed-batcher-hellgate.test.ts
+    integration: []
+    contract: []
+knobs:
+  - name: BatchConfig.windowMs
+    default: 'undefined'
+    purpose: 'accumulation window in ms; `0` schedules on `queueMicrotask`'
+  - name: BatchConfig.maxBatchSize
+    default: 'undefined'
+    purpose: 'provider per-request cap; outgoing chunks honour this'
+  - name: UnderlyingEmbedder.embed
+    default: 'undefined'
+    purpose: 'structural seam over any `EmbeddingPort`-shaped object'
+deliberate_hold:
+  reason: |
+    Wire-up into commit-embedder / hybrid-query / future memory retrievers
+    is intentionally deferred. RFC §1.2 byte-identical landing first;
+    feature wiring follows in a separate round once retriever composition
+    callers are ready to opt-in via the closed port.
+notes: |
+  The slice's barrel is `@/retrieval/batching` — `src/retrieval/index.ts`
+  is on the unchanged constraint envelope for this round, so the batcher
+  is NOT re-exported from the top-level retrieval surface. Callers import
+  directly. BatchError is a closed 4-arm union (`underlying-failed` /
+  `aborted` / `vector-missing` / `config-invalid`); the hellgate proves
+  exhaustiveness via `assertNever`.

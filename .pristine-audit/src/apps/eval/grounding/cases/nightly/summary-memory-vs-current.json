@@ -1,0 +1,23 @@
+{
+  "schema": 2,
+  "id": "summary-memory-vs-current",
+  "usecase": "persistent-context.conversation-state.thread-grounding",
+  "memoryContext": "Earlier lane oauth_abort_flow was blocked by missing endpoint parity proof.",
+  "history": [
+    {
+      "role": "assistant",
+      "text": "Current active thread prompt_rules is finishing the prompt-policy observability pass."
+    }
+  ],
+  "targetUtterance": "이제 다 끝냈냐?",
+  "gold": {
+    "activeThreadId": "prompt_rules",
+    "referentId": "prompt_rules",
+    "intent": "status_check",
+    "scope": "current_workstream",
+    "shouldClarify": false,
+    "confidence": "medium"
+  },
+  "bucket": "stale_context_trap",
+  "severity": "medium"
+}

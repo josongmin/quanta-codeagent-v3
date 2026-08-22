@@ -1,0 +1,64 @@
+id: subagent-fanout-parallel
+title: Subagent fanout parallelization — `agent.isConcurrencySafe = true` + `parallel_worker` flag (ADR-0298)
+section: 6
+subsystem: Tier-1 subagent fanout via streaming-dispatch barrier
+order: 296
+maturity: L4
+status: new
+ui_surfaces: [cli]
+monitoring: integrated
+modes: [interactive, headless, batch, daemon, ide, ci-bot]
+configurable: static
+owners: ["@songmin"]
+labels: [absorbed:cursor, tier:1, surface:core]
+depends_on: [subagent-6-tools, subagent-background-wire, create-stream-dispatcher]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 2/2 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "pure internal dispatch-concurrency primitive (parallel_worker flag functional ZERO); no UI control; runs only show read-only in RunColumn"
+purpose: |
+  Cursor 3.2 `is_parallel_worker:true` 패턴을 흡수하여 단일 assistant 메시지에
+  `agent` 도구 호출 N개를 emit 했을 때 streaming-dispatch barrier 가 자동으로
+  병렬 dispatch (Phase 1 in-flight overlap) 하도록 `agent.isConcurrencySafe` 를
+  `() => false` 에서 `() => true` 로 flip. 자식 subagent 는 별도 conversation
+  envelope (own registry record + AbortController + working memory + checkpoint
+  path) 이라서 sibling spawn 사이에 공유 mutable state 가 없음 — barrier 가
+  보호하는 것은 parent loop 의 race condition 인데, child 의 effect 는 child 의
+  own dispatch 안에서 직렬화되므로 parent dispatch 와 직교함. 추가로 Cursor
+  의 declarative pattern 을 모방하여 `parallel_worker?: boolean` schema 필드를
+  추가 (functional 의미 ZERO — telemetry/HITL 그룹핑 용도). 휴리스틱 아닌 LLM
+  의 명시적 선언. 기존 barrier (write/bash 같은 unsafe sibling 에서 engage) 는
+  완전히 보존됨 — agent fanout 은 HOL barrier 의미를 약화시키지 않음.
+evidence:
+  code:
+    - src/subagent/agent-tool.ts
+    - src/agent/prompt-body.ts
+  adrs: [298]
+  tests:
+    unit:
+      - tests/unit/subagent-fanout-hellgate.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  15-case hellgate seals 5 invariants: (1) declarative surface
+  (isConcurrencySafe===true, flag-independent, accepts parallel_worker
+  without error, isReadOnly unchanged); (2) streaming-dispatch fanout (3
+  spawns start before stream end, wall-clock < serial floor, result ordering
+  preserved under reverse completion, onToolStart fires per call); (3)
+  barrier interaction (agent × 2 + write → write deferred; write +
+  agent × 2 → agents deferred serial); (4) per-call depth + maxDepth +
+  unique task_id under concurrent registration; (5) child isolation —
+  independent abort signals, flag does not leak into SubagentRequest.
+  Mechanism re-uses existing streaming-dispatch.ts (ADR-0072 family) —
+  zero mutation to that file, loop.ts, registry.ts, or any permission /
+  plan-mode guard. Pre-existing 87-case regression suite (checkpoint,
+  cancellation, task-kind, continue-from, 6-tools, streaming-dispatch) all
+  pass unchanged. Negative invariant: `agent.isReadOnly()` stays false —
+  spawning IS a side effect even when child reads only; plan-mode dispatch
+  guards (which read isReadOnly) are NOT bypassed.

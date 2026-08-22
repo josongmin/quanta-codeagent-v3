@@ -8,7 +8,7 @@
  */
 
 import { describe, expect, test } from "bun:test"
-import { INDETERMINATE, type Progress, mergeProgress, progressEquals, toProgress } from "@/activity"
+import { INDETERMINATE, mergeProgress, type Progress, progressEquals, toProgress } from "@/activity"
 
 describe("D1 · toProgress (validate + clamp, never fabricate)", () => {
   test("a valid ratio passes through", () => {

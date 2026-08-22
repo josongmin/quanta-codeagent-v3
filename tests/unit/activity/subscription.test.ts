@@ -27,17 +27,25 @@ import {
   type ActivityEvent,
   type ActivityKind,
   type ActivityStatus,
-  type RawActivitySource,
-  createActivitySubscription,
   createActivityStore,
+  createActivitySubscription,
+  type RawActivitySource,
 } from "@/activity"
 
 // ── event builders ───────────────────────────────────────────────────────────
-const open = (id: string, parentId: string | null = null, kind: ActivityKind = "operation"): ActivityEvent => ({
+const open = (
+  id: string,
+  parentId: string | null = null,
+  kind: ActivityKind = "operation",
+): ActivityEvent => ({
   type: "node_open",
   node: { id, parentId, kind, label: id },
 })
-const status = (id: string, s: ActivityStatus): ActivityEvent => ({ type: "node_status", id, status: s })
+const status = (id: string, s: ActivityStatus): ActivityEvent => ({
+  type: "node_status",
+  id,
+  status: s,
+})
 const prog = (id: string, completed: number, total: number): ActivityEvent => ({
   type: "node_progress",
   id,
@@ -61,8 +69,7 @@ const makeManual = (): { schedule: (f: () => void) => void; run: () => void } =>
   }
 }
 
-const idOf = (e: ActivityEvent): string | undefined =>
-  e.type === "node_open" ? e.node.id : e.id
+const idOf = (e: ActivityEvent): string | undefined => (e.type === "node_open" ? e.node.id : e.id)
 
 // ── NEG. negative control: the hazard the atomic API removes ─────────────────
 describe("D1 · negative control (the race is real)", () => {
@@ -170,7 +177,11 @@ describe("D1 · ordered lifecycle delivery", () => {
     // two distinct progress slots survive (the seal prevented cross-lifecycle merge)
     const progVals = seen
       .filter((c) => c.event.type === "node_progress")
-      .map((c) => (c.event.type === "node_progress" && c.event.progress.kind === "ratio" ? c.event.progress.completed : -1))
+      .map((c) =>
+        c.event.type === "node_progress" && c.event.progress.kind === "ratio"
+          ? c.event.progress.completed
+          : -1,
+      )
     expect(progVals).toEqual([1, 5])
   })
 })
@@ -190,7 +201,11 @@ describe("D1 · bounded coalescing", () => {
     const progEvents = seen.filter((c) => c.event.type === "node_progress")
     expect(progEvents.length).toBe(1) // coalesced to one
     const only = progEvents[0]?.event
-    expect(only?.type === "node_progress" && only.progress).toEqual({ kind: "ratio", completed: 9, total: 10 })
+    expect(only?.type === "node_progress" && only.progress).toEqual({
+      kind: "ratio",
+      completed: 9,
+      total: 10,
+    })
   })
 
   test("distinct nodes each keep their own coalesced slot (order preserved)", () => {

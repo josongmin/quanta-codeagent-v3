@@ -1,0 +1,86 @@
+id: run-ledger-attribution
+title: ADR-0401 Run-ledger attribution via hook bus (bash/subagent/mcp observer)
+section: 9
+subsystem: Long-running work observability (ADR-0395 wave-2)
+order: 397
+maturity: L3
+status: stable
+ui_surfaces: [cli]
+monitoring: integrated
+modes: [interactive, headless, batch, daemon, ide]
+configurable: integrated
+owners: ["@songmin"]
+labels: ["surface:core", "default-off"]
+depends_on: [run-ledger, hookbus]
+surface_integration:
+  cli: full
+  web: full
+  method: audited
+  verified: "2026-07-19"
+  evidence:
+    cli: "The observability composition wire subscribes createRunLedgerHookSubscriber to the live post_tool_use bus; MCP task polling now produces real waiting/running/terminal ledger records."
+    web: "the web runtime factory supplies the same live hook-bus subscriber and projects the populated ledger into RunColumn."
+purpose: |
+  Wave-2 wiring for the wave-1 Run Ledger (ADR-0395). `@/agent/run-ledger` is
+  a pure store; this slice plugs INTO the in-process `HookBus`
+  (`src/agent/hooks.ts`) `post_tool_use` event and translates observed tool
+  outputs (bash background/await/kill banner, agent background launch banner,
+  task_output/task_stop, get_mcp_task / cancel_mcp_task) into ledger actions.
+  The MCP surface has no launch event: only an exact successful task poll may
+  create a record, then pending/in-progress/terminal observations map to
+  waiting/running/settled without inventing a task from an arbitrary id.
+
+  Closed contracts:
+    - `LedgerAction` — three arms (start / touch / settle) mirroring
+      `RunLedgerPort`.
+    - `LedgerMatcher.match(event)` — pure (no-throw, no side effects)
+      `(name,input,output,ok) → LedgerAction | null`.
+    - `createRunLedgerHookSubscriber({ledger,matcher?,owner?})` — returns a
+      `(event) ⇒ void` closure the composition root subscribes to the
+      `post_tool_use` event.
+
+  Slice fence: imports ONLY `@/agent/run-ledger` (type imports) + `@/shared`.
+  NEVER imports `@/tool/bash`, `@/subagent`, `@/mcp`, or `@/agent` core
+  (loop/dispatch/hooks/features). The matcher consumes the four
+  load-bearing fields of a hook event as an opaque shape — peer slices are
+  untouched.
+
+  The default matcher anchors on the literal output banner each tool emits
+  today (`[bash background] shellId=...`, `Subagent launched in
+  background. task_id: ...`, `cancelled: <id>`, etc.). The matcher OWNS the
+  banner contract — a tool author who changes a banner is caught by this
+  slice's hellgate.
+
+  Importing the barrel touches no process state. Runtime composition subscribes
+  the handler to the HookBus; ledger visibility remains default-off where that
+  runtime surface does not construct an observability wire.
+evidence:
+  code:
+    - src/agent/run-ledger-attribution/types.ts
+    - src/agent/run-ledger-attribution/matchers.ts
+    - src/agent/run-ledger-attribution/subscriber.ts
+    - src/agent/run-ledger-attribution/index.ts
+    - src/agent/observability-wire/wire.ts
+    - src/host/runtime/agent-arg-builder/observability-wire.ts
+  adrs:
+    - docs/decisions/0401-run-ledger-attribution.md
+    - 395
+  tests:
+    unit:
+      - tests/unit/run-ledger-attribution-hellgate.test.ts
+      - tests/unit/observability-wire-approval-gap-hellgate.test.ts
+    integration: []
+    contract: []
+knobs: []
+config_refs:
+  env: []
+deliberate_hold: null
+notes: |
+  Banner-contract observability — the matcher pins the LITERAL output text
+  each producing tool emits. The hellgate covers every banner verbatim so a
+  tool author who renames `[bash background]` (e.g. to `[bash bg]`) sees a
+  CI fail HERE, not a silent regression in a far-away UI weeks later.
+
+  MCP task state is parsed from the exact tool output and echoed task id. This
+  prevents a terminal poll from silently settling a nonexistent ledger row or
+  overwriting an unrelated shell/subagent record with the same id.

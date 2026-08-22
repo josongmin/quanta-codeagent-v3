@@ -1,0 +1,58 @@
+id: bench-host-arch-detect
+title: bench — host-architecture detection + Docker image inventory
+section: 10
+subsystem: Bench harness — image / arch
+order: 45
+maturity: L4
+status: stable
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [headless, batch]
+configurable: integrated
+owners: ["@songmin"]
+labels: ["surface:bench"]
+depends_on: [bench-python-swebench]
+config_refs:
+  env: ["QUANTA_SWEBENCH_NAMESPACE", "QUANTA_SWEBENCH_PREPARE_FORCE"]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 1/5 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "pure internal bench arch/image query primitive, no UI affordance on any surface"
+purpose: |
+  Host arch detection (`hostArch`) + Docker image warm-pool query
+  (`images.ts`). Why: SWE-bench's upstream default namespace (`swebench`)
+  pulls prebuilt x86_64 images. On Apple Silicon (arm64) those run under
+  emulation — a tiny django test that takes ~2-3s natively measured ~20s
+  under emulation in triage. Building locally (`--namespace none`) lets
+  the harness build for the host arch where the instance spec allows.
+  `images.ts` is READ-ONLY: lists `sweb.{base,env,eval}.<arch>.*` images
+  on the local daemon so `prepare.ts` can report warm-cache hits and
+  future `--list-images` can show operator cache footprint. NEVER
+  mutates Docker state, NEVER throws (daemon-down / parse-error ⇒ []).
+evidence:
+  code:
+    - src/apps/bench/harness/arch.ts
+    - src/apps/bench/harness/images.ts
+    - src/apps/bench/harness/prepare.ts
+    - src/apps/bench/harness/config.ts
+    - src/shared/runtime-config.ts
+  adrs: []
+  tests:
+    unit:
+      - tests/unit/bench-harness-images.test.ts
+      - tests/unit/bench-harness-config.test.ts
+      - tests/unit/bench-harness-prepare.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  Connects to memory `swebench-arm64-grading-recipe`: on arm64, prebuilt
+  namespace=swebench is the ONLY known-working config (namespace=none
+  hits x86 conda SIGTRAP). This module is the seam that surfaces the
+  arch decision; the actual prebuilt-vs-build choice happens upstream
+  in the Python harness invocation (`bench-python-swebench`).

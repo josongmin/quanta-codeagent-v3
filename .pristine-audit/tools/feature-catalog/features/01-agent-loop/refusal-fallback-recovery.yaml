@@ -1,0 +1,65 @@
+id: refusal-fallback-recovery
+title: Model-refusal recovery (fork/neutralize + re-prompt)
+section: 1
+subsystem: Same-turn recovery (T08, jun-13 codex-ide reabsorption)
+order: 121
+maturity: L3
+status: new
+ui_surfaces: [cli]
+monitoring: integrated
+telemetry_keys: ["quanta.conversation.id"]
+modes: [interactive, headless, batch, daemon, ide, ci-bot]
+configurable: static
+owners: ["@songmin"]
+labels: [surface:core, tier:core]
+depends_on: [refusal-stop-reason, recovery-state-budgets, recovery-router-codex-spec]
+config_refs:
+  env: ["QUANTA_REFUSAL_FALLBACK", "QUANTA_REFUSAL_FALLBACK_PROMPT"]
+surface_integration:
+  cli: full
+  web: partial
+  method: unverified
+  evidence:
+    cli: "runs in the shared same-turn engine driven by the interactive CLI loop; proven end-to-end by tests/unit/refusal-fallback-recovery-hellgate.test.ts via runAgent"
+    web: "the loop is surface-agnostic so recovery functions identically under the web daemon; the recovery event's web rendering is not separately verified"
+purpose: |
+  Absorbs Claude Code IDE 2.1.170's model-refusal recovery. When a turn ends
+  with a refusal-class stop (Anthropic `refusal` / OpenAI `content_filtered`,
+  unified by the provider-agnostic isRefusalStopReason seam), the loop forks the
+  refused turn off the transcript (neutralizes it with a marker so role
+  alternation holds) and re-prompts EXACTLY ONCE with a configurable fallback
+  prompt. A second refusal — or a fork that would exceed taskBudget — is
+  terminal. Default-OFF byte-identical. A refusal that already carried tool_use
+  is NOT neutralized (those tools may have dispatched) — it stays terminal.
+evidence:
+  code:
+    - src/llm/providers/provider-port.ts
+    - src/agent/refusal-fallback.ts
+    - src/agent/recovery.ts
+    - src/agent/loop/recovery-executor.ts
+    - src/agent/loop/same-turn-engine.ts
+    - src/agent/optional-ports.ts
+  adrs: []
+  tests:
+    unit:
+      - tests/unit/refusal-fallback-recovery-hellgate.test.ts
+      - tests/unit/refusal-fallback-units.test.ts
+    integration: []
+    contract: []
+knobs:
+  - name: QUANTA_REFUSAL_FALLBACK
+    where: src/agent/optional-ports.ts
+    default: false
+    purpose: Master gate for fork/neutralize + one-shot re-prompt recovery (default-OFF).
+  - name: QUANTA_REFUSAL_FALLBACK_PROMPT
+    where: src/agent/optional-ports.ts
+    purpose: Override the built-in re-prompt template (built-in default when unset).
+deliberate_hold: null
+notes: |
+  Backlog: docs/jun-13-backlog-codex-ide-reabsorption/08-model-refusal-recovery.md (T08).
+  One-shot cap (RECOVERY_CAPS.refusalFallbacks=1) is a HARD rule, not a knob
+  (n>1 forbidden without measurement). The recovery is observable via the
+  existing `recovery` event (reason "nudge", detail
+  "model_refusal_fallback (neutralizedByFork): <rationale clip>"). readSite is
+  agent/optional-ports.ts (loop wiring), NOT the wire — provider-agnostic
+  recovery lives in the loop, mirroring fast-apply / effort-auto / subagent-followup.

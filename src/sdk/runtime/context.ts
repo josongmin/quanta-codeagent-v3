@@ -1,10 +1,10 @@
 import type { AgentConfig } from "@/agent"
-import type { ObjectivePort } from "@/objective"
 import type { SessionBootstrapResult } from "@/host/bootstrap"
 import {
   createRuntimeContextBindingFromAgentConfigBase,
   createRuntimeContextBindingFromBootstrap,
 } from "@/host/runtime/internal/context-binding"
+import type { ObjectivePort } from "@/objective"
 import type { Tool } from "@/tool"
 import { automationUpdateTool, ToolRegistry } from "@/tool"
 import type { RuntimeAgentConfigBase, RuntimeAgentTurnAssembler } from "./base"

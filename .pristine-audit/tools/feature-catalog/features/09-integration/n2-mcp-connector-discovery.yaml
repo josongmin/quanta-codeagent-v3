@@ -1,0 +1,71 @@
+id: mcp-connector-discovery
+title: MCP connector discovery / catalog (N2 — discover + install MCP servers)
+section: 9
+subsystem: MCP / connectors (§7, Codex imported-connector-apps 흡수)
+order: 168
+maturity: L3
+status: new
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [interactive, headless, ide]
+configurable: integrated
+owners: ["@songmin"]
+labels: ["surface:core", "absorbed:codex"]
+depends_on: [mcp-oauth-login]
+surface_integration:
+  cli: full
+  web: full
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 4/4 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "agent calls to mcp_connector_list/_install render as tool cards via bridged tool_call/tool_result events"
+purpose: |
+  Codex `imported-connector-apps`/`connector-logo` 흡수 — `.mcp.json` 수동편집 대신
+  MCP 서버를 **발견·설치·관리**하는 surface. H18(MCP-OAuth)과 짝: OAuth는 인증, 이건
+  발견/카탈로그.
+
+  코어 (`src/connectors/mcp-connector-catalog.ts`, PURE leaf, @/shared만):
+    - `McpConnectorEntry{id,name,description,transport(stdio|http),command?/url?,
+      env?,requiresOAuth?}` — 발견가능 MCP 서버.
+    - `toMcpServerConfig(entry)` — PURE transform entry→`.mcp.json` 서버 config
+      shape(McpServerConfig 구조적 mirror=@/mcp 임포트 회피). typed error
+      (stdio=command 필수, http=url 필수). `name`=catalog id.
+    - `createMcpConnectorCatalog(entries)` in-memory 카탈로그(by-id byteCompare 정렬).
+      카탈로그 SOURCE는 주입(bundled/remote/REST registry — 호스트 선택).
+
+  도구 (`src/tool/mcp-connector/`, duck-typed `McpConnectorDiscoveryPort`=@/tool
+  fence clean): `mcp_connector_list`(발견) / `mcp_connector_install`(id→.mcp.json
+  설치). `DefaultToolPorts.mcpConnectors`+`QUANTA_MCP_CONNECTORS` default-OFF(없으면
+  미등록=byte-identical).
+evidence:
+  code:
+    - src/connectors/mcp-connector-catalog.ts
+    - src/tool/mcp-connector/index.ts
+    - src/tool/index.ts
+    - src/host/runtime/mcp-connector-wire.ts
+  tests:
+    unit:
+      - tests/unit/mcp-connector-catalog-hellgate.test.ts
+    integration:
+      - tests/unit/mcp-connector-tools-e2e-hellgate.test.ts
+      - tests/unit/mcp-connector-wire-e2e-hellgate.test.ts
+    contract: []
+  adrs: [484]
+knobs:
+  - name: QUANTA_MCP_CONNECTORS
+    default: 'undefined'
+    purpose: 'Strict opt-in (=="1") for the mcp_connector_list/_install tools; absent ⇒ tools unregistered ⇒ byte-identical.'
+  - name: QUANTA_MCP_CONFIG
+    default: 'undefined'
+    purpose: 'Override .mcp.json install target path; absent ⇒ cwd/.mcp.json. Host-resolved (NOT model-supplied).'
+notes: |
+  L3: pure 카탈로그 코어 + transform + 2 도구 + DefaultToolPorts wiring + knob +
+  manifest 완비, default-OFF byte-identical. **host 배선 완료**: arg-builder가
+  `QUANTA_MCP_CONNECTORS=1`일 때 `buildMcpConnectorDiscoveryPort`(@/host/runtime
+  mcp-connector-wire)로 discovery port를 mint해 `DefaultToolPorts.mcpConnectors`를
+  채움 → 도구 라이브. writer는 atomic merge(writeFileAtomic) + fail-closed:
+  divergent same-name 서버는 `name-conflict`로 거부(사용자 audited 엔트리 clobber
+  방지), 손상/오형(present-but-unparseable) .mcp.json은 `config-unreadable`로 거부
+  (단일-서버 doc로 통째 덮어쓰기 방지). command는 catalog(신뢰 소스)에서만 옴 —
+  모델은 id만 공급(임의 command 주입 불가).

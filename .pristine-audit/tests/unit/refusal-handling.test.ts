@@ -1,0 +1,197 @@
+/**
+ * ★ refusal stop_reason SOTA++ surface (claude.md §6 권고).
+ *
+ * Before this work:
+ *   decideOnAssembled("refusal", …) → {do:"error", reason:"Model refused…"}
+ *   AgentOutcome ⇒ {reason:"error", …} (refusal vs other errors 구분 불가)
+ *
+ * After:
+ *   decideOnAssembled("refusal", message, rec) → {do:"refusal", rationale:<text>}
+ *   AgentOutcome ⇒ {reason:"refusal", refusal:{rationale:"<assistant text>"}}
+ *
+ * Rationale = assembled message의 visible text 블록(들) 연결. thinking/
+ * redacted_thinking은 제외 (모델의 거부 SAY를 surface하는 것이지 내부 추론을
+ * 노출하는 게 아님). tool_use는 무시 (refusal-with-tool은 모델 버그 케이스).
+ *
+ * 헬게이트:
+ *   1. empty content   2. whitespace-only   3. multi-text-block 연결
+ *   4. thinking-only (visible text 0)         5. text + tool_use (mixed)
+ *   6. text + redacted_thinking                7. very long (16k+, NO 트런케이트)
+ *   8. unicode/RTL/NULL byte 보존              9. budget 비소비 (terminal)
+ *  10. byte-identical default-OFF (non-refusal outcomes unchanged)
+ */
+import { describe, expect, test } from "bun:test"
+import { decideOnAssembled, extractRefusalRationale, freshRecovery } from "@/agent/loop"
+import type { Message } from "@/llm"
+
+// ─── House helpers ──────────────────────────────────────────────────────────
+
+const assistantMsg = (...content: Message["content"]): Message => ({
+  role: "assistant",
+  content,
+})
+
+const txt = (text: string): Message["content"][number] => ({ type: "text", text })
+
+const toolUse = (id: string, name = "read"): Message["content"][number] => ({
+  type: "tool_use",
+  id,
+  name,
+  input: { path: "/x" },
+})
+
+const thinking = (text: string): Message["content"][number] => ({
+  type: "thinking",
+  thinking: text,
+  signature: "",
+})
+
+// AssembledMessage shape — recovery.ts derives from assembleFromEvents output
+// (role:"assistant" + content[]). The helpers above match it.
+const msg = (m: Message): Parameters<typeof decideOnAssembled>[1] =>
+  m as unknown as Parameters<typeof decideOnAssembled>[1]
+
+// ─── extractRefusalRationale — pure helper unit tests ───────────────────────
+
+describe("extractRefusalRationale", () => {
+  test("empty content ⇒ ''", () => {
+    expect(extractRefusalRationale(msg(assistantMsg()))).toBe("")
+  })
+
+  test("single text block ⇒ that text (trimmed)", () => {
+    expect(
+      extractRefusalRationale(msg(assistantMsg(txt("I cannot help with that request.")))),
+    ).toBe("I cannot help with that request.")
+  })
+
+  test("multi text blocks ⇒ joined with double-newline", () => {
+    expect(
+      extractRefusalRationale(
+        msg(assistantMsg(txt("I cannot do this."), txt("It violates policy X."))),
+      ),
+    ).toBe("I cannot do this.\n\nIt violates policy X.")
+  })
+
+  test("whitespace-only text ⇒ '' (treated as empty after trim)", () => {
+    expect(extractRefusalRationale(msg(assistantMsg(txt("   \n\t  "))))).toBe("")
+  })
+
+  test("text + tool_use ⇒ only text extracted (tool_use ignored)", () => {
+    expect(extractRefusalRationale(msg(assistantMsg(txt("Refusing."), toolUse("call_1"))))).toBe(
+      "Refusing.",
+    )
+  })
+
+  test("text + thinking ⇒ only visible text (thinking NOT exposed)", () => {
+    expect(
+      extractRefusalRationale(
+        msg(assistantMsg(thinking("internal reasoning"), txt("Refused publicly."))),
+      ),
+    ).toBe("Refused publicly.")
+  })
+
+  test("thinking-only (no visible text) ⇒ '' (모델의 SAY 없음)", () => {
+    expect(extractRefusalRationale(msg(assistantMsg(thinking("only thought, no say"))))).toBe("")
+  })
+
+  test("very long text (16k chars) preserved verbatim — caller truncates if needed", () => {
+    const long = "a".repeat(16_000)
+    expect(extractRefusalRationale(msg(assistantMsg(txt(long))))).toBe(long)
+  })
+
+  test("unicode + RTL + NULL bytes preserved", () => {
+    const weird = "한글 שלום \x00 control ‮ rtl 🔥"
+    expect(extractRefusalRationale(msg(assistantMsg(txt(weird))))).toBe(weird)
+  })
+
+  test("interleaved text + tool_use + text ⇒ both text blocks joined", () => {
+    expect(
+      extractRefusalRationale(
+        msg(assistantMsg(txt("First reason."), toolUse("call_x"), txt("Second reason."))),
+      ),
+    ).toBe("First reason.\n\nSecond reason.")
+  })
+})
+
+// ─── decideOnAssembled — refusal branch ─────────────────────────────────────
+
+describe("decideOnAssembled (stop_reason='refusal')", () => {
+  test("returns {do:'refusal', rationale}", () => {
+    const rec = freshRecovery()
+    const action = decideOnAssembled("refusal", msg(assistantMsg(txt("Policy denial."))), rec)
+    expect(action.do).toBe("refusal")
+    if (action.do === "refusal") {
+      expect(action.rationale).toBe("Policy denial.")
+    }
+  })
+
+  test("refusal with empty message ⇒ rationale=''", () => {
+    const rec = freshRecovery()
+    const action = decideOnAssembled("refusal", msg(assistantMsg()), rec)
+    expect(action.do).toBe("refusal")
+    if (action.do === "refusal") expect(action.rationale).toBe("")
+  })
+
+  test("refusal AFTER tool_use blocks ⇒ rationale STILL extracted (mixed signal)", () => {
+    // Edge: model emitted tool_use then refused. Streaming-dispatch tombstones
+    // those tool calls (see streaming-dispatch.ts:471-480), but the rationale
+    // text must still surface so the operator sees WHY.
+    const rec = freshRecovery()
+    const action = decideOnAssembled(
+      "refusal",
+      msg(assistantMsg(txt("Reconsidered — refusing."), toolUse("call_zombie"))),
+      rec,
+    )
+    expect(action.do).toBe("refusal")
+    if (action.do === "refusal") expect(action.rationale).toBe("Reconsidered — refusing.")
+  })
+
+  test("refusal does NOT consume any retry budget (terminal)", () => {
+    const rec = freshRecovery()
+    decideOnAssembled("refusal", msg(assistantMsg(txt("nope"))), rec)
+    expect(rec.streamRetries).toBe(0)
+    expect(rec.outputContinues).toBe(0)
+    expect(rec.malformedRetries).toBe(0)
+    expect(rec.consecutiveEmpties).toBe(0)
+  })
+
+  test("refusal with whitespace-only text ⇒ rationale='' (trimmed)", () => {
+    const rec = freshRecovery()
+    const action = decideOnAssembled("refusal", msg(assistantMsg(txt("   \n\t   "))), rec)
+    expect(action.do).toBe("refusal")
+    if (action.do === "refusal") expect(action.rationale).toBe("")
+  })
+
+  test("refusal with thinking-only ⇒ rationale='' (thinking is NOT a refusal SAY)", () => {
+    const rec = freshRecovery()
+    const action = decideOnAssembled(
+      "refusal",
+      msg(assistantMsg(thinking("hidden reasoning only"))),
+      rec,
+    )
+    expect(action.do).toBe("refusal")
+    if (action.do === "refusal") expect(action.rationale).toBe("")
+  })
+})
+
+// ─── byte-identical default-OFF: non-refusal outcomes unchanged ─────────────
+
+describe("decideOnAssembled non-refusal stop_reasons unchanged", () => {
+  test("end_turn proceeds (byte-identical legacy)", () => {
+    const rec = freshRecovery()
+    const action = decideOnAssembled("end_turn", msg(assistantMsg(txt("done"))), rec)
+    expect(action.do).toBe("proceed")
+  })
+
+  test("tool_use with tool_use block ⇒ proceed (unchanged)", () => {
+    const rec = freshRecovery()
+    const action = decideOnAssembled("tool_use", msg(assistantMsg(toolUse("call_a"))), rec)
+    expect(action.do).toBe("proceed")
+  })
+
+  test("max_tokens nudges (unchanged)", () => {
+    const rec = freshRecovery()
+    const action = decideOnAssembled("max_tokens", msg(assistantMsg(txt("p"))), rec)
+    expect(action.do).toBe("nudge")
+  })
+})

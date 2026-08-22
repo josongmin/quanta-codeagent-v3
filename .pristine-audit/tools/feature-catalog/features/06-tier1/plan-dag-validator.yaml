@@ -1,0 +1,61 @@
+id: plan-dag-validator
+title: Plan DAG validator — self/dangling/cycle + 100-node perf gate
+section: 6
+subsystem: Plan-mode 구조화 (ADR-0095 P2)
+order: 96
+maturity: L4
+status: stable
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [interactive, headless]
+configurable: integrated
+config_refs:
+  env: ["QUANTA_PLAN"]
+  cli: ["--plan"]
+owners: ["@songmin"]
+labels: ["surface:core", "tier:1", "absorbed:codex", "absorbed:cursor"]
+depends_on: [plan-mode]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 3/4 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "pure internal validator (validateDag/findCycle/topologicalSort); no I/O, no UI affordance"
+purpose: |
+  Three pure exports operating on a `Readonly<Record<string, TodoItem>>`
+  graph. `validateDag` is the full-plan validator that returns the first
+  failure in PRIORITY ORDER: self_dependency → dependency_unknown →
+  dependency_cycle (typed as `PlanMutationError` via `PlanResult`).
+  `findCycle` runs DFS with tri-state coloring and returns the cycle path
+  (traversal order, not necessarily canonical) or null; optional `startId`
+  narrows the search to a reachable subtree. `topologicalSort` is Kahn-
+  style with deterministic tie-break by lexicographic id, returning ordered
+  ids or `{ cycle: [...] }` on a cyclic graph. Complexity is O(V+E) for
+  all three. A 100-node perf hellgate pins the 50ms ceiling so a quadratic
+  regression fails CI. Distinct from all three of Cursor/Codex/Claude:
+  none of them ship a DAG validator on plan dependencies.
+evidence:
+  code:
+    - src/agent/plan/dag.ts
+    - src/agent/plan/mutations.ts
+    - src/agent/plan/types.ts
+    - src/agent/plan/index.ts
+  adrs: [95]
+  tests:
+    unit:
+      - tests/unit/agent/plan/dag-hell.test.ts
+      - tests/unit/agent/plan/mutations-hell.test.ts
+      - tests/unit/plan-queue-hellgate.test.ts
+    integration:
+      - tests/integration/plan-mode-stress-100k-ops.test.ts
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  Slice rule: pure module. No clock, no I/O, no logger, no allocation
+  beyond the result. Safe for hot-path mutation pre-flight. Hellgate
+  battery in tests/unit/agent/plan/dag-hell.test.ts covers cycle path
+  return shape, the 100-node 50ms gate, and deterministic toposort
+  tie-break.

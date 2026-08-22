@@ -1,0 +1,50 @@
+id: git-log-us-separator
+title: git_log — US-separator (\x1f) format + textconv determinism
+section: 2
+subsystem: Git 1급 도구 (ADR-0025/0105) — 머신 파싱 안전 format
+order: 24
+maturity: L4
+status: stable
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [n-a]
+configurable: n-a
+owners: ["@songmin"]
+labels: [absorbed:codex, surface:cli]
+depends_on: [git-runner-cancellation-signal, git-branch-name-schema-guard, cross-slice-mirror, deferred-tool-registry, evidence-toolresultevidence]
+surface_integration:
+  cli: full
+  web: full
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 2/2 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "Agent tool — rendered log (hash/author/date/subject) shows in browser via tool.completed resultPreview (session-hooks.ts:455), mapped tool_result (session-host-turn-event-bridge.ts tool_result arm (via context-binding))."
+purpose: |
+  `git_log` 도구가 commit 라인을 머신 파싱할 때 TAB(`\x09`) 대신 ASCII Unit
+  Separator(`\x1f`, US_SEP)를 필드 구분자로 쓴다 — commit subject와 author name에
+  TAB이 합법적으로 들어갈 수 있어 TAB-split 파서가 조용히 깨지는 클래스를 구조적으로
+  봉인. format string `%H%x1f%an%x1f%ai%x1f%s`와 split 상수가 lock-step. 동시에
+  `--no-textconv --no-ext-diff`로 `.gitattributes` textconv driver나 외부 diff
+  명령의 출력 변조 영향을 0으로 만든다 (Codex §18.7 흡수 / ADR-0105). 결과는 짧은
+  hash + author + date + subject로 안전 렌더.
+evidence:
+  code:
+    - src/tool/git/log.ts
+    - src/tool/git/runner.ts
+  adrs: [25, 105]
+  tests:
+    unit:
+      - tests/unit/git-tools.test.ts
+      - tests/unit/git-tools-hellgate.test.ts
+      - tests/unit/git-env-and-budget-hellgate.test.ts
+    integration:
+      - tests/integration/git-tools.test.ts
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  US-sep는 commit message에 의도적으로 0x1f를 박는 공격자에게는 100% 보장 안 됨
+  (practically nil). `buildGitEnv` + `DETERMINISTIC_ENV`와 같은 ADR-0105 묶음 —
+  env determinism은 별도 axis. checkpoint-policy.ts의 dedup key 합성도 같은
+  US-sep 관용을 따른다 (다른 슬라이스, 같은 원리).

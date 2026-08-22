@@ -17,7 +17,9 @@ import type { LastTurnOutcome } from "./types"
  * Total over `AgentOutcome["reason"]` — adding a new reason is a compile error
  * here, forcing an explicit classification rather than a silent default.
  */
-export const lastTurnOutcomeFromAgentOutcome = (outcome: { reason: AgentOutcome["reason"] }): LastTurnOutcome => {
+export const lastTurnOutcomeFromAgentOutcome = (outcome: {
+  reason: AgentOutcome["reason"]
+}): LastTurnOutcome => {
   switch (outcome.reason) {
     case "completed":
       return "success"

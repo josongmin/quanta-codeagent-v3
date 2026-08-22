@@ -57,12 +57,22 @@ A `bun test tests/unit/god-code-ratchet.test.ts` ratchet (source: `tools/god-cod
 frozen `tools/god-code/allowlist.json`) enforces two structural SE metrics:
 
 - **god-MODULE** — a source file > **1000 lines**.
-- **god-FUNCTION** — a function/method body > **150 lines** (LENGTH; cognitive
-  COMPLEXITY is separately gated by Biome `noExcessiveCognitiveComplexity` = 15).
+- **god-FUNCTION** — a function/method body > **150 lines** (LENGTH only).
 
 The ratchet only goes DOWN: a NEW violation **fails the build — you must split it,
 never add it to the allowlist**; and when a refactor drops a file/function below
 threshold you **remove its stale allowlist entry** (the test demands it).
+
+Cognitive COMPLEXITY is a *separate* gate. Biome declares
+`noExcessiveCognitiveComplexity` with `maxAllowedComplexity: 15`, but at level
+**warn** — and `biome check` exits 0 on warnings, so that rule by itself blocks
+nothing (it is a per-site advisory you should still act on). The gate is
+`bun run lint:complexity` (`tools/dev/complexity-ceiling.ts`, CI step
+"cognitive-complexity ceiling"): the repo-wide COUNT of over-threshold functions
+and the WORST single score are pinned in `tools/dev/complexity-ceiling.json` and
+may only go DOWN. A new over-threshold function fails the build — **split it,
+never raise the ceiling**; when you improve things, run
+`bun run lint:complexity --tighten` to lock the improvement in.
 
 **Proactive rule — fix on sight.** Whenever you open, edit, or even pass through a
 god-module or god-function (or any obvious SE smell — a 20-arg signature, a copy-

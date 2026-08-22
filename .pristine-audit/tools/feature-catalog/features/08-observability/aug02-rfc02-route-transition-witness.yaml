@@ -1,0 +1,39 @@
+id: aug02-rfc02-route-transition-witness
+title: RFC02 A8 — caller-owned model-route transition witness
+section: 8
+subsystem: Observability — model-route transition witness (aug-02 RFC02 A8)
+order: 555
+maturity: L3
+status: new
+ui_surfaces: [cli]
+monitoring: integrated
+modes: [interactive, headless]
+configurable: static
+owners: ["@songmin"]
+labels: ["rfc:aug02-02", "surface:cli"]
+purpose: |
+  RFC-02 A8 model-route transition witness: whenever the effective model route
+  changes (fallback trip, scheduler model reroute, /retry-with), the CALLER that
+  owns the transition emits a typed witness event carrying from→to route + the
+  reason, so the timeline can attribute every model change to its cause instead
+  of silently swapping. Caller-owned (each transition site emits its own
+  witness) rather than a global interceptor — additive, no route behavior change.
+  SCOPE (hellaudit R2-B — seam proven, composition-root feeder DEFERRED, NOT a
+  silent dead-seam): the three transition PRODUCERS + the model_route_changed
+  AgentEvent + its exhaustive projection are built and owner-local proven, BUT no
+  production composition root supplies the sink yet (FallbackLLM is built without
+  onTransition; scheduler/retry-with never assign onModelReroute), and the RFC's
+  QUANTA_MODEL_REROUTE_EVENT gate does not yet exist — so no witness emits in
+  production yet. Safe to wire (pure observability): add the gate + supply the sink
+  at the three roots. Explicit follow-up.
+evidence:
+  code:
+    - src/llm/fallback.ts
+    - src/scheduler/model-reroute.ts
+    - src/apps/cli/retry-with.ts
+    - src/apps/cli/timeline-panel.ts
+  adrs: ["docs/plans/aug-02-absorption/rfc-02-observability.md"]
+  tests:
+    unit:
+      - tests/unit/model-route-transition-hellgate.test.ts
+      - tests/unit/scheduler-model-reroute-hellgate.test.ts

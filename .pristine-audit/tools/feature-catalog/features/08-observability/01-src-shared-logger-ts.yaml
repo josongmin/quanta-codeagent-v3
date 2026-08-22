@@ -1,0 +1,46 @@
+id: src-shared-logger-ts
+title: src/shared/logger.ts
+section: 8
+subsystem: 운영 진단 노브
+order: 1
+maturity: L4
+status: stable
+ui_surfaces: [cli]
+monitoring: integrated
+telemetry_keys: []
+modes: [interactive, headless, batch, daemon, ide, ci-bot]
+configurable: integrated
+config_refs:
+  env: [QUANTA_LOG_LEVEL, QUANTA_RUN_ID]
+owners: ["@songmin"]
+labels: ["surface:core", "observability-primitive"]
+depends_on: [runtime-config-ssot, assert-never-exhaustiveness, bench-best-of-n-sampler, bench-corpus-loader, bench-observe-non-agent-evidence]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 3/4 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "pure internal diagnostic stderr logging primitive, no user-visible affordance on the web surface"
+purpose: / 임계값 threshold — line-based stderr writer + level filter. Bench/observe 실행 식별자 }) — trajectory/report 메타데이터 상관키.
+evidence:
+  code:
+    - src/observability/logger.ts
+    - src/shared/logger.ts
+    - src/shared/runtime-config.ts
+    - src/apps/bench/index.ts
+  adrs: []
+  tests:
+    unit: [tests/unit/logger-threshold.test.ts]
+    integration: []
+    contract: []
+knobs:
+  - name: QUANTA_LOG_LEVEL
+    default: 'undefined'
+    purpose: '(no description)'
+  - name: QUANTA_RUN_ID
+    default: 'undefined'
+    purpose: '(no description)'
+deliberate_hold: null
+notes: '단위 테스트(, 8 tests): default(info+), env=debug 전체 통과, env=error 단일 통과, explicit option override env, 잘못된 값 → info fallback, child logger inherit + fields merge, multi-line field JSON-escape 1줄 framing, …'

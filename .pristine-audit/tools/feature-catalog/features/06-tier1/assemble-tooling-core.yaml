@@ -1,0 +1,69 @@
+id: assemble-tooling-core
+title: buildToolingCore — surface-agnostic ToolRegistry composition + per-config gate logs
+section: 6
+subsystem: runner/assemble — tooling core
+order: 231
+maturity: L4
+status: new
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [interactive, headless]
+configurable: integrated
+config_refs:
+  env: ["QUANTA_MEMORY", "QUANTA_SUBAGENT", "QUANTA_SKILLS_DIR", "QUANTA_VERIFY_GUARD", "QUANTA_COMPACT_BREAKER"]
+owners: ["@songmin"]
+labels: ["surface:core", "tier:1"]
+depends_on: [assemble-config]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 3/4 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "pure internal ToolRegistry composer (buildToolingCore); no user-visible browser affordance"
+purpose: |
+  Surface-agnostic assembly of the per-run `ToolRegistry` + the aggregated
+  `Tooling` record. Substantial logic beyond plumbing:
+  (1) Tool-merge order (last-write-wins via `ToolRegistry`'s Map):
+      `buildDefaultTools()` → `mcpTools` → memory tools → `lspTools` →
+      `lspNavTools` → `gitToolList`. Order is contract — surfaces that splat
+      tools in a different order WILL observe different precedence.
+  (2) Memory-self-edit gate: memory tools are appended ONLY when both
+      `input.store` exists AND `input.memoryConfig?.selfEditTools !== false`.
+      Embedder is forwarded only when present (`exactOptionalPropertyTypes`).
+  (3) Per-config structured-log gates (1:1 with the prior inline
+      `internal.ts#buildTooling` `slog.info(...)` calls): `subagent.on`,
+      `skills.on`, `compaction.breaker.config`, `verify.guard.on`. Each fires
+      ONLY when its config block is set.
+  (4) Optional `onMemoryReady(line)` emission of the legacy human-readable
+      `memory on (kind=…, embed=…, session=…)` line — fires only when ALL
+      three are present (`store` + `memoryKindLabel` + `onMemoryReady`).
+      Decoupled from `@/shared#logger` so non-CLI surfaces can route it.
+  When every opt-in array is empty and no config block set, the registry is
+  byte-identical to `new ToolRegistry(buildDefaultTools())`.
+evidence:
+  code:
+    - src/runner/assemble/tooling.ts
+    - src/runner/assemble/index.ts
+    - src/runner/index.ts
+    - src/apps/cli/internal.ts
+  adrs: []
+  tests:
+    unit:
+      - tests/unit/assemble.test.ts
+      - tests/unit/defaults-registration-hellgate.test.ts
+      - tests/unit/document-tools-defaults-registration-hellgate.test.ts
+    integration:
+      - tests/integration/cli-export-assembly.test.ts
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  Distinct from `assemble-config` (which only composes already-built pieces
+  into the immutable `AgentConfig` shape). This builder instantiates the
+  registry and aggregates the per-run config dependencies. Slice invariant:
+  no `process.env` reads — the CLI shim parses env into the typed
+  `ToolingAssembleInput` and calls this. Per-config slog gates ("subagent.on",
+  "skills.on", "compaction.breaker.config", "verify.guard.on") provide
+  integrated monitoring signal.

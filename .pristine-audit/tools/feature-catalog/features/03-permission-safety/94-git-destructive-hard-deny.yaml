@@ -1,0 +1,51 @@
+id: git-destructive-hard-deny
+title: Destructive git HARD_DENY rules (workflow + push mass-delete)
+section: 3
+subsystem: Runtime backstop for git posture (ADR-0100/0101)
+order: 94
+maturity: L4
+status: stable
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [n-a]
+configurable: static
+owners: ["@songmin"]
+labels: [absorbed:codex, surface:cli, security-touched]
+depends_on: [permission-policy-engine, permission-store-json, harddeny-readonly-short-circuit, per-host-agent-mode, per-thread-permissions]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 4/4 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "pure HARD_DENY argv-pattern backstop (policy-rules.ts), internal fail-closed deny with no user-visible UI affordance on any surface"
+purpose: |
+  HARD_DENY_RULES extension covering workflow-destructive git argv shapes
+  that prompt-level posture (ADR-0099) cannot guarantee — forced-history
+  rewrites, mutating discard variants, and push mass-delete shapes. Static
+  argv pattern matchers run before tool dispatch; deny is fail-closed
+  regardless of HITL tier. Verbatim patterns live in `policy-rules.ts` and
+  are surfaced description-only past the slice (rule-name + human description,
+  never the regex source).
+evidence:
+  code:
+    - src/permission/policy-rules.ts
+    - src/permission/policy.ts
+    - src/permission/git-write-guard.ts
+    - src/permission/branch-only.ts
+  adrs: [100, 101]
+  tests:
+    unit:
+      - tests/unit/git-write-protection-wired.test.ts
+      - tests/unit/permission-rules.test.ts
+    integration:
+      - tests/integration/git-write-protection-hellgate.test.ts
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  Two-layer composition with ADR-0099 (prompt) and ADR-0091 (`.git/{hooks,config}`
+  write deny). Push mass-delete coverage absorbs Claude Desktop's
+  `push_refused_mass_delete` semantics without a memory sync channel — static
+  argv matchers at the dispatch seam suffice.

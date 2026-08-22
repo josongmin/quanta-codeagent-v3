@@ -1,5 +1,5 @@
 /**
- * Container-bound {@link TmuxExec} (RFC jun-29 terminal surface, spec S3).
+ * Container-bound {@link TmuxExec} (TB21-06 TC-1a, spec S3 — the impl-A backend).
  *
  * The default tmux backend ({@link ./tmux-adapter} `createTmuxAdapter`) runs `tmux` on the
  * HOST. When an external terminal-operator drives a session INSIDE a Docker container, that is

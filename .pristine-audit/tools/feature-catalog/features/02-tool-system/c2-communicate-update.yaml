@@ -1,0 +1,96 @@
+id: communicate-update
+title: CommunicateUpdate — structured mid-turn progress report (C2)
+section: 2
+subsystem: 도구 — 구조화 진행보고 채널 (Cursor agent.v1.CommunicateUpdateArgs 흡수)
+order: 172
+maturity: L3
+status: new
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [interactive, headless, batch, daemon, ide, ci-bot]
+configurable: integrated
+owners: ["@songmin"]
+labels: ["surface:core", "tier:0", "absorbed:cursor"]
+depends_on: [agentevent, assert-never-exhaustiveness]
+surface_integration:
+  cli: full
+  web: missing
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 8/8 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "user value (status pill / agent subtitle) rides the progress_update AgentEvent which is dropped at context-binding.ts default arm; Tauri render is an explicit P3 follow-up"
+purpose: |
+  Cursor 3.5.33 `agent.v1.CommunicateUpdateArgs` 흡수 — 모델이 턴을 끝내지 않고
+  MID-TURN에 구조화 진행상태를 보고하는 read-only 채널. 기존 free-text 내레이션
+  (`assistant_text`)·토큰카운터(`output_progress`)·tool-call-keyed 자유텍스트
+  (`tool_progress`)와 직교: 타입드 triple을 운반하고 surface가 status pill / agent
+  subtitle 같은 별도 UI affordance로 렌더.
+
+  도구 (`src/tool/communicate-update.ts`, factory, request-user-input 미러):
+    - input `{current_step, final_summary?, completed_subtitle?}` (snake_case
+      모델대면 contract; per-field DoS cap 200/4000/80자).
+    - `isReadOnly:true` / `isConcurrencySafe:true`(non-blocking fire-and-continue)
+      / `hitlTier:"pre-approval-ok"`(fail-closed 분류기가 always-confirm으로
+      오분류해 매 보고마다 deadlock하는 것 방지) — FS/shell/git/세션상태 불변.
+    - 유일효과: ctx.progressSink로 typed mirror emit, 모델은 ok:true ack 수신.
+
+  슬라이스-펜스 (RFC §8.5): `ProgressSink`/`ProgressUpdateMirror` duck-typed mirror를
+  `ToolContext`에 추가 — `@/tool`은 `@/stream`/`@/agent` 미임포트 leaf 유지
+  (vcsEventSink/toolDiff와 동일 규율). dispatch seam이 `AgentConfig.progressSink`에서
+  surfac; 호스트(composition root)가 mirror→`config.stream.emit({type:"progress_update"})`
+  어댑팅.
+
+  이벤트 (`src/stream/types.ts`): 새 `progress_update` AgentEvent variant
+  `{currentStep, finalSummary?, completedSubtitle?, turn?}` (camelCase 와이어내부).
+  RENDER-ONLY(루프 control authority 없음). 두 exhaustiveness pin 갱신: stdout.ts
+  (never default) dim status line + ✓ subtitle, jsonl-recorder.ts(assertNever)
+  recovery-family `reason:"progress_update"`로 RECORD(durable intent —
+  output_progress와 달리 skip 안 함). sse/tee는 generic forwarder=무변경.
+
+  default-OFF: `DefaultToolPorts.progressUpdate`+`QUANTA_PROGRESS_UPDATE` 없으면
+  도구 미등록=byte-identical. 도구가 있어도 progressSink 미배선이면 emit no-op +
+  ok:true(best-effort observability).
+evidence:
+  code:
+    - src/tool/communicate-update.ts
+    - src/stream/types.ts
+    - src/stream/adapters/stdout.ts
+    - src/stream/adapters/jsonl-recorder.ts
+    - src/tool/index.ts
+    - src/host/runtime/agent-arg-builder.ts
+    - src/host/runtime/progress-sink-wire.ts
+    - src/host/runtime/agent-config-assembler.ts
+  tests:
+    unit:
+      - tests/unit/communicate-update-hellgate.test.ts
+      - tests/unit/composition-root-gated-port-activation-r3-hellgate.test.ts
+      - tests/unit/progress-sink-wire-hellgate.test.ts
+    integration:
+      - tests/unit/communicate-update-e2e-hellgate.test.ts
+    contract: []
+  adrs: [478, 481]
+knobs:
+  - name: QUANTA_PROGRESS_UPDATE
+    where: src/shared/runtime-config.ts
+    default: "0"
+    purpose: |
+      "1" ⇒ communicate_update 도구 등록(DefaultToolPorts.progressUpdate) + 호스트가
+      progressSink 배선. 없으면 미등록 = byte-identical (default-OFF).
+notes: |
+  L3: 도구 + AgentEvent variant + 2 mandatory adapter case + ToolContext mirror +
+  dispatch seam + DefaultToolPorts wiring + knob + manifest 완비, default-OFF
+  byte-identical. DONE (jun-05): composition root(`agent-arg-builder.ts`
+  `buildGatedToolPorts`)가 `runtimeConfig().progressUpdate`로
+  `DefaultToolPorts.progressUpdate=true`를 배선 → 도구가 knob에 등록됨;
+  knob-on 등록 + knob-off byte-identity + dispatch가 wired progressSink로 emit하는
+  것까지 composition-root r3 hellgate로 핀. **(P1) live progress 렌더러 — WIRED (jun-06)**:
+  `src/host/runtime/progress-sink-wire.ts`가 `createProgressStreamSink(stream)`
+  (snake→camel mirror→`progress_update` AgentEvent, NO-THROW) + `maybeWireProgressSink(cfg,env)`
+  (`QUANTA_PROGRESS_UPDATE=1` gate, caller-override-safe) 제공 — `maybeWireVcsEventSink`의
+  byte-for-byte 클론. 이로써 producer→stdout `renderProgressUpdate`/jsonl 체인 완결
+  (지금까지 producer 부재로 렌더러가 dead-code였음). 호스트 배선은
+  `wireOptionalCapabilitySlots`에 `maybeWireProgressSink(cfg, env)` 한 줄 추가로 완성
+  (assembler call-site). **잔여(additive follow-up)**: (P2) prompt-body 모델대면
+  WHEN-to-call 가이던스(현 describe-string이 set-once 가이드 운반); (P3) Tauri surface
+  status pill + agent subtitle + summary panel 렌더 + 코얼레싱 live pill.

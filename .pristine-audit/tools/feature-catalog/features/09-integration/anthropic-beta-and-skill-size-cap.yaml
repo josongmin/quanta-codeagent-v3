@@ -1,0 +1,39 @@
+id: anthropic-beta-and-skill-size-cap
+title: Anthropic beta channels + 30 MB skill cap
+section: 9
+subsystem: Anthropic adapter + skill discovery (ADR-0058)
+order: 6
+maturity: L4
+status: stable
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [interactive, headless, batch, daemon, ide, ci-bot]
+configurable: static
+owners: ["@songmin"]
+labels: ["surface:core", "absorbed:claude-code"]
+depends_on: [llm-stream-timeout, errors-helper-fix, fallback-kinds-policy, llm-factory, skill-discover]
+config_refs:
+  env: ["QUANTA_LLM_STREAM_FIRST_CHUNK_MS", "QUANTA_LLM_STREAM_IDLE_MS"]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 4/4 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "pure internal header config + size-guard, no UI affordance on any surface"
+purpose: 'AnthropicConfig.betaHeaders?: readonly string[] — joined into `anthropic-beta` header at SDK client level (defaultHeaders). Empty / undefined ⇒ byte-identical to today. Skills-2025-10-02 / oauth-2025-04-20 / environments-2025-11-01 채널 게이팅. + MAX_SKILL_SIZE_BYTES = 30 MB hard cap in src/skill/discover.ts — 초과 파일은 console.warn 로그 + skip (discriminated union SkillSizeCheck { ok | reason: "too-large" | "stat-failed" }).'
+evidence:
+  code:
+    - src/llm/adapters/anthropic.ts
+    - src/skill/skill-size.ts
+    - src/skill/discover.ts
+    - src/shared/runtime-config.ts
+  adrs: [58]
+  tests:
+    unit: [tests/unit/skill-size.test.ts, tests/unit/anthropic.test.ts]
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: 'Tier-0 absorption #0-6. 30 MB 매직넘버는 Anthropic API 한도 미러; 향후 raise 시 수동 bump 필요.'

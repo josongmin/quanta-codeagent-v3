@@ -60,6 +60,7 @@ export {
   ProMaxSampleError,
   type ProMaxSampleManifest,
   type ProMaxSampleSpec,
+  proMaxSampleManifestDigest,
 } from "./samples"
 export {
   PROMAX_GRADER_BUNDLE_DIR,

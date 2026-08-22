@@ -100,6 +100,7 @@ const registerProbeFamily = (
     },
     harnessSpec: () => ({ pipSpec: "swebench", namespace: "swebench" }),
     onBoxEnvPrefix: () => "",
+    admitBox: () => {},
     setupBox: async () => {},
     preflight: () => {},
   }

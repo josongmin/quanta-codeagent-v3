@@ -425,6 +425,31 @@ describe("TB21-05 projector — missing / wrong identity is QUARANTINED", () => 
     clearQuarantine()
   })
 
+  test("a refusal carrying only a TERMINAL-ONLY FIELD is claimed (the live TB2.0 case)", () => {
+    clearQuarantine()
+    // This is what the real trove actually holds and what a live scan produced:
+    // a TB2.0 artifact with NO `benchmarkSuite` key, refused by the SWE branch
+    // with `must not carry the terminal-only "arm"`. Neither the explicit-suite
+    // branch nor the `source` marker fires — only the terminal-only-key branch
+    // does, and without it the file would vanish with no diagnostic.
+    recordQuarantine(
+      "/runs/tb-arm-only.report.json",
+      { timestamp: "t", model: "m", arm: "levers", perInstance: [] },
+      new CanonicalReportIdentityError('must not carry the terminal-only "arm"'),
+    )
+    expect(quarantinedArtifacts()[0]?.suite).toBe("terminal-bench")
+    clearQuarantine()
+
+    // ...and a wrong-VERSION 2.1 artifact, whose only terminal marker is `trials`.
+    recordQuarantine(
+      "/runs/tb-v3.report.json",
+      { trials: [], benchmarkVersion: "9.9" },
+      new CanonicalReportIdentityError("unsupported benchmarkVersion"),
+    )
+    expect(quarantinedArtifacts()[0]?.suite).toBe("terminal-bench")
+    clearQuarantine()
+  })
+
   test("a refused SWE artifact is NOT claimed by the Terminal suite", () => {
     clearQuarantine()
     recordQuarantine(

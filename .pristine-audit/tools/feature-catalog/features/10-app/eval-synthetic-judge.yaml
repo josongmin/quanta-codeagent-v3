@@ -1,0 +1,53 @@
+id: eval-synthetic-judge
+title: eval Tier 1 — LLM-as-judge (per-rubric pass/fail + weighted score)
+section: 10
+subsystem: eval 앱 — Tier 1 채점기
+order: 86
+maturity: L4
+status: stable
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [headless, batch]
+configurable: static
+owners: ["@songmin"]
+labels: ["surface:bench"]
+depends_on: [eval-synthetic-generator, eval-synthetic-scenario-schema, eval-tier1-synthetic, fallback-kinds-policy, llm-factory]
+surface_integration:
+  cli: missing
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "src evidence not reachable from the interactive CLI entry (src/apps/cli/index.ts) — wired only into other apps (eval/bench/probe/headless) or unwired"
+    web: "eval-harness internal judge primitive, no web UI affordance"
+purpose: |
+  Scenario rubric + 캡쳐된 transcript를 받아 judge LLM에 per-item pass/fail을
+  요청, weighted score(default weight=1) 계산. ERROR SURFACE CONTRACT
+  (critical): `error:undefined` = judge ran (모든 rubric pass:false도 legitimate
+  judgement), `error:defined` = INFRA failure (stream 에러, no parseable JSON,
+  malformed shape). Caller가 후자를 별도 `verdict:"error"`로 격리해야 — fail
+  버킷에 묻으면 correct run이 falsely tank됨. JSON-block tolerant parser
+  (markdown fence 무시), partial verdict (`parsed.length < rubric.length`)는
+  malformed로 강등해 unscored item을 default-fail로 spreading 금지. `judgePrompt`
+  override로 stricter/laxer calibration 가능. `weightedScore`가 missing
+  verdict id를 0으로 처리해 model이 누락해도 score가 graceful degrade.
+evidence:
+  code:
+    - src/apps/eval/synthetic/judge.ts
+    - src/apps/eval/synthetic/scenario.ts
+    - src/apps/eval/synthetic/index.ts
+    - src/apps/eval/synthetic/runner.ts
+    - src/apps/eval/synthetic/generator.ts
+  adrs: []
+  tests:
+    unit:
+      - tests/unit/eval-error-channels.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  Default system prompt는 strict-but-fair — 향후 weight calibration A/B는
+  judgePrompt override seam로 제공. judge.error의 caller-side handling은
+  `synthetic/index.ts/verdictFor`가 강제. 단일 JSON object shape로 parser를
+  defensive하게 keep — 향후 multi-rubric multi-judge ensemble은 미흡수.

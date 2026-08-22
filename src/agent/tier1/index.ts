@@ -42,9 +42,9 @@ export { buildPrShipBlock } from "./pr-ship"
 export { buildPromptCacheBlock } from "./prompt-cache"
 export { type ReflectConsultFromLLMOptions, reflectConsultFromLLM } from "./reflect"
 export {
-  materializeReviewerAgent,
-  createSubagentBackedGuardianReview,
   createSubagentBackedGuardianAssess,
+  createSubagentBackedGuardianReview,
+  materializeReviewerAgent,
 } from "./reviewer-subagent"
 export { buildShadowBlock } from "./shadow"
 export { buildShadowVerifyBlock } from "./shadow-verify"

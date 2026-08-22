@@ -1,0 +1,43 @@
+id: compactionbreaker
+title: CompactionBreaker
+section: 4
+subsystem: 압축 circuit-breaker (Tier 0)
+order: 1
+maturity: L3
+status: stable
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [interactive, headless, batch, daemon, ide, ci-bot]
+configurable: integrated
+config_refs:
+  env: [QUANTA_COMPACT_BREAKER, QUANTA_COMPACT_BREAKER_REACTIVE_MAX, QUANTA_COMPACT_BREAKER_PROACTIVE_MAX]
+owners: ['@songmin']
+labels: [surface:core]
+depends_on: [plan-mode, response-in-progress, runner-assemble-builders, effort-5-tier, fallback-kinds-policy]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 5/5 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "pure internal compaction circuit-breaker policy, no UI affordance"
+purpose: CompactionBreaker 4-사이트, thrash abort [_*]
+evidence:
+  code:
+    - src/agent/compaction-breaker.ts
+    - src/agent/compaction.ts
+    - src/agent/loop.ts
+    - src/runner/assemble/compaction.ts
+    - src/apps/cli/internal.ts
+  adrs: []
+  tests:
+    unit: [tests/unit/compaction-breaker-hellgate.test.ts, tests/unit/compaction-breaker-hellgate.test.ts]
+    integration: []
+    contract: []
+knobs:
+  - name: QUANTA_COMPACT_BREAKER
+    default: 'undefined'
+    purpose: '(no description)'
+deliberate_hold: null
+notes: ''

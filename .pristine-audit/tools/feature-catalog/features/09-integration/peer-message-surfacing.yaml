@@ -1,0 +1,77 @@
+id: peer-message-surfacing
+title: Peer/side-agent message surfacing — "Sent from another task" transcript notice
+section: 9
+subsystem: Subagent coordination (peer ↔ peer messaging)
+order: 100
+maturity: L2
+status: new
+ui_surfaces: [cli, web]
+monitoring: n-a
+modes: [interactive, headless, ide, daemon]
+configurable: partial
+owners: ["@songmin"]
+labels: ["surface:core"]
+depends_on: [peer-teammate-messaging, subagent-mailbox]
+config_refs:
+  env: [QUANTA_PEER_MSG_SURFACE, QUANTA_SUBAGENT_MAILBOX]
+surface_integration:
+  cli: full
+  web: partial
+  method: audited
+  verified: "2026-07-15"
+  evidence:
+    cli: "A mailbox `send` addressed to the session owner emits a `peer_message` AgentEvent that the stdout adapter renders as a DIM `✉ sent by <from> — from another task [kind]` label above the collapsed body (src/stream/adapters/stdout.ts renderPeerMessage); also a CLI timeline-panel row. Reachable from src/apps/cli/index.ts via the assembler mint-seam wire."
+    web: "The event folds onto an append-only item-stream `peerMessage` member (atomic started+completed), carried verbatim by BOTH wire planes so the web ItemStreamSection renders it generically; a dedicated label+bubble component (Codex parity) is a deferred follow-up."
+purpose: |
+  Makes inter-agent mailbox mail + side-agent daemon findings VISIBLE to the USER
+  as an attributed transcript notice — Codex "Sent by Codex from another task"
+  parity, terminal dialect. The `surfaceNotifyMailbox` decorator wraps the RAW
+  mailbox store INSIDE the team-scoped decorator; on a `send` addressed to the
+  session owner (`to === recipientId` or a broadcast) it emits a `peer_message`
+  display event at ENQUEUE time — so the user sees the mail the moment it is
+  queued while the MODEL still receives it at its next turn-top drain (no forced
+  turn; exactly Codex `send_message` "delivered promptly, does not trigger a new
+  turn" semantics). The owner's OWN sends are excluded (the store never delivers
+  a message to its own sender). The untrusted-peer body is redacted + per-line
+  control/ANSI sanitized at the emit boundary; `provenance` distinguishes ordinary
+  peer mail from a side-agent finding (the tool surface cannot forge it). The host
+  wire installs the decorator under `QUANTA_PEER_MSG_SURFACE` at the assembler
+  mint seam — BEFORE the side-agent registry captures the mailbox (so daemon
+  findings surface) and BEFORE the team wrap (so a cross-team DENIED send never
+  reaches the display seam). Default-OFF byte-identical when the knob is unset.
+
+  Ships with the prerequisite W1 audit fixes it depends on: the side-agent finding
+  recipient SSOT (`rootMailboxRecipient`, F1 dead-letter), the mailbox DoS-cap
+  factory SSOT (`createDefaultSubagentMailbox`, F2), and the honest cross-team
+  deny (`denied` marker, F3). Full event-type cascade: `peer_message` is handled
+  by the stdout switch, the item-stream projector, the jsonl recorder (RECORD),
+  and the CLI timeline inventory; the web agent-state projection filters it (rides
+  the item-stream leg).
+evidence:
+  code:
+    - src/agent/subagent-mailbox/surface-notify.ts
+    - src/host/runtime/peer-message-sink-wire.ts
+    - src/agent/subagent-mailbox/types.ts
+    - src/agent/subagent-mailbox/index.ts
+    - src/agent/side-agent-runner.ts
+    - src/host/runtime/agent-config-assembler.ts
+    - src/stream/types.ts
+    - src/stream/adapters/stdout.ts
+    - src/stream/item-stream-projector.ts
+    - src/shared/item-stream.ts
+    - src/stream/adapters/jsonl-recorder.ts
+    - src/apps/cli/timeline-panel.ts
+  adrs: []
+  tests:
+    unit:
+      - tests/unit/peer-message-surface-hellgate.test.ts
+      - tests/unit/peer-message-item-stream-and-render-hellgate.test.ts
+      - tests/unit/peer-message-recorder-hellgate.test.ts
+    integration: []
+    contract: []
+notes: |
+  jul-15 — landed via feat(peer-mail) after two hellaudit rounds (R1 12 findings
+  incl. 2 CI-breaking + 2 real bugs, all fixed; R2 converged, 0 regressions).
+  Follow-ups: the dedicated web label+bubble component + click-to-sender-thread
+  (Codex parity, needs web thread-nav) and seeding QUANTA_PEER_MSG_SURFACE on the
+  CLI surface (measure-first — flip after a live engagement smoke).

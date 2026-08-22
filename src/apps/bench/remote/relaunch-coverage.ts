@@ -56,14 +56,32 @@ export const resolveRelaunchCoverage = (args: {
   /** What the legacy four-bucket subtraction concluded. The fallback, and the
    *  answer for every family that carries no receipt. */
   readonly legacyMissing: readonly string[]
+  /**
+   * Instances the four LEGACY BUCKETS alone vouch for — the retry loop's own
+   * `covered` set, WITHOUT the receipt union.
+   *
+   * It exists for exactly one path: a REFUSED merge. `legacyMissing` is the
+   * relaunch loop's retry set, and that set deliberately counts an instance as
+   * covered when a RECEIPT spoke about it. When the merge then fails closed —
+   * a duplicate disposition across attempts, two evaluator builds — those are
+   * the very receipts being rejected, so returning the retry set publishes
+   * coverage that no surviving evidence supports. On that path `missing` is
+   * derived from the assigned set minus what the buckets can still vouch for.
+   */
+  readonly legacyCovered: readonly string[]
 }): RelaunchCoverage => {
   if (args.receipts.length === 0) return { missing: [...args.legacyMissing] }
   const merged = mergeOfficialGradeReceipts({
     receipts: args.receipts,
     additionalAssignedInstanceIds: args.expected,
   })
-  if (!merged.ok)
-    return { officialGradeFailures: merged.failures, missing: [...args.legacyMissing] }
+  if (!merged.ok) {
+    const covered = new Set(args.legacyCovered)
+    return {
+      officialGradeFailures: merged.failures,
+      missing: args.expected.filter((id) => !covered.has(id)),
+    }
+  }
   return {
     officialGrade: merged.receipt,
     missing: [...deriveMissingInstanceIds(merged.receipt)],

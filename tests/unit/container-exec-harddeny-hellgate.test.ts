@@ -1,5 +1,5 @@
 /**
- * PRIVILEGE-BOUNDARY hellgate — `container_exec` is a SHELL-EXEC channel (RFC jun-29 §13).
+ * PRIVILEGE-BOUNDARY hellgate — `container_exec` is a SHELL-EXEC channel (TB21-06 TC-1a, spec S3).
  *
  * FINDING (R5 adversarial audit): `container_exec` runs an arbitrary command in a container via
  * `sh -lc`. If it omitted `extractShellCommand`, the dispatch seam would leave

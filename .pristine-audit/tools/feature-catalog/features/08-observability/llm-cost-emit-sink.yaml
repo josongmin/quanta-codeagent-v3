@@ -1,0 +1,59 @@
+id: llm-cost-emit-sink
+title: LLM tokens + cost_usd OTel emit at turn-record sink
+section: 8
+subsystem: 텔레메트리 — gen_ai.usage.* + quanta.work.cost_usd 활성화
+order: 91
+maturity: L4
+status: new
+ui_surfaces: [cli]
+monitoring: integrated
+telemetry_keys: [gen_ai.usage, quanta.work.cost_usd]
+modes: [interactive, headless, batch, daemon, ide, ci-bot]
+configurable: integrated
+owners: ["@songmin"]
+labels: ["surface:core", "observability-primitive"]
+depends_on: [work-metrics, hitl-otel-emit-outcome, metrics-registry, otel-attribute-vocab, phase-ttft-readonly-trio]
+config_refs:
+  env: []
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 2/2 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "pure OTel cost/token sink into MetricsRegistry, no render; user-visible cost is the separate TokenCounter feature"
+purpose: |
+  `llm/*` adapter 가 계산한 `estimatedCostUsd` + `input_tokens` /
+  `output_tokens` / `cache_read_input_tokens` / `cache_creation_input_tokens`
+  가 `WorkMetrics` 에 surface 되지만 OTel registry 에는 도달하지 못하던
+  gap 을 downstream sink 에서 wire-up. **adapter 코드 unchanged** — user
+  WIP 에 있는 llm 슬라이스를 건드리지 않고 observability 측에서만 봉합.
+  `emitLlmCostToOtel(metrics, m, labels, extra)` — pure stateless emit;
+  `buildLlmCostMetricsSink(metrics, labels, wrap?)` — `AgentConfig.
+  workMetricsSink` 에 직접 plug-in 가능. Cost 는 `quanta.work.cost_usd`
+  timer 에 record (count/min/max/mean/p50/p95 histogram) + rolled-up
+  counter 동시 증가. Unknown-model (`estimatedCostUsd === undefined`)
+  ⇒ placeholder zero 안 쓰고 cost emit 통째로 skip. `${k}.${provider}.
+  ${model}` disaggregated counter 자동 생성 (sanitized: gpt-4.1 ⇒
+  gpt_4_1) — 모델별 분해 + rolled-up 동시 유지.
+evidence:
+  code:
+    - src/observability/llm-cost-emit.ts
+    - src/observability/index.ts
+  adrs: [32]
+  tests:
+    unit:
+      - tests/unit/llm-cost-emit-hellgate.test.ts
+      - tests/unit/observability.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  Security invariant: prompt/completion TEXT 절대 read/emit 안 함 (sink 는
+  WorkMetrics 만 소비; scalar counts + per-file numstat). Non-finite cost
+  (NaN/Infinity) + negative delta 는 boundary 에서 drop — OTel monotonic
+  sum 스펙 준수. providerOf() 미리 sniff (gpt/o1/o3 ⇒ openai; else
+  anthropic) — legacy caller 가 provider 누락해도 dashboard 가 항상
+  provider 라벨 봄. 300 expects / 1 hellgate case.

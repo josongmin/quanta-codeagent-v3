@@ -1,0 +1,36 @@
+id: tests-integration-probe-test-ts
+title: tests/unit/probe.test.ts
+section: 10
+subsystem: Probe (trajectory inspector) — `src/apps/probe/**` · `bun run probe` · RFC-0002 §7 / ADR-0010
+order: 2
+maturity: L4
+status: stable
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [n-a]
+configurable: static
+owners: ["@songmin"]
+labels: ["surface:cli"]
+depends_on: [assert-never-exhaustiveness, byte-stable-string-comparator, errors-helper-fix, probe-funnel-adherence, probe-trajectory-parse]
+surface_integration:
+  cli: missing
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "src evidence not reachable from the interactive CLI entry (src/apps/cli/index.ts) — wired only into other apps (eval/bench/probe/headless) or unwired"
+    web: "Test artifact, no user-visible affordance on any surface."
+purpose: '통합 테스트: (10 tests) — trajectory JSONL 다양한 변형에 대한 graceful 처리 + view 별 렌더 일관성'
+evidence:
+  code:
+    - src/apps/probe/index.ts
+    - src/apps/probe/parse.ts
+    - src/apps/probe/render.ts
+  adrs: [10]
+  tests:
+    unit: [tests/unit/probe-parse.test.ts]
+    integration: [tests/unit/probe.test.ts]
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: ''

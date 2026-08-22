@@ -13,11 +13,7 @@
  */
 
 import { describe, expect, test } from "bun:test"
-import {
-  type ActivityEvent,
-  type ActivityKind,
-  createActivityStore,
-} from "@/activity"
+import { type ActivityEvent, type ActivityKind, createActivityStore } from "@/activity"
 
 const open = (id: string, parentId: string | null, kind: ActivityKind): ActivityEvent => ({
   type: "node_open",
@@ -47,7 +43,7 @@ describe("D1 · agent aggregate invariance", () => {
     expect(agg.toolCalls).toBe(base.toolCalls)
   })
 
-  test("red-on-injection: making the steps kind:\"agent\" DOES corrupt the aggregate", () => {
+  test('red-on-injection: making the steps kind:"agent" DOES corrupt the aggregate', () => {
     // Proves the invariance above is real (not vacuous): the SAME shape with
     // step nodes mislabelled `agent` inflates the worker count.
     const baseline = createActivityStore()
@@ -70,7 +66,11 @@ describe("D1 · agent aggregate invariance", () => {
     const store = createActivityStore()
     store.emit(open("s", null, "step"))
     const before = store.snapshot().aggregate
-    store.emit({ type: "node_progress", id: "s", progress: { kind: "ratio", completed: 5, total: 10 } })
+    store.emit({
+      type: "node_progress",
+      id: "s",
+      progress: { kind: "ratio", completed: 5, total: 10 },
+    })
     const after = store.snapshot()
 
     expect(after.aggregate).toEqual(before) // no counter perturbation
@@ -90,8 +90,16 @@ describe("D1 · agent aggregate invariance", () => {
   test("store-applied regression guard: a rewinding progress becomes indeterminate on the node", () => {
     const store = createActivityStore()
     store.emit(open("s", null, "step"))
-    store.emit({ type: "node_progress", id: "s", progress: { kind: "ratio", completed: 8, total: 10 } })
-    store.emit({ type: "node_progress", id: "s", progress: { kind: "ratio", completed: 3, total: 10 } })
+    store.emit({
+      type: "node_progress",
+      id: "s",
+      progress: { kind: "ratio", completed: 8, total: 10 },
+    })
+    store.emit({
+      type: "node_progress",
+      id: "s",
+      progress: { kind: "ratio", completed: 3, total: 10 },
+    })
     expect(store.snapshot().byId.get("s")?.progress).toEqual({ kind: "indeterminate" })
   })
 })

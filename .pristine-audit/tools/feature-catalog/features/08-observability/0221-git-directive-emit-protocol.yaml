@@ -1,0 +1,109 @@
+id: git-directive-emit-protocol
+title: "Git `::git-*` 5-directive emit protocol — phase-guarded behavioral layer + turn-collector wire"
+section: 8
+subsystem: Out-of-band UI sync channel after successful mutating git operations
+order: 221
+maturity: L4
+status: new
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [n-a]
+configurable: integrated
+owners: ["@songmin"]
+labels: ["surface:cli", "observability-primitive", "default-off"]
+depends_on: []
+surface_integration:
+  cli: full
+  web: missing
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 17/17 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "Directive emit rides a stdout/stderr sink with no web handler; not one of the 7-tag bridged AgentEvent types and no SlashPalette executor."
+purpose: |
+  Codex-style `::git-*` 5-directive emit protocol with a HARD phase guard:
+  directives (create-branch / stage / commit / push / create-pr) may be
+  emitted ONLY in the `final-answer` phase, after a confirmed-successful
+  mutating git operation. `commentary` and `intermediate` phase emits are
+  rejected with a typed `wrong-phase` error before any sink write. Sibling
+  to ADR-0220 (`src/agent/git-directives/` — wire/serdes layer) — this
+  slice adds the BEHAVIORAL protocol layer (phase invariant + no-throw
+  Result surface). Default-OFF: `noopEmitter` is sink-free; `defaultEmitter`
+  is opt-in.
+
+  ADR-0232 / in-code ADR-0234 (turn-collector wire) closes the wire gap:
+  the mutating git tools (`git_commit`, `git_branch_switch`) execute in the
+  LLM's intermediate phase, where the phase guard rejects emits. A per-turn
+  `GitDirectiveCollector` (sibling file in the same slice) is the couple-
+  breaker: tools `record(directive)` during intermediate-phase execution;
+  the loop calls `flush()` at the turn boundary, draining each entry
+  through the wired emitter with `phase: "final-answer"` — the natural
+  moment that satisfies the ADR-0221 phase invariant. Wired via
+  `AgentConfig.gitDirectiveEmit` (default-OFF, RFC §1.2). 18 new hellgate
+  cases pin the collector contract (FIFO / phase invariant / re-entrant
+  safety / eager-emit knob / 2-turn independence / etc.).
+evidence:
+  code:
+    - src/git/directive-emit/index.ts
+    - src/runner/knobs/knobs/git-directive.ts
+    - src/git/directive-emit/types.ts
+    - src/git/directive-emit/port.ts
+    - src/git/directive-emit/phase-guard.ts
+    - src/git/directive-emit/validate.ts
+    - src/git/directive-emit/serializer.ts
+    - src/git/directive-emit/parser.ts
+    - src/git/directive-emit/emitter.ts
+    - src/git/directive-emit/turn-collector.ts
+    - src/agent/loop-helpers.ts
+    - src/agent/loop.ts
+    - src/agent/types.ts
+    - src/tool/git/_directive-publish.ts
+    - src/tool/git/commit.ts
+    - src/tool/git/branch-switch.ts
+    - src/tool/git/index.ts
+  adrs: [221, 232]
+  tests:
+    unit:
+      - tests/unit/git-directive-emit-hellgate.test.ts
+      - tests/unit/git-directive-turn-collector-hellgate.test.ts
+    integration: []
+    contract: []
+knobs:
+  - name: gitDirectiveEmit.enabled
+    type: boolean
+    default: false
+    purpose: "Opt-in master switch — when true, the loop builds a per-turn collector and calls flush() at turn end."
+  - name: gitDirectiveEmit.sink
+    type: '"stdout" | "stderr" | (line: string) => void'
+    default: '"stdout"'
+    purpose: "Where the emitter writes the wire line. The function form lets tests + Tauri hosts intercept without process I/O."
+  - name: gitDirectiveEmit.includeIntermediate
+    type: boolean
+    default: false
+    purpose: "When true, the collector emits at record time AS WELL AS at flush time (live-progress surfaces). Default false — strict final-answer-only discipline."
+  - name: gitDirectiveEmit.emitter
+    type: DirectiveEmitterPort
+    default: "<built from sink>"
+    purpose: "Test-injection / custom-port override (mirrors dedupGate / gitObservability.session pattern)."
+  - name: gitDirectiveEmit.collector
+    type: GitDirectiveCollector
+    default: "<built from emitter>"
+    purpose: "Test-injection override — when set, the loop uses this collector verbatim instead of constructing one."
+notes: |
+  Distinct from ADR-0220 (`src/agent/git-directives/`) in directive shape
+  AND in concern: 0220 models the UI-tail consumer (`stage.paths`, `push.{remote,branch}`);
+  this slice models the call-site intent (`stage.files`, `push.{ref,force}`).
+  Both wire formats serialize with canonical alpha-sorted JSON so a host
+  that wants either shape gets deterministic bytes. Slice isolation:
+  `src/git/directive-emit/` imports only `@/shared` (`Result`, `ok`, `err`);
+  does NOT touch `@/tool`, `@/llm`, `@/mcp`, `@/permission`, `@/agent`. The
+  caller-side wire lives in `src/tool/git/` (shared
+  `publishGitDirective` helper at `_directive-publish.ts`) and the loop
+  (`buildGitDirectiveEmit` in `loop-helpers.ts`). 37 hellgate cases (18 ADR-
+  0221 + 18 ADR-0232 + 1 OFF parity) pin the contract end-to-end.
+
+  ADR-number-collision note: in code references the wire is named
+  ADR-0234 because 0232/0233 were taken in `src/agent/types.ts` by parallel
+  in-flight tracks (shell-snapshot wire, composition-root mega-wire). The
+  ADR DOC sits at 0232 (the closest free doc slot at write time). See the
+  ADR file header for the full reconciliation.

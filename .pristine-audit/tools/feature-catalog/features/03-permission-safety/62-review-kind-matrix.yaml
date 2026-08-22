@@ -1,0 +1,83 @@
+id: review-kind-matrix
+title: ReviewKind × isExecutionBlocking × reason_code matrix + scoped-allowlist verbs
+section: 3
+subsystem: HITL 게이트 — 무엇을 리뷰하는가 축 (Cursor 흡수, ADR-0070)
+order: 62
+maturity: L4
+status: stable
+ui_surfaces: [n-a]
+monitoring: n-a
+telemetry_keys: ["quanta.hitl"]
+modes: [interactive, headless, batch, daemon, ide, ci-bot]
+configurable: integrated
+owners: ["@songmin"]
+labels: [absorbed:claude-code, absorbed:cursor, surface:cli]
+depends_on: [reviewer-3tier, 183-safety-net-green, agent-loop-branch-hardening, cross-slice-mirror, agent-dispatch-core]
+config_refs:
+  env: []
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 5/5 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "pure permission-typing matrix (inferReviewKind + isDecisionLegalFor), internal gate primitive with no UI affordance on any surface"
+purpose: |
+  Cursor approval gate의 타입드 매트릭스 흡수 — quanta 권한 레이어에 "무엇을 리뷰하는가" 축
+  추가. HITLTier(ADR-0020 — 행위 risk 형상)와 ReviewerTier(ADR-0029 — 누가 결정)와 직교.
+  ReviewKind = edit | delete | terminal | mcp | web_fetch | web_search | plan + ALL_REVIEW_KINDS.
+  isExecutionBlocking(kind) — **plan만 false** (계획 제시는 advisory, 턴 정지 불필요), 나머지
+  6개는 실행 게이트. ReasonCode 닫힌 union(`<kind>.needs_approval` ×7) + reasonCodeFor + 전체
+  array. ReviewDecision discriminated union 6-arm: run / skip / allowlist_commands{commands} /
+  allowlist_tool{server, tool} / allowlist_domain{domain} / reject_and_tell{message} —
+  reject_and_tell은 steering seam으로 모델에 사유 되먹임(Cursor REJECT_AND_TELL_WHAT_TO_DO_
+  DIFFERENTLY 흡수). stopCategoryFor(kind) → {stopCategory:"needs_user_approval", reasonCode}
+  로 ADR-0073 StopCategory matrix와 합성. isDecisionLegalFor(kind, decision)으로 verb×kind
+  합법성 검사 — allowlist_commands⇒terminal, allowlist_tool⇒mcp, allowlist_domain⇒web_*.
+
+  **L4 promotion (2026-05-23)** — pure 모듈을 admissibility-gate.reviewAndDecide에 배선:
+
+  - `inferReviewKind(tool, isReadOnly)` 신규 — 7-kind enum을 tool name + readonly 신호로
+    결정적 추론(mcp__ 접두사 > web_fetch/http > web_search/_search > delete/rm > terminal/
+    bash/exec > read-only fallthrough = plan > mutating fallthrough = edit).
+  - `ReviewContext.reviewKind` optional 필드 추가 — 게이트가 reviewer 호출 직전에 부착.
+    포트가 kind-typed UI 렌더링 가능; 무시해도 byte-identical.
+  - `ApprovalDecision.verb?: ReviewDecision` optional 필드 + buildDecision 통과 — 포트가
+    풍부한 verb 반환 가능. 게이트가 `isDecisionLegalFor(kind, verb)`로 검증; 위반 시
+    preview='reviewer_verb_illegal' deny(silent allow 방지).
+  - `reject_and_tell.message` → `denyFromConfirm` 재사용 경로로 라우팅 → DispatchResult
+    .steerInjection로 surface. **G-1d invariant 유지**: 게이트 전체에서 steerInjection: 할당
+    site EXACTLY ONE.
+  - `AdmissibilityWaveAOptions.allowlistEscalated?: Set<string>` 신규 — Cursor
+    `allowlist_escalated` re-run 패턴. reviewer 승인 시 actionKey 캐싱 → 동일 run 내 두번째
+    structurally-equivalent call은 reviewer skip(pre-hook만). 거부된 call은 캐시 안 함.
+    Set 미주입 ⇒ legacy byte-identical.
+  - `AdmissibilityWaveAOptions.reviewKindOverride?: ReviewKind` 신규 — 추론 단락(MCP-only
+    호스트 등이 이미 알고 있는 kind를 강제).
+evidence:
+  code:
+    - src/permission/review-kind.ts
+    - src/permission/types.ts
+    - src/permission/outcome.ts
+    - src/permission/reviewer.ts
+    - src/agent/admissibility-gate.ts
+  adrs: [70]
+  tests:
+    unit:
+      - tests/unit/permission/review-kind.test.ts
+      - tests/unit/permission/review-kind-inference.test.ts
+      - tests/unit/admissibility-gate.test.ts
+    integration:
+      - tests/integration/review-kind-gate-hell.test.ts
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  PLAN non-blocking 의미는 plan posture(ADR-0063)와 직교 — plan-exit는 plan posture 종료
+  방식, ReviewKind.plan은 plan 자체에 대한 리뷰 신호. allow/ask/deny 3-state
+  PermissionDecision은 무변경 — 본 매트릭스는 그 위에 얹는 add-on seam.
+
+  L4 promotion에서 `denyFromConfirm` 경로를 재사용함으로써 reject_and_tell이 deny_and_steer와
+  의미적으로 동일한 wire-shape(steerInjection + preview='deny_steer')를 가져감 — 단일
+  consumer가 두 path 모두 처리.

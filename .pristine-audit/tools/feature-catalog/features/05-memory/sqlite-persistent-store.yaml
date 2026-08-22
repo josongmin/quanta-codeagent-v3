@@ -1,0 +1,51 @@
+id: sqlite-persistent-store
+title: SQLite PersistentStorePort — long-term memory disk-backed adapter
+section: 5
+subsystem: Persistent memory (SQLite)
+order: 50
+maturity: L4
+status: stable
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [interactive, headless, batch, daemon, ide, ci-bot]
+configurable: n-a
+owners: ["@songmin"]
+labels: ["surface:core", "absorbed:codex"]
+depends_on: [embedder-port, memory-dedup-planner, memory-eviction-planner, tier, memory-vector-math]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 4/4 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "pure internal storage adapter, no UI affordance"
+purpose: |
+  Long-term 메모리 entries의 disk-backed PersistentStorePort 구현. `bun:sqlite` 사용
+  (외부 dep 0, Bun 내장). `rankEntries`(ranking.ts)와 함께 의미 검색 + 시간 기반 fade.
+  in-memory adapter는 테스트/dev용, sqlite adapter는 production 영속성. 동일
+  PersistentStorePort 계약 — adapter swap이 byte-identical (테스트는 in-memory로
+  결정성 유지, runtime은 sqlite). 동시 R/W는 SQLite WAL로 처리 — bun:sqlite의 prepared
+  statement 캐싱으로 hot path 효율.
+evidence:
+  code:
+    - src/memory/adapters/sqlite.ts
+    - src/memory/adapters/in-memory.ts
+    - src/memory/ports.ts
+    - src/memory/ranking.ts
+  adrs: []
+  tests:
+    unit:
+      - tests/unit/sqlite-save-error.test.ts
+      - tests/unit/ranking.test.ts
+    integration:
+      - tests/integration/memory-sqlite.test.ts
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  PersistentStorePort 두 구현(InMemoryStore + SqliteStore)이 같은 계약을 byte-identical
+  히 충족 — 테스트는 in-memory(결정성), runtime은 sqlite(영속성). bun:sqlite는 Bun
+  내장이므로 외부 의존 0. WAL 동시성 모드, prepared statement 캐싱. Codex `logs_2.sqlite`
+  retention 패턴(memory `codex-logs-retention-pattern`)은 다른 트랙 — 본 모듈은 메모리
+  entry의 진짜 영속 저장.

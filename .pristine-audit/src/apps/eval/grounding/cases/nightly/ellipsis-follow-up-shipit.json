@@ -1,0 +1,22 @@
+{
+  "schema": 2,
+  "id": "ellipsis-follow-up-shipit",
+  "usecase": "persistent-context.conversation-state.thread-grounding",
+  "history": [
+    {
+      "role": "assistant",
+      "text": "Active thread workflow_gate now has only the canary threshold step left."
+    }
+  ],
+  "targetUtterance": "그럼 이거 그냥 올리자.",
+  "gold": {
+    "activeThreadId": "workflow_gate",
+    "referentId": "workflow_gate",
+    "intent": "approval_request",
+    "scope": "current_workstream",
+    "shouldClarify": false,
+    "confidence": "medium"
+  },
+  "bucket": "ellipsis",
+  "severity": "medium"
+}

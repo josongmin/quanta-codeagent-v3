@@ -1,0 +1,41 @@
+id: permission-hook-ordering
+title: Permission stack × pre_tool_use hook ordering lock (13-step canonical pipeline)
+section: 3
+subsystem: Admissibility-gate SSOT (ADR-0026) + ADR-0133 hook + ADR-0046 permission stack
+order: 99
+maturity: L4
+status: stable
+ui_surfaces: [cli]
+monitoring: integrated
+telemetry_keys: ["quanta.tool.call.status", "quanta.hitl.tier_resolved"]
+modes: [interactive, headless]
+configurable: integrated
+owners: ["@songmin", "team-safety"]
+labels: [surface:cli, security-touched, tier:1, ordering-locked]
+config_refs:
+  env: []
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 3/3 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "pure internal ordering invariant/lock; no user-visible affordance on any surface"
+purpose: 'P1 cleanup (2026-05-25). Documents + enforces canonical 13-step pre-execute pipeline in dispatch.ts (registry → seam guard → dedup → localize-phase → mode-posture → earlyHardDeny → pattern auto-pass → rules DSL → HITL → permission stack → mode policy → pre_tool_use → execute → post_tool_use → post_tool_use_failure) plus 8 invariants. Lock prevents a future refactor from reordering permission vs hook.'
+evidence:
+  code:
+    - src/agent/dispatch.ts
+    - src/agent/admissibility-gate.ts
+    - src/agent/hooks.ts
+  adrs:
+    - docs/decisions/0133-hook-bidirectional-rpc.md
+    - docs/decisions/0135-permission-sandbox-two-layer.md
+    - docs/decisions/0046-permission-stack-thread-host-postdenial.md
+  tests:
+    unit: [tests/unit/permission-hook-ordering.test.ts]
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: '14 ordering tests pin invariants — plan-mode blocks first / HARD_DENY skips permission+hook / permission deny precludes hook / hook updatedInput is POST-permission (no re-check, ADR-0133 operator-trust) / hook deny skips execute+post-hooks / post_tool_use fires by outcome / post_tool_use before post_tool_use_failure / throwing handler isolated / rewrites compose in order / concurrent dispatches preserve per-call ordering.'

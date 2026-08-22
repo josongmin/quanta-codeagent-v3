@@ -1,0 +1,48 @@
+id: git-conflict-inspect
+title: git_conflict_inspect — structured merge-conflict surface tool
+section: 2
+subsystem: 도구 — git conflict 평면화 (fix-merge-conflicts skill 지원)
+order: 96
+maturity: L4
+status: new
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [n-a]
+configurable: n-a
+owners: ["@songmin"]
+labels: [surface:cli, tier:1]
+depends_on: [assert-never-exhaustiveness, byte-stable-string-comparator, errors-helper-fix, git-runner-cancellation-signal, runtime-config-ssot]
+surface_integration:
+  cli: full
+  web: full
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 4/4 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "Agent tool — structured conflict list renders in browser via tool.completed resultPreview (session-hooks.ts:455), mapped tool_result (session-host-turn-event-bridge.ts tool_result arm (via context-binding))."
+purpose: |
+  Surfaces the pure conflict parser (`./conflict-parser`) as a typed first-class
+  git tool so the `fix-merge-conflicts` skill (and any future loop consumer)
+  can list structured merge conflicts in working-tree files without each caller
+  hand-rolling a marker scan. Two input modes — explicit `paths` (REPO-RELATIVE;
+  rejects absolute and `..`-bearing paths at parse time before the runner is
+  ever invoked) or auto-discover via `git status --porcelain=v1` filtering rows
+  whose X or Y char is `U` (the unmerged states UU/AA/DD/AU/UA/DU/UD).
+  READ-ONLY + CONCURRENCY-SAFE — the only spawn is `git status --porcelain=v1`
+  (no mutation, no `git merge`); per-file `Bun.file(...).text()` reads are the
+  only filesystem touches and are confined to `ctx.cwd` via `path.join`.
+evidence:
+  code:
+    - src/tool/git/conflict-inspect.ts
+    - src/tool/git/conflict-parser/index.ts
+    - src/tool/git/conflict-parser/parse.ts
+    - src/tool/git/conflict-parser/types.ts
+  adrs: []
+  tests:
+    unit:
+      - tests/unit/git-conflict-inspect-tool.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: 'Default cap `DEFAULT_MAX_FILES = 50` + 50 KB MAX_OUTPUT cap. Path validation rejects untrusted porcelain rows before any file I/O.'

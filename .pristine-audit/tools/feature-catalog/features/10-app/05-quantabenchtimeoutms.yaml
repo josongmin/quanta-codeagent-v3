@@ -1,0 +1,40 @@
+id: quantabenchtimeoutms
+title: QUANTA_BENCH_TIMEOUT_MS
+section: 10
+subsystem: 벤치
+order: 5
+maturity: L2
+status: stable
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [headless, batch]
+configurable: integrated
+config_refs:
+  env: [QUANTA_BENCH_TIMEOUT_MS]
+owners: ['@songmin']
+labels: [surface:bench]
+depends_on: [bench-corpus-loader, bench-observe-non-agent-evidence, assert-never-exhaustiveness, bench-best-of-n-sampler, byte-stable-string-comparator]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 1/2 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "pure internal bench env knob, no user-visible UI affordance on any surface"
+purpose: 'Bench 실행 노브: —'
+evidence:
+  code:
+    - src/apps/bench/index.ts
+    - src/shared/runtime-config.ts
+  adrs: []
+  tests:
+    unit: [tests/unit/next-action-cap-enforce.test.ts]
+    integration: []
+    contract: []
+knobs:
+  - name: QUANTA_BENCH_TIMEOUT_MS
+    default: 'undefined'
+    purpose: '(no description)'
+deliberate_hold: null
+notes: 'L4→L2: no test imports evidence.code paths'

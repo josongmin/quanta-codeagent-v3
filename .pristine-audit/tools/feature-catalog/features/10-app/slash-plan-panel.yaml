@@ -1,0 +1,57 @@
+id: slash-plan-panel
+title: /plan — read-only plan-store visualization
+section: 10
+subsystem: REPL panels (R10)
+order: 21
+maturity: L4
+status: new
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [interactive]
+configurable: static
+owners: ["@songmin"]
+labels: ["surface:cli", "absorbed:codex"]
+depends_on: [plan-mode]
+config_refs:
+  env: ["QUANTA_COST_PANEL", "QUANTA_PREFS_HOME"]
+surface_integration:
+  cli: full
+  web: missing
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 3/3 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "B2 prefill stub: SlashPalette.tsx plan slug is prefill(plan), does not execute; plan_ events also B1-dropped at context-binding.ts default arm; planSnapshot port not web-supplied"
+purpose: |
+  Codex + Claude plan-mode TUI panel — renders the live `Plan` (via
+  `PlanStore.current` snapshot) as a compact boxed panel: ordered todo list with
+  status glyphs, current-step pointer, and progress header `Plan (N of M done)`.
+  100% READ-ONLY — this surface NEVER invokes a `PlanStore` mutator; the slash
+  command (`/plan`) consumes a `() => Plan | null` callback (`SlashContext.planSnapshot`)
+  and never reaches into the agent slice's mutators. Ordering contract is total
+  + deterministic: iterate `Plan.phases[]` in declared `order`, then
+  `phase.todoIds[]` in declared order; unreferenced todos appended by `createdAt`
+  ASC (stable secondary by `id`). Long plans (>20 todos) truncate to first 5
+  completed + current + next 10 pending/blocked with a `… N more` dim line —
+  header always reflects the FULL count.
+evidence:
+  code:
+    - src/apps/cli/plan-panel.ts
+    - src/apps/cli/slash-commands.ts
+    - src/shared/runtime-config.ts
+  adrs: []
+  tests:
+    unit:
+      - tests/unit/cli/plan-panel.test.ts
+      - tests/unit/slash-commands.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  Slice: `src/apps/cli` allowed to import `@/agent/plan` types ONLY (type-only
+  read of `Plan` shape — no mutators, no `PlanStore` runtime). Color policy
+  honored — `setColorPolicy("off")` ⇒ plain ASCII byte-identical to non-TTY
+  render. Default-OFF parity: when `SlashContext.planSnapshot` is absent the
+  command prints `PLAN_PANEL_NOT_WIRED` and exits 0 (matches `/skills`, `/snooze`
+  default-OFF posture).

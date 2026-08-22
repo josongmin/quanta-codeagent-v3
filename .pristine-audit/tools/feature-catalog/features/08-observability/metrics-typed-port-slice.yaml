@@ -1,0 +1,77 @@
+id: metrics-typed-port-slice
+title: Metrics typed-port slice — counter / histogram / gauge + sinks (ADR-0144)
+section: 8
+subsystem: 텔레메트리 — 첫 번째 클래스 metric primitive (closed-port)
+order: 112
+maturity: L4
+status: new
+ui_surfaces: [cli]
+monitoring: integrated
+telemetry_keys: []
+modes: [interactive, headless, batch, daemon, ide, ci-bot]
+configurable: integrated
+owners: ["@songmin"]
+labels: ["surface:core", "observability-primitive"]
+depends_on: [metrics-registry]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 5/5 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "pure closed-port in-memory metrics primitive, no UI affordance on any surface"
+purpose: |
+  Closed-port metrics primitive: `MetricsRegistry` + `MetricSink` pair
+  with three KIND-committed shapes (counter / histogram / gauge) and a
+  pluggable `send(MetricSample)` transport. Fills the gap that every
+  modern agent leaves — Cursor's IDE panel, Claude Code session totals,
+  Codex per-model OTel breakdown all emit unstructured logs but none
+  expose a typed registry the operator can query in-process
+  (`tool_calls_total`, `turn_duration_ms`, `verify_gate_pass_total`, …)
+  AND export to an out-of-process collector with the SAME data model.
+
+  Six explicit contracts:
+    1. PURE STORE — in-memory only, 0 I/O; the optional `MetricSink` is
+       the only transport. With no sink, the registry is a snapshot-only
+       primitive (Default-OFF posture per ADR-0144).
+    2. NAME COMMITS TO KIND on first use — `increment("foo")` after
+       `gauge("foo", 5)` throws `MetricsError("name-mismatch-kind")`.
+       Labels do NOT affect commitment — `foo{a=1}` and `foo{a=2}` share
+       the kind.
+    3. SINK NO-THROW — `sink.send` wrapped in try/catch; a throwing
+       sink logs nothing (observability plane must not crash the agent);
+       the registry still records the sample.
+    4. NEGATIVE / NON-FINITE INPUT coerces to 0. Same posture as
+       `BudgetMeter.tick`.
+    5. PERCENTILES via nearest-rank on a sorted ascending copy; empty
+       sample → zeros. `histogramBuckets` reserved for a future
+       bucketed-exposition adapter.
+    6. LABELS sorted lexicographically when forming the series key so
+       `{a:1,b:2}` and `{b:2,a:1}` share one time-series.
+
+  Built-in sinks ship for `console` (stderr line-by-line) and `jsonl`
+  (append `JSON.stringify(sample) + "\n"`; directory auto-created). Custom
+  OTel / Prometheus adapters plug in the same way.
+evidence:
+  code:
+    - src/observability/metrics/port.ts
+    - src/observability/metrics/in-memory-registry.ts
+    - src/observability/metrics/console-sink.ts
+    - src/observability/metrics/jsonl-sink.ts
+    - src/observability/metrics/index.ts
+  adrs: [144]
+  tests:
+    unit:
+      - tests/unit/observability-metrics-hellgate.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  Plane-clean: this slice imports ONLY `@/shared` (for `QuantaError`).
+  No `@/agent`, `@/llm`, `@/permission`, `@/tool` — those are future
+  consumers, never collaborators of this primitive. Distinct from the
+  pre-existing `metrics-registry.yaml` (which catalogs the older
+  `src/observability/metrics.ts` loop-recorder facade); the two coexist
+  during the migration window.

@@ -1,0 +1,50 @@
+id: jsonlrecorder
+title: JsonlRecorder
+section: 8
+subsystem: 이벤트/Trajectory (RFC-0002)
+order: 2
+maturity: L3
+status: stable
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [n-a]
+configurable: integrated
+config_refs:
+  env: [QUANTA_OBSERVE_DIR]
+owners: ['@songmin']
+labels: [surface:core, observability-primitive]
+depends_on: [agentevent, assemble-config, assert-never-exhaustiveness, byte-stable-string-comparator, errors-helper-fix]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 4/4 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "Pure internal append-only JSONL sink/codec, no UI affordance on any surface."
+purpose: |
+  `JsonlRecorder` — append-only JSON-Lines sink for the trajectory event stream.
+  One AgentEvent ⇒ one JSON object per line (newline-framed, never partial)
+  under the directory configured by `QUANTA_OBSERVE_DIR`. Pairs with `TeeStream`
+  for fan-out (SSE + JSONL + dashboard from the same loop emit) and with the
+  structured logger (RFC-0002 §5.2). Implemented in `src/stream/adapters/
+  jsonl-recorder.ts`; lifecycle (open/close) is idempotent so a late event
+  after close is a silent no-op instead of a crash.
+evidence:
+  code:
+    - src/stream/adapters/jsonl-recorder.ts
+    - src/stream/adapters/jsonl-recorder-event-data.ts
+    - src/stream/adapters/tee.ts
+    - src/stream/adapters/jsonl-retention.ts
+    - src/apps/cli/internal.ts
+  adrs: []
+  tests:
+    unit: [tests/unit/jsonl-recorder.test.ts, tests/unit/jsonl-recorder-retention.test.ts, tests/unit/tee.test.ts]
+    integration: []
+    contract: []
+knobs:
+  - name: QUANTA_OBSERVE_DIR
+    default: 'undefined'
+    purpose: '(no description)'
+deliberate_hold: null
+notes: ''

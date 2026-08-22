@@ -1,0 +1,80 @@
+id: replay-cmd-session-rewind
+title: '`/replay <session-id> [--at N] [--from tc_x]` — 세션 JSONL 시간순 재생 (ADR-0239 Track R)'
+section: 10
+subsystem: REPL slash — 사후 세션 trajectory time-travel replay
+order: 2392
+maturity: L3
+status: stable
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [interactive, headless, ide]
+configurable: partial
+owners: ["@songmin"]
+labels: ["surface:cli", "tier:observability"]
+depends_on: [debug-tracer-decision-event, decision-emit-phase2-admissibility, inspect-cmd-toolcall-expand, jsonlrecorder]
+config_refs:
+  env: []
+surface_integration:
+  cli: full
+  web: missing
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 3/3 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "CLI-only slash command; SlashPalette server-routed commands are prefill stubs (B2), no web handler"
+purpose: |
+  `/inspect`는 단일 tool-call에 대한 사후 zoom이고 `/debug`는 *live stream*
+  이라 retroactive하게는 못 봄 (ring buffer 없음). 사용자가 자주 묻는 또
+  다른 질문 — "어제 그 세션, 전체적으로 어떻게 흘러갔어? Turn N부터 뭐가
+  일어났어?" — 에 답하는 게 `/replay`. 세션 JSONL envelope이 이미 모든
+  trajectory를 deterministic order로 persist하고 있으므로 그걸 시간순으로
+  pretty-paint하는 surface만 추가.
+
+  `/replay <session-id> [--at N] [--from tc_x] [--pace ms]` ship: (1)
+  세션 envelope iterator를 file-order로 traverse, (2) `--at N` flag로 turn
+  N부터 시작 (skip first N-1 turns), (3) `--from tc_x` flag로 specific
+  tool-call id 도달부터 시작, (4) `--pace <ms>` (default 0 = instant)로 row
+  emit pacing 옵션, (5) live `/debug` consumer가 보는 것과 같은 single-line
+  pretty format으로 stderr write — debug-tracer category filter도 동일하게
+  apply 가능.
+
+  Determinism: file-order traverse + 동일한 pretty stringifier 사용 →
+  같은 세션 + 같은 flag 조합 = 같은 출력 (replay determinism). pacing은
+  rendering side concern (data side는 deterministic 유지).
+
+  Live `/debug`와 surface parity: 같은 `renderTimelineRow` / debug-tracer
+  category mapper 재사용 → 사용자가 live trace 보던 mental model 그대로
+  사후에도 적용. session-id resolution은 session-id store / state 디렉토리
+  스캔.
+
+  Default-OFF: SlashContext에 replay ctx 미공급 surface (one-shot / shell)
+  는 "/replay: not wired in this surface" + exit 0.
+evidence:
+  code:
+    - src/apps/cli/replay-cmd.ts
+    - src/apps/cli/slash-commands.ts
+    - src/apps/cli/repl.ts
+  adrs: [239]
+  tests:
+    unit:
+      - tests/unit/cli/replay-cmd-hellgate.test.ts
+      - tests/unit/cli/wire-tir-hellgate.test.ts
+      - tests/unit/slash-commands.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  Phase 1 negative invariant ("No `/replay` time-travel")을 의도적으로 Track
+  R로 따로 분리 ship — Phase 1 slice는 *contract + live consumer*만 책임.
+  Sibling이 ADR-0166 (subagent seed-replay)은 *agent를 재실행*하는 것 (LLM
+  fresh call)이고 이 `/replay`는 *fact만 시간순 paint* (LLM call 0, byte-
+  identical replay).
+
+  Slice fence: `@/session` envelope reader + `@/stream` types + 공통 redactor
+  만 import. `@/agent` reach 없음. argument parser는 cog-complexity 낮게
+  유지 (slash-commands.ts에서 dispatch만).
+
+  `--pace` 옵션 trade-off: 0 = instant (CI-friendly), >0 ms = 사람이 visually
+  쫓을 수 있는 cadence. pacing은 sleep-loop이 아니라 setTimeout chain (test
+  seam에서 fake clock injectable).

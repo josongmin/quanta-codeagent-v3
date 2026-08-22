@@ -1,0 +1,31 @@
+{
+  "schema": 2,
+  "id": "entire-session-rollup",
+  "usecase": "persistent-context.conversation-state.thread-grounding",
+  "history": [
+    {
+      "role": "assistant",
+      "kind": "directive",
+      "threadId": "session_rollup",
+      "referentId": "session_rollup",
+      "text": "Active thread session_rollup is compiling the cross-thread status for prompt_rules, workflow_gate, and feature_catalog."
+    },
+    {
+      "role": "assistant",
+      "threadId": "session_rollup",
+      "referentId": "session_rollup",
+      "text": "Session summary so far: prompt_rules proof rail green, workflow_gate pending, feature_catalog sync pending."
+    }
+  ],
+  "targetUtterance": "지금 전체적으로 뭐 남았지?",
+  "gold": {
+    "activeThreadId": "session_rollup",
+    "referentId": "session_rollup",
+    "intent": "status_check",
+    "scope": "entire_session",
+    "shouldClarify": false,
+    "confidence": "high"
+  },
+  "bucket": "topic_switch_return",
+  "severity": "medium"
+}

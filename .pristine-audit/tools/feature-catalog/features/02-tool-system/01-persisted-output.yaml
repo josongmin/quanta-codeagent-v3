@@ -1,0 +1,37 @@
+id: persisted-output
+title: <persisted-output>
+section: 2
+subsystem: 결과 cap + disk-spill (Tier 0)
+order: 1
+maturity: L3
+status: stable
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [n-a]
+configurable: n-a
+owners: ['@songmin']
+labels: [surface:cli]
+depends_on: [tool-registry, spill-evidence-fulllogpath-round-5, tool-output-schema-factory, assert-never-exhaustiveness, byte-stable-string-comparator]
+config_refs:
+  env: [QUANTA_TOOL_OUTPUT_MAX, QUANTA_TOOL_OUTPUT_SPILL_KEEP]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 1/2 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "pure internal result cap + disk-spill primitive; ui_surfaces n-a, no user-visible affordance"
+purpose: <persisted-output> 스필 + GC
+evidence:
+  code:
+    - src/tool/output-spill.ts
+    - src/tool/registry.ts
+  adrs: []
+  tests:
+    unit: [tests/unit/output-spill.test.ts]
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: ''

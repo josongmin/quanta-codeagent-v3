@@ -1,0 +1,83 @@
+id: per-tool-checkpoint-granularity
+title: Per-tool / per-skill checkpoint granularity (ADR-0209)
+section: 3
+subsystem: Shadow-ODB anchor granularity (Cline + Cursor + Codex absorption)
+order: 209
+maturity: L3
+status: new
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [n-a]
+configurable: integrated
+owners: ["@songmin"]
+labels: ["surface:core", "absorbed:cline", "absorbed:cursor", "absorbed:codex", "default-off"]
+depends_on: []
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 4/4 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "internal checkpoint-granularity policy primitive (surface:core); no UI affordance on any surface"
+purpose: |
+  ADR-0121의 4-arm trigger mode와 직교하는 GRANULARITY 축 추가
+  (`"turn" | "tool" | "skill"`). 기존 per-turn dedup는 Cline의 매-tool-call
+  anchor + tag 패턴 (`/rewind-tool tool:edit_file:turn-1:7`) 을 막아왔음.
+  `GranularCheckpointPolicy` 가 base `CheckpointPolicy` 를 extends 하고
+  `computeTag(ctx)` + `recordAnchorSha(tag, sha, ctx)` 를 추가; tool-grain
+  은 base의 turn-dedup 을 우회해 매 destructive call마다 anchor + LRU tag
+  registry 에 `tool:<name>:<turnId>:<callIndex>` 삽입. Default-OFF:
+  `defaultCheckpointPolicy` 그대로면 byte-identical (registry empty, no
+  bypass). assembly layer가 명시적으로 `defaultGranularCheckpointPolicy(
+  {base, granularity:"tool"})` 를 wire할 때만 활성.
+evidence:
+  code:
+    - src/agent/per-tool-checkpoint/port.ts
+    - src/agent/per-tool-checkpoint/granular-policy.ts
+    - src/agent/per-tool-checkpoint/index.ts
+    - src/apps/cli/repl/per-tool-checkpoint-wire.ts
+  adrs:
+    - docs/decisions/0209-per-tool-checkpoint-granularity.md
+  tests:
+    unit:
+      - tests/unit/per-tool-checkpoint-hellgate.test.ts
+      - tests/unit/per-tool-record-lifecycle-hellgate.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold:
+  reason: |
+    DoF-15 (jul-16 default-OFF SOTA++ board): the per-tool RECORD producer is
+    LIVE under `QUANTA_PER_TOOL_RECORD=on` (surface-compose wires the granular
+    policy into the dispatch-wrap producer + the /rewind-tool consumer), but
+    the DEFAULT stays OFF. Decision (c): deliberately HOLD the producer with
+    BOUNDED retention + a typed PRODUCER-ONLY inspection accessor — NOT a
+    second snapshot authority. The single ADR-0209 `GranularRegistry` (tag→SHA)
+    is the sole authority; the deleted ADR-0300 raw-content store was NOT
+    resurrected.
+    Retention policy (bounds proven in per-tool-record-lifecycle-hellgate):
+      - anchors LRU-capped at `maxRegistryEntries` (default 200, min 1);
+      - the per-(workspace,turnId) call-index counter LRU-capped at
+        DEFAULT_MAX_CALL_INDEX_KEYS (1000) — the pre-DoF-15 unbounded vector;
+      - `registry.clear()` resets BOTH anchors AND the counter, and is called
+        on session teardown via `disposePerToolRecord` (repl.ts finally block);
+      - OFF path wraps ZERO tools: `wireCheckpointedEffectChannel` returns the
+        SAME channel reference (no wrap, no registry allocation).
+    Inspection is PRODUCER-ONLY: `registry.stats()` is a pure read-only
+    projection ({entryCount, entryCap, counterCount, counterCap}); nothing in
+    the loop consumes it to drive behaviour.
+  promotion_path: |
+    To flip the default ON, wire the `/rewind-tool` RESTORE consumer as the
+    canonical product consumer (the raw checkpoint adapter → /rewind-tool) at
+    the CLI composition root — a change to `src/apps/cli/repl/surface-compose.ts`
+    (a forbidden composition root for the DoF-15 leaf; returned as a text
+    follow-up). No new snapshot store is permitted — the promotion re-uses the
+    existing ADR-0209 registry + ADR-0210 three-way-restore port.
+notes: |
+  4-arm trigger × granularity 호환성 매트릭스는 ADR 본문 표 참조.
+  pre-destructive 모드에서는 base가 turn-dedup 으로 거절하면 tool-grain도
+  거절 — legacy posture 존중 (cooperative). skill grain 은 enum-stable
+  reserved (Codex skill boundary 와이어 예정).
+  DoF-15 retention: registry `stats()` (producer-only inspection) + bounded
+  call-index counter + teardown-clear. See deliberate_hold above.

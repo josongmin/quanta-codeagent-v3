@@ -1,0 +1,57 @@
+id: shadow-odb-port
+title: ShadowOdb closed port + LRU eviction utility (ADR-0108)
+section: 2
+subsystem: 도구 — shadow store port (Cursor gix-snapshot 흡수, ADR-0108)
+order: 94
+maturity: L4
+status: new
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [n-a]
+configurable: n-a
+owners: ["@songmin"]
+labels: [absorbed:codex, absorbed:cursor, surface:cli]
+depends_on: [shadow-tools-trio, slash-snapshot]
+config_refs:
+  env: []
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 5/5 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "Pure internal git ObjectDB port + LRU cleanup library, no UI affordance on any surface."
+purpose: |
+  Closed-port contract for a separate git ObjectDB rooted at
+  `<baseDir>/snapshots/<workspaceHash>/.git` — point-in-time worktree snapshots
+  that NEVER touch the user's own `.git`. The pivot is `GIT_DIR` +
+  `GIT_WORK_TREE` env override: one `git` invocation re-points at the shadow
+  store while still reading the user's working tree. `defaultShadowOdb` is the
+  factory; the surface exports the port type, `ShadowOdbError` (with codes
+  `uninitialized:` / `merge-in-progress:` / `rewind-failed:`), well-known ref
+  constants (`SHADOW_LAST_REF`, `SHADOW_LAST_VERIFIED_REF`,
+  `SHADOW_PRE_REWIND_REF_PREFIX`), and `DEFAULT_SHADOW_ODB_MAX_BYTES`. `evictLru`
+  sums per-workspace shadow-dir sizes and removes oldest-mtime entries until
+  total ≤ `maxBytes` — best-effort by design (per-dir failures swallowed). Hard
+  safety invariant: cleanup ONLY ever reads/removes inside `<base>/snapshots/*`;
+  the user's `.quanta/auth/` (and anything above the snapshots root) is
+  untouched. The port underpins `shadow-tools-trio` (model-facing surface) and
+  `slash-snapshot` (operator CLI).
+evidence:
+  code:
+    - src/storage/shadow-odb/index.ts
+    - src/storage/shadow-odb/default.ts
+    - src/storage/shadow-odb/cleanup.ts
+    - src/storage/shadow-odb/hash.ts
+    - src/storage/shadow-odb/types.ts
+  adrs: [108]
+  tests:
+    unit:
+      - tests/unit/shadow-odb-hellgate.test.ts
+      - tests/unit/shadow-odb-rewind-extensions-hellgate.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: 'Distinct from `shadow-tools-trio` (the model-callable tools) and `slash-snapshot` (the operator slash command). This is the underlying port + LRU eviction utility.'

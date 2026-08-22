@@ -9,7 +9,7 @@ system은 `buildSystemPrompt`/`composeSystemPromptForSurface`로 **재구성**(�
 | 런 | 위치 | model | 결과 |
 |---|---|---|---|
 | **SWE 스모크** | 로컬, picks-3, `QUANTA_BENCH_PROMPT_SECTIONED=1` | gpt-5.4 | 1/3 pass (sympy PASS · requests/pylint completed_unresolved), 패치 3/3, 크래시 0, $0.52 |
-| **TB 스모크** | 원격 박스 i-04ca, harbor terminal-bench, 3-task | gpt-5.5 | guard 1/1 green(fix-git) · targets 0/2 (polyglot-c-py·sam-cell-seg) |
+| **TB 스모크** (⚠️ Terminal-Bench **2.0** — retired evidence, not a current 2.1 result) | 원격 박스 i-04ca, 3-task | gpt-5.5 | guard 1/1 green(fix-git) · targets 0/2 (polyglot-c-py·sam-cell-seg) |
 
 ## 파일
 

@@ -1,0 +1,103 @@
+id: repl-orphan-resolution
+title: CLI repl/ orphan modules — Slice B truth-up & prune
+section: 10
+subsystem: CLI surface dead-code closeout
+order: 220
+maturity: L4
+status: stable
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [interactive, headless]
+configurable: n-a
+owners: ["@songmin"]
+labels: ["surface:cli", "tier:repl", "closeout"]
+depends_on: [cli-repl-solid-split, repl-mcp-surface-wire]
+config_refs:
+  env: []
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 2/2 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "Pure dead-code closeout/prune task with no user-facing affordance on any surface; not a UI feature."
+purpose: |
+  Closeout of the 21-module orphan tree under `src/apps/cli/repl/` created by
+  commit `acb8d187` (2026-05-24 "split GodClass into SOLID modules v2,
+  byte-identical"). Verified by grep: zero importers in src/ or tests/ for any
+  `./repl/*` path other than `mcp-surface-wire.ts`. `src/apps/cli/repl.ts`
+  (the live God-class) had re-inlined every helper, so the orphan tree was
+  pure duplicate dead code.
+
+  **Per-module decision matrix (21 modules):**
+
+  | Module                  | LOC | Decision      | Reason                                                                            |
+  |-------------------------|----:|---------------|-----------------------------------------------------------------------------------|
+  | assemble-context.ts     | 332 | DELETE        | Composer; depends on the deleted wires; not imported anywhere.                    |
+  | idle-wire.ts            |  67 | DELETE        | `wrapPromptSourceWithIdleGate` duplicated at repl.ts:917.                         |
+  | image-queue-wire.ts     |  16 | DELETE        | `buildImageQueue` duplicated at repl.ts:200.                                      |
+  | interactive-driver.ts   | 150 | DELETE        | Driver; calls deleted composers; not imported anywhere.                           |
+  | lifecycle-wire.ts       |  98 | DELETE        | `buildLifecycleBundle` / `deriveMcpPillServers` / `snapshotAndFlushLifecyclePills` duplicated at repl.ts:225/255/280. |
+  | mcp-surface-wire.ts     | 127 | KEEP_AS_SEAM  | Has independent test (90 LOC, 9 assertions); no live consumer; future wire when repl.ts is re-split. Seam comment added. |
+  | metrics-sink.ts         |  17 | DELETE        | `buildWorkMetricsSink` duplicated at repl.ts:304.                                 |
+  | oneshot-driver.ts       |  71 | DELETE        | Driver; calls deleted composers; not imported anywhere.                           |
+  | prompt-source.ts        | 136 | DELETE        | `tryRunReplSlash` / `readReplLine` / `classifyReplLine` / `buildCliPromptSource` all duplicated in repl.ts. |
+  | readline-loop.ts        | 107 | DELETE        | `runReplLoop` / `runReplLoopRaw` duplicated at repl.ts:672/713.                   |
+  | resume-fsm.ts           |  62 | DELETE        | `driveResumeFsm` only used by deleted `assemble-context.ts`.                      |
+  | run-repl.ts             |  29 | DELETE        | Composer; calls deleted drivers; not imported anywhere.                           |
+  | seed-images.ts          |  18 | DELETE        | `loadSeedImages` duplicated at repl.ts:186.                                       |
+  | session-router.ts       |  45 | DELETE        | `runSessionMain` / `runSlashMain` duplicated at repl.ts:752/774.                  |
+  | skills-callback.ts      |  37 | DELETE        | `buildSkillsCallback` duplicated at repl.ts:543.                                  |
+  | status-pills-wire.ts    |  44 | DELETE        | `installPills` duplicated at repl.ts:575.                                         |
+  | turn-cancel.ts          |  66 | DELETE        | `installTurnCancel` duplicated as inner-nested helper inside repl.ts:1283.        |
+  | turn-indicator-wire.ts  |  65 | DELETE        | `buildIndicatorPort` / `buildTurnIndicatorAndStream` duplicated at repl.ts:475/525. |
+  | turn-render.ts          |  26 | DELETE        | `renderTurnDashboard` / `renderTurnError` duplicated at repl.ts:792/806.          |
+  | turn-summary-wire.ts    |  30 | DELETE        | `buildTurnSummaryAndStream` duplicated at repl.ts:505.                            |
+  | usage.ts                |  21 | DELETE        | `topLevelUsage` duplicated at repl.ts:163.                                        |
+
+  **Net LOC delta:** −1437 LOC removed, +119 LOC kept (mcp-surface-wire.ts +
+  seam comment), +~70 LOC added in catalog yamls & hellgate test. **Net source
+  delta:** −1437 LOC pruned dead code.
+
+  **Why not WIRE the orphan tree?** The hard constraint forbade touching
+  `src/apps/cli/repl.ts`. Wiring the orphan composers (`run-repl.ts` /
+  `assemble-context.ts`) requires `apps/cli/index.ts` to import them in place
+  of the current `repl.ts` exports — which means either (a) deleting the
+  duplicates inside `repl.ts` (forbidden by slice constraint) or (b) accepting
+  two parallel composers both alive (would break byte-identical default-OFF
+  the moment any helper drifted). The acb8d187 commit message "byte-identical"
+  was true ONLY because the orphan tree was never reached.
+
+  **Why KEEP mcp-surface-wire.ts?** It is the lone orphan with an independent
+  unit test (`tests/unit/mcp-surface-wire.test.ts`) AND it is the only orphan
+  that does work `repl.ts` does NOT duplicate (repl.ts only updates the live
+  lifecycle pill; `/mcp` slash command therefore prints "not wired in this
+  surface" today). The function is a load-bearing future wire when a follow-up
+  slice rebuilds the SOLID split correctly.
+evidence:
+  code:
+    - src/apps/cli/repl.ts
+    - src/apps/cli/repl/mcp-surface-wire.ts
+  adrs: []
+  tests:
+    unit:
+      - tests/unit/apps/cli/repl-orphan-resolution-hellgate.test.ts
+      - tests/unit/mcp-surface-wire.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  Risk register — REVERSIBLE: every deletion is git-recoverable from
+  acb8d187; the deleted modules were verified zero-importer with grep before
+  removal. IRREVERSIBLE: none. KEEP decision for mcp-surface-wire.ts is
+  reversible by deleting the file + the seam comment.
+
+  Pre-existing tsc errors (101 across foundry/skybridge/coverage/catalog test
+  scaffolding) are unrelated and unchanged by this slice — `bunx tsc -p .
+  --noEmit | grep apps/cli/repl` reports zero issues both before and after.
+
+  Pre-existing CLI tests baseline (`tests/unit/apps/cli/` + mcp-surface-wire):
+  165 pass / 0 fail / 381 expects. Post-prune (with the new hellgate added):
+  same 165 + 12 new = 177 pass / 0 fail.

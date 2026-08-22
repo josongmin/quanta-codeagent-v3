@@ -1,0 +1,48 @@
+id: external-editor-compose
+title: "External $EDITOR draft composition (ctrl-x ctrl-e)"
+section: 10
+subsystem: 앱 — CLI 외부 에디터 (claude/codex $EDITOR 흡수, ADR-0446)
+order: 4
+maturity: L3
+status: stable
+ui_surfaces: [cli]
+modes: [interactive]
+monitoring: n-a
+configurable: partial
+owners: ["@songmin"]
+labels: ["surface:core"]
+depends_on: []
+surface_integration:
+  cli: full
+  web: missing
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 3/3 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "CLI raw-mode-only affordance; web frontend has no $EDITOR chord and no protocol verb for it."
+purpose: |
+  A ctrl-x ctrl-e chord (readline convention) suspends raw mode, opens the current
+  draft in $EDITOR on a temp file, reads it back, and ALWAYS restores raw mode +
+  re-attaches the keypress listener in a finally (the #1 risk — restore even on
+  editor throw/nonzero-exit/spawn-fail/ctrl-c-during-edit). Reuses the existing
+  edit-plan-cmd `editInTemp` driver (no new spawn code). Default-OFF behind
+  QUANTA_EXTERNAL_EDITOR=1; absent ⇒ ctrl-x/ctrl-e are inert control chars.
+evidence:
+  code:
+    - src/apps/cli/raw-line-reader-editor.ts
+    - src/apps/cli/raw-line-reader.ts
+    - src/apps/cli/repl/surface-compose.ts
+  adrs: [446]
+  tests:
+    unit:
+      - src/apps/cli/__tests__/raw-line-reader-editor.hellgate.test.ts
+    integration: []
+    contract: []
+knobs:
+  - name: QUANTA_EXTERNAL_EDITOR
+    default: "undefined (off)"
+    purpose: "'1' ⇒ ctrl-x ctrl-e opens $EDITOR; absent ⇒ inert (byte-identical)"
+deliberate_hold:
+  reason: "modal vim / bracketed-paste burst deferred (RFC non-goals)."
+  promotion_path: "n-a — driver is complete; extensions are non-goals."
+notes: "ctrl-x latch abandons cleanly on any non-ctrl-e follow key; raw-mode restore is the load-bearing finally."

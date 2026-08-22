@@ -1,0 +1,65 @@
+id: darwin-vz-native-scaffold
+title: Darwin VZ native scaffold — napi-rs binding to Virtualization.framework
+section: 10
+subsystem: Darwin microVM native helper (Skybridge Phase 3.3)
+order: 93
+maturity: L3
+status: new
+ui_surfaces: [api]
+monitoring: planned
+modes: [daemon]
+configurable: integrated
+config_refs:
+  env: []
+owners: ["@songmin"]
+labels: ["adr-0190", "tier:2", "sandbox", "darwin"]
+depends_on:
+  - linux-sandbox-native-impl
+surface_integration:
+  cli: missing
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "src evidence not reachable from the interactive CLI entry (src/apps/cli/index.ts) — wired only into other apps (eval/bench/probe/headless) or unwired"
+    web: "Native VZ binding scaffold (deliberate_hold, fake-binding only), pure internal primitive with no UI affordance on any surface."
+purpose: |
+  napi-rs Cargo workspace member (`crates/darwin-vz-helper/`) — typed
+  surface + 20-case fake-binding hellgate + TS adapter
+  (`src/mcp/skybridge/applevz-native.ts`) wired into
+  `src/mcp/skybridge/registry.ts`. Mirrors ADR-0175 (linux-sandbox-native)
+  scaffold side-by-side. Phase 3.4 (real `VZVirtualMachine` bring-up +
+  DMG image management + vsock IPC + AVF entitlements) deferred to a
+  follow-up. `objc2-virtualization` v0.2.x community Rust binding under
+  `cfg(macos)`. Industry parallel: Claude Desktop's proprietary
+  yukonSilver Skybridge uses AVF; Codex `codex-rs` has no native AVF
+  binding (Lima wrapper only) — quanta leads on native Darwin VZ.
+evidence:
+  code:
+    - crates/Cargo.toml
+    - crates/darwin-vz-helper/Cargo.toml
+    - crates/darwin-vz-helper/src/lib.rs
+    - crates/darwin-vz-helper/src/vm_config.rs
+    - crates/darwin-vz-helper/src/boot_loader.rs
+    - src/mcp/skybridge/applevz-native.ts
+    - src/mcp/skybridge/registry.ts
+  adrs:
+    - docs/decisions/0190-darwin-vz-native-scaffold.md
+    - docs/decisions/0194-darwin-vz-native-scaffold.md
+  tests:
+    unit:
+      - tests/unit/mcp-skybridge-applevz-native-hellgate.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold:
+  reason: |
+    Phase 3.4 (real VM bring-up + vsock IPC + AVF entitlements + DMG
+    image management) is intentionally deferred — current slice is
+    typed-surface scaffold + fake-binding hellgate only.
+  promotion_path: |
+    Phase 3.4 ADR landing real VZVirtualMachine bring-up + production
+    image flow + signing/notarization story.
+notes: |
+  Resolver v2 + `cfg(target_os = "macos")` target deps. Future
+  `darwin-seatbelt-helper`, `win-appcontainer-helper` siblings expected.

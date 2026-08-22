@@ -1,0 +1,2055 @@
+{
+  "$schema": "https://biomejs.dev/schemas/2.4.15/schema.json",
+  "assist": {
+    "actions": {
+      "source": {
+        "organizeImports": "on"
+      }
+    }
+  },
+  "linter": {
+    "enabled": true,
+    "rules": {
+      "recommended": true,
+      "correctness": {
+        "noUnusedVariables": "error",
+        "noUnusedImports": "error",
+        "useExhaustiveDependencies": "warn"
+      },
+      "suspicious": {
+        "noExplicitAny": "error",
+        "noConsole": "error"
+      },
+      "style": {
+        "noNonNullAssertion": "warn",
+        "useImportType": "error",
+        "useExportType": "error"
+      },
+      "complexity": {
+        "noExcessiveCognitiveComplexity": {
+          "level": "warn",
+          "options": {
+            "maxAllowedComplexity": 15
+          }
+        }
+      }
+    }
+  },
+  "formatter": {
+    "enabled": true,
+    "indentStyle": "space",
+    "indentWidth": 2,
+    "lineWidth": 100,
+    "lineEnding": "lf"
+  },
+  "javascript": {
+    "formatter": {
+      "quoteStyle": "double",
+      "semicolons": "asNeeded",
+      "trailingCommas": "all",
+      "arrowParentheses": "always"
+    }
+  },
+  "files": {
+    "includes": [
+      "**",
+      "!node_modules",
+      "!dist",
+      "!**/*.d.ts",
+      "!tests/smoke/fixtures",
+      "!src/runner/batch/corpus/repo-version-specs.ts"
+    ]
+  },
+  "overrides": [
+    {
+      "includes": ["**/src/llm/**"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "paths": {
+                  "@/mcp": "Slice isolation (RFC 3.1): @/mcp is reachable only via @/agent",
+                  "@/tool": "Slice isolation (RFC 3.1): only @/agent may cross slices",
+                  "@/memory": "Slice isolation (RFC 3.1): only @/agent may cross slices",
+                  "@/storage": "Slice isolation (RFC 3.1): only @/agent may cross slices",
+                  "@/stream": "Slice isolation (RFC 3.1): only @/agent may cross slices",
+                  "@/permission": "Slice isolation (RFC 3.1): only @/agent may cross slices",
+                  "@/runtime": "Slice isolation (RFC 3.1): only @/agent may cross slices",
+                  "@/lsp": "Slice isolation (RFC 3.1): only @/agent may cross slices",
+                  "@/observability": "Slice isolation (RFC 3.1): only @/agent may cross slices",
+                  "@/security": "Slice isolation (RFC 3.1): @/security is reachable by @/tool (classifyPath/classifyCommandShape) + @/agent — not by other library slices.",
+                  "@/patch": "Slice isolation (RFC 3.1): @/patch is reachable by @/tool/apply-patch + @/agent — not by other library slices.",
+                  "@/rules": "Slice isolation (RFC 3.1): @/rules is reachable by @/agent only — library slices must not import."
+                },
+                "patterns": [
+                  {
+                    "group": ["**/apps/cli", "**/apps/cli/*", "**/apps/cli/**"],
+                    "message": "Slice isolation (ADR-0024 export-gap closure): src/apps/cli is the application entrypoint; library slices and external tests must NOT import its internals. CLI helpers live in src/apps/cli/internal.ts and are reachable only from src/apps/cli/** (and the explicitly-allowed CLI unit tests). New cross-slice helpers should land in @/agent or another library slice."
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "includes": ["**/src/tool/**"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "paths": {
+                  "@/mcp": "Slice isolation (RFC 3.1): @/mcp is reachable only via @/agent",
+                  "@/memory": "Slice isolation (RFC 3.1): @/tool may only reach @/storage, @/runtime, @/shared",
+                  "@/stream": "Slice isolation (RFC 3.1): @/tool may only reach @/storage, @/runtime, @/shared",
+                  "@/permission": "Slice isolation (RFC 3.1): @/tool may only reach @/storage, @/runtime, @/shared",
+                  "@/lsp": "Slice isolation (RFC 3.1): @/tool may only reach @/storage, @/runtime, @/shared",
+                  "@/observability": "Slice isolation (RFC 3.1): @/tool may only reach @/storage, @/runtime, @/shared",
+                  "@/patch": "Slice isolation (RFC 3.1): @/patch is reachable by @/tool/apply-patch + @/agent — not by other library slices.",
+                  "@/rules": "Slice isolation (RFC 3.1): @/rules is reachable by @/agent only — library slices must not import."
+                },
+                "patterns": [
+                  {
+                    "group": ["**/apps/cli", "**/apps/cli/*", "**/apps/cli/**"],
+                    "message": "Slice isolation (ADR-0024 export-gap closure): src/apps/cli is the application entrypoint; library slices and external tests must NOT import its internals. CLI helpers live in src/apps/cli/internal.ts and are reachable only from src/apps/cli/** (and the explicitly-allowed CLI unit tests). New cross-slice helpers should land in @/agent or another library slice."
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "includes": ["**/src/memory/**"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "paths": {
+                  "@/mcp": "Slice isolation (RFC 3.1): @/mcp is reachable only via @/agent",
+                  "@/tool": "Slice isolation (RFC 3.1): @/memory may only reach @/storage, @/shared",
+                  "@/stream": "Slice isolation (RFC 3.1): @/memory may only reach @/storage, @/shared",
+                  "@/permission": "Slice isolation (RFC 3.1): @/memory may only reach @/storage, @/shared",
+                  "@/lsp": "Slice isolation (RFC 3.1): @/memory may only reach @/storage, @/shared",
+                  "@/observability": "Slice isolation (RFC 3.1): @/memory may only reach @/storage, @/shared",
+                  "@/llm": "Slice isolation (RFC 3.1): @/memory may only reach @/storage, @/shared",
+                  "@/security": "Slice isolation (RFC 3.1): @/security is reachable by @/tool (classifyPath/classifyCommandShape) + @/agent — not by other library slices.",
+                  "@/patch": "Slice isolation (RFC 3.1): @/patch is reachable by @/tool/apply-patch + @/agent — not by other library slices.",
+                  "@/rules": "Slice isolation (RFC 3.1): @/rules is reachable by @/agent only — library slices must not import."
+                },
+                "patterns": [
+                  {
+                    "group": ["**/apps/cli", "**/apps/cli/*", "**/apps/cli/**"],
+                    "message": "Slice isolation (ADR-0024 export-gap closure): src/apps/cli is the application entrypoint; library slices and external tests must NOT import its internals. CLI helpers live in src/apps/cli/internal.ts and are reachable only from src/apps/cli/** (and the explicitly-allowed CLI unit tests). New cross-slice helpers should land in @/agent or another library slice."
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "includes": ["**/src/storage/**"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "paths": {
+                  "@/mcp": "Slice isolation (RFC 3.1): @/mcp is reachable only via @/agent",
+                  "@/tool": "Slice isolation (RFC 3.1): @/storage depends on @/shared only",
+                  "@/memory": "Slice isolation (RFC 3.1): @/storage depends on @/shared only",
+                  "@/stream": "Slice isolation (RFC 3.1): @/storage depends on @/shared only",
+                  "@/permission": "Slice isolation (RFC 3.1): @/storage depends on @/shared only",
+                  "@/runtime": "Slice isolation (RFC 3.1): @/storage depends on @/shared only",
+                  "@/lsp": "Slice isolation (RFC 3.1): @/storage depends on @/shared only",
+                  "@/observability": "Slice isolation (RFC 3.1): @/storage depends on @/shared only",
+                  "@/llm": "Slice isolation (RFC 3.1): @/storage depends on @/shared only",
+                  "@/security": "Slice isolation (RFC 3.1): @/security is reachable by @/tool (classifyPath/classifyCommandShape) + @/agent — not by other library slices.",
+                  "@/patch": "Slice isolation (RFC 3.1): @/patch is reachable by @/tool/apply-patch + @/agent — not by other library slices.",
+                  "@/rules": "Slice isolation (RFC 3.1): @/rules is reachable by @/agent only — library slices must not import."
+                },
+                "patterns": [
+                  {
+                    "group": ["**/apps/cli", "**/apps/cli/*", "**/apps/cli/**"],
+                    "message": "Slice isolation (ADR-0024 export-gap closure): src/apps/cli is the application entrypoint; library slices and external tests must NOT import its internals. CLI helpers live in src/apps/cli/internal.ts and are reachable only from src/apps/cli/** (and the explicitly-allowed CLI unit tests). New cross-slice helpers should land in @/agent or another library slice."
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "includes": ["**/src/stream/**"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "paths": {
+                  "@/mcp": "Slice isolation (RFC 3.1): @/mcp is reachable only via @/agent",
+                  "@/tool": "Slice isolation (RFC 3.1): @/stream depends on @/shared only",
+                  "@/memory": "Slice isolation (RFC 3.1): @/stream depends on @/shared only",
+                  "@/storage": "Slice isolation (RFC 3.1): @/stream depends on @/shared only",
+                  "@/permission": "Slice isolation (RFC 3.1): @/stream depends on @/shared only",
+                  "@/runtime": "Slice isolation (RFC 3.1): @/stream depends on @/shared only",
+                  "@/lsp": "Slice isolation (RFC 3.1): @/stream depends on @/shared only",
+                  "@/observability": "Slice isolation (RFC 3.1): @/stream depends on @/shared only",
+                  "@/llm": "Slice isolation (RFC 3.1): @/stream depends on @/shared only",
+                  "@/security": "Slice isolation (RFC 3.1): @/security is reachable by @/tool (classifyPath/classifyCommandShape) + @/agent — not by other library slices.",
+                  "@/patch": "Slice isolation (RFC 3.1): @/patch is reachable by @/tool/apply-patch + @/agent — not by other library slices.",
+                  "@/rules": "Slice isolation (RFC 3.1): @/rules is reachable by @/agent only — library slices must not import."
+                },
+                "patterns": [
+                  {
+                    "group": ["**/apps/cli", "**/apps/cli/*", "**/apps/cli/**"],
+                    "message": "Slice isolation (ADR-0024 export-gap closure): src/apps/cli is the application entrypoint; library slices and external tests must NOT import its internals. CLI helpers live in src/apps/cli/internal.ts and are reachable only from src/apps/cli/** (and the explicitly-allowed CLI unit tests). New cross-slice helpers should land in @/agent or another library slice."
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "includes": ["**/src/permission/**"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "paths": {
+                  "@/mcp": "Slice isolation (RFC 3.1): @/mcp is reachable only via @/agent",
+                  "@/tool": "Slice isolation (RFC 3.1): @/permission depends on @/shared only",
+                  "@/memory": "Slice isolation (RFC 3.1): @/permission depends on @/shared only",
+                  "@/storage": "Slice isolation (RFC 3.1): @/permission depends on @/shared only",
+                  "@/stream": "Slice isolation (RFC 3.1): @/permission depends on @/shared only",
+                  "@/runtime": "Slice isolation (RFC 3.1): @/permission depends on @/shared only",
+                  "@/lsp": "Slice isolation (RFC 3.1): @/permission depends on @/shared only",
+                  "@/observability": "Slice isolation (RFC 3.1): @/permission depends on @/shared only",
+                  "@/llm": "Slice isolation (RFC 3.1): @/permission depends on @/shared only",
+                  "@/security": "Slice isolation (RFC 3.1): @/security is reachable by @/tool (classifyPath/classifyCommandShape) + @/agent — not by other library slices.",
+                  "@/patch": "Slice isolation (RFC 3.1): @/patch is reachable by @/tool/apply-patch + @/agent — not by other library slices.",
+                  "@/rules": "Slice isolation (RFC 3.1): @/rules is reachable by @/agent only — library slices must not import."
+                },
+                "patterns": [
+                  {
+                    "group": ["**/apps/cli", "**/apps/cli/*", "**/apps/cli/**"],
+                    "message": "Slice isolation (ADR-0024 export-gap closure): src/apps/cli is the application entrypoint; library slices and external tests must NOT import its internals. CLI helpers live in src/apps/cli/internal.ts and are reachable only from src/apps/cli/** (and the explicitly-allowed CLI unit tests). New cross-slice helpers should land in @/agent or another library slice."
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "includes": ["**/src/runtime/**"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "paths": {
+                  "@/mcp": "Slice isolation (RFC 3.1): @/mcp is reachable only via @/agent",
+                  "@/tool": "Slice isolation (RFC 3.1): @/runtime depends on @/shared only",
+                  "@/memory": "Slice isolation (RFC 3.1): @/runtime depends on @/shared only",
+                  "@/stream": "Slice isolation (RFC 3.1): @/runtime depends on @/shared only",
+                  "@/permission": "Slice isolation (RFC 3.1): @/runtime depends on @/shared only",
+                  "@/lsp": "Slice isolation (RFC 3.1): @/runtime depends on @/shared only",
+                  "@/observability": "Slice isolation (RFC 3.1): @/runtime depends on @/shared only",
+                  "@/llm": "Slice isolation (RFC 3.1): @/runtime depends on @/shared only",
+                  "@/security": "Slice isolation (RFC 3.1): @/security is reachable by @/tool (classifyPath/classifyCommandShape) + @/agent — not by other library slices.",
+                  "@/patch": "Slice isolation (RFC 3.1): @/patch is reachable by @/tool/apply-patch + @/agent — not by other library slices.",
+                  "@/rules": "Slice isolation (RFC 3.1): @/rules is reachable by @/agent only — library slices must not import."
+                },
+                "patterns": [
+                  {
+                    "group": ["**/apps/cli", "**/apps/cli/*", "**/apps/cli/**"],
+                    "message": "Slice isolation (ADR-0024 export-gap closure): src/apps/cli is the application entrypoint; library slices and external tests must NOT import its internals. CLI helpers live in src/apps/cli/internal.ts and are reachable only from src/apps/cli/** (and the explicitly-allowed CLI unit tests). New cross-slice helpers should land in @/agent or another library slice."
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "includes": ["**/src/lsp/**"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "paths": {
+                  "@/mcp": "Slice isolation (RFC 3.1): @/mcp is reachable only via @/agent",
+                  "@/tool": "Slice isolation (RFC 3.1): @/lsp depends on @/shared only",
+                  "@/memory": "Slice isolation (RFC 3.1): @/lsp depends on @/shared only",
+                  "@/storage": "Slice isolation (RFC 3.1): @/lsp depends on @/shared only",
+                  "@/stream": "Slice isolation (RFC 3.1): @/lsp depends on @/shared only",
+                  "@/permission": "Slice isolation (RFC 3.1): @/lsp depends on @/shared only",
+                  "@/runtime": "Slice isolation (RFC 3.1): @/lsp depends on @/shared only",
+                  "@/observability": "Slice isolation (RFC 3.1): @/lsp depends on @/shared only",
+                  "@/llm": "Slice isolation (RFC 3.1): @/lsp depends on @/shared only",
+                  "@/security": "Slice isolation (RFC 3.1): @/security is reachable by @/tool (classifyPath/classifyCommandShape) + @/agent — not by other library slices.",
+                  "@/patch": "Slice isolation (RFC 3.1): @/patch is reachable by @/tool/apply-patch + @/agent — not by other library slices.",
+                  "@/rules": "Slice isolation (RFC 3.1): @/rules is reachable by @/agent only — library slices must not import."
+                },
+                "patterns": [
+                  {
+                    "group": ["**/apps/cli", "**/apps/cli/*", "**/apps/cli/**"],
+                    "message": "Slice isolation (ADR-0024 export-gap closure): src/apps/cli is the application entrypoint; library slices and external tests must NOT import its internals. CLI helpers live in src/apps/cli/internal.ts and are reachable only from src/apps/cli/** (and the explicitly-allowed CLI unit tests). New cross-slice helpers should land in @/agent or another library slice."
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "includes": ["**/src/mcp/**"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "paths": {
+                  "@/mcp": "Slice isolation (RFC 3.1): @/mcp is reachable only via @/agent",
+                  "@/tool": "Slice isolation (RFC 3.1): @/mcp depends on @/shared only",
+                  "@/memory": "Slice isolation (RFC 3.1): @/mcp depends on @/shared only",
+                  "@/storage": "Slice isolation (RFC 3.1): @/mcp depends on @/shared only",
+                  "@/stream": "Slice isolation (RFC 3.1): @/mcp depends on @/shared only",
+                  "@/permission": "Slice isolation (RFC 3.1): @/mcp depends on @/shared only",
+                  "@/runtime": "Slice isolation (RFC 3.1): @/mcp depends on @/shared only",
+                  "@/lsp": "Slice isolation (RFC 3.1): @/mcp depends on @/shared only",
+                  "@/observability": "Slice isolation (RFC 3.1): @/mcp depends on @/shared only",
+                  "@/llm": "Slice isolation (RFC 3.1): @/mcp depends on @/shared only",
+                  "@/security": "Slice isolation (RFC 3.1): @/security is reachable by @/tool (classifyPath/classifyCommandShape) + @/agent — not by other library slices.",
+                  "@/patch": "Slice isolation (RFC 3.1): @/patch is reachable by @/tool/apply-patch + @/agent — not by other library slices.",
+                  "@/rules": "Slice isolation (RFC 3.1): @/rules is reachable by @/agent only — library slices must not import."
+                },
+                "patterns": [
+                  {
+                    "group": ["**/apps/cli", "**/apps/cli/*", "**/apps/cli/**"],
+                    "message": "Slice isolation (ADR-0024 export-gap closure): src/apps/cli is the application entrypoint; library slices and external tests must NOT import its internals. CLI helpers live in src/apps/cli/internal.ts and are reachable only from src/apps/cli/** (and the explicitly-allowed CLI unit tests). New cross-slice helpers should land in @/agent or another library slice."
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "includes": ["**/src/observability/**"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "paths": {
+                  "@/mcp": "Slice isolation (RFC 3.1): @/mcp is reachable only via @/agent",
+                  "@/tool": "Slice isolation (RFC 3.1): @/observability depends on @/shared only",
+                  "@/memory": "Slice isolation (RFC 3.1): @/observability depends on @/shared only",
+                  "@/storage": "Slice isolation (RFC 3.1): @/observability depends on @/shared only",
+                  "@/stream": "Slice isolation (RFC 3.1): @/observability depends on @/shared only",
+                  "@/permission": "Slice isolation (RFC 3.1): @/observability depends on @/shared only",
+                  "@/runtime": "Slice isolation (RFC 3.1): @/observability depends on @/shared only",
+                  "@/lsp": "Slice isolation (RFC 3.1): @/observability depends on @/shared only",
+                  "@/llm": "Slice isolation (RFC 3.1): @/observability depends on @/shared only",
+                  "@/security": "Slice isolation (RFC 3.1): @/security is reachable by @/tool (classifyPath/classifyCommandShape) + @/agent — not by other library slices.",
+                  "@/patch": "Slice isolation (RFC 3.1): @/patch is reachable by @/tool/apply-patch + @/agent — not by other library slices.",
+                  "@/rules": "Slice isolation (RFC 3.1): @/rules is reachable by @/agent only — library slices must not import."
+                },
+                "patterns": [
+                  {
+                    "group": ["**/apps/cli", "**/apps/cli/*", "**/apps/cli/**"],
+                    "message": "Slice isolation (ADR-0024 export-gap closure): src/apps/cli is the application entrypoint; library slices and external tests must NOT import its internals. CLI helpers live in src/apps/cli/internal.ts and are reachable only from src/apps/cli/** (and the explicitly-allowed CLI unit tests). New cross-slice helpers should land in @/agent or another library slice."
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "includes": ["**/src/subagent/**"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "paths": {
+                  "@/mcp": "Slice isolation (RFC 3.1): @/mcp is reachable only via @/agent",
+                  "@/memory": "Slice isolation (RFC 3.1): @/subagent may only reach @/tool, @/shared",
+                  "@/storage": "Slice isolation (RFC 3.1): @/subagent may only reach @/tool, @/shared",
+                  "@/stream": "Slice isolation (RFC 3.1): @/subagent may only reach @/tool, @/shared",
+                  "@/permission": "Slice isolation (RFC 3.1): @/subagent may only reach @/tool, @/shared",
+                  "@/runtime": "Slice isolation (RFC 3.1): @/subagent may only reach @/tool, @/shared",
+                  "@/lsp": "Slice isolation (RFC 3.1): @/subagent may only reach @/tool, @/shared",
+                  "@/observability": "Slice isolation (RFC 3.1): @/subagent may only reach @/tool, @/shared",
+                  "@/llm": "Slice isolation (RFC 3.1): @/subagent may only reach @/tool, @/shared",
+                  "@/skill": "Slice isolation (RFC 3.1): peer slices may not cross-import; only @/agent assembles",
+                  "@/security": "Slice isolation (RFC 3.1): @/security is reachable by @/tool (classifyPath/classifyCommandShape) + @/agent — not by other library slices.",
+                  "@/patch": "Slice isolation (RFC 3.1): @/patch is reachable by @/tool/apply-patch + @/agent — not by other library slices.",
+                  "@/rules": "Slice isolation (RFC 3.1): @/rules is reachable by @/agent only — library slices must not import."
+                },
+                "patterns": [
+                  {
+                    "group": ["**/apps/cli", "**/apps/cli/*", "**/apps/cli/**"],
+                    "message": "Slice isolation (ADR-0024 export-gap closure): src/apps/cli is the application entrypoint; library slices and external tests must NOT import its internals. CLI helpers live in src/apps/cli/internal.ts and are reachable only from src/apps/cli/** (and the explicitly-allowed CLI unit tests). New cross-slice helpers should land in @/agent or another library slice."
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "includes": ["**/src/skill/**"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "paths": {
+                  "@/mcp": "Slice isolation (RFC 3.1): @/mcp is reachable only via @/agent",
+                  "@/memory": "Slice isolation (RFC 3.1): @/skill may only reach @/tool, @/shared",
+                  "@/storage": "Slice isolation (RFC 3.1): @/skill may only reach @/tool, @/shared",
+                  "@/stream": "Slice isolation (RFC 3.1): @/skill may only reach @/tool, @/shared",
+                  "@/permission": "Slice isolation (RFC 3.1): @/skill may only reach @/tool, @/shared",
+                  "@/runtime": "Slice isolation (RFC 3.1): @/skill may only reach @/tool, @/shared",
+                  "@/lsp": "Slice isolation (RFC 3.1): @/skill may only reach @/tool, @/shared",
+                  "@/observability": "Slice isolation (RFC 3.1): @/skill may only reach @/tool, @/shared",
+                  "@/llm": "Slice isolation (RFC 3.1): @/skill may only reach @/tool, @/shared",
+                  "@/subagent": "Slice isolation (RFC 3.1): peer slices may not cross-import; only @/agent assembles",
+                  "@/security": "Slice isolation (RFC 3.1): @/security is reachable by @/tool (classifyPath/classifyCommandShape) + @/agent — not by other library slices.",
+                  "@/patch": "Slice isolation (RFC 3.1): @/patch is reachable by @/tool/apply-patch + @/agent — not by other library slices.",
+                  "@/rules": "Slice isolation (RFC 3.1): @/rules is reachable by @/agent only — library slices must not import."
+                },
+                "patterns": [
+                  {
+                    "group": ["**/apps/cli", "**/apps/cli/*", "**/apps/cli/**"],
+                    "message": "Slice isolation (ADR-0024 export-gap closure): src/apps/cli is the application entrypoint; library slices and external tests must NOT import its internals. CLI helpers live in src/apps/cli/internal.ts and are reachable only from src/apps/cli/** (and the explicitly-allowed CLI unit tests). New cross-slice helpers should land in @/agent or another library slice."
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "includes": ["**/src/session/**"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "paths": {
+                  "@/mcp": "Slice isolation (RFC 3.1): @/mcp is reachable only via @/agent",
+                  "@/agent": "Slice isolation (RFC 3.1): @/session may only reach @/llm, @/storage, @/shared",
+                  "@/tool": "Slice isolation (RFC 3.1): @/session may only reach @/llm, @/storage, @/shared",
+                  "@/memory": "Slice isolation (RFC 3.1): @/session may only reach @/llm, @/storage, @/shared",
+                  "@/stream": "Slice isolation (RFC 3.1): @/session may only reach @/llm, @/storage, @/shared",
+                  "@/permission": "Slice isolation (RFC 3.1): @/session may only reach @/llm, @/storage, @/shared",
+                  "@/runtime": "Slice isolation (RFC 3.1): @/session may only reach @/llm, @/storage, @/shared",
+                  "@/lsp": "Slice isolation (RFC 3.1): @/session may only reach @/llm, @/storage, @/shared",
+                  "@/observability": "Slice isolation (RFC 3.1): @/session may only reach @/llm, @/storage, @/shared",
+                  "@/subagent": "Slice isolation (RFC 3.1): peer slices may not cross-import; only @/agent assembles",
+                  "@/skill": "Slice isolation (RFC 3.1): peer slices may not cross-import; only @/agent assembles",
+                  "@/security": "Slice isolation (RFC 3.1): @/security is reachable by @/tool (classifyPath/classifyCommandShape) + @/agent — not by other library slices.",
+                  "@/patch": "Slice isolation (RFC 3.1): @/patch is reachable by @/tool/apply-patch + @/agent — not by other library slices.",
+                  "@/rules": "Slice isolation (RFC 3.1): @/rules is reachable by @/agent only — library slices must not import."
+                },
+                "patterns": [
+                  {
+                    "group": ["**/apps/cli", "**/apps/cli/*", "**/apps/cli/**"],
+                    "message": "Slice isolation (ADR-0024 export-gap closure): src/apps/cli is the application entrypoint; library slices and external tests must NOT import its internals. CLI helpers live in src/apps/cli/internal.ts and are reachable only from src/apps/cli/** (and the explicitly-allowed CLI unit tests). New cross-slice helpers should land in @/agent or another library slice."
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "includes": ["**/src/migration/**"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "paths": {
+                  "@/agent": "Slice isolation (ADR-0038): @/migration depends on @/shared only",
+                  "@/mcp": "Slice isolation (ADR-0038): @/migration depends on @/shared only",
+                  "@/tool": "Slice isolation (ADR-0038): @/migration depends on @/shared only",
+                  "@/memory": "Slice isolation (ADR-0038): @/migration depends on @/shared only",
+                  "@/storage": "Slice isolation (ADR-0038): @/migration depends on @/shared only",
+                  "@/stream": "Slice isolation (ADR-0038): @/migration depends on @/shared only",
+                  "@/permission": "Slice isolation (ADR-0038): @/migration depends on @/shared only",
+                  "@/runtime": "Slice isolation (ADR-0038): @/migration depends on @/shared only",
+                  "@/lsp": "Slice isolation (ADR-0038): @/migration depends on @/shared only",
+                  "@/observability": "Slice isolation (ADR-0038): @/migration depends on @/shared only",
+                  "@/subagent": "Slice isolation (ADR-0038): @/migration depends on @/shared only",
+                  "@/skill": "Slice isolation (ADR-0038): @/migration depends on @/shared only",
+                  "@/session": "Slice isolation (ADR-0038): @/migration depends on @/shared only",
+                  "@/security": "Slice isolation (RFC 3.1): @/security is reachable by @/tool (classifyPath/classifyCommandShape) + @/agent — not by other library slices.",
+                  "@/patch": "Slice isolation (RFC 3.1): @/patch is reachable by @/tool/apply-patch + @/agent — not by other library slices.",
+                  "@/rules": "Slice isolation (RFC 3.1): @/rules is reachable by @/agent only — library slices must not import."
+                },
+                "patterns": [
+                  {
+                    "group": ["**/apps/cli", "**/apps/cli/*", "**/apps/cli/**"],
+                    "message": "Slice isolation (ADR-0024 export-gap closure): src/apps/cli is the application entrypoint; library slices and external tests must NOT import its internals. CLI helpers live in src/apps/cli/internal.ts and are reachable only from src/apps/cli/** (and the explicitly-allowed CLI unit tests). New cross-slice helpers should land in @/agent or another library slice."
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "includes": ["**/src/ipc/**"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "paths": {
+                  "@/rules": "Slice isolation (RFC 3.1): @/rules is reachable by @/agent only — @/ipc is a surface-agnostic event bridge and must not touch rules.",
+                  "@/patch": "Slice isolation (RFC 3.1): @/patch is reachable by @/tool/apply-patch + @/agent — @/ipc does not touch raw patches.",
+                  "@/migration": "Slice isolation (RFC 3.1): @/migration is a one-off translator slice — @/ipc does not own session-format translation."
+                },
+                "patterns": [
+                  {
+                    "group": ["**/apps/**", "**/src/apps/**"],
+                    "message": "Surface isolation: @/ipc is a surface-AGNOSTIC event bridge slice. It must NOT import from any apps/* (apps/cli, apps/web, apps/tauri, apps/agent, apps/bench, apps/eval, apps/probe). Surface entries depend on @/ipc, never the reverse. ENV/argv/HTTP/IPC parsing belongs in the surface; @/ipc takes plain typed config and injected transports."
+                  },
+                  {
+                    "group": ["node:readline", "node:readline/promises", "node:tty", "node:repl"],
+                    "message": "Surface coupling: @/ipc is surface-agnostic. CLI-specific node modules (readline / readline/promises / tty / repl) are terminal-only and belong in apps/cli. Accept a port (StdioReader / StdioWriter) and let the surface inject the concrete implementation."
+                  },
+                  {
+                    "group": ["node:process"],
+                    "message": "Surface coupling: named imports from node:process (env, argv, stdin, stdout, stderr, …) are a literal-rename bypass of the @/ipc surface-agnostic invariant. process.exit / process.on / process.cwd (via the global) remain allowed because they are not surface-coupled. For env/argv/stdio, the surface entry (apps/cli, apps/web, apps/tauri) parses node:process and passes typed config / StdioReader/Writer ports into @/ipc."
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "includes": ["**/src/runner/**"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "paths": {
+                  "@/rules": "Slice isolation (RFC 3.1): @/rules is reachable by @/agent only — Layer-2 @/runner must reach rules via @/agent.",
+                  "@/patch": "Slice isolation (RFC 3.1): @/patch is reachable by @/tool/apply-patch + @/agent — Layer-2 @/runner does not touch raw patches.",
+                  "@/migration": "Slice isolation (RFC 3.1): @/migration is a one-off translator slice — Layer-2 @/runner does not own session-format translation."
+                },
+                "patterns": [
+                  {
+                    "group": ["**/apps/**", "**/src/apps/**"],
+                    "message": "Surface isolation: @/runner is a Layer-2 surface-AGNOSTIC slice. It must NOT import from any apps/* (apps/cli, apps/web, apps/tauri, apps/agent, apps/bench, apps/eval, apps/probe). Surface entries depend on @/runner, never the reverse. ENV/argv/HTTP/IPC parsing belongs in the surface; @/runner takes plain typed config."
+                  },
+                  {
+                    "group": ["node:readline", "node:readline/promises", "node:tty", "node:repl"],
+                    "message": "Surface coupling: @/runner is Layer-2 surface-agnostic. CLI-specific node modules (readline / readline/promises / tty / repl) are terminal-only and belong in apps/cli. Accept a port (PromptSource, InputStream) and let the surface inject the concrete implementation (Node TTY / WebSocket / Tauri command)."
+                  },
+                  {
+                    "group": ["node:process"],
+                    "message": "Surface coupling: named imports from node:process (env, argv, stdin, stdout, stderr, …) are a literal-rename bypass of the @/runner surface-agnostic invariant. process.exit / process.on / process.cwd (via the global) remain allowed because they are not surface-coupled. For env/argv/stdio, the surface entry (apps/cli, apps/web, apps/tauri) parses node:process and passes typed config / a WriteSink port into @/runner."
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "includes": ["**/src/auth/**"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "paths": {
+                  "@/agent": "Slice isolation (S4): @/auth is a leaf slice — only @/llm and @/agent reach into it.",
+                  "@/llm": "Slice isolation (S4): @/auth is below @/llm; the dependency direction is llm → auth, never auth → llm.",
+                  "@/tool": "Slice isolation (S4): @/auth depends on @/shared only.",
+                  "@/mcp": "Slice isolation (S4): @/auth depends on @/shared only.",
+                  "@/memory": "Slice isolation (S4): @/auth depends on @/shared only.",
+                  "@/storage": "Slice isolation (S4): @/auth depends on @/shared only.",
+                  "@/stream": "Slice isolation (S4): @/auth depends on @/shared only.",
+                  "@/permission": "Slice isolation (S4): @/auth depends on @/shared only.",
+                  "@/runtime": "Slice isolation (S4): @/auth depends on @/shared only.",
+                  "@/lsp": "Slice isolation (S4): @/auth depends on @/shared only.",
+                  "@/observability": "Slice isolation (S4): @/auth depends on @/shared only.",
+                  "@/session": "Slice isolation (S4): @/auth depends on @/shared only.",
+                  "@/subagent": "Slice isolation (S4): @/auth depends on @/shared only.",
+                  "@/skill": "Slice isolation (S4): @/auth depends on @/shared only.",
+                  "@/security": "Slice isolation (S4): @/security is a leaf below @/tool.",
+                  "@/patch": "Slice isolation (S4): @/patch is reachable by @/tool/apply-patch + @/agent only.",
+                  "@/rules": "Slice isolation (S4): @/rules is reachable by @/agent only.",
+                  "@/migration": "Slice isolation (S4): @/migration is a one-off translator — leaf @/auth does not depend on it."
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "includes": ["**/src/rules/**"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "paths": {
+                  "@/agent": "Slice isolation (S4): @/rules is the rule store — only @/agent reaches in.",
+                  "@/permission": "Slice isolation (S4): @/rules is below @/permission; the dependency direction is permission → rules, never the reverse.",
+                  "@/tool": "Slice isolation (S4): @/rules depends on @/shared only.",
+                  "@/mcp": "Slice isolation (S4): @/rules depends on @/shared only.",
+                  "@/llm": "Slice isolation (S4): @/rules depends on @/shared only.",
+                  "@/memory": "Slice isolation (S4): @/rules depends on @/shared only.",
+                  "@/storage": "Slice isolation (S4): @/rules depends on @/shared only.",
+                  "@/stream": "Slice isolation (S4): @/rules depends on @/shared only.",
+                  "@/runtime": "Slice isolation (S4): @/rules depends on @/shared only.",
+                  "@/lsp": "Slice isolation (S4): @/rules depends on @/shared only.",
+                  "@/observability": "Slice isolation (S4): @/rules depends on @/shared only.",
+                  "@/session": "Slice isolation (S4): @/rules depends on @/shared only.",
+                  "@/subagent": "Slice isolation (S4): @/rules depends on @/shared only.",
+                  "@/skill": "Slice isolation (S4): @/rules depends on @/shared only.",
+                  "@/auth": "Slice isolation (S4): @/rules depends on @/shared only.",
+                  "@/security": "Slice isolation (S4): @/security is a leaf below @/tool.",
+                  "@/patch": "Slice isolation (S4): @/patch is reachable by @/tool/apply-patch + @/agent only.",
+                  "@/migration": "Slice isolation (S4): @/migration is a one-off translator — leaf @/rules does not depend on it."
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "includes": ["**/src/security/**"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "paths": {
+                  "@/agent": "Slice isolation (S4): @/security is a redaction port below @/tool and @/agent.",
+                  "@/tool": "Slice isolation (S4): @/security is below @/tool; the dependency direction is tool → security, never the reverse.",
+                  "@/mcp": "Slice isolation (S4): @/security depends on @/shared only.",
+                  "@/llm": "Slice isolation (S4): @/security depends on @/shared only.",
+                  "@/memory": "Slice isolation (S4): @/security depends on @/shared only.",
+                  "@/storage": "Slice isolation (S4): @/security depends on @/shared only.",
+                  "@/stream": "Slice isolation (S4): @/security depends on @/shared only.",
+                  "@/permission": "Slice isolation (S4): @/security depends on @/shared only.",
+                  "@/runtime": "Slice isolation (S4): @/security depends on @/shared only.",
+                  "@/lsp": "Slice isolation (S4): @/security depends on @/shared only.",
+                  "@/observability": "Slice isolation (S4): @/security depends on @/shared only.",
+                  "@/session": "Slice isolation (S4): @/security depends on @/shared only.",
+                  "@/subagent": "Slice isolation (S4): @/security depends on @/shared only.",
+                  "@/skill": "Slice isolation (S4): @/security depends on @/shared only.",
+                  "@/auth": "Slice isolation (S4): @/security depends on @/shared only.",
+                  "@/rules": "Slice isolation (S4): @/rules is reachable by @/agent only.",
+                  "@/patch": "Slice isolation (S4): @/patch is reachable by @/tool/apply-patch + @/agent only.",
+                  "@/migration": "Slice isolation (S4): @/migration is a one-off translator — leaf @/security does not depend on it."
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "includes": ["**/src/codemode/**"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "paths": {
+                  "@/agent": "Slice isolation (RFC jun-6-code-mode §5.1): @/codemode is a DUMB sandbox — it reaches the host ONLY via the injected CodeCellDispatchPort. It must NOT import @/agent (the binding lives in @/agent/codemode-wire.ts, never the reverse). This is the structural no-bypass invariant (§6.1).",
+                  "@/tool": "Slice isolation (RFC jun-6-code-mode §5.1): @/codemode does not know about tools or dispatchTool — only the injected port.",
+                  "@/permission": "Slice isolation (RFC jun-6-code-mode §6.1): @/codemode must NOT touch permission — every gate decision happens host-side in dispatchTool, behind the port.",
+                  "@/llm": "Slice isolation (RFC jun-6-code-mode §5.1): @/codemode depends on @/shared + @/security + the WASM dep only.",
+                  "@/mcp": "Slice isolation (RFC jun-6-code-mode §5.1): @/codemode depends on @/shared + @/security only.",
+                  "@/memory": "Slice isolation (RFC jun-6-code-mode §5.1): @/codemode depends on @/shared + @/security only.",
+                  "@/storage": "Slice isolation (RFC jun-6-code-mode §5.1): @/codemode depends on @/shared + @/security only.",
+                  "@/stream": "Slice isolation (RFC jun-6-code-mode §5.1): @/codemode depends on @/shared + @/security only.",
+                  "@/runtime": "Slice isolation (RFC jun-6-code-mode §5.1): @/codemode depends on @/shared + @/security only.",
+                  "@/lsp": "Slice isolation (RFC jun-6-code-mode §5.1): @/codemode depends on @/shared + @/security only.",
+                  "@/observability": "Slice isolation (RFC jun-6-code-mode §5.1): @/codemode depends on @/shared + @/security only.",
+                  "@/subagent": "Slice isolation (RFC jun-6-code-mode §5.1): @/codemode depends on @/shared + @/security only.",
+                  "@/session": "Slice isolation (RFC jun-6-code-mode §5.1): @/codemode depends on @/shared + @/security only.",
+                  "@/rules": "Slice isolation (RFC jun-6-code-mode §5.1): @/rules is reachable by @/agent only.",
+                  "@/patch": "Slice isolation (RFC jun-6-code-mode §5.1): @/patch is reachable by @/tool/apply-patch + @/agent only."
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "includes": ["**/src/patch/**"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "paths": {
+                  "@/agent": "Slice isolation (S4): @/patch is reachable by @/tool/apply-patch + @/agent — dependency goes the other way.",
+                  "@/tool": "Slice isolation (S4): @/patch is below @/tool/apply-patch; the dependency direction is tool → patch, never the reverse.",
+                  "@/mcp": "Slice isolation (S4): @/patch depends on @/shared only.",
+                  "@/llm": "Slice isolation (S4): @/patch depends on @/shared only.",
+                  "@/memory": "Slice isolation (S4): @/patch depends on @/shared only.",
+                  "@/storage": "Slice isolation (S4): @/patch depends on @/shared only.",
+                  "@/stream": "Slice isolation (S4): @/patch depends on @/shared only.",
+                  "@/permission": "Slice isolation (S4): @/patch depends on @/shared only.",
+                  "@/runtime": "Slice isolation (S4): @/patch depends on @/shared only.",
+                  "@/lsp": "Slice isolation (S4): @/patch depends on @/shared only.",
+                  "@/observability": "Slice isolation (S4): @/patch depends on @/shared only.",
+                  "@/session": "Slice isolation (S4): @/patch depends on @/shared only.",
+                  "@/subagent": "Slice isolation (S4): @/patch depends on @/shared only.",
+                  "@/skill": "Slice isolation (S4): @/patch depends on @/shared only.",
+                  "@/auth": "Slice isolation (S4): @/patch depends on @/shared only.",
+                  "@/security": "Slice isolation (S4): @/security is a leaf below @/tool — not for @/patch.",
+                  "@/rules": "Slice isolation (S4): @/rules is reachable by @/agent only.",
+                  "@/migration": "Slice isolation (S4): @/migration is a one-off translator — leaf @/patch does not depend on it."
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "includes": ["**/src/git/**"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "paths": {
+                  "@/agent": "Slice isolation (S4): @/git is below @/tool/git — dependency direction is tool → git, never the reverse.",
+                  "@/tool": "Slice isolation (S4): @/git is below @/tool; the dependency direction is tool → git, never the reverse.",
+                  "@/mcp": "Slice isolation (S4): @/git depends on @/shared only.",
+                  "@/llm": "Slice isolation (S4): @/git depends on @/shared only.",
+                  "@/memory": "Slice isolation (S4): @/git depends on @/shared only.",
+                  "@/storage": "Slice isolation (S4): @/git depends on @/shared only.",
+                  "@/stream": "Slice isolation (S4): @/git depends on @/shared only.",
+                  "@/permission": "Slice isolation (S4): @/git depends on @/shared only.",
+                  "@/runtime": "Slice isolation (S4): @/git depends on @/shared only.",
+                  "@/lsp": "Slice isolation (S4): @/git depends on @/shared only.",
+                  "@/observability": "Slice isolation (S4): @/git depends on @/shared only.",
+                  "@/session": "Slice isolation (S4): @/git depends on @/shared only.",
+                  "@/subagent": "Slice isolation (S4): @/git depends on @/shared only.",
+                  "@/skill": "Slice isolation (S4): @/git depends on @/shared only.",
+                  "@/auth": "Slice isolation (S4): @/git depends on @/shared only.",
+                  "@/security": "Slice isolation (S4): @/security is a leaf below @/tool.",
+                  "@/patch": "Slice isolation (S4): @/patch is reachable by @/tool/apply-patch + @/agent only.",
+                  "@/rules": "Slice isolation (S4): @/rules is reachable by @/agent only.",
+                  "@/migration": "Slice isolation (S4): @/migration is a one-off translator — leaf @/git does not depend on it."
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "includes": ["**/src/ui/**"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "paths": {
+                  "@/agent": "Slice isolation (S4): @/ui is surface-agnostic UI primitives — dependency direction is surface (apps/*) → ui, never the reverse.",
+                  "@/llm": "Slice isolation (S4): @/ui must not pull LLM/tool/agent code; it is surface-agnostic display primitives only.",
+                  "@/tool": "Slice isolation (S4): @/ui must not pull LLM/tool/agent code; it is surface-agnostic display primitives only.",
+                  "@/mcp": "Slice isolation (S4): @/ui depends on @/shared only.",
+                  "@/memory": "Slice isolation (S4): @/ui depends on @/shared only.",
+                  "@/storage": "Slice isolation (S4): @/ui depends on @/shared only.",
+                  "@/stream": "Slice isolation (S4): @/ui depends on @/shared only.",
+                  "@/permission": "Slice isolation (S4): @/ui depends on @/shared only.",
+                  "@/runtime": "Slice isolation (S4): @/ui depends on @/shared only.",
+                  "@/lsp": "Slice isolation (S4): @/ui depends on @/shared only.",
+                  "@/observability": "Slice isolation (S4): @/ui depends on @/shared only.",
+                  "@/session": "Slice isolation (S4): @/ui depends on @/shared only.",
+                  "@/subagent": "Slice isolation (S4): @/ui depends on @/shared only.",
+                  "@/skill": "Slice isolation (S4): @/ui depends on @/shared only.",
+                  "@/auth": "Slice isolation (S4): @/ui depends on @/shared only.",
+                  "@/security": "Slice isolation (S4): @/security is a leaf below @/tool.",
+                  "@/patch": "Slice isolation (S4): @/patch is reachable by @/tool/apply-patch + @/agent only.",
+                  "@/rules": "Slice isolation (S4): @/rules is reachable by @/agent only.",
+                  "@/migration": "Slice isolation (S4): @/migration is a one-off translator — leaf @/ui does not depend on it."
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "includes": ["**/src/retrieval/**"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "paths": {
+                  "@/agent": "Slice isolation (ADR-0159): @/retrieval is a leaf primitive slice — depends on @/shared only. Assemblers in @/agent reach IN, not the reverse.",
+                  "@/tool": "Slice isolation (ADR-0159): @/retrieval depends on @/shared only.",
+                  "@/llm": "Slice isolation (ADR-0159): @/retrieval depends on @/shared only; LLM provider SDKs (openai/voyage/etc.) are loaded as direct node modules from concrete adapter files, never through @/llm.",
+                  "@/mcp": "Slice isolation (ADR-0159): @/retrieval depends on @/shared only.",
+                  "@/memory": "Slice isolation (ADR-0159): @/retrieval depends on @/shared only — ranking lives in @/memory, retrieval primitives live here.",
+                  "@/storage": "Slice isolation (ADR-0159): @/retrieval depends on @/shared only.",
+                  "@/stream": "Slice isolation (ADR-0159): @/retrieval depends on @/shared only.",
+                  "@/permission": "Slice isolation (ADR-0159): @/retrieval depends on @/shared only.",
+                  "@/runtime": "Slice isolation (ADR-0159): @/retrieval depends on @/shared only.",
+                  "@/lsp": "Slice isolation (ADR-0159): @/retrieval depends on @/shared only.",
+                  "@/observability": "Slice isolation (ADR-0159): @/retrieval depends on @/shared only.",
+                  "@/session": "Slice isolation (ADR-0159): @/retrieval depends on @/shared only.",
+                  "@/subagent": "Slice isolation (ADR-0159): @/retrieval depends on @/shared only.",
+                  "@/skill": "Slice isolation (ADR-0159): @/retrieval depends on @/shared only.",
+                  "@/auth": "Slice isolation (ADR-0159): @/retrieval depends on @/shared only.",
+                  "@/security": "Slice isolation (ADR-0159): @/retrieval depends on @/shared only.",
+                  "@/patch": "Slice isolation (ADR-0159): @/retrieval depends on @/shared only.",
+                  "@/rules": "Slice isolation (ADR-0159): @/retrieval depends on @/shared only.",
+                  "@/migration": "Slice isolation (ADR-0159): @/retrieval depends on @/shared only.",
+                  "@/git": "Slice isolation (ADR-0159): @/retrieval defines its own GitLogPort and accepts an injected adapter — it never imports @/git.",
+                  "@/reactor": "Slice isolation (ADR-0159): @/retrieval depends on @/shared only."
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "includes": ["**/src/shared/**"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "paths": {
+                  "@/agent": "Slice isolation (S4): @/shared is THE leaf — pure utilities only. Every other @/* slice depends on it; no upward imports allowed.",
+                  "@/tool": "Slice isolation (S4): @/shared is the leaf — pure utilities only.",
+                  "@/llm": "Slice isolation (S4): @/shared is the leaf — pure utilities only.",
+                  "@/mcp": "Slice isolation (S4): @/shared is the leaf — pure utilities only.",
+                  "@/memory": "Slice isolation (S4): @/shared is the leaf — pure utilities only.",
+                  "@/storage": "Slice isolation (S4): @/shared is the leaf — pure utilities only.",
+                  "@/stream": "Slice isolation (S4): @/shared is the leaf — pure utilities only.",
+                  "@/permission": "Slice isolation (S4): @/shared is the leaf — pure utilities only.",
+                  "@/runtime": "Slice isolation (S4): @/shared is the leaf — pure utilities only.",
+                  "@/lsp": "Slice isolation (S4): @/shared is the leaf — pure utilities only.",
+                  "@/observability": "Slice isolation (S4): @/shared is the leaf — pure utilities only.",
+                  "@/session": "Slice isolation (S4): @/shared is the leaf — pure utilities only.",
+                  "@/subagent": "Slice isolation (S4): @/shared is the leaf — pure utilities only.",
+                  "@/skill": "Slice isolation (S4): @/shared is the leaf — pure utilities only.",
+                  "@/auth": "Slice isolation (S4): @/shared is the leaf — pure utilities only.",
+                  "@/security": "Slice isolation (S4): @/shared is the leaf — pure utilities only.",
+                  "@/patch": "Slice isolation (S4): @/shared is the leaf — pure utilities only.",
+                  "@/rules": "Slice isolation (S4): @/shared is the leaf — pure utilities only.",
+                  "@/migration": "Slice isolation (S4): @/shared is the leaf — pure utilities only.",
+                  "@/ui": "Slice isolation (S4): @/shared is the leaf — pure utilities only.",
+                  "@/git": "Slice isolation (S4): @/shared is the leaf — pure utilities only.",
+                  "@/runner": "Slice isolation (S4): @/shared is the leaf — pure utilities only.",
+                  "@/ipc": "Slice isolation (S4): @/shared is the leaf — pure utilities only.",
+                  "@/retrieval": "Slice isolation (S4): @/shared is the leaf — pure utilities only."
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "includes": ["**/src/agent/subagent-resume/**"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "paths": {
+                  "@/agent/loop": "Plane-clean (ADR-0190): subagent-resume is a helper primitive; it cannot import the orchestration loop. Inject the seam instead.",
+                  "@/agent/dispatch": "Plane-clean (ADR-0190): subagent-resume cannot reach @/agent/dispatch — dispatch consumes the resume primitive, not the reverse."
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "includes": [
+        "**/src/agent/conversation-checkpoint.ts",
+        "**/src/agent/conversation-checkpoint-lru.ts"
+      ],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "paths": {
+                  "@/agent/loop": "Plane-clean (ADR-0190): conversation-checkpoint is a helper primitive; it cannot import the orchestration loop.",
+                  "@/agent/dispatch": "Plane-clean (ADR-0190): conversation-checkpoint cannot reach @/agent/dispatch."
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "includes": ["**/src/agent/fork-session/**"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "paths": {
+                  "@/agent/loop": "Plane-clean (ADR-0201): fork-session is a helper primitive; it cannot import the orchestration loop.",
+                  "@/agent/dispatch": "Plane-clean (ADR-0201): fork-session cannot reach @/agent/dispatch."
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "includes": ["**/src/agent/thread-tools/**"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "paths": {
+                  "@/agent/loop": "Plane-clean (ADR-0206): thread-tools is a helper primitive; it cannot import the orchestration loop.",
+                  "@/agent/dispatch": "Plane-clean (ADR-0206): thread-tools cannot reach @/agent/dispatch."
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "includes": ["**/src/agent/plan-queue.ts"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "paths": {
+                  "@/agent/loop": "Plane-clean (ADR-0190): plan-queue is a helper primitive; it cannot import the orchestration loop.",
+                  "@/agent/dispatch": "Plane-clean (ADR-0190): plan-queue cannot reach @/agent/dispatch."
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "includes": ["**/src/agent/budget-ledger.ts"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "paths": {
+                  "@/agent/loop": "Plane-clean (ADR-0190): budget-ledger is a helper primitive; it cannot import the orchestration loop.",
+                  "@/agent/dispatch": "Plane-clean (ADR-0190): budget-ledger cannot reach @/agent/dispatch."
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "includes": ["**/src/agent/streaming-cancellation/**"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "paths": {
+                  "@/agent/loop": "Plane-clean (ADR-0190): streaming-cancellation is a helper primitive; it cannot import the orchestration loop.",
+                  "@/agent/dispatch": "Plane-clean (ADR-0190): streaming-cancellation cannot reach @/agent/dispatch."
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "includes": ["**/src/mcp/skybridge/**"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "patterns": [
+                  {
+                    "group": ["@/agent", "@/agent/*", "@/agent/**"],
+                    "message": "Plane-clean (ADR-0190): @/mcp/skybridge is a transport-adjacent primitive — it must not reach into @/agent. The assembly sits in @/agent, never the reverse."
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "includes": [
+        "src/apps/eval/index.ts",
+        "src/apps/eval/index.js",
+        "tests/smoke/swebench/select.ts",
+        "tests/smoke/swebench/select.js",
+        "tests/integration/plan-mode-stress-100k-ops.test.ts",
+        "tests/integration/plan-mode-stress-100k-ops.test.js",
+        "tests/contract/_guard.ts",
+        "tests/contract/_guard.js",
+        "tests/unit/round4-hardening.test.ts",
+        "tests/unit/round4-hardening.test.js",
+        "tests/unit/skill-discover-size-cap.test.ts",
+        "tests/unit/skill-discover-size-cap.test.js"
+      ],
+      "linter": {
+        "rules": {
+          "suspicious": {
+            "noConsole": "warn"
+          }
+        }
+      }
+    },
+    {
+      "includes": [
+        "src/**",
+        "!src/apps/**",
+        "!src/llm/**",
+        "!src/tool/**",
+        "!src/memory/**",
+        "!src/storage/**",
+        "!src/stream/**",
+        "!src/permission/**",
+        "!src/runtime/**",
+        "!src/runner/**",
+        "!src/ipc/**",
+        "!src/lsp/**",
+        "!src/mcp/**",
+        "!src/observability/**",
+        "!src/subagent/**",
+        "!src/skill/**",
+        "!src/session/**",
+        "!src/migration/**",
+        "!src/agent/plan-queue.ts",
+        "!src/agent/budget-ledger.ts",
+        "!src/agent/conversation-checkpoint.ts",
+        "!src/agent/conversation-checkpoint-lru.ts",
+        "!src/agent/checkpoint/**",
+        "!src/agent/fork-session/**",
+        "!src/agent/thread-tools/**",
+        "!src/agent/subagent-background.ts",
+        "!src/agent/verify-checkpoint-bridge.ts",
+        "!src/agent/checkpoint-policy.ts",
+        "!src/agent/subagent-resume/**",
+        "!src/agent/streaming-cancellation/**",
+        "!src/agent/branch-search/anchor.ts",
+        "tests/**",
+        "!tests/unit/cli-summarizer.test.ts",
+        "!tests/unit/cli-session-commands.test.ts",
+        "!tests/unit/migration-import-persistence-e2e-hellgate.test.ts",
+        "!tests/unit/migration-import-roundtrip-hellgate.test.ts",
+        "!tests/unit/migration-import-redaction-hellgate.test.ts",
+        "!tests/unit/cli-resume-heuristic.test.ts",
+        "!tests/unit/slash-commands.test.ts",
+        "!tests/unit/item-stream-s2-unification-hellgate.test.ts",
+        "!tests/unit/memory-cmd.test.ts",
+        "!tests/unit/mcp-cmd.test.ts",
+        "!tests/unit/mcp-surface-wire.test.ts",
+        "!tests/unit/cli-retry-with.test.ts",
+        "!tests/unit/model-route-feeder-wire-hellgate.test.ts",
+        "!tests/unit/cli-rewind-slash-hellgate.test.ts",
+        "!tests/unit/conv-checkpoint-auto-record-hellgate.test.ts",
+        "!tests/unit/per-tool-checkpoint-hellgate.test.ts",
+        "!tests/unit/shell-exec-observers-surface.test.ts",
+        "!tests/unit/cli-image-loader.test.ts",
+        "!tests/unit/cli-argv-prompt.test.ts",
+        "!tests/unit/cli-preflight-applicability-hellgate.test.ts",
+        "!tests/unit/cli-preflight-applicability-hellgate.test.js",
+        "!tests/unit/cli/**",
+        "!tests/unit/apps/cli/**",
+        "!tests/integration/cli/**",
+        "!tests/unit/session-export-import-slash-hellgate.test.ts",
+        "!tests/unit/session-registry-slash.test.ts",
+        "!tests/unit/session-transcript-retention-hellgate.test.ts",
+        "!tests/unit/session-transcript-retention-e2e-hellgate.test.ts",
+        "!tests/unit/session-knobs-default-off-byte-identity-hellgate.test.ts",
+        "!tests/unit/auth/auth-ui.test.ts",
+        "!tests/unit/dotenv.test.ts",
+        "!tests/unit/env-knob-branches.test.ts",
+        "!tests/unit/build-memory-config-delegation-hellgate.test.ts",
+        "!tests/unit/mcp-sampling-live-wire-e2e-hellgate.test.ts",
+        "!tests/unit/mcp-roots-supervised-wire-e2e-hellgate.test.ts",
+        "!tests/unit/h7-transport-e2e-hellgate.test.ts",
+        "!tests/unit/ai-title-byok-reachability-hellgate.test.ts",
+        "!tests/unit/cli-configured-endpoint-live-surface-hellgate.test.ts",
+        "!tests/integration/session-ux-e2e.test.ts",
+        "!tests/integration/session-chaos-and-attack.test.ts",
+        "!tests/integration/session-stress-and-concurrent.test.ts",
+        "!tests/integration/cli-export-assembly.test.ts",
+        "!tests/integration/skills-slash-e2e-hellgate.test.ts",
+        "!tests/integration/composition-root-wire-hellgate.test.ts",
+        "!tests/integration/decision-tracer-e2e-hellgate.test.ts",
+        "!tests/integration/debug-cli-surface-e2e-hellgate.test.ts",
+        "!tests/unit/playbook-trigger-cli-bind-hellgate.test.ts",
+        "!tests/unit/batch-cmd-wire-hellgate.test.ts",
+        "!tests/unit/config-migration-import-skill-stage-frontdoor.test.ts",
+        "!tests/unit/rfc03-import-stage-failsafe-boundary.test.ts",
+        "!tests/unit/rfc03-skill-review-promote-frontdoor.test.ts",
+        "!tests/unit/skills-review-cmd-frontdoor.test.ts",
+        "!tests/unit/integrations/github/cli-real-adapters-hellgate-r3.test.ts",
+        "!tests/unit/integrations/github/composer-redact-defence-in-depth-hellgate-r3.test.ts",
+        "!tests/unit/integrations/github/composer-fold-hellgate-r5.test.ts",
+        "!tests/integration/integrations/github/end-to-end-real-adapter-r3.test.ts",
+        "!tests/unit/heartbeat-binder-resume-hellgate.test.ts",
+        "!tests/unit/heartbeat-binder-e2e-hellgate.test.ts",
+        "!tests/unit/heartbeat-softfail-receipt-hellgate.test.ts",
+        "!tests/unit/mid-turn-capture-wire-hellgate.test.ts",
+        "!tests/unit/doctor-selfcheck-hellgate.test.ts",
+        "!tests/unit/mcp-oauth-keyring-reachability-hellgate.test.ts",
+        "!tests/integration/github-webhook-host-cli-hellgate.test.ts",
+        "!tests/integration/github-webhook-reactor-e2e-hellgate.test.ts",
+        "!tests/integration/github-webhook-multi-secret-hellgate.test.ts",
+        "!tests/integration/activity-spine-real-loop-e2e.test.ts",
+        "!tests/integration/cli-background-turn-e2e.test.ts",
+        "!tests/integration/completion-notify-live-e2e.test.ts",
+        "!tests/integration/crash-resume-hellgate.test.ts",
+        "!tests/integration/hitl-approval-e2e.test.ts",
+        "!tests/integration/model-swap-retry-real-loop-e2e.test.ts",
+        "!tests/integration/playbook-auto-dispatch-real-loop-e2e.test.ts",
+        "!tests/integration/subagent-panel-e2e.test.ts",
+        "!tests/unit/activity/activity-e2e-wire-hellgate.test.ts",
+        "!tests/unit/activity/mirror-drift-hellgate.test.ts",
+        "!tests/unit/albb-11-comproot-hitl-wiring.test.ts",
+        "!tests/unit/apps/web-daemon/follower-verb-frame-hellgate.test.ts",
+        "!tests/unit/capability/capability-axis-consistency-hellgate.test.ts",
+        "!tests/unit/capability/capability-exposure-matches-reality-hellgate.test.ts",
+        "!tests/unit/goal-cmd-hellgate.test.ts",
+        "!tests/unit/goal-continuation-ticker-hellgate.test.ts",
+        "!tests/unit/goal-pursuit-chain-hellgate.test.ts",
+        "!tests/unit/goal-ticker-concurrency-hellgate.test.ts",
+        "!tests/unit/host/mcp-health-shared.hellgate.test.ts",
+        "!tests/unit/mcp-governance-live-wire-hellgate.test.ts",
+        "!tests/unit/radar/radar-e2e-hellgate.test.ts",
+        "!tests/unit/status-pills-goal-chip-hellgate.test.ts",
+        "!tests/unit/thread-follower-dispatch-live-hellgate.test.ts",
+        "!tests/unit/unhandled-rejection-defense-hellgate.test.ts"
+      ],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "patterns": [
+                  {
+                    "group": ["**/apps/cli", "**/apps/cli/*", "**/apps/cli/**"],
+                    "message": "Slice isolation (ADR-0024 export-gap closure): src/apps/cli is the application entrypoint; library slices and external tests must NOT import its internals. CLI helpers live in src/apps/cli/internal.ts and are reachable only from src/apps/cli/** (and the explicitly-allowed CLI unit tests). New cross-slice helpers should land in @/agent or another library slice."
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "includes": ["**/src/agent/subagent-background.ts"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "paths": {
+                  "@/agent/loop": "Plane-clean (ADR-0193 + ADR-0145): subagent-background is a helper primitive; it cannot import the orchestration loop.",
+                  "@/agent/dispatch": "Plane-clean (ADR-0193 + ADR-0145): subagent-background cannot reach @/agent/dispatch.",
+                  "@/llm": "Plane-clean (ADR-0193 + ADR-0145): subagent-background only imports @/subagent types + node:crypto.",
+                  "@/tool": "Plane-clean (ADR-0193 + ADR-0145): subagent-background only imports @/subagent types + node:crypto.",
+                  "@/storage": "Plane-clean (ADR-0193 + ADR-0145): subagent-background only imports @/subagent types + node:crypto.",
+                  "@/memory": "Plane-clean (ADR-0193 + ADR-0145): subagent-background only imports @/subagent types + node:crypto.",
+                  "@/observability": "Plane-clean (ADR-0193 + ADR-0145): subagent-background only imports @/subagent types + node:crypto.",
+                  "@/mcp": "Plane-clean (ADR-0193 + ADR-0145): subagent-background only imports @/subagent types + node:crypto."
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "includes": ["**/src/agent/verify-checkpoint-bridge.ts"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "paths": {
+                  "@/agent/loop": "Plane-clean (ADR-0193 + ADR-0123): verify-checkpoint-bridge is a helper primitive; it cannot import the orchestration loop.",
+                  "@/agent/dispatch": "Plane-clean (ADR-0193 + ADR-0123): verify-checkpoint-bridge cannot reach @/agent/dispatch.",
+                  "@/agent/verify-guard": "Plane-clean (ADR-0123 §3): bridge cannot import verify-guard (in-flight track isolation).",
+                  "@/llm": "Plane-clean (ADR-0193 + ADR-0123): bridge only imports @/storage/shadow-odb types.",
+                  "@/tool": "Plane-clean (ADR-0193 + ADR-0123): bridge only imports @/storage/shadow-odb types.",
+                  "@/memory": "Plane-clean (ADR-0193 + ADR-0123): bridge only imports @/storage/shadow-odb types.",
+                  "@/observability": "Plane-clean (ADR-0193 + ADR-0123): bridge only imports @/storage/shadow-odb types.",
+                  "@/mcp": "Plane-clean (ADR-0193 + ADR-0123): bridge only imports @/storage/shadow-odb types."
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "includes": ["**/src/agent/branch-search/anchor.ts"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "paths": {
+                  "@/agent/loop": "Plane-clean (ADR-0193 + ADR-0116): branch-search anchor is a helper primitive; it cannot import the orchestration loop.",
+                  "@/agent/dispatch": "Plane-clean (ADR-0193 + ADR-0116): branch-search anchor cannot reach @/agent/dispatch.",
+                  "@/llm": "Plane-clean (ADR-0193 + ADR-0116): anchor only imports @/storage/shadow-odb types.",
+                  "@/tool": "Plane-clean (ADR-0193 + ADR-0116): anchor only imports @/storage/shadow-odb types.",
+                  "@/memory": "Plane-clean (ADR-0193 + ADR-0116): anchor only imports @/storage/shadow-odb types.",
+                  "@/observability": "Plane-clean (ADR-0193 + ADR-0116): anchor only imports @/storage/shadow-odb types.",
+                  "@/mcp": "Plane-clean (ADR-0193 + ADR-0116): anchor only imports @/storage/shadow-odb types."
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "includes": ["**/src/agent/checkpoint-policy.ts"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "paths": {
+                  "@/agent/loop": "Plane-clean (ADR-0193): checkpoint-policy is a pure decision primitive; it cannot import the orchestration loop.",
+                  "@/agent/dispatch": "Plane-clean (ADR-0193): checkpoint-policy cannot reach @/agent/dispatch — dispatch consumes the policy, not the reverse.",
+                  "@/memory": "Plane-clean (ADR-0193): checkpoint-policy only imports type-only @/llm, @/storage/shadow-odb, @/tool + sibling effect-channel.",
+                  "@/observability": "Plane-clean (ADR-0193): checkpoint-policy only imports type-only @/llm, @/storage/shadow-odb, @/tool + sibling effect-channel.",
+                  "@/mcp": "Plane-clean (ADR-0193): checkpoint-policy only imports type-only @/llm, @/storage/shadow-odb, @/tool + sibling effect-channel."
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "includes": ["**/src/storage/shadow-odb/**"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "paths": {
+                  "@/agent": "Plane-clean (ADR-0193 + ADR-0108): shadow-odb is a leaf primitive — only @/tool/git + node:fs/path + node:crypto are allowed.",
+                  "@/llm": "Plane-clean (ADR-0193 + ADR-0108): shadow-odb only imports @/tool/git + node modules.",
+                  "@/memory": "Plane-clean (ADR-0193 + ADR-0108): shadow-odb only imports @/tool/git + node modules.",
+                  "@/observability": "Plane-clean (ADR-0193 + ADR-0108): shadow-odb only imports @/tool/git + node modules.",
+                  "@/stream": "Plane-clean (ADR-0193 + ADR-0108): shadow-odb only imports @/tool/git + node modules.",
+                  "@/permission": "Plane-clean (ADR-0193 + ADR-0108): shadow-odb only imports @/tool/git + node modules.",
+                  "@/runtime": "Plane-clean (ADR-0193 + ADR-0108): shadow-odb only imports @/tool/git + node modules.",
+                  "@/lsp": "Plane-clean (ADR-0193 + ADR-0108): shadow-odb only imports @/tool/git + node modules.",
+                  "@/mcp": "Plane-clean (ADR-0193 + ADR-0108): shadow-odb only imports @/tool/git + node modules.",
+                  "@/security": "Plane-clean (ADR-0193 + ADR-0108): shadow-odb only imports @/tool/git + node modules.",
+                  "@/patch": "Plane-clean (ADR-0193 + ADR-0108): shadow-odb only imports @/tool/git + node modules.",
+                  "@/rules": "Plane-clean (ADR-0193 + ADR-0108): shadow-odb only imports @/tool/git + node modules.",
+                  "@/subagent": "Plane-clean (ADR-0193 + ADR-0108): shadow-odb only imports @/tool/git + node modules.",
+                  "@/skill": "Plane-clean (ADR-0193 + ADR-0108): shadow-odb only imports @/tool/git + node modules.",
+                  "@/auth": "Plane-clean (ADR-0193 + ADR-0108): shadow-odb only imports @/tool/git + node modules.",
+                  "@/session": "Plane-clean (ADR-0193 + ADR-0108): shadow-odb only imports @/tool/git + node modules."
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "includes": ["**/src/runtime/os-sandbox/**"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "paths": {
+                  "@/agent": "Plane-clean (ADR-0193 + ADR-0136): os-sandbox is a leaf primitive — only node:child_process is allowed.",
+                  "@/permission": "Plane-clean (ADR-0193 + ADR-0136): os-sandbox is a leaf primitive — only node:child_process is allowed.",
+                  "@/tool": "Plane-clean (ADR-0193 + ADR-0136): os-sandbox is a leaf primitive — only node:child_process is allowed.",
+                  "@/llm": "Plane-clean (ADR-0193 + ADR-0136): os-sandbox is a leaf primitive — only node:child_process is allowed.",
+                  "@/memory": "Plane-clean (ADR-0193 + ADR-0136): os-sandbox is a leaf primitive — only node:child_process is allowed.",
+                  "@/storage": "Plane-clean (ADR-0193 + ADR-0136): os-sandbox is a leaf primitive — only node:child_process is allowed.",
+                  "@/stream": "Plane-clean (ADR-0193 + ADR-0136): os-sandbox is a leaf primitive — only node:child_process is allowed.",
+                  "@/lsp": "Plane-clean (ADR-0193 + ADR-0136): os-sandbox is a leaf primitive — only node:child_process is allowed.",
+                  "@/observability": "Plane-clean (ADR-0193 + ADR-0136): os-sandbox is a leaf primitive — only node:child_process is allowed.",
+                  "@/mcp": "Plane-clean (ADR-0193 + ADR-0136): os-sandbox is a leaf primitive — only node:child_process is allowed.",
+                  "@/security": "Plane-clean (ADR-0193 + ADR-0136): os-sandbox is a leaf primitive — only node:child_process is allowed.",
+                  "@/patch": "Plane-clean (ADR-0193 + ADR-0136): os-sandbox is a leaf primitive — only node:child_process is allowed.",
+                  "@/rules": "Plane-clean (ADR-0193 + ADR-0136): os-sandbox is a leaf primitive — only node:child_process is allowed.",
+                  "@/subagent": "Plane-clean (ADR-0193 + ADR-0136): os-sandbox is a leaf primitive — only node:child_process is allowed.",
+                  "@/skill": "Plane-clean (ADR-0193 + ADR-0136): os-sandbox is a leaf primitive — only node:child_process is allowed.",
+                  "@/auth": "Plane-clean (ADR-0193 + ADR-0136): os-sandbox is a leaf primitive — only node:child_process is allowed.",
+                  "@/session": "Plane-clean (ADR-0193 + ADR-0136): os-sandbox is a leaf primitive — only node:child_process is allowed."
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "includes": ["**/src/security/pii-redaction/**"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "paths": {
+                  "@/agent": "Plane-clean (ADR-0193 + ADR-0171): pii-redaction is a leaf scanner — pure TS types from its own directory only.",
+                  "@/permission": "Plane-clean (ADR-0193 + ADR-0171): pii-redaction is a leaf scanner — pure TS types from its own directory only.",
+                  "@/shared": "Plane-clean (ADR-0193 + ADR-0171): pii-redaction explicitly forbids @/shared to remain portable to Tauri sidecar / worker / CI binary.",
+                  "@/tool": "Plane-clean (ADR-0193 + ADR-0171): pii-redaction is a leaf scanner — pure TS types from its own directory only.",
+                  "@/llm": "Plane-clean (ADR-0193 + ADR-0171): pii-redaction is a leaf scanner — pure TS types from its own directory only.",
+                  "@/memory": "Plane-clean (ADR-0193 + ADR-0171): pii-redaction is a leaf scanner — pure TS types from its own directory only.",
+                  "@/storage": "Plane-clean (ADR-0193 + ADR-0171): pii-redaction is a leaf scanner — pure TS types from its own directory only.",
+                  "@/stream": "Plane-clean (ADR-0193 + ADR-0171): pii-redaction is a leaf scanner — pure TS types from its own directory only.",
+                  "@/runtime": "Plane-clean (ADR-0193 + ADR-0171): pii-redaction is a leaf scanner — pure TS types from its own directory only.",
+                  "@/lsp": "Plane-clean (ADR-0193 + ADR-0171): pii-redaction is a leaf scanner — pure TS types from its own directory only.",
+                  "@/observability": "Plane-clean (ADR-0193 + ADR-0171): pii-redaction is a leaf scanner — pure TS types from its own directory only.",
+                  "@/mcp": "Plane-clean (ADR-0193 + ADR-0171): pii-redaction is a leaf scanner — pure TS types from its own directory only.",
+                  "@/patch": "Plane-clean (ADR-0193 + ADR-0171): pii-redaction is a leaf scanner — pure TS types from its own directory only.",
+                  "@/rules": "Plane-clean (ADR-0193 + ADR-0171): pii-redaction is a leaf scanner — pure TS types from its own directory only.",
+                  "@/subagent": "Plane-clean (ADR-0193 + ADR-0171): pii-redaction is a leaf scanner — pure TS types from its own directory only.",
+                  "@/skill": "Plane-clean (ADR-0193 + ADR-0171): pii-redaction is a leaf scanner — pure TS types from its own directory only.",
+                  "@/auth": "Plane-clean (ADR-0193 + ADR-0171): pii-redaction is a leaf scanner — pure TS types from its own directory only.",
+                  "@/session": "Plane-clean (ADR-0193 + ADR-0171): pii-redaction is a leaf scanner — pure TS types from its own directory only."
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "includes": ["**/src/apps/agent/**"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "patterns": [
+                  {
+                    "group": [
+                      "@/apps/bench",
+                      "@/apps/bench/*",
+                      "@/apps/bench/**",
+                      "@/apps/cli",
+                      "@/apps/cli/*",
+                      "@/apps/cli/**",
+                      "@/apps/eval",
+                      "@/apps/eval/*",
+                      "@/apps/eval/**",
+                      "@/apps/probe",
+                      "@/apps/probe/*",
+                      "@/apps/probe/**"
+                    ],
+                    "message": "Thin-surface fence (ADR-0303): src/apps/agent must not import other app surfaces. Move shared runtime below src/apps/."
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "includes": ["**/src/apps/bench/**"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "patterns": [
+                  {
+                    "group": [
+                      "@/apps/agent",
+                      "@/apps/agent/*",
+                      "@/apps/agent/**",
+                      "@/apps/cli",
+                      "@/apps/cli/*",
+                      "@/apps/cli/**",
+                      "@/apps/eval",
+                      "@/apps/eval/*",
+                      "@/apps/eval/**",
+                      "@/apps/probe",
+                      "@/apps/probe/*",
+                      "@/apps/probe/**"
+                    ],
+                    "message": "Thin-surface fence (ADR-0303): src/apps/bench must not import other app surfaces. Move shared runtime below src/apps/."
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "includes": ["**/src/apps/cli/**"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "patterns": [
+                  {
+                    "group": [
+                      "@/apps/agent",
+                      "@/apps/agent/*",
+                      "@/apps/agent/**",
+                      "@/apps/bench",
+                      "@/apps/bench/*",
+                      "@/apps/bench/**",
+                      "@/apps/eval",
+                      "@/apps/eval/*",
+                      "@/apps/eval/**",
+                      "@/apps/probe",
+                      "@/apps/probe/*",
+                      "@/apps/probe/**"
+                    ],
+                    "message": "Thin-surface fence (ADR-0303): src/apps/cli must not import other app surfaces. Move shared runtime below src/apps/."
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "includes": ["**/src/apps/headless/**"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "patterns": [
+                  {
+                    "group": [
+                      "**/apps/cli",
+                      "**/apps/cli/*",
+                      "**/apps/cli/**",
+                      "@/apps/cli",
+                      "@/apps/cli/*",
+                      "@/apps/cli/**",
+                      "**/apps/bench",
+                      "**/apps/bench/*",
+                      "**/apps/bench/**",
+                      "@/apps/bench",
+                      "@/apps/bench/*",
+                      "@/apps/bench/**",
+                      "**/apps/agent",
+                      "**/apps/agent/*",
+                      "**/apps/agent/**",
+                      "@/apps/agent",
+                      "@/apps/agent/*",
+                      "@/apps/agent/**"
+                    ],
+                    "message": "Surface isolation (ADR-0308 / ARCH-07): src/apps/headless is the SECOND consumer that proves the host layer is reusable. It MUST NOT import from src/apps/cli/**, src/apps/bench/**, or src/apps/agent/** — every env/argv/terminal-bound helper is injected through the dep bundle from @/host/bootstrap."
+                  },
+                  {
+                    "group": ["node:readline", "node:readline/promises", "node:tty", "node:repl"],
+                    "message": "Surface coupling: src/apps/headless is a non-TTY surface. CLI-specific node modules (readline / tty / repl) belong in apps/cli."
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "includes": ["**/src/apps/terminal/**"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "patterns": [
+                  {
+                    "group": [
+                      "**/apps/cli",
+                      "**/apps/cli/**",
+                      "@/apps/cli",
+                      "@/apps/cli/**",
+                      "**/apps/bench",
+                      "**/apps/bench/**",
+                      "@/apps/bench",
+                      "@/apps/bench/**",
+                      "**/apps/agent",
+                      "**/apps/agent/**",
+                      "@/apps/agent",
+                      "@/apps/agent/**",
+                      "**/apps/headless",
+                      "**/apps/headless/**",
+                      "@/apps/headless",
+                      "@/apps/headless/**",
+                      "**/apps/eval",
+                      "**/apps/eval/**",
+                      "@/apps/eval",
+                      "@/apps/eval/**",
+                      "**/apps/probe",
+                      "**/apps/probe/**",
+                      "@/apps/probe",
+                      "@/apps/probe/**",
+                      "**/apps/web-daemon",
+                      "**/apps/web-daemon/**",
+                      "@/apps/web-daemon",
+                      "@/apps/web-daemon/**"
+                    ],
+                    "message": "Surface isolation (RFC jun-29 §10): src/apps/terminal is the terminal ToolSurface composition root. It MUST NOT import from sibling app surfaces (apps/cli, apps/bench, apps/agent, apps/headless, apps/eval, apps/probe, apps/web-daemon) — it composes only @/tool ports + the agent loop. Backends are injected (ContainerExec / PtySessionPort); no orchestrator/Harbor specifics leak here."
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "includes": ["**/src/host/bootstrap/**"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "patterns": [
+                  {
+                    "group": ["**/apps/**", "**/src/apps/**", "@/apps/*"],
+                    "message": "Surface isolation (ADR-0299 host/bootstrap-host-extraction): @/host/bootstrap is the surface-agnostic session bootstrap. It MUST NOT import from any apps/* (apps/cli, apps/web, apps/tauri, apps/agent, apps/bench). Surface entries depend on @/host/bootstrap, never the reverse. Every env/argv/terminal-bound helper is injected via SessionBootstrapDeps."
+                  },
+                  {
+                    "group": ["node:readline", "node:readline/promises", "node:tty", "node:repl"],
+                    "message": "Surface coupling: @/host/bootstrap is surface-agnostic. CLI-specific node modules (readline / tty / repl) belong in apps/cli. Inject a port instead."
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "includes": ["**/src/apps/eval/**"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "patterns": [
+                  {
+                    "group": [
+                      "@/apps/agent",
+                      "@/apps/agent/*",
+                      "@/apps/agent/**",
+                      "@/apps/bench",
+                      "@/apps/bench/*",
+                      "@/apps/bench/**",
+                      "@/apps/cli",
+                      "@/apps/cli/*",
+                      "@/apps/cli/**",
+                      "@/apps/probe",
+                      "@/apps/probe/*",
+                      "@/apps/probe/**"
+                    ],
+                    "message": "Thin-surface fence (ADR-0303): src/apps/eval must not import other app surfaces. Move shared runtime below src/apps/."
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "includes": ["**/src/apps/eval/grounding/normalization/structural.ts"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "patterns": [
+                  {
+                    "group": [
+                      "./heuristic",
+                      "./heuristic.ts",
+                      "@/apps/eval/grounding/normalization/heuristic",
+                      "@/apps/eval/grounding/normalization/heuristic.ts"
+                    ],
+                    "message": "Grounding normalization seam: structural normalization must remain authority-only. Heuristic lexical repair belongs in normalization/heuristic.ts."
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "includes": ["**/src/apps/probe/**"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "patterns": [
+                  {
+                    "group": [
+                      "@/apps/agent",
+                      "@/apps/agent/*",
+                      "@/apps/agent/**",
+                      "@/apps/bench",
+                      "@/apps/bench/*",
+                      "@/apps/bench/**",
+                      "@/apps/cli",
+                      "@/apps/cli/*",
+                      "@/apps/cli/**",
+                      "@/apps/eval",
+                      "@/apps/eval/*",
+                      "@/apps/eval/**"
+                    ],
+                    "message": "Thin-surface fence (ADR-0303): src/apps/probe must not import other app surfaces. Move shared runtime below src/apps/."
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "includes": ["**/src/apps/cli/repl.ts", "**/src/apps/cli/repl/**"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "patterns": [
+                  {
+                    "group": [
+                      "@/runner/session-execution-plane",
+                      "@/runner/session-execution-plane/*",
+                      "@/runner/session-execution-plane/**",
+                      "@/runner/session-memory-auto",
+                      "@/runner/session-memory-auto/*",
+                      "@/runner/session-memory-auto/**",
+                      "**/execution-plane-wire",
+                      "**/execution-plane-wire/*",
+                      "**/session-memory-auto",
+                      "**/session-memory-auto/*"
+                    ],
+                    "message": "Thin-surface fence (ADR-0303): src/apps/cli/repl must not grow private session-assembler shims. Use the sanctioned runner-owned modules instead."
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "includes": ["**/src/apps/cli/repl/**"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "paths": {
+                  "@/agent/tier1/reviewer-subagent": "ADR-0299: src/apps/cli/repl/** must NOT import the reviewer subagent module directly. The reviewer factories (materializeReviewerAgent / createSubagentBackedGuardianReview) are injected via SessionBootstrapDeps from @/host/bootstrap and forwarded through the boot result. Import them from src/apps/cli/repl.ts (outside this slice) and pass through the dep bundle."
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "includes": ["**/src/apps/cli/slash/registry-surface.ts"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "patterns": [
+                  {
+                    "group": [
+                      "@/agent",
+                      "@/agent/**",
+                      "@/llm",
+                      "@/llm/**",
+                      "@/runner",
+                      "@/runner/**",
+                      "@/host",
+                      "@/host/**"
+                    ],
+                    "message": "ADR-0306 (CLI-03): surface registry MUST stay surface-only. It owns slash commands whose body never touches the live LLM, the agent loop, the runner, or the host. Per-command modules (./*-cmd.ts) may import @/agent / @/llm for types, but the registry file itself imports them as opaque SlashCommand objects only. Session-bound commands belong in ./slash/registry-session.ts; app/system commands belong in ./slash/registry-app.ts."
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "includes": ["**/src/apps/cli/repl/runtime-context-compose.ts"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "paths": {
+                  "@/runner/assemble/config": "Slice/surface boundary (migrated from a source-grep hellgate; AST-enforced, type-import-aware): src/apps/cli/repl/runtime-context-compose.ts must not import @/runner/assemble/config.",
+                  "@/runner/session-memory-auto": "Slice/surface boundary (migrated from a source-grep hellgate; AST-enforced, type-import-aware): src/apps/cli/repl/runtime-context-compose.ts must not import @/runner/session-memory-auto.",
+                  "@/sdk/runtime/bridge": "Slice/surface boundary (migrated from a source-grep hellgate; AST-enforced, type-import-aware): src/apps/cli/repl/runtime-context-compose.ts must not import @/sdk/runtime/bridge."
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "includes": ["**/src/apps/cli/repl/session-setup.ts"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "paths": {
+                  "@/host/runtime/session-host": "Slice/surface boundary (migrated from a source-grep hellgate; AST-enforced, type-import-aware): src/apps/cli/repl/session-setup.ts must not import @/host/runtime/session-host.",
+                  "@/runner/assemble/config": "Slice/surface boundary (migrated from a source-grep hellgate; AST-enforced, type-import-aware): src/apps/cli/repl/session-setup.ts must not import @/runner/assemble/config."
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "includes": ["**/src/apps/cli/repl.ts"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "paths": {
+                  "@/host/runtime/session-host": "Slice/surface boundary (migrated from a source-grep hellgate; AST-enforced, type-import-aware): src/apps/cli/repl.ts must not import @/host/runtime/session-host.",
+                  "@/runner": "Slice/surface boundary (migrated from a source-grep hellgate; AST-enforced, type-import-aware): src/apps/cli/repl.ts must not import @/runner.",
+                  "@/runner/session-execution-plane": "Slice/surface boundary (migrated from a source-grep hellgate; AST-enforced, type-import-aware): src/apps/cli/repl.ts must not import @/runner/session-execution-plane."
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "includes": ["**/src/host/runtime/session-host.ts"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "paths": {
+                  "@/runner/orchestrate/run-once": "Slice/surface boundary (migrated from a source-grep hellgate; AST-enforced, type-import-aware): src/host/runtime/session-host.ts must not import @/runner/orchestrate/run-once.",
+                  "@/runner/orchestrate/side-chat": "Slice/surface boundary (migrated from a source-grep hellgate; AST-enforced, type-import-aware): src/host/runtime/session-host.ts must not import @/runner/orchestrate/side-chat."
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "includes": ["**/src/host/runtime/internal/context-binding.ts"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "paths": {
+                  "@/runner/orchestrate/side-chat": "Slice/surface boundary (migrated from a source-grep hellgate; AST-enforced, type-import-aware): src/host/runtime/internal/context-binding.ts must not import @/runner/orchestrate/side-chat."
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "includes": ["**/src/apps/headless/index.ts"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "paths": {
+                  "@/host/bootstrap": "Slice/surface boundary (migrated from a source-grep hellgate; AST-enforced, type-import-aware): src/apps/headless/index.ts must not import @/host/bootstrap."
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "includes": ["**/src/apps/bench/eval/driver.ts"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "paths": {
+                  "@/host/bootstrap": "Slice/surface boundary (migrated from a source-grep hellgate; AST-enforced, type-import-aware): src/apps/bench/eval/driver.ts must not import @/host/bootstrap."
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "includes": ["**/src/sdk/runtime/context.ts"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "paths": {
+                  "@/sdk/runtime/bridge": "Slice/surface boundary (migrated from a source-grep hellgate; AST-enforced, type-import-aware): src/sdk/runtime/context.ts must not import @/sdk/runtime/bridge."
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "includes": ["**/src/apps/bench/index.ts"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "paths": {
+                  "@/sdk/runtime": "Slice/surface boundary (migrated from a source-grep hellgate; AST-enforced, type-import-aware): src/apps/bench/index.ts must not import @/sdk/runtime."
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "includes": ["**/src/apps/cli/slash/registry-surface.ts"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "patterns": [
+                  {
+                    "group": ["@/agent", "@/agent/**"],
+                    "message": "Slice/surface boundary (migrated from a source-grep hellgate; AST-enforced, type-import-aware): src/apps/cli/slash/registry-surface.ts must not import @/agent."
+                  },
+                  {
+                    "group": ["@/host", "@/host/**"],
+                    "message": "Slice/surface boundary (migrated from a source-grep hellgate; AST-enforced, type-import-aware): src/apps/cli/slash/registry-surface.ts must not import @/host."
+                  },
+                  {
+                    "group": ["@/llm", "@/llm/**"],
+                    "message": "Slice/surface boundary (migrated from a source-grep hellgate; AST-enforced, type-import-aware): src/apps/cli/slash/registry-surface.ts must not import @/llm."
+                  },
+                  {
+                    "group": ["@/runner", "@/runner/**"],
+                    "message": "Slice/surface boundary (migrated from a source-grep hellgate; AST-enforced, type-import-aware): src/apps/cli/slash/registry-surface.ts must not import @/runner."
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "includes": ["**/src/apps/cli/repl/session-loop.ts"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "paths": {
+                  "@/runner": "Slice/surface boundary (migrated from a source-grep hellgate; AST-enforced): src/apps/cli/repl/session-loop.ts must not import @/runner.",
+                  "@/sdk/runtime/bridge": "Slice/surface boundary (migrated from a source-grep hellgate; AST-enforced): src/apps/cli/repl/session-loop.ts must not import @/sdk/runtime/bridge.",
+                  "@/sdk/runtime/compat": "Slice/surface boundary (migrated from a source-grep hellgate; AST-enforced): src/apps/cli/repl/session-loop.ts must not import @/sdk/runtime/compat."
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "includes": ["**/src/apps/cli/repl/prompt-pipeline.ts"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "paths": {
+                  "@/runner": "Slice/surface boundary (migrated from a source-grep hellgate; AST-enforced): src/apps/cli/repl/prompt-pipeline.ts must not import @/runner."
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "includes": ["**/src/apps/cli/repl/external-prompt-queue.ts"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "paths": {
+                  "@/runner": "Slice/surface boundary (migrated from a source-grep hellgate; AST-enforced): src/apps/cli/repl/external-prompt-queue.ts must not import @/runner."
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  ]
+}

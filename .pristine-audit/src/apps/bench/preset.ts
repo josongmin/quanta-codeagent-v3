@@ -1,0 +1,118 @@
+import { KNOB_PRESETS, presetRequiresLiveLspGrounding } from "@/runner/knobs"
+import { gateOn } from "@/shared"
+import type { DatasetFamily } from "./dataset-family-token"
+import { resolveDatasetFamilyProfile } from "./profiles/registry"
+
+export const CURRENT_BENCH_BASE_PRESET = "agentless-v3-thin-strict"
+export const V5_ADAPTIVE_PRESET = "agentless-v5-thin-and-expanded"
+export { presetRequiresLiveLspGrounding }
+
+/** Is the v5 thin-first ADAPTIVE controller live for this run? Default-OFF and
+ *  STRICT opt-in: true ONLY when the resolved preset is the v5 preset AND
+ *  `QUANTA_BENCH_V5_ADAPTIVE` is explicitly on. Without the opt-in the preset is
+ *  inert (runs as its thin-strict base posture) — so the LLM brain never engages
+ *  until the operator opts in (the oracle-measurement wave gate). */
+export const v5AdaptiveEnabled = (args: {
+  readonly preset: string | undefined
+  readonly envVars: Record<string, string | undefined>
+}): boolean =>
+  args.preset === V5_ADAPTIVE_PRESET && gateOn(args.envVars, "QUANTA_BENCH_V5_ADAPTIVE")
+
+const asNonEmpty = (raw: string | undefined): string | undefined => {
+  const trimmed = raw?.trim()
+  return trimmed ? trimmed : undefined
+}
+
+/** Resolve the EFFECTIVE bench execution preset at the composition root.
+ *
+ * Precedence intentionally keeps explicit env selectors authoritative so a
+ * shell-exported experiment arm is not silently clobbered by a CLI default:
+ *   1. `QUANTA_BENCH_PRESET=<name>`      — canonical selector.
+ *   2. `QUANTA_BENCH_SOTA=1`             — back-compat alias for agentless-v1.
+ *   3. `QUANTA_KNOBS_PRESET=<name>`      — legacy framework spelling.
+ *   4. `--preset <name>`                 — CLI convenience for bench entrypoints.
+ *   5. CURRENT base profile              — the structural default for live runs.
+ */
+export const resolveBenchExecutionPreset = (args: {
+  readonly envVars: Record<string, string | undefined>
+  readonly argvPreset?: string | undefined
+}): string => {
+  const envPreset = asNonEmpty(args.envVars.QUANTA_BENCH_PRESET)
+  if (envPreset !== undefined) return envPreset
+  if (gateOn(args.envVars, "QUANTA_BENCH_SOTA")) return "agentless-v1"
+  const legacyPreset = asNonEmpty(args.envVars.QUANTA_KNOBS_PRESET)
+  if (legacyPreset !== undefined) return legacyPreset
+  return asNonEmpty(args.argvPreset) ?? CURRENT_BENCH_BASE_PRESET
+}
+
+/** Per-family REMOTE preset default (T4 layer 5). Remote Pro spans Python, Go,
+ * JS, and TS while the current strict remote box proves only Pyright, so Pro's
+ * profile declares the LSP-optional baseline — applied ONLY when the operator did
+ * not explicitly choose any preset. Explicit experiments retain the normal
+ * precedence unchanged. */
+export const resolveRemoteBenchExecutionPreset = (args: {
+  /** TYPED resolved family (aug-22 HIGH-1) — never a raw env string. Already
+   *  normalized by the ONE `normalizeDatasetFamilyToken` owner, so no ad-hoc
+   *  case-folding is needed (or permitted) here. */
+  readonly family: DatasetFamily
+  readonly envVars: Record<string, string | undefined>
+  readonly argvPreset?: string | undefined
+}): string => {
+  const resolved = resolveBenchExecutionPreset(args)
+  const explicitlySelected =
+    asNonEmpty(args.envVars.QUANTA_BENCH_PRESET) !== undefined ||
+    gateOn(args.envVars, "QUANTA_BENCH_SOTA") ||
+    asNonEmpty(args.envVars.QUANTA_KNOBS_PRESET) !== undefined ||
+    asNonEmpty(args.argvPreset) !== undefined
+  // aug-22 HIGH-4: the per-family default preset is the profile's
+  // `remoteDefaultPreset` field, not a `family === "pro"` compare here. A family
+  // with no opinion leaves the normal precedence untouched.
+  const familyDefault = resolveDatasetFamilyProfile(args.family).remoteDefaultPreset
+  return familyDefault !== undefined && !explicitlySelected ? familyDefault : resolved
+}
+
+/** Seed `QUANTA_BENCH_PRESET` only when the operator did NOT already select a
+ * posture through env. This keeps local `bench run` / `index.ts` honest by
+ * default while preserving explicit `QUANTA_BENCH_SOTA` / `QUANTA_KNOBS_PRESET`
+ * experiments unchanged.
+ *
+ * HIGH-1 (aug-22): `family` is now a REQUIRED TYPED parameter threaded from the
+ * composition root's resolved `BenchRunConfig`. It used to be read back out of
+ * `env.QUANTA_SWEBENCH_DATASET_FAMILY` — which the composition root had written
+ * four lines earlier from argv, making argv→env→preset a pure in-process
+ * round-trip through ambient env. The typed field is the sole authority; env is
+ * only ever a wire for a real subprocess. */
+export const seedBenchExecutionPreset = (
+  env: Record<string, string | undefined>,
+  argvPreset: string | undefined,
+  family: DatasetFamily,
+): void => {
+  const envPreset = asNonEmpty(env.QUANTA_BENCH_PRESET)
+  if (envPreset !== undefined) {
+    env.QUANTA_BENCH_PRESET = envPreset
+    return
+  }
+  if (gateOn(env, "QUANTA_BENCH_SOTA")) return
+  if (asNonEmpty(env.QUANTA_KNOBS_PRESET) !== undefined) return
+  env.QUANTA_BENCH_PRESET = resolveRemoteBenchExecutionPreset({
+    family,
+    envVars: env,
+    argvPreset,
+  })
+}
+
+/** Shared preset-list rendering for both legacy `index.ts --list-presets` and
+ * `quanta-bench presets`, so wording/content cannot drift across entrypoints. */
+export const renderBenchPresetListLines = (): string[] => [
+  "Bench presets — select with QUANTA_BENCH_PRESET=<name> (value, not on/off).",
+  `Default live execution preset: ${CURRENT_BENCH_BASE_PRESET}.`,
+  "Individual QUANTA_BENCH_* env vars override a preset's values.",
+  "QUANTA_BENCH_SOTA=1 is a back-compat alias for agentless-v1.",
+  "",
+  ...Object.entries(KNOB_PRESETS).map(([name, knobs]) => {
+    const body = Object.entries(knobs)
+      .map(([id, value]) => `${id}=${value}`)
+      .join(", ")
+    return `  ${name.padEnd(16)} ${body === "" ? "(no-op baseline)" : body}`
+  }),
+]

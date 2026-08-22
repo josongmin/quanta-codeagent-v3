@@ -1,3 +1,4 @@
+import { SubagentTurnGate } from "@/subagent"
 import type { ConversationActionPort } from "./conversation-action"
 import { createConversationActionSurface } from "./conversation-action-surface"
 import {
@@ -7,7 +8,6 @@ import {
 } from "./subagent-control-endpoint"
 import type { SubagentControlEndpoint, SubagentSteerSubmission } from "./subagent-delivery/ports"
 import type { AgentConfig } from "./types"
-import { SubagentTurnGate } from "@/subagent"
 
 const CHILD_STEER_QUEUE_CAPACITY = 8
 const CHILD_STEER_MAX_INPUT_BYTES = 8192

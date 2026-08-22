@@ -97,7 +97,7 @@ describe("PMX-04 campaign-golden derivation — mechanical, image_name only", ()
 
     // The assertion helper agrees (this is the production gate, not the test's
     // own re-derivation of the rule).
-    expect(assertGoldenDerivationIsImageOnly(diff)).toEqual([])
+    expect(assertGoldenDerivationIsImageOnly(diff, PINS)).toEqual([])
   })
 
   test("the derived document preserves non-uniform keys, integer types and nested values", () => {
@@ -201,7 +201,7 @@ describe("PMX-04 structural diff — every non-image_name delta is a VIOLATION",
     const tampered = mutate((rows) => Object.assign(rows[0] ?? {}, { patch: "tampered" }))
     const diff = diffGoldenDocuments(sourceText, tampered)
     if (!diff.ok) throw new Error("diff refused")
-    const problems = assertGoldenDerivationIsImageOnly(diff)
+    const problems = assertGoldenDerivationIsImageOnly(diff, PINS)
     expect(problems).toHaveLength(1)
     expect(problems[0]).toContain("field_changed")
     expect(problems[0]).toContain("promax__alpha-1")

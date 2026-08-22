@@ -1,0 +1,68 @@
+id: git-log-search-skill
+title: git-log-search 시스템 스킬 — pickaxe/regex/author/since 검색 (ADR-0172)
+section: 6
+subsystem: 스킬 — 번들 시스템 스킬 (git 히스토리 탐사, Cursor CTK §⑧ 패턴 흡수)
+order: 172
+maturity: L4
+status: stable
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [interactive, headless, batch, daemon, ide, ci-bot]
+configurable: static
+owners: ["@songmin"]
+labels: ["surface:core", "tier:1", "absorbed:cursor"]
+depends_on: [ctk-git-skills-bundle]
+config_refs:
+  env: ["QUANTA_SKILLS_DIR"]
+surface_integration:
+  cli: full
+  web: missing
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 2/2 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "skill slash invocation (/git-log-search) is CLI-only; SlashPalette prefill stub (B2), no web skill handler"
+purpose: |
+  사용자가 "when did X get added"/"who wrote this"/"find commits matching Y"/
+  "code archaeology"/"git history search"라고 물을 때 git 히스토리를 4개 검색
+  모드(pickaxe `-S` / regex `-G` / author / since+path) + ADR-0105 env-hygiene
+  quartet (GIT_OPTIONAL_LOCKS=0 / GIT_PAGER=cat / GIT_TERMINAL_PROMPT=0 /
+  LC_ALL=C) + US-separator pretty-format (`%H\x1f%an\x1f%ai\x1f%s`)으로 안전하게
+  탐사하는 시스템 스킬.
+
+  Research grounding: Cursor는 `blame_by_file_path`는 atomic tool로 노출하지만
+  pickaxe/regex/author/since 같은 git **검색** 워크플로는 CTK 스킬에 두고 `gh`/
+  `git` shell로 실행한다 (`docs/analysis/경쟁사리뷰/code-agent-loop/cursor-git.md`
+  §⑤ + §⑧). Tool = 원자적 single-shot, Skill = 사용자가 query를 좁히며 반복
+  iterate 하는 narrative 워크플로 — exploratory git search는 후자가 옳다.
+
+  본 스킬은 src/tool/git/*에 어떤 도구도 추가하지 않는다. `Bash` + `Read`만
+  allowedTools로 선언해 progressive disclosure (SKILL.md 본문이 정확한 명령
+  shape를 가르치되, 실행은 모델이 매 turn에 사용자 의도에 맞춰 합성)를
+  강제. `GIT_LOG_SEARCH_SKILL_NAME` + `triggerGitLogSearch()` 헬퍼를 노출하므로
+  slash router(`/git-log-search`)가 router-agnostic하게 wire 가능 — ADR-0045
+  progress-audit seam pattern과 동일.
+evidence:
+  code:
+    - src/skill/system-skills/git-log-search/SKILL.md
+    - src/skill/system-skills/git-log-search/index.ts
+    - src/skill/system-skills/index.ts
+  adrs: ["docs/decisions/0173-git-log-search-skill.md"]
+  tests:
+    unit:
+      - tests/unit/system-skills-git-log-search-hellgate.test.ts
+      - tests/unit/skill-git-bundle.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  Default-OFF — system-skill slice 일반 정책: description 매칭 또는 명시
+  invoke만 활성. System-wins-on-collision 보호 (user-supplied "git-log-search"
+  스킬이 shadow 못 함). ADR-0105 env-hygiene quartet과 US-separator format은
+  hellgate (HELL-5)에서 verbatim 검사 — drift 차단. Tool 형태로 만들 수 없는
+  이유: (1) "smart router"가 pickaxe vs regex 자동 선택 시 정규식 collision
+  (e.g. `-S".+"`는 거의 모든 commit 매치 → flood), (2) `-n 50` cap을 모델이
+  user query에 맞춰 조정해야 함, (3) `git show <sha>` follow-up은 결과
+  컨텍스트(top 5 vs top 10 vs none)에 따라 모델 판단 — 모두 atomic tool 계약
+  바깥. CTK git-skill bundle (ADR-0111) sibling — 같은 layout/seam 패턴.

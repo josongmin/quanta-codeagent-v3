@@ -1,0 +1,55 @@
+id: ipc-event-bridge
+title: EventBridge — surface-agnostic pub/sub + closed BridgePayload union
+section: 9
+subsystem: IPC core — typed envelope + transport injection
+order: 34
+maturity: L2
+status: new
+ui_surfaces: [api]
+monitoring: integrated
+telemetry_keys: [quanta.ipc.v]
+modes: [n-a]
+configurable: integrated
+owners: ["@songmin"]
+labels: ["surface:ipc"]
+depends_on: [portable-session-v1, slice-ipc-bridge]
+surface_integration:
+  cli: missing
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "src evidence not reachable from the interactive CLI entry (src/apps/cli/index.ts) — wired only into other apps (eval/bench/probe/headless) or unwired"
+    web: "Pure internal IPC protocol primitive (closed WireEnvelope union); no browser affordance; not the @/ipc/session codec the web-daemon actually uses."
+purpose: |
+  Surface-agnostic event bridge connecting multiple surfaces (CLI / Web /
+  Tauri / future remote-control daemons) to a single logical agent session.
+  Each surface publishes events and subscribes to peer events; the transport
+  is INJECTED (no `process.env` / `argv` reads inside `@/ipc`). On-the-wire
+  `WireEnvelope { protocol: "quanta.ipc.v1", source, sessionId, payload,
+  timestamp }` — every `BridgeEvent` is encoded to the envelope before send;
+  the transport just shuttles bytes. `BridgePayload` is a CLOSED discriminated
+  union — a new payload kind MUST extend this file (and transport encoders) —
+  there is no `unknown` escape. Default-OFF / byte-identical: if no surface
+  constructs an EventBridge the CLI behaviour is unchanged. Slice boundary —
+  `@/ipc` may import `@/agent`, `@/llm`, `@/session`, `@/stream`, `@/shared`;
+  MUST NOT import `apps/**`, `@/rules`, `@/patch`, `@/migration`.
+evidence:
+  code:
+    - src/ipc/event-bridge.ts
+    - src/ipc/index.ts
+  adrs: []
+  tests:
+    unit:
+      - tests/unit/ipc/event-bridge.test.ts
+      - tests/unit/ipc-slice-boundary.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  Inspired by Claude Code's CLI ↔ Web bridge (deep-dive:A11:206-222 —
+  `importCliSession` + `logCliEvent`). `slice-ipc-bridge` catalog entry
+  describes the slice as a whole; this entry zooms in on the bridge core
+  (event types + envelope + protocol version). Companion entries: 4 transport
+  implementations + portable-session-v1 export/import.

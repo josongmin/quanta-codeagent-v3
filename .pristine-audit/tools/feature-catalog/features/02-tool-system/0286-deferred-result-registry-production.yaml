@@ -1,0 +1,75 @@
+id: deferred-result-registry-production
+title: Production DeferredResultRegistry — registry-managed deferred work (ADR-0286)
+section: 2
+subsystem: 도구 — async work lifecycle (ADR-0286 sibling of legacy ADR-0064 seam)
+order: 286
+maturity: L4
+status: new
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [interactive, headless, batch, daemon, ide, ci-bot]
+configurable: integrated
+config_refs:
+  env: [QUANTA_ASYNC_TOOLS, QUANTA_DEFERRED_CAP]
+owners: ["@songmin"]
+labels: [surface:cli, kind:registry]
+depends_on: [deferred-tool-registry, tool-output-schema-factory]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 6/6 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "Pure internal async-work-lifecycle registry primitive (leaf, default-OFF); the visible surface is the poll_deferred tool (0287), this registry has no UI of its own."
+purpose: |
+  Closed-port DeferredResultRegistry that OWNS the lifecycle of registered
+  async work — distinct from the legacy ADR-0064 "external poller" seam
+  (kept verbatim in `src/tool/deferred/legacy.ts`).
+
+  Port: `register(work) / poll / await / cancel / list`. Closed 5-arm
+  `Status` (pending|running|completed|failed|cancelled). Closed 5-arm
+  `DeferredError` (unknown-handle|worker-threw|cancelled|await-timeout|
+  handle-evicted). Literal-anchor `as const satisfies` tuples make adding
+  a 6th kind a tsc error at the producer AND every exhaustive switch.
+
+  Concrete impl: DefaultDeferredResultRegistry — per-handle
+  AbortController, microtask worker (caller sees pending before any worker
+  code runs), LRU eviction (default cap 1000, pending/running NEVER
+  evicted), totalised poll/await (unknown/evicted return classified
+  failure, never throw). No zombie Promise: timeout detaches waiter; late
+  worker completion overwrites cancelled status per spec invariant.
+
+  Default-OFF: leaf module; agent composition root only constructs one when
+  `runtimeConfig().asyncTools === true` (ADR-0287). Sibling caller-wire
+  pattern (mirrors mcp_tasks / shadow / subagent_bg).
+evidence:
+  code:
+    - src/tool/deferred/port.ts
+    - src/tool/deferred/types.ts
+    - src/tool/deferred/default-registry.ts
+    - src/tool/deferred/index.ts
+    - src/tool/deferred/legacy.ts
+    - src/shared/runtime-config.ts
+  adrs: [286]
+  tests:
+    unit:
+      - tests/unit/tool/deferred-registry-hellgate.test.ts
+    integration: []
+    contract: []
+knobs:
+  - name: QUANTA_DEFERRED_CAP
+    default: '1000'
+    purpose: 'registry max live handles'
+deliberate_hold:
+  reason: "Sqlite persistence for cross-restart deferred 후속"
+  promotion_path: "Stage1 sqlite store와 동형 pattern (sibling SqliteDeferredResultRegistry under same port)"
+notes: |
+  Naming: the legacy class keeps its historic name `DeferredResultRegistry`
+  (still re-exported from `@/tool` via `src/tool/deferred/index.ts`). The
+  NEW port is also named `DeferredResultRegistry` but is reachable ONLY
+  via `@/tool/deferred/port` — the barrel re-exports only the legacy
+  class to avoid collision. New concrete impl is
+  `DefaultDeferredResultRegistry` from `@/tool/deferred/default-registry`.
+  No existing caller is touched; legacy hellgate (`tool-factory.test.ts`)
+  stays byte-identical.

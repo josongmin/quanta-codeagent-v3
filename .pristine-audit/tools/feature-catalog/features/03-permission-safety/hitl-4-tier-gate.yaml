@@ -1,0 +1,56 @@
+id: hitl-4-tier-gate
+title: HITL 4-tier gate registry + handoff event seam (ADR-0047)
+section: 3
+subsystem: HITL 4-tier gate (ADR-0020 / ADR-0047)
+order: 3
+maturity: L5
+status: stable
+ui_surfaces: [cli]
+monitoring: integrated
+telemetry_keys: [gen_ai.request.max_tokens, gen_ai.request.model, gen_ai.request.temperature, gen_ai.response.finish_reasons, gen_ai.response.model]
+modes: [interactive, headless]
+configurable: integrated
+config_refs:
+  env: [QUANTA_HITL_OVERRIDES]
+owners: ["@songmin"]
+labels: [absorbed:codex, surface:cli]
+depends_on: [183-safety-net-green, agent-loop-branch-hardening, assert-never-exhaustiveness, auto-approval-reviewer, branch-only-guard]
+surface_integration:
+  cli: full
+  web: partial
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 5/5 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "approvals render via EscalationCard/PlainApproval but decision collapses to approve|deny only, dropping the 4-tier handoff fidelity; HandoffRequiredEvent onHandoff callback is a CLI-only seam"
+purpose: 'ADR-0020 HITL 어휘 위에 annotation registry(빌트인 + ~/.quanta/hitl-overrides.json 운영자 override)와 typed HandoffRequiredEvent UI seam을 얹는다. one-way ratchet으로 override는 tier escalate만 가능; hand-off-required는 절대 downgrade되지 않는다. AgentConfig.onHandoff 콜백으로 deny 메시지 파싱 없이 구조화된 이벤트 수신.'
+evidence:
+  code:
+    - src/agent/hitl-tier.ts
+    - src/agent/hitl-tier-registry.ts
+    - src/agent/admissibility-gate.ts
+    - src/observability/vocabulary.ts
+    - src/shared/runtime-config.ts
+  adrs: [20, 26, 29, 47]
+  tests:
+    unit:
+      - tests/unit/hitl-tier-registry.test.ts
+      - tests/unit/hitl-tier-gate.test.ts
+      - tests/unit/admissibility-gate.test.ts
+    integration:
+      - tests/integration/hitl-tier-dispatch-e2e.test.ts
+    contract: []
+knobs:
+  - name: QUANTA_HITL_OVERRIDES
+    default: 'undefined'
+    purpose: 'override JSON 파일 경로 (absent ⇒ 빌트인만)'
+  - name: AgentConfig.hitl.enabled
+    default: 'undefined'
+    purpose: 'gate 켜기 (default OFF, byte-identical legacy)'
+  - name: AgentConfig.onHandoff
+    default: 'undefined'
+    purpose: 'UI 콜백 (absent ⇒ silent no-op)'
+deliberate_hold: null
+notes: |
+  one-way ratchet, no-regex matching, no-GUI editor, no-runtime-reload — ADR-0047 §R6 negative space.
+  Telemetry: quanta.hitl.tier_resolved / registry_escalated / handoff_emitted (vocabulary.ts).

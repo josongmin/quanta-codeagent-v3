@@ -27,10 +27,10 @@ import { isRewindEnabled, rewindCommands } from "../rewind-cmd"
 import { rewindConvCmd } from "../rewind-conv-cmd"
 import { rewindToolCmd } from "../rewind-tool-cmd"
 import { sessionRegistryCmd } from "../session-registry-cmd"
-import { isHunkUndoEnabled, undoCmd } from "../undo-cmd"
 import { capabilitiesCmd, capsAliasCmd } from "../slash-commands-capabilities"
 import { knobsCmd } from "../slash-commands-knobs"
 import type { SlashCommand } from "../slash-contract"
+import { isHunkUndoEnabled, undoCmd } from "../undo-cmd"
 import { releaseNotesCmd, versionCmd } from "../version-cmd"
 
 // `/rewind` + `/fork` (Claude Code v1.7196 pattern) — env-gated at module

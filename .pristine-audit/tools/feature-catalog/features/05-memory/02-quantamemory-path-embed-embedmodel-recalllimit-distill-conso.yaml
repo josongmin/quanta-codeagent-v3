@@ -1,0 +1,49 @@
+id: quantamemory-path-embed-embedmodel-recalllimit-distill-conso
+title: QUANTA_MEMORY[_PATH/_EMBED/_EMBED_MODEL/_RECALL_LIMIT/_DISTILL/_CONSOLIDATE/_SEL
+section: 5
+subsystem: 도구/노브
+order: 2
+maturity: L4
+status: stable
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [interactive]
+configurable: integrated
+config_refs:
+  env: [QUANTA_MEMORY]
+owners: ['@songmin']
+labels: [surface:core, absorbed:codex]
+depends_on: [memory-self-edit-tools, embedder-port]
+surface_integration:
+  cli: full
+  web: partial
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 4/4 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "QUANTA_MEMORY_* knobs are read-broad in KnobsPanel (GET /api/knobs) but NOT in the 6 CONFIG_ALLOWED_KEYS writable set — visible read-only, cannot be set from the browser where CLI can"
+purpose: |
+  메모리 서브시스템 surface knob 집합 `QUANTA_MEMORY_*` (PATH / EMBED /
+  EMBED_MODEL / RECALL_LIMIT / DISTILL / CONSOLIDATE / SELF_EDIT /
+  RECALL_TIERS). 각각 store 위치, 임베딩 어댑터, 임베딩 모델 식별자,
+  recall 결과 cap, 세션 종료 distill, 2-phase consolidator, self-edit 도구
+  활성화, recall tier 선택을 host-injectable seam으로 노출. 본 entry는
+  knob 카탈로그 reference — 구체 동작은 각 sub-feature (codex-2-phase-
+  consolidator / embedder-port / memory-self-edit-tools 등)가 담는다.
+evidence:
+  code:
+    - src/apps/cli/internal.ts
+    - src/runner/assemble/memory.ts
+    - src/memory/consolidate/paths.ts
+    - src/runner/assemble/tooling.ts
+  adrs: [8]
+  tests:
+    unit: ["tests/unit/cli-argv-prompt.test.ts", "tests/unit/cli-resume-heuristic.test.ts", "tests/unit/cli-summarizer.test.ts", "tests/unit/env-knob-branches.test.ts"]
+    integration: ["tests/integration/cli-export-assembly.test.ts", "tests/integration/session-ux-e2e.test.ts"]
+    contract: []
+knobs:
+  - name: QUANTA_MEMORY
+    default: 'undefined'
+    purpose: '(no description)'
+deliberate_hold: null
+notes: ''

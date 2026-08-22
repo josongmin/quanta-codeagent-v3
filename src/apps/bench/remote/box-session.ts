@@ -43,6 +43,12 @@ import { presetRequiresLiveLspGrounding } from "../preset"
 import { resolveDatasetFamilyProfile } from "../profiles/registry"
 import type { SpawnFn, SpawnResult } from "./backend"
 import { assertRemoteAccessTokenFreshEnough, stripToAccessToken } from "./box-session/auth"
+import {
+  buildChunkScrubCommand,
+  closureDiagnosticsPathFor,
+  runExitPathFor,
+  trajectoriesDirFor,
+} from "./box-session/chunk-scrub"
 import { runBenchDetachedPoll } from "./box-session/detached-poll"
 import { probePyrightGrounding, remoteLspLaunchReceipt } from "./box-session/pyright-grounding"
 import { BENCH_SSH_SAFE_OPTS, openOtelReverseTunnel, shq } from "./box-session/shell"
@@ -390,21 +396,6 @@ export const buildBenchCommand = (params: GradeChunkParams, paths: ChunkPaths): 
   )
 }
 
-const runExitPathFor = (paths: ChunkPaths): string => paths.runLog.replace(/run\.log$/, "run.exit")
-
-const closureDiagnosticsPathFor = (paths: ChunkPaths): string =>
-  paths.report.replace(/\.json$/, ".closure-diagnostics.json")
-
-/**
- * Per-INSTANCE trajectory directory on the box. The recorder splits each run's
- * localize/repro/repair phases into `<dir>/trajectories/<ts>-<instanceId>.jsonl`
- * (+ `.meta.json` sidecar) — one FILE per instance (SWE-agent shape) — where
- * `<dir>` is the parent of the configured `QUANTA_BENCH_RECORD_TRAJECTORY`
- * cassette path. So the fetchable directory is `dirname(paths.trajectory)/trajectories`.
- */
-const trajectoriesDirFor = (paths: ChunkPaths): string =>
-  `${paths.trajectory.replace(/\/[^/]*$/, "")}/trajectories`
-
 /**
  * Fail closed on stale box-side artifacts. Single full-remote runs still use the
  * historical fixed `~/preds.jsonl` / `~/report.json` / `~/run.log` paths; if a
@@ -412,26 +403,20 @@ const trajectoriesDirFor = (paths: ChunkPaths): string =>
  * them after a crash can mis-attribute stale/gold data as the current run's
  * outputs. Scrub every derived artifact path BEFORE launch so an empty/crashed
  * run fetches nothing instead of contaminated leftovers.
+ *
+ * WHICH paths — including `paths.dataset`, whose omission was the aug-22 A-B
+ * leak — is decided by `chunk-scrub.ts`'s exhaustive classification, not by a
+ * list maintained here. This function is now transport only.
+ *
+ * Exported so the drift-guard hellgate can drive the REAL scrub with a recording
+ * ssh rather than re-deriving the command it expects.
  */
-const scrubChunkArtifacts = async (args: {
+export const scrubChunkArtifacts = async (args: {
   ssh: BoxSession["ssh"]
   paths: ChunkPaths
   recordTrajectory: boolean
 }): Promise<void> => {
-  const targets = [
-    args.paths.preds,
-    args.paths.report,
-    args.paths.runLog,
-    runExitPathFor(args.paths),
-    closureDiagnosticsPathFor(args.paths),
-    ...(args.recordTrajectory ? [args.paths.trajectory] : []),
-  ]
-  // Also scrub the per-instance trajectory DIR so a prior run's cassettes can't
-  // be mis-fetched as this run's (same fail-closed contract as the flat files).
-  const trajDir = args.recordTrajectory ? trajectoriesDirFor(args.paths) : undefined
-  const cleared = await args.ssh(
-    `rm -f ${targets.join(" ")}; ${trajDir ? `rm -rf ${trajDir}; ` : ""}rm -rf ${args.paths.observeDir}; mkdir -p ${args.paths.observeDir}`,
-  )
+  const cleared = await args.ssh(buildChunkScrubCommand(args.paths, args.recordTrajectory))
   if (cleared.code !== 0) {
     throw new Error(
       `[full-remote] stale-artifact scrub failed (code ${cleared.code}): ${cleared.stderr}`,
@@ -722,17 +707,23 @@ const executeGradeChunk = async (args: {
   const ssh = args.session.ssh.bind(args.session)
   await args.snapshots.start()
   await shipAccessToken(ssh, log, args.params.authJson)
+  // 🔴 SCRUB FIRST, THEN UPLOAD (aug-22 A-B). The scrub now clears
+  // `paths.dataset` too — the previous chunk's corpus, which for ProMax carries
+  // `patch` / `test_patch` in every row — and it therefore MUST run before this
+  // chunk's dataset is placed. In the old order (upload, then scrub) adding the
+  // dataset to the scrub list would have deleted the file the run was about to
+  // grade, which is why the omission survived: it could not be fixed in place.
+  await scrubChunkArtifacts({
+    ssh,
+    paths: args.paths,
+    recordTrajectory: args.params.recordTrajectory,
+  })
   await uploadChunkDataset({
     spawn,
     keyPath,
     datasetPath: args.params.datasetPath,
     host,
     targetPath: args.paths.dataset,
-  })
-  await scrubChunkArtifacts({
-    ssh,
-    paths: args.paths,
-    recordTrajectory: args.params.recordTrajectory,
   })
   args.state.finalExitCode = await runChunkBench({
     ssh,

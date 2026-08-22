@@ -1,0 +1,51 @@
+id: shadow-odb-rewind
+title: Shadow ODB rewindToLast — destructive restore + auto safety net
+section: 10
+subsystem: Shadow ODB rewind primitive (ADR-0118)
+order: 118
+maturity: L4
+status: stable
+ui_surfaces: [n-a]
+monitoring: n-a
+telemetry_keys: ["quanta.local"]
+modes: [interactive, headless, batch, daemon, ide, ci-bot]
+configurable: static
+owners: ["@songmin"]
+labels: ["surface:cli"]
+depends_on: [shadow-odb-port, shadow-odb-workspace-hash, shadow-odb-lru-cleanup, git-init, git-review-diff]
+config_refs:
+  env: []
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 3/3 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "pure Shadow ODB rewind primitive (agent-facing tool registered separately under ADR-0119), no UI affordance"
+purpose: |
+  Closes the deliberate "not-implemented" trap from ADR-0108 by implementing
+  rewindToLast (destructive workspace restore to last snapshot) plus a safety
+  net: before rewind, the current workspace state is captured under a
+  pre-rewind ref so the user can recover from accidental rewind. Adds
+  RewindOptions / SnapshotMetadata types, listSnapshots inspector, and typed
+  error codes (merge-in-progress, rewind-failed). Refuses to rewind across an
+  in-progress merge.
+evidence:
+  code:
+    - src/storage/shadow-odb/types.ts
+    - src/storage/shadow-odb/default.ts
+    - src/storage/shadow-odb/index.ts
+  adrs: [118]
+  tests:
+    unit:
+      - tests/unit/shadow-odb-hellgate.test.ts
+      - tests/unit/shadow-odb-rewind-extensions-hellgate.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  The pre-rewind ref prefix is a typed constant so consumers can list / prune
+  recovery snapshots. Surface for the agent-facing rewind tool is registered
+  separately under the shadow-tools trio (ADR-0119).

@@ -1,0 +1,56 @@
+id: permission-policy-engine
+title: permission policy — HARD_DENY engine + tier inference + reviewer composition
+section: 3
+subsystem: 권한 정책 엔진 (HARD_DENY baseline + tier overlay 결합)
+order: 92
+maturity: L4
+status: stable
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [interactive, headless, batch, daemon, ide, ci-bot]
+configurable: static
+owners: ["@songmin"]
+labels: [absorbed:codex, surface:cli, security-touched]
+depends_on: [permission-store-json, per-host-agent-mode, per-thread-permissions, post-denial-precedence, quanta-home-meta-root]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 4/4 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "pure policy resolver engine, no user-visible affordance on any surface; description-only surfacing is an internal invariant not a UI"
+purpose: |
+  The RESOLVER ENGINE half of the permission policy (SRP split with the data
+  half in `policy-rules.ts`). Owns `evaluate` / `evaluateAuto` /
+  `evaluateStack` / `inferToolTier` / `hardDenyReason` — the four call surfaces
+  the admissibility gate composes per-action. Pipeline: (1) HARD_DENY
+  deny-by-default baseline runs first (description-only surfacing of
+  matched rules — verbatim patterns are NEVER exposed past the slice to
+  defeat jailbreak-crafter enumeration); (2) inferred HITL tier overlays
+  (`inferToolTier` secure-by-default fallback per ADR-0070); (3)
+  per-thread + per-host store consultation (`threadAllowsMutation` /
+  `hostAllowsMutation`); (4) auto-mode classifier port consulted when
+  applicable. The legacy `bash`-only shellCommand back-compat probe is gated
+  to `bash` so it cannot widen the gate; modern callers populate
+  `action.shellCommand` via `ToolRegistry.extractShellCommand`. Slice rule:
+  pure module — no `@/agent`, no `@/llm`; the LLM-backed classifier impl is
+  injected via `PermissionContext.classify`.
+evidence:
+  code:
+    - src/permission/policy.ts
+    - src/permission/policy-rules.ts
+    - src/permission/per-host-mode.ts
+    - src/permission/per-thread-store.ts
+  adrs: [29, 70]
+  tests:
+    unit:
+      - tests/unit/admissibility-gate.test.ts
+      - tests/unit/admissibility-hellgate.test.ts
+    integration:
+      - tests/integration/admissibility-deny-steer-hell.test.ts
+      - tests/integration/hard-deny-mid-multitool-hell-e2e.test.ts
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: 'SECURITY: this entry references the HARD_DENY 9-rule baseline at descriptor-level only. No verbatim regex patterns, no jailbreak-crafter enumeration aid — the description-only invariant of the inspector surface is mirrored here.'

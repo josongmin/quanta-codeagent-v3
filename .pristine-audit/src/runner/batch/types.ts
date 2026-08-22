@@ -1,0 +1,556 @@
+/**
+ * Bench domain types — SWE-bench-style harness + Best-of-N sampler.
+ *
+ * This is an app-composition concern (RFC §4 apps/bench, §13 Q4): the bench
+ * app assembles existing slices, it does not introduce a new slice. Types here
+ * are local to the app and intentionally minimal.
+ */
+
+import type { StopReason } from "@/agent"
+import type { LocalEnvSelection } from "@/runtime"
+import type { LspGroundingStatus } from "@/shared"
+import type { ReproViabilityReview } from "./eval/repro-viability"
+import type { ReceiptEvidence, ScoreLabel } from "./eval/score-label"
+import type { SubmissionReview } from "./eval/submission-review"
+
+/** Official SWE-bench instance metadata, present only for instances loaded
+ *  from the real `swebench.verified` corpus. Consumed by the optional Python
+ *  harness verifier (python-swebench.ts) — the local testCmd path ignores it. */
+export interface SwebenchMeta {
+  /** Upstream SWE-bench instance id, e.g. `astropy__astropy-12907`. */
+  instanceId: string
+  /** `org/name` GitHub slug, e.g. `astropy/astropy`. */
+  repo: string
+  /** Commit the buggy repo is checked out at. */
+  baseCommit: string
+  /** Commit whose env defines the test toolchain (optional upstream). */
+  environmentSetupCommit?: string
+  /** SWE-bench `version` (e.g. django "5.0", scikit-learn "0.20"). Selects the
+   *  CPython minor for the per-instance repro/test env via
+   *  {@link pythonForRepoVersion} — a single static per-repo python is WRONG
+   *  because one repo spans versions needing different pythons (RCA jun-20).
+   *  Absent ⇒ the per-repo high fallback is used. */
+  version?: string
+  /** EVAL-ONLY — the official PASS_TO_PASS regression set (tests that already
+   *  pass on the buggy tree and must keep passing). Threaded for the
+   *  verify-and-select regression oracle (TB): the bench adapter supplies these
+   *  ids to {@link makeBenchRegressionOracle} so a candidate that breaks one is
+   *  inadmissible. NEVER handed to the agent loop — same eval-only boundary as
+   *  the closure oracle's gold files. Absent ⇒ regression signal FAIL-OPEN. */
+  passToPass?: readonly string[]
+  /** Pro only (RFC jun-29) — the prebuilt Scale image tag (`jefzda/sweap-images:<tag>`).
+   *  The official Pro verifier resolves its own image from the raw sample CSV; our repro/issue-
+   *  smoke rails consume this field to run Python repros INSIDE that same prebuilt image instead
+   *  of the host uv env. Absent for Verified/Live (additive ⇒ byte-identical when omitted). */
+  dockerhubTag?: string
+  /** Pro only — `repo_language` (python|go|js|ts…). Consumed at synthesize-time to fence
+   *  non-Python repos from a fake pytest grade ({@link synthesizeTestCmd}); also available
+   *  for a per-language report breakdown. Absent for Verified/Live. */
+  repoLanguage?: string
+  /** Pro only — public test-file / suite selection from `selected_test_files_to_run`.
+   *  EVAL-ONLY: may synthesize a repo-local verifier for non-Python Pro instances,
+   *  but MUST NOT be routed into prompt/localization surfaces. */
+  selectedTestFilesToRun?: readonly string[]
+}
+
+/** A single SWE-bench-style task. `repoPath` is treated as read-only: the
+ *  runner copies it into a sandbox before the agent touches anything. */
+export interface Instance {
+  id: string
+  /** Path to a checked-out repo with the bug present. Never mutated. */
+  repoPath: string
+  /** Natural-language task handed to the agent verbatim. */
+  problemStatement: string
+  /** Optional one-time setup (deps, build) run inside the sandbox copy. */
+  setupCmd?: string
+  /** Declared command environment applied to agent shell tools and bench execs. */
+  localEnv?: LocalEnvSelection
+  /** Command whose exit code 0 == resolved. Run inside the sandbox copy. */
+  testCmd: string
+  /** Reference patch (informational; not applied by the TS harness). */
+  goldPatch?: string
+  /** Present only for real `swebench.verified` instances — enables the
+   *  optional official Python harness verifier. */
+  swebench?: SwebenchMeta
+}
+
+/** Token usage rolled up for one instance (RFC-0002 §5.3, cost derivation).
+ *  The cache buckets mirror the stream-level `usage` event so the report SSOT
+ *  is non-lossy: OpenAI cached-input discounts and Anthropic cache-read/-write
+ *  accounting can be derived from `report.json` alone. Cache fields are OMITTED
+ *  (not zero-filled) when the run reported no cache activity. */
+export interface InstanceUsage {
+  model: string
+  inputTokens: number
+  outputTokens: number
+  /** Cache-READ (cached prompt) tokens. OpenAI: SUBSET of inputTokens.
+   *  Anthropic: DISJOINT additive bucket. See @/observability/pricing costUsd. */
+  cacheReadTokens?: number
+  /** Cache-CREATION (cache write) tokens. Anthropic-only today; preserved for
+   *  fidelity even though `costUsd` does not yet price it. */
+  cacheCreationTokens?: number
+}
+
+export type BenchReproTestReason =
+  | "disabled"
+  | "empty_problem"
+  | "unsupported_language"
+  | "generation_failed"
+  | "generation_empty"
+  | "execution_failed"
+  | "no_reproduced_candidate"
+  | "write_failed"
+  | "not_installed"
+
+/** jun-29 grounding engagement (observe-only). Present ONLY when the
+ *  `reproGrounding` knob was on, so the A/B can distinguish "grounding injected N
+ *  skeletons" from "grounding ran but the lexical inference whiffed (engaged=false)"
+ *  — the silent-no-op confound the measurement would otherwise hide. Absent ⇒
+ *  grounding was off (byte-identical telemetry). */
+export interface ReproGroundingTelemetry {
+  readonly engaged: boolean
+  readonly exemplars: number
+  readonly signatures: number
+}
+
+export type BenchReproTestTelemetry =
+  | {
+      installed: true
+      path: string
+      samples: number
+      reproducedCount: number
+      grounding?: ReproGroundingTelemetry
+    }
+  | {
+      installed: false
+      reason: BenchReproTestReason
+      samples?: number
+      reproducedCount?: number
+      grounding?: ReproGroundingTelemetry
+      /** jun-18 DIAGNOSTIC (observe-only): per-sample outcome classification +
+       *  a tail of the first sample's stdout. Surfaces WHY base-red reproduction
+       *  is 0% (all `resolved` ⇒ LLM repro doesn't detect on base; `exec_failed`/
+       *  `other` ⇒ script crashed e.g. import error; `unknown` ⇒ no marker). */
+      sampleOutcomes?: readonly string[]
+      sampleStdoutTail?: string
+      /** jun-18 DIAGNOSTIC: tail of the first sample's stderr. Attributes an
+       *  `exec_failed` outcome — ModuleNotFoundError ⇒ project not importable in
+       *  the box's python (env-shape bug, not a script bug); SyntaxError ⇒ bad
+       *  LLM script; empty ⇒ timeout. */
+      sampleStderrTail?: string
+    }
+
+/**
+ * Per-instance grading breakdown — the "WHY did it fail" diagnostic the summary
+ * `resolved` boolean discards. EVAL-ONLY (from the official harness output).
+ * Separates the two failure modes a single `resolved:false` conflates:
+ *   - `passToPassFailed > 0` ⇒ the patch BROKE an existing test (a REGRESSION) —
+ *     the failure a regression gate / verify-and-select can address.
+ *   - `passToPassFailed === 0 ∧ failToPassFailed > 0` ⇒ the patch did NOT fix the
+ *     target (no regression) — only better localization/generation can help.
+ */
+export interface GradeBreakdown {
+  resolved: boolean
+  failToPassFailed: number
+  passToPassFailed: number
+  passToPassTotal: number
+  /** Count of FAIL_TO_PASS+PASS_TO_PASS ids the harness listed as failures that were actually
+   *  TRUNCATED/non-existent test ids (upstream dataset corruption — a parametrized id cut
+   *  mid-parameter that pytest cannot collect). Excluded from `*Failed` and from `resolved` since
+   *  a test that cannot be collected is neither pass nor fail. Present only when >0 (observability:
+   *  `resolved` may have been upgraded vs the harness's raw verdict because of these). */
+  truncatedExcluded?: number
+}
+
+/**
+ * Repro-oracle gold calibration (EVAL-ONLY). Did the patched-resolved oracle
+ * recognize the GOLD reference fix as resolved? A `falseNegative` oracle says
+ * "not resolved" on a known-correct fix — so it would reject correct candidates,
+ * and a resolved gate built on it must FAIL-OPEN. `falseNegative` rate is the
+ * direct readout of the oracle's correctness (the verify-and-select bottleneck).
+ * See `repro-oracle-calibration.ts`.
+ */
+export interface ReproOracleCalibration {
+  goldCalibrated: boolean
+  falseNegative: boolean
+  available: boolean
+  goldVotes: number | null
+  goldK: number | null
+  /**
+   * P3 metamorphic non-vacuity (jun-23). The canonical resolved-probe run on the
+   * BASE (un-patched / buggy) tree. A SOUND oracle reports NOT-resolved here (the
+   * repro is RED — it reproduces the bug). `baseResolved=true` means the oracle
+   * reports GREEN without any fix ⇒ its "green" is meaningless. OPTIONAL: absent
+   * ⇒ no claim (treated as `false`), so pre-P3 constructors stay valid.
+   */
+  baseResolved?: boolean
+  /**
+   * `=== baseResolved` — the oracle is VACUOUS (would false-GREEN a wrong
+   * candidate). A vacuous oracle must NOT hold proof authority (the proof gate
+   * fails open on it, same as `falseNegative`). Separate field so the fail-open
+   * reason is legible in telemetry. OPTIONAL: absent ⇒ `false` (no fail-open).
+   */
+  vacuous?: boolean
+  baseVotes?: number | null
+  baseK?: number | null
+}
+
+export type SelectionTelemetry = import("./eval/selection-executor").SelectionTelemetry
+export type SelectionProofSummary = import("./eval/selection-executor").SelectionProofSummary
+export type SelectionProofState = import("./eval/selection-executor").SelectionProofState
+export type SelectionProofSource = import("./eval/selection-executor").SelectionProofSource
+export type PublicRegressionProofState =
+  import("./eval/repo-regression-discovery-adapter").PublicRegressionProofState
+export type ReproConsensusProofState =
+  import("./eval/repair/resolved-consensus").ReproConsensusProofState
+export type LlmEvidenceArtifacts = import("./eval/llm-evidence-packet").LlmEvidenceArtifacts
+export type ReproVoteOutcomeRecord = import("./eval/repair/repro-vote").ReproVoteOutcomeRecord
+export type RepairValidationDecision = import("./eval/repair/decision").ValidationDecision
+
+/**
+ * A5 — per-instance repro-vote outcome telemetry, drained from the module sink
+ * after the repair/selection rounds complete. Each `round` preserves the EXACT
+ * {@link ReproVoteOutcomeRecord} (outcome + optional tally), so an analyst can
+ * distinguish VOTE-DECIDED rounds (`vote_resolved` / `vote_unresolved` /
+ * `vote_inconclusive` — for which `primary_false_red_rate` is structurally
+ * suppressed; see the repro-vote.ts MEASUREMENT NOTE) from rounds DEFERRED to
+ * the legacy gate (`empty_sources` / `exec_failed`). The two are never
+ * collapsed. `tally` rolls up the per-outcome round counts for quick reading.
+ * The sink is RESET at instance start, so these counts never leak across
+ * instances. ABSENT ⇒ no repro-vote validator ran this instance (byte-identical
+ * report when the knob is off).
+ */
+export interface ReproVoteTelemetry {
+  readonly rounds: readonly ReproVoteOutcomeRecord[]
+  readonly tally: Readonly<Record<import("./eval/repair/repro-vote").ReproVoteOutcome, number>>
+}
+
+export interface AdaptiveRouteTelemetry {
+  outcome: import("./eval/adaptive-escalation").AdaptiveOutcome
+  steps: readonly import("./eval/adaptive-escalation").AdaptiveAction[]
+  reason?: string
+  finalAction?: import("./eval/adaptive-escalation").AdaptiveAction
+  finalWhy?: string
+  citedEvidenceIds?: readonly string[]
+  evidenceRevisions: readonly string[]
+}
+
+export interface OwnerWideningTelemetry {
+  owners: readonly string[]
+  sources: readonly ("repair_escalation" | "forward_localize")[]
+  path: "single_pass_followup" | "adaptive_reroute"
+}
+
+/** Outcome of running one instance once. */
+export interface InstanceResult {
+  id: string
+  passed: boolean
+  /** Unified diff of the sandbox after the agent ran ("" if no change). */
+  patch: string
+  /** Agent turns consumed. */
+  turns: number
+  /** Typed terminal agent stop authority when the main loop reached a terminal
+   *  verdict. Omitted for harness/env failures outside the agent loop. */
+  stopReason?: StopReason
+  /** Present only on a harness-level failure (setup crash, timeout, etc.). */
+  error?: string
+  /**
+   * Observation verdict (RFC-0002 §3/§8/§12). `"degraded"` ⇒ the trajectory
+   * recorder failed under strict (eval) mode; `"env_prep_failed"` ⇒ T4
+   * harness env pre-prep (setupCmd) failed BEFORE the agent ran;
+   * `"grader_invalid"` ⇒ the selected verifier rejected the reference patch,
+   * so the instance is not a fair measurement item. All non-`"ok"` verdicts are
+   * EXCLUDED from `resolved/total` (the agent never got a fair shot). Absent
+   * ⇒ `"ok"` (default-off runs never set this, preserving byte-identical
+   * behavior).
+   */
+  verdict?: "ok" | "degraded" | "env_prep_failed" | "grader_invalid"
+  /** Solvability oracle (RFC jun-29): did the GOLD patch resolve under the selected verifier?
+   *  `true` = instance is solvable + verifier-sound (safe to benchmark); `false` = gold itself
+   *  failed ⇒ the instance's verifier/env is broken (a measurement artifact, NOT model
+   *  difficulty — see geopandas Live). `undefined` = gold-sanity didn't run for this instance
+   *  (e.g. the model PASSED, so it's trivially solvable). Populated by the gold-sanity gate. */
+  goldResolved?: boolean
+  /**
+   * Bench-side admission block (distinct from observation `verdict`). Present
+   * when the runner intentionally refuses to submit a generated patch, e.g.
+   * `patch-budget-strict`. Unlike `verdict`, this still counts as a fair run in
+   * resolved/total; it is a measured policy decision, not an infra exclusion.
+   */
+  admissionBlock?: import("./admission").AdmissionBlock
+  /** Absolute path of the captured `.patch` file (only when observing). */
+  patchPath?: string
+  /** Absolute path of the per-instance repro artifact directory (only when the
+   *  repro artifact sink was bound). */
+  reproArtifactPath?: string
+  /** Wall-clock instance duration in ms (only when observing). */
+  durationMs?: number
+  /** Rolled-up token usage (only when observing and the LLM reported it). */
+  usage?: InstanceUsage
+  /**
+   * Per-instance transient-retry budget (measurement-stability slice).
+   * ABSENT (default) ⇒ the retry loop did not run (byte-identical path);
+   * the report.json omits the field entirely. PRESENT ⇒ the driver ran the
+   * transient-retry loop and is recording the per-attempt history for
+   * after-the-fact analysis. `adaptedTimeoutMs` always equals `baseTimeoutMs`
+   * (knob `costMultiplier` is a matrix-budget construct, never a wall-clock
+   * multiplier).
+   *
+   * `attempts === 1` and `attemptOutcomes.length === 1` is the standard
+   * single-pass posture (no retry consumed). `baseTimeoutMs === adaptedTimeoutMs`
+   * means no knob raised the budget — byte-identical to the pre-feature wall-clock.
+   */
+  budget?: BenchInstanceBudget
+  /** Agentless repro-test generation/install telemetry. Omitted when the
+   *  repro-test knob is off; present when the driver attempted the pipeline. */
+  reproTest?: BenchReproTestTelemetry
+  /**
+   * T-202 — repo-relative path of the FIRST mutating edit observed on the
+   * stream (not the final diff). Populated by the bench driver's first-edit
+   * stream tap; ABSENT (default) ⇒ byte-identical report. Consumed offline by
+   * the closure-diagnostics sidecar for `first_edit_owner_match`.
+   */
+  firstEditFile?: string
+  /**
+   * F6 — count of file-mutating tool_calls across the run (the #10914 churn
+   * signal: many edits without resolution). Stream-tap populated, observe-only.
+   */
+  editCount?: number
+  /**
+   * F6 — 1-based turn index of the first mutating edit (localize latency: how
+   * long the agent explored before committing to a file). Observe-only.
+   */
+  turnsToFirstEdit?: number
+  /**
+   * T-3 closure measurement (observe-only, knob-gated ⇒ byte-identical when off).
+   * `primaryRailPresent`: a typed primary rail was selected for this run.
+   * `requiredVerificationCovered`: the VerificationPlan has ≥1 required step
+   * carrying a typed successPredicate. Consumed offline by closure-diagnostics for
+   * `primary_rail_present_rate` / `required_verification_coverage`.
+   */
+  primaryRailPresent?: boolean
+  requiredVerificationCovered?: boolean
+  /**
+   * LSP-02 — typed strict-admission LSP-grounding status (jun-23 stability proof).
+   * The folded {@link LspGroundingStatus} the strict gate decided on (launch +
+   * ready outcomes). Present only for presets that require live grounding; absent
+   * ⇒ byte-identical report. The SAME typed shape is rendered by `bench box ls`
+   * and a degraded verdict line, so RCA reads a status enum instead of a log tail.
+   */
+  lspGrounding?: LspGroundingStatus
+  /**
+   * T-3 OBSERVE-ONLY — the repair round that cleared (ok by exit code) had a typed
+   * rail predicate that was evaluable AND mismatched: the `primary_false_green`
+   * the predicate-aware gate (T-4) would have caught. Repair path only; absent ⇒
+   * null (metric unavailable). Quantifies the value of turning the predicate into
+   * a hard gate WITHOUT yet doing so (observe-first).
+   */
+  primaryFalseGreen?: boolean
+  /**
+   * jun-18 RCA OBSERVE-ONLY — a repair round's rail (exit-code) rejected a patch
+   * the repro's OWN sentinel reports as resolved (false-RED). Drives
+   * `primary_false_red_rate`: if high, the validator must gate on the repro
+   * sentinel (its Agentless contract), not the incidental exit code — the
+   * suspected cause of repair's wasteful churn (46→131 turns, 9→7). Repair only;
+   * absent ⇒ null.
+   */
+  primaryFalseRed?: boolean
+  /**
+   * T-4 OBSERVE-ONLY — the gate decision was verify-first (true) vs commit-now
+   * (false), computed from public signals. Drives `gate_enter_rate`. By default it
+   * is telemetry-only; when the `primaryRail` closure path is enabled, the same
+   * decision also chooses single-pass vs verify-first repair. Absent ⇒ null.
+   */
+  gateEntered?: boolean
+  /**
+   * T-4 OBSERVE-ONLY — the gate took the commit-now path instead of verify-first.
+   * Drives `gate_bypass_rate`. Absent ⇒ null.
+   */
+  gateBypassed?: boolean
+  /**
+   * T-4/T-301 — number of repair/verify rounds actually consumed when the
+   * verify-first path ran. Absent ⇒ null.
+   */
+  verifyRounds?: number
+  /**
+   * T-3/T-4 — the selected repro rail reproduced the bug on the unpatched base.
+   * Offline-only measurement for `synth_repro_base_red_rate`.
+   */
+  synthReproBaseRed?: boolean
+  /**
+   * jun-30 SOTA++ — which acceptance rerank tier chose the submitted patch
+   * (`repro_and_regression` | `regression_only` | `all_patches` | `none`). Set only
+   * when the `acceptance` opt-in routed selection through the ladder; absent on
+   * legacy validator-rank (byte-identical). Drives `acceptance_tier_distribution` —
+   * `all_patches` dominance means the oracle gave NO real selection signal (the
+   * thin-oracle inert case the synthesis arm must detect before trusting a delta).
+   */
+  acceptanceTier?: import("./eval/acceptance-rerank").RerankTier
+  /**
+   * T-6 — patch touched files outside the admitted owner set. Telemetry-first:
+   * exact diff fact only, never a semantic width judgment.
+   */
+  outOfScopeFiles?: boolean
+  /**
+   * T-401 — deterministic PatchHygieneReport over the final cumulative diff
+   * (stray added files, owner-outside, file count). Computed only when the
+   * `patch-hygiene` knob is on AND observing; ABSENT ⇒ byte-identical report.
+   * Consumed offline by the closure-diagnostics sidecar (stray_file_rate /
+   * out_of_scope_file_rate). Telemetry-first: emitting the report does NOT gate
+   * the run — the deny path is a later measure-first step.
+   */
+  patchHygiene?: import("./eval/patch-hygiene").PatchHygieneReport
+  /**
+   * jun-19 — typed PatchBudget over the final diff (source/new-file/new-def/
+   * cross-file vs owner). Emitted when the `patch-budget` knob is on AND observing;
+   * ABSENT ⇒ byte-identical. Drives over_budget_rate / new_def_rate / cross_file_rate
+   * (the #13417 over-engineer A/B). In observe-only mode,
+   * `withinBudget:false ⇒ escalate`; in strict mode the runner also blocks the
+   * over-budget patch from official submission and returns an empty patch.
+   */
+  patchBudget?: import("@/agent/patch-budget").PatchBudgetVerdict
+  /** jun-19 — official-grade regression-vs-didn't-fix breakdown (eval-only).
+   *  Present only for swebench instances graded by the Python harness; absent
+   *  ⇒ byte-identical report. Lets a campaign run self-measure how often our
+   *  patches break PASS_TO_PASS (the regression-gate justification) with NO
+   *  extra runs — see {@link GradeBreakdown}. */
+  gradeBreakdown?: GradeBreakdown
+  /** jun-20 — repro-oracle gold calibration (eval-only). Present only on a
+   *  verify-select run with a gold patch; absent ⇒ byte-identical. Lets a
+   *  campaign self-measure the resolved-oracle false-negative rate (the
+   *  verify-and-select bottleneck) with NO extra runs — see {@link
+   *  ReproOracleCalibration}. */
+  reproOracleCalibration?: ReproOracleCalibration
+  /** jun-20 — compact verify-select telemetry (eval-only). Present only on a
+   *  verify-select run; absent ⇒ byte-identical. Captures which candidate fix
+   *  sites were generated, which were admissible, and why the winner won, so a
+   *  campaign can diagnose selection without re-reading the trajectory. */
+  selectionTelemetry?: SelectionTelemetry
+  /**
+   * Honest score claim for PASSING receipts only. `official_harness` is the
+   * only label that may feed clean leaderboard-resolved counts; the weaker
+   * labels stay visible for RCA/reporting but must not be promoted.
+   */
+  scoreLabel?: ScoreLabel
+  /** Executed evidence underlying {@link scoreLabel}. Present only when
+   *  {@link scoreLabel} is present. */
+  scoreEvidence?: ReceiptEvidence
+  /**
+   * T-301 — the typed VerificationPlan computed for this run (primaryRail +
+   * required/optional steps + per-step successPredicate). Emitted only when the
+   * `verification-plan` knob is on AND observing; ABSENT ⇒ byte-identical report.
+   * Consumed offline by closure-diagnostics (primary_rail_present_rate /
+   * success_predicate_present_rate). Telemetry-only — does not gate the run.
+   */
+  verificationPlan?: import("@/agent/verification-plan").VerificationPlan
+  /**
+   * T-201 — FaultEvidencePacket built from the agentless localizer's ranked
+   * candidates (same pass, no extra LLM call). Emitted only when the
+   * `fault-evidence` knob is on AND observing; ABSENT ⇒ byte-identical. Consumed
+   * offline by closure-diagnostics for owner_recall@1/@3 (compared to gold owner
+   * OFFLINE — no runtime leak). Telemetry-only.
+   */
+  faultEvidence?: import("@/agent/fault-evidence").FaultEvidencePacket
+  /**
+   * T-202 — OwnerAdmission decision over the FaultEvidencePacket (admit / sibling
+   * coverage expectation). Emitted only when the `owner-admission` knob is on AND
+   * observing. Feeds sibling_coverage_expected_rate / miss_rate. Telemetry-only.
+   */
+  ownerAdmission?: import("@/agent/owner-admission").OwnerAdmission
+  /**
+   * OPC-07 — typed LLM evidence packets recorded for report-only RCA surfaces.
+   * Advisory only: these packets may explain intake / deterministic selection,
+   * but they never alter submit authority.
+   */
+  llmEvidence?: LlmEvidenceArtifacts
+  /** v5 adaptive-controller trace: which routed phases ran, what terminal
+   *  action was chosen, and which packet revisions the router actually saw. */
+  adaptiveRoute?: AdaptiveRouteTelemetry
+  /** Structural owner-widening actually consumed by a rerun/reroute. Present
+   *  only when a bounded follow-up prepare/run pass was armed with additional
+   *  owner files (repair-escalation and/or forward-localize). */
+  ownerWidening?: OwnerWideningTelemetry
+  /** #6 submit-review verdict over the final captured patch (clean / empty /
+   *  test-edits). Present only when `QUANTA_BENCH_SUBMIT_REVIEW` is on (observe-
+   *  only; the test-revert itself is unconditional via `sourceOnlyDiff`). */
+  submissionReview?: SubmissionReview
+  /** Spec step-5 repro-viability review (QUANTA_BENCH_REPRO_VIABILITY): observe-only
+   *  fix-free viability label over the final patch vs the actual reproducing test
+   *  source. Present only when the knob is on (telemetry only; ABSENT ⇒ byte-identical). */
+  reproViabilityReview?: ReproViabilityReview
+  /**
+   * A5 — repro-vote outcome telemetry drained from the module sink after the
+   * repair/selection rounds finish. Present only when a repro-vote validator
+   * actually recorded ≥1 round this instance (knob on AND a reproducing set
+   * existed); ABSENT ⇒ byte-identical report. See {@link ReproVoteTelemetry}:
+   * vote-decided vs legacy-deferred rounds stay distinguishable, and the sink
+   * is reset per-instance so counts never accumulate across instances.
+   */
+  reproVoteOutcomes?: ReproVoteTelemetry
+  /** jun-28 A2 — final repair-gate authority decision. Observe-only: shows
+   *  canonical-sidecar proof vs legacy verify-cmd/inconclusive/missing oracle. */
+  repairValidationDecision?: RepairValidationDecision
+  /**
+   * T-601 — RepairEscalationDecision (escalate to multi-owner / branch-search,
+   * with a structured reason). When the `repair-escalation` knob is on, the SAME
+   * decision may feed one bounded follow-up localization/retry pass (non-adaptive)
+   * or the adaptive reroute's next prepare pass; this field mirrors the typed
+   * final-phase decision onto the report. ABSENT ⇒ byte-identical.
+   */
+  repairEscalation?: import("@/agent/repair-escalation").EscalationDecision
+}
+
+/** Structured per-attempt outcome shape echoed onto the report. Mirrors the
+ *  `AttemptOutcome` union in `runner/batch/eval/retry-policy.ts` but lives
+ *  here so consumers of `InstanceResult` don't need to import the eval
+ *  sub-slice. Keeping it pure-data (no methods) preserves the JSON-serialise
+ *  round-trip used by `writeReport`. */
+export type BenchAttemptOutcome =
+  | { kind: "pass" }
+  | { kind: "empty-patch"; reason?: string }
+  | {
+      kind: "admission-blocked"
+      source: import("./admission").AdmissionBlock["kind"]
+      reason: string
+    }
+  | { kind: "generation-fail"; reason: string }
+  | { kind: "grader-invalid"; reason: string }
+  | { kind: "timeout" }
+  | {
+      kind: "real-fail"
+      subkind:
+        | "completed_unresolved"
+        | "verify_loop_stuck"
+        | "max_turns_exhausted"
+        | "budget_exhausted"
+    }
+  | { kind: "infra-fail"; reason: string }
+
+export interface BenchInstanceBudget {
+  /** `deps.timeoutMs` as passed by the caller (pre-adaptation). */
+  baseTimeoutMs: number
+  /** The per-attempt deadline actually used. Always equals `baseTimeoutMs` —
+   *  knob `costMultiplier` is a matrix-budget construct, never a wall-clock
+   *  multiplier. Retained for the report shape. */
+  adaptedTimeoutMs: number
+  /** Number of attempts actually consumed (1 = no retry). */
+  attempts: number
+  /** Per-attempt classified outcomes (length === attempts). */
+  attemptOutcomes: BenchAttemptOutcome[]
+}
+
+/** One Best-of-N trajectory result. Generic so the sampler stays reusable. */
+export interface Attempt {
+  index: number
+  /** Raw result, or undefined when the attempt threw. */
+  result?: InstanceResult
+  /** Set when the attempt threw; result is then undefined. */
+  error?: string
+}
+
+/** Aggregate summary printed by the CLI. */
+export interface BenchSummary {
+  total: number
+  resolved: number
+  results: InstanceResult[]
+}

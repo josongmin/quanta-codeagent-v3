@@ -1,0 +1,74 @@
+id: subagent-model-override
+title: Per-subagent model / role / effort override
+section: 1
+subsystem: 에이전트 코어 — subagent spawn 모델 배선 (Cursor SubagentModelOverride 흡수)
+order: 451
+maturity: L4
+status: new
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [interactive, headless, batch, daemon, ide, ci-bot]
+configurable: partial
+owners: ["@songmin"]
+labels: ["absorbed:cursor", "surface:core", "tier:core"]
+depends_on: [agent, guarded-spawn]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 3/3 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "internal subagent spawn config wiring via the agent tool input schema; no browser affordance and no SessionCommand verb to set it (B3)"
+purpose: |
+  A parent can assign a specific model and/or dispatch role and/or effort tier to
+  a child it spawns via the `agent` tool (Cursor SubagentModelOverride: a planner
+  on a deep-reasoning model delegating edits to a fast minimal-diff model). Threaded
+  end-to-end: (1) SubagentRequest gains optional model?/role?/effort? (plain strings —
+  the @/subagent slice owns no Role/EffortLevel enum, mirroring the TaskKind
+  precedent); (2) the `agent` tool input schema exposes model (string) / role
+  (string) / effort (enum default|low|medium|high|max), buildRequest omitting each
+  when absent; (3) buildChildConfig resolves the child's effective LLM port —
+  explicit req.model wins, else req.role via parent.roleModelResolver (ADR-0256),
+  else parent.llm — and swaps the port via the EXISTING modelCandidates id→port
+  lookup (the same mechanism loop.ts skill-model-swap uses, resolveSkillTurnOverride
+  ~L491). effort is wired as the child's sessionEffort() thunk (the same seam the
+  loop reads to cap the thinking budget via effortToTokenBudget). NO new model
+  registry is introduced. FAIL-CLOSED: an explicit/role-resolved model id with no
+  matching candidate throws UnknownSubagentModelError (child loop never forked on
+  the wrong model); the runner's callers turn it into a recoverable deny /
+  registry.fail — no crash, no silent fallback. DEFAULT-OFF: absent all three ⇒
+  child.llm === parent.llm (reference-identical) + no sessionEffort wired
+  (byte-identical to pre-0451).
+evidence:
+  code:
+    - src/subagent/types.ts
+    - src/subagent/agent-tool.ts
+    - src/agent/subagent-runner.ts
+  adrs: [451, 256, 65]
+  tests:
+    unit:
+      - tests/unit/subagent-model-override-hellgate.test.ts
+    integration: []
+    contract: []
+knobs:
+  - name: agent tool input `model`
+    default: 'undefined'
+    purpose: 'absent ⇒ child inherits parent model (byte-identical); set ⇒ swap child LLM port to that modelCandidates entry; unknown id ⇒ fail-closed'
+  - name: agent tool input `role`
+    default: 'undefined'
+    purpose: 'absent ⇒ no role resolution; set ⇒ roleModelResolver.resolve(role, parentModel) then swap; lower precedence than model; non-candidate resolve ⇒ fail-closed'
+  - name: agent tool input `effort`
+    default: 'undefined'
+    purpose: 'absent ⇒ child inherits parent effort (byte-identical); set (named tier) ⇒ child sessionEffort caps thinking budget via effortToTokenBudget'
+deliberate_hold: null
+notes: |
+  Reuse-only by design: the id→port swap reuses modelCandidates (skill-model-swap
+  mechanism), role resolution reuses the ADR-0256 RoleModelResolver, effort reuses
+  sessionEffort + effortToTokenBudget. Slice isolation preserved — @/subagent still
+  reaches only @/tool/@/shared; all interpretation (string→Role via the resolver's
+  type-erased contract, string→EffortLevel via parseEffort, id→port via
+  modelCandidates) happens agent-side in subagent-runner.ts. Fail-closed (vs the
+  skill path's advisory degrade) is intentional: a delegation boundary that names a
+  model is expressing intent; running the child on the wrong model would mask a
+  misconfiguration.

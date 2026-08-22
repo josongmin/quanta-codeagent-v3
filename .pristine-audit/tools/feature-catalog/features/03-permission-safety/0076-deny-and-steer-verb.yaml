@@ -1,0 +1,67 @@
+id: deny-and-steer-verb
+title: ConfirmDecision deny_and_steer verb — typed third option with steer injection
+section: 3
+subsystem: 권한 게이트 — 3-verb ConfirmDecision (Gap-4 of ADR-0076)
+order: 76
+maturity: L4
+status: stable
+ui_surfaces: [n-a]
+monitoring: n-a
+telemetry_keys: ["quanta.hitl"]
+modes: [interactive, headless, batch, daemon, ide, ci-bot]
+configurable: static
+owners: ["@songmin"]
+labels: [surface:cli, held-promotion]
+depends_on: [agent-loop-branch-hardening, refusal-stop-reason, llm-assemble]
+config_refs:
+  env: []
+surface_integration:
+  cli: full
+  web: full
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 3/3 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "The web EscalationCard maps the deny_and_steer verb (apps/web-frontend/src/components/EscalationCard.tsx) and protocol.ts ApprovalRespondCommand carries the steer field, so the host-redirect verb fully reaches the browser approval card."
+purpose: |
+  Gap-4 of the `agent-loop-branch-hardening` umbrella (ADR-0076). Adds a
+  third verb to host confirmation — beyond `allow` / `deny`, the host can
+  now return `{kind:"deny_and_steer", steer:string}` so a denial carries a
+  redirect message back to the model in the same envelope. Companion
+  Gap-1 (refusal-stop-reason) is already separately catalogued; Gap-2
+  thinking carry-over lives in `llm-assemble`; this entry is the third
+  major decomposable Gap. Bridge: `normalizeConfirm` accepts the legacy
+  boolean shape and the new discriminated `ConfirmDecision` union, so
+  existing callers stay byte-identical. The admissibility-gate's
+  always-confirm branch emits a `deny` DispatchResult on `deny_and_steer`
+  and attaches the steer text to the result envelope as
+  `steerInjection?:string`. Partial-wiring guard (G-1~G-1d) pins the
+  loop-consumer wiring as a separate follow-up — file-grep regression
+  pins force any wiring PR to consciously update the guard.
+evidence:
+  code:
+    - src/agent/confirm-decision.ts
+    - src/agent/admissibility-gate.ts
+    - src/agent/dispatch-types.ts
+  adrs: [76]
+  tests:
+    unit:
+      - tests/unit/agent/confirm-decision.test.ts
+      - tests/unit/agent/confirm-decision-hell.test.ts
+      - tests/unit/admissibility-gate.test.ts
+    integration:
+      - tests/integration/admissibility-deny-steer.test.ts
+      - tests/integration/admissibility-deny-steer-hell.test.ts
+    contract: []
+knobs: []
+deliberate_hold:
+  reason: 'Loop consumer for `steerInjection` is not yet wired into the next-turn prompt — the field is emitted on DispatchResult but the agent loop does not yet fold it into the model input. The 4 partial-wiring file-grep guards pin this state explicitly.'
+  promotion_path: 'When the loop consumer lands (one-liner fold into the next prompt), update the G-1~G-1d guards consciously and the entry can promote to L5.'
+notes: |
+  Sub-feature of `agent-loop-branch-hardening` umbrella — separately
+  catalogued because deny_and_steer is the only one of the 4 hardening
+  gaps that introduces a new typed verb (others are stop-reason
+  classifications / event accumulation rules). It owns the
+  prototype-pollution narrow-to-deny hellgate (55 hell cases) and the
+  admissibility-deny-steer integration battery, and it has a distinct
+  user-facing capability (host can redirect a denied tool call).

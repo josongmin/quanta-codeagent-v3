@@ -1,0 +1,55 @@
+id: scheduler-rrule
+title: ADR-0161 RRULE parser (RFC 5545 strict subset)
+section: 9
+subsystem: Scheduler / scheduled agent (ADR-0161)
+order: 161
+maturity: L4
+status: stable
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [n-a]
+configurable: integrated
+
+owners: ["@songmin"]
+labels: ["surface:cli"]
+depends_on: [scheduler-automation-lifecycle, scheduler-model-reroute, scheduler-runtime, scheduler-weekday-nth]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 3/3 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "pure internal RFC 5545 RRULE parser/serializer primitive; no UI affordance on any surface"
+purpose: |
+  `parseRRule(s)` / `serializeRRule(rule)` implement a strict RFC 5545
+  §3.3.10 BASIC RECUR rule subset (`FREQ=DAILY|WEEKLY|MONTHLY` + optional
+  `INTERVAL` / `COUNT` / `UNTIL` / `BYDAY` / `BYMONTHDAY`). HOURLY /
+  MINUTELY / SECONDLY / YEARLY and the BYSETPOS / BYWEEKNO / BYYEARDAY
+  superset are intentionally out of scope — Codex's `automation-schedule`
+  uses only DAILY / WEEKLY / MONTHLY in production.
+
+  Every rejection maps to one of the closed `RRuleParseErrorCode` arms
+  (`malformed` / `unsupported-freq` / `count-and-until` / `invalid-byday`)
+  so callers branch deterministically without prose parsing. The serializer
+  is idempotent — `serializeRRule(parseRRule(s)) === canonical(s)` (key
+  re-ordering, weekday upper-casing, no extra whitespace).
+evidence:
+  code:
+    - src/scheduler/types.ts
+    - src/scheduler/rrule-parser.ts
+    - src/scheduler/index.ts
+  adrs: ["docs/decisions/0161-scheduled-agent.md"]
+  tests:
+    unit:
+      - tests/unit/scheduler-rrule-parser-hellgate.test.ts
+      - tests/unit/scheduler-rrule-parser-hellgate.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  HOURLY / MINUTELY / SECONDLY / YEARLY can be added incrementally by
+  growing the `Frequency` union — parser is the only place that needs an
+  arm. The evaluator (`next-fire.ts`) switches on the same union so a new
+  arm forces a compile error there.

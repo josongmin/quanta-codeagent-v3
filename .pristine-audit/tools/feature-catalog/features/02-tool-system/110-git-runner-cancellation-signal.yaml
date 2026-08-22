@@ -1,0 +1,51 @@
+id: git-runner-cancellation-signal
+title: git runner — AbortSignal propagation kills spawned git on cancel
+section: 2
+subsystem: 도구 — git runner cancellation seam
+order: 110
+maturity: L4
+status: stable
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [n-a]
+configurable: n-a
+owners: ["@songmin"]
+labels: [surface:cli]
+depends_on: [git-runner-env-determinism, git-budget]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 3/3 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "pure internal cancellation seam (kills git child on abort, unhooks listener in finally); no user-visible affordance of its own"
+purpose: |
+  Distinct axis from the runner's wall-clock timeout (ADR-0105) and from
+  `GitBudget`'s deadline (ADR-0107): an optional caller-supplied `AbortSignal`
+  is forwarded through `GitRunner.run(args, cwd, signal?)` and into
+  `defaultGitRunner` so a cancelled tool call (loop abort, subagent cancel,
+  side-conversation budget exhaustion) IMMEDIATELY kills the spawned `git`
+  child instead of orphaning it for the full 30 s wall-clock. The abort
+  listener is unhooked in `finally` so an already-completed run never leaks a
+  reference into the parent AbortSignal's listener set — pre-aborted signals
+  short-circuit to a sync `proc.kill()` and never register a listener at all.
+  The `?` on the `signal` parameter preserves the fake-runner test surface
+  (callers without a signal still type-check). `safeRun` in `_shared.ts`
+  threads the signal through the boundary discriminated outcome, so every
+  read-only and mutating tool inherits cancellation for free.
+evidence:
+  code:
+    - src/tool/git/runner.ts
+    - src/tool/git/types.ts
+    - src/tool/git/_shared.ts
+  adrs: []
+  tests:
+    unit:
+      - tests/unit/git-tools.test.ts
+      - tests/unit/git-tools-hellgate.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: 'Companion to `git-budget` (ADR-0107 deadline) and `git-runner-env-determinism` (ADR-0105 30 s wall-clock). Three independent kill paths layered: parent abort → budget deadline → runner timeout; whichever fires first wins. Listener-leak avoidance: `removeEventListener` in `finally` + `{ once: true }` on registration.'

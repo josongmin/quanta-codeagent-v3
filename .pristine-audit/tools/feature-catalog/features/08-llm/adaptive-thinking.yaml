@@ -1,0 +1,75 @@
+id: adaptive-thinking
+title: Adaptive thinking — Anthropic `thinking:{type:"adaptive"}` (4.6+ self-paced reasoning)
+section: 8
+subsystem: LLM reasoning-mode — adaptive thinking (Anthropic 4.6+, RFC jun-6-adaptive-thinking)
+order: 278
+maturity: L3
+status: new
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [interactive, batch]
+configurable: integrated
+config_refs:
+  env: ['QUANTA_ADAPTIVE_THINKING']
+  runtime: ['adaptiveThinking']
+owners: ["@songmin"]
+labels: [absorbed:claude, surface:cli, category:llm, default-off]
+depends_on: [session-effort-wire]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 6/6 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "pure internal wire-shaper for the thinking field (adaptive vs manual budget); no user-visible affordance on any surface"
+purpose: |
+  quanta가 Anthropic extended-thinking을 manual-only로 보냄: effort/classifier가 token 예산을 계산해
+  `thinking:{type:"enabled", budget_tokens:N}`를 Messages wire에 박음 (`skill-gate.ts`
+  `applyEffortClassifierFloor` → `StreamInput.thinking` → `anthropic-messages-codec.ts`). cc-cli /
+  Anthropic API는 adaptive thinking (`thinking:{type:"adaptive"}`)을 ship — 모델이 요청별로
+  self-pace (Claude 4.6+: Opus 4.6/4.7/4.8, Sonnet 4.6), **manual `budget_tokens`는 4.7/4.8에서
+  hard 400**. quanta 기본 모델이 `claude-opus-4-8`이라 non-zero 예산이 박히는 순간 default 모델이
+  400 — 이건 latent live break repair이지 단순 SOTA++가 아님.
+
+  설계: PRODUCER(`skill-gate.ts`)에서 adaptive-vs-manual 결정, adapter/codec은 dumb wire-shaper로
+  유지. "think 할지" 신호는 `budgetTokens > 0` (effort-derived)로 불변 — adaptive는 SHAPE만 바꿈.
+  knob `QUANTA_ADAPTIVE_THINKING` (strict `=== "1"`, default-OFF byte-identical). model-family gate는
+  `factory.ts`의 `normalizeModelFamily`를 재사용한 `ADAPTIVE_THINKING_FAMILIES` +
+  `supportsAdaptiveThinking()` (1h-cache allowlist의 sibling, transport-agnostic — Bedrock/Vertex
+  slug도 같은 family로 collapse). 4.6+ family만 adaptive, 그 외(Sonnet 4.5 / Haiku 4.5 / 3.x /
+  unknown / absent slug)는 manual `budget_tokens`로 fall back (no 400). Codec은 SDK 0.40.1에
+  `ThinkingConfigAdaptive` 타입이 없어 `as Anthropic.ThinkingConfigParam` scoped cast (wire JSON
+  `{"type":"adaptive"}`은 정확; 컴파일 타입만 satisfy). OpenAI / Responses는 `StreamInput.thinking`을
+  안 읽으므로 영향 0 — H15 reasoning-carryover는 disjoint path로 그대로 assemble.
+
+  Default-OFF byte-identity: knob 미설정 시 모든 모델에 manual `{type:"enabled",budget_tokens}` —
+  기존 anthropic codec test + 신규 hellgate "knob-off byte-identical"로 증명.
+evidence:
+  code:
+    - src/llm/types.ts
+    - src/llm/factory.ts
+    - src/llm/index.ts
+    - src/llm/anthropic-messages-codec.ts
+    - src/agent/loop/skill-gate.ts
+    - src/shared/runtime-config.ts
+  adrs: [76, "docs/plans/jun-6-adaptive-thinking.md"]
+  tests:
+    unit:
+      - tests/unit/adaptive-thinking-hellgate.test.ts
+    integration: []
+    contract: []
+knobs:
+  - name: 'QUANTA_ADAPTIVE_THINKING'
+    where: 'runtime-config.ts → applyEffortClassifierFloor (skill-gate.ts)'
+    purpose: 'strict =1 opt-in; ON ⇒ {type:adaptive} for 4.6+ families, else manual budget; OFF ⇒ byte-identical manual budget'
+deliberate_hold: null
+notes: |
+  Family gate는 1h-cache allowlist와 의도적으로 다름: `claude-haiku-4-5`는 1h-cache set에는 있지만
+  adaptive set에는 없음 (haiku는 adaptive 미지원). SDK-cast 결정: `@anthropic-ai/sdk@0.40.1`은
+  `ThinkingConfigAdaptive` 타입이 없어 codec 단일 spread site에서 `as Anthropic.ThinkingConfigParam`
+  cast — wire bytes는 정확, 컴파일 타입만 satisfy (SDK bump이 깔끔하나 adapter의 hand-rolled RawEvent
+  narrow blast-radius 때문에 보류; RFC §8 open-question). `display:"summarized"` + `output_config.effort`
+  배선은 follow-up (RFC §8.3/§8.4). 18 hellgate 케이스 (family-gate 4 + producer-decision 9 + codec
+  wire 3 + provider-isolation 2). maturity L3: producer+codec+knob wired & tested이나 default-OFF +
+  composition-root live-flip은 미배선 (L4 overclaim 회피).

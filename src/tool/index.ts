@@ -913,7 +913,7 @@ const buildBaseDefaultTools = (ports: DefaultToolPorts): Tool[] => [
 export const defaultTools: Tool[] = buildDefaultTools()
 
 /**
- * The `terminal` ToolSurface registry (RFC jun-29, spec S2) — a terminal
+ * The `terminal` ToolSurface registry (TB21-06 TC-1a, spec S2) — a terminal
  * operator drives a live container terminal, so its tool set is the `pty_*` family ONLY and
  * deliberately does NOT inherit the BASE repo-edit/host-exec tools ({@link buildBaseDefaultTools}
  * = read/write/edit/apply_patch/bash/grep/test_runner…). Assembled by an EXPLICIT builder
@@ -952,8 +952,8 @@ export {
   type ToolSurface,
   type ToolSurfaceEntry,
 } from "./surface/manifest"
-// Capability guidance the terminal entry-point injects alongside the surface tools (RFC §4.5 /
-// §13 #5 — closes the #1 failure, exe-not-in-PATH). General operator habits, no answer-key.
+// Capability guidance the terminal entry-point injects alongside the surface tools (TB21-06 TC-3
+// — closes the #1 failure, exe-not-in-PATH). General operator habits, no answer-key.
 export {
   SELF_TEST_DISCIPLINE,
   TERMINAL_OPERATOR_GUIDE,

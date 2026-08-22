@@ -1,0 +1,96 @@
+id: chatgpt-oauth-provider
+title: ChatGPT-OAuth provider — BYOK 없이 구독계정으로 모델 호출 (ADR-0094 Phase 1)
+section: 9
+subsystem: Auth provider (ADR-0094)
+order: 11
+maturity: L4
+status: new
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [interactive, headless, batch, daemon, ide, ci-bot]
+configurable: integrated
+config_refs:
+  env: [QUANTA_OAUTH_ISSUER, QUANTA_OAUTH_CLIENT_ID, QUANTA_CHATGPT_API_BASE, QUANTA_OAUTH_SKU, QUANTA_OAUTH_ORIGINATOR]
+owners: ["@songmin"]
+labels: ["surface:core"]
+depends_on: [slice-auth-chatgpt-oauth, refresh-coordinator, token-store-atomic, built-in-slash-commands, slashctx-6-ports-wire-completion]
+surface_integration:
+  cli: full
+  web: full
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 15/16 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "Real web handlers: web-daemon /auth/login /auth/logout /auth/status (apps/web-daemon/auth-routes.ts) plus frontend slash-auth.ts; model selection via POST /config (QUANTA_MODEL)."
+purpose: |
+  ChatGPT Plus/Pro/Team 구독 계정으로 모델 호출 — BYOK(OPENAI_API_KEY) 없이 OAuth 토큰을
+  사용해 `https://chatgpt.com/backend-api/codex/responses`로 호출. BYOK provider와 형제로
+  공존 (토큰/엔드포인트/모델캐탈로그/빌링 분리). PKCE S256 + 32B random verifier,
+  authorize endpoint=auth.openai.com, 로컬 콜백 포트 1455→1457 fallback, /auth/callback,
+  10분 타임아웃. Token exchange + refresh in-flight 가드(Codex에 없는 추가 invariant).
+  토큰 저장 `~/.quanta/auth/chatgpt.json` 0600 (Phase 1; OS Keychain은 Phase 2).
+  Plan tier gate — JWT `chatgpt_plan_type=free` 즉시 거부 (/me 호출 없음). 헤더 5종 박힘:
+  `Authorization: Bearer`, `ChatGPT-Account-Id`, `OAI-Product-Sku=CODEX`, `originator`.
+  DEFAULT_CLIENT_ID=Codex 공개 OAuth app id verbatim → 사용자는 `/login` 한 줄.
+  LlmFactory 등록 + default-OFF (사용자 명시 선택 또는 토큰 존재 시만 활성).
+  CLI 슬래시 명령 `/login` + `/status`로 사용. 401/403은 typed `auth` LLMError —
+  retry/fallback 거부 (다른 provider로 자동 폴백 금지: 사용자 의도하지 않은 빌링 라인 차단).
+evidence:
+  code:
+    - src/auth/chatgpt-oauth/pkce.ts
+    - src/auth/chatgpt-oauth/browser-flow.ts
+    - src/auth/chatgpt-oauth/token-store.ts
+    - src/auth/chatgpt-oauth/refresh.ts
+    - src/auth/chatgpt-oauth/jwt.ts
+    - src/auth/chatgpt-oauth/config.ts
+    - src/auth/chatgpt-oauth/paths.ts
+    - src/auth/chatgpt-oauth/index.ts
+    - src/auth/index.ts
+    - src/llm/adapters/chatgpt-oauth.ts
+    - src/llm/factory.ts
+    - src/llm/fallback.ts
+    - src/apps/cli/auth-ui.ts
+    - src/apps/cli/login-cmd.ts
+    - src/apps/cli/status-cmd.ts
+    - src/apps/cli/slash-commands.ts
+  adrs: [94]
+  tests:
+    unit:
+      - tests/unit/auth/pkce.test.ts
+      - tests/unit/auth/browser-flow.test.ts
+      - tests/unit/auth/token-store.test.ts
+      - tests/unit/auth/refresh.test.ts
+      - tests/unit/auth/jwt.test.ts
+      - tests/unit/cli/login-status-cmd.test.ts
+      - tests/unit/auth/auth-ui.test.ts
+      - tests/unit/auth/chatgpt-oauth-adapter.test.ts
+      - tests/unit/slash-commands.test.ts
+    integration: []
+    contract: []
+knobs:
+  - name: QUANTA_OAUTH_ISSUER
+    default: 'undefined'
+    purpose: '(no description)'
+  - name: QUANTA_OAUTH_CLIENT_ID
+    default: 'undefined'
+    purpose: '(no description)'
+  - name: QUANTA_CHATGPT_API_BASE
+    default: 'undefined'
+    purpose: '(no description)'
+  - name: QUANTA_OAUTH_SKU
+    default: 'undefined'
+    purpose: '(no description)'
+  - name: QUANTA_OAUTH_ORIGINATOR
+    default: 'undefined'
+    purpose: '(no description)'
+deliberate_hold: null
+notes: |
+  Phase 1 absorption (2026-05-23). 흡수 출처: Codex Desktop OAuth 플로우 in-house 분석
+  + OSS `openai/codex` Rust `codex-rs/login` (SCOPES verbatim, 1455→1457 포트 verbatim,
+  client_id verbatim → wire-compatible). quanta가 *추가*한 invariant: refresh in-flight
+  mutex (Codex에 없음), 401/403 typed `auth` LLMError로 retry/fallback 차단 (다른
+  provider로 자동 폴백 금지 — 사용자 의도하지 않은 빌링 라인 사용 차단). JWT decode는
+  외부 lib 0 (payload base64url + JSON.parse). What this is NOT: ChatGPT 세션 쿠키
+  리버싱 X / 3rd-party proxy X / 자동 API-key 발급 X / 헤드리스 자동로그인 X / Codex
+  remote-control enrollment 플로우 X. 93/0 tests pass / main 정착. Phase 2 follow-up:
+  OS Keychain 마이그, headless 감지, 모델 캐탈로그 분기, 레이트 리밋 매핑.

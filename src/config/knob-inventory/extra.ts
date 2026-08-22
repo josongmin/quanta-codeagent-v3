@@ -276,6 +276,23 @@ export const EXTRA: readonly KnobInventoryEntry[] = [
       "SWE-bench ProMax: ABSOLUTE path of the PMX-*.manifest.json a run selects its instances from (PMX-06). The manifest is the SELECTION AUTHORITY — its ordered ids, and only those, execute — and it is fail-closed: a manifest whose sha256, ordering algorithm or dataset revision does not match, or that names an instance the loaded corpus lacks, REFUSES the run rather than falling back to the whole corpus. Cannot be combined with --instance. Unset ⇒ no manifest selection (byte-identical to the historical filter). A relative or blank value is REFUSED at the composition root.",
     readSite: "apps/bench/promax/settings.ts",
   },
+  // The bench composition root's ONE official-grader ingress (PMX-05 writer).
+  // Read DIRECTLY from the injected env bag at `apps/bench/official-grade-ingest-source.ts`
+  // (fail-closed: absent ⇒ no `officialGrade` report section ⇒ every lane byte-identical;
+  // present-but-unreadable ⇒ THROW rather than publish an unofficial number under an
+  // official campaign's name). Declared here — like the sibling QUANTA_PROMAX_* /
+  // QUANTA_SWEBENCH_* composition-root settings — so the completeness ratchet (ADR-0503)
+  // sees the read and operators can discover it on the /knobs surface.
+  {
+    envKey: "QUANTA_OFFICIAL_GRADE_RECEIPT",
+    kind: "string",
+    default: undefined,
+    group: "bench",
+    home: "bench",
+    describe:
+      "Bench: ABSOLUTE path of the official-grade ingest document (a pinned upstream evaluator's verdict, produced out of process) that this run's report aggregates into `officialGrade`. Unset ⇒ no section (byte-identical). Blank, unreadable, non-JSON or drifted ⇒ the report REFUSES to publish.",
+    readSite: "apps/bench/official-grade-ingest-source.ts",
+  },
   {
     envKey: "QUANTA_ALLOW_EXTRA_BOXES",
     kind: "bool",
@@ -678,7 +695,7 @@ export const EXTRA: readonly KnobInventoryEntry[] = [
       "B3/B4 ci-bot gh write path — wire the guarded gitRunner into ghOpts so gh_pr_resolve_thread/gh_pr_open can issue bounded rebases (opt-in).",
     readSite: "apps/agent/mode-presets/ci-bot.ts (buildCiBotWiring ghOpts gitRunner)",
   },
-  // TB lever #2 / v2 (RFC jul-2 TB levers/03) — the verify-gate v2
+  // TB lever #2 / v2 (TB21-06 TC-6) — the verify-gate v2
   // compare-to-reference gate in the terminal brain. AGENT-SIDE read via
   // `gateOn(env, "QUANTA_TB_VERIFY_GATE")` in `apps/terminal/brain-mode.ts` (a terminal-surface
   // gate, NOT a CLI-render knob, so it lives HERE per the read-site-domain ratchet). Default-OFF:
@@ -694,7 +711,7 @@ export const EXTRA: readonly KnobInventoryEntry[] = [
       "TB verify-gate v2 (compare-to-reference, opt-in). Inspects the trajectory for an OBSERVED L1 comparison of the deliverable's output against a distinct, NON-test reference (diff/cmp/sdiff/colordiff of two operands, or a script naming a reference); no-leak (R1): a comparison against a verifier/test path is REFUSED. If no L1 comparison, injects EXACTLY ONE bounded follow-up (K=0, cannot loop/over-persist), then stamps an honest verified-pass/verified-fail/unverifiable trichotomy — verified-pass is UNREACHABLE without an observed comparison (the v1 rubber-stamp is closed).",
     readSite: "apps/terminal/brain-mode.ts (runTerminalBrain verify-gate v2 compare-to-reference)",
   },
-  // TB lever #1 (RFC jul-2 TB levers/01) — the ENVIRONMENT POSTURE.
+  // TB lever #1 (TB21-06 TC-6) — the ENVIRONMENT POSTURE.
   // AGENT-SIDE read via `gateOn(env, "QUANTA_TB_ENV_OWNED")` in `apps/terminal/brain-mode.ts` (a
   // terminal-surface gate, NOT a CLI-render knob — lives HERE per the read-site-domain ratchet).
   // Default-OFF: absent ⇒ the brain keeps the frozen SWE-bench env guardrails (R-ENV / R-STOP-ENV)
@@ -711,23 +728,13 @@ export const EXTRA: readonly KnobInventoryEntry[] = [
       "TB environment posture (opt-in). When ON, the terminal brain rebuilds its SYSTEM prompt with the `owned` posture — install/configure/build freely (a working environment IS the deliverable), dropping the frozen R-ENV/R-STOP-ENV install-prohibition and adding R-ENV-OWNED/R-INSTALL-THRASH. PROMPT-TEXT-ONLY: swaps rendered rule text via boot.systemSource; touches NO SandboxPolicy/os-sandbox/host enforcement. Off ⇒ byte-identical (frozen) brain.",
     readSite: "apps/terminal/brain-mode.ts (runTerminalBrain env-posture systemSource swap)",
   },
-  // TB lever #3 (RFC jul-2 TB levers/04) — best-of-N FAIR candidate selection.
-  // AGENT-SIDE read via `resolveBestOfN(env)` in `apps/terminal/best-of-n-runner.ts` (a terminal-
-  // surface gate — lives HERE per the read-site-domain ratchet). INTEGER, hard-capped at 4. Default
-  // (unset / blank / non-integer / ≤1) ⇒ a SINGLE brain run ⇒ byte-identical to the pre-lever brain.
-  // Selection reuses each candidate's OWN verify-gate stamp (Lever #2) as the fair signal — it NEVER
-  // reads the hidden verifier / test (no-answer-key red line).
-  {
-    envKey: "QUANTA_TB_BEST_OF_N",
-    kind: "int",
-    default: undefined,
-    group: "bench",
-    home: "runtime-config",
-    describe:
-      "TB best-of-N fair candidate selection (opt-in, integer, hard-capped at 4). When ≥2, the terminal brain runs N independent attempts (fresh session each, serial) and selects the best via a FAIR, no-leak ranking over each candidate's OWN verify-gate signal (verified-pass > unverifiable > verified-fail; tie-break by evidence strength; attempt-1 floor). NEVER reads the hidden verifier/test. Unset / ≤1 ⇒ single run ⇒ byte-identical.",
-    readSite: "apps/terminal/best-of-n-runner.ts (runTerminalBrainBestOfN resolveBestOfN)",
-  },
-  // TB cassette (RFC jul-2 TB levers /07) — DEFAULT-ON trajectory recording on the brain report.
+  // RETIRED by TB21-06 (retirement manifest SR-6): `QUANTA_TB_BEST_OF_N`, the terminal-local
+  // best-of-N sampler knob. Trials belong to the external run harness (its `-k <n>` gives each
+  // trial a fresh container); a second sampling layer inside the brain shared one exhausted
+  // duplex and one container, so its attempts were not independent. There is no replacement
+  // knob — the 2.1 run config REFUSES an enabled terminal-local sampler beside `-k`
+  // (`apps/bench/terminal/config.ts` `assertNoTerminalBestOfN`).
+  // TB cassette (TB21-06 TC-6) — DEFAULT-ON trajectory recording on the brain report.
   // The jul-3 M0 regression could not be RCA'd without a record of what the agent actually did, so
   // this is the one deliberately default-ON TB knob; an explicit 0/false/off suppresses the field
   // entirely (byte-identical to the pre-cassette report). AGENT-SIDE read via
@@ -742,7 +749,7 @@ export const EXTRA: readonly KnobInventoryEntry[] = [
       "TB report cassette (DEFAULT-ON). Records a bounded compact trajectory on the brain report — every tool call paired with ok/exit/preview plus coalesced assistant-text claims — so a run is always RCA-able. No-leak: only the model's own actions/claims. Explicit 0/false/off suppresses the `trajectory` field (byte-identical to the pre-cassette report).",
     readSite: "apps/terminal/brain-mode.ts (resolveTrajectoryOn report cassette)",
   },
-  // TB OC1 sub-lever (RFC jul-2 TB levers /07) — output-contract check riding the verify-gate's
+  // TB OC1 sub-lever (TB21-06 TC-6) — output-contract check riding the verify-gate's
   // single bounded follow-up. Default-OFF and INERT unless QUANTA_TB_VERIFY_GATE is also ON
   // (separate knob so its effect is measured in isolation from v2).
   {

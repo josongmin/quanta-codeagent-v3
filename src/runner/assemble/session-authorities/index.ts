@@ -4,9 +4,9 @@
  * the task/question/attention arms, later packets extend it.
  */
 
+export { buildSessionAuthorities } from "./build"
 export type {
   AttentionReader,
   BuildSessionAuthoritiesInput,
   SessionAuthorities,
 } from "./types"
-export { buildSessionAuthorities } from "./build"

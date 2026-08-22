@@ -1,0 +1,40 @@
+id: verifyguard
+title: 'verifyGuard: {}'
+section: 1
+subsystem: Verify-guard (Tier 0) · ADR-0013
+order: 1
+maturity: L4
+status: stable
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [interactive, headless, batch, daemon, ide, ci-bot]
+configurable: integrated
+owners: ["@songmin"]
+labels: [surface:core, tier:core]
+depends_on: [assemble-config, bench-eval-driver, bench-repair-context-builder, runner-assemble-builders, cli-export-2026-05-21-l2-l3]
+config_refs:
+  env: ["QUANTA_VERIFY_GUARD", "QUANTA_VERIFY_GUARD_MAX_TRIPS"]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 4/5 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "pure internal loop verify-guard (reminder injection), no UI affordance on any surface"
+purpose: 변경 도구 후 검증 없이 finish 시도 → 1턴 강제. best-effort 게이트.
+evidence:
+  code:
+    - src/agent/verify-guard.ts
+    - src/agent/guards/verify-guard.ts
+    - src/apps/bench/eval/driver.ts
+    - src/apps/cli/internal.ts
+    - src/runner/assemble/verify.ts
+  adrs: [13]
+  tests:
+    unit: [tests/unit/verify-guard-hellgate.test.ts, tests/unit/verify-guard-hellgate.test.ts, tests/unit/verify-guard-must-pass-hellgate.test.ts]
+    integration: [tests/integration/verify-guard-e2e.test.ts, tests/integration/verify-guard-hellgate-e2e.test.ts, tests/integration/verify-guard-forces-any.test.ts]
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: '실측 0트립 — best-effort, empirically inert on this agent/model. bench는 verifyGuard: {}로 기본 inherit'

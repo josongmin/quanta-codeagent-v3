@@ -1,0 +1,61 @@
+id: shell-snapshot-production-spawner
+title: Shell-snapshot — production Bun spawner + size-budget prune + CLI opt-in
+section: 2
+subsystem: Shell-snapshot — production wiring
+order: 97
+maturity: L3
+status: stable
+ui_surfaces: [cli]
+monitoring: integrated
+modes: [interactive, headless]
+configurable: integrated
+config_refs:
+  env: []
+owners: ["@songmin"]
+labels: ["adr-0238", "tier:1", "shell-snapshot"]
+depends_on:
+  - shell-snapshot
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 8/8 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "Pure runtime primitive (shell-env snapshot capture + disk size-budget prune behind ShellSnapshotPort); no UI affordance, only shapes runShell env state."
+purpose: |
+  Production wire for ADR-0204's shell-snapshot primitive + ADR-0235's
+  `runShell` prefix integration. Adds `bun-spawner.ts` (production
+  adapter swapping in the Bun child-process API for the headless stub)
+  + `pruneToSizeBudget` method on the `ShellSnapshotPort` (closes the
+  unbounded-disk-growth hazard — total snapshot bytes capped per
+  session). Two-phase session-start prune
+  (`src/agent/shell-snapshot-session.ts`). Composition-root opt-in via
+  `SessionDeps.shellSnapshot` conditional spread (default-OFF byte
+  identity preserved). CLI surface `buildShellSnapshotConfig` in
+  `internal.ts`.
+evidence:
+  code:
+    - src/runtime/shell-snapshot/bun-spawner.ts
+    - src/runtime/shell-snapshot/file-store.ts
+    - src/runtime/shell-snapshot/port.ts
+    - src/runtime/shell-snapshot/index.ts
+    - src/agent/shell-snapshot-session.ts
+    - src/runner/assemble/config.ts
+    - src/apps/cli/internal.ts
+    - src/apps/cli/repl/session-setup.ts
+  adrs:
+    - docs/decisions/0238-shell-snapshot-production-spawner-and-size-prune.md
+  tests:
+    unit:
+      - tests/unit/runtime/shell-snapshot-bun-spawner-hellgate.test.ts
+      - tests/unit/runtime/shell-snapshot-prune-by-size-hellgate.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  20 hellgate cases combined (spawner 10 + size-prune 10). ADR-number
+  reconciliation: originally booked 0237 but lost the race to sibling
+  layer-owned-arms track; renumbered to 0238 atomically across src /
+  tests / catalog / memory.

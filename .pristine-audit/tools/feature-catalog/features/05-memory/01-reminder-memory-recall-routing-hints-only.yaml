@@ -1,0 +1,35 @@
+id: reminder-memory-recall-routing-hints-only
+title: 동적 reminder의 memory recall 블록에 "routing hints only
+section: 5
+subsystem: Memory-hints 라벨 (ADR-0021)
+order: 1
+maturity: L4
+status: stable
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [interactive, headless, batch, daemon, ide, ci-bot]
+configurable: n-a
+owners: ['@songmin']
+labels: [surface:core]
+depends_on: [mode-repo-rules-active-skills-working-state-memory-hints, build-turn-context, fallback-kinds-policy, llm-distill, llm-factory]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 2/2 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "pure prompt-string label prefix on the recall block (src/agent/prompt.ts) injected server-side into the system prompt; no user-visible affordance on any surface"
+purpose: 동적 reminder의 memory recall 블록에 "routing hints only — not proof" 라벨 prefix — L3/L4 회상의 인식론적 지위 명시
+evidence:
+  code:
+    - src/agent/memory.ts
+    - src/agent/prompt.ts
+  adrs: [21]
+  tests:
+    unit: ["tests/unit/agent/memory-citation-accumulator.test.ts", "tests/unit/agent/untrusted-embed.test.ts", "tests/unit/hook-paired-rpc-integration.test.ts", "tests/unit/memory-hellgate.test.ts", "tests/unit/prompt-escape-hellgate.test.ts", "tests/unit/prompt-rules-snapshot.test.ts"]
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: ''

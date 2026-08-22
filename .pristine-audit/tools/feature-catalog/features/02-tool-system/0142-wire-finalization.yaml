@@ -1,0 +1,59 @@
+id: wire-finalization
+title: Wire finalization — web-search env factory + document-tools default registration (ADR-0142)
+section: 2
+subsystem: caller-wire 마감 (ADR-0142)
+order: 142
+maturity: L4
+status: new
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [interactive, headless, batch, daemon, ide, ci-bot]
+configurable: integrated
+config_refs:
+  env: [QUANTA_WEB_SEARCH_DUCKDUCKGO]
+owners: ["@songmin"]
+labels: [surface:cli]
+depends_on: [read-write-edit, typed-tool-failure-modes, tool-output-schema-factory, fsjailerror, git-review-diff]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 4/4 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "Pure composition-root wiring (env-driven provider factory + MUTATING_TOOL_TABLE/buildDefaultTools registration); the visible affordance is owned by the doc-tools/web-search features, this has no UI of its own."
+purpose: |
+  Surgical 2-part wire-up closing seams deliberately left open by ADR-0127
+  / 0133 / 0137.
+  (A) `providerFromEnv(env)` — env-driven `WebSearchProvider` factory with
+  precedence `BRAVE_SEARCH_API_KEY` > `QUANTA_WEB_SEARCH_DUCKDUCKGO=1` >
+  undefined. Composition root keeps explicit `AgentConfig.webSearch.provider`
+  override; the helper is only the "just works" default. DI seam takes
+  `env` arg so tests inject hermetic snapshots without polluting
+  `process.env`.
+  (B) Five document/structured-data tools (`csv_read` / `ndjson_read` /
+  `yaml_read` / `pdf_read` / `xlsx_read`) — previously barrel-exported but
+  outside `buildDefaultTools()` so models couldn't see them. Atomic
+  single-commit closer: `MUTATING_TOOL_TABLE` gets the 5 `null` entries
+  (read-only, mirror `read_image` / `web_fetch`) AND `buildDefaultTools()`
+  adds the 5 imports + entries in the same commit so
+  `mode-mutating-table.test.ts` never sees an `UnknownToolError`.
+evidence:
+  code:
+    - src/tool/web/providers/from-env.ts
+    - src/tool/web/providers/index.ts
+    - src/agent/mode.ts
+    - src/tool/index.ts
+  adrs: [142]
+  tests:
+    unit:
+      - tests/unit/tool/web-search-from-env-hellgate.test.ts
+      - tests/unit/document-tools-defaults-registration-hellgate.test.ts
+      - tests/unit/mode.test.ts
+    integration: []
+    contract: []
+knobs: []
+notes: |
+  Slice posture: `from-env.ts` imports only `./brave` / `./duckduckgo` /
+  `../search` port type — same fence as the providers themselves.
+  Atomic-table-update pattern mirrors ADR-0119 voice/structure precedent.

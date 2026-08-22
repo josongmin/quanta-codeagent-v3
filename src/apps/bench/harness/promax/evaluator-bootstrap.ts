@@ -75,12 +75,14 @@ export interface ProMaxUpstreamFile {
 
 /** The bootstrap steps, in execution order. */
 export const PROMAX_BOOTSTRAP_STEPS = [
+  "gold-absence",
   "campaign-root",
   "docker-ready",
   "disk",
   "checkout",
   "verify-hashes",
   "python-env",
+  "gold-teardown",
 ] as const
 
 export type ProMaxBootstrapStep = (typeof PROMAX_BOOTSTRAP_STEPS)[number]
@@ -234,6 +236,25 @@ export const buildProMaxBootstrapPlan = (
   // reveals nothing (nothing is in it) and the checkout that fills it is below.
   const probes: ProMaxBootstrapCommand[] = [
     {
+      // 🔴 FIRST, and fail-closed. Absence is the WHOLE defence, and until this
+      // command existed it was ASSUMED: the grader phase created the
+      // gold-bearing checkout and nothing ever removed it, so the second chunk
+      // on a warm box started its agent phase on a box that still held the
+      // answer key — and every later assertion about absence was a statement
+      // about the PLAN, not about the box. A non-zero exit here means the tree
+      // EXISTS; the executor refuses the whole bootstrap on it (aug-22 A-A).
+      step: "gold-absence",
+      phase: "agent",
+      // It creates nothing and reads no answer-key bytes — it asserts there are
+      // none. Naming the root is what a probe IS; see `absenceProbe`.
+      goldBearing: false,
+      argv: ["test", "!", "-e", root],
+      purpose:
+        "REFUSE to start the agent phase on a box that still carries the gold-bearing upstream " +
+        "checkout (a prior chunk's grader phase, or a teardown that failed)",
+      absenceProbe: { absolutePath: root },
+    },
+    {
       step: "campaign-root",
       phase: "agent",
       goldBearing: false,
@@ -323,6 +344,23 @@ export const buildProMaxBootstrapPlan = (
       goldBearing: false,
       argv: [spec.evaluatorPython, "--version"],
       purpose: "prove the dedicated interpreter is executable before the campaign relies on it",
+    },
+    // ---- TEARDOWN ---- what the grader phase materialized, UNMADE.
+    //
+    // The venv is deliberately NOT removed: it holds no answer-key bytes, and
+    // rebuilding an interpreter per chunk is cost without a defence. Only the
+    // checkout — which IS the answer key — goes.
+    {
+      step: "gold-teardown",
+      phase: "teardown",
+      // It operates ON answer-key bytes, so it stays out of the agent phase by
+      // the same cross-check that keeps the checkout out: the agent phase is
+      // where absence is PROVEN, never where it is arranged.
+      goldBearing: true,
+      argv: ["rm", "-rf", root],
+      purpose:
+        "remove the gold-bearing upstream checkout at the end of the grader phase, so the NEXT " +
+        "chunk's agent phase starts on a box that does not hold the answer key",
     },
   ]
 }

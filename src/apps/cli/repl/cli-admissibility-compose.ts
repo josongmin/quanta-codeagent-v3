@@ -1,5 +1,5 @@
-import { createOnConfirmReviewerPort, type ConfirmDecision } from "@/agent"
-import { type SessionBootstrapResult } from "@/host/bootstrap"
+import { type ConfirmDecision, createOnConfirmReviewerPort } from "@/agent"
+import type { SessionBootstrapResult } from "@/host/bootstrap"
 import {
   APPROVAL_LADDER,
   CircumventionTracker,

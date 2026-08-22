@@ -1,0 +1,57 @@
+id: bench-best-of-n-sampler
+title: bench — Best-of-N sampler (N trajectories × patchVote)
+section: 10
+subsystem: Bench harness — sampling layer
+order: 40
+maturity: L4
+status: stable
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [headless, batch]
+configurable: n-a
+owners: ["@songmin"]
+labels: ["surface:bench"]
+depends_on: [bench-corpus-loader, bench-observe-non-agent-evidence, model-swap-retry, assert-never-exhaustiveness, built-in-slash-commands]
+config_refs:
+  env: ["QUANTA_BENCH_TIMEOUT_MS", "QUANTA_MODEL", "QUANTA_OBSERVE_DIR", "QUANTA_REPAIR_ROUNDS", "QUANTA_RUN_ID", "QUANTA_SWEBENCH_CACHE_LEVEL", "QUANTA_SWEBENCH_CLEAN", "QUANTA_SWEBENCH_CORPUS_ROOT", "QUANTA_SWEBENCH_DATASET", "QUANTA_SWEBENCH_DATASET_NAME", "QUANTA_SWEBENCH_FORCE_REBUILD", "QUANTA_SWEBENCH_MAX_WORKERS", "QUANTA_SWEBENCH_NAMESPACE", "QUANTA_SWEBENCH_PYTHON", "QUANTA_SWEBENCH_PYTHON_BIN", "QUANTA_SWEBENCH_REPO_BASE_URL"]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 2/4 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "pure internal bench sampling module, no UI affordance on any surface"
+purpose: |
+  Pure module that runs N independent agent trajectories against a single
+  bench instance and picks one — without leaking sampling concerns into
+  the agent core (RFC §1.2: no closed-alphabet / orchestration creep).
+  RFC §13 Q4 design decision: Best-of-N lives INSIDE `apps/bench`, NOT a
+  new top-level slice and NOT inside `agent/`. Rationale: it is a pure
+  app-composition concern (run N, vote on the winner). The agent loop
+  stays single-trajectory and ignorant of sampling. Voting strategy:
+  pick the unanimous/majority patch when multiple attempts produce
+  byte-identical or semantically-identical patches (patchVote); fall
+  back to first-pass on ties or single-attempt N=1. Sampler is the only
+  module that materializes N trajectories per instance — every other
+  bench module treats N=1 as the contract.
+evidence:
+  code:
+    - src/apps/bench/sampler.ts
+    - src/apps/bench/index.ts
+    - src/shared/runtime-config.ts
+    - src/apps/cli/help-render.ts
+  adrs: []
+  tests:
+    unit:
+      - tests/unit/sampler.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  Targets RFC §1.1 (single trajectory baseline ≈ 50% → Best-of-N upper
+  bound ≈ 70%). Pure: no `process.env` reads, no I/O, no `process.exit`;
+  the caller (`bench/index.ts`) decides whether/how many attempts to run.
+  Slice: `src/apps/bench` only — does not import `@/agent` directly
+  beyond the runner function it is handed.

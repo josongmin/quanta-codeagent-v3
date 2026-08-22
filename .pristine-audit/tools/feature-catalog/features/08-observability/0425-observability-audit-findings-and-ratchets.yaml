@@ -1,0 +1,75 @@
+id: observability-audit-findings-and-ratchets
+title: Observability stack audit (3-round, adversarial) findings + structural ratchets (ADR-0425)
+section: 8
+subsystem: 옵저버빌리티 — Waves 1-5 통합 감사 + 구조적 ratchet
+order: 425
+maturity: L4
+status: stable
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [interactive, headless, batch, daemon, ide, ci-bot]
+configurable: n-a
+owners: ["@songmin"]
+labels: ["surface:core", "audit-closeout", "discipline"]
+depends_on: [compaction-visibility, run-ledger-attribution]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 2/2 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "Pure internal audit-closeout findings + structural ratchet tests, no UI affordance on any surface."
+purpose: |
+  Waves 1-5 observability stack(ADR-0394~0421) end-to-end live 도달 후
+  3-round adversarial 감사. R1: correctness/lifecycle/coverage/hygiene 4 lens
+  parallel. R2: refutation + malicious input + concurrency 3 lens parallel.
+  R3: synthesis + recipe.
+
+  6 structural fix:
+  - F1 (HIGH): ADR-0409 post_compact wire dead seam — `buildPostCompactEmit`
+    helper + 4-callback wire(proactive) + reactive emit inline(NO-THROW,
+    reason:"ptl_reactive"). [3e15001d]
+  - F2 (MED): mailbox `renderMessage` line-injection — `escapeBodyForLine`
+    `\r\n|\r|\n` → 리터럴 `\n`. [1510d80d]
+  - F3-asm (MED): approval `requests` Map unbounded growth — `maxRetained`
+    1024 + LRU evict on settle-later. [156d768b]
+  - F3-obj (MED): objective `successCriteria` / `blockers` unbounded —
+    `MAX_CRITERIA_PER_OBJECTIVE=256` + `MAX_BLOCKERS_PER_OBJECTIVE=64`.
+    [a7eb0d8c]
+  - F5 (P1): effort keyword false positive(`myUltrathinkVariable` 트리거) —
+    `\b…\b` word-boundary anchor + negative/positive hellgate. [85406bdb]
+  - F6 (MED): attribution banner literal-anchor drift — 4 cross-module
+    banner-pin tests(bash bg/await/kill + subagent launch). [27c85264]
+
+  3 structural ratchet(`tests/unit/observability-audit-ratchet.test.ts`,
+  ~10ms each, every CI):
+  - G1 (F1-class): `loop.ts` MUST contain 4 post_compact wire markers
+    (`buildPostCompactEmit(`, `type: "post_compact"`, `recoveryReason:`,
+    `objectiveSetNextActions`). 하나라도 빠지면 F1 재발.
+  - G2 (F3-class): every `src/agent/<slice>/store.ts` MUST be bounded
+    (`maxRetained` / `MAX_*` / `evictIfOverCap`) OR carry explicit
+    `// UNBOUNDED: <reason>` comment. 새 unbounded store 즉시 CI fail.
+  - G3 (F6-class): every literal anchor in `run-ledger-attribution/matchers.
+    ts`(`startsWith` / `.test`) MUST appear verbatim in `src/tool/**` 또는
+    `src/subagent/**`. 새 banner 자동 발견 — ratchet 수정 불필요.
+evidence:
+  code:
+    - tests/unit/observability-audit-ratchet.test.ts
+    - src/agent/loop.ts
+    - src/agent/run-ledger-attribution/matchers.ts
+  adrs:
+    - docs/decisions/0425-observability-audit-findings-and-ratchets.md
+    - 425
+  tests:
+    unit:
+      - tests/unit/observability-audit-ratchet.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  Reusable discipline: 3 rounds layered + adversarial PROVE WRONG (refute) +
+  bank clean units under API instability(ADR-0389 salvage) + confirm vs
+  change(intent-vs-defect documented via `UNBOUNDED:` markers) + ratchet the
+  class not the instance. See [[may-29-audit-3r-fix-pass]] (memory).

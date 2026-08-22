@@ -6,7 +6,13 @@ import { __setBranchRunAgentForTest } from "@/agent/branch-search-runner"
 import { __setLspAvailabilityOverrideForTest } from "@/agent/lsp-bridge"
 import { __resetSpanSink } from "@/observability"
 import { __resetDefaultMetricSink } from "@/observability/metrics/in-memory-registry"
-import { __resetKnobOverrides, __resetRuntimeConfig, setTerminalIo } from "@/shared"
+import {
+  __resetKnobOverrides,
+  __resetRuntimeConfig,
+  quantaHomeDirFrom,
+  setTerminalIo,
+} from "@/shared"
+import { decideBenchResultsDir } from "./_support/bench-results-fence"
 
 // FORCING FUNCTION (aug-22 incident): `writeReport`/`writeArtifacts` fan out to
 // `mirrorReportToSsot`, whose DEFAULT sink is the operator's LIVE
@@ -21,16 +27,34 @@ import { __resetKnobOverrides, __resetRuntimeConfig, setTerminalIo } from "@/sha
 //
 // A temp DIR (not `off`) is deliberate — the mirror stays fully exercised, so
 // tests that assert mirror behaviour still observe a real effect. An explicit
-// operator/test-local override still wins: this only fills an ABSENT value, and
-// a test that sets its own per-test dir (see
-// `tests/unit/apps/bench/canonical-report-envelope.test.ts`) overrides it.
+// per-test dir (see `tests/unit/apps/bench/canonical-report-envelope.test.ts`)
+// and the `off`/`0` sentinels still win.
+//
+// aug-22 audit: this used to fill only an ABSENT value, which two ordinary
+// states walked straight through — a BLANK value (not absent, and the resolver
+// reads blank as absent ⇒ live corpus) and an operator shell that already
+// exports the real corpus (read as "an explicit override, respect it"). So the
+// rule cannot key on whether the variable is set; it keys on WHERE the value
+// points. That decision is a pure function in `_support/bench-results-fence.ts`
+// with its own hellgate — a fence living only inside a preload is a fence no
+// test can drive.
+//
 // The reset is load-bearing, not defensive: ES imports run BEFORE this
 // statement, so any module above that touched `runtimeConfig()` during its own
 // initialisation has already frozen a config snapshot taken WITHOUT the
 // redirect. Measured: without this line `tests/unit/bench-write-artifacts.test.ts`
 // still deposited one artifact into the live corpus on every run.
-if (process.env.QUANTA_BENCH_RESULTS_DIR === undefined) {
-  process.env.QUANTA_BENCH_RESULTS_DIR = join(tmpdir(), "quanta-bench-test-results")
+// `quantaHomeDirFrom` (the DI twin), NOT `quantaHomePath`: the latter resolves
+// through `runtimeConfig()`, which would CREATE and cache the frozen config
+// snapshot here — at preload, before any test has arranged its environment. The
+// injected-env twin answers the same question while touching no singleton.
+const benchResultsFence = decideBenchResultsDir({
+  configured: process.env.QUANTA_BENCH_RESULTS_DIR,
+  liveSsotDir: join(quantaHomeDirFrom(process.env), "bench", "results"),
+  fallbackDir: join(tmpdir(), "quanta-bench-test-results"),
+})
+if (benchResultsFence.action === "redirect") {
+  process.env.QUANTA_BENCH_RESULTS_DIR = benchResultsFence.dir
   __resetRuntimeConfig()
 }
 

@@ -1,0 +1,106 @@
+id: objective-tools
+title: Objective LLM tools — objective_set / objective_update / objective_get (ADR-0402)
+section: 9
+subsystem: Objective substrate (ADR-0394)
+order: 95
+maturity: L3
+status: new
+ui_surfaces: [cli, ide]
+monitoring: n-a
+modes: [interactive, headless, batch, daemon, ide, ci-bot]
+configurable: integrated
+owners: ["@songmin"]
+labels: ["surface:core"]
+depends_on: [objective-first-class]
+config_refs:
+  env: [QUANTA_OBJECTIVE_TOOLS]
+surface_integration:
+  cli: full
+  web: full
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 5/5 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "agent calls render as tool cards (bridged tool_call/tool_result) AND the resulting objective renders in the web-only ObjectiveCard via observability-emitter (objective.get)"
+purpose: |
+  Three LLM-facing tools wired to the ADR-0394 `ObjectivePort` so the agent
+  itself can declare its objective, surface blockers, and list next actions —
+  closing the consumer side of the substrate ADR-0394 shipped. Wave-1 (ADR-0394)
+  was MODEL ONLY; this wave (ADR-0402) is the FIRST consumer wire: a new
+  `src/tool/objective/` slice (1 file) exposes `objective_set` (set/replace per-
+  thread goal + optional success_criteria + optional budget), `objective_update`
+  (6-arm discriminated-union mutate: status / addBlocker / clearBlocker /
+  nextActions / markCriterion / recordUsage), and `objective_get` (read-only).
+
+  All 3 tools declare `hitlTier: "pre-approval-ok"` (information-class — no FS,
+  shell, or network side effect). NO-THROW: schema validation via `safeParse`
+  catches malformed input (missing thread_id / unknown op.kind / bad enum) at
+  the boundary; port calls are wrapped in try/catch so a hostile throwing port
+  surfaces as `{ ok: false, output: "<tool> error: <message>" }` instead of
+  bubbling past the loop. `objective_get` for an unknown thread returns the
+  typed string `"no objective set for thread <id>"`.
+
+  Wire: a new Tier-1 builder `buildObjectiveBlock(config)` returns `[]` when
+  `config.objective` is absent and the 3 tools when it is wired, mirroring the
+  `buildDelegateBlock` / `buildSubagentBgBlock` posture. `buildSessionFeatures`
+  pushes the result into `extraTools` between the delegate block and the
+  budget block. `AgentConfig.objective?: ObjectivePort` is a helper-only port
+  slot (no nested options object — the port IS the slot); the FeaturesConfig
+  Pick union includes `"objective"`. Default-OFF byte-identical (RFC §1.2):
+  absent ⇒ no tools registered, the ToolRegistry is structurally identical to
+  the pre-ADR registry.
+
+  Slice fence: `src/tool/objective/` imports `@/agent/objective` (the closed
+  ADR-0394 substrate) for types only (`ObjectivePort` / `Objective` /
+  `ObjectiveStatus` / `WaitingOn`), `../types` (Tool / ToolContext / ToolEvent
+  / ToolResult), and `zod`. NEVER `@/agent` core (loop / dispatch / prompt /
+  features / types). The tool slice does not mutate the substrate slice; it
+  consumes the port verbatim.
+
+  Status derivation rule is NOT overridden — `objective_update { kind:"status",
+  status:"blocked" }` is a no-op on the explicit status (the substrate stores
+  only "active"|"completed" as explicit intent; "blocked" derives from
+  `blockers.length > 0`). Tools surface this honestly via re-render after the
+  call.
+evidence:
+  code:
+    - src/tool/objective/index.ts
+    - src/agent/tier1/objective.ts
+    - src/agent/tier1/index.ts
+    - src/agent/features.ts
+    - src/agent/types.ts
+  adrs: [402]
+  tests:
+    unit:
+      - tests/unit/objective-tools-hellgate.test.ts
+    integration: []
+    contract: []
+knobs:
+  - name: objective
+    where: src/agent/types.ts
+    default: 'undefined'
+    purpose: |
+      Per-session port slot. Absent ⇒ 3 tools NOT registered (default-OFF
+      byte-identical). Present ⇒ 3 tools registered and bound to the same
+      port instance. Caller-wire — the composition root constructs the
+      reference store via `createObjectiveStore()`.
+deliberate_hold:
+  reason: |
+    Tools are registered + reachable, but ZERO downstream consumers read the
+    typed object yet. Compaction does not preserve { goal, success_criteria,
+    next_actions, blockers } across a summarize; resume does not re-hydrate
+    via fromSnapshot; subagent results do not attribute to the parent's
+    objective; the per-turn reminder does not surface the current objective.
+    All of these are separate ADRs.
+  promotion_path: |
+    Promote to L4 when at least ONE downstream consumer is wired — typically
+    the compaction-preserve path (next ADR) that re-injects the objective
+    snapshot into the compacted prefix so the model never re-derives intent
+    from message scrollback.
+notes: |
+  30 hellgate cases / 62 expects pin: tier1 barrel re-export; AgentConfig
+  slot + FeaturesConfig Pick; default-OFF (slot absent ⇒ no tools); wired
+  (slot present ⇒ all 3 tools); same-port binding (set/get round-trip);
+  schema rejection of unknown ops + bad enums + missing thread_id; each of
+  6 op variants round-trips; NO-THROW on throwing fake port; HITL tier
+  surface. Sibling-shaped to delegate-tool-hellgate (ADR-0393).

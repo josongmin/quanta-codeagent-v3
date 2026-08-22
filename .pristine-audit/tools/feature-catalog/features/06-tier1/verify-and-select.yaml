@@ -1,0 +1,160 @@
+id: verify-and-select
+title: Verify-and-select executor — N-candidate diversity-gen + VerificationBundle pick (TD)
+section: 6
+subsystem: verify-and-select outer control plane (jun-19) — absorbs Trae Selector
+order: 91
+maturity: L3
+status: new
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [headless]
+configurable: partial
+owners: ["@songmin"]
+labels: ["surface:core", "tier:1", "absorbed:trae"]
+depends_on: [speculative-branch-search, branch-search-pure-scorer, proof-driven-bench-closure]
+surface_integration:
+  cli: missing
+  web: na
+  method: audited
+  verified: "2026-06-19"
+  evidence:
+    cli: "bench verify-select path only; not interactive CLI"
+    web: "outer control plane; no browser affordance"
+purpose: |
+  The OUTER control plane for SWE-bench: the corrected north-star is "no single
+  noisy oracle holds global verdict authority". The bench generates N candidate
+  patches (closure-localization-seeded for DIVERSITY — candidate i is nudged
+  toward the i-th ranked owner so the set spans different FIX SITES, attacking
+  the measured cause-vs-symptom failure where a run fixates on the symptom),
+  scores each through the VerificationBundle (HARD gates AND'd, null=FAIL-OPEN;
+  SOFT weighted rank), and submits selectBest (else selectBestEffort — the gates
+  inform but never submit nothing). Bounded repair is demoted to an INNER
+  candidate-gen tactic. Pieces: VerificationBundle contract+scorer (T0/TA), the
+  regression oracle engine port + bench adapter (TB, plug-ready hard signal,
+  no-leak fenced), the pure selection-executor orchestrator (TD), and the
+  `verify-select` knob (8-step plumbing). Default-OFF / byte-identical when
+  unset. Explicit experimental presets now exist (`agentless-v3-thin-strict-select`,
+  `agentless-v3-thin-strict-closure-select`, `agentless-v3-select-regression`,
+  and `agentless-v3-select-regression-doubt`), but the feature is still NOT in
+  the default base profile and is not yet promoted as an A/B-proven winner.
+evidence:
+  code:
+    - src/agent/verification-bundle/types.ts
+    - src/agent/verification-bundle/score.ts
+    - src/agent/verification-bundle/index.ts
+    - src/agent/verification-bundle/authority.ts
+    - src/agent/verification-bundle/select-lexicographic.ts
+    - src/runner/batch/eval/impacted-test-discovery.ts
+    - src/runner/batch/eval/regression-oracle.ts
+    - src/apps/bench/eval/regression-oracle-adapter.ts
+    - src/apps/bench/eval/repo-regression-discovery-adapter.ts
+    - src/runner/batch/eval/regression-oracle-adapter.ts
+    - src/runner/batch/eval/repo-regression-discovery-adapter.ts
+    - src/runner/batch/eval/selection-executor.ts
+    - src/runner/batch/eval/repair/resolved-consensus.ts
+    - src/runner/knobs/knobs/verify-select.ts
+    - src/runner/knobs/knobs/verify-select-concurrency.ts
+    - src/runner/knobs/knobs/verify-select-early-accept.ts
+    - src/runner/knobs/knobs/verify-select-regression.ts
+    - src/runner/knobs/knobs/verify-select-repro.ts
+    # jun-21/22 clean-selector authority layer (extracted/added around selection-executor)
+    - src/runner/batch/eval/selection-gates.ts
+    - src/runner/batch/eval/selection-paths.ts
+    - src/runner/batch/eval/selection-types.ts
+    - src/runner/batch/eval/selection-proof-telemetry.ts
+    - src/runner/batch/eval/selection-repair-seed.ts
+    - src/runner/batch/eval/selection-risk-gate.ts
+    - src/runner/batch/eval/strict-risk-gate.ts
+    - src/runner/batch/eval/selection-smoke.ts
+    - src/runner/batch/eval/candidate-families.ts
+    - src/runner/batch/eval/diff-touched-symbols.ts
+    - src/runner/batch/eval/verification-owner-tests.ts
+    - src/runner/batch/eval/mwe-proof.ts
+    - src/runner/batch/eval/mwe-proof-port.ts
+    - src/runner/batch/eval/static-witness.ts
+    - src/runner/batch/eval/static-witness-adapter.ts
+    - src/runner/batch/eval/static-witness-contracts.ts
+    - src/runner/batch/eval/public-contract-bundle.ts
+    - src/runner/batch/eval/public-contract-types.ts
+    - src/runner/batch/eval/counterfactual-contract.ts
+    - src/runner/batch/eval/counterfactual-risk.ts
+    - src/runner/batch/eval/counterfactual-seed.ts
+    - src/runner/batch/eval/patch-static-sanity.ts
+    - src/runner/batch/eval/llm-evidence-packet.ts
+    - src/runner/batch/eval/llm-risk-gate.ts
+    - src/runner/knobs/knobs/selector-mode.ts
+    - src/runner/knobs/knobs/verify-select-counterfactual.ts
+    - src/runner/knobs/knobs/verify-select-llm-risk-gate.ts
+    - src/runner/knobs/knobs/verify-select-proof-required.ts
+    - src/runner/knobs/knobs/regression-max-tests.ts
+    - src/runner/knobs/presets.ts
+  adrs: [13, 433]
+  tests:
+    unit:
+      - tests/unit/verification-bundle-score.test.ts
+      - tests/unit/regression-oracle.test.ts
+      - tests/unit/impacted-test-discovery.test.ts
+      - tests/unit/repo-regression-discovery-adapter.test.ts
+      - tests/unit/selection-executor.test.ts
+      - tests/unit/resolved-consensus.test.ts
+      - tests/unit/pass-to-pass-threading.test.ts
+      - tests/unit/repro-consensus-selection-port.test.ts
+      - tests/unit/verify-select-regression-knob.test.ts
+      - tests/unit/runner/verify-select-driver-parity.test.ts
+      - tests/unit/bench-preset-drives-config-hellgate.test.ts
+    integration:
+      - tests/integration/bench-verify-select-concurrency.test.ts
+      - tests/integration/bench-verify-select-telemetry.test.ts
+    contract: []
+knobs:
+  - name: verify-select
+    where: QUANTA_BENCH_VERIFY_SELECT
+    purpose: "N candidate count; unset ⇒ single-pass (byte-identical). Cost ≈ ×N."
+  - name: verify-select-concurrency
+    where: QUANTA_BENCH_VERIFY_SELECT_CONCURRENCY
+    purpose: "Max candidates generated concurrently; unset ⇒ sequential. >1 needs isolated generate. Throttle: instance-conc × this."
+  - name: verify-select-early-accept
+    where: QUANTA_BENCH_VERIFY_SELECT_EARLY_ACCEPT
+    purpose: "Progressive cost guard: stop after the first clean owner-scoped candidate with explicit hard-positive regression/resolved authority; fail-open nulls and soft-only repro quorum remain keep-search signals."
+  - name: verify-select-regression
+    where: QUANTA_BENCH_VERIFY_SELECT_REGRESSION
+    purpose: "Regression source for verify-select: unset/gold keeps eval-only PASS_TO_PASS; discovered runs no-oracle impacted native repo tests; off ablates."
+  - name: verify-select-repro
+    where: QUANTA_BENCH_VERIFY_SELECT_REPRO
+    purpose: "Generated repro consensus mode for verify-select: unset/hard preserves legacy reject; positive uses votes/k as soft-only; off ablates."
+  - name: selector-mode
+    where: QUANTA_BENCH_SELECTOR_MODE
+    purpose: "Selector authority: clean (executable/structural hard gates only) vs research (legacy heuristic gates allowed). Unset ⇒ research (byte-identical)."
+  - name: verify-select-counterfactual
+    where: QUANTA_BENCH_VERIFY_SELECT_COUNTERFACTUAL
+    purpose: "Counterfactual cand1 seed when cand0 trips the structural risk gate."
+  - name: verify-select-llm-risk-gate
+    where: QUANTA_BENCH_VERIFY_SELECT_LLM_RISK_GATE
+    purpose: "Optional LLM semantic risk gate over the structural gate: shadow (advisory telemetry) | on (expands fail-closed)."
+  - name: verify-select-proof-required
+    where: QUANTA_BENCH_VERIFY_SELECT_PROOF_REQUIRED
+    purpose: "v4 clean submit rail: only candidates with positive executed public proof may submit."
+  - name: regression-max-tests
+    where: QUANTA_BENCH_REGRESSION_MAX_TESTS
+    purpose: "Cap on discovered regression witnesses run; unset ⇒ 12."
+deliberate_hold: null
+notes: |
+  FAIL-OPEN is the encoding of the north-star: every nullable signal
+  (regressionGreen / patchedResolvedKofN) NEVER rejects a candidate; only an
+  explicit false / insufficient hard signal makes one inadmissible. Soft signals
+  wired today: minimality (relative, parameter-free) + ownerCoverage (candidate
+  files ∩ closure-ranked owners — this is what lets a root-cause sibling beat a
+  symptom fixation). Both hard-gate signal ports are driver-ready: regression
+  (TB, +3.42 lever in Trae's ablation; PASS_TO_PASS threading is the eval-only
+  follow-up; no-oracle `discovered` mode finds impacted native repo tests from
+  candidate source files, base-preflights them, and only rejects on candidate
+  regressions) and patchedResolvedKofN (TC, makePatchedResolvedConsensus re-runs
+  the reproducing set on the patched tree; `verify-select-repro=positive` demotes
+  that self-generated signal to soft-only AND skips eval-only gold calibration,
+  while unset preserves the legacy gold-calibrated hard gate). Current explicit
+  presets: `agentless-v3-thin-strict-closure-select` (noexec candidate-gen +
+  ClosureBundle owner authority + late selector), `agentless-v3-select-regression`
+  (no-oracle selection arm), and `agentless-v3-select-regression-doubt` (same
+  arm plus `repro-doubt:5` for verify-loop stalls). L3, not L4: wired +
+  hellgate-tested, present in explicit experimental presets, but still not
+  promoted as a base-profile winner.

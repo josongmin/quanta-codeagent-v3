@@ -1,0 +1,64 @@
+id: permission-profile-2-layer
+title: PermissionProfile + file_system_sandbox_policy 2-layer (AND condition)
+section: 3
+subsystem: 권한 스택 (ADR-0135)
+order: 20
+maturity: L4
+status: new
+owners: ["@songmin"]
+labels: [absorbed:codex, surface:cli]
+depends_on: [permission-scope-4-tier, permission-4-pillar, special-path-resolver]
+configurable: static
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 4/4 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "pure internal access-decision primitive (configurable static); no user-visible affordance on any surface"
+purpose: |
+  **Codex `turn_context.permission_profile.file_system` + `file_system_sandbox_policy`
+  의 2-layer 모델 흡수.** 동일 schema (`path.type: special/path`, `access: read/write`)
+  의 두 인스턴스를 AND-condition으로 결합 — 두 layer 모두 allow여야 access OK.
+  한쪽이 deny면 deny. permission_profile은 "사용자가 이 path를 read/write 허용했나",
+  file_system_sandbox_policy는 "sandbox가 이 path를 expose하나" — 서로 다른 결정
+  주체이므로 두 layer가 모두 동의해야 함.
+
+  AND 조건 채택 이유 (ADR-0135 §Alternatives): OR는 security 약함. 두 layer 다
+  통과해야 안전. 단일 layer는 검사 비용 절반이지만 한쪽이 misconfig되면 sandbox
+  escape 가능. AND는 검사 비용 2배지만 LRU cache로 95%+ hit rate 보장.
+evidence:
+  code:
+    - src/permission/permission-profile.ts
+    - src/permission/access-check.ts
+    - src/permission/two-layer-manager.ts
+    - src/session/envelope.ts
+  adrs: [135]
+  tests:
+    unit:
+      - tests/unit/permission-access-check.test.ts
+      - tests/unit/permission-stack-2-layer.test.ts
+      - tests/unit/permission/two-layer-path-traversal-hellgate.test.ts
+      - tests/unit/envelope-permission-migration.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  - PermissionProfile.fileSystem.entries + FileSystemSandboxPolicy.entries 둘 다
+    allow-list. 매치 entry 없으면 deny.
+  - write access entry는 read access도 cover (POSIX-style superset).
+  - 두 layer 다 absent (TwoLayerManager.getEffectiveAccess decidedBy=no-policy)
+    이면 manager는 abstain → 호출자는 legacy PermissionStack fallthrough.
+  - 한 layer만 set이면 다른 layer는 DEFAULT (deny-by-default) → 부분 config는
+    strictest 동작.
+  - SECURITY SEAL (jun-15 audit): `containsPath` (the lexical root-containment
+    primitive both layers route through, exported from the barrel) closed a
+    documented fail-OPEN regression — byte-prefix matching let
+    `/repo/../etc/passwd` and prefix-siblings (`/repository`) escape an
+    allow-root for `/repo`. two-layer-path-traversal-hellgate pins the `..`
+    traversal + prefix-sibling + relative-path fail-closed denials, including
+    the dangerous case where BOTH layers root the same allow; red-on-injection
+    verified (reverting to byte-prefix → sibling/escape cases leak). Symlink
+    -target escape stays the OS-sandbox layer's job (this is a lexical guard).

@@ -1,0 +1,71 @@
+id: model-tag-versioning
+title: ModelTag versioning + invalidator + canonical codec (ADR-0266)
+section: 4
+subsystem: retrieval — embedding model identity / cache-store invalidation
+order: 266
+maturity: L3
+status: new
+ui_surfaces: [cli]
+monitoring: integrated
+modes: [n-a]
+configurable: integrated
+owners: ["@songmin"]
+labels: ["surface:core", "adr:0266", "default-off"]
+depends_on: []
+surface_integration:
+  cli: missing
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "src evidence not reachable from the interactive CLI entry (src/apps/cli/index.ts) — wired only into other apps (eval/bench/probe/headless) or unwired"
+    web: "Pure internal codec/invalidator, no UI affordance on any surface."
+purpose: |
+  Tag every stored embedding with its producing model identity (provider /
+  model / version / dim) using a canonical, round-trippable string form
+  `{provider}-{model}-v{version}-d{dim}`. When the embedder is swapped
+  (vendor change / model bump / dim change / major version bump) the
+  default invalidator detects the mismatch and fans the decision out to
+  every registered cache / store callback. Default-OFF — if no consumer
+  registers a callback, the slice is byte-identical to pre-ADR.
+evidence:
+  code:
+    - src/retrieval/versioning/types.ts
+    - src/retrieval/versioning/port.ts
+    - src/retrieval/versioning/tag-codec.ts
+    - src/retrieval/versioning/invalidator.ts
+    - src/retrieval/versioning/registry-callbacks.ts
+    - src/retrieval/versioning/index.ts
+  adrs:
+    - docs/decisions/0266-model-tag-versioning.md
+  tests:
+    unit:
+      - tests/unit/retrieval/model-tag-hellgate.test.ts
+    integration: []
+    contract: []
+knobs:
+  - name: DefaultInvalidatorOptions.onCallbackError
+    default: 'console.warn'
+    purpose: 'overrideable'
+  - name: registerInvalidationCallback
+    default: 'undefined'
+    purpose: '(cb) opt-in registration; absence = byte-identical'
+  - name: tag-codec
+    default: 'undefined'
+    purpose: 'major-version-bump triggers stale; minor / patch do NOT'
+deliberate_hold:
+  reason: |
+    Wiring this invalidator into specific cache (ADR-0254) and persisted
+    index (ADR-0263) layers is deferred. Those consumers own the
+    callback construction + lifetime — this slice ships the primitive,
+    the rules, and the registry seam only.
+  promotion_path: |
+    Documented in ADR; wire when ROI concrete.
+notes: |
+  Hellgate 15 cases (HELL-MT-01..HELL-MT-15) cover canonical format,
+  round-trip, malformed / missing-dim / missing-version / empty-field
+  parse arms, every staleness rule (provider / model / dim /
+  major-bump), minor-bump = fresh, invalidateAll fan-out + per-callback
+  error isolation, default-OFF byte-identity, and ParseError 4-arm
+  exhaustive switch. `exactOptionalPropertyTypes` omitted on
+  InvalidationDecision.reason for ergonomic literal {stale:false}.

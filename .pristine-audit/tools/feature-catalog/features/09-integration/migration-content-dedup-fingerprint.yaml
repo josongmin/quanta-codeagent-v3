@@ -1,0 +1,59 @@
+id: migration-content-dedup-fingerprint
+title: Migration content-dedup fingerprint — SHA-256 of source bytes
+section: 9
+subsystem: migration — dedup fingerprint (ADR-0038)
+order: 46
+maturity: L2
+status: new
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [interactive]
+configurable: partial
+owners: ["@songmin"]
+labels: ["surface:core"]
+depends_on: [migration-import-log-busy]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 2/2 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "Pure internal dedup/fingerprint primitive (ui_surfaces n-a); no user-visible affordance on any surface."
+purpose: |
+  Content-addressed fingerprint of a session transcript file so a re-run
+  does not re-import an unchanged session. `contentSha256(jsonlPath)` is
+  the SHA-256 hex of the raw file bytes (NOT the parsed Messages) —
+  cheapest correct primitive, stable across translator changes for the
+  same source bytes. `wasAlreadyImported(...)` is the dedup query the
+  importer will consult before each translate stage. The current
+  `ImportLogEntry` shape does NOT yet carry the `(sourceId, sha256)`
+  tuple, so the query returns `false` (never-deduped) and behavior is
+  import-everything — matching today's semantics. The log is still
+  loaded so the call validates readability and the wiring is in place
+  for when the entry shape grows.
+evidence:
+  code:
+    - src/migration/dedup.ts
+    - src/migration/persistence.ts
+  adrs: [38]
+  tests:
+    unit: []
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold:
+  reason: |
+    `wasAlreadyImported` is a CONSERVATIVE STUB returning `false` until
+    `ImportLogEntry` is widened with `sourceId + contentSha256`. The
+    fingerprint half is production-grade and exported so callers can
+    already record SHA-256s out-of-band if they wish.
+  promotion_path: |
+    Extend `ImportLogEntry` with `sourceId: string` + `contentSha256:
+    string`, persist them at write time in `persistence.ts`, then
+    implement the match in `wasAlreadyImported` → L4.
+notes: |
+  Pairs with `migration-importer-four-stage` (the future consumer that
+  will gate stage 3 / translate on this query) and
+  `migration-import-log-busy` (the persistence layer that will carry the
+  extended entry shape).

@@ -5,7 +5,10 @@
  * re-deriving them. PURE types + plain constants — no IO, no behavior.
  */
 
-import type { OfficialGradeReceipt } from "@/runner/batch/eval/official-grade"
+import type {
+  OfficialGradeReceipt,
+  OfficialGradeReceiptFailure,
+} from "@/runner/batch/eval/official-grade"
 import type { LspGroundingStatus } from "@/shared"
 import type { DatasetFamily } from "../../dataset-family-token"
 import { CURRENT_BENCH_BASE_PRESET } from "../../preset"
@@ -138,6 +141,17 @@ export interface FullRemoteResult {
    * historical meaning and every one of those lanes is byte-identical.
    */
   readonly officialGrade?: OfficialGradeReceipt
+  /**
+   * PMX-03/04 — why the pieces of this chunk's grade could NOT be merged into
+   * one receipt. Mutually exclusive with {@link officialGrade}.
+   *
+   * A refused merge and a dead box both leave `officialGrade` absent, and the
+   * two are opposite operator problems: one means "nothing came back", the other
+   * means "two graders disagreed / an instance was graded twice". Carrying the
+   * typed codes is what makes them distinguishable downstream instead of both
+   * reading as an empty chunk.
+   */
+  readonly officialGradeFailures?: readonly OfficialGradeReceiptFailure[]
   /** The box run hit the shared OAuth rate limit (a `generation_error` / 429 was
    *  observed in the run log). A pool uses this to BACK OFF before the next chunk
    *  instead of hammering the throttled login. Absent ⇒ not detected. */

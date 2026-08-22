@@ -381,6 +381,98 @@ const COUNTER_BY_STATE: Record<OfficialGradeState, keyof MutableCounts> = {
   ambiguous: "ambiguous",
 }
 
+/**
+ * Fold K persisted sections' totals into ONE campaign row.
+ *
+ * The dashboard's campaign rollup — the ranking surface — needs this, and it may
+ * not compute it: a rate divided anywhere in `tools/leaderboard-dashboard/**` is
+ * a second scoring authority, which a structural rail forbids and which is how
+ * the two surfaces drift. So the fold lives here, beside the aggregation whose
+ * `finish()` it reuses, and every rate is recomputed from the SUMMED counters
+ * rather than averaged (averaging rates weights a 3-instance sidecar like a
+ * 100-instance one).
+ *
+ * OVERLAP is deliberately NOT de-duplicated: these are totals, not ids, so an
+ * instance graded in two sidecars is counted twice. That inflates the
+ * DENOMINATOR — the conservative direction, which can only understate a rate —
+ * and the coverage figure the caller shows beside it makes the inflation
+ * visible. Silently picking one sidecar would be the flattering choice.
+ *
+ * Returns `undefined` for an empty list, and refuses (throws
+ * {@link OfficialGradePartitionError}) if the sum is not a covering partition —
+ * two legal sections always sum to one, so a violation means a member was
+ * written by a producer with a bug and NEITHER number may be published.
+ */
+export const sumOfficialGradeTotals = (
+  sections: readonly OfficialGradeTotals[],
+): OfficialGradeTotals | undefined => {
+  if (sections.length === 0) return undefined
+  const campaign = emptyCounts()
+  const byLanguage = new Map<string, MutableCounts>()
+  const byReason: Record<string, number> = {}
+  const add = (into: MutableCounts, row: OfficialGradeLanguageTotals): void => {
+    into.assigned += row.assigned
+    into.resolved += row.resolved
+    into.model_miss += row.model_miss
+    into.infra_invalid += row.infra_invalid
+    into.ambiguous += row.ambiguous
+    into.missing += row.missing
+  }
+  for (const section of sections) {
+    add(campaign, section)
+    for (const [language, row] of Object.entries(section.by_language)) {
+      let bucket = byLanguage.get(language)
+      if (bucket === undefined) {
+        bucket = emptyCounts()
+        byLanguage.set(language, bucket)
+      }
+      add(bucket, row)
+    }
+    for (const [reason, count] of Object.entries(section.by_reason)) {
+      byReason[reason] = (byReason[reason] ?? 0) + (count ?? 0)
+    }
+  }
+  const totals: OfficialGradeTotals = {
+    ...finish(campaign),
+    by_language: Object.fromEntries(
+      [...byLanguage.entries()]
+        .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+        .map(([k, v]) => [k, finish(v)]),
+    ),
+    by_reason: byReason as OfficialGradeTotals["by_reason"],
+  }
+  assertOfficialGradeCoveringPartition(totals)
+  return totals
+}
+
+/**
+ * The totals of a campaign member that produced NO official section at all.
+ *
+ * C-C (aug-22): the rollup summed the members that HAD a section and dropped the
+ * rest, so a campaign of eight sidecars with one graded file published
+ * `resolved/assigned` over that one file — and a coverage string computed over
+ * the same fraction. A member whose grader never delivered is not outside the
+ * campaign; it is the campaign's coverage LOSS, which is exactly what `missing`
+ * means. So its instances enter as assigned-and-missing: the denominator grows,
+ * coverage falls, and the rate can only understate.
+ *
+ * The language is `unknown` because that is what it is — the member carries no
+ * per-instance grade rows to attribute one from — and it keeps the per-language
+ * table summing back to the campaign, which {@link assertOfficialGradeCoveringPartition}
+ * requires.
+ */
+export const uncoveredOfficialGradeTotals = (assignedCount: number): OfficialGradeTotals => {
+  const counts = emptyCounts()
+  counts.assigned = assignedCount
+  counts.missing = assignedCount
+  const row = finish(counts)
+  return {
+    ...row,
+    by_language: { [OFFICIAL_GRADE_UNKNOWN_LANGUAGE]: row },
+    by_reason: {} as OfficialGradeTotals["by_reason"],
+  }
+}
+
 export interface AggregateOfficialGradeInput {
   readonly receipt: OfficialGradeReceipt
   /** Per-assigned-instance replay metadata. Absent entries degrade to `unknown`
@@ -580,10 +672,78 @@ const decodeLanguageTotals = (v: unknown, what: string): OfficialGradeLanguageTo
 }
 
 /**
+ * Cross-check the section's ROWS against the totals the partition just
+ * validated.
+ *
+ * The partition checks are arithmetic on `totals` alone: they prove the numbers
+ * are self-consistent, and a hand edit that shrinks BOTH the row lists and the
+ * counts satisfies them completely. These three checks are what tie the counts
+ * to named instances, so a section cannot claim a denominator it cannot list:
+ *
+ *  - `missing_instance_ids` must name exactly `totals.missing` DISTINCT
+ *    instances — a dropped id hides which rows the campaign lost, and a
+ *    duplicated one pads the count back up without a second real instance;
+ *  - `instances` must carry exactly `totals.attempted` rows, because the
+ *    aggregation emits one receipt per disposition and `attempted` IS the
+ *    disposition count;
+ *  - the two lists must be DISJOINT: an instance cannot be both graded and
+ *    missing, and an overlap means one of the two walks counted it twice.
+ */
+const assertSectionRowsMatchTotals = (
+  totals: OfficialGradeTotals,
+  instances: readonly OfficialGradeInstanceReceipt[],
+  missingIds: readonly string[],
+): void => {
+  const fail = (message: string): never => {
+    throw new OfficialGradePartitionError(message)
+  }
+  const uniqueMissing = new Set(missingIds)
+  if (uniqueMissing.size !== missingIds.length) {
+    const dup = missingIds.filter((id, i) => missingIds.indexOf(id) !== i)
+    fail(
+      `missing_instance_ids repeats ${[...new Set(dup)].join(", ")} — a name may go missing once`,
+    )
+  }
+  if (missingIds.length !== totals.missing) {
+    fail(
+      `missing_instance_ids names ${missingIds.length} instance(s) but totals.missing=${totals.missing} — ` +
+        "a denominator that cannot be listed is not a denominator",
+    )
+  }
+  if (instances.length !== totals.attempted) {
+    fail(
+      `section.instances carries ${instances.length} row(s) but totals.attempted=${totals.attempted} — ` +
+        "the covering partition emits exactly one instance receipt per disposition",
+    )
+  }
+  const graded = new Set(instances.map((i) => i.instance_id))
+  // C-B (aug-22): `instances.length === attempted` counted ROWS, never NAMES, so
+  // a duplicated receipt padded `attempted` — and therefore `assigned` — with a
+  // second copy of one instance. The same rule the missing list already had:
+  // a denominator must be a set of distinct instances, not a row count.
+  if (graded.size !== instances.length) {
+    const ids = instances.map((i) => i.instance_id)
+    const dup = ids.filter((id, i) => ids.indexOf(id) !== i)
+    fail(
+      `section.instances repeats ${[...new Set(dup)].join(", ")} — ` +
+        "one instance receipt per disposition, so a name may be graded once",
+    )
+  }
+  const both = [...uniqueMissing].filter((id) => graded.has(id))
+  if (both.length > 0) {
+    fail(
+      `${both.join(", ")} appear(s) BOTH in section.instances and in missing_instance_ids — ` +
+        "an instance is graded or missing, never both",
+    )
+  }
+}
+
+/**
  * Read a persisted `officialGrade` section back, re-running the SAME covering-
- * partition validation as construction. A section whose numbers drifted — by a
- * hand edit, a truncated merge, or a filter that dropped rows before the writer
- * saw them — is REFUSED here rather than rendered.
+ * partition validation as construction, PLUS the row/total cross-checks. A
+ * section whose numbers drifted — by a hand edit, a truncated merge, or a filter
+ * that dropped rows before the writer saw them — is REFUSED here rather than
+ * rendered.
  *
  * The per-instance receipts are passed through structurally: they are pure
  * provenance, and losing a digest by re-typing each field would be worse than
@@ -613,14 +773,17 @@ export const decodeOfficialGradeSection = (raw: unknown): OfficialGradeSection =
   if (!isRecord(raw.evaluator)) {
     throw new OfficialGradePartitionError("section.evaluator must be an object")
   }
+  const instances = raw.instances as readonly OfficialGradeInstanceReceipt[]
+  const missingIds = Array.isArray(raw.missing_instance_ids)
+    ? (raw.missing_instance_ids as readonly string[])
+    : []
+  assertSectionRowsMatchTotals(totals, instances, missingIds)
   return {
     schema_version: num(raw.schema_version, "schema_version"),
     totals,
     evaluator: raw.evaluator as unknown as OfficialGradeEvaluatorReceipt,
-    instances: raw.instances as readonly OfficialGradeInstanceReceipt[],
-    missing_instance_ids: Array.isArray(raw.missing_instance_ids)
-      ? (raw.missing_instance_ids as readonly string[])
-      : [],
+    instances,
+    missing_instance_ids: missingIds,
   }
 }
 

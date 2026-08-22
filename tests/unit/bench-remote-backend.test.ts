@@ -56,6 +56,19 @@ const SAMPLE_REPORT = {
 
 const ok = (stdout = ""): SpawnResult => ({ code: 0, stdout, stderr: "" })
 
+/** aug-22 regression repair (`9d5369d31`): the ec2 backend's DEFAULT ami is an
+ *  `ssm:` reference that `resolveLaunchAmi` dereferences into a real image id
+ *  BEFORE RunInstances. Every ec2 mock below must answer that lookup — a mock
+ *  that falls through to empty stdout makes the resolver throw and the launch
+ *  assertions measure a box that never launched. `ssmAmi` is what the fake
+ *  lookup returns; the launch argv is asserted to carry exactly this id, so the
+ *  stub is wired, not decorative. The resolver's own contract (pass-through of
+ *  an explicit `ami-*`, refusal on a malformed/failed lookup) is pinned by
+ *  src/apps/bench/remote/box-session/ami-resolution.test.ts. */
+const ssmAmi = "ami-0123456789abcdef0"
+const ssmAmiLookup = (cmd: string, args: readonly string[]): boolean =>
+  cmd === "aws" && args.includes("get-parameter")
+
 // ── spawnWithProc leak-safety (FIX A) ───────────────────────────────────────
 
 /** A fake proc whose streams/exit are controllable, recording kill + exit-await. */
@@ -374,6 +387,7 @@ describe("ec2 backend", () => {
       if (cmd === "curl" && args.includes("ifconfig.me")) return ok("203.0.113.7")
       if (cmd === "aws" && args.includes("describe-security-groups")) return ok("None") // force create
       if (cmd === "aws" && args.includes("create-security-group")) return ok("sg-abc123")
+      if (ssmAmiLookup(cmd, args)) return ok(`${ssmAmi}\n`)
       if (cmd === "aws" && args.includes("run-instances")) return ok("i-0deadbeef")
       if (cmd === "aws" && args.includes("describe-instances")) return ok("1.2.3.4")
       // waitForSsh probes `ssh … echo READY` and gates on /READY/ in stdout (the
@@ -463,6 +477,7 @@ describe("ec2 backend", () => {
       if (cmd === "aws" && args.includes("describe-security-groups")) return ok("sg-1")
       if (cmd === "aws" && args.includes("authorize-security-group-ingress"))
         return { code: 255, stdout: "", stderr: "InvalidPermission.Duplicate: rule already exists" }
+      if (ssmAmiLookup(cmd, args)) return ok(`${ssmAmi}\n`)
       if (cmd === "aws" && args.includes("run-instances")) return ok("i-1")
       if (cmd === "aws" && args.includes("describe-instances")) return ok("1.2.3.4")
       return ok()
@@ -495,6 +510,7 @@ describe("ec2 backend", () => {
     const { spawn } = makeMockSpawn((cmd, args) => {
       if (cmd === "curl") return ok("203.0.113.7")
       if (cmd === "aws" && args.includes("describe-security-groups")) return ok("sg-1")
+      if (ssmAmiLookup(cmd, args)) return ok(`${ssmAmi}\n`)
       if (cmd === "aws" && args.includes("run-instances")) {
         const it = args[args.indexOf("--instance-type") + 1] ?? ""
         launched.push(it)
@@ -561,13 +577,51 @@ describe("ec2 backend", () => {
     expect(run?.args).toContain("terminate") // instance-initiated-shutdown-behavior
   })
 
-  test("run-instances pins the validated AMI + instance type + spot defaults", async () => {
+  // The AMI is no longer a baked id: `9d5369d31` replaced the region-local
+  // `ami-04c2cdd2e17b15779` (since deleted by Canonical ⇒ every default launch
+  // died at RunInstances) with an `ssm:` reference resolved just before launch.
+  // The teeth therefore moved from "argv equals this literal id" to "argv equals
+  // whatever the SSM lookup returned" — which pins the WIRE (lookup → --image-id)
+  // that a literal could not, and stays red if anyone re-bakes a dead id.
+  test("run-instances pins the SSM-resolved AMI + instance type + spot defaults", async () => {
     const { issued } = await setup()
-    const run = issued.find((i) => i.cmd === "aws" && i.args.includes("run-instances"))
-    expect(run?.args).toContain("ami-04c2cdd2e17b15779")
+    const runIdx = issued.findIndex((i) => i.cmd === "aws" && i.args.includes("run-instances"))
+    const ssmIdx = issued.findIndex((i) => ssmAmiLookup(i.cmd, i.args))
+    expect(ssmIdx).toBeGreaterThanOrEqual(0) // the lookup HAPPENED …
+    expect(ssmIdx).toBeLessThan(runIdx) // … and BEFORE the launch it feeds
+    const ssm = issued[ssmIdx]
+    expect(ssm?.args).toContain(
+      "/aws/service/canonical/ubuntu/server/22.04/stable/current/amd64/hvm/ebs-gp2/ami-id",
+    )
+    const run = issued[runIdx]
+    // --image-id carries EXACTLY the resolved id (not the retired baked one, and
+    // not the raw `ssm:` reference).
+    expect(run?.args[(run?.args.indexOf("--image-id") ?? -1) + 1]).toBe(ssmAmi)
+    expect(run?.args).not.toContain("ami-04c2cdd2e17b15779")
+    expect(run?.args.some((a) => a.startsWith("ssm:"))).toBe(false)
     expect(run?.args).toContain("c7i.4xlarge")
     expect(run?.args).toContain("pickinstead_korea.pem")
     expect(run?.args.some((a) => a.includes('"VolumeSize":300'))).toBe(true)
+  })
+
+  // Fail-loud teeth for the resolution itself, exercised through the REAL backend
+  // (not the isolated resolver unit): a lookup that answers something that is not
+  // an ami id must abort BEFORE RunInstances, never launch with junk.
+  test("a malformed SSM answer refuses the launch (no RunInstances with junk)", async () => {
+    const { spawn, issued } = makeMockSpawn((cmd, args) => {
+      if (cmd === "curl") return ok("203.0.113.7")
+      if (cmd === "aws" && args.includes("describe-security-groups")) return ok("sg-1")
+      if (ssmAmiLookup(cmd, args)) return ok("not-an-ami\n")
+      if (cmd === "aws" && args.includes("run-instances")) return ok("i-should-not-launch")
+      return ok()
+    })
+    await expect(
+      createEc2Backend({ spawn, sleep: async () => {} }).grade("/p.jsonl", {
+        datasetPath: "/d.jsonl",
+        runId: "r",
+      }),
+    ).rejects.toThrow(/AMI SSM resolution failed/)
+    expect(issued.some((i) => i.cmd === "aws" && i.args.includes("run-instances"))).toBe(false)
   })
 
   test("keep:true skips terminate", async () => {
@@ -591,6 +645,7 @@ describe("ec2 backend", () => {
     const { spawn, issued } = makeMockSpawn((cmd, args) => {
       if (cmd === "curl") return ok("203.0.113.7")
       if (cmd === "aws" && args.includes("describe-security-groups")) return ok("sg-existing")
+      if (ssmAmiLookup(cmd, args)) return ok(`${ssmAmi}\n`)
       if (cmd === "aws" && args.includes("run-instances")) return ok("i-1")
       if (cmd === "aws" && args.includes("describe-instances")) return ok("1.1.1.1")
       if (cmd === "ssh" && args.some((a) => a.includes("echo READY") || a.includes("test -f")))
@@ -614,6 +669,7 @@ describe("ec2 backend", () => {
     const { spawn, issued } = makeMockSpawn((cmd, args) => {
       if (cmd === "curl") return ok("203.0.113.7")
       if (cmd === "aws" && args.includes("describe-security-groups")) return ok("sg-1")
+      if (ssmAmiLookup(cmd, args)) return ok(`${ssmAmi}\n`)
       if (cmd === "aws" && args.includes("run-instances")) return ok("i-leak")
       if (cmd === "aws" && args.includes("describe-instances")) return ok("1.1.1.1")
       // report never appears → ssh backend throws

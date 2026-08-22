@@ -1,8 +1,8 @@
 /**
  * TB21-03 — HELLGATE for the ONE Terminal-Bench run-config owner.
  *
- * WHY THIS FILE EXISTS. Terminal-Bench 2.0 was driven by `tools/tb-smoke/*.sh`,
- * which `export`ed knobs into the ambient shell and let harbor argv be assembled
+ * WHY THIS FILE EXISTS. Terminal-Bench 2.0 was driven by shell smoke drivers
+ * (deleted by TB21-06), which `export`ed knobs into the ambient shell and let harbor argv be assembled
  * by string concatenation. Two whole classes of measurement lie follow from that
  * shape: (a) an operator's stale `export QUANTA_TB_VERIFY_GATE=1` silently joins
  * a "baseline" arm, and (b) the report's `knobs.preset` is free text that no one

@@ -118,8 +118,28 @@ interface Recorder {
   calls: Array<{ cmd: string; args: string[]; input?: string }>
 }
 
+/** The image id the fake `aws ssm get-parameter` resolves to (see
+ *  {@link createPoolSpawnRecorder}). */
+const SSM_RESOLVED_AMI = "ami-0123456789abcdef0"
+
+/** Every recorder in this file goes through here, so the two calls the box
+ *  lifecycle makes before it can do anything interesting are answered ONCE:
+ *   - `curl ifconfig.me` (public IP for the SG ingress rule), and
+ *   - `aws ssm get-parameter` — aug-22 regression repair (`9d5369d31`): the
+ *     default AMI became an `ssm:` reference that `resolveLaunchAmi`
+ *     dereferences BEFORE RunInstances. An unanswered lookup falls through to
+ *     the recorder's empty-stdout fallback, the resolver fails loud, and EVERY
+ *     worker aborts at provisioning — which is exactly what these teeth were
+ *     silently measuring. That the pool's launch actually consumes the resolved
+ *     id is pinned by the "resolves the ssm: AMI reference…" test below; the
+ *     resolver's own contract is pinned by
+ *     src/apps/bench/remote/box-session/ami-resolution.test.ts. */
 const createPoolSpawnRecorder = (...handlers: readonly SpawnHandler[]) =>
-  createSpawnRecorder(whenCmd("curl", ok("9.9.9.9")), ...handlers)
+  createSpawnRecorder(
+    whenCmd("curl", ok("9.9.9.9")),
+    whenArgsInclude("get-parameter", ok(`${SSM_RESOLVED_AMI}\n`)),
+    ...handlers,
+  )
 
 /** Mock spawn. `reportFor(runId, launchIdx)` decides the report-fetch payload for
  *  a given chunk runId on a given box (launch index, 0-based) — return "" to
@@ -252,6 +272,26 @@ describe("runPool — persistent box, amortised bootstrap", () => {
     expect(count(calls, (c) => c.args.includes("terminate-instances"))).toBe(0)
     expect(out.every((r) => !r.lost)).toBe(true)
     expect(out.map((r) => r.chunk.runId)).toEqual(["c1", "c2", "c3"]) // input order preserved
+  })
+
+  // Wiring pin for the stub above: the pool's launch does NOT carry a baked AMI
+  // id — it dereferences the `ssm:` default and hands RunInstances whatever came
+  // back. Without this, answering `get-parameter` in the recorder would be an
+  // unobserved convenience; with it, a launch that stopped consuming the resolved
+  // id (or started shipping the raw `ssm:` string) turns this red.
+  test("resolves the ssm: AMI reference and launches with exactly that image id", async () => {
+    const { fn, calls } = mockSpawn({})
+    await runPool(CHUNKS, poolCfg(fn))
+    const ssmIdx = calls.findIndex((c) => c.args.includes("get-parameter"))
+    const runIdx = calls.findIndex((c) => c.args.includes("run-instances"))
+    expect(ssmIdx).toBeGreaterThanOrEqual(0)
+    expect(ssmIdx).toBeLessThan(runIdx)
+    expect(calls[ssmIdx]?.args).toContain(
+      "/aws/service/canonical/ubuntu/server/22.04/stable/current/amd64/hvm/ebs-gp2/ami-id",
+    )
+    const launch = calls[runIdx]?.args ?? []
+    expect(launch[launch.indexOf("--image-id") + 1]).toBe(SSM_RESOLVED_AMI)
+    expect(launch.some((a) => a.startsWith("ssm:"))).toBe(false)
   })
 
   test("each chunk re-ships a token AND writes to a runId-scoped box dir", async () => {

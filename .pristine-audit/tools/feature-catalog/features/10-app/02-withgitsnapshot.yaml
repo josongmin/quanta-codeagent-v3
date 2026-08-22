@@ -1,0 +1,42 @@
+id: withgitsnapshot
+title: withGitSnapshot
+section: 10
+subsystem: 벤치
+order: 2
+maturity: L4
+status: stable
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [n-a]
+configurable: integrated
+config_refs:
+  env: [QUANTA_REPAIR_ROUNDS]
+owners: ['@songmin']
+labels: [surface:cli]
+depends_on: [bench-eval-driver, bench-repair-context-builder, bench-corpus-loader, bench-eval-env-prep, bench-observe-non-agent-evidence]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 1/4 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "pure bench git-snapshot primitive, no UI affordance"
+purpose: '외부 repair 라운드 : 에이전트 자신의 verify cmd 재실행으로 라운드별 게이팅, hidden 필드 미참조 — 단일 withGitSnapshot/continue-from-patched-tree. 실측 2/5(40%) vs 3/5 baseline — negative delta, opt-in 권장 --repair-rounds <int> / ()'
+evidence:
+  code:
+    - src/apps/bench/index.ts
+    - src/apps/bench/eval/snapshot.ts
+    - src/apps/bench/eval/driver.ts
+    - src/agent/verify-guard.ts
+  adrs: [14]
+  tests:
+    unit: ["tests/unit/agent/guard-chain.test.ts", "tests/unit/bench-branch-search-wiring-hellgate.test.ts", "tests/unit/bench-branch-search-wiring.test.ts", "tests/unit/bench-issue-hint-agentless-wiring.test.ts", "tests/unit/bench-issue-hint-wiring.test.ts", "tests/unit/bench-opt-in.test.ts", "tests/unit/bench-repro-test-wiring.test.ts", "tests/unit/verify-checkpoint-bridge-wire-hellgate.test.ts", "tests/unit/verify-guard-hellgate.test.ts", "tests/unit/verify-guard-must-pass-hellgate.test.ts", "tests/unit/verify-guard-must-pass-hellgate.test.ts", "tests/unit/verify-guard-hellgate.test.ts"]
+    integration: ["tests/integration/fallback-x-verify-closeout-hell-e2e.test.ts", "tests/integration/verify-guard-e2e.test.ts", "tests/integration/verify-guard-hellgate-e2e.test.ts"]
+    contract: []
+knobs:
+  - name: QUANTA_REPAIR_ROUNDS
+    default: 'undefined'
+    purpose: '(no description)'
+deliberate_hold: null
+notes: ''

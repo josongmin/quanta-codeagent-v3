@@ -1,0 +1,41 @@
+id: recovery-router-codex-spec
+title: Codex recovery router in the live turn owner
+section: 7
+subsystem: LLM error recovery
+order: 12
+maturity: L4
+status: stable
+ui_surfaces: [cli]
+monitoring: integrated
+modes: [interactive, headless, batch, daemon, ide, ci-bot]
+configurable: integrated
+owners: ["@songmin"]
+labels: ["absorbed:codex", "surface:core", "default-off", "resilience"]
+depends_on: [llm-error-taxonomy, fallback-kinds-policy]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-07-16"
+  evidence:
+    cli: "decideOnStreamError consumes the default typed router at the outer turn recovery boundary."
+    web: "Shared runtime behavior, no independent web surface."
+purpose: "The 16-kind Codex router selects compact, bounded retry, HITL handoff, or fatal turn behavior while provider fallback remains the provider decorator's responsibility."
+evidence:
+  code:
+    - src/agent/recovery.ts
+    - src/llm/retry/codex-spec-router.ts
+    - src/llm/retry/decorator-policy.ts
+    - src/agent/retry.ts
+    - src/llm/fallback.ts
+  adrs: [214]
+  tests:
+    unit:
+      - tests/unit/recovery-router-hellgate.test.ts
+      - tests/unit/recovery-router-consumer-wire.test.ts
+      - tests/unit/retry-decorator-policy-hellgate.test.ts
+    integration: [tests/integration/recovery-router-real-loop-e2e.test.ts]
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: "SINGLE AUTHORITY COMPLETE (DOF-30). The 18-kind × 6-action `codexSpecRoute` table is now the SOLE retry/fallback kind-policy source across ALL three consumers: (1) the OUTER turn-recovery owner `decideOnStreamError` (src/agent/recovery.ts → `decideTypedStreamError` → `codexSpecRoute(kind)` directly [jul-19: the redundant `CodexSpecRouter`/`createDefaultRecoveryRouter` wrapper was deleted; recovery.ts consumes the table function], consumed by src/agent/loop.ts on every stream error), (2) the `RetryingLLM` decorator (src/agent/retry.ts), and (3) the `FallbackLLM` decorator (src/llm/fallback.ts). The decorators' previously-hardcoded `RETRYABLE_KINDS`/`FATAL_KINDS`/`FALLBACK_KINDS` sets are DELETED; both now derive via src/llm/retry/decorator-policy.ts (`retryDispositionForKind` + `isFallbackKind`). Derivation is proven byte-identical to the removed sets for all 18 kinds (tests/unit/retry-decorator-policy-hellgate.test.ts) — the win is dedup onto one table, NOT a behaviour change. `isFallbackKind` is a clean 1:1 projection of the `fallback_provider` action. `retryDispositionForKind` carries one documented carve-out (`not_implemented` = fallback-eligible but non-retryable at the same-provider layer) and preserves the legacy message-marker fallback for the seven kinds the table maps to a non-retry action that legacy `isRetryable` marker-scanned (`unknown`, `context_window_exceeded`, `cyber_policy`, `too_many_failed_attempts`, `thread_rollback_failed`, `sandbox_error`, `sandbox_blocked`) — those keep byte-identical behaviour. FLAGGED measure-first (NOT silently changed): those marker-scan kinds STILL retry when their message contains a retryable marker, contradicting the table's hitl/fatal action (latent divergence, e.g. `cyber_policy` + a '429' message); a fix flipping them to decisive no_retry is a one-line edit in decorator-policy.ts pending measurement. Pre-existing outer-owner flip retained: `not_implemented` same-turn RETRIES at the outer owner — see tests/unit/recovery-router-consumer-wire.test.ts CHARACTERIZATION block. NOT in scope: the opt-in ADR-0203 `errorRouting` refinement (src/agent/error-routing/, default-omitted, distinct `TypedErrorKind` vocabulary) remains a separate injected seam."

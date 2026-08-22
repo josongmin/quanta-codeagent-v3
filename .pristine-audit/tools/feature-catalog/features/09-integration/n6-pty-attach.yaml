@@ -1,0 +1,96 @@
+id: n6-pty-attach
+title: "PTY / tmux session attach (N6) — attach + resize + live stdio across turns"
+section: 9
+subsystem: Interactive terminal session attach (PTY / named tmux), distinct from one-shot + bg shell
+order: 606
+maturity: L3
+status: new
+ui_surfaces: [cli]
+modes: [interactive, headless]
+configurable: integrated
+owners: ["@songmin"]
+labels: ["surface:cli", "exec-risk", "default-off", "pty"]
+depends_on: ["quantamcpconfig"]
+config_refs:
+  env: ["QUANTA_PTY_ATTACH"]
+  runtime: ["ptyAttach"]
+surface_integration:
+  cli: full
+  web: full
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 10/10 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "agent calls to the 6 pty_* tools render as tool cards via bridged tool_call/tool_result events in session-hooks.ts"
+purpose: |
+  N6 (§7, RFC docs/plans/jun-4-pty-attach.md). quanta could spawn shells
+  (one-shot `bash`, `bash` background, the subagent 6-tool pipe router) but had
+  NO real PTY and could not attach to a pre-existing, long-lived interactive
+  terminal. N6 adds a gated `@/tool/pty` slice exposing 6 model-facing tools over
+  ONE `PtySessionPort` with two ZERO-DEP backends (Cursor's "tmux → pty_id" cue):
+
+    pty_list   (read-only) — enumerate attachable handles (handle/kind/cwd/owned)
+    pty_attach (exec)      — idempotent attach, returns the resumable output cursor
+    pty_write  (exec)      — live stdin (64 KiB cap; appendNewline submits a line)
+    pty_read   (read-only) — resumable stdout since a cursor (the Cursor last_event_id invariant)
+    pty_resize (exec)      — (cols, rows), bounded 1..1000
+    pty_kill   (exec)      — terminate owned / allow-listed handles
+
+  The dep crux is RESOLVED with no dependency: tmux is an external binary already
+  on the host (`createTmuxAdapter` — `send-keys`/`capture-pane`/`resize-window`,
+  the MVP-A attach-to-existing backend), and Bun 1.3.14 ships a native PTY
+  (`Bun.Terminal`) for the Phase-1b real-tty backend. node-pty is avoided.
+
+  Phase-1b LANDED (jun-06): `createBunPtyAdapter` (src/tool/pty/bun-pty-adapter.ts)
+  is the SECOND `PtySessionPort` impl — for OWNED PTYs quanta itself spawns under a
+  REAL controlling terminal (isTTY=true, real resize) via an injected
+  `PtyFactoryPort` (the real `Bun.Terminal`/`Bun.spawn({terminal})` lives in the
+  composition layer). It mirrors the port contract EXACTLY (same 7 NO-THROW
+  methods + the same caps) and adds a `spawn`/`closeAll` entry point. Security
+  inversion: owned ⇒ NO foreign-jail (no "attach to someone else's terminal"
+  risk); the ONLY trust boundary is the cwd-jail at spawn. Output is drained from
+  Bun's `data` callback into a bounded (256 KiB) ring with a monotone seq + an
+  explicit gap marker on overflow (byte-exact, no silent drop).
+
+  SECURITY (fail-closed): only tmux sessions matching the allow-prefix (default
+  `quanta-`) are attachable; a foreign session is `foreign-denied` unless
+  `pty.allowForeignTmux` + per-attach HITL; dangerous `pty_write` content flows
+  through the host's existing command-shape HITL classifier; 64 KiB write cap,
+  resize bounds, MAX_ATTACHED cap, bounded per-handle ring buffer.
+
+  Default-OFF (`QUANTA_PTY_ATTACH`): absent ⇒ the 6 tools are NOT registered
+  (byte-identical, exec-risk). Caller-wired via `DefaultToolPorts.ptySession`;
+  the closed-port DI (injected tmux `exec` / Bun backend) keeps the slice
+  fence-clean and fully testable over a Fake backend with no real tmux/process.
+evidence:
+  code:
+    - src/tool/pty/port.ts
+    - src/tool/pty/tools.ts
+    - src/tool/pty/tmux-adapter.ts
+    - src/tool/pty/bun-pty-adapter.ts
+    - src/tool/pty/index.ts
+    - src/tool/index.ts
+    - src/tool/surface/manifest.ts
+    - src/shared/runtime-config.ts
+    - src/host/runtime/pty-backend.ts
+    - src/host/runtime/agent-arg-builder.ts
+  tests:
+    unit:
+      - tests/unit/pty-attach-hellgate.test.ts
+      - tests/unit/pty-bun-native-adapter-hellgate.test.ts
+      - tests/unit/pty-bun-native-parity-hellgate.test.ts
+      - tests/unit/composition-root-gated-port-activation-r3-hellgate.test.ts
+    integration: []
+    contract: []
+  adrs: [486]
+knobs: []
+notes: |
+  L3: the slice + 6 tools + tmux backend are wired (DefaultToolPorts.ptySession)
+  + manifest + knob; 15 hellgate cases over a Fake backend + a fake TmuxExec
+  (resumable-read cursor, resize bounds, write cap, allow-prefix jail, send-keys
+  literal, capture-pane diff). DONE (jun-05): the composition root
+  (`agent-arg-builder.ts` `buildGatedToolPorts`) now mints a real tmux-backed
+  `PtySessionPort` from `runtimeConfig().ptyAttach` via `pty-backend.ts`
+  (`Bun.spawn(["tmux", …])`, argv-array/no-shell, NO-THROW). Knob-on/-off +
+  dispatch-activation pinned by the composition-root r3 hellgate. Deferred: the
+  Bun-native `bun-pty-adapter` (Phase-1b); a live `which tmux`-gated e2e.

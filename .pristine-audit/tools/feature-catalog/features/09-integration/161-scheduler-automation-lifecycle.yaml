@@ -1,0 +1,42 @@
+id: scheduler-automation-lifecycle
+title: Automation lifecycle through the canonical engine
+section: 9
+subsystem: Scheduler / scheduled agent
+order: 161
+maturity: L4
+status: stable
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [interactive, daemon, headless]
+configurable: integrated
+owners: ["@songmin"]
+labels: ["surface:cli"]
+depends_on: [scheduler-model-reroute, scheduler-rrule, scheduler-weekday-nth]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-07-16"
+  evidence:
+    cli: "The automation engine is the sole persistence and tick owner."
+    web: "No scheduler web surface."
+purpose: |
+  The engine owns active, paused, deleted, and error automation lifecycle
+  transitions, durable persistence, due claims, and ticker execution. The
+  former JSONL runtime/store duplicate was removed.
+evidence:
+  code:
+    - src/scheduler/automation-engine/port.ts
+    - src/scheduler/automation-engine/sqlite.ts
+    - src/scheduler/automation-engine/sqlite/operations.ts
+    - src/scheduler/automation-engine/ticker.ts
+  adrs: [161]
+  tests:
+    unit:
+      - tests/unit/scheduler/runtime-correctness-hellgate.test.ts
+      - tests/unit/scheduler/b2-wiring-closeout-hellgate.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: "One engine owner prevents JSONL and SQLite lifecycle divergence."

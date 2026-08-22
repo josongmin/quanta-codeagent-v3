@@ -41,18 +41,18 @@ export {
   worktreeStepSettle,
 } from "./producers/worktree"
 export {
-  type ActivityTreeNode,
-  type FleetRow,
-  projectFleet,
-  projectTree,
-} from "./project"
-export {
   INDETERMINATE,
   mergeProgress,
   type Progress,
   progressEquals,
   toProgress,
 } from "./progress"
+export {
+  type ActivityTreeNode,
+  type FleetRow,
+  projectFleet,
+  projectTree,
+} from "./project"
 export { formatAge, type RenderActivityOpts, renderActivity } from "./render"
 export {
   type ActivityState,

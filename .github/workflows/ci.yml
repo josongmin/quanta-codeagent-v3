@@ -44,7 +44,18 @@ jobs:
       - name: typecheck
         run: bun run typecheck:all
       - name: lint + slice isolation (biome overrides enforce boundaries)
-        run: ./node_modules/.bin/biome check src tests
+        # MUST stay `bun run lint` — the same entrypoint developers run. The
+        # wrapper (tools/dev/run-biome.ts) is the SSOT for WHICH files are
+        # linted; invoking biome directly here let CI and local drift apart
+        # (CI linted the gitignored `.js` mirror artifacts the wrapper skips,
+        # so `bun run lint` was green on files CI failed on, and vice versa).
+        run: bun run lint
+      - name: cognitive-complexity ceiling (one-directional)
+        # biome declares maxAllowedComplexity=15 at level WARN, and `biome check`
+        # exits 0 on warnings — so the rule gates nothing on its own. This step
+        # is the actual gate: repo-wide over-threshold COUNT + WORST score are
+        # pinned in tools/dev/complexity-ceiling.json and may only go DOWN.
+        run: bun run lint:complexity
       - name: unit (speed budget ≤ 8s — RFC §10.1 says <5s, headroom)
         run: |
           start=$(date +%s%3N)

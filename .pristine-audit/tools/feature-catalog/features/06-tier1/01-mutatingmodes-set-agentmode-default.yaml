@@ -1,0 +1,55 @@
+id: mutatingmodes-set-agentmode-default
+title: "`MUTATING_MODES = Set<AgentMode>([\"default\"])` 인버스"
+section: 6
+subsystem: Mode enum (ADR-0018)
+order: 1
+maturity: L5
+status: stable
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [interactive, headless]
+configurable: integrated
+config_refs:
+  env: ["QUANTA_PLAN"]
+  cli: ["--plan"]
+owners: ["@songmin"]
+labels: ["surface:core", "tier:1"]
+depends_on: [assemble-config, auto-approval-reviewer, branch-only-guard, default-acceptedits-bypass-auto, git-c]
+surface_integration:
+  cli: full
+  web: missing
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 4/4 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "mode selection has no web affordance; web POST /config sets only model/effort, mode_changed event is dropped at context-binding default arm (outside 7-tag bridge whitelist)"
+purpose: |
+  AgentMode 4-arm (default | plan | review | audit)에서 mutating tool 허용을
+  positive set(`MUTATING_MODES = Set<AgentMode>(["default"])`)으로 표현하는
+  인버스 디자인. read-only-set 인버스였다면 신규로 추가되는 mode가 자동으로
+  write access를 받는 silent-broaden 위험이 있음. 본 표현 하에서는 알려지지
+  않은(미지/신규) 런타임 mode 값은 admissibility-gate에서 mutating tool
+  dispatch가 자동 BLOCK된다. `--plan` 등 surface flag는 deprecated alias로
+  backward-compat 처리. CLI surface는 `QUANTA_PLAN=1` 또는 `--plan` 시
+  `planEnabled()` true → assembleConfig에 plan mode 주입.
+evidence:
+  code:
+    - src/agent/mode.ts
+    - src/agent/plan.ts
+    - src/agent/admissibility-gate.ts
+    - src/apps/cli/internal.ts
+  adrs: [18]
+  tests:
+    unit:
+      - tests/unit/admissibility-hellgate.test.ts
+      - tests/unit/plan-mode-dispatch-block-hellgate.test.ts
+      - tests/unit/mode-plan-block.test.ts
+    integration:
+      - tests/integration/plan-mode-dispatch-hell-e2e.test.ts
+    contract: []
+knobs:
+  - name: QUANTA_PLAN
+    default: 'undefined'
+    purpose: '(no description)'
+deliberate_hold: null
+notes: read-only-set 인버스였다면 신규 read-only mode가 silent write access를 받을 위험 있음. admissibility-gate에서 mutating tool dispatch 차단. `--plan` 은 deprecated alias로 backward-compat.

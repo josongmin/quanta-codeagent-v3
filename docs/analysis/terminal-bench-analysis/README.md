@@ -1,5 +1,15 @@
 # Terminal-Bench — 문제별 분석
 
+> 🚫 **RETIRED EVIDENCE — Terminal-Bench 2.0. NOT current proof.**
+> This whole directory is the **2.0** 89-task failure taxonomy and competitor-scaffold
+> corpus. The active benchmark is **2.1** (`terminal-bench/terminal-bench-2-1`, pinned at
+> `sha256:7d7bdc…`), whose task set and competitor field differ — so nothing here may be
+> cited as a current pass-rate, a guard task, or a "winnable" target.
+> Disposition: `archive-after-canary` (TB21-00 retirement manifest **DR-6**). It is still
+> on disk only because the archive gate — a green 2.1 canary — has not been met; the
+> delete-vs-port decision is TB21-06's to make after that run. See
+> [`docs/plans/aug-21-bench-terminal-2-1/`](../../plans/aug-21-bench-terminal-2-1/).
+
 Terminal-Bench(`terminal-bench` 데이터셋, **89 task**, Stanford+Laude / laude-institute/terminal-bench-2)를 **task별로 까볼 수 있게** 정리한 레퍼런스. [swe-bench-pro-analysis](../swe-bench-pro-analysis/)와 같은 포맷 철학 — 정답(solve.sh) 기반 유형 분류 + "뭘 조져야 하는지" 공략 포인트. 단 **TB는 코드 diff가 아니라 터미널 작업**이라 축을 새로 정의([TAXONOMY.md](TAXONOMY.md)).
 
 > ⚠️ 분석 md는 **solve.sh(정답) 스포일러 포함** — 사람이 task 유형을 빠르게 파악하는 레퍼런스지 에이전트 블라인드 학습셋 아님. solve.sh엔 canary GUID가 박혀 있음.

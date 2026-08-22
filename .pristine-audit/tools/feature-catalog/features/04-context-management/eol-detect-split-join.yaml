@@ -1,0 +1,55 @@
+id: eol-detect-split-join
+title: EOL detection + EOL-aware split/join (shared SSOT for patch + edit slices)
+section: 4
+subsystem: shared — EOL 정규화 primitive
+order: 23
+maturity: L3
+status: new
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [n-a]
+configurable: static
+owners: ["@songmin"]
+labels: [surface:core]
+depends_on: [patch-filesystem-port, edit-fuzzy-ladder]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "reachable from src/apps/cli/index.ts — `patch/applier.ts` (V4A apply) imports detectEol/splitEolAware/joinWithEol from @/shared/eol; the edit slice mirror (`tool/edit/eol`) is held byte-identical by a parity ratchet"
+    web: "pure measurement + string split/join (no I/O, no state); no user-visible affordance on any surface"
+purpose: |
+  EOL 터미네이터 SSOT: 소스의 dominant terminator 측정 + trailing `\r` 누출 없이
+  라인 분할 + 파일 native terminator 로 재결합. V4A patch applier(`@/patch`)와
+  fuzzy edit ladder(`@/tool/edit`)가 동일 EOL 의미를 필요로 함 — `\r` strip 후
+  비교하는 matcher 가 LF 로 re-emit 하면 CRLF 파일에 mixed-EOL 을 silent 생성.
+  (1) `detectEol` — `\r\n` vs lone-`\n` 개수의 정수 비교; CRLF 가 STRICT majority
+  일 때만 `\r\n`, tie/LF-majority/빈-소스 는 `\n` default — tunable threshold
+  없는 pure measurement 라 CRLF 를 절대 *도입*하지 않음. (2) `splitEolAware` —
+  `/\r?\n/` 로 분할해 `"foo\r\n"` → `"foo"` (trailing `\r` 없음); lone-CR 은
+  terminator 아니라 라인 내부에 남김. (3) `joinWithEol` — terminator-strip 된
+  라인을 주어진 style 로 재결합(trailing newline 미부착 — caller 가 소유).
+  slice fence: `@/patch` 는 `@/tool/edit` 를 import 못 하므로 detection 이
+  `@/shared` 에 살고 두 slice 가 함께 import; parity ratchet 이 본 `detectEol`
+  를 `@/tool/edit/eol` 과 byte-for-byte 동일하게 묶어 drift 방지.
+evidence:
+  code:
+    - src/shared/eol.ts
+  adrs: []
+  tests:
+    unit:
+      - tests/unit/patch/applier-mixed-eol.test.ts
+      - tests/unit/edit-fuzzy-eol-join-ratchet.test.ts
+    integration: []
+    contract:
+      - tests/unit/patch/applier-crlf.f1.test.ts
+knobs: []
+deliberate_hold: null
+notes: |
+  Reference: RFC jun-7 §3.1 / D6 (edit slice) + jun-8 longtail F1 (patch slice).
+  `applier-crlf.f1.test.ts` 는 `@/shared/eol` 와 `@/tool/edit/eol` 의 `detectEol`
+  를 둘 다 import 해 byte-identity 를 assert 하는 parity ratchet(따라서
+  contract). lone-CR(classic Mac)은 의도적으로 모델 안 함 — 소스 파일에서 사실상
+  멸종이라 라인의 일부로 취급.

@@ -1,0 +1,142 @@
+id: microcompact-tool-result-evict
+title: Microcompaction — tier-1 tool-result eviction (in-place content clearing)
+section: 4
+subsystem: Context reclaim — 압축 전 cheaper tier (stale tool-dump body null-out)
+order: 399
+maturity: L3
+status: new
+ui_surfaces: [n-a]
+monitoring: integrated
+modes: [interactive, headless, batch, daemon, ide, ci-bot]
+configurable: integrated
+config_refs:
+  env:
+    - QUANTA_MICROCOMPACT
+    - QUANTA_MICROCOMPACT_KEEP_RECENT
+    - QUANTA_MICROCOMPACT_FLOOR_TOKENS
+    - QUANTA_MICROCOMPACT_INTERVAL_MS
+owners: ["@songmin"]
+labels: [surface:core]
+depends_on: [persisted-output, quantacompacttokens, delta-token-accounting]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 7/7 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "pure context-reclaim primitive; its recovery:compact event is dropped at context-binding default arm (outside 7-tag bridge whitelist) and output is byte-identical, no UI affordance"
+purpose: |
+  압축 3-tier 중 누락된 tier-1 추가(RFC jun-6-microcompaction). 기존: tier-0 capture-time
+  per-result cap(`output-spill.ts`)·tier-2 full LLM summarization(`compactIfNeeded`). 갭=
+  summarization threshold 아래인데 20턴 전 large-but-under-cap tool dump(50KB grep·30KB read·
+  dir listing)로 bloat된 트랜스크립트를 reclaim할 길이 없음.
+
+  본 tier-1=PURE pre-pass `microcompactToolResults`: 메시지 forward-scan으로 tool_result를
+  순서 수집 → LAST N(`keepRecent`, default 3=live working set)만 보존 → 더 오래된 tool_result의
+  BODY를 in-place로 `[Old tool result content cleared]` placeholder(+spill ref)로 rewrite.
+  ZERO LLM cost·ZERO reasoning loss(assistant text/decision는 verbatim, stale tool dump만 shrink).
+  Trigger: idempotent skip-if-already-cleared + `tokensSaved > floor` gate.
+
+  ORPHAN-SAFETY WIN(§3.3): block을 제거하지 않고 CONTENT만 clear하므로 모든 tool_use↔tool_result
+  pairing이 구조적으로 보존됨 → boundary walk·orphan set 불필요(findBoundary보다 strictly 단순,
+  unwired createMicroCompactor보다 strictly 안전). 이건 whole-MESSAGE-drop인 ADR-0409
+  `src/agent/microcompact/`(compaction-visibility.yaml)와 별개의 메커니즘.
+
+  COUNTER-RESEED(§3.4 핵심 correctness): 방금 landed된 delta-token counter는
+  append/replace/clear/tokenReseed에서만 re-anchor. wire는 evicted array를 반드시
+  `wm.replace([...r.messages])`로 install → counter reseed → `tokenTotal() === estimateTokens(
+  snapshot())` byte-identical 유지. in-place `wm.messages[i].content=…`는 counter를 bypass해
+  DRIFT(over-report) → 금지. §6.2 hellgate가 correct path(no drift)·adversarial in-place(drifts)
+  둘 다 봉인.
+evidence:
+  code:
+    - src/agent/tool-result-evict/types.ts
+    - src/agent/tool-result-evict/evict.ts
+    - src/agent/tool-result-evict/spill-adapter.ts
+    - src/agent/tool-result-evict/index.ts
+    - src/shared/runtime-config.ts
+    # HOST WIRING (LIVE): tier-1 pre-pass fires inside maybeCompact BEFORE the
+    # bg-controller reconcile + compactIfNeeded, knob-gated + min-interval
+    # cadence, installs via wm.replace (counter reseed), emits
+    # recovery:{reason:"compact",detail:"microcompact"}.
+    - src/agent/loop/compaction-wire.ts
+    # spill reuse: the evicted original is persisted to the SAME
+    # .quanta/tool-output surface + pruneSpillDir bound as the capture-time cap.
+    - src/tool/output-spill.ts
+  adrs: [492]
+  tests:
+    unit:
+      # §6.1 — keep-last-N / clear-to-placeholder(preserve id+is_error, drop
+      # contentBlocks) / floor-gate(under ⇒ SAME ref, no spill IO) / idempotent
+      # (no re-spill) / ORPHAN-SAFE(tool_use↔result ids identical) / spill
+      # round-trip byte-for-byte / NO-THROW spill failure ⇒ bare placeholder /
+      # image-heavy counted via image estimate / default-adapter injected writer.
+      - tests/unit/microcompaction-evict-hellgate.test.ts
+      # §6.2 — counter consistency: replace ⇒ tokenTotal()===estimateTokens
+      # (snapshot()) no drift; adversarial in-place edit DRIFTS; tokenReseed heals.
+      - tests/unit/microcompaction-x-token-delta-hellgate.test.ts
+      # DOF-40 fail-closed (pure core): out-of-bounds tuning REFUSES (typed
+      # MicrocompactTuningError) instead of silently mis-evicting — keepRecent<=0
+      # / non-integer / negative floor / NaN floor all throw BEFORE any evict;
+      # VALID tuning unchanged (bounded evict, working set retained).
+      - tests/unit/microcompaction-tuning-failclosed-hellgate.test.ts
+      # DOF-40 fail-closed (WIRE, real maybeCompact): ON-proof (valid ⇒ real
+      # eviction observed in the live wm, last keepRecent kept) + paired FAIL-
+      # CLOSED (invalid keepRecent=0 injected via runtimeConfig spy ⇒ VISIBLE
+      # recovery:{compact,microcompact-refused}, transcript UNTOUCHED, no silent
+      # wrong evict) + OFF-identity (unset ⇒ byte-identical object refs, no event).
+      - tests/unit/microcompaction-wire-failclosed-hellgate.test.ts
+    integration:
+      # §6.3 — REAL runAgent: knob-ON clears old tool dumps with ZERO summarizer
+      # calls + reasoning verbatim (tier-2 no-op); knob-OFF byte-identical
+      # (no clear, no recovery:compact event).
+      - tests/integration/microcompaction-tier-e2e.test.ts
+    contract: []
+knobs:
+  - name: QUANTA_MICROCOMPACT
+    default: 'undefined'
+    purpose: Strict opt-in (`=== "1"`). ON이면 maybeCompact가 tier-1 eviction pre-pass를 compactIfNeeded 앞에서 구성·실행. OFF ⇒ pre-pass 미구성, spill dir 미접촉 → byte-identical.
+  - name: QUANTA_MICROCOMPACT_KEEP_RECENT
+    default: '3'
+    purpose: 최근 N개 tool_result를 intact 보존(live working set). positive int knob, wire default 3.
+  - name: QUANTA_MICROCOMPACT_FLOOR_TOKENS
+    default: '4000'
+    purpose: 추정 tokensSaved > floor일 때만 commit. REACTIVE_MIN_INPUT_TOKENS magnitude mirror. 미만이면 트랜스크립트 churn 비가치 → no-op pass-through.
+  - name: QUANTA_MICROCOMPACT_INTERVAL_MS
+    default: '30000'
+    purpose: time-based cadence min-interval(ms). wire의 per-session 게이트(주입 clock). over-eager여도 floor gate가 무해화.
+deliberate_hold: null
+notes: |
+  설계/증명: RFC `docs/plans/jun-6-microcompaction.md`(Status ✅ IMPLEMENTED, §10 as-built).
+  Phase 1(pure pre-pass + spill adapter) + Phase 2(tier-1 wire) landed; Phase 3(context_hint /
+  CLI surface) deferred. L3=tested+wired+default-OFF byte-identity 증명 완비(L4 미주장: ADR
+  미발행 + cadence default가 measurement 전 추정값이라 over-claim 회피).
+
+  AS-BUILT 정제: spill adapter는 output-spill.ts on-disk surface(.quanta/tool-output/<uuid>.txt +
+  pruneSpillDir + QUANTA_TOOL_OUTPUT_SPILL_KEEP)를 REUSE하되, capToolOutput의 8k-head/4k-tail
+  EXCERPT marker 대신 COMPACT 1-line `<persisted-output path=…>` ref 방출 — excerpt는 ~12k
+  원본을 keep해 mid-sized dump의 shrink를 defeat하므로. 모델은 path로 full original을 Read 가능.
+
+  이벤트: stream-recovery union(recovery.ts)에 microcompact variant 없음 → 상태머신 ripple 회피
+  위해 recovery:{reason:"compact",detail:"microcompact"}로 attribute(recovery-reason/types.ts의
+  별도 microcompact provenance variant는 typed-event follow-up). default-OFF 시 pre-pass 미구성·
+  spill dir 미접촉이라 산출 트랜스크립트·이벤트 스트림 byte-identical(§6.3 OFF 케이스 봉인).
+
+  ADR-0409 `src/agent/microcompact/`(compaction-visibility.yaml)와 혼동 금지: 그건 whole-MESSAGE
+  -drop(orphan guard 無, unwired), 본 슬라이스는 in-place tool-result CONTENT clearing(orphan-safe,
+  wired). 다른 알고리즘·다른 safety profile·다른 cost.
+
+  DOF-40 FAIL-CLOSED HARDENING (tuning): keep-recent/floor tuning이 out-of-bounds일 때
+  silent mis-eviction하던 boundary를 typed refusal로 봉인. 이전 갭=pure core가
+  `keepRecent<=0`(→ `Math.max(0,·)`가 working set 전부 evict), non-integer keepRecent(→
+  bogus slice), `tokensSavedFloor=NaN`(→ floor gate `<=NaN` 항상 false → unbounded commit)를
+  전부 SILENT하게 수용(`changed:true`, 무-signal). 이제 `microcompactToolResults`가 스캔/evict
+  전에 `validateMicrocompactTuning`으로 REFUSE(typed `MicrocompactTuningError`, 위반 param 명시).
+  bound=type contract(keepRecent ≥1 int; floor ≥0 finite int)이지 invented threshold 아님
+  (no-heuristics: refusal/bounds만, magnitude 발명 X). env는 이미 `parsePositiveInt`가 정화하나,
+  core가 SSOT chokepoint라 미래 per-session injection path도 커버. WIRE(`maybeMicrocompact`)는
+  refusal을 catch → `recovery:{compact,microcompact-refused}` VISIBLE 방출 + pass SKIP(no
+  wm.replace) = fail CLOSED(turn crash도, silent wrong evict도 아님). cadence-clock는 refuse도
+  스탬프해 misconfigured session이 매 턴 re-throw 안 함. OFF path(knob unset)는 core 미호출이라
+  byte-identical 유지(§6.3 + wire fail-closed OFF-identity 케이스 봉인).

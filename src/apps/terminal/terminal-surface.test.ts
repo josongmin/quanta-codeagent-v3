@@ -1,5 +1,5 @@
 /**
- * B4 hellgate — the `terminal` ToolSurface composition root (RFC jun-29 §13, spec S2/S3).
+ * B4 hellgate — the `terminal` ToolSurface composition root (TB21-06 TC-1a, spec S2/S3/B4).
  *
  * Proves the brain-side entry-point ACTUALLY assembles the surface: container_exec + pty_* are
  * minted per the wired ports (and ONLY those — never the BASE repo-edit/host-exec set), the

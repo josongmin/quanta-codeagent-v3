@@ -20,6 +20,7 @@
  * different construction order cannot change a digest. The digest therefore
  * means "these rows", not "these bytes", which is the property a receipt needs.
  */
+import { errMessage } from "@/shared"
 import { sha256Hex } from "../provenance"
 import type {
   PromaxAgentTaskView,
@@ -104,9 +105,7 @@ const parseArtifact = <T>(text: string, kind: string, label: string): T => {
   try {
     value = JSON.parse(text)
   } catch (err) {
-    throw new ProMaxArtifactError(
-      `promax ${label}: not valid JSON (${err instanceof Error ? err.message : String(err)})`,
-    )
+    throw new ProMaxArtifactError(`promax ${label}: not valid JSON (${errMessage(err)})`)
   }
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
     throw new ProMaxArtifactError(`promax ${label}: expected a JSON object envelope`)

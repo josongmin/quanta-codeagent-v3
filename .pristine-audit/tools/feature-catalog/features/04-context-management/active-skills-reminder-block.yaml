@@ -1,0 +1,48 @@
+id: active-skills-reminder-block
+title: renderActiveSkillsBlock — catalogue + trigger-rule footer (progressive disclosure)
+section: 4
+subsystem: Active-skills per-turn block — body 는 lazy, catalogue 만 reminder 에 (Codex skills-audit 모방)
+order: 15
+maturity: L4
+status: stable
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [interactive, headless, batch, daemon, ide, ci-bot]
+configurable: static
+owners: ["@songmin"]
+labels: [absorbed:codex, surface:core]
+depends_on: [codex-2-phase-consolidator, fallback-kinds-policy, llm-factory, memory-summary-aggregate-coalesce, mode-repo-rules-active-skills-working-state-memory-hints]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 3/3 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "Pure internal per-turn prompt content (model-facing reminder); no user-visible surface affordance."
+purpose: |
+  Active-skills 카탈로그를 per-turn `<system-reminder>` 안에 `- $name — first-line`
+  목록 + 4-rule 트리거 footer 로 렌더한다. Description 의 FIRST LINE 만 사용 —
+  진짜 body 는 모델이 실제 invoke 할 때 `Skill` 도구로 lazy load(progressive
+  disclosure)하므로 매 턴 비용은 catalogue 한 줄 + footer 만. Trigger rules(verbatim,
+  prompt.ts L460-465): (1) user 가 skill 을 명시 ⇒ 그 턴에 invoke; (2) task 가 description
+  과 분명히 일치 ⇒ invoke(mandatory); (3) 다수 매칭 ⇒ minimal cover set, 순서 announce;
+  (4) progressive disclosure — invoke 결정 후에만 `SKILL.md` body load. 빈 리스트 ⇒
+  `undefined` 반환 → caller 가 블록 생략(byte-identical for skill-less sessions).
+evidence:
+  code:
+    - src/agent/prompt.ts
+    - src/agent/turn-context.ts
+    - src/agent/prompt-sections.ts
+  adrs: [22]
+  tests:
+    unit:
+      - tests/unit/prompt-dynamic.test.ts
+      - tests/unit/prompt-sections-hellgate.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  `06-tier1/06-skill-adr-0022` 가 트리거-규칙 자체의 normative spec 을, 본 yaml 은
+  per-turn reminder 렌더링 면의 contract 와 비용/disclosure 모델을 다룬다.

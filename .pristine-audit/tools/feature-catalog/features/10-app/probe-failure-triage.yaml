@@ -1,0 +1,59 @@
+id: probe-failure-triage
+title: probe — NON-authoritative failure triage (ordered rule-table hypothesis)
+section: 10
+subsystem: Probe (trajectory inspector) — failure-class hypothesis
+order: 31
+maturity: L4
+status: stable
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [headless, batch]
+configurable: static
+owners: ["@songmin"]
+labels: ["surface:cli"]
+depends_on: [assert-never-exhaustiveness, byte-stable-string-comparator, errors-helper-fix, runtime-config-ssot]
+surface_integration:
+  cli: missing
+  web: missing
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "src evidence not reachable from the interactive CLI entry (src/apps/cli/index.ts) — wired only into other apps (eval/bench/probe/headless) or unwired"
+    web: "Probe inspector output (hypothesis) is a standalone CLI affordance; code does not run in web-daemon and has no browser surface."
+purpose: |
+  Reads a `TrajectoryEvent[]` and returns a HYPOTHESIS describing the
+  likely failure class:
+    {
+      likely_failure_class: string,
+      confidence:            number,   // hedged — capped well below 1.0
+      hint:                  string,   // one-line, hedged language
+      evidence:              string[]  // raw excerpts for human review
+    }
+  Implementation = ORDERED rule-table of tiny pure predicates over the
+  event list. Rules are tried first-match-wins; each rule encodes a
+  signal pattern (e.g. budget-exhaustion, repeated tool failure of the
+  same class, verify-loop livelock, sandbox-prep crash, missing test
+  command). No field implies certainty: NO "verdict" / "definitive" /
+  "certain" vocabulary is emitted. Pure function — same input ⇒ same
+  output, deterministic, no I/O.
+evidence:
+  code:
+    - src/apps/probe/triage.ts
+    - src/apps/probe/index.ts
+    - src/apps/probe/funnel.ts
+    - src/apps/probe/parse.ts
+  adrs: [10]
+  tests:
+    unit:
+      - tests/unit/probe-triage.test.ts
+    integration:
+      - tests/unit/probe.test.ts
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  Probe philosophy (RFC §1.2): hypothesis only. The triage output is a
+  HINT to the operator, NEVER a programmatic gate. Distinct from the
+  bench `failure-classifier` which classifies an `InstanceResult` post
+  termination (covering+non-exclusive 2-axis schema); triage is purely
+  trajectory-event-driven and does not require a terminated run.

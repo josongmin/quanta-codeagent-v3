@@ -24,7 +24,17 @@
  * the attention rail (the rail is the tool→broker→reader→command→answer graph),
  * so the receipt is a genuine product RED/GREEN, not a stub.
  *
- * The RED (base rail proof) is demonstrated by injection, recorded in the packet
+ * SLICE FENCE (ADR-0024): this file is on the `biome.json` allowlist for
+ * `src/apps/cli/**` imports — the same "explicitly-allowed CLI test" mechanism as
+ * `tests/integration/subagent-panel-e2e.test.ts` / `hitl-approval-e2e.test.ts`.
+ * It is legitimate here because the CLI surface IS the subject under test: the
+ * receipt is worthless unless it drives the REAL `/attention` command, the REAL
+ * CLI lifecycle composition and the REAL fleet renderer. There is no library-side
+ * facade to route through — `src/apps/cli/internal.ts` sits INSIDE the same fenced
+ * group, so re-exporting through it would launder the coupling, not remove it.
+ * NO production code is touched by this test.
+ *
+
  * receipt: removing the dispatch broker branch (`resolveRequestUserInput`) makes
  * the child's question never reach the broker → `/attention` shows no row → the
  * answer route cannot reach the child → section (1) fails. Replacing the explicit
@@ -36,12 +46,12 @@
 import { describe, expect, test } from "bun:test"
 import type { AgentConfig } from "@/agent"
 import { buildToolContext } from "@/agent/dispatch/tool-context"
-import { toAgentFleetRow } from "@/apps/cli/repl/slash-surface"
+import { renderAgentFleet } from "@/apps/cli/agents-fleet-panel"
 import type { CliFeatureConfig } from "@/apps/cli/repl/cli-feature-config"
 import { buildLifecycleBundle } from "@/apps/cli/repl/factories/lifecycle"
+import { toAgentFleetRow } from "@/apps/cli/repl/slash-surface"
 import { attentionCmd, buildAttentionSlashState } from "@/apps/cli/slash/attention-cmd"
 import { buildSurfaceSlashCommands } from "@/apps/cli/slash/registry-surface"
-import { renderAgentFleet } from "@/apps/cli/agents-fleet-panel"
 import type { SlashCommand, SlashContext } from "@/apps/cli/slash-contract"
 import { buildSessionAuthorities } from "@/runner/assemble/session-authorities"
 import { createUserQuestionBroker, type UserQuestionBroker } from "@/session/user-question"
@@ -445,9 +455,7 @@ describe("RFC-01 A5 — TaskRegistry constructor completeness (source scan)", ()
     // Strip block + line comments so a constructor CALL is required, never a bare
     // symbol/prose mention (e.g. subagent.ts's "defaults to `new TaskRegistry()`").
     const stripComments = (s: string): string =>
-      s
-        .replace(/\/\*[\s\S]*?\*\//g, "")
-        .replace(/(^|[^:])\/\/[^\n]*/g, "$1")
+      s.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/[^\n]*/g, "$1")
     const hits: string[] = []
     for await (const rel of glob.scan(root)) {
       if (rel.endsWith(".test.ts")) continue

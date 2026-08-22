@@ -1,0 +1,86 @@
+id: subagent-role-identity
+title: Named-agent role identity — role-specialized system prompt + .quanta/agents runtime loader
+section: 1
+subsystem: 에이전트 코어 — subagent role identity/specialization (Claude/Cursor named-agent 흡수, §20.1/20.2/20.3)
+order: 452
+maturity: L4
+status: new
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [interactive, headless, batch, daemon, ide, ci-bot]
+configurable: partial
+owners: ["@songmin"]
+labels: ["absorbed:claude", "absorbed:cursor", "surface:core", "tier:core"]
+depends_on: [agent, guarded-spawn, subagent-model-override]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 4/4 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "internal spawn-config/system-prompt specialization (named-agent resolver folds system/tools/model into child); no user-visible affordance of its own on any surface"
+purpose: |
+  A forked subagent can run with its OWN role identity instead of always inheriting
+  `parent.system` (§20.1) AND a repo's `.quanta/agents/*.md` named-agent definitions
+  are loaded + instantiated at runtime (§20.2). Three threaded seams:
+  (1) SubagentRequest gains optional `system?` / `mode?` (plain strings — the
+  @/subagent slice owns no AgentMode enum; `model?` already existed from ADR-0451);
+  `buildChildConfig` uses `req.system ?? parent.system` so absent ⇒ byte-identical.
+  (2) NEW `src/agent/named-agent-registry.ts` — `loadNamedAgents(cwd)` reads
+  `.quanta/agents/*.md` (the migration PERSIST destination) + `.claude/agents/*.md`
+  (Claude-Code parity), REUSING the SAME `@/skill` frontmatter parser the migration
+  converter (`convert.ts#convertSubagentFile`) reads these files with (no duplicated
+  parser), and builds `Map<agentType, {system, tools?, model?, mode?}>` +
+  `resolve(agentType)`. The runner's `applyNamedAgent(parent, req)` consults the
+  resolver (off `AgentConfig.namedAgentResolver`) when a spawn carries a matching
+  `agentType` and folds the definition's `{system, toolFilter, model, mode}` into the
+  request — explicit-request-wins on every field. (3) §20.3 — the dead-code maestro
+  nickname pool is wired LIVE: `recordChildNickname` writes a deterministic
+  `assignNickname(stableMailboxId)` display label into the host's `AgentMetaRegistry`
+  (the `list_agents` label source) so an un-typed child shows "Karajan" instead of a
+  bare ordinal; the STABLE id stays the ordinal `root/0` mailbox label.
+  SECURITY (tool widening): a definition's `tools:` is REPO-CONTROLLED and rides ONLY
+  as the spawn's `toolFilter`, which `filterRegistry(parent.registry, toolFilter)`
+  INTERSECTS against the parent's already-granted surface — a definition naming a
+  tool the parent never granted (e.g. `bash`) yields a child registry WITHOUT it
+  (narrow-only, most-restrictive-wins; NO grant of its own).
+  DEFAULT-OFF: no resolver wired / no `.quanta/agents` dir / no matching agentType ⇒
+  child.system === parent.system + no toolFilter/mode change + empty AgentMeta
+  (byte-identical to pre-§20).
+evidence:
+  code:
+    - src/subagent/types.ts
+    - src/agent/named-agent-registry.ts
+    - src/agent/subagent-runner.ts
+    - src/subagent/nicknames.ts
+  adrs: [451, 11, 42]
+  tests:
+    unit:
+      - tests/unit/agent/named-agent-registry.test.ts
+      - tests/unit/subagent/named-agent-spawn-hellgate.test.ts
+    integration: []
+    contract: []
+knobs:
+  - name: '.quanta/agents/<name>.md (frontmatter system/tools/model/mode + body)'
+    default: 'absent ⇒ empty registry'
+    purpose: 'named-agent definition file; body ⇒ role system prompt, frontmatter tools NARROW-ONLY (intersected against parent surface), model fail-closed, mode SSOT-validated. Absent dir ⇒ byte-identical default-OFF.'
+  - name: 'SubagentRequest.system'
+    default: 'undefined'
+    purpose: 'absent ⇒ child inherits parent.system (byte-identical); set (explicit caller OR matched named-agent def) ⇒ replaces the child role system prompt'
+  - name: 'SubagentRequest.mode'
+    default: 'undefined'
+    purpose: 'absent ⇒ child inherits parent.mode; set (named-agent def, SSOT-validated) ⇒ child runs the declared posture (e.g. review)'
+  - name: 'AgentConfig.namedAgentResolver (host-wired)'
+    default: 'undefined'
+    purpose: 'absent ⇒ no named-agent resolution (byte-identical); set ⇒ a matching agentType folds {system,toolFilter,model,mode} into the spawn (explicit-request-wins, narrow-only tools)'
+deliberate_hold: null
+notes: |
+  Reuse-only by design: the frontmatter parse reuses `@/skill#parseFrontmatter` (the
+  same parser the migration converter READS these files with — producer/consumer share
+  one parser, no duplication); the tool-widening guard reuses the existing
+  `filterRegistry` intersection (no new grant path); the model swap rides the ADR-0451
+  modelCandidates id→port mechanism. `AgentConfig.namedAgentResolver` is read via a
+  structural accessor in the runner so the slice compiles independent of the
+  parent-owned field landing. §20.4 (owned/forbidden FS-path ENFORCEMENT — currently
+  advisory prose only) is OUT of scope and remains deferred.

@@ -1,0 +1,64 @@
+id: health-snapshot-watcher
+title: Health snapshot watcher — periodic re-emit + SIGHUP hot-reload (3-channel drift defense)
+section: 8
+subsystem: 관측성 — operator-facing file refresh layering
+order: 99
+maturity: L3
+status: stable
+ui_surfaces: [cli]
+monitoring: integrated
+telemetry_keys: []
+modes: [interactive, headless, batch, daemon, ide, ci-bot]
+configurable: integrated
+owners: ['@songmin']
+labels: [surface:core, observability-primitive]
+depends_on: [metrics-registry]
+config_refs:
+  env: []
+surface_integration:
+  cli: missing
+  web: missing
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "src evidence not reachable from the interactive CLI entry (src/apps/cli/index.ts) — wired only into other apps (eval/bench/probe/headless) or unwired"
+    web: "writes ~/.quanta/health.json for K8s/operator file-scraping, never rendered in the quanta web frontend"
+purpose: |
+  ADR-0180 writes `~/.quanta/health.json` once at composition time. Operators
+  scraping the file on a long-running daemon (K8s livenessProbe periodSeconds:
+  30, cron, shell loop) need the file to TRACK wiring changes, not freeze at
+  startup. This watcher adds 3-channel refresh on top of ADR-0180's primitive:
+    1. Interval — default 30_000ms (mirrors K8s liveness norm + systemd notify
+       socket heartbeat pattern); always-on drift backstop.
+    2. SIGHUP — POSIX hot-reload convention (nginx/postgres/dovecot); external
+       orchestrator forces re-emit without waiting for interval.
+    3. Manual emitNow() — admin RPC + test seam; resolves AFTER write.
+  Layering sourced from Cursor's 4-tier drift defense model (cursor-localization
+  §17: "watcher는 힌트이고 ground truth는 60초마다 서버가 검증") — never trust
+  one channel; combine timer + signal + manual. Stop() is idempotent and
+  removes both timer + listener exactly once; after stop() the emitNow()
+  primitive stays callable for shutdown final-emit pattern. Write failures are
+  swallowed via injected warn (default noop) — state is not poisoned; next
+  tick retries with fresh bag (health snapshot is operator convenience, not a
+  hot-path failure mode).
+evidence:
+  code:
+    - src/observability/metrics/health-snapshot-watcher.ts
+    - src/observability/metrics/health-snapshot.ts
+  adrs: [180, 183, 187]
+  tests:
+    unit: [tests/unit/observability-health-snapshot-watcher-hellgate.test.ts]
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  Default-OFF — composition root (withFullObservability) does NOT attach the
+  watcher automatically; callers must invoke startHealthSnapshotWatcher()
+  explicitly. ADR-0180's file lifecycle is byte-identical when the watcher is
+  absent. Plane-clean imports: only ./health-snapshot (builder/writer) and
+  ./observability-helper (ObservabilityBag type); no direct node:os/fs (writes
+  delegated to HealthSnapshotOpts.writeFile). Process API access (setInterval,
+  process.on("SIGHUP")) only when test seams (setInterval, onSignal) are
+  absent — production path. Follow-up: byte-identical write skip, snapshot
+  rotation, composition-root auto-attach opt.

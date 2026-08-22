@@ -9,6 +9,7 @@
 import type { FaultEvidencePacket } from "@/agent/fault-evidence"
 import type { VerificationPlan } from "@/agent/verification-plan"
 import { extractIssueReproSeed } from "@/agent/verification-plan"
+import type { BenchReproTestReason } from "../../types"
 import type { MweProofState } from "../mwe-proof"
 import type { ReproConsensusProofState } from "../repair/resolved-consensus"
 import type { PublicRegressionProofState } from "../repo-regression-discovery-adapter"
@@ -25,7 +26,6 @@ import { assertEvidenceTextBlind } from "./guards"
 import { opaqueInstanceIdHash } from "./hash"
 import { ownerTestResultReceipt, sourcePolicyOf } from "./policy"
 import { boundHead, boundTail, fmtList } from "./text-utils"
-import type { BenchReproTestReason } from "../../types"
 import type {
   CandidateEditSurfaceFact,
   ContractFact,

@@ -1,0 +1,81 @@
+id: brief-mode
+title: Brief mode — condensed output posture (`/brief` slash + `set_brief` op + `QUANTA_BRIEF` seed)
+section: 8
+subsystem: 출력 verbosity — 세션 brief posture (Claude `briefTranscript` 흡수의 model-facing 절반, C3)
+order: 278
+maturity: L4
+status: new
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [interactive]
+configurable: integrated
+config_refs:
+  cli: ['/brief']
+  env: ['QUANTA_BRIEF']
+owners: ["@songmin"]
+labels: [absorbed:claude, surface:cli, tier:core]
+depends_on: []
+surface_integration:
+  cli: full
+  web: missing
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 9/9 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "QUANTA_BRIEF is NOT in CONFIG_ALLOWED_KEYS (read-only in KnobsPanel, no write); CLI /brief is a B2 prefill stub; set_brief control-op rides no bridged event. User value does not reach the browser"
+purpose: |
+  Claude Code 2.1.150 `briefTranscript`/`tengu_brief_mode_toggled` 흡수의 **model-facing
+  절반** (C3, docs/plans/jun-4-brief-mode.md). Claude의 brief는 render-primary(transcript
+  layout) — copy하면 wire token은 0 절약. v3는 대신 **PROMPT DIRECTIVE**로 구현: brief가 ON일
+  때 terse-output 지시문(`BRIEF_NOTICE`, `src/agent/prompt-body.ts`)을 per-turn DYNAMIC
+  `<system-reminder>` slot(`buildDynamicContext`, `src/agent/prompt.ts`)에 splice — 정적
+  cached prefix는 절대 안 건드림 → mid-session toggle이 provider cache prefix를 무효화 안 하고,
+  default-OFF는 byte-identical (dynamic tail 불변). 지시문은 FINAL 설명 prose만 condense하고
+  **correctness reporting은 명시적으로 EXEMPT** (Verification report / 에러·실패 / file:line
+  evidence / honesty ladder). brevity가 verify를 누락할 핑계가 되지 못하도록 hard floor를 지시문
+  본문 + hellgate 둘 다에 박음. `effort` tier와 ORTHOGONAL (`effort`=token ceiling+reasoning
+  깊이의 wire clamp; `brief`=model이 *선택*하는 prose verbosity의 behavioral nudge) — 둘 다 set
+  가능, "deep think + terse output"으로 compose. Plumbing은 `effort`를 그대로 mirror:
+  `createBriefStore`(pure leaf, `src/agent/brief.ts`) + `QUANTA_BRIEF` seed
+  (`src/shared/runtime-config.ts`) + `/brief` slash(toggle 또는 on|off) + `set_brief`
+  control-op(`src/agent/control-op-handler.ts`, host/model self-mutation seam) +
+  `TurnContextInput.brief?: boolean`.
+evidence:
+  code:
+    - src/agent/brief.ts
+    - src/agent/prompt-body.ts
+    - src/agent/prompt.ts
+    - src/agent/submission.ts
+    - src/agent/control-op-handler.ts
+    - src/shared/runtime-config.ts
+    - src/apps/cli/slash-contract.ts
+    - src/apps/cli/slash/registry-surface.ts
+    - src/apps/cli/help-render.ts
+  adrs: ["docs/plans/jun-4-brief-mode.md"]
+  tests:
+    unit:
+      - tests/unit/brief-mode-hellgate.test.ts
+      - tests/unit/slash-commands.test.ts
+      - tests/unit/agent/submission-set-mode-hell.test.ts
+    integration: []
+    contract: []
+knobs:
+  - name: 'QUANTA_BRIEF'
+    where: 'runtime-config.ts → createBriefStore seed'
+    purpose: 'boot-time brief posture seed (1|true|on ⇒ on; default off)'
+  - name: '/brief [on|off]'
+    where: 'apps/cli/slash/registry-surface.ts'
+    purpose: 'runtime brief toggle (no arg ⇒ flip; mutates store + repaints pill)'
+  - name: 'set_brief'
+    where: 'agent/control-op-handler.ts — applyBriefTransition'
+    purpose: 'model/host self-mutation op — flip brief mid-session; NEXT turn observes'
+deliberate_hold: null
+notes: |
+  Default-OFF byte-identical은 headline 불변식: `QUANTA_BRIEF` unset + no `/brief` ⇒
+  `input.brief` undefined/false ⇒ `buildDynamicContext`가 아무것도 push 안 함 ⇒ dynamic tail이
+  frozen legacy golden과 toBe (hellgate). 정적 prefix는 ON/OFF 동일 (brief는 dynamic slot 전용).
+  `BRIEF_NOTICE`는 mode notice AFTER + repo-rules BEFORE에 위치 (mode notice가 출력을 제약할 수
+  있으니 먼저 읽힘). R1(headline risk: brief가 중요 출력 억제)는 지시문 hard floor + hellgate
+  test 4(correctness block 잔존)로 mitigate. Phase 3 display half(condensed transcript render)는
+  backlog — token 절약과 orthogonal한 순수 UX. 측정(R4): smoke 배터리 A/B(`QUANTA_BRIEF=0` vs `=1`)
+  로 output-token delta 정량화 후에만 % 주장 (no-heuristics-only-validated).

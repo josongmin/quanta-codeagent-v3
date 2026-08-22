@@ -1,0 +1,71 @@
+id: memory-outcome-enum
+title: 4-state memory outcome enum (partial / success / uncertain / fail)
+section: 5
+subsystem: 장기 메모리 — outcome 4-state (Codex 흡수, ADR-0131)
+order: 12
+maturity: L4
+status: stable
+ui_surfaces: [cli]
+monitoring: integrated
+telemetry_keys: [quanta.memory.phase]
+modes: [n-a]
+configurable: n-a
+owners: ["@songmin"]
+labels: ["surface:core", "absorbed:codex"]
+depends_on: [codex-2-phase-consolidator, phase1-stage1-store, memory-fence-cleanup, phase2-promotion-gate, memory-md-atomic-writer]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 4/4 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "pure internal data-model enum + DB column + telemetry key; not rendered on any surface, no UI affordance"
+purpose: |
+  Codex memory corpus(R4+R6) production 분포 (partial 75% / success 15% /
+  uncertain 10% / fail 1%)를 4-state fixed-set enum으로 흡수. 기존 memory
+  자유형 percentage 표현 (“80% done”)이 후속 세션에서 inflation hallucination
+  의 직격 원인이 되는 것을 enum 강제로 차단. [[no-heuristics-only-validated]]
+  강경 지침에 부합 — 임계값/스코어링이 아닌 검증된 4-set 신호.
+
+  추가 컬럼:
+    - `stage1_outputs.outcome` TEXT (nullable, NULL = 레거시/비선언)
+    - `stage1_outputs.outcome_evidence` TEXT (nullable, free-form anchor)
+    - INDEX `idx_stage1_outputs_outcome`
+
+  마이그레이션 idempotent — `pragma_table_info` 프로브로 컬럼 존재 시
+  ALTER 스킵. 기존 메모리 파일/DB 행을 단 하나도 mutation하지 않음
+  ([[codex-absorption-complete]] byte-identical 정신).
+
+  Backward compat 100%:
+    - Stage1Output 타입에서 outcome/outcomeEvidence는 optional
+    - 기존 Phase 1 distill 경로 변경 없음
+    - 신규 컬럼 absent → 도메인 객체에서 키 자체 부재 (undefined)
+    - 모든 기존 552 memory 테스트 그대로 pass
+
+  V2 deferred: outcome auto-derivation (LLM-driven), outcome ↔ body
+  cross-validation, 4-state OTel histogram metric.
+evidence:
+  code:
+    - src/memory/consolidate/types.ts
+    - src/memory/consolidate/schema.ts
+    - src/memory/consolidate/store.ts
+    - src/memory/consolidate/index.ts
+  adrs: [131]
+  tests:
+    unit:
+      - tests/unit/memory-outcome.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  ADR-0131 §1 의 frontmatter 권장 형식:
+  ```
+  ---
+  metadata:
+    outcome: success
+    outcome_evidence: src/foo.ts:42
+  ---
+  ```
+  Lint(W1/W2)는 권장 위반을 WARNING으로만 통지 — 강제 X (opt-in 채택률 우선).

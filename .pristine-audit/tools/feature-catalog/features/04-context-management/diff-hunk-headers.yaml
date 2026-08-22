@@ -1,0 +1,45 @@
+id: diff-hunk-headers
+title: "Unified-diff hunk headers + line-number gutters (CLI diff preview)"
+section: 4
+subsystem: 컨텍스트 — CLI diff 렌더 (git-style @@ 헤더, ADR-0449)
+order: 0
+maturity: L3
+status: stable
+ui_surfaces: [cli]
+modes: [interactive, headless]
+monitoring: n-a
+configurable: partial
+owners: ["@songmin"]
+labels: ["surface:core"]
+depends_on: [cli-diff-preview]
+surface_integration:
+  cli: full
+  web: missing
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 1/1 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "CLI-only ANSI render; web DiffPanel unmounted (App.tsx:578), hunk headers never reach the browser."
+purpose: |
+  Adds `@@ -A,B +C,D @@` hunk headers + old/new line-number gutters to the ANSI
+  diff preview (was +/- prefix only). Groups changes into hunks with git-standard
+  3-line context, merges hunks within 2*context. Additive via a `{hunks}` option
+  defaulting OFF → the original +/- render is byte-identical. Hunk-aware clip
+  (clipHunks) never severs a header from its body (no orphan @@ → invalid diff).
+evidence:
+  code:
+    - src/apps/cli/diff-preview.ts
+  adrs: [449]
+  tests:
+    unit:
+      - tests/unit/cli/diff-preview.test.ts
+    integration: []
+    contract: []
+knobs:
+  - name: renderUnified opts.hunks
+    default: "false (legacy +/- render, byte-identical)"
+    purpose: "true ⇒ @@ headers + line-number gutters"
+deliberate_hold:
+  reason: "word-level intra-line diff + line-wrap gutter continuation deferred."
+  promotion_path: "auto-mount {hunks:true} in the confirm-prompt callers."
+notes: "clipHunks trims back over a trailing header at the maxLines cut; 'N more lines' counts the dropped header."

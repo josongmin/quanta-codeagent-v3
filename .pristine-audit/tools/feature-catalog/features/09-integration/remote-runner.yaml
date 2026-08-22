@@ -1,0 +1,47 @@
+id: remote-runner
+title: Remote runner — `quanta remote` run/status/cancel/logs over docker|lima|apple-vz|headless (ADR-0288/0289/0290)
+section: 9
+subsystem: Remote execution plane
+order: 4212
+maturity: L4
+status: stable
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [headless]
+configurable: integrated
+owners: ["@songmin"]
+labels: [remote, docker, lima, apple-vz, default-off]
+depends_on: []
+config_refs:
+  env: ["QUANTA_REMOTE_RUNNER", "QUANTA_REMOTE_NETWORK", "QUANTA_REMOTE_DEFAULT_IMAGE", "QUANTA_REMOTE_TIMEOUT_MS"]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-15"
+  evidence:
+    cli: "Wired into src/apps/cli/index.ts (the `quanta remote …` subcommand); selectRemoteRunner(process.env,{}) feeds runRemoteCmd (src/apps/cli/remote-cmd.ts). Default-OFF: QUANTA_REMOTE_RUNNER unset/none ⇒ exit 64 remote-not-configured with NO subprocess."
+    web: "no web/daemon surface — remote plane is CLI-only."
+purpose: 'Closed RemoteRunner port (spawn/status/cancel/logs) with an env-driven registry selecting one of four backends — docker, lima, apple-vz, or the deterministic in-memory headless stub. Exposed as the `quanta remote` CLI subcommand (ADR-0290). Default-OFF + import-safe: selectRemoteRunner returns null when QUANTA_REMOTE_RUNNER is unset/"none"/unknown or the adapter host seam is missing — the CLI exits 64 (remote-not-configured) WITHOUT spawning, so importing @/remote never instantiates an adapter. The port guarantees Result-typed spawn/status/cancel (no thrown surface error), idempotent cancel, cached terminal status, and back-pressure-friendly logs as an AsyncIterable that releases on exhaustion/break.'
+evidence:
+  code:
+    - src/remote/runner/index.ts
+    - src/remote/runner/port.ts
+    - src/remote/runner/registry.ts
+    - src/remote/runner/types.ts
+    - src/remote/runner/docker-adapter.ts
+    - src/remote/runner/lima-adapter.ts
+    - src/remote/runner/apple-vz-adapter.ts
+    - src/remote/runner/headless-stub.ts
+    - src/remote/runner/validate.ts
+    - src/apps/cli/remote-cmd.ts
+  adrs: []
+  tests:
+    unit:
+      - tests/unit/remote/runner-port-hellgate.test.ts
+      - tests/unit/remote/docker-adapter-hellgate.test.ts
+    integration: []
+    contract: []
+knobs: ["QUANTA_REMOTE_RUNNER", "QUANTA_REMOTE_NETWORK", "QUANTA_REMOTE_DEFAULT_IMAGE", "QUANTA_REMOTE_TIMEOUT_MS"]
+deliberate_hold: null
+notes: 'Default-OFF: import alone instantiates no adapter; the CLI composition root (src/apps/cli/index.ts) is the only wiring site. ADR md files for 0288/0289/0290 not present on disk (inline ADR refs only) ⇒ adrs:[]. The headless stub doubles as the hellgate determinism backend.'

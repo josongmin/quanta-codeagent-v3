@@ -1,0 +1,5 @@
+{
+  "note": "One-directional ceilings for lint/complexity/noExcessiveCognitiveComplexity (biome maxAllowedComplexity=15, level=warn so biome itself never gates). count = over-threshold functions repo-wide; worst = highest single score. Raise NEVER; tighten with `bun run lint:complexity --tighten`.",
+  "count": 398,
+  "worst": 122
+}

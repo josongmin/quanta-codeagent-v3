@@ -1,0 +1,73 @@
+id: playbook-nesting
+title: Playbook nesting — bounded recursive call chain with cycle detection — ADR-0258
+section: 1
+subsystem: 스킬 — playbook-to-playbook nested invocation (Devin Playbooks nested-call absorption, ADR-0203 macro 1-pass와 직교)
+order: 258
+maturity: L4
+status: new
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [interactive, headless, batch, daemon, ide, ci-bot]
+configurable: integrated
+config_refs:
+  env: []
+owners: ["@songmin"]
+labels: ["surface:core", "tier:1", "absorbed:devin", "slice:playbook"]
+depends_on: [user-authored-playbook-frontmatter]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 5/5 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "pure internal NestedPlaybookExecutor primitive (closed port + cycle detector), no host wires it, ui_surfaces n-a; no UI affordance on any surface"
+purpose: |
+  ADR-0203의 macro 1-pass invariant 위에 직교적으로 추가되는 슬라이스 —
+  procedure-level "playbook A가 playbook B를 호출 + 결과 변환" 패턴을
+  bounded recursion + 명시적 cycle detection으로 봉합한다. Devin Playbook
+  의 두 번째 recursion 형태 (구조적 call vs textual substitution)를 흡수
+  하면서 macro 슬라이스는 손대지 않는다.
+  주요 구성:
+    - NestedPlaybookExecutor port — invoke(parentId, childId, args, depth)
+      → Result<NestedResult, NestError>. 동기 + Result-typed.
+    - NestError 4-arm closed union — depth-exceeded / cycle-detected /
+      child-not-found / child-error. 모든 operational failure가 컴파일
+      타임에 가시. throw 절대 없음.
+    - cycle-detector — pure DFS visit-set helper. 의존 zero, I/O zero.
+    - default-executor — childLookup 주입식, maxDepth default 3 (configurable).
+      try/finally로 stack 누수 방지. 동기 JS semantics + per-top-level 리셋
+      으로 "concurrent" serial invoke isolation 보장.
+  Default-OFF: 어떤 host도 NestedPlaybookExecutor를 construct 안 함.
+  procedure가 child playbook을 참조 안 하는 SKILL.md는 pre-0258 byte-identical
+  (HELL-PN-10 봉인).
+evidence:
+  code:
+    - src/skill/playbook/nesting/types.ts
+    - src/skill/playbook/nesting/port.ts
+    - src/skill/playbook/nesting/cycle-detector.ts
+    - src/skill/playbook/nesting/default-executor.ts
+    - src/skill/playbook/nesting/index.ts
+  adrs: [258, 203]
+  tests:
+    unit:
+      - tests/unit/skill/playbook/nesting-hellgate.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold:
+  reason: |
+    host wire 보류: auto-dispatch.ts / 어떤 planning surface도 아직 NestedPlaybookExecutor를
+    construct 안 함. 현재 라운드는 슬라이스 primitive만 (closed port + default
+    adapter + cycle helper + 15-case hellgate). 후속:
+      - host adapter — procedure step "run playbook X" 디스패치 시 executor 주입
+      - async sibling adapter — 자식 playbook이 subagent spawn 등 async 필요할 때
+      - planner integration — DAG planner가 nested call을 시각화 / cost cap
+  promotion_path: |
+    Documented in ADR; wire when ROI concrete.
+notes: |
+  슬라이스는 leaf-only — @/agent, @/tool, @/permission, @/storage, @/runtime
+  import 0. 모든 import는 ./types, ./port, ./cycle-detector 안에서만. ADR-0203
+  macro 슬라이스 (src/skill/playbook/{port,types,index,auto-dispatch,validator,
+  trigger,template-literal,spec-to-test}.ts)는 unchanged. host가 명시적으로
+  createDefaultNestedExecutor를 wire하기 전까지 dormant.

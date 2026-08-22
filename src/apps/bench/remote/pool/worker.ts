@@ -257,7 +257,7 @@ const loseChunk = (
   result: FullRemoteResult = {},
 ): void => {
   const acc = coverageByRun.get(chunk.runId)
-  const aggregated = acc === undefined ? result : chunkCoverageResult(acc)
+  const aggregated = acc === undefined ? result : chunkCoverageResult(acc, chunk)
   const missing = acc === undefined ? [] : accumulatedMissingInstances(acc, chunk)
   const partial = earnedVerdict(aggregated) && missing.length > 0
   out.set(chunk.runId, {
@@ -395,9 +395,18 @@ const handleIncompleteChunk = async (
   _result: FullRemoteResult,
 ): Promise<void> => {
   const acc = chunkCoverageAccumulatorFor(coverageByRun, chunk.runId)
-  const aggregated = chunkCoverageResult(acc)
+  const aggregated = chunkCoverageResult(acc, chunk)
   const missing = accumulatedMissingInstances(acc, chunk)
   const partial = earnedVerdict(aggregated) && missing.length > 0
+  // PMX-03/04: a chunk whose receipts REFUSED to merge looks exactly like a dead
+  // box from the outside — no verdicts, requeue. Say WHY, or the operator debugs
+  // an infra problem that is really a two-grader / double-graded campaign.
+  if (aggregated.officialGradeFailures !== undefined) {
+    runtime.log(
+      `[pool] worker ${workerId}: chunk ${chunk.runId} produced official-grade receipts that could NOT be merged: ` +
+        aggregated.officialGradeFailures.map((f) => `${f.code}: ${f.message}`).join(" | "),
+    )
+  }
   if (attempt > runtime.maxRetries) {
     loseChunk(out, chunk, attempt, coverageByRun, aggregated)
     return
@@ -785,7 +794,7 @@ const gradeChunkAttempt = async (
     const acc = chunkCoverageAccumulatorFor(coverageByRun, chunk.runId)
     accumulateChunkCoverage(acc, result)
     if (accumulatedCoverageComplete(acc, chunk)) {
-      recordSuccessfulChunk(out, chunk, chunkCoverageResult(acc), attempt, coverageByRun)
+      recordSuccessfulChunk(out, chunk, chunkCoverageResult(acc, chunk), attempt, coverageByRun)
       return { rateLimited: result.rateLimited === true, completed: true, lostBox: false }
     }
     await handleIncompleteChunk(

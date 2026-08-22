@@ -1,0 +1,75 @@
+id: session-cwd-missing-exit
+title: switchToSessionCwd — fail-loud SessionStartupError on missing worktree on resume
+section: 7
+subsystem: 세션 재개 가드 — cwd 부재 진단
+order: 27
+maturity: L4
+status: stable
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [n-a]
+configurable: integrated
+owners: ["@songmin"]
+labels: ["surface:core", "resilience-primitive"]
+depends_on: [repl-code-smell-cleanup, repl-interactive-surface, slashctx-6-ports-wire-completion, multimodal-image-input, runner-persist-turn]
+surface_integration:
+  cli: full
+  web: missing
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 4/4 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "resume is a B3-absent web verb (protocol.ts has no resume); the diagnostic is a CLI stderr line that never reaches the browser"
+purpose: |
+  HIGH-4 fail-loud guard for the resume path. When `--resume <id>` lands on
+  a session whose recorded cwd no longer exists on disk (worktree removed
+  since save / external rm -rf), `switchToSessionCwd` throws a typed
+  `SessionStartupError` (kind: `session_cwd_missing`, exitCode: 1) with the
+  diagnostic message "Session cwd missing: <path>. The worktree may have
+  been removed." BEFORE the SessionDeps capture chains a stale cwd. The
+  top-level `main().catch` in `apps/cli/index.ts` recognizes both
+  `SessionStartupError` and `SessionBootstrapError`, logs `e.message`, and
+  exits `e.exitCode` — so the user-visible behavior is still a clean exit-1
+  with a single diagnostic line, but the error flows through a typed throw
+  instead of an inline `process.exit(1)`. This unblocks contract tests
+  (which can assert structured failure without killing the test runner) and
+  keeps lifetime concerns (when the process actually dies) at the
+  composition root rather than buried in a leaf helper. Without this guard
+  the next `process.cwd()` read silently anchors the session to the LAUNCH
+  directory — every subsequent tool call routes there, scrambling the
+  user's actual project state. Same-cwd short-circuit (target === current)
+  is a no-op and returns current verbatim (most common path: resume in the
+  same cwd). Live chdir on the changed path uses `process.chdir(target)` +
+  reads back `process.cwd()` to capture the canonical (symlink-resolved)
+  form. Distinct from generic argv-error exit (EX_USAGE=64): this is a
+  STATE-of-disk failure, not a usage failure, so it uses the generic-error
+  code (1).
+evidence:
+  code:
+    - src/apps/cli/session-io.ts
+    - src/apps/cli/repl/session-startup-error.ts
+    - src/apps/cli/index.ts
+    - src/apps/cli/repl.ts
+  adrs: []
+  tests:
+    unit:
+      - tests/unit/cli/session-io-startup-error.test.ts
+    integration:
+      - tests/integration/session-cli-subprocess.test.ts
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  `existsSync` is a deliberate (synchronous) probe — this runs once at
+  resume boundary BEFORE any agent loop is started, so the sync FS hit is
+  one-shot and the failure-fast property is more important than the
+  microsecond. The slog observability emits a `session.cwd.switched`
+  structured event on the success path (from→to) so a triage can correlate
+  the chdir with any subsequent tool calls.
+
+  History: prior implementation called `logger.error(...)` + `process.exit(1)`
+  inline. The inline exit killed the bun test runner mid-suite when the
+  contract test exercised the missing-cwd path, masking unrelated failures.
+  The throw-then-top-level-catch refactor preserved exit code + log line
+  while restoring test-runner survivability and making the failure
+  introspectable (`e instanceof SessionStartupError && e.kind === "session_cwd_missing"`).

@@ -1,5 +1,6 @@
 /**
- * `@/apps/terminal/brain-mode` — the terminal "brain-mode" entry-point (RFC jun-29 §13, spec B3).
+ * `@/apps/terminal/brain-mode` — the terminal "brain-mode" entry-point (TB21-06 TC-1a, spec B3 —
+ * `docs/plans/aug-21-bench-terminal-2-1/TB21-06-transferred-contracts.md`).
  *
  * The BRAIN process speaks line-delimited JSON over **stdio** to a separate HANDS process (the
  * Python harbor `serve` adapter). This module assembles the BASE-free terminal tool surface over a
@@ -62,7 +63,7 @@ import {
   type VerificationStamp,
 } from "./verify-gate"
 
-/** Lever #2 knob (RFC `jul-2-terminal-bench-levers/02`): the verify-before-finalize gate.
+/** Lever #2 knob (TB21-06 TC-6): the verify-before-finalize gate.
  *  DEFAULT-OFF ⇒ byte-identical today (no `verification` field, no extra turn). When ON, the brain
  *  inspects the trajectory for an end-to-end exercise of the deliverable and, if none is found,
  *  injects EXACTLY ONE bounded follow-up turn, then stamps an honest verification trichotomy. */
@@ -137,7 +138,7 @@ const TRAJECTORY_PREVIEW_MAX = 240
 export const resolveDebugDumpOn = (env: Record<string, string | undefined>): boolean =>
   (env.QUANTA_BENCH_RECORD_TRAJECTORY ?? "").trim().toLowerCase() === "debug"
 
-/** Lever #1 knob (RFC `jul-2-terminal-bench-levers/01`): the environment posture.
+/** Lever #1 knob (TB21-06 TC-6): the environment posture.
  *  DEFAULT-OFF ⇒ byte-identical today (the brain's system prompt keeps the frozen
  *  SWE-bench env guardrails — R-ENV / R-STOP-ENV). When ON, the brain rebuilds its
  *  SYSTEM prompt with the `owned` posture (install/configure/build freely — a working
@@ -155,7 +156,7 @@ export const TB_ENV_OWNED_ENV = "QUANTA_TB_ENV_OWNED"
  *  class). Measure-first: flips on only for A/B arms until the smoke battery proves it. */
 export const TB_WRITE_TOOL_ENV = "QUANTA_TB_WRITE_TOOL"
 
-/** The terminal brain's DECLARED surface profile (RFC `jul-2-terminal-bench-levers/00` §X).
+/** The terminal brain's DECLARED surface profile (TB21-06 TC-4).
  *  The terminal entry point is a *deployment fact*: it owns its container, so its profile
  *  declares `envPosture: "owned"` + the terminal operator guide. Declaring it here — rather
  *  than an inline `buildSystemPrompt({ envPosture: "owned" })` at the launch site — keeps the
@@ -212,18 +213,6 @@ export interface TerminalBrainReport {
    *  (knob ON) — absent ⇒ byte-identical to the pre-lever report. Lets per-task A/B analysis confirm
    *  the owned prompt actually rendered for this task (guards against a silent env-plumbing miss). */
   readonly envPosture?: "owned"
-  /** Lever #3 (`QUANTA_TB_BEST_OF_N`): PRESENT ONLY when best-of-N ran (N≥2, set by the
-   *  `best-of-n-runner` wrapper) — absent ⇒ byte-identical single-run report. Records how many
-   *  attempts ran, which won, and the FAIR (no-hidden-test) selection rationale, for A/B attribution.
-   *  The single `runTerminalBrain` core never sets this; only the outer wrapper does. */
-  readonly bestOfN?: {
-    /** attempts ACTUALLY run (adaptive early-stop may be < cap). */
-    readonly attempts: number
-    /** the ceiling requested via `QUANTA_TB_BEST_OF_N` (cost analysis). */
-    readonly cap?: number
-    readonly winnerIndex: number
-    readonly rationale: string
-  }
   /** Cassette (RFC 07): a COMPACT, ordered trajectory of the run — every tool_call command paired
    *  with its result (ok / exit code / truncated stdout) plus assistant text turns. Present by DEFAULT
    *  (the pain of jul-3: a regression could not be RCA'd because nothing recorded WHAT the agent did);
@@ -898,13 +887,12 @@ const runMain = async (): Promise<void> => {
   const stdinLines: AsyncIterable<string> = rl as unknown as AsyncIterable<string>
 
   const maxTurns = resolveMaxTurnsFromEnv(process.env)
-  // Lever #3 (`QUANTA_TB_BEST_OF_N`) is NOT run in-process here (structural RCA jul-2): the brain drives
-  // ONE harbor `serve` connection (a single-use stdin duplex + a SINGLE container). Re-running the loop
-  // N times in-process reuses that exhausted duplex (attempt ≥2 hangs waiting for exec results) AND
-  // shares one container (attempts aren't independent). best-of-N is therefore a TRIAL-LEVEL concern —
-  // the supervisor runs the task as N fresh harbor trials (fresh container + duplex each) and fair-
-  // selects across their reports via the pure `best-of-n#selectBestCandidate`. The brain stays a single
-  // clean run. (The `best-of-n.ts` selector + `resolveBestOfN` remain, consumed by the supervisor.)
+  // TRIALS ARE HARBOR'S. The brain is ONE clean attempt and never re-runs its own loop: it drives a
+  // single harbor `serve` connection (a single-use stdin duplex + a SINGLE container), so an in-process
+  // retry would reuse an exhausted duplex and share one container (attempts would not be independent).
+  // Repetition is expressed as `harbor run -k <n>`, which gives each trial a fresh container — see
+  // `@/apps/bench/terminal/config` (`assertNoTerminalBestOfN`), which REFUSES a terminal-local sampler
+  // beside harbor's `-k`. The 2.0-era in-brain best-of-N selector was retired by TB21-06.
   await runTerminalBrain({
     instruction,
     ...(model !== undefined ? { model } : {}),

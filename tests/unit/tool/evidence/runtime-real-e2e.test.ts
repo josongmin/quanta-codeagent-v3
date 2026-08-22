@@ -87,7 +87,9 @@ DR("defaultRuntimePort — REAL Rust runtime capture (cargo + lldb-dap)", () => 
     mkdirSync(join(dir, "src"), { recursive: true })
     writeFileSync(
       join(dir, "Cargo.toml"),
-      ["[package]", 'name = "t"', 'version = "0.1.0"', 'edition = "2021"', "", "[workspace]"].join("\n"),
+      ["[package]", 'name = "t"', 'version = "0.1.0"', 'edition = "2021"', "", "[workspace]"].join(
+        "\n",
+      ),
     )
     writeFileSync(
       join(dir, "src", "lib.rs"),

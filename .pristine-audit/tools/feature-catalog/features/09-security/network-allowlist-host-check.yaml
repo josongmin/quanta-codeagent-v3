@@ -1,0 +1,65 @@
+id: network-allowlist-host-check
+title: Network allowlist — propositional outbound host check (ci-bot mode)
+section: 9
+subsystem: 보안 — 아웃바운드 호스트 게이트 (ci-bot mode lever)
+order: 4
+maturity: L4
+status: stable
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [ci-bot]
+configurable: integrated
+owners: ["@songmin"]
+labels: ["surface:core", "security-touched"]
+depends_on: [sandbox-policy, bash-timeout-cap, escalating-kill, os-sandbox-wire, guarded-spawn]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 2/2 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "pure internal propositional policy check, no UI affordance on any surface"
+purpose: |
+  Pure propositional check answering "is this URL/host on the allowlist?"
+  for the ci-bot mode network lever (`network: { kind: "allowlist"; hosts:
+  readonly string[] }`). The signal is purely the URL/host string — no
+  counts, no thresholds, no fuzzy match. Allowlist semantics: exact host
+  match OR `*.suffix` wildcard for subdomains; everything else is denied.
+  The module only answers the boolean; the CALLER decides what to do with
+  a denial (deny tool call, log, surface to the operator). A small audited
+  default allowlist ships for ci-bot (gh CLI hosts, common package
+  registries, github userinfo objects) and the operator can extend via
+  ModePolicy.network or replace it entirely. Pairs with the `gh` /
+  `runShell` tools that gate outbound network calls per-mode.
+evidence:
+  code:
+    - src/runtime/network-allowlist.ts
+    - src/runtime/index.ts
+  adrs: []
+  tests:
+    unit:
+      - tests/unit/runtime/network-allowlist.test.ts
+    integration:
+      - tests/unit/apps/agent/ci-bot-preset.test.ts
+    contract: []
+knobs:
+  - name: ModePolicy.network.hosts
+    default: 'undefined'
+    purpose: 'operator-supplied allowlist (replaces / extends default)'
+  - name: ModePolicy.network.kind
+    default: 'undefined'
+    purpose: '"allowlist" enables the gate; absent ⇒ no host check'
+deliberate_hold:
+  reason: |
+    No fuzzy / regex / counted-failure modes by design — the gate is
+    propositional and stateless. The signal is the host string alone; any
+    heuristic addition (e.g. "deny after N failed lookups") would be a
+    distinct module with its own ADR.
+  promotion_path: |
+    A future hardening axis (e.g. resolved-IP allowlist or TLS-pin gate)
+    would be a sibling module, not an extension of this one.
+notes: |
+  Wildcard form is `*.suffix` — exact-suffix-only, not a glob. Unparseable
+  inputs return null (treated as "not in allowlist" by callers) so a
+  garbled URL never accidentally passes the gate.

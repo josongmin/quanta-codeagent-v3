@@ -1,0 +1,72 @@
+id: spawn-batch-tool
+title: spawn_batch — structured subagent fan-out (one templated child per item)
+section: 1
+subsystem: tier-1 subagent tools (ADR-0436)
+order: 436
+maturity: L3
+status: stable
+ui_surfaces: [cli, api]
+modes: [interactive, batch, headless]
+configurable: integrated
+owners: ["@songmin"]
+labels: ["absorbed:codex", "surface:tool", "tier:tier1"]
+depends_on: []
+surface_integration:
+  cli: full
+  web: partial
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 8/8 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "as an LLM tool it surfaces in the browser as tool.invoked/tool.completed (name+args+result preview) via the bridge; per-item progress events are B1-dropped so the fan-out observability is thin"
+purpose: |
+  Single structured fan-out tool: items[] (inline) XOR items_path
+  (.csv/.jsonl/.json, parsed inline — no CSV dep) + a prompt_template with
+  {{key}} placeholders ({{item}} for string items, {{{{ }}}} for literal braces)
+  → N templated child runs over a bounded worker pool. Codex
+  spawn_agents_on_csv absorption, generalized away from CSV-only and the
+  worker-side report_agent_job_result tool (workers just return finalText;
+  output_schema is validated parent-side). Self-contained one-shot pool: an
+  inline FIFO admission semaphore bounded by min(max_concurrency ?? schedulerCap,
+  schedulerCap) over the INJECTED runner, per-item timeout race, and
+  partial-failure isolation — one item failing never stops the rest. Returns a
+  deterministic index-ordered BatchItemResult[] + BatchSummary on
+  result.structured plus per-item progress events; all items failing ⇒ ok:false.
+  Pure deterministic templating (no eval/Function/nested access). No Date.now /
+  Math.random / real timers in the slice — clock, file reader, runner all
+  injected; the only setTimeout is the per-item timeout race, unconditionally
+  cleared. Explicit injected caps (maxItems default 256, per-item timeout
+  default 1800s clamped to band) — no inlined heuristics. Triple default-OFF:
+  buildSubagentBatchBlock returns [] unless config.subagent.enableBatchSpawn ===
+  true; the tool returns ok:false (never throws) on cap/XOR violations; absent
+  from ToolRegistry until wired ⇒ byte-identical.
+evidence:
+  code:
+    - src/tool/subagent-batch/port.ts
+    - src/tool/subagent-batch/template.ts
+    - src/tool/subagent-batch/load-items.ts
+    - src/tool/subagent-batch/run-batch.ts
+    - src/tool/subagent-batch/batch.ts
+    - src/tool/subagent-batch/index.ts
+    - src/agent/tier1/subagent-batch.ts
+    - src/agent/optional-ports.ts
+  adrs: ["docs/decisions/0436-batch-spawn.md"]
+  tests:
+    unit:
+      - tests/unit/subagent-batch-hellgate.test.ts
+      - tests/unit/subagent-batch-template.test.ts
+      - tests/unit/subagent-knobs-wire-hellgate.test.ts
+    integration: []
+    contract: []
+knobs: ["QUANTA_SUBAGENT_BATCH", "enableBatchSpawn", "maxBatchItems"]
+deliberate_hold: null
+notes: |
+  Reuses the TaskRegistry cap philosophy + NO-THROW + injected-clock patterns
+  rather than the background scheduler's LRU/serialize machinery (a batch is a
+  one-shot blocking job). Does NOT introduce a CSV library, a worker-side
+  reporting tool, or implicit output_csv_path disk export. Concurrency ceiling
+  reuses config.subagent.maxConcurrent; per-item timeout band reuses
+  config.subagent.waitTimeoutPolicy.
+  2026-06-02 follow-up — dead-seam CLOSED: QUANTA_SUBAGENT_BATCH=on now sets
+  enableBatchSpawn at the composition root (wireOptionalAgentPorts), so the
+  tool reaches the registry in a real session. Default-OFF unchanged.

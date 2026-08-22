@@ -13,15 +13,19 @@ import { errMessage, gateOn } from "@/shared"
 import type { DatasetFamily } from "../../dataset-family-token"
 import { presetRequiresLiveLspGrounding } from "../../preset"
 import { resolveDatasetFamilyProfile } from "../../profiles/registry"
-import type { FamilyRemoteBootstrap } from "../../profiles/types"
 import { datasetFamilyOrDefault } from "../../run-config"
 import { defaultSpawn, type SpawnFn, type SpawnResult } from "../backend"
-import { createBootstrapTracer } from "../bootstrap-tracer"
+import { type BootstrapTracer, createBootstrapTracer } from "../bootstrap-tracer"
 import { PHANTOM_DEPS } from "./auth"
+import { resolveMaxReadyPolls, waitForBoxReady } from "./box-readiness"
 import { readDatasetInstanceIds } from "./dataset-preflight"
-import { ensureWarmBoxFamilyBootstrap, setupBoxForFamily } from "./family-box-setup"
+import {
+  assertFamilyAdmitsBox,
+  ensureWarmBoxFamilyBootstrap,
+  setupBoxForFamily,
+} from "./family-box-setup"
 import { probePyrightGrounding, verifyPyrightGrounding } from "./pyright-grounding"
-import { aws, BENCH_SSH_SAFE_OPTS, defaultSleep, makeSsh, oneLine, shq } from "./shell"
+import { aws, BENCH_SSH_SAFE_OPTS, makeSsh, oneLine, shq } from "./shell"
 import {
   type BoxSnapshotRead,
   readBoxRuntimeProbe,
@@ -390,6 +394,7 @@ const launchInstance = async (
 const bootstrapBox = async (session: BoxSession, cfg: FullRemoteConfig): Promise<void> => {
   const { host, keyPath, spawn, log } = session
   const ssh = session.ssh.bind(session)
+  assertFamilyAdmitsBox({ family: datasetFamilyOrDefault(cfg.swebenchDatasetFamily), log }) // A-C
   log(
     "[full-remote] bootstrapped. Syncing src/ + config (SURGICAL — the monorepo's apps/crates/native are GBs and the bench needs only src)…",
   )
@@ -526,106 +531,9 @@ const describeInstancePublicIp = async (
   return ip
 }
 
-const READINESS_PROBE_CMD =
-  "sudo cloud-init status --wait >/dev/null 2>&1; test -x ~/.bun/bin/bun && echo READY"
-
-/** Classify a not-ready readiness probe and (when it's worth surfacing) log the
- *  REAL ssh exit + stderr — first poll, every 10th, or ANY terminal one. Returns
- *  whether it's a LOCAL-misconfig terminal error so the caller can fail fast.
- *  Extracted from {@link waitForBoxReady} to keep that loop's complexity low. */
-const reportReadinessPoll = (
-  i: number,
-  max: number,
-  probe: SpawnResult,
-  log: (m: string) => void,
-): { code: number; err: string; terminal: boolean } => {
-  const err = (probe.stderr || probe.stdout).trim().replace(/\s+/g, " ").slice(0, 300)
-  const terminal = SSH_TERMINAL_ERROR.test(err)
-  if (i === 0 || i % 10 === 9 || terminal) {
-    log(
-      `[full-remote] readiness poll ${i + 1}/${max} not ready ` +
-        `(ssh exit ${probe.code}${err ? `: ${err}` : ""})` +
-        (terminal ? " — NON-RECOVERABLE (local key/config, not slow-boot)" : ""),
-    )
-  }
-  return { code: probe.code, err, terminal }
-}
-
-/** Default cloud-init readiness window: 90 polls × 10s ≈ 15min. jun-25: 30→90.
- *  A READY box returns on the FIRST poll, so a longer window NEVER slows a
- *  healthy launch — it only tolerates a SLOW bootstrap (the exact box-loss RCA:
- *  under a degraded network / stock-AMI fallback, cloud-init's
- *  docker+bun+uv+pyright install ran past 5min, so a ssh-reachable box was
- *  abandoned as a hard loss when the old 30-poll window expired). */
-const DEFAULT_READY_POLLS = 90
-
-/** Resolve the readiness-poll budget. Precedence: the test-seam `cfg.maxReadyPolls`
- *  (deterministic tests) → the operator knob `QUANTA_FULL_REMOTE_READY_POLLS`
- *  (widen for a persistently-degraded network WITHOUT a code edit) → the default.
- *  Default-safe: unset / garbage / non-positive ⇒ the default, never 0, never throws. */
-export const resolveMaxReadyPolls = (cfg: FullRemoteConfig): number => {
-  if (cfg.maxReadyPolls !== undefined) return cfg.maxReadyPolls
-  const raw = process.env.QUANTA_FULL_REMOTE_READY_POLLS
-  const parsed = raw !== undefined && raw !== "" ? Number(raw) : Number.NaN
-  return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : DEFAULT_READY_POLLS
-}
-
-const waitForBoxReady = async (
-  ssh: (cmd: string) => Promise<SpawnResult>,
-  cfg: FullRemoteConfig,
-): Promise<void> => {
-  const sleep = cfg.sleep ?? defaultSleep
-  const log = cfg.onLog ?? (() => {})
-  const maxReadyPolls = resolveMaxReadyPolls(cfg)
-  // jun-25 RCA: the prior loop DISCARDED probe.code/stderr every poll and threw a
-  // hardcoded guess ("check SG :22 / cloud-init"). So a box that was provably
-  // reachable + ready + world-open-SG looked IDENTICAL to a dead one — a run
-  // burned ~15min × 2 retries blind-polling, and the on-call had to hand-forensic
-  // (ssh + auth.log + AWS state, ~25min) to learn the readiness ssh simply never
-  // reached the box. Surface the REAL exit/stderr: first failure immediately
-  // (the diagnostic that matters), a heartbeat every 10th poll, and the actual
-  // last error in the throw.
-  let last = { code: -1, err: "", terminal: false }
-  let consecutiveTerminal = 0
-  for (let i = 0; i < maxReadyPolls; i++) {
-    const probe = await ssh(READINESS_PROBE_CMD)
-    if (probe.code === 0 && probe.stdout.includes("READY")) return
-    last = reportReadinessPoll(i, maxReadyPolls, probe, log)
-    consecutiveTerminal = last.terminal ? consecutiveTerminal + 1 : 0
-    // A LOCAL-misconfig ssh error (wrong/unreadable key, bad option, stale changed
-    // host key) NEVER heals by waiting — abort after a few consecutive hits rather
-    // than burning the whole ~15min window (and a retry burning another). Auth /
-    // "connection refused" / timeout stay non-terminal (transient during boot).
-    if (consecutiveTerminal >= 3) {
-      throw new Error(
-        `[full-remote] box ssh is NON-RECOVERABLE after ${i + 1} polls ` +
-          `(ssh exit ${last.code}: ${last.err}) — not a slow boot; ` +
-          "check key path / host-key / SG :22, not cloud-init",
-      )
-    }
-    await sleep(10_000)
-  }
-  throw new Error(
-    `[full-remote] box never became ssh-reachable + bun-ready after ${maxReadyPolls} polls ` +
-      `(last ssh exit ${last.code}${last.err ? `: ${last.err}` : ""})`,
-  )
-}
-
-/** ssh stderr patterns that will NEVER self-heal by waiting longer — strictly
- *  LOCAL misconfiguration (wrong/unreadable/unprotected key path, a bad ssh
- *  option, a stale changed host key). These fail INSTANTLY and identically on
- *  every poll, so polling the full window is pure waste.
- *
- *  Deliberately EXCLUDED (these CAN be transient during provisioning, so they
- *  keep polling the full window):
- *  - "Connection refused" / "Operation timed out" — sshd not up yet (slow boot);
- *  - "Permission denied" / "Too many authentication failures" — there is a real
- *    window where sshd is accepting but cloud-init has not yet written the launch
- *    key into the ubuntu user's authorized_keys, so a HEALTHY box transiently
- *    rejects auth. Fast-failing on it would kill boxes mid-bootstrap (exactly the
- *    early-boot transient the 90-poll window exists to tolerate). */
-const SSH_TERMINAL_ERROR =
-  /Host key verification failed|REMOTE HOST IDENTIFICATION HAS CHANGED|identity file .* not accessible|Bad (?:configuration|owner)|Could not resolve hostname|UNPROTECTED PRIVATE KEY/i
+/** The box READINESS-POLL loop lives in its own leaf (`box-readiness.ts`);
+ *  `resolveMaxReadyPolls` is re-exported so no consumer's import moved. */
+export { resolveMaxReadyPolls }
 
 /** Terminate NOW, whatever `keep` says. Used on the provisioning FAILURE path. */
 const forceTerminateInstance =
@@ -692,18 +600,28 @@ export const provisionBox = async (cfg: FullRemoteConfig): Promise<BoxSession> =
 
   const terminate = createInstanceTerminator(keep, awsFn, iid)
 
-  // jun-27 #4: live BOOTSTRAP-phase spans so the ~20min provision window is visible
-  // in the operator's trace UI — a slow bootstrap vs a DEAD one no longer look the
-  // same, and a failed phase surfaces WHERE it died (error span + message). Off
-  // unless an OTEL endpoint is threaded in (cfg.otelEndpoint) ⇒ byte-identical.
-  const tracer = (cfg.makeBootstrapTracer ?? createBootstrapTracer)({
-    endpoint: cfg.otelEndpoint ?? "",
-    iid,
-  })
+  // ⚠️ THE ORPHAN FENCE STARTS HERE. `iid` exists, so AWS is already billing. From
+  // this line until a session is handed back, EVERY throw must terminate the box —
+  // which is why the tracer is constructed INSIDE the try rather than above it.
+  // (aug-22 audit: it used to be constructed above, so a tracer factory that threw
+  // reopened the exact leak `createInstanceTerminator` documents, on a narrower
+  // path — an observability object failing to build would strand a live c7i box
+  // until its 180-minute TTL.)
+  let tracer: BootstrapTracer | undefined
 
   try {
+    // jun-27 #4: live BOOTSTRAP-phase spans so the ~20min provision window is visible
+    // in the operator's trace UI — a slow bootstrap vs a DEAD one no longer look the
+    // same, and a failed phase surfaces WHERE it died (error span + message). Off
+    // unless an OTEL endpoint is threaded in (cfg.otelEndpoint) ⇒ byte-identical.
+    const boxTracer = (cfg.makeBootstrapTracer ?? createBootstrapTracer)({
+      endpoint: cfg.otelEndpoint ?? "",
+      iid,
+    })
+    tracer = boxTracer
+
     log(`[full-remote] instance ${iid} — waiting for running…`)
-    await tracer.phase("wait-running", () =>
+    await boxTracer.phase("wait-running", () =>
       awsFn(["ec2", "wait", "instance-running", "--instance-ids", iid]),
     )
     const ip = await describeInstancePublicIp(awsFn, iid)
@@ -730,8 +648,8 @@ export const provisionBox = async (cfg: FullRemoteConfig): Promise<BoxSession> =
     }
 
     // Wait until SSH is reachable AND cloud-init finished installing bun.
-    await tracer.phase("cloud-init", () => waitForBoxReady(ssh, cfg))
-    await tracer.phase("bootstrap", () => bootstrapBox(session, cfg))
+    await boxTracer.phase("cloud-init", () => waitForBoxReady(ssh, cfg))
+    await boxTracer.phase("bootstrap", () => bootstrapBox(session, cfg))
     return session
   } catch (err) {
     try {
@@ -745,7 +663,19 @@ export const provisionBox = async (cfg: FullRemoteConfig): Promise<BoxSession> =
   } finally {
     // Flush the bootstrap spans (success or failure) before the caller proceeds to
     // grading — which streams its OWN spans into the same trace UI.
-    await tracer.close()
+    //
+    // SWALLOWED, deliberately. Flushing is OBSERVABILITY, and this file's rule is
+    // that observability never changes provisioning: a throw here would (a) replace
+    // a real bootstrap failure with a meaningless exporter error in the `catch`
+    // path's rethrow, and (b) on the SUCCESS path throw AFTER the box is live and
+    // bootstrapped — stranding a running instance the caller never receives and so
+    // can never terminate. `tracer` is undefined only when its factory threw, which
+    // the catch above has already handled.
+    try {
+      await tracer?.close()
+    } catch (flushErr) {
+      log(`[full-remote] bootstrap span flush failed (ignored): ${errMessage(flushErr)}`)
+    }
   }
 }
 

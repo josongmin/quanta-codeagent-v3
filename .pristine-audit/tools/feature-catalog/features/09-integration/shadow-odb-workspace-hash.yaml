@@ -1,0 +1,58 @@
+id: shadow-odb-workspace-hash
+title: Shadow-ODB workspace path → 16-hex directory hash
+section: 9
+subsystem: storage/shadow-odb — deterministic on-disk layout
+order: 43
+maturity: L4
+status: new
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [n-a]
+configurable: partial
+owners: ["@songmin"]
+labels: ["surface:core"]
+depends_on: [shadow-odb-lru-cleanup]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 5/5 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "pure internal hash/codec for storage directory naming, no UI affordance on any surface"
+purpose: |
+  Deterministic SHA-256 hash of a normalized absolute workspace path,
+  truncated to the first 16 hex characters (64 bits). The result is the
+  on-disk directory name for that workspace's shadow ODB, e.g.
+  `~/.quanta/snapshots/3a7f9c1b2e8d4a6b/`. 64 bits gives ~1-in-2^32
+  collision odds across ~4.3 billion workspaces — vastly over-budget for
+  a single user's machine — while keeping the directory name short
+  enough to read at a glance. Determinism invariant: same absolute path
+  ⇒ same hash; different paths ⇒ different hashes (HELL-2 / HELL-3
+  enforce this). Trailing slashes are normalized first so `/foo` and
+  `/foo/` collide deterministically. Uses node `crypto.createHash`
+  rather than `crypto.subtle.digest` so the function stays sync — the
+  caller is already async, but a sync hash makes the determinism
+  invariant trivial to assert in tests.
+evidence:
+  code:
+    - src/storage/shadow-odb/hash.ts
+    - src/storage/shadow-odb/default.ts
+    - src/storage/shadow-odb/index.ts
+    - src/storage/shadow-odb/types.ts
+    - src/storage/shadow-odb/cleanup.ts
+  adrs: [108]
+  tests:
+    unit:
+      - tests/unit/shadow-odb-hellgate.test.ts
+      - tests/unit/shadow-odb-rewind-extensions-hellgate.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  Callers must hand in an already-resolved absolute path — we do NOT
+  realpath here because the symlink-rejection invariant (HELL-8) needs
+  to fire *before* the hash. Pairs with `shadow-odb-foundation` (the
+  rewindable working-tree snapshot store) and `shadow-odb-lru-cleanup`
+  (the on-disk size cap that evicts the oldest workspace dirs).

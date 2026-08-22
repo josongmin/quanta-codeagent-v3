@@ -1,0 +1,140 @@
+id: otel-genai-unified-tracing
+title: OTel-GenAI unified tracing — one {traceId,spanId} across OTLP ≡ OBSERVE ≡ cassette + rule-5 enforcement
+section: 8
+subsystem: 옵저버빌리티 — 크로스-레이어 trace 상관관계(TraceRef) + gen_ai semconv + missing-context 강제
+order: 628
+maturity: L4
+status: new
+ui_surfaces: [cli]
+monitoring: integrated
+telemetry_keys:
+  - gen_ai.operation.name
+  - gen_ai.provider.name
+  - gen_ai.response.finish_reasons
+  - gen_ai.request.model
+  - gen_ai.response.model
+  - gen_ai.conversation.id
+  - error.type
+  - gen_ai.client.operation.duration
+  - gen_ai.client.token.usage
+  - gen_ai.input.messages
+  - gen_ai.output.messages
+  - gen_ai.system_instructions
+  - quanta.instance.id
+  - quanta.instance.attempt
+  - quanta.run.id
+modes: [interactive, headless, batch, daemon, ide, ci-bot]
+configurable: integrated
+config_refs:
+  env:
+    - QUANTA_OTEL_ENDPOINT
+    - QUANTA_OTEL_RUN_ID
+    - QUANTA_RUN_ID
+    - QUANTA_TRACE_CONTEXT
+    - QUANTA_OTEL_CAPTURE_CONTENT
+owners: ["@songmin"]
+labels: ["surface:core", "observability-primitive", "absorbed:none"]
+depends_on: [otel-span-tree, otel-attribute-vocab, bench-live-trace-run-link, jsonl-span-correlation]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-07-13"
+  evidence:
+    cli: "runs in the interactive CLI + bench — withActiveSpanScope wraps every recorded unit from src/apps/cli/index.ts + apps/bench run graph; the exporter's issued TraceRef is the active-context id, so a CLI/agent session's OTLP spans join the trajectory on {traceId,spanId}"
+    web: "cross-layer correlation primitive (AsyncLocalStorage TraceRef + exporter id-unification); no browser-side span render or user-visible affordance on the web daemon"
+purpose: |
+  Unifies the FOUR previously-disjoint trace layers (OTLP spans / OBSERVE stream /
+  replay cassette / debug-sink) onto ONE correlation identity so they are joinable
+  and no consequential action is traced nowhere (ADR-0539). Before: OTEL spans were
+  un-joinable to the trajectory (distinct id schemes); the run verdict was buried.
+  After: OTLP ≡ OBSERVE ≡ cassette share one {traceId, spanId} per instance-ATTEMPT.
+  Components:
+  (1) IDENTITY SSOT — `active-context.ts` (AsyncLocalStorage<TraceRef>,
+  `getActiveTraceRef`/`runWithActiveTraceRef`) is the async-local correlation
+  authority; `hex-id.ts` is the ONE consolidated W3C hex-id mint (default CSPRNG,
+  test-seam gen override) that replaced four duplicate helpers.
+  (2) EXPORTER id-unification (C7) — `otel-span-export.ts` `SpanSink.onStart`
+  RETURNS a TraceRef and `withActiveSpanScope` installs `span.ref` verbatim, so the
+  exporter's issued id IS the active-context id. Parentage derives purely from the
+  enclosing async-local ref; the exporter's LIFO stack is the direct-path fallback
+  only, and scoped spans are EVICTED from it (`onScoped`) the instant they become
+  scoped so concurrent scoped sessions never adopt each other's frame. chat span is
+  kind=CLIENT.
+  (3) gen_ai SEMCONV — the loop span sites (`session-resources.ts`
+  `withActiveSpanScope`) carry gen_ai operation.name (invoke_agent/chat/execute_tool),
+  provider.name, and a finish_reasons ARRAY (OTLP arrayValue).
+  (4) ONE TRACE PER ATTEMPT — `run-main-helpers.ts` `withBenchInstanceRoot` exports a
+  per-attempt `quanta.bench.instance` root span stamping quanta.instance.{id,attempt};
+  best-of-N/retry attempts get distinct trace ids sharing {runId, instanceId}.
+  (5) RULE-5 ENFORCEMENT — a missing active context WHILE a trace context is EXPECTED
+  (a live span sink) is a correlation DEFECT: the OBSERVE recorder
+  (`jsonl-recorder.ts` checkMissingTraceContext) emits ONE `observability_degraded`
+  record (reason:"missing_trace_context") per instance and fails the strict rail; the
+  cassette recorder (`recording-llm.ts`) warns once + stamps a replay-neutral
+  metadata marker. The defect-vs-legitimate distinction is threaded via a
+  `traceContextExpected` DI callback (`() => getSpanSink() !== null`) so @/stream and
+  @/llm/replay never import @/observability. The deterministic `t<turn>` fallback
+  VALUE is retained (existing consumers depend on it) — enforcement only ADDS the
+  degraded signal. `TrajectoryEvent.traceId?` carries the id across the OBSERVE layer.
+evidence:
+  code:
+    - src/observability/tracing/active-context.ts
+    - src/observability/tracing/hex-id.ts
+    - src/observability/otel-span-export.ts
+    - src/observability/metrics/instrument-genai.ts
+    - src/agent/loop-helpers.ts
+    - src/agent/loop/stream-consume.ts
+    - src/agent/session-resources.ts
+    - src/apps/bench/run-main-helpers.ts
+    - src/stream/adapters/jsonl-recorder.ts
+    - src/llm/replay/recording-llm.ts
+    - src/shared/trajectory.ts
+  adrs: [539]
+  tests:
+    unit:
+      - tests/unit/observability/active-context.test.ts
+      - tests/unit/observability/hex-id.test.ts
+      - tests/unit/observability/otel-span-export-wiring-hellgate.test.ts
+      - tests/unit/observability/sampling-span-error-conversation-hellgate.test.ts
+      - tests/unit/observability/genai-client-metrics-hellgate.test.ts
+      - tests/unit/observability/genai-content-capture-hellgate.test.ts
+      - tests/unit/jsonl-recorder.test.ts
+      - tests/unit/llm/replay/recording-trace-ref.test.ts
+      - tests/unit/bench-run-id-and-attempt-root.test.ts
+    integration:
+      - tests/integration/spans-otlp-active-context-unification.test.ts
+      - tests/integration/spans-direct-path-concurrent-scope.test.ts
+      - tests/integration/spans-genai-active-context.test.ts
+    contract: []
+knobs:
+  - name: QUANTA_OTEL_ENDPOINT
+    default: 'undefined'
+    purpose: 'infra: operator OTLP collector URL — presence makes the span sink live (getSpanSink() !== null), which is what "trace context expected" gates on. Absent ⇒ off ⇒ byte-identical / zero-alloc.'
+  - name: QUANTA_RUN_ID
+    default: 'undefined'
+    purpose: 'infra: one run-id authority (≡ QUANTA_OTEL_RUN_ID) rides the OTLP resource as quanta.run.id and threads onto the per-attempt root.'
+  - name: QUANTA_TRACE_CONTEXT
+    default: 'undefined'
+    purpose: 'bench: install a context-only span sink (real trace ids, NO OTLP export) so OBSERVE+cassette carry a unified {traceId,spanId} for the trajectory viewer, endpoint-free. Default-OFF ⇒ byte-identical.'
+  - name: QUANTA_OTEL_CAPTURE_CONTENT
+    default: 'undefined'
+    purpose: 'opt-in GenAI content capture on the chat span (T-D0/T-D1, mirrors OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT): emit the pinned structured gen_ai.input/output.messages + gen_ai.system_instructions attrs and the prompt/completion previews, ALL redacted via redactSecrets. Default-OFF ⇒ no content emitted (byte-identical); the replay cassette (Plane A) stays unredacted + untouched. Off is the fix for the T-B preview leak.'
+deliberate_hold: null
+notes: |
+  Runtime modes off | context | export — only `off` is byte-identical / zero-alloc
+  (`context` allocates ids + async context, NOT "zero cost"). GenAI semconv snapshot
+  is PINNED (Development, not Stable) per ADR-0539 §6 — the plan's commit SHA is the
+  normative contract. Negative invariants: (a) the cassette stays UNREDACTED and its
+  match key is request-hash, so the metadata TraceRef/degraded marker can NEVER
+  invalidate a cross-box replay hit (replay-hash invariant proven in
+  recording-trace-ref.test.ts); (b) @/stream + @/llm/replay never import
+  @/observability — the active ref + traceContextExpected arrive via DI; (c) the
+  `t<turn>` synthetic id is the CORRECT OFF-mode identity (OFF consumers join on it;
+  deleting breaks the byte-identical OFF contract) — C7 RECLASSIFIED as won't-delete-
+  by-design, NOT deferred; no separate "SpanSink compat adapter" exists (audit found
+  none). In unified mode a real ref supersedes it and rule-5 flags its use. LATENT rule-5 trigger
+  (audited clean): the "expected" gate is raw sink-liveness, correct today because
+  every recorded bench emit descends from withBenchInstanceRoot / runAgent's
+  withActiveSpanScope; a future bench-/run-LEVEL emit OUTSIDE that scope while the
+  endpoint is set would strict-throw (harden by gating on a scope-entered flag).

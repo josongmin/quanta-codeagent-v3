@@ -56,6 +56,27 @@ const project = (report: CanonicalBenchReport): ProjectedRun => {
   }
 }
 
+/**
+ * C-C residual (aug-22) — this suite had NO refusal claim at all.
+ *
+ * A refused artifact is dropped from the run set, which drops it from its
+ * campaign's `members` AND from the campaign denominator — the same shrunken
+ * denominator C-C closed for ungraded members, arriving through the refusal
+ * channel. C-B widened that channel: a section that cannot be reconciled against
+ * its own run rows is now refused at decode. An unclaimed refusal renders on NO
+ * surface, so the loss was both silent and invisible.
+ *
+ * Claimed by EXPLICIT identity, or by this branch's own provenance marker — the
+ * `officialGrade` section, which only the SWE writer emits (the terminal branch
+ * has no such key). A `datasetFamily` VALUE is never read as a suite id; that
+ * reading is what BFND-02 removed and it stays removed.
+ */
+const claimsRefused = (raw: Record<string, unknown>): boolean =>
+  raw.benchmarkSuite === "swe-bench" ||
+  (typeof raw.officialGrade === "object" &&
+    raw.officialGrade !== null &&
+    !Array.isArray(raw.officialGrade))
+
 const viewsFor = (seen: ReadonlySet<string>): readonly BenchmarkView[] =>
   sweFamilyViews()
     .filter((view) => view.family === DEFAULT_SWE_VIEW || seen.has(view.family))
@@ -63,6 +84,7 @@ const viewsFor = (seen: ReadonlySet<string>): readonly BenchmarkView[] =>
 
 export const sweBenchProjector: SuiteProjector = {
   suite: "swe-bench",
+  claimsRefused,
   project,
   viewsFor,
   // The SWE render path IS the page's default shell, so this suite contributes no

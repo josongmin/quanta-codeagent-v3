@@ -1,0 +1,53 @@
+id: bench-eval-env-prep
+title: bench — per-instance env pre-preparation (fail-fast on setupCmd)
+section: 10
+subsystem: Bench harness — Type-F structural fix
+order: 44
+maturity: L4
+status: stable
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [headless, batch]
+configurable: integrated
+owners: ["@songmin"]
+labels: ["surface:bench"]
+depends_on: [bench-corpus-loader, bench-eval-driver, dockersandbox, localsandbox, network-allowlist-host-check]
+surface_integration:
+  cli: missing
+  web: missing
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "src evidence not reachable from the interactive CLI entry (src/apps/cli/index.ts) — wired only into other apps (eval/bench/probe/headless) or unwired"
+    web: "env-prep produces the env_prep_failed verdict surfaced in the bench CLI report, not reachable from web-daemon; no browser affordance"
+purpose: |
+  Per-instance env prep — the structural fix for Type-F (verify-loop
+  stuck on env). When the instance carries `setupCmd`, run it INSIDE
+  the sandbox copy BEFORE the agent. If setup exits non-zero, fail-fast
+  with a DISTINCT `env_prep_failed` verdict and DO NOT run the agent —
+  handing a half-prepared env to the model is the worst case (it burns
+  budget thrashing on import errors / missing deps).
+  The setup command is the task author's responsibility to keep
+  HOST-CLEAN (e.g. a per-instance venv created INSIDE `sandbox`, NOT
+  against host Python / global env). The runner enforces this only
+  structurally — by scrubbing the env (`scrubEnv` from `@/runtime`)
+  before spawning the setup process so leaked tokens / API keys cannot
+  reach `pip install` / similar.
+evidence:
+  code:
+    - src/apps/bench/eval/env-prep.ts
+    - src/apps/bench/eval/exec.ts
+  adrs: []
+  tests:
+    unit:
+      - tests/unit/bench-env-prep.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  Distinct verdict (`env_prep_failed`) so the bench report can clearly
+  attribute failures to harness/env issues vs model issues — critical
+  for triaging large runs. Without this verdict, env failures would be
+  miscounted as agent failures (Type-F). The fail-fast invariant means
+  ZERO model tokens are spent when env setup itself is broken.

@@ -1,0 +1,41 @@
+id: quantamodelfallback
+title: QUANTA_MODEL_FALLBACK
+section: 7
+subsystem: 모델 Fallback (Tier 0)
+order: 2
+maturity: L3
+status: stable
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [interactive, headless, batch, daemon, ide, ci-bot]
+configurable: integrated
+config_refs:
+  env: [QUANTA_MODEL_FALLBACK]
+owners: ['@songmin']
+labels: [surface:core, resilience-primitive]
+depends_on: [assemble-config, runner-assemble-builders, cli-export-2026-05-21-l2-l3, cli-resume-state-machine, fallback-kinds-policy]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 3/3 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "pure config/resilience wiring; not one of the 6 web-writable CONFIG_ALLOWED_KEYS and has no UI affordance"
+purpose: ', retry-inner/fallback-outer'
+evidence:
+  code:
+    - src/runner/assemble/llm.ts
+    - src/apps/cli/internal.ts
+    - src/llm/fallback.ts
+  adrs: []
+  tests:
+    unit: [tests/unit/fallback.test.ts]
+    integration: []
+    contract: []
+knobs:
+  - name: QUANTA_MODEL_FALLBACK
+    default: 'undefined'
+    purpose: '(no description)'
+deliberate_hold: null
+notes: ''

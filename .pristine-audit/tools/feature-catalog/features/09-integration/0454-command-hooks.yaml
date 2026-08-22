@@ -1,0 +1,141 @@
+id: command-hooks
+title: Disk-configured command hooks (security-gated shell on HookBus events, ADR-0454)
+section: 9
+subsystem: HookBus shell-command executor
+order: 454
+# L3 (root-wired): the composition-root activation LANDED jun-02 R3 follow-up via
+# the security-reviewed ADR-0459 — `installCommandHooksIntoBase` (src/apps/agent/
+# index.ts) reads QUANTA_COMMAND_HOOKS + QUANTA_COMMAND_HOOKS_ACK + settings.json
+# #hooks (loaded async at runMain, threaded via the partial), normalizes the gate
+# (fail-fast on enabled-without-ack), and calls installCommandHooks on the (minted
+# or reused) HookBus. Default-OFF byte-identical when the knob is unset. (Was
+# briefly L2 in R3-audit before this bind — it was an intentional hold, not a bug.)
+maturity: L3
+status: stable
+ui_surfaces: [n-a]
+monitoring: partial
+modes: [n-a]
+configurable: partial
+owners: ["@songmin"]
+labels: ["surface:core", "absorbed:claude", "security-touched", "default-off"]
+depends_on:
+  - hookbus
+  - hook-updated-input
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 7/8 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "disk-configured shell executor on HookBus events; runs invisibly on the backend, ui_surfaces n-a, no browser affordance"
+purpose: |
+  Adds the missing executor for Claude Code's settings.json#hooks model: a
+  closed-port CommandHookRunner that, on a matching HookBus event, runs the
+  configured shell command(s) ONE-SHOT through an injected spawn port, passing
+  the hook event payload as JSON on the child's stdin (Claude Code contract),
+  and maps exit code / stdout back to the HookBus deny / updatedInput channels.
+  The migration translator already PARSED these command hooks but only counted
+  them — this slice runs them.
+
+  SECURITY MODEL (security-touched): arbitrary user shell. Default-OFF, gated by
+  a strict funnel — opt-in toggle (enabled===true) + a non-empty acknowledgedRisk
+  string (mirrors redaction-disable ack; enabled without ack THROWS at config
+  time) + at least one binding + a permission decision (CommandHookPermissionPort,
+  consulted once per event). INJECTION-SAFE: the user command is the argv tail
+  verbatim, NEVER concatenated with the payload; the payload reaches the command
+  only as JSON on stdin. STDIN-BOUNDED (DOF-40): the JSON envelope written to the
+  arbitrary-shell child's stdin is capped at the gate's IO bound (maxOutputBytes,
+  default 1MB) — an over-cap payload is DROPPED and replaced with a minimal safe
+  envelope carrying the event type + payload_truncated:true (the hook still fires,
+  bounded), so a model-/tool-derived payload can never produce an unbounded stdin
+  write; defense-in-depth, independent of the HookBus payload cap. Confinement
+  reuses LocalSandbox (scrubEnv env-allowlist,
+  timeout default 30s, output cap default 1MB, dotfile-skipping shell,
+  SIGTERM→SIGKILL escalation). Fail-closed: timeout ⇒ deny; exit≠0 ⇒ deny.
+
+  Reuses the sandbox (one-shot capture) NOT the plugin-isolation spawner — the
+  latter is a persistent READY-sentinel RPC duplex that rejects a one-shot
+  free-form-stdout child. Default-OFF byte-identical: disarmed gate ⇒ zero exec,
+  installCommandHooks registers no handlers.
+evidence:
+  code:
+    - src/agent/command-hooks/types.ts
+    - src/agent/command-hooks/gate.ts
+    - src/agent/command-hooks/settings-loader.ts
+    - src/agent/command-hooks/runner.ts
+    - src/agent/command-hooks/sandbox-exec.ts
+    - src/agent/command-hooks/install.ts
+    - src/agent/command-hooks/index.ts
+    - src/agent/command-hooks/review-store.ts
+    - src/apps/agent/index.ts
+    - src/apps/cli/hooks-cmd.ts
+  adrs:
+    - docs/decisions/0454-command-hooks.md
+    - docs/decisions/0459-command-hooks-composition-root-wire.md
+  tests:
+    unit:
+      - tests/unit/command-hooks-hellgate.test.ts
+      - tests/unit/command-hooks-fail-closed-hardening-hellgate.test.ts
+      - tests/unit/apps/agent/command-hooks-wire-hellgate.test.ts
+      - tests/unit/command-hooks-trust-gate-hellgate.test.ts
+      - tests/unit/command-hooks-trust-gate-migration-e2e.test.ts
+    integration: []
+    contract: []
+knobs:
+  - name: QUANTA_HOOK_TRUST_GATE
+    type: 'env'
+    default: 'false'
+    notes: 'T04 trust gate. "1" ⇒ hold imported/repo-shipped hooks (needsReview, provenance-stamped by loadCommandHookBindings) until approved via the /hooks slash; the runner review port reads the on-disk approval ledger fail-closed (key recomputed from record ⇒ tamper-proof). Unset ⇒ default-OFF byte-identical.'
+  - name: CommandHookConfig.enabled
+    type: 'boolean?'
+    default: 'false'
+    notes: 'Master opt-in. Strict === true. Default-OFF.'
+  - name: CommandHookConfig.acknowledgedRisk
+    type: 'string?'
+    default: 'unset'
+    notes: 'Required non-empty string when enabled; enabled without it throws CommandHookConfigError at config time.'
+  - name: CommandHookConfig.timeoutMs
+    type: 'number?'
+    default: '30000'
+    notes: 'Per-command wall-clock budget. Timeout ⇒ fail-closed deny.'
+  - name: CommandHookConfig.maxOutputBytes
+    type: 'number?'
+    default: '1048576'
+    notes: 'Symmetric IO cap. Per-command combined stdout/stderr byte cap AND (DOF-40) the ceiling on the JSON envelope written to the child stdin — an over-cap payload is dropped for a minimal safe envelope (payload_truncated:true) so stdin is never an unbounded write.'
+  - name: CommandHookConfig.envAllowlist
+    type: 'string[]?'
+    default: 'DEFAULT_ENV_ALLOWLIST'
+    notes: 'Env names allowed through to the child (reuses sandbox scrubEnv source of truth).'
+  - name: QUANTA_COMMAND_HOOKS
+    type: 'env'
+    default: 'unset'
+    notes: 'ADR-0459 root knob. "1" ⇒ arm (read settings.json#hooks + build the gate). Unset ⇒ default-OFF byte-identical (no settings read, no bus minted by this path).'
+  - name: QUANTA_COMMAND_HOOKS_ACK
+    type: 'env'
+    default: 'unset'
+    notes: 'ADR-0459 audit-grade acknowledgement string. Required when QUANTA_COMMAND_HOOKS=1; enabled-without-ack THROWS at startup (fail-fast).'
+deliberate_hold:
+  reason: |
+    Root wiring LANDED (ADR-0459 — `installCommandHooksIntoBase` at the agent
+    composition root, security-reviewed; the triple-gate is the approval, isAllowed
+    returns true, bypass mode recommended, port injectable for a stricter host).
+    The ONLY remaining hold is a DockerSandbox-backed CommandHookExecPort for TRUE
+    OS isolation (a clean future swap of the closed exec port).
+  promotion_path: |
+    OS-isolation upgrade: swap `createSandboxCommandHookExec()` for a
+    DockerSandbox-backed `CommandHookExecPort` adapter (the port is closed; no
+    runner/gate change). A host wanting a stricter permission decision injects its
+    own `CommandHookPermissionPort` (e.g. interactive approval) — no slice change.
+notes: |
+  Mirrors src/security/redaction-config.ts acknowledgement pattern, inverted
+  (the dangerous direction here is turning execution ON). Sealed by 25 hellgate
+  cases incl. injection-safety (a $(rm -rf /) payload never enters the command
+  string), permission refusal, opt-in/ack enforcement, and default-OFF
+  byte-identical. DOF-40 fail-closed hardening adds 9 more cases (tests/unit/
+  command-hooks-fail-closed-hardening-hellgate.test.ts): the ON-proof through the
+  real config->gate->installCommandHooks->HookBus->spawn-port chain (exact event,
+  no direct shell), three separate fail-closed controls (empty-ack THROWS before
+  any handler is armed; armed-toggle-no-binding never spawns; unset => zero
+  HookBus subscription), and the stdin-bound (over-cap payload dropped, hook still
+  fires) with a red-on-injection guard proving the cap is load-bearing.

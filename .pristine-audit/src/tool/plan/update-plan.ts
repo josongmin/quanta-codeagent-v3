@@ -1,0 +1,68 @@
+/**
+ * `update_plan` tool (ADR-0095 draft) — meta-only updates (name, overview,
+ * isProject, phase reorder). Does NOT touch todos; use update_todos for that.
+ */
+import { errMessage } from "@/shared"
+import type { PlanToolContext, Tool, ToolEvent } from "../types"
+import { planErrorMessage, planFailure } from "./error-mapping"
+import { type UpdatePlanInput, updatePlanSchema } from "./schemas"
+
+export const updatePlanTool = (): Tool<UpdatePlanInput> => ({
+  name: "update_plan",
+  description:
+    "Update plan metadata (name, overview, isProject) and/or reorder phases. " +
+    "phase_order must list ALL existing phase ids in the new order; partial reorder is rejected. " +
+    "Pass expected_version from the last current_plan/result.",
+  inputSchema: updatePlanSchema,
+  isReadOnly: () => false,
+  isConcurrencySafe: () => true,
+  async *execute(input: UpdatePlanInput, ctx: PlanToolContext): AsyncIterable<ToolEvent> {
+    const mutator = ctx.planMutator
+    if (mutator === undefined) {
+      yield {
+        type: "result",
+        result: {
+          ok: false,
+          output: "update_plan unavailable: no structured plan store is wired in this session.",
+          failure: { mode: "error", modelVisibleError: "structured plan store is not wired" },
+        },
+      }
+      return
+    }
+    let result: ReturnType<typeof mutator.updateMeta>
+    try {
+      const args: Parameters<typeof mutator.updateMeta>[0] = {
+        ...(input.name !== undefined ? { name: input.name } : {}),
+        ...(input.overview !== undefined ? { overview: input.overview } : {}),
+        ...(input.isProject !== undefined ? { isProject: input.isProject } : {}),
+        ...(input.phase_order !== undefined ? { phaseOrder: input.phase_order } : {}),
+      }
+      result = mutator.updateMeta(args, input.expected_version)
+    } catch (e) {
+      yield {
+        type: "result",
+        result: {
+          ok: false,
+          output: `update_plan failed: ${errMessage(e)}`,
+          failure: { mode: "error", modelVisibleError: "internal mutator error" },
+        },
+      }
+      return
+    }
+    if (!result.ok) {
+      yield {
+        type: "result",
+        result: {
+          ok: false,
+          output: `update_plan rejected (${result.code}): ${planErrorMessage(result.code)}`,
+          failure: planFailure(result.code),
+        },
+      }
+      return
+    }
+    yield {
+      type: "result",
+      result: { ok: true, output: `Plan meta updated at v${result.version}.` },
+    }
+  },
+})

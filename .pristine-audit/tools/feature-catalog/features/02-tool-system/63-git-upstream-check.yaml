@@ -1,0 +1,47 @@
+id: git-upstream-check
+title: git_upstream_check — upstream 분기 감지 (read-only)
+section: 2
+subsystem: Git 1급 도구 (v0.dev chat=branch 흡수, ADR-0064)
+order: 63
+maturity: L4
+status: stable
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [n-a]
+configurable: integrated
+config_refs:
+  env: [QUANTA_GIT_TOOLS]
+owners: ["@songmin"]
+labels: [absorbed:v0, surface:cli]
+depends_on: [gitdiff, git-read-trio, git-runner-cancellation-signal, git-branch-name-schema-guard, git-mutating-tools]
+surface_integration:
+  cli: full
+  web: full
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 4/4 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "Agent tool — ahead/behind + pull-suggestion result renders in browser via tool.completed resultPreview (session-hooks.ts:455), mapped tool_result (session-host-turn-event-bridge.ts tool_result arm (via context-binding))."
+purpose: |
+  v0.dev chat=branch upstreamChanges 흡수 — fetch 없이(네트워크·index 무변경) 이미
+  가져온 remote-tracking ref 대비 ahead/behind를 보고. rev-parse @{upstream}로 upstream
+  ref 확인(미설정 graceful), rev-list --left-right --count HEAD...@{upstream}로 분기
+  카운트, behind>0이면 "upstream has N new commit(s); consider pulling" 액션 노트.
+  read-only·concurrency-safe — gitTools() 7번째 read-only 도구.
+evidence:
+  code:
+    - src/tool/git/upstream.ts
+    - src/tool/git/index.ts
+    - src/agent/mode.ts
+    - src/apps/cli/internal.ts
+  adrs: [64]
+  tests:
+    unit: [tests/unit/git-upstream-check.test.ts, tests/unit/mode.test.ts]
+    integration: []
+    contract: []
+knobs:
+  - name: QUANTA_GIT_TOOLS
+    default: 'undefined'
+    purpose: '(no description)'
+deliberate_hold: null
+notes: 'fetch는 의도적으로 안 함 — 네트워크·mutating 회피. 가져온 상태 대비 분기만 보고. MUTATING_TOOL_TABLE에 git_upstream_check:null 등록(read-only).'

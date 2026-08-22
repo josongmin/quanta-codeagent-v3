@@ -1,0 +1,86 @@
+id: skill-scope-v2-availability-permission
+title: Skill tool-scope v2 — 가용성(visibility) ⟂ 권한(permission) 2축 분리 + escalation (ADR-0512)
+section: 6
+subsystem: 스킬 — 도구 스코핑 v2 (nav-base carve-out + send-time filter + deny→ask escalation)
+order: 14
+maturity: L4
+status: new
+ui_surfaces: [cli, web]
+monitoring: n-a
+modes: [interactive, headless]
+configurable: integrated
+config_refs:
+  env: ["QUANTA_SKILL_SCOPE_V2"]
+owners: ["@songmin"]
+labels: ["surface:core", "tier:1"]
+depends_on: [tool-scoping, skill-7-scope-tiering, skill-registry-precedence]
+supersedes: []
+surface_integration:
+  cli: full
+  web: full
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "reachable from src/apps/cli/index.ts: exploration-ladder→loop/skill-gate (send-time spec filter); skill-scope-escalation→stream-callbacks (deny→ask routing); skill-scope-view→working-state-panel→slash/registry-surface (/state 패널이 visible/hidden 도구 파티션 렌더)"
+    web: "apps/web-frontend pending-approvals (usePendingApprovals) → App.tsx:247 → ChatPanel → EscalationCard: skill-scope escalation 승인 카드가 web 채팅 입력 위에 라이브로 뜸 (approval.requested→PendingApprovalView w/ scopeContext)"
+purpose: |
+  ADR-0512 — 스킬이 활성일 때 도구 접근을 **가용성(모델이 도구를 볼 수 있나)** 과
+  **권한(보이는 도구를 쓸 때 허락이 필요한가)** 의 두 직교 축으로 분리한다. ADR-0011의
+  "보이는데 dispatch 직전 빨간 에러"(`✕ file_tree_summary skill-scoped`) 결함을
+  "안 보이게 필터 + 필요시 물어봄"으로 승급. 4개 seam:
+
+  (1) `exploration-ladder.ts` — nav-base carve-out SSOT. `EXPLORATION_LADDER`
+  (file_tree_summary→glob→ls→read, 시스템 프롬프트의 verbatim 탐색 ladder) +
+  `grep`(CONFIRM 프리미티브) = `READ_ONLY_EXPLORATION`. 스킬 allowlist가 이들을
+  누락해도 gate가 항상 허용 → "프롬프트가 1순위로 강제하는 도구를 gate가 막는"
+  자기모순을 구조적으로 불가능하게. drift ratchet이 프롬프트 ladder 라인이 정확히
+  이 상수를 명명하는지 강제(P0, 무게이트 버그픽스).
+
+  (2) `skill-scope-view.ts` — L1 가용성 필터의 read-only projection. 동일 술어
+  `filterSpecsByScope`를 재사용해 `{activeSkill, visibleTools, hiddenTools}` 산출.
+  `/state` 패널이 "왜 이 도구가 없지?"에 답함. gate 부재/스킬 미장착 ⇒ ALL visible
+  (byte-identical "nothing scoped").
+
+  (3) `skill-scope-escalation.ts` — scope 밖 호출의 deny→ask 결정(L3). flat 에러
+  대신 fork: hand-off-required 티어 ⇒ HARD DENY(보안경계, 절대 escalatable 안 됨);
+  onConfirm 미배선 ⇒ DENY(fail-closed); bypass/acceptEdits·always-confirm ⇒ dispatch
+  (이중 프롬프트 회피); 그 외 auto-run 티어 ⇒ 사용자에게 ASK. `permission_escalation_requested`
+  /`_resolved` 이벤트 페어를 정확히 ASK 직전/직후에만 발화(보안 short-circuit엔 미발화).
+  4-verb 결정(allow_once/allow_session/deny/deny_and_steer); allow_session만 scope widen.
+
+  (4) `pending-approvals.ts` (web) — escalation 카드 backing state. `approval.requested`
+  (scopeContext 포함)를 dedup-add, `approval.resolved`를 remove. PURE reducer +
+  optimistic `dismiss`. 모든 비매칭 이벤트는 SAME reference 반환(memo/effect 안정).
+
+  게이트: P0 nav-base carve-out=무게이트 버그픽스; P1~P3=`QUANTA_SKILL_SCOPE_V2`
+  (`gateOnStrict`, default-OFF, byte-identical degrade). OFF ⇒ ADR-0011 flat deny로
+  복귀, 신규 이벤트 미발화.
+evidence:
+  code:
+    - src/agent/exploration-ladder.ts
+    - src/agent/loop/skill-scope-view.ts
+    - src/agent/skill-scope-escalation.ts
+    - apps/web-frontend/src/ws/pending-approvals.ts
+  adrs: [512]
+  tests:
+    unit:
+      - tests/unit/agent/exploration-ladder-prompt-drift.test.ts
+      - tests/unit/agent/skill-scope-escalation.test.ts
+      - tests/unit/agent/skill-scope-escalation-emit.test.ts
+      - src/agent/loop/__tests__/skill-scope-view.test.ts
+      - tests/unit/apps/web-daemon/approval-scope-context-bridge.test.ts
+    integration:
+      - apps/web-frontend/src/ws/pending-approvals.test.ts
+    contract:
+      - src/apps/cli/__tests__/state-skill-scope-e2e.hellgate.test.ts
+      - src/host/runtime/internal/__tests__/approval-lease-escalation-decision.hellgate.test.ts
+knobs:
+  - name: skillScopeV2
+    where: src/shared/runtime-config.ts (gateOn QUANTA_SKILL_SCOPE_V2)
+    default: false
+    purpose: 'P1~P3 가용성 필터 + escalation UX 게이트 (gateOnStrict, default-OFF). OFF ⇒ ADR-0011 flat deny + 신규 이벤트 미발화 (byte-identical legacy).'
+deliberate_hold: null
+notes: |
+  P0(nav-base carve-out)는 무게이트 버그픽스 — `exploration-ladder` 상수는 v2 OFF에서도
+  활성. drift ratchet(exploration-ladder-prompt-drift)이 프롬프트 ladder와 상수를 lock-step
+  강제. 후속: justification 카드 surface 확장 + /state web 카드 패리티.

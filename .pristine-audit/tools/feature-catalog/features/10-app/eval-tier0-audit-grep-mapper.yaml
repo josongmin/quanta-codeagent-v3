@@ -1,0 +1,54 @@
+id: eval-tier0-audit-grep-mapper
+title: eval Tier 0 — static grep-mapper + curated rules + (major × CoverageLevel) matrix
+section: 10
+subsystem: eval 앱 — Tier 0 static coverage
+order: 80
+maturity: L4
+status: stable
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [headless, batch]
+configurable: static
+owners: ["@songmin"]
+labels: ["surface:bench"]
+depends_on: [eval-five-tier]
+surface_integration:
+  cli: missing
+  web: missing
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "src evidence not reachable from the interactive CLI entry (src/apps/cli/index.ts) — wired only into other apps (eval/bench/probe/headless) or unwired"
+    web: "Bench-app audit engine; code does not run in web-daemon and produces no browser affordance (rendering is delegated to report/coverage-matrix, not web)."
+purpose: |
+  Tier 0 정적 감사 내부 — 손-큐레이트된 grep 룰 테이블이 `UseCaseId` → 토큰을
+  매핑하고, `auditOne`이 rg(우선) 또는 portable BSD/GNU `grep -F -Z` 폴백으로
+  code/test/runbook roots를 스캔해 leaf 별 `AuditFinding`을 산출. 두 도구 모두
+  없으면 HARD ERROR로 `coverage:"tbd"` + note 명시 (silent "no match" 금지).
+  grep 에러는 silent drop이 아니라 발견된 stderr를 evidence에 surfacing해서
+  audit baseline에 infra rot가 흘러들지 못함. `runAudit`이 모든 leaf 순회하며
+  `auditOne` per-leaf try/catch → 오류 카운트를 별도 `error` 버킷으로 분리
+  (한 룰 깨져도 audit 전체 abort 금지). `buildMatrix`가 finding을 `major ×
+  CoverageLevel` 매트릭스로 롤업 — 렌더는 `report/coverage-matrix`가 담당.
+  Null-separated (`--null` / `-Z`)으로 파일명에 embedded `\n` 들어가는 희귀
+  엣지 케이스에서도 phantom path 안 생김. 룰 추가는 의도적으로 seed-thin —
+  근거 없는 optimistic match는 진짜 hole을 가리기 때문에 default `tbd`로 잔류.
+evidence:
+  code:
+    - src/apps/eval/audit/index.ts
+    - src/apps/eval/audit/grep-mapper.ts
+    - src/apps/eval/audit/rules.ts
+    - src/apps/eval/audit/matrix.ts
+  adrs: []
+  tests:
+    unit:
+      - tests/unit/eval-audit-matrix.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  Umbrella [eval-five-tier]가 entry point만 lists; 이 항목이 grep-mapper 룰
+  엔진 + scope-out semantics + scopedOut/tbd/partial/ok 4-level 결정 트리 +
+  rg/grep 도구 fallback contract을 명시적으로 잠금. PROBE_TIMEOUT_MS=3s로
+  macOS Gatekeeper hang 방지. 룰은 ~20 entries로 small-by-design.

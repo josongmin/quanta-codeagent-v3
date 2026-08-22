@@ -1,0 +1,86 @@
+id: automation-tool-inbox-cli
+title: ADR-0280 automation_update tool + REPL inbox banner + B2 threads_handoff
+section: 9
+subsystem: Scheduler / E2 productization (ADR-0280) + B2 cross-surface handoff
+order: 280
+maturity: L3
+status: stable
+ui_surfaces: [cli]
+monitoring: integrated
+modes: [interactive]
+configurable: integrated
+owners: ["@songmin"]
+labels: ["surface:core", "default-off"]
+depends_on: [automation-engine, automation-engine-wire]
+surface_integration:
+  cli: full
+  web: full
+  method: audited
+  verified: "2026-07-03"
+  evidence:
+    cli: "runs in the interactive CLI — evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "automation_update + threads_handoff are model-facing tools; their calls render via tool.invoked/tool.completed in session-hooks.ts (banner is CLI-stderr-only but the tools are the primary affordance)"
+purpose: |
+  Two thin operator-facing slices on top of ADR-0279:
+
+    - `automation_update` tool (`src/tool/automation_update.ts`) — a
+      `defineTool`-built tool with 6-action closed input schema
+      (`create | list | pause | resume | cancel | get`). Registered in
+      `buildDefaultTools` ONLY when `QUANTA_AUTOMATION === "on"`; absent
+      ⇒ the model never sees the tool (byte-identical default set).
+
+    - REPL inbox banner (`src/apps/cli/repl/automation-banner.ts`) —
+      paints `[inbox: N]` on stderr after each tick that produces a fire
+      / error outcome. Pure stderr (stdout stays clean for headless /
+      batch modes).
+
+    - `threads_handoff` tool (`src/tool/threads_handoff.ts`, B2 jul-03) —
+      a PURE leaf tool (no ports; no I/O) that hands the current session
+      off to another surface, emitting a `quanta://threads/{id}` deeplink;
+      session state travels over the existing spot-resume transport. It
+      SHARES the automation-engine gate (no second flag): registered in
+      `buildDefaultTools` ONLY when the automation-engine port is wired
+      (i.e. `QUANTA_AUTOMATION=on`) — absent engine ⇒ tool absent
+      (byte-identical). read-only risk.
+
+  pause/resume collapse to `cancel` for v1 (no `paused` state in
+  `EngineStatus`); a future ADR may introduce a soft-pause if operators
+  need it. `list` / `get` return ordered (`nextRunAt ASC, id ASC`) per
+  the port contract.
+
+  Concurrent CRUD is engine-atomic (in-memory: single-row Map mutation;
+  sqlite: BEGIN/COMMIT). The tool serializes nothing of its own; the
+  engine's port contract handles atomicity.
+evidence:
+  code:
+    - src/tool/automation_update.ts
+    - src/tool/threads_handoff.ts
+    - src/scheduler/deeplink.ts
+    - src/tool/index.ts
+    - src/apps/cli/repl/automation-banner.ts
+  adrs: ["docs/decisions/0280-automation-tool-inbox-cli.md", 215, 279]
+  tests:
+    unit:
+      - tests/unit/cli/automation-wire-hellgate.test.ts
+    integration: []
+    contract: []
+knobs:
+  - name: QUANTA_AUTOMATION
+    default: 'off'
+    purpose: 'tool 등록 + 배너 활성 (on|off)'
+config_refs:
+  env: [QUANTA_AUTOMATION]
+deliberate_hold:
+  reason: |
+    `/inbox` slash와 inbox read/archive 액션은 후속. 이 슬라이스는 배너
+    표시만 (unread count). 사용자가 entry를 읽고 archived로 표시하는
+    workflow는 별도 slash + 별도 engine verb (markRead / archive)이 필요.
+  promotion_path: |
+    InboxReadPort 추가 → engine port에 markRead(id) 추가 → /inbox slash
+    추가 → REPL에서 entry 페이지네이션 + read action. tool은 별도 verb
+    `automation_update.markRead`로 확장 가능.
+notes: |
+  E2 productization track 마지막 슬라이스. 배너는 stderr 디시플린 엄수 —
+  HELL-AW-18에서 stdout이 banner emission 중 0 bytes를 받는지 단정.
+  tool은 빈 env일 때 defaultTools에서 누락되어 byte-identical 보장
+  (HELL-AW-16).

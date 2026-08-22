@@ -1,0 +1,49 @@
+id: item-lifecycle-stream
+title: item-lifecycle stream projector — per-item started/updated/completed events (ADR-0508)
+section: 8
+subsystem: observability — per-item streaming lifecycle (thin-client progress)
+order: 210
+maturity: L4
+status: new
+ui_surfaces: [cli, ide]
+monitoring: integrated
+modes: [interactive, headless, daemon, ide]
+configurable: integrated
+owners: ["@songmin"]
+labels: ["surface:core", "absorbed:codex", "absorbed:claude"]
+depends_on: [live-token-counter]
+config_refs:
+  env: ["QUANTA_ITEM_LIFECYCLE"]
+surface_integration:
+  cli: full
+  web: missing
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 3/3 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "all three item_* variants dropped at context-binding.ts default arm (B1)"
+purpose: |
+  Project the event stream into per-item lifecycle events so host UIs can render
+  "this text block / tool call / thinking block is in-progress / done". Three
+  additive AgentEvent variants (item_started{itemId,itemKind,index} /
+  item_updated{itemId,delta} / item_completed{itemId}). A pure ItemLifecycleTracker
+  tracks open text + tool ids, closes them at turn boundaries, ignores
+  orphan/duplicate signals (fuzz-proven: every started has exactly one completed).
+  Wired as the final wireOptionalAgentPorts decorator behind QUANTA_ITEM_LIFECYCLE:
+  off ⇒ stream returned unwrapped (byte-identical); on ⇒ each emit also emits the
+  derived events on the sink (no re-entrancy). The two exhaustive stream consumers
+  (jsonl-recorder, stdout) skip the new variants.
+evidence:
+  code:
+    - src/stream/item-lifecycle.ts
+    - src/stream/types.ts
+    - src/agent/optional-ports.ts
+  adrs: [508]
+  tests:
+    unit:
+      - tests/unit/item-lifecycle-hellgate.test.ts
+      - tests/unit/item-lifecycle-wire-hellgate.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null

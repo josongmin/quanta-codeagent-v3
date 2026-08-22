@@ -1,0 +1,124 @@
+id: fast-apply-merge
+title: Model-based fast-apply MERGE rung (apply-model elision merge)
+section: 9
+subsystem: Edit-apply ladder recovery (ADR-0500, jun-7-misc 06)
+order: 4172
+maturity: L3
+status: hold
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [interactive, headless]
+configurable: integrated
+owners: ["@songmin"]
+labels: ["surface:core", "default-off", "ports-only", "security-gated"]
+depends_on: ["fast-apply-fallback"]
+surface_integration:
+  cli: partial
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "apply-model port is reachable behind QUANTA_FAST_APPLY_MERGE + model, but the normal CLI supplies no FastApplyMergeReview authority; whole-file proposals fail closed before provider dispatch."
+    web: "pure internal edit-apply recovery rung; ToolDiffSink is post-write observation, not an approval authority."
+purpose: |
+  A NEW closed `FastApplyPort` (merge direction) sibling to the existing V4A
+  re-emit `FastApplyFallbackPort`. Where re-emit re-authors a patch that must
+  itself re-anchor, the MERGE port asks a DEDICATED apply model to fold a terse
+  `// ... existing code ...` edit sketch directly into the full original file and
+  return the MERGED full file (Cursor 3.5.33 REWRITE-flavor apply IO shape) — no
+  second round of diff anchoring.
+
+  Inserted as an OPTIONAL rung in the `edit` ladder:
+  `exact → fuzzy → [model MERGE] → typed mismatch`. Reached ONLY when the
+  deterministic exact/fuzzy ladder MISSES AND `ctx.fastApplyMerge` is wired.
+
+  The merge is a PROPOSAL, never a blind write. Two-layer verification:
+    (1) runner STRUCTURAL check (`verifyMergeStructural`): non-empty,
+        changed-vs-original, no leftover elision marker, complete fenced block.
+    (2) edit-scoped bounded check (`verifyEditScopedMerge`): must ADD new_string
+        (its occurrence count strictly INCREASES vs the original — R3 audit; mere
+        `includes(new_string)` is UNSOUND when new_string already exists unrelated
+        to the edit, letting a drop-others merge pass while keeping the pre-existing
+        occurrence), must not still contain old_string (unless new_string
+        legitimately re-introduces it), must differ from the original, AND
+        (R1 audit) REJECT an empty new_string (the `includes("")` landed-signal
+        is vacuous, so arbitrary content would otherwise pass).
+    (R1 audit) The rung is also SKIPPED entirely when the caller supplied
+        `line_ranges`: a whole-file merge cannot honor a bounded scope, so a
+        model merge could mutate lines OUTSIDE the declared span — fail-closed
+        to the typed mismatch instead.
+    (R2 audit) The rung is likewise SKIPPED under `replace_all`: that is a
+        deterministic "change EVERY occurrence" contract, but a whole-file merge
+        + single-occurrence verification cannot prove all N sites changed (a
+        partial merge would pass `includes(new_string)`) — fail-closed instead.
+    (R4 audit) DEFENSE-IN-DEPTH against the duck-typed port: `verifyEditScopedMerge`
+        ALSO rejects a merged file that still literally contains the `// ... existing
+        code ...` elision marker BEYOND what the original + new_string legitimately
+        account for. The runner's structural check rejects this, but the consumer
+        must NOT trust an arbitrary `ctx.fastApplyMerge` implementation to have run
+        it: a buggy/compromised port that returns a merge where the apply model
+        COPIED the sketch verbatim (dropping the real lines the marker stood for)
+        would otherwise pass the edit-scoped check (new_string lands, old absent) and
+        write the corrupted file. The count-attributed bound avoids over-rejecting a
+        legitimate edit whose new_string genuinely embeds the marker (EM-17 RED / EM-18
+        GREEN).
+    (R5 repair) SEMANTIC content-drop cannot be proved generically without an
+        unsound magic diff threshold. Therefore every whole-file proposal now
+        requires `FastApplyMergeReviewSeam.approve({path,before,after,editSketch})`
+        after deterministic checks and before commit. Missing review fails closed
+        before provider dispatch; rejecting or throwing review fails closed before
+        any write. `ToolDiffSink` is
+        post-write observation only and is never approval (EM-02b/EM-14).
+  An accepted merge then flows through the SAME gated commit + `ToolDiffSink`
+  path as ANY edit — there is NO code path that writes a merged file without
+  verification, explicit review, and the normal gate.
+
+  NO-THROW / fail-closed: a role-resolve throw, dispatch throw, non-ok reply,
+  empty/truncated reply, or ANY verification miss ⇒ `{ ok:false, merged:null }`
+  ⇒ the ladder falls through to the byte-identical typed mismatch.
+
+  The apply model is resolved under a NEW `"apply"` role from the operator-set
+  `QUANTA_FAST_APPLY_MODEL` — NEVER the main agent model (that defeats the cost
+  win). Reuses quanta's OWN `@/llm` provider seam — no hosted Morph/Relace dep,
+  no new egress endpoint.
+
+  Slice fence: producer types + `@/shared` only (collaborators duck-typed);
+  `@/tool` references the merge port via a duck-typed `FastApplyMergeSeam`
+  mirror so it never imports `@/agent`.
+evidence:
+  code:
+    - src/agent/fast-apply-fallback/types.ts
+    - src/agent/fast-apply-fallback/merge-runner.ts
+    - src/agent/fast-apply-fallback/index.ts
+    - src/tool/types.ts
+    - src/tool/edit/index.ts
+  adrs: ["docs/decisions/0500-model-based-fast-apply-merge.md"]
+  tests:
+    unit:
+      - tests/unit/fast-apply-merge-runner-hellgate.test.ts
+      - tests/unit/edit-fast-apply-merge-rung-hellgate.test.ts
+    integration: []
+    contract: []
+knobs:
+  - name: QUANTA_FAST_APPLY_MERGE
+    default: 'off'
+    purpose: 'gateOnStrict (=== "1") opt-in for the model-apply MERGE rung; DISTINCT from QUANTA_FAST_APPLY (re-emit)'
+  - name: QUANTA_FAST_APPLY_MODEL
+    default: 'unset'
+    purpose: 'operator-chosen apply-model id; absent ⇒ no FastApplyPort built even when the gate is on (advertise-iff-able)'
+config_refs:
+  env: [QUANTA_FAST_APPLY_MERGE, QUANTA_FAST_APPLY_MODEL]
+deliberate_hold:
+  reason: "Normal hosts do not yet own a FastApplyMergeReviewSeam. The env gate and apply model select capability only; accepting a whole-file model proposal without an explicit before/after review is unsafe."
+  promotion_path: "A composition root must provide a synchronous, fail-closed review authority over {path,before,after,editSketch}; ToolDiffSink or post-write canvas rendering does not qualify."
+notes: |
+  PORTS + edit-tool consumer LANDED; composition-root wire (optional-ports.ts /
+  dispatch.ts) is the cross-lane wiring step (mirror the `QUANTA_FAST_APPLY`
+  block: build `createFastApplyMerge` under `QUANTA_FAST_APPLY_MERGE=1` AND a
+  configured `QUANTA_FAST_APPLY_MODEL`, thread `fastApplyMerge` onto
+  `ToolContext`). R5 safety repair adds a separate host-owned
+  `fastApplyMergeReview` seam: absent it, the merge rung is fail-closed before
+  provider dispatch. No model default is pinned (per [[no-heuristics-only-validated]]):
+  the apply model is operator-set and must be measured against the re-emit
+  baseline. Out of scope v1: speculative-decoding (NOSPEC) parity, hosted apply
+  APIs (Morph/Relace), and native terse-sketch emission (first-attempt merge).

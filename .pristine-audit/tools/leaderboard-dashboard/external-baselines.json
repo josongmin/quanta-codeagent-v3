@@ -1,0 +1,3628 @@
+{
+  "generatedFrom": "live=live-leaderboard-0605.jsonl; pro=2026-06 (labs.scale.com/leaderboard/swe_bench_pro_public, standardized SEAL)",
+  "models": [
+    {
+      "name": "Slingshot + Claude-4.5-Sonnet",
+      "dataset": "live",
+      "set": "tsjs",
+      "total": 200,
+      "resolved": 51,
+      "rate": 0.255,
+      "date": "2026-06-23"
+    },
+    {
+      "name": "AMI Agent + Claude-4.6-Oups",
+      "dataset": "live",
+      "set": "lite",
+      "total": 300,
+      "resolved": 189,
+      "rate": 0.63,
+      "date": "2026-06-23"
+    },
+    {
+      "name": "Win-agent + GPT-5.5 (Medium)",
+      "dataset": "live",
+      "set": "windows",
+      "total": 60,
+      "resolved": 16,
+      "rate": 0.26666666666666666,
+      "date": "2026-06-06"
+    },
+    {
+      "name": "Win-agent + Deepseek-v4-Pro",
+      "dataset": "live",
+      "set": "windows",
+      "total": 60,
+      "resolved": 13,
+      "rate": 0.21666666666666667,
+      "date": "2026-06-06"
+    },
+    {
+      "name": "OpenHands + Deepseek-v4-Pro",
+      "dataset": "live",
+      "set": "rust",
+      "total": 64,
+      "resolved": 18,
+      "rate": 0.28125,
+      "date": "2026-06-05"
+    },
+    {
+      "name": "Claude Code + Deepseek-v4-Pro",
+      "dataset": "live",
+      "set": "rust",
+      "total": 64,
+      "resolved": 19,
+      "rate": 0.296875,
+      "date": "2026-06-05"
+    },
+    {
+      "name": "SWE-agent + Deepseek-v4-Pro",
+      "dataset": "live",
+      "set": "rust",
+      "total": 64,
+      "resolved": 22,
+      "rate": 0.34375,
+      "date": "2026-06-05"
+    },
+    {
+      "name": "OpenHands + GPT-5.5 (Medium)",
+      "dataset": "live",
+      "set": "rust",
+      "total": 64,
+      "resolved": 19,
+      "rate": 0.296875,
+      "date": "2026-06-05"
+    },
+    {
+      "name": "Claude Code + GPT-5.5 (Medium)",
+      "dataset": "live",
+      "set": "rust",
+      "total": 64,
+      "resolved": 21,
+      "rate": 0.328125,
+      "date": "2026-06-05"
+    },
+    {
+      "name": "SWE-agent + GPT-5.5 (Medium)",
+      "dataset": "live",
+      "set": "rust",
+      "total": 64,
+      "resolved": 18,
+      "rate": 0.28125,
+      "date": "2026-06-05"
+    },
+    {
+      "name": "OpenHands + Deepseek-v4-Pro",
+      "dataset": "live",
+      "set": "go",
+      "total": 98,
+      "resolved": 27,
+      "rate": 0.2755102040816326,
+      "date": "2026-06-05"
+    },
+    {
+      "name": "Claude Code + Deepseek-v4-Pro",
+      "dataset": "live",
+      "set": "go",
+      "total": 98,
+      "resolved": 29,
+      "rate": 0.29591836734693877,
+      "date": "2026-06-05"
+    },
+    {
+      "name": "SWE-agent + Deepseek-v4-Pro",
+      "dataset": "live",
+      "set": "go",
+      "total": 98,
+      "resolved": 29,
+      "rate": 0.29591836734693877,
+      "date": "2026-06-05"
+    },
+    {
+      "name": "OpenHands + GPT-5.5 (Medium)",
+      "dataset": "live",
+      "set": "go",
+      "total": 98,
+      "resolved": 25,
+      "rate": 0.25510204081632654,
+      "date": "2026-06-05"
+    },
+    {
+      "name": "Claude Code + GPT-5.5 (Medium)",
+      "dataset": "live",
+      "set": "go",
+      "total": 98,
+      "resolved": 37,
+      "rate": 0.37755102040816324,
+      "date": "2026-06-05"
+    },
+    {
+      "name": "SWE-agent + GPT-5.5 (Medium)",
+      "dataset": "live",
+      "set": "go",
+      "total": 98,
+      "resolved": 34,
+      "rate": 0.3469387755102041,
+      "date": "2026-06-05"
+    },
+    {
+      "name": "OpenHands + Deepseek-v4-Pro",
+      "dataset": "live",
+      "set": "tsjs",
+      "total": 204,
+      "resolved": 75,
+      "rate": 0.36764705882352944,
+      "date": "2026-06-05"
+    },
+    {
+      "name": "Claude Code + Deepseek-v4-Pro",
+      "dataset": "live",
+      "set": "tsjs",
+      "total": 204,
+      "resolved": 63,
+      "rate": 0.3088235294117647,
+      "date": "2026-06-05"
+    },
+    {
+      "name": "SWE-agent + Deepseek-v4-Pro",
+      "dataset": "live",
+      "set": "tsjs",
+      "total": 204,
+      "resolved": 75,
+      "rate": 0.36764705882352944,
+      "date": "2026-06-05"
+    },
+    {
+      "name": "OpenHands + GPT-5.5 (Medium)",
+      "dataset": "live",
+      "set": "tsjs",
+      "total": 204,
+      "resolved": 92,
+      "rate": 0.45098039215686275,
+      "date": "2026-06-05"
+    },
+    {
+      "name": "Claude Code + GPT-5.5 (Medium)",
+      "dataset": "live",
+      "set": "tsjs",
+      "total": 204,
+      "resolved": 87,
+      "rate": 0.4264705882352941,
+      "date": "2026-06-05"
+    },
+    {
+      "name": "SWE-agent + GPT-5.5 (Medium)",
+      "dataset": "live",
+      "set": "tsjs",
+      "total": 204,
+      "resolved": 97,
+      "rate": 0.47549019607843135,
+      "date": "2026-06-05"
+    },
+    {
+      "name": "OpenHands + Deepseek-v4-Pro",
+      "dataset": "live",
+      "set": "java",
+      "total": 102,
+      "resolved": 40,
+      "rate": 0.39215686274509803,
+      "date": "2026-06-05"
+    },
+    {
+      "name": "Claude Code + Deepseek-v4-Pro",
+      "dataset": "live",
+      "set": "java",
+      "total": 102,
+      "resolved": 39,
+      "rate": 0.38235294117647056,
+      "date": "2026-06-05"
+    },
+    {
+      "name": "SWE-agent + Deepseek-v4-Pro",
+      "dataset": "live",
+      "set": "java",
+      "total": 102,
+      "resolved": 40,
+      "rate": 0.39215686274509803,
+      "date": "2026-06-05"
+    },
+    {
+      "name": "OpenHands + GPT-5.5 (Medium)",
+      "dataset": "live",
+      "set": "java",
+      "total": 102,
+      "resolved": 48,
+      "rate": 0.47058823529411764,
+      "date": "2026-06-05"
+    },
+    {
+      "name": "Claude Code + GPT-5.5 (Medium)",
+      "dataset": "live",
+      "set": "java",
+      "total": 102,
+      "resolved": 46,
+      "rate": 0.45098039215686275,
+      "date": "2026-06-05"
+    },
+    {
+      "name": "SWE-agent + GPT-5.5 (Medium)",
+      "dataset": "live",
+      "set": "java",
+      "total": 102,
+      "resolved": 51,
+      "rate": 0.5,
+      "date": "2026-06-05"
+    },
+    {
+      "name": "OpenHands + Deepseek-v4-Pro",
+      "dataset": "live",
+      "set": "csharp",
+      "total": 78,
+      "resolved": 30,
+      "rate": 0.38461538461538464,
+      "date": "2026-06-05"
+    },
+    {
+      "name": "Claude Code + Deepseek-v4-Pro",
+      "dataset": "live",
+      "set": "csharp",
+      "total": 78,
+      "resolved": 29,
+      "rate": 0.3717948717948718,
+      "date": "2026-06-05"
+    },
+    {
+      "name": "SWE-agent + Deepseek-v4-Pro",
+      "dataset": "live",
+      "set": "csharp",
+      "total": 78,
+      "resolved": 35,
+      "rate": 0.44871794871794873,
+      "date": "2026-06-05"
+    },
+    {
+      "name": "OpenHands + GPT-5.5 (Medium)",
+      "dataset": "live",
+      "set": "csharp",
+      "total": 78,
+      "resolved": 33,
+      "rate": 0.4230769230769231,
+      "date": "2026-06-05"
+    },
+    {
+      "name": "Claude Code + GPT-5.5 (Medium)",
+      "dataset": "live",
+      "set": "csharp",
+      "total": 78,
+      "resolved": 31,
+      "rate": 0.3974358974358974,
+      "date": "2026-06-05"
+    },
+    {
+      "name": "SWE-agent + GPT-5.5 (Medium)",
+      "dataset": "live",
+      "set": "csharp",
+      "total": 78,
+      "resolved": 35,
+      "rate": 0.44871794871794873,
+      "date": "2026-06-05"
+    },
+    {
+      "name": "OpenHands + Deepseek-v4-Pro",
+      "dataset": "live",
+      "set": "ccpp",
+      "total": 66,
+      "resolved": 15,
+      "rate": 0.22727272727272727,
+      "date": "2026-06-05"
+    },
+    {
+      "name": "Claude Code + Deepseek-v4-Pro",
+      "dataset": "live",
+      "set": "ccpp",
+      "total": 66,
+      "resolved": 15,
+      "rate": 0.22727272727272727,
+      "date": "2026-06-05"
+    },
+    {
+      "name": "SWE-agent + Deepseek-v4-Pro",
+      "dataset": "live",
+      "set": "ccpp",
+      "total": 66,
+      "resolved": 16,
+      "rate": 0.24242424242424243,
+      "date": "2026-06-05"
+    },
+    {
+      "name": "OpenHands + GPT-5.5 (Medium)",
+      "dataset": "live",
+      "set": "ccpp",
+      "total": 66,
+      "resolved": 22,
+      "rate": 0.3333333333333333,
+      "date": "2026-06-05"
+    },
+    {
+      "name": "Claude Code + GPT-5.5 (Medium)",
+      "dataset": "live",
+      "set": "ccpp",
+      "total": 66,
+      "resolved": 25,
+      "rate": 0.3787878787878788,
+      "date": "2026-06-05"
+    },
+    {
+      "name": "SWE-agent + GPT-5.5 (Medium)",
+      "dataset": "live",
+      "set": "ccpp",
+      "total": 66,
+      "resolved": 23,
+      "rate": 0.3484848484848485,
+      "date": "2026-06-05"
+    },
+    {
+      "name": "MIT-IBM Agent (BOAD) + SWE-Agent + Seed-OSS-36B",
+      "dataset": "live",
+      "set": "lite",
+      "total": 300,
+      "resolved": 60,
+      "rate": 0.2,
+      "date": "2025-12-21"
+    },
+    {
+      "name": "Brokk + Sonnet4.5 (Standard) + Flash3 (Minimal)",
+      "dataset": "live",
+      "set": "csharp",
+      "total": 20,
+      "resolved": 9,
+      "rate": 0.45,
+      "date": "2026-02-25"
+    },
+    {
+      "name": "Brokk + GPT5.2 (Medium) + Flash3 (Minimal)",
+      "dataset": "live",
+      "set": "csharp",
+      "total": 20,
+      "resolved": 9,
+      "rate": 0.45,
+      "date": "2026-02-23"
+    },
+    {
+      "name": "Brokk + Sonnet4.5 (Standard) + Gemini-flash3 (Minimal)",
+      "dataset": "live",
+      "set": "java",
+      "total": 39,
+      "resolved": 16,
+      "rate": 0.41025641025641024,
+      "date": "2026-02-18"
+    },
+    {
+      "name": "Brokk + GPT5.2 (Medium) + Gemini-flash3 (Minimal)",
+      "dataset": "live",
+      "set": "java",
+      "total": 39,
+      "resolved": 19,
+      "rate": 0.48717948717948717,
+      "date": "2026-02-18"
+    },
+    {
+      "name": "Win-agent + Gemini-3-Flash",
+      "dataset": "live",
+      "set": "windows",
+      "total": 50,
+      "resolved": 8,
+      "rate": 0.16,
+      "date": "2026-01-08"
+    },
+    {
+      "name": "Win-agent + Claude-4.5-Sonnet",
+      "dataset": "live",
+      "set": "windows",
+      "total": 50,
+      "resolved": 15,
+      "rate": 0.3,
+      "date": "2026-01-08"
+    },
+    {
+      "name": "Win-agent + GPT-5.2-Thinking-Medium",
+      "dataset": "live",
+      "set": "windows",
+      "total": 50,
+      "resolved": 10,
+      "rate": 0.2,
+      "date": "2026-01-08"
+    },
+    {
+      "name": "Win-agent + DeepSeek-V3.1-Terminus",
+      "dataset": "live",
+      "set": "windows",
+      "total": 50,
+      "resolved": 10,
+      "rate": 0.2,
+      "date": "2026-01-08"
+    },
+    {
+      "name": "Claude Code + DeepSeek-V3.1-Terminus",
+      "dataset": "live",
+      "set": "java",
+      "total": 62,
+      "resolved": 14,
+      "rate": 0.22580645161290322,
+      "date": "2026-01-08"
+    },
+    {
+      "name": "Claude Code + DeepSeek-V3.1-Terminus",
+      "dataset": "live",
+      "set": "rust",
+      "total": 45,
+      "resolved": 8,
+      "rate": 0.17777777777777778,
+      "date": "2026-01-08"
+    },
+    {
+      "name": "Claude Code + DeepSeek-V3.1-Terminus",
+      "dataset": "live",
+      "set": "go",
+      "total": 68,
+      "resolved": 20,
+      "rate": 0.29411764705882354,
+      "date": "2026-01-08"
+    },
+    {
+      "name": "Claude Code + DeepSeek-V3.1-Terminus",
+      "dataset": "live",
+      "set": "tsjs",
+      "total": 162,
+      "resolved": 25,
+      "rate": 0.15432098765432098,
+      "date": "2026-01-08"
+    },
+    {
+      "name": "Claude Code + DeepSeek-V3.1-Terminus",
+      "dataset": "live",
+      "set": "csharp",
+      "total": 28,
+      "resolved": 4,
+      "rate": 0.14285714285714285,
+      "date": "2026-01-08"
+    },
+    {
+      "name": "Claude Code + DeepSeek-V3.1-Terminus",
+      "dataset": "live",
+      "set": "ccpp",
+      "total": 48,
+      "resolved": 5,
+      "rate": 0.10416666666666667,
+      "date": "2026-01-08"
+    },
+    {
+      "name": "OpenHands + DeepSeek-V3.1-Terminus",
+      "dataset": "live",
+      "set": "java",
+      "total": 62,
+      "resolved": 15,
+      "rate": 0.24193548387096775,
+      "date": "2026-01-08"
+    },
+    {
+      "name": "OpenHands + DeepSeek-V3.1-Terminus",
+      "dataset": "live",
+      "set": "rust",
+      "total": 45,
+      "resolved": 12,
+      "rate": 0.26666666666666666,
+      "date": "2026-01-08"
+    },
+    {
+      "name": "OpenHands + DeepSeek-V3.1-Terminus",
+      "dataset": "live",
+      "set": "go",
+      "total": 68,
+      "resolved": 15,
+      "rate": 0.22058823529411764,
+      "date": "2026-01-08"
+    },
+    {
+      "name": "OpenHands + DeepSeek-V3.1-Terminus",
+      "dataset": "live",
+      "set": "tsjs",
+      "total": 162,
+      "resolved": 18,
+      "rate": 0.1111111111111111,
+      "date": "2026-01-08"
+    },
+    {
+      "name": "OpenHands + DeepSeek-V3.1-Terminus",
+      "dataset": "live",
+      "set": "csharp",
+      "total": 28,
+      "resolved": 5,
+      "rate": 0.17857142857142858,
+      "date": "2026-01-08"
+    },
+    {
+      "name": "OpenHands + DeepSeek-V3.1-Terminus",
+      "dataset": "live",
+      "set": "ccpp",
+      "total": 48,
+      "resolved": 12,
+      "rate": 0.25,
+      "date": "2026-01-08"
+    },
+    {
+      "name": "SWE-agent + DeepSeek-V3.1-Terminus",
+      "dataset": "live",
+      "set": "java",
+      "total": 62,
+      "resolved": 17,
+      "rate": 0.27419354838709675,
+      "date": "2026-01-08"
+    },
+    {
+      "name": "SWE-agent + DeepSeek-V3.1-Terminus",
+      "dataset": "live",
+      "set": "rust",
+      "total": 45,
+      "resolved": 13,
+      "rate": 0.28888888888888886,
+      "date": "2026-01-08"
+    },
+    {
+      "name": "SWE-agent + DeepSeek-V3.1-Terminus",
+      "dataset": "live",
+      "set": "go",
+      "total": 68,
+      "resolved": 14,
+      "rate": 0.20588235294117646,
+      "date": "2026-01-08"
+    },
+    {
+      "name": "SWE-agent + DeepSeek-V3.1-Terminus",
+      "dataset": "live",
+      "set": "tsjs",
+      "total": 162,
+      "resolved": 17,
+      "rate": 0.10493827160493827,
+      "date": "2026-01-08"
+    },
+    {
+      "name": "SWE-agent + DeepSeek-V3.1-Terminus",
+      "dataset": "live",
+      "set": "csharp",
+      "total": 28,
+      "resolved": 6,
+      "rate": 0.21428571428571427,
+      "date": "2026-01-08"
+    },
+    {
+      "name": "SWE-agent + DeepSeek-V3.1-Terminus",
+      "dataset": "live",
+      "set": "ccpp",
+      "total": 48,
+      "resolved": 13,
+      "rate": 0.2708333333333333,
+      "date": "2026-01-08"
+    },
+    {
+      "name": "OpenHands + Gemini3-Flash",
+      "dataset": "live",
+      "set": "java",
+      "total": 62,
+      "resolved": 15,
+      "rate": 0.24193548387096775,
+      "date": "2026-01-08"
+    },
+    {
+      "name": "OpenHands + Gemini3-Flash",
+      "dataset": "live",
+      "set": "rust",
+      "total": 45,
+      "resolved": 16,
+      "rate": 0.35555555555555557,
+      "date": "2026-01-08"
+    },
+    {
+      "name": "OpenHands + Gemini3-Flash",
+      "dataset": "live",
+      "set": "go",
+      "total": 68,
+      "resolved": 21,
+      "rate": 0.3088235294117647,
+      "date": "2026-01-08"
+    },
+    {
+      "name": "OpenHands + Gemini3-Flash",
+      "dataset": "live",
+      "set": "tsjs",
+      "total": 162,
+      "resolved": 14,
+      "rate": 0.08641975308641975,
+      "date": "2026-01-08"
+    },
+    {
+      "name": "OpenHands + Gemini3-Flash",
+      "dataset": "live",
+      "set": "csharp",
+      "total": 28,
+      "resolved": 5,
+      "rate": 0.17857142857142858,
+      "date": "2026-01-08"
+    },
+    {
+      "name": "OpenHands + Gemini3-Flash",
+      "dataset": "live",
+      "set": "ccpp",
+      "total": 48,
+      "resolved": 17,
+      "rate": 0.3541666666666667,
+      "date": "2026-01-08"
+    },
+    {
+      "name": "SWE-agent + Gemini3-Flash",
+      "dataset": "live",
+      "set": "java",
+      "total": 62,
+      "resolved": 16,
+      "rate": 0.25806451612903225,
+      "date": "2026-01-08"
+    },
+    {
+      "name": "SWE-agent + Gemini3-Flash",
+      "dataset": "live",
+      "set": "rust",
+      "total": 45,
+      "resolved": 17,
+      "rate": 0.37777777777777777,
+      "date": "2026-01-08"
+    },
+    {
+      "name": "SWE-agent + Gemini3-Flash",
+      "dataset": "live",
+      "set": "go",
+      "total": 68,
+      "resolved": 22,
+      "rate": 0.3235294117647059,
+      "date": "2026-01-08"
+    },
+    {
+      "name": "SWE-agent + Gemini3-Flash",
+      "dataset": "live",
+      "set": "tsjs",
+      "total": 162,
+      "resolved": 16,
+      "rate": 0.09876543209876543,
+      "date": "2026-01-08"
+    },
+    {
+      "name": "SWE-agent + Gemini3-Flash",
+      "dataset": "live",
+      "set": "csharp",
+      "total": 28,
+      "resolved": 4,
+      "rate": 0.14285714285714285,
+      "date": "2026-01-08"
+    },
+    {
+      "name": "SWE-agent + Gemini3-Flash",
+      "dataset": "live",
+      "set": "ccpp",
+      "total": 48,
+      "resolved": 17,
+      "rate": 0.3541666666666667,
+      "date": "2026-01-08"
+    },
+    {
+      "name": "Claude Code + Claude-4.5-Sonnet",
+      "dataset": "live",
+      "set": "java",
+      "total": 62,
+      "resolved": 17,
+      "rate": 0.27419354838709675,
+      "date": "2026-01-08"
+    },
+    {
+      "name": "Claude Code + Claude-4.5-Sonnet",
+      "dataset": "live",
+      "set": "rust",
+      "total": 45,
+      "resolved": 10,
+      "rate": 0.2222222222222222,
+      "date": "2026-01-08"
+    },
+    {
+      "name": "Claude Code + Claude-4.5-Sonnet",
+      "dataset": "live",
+      "set": "go",
+      "total": 68,
+      "resolved": 30,
+      "rate": 0.4411764705882353,
+      "date": "2026-01-08"
+    },
+    {
+      "name": "Claude Code + Claude-4.5-Sonnet",
+      "dataset": "live",
+      "set": "tsjs",
+      "total": 162,
+      "resolved": 44,
+      "rate": 0.2716049382716049,
+      "date": "2026-01-08"
+    },
+    {
+      "name": "Claude Code + Claude-4.5-Sonnet",
+      "dataset": "live",
+      "set": "csharp",
+      "total": 28,
+      "resolved": 4,
+      "rate": 0.14285714285714285,
+      "date": "2026-01-08"
+    },
+    {
+      "name": "Claude Code + Claude-4.5-Sonnet",
+      "dataset": "live",
+      "set": "ccpp",
+      "total": 48,
+      "resolved": 17,
+      "rate": 0.3541666666666667,
+      "date": "2026-01-08"
+    },
+    {
+      "name": "OpenHands + Claude-4.5-Sonnet",
+      "dataset": "live",
+      "set": "java",
+      "total": 62,
+      "resolved": 12,
+      "rate": 0.1935483870967742,
+      "date": "2026-01-08"
+    },
+    {
+      "name": "OpenHands + Claude-4.5-Sonnet",
+      "dataset": "live",
+      "set": "rust",
+      "total": 45,
+      "resolved": 12,
+      "rate": 0.26666666666666666,
+      "date": "2026-01-08"
+    },
+    {
+      "name": "OpenHands + Claude-4.5-Sonnet",
+      "dataset": "live",
+      "set": "go",
+      "total": 68,
+      "resolved": 27,
+      "rate": 0.39705882352941174,
+      "date": "2026-01-08"
+    },
+    {
+      "name": "OpenHands + Claude-4.5-Sonnet",
+      "dataset": "live",
+      "set": "tsjs",
+      "total": 162,
+      "resolved": 31,
+      "rate": 0.19135802469135801,
+      "date": "2026-01-08"
+    },
+    {
+      "name": "OpenHands + Claude-4.5-Sonnet",
+      "dataset": "live",
+      "set": "csharp",
+      "total": 28,
+      "resolved": 5,
+      "rate": 0.17857142857142858,
+      "date": "2026-01-08"
+    },
+    {
+      "name": "OpenHands + Claude-4.5-Sonnet",
+      "dataset": "live",
+      "set": "ccpp",
+      "total": 48,
+      "resolved": 21,
+      "rate": 0.4375,
+      "date": "2026-01-08"
+    },
+    {
+      "name": "SWE-agent + Claude-4.5-Sonnet",
+      "dataset": "live",
+      "set": "java",
+      "total": 62,
+      "resolved": 10,
+      "rate": 0.16129032258064516,
+      "date": "2026-01-08"
+    },
+    {
+      "name": "SWE-agent + Claude-4.5-Sonnet",
+      "dataset": "live",
+      "set": "rust",
+      "total": 45,
+      "resolved": 13,
+      "rate": 0.28888888888888886,
+      "date": "2026-01-08"
+    },
+    {
+      "name": "SWE-agent + Claude-4.5-Sonnet",
+      "dataset": "live",
+      "set": "go",
+      "total": 68,
+      "resolved": 27,
+      "rate": 0.39705882352941174,
+      "date": "2026-01-08"
+    },
+    {
+      "name": "SWE-agent + Claude-4.5-Sonnet",
+      "dataset": "live",
+      "set": "tsjs",
+      "total": 162,
+      "resolved": 33,
+      "rate": 0.2037037037037037,
+      "date": "2026-01-08"
+    },
+    {
+      "name": "SWE-agent + Claude-4.5-Sonnet",
+      "dataset": "live",
+      "set": "csharp",
+      "total": 28,
+      "resolved": 6,
+      "rate": 0.21428571428571427,
+      "date": "2026-01-08"
+    },
+    {
+      "name": "SWE-agent + Claude-4.5-Sonnet",
+      "dataset": "live",
+      "set": "ccpp",
+      "total": 48,
+      "resolved": 21,
+      "rate": 0.4375,
+      "date": "2026-01-08"
+    },
+    {
+      "name": "Claude Code + GPT5.2-Thinking (Medium)",
+      "dataset": "live",
+      "set": "java",
+      "total": 62,
+      "resolved": 23,
+      "rate": 0.3709677419354839,
+      "date": "2026-01-08"
+    },
+    {
+      "name": "Claude Code + GPT5.2-Thinking (Medium)",
+      "dataset": "live",
+      "set": "rust",
+      "total": 45,
+      "resolved": 15,
+      "rate": 0.3333333333333333,
+      "date": "2026-01-08"
+    },
+    {
+      "name": "Claude Code + GPT5.2-Thinking (Medium)",
+      "dataset": "live",
+      "set": "go",
+      "total": 68,
+      "resolved": 19,
+      "rate": 0.27941176470588236,
+      "date": "2026-01-08"
+    },
+    {
+      "name": "Claude Code + GPT5.2-Thinking (Medium)",
+      "dataset": "live",
+      "set": "tsjs",
+      "total": 162,
+      "resolved": 33,
+      "rate": 0.2037037037037037,
+      "date": "2026-01-08"
+    },
+    {
+      "name": "Claude Code + GPT5.2-Thinking (Medium)",
+      "dataset": "live",
+      "set": "csharp",
+      "total": 28,
+      "resolved": 4,
+      "rate": 0.14285714285714285,
+      "date": "2026-01-08"
+    },
+    {
+      "name": "Claude Code + GPT5.2-Thinking (Medium)",
+      "dataset": "live",
+      "set": "ccpp",
+      "total": 48,
+      "resolved": 18,
+      "rate": 0.375,
+      "date": "2026-01-08"
+    },
+    {
+      "name": "OpenHands + GPT5.2-Thinking (Medium)",
+      "dataset": "live",
+      "set": "java",
+      "total": 62,
+      "resolved": 14,
+      "rate": 0.22580645161290322,
+      "date": "2026-01-08"
+    },
+    {
+      "name": "OpenHands + GPT5.2-Thinking (Medium)",
+      "dataset": "live",
+      "set": "rust",
+      "total": 45,
+      "resolved": 12,
+      "rate": 0.26666666666666666,
+      "date": "2026-01-08"
+    },
+    {
+      "name": "OpenHands + GPT5.2-Thinking (Medium)",
+      "dataset": "live",
+      "set": "go",
+      "total": 68,
+      "resolved": 14,
+      "rate": 0.20588235294117646,
+      "date": "2026-01-08"
+    },
+    {
+      "name": "OpenHands + GPT5.2-Thinking (Medium)",
+      "dataset": "live",
+      "set": "tsjs",
+      "total": 162,
+      "resolved": 21,
+      "rate": 0.12962962962962962,
+      "date": "2026-01-08"
+    },
+    {
+      "name": "OpenHands + GPT5.2-Thinking (Medium)",
+      "dataset": "live",
+      "set": "csharp",
+      "total": 28,
+      "resolved": 6,
+      "rate": 0.21428571428571427,
+      "date": "2026-01-08"
+    },
+    {
+      "name": "OpenHands + GPT5.2-Thinking (Medium)",
+      "dataset": "live",
+      "set": "ccpp",
+      "total": 48,
+      "resolved": 18,
+      "rate": 0.375,
+      "date": "2026-01-08"
+    },
+    {
+      "name": "SWE-agent + GPT5.2-Thinking (Medium)",
+      "dataset": "live",
+      "set": "java",
+      "total": 62,
+      "resolved": 14,
+      "rate": 0.22580645161290322,
+      "date": "2026-01-08"
+    },
+    {
+      "name": "SWE-agent + GPT5.2-Thinking (Medium)",
+      "dataset": "live",
+      "set": "rust",
+      "total": 45,
+      "resolved": 13,
+      "rate": 0.28888888888888886,
+      "date": "2026-01-08"
+    },
+    {
+      "name": "SWE-agent + GPT5.2-Thinking (Medium)",
+      "dataset": "live",
+      "set": "go",
+      "total": 68,
+      "resolved": 17,
+      "rate": 0.25,
+      "date": "2026-01-08"
+    },
+    {
+      "name": "SWE-agent + GPT5.2-Thinking (Medium)",
+      "dataset": "live",
+      "set": "tsjs",
+      "total": 162,
+      "resolved": 26,
+      "rate": 0.16049382716049382,
+      "date": "2026-01-08"
+    },
+    {
+      "name": "SWE-agent + GPT5.2-Thinking (Medium)",
+      "dataset": "live",
+      "set": "csharp",
+      "total": 28,
+      "resolved": 6,
+      "rate": 0.21428571428571427,
+      "date": "2026-01-08"
+    },
+    {
+      "name": "SWE-agent + GPT5.2-Thinking (Medium)",
+      "dataset": "live",
+      "set": "ccpp",
+      "total": 48,
+      "resolved": 20,
+      "rate": 0.4166666666666667,
+      "date": "2026-01-08"
+    },
+    {
+      "name": "SWE-agent + GPT5-Thinking (Medium)",
+      "dataset": "live",
+      "set": "verified",
+      "total": 500,
+      "resolved": 152,
+      "rate": 0.304,
+      "date": "2025-12-31"
+    },
+    {
+      "name": "SWE-agent + Claude-4.5-Sonnet",
+      "dataset": "live",
+      "set": "verified",
+      "total": 500,
+      "resolved": 200,
+      "rate": 0.4,
+      "date": "2025-12-31"
+    },
+    {
+      "name": "SWE-agent + Claude-4.5-Sonnet",
+      "dataset": "live",
+      "set": "lite",
+      "total": 300,
+      "resolved": 108,
+      "rate": 0.36,
+      "date": "2025-12-01"
+    },
+    {
+      "name": "SWE-agent + GPT5-Thinking (Medium)",
+      "dataset": "live",
+      "set": "lite",
+      "total": 300,
+      "resolved": 73,
+      "rate": 0.24333333333333335,
+      "date": "2025-11-01"
+    },
+    {
+      "name": "Agentless + DeepSeek V3",
+      "dataset": "live",
+      "set": "lite",
+      "total": 300,
+      "resolved": 40,
+      "rate": 0.13333333333333333,
+      "date": "2025-05-01"
+    },
+    {
+      "name": "Agentless + Claude 3.7 Sonnet",
+      "dataset": "live",
+      "set": "lite",
+      "total": 300,
+      "resolved": 34,
+      "rate": 0.11333333333333333,
+      "date": "2025-05-01"
+    },
+    {
+      "name": "SWE-agent + Claude 3.7 Sonnet",
+      "dataset": "live",
+      "set": "lite",
+      "total": 300,
+      "resolved": 53,
+      "rate": 0.17666666666666667,
+      "date": "2025-05-01"
+    },
+    {
+      "name": "OpenHands + GPT 4.1",
+      "dataset": "live",
+      "set": "lite",
+      "total": 300,
+      "resolved": 34,
+      "rate": 0.11333333333333333,
+      "date": "2025-05-01"
+    },
+    {
+      "name": "SWE-agent + DeepSeek V3",
+      "dataset": "live",
+      "set": "lite",
+      "total": 300,
+      "resolved": 46,
+      "rate": 0.15333333333333332,
+      "date": "2025-05-01"
+    },
+    {
+      "name": "SWE-agent + GPT 4o",
+      "dataset": "live",
+      "set": "lite",
+      "total": 300,
+      "resolved": 30,
+      "rate": 0.1,
+      "date": "2025-05-01"
+    },
+    {
+      "name": "OpenHands + Claude 3.7 Sonnet",
+      "dataset": "live",
+      "set": "lite",
+      "total": 300,
+      "resolved": 53,
+      "rate": 0.17666666666666667,
+      "date": "2025-05-01"
+    },
+    {
+      "name": "Agentless + GPT 4o",
+      "dataset": "live",
+      "set": "lite",
+      "total": 300,
+      "resolved": 35,
+      "rate": 0.11666666666666667,
+      "date": "2025-05-01"
+    },
+    {
+      "name": "OpenHands + GPT 4o",
+      "dataset": "live",
+      "set": "lite",
+      "total": 300,
+      "resolved": 21,
+      "rate": 0.07,
+      "date": "2025-05-01"
+    },
+    {
+      "name": "OpenHands + DeepSeek V3",
+      "dataset": "live",
+      "set": "lite",
+      "total": 300,
+      "resolved": 39,
+      "rate": 0.13,
+      "date": "2025-05-01"
+    },
+    {
+      "name": "SWE-agent + GPT 4.1",
+      "dataset": "live",
+      "set": "full",
+      "total": 1319,
+      "resolved": 245,
+      "rate": 0.18574677786201668,
+      "date": "2025-05-01"
+    },
+    {
+      "name": "SWE-agent + Claude 3.7 Sonnet",
+      "dataset": "live",
+      "set": "full",
+      "total": 1319,
+      "resolved": 226,
+      "rate": 0.17134192570128887,
+      "date": "2025-05-01"
+    },
+    {
+      "name": "SWE-agent + GPT 4o",
+      "dataset": "live",
+      "set": "full",
+      "total": 1319,
+      "resolved": 120,
+      "rate": 0.09097801364670205,
+      "date": "2025-05-01"
+    },
+    {
+      "name": "OpenHands + Claude 3.7 Sonnet",
+      "dataset": "live",
+      "set": "full",
+      "total": 1319,
+      "resolved": 254,
+      "rate": 0.19257012888551933,
+      "date": "2025-05-01"
+    },
+    {
+      "name": "Agentless + GPT 4.1",
+      "dataset": "live",
+      "set": "lite",
+      "total": 300,
+      "resolved": 36,
+      "rate": 0.12,
+      "date": "2025-05-01"
+    },
+    {
+      "name": "SWE-agent + GPT 4.1",
+      "dataset": "live",
+      "set": "lite",
+      "total": 300,
+      "resolved": 49,
+      "rate": 0.16333333333333333,
+      "date": "2025-05-01"
+    },
+    {
+      "name": "OpenHands + Qwen3-Coder-480B-A35B",
+      "dataset": "live",
+      "set": "lite",
+      "total": 300,
+      "resolved": 74,
+      "rate": 0.24666666666666667,
+      "date": "2025-07-25"
+    },
+    {
+      "name": "gpt-5.4 (xHigh)",
+      "dataset": "pro",
+      "set": "public-731",
+      "total": 731,
+      "resolved": 432,
+      "rate": 0.591,
+      "date": "2026-06"
+    },
+    {
+      "name": "Muse Spark",
+      "dataset": "pro",
+      "set": "public-731",
+      "total": 731,
+      "resolved": 402,
+      "rate": 0.55,
+      "date": "2026-06"
+    },
+    {
+      "name": "claude-opus-4-6 (thinking)",
+      "dataset": "pro",
+      "set": "public-731",
+      "total": 731,
+      "resolved": 379,
+      "rate": 0.519,
+      "date": "2026-06"
+    },
+    {
+      "name": "gemini-3.1-pro (thinking)",
+      "dataset": "pro",
+      "set": "public-731",
+      "total": 731,
+      "resolved": 337,
+      "rate": 0.461,
+      "date": "2026-06"
+    },
+    {
+      "name": "claude-opus-4-5",
+      "dataset": "pro",
+      "set": "public-731",
+      "total": 731,
+      "resolved": 335,
+      "rate": 0.4589,
+      "date": "2026-06"
+    },
+    {
+      "name": "claude-4-5-sonnet",
+      "dataset": "pro",
+      "set": "public-731",
+      "total": 731,
+      "resolved": 319,
+      "rate": 0.436,
+      "date": "2026-06"
+    },
+    {
+      "name": "gpt-5 (High)",
+      "dataset": "pro",
+      "set": "public-731",
+      "total": 731,
+      "resolved": 305,
+      "rate": 0.4178,
+      "date": "2026-06"
+    },
+    {
+      "name": "gpt-5.2-codex",
+      "dataset": "pro",
+      "set": "public-731",
+      "total": 731,
+      "resolved": 300,
+      "rate": 0.4104,
+      "date": "2026-06"
+    }
+  ],
+  "liveResolvedBy": {
+    "amoffat__sh-744": [
+      "OpenHands + Claude 3.7 Sonnet",
+      "OpenHands + GPT 4.1",
+      "OpenHands + Qwen3-Coder-480B-A35B",
+      "SWE-agent + Claude 3.7 Sonnet",
+      "SWE-agent + Claude-4.5-Sonnet",
+      "SWE-agent + GPT 4.1",
+      "SWE-agent + GPT5-Thinking (Medium)"
+    ],
+    "beancount__beancount-931": [
+      "Agentless + DeepSeek V3",
+      "OpenHands + Claude 3.7 Sonnet",
+      "OpenHands + GPT 4.1",
+      "OpenHands + Qwen3-Coder-480B-A35B",
+      "SWE-agent + Claude 3.7 Sonnet",
+      "SWE-agent + Claude-4.5-Sonnet",
+      "SWE-agent + DeepSeek V3",
+      "SWE-agent + GPT5-Thinking (Medium)"
+    ],
+    "beetbox__beets-5495": [
+      "Agentless + Claude 3.7 Sonnet",
+      "Agentless + DeepSeek V3",
+      "Agentless + GPT 4.1",
+      "Agentless + GPT 4o",
+      "OpenHands + Claude 3.7 Sonnet",
+      "OpenHands + GPT 4.1",
+      "SWE-agent + Claude-4.5-Sonnet",
+      "SWE-agent + GPT5-Thinking (Medium)"
+    ],
+    "beeware__briefcase-2075": [
+      "Agentless + Claude 3.7 Sonnet",
+      "Agentless + DeepSeek V3",
+      "Agentless + GPT 4.1",
+      "OpenHands + DeepSeek V3",
+      "OpenHands + GPT 4.1",
+      "SWE-agent + Claude 3.7 Sonnet",
+      "SWE-agent + Claude-4.5-Sonnet",
+      "SWE-agent + DeepSeek V3",
+      "SWE-agent + GPT 4.1",
+      "SWE-agent + GPT5-Thinking (Medium)"
+    ],
+    "beeware__briefcase-2085": [
+      "Agentless + DeepSeek V3",
+      "OpenHands + DeepSeek V3",
+      "SWE-agent + Claude-4.5-Sonnet",
+      "SWE-agent + DeepSeek V3",
+      "SWE-agent + GPT 4o"
+    ],
+    "beeware__briefcase-2088": [
+      "OpenHands + Claude 3.7 Sonnet",
+      "OpenHands + DeepSeek V3",
+      "OpenHands + GPT 4.1",
+      "OpenHands + Qwen3-Coder-480B-A35B",
+      "SWE-agent + Claude 3.7 Sonnet",
+      "SWE-agent + Claude-4.5-Sonnet",
+      "SWE-agent + DeepSeek V3",
+      "SWE-agent + GPT 4.1",
+      "SWE-agent + GPT 4o",
+      "SWE-agent + GPT5-Thinking (Medium)"
+    ],
+    "bridgecrewio__checkov-6893": [
+      "SWE-agent + Claude-4.5-Sonnet"
+    ],
+    "bridgecrewio__checkov-6895": [
+      "Agentless + Claude 3.7 Sonnet",
+      "SWE-agent + Claude 3.7 Sonnet",
+      "SWE-agent + Claude-4.5-Sonnet",
+      "SWE-agent + DeepSeek V3"
+    ],
+    "bridgecrewio__checkov-7002": [
+      "SWE-agent + Claude 3.7 Sonnet",
+      "SWE-agent + Claude-4.5-Sonnet"
+    ],
+    "conan-io__conan-17123": [
+      "Agentless + DeepSeek V3",
+      "OpenHands + DeepSeek V3",
+      "OpenHands + GPT 4.1",
+      "SWE-agent + Claude 3.7 Sonnet",
+      "SWE-agent + Claude-4.5-Sonnet",
+      "SWE-agent + DeepSeek V3",
+      "SWE-agent + GPT 4.1"
+    ],
+    "conan-io__conan-17183": [
+      "Agentless + Claude 3.7 Sonnet",
+      "Agentless + DeepSeek V3",
+      "Agentless + GPT 4.1",
+      "OpenHands + Claude 3.7 Sonnet",
+      "OpenHands + DeepSeek V3",
+      "OpenHands + GPT 4.1",
+      "OpenHands + GPT 4o",
+      "SWE-agent + Claude 3.7 Sonnet",
+      "SWE-agent + Claude-4.5-Sonnet",
+      "SWE-agent + DeepSeek V3",
+      "SWE-agent + GPT 4.1",
+      "SWE-agent + GPT5-Thinking (Medium)"
+    ],
+    "conan-io__conan-17266": [
+      "Agentless + Claude 3.7 Sonnet",
+      "Agentless + DeepSeek V3",
+      "Agentless + GPT 4.1",
+      "OpenHands + Claude 3.7 Sonnet",
+      "OpenHands + DeepSeek V3",
+      "OpenHands + GPT 4.1",
+      "OpenHands + GPT 4o",
+      "SWE-agent + Claude 3.7 Sonnet",
+      "SWE-agent + Claude-4.5-Sonnet",
+      "SWE-agent + DeepSeek V3",
+      "SWE-agent + GPT 4.1",
+      "SWE-agent + GPT 4o",
+      "SWE-agent + GPT5-Thinking (Medium)"
+    ],
+    "conan-io__conan-17300": [
+      "Agentless + Claude 3.7 Sonnet",
+      "Agentless + DeepSeek V3",
+      "Agentless + GPT 4.1",
+      "Agentless + GPT 4o",
+      "OpenHands + DeepSeek V3",
+      "OpenHands + GPT 4.1",
+      "SWE-agent + Claude 3.7 Sonnet",
+      "SWE-agent + Claude-4.5-Sonnet",
+      "SWE-agent + DeepSeek V3",
+      "SWE-agent + GPT 4.1",
+      "SWE-agent + GPT5-Thinking (Medium)"
+    ],
+    "conan-io__conan-17301": [
+      "SWE-agent + Claude-4.5-Sonnet"
+    ],
+    "conan-io__conan-17520": [
+      "SWE-agent + Claude-4.5-Sonnet"
+    ],
+    "conan-io__conan-17532": [
+      "Agentless + Claude 3.7 Sonnet",
+      "Agentless + DeepSeek V3",
+      "OpenHands + Claude 3.7 Sonnet",
+      "OpenHands + DeepSeek V3",
+      "SWE-agent + Claude 3.7 Sonnet",
+      "SWE-agent + Claude-4.5-Sonnet",
+      "SWE-agent + DeepSeek V3",
+      "SWE-agent + GPT5-Thinking (Medium)"
+    ],
+    "conan-io__conan-17819": [
+      "SWE-agent + Claude-4.5-Sonnet"
+    ],
+    "conan-io__conan-17917": [
+      "SWE-agent + Claude-4.5-Sonnet"
+    ],
+    "cyclotruc__gitingest-94": [
+      "Agentless + Claude 3.7 Sonnet",
+      "Agentless + DeepSeek V3",
+      "Agentless + GPT 4.1",
+      "Agentless + GPT 4o",
+      "OpenHands + Claude 3.7 Sonnet",
+      "OpenHands + DeepSeek V3",
+      "OpenHands + GPT 4.1",
+      "OpenHands + GPT 4o",
+      "SWE-agent + Claude 3.7 Sonnet",
+      "SWE-agent + Claude-4.5-Sonnet",
+      "SWE-agent + DeepSeek V3",
+      "SWE-agent + GPT 4.1",
+      "SWE-agent + GPT 4o",
+      "SWE-agent + GPT5-Thinking (Medium)"
+    ],
+    "deepset-ai__haystack-8489": [
+      "SWE-agent + Claude-4.5-Sonnet"
+    ],
+    "deepset-ai__haystack-8609": [
+      "OpenHands + DeepSeek V3",
+      "SWE-agent + Claude-4.5-Sonnet",
+      "SWE-agent + DeepSeek V3",
+      "SWE-agent + GPT5-Thinking (Medium)"
+    ],
+    "deepset-ai__haystack-8619": [
+      "OpenHands + DeepSeek V3",
+      "OpenHands + GPT 4.1",
+      "OpenHands + Qwen3-Coder-480B-A35B",
+      "SWE-agent + Claude 3.7 Sonnet",
+      "SWE-agent + Claude-4.5-Sonnet",
+      "SWE-agent + GPT5-Thinking (Medium)"
+    ],
+    "deepset-ai__haystack-8725": [
+      "Agentless + GPT 4.1",
+      "OpenHands + Claude 3.7 Sonnet",
+      "SWE-agent + Claude-4.5-Sonnet",
+      "SWE-agent + GPT 4o"
+    ],
+    "deepset-ai__haystack-8799": [
+      "SWE-agent + Claude-4.5-Sonnet"
+    ],
+    "deepset-ai__haystack-8969": [
+      "Agentless + Claude 3.7 Sonnet",
+      "Agentless + DeepSeek V3",
+      "Agentless + GPT 4.1",
+      "Agentless + GPT 4o",
+      "OpenHands + Claude 3.7 Sonnet",
+      "OpenHands + DeepSeek V3",
+      "OpenHands + GPT 4o",
+      "SWE-agent + Claude-4.5-Sonnet",
+      "SWE-agent + GPT 4o",
+      "SWE-agent + GPT5-Thinking (Medium)"
+    ],
+    "deepset-ai__haystack-8973": [
+      "Agentless + DeepSeek V3",
+      "Agentless + GPT 4o",
+      "OpenHands + Claude 3.7 Sonnet",
+      "OpenHands + GPT 4o",
+      "OpenHands + Qwen3-Coder-480B-A35B",
+      "SWE-agent + Claude 3.7 Sonnet",
+      "SWE-agent + Claude-4.5-Sonnet",
+      "SWE-agent + DeepSeek V3",
+      "SWE-agent + GPT 4.1"
+    ],
+    "deepset-ai__haystack-8981": [
+      "SWE-agent + Claude-4.5-Sonnet"
+    ],
+    "deepset-ai__haystack-8997": [
+      "Agentless + Claude 3.7 Sonnet",
+      "Agentless + DeepSeek V3",
+      "Agentless + GPT 4o",
+      "OpenHands + GPT 4.1",
+      "SWE-agent + Claude 3.7 Sonnet",
+      "SWE-agent + Claude-4.5-Sonnet",
+      "SWE-agent + DeepSeek V3",
+      "SWE-agent + GPT 4.1"
+    ],
+    "deepset-ai__haystack-9027": [
+      "SWE-agent + Claude-4.5-Sonnet"
+    ],
+    "dynaconf__dynaconf-1241": [
+      "Agentless + Claude 3.7 Sonnet",
+      "Agentless + DeepSeek V3",
+      "Agentless + GPT 4.1",
+      "Agentless + GPT 4o",
+      "OpenHands + Claude 3.7 Sonnet",
+      "OpenHands + DeepSeek V3",
+      "OpenHands + GPT 4o",
+      "SWE-agent + Claude 3.7 Sonnet",
+      "SWE-agent + Claude-4.5-Sonnet",
+      "SWE-agent + GPT5-Thinking (Medium)"
+    ],
+    "encode__starlette-2812": [
+      "SWE-agent + Claude-4.5-Sonnet"
+    ],
+    "falconry__falcon-2366": [
+      "SWE-agent + Claude-4.5-Sonnet"
+    ],
+    "feast-dev__feast-5036": [
+      "Agentless + GPT 4.1",
+      "Agentless + GPT 4o",
+      "OpenHands + Qwen3-Coder-480B-A35B",
+      "SWE-agent + Claude 3.7 Sonnet",
+      "SWE-agent + Claude-4.5-Sonnet",
+      "SWE-agent + GPT 4.1",
+      "SWE-agent + GPT 4o",
+      "SWE-agent + GPT5-Thinking (Medium)"
+    ],
+    "flexget__flexget-4306": [
+      "Agentless + Claude 3.7 Sonnet",
+      "Agentless + DeepSeek V3",
+      "Agentless + GPT 4.1",
+      "Agentless + GPT 4o",
+      "SWE-agent + Claude 3.7 Sonnet",
+      "SWE-agent + Claude-4.5-Sonnet",
+      "SWE-agent + DeepSeek V3",
+      "SWE-agent + GPT 4.1",
+      "SWE-agent + GPT 4o",
+      "SWE-agent + GPT5-Thinking (Medium)"
+    ],
+    "fonttools__fonttools-3682": [
+      "Agentless + Claude 3.7 Sonnet",
+      "OpenHands + Claude 3.7 Sonnet",
+      "OpenHands + DeepSeek V3",
+      "SWE-agent + Claude-4.5-Sonnet",
+      "SWE-agent + DeepSeek V3"
+    ],
+    "hiyouga__llama-factory-7505": [
+      "Agentless + DeepSeek V3",
+      "OpenHands + Claude 3.7 Sonnet",
+      "OpenHands + DeepSeek V3",
+      "OpenHands + GPT 4.1",
+      "SWE-agent + Claude 3.7 Sonnet",
+      "SWE-agent + Claude-4.5-Sonnet"
+    ],
+    "icloud-photos-downloader__icloud_photos_downloader-1060": [
+      "Agentless + Claude 3.7 Sonnet",
+      "Agentless + DeepSeek V3",
+      "Agentless + GPT 4.1",
+      "Agentless + GPT 4o",
+      "OpenHands + Claude 3.7 Sonnet",
+      "OpenHands + DeepSeek V3",
+      "OpenHands + GPT 4.1",
+      "OpenHands + Qwen3-Coder-480B-A35B",
+      "SWE-agent + Claude 3.7 Sonnet",
+      "SWE-agent + Claude-4.5-Sonnet",
+      "SWE-agent + DeepSeek V3",
+      "SWE-agent + GPT 4.1",
+      "SWE-agent + GPT 4o",
+      "SWE-agent + GPT5-Thinking (Medium)"
+    ],
+    "instructlab__instructlab-2526": [
+      "OpenHands + DeepSeek V3",
+      "OpenHands + GPT 4o",
+      "SWE-agent + Claude-4.5-Sonnet",
+      "SWE-agent + DeepSeek V3",
+      "SWE-agent + GPT5-Thinking (Medium)"
+    ],
+    "instructlab__instructlab-2572": [
+      "SWE-agent + Claude-4.5-Sonnet"
+    ],
+    "instructlab__instructlab-3060": [
+      "Agentless + Claude 3.7 Sonnet",
+      "Agentless + DeepSeek V3",
+      "Agentless + GPT 4.1",
+      "Agentless + GPT 4o",
+      "OpenHands + Claude 3.7 Sonnet",
+      "OpenHands + DeepSeek V3",
+      "OpenHands + GPT 4.1",
+      "OpenHands + GPT 4o",
+      "SWE-agent + Claude 3.7 Sonnet",
+      "SWE-agent + Claude-4.5-Sonnet",
+      "SWE-agent + DeepSeek V3",
+      "SWE-agent + GPT 4.1",
+      "SWE-agent + GPT5-Thinking (Medium)"
+    ],
+    "instructlab__instructlab-3118": [
+      "OpenHands + Claude 3.7 Sonnet",
+      "OpenHands + GPT 4.1",
+      "OpenHands + Qwen3-Coder-480B-A35B",
+      "SWE-agent + Claude-4.5-Sonnet",
+      "SWE-agent + DeepSeek V3",
+      "SWE-agent + GPT5-Thinking (Medium)"
+    ],
+    "ipython__ipython-14695": [
+      "Agentless + Claude 3.7 Sonnet",
+      "Agentless + GPT 4.1",
+      "Agentless + GPT 4o",
+      "OpenHands + DeepSeek V3",
+      "OpenHands + GPT 4.1",
+      "SWE-agent + Claude 3.7 Sonnet",
+      "SWE-agent + Claude-4.5-Sonnet",
+      "SWE-agent + DeepSeek V3",
+      "SWE-agent + GPT 4.1",
+      "SWE-agent + GPT 4o",
+      "SWE-agent + GPT5-Thinking (Medium)"
+    ],
+    "ipython__ipython-14822": [
+      "Agentless + GPT 4.1",
+      "SWE-agent + Claude-4.5-Sonnet"
+    ],
+    "iterative__dvc-10711": [
+      "Agentless + Claude 3.7 Sonnet",
+      "Agentless + DeepSeek V3",
+      "Agentless + GPT 4o",
+      "OpenHands + DeepSeek V3",
+      "SWE-agent + Claude 3.7 Sonnet",
+      "SWE-agent + Claude-4.5-Sonnet",
+      "SWE-agent + DeepSeek V3",
+      "SWE-agent + GPT 4o"
+    ],
+    "jazzband__tablib-613": [
+      "Agentless + GPT 4o",
+      "SWE-agent + Claude-4.5-Sonnet",
+      "SWE-agent + GPT5-Thinking (Medium)"
+    ],
+    "joke2k__faker-2142": [
+      "Agentless + Claude 3.7 Sonnet",
+      "OpenHands + DeepSeek V3",
+      "SWE-agent + Claude-4.5-Sonnet",
+      "SWE-agent + GPT5-Thinking (Medium)"
+    ],
+    "joke2k__faker-2155": [
+      "OpenHands + Claude 3.7 Sonnet",
+      "SWE-agent + Claude-4.5-Sonnet",
+      "SWE-agent + GPT 4.1",
+      "SWE-agent + GPT5-Thinking (Medium)"
+    ],
+    "joke2k__faker-2173": [
+      "Agentless + Claude 3.7 Sonnet",
+      "Agentless + GPT 4.1",
+      "OpenHands + Qwen3-Coder-480B-A35B",
+      "SWE-agent + Claude-4.5-Sonnet",
+      "SWE-agent + DeepSeek V3"
+    ],
+    "joke2k__faker-2190": [
+      "Agentless + DeepSeek V3",
+      "OpenHands + Claude 3.7 Sonnet",
+      "OpenHands + GPT 4.1",
+      "OpenHands + GPT 4o",
+      "SWE-agent + Claude 3.7 Sonnet",
+      "SWE-agent + Claude-4.5-Sonnet",
+      "SWE-agent + DeepSeek V3",
+      "SWE-agent + GPT 4.1",
+      "SWE-agent + GPT 4o",
+      "SWE-agent + GPT5-Thinking (Medium)"
+    ],
+    "keras-team__keras-20389": [
+      "Agentless + DeepSeek V3",
+      "Agentless + GPT 4.1",
+      "SWE-agent + Claude-4.5-Sonnet"
+    ],
+    "koxudaxi__datamodel-code-generator-2259": [
+      "Agentless + Claude 3.7 Sonnet",
+      "Agentless + GPT 4.1",
+      "Agentless + GPT 4o",
+      "OpenHands + Qwen3-Coder-480B-A35B",
+      "SWE-agent + Claude 3.7 Sonnet",
+      "SWE-agent + Claude-4.5-Sonnet"
+    ],
+    "koxudaxi__datamodel-code-generator-2349": [
+      "SWE-agent + Claude-4.5-Sonnet",
+      "SWE-agent + GPT 4.1"
+    ],
+    "kozea__weasyprint-2300": [
+      "SWE-agent + Claude-4.5-Sonnet",
+      "SWE-agent + GPT5-Thinking (Medium)"
+    ],
+    "kozea__weasyprint-2405": [
+      "SWE-agent + Claude-4.5-Sonnet",
+      "SWE-agent + GPT5-Thinking (Medium)"
+    ],
+    "matplotlib__matplotlib-29249": [
+      "OpenHands + Claude 3.7 Sonnet",
+      "OpenHands + DeepSeek V3",
+      "SWE-agent + Claude 3.7 Sonnet",
+      "SWE-agent + Claude-4.5-Sonnet"
+    ],
+    "matplotlib__matplotlib-29258": [
+      "OpenHands + Claude 3.7 Sonnet",
+      "OpenHands + GPT 4o",
+      "SWE-agent + Claude-4.5-Sonnet",
+      "SWE-agent + GPT5-Thinking (Medium)"
+    ],
+    "matplotlib__matplotlib-29285": [
+      "Agentless + DeepSeek V3",
+      "Agentless + GPT 4.1",
+      "Agentless + GPT 4o",
+      "OpenHands + Claude 3.7 Sonnet",
+      "OpenHands + DeepSeek V3",
+      "OpenHands + GPT 4o",
+      "OpenHands + Qwen3-Coder-480B-A35B",
+      "SWE-agent + Claude 3.7 Sonnet",
+      "SWE-agent + Claude-4.5-Sonnet",
+      "SWE-agent + DeepSeek V3",
+      "SWE-agent + GPT 4.1",
+      "SWE-agent + GPT 4o",
+      "SWE-agent + GPT5-Thinking (Medium)"
+    ],
+    "matplotlib__matplotlib-29388": [
+      "SWE-agent + Claude-4.5-Sonnet",
+      "SWE-agent + GPT 4.1"
+    ],
+    "matplotlib__matplotlib-29537": [
+      "Agentless + GPT 4.1",
+      "Agentless + GPT 4o",
+      "OpenHands + Qwen3-Coder-480B-A35B",
+      "SWE-agent + Claude-4.5-Sonnet",
+      "SWE-agent + DeepSeek V3",
+      "SWE-agent + GPT5-Thinking (Medium)"
+    ],
+    "mikedh__trimesh-2363": [
+      "SWE-agent + Claude-4.5-Sonnet"
+    ],
+    "modelcontextprotocol__python-sdk-222": [
+      "SWE-agent + Claude-4.5-Sonnet"
+    ],
+    "pallets__flask-5626": [
+      "SWE-agent + Claude-4.5-Sonnet",
+      "SWE-agent + GPT5-Thinking (Medium)"
+    ],
+    "pallets__flask-5637": [
+      "SWE-agent + Claude 3.7 Sonnet",
+      "SWE-agent + Claude-4.5-Sonnet"
+    ],
+    "pdm-project__pdm-3374": [
+      "SWE-agent + Claude-4.5-Sonnet"
+    ],
+    "pdm-project__pdm-3420": [
+      "OpenHands + DeepSeek V3",
+      "OpenHands + Qwen3-Coder-480B-A35B",
+      "SWE-agent + Claude-4.5-Sonnet",
+      "SWE-agent + GPT5-Thinking (Medium)"
+    ],
+    "projectmesa__mesa-2632": [
+      "SWE-agent + Claude-4.5-Sonnet"
+    ],
+    "pvlib__pvlib-python-2249": [
+      "Agentless + Claude 3.7 Sonnet",
+      "Agentless + DeepSeek V3",
+      "Agentless + GPT 4.1",
+      "Agentless + GPT 4o",
+      "OpenHands + Claude 3.7 Sonnet",
+      "OpenHands + DeepSeek V3",
+      "OpenHands + GPT 4.1",
+      "OpenHands + GPT 4o",
+      "SWE-agent + Claude 3.7 Sonnet",
+      "SWE-agent + Claude-4.5-Sonnet",
+      "SWE-agent + DeepSeek V3",
+      "SWE-agent + GPT 4.1",
+      "SWE-agent + GPT 4o",
+      "SWE-agent + GPT5-Thinking (Medium)"
+    ],
+    "pvlib__pvlib-python-2286": [
+      "SWE-agent + Claude-4.5-Sonnet"
+    ],
+    "pvlib__pvlib-python-2292": [
+      "SWE-agent + Claude-4.5-Sonnet"
+    ],
+    "pvlib__pvlib-python-2341": [
+      "SWE-agent + Claude-4.5-Sonnet"
+    ],
+    "pvlib__pvlib-python-2393": [
+      "Agentless + DeepSeek V3",
+      "Agentless + GPT 4.1",
+      "Agentless + GPT 4o",
+      "OpenHands + Claude 3.7 Sonnet",
+      "OpenHands + Qwen3-Coder-480B-A35B",
+      "SWE-agent + Claude 3.7 Sonnet",
+      "SWE-agent + Claude-4.5-Sonnet",
+      "SWE-agent + DeepSeek V3",
+      "SWE-agent + GPT 4.1",
+      "SWE-agent + GPT 4o",
+      "SWE-agent + GPT5-Thinking (Medium)"
+    ],
+    "pvlib__pvlib-python-2400": [
+      "Agentless + Claude 3.7 Sonnet",
+      "Agentless + DeepSeek V3",
+      "Agentless + GPT 4.1",
+      "Agentless + GPT 4o",
+      "OpenHands + Claude 3.7 Sonnet",
+      "OpenHands + GPT 4.1",
+      "OpenHands + GPT 4o",
+      "OpenHands + Qwen3-Coder-480B-A35B",
+      "SWE-agent + Claude 3.7 Sonnet",
+      "SWE-agent + Claude-4.5-Sonnet",
+      "SWE-agent + DeepSeek V3",
+      "SWE-agent + GPT 4.1",
+      "SWE-agent + GPT 4o",
+      "SWE-agent + GPT5-Thinking (Medium)"
+    ],
+    "pybamm-team__pybamm-4644": [
+      "SWE-agent + Claude-4.5-Sonnet"
+    ],
+    "pybamm-team__pybamm-4816": [
+      "OpenHands + Claude 3.7 Sonnet",
+      "OpenHands + Qwen3-Coder-480B-A35B",
+      "SWE-agent + Claude-4.5-Sonnet"
+    ],
+    "pydata__xarray-10076": [
+      "Agentless + Claude 3.7 Sonnet",
+      "Agentless + DeepSeek V3",
+      "OpenHands + Qwen3-Coder-480B-A35B",
+      "SWE-agent + Claude-4.5-Sonnet",
+      "SWE-agent + DeepSeek V3",
+      "SWE-agent + GPT 4o"
+    ],
+    "pydata__xarray-9760": [
+      "SWE-agent + Claude-4.5-Sonnet"
+    ],
+    "pydata__xarray-9971": [
+      "Agentless + GPT 4o",
+      "SWE-agent + Claude 3.7 Sonnet",
+      "SWE-agent + Claude-4.5-Sonnet",
+      "SWE-agent + GPT 4.1"
+    ],
+    "pydata__xarray-9974": [
+      "Agentless + Claude 3.7 Sonnet",
+      "Agentless + DeepSeek V3",
+      "Agentless + GPT 4.1",
+      "Agentless + GPT 4o",
+      "OpenHands + GPT 4.1",
+      "SWE-agent + Claude 3.7 Sonnet",
+      "SWE-agent + Claude-4.5-Sonnet",
+      "SWE-agent + GPT 4.1",
+      "SWE-agent + GPT 4o",
+      "SWE-agent + GPT5-Thinking (Medium)"
+    ],
+    "pylint-dev__pylint-10240": [
+      "OpenHands + DeepSeek V3",
+      "OpenHands + GPT 4.1",
+      "SWE-agent + Claude 3.7 Sonnet",
+      "SWE-agent + Claude-4.5-Sonnet",
+      "SWE-agent + DeepSeek V3",
+      "SWE-agent + GPT 4.1"
+    ],
+    "pypa__twine-1225": [
+      "Agentless + DeepSeek V3",
+      "Agentless + GPT 4.1",
+      "Agentless + GPT 4o",
+      "OpenHands + Claude 3.7 Sonnet",
+      "OpenHands + DeepSeek V3",
+      "SWE-agent + Claude-4.5-Sonnet",
+      "SWE-agent + DeepSeek V3",
+      "SWE-agent + GPT 4.1",
+      "SWE-agent + GPT5-Thinking (Medium)"
+    ],
+    "python-babel__babel-1141": [
+      "Agentless + Claude 3.7 Sonnet",
+      "Agentless + GPT 4.1",
+      "Agentless + GPT 4o",
+      "OpenHands + Claude 3.7 Sonnet",
+      "OpenHands + DeepSeek V3",
+      "SWE-agent + Claude 3.7 Sonnet",
+      "SWE-agent + Claude-4.5-Sonnet",
+      "SWE-agent + DeepSeek V3",
+      "SWE-agent + GPT 4.1",
+      "SWE-agent + GPT 4o",
+      "SWE-agent + GPT5-Thinking (Medium)"
+    ],
+    "python-babel__babel-1163": [
+      "OpenHands + Claude 3.7 Sonnet",
+      "SWE-agent + Claude-4.5-Sonnet",
+      "SWE-agent + GPT5-Thinking (Medium)"
+    ],
+    "python-babel__babel-1194": [
+      "SWE-agent + Claude-4.5-Sonnet",
+      "SWE-agent + GPT 4.1",
+      "SWE-agent + GPT5-Thinking (Medium)"
+    ],
+    "python-control__python-control-1111": [
+      "Agentless + Claude 3.7 Sonnet",
+      "Agentless + DeepSeek V3",
+      "Agentless + GPT 4.1",
+      "Agentless + GPT 4o",
+      "OpenHands + Claude 3.7 Sonnet",
+      "OpenHands + DeepSeek V3",
+      "OpenHands + Qwen3-Coder-480B-A35B",
+      "SWE-agent + Claude 3.7 Sonnet",
+      "SWE-agent + Claude-4.5-Sonnet",
+      "SWE-agent + DeepSeek V3",
+      "SWE-agent + GPT 4.1",
+      "SWE-agent + GPT 4o",
+      "SWE-agent + GPT5-Thinking (Medium)"
+    ],
+    "pytorch__torchtune-1806": [
+      "Agentless + DeepSeek V3",
+      "OpenHands + Claude 3.7 Sonnet",
+      "OpenHands + DeepSeek V3",
+      "SWE-agent + Claude-4.5-Sonnet",
+      "SWE-agent + GPT 4.1",
+      "SWE-agent + GPT5-Thinking (Medium)"
+    ],
+    "pytorch__torchtune-2139": [
+      "SWE-agent + Claude-4.5-Sonnet"
+    ],
+    "qtile__qtile-5154": [
+      "Agentless + DeepSeek V3",
+      "Agentless + GPT 4o",
+      "OpenHands + Claude 3.7 Sonnet",
+      "OpenHands + DeepSeek V3",
+      "OpenHands + GPT 4.1",
+      "OpenHands + GPT 4o",
+      "OpenHands + Qwen3-Coder-480B-A35B",
+      "SWE-agent + Claude 3.7 Sonnet",
+      "SWE-agent + Claude-4.5-Sonnet",
+      "SWE-agent + DeepSeek V3",
+      "SWE-agent + GPT 4.1",
+      "SWE-agent + GPT5-Thinking (Medium)"
+    ],
+    "reflex-dev__reflex-4087": [
+      "OpenHands + Claude 3.7 Sonnet",
+      "SWE-agent + Claude-4.5-Sonnet",
+      "SWE-agent + GPT5-Thinking (Medium)"
+    ],
+    "reflex-dev__reflex-4371": [
+      "OpenHands + Claude 3.7 Sonnet",
+      "SWE-agent + Claude-4.5-Sonnet",
+      "SWE-agent + GPT5-Thinking (Medium)"
+    ],
+    "reflex-dev__reflex-4717": [
+      "SWE-agent + Claude-4.5-Sonnet"
+    ],
+    "run-llama__llama_deploy-356": [
+      "SWE-agent + Claude-4.5-Sonnet",
+      "SWE-agent + GPT5-Thinking (Medium)"
+    ],
+    "run-llama__llama_deploy-384": [
+      "SWE-agent + Claude-4.5-Sonnet",
+      "SWE-agent + GPT5-Thinking (Medium)"
+    ],
+    "shapely__shapely-2226": [
+      "Agentless + Claude 3.7 Sonnet",
+      "Agentless + DeepSeek V3",
+      "Agentless + GPT 4.1",
+      "OpenHands + Claude 3.7 Sonnet",
+      "OpenHands + DeepSeek V3",
+      "OpenHands + Qwen3-Coder-480B-A35B",
+      "SWE-agent + Claude 3.7 Sonnet",
+      "SWE-agent + Claude-4.5-Sonnet",
+      "SWE-agent + GPT 4.1",
+      "SWE-agent + GPT5-Thinking (Medium)"
+    ],
+    "shapely__shapely-2255": [
+      "SWE-agent + Claude-4.5-Sonnet",
+      "SWE-agent + GPT5-Thinking (Medium)"
+    ],
+    "sissbruecker__linkding-989": [
+      "Agentless + DeepSeek V3",
+      "OpenHands + Claude 3.7 Sonnet",
+      "OpenHands + GPT 4.1",
+      "SWE-agent + Claude 3.7 Sonnet",
+      "SWE-agent + Claude-4.5-Sonnet",
+      "SWE-agent + GPT 4.1"
+    ],
+    "sissbruecker__linkding-995": [
+      "OpenHands + Claude 3.7 Sonnet",
+      "OpenHands + GPT 4.1",
+      "OpenHands + GPT 4o",
+      "OpenHands + Qwen3-Coder-480B-A35B",
+      "SWE-agent + Claude 3.7 Sonnet",
+      "SWE-agent + Claude-4.5-Sonnet",
+      "SWE-agent + GPT 4.1",
+      "SWE-agent + GPT 4o",
+      "SWE-agent + GPT5-Thinking (Medium)"
+    ],
+    "stanfordnlp__dspy-1651": [
+      "SWE-agent + Claude-4.5-Sonnet"
+    ],
+    "streamlink__streamlink-6242": [
+      "Agentless + Claude 3.7 Sonnet",
+      "Agentless + DeepSeek V3",
+      "Agentless + GPT 4.1",
+      "Agentless + GPT 4o",
+      "OpenHands + Claude 3.7 Sonnet",
+      "OpenHands + DeepSeek V3",
+      "OpenHands + GPT 4.1",
+      "SWE-agent + Claude 3.7 Sonnet",
+      "SWE-agent + Claude-4.5-Sonnet",
+      "SWE-agent + GPT 4.1",
+      "SWE-agent + GPT 4o",
+      "SWE-agent + GPT5-Thinking (Medium)"
+    ],
+    "streamlink__streamlink-6361": [
+      "SWE-agent + Claude-4.5-Sonnet",
+      "SWE-agent + GPT5-Thinking (Medium)"
+    ],
+    "streamlink__streamlink-6389": [
+      "Agentless + DeepSeek V3",
+      "Agentless + GPT 4o",
+      "SWE-agent + Claude-4.5-Sonnet",
+      "SWE-agent + DeepSeek V3",
+      "SWE-agent + GPT 4.1",
+      "SWE-agent + GPT 4o"
+    ],
+    "sympy__sympy-27462": [
+      "Agentless + GPT 4.1",
+      "Agentless + GPT 4o",
+      "SWE-agent + Claude-4.5-Sonnet",
+      "SWE-agent + DeepSeek V3",
+      "SWE-agent + GPT 4.1",
+      "SWE-agent + GPT5-Thinking (Medium)"
+    ],
+    "theoehrly__fast-f1-699": [
+      "SWE-agent + Claude-4.5-Sonnet"
+    ],
+    "tox-dev__tox-3409": [
+      "SWE-agent + Claude-4.5-Sonnet"
+    ],
+    "wemake-services__wemake-python-styleguide-3117": [
+      "OpenHands + Claude 3.7 Sonnet",
+      "OpenHands + GPT 4.1",
+      "SWE-agent + Claude 3.7 Sonnet",
+      "SWE-agent + Claude-4.5-Sonnet"
+    ],
+    "wemake-services__wemake-python-styleguide-3128": [
+      "SWE-agent + Claude-4.5-Sonnet"
+    ],
+    "wemake-services__wemake-python-styleguide-3129": [
+      "SWE-agent + Claude 3.7 Sonnet",
+      "SWE-agent + Claude-4.5-Sonnet",
+      "SWE-agent + GPT5-Thinking (Medium)"
+    ],
+    "wireservice__csvkit-1281": [
+      "Agentless + GPT 4o",
+      "SWE-agent + Claude-4.5-Sonnet",
+      "SWE-agent + GPT5-Thinking (Medium)"
+    ],
+    "yt-dlp__yt-dlp-11880": [
+      "Agentless + GPT 4.1",
+      "OpenHands + Claude 3.7 Sonnet",
+      "OpenHands + GPT 4.1",
+      "SWE-agent + Claude 3.7 Sonnet",
+      "SWE-agent + Claude-4.5-Sonnet"
+    ],
+    "conan-io__conan-17292": [
+      "SWE-agent + GPT5-Thinking (Medium)"
+    ],
+    "conan-io__conan-17967": [
+      "SWE-agent + GPT5-Thinking (Medium)"
+    ],
+    "deepset-ai__haystack-8940": [
+      "SWE-agent + GPT5-Thinking (Medium)"
+    ],
+    "keras-team__keras-20534": [
+      "SWE-agent + GPT5-Thinking (Medium)"
+    ],
+    "pdm-project__pdm-3255": [
+      "Agentless + GPT 4o",
+      "OpenHands + Claude 3.7 Sonnet",
+      "SWE-agent + GPT 4.1",
+      "SWE-agent + GPT5-Thinking (Medium)"
+    ],
+    "pybamm-team__pybamm-4865": [
+      "SWE-agent + GPT5-Thinking (Medium)"
+    ],
+    "streamlink__streamlink-6439": [
+      "SWE-agent + GPT5-Thinking (Medium)"
+    ],
+    "keras-team__keras-20609": [
+      "SWE-agent + GPT5-Thinking (Medium)"
+    ],
+    "projectmesa__mesa-2523": [
+      "SWE-agent + GPT5-Thinking (Medium)"
+    ],
+    "privacyidea__privacyidea-4251": [
+      "SWE-agent + GPT5-Thinking (Medium)"
+    ],
+    "yt-dlp__yt-dlp-12714": [
+      "SWE-agent + GPT5-Thinking (Medium)"
+    ],
+    "conan-io__conan-17382": [
+      "SWE-agent + GPT5-Thinking (Medium)"
+    ],
+    "aws-cloudformation__cfn-lint-3855": [
+      "SWE-agent + GPT5-Thinking (Medium)"
+    ],
+    "wireservice__csvkit-1274": [
+      "OpenHands + GPT 4o",
+      "SWE-agent + GPT 4.1",
+      "SWE-agent + GPT5-Thinking (Medium)"
+    ],
+    "falconry__falcon-2419": [
+      "SWE-agent + GPT5-Thinking (Medium)"
+    ],
+    "huggingface__smolagents-405": [
+      "SWE-agent + GPT5-Thinking (Medium)"
+    ],
+    "deepset-ai__haystack-8879": [
+      "SWE-agent + GPT5-Thinking (Medium)"
+    ],
+    "conan-io__conan-17517": [
+      "SWE-agent + GPT5-Thinking (Medium)"
+    ],
+    "aws-cloudformation__cfn-lint-3821": [
+      "Agentless + Claude 3.7 Sonnet",
+      "Agentless + DeepSeek V3",
+      "Agentless + GPT 4.1",
+      "Agentless + GPT 4o",
+      "OpenHands + Claude 3.7 Sonnet",
+      "OpenHands + DeepSeek V3",
+      "OpenHands + GPT 4.1",
+      "OpenHands + GPT 4o",
+      "SWE-agent + Claude 3.7 Sonnet",
+      "SWE-agent + DeepSeek V3",
+      "SWE-agent + GPT 4.1",
+      "SWE-agent + GPT 4o"
+    ],
+    "wemake-services__wemake-python-styleguide-3114": [
+      "Agentless + Claude 3.7 Sonnet",
+      "Agentless + DeepSeek V3",
+      "Agentless + GPT 4o",
+      "SWE-agent + GPT 4o"
+    ],
+    "streamlink__streamlink-6328": [
+      "Agentless + DeepSeek V3",
+      "Agentless + GPT 4.1",
+      "Agentless + GPT 4o",
+      "SWE-agent + DeepSeek V3",
+      "SWE-agent + GPT 4.1",
+      "SWE-agent + GPT 4o"
+    ],
+    "aws-cloudformation__cfn-lint-4002": [
+      "Agentless + DeepSeek V3",
+      "OpenHands + Claude 3.7 Sonnet",
+      "OpenHands + GPT 4.1",
+      "SWE-agent + GPT 4.1",
+      "SWE-agent + GPT 4o"
+    ],
+    "cyclotruc__gitingest-134": [
+      "Agentless + Claude 3.7 Sonnet",
+      "Agentless + DeepSeek V3",
+      "Agentless + GPT 4o",
+      "OpenHands + DeepSeek V3",
+      "OpenHands + GPT 4o",
+      "SWE-agent + Claude 3.7 Sonnet",
+      "SWE-agent + DeepSeek V3"
+    ],
+    "aws-cloudformation__cfn-lint-4023": [
+      "Agentless + Claude 3.7 Sonnet",
+      "Agentless + GPT 4.1",
+      "OpenHands + Claude 3.7 Sonnet",
+      "SWE-agent + Claude 3.7 Sonnet",
+      "SWE-agent + GPT 4.1"
+    ],
+    "geopandas__geopandas-3471": [
+      "Agentless + Claude 3.7 Sonnet"
+    ],
+    "python-telegram-bot__python-telegram-bot-4617": [
+      "Agentless + Claude 3.7 Sonnet",
+      "Agentless + GPT 4.1",
+      "OpenHands + Claude 3.7 Sonnet",
+      "OpenHands + DeepSeek V3",
+      "OpenHands + GPT 4.1",
+      "OpenHands + GPT 4o",
+      "SWE-agent + Claude 3.7 Sonnet",
+      "SWE-agent + DeepSeek V3",
+      "SWE-agent + GPT 4.1",
+      "SWE-agent + GPT 4o"
+    ],
+    "aws-cloudformation__cfn-lint-4032": [
+      "OpenHands + Claude 3.7 Sonnet",
+      "OpenHands + DeepSeek V3",
+      "OpenHands + Qwen3-Coder-480B-A35B",
+      "SWE-agent + Claude 3.7 Sonnet",
+      "SWE-agent + DeepSeek V3"
+    ],
+    "aws-cloudformation__cfn-lint-3767": [
+      "OpenHands + GPT 4.1",
+      "SWE-agent + Claude 3.7 Sonnet",
+      "SWE-agent + DeepSeek V3",
+      "SWE-agent + GPT 4.1"
+    ],
+    "aws-cloudformation__cfn-lint-3866": [
+      "SWE-agent + Claude 3.7 Sonnet"
+    ],
+    "kedro-org__kedro-4406": [
+      "OpenHands + Claude 3.7 Sonnet",
+      "SWE-agent + Claude 3.7 Sonnet",
+      "SWE-agent + DeepSeek V3",
+      "SWE-agent + GPT 4.1",
+      "SWE-agent + GPT 4o"
+    ],
+    "kubernetes-client__python-2303": [
+      "OpenHands + Claude 3.7 Sonnet",
+      "SWE-agent + Claude 3.7 Sonnet"
+    ],
+    "sissbruecker__linkding-984": [
+      "OpenHands + Claude 3.7 Sonnet",
+      "OpenHands + GPT 4.1"
+    ],
+    "aws-cloudformation__cfn-lint-3770": [
+      "OpenHands + DeepSeek V3",
+      "OpenHands + GPT 4.1",
+      "SWE-agent + DeepSeek V3"
+    ],
+    "pylint-dev__pylint-10089": [
+      "SWE-agent + DeepSeek V3",
+      "SWE-agent + GPT 4.1",
+      "SWE-agent + GPT 4o"
+    ],
+    "scrapy-plugins__scrapy-splash-324": [
+      "OpenHands + Claude 3.7 Sonnet",
+      "OpenHands + Qwen3-Coder-480B-A35B"
+    ],
+    "pypsa__pypsa-1091": [
+      "OpenHands + Claude 3.7 Sonnet"
+    ],
+    "reflex-dev__reflex-4510": [
+      "OpenHands + Claude 3.7 Sonnet",
+      "OpenHands + Qwen3-Coder-480B-A35B"
+    ],
+    "matplotlib__matplotlib-28933": [
+      "OpenHands + Claude 3.7 Sonnet"
+    ],
+    "python-telegram-bot__python-telegram-bot-4626": [
+      "OpenHands + DeepSeek V3",
+      "OpenHands + GPT 4o",
+      "SWE-agent + GPT 4.1"
+    ],
+    "cyclotruc__gitingest-115": [
+      "OpenHands + GPT 4o"
+    ],
+    "sphinx-doc__sphinx-13172": [
+      "SWE-agent + GPT 4.1"
+    ],
+    "pylint-dev__pylint-9346": [
+      "OpenHands + Claude 3.7 Sonnet",
+      "SWE-agent + Claude 3.7 Sonnet",
+      "SWE-agent + GPT 4.1",
+      "SWE-agent + GPT 4o"
+    ],
+    "pytorch__torchtune-1477": [
+      "OpenHands + Claude 3.7 Sonnet",
+      "SWE-agent + Claude 3.7 Sonnet",
+      "SWE-agent + GPT 4.1",
+      "SWE-agent + GPT 4o"
+    ],
+    "bridgecrewio__checkov-7022": [
+      "SWE-agent + Claude 3.7 Sonnet",
+      "SWE-agent + GPT 4.1",
+      "SWE-agent + GPT 4o"
+    ],
+    "keras-team__keras-19775": [
+      "OpenHands + Claude 3.7 Sonnet",
+      "SWE-agent + Claude 3.7 Sonnet",
+      "SWE-agent + GPT 4.1"
+    ],
+    "keras-team__keras-19931": [
+      "OpenHands + Claude 3.7 Sonnet",
+      "SWE-agent + Claude 3.7 Sonnet",
+      "SWE-agent + GPT 4.1"
+    ],
+    "mikedh__trimesh-2136": [
+      "SWE-agent + Claude 3.7 Sonnet",
+      "SWE-agent + GPT 4.1",
+      "SWE-agent + GPT 4o"
+    ],
+    "geopandas__geopandas-3240": [
+      "OpenHands + Claude 3.7 Sonnet",
+      "SWE-agent + Claude 3.7 Sonnet",
+      "SWE-agent + GPT 4.1",
+      "SWE-agent + GPT 4o"
+    ],
+    "joke2k__faker-2007": [
+      "OpenHands + Claude 3.7 Sonnet",
+      "SWE-agent + Claude 3.7 Sonnet",
+      "SWE-agent + GPT 4.1",
+      "SWE-agent + GPT 4o"
+    ],
+    "shapely__shapely-2223": [
+      "OpenHands + Claude 3.7 Sonnet",
+      "OpenHands + Qwen3-Coder-480B-A35B",
+      "SWE-agent + Claude 3.7 Sonnet",
+      "SWE-agent + GPT 4.1"
+    ],
+    "conan-io__conan-15699": [
+      "OpenHands + Claude 3.7 Sonnet",
+      "SWE-agent + Claude 3.7 Sonnet",
+      "SWE-agent + GPT 4.1",
+      "SWE-agent + GPT 4o"
+    ],
+    "pdm-project__pdm-2830": [
+      "OpenHands + Claude 3.7 Sonnet",
+      "SWE-agent + Claude 3.7 Sonnet",
+      "SWE-agent + GPT 4.1"
+    ],
+    "pypa__twine-1112": [
+      "OpenHands + Claude 3.7 Sonnet",
+      "SWE-agent + Claude 3.7 Sonnet",
+      "SWE-agent + GPT 4.1",
+      "SWE-agent + GPT 4o"
+    ],
+    "sphinx-doc__sphinx-11879": [
+      "OpenHands + Claude 3.7 Sonnet",
+      "SWE-agent + Claude 3.7 Sonnet",
+      "SWE-agent + GPT 4.1"
+    ],
+    "keras-team__keras-19773": [
+      "OpenHands + Claude 3.7 Sonnet",
+      "SWE-agent + Claude 3.7 Sonnet",
+      "SWE-agent + GPT 4.1",
+      "SWE-agent + GPT 4o"
+    ],
+    "joke2k__faker-2203": [
+      "OpenHands + Qwen3-Coder-480B-A35B",
+      "SWE-agent + GPT 4.1"
+    ],
+    "streamlink__streamlink-5908": [
+      "OpenHands + Claude 3.7 Sonnet",
+      "SWE-agent + Claude 3.7 Sonnet",
+      "SWE-agent + GPT 4.1"
+    ],
+    "matplotlib__matplotlib-28881": [
+      "SWE-agent + GPT 4.1"
+    ],
+    "pylint-dev__pylint-9876": [
+      "OpenHands + Claude 3.7 Sonnet",
+      "SWE-agent + Claude 3.7 Sonnet",
+      "SWE-agent + GPT 4.1",
+      "SWE-agent + GPT 4o"
+    ],
+    "geopandas__geopandas-3513": [
+      "OpenHands + Claude 3.7 Sonnet",
+      "SWE-agent + Claude 3.7 Sonnet",
+      "SWE-agent + GPT 4.1"
+    ],
+    "matplotlib__matplotlib-29209": [
+      "SWE-agent + GPT 4.1"
+    ],
+    "keras-team__keras-20703": [
+      "OpenHands + Claude 3.7 Sonnet",
+      "OpenHands + Qwen3-Coder-480B-A35B",
+      "SWE-agent + Claude 3.7 Sonnet",
+      "SWE-agent + GPT 4.1",
+      "SWE-agent + GPT 4o"
+    ],
+    "deepset-ai__haystack-8804": [
+      "SWE-agent + Claude 3.7 Sonnet",
+      "SWE-agent + GPT 4.1",
+      "SWE-agent + GPT 4o"
+    ],
+    "aws-cloudformation__cfn-lint-3965": [
+      "OpenHands + Claude 3.7 Sonnet",
+      "SWE-agent + Claude 3.7 Sonnet",
+      "SWE-agent + GPT 4.1",
+      "SWE-agent + GPT 4o"
+    ],
+    "reata__sqllineage-561": [
+      "OpenHands + Claude 3.7 Sonnet",
+      "SWE-agent + Claude 3.7 Sonnet",
+      "SWE-agent + GPT 4.1",
+      "SWE-agent + GPT 4o"
+    ],
+    "theoehrly__fast-f1-701": [
+      "OpenHands + Claude 3.7 Sonnet",
+      "OpenHands + Qwen3-Coder-480B-A35B",
+      "SWE-agent + Claude 3.7 Sonnet",
+      "SWE-agent + GPT 4.1"
+    ],
+    "beeware__briefcase-1785": [
+      "OpenHands + Claude 3.7 Sonnet",
+      "SWE-agent + Claude 3.7 Sonnet",
+      "SWE-agent + GPT 4.1",
+      "SWE-agent + GPT 4o"
+    ],
+    "conan-io__conan-18097": [
+      "OpenHands + Claude 3.7 Sonnet",
+      "OpenHands + Qwen3-Coder-480B-A35B",
+      "SWE-agent + Claude 3.7 Sonnet",
+      "SWE-agent + GPT 4.1"
+    ],
+    "pdm-project__pdm-3440": [
+      "OpenHands + Claude 3.7 Sonnet",
+      "OpenHands + Qwen3-Coder-480B-A35B",
+      "SWE-agent + Claude 3.7 Sonnet",
+      "SWE-agent + GPT 4.1"
+    ],
+    "pypa__twine-1066": [
+      "OpenHands + Claude 3.7 Sonnet",
+      "SWE-agent + Claude 3.7 Sonnet",
+      "SWE-agent + GPT 4.1"
+    ],
+    "streamlink__streamlink-6479": [
+      "OpenHands + Claude 3.7 Sonnet",
+      "OpenHands + Qwen3-Coder-480B-A35B",
+      "SWE-agent + GPT 4.1"
+    ],
+    "matplotlib__matplotlib-28388": [
+      "OpenHands + Claude 3.7 Sonnet",
+      "SWE-agent + Claude 3.7 Sonnet",
+      "SWE-agent + GPT 4.1",
+      "SWE-agent + GPT 4o"
+    ],
+    "bridgecrewio__checkov-7010": [
+      "SWE-agent + GPT 4.1"
+    ],
+    "conan-io__conan-15965": [
+      "OpenHands + Claude 3.7 Sonnet",
+      "SWE-agent + Claude 3.7 Sonnet",
+      "SWE-agent + GPT 4.1",
+      "SWE-agent + GPT 4o"
+    ],
+    "bridgecrewio__checkov-5936": [
+      "SWE-agent + GPT 4.1"
+    ],
+    "pdm-project__pdm-3170": [
+      "OpenHands + Claude 3.7 Sonnet",
+      "SWE-agent + Claude 3.7 Sonnet",
+      "SWE-agent + GPT 4.1"
+    ],
+    "beeware__briefcase-1824": [
+      "OpenHands + Claude 3.7 Sonnet",
+      "SWE-agent + GPT 4.1"
+    ],
+    "sphinx-doc__sphinx-11888": [
+      "OpenHands + Claude 3.7 Sonnet",
+      "SWE-agent + Claude 3.7 Sonnet",
+      "SWE-agent + GPT 4.1"
+    ],
+    "delgan__loguru-1304": [
+      "SWE-agent + Claude 3.7 Sonnet",
+      "SWE-agent + GPT 4.1",
+      "SWE-agent + GPT 4o"
+    ],
+    "joke2k__faker-2096": [
+      "SWE-agent + GPT 4.1",
+      "SWE-agent + GPT 4o"
+    ],
+    "keras-team__keras-20120": [
+      "OpenHands + Claude 3.7 Sonnet",
+      "SWE-agent + Claude 3.7 Sonnet",
+      "SWE-agent + GPT 4.1",
+      "SWE-agent + GPT 4o"
+    ],
+    "shapely__shapely-2206": [
+      "OpenHands + Claude 3.7 Sonnet",
+      "SWE-agent + Claude 3.7 Sonnet",
+      "SWE-agent + GPT 4.1"
+    ],
+    "sissbruecker__linkding-819": [
+      "OpenHands + Claude 3.7 Sonnet",
+      "SWE-agent + Claude 3.7 Sonnet",
+      "SWE-agent + GPT 4.1",
+      "SWE-agent + GPT 4o"
+    ],
+    "deepset-ai__haystack-6701": [
+      "OpenHands + Claude 3.7 Sonnet",
+      "SWE-agent + Claude 3.7 Sonnet",
+      "SWE-agent + GPT 4.1",
+      "SWE-agent + GPT 4o"
+    ],
+    "kedro-org__kedro-3950": [
+      "OpenHands + Claude 3.7 Sonnet",
+      "SWE-agent + Claude 3.7 Sonnet",
+      "SWE-agent + GPT 4.1",
+      "SWE-agent + GPT 4o"
+    ],
+    "python-control__python-control-1030": [
+      "SWE-agent + Claude 3.7 Sonnet",
+      "SWE-agent + GPT 4.1"
+    ],
+    "keras-team__keras-19313": [
+      "SWE-agent + Claude 3.7 Sonnet",
+      "SWE-agent + GPT 4.1"
+    ],
+    "pydata__xarray-10066": [
+      "OpenHands + Claude 3.7 Sonnet",
+      "SWE-agent + Claude 3.7 Sonnet",
+      "SWE-agent + GPT 4.1",
+      "SWE-agent + GPT 4o"
+    ],
+    "reata__sqllineage-555": [
+      "SWE-agent + GPT 4.1"
+    ],
+    "sphinx-doc__sphinx-12807": [
+      "OpenHands + Claude 3.7 Sonnet",
+      "SWE-agent + Claude 3.7 Sonnet",
+      "SWE-agent + GPT 4.1",
+      "SWE-agent + GPT 4o"
+    ],
+    "piskvorky__smart_open-820": [
+      "OpenHands + Claude 3.7 Sonnet",
+      "SWE-agent + GPT 4.1",
+      "SWE-agent + GPT 4o"
+    ],
+    "instructlab__instructlab-1417": [
+      "OpenHands + Claude 3.7 Sonnet",
+      "SWE-agent + Claude 3.7 Sonnet",
+      "SWE-agent + GPT 4.1"
+    ],
+    "matplotlib__matplotlib-28584": [
+      "OpenHands + Claude 3.7 Sonnet",
+      "SWE-agent + Claude 3.7 Sonnet",
+      "SWE-agent + GPT 4.1",
+      "SWE-agent + GPT 4o"
+    ],
+    "beeware__briefcase-1811": [
+      "SWE-agent + Claude 3.7 Sonnet",
+      "SWE-agent + GPT 4.1"
+    ],
+    "reata__sqllineage-572": [
+      "OpenHands + Claude 3.7 Sonnet",
+      "SWE-agent + Claude 3.7 Sonnet",
+      "SWE-agent + GPT 4.1"
+    ],
+    "patroni__patroni-3112": [
+      "OpenHands + Claude 3.7 Sonnet",
+      "SWE-agent + Claude 3.7 Sonnet",
+      "SWE-agent + GPT 4.1"
+    ],
+    "pvlib__pvlib-python-2217": [
+      "OpenHands + Claude 3.7 Sonnet",
+      "SWE-agent + Claude 3.7 Sonnet",
+      "SWE-agent + GPT 4.1"
+    ],
+    "urllib3__urllib3-3311": [
+      "OpenHands + Claude 3.7 Sonnet",
+      "SWE-agent + Claude 3.7 Sonnet",
+      "SWE-agent + GPT 4.1"
+    ],
+    "pylint-dev__pylint-9772": [
+      "OpenHands + Claude 3.7 Sonnet",
+      "SWE-agent + GPT 4.1"
+    ],
+    "bridgecrewio__checkov-6314": [
+      "SWE-agent + Claude 3.7 Sonnet",
+      "SWE-agent + GPT 4.1"
+    ],
+    "beetbox__beets-5442": [
+      "SWE-agent + Claude 3.7 Sonnet",
+      "SWE-agent + GPT 4.1"
+    ],
+    "pylint-dev__pylint-9714": [
+      "SWE-agent + Claude 3.7 Sonnet",
+      "SWE-agent + GPT 4.1"
+    ],
+    "pypa__twine-1188": [
+      "OpenHands + Claude 3.7 Sonnet",
+      "SWE-agent + Claude 3.7 Sonnet",
+      "SWE-agent + GPT 4.1"
+    ],
+    "deepset-ai__haystack-9251": [
+      "SWE-agent + Claude 3.7 Sonnet",
+      "SWE-agent + GPT 4.1",
+      "SWE-agent + GPT 4o"
+    ],
+    "pytorch__torchtune-293": [
+      "OpenHands + Claude 3.7 Sonnet",
+      "SWE-agent + GPT 4.1"
+    ],
+    "shapely__shapely-2120": [
+      "OpenHands + Claude 3.7 Sonnet",
+      "SWE-agent + Claude 3.7 Sonnet",
+      "SWE-agent + GPT 4.1",
+      "SWE-agent + GPT 4o"
+    ],
+    "pylint-dev__pylint-9534": [
+      "OpenHands + Claude 3.7 Sonnet",
+      "SWE-agent + Claude 3.7 Sonnet",
+      "SWE-agent + GPT 4.1"
+    ],
+    "fonttools__fonttools-3509": [
+      "OpenHands + Claude 3.7 Sonnet",
+      "SWE-agent + Claude 3.7 Sonnet",
+      "SWE-agent + GPT 4.1"
+    ],
+    "reata__sqllineage-565": [
+      "OpenHands + Claude 3.7 Sonnet",
+      "SWE-agent + GPT 4.1"
+    ],
+    "urllib3__urllib3-3441": [
+      "SWE-agent + GPT 4.1"
+    ],
+    "huggingface__smolagents-226": [
+      "SWE-agent + GPT 4.1"
+    ],
+    "matplotlib__matplotlib-27613": [
+      "SWE-agent + GPT 4.1"
+    ],
+    "pydata__xarray-9070": [
+      "SWE-agent + GPT 4.1"
+    ],
+    "conan-io__conan-15575": [
+      "OpenHands + Claude 3.7 Sonnet",
+      "SWE-agent + GPT 4.1"
+    ],
+    "pdm-project__pdm-3191": [
+      "OpenHands + Claude 3.7 Sonnet",
+      "SWE-agent + Claude 3.7 Sonnet",
+      "SWE-agent + GPT 4.1",
+      "SWE-agent + GPT 4o"
+    ],
+    "python-attrs__attrs-1401": [
+      "OpenHands + Claude 3.7 Sonnet",
+      "SWE-agent + Claude 3.7 Sonnet",
+      "SWE-agent + GPT 4.1"
+    ],
+    "pvlib__pvlib-python-2032": [
+      "SWE-agent + GPT 4.1"
+    ],
+    "pytransitions__transitions-694": [
+      "OpenHands + Claude 3.7 Sonnet",
+      "OpenHands + Qwen3-Coder-480B-A35B",
+      "SWE-agent + GPT 4.1"
+    ],
+    "pylint-dev__pylint-9866": [
+      "SWE-agent + Claude 3.7 Sonnet",
+      "SWE-agent + GPT 4.1"
+    ],
+    "sphinx-doc__sphinx-11905": [
+      "OpenHands + Claude 3.7 Sonnet",
+      "SWE-agent + GPT 4.1"
+    ],
+    "joke2k__faker-2018": [
+      "OpenHands + Claude 3.7 Sonnet",
+      "SWE-agent + Claude 3.7 Sonnet",
+      "SWE-agent + GPT 4.1",
+      "SWE-agent + GPT 4o"
+    ],
+    "sissbruecker__linkding-691": [
+      "SWE-agent + Claude 3.7 Sonnet",
+      "SWE-agent + GPT 4.1"
+    ],
+    "kubernetes-client__python-2340": [
+      "OpenHands + Claude 3.7 Sonnet",
+      "SWE-agent + GPT 4.1"
+    ],
+    "deepset-ai__haystack-6857": [
+      "OpenHands + Claude 3.7 Sonnet",
+      "SWE-agent + Claude 3.7 Sonnet",
+      "SWE-agent + GPT 4.1"
+    ],
+    "sphinx-doc__sphinx-13319": [
+      "OpenHands + Claude 3.7 Sonnet",
+      "SWE-agent + GPT 4.1"
+    ],
+    "instructlab__instructlab-3135": [
+      "OpenHands + Claude 3.7 Sonnet",
+      "OpenHands + Qwen3-Coder-480B-A35B",
+      "SWE-agent + GPT 4.1",
+      "SWE-agent + GPT 4o"
+    ],
+    "streamlink__streamlink-5861": [
+      "SWE-agent + GPT 4.1"
+    ],
+    "reflex-dev__reflex-2350": [
+      "SWE-agent + Claude 3.7 Sonnet",
+      "SWE-agent + GPT 4.1",
+      "SWE-agent + GPT 4o"
+    ],
+    "deepset-ai__haystack-6922": [
+      "OpenHands + Claude 3.7 Sonnet",
+      "SWE-agent + Claude 3.7 Sonnet",
+      "SWE-agent + GPT 4.1"
+    ],
+    "pdm-project__pdm-2539": [
+      "SWE-agent + Claude 3.7 Sonnet",
+      "SWE-agent + GPT 4.1"
+    ],
+    "keras-team__keras-19284": [
+      "SWE-agent + GPT 4.1",
+      "SWE-agent + GPT 4o"
+    ],
+    "deepset-ai__haystack-8948": [
+      "OpenHands + Claude 3.7 Sonnet",
+      "OpenHands + Qwen3-Coder-480B-A35B",
+      "SWE-agent + GPT 4.1"
+    ],
+    "piskvorky__smart_open-817": [
+      "OpenHands + Claude 3.7 Sonnet",
+      "SWE-agent + Claude 3.7 Sonnet",
+      "SWE-agent + GPT 4.1"
+    ],
+    "tox-dev__tox-3250": [
+      "SWE-agent + GPT 4.1"
+    ],
+    "instructlab__instructlab-1762": [
+      "OpenHands + Claude 3.7 Sonnet",
+      "SWE-agent + Claude 3.7 Sonnet",
+      "SWE-agent + GPT 4.1",
+      "SWE-agent + GPT 4o"
+    ],
+    "fonttools__fonttools-3581": [
+      "OpenHands + Claude 3.7 Sonnet",
+      "SWE-agent + Claude 3.7 Sonnet",
+      "SWE-agent + GPT 4.1"
+    ],
+    "keras-team__keras-19300": [
+      "SWE-agent + GPT 4.1"
+    ],
+    "python-telegram-bot__python-telegram-bot-4290": [
+      "OpenHands + Claude 3.7 Sonnet",
+      "SWE-agent + GPT 4.1"
+    ],
+    "bridgecrewio__checkov-6695": [
+      "SWE-agent + Claude 3.7 Sonnet",
+      "SWE-agent + GPT 4.1",
+      "SWE-agent + GPT 4o"
+    ],
+    "tox-dev__tox-3274": [
+      "SWE-agent + GPT 4.1"
+    ],
+    "instructlab__instructlab-612": [
+      "OpenHands + Claude 3.7 Sonnet",
+      "SWE-agent + Claude 3.7 Sonnet",
+      "SWE-agent + GPT 4.1",
+      "SWE-agent + GPT 4o"
+    ],
+    "shapely__shapely-2074": [
+      "OpenHands + Claude 3.7 Sonnet",
+      "SWE-agent + Claude 3.7 Sonnet",
+      "SWE-agent + GPT 4.1",
+      "SWE-agent + GPT 4o"
+    ],
+    "streamlink__streamlink-5881": [
+      "OpenHands + Claude 3.7 Sonnet",
+      "SWE-agent + Claude 3.7 Sonnet",
+      "SWE-agent + GPT 4.1",
+      "SWE-agent + GPT 4o"
+    ],
+    "geopandas__geopandas-3438": [
+      "SWE-agent + GPT 4.1",
+      "SWE-agent + GPT 4o"
+    ],
+    "piskvorky__smart_open-833": [
+      "OpenHands + Claude 3.7 Sonnet",
+      "SWE-agent + GPT 4.1"
+    ],
+    "matplotlib__matplotlib-28363": [
+      "OpenHands + Claude 3.7 Sonnet",
+      "SWE-agent + GPT 4.1"
+    ],
+    "sphinx-doc__sphinx-12470": [
+      "OpenHands + Claude 3.7 Sonnet",
+      "SWE-agent + Claude 3.7 Sonnet",
+      "SWE-agent + GPT 4.1",
+      "SWE-agent + GPT 4o"
+    ],
+    "python-attrs__attrs-1285": [
+      "OpenHands + Claude 3.7 Sonnet",
+      "SWE-agent + Claude 3.7 Sonnet",
+      "SWE-agent + GPT 4.1"
+    ],
+    "python-control__python-control-1065": [
+      "SWE-agent + Claude 3.7 Sonnet",
+      "SWE-agent + GPT 4.1"
+    ],
+    "keras-team__keras-20122": [
+      "OpenHands + Claude 3.7 Sonnet",
+      "SWE-agent + Claude 3.7 Sonnet",
+      "SWE-agent + GPT 4.1"
+    ],
+    "aws-cloudformation__cfn-lint-3931": [
+      "SWE-agent + GPT 4.1"
+    ],
+    "deepset-ai__haystack-8708": [
+      "SWE-agent + Claude 3.7 Sonnet",
+      "SWE-agent + GPT 4.1",
+      "SWE-agent + GPT 4o"
+    ],
+    "geopandas__geopandas-3368": [
+      "OpenHands + Claude 3.7 Sonnet",
+      "SWE-agent + Claude 3.7 Sonnet",
+      "SWE-agent + GPT 4.1",
+      "SWE-agent + GPT 4o"
+    ],
+    "matplotlib__matplotlib-27773": [
+      "OpenHands + Claude 3.7 Sonnet",
+      "SWE-agent + GPT 4.1",
+      "SWE-agent + GPT 4o"
+    ],
+    "conan-io__conan-15931": [
+      "OpenHands + Claude 3.7 Sonnet",
+      "SWE-agent + Claude 3.7 Sonnet",
+      "SWE-agent + GPT 4.1",
+      "SWE-agent + GPT 4o"
+    ],
+    "pvlib__pvlib-python-2019": [
+      "OpenHands + Claude 3.7 Sonnet",
+      "SWE-agent + Claude 3.7 Sonnet",
+      "SWE-agent + GPT 4.1",
+      "SWE-agent + GPT 4o"
+    ],
+    "mikedh__trimesh-2142": [
+      "SWE-agent + GPT 4.1"
+    ],
+    "aws-cloudformation__cfn-lint-3563": [
+      "SWE-agent + GPT 4.1"
+    ],
+    "streamlink__streamlink-6127": [
+      "OpenHands + Claude 3.7 Sonnet",
+      "SWE-agent + Claude 3.7 Sonnet",
+      "SWE-agent + GPT 4.1"
+    ],
+    "geopandas__geopandas-3383": [
+      "OpenHands + Claude 3.7 Sonnet",
+      "SWE-agent + Claude 3.7 Sonnet",
+      "SWE-agent + GPT 4.1",
+      "SWE-agent + GPT 4o"
+    ],
+    "pylint-dev__pylint-10209": [
+      "SWE-agent + Claude 3.7 Sonnet",
+      "SWE-agent + GPT 4.1"
+    ],
+    "instructlab__instructlab-3045": [
+      "OpenHands + Claude 3.7 Sonnet",
+      "OpenHands + Qwen3-Coder-480B-A35B",
+      "SWE-agent + Claude 3.7 Sonnet",
+      "SWE-agent + GPT 4.1",
+      "SWE-agent + GPT 4o"
+    ],
+    "icloud-photos-downloader__icloud_photos_downloader-956": [
+      "OpenHands + Claude 3.7 Sonnet",
+      "SWE-agent + Claude 3.7 Sonnet",
+      "SWE-agent + GPT 4.1"
+    ],
+    "aws-cloudformation__cfn-lint-3425": [
+      "OpenHands + Claude 3.7 Sonnet",
+      "SWE-agent + Claude 3.7 Sonnet",
+      "SWE-agent + GPT 4.1"
+    ],
+    "matplotlib__matplotlib-29520": [
+      "OpenHands + Claude 3.7 Sonnet",
+      "SWE-agent + GPT 4.1"
+    ],
+    "ipython__ipython-14555": [
+      "OpenHands + Claude 3.7 Sonnet",
+      "SWE-agent + GPT 4.1"
+    ],
+    "sphinx-doc__sphinx-12745": [
+      "SWE-agent + GPT 4.1"
+    ],
+    "deepset-ai__haystack-8885": [
+      "SWE-agent + GPT 4.1"
+    ],
+    "keras-team__keras-19641": [
+      "SWE-agent + Claude 3.7 Sonnet",
+      "SWE-agent + GPT 4.1"
+    ],
+    "bridgecrewio__checkov-6301": [
+      "SWE-agent + Claude 3.7 Sonnet",
+      "SWE-agent + GPT 4.1",
+      "SWE-agent + GPT 4o"
+    ],
+    "keras-team__keras-19484": [
+      "OpenHands + Claude 3.7 Sonnet",
+      "SWE-agent + GPT 4.1"
+    ],
+    "python-attrs__attrs-1303": [
+      "SWE-agent + Claude 3.7 Sonnet",
+      "SWE-agent + GPT 4.1",
+      "SWE-agent + GPT 4o"
+    ],
+    "python-telegram-bot__python-telegram-bot-4375": [
+      "SWE-agent + GPT 4.1"
+    ],
+    "joke2k__faker-2104": [
+      "OpenHands + Claude 3.7 Sonnet",
+      "SWE-agent + Claude 3.7 Sonnet",
+      "SWE-agent + GPT 4.1"
+    ],
+    "pylint-dev__pylint-9678": [
+      "SWE-agent + GPT 4.1"
+    ],
+    "keras-team__keras-19387": [
+      "OpenHands + Claude 3.7 Sonnet",
+      "SWE-agent + Claude 3.7 Sonnet",
+      "SWE-agent + GPT 4.1"
+    ],
+    "bridgecrewio__checkov-6413": [
+      "SWE-agent + GPT 4.1"
+    ],
+    "aws-cloudformation__cfn-lint-3357": [
+      "OpenHands + Claude 3.7 Sonnet",
+      "SWE-agent + Claude 3.7 Sonnet",
+      "SWE-agent + GPT 4.1"
+    ],
+    "fonttools__fonttools-3510": [
+      "SWE-agent + Claude 3.7 Sonnet",
+      "SWE-agent + GPT 4.1",
+      "SWE-agent + GPT 4o"
+    ],
+    "keras-team__keras-20125": [
+      "OpenHands + Claude 3.7 Sonnet",
+      "SWE-agent + Claude 3.7 Sonnet",
+      "SWE-agent + GPT 4.1"
+    ],
+    "encode__starlette-2909": [
+      "OpenHands + Claude 3.7 Sonnet",
+      "OpenHands + Qwen3-Coder-480B-A35B",
+      "SWE-agent + Claude 3.7 Sonnet",
+      "SWE-agent + GPT 4.1"
+    ],
+    "aws-cloudformation__cfn-lint-3508": [
+      "SWE-agent + GPT 4.1"
+    ],
+    "beeware__briefcase-1638": [
+      "OpenHands + Claude 3.7 Sonnet",
+      "SWE-agent + Claude 3.7 Sonnet",
+      "SWE-agent + GPT 4.1",
+      "SWE-agent + GPT 4o"
+    ],
+    "deepset-ai__haystack-7375": [
+      "SWE-agent + Claude 3.7 Sonnet",
+      "SWE-agent + GPT 4.1"
+    ],
+    "conan-io__conan-17877": [
+      "OpenHands + Qwen3-Coder-480B-A35B",
+      "SWE-agent + GPT 4.1"
+    ],
+    "geopandas__geopandas-3416": [
+      "OpenHands + Claude 3.7 Sonnet",
+      "SWE-agent + Claude 3.7 Sonnet",
+      "SWE-agent + GPT 4.1",
+      "SWE-agent + GPT 4o"
+    ],
+    "deepset-ai__haystack-8078": [
+      "SWE-agent + GPT 4.1"
+    ],
+    "joke2k__faker-2147": [
+      "OpenHands + Claude 3.7 Sonnet",
+      "OpenHands + Qwen3-Coder-480B-A35B",
+      "SWE-agent + Claude 3.7 Sonnet",
+      "SWE-agent + GPT 4.1",
+      "SWE-agent + GPT 4o"
+    ],
+    "pydata__xarray-9079": [
+      "SWE-agent + Claude 3.7 Sonnet",
+      "SWE-agent + GPT 4.1"
+    ],
+    "beeware__briefcase-2035": [
+      "OpenHands + Claude 3.7 Sonnet",
+      "SWE-agent + Claude 3.7 Sonnet",
+      "SWE-agent + GPT 4.1",
+      "SWE-agent + GPT 4o"
+    ],
+    "keras-team__keras-19844": [
+      "OpenHands + Claude 3.7 Sonnet",
+      "SWE-agent + GPT 4.1",
+      "SWE-agent + GPT 4o"
+    ],
+    "streamlink__streamlink-6016": [
+      "SWE-agent + GPT 4.1"
+    ],
+    "bridgecrewio__checkov-6354": [
+      "SWE-agent + Claude 3.7 Sonnet",
+      "SWE-agent + GPT 4.1",
+      "SWE-agent + GPT 4o"
+    ],
+    "aws-cloudformation__cfn-lint-3481": [
+      "OpenHands + Claude 3.7 Sonnet",
+      "SWE-agent + Claude 3.7 Sonnet",
+      "SWE-agent + GPT 4.1",
+      "SWE-agent + GPT 4o"
+    ],
+    "joke2k__faker-2074": [
+      "OpenHands + Claude 3.7 Sonnet",
+      "SWE-agent + GPT 4.1"
+    ],
+    "stanfordnlp__dspy-987": [
+      "SWE-agent + GPT 4.1"
+    ],
+    "streamlink__streamlink-5926": [
+      "OpenHands + Claude 3.7 Sonnet",
+      "SWE-agent + GPT 4.1",
+      "SWE-agent + GPT 4o"
+    ],
+    "matplotlib__matplotlib-29411": [
+      "OpenHands + Claude 3.7 Sonnet",
+      "OpenHands + Qwen3-Coder-480B-A35B",
+      "SWE-agent + GPT 4.1",
+      "SWE-agent + GPT 4o"
+    ],
+    "pvlib__pvlib-python-2190": [
+      "OpenHands + Claude 3.7 Sonnet",
+      "SWE-agent + GPT 4.1"
+    ],
+    "matplotlib__matplotlib-28473": [
+      "OpenHands + Claude 3.7 Sonnet",
+      "SWE-agent + Claude 3.7 Sonnet",
+      "SWE-agent + GPT 4.1"
+    ],
+    "sissbruecker__linkding-820": [
+      "OpenHands + Claude 3.7 Sonnet",
+      "SWE-agent + Claude 3.7 Sonnet",
+      "SWE-agent + GPT 4.1",
+      "SWE-agent + GPT 4o"
+    ],
+    "conan-io__conan-15422": [
+      "OpenHands + Claude 3.7 Sonnet",
+      "SWE-agent + Claude 3.7 Sonnet",
+      "SWE-agent + GPT 4.1"
+    ],
+    "keras-team__keras-20064": [
+      "OpenHands + Claude 3.7 Sonnet",
+      "SWE-agent + Claude 3.7 Sonnet",
+      "SWE-agent + GPT 4.1",
+      "SWE-agent + GPT 4o"
+    ],
+    "matplotlib__matplotlib-27833": [
+      "OpenHands + Claude 3.7 Sonnet",
+      "SWE-agent + GPT 4.1",
+      "SWE-agent + GPT 4o"
+    ],
+    "bridgecrewio__checkov-6144": [
+      "SWE-agent + Claude 3.7 Sonnet",
+      "SWE-agent + GPT 4.1",
+      "SWE-agent + GPT 4o"
+    ],
+    "koxudaxi__datamodel-code-generator-2185": [
+      "OpenHands + Claude 3.7 Sonnet",
+      "SWE-agent + Claude 3.7 Sonnet",
+      "SWE-agent + GPT 4.1"
+    ],
+    "pylint-dev__pylint-9704": [
+      "OpenHands + Claude 3.7 Sonnet",
+      "SWE-agent + Claude 3.7 Sonnet",
+      "SWE-agent + GPT 4.1",
+      "SWE-agent + GPT 4o"
+    ],
+    "koxudaxi__datamodel-code-generator-2305": [
+      "OpenHands + Qwen3-Coder-480B-A35B",
+      "SWE-agent + Claude 3.7 Sonnet",
+      "SWE-agent + GPT 4.1"
+    ],
+    "kedro-org__kedro-4030": [
+      "OpenHands + Claude 3.7 Sonnet",
+      "SWE-agent + GPT 4.1",
+      "SWE-agent + GPT 4o"
+    ],
+    "pvlib__pvlib-python-1947": [
+      "SWE-agent + GPT 4.1"
+    ],
+    "deepset-ai__haystack-6758": [
+      "OpenHands + Claude 3.7 Sonnet",
+      "SWE-agent + Claude 3.7 Sonnet",
+      "SWE-agent + GPT 4.1",
+      "SWE-agent + GPT 4o"
+    ],
+    "geopandas__geopandas-3424": [
+      "OpenHands + Claude 3.7 Sonnet",
+      "SWE-agent + Claude 3.7 Sonnet",
+      "SWE-agent + GPT 4.1"
+    ],
+    "pydata__xarray-9369": [
+      "SWE-agent + GPT 4.1"
+    ],
+    "matplotlib__matplotlib-28261": [
+      "OpenHands + Claude 3.7 Sonnet",
+      "SWE-agent + GPT 4.1",
+      "SWE-agent + GPT 4o"
+    ],
+    "wemake-services__wemake-python-styleguide-3216": [
+      "SWE-agent + Claude 3.7 Sonnet",
+      "SWE-agent + GPT 4.1",
+      "SWE-agent + GPT 4o"
+    ],
+    "deepset-ai__haystack-7681": [
+      "SWE-agent + GPT 4.1",
+      "SWE-agent + GPT 4o"
+    ],
+    "bridgecrewio__checkov-6687": [
+      "SWE-agent + Claude 3.7 Sonnet",
+      "SWE-agent + GPT 4.1",
+      "SWE-agent + GPT 4o"
+    ],
+    "deepset-ai__haystack-8880": [
+      "SWE-agent + Claude 3.7 Sonnet",
+      "SWE-agent + GPT 4.1"
+    ],
+    "matplotlib__matplotlib-28830": [
+      "OpenHands + Claude 3.7 Sonnet",
+      "SWE-agent + Claude 3.7 Sonnet",
+      "SWE-agent + GPT 4.1",
+      "SWE-agent + GPT 4o"
+    ],
+    "patroni__patroni-3119": [
+      "OpenHands + Claude 3.7 Sonnet",
+      "SWE-agent + GPT 4.1"
+    ],
+    "deepset-ai__haystack-9218": [
+      "OpenHands + Claude 3.7 Sonnet",
+      "SWE-agent + GPT 4.1"
+    ],
+    "koxudaxi__datamodel-code-generator-2334": [
+      "OpenHands + Qwen3-Coder-480B-A35B",
+      "SWE-agent + Claude 3.7 Sonnet",
+      "SWE-agent + GPT 4.1"
+    ],
+    "qtile__qtile-4953": [
+      "OpenHands + Claude 3.7 Sonnet",
+      "SWE-agent + Claude 3.7 Sonnet",
+      "SWE-agent + GPT 4.1",
+      "SWE-agent + GPT 4o"
+    ],
+    "deepset-ai__haystack-9227": [
+      "SWE-agent + Claude 3.7 Sonnet",
+      "SWE-agent + GPT 4.1",
+      "SWE-agent + GPT 4o"
+    ],
+    "encode__starlette-2711": [
+      "OpenHands + Claude 3.7 Sonnet",
+      "SWE-agent + GPT 4.1"
+    ],
+    "matplotlib__matplotlib-28573": [
+      "OpenHands + Claude 3.7 Sonnet",
+      "SWE-agent + Claude 3.7 Sonnet",
+      "SWE-agent + GPT 4.1"
+    ],
+    "pdm-project__pdm-2800": [
+      "OpenHands + Claude 3.7 Sonnet",
+      "SWE-agent + GPT 4.1"
+    ],
+    "conan-io__conan-15651": [
+      "OpenHands + Claude 3.7 Sonnet",
+      "SWE-agent + GPT 4.1"
+    ],
+    "bridgecrewio__checkov-6630": [
+      "SWE-agent + Claude 3.7 Sonnet",
+      "SWE-agent + GPT 4.1",
+      "SWE-agent + GPT 4o"
+    ],
+    "sphinx-doc__sphinx-12875": [
+      "OpenHands + Claude 3.7 Sonnet",
+      "SWE-agent + Claude 3.7 Sonnet",
+      "SWE-agent + GPT 4.1"
+    ],
+    "aws-cloudformation__cfn-lint-3621": [
+      "OpenHands + Claude 3.7 Sonnet",
+      "SWE-agent + Claude 3.7 Sonnet",
+      "SWE-agent + GPT 4.1"
+    ],
+    "delgan__loguru-1240": [
+      "SWE-agent + GPT 4.1"
+    ],
+    "pylint-dev__pylint-10232": [
+      "OpenHands + Qwen3-Coder-480B-A35B",
+      "SWE-agent + GPT 4.1"
+    ],
+    "keras-team__keras-19838": [
+      "OpenHands + Claude 3.7 Sonnet",
+      "SWE-agent + Claude 3.7 Sonnet",
+      "SWE-agent + GPT 4.1"
+    ],
+    "aws-cloudformation__cfn-lint-4026": [
+      "SWE-agent + GPT 4.1"
+    ],
+    "reflex-dev__reflex-2457": [
+      "SWE-agent + Claude 3.7 Sonnet",
+      "SWE-agent + GPT 4.1",
+      "SWE-agent + GPT 4o"
+    ],
+    "pylint-dev__pylint-9700": [
+      "OpenHands + Claude 3.7 Sonnet",
+      "SWE-agent + Claude 3.7 Sonnet"
+    ],
+    "python-babel__babel-1132": [
+      "OpenHands + Claude 3.7 Sonnet",
+      "SWE-agent + Claude 3.7 Sonnet"
+    ],
+    "privacyidea__privacyidea-4159": [
+      "SWE-agent + Claude 3.7 Sonnet"
+    ],
+    "python-attrs__attrs-1319": [
+      "SWE-agent + Claude 3.7 Sonnet",
+      "SWE-agent + GPT 4o"
+    ],
+    "matplotlib__matplotlib-27906": [
+      "OpenHands + Claude 3.7 Sonnet",
+      "SWE-agent + Claude 3.7 Sonnet"
+    ],
+    "conan-io__conan-16170": [
+      "OpenHands + Claude 3.7 Sonnet",
+      "SWE-agent + Claude 3.7 Sonnet"
+    ],
+    "falconry__falcon-2248": [
+      "OpenHands + Claude 3.7 Sonnet",
+      "SWE-agent + Claude 3.7 Sonnet"
+    ],
+    "conan-io__conan-15705": [
+      "OpenHands + Claude 3.7 Sonnet",
+      "SWE-agent + Claude 3.7 Sonnet"
+    ],
+    "icloud-photos-downloader__icloud_photos_downloader-1061": [
+      "OpenHands + Claude 3.7 Sonnet",
+      "SWE-agent + Claude 3.7 Sonnet"
+    ],
+    "aws-cloudformation__cfn-lint-3605": [
+      "OpenHands + Claude 3.7 Sonnet",
+      "SWE-agent + Claude 3.7 Sonnet"
+    ],
+    "deepset-ai__haystack-9284": [
+      "SWE-agent + Claude 3.7 Sonnet"
+    ],
+    "pvlib__pvlib-python-2133": [
+      "OpenHands + Claude 3.7 Sonnet",
+      "SWE-agent + Claude 3.7 Sonnet",
+      "SWE-agent + GPT 4o"
+    ],
+    "joke2k__faker-2101": [
+      "SWE-agent + Claude 3.7 Sonnet"
+    ],
+    "aws-cloudformation__cfn-lint-3388": [
+      "OpenHands + Claude 3.7 Sonnet",
+      "SWE-agent + Claude 3.7 Sonnet"
+    ],
+    "keras-team__keras-19915": [
+      "OpenHands + Claude 3.7 Sonnet",
+      "SWE-agent + Claude 3.7 Sonnet"
+    ],
+    "matplotlib__matplotlib-29892": [
+      "OpenHands + Claude 3.7 Sonnet",
+      "SWE-agent + Claude 3.7 Sonnet"
+    ],
+    "aws-cloudformation__cfn-lint-4008": [
+      "OpenHands + Claude 3.7 Sonnet",
+      "OpenHands + Qwen3-Coder-480B-A35B",
+      "SWE-agent + Claude 3.7 Sonnet"
+    ],
+    "reata__sqllineage-637": [
+      "OpenHands + Claude 3.7 Sonnet",
+      "SWE-agent + Claude 3.7 Sonnet"
+    ],
+    "aws-cloudformation__cfn-lint-3389": [
+      "SWE-agent + Claude 3.7 Sonnet"
+    ],
+    "aiogram__aiogram-1474": [
+      "SWE-agent + Claude 3.7 Sonnet",
+      "SWE-agent + GPT 4o"
+    ],
+    "python-babel__babel-1104": [
+      "OpenHands + Claude 3.7 Sonnet",
+      "SWE-agent + Claude 3.7 Sonnet"
+    ],
+    "mikedh__trimesh-2201": [
+      "SWE-agent + Claude 3.7 Sonnet"
+    ],
+    "conan-io__conan-16350": [
+      "OpenHands + Claude 3.7 Sonnet",
+      "SWE-agent + Claude 3.7 Sonnet"
+    ],
+    "pdm-project__pdm-2551": [
+      "SWE-agent + Claude 3.7 Sonnet"
+    ],
+    "reflex-dev__reflex-3179": [
+      "OpenHands + Claude 3.7 Sonnet",
+      "SWE-agent + Claude 3.7 Sonnet"
+    ],
+    "matplotlib__matplotlib-28292": [
+      "OpenHands + Claude 3.7 Sonnet",
+      "SWE-agent + Claude 3.7 Sonnet"
+    ],
+    "projectmesa__mesa-2463": [
+      "OpenHands + Claude 3.7 Sonnet",
+      "SWE-agent + Claude 3.7 Sonnet"
+    ],
+    "jupyterlab__jupyter-ai-592": [
+      "OpenHands + Claude 3.7 Sonnet",
+      "SWE-agent + Claude 3.7 Sonnet"
+    ],
+    "dynaconf__dynaconf-1040": [
+      "OpenHands + Claude 3.7 Sonnet",
+      "SWE-agent + Claude 3.7 Sonnet"
+    ],
+    "delgan__loguru-1299": [
+      "OpenHands + Claude 3.7 Sonnet",
+      "SWE-agent + Claude 3.7 Sonnet"
+    ],
+    "reflex-dev__reflex-5081": [
+      "OpenHands + Claude 3.7 Sonnet",
+      "SWE-agent + Claude 3.7 Sonnet"
+    ],
+    "patroni__patroni-3079": [
+      "SWE-agent + Claude 3.7 Sonnet",
+      "SWE-agent + GPT 4o"
+    ],
+    "matplotlib__matplotlib-28039": [
+      "OpenHands + Claude 3.7 Sonnet",
+      "SWE-agent + Claude 3.7 Sonnet"
+    ],
+    "pypsa__pypsa-891": [
+      "OpenHands + Claude 3.7 Sonnet",
+      "SWE-agent + Claude 3.7 Sonnet"
+    ],
+    "bridgecrewio__checkov-6933": [
+      "SWE-agent + Claude 3.7 Sonnet"
+    ],
+    "pdm-project__pdm-3039": [
+      "SWE-agent + Claude 3.7 Sonnet"
+    ],
+    "ag2ai__faststream-1619": [
+      "OpenHands + Claude 3.7 Sonnet",
+      "SWE-agent + Claude 3.7 Sonnet",
+      "SWE-agent + GPT 4o"
+    ],
+    "pylint-dev__pylint-10246": [
+      "SWE-agent + Claude 3.7 Sonnet"
+    ],
+    "conan-io__conan-17954": [
+      "OpenHands + Qwen3-Coder-480B-A35B",
+      "SWE-agent + Claude 3.7 Sonnet"
+    ],
+    "aws-cloudformation__cfn-lint-3900": [
+      "OpenHands + Claude 3.7 Sonnet",
+      "SWE-agent + Claude 3.7 Sonnet"
+    ],
+    "aiogram__aiogram-1497": [
+      "OpenHands + Claude 3.7 Sonnet",
+      "SWE-agent + Claude 3.7 Sonnet",
+      "SWE-agent + GPT 4o"
+    ],
+    "pylint-dev__pylint-9753": [
+      "SWE-agent + Claude 3.7 Sonnet"
+    ],
+    "reata__sqllineage-619": [
+      "OpenHands + Claude 3.7 Sonnet",
+      "SWE-agent + Claude 3.7 Sonnet",
+      "SWE-agent + GPT 4o"
+    ],
+    "matplotlib__matplotlib-28116": [
+      "SWE-agent + Claude 3.7 Sonnet"
+    ],
+    "aws-cloudformation__cfn-lint-3861": [
+      "OpenHands + Claude 3.7 Sonnet",
+      "SWE-agent + Claude 3.7 Sonnet"
+    ],
+    "pydata__xarray-8877": [
+      "SWE-agent + Claude 3.7 Sonnet"
+    ],
+    "stanfordnlp__dspy-8053": [
+      "SWE-agent + Claude 3.7 Sonnet"
+    ],
+    "sphinx-doc__sphinx-11876": [
+      "OpenHands + Claude 3.7 Sonnet",
+      "SWE-agent + Claude 3.7 Sonnet"
+    ],
+    "pytorch__torchtune-1832": [
+      "SWE-agent + GPT 4o"
+    ],
+    "pylint-dev__pylint-9705": [
+      "OpenHands + Claude 3.7 Sonnet",
+      "SWE-agent + GPT 4o"
+    ],
+    "qtile__qtile-4909": [
+      "OpenHands + Claude 3.7 Sonnet",
+      "SWE-agent + GPT 4o"
+    ],
+    "python-telegram-bot__python-telegram-bot-4288": [
+      "SWE-agent + GPT 4o"
+    ],
+    "streamlink__streamlink-6111": [
+      "SWE-agent + GPT 4o"
+    ],
+    "pdm-project__pdm-3393": [
+      "SWE-agent + GPT 4o"
+    ],
+    "kubernetes-client__python-2187": [
+      "OpenHands + Claude 3.7 Sonnet",
+      "SWE-agent + GPT 4o"
+    ],
+    "matplotlib__matplotlib-27845": [
+      "OpenHands + Claude 3.7 Sonnet"
+    ],
+    "stanfordnlp__dspy-848": [
+      "OpenHands + Claude 3.7 Sonnet"
+    ],
+    "psf__requests-6644": [
+      "OpenHands + Claude 3.7 Sonnet"
+    ],
+    "matplotlib__matplotlib-27692": [
+      "OpenHands + Claude 3.7 Sonnet"
+    ],
+    "conan-io__conan-15946": [
+      "OpenHands + Claude 3.7 Sonnet"
+    ],
+    "kozea__weasyprint-2416": [
+      "OpenHands + Claude 3.7 Sonnet"
+    ],
+    "aws-cloudformation__cfn-lint-3528": [
+      "OpenHands + Claude 3.7 Sonnet"
+    ],
+    "python-control__python-control-1138": [
+      "OpenHands + Claude 3.7 Sonnet",
+      "OpenHands + Qwen3-Coder-480B-A35B"
+    ],
+    "python-attrs__attrs-1320": [
+      "OpenHands + Claude 3.7 Sonnet"
+    ],
+    "matplotlib__matplotlib-27605": [
+      "OpenHands + Claude 3.7 Sonnet"
+    ],
+    "aws-cloudformation__cfn-lint-3920": [
+      "OpenHands + Claude 3.7 Sonnet"
+    ],
+    "qtile__qtile-5206": [
+      "OpenHands + Claude 3.7 Sonnet"
+    ],
+    "urllib3__urllib3-3273": [
+      "OpenHands + Claude 3.7 Sonnet"
+    ],
+    "pdm-project__pdm-2781": [
+      "OpenHands + Claude 3.7 Sonnet"
+    ],
+    "matplotlib__matplotlib-28629": [
+      "OpenHands + Claude 3.7 Sonnet"
+    ],
+    "urllib3__urllib3-3326": [
+      "OpenHands + Claude 3.7 Sonnet"
+    ],
+    "kedro-org__kedro-3823": [
+      "OpenHands + Claude 3.7 Sonnet"
+    ],
+    "python-babel__babel-1075": [
+      "OpenHands + Claude 3.7 Sonnet"
+    ],
+    "falconry__falcon-2254": [
+      "OpenHands + Claude 3.7 Sonnet"
+    ],
+    "aws-cloudformation__cfn-lint-3342": [
+      "OpenHands + Claude 3.7 Sonnet"
+    ],
+    "deepset-ai__haystack-6987": [
+      "OpenHands + Claude 3.7 Sonnet"
+    ],
+    "kozea__weasyprint-2233": [
+      "OpenHands + Claude 3.7 Sonnet"
+    ],
+    "matplotlib__matplotlib-28032": [
+      "OpenHands + Claude 3.7 Sonnet"
+    ],
+    "aws-cloudformation__cfn-lint-3372": [
+      "OpenHands + Claude 3.7 Sonnet"
+    ],
+    "instructlab__instructlab-893": [
+      "OpenHands + Claude 3.7 Sonnet"
+    ],
+    "conan-io__conan-18089": [
+      "OpenHands + Claude 3.7 Sonnet"
+    ],
+    "sphinx-doc__sphinx-11914": [
+      "OpenHands + Claude 3.7 Sonnet"
+    ],
+    "pylint-dev__pylint-9452": [
+      "OpenHands + Claude 3.7 Sonnet"
+    ],
+    "beetbox__beets-5152": [
+      "OpenHands + Claude 3.7 Sonnet"
+    ],
+    "conan-io__conan-15747": [
+      "OpenHands + Claude 3.7 Sonnet"
+    ],
+    "matplotlib__matplotlib-28609": [
+      "OpenHands + Claude 3.7 Sonnet"
+    ],
+    "geopandas__geopandas-3378": [
+      "OpenHands + Claude 3.7 Sonnet"
+    ],
+    "amoffat__sh-750": [
+      "OpenHands + Claude 3.7 Sonnet",
+      "OpenHands + Qwen3-Coder-480B-A35B"
+    ],
+    "conan-io__conan-15505": [
+      "OpenHands + Claude 3.7 Sonnet"
+    ],
+    "matplotlib__matplotlib-29401": [
+      "OpenHands + Claude 3.7 Sonnet",
+      "OpenHands + Qwen3-Coder-480B-A35B"
+    ],
+    "pylint-dev__pylint-9817": [
+      "OpenHands + Claude 3.7 Sonnet"
+    ],
+    "pydata__xarray-9498": [
+      "OpenHands + Claude 3.7 Sonnet"
+    ],
+    "pylint-dev__pylint-9634": [
+      "OpenHands + Claude 3.7 Sonnet"
+    ],
+    "gptme__gptme-70": [
+      "OpenHands + Claude 3.7 Sonnet"
+    ],
+    "koxudaxi__datamodel-code-generator-2257": [
+      "OpenHands + Claude 3.7 Sonnet"
+    ],
+    "ag2ai__faststream-1796": [
+      "OpenHands + Claude 3.7 Sonnet"
+    ],
+    "instructlab__instructlab-1662": [
+      "OpenHands + Claude 3.7 Sonnet"
+    ],
+    "conan-io__conan-15653": [
+      "OpenHands + Claude 3.7 Sonnet"
+    ],
+    "jupyterlab__jupyter-ai-989": [
+      "OpenHands + Claude 3.7 Sonnet"
+    ],
+    "run-llama__llama_deploy-397": [
+      "Agentless + GPT 4.1",
+      "OpenHands + Qwen3-Coder-480B-A35B"
+    ],
+    "arviz-devs__arviz-2404": [
+      "OpenHands + Qwen3-Coder-480B-A35B"
+    ],
+    "Azure__azure-sdk-for-python-40487": [
+      "OpenHands + Qwen3-Coder-480B-A35B"
+    ],
+    "apify__crawlee-python-1155": [
+      "OpenHands + Qwen3-Coder-480B-A35B"
+    ],
+    "Textualize__textual-5743": [
+      "OpenHands + Qwen3-Coder-480B-A35B"
+    ],
+    "pypa__pipx-1625": [
+      "OpenHands + Qwen3-Coder-480B-A35B"
+    ],
+    "python-attrs__attrs-1417": [
+      "OpenHands + Qwen3-Coder-480B-A35B"
+    ],
+    "ansible__ansible-lint-4566": [
+      "OpenHands + Qwen3-Coder-480B-A35B"
+    ],
+    "meta-llama__llama-stack-1105": [
+      "OpenHands + Qwen3-Coder-480B-A35B"
+    ],
+    "python__mypy-19097": [
+      "OpenHands + Qwen3-Coder-480B-A35B"
+    ],
+    "koxudaxi__datamodel-code-generator-2400": [
+      "OpenHands + Qwen3-Coder-480B-A35B"
+    ],
+    "dpkp__kafka-python-2608": [
+      "OpenHands + Qwen3-Coder-480B-A35B"
+    ],
+    "deepset-ai__haystack-9336": [
+      "OpenHands + Qwen3-Coder-480B-A35B"
+    ],
+    "sdv-dev__SDV-2532": [
+      "OpenHands + Qwen3-Coder-480B-A35B"
+    ],
+    "graphistry__pygraphistry-661": [
+      "OpenHands + Qwen3-Coder-480B-A35B"
+    ],
+    "run-llama__llama_deploy-500": [
+      "OpenHands + Qwen3-Coder-480B-A35B"
+    ],
+    "aws-cloudformation__cfn-lint-4137": [
+      "OpenHands + Qwen3-Coder-480B-A35B"
+    ],
+    "Textualize__textual-5812": [
+      "OpenHands + Qwen3-Coder-480B-A35B"
+    ],
+    "sdv-dev__SDV-2546": [
+      "OpenHands + Qwen3-Coder-480B-A35B"
+    ],
+    "scrapinghub__dateparser-1274": [
+      "OpenHands + Qwen3-Coder-480B-A35B"
+    ],
+    "koxudaxi__datamodel-code-generator-2396": [
+      "OpenHands + Qwen3-Coder-480B-A35B"
+    ],
+    "conan-io__conan-18244": [
+      "OpenHands + Qwen3-Coder-480B-A35B"
+    ],
+    "jlowin__fastmcp-299": [
+      "OpenHands + Qwen3-Coder-480B-A35B"
+    ],
+    "pymodbus-dev__pymodbus-2670": [
+      "OpenHands + Qwen3-Coder-480B-A35B"
+    ],
+    "matplotlib__matplotlib-30030": [
+      "OpenHands + Qwen3-Coder-480B-A35B"
+    ],
+    "albumentations-team__albumentations-2520": [
+      "OpenHands + Qwen3-Coder-480B-A35B"
+    ],
+    "pylint-dev__pylint-10379": [
+      "OpenHands + Qwen3-Coder-480B-A35B"
+    ]
+  }
+}

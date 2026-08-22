@@ -1,0 +1,38 @@
+import type { LlmSurfaceId, LlmTransportId } from "@/shared/llm-route-types"
+import type { StreamEvent, StreamInput } from "./types"
+
+export interface LLMPort {
+  /** The configured model id (e.g. `claude-sonnet-4-6`, `gpt-4o`). Real
+   *  adapters expose it so the loop can emit a faithful pre-stream
+   *  `llm_request` (RFC-0002 §5.2/§9) without probing private fields.
+   *  Optional: lightweight test doubles may omit it (loop falls back to
+   *  `"unknown"`), so adding this never breaks an existing `LLMPort`. */
+  readonly model?: string
+  /** Optional CONTEXT-WINDOW resolution key (gap GAP 3, ADR-0505). Distinct from
+   *  {@link model} (the API model id, which must stay the canonical un-suffixed
+   *  slug). When the `context-1m` beta is active the adapter pins the `<model>-1m`
+   *  window key here so compaction + the usage gauge resolve the granted 1M window
+   *  instead of the 200k default. Absent ⇒ the window is resolved from `model`
+   *  (byte-identical). */
+  readonly contextWindowKey?: string
+  /** Optional provider id (`anthropic` / `openai` / `chatgpt-oauth`).
+   *  Real adapters expose it so the loop's pre-stream `llm_request` marker
+   *  can carry it through to the renderer, which paints an unambiguous
+   *  auth-mode badge alongside the model. Lightweight test doubles may
+   *  omit it; the renderer just paints the model when absent. */
+  readonly provider?: string
+  /** Optional canonical wire-surface id (`anthropic-messages`,
+   *  `openai-chat-completions`, `openai-responses`). Lets telemetry separate
+   *  vendor choice from request grammar. */
+  readonly surfaceId?: LlmSurfaceId
+  /** Optional transport id (`public`, `bedrock`, `vertex`, `foundry`,
+   *  `mantle`, `chatgpt-oauth`). Orthogonal to `surfaceId`. */
+  readonly transportId?: LlmTransportId
+  /** Optional human-readable auth-mode label
+   *  (`"ChatGPT subscription"` / `"OpenAI BYOK"` / `"Anthropic BYOK"`).
+   *  Same emission rules as {@link provider}. */
+  readonly authMode?: string
+  /** Streams a single assistant turn. The caller reconstructs the assistant
+   *  message from the emitted events (see {@link assembleMessage}). */
+  stream(input: StreamInput): AsyncIterable<StreamEvent>
+}

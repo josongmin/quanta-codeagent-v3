@@ -91,8 +91,13 @@ export const PROMAX_PREFLIGHT_CP_TARGET = "/tmp/quanta-preflight-probe.txt"
 /** The evaluator applies patches under upstream's hard-coded repo path. */
 const UPSTREAM_TESTBED = "/testbed"
 
-const SENTINEL_MARKER = "QUANTA_SENTINEL"
-const CP_MARKER = "QUANTA_CP"
+/** On-box stdout markers for the exec probe — parsed back out of the container
+ *  output below. Deliberately NOT `QUANTA_*`: an `echo QUANTA_X=VALUE` line is
+ *  indistinguishable from an env assignment to the knob-registry scanner (it
+ *  flagged both as undeclared knob reads), and a marker that looks like a knob
+ *  invites a reader to go looking for a config surface that does not exist. */
+const SENTINEL_MARKER = "__QPMX_SENTINEL__"
+const CP_MARKER = "__QPMX_CP__"
 
 /** FNV-1a over the campaign id — a short, stable, filename-safe discriminator. */
 const shortHash = (input: string): string => {
@@ -187,12 +192,32 @@ const detailOf = (r: { stdout: string; stderr: string }): string =>
  * throwing — a container that outlived its preflight is a real operator problem
  * (it holds the image and a name) but it must not erase the image record that
  * was already earned.
+ *
+ * `probeExistence` is the START-FAILURE path. `docker run -d` can fail two ways:
+ * the container was never created (bad image reference, no disk for the layer)
+ * or it was created and then died (the entrypoint exited). Only the second
+ * leaves anything to clean, and `docker rm -f` on the first exits NON-ZERO —
+ * which used to be recorded as a second, spurious `cleanup_failed` beside every
+ * `start_failed`, so a start fault never arrived alone and the ticket's "classify
+ * pull/start/cp/exec separately" was unmeetable.
+ *
+ * The disambiguation is an EXISTENCE PROBE (`docker container inspect`), not a
+ * match on Docker's error text: a stderr string is a heuristic that changes with
+ * the daemon version, while the exit status of `container inspect` is the
+ * daemon's own answer to "does this exist". After a SUCCESSFUL `run -d` the
+ * container exists by construction, so that path skips the probe and its Docker
+ * sequence is byte-identical to before.
  */
 const cleanupContainer = async (
   docker: DockerPort,
   instanceId: string,
   container: string,
+  probeExistence = false,
 ): Promise<readonly ProMaxImageFault[]> => {
+  if (probeExistence) {
+    const probe = await docker(["container", "inspect", "--format", "{{.Id}}", container])
+    if (probe.code !== 0) return []
+  }
   const argv = ["rm", "-f", container]
   const r = await docker(argv)
   if (r.code === 0) return []
@@ -392,7 +417,7 @@ const preflightOneInstance = async (args: {
           argv: runArgv,
           exitCode: run.code,
         }),
-        ...(await cleanupContainer(docker, id, container)),
+        ...(await cleanupContainer(docker, id, container, true)),
       ],
     }
   }

@@ -265,8 +265,10 @@ const decodeKnobs = (v: unknown): Readonly<Record<string, KnobValue>> => {
     }
     out[key] = value
   }
-  assertKnobsRegistered(out, "the manifest's resolvedKnobs")
+  // Order is load-bearing — see the note in `config.ts` (the retired knob would
+  // otherwise be reported as merely "unregistered").
   assertNoTerminalBestOfN(out, "the manifest's resolvedKnobs")
+  assertKnobsRegistered(out, "the manifest's resolvedKnobs")
   return out
 }
 

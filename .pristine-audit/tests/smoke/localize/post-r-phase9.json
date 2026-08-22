@@ -1,0 +1,202 @@
+{
+  "schemaVersion": 1,
+  "cwd": "/Users/songmin/quanta-codeagent-v3",
+  "git_sha": "800fc90",
+  "queries": [
+    {
+      "id": "symbol-buildSystemPrompt",
+      "predicted_top5": [],
+      "rank_of_first_expected": 0,
+      "recall@1": 0,
+      "recall@3": 0,
+      "recall@5": 0
+    },
+    {
+      "id": "behavioral-agent-loop",
+      "predicted_top5": [
+        "predictions.jsonl",
+        "docs/10.feature-catalog.md",
+        "tools/feature-catalog/features/09-integration/09-external-agent-import.yaml",
+        "runs/matrix-sanity-r1/all/matrix-all-1779539756717/psf__requests-5414.0.jsonl",
+        "src/agent/loop.js"
+      ],
+      "rank_of_first_expected": 6,
+      "recall@1": 0,
+      "recall@3": 0,
+      "recall@5": 0
+    },
+    {
+      "id": "camelcase-subtoken-compaction-breaker",
+      "predicted_top5": [
+        "src/agent/compaction-breaker.js",
+        "src/agent/compaction-breaker.ts",
+        "tools/feature-catalog/features/04-context-management/01-compactionbreaker.yaml"
+      ],
+      "rank_of_first_expected": 2,
+      "recall@1": 0,
+      "recall@3": 1,
+      "recall@5": 1
+    },
+    {
+      "id": "snake-case-symmetry",
+      "predicted_top5": [
+        "src/tool/bash/index.js",
+        "src/tool/bash/index.ts",
+        "src/tool/scripted-replace.js",
+        "src/tool/scripted-replace.ts",
+        "tests/unit/agent/tool-failure-mode.test.js"
+      ],
+      "rank_of_first_expected": 8,
+      "recall@1": 0,
+      "recall@3": 0,
+      "recall@5": 0
+    },
+    {
+      "id": "noisy-english-cli-entry",
+      "predicted_top5": [
+        "predictions.jsonl",
+        "src/apps/cli/index.js",
+        "src/apps/cli/index.ts",
+        "tools/feature-catalog/cli.js",
+        "tools/feature-catalog/cli.ts"
+      ],
+      "rank_of_first_expected": 3,
+      "recall@1": 0,
+      "recall@3": 1,
+      "recall@5": 1
+    },
+    {
+      "id": "vendored-noise-main-index",
+      "predicted_top5": [
+        "src/apps/bench/index.js",
+        "src/apps/bench/index.ts",
+        "src/apps/cli/index.js",
+        "src/apps/cli/index.ts",
+        "src/apps/eval/index.js"
+      ],
+      "rank_of_first_expected": 4,
+      "recall@1": 0,
+      "recall@3": 0,
+      "recall@5": 0.5
+    },
+    {
+      "id": "multi-word-repl",
+      "predicted_top5": [
+        "src/apps/cli/repl.js",
+        "src/apps/cli/repl.ts",
+        "predictions.jsonl",
+        "src/agent/recovery.js",
+        "src/agent/recovery.ts"
+      ],
+      "rank_of_first_expected": 2,
+      "recall@1": 0,
+      "recall@3": 1,
+      "recall@5": 1
+    },
+    {
+      "id": "test-file-query-memory",
+      "predicted_top5": [
+        "tools/feature-catalog/migrate-from-md.js",
+        "tools/feature-catalog/migrate-from-md.ts",
+        "logs/run_evaluation/gold_pytest_timing/gold/pytest-dev__pytest-7982/eval.sh",
+        "logs/run_evaluation/gold_pytest_timing/gold/pytest-dev__pytest-7982/test_output.txt",
+        "src/agent/admissibility-gate.js"
+      ],
+      "rank_of_first_expected": 0,
+      "recall@1": 0,
+      "recall@3": 0,
+      "recall@5": 0
+    },
+    {
+      "id": "cross-cutting-streaming-dispatch",
+      "predicted_top5": [
+        "predictions.jsonl",
+        "src/agent/streaming-dispatch.js",
+        "src/agent/streaming-dispatch.ts",
+        "docs/10.feature-catalog.md",
+        "src/llm/streaming-events.js"
+      ],
+      "rank_of_first_expected": 3,
+      "recall@1": 0,
+      "recall@3": 0.5,
+      "recall@5": 0.5
+    },
+    {
+      "id": "symbol-resolveJailed",
+      "predicted_top5": [
+        "docs/ARCHITECTURE.md",
+        "src/storage/index.js",
+        "src/storage/index.ts",
+        "src/storage/service.js",
+        "src/storage/service.ts"
+      ],
+      "rank_of_first_expected": 5,
+      "recall@1": 0,
+      "recall@3": 0,
+      "recall@5": 1
+    },
+    {
+      "id": "behavioral-openai-adapter",
+      "predicted_top5": [
+        "predictions.jsonl",
+        "src/llm/adapters/openai.ts",
+        "tools/feature-catalog/features/09-integration/94-chatgpt-oauth-provider.yaml",
+        "src/llm/adapters/openai.js",
+        "tests/unit/llm/openai-thinking-hell.test.ts"
+      ],
+      "rank_of_first_expected": 2,
+      "recall@1": 0,
+      "recall@3": 1,
+      "recall@5": 1
+    },
+    {
+      "id": "behavioral-sqlite-memory",
+      "predicted_top5": [
+        "tools/feature-catalog/features/05-memory/sqlite-persistent-store.yaml",
+        "src/memory/adapters/sqlite.js",
+        "src/memory/adapters/sqlite.ts",
+        "src/memory/consolidate/store.js",
+        "src/memory/consolidate/store.ts"
+      ],
+      "rank_of_first_expected": 3,
+      "recall@1": 0,
+      "recall@3": 1,
+      "recall@5": 1
+    },
+    {
+      "id": "symbol-localize-tool",
+      "predicted_top5": [
+        "src/tool/localize/index.js",
+        "src/tool/localize/index.ts",
+        "src/skill/system-skills/localize-fault/index.ts",
+        "docs/analysis/code-agent-loop/quanta-comparison.md",
+        "runs/matrix-sanity-r1/all/matrix-all-1779539756717/psf__requests-5414.0.jsonl"
+      ],
+      "rank_of_first_expected": 2,
+      "recall@1": 0,
+      "recall@3": 1,
+      "recall@5": 1
+    },
+    {
+      "id": "behavioral-tool-search-skill",
+      "predicted_top5": [
+        "src/skill/tool-search.js",
+        "src/skill/tool-search.ts",
+        "docs/decisions/0022-skill-trigger-tool-routing.md",
+        "docs/reviews-claude-agent/skill-system.md",
+        "src/skill/plugin-loader.js"
+      ],
+      "rank_of_first_expected": 2,
+      "recall@1": 0,
+      "recall@3": 1,
+      "recall@5": 1
+    }
+  ],
+  "aggregate": {
+    "recall@1": 0,
+    "recall@3": 0.5357142857142857,
+    "recall@5": 0.6428571428571429,
+    "MRR": 0.3029761904761905,
+    "n": 14
+  }
+}

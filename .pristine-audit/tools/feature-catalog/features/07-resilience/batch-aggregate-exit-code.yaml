@@ -1,0 +1,53 @@
+id: batch-aggregate-exit-code
+title: batch.computeExitCode — corpus aggregator (any !passed | degraded | env_prep_failed → 1)
+section: 7
+subsystem: Batch 모드 종료 코드 집계
+order: 25
+maturity: L4
+status: stable
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [n-a]
+configurable: integrated
+owners: ["@songmin"]
+labels: ["surface:core", "resilience-primitive"]
+depends_on: [outcome-exit-code-table]
+surface_integration:
+  cli: missing
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "src evidence not reachable from the interactive CLI entry (src/apps/cli/index.ts) — wired only into other apps (eval/bench/probe/headless) or unwired"
+    web: "pure POSIX exit-code policy primitive, no UI affordance on any surface"
+purpose: |
+  Corpus-level exit-code aggregator for batch mode. `computeExitCode(results)`
+  returns 0 iff EVERY instance resolved cleanly (passed AND verdict NOT in
+  {"degraded", "env_prep_failed"}); 1 if ANY failed. Mirrors the legacy bench
+  behaviour where the operator sees non-zero whenever a regression slips —
+  CI gates on the binary {0,1} signal here, not on per-instance verdicts.
+  Empty-corpus short-circuit returns 0 (vacuously passed: nothing to
+  regress). DISTINCT from `outcome-exit-code-table` (per-instance run-loop
+  outcome → POSIX code) because batch composes MANY runs into a single
+  process exit, and the aggregation rule has its own asymmetry (one fail
+  poisons the run, even when 999 pass).
+evidence:
+  code:
+    - src/apps/agent/mode-presets/batch.ts
+    - src/apps/agent/run.ts
+  adrs: []
+  tests:
+    unit:
+      - tests/unit/apps/agent/mode-presets/batch.test.ts
+      - tests/unit/apps/agent/run.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  `degraded` and `env_prep_failed` count as failures because they signal the
+  test environment misbehaved — silently treating them as 0 would mask
+  infrastructure regressions (worktree corruption / docker image gone /
+  python toolchain drift). The batch preset's `runMode` calls
+  `computeExitCode` exactly once at the tail and returns `{ exitCode }` —
+  `apps/agent/index.ts` then maps that to `process.exit(code)`.

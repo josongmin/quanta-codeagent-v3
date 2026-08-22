@@ -1,0 +1,102 @@
+id: subagent-read-inbox
+title: Subagent read-inbox — subagent_read_messages poll (ADR-0419)
+section: 9
+subsystem: Subagent mailbox read (ADR-0419, closes ADR-0416 deferral)
+order: 97
+maturity: L3
+status: new
+ui_surfaces: [cli, ide]
+monitoring: n-a
+modes: [interactive, headless, batch, daemon, ide, ci-bot]
+configurable: integrated
+owners: ["@songmin"]
+labels: ["surface:core", "default-off"]
+depends_on: [subagent-mailbox]
+surface_integration:
+  cli: full
+  web: full
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 2/2 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "user value is an LLM tool call which renders as tool.invoked/tool.completed via the bridged tool_call/tool_result events"
+purpose: |
+  Closes the ADR-0416 read deferral: adds the LLM-facing READ surface so a
+  running agent can POLL its own inbox for messages other agents sent it (or
+  broadcast) WITHOUT teardown. ADR-0416 shipped the `MailboxPort` substrate +
+  `subagent_send_message`, but incoming mail was only surfaceable out-of-band
+  (task_output summary / child-seed). This wave adds the strictly-additive read
+  half as a SIBLING export in the SAME tool slice — no new substrate, no new
+  shared-file wire.
+
+  Tool `subagent_read_messages`: `mode` (`read` default ⇒ `port.read` returns
+  undelivered mail addressed to the caller and MARKS it delivered, idempotent
+  re-read; `peek` ⇒ `port.peek`, same selection WITHOUT marking), `limit`
+  (positive int cap on the oldest-first result, passed to `opts.limit`). The
+  reader id is derived from `ctx.depth` via the SAME `senderId` helper the send
+  tool uses (root / `agent@depth-N`), so an agent reads its own inbox under the
+  identical label it sent under. Render: each message is one line
+  `from→to [kind] body (id, correlationId?)` oldest-first, followed by a trailing
+  `pending: <pendingFor(agentId)>` line reporting how many remain undelivered
+  AFTER the call. Empty inbox ⇒ `(no messages)` + `pending: 0`.
+
+  `hitlTier: "pre-approval-ok"` (information-class — the only effect is the
+  in-memory delivery cursor advancing) and `isReadOnly: true` (a poll mutates no
+  observable state the loop snapshots). NO-THROW: zod `safeParse` rejects
+  malformed input ⇒ `{ ok:false, output:"invalid input: ..." }`; the port calls
+  are wrapped in try/catch ⇒ `{ ok:false, output:"read failed: ..." }`.
+
+  Wire: the existing Tier-1 builder `buildSubagentMailboxBlock(config)` is
+  unchanged in shape — `[]` when `config.subagentMailbox` absent, otherwise
+  `subagentMailboxTools(port)`, which now returns BOTH `subagent_send_message`
+  (ADR-0416) and `subagent_read_messages` (ADR-0419) bound to the SAME port.
+  Default-OFF byte-identical (RFC §1.2): absent slot ⇒ neither tool registered.
+
+  Slice fence: the read tool shares `src/tool/subagent-mailbox/index.ts`'s
+  narrow consumer port and accepts the host mailbox structurally at the Tier-1
+  composition seam. It imports only `../types` (Tool / ToolContext / ToolEvent /
+  ToolResult), `@/shared` (errMessage), and `zod`; it never imports `@/agent`.
+  The sealed `src/agent/subagent-mailbox/*` substrate is UNMODIFIED.
+evidence:
+  code:
+    - src/tool/subagent-mailbox/index.ts
+    - src/agent/tier1/subagent-mailbox.ts
+  adrs: [419]
+  tests:
+    unit:
+      - tests/unit/subagent-mailbox-read-hellgate.test.ts
+    integration: []
+    contract: []
+knobs:
+  - name: subagentMailbox
+    where: src/agent/types.ts
+    default: 'undefined'
+    purpose: |
+      Per-session port slot (shared with ADR-0416 send). Absent ⇒ neither
+      subagent_send_message NOR subagent_read_messages registered (default-OFF
+      byte-identical). Present ⇒ BOTH tools registered and bound to the same
+      port instance. Caller-wire via `createSubagentMailbox()`.
+deliberate_hold:
+  reason: |
+    READ surface (PULL) only. There is still NO dispatch-seam auto-drain of
+    `pendingFor` into the per-turn reminder (an automatic PUSH into the prompt).
+    Reader ids stay depth-derived (ToolContext has no session id), so siblings
+    at the same depth collapse into one label (`agent@depth-N`) — a known
+    ADR-0416 limitation, unchanged here.
+  promotion_path: |
+    Promote to L4 when the dispatch seam drains `pendingFor()` into the per-turn
+    reminder automatically (PUSH) and threads a per-agent-id reader label through
+    the dispatch seam for precise sibling-to-sibling addressing.
+notes: |
+  26 hellgate cases pin: read marks delivered + idempotent re-read ⇒ (no
+  messages); peek no-mark; default mode "read"; limit caps oldest-first (does not
+  consume the rest); empty inbox text; trailing pending line reflects pendingFor
+  AFTER the call; render shape from→to [kind] body (id, correlationId?)
+  oldest-first; broadcast read by a non-sender; reader id derives from ctx.depth
+  matching subagent_send_message; builder registers 2 tools when wired / [] when
+  absent + same-port binding; send→read round-trip; schema rejection (bad mode /
+  non-positive limit / non-integer limit); NO-THROW on throwing read/peek/
+  pendingFor ⇒ "read failed"; HITL pre-approval-ok + isReadOnly true. Absorption:
+  Codex multi_agents_v2 inbox poll. What this is NOT: no auto-drain into prompt /
+  no per-agent-id addressing / src/agent/subagent-mailbox sealed (SIBLING export,
+  not a substrate mutation). Closes the ADR-0416 read deferral.

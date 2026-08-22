@@ -1,0 +1,40 @@
+id: toolcontext-depth
+title: ToolContext.depth
+section: 2
+subsystem: 디스패치/배칭
+order: 3
+maturity: L3
+status: stable
+ui_surfaces: [cli]
+monitoring: integrated
+telemetry_keys: [quanta.tool.call.status]
+modes: [n-a]
+configurable: n-a
+owners: ['@songmin']
+labels: [absorbed:codex, surface:cli, tier:1]
+depends_on: [agent-dispatch-core, secret-redaction-content-plane, agent-loop-branch-hardening, mode-posture-hitl-4-tier-permission-policy-harddeny-redundan, 183-safety-net-green]
+config_refs:
+  env: [QUANTA_CAP_ENFORCE]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 4/4 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "Pure internal dispatch context primitive (subagent depth propagation); no UI affordance, only feeds internal telemetry quanta.tool.call.status."
+purpose: subagent 깊이 ToolContext.depth 전파
+evidence:
+  code:
+    - src/tool/types.ts
+    - src/agent/dispatch.ts
+    - src/subagent/agent-tool.ts
+    - src/shared/runtime-config.ts
+  adrs: []
+  tests:
+    unit: [tests/unit/dispatch.test.ts]
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: ''

@@ -56,13 +56,17 @@ function renderPromaxCards() {
     return;
   }
   var d = run.officialGrade.display;
-  var cards = [
+  // withRefusedCard: this card set quotes ONE artifact's persisted totals, so an
+  // artifact REFUSED at decode does not merely leave the denominator — it can leave
+  // this view quoting an OLDER run as if it were current. The shared shell builder
+  // appends the refusal count beside the rate; it appends nothing when there is none.
+  var cards = withRefusedCard([
     ["해결 / 유효채점", d.score, "공식 채점 유효분모 · " + run.preset],
     ["assigned", d.assigned, "캠페인 분모(무효·미채점 포함)"]
   ].concat(ogRateCards(d)).concat([
     ["무효/모호", d.infra_invalid + " / " + d.ambiguous, "채점 자체가 신뢰불가 · 판단보류"],
     ["미채점", d.missing, "assigned 인데 채점 결과 없음"]
-  ]);
+  ]));
   el.innerHTML = cards.map(function(c){
     return '<div class="card"><div class="n">'+esc(c[1])+'</div><div class="l">'+esc(c[0])+'</div>'+
       (c[2]? '<div class="muted" style="font-size:10px">'+esc(c[2])+'</div>':'')+'</div>';

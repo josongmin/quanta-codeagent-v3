@@ -1,0 +1,45 @@
+id: thin-client-dispatch
+title: thin-client dispatch routing — one command, per-surface local/post-text/control-request (ADR-0493)
+section: 10
+subsystem: app — multi-surface command routing (thin web/ide host vs thick CLI)
+order: 212
+maturity: L3
+status: new
+ui_surfaces: [cli, web, ide]
+modes: [interactive, ide, daemon]
+monitoring: n-a
+configurable: integrated
+owners: ["@songmin"]
+labels: ["surface:core", "absorbed:claude"]
+depends_on: [slash-command-registry]
+config_refs:
+  env: ["QUANTA_THIN_CLIENT_DISPATCH"]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 1/2 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "pure internal gate-aware route resolver + NO-THROW parser primitive; no distinct browser-rendered affordance of its own"
+purpose: |
+  A slash-command/skill carries an optional thinClientDispatch route tag so the SAME
+  command, defined once, runs correctly across surfaces: local (thin client runs it),
+  post-text (host posts the command text into the stream), control-request (host
+  issues a structured control request). THICK surfaces (cli/headless/bench = real
+  process/TTY) ALWAYS resolve local — a tag never breaks a real terminal. THIN
+  surfaces (web/ide) honor the tag ONLY when QUANTA_THIN_CLIENT_DISPATCH is opted in.
+  Default-OFF ⇒ every descriptor resolves local (byte-identical). Pure resolver
+  (never reads process.env); unknown/garbage tag degrades to local, never throws.
+evidence:
+  code:
+    - src/agent/thin-client-dispatch/types.ts
+    - src/shared/thin-client-route.ts
+  adrs: [493]
+  tests:
+    unit:
+      - tests/unit/thin-client-dispatch-hellgate.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null

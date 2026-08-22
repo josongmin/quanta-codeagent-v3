@@ -2,7 +2,7 @@
  * B3 hellgate — the terminal "brain-mode" entry (`runTerminalBrain`).
  *
  * Proves the brain process REALLY drives the agent loop over the brain↔hands JSON-line stdio
- * duplex (RFC jun-29 §13, spec S2/S3 / B3). A scripted fake LLM emits ONE `container_exec` tool
+ * duplex (TB21-06 TC-1a, spec S2/S3/B3). A scripted fake LLM emits ONE `container_exec` tool
  * call; a fake HANDS side reads the framed exec request off the brain's stdout and pushes back an
  * `exec_result`; the loop consumes the result, completes, and the report JSON is written through
  * the injected `writeReport`. This is a real effect (a command round-trips the duplex + a report is
@@ -574,7 +574,7 @@ type TerminalBrainReportShape = {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────────────────────
-// Lever #1 — environment posture (RFC jul-2-terminal-bench-levers/01).
+// Lever #1 — environment posture (TB21-06 TC-6).
 // HELLGATE: RED-first (the brain's SYSTEM prompt TODAY carries the frozen [R-ENV] guardrail), then
 // knob-ON behavior (owned posture: [R-ENV] / [R-STOP-ENV] gone, [R-ENV-OWNED] present) and the
 // DEFAULT-OFF byte-identical proof (unset ≡ explicit-off ≡ pre-lever system prompt).
@@ -682,7 +682,7 @@ describe("B2 — container_write_file knob (default-OFF)", () => {
 })
 
 // ─────────────────────────────────────────────────────────────────────────────────────────────
-// Lever #2 — verify-before-finalize gate (RFC jul-2-terminal-bench-levers/02).
+// Lever #2 — verify-before-finalize gate (TB21-06 TC-6).
 // HELLGATE: RED-first (knob OFF today = no verification field, no extra turn), then knob-ON
 // behaviors (one bounded follow-up, honest trichotomy), boundedness (≤1 turn, cannot loop), and
 // the exercise recognizer for BOTH tools (container_exec + pty_*).

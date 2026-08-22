@@ -1,0 +1,314 @@
+/**
+ * Session JSONL projection for `/inspect <toolCallId>` (ADR-0239 follow-up).
+ *
+ * Pure projection layer — given a stream of decoded `SessionEnvelopeRecord`s,
+ * group every envelope that pertains to ONE `toolCallId` into a single
+ * {@link InspectGroup} (or two if the same id appears in a forked branch).
+ *
+ * The envelope schema (see `./envelope.ts`) carries a single first-class
+ * tool-call id field: `event_msg{kind:"decision"}.tool_call_id`. Other
+ * envelopes that reference a tool call — `event_msg{kind:"tool_invoke" |
+ * "tool_result"}` (no on-wire id), `event_msg{kind:"custom"}` (open `data`
+ * record where the upstream emitter may carry an `id`/`toolCallId` field) —
+ * are matched by best-effort introspection so the projection covers every
+ * plausible upstream shape WITHOUT modifying the envelope schema (Track A
+ * locked it down — see {@link SESSION_ENVELOPE_VERSION}).
+ *
+ * Determinism:
+ *   - Records are kept in their original on-disk order (the envelope `ts`
+ *     field is monotonic per emitter but we never re-sort — `iterateSessionFile`
+ *     yields lines in file order, which IS the deterministic ordering).
+ *   - When two matches share the same id (e.g. fork-on-accept), each occurrence
+ *     opens its own group; the projector returns them in arrival order.
+ *
+ * This module is a pure data shaper. It does NO IO and NO sanitisation —
+ * the inspect renderer (`src/apps/cli/inspect-cmd.ts`) layers redaction
+ * on top via the shared `redactValue` so the projection stays reusable by
+ * non-CLI surfaces.
+ */
+
+import type {
+  EventMsgRecord,
+  ResponseItemRecord,
+  SessionEnvelopeRecord,
+  TurnContextRecord,
+} from "./envelope"
+
+/** One decoded envelope record that pertains to a specific tool-call id, plus
+ *  a short reason string explaining WHY the projector matched it (so the
+ *  renderer can paint a debugging-friendly trail when the schema drifts). */
+export interface InspectMatch {
+  readonly record: SessionEnvelopeRecord
+  /** Closed enum of how we decided this record belongs to the group. */
+  readonly via: "decision_tool_call_id" | "custom_data_id" | "co_turn"
+}
+
+/** A single tool-call's worth of evidence: every record that mentions the
+ *  id, plus the active turn context (when discoverable) so the renderer can
+ *  paint model / mode without re-scanning. */
+export interface InspectGroup {
+  readonly toolCallId: string
+  /** Turn id this group belongs to. Best-effort — taken from the FIRST
+   *  matched record. `undefined` when no record carries `turn_id`. */
+  readonly turnId: string | undefined
+  /** `turn_context` envelope for `turnId`, when present in the input. */
+  readonly turnContext: TurnContextRecord | undefined
+  /** Each `event_msg{kind:"tool_invoke"}` co-located in the matched turn. */
+  readonly toolInvokes: ReadonlyArray<Extract<EventMsgRecord, { kind: "tool_invoke" }>>
+  /** Each `event_msg{kind:"tool_result"}` co-located in the matched turn. */
+  readonly toolResults: ReadonlyArray<Extract<EventMsgRecord, { kind: "tool_result" }>>
+  /** Every gate-decision envelope whose `tool_call_id` matches. */
+  readonly decisions: ReadonlyArray<Extract<EventMsgRecord, { kind: "decision" }>>
+  /** Every `event_msg{kind:"custom"}` whose payload carries the id (best-effort). */
+  readonly customs: ReadonlyArray<Extract<EventMsgRecord, { kind: "custom" }>>
+  /** Optional `response_item` envelopes in the matched turn. */
+  readonly responseItems: ReadonlyArray<ResponseItemRecord>
+  /** Every matched record in original on-disk order — convenient for a
+   *  "raw view" renderer mode (not used by the default panel). */
+  readonly matches: readonly InspectMatch[]
+  /** Best-effort warning emitted when the group looks structurally
+   *  incomplete (e.g. tool_result without a paired decision/invoke). Lets
+   *  the renderer surface a single yellow-warning line WITHOUT making the
+   *  projector opinionated about UX. */
+  readonly warnings: readonly string[]
+}
+
+/* ─── helpers ────────────────────────────────────────────────────────── */
+
+/** Extract a tool-call id from an EventCustomSchema's open `data` record.
+ *  We probe the two canonical key names (`id` and `toolCallId`) — anything
+ *  else is invisible to the projector, which is fine: the upstream emitter
+ *  is responsible for using one of the two names (the spec is documented
+ *  in this module's header). */
+const customId = (data: Record<string, unknown>): string | undefined => {
+  const a = data.id
+  if (typeof a === "string" && a.length > 0) return a
+  const b = data.toolCallId
+  if (typeof b === "string" && b.length > 0) return b
+  return undefined
+}
+
+/** True when the event_msg envelope record references `toolCallId`. */
+const eventMatches = (e: EventMsgRecord, toolCallId: string): InspectMatch["via"] | null => {
+  if (e.kind === "decision" && e.tool_call_id === toolCallId) return "decision_tool_call_id"
+  if (e.kind === "custom") {
+    if (customId(e.data) === toolCallId) return "custom_data_id"
+  }
+  return null
+}
+
+/** Group bucketing accumulator — one per `(toolCallId, turnId)` pair. The
+ *  projector mints a fresh group every time it sees an UNSEEN turn for the
+ *  same id so a fork creates two groups (see the "fork" hellgate case). */
+interface Bucket {
+  toolCallId: string
+  turnId: string | undefined
+  turnContext: TurnContextRecord | undefined
+  toolInvokes: Array<Extract<EventMsgRecord, { kind: "tool_invoke" }>>
+  toolResults: Array<Extract<EventMsgRecord, { kind: "tool_result" }>>
+  decisions: Array<Extract<EventMsgRecord, { kind: "decision" }>>
+  customs: Array<Extract<EventMsgRecord, { kind: "custom" }>>
+  responseItems: Array<ResponseItemRecord>
+  matches: InspectMatch[]
+  warnings: string[]
+}
+
+const newBucket = (toolCallId: string, turnId: string | undefined): Bucket => ({
+  toolCallId,
+  turnId,
+  turnContext: undefined,
+  toolInvokes: [],
+  toolResults: [],
+  decisions: [],
+  customs: [],
+  responseItems: [],
+  matches: [],
+  warnings: [],
+})
+
+const bucketKey = (toolCallId: string, turnId: string | undefined): string =>
+  `${toolCallId}\x00${turnId ?? ""}`
+
+const finalizeBucket = (b: Bucket): InspectGroup => {
+  const warnings = [...b.warnings]
+  // Structural sanity probes — only run when we have ENOUGH evidence to
+  // make a meaningful claim; otherwise stay silent (the projector doesn't
+  // know whether the upstream emitter is wired yet).
+  if (b.toolResults.length > 0 && b.toolInvokes.length === 0 && b.decisions.length === 0) {
+    warnings.push("tool_result present without a matching tool_invoke or decision")
+  }
+  return {
+    toolCallId: b.toolCallId,
+    turnId: b.turnId,
+    turnContext: b.turnContext,
+    toolInvokes: b.toolInvokes,
+    toolResults: b.toolResults,
+    decisions: b.decisions,
+    customs: b.customs,
+    responseItems: b.responseItems,
+    matches: b.matches,
+    warnings,
+  }
+}
+
+/* ─── public API ─────────────────────────────────────────────────────── */
+
+type ToolInvokeRec = Extract<EventMsgRecord, { kind: "tool_invoke" }>
+type ToolResultRec = Extract<EventMsgRecord, { kind: "tool_result" }>
+
+/** Mutable accumulator used by {@link findByToolCallId} — keeps the per-scan
+ *  state in one place so each handler can stay small + below the biome
+ *  cognitive-complexity ceiling. Pure data, no methods on the type itself;
+ *  the helper functions below mutate it. */
+interface ScanState {
+  readonly toolCallId: string
+  readonly buckets: Map<string, Bucket>
+  readonly allBuckets: Bucket[]
+  readonly ownedTurns: Set<string>
+  readonly pendingInvokes: ToolInvokeRec[]
+  readonly pendingResults: ToolResultRec[]
+  readonly pendingResponseItems: ResponseItemRecord[]
+  readonly turnContexts: Map<string, TurnContextRecord>
+}
+
+const newScanState = (toolCallId: string): ScanState => ({
+  toolCallId,
+  buckets: new Map(),
+  allBuckets: [],
+  ownedTurns: new Set(),
+  pendingInvokes: [],
+  pendingResults: [],
+  pendingResponseItems: [],
+  turnContexts: new Map(),
+})
+
+const drainPending = (state: ScanState, fresh: Bucket, turnId: string): void => {
+  for (const inv of state.pendingInvokes) {
+    if (inv.turn_id === turnId) fresh.toolInvokes.push(inv)
+  }
+  for (const res of state.pendingResults) {
+    if (res.turn_id === turnId) fresh.toolResults.push(res)
+  }
+  for (const ri of state.pendingResponseItems) {
+    if (ri.turn_id === turnId) fresh.responseItems.push(ri)
+  }
+}
+
+const openBucket = (state: ScanState, turnId: string | undefined): Bucket => {
+  const key = bucketKey(state.toolCallId, turnId)
+  const existing = state.buckets.get(key)
+  if (existing) return existing
+  const fresh = newBucket(state.toolCallId, turnId)
+  if (turnId !== undefined) {
+    const ctx = state.turnContexts.get(turnId)
+    if (ctx !== undefined) fresh.turnContext = ctx
+  }
+  state.buckets.set(key, fresh)
+  state.allBuckets.push(fresh)
+  if (turnId !== undefined) {
+    state.ownedTurns.add(turnId)
+    drainPending(state, fresh, turnId)
+  }
+  return fresh
+}
+
+const handleTurnContext = (state: ScanState, rec: TurnContextRecord): void => {
+  state.turnContexts.set(rec.turn_id, rec)
+  for (const b of state.allBuckets) {
+    if (b.turnId === rec.turn_id && b.turnContext === undefined) b.turnContext = rec
+  }
+}
+
+const handleResponseItem = (state: ScanState, rec: ResponseItemRecord): void => {
+  if (state.ownedTurns.has(rec.turn_id)) {
+    for (const b of state.allBuckets) {
+      if (b.turnId === rec.turn_id) b.responseItems.push(rec)
+    }
+    return
+  }
+  state.pendingResponseItems.push(rec)
+}
+
+const handleToolInvoke = (state: ScanState, rec: ToolInvokeRec): void => {
+  if (state.ownedTurns.has(rec.turn_id)) {
+    for (const b of state.allBuckets) {
+      if (b.turnId === rec.turn_id) b.toolInvokes.push(rec)
+    }
+    return
+  }
+  state.pendingInvokes.push(rec)
+}
+
+const handleToolResult = (state: ScanState, rec: ToolResultRec): void => {
+  if (state.ownedTurns.has(rec.turn_id)) {
+    for (const b of state.allBuckets) {
+      if (b.turnId === rec.turn_id) b.toolResults.push(rec)
+    }
+    return
+  }
+  state.pendingResults.push(rec)
+}
+
+const handleEventMsg = (state: ScanState, rec: EventMsgRecord): void => {
+  if (rec.kind === "tool_invoke") {
+    handleToolInvoke(state, rec)
+    return
+  }
+  if (rec.kind === "tool_result") {
+    handleToolResult(state, rec)
+    return
+  }
+  const via = eventMatches(rec, state.toolCallId)
+  if (via === null) return
+  const bucket = openBucket(state, rec.turn_id)
+  bucket.matches.push({ record: rec, via })
+  if (rec.kind === "decision") bucket.decisions.push(rec)
+  if (rec.kind === "custom") bucket.customs.push(rec)
+}
+
+/** Pure projection: scan `envelopes` once and return every group whose
+ *  records mention `toolCallId`. Returns `[]` when the id never appears.
+ *
+ *  Forking: when the SAME `toolCallId` shows up in two different `turn_id`
+ *  scopes (the only way to legitimately re-use an id on disk — fork-on-accept
+ *  copies a checkpoint), the projector returns TWO groups in arrival order
+ *  so the renderer can paint them as a divider-separated pair.
+ *
+ *  Co-turn fallback: `tool_invoke` and `tool_result` envelopes don't carry
+ *  a tool-call id on the wire — Track A added it only to `decision`. We
+ *  pair them by **turn co-location**: once a decision with the id has been
+ *  seen in turn T, EVERY subsequent tool_invoke / tool_result within turn T
+ *  joins the group. This is best-effort — a turn with multiple concurrent
+ *  tool calls (`parallel_tool_use`) will mix them; the renderer surfaces a
+ *  warning when that ambiguity is detectable. */
+export const findByToolCallId = (
+  envelopes: Iterable<SessionEnvelopeRecord>,
+  toolCallId: string,
+): readonly InspectGroup[] => {
+  if (typeof toolCallId !== "string" || toolCallId.length === 0) return []
+  const state = newScanState(toolCallId)
+  for (const env of envelopes) {
+    if (env.type === "turn_context") handleTurnContext(state, env)
+    else if (env.type === "response_item") handleResponseItem(state, env)
+    else if (env.type === "event_msg") handleEventMsg(state, env)
+    // session_meta / thread_spawn carry no per-tool id — silently ignored.
+  }
+  return state.allBuckets.map(finalizeBucket)
+}
+
+/* ─── back-compat reader (test seam) ──────────────────────────────────── */
+
+/** Iterate a session JSONL file and yield every decoded envelope, dropping
+ *  decode errors silently (the projector cares only about valid records;
+ *  the CLI surface logs error lines via its own warn channel). Thin wrapper
+ *  over {@link iterateSessionFile} so callers depend on this module
+ *  exclusively (the CLI never reaches into envelope-encoder directly). */
+export async function* readEnvelopes(path: string): AsyncIterable<SessionEnvelopeRecord> {
+  // Lazy import to avoid loading Bun.file at module-evaluation time in
+  // contexts that never call this function (the projector itself is sync
+  // and unit-tested against in-memory fixtures).
+  const { iterateSessionFile } = await import("./envelope-encoder")
+  for await (const r of iterateSessionFile(path)) {
+    if (r.ok) yield r.value
+  }
+}

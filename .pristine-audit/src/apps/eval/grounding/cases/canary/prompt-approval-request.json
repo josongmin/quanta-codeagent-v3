@@ -1,0 +1,19 @@
+{
+  "schema": 2,
+  "id": "prompt-approval-request",
+  "usecase": "persistent-context.conversation-state.thread-grounding",
+  "history": [
+    { "role": "assistant", "text": "Active thread prompt_rules has a patch ready for merge." }
+  ],
+  "targetUtterance": "그럼 이거 머지해도 되냐?",
+  "gold": {
+    "activeThreadId": "prompt_rules",
+    "referentId": "prompt_rules",
+    "intent": "approval_request",
+    "scope": "current_workstream",
+    "shouldClarify": false,
+    "confidence": "high"
+  },
+  "bucket": "reference",
+  "severity": "high"
+}

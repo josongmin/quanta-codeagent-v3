@@ -180,7 +180,11 @@ export const dispatchTool = async (
     const message = e instanceof QuantaError ? e.message : toError(e).message
     const redactedMessage = redactSecrets(message, { origin: "tool_result" }).text
     endSpan(toolSpan, "error", toolCloseAttrs("error", captureContent, redactedMessage))
-    return deny(call.id, `Tool dispatch failed for ${call.name}: ${redactedMessage}`, "dispatch-error")
+    return deny(
+      call.id,
+      `Tool dispatch failed for ${call.name}: ${redactedMessage}`,
+      "dispatch-error",
+    )
   }
 }
 

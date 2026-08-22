@@ -1,0 +1,50 @@
+id: mcp-launch-governance
+title: MCP launch governance — deniedServers + allowManagedMcpServersOnly LIVE enforcement (E2/E1-sub, §12.4 해소)
+section: 9
+subsystem: central-config (ADR-0497) → MCP launcher
+order: 40
+maturity: L3
+status: stable
+ui_surfaces: [cli, web]
+monitoring: integrated
+modes: [n-a]
+configurable: integrated
+owners: ["@songmin"]
+labels: ["surface:core", "absorbed:claude-code", "security", "default-off"]
+depends_on: []
+surface_integration:
+  cli: full
+  web: full
+  method: audited
+  verified: "2026-06-10"
+  evidence:
+    cli: "loadFeatures (src/apps/cli/internal.ts) resolves the policy via resolveMcpLaunchPolicy and passes it to readMcpConfig — the CLI repl + bootstrap-session deps.loadFeatures both route through it"
+    web: "the daemon-backed session uses the same loadFeatures composition; MCP servers materialize identically"
+purpose: |
+  Closes the §12.4 built-not-wired gap: central-config resolved
+  `mcpEnabledServers` (and the jun-09 `mcpDeniedServers` /
+  `allowManagedMcpServersOnly`) but NO launcher consumed them — resolution was
+  inert. Now `loadFeatures` resolves a launch policy (non-interactive trust:
+  `~/.quanta/trust.json` + `QUANTA_TRUSTED_PATHS`; NEVER prompts — boot must
+  not block on stdin) and `readMcpConfig` applies `filterMcpServersByPolicy`
+  (pure, `@/config`): deniedServers = hard drop (tightening — survives untrust,
+  mirrors permission deny); non-empty enabledServers = exclusive allowlist;
+  empty/absent policy = NO filtering (no behavior cliff — enabling
+  central-config without MCP policy keeps existing `.mcp.json` servers).
+  Managed layer can set `allowManagedMcpServersOnly` so even a trusted repo
+  cannot add servers. Every dropped server is slog'd (observable governance).
+  Fail-soft: a resolution fault warns + falls back to legacy (availability).
+config_refs:
+  env: [QUANTA_CENTRAL_CONFIG]
+evidence:
+  code:
+    - src/config/mcp-governance.ts
+    - src/apps/cli/internal.ts
+  adrs: [530]
+  tests:
+    unit:
+      - tests/unit/config/mcp-governance-filter.test.ts
+      - tests/unit/config/mcp-governance-merge-hellgate.test.ts
+      - tests/unit/mcp-governance-live-wire-hellgate.test.ts
+    integration: []
+    contract: []

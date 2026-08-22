@@ -1,0 +1,42 @@
+id: llm-distill
+title: 세션종료 LLM distill
+section: 5
+subsystem: 자동 지식처리
+order: 1
+maturity: L4
+status: stable
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [interactive, headless, batch, daemon, ide, ci-bot]
+configurable: n-a
+owners: ['@songmin']
+labels: [surface:core, absorbed:codex]
+depends_on: [codex-2-phase-consolidator, consolidator-session-hook, memory-eviction-planner, memory-dedup-planner]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 3/3 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "pure internal background knowledge-processing axis, no user-visible affordance on any surface"
+purpose: |
+  세션 종료 시 LLM distill (provider 미주입 / 호출 실패 시 휴리스틱 폴백),
+  pre-save dedup 후보 발견 시 LLM이 merge/supersede 중재, 정주기 eviction
+  + age 기반 importance decay로 long-term store가 한도 안에서 유지되도록
+  하는 자동 지식 처리 축. 본 entry는 큰 그림 reference — 구체 모듈은
+  memory-dedup-planner / memory-eviction-planner / consolidator-session-hook
+  / codex-2-phase-consolidator로 분리.
+evidence:
+  code:
+    - src/agent/memory-distill.ts
+    - src/agent/memory-consolidate.ts
+    - src/agent/memory-consolidator-hook.ts
+  adrs: [8]
+  tests:
+    unit: ["tests/unit/memory-consolidate.test.ts", "tests/unit/memory-consolidator-hook-hellgate.test.ts", "tests/unit/memory-distill-redaction-hellgate.test.ts", "tests/unit/memory-distill.test.ts", "tests/unit/memory-phase2-wire-hellgate.test.ts"]
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: ''

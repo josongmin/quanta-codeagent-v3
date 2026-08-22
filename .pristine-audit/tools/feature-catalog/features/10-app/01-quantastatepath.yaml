@@ -1,0 +1,44 @@
+id: quantastatepath
+title: QUANTA_STATE_PATH
+section: 10
+subsystem: 세션 영속/resume
+order: 1
+maturity: L4
+status: stable
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [interactive, headless]
+configurable: integrated
+config_refs:
+  env: [QUANTA_RESUME, QUANTA_STATE_PATH]
+owners: ["@songmin"]
+labels: ["surface:cli"]
+depends_on: [runner-resume-fsm, assemble-config, runner-assemble-builders, cli-export-2026-05-21-l2-l3, cli-resume-state-machine]
+surface_integration:
+  cli: full
+  web: missing
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 3/3 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "resume lifecycle needs a B3-absent SessionCommand verb (protocol.ts has only input.append/turn.run/turn.cancel/approval.respond) so it never reaches the browser"
+purpose: '/--state, /--resume. CLI 리주메 lifecycle e2e(, 7 tests): 실 runAgent → saveSession → loadSession → 새 runAgent 라운드트립으로 (a) 사전 assistant 텍스트가 두 번째 StreamInput.messages에 도달, (b) tool_use/tool_result 쌍이 boundary 보존, (c) 손상 파일 → loadSession null → fresh start no-throw, (d) 다단계 A→save→B→save→C 누적 transcript, (e) sessionId boundary 안정성, (f) StreamPort per-run 격리(공유 누수 없음).'
+evidence:
+  code:
+    - src/apps/cli/internal.ts
+    - src/apps/cli/resume.ts
+    - src/session/store.ts
+  adrs: []
+  tests:
+    unit: [tests/unit/apps/cli/resume-wire-hellgate.test.ts]
+    integration: [tests/integration/cli-resume-e2e.test.ts, tests/integration/resume-e2e.test.ts]
+    contract: []
+knobs:
+  - name: QUANTA_RESUME
+    default: 'undefined'
+    purpose: '(no description)'
+  - name: QUANTA_STATE_PATH
+    default: 'undefined'
+    purpose: '(no description)'
+deliberate_hold: null
+notes: 'CLI subprocess flake 없이 CLI의 if (prior) { history = prior.messages; sessionId = prior.sessionId } 시밍을 동일 와이어로 검증. 보강 e2e(, 3 tests): tool 호출 라운드의 content-block shape preservation, loadSession ?? [] gr…'

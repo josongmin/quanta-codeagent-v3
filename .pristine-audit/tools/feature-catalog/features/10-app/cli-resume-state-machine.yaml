@@ -1,0 +1,50 @@
+id: cli-resume-state-machine
+title: CLI `--resume` state machine — path-mode vs id-mode (ADR-0024 split)
+section: 10
+subsystem: Session resume (ADR-0024)
+order: 12
+maturity: L4
+status: stable
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [interactive, headless]
+configurable: integrated
+owners: ["@songmin"]
+labels: ["surface:cli"]
+depends_on: [quanta-session-subcommands, session-index-store, quantastatepath]
+surface_integration:
+  cli: full
+  web: missing
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 1/1 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "resume verb absent from protocol.ts SessionCommand (B3); --resume is a CLI-only flag with no browser path"
+purpose: |
+  `--resume <token>` 해석의 pure state machine — 실구현은 surface-agnostic Layer-2
+  슬라이스 `@/runner/orchestrate/resume-fsm` 으로 재배치됐고, `src/apps/cli/resume.ts`
+  는 기존 CLI importer(`internal.ts` 배럴 / `repl.ts` / 테스트) 호환을 위한 thin re-
+  export shim 만 남는다 (Web/Tauri 등 다른 surface 는 `@/runner` 에서 직접 import).
+  PATH 모드 (token 에 `/` 또는 `\` 포함, 혹은 `.json` 으로 끝남) vs ID 모드 (opaque
+  session id) 의 결정 로직과 `isPathLikeToken` heuristic, `resolveResume` /
+  `defaultUntitled` 가 같은 슬라이스 모듈에 모여 있고, PURE w.r.t. argv/env 라
+  caller 가 미리 풀어서 전달한 파라미터만 받는다 (`process.env` 미접근 → unit-
+  testable in isolation). PATH 모드는 디스크 경로에서 직접 로드, ID 모드는
+  `index.jsonl` 조회 → 디스크 경로 변환.
+evidence:
+  code:
+    - src/apps/cli/resume.ts
+  adrs: [24]
+  tests:
+    integration:
+      - tests/integration/resume-e2e.test.ts
+    unit:
+      - tests/unit/cli-resume-heuristic.test.ts
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  ADR-0024 (CLI slice 분해) — `internal.ts` 비대화 fix. 본 모듈은 *어떻게 resume token
+  을 해석할지*; 실제 세션 로드(loadSession / loadSessionById)는 @/session 모듈
+  (session-index-store / quanta-session-subcommands feature). `--state` path는
+  quantastatepath feature 와 직교.

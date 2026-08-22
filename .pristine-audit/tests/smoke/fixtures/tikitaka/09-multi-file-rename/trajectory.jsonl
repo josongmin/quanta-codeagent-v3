@@ -1,0 +1,21 @@
+{"run":0,"turn":0,"event":{"type":"tool_use_start","id":"g1","name":"grep"}}
+{"run":0,"turn":0,"event":{"type":"tool_use_end","id":"g1","input":{"pattern":"oldName"}}}
+{"run":0,"turn":0,"event":{"type":"message_stop","stop_reason":"tool_use"}}
+{"run":0,"turn":1,"event":{"type":"text_delta","delta":"oldName 은 lib.ts(정의), a.ts, b.ts(호출)에서 사용됩니다."}}
+{"run":0,"turn":1,"event":{"type":"message_stop","stop_reason":"end_turn"}}
+{"run":1,"turn":0,"event":{"type":"tool_use_start","id":"e1","name":"edit"}}
+{"run":1,"turn":0,"event":{"type":"tool_use_end","id":"e1","input":{"path":"lib.ts","old_string":"oldName","new_string":"newName"}}}
+{"run":1,"turn":0,"event":{"type":"message_stop","stop_reason":"tool_use"}}
+{"run":1,"turn":1,"event":{"type":"tool_use_start","id":"e2","name":"edit"}}
+{"run":1,"turn":1,"event":{"type":"tool_use_end","id":"e2","input":{"path":"a.ts","old_string":"oldName","new_string":"newName","replace_all":true}}}
+{"run":1,"turn":1,"event":{"type":"message_stop","stop_reason":"tool_use"}}
+{"run":1,"turn":2,"event":{"type":"tool_use_start","id":"e3","name":"edit"}}
+{"run":1,"turn":2,"event":{"type":"tool_use_end","id":"e3","input":{"path":"b.ts","old_string":"oldName","new_string":"newName","replace_all":true}}}
+{"run":1,"turn":2,"event":{"type":"message_stop","stop_reason":"tool_use"}}
+{"run":1,"turn":3,"event":{"type":"text_delta","delta":"lib.ts, a.ts, b.ts 전부 newName 으로 변경했습니다."}}
+{"run":1,"turn":3,"event":{"type":"message_stop","stop_reason":"end_turn"}}
+{"run":2,"turn":0,"event":{"type":"tool_use_start","id":"g2","name":"grep"}}
+{"run":2,"turn":0,"event":{"type":"tool_use_end","id":"g2","input":{"pattern":"oldName"}}}
+{"run":2,"turn":0,"event":{"type":"message_stop","stop_reason":"tool_use"}}
+{"run":2,"turn":1,"event":{"type":"text_delta","delta":"확인 결과 모두 newName 으로 변경되었고 oldName 은 더 이상 없습니다. 완료."}}
+{"run":2,"turn":1,"event":{"type":"message_stop","stop_reason":"end_turn"}}

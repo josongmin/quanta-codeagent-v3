@@ -166,7 +166,68 @@ const SRC = join(__dirname, "..", "..", "src")
 // reviewer output IS the answer (`tryParseReport` deliberately tries multiple
 // candidates expecting most to fail); `null` is normal control flow, not a
 // swallowed error. +1 justified site only — NO blanket bump. Ceiling 1155 → 1156.
-const BARE_CATCH_BASELINE = 1156
+// 2026-08-22 — the ceiling was BREACHED (live prod 1163 > 1156). Classified, NOT
+// papered over: the growth is +8 in `src/apps/bench/**` and -1 in `runner/batch/`.
+// Ceiling HELD at 1156 and SEVEN swallows were bound + attributed instead (each
+// keeps its control flow byte-for-byte; only a `logger.warn` was added):
+//   - runner/batch/report-envelope.ts `mirrorReportToSsot` - NEW site (commit
+//     8cdf4badb). A silently-failing canonical mirror makes the SSOT results dir
+//     look like the run never happened => `report-envelope.mirrorReportToSsot`.
+//   - agent/loop-activation-hook.ts x2 - the per-turn activation hot path. The
+//     `activatePlugins` catch bumped `codex_r2.activation.errors` but dropped the
+//     error itself (a counter says THAT, never WHAT), and the outer
+//     `reconcileSkillMcpDeps` guard made a skipped reconcile indistinguishable
+//     from "nothing to do" => `loop-activation-hook.{activatePlugins,
+//     reconcileSkillMcpDeps}`.
+//   - tool/output-spill.ts x4 - spill-dir retention. Both prune surfaces only run
+//     AFTER a successful spill write into that same dir, so a `readdir` failure is
+//     a real fs fault (never the benign "nothing spilled yet"), and a `remove`
+//     failure defeats the retention bound this function exists to enforce - both
+//     previously grew the dir unbounded in silence =>
+//     `output-spill.pruneSpillDir{,Async}.{readdir,remove}`. (The 2 readdir sites
+//     were also `catch { return [] }`, so CATCH_RETURN_EMPTY drops 110 -> 108.)
+// TIGHTENED 2026-08-22 (1156 -> 1147), same classify-not-paper pass, at the
+// SOURCE this time. The +8 that ate the entire ceiling headroom above was grown
+// by `src/apps/bench/**` after the 8c58ef0fe pin (13 new bare catches in new
+// bench files, -5 removed elsewhere in bench). Repaying it in the slice that
+// borrowed it: NINE of those 13 were bound + attributed (control flow byte-for-
+// byte identical at every site — only a `logger.warn`, or the already-returned
+// refusal message, gained the error):
+//   - profiles/corpus-read.ts `readFamilyCorpusFile` - a `readFileSync` fault
+//     collapsed to `undefined`; `readFamilyDatasetInstanceIds` then degrades that
+//     to `[]`, so "dataset absent" and "dataset unreadable" were the same event
+//     => `corpus-read.readFamilyCorpusFile`.
+//   - profiles/jsonl-corpus.ts + promax/corpus/public-reader.ts (rowsFromJsonl) -
+//     a malformed JSONL line is DROPPED by documented design, but a dropped line
+//     is a dropped INSTANCE: a hand-edited chunk file quietly ran fewer tasks with
+//     no trace. The skip stays; it is now attributed.
+//   - promax/corpus/public-reader.ts `readProMaxCorpusRows` - text that OPENS with
+//     `[` is declaring the bare-array form, so a parse fault there is a CORRUPT
+//     corpus, not a format mismatch; `catch { return [] }` made it indistinguishable
+//     from an empty one. (Also drops CATCH_RETURN_EMPTY.)
+//   - promax/campaign/rails.ts `collectTestFiles` - a `statSync` fault silently
+//     SHRINKS `resolvedTestFiles`, i.e. the empty-selection trap that module exists
+//     to close, re-entered through the error path.
+//   - terminal/harbor-results.ts `isDirectory` - gates the whole results scan
+//     (`scanHarborJobDir` -> `[]`), so an unreadable job dir read as "this run
+//     produced no trials". (Also drops CATCH_RETURN_EMPTY.)
+//   - commands/terminal.ts `defaultCanWriteDir` - a DOCTOR probe: `accessSync`
+//     throws for ELOOP/EIO/a lost race as well as EACCES, and all of them were
+//     reported as "not writable". (Also drops CATCH_RETURN_EMPTY.)
+//   - harness/promax/campaign-freeze.ts + remote/box-session/official-grade-
+//     transport.ts - both already REFUSED loudly but neither refusal carried the
+//     parse fault or the offending bytes; the error is now folded into the message
+//     that was already being returned (no logger added).
+// The remaining 4 new bench sites are JUSTIFIED, traced to their callers, and
+// deliberately left bare: harness/promax/image-preflight.ts `parseInspect` and
+// terminal/doctor.ts `checkAgentImport` both surface an `inspect_unparseable` /
+// "produced no JSON" refusal that ALREADY embeds the offending stdout, so the
+// parse message adds nothing the raw bytes do not; promax/corpus/layout.ts
+// `resolveExisting` uses the `realpathSync` throw as the walk-up loop's own
+// control flow (a missing leaf is the normal case, per its jsdoc); and
+// public-reader.ts's second `JSON.parse` is the documented object-vs-JSONL format
+// DISCRIMINATOR, where failing over to the line reader is the success path.
+const BARE_CATCH_BASELINE = 1147
 // Re-measured 2026-06-25 (repo-cache GC + committed in-flight bench work): the
 // `reapStaleMirrorTemps` `stat(p).catch(() => null)` not-found PROBE (handled via
 // `if (st !== null …)`, a vanished orphan tmp is simply skipped) plus one further
@@ -205,7 +266,17 @@ const NULLISH_PROMISE_SWALLOW_BASELINE = 171
 // vanished/racing entry (best-effort hygiene, the port contract forbids throwing);
 // the caller treats `[]` as "nothing to reclaim", never as "genuinely complete".
 // Ceiling 110 → 111.
-const CATCH_RETURN_EMPTY_BASELINE = 111
+// TIGHTENED 2026-08-22 (111 -> 108): the two `pruneSpillDir{,Async}` `catch {
+// return [] }` readdir masks in tool/output-spill.ts were migrated to bound +
+// `logger.warn` (see the BARE_CATCH_BASELINE note above), and the 1 unit of
+// pre-existing slack (HEAD measured 110 under a 111 ceiling) is retired at the
+// same time. Pinned to the live prod count so the improvement cannot erode.
+// TIGHTENED 2026-08-22 (108 -> 105): three of the bench bare-catch repairs above
+// (public-reader `readProMaxCorpusRows`, harbor-results `isDirectory`,
+// commands/terminal `defaultCanWriteDir`) were ALSO `catch { return []|false }`
+// fail-open masks, so binding them retires 3 units here too. Pinned to the live
+// prod count so the improvement cannot erode.
+const CATCH_RETURN_EMPTY_BASELINE = 105
 // Re-measured 2026-06-17 (RFC jun-17 LSP warm backend): +1 for
 // `startBackgroundLspPrewarm` in agent/lsp-bridge.ts — a fire-and-forget
 // session-start prewarm whose failure is a documented best-effort skip (the

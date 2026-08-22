@@ -1,0 +1,65 @@
+id: exfil-scouting-detector
+title: jun-6 exfil-rail (c) — exfil-scouting sequence detector + taxonomy line
+section: 3
+subsystem: Exfil-prevention enforcement — mechanical teeth behind the Data-Exfil taxonomy
+order: 481
+maturity: L3
+status: new
+ui_surfaces: [cli]
+monitoring: integrated
+modes: [interactive, headless, batch, daemon, ide, ci-bot]
+configurable: integrated
+config_refs:
+  env: [QUANTA_EXFIL_SCOUTING, QUANTA_EXFIL_SCOUTING_K]
+owners: ["@songmin"]
+labels: [surface:core, security, security-touched, absorbed:claude]
+depends_on: [network-egress-proxy, auto-mode-classifier]
+surface_integration:
+  cli: full
+  web: missing
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 5/5 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "advisory signal is a pure seam (host-binding surfacing is a noted follow-up, not wired) and the taxonomy line is appended to the LLM prompt; nothing reaches the browser via a bridged event"
+purpose: |
+  비할당(allowlist 부재) 엔드포인트들(webhook sink, file-share, DNS resolver)을 연쇄
+  탐침하는 시퀀스를 "exfil 준비"로 탐지(RFC jun-6-exfil-egress-rails (c), Claude CLI
+  "Exfil Scouting" 흡수). 두 부분: (1) 순수 `detectScouting(decisionLog, {threshold K})`
+  (`src/runtime/network-proxy/scouting.ts`)가 프록시의 기존 append-only deny-log 위를
+  읽어 DISTINCT 거부 호스트 수가 K 이상이면 ADVISORY `ScoutingSignal` 발화 — 새 인터셉션
+  없음(프록시가 이미 모든 deny 를 record). (2) classifier 에 verbatim taxonomy 라인
+  추가(`withExfilScoutingTaxonomy`, ON 일 때만 prompt 에 append — OFF ⇒ byte-identical
+  prompt). FALSE-POSITIVE 규율: K 는 REQUIRED 노브(매직넘버 없음 — no-heuristics);
+  DISTINCT 호스트만 카운트(같은 호스트 K회 재시도 미발화); ADVISORY 힌트일 뿐 HARD
+  auto-deny 아님(사용자가 allowlist 추가로 해소). DEFAULT-OFF byte-identical.
+evidence:
+  code:
+    - src/runtime/network-proxy/scouting.ts
+    - src/runtime/network-proxy/exfil-scouting-gate.ts
+    - src/permission/classifier.ts
+    - src/runtime/network-proxy/index.ts
+    - src/shared/runtime-config.ts
+  adrs: [489]
+  tests:
+    unit:
+      - tests/unit/exfil-scouting-hellgate.test.ts
+    integration: []
+    contract: []
+knobs:
+  - name: QUANTA_EXFIL_SCOUTING
+    default: 'undefined'
+    purpose: Strict opt-in (`=== "1"`). OFF 면 `detectScouting` 미호출 + scouting taxonomy 라인이 assembled prompt 에서 omit(byte-identical prompt + behavior). ON 이면 deny-log 위 advisory 탐지 활성 + verbatim taxonomy 라인 append.
+  - name: QUANTA_EXFIL_SCOUTING_K
+    default: 'undefined'
+    purpose: 임계 K(양의 정수) — CONFIGURABLE 노브, 하드코딩 default 없음(no-heuristics rule, 실제 probe-burst 코퍼스에서 calibrate). 부재/무효 ⇒ undefined ⇒ EXFIL_SCOUTING=1 이어도 탐지기 inert(byte-identical).
+deliberate_hold: null
+notes: |
+  설계/증명: RFC `docs/plans/jun-6-exfil-egress-rails.md` §4.3 (✅ IMPLEMENTED jun-06).
+  ADVISORY-only 출시(RFC §7 (c) — HARD auto-deny 는 너무 공격적이라 의도적 보류).
+  탐지기는 순수 read-only aggregate(소켓 미오픈, clock/random 미사용, 입력 미변경).
+  no-false-positive: `detectScouting` 가 DISTINCT 거부 호스트만 카운트 —
+  같은 호스트 K회(retry loop)/K allowlisted 호스트/단일 거부 호스트 모두 null
+  (`exfil-scouting-hellgate.test.ts` 봉인). prose 라인은 ON 일 때만 prompt 진입
+  (`withExfilScoutingTaxonomy(base, false) === base` byte-identity 봉인).
+  host-binding follow-up: deny-log → classify-port advisory 표면화 배선(현재 순수 seam).

@@ -1,0 +1,56 @@
+id: mutating-tool-table-coverage
+title: MUTATING_TOOL_TABLE drift closeout (12 caller-wire tools + agent.isReadOnly fix)
+section: 3
+subsystem: Plan-mode dispatch seam (ADR-0036)
+order: 4
+maturity: L4
+status: stable
+ui_surfaces: [cli]
+monitoring: integrated
+telemetry_keys: ["quanta.tool.call.status"]
+modes: [interactive, headless]
+configurable: integrated
+owners: ["@songmin"]
+labels: [surface:cli, security-touched, tier:1, slice:S2]
+depends_on: [agent, assert-never-exhaustiveness, byte-stable-string-comparator, errors-helper-fix, runtime-config-ssot]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 2/2 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "pure internal dispatch guard preventing UnknownToolError; no user-visible UI affordance on any surface"
+purpose: |
+  Closes the silent drift between MUTATING_TOOL_TABLE and the caller-wire tool
+  registry. Twelve previously-missing entries (gh_pr_comment/create/auto_merge,
+  memory_write/update, branch_search, task_stop, request_plan_exit, agent,
+  Skill, ToolSearch, web_search, read_image_url) now carry permanent classifications
+  so plan-mode dispatch never trips UnknownToolError regardless of which
+  AgentConfig slots a host wires. Adds four new MutatingToolKind variants
+  (memory_mutating / subagent_spawn / subagent_control / plan_control) to keep
+  the typed deny payload specific. Also fixes agent.isReadOnly() — previously
+  hardcoded to true (a lie — spawning a child agent has unbounded side effects
+  via its own tools), now correctly returns false so inferToolTier routes to
+  always-confirm instead of silently bypassing to none.
+evidence:
+  code:
+    - src/agent/mode.ts
+    - src/subagent/agent-tool.ts
+  adrs:
+    - docs/decisions/0036-plan-mode-dispatch-seam-block.md
+  tests:
+    unit:
+      - tests/unit/mode-mutating-table-coverage-hellgate.test.ts
+      - tests/unit/mode-mutating-table.test.ts
+      - tests/unit/plan-mode-dispatch-block-hellgate.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  S2 slice. Read-only entries (gh_pr_view/list/blame/review_diff, gh_issue_view,
+  gh_check_status, memory_search, task_output) added in the same change so the
+  cross-check covers BOTH directions of drift. callerWireToolNames in the
+  existing mode-mutating-table cross-check extended (not gutted) with the new
+  names — same allowlist convention as shadow_* / subagent_fork / budget_status.

@@ -1,0 +1,77 @@
+id: llm-multicloud-provider-router
+title: Multi-cloud provider router (CLAUDE_CODE_USE_* env mirror + precedence ladder)
+section: 8
+subsystem: LLM provider seam — multi-cloud routing
+order: 1
+maturity: L2
+status: stable
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [n-a]
+configurable: integrated
+owners: ["@songmin"]
+labels: ["surface:core", "multi-cloud", "adr-0163"]
+depends_on: [llm-factory]
+config_refs:
+  env:
+    - CLAUDE_CODE_USE_BEDROCK
+    - CLAUDE_CODE_USE_VERTEX
+    - CLAUDE_CODE_USE_FOUNDRY
+    - CLAUDE_CODE_USE_MANTLE
+    - ANTHROPIC_BEDROCK_BASE_URL
+    - ANTHROPIC_VERTEX_BASE_URL
+    - ANTHROPIC_FOUNDRY_BASE_URL
+    - ANTHROPIC_API_KEY
+    - OPENAI_API_KEY
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 1/2 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "pure internal provider-resolution primitive (env precedence ladder, ui_surfaces n-a), no UI affordance"
+purpose: |
+  `resolveProviderWithRouter(input)` is the 7-layer precedence ladder that picks the
+  active `LlmProvider` from explicit caller arg + `CLAUDE_CODE_USE_*` (claude-cli
+  convention) + `ANTHROPIC_*_BASE_URL` (ADR-0139 convention) + chatgpt-oauth disk
+  probe + ANTHROPIC_API_KEY + OPENAI_API_KEY + default. Conflict policy: simultaneous
+  `CLAUDE_CODE_USE_*` keys throw `ProviderConflictError` (no silent pick — cloud
+  transports are mutually exclusive, $-bill surprise). Strict truthy parser accepts
+  {1,true,yes} case-insensitive; "2"/"0"/"" are FALSE. Pure function — no I/O except
+  the port-injected hasChatgptOAuthToken probe. The new `LlmProvider` union names
+  every transport AND every vendor in one place (anthropic / openai / chatgpt-oauth /
+  bedrock / vertex / foundry / mantle); `ProviderCredentials` discriminator
+  classifies WHERE the credential lives (env / file / metadata-service / vault) so
+  downstream code (OAuth refresh lock, OIDC federation, GH rotation) routes
+  correctly without re-deriving from provider name.
+evidence:
+  code:
+    - src/llm/provider-router.ts
+    - src/llm/provider-types.ts
+  adrs:
+    - docs/decisions/0163-multicloud-oauth-lock.md
+  tests:
+    unit:
+      - tests/unit/llm-provider-router-hellgate.test.ts
+    integration: []
+    contract: []
+knobs:
+  - name: CLAUDE_CODE_USE_BEDROCK
+    default: 'undefined'
+    purpose: '(no description)'
+  - name: CLAUDE_CODE_USE_VERTEX
+    default: 'undefined'
+    purpose: '(no description)'
+  - name: CLAUDE_CODE_USE_FOUNDRY
+    default: 'undefined'
+    purpose: '(no description)'
+  - name: CLAUDE_CODE_USE_MANTLE
+    default: 'undefined'
+    purpose: '(no description)'
+deliberate_hold: null
+notes: |
+  L4: 24-test hellgate covers precedence, conflict, truthy parser, empty-string,
+  unknown explicit fall-through, env independence. Default-OFF: absent env ⇒
+  legacy paths (factory.ts pickProvider) stay exclusive. Mantle is in the union;
+  the adapter is a Phase-1 stub (separate yaml).

@@ -1,0 +1,67 @@
+id: runner-persist-turn
+title: persistTurn — per-turn save plumbing (path-mode + id-mode)
+section: 6
+subsystem: surface-agnostic 오케스트레이션 드라이버
+order: 116
+maturity: L4
+status: new
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [interactive, headless]
+configurable: integrated
+config_refs:
+  env: ["QUANTA_STATE_PATH"]
+  cli: ["--state", "--resume", "--new-session"]
+owners: ["@songmin"]
+labels: ["surface:core", "tier:1"]
+depends_on: [prompt-source-payload-widening, runner-run-interactive, assemble-config, repl-code-smell-cleanup, runner-resume-fsm]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 4/5 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "pure internal per-turn save primitive, no user-visible affordance on any surface"
+purpose: |
+  CLI REPL `turn` 클로저의 inline save 블록을 surface 무관 슬라이스로 verbatim
+  추출. 두 개의 독립 default-OFF 저장 경로를 하나의 진입점으로 묶는다:
+
+    1. `state: string | undefined` (path-mode)
+       — `--state <p>` / `QUANTA_STATE_PATH` 세트 시 `saveSession(state, ...)`
+       으로 legacy transcript JSON 작성. 미세트 ⇒ no-op.
+
+    2. `idMeta: SessionMeta | undefined` (id-mode)
+       — resume FSM 이 id-mode 로 진입 했을 때만 세트. 세트 시 매 turn 후
+       `saveSessionById(idMeta, payload)` 로 자동 저장 — `quanta --resume <id>`
+       가 별도 `--state` 없이 자체 영구화 되도록.
+
+  두 게이트 모두 OFF ⇒ 함수 전체가 no-op (zero I/O). 새 branch ZERO —
+  legacy CLI 블록과 정확히 동일한 두-개-if 모양 보존. `apps/cli/session-io.ts`
+  는 본 함수를 re-export 해서 기존 callsite (`repl.ts`, 유닛 테스트) 가 변경
+  없이 동일 진입점 도달.
+
+  id-mode 자동저장 의식적으로 silent (slog 미발화) — REPL 안에서 매 turn 마다
+  로그가 발생하면 너무 chatty.
+evidence:
+  code:
+    - src/runner/orchestrate/persist-turn.ts
+    - src/runner/orchestrate/index.ts
+    - src/runner/index.ts
+    - src/apps/cli/session-io.ts
+    - src/apps/cli/repl.ts
+  adrs: []
+  tests:
+    unit:
+      - tests/unit/cli/repl-extract-shape.test.ts
+      - tests/unit/runner-slice-boundary.test.ts
+    integration:
+      - tests/integration/resume-e2e.test.ts
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  Slice boundary: Layer-2 (`@/runner/orchestrate`) — `@/agent` + `@/llm` +
+  `@/session` 만 의존. CLI 의 path-mode `state` 와 V2 id-mode `idMeta` 가
+  논리적으로 독립이라는 점을 타입 경계 (`undefined` 두 슬롯) 으로 강제 —
+  surface 가 둘 다 켜면 두 곳 모두 저장 (이전 inline 거동 동일).

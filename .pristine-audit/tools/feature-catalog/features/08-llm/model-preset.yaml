@@ -1,0 +1,65 @@
+id: model-preset-sticky-resolver
+title: opusplan-style sticky model PRESET registry + resolver (curated multi-role recipe)
+section: 8
+subsystem: LLM — named multi-role model preset (sticky per-run binding)
+order: 907
+maturity: L2
+status: new
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [n-a]
+configurable: n-a
+owners: ["@songmin"]
+labels: [surface:core, tier:core, absorbed:claude, default-off, export-only]
+depends_on: [role-based-model-override, sticky-model-per-mode]
+surface_integration:
+  cli: na
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "reachable from src/apps/cli/index.ts import graph — the `/presets` slash (presets-slash-sticky-model) is the FIRST live consumer: surface-compose.ts mints a StickyPresetResolver via createStickyPresetResolver and threads it into ctx.presets AND (wrapped) into AgentConfig.roleModelResolver. The registry/resolver primitives stay pure; Default-OFF byte-identity holds because an UNSELECTED resolver returns the caller fallback verbatim."
+    web: "no web bridge consumer; pure in-memory resolver with no persistence and no surface affordance on any plane."
+purpose: |
+  A model preset is a NAMED, curated bundle mapping logical roles/phases to
+  concrete models, applied STICKILY for a run — Claude Code's `opusplan` is the
+  canonical example (Opus for plan-writer/reviewer, Sonnet for executor/explorer
+  /default). The operator picks a preset BY NAME and the choice persists until
+  cleared.
+
+  Deliberately DISTINCT from the two pre-existing model-selection axes, and
+  composable with both: `role-model-override` (ADR-0256) stores AD-HOC per-role
+  picks the user set individually; sticky-model (ADR-0212) makes the user's ONE
+  chosen model persist across turns; a preset binds DIFFERENT models to
+  different roles within the run. A composition root can layer them — the preset
+  supplies the per-role default, which an explicit role override can still beat.
+
+  V1 surface (this slice): a pure preset registry + a sticky resolver, reusing
+  the `Role`/`ModelId` axis from role-model-override (no second enum).
+    - `BUILTIN_MODEL_PRESETS` — FROZEN catalog (`opusplan` built in) so a
+      consumer cannot mutate the shared catalog by reference.
+    - `resolveModelPreset(name, extra)` / `listModelPresets(extra)` — caller
+      `extra` entries SHADOW a built-in of the same name (caller-supplied wins);
+      an unknown name ⇒ `undefined` (NO-THROW; names arrive type-erased).
+    - `resolveModelForRole(preset, role)` — falls back to `defaultModel` for any
+      unmapped (or empty/type-erased) role.
+    - `createStickyPresetResolver(extra)` — remembers ONE selected preset;
+      `select()` returns a typed `{ok:false}` (PresetError) on an unknown name
+      and leaves a good selection UNCHANGED; `resolve(role, fallback)` returns
+      the caller's fallback VERBATIM when no preset is selected (Default-OFF
+      byte-identity). Pure in-memory; persistence is a separate concern.
+evidence:
+  code:
+    - src/llm/model-preset.ts
+  adrs: []
+  tests:
+    unit:
+      - tests/unit/llm/model-preset-hellgate.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  Model ids are the current canonical slugs (claude-api skill model table).
+  PresetError subclasses QuantaError so future rejection codes attach without a
+  breaking shape.

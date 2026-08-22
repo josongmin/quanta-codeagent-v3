@@ -34,13 +34,13 @@
  *
  * Pure: bytes in, bytes + verdict out. No Docker, no filesystem, no clock.
  */
+
 import { sha256Hex } from "@/apps/bench/promax/provenance"
+import { errMessage } from "@/shared"
+import { isDigestPinnedReference } from "./image-freeze"
 
 /** The one field a campaign golden may differ from its source on. */
 export const CAMPAIGN_GOLDEN_MUTABLE_FIELD = "image_name"
-
-/** A digest-addressed image reference: `<name>@sha256:<64 lowercase hex>`. */
-const DIGEST_REFERENCE_RE = /^[^\s@]+@sha256:[0-9a-f]{64}$/
 
 /** Per-instance replacement: the digest-pinned reference the freeze resolved. */
 export interface CampaignGoldenPin {
@@ -109,7 +109,7 @@ const parseRows = (
       failures: [
         {
           code: "source_unparseable",
-          message: `${label} is not valid JSON: ${err instanceof Error ? err.message : String(err)}`,
+          message: `${label} is not valid JSON: ${errMessage(err)}`,
         },
       ],
     }
@@ -206,7 +206,7 @@ export const deriveCampaignGolden = (
       rows.push(row)
       return
     }
-    if (!DIGEST_REFERENCE_RE.test(pinned)) {
+    if (!isDigestPinnedReference(pinned)) {
       failures.push({
         code: "pin_not_digest",
         message: `instance "${instanceId}" pin "${pinned}" is not digest-addressed (expected \`name@sha256:<64 hex>\`)`,
@@ -298,6 +298,16 @@ export interface GoldenStructuralDiffOk {
   readonly changes: readonly GoldenFieldChange[]
   /** Everything else. A legal derivation has NONE. */
   readonly violations: readonly GoldenDiffViolation[]
+  /**
+   * instanceId → the `image_name` the DERIVED document actually carries.
+   *
+   * Carried because a diff reports DELTAS, and the most dangerous derivation
+   * defect leaves no delta at all: a row whose mutable tag was never replaced is
+   * byte-identical to its source, so `changes` and `violations` are both empty
+   * while the campaign is unpinned. {@link assertGoldenDerivationIsImageOnly}
+   * judges the derived VALUES, which is only possible if they survive to here.
+   */
+  readonly derivedImageNames: ReadonlyMap<string, string>
 }
 
 export type GoldenStructuralDiff = GoldenStructuralDiffOk | CampaignGoldenRejected
@@ -335,6 +345,7 @@ export const diffGoldenDocuments = (
     return {
       ok: true,
       changes: [],
+      derivedImageNames: new Map(),
       violations: [
         {
           code: "row_count_changed",
@@ -349,6 +360,7 @@ export const diffGoldenDocuments = (
 
   const changes: GoldenFieldChange[] = []
   const violations: GoldenDiffViolation[] = []
+  const derivedImageNames = new Map<string, string>()
 
   source.rows.forEach((rawSource, index) => {
     const rawDerived = derived.rows[index]
@@ -373,8 +385,14 @@ export const diffGoldenDocuments = (
       })
       return
     }
+    const derivedImage = rawDerived[CAMPAIGN_GOLDEN_MUTABLE_FIELD]
+    if (nonBlank(derivedImage)) derivedImageNames.set(instanceId, derivedImage)
+    // OWN properties only. `key in obj` walks Object.prototype, so a row whose
+    // keys are `constructor` / `toString` / `hasOwnProperty` / `valueOf` — all
+    // legal JSON keys — reported as present on BOTH sides no matter what either
+    // document said, and an added or dropped one evaded the diff entirely.
     for (const key of Object.keys(rawDerived)) {
-      if (!(key in rawSource)) {
+      if (!Object.hasOwn(rawSource, key)) {
         violations.push({
           code: "field_added",
           index,
@@ -385,7 +403,7 @@ export const diffGoldenDocuments = (
       }
     }
     for (const key of Object.keys(rawSource)) {
-      if (!(key in rawDerived)) {
+      if (!Object.hasOwn(rawDerived, key)) {
         violations.push({
           code: "field_removed",
           index,
@@ -418,7 +436,60 @@ export const diffGoldenDocuments = (
     }
   })
 
-  return { ok: true, changes, violations }
+  return { ok: true, changes, violations, derivedImageNames }
+}
+
+/**
+ * Judge the derived VALUES against the pins the image freeze resolved.
+ *
+ * The structural half of the gate answers "was anything but `image_name`
+ * touched?". This half answers the question the ticket actually asks — "is every
+ * row now DIGEST-PINNED, at the digest this campaign froze?" — and it is a
+ * separate walk because the two failures have disjoint shapes: a tag→tag swap is
+ * a permitted-looking delta, and an unreplaced tag is no delta at all.
+ */
+const auditDerivedPins = (
+  derivedImageNames: ReadonlyMap<string, string>,
+  pins: readonly CampaignGoldenPin[],
+): readonly string[] => {
+  const problems: string[] = []
+  const pinByInstance = new Map<string, string>()
+  for (const pin of pins) pinByInstance.set(pin.instanceId, pin.pinnedReference)
+
+  for (const [instanceId, derived] of derivedImageNames) {
+    const pinned = pinByInstance.get(instanceId)
+    if (pinned === undefined) {
+      problems.push(
+        `campaign-golden row "${instanceId}" carries \`${CAMPAIGN_GOLDEN_MUTABLE_FIELD}\` "${derived}" but the image ` +
+          "freeze resolved NO digest for it — an instance the freeze never covered may not be graded from this golden",
+      )
+      continue
+    }
+    if (!isDigestPinnedReference(derived)) {
+      problems.push(
+        `campaign-golden row "${instanceId}" is not digest-pinned: \`${CAMPAIGN_GOLDEN_MUTABLE_FIELD}\` is "${derived}", ` +
+          "a MUTABLE TAG. The pinned evaluator runs `docker pull <image_name>` itself, so a tag here lets the same " +
+          `campaign execute different image content between runs (expected "${pinned}")`,
+      )
+      continue
+    }
+    if (derived !== pinned) {
+      problems.push(
+        `campaign-golden row "${instanceId}" pins "${derived}", but the image freeze resolved "${pinned}" — ` +
+          "the golden and the freeze receipt would send the evaluator to different image content",
+      )
+    }
+  }
+
+  for (const pin of pins) {
+    if (!derivedImageNames.has(pin.instanceId)) {
+      problems.push(
+        `the image freeze pinned "${pin.instanceId}" to "${pin.pinnedReference}", but the derived campaign golden ` +
+          `carries no \`${CAMPAIGN_GOLDEN_MUTABLE_FIELD}\` for it`,
+      )
+    }
+  }
+  return problems
 }
 
 /**
@@ -428,17 +499,28 @@ export const diffGoldenDocuments = (
  * Returning strings rather than throwing keeps it usable both as a hard gate and
  * as a receipt field, and an unparseable document is itself a problem rather
  * than an exception a caller could swallow.
+ *
+ * `pins` is REQUIRED. The gate used to take the diff alone and classify ANY
+ * `image_name` delta as permitted, which made it return CLEAN for a tag→tag
+ * swap — the one substitution that defeats the entire derivation. The pins are
+ * the image freeze's resolved digests (`ProMaxImageRecord.registry_repo_digest`),
+ * so passing them is what ties the shipped golden to the receipt that justifies
+ * it rather than to the mere fact that a field changed.
  */
 export const assertGoldenDerivationIsImageOnly = (
   diff: GoldenStructuralDiff,
+  pins: readonly CampaignGoldenPin[],
 ): readonly string[] => {
   if (!diff.ok) {
     return diff.failures.map((f) => `campaign-golden diff refused (${f.code}): ${f.message}`)
   }
-  return diff.violations.map(
-    (v) =>
-      `campaign-golden derivation changed more than \`${CAMPAIGN_GOLDEN_MUTABLE_FIELD}\`: ` +
-      `${v.code} at row ${v.index} ("${v.instanceId}") field \`${v.field}\` — ${v.detail}. ` +
-      `${GOLDEN_DIFF_VIOLATION_REASONS[v.code]}`,
-  )
+  return [
+    ...diff.violations.map(
+      (v) =>
+        `campaign-golden derivation changed more than \`${CAMPAIGN_GOLDEN_MUTABLE_FIELD}\`: ` +
+        `${v.code} at row ${v.index} ("${v.instanceId}") field \`${v.field}\` — ${v.detail}. ` +
+        `${GOLDEN_DIFF_VIOLATION_REASONS[v.code]}`,
+    ),
+    ...auditDerivedPins(diff.derivedImageNames, pins),
+  ]
 }

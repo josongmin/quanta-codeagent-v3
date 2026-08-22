@@ -93,7 +93,7 @@ const rulesForPosture = (envPosture: PromptContext["envPosture"]): readonly Prom
  *  from the atom graph — the frozen-posture projection of POSTURE_ATOMS. */
 export const CORE_RULES: readonly PromptRule[] = rulesForPosture("frozen")
 
-/** The `owned` posture rule list (RFC jul-2 TB levers /01) — install-permitted,
+/** The `owned` posture rule list (TB21-06 TC-6) — install-permitted,
  *  a working env is the graded deliverable. Derived: the owned-posture projection.
  *  Universal rails are the SAME objects as in {@link CORE_RULES}; the env atoms
  *  (R-ENV-OWNED / R-INSTALL-THRASH / R-ENV-DONE) + the owned R-NO-SHIM variant

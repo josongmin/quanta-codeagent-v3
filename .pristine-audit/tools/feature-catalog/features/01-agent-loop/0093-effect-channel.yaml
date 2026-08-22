@@ -1,0 +1,57 @@
+id: effect-channel
+title: EffectChannel — relocatable effect boundary (ADR-0093 M1 keystone)
+section: 1
+subsystem: Effect boundary (ADR-0093)
+order: 93
+maturity: L5
+status: stable
+ui_surfaces: [cli]
+monitoring: integrated
+telemetry_keys: [quanta.tool.call.status]
+modes: [n-a]
+configurable: n-a
+owners: ["@songmin"]
+labels: [surface:core, tier:core]
+depends_on: [agent-dispatch-core, agent-loop-branch-hardening, mode-posture-hitl-4-tier-permission-policy-harddeny-redundan, secret-redaction-content-plane, 183-safety-net-green]
+config_refs:
+  env: []
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 2/2 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "pure internal effect-boundary abstraction over registry.run, no UI affordance on any surface"
+purpose: |
+  Cursor의 cursor-agent-exec 분리 구조적 교훈 흡수 — 오케스트레이션 평면(permission/HITL/
+  plan-exit/hook)과 효과 평면(`registry.run`)을 typed `ToolRequest`/`ToolResultEnvelope`
+  oneof로 격리. 같은 콜 사이트에 LocalEffectChannel(in-proc, M1 default) / Sandbox
+  EffectChannel(Phase 2) / RemoteEffectChannel(future) 모두 plug → 로프는 substrate를
+  알 필요 없음(relocatable). 계약 5개: (1) no-throw — executor 예외도 `{ok:false}`로
+  정규화, (2) duration 측정은 채널 내부, (3) signal 전파, (4) byte-identical to current
+  dispatch try/catch contract, (5) 정규화는 채널이 / 리덕션·typed-failure·evidence
+  flatten은 dispatch 평면 유지(`dispatchToolInner`가 envelope을 `DispatchResult`로 래핑).
+evidence:
+  code:
+    - src/agent/effect-channel.ts
+    - src/agent/dispatch.ts
+  adrs: [93]
+  tests:
+    unit:
+      - tests/unit/agent/effect-channel.test.ts
+      - tests/unit/smoke-battery.test.ts
+      - tests/unit/dispatch.test.ts
+    integration:
+      - tests/smoke/index.ts
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  2026-05-22 round shipped (module). 2026-05-23 L3→L4 — dispatch.ts execute()를
+  LocalEffectChannel 경유로 wire(byte-identical: QuantaError/toError(e).message
+  동일 어구, durationMs 채널 내부). 2026-05-23 L4→L5 — 실 LLM smoke battery
+  13 시나리오(single/medium/tikitaka)가 모두 dispatch.ts execute()를 거치므로
+  채널을 transitive로 exercise. tier-0 replay + tier-1 live(녹화된 실 모델 응답
+  replay)가 채널의 no-throw/durationMs/normalize 계약을 매 dispatch 콜마다 검증.
+  Phase 2 SandboxEffectChannel 추가 시 같은 콜 사이트 채널 생성자만 교체.

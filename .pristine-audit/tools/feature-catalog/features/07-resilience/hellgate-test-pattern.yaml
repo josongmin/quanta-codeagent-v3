@@ -1,0 +1,66 @@
+id: hellgate-test-pattern
+title: hellgate test pattern — 적대적 회귀 봉인 (`tests/unit/*-hellgate.test.ts`)
+section: 7
+subsystem: 회귀 봉인 testing infra (quanta-wins 축의 적대 케이스 sealing)
+order: 70
+maturity: L2
+status: stable
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [n-a]
+configurable: static
+owners: ['@songmin']
+labels: [surface:core, resilience-primitive, absorbed:claude-code, absorbed:agentless]
+depends_on: [git-write-protection, shadow-odb-rewind, subagent-6-tools]
+config_refs:
+  env: [QUANTA_FS_JAIL]
+surface_integration:
+  cli: na
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "no src evidence (pure docs/tooling/tests) — no interactive-CLI code"
+    web: "pure regression-test infra, no UI affordance on any surface"
+purpose: |
+  "이김(quanta-wins)" 또는 "절대 깨면 안 되는" 축을 적대적(adversarial)
+  케이스로 봉인하는 테스트 패턴. 일반 unit test와 분리된 `*-hellgate.test.ts`
+  네이밍으로 grep-가능하고, 한 축당 한 파일로 응집된다. 각 hellgate 배터리는
+  permission boundary (fs-jail / git-write-protection / harddeny), agent loop
+  invariant (recovery / streaming-dispatch / verify-guard), 도구 surface
+  (apply_patch / git-tools / gh-pr-tools / subagent-6-tools), 통합 케이스
+  (memory / session-envelope / shadow-odb-rewind / branch-search) 등 quanta가
+  경쟁사 분석 후 "여기서는 절대 회귀하지 않는다"고 선언한 영역을 1개씩
+  덮는다. 현재 40+ 배터리, 700+ 적대 케이스로 매 PR이 회귀 시 즉시 실패.
+evidence:
+  code:
+    - tests/unit/fs-jail-hellgate.test.ts
+    - tests/unit/verify-guard-hellgate.test.ts
+    - tests/unit/recovery-hellgate.test.ts
+    - tests/unit/streaming-dispatch-hellgate.test.ts
+    - tests/unit/repo-rules-tree-hellgate.test.ts
+    - tests/unit/git-tools-hellgate.test.ts
+    - tests/unit/gh-pr-tools-hellgate.test.ts
+    - tests/unit/subagent-6-tools-hellgate.test.ts
+    - tests/unit/shadow-odb-hellgate.test.ts
+    - tests/unit/branch-search-anchor-hellgate.test.ts
+    - tests/unit/memory-hellgate.test.ts
+    - tests/unit/session-envelope-hellgate.test.ts
+    - tests/unit/prompt-sections-hellgate.test.ts
+  adrs: []
+  tests:
+    unit: []
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  Evidence.code는 hellgate 패턴의 대표 샘플 — 실제 배터리는 더 많음
+  (find pattern: `tests/unit/*-hellgate.test.ts`). 일반 단위 테스트는 happy
+  path + 자명한 엣지케이스 중심이고, hellgate는 "공격자 시점/실패 모드"
+  중심으로 분리 운영. ADR/메모리 corpus의
+  `may-22-quanta-wins-hellgate-verification` 회기에서 17 배터리 / 276
+  적대 케이스로 quanta-comparison 이긴 축들을 1차 봉인 (이후 git-axis
+  R1/R2에서 9 추가 → 24+).
+
+  L5→L2: no test imports evidence.code paths

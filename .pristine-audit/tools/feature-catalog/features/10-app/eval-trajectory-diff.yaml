@@ -1,0 +1,60 @@
+id: eval-trajectory-diff
+title: eval Tier 3 — structural projection diff (LCS over event kinds)
+section: 10
+subsystem: eval 앱 — Tier 3 replay 비교
+order: 88
+maturity: L4
+status: stable
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [headless, batch]
+configurable: static
+owners: ["@songmin"]
+labels: ["surface:bench"]
+depends_on: [eval-tier3-trajectory, eval-trajectory-meta-source, assert-never-exhaustiveness, byte-stable-string-comparator, errors-helper-fix]
+surface_integration:
+  cli: missing
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "src evidence not reachable from the interactive CLI entry (src/apps/cli/index.ts) — wired only into other apps (eval/bench/probe/headless) or unwired"
+    web: "Pure deterministic comparator over event kinds, no direct UI affordance on any surface."
+purpose: |
+  두 `TrajectoryEvent` 스트림을 PROJECTION 기반으로 비교 (raw equality 아님).
+  설계 결정 (each = contract):
+  (1) PROJECTION over EQUALITY: timestamp/monotonic ns/span id/assistant token
+      stream/llm usage 등 producer가 deterministic하게 pin 못 하는 필드를 strip
+      → `(kind, key)` tuple로 투영.
+  (2) SEQUENCE-AWARE: 투영 시퀀스에 LCS 적용 → 한 이벤트 insert/delete가
+      cascade misalignment 없이 small diff로 보고.
+  (3) NO LLM: deterministic + unit-testable. Subjective quality는
+      `compare/pairwise-judge`에 둠.
+  비교 대상 kinds (COMPARED_KINDS): turn_start, tool_call, tool_result, error,
+  recovery, session_end. 그 외 (assistant_text 델타, llm_request, llm_usage,
+  sandbox/verify)는 too noisy로 elide. `tool_call` key는 name + input keys-only
+  fingerprint (values는 의도적으로 ignore — path/query 텍스트 noise). `DiffSummary`
+  의 `matched/divergedEvents/originalLength/replayLength`를 `replay.ts/verdictFromDiff`가
+  pass/partial/fail ladder로 변환 (10% divergence 임계).
+evidence:
+  code:
+    - src/apps/eval/trajectory/diff.ts
+    - src/apps/eval/trajectory/replay.ts
+    - src/apps/eval/trajectory/index.ts
+    - src/apps/eval/trajectory/source.ts
+    - src/apps/eval/trajectory/meta.ts
+    - src/apps/eval/trajectory/classifier.ts
+    - src/apps/eval/trajectory/freeze.ts
+  adrs: []
+  tests:
+    unit:
+      - tests/unit/eval-trajectory-diff.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  projection level은 의도적으로 abstract — 너무 strict하면 provider 비결정성에
+  brittle, 너무 loose하면 real regression 누락. 현재 mix는 fixture corpus에서
+  녹는지 보면서 calibrated. 한 이벤트의 key가 동일해도 input value 변경은
+  ignored — value-level diff는 향후 별도 lens가 필요하면 분리해서 흡수.

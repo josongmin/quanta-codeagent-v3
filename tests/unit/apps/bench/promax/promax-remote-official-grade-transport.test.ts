@@ -222,7 +222,7 @@ describe("pool — a chunk graded ONLY by the official grader is not 'box died'"
     const acc = createChunkCoverageAccumulator()
     accumulateChunkCoverage(acc, { officialGrade: CHUNK_A })
     accumulateChunkCoverage(acc, { officialGrade: CHUNK_B })
-    const result = chunkCoverageResult(acc)
+    const result = chunkCoverageResult(acc, CHUNK)
     // …with ZERO legacy verdicts, which is exactly the ProMax shape
     expect(result.resolved).toBeUndefined()
     expect(result.unresolved).toBeUndefined()
@@ -236,7 +236,7 @@ describe("pool — a chunk graded ONLY by the official grader is not 'box died'"
   test("a PARTIAL chunk names exactly the uncovered ids", () => {
     const acc = createChunkCoverageAccumulator()
     accumulateChunkCoverage(acc, { officialGrade: CHUNK_A })
-    const result = chunkCoverageResult(acc)
+    const result = chunkCoverageResult(acc, CHUNK)
     expect(missingInstances(result, CHUNK)).toEqual(["i-3"])
     expect(coverageComplete(result, CHUNK)).toBe(false)
   })
@@ -244,7 +244,7 @@ describe("pool — a chunk graded ONLY by the official grader is not 'box died'"
   test("PAIRED CONTROL — a legacy chunk behaves exactly as before", () => {
     const acc = createChunkCoverageAccumulator()
     accumulateChunkCoverage(acc, { resolved: ["i-1"], unresolved: ["i-2"] })
-    const result = chunkCoverageResult(acc)
+    const result = chunkCoverageResult(acc, CHUNK)
     expect(result.officialGrade).toBeUndefined()
     expect(earnedVerdict(result)).toBe(true)
     expect(missingInstances(result, CHUNK)).toEqual(["i-3"])
@@ -254,7 +254,7 @@ describe("pool — a chunk graded ONLY by the official grader is not 'box died'"
     const acc = createChunkCoverageAccumulator()
     accumulateChunkCoverage(acc, { officialGrade: CHUNK_A })
     accumulateChunkCoverage(acc, { officialGrade: CHUNK_A })
-    const result = chunkCoverageResult(acc)
+    const result = chunkCoverageResult(acc, CHUNK)
     expect(result.officialGrade).toBeUndefined()
     expect(missingInstances(result, CHUNK)).toEqual(["i-1", "i-2", "i-3"])
   })
@@ -322,8 +322,16 @@ describe("relaunch — coverage is receipt-derived, not bucket-derived", () => {
     expect(outcome.officialGrade).toBeUndefined()
     expect(outcome.officialGradeFailures?.map((f) => f.code)).toContain("disposition_duplicated")
     expect(logs.join("\n")).toContain("could NOT be merged")
-    // …and the campaign still names the coverage gap through the legacy path
-    expect(outcome.missing).toEqual(["i-5"])
+    // …and the campaign names the WHOLE gap.
+    //
+    // ⚠️ CORRECTED (aug-22, C2). This used to assert `["i-5"]`, i.e. that i-3 was
+    // covered — on the authority of the two receipts that had just refused to
+    // merge. That is the fabricated-coverage defect: the relaunch retry set
+    // counts a receipt disposition as coverage, and on the refusal path those
+    // dispositions are exactly what has no campaign authority. i-3's only
+    // evidence is a double-grade, so it is missing, and the four legacy buckets
+    // vouch for nothing here (this lane produced no legacy arrays at all).
+    expect(outcome.missing).toEqual(["i-3", "i-5"])
   })
 
   test("a refused merge is SURFACED, never silently downgraded to no-receipt", async () => {

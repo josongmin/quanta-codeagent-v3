@@ -95,14 +95,19 @@ describe("the executor is generic and fail-closed", () => {
     // it (see promax-gold-absence-agent-phase.test.ts), so ordering/quoting is
     // asserted on the phase that actually issues those commands.
     const grader = bootstrap.commands.filter((c) => c.phase === "grader")
+    // aug-22 A-A: the TEARDOWN is bound to the grader call (it runs in that
+    // call's finally), so the recorded sequence is grader-then-teardown. A
+    // teardown with its own call site is a teardown someone forgets.
+    const teardown = bootstrap.commands.filter((c) => c.phase === "teardown")
+    expect(teardown.length).toBeGreaterThanOrEqual(1)
     const ran = await executeFamilyRemoteBootstrap({
       bootstrap,
       phase: "grader",
       ssh: rec.ssh,
       log: () => {},
     })
-    expect(ran).toBe(grader.length)
-    expect(rec.commands).toEqual(grader.map(renderBootstrapCommand))
+    expect(ran).toBe(grader.length + teardown.length)
+    expect(rec.commands).toEqual([...grader, ...teardown].map(renderBootstrapCommand))
     // the pinned COMMIT is what gets checked out, detached, and no branch is named
     const joined = rec.commands.join("\n")
     expect(joined).toContain(`'checkout' '--detach' '${PINNED}'`)
@@ -116,11 +121,20 @@ describe("the executor is generic and fail-closed", () => {
     const rec = recorder(3)
     const bootstrap = promaxBootstrap()
     const grader = bootstrap.commands.filter((c) => c.phase === "grader")
+    const teardown = bootstrap.commands.filter((c) => c.phase === "teardown")
     await expect(
       executeFamilyRemoteBootstrap({ bootstrap, phase: "grader", ssh: rec.ssh, log: () => {} }),
     ).rejects.toBeInstanceOf(FamilyBootstrapError)
-    expect(rec.commands).toHaveLength(3)
-    expect(rec.commands.length).toBeLessThan(grader.length)
+    // The 3 that ran before the failure, and NO later grader precondition…
+    const graderIssued = rec.commands.filter(
+      (c) => !teardown.map(renderBootstrapCommand).includes(c),
+    )
+    expect(graderIssued).toHaveLength(3)
+    expect(graderIssued.length).toBeLessThan(grader.length)
+    // …but the TEARDOWN still ran (aug-22 A-A). A grader phase that died
+    // half-way is EXACTLY when the answer key is left on the box, so a failure
+    // is a reason to tear down, not a reason to skip it.
+    expect(rec.commands.slice(-teardown.length)).toEqual(teardown.map(renderBootstrapCommand))
   })
 
   test("PAIRED CONTROL — no declared bootstrap ⇒ NOT ONE ssh round trip", async () => {

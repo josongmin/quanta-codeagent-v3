@@ -16,6 +16,10 @@
 import { describe, expect, test } from "bun:test"
 import { readFileSync } from "node:fs"
 import { join, basename as pathBasename } from "node:path"
+import {
+  groupRuns as realGroupRuns,
+  instanceIsUnmeasured as realInstanceIsUnmeasured,
+} from "./campaign-rollup"
 import { renderDashboardPage } from "./page"
 import { suiteClientAssets } from "./projectors/registry"
 
@@ -34,11 +38,9 @@ const PAGE = renderDashboardPage({ tracePort: 4318 })
  *  client layer lives in the rendered page. Both are the shipped source. */
 const SERVER_SRC = readFileSync(join(import.meta.dir, "server.ts"), "utf8")
 const SRC = [SERVER_SRC, PAGE].join("\n")
-// campaignKeyOf was extracted to family-partition.ts (genuinely importable; also
-// unit-tested in family-partition.test.ts). The aggregation harness below slices its
-// REAL source from there — `indexOf("const campaignKeyOf =")` lands past the `export `,
-// so the slice transpiles cleanly inside `new Function`.
-const FAMILY_SRC = readFileSync(join(import.meta.dir, "family-partition.ts"), "utf8")
+// campaignKeyOf lives in family-partition.ts and the ROLLUP now lives in
+// campaign-rollup.ts — both ordinary modules, so the harness below no longer
+// slices either out of source text: `groupRuns` is imported and called directly.
 
 /** Pull a `function name(...) { ... }` body out of the source by brace-matching. */
 function extractFn(name: string): string {
@@ -80,6 +82,14 @@ const SUITE_DISPATCH_PRELUDE: readonly string[] = [
   extractEsc(),
   extractFn("suiteOfView"),
   extractFn("suiteView"),
+  // C-D: `renderCards` now takes its "best 캠페인" card from the ONE shared
+  // builder (so the family cards cannot print a rate without its coverage), and
+  // every driver of renderCards needs that dependency in scope.
+  extractFn("bestCampaignCard"),
+  // …and from the ONE shared card-list builder that appends REFUSED artifacts, so
+  // an artifact dropped at the identity boundary cannot leave the denominator
+  // invisibly. Same dependency, same reason: every driver needs it in scope.
+  extractFn("withRefusedCard"),
 ]
 
 const HOSTILE = `</style><script>alert(1)</script>`
@@ -599,22 +609,22 @@ function firstCampaign(runs: unknown[]): Camp {
 }
 
 function loadAgg(): AggModule {
+  // `classifyFail` still lives in server.ts (which cannot be imported — it calls
+  // `Bun.serve` at import), so it is exercised through a source slice. The
+  // ROLLUP no longer needs one: `groupRuns` moved to `campaign-rollup.ts`, an
+  // ordinary module, so these tests now run the SHIPPED function itself rather
+  // than a transpiled copy of its text.
   const ts = [
     sliceExprArrow("const asRecord ="),
     sliceConst("asString"),
-    sliceDecl("const shortId ="),
     sliceConst("RE_RUNNABLE_TERMINATIONS"),
     sliceDecl("function isReRunnableHole"),
     sliceDecl("function classifyFail"),
-    sliceExprArrow("const instanceIsUnmeasured ="),
-    sliceDecl("const campaignKeyOf =", FAMILY_SRC),
-    sliceDecl("const addRunToCampaign ="),
-    sliceDecl("function groupRuns"),
-    "return { classifyFail, groupRuns };",
+    "return { classifyFail };",
   ].join("\n")
   const js = TRANSPILER.transformSync(ts)
-  // campaignKeyOf uses `basename` from node:path — inject it into scope.
-  return new Function("basename", js)(pathBasename) as AggModule
+  const sliced = new Function(js)() as Pick<AggModule, "classifyFail">
+  return { classifyFail: sliced.classifyFail, groupRuns: realGroupRuns as AggModule["groupRuns"] }
 }
 
 // ---------------------------------------------------------------------------
@@ -650,7 +660,6 @@ function loadDispatch(projection: unknown, artifact: unknown = ARTIFACT): Dispat
     sliceConst("RE_RUNNABLE_TERMINATIONS"),
     sliceDecl("function isReRunnableHole"),
     sliceDecl("function classifyFail"),
-    sliceExprArrow("const instanceIsUnmeasured ="),
     sliceExprArrow("const rowBaseOf ="),
     sliceExprArrow("const sweRowsOf ="),
     sliceDecl("const tallyOf ="),
@@ -673,6 +682,7 @@ function loadDispatch(projection: unknown, artifact: unknown = ARTIFACT): Dispat
     "swePresetLabel",
     "projectReport",
     "recordQuarantine",
+    "instanceIsUnmeasured",
     TRANSPILER.transformSync(ts),
   )(
     () => JSON.stringify(artifact),
@@ -680,6 +690,9 @@ function loadDispatch(projection: unknown, artifact: unknown = ARTIFACT): Dispat
     () => "SERVER-SIDE-FALLBACK-LABEL",
     projectReport,
     recordQuarantine,
+    // Moved to campaign-rollup.ts (the rollup is what keys on it); injected here
+    // as the REAL predicate, not a re-implementation.
+    realInstanceIsUnmeasured,
   ) as DispatchProbe["buildRun"]
   return { buildRun, calls, quarantined }
 }
@@ -765,6 +778,17 @@ describe("BFND-03 — server.ts dispatches every artifact through the registry",
     })
     expect(buildRun("/runs/x.report.json", 123)).not.toBeNull()
     expect(quarantined).toEqual([])
+  })
+
+  test("a v2-shaped artifact (trials, NO perInstance) is recorded when refused", () => {
+    // A Terminal 2.1 artifact's per-instance channel is `trials`; it has no
+    // `perInstance` at all. A quarantine gate that only looked for `perInstance`
+    // would drop every malformed 2.1 report silently — which is precisely the
+    // file an operator most needs to see named.
+    const v2ish = { schemaVersion: "terminal-bench-report/v9", trials: [], outcomes: {} }
+    const { buildRun, quarantined } = loadDispatch(null, v2ish)
+    expect(buildRun("/runs/tb-v9.report.json", 1)).toBeNull()
+    expect(quarantined.map((q) => q.file)).toEqual(["/runs/tb-v9.report.json"])
   })
 
   test("a non-report JSON is dropped WITHOUT a quarantine line (not every file is a report)", () => {

@@ -21,8 +21,8 @@
  */
 
 import { randomUUID } from "node:crypto"
-import type { ObjectivePort } from "@/objective"
 import type { RunLedgerPort } from "@/agent/run-ledger"
+import type { ObjectivePort } from "@/objective"
 import { errMessage, logger } from "@/shared"
 import type {
   ApprovalAttributionGap,

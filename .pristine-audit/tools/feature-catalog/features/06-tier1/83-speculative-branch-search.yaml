@@ -1,0 +1,49 @@
+id: speculative-branch-search
+title: branch_search — N-best verifier-prover (speculative branch search)
+section: 6
+subsystem: 투기적 분기 탐색 (Agentless 흡수, ADR-0084)
+order: 83
+maturity: L4
+status: refined
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [n-a]
+configurable: n-a
+owners: ["@songmin"]
+labels: ["surface:core", "tier:1", "absorbed:codex", "absorbed:cursor", "absorbed:agentless"]
+depends_on: [branch-search-verifier-suite, branch-search-isolate-symlink-safe, branch-search-pure-scorer, response-in-progress, fallback-kinds-policy]
+surface_integration:
+  cli: full
+  web: partial
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 9/9 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "model-invoked tool bridges as a generic tool.invoked/tool.completed card (one of the 6 events), but candidate/scoring/winner view is not rendered and losers are OTel-only"
+purpose: |
+  하드 edit를 N개 후보로 격리 워크스페이스에서 병렬 시도 → 닫힌 Verifier 포트(tsc/test/
+  lint/lsp_diag)로 채점 → 순수 Scorer 가중합 + Selector argmax로 winner 선택. 메인 루프는
+  winner만 봄(loser는 OTel span + smoke sidecar). 상용 코딩에이전트(cursor/codex/claude)
+  메인 루프엔 없는 학계 SOTA(Agentless §3 patch sampling/§4 repro-test). 닫힌 포트
+  아키텍처(verifier/scorer/selector/isolator/runCandidate 전부 주입) → 완전 유닛테스트.
+  Agentless 4기법 흡수: 온도 다양화·구문 pre-filter·repro-test 선택·혼합모델 voting.
+evidence:
+  code:
+    - src/agent/branch-search/types.ts
+    - src/agent/branch-search/score.ts
+    - src/agent/branch-search/verify.ts
+    - src/agent/branch-search/isolate.ts
+    - src/agent/branch-search/propose.ts
+    - src/agent/branch-search/search.ts
+    - src/agent/branch-search/seed.ts
+    - src/agent/branch-search/tool.ts
+    - src/agent/branch-search-runner.ts
+    - src/runner/knobs/knobs/branch-search.ts
+  adrs: [84]
+  tests:
+    unit: [tests/unit/branch-search.test.ts]
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: 'isolator는 node_modules 심볼릭 해저드 명시 가드(unlink 링크 먼저, 그 다음 rm). N 하드캡 8(Agentless §6 plateau). winner diff 적용은 호출자 책임 — 오케스트레이터는 부모 워크스페이스 무접촉(negative invariant).'

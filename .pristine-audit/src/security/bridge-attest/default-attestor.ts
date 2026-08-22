@@ -1,0 +1,301 @@
+/**
+ * Default in-process attestor (ADR-0246).
+ *
+ * Implements {@link BridgeAttestor} with:
+ *   - policy-table lookup (action → allow|deny|prompt-user; default = prompt-user on miss)
+ *   - HMAC-SHA256 token mint over `${scope}|${expiresAt}|${nonce}` with a
+ *     16-byte random nonce
+ *   - injectable `clock` for test-time TTL determinism
+ *   - injectable `onEvent` for the 9-event lifecycle stream (default no-op)
+ *   - fail-closed secret validation: construction rejects a missing, blank, or
+ *     shorter-than-32-byte HMAC secret before any token can be minted
+ *
+ * Plane discipline: imports `node:crypto` + `@/shared` ONLY. No
+ * `@/agent`, no `@/permission`, no `@/observability`.
+ *
+ * NO-THROW: `preflight` never throws; internal failures surface as
+ * `{ kind: "deny", reason }` + a `preflight-error` audit event.
+ */
+import { createHmac, randomBytes, timingSafeEqual } from "node:crypto"
+import { errMessage } from "@/shared"
+import type { BridgeAttestor } from "./port"
+import {
+  AttestError,
+  type AttestEvent,
+  type AttestEventSink,
+  type AttestRequest,
+  type AttestResult,
+  attestationScopeFor,
+  type PolicyTable,
+  type StsToken,
+} from "./types"
+
+/**
+ * Constructor options. Policy, clock, and event sink have documented defaults;
+ * signing material is required so this adapter cannot silently mint forgeable
+ * tokens.
+ */
+export interface DefaultAttestorOpts {
+  /** HMAC-SHA256 signing secret. Required and at least 32 UTF-8 bytes. */
+  readonly secret?: string
+  /** action → verdict table. Default `{}` (every action → prompt-user). */
+  readonly policyTable?: PolicyTable
+  /** Injectable clock (epoch-ms). Default `Date.now`. */
+  readonly clock?: () => number
+  /** 9-event stream subscriber. Default no-op (default-OFF). */
+  readonly onEvent?: AttestEventSink
+  /** Maximum accepted age of a remote preflight request. Default 5 minutes. */
+  readonly maxRequestAgeMs?: number
+  /** Maximum accepted future clock skew for a remote preflight. Default 30s. */
+  readonly maxFutureSkewMs?: number
+}
+
+/** Minimum entropy-bearing HMAC key material. SHA-256's 256-bit output is the
+ * security target; accepting short convenience strings would make a future
+ * production caller trivially forgeable. */
+const MIN_SECRET_BYTES = 32
+
+// STS token TTL — 5 minutes by default. Matches AWS STS short-lived
+// credential convention; long enough for typical preflight→action latency,
+// short enough to bound exposure on accidental leak.
+const DEFAULT_STS_TOKEN_TTL_MS = 300_000
+const DEFAULT_MAX_REQUEST_AGE_MS = 300_000
+const DEFAULT_MAX_FUTURE_SKEW_MS = 30_000
+
+const requireSecret = (secret: string | undefined): string => {
+  if (secret === undefined || secret.trim().length === 0) {
+    throw new AttestError(
+      "bridge attestor requires a non-empty HMAC signing secret",
+      "misconfigured",
+    )
+  }
+  if (Buffer.byteLength(secret, "utf8") < MIN_SECRET_BYTES) {
+    throw new AttestError(
+      `bridge attestor HMAC signing secret must be at least ${MIN_SECRET_BYTES} UTF-8 bytes`,
+      "misconfigured",
+    )
+  }
+  return secret
+}
+
+const requireNonNegativeMs = (value: number, label: string): number => {
+  if (!Number.isFinite(value) || value < 0) {
+    throw new AttestError(
+      `bridge attestor ${label} must be a finite non-negative millisecond value`,
+      "misconfigured",
+    )
+  }
+  return value
+}
+
+const isFreshRequest = (
+  requestedAt: number,
+  now: number,
+  maxRequestAgeMs: number,
+  maxFutureSkewMs: number,
+): boolean =>
+  Number.isFinite(requestedAt) &&
+  requestedAt >= now - maxRequestAgeMs &&
+  requestedAt <= now + maxFutureSkewMs
+
+const isWellFormedRequest = (req: AttestRequest): boolean =>
+  typeof req.agentId === "string" &&
+  req.agentId.length > 0 &&
+  typeof req.action === "string" &&
+  req.action.length > 0 &&
+  typeof req.resource === "string" &&
+  req.resource.length > 0
+
+/** Build the canonical signing payload — kept centralised so mint + verify
+ *  hash identical bytes. */
+const buildPayload = (scope: string, expiresAt: number, nonce: string): string =>
+  `${scope}|${expiresAt}|${nonce}`
+
+/** base64url-encode without padding. Mirrors RFC 4648 §5. */
+const b64url = (buf: Buffer): string =>
+  buf.toString("base64").replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "")
+
+/** Decode a base64url token into its 3-part envelope. Returns null on any
+ *  shape failure — verify treats null as a tamper signal. */
+interface TokenEnvelope {
+  readonly scope: string
+  readonly expiresAt: number
+  readonly nonce: string
+  readonly mac: string
+}
+
+const decodeToken = (token: string): TokenEnvelope | null => {
+  if (typeof token !== "string" || token.length === 0) return null
+  // Token shape: base64url(scope) "." base64url(expiresAt) "." base64url(nonce) "." base64url(mac)
+  const parts = token.split(".")
+  if (parts.length !== 4) return null
+  const [s, e, n, m] = parts
+  if (!s || !e || !n || !m) return null
+  try {
+    const scope = Buffer.from(s, "base64url").toString("utf8")
+    const expiresAt = Number(Buffer.from(e, "base64url").toString("utf8"))
+    const nonce = Buffer.from(n, "base64url").toString("utf8")
+    if (!Number.isFinite(expiresAt)) return null
+    return { scope, expiresAt, nonce, mac: m }
+  } catch {
+    return null
+  }
+}
+
+/** Mint the 4-part token. The MAC is computed over the canonical payload so
+ *  verify can recompute byte-identical input. */
+const encodeToken = (secret: string, scope: string, expiresAt: number, nonce: string): string => {
+  const payload = buildPayload(scope, expiresAt, nonce)
+  const mac = createHmac("sha256", secret).update(payload).digest()
+  return [
+    b64url(Buffer.from(scope, "utf8")),
+    b64url(Buffer.from(String(expiresAt), "utf8")),
+    b64url(Buffer.from(nonce, "utf8")),
+    b64url(mac),
+  ].join(".")
+}
+
+/** Constant-time MAC compare. `timingSafeEqual` requires equal-length buffers
+ *  — pad-or-reject pattern returns false on length mismatch. */
+const macEqual = (a: string, b: string): boolean => {
+  const ba = Buffer.from(a, "base64url")
+  const bb = Buffer.from(b, "base64url")
+  if (ba.length !== bb.length) return false
+  return timingSafeEqual(ba, bb)
+}
+
+/** Monotonic request-id — `att-<ms>-<rand>` is enough for in-process audit. */
+const nextRequestId = (clock: () => number): string =>
+  `att-${clock()}-${randomBytes(4).toString("hex")}`
+
+/**
+ * Construct the default attestor.
+ *
+ * Returns a fresh instance with its own revoke-set; safe to construct multiple
+ * concurrent attestors (e.g. per-session).
+ */
+export const defaultAttestor = (opts: DefaultAttestorOpts = {}): BridgeAttestor => {
+  const secret = requireSecret(opts.secret)
+  const policyTable: PolicyTable = opts.policyTable ?? {}
+  const clock = opts.clock ?? Date.now
+  const onEvent: AttestEventSink = opts.onEvent ?? (() => {})
+  const maxRequestAgeMs = requireNonNegativeMs(
+    opts.maxRequestAgeMs ?? DEFAULT_MAX_REQUEST_AGE_MS,
+    "maxRequestAgeMs",
+  )
+  const maxFutureSkewMs = requireNonNegativeMs(
+    opts.maxFutureSkewMs ?? DEFAULT_MAX_FUTURE_SKEW_MS,
+    "maxFutureSkewMs",
+  )
+  const revoked = new Set<string>()
+
+  const emit = (ev: AttestEvent): void => {
+    try {
+      onEvent(ev)
+    } catch {
+      // Subscriber must not break the attestor. Swallow + carry on.
+    }
+  }
+
+  const mintTokenInternal = async (
+    scope: string,
+    ttlMs: number,
+    requestId: string,
+  ): Promise<StsToken> => {
+    const now = clock()
+    const expiresAt = now + Math.max(0, ttlMs)
+    const nonce = randomBytes(16).toString("hex")
+    const token = encodeToken(secret, scope, expiresAt, nonce)
+    emit({ kind: "token-minted", requestId, at: now, scope, expiresAt })
+    return { token, expiresAt, scope }
+  }
+
+  /** Handle a `deny` verdict — single emit pair + return shape. Extracted from
+   *  `preflight` to keep cognitive complexity under the biome cap. */
+  const handleDeny = (requestId: string, reason: string): AttestResult => {
+    emit({ kind: "preflight-denied", requestId, at: clock(), reason })
+    emit({ kind: "attest-audit", requestId, at: clock(), summary: `deny: ${reason}` })
+    return { kind: "deny", reason }
+  }
+
+  /** Handle a `prompt-user` verdict. Returns the canonical 2-arm shape that
+   *  honours exactOptionalPropertyTypes (omit `reason` when absent). */
+  const handlePromptUser = (requestId: string, reason: string | undefined): AttestResult => {
+    emit({
+      kind: "attest-audit",
+      requestId,
+      at: clock(),
+      summary: `prompt-user${reason ? `: ${reason}` : ""}`,
+    })
+    return reason !== undefined ? { kind: "prompt-user", reason } : { kind: "prompt-user" }
+  }
+
+  /** Handle an `allow` verdict — mints the sole public issuance path's
+   *  canonical 5-minute STS token. */
+  const handleAllow = async (requestId: string, req: AttestRequest): Promise<AttestResult> => {
+    const scope = attestationScopeFor(req)
+    const stsToken = await mintTokenInternal(scope, DEFAULT_STS_TOKEN_TTL_MS, requestId)
+    emit({ kind: "preflight-granted", requestId, at: clock(), scope })
+    emit({ kind: "attest-audit", requestId, at: clock(), summary: `allow: ${scope}` })
+    return { kind: "allow", stsToken }
+  }
+
+  const preflight = async (req: AttestRequest): Promise<AttestResult> => {
+    const requestId = nextRequestId(clock)
+    const at = clock()
+    emit({ kind: "preflight-requested", requestId, at, action: req.action })
+    try {
+      if (!isWellFormedRequest(req)) return handleDeny(requestId, "invalid preflight request")
+      if (!isFreshRequest(req.requestedAt, at, maxRequestAgeMs, maxFutureSkewMs)) {
+        return handleDeny(requestId, "preflight request timestamp outside allowed freshness window")
+      }
+      const verdict = policyTable[req.action] ?? { kind: "prompt-user" as const }
+      if (verdict.kind === "deny") return handleDeny(requestId, verdict.reason)
+      if (verdict.kind === "prompt-user") return handlePromptUser(requestId, verdict.reason)
+      return await handleAllow(requestId, req)
+    } catch (e) {
+      const error = errMessage(e)
+      emit({ kind: "preflight-error", requestId, at: clock(), error })
+      emit({ kind: "attest-audit", requestId, at: clock(), summary: `error: ${error}` })
+      return { kind: "deny", reason: `preflight failed: ${error}` }
+    }
+  }
+
+  const verify = async (token: string, scope: string): Promise<boolean> => {
+    const requestId = nextRequestId(clock)
+    const at = clock()
+    const env = decodeToken(token)
+    if (!env) {
+      return false
+    }
+    if (env.scope !== scope) {
+      return false
+    }
+    if (revoked.has(token)) {
+      return false
+    }
+    if (at > env.expiresAt) {
+      emit({ kind: "token-expired", requestId, at, scope: env.scope })
+      return false
+    }
+    // Recompute MAC and constant-time compare.
+    const expected = encodeToken(secret, env.scope, env.expiresAt, env.nonce).split(".")[3]
+    if (!expected) return false
+    if (!macEqual(env.mac, expected)) {
+      return false
+    }
+    emit({ kind: "token-used", requestId, at, scope: env.scope })
+    return true
+  }
+
+  const revoke = async (token: string): Promise<void> => {
+    const requestId = nextRequestId(clock)
+    const env = decodeToken(token)
+    revoked.add(token)
+    if (env) {
+      emit({ kind: "token-revoked", requestId, at: clock(), scope: env.scope })
+    }
+  }
+
+  return { preflight, verify, revoke }
+}

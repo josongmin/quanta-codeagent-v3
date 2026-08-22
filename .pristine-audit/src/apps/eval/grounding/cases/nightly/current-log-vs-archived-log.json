@@ -1,0 +1,30 @@
+{
+  "schema": 2,
+  "id": "current-log-vs-archived-log",
+  "usecase": "persistent-context.conversation-state.thread-grounding",
+  "history": [
+    {
+      "role": "assistant",
+      "referentId": "old_runner_log",
+      "text": "Archived log old_runner_log is from last week."
+    },
+    {
+      "role": "assistant",
+      "kind": "directive",
+      "threadId": "runner_rca",
+      "referentId": "current_runner_log",
+      "text": "Current active thread runner_rca is reading current_runner_log for today's failure."
+    }
+  ],
+  "targetUtterance": "그 로그부터 읽어.",
+  "gold": {
+    "activeThreadId": "runner_rca",
+    "referentId": "current_runner_log",
+    "intent": "execute_change",
+    "scope": "specific_subthread",
+    "shouldClarify": false,
+    "confidence": "medium"
+  },
+  "bucket": "wrong_thread_adversarial",
+  "severity": "medium"
+}

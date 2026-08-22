@@ -1,0 +1,67 @@
+id: eval-five-tier
+title: eval 앱 — 6-tier 검증 스택 (audit/synthetic/grounding/public/trajectory/compare)
+section: 10
+subsystem: eval 앱 (RFC-0003) — 로컬 품질 검증 스택
+order: 8
+maturity: L4
+status: stable
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [headless, batch]
+configurable: static
+owners: ["@songmin"]
+labels: ["surface:bench", "absorbed:claude-code", "absorbed:cursor"]
+depends_on: [eval-schema-additive, 2026-05-21]
+config_refs:
+  env: ["QUANTA_CLASSIFIER_MODEL", "QUANTA_JUDGE_MODEL", "QUANTA_MODEL"]
+surface_integration:
+  cli: missing
+  web: missing
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "src evidence not reachable from the interactive CLI entry (src/apps/cli/index.ts) — wired only into other apps (eval/bench/probe/headless) or unwired"
+    web: "eval app (src/apps/eval) is a CLI/CI quality stack; does not run in web-daemon and renders nothing in the browser"
+purpose: |
+  `bun run eval` — taxonomy(12 major/~120 leaf) 기반 6-tier 로컬 검증 스택.
+  Tier 0 audit(정적 grep 커버리지 매트릭스) / Tier 1 synthetic(LLM-judge 시나리오 run) /
+  Tier 2 grounding(real prompt assembly 기반 structured probe) / Tier 3 public
+  (SWE-bench Verified bench-report 래핑) / Tier 4 trajectory(실세션 분류·
+  replay·freeze) / Tier 5 compare(A/B pairwise judge). append-only JSONL 저장
+  (EvalRecord 엔벨로프 + tier별 payload), report가 tier-agnostic 집계·markdown 렌더.
+  Tier 5 compare adapters (quanta/claude-code/cursor/aider) 4종 모두 운영 — cursor는
+  `-p <prompt> --output-format text --force`, aider는 `--message <prompt> --yes-always
+  --no-auto-commits --no-git --no-stream --no-pretty --no-show-model-warnings`. CLI
+  미설치 시 `available()` 가 `{ok:false}` 반환 → `runCompare` 가 graceful skip 으로
+  bookkeeping 만 기록. SIGTERM→SIGKILL grace + stderr tail truncation 으로 timeout/
+  hang 안전. Pairwise judge 의 parse 실패는 `parseFailed:true` + `winnerIndex:-1`
+  로 partial/tie 카운트 오염 방지.
+evidence:
+  code:
+    - src/apps/eval/index.ts
+    - src/apps/eval/synthetic/index.ts
+    - src/apps/eval/grounding/index.ts
+    - src/apps/eval/trajectory/replay.ts
+    - src/apps/eval/report/index.ts
+    - src/apps/eval/compare/index.ts
+    - src/apps/eval/compare/adapters/cli-base.ts
+    - src/apps/eval/compare/adapters/cursor.ts
+    - src/apps/eval/compare/adapters/aider.ts
+    - .github/workflows/grounding-live-gate.yml
+  adrs: []
+  tests:
+    unit:
+      - tests/unit/eval-audit-matrix.test.ts
+      - tests/unit/eval-grounding-scorer-hellgate.test.ts
+      - tests/unit/eval-pairwise-judge.test.ts
+      - tests/unit/eval-replay-verdict.test.ts
+      - tests/unit/eval-freeze.test.ts
+      - tests/unit/eval-compare-adapters.test.ts
+      - tests/unit/workflows/yaml-validity.test.ts
+      - tests/unit/workflows/permission-bounds.test.ts
+    integration:
+      - tests/integration/eval-five-tier-compare-e2e.test.ts
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: 'feature id `eval-five-tier`는 기존 depends_on stability 때문에 유지하지만 surface truth는 이제 6-tier다. Tier 0-5 모두 운영(L4). grounding tier가 prompt assembly + fail-closed scorer + live gate workflow에 더해 route preflight, typed errorKind, bounded concurrency를 추가했고, 4개 compare adapter는 기존 buildArgv pinning + timeout 회복 contract를 유지한다. storage 스키마 additive 필드(metrics/tokens/costUsd)는 별도 [eval-schema-additive].'

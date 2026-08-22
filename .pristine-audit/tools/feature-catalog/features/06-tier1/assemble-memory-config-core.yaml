@@ -1,0 +1,63 @@
+id: assemble-memory-config-core
+title: buildMemoryConfigCore + parseRecallTiers — memory tuning block composer
+section: 6
+subsystem: runner/assemble — memory config
+order: 233
+maturity: L4
+status: new
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [interactive, headless]
+configurable: integrated
+config_refs:
+  env: ["QUANTA_MEMORY_CONSOLIDATE", "QUANTA_MEMORY_DISTILL", "QUANTA_MEMORY_RECALL_LIMIT", "QUANTA_MEMORY_RECALL_TIERS", "QUANTA_MEMORY_SELF_EDIT"]
+owners: ["@songmin"]
+labels: ["surface:core", "tier:1"]
+depends_on: [assemble-store-core]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 3/4 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "pure internal memory-config composer (buildMemoryConfigCore/parseRecallTiers); no user-visible browser affordance"
+purpose: |
+  Surface-agnostic memory-config assembly. Two distinct helpers:
+  (1) `parseRecallTiers` — pure parser for raw
+      `QUANTA_MEMORY_RECALL_TIERS`-style strings ("episodic,semantic"). Lower-
+      cases + trims tokens, accepts only the two valid tiers, dedups via Set.
+      Empty result ⇒ `undefined` so the caller can omit the key entirely.
+  (2) `buildMemoryConfigCore` — composes the `memory` tuning block from 5
+      pre-parsed knobs (each mirrors a prior env flag exactly):
+      `recallLimit` (finite int gate), `distill === false`, `consolidate ===
+      false`, `selfEditTools === false`, `recallTiers`. EVERY conditional
+      spread preserved byte-for-byte from the prior `internal.ts` inline
+      block (the `=== false` triple-equals is deliberate — `undefined` /
+      truthy paths MUST omit the key entirely to keep the assembled `memory`
+      shape byte-identical under `exactOptionalPropertyTypes`).
+  Empty-block contract: when `!store && Object.keys(block).length === 0` ⇒
+  `undefined` (key omitted). Otherwise returns the block (even if empty)
+  because a store is configured.
+evidence:
+  code:
+    - src/runner/assemble/memory.ts
+    - src/runner/assemble/index.ts
+    - src/runner/index.ts
+    - src/apps/cli/internal.ts
+  adrs: []
+  tests:
+    unit:
+      - tests/unit/assemble.test.ts
+      - tests/unit/memory-hellgate.test.ts
+    integration:
+      - tests/integration/cli-export-assembly.test.ts
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  Distinct from `assemble-store-core` (which builds the store + embedder
+  collaborators). This builder assembles the TUNING config that the loop
+  passes to memory recall / distill / consolidate behaviors. Every
+  conditional spread is contract — surfaces that drop `=== false` for
+  truthiness checks WILL break exactOptional byte-identity.

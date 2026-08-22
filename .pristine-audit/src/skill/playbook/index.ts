@@ -1,0 +1,116 @@
+/**
+ * Playbook slice barrel (ADR-0203 — user-authored task macros).
+ *
+ * Slice posture: SELF-CONTAINED. This barrel re-exports types, the parser,
+ * the validator, the dispatcher, and the inline-trigger watcher. It does
+ * NOT re-export anything from `@/agent`, `@/tool`, or `@/permission`.
+ *
+ * Default-OFF wire: nothing here is invoked unless a host calls one of the
+ * surface functions. A SKILL.md whose frontmatter omits all 0203 slots is
+ * byte-identical to the pre-0203 lenient skill — verified by
+ * `tests/unit/playbook-frontmatter-hellgate.test.ts:HELL-PB-12`.
+ *
+ * Consumption order for the host:
+ *   1. `parsePlaybookFrontmatter(content)` → `PlaybookFrontmatter`
+ *   2. `buildMacroRegistry(fm.macros)` → `MacroRegistry`
+ *   3. `expandProcedure(fm.procedure, registry)` once on load (authoring lint)
+ *   4. On every proposed tool call: `evaluatePlaybookAction(fm, repr)` —
+ *      forward to permission seam.
+ *   5. (Optional) `createInlineTriggerWatcher().start({...})` on session
+ *      bind, with `.stop()` on session unbind.
+ */
+
+export {
+  type DispatchResult,
+  dispatchPlaybook,
+  type PlaybookAutoDispatchController,
+  type PlaybookAutoDispatchOptions,
+  type PlaybookFollowUpInput,
+  type PlaybookPlanQueueSink,
+  type PlaybookRegistration,
+  type PlaybookRegistry,
+  startPlaybookAutoDispatch,
+} from "./auto-dispatch"
+export {
+  createDiskPlaybookRegistry,
+  type DiskPlaybookRegistry,
+  type DiskPlaybookRegistryIssue,
+  type DiskPlaybookRegistryIssueCode,
+  type DiskPlaybookRegistryReloadResult,
+} from "./disk-registry"
+export {
+  buildMacroRegistry,
+  expandProcedure,
+  expandStep,
+  type MacroRegistry,
+  type ProcedureExpansion,
+  type StepExpansion,
+} from "./dispatcher"
+export {
+  isPlaybookExtended,
+  parsePlaybookFrontmatter,
+} from "./frontmatter-parser"
+export { adaptPlanQueueStoreToSink, startPlaybookFromTrigger } from "./host-adapters"
+export {
+  createInlineTriggerWatcher,
+  createMemoryWatcher,
+  dispatchScan,
+  expandBraces,
+  findMarkerLine,
+  type MemoryWatcher,
+  matchesGlobSubset,
+} from "./inline-trigger-watcher"
+// ADR-0258 — nested playbook executor (bounded recursion + cycle detection).
+// Default-OFF: re-exported here so the host can opt in; nothing in the rest
+// of the playbook slice (parser / validator / dispatcher) constructs it.
+export {
+  type ChildLookup,
+  type CycleCheck,
+  checkCycle,
+  createDefaultNestedExecutor,
+  DEFAULT_MAX_DEPTH,
+  type NestError,
+  type NestedExecutorOpts,
+  type NestedPlaybookExecutor,
+  type NestedResult,
+  type Result,
+} from "./nesting"
+export type {
+  InlineTriggerCallback,
+  InlineTriggerFire,
+  InlineTriggerWatcherHandle,
+  InlineTriggerWatcherPort,
+  InlineTriggerWatchSpec,
+  RepoRulesReaderPort,
+  RepoRulesView,
+} from "./port"
+// ADR-0252 — Windsurf-style `{{ name }}` template-literal expander (sibling to
+// the ADR-0203 `!macro` expander). Re-exported from the root barrel so a host
+// (the `Skill` tool render path) can reach it WITHOUT deep-importing the
+// sub-slice path. Additive: nothing in the parser / validator / dispatcher
+// constructs it; the `Skill` tool wires it under `QUANTA_SKILL_TEMPLATE_VARS`
+// (default-OFF ⇒ byte-identical, cf. HELL-TL-14 + the skill-template hellgate).
+export {
+  createDefaultTemplateExpander,
+  type ExpandContext,
+  type ExpandError,
+  type ExpandResult,
+  type ExpandValue,
+  type NestedContext,
+  type TemplateExpander,
+} from "./template-literal"
+export type {
+  ForbiddenActionMatch,
+  InlineTriggerConfig,
+  MacroDefinition,
+  MacroLookupResult,
+  PlaybookFrontmatter,
+  PlaybookParseResult,
+  ValidatorVerdict,
+} from "./types"
+export { PLAYBOOK_MAX_BYTES, PlaybookParseError } from "./types"
+export {
+  evaluatePlaybookAction,
+  inMemoryRepoRules,
+  repoRulesMentions,
+} from "./validator"

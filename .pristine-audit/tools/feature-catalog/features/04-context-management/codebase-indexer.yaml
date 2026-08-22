@@ -1,0 +1,80 @@
+id: codebase-indexer
+title: Codebase indexer slice (ADR-0277)
+section: 4
+subsystem: Retrieval — workspace scanner + chunker + delta tracker
+order: 60
+maturity: L4
+status: stable
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [interactive, headless, batch, daemon, ide, ci-bot]
+configurable: integrated
+owners: ["@songmin"]
+labels: [surface:core, default-off, slice:retrieval]
+depends_on: [search-pipeline-composer]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 7/7 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "Pure internal retrieval primitive (backend scanner); no user-visible surface affordance."
+purpose: |
+  Populates a SearchPipeline's underlying SemanticIndex / lexical store
+  by walking the workspace, chunking files, and tracking deltas. Closed
+  port `CodebaseIndexer { scanInitial, scanDelta, getCorpus, stop }`,
+  closed 5-arm error taxonomy (`scan-in-progress`, `stopped`,
+  `scan-failed`, `invalid-config`, `aborted`), default 50-line / 20-
+  overlap chunker. Honours `.gitignore` + `.quantaignore` (blank line,
+  `#` comment, `!` negation parsed); detects symlink cycles via inode
+  tracking; skips binary / 0-byte / >10 MB / EACCES files with a typed
+  `SkipReason`; `AbortSignal` honoured at every async boundary; second
+  concurrent scan returns `Err("scan-in-progress")`. Pure of
+  `process.env`; every knob flows through the constructor. Default-OFF
+  — nothing in @/agent / @/runner / @/apps constructs an indexer at
+  module load (composition root opt-in via ADR-0278).
+evidence:
+  code:
+    - src/retrieval/indexer/types.ts
+    - src/retrieval/indexer/port.ts
+    - src/retrieval/indexer/chunker.ts
+    - src/retrieval/indexer/delta-tracker.ts
+    - src/retrieval/indexer/default-scanner.ts
+    - src/retrieval/indexer/headless-stub.ts
+    - src/retrieval/indexer/index.ts
+  adrs: ["docs/decisions/0277-codebase-indexer.md", "docs/decisions/0278-search-codebase-auto-register.md", 265, 260, 261]
+  tests:
+    unit:
+      - tests/unit/retrieval/indexer-hellgate.test.ts
+    integration: []
+    contract: []
+knobs:
+  - name: QUANTA_INDEX
+    default: 'off'
+    purpose: 'indexer enabled at composition root (on|off; consumed by ADR-0278 wire)'
+  - name: QUANTA_INDEX_GLOB
+    default: '`src/**/*.ts`'
+    purpose: 'file glob the default scanner consumes'
+  - name: QUANTA_INDEX_INTERVAL_MS
+    default: 'undefined'
+    purpose: 'polling cadence for `scanDelta` (default 5000 ms; consumed by ADR-0278 wire)'
+deliberate_hold:
+  reason: |
+    LSP-aware (tree-sitter) symbol chunking is structurally better than
+    line-window for code corpora (function-aligned chunks survive renames
+    and produce cleaner reranker inputs). We ship line-window first
+    because it is provably correct on every file type and adds no native
+    dependency.
+    promotion_path: |
+      Sibling `symbol-chunker.ts` that satisfies the same chunker port.
+      The indexer is agnostic to which one runs.
+  promotion_path: |
+    Documented in ADR; wire when ROI concrete.
+notes: |
+  The default scanner uses `fs.promises.readdir({ withFileTypes: true })`
+  + `lstat()` inode tracking to detect symlink cycles deterministically
+  across Linux / macOS. Binary detection is `TextDecoder({ fatal: true })`
+  — same heuristic ripgrep uses for `--text` opt-in. SHA is sha1 over
+  raw bytes (collision-resistant enough for delta detection, fast for
+  1000-file scans per HELL-IDX-21).

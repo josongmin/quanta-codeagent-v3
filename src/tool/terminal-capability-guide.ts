@@ -1,20 +1,22 @@
 /**
- * Terminal-operator CAPABILITY GUIDANCE (RFC jun-29 §4.5 / §13 lever #5). A general
+ * Terminal-operator CAPABILITY GUIDANCE (TB21-06 transferred contract TC-3 —
+ * `docs/plans/aug-21-bench-terminal-2-1/TB21-06-transferred-contracts.md`). A general
  * "how to drive a terminal well" prompt section — NOT a preset, NOT task-specific, and
  * deliberately free of any benchmark/gold-answer hint (it steers HOW to operate, never
  * WHAT the answer is). WIRED (jul-01): `src/apps/terminal` (`assembleTerminalSurface`) injects
  * this alongside the surface tools and the brain (`brain-mode.ts`) puts it in the model's system
  * turn (proven by the brain-mode hellgate, which asserts the full body reaches the model).
  *
- * Why it exists: the #1 real-world terminal-agent failure is "executable not in PATH"
- * (~24% of failures per the TB2.0 paper) — a pure environment-state problem the base loop
- * gives no guidance on. This encodes the SOTA habits that close it: probe before assuming,
- * exit-code = completion, install-on-demand, structured-exec over keystroke-typing.
+ * Why it exists: a leading real-world terminal-agent failure is "executable not in PATH" — a
+ * pure environment-state problem the base loop gives no guidance on. (A failure-share figure
+ * from a retired benchmark paper used to be quoted here; it was retired evidence and is NOT
+ * restated as a current claim — see TB21-06 TC-3. The rationale stands on the failure mode
+ * itself.) This encodes the SOTA habits that close it: probe before assuming, exit-code = completion,
+ * install-on-demand, structured-exec over keystroke-typing.
  *
  * NB (jul-01): a measure-to-gate / verify-before-submit / no-overfit steer was tried here and
- * REVERTED — on the TB 3-task probe it produced zero solve-flips and made the agent over-persist
- * (an unsolvable task ran ~3× longer for no gain). Net-negative at n=1; not shipped. See
- * docs/analysis — the terminal bench analysis dir's FAILURE-RCA.md.
+ * REVERTED — on a 3-task probe it produced zero solve-flips and made the agent over-persist
+ * (an unsolvable task ran ~3× longer for no gain). Net-negative at n=1; not shipped.
  */
 
 /** The capability section text. General terminal-operator habits only. */
@@ -44,7 +46,7 @@ export const terminalOperatorGuide = (): string => TERMINAL_OPERATOR_GUIDE
  * discipline, not a re-check nag. Scoped to program/behavior deliverables and explicitly BOUNDED so it does
  * not reproduce the reverted steer's over-persist. No-leak: built from the task spec only, never the hidden
  * test/verifier/answer files. Efficacy is measure-first (A/B on the box); if it does not lift, the knob is
- * removed. See docs/plans/jul-3-tb-lever-audit-fixes/02-bestofn-audit-and-sota.md (S1). */
+ * removed. See TB21-06 TC-6 (`docs/plans/aug-21-bench-terminal-2-1/`). */
 export const SELF_TEST_DISCIPLINE = `# Self-test before finalizing (for a program / script / function with a defined input→output behavior)
 
 - Construct your OWN executable self-test FROM THE TASK SPEC: pick concrete inputs that cover the behavior across its RANGE and edges — several successive values, plus boundary/zero/empty cases — not a single example. Compute each expected output from the spec, then run YOUR deliverable against them.

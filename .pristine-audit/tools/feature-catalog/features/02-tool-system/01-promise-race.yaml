@@ -1,0 +1,35 @@
+id: promise-race
+title: Promise.race
+section: 2
+subsystem: '`applyScriptedReplaceBounded` 제거 (R3-P1)'
+order: 1
+maturity: L5
+status: stable
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [n-a]
+configurable: static
+owners: ["@songmin"]
+labels: [surface:cli, security-touched]
+depends_on: [read-write-edit, typed-tool-failure-modes, tool-output-schema-factory, fsjailerror, git-review-diff]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 2/2 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "pure internal ReDoS-defense note (literal fallback + length cap); no user-visible affordance on any surface"
+purpose: '이전 sync regex를 Promise.race로 감싸 setTimeout 타임아웃 시도 → event loop pinned, setTimeout never fires . 회수: 진짜 ReDoS 방어는 applyScriptedReplace의 (1) literal-only fallback + length cap heuristic, (2) FS-jail · count cap뿐.'
+evidence:
+  code:
+    - src/tool/scripted-replace.ts
+    - src/tool/index.ts
+  adrs: []
+  tests:
+    unit: [tests/unit/hard-deny-redos-bound.test.ts, tests/unit/scripted-replace.test.ts]
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: 에 NOTE 명시

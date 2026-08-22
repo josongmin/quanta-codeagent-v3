@@ -1,0 +1,57 @@
+id: ipc-transports
+title: IPC transports — in-memory / stdio / uds / websocket
+section: 9
+subsystem: IPC byte shuttle — 4 transport implementations
+order: 35
+maturity: L2
+status: new
+ui_surfaces: [api]
+monitoring: n-a
+modes: [n-a]
+configurable: planned
+owners: ['@songmin']
+labels: [surface:ipc]
+depends_on: [slice-ipc-bridge, ipc-event-bridge]
+surface_integration:
+  cli: missing
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "src evidence not reachable from the interactive CLI entry (src/apps/cli/index.ts) — wired only into other apps (eval/bench/probe/headless) or unwired"
+    web: "Pure internal transport library; no browser affordance; web-daemon uses its own @/ipc/session codec not these transports."
+purpose: |
+  Four `BridgeTransport` implementations behind one closed shape so the
+  EventBridge stays transport-agnostic. (1) `in-memory` — test fixture
+  with `createInMemoryHub` for many-peer loopback (fully working).
+  (2) `stdio` — line-delimited JSON over Node Readable/Writable, used by
+  CLI ↔ daemon (fully working; the slice takes streams as INJECTED PORTS,
+  never reads `process.stdin/stdout` directly). (3) `uds` — Unix Domain
+  Socket; on-disk path convention `<home>/.quanta/ipc.sock`, framing reused
+  from stdio so daemon can multiplex stdio (subprocess) + uds (local IPC)
+  peers behind one envelope reader; `udsSocketPath()` is the canonical
+  resolver (skeleton — connect/listen/accept dance in follow-up PR).
+  (4) `websocket` — `WebSocketLike` adapter + `createWebSocketServerTransport`
+  helper; interface complete, real server lib choice pending follow-up.
+evidence:
+  code:
+    - src/ipc/transports/in-memory.ts
+    - src/ipc/transports/stdio.ts
+    - src/ipc/transports/uds.ts
+    - src/ipc/transports/websocket.ts
+  adrs: []
+  tests:
+    unit: []
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold:
+  reason: uds + websocket are skeleton-only (path resolver + adapter shape) pending follow-up wiring PR; in-memory + stdio are production.
+  promotion_path: 'uds: implement node:net listen/connect/accept + reuse stdio framing → integration test. websocket: pick ws lib (uWebSockets vs ws) → real server impl → integration test → L5.'
+notes: |
+  Wire framing is the SAME line-delimited JSON across stdio + uds so multiplex
+  is trivial. `wrapDuplexAsUdsTransport` and `wrapWebSocketLikeAsTransport`
+  let surface code adapt arbitrary duplex / WS-like objects without coupling
+  `@/ipc` to a specific server lib.
+
+  L4→L2: no test imports evidence.code paths

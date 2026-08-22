@@ -507,10 +507,7 @@ export const createTurnEndCorrelator = (
       if (chain === undefined || chain.settlement !== undefined) return
       settleChain(chain, {
         kind: "error",
-        error: new SessionTurnCorrelationLostError(
-          "continuation_failed",
-          errMessage(error),
-        ),
+        error: new SessionTurnCorrelationLostError("continuation_failed", errMessage(error)),
       })
     },
     rejectCommand(commandId, error) {

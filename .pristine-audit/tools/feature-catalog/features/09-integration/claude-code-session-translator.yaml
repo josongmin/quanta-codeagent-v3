@@ -1,0 +1,49 @@
+id: claude-code-session-translator
+title: Claude Code session translator (~/.claude/projects/*.jsonl → Message[])
+section: 9
+subsystem: Migration translator (Claude Code 흡수, ADR-0038)
+order: 11
+maturity: L4
+status: stable
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [interactive]
+configurable: integrated
+owners: ["@songmin"]
+labels: ["surface:core", "absorbed:claude-code"]
+depends_on: [external-agent-import, portable-session-v1]
+surface_integration:
+  cli: full
+  web: missing
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 3/3 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "User-facing import mechanism is CLI-only; no web import verb (B3-absent) and @/migration not reachable from web-daemon; does not reach the browser."
+purpose: |
+  `SessionTranslator` adapter that parses a Claude Code session transcript at
+  `~/.claude/projects/<slug>/<id>.jsonl` into v3 `Message[]`. Each line is a
+  JSON object discriminated by `.type`: `user` / `assistant` carry
+  `message: { role, content }` (string or array of `text` / `tool_use` /
+  `tool_result` blocks); everything else (`queue-operation`, `attachment`,
+  `file-history-snapshot`, `ai-title`, `summary`) is bookkeeping and skipped.
+  Defensive by contract: malformed lines (bad JSON, wrong shape, unknown block
+  type) are skipped, never thrown. Messages whose translated content is empty
+  are dropped — they carry no signal and would pollute the transcript. The
+  resulting `Message[]` is feed-compatible with the v3 loop (seed messages /
+  rewind / fork).
+evidence:
+  code:
+    - src/migration/translators/claude-code.ts
+    - src/migration/translators/types.ts
+    - src/migration/translators/index.ts
+  adrs: [38]
+  tests:
+    unit: [tests/unit/migration-import-redaction-hellgate.test.ts]
+    integration:
+      - tests/integration/migration-claude-code-translator.test.ts
+      - tests/integration/migration-claude-code-fixture.test.ts
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: 'Distinct from `portable-session-v1` (v3-native round-trip schema) and `external-agent-import` (4-stage import lifecycle). This is the per-provider Claude-Code-shape translator that feeds those upstream surfaces.'

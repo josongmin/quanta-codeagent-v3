@@ -1,0 +1,51 @@
+id: subagent-persistence
+title: Background subagent persistence (cross-restart)
+section: 6
+subsystem: 서브에이전트 (ADR-0130)
+order: 236
+maturity: L4
+status: stable
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [interactive, headless, batch, daemon, ide, ci-bot]
+configurable: partial
+owners: ["@songmin"]
+labels: ["surface:agent", "tier:1"]
+depends_on: [background-subagent, agent, agent-tool-shape, bounded, quantasubagent-maxdepth]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 5/6 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "pure cross-restart persistence primitive, no UI on any surface"
+purpose: |
+  BackgroundSubagentScheduler serialize / hydrate / hydrateWithPrune primitives
+  + auto-restore-on-construction (`hydrateFrom` opt). Running entries whose
+  Promise can't be reconstructed across restart surface as `status:"failed",
+  errorMessage:"lost across restart"` (honest, not silent). Disk-backed helpers
+  (`snapshotToFile` / `restoreFromFile`) in sibling `subagent-persistence.ts` +
+  `subagent-persistence-store/` (jsonl + hydrating-scheduler).
+evidence:
+  code:
+    - src/agent/subagent-background.ts
+    - src/agent/subagent-persistence.ts
+    - src/agent/subagent-persistence-store/index.ts
+    - src/agent/subagent-persistence-store/jsonl-store.ts
+    - src/agent/subagent-persistence-store/hydrating-scheduler.ts
+    - src/agent/subagent-persistence-store/types.ts
+  adrs: [153, "docs/decisions/0158-subagent-persistence.md"]
+  tests:
+    unit:
+      - tests/unit/subagent-persistence-hellgate.test.ts
+      - tests/unit/subagent-background-hellgate.test.ts
+      - tests/unit/subagent-background-wire-hellgate.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  Default-OFF (`hydrateFrom` absent → byte-identical). Caller wires
+  snapshot/restore at session boundaries. Task-replay-based resume (re-spawn
+  via stored spec) is separate follow-up ADR.

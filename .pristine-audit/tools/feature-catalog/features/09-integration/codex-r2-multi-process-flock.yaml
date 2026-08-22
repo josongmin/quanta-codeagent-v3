@@ -1,0 +1,57 @@
+id: codex-r2-multi-process-flock
+title: Multi-process lockfile for jsonl disk-adapter (ADR-0356)
+section: 9
+subsystem: per-session O_EXCL lockfile for disk-persistent session registry
+order: 103
+maturity: L3
+status: stable
+ui_surfaces: [n-a]
+monitoring: none
+modes: [n-a]
+configurable: integrated
+config_refs:
+  env: [QUANTA_SESSION_REGISTRY_DISK_DIR]
+owners: ["@songmin"]
+labels: ["surface:core", "absorbed:codex", "default-off"]
+depends_on:
+  - codex-r2-disk-persistence-and-env-swap
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 4/4 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "pure internal lockfile primitive (monitoring none, ui_surfaces n-a); no user-visible affordance anywhere"
+purpose: |
+  Closes ADR-0348 single-writer assumption. Per-session lockfile
+  (`<storageDir>/<sessionId>/.lock`) acquired via Node `wx` flag
+  (O_CREAT|O_EXCL|O_WRONLY|0o600) so concurrent quanta instances
+  serialize disk writes per sessionId. Stale-lock detection at
+  30s mtime threshold reclaims locks abandoned by crashed processes.
+  Disk-store gates every meta/events/cache mirror write on the lock
+  promise; acquire failure (timeout/fs error) degrades to memory-only.
+  Process-local refcount holder map keeps the lock re-entrant for
+  same-PID callers so ADR-0348's existing "two registry instances
+  same PID" tests pass unchanged.
+evidence:
+  code:
+    - src/agent/session-resource-registry/disk-adapter/file-lock.ts
+    - src/agent/session-resource-registry/disk-adapter/disk-store.ts
+    - src/agent/session-resource-registry/disk-adapter/types.ts
+    - src/agent/session-resource-registry/index.ts
+  adrs:
+    - docs/decisions/0356-disk-registry-multi-process-flock.md
+  tests:
+    unit:
+      - src/agent/session-resource-registry/disk-adapter/__tests__/file-lock.hellgate.test.ts
+      - src/agent/session-resource-registry/disk-adapter/__tests__/disk-store-flock.hellgate.test.ts
+    integration: []
+    contract: []
+knobs:
+  - name: DiskRegistryConfig.lock
+    type: 'AcquireSessionLockOpts?'
+    default: 'undefined (uses defaults: 5s timeout / 100ms retry / 30s stale)'
+    notes: 'Per-session lock options. Override timeoutMs / retryIntervalMs / staleThresholdMs / now for tests.'
+deliberate_hold: null
+notes: '2026-07-19 source audit: global.ts selects the disk registry when QUANTA_SESSION_REGISTRY_DISK_DIR is set, and disk-store ALWAYS acquires the per-session lock (DiskRegistryConfig.lock only tunes policy). Codex parity: jsonl uses lockfile pattern (Codex sqlite uses WAL — ADR-0357 sibling).'

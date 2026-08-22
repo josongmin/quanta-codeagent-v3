@@ -1,0 +1,63 @@
+id: platform-base-shell-argv
+title: Platform-aware base shell argv — POSIX-first discovery ladder + dialect (P16 → ADR-0529)
+section: 3
+subsystem: 셸 실행 — 플랫폼별 base argv 결정점
+order: 236
+maturity: L3
+status: new
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [interactive, headless, batch, daemon, ide, ci-bot]
+configurable: integrated
+config_refs:
+  env: [QUANTA_WIN_SHELL]
+owners: ["@songmin"]
+labels: [surface:cli, default-off]
+depends_on: [shell-snapshot-runshell-wire]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "reachable from src/apps/cli/index.ts — `runtime/shell.ts` (runShell) imports buildBaseShellArgv + resolveWinShellMode (+ ADR-0529 `discoverShells`, called only on win32+auto); re-exported via runtime/index.ts barrel. ADR-0529 adds a POSIX-first discovery ladder (Git-Bash/WSL→PowerShell→cmd.exe) returning a `dialect` tag, all PURE-tested on darwin via injected ShellProbe (3R-audit-hardened: byte-identity covers auto/bash/pwsh; cmd/pwsh-exe fallbacks have teeth)."
+    web: "pure platform→argv decision (no I/O, env read hoisted to wire site); no user-visible affordance on any surface"
+purpose: |
+  P16 (jun-08 long-tail §P16) — `runShell` 의 base argv 를 플랫폼별로 고르는
+  단일 PURE 결정점. 종전 `runShell` 은 win32 분기 없이 `["bash","-lc",cmd]` 를
+  하드코드 → Windows 에 bash 부재 시 opaque ENOENT 가 generic 셸 실패로 표면화
+  되는 SILENT mis-behavior. 본 모듈이 이를 EXPLICIT/typed outcome 으로 전환:
+  (a) non-win32 (darwin/linux) ⇒ `POSIX_SHELL_ARGV` = `["bash","-lc",cmd]` —
+  legacy 하드코드와 BYTE-IDENTICAL (greppable named const 라 refactor drift 방지);
+  (b) win32 default(knob OFF) ⇒ typed `{kind:"error"}` — caller 가 exitCode 127 +
+  actionable stderr 로 표면화, 존재하지 않는 bash 를 spawn 하지 않음;
+  (c) win32 `QUANTA_WIN_SHELL=cmd`(opt-in) ⇒ `["cmd.exe","/d","/s","/c",cmd]`
+  (Node `shell:true` 의 Windows invocation 동일) — bash 와 의미가 달라 never
+  silent default. `resolveWinShellMode` 는 `"cmd"`(case-insensitive)만 opt-in;
+  unset/empty/typo 는 safe `"error"` default 로 — 우발적 enable 이 셸 의미를
+  조용히 못 바꿈. env read 는 wire site(win32 일 때만)에서 — non-win32 fast
+  path 는 env 를 건드리지 않아 byte-identical 보존. Pure: 동일 입력 ⇒ 동일 출력.
+evidence:
+  code:
+    - src/runtime/shell-argv.ts
+    - src/runtime/shell.ts
+  adrs:
+    - docs/decisions/0529-cross-platform-shell-execution.md
+    - docs/decisions/0235-shell-snapshot-runshell-wire.md
+  tests:
+    unit:
+      - tests/unit/runtime/shell-discovery-ladder-hellgate.test.ts
+      - tests/unit/runtime/win-shell-guard-hellgate.test.ts
+    integration: []
+    contract: []
+knobs:
+  - name: QUANTA_WIN_SHELL
+    where: src/runtime/shell-argv.ts (resolveWinShellMode, read at wire site in runtime/shell.ts)
+    default: "error"
+    purpose: "win32 에서만; `cmd` 면 cmd.exe fallback, 그 외 값은 loud-fail(refuse to spawn bash)"
+deliberate_hold: null
+notes: |
+  의도적으로 full Windows 포트 아님 — silent fail 을 멈추는 게 목표.
+  win-shell-guard hellgate 이 (1) non-win32 byte-identity, (2) win32 default
+  loud-fail, (3) `=cmd` opt-in argv, (4) typo/empty 가 default error 로 떨어짐을
+  봉인. knob inventory(`src/config/knob-inventory.ts`)에 readSite 등록됨.

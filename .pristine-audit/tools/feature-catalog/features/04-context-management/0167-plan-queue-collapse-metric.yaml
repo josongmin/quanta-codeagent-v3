@@ -1,0 +1,51 @@
+id: plan-queue-collapse-metric
+title: PlanQueue enqueue collapse metric — EnqueueResult + dedicated counter
+section: 4
+subsystem: PlanQueue observability
+order: 84
+maturity: L3
+status: stable
+ui_surfaces: [cli]
+monitoring: integrated
+modes: [interactive, headless]
+configurable: integrated
+config_refs:
+  env: []
+owners: ["@songmin"]
+labels: ["adr-0167", "tier:1", "plan-queue", "observability"]
+depends_on:
+  - plan-queue
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 1/2 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "pure internal observability counter, not an AgentEvent and no browser render"
+purpose: |
+  Closes the ADR-0161 follow-up gap: PlanQueueStore previously returned
+  just a string id from `enqueue` — when ADR-0128's dedup rule collapsed
+  a same-(threadId, textHash) request into an existing live entry, the
+  `instrumentPlanQueue` wrap had no signal to count. New `EnqueueResult`
+  (`{ id, collapsed }` — both required, no exactOptional ambiguity) +
+  `plan_queue.enqueue.collapsed.total` counter expose collapse-rate as a
+  first-class signal. Same expand-return-shape pattern as ADR-0162's
+  budget cost histogram.
+evidence:
+  code:
+    - src/agent/plan-queue.ts
+    - src/observability/metrics/instrument-plan-queue.ts
+  adrs:
+    - docs/decisions/0167-plan-queue-collapse-metric.md
+  tests:
+    unit:
+      - tests/unit/plan-queue-hellgate.test.ts
+      - tests/unit/observability-metrics-instrument-extra-hellgate.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  All bare-string-id callers updated to `result.id`. Collapse-rate is the
+  load-bearing signal for "is mid-turn surface spamming keystrokes?".

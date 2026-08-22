@@ -184,6 +184,12 @@ const FULL_AUTH = JSON.stringify({
 // bun-ready so that phase throws (the bootstrap dies there).
 const mockSpawnForProvision = () =>
   createSpawnRecorder(
+    // aug-22 regression repair: `9d5369d31` made the default AMI an `ssm:` reference
+    // that `resolveLaunchAmi` dereferences BEFORE RunInstances. Without a responder
+    // the recorder's fallback returns an empty stdout, so provisioning died at AMI
+    // resolution and every assertion below silently measured a run that never
+    // reached a single bootstrap phase. Answer with a well-formed AMI id.
+    whenArgsInclude("get-parameter", ok("ami-0123456789abcdef0\n")),
     whenArgsInclude("describe-security-groups", ok("sg-abc")),
     whenArgsInclude("run-instances", ok("i-box0")),
     whenArgsInclude("wait", ok("")),
@@ -220,6 +226,86 @@ describe("provisionBox ↔ bootstrap tracer wiring", () => {
     expect(byName.has("bootstrap")).toBe(false)
     // The tracer is always closed (finally), even on the failure path.
     expect(state.closed).toBe(true)
+  })
+
+  /**
+   * aug-22 audit — the ORPHAN-INSTANCE residue.
+   *
+   * `createInstanceTerminator`'s doc block records a measured money leak: ten
+   * c7i.4xlarge spot boxes left running because a `keep: true` bootstrap failure
+   * terminated nothing. The repair put a force-terminate in provisionBox's
+   * `catch`. But the tracer was CONSTRUCTED between `launchInstance` and that
+   * `try`, so a throwing tracer factory reopened the identical hole on a narrower
+   * path: RunInstances has already billed a box, and nothing reaps it but the
+   * 180-minute TTL.
+   *
+   * The invariant this pins is the general one, not the one bug: once `iid`
+   * exists, EVERY throw before the session is handed back must terminate it.
+   */
+  test("a THROWING tracer factory still terminates the instance (no orphan box)", async () => {
+    const { provisionBox } = await import("../../src/apps/bench/remote/box-session")
+    const { fn, calls } = mockSpawnForProvision()
+
+    await expect(
+      provisionBox({
+        repoDir: "/tmp/repo",
+        authJson: FULL_AUTH,
+        datasetPath: "/tmp/unused.jsonl",
+        spawn: fn,
+        sleep: async () => {},
+        maxReadyPolls: 1,
+        keep: true, // the operator asked to KEEP a successfully provisioned box…
+        otelEndpoint: ENDPOINT,
+        makeBootstrapTracer: () => {
+          throw new Error("otel exporter init failed")
+        },
+      }),
+    ).rejects.toThrow(/otel exporter init failed/) // …the real cause still surfaces
+
+    // …but a box that never bootstrapped is an ORPHAN, not something to keep.
+    const launched = calls.filter((c) => c.args.includes("run-instances"))
+    const terminated = calls.filter((c) => c.args.includes("terminate-instances"))
+    expect(launched.length).toBe(1)
+    expect(terminated.length).toBe(1)
+    expect(terminated[0]?.args).toContain("i-box0")
+  })
+
+  /**
+   * The same principle one step later: flushing spans is OBSERVABILITY. This file
+   * already pins "a DOWN sink never breaks a phase"; the `finally` that flushes
+   * must obey the same rule. A throwing `close()` would otherwise (a) replace the
+   * bootstrap's real error with a meaningless exporter error, and (b) on the
+   * SUCCESS path throw after the session was built — stranding a live box the
+   * caller never receives.
+   */
+  test("a THROWING tracer close() neither masks the bootstrap error nor skips termination", async () => {
+    const { provisionBox } = await import("../../src/apps/bench/remote/box-session")
+    const { fn, calls } = mockSpawnForProvision()
+    const tracer: BootstrapTracer = {
+      phase: async (_name, f) => await f(),
+      close: async () => {
+        throw new Error("otlp flush failed")
+      },
+    }
+
+    const err = await provisionBox({
+      repoDir: "/tmp/repo",
+      authJson: FULL_AUTH,
+      datasetPath: "/tmp/unused.jsonl",
+      spawn: fn,
+      sleep: async () => {},
+      maxReadyPolls: 1,
+      otelEndpoint: ENDPOINT,
+      makeBootstrapTracer: () => tracer,
+    }).then(
+      () => undefined,
+      (e: unknown) => e,
+    )
+
+    // The propagated error is the BOOTSTRAP failure (cloud-init never readied),
+    // not the exporter's flush failure.
+    expect(errMessage(err)).not.toContain("otlp flush failed")
+    expect(calls.filter((c) => c.args.includes("terminate-instances")).length).toBe(1)
   })
 
   test("Default-OFF: no otelEndpoint ⇒ provisionBox still runs (real no-op tracer, no throw added)", async () => {

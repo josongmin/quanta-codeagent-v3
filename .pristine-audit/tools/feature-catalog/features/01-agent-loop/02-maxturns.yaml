@@ -1,0 +1,42 @@
+id: maxturns
+title: maxTurns
+section: 1
+subsystem: 턴 상태머신
+order: 2
+maturity: L3
+status: stable
+ui_surfaces: [cli]
+monitoring: integrated
+telemetry_keys: [gen_ai.response.time_to_first_token_ms, quanta.conversation.id]
+modes: [interactive, headless, batch, daemon, ide, ci-bot]
+configurable: integrated
+config_refs:
+  env: [QUANTA_MAX_TURNS]
+owners: ['@songmin']
+labels: [surface:core, tier:core]
+depends_on: [plan-mode, secret-redaction-content-plane, durable-state-belongs-in-workspace-files, src-agent-working-state-ts, turncontextinput-mode-reporules-workingstate-activeskills]
+surface_integration:
+  cli: full
+  web: missing
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 3/3 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "maxTurns is not among the 6 CONFIG_ALLOWED_KEYS writable via POST /config nor rendered in KnobsPanel; the config mechanism exists but does not reach the browser"
+purpose: maxTurns
+evidence:
+  code:
+    - src/agent/loop.ts
+    - src/observability/turn-timing.ts
+    - src/shared/runtime-config.ts
+  adrs: []
+  tests:
+    unit: ["tests/unit/recovery-hell.test.ts", "tests/unit/recovery-hellgate.test.ts", "tests/unit/recovery-hellgate.test.ts", "tests/unit/refusal-handling.test.ts", "tests/unit/subagent-runner.test.ts", "tests/unit/subagent-seed-augmentation.test.ts"]
+    integration: ["tests/integration/multi-plane-e2e-hellgate.test.ts"]
+    contract: []
+knobs:
+  - name: QUANTA_MAX_TURNS
+    default: 'undefined'
+    purpose: '(no description)'
+deliberate_hold: null
+notes: ''

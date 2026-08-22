@@ -1,0 +1,80 @@
+id: bench-eval-driver
+title: bench — single-instance eval driver (sandbox + agent + verdict + diff)
+section: 10
+subsystem: Bench harness — per-instance orchestration
+order: 41
+maturity: L4
+status: stable
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [headless, batch]
+configurable: integrated
+config_refs:
+  env: [QUANTA_BENCH_TIMEOUT_MS]
+owners: ["@songmin"]
+labels: ["surface:bench"]
+depends_on: [bench-eval-env-prep, bench-repair-context-builder, bench-corpus-loader, bench-python-swebench, runrepairrounds]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 1/6 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "pure internal bench per-instance orchestration, no browser affordance"
+purpose: |
+  Top-level orchestration for a SINGLE SWE-bench-style instance. The ONLY
+  place that ties the eval sub-slice together:
+    1. Prepare an isolated sandbox `cp -R` copy of the instance repo
+       (corpus is NEVER mutated — that invariant lives in `eval/sandbox.ts`)
+    2. Run the real agent (`runAgent` + `defaultTools`) against the
+       problem statement under per-instance budget caps
+    3. Run the instance's `testCmd` (or the official Python harness via
+       `python-swebench.ts` when wired) to decide pass/fail
+    4. Capture a unified diff of the sandbox via `gitStageAndDiffCached`
+       as the produced patch
+    5. Unconditional `rm -rf` of the sandbox on the `finally` path
+  Returns `InstanceResult` (turns, patch, passed, error, patchPath) which
+  the bench report + failure-classifier consume. Every other eval module
+  (`env-prep`, `exec`, `sandbox`, `snapshot`, `verdict`) is a
+  single-responsibility helper consumed only here.
+evidence:
+  code:
+    - src/runner/batch/eval/score-label.ts
+    - src/runner/batch/core.ts
+    - src/runner/batch/observe.ts
+    - src/apps/bench/eval/driver.ts
+    - src/apps/bench/eval/sandbox.ts
+    - src/apps/bench/eval/snapshot.ts
+    - src/apps/bench/eval/verdict.ts
+    - src/apps/bench/eval/exec.ts
+    - src/runner/batch/eval/driver.ts
+    - src/runner/batch/eval/retry-policy.ts
+    - src/runner/batch/eval/sandbox.ts
+    - src/runner/batch/eval/snapshot.ts
+    - src/runner/batch/report.ts
+    - src/runner/batch/types.ts
+    - src/runner/batch/corpus/dataset.ts
+    - src/runner/knobs/presets.ts
+    - src/shared/runtime-config.ts
+    - src/shared/runtime-config-knobs.ts
+  adrs: []
+  tests:
+    unit:
+      - tests/unit/sandbox.test.ts
+      - tests/unit/eval-replay-verdict.test.ts
+      - tests/unit/eval-sandbox-escape.test.ts
+    integration: []
+    contract: []
+knobs:
+  - name: QUANTA_BENCH_TIMEOUT_MS
+    default: 'undefined'
+    purpose: '(no description)'
+deliberate_hold: null
+notes: |
+  Slice: `src/apps/bench/eval` — the driver imports `@/runtime` (for
+  `scrubEnv`), `@/agent` (for `runAgent`), `@/shared` (event makers),
+  `@/observability` (cost stamping). No `@/tool` deep imports — the agent
+  carries its tool registry. Sandbox lifecycle = pure path discipline:
+  every fs operation lives inside the sandbox root produced by
+  `mkdtemp(benchWorkRoot() + 'bench-<id>-')`.

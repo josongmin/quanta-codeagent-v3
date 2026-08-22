@@ -1,0 +1,61 @@
+id: cli-single-binary-build
+title: bun build --compile → dist/agent single binary
+section: 10
+subsystem: CLI distribution
+order: 81
+maturity: L3
+status: stable
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [interactive, headless]
+configurable: static
+owners: ["@songmin"]
+labels: ["surface:cli"]
+depends_on: [ctk-git-skills-bundle, engineering-skills-bundle, repl-code-smell-cleanup, repl-interactive-surface, slashctx-6-ports-wire-completion]
+config_refs:
+  env: ["QUANTA_SANDBOX", "QUANTA_SKILLS_DIR"]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 5/5 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "pure build/distribution tooling, no user-visible runtime affordance on any surface"
+purpose: |
+  `bun run build` produces a single self-contained executable at
+  `dist/agent` via `bun build --compile --minify src/apps/cli/index.ts`.
+  This is the distribution path for the v3 CLI — no `bun` runtime
+  required on the target machine. ADR-0045 (progress-audit system
+  skill) explicitly anticipates this compile path for SKILL.md
+  bundling, so the build script is the seam through which future
+  bundled-resource work will flow.
+evidence:
+  code:
+    - package.json
+    - src/apps/cli/index.ts
+    - src/skill/system-skills/index.ts
+    - src/apps/cli/repl.ts
+    - src/apps/cli/internal.ts
+    - src/apps/cli/sandbox-wire.ts
+  adrs: [45]
+  tests:
+    unit: ["tests/unit/cli-argv-prompt.test.ts", "tests/unit/cli-resume-heuristic.test.ts", "tests/unit/cli-summarizer.test.ts", "tests/unit/env-knob-branches.test.ts"]
+    integration: ["tests/integration/cli-export-assembly.test.ts", "tests/integration/session-ux-e2e.test.ts"]
+    contract: []
+knobs: []
+deliberate_hold:
+  reason: |
+    No release/publish automation yet — `dist/agent` is built on
+    demand, not on tag. Bundled SKILL.md / .system/ resources are not
+    yet packed into the compiled binary; today they are resolved from
+    the source tree (per src/skill/system-skills/index.ts).
+  promotion_path: |
+    Pack `.system/**/SKILL.md` into the compile output (or read via
+    `import.meta.dir` fallback) to make `dist/agent` truly
+    standalone — see ADR-0045 §next. Add a tag-triggered release
+    script once the binary is reproducible.
+notes: |
+  `--minify` is on by default; flip off when debugging crashes that
+  reference compiled positions. Output path `dist/agent` is
+  hardcoded — change requires updating any docs that reference it.

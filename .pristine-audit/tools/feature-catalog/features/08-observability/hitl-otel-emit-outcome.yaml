@@ -1,0 +1,58 @@
+id: hitl-otel-emit-outcome
+title: HITL outcome-site OTel emit — tier_resolved / registry_escalated / handoff_emitted
+section: 8
+subsystem: 텔레메트리 — quanta.hitl.* 어휘 활성화
+order: 92
+maturity: L4
+status: new
+ui_surfaces: [cli]
+monitoring: integrated
+telemetry_keys: [quanta.hitl, quanta.hitl.tier_resolved]
+modes: [interactive, headless]
+configurable: static
+owners: ["@songmin"]
+labels: ["surface:core", "observability-primitive", "absorbed:codex"]
+depends_on: [183-safety-net-green, agent-loop-branch-hardening, agent-dispatch-core, deny-and-steer-verb, hitl-4-tier-gate]
+config_refs:
+  env: []
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 3/3 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "pure OTel attribute emit into span sink, no user-visible affordance on any surface"
+purpose: |
+  `quanta.hitl.tier_resolved` + `registry_escalated` + `handoff_emitted` 3개
+  키가 vocabulary 에 있고 helper 도 있었지만 zero call-site 였던 갭을
+  `runHitlGate` (admissibility-gate.ts) 안에서 봉합. `resolveHitlTier`
+  직후 tier + matched 부울을 `recordAttrs(handleToolCall, ...)` 로 emit —
+  4개 tier literal (none/auto-pass/always-confirm/hand-off-required)
+  전부 fire. `emitHandoffEvent` 진입에서 deny reason 의 prose suffix 를
+  `slugifyHandoffReason` 으로 strip 해 categorical kebab slug (`hard-deny`
+  / `registry:<tool>` / `tier:hand-off-required`) 만 attribute 에 통과 —
+  offending shell command / handoff prompt body 절대 leak 안 함.
+  Default-OFF: sink 미등록 ⇒ zero-allocation no-op.
+evidence:
+  code:
+    - src/agent/admissibility-gate.ts
+    - src/observability/spans.ts
+    - src/observability/vocabulary.ts
+  adrs: [20, 32, 47]
+  tests:
+    unit:
+      - tests/unit/hitl-otel-emit-hellgate.test.ts
+      - tests/unit/admissibility-gate.test.ts
+      - tests/unit/observability/spans.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  FORBIDDEN_SUBSTRINGS scan (handoff prompt body / tool input / deny prose)
+  으로 emitted attribute value 매 hellgate 케이스에서 audit. 17 cases /
+  61 expects. `recordAttrs` (spans.ts) 는 이 흡수 라운드에서 새로 추가된
+  point-in-time emit helper — start+end 를 한 sink 호출로 묶고 duration=0
+  으로 표시 (sinks 가 instant event 를 normal closed span 처럼 다룰 수
+  있도록).

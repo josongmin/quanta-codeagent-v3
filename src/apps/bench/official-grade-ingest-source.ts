@@ -17,9 +17,11 @@
  * Env-reading lives HERE, at the allowlisted composition root, and the document
  * is decoded by its owner (`runner/batch/official-grade-ingest.ts`).
  */
+
 import { readFileSync } from "node:fs"
 import { parseOfficialGradeIngestDocument } from "@/runner/batch/official-grade-ingest"
 import type { AggregateOfficialGradeInput } from "@/runner/batch/report-official-grade"
+import { errMessage } from "@/shared"
 
 /** Absolute path of the official-grade ingest document this run should publish. */
 export const OFFICIAL_GRADE_INGEST_ENV = "QUANTA_OFFICIAL_GRADE_RECEIPT"
@@ -43,7 +45,7 @@ export const resolveOfficialGradeReportInput = (
   } catch (err) {
     throw new Error(
       `bench: the official-grade ingest document ${path} could not be read ` +
-        `(${err instanceof Error ? err.message : String(err)}). REFUSING to write a report ` +
+        `(${errMessage(err)}). REFUSING to write a report ` +
         "without the grader verdict this run claims to have.",
     )
   }
@@ -52,8 +54,7 @@ export const resolveOfficialGradeReportInput = (
     json = JSON.parse(text) as unknown
   } catch (err) {
     throw new Error(
-      `bench: the official-grade ingest document ${path} is not JSON ` +
-        `(${err instanceof Error ? err.message : String(err)}).`,
+      `bench: the official-grade ingest document ${path} is not JSON ` + `(${errMessage(err)}).`,
     )
   }
   const parsed = parseOfficialGradeIngestDocument(json)

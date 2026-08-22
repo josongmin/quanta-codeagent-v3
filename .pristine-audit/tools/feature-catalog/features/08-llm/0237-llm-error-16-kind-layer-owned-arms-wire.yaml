@@ -1,0 +1,58 @@
+id: llm-error-16-kind-layer-owned-arms-wire
+title: LLM error 16-kind close-out — layer-owned arms wire (too-many-failed / thread-rollback / sandbox)
+section: 8
+subsystem: LLM error taxonomy — layer-owned emitters
+order: 96
+maturity: L3
+status: stable
+ui_surfaces: [api]
+monitoring: integrated
+modes: [interactive, headless, daemon]
+configurable: integrated
+config_refs:
+  env: []
+owners: ["@songmin"]
+labels: ["adr-0237", "tier:1", "llm", "error-taxonomy"]
+depends_on: []
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 5/5 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "pure internal error-taxonomy emitter primitives (too-many-failed / thread-rollback / sandbox arms), no UI affordance"
+purpose: |
+  Closes the ADR-0214 → ADR-0234 taxonomy gap: three Codex-spec
+  `LLMErrorKind` arms (`too_many_failed_attempts` → fatal;
+  `thread_rollback_failed` → reactive_compaction; `sandbox_error` →
+  hitl_handoff) were reachable only via the heuristic `classify(e:
+  unknown)` router because no layer was emitting them as typed signals.
+  Each arm now has a pure, default-OFF helper owned by the layer that
+  KNOWS the failure: retry layer (`src/llm/retry/too-many-failed-attempts.ts`),
+  per-tool-checkpoint (`src/agent/per-tool-checkpoint/rollback-llm-error-bridge.ts`),
+  os-sandbox (`src/runtime/os-sandbox/llm-error-bridge.ts`). Each helper
+  is additive — when `enabled !== true`, the inner port is returned
+  verbatim (same reference) preserving byte-identical behavior. Original
+  failure carried as `cause` on the typed `LLMError`.
+evidence:
+  code:
+    - src/llm/retry/too-many-failed-attempts.ts
+    - src/llm/retry/codex-spec-router.ts
+    - src/agent/per-tool-checkpoint/rollback-llm-error-bridge.ts
+    - src/runtime/os-sandbox/llm-error-bridge.ts
+  adrs:
+    - docs/decisions/0237-llm-error-16-kind-layer-owned-arms-wire.md
+  tests:
+    unit:
+      - tests/unit/llm-retry-too-many-failed-attempts-hellgate.test.ts
+      - tests/unit/sandbox-error-emit-hellgate.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  Closes typed emitter reachability only. `RetryingLLM` / `FallbackLLM`
+  composition through `recovery-router-codex-spec` remains deferred.
+  `exactOptionalPropertyTypes` discipline — `Knobs` shapes omit fields
+  rather than set undefined.

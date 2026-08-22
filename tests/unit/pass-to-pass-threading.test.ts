@@ -57,10 +57,18 @@ describe("parseTestNameList", () => {
     expect(parseTestNameList({ PASS_TO_PASS: "[]" }, "PASS_TO_PASS")).toBeUndefined()
   })
   test("all-blank array ⇒ undefined", () => {
-    expect(parseTestNameList({ PASS_TO_PASS: JSON.stringify(["", "  "]) }, "PASS_TO_PASS")).toEqual(
-      ["  "],
-    )
-    // (whitespace-only is a non-empty string — kept; only length-0 is dropped)
+    // `parseSerializedStringList` drops every entry whose `.trim()` is empty
+    // (src/runner/batch/corpus/string-list-literal.ts `nonEmptyStrings`), so a
+    // whitespace-only node-id is blank — NOT a test name — and an array of only
+    // blanks collapses to `undefined`, never `[]` (omit-the-key contract).
+    expect(
+      parseTestNameList({ PASS_TO_PASS: JSON.stringify(["", "  ", "\t\n"]) }, "PASS_TO_PASS"),
+    ).toBeUndefined()
+    // …while a real node-id alongside blanks SURVIVES (the drop is blank-only,
+    // not a wholesale discard).
+    expect(
+      parseTestNameList({ PASS_TO_PASS: JSON.stringify(["", " ", "a.py::t1"]) }, "PASS_TO_PASS"),
+    ).toEqual(["a.py::t1"])
   })
 })
 

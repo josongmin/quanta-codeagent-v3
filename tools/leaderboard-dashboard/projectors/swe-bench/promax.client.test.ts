@@ -206,6 +206,10 @@ function runShell(bench: string, DATA: unknown, call = "renderCards();"): Sinks 
     sweBenchProjector.client.script,
     extractFn("suiteOfView"),
     extractFn("suiteView"),
+    // The shell's shared card-list builder. Every card surface appends refused
+    // artifacts through it, so the ProMax bundle needs the same shipped bytes the
+    // browser gets (the family script already leans on the shell's `esc`/`DATA`).
+    extractFn("withRefusedCard"),
     "function renderFamCards(){ FAM_CARDS.n += 1; }",
     "function renderFamMatrix(v){ FAM_CARDS.m += 1; }",
     extractFn("renderCards"),

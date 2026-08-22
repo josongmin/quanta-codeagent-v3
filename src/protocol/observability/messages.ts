@@ -17,8 +17,8 @@
  */
 
 import type { ApprovalRequest } from "@/agent/approval-state-machine"
-import type { Objective } from "@/objective"
 import type { RunEntry } from "@/agent/run-ledger"
+import type { Objective } from "@/objective"
 
 /** Full state push. Sent on first wiring + on reconnect / re-attach so a
  *  fresh client can render Running / Waiting / Completed and the current

@@ -245,7 +245,20 @@ describe("PMX-04 bootstrap — dedicated python env, docker readiness, disk, pla
     const agent = plan().filter((c) => c.phase === "agent")
     expect(agent.length).toBeGreaterThanOrEqual(2)
     expect(agent.every((c) => !c.goldBearing)).toBe(true)
-    const flat = agent.map((c) => c.argv.join(" ")).join("\n")
+    // aug-22 A-A: the agent phase now also PROVES the checkout is absent, which
+    // is the ONE kind of agent-phase command allowed to name the gold-bearing
+    // root — it names it in order to assert nothing is there. Classify rather
+    // than exempt: every other agent command must still be gold-path-free, and
+    // the probe must be a DECLARED probe, not merely a command that happens to
+    // mention the path.
+    const probes = agent.filter((c) => c.absenceProbe !== undefined)
+    expect(probes).toHaveLength(1)
+    expect(probes[0]?.absenceProbe?.absolutePath).toBe(ROOT)
+    expect(probes[0]?.argv).toEqual(["test", "!", "-e", ROOT])
+    const flat = agent
+      .filter((c) => c.absenceProbe === undefined)
+      .map((c) => c.argv.join(" "))
+      .join("\n")
     expect(flat).toContain("mkdir")
     expect(flat).toContain(CAMPAIGN)
     // no upstream identity, no checkout, no gold path
@@ -253,6 +266,12 @@ describe("PMX-04 bootstrap — dedicated python env, docker readiness, disk, pla
     expect(flat).not.toContain(PINNED)
     expect(flat).not.toContain(PROMAX_V1_SNAPSHOT.upstream_repo_url)
     for (const rel of Object.values(PROMAX_V1_UPSTREAM_PATHS)) expect(flat).not.toContain(rel)
+    // …and NOT EVEN the probe may name the pinned commit, the upstream URL or a
+    // gold FILE — absence is asserted on the directory, nothing more is revealed.
+    const probeFlat = probes.map((c) => c.argv.join(" ")).join("\n")
+    expect(probeFlat).not.toContain(PINNED)
+    expect(probeFlat).not.toContain(PROMAX_V1_SNAPSHOT.upstream_repo_url)
+    for (const rel of Object.values(PROMAX_V1_UPSTREAM_PATHS)) expect(probeFlat).not.toContain(rel)
   })
 
   test("a checkoutRoot OUTSIDE the campaign root is REFUSED", () => {

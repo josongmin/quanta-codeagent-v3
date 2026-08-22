@@ -19,13 +19,13 @@
  */
 
 import { describe, expect, test } from "bun:test"
-import { createObjectiveStore, type ObjectivePort } from "@/objective"
 import {
   type GoalContinuationProbes,
   startGoalContinuationTicker,
 } from "@/apps/cli/goal-continuation-hook"
 import { goalCmd } from "@/apps/cli/slash/goal-cmd"
 import type { SlashContext } from "@/apps/cli/slash-contract"
+import { createObjectiveStore, type ObjectivePort } from "@/objective"
 
 const TID = "thread-e2e"
 

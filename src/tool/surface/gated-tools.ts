@@ -784,7 +784,7 @@ export const GATED_TOOLS: readonly ToolSurfaceEntry[] = [
       web: "opt-in",
       ide: "opt-in",
       headless: "opt-in",
-      // RFC jun-29: pty_* IS the `terminal` surface's primary toolset (default-ON there). The
+      // TB21-06 TC-1a: pty_* IS the `terminal` surface's primary toolset (default-ON there). The
       // terminal registry is built BASE-free by `buildTerminalTools` (not buildDefaultTools), so
       // this `on` only affects the terminal surface; cli/bench/web/ide/headless stay opt-in.
       terminal: "on",
@@ -820,13 +820,13 @@ export const GATED_TOOLS: readonly ToolSurfaceEntry[] = [
       web: "opt-in",
       ide: "opt-in",
       headless: "opt-in",
-      // RFC jun-29 §13 #1: the one-shot exec workhorse of the `terminal` surface (default-ON there,
+      // TB21-06 TC-1a (spec S3): the one-shot exec workhorse of the `terminal` surface (default-ON there,
       // built BASE-free by buildTerminalTools — never on cli/bench/web/ide/headless).
       terminal: "on",
     },
     risk: "exec",
     adr: "N6",
-    note: "RFC jun-29 §13 — one-shot shell exec INSIDE the bound container; returns stdout/stderr + EXIT CODE (the completion signal, lever #2), head+tail-capped (#4) and run through the shared neutralizeTerminalOutput forge-defence. Container-bound by construction (the injected ContainerExec port is docker exec / orchestrator env-exec, NEVER host bash — spec S3); command flows through the host HARD_DENY denylist via extractShellCommand. Minted ONLY when DefaultToolPorts.containerExec is wired (QUANTA_CONTAINER_EXEC, by the terminal entry-point adapter in src/apps/); off ⇒ tool absent, byte-identical default menu. Opt-in EVERYWHERE except the terminal surface.",
+    note: "TB21-06 TC-1a (spec S3) — one-shot shell exec INSIDE the bound container; returns stdout/stderr + EXIT CODE (the completion signal, lever #2), head+tail-capped (#4) and run through the shared neutralizeTerminalOutput forge-defence. Container-bound by construction (the injected ContainerExec port is docker exec / orchestrator env-exec, NEVER host bash — spec S3); command flows through the host HARD_DENY denylist via extractShellCommand. Minted ONLY when DefaultToolPorts.containerExec is wired (QUANTA_CONTAINER_EXEC, by the terminal entry-point adapter in src/apps/); off ⇒ tool absent, byte-identical default menu. Opt-in EVERYWHERE except the terminal surface.",
   },
   {
     name: "container_write_file",

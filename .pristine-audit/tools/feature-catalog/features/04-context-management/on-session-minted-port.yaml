@@ -1,0 +1,50 @@
+id: on-session-minted-port
+title: onSessionMinted callback port — resume-fsm surface decoupling (DIP)
+section: 4
+subsystem: Session-resume — surface log seam
+order: 7
+maturity: L4
+status: stable
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [n-a]
+configurable: n-a
+owners: ['@songmin']
+labels: [surface:core]
+depends_on: [repl-code-smell-cleanup, runner-assemble-builders, cli-export-2026-05-21-l2-l3, repl-interactive-surface, repo-rules-tree]
+config_refs:
+  env: [QUANTA_DIFF_PREVIEW, QUANTA_EFFORT, QUANTA_HISTORY, QUANTA_HISTORY_FILE, QUANTA_HISTORY_MAX, QUANTA_IDLE_MS, QUANTA_IDLE_SUPPRESS, QUANTA_IMAGE_MAX_QUEUE, QUANTA_IMAGE_QUEUE, QUANTA_MAX_TURNS, QUANTA_METRICS, QUANTA_MODEL, QUANTA_MULTILINE, QUANTA_PERMISSION, QUANTA_PILLS, QUANTA_REJECT_LIMIT, QUANTA_SANDBOX, QUANTA_SNOOZE_DEFAULT_MS, QUANTA_SPINNER, QUANTA_SPINNER_INTERVAL_MS, QUANTA_SUBAGENT]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 5/5 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "pure DIP logging seam inside resume FSM, ui_surfaces n-a, no user-visible affordance"
+purpose: |
+  Surface-supplied hook fired ONCE when a fresh session id is minted via
+  `--new-session` inside the surface-AGNOSTIC `resolveResume` FSM (relocated
+  to `@/runner/orchestrate/resume-fsm.ts`). Lets the CLI surface emit its
+  legacy `session: <id>` log line without coupling the runner slice to
+  `@/shared#logger`. Absent ⇒ silent (Web/Tauri may prefer structured
+  `slog.info` only). Byte-identical default-OFF — CLI shim passes the hook
+  verbatim so the existing log line is preserved.
+evidence:
+  code:
+    - src/runner/orchestrate/resume-fsm.ts
+    - src/apps/cli/repl.ts
+    - src/apps/cli/diff-preview.ts
+    - src/apps/cli/internal.ts
+    - src/apps/cli/status-pills.ts
+  adrs: []
+  tests:
+    unit: ["tests/unit/cli-argv-prompt.test.ts", "tests/unit/cli-resume-heuristic.test.ts", "tests/unit/cli-summarizer.test.ts", "tests/unit/env-knob-branches.test.ts"]
+    integration: ["tests/integration/cli-export-assembly.test.ts", "tests/integration/session-ux-e2e.test.ts", "tests/integration/skills-slash-e2e-hellgate.test.ts"]
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  DIP inversion — the runner slice doesn't know how surfaces want to log
+  the minted id; it just exposes a typed callback the surface owns. One-shot
+  fire (`onSessionMinted?.(newId)` inside the new-session branch).

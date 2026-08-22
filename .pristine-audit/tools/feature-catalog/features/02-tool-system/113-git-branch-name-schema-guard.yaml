@@ -1,0 +1,53 @@
+id: git-branch-name-schema-guard
+title: git_branch_switch — `BRANCH_NAME_RE` schema-level alphabet guard
+section: 2
+subsystem: 도구 — git_branch_switch input hardening
+order: 113
+maturity: L4
+status: stable
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [interactive, headless, batch, daemon, ide, ci-bot]
+configurable: static
+owners: ["@songmin"]
+labels: [surface:cli]
+depends_on: [git-runner-cancellation-signal, cross-slice-mirror, deferred-tool-registry, evidence-toolresultevidence, git-mutating-tools]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 2/2 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "Pure internal schema-level alphabet guard, no UI affordance."
+purpose: |
+  Schema-level zod regex `^(?!-)[A-Za-z0-9._/+-]{1,64}$` on `git_branch_switch.branch`
+  that rejects a malicious or malformed branch name BEFORE argv is built — so
+  it cannot escape into the `git switch <branch>` argv we hand to the runner.
+  Four properties: (1) ALPHABET match — only `[A-Za-z0-9._/+-]`, the same set
+  as `safeBranch` in `@/runtime/worktree-fork`, so worktree-fork and
+  branch-switch reject the same identifier surface. (2) NO LEADING DASH — the
+  `(?!-)` negative lookahead defeats `--orphan`/`-c` argv-as-flag injection
+  even though branch is a positional, because `git` would still parse
+  leading-dash positionals as flags. (3) 64-CHAR CAP — bounded length so a
+  pathological branch name cannot blow up command-line size or argv parsers.
+  (4) MIN 1 — empty string rejected at schema time. The `regex` zod method
+  produces a typed validation error (`"branch must match [A-Za-z0-9._/+-] (no
+  leading '-')"`) that the tool turns into a deterministic `ok:false` without
+  ever calling the runner. Combined with the slice's other defenses (gh
+  `normalizeRef`, git_diff base leading-dash rejection), the rule is: argv is
+  NEVER built from untrusted strings without a schema-level alphabet guard.
+evidence:
+  code:
+    - src/tool/git/types.ts
+    - src/tool/git/branch-switch.ts
+  adrs: []
+  tests:
+    unit:
+      - tests/unit/tool/git-branch-switch.test.ts
+    integration:
+      - tests/integration/git-tools-e2e.test.ts
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: 'Same alphabet as `safeBranch` in `@/runtime/worktree-fork` (slice rule forbids cross-import, so the regex is duplicated — both slices independently enforce the same contract).'

@@ -20,6 +20,18 @@ export {
   type ProMaxGradeInput,
 } from "./adapter"
 export {
+  admitProMaxCampaignForLaunch,
+  freezeProMaxCampaignImages,
+  PROMAX_FREEZE_STAGE_REASONS,
+  PROMAX_FREEZE_STAGES,
+  type ProMaxCampaignAdmissionInput,
+  type ProMaxCampaignFreeze,
+  type ProMaxCampaignFreezeInput,
+  type ProMaxCampaignFreezeRefused,
+  type ProMaxCampaignFrozen,
+  type ProMaxFreezeStage,
+} from "./campaign-freeze"
+export {
   assertClassificationTablesInSync,
   type ClassificationTables,
   classifyOfficialPair,
@@ -74,6 +86,8 @@ export {
 } from "./golden-derive"
 export {
   assertImageFreezeReadyForModelLaunch,
+  isDigestPinnedReference,
+  PROMAX_DIGEST_REFERENCE_RE,
   PROMAX_IMAGE_FAULT_CODES,
   PROMAX_IMAGE_FAULT_REASONS,
   PROMAX_REQUIRED_ARCHITECTURE,

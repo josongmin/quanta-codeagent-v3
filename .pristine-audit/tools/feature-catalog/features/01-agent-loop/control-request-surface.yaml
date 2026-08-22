@@ -1,0 +1,52 @@
+id: control-request-surface
+title: control-request runtime surface — set_model/permission_mode/thinking/get_context_usage (ADR-0496)
+section: 1
+subsystem: agent-loop — unified live-control channel (Claude control-request parity)
+order: 211
+maturity: L3
+status: new
+ui_surfaces: [cli, ide]
+monitoring: n-a
+modes: [interactive, ide, daemon]
+configurable: integrated
+owners: ["@songmin"]
+labels: ["surface:core", "absorbed:claude"]
+depends_on: [agent-loop-core]
+config_refs:
+  env: ["QUANTA_CONTROL_REQUEST"]
+surface_integration:
+  cli: missing
+  web: full
+  method: audited
+  verified: "2026-07-03"
+  evidence:
+    cli: "no CLI control-request port — the interactive REPL wires no createWebControlRequestPort/pollControlRequests slot (src/apps/cli has zero control-request refs); the surface is agent-loop + web-daemon only"
+    web: "WIRED (ADR-0496 A1, jul-03): src/apps/web-daemon/runtime-factory.ts:426 mints createWebControlRequestPort under isControlRequestEnabled(env) (QUANTA_CONTROL_REQUEST); the loop's turn-top pollControlRequests (src/agent/loop/control-poll.ts) drains a browser/IDE control frame (control-request-frame.ts) into a live planControlRequest effect over ws-handlers.ts"
+purpose: |
+  A single closed ControlRequest union (set_model / set_permission_mode /
+  set_thinking / get_context_usage) + an exhaustive ALL_CONTROL_REQUEST_KINDS + a
+  PURE planControlRequest(req, ctx) mapping each request to a typed ControlEffect.
+  The planner invents NO vocabulary: model ids / permission modes / thinking levels
+  are validated against caller-supplied allowlists, so the slice carries zero
+  coupling. Fail-closed: off-allowlist/malformed ⇒ typed rejected effect; null/garbage
+  never throws. Mirrors Claude Code's live control-request protocol. Folding the
+  existing interrupt/cancel/set_mode/set_brief (SubmissionOp) under this umbrella is
+  the documented consolidation follow-up.
+evidence:
+  code:
+    - src/agent/control-request/types.ts
+    - src/agent/control-request/apply.ts
+    - src/agent/control-request/index.ts
+    - src/agent/loop/control-poll.ts
+    - src/apps/web-daemon/web-control-request-port.ts
+    - src/apps/web-daemon/control-request-frame.ts
+    - src/apps/web-daemon/runtime-factory.ts
+  adrs: [496]
+  tests:
+    unit:
+      - tests/unit/control-request-hellgate.test.ts
+      - tests/unit/control-request-apply-hellgate.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null

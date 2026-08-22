@@ -1,0 +1,31 @@
+{
+  "schema": 2,
+  "id": "switch-back-original-thread",
+  "usecase": "persistent-context.conversation-state.thread-grounding",
+  "history": [
+    {
+      "role": "assistant",
+      "threadId": "prompt_rules",
+      "referentId": "prompt_rules",
+      "mentionedThreadIds": ["oauth_abort_flow", "prompt_rules"],
+      "text": "We started on prompt_rules, switched briefly to oauth_abort_flow, and are now back on prompt_rules."
+    }
+  ],
+  "targetUtterance": "그럼 원래 거 계속.",
+  "gold": {
+    "activeThreadId": "prompt_rules",
+    "referentId": "prompt_rules",
+    "intent": "execute_change",
+    "scope": "current_workstream",
+    "shouldClarify": false,
+    "confidence": "medium"
+  },
+  "bucket": "multi_workstream",
+  "severity": "high",
+  "stateContract": {
+    "activeThreadId": "prompt_rules",
+    "visibleThreadIds": ["oauth_abort_flow", "prompt_rules"],
+    "pausedThreadIds": ["oauth_abort_flow"]
+  },
+  "candidateThreadIds": ["oauth_abort_flow", "prompt_rules"]
+}

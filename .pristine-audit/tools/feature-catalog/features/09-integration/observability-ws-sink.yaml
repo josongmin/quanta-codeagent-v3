@@ -1,0 +1,96 @@
+id: observability-ws-sink
+title: ADR-0420 Observability served-WebSocket sink (closes ADR-0415 emitter-port-only deferral)
+section: 9
+subsystem: Long-running work observability (Wave-3 deliberate-hold closeout)
+order: 420
+maturity: L4
+status: stable
+ui_surfaces: [cli]
+monitoring: integrated
+modes: [interactive, headless, batch, daemon, ide]
+configurable: integrated
+owners: ["@songmin"]
+labels: ["surface:core", "default-off"]
+depends_on:
+  - observability-live-wire
+  - observability-ui-pane
+  - observability-wire
+surface_integration:
+  cli: missing
+  web: full
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "src evidence not reachable from the interactive CLI entry (src/apps/cli/index.ts) — wired only into other apps (eval/bench/probe/headless) or unwired"
+    web: "attachObservabilitySink in server.ts:866 forwards observability.snapshot/delta frames to ws.send so the deltas reach the live ObservabilityPane; this closes the ADR-0415 port-only deferral."
+purpose: |
+  Closes ADR-0415's documented emitter-port-only deferral so observability
+  goes fully live over the served WebSocket.
+
+  ADR-0415 fed the four live observability ports (RunLedger / Objective /
+  ApprovalStateMachine / ShadowVerify) to `createObservabilityEmitter`, but
+  the emitter ran PORT-ONLY — there was no daemon-level WebSocket sink, so
+  `observability.snapshot` / `observability.delta` frames never reached the
+  connected UI pane. The blocker was that the sink lives at the served
+  `ServerWebSocket` layer (server.ts), which was off-limits at the time.
+
+  ADR-0420 opens server.ts + the entry composition root and adds a
+  PER-CONNECTION sink:
+
+  - `attachObservabilitySink(ws, ports)` in server.ts mints ONE emitter per
+    connection whose `ObservabilitySink` forwards encoded frames straight to
+    `ws.send(frame)`. Absent ports ⇒ returns null (gate OFF ⇒ no sink,
+    byte-identical). The `observability-emitter.ts` slice and the
+    `src/protocol/observability/*` slice are CONSUMED ONLY (sealed). The
+    `ObservabilityPorts` bundle + emitter port/timer option types are
+    re-derived from the emitter's parameter type so they cannot drift.
+  - Connection lifecycle: Bun.serve `open` attaches the sink; `close` calls
+    `handle.stop()` and clears the slot so the timer is cleared and no frames
+    target a dead socket. Each connection gets its own emitter + snapshot
+    (v1 = one session per socket per ADR-0315).
+  - Frames ride the SAME ws the SessionTransport uses; the frontend already
+    multiplexes by the `kind: "observability.*"` discriminant (no frontend
+    change). `WebDaemonConfig` (shared types.ts) is left untouched — the
+    server widens config locally via `WebDaemonServerConfig`.
+  - `index.ts` `buildObservabilityPorts(facade)` projects the live facade
+    ports into the bundle (undefined when the facade is absent or carries no
+    readable port) and threads it into the server config.
+
+  NO-THROW: a dead / throwing `ws.send` is swallowed (sink wraps it + the
+  emitter guards internally); mint never throws on a hostile socket; a later
+  tick on a recovered socket still emits.
+
+  Default-OFF (RFC §1.2): `QUANTA_OBSERVABILITY` unset ⇒ `observabilityPorts`
+  undefined ⇒ no sink attached ⇒ zero behavior change. web-daemon (55) suite
+  byte-identical, 0 regression.
+evidence:
+  code:
+    - src/apps/web-daemon/server.ts
+    - src/apps/web-daemon/index.ts
+  adrs:
+    - docs/decisions/0420-observability-ws-sink.md
+    - 315
+    - 406
+    - 408
+    - 415
+  tests:
+    unit:
+      - tests/unit/observability-ws-sink-hellgate.test.ts
+    integration: []
+    contract: []
+knobs:
+  - name: QUANTA_OBSERVABILITY
+    default: 'off'
+    purpose: 'live observability over the served WebSocket (per-connection snapshot + delta sink)'
+config_refs:
+  env: [QUANTA_OBSERVABILITY]
+notes: |
+  L4 promotion of ADR-0415 (which was L3 + a deliberate_hold whose stated
+  promotion_path was exactly this: a daemon-level ws sink in server.ts). The
+  emitter snapshot/delta frames now reach the connected UI pane live.
+  14 hellgate cases / 37 expects against a fake ServerWebSocket recording
+  `.send()` (gate-OFF byte-identical, snapshot-first-on-connect,
+  delta-on-port-change, no-frame-when-unchanged, requestSnapshot re-emit,
+  stop()-freeze + idempotent, two-connection independent snapshots,
+  disconnect-one-keeps-sibling, throwing-send swallowed NO-THROW,
+  hostile-socket mint never throws, frame decode round-trip).

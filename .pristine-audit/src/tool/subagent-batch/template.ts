@@ -1,0 +1,85 @@
+/**
+ * RFC-02 §5.3 — deterministic per-item prompt templating.
+ *
+ * PURE: no `eval`, no `Function`, no nested key access — flat-key string
+ * substitution only. Injection surface = 0. Mirrors Codex's `{column}` template
+ * but with doubling-escape for literal braces (more standard than Codex's
+ * `__CODEX_OPEN_BRACE__` sentinel).
+ *
+ * Substitution rules:
+ *   - `{{item}}`  ⇒ the value of a STRING item. For an OBJECT item with no
+ *     `item` field this is a missing placeholder.
+ *   - `{{key}}`   ⇒ object item's `key` value. string/number/boolean ⇒
+ *     `String(v)`; anything else ⇒ `JSON.stringify(v)`. Absent key ⇒ collected
+ *     into `missing` (that item later marked status:"error", others continue).
+ *   - literal braces: `{{{{` ⇒ `{{`, `}}}}` ⇒ `}}` (doubling). Escapes are
+ *     resolved FIRST so an escaped pair is never seen as a placeholder.
+ */
+
+export type BatchItem = string | Record<string, unknown>
+
+export type RenderResult =
+  | { readonly ok: true; readonly prompt: string }
+  | { readonly ok: false; readonly missing: readonly string[] }
+
+/** Sentinel placeholders used while escapes are folded out. They are chosen to
+ *  be impossible to type via the placeholder grammar (`[A-Za-z0-9_.]`), so a
+ *  hostile template cannot inject them. */
+const OPEN_SENTINEL = "\x00__BATCH_LBRACE__\x00"
+const CLOSE_SENTINEL = "\x00__BATCH_RBRACE__\x00"
+
+/** Placeholder grammar: `{{ key }}` where key ∈ [A-Za-z0-9_.]+. The `.` is a
+ *  LITERAL part of the key name (flat lookup, no nested access). */
+const PLACEHOLDER = /\{\{\s*([A-Za-z0-9_.]+)\s*\}\}/g
+
+/** Stringify a resolved value deterministically. */
+const stringify = (v: unknown): string => {
+  const t = typeof v
+  if (t === "string") return v as string
+  if (t === "number" || t === "boolean") return String(v)
+  return JSON.stringify(v)
+}
+
+/**
+ * Render `template` against `item`. Total + pure + deterministic.
+ *
+ * Returns `{ok:true, prompt}` when every placeholder resolved, else
+ * `{ok:false, missing}` listing the unresolved keys (deduped, in first-seen
+ * order) so the caller can mark JUST that item as error.
+ */
+export const renderTemplate = (template: string, item: BatchItem): RenderResult => {
+  // 1) Fold escapes out FIRST so `{{{{`/`}}}}` are never matched as a pair.
+  //    Order matters: replace the 4-char escapes before the 2-char placeholder
+  //    grammar runs.
+  const escaped = template.split("{{{{").join(OPEN_SENTINEL).split("}}}}").join(CLOSE_SENTINEL)
+
+  const missing: string[] = []
+  const seen = new Set<string>()
+  const isObject = typeof item === "object" && item !== null
+
+  const substituted = escaped.replace(PLACEHOLDER, (_full, rawKey: string) => {
+    const key = rawKey
+    if (key === "item" && !isObject) {
+      return stringify(item)
+    }
+    if (isObject) {
+      const obj = item as Record<string, unknown>
+      if (Object.hasOwn(obj, key)) {
+        return stringify(obj[key])
+      }
+    }
+    // Unresolved — string item referencing a non-`item` key, OR object item
+    // missing the key, OR `{{item}}` on an object item with no `item` field.
+    if (!seen.has(key)) {
+      seen.add(key)
+      missing.push(key)
+    }
+    return _full as string
+  })
+
+  if (missing.length > 0) return { ok: false, missing }
+
+  // 2) Restore literal braces.
+  const prompt = substituted.split(OPEN_SENTINEL).join("{{").split(CLOSE_SENTINEL).join("}}")
+  return { ok: true, prompt }
+}

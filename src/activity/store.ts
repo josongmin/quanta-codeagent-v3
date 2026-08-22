@@ -11,8 +11,8 @@
  * NO-THROW: feeding a malformed event degrades inside the pure reducer.
  */
 
-import { mergeProgress } from "./progress"
 import { type WorkflowEventLike, wfPhaseId, wfRunId, wfStepId } from "./producers/workflow"
+import { mergeProgress } from "./progress"
 import { type ActivityState, emptyActivityState, materialize, reduceActivity } from "./spine"
 import {
   type ActivityChange,
@@ -21,12 +21,7 @@ import {
   createActivitySubscription,
   type SubscribeOptions,
 } from "./subscription"
-import type {
-  ActivityEvent,
-  ActivityNode,
-  ActivitySnapshot,
-  NodeProgressEvent,
-} from "./types"
+import type { ActivityEvent, ActivityNode, ActivitySnapshot, NodeProgressEvent } from "./types"
 
 /** A live, mutable activity accumulator. */
 export interface ActivityStore {

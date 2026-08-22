@@ -8,10 +8,7 @@
 import { describe, expect, test } from "bun:test"
 import type { EngineAutomation } from "@/scheduler/automation-engine"
 import { chooseModel, rerouteResultToRouteEvent } from "@/scheduler/model-reroute"
-import {
-  AUTOMATION_ENV_FLAG,
-  assembleAutomation,
-} from "@/scheduler/runtime-wire"
+import { AUTOMATION_ENV_FLAG, assembleAutomation } from "@/scheduler/runtime-wire"
 import type { AgentLoopPort, ModelAvailabilityPort, RRule } from "@/scheduler/types"
 import type { AgentEvent } from "@/stream"
 

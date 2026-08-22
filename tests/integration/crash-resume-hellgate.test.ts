@@ -579,7 +579,9 @@ describe("RFC01-4 A1 boot rehydrate — LIVE (SavedSession injection)", () => {
       caught = error
     }
     expect(caught).toBeInstanceOf(ResumeRehydrateRefusedError)
-    expect((caught as InstanceType<typeof ResumeRehydrateRefusedError>).component).toBe("transcript")
+    expect((caught as InstanceType<typeof ResumeRehydrateRefusedError>).component).toBe(
+      "transcript",
+    )
     expect((caught as Error).message).toContain("entry #2")
   })
 

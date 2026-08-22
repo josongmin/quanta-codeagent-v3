@@ -1,0 +1,57 @@
+id: session-root-provider-port
+title: SessionRootProvider port — multi-tenant session-root abstraction
+section: 10
+subsystem: Session persistence — surface-agnostic rooting (Audit-W blocker #2)
+order: 13
+maturity: L4
+status: stable
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [interactive, headless, batch, daemon, ide, ci-bot]
+configurable: static
+owners: ["@songmin"]
+labels: ["surface:cli"]
+depends_on: [session-index-store, session-jsonl-envelope, session-sanitize-id, session-envelope-encoder, assemble-config]
+config_refs:
+  env: ["QUANTA_MEMORY_PATH", "QUANTA_SESSIONS_DIR"]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 6/6 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "pure internal multi-tenant rooting port, no UI affordance on any surface"
+purpose: |
+  Inverts the legacy process-wide `sessionsRoot()` resolver so multi-tenant
+  surfaces (Web / Tauri daemon) can supply per-tenant rooting strategies
+  without cross-user data leak. Interface `{ resolve(): Promise<string> }`
+  injected through the session slice's `*Async` overloads. CLI default
+  (`defaultSessionRootProvider`) re-resolves `runtimeConfig().sessionsDir ??
+  ~/.quanta/sessions` on each call so omitting the provider is byte-identical
+  to the legacy synchronous `sessionsRoot()`. `staticSessionRootProvider(root)`
+  factory for tests + pre-computed Web-tenant roots. Async resolve allows
+  Web providers to do IPC / DB lookup off the authenticated request without
+  blocking the event loop. Wired through `store.ts`, `paths.ts`, exported
+  from `session/index.ts`.
+evidence:
+  code:
+    - src/session/root-port.ts
+    - src/session/store.ts
+    - src/session/paths.ts
+    - src/session/index.ts
+    - src/apps/cli/internal.ts
+    - src/shared/runtime-config.ts
+  adrs: []
+  tests:
+    unit:
+      - tests/unit/session/root-port.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  Audit-W blocker #2 — without this port, a Web daemon serving authenticated
+  users would have user A's `loadSessionById("abc")` read user B's
+  `<root>/abc.json`. DIP at the session slice boundary; CLI surface stays
+  byte-identical by omitting the provider arg.

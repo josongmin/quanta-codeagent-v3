@@ -46,7 +46,9 @@
  *  - the plan notes — surface the frozen pin + bundle root on a dry-run;
  *  - the report partition key — distinct from `pro` by construction.
  */
+
 import { readFileSync } from "node:fs"
+import { errMessage } from "@/shared"
 import { ProMaxSampleError, selectProMaxSampleIds } from "../promax/corpus"
 import { PROMAX_V1_SNAPSHOT } from "../promax/provenance/frozen-snapshot"
 import {
@@ -98,6 +100,15 @@ const refuse = (what: string, why: string): never => {
       "share neither a grader nor a report partition.",
   )
 }
+
+/** The ON-BOX refusal, spelled once and shared by the admission gate and the
+ *  bootstrap port so the two can never drift into disagreeing about the lane. */
+const refuseOnBoxBootstrap = (): never =>
+  refuse(
+    "the on-box ProMax bootstrap",
+    `The frozen bundle is not in git and must not be downloaded on demand (PMX-00). ` +
+      `Provision it out of band and point ${PROMAX_BUNDLE_ROOT_ENV} at the verified root.`,
+  )
 
 export const PROMAX_PROFILE: DatasetFamilyProfile = {
   family: "promax",
@@ -166,13 +177,19 @@ export const PROMAX_PROFILE: DatasetFamilyProfile = {
     return `QUANTA_PROMAX_UPSTREAM_COMMIT=${shq(settings.upstreamCommit)} `
   },
 
+  // layer 3b′ — ADMISSION. The SAME refusal `setupBox` carries, hoisted into the
+  // port that runs BEFORE the box is mutated. `setupBox` fired at the END of
+  // `bootstrapBox` — after mkdir, a full `src/` rsync, an scp and a `bun
+  // install` — so ProMax's refusal was already landing on a rewritten box.
+  // Admission carries no ssh, so it cannot mutate anything on its way to
+  // refusing (aug-22 A-C).
+  admitBox: () => refuseOnBoxBootstrap(),
+
   // layer 3c — on-box bootstrap. Refuses; the bundle is deliberately not fetchable.
+  // ONE spelling with `admitBox` above: a lane that admission refuses must not be
+  // reachable through a second, later gate that says something different.
   setupBox: async () => {
-    refuse(
-      "the on-box ProMax bootstrap",
-      `The frozen bundle is not in git and must not be downloaded on demand (PMX-00). ` +
-        `Provision it out of band and point ${PROMAX_BUNDLE_ROOT_ENV} at the verified root.`,
-    )
+    refuseOnBoxBootstrap()
   },
 
   // layer 4 — preflight. REAL and fail-closed, and it runs BEFORE a box is
@@ -217,7 +234,7 @@ export const PROMAX_PROFILE: DatasetFamilyProfile = {
     } catch (err) {
       throw new ProMaxSampleError(
         `[${input.surface}] promax sample manifest: ${samplePath} could not be read ` +
-          `(${err instanceof Error ? err.message : String(err)}). REFUSING to fall back to the ` +
+          `(${errMessage(err)}). REFUSING to fall back to the ` +
           `whole corpus — ${PROMAX_SAMPLE_ENV} names the set this campaign claims to run.`,
       )
     }

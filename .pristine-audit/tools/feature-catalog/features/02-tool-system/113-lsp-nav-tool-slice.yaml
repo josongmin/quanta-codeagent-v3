@@ -1,0 +1,61 @@
+id: lsp-nav-tool-slice
+title: lsp_nav — 8 navigation tools (def/refs/hover/type-def/impl/symbols/rename-preview)
+section: 2
+subsystem: 코어 read-only 도구 — language-server navigation
+order: 113
+maturity: L4
+status: stable
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [interactive, headless, batch, daemon, ide, ci-bot]
+configurable: n-a
+owners: ["@songmin"]
+labels: [surface:cli]
+depends_on: [diagnostics-tool, lsp-bridge]
+surface_integration:
+  cli: full
+  web: full
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 3/3 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "Agent tools — each invocation + nav result preview render in browser via tool.invoked/tool.completed (session-hooks.ts:420-466), mapped tool_call/tool_result (session-host-turn-event-bridge.ts (tool_call/tool_result → tool.invoked/tool.completed via context-binding))."
+purpose: |
+  Eight navigation tools fronted by an injected `LspNavProvider` (same
+  slice-isolation pattern as `diagnostics` — `@/tool` MUST NOT import
+  `@/lsp`, biome-enforced): definition, references, hover, type-definition,
+  implementation, document-symbol, workspace-symbol, rename-preview. All
+  take 1-based human coords (line + character) and convert to 0-based LSP
+  `NavPos` internally; `path` is FsJail-validated via `resolveJailed`
+  BEFORE handing to the provider (only a branded `JailedPath`-equivalent
+  ever reaches the language server). `references` has optional
+  `includeDeclaration` (default true). `rename-preview` returns the
+  `NavRenamePreview` shape (per-file edit ranges) WITHOUT applying — apply
+  is a separate mutating step. Formatters (`formatHover` / `formatLocations`
+  / `formatSymbols` / `formatRenamePreview`) are pure + exported for unit
+  test isolation. Not registered in `buildDefaultTools` — the CLI wires
+  `lspNavTools(provider)` separately so embedding hosts can opt in.
+evidence:
+  code:
+    - src/tool/lsp_nav/index.ts
+    - src/tool/lsp_nav/formatters.ts
+    - src/tool/lsp_nav/types.ts
+    - src/runner/knobs/knobs/lsp.ts
+  adrs: []
+  tests:
+    unit:
+      - tests/unit/lsp-nav-formatters.test.ts
+      - tests/unit/lsp-nav-tools.test.ts
+      - tests/unit/lsp-nav-rpc.test.ts
+      - tests/unit/lsp-nav-per-tool.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  Companion of `diagnostics-tool` (order 112) — same provider-injection
+  pattern, same slice fence, same jail seam. `lsp-bridge.ts` in the agent
+  slice is the only cross-slice assembler allowed (mirror of `mcp-bridge.ts`).
+  Position schemas use `z.number().int().min(1)` so a `line: 0` request fails
+  validation before reaching the server. Workspace-symbol takes any `path`
+  in the workspace — the language server it picks dictates the search scope.

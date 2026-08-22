@@ -1,0 +1,64 @@
+id: flock-operations-telemetry
+title: Flock acquire/timeout/fail/stale_reclaim telemetry (ADR-0364)
+section: 8
+subsystem: per-session lockfile observability for disk-persistent session registry
+order: 124
+maturity: L3
+status: stable
+ui_surfaces: [n-a]
+monitoring: integrated
+modes: [n-a]
+configurable: integrated
+owners: ["@songmin"]
+labels: ["surface:core", "absorbed:codex", "default-off", "telemetry"]
+depends_on:
+  - codex-r2-multi-process-flock
+  - codex-r2-metrics-composition-wire
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 3/3 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "pure OTel metric counters into MetricEmitterPort collector, no UI affordance on any surface"
+purpose: |
+  Emits five `codex_r2.lock.*` metrics through the ADR-0352
+  `MetricEmitterPort` on every `acquireSessionLock` outcome path:
+  `acquire_success` / `acquire_timeout` / `acquire_fail` /
+  `stale_reclaim` counters plus an `acquire_latency_ms` gauge. The
+  emitter is an optional field on `AcquireSessionLockOpts` (+ a
+  top-level ergonomic alias on `DiskRegistryConfig`); absent ⇒ zero
+  emits, byte-identical to ADR-0356. Operators wire via the same
+  `adaptMetricsRegistryToEmitter` shim (ADR-0358) the cache + registry
+  decorators already use, so the lock health rides the same OTel
+  attribute family Codex established (`codex.{turn,tool}.*` mirrored
+  to `codex_r2.lock.*`). NO-THROW: hostile emitters are wrapped in
+  defence-in-depth try/catch so a buggy registry cannot break acquire.
+evidence:
+  code:
+    - src/agent/session-resource-registry/disk-adapter/file-lock.ts
+    - src/agent/session-resource-registry/disk-adapter/disk-store.ts
+    - src/agent/session-resource-registry/disk-adapter/types.ts
+  adrs:
+    - docs/decisions/0364-flock-operations-telemetry.md
+  tests:
+    unit:
+      - src/agent/session-resource-registry/disk-adapter/__tests__/file-lock-telemetry.hellgate.test.ts
+    integration: []
+    contract: []
+knobs:
+  - name: AcquireSessionLockOpts.metricsEmitter
+    type: 'MetricEmitterPort?'
+    default: 'undefined (zero emits — byte-identical to ADR-0356)'
+    notes: 'Per-acquire emitter. Composition roots pass the shared emitter from `adaptMetricsRegistryToEmitter` (ADR-0358).'
+  - name: DiskRegistryConfig.metricsEmitter
+    type: 'MetricEmitterPort?'
+    default: 'undefined'
+    notes: 'Top-level ergonomic alias. Falls into `cfg.lock.metricsEmitter` if the lock-knob bag does not already supply one.'
+deliberate_hold: null
+notes: |
+  Metric names exported as `LOCK_METRIC_*` constants for downstream
+  alert-rule reference. Same-process re-entry counts as `acquire_success`
+  (re-entry rate is itself an operational signal; trade-off favours
+  observability over exclusive-create-wins-per-second precision).

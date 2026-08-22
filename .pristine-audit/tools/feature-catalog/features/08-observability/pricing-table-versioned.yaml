@@ -1,0 +1,52 @@
+id: pricing-table-versioned
+title: Pricing table — versioned static prices + provider cache-read semantics
+section: 8
+subsystem: 비용 산정 — provider-aware cost math (RFC-0002 §5.3)
+order: 82
+maturity: L4
+status: stable
+ui_surfaces: [cli]
+monitoring: integrated
+telemetry_keys: []
+modes: [interactive, headless, batch, daemon, ide, ci-bot]
+configurable: static
+owners: ["@songmin"]
+labels: ["surface:core", "observability-primitive"]
+depends_on: [cost-cache-dashboard, slash-cost-panel, work-metrics]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 1/1 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "pure versioned static pricing library (no UI), the surface is the separate /cost panel"
+purpose: |
+  Pure (no network) versioned static price table. Every derived cost event
+  stamps `PRICING_VERSION` so historical costs can be re-derived after table
+  drift. Unknown model returns `null` (NOT an error, NEVER silent `$0`).
+  Crucially encodes the provider-aware semantics: Anthropic's `input_tokens`
+  EXCLUDES cache reads (disjoint bucket — total billed input = input +
+  cacheRead), while OpenAI's `prompt_tokens` ALREADY INCLUDES `cached_tokens`
+  (subset — adding cacheRead again double-counts). The `providerOf(model)`
+  helper derives the billing provider from the model name (`gpt`/`o1`/`o3` ⇒
+  openai, default ⇒ anthropic) so the fix needs no cross-slice change. Per-
+  model `cacheReadPerM` is set explicitly so the provider-documented
+  discount (OpenAI ≈ 0.5×, Anthropic ≈ 0.1×) stays auditable.
+evidence:
+  code:
+    - src/observability/pricing.ts
+  adrs: []
+  tests:
+    unit:
+      - tests/unit/pricing.test.ts
+      - tests/unit/pricing-hellgate.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  Single source-of-truth for `$/token` across `/cost` (slash-cost-panel),
+  `cost-cache-dashboard`, `work-metrics`, and eval `RunResult.costUsd`. The
+  `costUsd NaN` real bug noted in `may-22-quanta-wins-hellgate-verification`
+  is sealed by the hellgate test in the evidence above.

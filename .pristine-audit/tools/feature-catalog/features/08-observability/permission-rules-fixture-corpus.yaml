@@ -1,0 +1,62 @@
+id: permission-rules-fixture-corpus
+title: permission-rules fixture corpus — authorship-separated mustBlock/mustAllow catalog
+section: 8
+subsystem: 테스트 인프라 (HARD_DENY 적대 케이스 코퍼스 + 양방향 cross-check)
+order: 76
+maturity: L4
+status: stable
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [n-a]
+configurable: static
+owners: ["@songmin"]
+labels: ["surface:core", "observability-primitive"]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 2/2 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "pure adversarial test fixture catalog, no UI affordance on any surface"
+purpose: |
+  `tests/unit/permission-rules.fixtures.ts` 는 `src/permission/policy.ts`
+  의 `HARD_DENY_RULES` 카탈로그를 적대(mustBlock) + 회피-방지(mustAllow)
+  케이스로 봉인하는 데이터-only 코퍼스다. 이전엔 각 `HardDenyRule` 이
+  같은 파일에 자기 `mustBlock` / `mustAllow` 배열을 들고 있어서 — 룰 작성자
+  와 fixture 작성자가 같은 엔지니어 + 같은 PR + 같은 파일 diff 였다.
+  regex 에 버그가 있고 fixture 도 bypass 케이스를 빠뜨리면 양쪽이 동시에
+  틀려도 테스트는 그대로 그린이 된다. 본 코퍼스는 의도적으로 분리되어
+  "다른 reviewer (또는 최소 다른 commit / 다른 file diff) 가 fixture 를
+  curating" 하도록 authorship boundary 를 만든다. zod / bun:test import 없는
+  pure data 라 fixture 카탈로그로 읽힌다 (테스트 코드처럼 안 읽힌다).
+  Cross-check invariant 두 방향:
+   - 모든 entry key 가 `HARD_DENY_RULES` 의 어떤 rule.name 과 매칭 — 고아
+     fixture(이름 변경 leftover) 즉시 실패.
+   - 모든 rule.name 이 fixture 를 가짐 — fixture 없이 룰 추가 시 즉시 실패.
+  실제 적대 케이스: `rm -rf /` brace-HOME · `find / -delete` 절대-루트
+  exec-rm · `find . -name x -delete` action-flag · `git -c
+  core.pager=touch\ pwned` config-injection · `git --exec-path=/tmp/evil`
+  exec-path-hijack · etc. 각 group 은 mustBlock 옆에 lookalike
+  mustAllow(`rm -rf node_modules` · `git -C ./repo status`) 를 짝으로 두어
+  over-match 회귀까지 잡는다.
+evidence:
+  code:
+    - tests/unit/permission-rules.fixtures.ts
+    - src/permission/policy.ts
+    - src/permission/policy-rules.ts
+  adrs: []
+  tests:
+    unit:
+      - tests/unit/permission-rules.test.ts
+      - tests/unit/hard-deny-redos-bound.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  파일은 코드가 아니라 "rule catalog 의 적대 진실 (adversarial truth)" 로
+  취급. mustBlock 만으로는 false-positive 회귀 (e.g. 정상 `git -C` 차단)
+  를 못 잡으므로 mustAllow lookalike 가 필수 — 본 코퍼스는 두 축 모두를
+  필수 schema (`RuleFixture { mustBlock, mustAllow }`) 로 둬서 한쪽만 채운
+  fixture 가 schema 에서 거부되도록 한다.

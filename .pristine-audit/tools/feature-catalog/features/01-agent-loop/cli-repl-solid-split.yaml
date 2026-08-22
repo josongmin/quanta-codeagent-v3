@@ -1,0 +1,71 @@
+id: cli-repl-solid-split
+title: CLI REPL GodClass → SOLID split (abandoned in-place; orphan tree pruned)
+section: 1
+subsystem: CLI surface (R7/R8 follow-up — deferred to next SOLID restore round)
+order: 200
+maturity: L2
+status: hold
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [interactive]
+configurable: n-a
+owners: ["@songmin"]
+labels: [absorbed:codex, surface:core, tier:core]
+depends_on: [repl-code-smell-cleanup, runner-assemble-builders, cli-export-2026-05-21-l2-l3, repl-interactive-surface, slashctx-6-ports-wire-completion]
+config_refs:
+  env: ["QUANTA_DIFF_PREVIEW", "QUANTA_EFFORT", "QUANTA_HISTORY", "QUANTA_HISTORY_FILE", "QUANTA_HISTORY_MAX", "QUANTA_IDLE_MS", "QUANTA_IDLE_SUPPRESS", "QUANTA_IMAGE_MAX_QUEUE", "QUANTA_IMAGE_QUEUE", "QUANTA_MAX_TURNS", "QUANTA_MCP_CONFIG", "QUANTA_METRICS", "QUANTA_MODEL", "QUANTA_MULTILINE", "QUANTA_PERMISSION", "QUANTA_PILLS", "QUANTA_REJECT_LIMIT", "QUANTA_SANDBOX", "QUANTA_SNOOZE_DEFAULT_MS", "QUANTA_SPINNER", "QUANTA_SPINNER_INTERVAL_MS", "QUANTA_SUBAGENT"]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 5/5 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "pure internal CLI code-structure refactor, no distinct user-visible affordance on any surface"
+purpose: |
+  **Status truth-up (Slice B, 2026-05-25):** the 21-module split landed at
+  commit `acb8d187` was NEVER wired into `src/apps/cli/repl.ts`. Verified by
+  grep: zero importers in src/ or tests/ for any `./repl/*` path other than
+  the standalone `mcp-surface-wire.ts` translator. `repl.ts` re-inlined every
+  extracted helper (loadSeedImages / buildImageQueue / buildLifecycleBundle /
+  deriveMcpPillServers / snapshotAndFlushLifecyclePills / buildWorkMetricsSink
+  / buildIndicatorPort / buildTurnSummaryAndStream / buildTurnIndicatorAndStream
+  / buildSkillsCallback / installPills / tryRunReplSlash / renderTurnDashboard /
+  renderTurnError / readReplLine / classifyReplLine / buildCliPromptSource /
+  wrapPromptSourceWithIdleGate / installTurnCancel / topLevelUsage /
+  runSessionMain / runSlashMain) so the orphan tree was pure dead code
+  duplicating the live God-class.
+
+  **Action:** 20 of 21 orphan modules deleted (~1437 LOC). One survives
+  (`mcp-surface-wire.ts`) as a marked seam: it has the only independent unit
+  test (`tests/unit/mcp-surface-wire.test.ts`) and is the future wire when
+  `repl.ts` is finally re-split. See sibling feature
+  `repl-orphan-resolution` for the full per-module decision matrix.
+
+  **Deferred work:** the SOLID restore (re-extract runRepl helpers and have
+  `repl.ts` import them instead of inlining) is deliberately held until a
+  follow-up slice can both delete repl.ts duplicates AND update repl.ts in
+  one atomic refactor. Splitting the work as commit acb8d187 did (extract
+  WITHOUT migrate) created the dead code we just pruned.
+evidence:
+  code:
+    - src/apps/cli/repl.ts
+    - src/apps/cli/repl/mcp-surface-wire.ts
+    - src/apps/cli/internal.ts
+    - src/apps/cli/diff-preview.ts
+    - src/apps/cli/status-pills.ts
+  adrs: []
+  tests:
+    unit: [tests/unit/mcp-surface-wire.test.ts]
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold:
+  reason: |
+    SOLID restore deferred to a future slice that can atomically delete the
+    repl.ts inlined duplicates AND re-extract them. Splitting extract+migrate
+    is what produced the orphan tree pruned in Slice B (2026-05-25).
+notes: |
+  Pre-prune snapshot: 21 modules / 1556 LOC at `src/apps/cli/repl/`. Post-prune:
+  1 module / 119 LOC. Net delta: −20 files / −1437 LOC. Companion truth-up
+  yaml: `tools/feature-catalog/features/10-app/repl-orphan-resolution.yaml`.

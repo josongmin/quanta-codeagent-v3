@@ -1,0 +1,170 @@
+id: subagent-msg-delivery-modes
+title: Subagent message delivery modes — queue / steer / interrupt (Codex followUpQueueMode parity)
+section: 9
+subsystem: Subagent coordination (targeted child delivery timing)
+order: 543
+maturity: L3
+status: refined
+ui_surfaces: [cli]
+monitoring: integrated
+modes: [interactive, headless, batch, daemon, ide, ci-bot]
+configurable: partial
+owners: ["@songmin"]
+labels: ["surface:core"]
+depends_on: [subagent-introspect-tools, peer-teammate-messaging, subagent-mailbox]
+config_refs:
+  env: [QUANTA_SUBAGENT_FOLLOWUP, QUANTA_SUBAGENT_STEER]
+surface_integration:
+  cli: full
+  web: missing
+  method: audited
+  verified: "2026-07-20"
+  evidence:
+    cli: "followup_task is a gated LLM tool (QUANTA_SUBAGENT_FOLLOWUP, CLI default-ON); queue/steer/interrupt traverse the real delivery controller, control endpoint, child loop, and correlated receipt path in tests/integration/subagent-delivery-modes-real-loop-e2e.test.ts. Steer admission returns pending status + deliveryId without claiming an effective mode; admission and every terminal receipt are correlated through the typed subagent_delivery stream event, with terminal receipts also on the operator-notice bus."
+    web: "the typed subagent_delivery event exists and is durably recorded, but an explicit browser rendering/activation proof is not yet present"
+purpose: |
+  Codex's `followUpQueueMode` (`queue | steer | interrupt`, corpus-verified in
+  `.extracted_source/codex-ide` — `turn/steer` + `turn/interrupt` RPC +
+  `multi_agents_v2/interrupt_agent.rs`) absorbed onto quanta's EXISTING targeted-
+  delivery substrate. RFC docs/plans/jul-18-subagent-message-delivery-modes-rfc.md.
+  quanta ALREADY had a passive peer mailbox, targeted `followup_task` wake, a
+  per-turn interrupt gate, and a `steer()`/`ActiveTurnState` authority — those are
+  REUSED, not rebuilt. This slice adds ONE canonical typed command contract across
+  them and the genuinely-missing capability: targeted child STEER.
+
+  TWO ORTHOGONAL AXES (`src/shared/delivery-mode.ts`): `mode` (queue|steer|
+  interrupt = WHEN the child's model receives the message) and `activation`
+  (passive|ensure-turn = whether an idle child is scheduled). `subagent_send_message`
+  stays queue+passive; `followup_task` is ensure-turn and accepts all three modes.
+
+  CANONICAL CONTRACT (`src/agent/subagent-delivery/`): one decide/apply controller
+  (`SubagentDeliveryPort`) validates target/lineage/self BEFORE any mutation (every
+  reject is pre-mutation), resolves task-id → mailbox label + control endpoint, and
+  applies EXACTLY ONE of mailbox-enqueue / per-turn interrupt / steer-submit. The
+  outcome taxonomy is closed and honest: `applied` / `accepted (steer_pending)` /
+  `degraded (typed reason)` / `rejected (typed reason)` — no boolean `ok`, and every
+  runtime downgrade (e.g. steer on a non-steerable turn) is a typed `degraded`
+  carrying requested vs effective mode, never a silent success.
+
+  SANCTIONED CONTROL ENDPOINT (`src/agent/subagent-control-endpoint.ts` +
+  `TurnWakeRegistry` superset): each running child registers ONE typed endpoint
+  (wake / interrupt / steer) under its task id; the endpoint exposes closed commands
+  only — no mutable `ActiveTurnState` / `ConversationActionSurface` / `AbortController`
+  handle escapes to callers (Codex "direct app-server input is not allowed for v2
+  sub-agents" posture). `interrupt()` reuses the per-turn abort (NOT terminal
+  `forceStop`, which stays a distinct kill) so the child reports-and-continues.
+
+  TARGETED STEER (`src/agent/loop/{turn-iteration,same-turn-engine}.ts`): admitted
+  steer is consumed at a POST-STREAM SAFE POINT — before `runTurn` honors a final
+  `end_turn`, a pending steer is injected and the SAME turn re-streams one more
+  model call (no abort, no mailbox duplicate). A `SubagentSteerFinalizationPort`
+  guarantees every accepted steer terminates in EXACTLY ONE correlated receipt
+  (applied / degraded-fallback / cancelled / failed); an interrupt racing an accepted steer
+  supersedes it (`superseded_by_interrupt`) with the steer preserved via one mailbox
+  fallback. Remote-steer admission is bounded (`action_queue_full` /
+  `same_turn_budget_exhausted`).
+
+  TRUST: all modes route the body through the ONE peer formatter
+  (`src/agent/subagent-mailbox/peer-inbox.ts` `formatPeerBody` — redact → escape →
+  `[teammate <from> — untrusted]`); steer never injects a raw trusted user string.
+evidence:
+  code:
+    - src/shared/delivery-mode.ts
+    - src/agent/subagent-delivery/types.ts
+    - src/agent/subagent-delivery/ports.ts
+    - src/agent/subagent-delivery/controller.ts
+    - src/agent/subagent-delivery/target-resolver.ts
+    - src/agent/subagent-control-endpoint.ts
+    - src/subagent/turn-wake.ts
+    - src/subagent/turn-gate.ts
+    - src/subagent/introspect-tools.ts
+    - src/agent/subagent-runner.ts
+    - src/agent/subagent-runner-child-config.ts
+    - src/agent/loop/turn-iteration.ts
+    - src/agent/loop/same-turn-engine.ts
+    - src/agent/tier1/subagent-introspect.ts
+    - src/agent/optional-ports.ts
+    - src/stream/types.ts
+    - src/stream/item-stream-projector.ts
+    - src/stream/adapters/jsonl-recorder.ts
+    - src/stream/adapters/jsonl-recorder-communication-data.ts
+    - src/stream/adapters/stdout.ts
+    - src/apps/cli/timeline-panel.ts
+  adrs: ["docs/plans/jul-18-subagent-message-delivery-modes-rfc.md"]
+  tests:
+    unit:
+      - tests/unit/subagent-delivery-contract-hellgate.test.ts
+      - tests/unit/subagent-control-endpoint-hellgate.test.ts
+      - tests/unit/subagent-delivery-controller-hellgate.test.ts
+      - tests/unit/subagent-steer-safepoint-hellgate.test.ts
+      - tests/unit/subagent-introspect-hellgate.test.ts
+      - tests/unit/subagent-steer-degrade-notice-hellgate.test.ts
+      - tests/unit/peer-message-item-stream-and-render-hellgate.test.ts
+      - tests/unit/peer-message-recorder-hellgate.test.ts
+    integration:
+      - tests/integration/subagent-delivery-modes-real-loop-e2e.test.ts
+    contract: []
+knobs:
+  - name: QUANTA_SUBAGENT_FOLLOWUP
+    where: src/agent/optional-ports.ts
+    default: 'false'
+    purpose: |
+      REUSED (not new) — the existing targeted-control gate. ON ⇒ `followup_task`
+      registered + the control endpoint (wake/interrupt) wired. queue + interrupt
+      modes ride this gate; behavior for those two is byte-identical to the pre-RFC
+      followup baseline. CLI default-ON; bench/web opt-in.
+  - name: QUANTA_SUBAGENT_STEER
+    where: src/agent/optional-ports.ts
+    default: 'false'
+    purpose: |
+      The ONLY genuinely-new gate — the child-steer plane (shared steer retention +
+      finalization port over the session mailbox) + the loop post-stream safe-point
+      drain. Default OFF ⇒ `mode:"steer"` is REJECTED as `mode_disabled` (never a
+      silent queue), no child conversation-action surface / steer plane allocated,
+      and the `runTurn` safe-point branch is byte-identical (guarded on
+      `config.childSteerDrain !== undefined`). ON ⇒ targeted steer admits + applies
+      at the safe point. The real-loop integration rail covers enabled and default-off behavior.
+notes: |
+  Owner-local hellgates GREEN (verified 2026-07-18, integrated WS1–WS5):
+  contract 8 · control-endpoint 14 · controller 23 · steer-safepoint 15 ·
+  introspect 33 (+ turn-interrupt/turn-wake-gate baseline preserved) — 165 pass
+  across the campaign suite; src typecheck clean (forced recompile). Non-vacuity
+  pinned by red-on-injection on each workstream (WS2 interrupt outcome, WS3
+  reject-before-mutation, WS4 safe-point re-stream, WS5 boolean-gone unknown-key).
+
+  Adversarial hellaudit R1 (cross-workstream seam hunt) found + FIXED 2 real bugs
+  the per-workstream green rails missed (fake endpoints hid the real seam):
+  HIGH-1 — followup_task(mode:"steer") THREW on its happy path (the tool omits
+  expectedTurnId → controller submitted "" → the steer authority's assertRequestShape
+  throws); fixed by resolving the omitted id to the child's live turn
+  (endpoint.currentTurnId) + defense-in-depth in submitSteer, pinned by a
+  real-endpoint regression (red-on-injection confirmed). MED-2 — a followup-on/
+  steer-off child leaked a conversation-action port (RFC §9 byte-identity break);
+  fixed by gating that allocation on the steer plane, with a paired-control test.
+  Post-fix: 246 pass, src typecheck + file-scoped biome clean.
+
+  STRUCTURAL REPAIR (verified 2026-07-20): finalization uses a claim/commit
+  retention protocol; throwing mailbox adapters terminate as correlated
+  `failed(mailbox_error)` receipts and throwing receipt sinks cannot poison the
+  loop. `followup_task` separates pending admission from final application and
+  preserves `deliveryId`. `TurnWakeRegistry` now stores one discriminated
+  registration cell per task, eliminating endpoint/label/waker split-brain.
+
+  OBSERVABILITY: the existing jul-15 peer-message stream substrate is landed.
+  Delivery lifecycle uses a distinct typed `subagent_delivery` event so content
+  mail and control receipts are not conflated. Admission and finalization share
+  `deliveryId`; recorder, item projection, stdout, and CLI timeline consumers are
+  wired in the same change. Explicit browser rendering remains unverified.
+
+  SCOPE / DEFERRED (honest):
+  - WS7 real-loop integration covers 5 scenarios and promotes this to L3. It is a
+    deterministic in-process real child-loop rail, not an external CLI/browser smoke.
+
+  Absorption map: Codex `followUpQueueMode: queue|steer|interrupt` → the `mode` axis;
+  `turn/interrupt` + `multi_agents_v2/interrupt_agent.rs` → the endpoint `interrupt()`
+  over the per-turn gate (report-and-continue, NOT `forceStop`); `turn/steer` +
+  steerable-turn guards → the safe-point drain honoring `steer()`'s review/compact/
+  standalone rejections; "direct input not allowed for v2 sub-agents" → the closed
+  typed endpoint (no mutable-state leak). What this is NOT: no second mailbox, no
+  second policy/fallback table (the steer→delivery bridge `steerRejectionToDelivery`
+  reuses the `SteerRejectionReason` SSOT), no terminal-kill reuse for interrupt.

@@ -1,0 +1,37 @@
+id: repair-escalation-knob
+title: repair-escalation — T-601 multi-owner escalation knob
+section: 10
+subsystem: 벤치 — closure repair-escalation lever
+order: 2415
+maturity: L3
+status: new
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [batch]
+configurable: integrated
+owners: ["@songmin"]
+labels: [surface:bench, default-off]
+depends_on: [proof-driven-bench-closure]
+config_refs:
+  env: [QUANTA_BENCH_REPAIR_ESCALATION]
+surface_integration:
+  cli: missing
+  web: na
+  method: audited
+  verified: "2026-06-19"
+  evidence:
+    cli: "bench posture projection only"
+    web: "no browser affordance"
+purpose: 'Default-OFF NOOP-apply registry knob: typed RepairEscalationDecision with closed reason taxonomy.'
+evidence:
+  code:
+    - src/runner/knobs/knobs/repair-escalation.ts
+  adrs: [14]
+  tests:
+    unit:
+      - tests/unit/proof-closure-knobs-wiring-hellgate.test.ts
+      - tests/unit/repair-escalation.test.ts
+    integration: []
+    contract: []
+knobs: ["repair-escalation"]
+deliberate_hold: null

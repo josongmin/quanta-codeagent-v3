@@ -1,0 +1,99 @@
+id: subagent-introspect-tools
+title: list_agents + followup_task — subagent introspection (enumerate + deliver-and-trigger)
+section: 1
+subsystem: tier-1 subagent tools (ADR-0437)
+order: 437
+maturity: L3
+status: stable
+ui_surfaces: [cli, api]
+modes: [interactive, batch, headless]
+configurable: integrated
+owners: ["@songmin"]
+labels: ["absorbed:codex", "surface:tool", "tier:tier1"]
+depends_on: []
+surface_integration:
+  cli: full
+  web: partial
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 8/8 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "list_agents/followup_task surface in the browser as tool.invoked/tool.completed cards via the bridge; the rich wake/interrupt/progress signals ride B1-dropped subagent events so the render is thin"
+purpose: |
+  Two Codex multi_agents_v2 tools absorbed. list_agents — read-only,
+  concurrency-safe enumeration over TaskRegistry.list() (snapshot copy); 4-status
+  registry union narrowed to a 3-bucket view (running/settled/failed); prefix
+  filters by id OR label; includeSettled toggles finished children; limit caps.
+  Depth/label from an OPTIONAL AgentMetaRegistry side-table (option B — the
+  frozen TaskRecord is NOT mutated; spawn_agent writes it when wired, no-op
+  otherwise); absent ⇒ depth=0 + description-derived label. followup_task —
+  deliver-and-trigger to a non-root running child: delivery is SYNTHESIZED over
+  the injected mailbox send (NOT a new store — mailbox keeps quota/escape/NO-THROW),
+  the trigger is a new persistent TurnWakeRegistry (sibling of
+  InputChannelRegistry but persistent + for busy/idle children, not one-shot/paused).
+  Outcome woke (idle→immediate)/queued (mid-turn→next turn)/no-receiver;
+  interrupt:true passes reason "interrupt". Non-root only (root never in
+  registry ⇒ id_unknown), self-target rejected, and HONEST DEGRADATION: no live
+  waker ⇒ cause:no_waker but the mailbox delivery still stands. Wired honesty:
+  list_agents fully reflects real registry+meta (incl. a spawn-through-6-tool
+  integration test); followup delivery is wired, AND (ADR-0437 follow-up, RFC §11)
+  the runner now registers a real per-child waker into runAgent: spawn_agent
+  threads its registry taskId onto SubagentRequest, the runner mints a per-child
+  SubagentTurnGate + registers a Waker (bridged to that gate) under the SAME id
+  followup_task targets, and the child loop PARKS on the gate at its clean-
+  completion point. So followup_task on an idle child returns woke and the child
+  runs ANOTHER turn (the next turn's mailbox read surfaces the message — existing
+  per-turn injection seam, no parallel driver); a busy child returns queued and
+  the turn runs after the current one; abort/dispose ⇒ settle (loop finishes).
+  INTERRUPT (ADR-0437 follow-up — interrupt:true now ACTUALLY interrupts): the
+  gate owns a per-turn AbortController; runTurn (buildTurnSessionView) calls
+  armTurn(loopSignal) each turn to mint a fresh controller and an EFFECTIVE turn
+  signal AbortSignal.any([loopSignal, turnAbort]) threaded into the in-flight LLM
+  stream + streamingTurn phase checks + tool ctx — the SAME AbortController seam
+  task_stop/forceStop use (no parallel abort path). wake("interrupt") on a BUSY
+  child aborts that controller (the in-flight stream/tool unwinds NOW) + records
+  pending ⇒ the turn returns {kind:interrupted}, the loop PARKS, the pending wake
+  resumes a FRESH turn that handles the message; the child is NOT killed
+  (controller reset by next armTurn). classifyTurnAbort distinguishes interrupt
+  from a real lifetime cancel via the ORIGINAL loopSignal. IDLE child interrupt =
+  plain wake (nothing in flight). followup NEVER aborts. Guarantee: turn-level +
+  cooperative-tool-level (an already-running tool sees ToolContext.signal; we do
+  not force-kill a tool ignoring its signal — same cooperative contract as
+  task_stop). Default-OFF: buildSubagentIntrospectBlock returns []
+  unless enableIntrospect/enableFollowup gates set (followup also needs
+  mailbox+wake substrate) ⇒ byte-identical.
+evidence:
+  code:
+    - src/subagent/introspect-tools.ts
+    - src/subagent/turn-wake.ts
+    - src/subagent/turn-gate.ts
+    - src/subagent/agent-meta.ts
+    - src/agent/subagent-runner.ts
+    - src/agent/loop.ts
+    - src/agent/tier1/subagent-introspect.ts
+    - src/agent/optional-ports.ts
+  adrs: ["docs/decisions/0437-subagent-introspect.md"]
+  tests:
+    unit:
+      - tests/unit/subagent-introspect-hellgate.test.ts
+      - tests/unit/subagent-turn-wake-gate-hellgate.test.ts
+      - tests/unit/subagent-turn-interrupt-hellgate.test.ts
+      - tests/unit/subagent-knobs-wire-hellgate.test.ts
+    integration: []
+    contract: []
+knobs: ["QUANTA_SUBAGENT_INTROSPECT", "QUANTA_SUBAGENT_FOLLOWUP", "enableIntrospect", "enableFollowup"]
+deliberate_hold: null
+notes: |
+  Reuses TaskRegistry list()/get() (registry mutate 0) + MailboxPort send
+  (followup does NOT replace the mailbox — N1). TurnWakeRegistry is a sibling of
+  InputChannelRegistry; the one-shot/paused vs persistent/busy distinction is
+  intentional. Frozen contracts (registry.ts, tools-6.ts schemas, handlers-6
+  schemas) untouched; new state isolated in side-ports (AgentMetaRegistry,
+  TurnWakeRegistry). agentMeta is an additive optional dep on
+  SpawnAgentDeps/Subagent6Deps — no-op when unwired (byte-identical spawn path).
+  2026-06-02 follow-up — dead-seam CLOSED: QUANTA_SUBAGENT_INTROSPECT=on and
+  QUANTA_SUBAGENT_FOLLOWUP=on now set the gates AND wire the dependency ports
+  (AgentMetaRegistry / shared TurnWakeRegistry / mailbox) at the composition
+  root (wireOptionalAgentPorts). The shared TurnWakeRegistry is what the runner
+  registers per-child wakers into, so followup_task against a running child
+  reports triggered (not no_waker). Default-OFF unchanged.

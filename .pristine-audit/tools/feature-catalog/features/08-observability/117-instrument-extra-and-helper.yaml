@@ -1,0 +1,48 @@
+id: instrument-extra-and-helper
+title: PlanQueue/Budget/LSP wraps + withFullObservability + SLO doc
+section: 8
+subsystem: metrics export (ADR-0144/0158/0159/0160)
+order: 117
+maturity: L2
+status: stable
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [n-a]
+configurable: partial
+owners: ["@songmin"]
+labels: ["surface:observability", "tier:wrap"]
+depends_on: [instrument-wrap, metrics-typed-port-slice, otel-sink, budget-ledger, instrument-shadow-tool-routing]
+surface_integration:
+  cli: missing
+  web: missing
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "src evidence not reachable from the interactive CLI entry (src/apps/cli/index.ts) — wired only into other apps (eval/bench/probe/headless) or unwired"
+    web: "metrics emitted to OTel backend plus SLO doc, never to the quanta web frontend"
+purpose: |
+  Final closeout for 24-metric recipe coverage: 3 additional typed wraps
+  (PlanQueueStore enqueue/drain/clear; BudgetLedger record + breach surfacing;
+  LspClient 4-method Proxy-based duck-typed) + `withFullObservability(bag,opts)`
+  composition-root one-call auto-instrument helper + per-metric SLO/SLI document.
+  All wraps preserve plane-clean (slices import nothing from `@/observability`);
+  helper is missing-key tolerant (undefined → passthrough). SLO doc seeds
+  AlertManager threshold decisions + future SLO-burn-rate alerting.
+evidence:
+  code:
+    - src/observability/metrics/instrument-plan-queue.ts
+    - src/observability/metrics/instrument-budget.ts
+    - src/observability/metrics/instrument-lsp.ts
+    - src/observability/metrics/observability-helper.ts
+  adrs: ["docs/decisions/0161-monitoring-full-coverage.md", "docs/decisions/0162-budget-cost-histogram.md"]
+  tests:
+    unit:
+      - tests/unit/observability-metrics-instrument-extra-hellgate.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  LSP wrap is Proxy-based duck-typed (no LspClient class import — avoids slice
+  coupling). Budget per-event cost histogram + PlanQueue collapse-count metric
+  deferred (require upstream API expansion).

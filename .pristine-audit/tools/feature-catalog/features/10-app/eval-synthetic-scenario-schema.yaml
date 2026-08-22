@@ -1,0 +1,54 @@
+id: eval-synthetic-scenario-schema
+title: eval Tier 1 — Scenario JSON schema + tolerant loader/parser
+section: 10
+subsystem: eval 앱 — Tier 1 fixture format
+order: 84
+maturity: L4
+status: stable
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [headless, batch]
+configurable: static
+owners: ["@songmin"]
+labels: ["surface:bench"]
+depends_on: [eval-synthetic-generator, eval-synthetic-judge, eval-tier1-synthetic, fallback-kinds-policy, llm-factory]
+surface_integration:
+  cli: missing
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "src evidence not reachable from the interactive CLI entry (src/apps/cli/index.ts) — wired only into other apps (eval/bench/probe/headless) or unwired"
+    web: "pure internal schema/parser primitive, no UI affordance on any surface"
+purpose: |
+  Tier 1 합성 시나리오 schema (`scenarios/<usecase-id>/<scenario-id>.json`).
+  Schema version 1, additive — 새 optional 필드 추가는 backward-compat,
+  breaking change는 SCENARIO_SCHEMA_VERSION bump 필요. `Scenario` shape:
+  `{ schema, id, usecase, title, prompt, files?, setupCmd?, rubric[≥1],
+  forbidden?, maxTurns? }`. `parseScenario`는 strict — `forbidden`에 non-string
+  들어가면 safety net이 무력화되므로 throw, `maxTurns`는 positive integer
+  강제 (NaN/0/negative이면 runAgent crash). `RubricItem.weight`는 (0,1] 범위
+  벗어나면 default 1로 강등. `loadScenarioFile`이 read + parse를 합친 single
+  entry point. JSON 선택 (YAML 아님) — parser dep 없음 + hand-editable +
+  diff-clean. Tier 1 runner와 Tier 4 compare 양쪽이 이 schema로 시나리오를
+  로드.
+evidence:
+  code:
+    - src/apps/eval/synthetic/scenario.ts
+    - src/apps/eval/synthetic/index.ts
+    - src/apps/eval/synthetic/runner.ts
+    - src/apps/eval/synthetic/generator.ts
+    - src/apps/eval/synthetic/judge.ts
+  adrs: []
+  tests:
+    unit:
+      - tests/unit/eval-storage-roundtrip.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  Scenario id는 filename stem과 일치해야 — generator/runner가 그렇게 가정.
+  `files` 목록은 sandbox 안에만 쓸 수 있게 path-escape 검사는 `runner.ts`에서
+  수행 (`isInsideSandbox` 가드). rubric 최소 1, generator는 더 강한 ≥3
+  constraint를 자체 enforces (`generator.ts/validateExtra`).

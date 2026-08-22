@@ -1,0 +1,66 @@
+id: bench-repair-context-builder
+title: Bench repair-round context — seed message + cumulative-diff truncation
+section: 10
+subsystem: 벤치 — repair round (RFC §16)
+order: 133
+maturity: L4
+status: stable
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [headless, batch]
+configurable: n-a
+owners: ["@songmin"]
+labels: ["surface:bench"]
+depends_on: [runrepairrounds]
+surface_integration:
+  cli: missing
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "src evidence not reachable from the interactive CLI entry (src/apps/cli/index.ts) — wired only into other apps (eval/bench/probe/headless) or unwired"
+    web: "pure seed-message + diff-truncation builder internal to the repair-round loop, no standalone user-visible affordance on any surface"
+purpose: |
+  Pure seed-message builder for the b2 repair-round orchestrator (RFC §16,
+  ADR-0014). Given the running cumulative diff and the latest validator
+  failure tail, produces the seed user message for the NEXT repair round.
+
+  Output structure (in order):
+    1. `Repair round <round>.`
+    2. Original problem statement (verbatim, trimmed only if hugely over budget)
+    3. `Your patch so far (cumulative):` + truncated cumulative diff
+    4. `Validation failed. Tail of failing output:` + tail-truncated failTail
+    5. Forceful next-step instruction — "do NOT revert; fix source; re-verify"
+       (specifically forbids `git checkout`, `git reset`, `git clean`, `git stash`).
+
+  Truncation order to fit `maxBytes` (default 12000):
+    failTail first (keep TAIL), then cumulativeDiff (drop MIDDLE hunks,
+    keep `diff --git` headers + first/last hunks), then trim the problem
+    statement only if still over budget. Each truncation leaves a visible
+    `… <N bytes truncated>` marker so the model can reason about what
+    it isn't seeing.
+
+  Slice no-leak structural guarantee: the orchestrator + this builder
+  + the validator import ONLY from `./types`. They never import the
+  agent slice; bench runner stays the sole composer.
+evidence:
+  code:
+    - src/apps/bench/eval/repair/context.ts
+    - src/apps/bench/eval/repair/index.ts
+    - src/apps/bench/eval/repair/validator.ts
+    - src/apps/bench/eval/repair/types.ts
+  adrs: [14]
+  tests:
+    unit:
+      - tests/unit/repair-context.test.ts
+      - tests/unit/repair-validator.test.ts
+    integration:
+      - tests/integration/bench-repair.test.ts
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  Companion of the placeholder `runrepairrounds` yaml which intentionally
+  leaves `evidence.code: []` for the orchestrator umbrella; this entry
+  wires the actual policy modules. Sandbox is NOT reset between rounds —
+  the runner is responsible for "continue-from-patched-tree" semantics.

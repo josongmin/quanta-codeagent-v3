@@ -1,0 +1,71 @@
+id: lexical-search-bm25-ripgrep
+title: LexicalSearch — BM25 + ripgrep pluggable retrieval engine (ADR-0260)
+section: 4
+subsystem: Retrieval first-stage (lexical axis)
+order: 63
+maturity: L3
+status: new
+ui_surfaces: []
+monitoring: n-a
+modes: [interactive, headless, batch, daemon, ide, ci-bot]
+configurable: static
+owners: ["@songmin"]
+labels: [absorbed:none, surface:core]
+depends_on: []
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 6/6 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "pure retrieval engine port/adapters, ui_surfaces empty, no consumer wired, no UI affordance"
+purpose: |
+  ADR-0159 retrieval slice 의 first-stage 누락 봉합 — Phase 7 pluggable
+  lexical engine. 닫힌 `LexicalSearch` port (`index` / `query` / `clear` /
+  `size`) + 2 production adapter (in-memory BM25 + ripgrep shell-out) +
+  deterministic headless stub. BM25 는 Lucene defaults (k1=1.5, b=0.75)
+  configurable + UTF-8 word-boundary tokenizer (`\p{L}\p{N}+`) — 기존
+  `rerank/bm25-secondary` 의 ASCII-only tokenizer 는 다른 axis 라 unchanged.
+  Ripgrep adapter 는 `rg --json` shell-out + `grep -F -r -c` fallback +
+  `degradeReason: "rg-missing"` 한 번만 surface. 모든 query 는 `--fixed-strings`
+  로 literal match (regex 메타 escape 불필요). 5-arm closed `LexicalError`
+  (`no-search-binary` / `spawn-failed` / `parse-failed` / `invalid-query`
+  / `aborted`) — exhaustive switch 강제. Default-OFF: 어떤 hybrid-query
+  consumer 도 pre-wire 안 됨, byte-identical land. Stub 은 BM25 scoring
+  을 미러링해 prod adapter 와 byte-identical (스코어 drift 0).
+evidence:
+  code:
+    - src/retrieval/lexical/types.ts
+    - src/retrieval/lexical/port.ts
+    - src/retrieval/lexical/bm25-impl.ts
+    - src/retrieval/lexical/ripgrep-impl.ts
+    - src/retrieval/lexical/headless-stub.ts
+    - src/retrieval/lexical/index.ts
+  adrs: [260]
+  tests:
+    unit:
+      - tests/unit/retrieval/lexical-hellgate.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold:
+  reason: 'Composition-root wiring (`hybrid-query.bm25Source` 슬롯) 는 후속 PR. 현재는 port + 2 adapter + stub + 15-case hellgate 만 land. 호출 사이트는 `createBm25LexicalSearch()` 혹은 `createRipgrepLexicalSearch({ root, spawner })` 인스턴스를 `bm25Source` 콜백에서 호출하면 즉시 활성.'
+  promotion_path: 'composition root 에서 (1) lexical engine 인스턴스 1 회 생성, (2) 기존 `bm25Source: async () => (await engine.query(q, k)).value` 와이어, (3) `degradeReason` 을 observability sink 로 forward. 3-line wire 만으로 L4.'
+notes: |
+  - 5-arm closed `LexicalError` union: 추가 arm 은 `ALL_LEXICAL_ERROR_KINDS`
+    tuple 갱신 필수 (모든 consumer exhaustive switch compile fail).
+  - Tokenizer 는 `\p{L}\p{N}+` (Unicode property class) — CJK / Korean /
+    Cyrillic / Arabic 포함. 기존 `bm25-secondary` reranker 의 `[A-Za-z0-9]+`
+    은 다른 axis 라 변경 없음 (의도적 분리).
+  - Ripgrep `--fixed-strings` (`-F`) 로 literal match — regex 메타
+    (`. * + ? [ ]` 등) escape 불필요. Phrase / regex / boolean DSL 은
+    future ADR.
+  - degrade order: `rg` → `grep` → `Err("no-search-binary")`. degrade 는
+    FIRST `index` result 의 `degradeReason` 으로 한 번만 surface (이후
+    query 마다 재-probe 안 함).
+  - Stub 은 BM25 scoring 을 prod adapter 와 byte-identical 미러링.
+    HELL-LX-01 (round-trip) + HELL-LX-13 (10k-doc sanity) 가 두
+    adapter 모두에서 실행되어 lock-step 봉인.
+  - AbortSignal: pre-aborted → 즉시 `aborted` (spawn 회피). in-flight
+    abort 는 proc.kill() + 동일 결과.

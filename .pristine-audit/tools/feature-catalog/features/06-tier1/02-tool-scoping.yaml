@@ -1,0 +1,50 @@
+id: tool-scoping
+title: tool-scoping 강제
+section: 6
+subsystem: 스킬 — `Skill` 도구
+order: 2
+maturity: L4
+status: stable
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [interactive, headless]
+configurable: integrated
+config_refs:
+  env: ["QUANTA_SKILLS_DIR"]
+owners: ["@songmin"]
+labels: ["surface:core", "tier:1"]
+depends_on: [skill-7-scope-tiering, skill-registry-precedence, skill-admin-enforcement, skill-audit-log, quantaskillsdir]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 4/5 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "pure internal permission policy fence (positive-set tool gate), no user-visible UI affordance"
+purpose: |
+  활성 스킬의 `allowedTools` 프론트매터를 LOAD-BEARING 권한 경계로 강제 —
+  스킬이 활성화된 동안 그 set에 없는 도구는 호출이 차단된다 (deny
+  message는 위반 도구명 + 허용 목록을 명시해 모델이 다른 경로로 회복
+  가능). `allowedTools: []` 는 NO tools allowed를 의미하며 빈 array가
+  default fail-open으로 해석되지 않는다. positive-set 표현이므로 신규
+  도구는 명시적으로 enroll되지 않으면 자동 BLOCK.
+evidence:
+  code:
+    - src/skill/skill-tool.ts
+    - src/skill/skill-vs-extension.ts
+    - src/skill/skill-frontmatter.ts
+    - src/skill/index.ts
+    - src/agent/tier1/skill.ts
+  adrs: [40]
+  tests:
+    unit:
+      - tests/unit/skill.test.ts
+      - tests/unit/skill-vs-extension.test.ts
+      - tests/unit/skill-overrides.test.ts
+    integration:
+      - tests/integration/loop-skill-override.test.ts
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: ''

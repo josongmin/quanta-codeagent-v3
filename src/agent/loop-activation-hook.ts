@@ -51,6 +51,7 @@ import type { ParsedMention } from "@/agent/mention-injection"
 import type { AggregatedActivation } from "@/agent/plugin-activation-handler"
 import { type ActiveSkillDescriptor, unionActiveSkills } from "@/agent/plugin-skill-extension"
 import type { MetricEmitterPort } from "@/observability/codex-r2-metrics"
+import { errMessage, logger } from "@/shared"
 import type { ActiveSkillDeps, SkillMcpSession } from "@/skill/skill-mcp-deps"
 
 /**
@@ -253,10 +254,13 @@ export const reconcileSkillMcpDepsForTurn = async (
       }
     }
     await reconcileSkillMcpForTurn(config, deps)
-  } catch {
+  } catch (e) {
     // Belt-and-suspenders: nothing above should throw (the inner reconcile is
     // itself NO-THROW), but a hostile `activeSkills` iterator must never break
-    // the turn. Swallow → the turn proceeds with no reconcile this round.
+    // the turn. Degrade → the turn proceeds with no reconcile this round, but
+    // attribute it: reaching here means an invariant broke and the skipped
+    // reconcile would otherwise be indistinguishable from "nothing to do".
+    logger.warn(`loop-activation-hook.reconcileSkillMcpDeps: ${errMessage(e)}`)
   }
 }
 
@@ -312,8 +316,13 @@ export const resolvePluginActivationForTurn = async (
       e.counter("codex_r2.activation.resolved_skills_count", resolved.length)
     })
     return { resolvedSkills: resolved }
-  } catch {
+  } catch (err) {
+    // Counter FIRST — byte-identical to the prior body, so the NO-THROW contract
+    // cannot regress on the metric even if the logger sink itself misbehaves.
     safeEmit(emitter, (e) => e.counter("codex_r2.activation.errors", 1))
+    // …then attribute: the errors counter says THAT an activator threw but never
+    // WHAT, so a broken plugin activator was countable but not diagnosable.
+    logger.warn(`loop-activation-hook.activatePlugins: ${errMessage(err)}`)
     return EMPTY
   }
 }

@@ -1,0 +1,100 @@
+id: pptx-authoring
+title: pptx_write / pptx_read tools — generate + read real .pptx (PresentationML, H14 follow-up)
+section: 2
+subsystem: Binary-artifact generation (H14 PPTX follow-up, jun-3-misc §3)
+order: 602
+maturity: L3
+status: new
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [interactive, headless]
+configurable: integrated
+owners: ["@songmin"]
+labels: [surface:cli, category:generation, default-off]
+depends_on: [office-authoring, tool-surface-manifest]
+config_refs:
+  env: ["QUANTA_OFFICE_AUTHORING"]
+  runtime: ["officeAuthoring"]
+surface_integration:
+  cli: full
+  web: full
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 7/7 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "pptx_write/pptx_read are ordinary tool calls -> render as tool.invoked/completed cards via the bridged tool_call/tool_result events"
+purpose: |
+  Completes the Office authoring trio (xlsx + docx + PPTX) flagged as the scoped
+  follow-up in office-authoring (H14b). `pptx_write` builds a real PowerPoint
+  `.pptx` deck from per-slide title (the claim) + body bullet lines (the proof);
+  `pptx_read` parses a `.pptx` back into per-slide title + body text — closing
+  the round-trip.
+
+  Workflow intent absorbed from Codex's `Presentations` skill (whose own
+  artifact-tool JSX runtime is NOT portable): an EDITABLE deck of ordered slides,
+  each carrying a title + body. We target REAL ISO-29500 PresentationML (not a
+  bespoke format) so PowerPoint / LibreOffice open the file.
+
+  HARD CONSTRAINT — NO dependencies (installs blocked). REUSES the H14b substrate
+  verbatim: the pure-TS STORED-ZIP writer (zip-store.ts, CRC-32) + OOXML helpers
+  (ooxml.ts, xmlText / [Content_Types] / .rels builders) + the FS-jail
+  versioned-sibling write chokepoint (jailed-write.ts) + the DEFLATE-capable
+  reader (unzip) + the shared readJailedFileBytes. Only a PresentationML
+  serializer + reader are NEW. buildPptx emits the spec-minimal-but-VALID parts
+  BY HAND: [Content_Types].xml, _rels/.rels, ppt/presentation.xml (+rels),
+  ppt/slideMasters/slideMaster1.xml (+rels), ppt/slideLayouts/slideLayout1.xml
+  (+rels), ppt/slides/slideN.xml (+rels), ppt/theme/theme1.xml (full clr/font/fmt
+  scheme). Each slide = a title placeholder shape + a body text-box shape, one
+  <a:p> paragraph per body bullet; every user string XML-escaped via xmlText.
+
+  Posture mirrors xlsx_write / docx_write: pptx_write is MUTATING (writes a file),
+  no-throw (typed ok:false), default-OFF behind the SAME DefaultToolPorts.
+  officeAuthoring knob (QUANTA_OFFICE_AUTHORING), versioned-sibling on an existing
+  target. pptx_read is a BASE (always-on) read-only + concurrency-safe tool
+  alongside xlsx_read / docx_read (reading a deck never spends quota / writes
+  files). buildPptx is pure + deterministic (no clock, fixed 4:3 EMU geometry).
+evidence:
+  code:
+    - src/tool/document/authoring/pptx.ts
+    - src/tool/document/authoring/pptx-write.ts
+    - src/tool/document/pptx-read.ts
+    - src/tool/document/authoring/index.ts
+    - src/tool/document/index.ts
+    - src/tool/index.ts
+    - src/tool/surface/manifest.ts
+  adrs: []
+  tests:
+    unit:
+      - tests/unit/pptx-authoring-hellgate.test.ts
+      - tests/unit/pptx-roundtrip-e2e-hellgate.test.ts
+      - tests/unit/artifact-auto-register-c1-hellgate.test.ts
+    integration: []
+    contract: []
+knobs:
+  - name: QUANTA_OFFICE_AUTHORING
+    where: src/shared/runtime-config.ts
+    default: false
+    purpose: |
+      Shared with xlsx_write / docx_write. Strict opt-in: default-OFF ⇒ no
+      DefaultToolPorts.officeAuthoring ⇒ pptx_write NOT registered ⇒ byte-identical
+      default tool menu. (pptx_read is BASE — unaffected by the knob.)
+deliberate_hold: null
+notes: |
+  AUTO-REGISTER (jun-06, C1 loop): `makePptxWriteTool({ artifactRegistry })`
+  best-effort registers the written deck (kind:presentation, media type
+  presentationml.presentation) after a successful write; the const `pptxWriteTool`
+  === the no-arg factory (byte-identical). port absent ⇒ no register; throw ⇒
+  write unaffected. See office-authoring (H14b) + artifact-canvas-store (C1).
+
+  pptx_write is default-OFF / opt-in on EVERY surface in the tool-surface SSOT
+  (grouped under the xlsx_write officeAuthoring entry); pptx_read is BASE
+  (BASE_TOOL_NAMES). Title-vs-body split on read: the title placeholder
+  (<p:ph type="title|ctrTitle"/>) text is the slide title, every other shape's
+  paragraphs are body lines; a foreign deck with no title placeholder reads all
+  text into body. Slides read back in NUMERIC part order (slide1..slide10), not
+  lexicographic. Deferred (same as H14b): per-run formatting (bold/italic/size),
+  speaker notes, images/charts, custom layouts/themes — the deck is
+  content-complete (opens + round-trips title/body DATA) but visually plain.
+  The mode.ts MUTATING_TOOL_TABLE classification (pptx_read=null, pptx_write=
+  mutating) is owned by the agent slice and tracked separately (docx_read/
+  docx_write share the same pending classification).

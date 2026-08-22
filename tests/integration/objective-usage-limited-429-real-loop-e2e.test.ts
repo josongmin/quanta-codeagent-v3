@@ -29,7 +29,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import { runAgent } from "@/agent"
 import { createObjectiveStore, type ObjectivePort } from "@/objective"
 import { __resetRuntimeConfig, LLMError } from "@/shared"
-import { cfg, ScriptedLLM, text, thr, ev, withTimeout } from "./_harness"
+import { cfg, ev, ScriptedLLM, text, thr, withTimeout } from "./_harness"
 
 /** Wrap a store counting `markUsageLimited` invocations — the capturing-sink for
  *  the default-OFF byte-identical proof (the wire must NEVER call it when the

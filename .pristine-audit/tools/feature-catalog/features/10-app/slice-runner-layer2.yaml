@@ -1,0 +1,33 @@
+id: slice-runner-layer2
+title: Runner Layer-2 orchestration slice
+section: 10
+subsystem: Surface-agnostic Layer-2
+order: 20
+maturity: L4
+status: stable
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [interactive]
+configurable: integrated
+owners: ["@songmin"]
+labels: ["surface:cli", "absorbed:codex"]
+depends_on: [runner-assemble-builders, assemble-config, runner-persist-turn]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-07-16"
+  evidence:
+    cli: "Runner owns generic assembly, turn orchestration, and session operations; side conversation moved to host runtime."
+    web: "Surface-agnostic internal slice."
+purpose: "Keep environment and UI dependencies out of reusable Layer-2 orchestration."
+evidence:
+  code: [src/runner/index.ts, src/runner/assemble/index.ts, src/runner/orchestrate/index.ts, src/runner/session-ops/index.ts]
+  adrs: []
+  tests:
+    unit: [tests/unit/runner-slice-boundary.test.ts, tests/unit/runner/run-once-multimodal.test.ts]
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: "Runner has no side-chat implementation after ownership consolidation."

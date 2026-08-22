@@ -1,0 +1,45 @@
+id: bench-trajectory-record
+title: Bench LLM trajectory recording — replayable JSONL cassette (default-OFF)
+section: 10
+subsystem: 벤치 — opt-in trajectory capture
+order: 2409
+maturity: L3
+status: new
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [batch]
+configurable: integrated
+owners: ["@songmin"]
+labels: [surface:bench, default-off]
+depends_on: [bench-eval-driver, bench-full-remote-ami]
+config_refs:
+  env: [QUANTA_BENCH_RECORD_TRAJECTORY, QUANTA_BENCH_TRAJECTORY_DEBUG]
+surface_integration:
+  cli: missing
+  web: na
+  method: audited
+  verified: "2026-06-19"
+  evidence:
+    cli: "wraps bench LLM port when env set; full-remote propagates to EC2 box"
+    web: "no browser affordance"
+purpose: |
+  Default-OFF `maybeRecordTrajectory` wraps the bench LLM port when
+  `QUANTA_BENCH_RECORD_TRAJECTORY` is set, writing a replayable JSONL cassette
+  for fork-from-point debugging of failed remote runs. The `=debug` tier adds a
+  sidecar DEBUG sink (`trajectory-debug-sink.ts`): subsystems across the run (tool
+  executor, edit tool, phase-gate, grader) contribute keyed debug slices that ride
+  alongside each recorded turn as `RecordedInteraction.metadata.debug`.
+evidence:
+  code:
+    - src/apps/bench/index.ts
+    - src/apps/bench/trajectory-debug-sink.ts
+    - src/config/knob-inventory.ts
+  adrs: [536]
+  tests:
+    unit:
+      - tests/unit/bench-trajectory-record-hellgate.test.ts
+      - tests/unit/trajectory-debug-sink-hellgate.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null

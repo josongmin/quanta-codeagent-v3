@@ -1,0 +1,63 @@
+id: agent-config-assembler
+title: agent — unified AgentConfig assembler (12-lever wiring point)
+section: 10
+subsystem: Unified Agent Runtime — Phase 4 wiring
+order: 51
+maturity: L4
+status: stable
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [interactive, headless, batch, daemon, ide, ci-bot]
+configurable: n-a
+owners: ["@songmin"]
+labels: ["surface:cli"]
+depends_on: [effort-5-tier, repo-rules-tree]
+surface_integration:
+  cli: missing
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "src evidence not reachable from the interactive CLI entry (src/apps/cli/index.ts) — wired only into other apps (eval/bench/probe/headless) or unwired"
+    web: "pure internal AgentConfig assembler (ModePolicy+BudgetMeter+BudgetCaps), no user-visible affordance on any surface"
+purpose: |
+  SINGLE wiring point for `ModePolicy + BudgetMeter + BudgetCaps`.
+  RFC may-22-unified-agent-runtime / Phase 4. Apps that want a unified
+  surface (`apps/agent/index.ts`) call `assembleAgentConfig`; legacy
+  entry points (`apps/cli/index.ts`, `apps/bench/index.ts`) can adopt
+  incrementally — the assembler is opt-in, not mandatory.
+  Lever propagation: the 12-lever discriminated union from `ModePolicy`
+  translates HERE to concrete `AgentConfig` fields. New levers added to
+  `ModePolicy` MUST be wired here AND in `apps/agent/mode-presets/<mode>
+  .ts` — the per-mode preset owns lever→implementation mapping; this
+  file owns the unified type-narrow + BudgetMeter construction +
+  exhaustion policy plumbing.
+  Default-OFF / byte-identical: callers may pass `modePolicy: undefined`
+  to skip the whole RFC may-22 layer — the returned config is
+  byte-identical to a pre-RFC manually-assembled `AgentConfig` (no
+  budgetMeter, no modePolicy). This is the no-regression escape hatch.
+evidence:
+  code:
+    - src/apps/agent/assemble.ts
+    - src/apps/agent/run.ts
+  adrs: []
+  tests:
+    unit:
+      - tests/unit/apps/agent/assemble.test.ts
+      - tests/unit/assemble.test.ts
+      - tests/unit/apps/agent/anti-regression-invariants.test.ts
+      - tests/unit/apps/agent/run.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  Mode-preset-extra payloads (`HeadlessExtras`, `BatchExtras`, …) are
+  each OPTIONAL on `AssembleRequest` so legacy callers (the assemble
+  unit test, anything wanting ONLY `modePolicy + budgetMeter` wiring)
+  continue to work byte-identically. Mode-preset runners validate the
+  relevant field is present on entry and throw with a clear message.
+  Anti-regression: see `tests/unit/apps/agent/anti-regression-invariants
+  .test.ts` for the 6 exhaustive-seam invariants any new lever must
+  satisfy (union + ALL_AGENT_MODES + MODE_PRESETS Record + renderPackByMode
+  switch + VALID_MODES + per-mode preset runners).

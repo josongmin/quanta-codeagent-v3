@@ -22,9 +22,7 @@ import type { SpawnResult } from "../backend"
 type Call = readonly string[]
 
 /** Records every aws argv and fails the launch at the bootstrap phase. */
-const recordingAws = (
-  calls: Call[],
-): ((args: readonly string[]) => Promise<SpawnResult>) => {
+const recordingAws = (calls: Call[]): ((args: readonly string[]) => Promise<SpawnResult>) => {
   return async (args: readonly string[]): Promise<SpawnResult> => {
     calls.push(args)
     if (args.includes("run-instances")) {
@@ -68,9 +66,7 @@ describe("SPEND: a failed bootstrap never leaks an instance, even with keep:true
     // ...and the FAILURE path must terminate even when keep=true. This is the
     // regression that leaked ten boxes: assert the module no longer routes the
     // catch through the keep-aware terminator.
-    const source = await Bun.file(
-      new URL("./ec2-lifecycle.ts", import.meta.url).pathname,
-    ).text()
+    const source = await Bun.file(new URL("./ec2-lifecycle.ts", import.meta.url).pathname).text()
 
     // Non-vacuity: the anchors below must exist at all.
     expect(source).toContain("forceTerminateInstance")

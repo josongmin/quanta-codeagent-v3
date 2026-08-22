@@ -77,7 +77,7 @@ const makeDocker = (calls: Recorded[], opts: FakeOpts = {}): DockerPort => {
     if (argv[0] === "exec") {
       return {
         code: 0,
-        stdout: opts.execStdout ?? "QUANTA_SENTINEL=ABSENT\nQUANTA_CP=OK\n",
+        stdout: opts.execStdout ?? "__QPMX_SENTINEL__=ABSENT\n__QPMX_CP__=OK\n",
         stderr: "",
       }
     }
@@ -136,8 +136,8 @@ describe("PMX-04 image preflight — the exact Docker argv, in order", () => {
     const { calls } = await runPreflight()
     const script = calls[4]?.argv[6] ?? ""
     expect(script).toContain(`/testbed/${goldSentinelPath(CAMPAIGN)}`)
-    expect(script).toContain("QUANTA_SENTINEL")
-    expect(script).toContain("QUANTA_CP")
+    expect(script).toContain("__QPMX_SENTINEL__")
+    expect(script).toContain("__QPMX_CP__")
     // Campaign-unique by construction: a different campaign probes a different path.
     expect(script).not.toContain(goldSentinelPath("some-other-campaign"))
   })
@@ -212,7 +212,9 @@ describe("PMX-04 image preflight — every fault class maps to a DISTINCT reason
     expect(calls.map((c) => c.argv[0])).toEqual(["pull", "image"])
     expect(receipt.ok).toBe(false)
     // and the gate a model launch passes through refuses on it
-    expect(() => assertImageFreezeReadyForModelLaunch(receipt)).toThrow(/platform_unsupported/)
+    expect(() => assertImageFreezeReadyForModelLaunch(receipt, ["promax__alpha-1"])).toThrow(
+      /platform_unsupported/,
+    )
   })
 
   test("a non-linux OS ⇒ platform_unsupported", async () => {
@@ -226,8 +228,13 @@ describe("PMX-04 image preflight — every fault class maps to a DISTINCT reason
       faults: new Map([["run -d", { code: 125, stderr: "no space left" }]]),
     })
     expect(receipt.faults.map((f) => f.code)).toEqual(["start_failed"])
-    // still cleans up the (possibly half-created) container, never the image
-    expect(calls.map((c) => c.argv[0])).toEqual(["pull", "image", "run", "rm"])
+    // Still cleans up the (possibly half-created) container, never the image —
+    // but ASKS the daemon whether there is one first (`container inspect`), so a
+    // `rm -f` against a container `run -d` never created cannot manufacture a
+    // second `cleanup_failed` fault beside the start fault. This fake's default
+    // `container inspect` exits 0 ⇒ the container exists ⇒ it is removed.
+    // Absence is covered in promax-image-provenance-gates.test.ts (P5).
+    expect(calls.map((c) => c.argv[0])).toEqual(["pull", "image", "run", "container", "rm"])
   })
 
   test("docker cp failure ⇒ cp_failed (distinct from start and exec)", async () => {
@@ -238,7 +245,7 @@ describe("PMX-04 image preflight — every fault class maps to a DISTINCT reason
 
   test("a cp that exits 0 but did not land the file ⇒ cp_failed, proven IN the container", async () => {
     expect(
-      await faultCodesFor({ execStdout: "QUANTA_SENTINEL=ABSENT\nQUANTA_CP=MISSING\n" }),
+      await faultCodesFor({ execStdout: "__QPMX_SENTINEL__=ABSENT\n__QPMX_CP__=MISSING\n" }),
     ).toEqual(["cp_failed"])
   })
 
@@ -254,7 +261,7 @@ describe("PMX-04 image preflight — every fault class maps to a DISTINCT reason
 
   test("the gold-sentinel target path PRESENT in the image ⇒ sentinel_present", async () => {
     const { receipt } = await runPreflight({
-      execStdout: "QUANTA_SENTINEL=PRESENT\nQUANTA_CP=OK\n",
+      execStdout: "__QPMX_SENTINEL__=PRESENT\n__QPMX_CP__=OK\n",
     })
     expect(receipt.faults.map((f) => f.code)).toEqual(["sentinel_present"])
     expect(receipt.faults[0]?.message).toContain(goldSentinelPath(CAMPAIGN))
@@ -314,7 +321,7 @@ describe("PMX-04 image preflight — multi-instance coverage", () => {
         return { code: 0, stdout: `${JSON.stringify(inspectDefault)}\n`, stderr: "" }
       }
       if (argv[0] === "exec") {
-        return { code: 0, stdout: "QUANTA_SENTINEL=ABSENT\nQUANTA_CP=OK\n", stderr: "" }
+        return { code: 0, stdout: "__QPMX_SENTINEL__=ABSENT\n__QPMX_CP__=OK\n", stderr: "" }
       }
       return { code: 0, stdout: "", stderr: "" }
     }
@@ -402,9 +409,13 @@ describe("PMX-04 image freeze receipt — one schema, fail-closed on read", () =
 
   test("the launch gate passes a clean receipt and refuses a faulted one", async () => {
     const clean = (await runPreflight()).receipt
-    expect(() => assertImageFreezeReadyForModelLaunch(clean)).not.toThrow()
+    expect(() => assertImageFreezeReadyForModelLaunch(clean, ["promax__alpha-1"])).not.toThrow()
     const faulted = (await runPreflight({ faults: new Map([["pull ", { code: 1 }]]) })).receipt
-    expect(() => assertImageFreezeReadyForModelLaunch(faulted)).toThrow(/pull_failed/)
+    // `assignedInstanceIds` is REQUIRED — a caller can no longer opt out of the
+    // coverage half by omitting it (see P3 in promax-image-provenance-gates).
+    expect(() => assertImageFreezeReadyForModelLaunch(faulted, ["promax__alpha-1"])).toThrow(
+      /pull_failed/,
+    )
   })
 
   test("the launch gate refuses a receipt that is MISSING an assigned instance", async () => {

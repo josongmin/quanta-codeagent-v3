@@ -1,0 +1,63 @@
+id: assemble-streaming-core
+title: buildStreamingCore — StdoutStream + observe-dir JsonlRecorder TeeStream
+section: 6
+subsystem: runner/assemble — streaming
+order: 235
+maturity: L4
+status: new
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [interactive, headless]
+configurable: integrated
+config_refs:
+  env: ["QUANTA_OBSERVE_DIR"]
+  cli: ["--observe-dir"]
+owners: ["@songmin"]
+labels: ["surface:core", "tier:1"]
+depends_on: [runner-assemble-builders, assemble-config, runner-resume-fsm, assemble-compaction-core, assemble-llm-core]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 3/4 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "pure internal streaming/observe-dir assembler (StdoutStream + JsonlRecorder TeeStream); no browser UI affordance"
+purpose: |
+  Surface-agnostic streaming/observability wiring (RFC-0002 §5.4/§8).
+  Default OFF: no `observeDir` ⇒ plain `StdoutStream` + no `RunContext`
+  (byte-identical to today). When `observeDir` is set:
+  (1) Mint a `runId` (caller-supplied OR `crypto.randomUUID()` when absent)
+      so cross-process surfaces can correlate events with the same id they
+      already minted off-thread.
+  (2) Construct `RunContext = { runId }` and tag a `JsonlRecorder` writing
+      to `join(observeDir, runId, "session.jsonl")` with `{ ctx: run }`.
+  (3) Fan-out: return `TeeStream([stdoutStream, recorder])` so events hit
+      both human surface AND the JSONL on-disk record.
+  (4) Emits `observe.on { dir, runId }` structured log.
+  Optional `painter` (e.g. inline markdown highlighter) is injected into the
+  `StdoutStream` only when present — when absent, deltas write verbatim
+  (byte-identical to the pre-painter path). CLI injects; recorders / Web
+  surfaces leave it undefined.
+evidence:
+  code:
+    - src/runner/assemble/streaming.ts
+    - src/runner/assemble/index.ts
+    - src/runner/index.ts
+    - src/apps/cli/internal.ts
+  adrs: []
+  tests:
+    unit:
+      - tests/unit/assemble.test.ts
+      - tests/unit/streaming-dispatch-hellgate.test.ts
+    integration:
+      - tests/integration/cli-export-assembly.test.ts
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  Pure relocation of the prior `internal.ts#buildStreaming` block — same
+  effects, same logging keys. `TeeStream` is the fan-out primitive — caller
+  cannot inject additional sinks here, but a Web/Tauri surface can compose
+  its own tee on top of the returned `stream`. `slog.info("observe.on")`
+  emits when observeDir set, giving integrated monitoring.

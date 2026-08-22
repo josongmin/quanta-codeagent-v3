@@ -1,0 +1,1151 @@
+// Bun Snapshot v1, https://bun.sh/docs/test/snapshots
+
+exports[`preset resolution — golden byte-identical oracle (P0) golden resolved knobs: agentless-v1: agentless-v1 1`] = `
+[
+  [
+    "issue-hint",
+    "agentless",
+  ],
+  [
+    "issue-hint-expected-actual",
+    true,
+  ],
+  [
+    "localize-phase",
+    {
+      "phase1Turns": 5,
+    },
+  ],
+  [
+    "lsp",
+    true,
+  ],
+  [
+    "read-outline",
+    true,
+  ],
+  [
+    "repo-map",
+    {
+      "enabled": true,
+    },
+  ],
+  [
+    "repro-test",
+    {
+      "samples": 5,
+    },
+  ],
+  [
+    "retry-transient",
+    3,
+  ],
+  [
+    "test-runner",
+    true,
+  ],
+]
+`;
+
+exports[`preset resolution — golden byte-identical oracle (P0) golden resolved knobs: agentless-v1-nosteer: agentless-v1-nosteer 1`] = `
+[
+  [
+    "issue-hint",
+    "agentless",
+  ],
+  [
+    "issue-hint-expected-actual",
+    true,
+  ],
+  [
+    "localize-phase",
+    {
+      "phase1Turns": 5,
+    },
+  ],
+  [
+    "lsp",
+    true,
+  ],
+  [
+    "lsp-steer",
+    false,
+  ],
+  [
+    "read-outline",
+    true,
+  ],
+  [
+    "repo-map",
+    {
+      "enabled": true,
+    },
+  ],
+  [
+    "repro-test",
+    {
+      "samples": 5,
+    },
+  ],
+  [
+    "retry-transient",
+    3,
+  ],
+  [
+    "test-runner",
+    true,
+  ],
+]
+`;
+
+exports[`preset resolution — golden byte-identical oracle (P0) golden resolved knobs: agentless-v3-thin-strict: agentless-v3-thin-strict 1`] = `
+[
+  [
+    "bench-in-loop-exec",
+    "off",
+  ],
+  [
+    "issue-hint",
+    "agentless",
+  ],
+  [
+    "issue-hint-expected-actual",
+    true,
+  ],
+  [
+    "localize-phase",
+    {
+      "phase1Turns": 5,
+    },
+  ],
+  [
+    "lsp",
+    true,
+  ],
+  [
+    "patch-budget",
+    true,
+  ],
+  [
+    "patch-budget-strict",
+    true,
+  ],
+  [
+    "patch-hygiene",
+    true,
+  ],
+  [
+    "read-outline",
+    true,
+  ],
+  [
+    "repo-map",
+    {
+      "enabled": true,
+    },
+  ],
+  [
+    "retry-transient",
+    3,
+  ],
+  [
+    "spec-fidelity-steer",
+    true,
+  ],
+]
+`;
+
+exports[`preset resolution — golden byte-identical oracle (P0) golden resolved knobs: agentless-v5-thin-and-expanded: agentless-v5-thin-and-expanded 1`] = `
+[
+  [
+    "bench-in-loop-exec",
+    "off",
+  ],
+  [
+    "issue-hint",
+    "agentless",
+  ],
+  [
+    "issue-hint-expected-actual",
+    true,
+  ],
+  [
+    "localize-phase",
+    {
+      "phase1Turns": 5,
+    },
+  ],
+  [
+    "lsp",
+    true,
+  ],
+  [
+    "patch-budget",
+    true,
+  ],
+  [
+    "patch-budget-strict",
+    true,
+  ],
+  [
+    "patch-hygiene",
+    true,
+  ],
+  [
+    "read-outline",
+    true,
+  ],
+  [
+    "repo-map",
+    {
+      "enabled": true,
+    },
+  ],
+  [
+    "retry-transient",
+    3,
+  ],
+  [
+    "spec-fidelity-steer",
+    true,
+  ],
+]
+`;
+
+exports[`preset resolution — golden byte-identical oracle (P0) golden resolved knobs: agentless-v6-singlepass-execfull: agentless-v6-singlepass-execfull 1`] = `
+[
+  [
+    "bench-in-loop-exec",
+    "full",
+  ],
+  [
+    "issue-hint",
+    "agentless",
+  ],
+  [
+    "issue-hint-expected-actual",
+    true,
+  ],
+  [
+    "localize-phase",
+    {
+      "phase1Turns": 5,
+    },
+  ],
+  [
+    "lsp",
+    true,
+  ],
+  [
+    "read-outline",
+    true,
+  ],
+  [
+    "repo-map",
+    {
+      "enabled": true,
+    },
+  ],
+  [
+    "repro-test",
+    {
+      "samples": 5,
+    },
+  ],
+  [
+    "retry-transient",
+    3,
+  ],
+  [
+    "test-runner",
+    true,
+  ],
+]
+`;
+
+exports[`preset resolution — golden byte-identical oracle (P0) golden resolved knobs: baseline: baseline 1`] = `[]`;
+
+exports[`preset resolution — golden byte-identical oracle (P0) golden resolved knobs: everything: everything 1`] = `
+{
+  "__throws": "knob conflicts: branch-search<->localize-phase",
+}
+`;
+
+exports[`preset resolution — golden byte-identical oracle (P0) golden resolved knobs: hint-only: hint-only 1`] = `
+[
+  [
+    "issue-hint",
+    "regex",
+  ],
+]
+`;
+
+exports[`preset resolution — golden byte-identical oracle (P0) golden resolved knobs: agentless-v4-proof-clean-chageneral: agentless-v4-proof-clean-chageneral 1`] = `
+[
+  [
+    "adversarial-repro",
+    true,
+  ],
+  [
+    "bench-in-loop-exec",
+    "repro-only",
+  ],
+  [
+    "cha-multisite-general",
+    true,
+  ],
+  [
+    "cha-multisite-steer",
+    true,
+  ],
+  [
+    "fault-evidence",
+    true,
+  ],
+  [
+    "issue-hint",
+    "agentless",
+  ],
+  [
+    "issue-hint-expected-actual",
+    true,
+  ],
+  [
+    "localize-phase",
+    {
+      "phase1Turns": 5,
+    },
+  ],
+  [
+    "lsp",
+    true,
+  ],
+  [
+    "no-patch-breaker",
+    true,
+  ],
+  [
+    "patch-budget",
+    true,
+  ],
+  [
+    "patch-budget-strict",
+    true,
+  ],
+  [
+    "patch-hygiene",
+    true,
+  ],
+  [
+    "primary-rail",
+    true,
+  ],
+  [
+    "read-outline",
+    true,
+  ],
+  [
+    "repair-escalation",
+    true,
+  ],
+  [
+    "repo-map",
+    {
+      "enabled": true,
+    },
+  ],
+  [
+    "repro-test",
+    {
+      "samples": 10,
+    },
+  ],
+  [
+    "retry-transient",
+    3,
+  ],
+  [
+    "selector-mode",
+    "clean",
+  ],
+  [
+    "spec-fidelity-steer",
+    true,
+  ],
+  [
+    "test-runner",
+    true,
+  ],
+  [
+    "verification-plan",
+    true,
+  ],
+  [
+    "verify-select",
+    5,
+  ],
+  [
+    "verify-select-concurrency",
+    3,
+  ],
+  [
+    "verify-select-proof-required",
+    true,
+  ],
+  [
+    "verify-select-regression",
+    "discovered",
+  ],
+  [
+    "verify-select-repro",
+    "positive",
+  ],
+]
+`;
+
+exports[`preset resolution — golden byte-identical oracle (P0) golden resolved knobs: agentless-v6-closure-control: agentless-v6-closure-control 1`] = `
+[
+  [
+    "bench-in-loop-exec",
+    "full",
+  ],
+  [
+    "fault-evidence",
+    true,
+  ],
+  [
+    "issue-hint",
+    "agentless",
+  ],
+  [
+    "issue-hint-expected-actual",
+    true,
+  ],
+  [
+    "localize-phase",
+    {
+      "phase1Turns": 5,
+    },
+  ],
+  [
+    "lsp",
+    true,
+  ],
+  [
+    "no-patch-breaker",
+    true,
+  ],
+  [
+    "primary-rail",
+    true,
+  ],
+  [
+    "read-outline",
+    true,
+  ],
+  [
+    "repair-escalation",
+    true,
+  ],
+  [
+    "repo-map",
+    {
+      "enabled": true,
+    },
+  ],
+  [
+    "repro-test",
+    {
+      "samples": 5,
+    },
+  ],
+  [
+    "retry-transient",
+    3,
+  ],
+  [
+    "test-runner",
+    true,
+  ],
+  [
+    "verification-plan",
+    true,
+  ],
+]
+`;
+
+exports[`preset resolution — golden byte-identical oracle (P0) golden resolved knobs: agentless-v6-closure-repair: agentless-v6-closure-repair 1`] = `
+[
+  [
+    "bench-in-loop-exec",
+    "full",
+  ],
+  [
+    "closure-repair",
+    5,
+  ],
+  [
+    "fault-evidence",
+    true,
+  ],
+  [
+    "issue-hint",
+    "agentless",
+  ],
+  [
+    "issue-hint-expected-actual",
+    true,
+  ],
+  [
+    "localize-phase",
+    {
+      "phase1Turns": 5,
+    },
+  ],
+  [
+    "lsp",
+    true,
+  ],
+  [
+    "no-patch-breaker",
+    true,
+  ],
+  [
+    "primary-rail",
+    true,
+  ],
+  [
+    "read-outline",
+    true,
+  ],
+  [
+    "repair-escalation",
+    true,
+  ],
+  [
+    "repo-map",
+    {
+      "enabled": true,
+    },
+  ],
+  [
+    "repro-test",
+    {
+      "samples": 5,
+    },
+  ],
+  [
+    "retry-transient",
+    3,
+  ],
+  [
+    "test-runner",
+    true,
+  ],
+  [
+    "verification-plan",
+    true,
+  ],
+]
+`;
+
+exports[`preset resolution — golden byte-identical oracle (P0) golden resolved knobs: agentless-v6-closure-tuned: agentless-v6-closure-tuned 1`] = `
+[
+  [
+    "bench-in-loop-exec",
+    "full",
+  ],
+  [
+    "closure-repair",
+    5,
+  ],
+  [
+    "fault-evidence",
+    true,
+  ],
+  [
+    "issue-hint",
+    "agentless",
+  ],
+  [
+    "issue-hint-expected-actual",
+    true,
+  ],
+  [
+    "localize-phase",
+    {
+      "phase1Turns": 5,
+    },
+  ],
+  [
+    "lsp",
+    true,
+  ],
+  [
+    "no-patch-breaker",
+    true,
+  ],
+  [
+    "primary-rail",
+    true,
+  ],
+  [
+    "read-outline",
+    true,
+  ],
+  [
+    "repair-escalation",
+    true,
+  ],
+  [
+    "repair-spec-gate",
+    true,
+  ],
+  [
+    "repo-map",
+    {
+      "enabled": true,
+    },
+  ],
+  [
+    "repro-test",
+    {
+      "samples": 5,
+    },
+  ],
+  [
+    "retry-transient",
+    3,
+  ],
+  [
+    "test-runner",
+    true,
+  ],
+  [
+    "verification-plan",
+    true,
+  ],
+]
+`;
+
+exports[`preset resolution — golden byte-identical oracle (P0) golden resolved knobs: agentless-v6-singlepass-execfull-sticky: agentless-v6-singlepass-execfull-sticky 1`] = `
+[
+  [
+    "bench-in-loop-exec",
+    "full",
+  ],
+  [
+    "issue-hint",
+    "agentless",
+  ],
+  [
+    "issue-hint-expected-actual",
+    true,
+  ],
+  [
+    "localize-phase",
+    {
+      "phase1Turns": 5,
+    },
+  ],
+  [
+    "lsp",
+    true,
+  ],
+  [
+    "must-pass",
+    {
+      "maxTrips": 2,
+      "mustPass": true,
+      "stickyRed": true,
+    },
+  ],
+  [
+    "read-outline",
+    true,
+  ],
+  [
+    "repo-map",
+    {
+      "enabled": true,
+    },
+  ],
+  [
+    "repro-test",
+    {
+      "samples": 5,
+    },
+  ],
+  [
+    "retry-transient",
+    3,
+  ],
+  [
+    "test-runner",
+    true,
+  ],
+]
+`;
+
+exports[`preset resolution — golden byte-identical oracle (P0) golden resolved knobs: agentless-v6-oracle: agentless-v6-oracle 1`] = `
+[
+  [
+    "bench-in-loop-exec",
+    "full",
+  ],
+  [
+    "closure-repair",
+    5,
+  ],
+  [
+    "fault-evidence",
+    true,
+  ],
+  [
+    "issue-hint",
+    "agentless",
+  ],
+  [
+    "issue-hint-expected-actual",
+    true,
+  ],
+  [
+    "localize-phase",
+    {
+      "phase1Turns": 5,
+    },
+  ],
+  [
+    "lsp",
+    true,
+  ],
+  [
+    "no-patch-breaker",
+    true,
+  ],
+  [
+    "primary-rail",
+    true,
+  ],
+  [
+    "read-outline",
+    true,
+  ],
+  [
+    "repair-escalation",
+    true,
+  ],
+  [
+    "repair-spec-gate",
+    true,
+  ],
+  [
+    "repo-map",
+    {
+      "enabled": true,
+    },
+  ],
+  [
+    "repro-grounding",
+    true,
+  ],
+  [
+    "repro-test",
+    {
+      "samples": 5,
+    },
+  ],
+  [
+    "retry-transient",
+    3,
+  ],
+  [
+    "test-runner",
+    true,
+  ],
+  [
+    "verification-plan",
+    true,
+  ],
+]
+`;
+
+exports[`preset resolution — golden byte-identical oracle (P0) golden resolved knobs: agentless-v6-oracle-hardened: agentless-v6-oracle-hardened 1`] = `
+[
+  [
+    "bench-in-loop-exec",
+    "full",
+  ],
+  [
+    "closure-repair",
+    5,
+  ],
+  [
+    "fault-evidence",
+    true,
+  ],
+  [
+    "issue-hint",
+    "agentless",
+  ],
+  [
+    "issue-hint-expected-actual",
+    true,
+  ],
+  [
+    "localize-phase",
+    {
+      "phase1Turns": 5,
+    },
+  ],
+  [
+    "lsp",
+    true,
+  ],
+  [
+    "no-patch-breaker",
+    true,
+  ],
+  [
+    "primary-rail",
+    true,
+  ],
+  [
+    "read-outline",
+    true,
+  ],
+  [
+    "repair-escalation",
+    true,
+  ],
+  [
+    "repair-spec-gate",
+    true,
+  ],
+  [
+    "repair-strong-oracle",
+    true,
+  ],
+  [
+    "repo-map",
+    {
+      "enabled": true,
+    },
+  ],
+  [
+    "repro-grounding",
+    true,
+  ],
+  [
+    "repro-test",
+    {
+      "samples": 5,
+    },
+  ],
+  [
+    "repro-vote",
+    true,
+  ],
+  [
+    "retry-transient",
+    3,
+  ],
+  [
+    "test-runner",
+    true,
+  ],
+  [
+    "verification-plan",
+    true,
+  ],
+]
+`;
+
+exports[`preset resolution — golden byte-identical oracle (P0) golden resolved knobs: agentless-v7-oracle-multifile: agentless-v7-oracle-multifile 1`] = `
+[
+  [
+    "acceptance",
+    true,
+  ],
+  [
+    "adversarial-repro",
+    true,
+  ],
+  [
+    "bench-in-loop-exec",
+    "full",
+  ],
+  [
+    "bench-location-fanout",
+    true,
+  ],
+  [
+    "cha-multisite-general",
+    true,
+  ],
+  [
+    "cha-multisite-steer",
+    true,
+  ],
+  [
+    "closure-repair",
+    5,
+  ],
+  [
+    "fault-evidence",
+    true,
+  ],
+  [
+    "issue-hint",
+    "agentless",
+  ],
+  [
+    "issue-hint-expected-actual",
+    true,
+  ],
+  [
+    "localize-phase",
+    {
+      "phase1Turns": 5,
+    },
+  ],
+  [
+    "lsp",
+    true,
+  ],
+  [
+    "model-lane-diversity",
+    true,
+  ],
+  [
+    "no-patch-breaker",
+    true,
+  ],
+  [
+    "paired-control",
+    true,
+  ],
+  [
+    "primary-rail",
+    true,
+  ],
+  [
+    "read-outline",
+    true,
+  ],
+  [
+    "repair-breadth",
+    3,
+  ],
+  [
+    "repair-escalation",
+    true,
+  ],
+  [
+    "repair-spec-gate",
+    true,
+  ],
+  [
+    "repair-strong-oracle",
+    true,
+  ],
+  [
+    "repo-map",
+    {
+      "enabled": true,
+    },
+  ],
+  [
+    "repro-grounding",
+    true,
+  ],
+  [
+    "repro-test",
+    {
+      "samples": 5,
+    },
+  ],
+  [
+    "repro-vote",
+    true,
+  ],
+  [
+    "retry-transient",
+    3,
+  ],
+  [
+    "test-runner",
+    true,
+  ],
+  [
+    "verification-plan",
+    true,
+  ],
+]
+`;
+
+exports[`preset resolution — golden byte-identical oracle (P0) golden resolved knobs: agentless-v7-oracle-multifile-synthesis: agentless-v7-oracle-multifile-synthesis 1`] = `
+[
+  [
+    "acceptance",
+    true,
+  ],
+  [
+    "bench-in-loop-exec",
+    "full",
+  ],
+  [
+    "bench-location-fanout",
+    true,
+  ],
+  [
+    "cha-multisite-general",
+    true,
+  ],
+  [
+    "cha-multisite-steer",
+    true,
+  ],
+  [
+    "closure-repair",
+    5,
+  ],
+  [
+    "fault-evidence",
+    true,
+  ],
+  [
+    "issue-hint",
+    "agentless",
+  ],
+  [
+    "issue-hint-expected-actual",
+    true,
+  ],
+  [
+    "localize-phase",
+    {
+      "phase1Turns": 5,
+    },
+  ],
+  [
+    "lsp",
+    true,
+  ],
+  [
+    "no-patch-breaker",
+    true,
+  ],
+  [
+    "primary-rail",
+    true,
+  ],
+  [
+    "read-outline",
+    true,
+  ],
+  [
+    "repair-breadth",
+    3,
+  ],
+  [
+    "repair-escalation",
+    true,
+  ],
+  [
+    "repair-spec-gate",
+    true,
+  ],
+  [
+    "repair-strong-oracle",
+    true,
+  ],
+  [
+    "repo-map",
+    {
+      "enabled": true,
+    },
+  ],
+  [
+    "repro-grounding",
+    true,
+  ],
+  [
+    "repro-test",
+    {
+      "samples": 5,
+    },
+  ],
+  [
+    "repro-vote",
+    true,
+  ],
+  [
+    "retry-transient",
+    3,
+  ],
+  [
+    "test-runner",
+    true,
+  ],
+  [
+    "verification-plan",
+    true,
+  ],
+]
+`;
+
+exports[`preset resolution — golden byte-identical oracle (P0) golden resolved knobs: agentless-v6-singlepass-execfull-subagent: agentless-v6-singlepass-execfull-subagent 1`] = `
+[
+  [
+    "bench-in-loop-exec",
+    "full",
+  ],
+  [
+    "issue-hint",
+    "agentless",
+  ],
+  [
+    "issue-hint-expected-actual",
+    true,
+  ],
+  [
+    "localize-phase",
+    {
+      "phase1Turns": 5,
+    },
+  ],
+  [
+    "lsp",
+    true,
+  ],
+  [
+    "read-outline",
+    true,
+  ],
+  [
+    "repo-map",
+    {
+      "enabled": true,
+    },
+  ],
+  [
+    "repro-test",
+    {
+      "samples": 5,
+    },
+  ],
+  [
+    "retry-transient",
+    3,
+  ],
+  [
+    "subagent",
+    true,
+  ],
+  [
+    "test-runner",
+    true,
+  ],
+]
+`;

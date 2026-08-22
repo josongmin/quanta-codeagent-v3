@@ -13,6 +13,7 @@
  *    not key-uniform and neither field may be required.
  * A validator that got either wrong would reject the real corpus.
  */
+import { errMessage } from "@/shared"
 import { createFailureSink, describeValue, isRecord } from "./json"
 import type { ProMaxFailure, ProMaxFailureCode } from "./types"
 
@@ -86,7 +87,7 @@ const parseJsonBytes = (raw: string, code: ProMaxFailureCode, label: string): Js
       ok: false,
       failure: {
         code,
-        message: `${label} bytes are not valid JSON: ${err instanceof Error ? err.message : String(err)}`,
+        message: `${label} bytes are not valid JSON: ${errMessage(err)}`,
       },
     }
   }

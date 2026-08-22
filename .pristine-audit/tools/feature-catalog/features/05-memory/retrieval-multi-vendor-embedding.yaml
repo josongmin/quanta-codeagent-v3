@@ -1,0 +1,67 @@
+id: retrieval-multi-vendor-embedding
+title: Multi-vendor embedding port — 8 vendors (2 runtime + 6 type-level stub)
+section: 5
+subsystem: retrieval SOTA stack — Axis D (ADR-0159)
+order: 94
+maturity: L4
+status: new
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [n-a]
+configurable: integrated
+owners: ["@songmin"]
+labels: ["surface:core", "adr:0159"]
+depends_on: [retrieval-rerank-registry, assert-never-exhaustiveness, byte-stable-string-comparator, errors-helper-fix, runtime-config-ssot]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 9/9 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "pure internal port/codec primitive, no UI affordance"
+purpose: |
+  Generic seam over every embedding provider. Each concrete adapter
+  lives in src/retrieval/embedders/<vendor>.ts and implements
+  EmbeddingPort with its own vendor discriminator. 8 vendors total:
+    - openai, voyage           — runtime adapters (HTTP injected)
+    - cohere, gemini, xai,
+      moonshot, nvidia, zai    — type-level adapter stubs that throw
+                                 RetrievalError from embed()
+  Locking the wire-shape across all 8 vendors NOW means any later
+  runtime wiring is a one-file substitution, not an architecture
+  change. Distinct from src/agent/memory-embedder.ts (which implements
+  @/memory's EmbedderPort, a different interface tied to the memory
+  recall pipeline). The retrieval-side adapters live entirely within
+  the retrieval slice so they can be wired without crossing into
+  @/memory or @/agent.
+evidence:
+  code:
+    - src/retrieval/embedding-port.ts
+    - src/retrieval/embedders/openai.ts
+    - src/retrieval/embedders/voyage.ts
+    - src/retrieval/embedders/cohere.ts
+    - src/retrieval/embedders/gemini.ts
+    - src/retrieval/embedders/xai.ts
+    - src/retrieval/embedders/moonshot.ts
+    - src/retrieval/embedders/nvidia.ts
+    - src/retrieval/embedders/zai.ts
+  adrs: ["docs/decisions/0159-retrieval-sota-stack.md"]
+  tests:
+    unit:
+      - tests/unit/retrieval-embedding-multi-vendor-hellgate.test.ts
+    integration: []
+    contract: []
+knobs:
+  - name: EmbeddingAdapterOptions.apiKey
+    default: 'undefined'
+    purpose: '(no description)'
+  - name: Per-vendor
+    default: 'undefined'
+    purpose: 'injected, no SDK import'
+deliberate_hold: null
+notes: |
+  Stubs throw RetrievalError ("vendor not yet wired at runtime") so any
+  code that wires them by accident fails at the boundary, not silently.
+  To wire one of the 6 stubs at runtime, mirror the openai.ts/voyage.ts
+  pattern (inject an HTTP seam, batch + LLMError wrap).

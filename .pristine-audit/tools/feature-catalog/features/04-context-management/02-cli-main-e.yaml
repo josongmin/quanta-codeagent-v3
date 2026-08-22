@@ -1,0 +1,38 @@
+id: cli-main-e
+title: (CLI 순수헬퍼 직접 유닛테스트 불가 — main() 톱레벨; 루프 e
+section: 4
+subsystem: 전용 요약 모델
+order: 2
+maturity: L3
+status: stable
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [interactive, headless]
+configurable: n-a
+owners: ['@songmin']
+labels: [surface:core]
+depends_on: [repl-code-smell-cleanup, repl-interactive-surface, slashctx-6-ports-wire-completion, cli-export-2026-05-21-l2-l3, runner-assemble-builders]
+config_refs:
+  env: [QUANTA_COMPACT_BREAKER, QUANTA_COMPACT_BREAKER_PROACTIVE_MAX, QUANTA_COMPACT_BREAKER_REACTIVE_MAX, QUANTA_COMPACT_MODEL, QUANTA_COMPACT_PROVIDER, QUANTA_GIT_TOOLS, QUANTA_LSP, QUANTA_LSP_TOOLS, QUANTA_MCP_CONFIG, QUANTA_MD_HIGHLIGHT, QUANTA_MD_MODE, QUANTA_MEMORY, QUANTA_MEMORY_CONSOLIDATE, QUANTA_MEMORY_DISTILL, QUANTA_MEMORY_EMBED, QUANTA_MEMORY_EMBED_MODEL, QUANTA_MEMORY_PATH, QUANTA_MEMORY_RECALL_LIMIT, QUANTA_MEMORY_RECALL_TIERS, QUANTA_MEMORY_SELF_EDIT, QUANTA_METRICS, QUANTA_MODEL_FALLBACK, QUANTA_OBSERVE_DIR, QUANTA_PLAN, QUANTA_RESUME, QUANTA_SANDBOX, QUANTA_SKILLS, QUANTA_SKILLS_DIR, QUANTA_STATE_PATH, QUANTA_SUBAGENT, QUANTA_SUBAGENT_MAX_DEPTH, QUANTA_VERIFY_GUARD, QUANTA_VERIFY_GUARD_MAX_TRIPS]
+surface_integration:
+  cli: full
+  web: missing
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 3/3 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "CLI entrypoint top-level code; not loaded by web-daemon, no browser affordance."
+purpose: 톱레벨; 루프 e2e로 검증, lockstep cli 테스트)
+evidence:
+  code:
+    - src/apps/cli/index.ts
+    - src/apps/cli/internal.ts
+    - src/apps/cli/repl.ts
+  adrs: []
+  tests:
+    unit: [tests/unit/cli-summarizer.test.ts]
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: ''

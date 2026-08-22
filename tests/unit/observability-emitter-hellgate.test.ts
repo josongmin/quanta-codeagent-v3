@@ -14,10 +14,10 @@
 
 import { describe, expect, test } from "bun:test"
 import { createApprovalStateMachine } from "@/agent/approval-state-machine"
-import { createObjectiveStore } from "@/objective"
 import type { RunEntry } from "@/agent/run-ledger"
 import { createRunLedger } from "@/agent/run-ledger"
 import { createObservabilityEmitter } from "@/apps/web-daemon/observability-emitter"
+import { createObjectiveStore } from "@/objective"
 import type { ObservabilityMessage } from "@/protocol/observability"
 import { decodeObservabilityFrame } from "@/protocol/observability"
 

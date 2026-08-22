@@ -1,0 +1,97 @@
+id: repl-code-smell-cleanup
+title: REPL code-smell cleanup — STATUS_FLASH config + string drift + silent-catch telemetry
+section: 10
+subsystem: REPL discipline — env-back constants + telemetry + cast hardening
+order: 27
+maturity: L2
+status: new
+ui_surfaces: [cli]
+monitoring: integrated
+modes: [interactive]
+configurable: integrated
+owners: ["@songmin"]
+labels: ["surface:cli", "discipline:cleanup", "no-heuristics"]
+depends_on: [repl-interactive-surface, multimodal-image-input, shell-output-delta-streaming, slashctx-6-ports-wire-completion, abort-signal-compose]
+surface_integration:
+  cli: full
+  web: missing
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 1/7 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "Pure CLI repl.ts internal cleanup (flash durations, banners, sandbox-mode cast); these UX flashes/banners are terminal-only and have no apps/web-frontend equivalent, so nothing reaches the browser."
+purpose: |
+  Closes 7 audit findings on `src/apps/cli/repl.ts` without splitting the
+  larger God-class:
+    (1) `ESC_WINDOW_MS = 2000` was the only un-env-backed timing constant —
+        replaced with `flash.escWindowMs` driven by `QUANTA_ESC_WINDOW_MS`.
+    (2) 5 magic UX flash durations (4000 ×3, 3000, 1500 ×2) centralized in
+        `StatusFlashConfig` with one env knob per field — defaults preserve
+        the pre-cleanup byte stream verbatim.
+    (3) Banner string drift fixed: "idle 60s" and "20 consecutive denials"
+        previously hardcoded the human number while behavior read
+        `QUANTA_IDLE_MS` / `QUANTA_REJECT_LIMIT` separately. The new
+        `idleBanner(idleMs)` / `rejectExitBanner(limit)` interpolate the
+        env-resolved value so the displayed number cannot lie.
+    (4) 3 silent `catch {}` blocks (indicator port / skills callback / rule
+        inventory) now emit `slog.warn` via `swallowAndLog` — failure
+        isolation preserved (sink throws are themselves swallowed).
+    (5) 7 bare `process.stderr.write("\\n")` writes (commented "matches the
+        prior byte-identically") routed through `paintBlankLine()` so the
+        contract appears in ONE place.
+    (6) `buildPlanStoreOrUndefined` no longer reimplements the falsy-string
+        parser inline — moved to `isPlanStoreEnabled` peer of
+        `isCostPanelEnabled` / `isLifecyclePillsEnabled`.
+    (7) `as SandboxMode` unchecked cast hardened via `parseSandboxMode` —
+        a bogus `QUANTA_SANDBOX=badvalue` falls back to `"default"` instead
+        of propagating as a literal pill label (silent UI lie).
+  Byte-identical default-OFF: when no `QUANTA_FLASH_*` / `QUANTA_ESC_WINDOW_MS`
+  env is set, every constant resolves to its pre-cleanup value (4000 / 3000 /
+  2000 / 1500 / 120) and the banner text matches the prior bytes exactly when
+  the underlying `QUANTA_IDLE_MS` / `QUANTA_REJECT_LIMIT` are also at their
+  defaults (60000 / 20). Every new constant is env-overrideable per the user's
+  "no-heuristics" stance — the defaults are deliberately labeled as
+  cosmetic-UX-flash-with-existing-precedent (not heuristics).
+evidence:
+  code:
+    - src/apps/cli/repl.ts
+    - src/apps/cli/status-flash-config.ts
+    - src/apps/cli/repl-paint.ts
+    - src/apps/cli/repl-banners.ts
+    - src/apps/cli/repl-silent-catch.ts
+    - src/apps/cli/sandbox-mode-parse.ts
+    - src/apps/cli/repl/cli-feature-config.ts
+    - src/apps/cli/repl/factories/plan-store.ts
+  adrs: []
+  tests:
+    unit:
+      - tests/unit/apps/cli/repl-status-flash-config-hellgate.test.ts
+      - tests/unit/apps/cli/repl-paint-blank-line-hellgate.test.ts
+      - tests/unit/apps/cli/repl-string-drift-hellgate.test.ts
+      - tests/unit/apps/cli/repl-silent-catch-telemetry-hellgate.test.ts
+      - tests/unit/apps/cli/repl-sandbox-cast-hellgate.test.ts
+    integration: []
+    contract: []
+knobs:
+  - name: QUANTA_FLASH_ERROR_MS
+    default: 'undefined'
+    purpose: '(no description)'
+  - name: QUANTA_FLASH_IDLE_MS
+    default: 'undefined'
+    purpose: '(no description)'
+  - name: QUANTA_ESC_WINDOW_MS
+    default: 'undefined'
+    purpose: '(no description)'
+  - name: QUANTA_FLASH_TRANSIENT_MS
+    default: 'undefined'
+    purpose: '(no description)'
+  - name: QUANTA_FLASH_TRUNCATE_CHARS
+    default: 'undefined'
+    purpose: '(no description)'
+deliberate_hold: null
+notes: |
+  The larger `runRepl` God-class split (~1570 lines) is owned by a parallel
+  slice under `src/apps/cli/repl/`. This cleanup intentionally stays inside
+  `repl.ts` so the two tracks do not collide. The 3 silent catches now thread
+  `slog` through `installPills` + `buildTurnIndicatorAndStream` so the larger
+  split can keep the same wiring contract.

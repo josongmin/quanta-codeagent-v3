@@ -2,7 +2,7 @@
   "schemaVersion": "terminal-bench-canary/v1",
   "dataset": "terminal-bench/terminal-bench-2-1",
   "datasetRef": "sha256:7d7bdc1cbedad549fc1140404bd4dc45e5fd0ea7c4186773687d177ad3a0699a",
-  "selectionBasis": "Generated from the pinned 2.1 catalog (src/apps/bench/terminal/terminal-bench-2-1-tasks.json, 89 tasks). The TB2.0 smoke list (tools/tb-smoke/run-tb-smoke.sh GUARD/LEVER_REGRESSION/TARGETS) is deliberately DISJOINT from this set: it was chosen against a different dataset revision and against 2.0-era failure attribution, so reusing it would carry a stale prior into 2.1. Expected durations are UNMEASURED on 2.1 and are therefore not asserted here; the oracle/canary distinction is about what each run PROVES, not about a guessed runtime.",
+  "selectionBasis": "Generated from the pinned 2.1 catalog (src/apps/bench/terminal/terminal-bench-2-1-tasks.json, 89 tasks). The TB2.0 smoke list (GUARD/LEVER_REGRESSION/TARGETS, retired by TB21-06 into src/apps/bench/terminal/retired-tb-2-0-smoke.ts) is deliberately DISJOINT from this set: it was chosen against a different dataset revision and against 2.0-era failure attribution, so reusing it would carry a stale prior into 2.1. Expected durations are UNMEASURED on 2.1 and are therefore not asserted here; the oracle/canary distinction is about what each run PROVES, not about a guessed runtime.",
   "tasks": [
     {
       "id": "terminal-bench/openssl-selfsigned-cert",

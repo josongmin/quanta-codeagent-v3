@@ -1,0 +1,65 @@
+id: stream-sse-adapter
+title: SseStream — spec-correct SSE serializer with redaction + injectable clock
+section: 9
+subsystem: Stream adapters — SSE wire format
+order: 51
+maturity: L4
+status: stable
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [n-a]
+configurable: partial
+owners: ["@songmin"]
+labels: ["surface:core"]
+depends_on: [agentevent, assert-never-exhaustiveness, byte-stable-string-comparator, errors-helper-fix, jsonl-cumulative-retention]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 2/2 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "pure internal serializer/codec for the SSE wire format, no UI affordance"
+purpose: |
+  Serializes every `AgentEvent` as a spec-correct Server-Sent Events frame:
+  one `id:` line (per-frame monotonic counter), one `event:` line (the
+  discriminant), one-or-more `data:` lines, terminated by a blank line.
+  Transport-agnostic: `SseSink` is just `{ write(chunk) }` — a real HTTP
+  handler passes a response writer, tests pass an in-memory buffer.
+
+  Multiline handling: `JSON.stringify` never emits raw newlines (escaped as
+  `\\n`), so a single `data:` line is always correct in practice — but the
+  serializer DEFENSIVELY splits the payload on `\n` into one `data:` line
+  each (per the SSE spec, a literal LF would otherwise be parsed as a
+  frame-internal record boundary). Robust if a future serializer ever
+  produces embedded newlines.
+
+  Security-by-default: every event is routed through `@/shared`
+  `redactValue` BEFORE serialization so secret values
+  (`tool_call.input` / `tool_result.preview` + `stderrTail` /
+  `assistant_text.delta` / `error.message` / …) never reach the wire.
+  `redactValue` preserves shape — only string/keyed values are masked.
+
+  Lifecycle: `close()` flips a `closed` flag (idempotent). Subsequent
+  `emit()` / `comment()` are SILENT NO-OPS — chosen over throwing so a
+  late event from the agent can never crash an already-finished response.
+  Injectable `now` callback for deterministic ids/timestamps in tests.
+evidence:
+  code:
+    - src/stream/adapters/sse.ts
+    - src/stream/index.ts
+  adrs: []
+  tests:
+    unit:
+      - tests/unit/sse.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  Pairs with `tee` (fan-out) and `JsonlRecorder` (file sink). SSE is the
+  Web surface's wire format — the loop emits events into a TeeStream that
+  contains an SseStream pointed at the HTTP response writer; the client
+  reconstructs the event stream from the `event:`/`data:`/`id:` frames.
+  Keep-alive comment line (`: <text>`) supported and similarly no-op once
+  closed.

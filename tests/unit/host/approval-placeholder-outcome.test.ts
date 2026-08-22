@@ -1,9 +1,9 @@
 import { describe, expect, test } from "bun:test"
-import type { ToolAction } from "../../../src/permission"
 import {
   approvalPlaceholderOutcome,
   escalationActorFields,
 } from "../../../src/host/runtime/internal/context-binding/approval-support"
+import type { ToolAction } from "../../../src/permission"
 import { lastTurnOutcomeFromAgentOutcome } from "../../../src/reactor/agent-outcome-adapter"
 
 /** A minimal ToolAction; the actor projection reads ONLY `teamEscalation`. */

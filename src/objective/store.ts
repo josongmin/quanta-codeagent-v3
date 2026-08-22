@@ -20,7 +20,7 @@
  */
 
 import { randomUUID } from "node:crypto"
-import { logger } from "@/shared"
+import { errMessage, logger } from "@/shared"
 import type { ExplicitStatus, ObjectiveThreadSnapshot } from "./model"
 import type {
   Blocker,
@@ -445,7 +445,12 @@ export const createObjectiveCoreStore = (opts?: {
             ? { usageLimitedUntil: cell.usageLimitedUntil }
             : {}),
         })
-      } catch {
+      } catch (e) {
+        // RFC-03 C1 — NO-THROW contract preserved (still `null`), but the fault is
+        // now attributed: a snapshot that silently returns null is indistinguishable
+        // from "no objective on this thread", which would make the authority's undo
+        // look like a no-op instead of a failure.
+        logger.warn(`objective.snapshotThread: ${errMessage(e)}`)
         return null
       }
     },
@@ -460,7 +465,10 @@ export const createObjectiveCoreStore = (opts?: {
         if (cell === null) return false
         cells.set(threadId, cell)
         return true
-      } catch {
+      } catch (e) {
+        // Same contract, same `false` — but an undo that fails to restore is a
+        // DATA-LOSS class event for the caller's rollback, so it must not be silent.
+        logger.warn(`objective.restoreThread: ${errMessage(e)}`)
         return false
       }
     },

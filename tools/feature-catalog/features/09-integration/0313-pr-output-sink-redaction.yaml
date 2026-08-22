@@ -3,7 +3,7 @@ title: PR output sink with mandatory redaction
 section: 9
 subsystem: GitHub integration (ADR-0313)
 order: 313
-maturity: L3
+maturity: L2
 status: new
 ui_surfaces: [cli]
 monitoring: n-a
@@ -42,6 +42,16 @@ purpose: |
   Mechanism (sink + redaction + marker) and policy (which trigger maps
   to which body) are intentionally split: the sink is dumb, the agent
   decides what to say.
+
+  STATE (L2, not L3): the slice is composed and unit-tested but has NO
+  production caller. `createPrOutputSink` / `loadPrContext` are named-
+  imported only by `src/apps/cli/from-pr-cmd.ts`, and that sub-command is
+  itself not registered in the CLI dispatcher (see
+  `github-pr-from-pr-cli`, ADR-0311, `deliberate_hold`), so neither
+  evidence file is symbol-reachable from any `src/apps/<surface>/index.ts`
+  entrypoint. Claiming L3 ("wired, with tests") while every export is
+  dead-API is an overclaim, so maturity states the real thing: mechanism
+  built + tested, host edge deferred.
 evidence:
   code:
     - src/integrations/github/pr-output-sink.ts
@@ -60,9 +70,35 @@ evidence:
     integration: []
     contract: []
 knobs: []
-deliberate_hold: null
+deliberate_hold:
+  reason: |
+    No production caller by design-of-sequencing, not by accident: the sink
+    posts WRITES to GitHub (comments / reviews / inline review comments), so
+    the only host that would drive it — the `from-pr` CLI sub-command
+    (`github-pr-from-pr-cli`, ADR-0311) — is deliberately held out of the CLI
+    dispatcher until the Tier-0 path has real deliveries to size its
+    daemon-mode budget knobs. Wiring a destructive outbound-write seam LIVE
+    ahead of that gate is the thing the hold exists to prevent; the mechanism
+    (mandatory redactPort, idempotency marker, concurrent-post reconcile) is
+    finished and unit-covered in the meantime.
+  promotion_path: |
+    Promote to L3 together with `github-pr-from-pr-cli`: register `from-pr` in
+    the CLI dispatcher so `src/apps/cli/from-pr-cmd.ts` becomes reachable from
+    `src/apps/cli/index.ts` (that alone makes `createPrOutputSink` /
+    `loadPrContext` symbol-live), and add an end-to-end test driving
+    env → event → context → redact → post against a recorded Actions payload.
+    `bun fc reachability --strict --symbols` is the objective check: this id
+    must drop off the offender list without any baseline edit.
 notes: |
   The "boot-time throw on missing redactPort" pattern is the same fail-
   closed shape used by ADR-0313's sibling sinks elsewhere in the
   catalog — a default no-op redactor would silently degrade safety on
   composition mistakes, so the constructor refuses to build.
+
+  Maturity was L3 until 2026-08-22, when `bun fc reachability --strict
+  --symbols` flagged it as a net-new dead-API overclaim: both evidence files
+  are module-reachable only because the `@/integrations/github` barrel is
+  pulled in by `webhook-server-setup.ts` (a DIFFERENT feature's host), while
+  no reached module ever names an export of this one. Corrected to L2 rather
+  than grandfathered — the catalog treats "unwired seam claiming L3" as debt
+  to state, not to silence.

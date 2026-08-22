@@ -1,0 +1,57 @@
+id: probe-renderers
+title: probe — plain-text renderers (`--failed` / `--slow` / `--cost` / `--json`)
+section: 10
+subsystem: Probe (trajectory inspector) — view layer
+order: 33
+maturity: L4
+status: stable
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [headless, batch]
+configurable: n-a
+owners: ["@songmin"]
+labels: ["surface:cli"]
+depends_on: [assert-never-exhaustiveness, byte-stable-string-comparator, errors-helper-fix, llm-cost-emit-sink, memory-telemetry-adapter]
+surface_integration:
+  cli: missing
+  web: missing
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "src evidence not reachable from the interactive CLI entry (src/apps/cli/index.ts) — wired only into other apps (eval/bench/probe/headless) or unwired"
+    web: "Probe CLI view layer producing terminal text; not ported to web and does not run in web-daemon."
+purpose: |
+  Pure renderers — events in, strings out. No color, no I/O (RFC-0002 §7
+  Phase 1 = plain text, no TUI per RFC §14). Multiple views from the same
+  source:
+    - default        : ordered event timeline (compact)
+    - `--failed`     : only events leading to failed instances
+    - `--slow`       : per-instance + per-tool latency breakdown
+    - `--cost`       : per-call token + USD using `costUsd` + PRICING_VERSION
+                       from `@/observability` (stamps PRICING_VERSION so a
+                       future price change does not silently re-attribute)
+    - `--json`       : structured emit for downstream pipelines
+  Hotspots + cost are derived from the trajectory events themselves and
+  do NOT require `metrics.json` (RFC §3 원칙1 — trajectory is SSOT).
+evidence:
+  code:
+    - src/apps/probe/render.ts
+  adrs: [10]
+  tests:
+    unit: []
+    integration:
+      - tests/unit/probe.test.ts
+    contract: []
+knobs: []
+deliberate_hold:
+  reason: |
+    Renderer is currently covered only via the integration suite (rendered
+    string snapshot per view). Pure-function unit coverage of individual
+    formatters (cost row, latency row, JSON envelope) would catch
+    formatter drift faster.
+  promotion_path: |
+    Add `tests/unit/probe-render.test.ts` per-formatter with small fixtures.
+notes: |
+  Pure functions only — re-imports from `@/observability` are read-only
+  (PRICING_VERSION + costUsd). The renderer does not log, does not exit,
+  does not throw on a missing event field (degrades to "-").

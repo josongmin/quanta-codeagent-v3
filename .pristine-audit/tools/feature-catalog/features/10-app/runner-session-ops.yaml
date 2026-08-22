@@ -1,0 +1,67 @@
+id: runner-session-ops
+title: runner/session-ops — surface-agnostic `quanta session …` dispatcher
+section: 10
+subsystem: surface-agnostic session ops
+order: 121
+maturity: L4
+status: new
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [interactive]
+configurable: integrated
+owners: ["@songmin"]
+labels: ["surface:cli"]
+depends_on: [session-jsonl-envelope, session-root-provider-port, session-sanitize-id, byte-stable-string-comparator, assert-never-exhaustiveness]
+surface_integration:
+  cli: full
+  web: missing
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 2/2 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "Session ops are CLI subcommands; protocol.ts SessionCommand has only input.append/turn.run/turn.cancel/approval.respond with no resume/fork/rewind verb (B3) and no apps/web-frontend session-management UI, so they never reach the browser."
+purpose: |
+  `quanta session <subcommand>` 의 dispatcher 를 surface-agnostic 슬라이스로
+  격리. 8 개 서브커맨드 (`list` / `show` / `delete` / `rename` / `archive` /
+  `unarchive` / `fork` / `import`) 를 단일 진입점 `runSessionCommand(argv, deps)`
+  으로 분기. argv 가 `session` 으로 시작하지 않으면 본 모듈은 ZERO 실행 — REPL
+  / agent 경로로 fall-through (byte-identical default-OFF posture).
+
+  Pure-ish 설계: 모든 stdout/stderr 가 주입된 `out`/`err` writer 로 라우팅,
+  interactive confirm 도 `confirm: (prompt) => Promise<boolean>` 로 주입 →
+  binary spawn / readline attach 없이 unit test 가능. 함수가 numeric exit
+  code (`0` 성공 / `1` 에러) 를 반환 — caller (`apps/cli/index.ts`) 가
+  `process.exit(...)` 로 매핑.
+
+  Surface-agnostic seam (`SessionCommandDeps`):
+    - `out` / `err`           — io writer port (surface 가 stdout/HTTP/IPC 선택)
+    - `confirm`               — interactive yes/no port (test mockable)
+    - `homeDir`               — external-agent install scan root (test injectable)
+    - `importHandler`         — `@/migration` 진입점을 surface 가 와이어링
+                                (`@/runner` 슬라이스가 `@/migration` 을 직접
+                                 import 금지 — biome 규칙). 미세트 ⇒ `import`
+                                서브커맨드 fail-fast (silent skip 방지)
+    - `listEnv`               — `SessionListEnv` (defaultFormat / defaultMaxN);
+                                surface 가 TTY 감지 결과 등을 typed 으로 주입
+
+  `list-tui.ts` 가 rich (TUI 컬러/박스) vs plain (파이프/리다이렉트/테스트)
+  렌더링 분기 + 정렬·필터 파이프라인 (`applyListPipeline` / `buildSessionListEntries`
+  / `renderSessionList`) 담당.
+evidence:
+  code:
+    - src/runner/session-ops/index.ts
+    - src/runner/session-ops/list-tui.ts
+  adrs: []
+  tests:
+    unit:
+      - tests/unit/session-ops/list-tui.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  Slice boundary: `@/runner/session-ops` 는 `@/session` + `@/runtime` +
+  `@/llm` 만 의존. `@/migration` 의존성은 의도적으로 surface 가 주입
+  (`importHandler`) — 슬라이스 격리 + 미주입 시 명시적 fail-fast 가 둘 다
+  만족 (silent migration skip 방지). list-tui 의 default 값 (rich+10) 은
+  `listEnv` 미세트 시 surface-호환 legacy 거동 보존.

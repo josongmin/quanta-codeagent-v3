@@ -1,0 +1,35 @@
+id: cr2-fu3-exhaustiveness-gate
+title: CR2 + FU3 exhaustiveness gate
+section: 2
+subsystem: Edit-strategy state machine (ADR-0019)
+order: 2
+maturity: L4
+status: stable
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [n-a]
+configurable: n-a
+owners: ['@songmin']
+labels: [absorbed:codex, surface:cli]
+depends_on: [edit]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 2/2 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "Pure internal edit-recovery state-machine and exhaustiveness compile guard with out-of-process marker; ui_surfaces n-a, no UI affordance on any surface."
+purpose: CR2 + FU3 exhaustiveness gate — 구조적 EditMismatchKind = "not-found" | "ambiguous" | "fuzzy-no-confident" 리터럴 union + Record<EditMismatchKind, NextStrategy> exhaustiveness 컴파일 게이트. out-of-process [edit-mismatch:<kind>] 마커로 producer/consumer간 통신 — substring sniff 제거.
+evidence:
+  code:
+    - src/tool/edit/strategy-hint.ts
+    - src/tool/edit/exact.ts
+  adrs: [19]
+  tests:
+    unit: ["tests/unit/edit-recovery-hellgate.test.ts", "tests/unit/edit-strategy-hint.test.ts", "tests/unit/edit.test.ts"]
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: 신규 failure class 추가 시 union + switch 동시 갱신 강제

@@ -1,0 +1,51 @@
+id: token-store-atomic
+title: chatgpt-oauth token-store — atomic write + 0o600 perm guard
+section: 7
+subsystem: Auth resilience (ChatGPT-OAuth)
+order: 19
+maturity: L4
+status: stable
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [n-a]
+configurable: integrated
+owners: ["@songmin"]
+labels: ["surface:core", "resilience-primitive", "absorbed:codex"]
+depends_on: [chatgpt-oauth-provider, slice-auth-chatgpt-oauth, refresh-coordinator, chatgpt-responses-adapter]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 7/7 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "pure internal token-store durability primitive, no UI affordance (login UI is a separate feature)"
+purpose: |
+  OAuth refresh-token / access-token on-disk 저장: (1) tmp + rename atomic
+  write로 torn JSON 방지, (2) Linux/macOS에서 `mode & 0o077 !== 0`이면
+  TokenStoreError throw — world/group readable 토큰 파일은 load 대신 force
+  relogin (tampering vs leak 회피), (3) `ENOENT`만 null 반환, 다른 read 실패는
+  throw, (4) 부재 필드는 null/undefined 직렬화 대신 키 자체 omit (Codex
+  auth-data shape 호환), (5) `expires_at`은 ISO-8601 string으로 시간대 모호성
+  제거.
+evidence:
+  code:
+    - src/auth/chatgpt-oauth/token-store.ts
+    - src/auth/chatgpt-oauth/index.ts
+    - src/auth/chatgpt-oauth/refresh.ts
+    - src/auth/chatgpt-oauth/paths.ts
+    - src/auth/chatgpt-oauth/browser-flow.ts
+    - src/auth/chatgpt-oauth/config.ts
+    - src/auth/chatgpt-oauth/jwt.ts
+  adrs: []
+  tests:
+    unit:
+      - tests/unit/auth/token-store.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  RefreshCoordinator(thundering-herd guard)가 본 store를 wrap — concurrent
+  refresh 시 1회만 실제 네트워크 fetch, 나머지는 같은 promise share. atomic
+  rename으로 fetch-update 중간 crash 시 이전 토큰이 손상되지 않음.

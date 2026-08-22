@@ -1,0 +1,53 @@
+id: turn-cancel-keys
+title: REPL turn-cancel — Ctrl+C hard / Esc-Esc soft 2-tier
+section: 7
+subsystem: 사용자 cancellation gesture
+order: 21
+maturity: L4
+status: stable
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [interactive]
+configurable: integrated
+owners: ["@songmin"]
+labels: ["surface:core", "resilience-primitive"]
+depends_on: [repl-code-smell-cleanup, repl-interactive-surface, slashctx-6-ports-wire-completion, multimodal-image-input, shell-output-delta-streaming]
+surface_integration:
+  cli: full
+  web: missing
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 4/4 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "CLI-only TTY raw-mode keypress gesture; the cancel verb on the web (turn.cancel) is a separate path and this keypress install never runs in the web-daemon"
+purpose: |
+  CLI REPL의 cancellation 2-tier gesture wiring: (1) **Ctrl+C** → outer
+  AbortController.abort() (hard exit, surface-scoped) + transient "interrupted"
+  status, (2) **Esc 두 번 (2초 윈도우 안)** → turnAbort.abort() (soft cancel,
+  per-turn controller) + "turn cancelled" status — 첫 Esc는 hint, 두 번째가
+  실제 abort. raw mode REQUIRED — LLM이 streaming 중에도 keypress가 발화하기
+  위함; 비-TTY stdin에선 no-op return. `installTurnCancel`은 disposable —
+  caller가 try/finally로 호출해 terminal raw mode 복원 MUST. cognitive-complexity
+  예산을 위해 `runRepl`에서 분리. 2-tier signal hierarchy(turn vs surface)는
+  AgentLoop의 dual signal contract와 정확히 일치.
+evidence:
+  code:
+    - src/apps/cli/repl.ts
+    - src/apps/cli/repl/turn-cancel-install.ts
+    - src/apps/cli/repl/turn-runner.ts
+    - src/apps/cli/repl/session-loop.ts
+  adrs: []
+  tests:
+    unit:
+      - tests/unit/apps/cli/turn-cancel-install-hellgate.test.ts
+      - tests/unit/apps/cli/turn-runner-hellgate.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  ESC_WINDOW_MS=2000은 double-tap timing. 첫 Esc 후 다른 키가 들어오면 카운터
+  리셋 — 우발적 Esc는 abort로 빠지지 않음. Hard(Ctrl+C)와 Soft(Esc-Esc)의
+  분기로 "현재 턴만 취소"와 "REPL 자체 종료"가 명확히 구분 — 다른 surface는
+  outer abort signal만 honor하면 같은 의미론을 받음. 현재 owner는
+  `turn-cancel-install.ts` + `turn-runner.ts`이며, 옛 interactive helper는 없다.

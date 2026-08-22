@@ -1,0 +1,63 @@
+id: product-onboard-skill
+title: product-onboard system skill — new-USER guided first-run (B1)
+section: 6
+subsystem: 스킬 — 번들 시스템 스킬 (first-user onboarding, jul-03 competitor UX absorption)
+order: 211
+maturity: L2
+status: new
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [interactive]
+configurable: static
+owners: ["@songmin"]
+labels: ["surface:core", "tier:1", "default-off"]
+depends_on: [git-log-search-skill]
+config_refs:
+  env: ["QUANTA_SKILLS_DIR"]
+surface_integration:
+  cli: full
+  web: missing
+  method: audited
+  verified: "2026-07-03"
+  evidence:
+    cli: "auto-discovered by discoverSystemSkills() (src/skill/system-skills/index.ts globs the bundled system-skills/ dir); its 5-step update_plan checklist runs in the interactive CLI via the plan seam"
+    web: "skill slash invocation is CLI-only; SlashPalette is prefill stubs (B2), no dedicated web skill affordance"
+purpose: |
+  A prompt-only system skill for FIRST-USER onboarding (the get-started flow),
+  DISTINCT from the existing repo-recon `onboard` skill. The two have INVERTED
+  semantics:
+
+    - `onboard`          → a developer meets an unfamiliar REPO (read-only recon)
+    - `product-onboard`  → a new USER meets the PRODUCT (guided first task)
+
+  THE risk this carries is name/trigger COLLISION — the model must pick the right
+  skill. So `product-onboard` uses a DISTINCT kebab name (≠ `onboard`) and sharp,
+  non-overlapping triggers ("onboard me" / "get started" / "first task" /
+  "new user" / "how do I use this"), and its body is a 5-step `update_plan`
+  contract (pick a role → connect context → scope a first task → ship a first
+  artifact → recap) reusing the EXISTING plan seam — NO onboarding-specific plan
+  tool. allowedTools: [update_plan, Read, Glob, Edit, Bash]. userInvocable,
+  category=skill, stability=experimental.
+
+  Default-OFF per the system-skill slice policy: activated only by description
+  match or explicit invoke; system-wins-on-collision protects it from a
+  user-supplied "product-onboard" shadow.
+evidence:
+  code:
+    - src/skill/system-skills/product-onboard/SKILL.md
+    - src/skill/system-skills/index.ts
+    - src/skill/index.ts
+  adrs: ["docs/analysis/jul-03-competitor-ux-absorption.md"]
+  tests:
+    unit:
+      - tests/unit/system-skills-product-onboard-hellgate.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  B1 (jul-03) — competitor first-run-UX absorption. Prompt-only (no new tool):
+  the whole skill is the SKILL.md body + the strict 6-field frontmatter SSOT.
+  The hellgate (system-skills-product-onboard-hellgate.test.ts) pins the
+  name/trigger DISTINCTNESS from `onboard` (inverted audience) and that the body
+  drives the plan via the existing update_plan seam, not a bespoke tool.

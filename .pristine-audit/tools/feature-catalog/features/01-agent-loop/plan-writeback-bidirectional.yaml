@@ -1,0 +1,68 @@
+id: plan-writeback-bidirectional
+title: Plan-writeback — bidirectional skill ↔ plan sync (ADR-0259)
+section: 1
+subsystem: Plan-writeback closed-port (ADR-0259, Devin Playbook 흡수)
+order: 259
+maturity: L2
+status: new
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [n-a]
+configurable: n-a
+owners: ["@songmin"]
+labels: [absorbed:devin, absorbed:cursor, absorbed:roo, absorbed:claude-code, surface:core, tier:core]
+depends_on: [user-authored-playbook-frontmatter]
+surface_integration:
+  cli: missing
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "src evidence not reachable from the interactive CLI entry (src/apps/cli/index.ts) — wired only into other apps (eval/bench/probe/headless) or unwired"
+    web: "pure internal closed-port finding side-queue, default-OFF, no UI affordance; does not mutate plan or emit any web event"
+purpose: |
+  Devin playbook 실행 중 skill 이 발견한 finding (discovery / blocker /
+  opportunity) 을 plan 객체에 직접 mutate 하지 않고 사이드 큐에 typed 로
+  적재해, 호스트가 다음 plan re-render 경계에서 consume 하도록 하는 닫힌-
+  포트 슬라이스. quanta 는 지금까지 plan → tool dispatch 단방향이었고
+  ADR-0203 의 success-criteria/procedure 도 declarative 선언만 흡수했을
+  뿐 실행 중 finding 의 역기록 경로가 없었다.
+  MVP scope (이 슬라이스에만 한정):
+    - PlanWriteback port  — recordFinding(skillId, finding) / getUpdates /
+      clearUpdates 3-method 닫힌 surface
+    - Finding type        — kind 3-arm (discovery/blocker/opportunity) +
+      severity 3-arm (info/warn/critical) + non-empty text
+    - PlanUpdate envelope — { planId, skillId, finding, recordedAt } 전부
+      frozen
+    - WritebackError      — 3-arm closed (plan-not-found / empty-text /
+      skill-id-empty); 절대 throw 안 함
+    - defaultWriteback    — Map-backed in-memory, 하나의 인스턴스 = 하나의
+      활성 planId, 내부 monotonic counter 로 recordedAt 부여 (Date.now()
+      미사용 → 동일 ms 폭주에도 strict-increase)
+  Default-OFF: 호스트가 createDefaultWriteback 을 명시적으로 wire 하지
+  않으면 ADR-0203 playbook 경로는 byte-identical. loop / agent / tool /
+  permission 어디에도 import 0. plan 본체를 mutate 하지 않으므로 기존
+  plan 모듈도 0 touch.
+evidence:
+  code:
+    - src/skill/playbook/plan-writeback/types.ts
+    - src/skill/playbook/plan-writeback/port.ts
+    - src/skill/playbook/plan-writeback/default-writeback.ts
+    - src/skill/playbook/plan-writeback/index.ts
+  adrs: [259, 203, 218]
+  tests:
+    unit:
+      - tests/unit/skill/playbook/plan-writeback-hellgate.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  슬라이스는 leaf-only — `@/agent`, `@/tool`, `@/permission`, `@/memory`,
+  `@/scheduler`, `@/observability`, `@/runtime`, `@/storage`, `@/llm`,
+  `@/stream`, `@/shared` import 0 (HELL-PW-08 봉인). plan 본체 mutate
+  금지 — caller 가 자신만의 re-render 경계에서 getUpdates → 통합 →
+  clearUpdates 패턴으로 drain. 후속:
+    (1) plan renderer 와 합성 (deliberate hold)
+    (2) ADR-0203 dispatcher 에서 자동 inject (host opt-in)
+    (3) 영속화 (memory + session-store 협업, 별도 슬라이스)

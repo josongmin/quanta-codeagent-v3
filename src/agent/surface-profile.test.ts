@@ -1,6 +1,6 @@
 /**
- * SurfaceProfile seam — surface-adaptive prompt composition (RFC
- * `jul-2-terminal-bench-levers/00` §X).
+ * SurfaceProfile seam — surface-adaptive prompt composition (TB21-06 TC-4 —
+ * `docs/plans/aug-21-bench-terminal-2-1/TB21-06-transferred-contracts.md`).
  *
  * HELLGATE proofs:
  *   - Composition is SURFACE-AGNOSTIC: two DIFFERENT profiles → two DIFFERENT

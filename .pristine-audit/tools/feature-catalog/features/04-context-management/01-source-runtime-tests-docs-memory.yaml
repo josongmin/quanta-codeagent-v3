@@ -1,0 +1,35 @@
+id: source-runtime-tests-docs-memory
+title: source/runtime > tests > docs/memory
+section: 4
+subsystem: Prompt policy stack (ADR-0016)
+order: 1
+maturity: L5
+status: stable
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [interactive, headless, batch, daemon, ide, ci-bot]
+configurable: static
+owners: ["@songmin"]
+labels: [absorbed:codex, surface:core]
+depends_on: [mode-repo-rules-active-skills-working-state-memory-hints, build-turn-context, fallback-kinds-policy, llm-factory, loadreporules-cwd]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 2/2 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "pure internal system-prompt policy text, no UI affordance"
+purpose: 8-layer 정책 인덱스 + FACT/INFERENCE/UNKNOWN claim ladder + 트러스트 ladder + 5축 예산 + 정직성 4 rule + 8 task-kind reporting shape + VerificationCloseout scaffold. buildSystemPrompt에 정적 박힘 — 캐시 prefix byte-stable 보존
+evidence:
+  code:
+    - src/agent/prompt.ts
+    - src/agent/prompt-sections.ts
+  adrs: [16]
+  tests:
+    unit: [tests/unit/prompt-system.test.ts, tests/unit/prompt-sections-hellgate.test.ts, tests/unit/prompt-rules-snapshot.test.ts]
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: ''

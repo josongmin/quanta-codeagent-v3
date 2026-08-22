@@ -1,0 +1,64 @@
+id: cli-diff-preview
+title: CLI action diff-preview — write/edit/apply_patch/scripted_replace 통합 unified diff
+section: 4
+subsystem: CLI surface — pre/post action preview
+order: 70
+maturity: L4
+status: new
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [interactive, headless]
+configurable: integrated
+config_refs:
+  env: [QUANTA_DIFF_MAX_BYTES, QUANTA_DIFF_MAX_LINES, QUANTA_DIFF_PREVIEW]
+owners: ["@songmin"]
+labels: [absorbed:codex, surface:core]
+depends_on: [auto-approval-reviewer, branch-only-guard, color-policy-resolver, default-acceptedits-bypass-auto, git-c]
+surface_integration:
+  cli: full
+  web: missing
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 1/1 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "CLI ANSI terminal render; web DiffPanel is NOT mounted (App.tsx:578) so this diff never reaches the browser."
+purpose: |
+  4개 변경-도구(`write` / `edit` / `apply_patch` / `scripted_replace`) 분기를
+  단일 `renderActionDiff()`로 통일 — before/after 텍스트 페어를 line-LCS
+  unified diff(`@@ -a,b +c,d @@` hunks)로 렌더하고 ANSI 컬러(추가=green /
+  제거=red / hunk header=cyan)로 출력. 도구별 입력 차이는 도구별 어댑터에서
+  before/after pair 추출로 흡수 — diff 코어는 페어만 본다.
+  Graceful fallback 5 path: (1) 바이너리(NUL 바이트 감지) ⇒ summary line만,
+  (2) oversize(`QUANTA_DIFF_MAX_BYTES`/`QUANTA_DIFF_MAX_LINES` 초과) ⇒
+  "(diff omitted: too large)" 라인, (3) 파일 부재(ENOENT, edit/apply_patch
+  대상) ⇒ creation 처리, (4) invalid regex(scripted_replace) ⇒ no-diff
+  fallback + 명시 사유, (5) no-match(스크립트 패턴 미일치) ⇒ unchanged 표시.
+  Default-OFF 시 byte-identical (기존 로프 출력 0변경).
+evidence:
+  code:
+    - src/apps/cli/diff-preview.ts
+    - src/runner/action-diff.ts
+  adrs: []
+  tests:
+    unit:
+      - tests/unit/cli/diff-preview.test.ts
+      - tests/unit/cli/compute-action-diff.test.ts
+    integration: []
+    contract: []
+knobs:
+  - name: QUANTA_DIFF_PREVIEW
+    default: 'undefined'
+    purpose: '(no description)'
+  - name: QUANTA_DIFF_MAX_LINES
+    default: 'undefined'
+    purpose: '(no description)'
+  - name: QUANTA_DIFF_MAX_BYTES
+    default: 'undefined'
+    purpose: '(no description)'
+deliberate_hold: null
+notes: |
+  TTY 자동 ON / non-TTY OFF; `QUANTA_DIFF_PREVIEW=0` 명시 OFF, `=1` 강제 ON
+  (테스트가 real TTY 없이 force-on 할 수 있는 시ams). 코어 알고리즘은
+  순수 line-LCS — 외부 diff lib 0. 의도적으로 word-level/character-level
+  intra-line diff는 비제공 (가독성 트레이드오프; line 단위가 review용으로
+  충분).

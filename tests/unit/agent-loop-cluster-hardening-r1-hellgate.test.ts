@@ -310,9 +310,14 @@ describe("H6 passive-vcs — false-positive cuts + correct classification (hellg
   })
 
   test("a chained `cd repo && git merge` is recognized via the git segment (merge commit + branch)", () => {
+    // `commit.branch` is read LITERALLY from the `[<branch> <sha>]` bracket
+    // (VcsCommit.branch, src/git/passive-classify/types.ts) — never guessed.
     expect(
       cls("cd repo && git merge feature", "Merge made by the 'ort' strategy.\n[main abc1234] msg"),
-    ).toEqual({ commit: { kind: "merge", sha: "abc1234" }, branch: { action: "merged" } })
+    ).toEqual({
+      commit: { kind: "merge", sha: "abc1234", branch: "main" },
+      branch: { action: "merged" },
+    })
   })
 
   test("a benign `git status` matches no facet ⇒ null", () => {
@@ -321,13 +326,17 @@ describe("H6 passive-vcs — false-positive cuts + correct classification (hellg
 
   test("`git commit` with extra spaces captures the landed sha", () => {
     expect(cls("  git   commit  -m x", "[main 1234567] subject line")).toEqual({
-      commit: { kind: "commit", sha: "1234567" },
+      commit: { kind: "commit", sha: "1234567", branch: "main" },
     })
   })
 
   test("`gh pr create` URL yields a PR facet with the parsed number", () => {
+    // `pr.action` is derived from the argv command-shape (VcsPrAction grammar,
+    // src/git/passive-classify/pr-action.ts) and emitted only with an
+    // authoritative PR identity + exit 0 — `gh pr create` + a stdout URL is
+    // exactly that, so the facet carries `action:"created"`.
     expect(cls("gh pr create --fill", "https://github.com/o/r/pull/42\nsome trailer")).toEqual({
-      pr: { number: 42, url: "https://github.com/o/r/pull/42" },
+      pr: { number: 42, url: "https://github.com/o/r/pull/42", action: "created" },
     })
   })
 

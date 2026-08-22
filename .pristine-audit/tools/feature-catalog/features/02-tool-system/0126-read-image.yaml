@@ -1,0 +1,53 @@
+id: read-image
+title: read_image tool + ToolResult.images field + composer helper
+section: 2
+subsystem: Vision input tool (ADR-0126)
+order: 126
+maturity: L4
+status: stable
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [n-a]
+configurable: static
+owners: ["@songmin"]
+labels: [surface:cli]
+depends_on: [fallback-kinds-policy, image-vision-tools, llm-factory, model-swap-retry, response-in-progress]
+config_refs:
+  env: ["QUANTA_CAP_ENFORCE"]
+surface_integration:
+  cli: full
+  web: partial
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 6/6 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "tool.invoked/tool.completed render the call but the ToolResult.images payload is injected into the next provider request and is never visually rendered in the browser (no tool-media render; only user-input turn.started.images render)"
+purpose: |
+  read_image tool that loads a local image, verifies the format via a magic-
+  byte SSOT (cannot be spoofed by extension), and surfaces the image through
+  a new ToolResult.images field plus a composer helper that injects the image
+  into the next provider request. Enforces a 5 MB per-image cap, rejects leaf
+  symlinks (anti-escape), and runs through the standard FsJail boundary.
+evidence:
+  code:
+    - src/tool/image/read.ts
+    - src/tool/image/compose.ts
+    - src/tool/image/index.ts
+    - src/tool/types.ts
+    - src/shared/runtime-config.ts
+    - src/tool/image/from-url.ts
+  adrs: [126]
+  tests:
+    unit:
+      - tests/unit/tool/read-image-hellgate.test.ts
+      - tests/unit/tool/image-read-fsjail-unify-hellgate.test.ts
+    integration:
+      - tests/integration/dispatch-image-roundtrip-hellgate.test.ts
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  ToolResult.images is added as an optional field — absent on every legacy
+  tool, byte-identical when no caller emits it. Magic-byte SSOT is shared with
+  the URL variant (ADR-0132) so spoofed Content-Type from a remote server
+  cannot bypass detection.

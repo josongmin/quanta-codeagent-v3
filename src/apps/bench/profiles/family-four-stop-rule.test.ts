@@ -99,6 +99,9 @@ const family4Profile: DatasetFamilyProfile = {
       throw new Error("family4 preflight refused this dataset")
     }
   },
+  // layer 3b′ — its own ADMISSION gate (admits; the refusal case is covered by
+  // the gold-absence lifecycle hellgate's own synthetic family).
+  admitBox: () => {},
   // layer 3c — its own on-box bootstrap.
   setupBox: async (input) => {
     input.log("[family4] setting up")

@@ -1,0 +1,50 @@
+id: shadow-checkpoint-policy
+title: ShadowOdb auto-checkpoint policy (ADR-0121)
+section: 7
+subsystem: Shadow ODB 복원 anchor 정책
+order: 17
+maturity: L4
+status: new
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [interactive, headless, batch, daemon, ide, ci-bot]
+configurable: static
+owners: ["@songmin"]
+labels: ["surface:core", "resilience-primitive", "absorbed:codex", "absorbed:cursor"]
+depends_on: [effect-channel, agent-loop-branch-hardening, agent-types-split, cap-enforcer, cfg-fourrule-true]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 2/2 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "pure internal ShadowOdb checkpoint-anchor policy, no UI affordance"
+purpose: |
+  Cline / Hermes / Codex / Cursor의 auto-checkpoint 패턴을 closed enum 4-arm
+  으로 표면화 — `off`(byte-identical 기본) / `per_tool`(모든 tool-use 전,
+  Cline식) / `turn_dedup`(턴당 최대 1회 destructive 직전, Hermes식) /
+  `verify_success`(verify pass boundary, Codex/Cursor식). `EffectChannel`
+  wrap이 anchor를 INSERT BEFORE 위임. (workspace, turnId)당 최대 1회로 dedup
+  (Hermes 1-per-dir-per-turn 미러). 4-arm string union을 expand하려면 ADR
+  amendment + 모든 exhaustive switch가 compile error를 강제하므로 audit-time
+  결정. No-throw 보장(fail-OPEN): anchor I/O 실패는 swallowed observability
+  concern, 도구 호출은 ALWAYS 실행. `DestructivenessOracle`은 DI port — 기본은
+  `Tool.isReadOnly()` 신뢰, 테스트는 더 엄격한 classifier 핀가능.
+evidence:
+  code:
+    - src/agent/checkpoint-policy.ts
+    - src/agent/checkpoint-wiring.ts
+  adrs: [121]
+  tests:
+    unit:
+      - tests/unit/checkpoint-policy-hellgate.test.ts
+      - tests/unit/dispatch-wires-checkpoint-and-image-hellgate.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  `shadowCheckpoint` config 부재 + `shadowOdb` 부재 + mode === "off"의 3중
+  short-circuit으로 zero-cost when off. 정책 mode 자체는 closed; 신규 모드
+  추가는 ADR 갱신 + 전 consumer 컴파일러가 fail-out.

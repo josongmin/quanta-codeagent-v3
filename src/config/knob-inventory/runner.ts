@@ -236,4 +236,21 @@ export const RUNNER: readonly KnobInventoryEntry[] = [
     describe: "Git tool budget: stdout byte cap; unset ⇒ unbounded.",
     readSite: "tool/git/_budget.ts",
   },
+  // RFC-01 A2 — attention/question authority gate. Read at the session-authority
+  // composition root via `gateOn(env, ATTENTION_GATE)` (INJECTED env, not raw
+  // process.env), and on the CLI side via `readCliKnob` in slash/attention-cmd.ts.
+  // Declared here (agent/runner domain, NOT cli-knobs.ts) because the gate governs
+  // a RUNNER-side authority graph, not terminal render — cli-knobs is excluded from
+  // the web `/knobs` catalog. Default-OFF ⇒ `buildSessionAuthorities` returns the
+  // pre-attention graph and `/attention` is never registered (byte-identical).
+  {
+    envKey: "QUANTA_ATTENTION_NAV",
+    kind: "bool",
+    default: false,
+    group: "agent-feature",
+    home: "runtime-config",
+    describe:
+      "Attention navigation gate (RFC-01) — wires the pure @/attention resolver + the user-question broker into a read-only AttentionReader on the session authorities and registers the `/attention` slash command. Opt-in; unset ⇒ no broker, no reader, no command (byte-identical).",
+    readSite: "runner/assemble/session-authorities/build.ts",
+  },
 ]

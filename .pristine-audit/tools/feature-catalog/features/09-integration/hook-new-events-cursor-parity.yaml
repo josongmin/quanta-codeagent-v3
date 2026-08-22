@@ -1,0 +1,69 @@
+id: hook-new-events-cursor-parity
+title: Hook new events — user_prompt_submit + pre_compact + subagent_stop (S5)
+section: 9
+subsystem: Hook bus (S5 Cursor parity)
+order: 202
+maturity: L4
+status: stable
+owners: ["@songmin"]
+depends_on: [plan-mode, secret-redaction-content-plane, response-in-progress, codex-2-phase-consolidator, ide-context-provider-seam]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 4/4 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "pure internal hook-bus lifecycle primitive (user_prompt_submit / pre_compact / subagent_stop) — no browser affordance on any surface; not bridged because it is not a UI feature"
+purpose: |
+  Three additional HookEvent variants S5 surfaces (pre_compact +
+  subagent_stop already shipped via ADR-0133; user_prompt_submit is the
+  new addition).
+
+  (1) user_prompt_submit — emitted by loop.ts ONCE per run, immediately
+  after session_start, when the seeded buffer ends in a user message.
+  Honored response channels: `deny` ⇒ short-circuit into aborted (the
+  surface observes AgentOutcome.reason === "aborted" + a hook-origin stop
+  category); `updatedPrompt: string` ⇒ rewrites the trailing user
+  message's first text block in place (the LLM sees only the rewritten
+  text). Each handler sees the latest rewritten prompt so rewrites
+  compose in registration order; LAST rewrite wins.
+
+  (2) pre_compact — emitted by compactIfNeeded BEFORE the summarizer LLM
+  is invoked. Handlers may return `{abortReason}` to skip THIS compaction
+  (the breaker observes the no-op). Use cases: snapshot before lossy
+  compaction, audit log, defer to off-hours.
+
+  (3) subagent_stop — emitted by subagent-runner.ts AFTER a forked child
+  returns (success/fail/cancel). Fire-and-forget for status reporting; an
+  abort here is meaningless (the child already finished). promptHook on
+  this event is queued for the parent's NEXT turn.
+
+  Anti-leak: each event payload contains ONLY the documented fields
+  (user_prompt_submit ⇒ prompt+attachmentsCount+threadId; pre_compact ⇒
+  messagesToCompact+isFirstCompaction; subagent_stop ⇒ subagentId+result
+  {ok,finalText,turns}). No tool args, no cookies, no memory content
+  leaks through the typed envelope.
+evidence:
+  code:
+    - src/agent/hooks.ts
+    - src/agent/loop.ts
+    - src/agent/compaction.ts
+    - src/agent/subagent-runner.ts
+  adrs: []
+  tests:
+    unit:
+      - tests/unit/hooks-new-events-hellgate.test.ts
+      - tests/unit/hook-bus-bidirectional.test.ts
+      - tests/unit/hook-bidirectional-hellgate.test.ts
+      - tests/unit/subagent-runner.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  user_prompt_submit emission lives in loop.ts (emitUserPromptSubmitHook
+  helper) — NOT in the REPL surface — so every surface (CLI / Web /
+  Tauri / one-shot) benefits without per-surface wiring. No emission when
+  there is no trailing user message (resume-without-new-prompt) or when
+  no bus is wired (byte-identical legacy path).

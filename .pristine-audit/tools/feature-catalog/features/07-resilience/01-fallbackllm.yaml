@@ -1,0 +1,48 @@
+id: fallbackllm
+title: FallbackLLM
+section: 7
+subsystem: 모델 Fallback (Tier 0)
+order: 1
+maturity: L3
+status: stable
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [n-a]
+configurable: static
+owners: ['@songmin']
+labels: [surface:core, resilience-primitive]
+depends_on: [agent-loop-branch-hardening, assert-never-exhaustiveness, byte-stable-string-comparator, errors-helper-fix, fallback-kinds-policy]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 3/3 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "pure resilience-primitive decorator, no user-visible affordance on any surface"
+purpose: |
+  `FallbackLLM` (`src/llm/fallback.ts`) — LLMPort 데코레이터. 우선순위
+  순서의 provider 리스트를 받아, 현재 provider가 fallback-trigger 에러
+  (overload/server_error/network/not_implemented; `FALLBACK_KINDS`
+  policy로 정의)로 실패하면 다음 provider로 swap. swap 시점이 *첫
+  바이트가 yield되기 전*이면 호출자에 투명(같은 turn 안에서 발견되지
+  않음); 첫 chunk가 이미 흘러나간 *post-yield* 시점에 trigger가 떨어지면
+  swap 대신 partial output에 tombstone을 남기고 stream을 종료한다
+  (trajectory 결정성 보존, mid-stream replay 금지).
+evidence:
+  code:
+    - src/llm/fallback.ts
+    - src/llm/index.ts
+    - src/runner/assemble/llm.ts
+  adrs: []
+  tests:
+    unit:
+      - tests/unit/fallback.test.ts
+      - tests/unit/fallback-hellgate.test.ts
+      - tests/unit/fallback-empty-tombstone.test.ts
+      - tests/unit/fallback-metrics-hellgate.test.ts
+    integration: [tests/integration/fallback-tombstone-e2e.test.ts]
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: ''

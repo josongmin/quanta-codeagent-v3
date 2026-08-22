@@ -1,0 +1,70 @@
+id: github-actions-trigger-adapter
+title: GitHub Actions Tier 0 PR webhook adapter
+section: 9
+subsystem: GitHub integration (ADR-0311)
+order: 311
+maturity: L3
+status: new
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [daemon, ci-bot]
+configurable: integrated
+config_refs:
+  env: [QUANTA_GH_ACTIONS_TRIGGER]
+owners: ["@songmin"]
+labels: ["surface:cli", "integration:github", "default-off"]
+depends_on: [reactor-trigger-source, pii-redaction-scanner, mention-filter-trust-scope]
+surface_integration:
+  cli: missing
+  web: missing
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "src evidence not reachable from the interactive CLI entry (src/apps/cli/index.ts) — wired only into other apps (eval/bench/probe/headless) or unwired"
+    web: "daemon/ci-bot GH event normalizer; no browser affordance and no web verb"
+purpose: |
+  Tier 0 GitHub Actions adapter — reads `GITHUB_EVENT_PATH` JSON once per
+  workflow run, normalizes 6 event kinds (issue_comment / pull_request /
+  pull_request_review / pull_request_review_comment / issues / push) and
+  gates each normalized event through the mention filter + trust scope + bot
+  sender check + idempotency-store dedupe before emitting a
+  `ProactiveTrigger` whose evidence anchor points back at the PR / issue
+  URL.
+
+  Default-OFF via `QUANTA_GH_ACTIONS_TRIGGER=1`; absence of the env (or any
+  value other than "1") makes `createGithubActionsEventSource` short-circuit
+  to an empty trigger list so the legacy CI replay path is byte-identical.
+
+  The 1-shot read model matches GitHub Actions' single-event invocation
+  contract — no polling, no webhook host required for Tier 0. Tier 1 host
+  scaffold lives in ADR-0312.
+evidence:
+  code:
+    - src/integrations/github/event-source-actions.ts
+    - src/integrations/github/event-payload.ts
+    - src/integrations/github/idempotency.ts
+    - src/integrations/github/index.ts
+    - src/integrations/github/types.ts
+  adrs: [311]
+  tests:
+    unit:
+      - tests/unit/integrations/github/event-source-actions.test.ts
+      - tests/unit/integrations/github/event-payload.test.ts
+      - tests/unit/integrations/github/idempotency.test.ts
+      - tests/unit/integrations/github/event-source-actions-malformed-hellgate.test.ts
+      - tests/unit/integrations/github/event-source-idempotency-hellgate.test.ts
+      - tests/unit/integrations/github/event-payload-fuzz-hellgate-r2.test.ts
+      - tests/unit/integrations/github/event-source-actions-state-hellgate-r2.test.ts
+      - tests/unit/integrations/github/idempotency-cap-hellgate-r2.test.ts
+    integration:
+      - tests/integration/integrations/github/github-actions-end-to-end.test.ts
+    contract: []
+knobs:
+  - QUANTA_GH_ACTIONS_TRIGGER — Default-OFF env gate; "1" arms the adapter, anything else short-circuits.
+deliberate_hold: null
+notes: |
+  Tier 0 path was picked first because GitHub Actions hosts the webhook
+  receiver for free — no signature key management, no public ingress, no
+  outage budget. Tier 1 self-hosted webhook server (ADR-0312) becomes
+  worthwhile only when sub-minute latency or non-Actions hosts (GitLab /
+  Bitbucket / Gitea) enter scope.

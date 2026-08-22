@@ -1,0 +1,55 @@
+id: seatbelt-profile-compiler
+title: Seatbelt (SBPL) profile compiler — macOS sandbox-exec text
+section: 9
+subsystem: runtime/os-sandbox — macOS profile compilation
+order: 41
+maturity: L2
+status: new
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [n-a]
+configurable: partial
+owners: ['@songmin']
+labels: [surface:core, absorbed:codex]
+depends_on: [landlock-degraded-passthrough]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 2/2 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "pure internal SandboxPolicy-to-SBPL codec, no UI affordance on any surface"
+purpose: |
+  Pure compiler from a `SandboxPolicy` to a Seatbelt (SBPL) profile text
+  suitable for `sandbox-exec -p '<text>'`. No I/O. Mirrors the Codex
+  baseline (memory: `codex-seatbelt-sandbox-profile`) adapted to our
+  5-arm closed profile enum. `compileSeatbeltProfile(policy, workspace)`
+  returns `null` for profiles that should NOT be compiled (the caller
+  passes the spawn through verbatim instead): `"off"` and
+  `"danger-full-access"`. For every other profile the emitted text starts
+  `(version 1)(deny default)`, then layers framework-read subpaths,
+  per-profile FS read/write rules over the workspace and extras, and a
+  network deny/allow. The workspace path's `"` is escaped defensively so
+  an attacker-controlled workspace argument cannot break out of the SBPL
+  string literal.
+evidence:
+  code:
+    - src/runtime/os-sandbox/seatbelt.ts
+    - src/runtime/os-sandbox/types.ts
+  adrs: []
+  tests:
+    unit: []
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  Design notes (deliberate, beyond literal spec): `pseudo-tty` + `/dev/ptmx`
+  always allowed (any pty-buffered tool would otherwise break), `process-fork`
+  allowed in every non-off profile (bash itself forks; denying it makes
+  the sandbox useless — `process-exec` of new binaries is what is denied
+  in `read-only` / `workspace-write`). Pairs with `landlock-degraded-passthrough`
+  (Linux backend) and `defaultOsSandbox` (the platform-aware router).
+
+  L4→L2: no test imports evidence.code paths

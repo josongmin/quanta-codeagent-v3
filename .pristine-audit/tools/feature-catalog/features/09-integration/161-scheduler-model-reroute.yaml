@@ -1,0 +1,33 @@
+id: scheduler-model-reroute
+title: Scheduler model reroute
+section: 9
+subsystem: Scheduler / scheduled agent
+order: 161
+maturity: L4
+status: stable
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [interactive, daemon, headless]
+configurable: integrated
+owners: ["@songmin"]
+labels: ["surface:cli"]
+depends_on: [scheduler-automation-lifecycle, scheduler-rrule, scheduler-weekday-nth]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-07-16"
+  evidence:
+    cli: "The canonical automation engine consumes the pure model selector."
+    web: "No web scheduler surface."
+purpose: "Choose the preferred available model or an ordered fallback without duplicate probes."
+evidence:
+  code: [src/scheduler/model-reroute.ts, src/scheduler/automation-engine/run-model.ts]
+  adrs: [161]
+  tests:
+    unit: [tests/unit/scheduler-model-reroute-hellgate.test.ts]
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: "Retry policy remains outside the pure selector."

@@ -1,0 +1,194 @@
+id: otlp-http-exporter
+title: OTLP/HTTP exporter — `QUANTA_OTEL_ENDPOINT` realtime ship (외부 SDK zero) (ADR-0268)
+section: 8
+subsystem: observability — realtime OTLP/JSON span+metric ship (hand-rolled wire)
+order: 268
+maturity: L4
+status: stable
+ui_surfaces: [cli]
+monitoring: integrated
+modes: [interactive, headless, daemon, ide, ci-bot]
+configurable: partial
+owners: ["@songmin"]
+labels: ["surface:observability", "tier:adapter", "absorbed:opentelemetry"]
+depends_on: [otel-span-tree, otel-sink, metrics-typed-port-slice]
+config_refs:
+  env:
+    - QUANTA_OTEL_ENDPOINT
+    - QUANTA_OTEL_SERVICE_NAME
+    - QUANTA_OTEL_BATCH_SIZE
+    - QUANTA_OTEL_FLUSH_MS
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-16"
+  evidence:
+    cli: "LIVE (jun-16): src/apps/cli/index.ts main() calls wireOtelSpanExport() → installOtelSpanExportFromEnv(process.env) at boot. When QUANTA_OTEL_ENDPOINT is set it registers an exporter-backed SpanSink (createExporterSpanSink, src/observability/otel-span-export.ts) so the loop's startSpan/endSpan ship to the OTLP collector; Default-OFF no-op otherwise. Closes the prior built-not-wired gap — setSpanSink had ZERO prod callers, so the knob was inert."
+    web: "pure internal OTLP/JSON exporter library posting spans/metrics to an external collector; no UI affordance on any surface"
+purpose: |
+  in-tree OTel scaffold (`metrics/otel-sink.ts`, `tracing/otel-tracer.ts`,
+  `tracing/w3c-propagator.ts`)는 in-process surface (counter / histogram /
+  span / W3C propagation)는 다 깔았지만 **모든 sample이 in-memory에 머묾**
+  — real collector로 가는 wiring 없었음. `otlp-helper.ts` / prometheus
+  factory들은 upstream OTel SDK (`@opentelemetry/sdk-metrics` + exporter
+  packages)가 call site에 설치돼 있다고 가정하지만 이 tree에는 안 깔려
+  있음. env-memo로 install이 막혔으므로 "realtime export 토글"이 (a)
+  default-OFF byte-identical, (b) **zero new npm install**, (c) 표준 OTLP
+  wire format이어야 함.
+
+  Hand-rolled **OTLP/JSON over HTTP** exporter를 `src/observability/otel-exporter.ts`
+  closed-port primitive로 ship. Exporter는: (1) `ExportSpan` + `ExportMetric`
+  typed record buffer, (2) `POST ${endpoint}/v1/traces` + `POST ${endpoint}/v1/metrics`
+  로 `Content-Type: application/json` flush, (3) batch-size reach OR time
+  interval trigger flush, (4) `teardown()`이 interval clear + pending drain,
+  (5) `attachOtelExporterFromEnv` composition helper가 `QUANTA_OTEL_ENDPOINT`
+  읽고 unset이면 undefined return (byte-identical Default-OFF).
+
+  Wire serializer는 OTLP/proto JSON 최소 shape 구현: `resourceSpans` /
+  `resourceMetrics` envelope, `scopeSpans[]` / `scopeMetrics[]`,
+  `traceId` / `spanId` / `parentSpanId` (16/8-byte hex),
+  `startTimeUnixNano` / `endTimeUnixNano` (spec 따라 nanos as string),
+  `attributes`는 OTLP tagged-union KeyValue list.
+
+  두 bridge fn으로 기존 MetricsRegistry / Tracer가 restructure 없이 plug:
+  `exporterMetricSink(exporter)` → MetricSink (모든 observation을 exporter
+  metric buffer로 forward), `buildExportingTracer(exporter, opts)` → Tracer
+  (W3C ID 할당 + `end()`에서 finished span을 exporter span buffer로). 메모리
+  tree 없음 — collector가 parentSpanId로 parent/child 복원.
+
+  Default endpoint 절대 없음 — exporter는 `endpoint` 명시 강제. env helper도
+  unset/blank이면 undefined return (default localhost endpoint는 observation
+  silent leak).
+evidence:
+  code:
+    - src/observability/otel-exporter.ts
+    - src/observability/otel-span-export.ts
+    - src/observability/metrics/in-memory-registry.ts
+    - src/observability/metrics/instrument-tool.ts
+    - src/agent/loop-helpers.ts
+    - src/agent/loop/stream-consume.ts
+    - src/runner/assemble/tooling.ts
+    - src/apps/cli/index.ts
+    - src/apps/agent/index.ts
+    - src/apps/web-daemon/index.ts
+  adrs: [268]
+  tests:
+    unit:
+      - tests/unit/observability/otel-exporter-hellgate.test.ts
+      - tests/unit/observability/otel-span-export-wiring-hellgate.test.ts
+      - tests/unit/observability/instrument-tools-for-export-hellgate.test.ts
+    integration:
+      - tests/integration/spans-e2e.test.ts
+    contract: []
+knobs:
+  - name: QUANTA_OTEL_ENDPOINT
+    default: 'undefined'
+    purpose: '(no description)'
+  - name: QUANTA_OTEL_SERVICE_NAME
+    default: 'undefined'
+    purpose: '(no description)'
+  - name: QUANTA_OTEL_BATCH_SIZE
+    default: 'undefined'
+    purpose: '(no description)'
+  - name: QUANTA_OTEL_FLUSH_MS
+    default: 'undefined'
+    purpose: '(no description)'
+deliberate_hold: null
+notes: |
+  No-throw posture: 모든 public method가 network / serialization error를
+  swallow하고 optional `warn` sink로 log. failure 시 buffer NOT drained →
+  next flush가 retry.
+
+  Plane-clean imports: `./tracing/port` (Span types) + `./tracing/noop-tracer`
+  (fallback) + `./metrics/port` (`MetricSink` type)만. Zero `@/agent` /
+  `@/tool` / `@/llm` reach.
+
+  Caller-injected `fetch` + `setInterval` + `now` — test seam (hellgate가
+  fake fetch + manual-tick scheduler + injected clock으로 구동).
+
+  17 hellgate cases: 1-span flush / batch-size flush / interval flush /
+  teardown / failure-retain-buffer / large-N batching / metric POST /
+  service.name presence / empty-buffer no-op / clock injection / W3C ID
+  shape / parent-spanId omission+presence / attribute type round-trip /
+  1KB attribute pass-through / env-unset returns undefined / env-set wires
+  triple / sink adapter forwarding.
+
+  AUTO-ATTACH WIRE (jun-16): the follow-up "composition root auto-attach" is now
+  DONE for BOTH spans AND metrics. `src/observability/otel-span-export.ts` adds:
+   - `createExporterSpanSink(exporter)` — a `SpanSink` (spans.ts) forwarding each
+     closed span to `exporter.recordSpan` with a per-run traceId + a LIFO
+     open-span stack for parent linkage.
+   - `installOtelSpanExportFromEnv(env)` — host entry: when QUANTA_OTEL_ENDPOINT
+     is set it `attachOtelExporterFromEnv` then `setSpanSink(...)` AND
+     `setDefaultMetricSink(exporterMetricSink(exporter))`. Idempotent (declines
+     if a span sink is already registered); teardown restores both prior sinks.
+  Metric egress uses a NEW process-default sink seam mirroring `setSpanSink`:
+  `setDefaultMetricSink` in `metrics/in-memory-registry.ts` — every sink-less
+  `defaultMetricsRegistry()` (the common case; there is no global registry)
+  picks it up, so one host call routes ALL metrics to the exporter. An explicit
+  `opts.sink` still wins; default `null` ⇒ byte-identical. Wired at
+  `src/apps/cli/index.ts` boot. Sealed by otel-span-export-wiring-hellgate.test.ts
+  (env→span→/v1/traces POST, env→metric→/v1/metrics POST, parent linkage, OFF
+  byte-identical, idempotent); red-on-injection verified for both span + metric.
+
+  4-LENS AUDIT (jun-16) — fixes applied:
+   - traceId minted PER ROOT span (open-stack empty ⇒ new trace), NOT once per
+     process — else every session/turn of a long-lived REPL/daemon collapsed into
+     ONE unbounded trace (collector span-cap truncation). Children inherit. Sealed
+     + red-on-injection.
+   - onEnd uses splice(idx, 1) (remove ONLY the closed frame), not splice(idx)
+     which dropped every still-open sibling above it — corrupting the tree under
+     concurrent tool dispatch / concurrent subagents (out-of-LIFO close). Sealed +
+     red-on-injection.
+   - Final flush: the interactive REPL FALLS THROUGH main() ⇒ beforeExit fires ⇒
+     teardown flushes. process.exit() subcommand paths (batch/headless) rely on the
+     unref'd 5s timer, losing at most the final sub-interval batch.
+   - tests/setup.ts global afterEach resets both sinks (forcing function vs
+     cross-file global-sink leak).
+  COVERAGE BUILDOUT (jun-16, iterative):
+   - SPAN ATTRS: the run_sampling_request span now carries gen_ai.* model + token
+     usage + finish reason (was TTFT-only). teeUsage captures the provider usage
+     event → buildSamplingSpanAttrs (loop-helpers.ts) → endSpan. Sealed by
+     spans-e2e.test.ts ("carries gen_ai model + token + finish attrs") +
+     red-on-injection. Empty-safe on early abort.
+   - MULTI-SURFACE: installOtelSpanExportFromEnv now wired at ALL THREE process
+     entries — CLI (apps/cli/index.ts), headless/batch/ci-bot agent
+     (apps/agent/index.ts import.meta.main), and the web-daemon
+     (apps/web-daemon/index.ts main() + AWAITED teardown in shutdown, so the
+     daemon's final flush actually completes). In-process subagents inherit the
+     parent's global sink (idempotent guard ⇒ no re-install).
+   - METRIC instruments (TOOLS): tool.call.total + tool.call.duration_ms now
+     export. `instrumentToolsForExport(tools)` (instrument-tool.ts) wraps the tool
+     array WHEN the process-default metric sink is live (export ON), verbatim
+     otherwise (byte-identical) — wired at BOTH ToolRegistry assembly chokepoints
+     (runner/assemble/tooling.ts + host/runtime/agent-arg-builder.ts). instrumentTool
+     is a transparent spread+delegate proxy (names preserved ⇒ originMap-safe).
+     Sealed by instrument-tools-for-export-hellgate.test.ts (gate OFF=verbatim,
+     ON=wrapped+emits, no-leak) + red-on-injection.
+  METRIC INSTRUMENT COVERAGE (jun-16 audit-grounded): of withFullObservability's
+  bag, only TOOLS had a clean high-value prod wrap (done above). The rest:
+   - budget / scheduler / lsp / planQueue / shadowOdb: their components are
+     OPT-IN and NOT assembled in the default prod composition (AgentConfig
+     fields stay undefined) — there is nothing to instrument; wiring them is
+     moot until those features are themselves wired.
+   - llm provider: `instrumentLlmProvider` wraps the RAW `LlmProvider` (providerId
+     + model), not the composed `LLMPort` that composeLLMCore returns (type/layer
+     mismatch). AND the run_sampling_request SPAN already carries per-call model +
+     token + ttft + finish (Item 1) — so the llm-call telemetry is covered by the
+     trace; a separate llm metric instrument is low marginal value.
+  KNOWN RESIDUALS (honest, larger scope):
+   - COST / ERROR / MEMORY metrics flow through OTHER subsystems (work-metrics /
+     taskSpend / recorder / memory-telemetry), NOT the bag instruments — routing
+     those to OTLP is a separate, fragmented metric-unification project.
+   - Subagent parent-linkage across CONCURRENT in-process fan-out needs context
+     propagation (W3C / AsyncLocalStorage); the LIFO stack is correct for serial
+     nesting only.
+   - Subagent parent-linkage across CONCURRENT in-process fan-out needs context
+     propagation (W3C / AsyncLocalStorage); the LIFO stack is correct for serial
+     nesting only. The OS-process side-agent (src/side-agent) is a V1 fork-core,
+     not a wired prod surface.
+
+  Non-goals: OTLP/protobuf serialization (collector는 universally JSON at
+  `/v1/{traces,metrics}` accept), `@opentelemetry/*` runtime auto-install,
+  OTel Context API 재구현 (in-process tracer가 이미 함).

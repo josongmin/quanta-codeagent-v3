@@ -1,0 +1,129 @@
+id: objective-goal-continuation-live
+title: /goal pursuing-loop LIVE — idle goal-continuation ticker wired end-to-end in the CLI (jul-13)
+section: 9
+subsystem: Objective substrate (ADR-0394) — idle-continuation half (Codex core/src/goals.rs parity)
+order: 97
+maturity: L3
+status: new
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [interactive, headless, ide]
+configurable: integrated
+owners: ["@songmin"]
+labels: ["surface:core", "codex-parity"]
+depends_on: [objective-first-class, objective-tools, objective-budget-enforce]
+surface_integration:
+  cli: full
+  web: missing
+  method: audited
+  verified: "2026-07-13"
+  evidence:
+    cli: "runs in the interactive CLI — surface-compose mints ONE objective store and binds it to the `/goal` slash slot (ctx.goal, src/apps/cli/repl/surface-compose.ts:913, persistent session only) AND to startGoalContinuationTicker beside the reactor bridge (src/apps/cli/repl/session-loop.ts); the `/goal` command (src/apps/cli/slash/goal-cmd.ts) sets/reads the active objective; the goal chip renders while a goal is active (status-pills.ts, QUANTA_PILL_GOAL default-ON). Live proven by tests/e2e-pty/cli-goal-pursuit-e2e.test.ts (real CLI boot + PTY). Arming the ticker is gated by QUANTA_GOAL_ENFORCE (OFF ⇒ no timer ⇒ byte-identical)."
+    web: "CLI-only. The web/Tauri surface has no `/goal` slash slot and does not arm the continuation ticker (session-loop is a CLI-repl concern); the objective itself reaches the web ObjectiveCard via the objective substrate, but the pursuing-loop wiring is not present on that surface."
+purpose: |
+  Promotes the previously-DEAD idle goal-continuation machine
+  (`src/agent/objective/continuation.ts`: `runIdleContinuation` /
+  `ContinuationSemaphore` / `evaluateContinuation` — Codex `core/src/goals.rs`
+  parity) from a hellgated-but-unreferenced primitive into a LIVE end-to-end
+  CLI feature. Before jul-13 the machine round-tripped its tests but had ZERO
+  production callers and the `QUANTA_GOAL_ENFORCE` → `goalContinuationEnforce`
+  knob had ZERO readers (documented as future work in the
+  objective-budget-enforce notes). This wave binds the seam:
+
+  1. STORE MINT + SHARE — `surface-compose` builds exactly ONE objective store
+     and threads the SAME instance to (a) the `/goal` slash slot (`ctx.goal`,
+     persistent sessions only — ephemeral threads have no goal to pursue) and
+     (b) the session loop, so the command the user types and the loop that
+     pursues it read/write one SSOT.
+
+  2. TICKER ARM — `session-loop` calls `startGoalContinuationTicker` over that
+     store next to the reactor bridge. Each idle tick with an ACTIVE goal
+     enqueues a continuation turn carrying the goal text + a
+     verify-before-complete instruction (the completion-discipline SSOT), so
+     the agent keeps pursuing the objective while idle until it is
+     completed / paused / budget-limited. Gated by QUANTA_GOAL_ENFORCE: OFF
+     arms NO timer and returns `undefined` ⇒ byte-identical to a session that
+     never opted in.
+
+  3. COMMAND + CHIP — `/goal <objective>` records the active goal (or shows it
+     with no args); the status-bar goal chip renders only while a goal is
+     active (QUANTA_PILL_GOAL default-ON, so no idle clutter). The objective store
+     is minted for the CLI surface; `QUANTA_GOAL_ENFORCE=1` controls only whether
+     the idle continuation ticker pursues the recorded goal.
+
+  Sibling to objective-budget-enforce: that entry gates the BUDGET half
+  (`budget_limited` status suppresses continuation when a cap is exhausted);
+  this entry wires the CONTINUATION half (the idle ticker that re-issues the
+  goal). Together they are the two live readers the objective substrate was
+  built for. Slice fence: additive wiring in `src/apps/cli/repl/**`
+  (surface-compose / session-loop / dispatch) + `src/apps/cli/{goal-continuation-hook,slash/goal-cmd,status-pills}.ts`;
+  the pure machine in `src/agent/objective/**` is unchanged (only now driven).
+evidence:
+  code:
+    - src/agent/objective/continuation.ts
+    - src/agent/objective/pursuit-prompt.ts
+    - src/apps/cli/goal-continuation-hook.ts
+    - src/apps/cli/slash/goal-cmd.ts
+    - src/apps/cli/repl/surface-compose.ts
+    - src/apps/cli/repl/surface-compose/dispatch.ts
+    - src/apps/cli/repl/session-loop.ts
+    - src/apps/cli/repl/session-loop-options.ts
+    - src/apps/cli/status-pills.ts
+    - src/shared/runtime-config.ts
+  adrs: [394]
+  tests:
+    unit:
+      - tests/unit/goal-pursuit-chain-hellgate.test.ts
+      - tests/unit/goal-continuation-ticker-hellgate.test.ts
+      - tests/unit/goal-pursuit-prompt-hellgate.test.ts
+      - tests/unit/status-pills-goal-chip-hellgate.test.ts
+    integration: []
+    contract:
+      - tests/e2e-pty/cli-goal-pursuit-e2e.test.ts
+knobs:
+  - name: QUANTA_GOAL_ENFORCE
+    where: src/shared/runtime-config.ts
+    default: 'unset (OFF)'
+    purpose: |
+      `gateOn` opt-in → `goalContinuationEnforce`. OFF ⇒ startGoalContinuationTicker
+      arms NO timer and returns undefined ⇒ a session that never opted in is
+      byte-identical (the objective is recorded but never auto-pursued). ON ⇒
+      each idle tick with an active goal enqueues a continuation turn until the
+      goal is completed / paused / budget-limited.
+  - name: QUANTA_PILL_GOAL
+    where: src/apps/cli/status-pills.ts
+    default: 'unset (ON)'
+    purpose: |
+      `/goal` status chip. Default ON — it renders only while a goal is ACTIVE
+      (state.goal set), so there is no idle clutter; opt-out via
+      QUANTA_PILL_GOAL=0. Declared in src/apps/cli/cli-knobs.ts (status-ui).
+deliberate_hold: null
+notes: |
+  jul-13 (Codex multi_agent / goal-pursuit parity). This is the "Promotion for
+  the continuation half" that objective-budget-enforce's notes flagged as
+  future work — `runIdleContinuation` / `ContinuationSemaphore` now have their
+  first production caller (`src/apps/cli/goal-continuation-hook.ts`) and
+  `goalContinuationEnforce` has its first reader.
+
+  Hellgate coverage: goal-pursuit-chain-hellgate pins set → active → ticker →
+  resume through prod objects except the host boundary (red-on-injection at
+  each cut point: command→store, ticker gate, store→resume read);
+  goal-continuation-ticker-hellgate pins the QUANTA_GOAL_ENFORCE OFF⇒no-timer /
+  ON⇒idle-tick arming; goal-pursuit-prompt-hellgate pins the continuation turn
+  carries the goal text + verify-before-complete instruction;
+  status-pills-goal-chip-hellgate pins the chip render/hide; the PTY e2e
+  (cli-goal-pursuit-e2e) boots the REAL CLI and drives `/goal` so the surface
+  mint+share+dispatch is proven live (not a stub).
+
+  `/goal` registration: listed in BUILTINS via SESSION_SLASH_COMMANDS
+  (category "session"), describe present. It is deliberately NOT in the
+  env-gated not-wired drift-guard (surfaced-features-slash.hellgate) — its
+  wiring predicate is sessionId presence, not an env flag, so its not-wired
+  branch exits 0 (documented) rather than the exit-2 + `hint: set <GATE>=1`
+  contract that env-gated commands follow.
+
+  Efficacy is measure-first: QUANTA_GOAL_ENFORCE ships OFF; the pursuing loop
+  is a behavior lever whose value (does idle continuation improve long-horizon
+  task completion) is unmeasured. A budget-limited goal does NOT auto-resume
+  (the budget half, objective-budget-enforce, gates it), so the two objective
+  substrate halves compose.

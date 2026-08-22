@@ -1,0 +1,56 @@
+id: jsonrpc-codec
+title: JSON-RPC 2.0 codec — encode/decode helpers returning `Result`
+section: 9
+subsystem: shared/jsonrpc — byte shuttle for IPC + MCP + LSP
+order: 36
+maturity: L2
+status: new
+ui_surfaces: [api]
+monitoring: n-a
+modes: [n-a]
+configurable: partial
+owners: ["@songmin"]
+labels: ["surface:ipc", "absorbed:codex"]
+depends_on: [jsonrpc-request-id-correlation, jsonrpc-envelope]
+surface_integration:
+  cli: missing
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "src evidence not reachable from the interactive CLI entry (src/apps/cli/index.ts) — wired only into other apps (eval/bench/probe/headless) or unwired"
+    web: "Pure internal codec; no browser affordance and not reachable from web surface."
+purpose: |
+  encode / decode helpers for JSON-RPC 2.0 frames (request / notification /
+  success-response / error-response / Codex-style explicit timeout). Decoders
+  NEVER throw on malformed input — bad JSON, missing fields, wrong types all
+  surface as `err(JsonRpcCodecError)` so the caller decides whether to
+  disconnect, reply with -32600, log, or retry. Encoders throw only on
+  programmer errors (empty `method`) and strict-re-parse the constructed
+  frame before serialising so encoder drift fails loudly in tests.
+  `JsonRpcCodecErrorKind` is a closed discriminator (`parse_json` /
+  `schema_envelope` / `schema_request` / `schema_response` /
+  `schema_notification` / `schema_timeout` / `version_mismatch`) so callers
+  can branch precisely without string-matching the message. JSON-RPC 2.0
+  does NOT require canonical key ordering, so we use plain `JSON.stringify`
+  — session-JSONL canonicalisation is a separate concern.
+evidence:
+  code:
+    - src/shared/jsonrpc/codec.ts
+    - src/shared/jsonrpc/envelope.ts
+  adrs: []
+  tests:
+    unit:
+      - tests/unit/jsonrpc-codec.test.ts
+      - tests/unit/jsonrpc-envelope.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  Pairs with `jsonrpc-envelope` (zod schemas the codec re-uses for the
+  strict re-parse) and `jsonrpc-request-id-correlation` (id generator for
+  the `id` field). The Codex-style timeout encoding (code `-32000` +
+  `data.kind === "timeout"`) is the agreement that lets a server send a
+  precise timeout signal without colliding with the JSON-RPC error-code
+  space reserved for the spec.

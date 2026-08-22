@@ -1,0 +1,86 @@
+id: browser-automation
+title: Browser automation tools (headless CDP, ADR-0427)
+section: 2
+subsystem: tool-system browser slice (ADR-0427)
+order: 427
+maturity: L2
+status: new
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [interactive, batch]
+configurable: integrated
+owners: ["@songmin"]
+labels: ["absorbed:codex", "surface:tool", "tier:tool-system"]
+config_refs:
+  env:
+    - QUANTA_BROWSER_TOOL
+    - QUANTA_BROWSER_NETWORK
+    - QUANTA_BROWSER_BOUNDS
+    - QUANTA_BROWSER_HIGHLIGHT
+    - QUANTA_BROWSER_TABS
+surface_integration:
+  cli: full
+  web: full
+  method: audited
+  verified: "2026-07-03"
+  evidence:
+    cli: "runs in the interactive CLI — 17/17 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "agent-callable navigate/collect tools render as tool.invoked/tool.completed in session-hooks.ts (name + args preview + result preview)"
+purpose: |
+  Agent-callable browser automation over the Chrome DevTools Protocol (CDP).
+  A pure `@/browser` slice (port + CDP adapter + headless stub + console/DOM
+  collectors) drives a system Chrome over a launched dev-tools endpoint; the
+  `@/tool/browser` layer exposes the navigate/collect tools to the loop with a
+  net-guard (SSRF/loopback denial) + result mapping + a per-session holder.
+  Env-gated: registered ONLY when `QUANTA_BROWSER_TOOL=on` AND a system Chrome
+  is on PATH; absent ⇒ the tools are not registered (byte-identical, RFC §1.2)
+  and the adapter degrades to the headless stub. fs-jailed temp profile; the
+  real-chrome e2e is environment-dependent (needs a Chrome binary) so it is not
+  part of the deterministic gate.
+
+  S1 strengthen (jul-03) — `browser_network`: a bounded METADATA-ONLY network
+  ring buffer (method / url / status / mime / size; NO bodies or headers, so no
+  cookies/tokens/PII — the leak guard is enforced at the producer, not by
+  redaction). Read-only. Triple-gated: `QUANTA_BROWSER_TOOL=on` + chrome present
+  + an INDEPENDENT `QUANTA_BROWSER_NETWORK=on` (default-OFF) — off ⇒ the tool is
+  absent and the buffer never captures (byte-identical menu). Lets the agent
+  verify a front end (did a fetch 404/500, what did the API return, payload size).
+evidence:
+  code:
+    - src/browser/index.ts
+    - src/browser/port.ts
+    - src/browser/types.ts
+    - src/browser/cdp-adapter.ts
+    - src/browser/headless-stub.ts
+    - src/browser/cdp/cdp-session.ts
+    - src/browser/cdp/collect.ts
+    - src/browser/cdp/console-buffer.ts
+    - src/browser/cdp/defaults.ts
+    - src/browser/cdp/dev-tools-endpoint.ts
+    - src/browser/cdp/ports.ts
+    - src/browser/cdp/network-buffer.ts
+    - src/tool/browser/index.ts
+    - src/tool/browser/net-guard.ts
+    - src/tool/browser/result-map.ts
+    - src/tool/browser/schemas.ts
+    - src/tool/browser/session-holder.ts
+    - src/shared/net/ssrf.ts
+  adrs: [427]
+  tests:
+    unit:
+      - tests/unit/browser-tool-hellgate.test.ts
+      - tests/unit/browser-tool-mapping-hellgate.test.ts
+      - tests/unit/browser-cdp-adapter-hellgate.test.ts
+      - tests/unit/browser-cdp-adapter-branches-hellgate.test.ts
+      - tests/unit/browser-cdp-session-hellgate.test.ts
+      - tests/unit/browser-cdp-allowlist-hellgate.test.ts
+      - tests/unit/browser-edge-ssrf-hellgate.test.ts
+      - tests/unit/browser-edge-parse-hellgate.test.ts
+      - tests/unit/browser-edge-tool-hellgate.test.ts
+      - tests/unit/browser-edge-cdp-session-hellgate.test.ts
+    integration:
+      - tests/integration/browser-agent-loop-e2e.test.ts
+      - tests/integration/browser-edge-injection-e2e.test.ts
+      - tests/integration/browser-real-chrome-e2e.test.ts
+      - tests/integration/browser-real-chrome-adversarial-e2e.test.ts
+    contract: []

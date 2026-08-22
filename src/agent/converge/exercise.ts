@@ -104,7 +104,7 @@ export const isExerciseCommand = (command: string): boolean =>
  *  timed-out `diff` must never count as an observed L1 comparison (a truncated diff could stamp
  *  `verified-fail`/`verified-pass` on partial evidence); same for L0 run-evidence (fail-closed —
  *  the honest cost is one bounded follow-up). The SINGLE observation predicate — `compare`,
- *  `self-test`, and `best-of-n`'s tie-break all reuse it (no drifting mirror). */
+ *  and `self-test` both reuse it (no drifting mirror). */
 export const resultObservedOutput = (r: ToolResultEvent): boolean => {
   if (r.timedOut === true) return false
   return (

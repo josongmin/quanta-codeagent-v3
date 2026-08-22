@@ -2,29 +2,21 @@
  * TB21-03 — HELLGATE for the 2.1 canary manifest.
  *
  * The ticket's rule is blunt: "Do not reuse the TB2.0 smoke list." That list is
- * not a memory — it is `tools/tb-smoke/run-tb-smoke.sh`, whose bytes this file
- * READS so the disjointness rail cannot silently rot when the shell script is
- * edited. The other rail is revision binding: a canary set is only meaningful
- * for the dataset ref it was chosen against, so a ref change INVALIDATES it.
+ * not a memory — it was `tools/tb-smoke/run-tb-smoke.sh`. TB21-06 DELETED that
+ * driver, so under the retirement stop rule its task list was MIGRATED first
+ * into `./retired-tb-2-0-smoke.ts` (retired evidence, with provenance), and this
+ * rail now reads THAT typed record. The disjointness proof therefore still binds
+ * real data rather than a memory, and it cannot rot when the record is edited.
+ * The other rail is revision binding: a canary set is only meaningful for the
+ * dataset ref it was chosen against, so a ref change INVALIDATES it.
  */
 import { describe, expect, test } from "bun:test"
-import { readFileSync } from "node:fs"
-import { join } from "node:path"
 import { canaryTaskIds, TERMINAL_CANARY_MANIFEST, validateCanaryManifest } from "./canary"
 import { CANONICAL_TASK_IDS, canonicalTaskRef, TERMINAL_BENCH_DATASET_REF } from "./dataset"
+import { RETIRED_TB_2_0_SMOKE, retiredTb20SmokeTaskNames } from "./retired-tb-2-0-smoke"
 
-const REPO_ROOT = join(import.meta.dir, "..", "..", "..", "..")
-
-/** The TB2.0 smoke set, read from the SSOT the 2.0 script itself declares. */
-const tb20SmokeTasks = (): readonly string[] => {
-  const sh = readFileSync(join(REPO_ROOT, "tools/tb-smoke/run-tb-smoke.sh"), "utf8")
-  const names: string[] = []
-  for (const key of ["GUARD", "LEVER_REGRESSION", "TARGETS"]) {
-    const m = new RegExp(`^${key}="([^"]*)"`, "m").exec(sh)
-    if (m?.[1] !== undefined) names.push(...m[1].split(/\s+/).filter((s) => s !== ""))
-  }
-  return names
-}
+/** The TB2.0 smoke set, read from the migrated record (TB21-06 TC-5). */
+const tb20SmokeTasks = (): readonly string[] => retiredTb20SmokeTaskNames()
 
 describe("the canary set is generated from the PINNED 2.1 catalog", () => {
   test("every selected id is a canonical task of the pinned dataset", () => {
@@ -52,9 +44,13 @@ describe("the canary set is generated from the PINNED 2.1 catalog", () => {
 
   test("RED RAIL — the TB2.0 smoke list is NOT reused", () => {
     const legacy = new Set(tb20SmokeTasks())
-    // Anti-vacuity: the legacy list really was parsed.
+    // Anti-vacuity: the legacy list really was read, and it carries the three
+    // classes the deleted driver declared (GUARD / LEVER_REGRESSION / TARGETS).
     expect(legacy.size).toBeGreaterThanOrEqual(8)
     expect(legacy.has("fix-git")).toBe(true)
+    expect(RETIRED_TB_2_0_SMOKE.guard.length).toBeGreaterThan(0)
+    expect(RETIRED_TB_2_0_SMOKE.leverRegression.length).toBeGreaterThan(0)
+    expect(RETIRED_TB_2_0_SMOKE.targets.length).toBeGreaterThan(0)
     const reused = TERMINAL_CANARY_MANIFEST.tasks
       .map((t) => t.id.split("/").at(-1) as string)
       .filter((short) => legacy.has(short))

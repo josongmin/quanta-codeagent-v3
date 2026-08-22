@@ -1,0 +1,70 @@
+id: branch-only-guard
+title: branch-only git-write guard — ci-bot mode protected-branch propositional check
+section: 3
+subsystem: 권한 — git-write 모드 게이트 (RFC may-22 ci-bot mode)
+order: 95
+maturity: L4
+status: stable
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [ci-bot]
+configurable: static
+owners: ["@songmin"]
+labels: [surface:cli]
+depends_on: [permission-store-json, git-destructive-hard-deny, permission-inspect-5axis, permission-scope-4-tier, cr3-rule-catalog-ssot-fu1-rule-per-concern-invert]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 4/6 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "pure ci-bot git-write guard predicate (no FS/shell), internal mode-gate primitive with no UI affordance on any surface"
+purpose: |
+  Propositional check on a shell command — is this operation forbidden by the
+  `gitWrite: { kind: "branch-only"; protectedBranches: string[] }` lever?
+  Four forbidden ci-bot operations: (1) any `git push` whose refspec targets
+  a protected branch; (2) any `git commit` while HEAD is on a protected
+  branch; (3) any `git merge` / `git rebase` onto a protected branch;
+  (4) any `git reset --hard` to a protected-branch ref. Default protected
+  branches: `main`, `master`, `develop`, `production`. Signal:
+  command-string properties (split + token match) — no counts, no
+  thresholds. Returns `{allowed: true} | {allowed: false, reason}`. Pure
+  module — no FS, no shell — so it is unit-testable in isolation and the
+  per-mode wiring (`apps/agent` mode presets) is the only place that
+  decides WHEN to consult it.
+evidence:
+  code:
+    - src/permission/branch-only.ts
+    - src/permission/index.ts
+    - src/apps/agent/mode-presets/ci-bot.ts
+    - src/apps/agent/mode-presets/ci-bot-policy.ts
+    - src/agent/run-mode/types.ts
+    - src/agent/run-mode/presets.ts
+  adrs: []
+  tests:
+    unit:
+      - tests/unit/permission/branch-only.test.ts
+      - tests/unit/permission/branch-only-bypass-hellgate.test.ts
+      - tests/unit/apps/agent/mode-presets/ci-bot.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  Operator can override the default protected-branch list per mode policy.
+  SECURITY SEAL (jun-15 audit): branch-only-bypass-hellgate pins THREE
+  documented audit fixes that had no regression test — protected-branch write
+  vectors that slip past the obvious refspec scan:
+    1. `-c alias.<x>=push` / glued `-calias.` / `--config-env=alias.*` CONFIG
+       INJECTION (Audit R2) — the visible subcommand is the alias, not `push`;
+       an unresolvable alias under branch-only fails closed.
+    2. `--all` / `--mirror` / `--tags` WHOLESALE push — pushes refs wholesale
+       (every branch incl. main) with NO positional refspec (distinct from the
+       H3 positional-glob case already covered by branch-only.test.ts).
+    3. bare destructive `reset --hard HEAD~N` / `--merge` / `--keep` on a
+       protected CURRENT branch (Audit L8 H1) — rewrites the protected branch's
+       OWN history without ever naming a protected ref.
+  Each is red-on-injection proven (disabling its guard flips DENY→ALLOW); the
+  battery also pins over-correction controls (legit `-c user.name` config, a
+  single feature-branch push, a feature-branch / soft reset all stay ALLOWED).

@@ -1,0 +1,58 @@
+id: jun7-operator-transparency-slashes
+title: /version · /release-notes · /bug operator transparency (§23.3/§23.4)
+section: 10
+subsystem: CLI 슬래시 — 투명성/온보딩
+order: 320
+maturity: L4
+status: new
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [interactive]
+configurable: static
+owners: ["@songmin"]
+labels: ["surface:cli", "absorbed:claude"]
+depends_on: [slash-registry-split]
+config_refs:
+  env: ["QUANTA_VERSION", "QUANTA_COMMIT", "QUANTA_REPO_URL"]
+surface_integration:
+  cli: full
+  web: missing
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 4/4 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "CLI-only text slash commands; SlashPalette server-routed commands are prefill stubs (B2), no backing web handler"
+purpose: |
+  Three read-only, additive operator slash commands. `/version` prints the
+  resolved CLI version (env QUANTA_VERSION > package.json > "unknown"), the
+  short commit when QUANTA_COMMIT is set, the platform, and the repo URL.
+  `/release-notes` prints a pointer to the GitHub releases page. `/bug
+  [summary]` renders a PREFILLED GitHub new-issue URL (title from args, body
+  seeded with version + platform) — TEXT ONLY, no telemetry/network call
+  (quanta is not a hosted product). Hardened: title/body are
+  `encodeURIComponent`-escaped so a summary cannot inject query params, and
+  `QUANTA_REPO_URL` is accepted only when it is a well-formed `https:` URL
+  (a `javascript:`/`file:`/non-https override falls back to the default —
+  caught + fixed as F3). Registering all three changes no existing command.
+evidence:
+  code:
+    - src/apps/cli/version-cmd.ts
+    - src/apps/cli/bug-cmd.ts
+    - src/apps/cli/repo-info.ts
+    - src/apps/cli/slash/registry-app.ts
+  adrs: []
+  tests:
+    unit:
+      - tests/unit/cli/version-bug-cmd.test.ts
+      - tests/unit/slash-commands.test.ts
+    integration: []
+    contract: []
+knobs:
+  - name: QUANTA_VERSION
+    where: src/apps/cli/repo-info.ts
+    purpose: build-time version pin (else package.json)
+  - name: QUANTA_REPO_URL
+    where: src/apps/cli/repo-info.ts
+    purpose: https-validated repo URL override (fork/mirror)
+deliberate_hold: null
+notes: 'jun-7 Wave R (R3/R4). Gap doc §23.3/§23.4. `--version` CLI flag deferred (agent-args.ts owned by user Wave 3). F3 (3x adversarial verify): repoUrl had no scheme validation → hardened to https-only with fallback + regression test.'

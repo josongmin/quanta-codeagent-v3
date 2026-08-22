@@ -3,7 +3,9 @@ import { describe, expect, test } from "bun:test"
 import {
   type DiffFile,
   isExemptFromFc,
+  mergeDiffSources,
   parseDiffNameStatus,
+  parseUntrackedFiles,
   runCheckChanged,
 } from "../../tools/feature-catalog/check-changed"
 import type { Feature, LoadedFeature } from "../../tools/feature-catalog/schema"
@@ -144,5 +146,90 @@ describe("parseDiffNameStatus", () => {
   test("ignores unknown status codes", () => {
     const out = parseDiffNameStatus("X\tsrc/x.ts\n")
     expect(out).toEqual([])
+  })
+})
+
+/**
+ * aug-22 audit — the gate's BLIND SPOT.
+ *
+ * `cmdCheckChanged` asked git for `diff <base>...HEAD`, which sees committed
+ * history only. Two whole categories of "new src file" were therefore invisible
+ * to the gate a developer runs before committing:
+ *
+ *  - UNTRACKED files (the file exists, is not in the index, and is exactly the
+ *    "new standalone file" this gate's docstring says is where features hide);
+ *  - files already merged into the base ref, whose fc entry was never written —
+ *    once the branch lands, `base...HEAD` is empty and the gate reports ok.
+ *
+ * Measured on the aug-21/22 bench campaign: `bun fc check-changed` printed ok
+ * while 99 added `src/` files carried no fc evidence at all; re-running it
+ * against the pre-campaign base surfaced all of them. The gate was not wrong
+ * about its inputs — it was asking git the wrong question.
+ *
+ * The repair keeps the pure decision layer untouched and widens the INPUT: the
+ * working tree is merged into the committed diff. In CI (clean checkout) the
+ * union is identical to the committed diff, so this is a no-op there and a
+ * fail-closed improvement locally.
+ */
+describe("parseUntrackedFiles", () => {
+  test("every untracked path is an ADDED file", () => {
+    expect(parseUntrackedFiles("src/a.ts\nsrc/nested/b.ts\n")).toEqual([
+      { path: "src/a.ts", status: "A" },
+      { path: "src/nested/b.ts", status: "A" },
+    ])
+  })
+
+  test("blank lines are ignored and paths with spaces survive intact", () => {
+    expect(parseUntrackedFiles("\nsrc/my file.ts\n\n")).toEqual([
+      { path: "src/my file.ts", status: "A" },
+    ])
+  })
+})
+
+describe("mergeDiffSources", () => {
+  test("union of committed diff and working tree", () => {
+    const merged = mergeDiffSources(
+      [{ path: "src/a.ts", status: "M" }],
+      [{ path: "src/b.ts", status: "A" }],
+    )
+    expect(merged).toEqual([
+      { path: "src/a.ts", status: "M" },
+      { path: "src/b.ts", status: "A" },
+    ])
+  })
+
+  test("ADDED wins over MODIFIED for the same path — a new file edited again is still new", () => {
+    const merged = mergeDiffSources(
+      [{ path: "src/a.ts", status: "A" }],
+      [{ path: "src/a.ts", status: "M" }],
+    )
+    expect(merged).toEqual([{ path: "src/a.ts", status: "A" }])
+    // …and in the other argument order, so the result cannot depend on which
+    // git command happened to run first.
+    expect(
+      mergeDiffSources([{ path: "src/a.ts", status: "M" }], [{ path: "src/a.ts", status: "A" }]),
+    ).toEqual([{ path: "src/a.ts", status: "A" }])
+  })
+
+  test("no duplicates — one path appears once however many sources report it", () => {
+    const merged = mergeDiffSources(
+      [{ path: "src/a.ts", status: "M" }],
+      [{ path: "src/a.ts", status: "M" }],
+      [{ path: "src/a.ts", status: "M" }],
+    )
+    expect(merged).toEqual([{ path: "src/a.ts", status: "M" }])
+  })
+
+  test("END TO END — an untracked src file BLOCKS once the working tree is merged in", () => {
+    const committed = parseDiffNameStatus("M\tsrc/known.ts\n")
+    const untracked = parseUntrackedFiles("src/brand-new.ts\n")
+
+    // The old input (committed only) reported ok — the blind spot, verbatim.
+    expect(runCheckChanged(committed, [f(["src/known.ts"])]).ok).toBe(true)
+
+    // The widened input blocks on exactly the file that was invisible.
+    const widened = runCheckChanged(mergeDiffSources(committed, untracked), [f(["src/known.ts"])])
+    expect(widened.ok).toBe(false)
+    expect(widened.addedUntracked).toEqual(["src/brand-new.ts"])
   })
 })

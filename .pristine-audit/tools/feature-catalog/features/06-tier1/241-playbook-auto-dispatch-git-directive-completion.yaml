@@ -1,0 +1,46 @@
+id: playbook-auto-dispatch-git-directive-completion
+title: Playbook auto-dispatch + Git directive 5-kind completion
+section: 6
+subsystem: Playbook + Git directive completion (ADR-0241)
+order: 241
+maturity: L3
+status: stable
+ui_surfaces: [cli]
+monitoring: integrated
+modes: [interactive, headless, batch, daemon, ide, ci-bot]
+configurable: integrated
+owners: ["@songmin"]
+labels: ["surface:core", "tier:1", "absorbed:aider", "absorbed:codex", "closes:deliberate-hold"]
+depends_on: ["user-authored-playbook-frontmatter", "queued-followup-per-msg-mutators", "git-directive-emit-protocol"]
+surface_integration:
+  cli: full
+  web: missing
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 3/3 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "/play is a SlashPalette server-routed prefill stub (B2) and queue enqueue has no SessionCommand verb (B3); never executes in the browser"
+purpose: |
+  Closes ADR-0203 inline-trigger dispatch gap + ADR-0221's remaining
+  3-of-5 directive kinds. (A) `dispatchPlaybook` canonical sink resolves
+  watcher fire → `/play <name>` follow-up enqueue via planQueueSink
+  (source="inline_trigger"). Sink-optional: counts observable even
+  without queue (graceful). NO-THROW (typed DispatchResult).
+  `startPlaybookAutoDispatch` orchestrator default-OFF (enabled !== true
+  = immediate return). (B) 3 new git directive hook sites — stage/push/
+  create-pr — each 1-line `publishGitDirective` call on success path.
+  Closes ADR-0221's 5-kind closed enum end-to-end (collector → emitter
+  → host parser). Collector absent = byte-identical pre-wire behavior.
+evidence:
+  code:
+    - src/skill/playbook/auto-dispatch.ts
+    - src/skill/playbook/index.ts
+    - src/tool/git/_directive-publish.ts
+  tests:
+    integration:
+      - tests/integration/playbook-inline-trigger-dispatch-hellgate.test.ts
+    unit:
+      - tests/unit/git-directive-stage-push-pr-hooks-hellgate.test.ts
+    contract: []
+  adrs:
+    - docs/decisions/0241-playbook-auto-dispatch-and-git-directive-completion.md

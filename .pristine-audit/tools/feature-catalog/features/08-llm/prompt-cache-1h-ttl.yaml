@@ -1,0 +1,77 @@
+id: prompt-cache-1h-ttl
+title: '1-hour prompt-cache TTL — Anthropic `cache_control: { ttl: "1h" }` (cost optimization)'
+section: 8
+subsystem: LLM Anthropic Messages codec — prompt-cache retention
+order: 320
+maturity: L4
+status: new
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [interactive, headless]
+configurable: integrated
+config_refs:
+  env:
+    - QUANTA_PROMPT_CACHE_TTL
+  runtime:
+    - cacheTtl
+owners: ["@songmin"]
+labels: [absorbed:anthropic, cost-optimization, surface:core, tier:core]
+depends_on: [cache-control-audit]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 2/2 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "pure internal codec cache-control field stamping (cost optimization); no user-visible affordance on any surface"
+purpose: |
+  quanta는 Anthropic prompt-cache breakpoint를 `cache_control: { type: "ephemeral" }`
+  로만 마킹하는데(NO `ttl`), Anthropic은 이를 default 5분 TTL로 취급한다. 긴 interactive/
+  agentic 세션에서 5분보다 긴 gap(사용자 사고·긴 tool exec·paused turn)이 생기면 캐시된
+  system+tools+history prefix가 만료돼 다음 turn이 전체 prefix를 full input 가격으로 재처리
+  한다(가장 큰 회피가능 토큰비용). 이 슬라이스는 opt-in `cacheTtl` 노브를 추가해 codec이
+  ALREADY 찍는 breakpoint의 `ttl` 필드만 `"1h"`로 stamp한다 — NEW breakpoint를 추가하지
+  않으므로 4-breakpoint cap·prefix layout·cache-control-audit(ADR-0319) 안정성 보장이 전부
+  verbatim 유지된다.
+
+  핵심 seam은 codec의 단일 literal-construction site `ttlControl(ttl)`
+  (`src/llm/anthropic-messages-codec.ts`): `"5m"`(default) ⇒ `{ type: "ephemeral" }`
+  with NO `ttl` key(pre-feature inline literal과 byte-identical), `"1h"` ⇒
+  `{ type: "ephemeral", ttl: "1h" }`. `toAnthropicSystem`(cache:true system block) 와
+  `cacheConversationPrefix`(last-message text breakpoint) 둘 다 `cacheTtl: CacheTtl = "5m"`
+  를 받아 `ttlControl`을 호출한다. `buildAnthropicMessagesRequest`는 optional 4번째 인자
+  `cacheTtl = "5m"`로 forward — 기존 호출자(adapter/vertex/foundry/bedrock)는 인자 미전달 시
+  전부 byte-identical. idempotent: 이미 `cache_control`을 가진 block은 re-stamp 안 함(caller-set
+  ttl을 silent flip 방지).
+
+  `CacheTtl = "5m" | "1h"`(closed union; Anthropic의 두 retention과 1:1)는
+  `src/llm/types.ts`에 export. OpenAI Responses `prompt_cache` retention인
+  `PromptCacheRetention`("in-memory"|"24h")과는 DELIBERATELY 별개 축(다른 vendor·field·value)
+  — 절대 conflate하지 않음.
+
+  Default-OFF byte-identity가 sacred guarantee: 노브 unset/`"5m"` ⇒ wire payload가 today와
+  byte-identical(모든 cache_control이 bare ephemeral, NO ttl). `"1h"`는 per-model allowlist
+  (composition-root policy)에 든 모델에서만 효력 — allowlist 밖 모델은 노브가 켜져도 `"5m"`로
+  silently 안전(byte-identical). 2× write premium 리스크 때문에 절대 default가 아님.
+evidence:
+  code:
+    - src/llm/anthropic-messages-codec.ts
+    - src/llm/types.ts
+  adrs: []
+  tests:
+    unit:
+      - tests/unit/prompt-cache-1h-ttl-codec-hellgate.test.ts
+    integration: []
+    contract: []
+knobs: ["QUANTA_PROMPT_CACHE_TTL"]
+deliberate_hold: null
+notes: |
+  RFC `docs/plans/jun-6-prompt-cache-1h-ttl.md` Phase 1. RFC §5.2는 `status: planned`라 했으나
+  fc schema의 top-level `status` enum은 `stable|new|refined|hold|deprecated`(`planned`은
+  configurable/monitoring 축 전용) — `status: new` + `configurable: planned`로 정정.
+  이 슬라이스가 OWN한 파일은 codec + types.ts + 이 fc + hellgate 뿐. 노브 threading의 shared-file
+  edit(runtime-config 필드·factory allowlist+resolveCacheTtl·adapter AnthropicConfig.cacheTtl·
+  provider-port ProviderConfig.cacheTtl)는 RFC §9 + 리포트에 verbatim으로 기술됨(미편집).
+  Phase 2 = adaptive TTL(관측된 gap pattern에서만 "1h" 자동 선택; "no arbitrary heuristic"
+  규칙 준수). Phase 3 = max_tokens:0 pre-warm. memory `live-token-counter-output-progress` 인접.

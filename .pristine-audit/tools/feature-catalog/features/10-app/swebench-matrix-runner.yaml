@@ -1,0 +1,64 @@
+id: swebench-matrix-runner
+title: SWE-bench A/B matrix runner — 3-axis 2^3 condition sweep (LSP × subagent × skills)
+section: 10
+subsystem: 벤치 메타-도구 (env-overlay composer, never mutates bench)
+order: 70
+maturity: L4
+status: stable
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [headless, batch]
+configurable: integrated
+config_refs:
+  env: [QUANTA_BENCH_LSP, QUANTA_BENCH_SUBAGENT, QUANTA_BENCH_SKILLS]
+owners: ["@songmin"]
+labels: ["surface:bench"]
+depends_on: [llm-cost-emit-sink, memory-telemetry-adapter, otel-span-tree]
+surface_integration:
+  cli: na
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "no src evidence (pure docs/tooling/tests) — no interactive-CLI code"
+    web: "Pure bench experiment runner that sweeps env conditions and emits JSONL/markdown; no user-visible UI affordance on any surface."
+purpose: |
+  `bun run tools/swebench-matrix.ts` — SWE-bench-shape 데이터셋(기본
+  `tests/smoke/swebench/picks.jsonl`)을 3축 ON/OFF 조건 매트릭스로 sweep
+  하여 per-condition pass@1 / 평균 토큰 / 턴 / wall / cost 를 산출하는
+  실험 러너. 축: LSP (`QUANTA_BENCH_LSP`) · SUBAGENT (`QUANTA_BENCH_SUBAGENT`)
+  · SKILLS (`QUANTA_BENCH_SKILLS`). 8 조건(2^3): baseline / lsp / subagent /
+  skills / lsp+subagent / lsp+skills / subagent+skills / all. 디자인 규율:
+  러너는 bench 자체를 절대 수정하지 않고 env-overlay 만으로 합성 — 각 축
+  ON/OFF 는 bench/agent 코드의 속성(다른 트랙 소유)이고, `--conditions baseline`
+  은 3 env var 모두 unset → byte-identical default-OFF 보장. 결과는
+  `<out>/matrix-summary.jsonl` (jq/스프레드시트용 flat row) + markdown
+  table 로 직렬화, 토큰/wall/cost 는 bench `<runId>/summary.json` + per-
+  instance JSONL 에서만 파싱(invent 금지, 결측 ⇒ 0). exit 0 = 모든 조건이
+  최종 summary 까지 도달, 1 = harness fatal, 130 = 첫 조건 전 SIGINT.
+evidence:
+  code:
+    - tools/swebench-matrix.ts
+  adrs: []
+  tests:
+    unit:
+      - tests/unit/swebench-matrix.test.ts
+    integration: []
+    contract: []
+knobs:
+  - name: QUANTA_BENCH_LSP
+    default: 'undefined'
+    purpose: '(no description)'
+  - name: QUANTA_BENCH_SUBAGENT
+    default: 'undefined'
+    purpose: '(no description)'
+  - name: QUANTA_BENCH_SKILLS
+    default: 'undefined'
+    purpose: '(no description)'
+deliberate_hold: null
+notes: |
+  Composer-only pattern: 3 env var 가 bench 의 single source of truth 이며
+  이 러너는 그것을 켜고/끄고 결과만 모은다. CSV `--conditions` 는 unknown
+  토큰에 throw (heuristic best-effort 금지). 산출물 `matrix-summary.jsonl`
+  은 flat per-row 로 jq 친화적 — `runs/matrix-*` 디렉토리에 누적되는 실제
+  실험 출력의 ground-truth 스키마.

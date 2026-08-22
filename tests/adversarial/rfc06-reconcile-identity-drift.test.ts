@@ -190,7 +190,7 @@ describe("RFC01 ThreadRollback — crash/idempotency invariants", () => {
     // Model the crash: the effect NEVER completes on the first run (throws after
     // intent is durable). We then reload from the SAME durable ops and re-invoke
     // executeRollback (a naive restart) — it must NOT auto-succeed or re-run.
-    const { store, snapshot } = makeLoggingStore({
+    const { snapshot } = makeLoggingStore({
       checkpoints: [checkpoint("t1")],
       operations: [],
     })

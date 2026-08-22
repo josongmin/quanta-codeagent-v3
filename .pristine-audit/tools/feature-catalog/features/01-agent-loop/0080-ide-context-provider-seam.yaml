@@ -1,0 +1,101 @@
+id: ide-context-provider-seam
+title: IDE context provider seam (ADR-0080)
+section: 1
+subsystem: 턴 라이프사이클 — host→agent IDE 신호 (Tier-1 IDE host enablement)
+order: 80
+maturity: L4
+status: stable
+ui_surfaces: [cli]
+monitoring: integrated
+telemetry_keys: ["gen_ai.response.time_to_first_token_ms", "quanta.conversation.id"]
+modes: [interactive, headless, batch, daemon, ide, ci-bot]
+configurable: integrated
+owners: ["@songmin"]
+labels: [surface:core, tier:1]
+depends_on: [agent-types-split, plan-mode, mode-repo-rules-active-skills-working-state-memory-hints, build-turn-context, secret-redaction-content-plane]
+config_refs:
+  env: ["QUANTA_BENCH_LOCALIZE_PHASE", "QUANTA_CAP_ENFORCE"]
+surface_integration:
+  cli: full
+  web: missing
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 6/7 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "host-to-agent IDE-state injection seam; the web frontend is not an IDE host and provides no ide-context source; backend-only, no browser affordance"
+purpose: |
+  IDE host (VS Code extension, MCP IDE bridge 등) 가 turn-by-turn 에디터 상태를
+  모델에 보낼 수 있는 단일 진입점. 신규 `src/agent/ide-context.ts` 의 닫힌 shape
+  `IdeSnapshot` (activeFile/openTabs/selection/diagnostics, 모든 필드 optional)
+  + `IdeContextProvider.snapshot(signal)` 포트. `AgentConfig.ideContextProvider`
+  미설정 ⇒ 루프는 provider를 호출하지 않고 buildTurnContext spread에서 키 자체가
+  생략되어 렌더링 경로 미도달 ⇒ byte-identical 레거시 (RFC §1.2 default-OFF).
+  설정 ⇒ runAgentInner 턴 진입부에서 ONCE 캡처 (same-turn retry는 동일 스냅샷
+  재사용) → `renderIdeContext` 가 deterministic `<ide-context>` 블록 생성
+  (sections 는 해당 필드 present일 때만) → buildTurnContext가 마지막 user 메시지의
+  첫 text block 앞에 prepend (호출자 baseMessages는 mutate 안 함, 얕은 복사 슬롯
+  교체). 트레일링 `<system-reminder>` 보다 앞 (user-side trust attribution).
+  모든 사용자-공급 fragment (paths, selection text, diagnostic messages, tab paths)
+  는 기존 `escapeReminderBoundary` 통과 — `</system-reminder>` 위조 차단.
+  Provider 가 throw/reject ⇒ `stream.emit({type:"error", message:"ide-context
+  provider failed: …"})` + ideSnapshot=null 로 graceful degrade (boundary, NOT
+  fallback). Provider 가 `null` 반환 ⇒ "IDE 미연결" 닫힌 신호 ⇒ 블록 미렌더.
+  L4 promotion 2026-05-23 — Cursor SOTA(`injectedContext` vs `predictedContext`
+  dual-tier + metadata-only persistence + relative-path scrubbing) 흡수:
+   - `FileSystemIdeContextProvider`: `.quanta/ide-context.json` 을 매 턴 fresh
+     read 하는 in-repo concrete wire 경로 (cwd 기준 절대→상대 path 정규화 +
+     malformed JSON ⇒ typed throw + pre-aborted signal ⇒ no read).
+   - `IdeContextMetadata` + `toMetadataSnapshot` + `IdeContextMetadataSink`:
+     content-free projection (selection.text → textLength, diagnostics.message
+     → messageLength, 절대 경로 → 상대 경로). 호스트가 sink 를 trajectory
+     recorder 에 연결하면 jsonl envelope 에 metadata-only 로 영속 (file 내용
+     절대 미저장 — Cursor `usedCurrentFile{relativeFilePath}` 패턴).
+   - `IdeContextTier = "injected" | "predicted"` provenance — 현재 concrete
+     provider 는 `injected` 만 사용, predicted 슬롯은 향후 heuristic 랭킹용
+     예약 (Cursor `predictedContext` 와 매핑).
+   - Sink 가 throw 해도 provider 가 boundary 에서 흡수 (loop catch 와 동일
+     세만틱) — sink 버그가 턴을 죽이지 않음.
+evidence:
+  code:
+    - src/agent/ide-context.ts
+    - src/agent/types.ts
+    - src/agent/prompt.ts
+    - src/agent/loop.ts
+    - src/observability/vocabulary.ts
+    - src/apps/bench/eval/driver.ts
+    - src/shared/runtime-config.ts
+  adrs: [80]
+  tests:
+    unit:
+      - tests/unit/agent/ide-context-render.test.ts
+    integration:
+      - tests/integration/ide-context-provider-wire.test.ts
+      - tests/integration/ide-context-provider-l4.test.ts
+    contract: []
+knobs:
+  - name: AgentConfig.ideContextProvider
+    default: 'undefined'
+    purpose: 'IdeContextProvider | undefined  — undefined ⇒ provider 미호출, `<ide-context>` 미렌더, byte-identical 레거시. 설정 ⇒ 매 턴 진입 시 `snapshot(cfg.signal)` 1회 호출하여 렌더링.'
+  - name: FileSystemIdeContextProvider.contextFile
+    default: '`<cwd>/.quanta/ide-context.json`'
+    purpose: 'string  — JSON 파일 경로 오버라이드 (rename-after-write 안전).'
+  - name: FileSystemIdeContextProvider.metadataSink
+    default: 'undefined'
+    purpose: '(md: IdeContextMetadata) => void  — content-free metadata 영속 sink. undefined ⇒ render-only (no persistence).'
+deliberate_hold: null
+notes: |
+  In-repo L4 (concrete provider + metadata-only persistence + relative-path
+  scrub) 완료 2026-05-23. 실제 VS Code extension / MCP IDE bridge / Tauri
+  sidecar 구현체는 surface 별로 별도 PR (외부 host 어댑터가
+  FileSystemIdeContextProvider 를 모델로 wire 하거나 직접 IdeContextProvider
+  를 implement 한다). subagent runner 는 IDE provider 를 자동 상속시키지 않음
+  (의도적 — subagent 는 격리된 sub-conversation).
+
+  Negative invariants (실효 강제):
+   - IDE 상태를 `<system-reminder>` 안에 넣지 말 것 (trust boundary).
+   - Provider 부재 시 IDE 블록 추정 금지 (no heuristic).
+   - `IdeSnapshot` shape 에 임의 키 추가 금지 (closed shape).
+   - Same-turn retry 마다 `snapshot()` 재호출 금지 (한 턴 = 한 스냅샷).
+   - Metadata 에 selection.text / diagnostic.message / open-tab 본문 절대 포함 금지
+     (content-free persistence — 영속 trajectory 의 privacy 계약).
+   - 절대 경로를 모델 컨텍스트에 노출하지 말 것 (host-absolute path 누출 방지).

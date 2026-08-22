@@ -1,0 +1,36 @@
+{
+  "schema": 2,
+  "id": "adversarial-ambiguous-thread-korean",
+  "corpus": "adversarial_canary",
+  "usecase": "persistent-context.conversation-state.thread-grounding",
+  "history": [
+    {
+      "role": "assistant",
+      "text": "Two live threads are active: prompt_rules and feature_catalog."
+    },
+    {
+      "role": "assistant",
+      "text": "Both still have pending edits and both were mentioned in the last status update."
+    }
+  ],
+  "targetUtterance": "그거 먼저 끝내.",
+  "gold": {
+    "activeThreadId": null,
+    "referentId": null,
+    "intent": "execute_change",
+    "scope": "current_workstream",
+    "shouldClarify": true,
+    "confidence": "high"
+  },
+  "bucket": "wrong_thread_adversarial",
+  "severity": "critical",
+  "candidateThreadIds": ["feature_catalog", "prompt_rules"],
+  "ambiguityClass": "thread",
+  "blockingEligible": false,
+  "sourceProvenance": {
+    "kind": "manual"
+  },
+  "humanAudit": {
+    "status": "none"
+  }
+}

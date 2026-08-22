@@ -1,0 +1,85 @@
+id: slash-web-paste-edit
+title: /web + /paste + /edit-plan + /edit-message (ADR-0224/0225)
+section: 10
+subsystem: REPL slash UX (Aider + Claude Code absorption)
+order: 24
+maturity: L4
+status: new
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [interactive]
+configurable: integrated
+config_refs:
+  env: [EDITOR, VISUAL]
+owners: ["@songmin"]
+labels: ["surface:cli", "absorbed:aider", "absorbed:claude-code"]
+depends_on: [built-in-slash-commands, web-fetch-search]
+surface_integration:
+  cli: full
+  web: missing
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 6/6 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "absent from SlashPalette.tsx; inherently terminal mechanism (EDITOR spawn + OS pbpaste/xclip); TextInbox/PlanEditPort not web-wired"
+purpose: |
+  Four-slash absorption batch. /web <url> + /paste deliver out-of-band
+  content (URL fetch / clipboard) through a single-shot TextInbox the
+  next user turn prepends. /edit-plan + /edit-message open the current
+  plan / pending composer in $EDITOR (vi/nano/code) for mid-execution
+  edits then push the result back through a duck-typed
+  PlanEditPort / ComposerEditPort. Default-OFF: every port is optional,
+  every command prints "not wired in this surface" or degrades to
+  inline-print without crashing. Editor-cancel (unchanged file) ⇒ exit
+  0 without mutation. NO LLM calls in any of the four commands.
+evidence:
+  code:
+    - src/apps/cli/web-cmd.ts
+    - src/apps/cli/paste-cmd.ts
+    - src/apps/cli/edit-plan-cmd.ts
+    - src/apps/cli/edit-message-cmd.ts
+    - src/apps/cli/text-inbox.ts
+    - src/apps/cli/slash-commands.ts
+  adrs: [224, 225]
+  tests:
+    unit:
+      - tests/unit/cli/web-cmd-hellgate.test.ts
+      - tests/unit/cli/paste-cmd-hellgate.test.ts
+      - tests/unit/cli/edit-plan-cmd-hellgate.test.ts
+      - tests/unit/cli/edit-message-cmd-hellgate.test.ts
+      - tests/unit/slash-commands.test.ts
+    integration: []
+    contract: []
+knobs:
+  - name: EDITOR
+    default: 'undefined'
+    purpose: '(no description)'
+  - name: VISUAL
+    default: 'undefined'
+    purpose: '(no description)'
+deliberate_hold:
+  reason: |
+    PlanEditPort / ComposerEditPort + TextInbox are ports without a
+    REPL-side wire yet. The slashes are registered + default-OFF
+    parity is proven by hellgate; concrete REPL wire-up is a separate
+    follow-up (composition root will instantiate createTextInbox() at
+    runReplLoop start and pass plan-queue-backed PlanEditPort).
+  promotion_path: |
+    1. repl.ts owns one createTextInbox() per REPL session; wire
+       textInbox into runSlashCommand ctx + PromptSource.next() drain.
+    2. plan-queue-backed PlanEditPort: getPlan reads the plan-queue's
+       last external_editor follow-up (or empty); setPlan enqueues a
+       new external_editor follow-up tagged for the next turn.
+    3. composerEdit reads/writes the raw-line-reader pending buffer.
+notes: |
+  4-slash absorption from Aider (/web + /paste) and Claude Code
+  (tengu_external_editor.{plan,message}). The text-inbox port mirrors
+  ImageQueue's shape (single-shot drain + cap + typed add-result) so
+  future surface integrations (drag-drop, Web/Tauri clipboard) reuse
+  it without rebuilding the FIFO. editInTemp is a shared driver
+  reused across /edit-plan and /edit-message (one source of truth for
+  the mkdtemp + spawn + read-back + diff lifecycle). renderEditResult
+  is the shared rendering helper that keeps each command's run() body
+  under biome's cognitive-complexity ceiling (15). No external
+  libraries added — node:child_process spawn + node:fs/promises +
+  osascript/xclip/wl-paste/pbpaste/powershell at the OS layer.

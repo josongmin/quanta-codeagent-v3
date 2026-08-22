@@ -47,7 +47,7 @@
  * Values callers do supply that are NOT in that union — notably `max` and
  * `default`, which are the SESSION-effort vocabulary (`src/agent/effort.ts`
  * `EffortLevel = "default" | "max" | "high" | "medium" | "low"`, surfaced by
- * `/effort` and by Harbor's `--ak reasoning_effort=…`) — are `rejected`, loudly.
+ * `/effort` and by the terminal suite's agent-kwarg) — are `rejected`, loudly.
  * They are deliberately NOT mapped onto a neighbouring tier: inventing a wire
  * value the provider never documented is exactly the failure the closed set was
  * built to prevent, and guessing an equivalence (`max` ≈ `xhigh`?) would put a

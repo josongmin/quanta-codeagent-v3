@@ -1,0 +1,53 @@
+id: side-conversation-seam
+title: Side-conversation read-only sub-thread seam
+section: 1
+subsystem: Side-conversation (ADR-0049)
+order: 20
+maturity: L4
+status: stable
+ui_surfaces: [cli]
+monitoring: integrated
+telemetry_keys: [quanta.thread.side, quanta.thread.kind]
+modes: [interactive, headless, batch, daemon, ide, ci-bot]
+configurable: integrated
+owners: ["@songmin"]
+labels: [absorbed:codex, absorbed:claude-code, surface:core, tier:1]
+depends_on: [plan-mode]
+config_refs:
+  env: []
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 5/5 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "internal read-only sub-thread seam (host injects LLM resolver/abort, parent loop untouched); no distinct browser affordance"
+purpose: Lightweight read-only sub-thread that runs alongside the main agent loop without disrupting it. Codex `codex.thread.side` absorption (build 2867 round-4 §G). Verbatim Codex base prompt pinned by `toBe`-literal test; quanta-specific sticky-taint addendum concatenated after a stable delimiter. Tool allowlist EQUALS the planModeMutatingTable read-only complement (drift fails CI). Effort cap is type+runtime double-gated against `as any` and JSON.parse bypass. Token budgets (8192/4096 default) enforced on both directions, with explicit error. Cancellation propagates from parent via AbortSignal. OTel emits `quanta.thread.side=true` + `quanta.thread.kind="side"` + parent_id. Dispatch router (`dispatchSideConversation`) is the public UI/CLI seam — host injects LLM resolver and abort signal; parent agent loop is never touched.
+evidence:
+  code:
+    - src/agent/side-conversation/index.ts
+    - src/agent/side-conversation/prompt.ts
+    - src/agent/side-conversation/run.ts
+    - src/agent/side-conversation/dispatch.ts
+    - src/observability/vocabulary.ts
+  adrs: [49]
+  tests:
+    unit:
+      - tests/unit/side-conversation.test.ts
+      - tests/unit/observability/vocabulary.test.ts
+    integration:
+      - tests/integration/side-conversation-e2e.test.ts
+    contract: []
+knobs:
+  - name: inputTokenBudget
+    default: '8192'
+    purpose: '(no description)'
+  - name: outputTokenBudget
+    default: '4096'
+    purpose: '(no description)'
+  - name: effort
+    default: 'undefined'
+    purpose: '(no description)'
+deliberate_hold: null
+notes: 'Side-conv is NOT a subagent (no nickname per ADR-0042, no spawn lifecycle per ADR-0041) and NOT plan-mode (which is a posture of the MAIN thread per ADR-0036). It is a separate thread surface. 2026-05-22 audit #10: the prior 540-LOC single file was split into a directory (`prompt.ts` byte-identical constants + integrity surface, `run.ts` executor+errors+budgeting, `dispatch.ts` resolver/request/response indirection) behind a barrel index — every external import path resolves unchanged.'

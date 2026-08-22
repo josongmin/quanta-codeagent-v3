@@ -1,0 +1,85 @@
+id: consolidator-session-hook
+title: Session-end consolidator hook — runMemoryConsolidatorHook (no-throw L4 wire)
+section: 5
+subsystem: 장기 메모리 — Phase 1 session-end wire (ADR-0068 Wave D)
+order: 72
+maturity: L4
+status: stable
+ui_surfaces: [cli]
+monitoring: integrated
+telemetry_keys: ["gen_ai.response.time_to_first_token_ms", "quanta.conversation.id"]
+modes: [interactive, headless, batch, daemon, ide, ci-bot]
+configurable: integrated
+owners: ["@songmin"]
+labels: ["surface:core", "absorbed:codex", "absorbed:cursor", "held-promotion"]
+depends_on: [memory-md-atomic-writer]
+config_refs:
+  env: ["QUANTA_BENCH_LOCALIZE_PHASE", "QUANTA_CAP_ENFORCE"]
+surface_integration:
+  cli: full
+  web: missing
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 5/6 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "session-end Phase 1 distill hook; the only thing it surfaces is an error AgentEvent on failure (bridged), but the distilled/skipped outcome rides no bridged event and there is no consolidator UI — user-facing value (distilled knowledge) does not reach the browser"
+purpose: |
+  Pure wiring around `runPhase1`. Converts the agent's session-end signal +
+  host-injected `Phase1Port` / `Stage1StorePort` + final AgentOutcome into
+  a `Phase1Input`, invokes the consolidator, and turns the result into a
+  structured outcome (`distilled` / `skipped` / `error`). NO-THROW
+  contract: every internal failure path (missing port, missing store,
+  missing thread id, port throw, store throw) is caught and surfaced via
+  the injected log callback + an `error` AgentEvent so the
+  session-finishing path is never derailed. Default-OFF: absent host
+  configuration ⇒ zero allocation (hook is not invoked). Fires ONLY when
+  `spanStatus === "ok"` — failed sessions skip distillation; the
+  forceSummarization flag does NOT override this (force is "distill on a
+  successful run" intent, not a failure salvage). SOTA Cursor mirror —
+  forceSummarization=true fires the consolidator's enabled arm without an
+  explicit host opt-in (the per-thread MIN_TURN_THRESHOLD floor still
+  applies).
+evidence:
+  code:
+    - src/agent/memory-consolidator-hook.ts
+    - src/agent/loop.ts
+    - src/agent/types.ts
+    - src/observability/vocabulary.ts
+    - src/apps/bench/eval/driver.ts
+    - src/shared/runtime-config.ts
+  adrs: ["docs/decisions/0068-codex-2-phase-memory-consolidator.md"]
+  tests:
+    unit:
+      - tests/unit/memory-consolidator-hook-hellgate.test.ts
+    integration: []
+    contract: []
+knobs:
+  - name: AgentConfig.memoryConsolidator.enabled
+    default: 'undefined'
+    purpose: 'host opt-in (default-OFF; absent ⇒ no hook)'
+  - name: AgentConfig.memoryConsolidator.forceSummarization
+    default: 'undefined'
+    purpose: 'Cursor-style override of memoryMode'
+  - name: AgentConfig.memoryConsolidator.port
+    default: 'undefined'
+    purpose: 'Phase1Port injection'
+  - name: AgentConfig.memoryConsolidator.store
+    default: 'undefined'
+    purpose: 'Stage1StorePort injection'
+  - name: AgentConfig.memoryConsolidator.threadId
+    default: 'undefined'
+    purpose: 'required for stage1 row key'
+deliberate_hold:
+  reason: |
+    Phase 2 (cross-session synthesizer) is NOT triggered from the
+    session-end hook — Phase 2 is threshold / explicit-trigger driven, not
+    cron. The host runs it on its own schedule. A Phase-2 host trigger
+    (CLI command / cron / per-N-Phase1s) is a separate follow-up.
+  promotion_path: |
+    Add a host-side scheduler that invokes the Phase 2 entry on its own
+    cadence — not in `runAgent`.
+notes: |
+  Pairs with `04-codex-2-phase-consolidator` (broader orchestration entry)
+  and `memory-md-atomic-writer` (Phase 2 disk side). Distinct because
+  Phase 1 wire-up has its own contract (no-throw, default-OFF) that
+  applies to the agent loop boundary, not the consolidator internals.

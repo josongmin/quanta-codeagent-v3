@@ -1,0 +1,44 @@
+id: safety-posture-round-2-fix
+title: Safety-posture 전파 (Round 2 fix)
+section: 6
+subsystem: 서브에이전트
+order: 4
+maturity: L3
+status: stable
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [interactive, headless]
+configurable: integrated
+config_refs:
+  env: [QUANTA_SUBAGENT, QUANTA_VERIFY_GUARD]
+owners: ['@songmin']
+labels: [surface:core, tier:1]
+depends_on: [agent, agent-tool-shape, quantasubagent-maxdepth, subagent-6-tools, task-registry]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 5/5 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "internal safety-posture inheritance policy, no user-visible surface anywhere"
+purpose: |
+  Safety-posture 전파 — buildChildConfig가 부모의 mode/verifyGuard/closeoutGuard/hitl를 옵셔널 spread로
+  자식에 전파. 이전엔 자식이 default mode로 붕괴 가능 → review-posture 부모가 mutating 자식을 spawn할
+  위험. CLI surface는 `QUANTA_SUBAGENT` 활성 시 `buildSubagentBlock` 경유로 동일 SubagentRunner
+  config를 자식에 inherit. 자식은 verify-guard/closeout-guard도 부모와 동일 caps로 동작.
+evidence:
+  code:
+    - src/agent/subagent-runner.ts
+    - src/subagent/agent-tool.ts
+    - src/subagent/index.ts
+    - src/agent/tier1/subagent.ts
+    - src/runner/assemble/subagent.ts
+  adrs: []
+  tests:
+    unit: [tests/unit/subagent-runner.test.ts, tests/unit/subagent-6-tools-hellgate.test.ts]
+    integration: [tests/integration/subagent-6tool-hell-e2e.test.ts]
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: ''

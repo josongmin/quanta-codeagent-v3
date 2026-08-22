@@ -1,0 +1,66 @@
+id: assemble-llm-core
+title: buildLLMCore + composeLLMCore + parseFallbackModels — surface-agnostic LLM stack
+section: 6
+subsystem: runner/assemble — LLM core
+order: 230
+maturity: L4
+status: new
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [interactive, headless]
+configurable: integrated
+config_refs:
+  env: ["QUANTA_MODEL_FALLBACK"]
+owners: ["@songmin"]
+labels: ["surface:core", "tier:1"]
+depends_on: [runner-assemble-builders, llm-assemble]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 3/4 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "pure internal LLM-stack factory (buildLLMCore/composeLLMCore/parseFallbackModels); no browser UI affordance of its own"
+purpose: |
+  Surface-agnostic LLM assembly family that hides three distinct concerns
+  behind typed inputs (no `process.env` / `process.argv` reads — the surface
+  maps its own ENV/HTTP/IPC into the `*AssembleInput` shapes first):
+  (1) `pickProviderCore` — re-export of the `@/llm` factory provider selection.
+  (2) `buildLLMCore` — instantiates the main `LLMPort` via `createLLM`;
+      missing api-key throws so the surface aborts loudly.
+  (3) `composeLLMCore` — composes the stack: inner `RetryingLLM` (caller-
+      supplied) → optional `FallbackLLM` wrap when `fallbackModelIds.length>0`
+      (per-fallback retry stacks built off the same provider, different
+      model ids) → in `auto` permission mode, attach the LLM-backed
+      `createAutoClassifierPort` onto `permission.classify`. Default OFF for
+      both fallback and classifier ⇒ `finalLLM === retryingLLM` and
+      `permission.classify` untouched, byte-identical to today.
+  (4) `parseFallbackModels` — parses a raw `QUANTA_MODEL_FALLBACK`-style
+      comma-string into dedup'd trimmed model ids; empty string `"1"` is
+      skipped (legacy boolean-enable sentinel).
+  `slog.info("llm.fallback.on", ...)` / `slog.info("permission.auto.on")` emit
+  on enable; `composeLLMCore` is called from CLI's `apps/cli/internal.ts`.
+evidence:
+  code:
+    - src/runner/assemble/llm.ts
+    - src/runner/assemble/index.ts
+    - src/runner/index.ts
+    - src/apps/cli/internal.ts
+  adrs: []
+  tests:
+    unit:
+      - tests/unit/assemble.test.ts
+      - tests/unit/fallback-hellgate.test.ts
+      - tests/unit/runner-slice-boundary.test.ts
+    integration:
+      - tests/integration/cli-export-assembly.test.ts
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  ID disambiguates from the existing `llm-assemble` (which is the STREAM
+  assembler `assembleFromEvents` for fold-rules / phase tagging). This one is
+  the COLLABORATOR assembly. Sub-feature of `runner-assemble-builders`
+  umbrella, individuated because 122 LOC carries 3 distinct factory cores +
+  the auto-mode classifier port wiring + the fallback-stack composition rule.

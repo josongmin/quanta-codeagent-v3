@@ -1,0 +1,84 @@
+id: permission-store-json
+title: permission state store — atomic JSON-state-file persistence engine (ADR-0046)
+section: 3
+subsystem: 권한 영속화 (per-thread + per-host + denial ledger)
+order: 93
+maturity: L4
+status: stable
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [n-a]
+configurable: integrated
+config_refs:
+  env: [QUANTA_PERMISSION_STATE]
+owners: ["@songmin"]
+labels: [absorbed:codex, surface:cli, security-touched]
+depends_on: [per-host-agent-mode, per-thread-permissions, post-denial-precedence, quanta-home-meta-root, runtime-config-ssot]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 6/6 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "pure file-backed persistence primitive (atomic write + debounced flush), no UI affordance on any surface"
+purpose: |
+  File-backed JSON store for per-thread permissions, per-host agent modes,
+  and post-denial precedence records. Single file at
+  `~/.quanta/permission-state.json` (overridable via
+  `QUANTA_PERMISSION_STATE`, both env vars read via `runtimeConfig()` — the
+  one legitimate `process.env` owner). Composition root
+  (`createPermissionStore`) owns ONE live `MutableState` + ONE
+  `JsonStateFile` persistence engine and layers three thin domain modules
+  over them: `createThreadStore` / `createHostStore` / denied-actions ledger.
+  The persistence helper owns the file-side machinery independent of WHAT
+  is stored: atomic write (`.tmp.<pid>.<rand>` + `rename`), debounced flush
+  (one rename per debounce window), write serialization
+  (`enqueueWrite` burst-collapse — no torn rename), quarantine sidecars
+  (`.corrupt` / `.unsupported-vN`), load→parse→validate with soft-fail to
+  empty state, and a `reset()` test seam. Failure model (preserved
+  verbatim): missing file ⇒ cold-start empty (no warning); corrupt JSON ⇒
+  start empty + `.corrupt` sidecar (never crash). Slice rule: pure
+  `node:` stdlib only — NO `@/storage`, NO `@/memory` (kept at minimum
+  dependency surface per biome `noRestrictedImports`).
+evidence:
+  code:
+    - src/permission/permission-store.ts
+    - src/permission/json-state-file.ts
+    - src/permission/per-thread-store.ts
+    - src/permission/per-host-mode.ts
+    - src/permission/post-denial.ts
+    - src/shared/runtime-config.ts
+  adrs: [46]
+  tests:
+    unit:
+      - tests/unit/permission-store-hardening.test.ts
+      - tests/unit/permission-per-thread.test.ts
+    integration: []
+    contract: []
+knobs:
+  - name: QUANTA_PERMISSION_STATE
+    default: '~/.quanta/permission-state.json'
+    purpose: 'override file path'
+deliberate_hold: null
+notes: |
+  No SQLite, no transactions — bounded state (small N per kind) makes RMW +
+  debounced flush correct. JsonStateFile is generic by design (the state DOMAIN
+  lives in the caller, the helper is parameterised by emptyState/serialize/parse).
+  ADVERSARIAL COVERAGE (jun-15 audit): permission-store-hardening.test.ts IS the
+  adversarial battery despite not carrying a `hellgate` filename — atomic-write
+  hardening (orphan `.tmp` does not block a fresh write; partial `.tmp` cleaned
+  up — no orphan accumulation); schema versioning (future-version + string-
+  version + missing-version ⇒ quarantine to `.unsupported-vN`, never silent
+  accept; malformed nested ⇒ `.corrupt` sidecar + start empty, never crash);
+  actionSignature adversarial inputs (whitespace ⇒ DIFFERENT sig, nested-arg
+  canonicalization, positional array order significant, 32-hex shape);
+  concurrency (two stores flushing CONCURRENTLY ⇒ no torn JSON + ≥1 grant
+  survives; burst serializes through pendingFlush — no concurrent rename);
+  multi-process read-reconcile-MERGE / TOCTOU clobber (A+B grants both survive,
+  a peer denial survives a stale flush, a NEWER denial generation supersedes,
+  a locally-cleared grant is NOT resurrected by its own prior on-disk copy).
+  File mode is intentionally default (not 0o600): permission state (grants /
+  modes / denial ledger) is not a credential — the credential bundle has its own
+  0o600 store ([[token-store-atomic]]). Corrupt/tampered files are quarantined,
+  never trusted; the on-disk file is agent-authored and local.

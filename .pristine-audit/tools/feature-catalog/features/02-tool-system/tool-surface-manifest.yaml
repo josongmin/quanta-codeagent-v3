@@ -1,0 +1,59 @@
+id: tool-surface-manifest
+title: Tool-surface manifest — SSOT for the LLM tool-access axis (gate + per-surface default)
+section: 2
+subsystem: 도구 — tool-surface SSOT (어떤 도구가 존재/게이트/표면별 default-ON 인지 단일 관리 카탈로그)
+order: 489
+maturity: L3
+status: new
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [interactive, headless, batch, daemon, ide, ci-bot]
+configurable: integrated
+config_refs:
+  env: []
+owners: ["@songmin"]
+labels: [surface:cli, tier:core]
+depends_on: [tool-registry]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 1/1 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "Pure internal tool-access catalog data + resolver, no UI affordance on any surface."
+purpose: |
+  jun-03 — 단일 관리 카탈로그로 LLM-accessible 도구 집합의 접근 축(어떤 도구가
+  존재하는가 / 무엇이 게이트하는가 / 표면별 default-ON 여부)을 SSOT로 모은다.
+  이전에는 이 데이터가 buildDefaultTools + tier-1 블록(@/agent/features) + 호스트
+  maybeWireX 슬롯(@/host/runtime/agent-config-assembler) + CLI env seed(@/apps/cli)에
+  흩어져 있었다. 두 축으로 나뉜다: (1) BASE — buildDefaultTools()가 포트 없이 항상
+  등록하는 unconditional read/edit/shell/search primitive 이름 목록(BASE_TOOL_NAMES);
+  (2) GATED — env flag / AgentConfig 슬롯 / 외부 resource로만 등록되는 도구의 gate +
+  per-surface default(on/opt-in/resource)를 담은 GATED_TOOLS 엔트리. 순수 resolver
+  (surfaceDefaultFor / shouldSeedOn / seedEnvVarsForSurface / entryToolNames)가 표면별
+  default 정책과 CLI seed-env 집합을 도출하며 병렬 목록을 없앤다. @/shared만 import하는
+  plane-clean 모듈(ToolSurface 축은 로컬 string union — @/runner/knobs의 Surface를
+  @/tool이 import할 수 없어 별도 정의). I/O 없음, 순수 데이터 + 순수 함수.
+evidence:
+  code:
+    - src/tool/surface/manifest.ts
+    - src/apps/cli/cli-seeded-gates.ts
+  adrs: []
+  tests:
+    unit:
+      - tests/unit/tool-surface-manifest-hellgate.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  TWO-WAY drift guard(tests/unit/tool-surface-manifest-hellgate.test.ts)가 실
+  registry 조립에 핀: 등록된 모든 도구 이름은 manifest에 나타나야 하고(orphan 도구
+  금지 — 이 테스트가 apply_patch_structured가 fc에서 빠진 것을 잡았다), 모든 manifest
+  엔트리는 실제 도구 이름이어야 한다(stale row 금지). manifest row 없이 도구 추가, 또는
+  row 제거 없이 도구 삭제 시 CI 실패. ToolGate는 always/env-flag/config-slot/resource/
+  unwired 닫힌 union이며 unwired는 orphan을 숨기지 않고 VISIBLE하게 카탈로그한다. 모든
+  default 상태는 row의 note에 비-휴리스틱 근거가 명시된 문서화된 결정(CLI default-ON은
+  cheap/in-memory capability에만; Chrome/API key 필요는 resource; bench/eval 재현성
+  민감 표면은 opt-in).

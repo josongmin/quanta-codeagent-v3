@@ -1,0 +1,58 @@
+id: plan-mutator-adapter
+title: PlanStore → PlanMutator adapter — slice-boundary translation
+section: 6
+subsystem: Plan-mode 구조화 (ADR-0096)
+order: 98
+maturity: L4
+status: stable
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [interactive, headless]
+configurable: integrated
+config_refs:
+  env: ["QUANTA_PLAN"]
+  cli: ["--plan"]
+owners: ["@songmin"]
+labels: ["surface:core", "tier:1"]
+depends_on: [plan-mode]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 5/6 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "pure internal slice-boundary by-value translation adapter; no UI affordance"
+purpose: |
+  The producer-side `PlanStore` returns `PlanResult<PlanDelta>` (rich
+  shape: full Plan snapshot + typed delta). The duck-typed consumer-side
+  `PlanMutator` (in `@/tool/types`) returns `PlanMutationResult` (compact
+  shape: version + delta kind + touched ids). This adapter is the ONLY
+  place the two shapes meet — keeps the slice fence intact (`@/tool` never
+  imports `@/agent/plan`; the duck-type seam is what dispatch consumes),
+  and centralizes the by-value translation so a drift between producer
+  and consumer fails at exactly one site. Every mapping is a closed
+  switch with `never` default arm — no heuristics.
+evidence:
+  code:
+    - src/agent/plan/mutator-adapter.ts
+    - src/agent/plan/state.ts
+    - src/agent/plan/types.ts
+    - src/agent/plan/mutations.ts
+    - src/agent/plan/index.ts
+    - src/agent/tier1/plan-mutation.ts
+  adrs: [95, 96]
+  tests:
+    unit:
+      - tests/unit/agent/plan/mutations-hell.test.ts
+      - tests/unit/plan-queue-hellgate.test.ts
+    integration:
+      - tests/integration/plan-mode-x-tool-registry-cross.test.ts
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  ADR-0096 introduces this adapter so the `@/tool` slice can call
+  PlanMutator without importing the canonical plan types. Adding a new
+  PlanDeltaKind / PlanMutationErrorCode in either slice forces a compile
+  error at this site until the mapping is extended.

@@ -1,0 +1,78 @@
+id: lsp-call-hierarchy
+title: LSP call hierarchy — lsp_incoming_calls / lsp_outgoing_calls (RFC jun-6)
+section: 2
+subsystem: 코어 read-only 도구 — language-server call hierarchy
+order: 487
+maturity: L4
+status: new
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [interactive, headless, batch, daemon, ide, ci-bot]
+configurable: integrated
+owners: ["@songmin"]
+labels: [surface:cli]
+depends_on: [lsp-nav-tool-slice, lsp-bridge, lspport]
+surface_integration:
+  cli: full
+  web: full
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 7/7 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "lsp call-hierarchy tool invocations + results render via tool.invoked/tool.completed; bridged at context-binding.ts tool arms"
+purpose: |
+  Two new read-only nav tools answering the refactorer's core question — "if I
+  change this function's signature, what calls it (and breaks), and what does it
+  call?" — which `lsp_references` cannot (it conflates reads / writes / imports /
+  type annotations and gives no call-site grouping).
+
+  `lsp_incoming_calls` (callers) / `lsp_outgoing_calls` (callees) front the LSP
+  3-step call-hierarchy protocol (LSP 3.16): the adapter hides a TWO-HOP request
+  behind one port method each — `textDocument/prepareCallHierarchy` resolves the
+  position to callable item(s), then `callHierarchy/incomingCalls|outgoingCalls`
+  per item, flattened. The normalized `CallHierarchyEntry` carries the callee/
+  caller name+kind+uri+ranges PLUS `fromRanges` — the exact call-site ranges
+  (the "what breaks where" payload). incoming reads `from`; outgoing reads `to`.
+
+  Mirrors the existing `lsp_implementation` slice end-to-end: `LspPort` /
+  `LspNavSession` methods, the `positionTool` factory (bare PATH:LINE:CHARACTER,
+  1-based), `isReadOnly:true` / `isConcurrencySafe:false`, never-fail-the-turn
+  degradation. The unsupported→null / resolved-empty→[] split falls out of the
+  shared `callOrNullOnUnsupported` helper (server lacking `callHierarchyProvider`
+  ⇒ clean message, never a throw). The `callHierarchy` client capability is now
+  advertised in `initialize` so spec-strict servers offer the provider.
+
+  Strictly additive + default-OFF: both tools ride the EXISTING
+  `QUANTA_LSP_TOOLS` opt-in gate (siblings in the `lspNavToolList()` set) — no
+  new knob, no new manifest top-level row, byte-identical default surface.
+evidence:
+  code:
+    - src/lsp/ports.ts
+    - src/lsp/types.ts
+    - src/lsp/adapters/base.ts
+    - src/tool/lsp_nav/index.ts
+    - src/tool/lsp_nav/formatters.ts
+    - src/tool/lsp_nav/types.ts
+    - src/agent/lsp-bridge.ts
+  adrs: []
+  tests:
+    unit:
+      - tests/unit/lsp-call-hierarchy-tools-hellgate.test.ts
+      - tests/unit/lsp-call-hierarchy-adapter-hellgate.test.ts
+      - tests/unit/lsp-nav-per-tool.test.ts
+      - tests/unit/lsp-rename-bridge-hellgate.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  Slice fence: `src/tool/lsp_nav/` MUST NOT import `@/lsp`, so `CallHierarchyEntry`
+  is declared twice (normalized `@/lsp/types` + slice `NavCallHierarchyEntry`
+  mirror), structurally compatible — exactly how `Location`/`NavLocation`
+  coexist. `lsp-bridge.ts` is the only cross-slice assembler (two one-line
+  forwarders). The two tools use the `positionTool` factory (positional name,
+  not a `name: "x"` literal) so — like the other 5 factory-built nav tools
+  (definition/hover/type-def/impl/rename-preview) — they are NOT scanned by the
+  tool-surface manifest drift guard and need NO manifest group row (they ride
+  the same gate transparently). Phase 2 (deferred): a `depth` knob to expand the
+  hierarchy recursively (direct edges already answer the change-impact ask).

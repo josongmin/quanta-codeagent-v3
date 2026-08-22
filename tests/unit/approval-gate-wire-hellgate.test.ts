@@ -40,8 +40,8 @@ import {
   type ApprovalStateMachinePort,
   createApprovalStateMachine,
 } from "@/agent/approval-state-machine"
-import { createObjectiveStore } from "@/objective"
 import { createRunLedger } from "@/agent/run-ledger"
+import { createObjectiveStore } from "@/objective"
 
 const baseReq = (over: Partial<ApprovalGateRequest> = {}): ApprovalGateRequest => ({
   threadId: over.threadId ?? "thread-1",

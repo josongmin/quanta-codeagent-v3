@@ -1,0 +1,73 @@
+id: cli-jun11-repl-input-ux
+title: jun-11 REPL input UX — approval preflight, bracketed paste, automation inbox banner
+section: 10
+subsystem: CLI REPL input + confirm layer
+order: 74
+maturity: L3
+status: new
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [interactive]
+configurable: integrated
+config_refs:
+  env:
+    - QUANTA_PREFLIGHT_CHECK
+    - QUANTA_BRACKETED_PASTE
+    - QUANTA_AUTOMATION_INBOX
+owners: ["@songmin"]
+labels: ["surface:cli", "jun-11", "default-on-partial"]
+depends_on: [cli-runtime-feature-config-unification, repl-interactive-surface, trust-scope-wire-up]
+surface_integration:
+  cli: full
+  web: missing
+  method: audited
+  verified: "2026-06-10"
+  evidence:
+    cli: "preflight renders in confirm prompt via runtime-context-compose; bracketed paste wired in surface-compose → raw-line-reader; automation inbox banner composed in session-loop"
+    web: "terminal-only REPL behaviors; web session uses its own input surface"
+purpose: |
+  jun-11 R3-hardened CLI input/confirm fixes:
+  (1) #19 `QUANTA_PREFLIGHT_CHECK` — approval-time applicability pre-flight
+  warns BEFORE approve when `edit`/`apply_patch` would fail (reuses the SAME
+  matchers; NEVER mutates). Default-ON via `CLI_FEATURE_GATES`; `=0` opts out.
+  (2) #10 `QUANTA_BRACKETED_PASTE` — DECSET 2004 paste accumulation so multi-line
+  clipboard pastes submit as one buffer (fixes early-submit at embedded newline).
+  Default-ON via seed; `=0` opts out.
+  (3) #22 `QUANTA_AUTOMATION_INBOX` — opt-in inbox banner in the REPL status
+  chrome when scheduler automations are pending (default-OFF).
+  Companion: `session-grant-prefix.ts` (#20 prefix-aware session grants) wired
+  in context-binding for standing `git …` style approvals, with durable prefix
+  grants + harddeny backstop in trust-scope-store.
+evidence:
+  code:
+    - src/apps/cli/preflight.ts
+    - src/apps/cli/raw-line-reader.ts
+    - src/apps/cli/repl/surface-compose.ts
+    - src/apps/cli/repl/runtime-context-compose.ts
+    - src/apps/cli/repl/session-loop.ts
+    - src/permission/session-grant-prefix.ts
+    - src/host/runtime/internal/context-binding.ts
+  adrs: []
+  tests:
+    unit:
+      - tests/unit/cli-preflight-applicability-hellgate.test.ts
+      - src/apps/cli/__tests__/raw-line-reader-bracketed-paste.hellgate.test.ts
+      - tests/unit/cli/automation-inbox-wire-hellgate.test.ts
+      - tests/unit/permission/session-grant-prefix-hellgate.test.ts
+      - tests/unit/permission/trust-scope-durable-prefix-grant-hellgate.test.ts
+      - tests/unit/permission/prefix-grant-harddeny-backstop-hellgate.test.ts
+      - tests/unit/permission/trust-scope-prefix-gate-guard-hellgate.test.ts
+      - tests/unit/cli/cli-default-on-ux-gates-hellgate.test.ts
+    integration:
+      - tests/e2e-pty/cli-approval-preflight-prefix-e2e.test.ts
+    contract: []
+knobs:
+  - name: QUANTA_PREFLIGHT_CHECK
+    default: "true"
+    purpose: "Approval-time edit applicability warning (CLI default-ON; =0 disables)."
+  - name: QUANTA_BRACKETED_PASTE
+    default: "true"
+    purpose: "Bracketed-paste multi-line accumulation (CLI default-ON; =0 disables)."
+  - name: QUANTA_AUTOMATION_INBOX
+    default: "false"
+    purpose: "Automation inbox status banner (opt-in)."

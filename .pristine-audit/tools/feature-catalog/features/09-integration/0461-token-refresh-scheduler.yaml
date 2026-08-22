@@ -1,0 +1,84 @@
+id: token-refresh-scheduler
+title: Proactive token-refresh scheduler — clock-driven pre-expiry refresh (ADR-0461)
+section: 9
+subsystem: Connectors / token store (ADR-0461, extends ADR-0160 Phase E)
+order: 65
+maturity: L2
+status: new
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [n-a]
+configurable: integrated
+config_refs:
+  env: []
+owners: ["@songmin"]
+labels: ["surface:core", "auth", "adr-0461"]
+depends_on: [connector-token-rotation]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 1/1 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "pure internal clock-driven token-refresh port; deliberately held / unwired, no UI affordance on any surface"
+purpose: |
+  `TokenRefreshScheduler` closed-port — turns ADR-0160's purely caller-driven
+  rotation into clock-driven, refresh-BEFORE-expiry. ADR-0160 only refreshes
+  reactively when a caller invokes `rotate()`, which in practice happens AFTER
+  a wire call already ate a 401; a long task hits the expired token mid-flight.
+  Given a `TokenRecord` with `expiresAt`, `schedule(connectorId, record)` arms a
+  timer at `expiresAt - LEAD_MS`; on fire it calls the SAME
+  `TokenRotator.rotate(connectorId, refresh)` path — it does NOT duplicate the
+  rotator's in-flight mutex or atomic persist (single source of truth) — then
+  re-schedules from the new token's expiry. `LEAD_MS = 60_000` is a STRUCTURAL
+  margin not a tunable: firing exactly at `expiresAt` lets the refresh round-trip
+  straddle the boundary so a concurrent call could still see an expired token.
+  Bounded exponential backoff on refresh failure (1s → ×2 → cap 5min) so a
+  flapping IdP never busy-loops. `cancel(id)` clears one connector's timer;
+  `stop()` clears all (clean shutdown — no dangling timers); `pendingCount()`
+  for observability. `ClockPort` + `TimerPort` (injected setTimeout/clearTimeout
+  pair) are both DI seams — tests use a fake clock + a fake timer with
+  `fireNext()`. Default-OFF: a connector that never constructs the scheduler is
+  byte-identical (rotation stays caller-driven).
+evidence:
+  code:
+    - src/connectors/token-refresh-scheduler.ts
+  adrs: ["docs/decisions/0461-proactive-token-refresh-scheduler.md"]
+  tests:
+    unit:
+      - src/connectors/__tests__/token-refresh-scheduler-hellgate.test.ts
+    integration: []
+    contract: []
+knobs:
+  - name: 'LEAD_MS'
+    where: 'token-refresh-scheduler.ts (compile-time const)'
+    purpose: '60s pre-expiry firing margin so the refresh round-trip completes before the old token lapses — a structural boundary guard, not a tunable.'
+deliberate_hold:
+  reason: |
+    Wiring is HELD because there is no honest production target today (audited
+    2026-06-03, 6-track scout): (1) the ADR-0160 rotator the scheduler drives is
+    itself never constructed in production — it is test-only, and ADR-0160's own
+    barrel says "wire-up into agent dispatch is a follow-up ADR"; there is no
+    connector composition root, no TokenStorePort adapter. (2) The ONLY live
+    token path, ChatGPT OAuth (src/auth/chatgpt-oauth), already refreshes
+    PRE-CALL at the top of every stream() (ensureFreshToken, 60s skew, with a
+    RefreshCoordinator mutex), so the "401-mid-task" friction this scheduler
+    removes structurally cannot occur there — arming it would be redundant AND
+    risk a double-refresh race against the coordinator. Forcing a wire today
+    would be speculative dead code / regression risk, so the slice ships the
+    seam + 15-case hellgate and stays opt-in.
+  promotion_path: |
+    Wire when a long-running connector that DOES hit reactive 401s lands with a
+    real rotator (e.g. a GitHub-app or MCP-OAuth connector via the ADR-0160
+    composition root): construct the scheduler with that rotator + its refresh
+    callback and call schedule() when a token loads / stop() on shutdown. Do NOT
+    retrofit it onto ChatGPT OAuth — that path's pre-call refresh already covers
+    the case and the coordinator owns the mutex.
+notes: |
+  Hellgate 15 cases: arms at expiresAt-LEAD_MS / reuses rotator mutex (no dup
+  callback) / re-schedules from NEW expiry / cancel clears one / stop clears all
+  (no dangling) / bounded backoff 1s→×2→cap-5min / backoff resets on success /
+  expiresAt absent ⇒ no arm (opaque refresh-only token) / fake-clock+fake-timer
+  determinism. Reuses TokenRotator.rotate() verbatim — zero behavioural change
+  for connectors that don't construct it (default-OFF, byte-identical).

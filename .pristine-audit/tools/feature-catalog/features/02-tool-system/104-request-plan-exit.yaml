@@ -1,0 +1,53 @@
+id: request-plan-exit-tool
+title: request_plan_exit — model-driven plan-mode exit with 3-way outcome (ADR-0086)
+section: 2
+subsystem: 도구 — request_plan_exit (ADR-0086)
+order: 104
+maturity: L4
+status: stable
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [n-a]
+configurable: n-a
+owners: ["@songmin"]
+labels: [surface:cli, held-promotion, tier:1]
+depends_on: [cross-slice-mirror, deferred-tool-registry, evidence-toolresultevidence, git-review-diff, hitltier-hand-off-required-always-confirm-pre-approval-ok-no]
+surface_integration:
+  cli: full
+  web: missing
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 1/1 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "plan-exit 3-way outcome surfaces through planExitPort to the CLI/IDE decider; /plan in SlashPalette.tsx is a prefill stub (B2) and no plan-exit handler exists in apps/web-frontend"
+purpose: |
+  Model-driven exit from plan mode mirroring Claude Code's `ExitPlanMode`.
+  When the agent has assembled a plan and is ready to act, it calls this
+  with the plan text; the dispatch seam routes via
+  `ToolContext.requestPlanExit` (built from `AgentConfig.planExitPort`),
+  which surfaces the plan to whoever decides and returns the 3-way outcome:
+  (1) `approved` — operator accepted; the surface (CLI/IDE) is responsible
+  for continuing in default mode so subsequent turns may mutate (the tool
+  tells the model it may proceed); (2) `rejected` — plan discarded, the
+  model should stop / re-plan; (3) `changes_requested` — carries non-empty
+  `feedback` so the model can revise the plan and call again. Registered
+  ONLY when `AgentConfig.planExitPort` is wired (see `buildSessionFeatures`)
+  — absent ⇒ tool is not in the registry and the loop is byte-identical.
+  Read-only + concurrency-UNSAFE. Within-run mode flip is a NON-GOAL —
+  an `approved` outcome does not unblock mutating tools inside the SAME
+  `runAgent` call (plan mode is fixed per run); the operator's port owns
+  the cross-turn mode transition.
+evidence:
+  code:
+    - src/tool/request-plan-exit.ts
+  adrs: [86]
+  tests:
+    unit:
+      - tests/unit/request-plan-exit-tool.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold:
+  reason: 'Auto within-run plan-mode transition needs a loop hook — deliberate follow-up (ADR-0086 §LIMITATIONS).'
+  promotion_path: 'Add loop-level mode-flip seam when a cross-tool transition signal is required.'
+notes: ''

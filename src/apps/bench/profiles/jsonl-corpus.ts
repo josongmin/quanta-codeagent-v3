@@ -17,6 +17,7 @@
  * that here is exactly how the third parser got out of sync in the first place.
  */
 import { parseSwebenchJsonl, toInstance } from "@/runner/batch/corpus/dataset"
+import { errMessage, logger } from "@/shared"
 import type { FamilyCorpusReader, FamilyCorpusRow } from "./corpus-row"
 
 /** Identity as the dataset layer has always resolved it: the official
@@ -37,8 +38,13 @@ const rowFromLine = (
   let parsed: unknown
   try {
     parsed = JSON.parse(trimmed)
-  } catch {
-    return undefined // skip malformed line
+  } catch (e) {
+    // Skipping stays the behavior (module doc #1: a stray line must not kill a
+    // campaign) — but the SKIP itself is now attributed. A dropped line is a
+    // dropped INSTANCE, and until now a hand-edited chunk file just quietly ran
+    // fewer tasks with no signal anywhere that the corpus lost rows.
+    logger.warn(`jsonl-corpus.rowFromLine: skipped malformed line: ${errMessage(e)}`)
+    return undefined
   }
   if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return undefined
   const record = parsed as Record<string, unknown>

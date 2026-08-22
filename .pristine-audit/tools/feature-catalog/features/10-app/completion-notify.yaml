@@ -1,0 +1,50 @@
+id: completion-notify
+title: "Turn-completion terminal notification (OSC title + bell)"
+section: 10
+subsystem: 앱 — CLI 완료 알림 (claude/codex OSC title 흡수, ADR-0444)
+order: 2
+maturity: L3
+status: stable
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [interactive]
+configurable: partial
+owners: ["@songmin"]
+labels: ["surface:core"]
+depends_on: []
+surface_integration:
+  cli: full
+  web: missing
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 5/5 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "CLI terminal OSC-title/bell, TTY-gated; no browser notification path, not reachable from web-daemon"
+purpose: |
+  A closed-port NotificationPort + OSC-title/bell adapter: on turn completion (slow
+  turns only — reuses the existing durationMs) and on idle-awaiting-input, write an
+  `ESC]0;<title>BEL` terminal-title (+ optional bell), restoring a neutral title on
+  teardown. TTY-gated (never to a pipe). Default-OFF behind QUANTA_NOTIFY=bell|title.
+  sanitizeTitle strips C0/DEL + C1 (NEL 0x85) + U+2028/2029 (OSC-injection guard).
+evidence:
+  code:
+    - src/apps/cli/notify/port.ts
+    - src/apps/cli/notify/osc-adapter.ts
+    - src/apps/cli/notify/notify-enabled.ts
+    - src/apps/cli/repl/factories/notify-and-warning.ts
+    - src/apps/cli/repl/session-loop.ts
+  adrs: [444]
+  tests:
+    unit:
+      - src/apps/cli/notify/__tests__/osc-adapter.hellgate.test.ts
+      - src/apps/cli/notify/__tests__/notify-enabled.hellgate.test.ts
+    integration: []
+    contract: []
+knobs:
+  - name: QUANTA_NOTIFY
+    default: "undefined (off)"
+    purpose: "'bell'|'title' channel; absent/non-TTY ⇒ no port, byte-identical"
+deliberate_hold:
+  reason: "iTerm2 native OSC 9/1337 push + per-emulator detection deferred (conservative TTY+TERM gate only)."
+  promotion_path: "add an iTerm2 adapter behind the same port."
+notes: "post-turn title persists until next prompt by design (dispose idempotent); idle transitions it to 'waiting'."

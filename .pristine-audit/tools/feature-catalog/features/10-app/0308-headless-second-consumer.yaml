@@ -1,0 +1,60 @@
+id: headless-second-consumer
+title: Headless second-consumer proof (ARCH-07)
+section: 10
+subsystem: Surface governance / host layer validation
+order: 79
+maturity: L3
+status: new
+ui_surfaces: [api]
+monitoring: n-a
+modes: [headless, batch, ci-bot]
+configurable: integrated
+config_refs:
+  env: []
+owners: ["@songmin"]
+labels: ["surface:api", "tier:2", "adr-0308", "governance"]
+depends_on:
+  - cli-bootstrap-host-extraction
+  - side-conversation-port
+  - cli-session-cmd-shim-removal
+  - slash-registry-split
+  - thin-surface-headless-core
+  - repl-host-slim-down
+surface_integration:
+  cli: missing
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "src evidence not reachable from the interactive CLI entry (src/apps/cli/index.ts) — wired only into other apps (eval/bench/probe/headless) or unwired"
+    web: "Architecture portability proof with fake deps, pure internal validation harness, no user-visible UI affordance on any surface."
+purpose: |
+  Validates the host-layer SSOT by adding a SECOND surface
+  (`src/apps/headless/`) that drives the SAME `bootstrapSession` +
+  `@/runner#runOnce` cores end-to-end with zero CLI imports. The
+  headless surface is the proof-of-portability: until a second consumer
+  exists, the slice-isolation fence is theoretical. With it, every CLI-01
+  invariant (host-layer slice fence, no CLI-back-imports) becomes
+  literal — a regression that quietly couples to CLI would fail the
+  headless adversarial hellgate.
+evidence:
+  code:
+    - src/apps/headless/index.ts
+    - src/apps/headless/types.ts
+    - src/apps/headless/fake-deps.ts
+    - src/apps/headless/fake-llm.ts
+  adrs:
+    - docs/decisions/0308-headless-second-consumer.md
+  tests:
+    unit:
+      - tests/unit/apps/headless/headless-second-consumer-hellgate.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  References memory `surface-model` (quanta is multi-surface: CLI /
+  Web-Tauri / CLI-embedded browser; absorption-ROI must NEVER be gated on
+  which surface is present today). Closes Wave 1-3 (CLI-01 → CLI-06,
+  ADRs 0297/0299/0300/0301/0302/0303 in user's renumber chain, mapping
+  to current 0297/0299/0304/0305/0306/0307).

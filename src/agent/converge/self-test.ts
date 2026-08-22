@@ -6,7 +6,7 @@
  * OBSERVE-ONLY by design (RFC jul-3 hell-audit R2): coverage (case count / edge presence) is NOT
  * deterministically recoverable from a cassette, so `green` means only "a self-test-shaped command
  * the agent AUTHORED exited 0" — nothing stronger. The receipt therefore NEVER gates submission on
- * its own; a consumer that gates on it (best-of-n P2) must corroborate with an independent signal.
+ * its own; a consumer that gates on it must corroborate with an independent signal.
  *
  * NO-LEAK: the peek guard REUSES the oracle-taint SSOT ({@link isUnfair} / {@link buildTaintedRefs})
  * — the SAME predicate the compare layer refuses with — so a laundered-oracle self-test

@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import { TERMINAL_OPERATOR_GUIDE, terminalOperatorGuide } from "./terminal-capability-guide"
 
-describe("terminal-operator capability guide (RFC §4.5 / §13 #5)", () => {
+describe("terminal-operator capability guide (TB21-06 TC-3)", () => {
   test("covers the SOTA levers that close the #1 failure mode (exe-not-in-PATH)", () => {
     const g = terminalOperatorGuide()
     expect(g).toBe(TERMINAL_OPERATOR_GUIDE)

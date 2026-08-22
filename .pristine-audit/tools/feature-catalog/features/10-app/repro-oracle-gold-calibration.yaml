@@ -1,0 +1,62 @@
+id: repro-oracle-gold-calibration
+title: repro-oracle gold calibration — EVAL-ONLY false-negative diagnostic
+section: 10
+subsystem: 벤치 — verify-and-select repro 오라클 보정 (측정도구)
+order: 2422
+maturity: L3
+status: new
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [batch]
+configurable: integrated
+owners: ["@songmin"]
+labels: [surface:bench, eval-only, diagnostic, not-production-capability]
+depends_on: [repro-test-slice, verify-select]
+config_refs:
+  env: [QUANTA_BENCH_VERIFY_SELECT]
+surface_integration:
+  cli: missing
+  web: na
+  method: audited
+  verified: "2026-06-20"
+  evidence:
+    cli: "makeCalibratedReproConsensusPort wraps the resolvedKofN selection port"
+    web: "no browser affordance"
+purpose: |
+  EVAL-ONLY DIAGNOSTIC, NOT a production solving capability. It needs the
+  dataset gold patch as ground truth, so live tasks have no gold and this is
+  unavailable off-bench.
+
+  It calibrates the noisy patched-resolved oracle by running the same probe on
+  the gold-patched tree. If the probe says "not resolved" on the known-correct
+  fix, the oracle is a confirmed false-negative for that instance and the
+  resolved gate fails open, meaning it never rejects a candidate on that
+  signal.
+
+  Two jobs:
+  1. Measure the oracle's per-instance false-negative rate, which is the jun-20
+     root-cause readout for the "right place, fix unrecognized by oracle" miss
+     family.
+  2. De-noise bench candidate selection so a broken oracle cannot discard a
+     correct candidate before official grading.
+
+  Asymmetric limitation: fail-open removes a false-red, but it does not add a
+  true-green. Selection then degrades to weak minimality plus ownerCoverage, so
+  the correct candidate may still lose to a wrong sibling. It does not cheat
+  grading: the final verdict is still the independent official harness; fail-open
+  only changes which candidate is submitted.
+evidence:
+  code:
+    - src/runner/batch/eval/repro-oracle-calibration.ts
+    - src/runner/batch/eval/driver.ts
+    - src/runner/batch/eval/rematerialize.ts
+  adrs: [14]
+  tests:
+    unit:
+      - tests/unit/repro-oracle-calibration-hellgate.test.ts
+    integration:
+      - tests/unit/calibrated-repro-consensus-port.test.ts
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: ""

@@ -101,9 +101,33 @@ export const isTerminalTrialOutcome = (raw: unknown): raw is TerminalTrialOutcom
 
 // ── per-trial receipt ────────────────────────────────────────────────────────
 
+/** The verify-before-finalize gate's honest trichotomy, as the terminal brain
+ *  stamped it (`QUANTA_TB_VERIFY_GATE`, a RETAINED 2.1 lever). ABSENT on a
+ *  gate-off run — the field is never defaulted, because "no stamp" and
+ *  "unverifiable" are different facts. Mirrors `@/agent/converge`'s
+ *  `VerificationState`; duplicated as a literal union rather than imported
+ *  because `@/runner` must not depend on the agent slice for a report shape. */
+export const TERMINAL_VERIFY_GATE_STATES = [
+  "verified-pass",
+  "verified-fail",
+  "unverifiable",
+] as const
+export type TerminalVerifyGateState = (typeof TERMINAL_VERIFY_GATE_STATES)[number]
+const VERIFY_GATE_STATE_SET: Readonly<Record<TerminalVerifyGateState, true>> = {
+  "verified-pass": true,
+  "verified-fail": true,
+  unverifiable: true,
+}
+export const isTerminalVerifyGateState = (raw: unknown): raw is TerminalVerifyGateState =>
+  typeof raw === "string" && raw in VERIFY_GATE_STATE_SET
+
 /** Supplemental Quanta facts, verbatim from the agent adapter's own receipt.
- *  NEVER authoritative for the score — Harbor's reward is. */
+ *  NEVER authoritative for the score — the grader's reward is. */
 export interface QuantaTrialFacts {
+  /** TB21-06 AP-9: the verify-gate outcome. The retired 2.0 shell tally
+   *  (`tally-verification.sh`) was this stamp's only consumer; the distribution
+   *  it printed is now derivable from the canonical report itself. */
+  readonly verifyGateState?: TerminalVerifyGateState
   readonly agentVersion?: string
   readonly packageVersion?: string
   readonly commit?: string
@@ -131,7 +155,7 @@ export interface TerminalTrialReceipt {
   readonly taskChecksum?: string
   /** The dataset the trial declares it ran. */
   readonly datasetSource?: string
-  /** The raw numeric reward used for scoring; `null` when Harbor recorded none.
+  /** The raw numeric reward used for scoring; `null` when the grader recorded none.
    *  `null` is NOT zero — it is "no reward was recorded", and the difference is
    *  what stops a fabricated miss. */
   readonly reward: number | null
@@ -275,7 +299,7 @@ export interface TerminalBenchReport {
   readonly benchmarkSuite: "terminal-bench"
   readonly benchmarkVersion: TerminalBenchVersion
   readonly dataset: TerminalBenchDatasetId
-  /** The pinned Harbor dataset ref the trials were graded against. */
+  /** The pinned upstream dataset ref the trials were graded against. */
   readonly datasetRef: string
   readonly timestamp: string
   /** Experiment arm. Baseline and lever runs are scored SEPARATELY, always. */
@@ -308,7 +332,18 @@ const decodeQuantaFacts = (raw: unknown, at: string): QuantaTrialFacts => {
     row[key] === undefined ? undefined : asBooleanField(row[key], `${at}.${String(key)}`)
   const optStrings = (key: keyof QuantaTrialFacts): readonly string[] | undefined =>
     row[key] === undefined ? undefined : asStringArrayField(row[key], `${at}.${String(key)}`)
+  if (row.verifyGateState !== undefined && !isTerminalVerifyGateState(row.verifyGateState)) {
+    refuse(
+      `${at}.verifyGateState`,
+      `must be one of ${TERMINAL_VERIFY_GATE_STATES.join("|")}`,
+      row.verifyGateState,
+    )
+  }
   return {
+    ...put(
+      "verifyGateState",
+      isTerminalVerifyGateState(row.verifyGateState) ? row.verifyGateState : undefined,
+    ),
     ...put("agentVersion", optString("agentVersion")),
     ...put("packageVersion", optString("packageVersion")),
     ...put("commit", optString("commit")),

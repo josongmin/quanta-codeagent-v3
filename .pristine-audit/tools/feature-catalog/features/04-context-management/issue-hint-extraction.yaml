@@ -1,0 +1,70 @@
+id: issue-hint-extraction
+title: Issue-hint extraction — Agentless-style structured signal scan
+section: 4
+subsystem: 이슈 텍스트 localization 힌트 (Agentless 흡수)
+order: 60
+maturity: L4
+status: stable
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [interactive, headless, batch, daemon, ide, ci-bot]
+configurable: n-a
+owners: ["@songmin"]
+labels: [absorbed:agentless, surface:core]
+depends_on: [bench-eval-driver, bench-repair-context-builder, runrepairrounds, bench-eval-env-prep, bench-python-swebench]
+config_refs:
+  env: ["QUANTA_BENCH_ISSUE_HINT_EXPECTED_ACTUAL"]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 8/9 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "pure deterministic extractors composing an LLM prompt block, ui_surfaces n-a, no UI affordance"
+purpose: |
+  Pure deterministic extractors that scan an issue/problem-statement string
+  and surface a structured `IssueHint` (files, errors, code fences,
+  traceback paths, symbols) for downstream localization. Conservative
+  posture — NO heuristics: paths require a slash + recognized extension;
+  errors must trail-suffix `Error`/`Exception`/`Warning` with leading
+  uppercase; symbols only match backtick-fenced identifiers + Python /
+  TS-JS def keywords (language keywords like `def`/`if`/`return`
+  themselves never count). Each extractor is its own pure module; the
+  composer renders an LLM-friendly markdown block ending with a
+  calibration line that warns the model NOT to blindly trust hints.
+  Companion `agentless-localize` runs the paper's Stage-1 LLM file-level
+  localization (prompt verbatim from Xia 2024) with a hallucination guard
+  that rejects any path not in the supplied file tree.
+evidence:
+  code:
+    - src/shared/public-issue-text.ts
+    - src/runner/knobs/knobs/localize-budget.ts
+    - src/agent/issue-hint/extract-files.ts
+    - src/agent/issue-hint/extract-errors.ts
+    - src/agent/issue-hint/extract-code.ts
+    - src/agent/issue-hint/extract-symbols.ts
+    - src/agent/issue-hint/normalize.ts
+    - src/agent/issue-hint/compose.ts
+    - src/agent/issue-hint/agentless-localize.ts
+    - src/agent/issue-hint/types.ts
+    - src/apps/bench/eval/driver.ts
+    - src/runner/knobs/knobs/issue-hint.ts
+  adrs: []
+  tests:
+    unit:
+      - tests/unit/issue-hint/extract-files.test.ts
+      - tests/unit/issue-hint/extract-errors.test.ts
+      - tests/unit/issue-hint/extract-code.test.ts
+      - tests/unit/issue-hint/extract-symbols.test.ts
+      - tests/unit/issue-hint/compose.test.ts
+      - tests/unit/issue-hint/agentless-localize.test.ts
+      - tests/unit/issue-hint-hellgate.test.ts
+      - tests/unit/issue-hint-agentless-hellgate.test.ts
+      - tests/unit/bench-issue-hint-wiring.test.ts
+      - tests/unit/bench-issue-hint-agentless-wiring.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: 'Empty-hint sentinel: when every extractor returns nothing, composer returns the empty string ("") and the caller (bench/driver) skips prepending — byte-identical to no-hint path. ANSI strip is shared `normalize.ts` (issue bodies often carry pasted terminal output whose ESC byte trips lookbehind / word-boundary patterns).'

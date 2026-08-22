@@ -37,9 +37,9 @@ import {
   runAdmissibilityGate,
 } from "@/agent/admissibility-gate"
 import { createApprovalStateMachine } from "@/agent/approval-state-machine"
-import { createObjectiveStore } from "@/objective"
 import { createRunLedger } from "@/agent/run-ledger"
 import type { ToolUseBlock } from "@/llm"
+import { createObjectiveStore } from "@/objective"
 import type {
   ApprovalDecision,
   PermissionContext,

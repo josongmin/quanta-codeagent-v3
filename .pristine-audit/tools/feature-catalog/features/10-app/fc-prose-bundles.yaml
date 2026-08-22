@@ -1,0 +1,57 @@
+id: fc-prose-bundles
+title: fc prose bundles — intro + non-absorption 정책 MD 가 catalog 빌드 시 blend
+section: 10
+subsystem: feature-catalog 메타 도구 (rendered MD 의 non-YAML 섹션 SSOT)
+order: 53
+maturity: L4
+status: stable
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [interactive, headless, batch, daemon, ide, ci-bot]
+configurable: n-a
+owners: ["@songmin"]
+labels: ["surface:tooling", "absorbed:codex"]
+depends_on: [assemble-config, runner-assemble-builders, cli-export-2026-05-21-l2-l3, cli-resume-state-machine, quantastatepath]
+config_refs:
+  env: ["QUANTA_GIT_SHA", "QUANTA_GIT_TOOLS", "QUANTA_MEMORY_PATH", "QUANTA_PRICING_VERSION", "QUANTA_SESSIONS_DIR", "QUANTA_SKILLS", "QUANTA_SKILLS_DIR", "QUANTA_TOOL_OUTPUT_SPILL_KEEP"]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 2/2 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "pure feature-catalog build tooling that blends prose into docs MD; no user-visible affordance on any runtime surface"
+purpose: |
+  Rendered `docs/10.feature-catalog.md` 의 두 가지 비-YAML 섹션 — (a)
+  intro/머리말 (성숙도 5단계 척도, RFC/ADR refs, slice-isolation 원칙),
+  (b) trailer 정책 노트 (Codex 의도적 미흡수 — heartbeat/plugin
+  bundle/cassette validator 등, ADR-0015~0023 근거; 운영/실험 인프라
+  미흡수 — Statsig kill-switch / Datadog cohort 등, ADR-0011 근거) — 를
+  `tools/feature-catalog/prose/<prefix>-<slug>.md` 파일로 SSOT 보관.
+  `render.ts#loadProse` 가 `00-*.md` 를 intro 로, `50-*.md`/`99-*.md` 를
+  trailer 로 자동 collect 해서 rendered MD 의 정해진 위치에 inline. MD
+  자체는 build artefact (직접 편집 금지) — 산문 변경은 prose/ 의 source
+  를 고치고 `bun fc build` 가 결정적으로 재생성한다. 이 분리 덕에 catalog
+  rendering 코드는 데이터 transform 만, 정책 텍스트 권위는 markdown 파일에.
+evidence:
+  code:
+    - tools/feature-catalog/prose/00-intro.md
+    - tools/feature-catalog/prose/50-codex-non-absorption.md
+    - tools/feature-catalog/prose/99-policy-non-absorption.md
+    - tools/feature-catalog/render.ts
+    - src/shared/runtime-config.ts
+    - src/apps/cli/internal.ts
+  adrs: [11]
+  tests:
+    unit:
+      - tests/unit/feature-catalog-render.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  Prefix convention: `00-*` ⇒ intro (catalog 헤더 직후), `50-*`/`99-*`
+  ⇒ trailer (catalog 본문 뒤). `loadProse` 는 prefix-sorted 로 결정적
+  순서. "의도적으로 흡수하지 않은 것" 의 카탈로그 — 흡수 ROI 추적 시
+  반복 질문 ("X 왜 안 들어옴?") 의 single answer point.

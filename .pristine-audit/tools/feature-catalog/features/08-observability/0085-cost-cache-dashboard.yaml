@@ -1,0 +1,48 @@
+id: cost-cache-dashboard
+title: Cost & cache 대시보드
+section: 8
+subsystem: 비용·캐시 가시화 (ADR-0085)
+order: 85
+maturity: L4
+status: stable
+ui_surfaces: [cli]
+monitoring: integrated
+telemetry_keys: ["shell.exec.stdout.bytes", "shell.exec.stderr.bytes"]
+modes: [interactive, headless, batch, daemon, ide, ci-bot]
+configurable: integrated
+config_refs:
+  env: [QUANTA_METRICS]
+owners: ["@songmin"]
+labels: ["surface:core", "observability-primitive", "absorbed:claude-code"]
+depends_on: [repl-code-smell-cleanup, runner-assemble-builders, cli-export-2026-05-21-l2-l3, plan-mode, repl-interactive-surface]
+surface_integration:
+  cli: full
+  web: missing
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 3/3 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "the cost/cache dashboard (byTool, p50/p95, stopReasons, shell rollup) has a CLI stderr render but no web mount; its render is CLI-only and does not reach the browser"
+purpose: |
+  MetricsSnapshot 위 순수 aggregator — token in/out·cacheHitRate·estimatedCostUsd·
+  turns·toolCalls(byTool)·stopReasons·latency(p50/p95)·shell rollup 집계. 새 수집 0
+  (AgentRecorder/shell-otel가 채운 counter/timer만 read). 2 string renderer
+  (renderDashboardText·renderDashboardMarkdown) + CostDashboard 객체 자체가 JSON form.
+  CLI는 metrics 활성 시 turn 종료마다 stderr로 text 블록 출력.
+  cost는 unknown model이면 null(가짜 $0 금지).
+evidence:
+  code:
+    - src/observability/cost-dashboard.ts
+    - src/apps/cli/repl.ts
+    - src/apps/cli/internal.ts
+  adrs: [85]
+  tests:
+    unit: [tests/unit/cost-dashboard.test.ts]
+    integration: []
+    contract: []
+knobs:
+  - name: QUANTA_METRICS
+    default: 'undefined'
+    purpose: '(no description)'
+deliberate_hold: null
+notes: '데이터 이미 있던 것의 표현 surface. 세션 누적만 (per-turn delta는 follow-up). markdown은 PR 코멘트용.'

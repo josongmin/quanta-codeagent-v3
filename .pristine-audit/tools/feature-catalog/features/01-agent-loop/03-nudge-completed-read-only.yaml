@@ -1,0 +1,40 @@
+id: nudge-completed-read-only
+title: nudge/completed 전 디스패치된 read-only 결과 폐기
+section: 1
+subsystem: 스트리밍 도구 실행
+order: 3
+maturity: L3
+status: stable
+ui_surfaces: [cli]
+monitoring: integrated
+telemetry_keys: [gen_ai.response.time_to_first_token_ms, quanta.conversation.id]
+modes: [interactive, headless, batch, daemon, ide, ci-bot]
+configurable: n-a
+owners: ['@songmin']
+labels: [surface:core, tier:core]
+depends_on: [plan-mode, secret-redaction-content-plane, durable-state-belongs-in-workspace-files, src-agent-working-state-ts, turncontextinput-mode-reporules-workingstate-activeskills]
+config_refs:
+  env: [QUANTA_CAP_ENFORCE]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 4/4 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "pure internal streaming-dispatch discard logic; no rendered web affordance"
+purpose: nudge/completed 전 디스패치된 read-only 결과 폐기
+evidence:
+  code:
+    - src/agent/streaming-dispatch.ts
+    - src/agent/loop.ts
+    - src/observability/turn-timing.ts
+    - src/shared/runtime-config.ts
+  adrs: []
+  tests:
+    unit: [tests/unit/streaming-dispatch.test.ts, tests/unit/streaming-dispatch-hellgate.test.ts, tests/unit/streaming-dispatch-refusal-shortcircuit.test.ts]
+    integration: [tests/integration/streaming-dispatch-in-progress-e2e.test.ts, tests/integration/streaming-dispatch-rejection-e2e.test.ts]
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: ''

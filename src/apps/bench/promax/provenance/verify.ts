@@ -11,6 +11,7 @@
  * code. The only early exits are the two points where continuing is impossible
  * — unparseable manifest bytes and an unparseable manifest schema.
  */
+import { errMessage } from "@/shared"
 import { idSetEqualityFailures, parseDatasetIdentity, parseEvalIdentity } from "./corpus-identity"
 import { decodeUtf8, instanceIdSetDigest, sha256Hex } from "./digest"
 import { PROMAX_V1_SNAPSHOT, type ProMaxFrozenSnapshot } from "./frozen-snapshot"
@@ -245,7 +246,7 @@ export const verifyProMaxBundle = (
     return reject([
       {
         code: "manifest_unparseable",
-        message: `manifest bytes are not valid UTF-8: ${err instanceof Error ? err.message : String(err)}`,
+        message: `manifest bytes are not valid UTF-8: ${errMessage(err)}`,
       },
     ])
   }
@@ -279,10 +280,7 @@ const collectCorpusIdentity = (
     datasetText = decodeUtf8(sources.dataset)
     evalText = decodeUtf8(sources.evalMeta)
   } catch (err) {
-    sink.add(
-      "dataset_unparseable",
-      `corpus bytes are not valid UTF-8: ${err instanceof Error ? err.message : String(err)}`,
-    )
+    sink.add("dataset_unparseable", `corpus bytes are not valid UTF-8: ${errMessage(err)}`)
     return []
   }
 

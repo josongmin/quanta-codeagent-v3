@@ -1,0 +1,51 @@
+id: coverage-ast-branch
+title: AST-precise branch counter — astCoverageSource() behind ADR-0165 port
+section: 10
+subsystem: Coverage source — AST adapter
+order: 86
+maturity: L3
+status: stable
+ui_surfaces: [cli]
+monitoring: integrated
+modes: [interactive, headless, batch, ci-bot]
+configurable: integrated
+config_refs:
+  env: []
+owners: ["@songmin"]
+labels: ["adr-0170", "tier:1", "observability", "coverage"]
+depends_on:
+  - code-coverage
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 2/2 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "pure AST coverage adapter behind the port (no own tool surface), no UI affordance"
+purpose: |
+  AST-walked sibling to ADR-0165's V8 keyword-regex heuristic. Uses the
+  typescript compiler API (`ts.createSourceFile` + `ts.forEachChild`)
+  WITHOUT a runtime type-check pass — `typescript` is already on disk via
+  the project's tsconfig install so marginal cost is zero. Counts
+  branches at AST nodes (`IfStatement` then/else, each `Case/Default`,
+  `ConditionalExpression` ±2, `&&`/`||`/`??` short-circuit, loops, `catch`).
+  Halts recursion at string/template/regex literals so `|` in regex
+  doesn't false-positive. Same `CoverageSource` port — caller picks V8
+  (speed) vs AST (precision-sensitive audit gates).
+evidence:
+  code:
+    - src/observability/coverage/ast-source.ts
+    - src/observability/coverage/index.ts
+  adrs:
+    - docs/decisions/0170-coverage-ast-branch.md
+  tests:
+    unit:
+      - tests/unit/coverage-ast-source-hellgate.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  22 hellgate cases (A:11 / B:5 / C:3 / D:3). Sibling V8 hellgate stays
+  green — same port, both adapters substitutable. Parse cost ~1-2ms/file.

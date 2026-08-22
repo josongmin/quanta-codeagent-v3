@@ -1,0 +1,847 @@
+import { createEffortClassifier } from "@/agent/effort-classifier"
+import {
+  type ApplyRoleResolverLike,
+  createFastApplyFallback,
+  createFastApplyMerge,
+} from "@/agent/fast-apply-fallback"
+import { DEFAULT_REFUSAL_FALLBACK_PROMPT } from "@/agent/refusal-fallback"
+import { dispatchSideConversation } from "@/agent/side-conversation"
+import { createDefaultSubagentMailbox } from "@/agent/subagent-mailbox"
+import type { LLMPort } from "@/llm"
+import { defaultRoleModelResolver, type RoleModelResolver } from "@/llm/role-model-override"
+import { projectAgentEventToAgentStateObservation } from "@/protocol/agent-state"
+import {
+  emitOperatorNotice,
+  errMessage,
+  gateOn,
+  gateOnStrict,
+  itemStreamEnabled,
+  logger,
+  runtimeConfig,
+} from "@/shared"
+import type { AgentEvent } from "@/stream"
+import {
+  ItemLifecycleTracker,
+  ItemStreamProjector,
+  itemLifecycleEnabled,
+  type StreamPort,
+} from "@/stream"
+import { AgentMetaRegistry, TaskRegistry, TurnWakeRegistry } from "@/subagent"
+import type { CloseoutCritic, CloseoutCriticVerdict } from "./closeout-critic"
+import { buildCodeCellDispatchPort } from "./codemode-wire"
+import {
+  createSubagentSteerFinalization,
+  makeSteerRetentionStore,
+} from "./subagent-delivery/controller"
+import { materializeReviewerAgent } from "./tier1/reviewer-subagent"
+import type { AgentConfig } from "./types"
+
+const QUANTA_FAST_APPLY_ENV = "QUANTA_FAST_APPLY"
+const QUANTA_EFFORT_AUTO_ENV = "QUANTA_EFFORT_AUTO"
+const QUANTA_SUBAGENT_MAILBOX_ENV = "QUANTA_SUBAGENT_MAILBOX"
+/** RFC-02 / ADR-0436 — `spawn_batch` fan-out tool gate. */
+const QUANTA_SUBAGENT_BATCH_ENV = "QUANTA_SUBAGENT_BATCH"
+/** RFC-04 / ADR-0437 — `list_agents` read-only enumeration tool gate. */
+const QUANTA_SUBAGENT_INTROSPECT_ENV = "QUANTA_SUBAGENT_INTROSPECT"
+/** RFC-04 / ADR-0437 — `followup_task` deliver-and-trigger tool gate. */
+const QUANTA_SUBAGENT_FOLLOWUP_ENV = "QUANTA_SUBAGENT_FOLLOWUP"
+/** WS4 (RFC jul-18 §9) — `mode:"steer"` targeted child steer gate. Default-OFF ⇒
+ *  the controller's `steerEnabled` stays false (`mode:"steer"` ⇒ `mode_disabled`)
+ *  AND no child steer safe-point overhead (byte-identical). Rides the followup
+ *  substrate, so it only takes effect alongside `QUANTA_SUBAGENT_FOLLOWUP`. */
+const QUANTA_SUBAGENT_STEER_ENV = "QUANTA_SUBAGENT_STEER"
+/** RFC jun-6-code-mode (Phase 1) — `code_cell` dispatch-port wire gate. Strict
+ *  `"1"` (mirrors `runtimeConfig().codeMode` — NOT the `=on` convention the
+ *  subagent gates use) so the composition root flips the SAME knob the tool
+ *  registration (`DefaultToolPorts.codeMode`) reads. */
+const QUANTA_CODE_MODE_ENV = "QUANTA_CODE_MODE"
+/** P12 — `closeout-critic` port wire gate. Same `QUANTA_CLOSEOUT_CRITIC` env the
+ *  knob's `enabled` fold reads; the truthy set mirrors the knob's
+ *  (`["1","on","true"]`) so the port is constructed on EXACTLY the runs the knob
+ *  turns the feature on. */
+const QUANTA_CLOSEOUT_CRITIC_ENV = "QUANTA_CLOSEOUT_CRITIC"
+const CLOSEOUT_CRITIC_TRUTHY = new Set(["1", "on", "true"])
+/** T08 — model-refusal recovery gate + optional re-prompt override. */
+const QUANTA_REFUSAL_FALLBACK_ENV = "QUANTA_REFUSAL_FALLBACK"
+const QUANTA_REFUSAL_FALLBACK_PROMPT_ENV = "QUANTA_REFUSAL_FALLBACK_PROMPT"
+
+type OptionalPortEnv = Readonly<Record<string, string | undefined>>
+
+type OptionalPortBase = Pick<
+  AgentConfig,
+  | "llm"
+  | "signal"
+  | "modelCandidates"
+  | "fastApplyFallback"
+  | "fastApplyMerge"
+  | "effortClassifier"
+  | "roleModelResolver"
+  | "sessionId"
+> &
+  Partial<AgentConfig>
+
+// Delegate to the canonical SSOT gate reader (`@/shared#gateOn`) so the whole
+// optional-ports family (fast-apply / effort-auto / mailbox / batch / introspect
+// / followup / code-mode) accepts the SAME vocabulary as every other gate —
+// `=1` AND `=on` (and `true`/`yes`) all activate. Previously this was a strict
+// `=== "on"`, which silently ignored `=1` (the followup-task footgun). Superset:
+// the value `"on"` still activates, unset is still OFF.
+const envGateOn = (env: OptionalPortEnv, key: string): boolean => gateOn(env, key)
+
+const resolveModelPort = (base: OptionalPortBase, modelId: string): LLMPort | null => {
+  if (base.llm.model === modelId) return base.llm
+  return base.modelCandidates?.find((candidate) => candidate.id === modelId)?.port ?? null
+}
+
+const resolveSessionId = (base: OptionalPortBase): string => base.sessionId ?? crypto.randomUUID()
+
+const roleModelResolverOf = (base: OptionalPortBase): RoleModelResolver | undefined => {
+  return base.roleModelResolver
+}
+
+export const wireOptionalAgentPorts = <T extends OptionalPortBase>(
+  base: T,
+  // REQUIRED — the composition root (apps/host/runner) passes its already-loaded
+  // env so this slice never reads `process.env` itself (slice-boundary
+  // invariant). Pass `{}` for a hermetic wire (every `=on` gate stays off).
+  env: OptionalPortEnv,
+): T => {
+  let next = base
+
+  if (envGateOn(env, QUANTA_FAST_APPLY_ENV)) {
+    const roleModelResolver = roleModelResolverOf(next) ?? defaultRoleModelResolver()
+    if (next.roleModelResolver === undefined) {
+      next = { ...next, roleModelResolver } as T
+    }
+    if (next.fastApplyFallback === undefined) {
+      const defaultModel = next.llm.model
+      if (defaultModel !== undefined && defaultModel.length > 0) {
+        const parentSessionId = resolveSessionId(next)
+        next = {
+          ...next,
+          fastApplyFallback: createFastApplyFallback({
+            roleResolver: roleModelResolver,
+            defaultModel,
+            sideConversation: {
+              dispatch: async (req) => {
+                const llm = resolveModelPort(next, req.model)
+                if (llm === null) return { ok: false, text: "" }
+                const result = await dispatchSideConversation(
+                  {
+                    parentSessionId,
+                    question: req.prompt,
+                    model: req.model,
+                  },
+                  {
+                    resolveLlm: () => llm,
+                    resolveTools: () => [],
+                    signal: next.signal,
+                  },
+                )
+                return { ok: true, text: result.answer }
+              },
+            },
+          }),
+        } as T
+      }
+    }
+  }
+
+  // jun-7-misc 06 (ADR ≥0497) — model-based fast-apply MERGE rung. STRICT gate
+  // (`runtimeConfig().fastApplyMerge`, `QUANTA_FAST_APPLY_MERGE === "1"`) — NOT
+  // the loose `=on` vocabulary the other gates use — so the composition root
+  // flips EXACTLY the same knob the consumer (`edit` tool) reads and the
+  // runtime-config strict-fold tests already pin. BOTH the strict gate AND a
+  // configured apply-model (`runtimeConfig().fastApplyModel`) are required: the
+  // apply call must run against the operator-chosen cheap model, never the main
+  // chat model (which would defeat the cost win), so an empty/absent model id ⇒
+  // NO port (byte-identical default-OFF). Caller-override-precedence (ADR-0332):
+  // a pre-set `fastApplyMerge` is preserved verbatim.
+  next = wireFastApplyMerge(next)
+
+  if (next.effortClassifier === undefined && envGateOn(env, QUANTA_EFFORT_AUTO_ENV)) {
+    next = {
+      ...next,
+      effortClassifier: createEffortClassifier(),
+    } as T
+  }
+
+  // T08 — model-refusal recovery (fork/neutralize + re-prompt). Default-OFF:
+  // unset ⇒ `next` returned verbatim (the loop terminates a refusal exactly as
+  // before). Caller-override-precedence: a pre-set `refusalFallback` is kept.
+  next = wireRefusalFallback(next, env)
+
+  // R3 audit-H production wire for the subagent mailbox. Default-OFF (the
+  // tier-1 builder still returns [] when `subagentMailbox` is undefined). Env
+  // gate `QUANTA_SUBAGENT_MAILBOX=on` flips it on with the per-sender DoS cap
+  // BAKED IN — the audit-H R2 contract becomes a property of every production
+  // wiring instead of a knob a downstream caller might forget to set.
+  if (next.subagentMailbox === undefined && envGateOn(env, QUANTA_SUBAGENT_MAILBOX_ENV)) {
+    next = { ...next, subagentMailbox: createDefaultSubagentMailbox() } as T
+  }
+
+  // RFC jun-6-code-mode (Phase 1) — wire the `code_cell` per-cell dispatch-port
+  // FACTORY behind `QUANTA_CODE_MODE=1`. Default-OFF byte-identical when unset.
+  next = wireCodeCellDispatch(next, env)
+
+  // RFC-02/04 — subagent batch + introspect + followup tool gates. Extracted
+  // so this function stays under biome's cognitive-complexity cap. Each gate is
+  // default-OFF (`=on` only); unset ⇒ `next` returned verbatim (byte-identical).
+  // MUST run BEFORE wireCloseoutCritic: a subagent tool gate (e.g. followup,
+  // seeded `=on` by apps/cli) can CREATE `next.subagent` here, and the critic's
+  // reviewer is materialized FROM `config.subagent` — so the critic wire has to
+  // observe the FINAL subagent state, not the pre-gate one.
+  next = wireSubagentToolGates(next, env)
+
+  // P12 — wire the REAL `closeout-critic` port behind `QUANTA_CLOSEOUT_CRITIC`.
+  // Default-OFF byte-identical when unset; gate ON but no reviewer subagent
+  // available ⇒ no port ⇒ the loop fails open (byte-identical completion). This
+  // is the GENUINE final transform (after the subagent gates above), so a
+  // `config.subagent` absent here is the real end state.
+  // GAP 10 — item-lifecycle stream projector. The GENUINE final transform: it
+  // decorates `config.stream` so every emitted AgentEvent ALSO yields its
+  // item_started/updated/completed lifecycle events (host UIs that render
+  // per-item progress). Default-OFF (`QUANTA_ITEM_LIFECYCLE` unset ⇒ the stream
+  // is returned unwrapped, byte-identical).
+  //
+  // QUANTA_WEB_AGENT_STATE — wrap the (post-lifecycle) stream so the 9
+  // agent-state events ALSO fan out to `config.onAgentState`. Composed LAST so
+  // it observes the SAME stream the loop actually emits onto (including any
+  // lifecycle-derived events). Installed ONLY when the comp-root set
+  // `onAgentState` (gate ON); absent ⇒ the stream is returned verbatim
+  // (byte-identical default-OFF).
+  // T01 — wrap the (post-lifecycle) stream so a per-run {@link ItemStreamProjector}
+  // fans its fine-grained item cores onto `config.onAgentState` as `item.*`
+  // observations (web agent-state plane). Composed INSIDE `wireAgentStateTap` so
+  // both taps observe the SAME loop stream; default-OFF when `QUANTA_ITEM_STREAM`
+  // is unset OR no `onAgentState` sink (byte-identical).
+  return wireAgentStateTap(
+    wireItemStreamTap(wireItemLifecycleStream(wireCloseoutCritic(next, env), env), env),
+    env,
+  )
+}
+
+/**
+ * T01 — wrap `base.stream` so a per-run {@link ItemStreamProjector} feeds the
+ * SAME `onAgentState` sink with `item.*` observations. Installed ONLY when BOTH
+ * `QUANTA_ITEM_STREAM` is on AND a sink is present (the web-daemon comp-root sets
+ * `onAgentState` only under `QUANTA_WEB_AGENT_STATE`). Either absent ⇒ `base`
+ * returned verbatim (the projector is never even allocated), proving
+ * byte-identical default-OFF. The base stream emits FIRST + verbatim; a throwing
+ * sink can never break the emit (the item fan-out is observation-only).
+ */
+/**
+ * S2 unified-observability (jul-03) — the plan events the item-stream OWNS once
+ * `QUANTA_ITEM_STREAM` is on. When the item-stream is the owner, plan state
+ * flows as `plan` item cores (from {@link ItemStreamProjector}); the legacy
+ * `plan.*` host-mirror observation MUST be suppressed for these so the web plane
+ * does not double-carry plan state on BOTH `plan.*` AND `item.*` (which would be
+ * a 4th parallel path — the re-fragmentation this whole absorption forbids). Only
+ * the plan trio is owned; every OTHER agent-state observation (mode/tool_progress/
+ * compaction/ratelimit/plan-input) still flows on the host-mirror channel.
+ */
+const ITEM_STREAM_OWNED_PLAN_EVENTS: ReadonlySet<string> = new Set([
+  "plan_created",
+  "plan_updated",
+  "plan_snapshot",
+])
+
+/**
+ * S2 — the agent-state observation for `event`, gated on item-stream ownership.
+ * Returns `null` (suppressed) for the plan trio when `QUANTA_ITEM_STREAM` is on
+ * (the item-stream owns plan) — otherwise the unchanged host-mirror projection.
+ * This is the ONE seam where the two channels are reconciled to a single path.
+ */
+export const projectAgentEventToItemStreamObservationsGated = (
+  event: AgentEvent,
+  env: OptionalPortEnv,
+) => {
+  if (itemStreamEnabled(env) && ITEM_STREAM_OWNED_PLAN_EVENTS.has(event.type)) return null
+  return projectAgentEventToAgentStateObservation(event)
+}
+
+const wireItemStreamTap = <T extends OptionalPortBase>(base: T, env: OptionalPortEnv): T => {
+  const sink = (base as Partial<AgentConfig>).onAgentState
+  if (sink === undefined) return base
+  if (!itemStreamEnabled(env)) return base
+  const source = base.stream
+  if (source === undefined) return base
+  const projector = new ItemStreamProjector()
+  const wrapped: StreamPort = {
+    emit(event: AgentEvent): void {
+      // Base emit FIRST + verbatim — every existing consumer is byte-identical.
+      source.emit(event)
+      for (const item of projector.project(event)) {
+        try {
+          sink.capture({ type: "item_stream", item })
+        } catch {
+          // A throwing sink must never break the base emit or crash the turn.
+        }
+      }
+    },
+  }
+  return { ...base, stream: wrapped } as T
+}
+
+/**
+ * QUANTA_WEB_AGENT_STATE — wrap `base.stream` so each emitted event that is one
+ * of the 9 agent-state types ALSO reaches `base.onAgentState.capture(...)`.
+ *
+ * Cloned from {@link wireItemLifecycleStream}: the base stream emits the event
+ * FIRST + verbatim (so every existing consumer is byte-identical), THEN — only
+ * for the 9 tapped types — the sink is fed. NO-THROW at the fan-out: a throwing
+ * sink can never break the base emit or crash the turn.
+ *
+ * Installed ONLY when `base.onAgentState` is present — the web-daemon comp-root
+ * sets that slot exclusively when `QUANTA_WEB_AGENT_STATE=1`, so an absent slot
+ * ⇒ `base` returned verbatim (the stream is NOT even allocated a wrapper),
+ * proving byte-identical default-OFF. A `base` without a `stream` likewise
+ * passes through unchanged.
+ */
+const wireAgentStateTap = <T extends OptionalPortBase>(base: T, env: OptionalPortEnv): T => {
+  const sink = (base as Partial<AgentConfig>).onAgentState
+  if (sink === undefined) return base
+  const source = base.stream
+  if (source === undefined) return base
+  const wrapped: StreamPort = {
+    emit(event: AgentEvent): void {
+      // Base emit FIRST + verbatim — every existing consumer is byte-identical.
+      source.emit(event)
+      // S2 — gated projection: when the item-stream owns plan (`QUANTA_ITEM_STREAM`
+      // on), the plan trio is suppressed here so it flows ONLY as `item.*` cores
+      // (unify, not a 4th path). Item-stream OFF ⇒ unchanged host-mirror.
+      const observation = projectAgentEventToItemStreamObservationsGated(event, env)
+      if (observation === null) return
+      try {
+        sink.capture(observation)
+      } catch {
+        // A throwing sink must never break the base emit (already done above)
+        // or crash the turn — observation-only, fail-silent.
+      }
+    },
+  }
+  return { ...base, stream: wrapped } as T
+}
+
+/**
+ * GAP 10 — wrap `base.stream` so each emitted event also emits the lifecycle
+ * events the {@link ItemLifecycleTracker} derives. Default-OFF: gate unset (or no
+ * stream) ⇒ `base` returned verbatim. The lifecycle events are emitted on the
+ * SOURCE stream (not the wrapper) so there is no re-entrancy.
+ */
+const wireItemLifecycleStream = <T extends OptionalPortBase>(base: T, env: OptionalPortEnv): T => {
+  if (!itemLifecycleEnabled(env)) return base
+  const source = base.stream
+  if (source === undefined) return base
+  const tracker = new ItemLifecycleTracker()
+  const wrapped: StreamPort = {
+    emit(event: AgentEvent): void {
+      source.emit(event)
+      for (const ev of tracker.track(event)) source.emit(ev)
+    },
+  }
+  return { ...base, stream: wrapped } as T
+}
+
+/**
+ * RFC jun-6-code-mode (Phase 1) — composition-root wire for the `code_cell`
+ * tool's dispatch-port FACTORY. When `QUANTA_CODE_MODE=1` (the SAME knob that
+ * registers the tool via `DefaultToolPorts.codeMode`), set
+ * `AgentConfig.codeCellDispatchFactory` to a factory that, per cell-call-id,
+ * builds the security-critical {@link buildCodeCellDispatchPort} closing over the
+ * LIVE assembled `config` (`base`) + its `permission`. The dispatch seam
+ * (`dispatch.ts`) then calls `codeCellDispatchFactory(toolCallId)` for each
+ * `code_cell` dispatch and surfaces the port on `ctx.codeCellDispatch`.
+ *
+ * SECURITY (RFC §6.1 — structural no-bypass): the port routes EVERY in-cell
+ * `tools.X(args)` through the REAL `dispatchTool` with the SAME `config`/
+ * `permission` the loop holds — a cell is N ordinary gated tool calls. The
+ * factory closes over `base` BY REFERENCE so the gating reflects the exact posture
+ * the turn runs under (no snapshot, no widening). `autoClassifier` is left absent
+ * here (the loop's auto-mode classifier is a per-session object not present on
+ * `AgentConfig`); absent ⇒ in-cell read-only ops do NOT auto-pass, which is
+ * STRICTLY MORE RESTRICTIVE than the direct path — never a bypass.
+ *
+ * Default-OFF byte-identical (RFC §1.2): with `QUANTA_CODE_MODE` unset, `base` is
+ * returned UNCHANGED — no factory slot, and the tool is not registered, so the
+ * QuickJS-WASM module is never instantiated. Caller-override-precedence: a
+ * pre-set `codeCellDispatchFactory` is preserved verbatim.
+ */
+const wireCodeCellDispatch = <T extends OptionalPortBase>(base: T, env: OptionalPortEnv): T => {
+  if (!gateOnStrict(env, QUANTA_CODE_MODE_ENV)) return base
+  if (base.codeCellDispatchFactory !== undefined) return base
+  const config = base as unknown as AgentConfig
+  // `permission` is REQUIRED on the assembled AgentConfig (the loop's live
+  // posture); read it off the config so the in-cell gate matches the turn exactly.
+  const permission = config.permission
+  if (permission === undefined) return base
+  return {
+    ...base,
+    codeCellDispatchFactory: (callId: string) =>
+      buildCodeCellDispatchPort({ config, permission, cellId: callId }),
+    // Phase 2 (FULL tool surface) — a thunk reading the LIVE registry so the
+    // cell binds `tools.<name>` for the agent's ACTUAL registered set (each STILL
+    // re-gated through the dispatch port above). Read lazily at cell-dispatch time
+    // so a tool registered after assembly appears automatically. Caller-override-
+    // precedence: a pre-set thunk is preserved (the spread keeps it below `...base`
+    // only if it was unset — we guard explicitly to mirror the factory above).
+    ...(base.codeCellSurfaceTools === undefined
+      ? { codeCellSurfaceTools: () => config.registry.toolNames() }
+      : {}),
+  } as T
+}
+
+/**
+ * P12 — composition-root wire for the `closeout-critic` PORT (FINDING C). When
+ * `QUANTA_CLOSEOUT_CRITIC` is truthy (the SAME knob that flips
+ * `cfg.closeoutCritic.enabled` via `wireInteractiveKnobs`), inject a REAL
+ * `CloseoutCritic` adapter backed by the EXISTING reviewer subagent
+ * infrastructure (`materializeReviewerAgent`), so the feature is FUNCTIONAL
+ * rather than inert (an enabled-but-portless config always fails open to a
+ * no-op).
+ *
+ * The adapter is DI: the loop never hardcodes a reviewer — it only ever calls
+ * `cfg.closeoutCritic.critic`. Here we ADAPT the reviewer runner into the critic
+ * port shape (request → verdict) by running a read-only review subagent over the
+ * draft final answer + tool history and decoding its JSON reply into an
+ * ADVISORY `CloseoutCriticVerdict` (never blocks completion — see
+ * `closeout-critic.ts`).
+ *
+ * Default-OFF byte-identical (RFC §1.2):
+ *   - env unset / not truthy ⇒ `base` returned UNCHANGED (no port, no slot).
+ *   - knob ON but `config.subagent` absent ⇒ `materializeReviewerAgent` returns
+ *     `undefined` ⇒ NO port wired ⇒ the loop fails open (byte-identical
+ *     completion). Reviewer port CONSTRUCTION failing therefore degrades to the
+ *     existing fail-open path, never a crash.
+ *   - caller-override-precedence (ADR-0332): a pre-set `closeoutCritic.critic`
+ *     is preserved verbatim; we only fill an ABSENT port.
+ *
+ * The knob's `apply` MERGES `{ ...cfg.closeoutCritic, enabled: true }`, so the
+ * port we set here survives the subsequent `enabled` fold (and vice-versa: the
+ * order of the two wires does not matter — each only fills its own slot).
+ */
+/** Process-scoped guard so the "knob on but no reviewer" warning fires AT MOST
+ *  once — `wireOptionalAgentPorts` runs once per surface assembly and can run
+ *  twice on a double-wired path (arg-builder + context-binding), so without this
+ *  the same advisory would repeat. Reset seam for tests. */
+let warnedCloseoutCriticNoReviewer = false
+export const __resetCloseoutCriticWarning = (): void => {
+  warnedCloseoutCriticNoReviewer = false
+}
+
+/** T08 — wire model-refusal recovery behind `QUANTA_REFUSAL_FALLBACK`. OFF /
+ *  unset ⇒ `base` returned verbatim (byte-identical: a refusal terminates the
+ *  turn as before). Caller-override-precedence: a pre-set `refusalFallback`
+ *  (e.g. a host-supplied config or a test) is preserved untouched. The optional
+ *  `QUANTA_REFUSAL_FALLBACK_PROMPT` overrides the built-in re-prompt template;
+ *  blank/whitespace ⇒ the built-in default. */
+const wireRefusalFallback = <T extends OptionalPortBase>(base: T, env: OptionalPortEnv): T => {
+  if (base.refusalFallback !== undefined) return base
+  if (!envGateOn(env, QUANTA_REFUSAL_FALLBACK_ENV)) return base
+  const promptRaw = env[QUANTA_REFUSAL_FALLBACK_PROMPT_ENV]
+  const prompt =
+    promptRaw !== undefined && promptRaw.trim().length > 0
+      ? promptRaw
+      : DEFAULT_REFUSAL_FALLBACK_PROMPT
+  return { ...base, refusalFallback: { enabled: true, prompt } } as T
+}
+
+const wireCloseoutCritic = <T extends OptionalPortBase>(base: T, env: OptionalPortEnv): T => {
+  const raw = env[QUANTA_CLOSEOUT_CRITIC_ENV]
+  if (raw === undefined || !CLOSEOUT_CRITIC_TRUTHY.has(raw)) return base
+  // Caller-override-precedence — never overwrite a host-supplied critic.
+  if (base.closeoutCritic?.critic !== undefined) return base
+  const critic = buildReviewerBackedCloseoutCritic(base as unknown as AgentConfig)
+  // No reviewer subagent available ⇒ NO port ⇒ fail-open (byte-identical).
+  // `wireOptionalAgentPorts` is the FINAL composition transform per surface, so a
+  // `config.subagent` absent HERE is the genuine final state (nothing adds it
+  // later). Surface it once: the operator turned the knob ON but the critic will
+  // silently never fire — a stderr warning makes the inert state visible instead
+  // of a silent no-op. Guarded to once-per-process so a double-wire never spams.
+  if (critic === undefined) {
+    if (!warnedCloseoutCriticNoReviewer) {
+      warnedCloseoutCriticNoReviewer = true
+      logger.warn(
+        `QUANTA_CLOSEOUT_CRITIC is on but no reviewer subagent is configured (config.subagent absent) — the closeout critic will not run. Configure a subagent runner to enable it.`,
+      )
+    }
+    return base
+  }
+  return {
+    ...base,
+    closeoutCritic: { ...base.closeoutCritic, critic },
+  } as T
+}
+
+/** P12 — adapt the EXISTING reviewer subagent (`materializeReviewerAgent`) into
+ *  the {@link CloseoutCritic} port shape. Returns `undefined` when no reviewer
+ *  can be materialized (no `config.subagent`) ⇒ the wire fails open. The adapter
+ *  runs a READ-ONLY review child (`toolFilter` read/grep/glob, `taskKind:
+ *  "review"`) over the draft answer + name-only tool history and decodes its
+ *  reply into an advisory verdict. A failed/garbage child ⇒ a `denied`
+ *  ADVISORY verdict (the host/UI sees the second opinion); it NEVER throws and
+ *  NEVER blocks (the loop ignores the verdict for control flow). */
+const buildReviewerBackedCloseoutCritic = (config: AgentConfig): CloseoutCritic | undefined => {
+  const reviewer = materializeReviewerAgent(config)
+  if (reviewer === undefined) return undefined
+  return async (req): Promise<CloseoutCriticVerdict> => {
+    const result = await reviewer({
+      prompt: closeoutCriticPrompt(req.finalText, req.history),
+      depth: 1,
+      taskKind: "review",
+      toolFilter: ["read", "grep", "glob"],
+      ...(req.signal !== undefined ? { signal: req.signal } : {}),
+    })
+    if (!result.ok) {
+      return {
+        outcome: "denied",
+        rationale: `critic reviewer unavailable: ${result.finalText || "no result"}`,
+        riskLevel: "medium",
+      }
+    }
+    return decodeCloseoutVerdict(result.finalText)
+  }
+}
+
+/** Render the closeout-critic review prompt. Mirrors the guardian-reviewer
+ *  prompt posture but framed for a turn-closeout second opinion: the child
+ *  decides whether the agent's DRAFT final answer is acceptable as the turn's
+ *  conclusion, replying with the same JSON envelope the guardian uses. */
+const closeoutCriticPrompt = (
+  finalText: string,
+  history: ReadonlyArray<{ name: string }> | undefined,
+): string => {
+  const tools =
+    history !== undefined && history.length > 0 ? history.map((h) => h.name).join(", ") : "(none)"
+  return [
+    "You are a second-opinion critic at an agent turn's CLOSEOUT.",
+    "The agent is about to declare the turn complete. Decide whether the draft",
+    "final answer is acceptable as the conclusion, given the tools it ran.",
+    "Respond with JSON only.",
+    "",
+    "Decision rules:",
+    '- return {"outcome":"approved",...} when the draft answer is acceptable to ship.',
+    '- return {"outcome":"denied",...} when the agent should keep working',
+    "  (claims unverified, task incomplete, obvious gap).",
+    "",
+    `Tools invoked this turn: ${tools}`,
+    "Draft final answer:",
+    "```",
+    finalText,
+    "```",
+    "",
+    'Output shape: JSON only: {"outcome":"approved"|"denied","rationale":"string","riskLevel?":"low"|"medium"|"high"}',
+  ].join("\n")
+}
+
+/** Decode the reviewer child's reply into an advisory {@link
+ *  CloseoutCriticVerdict}. Malformed / non-JSON output ⇒ a `denied` advisory
+ *  (surfaced as the second opinion, never a throw — the loop survives any
+ *  reviewer output). NO Zod here (the verdict is advisory-only; a missing field
+ *  degrades to a safe default rather than a hard parse failure). */
+const decodeCloseoutVerdict = (finalText: string): CloseoutCriticVerdict => {
+  let decoded: unknown
+  try {
+    decoded = JSON.parse(finalText)
+  } catch {
+    return { outcome: "denied", rationale: "critic returned non-JSON output", riskLevel: "medium" }
+  }
+  if (typeof decoded !== "object" || decoded === null) {
+    return {
+      outcome: "denied",
+      rationale: "critic returned a non-object reply",
+      riskLevel: "medium",
+    }
+  }
+  const rec = decoded as Record<string, unknown>
+  const outcome = rec.outcome === "approved" ? "approved" : "denied"
+  const rationale =
+    typeof rec.rationale === "string" && rec.rationale.length > 0 ? rec.rationale : "(no rationale)"
+  const riskLevel =
+    rec.riskLevel === "low" || rec.riskLevel === "medium" || rec.riskLevel === "high"
+      ? rec.riskLevel
+      : undefined
+  return {
+    outcome,
+    rationale,
+    ...(riskLevel !== undefined ? { riskLevel } : {}),
+  }
+}
+
+/**
+ * RFC-02 (ADR-0436) + RFC-04 (ADR-0437) — composition-root activation of the
+ * `spawn_batch` / `list_agents` / `followup_task` subagent tools, plus the
+ * introspect dependency ports so the tools are FUNCTIONAL (not just present).
+ *
+ * Three independent env gates (all strict `=on`, all default-OFF):
+ *   - `QUANTA_SUBAGENT_BATCH=on`      ⇒ `subagent.enableBatchSpawn = true`.
+ *   - `QUANTA_SUBAGENT_INTROSPECT=on` ⇒ `subagent.enableIntrospect = true` +
+ *     a shared {@link AgentMetaRegistry} side-table (richer `list_agents` rows).
+ *   - `QUANTA_SUBAGENT_FOLLOWUP=on`   ⇒ `subagent.enableFollowup = true` +
+ *     a shared {@link TurnWakeRegistry} (the TRIGGER substrate the subagent
+ *     runner registers per-child wakers into — this is what makes a followup
+ *     actually wake a child instead of degrading to `cause:"no_waker"`) +
+ *     a {@link createDefaultSubagentMailbox} (the DELIVERY substrate) when the host
+ *     did not already wire one via `QUANTA_SUBAGENT_MAILBOX`.
+ *   - `QUANTA_SUBAGENT_STEER=on` (+ followup) ⇒ `subagent.enableSteer = true` +
+ *     the SESSION steer plane (retention + finalization) so `mode:"steer"` is
+ *     admitted and the child loop runs the post-stream safe-point drain (WS4).
+ *
+ * Because the tier-1 batch builder requires a runner (`config.subagent` must
+ * exist) and the introspect builder joins `config.subagent.taskRegistry`, ANY
+ * enabled gate first ensures the nested `subagent` block exists (an empty `{}`
+ * — the runner-enabling default; byte-identical to `QUANTA_SUBAGENT` on).
+ * Caller-override-precedence (ADR-0332): a pre-set flag / port on `base` is
+ * preserved verbatim.
+ *
+ * Default-OFF byte-identical (RFC §1.2): with every gate unset, `base` is
+ * returned UNCHANGED — no `subagent` block is created, the tier-1 builders see
+ * the flags absent, and the ToolRegistry is byte-identical.
+ */
+/** WS4 — set the followup + steer capability flags on the subagent block. Steer
+ *  rides the followup substrate (controller + child endpoint), so it is only
+ *  meaningful when followup is on. Extracted to keep {@link wireSubagentToolGates}
+ *  under biome's cognitive-complexity cap. */
+const applyFollowupFlags = (
+  subagent: NonNullable<AgentConfig["subagent"]>,
+  wantFollowup: boolean,
+  env: OptionalPortEnv,
+): void => {
+  if (!wantFollowup) return
+  if (subagent.enableFollowup !== true) subagent.enableFollowup = true
+  // WS4 — flip steer from `QUANTA_SUBAGENT_STEER` (+ followup). Default-OFF:
+  // absent ⇒ `enableSteer` unset ⇒ controller `steerEnabled` false + no child
+  // safe-point drain (byte-identical).
+  if (envGateOn(env, QUANTA_SUBAGENT_STEER_ENV) && subagent.enableSteer !== true) {
+    subagent.enableSteer = true
+  }
+}
+
+const wireSubagentToolGates = <T extends OptionalPortBase>(base: T, env: OptionalPortEnv): T => {
+  const wantBatch = envGateOn(env, QUANTA_SUBAGENT_BATCH_ENV)
+  const wantIntrospect = envGateOn(env, QUANTA_SUBAGENT_INTROSPECT_ENV)
+  const wantFollowup = envGateOn(env, QUANTA_SUBAGENT_FOLLOWUP_ENV)
+  if (!wantBatch && !wantIntrospect && !wantFollowup) return base
+
+  let next = base
+  // Any gate needs the runner to exist (batch) / the shared registry to live
+  // (introspect/followup), so ensure the nested `subagent` block is present.
+  // Empty `{}` is the runner-enabling default (== `QUANTA_SUBAGENT` on).
+  const subagent: NonNullable<AgentConfig["subagent"]> = { ...(next.subagent ?? {}) }
+
+  if (wantBatch && subagent.enableBatchSpawn !== true) subagent.enableBatchSpawn = true
+  if (wantIntrospect && subagent.enableIntrospect !== true) subagent.enableIntrospect = true
+  applyFollowupFlags(subagent, wantFollowup, env)
+
+  // ALBB-12 claim 1 (belt-and-suspenders) — env-gated surfaces (daemon/ide/
+  // headless/bench/eval/SDK) reach the introspect builder via THIS wire, NOT the
+  // CLI-pill features seam, so mint the SHARED `TaskRegistry` here too — otherwise
+  // `list_agents`/`followup_task` fail-close to [] (no registry) by construction.
+  // The `buildSubagentBlock` agent/6-tool path ADOPTS a pre-set
+  // `config.subagent.taskRegistry` (subagent.ts), so both spawn into and observe
+  // THIS instance. Caller-override-precedence: never overwrite a host-provided one.
+  if ((wantIntrospect || wantFollowup) && subagent.taskRegistry === undefined) {
+    subagent.taskRegistry = new TaskRegistry()
+  }
+  next = { ...next, subagent } as T
+
+  // Introspect dep — richer `list_agents` rows (depth/label). Optional even
+  // when enabled (absent ⇒ depth=0 + description-derived label). Caller wins.
+  if (wantIntrospect && next.subagentAgentMeta === undefined) {
+    next = { ...next, subagentAgentMeta: new AgentMetaRegistry() } as T
+  }
+
+  // Followup deps — TRIGGER (shared TurnWakeRegistry the runner registers child
+  // wakers into) + DELIVERY (mailbox). Both required for `followup_task` to be
+  // built AND to wake a child (not `no_waker`). Caller-override-precedence.
+  return wantFollowup ? wireFollowupDeps(next) : next
+}
+
+/**
+ * jun-7-misc 06 (ADR ≥0497) — composition-root wire for the model-based
+ * fast-apply MERGE port. Mirrors the {@link createFastApplyFallback} block's
+ * dep-acquisition (role resolver + `dispatchSideConversation` adapter) but for
+ * the MERGE direction (`createFastApplyMerge`), and gates STRICT via
+ * `runtimeConfig().fastApplyMerge` (`QUANTA_FAST_APPLY_MERGE === "1"`).
+ *
+ * Deps obtained at the comp-root (same seams as the fallback block):
+ *   - `roleResolver`: the LIVE `RoleModelResolver` (or a fresh
+ *     `defaultRoleModelResolver()`), ADAPTED into the `"apply"`-role
+ *     {@link ApplyRoleResolverLike} shape. `"apply"` is not a member of the
+ *     resolver's `Role` union, so the adapter forwards to `resolve` (which
+ *     falls through to the supplied `applyModel` for any unconfigured role) —
+ *     i.e. the apply call runs against the operator-set model id, NEVER the
+ *     main chat model.
+ *   - `sideConversation`: the SAME `dispatchSideConversation` adapter the
+ *     fallback uses (host LLM port resolved per-request, read-only tools, the
+ *     turn's signal), closing over the parent session id.
+ *   - `applyModel`: `runtimeConfig().fastApplyModel` (`QUANTA_FAST_APPLY_MODEL`).
+ *
+ * Default-OFF byte-identical (RFC §1.2): gate unset / model absent / model
+ * empty ⇒ `base` returned UNCHANGED (no port, no allocation). This function
+ * builds only the provider port; it deliberately does not invent a
+ * FastApplyMergeReviewSeam from a diff observer. Therefore normal hosts remain
+ * fail-closed before provider dispatch until a review owner is explicitly wired.
+ * A pre-set `fastApplyMerge` is preserved verbatim (caller-override-precedence).
+ */
+const wireFastApplyMerge = <T extends OptionalPortBase>(base: T): T => {
+  if (!runtimeConfig().fastApplyMerge) return base
+  if (base.fastApplyMerge !== undefined) return base
+  const applyModel = runtimeConfig().fastApplyModel
+  // BOTH the strict gate AND a configured apply model are required — absent /
+  // empty ⇒ no port (the merge must never fall through to the main chat model).
+  if (applyModel === undefined || applyModel.length === 0) return base
+
+  let next = base
+  const roleModelResolver = roleModelResolverOf(next) ?? defaultRoleModelResolver()
+  if (next.roleModelResolver === undefined) {
+    next = { ...next, roleModelResolver } as T
+  }
+  // Adapt the real `RoleModelResolver` into the `"apply"`-role duck-type. The
+  // resolver falls through to `applyModel` for the unconfigured `"apply"` role,
+  // so the call binds to the operator-set cheap model, not the chat model.
+  const applyRoleResolver: ApplyRoleResolverLike = {
+    resolve: (role, fallback) =>
+      (roleModelResolver as { resolve: (r: string, f: string) => string }).resolve(role, fallback),
+  }
+  const parentSessionId = resolveSessionId(next)
+  // Capture for the per-request LLM resolution (mirrors the fallback block).
+  const resolverHost = next
+  return {
+    ...next,
+    fastApplyMerge: createFastApplyMerge({
+      roleResolver: applyRoleResolver,
+      applyModel,
+      sideConversation: {
+        dispatch: async (req) => {
+          const llm = resolveModelPort(resolverHost, req.model)
+          if (llm === null) return { ok: false, text: "" }
+          const result = await dispatchSideConversation(
+            {
+              parentSessionId,
+              question: req.prompt,
+              model: req.model,
+            },
+            {
+              resolveLlm: () => llm,
+              resolveTools: () => [],
+              signal: resolverHost.signal,
+            },
+          )
+          return { ok: true, text: result.answer }
+        },
+      },
+    }),
+  } as T
+}
+
+/** Wire the `followup_task` trigger + delivery substrate, preserving any port
+ *  the caller already supplied (ADR-0332). Extracted to keep
+ *  {@link wireSubagentToolGates} under biome's cognitive-complexity cap. */
+const wireFollowupDeps = <T extends OptionalPortBase>(base: T): T => {
+  let next = base
+  if (next.subagentTurnWake === undefined) {
+    next = { ...next, subagentTurnWake: new TurnWakeRegistry() } as T
+  }
+  if (next.subagentMailbox === undefined) {
+    next = { ...next, subagentMailbox: createDefaultSubagentMailbox() } as T
+  }
+  return wireSteerPlane(next)
+}
+
+/**
+ * WS4 (RFC jul-18 §3.5, §4.3) — mint the SESSION-shared steer plane when the
+ * steer capability is on (`subagent.enableSteer`). ONE retention store + ONE
+ * finalization port over the session mailbox, shared by BOTH the delivery
+ * controller (retains on admission) and every child loop (drains + finalizes).
+ *
+ * Default-OFF byte-identical: `enableSteer` unset ⇒ `base` returned verbatim (no
+ * plane allocated ⇒ the `onReceipt` closure never exists). Caller-override-
+ * precedence: a pre-set `steerPlane` is kept.
+ * The receipt sink routes every terminal receipt onto the GLOBAL operator-notice
+ * bus with its `deliveryId`. This gives admission and finalization one observable
+ * correlation key without making UI delivery part of control correctness. A
+ * dedicated transcript event may still layer on top.
+ */
+export const wireSteerPlane = <T extends OptionalPortBase>(base: T): T => {
+  const sub = (base as Partial<AgentConfig>).subagent
+  if (sub === undefined || sub.enableSteer !== true || sub.steerPlane !== undefined) return base
+  const mailbox = (base as Partial<AgentConfig>).subagentMailbox
+  if (mailbox === undefined) return base
+  const stream = (base as Partial<AgentConfig>).stream
+  const retention = makeSteerRetentionStore()
+  const finalization = createSubagentSteerFinalization({
+    store: retention,
+    mailbox: mailbox as unknown as import("./subagent-delivery/controller").DeliveryMailboxPort,
+    // Terminal receipts are correlated with the `deliveryId` returned by
+    // `followup_task`. `emitOperatorNotice` is observational and no-throw; the
+    // finalizer additionally contains any custom sink failure.
+    onReceipt: (r) => {
+      if (r.kind === "degraded") {
+        emitOperatorNotice({
+          severity: "warn",
+          source: "subagent",
+          message: `steer delivery ${r.deliveryId} degraded to ${r.effectiveMode} (${r.reason})`,
+          hint: `delivered via mailbox msg ${r.messageId}`,
+        })
+      } else if (r.kind === "cancelled") {
+        emitOperatorNotice({
+          severity: "info",
+          source: "subagent",
+          message: `steer delivery ${r.deliveryId} cancelled (${r.reason})`,
+        })
+      } else if (r.kind === "failed") {
+        emitOperatorNotice({
+          severity: "error",
+          source: "subagent",
+          message: `steer delivery ${r.deliveryId} failed (${r.reason})`,
+        })
+      } else {
+        emitOperatorNotice({
+          severity: "info",
+          source: "subagent",
+          message: `steer delivery ${r.deliveryId} applied to turn ${r.targetTurnId}`,
+        })
+      }
+      if (stream === undefined) return
+      try {
+        if (r.kind === "applied") {
+          stream.emit({
+            type: "subagent_delivery",
+            phase: "finalized",
+            deliveryId: r.deliveryId,
+            requestedMode: "steer",
+            status: "applied",
+            effectiveMode: "steer",
+            targetTurnId: r.targetTurnId,
+          })
+        } else if (r.kind === "degraded") {
+          stream.emit({
+            type: "subagent_delivery",
+            phase: "finalized",
+            deliveryId: r.deliveryId,
+            requestedMode: "steer",
+            status: "degraded",
+            effectiveMode: "queue",
+            reason: r.reason,
+            messageId: r.messageId,
+          })
+        } else {
+          stream.emit({
+            type: "subagent_delivery",
+            phase: "finalized",
+            deliveryId: r.deliveryId,
+            requestedMode: "steer",
+            status: r.kind,
+            reason: r.reason,
+          })
+        }
+      } catch {
+        // Stream observation cannot change an already-finalized delivery.
+      }
+    },
+    onReceiptError: (error) =>
+      logger.warn("subagent steer receipt sink failed", { error: errMessage(error) }),
+  })
+  return { ...base, subagent: { ...sub, steerPlane: { retention, finalization } } } as T
+}

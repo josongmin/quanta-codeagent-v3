@@ -1,0 +1,87 @@
+id: jun7-manifest-codex-compat
+title: Plugin/skill manifest codex-compat INGEST — strict schemas accept real codex artifacts (ADR-0499)
+section: 9
+subsystem: Skill/plugin manifest — read-only codex-shape ingest normalizer + relaxed-outer/strict-inner schemas
+order: 197
+maturity: L3
+status: new
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [interactive, headless, batch, daemon, ide, ci-bot]
+configurable: integrated
+owners: ["@songmin"]
+labels: ["surface:core", "absorbed:codex", "default-off", "adr-0499"]
+depends_on: []
+config_refs:
+  env: ["QUANTA_MANIFEST_COMPAT"]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 5/6 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "pure internal schema normalizer / parser (ui_surfaces n-a) — no UI affordance on any surface"
+purpose: |
+  quanta claims "Faithful absorption of the Codex plugin layout" but its strict
+  Zod schemas EMPIRICALLY REJECT the real Codex 0.135 artifacts in
+  `.extracted_source`: (1) `plugin.json` `"skills": "./skills/"` is a STRING (schema
+  wants `string[]`); (2) top-level `"repository"` is rejected by `.strict()`;
+  (3) `SKILL.md` uses kebab `allowed-tools:` (YAML BLOCK-LIST) + `user-invocable:`
+  while quanta wants camel `allowedTools`/`userInvocable`, AND `discover.ts` reads
+  only the camel key so a kebab tool-allowlist is SILENTLY DROPPED at scoping time
+  (a safety field vanishing without error).
+
+  Two-layer, strict-opt-in, default-OFF byte-identical INGEST compat:
+  - Layer 1 — pure normalizer (`manifest-compat.ts`): string `skills` → array;
+    kebab→camel rename of ONLY the two enumerated keys (frozen `SKILL_KEBAB_RENAME`
+    = allowed-tools/user-invocable; NOT a generic auto-caser); on a kebab/camel
+    collision the NATIVE camel wins (a broad kebab cannot widen a narrow native).
+  - Layer 2 — relaxed OUTER schema (`PluginManifestCompatSchema` /
+    `SkillFrontmatterCompatSchema`): `.strict()` → `.strip()` (unknown top-level
+    keys DROPPED, never interpreted) + additive optional `repository`
+    (string-URL | {url,type?}) + `userInvocable` default false (conservative) +
+    foreign-ingest defaults for the quanta-only category/stability/allowedTools
+    (skill/experimental/[] — [] grants NO tools). The SECURITY-load-bearing INNER
+    blocks stay `.strict()` UNCHANGED (MCPServerSpec, PluginInterface capabilities
+    enum, allowedTools element shape, Capability enum), so loosening the outer
+    schema CANNOT widen any grant. The strict `splitAndCollect` parser learns the
+    codex `allowed-tools:` block-list via a compat-only lookahead; `discover.ts`
+    renames the kebab key before `declaredAllowedTools`, fixing the silent drop.
+
+  Posture: the Knobs phase shipped `QUANTA_MANIFEST_COMPAT` as `gateOnStrict`
+  (`=== "1"`, default-OFF) — OVERRIDING the ticket §4.c "no knob / always-on"
+  recommendation, because loosening manifest validation is a (safe-by-construction)
+  loosening. Absent the knob every path is byte-for-byte the pre-ticket behavior:
+  codex artifacts still REJECT; quanta-native files parse identically. Operators
+  opt in with `QUANTA_MANIFEST_COMPAT=1`.
+evidence:
+  code:
+    - src/skill/manifest-compat.ts
+    - src/skill/plugin-manifest.ts
+    - src/skill/skill-frontmatter.ts
+    - src/skill/discover.ts
+    - src/skill/plugin-loader.ts
+    - src/shared/runtime-config.ts
+  adrs: ["docs/decisions/0499-manifest-codex-compat-ingest.md"]
+  tests:
+    unit:
+      - tests/unit/manifest-codex-compat-hellgate.test.ts
+    integration: []
+    contract: []
+knobs:
+  - name: QUANTA_MANIFEST_COMPAT
+    where: src/shared/runtime-config.ts (manifestCompat, gateOnStrict === "1") → src/skill parsePluginManifest / parseSkillMarkdown / discover.toSkill
+    default: "false (unset)"
+    purpose: strict opt-in to codex-shape INGEST. Default-OFF ⇒ strict schemas reject codex artifacts exactly as today (byte-identical). ON ⇒ the normalizer renames/coerces SHAPE only (never widens a grant) and the relaxed-outer/strict-inner schemas accept the real codex plugin/skill files.
+deliberate_hold: null
+notes: |
+  jun-7-misc 02. Open-question decisions (conservative): follow the strict
+  default-OFF knob the Knobs phase shipped (NOT the ticket's always-on); native
+  camel wins on kebab/camel collision; `userInvocable` defaults false (no
+  auto-/slash exposure); foreign category/stability/allowedTools default to
+  skill/experimental/[] ([] = no tool grant). Deferred: write-BACK emission
+  (§9.3), speculative Claude `hooks`/`apps` keys (§9.4 — absent from cached codex
+  artifacts; not added without a real artifact), `description: |` block-scalars
+  (§9.5, pre-existing parser limit). Fixtures are the REAL codex artifacts copied
+  hermetically into tests/fixtures/manifest-compat/.

@@ -1,0 +1,42 @@
+id: surface-wire-r2
+title: Per-tool checkpoint wire and identity prompt refresh
+section: 10
+subsystem: REPL surface composition
+order: 73
+maturity: L4
+status: stable
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [interactive]
+configurable: integrated
+config_refs:
+  env: [QUANTA_PER_TOOL_RECORD]
+owners: ["@songmin"]
+labels: ["surface:cli", "tier:2", "default-off"]
+depends_on: [identity-mid-session-prompt-rebuild, repl-slash-ctx-mega-wire]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-07-16"
+  evidence:
+    cli: "One session-scoped SHA checkpoint policy is both dispatch producer and /rewind-tool consumer."
+    web: "No web rewind surface."
+purpose: |
+  QUANTA_PER_TOOL_RECORD selects the canonical granular checkpoint policy. Tool
+  call tags come from the actual dispatch IDs, are bounded, and are cleared on
+  session shutdown. The raw-content recorder and its duplicate registry were
+  removed rather than left as a second recovery path.
+evidence:
+  code:
+    - src/apps/cli/repl/per-tool-checkpoint-wire.ts
+    - src/apps/cli/repl/surface-compose.ts
+    - src/apps/cli/rewind-tool-cmd.ts
+  adrs: [309]
+  tests:
+    unit: [tests/unit/per-tool-checkpoint-hellgate.test.ts, tests/unit/cli/surface-wire-r2-hellgate.test.ts]
+    integration: []
+    contract: []
+knobs: [QUANTA_PER_TOOL_RECORD]
+deliberate_hold: null
+notes: "No raw file-content snapshot store remains."

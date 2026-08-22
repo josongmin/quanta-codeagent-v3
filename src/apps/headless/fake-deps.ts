@@ -105,7 +105,11 @@ export const buildFakeBootstrapDeps = (
     buildMcpSurfaceInfo: () => undefined,
     buildIdleGuards: () => ({
       idleMonitor: { markActive: () => undefined },
-      rejectCounter: { recordAccept: () => undefined, recordDeny: () => 0, shouldAutoExit: () => false },
+      rejectCounter: {
+        recordAccept: () => undefined,
+        recordDeny: () => 0,
+        shouldAutoExit: () => false,
+      },
     }),
   }
 }

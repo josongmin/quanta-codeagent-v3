@@ -1,0 +1,65 @@
+id: eval-tier4-compare
+title: eval Tier-5 — A/B pairwise compare across CLI adapters (quanta/cursor/claude/aider)
+section: 10
+subsystem: eval 앱 Tier-5 — pairwise compare (RFC-0003)
+order: 85
+maturity: L4
+status: stable
+ui_surfaces: [cli]
+monitoring: n-a
+telemetry_keys: []
+modes: [headless, batch]
+configurable: static
+owners: ["@songmin"]
+labels: ["surface:bench", "absorbed:claude-code", "absorbed:cursor"]
+depends_on: [eval-five-tier]
+surface_integration:
+  cli: missing
+  web: missing
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "src evidence not reachable from the interactive CLI entry (src/apps/cli/index.ts) — wired only into other apps (eval/bench/probe/headless) or unwired"
+    web: "cross-CLI pairwise judge spawns external CLIs from the eval app, not in web-daemon; no browser surface"
+purpose: |
+  Tier-5 of the 6-tier eval stack (umbrella id: `eval-five-tier`). The only
+  tier that runs TWO agents on the same prompt and asks an LLM judge to
+  pick a winner (`pairwise-judge.ts`). 4 CLI adapters share the
+  `cli-base.ts` argv-pinning + SIGTERM→SIGKILL grace + stderr-tail
+  truncation pattern: `quanta.ts` (self), `cursor.ts`
+  (`-p <prompt> --output-format text --force`), `claude-code.ts`,
+  `aider.ts` (`--message <prompt> --yes-always --no-auto-commits --no-git
+  --no-stream --no-pretty --no-show-model-warnings`). Each adapter's
+  `available()` returns `{ok:false}` when its CLI is missing, and
+  `runCompare` graceful-skips with bookkeeping (no test failure on
+  missing binary). Parse-failed pairwise verdicts surface as
+  `parseFailed:true` + `winnerIndex:-1` to avoid poisoning tie counts.
+evidence:
+  code:
+    - src/apps/eval/compare/index.ts
+    - src/apps/eval/compare/adapter.ts
+    - src/apps/eval/compare/pairwise-judge.ts
+    - src/apps/eval/compare/adapters/cli-base.ts
+    - src/apps/eval/compare/adapters/cursor.ts
+    - src/apps/eval/compare/adapters/aider.ts
+    - src/apps/eval/compare/adapters/claude-code.ts
+    - src/apps/eval/compare/adapters/quanta.ts
+  adrs: []
+  tests:
+    unit:
+      - tests/unit/eval-pairwise-judge.test.ts
+      - tests/unit/eval-compare-adapters.test.ts
+      - tests/unit/eval-error-channels.test.ts
+    integration:
+      - tests/integration/eval-five-tier-compare-e2e.test.ts
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  Sub-feature of `eval-five-tier` umbrella — separately catalogued because
+  the compare tier is the only one with cross-CLI process spawning, the
+  only one with an adapter contract (`buildArgv` + `available` + timeout),
+  and the only one that produces pairwise verdicts (not per-scenario
+  scores). The 4 adapter files are interchangeable parts of the same
+  port (kept under this entry, not further decomposed) but the tier as
+  a whole has distinct semantics from the other 4 tiers.

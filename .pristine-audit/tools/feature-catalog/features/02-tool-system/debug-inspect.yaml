@@ -1,0 +1,62 @@
+id: debug-inspect
+title: debug_inspect — DAP debugger tool (run under adapter, stop at breakpoint, report stack+vars) (W5)
+section: 2
+subsystem: tool-system
+order: 60
+maturity: L3
+status: stable
+ui_surfaces: [cli, web]
+monitoring: integrated
+modes: [n-a]
+configurable: integrated
+owners: ["@songmin"]
+labels: ["surface:core", "absorbed:claude-code", "high-risk", "default-off", "code-execution"]
+depends_on: []
+surface_integration:
+  cli: full
+  web: full
+  method: audited
+  verified: "2026-06-10"
+  evidence:
+    cli: "DefaultToolPorts.debugTools conditional registration in src/tool/index.ts; gated by cfg.debugTools in host/runtime/agent-arg-builder.ts (same seam as notebook_edit/officeAuthoring)"
+    web: "rides the agent-arg-builder composition the daemon-backed session uses (identical to notebook_edit wiring)"
+purpose: |
+  The marquee genuinely-new (non-inert) absorption from the CC IDE debugger
+  tool family. quanta had zero runtime-state inspection beyond print debugging.
+  `debug_inspect` runs a program under a Debug Adapter Protocol adapter
+  (debugpy for adapter:'python'; explicit adapterCommand for others), stops at
+  the FIRST breakpoint, and reports the call stack + local variables (and an
+  optional evaluated expression). One self-contained call (launch → stop →
+  inspect → terminate); continue/step-across-calls is a documented follow-up.
+
+  Layers (src/tool/debug/): dap-codec (byte-accurate Content-Length framing,
+  multibyte-safe, malformed-resync, NEVER-throws) · dap-client (out-of-order
+  response correlation by request_seq; success:false RESOLVES not rejects) ·
+  inspect-driver (canonical DAP launch handshake; event waiters armed before
+  the first request; every wait timeout- AND abort-guarded) · port (Bun.spawn
+  seam, closed-port DI so tools test against a scripted fake adapter).
+
+  HIGH RISK: launching the adapter EXECUTES the user's program (arbitrary
+  code), so the tool is always-confirm (every call needs approval, like bash)
+  AND default-OFF. NEVER throws — a spawn/protocol/timeout fault collapses to
+  ok:false. Turn-abort tears the session down immediately (no lingering process
+  to the stop timeout).
+tcp_transport: "jun-10 — DebugAdapterPort gained a TCP carrier (spawnTcpDebugAdapter/connectTcpTransport) for socket-based adapters (dlv-dap, vscode-js-debug); same DapClient/inspectViaDap. Real-verified via dlv-dap Go runtime."
+verified_real: "2026-06-10 — TWO real adapters, language-agnostic. (1) debugpy 1.8.21 (Python): 15 e2e incl multibyte-byte-accuracy, deep stack, conditional bp, multi-file cross-file stack, abort-mid-run, never-hit→exited. (2) lldb-dap (C via clang -g): 3 e2e (stack add→main, locals, conditional loop bp). Caught & fixed: launch-sequencing DEADLOCK (debugpy defers launch resp until configurationDone) + terminate-at-breakpoint HANG (lldb-dap never answers terminate while stopped) + presentation-pseudo-var noise."
+evidence:
+  code:
+    - src/tool/debug/tool.ts
+    - src/tool/debug/inspect-driver.ts
+    - src/tool/debug/dap-client.ts
+    - src/tool/debug/dap-codec.ts
+    - src/tool/debug/cdp-inspect.ts
+    - src/tool/debug/cdp-client.ts
+  adrs: [531]
+  tests:
+    unit:
+      - tests/unit/tool/debug/cdp-inspect-hellgate.test.ts
+      - tests/unit/tool/debug/dap-codec.test.ts
+      - tests/unit/tool/debug/dap-client.test.ts
+      - tests/unit/tool/debug/dap-inspect-driver-hellgate.test.ts
+      - tests/unit/tool/debug/debug-inspect-tool-e2e-hellgate.test.ts
+      - tests/unit/tool/debug/debugpy-real-e2e.test.ts

@@ -1,0 +1,70 @@
+id: codex-r2-disk-persistence-and-env-swap
+title: Disk-persistent session registry + env-var swap + cross-machine negative (ADR-0348 / 0351 / 0355)
+section: 9
+subsystem: optional jsonl-backed session resource persistence
+order: 102
+maturity: L3
+status: stable
+ui_surfaces: [n-a]
+monitoring: partial
+modes: [n-a]
+configurable: n-a
+owners: ["@songmin"]
+labels: ["surface:core", "absorbed:codex", "default-off"]
+depends_on:
+  - codex-r2-composition-install-and-registry
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 5/5 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "pure internal persistence backend (env-var swap, jsonl adapter, GC); ui_surfaces n-a, no UI affordance on any surface"
+purpose: |
+  Three-ADR persistence band for ADR-0345 session-resource-registry.
+  ADR-0348 ships the jsonl-backed adapter (per-session
+  `<storageDir>/<sessionId>/{events,prompt-cache}.jsonl + meta.json`,
+  TTL 14d + per-session 50MB cap, path-traversal guard, atomic write
+  via temp+rename, NO-THROW degraded fallback to memory-only on fs
+  failure). ADR-0351 wires the disk adapter into the process-level
+  singleton via the `QUANTA_SESSION_REGISTRY_DISK_DIR` env var (read
+  exactly once at first-call, lazy-init; empty / unset / hosed path ⇒
+  in-memory fallback). ADR-0355 documents the deliberate non-
+  implementation of cross-machine replication with 3 re-open triggers
+  (deployment expansion / user request / competitor parity) + a 3-phase
+  implementation sketch on file.
+evidence:
+  code:
+    - src/agent/session-resource-registry/disk-adapter/types.ts
+    - src/agent/session-resource-registry/disk-adapter/serializer.ts
+    - src/agent/session-resource-registry/disk-adapter/disk-store.ts
+    - src/agent/session-resource-registry/disk-adapter/gc.ts
+    - src/agent/session-resource-registry/global.ts
+  adrs:
+    - docs/decisions/0348-disk-persistent-session-registry.md
+    - docs/decisions/0351-session-registry-disk-env-swap.md
+    - docs/decisions/0355-cross-machine-session-replication.md
+  tests:
+    unit:
+      - src/agent/session-resource-registry/disk-adapter/__tests__/serializer.hellgate.test.ts
+      - src/agent/session-resource-registry/disk-adapter/__tests__/disk-store.hellgate.test.ts
+      - src/agent/session-resource-registry/disk-adapter/__tests__/gc.hellgate.test.ts
+      - tests/unit/session-registry-env-swap-hellgate.test.ts
+    integration: []
+    contract: []
+knobs:
+  - name: env QUANTA_SESSION_REGISTRY_DISK_DIR
+    type: 'string?'
+    default: 'unset (in-memory)'
+    notes: 'Set to a directory path to opt into disk persistence. Read once at process start.'
+  - name: DiskRegistryConfig.ttlMs
+    type: 'number?'
+    default: '14 days'
+    notes: 'Per-session jsonl files expire (GC sweep at getOrCreate).'
+  - name: DiskRegistryConfig.maxSessionBytes
+    type: 'number?'
+    default: '50_000_000 (50 MB)'
+    notes: 'Truncation kicks in on oversize sessions; oldest entries dropped first.'
+deliberate_hold: null
+notes: 'Multi-process flock + sqlite backend (ADR-0353 / ADR-0354) were dispatched in this sprint but API socket failures aborted both worktrees — deferred to a follow-up sprint without partial-state in main. Cross-machine replication (ADR-0355) is a negative decision pending a concrete trigger.'

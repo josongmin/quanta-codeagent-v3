@@ -1,0 +1,47 @@
+id: instrument-shadow-tool-routing
+title: ShadowOdb/Tool instrument wraps + AlertManager routing + Grafana provisioning
+section: 8
+subsystem: metrics export (ADR-0144/0158/0159)
+order: 116
+maturity: L2
+status: stable
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [n-a]
+configurable: partial
+owners: ["@songmin"]
+labels: ["surface:observability", "tier:wrap"]
+depends_on: [metrics-typed-port-slice, otel-sink, isregex-true, promise-race, shadow-odb-port]
+surface_integration:
+  cli: missing
+  web: missing
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "src evidence not reachable from the interactive CLI entry (src/apps/cli/index.ts) — wired only into other apps (eval/bench/probe/headless) or unwired"
+    web: "metrics routed to AlertManager/Grafana provisioning, never to the quanta web frontend"
+purpose: |
+  Closes 24-metric recipe coverage gap from ADR-0159: ShadowOdb 5-method wrap
+  (`shadow.checkpoint.*` / `shadow.rewind.*{target}` / `shadow.diff.*{kind}` /
+  `shadow.restore_partial.*` / `shadow.markVerified.*`) + Tool generic wrap
+  (`tool.call.*{tool, ok}` + `tool.call.duration_ms{tool}`) + `instrumentTools`
+  bulk helper. Operational closeout: AlertManager 3-tier routing config (PagerDuty
+  critical / Slack warning / silent-log info, with inhibit rules to silence noise)
+  + Grafana provisioning manifests (dashboards folder + Prometheus datasource).
+evidence:
+  code:
+    - src/observability/metrics/instrument-shadow.ts
+    - src/observability/metrics/instrument-tool.ts
+  adrs: ["docs/decisions/0160-monitoring-completion.md"]
+  tests:
+    unit:
+      - tests/unit/observability-metrics-instrument-shadow-tool-hellgate.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  Pure forwarding wraps; slice never imports `@/observability` (plane-clean).
+  init/listSnapshots/cleanup intentionally non-instrumented (read-mostly +
+  low ROI). Inhibit rules suppress session-soft when session-hard fires,
+  LlmTtftP95High when LlmFailureRateHigh fires (root-cause-first).

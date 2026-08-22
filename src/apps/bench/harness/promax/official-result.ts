@@ -26,6 +26,8 @@
  * guard into `schema_invalid` — fail closed, exactly like any other drift.
  */
 
+import { errMessage } from "@/shared"
+
 /** Every `final_result` the pinned evaluator is documented to write. */
 export const OFFICIAL_FINAL_RESULTS = [
   "success",
@@ -197,7 +199,7 @@ export const parseOfficialPassRateDocument = (text: string): OfficialDocumentPar
   } catch (error) {
     return {
       ok: false,
-      detail: `evaluator output is not parseable JSON: ${(error as Error).message}`,
+      detail: `evaluator output is not parseable JSON: ${errMessage(error)}`,
     }
   }
   if (!Array.isArray(parsed)) {

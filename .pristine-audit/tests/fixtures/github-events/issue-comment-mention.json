@@ -1,0 +1,25 @@
+{
+  "action": "created",
+  "issue": {
+    "number": 42,
+    "title": "Add streaming retry helper",
+    "pull_request": {
+      "html_url": "https://github.com/owner/repo/pull/42",
+      "url": "https://api.github.com/repos/owner/repo/pulls/42"
+    },
+    "body": "Initial PR body"
+  },
+  "comment": {
+    "id": 9001,
+    "body": "@quanta please take a look",
+    "author_association": "COLLABORATOR",
+    "user": { "login": "alice", "type": "User" }
+  },
+  "repository": {
+    "id": 7777,
+    "name": "repo",
+    "full_name": "owner/repo",
+    "owner": { "login": "owner", "type": "User" }
+  },
+  "sender": { "login": "alice", "type": "User" }
+}

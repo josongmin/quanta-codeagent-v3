@@ -522,19 +522,40 @@ describe("PMX-05 display — three rates always adjacent, zero denominators unav
   test("the three rates are ADJACENT in every rendering", () => {
     const section = canonicalSection()
     const display = formatOfficialGradeTotals(section.totals)
+    // Non-vacuity control: the three rendered rate strings are DISTINCT, so
+    // "the row carrying this rate" is unambiguous and the adjacency claim below
+    // cannot be satisfied by a single row that happens to match all three.
+    expect(new Set([display.official_valid_rate, display.coverage, display.raw_rate]).size).toBe(3)
     for (const surface of [
       renderOfficialGradeCliLines(section).join("\n"),
       renderOfficialGradeMarkdown(section),
     ]) {
-      const valid = surface.indexOf(display.official_valid_rate)
-      const coverage = surface.indexOf(display.coverage)
-      const raw = surface.indexOf(display.raw_rate)
-      expect(valid).toBeGreaterThanOrEqual(0)
-      expect(coverage).toBeGreaterThan(valid)
-      expect(raw).toBeGreaterThan(coverage)
-      // Nothing but whitespace/separators between the first and the last.
-      const between = surface.slice(valid, raw)
-      expect(between.split("\n").length).toBeLessThanOrEqual(4)
+      const rows = surface.split("\n")
+      const rowOf = (rate: string): number => {
+        const at = rows.findIndex((row) => row.includes(rate))
+        expect(at).toBeGreaterThanOrEqual(0)
+        return at
+      }
+      const valid = rowOf(display.official_valid_rate)
+      const coverage = rowOf(display.coverage)
+      const raw = rowOf(display.raw_rate)
+      // STRUCTURE, not a size budget: the three rates occupy three CONSECUTIVE
+      // rows in this exact order. A renderer that interleaves anything between
+      // them (a state tally, the evaluator line, a table header) — or that drops
+      // one rate so the honest denominator can be read without its coverage —
+      // moves these offsets off 1. Everything else in the surface may grow
+      // freely without touching this assertion.
+      expect([coverage - valid, raw - coverage]).toEqual([1, 1])
+      // ...and the rate rows are the ONLY thing on their own rows that carries a
+      // rate: no row outside the block repeats one of the three campaign rates.
+      const carriers = rows.flatMap((row, i) =>
+        [display.official_valid_rate, display.coverage, display.raw_rate].some((r) =>
+          row.includes(r),
+        )
+          ? [i]
+          : [],
+      )
+      expect(carriers).toEqual([valid, coverage, raw])
     }
   })
 

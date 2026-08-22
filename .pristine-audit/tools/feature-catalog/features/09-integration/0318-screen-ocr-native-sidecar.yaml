@@ -1,0 +1,99 @@
+id: screen-ocr-native-sidecar
+title: Screen OCR native sidecar — Swift CLI (ScreenCaptureKit + Vision) for Tauri shell
+section: 9
+subsystem: Native sidecar (ADR-0318)
+order: 30
+maturity: L2
+status: new
+ui_surfaces: [tauri]
+monitoring: n-a
+modes: [interactive]
+configurable: integrated
+config_refs:
+  env: [SCREEN_OCR_DEBUG]
+owners: ["@songmin"]
+labels: ["surface:tauri", "platform:macos"]
+depends_on: []
+surface_integration:
+  cli: na
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "no src evidence (pure docs/tooling/tests) — no interactive-CLI code"
+    web: "Tauri native-shell sidecar (ScreenCaptureKit/Vision), not browser web-frontend; no web affordance"
+purpose: |
+  Tiny Swift CLI binary at native/screen-ocr/ that the Tauri shell (Worker D)
+  spawns as a sidecar to feed quanta two host-desktop signals: (1) the list of
+  on-screen windows the user can target, (2) a single captured frame of a
+  chosen window plus its OCR text. Three subcommands — `list-windows`,
+  `capture --window-id N [--include-image]`, `check-permission` — all emit
+  single-line snake_case JSON on stdout followed by exactly one `\n`. Errors
+  produce a typed envelope `{"error":{"code":"PERMISSION_DENIED|WINDOW_NOT_FOUND
+  |CAPTURE_FAILED|OCR_FAILED|INVALID_ARGS|UNKNOWN","message":"..."}}` plus a
+  closed exit-code table (0=ok, 1=unknown, 2=invalid-args, 3=permission,
+  4=window-not-found, 5=capture/OCR). Stack: Swift 5.9, Swift Package Manager,
+  apple/swift-argument-parser 1.3.0+, platform pin `.macOS(.v13)`, frameworks
+  ScreenCaptureKit + Vision + Foundation + AppKit + CoreGraphics/Media/Video
+  + ImageIO + UniformTypeIdentifiers. NO UIKit import (mac-only by construction).
+  OCR config locked verbatim: VNRecognizeTextRequestRevision3 + accurate +
+  usesLanguageCorrection + languages ["ko-KR","en-US"]; bboxes normalized 0..1
+  and y-FLIPPED at the boundary from Vision's bottom-left-origin convention to
+  the top-left-origin convention the rest of quanta uses; lines sorted
+  top-to-bottom-left-to-right with a 0.01 y-tolerance band. Capture: SCContentFilter
+  on the single target SCWindow, SCStreamConfiguration BGRA + matched
+  width/height + captureResolution=.best (macOS 14+), single SCStreamOutput
+  handler that resolves the first valid CMSampleBuffer → CGImage and
+  immediately stops the stream, 5s wall-clock timeout. `--include-image` flag
+  embeds the captured frame as base64 PNG in `image_png_b64`; when absent the
+  field is JSON `null` (NOT omitted — distinguishes "no image requested" from
+  "field missing"). Permission model: `check-permission` calls only
+  `CGPreflightScreenCaptureAccess()`; it MUST NOT trigger the system prompt
+  (which fires automatically the first time the host process reads
+  `SCShareableContent.current`). Build: `cd native/screen-ocr && swift build -c
+  release` → binary at `.build/release/screen-ocr`. Worker D copies the release
+  binary to `apps/tauri-shell/binaries/screen-ocr`. L2 — sidecar is complete
+  and unit-tested for its JSON wire shapes but not yet wired into the Tauri
+  shell (Worker D track) and not yet exercised end-to-end against a live
+  TCC-granted host.
+evidence:
+  code:
+    - native/screen-ocr/Package.swift
+    - native/screen-ocr/README.md
+    - native/screen-ocr/Sources/ScreenOcr/App.swift
+    - native/screen-ocr/Sources/ScreenOcr/Commands/ListWindowsCommand.swift
+    - native/screen-ocr/Sources/ScreenOcr/Commands/CaptureCommand.swift
+    - native/screen-ocr/Sources/ScreenOcr/Capture/WindowEnumerator.swift
+    - native/screen-ocr/Sources/ScreenOcr/Capture/ScreenCapture.swift
+    - native/screen-ocr/Sources/ScreenOcr/OCR/VisionOCR.swift
+    - native/screen-ocr/Sources/ScreenOcr/Permissions/ScreenRecordingPermission.swift
+    - native/screen-ocr/Sources/ScreenOcr/JSON/Models.swift
+    - native/screen-ocr/Sources/ScreenOcr/JSON/Output.swift
+  adrs: [318]
+  tests:
+    unit:
+      - native/screen-ocr/Tests/ScreenOcrTests/ModelsTests.swift
+    integration: []
+    contract: []
+knobs:
+  - name: SCREEN_OCR_DEBUG
+    default: 'unset'
+    purpose: 'When set to "1", the sidecar emits debug logs to STDERR (stdout stays JSON-only).'
+deliberate_hold:
+  reason: |
+    Live ScreenCaptureKit + Vision integration is intentionally not unit-tested:
+    it requires a TCC Screen Recording grant and a real display server. The
+    end-to-end smoke lives on Worker D's Tauri shell track; this slice only
+    guarantees the wire-shape contract.
+  promotion_path: Worker D Tauri shell wires the binary as a sidecar + records a manual end-to-end smoke against a granted host → promote to L3.
+notes: |
+  Worker E of the 2026-05-26 multi-surface 4-worker sprint. First non-Rust
+  native binary in the repo — placed at native/screen-ocr/ rather than crates/
+  because Swift Package Manager isn't compatible with Cargo's workspace. Built
+  to be a drop-in replaceable sidecar: if a future ADR swaps to a different
+  capture/OCR stack, only this binary needs to change as long as the JSON wire
+  contract holds. Negative invariants (locked in ADR-0318): mac-only (no UIKit
+  ever); single-frame only (no streaming v1); stateless one-shot (every
+  invocation re-resolves SCShareableContent); stdout JSON-only (debug to
+  stderr behind SCREEN_OCR_DEBUG=1); check-permission MUST NOT prompt; no env
+  knobs besides SCREEN_OCR_DEBUG; no Tesseract or non-Apple OCR engine ever.

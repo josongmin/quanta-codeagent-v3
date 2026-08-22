@@ -1,0 +1,71 @@
+id: plugin-lifecycle-manager
+title: PluginLifecycleManager — auto-restart + heartbeat (ADR-0162)
+section: 9
+subsystem: Plugin isolation (ADR-0162) — crash recovery + liveness probe
+order: 162
+maturity: L4
+status: stable
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [n-a]
+configurable: integrated
+owners: ["@songmin"]
+labels: ["surface:ipc"]
+depends_on: [plugin-isolated-spawner, plugin-host-wrapper, plugin-dxt-loader, assert-never-exhaustiveness, byte-stable-string-comparator]
+config_refs:
+  env: []
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 2/2 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "pure internal lifecycle/liveness primitive, no browser affordance"
+purpose: |
+  State machine `idle → starting → running ↔ restarting → dead/stopped`.
+  Rolling-window restart counter (default max 3 / 60s); on budget exhaustion
+  → `dead`, no further restart. Heartbeat (default 10s ping cadence + 2-miss
+  threshold = 20s silence → kill+restart cycle); `heartbeatIntervalMs: 0`
+  disables ping entirely (opt-out).
+  Wire methods: `$/ping` notification (host → child), `$/pong` notification
+  (child → host) — LSP-style slash-prefixed so they don't collide with
+  user-defined plugin methods.
+  DI seams: clock + setIntervalImpl + clearIntervalImpl (deterministic test
+  without monkey-patching globals).
+  Typed `LifecycleError.kind` 3-arm: exceeded-restart-budget / stopped /
+  spawn-failed.
+evidence:
+  code:
+    - src/plugin-isolation/lifecycle.ts
+    - src/plugin-isolation/index.ts
+  adrs:
+    - docs/decisions/0162-plugin-process-isolation.md
+  tests:
+    unit:
+      - tests/unit/plugin-isolation-lifecycle-hellgate.test.ts
+      - tests/unit/plugin-isolation-lifecycle.test.ts
+    integration: []
+    contract: []
+knobs:
+  - name: maxRestarts
+    where: src/plugin-isolation/lifecycle.ts (DEFAULT_LIFECYCLE_POLICY)
+    default: 3
+    purpose: max restart attempts within restartWindowMs before dead
+  - name: restartWindowMs
+    where: src/plugin-isolation/lifecycle.ts (DEFAULT_LIFECYCLE_POLICY)
+    default: 60_000
+    purpose: rolling window for restart counter
+  - name: heartbeatIntervalMs
+    where: src/plugin-isolation/lifecycle.ts (DEFAULT_LIFECYCLE_POLICY)
+    default: 10_000
+    purpose: ping cadence (0 = disabled)
+  - name: heartbeatMissThreshold
+    where: src/plugin-isolation/lifecycle.ts (DEFAULT_LIFECYCLE_POLICY)
+    default: 2
+    purpose: consecutive missed pings before declaring child dead
+deliberate_hold: null
+notes: |
+  Why $/ ping/pong? LSP convention for meta methods that the protocol owns
+  (vs user methods which the plugin author chooses). The slash prefix is
+  reserved — plugins must not register handlers for `$/...` notifications.

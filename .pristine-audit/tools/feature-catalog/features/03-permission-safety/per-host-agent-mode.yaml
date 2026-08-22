@@ -1,0 +1,60 @@
+id: per-host-agent-mode
+title: 호스트별 기본 agent-mode (agent-mode-by-host-id 동등물)
+section: 3
+subsystem: 권한 스택 (ADR-0046)
+order: 11
+maturity: L4
+status: stable
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [n-a]
+configurable: integrated
+config_refs:
+  env: [QUANTA_PERMISSION_STATE, QUANTA_HOME]
+owners: ["@songmin"]
+labels: [absorbed:codex, surface:cli]
+depends_on: [permission-store-json, per-thread-permissions, agent-loop-branch-hardening, post-denial-precedence, quanta-home-meta-root]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 5/5 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "pure internal permission precedence primitive (ui_surfaces n-a), resolved silently; no UI affordance on any surface"
+purpose: |
+  **Host-level default** — hostId(SSH_CONNECTION 기반 결정론적 식별자,
+  부재 시 localhost) 단위로 full-access / read-only / custom 기본값을 잡는다.
+  per-thread record가 없을 때만 적용 — 즉 "이 호스트에서 새로 열린 스레드의
+  기본 정책". 원격 SSH 호스트는 read-only, localhost는 full-access를 흔히
+  잡는다.
+
+  Codex `agent-mode-by-host-id`의 v3 대응. ADR-0046 우선순위 4위(per-thread
+  다음, global default 위).
+evidence:
+  code:
+    - src/permission/permission-store.ts
+    - src/permission/per-host-mode.ts
+    - src/permission/policy.ts
+    - src/agent/admissibility-gate.ts
+    - src/shared/runtime-config.ts
+  adrs: [29, 46]
+  tests:
+    unit:
+      - tests/unit/permission-per-thread.test.ts
+      - tests/unit/admissibility-gate.test.ts
+    integration:
+      - tests/integration/permission-stack-gate-e2e.test.ts
+    contract: []
+knobs:
+  - name: QUANTA_PERMISSION_STATE
+    default: 'undefined'
+    purpose: '(no description)'
+  - name: QUANTA_HOME
+    default: 'undefined'
+    purpose: '(no description)'
+deliberate_hold: null
+notes: |
+  resolveHostId(env)는 순수 함수 — DNS 조회 없음. SSH_CONNECTION이 설정된
+  경우 `${user}@${hostname}`, 아니면 `localhost`. `custom` sentinel은
+  "다른 곳에 정책 정의" 신호로 fall-through.

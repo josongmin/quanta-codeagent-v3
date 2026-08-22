@@ -140,9 +140,30 @@ const validateDisposition = (
   return failures
 }
 
+/**
+ * The evaluator half. FAIL-CLOSED on a receipt that has no evaluator AT ALL.
+ *
+ * `meta` is typed, but this function sits on three paths that hand it UNTYPED
+ * bytes — construction from an adapter, `parseOfficialGradeReceipt` over a
+ * persisted document, and the box transport over whatever a grading box wrote.
+ * An absent or null `evaluator` key therefore reached `meta.evaluatorId` and
+ * threw a TypeError: the campaign crashed instead of producing the typed refusal
+ * that the same document's every other defect produces, so an operator got a
+ * stack trace where a `evaluator_meta_invalid` belonged.
+ */
 const validateEvaluator = (
   meta: OfficialGradeEvaluatorMeta,
 ): readonly OfficialGradeReceiptFailure[] => {
+  if (typeof meta !== "object" || meta === null || Array.isArray(meta)) {
+    return [
+      {
+        code: "evaluator_meta_invalid" as const,
+        message:
+          `evaluator metadata is ${meta === null ? "null" : `a ${Array.isArray(meta) ? "array" : typeof meta}`}, ` +
+          "not a record — a receipt with no evaluator names no grader, so nothing about it is replayable",
+      },
+    ]
+  }
   const bad =
     isBlank(meta.evaluatorId) ||
     isBlank(meta.upstreamCommit) ||

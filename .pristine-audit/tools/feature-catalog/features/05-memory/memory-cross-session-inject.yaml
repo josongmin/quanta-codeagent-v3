@@ -1,0 +1,105 @@
+id: memory-cross-session-inject
+title: ADR-0282 — Cross-session memory inject (selectForInject → prompt section)
+section: 5
+subsystem: 장기 메모리 — E3 productization (cross-session 자동 누적, Phase B)
+order: 282
+maturity: L3
+status: stable
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [interactive, headless, batch, daemon, ide, ci-bot]
+configurable: integrated
+owners: ["@songmin"]
+labels: ["surface:core", "default-off", "absorbed:cursor", "absorbed:codex"]
+depends_on: [memory-auto-trigger, phase1-stage1-store]
+config_refs:
+  env: [QUANTA_MEMORY_AUTO]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 5/5 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "pure internal session-start prompt injector (src/memory/cross-session/) — emits a system-prompt MemorySystemBlock server-side, no user-visible affordance on any surface"
+purpose: |
+  Read path for ADR-0281: at session start, `CrossSessionInjector.
+  selectForInject({maxBytes})` reads the stage1 store, filters to
+  `selectedForPhase2 && usageCount ≥ 1`, drops empty/whitespace and
+  non-string summaries, applies optional kindFilter (first-token
+  match on `rolloutSummary`), sorts oldest-first by `generatedAt`,
+  and greedy-accumulates until the next candidate would overflow
+  `maxBytes` (deterministic: STOPs, does NOT skip to try smaller
+  subsequent entries — keeps the prompt-cache key stable).
+
+  `renderMemorySection(entries)` returns a `MemorySystemBlock`
+  (structural mirror of `@/llm` `SystemBlock` — the memory slice
+  cannot import `@/llm` per RFC §3.1 / biome override) which the
+  composition root one-to-one-translates at the plug site. Empty
+  input ⇒ `{text:"", cache:true}` (caller filters before injecting).
+
+  Default-OFF: when `assembleMemoryAuto(env)` returns null
+  (`QUANTA_MEMORY_AUTO !== "on"`), the host never constructs the
+  injector and the system prompt is byte-identical.
+
+  Boundary cases sealed by hellgate:
+    - kindFilter=[] ⇒ matches NOTHING (explicit hard NO; use absent
+      for "no filter")
+    - maxBytes ≤ 0 ⇒ returns []
+    - maxBytes exactly equal to cumulative bytes ⇒ accept the
+      candidate (`>` cap test, not `>=`)
+    - oldest-first ordering deterministic on tie-break (V8 stable
+      sort)
+evidence:
+  code:
+    - src/memory/cross-session/port.ts
+    - src/memory/cross-session/types.ts
+    - src/memory/cross-session/default-injector.ts
+    - src/memory/cross-session/prompt-section.ts
+    - src/memory/cross-session/index.ts
+  adrs:
+    - docs/decisions/0282-cross-session-memory-inject.md
+    - docs/decisions/0281-memory-auto-trigger.md
+    - docs/decisions/0207-stage1-outputs-persist.md
+  tests:
+    unit:
+      - tests/unit/memory-consolidator-hook-hellgate.test.ts
+    integration: []
+    contract: []
+knobs:
+  - name: InjectOpts.maxBytes
+    default: 'DEFAULT_INJECT_MAX_BYTES=8192'
+    purpose: 'hard cap on Σ rolloutSummary bytes'
+  - name: InjectOpts.kindFilter
+    default: 'undefined'
+    purpose: 'optional first-token startsWith filter (OMIT semantics)'
+  - name: DEFAULT_INJECT_MAX_BYTES
+    default: 'undefined'
+    purpose: '8 KiB'
+  - name: MEMORY_SECTION_HEADER
+    default: 'undefined'
+    purpose: '''## Cross-session memory (auto)'''
+  - name: DefaultCrossSessionInjectorOpts.stage1Store
+    default: 'undefined'
+    purpose: 'Stage1OutputsStore (sibling read port)'
+deliberate_hold:
+  reason: |
+    Untrusted-aggregate wrapper around the injected section is NOT yet
+    applied here — Phase 2's `memory_summary.md` already has it; the
+    cross-session inject runs ALONGSIDE that, not inside it. A
+    follow-up ADR adds the wrapper if/when entries can carry
+    user-written fragments (today they are LLM-distilled only).
+  promotion_path: |
+    1. Decide wrapper format (likely identical to memory_summary.md's
+       `<UNTRUSTED_AGGREGATE>…</UNTRUSTED_AGGREGATE>`);
+    2. Apply in `renderMemorySection` (1-line wrap) when a config
+       flag opts in;
+    3. Adversarial test for prompt-injection (a malicious
+       rolloutSummary that says "ignore previous instructions" must
+       NOT change behavior).
+notes: |
+  Pairs with `memory-auto-trigger` (ADR-0281 — the write half).
+  Prompt-cache friendly: `cache:true` on the produced block keeps the
+  Anthropic breakpoint stable. Oldest-first sort is deliberate (NEW
+  entries appearing at the END of the prefix invalidate fewer cache
+  hits than NEW entries appearing at the START).

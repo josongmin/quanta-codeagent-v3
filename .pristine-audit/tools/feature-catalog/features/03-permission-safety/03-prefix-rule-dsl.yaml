@@ -1,0 +1,41 @@
+id: prefix-rule-dsl
+title: Prefix-rule allowlist DSL + 3-layer (project > user > system) + default-deny opt-in
+section: 3
+subsystem: 승인 표면 — 외부화된 텍스트 DSL
+order: 2
+maturity: L4
+status: stable
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [interactive, headless, batch, daemon, ide, ci-bot]
+configurable: static
+owners: ["@songmin"]
+labels: [absorbed:codex, absorbed:claude-code, surface:cli, default-off]
+depends_on: [rules-matcher]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 5/5 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "pure internal allowlist DSL parser/matcher/store policy; no UI affordance on any surface"
+purpose: 'Codex `~/.codex/rules/default.rules` (1060 prefix rules, allow only) 흡수 + 3축 확장: (a) action enum allow|deny|ask (Codex는 allow만), (b) 3-layer precedence project > user > system (project 짧은 prefix가 system 긴 prefix override), (c) noMatchPolicy=fallthrough|deny opt-in. matcher는 longest-prefix + space-boundary (탭은 boundary 아님 — 휴리스틱 회피). parser는 충돌 액션 시 RuleParseError(lineNumber) — silent dedupe는 동일 action만.'
+evidence:
+  code:
+    - src/rules/types.ts
+    - src/rules/parser.ts
+    - src/rules/matcher.ts
+    - src/rules/store.ts
+    - src/rules/index.ts
+  adrs: [31]
+  tests:
+    unit:
+      - tests/unit/rules/matcher.test.ts
+      - tests/unit/rules/parser.test.ts
+      - tests/unit/rules/store.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: 'admissibility-gate(ADR-0026) 결선은 follow-up. matched/ask → ADR-0029 reviewer 3-tier로 escalate. matched/deny → DenialMemory sticky 적용.'

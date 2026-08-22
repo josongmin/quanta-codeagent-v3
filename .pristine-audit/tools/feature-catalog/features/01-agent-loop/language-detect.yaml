@@ -1,0 +1,47 @@
+id: assistant-language-auto-detect
+title: 어시스턴트 언어 자동감지 — respond-in-<lang> notice (N1, absorb:cursor whichlang)
+section: 1
+subsystem: 프롬프트 동적 컨텍스트 (per-turn dynamic slot)
+order: 60
+maturity: L2
+status: stable
+ui_surfaces: [cli, web]
+monitoring: n-a
+modes: [n-a]
+configurable: integrated
+owners: ["@songmin"]
+labels: ["surface:core", "absorbed:cursor", "default-off"]
+depends_on: []
+surface_integration:
+  cli: full
+  web: full
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "prompt is assembled by @/agent buildTurnContext in the shared loop reachable from src/apps/cli/index.ts; the dynamic-slot notice is part of every turn's system prompt"
+    web: "same buildTurnContext path drives the daemon-backed web session; the per-turn dynamic context is surface-agnostic"
+purpose: |
+  Absorb Cursor `whichlang` / assistant-language-tracking. A PURE,
+  deterministic Unicode-script classifier (src/agent/language-detect) counts
+  meaningful chars by script, takes the argmax (NO magic threshold — a VALIDATED
+  proxy, not a heuristic), and maps script→language+confidence (Hangul→ko,
+  kana→ja, Han+no-kana→zh, Cyrillic→ru, …; Latin→en/low since it is ambiguous).
+  `buildLanguageHint` gates on QUANTA_LANG_DETECT and, on a high-confidence
+  non-English signal from the latest user message, injects a per-turn
+  "respond in <lang>" notice into buildDynamicContext's DYNAMIC slot. Gate OFF /
+  English / ambiguous (Latin) ⇒ NO notice ⇒ byte-identical prompt.
+config_refs:
+  env: [QUANTA_LANG_DETECT]
+evidence:
+  code:
+    - src/agent/language-detect/index.ts
+    - src/agent/prompt.ts
+    - src/agent/loop/context-assembler.ts
+  adrs: [530]
+  tests:
+    unit:
+      - tests/unit/agent/language-detect.test.ts
+      - tests/unit/agent/language-hint-prompt-hellgate.test.ts
+    integration:
+      - tests/integration/language-detect-turn-context-consumer-e2e.test.ts
+    contract: []

@@ -65,11 +65,7 @@ describe("RFC02-3 A8 — closed-union drift guards", () => {
     // Compile-side: the array `satisfies readonly ModelRouteKind[]`. Runtime
     // side: a value of the union must be a member (no missing/extra members).
     const universe = new Set<string>(ALL_MODEL_ROUTE_KINDS)
-    const sample: ModelRouteKind[] = [
-      "operator_retry",
-      "provider_fallback",
-      "scheduler_reroute",
-    ]
+    const sample: ModelRouteKind[] = ["operator_retry", "provider_fallback", "scheduler_reroute"]
     for (const k of sample) expect(universe.has(k)).toBe(true)
     expect(ALL_MODEL_ROUTE_KINDS).toHaveLength(sample.length)
   })

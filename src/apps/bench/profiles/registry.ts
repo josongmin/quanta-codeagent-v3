@@ -64,6 +64,11 @@ const proGradeEvaluator =
  *  ssh round-trip ⇒ those bootstraps are byte-identical to pre-T4. */
 const noBoxSetup = async (): Promise<void> => {}
 
+/** ADMITS every box. The three shipped SWE families grade on the shared box
+ *  image, so there is nothing for them to refuse — and admission issues no
+ *  command, so their provisioning sequence is byte-identical. */
+const admitsAnyBox = (): void => {}
+
 const VERIFIED_PROFILE: DatasetFamilyProfile = {
   family: "verified",
   reportPartitionKey: "verified",
@@ -73,6 +78,7 @@ const VERIFIED_PROFILE: DatasetFamilyProfile = {
   gradeEvaluator: () => officialGradeEvaluator("verified"),
   harnessSpec: (input) => stockOrLiveHarnessSpec(false, input),
   onBoxEnvPrefix: () => "",
+  admitBox: admitsAnyBox,
   setupBox: noBoxSetup,
   preflight: () => {},
 }
@@ -92,6 +98,7 @@ const LIVE_PROFILE: DatasetFamilyProfile = {
   // keying only off the name made the fix inert (audit r2 BUG#1).
   harnessSpec: (input) => stockOrLiveHarnessSpec(true, input),
   onBoxEnvPrefix: () => "",
+  admitBox: admitsAnyBox,
   setupBox: noBoxSetup,
   preflight: () => {},
 }
@@ -116,6 +123,7 @@ const PRO_PROFILE: DatasetFamilyProfile = {
   // Pro-specific wiring is the on-box env prefix + bootstrap, not the pip-spec.
   harnessSpec: (input) => stockOrLiveHarnessSpec(false, input),
   onBoxEnvPrefix: (input) => buildProEnvPrefix(input.env, input.datasetPath),
+  admitBox: admitsAnyBox,
   setupBox: setupProHarness,
   preflight: (input) =>
     assertProDatasetShape({

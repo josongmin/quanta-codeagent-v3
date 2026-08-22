@@ -137,17 +137,28 @@ const accumulateRelaunchAttempt = (
   absorbFullRemoteResult(acc, result)
 }
 
-const remainingRelaunchInstances = (
-  expected: readonly string[],
-  acc: RelaunchAccumulator,
-  receipts: readonly OfficialGradeReceipt[],
-): readonly string[] => {
-  const covered = coveredInstances({
+/**
+ * Instances the four LEGACY BUCKETS vouch for, with NO receipt union.
+ *
+ * Split out because the two consumers need different things: the retry loop
+ * wants the union (an instance the grader spoke about must not be re-run), while
+ * a REFUSED campaign merge must not credit coverage to the receipts it just
+ * rejected. See `resolveRelaunchCoverage`'s `legacyCovered`.
+ */
+const legacyCoveredInstances = (acc: RelaunchAccumulator): ReadonlySet<string> =>
+  coveredInstances({
     resolved: [...acc.resolved],
     unresolved: [...acc.unresolved],
     errored: [...acc.errored],
     emptyPatch: [...acc.emptyPatch],
   })
+
+const remainingRelaunchInstances = (
+  expected: readonly string[],
+  acc: RelaunchAccumulator,
+  receipts: readonly OfficialGradeReceipt[],
+): readonly string[] => {
+  const covered = legacyCoveredInstances(acc)
   // UNION with receipt coverage: an instance the official grader spoke about is
   // covered even when its state has no legacy bucket (`ambiguous`), and an
   // instance in a legacy array is covered even when no receipt was carried. The
@@ -244,6 +255,9 @@ export const runWithRelaunch = async (
     expected: opts.expected,
     receipts,
     legacyMissing: remaining,
+    // NOT `remaining`'s complement: that set already counted the receipts as
+    // coverage, and the refusal path is precisely where they may not be.
+    legacyCovered: [...legacyCoveredInstances(acc)],
   })
   if (coverage.officialGradeFailures !== undefined) {
     opts.onLog?.(
@@ -412,24 +426,35 @@ const finalizeFullRemoteRun = (args: {
   return args.result
 }
 
+/**
+ * PMX-04: resolve the family's DECLARED bootstrap at the LAUNCH ROOT (which owns
+ * the typed run config) and carry it onto the box config, so `ec2-lifecycle.ts`
+ * executes it without ever naming a family. `undefined` for every family without
+ * one ⇒ the returned config is byte-identical to the input.
+ *
+ * Exported so the ONE resolution point is directly assertable: the defect it
+ * repairs was positional, not logical — the resolution used to sit AFTER the
+ * idle-box early return, so a warm box reached the attach path with
+ * `remoteBootstrap` undefined and a REUSED box ran neither the pinned checkout
+ * nor the on-box hash verification while the report still claimed the pin.
+ * `attachBox` now refuses an unknown bootstrap state, so a regression here is
+ * fail-closed (a loud reuse refusal) rather than a silent skipped pin.
+ */
+export const withResolvedFamilyBootstrap = (
+  cfg: FullRemoteConfig,
+  runConfig: BenchRunConfig,
+): FullRemoteConfig => {
+  const bootstrap = cfg.remoteBootstrap ?? familyRemoteBootstrap(runConfig)
+  return { ...cfg, ...(bootstrap !== undefined ? { remoteBootstrap: bootstrap } : {}) }
+}
+
 const attachOrProvisionFullRemoteBox = async (
   cfg: FullRemoteConfig,
   runConfig: BenchRunConfig,
 ): Promise<BoxSession> => {
-  // PMX-04: resolve the family's DECLARED bootstrap HERE (the root owns the typed
-  // run config) and carry it onto the box config, so `ec2-lifecycle.ts` executes
-  // it without ever naming a family. `undefined` for every family without one ⇒
-  // provisioning is byte-identical.
-  //
-  // Resolved BEFORE the idle-box early return, not after: a warm box reached the
-  // attach path with `remoteBootstrap` undefined, so a REUSED box ran neither the
-  // pinned checkout nor the on-box hash verification while the report still
-  // claimed the pin. `attachBox` now refuses an unknown bootstrap state, which
-  // makes this ordering load-bearing rather than cosmetic.
-  const boxCfg: FullRemoteConfig = (() => {
-    const bootstrap = cfg.remoteBootstrap ?? familyRemoteBootstrap(runConfig)
-    return { ...cfg, ...(bootstrap !== undefined ? { remoteBootstrap: bootstrap } : {}) }
-  })()
+  // BEFORE the idle-box early return — both the attach and the provision branch
+  // must see the resolved bootstrap.
+  const boxCfg = withResolvedFamilyBootstrap(cfg, runConfig)
   const idle = await findIdleBox(boxCfg).catch(() => undefined)
   if (idle !== undefined) return attachBox(boxCfg, idle)
   const live = await countLiveBoxes(boxCfg)

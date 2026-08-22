@@ -1,0 +1,47 @@
+id: plugin-manifest
+title: 플러그인 매니페스트 (.quanta-plugin/plugin.json + .mcp.json + skills/)
+section: 6
+subsystem: 플러그인 — 매니페스트 + 디스커버리
+order: 10
+maturity: L4
+status: stable
+ui_surfaces: [none]
+monitoring: n-a
+modes: [interactive, headless, batch, daemon, ide, ci-bot]
+configurable: static
+owners: ["@songmin"]
+labels: ["surface:core", "tier:1", "absorbed:codex"]
+depends_on: [skill-admin-enforcement, skill-audit-log, skill-7-scope-tiering, skill-registry-precedence, quantaskillsdir]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 2/3 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "pure manifest loader/discovery primitive, no user-visible affordance anywhere"
+purpose: |
+  `.quanta-plugin/plugin.json` (strict Zod) + 옵셔널 `.mcp.json` + `skills/<name>/SKILL.md`
+  3-surface 레이아웃. Codex `.codex-plugin/` 패턴을 v3 path 명으로 흡수 (RFC §1.6). loader는
+  cause-typed PluginManifestError 분기 — silent fallback 0. discovery는 depth 4 cap +
+  node_modules/.git/dot-dir skip + lex sort.
+evidence:
+  code:
+    - src/skill/plugin-manifest.ts
+    - src/skill/plugin-loader.ts
+    - src/skill/index.ts
+  adrs: [39]
+  tests:
+    unit:
+      - tests/unit/plugin-manifest-schema.test.ts
+      - tests/unit/plugin-loader.test.ts
+    integration:
+      - tests/integration/plugin-discovery.test.ts
+      - tests/integration/plugin-discovery-hell-e2e.test.ts
+      - tests/integration/plugin-x-skill-cross-hell-e2e.test.ts
+    contract: []
+knobs: []
+deliberate_hold:
+  reason: 'plugin runtime loader 호스트 통합 미완. discovery/manifest 파서는 production-ready지만 buildSessionFeatures가 plugin tree를 자동 enroll하는 경로는 follow-up. integration 테스트로 calling contract 검증됨.'
+  promotion_path: 'runner/assemble/plugin.ts builder 도입 → buildSessionFeatures 안에서 discoverPlugins(repoRoot) → 각 plugin의 skills/ 트리를 skill registry에 inject. CLI는 default-ON으로 활성 (RFC §1.2).'
+notes: 'Capability closed enum (Interactive/Read/Write). plugin runtime loader 호스트 통합은 follow-up.'

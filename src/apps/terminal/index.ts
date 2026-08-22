@@ -1,5 +1,6 @@
 /**
- * `@/apps/terminal` — the `terminal` ToolSurface composition root (RFC jun-29 §13, spec S2/S3).
+ * `@/apps/terminal` — the `terminal` ToolSurface composition root (TB21-06 TC-1/TC-1a, spec S2/S3 —
+ * `docs/plans/aug-21-bench-terminal-2-1/TB21-06-transferred-contracts.md`).
  *
  * The BRAIN-side entry-point that ASSEMBLES the terminal surface: the BASE-free
  * {@link buildTerminalTools} registry (`container_exec` + `pty_*` — both default-ON on this surface,
@@ -11,7 +12,7 @@
  *
  * Backend-agnostic BY CONSTRUCTION: this root sees only the `ContainerExec` / `PtySessionPort`
  * ports (a JSON-line duplex to a hands process, or — later — a docker-exec backend). NO
- * orchestrator / Harbor / Docker specifics leak here (upholds the RFC §10 naming invariant), and
+ * orchestrator / Harbor / Docker specifics leak here (upholds the TC-1 ownership-boundary naming invariant), and
  * there is NO host-execution path on this surface (spec S3: host bash is never registered).
  *
  * This module is the SINGLE production caller of {@link buildTerminalTools},
@@ -41,7 +42,7 @@ export interface TerminalSurfaceDeps {
 export interface TerminalSurface {
   /** The BASE-free terminal tool registry (`container_exec` + `pty_*`, per the wired ports). */
   tools: ReturnType<typeof buildTerminalTools>
-  /** Operator capability guidance injected alongside the tools (RFC §4.5 / §13 #5 — closes the
+  /** Operator capability guidance injected alongside the tools (TB21-06 TC-3 — closes the
    *  exe-not-in-PATH failure). General operator habits, NO answer-key. */
   operatorGuide: string
 }

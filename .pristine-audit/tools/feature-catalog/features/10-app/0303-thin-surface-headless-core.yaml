@@ -1,0 +1,53 @@
+id: thin-surface-headless-core
+title: Thin-surface invariant + headless-core ratchet
+section: 10
+subsystem: Surface governance / architecture rules
+order: 75
+maturity: L3
+status: new
+ui_surfaces: [cli, api]
+monitoring: n-a
+modes: [interactive, headless, batch, daemon, ide, ci-bot]
+configurable: static
+config_refs:
+  env: []
+owners: ["@songmin"]
+labels: ["surface:core", "tier:2", "adr-0303", "governance", "ratchet"]
+depends_on: []
+surface_integration:
+  cli: na
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "no src evidence (pure docs/tooling/tests) — no interactive-CLI code"
+    web: "Pure import-graph governance ratchet, no user-visible UI affordance on any surface."
+purpose: |
+  Codifies the "thin surface, headless core" architecture invariant: the
+  CLI surface owns prompt UX + slash dispatch only; turn execution lives
+  in `@/runner/orchestrate` (host-neutral `runOnce` / `runInteractive`);
+  collaborator assembly lives in `@/runner/assemble`; loop semantics in
+  `@/agent`. A surface-coupling ratchet test
+  (`tests/unit/surface-coupling-ratchet.test.ts`) prevents regressions
+  by counting cross-surface imports (`src/apps/agent/**` → `../cli/*`,
+  `src/apps/cli/internal.ts` → `../agent/*`, etc.) and failing when the
+  count rises. The number is a hard ceiling — lowering is allowed; raising
+  is not.
+evidence:
+  code:
+    - tests/unit/surface-coupling-ratchet.test.ts
+    - docs/ARCHITECTURE.md
+  adrs:
+    - docs/decisions/0303-thin-surface-headless-core.md
+  tests:
+    unit:
+      - tests/unit/surface-coupling-ratchet.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  Sibling to the ADR-0024 slice-isolation policy + ADR-0019 4-surface
+  posture. The ratchet test is the enforcement mechanism, not just
+  documentation — every PR must keep cross-surface imports ≤ the pinned
+  baseline.

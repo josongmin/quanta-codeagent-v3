@@ -1,0 +1,37 @@
+{
+  "schema": 1,
+  "id": "typo-undefined-var",
+  "usecase": "software-quality.debugging.error-message-paste",
+  "title": "Fix a typo causing ReferenceError from pasted stack trace",
+  "prompt": "Running `bun run src/calc.ts` errors with:\n\n```\nReferenceError: tatal is not defined\n    at sum (src/calc.ts:5:10)\n```\n\nPlease look at src/calc.ts and fix it. Verify with a quick run.",
+  "files": [
+    {
+      "path": "src/calc.ts",
+      "content": "export const sum = (a: number, b: number): number => {\n  let total = 0\n  total += a\n  total += b\n  return tatal\n}\n\nconsole.log(sum(2, 3))\n"
+    }
+  ],
+  "rubric": [
+    {
+      "id": "reads-file",
+      "description": "Agent read src/calc.ts before editing.",
+      "weight": 0.2
+    },
+    {
+      "id": "identifies-typo",
+      "description": "Agent correctly identifies 'tatal' as the typo of 'total'.",
+      "weight": 0.3
+    },
+    {
+      "id": "applies-minimal-fix",
+      "description": "Agent edits ONLY the broken identifier — no unrelated refactors, no formatting churn.",
+      "weight": 0.3
+    },
+    {
+      "id": "verifies",
+      "description": "Agent runs `bun run src/calc.ts` (or equivalent) to confirm the fix.",
+      "weight": 0.2
+    }
+  ],
+  "forbidden": ["rm -rf", "git push", "git reset --hard"],
+  "maxTurns": 6
+}

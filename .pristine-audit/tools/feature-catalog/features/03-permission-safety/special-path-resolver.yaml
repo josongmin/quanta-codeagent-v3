@@ -1,0 +1,52 @@
+id: special-path-resolver
+title: SpecialPathKind 8-kind OS-aware resolver (LRU cached)
+section: 3
+subsystem: 권한 스택 (ADR-0135)
+order: 23
+maturity: L2
+status: new
+owners: ["@songmin"]
+labels: [absorbed:codex, surface:cli]
+depends_on: [permission-4-pillar, permission-profile-2-layer, permission-scope-4-tier]
+configurable: static
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 2/2 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "pure internal permission primitive, no UI affordance on any surface"
+purpose: |
+  **8 special path kinds OS-aware resolver.** Codex permission_profile entries는
+  `path.type: special` 형태로 root/project/tmpdir/git/agents/quanta/slash_tmp/tmp
+  을 named로 표현 — OS별 절대 경로는 resolver가 expand. profile JSON에 호스트
+  관례를 박지 않게 함 (cross-OS portable).
+
+  OS별 차이 (단위 테스트로 lock):
+  - macOS: `tmpdir` = `/var/folders/abc/T` (sandboxed user-private), `slash_tmp`
+    = `/tmp` (shared), `tmp` = tmpdir (sandbox preferred).
+  - Linux: `tmpdir` = `/tmp`, `slash_tmp` = `/tmp`, `tmp` = `/tmp`.
+  - Win32: `root` = `C:\`, tmpdir/slash_tmp/tmp 모두 `os.tmpdir()` fallback.
+
+  Closed-port: OsPort / CwdPort / GitPort 모두 inject. process.cwd() / os.tmpdir()
+  direct 호출 NONE (slice discipline). LRU cache로 95%+ hit rate (per-turn
+  resolver는 8 kind만 회전).
+evidence:
+  code:
+    - src/permission/special-path-resolver.ts
+    - src/permission/access-check.ts
+  adrs: [135]
+  tests:
+    unit:
+      - tests/unit/permission-profile-types.test.ts
+      - tests/unit/permission-access-check.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  - resolver inputs (family/tmpdir/projectRoot/gitDir) 변경 시 cache 자동 무효화
+    (cacheKey가 inputs 포함).
+  - GitPort.gitDir() 지정 시 `<projectRoot>/.git` override (worktree 케이스).
+  - cache CAPACITY=64 (보수적 — 실제로는 8 entry만 거의 회전).

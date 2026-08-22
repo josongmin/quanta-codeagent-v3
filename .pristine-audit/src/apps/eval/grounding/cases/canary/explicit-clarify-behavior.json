@@ -1,0 +1,31 @@
+{
+  "schema": 2,
+  "id": "explicit-clarify-behavior",
+  "usecase": "persistent-context.conversation-state.thread-grounding",
+  "history": [
+    {
+      "role": "assistant",
+      "kind": "directive",
+      "threadId": "prompt_rules",
+      "mentionedFileIds": ["src/agent/prompt.ts", "src/agent/loop.ts"],
+      "text": "Active thread prompt_rules still has two candidate files: src/agent/prompt.ts and src/agent/loop.ts."
+    }
+  ],
+  "targetUtterance": "파일이 애매하면 먼저 물어봐.",
+  "gold": {
+    "activeThreadId": "prompt_rules",
+    "referentId": null,
+    "intent": "clarify_request",
+    "scope": "specific_file",
+    "shouldClarify": true,
+    "confidence": "high"
+  },
+  "bucket": "reference",
+  "severity": "high",
+  "stateContract": {
+    "activeThreadId": "prompt_rules",
+    "visibleThreadIds": ["prompt_rules"],
+    "candidateFileIds": ["src/agent/prompt.ts", "src/agent/loop.ts"]
+  },
+  "candidateThreadIds": ["prompt_rules"]
+}

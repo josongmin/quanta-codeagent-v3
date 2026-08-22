@@ -1,0 +1,40 @@
+id: identity-mode-variant
+title: ADR-0198 Identity slot — per-mode system prompt identity lines
+section: 1
+subsystem: System prompt assembly
+order: 198
+maturity: L2
+status: stable
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [n-a]
+configurable: integrated
+owners: ["@songmin"]
+labels: [absorbed:cursor, absorbed:claude, absorbed:codex, surface:core]
+depends_on: []
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 5/5 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "pure internal prompt-assembly slot, no user-visible UI affordance on any surface"
+purpose: |
+  Cursor + Claude + Codex 3-vendor 강신호 흡수. quanta 단일 "You are
+  Quanta..." 시스템 prompt를 mode (default/plan/review/audit/onboarding)
+  별 identity 라인으로 분기. `buildSystemPrompt(opts.identity?)` 슬롯에
+  splice (persona 직전). closed-port `IdentityProvider.identityFor(mode)`
+  + default 5-mode table + caller override. 빈 배열 미주입 시 byte-identical.
+evidence:
+  code:
+    - src/agent/identity/port.ts
+    - src/agent/identity/default-identities.ts
+    - src/agent/identity/lookup.ts
+    - src/agent/identity/index.ts
+    - src/agent/prompt.ts
+  adrs: [198]
+  tests:
+    unit: [tests/unit/agent/identity-hellgate.test.ts]
+knobs: []
+notes: 'Default-OFF byte-identical when opts.identity omitted; assembly wires defaultIdentityProvider().'

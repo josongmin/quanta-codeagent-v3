@@ -1,0 +1,55 @@
+id: refusal-stop-reason-branching
+title: ADR-0242 stop_reason 8-arm typed router (Cursor 3.2.16) — surface/abort/hitl/continue
+section: 1
+subsystem: Recovery FSM / Stop-reason classification
+order: 242
+maturity: L2
+status: new
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [n-a]
+configurable: integrated
+owners: ["@songmin"]
+labels: [absorbed:cursor, surface:core]
+depends_on: [refusal-stop-reason]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 8/8 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "pure internal stop_reason classification policy (closed-port router in recovery FSM), ui_surfaces n-a; no user-visible affordance on any surface"
+purpose: |
+  Cursor 3.2.16 흡수 — provider `stop_reason` 8-arm vocabulary 전체
+  (end_turn/tool_use/max_tokens/refusal/pause_turn/error/content_filtered/
+  guardrail_intervened) 를 closed-port 타입 라우터로 분기. quanta 기존
+  `decideOnAssembled` 은 3-arm 만 다루고 5 arm 은 silently 빈 turn 분기로
+  떨어졌음. StopReasonPolicy 포트 + Cursor 라우팅 표 verbatim default policy +
+  no-op policy + recovery.ts `decideFromStopPolicy` 헬퍼 + loop.ts `runTurn`
+  4줄 wire. default-OFF: `config.stopReasonPolicy` 미주입 시 zero allocation
+  short-circuit (optional-chain), 기존 typed `refusal` outcome (ADR-0076 Gap-1)
+  + 모든 e2e/hellgate 그대로. 옵트인 시 `surface`/`abort`/`hitl` 4-arm action
+  중 `abort`/`hitl` 은 `[stop-abort]`/`[stop-hitl]` 태그 접두사로 미래 HITL
+  re-router 인식면 제공.
+evidence:
+  code:
+    - src/agent/stop-reason/types.ts
+    - src/agent/stop-reason/port.ts
+    - src/agent/stop-reason/default-policy.ts
+    - src/agent/stop-reason/no-op-policy.ts
+    - src/agent/stop-reason/index.ts
+    - src/agent/recovery.ts
+    - src/agent/loop.ts
+    - src/agent/types.ts
+  adrs: [242, 120, 76, 73]
+  tests:
+    unit:
+      - tests/unit/agent/stop-reason-hellgate.test.ts
+knobs: []
+notes: |
+  33 hellgate / 1679 expects. 4-arm StopAction × 8-arm StopReasonKind 클로즈드
+  유니언, 미지 값은 `continue` 로 fall-through 해 레거시 `decideOnAssembled`
+  가 final word 유지. 정책 ON 시 refusal → surface 로 라우팅돼 typed refusal
+  outcome 대신 error outcome 으로 흐름. 이는 옵트인 trade-off (Cursor parity)
+  이며 HELL-SR-15 두 번째 케이스가 absent ⇒ 레거시 refusal outcome 회귀 펜스.

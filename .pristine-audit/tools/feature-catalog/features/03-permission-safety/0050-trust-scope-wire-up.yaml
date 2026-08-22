@@ -1,0 +1,74 @@
+id: trust-scope-wire-up
+title: Trust-scope registry wire-up (Phase C) — persistent grant memory ask-skip
+section: 3
+subsystem: HITL 게이트 — 그랜트 기억 / ask-skip (ADR-0050)
+order: 50
+maturity: L2
+status: stable
+ui_surfaces: [n-a]
+monitoring: n-a
+telemetry_keys: ["quanta.hitl"]
+modes: [interactive, headless, batch, daemon, ide, ci-bot]
+configurable: integrated
+owners: ["@songmin"]
+labels: [absorbed:claude-code, surface:cli, security-touched]
+depends_on: [183-safety-net-green, agent-loop-branch-hardening, agent-dispatch-core, deny-and-steer-verb, hitl-4-tier-gate]
+config_refs:
+  env: []
+surface_integration:
+  cli: full
+  web: partial
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 3/3 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "Grant memory gates the approval path that renders (approval.requested EscalationCard), but there is no web grant gesture; the yaml flags Tauri always-allow buttons as out-of-scope, so the persistence operates invisibly with only the gated approval card rendering."
+purpose: |
+  TrustScope enum(always_allow | project | workspace | session | once_only | deny)을 위한
+  registry + admissibility-gate 단일 wire-up. ask-branch는 onConfirm 직전에
+  registry.hasGrant(projectKey, { tool, actionKey? }) 조회로 단락. once_only는 hasGrant 내부에서
+  positive-and-consume(게이트는 if 1중첩 유지). deny-scoped grant는 ask-skip으로 취급하지 않음 —
+  registry POSITIVE_SCOPES set이 deny 제외. AgentConfig.trustScope?: { registry, projectKey }
+  미설정 시 byte-identical(레거시 onConfirm 경로 그대로). always-confirm tier는 의도적으로
+  short-circuit 안 함(이 tier의 핵심이 batch-approval 우회).
+
+  **L4 promotion (2026-05-23)** — persistent file-backed registry
+  (`createPersistentTrustScopeRegistry`) wired into `@/permission`. SOTA reference:
+  Claude Desktop `safeStorage.encryptString` allowlist cache w/ 2h TTL + scope cascade.
+  We ship: (a) `~/.quanta/grants.json` global state file with the project's
+  existing JsonStateFile engine (atomic rename + read-reconcile-MERGE for concurrent
+  writers); (b) per-project overlay `.quanta/project-grants.json` consulted FIRST so
+  a project can tighten user-global grants; (c) per-grant `ttlMs` honored at read
+  time (stale records skip the cascade); (d) command-pattern surface
+  (`leading-token sequence`, e.g. `"npm,install"`) absorbed from Cursor
+  ClassifiedCommand; (e) cascade `exact-actionKey → command-pattern → tool-only`
+  with most-specific wins + explicit `deny` short-circuit at every layer; (f)
+  `hydrate()` reads both files at session start; (g) gate's `trustScopeGrants` now
+  passes the same `extractShellCommand`-derived actionKey the reviewer uses, so a
+  per-command persisted grant matches the live call shape.
+evidence:
+  code:
+    - src/permission/trust-scope.ts
+    - src/permission/trust-scope-store.ts
+    - src/agent/admissibility-gate.ts
+  adrs: [50]
+  tests:
+    unit:
+      - tests/unit/permission/trust-scope-wire.test.ts
+      - tests/unit/permission/trust-scope-store-hell.test.ts
+      - tests/unit/admissibility-gate.test.ts
+    integration:
+      - tests/integration/trust-scope-e2e.test.ts
+      - tests/integration/trust-scope-persistent-e2e.test.ts
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  @/permission 슬라이스 격리 유지: trust-scope.ts/trust-scope-store.ts는 @/agent import 0,
+  gate는 type-import만. RFC §1.2 default-OFF byte-identical 보장.
+
+  Remaining out-of-scope follow-ups (not blocking L4): OS-keyring encryption-at-rest
+  (currently plain-text JSON under user home — Claude Desktop SOTA path), Tauri UI
+  "always allow project / workspace / session" gesture buttons (CLI gesture is the
+  host's `onConfirm` calling `registry.grant(projectKey, ...)` in the integration
+  test pattern), org-blocklist API (SaaS backend, deferred per promotion-plan).

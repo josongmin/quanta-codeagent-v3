@@ -152,9 +152,7 @@ export const escalationScopeFields = (
  *  confirm (main agent) has no `teamEscalation` ⇒ this returns `{}` ⇒ the field
  *  is omitted ⇒ the minted approval is byte-identical to every main-agent
  *  approval. `scope` is forwarded only when the escalation carried one. */
-export const escalationActorFields = (
-  action: ToolAction,
-): Pick<PendingApprovalView, "actor"> => {
+export const escalationActorFields = (action: ToolAction): Pick<PendingApprovalView, "actor"> => {
   const team = action.teamEscalation
   if (team === undefined) return {}
   const scope = team.scope

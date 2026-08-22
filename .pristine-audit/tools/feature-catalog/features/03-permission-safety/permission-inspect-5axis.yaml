@@ -1,0 +1,66 @@
+id: permission-inspect-5axis
+title: 5-axis permission inspector (stateless, slash-facade)
+section: 3
+subsystem: Permission stack 시각화 (read-only surface)
+order: 76
+maturity: L4
+status: new
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [n-a]
+configurable: integrated
+owners: ["@songmin"]
+labels: [absorbed:codex, surface:cli, security-touched]
+depends_on: [permission-store-json, permission-policy-engine, per-host-agent-mode, per-thread-permissions, cr3-rule-catalog-ssot-fu1-rule-per-concern-invert]
+surface_integration:
+  cli: full
+  web: missing
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 4/4 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "user mechanism is a CLI slash facade; web SlashPalette commands are prefill stubs (B2) with no real handler, output rides no rendered event"
+purpose: |
+  Slash-command 표면(`/permission explain <tool>`)을 위한 stateless inspector. 동일
+  슬라이스의 `inspector.ts`(store-기반, per-thread "지금 어떻게 결정될까")와 보완:
+  본 모듈은 store 없이 "정책 SHAPE 가 어떻게 생겼는가" 를 5-axis 분해로 반환한다.
+
+  5-axis precedence (UI pipeline render 순서):
+    1. read-only-bypass — 읽기 전용 tool 은 HARD_DENY 외 모든 축 우회
+    2. hard-deny        — 보안 경계 (description-only 노출, regex 원문 금지)
+    3. hitl-tier        — 4-tier 오버레이 (hand-off-required/always-confirm/pre-approval-ok/none)
+    4. mode-policy      — default | acceptEdits | bypass | auto 결정 매트릭스
+    5. global-default   — 마지막 fallback (ask)
+
+  핵심 API: `inspectPermission(tool, ctx, meta?) → PermissionInspection` 은 frozen
+  5-axis array(`PERMISSION_AXES`) 를 따라 단계별 `AxisStep[]` + 4-mode `ModePolicyMatrix`
+  + 매치된 HARD_DENY 규칙(`MatchedHardDenyRule[]` — `name` + `description` 뿐, `pattern` 제외)
+  을 반환. 보조 `finalDecisionFor(inspection, mode)` 는 단일 mode 의 최종 verdict 만 추출.
+  `listHardDenyRuleDescriptors()` 는 슬래시 summary 용으로 description-only 카탈로그 노출.
+
+  Slice discipline: `@/permission` 내부에서만 sibling + `@/shared` import (HITLTier SSOT).
+  `@/tool` 의존 ZERO — 호출자(apps/cli slash renderer)가 `isReadOnly`/`hitlTier`/`shellCommand`
+  메타데이터를 옵셔널 주입; 미매핑 tool 은 `mapped: false` 로 graceful degrade.
+
+  HARD_DENY description-only invariant 는 jailbreak surface 차단의 핵심 — `pattern: RegExp`
+  필드는 의도적으로 drop. `evaluateStack` 우선순위와 mirror 하므로 평가 의미는 admissibility-
+  gate SSOT(ADR-0026) 와 영원히 일치 (실제 evaluate 호출은 정책 단독, 본 모듈은 시각화).
+evidence:
+  code:
+    - src/permission/inspect.ts
+    - src/permission/inspector.ts
+    - src/permission/policy.ts
+    - src/permission/index.ts
+  adrs: [26, 29, 30, 46, 47]
+  tests:
+    unit:
+      - tests/unit/permission/inspect.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  대 3 권한 inspector 의 second-pump — 기존 `inspector.ts`(store-based, ADR-0046)와
+  orthogonal. 표면 wiring(`/permission explain` slash + Tauri dashboard)은 별도 트랙.
+  보안: `MatchedHardDenyRule` 은 `name` + `description` 만 반환; raw RegExp 패턴은
+  ABSOLUTELY 노출 안 함 (jailbreak-crafter enumeration 차단).

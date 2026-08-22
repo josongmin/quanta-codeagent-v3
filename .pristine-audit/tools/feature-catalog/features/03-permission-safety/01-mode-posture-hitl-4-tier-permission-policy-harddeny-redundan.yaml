@@ -1,0 +1,40 @@
+id: mode-posture-hitl-4-tier-permission-policy-harddeny-redundan
+title: mode-posture → HITL 4-tier → permission policy (HARD_DENY redundant guard) → pre
+section: 3
+subsystem: Admissibility-gate SSOT (ADR-0026)
+order: 1
+maturity: L5
+status: stable
+ui_surfaces: [cli]
+monitoring: integrated
+telemetry_keys: ["quanta.hitl", "quanta.tool.call.status"]
+modes: [interactive, headless]
+configurable: integrated
+owners: ["@songmin"]
+labels: [surface:cli, security-touched, tier:1]
+depends_on: [agent-dispatch-core, agent-loop-branch-hardening, secret-redaction-content-plane, 183-safety-net-green, deny-and-steer-verb]
+config_refs:
+  env: []
+surface_integration:
+  cli: full
+  web: partial
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 4/4 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "gate emits approval requests that DO reach web via approval.requested + approval.respond (session-hooks.ts:410), but 4-tier HITL fidelity collapses to approve|deny 2-verb on EscalationCard"
+purpose: '단일 함수 runAdmissibilityGate로 추출 — 순서: mode-posture → HITL 4-tier → permission policy → pre_tool_use hook. dispatch.ts는 thin caller.'
+evidence:
+  code:
+    - src/agent/admissibility-gate.ts
+    - src/agent/dispatch-helpers.ts
+    - src/agent/dispatch-types.ts
+    - src/agent/dispatch.ts
+  adrs: []
+  tests:
+    unit: [tests/unit/hitl-tier-dispatch.test.ts, tests/unit/admissibility-gate.test.ts, tests/unit/dispatch.test.ts]
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: + dispatch-helpers.ts + dispatch-types.ts (구조 SSOT)

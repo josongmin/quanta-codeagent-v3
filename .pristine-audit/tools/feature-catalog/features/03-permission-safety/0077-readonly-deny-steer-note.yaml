@@ -1,0 +1,62 @@
+id: readonly-deny-steer-note
+title: Readonly deny-steer note — admissibility isReadonly flag appended to steer message
+section: 3
+subsystem: 권한 게이트 — readonly-aware deny-steer (Plane-C of ADR-0077 trio)
+order: 78
+maturity: L4
+status: stable
+ui_surfaces: [n-a]
+monitoring: n-a
+telemetry_keys: ["quanta.hitl"]
+modes: [interactive, headless, batch, daemon, ide, ci-bot]
+configurable: static
+owners: ["@songmin"]
+labels: [surface:cli]
+depends_on: [turn-timing-anchors, llm-assemble, phase-ttft-readonly-trio]
+config_refs:
+  env: []
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 2/2 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "Pure internal string-append refinement to the model-facing steer message; no distinct UI affordance on any surface (the note is folded into the deny/steer envelope, not independently rendered)."
+purpose: |
+  Plane-C of the `phase-ttft-readonly-trio` umbrella (ADR-0077) — the
+  control-plane sibling of Plane-A (phase marker, surfaced via
+  `llm-assemble`) and Plane-B (TTFT, surfaced via `turn-timing-anchors`).
+  Read-only tool denials get a structured steer note appended so the model
+  knows the deny is "policy says don't touch even for read" rather than
+  "this would mutate state". `buildDenySteerMessage(decision, isReadonly?)`
+  appends `READONLY_DENY_STEER_NOTE` only when `isReadonly === true`;
+  unknown / undefined / false fall through verbatim (byte-identical).
+  Flag source is the `config.registry.get(call.name)?.isReadOnly()` lookup
+  already owned by `denyFromConfirm` in `admissibility-gate.ts` — no
+  parallel lookup. `DispatchResult.failure = {mode:"permission_denied",
+  isReadonly}` exposes the same flag on the typed failure envelope so
+  trajectory / permission consumers can branch on it.
+evidence:
+  code:
+    - src/agent/admissibility-gate.ts
+    - src/agent/confirm-decision.ts
+  adrs: [77]
+  tests:
+    unit:
+      - tests/unit/agent/readonly-deny-steer.test.ts
+      - tests/unit/admissibility-gate.test.ts
+      - tests/unit/agent/confirm-decision-hell.test.ts
+      - tests/unit/agent/confirm-decision.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  Sub-feature of `phase-ttft-readonly-trio` umbrella — separately catalogued
+  because the three planes are explicitly orthogonal in the umbrella's own
+  purpose statement (data / observability / control), and Planes A+B already
+  have dedicated entries (`llm-assemble`, `turn-timing-anchors`). Plane-C is
+  the only one that touches the permission/admissibility surface (section 3),
+  has its own hellgate test pin (false-positive on null registry entry), and
+  its own user-visible artefact (the appended note text).

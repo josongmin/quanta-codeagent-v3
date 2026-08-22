@@ -1,0 +1,41 @@
+id: repro-doubt-knob
+title: repro-doubt — break verify_loop_stuck with repro-test suspicion steer
+section: 10
+subsystem: 벤치 — repro oracle churn guard
+order: 2421
+maturity: L3
+status: new
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [batch]
+configurable: integrated
+owners: ["@songmin"]
+labels: [surface:bench, default-off]
+depends_on: [repro-test-slice, bench-eval-driver]
+config_refs:
+  env: [QUANTA_BENCH_REPRO_DOUBT]
+surface_integration:
+  cli: missing
+  web: na
+  method: audited
+  verified: "2026-06-20"
+  evidence:
+    cli: "sets AgentConfig.reproDoubt after N test re-runs with no edit"
+    web: "no browser affordance"
+purpose: |
+  After N consecutive test re-runs with no edit, steer the agent to doubt its
+  repro test instead of churning on the patch (verify_loop_stuck class). Domain
+  N in [2,12]. Default-OFF ⇒ byte-identical.
+evidence:
+  code:
+    - src/runner/knobs/knobs/repro-doubt.ts
+    - src/config/knob-inventory.ts
+  adrs: [14]
+  tests:
+    unit:
+      - tests/unit/repro-doubt-guard.test.ts
+      - tests/unit/bench-preset-drives-config-hellgate.test.ts
+    integration: []
+    contract: []
+knobs: ["repro-doubt"]
+deliberate_hold: null

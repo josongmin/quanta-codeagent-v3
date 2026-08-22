@@ -1,0 +1,61 @@
+id: outcome-exit-code-table
+title: exitCodeForOutcome — AgentOutcome → POSIX exit code mapping + SIGINT lifecycle wrapper
+section: 7
+subsystem: 종료 코드 — outcome → POSIX (apps/agent/run.ts)
+order: 22
+maturity: L4
+status: stable
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [n-a]
+configurable: integrated
+owners: ["@songmin"]
+labels: ["surface:core", "resilience-primitive"]
+depends_on: [batch-aggregate-exit-code, agent-cli-args-parser]
+surface_integration:
+  cli: missing
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "src evidence not reachable from the interactive CLI entry (src/apps/cli/index.ts) — wired only into other apps (eval/bench/probe/headless) or unwired"
+    web: "pure exit-code policy primitive, no UI affordance on any surface"
+purpose: |
+  `exitCodeForOutcome(outcome)` is the PURE function that pins the canonical
+  AgentOutcome→POSIX exit-code table (the ONLY policy `apps/agent/run.ts` owns):
+  `completed=0` (EX_OK), `budget_exhausted=2` (distinct from generic failure
+  so a budget cap is shell-distinguishable), `aborted=130` (POSIX 128+SIGINT=2),
+  `max_turns=1` / `error=1` (generic failure — caller can inspect outcome),
+  `refusal=3` (ADR-0076 Gap-1 — model declined; distinct from loop-errored=1
+  and task-done=0 so CI/wrapper scripts can branch). `runAgentLifecycle` +
+  `runAgentLifecycleWith(controller)` are the production wiring: install a
+  SIGINT handler that calls `controller.abort()`, run the loop, map via the
+  table, and ALWAYS uninstall in `finally` (no leak across mode-preset
+  boundaries). Distinct from `agent-cli-args-parser` (which owns the SEPARATE
+  EX_USAGE=64 path on bad argv) and `batch-aggregate-exit-code` (corpus
+  aggregator).
+evidence:
+  code:
+    - src/apps/agent/run.ts
+    - src/apps/agent/mode-presets/interactive.ts
+    - src/apps/agent/mode-presets/headless.ts
+    - src/apps/agent/mode-presets/ci-bot.ts
+    - src/apps/agent/mode-presets/daemon.ts
+    - src/apps/agent/mode-presets/ide.ts
+  adrs: []
+  tests:
+    unit:
+      - tests/unit/apps/agent/run.test.ts
+      - tests/unit/outcome-hellgate.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  Pure function — no IO, no side effects — tests pin the table directly. The
+  `runAgentLifecycle` variant (no controller) installs a no-op SIGINT marker
+  so tests can verify install/uninstall symmetry; the controller variant is
+  the production wiring used by every mode-preset. The cfg.signal is read-
+  only AbortSignal by design — surfaces that want SIGINT-driven cancellation
+  use the `With(controller)` entry, where the wrapper owns the controller
+  and the SIGINT-to-abort plumbing lives in EXACTLY one place.

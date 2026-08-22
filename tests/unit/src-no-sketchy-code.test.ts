@@ -111,7 +111,9 @@ const RULES: readonly Rule[] = [
       "lsp/adapters/base/transport.ts":
         "ENV PROPAGATION at the LSP spawn site (god-module split of lsp/adapters/base.ts — the transport collaborator now owns process spawn/lifecycle, reads moved VERBATIM). Passes the parent's `process.env` into `buildLspServerEnv` so the spawned language-server child inherits it (plus the NODE_OPTIONS heap cap), and threads it as the call-boundary arg to the PURE `resolveLspMemBudgetMb`/`resolveLspRssBudgetMb` resolvers (each allowlisted separately). Pass-through to a child + DI-boundary arg, not a feature read. Same posture as runtime/shell.ts / tool/git/runner.ts.",
       "apps/bench/remote/box-session/ec2-lifecycle.ts":
-        "Bench full-remote launch dial (QUANTA_FULL_REMOTE_READY_POLLS) read at box-provision time; same bench-only opt-in env posture as runner/batch/eval/driver.ts. Downstream gets the resolved poll count.",
+        "Bench full-remote launch dials read at box-provision time (QUANTA_SWEBENCH_DATASET_NAME / _PIP_SPEC operator overrides for the grading shim; QUANTA_BENCH_RESUME + _IAM_PROFILE for the resume instance profile); same bench-only opt-in env posture as runner/batch/eval/driver.ts. Downstream gets the resolved values. NOTE (aug-22): the QUANTA_FULL_REMOTE_READY_POLLS read this entry used to name MOVED VERBATIM to the box-readiness.ts split below — repointed, not re-justified.",
+      "apps/bench/remote/box-session/box-readiness.ts":
+        "Bench full-remote launch dial (QUANTA_FULL_REMOTE_READY_POLLS) read at box-provision time; same bench-only opt-in env posture as runner/batch/eval/driver.ts. Downstream gets the resolved poll count. God-module split of ec2-lifecycle.ts (aug-22): the readiness-poll loop moved out VERBATIM, carrying its already-justified read with it — the entry above is its origin.",
       "apps/bench/remote/box-session/types.ts":
         "Bench full-remote launch dial (QUANTA_FULL_REMOTE_INSTANCE_TYPE) read in the provision-config defaults; same bench-only opt-in env posture as the sibling ec2-lifecycle.ts. Downstream gets the resolved instance type.",
       "apps/bench/remote/box-session.ts":

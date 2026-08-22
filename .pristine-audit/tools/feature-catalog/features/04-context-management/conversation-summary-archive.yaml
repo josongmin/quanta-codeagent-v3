@@ -1,0 +1,50 @@
+id: conversation-summary-archive
+title: ConversationSummaryArchive — sliding-window per-compaction summary log
+section: 4
+subsystem: Cursor 흡수 — context history 1급 surface (ADR-0075)
+order: 30
+maturity: L4
+status: stable
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [interactive, headless, batch, daemon, ide, ci-bot]
+configurable: integrated
+owners: ["@songmin"]
+labels: [absorbed:codex, absorbed:cursor, surface:core]
+depends_on: [plan-mode, secret-redaction-content-plane, durable-state-belongs-in-workspace-files, response-in-progress, src-agent-working-state-ts]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 3/3 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "pure append-only summary store; its only publish path is context_compacted which is dropped at context-binding default arm (outside 7-tag bridge whitelist); nothing renders it"
+purpose: |
+  Cursor compactor 의 `summaries[]` 모방. 각 compaction 직후 `appendSummary` 로
+  `ConversationSummaryEntry{fromTurnId, toTurnId, summary, ts, tokens}` 한 entry 를
+  archive 에 push — UI 가 "context history" 를 렌더하거나 debug inspector 가
+  "어떤 turn 이 어떤 summary 로 접혔는지" 를 알 수 있다. Pure module(clock/IO 0):
+  caller 가 `ts` 를 주입(deterministic test). Append-only 였던 초안의 unbounded-heap
+  결함을 `MAX_ARCHIVED_SUMMARIES=64` FIFO-oldest 캡으로 봉합 — 유일 consumer 가
+  `archive.summaries.at(-1)?.toTurnId` 만 읽고 evicted entry 는 이미
+  `context_compacted` AgentEvent 로 subscribers 에게 publish 됐기 때문에
+  correctness-preserving.
+evidence:
+  code:
+    - src/agent/conversation-summary-archive.ts
+    - src/agent/loop.ts
+    - src/agent/compaction.ts
+  adrs: [75]
+  tests:
+    unit:
+      - tests/unit/conversation-summary-archive.test.ts
+      - tests/unit/compaction-archive-loop.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  Default-OFF — `AgentConfig.compaction.archive !== true` 시 loop 는 archive 자체를
+  생성하지 않음(byte-identical legacy). `06-pre-compact-hitl` 의 시스템 일부이지만
+  archive 자체는 별도 모듈/책임이라 분리 yaml.

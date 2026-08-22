@@ -1372,7 +1372,9 @@ describe("B8 — ProofReceiptFact source policy is explicit + typed", () => {
     })
     // exec failure ⇒ infra policy (not a public-repro verdict).
     expect(
-      intake.proofReceipts.some((r) => r.state === "execution_failed" && r.sourcePolicy === "infra"),
+      intake.proofReceipts.some(
+        (r) => r.state === "execution_failed" && r.sourcePolicy === "infra",
+      ),
     ).toBe(true)
     // the static issue-seed receipt is public_issue provenance.
     expect(

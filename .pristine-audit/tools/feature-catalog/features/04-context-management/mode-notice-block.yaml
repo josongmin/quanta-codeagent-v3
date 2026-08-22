@@ -1,0 +1,50 @@
+id: mode-notice-block
+title: PLAN/REVIEW/AUDIT mode notice — per-turn reminder injection
+section: 4
+subsystem: AgentMode → per-turn notice (resolveAgentMode SSOT)
+order: 14
+maturity: L4
+status: stable
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [interactive, headless, batch, daemon, ide, ci-bot]
+configurable: static
+owners: ["@songmin"]
+labels: [absorbed:codex, surface:core]
+depends_on: [mode-repo-rules-active-skills-working-state-memory-hints, build-turn-context, codex-2-phase-consolidator, durable-state-belongs-in-workspace-files, fallback-kinds-policy]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 4/4 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "pure prompt-text reminder block; mode itself rides mode_changed dropped at context-binding default arm (outside 7-tag bridge whitelist), the notice has no rendered affordance"
+purpose: |
+  PLAN/REVIEW/AUDIT 모드 별 verbatim 본문을 `PLAN_NOTICE` / `REVIEW_NOTICE` /
+  `AUDIT_NOTICE` 상수로 고정하고, `modeNotice(mode)` 가 mode → notice text 매핑
+  (default 는 undefined → block 미렌더). `resolveAgentMode(input.mode, input.planMode)`
+  ADR-0018 SSOT 를 prompt + dispatch admissibility gate 가 공유 — per-turn 텍스트
+  reminder 와 mutating-block dispatch decision 이 절대 disagree 하지 않음. Notice 의
+  공통 invariant: "Do NOT modify anything" + 모드별 outcome 형식(plan ⇒ step-by-step
+  plan, review ⇒ findings-first severity ordering, audit ⇒ 4-truth-surface mismatch
+  report).
+evidence:
+  code:
+    - src/agent/prompt.ts
+    - src/agent/mode.ts
+    - src/agent/turn-context.ts
+    - src/agent/prompt-sections.ts
+  adrs: [18]
+  tests:
+    unit:
+      - tests/unit/prompt-dynamic.test.ts
+      - tests/unit/prompt-sections-hellgate.test.ts
+    integration:
+      - tests/integration/sota-codex-full.test.ts
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  `01-mode-repo-rules-active-skills-working-state-memory-hints` 가 블록 순서 자체를
+  pin 한다면, 본 yaml 은 mode 셀의 텍스트 contract 와 SSOT 위치를 pin.

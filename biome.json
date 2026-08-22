@@ -1,5 +1,10 @@
 {
   "$schema": "https://biomejs.dev/schemas/2.4.15/schema.json",
+  "vcs": {
+    "enabled": true,
+    "clientKind": "git",
+    "useIgnoreFile": true
+  },
   "assist": {
     "actions": {
       "source": {
@@ -1191,12 +1196,15 @@
         "!tests/integration/github-webhook-reactor-e2e-hellgate.test.ts",
         "!tests/integration/github-webhook-multi-secret-hellgate.test.ts",
         "!tests/integration/activity-spine-real-loop-e2e.test.ts",
+        "!tests/integration/cli-attention-navigation.test.ts",
         "!tests/integration/cli-background-turn-e2e.test.ts",
         "!tests/integration/completion-notify-live-e2e.test.ts",
         "!tests/integration/crash-resume-hellgate.test.ts",
         "!tests/integration/hitl-approval-e2e.test.ts",
         "!tests/integration/model-swap-retry-real-loop-e2e.test.ts",
         "!tests/integration/playbook-auto-dispatch-real-loop-e2e.test.ts",
+        "!tests/integration/rewind-recover-crash-resume.test.ts",
+        "!tests/integration/rewind-restore-coordinator-e2e.test.ts",
         "!tests/integration/subagent-panel-e2e.test.ts",
         "!tests/unit/activity/activity-e2e-wire-hellgate.test.ts",
         "!tests/unit/activity/mirror-drift-hellgate.test.ts",
@@ -2045,6 +2053,40 @@
                 "paths": {
                   "@/runner": "Slice/surface boundary (migrated from a source-grep hellgate; AST-enforced): src/apps/cli/repl/external-prompt-queue.ts must not import @/runner."
                 }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "includes": ["**/src/skill/**/*.test.ts"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "paths": {
+                  "@/mcp": "Slice isolation (RFC 3.1): @/mcp is reachable only via @/agent",
+                  "@/memory": "Slice isolation (RFC 3.1): @/skill may only reach @/tool, @/shared",
+                  "@/stream": "Slice isolation (RFC 3.1): @/skill may only reach @/tool, @/shared",
+                  "@/permission": "Slice isolation (RFC 3.1): @/skill may only reach @/tool, @/shared",
+                  "@/runtime": "Slice isolation (RFC 3.1): @/skill may only reach @/tool, @/shared",
+                  "@/lsp": "Slice isolation (RFC 3.1): @/skill may only reach @/tool, @/shared",
+                  "@/observability": "Slice isolation (RFC 3.1): @/skill may only reach @/tool, @/shared",
+                  "@/llm": "Slice isolation (RFC 3.1): @/skill may only reach @/tool, @/shared",
+                  "@/subagent": "Slice isolation (RFC 3.1): peer slices may not cross-import; only @/agent assembles",
+                  "@/security": "Slice isolation (RFC 3.1): @/security is reachable by @/tool (classifyPath/classifyCommandShape) + @/agent — not by other library slices.",
+                  "@/patch": "Slice isolation (RFC 3.1): @/patch is reachable by @/tool/apply-patch + @/agent — not by other library slices.",
+                  "@/rules": "Slice isolation (RFC 3.1): @/rules is reachable by @/agent only — library slices must not import."
+                },
+                "patterns": [
+                  {
+                    "group": ["**/apps/cli", "**/apps/cli/*", "**/apps/cli/**"],
+                    "message": "Slice isolation (ADR-0024 export-gap closure): src/apps/cli is the application entrypoint; library slices and external tests must NOT import its internals. CLI helpers live in src/apps/cli/internal.ts and are reachable only from src/apps/cli/** (and the explicitly-allowed CLI unit tests). New cross-slice helpers should land in @/agent or another library slice."
+                  }
+                ]
               }
             }
           }

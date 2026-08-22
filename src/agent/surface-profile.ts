@@ -1,5 +1,6 @@
 /**
- * Surface-adaptive prompt composition seam (RFC jul-2 TB levers /00 §X).
+ * Surface-adaptive prompt composition seam (TB21-06 TC-4 —
+ * `docs/plans/aug-21-bench-terminal-2-1/TB21-06-transferred-contracts.md`).
  *
  * The universal SOTA shape (Codex / Claude / Terminus parity) is three cleanly
  * separated layers:

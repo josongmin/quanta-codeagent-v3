@@ -1,0 +1,73 @@
+id: prompt-cache-observability
+title: Prompt cache observability — typed observer + budget bridge + tool surface
+section: 10
+subsystem: Anthropic prompt cache observer
+order: 89
+maturity: L3
+status: stable
+ui_surfaces: [cli]
+monitoring: integrated
+modes: [interactive, headless]
+configurable: integrated
+config_refs:
+  env: [QUANTA_PROMPT_CACHE_STATUS]
+owners: ["@songmin"]
+labels: ["adr-0182", "tier:1", "observability", "prompt-cache"]
+depends_on:
+  - budget-ledger
+  - metrics-typed-port-slice
+surface_integration:
+  cli: full
+  web: partial
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 7/7 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "prompt_cache_status is an agent-invocable tool so its invocation renders as a tool.invoked/tool.completed card via the bridged tool_call/tool_result events; no dedicated cache hit-rate panel renders"
+purpose: |
+  Typed observer slice (`src/observability/prompt-cache/`) for the
+  Anthropic Messages API `cache_control:{type:"ephemeral"}` mechanic.
+  Captures `cache_creation_input_tokens` + `cache_read_input_tokens` per
+  call into a `PromptCacheObserver` (record / attributeBreakpoint /
+  snapshot / reset) with perModel / perSession / breakpoint views.
+  `wirePromptCacheToBudget` bridges ADR-0138's budget-ledger via
+  type-only import (cross-plane intentional exception called out in ADR
+  body — observer doesn't import ledger at module-graph level).
+  `prompt_cache_status` tool surfaces hit-rate / cost-savings to the
+  agent. Default pricing table (`default-pricing.ts`) covers Claude
+  family; cache hit = 10% of input rate (90% discount).
+  Tier-1 builder `buildPromptCacheBlock` (`src/agent/tier1/prompt-cache.ts`)
+  surfaces `prompt_cache_status` into the agent's tool set only when the host
+  wired a `PromptCacheObserver` and the `QUANTA_PROMPT_CACHE_STATUS` gate is on.
+  The CLI tool manifest seeds an unset gate to `1`; explicit falsy values or an
+  absent observer return `[]`. The SAME observer instance backs
+  both this tool and the loop's usage feed so the rendered snapshot reflects the
+  buckets observed this session.
+evidence:
+  code:
+    - src/observability/prompt-cache/types.ts
+    - src/observability/prompt-cache/default.ts
+    - src/observability/prompt-cache/default-pricing.ts
+    - src/observability/prompt-cache/budget-bridge.ts
+    - src/observability/prompt-cache/index.ts
+    - src/tool/prompt_cache_status.ts
+    - src/agent/tier1/prompt-cache.ts
+  adrs:
+    - docs/decisions/0182-prompt-cache-observability.md
+  tests:
+    unit:
+      - tests/unit/prompt-cache-observability-hellgate.test.ts
+      - tests/unit/prompt-cache-tracker-hellgate.test.ts
+      - tests/unit/tier1-prompt-cache-hellgate.test.ts
+    integration: []
+    contract: []
+knobs:
+  - name: QUANTA_PROMPT_CACHE_STATUS
+    default: "CLI unset -> 1 (on); other surfaces follow host config"
+    purpose: "Expose the read-only prompt_cache_status tool when its observer port exists; explicit falsy value rolls back"
+deliberate_hold: null
+notes: |
+  Hit rate denominator-zero → 0 (NaN guard). Negative-savings guard
+  prevents misconfigured pricing from showing fictitious gains. Claude
+  Code's `/cost` exposes raw tokens only — this slice adds operational
+  hit-rate / savings.

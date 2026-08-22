@@ -1,0 +1,58 @@
+id: jsonl-span-correlation
+title: JsonlRecorder span correlation — deterministic turn / tool / llm span ids
+section: 8
+subsystem: stream/adapters/jsonl-recorder — span-id derivation
+order: 98
+maturity: L4
+status: new
+ui_surfaces: [cli]
+monitoring: integrated
+telemetry_keys: ["quanta.trajectory.v"]
+modes: [interactive, headless, batch, daemon, ide, ci-bot]
+configurable: static
+owners: ["@songmin"]
+labels: ["surface:core", "observability-primitive", "absorbed:codex"]
+depends_on: [otel-span-tree]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 2/2 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "pure internal span-id derivation primitive in the recorder, no UI affordance"
+purpose: |
+  Deterministic span-id derivation inside the JsonlRecorder so the
+  recorded trajectory is golden-testable with no randomness. The scheme:
+  (1) `turn_start` opens a new turn span `t<turn>` (or `t#<seq>` fallback
+  when the AgentEvent carries no turn number); every later event in that
+  turn inherits `parentSpanId = turnSpanId`. (2) `tool_call` /
+  `tool_progress` / `tool_result` sharing one tool-use `id` all get
+  `spanId = "tool:" + id` with `parentSpanId = turnSpanId`. (3)
+  `llm_request` AND the matched `usage` event for that turn BOTH get
+  `spanId = "llm:" + turnSpanId` so the `llm_request ↔ llm_usage` span
+  pair (RFC-0002 §5.2 / §9 / §11) is exact and replayable
+  (`request.spanId === usage.spanId`). (4) `turn_start` itself is the
+  span root: `spanId = turnSpanId`, no parent. Strict / non-strict modes
+  decide whether a write failure rethrows or is swallowed (degraded
+  surface); `maxLines` enforces a hard line cap with a final `line_cap`
+  degraded marker.
+evidence:
+  code:
+    - src/stream/adapters/jsonl-recorder.ts
+    - src/shared/trajectory.ts
+  adrs: [2]
+  tests:
+    unit:
+      - tests/unit/jsonl-recorder.test.ts
+      - tests/unit/jsonl-recorder-retention.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  Determinism is a hard requirement — the recorder is the source of
+  truth for replay-compared payloads, so a `Math.random()` span-id would
+  silently break the byte-identical replay invariant. Pairs with
+  `jsonl-recorder` (the surface) and `otel-span-tree` (the conceptual
+  10-step Codex span hierarchy this scheme mirrors).

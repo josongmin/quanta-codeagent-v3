@@ -153,9 +153,7 @@ const scan = (
   } catch (error) {
     return {
       ok: false,
-      issues: [
-        issue("io-error", rootResult.root, errMessage(error)),
-      ],
+      issues: [issue("io-error", rootResult.root, errMessage(error))],
     }
   }
 
@@ -202,9 +200,7 @@ export const createDiskPlaybookRegistry = (root: string): DiskPlaybookRegistry =
     } catch (error) {
       last = {
         ok: false,
-        issues: [
-          issue("io-error", resolve(root), errMessage(error)),
-        ],
+        issues: [issue("io-error", resolve(root), errMessage(error))],
       }
       return last
     }

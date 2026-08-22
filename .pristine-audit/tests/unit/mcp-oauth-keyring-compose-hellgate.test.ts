@@ -1,0 +1,279 @@
+/** jun-06 — MCP OAuth keyring hellgate (write FIRST: red → green).
+ *
+ *  Seals the OPTIONAL keyring backend for the H18 MCP OAuth `TokenStorePort`
+ *  against a FAKE keyring + an in-memory file store, every arm explicit:
+ *    (1) keyring available — write→keyring, read-from-keyring round-trip;
+ *        the file store is never touched;
+ *    (2) keyring UNAVAILABLE — every op delegates to the file store
+ *        (byte-identical to today's 0600 file behavior);
+ *    (3) migration (file → keyring) — a token seeded ONLY in the file is moved
+ *        into the keyring on first read AND the file copy deleted; a second read
+ *        hits the keyring and does NOT re-touch the file;
+ *    (4) migration idempotent under failure — the post-set file delete throws;
+ *        read still returns the record; a re-read re-attempts; no throw;
+ *    (5) keyring error degrades — get/set throw (locked keychain) ⇒ swallowed,
+ *        read returns the file value (or undefined), never crashes;
+ *    (6) delete spans BOTH stores — a record in both is removed from both;
+ *    (7) secret NEVER on argv — the macOS/libsecret adapters pass the secret on
+ *        STDIN only; no exec arg carries the token;
+ *    (8) default-OFF byte-identical — the null keyring ⇒ pure file behavior.
+ */
+
+import { describe, expect, it } from "bun:test"
+import type { TokenRecord, TokenStorePort } from "@/connectors"
+import {
+  composeTokenStore,
+  createMacosKeyring,
+  createNullKeyring,
+  type KeyringExec,
+  type KeyringPort,
+} from "@/host/runtime/keyring"
+
+// ── fakes ─────────────────────────────────────────────────────────────────
+
+const REC: TokenRecord = {
+  accessToken: "ACCESS-SECRET-XYZ",
+  refreshToken: "REFRESH-SECRET-ABC",
+  expiresAt: 1_700_000_000_000,
+  tokenType: "Bearer",
+}
+
+/** An in-memory `TokenStorePort` that records every op (stands in for the 0600
+ *  file store). */
+const makeFileStore = (seed?: Record<string, TokenRecord>) => {
+  const map = new Map<string, TokenRecord>(Object.entries(seed ?? {}))
+  const ops: string[] = []
+  const store: TokenStorePort = {
+    async read(id) {
+      ops.push(`read:${id}`)
+      return map.get(id)
+    },
+    async write(id, rec) {
+      ops.push(`write:${id}`)
+      map.set(id, rec)
+    },
+    async delete(id) {
+      ops.push(`delete:${id}`)
+      map.delete(id)
+    },
+  }
+  return { store, map, ops }
+}
+
+/** A fake in-memory keyring with toggleable availability + injectable faults. */
+const makeFakeKeyring = (opts?: {
+  available?: boolean
+  throwOn?: Partial<Record<"available" | "get" | "set" | "delete", boolean>>
+}) => {
+  const map = new Map<string, string>()
+  const key = (s: string, a: string) => `${s}\x00${a}`
+  const t = opts?.throwOn ?? {}
+  const keyring: KeyringPort = {
+    async available() {
+      if (t.available) throw new Error("probe failed")
+      return opts?.available ?? true
+    },
+    async get(s, a) {
+      if (t.get) throw new Error("locked keychain")
+      return map.get(key(s, a))
+    },
+    async set(s, a, secret) {
+      if (t.set) throw new Error("locked keychain")
+      map.set(key(s, a), secret)
+    },
+    async delete(s, a) {
+      if (t.delete) throw new Error("locked keychain")
+      map.delete(key(s, a))
+    },
+  }
+  return { keyring, map, key }
+}
+
+// ── (1) keyring available — round-trip, file untouched ──────────────────────
+
+describe("composeTokenStore — keyring available", () => {
+  it("write→keyring then read-from-keyring round-trips; file store untouched", async () => {
+    const { keyring, map } = makeFakeKeyring()
+    const file = makeFileStore()
+    const store = composeTokenStore(keyring, file.store, "svc")
+
+    await store.write("srv-1", REC)
+    expect(map.size).toBe(1)
+    expect(file.map.size).toBe(0)
+    expect(file.ops).toEqual([]) // file never touched on a keyring write
+
+    const got = await store.read("srv-1")
+    expect(got).toEqual(REC)
+    expect(file.ops).toEqual([]) // read served from keyring, file untouched
+  })
+})
+
+// ── (2) keyring unavailable — pure file fallback ────────────────────────────
+
+describe("composeTokenStore — keyring UNAVAILABLE", () => {
+  it("delegates every op to the file store (byte-identical to today)", async () => {
+    const { keyring, map } = makeFakeKeyring({ available: false })
+    const file = makeFileStore()
+    const store = composeTokenStore(keyring, file.store, "svc")
+
+    await store.write("srv-1", REC)
+    expect(map.size).toBe(0) // keyring never written
+    expect(await file.store.read("srv-1")).toEqual(REC)
+
+    const got = await store.read("srv-1")
+    expect(got).toEqual(REC)
+
+    await store.delete("srv-1")
+    expect(await file.store.read("srv-1")).toBeUndefined()
+    // every op went through the file store
+    expect(file.ops).toContain("write:srv-1")
+    expect(file.ops).toContain("delete:srv-1")
+  })
+
+  it("the null keyring yields pure file behavior (default-OFF byte-identical)", async () => {
+    const file = makeFileStore({ "srv-1": REC })
+    const composed = composeTokenStore(createNullKeyring(), file.store, "svc")
+    const bare = makeFileStore({ "srv-1": REC })
+
+    expect(await composed.read("srv-1")).toEqual(await bare.store.read("srv-1"))
+    await composed.write("srv-2", REC)
+    expect(await file.store.read("srv-2")).toEqual(REC)
+  })
+})
+
+// ── (3) migration (file → keyring) ──────────────────────────────────────────
+
+describe("composeTokenStore — migration file→keyring", () => {
+  it("moves a file-only token into the keyring on first read and deletes the file copy", async () => {
+    const { keyring, map, key } = makeFakeKeyring()
+    const file = makeFileStore({ "srv-1": REC })
+    const store = composeTokenStore(keyring, file.store, "svc")
+
+    const first = await store.read("srv-1")
+    expect(first).toEqual(REC)
+    expect(map.get(key("svc", "srv-1"))).toBe(JSON.stringify(REC)) // now in keyring
+    expect(await file.store.read("srv-1")).toBeUndefined() // file copy deleted
+    expect(file.ops).toContain("delete:srv-1")
+  })
+
+  it("is idempotent — a second read hits the keyring and never re-touches the file", async () => {
+    const { keyring } = makeFakeKeyring()
+    const file = makeFileStore({ "srv-1": REC })
+    const store = composeTokenStore(keyring, file.store, "svc")
+
+    await store.read("srv-1") // migrates
+    file.ops.length = 0 // reset op log
+    const second = await store.read("srv-1")
+    expect(second).toEqual(REC)
+    expect(file.ops).toEqual([]) // file untouched on the second read
+  })
+})
+
+// ── (4) migration idempotent under file-delete failure ──────────────────────
+
+describe("composeTokenStore — migration under failure", () => {
+  it("still returns the record when the post-set file delete throws; re-read re-attempts", async () => {
+    const { keyring, map, key } = makeFakeKeyring()
+    // file store whose delete throws
+    const map2 = new Map<string, TokenRecord>([["srv-1", REC]])
+    let deleteAttempts = 0
+    const file: TokenStorePort = {
+      async read(id) {
+        return map2.get(id)
+      },
+      async write(id, rec) {
+        map2.set(id, rec)
+      },
+      async delete() {
+        deleteAttempts += 1
+        throw new Error("EPERM")
+      },
+    }
+    const store = composeTokenStore(keyring, file, "svc")
+
+    const first = await store.read("srv-1")
+    expect(first).toEqual(REC) // returned despite delete failure
+    expect(map.get(key("svc", "srv-1"))).toBe(JSON.stringify(REC)) // set succeeded
+    expect(deleteAttempts).toBe(1)
+
+    // re-read: keyring now has it ⇒ no migration attempt, no further delete
+    const second = await store.read("srv-1")
+    expect(second).toEqual(REC)
+    expect(deleteAttempts).toBe(1)
+  })
+})
+
+// ── (5) keyring error degrades to file value / re-login ─────────────────────
+
+describe("composeTokenStore — keyring error NO-THROW", () => {
+  it("read swallows a get() throw and returns the file value (degrade, never crash)", async () => {
+    const { keyring } = makeFakeKeyring({ throwOn: { get: true } })
+    const file = makeFileStore({ "srv-1": REC })
+    const store = composeTokenStore(keyring, file.store, "svc")
+
+    const got = await store.read("srv-1")
+    expect(got).toEqual(REC) // fell back to the file store, no throw
+  })
+
+  it("read returns undefined when get() throws and the file is also empty (⇒ re-login)", async () => {
+    const { keyring } = makeFakeKeyring({ throwOn: { get: true } })
+    const file = makeFileStore()
+    const store = composeTokenStore(keyring, file.store, "svc")
+    expect(await store.read("absent")).toBeUndefined()
+  })
+
+  it("write swallows a set() throw and persists to the file store instead", async () => {
+    const { keyring } = makeFakeKeyring({ throwOn: { set: true } })
+    const file = makeFileStore()
+    const store = composeTokenStore(keyring, file.store, "svc")
+
+    await store.write("srv-1", REC)
+    expect(await file.store.read("srv-1")).toEqual(REC) // not lost
+  })
+
+  // SILENT-DROP-WRITE end-to-end: a REAL adapter (not the throwing fake) over a
+  // fake exec that DENIES the write (non-zero exit, as a locked keychain does).
+  // The token MUST land in the file store — never silently dropped.
+  it("write over a real macOS adapter whose exec DENIES the store still persists to file", async () => {
+    // probe (default-keychain) succeeds ⇒ keyring "available"; the actual
+    // add-generic-password is DENIED (non-zero) ⇒ must fall back to file.
+    const denyingExec: KeyringExec = async (input) =>
+      input.args[0] === "default-keychain" ? { ok: true, stdout: "" } : { ok: false, stdout: "" }
+    const keyring = createMacosKeyring(denyingExec)
+    const file = makeFileStore()
+    const store = composeTokenStore(keyring, file.store, "svc")
+
+    await store.write("srv-1", REC)
+    expect(await file.store.read("srv-1")).toEqual(REC) // NOT silently dropped
+  })
+
+  it("a thrown availability probe degrades to the file store", async () => {
+    const { keyring } = makeFakeKeyring({ throwOn: { available: true } })
+    const file = makeFileStore({ "srv-1": REC })
+    const store = composeTokenStore(keyring, file.store, "svc")
+    expect(await store.read("srv-1")).toEqual(REC)
+  })
+})
+
+// ── (6) delete spans both stores ────────────────────────────────────────────
+
+describe("composeTokenStore — delete spans both", () => {
+  it("removes a mid-migration record from BOTH keyring and file", async () => {
+    const { keyring, map, key } = makeFakeKeyring()
+    map.set(key("svc", "srv-1"), JSON.stringify(REC)) // in keyring
+    const file = makeFileStore({ "srv-1": REC }) // ALSO in file
+    const store = composeTokenStore(keyring, file.store, "svc")
+
+    await store.delete("srv-1")
+    expect(map.get(key("svc", "srv-1"))).toBeUndefined() // keyring cleared
+    expect(await file.store.read("srv-1")).toBeUndefined() // file cleared
+  })
+
+  it("delete NO-THROWs when the keyring delete throws (still clears the file)", async () => {
+    const { keyring } = makeFakeKeyring({ throwOn: { delete: true } })
+    const file = makeFileStore({ "srv-1": REC })
+    const store = composeTokenStore(keyring, file.store, "svc")
+    await store.delete("srv-1")
+    expect(await file.store.read("srv-1")).toBeUndefined()
+  })
+})

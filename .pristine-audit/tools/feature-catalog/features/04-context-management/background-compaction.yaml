@@ -1,0 +1,83 @@
+id: background-compaction
+title: Background (speculative) compaction — cancellable summarize + 2-phase install
+section: 4
+subsystem: 컨텍스트 관리 — 한도 근접 시 백그라운드 summarize 선점 (Claude/Codex 흡수)
+order: 473
+maturity: L3
+status: refined
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [interactive]
+configurable: partial
+owners: ["@songmin"]
+labels: ["absorbed:claude", "absorbed:codex", "surface:cli", "tier:core", "default-off"]
+depends_on: [agent]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 5/5 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "Pure internal context-management optimization (invisible background summarize); no user-visible surface affordance and its gating knob is not web-writable."
+purpose: |
+  When the live transcript is APPROACHING (not yet at) the context-window ceiling,
+  start a CANCELLABLE summarize() as a background promise while the turn keeps
+  running; at the turn boundary install the produced summary ONLY if it (a)
+  completed AND (b) cleared the persist threshold, else discard — so a
+  failed/aborted/too-small summarize NEVER corrupts live history (2-phase install:
+  old context stays until a good summary lands). The slice
+  (src/agent/compaction/, the directory — NOT the existing compaction.ts file,
+  imports @/shared ONLY) owns: (1) the strict gate bgCompactionEnabled
+  (QUANTA_BG_COMPACTION === "1", reads INJECTED env, never process.env); (2) the
+  pure approaching-limit predicate isApproachingLimit (fires on EITHER the
+  absolute startAtUnusedTokens OR relative startAtUnusedPercent floor — OR, start
+  eagerly; degenerate window never fires); (3) the pure persist predicate
+  meetsPersistThreshold (BOTH persistUnusedTokens AND persistUnusedPercent — AND,
+  conservative; freed clamped non-negative); (4) the
+  BackgroundSummarizationController<S> over the INJECTED SpeculativeSummarizeFn
+  port + INJECTED Clock (port inversion, mirrors @/permission ClassifierPort) with
+  maybeStart (idempotent — no double pass), cancelIfPending (no wasted spend when
+  the turn ends early), and reconcileAtTurnBoundary → install | discard over a
+  closed DiscardReason union (not-completed / below-persist-threshold /
+  input-limit-failure / cancelled / summarizer-error / no-pass-started). The
+  in-flight promise NEVER rejects (every summarizer call is try/catch-wrapped) and
+  the only outcome that hands back a summary is kind:"install" (the 2-phase
+  guarantee). All four start/persist values are REQUIRED config — no magic numbers.
+  The clock feeds the side-channel duration log ONLY, never control flow. NO-THROW
+  throughout. DEFAULT-OFF: flag unset ⇒ the host never constructs the controller ⇒
+  the existing synchronous compactIfNeeded / reactiveCompact path is byte-identical
+  to today.
+evidence:
+  code:
+    - src/agent/compaction/types.ts
+    - src/agent/compaction/background.ts
+    - src/agent/compaction/index.ts
+    - src/agent/compaction.ts
+    - src/agent/loop.ts
+  adrs: [473]
+  tests:
+    unit:
+      - tests/unit/background-compaction-hellgate.test.ts
+    integration: []
+    contract: []
+knobs:
+  - name: QUANTA_BG_COMPACTION
+    default: 'unset (OFF)'
+    purpose: 'exactly "1" opts a deployment in; any other value (incl "0"/"on"/"true") keeps it OFF. Unset ⇒ the controller is never constructed and the existing synchronous compaction path runs unchanged (byte-identical), no speculative summarize is ever started.'
+deliberate_hold: null
+notes: |
+  LANDED: the controller is constructed and driven on the live loop.
+  src/agent/compaction.ts builds the BackgroundSummarizationController gated on
+  bgCompactionEnabled(env) (returns undefined when OFF, byte-identical backstop).
+  src/agent/loop.ts wires all three integration points: bgController.maybeStart(...)
+  at the approaching-limit check, await bgController.reconcileAtTurnBoundary(...)
+  at the turn boundary (install via wm.replace on kind:"install", else leave
+  history), and bgCompaction.cancelIfPending() on early turn end.
+  Port inversion is the design crux: @/agent could legally import @/llm, but this
+  is a leaf, so the summarize primitive is injected as SpeculativeSummarizeFn and
+  the clock as Clock (mirrors @/permission ClassifierPort), keeping the slice
+  @/shared-only and unit-testable with a spy double + a fake counter clock. The
+  approaching/persist gates are caller-supplied named config, NOT magic thresholds.
+  Lives in the compaction/ DIRECTORY alongside (not editing) the synchronous
+  compaction.ts — the existing reactive path is the OFF backstop.

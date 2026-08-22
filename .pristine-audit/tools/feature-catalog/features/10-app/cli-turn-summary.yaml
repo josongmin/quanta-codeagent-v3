@@ -1,0 +1,67 @@
+id: cli-turn-summary
+title: CLI turn-summary box — tools/verify-guard/compaction/memory/recovery
+section: 10
+subsystem: CLI chrome — turn-end summary panel
+order: 21
+maturity: L4
+status: new
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [interactive]
+configurable: integrated
+config_refs:
+  env: [QUANTA_TURN_SUMMARY, QUANTA_TURN_SUMMARY_VERBOSE]
+owners: ["@songmin"]
+labels: ["surface:cli"]
+depends_on: [memory-recall-citation]
+surface_integration:
+  cli: full
+  web: missing
+  method: audited
+  verified: "2026-06-11"
+  evidence:
+    cli: "TURN_SUMMARY_CONSUMED_AGENT_EVENT_TYPES is a pinned strict subset of AGENT_EVENT_TYPES (agent-event-surface-inventory-hellgate)"
+    web: "CLI-only box panel; rides recovery/context_compacted events outside the 7-tag bridge default arm (B1); no web render"
+purpose: |
+  Turn-end "summary box" panel — 한 턴 종료 시 다음을 한 박스에 모아 출력:
+  (1) tools row (도구 호출/결과 카운트 + 실패 카운트),
+  (2) verify-guard row (verify-guard hit/miss),
+  (3) compaction row (`context_compacted` 이벤트 카운트 + reclaimed bytes),
+  (4) memory row (`◇ memory: N hits (top-3 ids)` — `AgentOutcome.memoryCitations`
+  를 dedup-free 누적 표시; score는 의도적 hide, score-gaming 방지),
+  (5) recovery row (도구 실패 → 회복 시도 카운트).
+  Event consumer — `AgentEvent` 스트림에서 `tool_call`/`tool_result`/
+  `recovery`/`context_compacted`/`usage`를 누적; turn-end시 박스 렌더.
+  redaction은 카운트만 노출 (실제 redact된 값 미노출 — secret leak 방지).
+  DEFAULT = TTY-AUTO (UUX-1-25 drift fix — `isTurnSummaryEnabled`,
+  src/apps/cli/turn-summary.ts:120): unset ⇒ ON iff stdout is a TTY
+  (interactive default-ON), non-TTY/pipe ⇒ OFF; `QUANTA_TURN_SUMMARY=0` 명시
+  OFF, `=1` 강제 ON. OFF일 때 출력 byte-identical (기존 loop surface 0변경).
+evidence:
+  code:
+    - src/apps/cli/turn-summary.ts
+  adrs: []
+  tests:
+    unit:
+      - tests/unit/cli/turn-summary.test.ts
+      - tests/unit/cli/agent-event-surface-inventory-hellgate.test.ts
+    integration: []
+    contract: []
+knobs:
+  - name: QUANTA_TURN_SUMMARY
+    default: 'TTY-auto (unset ⇒ ON iff stdout TTY)'
+    purpose: 'turn-end summary box gate — `=0/false/off/no` force-OFF, `=1/true/on/yes` force-ON, unset ⇒ TTY auto-detect (isTurnSummaryEnabled)'
+  - name: QUANTA_TURN_SUMMARY_VERBOSE
+    default: 'off'
+    purpose: 'verbose row set for the summary box (`=1` opt-in; isTurnSummaryVerbose)'
+deliberate_hold:
+  reason: |
+    의도적 미노출: redacted 값 본문, memory recall score, turn timing 세부
+    breakdown (TTFT trio는 별도 trace 채널). score는 score-gaming invariant.
+  promotion_path: |
+    verbose mode (`QUANTA_TURN_SUMMARY_VERBOSE=1`)에서 추가 메트릭 노출
+    검토 — 단 redacted 본문/score는 영구 hide.
+notes: |
+  ADR-0082 memory-citation surface를 사용자-가시 channel로 잇는 첫 consumer
+  (별도 `memory-recall-citation` feature 참조). non-TTY 자동 OFF;
+  `QUANTA_TURN_SUMMARY=0` 명시 OFF, `=1` 강제 ON.

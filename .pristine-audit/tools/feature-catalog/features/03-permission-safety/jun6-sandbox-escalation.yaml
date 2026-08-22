@@ -1,0 +1,108 @@
+id: sandbox-escalation
+title: jun-6 sandbox-block → escalation-retry loop (denialReason:sandbox-blocked + HITL escape hatch)
+section: 3
+subsystem: OS-sandbox usability — the user-gated escape hatch that unlocks a future default-ON sandbox
+order: 483
+maturity: L3
+status: refined
+ui_surfaces: [cli]
+monitoring: integrated
+modes: [interactive, headless, batch, daemon, ide, ci-bot]
+configurable: integrated
+config_refs:
+  env: [QUANTA_SANDBOX_ESCALATION, QUANTA_SANDBOX_ESCALATION_MAX]
+owners: ["@songmin"]
+labels: [surface:cli, category:sandbox, security, security-touched, default-off, absorbed:codex]
+depends_on: [os-sandbox, post-denial-precedence, hitl-tier-registry, typed-tool-failure-modes]
+surface_integration:
+  cli: full
+  web: partial
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 15/15 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "the onConfirm escape-hatch can route to the EscalationCard approve|deny path but the sandbox-blocked classification, re-run argv and escalation context ride dropped events; only the collapsed confirm reaches the browser"
+purpose: |
+  OS sandbox 가 syscall 을 BLOCK 했을 때(=sandbox 가 제대로 작동) 와 일반 명령
+  실패를 구분하지 못하던 갭(`SandboxedSpawnResult` 에 denialReason 없음 → block 이
+  plain nonzero exit 과 byte-구분불가)을 닫는 RFC jun-6-sandbox-escalation 흡수
+  (Codex 0.135 `unix_escalation.rs` + `with_escalated_permissions` + `justification`
+  + `ExecPolicyAmendmentExhausted`). 두 절반: (1) `denialReason:"sandbox-blocked"`
+  discriminant + 순수 per-platform `classifySandboxDenial` (`src/runtime/os-sandbox/
+  denial-classify.ts`), (2) block → 기존 post-denial 3-step 머신(ADR-0046) 경유 →
+  유저-게이팅 unsandboxed re-run 의 escalation 루프(`src/agent/sandbox-escalation/`).
+  핵심-난이도(정직하게): detection FALSE-POSITIVE 리스크. `classifySandboxDenial` 은
+  ALWAYS `sandboxApplied===true` 일 때만 분류; HIGH-confidence = UNAMBIGUOUS 시그널만
+  (우리 seccomp 필터 하 SIGSYS / exit-126 denied-exec / EXACT line-anchored Seatbelt-deny
+  stderr PREFIX — substring 절대 아님), LOW-confidence = bare EPERM (실제 non-sandbox
+  permission 에러와 구분불가) ⇒ DECLINE-able 제안. 미인식 nonzero ⇒ plain failure
+  (UNDER-detect over over-escalate). escalation NEVER auto-grants: recordRiskSeen-BEFORE-
+  recordUserOverride ordering(타임스탬프, ADR-0046)이 조작된 override 차단; 승인 시
+  byte-same argv 를 NORMAL permission gate 통과 후 sandbox wrapper 없이 re-run(한 콜만,
+  세션 flip 아님). per-turn cap(`QUANTA_SANDBOX_ESCALATION_MAX`, ExecPolicyAmendmentExhausted
+  analog)이 escalate→deny→escalate 스팸 차단. DEFAULT-OFF byte-identical
+  (`QUANTA_SANDBOX_ESCALATION` 부재 ⇒ classifier 미호출, denialReason 미설정, prompt
+  없음 — sandboxed nonzero exit 이 plain failure 와 byte-동일). NOTE: 이 escape hatch 가
+  미래 SAFE default-ON sandbox 를 unlock 하나, `QUANTA_SANDBOX` default-ON flip 은
+  별도 결정(OUT OF SCOPE).
+evidence:
+  code:
+    - src/runtime/os-sandbox/denial-classify.ts
+    - src/runtime/os-sandbox/types.ts
+    - src/runtime/os-sandbox/llm-error-bridge.ts
+    - src/runtime/os-sandbox/index.ts
+    - src/agent/sandbox-escalation/cap.ts
+    - src/agent/sandbox-escalation/orchestrator.ts
+    - src/agent/sandbox-escalation/index.ts
+    - src/shared/errors.ts
+    - src/shared/runtime-config.ts
+    - src/llm/retry/codex-spec-router.ts
+    - src/agent/error-routing/default-classifier.ts
+    - src/tool/bash/sandbox-escalation-wire.ts
+    - src/tool/bash/index.ts
+    - src/host/runtime/sandbox-escalation-wire.ts
+    - src/host/runtime/agent-config-assembler.ts
+  adrs: ["docs/plans/jun-6-sandbox-escalation.md"]
+  tests:
+    unit:
+      - tests/unit/sandbox-escalation-classify-hellgate.test.ts
+      - tests/unit/sandbox-escalation-loop-hellgate.test.ts
+      - tests/unit/sandbox-escalation-off-byte-identity-hellgate.test.ts
+      - tests/unit/sandbox-escalation-bash-wire-hellgate.test.ts
+    integration: []
+    contract: []
+knobs:
+  - name: QUANTA_SANDBOX_ESCALATION
+    default: 'undefined'
+    purpose: Strict opt-in (`=== "1"`). OFF ⇒ classifySandboxDenial 미호출, denialReason 미설정, escalation prompt/post-denial record 없음 — sandboxed nonzero exit 이 plain failure 와 byte-identical. Default-ON flip 은 OUT OF SCOPE.
+  - name: QUANTA_SANDBOX_ESCALATION_MAX
+    default: 'undefined'
+    purpose: per-turn escalation-retry cap (ExecPolicyAmendmentExhausted analog). 부재/무효 ⇒ cap 모듈 default 3. escalation REQUESTS 만 bound(tool 콜 아님) — 초과 시 typed escalation-exhausted, 추가 prompt 없음. KNOB(no-heuristics) — baked constant 아님.
+notes: |
+  ✅ host-wired LIVE (jun-06) — bash hot-path 배선 완료 → L3. mode="read" sandboxed
+  명령이 APPLIED-sandbox nonzero exit 을 내면 bash tool 이 module-level seam
+  (`src/tool/bash/sandbox-escalation-wire.ts`, per-call-factory 선례 미러 — `@/tool`
+  은 `@/agent`/`@/permission` fence 격리라 직접 import 불가)을 호출. 컴포지션 루트
+  (`src/host/runtime/sandbox-escalation-wire.ts` `maybeWireBashSandboxEscalation`,
+  assembler 에서 knob-ON 시 install)가 classifier+orchestrator+post-denial store+
+  onConfirm gate 를 그 seam 의 handler 로 adapt: classifySandboxDenial(backend=
+  seatbelt, per-call port 은 darwin/sandbox-exec only) → seedSandboxBlockDenial →
+  runSandboxEscalation(cap→presentRisk(onConfirm)→recordRiskSeen/Override→NORMAL gate
+  (2번째 onConfirm consult, NOT bypass)→unsandboxed re-run). 승인 시 bash 가
+  baseShellOpts 로 perCallWrap 없이 byte-same 명령 re-run. knob-OFF ⇒ handler 미설치
+  ⇒ bash byte-identical. e2e: tests/unit/sandbox-escalation-bash-wire-hellgate.test.ts
+  (REAL bash tool + fake blocking sandbox: block→approve→unsandboxed re-run 성공 /
+  deny→stays blocked / cap exhaustion / knob-OFF byte-identical / 성공 미분류 /
+  mode=write 미에스컬레이션).
+  설계/증명: RFC `docs/plans/jun-6-sandbox-escalation.md` (✅ host-wired LIVE jun-06).
+  ADR 미발행. discriminant(Phase 1)는 pure+tested; escalation 루프(Phase 2 머신)는
+  pure orchestrator 로 hellgate 완비 + bash hot-path 배선 LIVE(L3).
+  Detection-confidence tiers: HIGH = seccomp-sigsys(128+SIGSYS, landlock+seccomp backend) /
+  exit-126(denied-exec, seatbelt|landlock|bwrap) / seatbelt-deny(EXACT line-anchored prefix
+  `Sandbox:`/`sandbox-exec:`+deny token | `deny(1)` | `deny default`). LOW = landlock-eperm
+  (bare EPERM/EACCES) / windows-access(exit 5). FALSE-POSITIVE GUARD(load-bearing):
+  normal non-sandbox EPERM with sandboxApplied:true & no high signal ⇒ NOT high(suggestion or
+  undefined); sandboxApplied:false ⇒ NEVER classified regardless of stderr(command 이 직접
+  "Sandbox: deny" 출력해도 미탐). LLMError: 신규 `sandbox_blocked` kind(sibling to degrade의
+  `sandbox_error`) + recovery-router → hitl_handoff(user-gated, never auto). default-ON flip
+  deferred = 별도 결정(corpus FP-rate 측정 게이팅).

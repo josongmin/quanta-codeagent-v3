@@ -24,10 +24,10 @@
 
 import { describe, expect, test } from "bun:test"
 import { buildSessionFeatures } from "@/agent/features"
-import { createObjectiveStore, type ObjectivePort } from "@/objective"
 import { buildObjectiveBlock } from "@/agent/tier1"
 import type { AgentConfig, FeaturesConfig } from "@/agent/types"
 import type { LLMPort } from "@/llm"
+import { asObjectiveAuthority, createObjectiveStore, type ObjectivePort } from "@/objective"
 import type { PermissionContext } from "@/permission"
 import type { StreamPort } from "@/stream"
 import { defaultTools, type Tool, type ToolContext, ToolRegistry } from "@/tool"
@@ -148,7 +148,7 @@ describe("objective tools — wire hellgate (ADR-0402)", () => {
 describe("objective tools — schema validation hellgate (ADR-0402)", () => {
   test("objective_set requires non-empty goal", async () => {
     const port = createObjectiveStore()
-    const tools = objectiveTools(port)
+    const tools = objectiveTools(asObjectiveAuthority(port))
     const out = await drain(findTool(tools, "objective_set"), { thread_id: "t", goal: "" })
     expect(out.ok).toBe(false)
     expect(out.output.toLowerCase()).toContain("invalid")
@@ -156,7 +156,7 @@ describe("objective tools — schema validation hellgate (ADR-0402)", () => {
 
   test("objective_set rejects missing thread_id", async () => {
     const port = createObjectiveStore()
-    const tools = objectiveTools(port)
+    const tools = objectiveTools(asObjectiveAuthority(port))
     const out = await drain(findTool(tools, "objective_set"), { goal: "g" })
     expect(out.ok).toBe(false)
   })
@@ -164,7 +164,7 @@ describe("objective tools — schema validation hellgate (ADR-0402)", () => {
   test("objective_update rejects unknown op kind", async () => {
     const port = createObjectiveStore()
     port.set("t", { goal: "g" })
-    const tools = objectiveTools(port)
+    const tools = objectiveTools(asObjectiveAuthority(port))
     const out = await drain(findTool(tools, "objective_update"), {
       thread_id: "t",
       op: { kind: "wizardry" },
@@ -175,7 +175,7 @@ describe("objective tools — schema validation hellgate (ADR-0402)", () => {
   test("objective_update rejects bad enum (waiting_on)", async () => {
     const port = createObjectiveStore()
     port.set("t", { goal: "g" })
-    const tools = objectiveTools(port)
+    const tools = objectiveTools(asObjectiveAuthority(port))
     const out = await drain(findTool(tools, "objective_update"), {
       thread_id: "t",
       op: { kind: "addBlocker", reason: "x", waiting_on: "moon" },
@@ -186,7 +186,7 @@ describe("objective tools — schema validation hellgate (ADR-0402)", () => {
   test("objective_update rejects bad status enum", async () => {
     const port = createObjectiveStore()
     port.set("t", { goal: "g" })
-    const tools = objectiveTools(port)
+    const tools = objectiveTools(asObjectiveAuthority(port))
     const out = await drain(findTool(tools, "objective_update"), {
       thread_id: "t",
       op: { kind: "status", status: "halfway" },
@@ -196,7 +196,7 @@ describe("objective tools — schema validation hellgate (ADR-0402)", () => {
 
   test("objective_get rejects missing thread_id", async () => {
     const port = createObjectiveStore()
-    const tools = objectiveTools(port)
+    const tools = objectiveTools(asObjectiveAuthority(port))
     const out = await drain(findTool(tools, "objective_get"), {})
     expect(out.ok).toBe(false)
   })
@@ -209,7 +209,7 @@ describe("objective tools — schema validation hellgate (ADR-0402)", () => {
 describe("objective tools — op variant round-trip (ADR-0402)", () => {
   const seed = async (): Promise<{ port: ObjectivePort; tools: readonly Tool[] }> => {
     const port = createObjectiveStore()
-    const tools = objectiveTools(port)
+    const tools = objectiveTools(asObjectiveAuthority(port))
     await drain(findTool(tools, "objective_set"), {
       thread_id: "t",
       goal: "build feature",
@@ -339,20 +339,20 @@ describe("objective tools — NO-THROW + output shape (ADR-0402)", () => {
     }) as unknown as ObjectivePort
 
   test("throwing port.set ⇒ ok:false (never bubbles)", async () => {
-    const tools = objectiveTools(throwingPort())
+    const tools = objectiveTools(asObjectiveAuthority(throwingPort()))
     const out = await drain(findTool(tools, "objective_set"), { thread_id: "t", goal: "g" })
     expect(out.ok).toBe(false)
     expect(out.output.toLowerCase()).toContain("error")
   })
 
   test("throwing port.get ⇒ ok:false (never bubbles)", async () => {
-    const tools = objectiveTools(throwingPort())
+    const tools = objectiveTools(asObjectiveAuthority(throwingPort()))
     const out = await drain(findTool(tools, "objective_get"), { thread_id: "t" })
     expect(out.ok).toBe(false)
   })
 
   test("throwing port.addBlocker (via update) ⇒ ok:false (never bubbles)", async () => {
-    const tools = objectiveTools(throwingPort())
+    const tools = objectiveTools(asObjectiveAuthority(throwingPort()))
     const out = await drain(findTool(tools, "objective_update"), {
       thread_id: "t",
       op: { kind: "addBlocker", reason: "x", waiting_on: "tool" },
@@ -362,15 +362,19 @@ describe("objective tools — NO-THROW + output shape (ADR-0402)", () => {
 
   test("objective_get for unknown thread ⇒ ok:false 'no objective set for thread <id>'", async () => {
     const port = createObjectiveStore()
-    const tools = objectiveTools(port)
-    const out = await drain(findTool(tools, "objective_get"), { thread_id: "missing" }, ctx("missing"))
+    const tools = objectiveTools(asObjectiveAuthority(port))
+    const out = await drain(
+      findTool(tools, "objective_get"),
+      { thread_id: "missing" },
+      ctx("missing"),
+    )
     expect(out.ok).toBe(false)
     expect(out.output).toContain("no objective set for thread missing")
   })
 
   test("objective_set rendered output contains goal + status", async () => {
     const port = createObjectiveStore()
-    const tools = objectiveTools(port)
+    const tools = objectiveTools(asObjectiveAuthority(port))
     const out = await drain(findTool(tools, "objective_set"), {
       thread_id: "t",
       goal: "ship feature X",
@@ -385,7 +389,7 @@ describe("objective tools — NO-THROW + output shape (ADR-0402)", () => {
     port.set("t", { goal: "the goal" })
     port.addBlocker("t", { reason: "waiting", waitingOn: "user" })
     port.setNextActions("t", ["do A", "do B"])
-    const tools = objectiveTools(port)
+    const tools = objectiveTools(asObjectiveAuthority(port))
     const out = await drain(findTool(tools, "objective_get"), { thread_id: "t" })
     expect(out.ok).toBe(true)
     expect(out.output).toContain("the goal")
@@ -399,7 +403,7 @@ describe("objective tools — NO-THROW + output shape (ADR-0402)", () => {
   test("objective_update returns the NEW state in the output (echo)", async () => {
     const port = createObjectiveStore()
     port.set("t", { goal: "g" })
-    const tools = objectiveTools(port)
+    const tools = objectiveTools(asObjectiveAuthority(port))
     const out = await drain(findTool(tools, "objective_update"), {
       thread_id: "t",
       op: { kind: "nextActions", actions: ["next thing"] },
@@ -416,7 +420,7 @@ describe("objective tools — NO-THROW + output shape (ADR-0402)", () => {
 describe("objective tools — HITL tier (ADR-0402)", () => {
   test("all 3 tools declare hitlTier 'pre-approval-ok'", () => {
     const port = createObjectiveStore()
-    const tools = objectiveTools(port)
+    const tools = objectiveTools(asObjectiveAuthority(port))
     for (const t of tools) {
       expect(typeof t.hitlTier).toBe("function")
       expect(t.hitlTier?.({} as never)).toBe("pre-approval-ok")
@@ -428,7 +432,7 @@ describe("objective tools — HITL tier (ADR-0402)", () => {
     // three as "information-class" via the HITL tier rather than via the legacy
     // isReadOnly() axis — but the get tool MAY claim isReadOnly() true.
     const port = createObjectiveStore()
-    const tools = objectiveTools(port)
+    const tools = objectiveTools(asObjectiveAuthority(port))
     const get = findTool(tools, "objective_get")
     expect(get.isReadOnly()).toBe(true)
     const setT = findTool(tools, "objective_set")
@@ -445,7 +449,7 @@ describe("objective tools — HITL tier (ADR-0402)", () => {
 describe("objective tools — thread identity is session-bound, never model input", () => {
   test("the model's thread_id argument is IGNORED; ctx.ownerId is authoritative", async () => {
     const port = createObjectiveStore()
-    const tools = objectiveTools(port)
+    const tools = objectiveTools(asObjectiveAuthority(port))
     // The model claims thread_id "attacker"; the session owner is "session-x".
     const out = await drain(
       findTool(tools, "objective_set"),
@@ -459,9 +463,13 @@ describe("objective tools — thread identity is session-bound, never model inpu
 
   test("fails CLOSED when no session-bound owner is present (no model fallback)", async () => {
     const port = createObjectiveStore()
-    const tools = objectiveTools(port)
+    const tools = objectiveTools(asObjectiveAuthority(port))
     const bareCtx: ToolContext = { cwd: "/tmp", signal: new AbortController().signal }
-    const out = await drain(findTool(tools, "objective_set"), { thread_id: "t", goal: "g" }, bareCtx)
+    const out = await drain(
+      findTool(tools, "objective_set"),
+      { thread_id: "t", goal: "g" },
+      bareCtx,
+    )
     expect(out.ok).toBe(false)
     expect(out.output.toLowerCase()).toContain("session-bound")
     expect(port.get("t")).toBeNull() // nothing was written to the model-named thread

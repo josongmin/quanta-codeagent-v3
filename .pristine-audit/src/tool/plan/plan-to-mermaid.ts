@@ -1,0 +1,94 @@
+/**
+ * RFC12-1 — plan → mermaid `graph TD` projector (pure, slice-safe).
+ *
+ * The agent already derives the DAG edges every turn: RFC07-3's
+ * `task-projection` maps `blockedBy := todo.dependencies` (the canonical inbound
+ * edge). The flat list render throws those edges away. This projector turns the
+ * SAME task view into a mermaid flowchart string — one node per todo, one
+ * `dep --> id` edge per dependency — so the EXISTING mermaid renderer
+ * (`MermaidDiagram` on web, `rich-markers` fenced-block detection on the CLI)
+ * draws the graph. NO new protocol kind, NO new store, NO DAG-layout engine
+ * (mermaid does layout).
+ *
+ * PURE leaf: imports nothing (no clock / RNG / IO / `@/agent`). Consumes a
+ * minimal STRUCTURAL node shape ({@link MermaidPlanNode}) so it stays inside the
+ * `@/tool` slice fence — the CLI feeds it the RFC07-3 `PlanReadonlyView.tasks`
+ * (id/title/status/blockedBy); the web feeds it the agent-state todo mirror.
+ *
+ * Determinism: nodes are emitted in the caller's supplied order (the RFC07-3
+ * projection already sorts canonically by `createdAt` then `id`); edges are
+ * SORTED (`from`,`to`) + DEDUPED so a duplicated or reordered dependency array
+ * can never change the output. Cycle/back-edge safe (mermaid tolerates cycles;
+ * we still emit every edge). Dangling deps (pointing at a non-existent node) are
+ * dropped so a phantom blocker never invents a node.
+ */
+
+/** The 5-state todo lifecycle (mirrors `TodoStatus` in `@/agent/plan/types`,
+ *  restated here so the projector imports no `@/agent`). */
+export type MermaidTodoStatus = "pending" | "in_progress" | "completed" | "cancelled" | "blocked"
+
+/** One todo the projector renders. `blockedBy` is the RFC07-3 canonical inbound
+ *  dependency edge (ids this todo waits on) — verbatim from `task-projection`. */
+export interface MermaidPlanNode {
+  readonly id: string
+  readonly title: string
+  readonly status: MermaidTodoStatus
+  readonly blockedBy: readonly string[]
+}
+
+/** Escape a node LABEL for a mermaid `id["..."]` declaration. Mermaid parses
+ *  the bracket-quoted form; a raw `"` closes the label early and breaks the
+ *  node. Mermaid renders the HTML entity `#quot;` back to a literal quote, so we
+ *  swap every `"` for it (and escape a literal `#` first so a title containing
+ *  `#quot;` is not mistaken for our escape). */
+const escapeLabel = (title: string): string => title.replace(/#/g, "#35;").replace(/"/g, "#quot;")
+
+/** A directed edge `from --> to` (from the blocker to the dependent). */
+interface Edge {
+  readonly from: string
+  readonly to: string
+}
+
+/**
+ * Project a plan's task set into a mermaid `graph TD` flowchart string.
+ *
+ * @param nodes the todos in canonical (caller-supplied) order.
+ * @returns a mermaid source string; `"graph TD"` alone for an empty plan.
+ */
+export const planToMermaid = (input: readonly MermaidPlanNode[]): string => {
+  // Sort nodes by `id` so the output is byte-identical regardless of the
+  // caller's array order (node declaration order does not change mermaid's
+  // edge-driven layout). The real caller (RFC07-3 projection) is already
+  // canonical; this makes the projector self-sufficiently deterministic.
+  const nodes = input.slice().sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
+  const known = new Set(nodes.map((n) => n.id))
+
+  // One edge `dep --> id` per dependency: `id` is blocked by `dep`, so the
+  // arrow points from the blocker (`dep`) to the dependent (`id`) — the natural
+  // top-down reading of a `graph TD` flow. Dangling deps (a `dep` with no node)
+  // are dropped, and edges are deduped so a duplicated dependency array entry
+  // never emits a double arrow.
+  const seen = new Set<string>()
+  const edges: Edge[] = []
+  for (const n of nodes) {
+    for (const dep of n.blockedBy) {
+      if (!known.has(dep)) continue // dangling — no phantom node/edge
+      const key = `${dep}\x00${n.id}`
+      if (seen.has(key)) continue
+      seen.add(key)
+      edges.push({ from: dep, to: n.id })
+    }
+  }
+  // Sort edges so array order / duplication cannot change the output.
+  edges.sort((a, b) =>
+    a.from < b.from ? -1 : a.from > b.from ? 1 : a.to < b.to ? -1 : a.to > b.to ? 1 : 0,
+  )
+
+  const lines: string[] = ["graph TD"]
+  for (const n of nodes) lines.push(`  ${n.id}["${escapeLabel(n.title)}"]`)
+  for (const e of edges) lines.push(`  ${e.from} --> ${e.to}`)
+  // Per-node status class (the surface's stylesheet colors `.completed` etc.);
+  // emitted after the graph body so a class line never precedes its node.
+  for (const n of nodes) lines.push(`  class ${n.id} ${n.status}`)
+  return lines.join("\n")
+}

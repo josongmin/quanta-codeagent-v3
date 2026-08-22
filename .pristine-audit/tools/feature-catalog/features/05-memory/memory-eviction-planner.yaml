@@ -1,0 +1,49 @@
+id: memory-eviction-planner
+title: Pure eviction planner — per-tier caps + supersede prune + ancient decay
+section: 5
+subsystem: 장기 메모리 — eviction 정책 (adapter-shared)
+order: 60
+maturity: L4
+status: stable
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [interactive, headless, batch, daemon, ide, ci-bot]
+configurable: static
+owners: ["@songmin"]
+labels: ["surface:core"]
+depends_on: [memory-dedup-planner]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 3/3 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "pure internal planner (returns ids to delete/decay); ui_surfaces n-a; no surface affordance"
+purpose: |
+  Periodic full-store sweep that bounds each memory tier (semantic / episodic),
+  prunes ancient superseded rows, and decays long-archived low-value memories.
+  Pure planner: returns only ids to delete + ids to decay (importance multiplier)
+  — the caller performs the actual writes so semantics stay adapter-agnostic.
+  In-memory and SQLite stores share this exact module so eviction never diverges
+  between dev and production. Caps + decay multiplier + stale window are
+  module-level constants (no hidden tuning per call site) so a single test fixes
+  behavior across both adapters.
+evidence:
+  code:
+    - src/memory/eviction.ts
+    - src/memory/ports.ts
+    - src/memory/types.ts
+  adrs: []
+  tests:
+    unit:
+      - tests/unit/eviction.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  Sibling to `memory-dedup-planner` (pre-save dup detector). Both are pure
+  shared modules so adapter parity is statically guaranteed — flipping the
+  in-memory adapter for SQLite never changes eviction outcome for the same
+  store snapshot.

@@ -21,8 +21,8 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import type { AgentConfig } from "@/agent"
 import { type HeadroomLatchState, stepHeadroomLatch } from "@/agent/compaction/index"
 import { maybeCompact } from "@/agent/loop/compaction-wire"
-import { __resetRuntimeConfig } from "@/shared"
 import type { LLMPort, Message, StreamEvent, StreamInput } from "@/llm"
+import { __resetRuntimeConfig } from "@/shared"
 import type { AgentEvent } from "@/stream"
 
 /* ------------------------------------------------------------------ */

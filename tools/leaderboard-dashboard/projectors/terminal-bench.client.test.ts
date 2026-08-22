@@ -102,7 +102,7 @@ function cardValue(html: string, label: string): string {
   for (const card of cards) {
     if (card.includes(`>${label}<`)) {
       const m = card.match(/<div class="n">([\s\S]*?)<\/div>/)
-      if (m) return m[1]!
+      if (m?.[1] !== undefined) return m[1]
     }
   }
   throw new Error(`card ${label} not found in: ${html.slice(0, 600)}`)
@@ -242,7 +242,7 @@ describe("TB21-05 client — registration", () => {
   test("the bundle registers itself under its suite id (a live registration)", () => {
     const views = evalClient<Record<string, Record<string, unknown>>>("SUITE_VIEWS", null)
     expect(Object.keys(views)).toEqual(["terminal-bench"])
-    const view = views["terminal-bench"]!
+    const view = views["terminal-bench"] ?? {}
     expect(typeof view.cards).toBe("function")
     expect(typeof view.scaffolds).toBe("function")
     expect(typeof view.matrix).toBe("object")
@@ -435,6 +435,37 @@ describe("TB21-05 client — runs are scored INDEPENDENTLY (no baseline ∪ leve
     // accuracies on the page are the two persisted ones.
     const shown = [...cards.matchAll(/\*\*([\d.]+)%\*\*/g)].map((m) => m[1])
     expect([...new Set(shown)].sort()).toEqual(["10.0", "80.0"])
+  })
+
+  test("the FOCUSED run is the most RECENT, never the best-scoring one", () => {
+    // Found by injection: swapping "newest" for "highest accuracy" left every
+    // other rail green. Defaulting the detail cards to whichever run scored best
+    // is cherry-picking — the same bias the any-pass headline had, one level up.
+    const runs = twoProfiles() // control 10% @mtime 2000, quanta-full 80% @mtime 1000
+    expect(evalClient<Record<string, unknown>>("tbSelectedRun()", dataWith(runs)).label).toBe(
+      "tb-control",
+    )
+    expect(
+      cardValue(runClient("renderTbCards(); return null;", dataWith(runs)).cards, "정확도"),
+    ).toBe("**10.0%** ± 3.0%")
+
+    // PAIRED CONTROL 1: move the clock and the focus follows the clock, so the
+    // assertion above is a rule and not a frozen literal.
+    const newerFull = [
+      { ...(runs[0] as Record<string, unknown>), mtime: 1 },
+      { ...(runs[1] as Record<string, unknown>), mtime: 9999 },
+    ]
+    expect(evalClient<Record<string, unknown>>("tbSelectedRun()", dataWith(newerFull)).label).toBe(
+      "tb-full",
+    )
+
+    // PAIRED CONTROL 2: an EXPLICIT pick still wins over recency.
+    expect(
+      evalClient<Record<string, unknown>>(
+        '(TB_FILTER.run = "tb-full", tbSelectedRun())',
+        dataWith(runs),
+      ).label,
+    ).toBe("tb-full")
   })
 
   test("runs of DIFFERENT dataset refs are never merged into one row", () => {

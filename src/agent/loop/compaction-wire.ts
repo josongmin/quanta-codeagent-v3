@@ -1,7 +1,7 @@
 import { join } from "node:path"
 import type { Message, SystemPromptInput } from "@/llm"
 import type { CompactionEventVariant } from "@/memory/typed-event"
-import { errMessage, gateOnStrict, logger, runtimeConfig } from "@/shared"
+import { errMessage, logger, runtimeConfig } from "@/shared"
 import {
   type BgSummaryPayload,
   compactIfNeeded,

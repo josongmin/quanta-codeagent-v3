@@ -1,0 +1,60 @@
+id: lsp-real-adapters
+title: LSP default-adapter real wire — code-action / format / signature-help / applyWorkspaceEdit (ADR-0143)
+section: 2
+subsystem: LSP wire layer (ADR-0143)
+order: 143
+maturity: L4
+status: new
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [n-a]
+configurable: n-a
+owners: ["@songmin"]
+labels: [surface:cli]
+depends_on: [lsp-expansion-4-tools, lsp-client-base, lspport, assert-never-exhaustiveness, byte-stable-string-comparator]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 4/4 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "Pure adapter wire layer (LspClient delegation replacing not-implemented stubs); the visible affordance is the LSP tool calls owned by 0141, this adapter impl has no UI of its own."
+purpose: |
+  Promotion-path closer for ADR-0141: replaces the three `not-implemented`
+  default adapters (code-action / format / signature-help) with real
+  `LspClient` delegations. Adds 4 wire methods to `LspClient`
+  (`requestCodeActions` / `requestFormatting` / `requestSignatureHelp` /
+  `applyWorkspaceEdit`) mirroring the existing nav-RPC pattern (lazy
+  `ensureOpen` → `callOrNullOnUnsupported` → null on -32601/-32602/"not
+  supported"). `applyWorkspaceEdit` is client-side write only — no wire —
+  via new `writeFileText` protected seam (Bun.write delegation) +
+  `applyEditsToText` helper that sorts edits descending by start offset to
+  avoid offset shift. Code-action wire result is narrowed to exact
+  port-level 9-value `kind` (LSP server returns prefix-match — e.g.
+  `refactor.extract` shouldn't surface on `refactor.inline` query).
+  Adapters take duck-typed `*LspClient` interfaces so a `FakeLspClient`
+  satisfies via structural matching — no subclass needed.
+evidence:
+  code:
+    - src/lsp/adapters/base.ts
+    - src/lsp/adapters/default-code-action.ts
+    - src/lsp/adapters/default-format.ts
+    - src/lsp/adapters/default-signature-help.ts
+  adrs: [143, 141]
+  tests:
+    unit:
+      - tests/unit/lsp-real-adapters-hellgate.test.ts
+      - tests/unit/lsp-default-rename-apply-hellgate.test.ts
+      - tests/unit/lsp-rename-rpc-hellgate.test.ts
+      - tests/unit/lsp-call-hierarchy-adapter-hellgate.test.ts
+      - tests/unit/lsp-atomic-write-hellgate.test.ts
+    integration: []
+    contract: []
+knobs: []
+notes: |
+  Lifts ADR-0141 L3 stub posture → L4 wire. Adapter files still import
+  only `../ports/*-port` (+ duck-typed interface) — they do NOT
+  type-import the `LspClient` class so the closed-port boundary stays
+  intact; callers wire via `new DefaultCodeActionAdapter(lspClient)` and
+  structural matching takes care of it.

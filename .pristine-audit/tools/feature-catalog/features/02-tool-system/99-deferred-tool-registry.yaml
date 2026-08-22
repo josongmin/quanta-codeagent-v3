@@ -1,0 +1,72 @@
+id: deferred-tool-registry
+title: DeferredResultRegistry — typed deferred-tool-result seam
+section: 2
+subsystem: 도구 — deferred tool result (Codex/Claude absorb seam, ADR-0064 family)
+order: 99
+maturity: L4
+status: new
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [interactive, headless, batch, daemon, ide, ci-bot]
+configurable: n-a
+owners: ['@songmin']
+labels: [absorbed:codex, surface:cli]
+depends_on: [tool-output-schema-factory, tool-search]
+config_refs:
+  env: [QUANTA_CAP_ENFORCE]
+surface_integration:
+  cli: na
+  web: na
+  method: audited
+  verified: "2026-07-15"
+  evidence:
+    cli: "TYPE SURFACE ONLY — the registry is import-reachable but deliberately has NO scheduler wired into the agent loop and NO user-visible affordance; see the machine-checkable `wiring` block (wireStatus=seam-only). The former cli=full was a false-green (a type-surface with no end-to-end effect)."
+    web: "pure in-memory type-surface registry, deliberately NO scheduler wired into the loop, no UI affordance on any surface"
+wiring:
+  # THE FALSE-GREEN FIX. Old state: surface_integration.cli=full — a pure
+  # in-memory type-surface scored as fully integrated. Honest state below:
+  # the producer (the registry class) EXISTS, but there is deliberately NO
+  # consumer (no scheduler wired into the loop), so wireStatus=seam-only.
+  wireStatus: seam-only
+  activation:
+    - kind: config
+      key: capEnforce
+      value: true
+    - kind: env
+      key: QUANTA_CAP_ENFORCE
+  producer:
+    - module: src/tool/deferred/index.ts
+      exportedSymbol: DeferredResultRegistry
+      role: "issues DeferredHandle ids + parks/poll/resolve DeferredToolResult (in-memory registry)"
+  consumer: []
+  contracts:
+    cli:
+      status: na
+    web:
+      status: na
+purpose: |
+  Typed seam for tools that need to return a provisional placeholder plus a
+  `DeferredHandle`, with the final `ToolResult` produced out-of-band and parked
+  here until a poller resolves it. Pure in-memory registry: `register(hint?)`
+  issues a fresh handle (`deferred-<n>` ids), `resolve(handle, result)` moves
+  it from pending→resolved, `poll(handle)` returns a discriminated
+  `DeferredToolResult` (`state: "pending" | "resolved"`). Unknown ids surface
+  as `UnknownDeferredHandleError` (typed `QuantaError` code
+  `deferred_unknown_handle`). This is the TYPE SURFACE ONLY — there is
+  deliberately no async scheduler wired into the agent loop, so the contract
+  can be exercised in isolation and a real scheduler can adopt it later without
+  changing the surface. Underpins `defineTool`'s `supportsDeferredResults` flag
+  (see `tool-output-schema-factory`).
+evidence:
+  code:
+    - src/tool/deferred/index.ts
+    - src/tool/types.ts
+    - src/shared/runtime-config.ts
+  adrs: [64]
+  tests:
+    unit: ["tests/unit/gh-pr-tools-hellgate.test.ts", "tests/unit/git-churn-blame-heatmap.test.ts", "tests/unit/git-conflict-inspect-tool.test.ts", "tests/unit/git-moved-code-tool.test.ts", "tests/unit/git-tools-hellgate.test.ts", "tests/unit/git-tools.test.ts", "tests/unit/git-upstream-check.test.ts", "tests/unit/localize.test.ts", "tests/unit/lsp-atomic-write-hellgate.test.ts", "tests/unit/patch-v4a-otel-emit-hellgate.test.ts", "tests/unit/request-plan-exit-tool.test.ts", "tests/unit/tool-factory-l3-wire.test.ts", "tests/unit/tool-factory.test.ts", "tests/unit/tool-output-schema-hellgate.test.ts", "tests/unit/tool/coverage-check-hellgate.test.ts", "tests/unit/tool/csv-read-hellgate.test.ts", "tests/unit/tool/git-branch-switch.test.ts", "tests/unit/tool/git-commit.test.ts", "tests/unit/tool/git-review-diff.test.ts", "tests/unit/tool/image-read-fsjail-unify-hellgate.test.ts", "tests/unit/tool/lsp-code-action-hellgate.test.ts", "tests/unit/tool/lsp-format-hellgate.test.ts", "tests/unit/tool/lsp-rename-apply-hellgate.test.ts", "tests/unit/tool/lsp-signature-help-hellgate.test.ts", "tests/unit/tool/ndjson-read-hellgate.test.ts", "tests/unit/tool/read-image-hellgate.test.ts", "tests/unit/tool/read-image-url-hellgate.test.ts", "tests/unit/tool/request-user-input-hell.test.ts", "tests/unit/tool/shadow-rewind-extensions-hellgate.test.ts", "tests/unit/tool/shadow-rewind-hellgate.test.ts", "tests/unit/tool/shadow-snapshots-hellgate.test.ts", "tests/unit/tool/web-fetch-hellgate.test.ts", "tests/unit/tool/web-search-hellgate.test.ts"]
+    integration: ["tests/integration/git-review-diff-e2e.test.ts", "tests/integration/git-tools-e2e.test.ts", "tests/integration/git-tools.test.ts", "tests/integration/test-runner.test.ts"]
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: Distinct from `tool-output-schema-factory` (the `defineTool` builder that DECLARES `supportsDeferredResults`) and `tool-search` (the deferred-tool catalog SEARCH surface). This is the runtime parking lot.

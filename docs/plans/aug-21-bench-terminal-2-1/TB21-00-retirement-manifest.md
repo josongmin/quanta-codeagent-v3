@@ -14,14 +14,44 @@
 
 ## Hard preconditions on every `delete` / `archive-after-canary` row
 
-Per the ticket's RED rails, **none** of these rows may be executed until **both**:
+> **AMENDED 2026-08-22 (audit).** As first written, this section required a green
+> 2.1 canary before **every** `delete` row. TB21-06 — the ticket that executes
+> those rows — gates only the **`archive-after-canary`** rows on a green canary
+> ("Local artifact retirement … *After a green 2.1 canary*"), and gates the
+> source/documentation `delete` rows on transfer-first alone. The two documents
+> disagreed, and the executed work followed the ticket: source and documentation
+> deletes shipped with no canary yet run.
+>
+> This amendment records the resolution rather than papering the gap. The split is
+> the correct one and the manifest, not the ticket, was wrong:
+>
+> - a **source/doc `delete`** is recoverable from git history by construction, so
+>   the cost of doing it before the canary is one `git show` — and holding it back
+>   leaves the tree claiming two active TB versions at once, which is the specific
+>   confusion this retirement exists to end;
+> - an **`archive-after-canary`** row moves LOCAL, non-Git artifacts. Nothing
+>   reconstructs those, and they are the only evidence a 2.0 comparison could ever
+>   be re-derived from. That row keeps the canary gate, unrelaxed.
+>
+> Nothing in the ledger below moves category. Rows still marked
+> `archive-after-canary` remain **unexecuted** and still require a green canary.
+
+**`delete` rows** may not be executed until:
 
 1. exact read-only target resolution has been performed for that specific row
    (`ls`/`find`/`git ls-files` of the literal path, echoed and reviewed), **and**
-2. a **green 2.1 canary** exists (TB21-03 3-task canary at minimum, and for report/
+2. any live contract inside the target has been transferred first and its new
+   consumer proven (the ticket's stop rule).
+
+**`archive-after-canary` rows** additionally require:
+
+3. a **green 2.1 canary** (TB21-03 3-task canary at minimum, and for report/
    dashboard rows the TB21-05 dashboard renders it).
 
-At snapshot time **neither** condition holds. Zero destructive commands have run.
+At snapshot time **none** of these conditions held. Zero destructive commands had
+run. As of the amendment, conditions 1–2 have been met for the executed `delete`
+rows; condition 3 is still outstanding, so every `archive-after-canary` row is
+still pending.
 
 ---
 

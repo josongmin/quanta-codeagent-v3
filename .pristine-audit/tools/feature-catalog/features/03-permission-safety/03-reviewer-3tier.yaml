@@ -1,0 +1,46 @@
+id: reviewer-3tier
+title: Reviewer 3-tier (user/auto_review/guardian_subagent) + 8-state outcome
+section: 3
+subsystem: 승인 표면 — reviewer + outcome invariant matrix
+order: 1
+maturity: L4
+status: stable
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [interactive, headless, batch, daemon, ide, ci-bot]
+configurable: static
+owners: ["@songmin"]
+labels: [absorbed:codex, surface:cli, tier:1]
+depends_on: [review-kind-matrix, permission-store-json, permission-otel-emit-recorder, cr3-rule-catalog-ssot-fu1-rule-per-concern-invert, git-destructive-hard-deny]
+surface_integration:
+  cli: full
+  web: partial
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 4/4 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "reviewer-tier plus 8-state outcome; on web only the user-decision approve|deny surfaces via EscalationCard, auto_review/guardian outcomes and the 8-state envelope do not render"
+purpose: 'ReviewerTier (user|auto_review|guardian_subagent) × ApprovalOutcome 8-state (not_needed/config_allowed/guardian_approved|denied/user_approved|approved_for_session|denied|aborted). HITLTier(ADR-0020)와 직교 축 — HITL=위험 형태, Reviewer=결정자. invariant matrix는 `auto_review` deny 금지 + `guardian` user-only outcome 금지를 explicit literal set으로 enforce. sticky precedence: user_aborted > guardian_denied > user_denied (DenialPrecedenceConflictError로 silent winner 금지).'
+evidence:
+  code:
+    - src/permission/types.ts
+    - src/permission/outcome.ts
+    - src/permission/reviewer.ts
+    - src/permission/index.ts
+    - src/permission/approval-ladder.ts
+    - src/permission/auto-approval-review-observer.ts
+    - src/apps/cli/repl/reviewer-policy.ts
+  adrs: [29]
+  tests:
+    unit:
+      - tests/unit/permission/outcome.test.ts
+      - tests/unit/permission/reviewer.test.ts
+      - tests/unit/permission.test.ts
+      - tests/unit/approval-ladder-hellgate.test.ts
+      - tests/unit/guardian-auto-approval-reviewer-hellgate.test.ts
+      - tests/unit/apps/cli/reviewer-policy.test.ts
+    integration: []
+    contract: []
+knobs: [QUANTA_AUTO_REVIEW, QUANTA_APPROVAL_LADDER]
+deliberate_hold: null
+notes: 'admissibility-gate(ADR-0026)와의 결선은 follow-up. ReviewerPort 미주입 시 기존 1300+ 테스트 byte-identical. T03(jun-13 codex-ide) delta: named approval-ladder SSOT(APPROVAL_LADDER 6-name rungs; guardian-approvals = 유일 reviewer:agent rung) gated by QUANTA_AUTO_REVIEW/QUANTA_APPROVAL_LADDER + emitAutoApprovalReview started/completed observability seam(default-OFF, observer throw swallow). reviewer-policy.ts = CLI default-reviewer 선택 consumer.'

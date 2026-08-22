@@ -1,0 +1,117 @@
+id: agent-features-tier1
+title: Tier-1 builders → per-subsystem composer (30 builders SRP split)
+section: 1
+subsystem: 코어 루프 SOLID 회복
+order: 204
+maturity: L4
+status: new
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [interactive, headless, batch, daemon, ide, ci-bot]
+configurable: static
+owners: ["@songmin"]
+labels: [surface:core, tier:1]
+depends_on: [skill-adr-0022, agent-loop-branch-hardening, cap-enforcer, cfg-fourrule-true, codex-2-phase-consolidator]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 12/12 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "pure internal builder-composer refactor, no user-visible UI affordance on any surface"
+purpose: |
+  `src/agent/features.ts` (SessionFeatures 합성 composer) 를 30 개
+  per-subsystem builder + composer 로 분해. 각 builder 는 ONE optional config
+  block → ONE concrete 런타임 object (or `undefined` 으로 byte-identical
+  default-OFF 보존).
+
+  30 builders (`src/agent/tier1/`):
+    - `advisor`           — buildAdvisorBlock
+    - `appshot`           — buildAppshotBlock
+    - `auto-classifier`   — buildClassifierBlock
+    - `branch-search`     — buildBranchSearchBlock
+    - `browser`           — buildBrowserBlock
+    - `budget`            — buildBudgetBlock
+    - `check-secrets`     — buildCheckSecretsBlock
+    - `compose-authoring` — buildComposeAuthoringBlock
+    - `delegate`          — buildDelegateBlock
+    - `enter-plan`        — buildEnterPlanBlock
+    - `fork-session`      — buildForkSessionBlock
+    - `objective`         — buildObjectiveBlock
+    - `plan-exit`         — buildPlanExitBlock
+    - `plan-mutation`     — buildPlanMutationBlock
+    - `pr-ship`           — buildPrShipBlock
+    - `prompt-cache`      — buildPromptCacheBlock
+    - `shadow`            — buildShadowBlock
+    - `shadow-verify`     — buildShadowVerifyBlock
+    - `side-agent`        — buildSideAgentBlock
+    - `skill`             — buildSkillBlock (+ SkillBlock type)
+    - `subagent`          — buildSubagentBlock (+ SubagentBlock type)
+    - `subagent-batch`    — buildSubagentBatchBlock
+    - `subagent-bg`       — buildSubagentBgBlock
+    - `subagent-introspect` — buildSubagentIntrospectBlock
+    - `subagent-mailbox`  — buildSubagentMailboxBlock
+    - `team`              — buildTeamBlock
+    - `user-input`        — buildUserInputBlock
+    - `web-search`        — buildWebSearchBlock
+    - `working-state`     — buildWorkingStateBlock (+ WorkingStateBlock type)
+    - `worktree`          — buildWorktreeBlock
+
+  `features.ts` composer: builder 호출 시퀀스 + 결과를 `SessionFeatures` shape
+  으로 fold. composer 는 builder 추가에 대해 closed — 새 tier-1 추가는 `tier1/`
+  신규 모듈 + `index.ts` re-export + features.ts 한 줄 composer fold push.
+  `tier1-completeness-ratchet.test.ts` 가 이 3-step 을 CI 에서 강제.
+
+  Edge direction 엄격: `features.ts` 가 `tier1/*` 를 IMPORT;
+  `tier1/*` 는 절대 `features.ts` 를 import 금지. import-cycle guard
+  (`tests/unit/agent-import-cycle.test.ts`) 가 단순한 이유 — `tier1/*` 는
+  하위 디렉토리에 있어 top-level SCC 분석에서 invisible, 그리고 one-way edge
+  이므로 새 cycle 0.
+evidence:
+  code:
+    - src/agent/features.ts
+    - src/agent/tier1/index.ts
+    - src/agent/tier1/advisor.ts
+    - src/agent/tier1/appshot.ts
+    - src/agent/tier1/auto-classifier.ts
+    - src/agent/tier1/branch-search.ts
+    - src/agent/tier1/browser.ts
+    - src/agent/tier1/budget.ts
+    - src/agent/tier1/check-secrets.ts
+    - src/agent/tier1/compose-authoring.ts
+    - src/agent/tier1/delegate.ts
+    - src/agent/tier1/enter-plan.ts
+    - src/agent/tier1/fork-session.ts
+    - src/agent/tier1/objective.ts
+    - src/agent/tier1/plan-exit.ts
+    - src/agent/tier1/plan-mutation.ts
+    - src/agent/tier1/pr-ship.ts
+    - src/agent/tier1/prompt-cache.ts
+    - src/agent/tier1/shadow.ts
+    - src/agent/tier1/shadow-verify.ts
+    - src/agent/tier1/side-agent.ts
+    - src/agent/tier1/skill.ts
+    - src/agent/tier1/subagent.ts
+    - src/agent/tier1/subagent-batch.ts
+    - src/agent/tier1/subagent-bg.ts
+    - src/agent/tier1/subagent-introspect.ts
+    - src/agent/tier1/subagent-mailbox.ts
+    - src/agent/tier1/team.ts
+    - src/agent/tier1/user-input.ts
+    - src/agent/tier1/web-search.ts
+    - src/agent/tier1/working-state.ts
+    - src/agent/tier1/worktree.ts
+  adrs: []
+  tests:
+    unit:
+      - tests/unit/features.test.ts
+      - tests/unit/tier1-completeness-ratchet.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  SRP per builder — 각 builder 의 config gating / undefined short-circuit / 결과
+  shape 이 단일 모듈에 격리. composer 는 비즈니스 결정 0 (순수 fold). OCP:
+  새 tier-1 추가 코스트 일정 (3-step: 모듈 + barrel + composer push).

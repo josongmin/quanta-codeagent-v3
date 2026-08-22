@@ -26,8 +26,10 @@
  * infers a trial id, a reward or a task version from a directory name — the stop
  * rule in the ticket forbids exactly that, and it is unnecessary.
  */
+
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs"
 import { join } from "node:path"
+import { errMessage, logger } from "@/shared"
 
 /** One trial directory's raw bytes plus the filesystem facts a pure parser
  *  cannot know. `raw` is `undefined` exactly when the record could not be read
@@ -54,7 +56,12 @@ const ATIF_FILENAME = "trajectory.json"
 const isDirectory = (path: string): boolean => {
   try {
     return statSync(path).isDirectory()
-  } catch {
+  } catch (e) {
+    // `false` stays the answer, but this predicate gates the WHOLE results scan
+    // (`scanHarborJobDir` returns `[]` when the job dir fails it), so an
+    // unreadable job directory used to be reported as "this run produced no
+    // trials" — a fs fault wearing a legitimate result's clothes.
+    logger.warn(`harbor-results.isDirectory: ${path}: ${errMessage(e)}`)
     return false
   }
 }
@@ -82,7 +89,7 @@ const readTrial = (jobDir: string, trialDirName: string): HarborTrialFile | unde
   try {
     text = readFileSync(sourcePath, "utf8")
   } catch (error) {
-    return { ...base, raw: undefined, readError: `unreadable: ${String(error)}` }
+    return { ...base, raw: undefined, readError: `unreadable: ${errMessage(error)}` }
   }
   if (text.trim() === "") {
     return { ...base, raw: undefined, readError: `empty ${RESULT_FILENAME}` }
@@ -90,7 +97,7 @@ const readTrial = (jobDir: string, trialDirName: string): HarborTrialFile | unde
   try {
     return { ...base, raw: JSON.parse(text) as unknown }
   } catch (error) {
-    return { ...base, raw: undefined, readError: `unparseable JSON: ${String(error)}` }
+    return { ...base, raw: undefined, readError: `unparseable JSON: ${errMessage(error)}` }
   }
 }
 

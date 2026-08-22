@@ -1,0 +1,68 @@
+id: mcp-tasks-live
+title: MCP tasks live binding (outbound tasks/* dispatch)
+section: 9
+subsystem: mcp client (ADR-0431)
+order: 431
+maturity: L3
+status: stable
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [n-a]
+configurable: integrated
+owners: ["@songmin"]
+labels: ["absorbed:rmcp-0.15", "surface:integration", "tier:adapter", "default-off"]
+depends_on: [01-quantamcpconfig]
+surface_integration:
+  cli: full
+  web: full
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 2/2 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "agent calls to the registered mcp_tasks tools render as tool cards (tool_call/tool_result bridged at context-binding.ts) in the web session view"
+purpose: |
+  Live `McpTasksPort` over a started `McpClient`. `clientTasksPort(client)`
+  dispatches the four rmcp 0.15 `tasks/*` JSON-RPC requests through
+  `client.requestRaw(method, params)` — the outbound mirror of the inbound
+  elicitation router:
+    list      → `tasks/list`      `{ cursor? }`  → `{ tasks, nextCursor? }`
+    getInfo   → `tasks/getInfo`   `{ taskId }`    → `{ taskId, status, … }` | null
+    getResult → `tasks/getResult` `{ taskId }`    → `{ status, output|error }`
+    cancel    → `tasks/cancel`    `{ taskId }`    → `{}` | `{ ok:false, reason }`
+  The composition root (`loadMcpTools` → `tasksToolsFor`) registers the three
+  model-facing `mcp_tasks` tools (list / get / cancel) ONLY when the connected
+  server advertised the `tasks/*` capability in its `initialize` response. No
+  advertisement ⇒ no tools (byte-identical to before the binding existed).
+  Transport errors (process exit / RPC timeout) propagate as `McpError`;
+  MALFORMED-but-successful responses map to typed conservative outcomes
+  (cursor-stale / null / not-ready / not-found) so a hostile server cannot
+  crash the model loop.
+evidence:
+  code:
+    - src/mcp/tasks/client-port.ts
+    - src/agent/mcp-bridge.ts
+  adrs: ["docs/decisions/0431-mcp-tasks-live-binding.md"]
+  tests:
+    unit:
+      - tests/unit/mcp/tasks-live-binding-hellgate.test.ts
+      - tests/unit/mcp/tasks-live-binding-adversarial.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  ACTIVATION IS MCP-CAPABILITY-NEGOTIATED, NOT AN ENV KNOB. There is no
+  `QUANTA_*` flag and `config_refs` is intentionally empty — the tools become
+  available iff a connected MCP server advertises `capabilities.tasks` in its
+  `initialize` handshake (read by `McpClient.serverSupportsTasks()`), and the
+  composition root gates registration on that. `configurable: integrated` is
+  structurally honest in the wiring sense (the binding is fully wired into
+  `loadMcpTools` and reaches the model surface with no further config), but the
+  ON/OFF decision is owned by the server's advertised capability, not by user
+  configuration. A server without the capability adds zero tools.
+
+  Tool count is THREE (`list_mcp_tasks` / `get_mcp_task` / `cancel_mcp_task`),
+  not four — the four `tasks/*` JSON-RPC METHODS collapse onto three
+  model-facing tools (getInfo + getResult are both served by `get_mcp_task`).
+
+  `knobs: []` because there is no env/config surface to enumerate.

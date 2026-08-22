@@ -1,0 +1,61 @@
+id: trajectory-schema
+title: Trajectory v1 schema SSOT — kind taxonomy + envelope + redaction policy id
+section: 8
+subsystem: 텔레메트리 — append-only event schema
+order: 9
+maturity: L4
+status: stable
+ui_surfaces: [cli]
+monitoring: integrated
+telemetry_keys: [quanta.trajectory.v1]
+modes: [interactive, headless, batch, daemon, ide, ci-bot]
+configurable: static
+owners: ["@songmin"]
+labels: ["surface:core", "observability-primitive"]
+depends_on: [bun-run-dev-start, cli-single-binary-build, run-context-correlation]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 1/1 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "Pure internal schema/SSOT primitive; no UI affordance on any surface."
+purpose: |
+  Single source of truth for the append-only JSONL trajectory (RFC-0002 §5.2).
+  Declares `TRAJECTORY_SCHEMA = "quanta.trajectory.v1"`, the 17-element
+  `TrajectoryKind` closed union (session_start / session_end / turn_start /
+  llm_request / llm_usage / assistant_text / tool_call / tool_progress /
+  tool_result / recovery / patch_generated / patch_applied / patch_rejected /
+  sandbox / verify / error / observability_degraded), the `TrajectoryEvent`
+  envelope (schema/v/seq/ts/monotonicNs/ctx/spanId/parentSpanId/producer/
+  pricingVersion/redaction/kind/data), the `Producer` provenance shape, and
+  the `Redaction` { policy, applied } stamp. Lives in `@/shared` so `@/stream`
+  may import it without crossing slice boundaries (RFC §6: `@/stream →
+  @/observability` is forbidden).
+
+  Invariants:
+    - `seq` is process-monotonic so ordering survives wall-clock skew;
+      `ts` is display-only.
+    - The `REDACTION_POLICY` id (`"secrets.v1"`) is a stable symbolic label
+      — widening the secret-scrub regex sets does NOT churn it (consumers
+      do not dispatch on its value, only assert "non-empty").
+    - Adding a kind requires extending BOTH the type union AND the runtime
+      `TRAJECTORY_KINDS` set so guards can branch exhaustively.
+evidence:
+  code:
+    - src/shared/trajectory.ts
+  adrs: []
+  tests:
+    unit:
+      - tests/unit/trajectory.test.ts
+      - tests/unit/probe-parse.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  Forward-compat is a HARD invariant — probes / replay tooling MUST tolerate
+  unknown kinds and unknown event-data fields (golden corpora in
+  `probe-parse.test.ts` cover both directions). Per-kind `data` contracts
+  documented inline in the source as section comments.

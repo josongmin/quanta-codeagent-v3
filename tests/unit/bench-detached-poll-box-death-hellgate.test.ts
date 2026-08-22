@@ -33,6 +33,7 @@ import {
   createSpawnRecorder,
   ok,
   whenArgsInclude,
+  whenArgsIncludeAll,
   whenCmd,
   whenSshRemote,
   whenSshRemoteIncludes,
@@ -169,6 +170,12 @@ describe("BUG 1 — detached poll bounds box death (no forever spin)", () => {
     // The FIRST box (i-box0) dies: its run.exit/run.log polls fail forever AND
     // describe State.Name reports `terminated`. The SECOND box (i-box1) is healthy.
     const { fn, calls } = createSpawnRecorder(
+      // Pre-launch AMI resolution: the config's `ssm:` AMI reference is resolved
+      // through `aws ssm get-parameter` before RunInstances
+      // (`resolveLaunchAmi`, box-session/ec2-lifecycle.ts). Unstubbed it throws
+      // "AMI SSM resolution failed" and the run never reaches the poll loop
+      // this hellgate is about.
+      whenArgsIncludeAll(["ssm", "get-parameter"], ok("ami-0123456789abcdef\n")),
       whenArgsInclude("describe-security-groups", ok("sg-abc")),
       whenCmd("curl", ok("203.0.113.7\n")), // SG ingress current-IP lookup (BUG 2)
       whenArgsInclude("run-instances", () => {

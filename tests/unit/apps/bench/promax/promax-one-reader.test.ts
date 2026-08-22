@@ -96,6 +96,7 @@ const probeProfile = (family: string, readCorpus: FamilyCorpusReader): DatasetFa
   gradeEvaluator: () => async () => ({ resolved: false, gradingCompleted: false, log: "" }),
   harnessSpec: () => ({ pipSpec: "swebench", namespace: "swebench" }),
   onBoxEnvPrefix: () => "",
+  admitBox: () => {},
   setupBox: async () => {},
 })
 

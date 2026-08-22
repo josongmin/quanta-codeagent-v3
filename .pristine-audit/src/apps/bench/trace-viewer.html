@@ -1,0 +1,370 @@
+<!doctype html>
+<!--
+  trace-viewer — self-contained live OTEL waterfall for the bench agent loop.
+  Served by src/apps/bench/otel-trace-sink.ts at GET /. Polls /spans.json and renders a
+  Jaeger-style waterfall (per-trace nesting, duration bars, gen_ai attrs). No
+  build, no deps, no network — just the sink + a browser.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>quanta · live trace</title>
+<style>
+  :root{
+    --bg:#0b0e14; --panel:#11151f; --panel2:#161b27; --line:#222b3a;
+    --txt:#cdd6e4; --dim:#7c8aa0; --accent:#7aa2f7;
+    --llm:#7aa2f7; --tool:#9ece6a; --turn:#bb9af7; --root:#7dcfff;
+    --err:#f7768e; --grid:#1b2230;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--txt);
+    font:13px/1.4 ui-monospace,SFMono-Regular,Menlo,monospace}
+  header{display:flex;align-items:center;gap:18px;padding:10px 16px;
+    background:var(--panel);border-bottom:1px solid var(--line);position:sticky;top:0;z-index:5}
+  header h1{font-size:14px;margin:0;font-weight:600;letter-spacing:.5px;color:#fff}
+  header h1 .dot{color:var(--tool)}
+  .stat{display:flex;flex-direction:column;line-height:1.1}
+  .stat b{font-size:15px;color:#fff}
+  .stat span{font-size:10px;color:var(--dim);text-transform:uppercase;letter-spacing:.5px}
+  .spacer{flex:1}
+  select,button{background:var(--panel2);color:var(--txt);border:1px solid var(--line);
+    border-radius:6px;padding:5px 9px;font:inherit;cursor:pointer}
+  button.on{border-color:var(--tool);color:var(--tool)}
+  /* run-id filter chip — shown when the URL carries ?run=<id>; click to clear */
+  .rf{display:inline-flex;align-items:center;gap:6px;font-size:11px;color:var(--turn);
+    text-decoration:none;background:var(--panel2);border:1px solid var(--turn);
+    border-radius:12px;padding:3px 9px;white-space:nowrap}
+  .rf::after{content:"✕";color:var(--dim);font-size:10px}
+  .rf:hover{border-color:var(--accent)}.rf:hover::after{color:var(--err)}
+  .legend{display:flex;gap:12px;font-size:11px;color:var(--dim);align-items:center}
+  .legend i{display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:4px;vertical-align:middle}
+  main{display:flex;height:calc(100vh - 53px)}
+  /* left session picker — choose WHICH run/session before the waterfall renders */
+  #sessions{width:248px;flex:none;overflow:auto;border-right:1px solid var(--line);background:var(--panel)}
+  #sessions .sh{padding:9px 12px;font-size:10px;text-transform:uppercase;letter-spacing:.5px;
+    color:var(--dim);position:sticky;top:0;background:var(--panel);border-bottom:1px solid var(--line)}
+  .sess{padding:8px 12px;border-bottom:1px solid var(--grid);cursor:pointer;border-left:2px solid transparent}
+  .sess:hover{background:#0f141d}
+  .sess.sel{background:#152033;border-left-color:var(--accent)}
+  .sess .si{color:#fff;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:12px}
+  .sess .sm{color:var(--dim);font-size:10px;margin-top:3px;display:flex;gap:8px;flex-wrap:wrap}
+  .sess .sm .e{color:var(--err)}
+  #waterfall{flex:1;overflow:auto;padding:8px 0}
+  .trace{margin:0 0 4px}
+  .trace>.thead{display:flex;gap:10px;align-items:center;padding:6px 16px;
+    background:var(--panel);border-top:1px solid var(--line);cursor:pointer;position:sticky;top:0}
+  .trace>.thead .tid{color:var(--dim);font-size:11px}
+  .trace>.thead .tname{color:#fff;font-weight:600}
+  .trace>.thead .tdur{margin-left:auto;color:var(--accent)}
+  .row{display:flex;align-items:center;height:22px;padding:0 16px;position:relative}
+  .row:hover{background:#0f141d}
+  .row.sel{background:#152033}
+  .label{width:46%;min-width:280px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+    display:flex;align-items:center;gap:6px;cursor:pointer}
+  .label .nm{color:var(--txt)}
+  .label .ky{color:var(--dim);font-size:11px}
+  .kind{font-size:9px;padding:0 4px;border-radius:3px;border:1px solid var(--line);color:var(--dim);flex:none}
+  .kind-client{color:var(--llm);border-color:var(--llm)}
+  .kind-internal{color:var(--turn);border-color:var(--turn)}
+  .tick{display:inline-block;width:8px;height:8px;border-radius:2px;flex:none}
+  .track{flex:1;position:relative;height:14px;background:
+    repeating-linear-gradient(90deg,transparent,transparent 9.9%,var(--grid) 10%,var(--grid) calc(10% + 1px))}
+  .bar{position:absolute;top:2px;height:10px;border-radius:3px;min-width:2px;opacity:.92}
+  .bar.err{outline:1px solid var(--err);outline-offset:1px}
+  .dms{position:absolute;top:-1px;font-size:10px;color:var(--dim);white-space:nowrap}
+  /* drag-to-resize divider between the waterfall and the detail panel */
+  #resizer{width:7px;flex:none;cursor:col-resize;background:var(--line);
+    transition:background .12s;position:relative}
+  #resizer::after{content:"";position:absolute;inset:0 2px;border-radius:2px}
+  #resizer:hover,#resizer.drag{background:var(--accent)}
+  #side{width:var(--side-w,460px);flex:none;background:var(--panel);
+    overflow:auto;padding:14px 16px}
+  #side h2{font-size:13px;margin:0 0 4px;color:#fff;word-break:break-all}
+  #side .meta{color:var(--dim);font-size:11px;margin-bottom:14px;display:flex;gap:8px;align-items:center}
+  /* each attribute is a full-width block: key label above, value in its own box —
+     so long LLM prompts/completions use the whole panel instead of a squished cell */
+  #side .attr{margin:0 0 12px}
+  #side .attr .k{color:var(--accent);font-size:11px;font-weight:600;margin-bottom:3px;word-break:break-all}
+  #side .attr .v{white-space:pre-wrap;overflow-wrap:anywhere;background:var(--panel2);
+    border:1px solid var(--grid);border-radius:5px;padding:7px 9px;font-size:12px;line-height:1.5;
+    color:var(--txt);max-width:100%;overflow-x:auto;max-height:46vh;overflow-y:auto}
+  #side .attr .v.json{color:#b7c7e8}
+  #side .empty{color:var(--dim)}
+  .pill{font-size:10px;padding:1px 6px;border-radius:8px;border:1px solid var(--line)}
+  .pill.error{color:var(--err);border-color:var(--err)}
+  .pill.ok{color:var(--tool);border-color:var(--tool)}
+</style>
+</head>
+<body>
+<header>
+  <h1>quanta<span class="dot">·</span>live trace</h1>
+  <a id="runfilter" class="rf" hidden href="/" title="clear run filter"></a>
+  <div class="stat"><b id="s-spans">0</b><span>spans</span></div>
+  <div class="stat"><b id="s-traces">0</b><span>turns</span></div>
+  <div class="stat"><b id="s-err" style="color:var(--err)">0</b><span>errors</span></div>
+  <div class="stat"><b id="s-tin">0</b><span>tok in</span></div>
+  <div class="stat"><b id="s-tout">0</b><span>tok out</span></div>
+  <div class="stat"><b id="s-wall">0s</b><span>wall</span></div>
+  <div class="spacer"></div>
+  <div class="legend">
+    <span><i style="background:var(--llm)"></i>llm</span>
+    <span><i style="background:var(--tool)"></i>tool</span>
+    <span><i style="background:var(--turn)"></i>turn</span>
+    <span><i style="background:var(--root)"></i>session</span>
+    <span><i style="background:var(--err)"></i>error</span>
+  </div>
+  <span class="stat"><b id="s-sess">0</b><span>sessions</span></span>
+  <button id="auto" class="on">● live</button>
+</header>
+<main>
+  <div id="sessions"></div>
+  <div id="waterfall"></div>
+  <div id="resizer" title="drag to resize"></div>
+  <div id="side"><div class="empty">click a span →</div></div>
+</main>
+<script>
+// Categorize a span → color band. Prefer the Wave-2 gen_ai.operation.name
+// (chat / execute_tool / invoke_agent) — the canonical span TYPE — over a name
+// substring, so the unified tree colors correctly even if the span name changes.
+const CAT = (s) => {
+  const a = s.attrs||{};
+  const op = String(a["gen_ai.operation.name"]||"").toLowerCase();
+  const n = (s.name||"").toLowerCase();
+  if (s.status === "error") return "err";
+  if (op === "chat" || n.includes("sampling") || n.startsWith("chat") || a["gen_ai.response.model"] || a["gen_ai.request.model"]) return "llm";
+  if (op === "execute_tool" || a["gen_ai.tool.name"] || n.includes("tool")) return "tool";
+  if (n.includes("turn")) return "turn";
+  if (op === "invoke_agent" || n.includes("invoke_agent") || n.includes("instance") || n.includes("session") || n.includes("loop")) return "root";
+  return "root";
+};
+const COLOR = {llm:"var(--llm)",tool:"var(--tool)",turn:"var(--turn)",root:"var(--root)",err:"var(--err)"};
+const KEYATTR = (s) => {
+  const a = s.attrs||{};
+  if (a["gen_ai.response.model"]) return `${a["gen_ai.response.model"]} · ${a["gen_ai.usage.input_tokens"]??"?"}→${a["gen_ai.usage.output_tokens"]??"?"}`;
+  // execute_tool span: prefer the canonical gen_ai.tool.name (+ call id)
+  if (a["gen_ai.tool.name"]) return `${a["gen_ai.tool.name"]}${a["gen_ai.tool.call.id"]?" #"+String(a["gen_ai.tool.call.id"]).slice(-6):""}`;
+  if (a["quanta.tool.name"]||a["tool"]) return `${a["quanta.tool.name"]||a["tool"]} ${a["quanta.tool.call.status"]||""}`.trim();
+  if (a["gen_ai.operation.name"]) return String(a["gen_ai.operation.name"]);
+  if (a["quanta.instance.id"]||a["instance"]) return a["quanta.instance.id"]||a["instance"];
+  return "";
+};
+// SpanKind badge (CLIENT on chat/sampling, INTERNAL on agent/tool/turn) — shown
+// on each row so the OTLP kind is legible at a glance, matching the semconv.
+const KINDBADGE = (s) => {
+  const k = String(s.kind||"").toLowerCase();
+  if (k === "client") return '<span class="kind kind-client" title="SpanKind.CLIENT">CLIENT</span>';
+  if (k === "internal") return '<span class="kind kind-internal" title="SpanKind.INTERNAL">INT</span>';
+  return "";
+};
+let selId = null, selSession = null, auto = true, lastData = [];
+
+// Deep-link params (`quanta-bench trace <run-id>` opens `/?run=<id>`):
+//   ?run=<id>      → show ONLY spans whose quanta.run.id matches this run
+//   ?session=<id>  → pre-select that session (instance.id / traceId) in the picker
+// The run filter is applied BEFORE sessionsOf so a sink mixing many concurrent
+// runs (an A/B fan-out) collapses to just the requested run.
+const urlParams = new URLSearchParams(location.search);
+const runFilter = urlParams.get("run");
+// `?session=<id>` is STICKY until it first appears: a live run's session may not
+// exist at first poll, so we keep wanting it (instead of overwriting selSession to
+// the most-recent session and losing the deep-link) until its spans arrive, then
+// release it so the user's manual picks aren't overridden.
+let wantSession = urlParams.get("session");
+if(runFilter){
+  document.title = "quanta · trace · run " + runFilter;
+  const chip = document.getElementById("runfilter");
+  chip.hidden = false; chip.textContent = "run " + runFilter;
+}
+// Keep only the requested run's spans (no filter ⇒ identity). A span carries the
+// run id as the resource-derived attr quanta.run.id (folded on by the sink).
+function applyRunFilter(spans){
+  if(!runFilter) return spans;
+  return spans.filter(s => String(s.attrs && s.attrs["quanta.run.id"] || "") === runFilter);
+}
+
+// Group spans into SESSIONS. A session = one run/conversation, keyed by
+// quanta.instance.id when present (so all turns of one bench instance fold
+// together even across trace ids), else the traceId. Returns key → {label, spans}.
+function sessionsOf(spans){
+  const byTrace = new Map();
+  for(const s of spans){ const t = s.traceId||"·"; if(!byTrace.has(t)) byTrace.set(t,[]); byTrace.get(t).push(s); }
+  const attrAny = (arr,k)=>{ const h=arr.find(x=>x.attrs&&x.attrs[k]!=null); return h?h.attrs[k]:undefined; };
+  const sess = new Map();
+  for(const [t,arr] of byTrace){
+    // session identity MUST be unique-per-run. traceId is (each session_loop root
+    // mints a fresh one); conversation.id is NOT (the local bench path leaves it
+    // "default" for every run, which would collapse all concurrent runs into one).
+    // So key by instance.id (unique per bench instance, folds retries) ELSE traceId.
+    // conversation.id is used only as a label hint when it is a real, non-default id.
+    const inst = attrAny(arr,"quanta.instance.id");
+    const conv = attrAny(arr,"quanta.conversation.id");
+    const key = inst || t;
+    const convLabel = conv && conv !== "default" ? conv.replace(/^bench-/,"").slice(0,8) : null;
+    const label = inst || convLabel || ("run " + t.slice(0,8));
+    let e = sess.get(key);
+    if(!e){ e = {key, label, spans: [], traces: new Set()}; sess.set(key,e); }
+    for(const s of arr) e.spans.push(s);
+    e.traces.add(t);
+  }
+  return sess;
+}
+
+async function poll(){
+  try{
+    const r = await fetch("/spans.json",{cache:"no-store"});
+    lastData = await r.json();
+    render(lastData);
+  }catch(e){/* sink restarting; keep last */}
+}
+function render(allSpans){
+  // honor the ?run=<id> deep-link: everything below sees only this run's spans
+  const spans = applyRunFilter(allSpans);
+  // ── sessions: summarize each, sort most-recent first ──
+  const sess = sessionsOf(spans);
+  const list = [...sess.values()].map(e=>{
+    let min=Infinity,max=-Infinity,err=0,turns=0,tin=0,tout=0;
+    for(const s of e.spans){
+      min=Math.min(min,s.startNano); max=Math.max(max,s.endNano);
+      if(s.status==="error") err++;
+      if((s.name||"").includes("turn")) turns++;
+      tin += +(s.attrs?.["gen_ai.usage.input_tokens"]||0);
+      tout += +(s.attrs?.["gen_ai.usage.output_tokens"]||0);
+    }
+    return Object.assign(e,{min,max,err,turns,tin,tout,dur:isFinite(min)?(max-min)/1e9:0});
+  }).sort((a,b)=>b.max-a.max);
+
+  // honor a sticky ?session= deep-link once its spans show up (then release it)
+  if(wantSession && sess.has(wantSession)){ selSession = wantSession; wantSession = null; }
+  // default / keep selection valid (auto-pick the most recent session)
+  if(!selSession || !sess.has(selSession)) selSession = list.length ? list[0].key : null;
+
+  // ── left sidebar: the session picker ──
+  const sb = document.getElementById("sessions");
+  const hhmmss = (nano)=> isFinite(nano) ? new Date(nano/1e6).toLocaleTimeString() : "";
+  sb.innerHTML = '<div class="sh">sessions · '+list.length+'</div>' + list.map(e=>
+    '<div class="sess'+(e.key===selSession?' sel':'')+'" data-k="'+esc(e.key)+'">'
+    + '<div class="si">'+esc(e.label)+'</div>'
+    + '<div class="sm"><span>'+hhmmss(e.min)+'</span>'
+    + '<span>'+e.spans.length+' sp</span>'
+    + (e.turns?'<span>'+e.turns+' turn</span>':'')
+    + (e.err?'<span class="e">'+e.err+' err</span>':'')
+    + '<span>'+e.dur.toFixed(1)+'s</span>'
+    + (e.tin?'<span>'+(e.tin/1000).toFixed(1)+'k→'+e.tout+'</span>':'')
+    + '</div></div>'
+  ).join('');
+  sb.querySelectorAll('.sess').forEach(el=> el.onclick = ()=>{ selSession=el.dataset.k; selId=null; render(lastData); });
+
+  // header stats reflect the SELECTED session
+  const cur = list.find(e=>e.key===selSession);
+  document.getElementById("s-sess").textContent = list.length;
+  document.getElementById("s-spans").textContent = cur? cur.spans.length : 0;
+  document.getElementById("s-traces").textContent = cur? cur.turns : 0;
+  document.getElementById("s-err").textContent = cur? cur.err : 0;
+  document.getElementById("s-tin").textContent = cur? cur.tin.toLocaleString() : "0";
+  document.getElementById("s-tout").textContent = cur? cur.tout.toLocaleString() : "0";
+  document.getElementById("s-wall").textContent = cur? cur.dur.toFixed(1)+"s" : "0s";
+
+  // ── waterfall: ONLY the selected session, grouped by its trace(s)/turns ──
+  const wf = document.getElementById("waterfall");
+  const sc = wf.scrollTop;
+  wf.innerHTML = "";
+  if(!cur){
+    wf.innerHTML = runFilter
+      ? '<div class="empty" style="padding:24px">run <b>'+esc(runFilter)+'</b> 의 span이 아직 없음 — 그 run을 <code>QUANTA_OTEL_RUN_ID='+esc(runFilter)+'</code> 로 돌리고 있는지 확인. (전체 보기: <a href="/" style="color:var(--accent)">필터 해제</a>)</div>'
+      : '<div class="empty" style="padding:24px">세션 없음 — 벤치를 <code>QUANTA_OTEL_ENDPOINT</code> 로 돌리면 여기 채워진다.</div>';
+    return;
+  }
+  const byTrace = new Map();
+  for(const s of cur.spans){ const t=s.traceId||"·"; if(!byTrace.has(t)) byTrace.set(t,[]); byTrace.get(t).push(s); }
+  for(const [t,arr] of byTrace){
+    if(!arr.length) continue;
+    const tmin = Math.min(...arr.map(s=>s.startNano));
+    const tmax = Math.max(...arr.map(s=>s.endNano));
+    const span = Math.max(1, tmax - tmin);
+    // nest: order by start, depth via parent chain within trace
+    const byId = new Map(arr.map(s=>[s.spanId,s]));
+    const depth = (s,guard=0)=>{ let d=0,p=s.parentSpanId; while(p&&byId.has(p)&&guard<50){d++;p=byId.get(p).parentSpanId;guard++;} return d; };
+    const sorted = [...arr].sort((a,b)=>a.startNano-b.startNano);
+    const inst = arr.find(x=>x.attrs?.["quanta.instance.id"])?.attrs["quanta.instance.id"] || "trace";
+    const div = document.createElement("div"); div.className="trace";
+    const head = document.createElement("div"); head.className="thead";
+    head.innerHTML = `<span class="tname">${esc(inst)}</span><span class="tid">${esc(t.slice(0,12))}…</span>`+
+      `<span class="tdur">${((tmax-tmin)/1e9).toFixed(2)}s · ${arr.length} spans</span>`;
+    div.appendChild(head);
+    for(const s of sorted){
+      const cat = CAT(s);
+      const left = ((s.startNano - tmin)/span*100);
+      const wid = Math.max(0.4,(s.endNano - s.startNano)/span*100);
+      const row = document.createElement("div");
+      row.className = "row"+(s.spanId===selId?" sel":"");
+      const ind = "&nbsp;".repeat(depth(s)*2);
+      row.innerHTML =
+        `<div class="label"><span class="tick" style="background:${COLOR[cat]}"></span>`+
+        `${ind}<span class="nm">${esc(s.name)}</span> ${KINDBADGE(s)} <span class="ky">${esc(KEYATTR(s))}</span></div>`+
+        `<div class="track"><div class="bar ${s.status==="error"?"err":""}" `+
+        `style="left:${left}%;width:${wid}%;background:${COLOR[cat]}"></div>`+
+        `<span class="dms" style="left:${Math.min(left,88)}%">${s.durationMs??"?"}ms</span></div>`;
+      row.querySelector(".label").onclick = ()=>{ selId=s.spanId; showSide(s); render(lastData); };
+      div.appendChild(row);
+    }
+    wf.appendChild(div);
+  }
+  wf.scrollTop = sc;
+  if(selId){ const s = spans.find(x=>x.spanId===selId); if(s) showSide(s); }
+}
+function esc(x){ return String(x).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;"); }
+// pretty-print JSON-ish values so LLM prompts/completions read as formatted blocks
+function fmtVal(v){
+  if(typeof v === "string"){
+    const t = v.trim();
+    if((t[0]==="{"&&t.endsWith("}"))||(t[0]==="["&&t.endsWith("]"))){
+      try{ return {text:JSON.stringify(JSON.parse(t),null,2),json:true}; }catch{}
+    }
+    return {text:v,json:false};
+  }
+  if(v&&typeof v==="object"){ try{ return {text:JSON.stringify(v,null,2),json:true}; }catch{} }
+  return {text:String(v),json:false};
+}
+function showSide(s){
+  const a = s.attrs||{};
+  const blocks = Object.keys(a).sort().map(k=>{
+    const f = fmtVal(a[k]);
+    return `<div class="attr"><div class="k">${esc(k)}</div>`+
+      `<div class="v${f.json?" json":""}">${esc(f.text)}</div></div>`;
+  }).join("");
+  const errLine = (s.status==="error" && s.statusMessage)
+    ? `<div class="attr"><div class="k" style="color:var(--err)">error message</div>`+
+      `<div class="v" style="border-color:var(--err);color:var(--err)">${esc(s.statusMessage)}</div></div>`
+    : "";
+  document.getElementById("side").innerHTML =
+    `<h2>${esc(s.name)}</h2>`+
+    `<div class="meta">${s.durationMs??"?"}ms · ${esc(s.kind)} · `+
+    `<span class="pill ${esc(s.status)}">${esc(s.status)}</span></div>`+
+    errLine+
+    (blocks || `<div class="empty">no attributes</div>`);
+}
+document.getElementById("auto").onclick = (e)=>{ auto=!auto; e.target.classList.toggle("on",auto); e.target.textContent = auto?"● live":"○ paused"; };
+
+// drag the divider to resize the detail panel; width persists across reloads.
+// double-click the divider to snap back to the default width.
+(function(){
+  const rz = document.getElementById("resizer"), root = document.documentElement, DEFAULT = 460;
+  const clamp = (w)=>Math.min(window.innerWidth*0.85, Math.max(300, w));
+  const setW = (w)=>root.style.setProperty("--side-w", clamp(w)+"px");
+  const saved = +localStorage.getItem("trace.sideW"); if(saved>=300) setW(saved);
+  let drag=false;
+  const move=(e)=>{ if(!drag)return; setW(window.innerWidth - (e.touches?e.touches[0].clientX:e.clientX)); };
+  const end=()=>{ if(!drag)return; drag=false; rz.classList.remove("drag"); document.body.style.userSelect="";
+    localStorage.setItem("trace.sideW", parseInt(getComputedStyle(root).getPropertyValue("--side-w"))||DEFAULT); };
+  const start=(e)=>{ drag=true; rz.classList.add("drag"); document.body.style.userSelect="none"; e.preventDefault(); };
+  rz.addEventListener("mousedown",start); rz.addEventListener("touchstart",start,{passive:false});
+  window.addEventListener("mousemove",move); window.addEventListener("touchmove",move,{passive:false});
+  window.addEventListener("mouseup",end); window.addEventListener("touchend",end);
+  rz.addEventListener("dblclick",()=>{ setW(DEFAULT); localStorage.setItem("trace.sideW",DEFAULT); });
+})();
+
+setInterval(()=>{ if(auto) poll(); }, 1500);
+poll();
+</script>
+</body>
+</html>

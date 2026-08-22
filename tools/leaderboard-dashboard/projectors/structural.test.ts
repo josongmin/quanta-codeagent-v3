@@ -47,7 +47,7 @@ const SUITE_BRANCH =
 /** The page SHELL — the two files that are supposed to know no suite at all.
  *  `page.ts` holds the HTML/client shell that used to live inside server.ts, so
  *  the rails below must cover BOTH or the extraction would have laundered them. */
-const SHELL_FILES = ["server.ts", "page.ts"] as const
+const SHELL_FILES = ["server.ts", "page.ts", "page-family-cards.ts"] as const
 
 describe("rail: the page shell branches on no suite identity", () => {
   test("the detector actually detects (non-vacuity)", () => {
@@ -383,7 +383,10 @@ describe("rail: the touched boundaries moved out of the shell", () => {
    */
   const SIZE_FLOOR: Readonly<Record<string, number>> = {
     "server.ts": 1215,
-    "page.ts": 997,
+    // C-D re-anchor (downward only): the family cards + the shared
+    // `bestCampaignCard` builder moved to `page-family-cards.ts`, so the shell
+    // paid for the new builder and 45 lines more.
+    "page.ts": 953,
   }
 
   /** `wc -l` semantics, so the numbers in SIZE_FLOOR are the ones a reader gets

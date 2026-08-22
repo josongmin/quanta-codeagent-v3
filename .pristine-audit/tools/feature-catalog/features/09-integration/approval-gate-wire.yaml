@@ -1,0 +1,108 @@
+id: approval-gate-wire
+title: Approval-gate wire — attribute HITL reviewer escalations to Objective+RunLedger via approval-SM (ADR-0407)
+section: 9
+subsystem: HITL attribution (ADR-0407)
+order: 12
+maturity: L3
+status: new
+ui_surfaces: [cli, tauri]
+monitoring: planned
+modes: [interactive, headless, batch, daemon, ide, ci-bot]
+configurable: integrated
+config_refs:
+  env: []
+owners: ["@songmin"]
+labels: ["surface:core", "default-off"]
+depends_on: [approval-state-machine, objective-store, run-ledger, admissibility-gate]
+surface_integration:
+  cli: full
+  web: partial
+  method: audited
+  verified: "2026-07-19"
+  evidence:
+    cli: "runs in the interactive CLI — 4/4 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "default-OFF attribution wire; when host injects ports its ApprovalRequest reaches the web-only ObservabilityPane (ApprovalsList/ObjectiveCard.blockers/RunColumn.waiting) via the ADR-0408 observability-emitter, not the B1 bridge; reviewer decision collapses to 2-verb approve/deny on the web approval card"
+purpose: |
+  Closed-port adapter (`createApprovalGate({ approvalSM?, now? })`) that wraps
+  `ApprovalStateMachinePort.request` + `settle` around a host-supplied HITL
+  resolver. Admissibility-gate imports + wraps `reviewAction` at `reviewAndDecide`
+  so every reviewer escalation creates its ApprovalRequest before awaiting the
+  reviewer, keeping the unresolved prompt visible in per-thread
+  Objective.blockers + Run Ledger.waiting(), then settles the same record on a
+  terminal decision or resolver error.
+
+  Default-OFF: `opts.approvalStateMachine === undefined` ⇒ byte-identical legacy
+  resolver passthrough, zero SM calls, `approvalId === ""`. A host opting into
+  attribution sets `config.admissibility.approvalStateMachine` to a
+  `createApprovalStateMachine({ objective, ledger })` instance.
+
+  NO-THROW at the SM boundary: hostile/misbehaving SM cannot perturb the gate's
+  contract (request() throws ⇒ resolver still runs with empty approvalId;
+  settle() throws ⇒ resolution still returned). Resolver throws DO propagate
+  but the gate first best-effort settles "deny" so the record closes out.
+
+  Slice fence (closed): imports = `@/agent/approval-state-machine` (TYPES ONLY).
+  NO `@/agent/admissibility-gate`, NO `@/agent/loop`, NO `@/agent/dispatch`,
+  NO `@/agent/types`. The admissibility-gate IMPORTS this slice — one-way.
+
+  Wire diff at the gate is 30 lines, additive, no logic mutation: opts slot
+  declaration + 1 line replaced with `gate.open(req, async () => { dec =
+  await reviewAction(...); return isAllowed(dec.outcome) ? "approve" : "deny" })`.
+  The closure captures the full multi-verb ReviewDecision for downstream paths.
+evidence:
+  code:
+    - src/agent/approval-gate-wire/types.ts
+    - src/agent/approval-gate-wire/wire.ts
+    - src/agent/approval-gate-wire/index.ts
+    - src/agent/admissibility-gate.ts
+  adrs: [407]
+  tests:
+    unit:
+      - tests/unit/approval-gate-wire-hellgate.test.ts
+      - tests/unit/admissibility-hellgate.test.ts
+      - tests/unit/admissibility-gate.test.ts
+      - tests/unit/approval-attribution-gap-hellgate.test.ts
+      - tests/unit/admissibility-gate-coalesce-r4-followup-hellgate.test.ts
+      - tests/unit/host/runtime-approval-pending-leak-hellgate.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  Pending-lifecycle invariant (2026-07-19): request precedes the reviewer
+  await. The kernel-deferred bridge cancels the provisional local record and
+  mints the kernel id, so only the host-resolvable kernel id is active; the
+  cancelled provisional record remains terminal history because the state
+  machine has no id-migration primitive.
+
+  Reviewer ⇒ ApprovalDecision mapping reduces multi-verb to 2-arm
+  (`isAllowed(dec.outcome) ? approve : deny`); `modify` is reserved for a
+  future modify-capable reviewer. The downstream gate still consumes the full
+  ReviewDecision via closure — only the attribution record loses verb
+  distinction. Acceptable: attribution answers "was the agent allowed", not
+  "by what rule". request_user_input wiring is a separate follow-up (different
+  return shape — UserInputOutcome 2-arm vs reviewer multi-verb).
+
+  DOF-40 PRODUCER→CONSUMER STATUS. The ESCALATION lifecycle IS wired
+  end-to-end in production: reviewAndDecide (admissibility-gate/hitl.ts) builds
+  the gate from config.approvalStateMachine (threaded from the observability
+  wire via dispatch.ts) and runs reviewAction inside gate.open. The deferred
+  (web/SDK) escalation producer is the gate's `kernelApprovalIdOf` bridge — a
+  resolver that throws RuntimeApprovalRequiredError has request(kernelId)
+  minted under the kernel-owned approvalId, so the host's later
+  resolveApprovalDecision → settle(kernelId) matches the pending SM record and
+  attributes to Objective+RunLedger (pinned by runtime-approval-pending-leak
+  test 3). RESIDUAL FAIL-CLOSED GAP: the plain always-confirm deferred path
+  (config.onConfirm → runOnConfirm) mints an approvalId and throws WITHOUT
+  going through gate.open, so no request(id) is produced; the host's
+  settle(approvalId) then hits an unknown SM id. Pre-DOF-40 that returned null
+  silently (audit trail dropped). DOF-40 makes it explicit via the SM's
+  `onUnattributed` gap sink (approval-state-machine feature). WIRED (2026-07-18):
+  the composition-root promotion owner — the observability wire
+  (`src/agent/observability-wire/wire.ts`) — now passes `onUnattributed` to a
+  REAL consumer (a structured `logger.warn` operator floor + an optional
+  `onApprovalGap` observer on ObservabilityWireOpts), so this residual
+  always-confirm gap SURFACES in production under `QUANTA_OBSERVABILITY=on`
+  instead of dropping silently. Still outside THIS slice's fence — the wiring
+  lives in the observability-wire slice (see approval-state-machine promotion
+  path), pinned by tests/unit/observability-wire-approval-gap-hellgate.test.ts.

@@ -1,0 +1,41 @@
+id: 183-safety-net-green
+title: 단언 단위 + 183 통합 safety net 그대로 green
+section: 3
+subsystem: Admissibility-gate SSOT (ADR-0026)
+order: 2
+maturity: L4
+status: stable
+ui_surfaces: [cli]
+monitoring: integrated
+telemetry_keys: [quanta.tool.call.status]
+modes: [n-a]
+configurable: static
+owners: ['@songmin']
+labels: [surface:cli]
+depends_on: [agent-dispatch-core, agent-loop-branch-hardening, secret-redaction-content-plane, mode-posture-hitl-4-tier-permission-policy-harddeny-redundan, deny-and-steer-verb]
+config_refs:
+  env: []
+surface_integration:
+  cli: full
+  web: partial
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 5/5 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "behavior-preserving extraction of the admissibility gate ordering; surfaces only through the approval card which renders approve|deny 2-of-4 verbs"
+purpose: 16 ordering 단언 단위 + 183 통합 safety net 그대로 green (행위 보존 추출)
+evidence:
+  code:
+    - src/agent/admissibility-gate.ts
+    - src/agent/dispatch.ts
+    - src/agent/dispatch-types.ts
+    - src/agent/confirm-decision.ts
+    - src/agent/hitl-tier-registry.ts
+  adrs: [26]
+  tests:
+    unit: [tests/unit/hitl-tier-dispatch.test.ts, tests/unit/admissibility-gate.test.ts, tests/unit/admissibility-hellgate.test.ts]
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: ''

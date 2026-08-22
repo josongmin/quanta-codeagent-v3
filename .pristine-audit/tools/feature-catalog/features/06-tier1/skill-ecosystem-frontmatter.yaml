@@ -1,0 +1,52 @@
+id: skill-ecosystem-frontmatter
+title: "Skill ecosystem: argument-hint + metadata + bundled resources"
+section: 6
+subsystem: Tier-1 — skill 생태계 완성도 (codex SKILL.md 흡수, ADR-0457)
+order: 0
+maturity: L3
+status: stable
+ui_surfaces: [cli]
+modes: [interactive, headless, batch, daemon, ide, ci-bot]
+monitoring: n-a
+configurable: integrated
+owners: ["@songmin"]
+labels: ["surface:core"]
+depends_on: []
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 6/6 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "pure internal frontmatter/resource parser; no web skill-listing UI consumes it"
+purpose: |
+  Absorbs codex's skill ECOSYSTEM frontmatter+resources (quanta's skill CORE —
+  7-scope/playbook/ReDoS-glob/admin — was already ahead). All ADDITIVE/optional:
+  (A) `argument-hint` → Skill.argumentHint, shown in the listing (`rr [scope]`);
+  (B) `metadata.short-description` → Skill.shortDescription (guaranteed-short
+  listing row); (C) bundled-resource walker recording agents/scripts/references/
+  assets presence + a minimal agents/openai.yaml `interface:` parser (no yaml dep).
+  Added to BOTH parser paths (strict zod + lenient discovery), regex-aligned so
+  lenient never accepts a key strict rejects. agents/openai.yaml read is size-
+  capped (checkSkillSize) — malformed/oversized resources skip, never crash
+  discovery. Plain SKILL.md is byte-identical.
+evidence:
+  code:
+    - src/skill/types.ts
+    - src/skill/frontmatter.ts
+    - src/skill/skill-frontmatter.ts
+    - src/skill/skill-resources.ts
+    - src/skill/discover.ts
+    - src/skill/skill-tool.ts
+  adrs: [457]
+  tests:
+    unit:
+      - tests/unit/skill-ecosystem-frontmatter-hellgate.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold:
+  reason: "scripts/ execution + GUI icon rendering deferred (presence/names recorded only)."
+  promotion_path: "run scripts/ at install; surface icons in a GUI surface."
+notes: "references/assets are on-demand (read via the normal tool when the body says to) — not auto-injected (token discipline)."

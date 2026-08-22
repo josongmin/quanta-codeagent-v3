@@ -1,0 +1,62 @@
+id: codex-r2-system-prompt-cache-and-audit
+title: System-prompt cache + drift detector + cache-control audit (ADR-0322 / 0326)
+section: 8
+subsystem: per-session system-prompt memoization + Anthropic cache-prefix stability audit
+order: 100
+maturity: L3
+status: stable
+ui_surfaces: [n-a]
+monitoring: partial
+modes: [n-a]
+configurable: n-a
+owners: ["@songmin"]
+labels: ["surface:core", "absorbed:codex", "default-off"]
+depends_on: []
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 4/7 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "Pure internal cache + cache-control audit/drift primitive, no UI affordance on any surface."
+purpose: |
+  Two complementary pieces. ADR-0322 (passive audit Case C verdict):
+  `analyzePrefixStability(batches)` over `CachePrefixSnapshot[]` records
+  sha256 + cache_control marker per position; detects drift across turns.
+  Verified the existing Anthropic prefix is byte-stable by construction
+  (`buildSystemPrompt` is sync + side-effect-free + per-turn dynamic data
+  rides the trailing `<system-reminder>` user message, NOT the cached
+  `SystemBlock[]`). ADR-0326 (active cache + strict drift): closed port
+  `SystemPromptCachePort{getOrBuild, peek, invalidate, clearAll, stats}` +
+  `createInMemorySystemPromptCache(cfg?)` + `makeStrictDriftCache(inner)`
+  wrap that fires `DriftDetectedError` on hit-with-different-factory-hash.
+  buildTurnContext wires both when `systemPromptCache` + `cacheKey` slots
+  are filled (bypassed when caller supplies `system` directly).
+evidence:
+  code:
+    - src/llm/cache-control-audit/types.ts
+    - src/llm/cache-control-audit/analyzer.ts
+    - src/llm/cache-control-audit/hash.ts
+    - src/llm/system-prompt-cache/types.ts
+    - src/llm/system-prompt-cache/port.ts
+    - src/llm/system-prompt-cache/in-memory-cache.ts
+    - src/llm/system-prompt-cache/drift-detector.ts
+  adrs:
+    - docs/decisions/0322-cache-control-thread-stability.md
+    - docs/decisions/0326-system-prompt-session-cache.md
+  tests:
+    unit:
+      - tests/unit/llm/cache-control-audit-hellgate.test.ts
+      - src/llm/system-prompt-cache/__tests__/in-memory-cache.hellgate.test.ts
+      - src/llm/system-prompt-cache/__tests__/drift-detector.hellgate.test.ts
+      - src/llm/system-prompt-cache/__tests__/port-contract.test.ts
+    integration: []
+    contract: []
+knobs:
+  - name: AgentConfig.systemPromptCache + systemPromptCacheKey
+    type: 'SystemPromptCachePort + branded SystemPromptCacheKey'
+    default: 'undefined (per-turn rebuild)'
+    notes: 'Both required — either-or absent ⇒ cache disengaged.'
+deliberate_hold: null
+notes: 'Drift detector is the active-counterpart to ADR-0322 passive audit. Bench replay harness is the natural wrap site (replay determinism doubles as drift assertion).'

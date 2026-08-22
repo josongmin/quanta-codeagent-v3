@@ -5,6 +5,7 @@
  * field. Nothing is defaulted: a manifest missing `evaluator_sha256` is not a
  * manifest with an unknown evaluator, it is not a manifest.
  */
+import { errMessage } from "@/shared"
 import { createFailureSink, describeValue, isRecord } from "./json"
 import type { ProMaxFailure, ProMaxManifest } from "./types"
 
@@ -61,7 +62,7 @@ export const parseManifest = (raw: string): ManifestParse => {
       failures: [
         {
           code: "manifest_unparseable",
-          message: `manifest bytes are not valid JSON: ${err instanceof Error ? err.message : String(err)}`,
+          message: `manifest bytes are not valid JSON: ${errMessage(err)}`,
         },
       ],
     }

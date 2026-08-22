@@ -1,0 +1,27 @@
+id: aug02-rfc09-review-finding-fields
+title: RFC09-2 — consumed review-finding fields (verdict / category / shortSummary)
+section: 2
+subsystem: Review tool — structured finding fields (aug-02 RFC09-2)
+order: 568
+maturity: L2
+status: new
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [interactive, headless]
+configurable: static
+owners: ["@songmin"]
+labels: ["rfc:aug02-09", "surface:cli"]
+purpose: |
+  RFC-09-2 residual-gap: the git-review-diff tool result now carries + CONSUMES
+  structured review-finding fields (verdict, category, shortSummary) instead of
+  free-text only, so a downstream consumer can group/route findings. Always-on
+  additive fields on the existing review tool output (no gate) — the base
+  review-diff feature is unchanged; this entry attributes the new consumed
+  fields.
+evidence:
+  code:
+    - src/tool/git/review-diff.ts
+  adrs: ["docs/plans/aug-02-absorption/rfc-09-residual-gaps.md"]
+  tests:
+    unit:
+      - tests/unit/tool/git-review-diff.test.ts

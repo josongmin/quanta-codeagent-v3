@@ -1,0 +1,64 @@
+id: memory-recall-citation
+title: Memory recall citation surface in turn-summary (user-visible provenance)
+section: 5
+subsystem: L2 long-term memory — user-visible recall provenance (ADR-0082 consumer)
+order: 83
+maturity: L4
+status: new
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [n-a]
+configurable: integrated
+config_refs:
+  env: [QUANTA_TURN_SUMMARY, QUANTA_TURN_SUMMARY_VERBOSE]
+owners: ["@songmin"]
+labels: ["surface:core", "held-promotion"]
+depends_on: [memory-citation-surface, cli-turn-summary]
+surface_integration:
+  cli: full
+  web: missing
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 2/2 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "user value is a cli-turn-summary panel row; turn-summary is a CLI-only panel not in the web-renders set, so it never reaches the browser"
+purpose: |
+  `AgentOutcome.memoryCitations` (ADR-0082, `memory-citation-surface` feature가
+  생성하는 신호)를 사용자에게 가시화하는 첫 consumer — `cli-turn-summary`
+  패널의 memory row가 한 줄로 표시: `◇ memory: N hits (id1, id2, id3, +K more)`.
+  recordId만 노출하고 **score는 의도적 hide** (score-gaming invariant — 사용자가
+  score를 보면 prompt에 키워드를 끼워 recall을 강제하려는 유혹이 생긴다;
+  provenance는 노출하되 ranking 메커니즘은 가린다).
+  citations 누적은 dedup-free — 같은 record가 N턴 anchor되면 N citations
+  (trajectory consumer가 "N턴 동안 anchor됨"을 볼 수 있도록).
+  citations 부재 시 row 자체 hide (byte-identical 보장).
+evidence:
+  code:
+    - src/agent/types/agent-outcome.ts
+    - src/apps/cli/turn-summary.ts
+  adrs: [82]
+  tests:
+    unit:
+      - tests/unit/cli/turn-summary.test.ts
+    integration: []
+    contract: []
+knobs:
+  - name: QUANTA_TURN_SUMMARY
+    default: 'undefined'
+    purpose: '(no description)'
+  - name: QUANTA_TURN_SUMMARY_VERBOSE
+    default: 'undefined'
+    purpose: '(no description)'
+deliberate_hold:
+  reason: |
+    score 노출 영구 hide (score-gaming 방지). recall block 본문은 turn-summary
+    범위 밖 (별도 `/memory` 슬래시 패널에서 browse). where-enum(`reminder_tail`
+    등)도 현재 미노출 — 단일 placement seam만 사용 중이라 사용자에 의미 없음.
+  promotion_path: |
+    multi-placement seam 활성화(system_prompt / tool_result_injection) 시
+    where 별 색상/아이콘으로 구분 — score는 promotion 대상 아님.
+notes: |
+  본 leaf 는 `memory-citation-surface` (signal 생성) 의 사용자-가시 consumer
+  반쪽. signal/consumer 분리로 turn-summary 외 다른 surface(JSONL trajectory,
+  audit log)가 같은 citation을 재사용 가능. ADR-0082의 "placement IS the
+  citation" invariant 그대로 — 휴리스틱 응답 스캔 금지.

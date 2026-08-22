@@ -1,0 +1,36 @@
+id: god-code-ratchet
+title: dev — god-code SE-metric ratchet (detect oversized/over-coupled modules)
+section: 10
+subsystem: Dev tooling — code-health ratchet
+order: 2433
+maturity: L3
+status: new
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [headless]
+configurable: partial
+owners: ["@songmin"]
+labels: ["surface:dev"]
+depends_on: []
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-23"
+  evidence:
+    cli: "god-code detect ratchet (dev/CI)"
+    web: "dev tooling; no browser affordance"
+purpose: |
+  Software-engineering-metric ratchet that detects god-code (oversized /
+  over-coupled modules) so they cannot grow past a locked baseline. Policy in
+  AGENTS.md; the detector is a standalone dev/CI ratchet.
+evidence:
+  code:
+    - tools/god-code/detect.ts
+  adrs: [425]
+  tests:
+    unit: 
+      - tests/unit/god-code-ratchet.test.ts
+      - tests/unit/god-code-detect-hellgate.test.ts
+    integration: []
+    contract: []

@@ -1,0 +1,75 @@
+id: bench-corpus-loader
+title: Bench corpus loader — real SWE-bench vs synthetic layout detection
+section: 10
+subsystem: 벤치 — corpus 어댑터
+order: 131
+maturity: L4
+status: stable
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [headless, batch]
+configurable: integrated
+config_refs:
+  env: [QUANTA_SWEBENCH_CORPUS_ROOT, QUANTA_SWEBENCH_PYTHON]
+owners: ["@songmin"]
+labels: ["surface:bench"]
+depends_on: [byte-stable-string-comparator, assert-never-exhaustiveness, bench-cache-pathspec-ssot, bench-observe-non-agent-evidence, errors-helper-fix]
+surface_integration:
+  cli: missing
+  web: missing
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "src evidence not reachable from the interactive CLI entry (src/apps/cli/index.ts) — wired only into other apps (eval/bench/probe/headless) or unwired"
+    web: "corpus loader feeds the bench CLI run (Instance[] + count), not reachable from web-daemon; no browser affordance"
+purpose: |
+  Adapter that turns a `QUANTA_SWEBENCH_CORPUS_ROOT` directory into an
+  `Instance[]` for the bench runner. Detects TWO layouts and degrades
+  gracefully on a third (offline / empty / invalid).
+
+    1. REAL `quanta-benchmark-corpus` (`tasks/repo/swebench/<id>.yaml` +
+       `external/swebench/verified/repos/repo_manifest.yaml`). Reads each
+       task's `objective.statement` as the problem, the visible_checks
+       `cmd` lines as the test command, and the `swebench_meta` block
+       (instance_id, repo, base_commit, environment_setup_commit) so the
+       optional Python harness can grade officially.
+    2. Synthetic manifest — `manifest.jsonl` (one Instance-shaped object
+       per line) OR one sub-dir per instance with `instance.json` + a
+       `repo/` subtree. Used by tests and hand-authored corpora.
+    3. Missing / empty / unreadable root → `[]` (never throws) so the CLI
+       degrades gracefully when no corpus is wired.
+
+  Detection rule: a `tasks/repo/swebench` directory under `root` ⇒ real
+  corpus path. Cache repo paths are kept read-only (the runner copies to
+  a sandbox before `git checkout <base_commit>` per instance).
+evidence:
+  code:
+    - src/runner/batch/corpus/project-env.ts
+    - src/runner/batch/corpus/repo-version-python.ts
+    - src/apps/bench/corpus/loader.ts
+    - src/apps/bench/corpus/dataset.ts
+    - src/apps/bench/corpus/index.ts
+    - src/apps/bench/types.ts
+    - src/apps/bench/index.ts
+  adrs: []
+  tests:
+    unit:
+      - tests/unit/issue-hint/swebench-corpus.test.ts
+    integration:
+      - tests/integration/bench-eval.test.ts
+      - tests/integration/bench.test.ts
+      - tests/integration/bench-observability.test.ts
+    contract: []
+knobs:
+  - name: QUANTA_SWEBENCH_CORPUS_ROOT
+    default: 'undefined'
+    purpose: '(no description)'
+  - name: QUANTA_SWEBENCH_PYTHON
+    default: 'undefined'
+    purpose: '(no description)'
+deliberate_hold: null
+notes: |
+  The Python SWE-bench seam (real grader) lives in `python-swebench.ts`
+  and is selected from `runner.ts` when `QUANTA_SWEBENCH_PYTHON=1` and
+  the harness is importable. Default-off; the local `testCmd` path is
+  unchanged when the flag is unset.

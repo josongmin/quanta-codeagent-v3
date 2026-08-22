@@ -9,9 +9,9 @@
  */
 import { describe, expect, test } from "bun:test"
 import { createApprovalStateMachine } from "@/agent/approval-state-machine"
-import { createObjectiveStore } from "@/objective"
 import { createRunLedger } from "@/agent/run-ledger"
 import type { AgentConfig } from "@/agent/types"
+import { createObjectiveStore } from "@/objective"
 
 describe("ADR-0414 AgentConfig observability slots", () => {
   test("[1] runLedger slot accepts a RunLedgerPort + is readable", () => {

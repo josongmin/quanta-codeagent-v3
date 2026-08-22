@@ -1,0 +1,70 @@
+id: post-denial-precedence
+title: post-denial 사용자 override (guardian-post-denial-precedence 동등물)
+section: 3
+subsystem: 권한 스택 (ADR-0046)
+order: 12
+maturity: L4
+status: stable
+ui_surfaces: [n-a]
+monitoring: n-a
+telemetry_keys: ["quanta.hitl"]
+modes: [ci-bot]
+configurable: integrated
+config_refs:
+  env: [QUANTA_PERMISSION_STATE, QUANTA_HOME]
+owners: ["@songmin"]
+labels: [absorbed:codex, surface:cli]
+depends_on: [permission-store-json, per-thread-permissions, per-host-agent-mode, quanta-home-meta-root, agent-loop-branch-hardening]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 5/5 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "pure internal permission precedence primitive (ui_surfaces n-a); no rendered affordance on any surface"
+purpose: |
+  **Explicit re-approval precedence** — guardian/룰이 거부한 동작을 사용자가
+  "위험을 본 뒤 명시적 재승인"한 경우에 한해 그 동작에 대해 룰을 override
+  한다. per-thread/per-host와 달리 "특정 (threadId, action) 한 건"에 대한
+  one-shot 승인이다. 3-step state machine은 자동 우회를 막는 안전장치 —
+  단순한 boolean flag가 아니라 timestamp 순서까지 강제(recordDenial →
+  recordRiskSeen → recordUserOverride).
+
+  (threadId, actionSignature) 키로 격리: 형제 스레드에 전파 안 됨, 다른
+  액션에 전파 안 됨. HARD_DENY는 절대 override 불가 (보안 경계). Codex
+  `guardian-post-denial-precedence`의 v3 대응. ADR-0046 우선순위 2위
+  (HARD_DENY 바로 다음, per-thread 위).
+evidence:
+  code:
+    - src/permission/permission-store.ts
+    - src/permission/post-denial.ts
+    - src/permission/policy.ts
+    - src/agent/admissibility-gate.ts
+    - src/shared/runtime-config.ts
+  adrs: [29, 46]
+  tests:
+    unit:
+      - tests/unit/permission-post-denial.test.ts
+      - tests/unit/permission-per-thread.test.ts
+      - tests/unit/admissibility-gate.test.ts
+    integration:
+      - tests/integration/permission-stack-gate-e2e.test.ts
+    contract: []
+knobs:
+  - name: QUANTA_PERMISSION_STATE
+    default: 'undefined'
+    purpose: '(no description)'
+  - name: QUANTA_HOME
+    default: 'undefined'
+    purpose: '(no description)'
+deliberate_hold: null
+notes: |
+  actionSignature = sha256(canonicalize({tool, workdir, args}))를 32-hex로
+  truncate (128 bit). 키 순서 무관. 시퀀스 순서 invariant —
+  deniedAt ≤ seenRiskAt ≤ userOverrideAt 강제. fresh recordDenial은 직전
+  시퀀스 리셋.
+  주요 risk: 악의적 프롬프트가 recordRiskSeen + recordUserOverride를
+  UI 우회로 호출. mitigation: 두 함수는 명시적 사용자 surface에서만 호출
+  + ADR-0046 §Risks §1 참고. 후속 hardening — noRestrictedImports로
+  외부 호출 차단 예정.

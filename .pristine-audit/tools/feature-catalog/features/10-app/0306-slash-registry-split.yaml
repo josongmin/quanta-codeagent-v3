@@ -1,0 +1,89 @@
+id: slash-registry-split
+title: Slash registry split — surface / session / app (CLI-03)
+section: 10
+subsystem: REPL surface composition
+order: 72
+maturity: L3
+status: new
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [interactive]
+configurable: integrated
+config_refs:
+  env:
+    - QUANTA_REWIND
+    - QUANTA_MEMORY_SLASH
+owners: ["@songmin"]
+labels: ["surface:cli", "tier:2", "adr-0302", "refactor"]
+depends_on:
+  - repl-slash-ctx-mega-wire
+  - built-in-slash-commands
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 5/5 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "pure CLI slash-registry refactor (set of names unchanged), no web affordance"
+purpose: |
+  Splits the historical `src/apps/cli/slash-commands.ts` (763 LOC) into
+  three sibling registries under `src/apps/cli/slash/`, each owning one
+  ownership layer:
+
+    - registry-surface.ts (34 entries) — `/help`, `/context`, `/usage`,
+      `/color`, `/navigate`, `/wait`, `/skills`, `/reload-skills`,
+      `/login`, `/logout`, `/status`, `/snooze`, `/resume`, `/snapshot`,
+      `/rules`, `/cost`, `/plan`, `/state`, `/working-state`, `/history`,
+      `/branches`, `/fork-checkpoint`, `/queue`, `/web`, `/paste`,
+      `/edit-plan`, `/edit-message`, `/profile`, `/identity`,
+      `/focus-chain`, `/effort`, `/inspect`, `/replay`, `/session`.
+    - registry-session.ts (4 entries) — `/retry-with`, `/side`, `/debug`,
+      `/why` (need live LLM / transcript / session-time toggle).
+    - registry-app.ts (7 entries, 3 env-gated) — `/permission`, `/mcp`,
+      `/rewind`, `/fork`, `/rewind-tool`, `/memory`, `/rewind-conv`.
+
+  `slash-commands.ts` becomes a thin 55-LOC assembly that concatenates
+  the three layers into the historic `BUILTINS` constant. Every
+  downstream import (`runSlashCommand`, `slashCompleter`,
+  `describeSlashCommand`, `isSlashCommand`, the `SlashContext` types,
+  every `declare module "./slash-commands"` augmentation) continues to
+  resolve byte-identically.
+
+  A biome `noRestrictedImports` rule fences `registry-surface.ts`
+  against `@/agent`, `@/llm`, `@/runner`, `@/host` so the surface layer
+  stays surface-only.
+
+  Slot order is now layered (`[...SURFACE, ...SESSION, ...APP]`); two
+  unit tests that pinned absolute slots (`tests/unit/slash-commands.test.ts`
+  full equality, `tests/unit/cli-retry-with.test.ts` `names[6]`) were
+  updated. The SET of registered names is unchanged.
+evidence:
+  code:
+    - src/apps/cli/slash-commands.ts
+    - src/apps/cli/slash/registry-surface.ts
+    - src/apps/cli/slash/registry-session.ts
+    - src/apps/cli/slash/registry-app.ts
+    - src/apps/cli/slash/render-helpers.ts
+  adrs:
+    - docs/decisions/0306-slash-registry-split.md
+  tests:
+    unit:
+      - tests/unit/apps/cli/slash-registry-split-hellgate.test.ts
+      - tests/unit/slash-commands.test.ts
+      - tests/unit/cli/help-render.test.ts
+      - tests/unit/cli/repl-extract-shape.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  `/help` reflects the LIVE assembled BUILTINS via a closure
+  (`buildSurfaceSlashCommands(() => BUILTINS)`) so the surface layer
+  enumerates entries from session + app layers too. The closure runs
+  only when a user types `/help`, long after module init — no
+  circular-import hazard.
+
+  15 hellgate cases / 64 expects / 0 fail. Pre-existing tsc baseline
+  (42 errors) unchanged; biome 0 errors on `src/apps/cli/slash` +
+  `src/apps/cli/slash-commands.ts`.

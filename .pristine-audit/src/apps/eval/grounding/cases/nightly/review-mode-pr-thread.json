@@ -1,0 +1,24 @@
+{
+  "schema": 2,
+  "id": "review-mode-pr-thread",
+  "usecase": "persistent-context.conversation-state.thread-grounding",
+  "mode": "review",
+  "history": [
+    { "role": "assistant", "text": "Open threads: review_pr_214 and context_grounding." },
+    {
+      "role": "assistant",
+      "text": "Stay on review_pr_214. Remaining review findings are src/agent/prompt.ts and src/apps/eval/index.ts."
+    }
+  ],
+  "targetUtterance": "이거 리뷰 다 끝났냐?",
+  "gold": {
+    "activeThreadId": "review_pr_214",
+    "referentId": "review_pr_214",
+    "intent": "status_check",
+    "scope": "current_workstream",
+    "shouldClarify": false,
+    "confidence": "high"
+  },
+  "bucket": "multi_workstream",
+  "severity": "medium"
+}

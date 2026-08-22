@@ -1,0 +1,51 @@
+id: gh-arg-injection-guard
+title: gh tools — `normalizeRef` leading-dash defense (positional PR/issue ID)
+section: 2
+subsystem: 도구 — gh CLI security (positional-arg flag-injection guard)
+order: 111
+maturity: L4
+status: stable
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [n-a]
+configurable: n-a
+owners: ["@songmin"]
+labels: [surface:cli, security-touched]
+depends_on: [git-read-trio]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 2/2 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "pure internal security validation guard (rejects bad PR identifiers before argv); no UI affordance of its own"
+purpose: |
+  Mirrors the `git diff`/`git log` leading-dash defense in the gh slice for the
+  POSITIONAL PR/issue identifier argument to `gh <pr|issue|pr_checks> <id>`. A
+  `-`-leading value (`--web`, `-R/owner/evil`, `--repo=...`) would otherwise be
+  parsed by `gh` as a FLAG rather than a numeric ID or URL — classic argv
+  flag-injection. `normalizeRef` accepts ONLY two shapes: (1) a positive
+  integer, optionally with a leading `#` (common human shorthand `#42` → `42`);
+  (2) a full `http(s)://...` URL (cannot lead with `-`). Anything else — leading
+  dash, empty string, `--web`, schemeless URL — is rejected BEFORE argv is built,
+  surfaced as a deterministic `ok:false` with the typed `refRejected` message
+  (`invalid PR identifier '...': expected a positive number or an http(s) URL`)
+  and NEVER thrown to the loop. The eight gh tools that take a PR/issue ID
+  (`gh_pr_view` / `gh_issue_view` / `gh_check_status` / `gh_pr_comment` /
+  `gh_pr_blame` / `gh_pr_review_diff` / `gh_pr_auto_merge` and the implicit
+  callers) all route through the same single helper — one chokepoint, one
+  rejection contract.
+evidence:
+  code:
+    - src/tool/gh/index.ts
+    - src/tool/index.ts
+  adrs: []
+  tests:
+    unit:
+      - tests/unit/gh-pr-tools-hellgate.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: 'HELL-10 hellgate test: "leading-dash PR ref rejected (no flag injection)". Parallels `git_diff` base-leading-dash rejection (`git-read-trio`) and `git_moved_code` base-leading-dash rejection. SECURITY-critical: `gh pr view --web` opens a browser at attacker-controlled URL; `gh pr view -R/path/evil` exfiltrates to attacker repo.'

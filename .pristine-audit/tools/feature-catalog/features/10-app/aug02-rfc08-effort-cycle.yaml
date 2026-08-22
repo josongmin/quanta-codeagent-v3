@@ -1,0 +1,30 @@
+id: aug02-rfc08-effort-cycle
+title: RFC08 — bindable effort-cycle key action
+section: 10
+subsystem: CLI UX — effort-cycle keybinding (aug-02 RFC08)
+order: 566
+maturity: L3
+status: new
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [interactive]
+configurable: static
+owners: ["@songmin"]
+labels: ["rfc:aug02-08", "surface:cli"]
+purpose: |
+  RFC-08 UX polish: a bindable "effort-cycle" key action that cycles the LLM
+  reasoning-effort level (low/medium/high) live from the REPL, wired into the
+  raw-line-reader keymap + keybinding action registry so a user can rebind it.
+  Additive: the action is a new keymap entry; the default binding cycles effort
+  and the session applies the new effort on the next turn.
+evidence:
+  code:
+    - src/apps/cli/effort-cycle.ts
+    - src/apps/cli/raw-line-reader/keymap.ts
+    - src/apps/cli/keybindings/types.ts
+    - src/apps/cli/repl/prompt-pipeline.ts
+  adrs: ["docs/plans/aug-02-absorption/rfc-08-ux-polish-deferred.md"]
+  tests:
+    unit:
+      - src/apps/cli/__tests__/effort-cycle.hellgate.test.ts
+      - src/apps/cli/__tests__/effort-cycle-session-live-e2e.hellgate.test.ts

@@ -1,0 +1,50 @@
+id: yaml-read-tool
+title: yaml_read — pure-TS YAML document reader (ADR-0137)
+section: 2
+subsystem: 도구 — document (YAML 1.2 reader via eemeli/yaml)
+order: 137
+maturity: L4
+status: new
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [n-a]
+configurable: static
+owners: ["@songmin"]
+labels: [surface:cli]
+depends_on: [document-image-fsjail-unify, document-tools-csv-ndjson, fsjailerror, pdf-read-tool, cross-slice-mirror]
+surface_integration:
+  cli: full
+  web: full
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 2/2 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "reader runs in web-daemon and returns JSON-stringified parsed text as the result, shown in the tool.completed resultPreview in session-hooks.ts:427-438"
+purpose: |
+  First-class YAML reader closing the de-facto config-file gap left by
+  ADR-0133's csv/ndjson slice. Single pure-TS dep (`yaml@2.x`, ~50 KB),
+  no native binding, no spawn. Path safety mirrors ADR-0126's `read_image`
+  posture: lstat symlink-leaf reject, `..` segment block, absolute paths
+  require explicit consent. Output is the parsed document re-serialized
+  through 2-space `JSON.stringify` so downstream tools see a single
+  canonical agent surface regardless of the source's flow/block style or
+  anchor/merge graph. `maxKeys` knob (default 200, max 5000) caps
+  anchor/merge expansion so a malicious YAML cannot detonate the heap by
+  key-fan-out. READ-ONLY + concurrency-safe.
+evidence:
+  code:
+    - src/tool/document/yaml-read.ts
+    - src/tool/document/index.ts
+  adrs: [137]
+  tests:
+    unit:
+      - tests/unit/tool/yaml-read-hellgate.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  Caller-deferred registration (NOT in defaultTools) — host wires per slice
+  posture, mirroring the csv_read / ndjson_read sibling family. Pure parse
+  errors collapse to typed `ok:false` envelopes; the tool never throws past
+  the loop.

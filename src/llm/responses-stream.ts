@@ -239,9 +239,7 @@ const buildCommonBodyOpts = (args: PrepareResponsesContinuationRequestArgs) => (
   ...(args.reasoningSummaryDetail !== undefined
     ? { reasoningSummaryDetail: args.reasoningSummaryDetail }
     : {}),
-  ...(args.reasoningVerbosity !== undefined
-    ? { reasoningVerbosity: args.reasoningVerbosity }
-    : {}),
+  ...(args.reasoningVerbosity !== undefined ? { reasoningVerbosity: args.reasoningVerbosity } : {}),
 })
 
 export const prepareResponsesContinuationRequest = (

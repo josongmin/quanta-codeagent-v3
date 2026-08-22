@@ -130,6 +130,10 @@ export const selectBootstrapCommandsForPhase = (
   phase: FamilyBootstrapPhase,
 ): readonly FamilyBootstrapCommand[] => {
   const selected = bootstrap.commands.filter((command) => command.phase === phase)
+  if (phase === "grader") {
+    assertGoldIsTornDown(bootstrap)
+    return selected
+  }
   if (phase !== "agent") return selected
   const leaking = selected.filter((command) => command.goldBearing)
   if (leaking.length > 0) {
@@ -141,7 +145,56 @@ export const selectBootstrapCommandsForPhase = (
         "of path (invariant 3). Gold-bearing work belongs to the GRADER phase.",
     )
   }
+  assertAbsenceIsProven(bootstrap, selected)
   return selected
+}
+
+/** Does this bootstrap put answer-key bytes on the box at all? Families that
+ *  never do are untouched by the two lifecycle clauses below. */
+const materializesGold = (bootstrap: FamilyRemoteBootstrap): boolean =>
+  bootstrap.commands.some((command) => command.phase === "grader" && command.goldBearing)
+
+/**
+ * A family that MATERIALIZES gold must declare its REMOVAL.
+ *
+ * The regression this closes is not "the teardown ran late", it is that there
+ * was no teardown at all: the grader phase created a gold-bearing checkout and
+ * nothing removed it, so the box carried the answer key into the next chunk. A
+ * plan that can create gold but not destroy it is refused BEFORE the first
+ * fetch, because after the fetch the only remedy is a box that must be thrown
+ * away.
+ */
+const assertGoldIsTornDown = (bootstrap: FamilyRemoteBootstrap): void => {
+  if (!materializesGold(bootstrap)) return
+  if (bootstrap.commands.some((command) => command.phase === "teardown")) return
+  throw new FamilyBootstrapError(
+    `[full-remote] ${bootstrap.family} GRADER bootstrap REFUSED: it declares gold-bearing ` +
+      'command(s) but NO phase="teardown" command. Materializing the answer key on a box with ' +
+      "no declared removal leaves it there for the next chunk's AGENT phase, which is the leak " +
+      "invariant 3 forbids. Declare the teardown — the executor runs it for you.",
+  )
+}
+
+/**
+ * A family that materializes gold must PROVE its absence before the agent runs.
+ *
+ * Teardown and probe are deliberately two gates, not one: a teardown that
+ * silently failed (a full disk, a killed ssh, a box reused from a campaign that
+ * crashed mid-grade) leaves gold behind, and the only way to notice is to look.
+ * Absence must be established, not assumed.
+ */
+const assertAbsenceIsProven = (
+  bootstrap: FamilyRemoteBootstrap,
+  agentCommands: readonly FamilyBootstrapCommand[],
+): void => {
+  if (!materializesGold(bootstrap)) return
+  if (agentCommands.some((command) => command.absenceProbe !== undefined)) return
+  throw new FamilyBootstrapError(
+    `[full-remote] ${bootstrap.family} AGENT bootstrap REFUSED: the family materializes ` +
+      "answer-key bytes in its grader phase but declares NO agent-phase absence probe, so " +
+      '"the box is clean" would be an assumption. Declare a probe (`absenceProbe`) that exits ' +
+      "non-zero when the gold-bearing path exists.",
+  )
 }
 
 /**
@@ -155,11 +208,60 @@ export const executeFamilyRemoteBootstrap = async (
 ): Promise<number> => {
   const bootstrap = input.bootstrap
   if (bootstrap === undefined) return 0
+  // The grader phase MATERIALIZES the answer key, so its teardown is bound to
+  // THIS call rather than being a step a caller has to remember. A teardown with
+  // its own call site is a teardown that gets forgotten — which is exactly how
+  // the checkout survived into the next chunk.
+  if (input.phase !== "grader") return runBootstrapPhase(bootstrap, input.phase, input)
+  let graderError: unknown
+  let ran = 0
+  try {
+    ran = await runBootstrapPhase(bootstrap, "grader", input)
+  } catch (err) {
+    graderError = err
+  }
+  // ALWAYS — a grader phase that died half-way is precisely when gold is left
+  // behind, so a failure is a reason to tear down, not a reason to skip it.
+  const teardown = await runTeardownPhase(bootstrap, input)
+  if (graderError !== undefined) {
+    // The GRADER error wins (same keystone as `resolveChunkOutcome`): it carries
+    // the diagnosis. A teardown failure underneath it is logged loudly rather
+    // than swallowed, and the next chunk's absence probe is what stops the run.
+    if (teardown.error !== undefined) input.log(teardownFailureNote(bootstrap, teardown.error))
+    throw graderError
+  }
+  if (teardown.error !== undefined) throw teardown.error
+  return ran + teardown.ran
+}
+
+const teardownFailureNote = (bootstrap: FamilyRemoteBootstrap, err: unknown): string =>
+  `[full-remote] ⚠️ ${bootstrap.family} TEARDOWN also failed — the box may still carry ` +
+  `answer-key bytes; it must not be reused for an agent phase: ${String(err)}`
+
+/** Run the declared teardown, capturing rather than throwing so the caller can
+ *  decide which error wins. */
+const runTeardownPhase = async (
+  bootstrap: FamilyRemoteBootstrap,
+  input: FamilyBootstrapExecInput,
+): Promise<{ ran: number; error?: unknown }> => {
+  try {
+    return { ran: await runBootstrapPhase(bootstrap, "teardown", input) }
+  } catch (err) {
+    return { ran: 0, error: err }
+  }
+}
+
+/** Execute exactly the commands declared for ONE phase, in order, fail-closed. */
+const runBootstrapPhase = async (
+  bootstrap: FamilyRemoteBootstrap,
+  phase: FamilyBootstrapPhase,
+  input: FamilyBootstrapExecInput,
+): Promise<number> => {
   // Refuses BEFORE any ssh, so a mislabelled gold command never reaches the box.
-  const commands = selectBootstrapCommandsForPhase(bootstrap, input.phase)
+  const commands = selectBootstrapCommandsForPhase(bootstrap, phase)
   if (commands.length === 0) return 0
   input.log(
-    `[full-remote] ${bootstrap.family}: running ${commands.length} declared ${input.phase}-phase ` +
+    `[full-remote] ${bootstrap.family}: running ${commands.length} declared ${phase}-phase ` +
       `bootstrap command(s) (grader workers=${bootstrap.graderWorkers})…`,
   )
   let ran = 0
@@ -168,12 +270,7 @@ export const executeFamilyRemoteBootstrap = async (
     const result = await input.ssh(rendered)
     ran += 1
     if (result.code !== 0) {
-      throw new FamilyBootstrapError(
-        `[full-remote] ${bootstrap.family} bootstrap step "${command.step}" FAILED ` +
-          `(exit ${result.code}): ${rendered}\n` +
-          `  purpose: ${command.purpose}\n` +
-          `${result.stdout}${result.stderr}`,
-      )
+      throw new FamilyBootstrapError(classifyNonZeroExit(bootstrap, command, rendered, result))
     }
     const digestProblem = classifyBootstrapDigest(command, `${result.stdout}${result.stderr}`)
     if (digestProblem !== undefined) {
@@ -185,4 +282,34 @@ export const executeFamilyRemoteBootstrap = async (
     }
   }
   return ran
+}
+
+/**
+ * A failed ABSENCE PROBE is not a broken step — it is the leak. Classify it as
+ * such, naming the path that exists, because "step gold-absence FAILED (exit 1)"
+ * reads like flaky infrastructure and this is the one failure an operator must
+ * never retry past.
+ */
+const classifyNonZeroExit = (
+  bootstrap: FamilyRemoteBootstrap,
+  command: FamilyBootstrapCommand,
+  rendered: string,
+  result: SpawnResult,
+): string => {
+  const probe = command.absenceProbe
+  if (probe !== undefined) {
+    return (
+      `[full-remote] ${bootstrap.family} bootstrap REFUSED — ANSWER KEY PRESENT: ` +
+      `${probe.absolutePath} EXISTS on this box at AGENT time (probe "${command.step}" exited ` +
+      `${result.code}). A prior chunk's grader phase left it behind, or its teardown failed. ` +
+      "The agent's shell is unsandboxed on a bench box, so running here would grade against a " +
+      "box that holds the gold and test patches. Remove the tree, or launch a fresh box."
+    )
+  }
+  return (
+    `[full-remote] ${bootstrap.family} bootstrap step "${command.step}" FAILED ` +
+    `(exit ${result.code}): ${rendered}\n` +
+    `  purpose: ${command.purpose}\n` +
+    `${result.stdout}${result.stderr}`
+  )
 }

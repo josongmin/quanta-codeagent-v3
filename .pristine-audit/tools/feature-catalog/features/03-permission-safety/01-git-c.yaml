@@ -1,0 +1,37 @@
+id: git-c
+title: git -c
+section: 3
+subsystem: HARD_DENY (경로무관 하드닝)
+order: 1
+maturity: L3
+status: stable
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [n-a]
+configurable: static
+owners: ['@songmin']
+labels: [surface:cli, security-touched]
+depends_on: [permission-policy-engine, permission-store-json, cr3-rule-catalog-ssot-fu1-rule-per-concern-invert, git-destructive-hard-deny, per-host-agent-mode]
+surface_integration:
+  cli: full
+  web: partial
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 4/4 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "A hard-denied shell command yields a tool_result ok:false rendering as tool.completed outcome:error in web; backend deny with only a thin denial render, no distinct affordance."
+purpose: HARD_DENY 베이스라인 패턴 모듬 — 시스템-루트 destructive 셸 명령, 인터프리터 파이프 RCE 시나리오, 매스-삭제 sweep, 실행-경로 하이재크 등 path-independent 위험 액션 형태를 description-only 룰로 차단. FP 가드(safe predicate / build-dir whitelist)로 합법 dev 워크플로 보존. 정확한 패턴은 slice 외부로 절대 노출되지 않음 (`policy-rules.ts` 내부에서만 verbatim 보유).
+evidence:
+  code:
+    - src/permission/policy-rules.ts
+    - src/permission/policy.ts
+    - src/permission/inspect.ts
+    - src/permission/index.ts
+  adrs: []
+  tests:
+    unit: [tests/unit/permission-rules.test.ts, tests/unit/hard-deny-redos-bound.test.ts]
+    integration: [tests/integration/hard-deny-mid-multitool-hell-e2e.test.ts]
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: ''

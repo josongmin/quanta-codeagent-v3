@@ -225,7 +225,9 @@ const buildLegacyHashEmbedder = (): ResolvedIndexEmbedder => ({
  *
  * Probe order matches the registry's switch; first key present wins.
  */
-const promoteProviderFromKey = (env: Record<string, string | undefined>): EmbedProvider | undefined => {
+const promoteProviderFromKey = (
+  env: Record<string, string | undefined>,
+): EmbedProvider | undefined => {
   if (env.QUANTA_EMBED_PROVIDER !== undefined && env.QUANTA_EMBED_PROVIDER !== "") return undefined
   if (gateDisabled(env, "QUANTA_INDEX_AUTO_EMBED")) return undefined
   if (env.VOYAGE_API_KEY !== undefined && env.VOYAGE_API_KEY !== "") return "voyage"
@@ -331,7 +333,8 @@ export const selectIndexEmbedder = (
 ): IndexEmbed => resolveIndexEmbedder(env, factory).embed
 
 /** `QUANTA_INDEX_PERSIST=on` toggles the sqlite-backed delta store. */
-export const isPersistOn = (env: Record<string, string | undefined>): boolean => gateOn(env, "QUANTA_INDEX_PERSIST")
+export const isPersistOn = (env: Record<string, string | undefined>): boolean =>
+  gateOn(env, "QUANTA_INDEX_PERSIST")
 
 const chunkId = (c: IndexerFileChunk): string => `${c.path}:${c.startLine}-${c.endLine}`
 
@@ -484,7 +487,9 @@ const openLocalIndexDb = (
   }
 }
 
-const resolveRequestedStore = (env: Record<string, string | undefined>): RequestedStoreSelection => {
+const resolveRequestedStore = (
+  env: Record<string, string | undefined>,
+): RequestedStoreSelection => {
   const requested = env.QUANTA_VECTOR_STORE
   if (requested !== undefined && requested !== "") {
     if (

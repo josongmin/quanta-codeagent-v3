@@ -1,0 +1,133 @@
+/**
+ * External-config migration THROTTLE LEDGER (H13).
+ *
+ * A small persisted marker so the migration prompt is NOT re-offered every
+ * launch. Mirrors Codex's startup-throttle (`external_agent_config_migration_
+ * startup.rs` "Failed to save preference"): once a source has been offered,
+ * imported, or declined, it is suppressed.
+ *
+ * Shape mirrors the parent slice's `ImportLog` (versioned envelope) and reuses
+ * its atomic-append discipline: a sidecar lock + write-temp + rename so a
+ * concurrent launch cannot tear the file. The lock here is best-effort — a
+ * throttle write is advisory; if it fails (busy) we swallow and the worst case
+ * is one extra prompt on the next launch (never a crash, never data loss).
+ */
+
+import { createHash, randomUUID } from "node:crypto"
+import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises"
+import { dirname, join } from "node:path"
+import type {
+  DetectedConfigItem,
+  MigrationDisposition,
+  MigrationItemType,
+  MigrationLedger,
+  MigrationLedgerEntry,
+  MigrationScope,
+} from "./types"
+
+/** Ledger file location under `~/.quanta`. Caller-supplied `homeDir` lets
+ *  tests redirect to a tmpdir. Named to be unmistakably distinct from the
+ *  parent slice's `external_agent_session_imports.json` (sessions) — THIS is
+ *  the CONFIG migration throttle. */
+export const migrationLedgerPath = (homeDir: string): string =>
+  join(homeDir, ".quanta", "external_config_migration.json")
+
+const lockPath = (homeDir: string): string => `${migrationLedgerPath(homeDir)}.lock`
+
+/**
+ * Stable identifier for a detected source: scope + the SORTED set of item
+ * paths. Order-insensitive (we sort), so detect re-running on the same tree
+ * yields the same key regardless of probe iteration order. Distinct scopes
+ * (home vs project) yield distinct keys even with identical paths. A short
+ * SHA-256 keeps the key compact + filesystem-safe.
+ */
+export const sourceKeyOf = (
+  scope: MigrationScope,
+  items: readonly Pick<DetectedConfigItem, "path">[],
+): string => {
+  const paths = [...items.map((i) => i.path)].sort()
+  const h = createHash("sha256")
+  h.update(scope)
+  h.update("\x00")
+  h.update(paths.join("\x00"))
+  return `${scope}:${h.digest("hex").slice(0, 24)}`
+}
+
+/** Load the ledger. Missing file ⇒ empty (version 1). A malformed file is
+ *  treated as empty (advisory store — we never crash startup on a corrupt
+ *  throttle marker; the worst case is re-offering once). */
+export const loadMigrationLedger = async (homeDir: string): Promise<MigrationLedger> => {
+  const path = migrationLedgerPath(homeDir)
+  let raw: string
+  try {
+    raw = await readFile(path, "utf8")
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code
+    if (code === "ENOENT" || code === "ENOTDIR") return { version: 1, entries: [] }
+    return { version: 1, entries: [] }
+  }
+  try {
+    const parsed = JSON.parse(raw) as unknown
+    if (
+      typeof parsed === "object" &&
+      parsed !== null &&
+      (parsed as { version?: unknown }).version === 1 &&
+      Array.isArray((parsed as { entries?: unknown }).entries)
+    ) {
+      return parsed as MigrationLedger
+    }
+  } catch {
+    // fallthrough to empty
+  }
+  return { version: 1, entries: [] }
+}
+
+/** True iff `sourceKey` has ANY recorded disposition (offered / imported /
+ *  declined) — any of the three suppresses a re-offer. */
+export const isThrottled = (ledger: MigrationLedger, sourceKey: string): boolean =>
+  ledger.entries.some((e) => e.sourceKey === sourceKey)
+
+/**
+ * Record a disposition for `sourceKey`, atomically appending to the ledger.
+ * Best-effort lock: on a concurrent-writer collision we SKIP the write (return
+ * false) rather than throw — the throttle is advisory. A successful write
+ * returns true.
+ */
+export const recordDisposition = async (
+  homeDir: string,
+  sourceKey: string,
+  disposition: MigrationDisposition,
+  itemTypes: readonly MigrationItemType[],
+): Promise<boolean> => {
+  const path = migrationLedgerPath(homeDir)
+  await mkdir(dirname(path), { recursive: true })
+  const lock = lockPath(homeDir)
+  // Acquire — `wx` fails if the lock exists. Advisory: a held lock ⇒ skip.
+  try {
+    await writeFile(lock, String(process.pid), { flag: "wx" })
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "EEXIST") return false
+    throw err
+  }
+  try {
+    const current = await loadMigrationLedger(homeDir)
+    const entry: MigrationLedgerEntry = {
+      sourceKey,
+      disposition,
+      timestamp: new Date().toISOString(),
+      itemTypes: [...itemTypes],
+    }
+    const next: MigrationLedger = { version: 1, entries: [...current.entries, entry] }
+    const tmp = `${path}.tmp.${process.pid}.${randomUUID().slice(0, 8)}`
+    try {
+      await writeFile(tmp, `${JSON.stringify(next, null, 2)}\n`, "utf8")
+    } catch (e) {
+      await rm(tmp, { force: true })
+      throw e
+    }
+    await rename(tmp, path)
+    return true
+  } finally {
+    await rm(lock, { force: true })
+  }
+}

@@ -1,0 +1,116 @@
+id: subagent-mailbox
+title: Managed-subagent mailbox — subagent_send_message between agents (ADR-0416)
+section: 9
+subsystem: Subagent mailbox (ADR-0416)
+order: 96
+maturity: L3
+status: new
+ui_surfaces: [cli, ide]
+monitoring: n-a
+modes: [interactive, headless, batch, daemon, ide, ci-bot]
+configurable: integrated
+owners: ["@songmin"]
+labels: ["surface:core"]
+depends_on: [objective-tools]
+surface_integration:
+  cli: full
+  web: full
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 8/8 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "user value is an LLM tool call which renders as tool.invoked/tool.completed via the bridged tool_call/tool_result events"
+purpose: |
+  Inter-agent mailbox so quanta subagents can coordinate WITHOUT teardown —
+  Codex `multi_agents_v2.send_message(agent_id, msg)` parity. quanta subagents
+  are fork-and-forget (ADR-0011): the parent only learns the result when the
+  child settles. This slice adds a closed `MailboxPort` substrate
+  (`src/agent/subagent-mailbox/`, 3 files: types/store/index) + ONE LLM-facing
+  SEND tool (`src/tool/subagent-mailbox/`, 1 file) so a running agent can message
+  its parent, a sibling, or broadcast to every other agent mid-flight.
+
+  `MailboxPort` (ALL NO-THROW): `send` (always returns a message) / `read`
+  (undelivered for an agent, MARKS delivered, idempotent re-read) / `peek` (same
+  selection, no mark) / `ack` (mark a specific message) / `list` (filter by
+  from/to/kind) / `pendingFor` (undelivered count) / `toSnapshot` +
+  `fromSnapshot` (REPLACE-not-merge). Delivery: direct messages get a
+  per-message `deliveredAt`; broadcast `to:"*"` is delivered ONCE PER AGENT via a
+  per-agent `lastReadAt` cursor and NEVER to its own sender; a message is never
+  delivered to self; `send(to:unknown)` succeeds and sits unread;
+  `pendingFor(unknown)`=0. Retention/LRU: at most `maxRetained` (default 1024)
+  messages + `retentionMs` (default 3_600_000) reclaim, evicting
+  delivered-before-undelivered (oldest sentAt first).
+
+  The LLM tool `subagent_send_message` takes `to` (agent id / "*" broadcast /
+  "parent"), `kind` (request|response|broadcast), `body` (1-8000), optional
+  `correlation_id`. `hitlTier: "pre-approval-ok"` (information-class — only
+  effect is an in-memory enqueue). NO-THROW: zod `safeParse` at the boundary +
+  port-throw catch ⇒ `{ ok:false, output:"send failed: ..." }`. Sender id is
+  derived from `ctx.depth` (root / `agent@depth-N`); `"parent"` rewrites to the
+  parent's derived label.
+
+  Wire: a new Tier-1 builder `buildSubagentMailboxBlock(config)` returns `[]`
+  when `config.subagentMailbox` is absent and the tool when wired, mirroring
+  `buildObjectiveBlock` / `buildSubagentBgBlock`. `buildSessionFeatures` pushes
+  the result into `extraTools` right after the background-subagent block.
+  `AgentConfig.subagentMailbox?: MailboxPort` is a helper-only port slot; the
+  FeaturesConfig Pick union includes `"subagentMailbox"`. Default-OFF
+  byte-identical (RFC §1.2): absent ⇒ no tool registered, the ToolRegistry is
+  structurally identical to the pre-ADR registry.
+
+  Slice fence: `src/agent/subagent-mailbox/` is a pure leaf (store depends only
+  on `node:crypto`; types reference nothing outside the slice).
+  `src/tool/subagent-mailbox/` declares its own narrow consumer port and accepts
+  the host mailbox structurally at the Tier-1 composition seam; it imports only
+  `../types` (Tool / ToolContext / ToolEvent / ToolResult), `@/shared`
+  (errMessage), and `zod`. NEVER `@/agent`. The sealed `src/subagent/*` slice
+  is UNMODIFIED — the mailbox is a NEW sibling.
+evidence:
+  code:
+    - src/agent/subagent-mailbox/types.ts
+    - src/agent/subagent-mailbox/store.ts
+    - src/agent/subagent-mailbox/index.ts
+    - src/tool/subagent-mailbox/index.ts
+    - src/agent/tier1/subagent-mailbox.ts
+    - src/agent/tier1/index.ts
+    - src/agent/features.ts
+    - src/agent/types.ts
+  adrs: [416, 426]
+  tests:
+    unit:
+      - tests/unit/subagent-mailbox-hellgate.test.ts
+    integration: []
+    contract: []
+knobs:
+  - name: subagentMailbox
+    where: src/agent/types.ts
+    default: 'undefined'
+    purpose: |
+      Per-session port slot. Absent ⇒ subagent_send_message NOT registered
+      (default-OFF byte-identical). Present ⇒ tool registered and bound to the
+      same port instance. Caller-wire — the composition root constructs the
+      reference store via `createSubagentMailbox()`.
+deliberate_hold:
+  reason: |
+    SEND surface only. There is NO subagent_read_inbox LLM tool yet, and the
+    dispatch seam does not drain pendingFor into the per-turn reminder. A
+    recipient surfaces incoming messages via the existing task_output summary /
+    child-seed channels; an agent that never polls leaves the message unread.
+    Sender ids are depth-derived (ToolContext has no session id), so siblings at
+    the same depth collapse into one label.
+  promotion_path: |
+    Promote to L4 when the read side lands — a subagent_read_inbox tool plus the
+    dispatch-seam wiring that drains pendingFor() into the per-turn reminder, and
+    a per-agent-id sender label threaded through the dispatch seam for precise
+    sibling-to-sibling addressing.
+notes: |
+  40 hellgate cases / 93 expects pin: direct + broadcast + self delivery rules;
+  idempotent re-read; peek-no-mark; ack; list filters; multi-agent isolation;
+  LRU delivered-before-undelivered + retentionMs; snapshot replace-not-merge;
+  NO-THROW on hostile inputs; frozen returns; tier1 barrel re-export; AgentConfig
+  slot + FeaturesConfig Pick; default-OFF (slot absent ⇒ no tool); wired (slot
+  present ⇒ tool lands, same-port binding); schema rejection; "parent"/"*" target
+  resolution; HITL tier. Sibling-shaped to objective-tools (ADR-0402).
+  Absorption: Codex multi_agents_v2.send_message. What this is NOT: no read tool
+  this wave / no auto-drain into prompt / no per-agent-id addressing / src/subagent
+  sealed (NEW sibling slice, not a mutation).

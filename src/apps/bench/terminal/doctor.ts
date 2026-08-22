@@ -26,6 +26,7 @@
  * things only a live machine can answer.
  */
 
+import { sliceWholeChars } from "@/shared/slice-whole-chars"
 import type { ReasoningEffortRecord, TerminalProvider, TerminalSandbox } from "./config"
 import { EXPECTED_TASK_COUNT, TERMINAL_BENCH_DATASET, TERMINAL_BENCH_DATASET_REF } from "./dataset"
 import {
@@ -94,7 +95,12 @@ export const REQUIRED_DOCTOR_CHECKS = [
 const MAX_DETAIL = 100
 const bound = (s: string): string => {
   const oneLine = s.replace(/\s+/g, " ").trim()
-  return oneLine.length > MAX_DETAIL ? `${oneLine.slice(0, MAX_DETAIL)}…` : oneLine
+  // Surrogate-safe: `detail` carries arbitrary probe output (docker/python
+  // stderr, dataset ids) that can contain astral code points; a raw
+  // `.slice(0, MAX_DETAIL)` can cut a surrogate PAIR in half and emit a lone
+  // high surrogate (→ U+FFFD on the wire). Pinned by the surrogate-safe
+  // truncation ratchet.
+  return oneLine.length > MAX_DETAIL ? `${sliceWholeChars(oneLine, MAX_DETAIL)}…` : oneLine
 }
 
 const firstLine = (s: string): string => (s.split("\n")[0] ?? "").trim()

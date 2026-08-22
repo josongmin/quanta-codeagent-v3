@@ -1,0 +1,35 @@
+id: mcp-skybridge-sandbox
+title: MCP Skybridge sandbox — typed profiles with microVM adapters
+section: 3
+subsystem: MCP server isolation
+order: 155
+maturity: L2
+status: new
+purpose: |
+  Provides the MCP-specific sandbox port, honest passthrough degradation, and
+  registry-selected container or external microVM adapters. The profile stays
+  explicit about whether isolation was actually applied; unavailable backends
+  never claim a sandbox that did not run.
+evidence:
+  code:
+    - src/mcp/skybridge/types.ts
+    - src/mcp/skybridge/passthrough.ts
+    - src/mcp/skybridge/container.ts
+    - src/mcp/skybridge/microvm.ts
+    - src/mcp/skybridge/lima-microvm.ts
+    - src/mcp/skybridge/applevz-microvm.ts
+    - src/mcp/skybridge/registry.ts
+    - src/mcp/skybridge/index.ts
+  adrs:
+    - docs/decisions/0155-mcp-skybridge.md
+    - docs/decisions/0160-skybridge-microvm-impl.md
+  tests:
+    unit:
+      - tests/unit/mcp-skybridge-hellgate.test.ts
+      - tests/unit/mcp-skybridge-lima-hellgate.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold:
+  reason: "MCP composition does not yet install a non-passthrough Skybridge backend in the production host."
+  promotion_path: "Wire a selected backend at the MCP host composition root and prove an MCP server cannot observe an out-of-profile filesystem or network capability."

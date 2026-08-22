@@ -1,0 +1,84 @@
+id: codex-r2-plugin-system
+title: Plugin discovery + MCP launcher + skill set extension + app catalog + manifest unification (ADR-0336 / 0338 / 0339 / 0341 / 0342)
+section: 9
+subsystem: Codex `.codex-plugin/plugin.json` absorption + `@@app` / `plugin://` mention resolution + workspace customization
+order: 101
+maturity: L3
+status: stable
+ui_surfaces: [n-a]
+monitoring: partial
+modes: [n-a]
+configurable: n-a
+owners: ["@songmin"]
+labels: ["surface:core", "absorbed:codex", "default-off"]
+depends_on:
+  - codex-r2-typed-event-store
+  - codex-r2-mention-injection-pipeline
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 15/15 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "pure internal plugin/MCP/app-catalog substrate (ui_surfaces n-a); no browser render affordance on any surface"
+purpose: |
+  5-ADR plugin substrate. ADR-0336 ships 3 slices: plugin-discovery
+  (`.codex-plugin/plugin.json` parser + fs scan + in-memory registry),
+  app-catalog (`DEFAULT_APP_CATALOG` 3 entries verbatim from surface-
+  model.md: cli / browser / desktop), plugin-app-resolver (composite
+  resolver). ADR-0338 ships plugin-mcp-launcher: closed
+  `McpLauncherPort + McpServerHandle + PluginMcpRegistry`,
+  `createIsolatedMcpLauncherPort` production adapter wrapping
+  `@/mcp/isolated-client`, `composeServerId` canonicalization, NO-THROW
+  per-server isolation. ADR-0339 ships plugin-skill-extension:
+  `resolvePluginSkillsForActivation` + `unionActiveSkills`
+  (caller-override-precedence). ADR-0341 unifies the plugin manifest
+  shape — Codex Desktop bundle (.vite/build/main-*.js:13428) verified
+  as `Record<string, MCPServerSpec>` ground truth, so the array shape
+  was an absorption miss. ADR-0342 adds `.quanta/apps.json` workspace
+  override loader + workspace-wins merge.
+evidence:
+  code:
+    - src/agent/plugin-discovery/types.ts
+    - src/agent/plugin-discovery/parser.ts
+    - src/agent/plugin-discovery/discovery.ts
+    - src/agent/plugin-discovery/in-memory-registry.ts
+    - src/agent/app-catalog/types.ts
+    - src/agent/app-catalog/default-catalog.ts
+    - src/agent/app-catalog/loader.ts
+    - src/agent/app-catalog/merge.ts
+    - src/agent/app-catalog/workspace-catalog.ts
+    - src/agent/plugin-app-resolver/composite-resolver.ts
+    - src/agent/plugin-mcp-launcher/launcher.ts
+    - src/agent/plugin-mcp-launcher/registry.ts
+    - src/agent/plugin-mcp-launcher/isolated-launcher-port.ts
+    - src/agent/plugin-skill-extension/extender.ts
+    - src/agent/plugin-skill-extension/types.ts
+  adrs:
+    - docs/decisions/0336-plugin-app-resolver.md
+    - docs/decisions/0338-plugin-mcp-launcher.md
+    - docs/decisions/0339-plugin-declared-skill-set-extension.md
+    - docs/decisions/0341-plugin-manifest-shape-unification.md
+    - docs/decisions/0342-workspace-app-catalog-override.md
+  tests:
+    unit:
+      - src/agent/plugin-discovery/__tests__/parser.hellgate.test.ts
+      - src/agent/plugin-discovery/__tests__/discovery.hellgate.test.ts
+      - src/agent/plugin-discovery/__tests__/in-memory-registry.hellgate.test.ts
+      - src/agent/app-catalog/__tests__/loader.hellgate.test.ts
+      - src/agent/app-catalog/__tests__/merge.hellgate.test.ts
+      - src/agent/app-catalog/__tests__/workspace-catalog.hellgate.test.ts
+      - src/agent/app-catalog/__tests__/default-catalog.hellgate.test.ts
+      - src/agent/plugin-app-resolver/__tests__/plugin-resolver.hellgate.test.ts
+      - src/agent/plugin-app-resolver/__tests__/app-resolver.hellgate.test.ts
+      - src/agent/plugin-app-resolver/__tests__/composite-resolver.hellgate.test.ts
+      - src/agent/plugin-mcp-launcher/__tests__/launcher.hellgate.test.ts
+      - src/agent/plugin-mcp-launcher/__tests__/registry.hellgate.test.ts
+      - src/agent/plugin-skill-extension/__tests__/extender.hellgate.test.ts
+      - src/agent/plugin-skill-extension/__tests__/union.hellgate.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: 'app-catalog workspace-wins precedence is INTENTIONALLY opposite to plugin-skill-extension caller-wins — workspace customization is more specific than global default; plugin skills are supplements. ADR-0341 made the W-D `mcp-shape-adapter` redundant — adapter retired in the W-A reconcile commit.'

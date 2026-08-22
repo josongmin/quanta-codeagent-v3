@@ -1,0 +1,44 @@
+id: turn-diff-event
+title: turn_diff_updated stream event + emitter
+section: 8
+subsystem: Turn-end structured diff channel (ADR-0102)
+order: 102
+maturity: L4
+status: new
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [n-a]
+configurable: integrated
+surface_integration:
+  cli: full
+  web: partial
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 2/2 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "components built+tested (apps/web-frontend/src/components/canvas/DiffView.tsx + DiffPanel.tsx + SplitDiffView.tsx + DiffStats.tsx) but NOT mounted — App.tsx:578 says DiffPanel DEFERRED so tool.diff frames decode then drop; the turn_diff_updated AgentEvent itself is dropped at context-binding default arm (outside 7-tag bridge whitelist)"
+owners: ["@songmin"]
+labels: ["surface:core", "observability-primitive"]
+depends_on: [agentevent, git-branch-name-schema-guard, git-runner-cancellation-signal, jsonl-cumulative-retention, plan-mode]
+purpose: |
+  AgentEvent union variant `turn_diff_updated` plus the emitter module that
+  computes per-turn cumulative unified diff. captureTurnStart records workspace
+  state at turn-open; computeTurnDiff produces a unified diff against the
+  captured baseline at turn-close; buildTurnDiffEvent shapes the AgentEvent
+  payload so consumers (jsonl-recorder / stdout) can render or persist the
+  turn's filesystem footprint without parsing assistant text.
+evidence:
+  code:
+    - src/agent/turn-diff/index.ts
+    - src/stream/types.ts
+  adrs: [102]
+  tests:
+    unit: [tests/unit/turn-diff-emitter-hellgate.test.ts]
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  Contract + emitter shipped; loop wiring lives separately in ADR-0110 helpers
+  (deferred caller-wire pattern). ADR-0125 catalogs the consolidated wiring
+  recipe and ships an integration test against real git.

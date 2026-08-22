@@ -1,0 +1,2847 @@
+{
+  "generatedAt": "2026-06-22T09:29:46.982Z",
+  "presets": {
+    "baseline": {
+      "name": "baseline",
+      "knobs": {},
+      "desc": "",
+      "knobCount": 0
+    },
+    "agentless-v1": {
+      "name": "agentless-v1",
+      "knobs": {
+        "lsp": "1",
+        "localize-phase": "5",
+        "issue-hint": "agentless",
+        "issue-hint-expected-actual": "1",
+        "repro-test": "5",
+        "repo-map": "1",
+        "read-outline": "1",
+        "test-runner": "1",
+        "retry-transient": "3"
+      },
+      "desc": "Versioned bench presets (frozen)  The full recommended SWE-bench posture (the bundle formerly hidden behind the ad-hoc `QUANTA_BENCH_SOTA=1` flag, now honest + declarative + actually config-driving). `QUANTA_BENCH_SOTA=1` resolves to THIS preset (alias). Excludes subagent/skills deliberately — no measured win yet; those live in `everything-v1` for A/B.",
+      "knobCount": 9
+    },
+    "agentless-v1-nosteer": {
+      "name": "agentless-v1-nosteer",
+      "knobs": {
+        "lsp": "1",
+        "lsp-steer": "off",
+        "localize-phase": "5",
+        "issue-hint": "agentless",
+        "issue-hint-expected-actual": "1",
+        "repro-test": "5",
+        "repo-map": "1",
+        "read-outline": "1",
+        "test-runner": "1",
+        "retry-transient": "3"
+      },
+      "desc": "LSP-nav GROUNDING steer (`lsp-steer`) is DEFAULT-ON whenever `lsp:1` (see benchPostureFromState) — agentless-v1 already steers `lsp_definition`/ `lsp_references`. This preset is the A/B BASELINE: identical to agentless-v1 but with the steer explicitly OFF, so `--preset agentless-v1` vs this one is a clean single-variable measure of the steer's effect (no env-forwarding needed on the remote box — full-remote forwards `--preset` only).",
+      "knobCount": 10
+    },
+    "agentless-v2-safe": {
+      "name": "agentless-v2-safe",
+      "knobs": {
+        "lsp": "1",
+        "localize-phase": "5",
+        "issue-hint": "agentless",
+        "issue-hint-expected-actual": "1",
+        "repo-map": "1",
+        "read-outline": "1",
+        "retry-transient": "3",
+        "bench-in-loop-exec": "off"
+      },
+      "desc": "agentless-v1 + the mini-swe (edit-and-submit) posture. Identical localization stack (lsp/localize-phase/issue-hint/repo-map/read-outline) but turns OFF in-loop test execution: drops `repro-test` (host-python repro directive) and `test-runner` (the run-tests tool), and sets `bench-in-loop-exec:off` so the driver emits SWEBENCH_DIRECTIVE_NOEXEC + no verifyGuard + single-pass + no repro hint. For instances whose host test-env is incompatible the agent can't run tests anyway; the grader runs them in the correct docker env. A NEW frozen preset — agentless-v1 is untouched.",
+      "knobCount": 8
+    },
+    "agentless-v2": {
+      "name": "agentless-v2",
+      "knobs": {
+        "lsp": "1",
+        "localize-phase": "5",
+        "issue-hint": "agentless",
+        "issue-hint-expected-actual": "1",
+        "repro-test": "5",
+        "repo-map": "1",
+        "read-outline": "1",
+        "test-runner": "1",
+        "retry-transient": "3",
+        "fault-evidence": "1",
+        "verification-plan": "1",
+        "primary-rail": "1",
+        "patch-hygiene": "1",
+        "no-patch-breaker": "1",
+        "repair-escalation": "1"
+      },
+      "desc": "jun-17 proof-driven closure bundle: agentless-v1 + ALL six closure knobs ON. This is the EXPERIMENTAL A/B ARM (not a claimed winner) — it turns on the typed-artifact rails (fault-evidence/verification-plan/primary-rail/ patch-hygiene/no-patch-breaker/repair-escalation) so a `--preset agentless-v2` vs `agentless-v1` run measures the bundle's effect. primary-rail is the only BEHAVIORAL knob (gates the repair validator on a red-on-base repro); the rest are observe-only telemetry feeding closure-diagnostics. FROZEN once measured.",
+      "knobCount": 15
+    },
+    "agentless-v2-repair": {
+      "name": "agentless-v2-repair",
+      "knobs": {
+        "lsp": "1",
+        "localize-phase": "5",
+        "issue-hint": "agentless",
+        "issue-hint-expected-actual": "1",
+        "repro-test": "5",
+        "repo-map": "1",
+        "read-outline": "1",
+        "test-runner": "1",
+        "retry-transient": "3",
+        "fault-evidence": "1",
+        "verification-plan": "1",
+        "primary-rail": "1",
+        "patch-hygiene": "1",
+        "no-patch-breaker": "1",
+        "repair-escalation": "1",
+        "closure-repair": "3"
+      },
+      "desc": "jun-19 BASELINE ARM for the repro-vote A/B — agentless-v2 + the repair loop gated by the LEGACY single-sentinel validator (`closure-repair:3`, NO vote). This is the apples-to-apples control: it re-introduces the same closure-repair executor that was measured net-negative, so `agentless-v2-repair` vs `agentless-v2-reprovote` isolates EXACTLY the vote gate (single variable: `repro-vote`). A boolean knob's env value cannot turn a preset-ON knob OFF (parse yields true|undefined, never explicit-false), so the baseline MUST be its own preset — env `QUANTA_BENCH_REPRO_VOTE=off` would NOT suppress it.",
+      "knobCount": 16
+    },
+    "agentless-v2-reprovote": {
+      "name": "agentless-v2-reprovote",
+      "knobs": {
+        "lsp": "1",
+        "localize-phase": "5",
+        "issue-hint": "agentless",
+        "issue-hint-expected-actual": "1",
+        "repro-test": "5",
+        "repo-map": "1",
+        "read-outline": "1",
+        "test-runner": "1",
+        "retry-transient": "3",
+        "fault-evidence": "1",
+        "verification-plan": "1",
+        "primary-rail": "1",
+        "patch-hygiene": "1",
+        "no-patch-breaker": "1",
+        "repair-escalation": "1",
+        "closure-repair": "3",
+        "repro-vote": "1"
+      },
+      "desc": "jun-19 repro-oracle-quality ARM — repair gated by the K-of-N RESOLVED vote.  The HYPOTHESIS: closure-repair was measured net-negative (resolution 9→7) ONLY because the repro oracle is a false-NEGATIVE — it reads a CORRECT fix as \"reproduced\", so the single-script gate rejects it and repair churns. The `repro-vote` knob re-runs the WHOLE reproducing set on the patched tree and majority-votes \"Issue resolved\", removing exactly that false-NEGATIVE. So this arm bundles BOTH: `closure-repair:3` (the repair loop) + `repro-vote:1` (its vote gate). Without closure-repair the repair phase never runs and the vote would be INERT (the gate lives inside the loop) — they MUST ship together.  Measurement: vs plain `agentless-v2` (no repair) = repair+vote net effect; vs `agentless-v2-repair` (repair + legacy single-sentinel gate) = the vote's ISOLATED effect (single variable `repro-vote`). v1/v2 untouched (frozen).",
+      "knobCount": 17
+    },
+    "agentless-mini-parity": {
+      "name": "agentless-mini-parity",
+      "knobs": {
+        "lsp": "1",
+        "localize-phase": "5",
+        "issue-hint": "agentless",
+        "issue-hint-expected-actual": "1",
+        "repro-test": "5",
+        "repo-map": "1",
+        "read-outline": "1",
+        "test-runner": "1",
+        "retry-transient": "3",
+        "fault-evidence": "1",
+        "verification-plan": "1",
+        "primary-rail": "1",
+        "patch-hygiene": "1",
+        "no-patch-breaker": "1",
+        "repair-escalation": "1",
+        "round0-minimal": "1"
+      },
+      "desc": "WS1 mini-parity (jun-18) — agentless-v2 with the round-0 prompt THINNED. Single-variable delta vs agentless-v2: `round0-minimal:1`. Everything else is byte-identical to v2, so a `--preset agentless-mini-parity` vs `agentless-v2` run isolates the effect of removing the round-0 repro-directive prose (the baseline penalty: mini-swe's clean round-0 matched quanta 1:1 on the easy tail and beat agentless-v1 on #10914). The repro is still generated and still gates the repair loop (primary-rail unchanged) — only its PROSE is deferred out of the first attempt. A NEW frozen preset — v1/v2 untouched.",
+      "knobCount": 16
+    },
+    "agentless-v3-thin": {
+      "name": "agentless-v3-thin",
+      "knobs": {
+        "lsp": "1",
+        "localize-phase": "5",
+        "issue-hint": "agentless",
+        "issue-hint-expected-actual": "1",
+        "repro-test": "5",
+        "repo-map": "1",
+        "read-outline": "1",
+        "test-runner": "1",
+        "retry-transient": "3",
+        "fault-evidence": "1",
+        "verification-plan": "1",
+        "primary-rail": "1",
+        "patch-hygiene": "1",
+        "no-patch-breaker": "1",
+        "repair-escalation": "1",
+        "round0-minimal": "1",
+        "spec-fidelity-steer": "1",
+        "patch-budget": "1"
+      },
+      "desc": "jun-19 EXPERIMENTAL ARM — mini-first + patch-budgeted + source-only + critic-late. Measured insight: #13417's cause is missing minimal-patch ADMISSION, not missing verification. v3-thin keeps v2's localization+grounding but (1) thins round-0 (round0-minimal + spec-fidelity-steer; heavy verification prose deferred), and (2) adds the patch-budget admission (over-engineer escalates to the late critic). closure-repair stays OFF. NOT default; A/B arm vs agentless-v2 / mini-parity. External alignment: Agentless 3-phase + mini-SWE thin scaffold + OpenHands late-critic.",
+      "knobCount": 18
+    },
+    "agentless-v3-thin-strict": {
+      "name": "agentless-v3-thin-strict",
+      "knobs": {
+        "lsp": "1",
+        "localize-phase": "5",
+        "issue-hint": "agentless",
+        "issue-hint-expected-actual": "1",
+        "repo-map": "1",
+        "read-outline": "1",
+        "retry-transient": "3",
+        "bench-in-loop-exec": "off",
+        "patch-hygiene": "1",
+        "round0-minimal": "1",
+        "spec-fidelity-steer": "1",
+        "patch-budget": "1",
+        "patch-budget-strict": "1"
+      },
+      "desc": "jun-20 strict arm: mini-first + hard patch-budget admission + source-only sanitizer. It keeps the localization stack, turns host in-loop execution OFF for round-0 thinness, and blocks over-budget final patches from submission. Existing v3-thin remains observe-only because it has already been measured.",
+      "knobCount": 13
+    },
+    "agentless-v3-thin-strict-gated": {
+      "name": "agentless-v3-thin-strict-gated",
+      "knobs": {
+        "lsp": "1",
+        "localize-phase": "5",
+        "issue-hint": "agentless",
+        "issue-hint-expected-actual": "1",
+        "repo-map": "1",
+        "read-outline": "1",
+        "retry-transient": "3",
+        "bench-in-loop-exec": "off",
+        "patch-hygiene": "1",
+        "round0-minimal": "1",
+        "spec-fidelity-steer": "1",
+        "patch-budget": "1",
+        "patch-budget-strict": "1",
+        "verify-select": "2",
+        "verify-select-concurrency": "1",
+        "verify-select-risk-gate": "1",
+        "verify-select-regression": "discovered",
+        "verify-select-repro": "off",
+        "selector-mode": "clean"
+      },
+      "desc": "Adaptive strict arm: generate one thin/noexec strict candidate first. Only if a static public-issue/patch risk gate fires does it spend candidate #2 and run late selection. Repro consensus is OFF here so low-risk strict@1 does not pay a hidden repro-generation cost before the gate can accept.",
+      "knobCount": 19
+    },
+    "agentless-v3-thin-strict-counterfactual": {
+      "name": "agentless-v3-thin-strict-counterfactual",
+      "knobs": {
+        "lsp": "1",
+        "localize-phase": "5",
+        "issue-hint": "agentless",
+        "issue-hint-expected-actual": "1",
+        "repo-map": "1",
+        "read-outline": "1",
+        "retry-transient": "3",
+        "bench-in-loop-exec": "off",
+        "patch-hygiene": "1",
+        "round0-minimal": "1",
+        "spec-fidelity-steer": "1",
+        "patch-budget": "1",
+        "patch-budget-strict": "1",
+        "verify-select": "2",
+        "verify-select-concurrency": "1",
+        "verify-select-risk-gate": "1",
+        "verify-select-counterfactual": "on",
+        "verify-select-regression": "discovered",
+        "verify-select-repro": "off",
+        "selector-mode": "clean"
+      },
+      "desc": "Structural gate + counterfactual cand1 seed. When cand0 trips the structural risk gate, cand1 is seeded from a counterfactual minimal-alternative and bound to the structural contracts (widens late-selection diversity along the flagged dimension).",
+      "knobCount": 20
+    },
+    "agentless-v3-thin-strict-counterfactual-shadow": {
+      "name": "agentless-v3-thin-strict-counterfactual-shadow",
+      "knobs": {
+        "lsp": "1",
+        "localize-phase": "5",
+        "issue-hint": "agentless",
+        "issue-hint-expected-actual": "1",
+        "repo-map": "1",
+        "read-outline": "1",
+        "retry-transient": "3",
+        "bench-in-loop-exec": "off",
+        "patch-hygiene": "1",
+        "round0-minimal": "1",
+        "spec-fidelity-steer": "1",
+        "patch-budget": "1",
+        "patch-budget-strict": "1",
+        "verify-select": "2",
+        "verify-select-concurrency": "1",
+        "verify-select-risk-gate": "1",
+        "verify-select-counterfactual": "on",
+        "verify-select-llm-risk-gate": "shadow",
+        "verify-select-regression": "discovered",
+        "verify-select-repro": "off",
+        "selector-mode": "clean"
+      },
+      "desc": "Counterfactual cand1 seed + shadow LLM semantic gate. The semantic advisory is recorded in telemetry only (shadow), so this measures the counterfactual seed's effect while observing what the LLM gate would have expanded.",
+      "knobCount": 21
+    },
+    "agentless-v3-thin-strict-gated-llm-shadow": {
+      "name": "agentless-v3-thin-strict-gated-llm-shadow",
+      "knobs": {
+        "lsp": "1",
+        "localize-phase": "5",
+        "issue-hint": "agentless",
+        "issue-hint-expected-actual": "1",
+        "repo-map": "1",
+        "read-outline": "1",
+        "retry-transient": "3",
+        "bench-in-loop-exec": "off",
+        "patch-hygiene": "1",
+        "round0-minimal": "1",
+        "spec-fidelity-steer": "1",
+        "patch-budget": "1",
+        "patch-budget-strict": "1",
+        "verify-select": "2",
+        "verify-select-concurrency": "1",
+        "verify-select-risk-gate": "1",
+        "verify-select-llm-risk-gate": "shadow",
+        "verify-select-regression": "discovered",
+        "verify-select-repro": "off"
+      },
+      "desc": "Structural gate + shadow semantic gate. Measures whether the LLM advisory would have expanded candidate 0 without changing submit authority yet.",
+      "knobCount": 19
+    },
+    "agentless-v3-thin-strict-gated-llm": {
+      "name": "agentless-v3-thin-strict-gated-llm",
+      "knobs": {
+        "lsp": "1",
+        "localize-phase": "5",
+        "issue-hint": "agentless",
+        "issue-hint-expected-actual": "1",
+        "repo-map": "1",
+        "read-outline": "1",
+        "retry-transient": "3",
+        "bench-in-loop-exec": "off",
+        "patch-hygiene": "1",
+        "round0-minimal": "1",
+        "spec-fidelity-steer": "1",
+        "patch-budget": "1",
+        "patch-budget-strict": "1",
+        "verify-select": "2",
+        "verify-select-concurrency": "1",
+        "verify-select-risk-gate": "1",
+        "verify-select-llm-risk-gate": "on",
+        "verify-select-regression": "discovered",
+        "verify-select-repro": "off"
+      },
+      "desc": "Structural gate + semantic LLM expand in the live path. Winner authority still stays with late select / VerificationBundle after expansion.",
+      "knobCount": 19
+    },
+    "agentless-v3-thin-strict-select": {
+      "name": "agentless-v3-thin-strict-select",
+      "knobs": {
+        "lsp": "1",
+        "localize-phase": "5",
+        "issue-hint": "agentless",
+        "issue-hint-expected-actual": "1",
+        "repo-map": "1",
+        "read-outline": "1",
+        "retry-transient": "3",
+        "bench-in-loop-exec": "off",
+        "patch-hygiene": "1",
+        "round0-minimal": "1",
+        "spec-fidelity-steer": "1",
+        "patch-budget": "1",
+        "patch-budget-strict": "1",
+        "verify-select": "5",
+        "verify-select-early-accept": "1",
+        "verify-select-regression": "discovered",
+        "verify-select-repro": "positive"
+      },
+      "desc": "Strict + late critic/select. Candidate generation stays mini-first/noexec; only the outer selector runs regression checks after candidates exist.",
+      "knobCount": 17
+    },
+    "agentless-v3-thin-strict-closure-select": {
+      "name": "agentless-v3-thin-strict-closure-select",
+      "knobs": {
+        "lsp": "1",
+        "localize-phase": "5",
+        "issue-hint": "agentless",
+        "issue-hint-expected-actual": "1",
+        "repo-map": "1",
+        "read-outline": "1",
+        "retry-transient": "3",
+        "bench-in-loop-exec": "off",
+        "fault-evidence": "1",
+        "verification-plan": "1",
+        "primary-rail": "1",
+        "patch-hygiene": "1",
+        "no-patch-breaker": "1",
+        "repair-escalation": "1",
+        "round0-minimal": "1",
+        "spec-fidelity-steer": "1",
+        "patch-budget": "1",
+        "patch-budget-strict": "1",
+        "verify-select": "5",
+        "verify-select-early-accept": "1",
+        "verify-select-regression": "discovered",
+        "verify-select-repro": "positive"
+      },
+      "desc": "Structural selector candidate arm. Keeps the cheap mini-swe/noexec candidate generation from thin-strict-select, but restores the closure grounding knobs from v3-thin so verify-select owner seeds/ownerCoverage are driven by the ClosureBundle evidence SSOT instead of raw localizer fallback. Repair executor stays OFF: this is late select, not repair churn.",
+      "knobCount": 22
+    },
+    "agentless-v3-thin-strict-closure-select-clean": {
+      "name": "agentless-v3-thin-strict-closure-select-clean",
+      "knobs": {
+        "lsp": "1",
+        "localize-phase": "5",
+        "issue-hint": "agentless",
+        "issue-hint-expected-actual": "1",
+        "repo-map": "1",
+        "read-outline": "1",
+        "retry-transient": "3",
+        "bench-in-loop-exec": "off",
+        "fault-evidence": "1",
+        "verification-plan": "1",
+        "primary-rail": "1",
+        "patch-hygiene": "1",
+        "no-patch-breaker": "1",
+        "repair-escalation": "1",
+        "round0-minimal": "1",
+        "spec-fidelity-steer": "1",
+        "patch-budget": "1",
+        "patch-budget-strict": "1",
+        "verify-select": "5",
+        "verify-select-early-accept": "1",
+        "verify-select-regression": "discovered",
+        "verify-select-repro": "positive",
+        "selector-mode": "clean"
+      },
+      "desc": "Clean-authority successor to closure-select. Preserves the same closure- grounded generation/search posture, but routes final submit authority through the clean selector lattice.",
+      "knobCount": 23
+    },
+    "agentless-v3-thin-strict-closure-select-clean-witness-only": {
+      "name": "agentless-v3-thin-strict-closure-select-clean-witness-only",
+      "knobs": {
+        "lsp": "1",
+        "localize-phase": "5",
+        "issue-hint": "agentless",
+        "issue-hint-expected-actual": "1",
+        "repo-map": "1",
+        "read-outline": "1",
+        "retry-transient": "3",
+        "bench-in-loop-exec": "off",
+        "fault-evidence": "1",
+        "verification-plan": "1",
+        "primary-rail": "1",
+        "patch-hygiene": "1",
+        "no-patch-breaker": "1",
+        "repair-escalation": "1",
+        "round0-minimal": "1",
+        "spec-fidelity-steer": "1",
+        "patch-budget": "1",
+        "patch-budget-strict": "1",
+        "verify-select": "5",
+        "verify-select-regression": "discovered",
+        "verify-select-repro": "off",
+        "selector-mode": "clean"
+      },
+      "desc": "Witness-only clean closure-select arm. Keeps the same closure-grounded generation/search posture as closure-select-clean, but removes progressive early accept and generated repro ranking so final submit authority comes only from the clean selector's executed-witness / structural / contract lattice over the full N-best candidate set.",
+      "knobCount": 22
+    },
+    "agentless-v4-proof-clean": {
+      "name": "agentless-v4-proof-clean",
+      "knobs": {
+        "lsp": "1",
+        "localize-phase": "5",
+        "issue-hint": "agentless",
+        "issue-hint-expected-actual": "1",
+        "repo-map": "1",
+        "read-outline": "1",
+        "test-runner": "1",
+        "retry-transient": "3",
+        "bench-in-loop-exec": "repro-only",
+        "repro-test": "10",
+        "adversarial-repro": "1",
+        "fault-evidence": "1",
+        "verification-plan": "1",
+        "primary-rail": "1",
+        "patch-hygiene": "1",
+        "no-patch-breaker": "1",
+        "repair-escalation": "1",
+        "round0-minimal": "1",
+        "spec-fidelity-steer": "1",
+        "patch-budget": "1",
+        "patch-budget-strict": "1",
+        "verify-select": "5",
+        "verify-select-concurrency": "3",
+        "verify-select-regression": "discovered",
+        "verify-select-repro": "positive",
+        "verify-select-proof-required": "1",
+        "selector-mode": "clean"
+      },
+      "desc": "v4 proof-clean arm. Successor to the v3 closure-select-clean family: keep closure-grounded generation and clean selector authority, but restore bounded executable public-repro feedback in repro-only mode. This makes the selector consume proof receipts instead of relying on minimality-only wins.",
+      "knobCount": 27
+    },
+    "agentless-v3-select-regression": {
+      "name": "agentless-v3-select-regression",
+      "knobs": {
+        "lsp": "1",
+        "localize-phase": "5",
+        "issue-hint": "agentless",
+        "issue-hint-expected-actual": "1",
+        "repro-test": "5",
+        "repo-map": "1",
+        "read-outline": "1",
+        "test-runner": "1",
+        "retry-transient": "3",
+        "fault-evidence": "1",
+        "verification-plan": "1",
+        "primary-rail": "1",
+        "patch-hygiene": "1",
+        "no-patch-breaker": "1",
+        "repair-escalation": "1",
+        "round0-minimal": "1",
+        "spec-fidelity-steer": "1",
+        "patch-budget": "1",
+        "verify-select": "5",
+        "verify-select-early-accept": "1",
+        "verify-select-regression": "discovered",
+        "verify-select-repro": "positive"
+      },
+      "desc": "jun-20 no-oracle verify-select arm. Starts from v3-thin, adds N-best selection, uses discovered native repo tests as the hard regression signal, and demotes self-generated repro consensus to positive-only soft ranking so a noisy repro false-negative cannot reject the right candidate.",
+      "knobCount": 22
+    },
+    "agentless-v3-select-regression-doubt": {
+      "name": "agentless-v3-select-regression-doubt",
+      "knobs": {
+        "lsp": "1",
+        "localize-phase": "5",
+        "issue-hint": "agentless",
+        "issue-hint-expected-actual": "1",
+        "repro-test": "5",
+        "repo-map": "1",
+        "read-outline": "1",
+        "test-runner": "1",
+        "retry-transient": "3",
+        "fault-evidence": "1",
+        "verification-plan": "1",
+        "primary-rail": "1",
+        "patch-hygiene": "1",
+        "no-patch-breaker": "1",
+        "repair-escalation": "1",
+        "round0-minimal": "1",
+        "spec-fidelity-steer": "1",
+        "patch-budget": "1",
+        "verify-select": "5",
+        "verify-select-early-accept": "1",
+        "verify-select-regression": "discovered",
+        "verify-select-repro": "positive",
+        "repro-doubt": "5"
+      },
+      "desc": "jun-20 targeted verify_loop_stuck arm. Keeps the no-oracle verify-select posture, but adds the one-shot repro-doubt guard after 5 consecutive post-edit test reruns. Separate preset so the stall-breaker effect stays attributable instead of silently changing the base select-regression arm.",
+      "knobCount": 23
+    },
+    "everything-v1": {
+      "name": "everything-v1",
+      "knobs": {
+        "lsp": "1",
+        "subagent": "1",
+        "skills": "1",
+        "localize-phase": "5",
+        "issue-hint": "agentless",
+        "issue-hint-expected-actual": "1",
+        "repro-test": "5",
+        "repo-map": "1",
+        "read-outline": "1",
+        "test-runner": "1",
+        "retry-transient": "3"
+      },
+      "desc": "agentless-v1 + the multi-agent axis (subagent + bundled skills). Kitchen sink for \"use everything\" runs; NOT measurement-clean vs agentless-v1.",
+      "knobCount": 11
+    },
+    "agentless-full": {
+      "name": "agentless-full",
+      "knobs": {
+        "issue-hint": "agentless",
+        "branch-search": "3",
+        "repro-test": "5"
+      },
+      "desc": "Legacy unversioned presets (retained for back-compat)",
+      "knobCount": 3
+    },
+    "hint-only": {
+      "name": "hint-only",
+      "knobs": {
+        "issue-hint": "1"
+      },
+      "desc": "",
+      "knobCount": 1
+    },
+    "everything": {
+      "name": "everything",
+      "knobs": {
+        "lsp": "1",
+        "subagent": "1",
+        "skills": "1",
+        "localize-phase": "3",
+        "branch-search": "3",
+        "issue-hint": "agentless",
+        "repro-test": "5"
+      },
+      "desc": "",
+      "knobCount": 7
+    }
+  },
+  "knobs": {
+    "adversarial-repro": {
+      "id": "adversarial-repro",
+      "desc": "Adversarial repro coverage (boundary/must-reject/no-copy-suggested-fix) so a shallow fix stays RED (#10999 under-fix class)",
+      "group": "tool",
+      "category": "tool",
+      "envKey": "QUANTA_BENCH_ADVERSARIAL_REPRO",
+      "unit": null,
+      "source": "jun-19 repro-quality domino (10999 RCA: weak repro false-GREEN on under-fix)",
+      "cost": null,
+      "conflicts": null,
+      "inRegistry": true,
+      "usedBy": [
+        {
+          "preset": "agentless-v4-proof-clean",
+          "value": "1"
+        }
+      ]
+    },
+    "bench-in-loop-exec": {
+      "id": "bench-in-loop-exec",
+      "desc": "Bench: execution authority mode (default full). full = repo tests in-loop; repro-only = focused issue reproduction only; off = edit-and-submit with no execution.",
+      "group": "exec",
+      "category": "verify",
+      "envKey": "QUANTA_BENCH_IN_LOOP_EXEC",
+      "unit": "mode",
+      "source": "mini-swe posture absorption (pytest-7982 incompatible-host-env flail)",
+      "cost": null,
+      "conflicts": null,
+      "inRegistry": true,
+      "usedBy": [
+        {
+          "preset": "agentless-v2-safe",
+          "value": "off"
+        },
+        {
+          "preset": "agentless-v3-thin-strict",
+          "value": "off"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-gated",
+          "value": "off"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-counterfactual",
+          "value": "off"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-counterfactual-shadow",
+          "value": "off"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-gated-llm-shadow",
+          "value": "off"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-gated-llm",
+          "value": "off"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-select",
+          "value": "off"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-closure-select",
+          "value": "off"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-closure-select-clean",
+          "value": "off"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-closure-select-clean-witness-only",
+          "value": "off"
+        },
+        {
+          "preset": "agentless-v4-proof-clean",
+          "value": "repro-only"
+        }
+      ]
+    },
+    "branch-search": {
+      "id": "branch-search",
+      "desc": "Agentless N-best speculative branch search (K candidates, ~K× cost)",
+      "group": "agent",
+      "category": "agent",
+      "envKey": "QUANTA_BENCH_BRANCH_SEARCH",
+      "unit": "candidates",
+      "source": "ADR-0084 / Agentless paper",
+      "cost": 8,
+      "conflicts": [
+        "localize-phase"
+      ],
+      "inRegistry": true,
+      "usedBy": [
+        {
+          "preset": "agentless-full",
+          "value": "3"
+        },
+        {
+          "preset": "everything",
+          "value": "3"
+        }
+      ]
+    },
+    "closure-repair": {
+      "id": "closure-repair",
+      "desc": "Repair-round budget for the closure gate's verify-first path (max N rounds)",
+      "group": "repair",
+      "category": "validation",
+      "envKey": "QUANTA_BENCH_CLOSURE_REPAIR",
+      "unit": "rounds",
+      "source": "closure-driven runner (jun-18) — the execution half of T-302",
+      "cost": 10,
+      "conflicts": null,
+      "inRegistry": true,
+      "usedBy": [
+        {
+          "preset": "agentless-v2-repair",
+          "value": "3"
+        },
+        {
+          "preset": "agentless-v2-reprovote",
+          "value": "3"
+        }
+      ]
+    },
+    "fault-evidence": {
+      "id": "fault-evidence",
+      "desc": "T-201 typed FaultEvidencePacket (bounded owner-context, no raw source)",
+      "group": "verify",
+      "category": "tool",
+      "envKey": "QUANTA_BENCH_FAULT_EVIDENCE",
+      "unit": null,
+      "source": "jun-17 proof-driven bench closure (T-201)",
+      "cost": null,
+      "conflicts": null,
+      "inRegistry": true,
+      "usedBy": [
+        {
+          "preset": "agentless-v2",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v2-repair",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v2-reprovote",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-mini-parity",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v3-thin",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-closure-select",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-closure-select-clean",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-closure-select-clean-witness-only",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v4-proof-clean",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v3-select-regression",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v3-select-regression-doubt",
+          "value": "1"
+        }
+      ]
+    },
+    "issue-hint": {
+      "id": "issue-hint",
+      "desc": "Issue verbatim/agentless localization hint",
+      "group": "hint",
+      "category": "hint",
+      "envKey": "QUANTA_BENCH_ISSUE_HINT",
+      "unit": "mode",
+      "source": "Agentless paper §3.1",
+      "cost": null,
+      "conflicts": null,
+      "inRegistry": true,
+      "usedBy": [
+        {
+          "preset": "agentless-v1",
+          "value": "agentless"
+        },
+        {
+          "preset": "agentless-v1-nosteer",
+          "value": "agentless"
+        },
+        {
+          "preset": "agentless-v2-safe",
+          "value": "agentless"
+        },
+        {
+          "preset": "agentless-v2",
+          "value": "agentless"
+        },
+        {
+          "preset": "agentless-v2-repair",
+          "value": "agentless"
+        },
+        {
+          "preset": "agentless-v2-reprovote",
+          "value": "agentless"
+        },
+        {
+          "preset": "agentless-mini-parity",
+          "value": "agentless"
+        },
+        {
+          "preset": "agentless-v3-thin",
+          "value": "agentless"
+        },
+        {
+          "preset": "agentless-v3-thin-strict",
+          "value": "agentless"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-gated",
+          "value": "agentless"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-counterfactual",
+          "value": "agentless"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-counterfactual-shadow",
+          "value": "agentless"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-gated-llm-shadow",
+          "value": "agentless"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-gated-llm",
+          "value": "agentless"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-select",
+          "value": "agentless"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-closure-select",
+          "value": "agentless"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-closure-select-clean",
+          "value": "agentless"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-closure-select-clean-witness-only",
+          "value": "agentless"
+        },
+        {
+          "preset": "agentless-v4-proof-clean",
+          "value": "agentless"
+        },
+        {
+          "preset": "agentless-v3-select-regression",
+          "value": "agentless"
+        },
+        {
+          "preset": "agentless-v3-select-regression-doubt",
+          "value": "agentless"
+        },
+        {
+          "preset": "everything-v1",
+          "value": "agentless"
+        },
+        {
+          "preset": "agentless-full",
+          "value": "agentless"
+        },
+        {
+          "preset": "hint-only",
+          "value": "1"
+        },
+        {
+          "preset": "everything",
+          "value": "agentless"
+        }
+      ]
+    },
+    "issue-hint-expected-actual": {
+      "id": "issue-hint-expected-actual",
+      "desc": "Extract structured expected/actual evidence to ground the issue-hint signal",
+      "group": "hint",
+      "category": "hint",
+      "envKey": "QUANTA_BENCH_ISSUE_HINT_EXPECTED_ACTUAL",
+      "unit": null,
+      "source": "Agentless paper §3.1",
+      "cost": null,
+      "conflicts": null,
+      "inRegistry": true,
+      "usedBy": [
+        {
+          "preset": "agentless-v1",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v1-nosteer",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v2-safe",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v2",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v2-repair",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v2-reprovote",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-mini-parity",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v3-thin",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v3-thin-strict",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-gated",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-counterfactual",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-counterfactual-shadow",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-gated-llm-shadow",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-gated-llm",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-select",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-closure-select",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-closure-select-clean",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-closure-select-clean-witness-only",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v4-proof-clean",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v3-select-regression",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v3-select-regression-doubt",
+          "value": "1"
+        },
+        {
+          "preset": "everything-v1",
+          "value": "1"
+        }
+      ]
+    },
+    "localize-budget": {
+      "id": "localize-budget",
+      "desc": "Bench: agentless one-shot localizer breadth — `topk=N,tree=N,files=N` (defaults 5/12000/3000). The most localization-recall-sensitive levers, was un-sweepable.",
+      "group": "hint",
+      "category": "hint",
+      "envKey": "QUANTA_BENCH_LOCALIZE_BUDGET",
+      "unit": "spec",
+      "source": "jun-22 magic-number config-extraction (agentless-localize DEFAULT_TOP_K/MAX_TREE_CHARS/MAX_FILES)",
+      "cost": 1,
+      "conflicts": null,
+      "inRegistry": true,
+      "usedBy": []
+    },
+    "localize-phase": {
+      "id": "localize-phase",
+      "desc": "Block mutating tools during first N turns; force localize-first (Agentless §3.1)",
+      "group": "localize",
+      "category": "agent",
+      "envKey": "QUANTA_BENCH_LOCALIZE_PHASE",
+      "unit": "turns",
+      "source": "Agentless absorption",
+      "cost": null,
+      "conflicts": [
+        "branch-search"
+      ],
+      "inRegistry": true,
+      "usedBy": [
+        {
+          "preset": "agentless-v1",
+          "value": "5"
+        },
+        {
+          "preset": "agentless-v1-nosteer",
+          "value": "5"
+        },
+        {
+          "preset": "agentless-v2-safe",
+          "value": "5"
+        },
+        {
+          "preset": "agentless-v2",
+          "value": "5"
+        },
+        {
+          "preset": "agentless-v2-repair",
+          "value": "5"
+        },
+        {
+          "preset": "agentless-v2-reprovote",
+          "value": "5"
+        },
+        {
+          "preset": "agentless-mini-parity",
+          "value": "5"
+        },
+        {
+          "preset": "agentless-v3-thin",
+          "value": "5"
+        },
+        {
+          "preset": "agentless-v3-thin-strict",
+          "value": "5"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-gated",
+          "value": "5"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-counterfactual",
+          "value": "5"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-counterfactual-shadow",
+          "value": "5"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-gated-llm-shadow",
+          "value": "5"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-gated-llm",
+          "value": "5"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-select",
+          "value": "5"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-closure-select",
+          "value": "5"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-closure-select-clean",
+          "value": "5"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-closure-select-clean-witness-only",
+          "value": "5"
+        },
+        {
+          "preset": "agentless-v4-proof-clean",
+          "value": "5"
+        },
+        {
+          "preset": "agentless-v3-select-regression",
+          "value": "5"
+        },
+        {
+          "preset": "agentless-v3-select-regression-doubt",
+          "value": "5"
+        },
+        {
+          "preset": "everything-v1",
+          "value": "5"
+        },
+        {
+          "preset": "everything",
+          "value": "3"
+        }
+      ]
+    },
+    "lsp": {
+      "id": "lsp",
+      "desc": "LSP nav tools (8 tools — ADR-0015)",
+      "group": "localize",
+      "category": "tool",
+      "envKey": "QUANTA_BENCH_LSP",
+      "unit": null,
+      "source": "ADR-0015",
+      "cost": 1,
+      "conflicts": null,
+      "inRegistry": true,
+      "usedBy": [
+        {
+          "preset": "agentless-v1",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v1-nosteer",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v2-safe",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v2",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v2-repair",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v2-reprovote",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-mini-parity",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v3-thin",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v3-thin-strict",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-gated",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-counterfactual",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-counterfactual-shadow",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-gated-llm-shadow",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-gated-llm",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-select",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-closure-select",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-closure-select-clean",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-closure-select-clean-witness-only",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v4-proof-clean",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v3-select-regression",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v3-select-regression-doubt",
+          "value": "1"
+        },
+        {
+          "preset": "everything-v1",
+          "value": "1"
+        },
+        {
+          "preset": "everything",
+          "value": "1"
+        }
+      ]
+    },
+    "lsp-steer": {
+      "id": "lsp-steer",
+      "desc": "append LSP-nav grounding nudge to the localize-phase block message",
+      "group": "localize",
+      "category": "tool",
+      "envKey": "QUANTA_BENCH_LSP_STEER",
+      "unit": null,
+      "source": "jun-17 measured LSP-nav usage gap",
+      "cost": 1,
+      "conflicts": null,
+      "inRegistry": true,
+      "usedBy": [
+        {
+          "preset": "agentless-v1-nosteer",
+          "value": "off"
+        }
+      ]
+    },
+    "multi-voter": {
+      "id": "multi-voter",
+      "desc": "Adversarial multi-voter verification — N refute-biased voters per candidate (ADR-0433)",
+      "group": "verify",
+      "category": "verify",
+      "envKey": "QUANTA_MULTI_VOTER",
+      "unit": null,
+      "source": "ADR-0433 / Agentless §4.2 sample-and-vote",
+      "cost": 3,
+      "conflicts": null,
+      "inRegistry": true,
+      "usedBy": []
+    },
+    "must-pass": {
+      "id": "must-pass",
+      "desc": "verify-guard outcome-gate (must pass, not just presence)",
+      "group": "verify",
+      "category": "verify",
+      "envKey": "QUANTA_BENCH_MUST_PASS",
+      "unit": null,
+      "source": "RCA 2026-05-25 sanity",
+      "cost": null,
+      "conflicts": null,
+      "inRegistry": true,
+      "usedBy": []
+    },
+    "network-proxy": {
+      "id": "network-proxy",
+      "desc": "Socket-level egress proxy — gate subprocess sockets through the host allowlist (ADR-0428)",
+      "group": "tool",
+      "category": "tool",
+      "envKey": "QUANTA_NETWORK_PROXY",
+      "unit": null,
+      "source": "ADR-0428 / Codex 0.135 [network_proxy]",
+      "cost": null,
+      "conflicts": null,
+      "inRegistry": true,
+      "usedBy": []
+    },
+    "no-patch-breaker": {
+      "id": "no-patch-breaker",
+      "desc": "T-501 post-localization commit rail + no-patch exhausted verdict",
+      "group": "patch",
+      "category": "tool",
+      "envKey": "QUANTA_BENCH_NO_PATCH_BREAKER",
+      "unit": null,
+      "source": "jun-17 proof-driven bench closure (T-501)",
+      "cost": null,
+      "conflicts": null,
+      "inRegistry": true,
+      "usedBy": [
+        {
+          "preset": "agentless-v2",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v2-repair",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v2-reprovote",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-mini-parity",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v3-thin",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-closure-select",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-closure-select-clean",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-closure-select-clean-witness-only",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v4-proof-clean",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v3-select-regression",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v3-select-regression-doubt",
+          "value": "1"
+        }
+      ]
+    },
+    "no-patch-force-fraction": {
+      "id": "no-patch-force-fraction",
+      "desc": "Bench: no-patch breaker fires at this fraction of the turn budget (default 0.8). Domain (0,1). Only active when no-patch-breaker is on.",
+      "group": "agent",
+      "category": "agent",
+      "envKey": "QUANTA_BENCH_NO_PATCH_FORCE_FRACTION",
+      "unit": "fraction",
+      "source": "jun-22 magic-number config-extraction (was hardcoded DEFAULT_FORCE_FRACTION=0.8)",
+      "cost": 1,
+      "conflicts": null,
+      "inRegistry": true,
+      "usedBy": []
+    },
+    "patch-budget": {
+      "id": "patch-budget",
+      "desc": "Minimal-edit admission: emit PatchBudget over the diff (#13417 over-engineer class)",
+      "group": "patch",
+      "category": "validation",
+      "envKey": "QUANTA_BENCH_PATCH_BUDGET",
+      "unit": null,
+      "source": "jun-19 minimal-patch admission (Agentless 3-phase / mini-SWE thin scaffold)",
+      "cost": null,
+      "conflicts": null,
+      "inRegistry": true,
+      "usedBy": [
+        {
+          "preset": "agentless-v3-thin",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v3-thin-strict",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-gated",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-counterfactual",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-counterfactual-shadow",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-gated-llm-shadow",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-gated-llm",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-select",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-closure-select",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-closure-select-clean",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-closure-select-clean-witness-only",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v4-proof-clean",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v3-select-regression",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v3-select-regression-doubt",
+          "value": "1"
+        }
+      ]
+    },
+    "patch-budget-strict": {
+      "id": "patch-budget-strict",
+      "desc": "Hard minimal-edit admission: block over-budget final patches from submission",
+      "group": "patch",
+      "category": "validation",
+      "envKey": "QUANTA_BENCH_PATCH_BUDGET_STRICT",
+      "unit": null,
+      "source": "jun-20 SOTA++ strict minimal-edit admission",
+      "cost": null,
+      "conflicts": null,
+      "inRegistry": true,
+      "usedBy": [
+        {
+          "preset": "agentless-v3-thin-strict",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-gated",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-counterfactual",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-counterfactual-shadow",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-gated-llm-shadow",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-gated-llm",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-select",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-closure-select",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-closure-select-clean",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-closure-select-clean-witness-only",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v4-proof-clean",
+          "value": "1"
+        }
+      ]
+    },
+    "patch-hygiene": {
+      "id": "patch-hygiene",
+      "desc": "T-401 patch hygiene gate (stray-file deny, owner-outside telemetry)",
+      "group": "patch",
+      "category": "tool",
+      "envKey": "QUANTA_BENCH_PATCH_HYGIENE",
+      "unit": null,
+      "source": "jun-17 proof-driven bench closure (T-401)",
+      "cost": null,
+      "conflicts": null,
+      "inRegistry": true,
+      "usedBy": [
+        {
+          "preset": "agentless-v2",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v2-repair",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v2-reprovote",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-mini-parity",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v3-thin",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v3-thin-strict",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-gated",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-counterfactual",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-counterfactual-shadow",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-gated-llm-shadow",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-gated-llm",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-select",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-closure-select",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-closure-select-clean",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-closure-select-clean-witness-only",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v4-proof-clean",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v3-select-regression",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v3-select-regression-doubt",
+          "value": "1"
+        }
+      ]
+    },
+    "primary-rail": {
+      "id": "primary-rail",
+      "desc": "T-302 primary-rail enforcement + commit-vs-verify gate + repair admission",
+      "group": "structure",
+      "category": "tool",
+      "envKey": "QUANTA_BENCH_PRIMARY_RAIL",
+      "unit": null,
+      "source": "jun-17 proof-driven bench closure (T-302)",
+      "cost": null,
+      "conflicts": null,
+      "inRegistry": true,
+      "usedBy": [
+        {
+          "preset": "agentless-v2",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v2-repair",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v2-reprovote",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-mini-parity",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v3-thin",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-closure-select",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-closure-select-clean",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-closure-select-clean-witness-only",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v4-proof-clean",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v3-select-regression",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v3-select-regression-doubt",
+          "value": "1"
+        }
+      ]
+    },
+    "read-outline": {
+      "id": "read-outline",
+      "desc": "Outline-first read mode (structural map before full file body)",
+      "group": "localize",
+      "category": "tool",
+      "envKey": "QUANTA_READ_OUTLINE",
+      "unit": null,
+      "source": "Agentless absorption / Codex realtime-startup-context",
+      "cost": null,
+      "conflicts": null,
+      "inRegistry": true,
+      "usedBy": [
+        {
+          "preset": "agentless-v1",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v1-nosteer",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v2-safe",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v2",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v2-repair",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v2-reprovote",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-mini-parity",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v3-thin",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v3-thin-strict",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-gated",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-counterfactual",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-counterfactual-shadow",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-gated-llm-shadow",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-gated-llm",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-select",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-closure-select",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-closure-select-clean",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-closure-select-clean-witness-only",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v4-proof-clean",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v3-select-regression",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v3-select-regression-doubt",
+          "value": "1"
+        },
+        {
+          "preset": "everything-v1",
+          "value": "1"
+        }
+      ]
+    },
+    "regression-max-tests": {
+      "id": "regression-max-tests",
+      "desc": "Bench: max discovered keep-green regression witnesses executed per candidate (default 12). Domain [1,200]. Raise for higher regression-gate recall.",
+      "group": "validation",
+      "category": "validation",
+      "envKey": "QUANTA_BENCH_REGRESSION_MAX_TESTS",
+      "unit": "tests",
+      "source": "jun-22 magic-number config-extraction (was hardcoded/duplicated DEFAULT_MAX_TESTS=12)",
+      "cost": 1,
+      "conflicts": null,
+      "inRegistry": true,
+      "usedBy": []
+    },
+    "repair-escalation": {
+      "id": "repair-escalation",
+      "desc": "T-601 multi-owner escalation decision (closed reason taxonomy)",
+      "group": "repair",
+      "category": "tool",
+      "envKey": "QUANTA_BENCH_REPAIR_ESCALATION",
+      "unit": null,
+      "source": "jun-17 proof-driven bench closure (T-601)",
+      "cost": null,
+      "conflicts": null,
+      "inRegistry": true,
+      "usedBy": [
+        {
+          "preset": "agentless-v2",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v2-repair",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v2-reprovote",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-mini-parity",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v3-thin",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-closure-select",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-closure-select-clean",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-closure-select-clean-witness-only",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v4-proof-clean",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v3-select-regression",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v3-select-regression-doubt",
+          "value": "1"
+        }
+      ]
+    },
+    "repo-map": {
+      "id": "repo-map",
+      "desc": "Inject a bounded repo-map tree into the turn-0 env block (one-time orientation)",
+      "group": "localize",
+      "category": "hint",
+      "envKey": "QUANTA_REPO_MAP",
+      "unit": null,
+      "source": "RFC jun-6 §4 / Codex realtime-startup-context mirror",
+      "cost": 1,
+      "conflicts": null,
+      "inRegistry": true,
+      "usedBy": [
+        {
+          "preset": "agentless-v1",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v1-nosteer",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v2-safe",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v2",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v2-repair",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v2-reprovote",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-mini-parity",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v3-thin",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v3-thin-strict",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-gated",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-counterfactual",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-counterfactual-shadow",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-gated-llm-shadow",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-gated-llm",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-select",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-closure-select",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-closure-select-clean",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-closure-select-clean-witness-only",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v4-proof-clean",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v3-select-regression",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v3-select-regression-doubt",
+          "value": "1"
+        },
+        {
+          "preset": "everything-v1",
+          "value": "1"
+        }
+      ]
+    },
+    "repro-doubt": {
+      "id": "repro-doubt",
+      "desc": "After N test re-runs with no edit, steer the agent to doubt its repro test (break verify_loop_stuck)",
+      "group": "verify",
+      "category": "agent",
+      "envKey": "QUANTA_BENCH_REPRO_DOUBT",
+      "unit": "runs",
+      "source": "jun-20-bestofn-wrong-repro-oracle-root",
+      "cost": null,
+      "conflicts": null,
+      "inRegistry": true,
+      "usedBy": [
+        {
+          "preset": "agentless-v3-select-regression-doubt",
+          "value": "5"
+        }
+      ]
+    },
+    "repro-exec-timeout": {
+      "id": "repro-exec-timeout",
+      "desc": "Bench: per-repro-script exec timeout (ms, default 60000). Raise for slow repos whose repro scripts exceed 60s; it is the PER-SCRIPT cap, not the per-instance budget.",
+      "group": "validation",
+      "category": "validation",
+      "envKey": "QUANTA_BENCH_REPRO_EXEC_TIMEOUT_MS",
+      "unit": "ms",
+      "source": "jun-22 magic-number config-extraction (was hardcoded DEFAULT_EXEC_TIMEOUT_MS=60000)",
+      "cost": 1,
+      "conflicts": null,
+      "inRegistry": true,
+      "usedBy": []
+    },
+    "repro-test": {
+      "id": "repro-test",
+      "desc": "Agentless §3.3.1 reproduction-test K-sample generation",
+      "group": "verify",
+      "category": "validation",
+      "envKey": "QUANTA_BENCH_REPRO_TEST",
+      "unit": "samples",
+      "source": "Agentless paper §3.3.1",
+      "cost": 40,
+      "conflicts": null,
+      "inRegistry": true,
+      "usedBy": [
+        {
+          "preset": "agentless-v1",
+          "value": "5"
+        },
+        {
+          "preset": "agentless-v1-nosteer",
+          "value": "5"
+        },
+        {
+          "preset": "agentless-v2",
+          "value": "5"
+        },
+        {
+          "preset": "agentless-v2-repair",
+          "value": "5"
+        },
+        {
+          "preset": "agentless-v2-reprovote",
+          "value": "5"
+        },
+        {
+          "preset": "agentless-mini-parity",
+          "value": "5"
+        },
+        {
+          "preset": "agentless-v3-thin",
+          "value": "5"
+        },
+        {
+          "preset": "agentless-v4-proof-clean",
+          "value": "10"
+        },
+        {
+          "preset": "agentless-v3-select-regression",
+          "value": "5"
+        },
+        {
+          "preset": "agentless-v3-select-regression-doubt",
+          "value": "5"
+        },
+        {
+          "preset": "everything-v1",
+          "value": "5"
+        },
+        {
+          "preset": "agentless-full",
+          "value": "5"
+        },
+        {
+          "preset": "everything",
+          "value": "5"
+        }
+      ]
+    },
+    "repro-vote": {
+      "id": "repro-vote",
+      "desc": "K-of-N resolved gate: re-run the reproducing repro set on the patched tree and majority-vote 'Issue resolved' (removes the false-NEGATIVE single-script oracle)",
+      "group": "verify",
+      "category": "validation",
+      "envKey": "QUANTA_BENCH_REPRO_VOTE",
+      "unit": null,
+      "source": "jun-19 repro oracle quality (Agentless §3.3.1 resolved-side majority vote)",
+      "cost": null,
+      "conflicts": null,
+      "inRegistry": true,
+      "usedBy": [
+        {
+          "preset": "agentless-v2-reprovote",
+          "value": "1"
+        }
+      ]
+    },
+    "retry-transient": {
+      "id": "retry-transient",
+      "desc": "Retry cap for transient failures (empty-patch / infra-fail; real-fail never retried)",
+      "group": "exec",
+      "category": "validation",
+      "envKey": "QUANTA_BENCH_RETRY_TRANSIENT",
+      "unit": "retries",
+      "source": "measurement-stability wrapper",
+      "cost": null,
+      "conflicts": null,
+      "inRegistry": true,
+      "usedBy": [
+        {
+          "preset": "agentless-v1",
+          "value": "3"
+        },
+        {
+          "preset": "agentless-v1-nosteer",
+          "value": "3"
+        },
+        {
+          "preset": "agentless-v2-safe",
+          "value": "3"
+        },
+        {
+          "preset": "agentless-v2",
+          "value": "3"
+        },
+        {
+          "preset": "agentless-v2-repair",
+          "value": "3"
+        },
+        {
+          "preset": "agentless-v2-reprovote",
+          "value": "3"
+        },
+        {
+          "preset": "agentless-mini-parity",
+          "value": "3"
+        },
+        {
+          "preset": "agentless-v3-thin",
+          "value": "3"
+        },
+        {
+          "preset": "agentless-v3-thin-strict",
+          "value": "3"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-gated",
+          "value": "3"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-counterfactual",
+          "value": "3"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-counterfactual-shadow",
+          "value": "3"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-gated-llm-shadow",
+          "value": "3"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-gated-llm",
+          "value": "3"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-select",
+          "value": "3"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-closure-select",
+          "value": "3"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-closure-select-clean",
+          "value": "3"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-closure-select-clean-witness-only",
+          "value": "3"
+        },
+        {
+          "preset": "agentless-v4-proof-clean",
+          "value": "3"
+        },
+        {
+          "preset": "agentless-v3-select-regression",
+          "value": "3"
+        },
+        {
+          "preset": "agentless-v3-select-regression-doubt",
+          "value": "3"
+        },
+        {
+          "preset": "everything-v1",
+          "value": "3"
+        }
+      ]
+    },
+    "round0-minimal": {
+      "id": "round0-minimal",
+      "desc": "WS1 mini-parity: thin round-0 prompt (defer repro prose to repair rounds)",
+      "group": "structure",
+      "category": "tool",
+      "envKey": "QUANTA_BENCH_ROUND0_MINIMAL",
+      "unit": null,
+      "source": "jun-18 mini-parity baseline-penalty removal (WS1)",
+      "cost": null,
+      "conflicts": null,
+      "inRegistry": true,
+      "usedBy": [
+        {
+          "preset": "agentless-mini-parity",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v3-thin",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v3-thin-strict",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-gated",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-counterfactual",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-counterfactual-shadow",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-gated-llm-shadow",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-gated-llm",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-select",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-closure-select",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-closure-select-clean",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-closure-select-clean-witness-only",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v4-proof-clean",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v3-select-regression",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v3-select-regression-doubt",
+          "value": "1"
+        }
+      ]
+    },
+    "selector-mode": {
+      "id": "selector-mode",
+      "desc": "Selector authority mode: clean (only executable/structural hard gates) vs research (legacy heuristic gates allowed)",
+      "group": "validation",
+      "category": "validation",
+      "envKey": "QUANTA_BENCH_SELECTOR_MODE",
+      "unit": "mode",
+      "source": "jun-21 heuristic authority cleanup",
+      "cost": 1,
+      "conflicts": null,
+      "inRegistry": true,
+      "usedBy": [
+        {
+          "preset": "agentless-v3-thin-strict-gated",
+          "value": "clean"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-counterfactual",
+          "value": "clean"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-counterfactual-shadow",
+          "value": "clean"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-closure-select-clean",
+          "value": "clean"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-closure-select-clean-witness-only",
+          "value": "clean"
+        },
+        {
+          "preset": "agentless-v4-proof-clean",
+          "value": "clean"
+        }
+      ]
+    },
+    "skills": {
+      "id": "skills",
+      "desc": "Wire the Tier-1 skill system (bundled-only; Skill / ToolSearch tools)",
+      "group": "agent",
+      "category": "agent",
+      "envKey": "QUANTA_BENCH_SKILLS",
+      "unit": null,
+      "source": "ADR-0045",
+      "cost": null,
+      "conflicts": null,
+      "inRegistry": true,
+      "usedBy": [
+        {
+          "preset": "everything-v1",
+          "value": "1"
+        },
+        {
+          "preset": "everything",
+          "value": "1"
+        }
+      ]
+    },
+    "spec-fidelity-steer": {
+      "id": "spec-fidelity-steer",
+      "desc": "gap-B spec-fidelity steer (minimal-literal-fix; fires only when issue declares an exact expected output)",
+      "group": "hint",
+      "category": "tool",
+      "envKey": "QUANTA_BENCH_SPEC_FIDELITY_STEER",
+      "unit": null,
+      "source": "jun-17 strategy-failure-fix plan (Top-1)",
+      "cost": null,
+      "conflicts": null,
+      "inRegistry": true,
+      "usedBy": [
+        {
+          "preset": "agentless-v3-thin",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v3-thin-strict",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-gated",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-counterfactual",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-counterfactual-shadow",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-gated-llm-shadow",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-gated-llm",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-select",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-closure-select",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-closure-select-clean",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-closure-select-clean-witness-only",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v4-proof-clean",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v3-select-regression",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v3-select-regression-doubt",
+          "value": "1"
+        }
+      ]
+    },
+    "subagent": {
+      "id": "subagent",
+      "desc": "Wire the Tier-1 subagent system (Agent/Task/TaskOutput/TaskStop tools)",
+      "group": "agent",
+      "category": "agent",
+      "envKey": "QUANTA_BENCH_SUBAGENT",
+      "unit": null,
+      "source": "Codex absorption Phase 0-8",
+      "cost": null,
+      "conflicts": null,
+      "inRegistry": true,
+      "usedBy": [
+        {
+          "preset": "everything-v1",
+          "value": "1"
+        },
+        {
+          "preset": "everything",
+          "value": "1"
+        }
+      ]
+    },
+    "test-runner": {
+      "id": "test-runner",
+      "desc": "Expose the structured test_runner tool (typed suite execution)",
+      "group": "exec",
+      "category": "verify",
+      "envKey": "QUANTA_TEST_RUNNER",
+      "unit": null,
+      "source": "Agentless absorption",
+      "cost": null,
+      "conflicts": null,
+      "inRegistry": true,
+      "usedBy": [
+        {
+          "preset": "agentless-v1",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v1-nosteer",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v2",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v2-repair",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v2-reprovote",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-mini-parity",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v3-thin",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v4-proof-clean",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v3-select-regression",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v3-select-regression-doubt",
+          "value": "1"
+        },
+        {
+          "preset": "everything-v1",
+          "value": "1"
+        }
+      ]
+    },
+    "verification-plan": {
+      "id": "verification-plan",
+      "desc": "T-301 typed VerificationPlan (primary rail + typed successPredicates)",
+      "group": "verify",
+      "category": "tool",
+      "envKey": "QUANTA_BENCH_VERIFICATION_PLAN",
+      "unit": null,
+      "source": "jun-17 proof-driven bench closure (T-301)",
+      "cost": null,
+      "conflicts": null,
+      "inRegistry": true,
+      "usedBy": [
+        {
+          "preset": "agentless-v2",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v2-repair",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v2-reprovote",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-mini-parity",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v3-thin",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-closure-select",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-closure-select-clean",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-closure-select-clean-witness-only",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v4-proof-clean",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v3-select-regression",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v3-select-regression-doubt",
+          "value": "1"
+        }
+      ]
+    },
+    "verify-select": {
+      "id": "verify-select",
+      "desc": "Verify-and-select: generate N candidates, score via VerificationBundle, submit the best",
+      "group": "select",
+      "category": "validation",
+      "envKey": "QUANTA_BENCH_VERIFY_SELECT",
+      "unit": "candidates",
+      "source": "verify-and-select Phase 1 (jun-19) — TD selection executor",
+      "cost": 8,
+      "conflicts": null,
+      "inRegistry": true,
+      "usedBy": [
+        {
+          "preset": "agentless-v3-thin-strict-gated",
+          "value": "2"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-counterfactual",
+          "value": "2"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-counterfactual-shadow",
+          "value": "2"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-gated-llm-shadow",
+          "value": "2"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-gated-llm",
+          "value": "2"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-select",
+          "value": "5"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-closure-select",
+          "value": "5"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-closure-select-clean",
+          "value": "5"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-closure-select-clean-witness-only",
+          "value": "5"
+        },
+        {
+          "preset": "agentless-v4-proof-clean",
+          "value": "5"
+        },
+        {
+          "preset": "agentless-v3-select-regression",
+          "value": "5"
+        },
+        {
+          "preset": "agentless-v3-select-regression-doubt",
+          "value": "5"
+        }
+      ]
+    },
+    "verify-select-concurrency": {
+      "id": "verify-select-concurrency",
+      "desc": "Verify-and-select: max candidates generated concurrently (requires isolated generate)",
+      "group": "validation",
+      "category": "validation",
+      "envKey": "QUANTA_BENCH_VERIFY_SELECT_CONCURRENCY",
+      "unit": "concurrent",
+      "source": "verify-and-select Phase 1 (jun-19) — bounded-parallel candidate gen",
+      "cost": 1,
+      "conflicts": null,
+      "inRegistry": true,
+      "usedBy": [
+        {
+          "preset": "agentless-v3-thin-strict-gated",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-counterfactual",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-counterfactual-shadow",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-gated-llm-shadow",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-gated-llm",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v4-proof-clean",
+          "value": "3"
+        }
+      ]
+    },
+    "verify-select-counterfactual": {
+      "id": "verify-select-counterfactual",
+      "desc": "Verify-and-select counterfactual candidate: when cand0 trips structural risk, generate cand1 from a counterfactual minimal-alternative seed and bind it to structural contracts",
+      "group": "validation",
+      "category": "validation",
+      "envKey": "QUANTA_BENCH_VERIFY_SELECT_COUNTERFACTUAL",
+      "unit": "toggle",
+      "source": "jun-21 counterfactual select",
+      "cost": 1,
+      "conflicts": null,
+      "inRegistry": true,
+      "usedBy": [
+        {
+          "preset": "agentless-v3-thin-strict-counterfactual",
+          "value": "on"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-counterfactual-shadow",
+          "value": "on"
+        }
+      ]
+    },
+    "verify-select-early-accept": {
+      "id": "verify-select-early-accept",
+      "desc": "Verify-and-select: stop after first clean owner-scoped candidate with explicit hard-positive authority",
+      "group": "select",
+      "category": "validation",
+      "envKey": "QUANTA_BENCH_VERIFY_SELECT_EARLY_ACCEPT",
+      "unit": "toggle",
+      "source": "verify-and-select Phase 2 (jun-20) — progressive early accept",
+      "cost": 1,
+      "conflicts": null,
+      "inRegistry": true,
+      "usedBy": [
+        {
+          "preset": "agentless-v3-thin-strict-select",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-closure-select",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-closure-select-clean",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v3-select-regression",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v3-select-regression-doubt",
+          "value": "1"
+        }
+      ]
+    },
+    "verify-select-llm-risk-gate": {
+      "id": "verify-select-llm-risk-gate",
+      "desc": "Verify-and-select semantic expansion gate: shadow telemetry or fail-closed LLM expand",
+      "group": "validation",
+      "category": "validation",
+      "envKey": "QUANTA_BENCH_VERIFY_SELECT_LLM_RISK_GATE",
+      "unit": "mode",
+      "source": "jun-21 llm semantic selector gate",
+      "cost": 1,
+      "conflicts": null,
+      "inRegistry": true,
+      "usedBy": [
+        {
+          "preset": "agentless-v3-thin-strict-counterfactual-shadow",
+          "value": "shadow"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-gated-llm-shadow",
+          "value": "shadow"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-gated-llm",
+          "value": "on"
+        }
+      ]
+    },
+    "verify-select-proof-required": {
+      "id": "verify-select-proof-required",
+      "desc": "Require positive executed public proof before verify-select may submit a candidate",
+      "group": "validation",
+      "category": "validation",
+      "envKey": "QUANTA_BENCH_VERIFY_SELECT_PROOF_REQUIRED",
+      "unit": null,
+      "source": "jun-22 v4 proof-clean submit gate",
+      "cost": 1,
+      "conflicts": null,
+      "inRegistry": true,
+      "usedBy": [
+        {
+          "preset": "agentless-v4-proof-clean",
+          "value": "1"
+        }
+      ]
+    },
+    "verify-select-regression": {
+      "id": "verify-select-regression",
+      "desc": "Verify-and-select regression source: discovered repo tests, eval-only gold PASS_TO_PASS, or off",
+      "group": "select",
+      "category": "validation",
+      "envKey": "QUANTA_BENCH_VERIFY_SELECT_REGRESSION",
+      "unit": "mode",
+      "source": "verify-and-select no-oracle regression gate",
+      "cost": 1,
+      "conflicts": null,
+      "inRegistry": true,
+      "usedBy": [
+        {
+          "preset": "agentless-v3-thin-strict-gated",
+          "value": "discovered"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-counterfactual",
+          "value": "discovered"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-counterfactual-shadow",
+          "value": "discovered"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-gated-llm-shadow",
+          "value": "discovered"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-gated-llm",
+          "value": "discovered"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-select",
+          "value": "discovered"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-closure-select",
+          "value": "discovered"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-closure-select-clean",
+          "value": "discovered"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-closure-select-clean-witness-only",
+          "value": "discovered"
+        },
+        {
+          "preset": "agentless-v4-proof-clean",
+          "value": "discovered"
+        },
+        {
+          "preset": "agentless-v3-select-regression",
+          "value": "discovered"
+        },
+        {
+          "preset": "agentless-v3-select-regression-doubt",
+          "value": "discovered"
+        }
+      ]
+    },
+    "verify-select-repro": {
+      "id": "verify-select-repro",
+      "desc": "Verify-and-select generated repro consensus mode: hard gate, positive-only soft signal, or off",
+      "group": "select",
+      "category": "validation",
+      "envKey": "QUANTA_BENCH_VERIFY_SELECT_REPRO",
+      "unit": "mode",
+      "source": "verify-and-select no-oracle repro consensus demotion",
+      "cost": 1,
+      "conflicts": null,
+      "inRegistry": true,
+      "usedBy": [
+        {
+          "preset": "agentless-v3-thin-strict-gated",
+          "value": "off"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-counterfactual",
+          "value": "off"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-counterfactual-shadow",
+          "value": "off"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-gated-llm-shadow",
+          "value": "off"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-gated-llm",
+          "value": "off"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-select",
+          "value": "positive"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-closure-select",
+          "value": "positive"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-closure-select-clean",
+          "value": "positive"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-closure-select-clean-witness-only",
+          "value": "off"
+        },
+        {
+          "preset": "agentless-v4-proof-clean",
+          "value": "positive"
+        },
+        {
+          "preset": "agentless-v3-select-regression",
+          "value": "positive"
+        },
+        {
+          "preset": "agentless-v3-select-regression-doubt",
+          "value": "positive"
+        }
+      ]
+    },
+    "verify-select-risk-gate": {
+      "id": "verify-select-risk-gate",
+      "desc": "Verify-and-select: generate candidate 0 first, expand to N only when static risk triggers",
+      "group": "validation",
+      "category": "validation",
+      "envKey": "QUANTA_BENCH_VERIFY_SELECT_RISK_GATE",
+      "unit": "toggle",
+      "source": "jun-21 adaptive thin-strict selector gate",
+      "cost": 1,
+      "conflicts": null,
+      "inRegistry": true,
+      "usedBy": [
+        {
+          "preset": "agentless-v3-thin-strict-gated",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-counterfactual",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-counterfactual-shadow",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-gated-llm-shadow",
+          "value": "1"
+        },
+        {
+          "preset": "agentless-v3-thin-strict-gated-llm",
+          "value": "1"
+        }
+      ]
+    }
+  },
+  "presetOrder": [
+    "baseline",
+    "agentless-v1",
+    "agentless-v1-nosteer",
+    "agentless-v2-safe",
+    "agentless-v2",
+    "agentless-v2-repair",
+    "agentless-v2-reprovote",
+    "agentless-mini-parity",
+    "agentless-v3-thin",
+    "agentless-v3-thin-strict",
+    "agentless-v3-thin-strict-gated",
+    "agentless-v3-thin-strict-counterfactual",
+    "agentless-v3-thin-strict-counterfactual-shadow",
+    "agentless-v3-thin-strict-gated-llm-shadow",
+    "agentless-v3-thin-strict-gated-llm",
+    "agentless-v3-thin-strict-select",
+    "agentless-v3-thin-strict-closure-select",
+    "agentless-v3-thin-strict-closure-select-clean",
+    "agentless-v3-thin-strict-closure-select-clean-witness-only",
+    "agentless-v4-proof-clean",
+    "agentless-v3-select-regression",
+    "agentless-v3-select-regression-doubt",
+    "everything-v1",
+    "agentless-full",
+    "hint-only",
+    "everything"
+  ],
+  "groupLabels": {
+    "localize": "위치추정 (localize)",
+    "hint": "힌트 (hint)",
+    "verify": "검증 (verify)",
+    "select": "후보선택 (verify-select)",
+    "repair": "수리 (repair)",
+    "patch": "패치 품질 (patch)",
+    "structure": "구조 (structure)",
+    "exec": "실행 (exec)",
+    "validation": "검증·게이트 (validation)",
+    "agent": "에이전트 (agent)",
+    "tool": "도구 (tool)",
+    "기타": "기타"
+  }
+}

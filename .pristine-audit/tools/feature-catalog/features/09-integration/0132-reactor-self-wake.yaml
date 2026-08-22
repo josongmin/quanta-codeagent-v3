@@ -1,0 +1,65 @@
+id: reactor-self-wake
+title: ADR-0132 self-wake (3 hard guards + audit suffix)
+section: 9
+subsystem: Reactor / proactive wake (ADR-0132)
+order: 132
+maturity: L4
+status: stable
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [n-a]
+configurable: integrated
+config_refs:
+  env: [QUANTA_PROACTIVE_REACTOR]
+owners: ["@songmin"]
+labels: ["surface:cli"]
+depends_on: [reactor-trigger-source]
+surface_integration:
+  cli: full
+  web: missing
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 3/3 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "injects via AgentLoopPort; no SessionCommand resume/wake verb (B3) and ReactorSelfWakeEvent not bridged (B1)"
+purpose: |
+  `injectSimulatedTurn` hands a `ProactiveTrigger` to a closed
+  `AgentLoopPort` after THREE hard guards (evaluated in order; the order
+  becomes the `reason` field of the audit event when a guard rejects):
+    1. ENV — `QUANTA_PROACTIVE_REACTOR=1` MUST be set (default-OFF =
+       byte-identical replay invariant; cheapest guard first so a default-OFF
+       process never even reads the clock).
+    2. QUIET WINDOW — at least 30_000ms since the last user input
+       (`QUIET_WINDOW_MS`, inclusive boundary). Prevents racing the human.
+    3. PRIOR FAIL — last turn's outcome MUST NOT be `"fail"` (ADR-0131
+       outcome enum). Omitted ⇒ treated as `"success"` so callers opt INTO
+       fail-protection by wiring the outcome.
+  On success, appends a `[reason=<r> evidence=<kind>=<value>]` suffix to the
+  trigger's `simulatedMessage` before enqueue — 100% invariant so the
+  transcript always carries an audit anchor. Emits a
+  `ReactorSelfWakeEvent` (`outcome: "injected"|"skipped"`) through the
+  optional sink for telemetry (ADR-0132 validation budget ≤50/day per
+  workspace).
+evidence:
+  code:
+    - src/reactor/self-wake.ts
+    - src/reactor/types.ts
+    - src/reactor/index.ts
+  adrs: [132, 131]
+  tests:
+    unit:
+      - tests/unit/reactor-self-wake.test.ts
+    integration:
+      - tests/integration/reactor-babysit-end-to-end.test.ts
+    contract: []
+knobs:
+  - name: QUANTA_PROACTIVE_REACTOR
+    default: 'undefined'
+    purpose: '(no description)'
+deliberate_hold: null
+notes: |
+  Babysit (`BABYSIT_SKILL_NAME`) is the manual-resume fallback path — the
+  slash command maps to the same `TriggerReason` (`manual_resume`), so the
+  audit suffix shape is uniform whether the wake came from CI polling or a
+  human typing `/babysit`. The cron driver lives at `scripts/reactor-watch.ts`
+  (argv-only stub; real adapters bind at the composition root).

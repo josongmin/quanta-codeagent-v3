@@ -71,7 +71,7 @@ import type { WorkingState } from "./working-state"
  * `<system-reminder>` user message so the cached prefix never shifts.
  */
 
-/** Environment posture (RFC jul-2 TB levers /01) — selects which env
+/** Environment posture (TB21-06 TC-6) — selects which env
  *  RULE TEXT the model is told, and NOTHING ELSE. `"frozen"` (DEFAULT) = today's
  *  SWE-bench guardrails verbatim (do-not-install / stop-when-env-blocked). `"owned"`
  *  = the surface owns its container, so install/configure/build freely (the

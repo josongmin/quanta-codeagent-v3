@@ -21,6 +21,9 @@ import { acquirePatchGenBudgetLease } from "../../src/apps/bench/remote/token-bu
 
 const FIXED_NOW = 1_000_000
 
+/** The AMI id the fake `aws ssm get-parameter` resolves to. */
+const RESOLVED_AMI = "ami-0123456789abcdef0"
+
 // ───────────────────────── lease-manager pure teeth ─────────────────────────
 
 describe("audit: weight biases least-loaded routing (lease-manager.ts loadScore *weight)", () => {
@@ -137,6 +140,13 @@ const mockSpawn = (opts: { rateLimited?: Set<string> } = {}) => {
   }
   const route = (cmd: string, args: string[]): SpawnResult => {
     if (cmd === "curl") return ok("9.9.9.9") // ifconfig.me public-IP probe (SG ingress)
+    // aug-22 regression repair (`9d5369d31`): the default AMI is now an `ssm:`
+    // reference that `resolveLaunchAmi` dereferences BEFORE RunInstances. Without
+    // this branch the stub answered empty stdout ⇒ resolution threw ⇒ the pool
+    // aborted at provisioning and the backoff/cooldown teeth below never ran. The
+    // resolution contract stays pinned by
+    // src/apps/bench/remote/box-session/ami-resolution.test.ts.
+    if (args.includes("get-parameter")) return ok(`${RESOLVED_AMI}\n`)
     if (args.includes("run-instances")) return ok("i-box")
     if (args.includes("describe-instances")) return ok("1.2.3.4")
     if (args.includes("terminate-instances")) return ok("")

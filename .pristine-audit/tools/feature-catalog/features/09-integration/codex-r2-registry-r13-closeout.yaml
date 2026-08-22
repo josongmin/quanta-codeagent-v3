@@ -1,0 +1,80 @@
+id: codex-r2-registry-r13-closeout
+title: Session registry R13 — caller-owned wire + sweep telemetry + WAL RESTART + evict/help + path norm (ADR-0372/0373/0374/0375/0376/0377)
+section: 9
+subsystem: production-grade ops surface — codex-r2 absorption sprint R13
+order: 105
+maturity: L4
+status: stable
+ui_surfaces: [cli]
+monitoring: integrated
+modes: [n-a]
+configurable: n-a
+owners: ["@songmin"]
+labels: ["surface:core", "absorbed:codex", "production-wired", "tdd-strict"]
+depends_on:
+  - codex-r2-registry-retention-and-inspector
+  - codex-r2-observability-decorators
+  - codex-r2-multi-process-flock
+surface_integration:
+  cli: full
+  web: missing
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 6/7 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "operator value is the /session-registry CLI slash; web SlashPalette routes are prefill stubs (B2), telemetry rides no bridged event"
+purpose: |
+  6-ADR R13 closeout — every gap from R12's follow-up list landed TDD-strict
+  (each hellgate case authored RED-first, GREEN-confirmed, REFACTOR-pinned).
+  ADR-0372 closes the ADR-0368 architectural mismatch via a caller-owned-
+  registry builder; assemble.ts ternary becomes 3-case (cfg.metrics present
+  ⇒ mint per-call registry with disk-adapter metricsEmitter pre-wired).
+  ADR-0373 wires sweep telemetry into ADR-0369 auto-sweep — disk evicted /
+  truncated + sqlite evicted / checkpointed + sweep_latency_ms (histogram-
+  with-gauge-fallback). ADR-0375 adds opt-in WAL RESTART checkpoint
+  (`walSizeThresholdBytes` knob, no default — workload-dependent per Codex
+  14GB data). ADR-0374 + 0376 expand `/session-registry` slash with `evict
+  <id>` (idempotent operator action) + `help` (sub-command + backend-detect
+  discovery). ADR-0377 normalizes path display to forward-slash across
+  in-memory/disk/sqlite + adds `RegistryStats.path?` read-only field.
+evidence:
+  code:
+    - src/agent/session-resource-registry/caller-owned-builder.ts
+    - src/agent/session-resource-registry/auto-sweep.ts
+    - src/agent/session-resource-registry/sqlite-adapter/gc.ts
+    - src/agent/session-resource-registry/sqlite-adapter/types.ts
+    - src/agent/session-resource-registry/inspector.ts
+    - src/apps/cli/session-registry-cmd.ts
+    - src/apps/agent/assemble.ts
+  adrs:
+    - docs/decisions/0372-caller-owned-registry-flock-telemetry-wire.md
+    - docs/decisions/0373-auto-sweep-telemetry.md
+    - docs/decisions/0374-session-registry-evict-slash.md
+    - docs/decisions/0375-sqlite-wal-restart-checkpoint.md
+    - docs/decisions/0376-session-registry-help-discovery.md
+    - docs/decisions/0377-cross-platform-inspector-path-normalization.md
+  tests:
+    unit:
+      - tests/unit/caller-owned-registry-builder-hellgate.test.ts
+      - tests/unit/assemble-caller-owned-wire-hellgate.test.ts
+      - tests/unit/auto-sweep-hellgate.test.ts
+      - tests/unit/session-registry-slash.test.ts
+      - src/agent/session-resource-registry/__tests__/inspector.hellgate.test.ts
+      - src/agent/session-resource-registry/sqlite-adapter/__tests__/gc.hellgate.test.ts
+    integration: []
+    contract: []
+knobs:
+  - name: AgentConfig.metrics (MetricsRegistry)
+    type: 'object with increment + gauge methods (duck-typed)'
+    default: 'undefined ⇒ global singleton path (byte-identical pre-ADR-0372)'
+    notes: 'Present ⇒ assemble.ts mints caller-owned registry with disk-adapter metricsEmitter pre-wired (ADR-0372).'
+  - name: AutoSweepConfig.metricsEmitter
+    type: 'MetricEmitterPort?'
+    default: 'undefined ⇒ no emit (byte-identical pre-ADR-0373)'
+    notes: 'When set, emits disk_evicted / sqlite_evicted / sweep_latency_ms etc. (ADR-0373).'
+  - name: SqliteRegistryConfig.walSizeThresholdBytes
+    type: 'number?'
+    default: 'undefined ⇒ PASSIVE only (ADR-0361 baseline)'
+    notes: 'No baked-in default — opt-in only. Codex parity reference: 14GB WAL after 10 days, workload-dependent.'
+deliberate_hold: null
+notes: 'TDD discipline pinned: every R13 hellgate case authored RED-first (failing test) before GREEN (implementation) per ADR-0371 staleness pattern + TDD-strict prompt template. 4 worktree agents each reported worktree-vs-main divergence (13 commits behind on entry) + ff-only merge before starting — staleness preamble adoption is now 100% across 8 consecutive worktree dispatches (R12 + R13).'

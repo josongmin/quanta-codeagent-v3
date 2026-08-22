@@ -47,6 +47,7 @@ import {
   renderBootstrapCommand,
 } from "@/apps/bench/remote/box-session/family-bootstrap-exec"
 import { setupBoxForFamily } from "@/apps/bench/remote/box-session/family-box-setup"
+import { withResolvedFamilyBootstrap } from "@/apps/bench/remote/full"
 import { resolveBenchRunConfig } from "@/apps/bench/run-config"
 import { createSpawnRecorder, ok, whenArgsInclude, whenCmd } from "../../../bench-spawn-testkit"
 
@@ -104,8 +105,12 @@ describe("L1 — no gold-bearing path exists on the box during the AGENT phase",
     const gold = commands.filter((c) => c.goldBearing)
     expect(gold.length).toBeGreaterThanOrEqual(5)
     for (const c of gold) {
-      expect(c.phase, `gold-bearing step "${c.step}" must be grader-phase`).toBe("grader")
+      // aug-22 A-A: `teardown` is the second phase allowed to touch the answer
+      // key — it is what REMOVES it. The claim that matters is unchanged and is
+      // asserted positively below: the AGENT phase carries none of them.
+      expect(["grader", "teardown"], `gold-bearing step "${c.step}"`).toContain(c.phase)
     }
+    expect(gold.filter((c) => c.phase === "teardown").length).toBeGreaterThanOrEqual(1)
     // …and the agent phase is NOT empty, so the executor is genuinely exercised.
     const agent = commands.filter((c) => c.phase === "agent")
     expect(agent.length).toBeGreaterThanOrEqual(2)
@@ -124,14 +129,41 @@ describe("L1 — no gold-bearing path exists on the box during the AGENT phase",
       log: () => {},
     })
     expect(ran).toBeGreaterThan(0) // non-vacuous: commands really were issued
-    const issued = rec.commands.join("\n")
+    // EXACTLY the declared agent-phase commands, in order — not a subset the
+    // executor happened to skip.
+    expect(rec.commands).toEqual(
+      bootstrap.commands.filter((c) => c.phase === "agent").map(renderBootstrapCommand),
+    )
+    // aug-22 A-A. The agent phase now also PROVES the checkout is absent, and a
+    // probe must name the path it is proving absent. So the claim is CLASSIFIED
+    // rather than relaxed: the only agent-phase command permitted to name a
+    // gold-bearing path is a DECLARED `absenceProbe`, everything else must be
+    // gold-path-free, and there must really be a probe (floor below).
+    const agentCommands = bootstrap.commands.filter((c) => c.phase === "agent")
+    const probes = agentCommands.filter((c) => c.absenceProbe !== undefined)
+    expect(probes).toHaveLength(1)
+    expect(probes[0]?.absenceProbe?.absolutePath).toBe(PROMAX_ONBOX_CHECKOUT_ROOT)
+    const nonProbe = agentCommands
+      .filter((c) => c.absenceProbe === undefined)
+      .map(renderBootstrapCommand)
+    // non-vacuous: the non-probe commands are most of the phase, not an empty set
+    expect(nonProbe.length).toBeGreaterThanOrEqual(2)
+    const issued = nonProbe.join("\n")
     for (const needle of GOLD_BEARING_NEEDLES) {
       expect(issued, `agent phase issued a command naming ${needle}`).not.toContain(needle)
     }
     expect(issued).not.toContain(PINNED)
+    // The pinned commit and the upstream URL are revealed by NOTHING in the
+    // agent phase — not even the probe (it asserts on a directory, no more).
+    const everything = rec.commands.join("\n")
+    expect(everything).not.toContain(PINNED)
+    expect(everything).not.toContain(PROMAX_V1_SNAPSHOT.upstream_repo_url)
+    for (const rel of Object.values(PROMAX_V1_UPSTREAM_PATHS)) {
+      expect(everything).not.toContain(rel)
+    }
     // …and the checkout that materializes the answer key was NOT among them.
     expect(issued).not.toContain("checkout")
-    expect(issued).not.toContain("fetch")
+    expect(everything).not.toContain("fetch")
   })
 
   test("PAIRED CONTROL — the GRADER phase does issue exactly those commands", async () => {
@@ -276,13 +308,16 @@ describe("L3 — the digest gate reaches the executor and can actually fail", ()
     const rec = recorder((cmd) => ({ code: 0, stdout: digestFor(cmd) ?? "", stderr: "" }))
     const bootstrap = promaxBootstrap()
     const graderCount = bootstrap.commands.filter((c) => c.phase === "grader").length
+    // aug-22 A-A: the teardown runs in the SAME call, so it is part of the count.
+    const teardownCount = bootstrap.commands.filter((c) => c.phase === "teardown").length
+    expect(teardownCount).toBeGreaterThanOrEqual(1)
     const ran = await executeFamilyRemoteBootstrap({
       bootstrap,
       phase: "grader",
       ssh: rec.ssh,
       log: () => {},
     })
-    expect(ran).toBe(graderCount)
+    expect(ran).toBe(graderCount + teardownCount)
   })
 
   test("RED-ON-INJECTION — one WRONG observed digest fails the bootstrap and STOPS it", async () => {
@@ -331,7 +366,9 @@ describe("L4 — warm-box reuse cannot bypass the family bootstrap", () => {
       whenArgsInclude("describe-instances", ok("1.2.3.4")),
       whenCmd("rsync", ok("")),
       // isBootstrapped probe ⇒ the box is WARM and healthy (no re-bootstrap).
-      whenCmd("ssh", (ctx) => (ctx.remote.includes("test -x ~/.bun/bin/bun") ? ok("OK\n") : ok(""))),
+      whenCmd("ssh", (ctx) =>
+        ctx.remote.includes("test -x ~/.bun/bin/bun") ? ok("OK\n") : ok(""),
+      ),
     )
 
   const attachCfg = (over: Record<string, unknown>) => ({
@@ -364,13 +401,40 @@ describe("L4 — warm-box reuse cannot bypass the family bootstrap", () => {
     // early return, so `remoteBootstrap` arrives undefined on the attach path.
     // That must be a refusal — silently reusing skips the pinned checkout and
     // the hash step, which defeats the pin.
+    //
+    // aug-22 A-C: on a ProMax lane the ADMISSION gate now fires first and refuses
+    // the lane outright, which is strictly earlier and stronger — so this case
+    // asserts THAT refusal, and the unknown-bootstrap-state clause is covered
+    // NON-VACUOUSLY (on a family that admits) in promax-gold-absence-lifecycle.
     const { fn } = warmSpawn()
     await expect(
       attachBox(
         attachCfg({ spawn: fn, swebenchDatasetFamily: "promax" as DatasetFamily }),
         "i-warm",
       ),
-    ).rejects.toThrow(/bootstrap state is unknown/i)
+    ).rejects.toThrow(/on-box ProMax bootstrap is not wired yet/)
+  })
+
+  test("the launch root resolves the bootstrap for the ATTACH branch too", async () => {
+    // The defect was positional: the resolution sat AFTER the idle-box early
+    // return, so only the PROVISION branch ever saw it. `withResolvedFamilyBootstrap`
+    // is the one resolution point both branches now consume.
+    const base = { repoDir: "/repo", authJson: "{}", datasetPath: "/ds.jsonl" } as const
+    const promaxCfg = withResolvedFamilyBootstrap(
+      base,
+      resolveBenchRunConfig({ argvFamily: "promax", env: {} }),
+    )
+    expect(promaxCfg.remoteBootstrap?.family).toBe("promax")
+    expect(promaxCfg.remoteBootstrap?.commands.some((c) => c.goldBearing)).toBe(true)
+    // PAIRED CONTROL — a family that declares none is returned unchanged.
+    for (const family of DATASET_FAMILIES.filter((f) => f !== "promax")) {
+      const out = withResolvedFamilyBootstrap(
+        base,
+        resolveBenchRunConfig({ argvFamily: family, env: {} }),
+      )
+      expect(out.remoteBootstrap, `${family} grew a bootstrap`).toBeUndefined()
+      expect(out).toEqual(base)
+    }
   })
 
   test("BYTE-IDENTICAL CONTROL — families with no declared bootstrap attach unchanged", async () => {

@@ -28,9 +28,25 @@
  * Pure: no Docker, no filesystem, no clock.
  */
 
+import { errMessage } from "@/shared"
+
 /** The platform a ProMax campaign is only reproducible on. */
 export const PROMAX_REQUIRED_OS = "linux"
 export const PROMAX_REQUIRED_ARCHITECTURE = "amd64"
+
+/**
+ * A DIGEST-ADDRESSED image reference: `<name>@sha256:<64 lowercase hex>`.
+ *
+ * Declared HERE, by the receipt schema owner, and imported by the golden
+ * derivation — one definition of "pinned", so a gate cannot be satisfied by a
+ * looser second spelling. Invariant 6's "mutable tags alone are not replay
+ * evidence" is only checkable against a single rule.
+ */
+export const PROMAX_DIGEST_REFERENCE_RE = /^[^\s@]+@sha256:[0-9a-f]{64}$/
+
+/** Is this reference content-addressed (as opposed to a mutable tag)? */
+export const isDigestPinnedReference = (reference: string): boolean =>
+  PROMAX_DIGEST_REFERENCE_RE.test(reference)
 
 /** Invariant-6's per-instance record. */
 export interface ProMaxImageRecord {
@@ -283,7 +299,7 @@ export const parseProMaxImageFreezeReceipt = (text: string): ProMaxImageReceiptP
       failures: [
         {
           code: "receipt_unparseable",
-          message: `image-freeze receipt bytes are not valid JSON: ${err instanceof Error ? err.message : String(err)}`,
+          message: `image-freeze receipt bytes are not valid JSON: ${errMessage(err)}`,
         },
       ],
     }
@@ -358,14 +374,59 @@ export const parseProMaxImageFreezeReceipt = (text: string): ProMaxImageReceiptP
 }
 
 /**
- * The gate a MODEL run passes through. Refuses on any fault (so a non-amd64
- * platform or a changed digest stops the campaign before a single model token is
- * spent) and, when the assigned set is supplied, on any assigned instance with
- * no frozen image record.
+ * The RECORD half of the pre-spend gate: every frozen record must be
+ * content-addressed and must sit on the platform the receipt itself requires.
+ *
+ * Both clauses exist because a fault-free receipt is not the same thing as a
+ * REPRODUCIBLE one. A freeze that recorded `repo:tag` for every instance carries
+ * no faults at all — it simply never resolved a digest — and a record whose
+ * `os`/`architecture` disagree with the receipt's own `required_platform` is a
+ * self-contradicting document that a fault list cannot express.
+ */
+const auditImageRecords = (receipt: ProMaxImageFreezeReceipt): readonly string[] => {
+  const problems: string[] = []
+  const required = receipt.required_platform
+  const seen = new Set<string>()
+  for (const image of receipt.images) {
+    if (seen.has(image.instance_id)) {
+      problems.push(
+        `instance "${image.instance_id}" has more than one image record — a campaign instance resolves to exactly one image`,
+      )
+    }
+    seen.add(image.instance_id)
+    if (!isDigestPinnedReference(image.registry_repo_digest)) {
+      problems.push(
+        `instance "${image.instance_id}" froze "${image.registry_repo_digest}", which is a MUTABLE TAG, not a digest pin ` +
+          "(`name@sha256:<64 hex>`) — the pinned evaluator's own `docker pull` could serve different bytes on the next run",
+      )
+    }
+    if (image.os !== required.os || image.architecture !== required.architecture) {
+      problems.push(
+        `instance "${image.instance_id}" resolved to platform ${image.os}/${image.architecture}, which CONTRADICTS ` +
+          `the receipt's own required platform ${required.os}/${required.architecture}`,
+      )
+    }
+  }
+  return problems
+}
+
+/**
+ * The gate a MODEL run passes through, BEFORE a single token is spent.
+ *
+ * `assignedInstanceIds` is REQUIRED, not optional. It used to default away, and
+ * a caller that omitted it silently got fault-checking with NO coverage check —
+ * i.e. the 170/170 requirement was satisfied by not asking. Making the parameter
+ * mandatory turns that omission into a COMPILE error.
+ *
+ * Coverage is checked in BOTH directions: an assigned instance with no image is
+ * an unfrozen launch, and a frozen image for an UNASSIGNED instance means the
+ * freeze and the selection disagree about what this campaign is — which is
+ * exactly how a receipt from another campaign gets accepted as this one's
+ * evidence.
  */
 export const assertImageFreezeReadyForModelLaunch = (
   receipt: ProMaxImageFreezeReceipt,
-  assignedInstanceIds?: readonly string[],
+  assignedInstanceIds: readonly string[],
 ): void => {
   if (receipt.faults.length > 0) {
     const detail = receipt.faults
@@ -376,12 +437,42 @@ export const assertImageFreezeReadyForModelLaunch = (
         "REFUSING to spend model tokens against an unreproducible image set.",
     )
   }
-  if (assignedInstanceIds === undefined) return
+
+  const problems: string[] = []
+  const required = receipt.required_platform
+  if (
+    required.os !== PROMAX_REQUIRED_OS ||
+    required.architecture !== PROMAX_REQUIRED_ARCHITECTURE
+  ) {
+    // Checked FIRST and separately: without it, the per-record contradiction
+    // check below is defeated by lowering the requirement instead of fixing the
+    // images.
+    problems.push(
+      `the receipt declares required_platform ${required.os}/${required.architecture}, but ProMax is only ` +
+        `reproducible on ${PROMAX_REQUIRED_OS}/${PROMAX_REQUIRED_ARCHITECTURE} — a receipt may not lower its own bar`,
+    )
+  }
+  problems.push(...auditImageRecords(receipt))
+
   const frozen = new Set(receipt.images.map((i) => i.instance_id))
+  const assigned = new Set(assignedInstanceIds)
   const missing = assignedInstanceIds.filter((id) => !frozen.has(id))
-  if (missing.length === 0) return
+  if (missing.length > 0) {
+    problems.push(
+      `the freeze covers ${frozen.size}/${assigned.size} assigned instance(s); no image record for: ${missing.join(", ")}`,
+    )
+  }
+  const unassigned = [...frozen].filter((id) => !assigned.has(id))
+  if (unassigned.length > 0) {
+    problems.push(
+      `the freeze carries image record(s) for instance(s) this campaign never assigned: ${unassigned.join(", ")} — ` +
+        "the freeze and the selection disagree about what this campaign is",
+    )
+  }
+
+  if (problems.length === 0) return
   throw new Error(
-    `bench: ProMax image freeze covers ${frozen.size}/${assignedInstanceIds.length} assigned instance(s); ` +
-      `no image record for: ${missing.join(", ")}. REFUSING a launch whose images are not all frozen.`,
+    `bench: ProMax image freeze is not launch-ready — ${problems.length} problem(s): ` +
+      `${problems.join("; ")}. REFUSING to spend model tokens against an unreproducible image set.`,
   )
 }

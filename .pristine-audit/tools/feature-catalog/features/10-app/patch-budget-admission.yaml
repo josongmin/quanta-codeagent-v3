@@ -1,0 +1,49 @@
+id: patch-budget-admission
+title: Patch-budget — minimal-edit admission (over-engineer class guard)
+section: 10
+subsystem: 벤치 — round-0 minimal patch admission
+order: 2401
+maturity: L4
+status: new
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [batch]
+configurable: integrated
+owners: ["@songmin"]
+labels: ["surface:bench", "default-off"]
+depends_on: [proof-driven-bench-closure, bench-eval-driver]
+config_refs:
+  env: [QUANTA_BENCH_PATCH_BUDGET, QUANTA_BENCH_PATCH_BUDGET_STRICT]
+surface_integration:
+  cli: missing
+  web: na
+  method: audited
+  verified: "2026-06-19"
+  evidence:
+    cli: "bench-only observe telemetry; not reachable from interactive CLI"
+    web: "internal bench measurement; no browser affordance"
+purpose: |
+  jun-19/20 minimal-edit admission over the final diff: count source files, new
+  files, new defs, cross-file touches vs owner evidence. `patch-budget` remains
+  the observe/soft-escalation arm (telemetry + late-critic routing), while the
+  companion `patch-budget-strict` fail-closes submission of over-budget final
+  patches. Default-OFF ⇒ byte-identical.
+evidence:
+  code:
+    - src/agent/patch-budget/index.ts
+    - src/runner/batch/eval/patch-budget-admission.ts
+    - src/runner/knobs/knobs/patch-budget.ts
+    - src/runner/knobs/knobs/patch-budget-strict.ts
+    - src/runner/knobs/presets.ts
+  adrs: [117]
+  tests:
+    unit:
+      - tests/unit/patch-budget.test.ts
+      - tests/unit/bench-preset-drives-config-hellgate.test.ts
+      - tests/unit/runner/verify-select-driver-parity.test.ts
+      - tests/unit/runner/knobs/parsers-hellgate.test.ts
+      - tests/unit/runner/knobs/knobs-import-bundle.test.ts
+    integration: []
+    contract: []
+knobs: ["patch-budget", "patch-budget-strict"]
+deliberate_hold: null

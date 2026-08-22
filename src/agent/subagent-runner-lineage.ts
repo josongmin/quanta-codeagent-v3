@@ -1,8 +1,5 @@
 import { projectToSubagentObservation } from "@/protocol/subagent"
-import {
-  type SubagentLifecycleEvent,
-  type TaskRegistry,
-} from "@/subagent"
+import type { SubagentLifecycleEvent, TaskRegistry } from "@/subagent"
 import type { SubagentRequest, SubagentResult } from "../subagent/types"
 import type { AgentConfig } from "./types"
 

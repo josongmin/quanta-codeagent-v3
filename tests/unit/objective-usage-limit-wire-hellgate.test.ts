@@ -43,19 +43,22 @@ describe("applyMeasuredUsageLimit — epoch + derived transition", () => {
     expect(h.store.get(TID)?.status).toBe("active")
   })
 
-  test("RED-ON-INJECTION (epoch basis): a naive impl that stamped `retryAfterMs` "
-    + "as an ABSOLUTE epoch (not a delta) would derive active immediately — the "
-    + "delta semantics are load-bearing", () => {
-    const h = enforcing(1000)
-    h.store.set(TID, { goal: "g" })
-    // delta 5000 with clock 1000 ⇒ epoch 6000 (future). If the impl wrote 5000
-    // as the epoch, then at clock 1000 the window (1000<5000) would still be
-    // active BUT it would EXPIRE at 5000 — 1000ms EARLY. Assert the correct
-    // 6000 boundary: at 5000 it must STILL be limited (proves delta, not abs).
-    applyMeasuredUsageLimit(h.store, TID, 5000, () => h.get())
-    h.set(5000)
-    expect(h.store.get(TID)?.status).toBe("usage_limited") // 5000 < 6000
-  })
+  test(
+    "RED-ON-INJECTION (epoch basis): a naive impl that stamped `retryAfterMs` " +
+      "as an ABSOLUTE epoch (not a delta) would derive active immediately — the " +
+      "delta semantics are load-bearing",
+    () => {
+      const h = enforcing(1000)
+      h.store.set(TID, { goal: "g" })
+      // delta 5000 with clock 1000 ⇒ epoch 6000 (future). If the impl wrote 5000
+      // as the epoch, then at clock 1000 the window (1000<5000) would still be
+      // active BUT it would EXPIRE at 5000 — 1000ms EARLY. Assert the correct
+      // 6000 boundary: at 5000 it must STILL be limited (proves delta, not abs).
+      applyMeasuredUsageLimit(h.store, TID, 5000, () => h.get())
+      h.set(5000)
+      expect(h.store.get(TID)?.status).toBe("usage_limited") // 5000 < 6000
+    },
+  )
 })
 
 describe("applyMeasuredUsageLimit — guards (each with red-on-injection)", () => {
@@ -154,16 +157,16 @@ describe("applyMeasuredUsageLimit — guards (each with red-on-injection)", () =
     // CLEAR it (markUsageLimited(non-finite) would clear).
     applyMeasuredUsageLimit(h.store, TID, 5000, () => 1000) // epoch 6000
     // Now an overflowing call must be a no-op, NOT clear the window.
-    expect(
-      applyMeasuredUsageLimit(h.store, TID, Number.MAX_VALUE, () => Number.MAX_VALUE),
-    ).toBe(false)
+    expect(applyMeasuredUsageLimit(h.store, TID, Number.MAX_VALUE, () => Number.MAX_VALUE)).toBe(
+      false,
+    )
     // Window still present: at clock 5999 (< 6000) still limited.
     h.set(5999)
     expect(h.store.get(TID)?.status).toBe("usage_limited")
   })
 
   test("INFORMATIONAL store: window set but never DERIVES usage_limited", () => {
-    let clock = 1000
+    const clock = 1000
     const store = createObjectiveStore({ now: () => clock }) // enforce OFF
     store.set(TID, { goal: "g" })
     // The adapter still WRITES the window (the host gate — not this pure fn —

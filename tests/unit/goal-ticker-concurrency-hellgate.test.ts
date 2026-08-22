@@ -25,12 +25,12 @@
  */
 
 import { describe, expect, test } from "bun:test"
-import { createObjectiveStore, type ObjectivePort } from "@/objective"
 import {
   type GoalContinuationProbes,
   startGoalContinuationTicker,
 } from "@/apps/cli/goal-continuation-hook"
 import { createStatusPills, stripAnsi } from "@/apps/cli/status-pills"
+import { createObjectiveStore, type ObjectivePort } from "@/objective"
 
 const TID = "thread-1"
 

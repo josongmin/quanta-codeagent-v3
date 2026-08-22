@@ -1,0 +1,97 @@
+id: phase2-auto-trigger-wire
+title: Phase 2 session-start auto-trigger — runMemoryPhase2AutoTrigger (non-blocking)
+section: 5
+subsystem: 장기 메모리 — Phase 2 session-start wire (ADR-0068 Wave B + Slice S9 Part B)
+order: 73
+maturity: L4
+status: stable
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [interactive, headless, batch, daemon, ide, ci-bot]
+configurable: integrated
+owners: ["@songmin"]
+labels: ["surface:core", "held-promotion"]
+depends_on: [consolidator-session-hook, memory-md-atomic-writer]
+config_refs:
+  env: []
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 5/6 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "pure background fire-and-forget orchestration seam (session-start microtask); outcome surface is {kind,reason} only, never rendered; ui_surfaces n-a"
+purpose: |
+  Mirror of the session-end Phase 1 hook for the Phase 2 cross-session
+  synthesizer. Reads Stage1 watermark + pending count from the injected
+  `Stage1StorePort` at session-start; if `pending ≥ PHASE2_AUTO_TRIGGER_PENDING`
+  OR `age_ms ≥ PHASE2_AUTO_TRIGGER_MAX_AGE_MS` (and pending > 0), schedules
+  `runPhase2(...)` as a fire-and-forget microtask so the session-start
+  completes before the LLM call even begins. Pending-count branch wins when
+  both fire to keep the trigger reason deterministic. NO-THROW contract:
+  store errors surface as `error` outcomes; background `runPhase2`
+  rejections surface via the log callback only (no unhandled rejection).
+  In-flight guard (WeakSet keyed by writer) keeps concurrent session-starts
+  from double-firing while a prior run is still in flight. DEFAULT-OFF:
+  absent `phase2` block ⇒ zero allocation, byte-identical to today.
+evidence:
+  code:
+    - src/runner/session-memory-auto.ts
+    - src/apps/cli/repl/session-deps-compose.ts
+    - src/agent/memory-consolidator-hook.ts
+    - src/memory/consolidate/phase2.ts
+    - src/memory/consolidate/constants.ts
+    - src/memory/index.ts
+  adrs: ["docs/decisions/0068-codex-2-phase-memory-consolidator.md"]
+  tests:
+    unit:
+      - tests/unit/memory-phase2-wire-hellgate.test.ts
+      - tests/unit/memory-consolidator-hook-hellgate.test.ts
+      - tests/unit/memory-hellgate.test.ts
+    integration: []
+    contract: []
+knobs:
+  - name: phase2.enabled
+    default: 'undefined'
+    purpose: 'host opt-in (default-OFF; absent ⇒ skip phase2_disabled)'
+  - name: phase2.port
+    default: 'undefined'
+    purpose: 'Phase2Port (wraps cheaper summarizer LLM per ADR-0011)'
+  - name: phase2.store
+    default: 'undefined'
+    purpose: 'Stage1StorePort (countSince / getWatermark / fetchSince)'
+  - name: phase2.writer
+    default: 'undefined'
+    purpose: 'MemoryWriter (3-file atomic + git commit)'
+  - name: phase2.existingContent
+    default: 'undefined'
+    purpose: 'pre-read on-disk MEMORY.md/raw/summary (caller fetches)'
+  - name: phase2.mode
+    default: 'incremental'
+    purpose: '"INIT" | "incremental"'
+  - name: PHASE2_AUTO_TRIGGER_PENDING
+    default: 'undefined'
+    purpose: 'pending-count threshold'
+  - name: PHASE2_AUTO_TRIGGER_MAX_AGE_MS
+    default: 'undefined'
+    purpose: 'age threshold'
+deliberate_hold:
+  reason: |
+    The hook itself is still a pure orchestration seam. The CLI/REPL host
+    now wires it through `buildSessionMemoryAutoWires()`, but non-CLI
+    surfaces (Web/Tauri/other hosts) still need their own session-start
+    binding and may choose different timing semantics (background tick vs
+    first-prompt).
+  promotion_path: |
+    Keep the orchestration seam shared, but document per-surface ownership:
+    CLI/REPL is already wired; future Web/Tauri/daemon hosts should call
+    `runMemoryPhase2AutoTrigger` once per session start with their own
+    resolved phase2 block and lifecycle policy.
+notes: |
+  Pairs with `consolidator-session-hook` (Phase 1 session-end) and
+  `memory-md-atomic-writer` (Phase 2 disk side). Anti-leak invariant:
+  the outcome surface is `{kind, reason}` only — NEVER carries memoryMd /
+  rawMemoriesMd / memorySummaryMd / score bytes. Verified by hellgate
+  test "anti-leak invariants: memory score / content NEVER appears in
+  the structured outcome".

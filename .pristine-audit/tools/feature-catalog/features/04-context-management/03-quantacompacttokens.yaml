@@ -1,0 +1,42 @@
+id: quantacompacttokens
+title: QUANTA_COMPACT_TOKENS
+section: 4
+subsystem: 압축(LLM 요약)
+order: 3
+maturity: L3
+status: stable
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [interactive, headless, batch, daemon, ide, ci-bot]
+configurable: integrated
+config_refs:
+  env: [QUANTA_COMPACT_TOKENS]
+owners: ['@songmin']
+labels: [surface:core]
+depends_on: [runner-assemble-builders, assemble-config, fallback-kinds-policy, llm-factory, model-swap-retry]
+surface_integration:
+  cli: full
+  web: partial
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 4/4 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "KnobsPanel reads broadly via GET /api/knobs so the knob can be displayed, but QUANTA_COMPACT_TOKENS is NOT in CONFIG_WRITABLE_KEYS (server.ts:314) so it renders read-only where CLI can set it; backend honors the value."
+purpose: QUANTA_COMPACT_TOKENS env knob — proactive compaction token threshold; parsed by runtime-config + consumed by compaction loop.
+evidence:
+  code:
+    - src/agent/compaction.ts
+    - src/shared/runtime-config.ts
+    - src/runner/assemble/compaction.ts
+    - src/apps/cli/internal.ts
+  adrs: []
+  tests:
+    unit: [tests/unit/compaction.test.ts, tests/unit/compaction-precompact.test.ts]
+    integration: []
+    contract: []
+knobs:
+  - name: QUANTA_COMPACT_TOKENS
+    default: 'undefined'
+    purpose: '(no description)'
+deliberate_hold: null
+notes: ''

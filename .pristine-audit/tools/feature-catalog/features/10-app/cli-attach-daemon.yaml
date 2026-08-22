@@ -1,0 +1,87 @@
+id: cli-attach-daemon
+title: '`quanta attach` — CLI → daemon shared-session WS client (ADR-0516)'
+section: 10
+subsystem: Multi-surface (CLI / Web / Tauri) — CLI attach client
+order: 96
+maturity: L3
+status: new
+ui_surfaces: [cli]
+modes: [interactive]
+monitoring: n-a
+configurable: integrated
+owners: ["@songmin"]
+labels: ["adr-0516", "surface:cli", "tier:1"]
+depends_on:
+  - web-daemon-surface
+  - slice-ipc-bridge
+config_refs:
+  env:
+    - QUANTA_WEB_AUTH_TOKEN
+  cli:
+    - "attach [ws-url] [--token <token>]"
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-11"
+  evidence:
+    cli: "dispatched from src/apps/cli/index.ts:132 (`process.argv[2] === \"attach\"` → dynamic import(./attach-cmd) → runAttachCmd); a real `quanta attach [ws-url]` subcommand with --help, live event render, and y/N approval prompts."
+    web: "Not a web surface — this is the CLI-side WS *client* that ATTACHES TO the web daemon (ADR-0315). The daemon is the web backend; this slice renders its events to a terminal. No browser-rendered affordance of its own."
+purpose: |
+  Turns the in-process-only legacy CLI into a WebSocket CLIENT of a running
+  daemon's shared `session.v1` endpoint — the #1 multi-surface unlock (terminal
+  AND browser drive the SAME live session). Five single-responsibility files
+  (4 PURE): `handshake.ts` runs the discovery→adopt dance (send a `connect`
+  carrying the `"ui-session"` sentinel; the bridge rejects with
+  target=connect/session_id_mismatch + canonical id, which is adopted and
+  re-handshaked; a snapshot settles `ready`); `commands.ts` maps a typed line
+  to TWO commands (`input.append` then `turn.run`, distinct commandIds so the
+  daemon dedup window never collapses them) and approval answers to
+  approve/deny (y/yes→approve, else→DENY fail-safe); `render.ts` maps
+  SessionEvents to verbatim terminal text (no implicit newlines so
+  turn.output.delta streams a token at a time); `attach-client.ts` orchestrates
+  the transport (reuses `@/ipc/session` `createSessionTransportClient` +
+  `wrapWebSocketLikeAsSessionTransport` — never re-implements the codec), owns
+  the close/error teardown the wrapper omits, serializes approval prompts, and
+  runs the stdin read loop; `attach-cmd.ts` is the impure shell (argv parse,
+  stdin/stdout, interactive y/N prompt, SIGINT→best-effort turn.cancel+close).
+  v1 is single-connection — NO reconnect/resume cursor; a daemon-initiated
+  close/error/`session.closed` tears down cleanly (banner + resolve `done`)
+  rather than re-dialing. Token via --token / QUANTA_WEB_AUTH_TOKEN →
+  `?token=…`. Default-OFF / byte-identical: a bare `quanta` run never reaches
+  the dispatch branch, so the in-process REPL path is untouched.
+evidence:
+  code:
+    - src/apps/cli/attach-cmd.ts
+    - src/apps/cli/attach/attach-client.ts
+    - src/apps/cli/attach/commands.ts
+    - src/apps/cli/attach/handshake.ts
+    - src/apps/cli/attach/render.ts
+  adrs:
+    - docs/decisions/0516-cli-attach-daemon-client.md
+  tests:
+    unit:
+      - tests/unit/apps/cli/attach/attach-pure.test.ts
+      - tests/unit/apps/cli/attach/attach-client.test.ts
+      - tests/unit/apps/cli/attach/attach-cmd.test.ts
+      - tests/unit/apps/cli/attach/attach-routing-guard.test.ts
+      - tests/unit/apps/cli/attach/attach-render-inventory-hellgate.test.ts
+    integration:
+      - tests/unit/apps/cli/attach/attach-e2e.test.ts
+    contract: []
+knobs:
+  - name: QUANTA_WEB_AUTH_TOKEN
+    default: "undefined"
+    purpose: |
+      Bearer token fallback when `--token` is not passed; appended to the WS
+      URL as `?token=<token>` (the daemon's browser-fallback query path, since
+      a raw WS upgrade cannot set an Authorization header). An explicit
+      `--token` wins over the env value.
+deliberate_hold: null
+notes: |
+  Distinct from ADR-0486 (PTY/tmux attach-to-existing-terminal) and ADR-0420
+  (daemon-SIDE served-WS observability sink) — this is the CLI→daemon attach
+  CLIENT. Slice fence: no npm dep (global/Bun `WebSocket`); the codec is reused
+  from `@/ipc/session` rather than re-implemented. The 4 pure files are
+  socket-free and unit-tested; the e2e test drives the full loop against an
+  ephemeral in-process `@/apps/web-daemon` (port 0, stub runtime — no LLM).

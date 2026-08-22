@@ -26,7 +26,12 @@ import {
   parseAdrStatus,
   runAudit,
 } from "./audit"
-import { parseDiffNameStatus, runCheckChanged } from "./check-changed"
+import {
+  mergeDiffSources,
+  parseDiffNameStatus,
+  parseUntrackedFiles,
+  runCheckChanged,
+} from "./check-changed"
 import { loadFcBaseline, runLint, saveFcBaseline, snapshotBaseline } from "./lint"
 import { computeReachability, computeSymbolReachability } from "./reachability"
 import { loadBaseline, loadProse, renderCatalog } from "./render"
@@ -528,21 +533,35 @@ async function cmdGates(argv: string[]): Promise<void> {
   )
 }
 
+/** Run one read-only git command, or exit(1) naming the command that failed. */
+function gitOrExit(args: readonly string[], label: string): string {
+  const proc = Bun.spawnSync(["git", ...args], { stdout: "pipe", stderr: "pipe" })
+  if (proc.exitCode !== 0) {
+    const err = new TextDecoder().decode(proc.stderr)
+    console.error(`check-changed: \`git ${args.join(" ")}\` failed (${label}): ${err.trim()}`)
+    process.exit(1)
+  }
+  return new TextDecoder().decode(proc.stdout)
+}
+
 async function cmdCheckChanged(argv: string[]): Promise<void> {
   const base = argv[0] ?? "origin/main"
   // Use git via the system shell; we don't have a direct git lib and one-shot
   // child process is sufficient.
-  const proc = Bun.spawnSync(["git", "diff", "--name-status", `${base}...HEAD`], {
-    stdout: "pipe",
-    stderr: "pipe",
-  })
-  if (proc.exitCode !== 0) {
-    const err = new TextDecoder().decode(proc.stderr)
-    console.error(`check-changed: \`git diff ${base}...HEAD\` failed: ${err.trim()}`)
-    process.exit(1)
-  }
-  const stdout = new TextDecoder().decode(proc.stdout)
-  const diff = parseDiffNameStatus(stdout)
+  //
+  // THREE sources, not one (aug-22 audit). `diff <base>...HEAD` sees committed
+  // history only, so the gate a developer runs BEFORE committing could not see
+  // the new file they were about to commit — the exact "new standalone file"
+  // case this gate's docstring calls out. Measured on the aug-21/22 bench
+  // campaign: `bun fc check-changed` printed ok while 99 added `src/` files had
+  // no fc evidence; the same command against the pre-campaign base listed all
+  // of them. On a clean CI checkout the two extra sources are empty, so this is
+  // a no-op there and fail-closed locally.
+  const diff = mergeDiffSources(
+    parseDiffNameStatus(gitOrExit(["diff", "--name-status", `${base}...HEAD`], "committed")),
+    parseDiffNameStatus(gitOrExit(["diff", "--name-status", "HEAD"], "working tree")),
+    parseUntrackedFiles(gitOrExit(["ls-files", "--others", "--exclude-standard"], "untracked")),
+  )
   const features = await loadFeaturesStrict(FEATURES_DIR)
   const result = runCheckChanged(diff, features)
 
@@ -1249,9 +1268,7 @@ async function cmdReachability(argv: string[]): Promise<void> {
   // Fail-closed ONLY on net-new ≥L3 overclaims (the class can never regress);
   // the grandfathered backlog shrinks monotonically via the tighten hint.
   if (strict && netNew.length > 0) {
-    console.error(
-      `reachability: ${netNew.length} NEW ≥${REACHABILITY_FLOOR} overclaim(s) — strict`,
-    )
+    console.error(`reachability: ${netNew.length} NEW ≥${REACHABILITY_FLOOR} overclaim(s) — strict`)
     process.exit(1)
   }
 }

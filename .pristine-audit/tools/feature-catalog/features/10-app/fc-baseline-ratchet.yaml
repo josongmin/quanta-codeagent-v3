@@ -1,0 +1,54 @@
+id: fc-baseline-ratchet
+title: fc baseline ratchet — empty-stub / orphan-ADR 캡 + tsc/biome/test 측정 스냅
+section: 10
+subsystem: feature-catalog 메타 도구 (ratchet + 검증 베이스라인)
+order: 52
+maturity: L5
+status: stable
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [n-a]
+configurable: static
+owners: ["@songmin"]
+labels: ["surface:tooling"]
+depends_on: [feature-catalog-tool]
+surface_integration:
+  cli: na
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "no src evidence (pure docs/tooling/tests) — no interactive-CLI code"
+    web: "Pure CI ratchet/baseline tooling, no UI affordance on any surface."
+purpose: |
+  `tools/feature-catalog/baseline.json` 단일 SSOT 가 두 가지를 합쳐 저장:
+  (1) `fc` 하위 ratchet — empty stubs HARD cap (`empty_stubs_max`) +
+  grandfathered orphan ADR allowlist (`orphan_adrs_grandfathered`) — 그래서
+  `bun fc lint` 가 audit 의 현재 count 와 비교해 *증가* 만 fail (기존
+  backlog 는 그대로 둠, 의식적 cap 상승은 `--update-baseline` 으로 explicit
+  + review-visible). (2) `tsc` / `biome` / `tests` 실측 — `refresh-baseline.ts`
+  가 `tsc --noEmit`, `biome check src tests`, `bun test`(per-tier) 를
+  돌려 exit code + error/pass/fail/skip/expect_count/files 를 결정적
+  JSON 으로 직렬화, render 가 "검증 베이스라인" 라인에 사용. 순수 parser
+  (`parseTsc/parseBiome/parseTestSummary`)는 export 되어 unit test 가
+  subprocess spawn 없이 검증 (slow + CI flaky 회피).
+evidence:
+  code:
+    - tools/feature-catalog/lint.ts
+    - tools/feature-catalog/refresh-baseline.ts
+    - tools/feature-catalog/baseline.json
+  adrs: []
+  tests:
+    unit:
+      - tests/unit/feature-catalog-lint.test.ts
+      - tests/unit/feature-catalog-baseline.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  Ratchet 정책: empty stubs / Accepted-orphan ADR = HARD cap; orphan src
+  = SOFT signal (count 반환, fail 안 함) — leaf 헬퍼는 자연 drift. cap
+  상승은 `bun fc lint --update-baseline` 한 줄로만 가능 → diff 에서
+  의도가 명시적. tsc/biome/test 스냅은 단순 progress marker 이지 게이트
+  아님 (게이트는 별도 CI step).

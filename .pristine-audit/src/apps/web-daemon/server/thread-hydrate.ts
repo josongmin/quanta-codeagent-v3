@@ -1,0 +1,67 @@
+/**
+ * P1 Phase 2 (jul-11) — swap the daemon's ONE live session onto an opened
+ * thread.
+ *
+ * The daemon hosts a single live `RuntimeSession` (all WS clients share it).
+ * Opening a persisted thread makes it LIVE: load that thread's lossless
+ * SavedSession (Phase 1), `transcript.replace` the live session's working set
+ * with it, and repoint future persistence to the thread (Phase 1's mutable
+ * `activeThreadId`, the same in-place identity repoint the CLI's
+ * `performSessionSwitch` does — the parent thread on disk is never clobbered).
+ *
+ * Crown ordering / safety (mirrors performSessionSwitch): a mid-turn swap is
+ * REFUSED by the kernel's `transcript_replace_unavailable` guard — we map that
+ * to `refused-mid-turn` and repoint NOTHING, so the live turn keeps running on
+ * the parent thread. Unknown / never-persisted id ⇒ clean `unknown-thread`
+ * no-op. Any other error propagates (never silently swallowed).
+ *
+ * Pure + DOM-free: the ws-handlers wiring injects `loadThread`
+ * (`loadSessionById`), `replaceTranscript` (`session.transcript.replace`), and
+ * `setActiveThreadId` (the transcript-persistence cell).
+ */
+
+import type { Message } from "@/llm"
+import { attachSessionToLive, type SessionMeta } from "@/session"
+
+export interface ThreadHydrateDeps {
+  readonly loadThread: (
+    id: string,
+  ) => Promise<{ readonly meta: SessionMeta; readonly messages: readonly Message[] } | undefined>
+  readonly replaceTranscript: (messages: readonly Message[]) => Promise<void>
+  readonly setActiveThreadId: (id: string) => void
+}
+
+export type ThreadHydrateOutcome =
+  | { readonly kind: "hydrated"; readonly threadId: string; readonly count: number }
+  | { readonly kind: "unknown-thread"; readonly threadId: string }
+  | { readonly kind: "refused-mid-turn"; readonly threadId: string }
+
+/**
+ * Web adapter over the unified `attachSessionToLive` (WS-1). The crown ordering
+ * + mid-turn guard live in the core; this maps the daemon's void-returning
+ * `transcript.replace` + id-only persist cell onto it, and re-expresses the
+ * outcome in thread-vocabulary for the ws layer.
+ */
+export const hydrateThreadIntoLiveSession = async (
+  threadId: string,
+  deps: ThreadHydrateDeps,
+): Promise<ThreadHydrateOutcome> => {
+  const outcome = await attachSessionToLive(threadId, {
+    loadSession: deps.loadThread,
+    replaceTranscript: async (messages) => {
+      await deps.replaceTranscript(messages)
+      return messages
+    },
+    // The daemon repoints by thread id only (the activeThreadId cell); the
+    // core's `meta` is unused here (no per-connection SessionMeta identity).
+    setPersistTarget: ({ id }) => deps.setActiveThreadId(id),
+  })
+  switch (outcome.kind) {
+    case "attached":
+      return { kind: "hydrated", threadId, count: outcome.messageCount }
+    case "unknown-session":
+      return { kind: "unknown-thread", threadId }
+    case "refused-mid-turn":
+      return { kind: "refused-mid-turn", threadId }
+  }
+}

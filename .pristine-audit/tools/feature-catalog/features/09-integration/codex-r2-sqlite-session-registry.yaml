@@ -1,0 +1,107 @@
+id: codex-r2-sqlite-session-registry
+title: SQLite-backed session registry (Codex logs_2.sqlite parity) (ADR-0361)
+section: 9
+subsystem: optional sqlite-backed session resource persistence
+order: 103
+maturity: L3
+status: stable
+ui_surfaces: [n-a]
+monitoring: partial
+modes: [n-a]
+configurable: n-a
+owners: ["@songmin"]
+labels: ["surface:core", "absorbed:codex", "default-off"]
+depends_on:
+  - codex-r2-composition-install-and-registry
+  - codex-r2-disk-persistence-and-env-swap
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 7/7 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "pure internal sqlite persistence backend (default-off, ui_surfaces n-a); no user-visible affordance on any surface"
+purpose: |
+  Sibling SQLite backend for the ADR-0345
+  `SessionResourceRegistry` port. Layered architecture: in-process
+  `Map<sessionId, Entry>` owns live `SessionResources` refs
+  (preserves same-id same-ref invariant byte-identical with the
+  in-memory + JSONL siblings); `bun:sqlite` WAL database owns the
+  durable mirror (every store.append → events row; cache MISS →
+  cache_entries row). Rehydrate-on-mint replays prior rows
+  synchronously on the first `getOrCreate(id)` for an id with rows.
+
+  Codex `logs_2.sqlite` retention parity: PRAGMA journal_mode=WAL +
+  synchronous=NORMAL + foreign_keys=ON, cumulative-bytes sliding
+  window (`SUM(total_estimated_bytes) OVER (ORDER BY last_touched
+  DESC)`) + TTL fallback + `PRAGMA wal_checkpoint(PASSIVE)` in the
+  `sweepSqliteRegistry` GC pass. Defaults: 14 d TTL / 14 GB total
+  bytes (Codex production calibration).
+
+  R10 retry: ADR-0357 worktree introduced a self-shaped port that
+  did not match main's closed `SessionResourceRegistry` port —
+  cherry-pick aborted. This ADR (0361) implements the SQLite
+  backend behind the SAME port the in-memory + JSONL siblings
+  already satisfy, so the same-id same-ref invariant + 5-method
+  closed surface stay byte-identical.
+
+  Default-OFF. Global singleton (ADR-0347 / ADR-0351) does NOT
+  auto-mount this backend; opt-in via direct factory call until a
+  follow-up ADR adds an env-var swap on the ADR-0351 pattern.
+evidence:
+  code:
+    - src/agent/session-resource-registry/sqlite-adapter/types.ts
+    - src/agent/session-resource-registry/sqlite-adapter/schema.ts
+    - src/agent/session-resource-registry/sqlite-adapter/serializer.ts
+    - src/agent/session-resource-registry/sqlite-adapter/sqlite-store.ts
+    - src/agent/session-resource-registry/sqlite-adapter/gc.ts
+    - src/agent/session-resource-registry/sqlite-adapter/index.ts
+    - src/agent/session-resource-registry/index.ts
+  adrs:
+    - docs/decisions/0361-sqlite-session-registry-backend.md
+  tests:
+    unit:
+      - src/agent/session-resource-registry/sqlite-adapter/__tests__/schema.hellgate.test.ts
+      - src/agent/session-resource-registry/sqlite-adapter/__tests__/serializer.hellgate.test.ts
+      - src/agent/session-resource-registry/sqlite-adapter/__tests__/sqlite-store.hellgate.test.ts
+      - src/agent/session-resource-registry/sqlite-adapter/__tests__/gc.hellgate.test.ts
+    integration: []
+    contract: []
+knobs:
+  - name: SqliteRegistryConfig.databasePath
+    type: 'string'
+    default: '(required)'
+    notes: 'Absolute path; ":memory:" supported for tests. Parent directory must exist.'
+  - name: SqliteRegistryConfig.ttlMs
+    type: 'number?'
+    default: '14 days (DEFAULT_TTL_MS)'
+    notes: 'Sessions whose last_touched is older than now() - ttlMs are evicted by sweepSqliteRegistry.'
+  - name: SqliteRegistryConfig.maxTotalBytes
+    type: 'number?'
+    default: '14 GB (DEFAULT_MAX_TOTAL_BYTES — Codex production calibration)'
+    notes: 'Cumulative-bytes sliding window cap across all sessions; oldest evicted first.'
+  - name: SqliteRegistryConfig.now
+    type: '() => number'
+    default: 'Date.now'
+    notes: 'Clock seam for deterministic TTL tests.'
+deliberate_hold:
+  reason: |
+    Env-var swap on the ADR-0351 pattern
+    (`QUANTA_SESSION_REGISTRY_SQLITE_PATH` or similar) deferred to a
+    follow-up ADR so this slice does not change production
+    composition-root behavior in the same commit. Schema v2+ migrations
+    are out of scope (born at v1). Cross-machine sharing is an explicit
+    negative invariant (ADR-0355).
+  promotion_path: |
+    Follow-up ADR adds the env-var swap into
+    `src/agent/session-resource-registry/global.ts` next to the existing
+    `QUANTA_SESSION_REGISTRY_DISK_DIR` branch — composition roots that
+    set the new env var would auto-route to the SQLite backend through
+    the singleton.
+notes: |
+  R10 ADR-0357 worktree aborted on port-shape mismatch (self-shaped
+  recordEvent/loadEvents). This R-retry implements the SQLite backend
+  behind the verbatim ADR-0345 `SessionResourceRegistry` port; the
+  in-memory + JSONL hellgate suites (72 cases combined) remain
+  byte-identical green alongside the new 40 cases.

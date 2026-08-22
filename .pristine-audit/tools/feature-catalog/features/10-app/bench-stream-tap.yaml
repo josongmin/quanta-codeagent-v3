@@ -1,0 +1,37 @@
+id: bench-stream-tap
+title: Bench stream tap — SSOT for lastVerifyCmd / firstEdit / editCount signals
+section: 10
+subsystem: 벤치 — run-shape observation rail
+order: 2407
+maturity: L3
+status: new
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [batch]
+configurable: n-a
+owners: ["@songmin"]
+labels: ["surface:bench"]
+depends_on: [bench-eval-driver, proof-driven-bench-closure]
+surface_integration:
+  cli: missing
+  web: na
+  method: audited
+  verified: "2026-06-19"
+  evidence:
+    cli: "pure StreamPort tap wired by both bench drivers; not interactive CLI"
+    web: "observe-only closure diagnostics input; no browser affordance"
+purpose: |
+  Single SSOT `LastVerifyCmdTap` for both bench drivers (runner + apps). Pure
+  pass-through StreamPort accumulates `lastVerifyCmd`, `firstEditFile`,
+  `turnsToFirstEdit`, and `editCount` for closure diagnostics / T-202 owner-match.
+evidence:
+  code:
+    - src/runner/batch/eval/stream-tap.ts
+  adrs: [536]
+  tests:
+    unit:
+      - tests/unit/bench-stream-tap-hellgate.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null

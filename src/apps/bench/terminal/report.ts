@@ -38,6 +38,7 @@
  * timeout/resource override keys, and "rewarded trials have trajectories".
  */
 import {
+  isTerminalVerifyGateState,
   type QuantaTrialFacts,
   TERMINAL_TRIAL_OUTCOMES,
   type TerminalAdmission,
@@ -73,13 +74,16 @@ import { computeOfficialMetrics, isSuccess, type ScorableTrial, trialDurationSec
 
 export type { QuantaTrialFacts } from "@/runner/batch/report-terminal"
 export {
+  isTerminalVerifyGateState,
   TERMINAL_TRIAL_OUTCOMES,
+  TERMINAL_VERIFY_GATE_STATES,
   type TerminalAdmission,
   type TerminalRejection,
   type TerminalRejectionKind,
   type TerminalTrialDefect,
   type TerminalTrialOutcome,
   type TerminalVerdict,
+  type TerminalVerifyGateState,
 } from "@/runner/batch/report-terminal"
 
 /** ONE receipt per distinct trial id. Never collapsed, never merged. TB21-04's
@@ -223,7 +227,16 @@ const parseQuantaFacts = (
   const receipt = asRecord(metadata?.quanta_agent)
   if (receipt === undefined) return undefined
   const promotability = asRecord(receipt.promotability)
+  // TB21-06 AP-9. The verify-gate stamp is a SIBLING of `quanta_agent` under
+  // metadata (the adapter spreads the brain report there verbatim), not part of
+  // the provenance receipt. An unrecognised value is DROPPED, never coerced:
+  // "no stamp" and "unverifiable" are different facts about a run.
+  const verifyGateState = asString(asRecord(metadata?.verification)?.state)
   return {
+    ...put(
+      "verifyGateState",
+      isTerminalVerifyGateState(verifyGateState) ? verifyGateState : undefined,
+    ),
     ...put("agentVersion", asString(receipt.version)),
     ...put("packageVersion", asString(receipt.package_version)),
     ...put("commit", asString(receipt.commit)),

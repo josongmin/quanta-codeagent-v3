@@ -1,0 +1,51 @@
+id: scripted-replace-tool
+title: scripted_replace — duplicated / bulk substitution sibling of edit
+section: 2
+subsystem: 도구 — scripted_replace (Codex Phase 4 흡수)
+order: 105
+maturity: L4
+status: stable
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [n-a]
+configurable: static
+owners: ["@songmin"]
+labels: [absorbed:codex, surface:cli]
+depends_on: [assert-never-exhaustiveness, byte-stable-string-comparator, cross-slice-mirror, deferred-tool-registry, errors-helper-fix]
+surface_integration:
+  cli: full
+  web: full
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 4/4 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "agent-callable scripted_replace edit-sibling renders as tool.invoked/tool.completed in session-hooks.ts"
+purpose: |
+  Codex `tool-routing-and-triggering.md` absorption — "patch is for local +
+  stable context; scripted replace is for duplicated blocks, bulk substitution,
+  or patch context mismatch". Sibling of `edit` — same FS-jail discipline
+  (`@/storage` `enforceJail` chokepoint, single `FsJailError` shape) + same
+  atomic write — but optimized for the duplicated / bulk case where `edit`
+  would either refuse as ambiguous or be too noisy to use
+  one-occurrence-at-a-time. Inputs: `file` (path), `pattern` (literal substring
+  by default, JS regex source when `isRegex=true`), `replacement` (with `$1`
+  / `$&` capture refs honoured in regex mode), optional `count` cap on number
+  of replacements (omit ⇒ replace ALL). Default-OFF posture: the tool is
+  registered in `defaultTools` so the dispatch seam is unchanged, but the LLM
+  only routes to it when prompt / strategy-hint surface explicitly calls for
+  it — no behavior change for sessions that never invoke it.
+evidence:
+  code:
+    - src/tool/scripted-replace.ts
+    - src/tool/index.ts
+    - src/agent/dispatch-dedup.ts
+    - src/permission/policy.ts
+  adrs: []
+  tests:
+    unit:
+      - tests/unit/scripted-replace.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: 'Mutating + concurrency-unsafe (atomic write to a single file). Honours `gitWriteProtectReason` via the same guard path as `write` / `edit`.'

@@ -27,6 +27,14 @@
  * is the drift anchor. If the command truncated the transcript on a refused
  * restore (partial), the reload would show FEWER messages — flipping
  * refuse→partial RED.
+ *
+ * SLICE FENCE (ADR-0024): this file is on the `biome.json` allowlist for
+ * `src/apps/cli/**` imports — same mechanism as the sibling
+ * `tests/unit/cli-rewind-slash-hellgate.test.ts`. Legitimate because the CLI
+ * front door IS the subject under test (the claim is "`/rewind --restore-files`
+ * routes through the durable coordinator"), and `src/apps/cli/internal.ts` sits
+ * inside the same fenced group, so re-exporting through it would launder the
+ * coupling rather than remove it. NO production code is touched by this test.
  */
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
@@ -39,15 +47,15 @@ import type {
   RestoreOutcome,
   ThreeWayRestorePort,
 } from "@/agent/per-tool-checkpoint"
-import type { Message } from "@/llm"
 import { buildRewindRestoreCoordinator } from "@/apps/cli/repl/rewind-restore-coordinator-wire"
 import type { RewindSlashState } from "@/apps/cli/rewind-cmd"
 import { rewindCommands } from "@/apps/cli/rewind-cmd"
 import type { SlashContext } from "@/apps/cli/slash-contract"
+import type { Message } from "@/llm"
 import {
   assignMessageIds,
-  loadSessionById,
   latestOperation,
+  loadSessionById,
   ROLLBACK_RECORD_VERSION,
   type RollbackCheckpointRecord,
   type SavePayload,
@@ -94,7 +102,12 @@ const fakeRegistry = (entries: readonly { sha: string; tag: string }[]): Granula
 const fakeRestore = (ok: boolean, errorCode?: RestoreOutcome["errorCode"]): ThreeWayRestorePort => {
   const outcome: RestoreOutcome = ok
     ? { ok: true, message: "restored", tag: "t", filesChanged: ["src/a.ts"] }
-    : { ok: false, message: "conflict", tag: "t", ...(errorCode !== undefined ? { errorCode } : {}) }
+    : {
+        ok: false,
+        message: "conflict",
+        tag: "t",
+        ...(errorCode !== undefined ? { errorCode } : {}),
+      }
   return {
     restoreFiles: async () => outcome,
     restoreTask: async () => outcome,
@@ -171,7 +184,10 @@ describe("Surface B — /rewind --restore-files through the coordinator", () => 
     rmSync(dir, { recursive: true, force: true })
   })
 
-  const state = (id: string, coordinatorPerTool?: { registry: GranularRegistry; restore: ThreeWayRestorePort }): RewindSlashState => ({
+  const state = (
+    id: string,
+    coordinatorPerTool?: { registry: GranularRegistry; restore: ThreeWayRestorePort },
+  ): RewindSlashState => ({
     sessionId: id,
     env: { QUANTA_REWIND: "1" },
     restoreFilesCoordinator: buildRewindRestoreCoordinator({

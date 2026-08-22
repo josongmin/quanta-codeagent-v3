@@ -80,6 +80,19 @@ appshot-reach-*/
 # Claude Code subagent worktrees (per-agent isolation)
 .claude/worktrees/
 
+# Ad-hoc probe/scratch scripts. Ignored so `bun fc check-changed` (which now sees
+# the working tree, not just committed history) does not report a throwaway probe
+# as an undocumented new feature file.
+.scratch/
+
+# Hand-made `git worktree` checkouts of THIS repository. Committing one is not a
+# harmless stray file: git records it as a mode-160000 GITLINK, so every movement
+# of that worktree's HEAD shows up as a repo diff, and a fresh clone materialises
+# an empty directory that no `git submodule update` can fill (nothing declares it
+# in .gitmodules). `.worktrees/base` was committed exactly this way on aug-22.
+# Enforced by tests/unit/_arch/repo-index-hygiene.test.ts.
+.worktrees/
+
 # Extracted Claude desktop corpus binaries (192MB+; not for git)
 scripts/_corpus/cc-base/
 

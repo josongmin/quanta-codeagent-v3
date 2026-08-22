@@ -1,0 +1,68 @@
+id: read-write-edit
+title: read/write/edit (primitive tool family umbrella)
+section: 2
+subsystem: 코어 도구 9종
+order: 1
+maturity: L5
+status: stable
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [n-a]
+configurable: n-a
+owners: ["@songmin"]
+labels: [absorbed:cursor, surface:cli]
+depends_on: [typed-tool-failure-modes, bash-tool-hitl-tier, edit-fuzzy-ladder, test-runner-tool, diagnostics-tool]
+surface_integration:
+  cli: full
+  web: full
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 9/9 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "these tools run in web-daemon; each invocation+text result renders as tool.invoked/tool.completed in session-hooks.ts:420-438"
+purpose: |
+  Aggregate L5 marker for the primitive tool family covering 9 core tools —
+  read, write, edit, bash, grep, glob, localize, diagnostics, test_runner.
+  Individual L4/L5 catalog entries cover specifics: grep-tool (107),
+  glob-tool (108), bash-tool-hitl-tier (109), edit-fuzzy-ladder (110),
+  test-runner-tool (111), diagnostics-tool (112), localize-tool (114),
+  typed-tool-failure-modes (64). This entry exists to assert the umbrella
+  is jointly stable; do not duplicate per-tool evidence here.
+evidence:
+  code:
+    - src/tool/read/index.ts
+    - src/tool/write/index.ts
+    - src/tool/edit/index.ts
+    - src/tool/bash/index.ts
+    - src/tool/grep/index.ts
+    - src/tool/glob/index.ts
+    - src/tool/localize/index.ts
+    - src/tool/diagnostics/index.ts
+    - src/tool/test-runner/index.ts
+  adrs:
+    - docs/decisions/0019-code-mod-edit-strategy-four-surface.md
+    - docs/decisions/0009-lsp-diagnostics-tool.md
+    - docs/decisions/0114-typed-tool-failures-bash-read.md
+  tests:
+    unit:
+      - tests/unit/read.test.ts
+      - tests/unit/write.test.ts
+      - tests/unit/edit.test.ts
+      - tests/unit/edit-recovery-hellgate.test.ts
+      - tests/unit/edit-strategy-hint.test.ts
+      - tests/unit/bash.test.ts
+      - tests/unit/grep.test.ts
+      - tests/unit/glob.test.ts
+      - tests/unit/localize.test.ts
+      - tests/unit/diagnostics.test.ts
+      - tests/unit/phase-ttft-readonly-trio-hellgate.test.ts
+    integration:
+      - tests/integration/test-runner.test.ts
+      - tests/integration/lsp-diagnostics-e2e.test.ts
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  Umbrella aggregator entry — per-tool details live in sibling catalog entries
+  (107/108/109/110/111/112/114). Kept at L5 because every member tool is at
+  L4+ with passing tests; this row asserts joint stability of the family.

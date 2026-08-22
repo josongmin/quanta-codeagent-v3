@@ -1,0 +1,47 @@
+id: aug02-rfc05-configured-endpoint
+title: RFC05 — configured OpenAI endpoint (schema + SSRF policy + adapter parity + live surface)
+section: 8
+subsystem: LLM providers — configured custom endpoint (aug-02 RFC05)
+order: 562
+maturity: L3
+status: new
+ui_surfaces: [cli]
+monitoring: partial
+modes: [interactive, headless]
+configurable: integrated
+owners: ["@songmin"]
+labels: ["rfc:aug02-05", "surface:cli", "gate:default-off", "safety"]
+config_refs:
+  env: ["QUANTA_LLM_ENDPOINT", "QUANTA_ENDPOINT_API_KEY"]
+purpose: |
+  RFC-05 configured-endpoint stack: (0) central-config `openaiEndpoints` named
+  profiles in the security band (custom baseUrl / local model + authRef); (1) a
+  canonical TYPED network admission policy (public_https / loopback_local) that
+  is the single SSRF decision seam for the endpoint fetch; (2) Chat/Responses
+  adapter PARITY over one guarded-fetch transport; (live) the CLI llm-build
+  composition root selects the profile named by QUANTA_LLM_ENDPOINT and resolves
+  its secret from QUANTA_ENDPOINT_API_KEY (a knob-registry secret EXCEPTION —
+  never a /config value; owned at the auth call site). Unset QUANTA_LLM_ENDPOINT
+  ⇒ the vendor path is byte-identical.
+evidence:
+  code:
+    - src/config/types.ts
+    - src/shared/net/ssrf.ts
+    - src/llm/endpoint-transport.ts
+    - src/apps/cli/configured-endpoint-wire.ts
+    - src/runner/assemble/llm.ts
+  adrs: ["docs/plans/aug-02-absorption/rfc-05-providers-transport.md"]
+  tests:
+    unit:
+      - tests/unit/central-config-openai-endpoints-hellgate.test.ts
+      - tests/unit/ssrf-typed-policy-hellgate.test.ts
+      - tests/unit/llm/endpoint-transport-parity-hellgate.test.ts
+      - tests/unit/assemble-llm-endpoint-selection-hellgate.test.ts
+      - tests/unit/cli-configured-endpoint-live-surface-hellgate.test.ts
+knobs:
+  - name: QUANTA_LLM_ENDPOINT
+    where: runtime-config
+    purpose: name of a configured openaiEndpoints profile to drive the CLI LLM (unset ⇒ vendor path)
+  - name: QUANTA_ENDPOINT_API_KEY
+    where: auth-call-site
+    purpose: SECRET — host-resolved endpoint API key (knob-registry EXCEPTION, never a /config value)

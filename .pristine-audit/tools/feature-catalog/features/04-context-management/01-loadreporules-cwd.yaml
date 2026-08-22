@@ -1,0 +1,38 @@
+id: loadreporules-cwd
+title: loadRepoRules(cwd)
+section: 4
+subsystem: Repo-local rule 적재 (ADR-0015)
+order: 1
+maturity: L4
+status: stable
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [interactive, headless, batch, daemon, ide, ci-bot]
+configurable: static
+owners: ["@songmin"]
+labels: [absorbed:codex, surface:core, default-off]
+depends_on: [mode-repo-rules-active-skills-working-state-memory-hints, build-turn-context, fallback-kinds-policy, llm-factory, memory-summary-aggregate-coalesce]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 3/3 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "pure internal prompt-assembly injector, no UI affordance"
+purpose: 'loadRepoRules(cwd) opt-in — 우선순위 AGENTS.md > CLAUDE.md > .codex/CODEX-RULES.md, 첫 비공백 파일만 채택. <system-reminder>에 ## Repo-local rules 블록 inject .'
+evidence:
+  code:
+    - src/agent/repo-rules.ts
+    - src/agent/prompt-sections.ts
+    - src/agent/prompt.ts
+  adrs: [15]
+  tests:
+    unit:
+      - tests/unit/repo-rules.test.ts
+      - tests/unit/repo-rules-tree-hellgate.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: ''

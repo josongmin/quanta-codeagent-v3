@@ -1,0 +1,62 @@
+id: landlock-phase2
+title: Linux Landlock Phase 2 (bubblewrap)
+section: 3
+subsystem: OS sandbox (ADR-0136)
+order: 99
+maturity: L3
+status: stable
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [interactive, headless, batch, daemon, ide, ci-bot]
+configurable: partial
+owners: ["@songmin"]
+labels: ["absorbed:cursor", "surface:runtime", "tier:adapter"]
+depends_on: [landlock-degraded-passthrough, seatbelt-profile-compiler, os-sandbox-port-router, sandbox-policy, os-sandbox-wire]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 3/3 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "pure Linux OS-sandbox backend (compileBubblewrapArgs), runtime spawn-wrapper with no user-visible UI affordance on any surface"
+purpose: |
+  Linux OS-level sandbox via `bwrap` (bubblewrap) shell-out. Phase 1 stub
+  (ADR-0136) replaced with real Linux backend matching the macOS Seatbelt
+  posture. `compileBubblewrapArgs` translates SandboxPolicy 4-arm enum to
+  argv (`--ro-bind` / `--bind` / `--unshare-net` / `--die-with-parent`).
+  FAIL-CLOSED (DOF-40): when a RESTRICTIVE profile is REQUESTED but no backend
+  (bwrap / landlock-cli / native landlock) can enforce it, the port emits a
+  TYPED REFUSAL (`sandboxUnavailableRefusal`, exit 126, empty stdout,
+  `sandboxApplied: false` + `degradeReason`) and NEVER runs the command — it
+  no longer degrades to an unsandboxed passthrough that ran while claiming the
+  fence. `off`/`danger-full-access` still passthrough verbatim (explicit
+  opt-out). Backend reported as "bubblewrap" (legacy "landlock+seccomp" name
+  reserved for Phase 3 native FFI follow-up).
+evidence:
+  code:
+    - src/runtime/os-sandbox/bubblewrap.ts
+    - src/runtime/os-sandbox/landlock.ts
+    - src/runtime/os-sandbox/linux.ts
+    - src/runtime/os-sandbox/default.ts
+    - src/runtime/os-sandbox/refusal.ts
+  adrs: [150, "docs/decisions/0159-linux-sandbox.md"]
+  tests:
+    unit:
+      - tests/unit/os-sandbox-bubblewrap-hellgate.test.ts
+      - tests/unit/os-sandbox-fail-closed-refusal-hellgate.test.ts
+      - tests/unit/os-sandbox-linux-hellgate.test.ts
+    integration:
+      - tests/integration/os-sandbox-bwrap-real-exec-e2e.test.ts
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  Native Landlock FFI deferred to Phase 3 (separate ADR — napi-rs landlock
+  binding maintenance is N-week scope). bwrap shell-out delivers parity
+  semantics with same deny-default + workspace allowlist + network unshare.
+  FAIL-CLOSED (DOF-40): requested-but-unavailable backend ⇒ typed refusal, the
+  command never runs unsandboxed. Real bwrap execution is proven by a
+  Linux-guarded e2e (os-sandbox-bwrap-real-exec-e2e) with a VISIBLE skip on
+  non-Linux hosts (loud `[DOF-40 SKIP]` banner + asserted precondition, never a
+  silent pass); the pure argv compiler proof runs on every platform.

@@ -31,10 +31,10 @@ import {
   type ApprovalStateMachinePort,
   createApprovalStateMachine,
 } from "@/agent/approval-state-machine"
-import type { ObjectivePort } from "@/objective"
-import { createObjectiveStore } from "@/objective"
 import type { RunLedgerPort } from "@/agent/run-ledger"
 import { createRunLedger } from "@/agent/run-ledger"
+import type { ObjectivePort } from "@/objective"
+import { createObjectiveStore } from "@/objective"
 
 /** Deterministic monotone clock seam. */
 const stepClock = (start = 1000, step = 10) => {

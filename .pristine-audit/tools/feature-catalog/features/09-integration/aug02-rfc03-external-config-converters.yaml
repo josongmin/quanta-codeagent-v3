@@ -1,0 +1,43 @@
+id: aug02-rfc03-external-config-converters
+title: RFC03-4 — skills/memory external-config converters + startup import staging
+section: 9
+subsystem: Onboarding — external-config migration converters (aug-02 RFC03-4)
+order: 559
+maturity: L3
+status: new
+ui_surfaces: [cli]
+monitoring: partial
+modes: [interactive]
+configurable: static
+owners: ["@songmin"]
+labels: ["rfc:aug02-03", "surface:cli"]
+purpose: |
+  RFC-03-4 onboarding converters: detect + convert competitor external configs
+  (skills / memory) into quanta's native format, and STAGE the startup skill
+  import THROUGH the approval flow rather than auto-installing. The CLI startup
+  path surfaces a migration notice and routes discovered skills into the
+  approval-bound stage seam (same gate as RFC03-2/3 promote). Additive: no
+  import runs without the user passing the staged approval.
+  DEFERRED (hellaudit A2 — explicit follow-up, NOT a silent dead-seam): the
+  approve->CAS-promote ACTUATOR is not yet wired. The staged approval carries
+  resumeStep "promote-skill-proposal" but no production consumer dispatches it to
+  the artifact port's promote, and the staging store + approval machine are fresh
+  per import run (staged bytes are NOT durable). So a skill is staged +
+  review-bound but not yet promotable live. Fail-SAFE (never an unapproved write).
+  Closing the loop is a security-sensitive design choice: a resumeStep->actuator
+  resume-dispatch that re-verifies the bound hash + CAS-promotes, driven by a
+  chosen review surface (startup notice vs. an interactive `skills review`).
+evidence:
+  code:
+    - src/migration/external-config/convert.ts
+    - src/migration/external-config/detect.ts
+    - src/migration/external-config/run.ts
+    - src/apps/cli/config-migration-skill-stage.ts
+    - src/apps/cli/config-migration-notice.ts
+  adrs: ["docs/plans/aug-02-absorption/rfc-03-self-improve-onboarding.md"]
+  tests:
+    unit:
+      - tests/unit/external-config-migration-skills-memory-hellgate.test.ts
+      - tests/unit/external-config-migration-skills-memory-frontdoor.test.ts
+      - tests/unit/config-migration-import-skill-stage-frontdoor.test.ts
+      - tests/unit/rfc03-import-stage-failsafe-boundary.test.ts

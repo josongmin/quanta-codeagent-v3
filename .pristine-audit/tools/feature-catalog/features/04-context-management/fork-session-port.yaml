@@ -1,0 +1,87 @@
+id: fork-session-port
+title: ForkSessionPort — branch-name + signal + shadow-tag fork (ADR-0226)
+section: 4
+subsystem: Conversation-level branching (Claude/Cursor /fork parity)
+order: 62
+maturity: L3
+status: new
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [interactive, headless, batch, daemon, ide, ci-bot]
+configurable: static
+owners: ["@songmin"]
+labels: [absorbed:claude, absorbed:cursor, surface:core]
+depends_on: [conversation-checkpoint-store]
+surface_integration:
+  cli: full
+  web: missing
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 6/6 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "CLI-only slash command; SlashPalette routed commands are prefill stubs (B2) and protocol.ts SessionCommand has no fork/rewind verb (B3)"
+purpose: |
+  ADR-0201 의 base `SessionForker` 를 둘러싸는 RICHER `ForkSessionPort` —
+  Claude `/fork` + Cursor session-fork 가 노출하는 4-axis UX 흡수:
+  (1) 사람이 grep 할 수 있는 `branchName` (URL-safe 64-char alphabet,
+  collision-resistant ~126-bit branch id);
+  (2) `AbortSignal` cancellation — abort 시 zero observable state mutation;
+  (3) Shadow ODB fork-tag (BEST EFFORT — 실패해도 session+link 보존,
+  `shadow-odb-failed` typed error 만 surface);
+  (4) `listBranches` / `resolveParent` API + per-link metadata
+  (parent session id / branch point / forked-at / branch name).
+  CLI surface: `/fork-checkpoint` slash command (ADR-0226) — 기존 `/fork`
+  (session-message-id fork, ADR's `rewind-cmd.ts`)와 NAME 차별화로 충돌
+  회피. Default-OFF: composition-root 에서 `ctx.forkSession` 미와이어시
+  슬래시 명령은 "not wired" exit 0 (byte-identical). nanoid 대신 in-house
+  `branch-id.ts` (~50 LOC, node:crypto.randomBytes) — install 차단 우회.
+evidence:
+  code:
+    - src/agent/fork-session/branch-id.ts
+    - src/agent/fork-session/parent-link.ts
+    - src/agent/fork-session/port.ts
+    - src/agent/fork-session/default-forker.ts
+    - src/agent/fork-session/index.ts
+    - src/apps/cli/fork-checkpoint-cmd.ts
+    - src/tool/shadow/fork.ts
+    - src/agent/tier1/fork-session.ts
+    # ADR-0284 fork-session-wire — composition-root wire that RESOLVED the prior hold
+    - src/agent/fork-session-wire/index.ts
+    - src/agent/fork-session-wire/default-checkpoint-base.ts
+    - src/host/runtime/agent-arg-builder.ts # resolveForkSession (the actual gate)
+    - src/apps/cli/repl/slash-surface.ts # maybeForkSession → forkSession flag
+  adrs: [201, 226, 284]
+  tests:
+    unit:
+      - tests/unit/agent/fork-session-port-hellgate.test.ts
+      - tests/unit/tool/shadow-fork-hellgate.test.ts
+    integration: []
+    contract: []
+# Gate is NOT an env knob. `resolveForkSession(enable: boolean)` (agent-arg-builder)
+# wires the fork only when the per-surface `forkSession` flag is true — CLI REPL sets
+# it via `maybeForkSession(args)` (slash-surface.ts); headless hardcodes false.
+# DRIFT: the `QUANTA_FORK_SESSION=on` mentions in fork-session-wire/{index,
+# default-checkpoint-base}.ts are STALE DOC-COMMENTS — that env var is never read.
+# SCOPE: bench (full-remote/batch eval) does NOT populate the ConversationCheckpointStore,
+# so a bench trajectory is NOT forkable — this is a CLI-REPL-scoped feature.
+knobs: []
+resolved_hold:
+  was: 'Composition-root wiring (ctx.forkSession 슬롯) 는 후속 PR — port + CLI + hellgate 만 land 했었음.'
+  resolved_by: 'ADR-0284 fork-session-wire (defaultCheckpointBaseWire) + agent-arg-builder resolveForkSession + CLI slash-surface maybeForkSession. CLI REPL 에서 `forkSession` flag 로 활성; `/fork-checkpoint` 슬래시가 라우팅.'
+notes: |
+  - 8-arm closed ForkError union (ADR-0201 4 + ADR-0226 4 신규):
+    `checkpoint-not-found` / `store-full` / `lineage-cycle` / `duplicate-id`
+    / `fork-not-configured` / `aborted` / `invalid-branch-name` /
+    `shadow-odb-failed`. 추가 arm 은 `ALL_FORK_ERROR_CODES` 튜플 갱신
+    필수 (모든 consumer 의 exhaustive switch compile fail).
+  - `ParentLinkStore` LRU cap = 500 (conversation-checkpoint 50 의 10×;
+    branch label 은 messages array 보다 작다).
+  - Shadow ODB tag 는 BEST EFFORT — registerHead throw 시 session+link
+    은 보존 (새 session 사용 가능), `shadow-odb-failed` 만 surface.
+    이 invariant 는 FP-10 hellgate 가 봉인.
+  - Branch-id alphabet 은 정확히 64자 (A-Z + a-z + 0-9 + `-` + `_`) —
+    256 % 64 === 0 이라 byte modulo bias 0. URL-safe (`=` / `+` / `/`
+    절대 누출 X).
+  - `/fork-checkpoint` ≠ `/fork`: 후자는 session 의 message-id 로 fork
+    (rewind-cmd.ts, ADR session-level), 전자는 ConversationCheckpointStore
+    의 ref 로 fork (richer port). 다른 ID space → 별도 명령.

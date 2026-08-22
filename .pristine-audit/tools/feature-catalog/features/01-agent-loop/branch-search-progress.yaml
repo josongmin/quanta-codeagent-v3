@@ -1,0 +1,50 @@
+id: branch-search-progress
+title: Branch-search Shadow-ODB anchor + pure progress formatter (ADR-0116)
+section: 1
+subsystem: Speculative branch search 부속 (ADR-0083/0084 + ADR-0116)
+order: 84
+maturity: L4
+status: stable
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [n-a]
+configurable: n-a
+owners: ["@songmin"]
+labels: [absorbed:agentless, surface:core, default-off, tier:core]
+depends_on: [branch-search-isolate-symlink-safe, branch-search-pure-scorer, branch-search-verifier-suite, shadow-odb-port, shadow-odb-rewind]
+surface_integration:
+  cli: full
+  web: missing
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 2/2 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "progress line rides branch-search trace events which are dropped at context-binding.ts default arm; CLI-only display formatter"
+purpose: |
+  Two leaf modules that complete the speculative branch-search slice.
+  (1) `BranchSearchAnchor` — closed port wiring the Shadow git ODB
+  (ADR-0108) into branch search as an opt-in, NO-THROW anchor + per-
+  candidate delta measurement port. Without it, branch search runs N
+  isolated candidates with no common starting point and no quantified
+  "how much did each candidate diverge" signal. Default impl
+  `shadowOdbAnchor` is backed by `ShadowOdb.registerHead` +
+  `ShadowOdb.diffWorkspaceSinceLast`. (2) `progress.ts` — pure formatter
+  turning a `BranchTraceEvent` into one human-readable line + severity
+  classification. Plane-clean (imports only `./types`). ANSI coloring +
+  unicode glyphs are opt-in, default-on for human display, default-off
+  for tests that diff exact strings.
+evidence:
+  code:
+    - src/agent/branch-search/anchor.ts
+    - src/agent/branch-search/progress.ts
+  adrs: [83, 84, 116]
+  tests:
+    unit:
+      - tests/unit/branch-search-anchor-hellgate.test.ts
+      - tests/unit/cli/branch-search-progress.test.ts
+      - tests/unit/branch-search-minimal-change-hellgate.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: 'Anchor is opt-in: caller (branch-search orchestrator) injects via `BranchSearchAnchor`; tests inject fakes for isolated runs. ShadowOdb anchor never touches the user `.git` — all writes go to the per-workspace shadow store.'

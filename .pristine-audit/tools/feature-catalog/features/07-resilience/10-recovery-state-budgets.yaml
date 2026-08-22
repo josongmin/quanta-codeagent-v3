@@ -1,0 +1,51 @@
+id: recovery-state-budgets
+title: RECOVERY_CAPS — bounded per-turn same-turn recovery budgets
+section: 7
+subsystem: 동일-턴 복원 한도 (Recovery)
+order: 10
+maturity: L5
+status: stable
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [n-a]
+configurable: static
+owners: ["@songmin"]
+labels: ["surface:core", "resilience-primitive"]
+depends_on: [fallback-kinds-policy, llm-error-taxonomy, llm-factory, llm-not-implemented-kind, model-swap-retry]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 3/3 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "pure internal frozen-constant primitive, no user-visible affordance on any surface"
+purpose: |
+  Per-turn recovery 4-카운터 캡을 Object.freeze 상수로 SSOT 화. 같은 턴 안의
+  pre-stream backoff, output-cap continue, malformed-output retry, consecutive-
+  empty-assistant retry가 무한 spin하지 못하도록 각 사유별 ceiling을 강제.
+  streamRetries=3 / outputContinues=3 / malformedRetries=1 / consecutiveEmpties=2.
+  소진 시 graceful degrade(finish / accept-partial)로 떨어지고 결코 loop를
+  hang시키지 않음. RECOVERY_CAPS 동결 + freshRecovery() 팩토리 + RecoveryReason
+  closed-union로 trajectory 분류기와 ABI 고정. RetryingLLM(pre-stream backoff)
+  와는 다른 축: 본 모듈은 *턴 단위* 시도 횟수 SSOT, RetryingLLM은 *연결* 단계
+  transient 재시도.
+evidence:
+  code:
+    - src/agent/recovery.ts
+    - src/agent/loop.ts
+    - src/agent/turn-context.ts
+  adrs: []
+  tests:
+    unit:
+      - tests/unit/recovery-hellgate.test.ts
+      - tests/unit/recovery-hell.test.ts
+      - tests/unit/recovery-hellgate.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  RecoveryReason 7-arm closed (backoff/compact/nudge/empty/malformed/unverified/
+  closeout) — trajectory 분류 / 텔레메트리는 이 유니온에 락-인. 캡 값을 바꾸려면
+  소스 상수만 수정하면 되고, 모든 테스트와 trajectory consumer가 같이 갱신됨.

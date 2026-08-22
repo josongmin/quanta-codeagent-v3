@@ -1,0 +1,37 @@
+id: git-init
+title: git init
+section: 2
+subsystem: Git 1급 도구 (ADR-0025)
+order: 2
+maturity: L4
+status: stable
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [n-a]
+configurable: n-a
+owners: ['@songmin']
+labels: [surface:cli]
+depends_on: [gitdiff, git-read-trio, git-branch-name-schema-guard, git-log-us-separator, git-mutating-tools]
+surface_integration:
+  cli: full
+  web: full
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 4/4 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "Model-invokable git tool; tool_call/tool_result render as the generic tool.invoked/completed card (session-hooks.ts:420-435)."
+purpose: 45 tests
+evidence:
+  code:
+    - src/tool/git/index.ts
+    - src/tool/git/runner.ts
+    - src/tool/git/_shared.ts
+    - src/tool/git/types.ts
+  adrs: [25]
+  tests:
+    unit: [tests/unit/git-tools.test.ts, tests/unit/git-tools-hellgate.test.ts]
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: ''

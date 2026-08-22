@@ -1,0 +1,59 @@
+id: shadow-odb-lru-cleanup
+title: Shadow-ODB per-workspace LRU eviction (best-effort, scope-fenced)
+section: 10
+subsystem: Shadow git ODB — disk-budget cleanup
+order: 50
+maturity: L4
+status: stable
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [interactive, headless, batch, daemon, ide, ci-bot]
+configurable: static
+owners: ["@songmin"]
+labels: ["surface:cli"]
+depends_on: [shadow-tools-trio, snapshot-slash-cmd, slash-snapshot]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 2/2 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "pure internal LRU eviction housekeeping primitive, no UI affordance on any surface"
+purpose: |
+  Bounded-disk policy for the shadow git ODB (ADR-0108). Sums the on-disk
+  size of each per-workspace shadow directory under
+  `<base>/snapshots/<workspaceHash>/` and, while the total exceeds
+  `maxBytes`, removes the oldest one (by directory `mtimeMs`) until the
+  cumulative size is at or below cap. Pairs with the workspace-hash
+  derivation that gives each workspace a stable 16-hex (64-bit) directory
+  name under `~/.quanta/snapshots/`.
+
+  Safety invariants:
+    - Reads / removes are SCOPE-FENCED to `<base>/snapshots/*`. Anything
+      above that root (e.g. `~/.quanta/auth/`) is untouched.
+    - Missing `snapshots/` directory ⇒ no-op (not an error).
+    - Per-directory eviction failures are swallowed so a single permission
+      glitch doesn't strand later cleanup work — best-effort by design.
+    - Symlinks under our own snapshots are skipped during size calc.
+  Determinism: same absolute workspace path ⇒ same 16-hex hash ⇒ same
+  shadow dir; the dirSize/inventory walk uses `withFileTypes` so the size
+  rollup is stable across calls.
+evidence:
+  code:
+    - src/storage/shadow-odb/cleanup.ts
+    - src/storage/shadow-odb/hash.ts
+  adrs: [108]
+  tests:
+    unit:
+      - tests/unit/shadow-odb-hellgate.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  Distinct from the user-facing shadow tools (`shadow-tools-trio`,
+  `slash-snapshot`, `snapshot-slash-cmd`): this is the housekeeping seam
+  the host invokes to keep the disk budget bounded. 16-hex prefix gives
+  ~1-in-2^32 collision over ~4.3B workspaces (birthday bound) — vastly
+  over-budget for a single user's machine.

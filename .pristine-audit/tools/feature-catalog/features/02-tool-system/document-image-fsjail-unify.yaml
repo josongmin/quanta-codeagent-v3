@@ -1,0 +1,85 @@
+id: document-image-fsjail-unify
+title: document/image readers — unified FsJail chokepoint via resolveJailedDoc
+section: 2
+subsystem: 도구 — FS-jail unification (Slice S7)
+order: 111
+maturity: L4
+status: new
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [n-a]
+configurable: integrated
+config_refs:
+  env: [QUANTA_FS_JAIL]
+owners: ["@songmin"]
+labels: [surface:cli, security-touched]
+depends_on: [fsjailerror, cross-slice-mirror, deferred-tool-registry, evidence-toolresultevidence, git-review-diff]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 8/8 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "pure internal security primitive (resolveJailedDoc containment chokepoint); the readers show as tool calls but this feature itself is a jail unification with no UI affordance"
+purpose: |
+  Pre-S7, every file-reading tool rolled its own `resolveXxxPath` —
+  `resolveImagePath` (`src/tool/image/read.ts`), `resolveCsvPath`
+  (`src/tool/document/csv-read.ts`), `resolveNdjsonPath`, `resolvePdfPath`,
+  `resolveYamlPath`. Five copies of the same `path.isAbsolute` +
+  `path.resolve` + `startsWith(cwd + path.sep)` containment check, and a
+  shared bug: an absolute path was treated as "explicit user consent" and
+  bypassed the cwd containment entirely (model could request
+  `/etc/passwd` and the only guard was the downstream `lstat`).
+  Additionally, none of them realpath-resolved the existing parent chain,
+  so a symlinked ancestor could smuggle a final path outside the jail.
+
+  Slice S7 routes every reader through ONE chokepoint:
+  `src/tool/_shared/resolve-jailed-doc.ts`, which delegates to the
+  canonical `@/storage/service` `resolveJailed` (lexical normalize +
+  realpath of the existing parent + segment-boundary `isInside` check)
+  and adds two pre-conditions storage does not need (empty path / NUL
+  byte). Each reader catches `FsJailError` in its preflight and
+  translates to the historical `ok:false` `permission_denied` shape —
+  back-compat preserved for callers, defense-in-depth gained.
+
+  After S7: absolute `/etc/hosts` is rejected just like relative
+  `../../../etc/hosts`. Sibling-prefix traps (`/jailX` for `/jail` cwd)
+  are caught by segment-boundary containment. Symlinked parents are
+  caught by realpath-of-existing-parent.
+
+evidence:
+  code:
+    - src/tool/_shared/resolve-jailed-doc.ts
+    - src/tool/image/read.ts
+    - src/tool/document/csv-read.ts
+    - src/tool/document/ndjson-read.ts
+    - src/tool/document/pdf-read.ts
+    - src/tool/document/yaml-read.ts
+    - src/storage/service.ts
+    - src/shared/runtime-config.ts
+  adrs: []
+  tests:
+    unit:
+      - tests/unit/tool/_shared-resolve-jailed-doc-hellgate.test.ts
+      - tests/unit/tool/image-read-fsjail-unify-hellgate.test.ts
+      - tests/unit/tool/read-image-hellgate.test.ts
+      - tests/unit/tool/csv-read-hellgate.test.ts
+      - tests/unit/tool/ndjson-read-hellgate.test.ts
+      - tests/unit/tool/pdf-read-hellgate.test.ts
+      - tests/unit/tool/yaml-read-hellgate.test.ts
+    integration: []
+    contract: []
+knobs:
+  - name: QUANTA_FS_JAIL
+    default: 'undefined'
+    purpose: '(no description)'
+deliberate_hold: null
+notes: |
+  xlsx_read is currently a stub (ADR-0137 / -0138 deferred) and has no
+  filesystem access path — when its impl lands it MUST thread through
+  `resolveJailedDoc(cwd, raw, "xlsx")` per the in-file authoring guide.
+  The anti-regression assertion in
+  `image-read-fsjail-unify-hellgate.test.ts` case 16 grep-pins the
+  `resolveJailedDoc` import so a future revert to per-tool resolvers is
+  caught loudly at the test boundary.

@@ -1,0 +1,51 @@
+id: template-literal-windsurf
+title: Template-literal `{{ variable }}` expander — Windsurf workflow parity (sibling to ADR-0203 !macro)
+section: 1
+subsystem: 플레이북 — 사용자 작성 task macro / 템플릿 치환 (ADR-0203 형제)
+order: 252
+maturity: L3
+status: new
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [n-a]
+configurable: integrated
+owners: ["@songmin"]
+labels: [absorbed:windsurf, surface:core, tier:core, default-off]
+depends_on: []
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-07-18"
+  evidence:
+    cli: "wired into the Skill tool render path (src/skill/skill-tool.ts execute → expandSkillTemplateVars) under QUANTA_SKILL_TEMPLATE_VARS (default-OFF). When ON + caller passes key=value args, a skill body's `{{ name }}` resolves to the value; unknown var → typed short-circuit surfaced to the model (no guess). OFF ⇒ `{{ name }}` emitted verbatim (byte-identical)."
+    web: "pure internal template-literal expander library (jinja2-style variable substitution), no UI affordance on any surface"
+purpose: |
+  Windsurf workflow `.windsurf/workflows/<name>.md`의 jinja2-style `{{ name }}`
+  치환을 흡수. ADR-0203의 `!macro` (1-pass, no-recursion) expander는 Devin
+  Playbook 어법에 맞춰진 surface — `{{}}`는 다른 grammar (no left-boundary
+  requirement), 다른 lookup (dotted-path context), 다른 escape (`\{\{`). 한
+  scanner에 합치면 두 contract가 섞이므로 sibling expander로 분리. 4 파일 leaf
+  sub-slice (port / types / default-expander / barrel). 순수 string→string 함수
+  + typed 3-arm error (unknown-variable / max-iterations / recursive). Default-OFF
+  — playbook root barrel 미수정, host가 직접 `@/skill/playbook/template-literal`
+  에서 import해야 활성. 1-pass 보장 (expansion 결과 안의 `{{ y }}` 재expand 안
+  함). Numeric/boolean coercion Windsurf parity (`0`→`"0"`, true→`"true"`).
+  Nested object는 dotted path로만 도달 (silent JSON.stringify 차단).
+evidence:
+  code:
+    - src/skill/playbook/template-literal/port.ts
+    - src/skill/playbook/template-literal/types.ts
+    - src/skill/playbook/template-literal/default-expander.ts
+    - src/skill/playbook/template-literal/index.ts
+    - src/skill/playbook/index.ts
+    - src/skill/skill-tool.ts
+  adrs: [252, 203]
+  tests:
+    unit:
+      - tests/unit/skill/playbook/template-literal-hellgate.test.ts
+      - tests/unit/skill/skill-template-vars-hellgate.test.ts
+    integration: []
+    contract: []
+knobs: [QUANTA_SKILL_TEMPLATE_VARS]
+notes: 'WIRED (jul-18): the ADR-0252 expander was previously producer-only (unreachable — not even barrel-exported). Now re-exported from the playbook root barrel (`src/skill/playbook/index.ts`) and wired into the Skill tool render path (`src/skill/skill-tool.ts` `execute` → `expandSkillTemplateVars`) under `QUANTA_SKILL_TEMPLATE_VARS` (default-OFF). Context source = the caller-supplied `args` string parsed into named `key=value` bindings (`parseKeyValueArgs`) — NO invented/heuristic context. Runs ALONGSIDE (not in place of) the pre-existing `$ARGUMENTS`/`$N` positional interpolation (`interpolateSkillArgs`): two different author surfaces (Windsurf named vars vs CC-slash positionals), NOT duplicates — different grammar, lookup, and semantics. Unknown `{{ name }}` → the expander typed short-circuit surfaced as an `ok:false` tool result (no guess, no partial-body leak). OFF ⇒ a literal `{{ name }}` in a body emits verbatim (byte-identical). ADR-0203 `!macro`와 sibling — 같은 SKILL.md에 둘 다 사용 가능. HELL-TL-14는 pure-expander default-OFF 봉인; skill-template-vars-hellgate가 wire의 gate/OFF-identity/short-circuit 봉인. nunjucks/handlebars swap은 TemplateExpander port body 한 줄 교체로 가능.'

@@ -27,9 +27,9 @@
  */
 
 import { describe, expect, test } from "bun:test"
-import { createObjectiveStore, type ObjectivePort } from "@/objective"
 import { goalCmd } from "@/apps/cli/slash/goal-cmd"
 import type { SlashContext } from "@/apps/cli/slash-contract"
+import { createObjectiveStore, type ObjectivePort } from "@/objective"
 
 const TID = "thread-goal-cmd"
 

@@ -1,0 +1,37 @@
+id: per-string-empty-patch-refine
+title: Per-string 캡 + empty-patch refine
+section: 5
+subsystem: L3 WorkingState (ADR-0021)
+order: 3
+maturity: L5
+status: refined
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [n-a]
+configurable: integrated
+owners: ["@songmin"]
+labels: ["surface:core"]
+depends_on: [cross-slice-mirror, agent-loop-branch-hardening, agent-types-split, cap-enforcer, cfg-fourrule-true]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 2/3 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "pure internal input-validation cap (per-string MAX_STR / empty-patch refusal in src/tool/update-working-state.ts) — schema guard, no UI affordance on any surface"
+purpose: "Per-string 캡 + empty-patch refine (R3/FU5): MAX_STR=500 / MAX_HYPOTHESIS=2000(zod .max()로 10 MB hypothesis-flood 차단). 모든 필드 omitted call → \"omit the tool call instead\" 명시 거절, turn-budget 낭비 방지"
+evidence:
+  code:
+    - src/tool/update-working-state.ts
+    - src/agent/working-state.ts
+    - src/agent/tier1/working-state.ts
+  adrs: [21]
+  tests:
+    unit:
+      - tests/unit/update-working-state.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: ''

@@ -26,17 +26,16 @@ import { afterEach, beforeEach, expect, test } from "bun:test"
 import { mkdtempSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { __resetRuntimeConfig } from "@/shared"
 import {
   loadSessionById,
   markSessionInterrupted,
   ROLLBACK_RECORD_VERSION,
   type RollbackCheckpointRecord,
   type RollbackOperationRecord,
-  saveSessionById,
-  SESSION_VERSION,
   type SessionMeta,
+  saveSessionById,
 } from "@/session"
+import { __resetRuntimeConfig } from "@/shared"
 import { persistTurn } from "./persist-turn"
 
 let root: string

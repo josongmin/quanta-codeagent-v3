@@ -1,0 +1,57 @@
+id: slash-snapshot
+title: /snapshot — Shadow-ODB snapshot list / rewind / partial restore
+section: 10
+subsystem: REPL panels (R10) — shadow-store UX
+order: 27
+maturity: L4
+status: new
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [interactive]
+configurable: static
+owners: ['@songmin']
+labels: [surface:cli]
+depends_on: [shadow-odb-port, shadow-odb-rewind, shadow-odb-workspace-hash, built-in-slash-commands, chatgpt-oauth-provider]
+surface_integration:
+  cli: full
+  web: missing
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 1/1 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "/snapshot absent from SlashPalette.tsx; rewind/restore needs a B3-absent SessionCommand verb; ShadowOdb port not web-supplied"
+purpose: |
+  CLI surface over the `ShadowOdb` port + the three `shadow_*` tools
+  (ADR-0122, Hermes Agent `/rollback` parity). Lets the operator browse,
+  preview, and restore workspace snapshots without round-tripping through
+  the model. Sub-commands:
+    - `/snapshot`                — list snapshots newest-first (numbered,
+                                   sha + ISO timestamp) via `listSnapshots`.
+    - `/snapshot <N>`            — rewind to snapshot
+                                   Routes through the `shadow_rewind` tool
+                                   body which is HITL `always-confirm` — the
+                                   surface shows a confirmation line; re-run
+                                   with `--yes` to commit (mirrors `/rewind`
+                                   confirmation protocol).
+    - `/snapshot <N> <file>`     — restore ONLY `<file>` from snapshot
+                                   via `shadow_restore_partial`.
+  Pure surface — never calls a snapshot APIs directly except through the
+  tool body (so HITL gating + audit trail are unified with model-driven
+  invocations).
+evidence:
+  code:
+    - src/apps/cli/snapshot-cmd.ts
+  adrs: [122]
+  tests:
+    unit: ["tests/unit/cli-rewind-slash-hellgate.test.ts", "tests/unit/cli/snapshot-cmd-ordinal-hellgate.test.ts"]
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  Slice: `src/apps/cli` consuming `@/tool/shadow` indirectly via the tool
+  dispatch — the surface itself does not import `ShadowOdb` directly so the
+  HITL + audit invariants are byte-identical to a model-driven `shadow_*`
+  tool call. Distinct from `/rewind`: that command rewinds CONVERSATION
+  history (message-id), while `/snapshot` rewinds WORKSPACE state (file
+  tree). Both can be combined for full session restore.

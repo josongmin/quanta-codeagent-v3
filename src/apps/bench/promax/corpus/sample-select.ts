@@ -34,13 +34,12 @@
  * (`samples.ts`) shared by the operator tool and the runtime.
  */
 
-import { sha256Hex } from "../provenance"
 import { PROMAX_V1_SNAPSHOT } from "../provenance/frozen-snapshot"
-import { canonicalJson } from "./artifacts"
 import {
   PROMAX_SAMPLE_ALGORITHM_VERSION,
   ProMaxSampleError,
   type ProMaxSampleManifest,
+  proMaxSampleManifestDigest,
 } from "./samples"
 
 /** The env knob naming the manifest a run selects from. */
@@ -131,11 +130,10 @@ export const parseProMaxSampleManifest = (args: {
     parentSubsetSha256,
     sha256,
   }
-  // 1 — SELF-DIGEST. Recomputed with the SAME canonicalization the writer used,
-  // so a re-serialized or pretty-printed manifest still verifies while an edited
-  // one cannot.
-  const { sha256: _declared, ...withoutDigest } = manifest
-  const recomputed = sha256Hex(canonicalJson(withoutDigest))
+  // 1 — SELF-DIGEST. Recomputed through the WRITER'S OWN recipe
+  // ({@link proMaxSampleManifestDigest}), not a second copy of it, so a manifest
+  // can never verify here and fail at the campaign-freeze boundary.
+  const recomputed = proMaxSampleManifestDigest(manifest)
   if (recomputed !== sha256) {
     refuse(
       surface,

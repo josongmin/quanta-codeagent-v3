@@ -1,0 +1,101 @@
+id: custom-3p-setup-mvp
+title: Custom 3P Setup MVP — 5 core method + lifecycle (ADR-0245)
+section: 9
+subsystem: Custom 3P Setup (ADR-0245) — closed-port user-declared provider registry
+order: 245
+maturity: L2
+status: new
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [n-a]
+configurable: integrated
+owners: ["@songmin"]
+labels: ["surface:core"]
+depends_on:
+  - connectors-rest-registry
+  - oauth-dynamic-discovery
+  - oauth-dynamic-registration
+  - connector-token-rotation
+config_refs:
+  env: []
+surface_integration:
+  cli: missing
+  web: missing
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "src evidence not reachable from the interactive CLI entry (src/apps/cli/index.ts) — wired only into other apps (eval/bench/probe/headless) or unwired"
+    web: "User-facing mechanism (provider register/health) is unwired; no /connector slash or web settings panel; not reachable from web-daemon; does not reach the browser."
+purpose: |
+  Claude Desktop `Custom3pSetup` 24-method IPC namespace 의 MVP 5 core
+  method 흡수: register / update / remove / health / list + 4-state
+  lifecycle (draft → configured → healthy → failing). 19 method 는
+  ADR-0151 (OAuth discovery + dynamic registration) / ADR-0160 (REST
+  catalog + 24h cache) / ADR-0163 (token rotation + multi-cloud) 의
+  composition 으로 이미 흡수됨 — deliberate hold. 슬라이스 구조: closed
+  `Custom3pRegistry` 포트 + canonical `InMemoryCustom3pRegistry` +
+  `JsonlCustom3pRegistry` (~/.quanta/connectors/custom-3p.jsonl, file
+  0600 / dir 0700) + headless stub (throw `unsupported` from mutators) +
+  pure `healthProbe(spec, deps)` (fetchPort/dnsPort/clockPort 주입).
+  `register()` 는 항상 draft 에 착지; `update()` advances draft →
+  configured; `health()` advances → healthy | failing (verdict 기반).
+  `ProviderKind = "mcp" | "llm"` 닫힌 union — exhaustive switch 강제.
+  `HealthResult.verdict = ok | dns-fail | http-fail | auth-fail |
+  timeout` 닫힌 arm. `src/connectors/index.ts` 는 custom-3p 를 재-export
+  하지 **않음** — 호출자 가 `@/connectors/custom-3p` 직접 import 해야
+  default-OFF byte-identical 계약 유지. src/mcp/ UNCHANGED.
+evidence:
+  code:
+    - src/connectors/custom-3p/types.ts
+    - src/connectors/custom-3p/port.ts
+    - src/connectors/custom-3p/in-memory-registry.ts
+    - src/connectors/custom-3p/jsonl-store.ts
+    - src/connectors/custom-3p/headless-stub.ts
+    - src/connectors/custom-3p/health-probe.ts
+    - src/connectors/custom-3p/index.ts
+  adrs:
+    - docs/decisions/0245-custom-3p-setup-mvp.md
+    - 151
+    - docs/decisions/0163-multicloud-oauth-lock.md
+  tests:
+    unit:
+      - tests/unit/connectors/custom-3p-hellgate.test.ts
+    integration: []
+    contract: []
+knobs:
+  - name: jsonl path
+    where: createJsonlCustom3pRegistry config.path
+    default: "~/.quanta/connectors/custom-3p.jsonl"
+    purpose: per-user provider registry persistence (caller-injectable for tests)
+  - name: file mode
+    where: jsonl-store.ts internals
+    default: 0o600
+    purpose: secret-bearing rows — owner-only read/write
+  - name: dir mode
+    where: jsonl-store.ts internals
+    default: 0o700
+    purpose: parent ~/.quanta/connectors — owner-only traverse
+deliberate_hold:
+  reason: |
+    OAuth authorization-code browser-redirect full flow (Phase 2 — hooks
+    into existing src/auth/chatgpt-oauth/ once surface ships).
+    19 additional Claude Desktop methods reachable via composition of
+    ADR-0151 / 0160 / 0163 — explicitly NOT re-implemented.
+    Concurrent multi-process write coordination (single-flight contract
+    this MVP).
+    Telemetry opt-in metadata (observability slice owns the emit surface
+    — separate ADR).
+  promotion_path: |
+    Documented in ADR; wire when ROI concrete.
+notes: |
+  R0 absorption (2026-05-25). Source: Claude Desktop 1.7196.3 catalog
+  (memory `claude-desktop-1-7196-catalog`) + R2 absorption gap memo
+  (`claude-desktop-tier0-absorption-r2`). Wire-up into AgentConfig +
+  CLI `/connector add` + Web settings panel is downstream. fc number
+  matches ADR (245). 15-case hellgate + secondary 2-arm exhaustive on
+  ProviderKind. Default-OFF byte-identical confirmed via barrel
+  inspection. Slice fence verified — touches `src/connectors/custom-3p/`
+  + tests + ADR + catalog only. Constraint-respected: src/agent/,
+  src/memory/, src/scheduler/, src/observability/, src/tool/,
+  src/runtime/, src/realtime/, src/radar/, src/mcp/, src/media/
+  unchanged.

@@ -32,9 +32,6 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { createObjectiveStore } from "@/objective"
-import { type ContinuationDeps, runIdleContinuation } from "@/objective/continuation"
-import type { ObjectivePort, ObjectiveStatus } from "@/objective/types"
 import { backoffDelayMs, RetryingLLM } from "@/agent/retry"
 import type { LLMPort, StreamEvent, StreamInput } from "@/llm"
 import {
@@ -45,6 +42,9 @@ import {
 } from "@/llm/credential-helper"
 import { persistConvertedItems } from "@/migration/external-config/persist"
 import type { ConvertedItem } from "@/migration/external-config/types"
+import { createObjectiveStore } from "@/objective"
+import { type ContinuationDeps, runIdleContinuation } from "@/objective/continuation"
+import type { ObjectivePort, ObjectiveStatus } from "@/objective/types"
 import type {
   ApprovalMode,
   NetworkMode,

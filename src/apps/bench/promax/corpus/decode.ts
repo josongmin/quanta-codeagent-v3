@@ -30,6 +30,7 @@
  * checkoutable, so both are refused here — reusing the owner's
  * `dataset_field_invalid` code rather than widening the closed failure union.
  */
+import { errMessage } from "@/shared"
 import {
   createFailureSink,
   idSetEqualityFailures,
@@ -99,7 +100,7 @@ const parseJson = (
   } catch (err) {
     return {
       code,
-      message: `${label} bytes are not valid JSON: ${err instanceof Error ? err.message : String(err)}`,
+      message: `${label} bytes are not valid JSON: ${errMessage(err)}`,
     }
   }
 }

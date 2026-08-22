@@ -1,0 +1,56 @@
+id: side-conv-dispatch-router
+title: dispatchSideConversation — external request/response router seam
+section: 1
+subsystem: Side-conversation (ADR-0049 R5)
+order: 22
+maturity: L4
+status: stable
+ui_surfaces: [cli]
+monitoring: integrated
+telemetry_keys: [quanta.thread.kind, quanta.thread.parent_id, quanta.thread.side]
+modes: [n-a]
+configurable: static
+owners: ["@songmin"]
+labels: [absorbed:codex, surface:core, tier:core]
+depends_on: [side-conversation-seam, side-conv-prompt-byte-identical, fallback-kinds-policy, llm-factory, model-swap-retry]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 4/4 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "internal request/response router seam over the side-conversation executor; no distinct user-visible affordance on any surface"
+purpose: |
+  UI/CLI/RPC-facing seam decoupling external callers from the executor's
+  `SideConversationOptions` shape. Callers describe WHAT they want via
+  `SideConversationRequest` (parentSessionId / question / effort / model
+  hint); the host-supplied `SideConversationResolver` decides which LLMPort
+  + tool list to use; `dispatchSideConversation` wires them and delegates
+  to `runSideConversation`. The host owns model selection (cost/latency
+  tradeoff) — the dispatcher does not pick. Effort is re-validated at the
+  RPC boundary (`assertSideConversationEffort`) — the type system alone
+  cannot be trusted across an external boundary. Options built via spread
+  to honor `exactOptionalPropertyTypes` (never assign `undefined` to a
+  non-`undefined` optional). Parent agent loop is NEVER interrupted —
+  the function touches no shared state, mutex, or message buffer.
+evidence:
+  code:
+    - src/agent/side-conversation/dispatch.ts
+    - src/agent/side-conversation/run.ts
+    - src/agent/side-conversation/index.ts
+    - src/agent/side-conversation/prompt.ts
+  adrs: [49]
+  tests:
+    unit:
+      - tests/unit/side-conversation.test.ts
+    integration:
+      - tests/integration/side-conversation-e2e.test.ts
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  Parent abort signal flows through the resolver and into runSideConversation
+  — cancelling the parent turn cancels any in-flight side-conv. SpanAttributes
+  observer optional. Tools resolver optional (defaults to the read-only
+  allowlist if absent).

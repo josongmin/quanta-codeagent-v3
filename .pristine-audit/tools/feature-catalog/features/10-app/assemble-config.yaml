@@ -1,0 +1,33 @@
+id: assemble-config
+title: assembleConfig - per-turn AgentConfig composer
+section: 10
+subsystem: Runner assembly layer
+order: 12
+maturity: L5
+status: stable
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [interactive]
+configurable: integrated
+owners: ["@songmin"]
+labels: ["surface:cli"]
+depends_on: [runner-assemble-builders, fallback-kinds-policy, llm-factory]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-07-16"
+  evidence:
+    cli: "The surface composes collaborators into an AgentConfig; side conversations are owned by host runtime rather than this runner seam."
+    web: "Surface-agnostic composer."
+purpose: "Compose explicit collaborators and history into AgentConfig without reading env or argv."
+evidence:
+  code: [src/runner/assemble/config.ts, src/runner/orchestrate/run-once.ts, src/host/runtime/session-host.ts]
+  adrs: [24]
+  tests:
+    unit: [tests/unit/assemble.test.ts]
+    integration: [tests/integration/cli-export-assembly.test.ts]
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: "Conditional optional spreads retain default-off behavior."

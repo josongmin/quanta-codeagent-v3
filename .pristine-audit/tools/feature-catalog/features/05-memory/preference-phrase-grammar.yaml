@@ -1,0 +1,69 @@
+id: preference-phrase-grammar
+title: Preference phrase grammar — literal quote + count-based confidence + evidence anchor
+section: 5
+subsystem: 장기 메모리 — preference signal grammar (Codex 흡수, ADR-0131)
+order: 13
+maturity: L4
+status: stable
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [interactive, headless, batch, daemon, ide, ci-bot]
+configurable: n-a
+owners: ["@songmin"]
+labels: ["surface:core", "absorbed:codex"]
+depends_on: [codex-2-phase-consolidator, memory-outcome-enum, phase1-stage1-store, memory-fence-cleanup, memory-md-atomic-writer]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-09"
+  evidence:
+    cli: "runs in the interactive CLI — 3/3 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "pure parser/grammar + warning-only lint primitive; ui_surfaces n-a; no user-visible affordance"
+purpose: |
+  Codex memory의 feedback-type 메모리 body 컨벤션 흡수 — 자유형 paraphrase
+  대신 4-field 구조화 grammar:
+
+    **When the user said** "코드 레벨로만"     ← literal quote (Korean/English 보존)
+    **They meant**: …                          ← author's interpretation
+    **Evidence**: src/foo.ts:42 (3 corrections same week)
+    **Confidence**: high | medium | low
+
+  파서(parsePreferenceSignal)는 PURE — I/O / clock / LLM 없음. PreferenceSignal
+  { quote?, evidence?, confidence? } 반환. 패턴 누락 시 빈 객체 ({}). 결코 throw X.
+
+  핵심 의사결정:
+    - Quote는 **literal slice** — 정규식은 lowercased view 매칭, slice는 ORIGINAL
+      → Korean / typographic / case 변형 byte-for-byte 보존
+    - Confidence는 **count-based** (1→low, 2→medium, 3+→high) — subjective
+      scoring 금지 [[no-heuristics-only-validated]]
+    - Explicit `Confidence: <level>` 마커 ⇒ count derivative 무시 (author
+      intent 우선)
+    - Evidence는 line-bound 캡처 — multi-paragraph 끌어들이지 않음
+
+  Lint (`lintMemoryFrontmatter`):
+    - W1: outcome 있는데 evidence 없음
+    - W2: evidence가 file:line / URL / SHA 형식 아님
+    - W3: body에 `\d+% (done|complete|finished)` percentage-grace 패턴
+  전부 WARNING — 결코 ERROR/THROW X. errors: [] 영구 비어있음.
+
+  Out of scope: cross-session phrase corpus indexing, ML clustering
+  ([[no-heuristics-only-validated]]와 충돌, ADR-0131 §Out-of-scope).
+evidence:
+  code:
+    - src/memory/consolidate/grammar.ts
+    - src/memory/consolidate/lint.ts
+    - src/memory/consolidate/index.ts
+  adrs: [131]
+  tests:
+    unit:
+      - tests/unit/memory-grammar.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  자료 출처: /.extracted_source/userdata/codex/memories/raw_memories.md
+  (30 sessions, 2026-05-04 ~ 2026-05-24). 정확한 quote 보존이 후속
+  세션 agent의 phrase recognition을 살린다 — paraphrase 시 semantic
+  dilution 발생 (ADR-0131 §Problem.2).
