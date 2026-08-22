@@ -15,8 +15,8 @@
  *   - overflow (until non-finite) ⇒ no-op (never accidentally CLEARS).
  */
 import { describe, expect, test } from "bun:test"
-import { createObjectiveStore } from "@/agent/objective"
-import { applyMeasuredUsageLimit } from "@/agent/objective/usage-limit-wire"
+import { createObjectiveStore } from "@/objective"
+import { applyMeasuredUsageLimit } from "@/objective/usage-limit-wire"
 
 const TID = "t"
 

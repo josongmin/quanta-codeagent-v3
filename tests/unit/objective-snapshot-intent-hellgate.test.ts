@@ -15,8 +15,8 @@
  * explicitStatus="completed", so unmarking yields "completed", not "active".
  */
 import { describe, expect, test } from "bun:test"
-import type { ObjectivePort, ObjectiveSnapshot } from "@/agent/objective"
-import { createObjectiveStore } from "@/agent/objective"
+import type { ObjectivePort, ObjectiveSnapshot } from "@/objective"
+import { createObjectiveStore } from "@/objective"
 
 const TID = "thread-intent"
 const freshStore = (now = 1_000): ObjectivePort => createObjectiveStore({ now: () => now })

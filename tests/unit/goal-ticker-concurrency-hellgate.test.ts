@@ -25,7 +25,7 @@
  */
 
 import { describe, expect, test } from "bun:test"
-import { createObjectiveStore, type ObjectivePort } from "@/agent/objective"
+import { createObjectiveStore, type ObjectivePort } from "@/objective"
 import {
   type GoalContinuationProbes,
   startGoalContinuationTicker,

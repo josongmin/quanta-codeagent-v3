@@ -27,7 +27,7 @@ import {
   type ApprovalStateMachinePort,
   createApprovalStateMachine,
 } from "@/agent/approval-state-machine"
-import type { Objective, ObjectivePort } from "@/agent/objective"
+import type { Objective, ObjectivePort } from "@/objective"
 import type { RunEntry, RunLedgerPort } from "@/agent/run-ledger"
 import { __resetLoggerRateLimit } from "@/shared"
 import { __resetTerminalIo, setTerminalIo } from "@/shared/terminal-io"

@@ -16,7 +16,7 @@
  *     (ADR-0395), so a single UI surface can render the pause across all
  *     long-running work.
  *
- * Slice fence: imports allowed = `@/agent/objective` (types) + `@/agent/run-ledger`
+ * Slice fence: imports allowed = `@/objective` (types) + `@/agent/run-ledger`
  * (types) + `@/shared`. NO `@/agent` core, NO `@/apps`, NO `@/tool`. Pure data +
  * a closed port. The store is the only mutator.
  *

@@ -7,7 +7,7 @@ import {
   createObjectiveStore,
   type ObjectivePort,
   runIdleContinuation,
-} from "@/agent/objective"
+} from "@/objective"
 import type { LLMPort, StreamEvent, StreamInput } from "@/llm"
 import { defaultTools, ToolRegistry } from "@/tool"
 import { cfg, RecordingStream, text, toolUse, withTimeout } from "./_harness"

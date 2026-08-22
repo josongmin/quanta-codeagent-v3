@@ -9,7 +9,7 @@
 
 import { describe, expect, test } from "bun:test"
 import type { ApprovalRequest } from "@/agent/approval-state-machine"
-import type { Objective } from "@/agent/objective"
+import type { Objective } from "@/objective"
 import type { RunEntry } from "@/agent/run-ledger"
 import type {
   ObservabilityDeltaMessage,

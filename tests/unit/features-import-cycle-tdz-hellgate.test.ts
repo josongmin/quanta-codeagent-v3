@@ -22,12 +22,12 @@ import { describe, expect, test } from "bun:test"
 describe("features.ts import-cycle TDZ (hellgate)", () => {
   test("the manifest-hellgate import order evaluates @/agent/features without a TDZ ReferenceError", async () => {
     // This is the EXACT barrel order the tool-surface manifest hellgate pulls
-    // (`@/agent/objective` FIRST, before `@/agent/tier1`), which re-enters
+    // (`@/objective` FIRST, before `@/agent/tier1`), which re-enters
     // `@/agent/features` while `@/agent/tier1` is still initializing — the
     // condition that surfaced the bare-ref TDZ. Under a bare `buildShadowBlock,`
     // entry this import graph throws `Cannot access 'buildShadowBlock' before
     // initialization`; with the arrow-wrapped entries it loads clean.
-    await import("@/agent/objective")
+    await import("@/objective")
     await import("@/agent/subagent-mailbox")
     await import("@/agent/tier1")
     await import("@/subagent")

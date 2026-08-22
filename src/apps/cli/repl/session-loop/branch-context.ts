@@ -1,6 +1,6 @@
 import type { AgentConfig } from "@/agent"
 import type { InboundMode } from "@/agent/inbound-mode"
-import type { ObjectivePort } from "@/agent/objective"
+import type { ObjectivePort } from "@/objective"
 import type { LastTurnOutcome } from "@/reactor"
 import type { ImageQueue } from "../../image-queue"
 import type { NotificationPort } from "../../notify"

@@ -14,14 +14,14 @@
  * `runEntryId` back-reference. That is the slice's hard invariant: attribution
  * is best-effort, approval state is authoritative.
  *
- * Slice fence: imports = `node:crypto` (for `randomUUID`), `@/agent/objective`
+ * Slice fence: imports = `node:crypto` (for `randomUUID`), `@/objective`
  * (TYPES ONLY), `@/agent/run-ledger` (TYPES ONLY), `@/shared` (leaf utils:
  * `errMessage` + `logger` for attribution-catch telemetry), and `./types`. NO
  * `@/agent` core, NO `@/apps`, NO `@/tool`.
  */
 
 import { randomUUID } from "node:crypto"
-import type { ObjectivePort } from "@/agent/objective"
+import type { ObjectivePort } from "@/objective"
 import type { RunLedgerPort } from "@/agent/run-ledger"
 import { errMessage, logger } from "@/shared"
 import type {

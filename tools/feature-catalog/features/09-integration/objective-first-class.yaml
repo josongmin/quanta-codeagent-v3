@@ -30,7 +30,7 @@ purpose: |
   ObjectiveBudget / ObjectiveStatus / ObjectiveSnapshot), the closed
   `ObjectivePort`, and a zero-dep in-memory `createObjectiveStore`. NOT wired
   into the agent loop / dispatch / prompt / features / any tool (in-flight
-  work on those shared files). Pure new slice `src/agent/objective/`, no
+  work on those shared files). Pure new slice `src/objective/`, no
   cross-slice imports (only `node:crypto` for randomUUID).
 
   Status is DERIVED, never stored as truth: (1) blockers non-empty ⇒ "blocked"
@@ -50,9 +50,9 @@ purpose: |
   byte-identical until a later wave wires it.
 evidence:
   code:
-    - src/agent/objective/types.ts
-    - src/agent/objective/store.ts
-    - src/agent/objective/index.ts
+    - src/objective/types.ts
+    - src/objective/store.ts
+    - src/objective/index.ts
   adrs: [394]
   tests:
     unit:
@@ -61,7 +61,7 @@ evidence:
     contract: []
 knobs:
   - name: now
-    where: src/agent/objective/store.ts
+    where: src/objective/store.ts
     default: 'Date.now'
     purpose: injected clock seam for deterministic createdAt/updatedAt/since stamps
 deliberate_hold:

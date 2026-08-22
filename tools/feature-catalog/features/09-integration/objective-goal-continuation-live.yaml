@@ -22,7 +22,7 @@ surface_integration:
     web: "CLI-only. The web/Tauri surface has no `/goal` slash slot and does not arm the continuation ticker (session-loop is a CLI-repl concern); the objective itself reaches the web ObjectiveCard via the objective substrate, but the pursuing-loop wiring is not present on that surface."
 purpose: |
   Promotes the previously-DEAD idle goal-continuation machine
-  (`src/agent/objective/continuation.ts`: `runIdleContinuation` /
+  (`src/objective/continuation.ts`: `runIdleContinuation` /
   `ContinuationSemaphore` / `evaluateContinuation` — Codex `core/src/goals.rs`
   parity) from a hellgated-but-unreferenced primitive into a LIVE end-to-end
   CLI feature. Before jul-13 the machine round-tripped its tests but had ZERO
@@ -57,11 +57,11 @@ purpose: |
   goal). Together they are the two live readers the objective substrate was
   built for. Slice fence: additive wiring in `src/apps/cli/repl/**`
   (surface-compose / session-loop / dispatch) + `src/apps/cli/{goal-continuation-hook,slash/goal-cmd,status-pills}.ts`;
-  the pure machine in `src/agent/objective/**` is unchanged (only now driven).
+  the pure machine in `src/objective/**` is unchanged (only now driven).
 evidence:
   code:
-    - src/agent/objective/continuation.ts
-    - src/agent/objective/pursuit-prompt.ts
+    - src/objective/continuation.ts
+    - src/objective/pursuit-prompt.ts
     - src/apps/cli/goal-continuation-hook.ts
     - src/apps/cli/slash/goal-cmd.ts
     - src/apps/cli/repl/surface-compose.ts

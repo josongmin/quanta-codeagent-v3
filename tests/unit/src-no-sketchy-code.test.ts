@@ -658,7 +658,7 @@ const RULES: readonly Rule[] = [
         "BURN-DOWN: JSONL persisted-row cutoff for log GC — replay-stable",
       "agent/run-ledger/store.ts":
         "BURN-DOWN: injected clock (`opts?.now ?? Date.now`); the literal `Date.now` is the default-factory + the `safeDateNow` last-resort fallback when the injected clock throws.",
-      "agent/objective/store.ts":
+      "objective/store.ts":
         "BURN-DOWN: injected clock (`opts?.now ?? Date.now`); the literal `Date.now` is the default fallback inside `clockNow()`'s catch + the empty-cell default factory.",
       "agent/approval-state-machine/store.ts":
         "BURN-DOWN: injected clock (`opts?.now ?? Date.now`); the literal `Date.now` is the finite-guard default fallback.",

@@ -143,7 +143,7 @@ export interface RunSessionLoopDeps {
    *  (the SAME instance `/goal` mutates). When present, the loop arms the idle
    *  goal-continuation ticker over it, gated by `QUANTA_GOAL_ENFORCE`. Absent ⇒
    *  no ticker (default-OFF byte-identical). */
-  readonly objectiveStore?: import("@/agent/objective").ObjectivePort
+  readonly objectiveStore?: import("@/objective").ObjectivePort
   /** #8 last-mile (jun-6) — the live stdin source for the CONCURRENT in-turn
    *  keystroke reader (closed-port DI; the host binds `process.stdin`, tests bind
    *  a fake). Only consumed when the mid-turn-capture wire is PRESENT

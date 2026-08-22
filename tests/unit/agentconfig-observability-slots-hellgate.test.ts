@@ -9,7 +9,7 @@
  */
 import { describe, expect, test } from "bun:test"
 import { createApprovalStateMachine } from "@/agent/approval-state-machine"
-import { createObjectiveStore } from "@/agent/objective"
+import { createObjectiveStore } from "@/objective"
 import { createRunLedger } from "@/agent/run-ledger"
 import type { AgentConfig } from "@/agent/types"
 

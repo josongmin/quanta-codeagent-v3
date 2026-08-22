@@ -50,7 +50,7 @@ purpose: |
   absent ⇒ no tools registered, the ToolRegistry is structurally identical to
   the pre-ADR registry.
 
-  Slice fence: `src/tool/objective/` imports `@/agent/objective` (the closed
+  Slice fence: `src/tool/objective/` imports `@/objective` (the closed
   ADR-0394 substrate) for types only (`ObjectivePort` / `Objective` /
   `ObjectiveStatus` / `WaitingOn`), `../types` (Tool / ToolContext / ToolEvent
   / ToolResult), and `zod`. NEVER `@/agent` core (loop / dispatch / prompt /

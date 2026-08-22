@@ -2,7 +2,7 @@
  * HELLGATE — adversarial proofs for ADR-0394: Objective as a first-class
  * per-thread object (MODEL ONLY wave — store + port, no agent-loop wiring).
  *
- * The store is a pure new slice (`@/agent/objective`). These cases pin the
+ * The store is a pure new slice (`@/objective`). These cases pin the
  * CLOSED port contract verbatim:
  *
  *   - set/get round-trip + frozen-snapshot determinism.
@@ -23,8 +23,8 @@
  *   updateStatus("completed") is honored only while NOT blocked.
  */
 import { describe, expect, test } from "bun:test"
-import type { Objective, ObjectivePort, ObjectiveSnapshot } from "@/agent/objective"
-import { createObjectiveStore } from "@/agent/objective"
+import type { Objective, ObjectivePort, ObjectiveSnapshot } from "@/objective"
+import { createObjectiveStore } from "@/objective"
 
 const TID = "thread-alpha"
 

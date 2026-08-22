@@ -1,6 +1,6 @@
 /**
  * HELLGATE — adversarial, mutation-grade proofs for the PURE goal-continuation
- * engine (`@/agent/objective` barrel → `src/agent/objective/continuation.ts`).
+ * engine (`@/objective` barrel → `src/objective/continuation.ts`).
  *
  * Target surface (H17, Codex `core/src/goals.rs` PURE core):
  *   - evaluateContinuation(input): TOTAL no-I/O guard chain → launch|skip+reason
@@ -20,13 +20,13 @@ import type {
   ContinuationSkipReason,
   GoalContinuationInput,
   ObjectiveStatus,
-} from "@/agent/objective"
+} from "@/objective"
 import {
   ContinuationSemaphore,
   createObjectiveStore,
   evaluateContinuation,
   runIdleContinuation,
-} from "@/agent/objective"
+} from "@/objective"
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Fixtures / builders

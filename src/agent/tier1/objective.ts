@@ -8,7 +8,7 @@
  * loop sees no extra tools and the ToolRegistry stays byte-identical. Mirrors
  * `buildDelegateBlock` / `buildSubagentBgBlock` posture.
  *
- * SLICE FENCE: the `@/tool/objective` slice imports `@/agent/objective` types
+ * SLICE FENCE: the `@/tool/objective` slice imports `@/objective` types
  * directly (the closed ADR-0394 substrate is its own slice — separate from the
  * agent core). This builder is the composition root that threads the host-
  * supplied `ObjectivePort` into the tool factory at session-start.

@@ -27,7 +27,7 @@
  */
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import { runAgent } from "@/agent"
-import { createObjectiveStore, type ObjectivePort } from "@/agent/objective"
+import { createObjectiveStore, type ObjectivePort } from "@/objective"
 import { __resetRuntimeConfig, LLMError } from "@/shared"
 import { cfg, ScriptedLLM, text, thr, ev, withTimeout } from "./_harness"
 

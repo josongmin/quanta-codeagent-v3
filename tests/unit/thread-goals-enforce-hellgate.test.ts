@@ -35,13 +35,13 @@
  * derived values; absent continuation config ⇒ no continuation ever launches.
  */
 import { describe, expect, test } from "bun:test"
-import type { ObjectivePort } from "@/agent/objective"
-import { createObjectiveStore } from "@/agent/objective"
+import type { ObjectivePort } from "@/objective"
+import { createObjectiveStore } from "@/objective"
 import {
   ContinuationSemaphore,
   evaluateContinuation,
   type GoalContinuationInput,
-} from "@/agent/objective/continuation"
+} from "@/objective/continuation"
 
 const TID = "thread-h17"
 

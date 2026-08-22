@@ -1,7 +1,7 @@
 /**
  * R4 audit-M — objective snapshot reapply caps.
  *
- * Pre-fix: the live `sanitizeCriteria` path in `src/agent/objective/store.ts`
+ * Pre-fix: the live `sanitizeCriteria` path in `src/objective/store.ts`
  * enforces `MAX_CRITERIA_PER_OBJECTIVE = 256` and `MAX_BLOCKERS_PER_OBJECTIVE
  * = 64` on the `set()` / `addBlocker()` paths. The snapshot rebuild path
  * (`fromSnapshot` → `cellFromObjective` → `rebuildCriteria` /
@@ -31,7 +31,7 @@
  */
 
 import { describe, expect, test } from "bun:test"
-import { createObjectiveStore } from "@/agent/objective/store"
+import { createObjectiveStore } from "@/objective/store"
 
 const makeCriterion = (i: number) => ({ id: `c-${i}`, text: `criterion ${i}`, met: false })
 const makeBlocker = (i: number) => ({

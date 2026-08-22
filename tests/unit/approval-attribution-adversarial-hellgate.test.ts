@@ -51,7 +51,7 @@ import {
   type ApprovalAttributionGap,
   createApprovalStateMachine,
 } from "@/agent/approval-state-machine"
-import { createObjectiveStore } from "@/agent/objective"
+import { createObjectiveStore } from "@/objective"
 import { createRunLedger } from "@/agent/run-ledger"
 
 const stepClock = (start = 1000, step = 10) => {

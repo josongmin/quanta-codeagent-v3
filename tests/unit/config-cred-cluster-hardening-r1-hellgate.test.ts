@@ -32,9 +32,9 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { createObjectiveStore } from "@/agent/objective"
-import { type ContinuationDeps, runIdleContinuation } from "@/agent/objective/continuation"
-import type { ObjectivePort, ObjectiveStatus } from "@/agent/objective/types"
+import { createObjectiveStore } from "@/objective"
+import { type ContinuationDeps, runIdleContinuation } from "@/objective/continuation"
+import type { ObjectivePort, ObjectiveStatus } from "@/objective/types"
 import { backoffDelayMs, RetryingLLM } from "@/agent/retry"
 import type { LLMPort, StreamEvent, StreamInput } from "@/llm"
 import {
@@ -676,7 +676,7 @@ describe("H17 — budget at the EXACT cap and continuation re-read", () => {
       },
     }
     const resumes: string[] = []
-    const sem = new (await import("@/agent/objective/continuation")).ContinuationSemaphore()
+    const sem = new (await import("@/objective/continuation")).ContinuationSemaphore()
     const deps: ContinuationDeps = {
       enabled: true,
       objective: flipping,

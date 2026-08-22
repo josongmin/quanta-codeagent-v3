@@ -13,7 +13,7 @@
  */
 
 import type { AgentConfig } from "@/agent"
-import { createObjectiveStore, type ObjectivePort } from "@/agent/objective"
+import { createObjectiveStore, type ObjectivePort } from "@/objective"
 import { gateOn } from "@/shared"
 
 /** Minimal env view — same record shape the assembler threads everywhere. */

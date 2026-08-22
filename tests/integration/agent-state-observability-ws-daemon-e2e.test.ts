@@ -40,7 +40,7 @@
 
 import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test"
 import { createApprovalStateMachine } from "@/agent/approval-state-machine"
-import { createObjectiveStore } from "@/agent/objective"
+import { createObjectiveStore } from "@/objective"
 import { createRunLedger } from "@/agent/run-ledger"
 import { createAgentStateSource } from "@/apps/web-daemon/agent-state-source"
 import {

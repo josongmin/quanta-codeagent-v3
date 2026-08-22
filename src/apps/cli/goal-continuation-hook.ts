@@ -1,13 +1,13 @@
 /**
  * Goal-continuation ticker — the LIVE host binding that activates the
- * previously-DEAD `@/agent/objective` continuation machine (H17, absorbed from
+ * previously-DEAD `@/objective` continuation machine (H17, absorbed from
  * Codex `core/src/goals.rs`).
  *
  * Codex's "Pursuing goal" behaviour: once an `active` goal is set, the agent
  * keeps resuming work on it turn after turn — whenever the thread goes idle and
  * no other work is pending — until the goal is `completed`, `blocked`, or a
  * budget/usage limit trips. The pure decision + semaphore already live in
- * `@/agent/objective` (`runIdleContinuation`); they were just never driven by a
+ * `@/objective` (`runIdleContinuation`); they were just never driven by a
  * real clock. This module is that driver: a `setInterval` idle-poll that calls
  * `runIdleContinuation` with host-bound probes and a `resume` sink.
  *
@@ -16,7 +16,7 @@
  * is armed, so a session that has not opted into `QUANTA_GOAL_ENFORCE` behaves
  * exactly as before.
  *
- * SLICE FENCE: imports ONLY the closed `@/agent/objective` barrel
+ * SLICE FENCE: imports ONLY the closed `@/objective` barrel
  * (`runIdleContinuation`, `ContinuationSemaphore`, and the `ContinuationDeps`
  * probe/`resume` shape). No `@/agent` core, no reactor internals.
  */
@@ -25,7 +25,7 @@ import {
   type ContinuationDeps,
   ContinuationSemaphore,
   runIdleContinuation,
-} from "@/agent/objective"
+} from "@/objective"
 
 /** The host-bound probes + resume sink (everything in `ContinuationDeps` except
  *  the pieces this driver owns: `enabled`, `semaphore`, `now`). */

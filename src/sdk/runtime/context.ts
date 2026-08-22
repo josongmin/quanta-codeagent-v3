@@ -1,5 +1,5 @@
 import type { AgentConfig } from "@/agent"
-import type { ObjectivePort } from "@/agent/objective"
+import type { ObjectivePort } from "@/objective"
 import type { SessionBootstrapResult } from "@/host/bootstrap"
 import {
   createRuntimeContextBindingFromAgentConfigBase,

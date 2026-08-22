@@ -89,6 +89,8 @@
       "@/ipc/*": ["./src/ipc/*"],
       "@/git": ["./src/git/index.ts"],
       "@/git/*": ["./src/git/*"],
+      "@/objective": ["./src/objective/index.ts"],
+      "@/objective/*": ["./src/objective/*"],
       "@/reactor": ["./src/reactor/index.ts"],
       "@/reactor/*": ["./src/reactor/*"],
       "@/integrations/github": ["./src/integrations/github/index.ts"],

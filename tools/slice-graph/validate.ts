@@ -120,6 +120,7 @@ export const SLICE_RULES: ReadonlyArray<ForbiddenEdge> = [
       "rules",
       "security",
       "observability",
+      "objective",
     ] as const
   ).map((from) => ({
     from,

@@ -65,16 +65,16 @@ purpose: |
   false after a single boolean read (no port call) ⇒ the idle-continuation
   re-issues exactly as ADR-0394. Proven by the OFF arm of both hellgates.
 
-  Slice fence: `src/agent/objective/**` (store + types — the enforce option +
+  Slice fence: `src/objective/**` (store + types — the enforce option +
   derive), `src/agent/loop.ts` (additive gate at the two existing continuation
   sites only — loop NOT restructured), `src/shared/runtime-config.ts`
   (additive knob), `src/tool/objective/` (additive render + STATUS_ENUM drift
   guard membership). No `@/mcp` / `@/llm` / `@/session` / `@/scheduler`.
 evidence:
   code:
-    - src/agent/objective/store.ts
-    - src/agent/objective/types.ts
-    - src/agent/objective/continuation.ts
+    - src/objective/store.ts
+    - src/objective/types.ts
+    - src/objective/continuation.ts
     - src/agent/loop.ts
     - src/shared/runtime-config.ts
     - src/tool/objective/index.ts
@@ -99,7 +99,7 @@ knobs:
       the loop stops re-issuing its continuation (a budget-exhausted goal does
       not auto-resume).
   - name: enforceBudget
-    where: src/agent/objective/store.ts
+    where: src/objective/store.ts
     default: 'false'
     purpose: |
       Construction-time store option (the SSOT for whether the store enforces).
@@ -125,7 +125,7 @@ notes: |
   compaction/PTL-recovery sites. That path does NOT touch the continuation
   machine.
 
-  `src/agent/objective/continuation.ts` (`evaluateContinuation` /
+  `src/objective/continuation.ts` (`evaluateContinuation` /
   `runIdleContinuation` / `ContinuationSemaphore`) is the PURE idle
   goal-continuation machine (Codex `core/src/goals.rs` parity). It was DEAD at
   the time this budget entry landed, but was LIVE-WIRED on jul-13 — see the

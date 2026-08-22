@@ -37,7 +37,7 @@
  *     gate-off legs.
  */
 import { describe, expect, test } from "bun:test"
-import { createObjectiveStore, type ObjectivePort } from "@/agent/objective"
+import { createObjectiveStore, type ObjectivePort } from "@/objective"
 import { type AssemblerEnv, assembleAgentConfig } from "@/host/runtime/agent-config-assembler"
 import { createRuntimeContextBindingFromAgentConfigBase } from "@/host/runtime/internal/context-binding"
 import { buildSnapshot } from "@/host/runtime/internal/context-binding/base"

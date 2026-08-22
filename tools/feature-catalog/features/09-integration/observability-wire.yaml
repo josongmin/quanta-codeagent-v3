@@ -52,7 +52,7 @@ purpose: |
   instances allocated. ZERO hook subscriptions. Composition root reads
   `process.env.QUANTA_OBSERVABILITY === "on"` to flip the gate.
 
-  Slice fence: imports only `@/agent/objective`, `@/agent/run-ledger`,
+  Slice fence: imports only `@/objective`, `@/agent/run-ledger`,
   `@/agent/run-ledger-attribution`, `@/agent/approval-state-machine`,
   `@/agent/shadow-verify`, `@/agent/shadow-verify-adapters`. NEVER touches
   `@/agent/loop`, `@/agent/dispatch`, `@/agent/prompt`, or `@/agent/hooks`.

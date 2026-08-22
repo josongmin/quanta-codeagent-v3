@@ -26,8 +26,8 @@
  * is a pure function of the current cell — no sticky flag).
  */
 import { describe, expect, test } from "bun:test"
-import type { ObjectivePort } from "@/agent/objective"
-import { createObjectiveStore } from "@/agent/objective"
+import type { ObjectivePort } from "@/objective"
+import { createObjectiveStore } from "@/objective"
 
 const TID = "thread-budget"
 

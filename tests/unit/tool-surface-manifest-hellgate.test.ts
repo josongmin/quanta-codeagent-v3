@@ -14,7 +14,7 @@
 import { describe, expect, test } from "bun:test"
 import { execSync } from "node:child_process"
 import { join } from "node:path"
-import { createObjectiveStore } from "@/agent/objective"
+import { createObjectiveStore } from "@/objective"
 import { createSubagentMailbox } from "@/agent/subagent-mailbox"
 import { buildEnterPlanBlock, buildPlanExitBlock } from "@/agent/tier1"
 import { createIntrospectTools, createSubagent6Tools, TaskRegistry } from "@/subagent"

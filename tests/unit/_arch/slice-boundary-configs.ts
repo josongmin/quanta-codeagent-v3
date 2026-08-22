@@ -21,6 +21,7 @@ const PEER_LIBRARY_DENY = [
   "@/permission",
   "@/lsp",
   "@/stream",
+  "@/objective",
 ] as const
 
 /** Layer-2 (composition / surface) slices. NO Layer-0/1 library or leaf slice
@@ -104,6 +105,7 @@ export const SLICE_BOUNDARY_CONFIGS: Record<string, SliceBoundaryConfig> = {
       "@/lsp",
       "@/stream",
       "@/llm",
+      "@/objective",
     ],
     // Documented carve-outs:
     //  • coverage_check tool consumes the @/observability/coverage sub-barrel
@@ -171,6 +173,7 @@ export const SLICE_BOUNDARY_CONFIGS: Record<string, SliceBoundaryConfig> = {
       "@/lsp",
       "@/stream",
       "@/storage",
+      "@/objective",
     ],
     stdioAllowFiles: ["json-state-file.ts"],
     requireSliceBarrel: true,
@@ -199,6 +202,7 @@ export const SLICE_BOUNDARY_CONFIGS: Record<string, SliceBoundaryConfig> = {
       "@/lsp",
       "@/stream",
       "@/memory",
+      "@/objective",
     ],
     requireSliceBarrel: true,
   },
@@ -223,6 +227,7 @@ export const SLICE_BOUNDARY_CONFIGS: Record<string, SliceBoundaryConfig> = {
       // composition root precisely because this import is forbidden — keep the two
       // SSOTs (biome + this arch test) in lockstep so the fence can't silently drift.
       "@/runtime",
+      "@/objective",
     ],
     // `exec-command.ts` spreads the parent `process.env` INTO the spawned bash
     // child (`{ ...process.env, ...input.env }`) so PATH/HOME resolve for the
@@ -248,6 +253,7 @@ export const SLICE_BOUNDARY_CONFIGS: Record<string, SliceBoundaryConfig> = {
       "@/permission",
       "@/lsp",
       "@/stream",
+      "@/objective",
     ],
     consoleAllowFiles: ["discover.ts"],
     requireSliceBarrel: true,
@@ -285,6 +291,7 @@ export const SLICE_BOUNDARY_CONFIGS: Record<string, SliceBoundaryConfig> = {
       "@/permission",
       "@/lsp",
       "@/stream",
+      "@/objective",
     ],
     envAllowFiles: ["client.ts", "isolated-client.ts", "stdio.ts"],
     requireSliceBarrel: true,
@@ -426,6 +433,24 @@ export const SLICE_BOUNDARY_CONFIGS: Record<string, SliceBoundaryConfig> = {
   // whole up-import class escape CI.)
   git: {
     slice: "git",
+    denyImports: [...PEER_LIBRARY_DENY, ...LAYER2_DENY],
+    requireSliceBarrel: true,
+  },
+  // `@/objective` (RFC-03 C0) is a pure LEAF DOMAIN: the ADR-0394 per-thread
+  // Objective model/store + continuation machine + pursuit prompt + usage-limit
+  // wire, atomically promoted out of its former agent-nested home. Its ONLY runtime deps
+  // are `@/shared` (logger) + `node:crypto`. Full peer + Layer-2 deny locks it as
+  // a leaf: no value import from agent/tool/session/permission/runner/host/
+  // protocol/apps — effects flow through injected ports (the agent BRIDGE layer
+  // composes the port; `@/objective` never reaches back up). `@/objective` is
+  // itself in PEER_LIBRARY_DENY (so every lower slice denies importing it — the
+  // self-prefix filter drops it from this slice's own list) and is added to the
+  // explicit deny lists of the hand-written peer slices (tool/session/subagent/
+  // skill/mcp/permission) so a future VALUE import of `@/objective` from any of
+  // them fires (the tool slice's existing `import type` stays allowed — the AST
+  // scanner skips type-only imports).
+  objective: {
+    slice: "objective",
     denyImports: [...PEER_LIBRARY_DENY, ...LAYER2_DENY],
     requireSliceBarrel: true,
   },

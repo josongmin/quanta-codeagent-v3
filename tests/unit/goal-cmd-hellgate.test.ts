@@ -27,7 +27,7 @@
  */
 
 import { describe, expect, test } from "bun:test"
-import { createObjectiveStore, type ObjectivePort } from "@/agent/objective"
+import { createObjectiveStore, type ObjectivePort } from "@/objective"
 import { goalCmd } from "@/apps/cli/slash/goal-cmd"
 import type { SlashContext } from "@/apps/cli/slash-contract"
 

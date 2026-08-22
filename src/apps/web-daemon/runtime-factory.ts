@@ -18,7 +18,7 @@ import {
   createConversationActionSurface,
 } from "@/agent/conversation-action-surface"
 import { type InboundMode, parseInboundMode } from "@/agent/inbound-mode"
-import type { ObjectivePort } from "@/agent/objective"
+import type { ObjectivePort } from "@/objective"
 import {
   type ObservabilityHookBus,
   type ObservabilityWireHandle,

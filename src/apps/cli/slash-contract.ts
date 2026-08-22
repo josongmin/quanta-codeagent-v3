@@ -303,7 +303,7 @@ export interface SlashContext {
    *  posture + exit 0 (default-OFF byte-identical). */
   readonly goal?:
     | {
-        readonly port: import("@/agent/objective").ObjectivePort
+        readonly port: import("@/objective").ObjectivePort
         readonly threadId: string
       }
     | undefined

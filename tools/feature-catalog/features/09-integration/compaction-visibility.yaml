@@ -47,7 +47,7 @@ purpose: |
 
   Slice fence: recovery-reason은 leaf (zero deps); microcompact은
   recovery-reason TYPES만 import (no @/llm, no @/agent/loop/dispatch/compaction);
-  compaction.ts는 recovery-reason TYPES만 추가 import (no @/agent/objective —
+  compaction.ts는 recovery-reason TYPES만 추가 import (no @/objective —
   full ObjectivePort 대신 callback closure로 coupling 최소화).
   Default-OFF: command hooks가 명시적으로 enabled·risk-acknowledged되고
   PostCompact binding이 있을 때만 CLI composition이 HookBus를 주입한다.

@@ -29,8 +29,8 @@ import type {
   ApprovalStateMachinePort,
 } from "@/agent/approval-state-machine"
 import { createApprovalStateMachine } from "@/agent/approval-state-machine"
-import type { ObjectivePort } from "@/agent/objective"
-import { createObjectiveStore } from "@/agent/objective"
+import type { ObjectivePort } from "@/objective"
+import { createObjectiveStore } from "@/objective"
 import type { RunLedgerPort } from "@/agent/run-ledger"
 import { createRunLedger } from "@/agent/run-ledger"
 import { createRunLedgerHookSubscriber } from "@/agent/run-ledger-attribution"

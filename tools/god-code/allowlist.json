@@ -8,7 +8,7 @@
     "src/agent/budget-ledger.ts::defaultBudgetLedger",
     "src/agent/loop/session-bootstrap.ts::createRunAgentContext",
     "src/agent/memory-tools.ts::memoryTools",
-    "src/agent/objective/store.ts::createObjectiveStore",
+    "src/objective/store.ts::createObjectiveStore",
     "src/agent/plan/snapshot.ts::fromSnapshot",
     "src/agent/session-resource-registry/disk-adapter/disk-store.ts::createDiskSessionResourceRegistry",
     "src/agent/stream-callbacks.ts::createStreamDispatcher",

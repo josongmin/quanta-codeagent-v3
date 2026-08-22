@@ -10,14 +10,14 @@
  *                                removals)
  *
  * Slice fence (load-bearing): this module imports TYPES ONLY from the three
- * existing closed ports (`@/agent/run-ledger`, `@/agent/objective`,
+ * existing closed ports (`@/agent/run-ledger`, `@/objective`,
  * `@/agent/approval-state-machine`). No runtime cross-slice — the types are
  * structural mirrors and the emitter / decoder produce / consume them via
  * the wire envelope. Importing this module touches no process state.
  */
 
 import type { ApprovalRequest } from "@/agent/approval-state-machine"
-import type { Objective } from "@/agent/objective"
+import type { Objective } from "@/objective"
 import type { RunEntry } from "@/agent/run-ledger"
 
 /** Full state push. Sent on first wiring + on reconnect / re-attach so a

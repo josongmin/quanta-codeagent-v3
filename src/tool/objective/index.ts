@@ -20,13 +20,13 @@
  *  caught at the zod `safeParse` boundary so an unknown op / bad enum / missing
  *  thread_id can never reach the port.
  *
- *  SLICE FENCE: imports `@/agent/objective` (the closed ADR-0394 substrate)
+ *  SLICE FENCE: imports `@/objective` (the closed ADR-0394 substrate)
  *  for typed `ObjectivePort` + `Objective` + `WaitingOn` + `ObjectiveStatus`,
  *  plus `../types` (Tool / ToolContext / ToolEvent / ToolResult) and `zod`.
  *  Nothing from `@/agent` core. */
 
 import { z } from "zod"
-import type { Objective, ObjectivePort, ObjectiveStatus, WaitingOn } from "@/agent/objective"
+import type { Objective, ObjectivePort, ObjectiveStatus, WaitingOn } from "@/objective"
 import { errMessage } from "@/shared"
 import type { Tool, ToolContext, ToolEvent, ToolResult } from "../types"
 

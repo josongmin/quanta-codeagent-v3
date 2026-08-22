@@ -14,7 +14,7 @@
 
 import { describe, expect, test } from "bun:test"
 import { createApprovalStateMachine } from "@/agent/approval-state-machine"
-import { createObjectiveStore } from "@/agent/objective"
+import { createObjectiveStore } from "@/objective"
 import type { RunEntry } from "@/agent/run-ledger"
 import { createRunLedger } from "@/agent/run-ledger"
 import { createObservabilityEmitter } from "@/apps/web-daemon/observability-emitter"

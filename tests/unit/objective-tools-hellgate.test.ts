@@ -24,7 +24,7 @@
 
 import { describe, expect, test } from "bun:test"
 import { buildSessionFeatures } from "@/agent/features"
-import { createObjectiveStore, type ObjectivePort } from "@/agent/objective"
+import { createObjectiveStore, type ObjectivePort } from "@/objective"
 import { buildObjectiveBlock } from "@/agent/tier1"
 import type { AgentConfig, FeaturesConfig } from "@/agent/types"
 import type { LLMPort } from "@/llm"

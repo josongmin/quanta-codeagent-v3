@@ -15,13 +15,13 @@
  *      no-op (single resume).
  */
 import { describe, expect, test } from "bun:test"
-import type { ObjectivePort } from "@/agent/objective"
-import { createObjectiveStore } from "@/agent/objective"
+import type { ObjectivePort } from "@/objective"
+import { createObjectiveStore } from "@/objective"
 import {
   type ContinuationDeps,
   ContinuationSemaphore,
   runIdleContinuation,
-} from "@/agent/objective/continuation"
+} from "@/objective/continuation"
 
 const TID = "thread-e2e"
 

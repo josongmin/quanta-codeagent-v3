@@ -3,7 +3,7 @@
  *
  * Sole import path for the observability WS protocol types + codec helpers.
  * Slice fence: this module re-exports from `./messages`, which itself imports
- * TYPES ONLY from `@/agent/run-ledger`, `@/agent/objective`, and
+ * TYPES ONLY from `@/agent/run-ledger`, `@/objective`, and
  * `@/agent/approval-state-machine` — no runtime cross-slice.
  */
 

@@ -35,7 +35,7 @@ purpose: |
   (`createApprovalStateMachine`). NOT yet wired into `admissibility-gate.ts`
   or `request_user_input` (existing HITL code is UNCHANGED). Pure new slice
   `src/agent/approval-state-machine/` — only `node:crypto` for randomUUID
-  + types-only imports from `@/agent/objective` + `@/agent/run-ledger`.
+  + types-only imports from `@/objective` + `@/agent/run-ledger`.
 
   Status transitions pinned: request ⇒ pending; settle(approve|modify) ⇒
   approved (idempotent on already-settled, settledAt not re-bumped on no-op);
@@ -130,7 +130,7 @@ deliberate_hold:
     to have a real consumer (the logger floor always fires).
 notes: |
   Slice fence verified: imports = `node:crypto` (randomUUID) + types-only from
-  `@/agent/objective` + `@/agent/run-ledger`. NO `@/agent` core, NO `@/apps`,
+  `@/objective` + `@/agent/run-ledger`. NO `@/agent` core, NO `@/apps`,
   NO `@/tool`. The store is sibling-shaped to ObjectiveStore (ADR-0394) and
   RunLedger (ADR-0395) — frozen returns, NO-THROW, injected clock — so the
   three slices compose with a uniform discipline. 44 hellgate cases / 110

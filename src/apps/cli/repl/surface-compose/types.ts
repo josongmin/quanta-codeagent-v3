@@ -1,6 +1,6 @@
 import type { ConversationCheckpointStore } from "@/agent/conversation-checkpoint"
 import type { InboundMode } from "@/agent/inbound-mode"
-import type { ObjectivePort } from "@/agent/objective"
+import type { ObjectivePort } from "@/objective"
 import type { PlanQueueStore, SendNowInjection } from "@/agent/plan-queue"
 import type { Message } from "@/llm"
 import type {

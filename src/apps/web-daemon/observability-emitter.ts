@@ -20,14 +20,14 @@
  *     `log` seam) and keeps the previous captured state for that port.
  *
  * Slice fence: imports allowed are the three closed port TYPES from
- * `@/agent/run-ledger`, `@/agent/objective`, `@/agent/approval-state-machine`
+ * `@/agent/run-ledger`, `@/objective`, `@/agent/approval-state-machine`
  * (types only — these ports own their own runtime stores), the protocol
  * codec from `@/protocol/observability`, and node-built-ins. NO `@/agent/loop`,
  * `@/agent/dispatch`, `@/apps/agent` runtime imports.
  */
 
 import type { ApprovalRequest, ApprovalStateMachinePort } from "@/agent/approval-state-machine"
-import type { Objective, ObjectivePort } from "@/agent/objective"
+import type { Objective, ObjectivePort } from "@/objective"
 import type { RunEntry, RunLedgerPort } from "@/agent/run-ledger"
 // Generic id-keyed-map structural-delta reconciler — the diff PROTOCOL lives in
 // core so this push surface only shapes store reads + forwards the computed

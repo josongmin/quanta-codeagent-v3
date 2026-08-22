@@ -3,7 +3,7 @@
  *
  * Wave-1 + Wave-2 shipped four pure, default-OFF observability ports:
  *
- *   • `@/agent/objective`              — ADR-0394 per-thread Objective store
+ *   • `@/objective`              — ADR-0394 per-thread Objective store
  *   • `@/agent/run-ledger`             — ADR-0395 in-memory RunLedger store
  *   • `@/agent/approval-state-machine` — ADR-0403 HITL state machine
  *   • `@/agent/shadow-verify`          — ADR-0396/0400 verifier (+ real adapters
@@ -38,7 +38,7 @@
  * helper itself is env-free (the env touchpoint lives at the composition
  * root, never inside the slice).
  *
- * Slice fence: imports allowed from `@/agent/objective`,
+ * Slice fence: imports allowed from `@/objective`,
  * `@/agent/run-ledger`, `@/agent/run-ledger-attribution`,
  * `@/agent/approval-state-machine`, `@/agent/shadow-verify`, and
  * `@/agent/shadow-verify-adapters`. NEVER imports `@/agent/loop`,
@@ -51,7 +51,7 @@ import type {
   ApprovalAttributionGap,
   ApprovalStateMachinePort,
 } from "@/agent/approval-state-machine"
-import type { ObjectivePort } from "@/agent/objective"
+import type { ObjectivePort } from "@/objective"
 import type { RunLedgerPort } from "@/agent/run-ledger"
 import type { ShadowVerifyPort } from "@/agent/shadow-verify"
 
