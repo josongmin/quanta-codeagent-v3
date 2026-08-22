@@ -1,5 +1,4 @@
 import * as readline from "node:readline/promises"
-import { createActivityStore } from "@/activity"
 import { RetryingLLM } from "@/agent"
 import { defaultConversationCheckpointStore } from "@/agent/conversation-checkpoint"
 import {
@@ -10,11 +9,13 @@ import {
 import { defaultResponsesContinuationStore } from "@/llm"
 import { buildShellOtelObserver } from "@/observability"
 import { getDefaultPermissionStore, type PermissionStore } from "@/permission"
+import { buildSessionAuthorities } from "@/runner/assemble/session-authorities"
 import { bootstrapCrashResumeOffers, selectCrashResumeReinject } from "@/runner/orchestrate"
 import { runSessionCommand as runSessionCommandInner } from "@/runner/session-ops"
 import { clearSessionInterrupted, crashResumeEnabled, listSessions } from "@/session"
 import { gateOn, runtimeConfig } from "@/shared"
 import { composeShellObservers, type ShellExecObserver } from "@/tool"
+import { readCliKnob } from "./cli-knobs-accessor"
 import { emitConfigMigrationImport, emitConfigMigrationNotice } from "./config-migration-notice"
 import { createIdleMonitor, DEFAULT_IDLE_MS } from "./idle-monitor"
 import { loadImageBlock } from "./image-loader"
@@ -137,6 +138,13 @@ export const runSessionMain = async (): Promise<number> => {
   // The runner accepts `listEnv: undefined` (treats it as omitted), so the
   // `exactOptionalPropertyTypes: true` spread is safe.
   const listEnv = resolveCliSessionListEnv()
+  // RFC-04 D4 — one session `ActivityStore` from the authority builder (DI; no
+  // command-local `createActivityStore()`), and the live-progress gate resolved
+  // ONCE at this composition root through the designated CLI knob accessor
+  // (`QUANTA_WORKTREE_PROGRESS`, default OFF). Gate off ⇒ the `worktree` command
+  // is byte-identical (single final render, no staged children).
+  const authorities = buildSessionAuthorities({ env: process.env })
+  const worktreeProgress = readCliKnob("QUANTA_WORKTREE_PROGRESS", "bool") ?? false
   const code = await runSessionCommandInner(process.argv.slice(3), {
     out: (s) => process.stdout.write(s),
     err: (s) => process.stderr.write(s),
@@ -149,10 +157,9 @@ export const runSessionMain = async (): Promise<number> => {
     // by default; the runner slice never reads `process.cwd()` itself.
     cwd: process.cwd(),
     // RFC02-5 / RFC06-2 — the `worktree` subcommand emits its correlated
-    // running→done|failed transition onto this live spine, then renders it. A
-    // fresh store per invocation (the CLI seam is the composition root; no
-    // ambient/global activity state).
-    activityStore: createActivityStore(),
+    // running→done|failed transition onto this session spine, then renders it.
+    activityStore: authorities.activity,
+    worktreeProgress,
     ...(listEnv !== undefined ? { listEnv } : {}),
   })
   rl.close()

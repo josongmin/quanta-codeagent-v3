@@ -92,7 +92,7 @@ describe("RFC-01 A2 — session-authorities question/attention join", () => {
     questions.cancelAll("teardown")
   })
 
-  test("2. DEFAULT-OFF: gate unset ⇒ byte-identical baseline graph (no question/attention authority)", () => {
+  test("2. DEFAULT-OFF: gate unset ⇒ baseline graph (no question/attention authority; store always present)", () => {
     const tasks = new TaskRegistry()
     const off: SessionAuthorities = buildSessionAuthorities({ tasks, env: {} })
 
@@ -101,9 +101,11 @@ describe("RFC-01 A2 — session-authorities question/attention join", () => {
     // No attention/question authority is constructed on the OFF path.
     expect(off.questions).toBeUndefined()
     expect(off.attention).toBeUndefined()
-    // Byte-identical to a hand-built baseline that has no attention concept.
-    expect(Object.keys(off).sort()).toEqual(["tasks"])
-    expect(off).toEqual({ tasks })
+    // RFC-04 D4 — the ONE session activity store is ALWAYS present (not gated),
+    // so the OFF-path graph carries exactly {activity, tasks} and nothing else.
+    expect(off.activity).toBeDefined()
+    expect(Object.keys(off).sort()).toEqual(["activity", "tasks"])
+    expect(off).toEqual({ activity: off.activity, tasks })
   })
 
   test("3. LINEAGE GATE: a foreign-lineage awaiting task is never selected", () => {

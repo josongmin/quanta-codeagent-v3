@@ -21,8 +21,9 @@
  */
 
 import {
-  createActivityStore,
+  emptyActivityState,
   fleetToActivity,
+  materialize,
   pumpFleetRowsToItemStream,
   renderActivity,
   seedStoreFromSnapshot,
@@ -293,10 +294,15 @@ const activityCmd: SlashCommand = {
     // current in-process subagent fleet. Pulling the fleet into the shared
     // store would leak LRU-evicted subagents forever; seeding a fresh view each
     // call keeps the durable store pristine and the fleet current.
-    const view =
-      ctx.activityStore !== undefined
-        ? seedStoreFromSnapshot(ctx.activityStore.snapshot())
-        : createActivityStore()
+    //
+    // RFC-04 D4 — the view store is ALWAYS minted by the `@/activity` library
+    // helper (`seedStoreFromSnapshot`), NEVER a slash-local `createActivityStore()`
+    // (§D4 stop: slash code must not own reusable activity state). When no session
+    // store is wired the seed is an empty snapshot, so the fleet overlay below
+    // still has a transient view without a command-local constructor.
+    const view = seedStoreFromSnapshot(
+      ctx.activityStore?.snapshot() ?? materialize(emptyActivityState()),
+    )
     if (ctx.agents !== undefined) {
       const rows = ctx.agents()
       view.emitAll(fleetToActivity(rows))

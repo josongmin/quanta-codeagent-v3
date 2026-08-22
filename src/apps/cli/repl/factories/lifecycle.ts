@@ -1,4 +1,4 @@
-import { type ActivityStore, createActivityStore } from "@/activity"
+import type { ActivityStore } from "@/activity"
 import { FollowUpQueue } from "@/agent/follow-up-queue"
 import {
   type AttentionReader,
@@ -69,19 +69,23 @@ export const buildLifecycleBundle = (
     hideFollowUp: pillsCfg.hideFollowUp,
     hideMcp: pillsCfg.hideMcp,
   })
-  // RFC-01 A4 — mint the pending-question authority alongside the registry it
-  // navigates. `buildSessionAuthorities` gates on `QUANTA_ATTENTION_NAV`: off ⇒
-  // it returns `{ tasks }` only, so `questions`/`attention` stay undefined and
-  // the whole feature (config wire + `/attention` slot) is absent (byte-identical).
-  const authorities =
-    taskRegistry !== undefined ? buildSessionAuthorities({ tasks: taskRegistry, env }) : undefined
+  // RFC-04 D4 — assemble the session authority graph ONCE: it mints THE one
+  // session `ActivityStore` (consumed below via DI — no command/surface-local
+  // `createActivityStore()`), and, under `QUANTA_ATTENTION_NAV` AND when a
+  // `TaskRegistry` exists, the pending-question + attention authority. Gate/reg
+  // absent ⇒ `questions`/`attention` stay undefined so the attention feature
+  // (config wire + `/attention` slot) is byte-identical.
+  const authorities = buildSessionAuthorities({
+    ...(taskRegistry !== undefined ? { tasks: taskRegistry } : {}),
+    env,
+  })
   return {
     pills,
     taskRegistry,
     followUpQueue,
-    activityStore: createActivityStore(),
-    ...(authorities?.questions !== undefined ? { questionBroker: authorities.questions } : {}),
-    ...(authorities?.attention !== undefined ? { attentionReader: authorities.attention } : {}),
+    activityStore: authorities.activity,
+    ...(authorities.questions !== undefined ? { questionBroker: authorities.questions } : {}),
+    ...(authorities.attention !== undefined ? { attentionReader: authorities.attention } : {}),
   }
 }
 

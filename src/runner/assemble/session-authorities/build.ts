@@ -21,15 +21,12 @@
  * itself never imports `@/subagent`.
  */
 
-import { nextNeedingAttention, type AttentionAgent } from "@/attention"
+import { type ActivityStore, createActivityStore } from "@/activity"
+import { type AttentionAgent, nextNeedingAttention } from "@/attention"
 import { createUserQuestionBroker, type UserQuestionBroker } from "@/session/user-question"
 import { gateOn } from "@/shared"
 import type { TaskRegistry } from "@/subagent"
-import type {
-  AttentionReader,
-  BuildSessionAuthoritiesInput,
-  SessionAuthorities,
-} from "./types"
+import type { AttentionReader, BuildSessionAuthoritiesInput, SessionAuthorities } from "./types"
 
 /** A2's own default-OFF gate. Deliberately independent of the panel gate
  *  (`QUANTA_WEB_SUBAGENTS`): the attention authority must not leak just because
@@ -92,17 +89,24 @@ const createAttentionReader = (
 })
 
 /**
- * Construct the per-session authority graph. Default-OFF ⇒ `{ tasks }` only.
+ * Construct the per-session authority graph. The ONE session `ActivityStore` is
+ * ALWAYS minted here (RFC-04 D4 — the single production owner; surfaces observe
+ * it via DI, never a command/surface-local `createActivityStore()`). The
+ * question/attention arms are added only when the `QUANTA_ATTENTION_NAV` gate is
+ * ON AND a `tasks` registry exists; otherwise the graph is byte-identical to the
+ * pre-attention baseline for those arms (`{ activity, tasks? }`).
  */
 export const buildSessionAuthorities = (
   input: BuildSessionAuthoritiesInput,
 ): SessionAuthorities => {
   const { tasks, env } = input
-  if (!gateOn(env, ATTENTION_GATE)) {
-    // Byte-identical baseline: no question/attention authority is constructed.
-    return { tasks }
+  const activity: ActivityStore = input.activity ?? createActivityStore()
+  if (tasks === undefined || !gateOn(env, ATTENTION_GATE)) {
+    // Attention baseline: no question/attention authority is constructed. The
+    // store is always present; the task registry rides along when supplied.
+    return { activity, ...(tasks !== undefined ? { tasks } : {}) }
   }
   const questions = input.questions ?? createUserQuestionBroker(input.questionDeps)
   const attention = createAttentionReader(tasks, questions)
-  return { tasks, questions, attention }
+  return { activity, tasks, questions, attention }
 }

@@ -1,4 +1,4 @@
-import { type ActivityStore, renderActivity } from "@/activity"
+import type { ActivityStore } from "@/activity"
 import type { Message } from "@/llm"
 import {
   createPersistentWorktree,
@@ -26,13 +26,13 @@ import {
   type WorkspaceOwnership,
 } from "@/session"
 import { errMessage } from "@/shared"
-import { type TransitionActivity, transitionThreadToWorktree } from "./current-thread-worktree"
 import {
   applyListPipeline,
   buildSessionListEntries,
   renderSessionList,
   type SessionListOptions,
 } from "./list-tui"
+import { renderActivityTo, runWorktreeTransitionWithProgress } from "./worktree/live-progress"
 import {
   applyWorktreeGc,
   collectOwnedWorktrees,
@@ -105,6 +105,13 @@ export interface SessionCommandDeps {
    *  activity (byte-identical to the pre-RFC02-5 path) but the subcommand still
    *  functions; when present the surface renders the resulting activity state. */
   activityStore?: ActivityStore
+  /** RFC-04 D4 — live staged worktree progress. Resolved ONCE at the composition
+   *  root from `QUANTA_WORKTREE_PROGRESS` (default OFF) and threaded in (the
+   *  runner slice never reads env). When `true` AND a store is wired, the
+   *  `worktree` command emits staged `workspace`/`checkout` children AND
+   *  subscribes BEFORE the transition so each stage renders PRE-completion.
+   *  Absent/false ⇒ byte-identical single coarse node + single final render. */
+  worktreeProgress?: boolean
 }
 
 /** Render a single message's content as a single line of joined text. */
@@ -866,12 +873,16 @@ const cmdWorktree = async (args: string[], deps: SessionCommandDeps): Promise<nu
     baseSha: saved.meta.gitSha ?? "HEAD",
     ...(branch !== undefined ? { branch } : {}),
   }
-  // The activity sink is OPTIONAL: when the surface wired a store, the
-  // transition emits the correlated running→done|failed node onto it (and we
-  // render the resulting state below). Absent ⇒ byte-identical, no activity.
-  const activity: TransitionActivity | undefined =
-    deps.activityStore !== undefined ? { store: deps.activityStore, turnId: id } : undefined
-  const result = await transitionThreadToWorktree(req, () => Date.now(), activity)
+  // RFC02-5 / RFC-04 D4 — the activity sink is OPTIONAL (absent ⇒ byte-identical,
+  // no activity). When a store is wired AND the composition root resolved the
+  // `QUANTA_WORKTREE_PROGRESS` gate, `runWorktreeTransitionWithProgress` turns on
+  // the transaction's staged children AND subscribes BEFORE invoking it, so each
+  // stage renders PRE-completion; gate-OFF ⇒ single coarse node, no live render.
+  const result = await runWorktreeTransitionWithProgress(req, deps.out, {
+    ...(deps.activityStore !== undefined ? { store: deps.activityStore } : {}),
+    progress: deps.worktreeProgress === true,
+    turnId: id,
+  })
   switch (result.kind) {
     case "ready":
       deps.out(`worktree ready: ${result.nextCwd} (branch ${result.ownership.branch})\n`)
@@ -890,11 +901,10 @@ const cmdWorktree = async (args: string[], deps: SessionCommandDeps): Promise<nu
       break
   }
   // RFC02-5 — surface the correlated activity state so the transition is
-  // observable (only when a store was wired; otherwise byte-identical).
+  // observable (only when a store was wired; otherwise byte-identical). Under D4
+  // live progress this is the FINAL settled receipt after the live stage renders.
   if (deps.activityStore !== undefined) {
-    for (const line of renderActivity(deps.activityStore.snapshot(), { now: Date.now() })) {
-      deps.out(`${line}\n`)
-    }
+    renderActivityTo(deps.activityStore.snapshot(), deps.out)
   }
   return result.kind === "ready" ? 0 : 1
 }

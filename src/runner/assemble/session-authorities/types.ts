@@ -10,6 +10,7 @@
  * arms it needs, keeping the OFF-path graph byte-identical to `{ tasks }`.
  */
 
+import type { ActivityStore } from "@/activity"
 import type { AttentionAgent } from "@/attention"
 import type { UserQuestionBroker, UserQuestionBrokerDeps } from "@/session/user-question"
 import type { TaskRegistry } from "@/subagent"
@@ -38,30 +39,43 @@ export interface AttentionReader {
 }
 
 /**
- * The per-session authority graph. A2 carries the shared task registry plus the
- * OPTIONAL question/attention authority — both present only under the
- * `QUANTA_ATTENTION_NAV` gate, both ABSENT (undefined) on the default-OFF path so
- * the constructed graph is byte-identical to the pre-attention baseline.
+ * The per-session authority graph. Carries the ONE session `ActivityStore`
+ * (RFC-04 D4 — always minted here, the single production owner all surfaces
+ * observe via DI), plus the OPTIONAL shared task registry and the OPTIONAL
+ * question/attention authority. The attention arms are present only under the
+ * `QUANTA_ATTENTION_NAV` gate AND when a `tasks` registry exists; both ABSENT
+ * (undefined) on the default-OFF path so the attention feature stays byte-
+ * identical to the pre-attention baseline. `activity` is NOT gated — every
+ * session has exactly one store.
  */
 export interface SessionAuthorities {
-  /** The ONE shared task registry the graph carries — injected, never re-minted
-   *  here (no parallel/duplicate authority). */
-  readonly tasks: TaskRegistry
-  /** The pending-question authority; present only when the gate is ON. */
+  /** RFC-04 D4 — the ONE session activity store, minted by the authority builder
+   *  and threaded to every surface (CLI/stdio/terminal) so all consumers observe
+   *  the SAME instance (no command/surface-local `createActivityStore()`). */
+  readonly activity: ActivityStore
+  /** The shared task registry the graph carries — injected, never re-minted here
+   *  (no parallel/duplicate authority). Absent when the surface has no subagent
+   *  fleet (one-shot session commands, served/offline sessions). */
+  readonly tasks?: TaskRegistry
+  /** The pending-question authority; present only when the gate is ON + tasks. */
   readonly questions?: UserQuestionBroker
-  /** The live fleet-attention reader; present only when the gate is ON. */
+  /** The live fleet-attention reader; present only when the gate is ON + tasks. */
   readonly attention?: AttentionReader
 }
 
 /** Input to {@link buildSessionAuthorities}. */
 export interface BuildSessionAuthoritiesInput {
-  /** The one shared task registry the graph wraps. A2 does NOT mint a parallel
-   *  registry; the caller/composition owns construction. */
-  readonly tasks: TaskRegistry
+  /** The shared task registry the graph wraps. The caller/composition owns
+   *  construction; the builder never mints a parallel registry. Absent for a
+   *  surface with no subagent fleet (the attention arms are then omitted). */
+  readonly tasks?: TaskRegistry
   /** Environment bag the `QUANTA_ATTENTION_NAV` gate is resolved from. Passed in
    *  by the composition root so this module never reads `process.env` directly
    *  (blueprint §Default-OFF gate: resolved once by composition, threaded in). */
   readonly env: Record<string, string | undefined>
+  /** RFC-04 D4 — optional pre-built activity store (tests inject one to observe
+   *  the graph's instance). Absent ⇒ the builder mints THE one session store. */
+  readonly activity?: ActivityStore
   /** Optional pre-built broker (tests inject one for deterministic id/clock, and
    *  to prove the graph carries the injected instance). When absent and the gate
    *  is ON, one is constructed from {@link questionDeps}. */

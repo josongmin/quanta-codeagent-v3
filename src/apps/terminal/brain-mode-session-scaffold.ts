@@ -7,7 +7,8 @@
  * headless fake-bootstrap shape — the terminal fence forbids importing `@/apps/headless`), the leanest
  * valid {@link SessionRuntimeConfigShape}, and the {@link JsonLineDuplex} over the brain's stdio.
  *
- * DOWNWARD-CLOSED: every function here calls ONLY module imports (`@/activity`, `@/tool`) + each other —
+ * DOWNWARD-CLOSED: every function here calls ONLY cross-slice ports (the `@/runner/assemble`
+ * session-authority builder that mints the one session activity store, `@/tool`) + each other —
  * NEVER a `brain-mode` value — so this module has NO runtime dependency on `brain-mode`. It imports the
  * `RunTerminalBrainOpts` SHAPE type-only (no value edge), and `brain-mode` imports these builders back as
  * values; the one edge that exists is `brain-mode → session-scaffold`, so there is no cycle.
@@ -16,9 +17,9 @@
  * ports + the shared agent-loop core shapes; it MUST NOT import a sibling app surface.
  */
 
-import { createActivityStore } from "@/activity"
 import type { SessionBootstrapDeps, SessionRuntimeConfigShape } from "@/host/bootstrap"
 import type { ImageBlock, LLMPort, Message } from "@/llm"
+import { buildSessionAuthorities } from "@/runner/assemble/session-authorities"
 import type { ResolveResumeInput, ResumeResolution } from "@/runner/orchestrate/resume-fsm"
 import type { StreamPort } from "@/stream"
 import { type Tool, ToolRegistry } from "@/tool"
@@ -39,11 +40,14 @@ export const buildTerminalBootstrapDeps = (
 ): SessionBootstrapDeps => {
   const registry = new ToolRegistry([...tools])
   return {
+    // RFC-04 D4 — one session `ActivityStore` from the authority builder (DI; no
+    // command-local `createActivityStore()`). The offline terminal brain has no
+    // subagent fleet, so `tasks` is omitted (attention arms stay absent).
     buildLifecycleBundle: () => ({
       pills: { update: () => undefined },
       taskRegistry: undefined,
       followUpQueue: undefined,
-      activityStore: createActivityStore(),
+      activityStore: buildSessionAuthorities({ env: {} }).activity,
     }),
     deriveMcpPillServers: () => [],
     buildCostPanelOrUndefined: () => undefined,
@@ -96,7 +100,11 @@ export const buildTerminalBootstrapDeps = (
     buildMcpSurfaceInfo: () => undefined,
     buildIdleGuards: () => ({
       idleMonitor: { markActive: () => undefined },
-      rejectCounter: { recordAccept: () => undefined, recordDeny: () => 0, shouldAutoExit: () => false },
+      rejectCounter: {
+        recordAccept: () => undefined,
+        recordDeny: () => 0,
+        shouldAutoExit: () => false,
+      },
     }),
   }
 }

@@ -32,12 +32,17 @@
  * and never rejects (mirrors `mcp-server-setup.ts`).
  */
 
-import { createActivityStore } from "@/activity"
 import type { SessionBootstrapDeps, SessionRuntimeConfigShape } from "@/host/bootstrap"
 import { createSessionStdioTransport } from "@/ipc/session"
 import type { ImageBlock, LLMPort, Message } from "@/llm"
 import { DEFAULT_MODEL, pickProvider, tryCreateLLM } from "@/llm"
-import { isPermissionMode, type PermissionMode, type ApprovalDecision, type ActionAssessment } from "@/permission"
+import {
+  type ActionAssessment,
+  type ApprovalDecision,
+  isPermissionMode,
+  type PermissionMode,
+} from "@/permission"
+import { buildSessionAuthorities } from "@/runner/assemble/session-authorities"
 import type { ResolveResumeInput, ResumeResolution } from "@/runner/orchestrate/resume-fsm"
 import { errMessage, gateOnStrict } from "@/shared"
 import type { StreamPort } from "@/stream"
@@ -236,11 +241,14 @@ const parseServeStdioArgs = (argv: readonly string[]): ServeStdioArgs | undefine
 const buildServeStdioDeps = (llm: LLMPort, stream: StreamPort): SessionBootstrapDeps => {
   const registry = new ToolRegistry([...buildDefaultTools()])
   return {
+    // RFC-04 D4 — one session `ActivityStore` from the authority builder (DI; no
+    // command-local `createActivityStore()`). A served session has no subagent
+    // fleet, so `tasks` is omitted (attention arms stay absent).
     buildLifecycleBundle: () => ({
       pills: { update: () => undefined },
       taskRegistry: undefined,
       followUpQueue: undefined,
-      activityStore: createActivityStore(),
+      activityStore: buildSessionAuthorities({ env: process.env }).activity,
     }),
     deriveMcpPillServers: () => [],
     buildCostPanelOrUndefined: () => undefined,
@@ -307,7 +315,11 @@ const buildServeStdioDeps = (llm: LLMPort, stream: StreamPort): SessionBootstrap
     buildMcpSurfaceInfo: () => undefined,
     buildIdleGuards: () => ({
       idleMonitor: { markActive: () => undefined },
-      rejectCounter: { recordAccept: () => undefined, recordDeny: () => 0, shouldAutoExit: () => false },
+      rejectCounter: {
+        recordAccept: () => undefined,
+        recordDeny: () => 0,
+        shouldAutoExit: () => false,
+      },
     }),
   }
 }
