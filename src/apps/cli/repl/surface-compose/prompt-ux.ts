@@ -44,6 +44,12 @@ export interface PromptUxOpts {
    *  pill as `/effort`). Owns NO store/model/config. Absent ⇒ a bound chord is
    *  inert (byte-identical). */
   readonly onCycleEffort?: () => void
+  /** RFC-01 A4 — bound `focus-next-attention` action hook. Present iff BOTH the
+   *  keybinding layer is enabled (a chord CAN be bound) AND the surface supplied
+   *  the attention wire (gated on `QUANTA_ATTENTION_NAV`). Runs the same
+   *  select+drill the `/attention next` slash does. Absent ⇒ a bound chord is
+   *  inert (byte-identical). */
+  readonly onFocusNextAttention?: () => void
   /** RFC-11 / ADR-0446 — external `$EDITOR` composition port. Present iff
    *  `QUANTA_EXTERNAL_EDITOR=1`. Absent ⇒ ctrl-x ctrl-e inert (byte-identical). */
   readonly openEditor?: ExternalEditorPort
@@ -127,6 +133,28 @@ const buildEffortCycle = (
   }
 }
 
+/** RFC-01 A4 — the bound `focus-next-attention` hook contract. A single thunk
+ *  the surface composes from the SAME `ctx.attention` + `ctx.agents` wires the
+ *  `/attention` slash reads, so the chord takes the operator to the exact agent
+ *  `/attention next` would. Absent ⇒ no hook (a bound chord is inert). */
+export interface FocusAttentionWire {
+  readonly focusNext: () => void
+}
+
+/** RFC-01 A4 — build the bound `focus-next-attention` callback. Gated on BOTH the
+ *  keybinding layer (a chord CAN be bound) AND the surface supplying the wire
+ *  (itself gated on `QUANTA_ATTENTION_NAV`). Absent either ⇒ `undefined` ⇒ a
+ *  bound chord is inert (byte-identical). The callback owns no state — it defers
+ *  to the surface-composed `focusNext`, which runs the SAME select+drill as the
+ *  `/attention next` slash. */
+const buildFocusNextAttention = (
+  env: NodeJS.ProcessEnv,
+  wire: FocusAttentionWire | undefined,
+): Pick<PromptUxOpts, "onFocusNextAttention"> => {
+  if (wire === undefined || !gateOn(env, "QUANTA_KEYBINDINGS")) return {}
+  return { onFocusNextAttention: () => wire.focusNext() }
+}
+
 /** RFC-12 / ADR-0439 — build the `@`-mention autocomplete provider when the
  *  feature is enabled (`QUANTA_AT_AUTOCOMPLETE=1`). File listing is live (cwd
  *  jail = the resolver root); symbol listing reuses the SAME lazy union-LSP
@@ -181,6 +209,10 @@ export const buildPromptUx = async (
   // autocomplete listers. Absent ⇒ those kinds contribute zero candidates
   // (byte-identical). Rides `QUANTA_AT_AUTOCOMPLETE` + the per-kind knobs.
   mentionSources?: MentionLiveSources,
+  // RFC-01 A4 — the bound `focus-next-attention` wire (select+drill the next
+  // agent needing attention). Present iff `QUANTA_ATTENTION_NAV` composed the
+  // attention slot. Absent ⇒ no `onFocusNextAttention` ⇒ a bound chord is inert.
+  focusAttention?: FocusAttentionWire,
 ): Promise<PromptUxOpts> => {
   const { history, multiline } = featureCfg
   const promptHistoryOpts: Parameters<typeof createPromptHistory>[0] = {
@@ -208,6 +240,7 @@ export const buildPromptUx = async (
     ...(atProvider !== undefined ? { atProvider } : {}),
     ...buildModeCycle(env, onPosture, modeCycleStore),
     ...buildEffortCycle(env, effortCycle),
+    ...buildFocusNextAttention(env, focusAttention),
     ...(openEditor !== undefined ? { openEditor } : {}),
     ...(keybindings !== undefined ? { keybindings } : {}),
     ...(pasteBurstMinChars !== undefined ? { pasteBurst: { minChars: pasteBurstMinChars } } : {}),

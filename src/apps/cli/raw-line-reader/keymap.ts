@@ -87,6 +87,8 @@ export interface KeymapOpts {
   readonly onCycleMode?: () => { meta?: string } | undefined
   /** RFC-08 BUILD-1 — bound `effort-cycle` action hook (see `options.ts`). */
   readonly onCycleEffort?: () => void
+  /** RFC-01 A4 — bound `focus-next-attention` action hook (see `options.ts`). */
+  readonly onFocusNextAttention?: () => void
   readonly openEditor?: ExternalEditorPort
   readonly keybindings?: KeybindingMap
   readonly pasteBurst?: { readonly minChars: number }
@@ -239,6 +241,15 @@ export const KEY_BINDINGS: readonly KeyBinding[] = [
       // no-hook build apart from the key not reaching its raw insert).
       if (action === "effort-cycle") {
         c.opts.onCycleEffort?.()
+        return "handled"
+      }
+      // RFC-01 A4 — a chord bound to `focus-next-attention` invokes the injected
+      // hook and CONSUMES the key (like `effort-cycle`, it has no canonical reader
+      // branch to remap onto). The hook runs the resolver over the live fleet and
+      // drills the top pick. A bound chord with NO hook wired (gate off) is an
+      // inert consume (byte-identical apart from the key not reaching raw insert).
+      if (action === "focus-next-attention") {
+        c.opts.onFocusNextAttention?.()
         return "handled"
       }
       if (action !== undefined) {

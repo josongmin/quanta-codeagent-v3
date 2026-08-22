@@ -325,6 +325,15 @@ export interface SlashContext {
    *  + exit 0 (parity with `/agents`). `/ps` itself is only REGISTERED behind
    *  the same gate (help catalog byte-identical when OFF). */
   readonly procShells?: (() => readonly import("./proc-panel").ProcPanelRow[]) | undefined
+  /** RFC-01 A4 `/attention` — the live pending-question navigation wire (list /
+   *  next: select+drill / answer <requestId> <text>). A PURE stateless projection
+   *  over the session `TaskRegistry` + `UserQuestionBroker` (built by
+   *  {@link import("./slash/attention-cmd").buildAttentionSlashState} from A2's
+   *  `AttentionReader`). Present iff `QUANTA_ATTENTION_NAV` is on AND the surface
+   *  assembled the authorities; absent ⇒ `/attention` prints "not wired" + exit 0
+   *  (parity with `/agents`). `/attention` itself is only REGISTERED behind the
+   *  same gate (help catalog byte-identical when OFF). */
+  readonly attention?: import("./slash/attention-cmd").AttentionSlashState | undefined
 }
 
 /** Inventory row returned by {@link SlashContext.skills}. Mirrors the host

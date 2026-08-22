@@ -1,5 +1,10 @@
 import { type ActivityStore, createActivityStore } from "@/activity"
 import { FollowUpQueue } from "@/agent/follow-up-queue"
+import {
+  type AttentionReader,
+  buildSessionAuthorities,
+} from "@/runner/assemble/session-authorities"
+import type { UserQuestionBroker } from "@/session/user-question"
 import { TaskRegistry } from "@/subagent"
 import {
   createLifecyclePills,
@@ -26,9 +31,28 @@ export interface LifecycleBundle {
    *  Map): `/activity` reads it and `run_workflow` writes its live run into it,
    *  so both share ONE instance. */
   activityStore: ActivityStore
+  /** RFC-01 A4 — the session pending-question authority (`@/session/user-question`
+   *  broker), minted ONLY under `QUANTA_ATTENTION_NAV` (via
+   *  `buildSessionAuthorities`) AND only when a `TaskRegistry` exists (attention
+   *  navigates the subagent fleet). Threaded onto the per-turn `AgentConfig`
+   *  (`config.questionBroker`) so `request_user_input` routes through it, and onto
+   *  the `/attention` slash surface. Absent (gate off) ⇒ omitted ⇒ byte-identical
+   *  (`request_user_input` keeps the legacy `userInputPort`). */
+  questionBroker?: UserQuestionBroker
+  /** RFC-01 A4 — the live fleet-attention reader (A2's `AttentionReader`), the
+   *  read-only join of the SAME `TaskRegistry` + broker above. Consumed ONLY by
+   *  the `/attention` slash surface. Absent ⇒ `/attention` prints "not wired". */
+  attentionReader?: AttentionReader
 }
 
-export const buildLifecycleBundle = (featureCfg: CliFeatureConfig): LifecycleBundle => {
+export const buildLifecycleBundle = (
+  featureCfg: CliFeatureConfig,
+  /** Composition-root env bag the `QUANTA_ATTENTION_NAV` gate is resolved from
+   *  (DI — the host passes `runtime.env`; this factory never reads `process.env`
+   *  for the gate). Absent ⇒ `{}` ⇒ gate off ⇒ no broker/attention minted
+   *  (byte-identical). */
+  env: Readonly<Record<string, string | undefined>> = {},
+): LifecycleBundle => {
   const { pills: pillsCfg, subagentForPills } = featureCfg
   // The TaskRegistry is allocated ONLY when subagent + pills are both ON.
   // The loop receives the same instance through `buildTooling` so all four
@@ -45,7 +69,20 @@ export const buildLifecycleBundle = (featureCfg: CliFeatureConfig): LifecycleBun
     hideFollowUp: pillsCfg.hideFollowUp,
     hideMcp: pillsCfg.hideMcp,
   })
-  return { pills, taskRegistry, followUpQueue, activityStore: createActivityStore() }
+  // RFC-01 A4 — mint the pending-question authority alongside the registry it
+  // navigates. `buildSessionAuthorities` gates on `QUANTA_ATTENTION_NAV`: off ⇒
+  // it returns `{ tasks }` only, so `questions`/`attention` stay undefined and
+  // the whole feature (config wire + `/attention` slot) is absent (byte-identical).
+  const authorities =
+    taskRegistry !== undefined ? buildSessionAuthorities({ tasks: taskRegistry, env }) : undefined
+  return {
+    pills,
+    taskRegistry,
+    followUpQueue,
+    activityStore: createActivityStore(),
+    ...(authorities?.questions !== undefined ? { questionBroker: authorities.questions } : {}),
+    ...(authorities?.attention !== undefined ? { attentionReader: authorities.attention } : {}),
+  }
 }
 
 /** Derive the per-server MCP pill state from the bridged tools list. The

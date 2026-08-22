@@ -174,6 +174,11 @@ export type ReplSlashCtx = Partial<{
    *  the panel reflects the CURRENT registry. Absent ⇒ `/agents` prints "not
    *  wired in this surface". */
   agents: () => readonly import("../agents-fleet-panel").AgentFleetRow[]
+  /** RFC-01 A4 `/attention` — the live pending-question navigation wire (list /
+   *  next / answer). Present iff `QUANTA_ATTENTION_NAV` composed the authorities;
+   *  absent ⇒ `/attention` prints "not wired". The `focus-next-attention`
+   *  KEY_ACTION hook reads the SAME wire. */
+  attention: import("../slash/attention-cmd").AttentionSlashState
   /** jun-15 P0-b `/activity` — the session Activity Spine store (shared with the
    *  loop's `run_workflow` writer). Absent ⇒ ephemeral fleet-only view. */
   activityStore: import("@/activity").ActivityStore
@@ -221,6 +226,12 @@ export interface BuildReplSlashCtxArgs {
    *  ctx slot is omitted and `/agents` prints "not wired" (default-OFF
    *  byte-identical). Optional so existing call sites/tests need no change. */
   taskRegistry?: import("@/subagent").TaskRegistry | undefined
+  /** RFC-01 A4 `/attention` — the live pending-question navigation wire (list /
+   *  next / answer), built by the surface from A2's `AttentionReader` + the
+   *  `UserQuestionBroker`. Present iff `QUANTA_ATTENTION_NAV` composed them;
+   *  absent/omitted ⇒ the `attention` ctx slot is omitted and `/attention` prints
+   *  "not wired" (default-OFF byte-identical). */
+  attention?: import("../slash/attention-cmd").AttentionSlashState | undefined
   /** jun-15 P0-b `/activity` — session Activity Spine store (shared with the
    *  loop's `run_workflow` writer). Absent ⇒ `/activity` falls back to an
    *  ephemeral fleet-only view. */
@@ -316,9 +327,7 @@ export interface BuildReplSlashCtxArgs {
    *  when `QUANTA_HUNK_UNDO=1` (the composition root built the store); absent ⇒
    *  the `hunkUndo` ctx slot is omitted and `/undo` prints "not wired"
    *  (default-OFF byte-identical). */
-  hunkUndoStore?:
-    | import("@/runner/hunk-mutation-journal").HunkMutationJournalStore
-    | undefined
+  hunkUndoStore?: import("@/runner/hunk-mutation-journal").HunkMutationJournalStore | undefined
   /** UUX-6-03 — the ONE live-history swap seam for `/rewind-tool`'s task
    *  leg (same closure `/rewind-conv` + `/rewind` swap through). Absent ⇒
    *  the command keeps its prior print-only behavior. */
@@ -593,6 +602,7 @@ export const buildReplSlashCtx = (args: BuildReplSlashCtxArgs): ReplSlashCtx => 
     brief,
     contextUsage,
     taskRegistry,
+    attention,
     activityStore,
     itemStreamSink,
     activityItems,
@@ -652,6 +662,9 @@ export const buildReplSlashCtx = (args: BuildReplSlashCtxArgs): ReplSlashCtx => 
     ...(taskRegistry !== undefined
       ? { agents: () => taskRegistry.list().map(toAgentFleetRow) }
       : {}),
+    // RFC-01 A4 — `/attention` list/next/answer over the SAME broker + registry
+    // A2 assembled. Absent slot ⇒ `/attention` "not wired" (byte-identical).
+    ...(attention !== undefined ? { attention } : {}),
     // RFC02-1 — `/ps` owner-scoped background-shell inventory. Wired ONLY when
     // QUANTA_PROC_PANEL is on (same gate as the command registration). Reads the
     // LIVE singleton registry each invocation, scoped to THIS session's owner

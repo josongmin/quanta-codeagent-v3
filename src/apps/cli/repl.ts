@@ -238,7 +238,7 @@ const sessionSetupDeps: Parameters<typeof setupSession>[0] = {
   // The host slice declares the featureCfg parameter as `unknown` so it
   // stays slice-clean (no import of `apps/cli/repl/cli-feature-config`).
   // The CLI surface narrows it back to `CliFeatureConfig` at each call site.
-  buildLifecycleBundle: (cfg) => buildLifecycleBundle(cfg as CliFeatureConfig),
+  buildLifecycleBundle: (cfg, env) => buildLifecycleBundle(cfg as CliFeatureConfig, env),
   deriveMcpPillServers,
   buildCostPanelOrUndefined: (cfg, model) =>
     buildCostPanelOrUndefined(cfg as CliFeatureConfig, model),

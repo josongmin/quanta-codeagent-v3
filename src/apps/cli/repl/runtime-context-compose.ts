@@ -1,3 +1,4 @@
+import { join } from "node:path"
 import {
   type ConfirmDecision,
   createOnConfirmReviewerPort,
@@ -5,7 +6,6 @@ import {
   mintActiveWorktreeSlot,
   type NamedAgentResolver,
 } from "@/agent"
-import { join } from "node:path"
 import type { ConversationCheckpointStore } from "@/agent/conversation-checkpoint"
 import { createClassifierBackedAutoReview } from "@/agent/reviewer-port"
 import type { SessionBootstrapResult } from "@/host/bootstrap"
@@ -26,10 +26,9 @@ import {
   makeDurableJournalStore,
 } from "@/runner/hunk-mutation-journal"
 import { resolveNetworkProxyFromEnv } from "@/runner/knobs/knobs/network-proxy"
-import { sessionsRoot } from "@/session"
 import type { ApprovalDecisionResult } from "@/runner/orchestrate"
 import { composeRuntimeBootstrapContext, type RuntimeContext } from "@/sdk/runtime"
-import { listSessions, type SessionMeta } from "@/session"
+import { listSessions, type SessionMeta, sessionsRoot } from "@/session"
 import { gateOn, runtimeConfigFromEnv } from "@/shared"
 import { decisionEmitterFromStream, type StreamPort } from "@/stream"
 import type { WorktreeSlotHandle } from "@/tool"
@@ -237,6 +236,15 @@ const buildBootstrapContextArgs = (args: {
       ...(summarizerLlm !== undefined ? { summarizerLlm } : {}),
       planExitPort,
       userInputPort,
+      // RFC-01 A4 — wire the pending-question authority (minted under
+      // `QUANTA_ATTENTION_NAV` by the lifecycle bundle) onto the per-turn
+      // AgentConfig. PRESENT ⇒ the A3 producer routes `request_user_input`
+      // through the broker (bound to the explicit `spawnedAsTaskId` owner) so the
+      // `/attention` projection surfaces it; ABSENT (gate off) ⇒ slot omitted ⇒
+      // `request_user_input` keeps the legacy `userInputPort` (byte-identical).
+      ...(boot.lifecycleQuestionBroker !== undefined
+        ? { questionBroker: boot.lifecycleQuestionBroker }
+        : {}),
       backgroundConsentPort,
       decisionEmitter: decisionEmitterFromStream(turnStream),
       admissibilityBuilder: ({ materializeReviewerAgent }) =>

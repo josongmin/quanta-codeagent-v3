@@ -183,6 +183,14 @@ export interface SessionSetupResult {
    *  `run_workflow` writes its live run into the SAME instance. */
   readonly lifecycleActivityStore: import("@/activity").ActivityStore
   readonly lifecycleFollowUpQueue: FollowUpQueue | undefined
+  /** RFC-01 A4 — the session pending-question authority (present under
+   *  `QUANTA_ATTENTION_NAV`). The `/attention` slash surface reads it (answer)
+   *  and the runtime overlay already wired it onto `AgentConfig.questionBroker`.
+   *  Absent ⇒ `/attention` prints "not wired". */
+  readonly lifecycleQuestionBroker?: SessionBootstrapResult["lifecycleQuestionBroker"]
+  /** RFC-01 A4 — the live fleet-attention reader for the `/attention` list/next
+   *  surface. Absent ⇒ `/attention` prints "not wired". */
+  readonly lifecycleAttention?: SessionBootstrapResult["lifecycleAttention"]
   readonly sessionId: string
   readonly history: readonly Message[]
   readonly pendingImages: readonly ImageBlock[]
@@ -483,6 +491,15 @@ export const setupSession = async (
     searchPipelineDispose: boot.tooling.searchPipelineDispose,
     lifecyclePills: boot.lifecyclePills as unknown as LifecyclePills,
     lifecycleTaskRegistry: boot.lifecycleTaskRegistry,
+    // RFC-01 A4 — forward the pending-question authority + attention reader so the
+    // `/attention` slash surface reads the SAME instances the loop's
+    // `config.questionBroker` producer writes to. Absent (gate off) ⇒ omitted.
+    ...(boot.lifecycleQuestionBroker !== undefined
+      ? { lifecycleQuestionBroker: boot.lifecycleQuestionBroker }
+      : {}),
+    ...(boot.lifecycleAttention !== undefined
+      ? { lifecycleAttention: boot.lifecycleAttention }
+      : {}),
     lifecycleActivityStore: boot.lifecycleActivityStore,
     lifecycleFollowUpQueue: boot.lifecycleFollowUpQueue,
     sessionId: boot.sessionId,

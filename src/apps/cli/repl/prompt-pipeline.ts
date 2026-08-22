@@ -40,6 +40,11 @@ export interface PromptPipelineUxOpts {
    *  `effort.set` with the next supported tier off the live model wire. Absent ⇒
    *  a bound `effort-cycle` chord is inert (byte-identical). */
   readonly onCycleEffort?: () => void
+  /** RFC-01 A4 — bound `focus-next-attention` action hook. Present iff the
+   *  attention wire was composed (host `buildPromptUx`, gated on
+   *  `QUANTA_ATTENTION_NAV` + `QUANTA_KEYBINDINGS`); selects+drills the next
+   *  agent needing attention. Absent ⇒ a bound chord is inert (byte-identical). */
+  readonly onFocusNextAttention?: () => void
   /** RFC-11 / ADR-0446 — external `$EDITOR` composition port. When present,
    *  `ctrl+x ctrl+e` opens the draft in `$EDITOR`. Absent ⇒ byte-identical. */
   readonly openEditor?: ExternalEditorPort
@@ -140,6 +145,9 @@ const defaultPromptLineReader: PromptLineReader = async (
       ...(ux?.modeMeta !== undefined ? { meta: ux.modeMeta } : {}),
       ...(ux?.onCycleMode !== undefined ? { onCycleMode: ux.onCycleMode } : {}),
       ...(ux?.onCycleEffort !== undefined ? { onCycleEffort: ux.onCycleEffort } : {}),
+      ...(ux?.onFocusNextAttention !== undefined
+        ? { onFocusNextAttention: ux.onFocusNextAttention }
+        : {}),
       ...(ux?.openEditor !== undefined ? { openEditor: ux.openEditor } : {}),
       ...(ux?.keybindings !== undefined ? { keybindings: ux.keybindings } : {}),
       ...(ux?.pasteBurst !== undefined ? { pasteBurst: ux.pasteBurst } : {}),

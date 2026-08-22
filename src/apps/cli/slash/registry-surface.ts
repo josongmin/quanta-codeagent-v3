@@ -57,6 +57,7 @@ import { runVoiceCmd } from "../voice-cmd"
 import { runVoiceLiveCmd } from "../voice-live-cmd"
 import { webCmd } from "../web-cmd"
 import { renderSkillScopePanel, renderWorkingStatePanel } from "../working-state-panel"
+import { attentionCmd, isAttentionNavEnabled } from "./attention-cmd"
 import { browserNetCmd } from "./browser-net-cmd"
 import { cronCmd, inboxCmd, scheduleCmd } from "./cron-cmd"
 import { kbCmd } from "./kb-cmd"
@@ -636,6 +637,11 @@ export const buildSurfaceSlashCommands = (
   // registered when QUANTA_PROC_PANEL is on, so `/help` is byte-identical when
   // the gate is unset (registration ≠ execution; parity with the /init gate).
   ...(isProcPanelEnabled() ? [psCmd] : []),
+  // RFC-01 A4 — `/attention` pending-question navigation. DEFAULT-OFF (opt-IN):
+  // only registered when QUANTA_ATTENTION_NAV is on, so `/help` + the command
+  // table are byte-identical when the gate is unset (registration ≠ execution;
+  // parity with the /ps + /init gates).
+  ...(isAttentionNavEnabled() ? [attentionCmd] : []),
   forkCheckpointCmd,
   queueCmd,
   webCmd,

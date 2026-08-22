@@ -53,6 +53,12 @@ export const KEY_ACTIONS = [
   // KEYBIND_TRUTH) and NO 1:1 reader branch — the keymap remap binding calls the
   // injected `onCycleEffort` hook directly when a configured chord maps here.
   "effort-cycle",
+  // RFC-01 A4 — go to the next agent needing attention (select+drill). Like
+  // `effort-cycle`, this action is operator-bindable ONLY (NO canonical default
+  // chord, so it is absent from DEFAULT_KEYBINDINGS / KEYBIND_TRUTH ⇒ byte-
+  // identical) and has NO 1:1 reader branch — the keymap remap binding calls the
+  // injected `onFocusNextAttention` hook when a configured chord maps here.
+  "focus-next-attention",
 ] as const
 
 export type KeyAction = (typeof KEY_ACTIONS)[number]

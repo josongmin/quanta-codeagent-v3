@@ -293,6 +293,13 @@ export type RuntimeBootstrapOverlay = {
   readonly shellSnapshot?: AgentConfig["shellSnapshot"]
   readonly summarizerLlm?: NonNullable<AgentConfig["compaction"]>["summarizerLlm"]
   readonly userInputPort?: AgentConfig["userInputPort"]
+  /** RFC-01 A4 — the pending-question authority (`@/session/user-question`
+   *  broker). When set (composition minted it under `QUANTA_ATTENTION_NAV`), the
+   *  base carries `questionBroker` so the A3 dispatch producer routes
+   *  `request_user_input` through it (bound to the explicit `spawnedAsTaskId`
+   *  owner). Absent ⇒ slot omitted (default-OFF, byte-identical: the legacy
+   *  `userInputPort` is used verbatim, no broker interaction). */
+  readonly questionBroker?: AgentConfig["questionBroker"]
   readonly backgroundConsentPort?: AgentConfig["backgroundConsentPort"]
   /** ADR-0428 jun-02 wire — socket-level egress proxy config. When set, the
    *  base carries `networkProxy` so `runAgent` constructs the live

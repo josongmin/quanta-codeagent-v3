@@ -688,6 +688,12 @@ const buildToolingBundle = (
   readonly lifecycleActivityStore: ReturnType<
     SessionBootstrapDeps["buildLifecycleBundle"]
   >["activityStore"]
+  readonly lifecycleQuestionBroker: ReturnType<
+    SessionBootstrapDeps["buildLifecycleBundle"]
+  >["questionBroker"]
+  readonly lifecycleAttention: ReturnType<
+    SessionBootstrapDeps["buildLifecycleBundle"]
+  >["attentionReader"]
   readonly budgetMeter: BudgetMeter | undefined
   readonly tooling: ReturnType<SessionBootstrapDeps["buildTooling"]>
   readonly mcpSurface: ReturnType<SessionBootstrapDeps["buildMcpSurfaceInfo"]>
@@ -698,7 +704,12 @@ const buildToolingBundle = (
     taskRegistry: lifecycleTaskRegistry,
     followUpQueue: lifecycleFollowUpQueue,
     activityStore: lifecycleActivityStore,
-  } = deps.buildLifecycleBundle(featureCfg)
+    // RFC-01 A4 — the pending-question authority + attention reader, minted by
+    // the CLI lifecycle bundle ONLY under `QUANTA_ATTENTION_NAV` (else undefined
+    // ⇒ byte-identical). `runtime.env` is the composition-root env bag (DI).
+    questionBroker: lifecycleQuestionBroker,
+    attentionReader: lifecycleAttention,
+  } = deps.buildLifecycleBundle(featureCfg, runtime.env)
 
   // ADR-0432 — session budget meter for the self-edit memory write-guard.
   // Constructed ONLY when the operator opted in via QUANTA_MEMORY_WRITE_GUARD_PCT
@@ -763,6 +774,8 @@ const buildToolingBundle = (
     lifecycleTaskRegistry,
     lifecycleFollowUpQueue,
     lifecycleActivityStore,
+    lifecycleQuestionBroker,
+    lifecycleAttention,
     budgetMeter,
     tooling,
     mcpSurface,
@@ -823,6 +836,8 @@ const assembleBootstrapResult = async (
       lifecycleTaskRegistry,
       lifecycleFollowUpQueue,
       lifecycleActivityStore,
+      lifecycleQuestionBroker,
+      lifecycleAttention,
       budgetMeter,
       tooling,
       mcpSurface,
@@ -898,6 +913,12 @@ const assembleBootstrapResult = async (
       lifecycleTaskRegistry,
       lifecycleActivityStore,
       lifecycleFollowUpQueue,
+      // RFC-01 A4 — carry the pending-question authority + attention reader onto
+      // the bootstrap result so the runtime overlay wires `config.questionBroker`
+      // and the `/attention` slash surface reads the SAME instances. Undefined
+      // when `QUANTA_ATTENTION_NAV` is off (byte-identical).
+      ...(lifecycleQuestionBroker !== undefined ? { lifecycleQuestionBroker } : {}),
+      ...(lifecycleAttention !== undefined ? { lifecycleAttention } : {}),
       sessionId,
       history,
       pendingImages,

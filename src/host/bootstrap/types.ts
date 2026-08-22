@@ -387,13 +387,24 @@ export interface SessionRuntimeConfigShape {
  *  (a closure) so the same shape works for terminal/web/headless surfaces. */
 export interface SessionBootstrapDeps {
   // ── Existing surface-side composers ────────────────────────────────
-  readonly buildLifecycleBundle: (featureCfg: SessionFeatureConfig) => {
+  readonly buildLifecycleBundle: (
+    featureCfg: SessionFeatureConfig,
+    /** RFC-01 A4 — composition-root env bag the `QUANTA_ATTENTION_NAV` gate is
+     *  resolved from (DI). Optional so surfaces that mint no attention authority
+     *  (serve-stdio) may ignore it. */
+    env?: Readonly<Record<string, string | undefined>>,
+  ) => {
     pills: BootstrapLifecyclePills
     taskRegistry: TaskRegistry | undefined
     followUpQueue: FollowUpQueue | undefined
     /** jun-15 P0-b — session Activity Spine store shared by `run_workflow`
      *  (writer) and `/activity` (reader). */
     activityStore: import("@/activity").ActivityStore
+    /** RFC-01 A4 — pending-question authority, minted ONLY under
+     *  `QUANTA_ATTENTION_NAV` (else undefined ⇒ byte-identical). */
+    questionBroker?: import("@/session/user-question").UserQuestionBroker
+    /** RFC-01 A4 — live fleet-attention reader (A2's `AttentionReader`). */
+    attentionReader?: import("@/runner/assemble/session-authorities").AttentionReader
   }
   readonly deriveMcpPillServers: (
     mcpTools: ReadonlyArray<{ name: string }>,
@@ -515,6 +526,17 @@ export interface SessionBootstrapResult {
   /** jun-15 P0-b — session Activity Spine store (shared writer/reader). */
   readonly lifecycleActivityStore: import("@/activity").ActivityStore
   readonly lifecycleFollowUpQueue: FollowUpQueue | undefined
+  /** RFC-01 A4 — the session pending-question authority, minted by the CLI
+   *  lifecycle bundle ONLY under `QUANTA_ATTENTION_NAV`. The runtime overlay
+   *  wires it onto `AgentConfig.questionBroker` (so `request_user_input` routes
+   *  through it) and the `/attention` slash surface reads it. Absent (gate off /
+   *  non-CLI surface) ⇒ byte-identical (`request_user_input` keeps the legacy
+   *  `userInputPort`). Optional so hermetic-test result constructors stay valid. */
+  readonly lifecycleQuestionBroker?: import("@/session/user-question").UserQuestionBroker
+  /** RFC-01 A4 — the live fleet-attention reader (A2's `AttentionReader`), joined
+   *  over the SAME registry + broker. Consumed ONLY by the `/attention` slash
+   *  surface. Absent ⇒ `/attention` prints "not wired". */
+  readonly lifecycleAttention?: import("@/runner/assemble/session-authorities").AttentionReader
   readonly sessionId: string
   readonly history: readonly Message[]
   readonly pendingImages: readonly ImageBlock[]

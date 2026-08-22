@@ -31,6 +31,13 @@ export interface RuntimeAgentConfigAugments {
   admissibility?: unknown
   planExitPort?: unknown
   userInputPort?: unknown
+  /** RFC-01 A4 — surface-owned pending-question authority (`@/session/user-question`
+   *  broker) threaded DOWN from the composition root ONLY under
+   *  `QUANTA_ATTENTION_NAV`. Duck-typed `unknown` at this SDK layer; the per-turn
+   *  assembler passes it onto `AgentConfig.questionBroker` so the A3 dispatch
+   *  producer routes `request_user_input` through it. Absent ⇒ slot omitted
+   *  (byte-identical: the legacy `userInputPort` is used verbatim). */
+  questionBroker?: unknown
   toolProfileState?: unknown
   identityModeState?: unknown
   focusChain?: unknown

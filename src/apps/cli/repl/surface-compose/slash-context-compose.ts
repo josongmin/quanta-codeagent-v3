@@ -1,6 +1,7 @@
 import { EFFORT_LEVELS, effortToTokenBudget } from "@/agent"
 import { gateOn } from "@/shared"
 import type { RestoreFilesCoordinatorPort } from "../../rewind-cmd"
+import { buildAttentionSlashState } from "../../slash/attention-cmd"
 import { buildRewindRestoreCoordinator } from "../rewind-restore-coordinator-wire"
 import type { SessionSetupResult } from "../session-setup"
 import { overlayRewindState } from "../session-switch-wire"
@@ -106,6 +107,19 @@ export const buildSurfaceSlashContext = (
     planStore: setup.planStore,
     branchProgress: setup.branchProgress,
     taskRegistry: setup.lifecycleTaskRegistry,
+    // RFC-01 A4 — `/attention` wire, built from A2's `AttentionReader` + the
+    // `UserQuestionBroker` (both present only under `QUANTA_ATTENTION_NAV`). The
+    // SAME broker instance the loop's `config.questionBroker` producer writes to,
+    // so `/attention answer` resolves the exact waiting request. Absent either ⇒
+    // slot omitted ⇒ `/attention` prints "not wired" (byte-identical).
+    ...(setup.lifecycleAttention !== undefined && setup.lifecycleQuestionBroker !== undefined
+      ? {
+          attention: buildAttentionSlashState(
+            setup.lifecycleAttention,
+            setup.lifecycleQuestionBroker,
+          ),
+        }
+      : {}),
     activityStore: setup.lifecycleActivityStore,
     getHistory: () => state.history,
     startSideConversation: mutable.startSideConversation,

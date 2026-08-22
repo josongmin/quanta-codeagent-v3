@@ -60,6 +60,15 @@ export interface ReadLineOptions {
    *  of its own. Absent ⇒ a bound `effort-cycle` chord is an inert no-op and
    *  every keypress path is byte-identical to the no-hook build. */
   readonly onCycleEffort?: () => void
+  /** RFC-01 A4 — `focus-next-attention` key action hook. A NON-submit UI callback
+   *  owning NO store: when an operator-configured chord maps to the
+   *  `focus-next-attention` action, the keybinding-remap branch invokes this hook
+   *  and consumes the key. The hook (composed at the host from the SAME
+   *  `ctx.attention` + `ctx.agents` wires the `/attention` slash reads) runs the
+   *  resolver over the live fleet and drills the next agent needing attention.
+   *  There is NO default chord and NO reader branch of its own. Absent (gate off)
+   *  ⇒ a bound chord is an inert no-op, byte-identical to the no-hook build. */
+  readonly onFocusNextAttention?: () => void
   /** RFC-11 / ADR-0446 — external `$EDITOR` composition port. When injected,
    *  `ctrl+x ctrl+e` (the bash `edit-and-execute-command` chord) suspends raw
    *  mode, opens the current draft in `$EDITOR`, and folds the edited text back

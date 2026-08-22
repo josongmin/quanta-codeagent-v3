@@ -328,6 +328,10 @@ const buildBootstrapBaseShape = (
     ...whenDefined("sessionTransport", args.overlay?.sessionTransport),
     ...whenDefined("planExitPort", args.overlay?.planExitPort),
     ...whenDefined("userInputPort", args.overlay?.userInputPort),
+    // RFC-01 A4 — carry the pending-question authority onto the base so the A3
+    // dispatch producer routes `request_user_input` through it. Absent ⇒ omitted
+    // (byte-identical: the legacy `userInputPort` is used verbatim).
+    ...whenDefined("questionBroker", args.overlay?.questionBroker),
     ...whenDefined("backgroundConsentPort", args.overlay?.backgroundConsentPort),
     ...whenDefined("toolProfileState", args.boot.toolProfileState),
     ...whenDefined("identityModeState", args.boot.identityModeState),
@@ -473,6 +477,8 @@ const buildOptionalSnapshotFields = (
   ...whenDefined("admissibility", base.admissibility),
   ...whenDefined("planExitPort", base.planExitPort),
   ...whenDefined("userInputPort", base.userInputPort),
+  // RFC-01 A4 — surface the pending-question authority onto the assembled config.
+  ...whenDefined("questionBroker", base.questionBroker),
   ...whenDefined("backgroundConsentPort", base.backgroundConsentPort),
   ...whenDefined("conversationCheckpoint", base.conversationCheckpoint),
   ...whenDefined("responsesContinuation", base.responsesContinuation),

@@ -15,6 +15,7 @@ import { listSessions, type SessionMeta } from "@/session"
 import { errMessage, logger } from "@/shared"
 import { atAutocompleteEnabled } from "../at-autocomplete"
 import type { McpServerInfo } from "../mcp-cmd"
+import { runFocusNextAttention } from "../slash/attention-cmd"
 import type { CliFeatureConfig } from "./cli-feature-config"
 import type { buildNotifyAndContextWarning } from "./factories"
 import type { runSessionLoop } from "./session-loop"
@@ -25,7 +26,7 @@ import {
   composeTurnSinks,
   type createSurfaceState,
 } from "./surface-compose"
-import type { EffortCycleWire } from "./surface-compose/prompt-ux"
+import type { EffortCycleWire, FocusAttentionWire } from "./surface-compose/prompt-ux"
 
 type SessionLoopArgs = Parameters<typeof runSessionLoop>[0]
 type Setup = Awaited<ReturnType<typeof setupSession>>
@@ -50,6 +51,11 @@ const buildReplPromptUx = (
   // surface-compose to the `/model` adapter's live `current()`). Absent the
   // effort slot ⇒ no effort-cycle wire ⇒ a bound chord is inert. NOT a new store.
   effortSlot?: NonNullable<Wires["slashCtx"]>["effort"],
+  // RFC-01 A4 — the live `/attention` slot (the SAME wire the `/attention` slash
+  // reads) so an operator-bound `focus-next-attention` chord takes the operator
+  // to the exact agent `/attention next` would. Absent ⇒ no focus wire (a bound
+  // chord is inert).
+  slashCtx?: Wires["slashCtx"],
 ): ReturnType<typeof buildPromptUx> =>
   buildProviderMentionSources(setup, env).then((mentionSources) =>
     buildPromptUx(
@@ -65,8 +71,37 @@ const buildReplPromptUx = (
       // (the session-resolved jail root — fail-open, same loader as
       // `composeCliRuntimeContext`); threads come from `listSessions`.
       mentionSources,
+      buildFocusAttentionWire(slashCtx),
     ),
   )
+
+/** RFC-01 A4 — project the live `/attention` slot onto the `focus-next-attention`
+ *  hook contract. Reuses the EXACT `ctx.attention` + `ctx.agents` wires the
+ *  `/attention` slash reads (one authority graph, no second reader) and the SAME
+ *  `runFocusNextAttention` select+drill the slash's `next` sub-command runs, so
+ *  the chord and the slash take the operator to the identical agent. The notice +
+ *  drill are written to stdout (the reader repaints the prompt on the next key).
+ *  Returns `undefined` when the attention slot is absent (gate off) ⇒ a bound
+ *  chord stays inert (byte-identical). */
+const buildFocusAttentionWire = (
+  slashCtx: Wires["slashCtx"] | undefined,
+): FocusAttentionWire | undefined => {
+  const attention = slashCtx?.attention
+  if (attention === undefined) return undefined
+  const agents = slashCtx?.agents
+  return {
+    focusNext: () => {
+      runFocusNextAttention({
+        attention,
+        agents,
+        now: Date.now(),
+        out: (s) => {
+          process.stdout.write(s)
+        },
+      })
+    },
+  }
+}
 
 /** RFC-12-2 WIRING — build the autocomplete provider's LIVE mention sources from
  *  the settled `setup` bundle. MCP: the connected servers of `setup.mcpSurface`
@@ -173,6 +208,7 @@ export const buildSessionLoopOptions = async (deps: {
       env,
       wires.modeCycleStore,
       wires.slashCtx.effort,
+      wires.slashCtx,
     ),
     registerExitTeardown: (cb) => {
       process.once("exit", cb)
