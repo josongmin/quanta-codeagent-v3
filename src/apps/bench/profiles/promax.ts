@@ -46,14 +46,18 @@
  *  - the plan notes — surface the frozen pin + bundle root on a dry-run;
  *  - the report partition key — distinct from `pro` by construction.
  */
+import { readFileSync } from "node:fs"
+import { ProMaxSampleError, selectProMaxSampleIds } from "../promax/corpus"
 import { PROMAX_V1_SNAPSHOT } from "../promax/provenance/frozen-snapshot"
 import {
   PROMAX_BUNDLE_ROOT_ENV,
   PROMAX_PYTHON_ENV,
+  PROMAX_SAMPLE_ENV,
   proMaxPlanNotes,
   resolveProMaxSettings,
 } from "../promax/settings"
 import { shq } from "../remote/box-session/shell"
+import { proMaxRemoteBootstrap } from "./promax-bootstrap"
 import { promaxFamilyCorpusReader } from "./promax-corpus"
 import { assertProMaxDatasetShape } from "./promax-dataset-shape"
 import type { DatasetFamilyProfile } from "./types"
@@ -63,6 +67,26 @@ import type { DatasetFamilyProfile } from "./types"
 export const PROMAX_DATASET_NAME = "swe-bench-promax/SWE-Bench-ProMax"
 
 const PINNED = PROMAX_V1_SNAPSHOT.upstream_git_commit
+
+/**
+ * PMX-04 — the FROZEN PORTABLE preset a ProMax remote run uses when the operator
+ * named none.
+ *
+ * Named rather than inlined because the ticket's rule is about EXPLICITNESS:
+ * *"PMX integration smoke uses an explicitly frozen portable preset; it never
+ * inherits the repo default implicitly."* The repo default
+ * (`agentless-v3-thin-strict`) requires LIVE LSP grounding, the remote box proves
+ * only `pyright-langserver`, and ProMax spans C / C++ / Go / Java / Python /
+ * Rust / TypeScript — so inheriting it would make six of the seven languages
+ * refuse to launch, and the one that did launch would silently be the only
+ * language in the "cross-language" headline.
+ *
+ * `agentless-v1` is the LSP-OPTIONAL baseline: portable across all seven
+ * languages, and identical to the default Pro already declares for the same
+ * reason. An explicit operator selection still wins (see `preset.ts`) — this is a
+ * default, not a lock.
+ */
+export const PROMAX_FROZEN_PORTABLE_PRESET = "agentless-v1"
 
 /** The one place the "not wired yet" boundary is spelled, so all three refusals
  *  point the operator at the same ticket rather than three different stories. */
@@ -85,7 +109,7 @@ export const PROMAX_PROFILE: DatasetFamilyProfile = {
   // ProMax spans seven languages while the strict remote box proves only Pyright,
   // so — exactly as for Pro — the LSP-optional baseline is the honest default
   // when the operator chose no preset. Explicit selections still win (preset.ts).
-  remoteDefaultPreset: "agentless-v1",
+  remoteDefaultPreset: PROMAX_FROZEN_PORTABLE_PRESET,
   // ProMax does NOT grade through the ScaleAI Pro dep-builder. Saying `true` here
   // would hand ProMax the `QUANTA_SWEBENCH_PRO_*` harness knobs, which the ticket
   // explicitly forbids reusing.
@@ -175,6 +199,44 @@ export const PROMAX_PROFILE: DatasetFamilyProfile = {
     )
   },
 
-  // dry-run visibility — which frozen bundle a launch would use.
-  planNotes: (cfg) => proMaxPlanNotes(cfg.promax),
+  // layer 6 — MANIFEST-DRIVEN SELECTION (PMX-06 / aug-22 G4). The sample
+  // manifests have been WRITTEN since PMX-02 and never READ, so "this campaign
+  // is PMX-7" was an unverifiable claim about whatever `--instance` said. With
+  // this port the manifest is the authority: the ids, their ORDER, and the
+  // digest that seals them.
+  //
+  // Unset knob ⇒ `undefined` ⇒ the generic selection path is byte-identical.
+  // Set ⇒ fail-closed on every manifest/corpus disagreement (see
+  // `selectProMaxSampleIds`); it NEVER degrades to "run everything".
+  resolveSelection: (input) => {
+    const { samplePath } = resolveProMaxSettings(input.env)
+    if (samplePath === undefined) return undefined
+    let manifestText: string
+    try {
+      manifestText = readFileSync(samplePath, "utf8")
+    } catch (err) {
+      throw new ProMaxSampleError(
+        `[${input.surface}] promax sample manifest: ${samplePath} could not be read ` +
+          `(${err instanceof Error ? err.message : String(err)}). REFUSING to fall back to the ` +
+          `whole corpus — ${PROMAX_SAMPLE_ENV} names the set this campaign claims to run.`,
+      )
+    }
+    return selectProMaxSampleIds({
+      manifestText,
+      manifestPath: samplePath,
+      availableInstanceIds: input.rows.map((row) => row.instanceId),
+      surface: input.surface,
+    })
+  },
+
+  // layer 7 — the REMOTE BOOTSTRAP specification (PMX-04). The typed value box
+  // provisioning CARRIES: the pinned checkout plan, the dedicated interpreter,
+  // the platform/disk gates, and the grader worker count. Every semantic
+  // decision inside it belongs to `harness/promax/evaluator-bootstrap.ts`; this
+  // profile only selects the on-box layout.
+  remoteBootstrap: proMaxRemoteBootstrap,
+
+  // dry-run visibility — which frozen bundle a launch would use, plus what the
+  // box would be bootstrapped into.
+  planNotes: (cfg) => [...proMaxPlanNotes(cfg.promax), ...proMaxRemoteBootstrap(cfg).planNotes],
 }

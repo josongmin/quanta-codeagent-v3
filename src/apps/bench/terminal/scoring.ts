@@ -28,6 +28,12 @@
  * standard-config admission and the Quanta receipt live in `report.ts`.
  */
 
+import {
+  TERMINAL_PASS_AT_KS,
+  type TerminalOfficialMetrics,
+  type TerminalPassAtK,
+} from "@/runner/batch/report-terminal"
+
 /** One trial row, shaped like the Harbor Hub bulk rows upstream consumes. */
 export interface ScorableTrial {
   readonly id: string
@@ -43,28 +49,19 @@ export interface ScorableTrial {
   readonly finishedAt: string | null
 }
 
-/** The pass@k columns the leaderboard `metrics_schema` requires. */
-export const PASS_AT_KS = [2, 3, 4, 5] as const
-export type PassAtK = (typeof PASS_AT_KS)[number]
+/** The pass@k columns the leaderboard `metrics_schema` requires.
+ *  Declared once, beside the report shape that persists them. */
+export const PASS_AT_KS = TERMINAL_PASS_AT_KS
+export type PassAtK = TerminalPassAtK
 
 /** Per-task reward lists, in trial order. Insertion order is load-bearing: the
  *  stderr sum is a float accumulation and upstream walks a `defaultdict`. */
 export type RewardsByTask = ReadonlyMap<string, readonly (number | null)[]>
 
-export interface OfficialMetrics {
-  readonly accuracy: number
-  readonly accuracyStderr: number
-  readonly displayAccuracy: string
-  readonly nTrials: number
-  readonly passAtK: Readonly<Record<PassAtK, number>>
-  readonly uncachedInputTokens: number
-  readonly cachedInputTokens: number
-  readonly outputTokens: number
-  readonly totalCostUsd: number
-  readonly displayTotalCostUsd: string
-  readonly avgTrialDurationSec: number
-  readonly rewardHacks: number
-}
+/** The metric block a Terminal report persists. Declared once, in the batch
+ *  layer that owns the persisted shape; named `OfficialMetrics` here because
+ *  that is what the upstream calculator this file ports calls it. */
+export type OfficialMetrics = TerminalOfficialMetrics
 
 // ── CPython numeric semantics ────────────────────────────────────────────────
 //

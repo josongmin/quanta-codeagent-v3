@@ -44,6 +44,12 @@ export {
   readProMaxPublicTasks,
 } from "./public-reader"
 export {
+  PROMAX_SAMPLE_ENV,
+  type ProMaxSampleSelectionInput,
+  parseProMaxSampleManifest,
+  selectProMaxSampleIds,
+} from "./sample-select"
+export {
   type BuildProMaxSampleFamilyInput,
   buildProMaxSampleFamily,
   buildProMaxSampleManifest,

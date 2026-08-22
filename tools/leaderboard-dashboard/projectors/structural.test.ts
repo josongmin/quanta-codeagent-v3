@@ -118,9 +118,11 @@ describe("rail: the page shell branches on no suite identity", () => {
 // ---------------------------------------------------------------------------
 
 describe("rail: one legacy-normalization boundary for the whole dashboard tree", () => {
-  /** The single identity normalizer, and the single legacy-encoding adapter. */
+  /** The single identity normalizer. TB21-04 removed the LAST legacy-encoding
+   *  adapter (Terminal's): the pre-2.1 fold recorded no trial ids, rewards or
+   *  task versions, so there is no honest 2.1 reading of it and those artifacts
+   *  are quarantined at the identity boundary instead of being re-scored. */
   const DECODE_OWNER = join("projectors", "registry.ts")
-  const LEGACY_ADAPTER = join("projectors", "terminal-bench.ts")
 
   const LIVE_DECODE = /(?<![.\w$])decodeCanonicalReport\s*\(/
   /** Interpreting a `datasetFamily` VALUE as a suite id — i.e. reading the
@@ -154,22 +156,26 @@ describe("rail: one legacy-normalization boundary for the whole dashboard tree",
     expect(callers).toEqual([DECODE_OWNER])
   })
 
-  test("exactly ONE dashboard module reads a legacy family as a suite", () => {
+  test("NO dashboard module reads a legacy family as a suite any more", () => {
+    // The strongest form of the old rail: with Terminal's adapter gone there is
+    // no sanctioned home left, so the count is ZERO rather than one. The
+    // non-vacuity probes above prove the detector still fires on the real thing.
     const offenders = walk(DASHBOARD)
       .filter(({ text }) => FAMILY_AS_SUITE.test(stripComments(text)))
       .map(({ path }) => path)
       .sort()
-    expect(offenders).toEqual([LEGACY_ADAPTER])
+    expect(offenders).toEqual([])
   })
 
-  test("legacy adoption is REGISTERED, not scattered (known-item floor)", () => {
+  test("legacy adoption stays a REGISTERED seam, unused (known-item floor)", () => {
     const wired = walk(DASHBOARD)
       .filter(({ text }) => ADOPT_LEGACY.test(stripComments(text)))
       .map(({ path }) => path)
       .sort()
-    // The contract (types.ts), the dispatcher that runs it (registry.ts), and the
-    // one suite that has a pre-canonical encoding. Nothing else.
-    expect(wired).toEqual([DECODE_OWNER, LEGACY_ADAPTER, join("projectors", "types.ts")].sort())
+    // Only the contract (types.ts) and the dispatcher that would run it
+    // (registry.ts). No projector implements one — a new legacy adapter has to be
+    // added deliberately, and this rail is where it shows up.
+    expect(wired).toEqual([DECODE_OWNER, join("projectors", "types.ts")].sort())
   })
 
   test("the trove readers consume the ONE boundary instead of parsing identity", () => {
@@ -209,10 +215,11 @@ describe("rail: no scattered promax family branches", () => {
 // Rail 3 — no projector re-implements the official metric formula.
 // ---------------------------------------------------------------------------
 
-/** `resolvedPct` is the OFFICIAL-shaped metric. Exactly one module in the repo
- *  computes it (src/runner/batch/report-terminal.ts); a projector that assigns
- *  it is a second scoring authority. Reading `report.totals.resolvedPct` is fine. */
-const SECOND_SCORER = /resolvedPct\s*[:=][^=]/
+/** The OFFICIAL-shaped metric. TB21-04 replaced the folded `resolvedPct`
+ *  headline with `accuracy` (a port of the pinned upstream calculator), so the
+ *  detector tracks BOTH spellings: a projector that assigns either is a second
+ *  scoring authority. Reading a persisted `report.metrics.accuracy` is fine. */
+const SECOND_SCORER = /(?:resolvedPct|accuracy)\s*[:=][^=]/
 
 describe("rail: projectors format persisted metrics, never recompute them", () => {
   test("the detector actually detects (non-vacuity)", () => {
@@ -222,6 +229,8 @@ describe("rail: projectors format persisted metrics, never recompute them", () =
     )
     expect(SECOND_SCORER.test("return report.totals.resolvedPct")).toBe(false)
     expect(SECOND_SCORER.test("if (a.resolvedPct === b.resolvedPct) return 0")).toBe(false)
+    expect(SECOND_SCORER.test("const accuracy = (100 * successful) / total")).toBe(true)
+    expect(SECOND_SCORER.test("return report.metrics.accuracy")).toBe(false)
   })
 
   test("no projector module computes an official-shaped score", () => {
@@ -231,12 +240,16 @@ describe("rail: projectors format persisted metrics, never recompute them", () =
     expect(offenders).toEqual([])
   })
 
-  test("the ONE owner of that formula is the report builder, and it still owns it", () => {
+  test("the ONE owner of that formula is the pinned upstream scorer, and it still owns it", () => {
+    // TB21-04 moved the official metric out of the report builder and into a
+    // verbatim PORT of the upstream leaderboard calculator, proven field-for-field
+    // against the vendored `metrics.py` executed as a live oracle.
     const owner = readFileSync(
-      join(DASHBOARD, "..", "..", "src", "runner", "batch", "report-terminal.ts"),
+      join(DASHBOARD, "..", "..", "src", "apps", "bench", "terminal", "scoring.ts"),
       "utf8",
     )
     expect(SECOND_SCORER.test(owner)).toBe(true)
+    expect(owner).toContain("leaderboard/src/leaderboard/core/metrics.py")
   })
 })
 
@@ -330,11 +343,12 @@ describe("rail: the dashboard formats official-grade totals, never derives them"
 
 describe("rail: the touched boundaries moved out of the shell", () => {
   const TB_RENDER_PATH = [
-    "function tbOurResults",
     "function tbTaskRows",
+    "function tbSelectedRun",
     "function renderTbCards",
     "function renderTbMatrix",
     "function drawTbMatrix",
+    "function tbScaffolds",
   ] as const
 
   test("the Terminal render path is no longer defined in any shell file", () => {
@@ -355,7 +369,12 @@ describe("rail: the touched boundaries moved out of the shell", () => {
    * was false: server.ts could have gained a hundred lines silently.
    *
    * Measured 2026-08-22 on this working tree (`wc -l`):
-   *   server.ts 1269, page.ts 997.
+   *   server.ts 1215, page.ts 997.
+   * TB21-05 took another 54 lines out: the Terminal per-instance row shaping
+   * moved into the suite's own projector (its persisted channel is `trials`,
+   * which the shell cannot read anyway), and the SWE preset-label fallback chain
+   * — the last suite knowledge left in the shell — moved to
+   * `projectors/swe-bench/preset-label.ts`.
    * server.ts was 2251 before the page extraction (2373 pre-BFND-03) and 1350
    * before PMX-05 moved the Run/row SHAPES out to `run-types.ts`. The floor is
    * RE-ANCHORED at each measurement, downward only: PMX-05 added a field to the
@@ -363,7 +382,7 @@ describe("rail: the touched boundaries moved out of the shell", () => {
    * A deliberate growth must move these numbers in the same commit.
    */
   const SIZE_FLOOR: Readonly<Record<string, number>> = {
-    "server.ts": 1269,
+    "server.ts": 1215,
     "page.ts": 997,
   }
 

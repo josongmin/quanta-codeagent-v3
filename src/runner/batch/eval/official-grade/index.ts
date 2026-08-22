@@ -17,6 +17,10 @@ export {
   projectLegacyBuckets,
 } from "./legacy-buckets"
 export {
+  type MergeOfficialGradeReceiptsInput,
+  mergeOfficialGradeReceipts,
+} from "./merge"
+export {
   type BuildOfficialGradeReceiptInput,
   buildOfficialGradeReceipt,
   deriveMissingInstanceIds,

@@ -106,14 +106,20 @@ describe("BFND-03 — the served page interpolates the suite client bundles", ()
 
   test("the Terminal suite's real render entry points reach the browser", () => {
     for (const fn of [
-      "function tbOurResults",
       "function tbTaskRows",
+      "function tbSelectedRun",
       "function renderTbCards",
       "function renderTbMatrix",
       "function drawTbMatrix",
+      "function tbScaffolds",
     ]) {
       expect(PAGE).toContain(fn)
     }
+    // TB21-05 — the any-pass fold the cutover REMOVED must not reappear in the
+    // shipped bytes: it collapsed a task's k trials into one optimistic boolean
+    // across runs AND arms, which is the projection the ticket forbids.
+    expect(PAGE).not.toContain("function tbOurResults")
+    expect(PAGE).not.toContain("tbBestRun")
     // ...and the shell's suite dispatch that those bundles register into.
     expect(PAGE).toContain("var SUITE_VIEWS = {}")
     expect(PAGE).toContain("function suiteView()")
@@ -624,6 +630,7 @@ function loadAgg(): AggModule {
 interface DispatchProbe {
   buildRun: (file: string, mtime: number) => Record<string, unknown> | null
   calls: unknown[]
+  quarantined: { file: string; raw: unknown; error: unknown }[]
 }
 
 const ARTIFACT = {
@@ -646,30 +653,35 @@ function loadDispatch(projection: unknown, artifact: unknown = ARTIFACT): Dispat
     sliceExprArrow("const instanceIsUnmeasured ="),
     sliceExprArrow("const rowBaseOf ="),
     sliceExprArrow("const sweRowsOf ="),
-    sliceExprArrow("const terminalRowsOf ="),
     sliceDecl("const tallyOf ="),
     sliceDecl("function buildRunFromFile"),
     "return buildRunFromFile;",
   ].join("\n")
   const calls: unknown[] = []
+  const quarantined: DispatchProbe["quarantined"] = []
   const projectReport = (raw: unknown): unknown => {
     calls.push(raw)
     if (projection === null) throw new Error("unidentifiable artifact")
     return projection
   }
+  const recordQuarantine = (file: string, raw: unknown, error: unknown): void => {
+    quarantined.push({ file, raw, error })
+  }
   const buildRun = new Function(
     "readFileSync",
     "basename",
-    "presetLabel",
+    "swePresetLabel",
     "projectReport",
+    "recordQuarantine",
     TRANSPILER.transformSync(ts),
   )(
     () => JSON.stringify(artifact),
     (p: string) => pathBasename(p),
     () => "SERVER-SIDE-FALLBACK-LABEL",
     projectReport,
+    recordQuarantine,
   ) as DispatchProbe["buildRun"]
-  return { buildRun, calls }
+  return { buildRun, calls, quarantined }
 }
 
 describe("BFND-03 — server.ts dispatches every artifact through the registry", () => {
@@ -681,6 +693,12 @@ describe("BFND-03 — server.ts dispatches every artifact through the registry",
       campaignIdentity: "terminal-bench@2.1 pinned-ref",
       presetLabel: "TB +levers",
       headline: { resolved: 7, total: 9 },
+      // TB21-05: a suite that owns its per-instance channel ships the rows itself.
+      rows: [
+        { id: "trial-1", passed: true, taskId: "org/a", outcome: "graded_pass" },
+        { id: "trial-2", passed: false, taskId: "org/a", outcome: "agent_crash" },
+      ],
+      runPayload: { datasetRef: "pinned-ref", metrics: { accuracy: 50 } },
     })
     const run = buildRun("/runs/x.report.json", 123)
     // (a) the LIVE call happened, with the artifact itself — not a filename sniff.
@@ -724,6 +742,39 @@ describe("BFND-03 — server.ts dispatches every artifact through the registry",
     expect(calls).toHaveLength(1)
   })
 
+  // TB21-05 — "dropped silently" is indistinguishable from "never existed", so
+  // the drop is RECORDED at the exact point it happens. This binds the LIVE
+  // call: the injected port is the one server.ts reaches for.
+  test("a REFUSED report artifact is RECORDED for the quarantine diagnostic", () => {
+    const { buildRun, quarantined } = loadDispatch(null)
+    expect(buildRun("/runs/old-tb.report.json", 123)).toBeNull()
+    expect(quarantined).toHaveLength(1)
+    expect(quarantined[0]?.file).toBe("/runs/old-tb.report.json")
+    // The raw ARTIFACT goes with it, so a projector can claim its own refusals…
+    expect(quarantined[0]?.raw).toEqual(ARTIFACT)
+    // …and the real reason, not a generic one.
+    expect((quarantined[0]?.error as Error).message).toBe("unidentifiable artifact")
+  })
+
+  test("PAIRED CONTROL: a SUCCESSFUL projection records no quarantine", () => {
+    const { buildRun, quarantined } = loadDispatch({
+      benchmarkSuite: "swe-bench",
+      instanceRowKind: "swe-grade",
+      viewId: "verified",
+      campaignIdentity: "",
+    })
+    expect(buildRun("/runs/x.report.json", 123)).not.toBeNull()
+    expect(quarantined).toEqual([])
+  })
+
+  test("a non-report JSON is dropped WITHOUT a quarantine line (not every file is a report)", () => {
+    // `summary.json` / `closure-*.json` share the trove but are a different
+    // schema entirely. Reporting each as "refused" would bury the real ones.
+    const { buildRun, quarantined } = loadDispatch(null, { generatedAt: "x", boxes: [] })
+    expect(buildRun("/runs/summary.json", 1)).toBeNull()
+    expect(quarantined).toEqual([])
+  })
+
   // -------------------------------------------------------------------------
   // MED-D — the consumer shape is split PER SUITE. A Terminal row must not carry
   // the SWE-only `fail` / `goldResolved` channels, and a SWE row must not carry
@@ -760,20 +811,36 @@ describe("BFND-03 — server.ts dispatches every artifact through the registry",
     return (run?.perInstance ?? []) as Record<string, unknown>[]
   }
 
-  test("a Terminal run's rows carry NO SWE-only fields", () => {
-    const rows = rowsFor("trial-receipt", "terminal-bench")
-    expect(rows).toHaveLength(2)
-    for (const row of rows) {
+  // TB21-05 — a suite that owns its per-instance channel supplies the rows
+  // ITSELF (`ProjectedRun.rows`). The shell carries them verbatim and shapes
+  // nothing: it must neither drop a suite field nor add a SWE one.
+  test("a suite-owned run carries the PROJECTOR's rows verbatim, and no SWE channel", () => {
+    const projectedRows = [
+      { id: "trial-1", passed: true, taskId: "org/a", outcome: "graded_pass", costUsd: 0.5 },
+      { id: "trial-2", passed: false, taskId: "org/a", outcome: "agent_crash", costUsd: null },
+    ]
+    const { buildRun } = loadDispatch(
+      {
+        benchmarkSuite: "terminal-bench",
+        instanceRowKind: "trial-receipt",
+        viewId: "terminal-bench",
+        campaignIdentity: "id",
+        rows: projectedRows,
+        runPayload: { datasetRef: "pinned", metrics: { accuracy: 50 } },
+      },
+      // The artifact's OWN `perInstance` carries both suites' vocabularies; a
+      // shell that still shaped rows would leak them onto the Terminal run.
+      MIXED_ARTIFACT,
+    )
+    const run = buildRun("/runs/x.report.json", 1)
+    expect(run?.perInstance).toEqual(projectedRows)
+    for (const row of (run?.perInstance ?? []) as Record<string, unknown>[]) {
       expect("fail" in row).toBe(false)
       expect("goldResolved" in row).toBe(false)
-      // ...while the Terminal channel it DOES own survives (non-vacuity).
-      expect(Object.keys(row).sort()).toEqual(
-        row.id === "row-a"
-          ? ["durationMs", "error", "id", "passed", "turns"]
-          : ["durationMs", "id", "passed", "turns"],
-      )
+      expect("error" in row).toBe(false)
     }
-    expect(rows[0]?.error).toEqual({ kind: "agent-crash" })
+    // ...and the suite's per-run payload rides along untouched.
+    expect(run?.suiteView).toEqual({ datasetRef: "pinned", metrics: { accuracy: 50 } })
   })
 
   test("a SWE run's rows carry NO Terminal-only infra-fault field", () => {
@@ -992,15 +1059,21 @@ describe("campaign denominator excludes re-runnable holes (FLAG-B)", () => {
     expect(naiveRate).toBeLessThan(realRate) // deflation iff we (wrongly) included it
   })
 
-  // BFND-03: the D1 infra-fault rule now lives in the shared denominator, so a
-  // campaign rollup agrees with the persisted headline the report builder stamps.
-  test("an explicit agent-CRASH leaves the campaign denominator (D1), with a PAIRED CONTROL", () => {
-    const withError = (id: string, kind: string) => ({
+  // TB21-05 REVERSED the old D1 exclusion for Terminal.
+  //
+  // The pre-cutover rule dropped an `agent-crash` row from the denominator
+  // ("a re-runnable infra hole, not a miss"). TB21-04's scorer does the
+  // opposite: an errored trial earns no reward, so it scores ZERO and stays in
+  // the official denominator. Keeping the dashboard exclusion made the campaign
+  // rollup silently disagree with the artifact it was rendering — so a
+  // suite-owned trial row now carries no re-runnable channel at all and every
+  // trial counts, exactly as the scorer counted it.
+  test("a CRASHED trial STAYS in the campaign denominator, with a PAIRED CONTROL", () => {
+    const trialRow = (id: string, outcome: string): unknown => ({
       id,
-      passed: false,
-      turns: 1,
-      fail: null,
-      error: { kind },
+      passed: outcome === "graded_pass",
+      taskId: "org/task",
+      outcome,
     })
     const runWith = (rows: unknown[]): unknown => ({
       label: "tb-camp",
@@ -1016,27 +1089,37 @@ describe("campaign denominator excludes re-runnable holes (FLAG-B)", () => {
     })
     const crashed = firstCampaign([
       runWith([
-        { id: "a", passed: true, turns: 1, fail: null },
-        { id: "b", passed: false, turns: 1, fail: null },
-        withError("c", "agent-crash"),
+        trialRow("a", "graded_pass"),
+        trialRow("b", "graded_fail"),
+        trialRow("c", "agent_crash"),
       ]),
     ])
     expect(crashed.resolved).toBe(1)
-    expect(crashed.total).toBe(2) // crash left the denominator
-    expect(crashed.unmeasured).toBe(1)
+    // 3, not 2 — the crash is a scored zero. This is the number TB21-04's
+    // `officialShapedTotals` produces for the same trial set.
+    expect(crashed.total).toBe(3)
+    expect(crashed.unmeasured).toBe(0)
 
-    // CONTROL: an agent-TIMEOUT is a GENUINE miss — the agent spent its whole
-    // budget — so it must STAY in the denominator. Same shape, different kind.
+    // CONTROL: an agent-TIMEOUT behaves identically — there is no longer a
+    // privileged error class, which is the whole point of the reversal.
     const timedOut = firstCampaign([
       runWith([
-        { id: "a", passed: true, turns: 1, fail: null },
-        { id: "b", passed: false, turns: 1, fail: null },
-        withError("c", "agent-timeout"),
+        trialRow("a", "graded_pass"),
+        trialRow("b", "graded_fail"),
+        trialRow("c", "agent_timeout"),
       ]),
     ])
     expect(timedOut.resolved).toBe(1)
     expect(timedOut.total).toBe(3)
     expect(timedOut.unmeasured).toBe(0)
+
+    // PAIRED CONTROL on the OTHER suite: the SWE re-runnable rule is untouched,
+    // so this reversal did not quietly delete the FLAG-B hole exclusion.
+    const throttled = firstCampaign([
+      makeRun("swe-camp", [passRow("repo-1"), failRow("repo-2", "throttled")]),
+    ])
+    expect(throttled.total).toBe(1)
+    expect(throttled.unmeasured).toBe(1)
   })
 
   test("instance measured in one shard, throttled in another counts as MEASURED (not unmeasured)", () => {
@@ -1120,51 +1203,8 @@ describe("realMiss card excludes re-runnable holes (FLAG-C)", () => {
   })
 })
 
-describe("tbOurResults (D1/P1-C) — infra-fault exclusion + explicit arm routing", () => {
-  const runTbOur = (DATA: unknown) => {
-    const src = [
-      extractFn("tbRuns"),
-      extractFn("tbArmOf"),
-      extractFn("tbOurResults"),
-      "return tbOurResults();",
-    ].join("\n")
-    return new Function("DATA", src)(DATA) as {
-      base: Record<string, unknown>
-      lev: Record<string, unknown>
-    }
-  }
-  test("agent-crash is EXCLUDED (not a miss); agent-timeout STAYS a fail; pass kept", () => {
-    const out = runTbOur({
-      runs: [
-        {
-          benchmarkSuite: "terminal-bench",
-          arm: "levers",
-          preset: "x",
-          perInstance: [
-            { id: "crashed", passed: false, error: { kind: "agent-crash" } },
-            { id: "timedout", passed: false, error: { kind: "agent-timeout" } },
-            { id: "solved", passed: true },
-          ],
-        },
-      ],
-    })
-    expect("crashed" in out.lev).toBe(false) // infra crash excluded from the denominator
-    expect(out.lev.timedout).toBe(false) // timeout stays a genuine miss (competitors score it 0 too)
-    expect(out.lev.solved).toBe(true)
-  })
-  test("explicit report.arm routes over the preset substring (an oc1 run does NOT poison baseline)", () => {
-    const out = runTbOur({
-      runs: [
-        // preset lacks "levers" but arm says levers ⇒ must land in lev, NOT base.
-        {
-          benchmarkSuite: "terminal-bench",
-          arm: "levers",
-          preset: "TB +oc1",
-          perInstance: [{ id: "t", passed: true }],
-        },
-      ],
-    })
-    expect(out.lev.t).toBe(true)
-    expect("t" in out.base).toBe(false)
-  })
-})
+// The `tbOurResults` any-pass fold (a task's trials collapsed into one boolean
+// across runs and arms, with agent-crash excluded) was DELETED by TB21-05: it is
+// the optimistic union the ticket forbids, and its crash exclusion contradicted
+// TB21-04's denominator. Its replacement is the per-TRIAL distribution, tested
+// against the real shipped bundle in `projectors/terminal-bench.client.test.ts`.

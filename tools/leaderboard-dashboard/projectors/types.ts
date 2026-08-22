@@ -54,6 +54,21 @@ export interface BenchmarkView {
  */
 export type InstanceRowKind = "swe-grade" | "trial-receipt"
 
+/**
+ * TB21-05 — the MINIMUM the page shell needs from a suite-shaped per-instance
+ * row: an identity and a verdict, which is all the shared campaign tally reads.
+ *
+ * Everything else on a row belongs to the suite that produced it (a Terminal
+ * trial receipt carries a task id, an outcome class, a reward, a cost and a
+ * trajectory path; a SWE grade row carries a classified failure). The shell
+ * therefore stops shaping rows for a suite that owns its own per-instance
+ * channel — it just carries them.
+ */
+export interface ProjectedInstanceRow {
+  readonly id: string
+  readonly passed: boolean
+}
+
 /** What a projector extracts from one persisted report. */
 export interface ProjectedRun {
   readonly benchmarkSuite: BenchmarkSuiteId
@@ -84,6 +99,22 @@ export interface ProjectedRun {
    * why the shell's existing row-counting stays byte-identical.
    */
   readonly officialGrade?: OfficialGradeView
+  /**
+   * TB21-05 — the suite's OWN per-instance rows, already shaped.
+   *
+   * A suite whose persisted artifact carries a per-instance channel the shell
+   * cannot read (Terminal's lossless `trials`, which is not `perInstance` at
+   * all) produces its rows here. Absent ⇒ the shell keeps shaping SWE rows out
+   * of `perInstance` exactly as before.
+   */
+  readonly rows?: readonly ProjectedInstanceRow[]
+  /**
+   * TB21-05 — suite-owned per-RUN payload (provenance, admission, the persisted
+   * official metrics), carried verbatim to the suite's client view. The shell
+   * never reads inside it, which is what keeps a suite's provenance out of the
+   * shared Run shape.
+   */
+  readonly runPayload?: Record<string, unknown>
 }
 
 /** Client-side render code a suite contributes to the dashboard page. */
@@ -100,6 +131,19 @@ export interface SuiteProjector {
    * null when the raw artifact is not this suite's legacy encoding.
    */
   readonly adoptLegacy?: (raw: Record<string, unknown>) => Record<string, unknown> | null
+  /**
+   * TB21-05 — does this suite own a REFUSED artifact?
+   *
+   * A report that fails the identity boundary is dropped from the run set, but
+   * "dropped silently" is indistinguishable from "never existed". A suite claims
+   * its own refusals so the dashboard can show a VISIBLE quarantine diagnostic
+   * ("this file exists and was refused, here is why") instead of a blank view.
+   *
+   * Claiming is by EXPLICIT identity or by the suite's own provenance marker —
+   * never by reading a `datasetFamily` value as a suite id, which is the
+   * pre-BFND-02 reading the whole extraction removed.
+   */
+  readonly claimsRefused?: (raw: Record<string, unknown>) => boolean
   readonly project: (report: CanonicalBenchReport) => ProjectedRun
   /** Views this suite offers, given the view ids actually present in the runs. */
   readonly viewsFor: (seen: ReadonlySet<string>) => readonly BenchmarkView[]

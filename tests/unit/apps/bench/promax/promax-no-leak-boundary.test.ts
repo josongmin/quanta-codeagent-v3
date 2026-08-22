@@ -25,13 +25,6 @@ import { join, relative } from "node:path"
 import { DATASET_FAMILIES, type DatasetFamily } from "@/apps/bench/dataset-family-token"
 import { readFamilyCorpusText } from "@/apps/bench/profiles/corpus-read"
 import { resolveDatasetFamilyProfile } from "@/apps/bench/profiles/registry"
-import { PROMAX_V1_SNAPSHOT } from "@/apps/bench/promax/provenance/frozen-snapshot"
-import {
-  PROMAX_BUNDLE_ROOT_ENV,
-  PROMAX_PYTHON_ENV,
-  resolveProMaxSettings,
-} from "@/apps/bench/promax/settings"
-import { shq } from "@/apps/bench/remote/box-session/shell"
 import {
   assertGraderBundleOutsideAgentRoot,
   buildProMaxArtifacts,
@@ -44,6 +37,13 @@ import {
   serializeProMaxPublicTasks,
   writeProMaxArtifacts,
 } from "@/apps/bench/promax/corpus"
+import { PROMAX_V1_SNAPSHOT } from "@/apps/bench/promax/provenance/frozen-snapshot"
+import {
+  PROMAX_BUNDLE_ROOT_ENV,
+  PROMAX_PYTHON_ENV,
+  resolveProMaxSettings,
+} from "@/apps/bench/promax/settings"
+import { shq } from "@/apps/bench/remote/box-session/shell"
 import { resolveBenchRunConfig } from "@/apps/bench/run-config"
 import { verify } from "@/runner/batch/eval/verdict"
 import {

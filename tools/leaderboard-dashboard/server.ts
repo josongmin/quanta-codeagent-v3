@@ -31,15 +31,16 @@ import { iidFromBody, launchSpecFromBody, presetsFromCatalog } from "./bench-req
 import type { ExternalBaselines } from "./external-baselines"
 import { campaignKeyOf } from "./family-partition"
 import { renderDashboardPage } from "./page"
-import { benchmarkViewsOf, projectReport, suiteData } from "./projectors/registry"
-import type {
-  FailInfo,
-  InstanceRowBase,
-  Run,
-  RunBase,
-  SweInstanceRow,
-  TerminalInstanceRow,
-} from "./run-types"
+import {
+  benchmarkViewsOf,
+  projectReport,
+  quarantinedArtifacts,
+  recordQuarantine,
+  suiteData,
+} from "./projectors/registry"
+import { swePresetLabel } from "./projectors/swe-bench/preset-label"
+import type { ProjectedInstanceRow } from "./projectors/types"
+import type { FailInfo, InstanceRowBase, Run, RunBase, SweInstanceRow } from "./run-types"
 
 const HOME = homedir()
 const REPO = join(import.meta.dir, "..", "..")
@@ -227,23 +228,19 @@ function parseMatrix(): MatrixData {
 }
 
 // A failing instance is unmeasured (re-runnable) iff its classified failure says
-// so, OR the row carries an explicit agent-CRASH infra fault. Passing instances
-// are always measured. Used for both run-level and campaign-level denominators
-// so the two stay consistent.
+// so. Passing instances are always measured. Used for both run-level and
+// campaign-level denominators so the two stay consistent.
 //
-// BFND-03 — the agent-crash clause: D1 (RFC jul-3) says an agent crash (auth
-// death / harness exception) is a re-runnable measurement hole, never a
-// capability miss, and the report builder ALREADY excludes it when it stamps a
-// suite's persisted totals. Before, only the view's own fold knew that, so a
-// campaign rollup silently disagreed with the run's headline. It lives here now
-// so ONE rule serves both. Each suite supplies its OWN channel (SWE: a classified
-// `fail`; Terminal: an infra-fault `error`), so this READS both optionally rather
-// than forcing either onto the other's row type.
-const instanceIsUnmeasured = (pi: {
-  passed: boolean
-  fail?: FailInfo | null
-  error?: { kind: string }
-}): boolean => !pi.passed && (pi.fail?.reRunnable === true || pi.error?.kind === "agent-crash")
+// TB21-05 removed the agent-CRASH clause that used to sit beside it. It encoded
+// D1 (RFC jul-3) — "an agent crash is a re-runnable hole, not a miss" — but
+// TB21-04 REVERSED that for Terminal: an errored trial earns no reward, so it
+// scores zero and stays in the official denominator. Keeping the exclusion here
+// made the dashboard's rollup silently disagree with the scorer that produced the
+// artifact. A suite whose rows are its own (see `ProjectedRun.rows`) therefore
+// supplies rows with no re-runnable channel at all, and this predicate is once
+// again exactly the SWE rule it is named after.
+const instanceIsUnmeasured = (pi: { passed: boolean; fail?: FailInfo | null }): boolean =>
+  !pi.passed && pi.fail?.reRunnable === true
 
 // Canonical re-runnable terminations — byte-identical to verdicts.ts's
 // RE_RUNNABLE_TERMINATIONS. throttle(429/usage-limit), harness/runner infra,
@@ -333,59 +330,6 @@ function walkReports(root: string, acc: string[], depth = 0) {
   }
 }
 
-// The versioned preset (agentless-v2, v3-thin-strict, …) is a `--preset` CLI
-// arg that is NOT persisted in report.json. We recover it from the file path
-// (the ground truth of how the campaign was launched). A trailing `*` marks a
-// label inferred from path/knobs rather than read from the data.
-const presetFromEncodedFileName = (name: string): string | undefined => {
-  if (/v3.?thin.*strict|strict/.test(name)) return "agentless-v3-thin-strict*"
-  if (/v3.?thin|v3thin/.test(name)) return "agentless-v3-thin*"
-  if (/norepair/.test(name)) return "agentless-v2 · norepair*"
-  if (/reprovote/.test(name)) return "agentless-v2 · reprovote*"
-  if (/v2.?repair|[-_]repair/.test(name)) return "agentless-v2 · repair*"
-  if (/v2/.test(name)) return "agentless-v2*"
-  if (/v1/.test(name)) return "agentless-v1*"
-  if (/^local-/.test(name)) return "local"
-  return undefined
-}
-
-const presetFromSidecar = (name: string, knobs: JsonRecord | null): string | undefined => {
-  if (!/^report-i-/.test(name)) return undefined
-  const preset = asString(knobs?.preset)
-  return typeof preset === "string" && preset.trim()
-    ? `${preset} · full-remote`
-    : "full-remote · preset 미기록"
-}
-
-const presetFromFingerprint = (knobs: JsonRecord | null): string => {
-  try {
-    const resolved = asRecord(knobs?.resolved) ?? {}
-    const issueHint = asRecord(resolved["issue-hint"])
-    const reproVote = asRecord(resolved["repro-vote"])
-    const bits = [
-      asString(issueHint?.value),
-      asString(reproVote?.display) ?? asString(reproVote?.value),
-    ].filter((bit): bit is string => !!bit)
-    return bits.length > 0 ? `${bits.join("/")}*` : "preset 미기록"
-  } catch {
-    return "preset 미기록"
-  }
-}
-
-function presetLabel(file: string, knobs: JsonRecord | null): string {
-  const name = basename(file).toLowerCase()
-  const dir = basename(file.replace(/\/[^/]+$/, "")).toLowerCase()
-  // BFND-03: a suite whose reports label their own presets supplies
-  // `ProjectedRun.presetLabel` and never reaches this SWE-oriented fallback chain
-  // (it used to be a filename sniff right here).
-  const encoded = presetFromEncodedFileName(name)
-  if (encoded !== undefined) return encoded
-  if (dir === "sota" || /shard/.test(name)) return "agentless-v2 (SOTA)*"
-  const sidecar = presetFromSidecar(name, knobs)
-  if (sidecar !== undefined) return sidecar
-  return presetFromFingerprint(knobs)
-}
-
 // Per-file parse memo keyed on (path, mtimeMs). The directory walk + statSync
 // still run on every call (so added / removed / EDITED files are always seen —
 // a content edit bumps mtimeMs, which is the cache key, forcing a re-parse), but
@@ -425,16 +369,6 @@ const sweRowsOf = (rows: readonly unknown[]): SweInstanceRow[] =>
     }
   })
 
-/** MED-D — Terminal rows keep only the infra-fault channel. D1: carry the
- *  classification through so the suite view can exclude it from the denominator. */
-const terminalRowsOf = (rows: readonly unknown[]): TerminalInstanceRow[] =>
-  rows.map((pi) => {
-    const row = asRecord(pi)
-    const errRec = asRecord(row?.error)
-    const errKind = errRec !== null && typeof errRec.kind === "string" ? errRec.kind : undefined
-    return { ...rowBaseOf(row), ...(errKind !== undefined ? { error: { kind: errKind } } : {}) }
-  })
-
 /**
  * Run-level tally, shared by both suites.
  *
@@ -444,7 +378,7 @@ const terminalRowsOf = (rows: readonly unknown[]): TerminalInstanceRow[] =>
  * dashboard formats them; otherwise it keeps counting rows exactly as before.
  */
 const tallyOf = (
-  rows: readonly (SweInstanceRow | TerminalInstanceRow)[],
+  rows: readonly (SweInstanceRow | ProjectedInstanceRow)[],
   headline: { resolved: number; total: number } | undefined,
 ): Pick<RunBase, "resolved" | "total" | "unmeasured"> => {
   const unmeasured = rows.filter(instanceIsUnmeasured).length
@@ -462,13 +396,18 @@ function buildRunFromFile(f: string, mtime: number): Run | null {
   } catch {
     return null
   }
-  if (report === null || !Array.isArray(report.perInstance)) return null
+  if (report === null) return null
   // BFND-03: THE dispatch. An artifact whose identity cannot be established is
   // dropped rather than guessed at — a mixed report root never poisons a view.
+  // TB21-05: the refusal is RECORDED, so a suite view can show that the file
+  // exists and was refused instead of silently rendering a shorter list.
   let projected: ReturnType<typeof projectReport>
   try {
     projected = projectReport(report)
-  } catch {
+  } catch (error) {
+    if (Array.isArray(report.perInstance) || Object.hasOwn(report, "trials")) {
+      recordQuarantine(f, report, error)
+    }
     return null
   }
   const base: Omit<RunBase, "resolved" | "total" | "unmeasured"> = {
@@ -476,7 +415,7 @@ function buildRunFromFile(f: string, mtime: number): Run | null {
     file: f,
     model: asString(report.model) ?? "?",
     // A suite may label its own presets; otherwise the SWE fingerprint chain runs.
-    preset: projected.presetLabel ?? presetLabel(f, asRecord(report.knobs)),
+    preset: projected.presetLabel ?? swePresetLabel(f, asRecord(report.knobs)),
     viewId: projected.viewId,
     campaignIdentity: projected.campaignIdentity,
     benchmarkSuite: projected.benchmarkSuite,
@@ -484,17 +423,20 @@ function buildRunFromFile(f: string, mtime: number): Run | null {
     ...(typeof report.arm === "string" ? { arm: report.arm } : {}),
     mtime,
   }
-  // MED-D: shape the consumer rows from the suite's DECLARED row vocabulary, so
-  // a new suite that grades like SWE needs no change here at all.
-  if (projected.instanceRowKind === "trial-receipt") {
-    const perInstance = terminalRowsOf(report.perInstance)
+  // TB21-05: a suite whose artifact carries its OWN per-instance channel ships
+  // the rows already shaped (Terminal's lossless `trials` is not `perInstance`,
+  // so the shell could not read it even if it wanted to). The shell only carries
+  // them plus the suite's own per-run payload.
+  if (projected.rows !== undefined) {
     return {
       ...base,
-      ...tallyOf(perInstance, projected.headline),
+      ...tallyOf(projected.rows, projected.headline),
       instanceRowKind: "trial-receipt",
-      perInstance,
+      perInstance: projected.rows,
+      ...(projected.runPayload !== undefined ? { suiteView: projected.runPayload } : {}),
     }
   }
+  if (!Array.isArray(report.perInstance)) return null
   const perInstance = sweRowsOf(report.perInstance)
   return {
     ...base,
@@ -975,6 +917,10 @@ function buildData() {
     // BFND-03 — the selectable benchmark tabs, owned by the projector registry.
     // Each carries its `suite`, which is what the client dispatches its render on.
     benchmarks: benchmarkViewsOf(runs.map((r) => r.viewId)),
+    // TB21-05 — artifacts REFUSED at the identity boundary. They contribute no
+    // run, no campaign and no score; a suite view renders the ones it claims as
+    // a visible "refused, and here is why" diagnostic.
+    quarantine: quarantinedArtifacts(),
     // Suite-owned payloads (e.g. a suite's public competitor matrix). Each
     // projector contributes its own keys; the shell never names them.
     ...suiteData({ rawdataDir: RAWDATA, argOf }),

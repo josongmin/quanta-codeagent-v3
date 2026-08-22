@@ -5,9 +5,11 @@
  * re-deriving them. PURE types + plain constants — no IO, no behavior.
  */
 
+import type { OfficialGradeReceipt } from "@/runner/batch/eval/official-grade"
 import type { LspGroundingStatus } from "@/shared"
 import type { DatasetFamily } from "../../dataset-family-token"
 import { CURRENT_BENCH_BASE_PRESET } from "../../preset"
+import type { FamilyRemoteBootstrap } from "../../profiles/types"
 import type { SpawnFn, SpawnResult } from "../backend"
 import type { BootstrapTracer, BootstrapTracerOpts } from "../bootstrap-tracer"
 
@@ -69,6 +71,18 @@ export interface FullRemoteConfig {
    *  `BenchRunConfig.datasetFamily` here instead of letting each consumer
    *  re-derive it from ambient env. */
   readonly swebenchDatasetFamily?: DatasetFamily
+  /**
+   * PMX-04 — the family's DECLARED remote bootstrap specification, RESOLVED at
+   * the launch composition root (which owns the typed `BenchRunConfig`) and
+   * carried onto the box config.
+   *
+   * It is carried rather than re-derived here on purpose: `remote/**` owns
+   * provisioning and transport and must not rediscover family behaviour, and
+   * resolving it at the root is what lets `ec2-lifecycle.ts` execute a family's
+   * bootstrap without ever naming a family. `undefined` (verified/live/pro) ⇒
+   * not one extra ssh round trip.
+   */
+  readonly remoteBootstrap?: FamilyRemoteBootstrap
   /** Fail-closed single-box guard: if another quanta-bench box is already
    *  running, callers must opt in before launching a fresh one. */
   readonly allowExtraBoxes?: boolean
@@ -112,6 +126,18 @@ export interface FullRemoteResult {
   readonly emptyPatch?: readonly string[]
   readonly dryRun?: boolean
   readonly plan?: readonly string[]
+  /**
+   * PMX-03/04 — the OFFICIAL-GRADE RECEIPT this chunk's grader produced, when the
+   * family's remote lane declares one.
+   *
+   * It is the ONLY verdict payload the remote lane may carry for such a family:
+   * the four legacy id arrays above cannot express `ambiguous` (the grader
+   * declined) or `missing` (never graded), so a family that grades through an
+   * official out-of-process grader would lose those rows the moment they were
+   * projected. Absent for verified/live/pro ⇒ the four arrays keep their
+   * historical meaning and every one of those lanes is byte-identical.
+   */
+  readonly officialGrade?: OfficialGradeReceipt
   /** The box run hit the shared OAuth rate limit (a `generation_error` / 429 was
    *  observed in the run log). A pool uses this to BACK OFF before the next chunk
    *  instead of hammering the throttled login. Absent ⇒ not detected. */

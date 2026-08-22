@@ -31,6 +31,19 @@ export {
   PRODUCTION_CLASSIFICATION_TABLES,
 } from "./classify"
 export {
+  type BuildProMaxBootstrapSpecInput,
+  buildProMaxBootstrapPlan,
+  buildProMaxBootstrapSpec,
+  evaluateProMaxBootstrapReadiness,
+  PROMAX_BOOTSTRAP_STEPS,
+  PROMAX_MIN_FREE_DISK_BYTES,
+  type ProMaxBootstrapCommand,
+  type ProMaxBootstrapObservation,
+  type ProMaxBootstrapStep,
+  type ProMaxEvaluatorBootstrapSpec,
+  type ProMaxUpstreamFile,
+} from "./evaluator-bootstrap"
+export {
   buildGoldSentinelPatch,
   evaluateGoldSentinelGate,
   type GoldSentinelGateFailure,
@@ -39,6 +52,53 @@ export {
   goldSentinelPath,
   goldSentinelPathToken,
 } from "./gold-sentinel"
+export {
+  assertGoldenDerivationIsImageOnly,
+  CAMPAIGN_GOLDEN_MUTABLE_FIELD,
+  type CampaignGoldenDerivation,
+  type CampaignGoldenDerived,
+  type CampaignGoldenPin,
+  type CampaignGoldenRejected,
+  type DeriveCampaignGoldenInput,
+  deriveCampaignGolden,
+  diffGoldenDocuments,
+  GOLDEN_DIFF_VIOLATION_CODES,
+  GOLDEN_DIFF_VIOLATION_REASONS,
+  type GoldenDerivationFailure,
+  type GoldenDerivationFailureCode,
+  type GoldenDiffViolation,
+  type GoldenDiffViolationCode,
+  type GoldenFieldChange,
+  type GoldenStructuralDiff,
+  type GoldenStructuralDiffOk,
+} from "./golden-derive"
+export {
+  assertImageFreezeReadyForModelLaunch,
+  PROMAX_IMAGE_FAULT_CODES,
+  PROMAX_IMAGE_FAULT_REASONS,
+  PROMAX_REQUIRED_ARCHITECTURE,
+  PROMAX_REQUIRED_OS,
+  type ProMaxArtifactDigest,
+  type ProMaxImageFault,
+  type ProMaxImageFaultCode,
+  type ProMaxImageFreezeReceipt,
+  type ProMaxImageReceiptFailure,
+  type ProMaxImageReceiptFailureCode,
+  type ProMaxImageReceiptParse,
+  type ProMaxImageRecord,
+  type ProMaxPreflightStage,
+  parseProMaxImageFreezeReceipt,
+  serializeProMaxImageFreezeReceipt,
+} from "./image-freeze"
+export {
+  type DockerPort,
+  PROMAX_PREFLIGHT_CP_TARGET,
+  type ProMaxImagePreflightInput,
+  type ProMaxImageTarget,
+  proMaxPreflightContainerName,
+  proMaxPreflightProbeScript,
+  runProMaxImagePreflight,
+} from "./image-preflight"
 export {
   buildProMaxEvaluatorInvocation,
   PROMAX_EVAL_META_RELATIVE_PATH,

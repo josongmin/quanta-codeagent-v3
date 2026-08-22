@@ -17,10 +17,14 @@
  * a directory listing or a task name — the digest IS the task version upstream
  * checks each trial against.
  */
+import { TERMINAL_BENCH_DATASET_ID } from "@/runner/batch/report-terminal"
 import TASK_DIGESTS from "./terminal-bench-2-1-tasks.json" with { type: "json" }
 
-/** The dataset every official 2.1 trial must have run. */
-export const TERMINAL_BENCH_DATASET = "terminal-bench/terminal-bench-2-1"
+/** The dataset every official 2.1 trial must have run. The literal itself lives
+ *  with the persisted report shape (`@/runner/batch/report-terminal`), so the
+ *  identity a report DECLARES and the identity admission CHECKS cannot drift
+ *  apart into two strings. */
+export const TERMINAL_BENCH_DATASET = TERMINAL_BENCH_DATASET_ID
 
 /** The sha256 of the canonical dataset version. Identity is never inferred. */
 export const TERMINAL_BENCH_DATASET_REF =

@@ -10,12 +10,8 @@
 import { describe, expect, test } from "bun:test"
 import { readFileSync } from "node:fs"
 import { join } from "node:path"
-import {
-  canaryTaskIds,
-  TERMINAL_CANARY_MANIFEST,
-  validateCanaryManifest,
-} from "./canary"
-import { CANONICAL_TASK_IDS, TERMINAL_BENCH_DATASET_REF, canonicalTaskRef } from "./dataset"
+import { canaryTaskIds, TERMINAL_CANARY_MANIFEST, validateCanaryManifest } from "./canary"
+import { CANONICAL_TASK_IDS, canonicalTaskRef, TERMINAL_BENCH_DATASET_REF } from "./dataset"
 
 const REPO_ROOT = join(import.meta.dir, "..", "..", "..", "..")
 

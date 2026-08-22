@@ -28,7 +28,9 @@
  */
 import { quantaHomePath, runtimeConfig } from "@/shared"
 import type { BenchReport } from "./report"
+import { CanonicalReportIdentityError, isRecord, refuse } from "./report-decode"
 import { decodeOfficialGradeSection } from "./report-official-grade"
+import { decodeTerminalBenchReport, type TerminalBenchReport } from "./report-terminal"
 
 /** Canonical SWE dataset-family union (RFC jun-29 R4). ProMax (PMX-05) is a
  *  member of this family AXIS — never a top-level suite: `benchmarkSuite:"promax"`
@@ -53,71 +55,60 @@ export interface SweBenchReport extends BenchReport {
   readonly datasetFamily: DatasetFamily
 }
 
-/** One Harbor trial, verbatim. Kept per-trial (never folded into a headline) so
- *  the receipt stays lossless for post-hoc RCA. */
-export interface TerminalTrialReceipt {
-  readonly id: string
-  readonly passed: boolean
-  readonly turns: number
-  readonly durationMs: number
-  /** D1 (RFC jul-3): an INFRA fault, not a capability outcome. */
-  readonly error?: { readonly kind: "agent-timeout" | "agent-crash" }
-}
-
-/** The Terminal-Bench branch: versioned, dataset-pinned, family-less. */
-export interface TerminalBenchReport {
-  readonly benchmarkSuite: "terminal-bench"
-  readonly benchmarkVersion: TerminalBenchVersion
-  /** The pinned Harbor dataset the trials were graded against. */
-  readonly datasetRef: string
-  readonly timestamp: string
-  /** Never fabricated — an unknown model stays undefined (P3-A). */
-  readonly model: string | undefined
-  readonly source: string
-  readonly arm?: "baseline" | "levers"
-  readonly knobs: {
-    readonly preset: string
-    readonly resolved: Record<string, never>
-    readonly inactive: readonly never[]
-  }
-  /** Precomputed official-shaped metrics — downstream formats, never recomputes. */
-  readonly totals: {
-    readonly total: number
-    readonly resolved: number
-    readonly resolvedPct: number
-  }
-  /** Lossless per-trial receipts. */
-  readonly perInstance: readonly TerminalTrialReceipt[]
-}
-
-/** The only Terminal-Bench version this envelope admits. */
-export const TERMINAL_BENCH_VERSION = "2.1"
-export type TerminalBenchVersion = typeof TERMINAL_BENCH_VERSION
-
 export type CanonicalBenchReport = SweBenchReport | TerminalBenchReport
 
-/** Thrown by {@link decodeCanonicalReport} when a report's identity is missing,
- *  unknown, or self-contradictory. Fail-closed: never a silent default. */
-export class CanonicalReportIdentityError extends Error {
-  constructor(message: string) {
-    super(`canonical report identity: ${message}`)
-    this.name = "CanonicalReportIdentityError"
-  }
-}
+/** Re-exported so every consumer of the envelope keeps importing its refusal
+ *  type from ONE place; the class itself lives in the leaf `report-decode.ts`
+ *  because the terminal branch decode needs it too (and the envelope imports the
+ *  branch, so the branch may not import the envelope). */
+export { CanonicalReportIdentityError } from "./report-decode"
+
+/** The Terminal branch, its receipt vocabulary and its decode are owned by the
+ *  cohesive sibling `report-terminal.ts`. Re-exported here so `report.ts` and the
+ *  dashboard keep a single import surface for the envelope. */
+export type {
+  QuantaTrialFacts,
+  TerminalAdmission,
+  TerminalBenchReport,
+  TerminalOfficialMetrics,
+  TerminalPassAtK,
+  TerminalRejection,
+  TerminalRejectionKind,
+  TerminalReportSchemaVersion,
+  TerminalRunManifestSection,
+  TerminalTrialDefect,
+  TerminalTrialOutcome,
+  TerminalTrialReceipt,
+  TerminalVerdict,
+} from "./report-terminal"
+export {
+  TERMINAL_BENCH_DATASET_ID,
+  TERMINAL_BENCH_VERSION,
+  TERMINAL_PASS_AT_KS,
+  TERMINAL_REPORT_SCHEMA_VERSION,
+  TERMINAL_TRIAL_OUTCOMES,
+  type TerminalBenchVersion,
+} from "./report-terminal"
 
 /**
  * Keys the Terminal branch declares that the SWE body does not — the type-DERIVED
  * candidate set, so a field added to {@link TerminalBenchReport} cannot quietly
  * escape the branch-exclusion guard.
  *
- * `source` is carved out deliberately: the type only happens to declare it on the
- * Terminal branch, but it is a SHARED provenance field that real pre-canonical SWE
- * artifacts carry (`report-campaign-recovered-*` write `source:
- * "recovered-from-campaign-log"`). Refusing it would refuse those reports.
+ * `source` stays carved out: it is a SHARED provenance field that real
+ * pre-canonical SWE artifacts carry (`report-campaign-recovered-*` write
+ * `source: "recovered-from-campaign-log"`). Refusing it would refuse those
+ * reports. `timestamp`/`model` fall out of the `Exclude` for the same reason —
+ * {@link BenchReport} declares them, so they are shared by construction.
  *
  * `totals` is NOT here and must never be: {@link BenchReport} declares it as a
- * REQUIRED field, so it is shared by construction — listing it would refuse every
- * SWE report ever written.
+ * REQUIRED field, so listing it would refuse every SWE report ever written. It
+ * cannot appear by accident either — the widened Terminal branch has no `totals`
+ * at all, because the folded headline it used to carry is exactly what TB21-04
+ * replaced with `metrics` + lossless `trials`.
+ *
+ * Checked against the live corpus before widening: of 3948 persisted artifacts
+ * in `~/.quanta/bench/results`, ZERO carry any of the keys below.
  */
 type TerminalOnlyKey = Exclude<
   keyof TerminalBenchReport,
@@ -128,9 +119,21 @@ type TerminalOnlyKey = Exclude<
  *  Terminal-only field is added without listing it AND when a shared field is
  *  listed by mistake. */
 const TERMINAL_ONLY_KEY_SET = {
+  admission: true,
   arm: true,
   benchmarkVersion: true,
+  dataset: true,
   datasetRef: true,
+  defects: true,
+  harborJobIds: true,
+  k: true,
+  manifest: true,
+  metrics: true,
+  outcomes: true,
+  preset: true,
+  schemaVersion: true,
+  sourcePaths: true,
+  trials: true,
 } as const satisfies Record<TerminalOnlyKey, true>
 
 /** Fields that belong exclusively to the Terminal branch. Their presence without
@@ -177,31 +180,6 @@ const refuseTerminalMarkers = (raw: Record<string, unknown>, context: string): v
     }
   }
 }
-
-// ── field decoders: every read of a persisted value goes through one of these ──
-
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === "object" && value !== null && !Array.isArray(value)
-
-const refuse = (what: string, why: string, got: unknown): never => {
-  throw new CanonicalReportIdentityError(
-    `${what} ${why} (got ${JSON.stringify(got) ?? "undefined"})`,
-  )
-}
-
-const asStringField = (value: unknown, what: string): string =>
-  typeof value === "string" ? value : refuse(what, "must be a string", value)
-
-const asFiniteField = (value: unknown, what: string): number =>
-  typeof value === "number" && Number.isFinite(value)
-    ? value
-    : refuse(what, "must be a finite number", value)
-
-const asBooleanField = (value: unknown, what: string): boolean =>
-  typeof value === "boolean" ? value : refuse(what, "must be a boolean", value)
-
-const asRecordField = (value: unknown, what: string): Record<string, unknown> =>
-  isRecord(value) ? value : refuse(what, "must be an object", value)
 
 // ── SWE branch ────────────────────────────────────────────────────────────────
 
@@ -252,92 +230,6 @@ const decodeSweReport = (raw: Record<string, unknown>, legacy: boolean): SweBenc
   }
 }
 
-// ── Terminal branch ───────────────────────────────────────────────────────────
-
-const TERMINAL_ERROR_KINDS: readonly string[] = ["agent-timeout", "agent-crash"]
-
-const decodeTerminalReceipt = (raw: unknown, index: number): TerminalTrialReceipt => {
-  const at = `perInstance[${index}]`
-  const row = asRecordField(raw, at)
-  const receipt = {
-    id: asStringField(row.id, `${at}.id`),
-    passed: asBooleanField(row.passed, `${at}.passed`),
-    turns: asFiniteField(row.turns, `${at}.turns`),
-    durationMs: asFiniteField(row.durationMs, `${at}.durationMs`),
-  }
-  if (row.error === undefined) return receipt
-  const kind = asRecordField(row.error, `${at}.error`).kind
-  if (typeof kind !== "string" || !TERMINAL_ERROR_KINDS.includes(kind)) {
-    refuse(`${at}.error.kind`, `must be one of ${TERMINAL_ERROR_KINDS.join("|")}`, kind)
-  }
-  return { ...receipt, error: { kind: kind as "agent-timeout" | "agent-crash" } }
-}
-
-const decodeTerminalKnobs = (raw: unknown): TerminalBenchReport["knobs"] => {
-  const knobs = asRecordField(raw, "knobs")
-  const resolved = asRecordField(knobs.resolved, "knobs.resolved")
-  if (Object.keys(resolved).length > 0) {
-    refuse("knobs.resolved", "carries no per-knob entries on the terminal branch", resolved)
-  }
-  if (!Array.isArray(knobs.inactive) || knobs.inactive.length > 0) {
-    refuse("knobs.inactive", "must be an empty array on the terminal branch", knobs.inactive)
-  }
-  return { preset: asStringField(knobs.preset, "knobs.preset"), resolved: {}, inactive: [] }
-}
-
-const decodeTerminalArm = (raw: unknown): "baseline" | "levers" | undefined => {
-  if (raw === undefined) return undefined
-  if (raw !== "baseline" && raw !== "levers") refuse("arm", "must be baseline|levers", raw)
-  return raw as "baseline" | "levers"
-}
-
-/**
- * HIGH-A — a real decode, not a cast. This is THE read boundary for the Terminal
- * branch: every field the type promises is checked and REBUILT here, so a
- * malformed or hostile artifact fails closed instead of entering the type system
- * as a well-typed value. Downstream consumers (the dashboard projector) therefore
- * do not need to re-validate `totals` defensively.
- */
-const decodeTerminalReport = (raw: Record<string, unknown>): TerminalBenchReport => {
-  if ("datasetFamily" in raw) {
-    throw new CanonicalReportIdentityError(
-      "a terminal-bench report must not carry a datasetFamily (families are the SWE axis)",
-    )
-  }
-  if (raw.benchmarkVersion !== TERMINAL_BENCH_VERSION) {
-    throw new CanonicalReportIdentityError(
-      `unsupported benchmarkVersion ${JSON.stringify(raw.benchmarkVersion)} (expected ${TERMINAL_BENCH_VERSION})`,
-    )
-  }
-  if (typeof raw.datasetRef !== "string" || raw.datasetRef.trim() === "") {
-    throw new CanonicalReportIdentityError(
-      "a terminal-bench report requires a non-empty datasetRef",
-    )
-  }
-  const totals = asRecordField(raw.totals, "totals")
-  if (!Array.isArray(raw.perInstance)) {
-    refuse("perInstance", "must be an array of trial receipts", raw.perInstance)
-  }
-  const arm = decodeTerminalArm(raw.arm)
-  return {
-    benchmarkSuite: "terminal-bench",
-    benchmarkVersion: TERMINAL_BENCH_VERSION,
-    datasetRef: raw.datasetRef,
-    timestamp: asStringField(raw.timestamp, "timestamp"),
-    // Never fabricated: an absent model stays undefined, a non-string is refused.
-    model: raw.model === undefined ? undefined : asStringField(raw.model, "model"),
-    source: asStringField(raw.source, "source"),
-    ...(arm !== undefined ? { arm } : {}),
-    knobs: decodeTerminalKnobs(raw.knobs),
-    totals: {
-      total: asFiniteField(totals.total, "totals.total"),
-      resolved: asFiniteField(totals.resolved, "totals.resolved"),
-      resolvedPct: asFiniteField(totals.resolvedPct, "totals.resolvedPct"),
-    },
-    perInstance: (raw.perInstance as readonly unknown[]).map(decodeTerminalReceipt),
-  }
-}
-
 /**
  * THE read-normalization boundary. Every consumer of a persisted bench report
  * enters the typed union here and nowhere else.
@@ -355,7 +247,7 @@ export const decodeCanonicalReport = (raw: unknown): CanonicalBenchReport => {
   const suite = body.benchmarkSuite
   if (suite === undefined) return decodeSweReport(body, true)
   if (suite === "swe-bench") return decodeSweReport(body, false)
-  if (suite === "terminal-bench") return decodeTerminalReport(body)
+  if (suite === "terminal-bench") return decodeTerminalBenchReport(body)
   throw new CanonicalReportIdentityError(
     `unknown benchmarkSuite ${JSON.stringify(suite)} (expected swe-bench|terminal-bench)`,
   )

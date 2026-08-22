@@ -66,6 +66,7 @@ import {
 import { datasetFamilyOrDefault, readDatasetFamilySelector } from "./run-config"
 import {
   attemptObs,
+  buildSwebenchArtifactMeta,
   filterSwebenchTasks,
   finalizeObserve,
   readSwebenchTasks,
@@ -531,17 +532,14 @@ const runDatasetMode = async (
     argValue("--predictions") ?? join(benchRunDir(benchRunId()), "predictions.jsonl"),
     reportPath,
     results,
-    {
+    buildSwebenchArtifactMeta({
       provider: meta.provider,
       model: meta.model,
       n: cfg.n,
-      // BFND-02 — carry the resolved family into the report. The SAME typed field
-      // the corpus parse and the grade verifier were threaded (aug-22 HIGH-1), so
-      // the artifact can never disagree with the run that produced it. Verified ⇒
-      // omitted at serialization ⇒ byte-identical legacy report.
       datasetFamily: cfg.family,
       ...(runHealth !== undefined ? { runHealth } : {}),
-    },
+      env: process.env,
+    }),
   )
   // T-101 closure diagnostics — OFFLINE sibling artifact. EVAL-ONLY: the oracle
   // (dataset gold/F2P) is read here post-run, never threaded into the agent loop.
@@ -672,7 +670,10 @@ const maybeRunDatasetMode = async (
   // filtered view are then threaded through the dry-run plan AND the run path
   // (no more 3× re-read/re-parse of the same JSONL).
   const parsed = readSwebenchTasks(datasetFile, cfg.family)
-  const filtered = filterSwebenchTasks(parsed)
+  // PMX-06 / aug-22 G4 — selection resolves through the FAMILY (a sealed sample
+  // manifest, when one is named), then the historical `--instance` filter. The
+  // resolved family + env are passed IN; no family string is compared here.
+  const filtered = filterSwebenchTasks(parsed, { family: cfg.family, env: process.env })
   if (argFlag("--dry-run")) {
     const plan = buildDatasetDryRunPlan(datasetFile, filtered, {
       n: cfg.n,

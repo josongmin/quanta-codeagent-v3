@@ -241,8 +241,9 @@ describe("the dry-run receipt shows argv and env NAMES, never secret values", ()
   })
 
   test("the secret-name vocabulary covers the provider keys the adapter documents", () => {
+    const declared: readonly string[] = SECRET_ENV_NAME_SUFFIXES
     for (const suffix of ["_API_KEY", "_KEY", "_TOKEN", "_SECRET", "_PASSWORD"]) {
-      expect(SECRET_ENV_NAME_SUFFIXES).toContain(suffix)
+      expect(declared).toContain(suffix)
     }
   })
 
@@ -257,5 +258,38 @@ describe("the dry-run receipt shows argv and env NAMES, never secret values", ()
         { outputRoot: "/tmp/o", env },
       ),
     ).toThrow(/secret|credential/i)
+  })
+})
+
+describe("the -i include id matches the PINNED harbor filter contract", () => {
+  // `_filter_task_ids` does `fnmatch(task_id.get_name(), pattern)`, and for a
+  // PACKAGE dataset (a `name` containing "/", which `terminal-bench/terminal-bench-2-1`
+  // is) the ids are `PackageTaskId`s whose `get_name()` is `f"{org}/{name}"`.
+  // So the include pattern must be the FULL `org/name`, not the bare task name.
+  // If a harbor bump flips that to the bare name, every canary run aborts with
+  // "No tasks matched the filter(s)" — this reads upstream's bytes so the bump
+  // is caught at test time instead of at job-start time.
+  const VENV = join(REPO_ROOT, "adapters/terminal-bench/.venv/lib/python3.13/site-packages/harbor")
+
+  test("upstream still keys the filter on get_name() == org/name", () => {
+    let idSource: string
+    let filterSource: string
+    try {
+      idSource = readFileSync(join(VENV, "models/task/id.py"), "utf8")
+      filterSource = readFileSync(join(VENV, "models/job/config.py"), "utf8")
+    } catch {
+      expect(true, "SKIPPED: adapters/terminal-bench/.venv not synced").toBe(true)
+      return
+    }
+    expect(filterSource).toContain("fnmatch(task_id.get_name(), pattern_id)")
+    expect(idSource).toContain('return f"{self.org}/{self.name}"')
+    // And an unmatched filter ABORTS — it does not widen to the whole dataset.
+    expect(filterSource).toContain("No tasks matched the filter(s)")
+
+    const m = manifestFor(["--tasks", "canary"])
+    const { argv } = buildHarborRunCommand(m, { outputRoot: "/tmp/o" })
+    const includes = argv.filter((_, i) => argv[i - 1] === "-i")
+    expect(includes.length).toBe(3)
+    for (const id of includes) expect(id).toMatch(/^[a-z0-9-]+\/[a-z0-9-]+$/)
   })
 })

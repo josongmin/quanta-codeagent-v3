@@ -37,12 +37,12 @@ import { cmdAuth } from "./commands/auth"
 import { cmdBox } from "./commands/box"
 import { cmdGrade } from "./commands/grade"
 import { cmdPool } from "./commands/pool"
+import { cmdTerminal } from "./commands/terminal"
 import { cmdTrace, cmdTraceUrl } from "./commands/trace"
 import { knownDatasetFamilyTokens } from "./dataset-family-token"
 import { routeBenchTerminalIo } from "./entry-bootstrap"
 import { bootBenchOtelExport } from "./otel"
 import { CURRENT_BENCH_BASE_PRESET } from "./preset"
-import { readDatasetFamilySelector } from "./run-config"
 
 // Route `logger` to the real terminal (shared SSOT with index.ts — without it
 // logger.info writes nowhere).
@@ -94,6 +94,7 @@ const HELP = `quanta-bench — unified SWE-bench CLI (ADR-0536)
 
   run          local patch-gen + optional local grading (legacy flat flags)
   grade        grade existing predictions on a remote backend (ec2 | ssh:host)
+  terminal     Terminal-Bench 2.1 (doctor | canary | run | report) — a SUITE, not a dataset family
   diff         compare two run reports (A/B, regression)
   explain      agent-vs-gold failure analysis for one instance
   leaderboard  render an official/local/research split table from run report(s)
@@ -138,29 +139,20 @@ const main = async (): Promise<void> => {
       await cmdPool()
       return
     case "terminal": {
-      // BFND-01 — resolve the terminal-bench suite config at the composition root.
-      // Execution/reporting for Terminal-Bench lands in later foundation stages
-      // (BFND-02 report envelope + BFND-03 dashboard projectors); today this
-      // validates the suite identity (and REFUSES a --dataset-family selector,
-      // which is a SWE-only axis) so the discriminator is resolved once, here.
-      // MED-6 (aug-22): the REAL argv is threaded here. It was hardcoded to
-      // `undefined`, so `quanta-bench terminal --dataset-family pro` resolved
-      // cleanly and only the ENV spelling was refused — the documented RED rail
-      // was green in unit tests (which called the pure resolver directly) while
-      // the live CLI path let a SWE-only axis through on a Terminal-Bench run.
-      const { resolveBenchmarkRunConfig } = await import("./benchmark-suite")
-      resolveBenchmarkRunConfig({
-        subcommand: "terminal",
-        // LOW-10: the SELECTOR reader (not the generic `argValue`), so a
-        // valueless `--dataset-family` is refused instead of reading back as
-        // absent — which used to slip a SWE-only axis past this very rail.
-        argvFamily: readDatasetFamilySelector(process.argv),
-        env: process.env,
-      })
-      logger.info(
-        "quanta-bench terminal: Terminal-Bench execution is not yet wired at this " +
-          "composition root (foundation stage BFND-01 resolves the suite identity only).",
-      )
+      // TB21-00A — the Terminal-Bench branch is REGISTERED here: one nested
+      // dispatcher (`./commands/terminal`) that resolves the BFND-01 suite
+      // branch + the ONE typed run config, and owns doctor/canary/run/report.
+      //
+      // It replaces a "not yet wired" stub that only validated the suite
+      // identity. The `--dataset-family` refusal it performed is preserved (and
+      // strengthened): `cmdTerminal` runs it on EVERY action, before dispatch,
+      // through the same BFND-01 resolver — so MED-6's failure mode (the live
+      // CLI path handing the resolver a hardcoded `undefined` while unit tests
+      // exercised the pure resolver) cannot come back through this seam.
+      // The AMBIENT reads (argv + env) happen HERE, at the allowlisted bench
+      // composition root, and are threaded in as values — the terminal modules
+      // below never re-read `process.env`.
+      await cmdTerminal({ argv: process.argv, env: process.env })
       return
     }
     case "box":

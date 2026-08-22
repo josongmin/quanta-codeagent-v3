@@ -5,11 +5,14 @@
  *
  * The defect this replaces
  * -----------------------
- * `tools/leaderboard-dashboard/tb-report-emit.ts` folds a task's trials into one
- * any-pass row. Five k=5 trials become a boolean; trial ids, per-trial cost,
- * tokens and trajectory paths are gone; infra outcomes quietly leave the
- * denominator; `k=5` coverage cannot be proven. So the unit of this module is the
- * TRIAL, and a task is only ever a grouping key.
+ * `tools/leaderboard-dashboard/tb-report-emit.ts` (DELETED — retirement DB-1)
+ * folded a task's trials into one any-pass row. Five k=5 trials became a
+ * boolean; trial ids, per-trial cost, tokens and trajectory paths were gone;
+ * infra outcomes quietly left the denominator; `k=5` coverage could not be
+ * proven. So the unit of this module is the TRIAL, and a task is only ever a
+ * grouping key. Its two real contracts were absorbed before deletion: the raw
+ * job-tree walk lives in `harbor-results.ts`, and its error taxonomy is the
+ * `EXCEPTION_OUTCOMES` table below (widened from 2 kinds to 8 classes).
  *
  * Two invariants hold the honesty of the number:
  *
@@ -35,6 +38,17 @@
  * timeout/resource override keys, and "rewarded trials have trajectories".
  */
 import {
+  type QuantaTrialFacts,
+  TERMINAL_TRIAL_OUTCOMES,
+  type TerminalAdmission,
+  type TerminalBenchReport,
+  type TerminalRejection,
+  type TerminalTrialDefect,
+  type TerminalTrialOutcome,
+  type TerminalTrialReceipt,
+  type TerminalVerdict,
+} from "@/runner/batch/report-terminal"
+import {
   CANONICAL_TASK_IDS,
   canonicalTaskRef,
   EXPECTED_TASK_COUNT,
@@ -43,29 +57,34 @@ import {
   TERMINAL_BENCH_DATASET_REF,
 } from "./dataset"
 import type { HarborTrialFile } from "./harbor-results"
-import {
-  computeOfficialMetrics,
-  isSuccess,
-  type OfficialMetrics,
-  type ScorableTrial,
-  trialDurationSec,
-} from "./scoring"
+import type { TerminalBenchRunManifest } from "./manifest"
+import { computeOfficialMetrics, isSuccess, type ScorableTrial, trialDurationSec } from "./scoring"
 
 // ── taxonomy ─────────────────────────────────────────────────────────────────
+//
+// The persisted SHAPE of a Terminal report — the outcome vocabulary, the trial
+// receipt, the admission record, the report itself — is declared ONCE, in the
+// batch layer that owns persistence (`@/runner/batch/report-terminal`). It has
+// to be: `@/runner` may not reference `apps/**` even in type position (the
+// surface-isolation guard), and BFND-02 puts serialization there. This module
+// owns the BEHAVIOUR — parsing, classification, admission — and re-exports the
+// vocabulary under the names TB21-04's consumers already use, so there is one
+// declaration per field and no drift to police.
 
-/** Every outcome a Terminal trial can have. Closed set: a new kind must be added
- *  here, which forces every exhaustive consumer to compile-fail. */
-export const TERMINAL_TRIAL_OUTCOMES = [
-  "graded_pass",
-  "graded_fail",
-  "agent_timeout",
-  "agent_crash",
-  "environment_error",
-  "verifier_error",
-  "missing_reward",
-  "malformed_result",
-] as const
-export type TerminalTrialOutcome = (typeof TERMINAL_TRIAL_OUTCOMES)[number]
+export type { QuantaTrialFacts } from "@/runner/batch/report-terminal"
+export {
+  TERMINAL_TRIAL_OUTCOMES,
+  type TerminalAdmission,
+  type TerminalRejection,
+  type TerminalRejectionKind,
+  type TerminalTrialDefect,
+  type TerminalTrialOutcome,
+  type TerminalVerdict,
+} from "@/runner/batch/report-terminal"
+
+/** ONE receipt per distinct trial id. Never collapsed, never merged. TB21-04's
+ *  name for the batch layer's {@link TerminalTrialReceipt}. */
+export type TerminalTrialRecord = TerminalTrialReceipt
 
 /**
  * Harbor exception class -> outcome. Every left-hand side is a REAL class in
@@ -92,68 +111,7 @@ const EXCEPTION_OUTCOMES: Readonly<Record<string, TerminalTrialOutcome>> = {
   GKEExecStreamClosedError: "environment_error",
 }
 
-// ── receipts ─────────────────────────────────────────────────────────────────
-
-/** Supplemental Quanta facts, verbatim from `agent_result.metadata.quanta_agent`
- *  (written by `adapters/terminal-bench/quanta_agent.py`). Never authoritative
- *  for the score — Harbor's reward is. */
-export interface QuantaTrialFacts {
-  readonly agentVersion?: string
-  readonly packageVersion?: string
-  readonly commit?: string
-  readonly dirty?: boolean
-  readonly model?: string
-  readonly reasoningEffort?: string
-  readonly reasoningEffortWireHonored?: boolean
-  readonly termination?: string
-  readonly promotable?: boolean
-  readonly promotabilityReasons?: readonly string[]
-  readonly atifErrors?: readonly string[]
-}
-
-/** ONE receipt per distinct trial id. Never collapsed, never merged. */
-export interface TerminalTrialRecord {
-  readonly trialId: string
-  readonly trialName?: string
-  /** `org/name`, e.g. `terminal-bench/adaptive-rejection-sampler`. */
-  readonly taskId: string
-  readonly taskName: string
-  /** The canonical task VERSION this trial ran (`sha256:…`). */
-  readonly taskRef?: string
-  readonly taskChecksum?: string
-  /** The dataset the trial declares it ran (`TrialResult.source`). */
-  readonly datasetSource?: string
-  /** The raw numeric reward used for scoring; `null` when Harbor recorded none. */
-  readonly reward: number | null
-  readonly outcome: TerminalTrialOutcome
-  readonly exceptionType?: string
-  readonly exceptionMessage?: string
-  readonly startedAt: string | null
-  readonly finishedAt: string | null
-  readonly durationSec: number | null
-  readonly uncachedInputTokens: number | null
-  readonly cachedInputTokens: number | null
-  readonly outputTokens: number | null
-  readonly costUsd: number | null
-  /** Path only — trajectory CONTENT never enters a summary report. */
-  readonly trajectoryPath?: string
-  /** `undefined` when there is no trajectory to judge. */
-  readonly atifValid?: boolean
-  readonly quanta?: QuantaTrialFacts
-  /** Forbidden timeout/resource overrides found on this trial's own config. */
-  readonly configOverrides: readonly string[]
-  readonly sourcePath: string
-  readonly harborJobId?: string
-  /** Which experimental arm produced this trial. Guards the baseline/lever union. */
-  readonly arm?: string
-}
-
-/** A trial record that could not be turned into a receipt at all. It is reported
- *  and it makes the run incomplete; it is NEVER scored and never back-filled. */
-export interface TerminalTrialDefect {
-  readonly sourcePath: string
-  readonly reason: string
-}
+// ── receipts ────────────────────────────────────────────────────────────────
 
 export const isTrialDefect = (
   value: TerminalTrialRecord | TerminalTrialDefect,
@@ -379,40 +337,6 @@ export const parseHarborTrialResult = (
 
 // ── admission ────────────────────────────────────────────────────────────────
 
-export type TerminalRejectionKind =
-  | "duplicate_trial_id"
-  | "unknown_task"
-  | "missing_task_ref"
-  | "task_ref_mismatch"
-  | "dataset_source_mismatch"
-
-export interface TerminalRejection {
-  readonly kind: TerminalRejectionKind
-  readonly trialId: string
-  readonly detail: string
-}
-
-/** `official` > `nonstandard` > `incomplete` > `rejected`, worst wins. A rejected
- *  run is not scored at all; an incomplete or nonstandard one is scored and
- *  labelled, because hiding its number would be its own kind of dishonesty. */
-export type TerminalVerdict = "official" | "nonstandard" | "incomplete" | "rejected"
-
-export interface TerminalAdmission {
-  readonly verdict: TerminalVerdict
-  readonly complete: boolean
-  readonly standardConfig: boolean
-  readonly promotable: boolean
-  readonly k: number
-  readonly expectedTaskCount: number
-  readonly observedTaskCount: number
-  readonly expectedTrials: number
-  readonly admittedTrials: number
-  readonly duplicateTrialIds: readonly string[]
-  readonly rejections: readonly TerminalRejection[]
-  /** Human-readable caveats. Every entry names a real, counted fact. */
-  readonly reasons: readonly string[]
-}
-
 const duplicateIdsOf = (trials: readonly TerminalTrialRecord[]): readonly string[] => {
   const seen = new Set<string>()
   const duplicates = new Set<string>()
@@ -560,35 +484,34 @@ export interface TerminalRunInput {
   readonly preset: string
   readonly trials: readonly TerminalTrialRecord[]
   readonly defects: readonly TerminalTrialDefect[]
-  /** TB21-03's run manifest, carried through verbatim. Opaque here on purpose:
-   *  this module must not become a second owner of provenance. */
-  readonly manifest?: unknown
+  /** TB21-03's run manifest, carried through verbatim. TYPE-ONLY dependency:
+   *  this module still owns none of the provenance — it neither builds nor
+   *  validates the manifest — but the `unknown` placeholder is now NARROWED to
+   *  the real contract (the deferred TB21-03 adoption). That makes the two
+   *  hand-off points a COMPILE-time link: a manifest field rename can no longer
+   *  slip through a report that carries an opaque blob. */
+  readonly manifest?: TerminalBenchRunManifest
   /** Trial ids disqualified by the upstream reward-hacking judge. They join the
    *  metric as reward 0 — never removed from the denominator. */
   readonly disqualifiedTrialIds?: readonly string[]
 }
 
-export interface TerminalRunReport {
-  readonly schemaVersion: "terminal-bench-report/v2"
-  readonly benchmarkSuite: "terminal-bench"
-  readonly benchmarkVersion: "2.1"
-  readonly dataset: typeof TERMINAL_BENCH_DATASET
-  readonly datasetRef: string
-  readonly timestamp: string
-  readonly arm: string
-  readonly k: number
-  readonly model: string | undefined
-  readonly preset: string
-  readonly harborJobIds: readonly string[]
-  readonly sourcePaths: readonly string[]
-  readonly manifest?: unknown
-  readonly admission: TerminalAdmission
-  /** `undefined` for a REJECTED run: a number computed from trials that failed
-   *  identity admission would be worse than no number at all. */
-  readonly metrics: OfficialMetrics | undefined
-  readonly outcomes: Readonly<Record<TerminalTrialOutcome, number>>
-  readonly trials: readonly TerminalTrialRecord[]
-  readonly defects: readonly TerminalTrialDefect[]
+/**
+ * THE canonical Terminal-Bench 2.1 run report.
+ *
+ * It IS the persisted branch of {@link CanonicalBenchReport} — not a parallel
+ * shape that has to be mapped onto one. `writeReport` therefore accepts it
+ * directly, which is what closes the old gap where a run could be scored
+ * losslessly in memory and flattened on the way to disk.
+ *
+ * The ONE thing narrowed here is `manifest`: the batch layer types it as the
+ * provenance CORE it can validate ({@link TerminalRunManifestSection}), while a
+ * report built by this module always carries TB21-03's full manifest. The
+ * narrowing is a compile-time link in both directions — a field renamed on
+ * either side fails to satisfy the `extends`.
+ */
+export interface TerminalRunReport extends TerminalBenchReport {
+  readonly manifest?: TerminalBenchRunManifest
 }
 
 const toScorable = (trial: TerminalTrialRecord): ScorableTrial => ({

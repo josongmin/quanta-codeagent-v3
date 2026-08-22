@@ -18,8 +18,6 @@
  * control that proves the same key IS deliverable when the profile asks for it.
  */
 import { describe, expect, test } from "bun:test"
-import { gateOn } from "@/shared"
-import { resolveStreamCap } from "@/tool/container-exec/tool"
 import {
   resolveMaxTurnsFromEnv,
   resolveOracleLoopRounds,
@@ -30,6 +28,8 @@ import {
   TB_VERIFY_GATE_ENV,
   TB_WRITE_TOOL_ENV,
 } from "@/apps/terminal/brain-mode"
+import { gateOn } from "@/shared"
+import { resolveStreamCap } from "@/tool/container-exec/tool"
 import {
   encodeKnobValue,
   isTerminalProfile,
@@ -85,9 +85,9 @@ describe("suite identity (BFND-01 branch, not a dataset family)", () => {
   })
 
   test("RED RAIL — QUANTA_SWEBENCH_DATASET_FAMILY in the env is REFUSED too", () => {
-    expect(() =>
-      resolve("control", [], { QUANTA_SWEBENCH_DATASET_FAMILY: "pro" }),
-    ).toThrow(/SWE-only/i)
+    expect(() => resolve("control", [], { QUANTA_SWEBENCH_DATASET_FAMILY: "pro" })).toThrow(
+      /SWE-only/i,
+    )
   })
 
   test("PAIRED CONTROL — with no family selector at all the same argv resolves", () => {
@@ -133,22 +133,27 @@ describe("required options for a paid run", () => {
     expect(() => resolve("control", ["--sandbox", "podman"])).toThrow(/sandbox/i)
   })
 
-  test("the FULL profile / provider / sandbox unions each resolve (no single-literal narrowing)", () => {
+  test("the FULL profile / provider / sandbox unions flow through (no single-literal narrowing)", () => {
     for (const profile of TERMINAL_PROFILES) {
       expect(resolve(profile).profile).toBe(profile)
     }
+    // Every provider is HANDLED, and the two directions are asserted: the two
+    // effort-bearing surfaces resolve, and the surface with NO reasoning-effort
+    // field REFUSES rather than quietly running at the provider's own default.
+    const handled: string[] = []
     for (const provider of TERMINAL_PROVIDERS) {
-      // anthropic has no reasoning-effort field at all, so it needs no effort.
-      const extra = provider === "anthropic" ? ["--provider", provider] : ["--provider", provider]
-      const argv = argvFor("control", extra).filter((tok, i, all) =>
-        provider === "anthropic" ? tok !== "xhigh" && all[i + 1] !== "xhigh" : true,
-      )
-      const cfg = resolveTerminalRunConfig({ argv, env: {} })
-      expect(cfg.provider).toBe(provider)
+      if (provider === "anthropic") {
+        expect(() => resolve("control", ["--provider", provider])).toThrow(/reasoning-effort/i)
+      } else {
+        expect(resolve("control", ["--provider", provider]).provider).toBe(provider)
+      }
+      handled.push(provider)
     }
+    expect(handled).toEqual([...TERMINAL_PROVIDERS])
     for (const sandbox of TERMINAL_SANDBOXES) {
       expect(resolve("control", ["--sandbox", sandbox]).sandbox).toBe(sandbox)
     }
+    expect(TERMINAL_SANDBOXES.length).toBeGreaterThan(1)
   })
 
   test("isTerminalProfile is a real predicate over the closed set", () => {
@@ -225,9 +230,7 @@ describe("profile knob tables", () => {
   })
 
   test("RED RAIL — an enabled QUANTA_TB_BEST_OF_N plus Harbor k is REFUSED", () => {
-    expect(() => resolve("control", [], { [TERMINAL_BEST_OF_N_KNOB]: "2" })).toThrow(
-      /best-of-n/i,
-    )
+    expect(() => resolve("control", [], { [TERMINAL_BEST_OF_N_KNOB]: "2" })).toThrow(/best-of-n/i)
     // PAIRED CONTROL: an explicitly-disabled value is not a second sampling layer.
     expect(resolve("control", [], { [TERMINAL_BEST_OF_N_KNOB]: "0" }).profile).toBe("control")
   })

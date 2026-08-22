@@ -7,12 +7,28 @@
  * axis and must never be admitted as a suite.
  *
  * The fixtures here are REAL artifacts: the canonical Terminal branch is built by
- * the production builder and encoded exactly as `writeReport` lands it on disk,
- * and the legacy branch is the byte-shape `tb-report-emit` wrote before BFND-02.
+ * the production builder (TB21-04's `buildTerminalRunReport`) and encoded exactly
+ * as `writeReport` lands it on disk.
+ *
+ * TB21-04 widened the Terminal branch to the LOSSLESS 2.1 receipt, so the
+ * pre-2.1 (versionless TB2.0) encoding no longer has a legacy adapter: those
+ * artifacts are QUARANTINED at the identity boundary, which is what both tickets
+ * require. The rail that used to assert they still render now asserts they are
+ * refused — see "versionless TB2.0 artifacts are quarantined" below.
  */
 import { describe, expect, test } from "bun:test"
+import {
+  CANONICAL_TASK_IDS,
+  canonicalTaskRef,
+  TERMINAL_BENCH_DATASET,
+  TERMINAL_BENCH_DATASET_REF,
+} from "@/apps/bench/terminal/dataset"
+import {
+  buildTerminalRunReport,
+  type TerminalTrialOutcome,
+  type TerminalTrialRecord,
+} from "@/apps/bench/terminal/report"
 import { CanonicalReportIdentityError, encodeCanonicalReport } from "@/runner/batch/report-envelope"
-import { buildTerminalBenchReport, type TerminalTrialInput } from "@/runner/batch/report-terminal"
 import { campaignKeyOf } from "../family-partition"
 import {
   benchmarkViewsOf,
@@ -22,7 +38,6 @@ import {
   suiteClientAssets,
 } from "./registry"
 import { registerSweFamilyView, sweFamilyViews } from "./swe-bench/registry"
-import { LEGACY_TB_DATASET_REF } from "./terminal-bench"
 
 // ---------------------------------------------------------------------------
 // Fixtures — on-disk shapes, not hand-written approximations of them.
@@ -44,29 +59,93 @@ const sweRaw = (family?: string, extra: Record<string, unknown> = {}): Record<st
   ...extra,
 })
 
-const TB_TRIALS: readonly TerminalTrialInput[] = [
-  { id: "task-a", passed: true, durationMs: 100 },
-  { id: "task-b", passed: false, durationMs: 200 },
-  { id: "task-c", passed: false, durationMs: 5, error: { kind: "agent-crash" } },
-  { id: "task-d", passed: false, durationMs: 900, error: { kind: "agent-timeout" } },
+/** Four REAL 2.1 trial receipts, one per canonical task: a graded pass, a
+ *  graded fail, an infra crash and an agent timeout. The crash/timeout carry NO
+ *  reward, which is exactly why they score zero and stay in the denominator. */
+const tbTrial = (
+  index: number,
+  outcome: TerminalTrialOutcome,
+  reward: number | null,
+): TerminalTrialRecord => {
+  const taskId = CANONICAL_TASK_IDS[index] as string
+  return {
+    trialId: `trial-${index}`,
+    taskId,
+    taskName: taskId.split("/")[1] as string,
+    taskRef: canonicalTaskRef(taskId) as string,
+    datasetSource: TERMINAL_BENCH_DATASET,
+    reward,
+    outcome,
+    startedAt: "2026-08-22T01:00:00.000Z",
+    finishedAt: "2026-08-22T01:05:00.000Z",
+    durationSec: 300,
+    uncachedInputTokens: 1000,
+    cachedInputTokens: 100,
+    outputTokens: 50,
+    costUsd: 0.5,
+    configOverrides: [],
+    sourcePath: `/jobs/trial-${index}/result.json`,
+  }
+}
+
+const TB_TRIALS: readonly TerminalTrialRecord[] = [
+  tbTrial(0, "graded_pass", 1),
+  tbTrial(1, "graded_fail", 0),
+  tbTrial(2, "agent_crash", null),
+  tbTrial(3, "agent_timeout", null),
 ]
+
+/**
+ * TB21-05 — the TB21-03 run manifest a real 2.1 run always carries. The
+ * projector reads the campaign identity (profile / provider / effort / sandbox)
+ * out of it and REFUSES a report that cannot supply one, so the fixture has to
+ * carry it for the same reason a real artifact does.
+ */
+const tbManifest = (datasetRef: string): Record<string, unknown> => ({
+  schemaVersion: "terminal-bench-run/v2",
+  benchmarkSuite: "terminal-bench",
+  benchmarkVersion: "2.1",
+  dataset: TERMINAL_BENCH_DATASET,
+  datasetRef,
+  harborVersion: "0.21.0",
+  quantaSha: "8cdf4badbe83",
+  dirty: false,
+  agentVersion: "1.0.025+g8cdf4badbe83",
+  profile: "quanta-full",
+  model: "gpt-5.5",
+  provider: "openai",
+  reasoningEffort: "xhigh",
+  sandbox: "docker",
+  k: 1,
+  timestamp: "2026-08-22T01:00:00.000Z",
+  arm: "levers",
+  preset: "TB +levers",
+  promotable: false,
+})
 
 /** Canonical Terminal artifact, encoded exactly as it lands on disk. */
 const tbCanonicalRaw = (
-  datasetRef = "terminal-bench@2.1.0#f00dcafe",
+  datasetRef?: string,
   overrides: Record<string, unknown> = {},
 ): Record<string, unknown> =>
   JSON.parse(
     JSON.stringify({
       ...encodeCanonicalReport(
-        buildTerminalBenchReport(TB_TRIALS, {
-          datasetRef,
+        buildTerminalRunReport({
+          datasetRef: TERMINAL_BENCH_DATASET_REF,
           timestamp: "2026-08-22T01:00:00.000Z",
+          arm: "levers",
+          k: 1,
+          harborJobIds: ["job-1"],
+          sourcePaths: ["/jobs"],
           model: "gpt-5.5",
           preset: "TB +levers",
-          arm: "levers",
+          trials: TB_TRIALS,
+          defects: [],
         }),
       ),
+      manifest: tbManifest(datasetRef ?? TERMINAL_BENCH_DATASET_REF),
+      ...(datasetRef !== undefined ? { datasetRef } : {}),
       ...overrides,
     }),
   ) as Record<string, unknown>
@@ -80,13 +159,10 @@ const tbLegacyRaw = (): Record<string, unknown> => ({
   source: "terminal-bench-harbor",
   arm: "levers",
   knobs: { preset: "TB +levers", resolved: {}, inactive: [] },
-  perInstance: TB_TRIALS.map((t) => ({
-    id: t.id,
-    passed: t.passed,
-    turns: 0,
-    durationMs: t.durationMs,
-    ...(t.error !== undefined ? { error: t.error } : {}),
-  })),
+  perInstance: [
+    { id: "task-a", passed: true, turns: 0, durationMs: 100 },
+    { id: "task-b", passed: false, turns: 0, durationMs: 200 },
+  ],
 })
 
 // ---------------------------------------------------------------------------
@@ -105,7 +181,7 @@ describe("BFND-03 registry — registration floor", () => {
     // Terminal owns a real render path; its script must be in the shipped bundle.
     expect(assets.script).toContain("renderTbCards")
     expect(assets.script).toContain("SUITE_VIEWS")
-    expect(assets.style).toContain("fam-tb-target")
+    expect(assets.style).toContain("tb-prov")
   })
 })
 
@@ -146,7 +222,9 @@ describe("BFND-03 registry — Terminal branch dispatch", () => {
   })
 
   test("campaign identity carries version + pinned dataset ref", () => {
-    expect(projectReport(tbCanonicalRaw("ref-one")).campaignIdentity).toBe(
+    // TB21-05 widened this to the FULL run identity (profile / model / effort /
+    // sandbox / k / standard-config); the version + pinned ref stay its head.
+    expect(projectReport(tbCanonicalRaw("ref-one")).campaignIdentity).toContain(
       "terminal-bench@2.1 ref-one",
     )
     // A DIFFERENT pinned dataset is a different campaign — identities never coalesce.
@@ -155,42 +233,44 @@ describe("BFND-03 registry — Terminal branch dispatch", () => {
     )
   })
 
-  test("headline is the PERSISTED metric, not a re-fold of the rows (paired control)", () => {
+  test("headline is the PERSISTED tally, not a re-fold of the receipts (paired control)", () => {
     const base = tbCanonicalRaw()
-    // OFFICIAL-shaped (aug-22): EVERY trial stays in the denominator — the
-    // agent-crash is a zero, not a hole ⇒ 1 resolved of 4. This replaced
-    // quanta's internal D1 convention, which dropped crashes and thereby
-    // inflated the headline; upstream (verified against the pinned
-    // `leaderboard/core/metrics.py` in TB21-04) scores a reward-less trial as a
-    // miss that remains counted.
-    expect(base.totals).toEqual({ total: 4, resolved: 1, resolvedPct: 25 })
+    // OFFICIAL-shaped: EVERY trial stays in the denominator — the crash and the
+    // timeout are zeros, not holes ⇒ 1 resolved of 4.
+    expect(base.outcomes).toMatchObject({ graded_pass: 1, graded_fail: 1, agent_crash: 1 })
+    expect((base.metrics as { accuracy: number }).accuracy).toBe(25)
     expect(projectReport(base).headline).toEqual({ resolved: 1, total: 4 })
 
-    // CONTROL: flip a row's verdict WITHOUT touching totals. A projector that
-    // recomputed the headline from raw rows would move; a formatter cannot.
-    const rowsMutated = tbCanonicalRaw()
-    ;(rowsMutated.perInstance as { passed: boolean }[])[1]!.passed = true
-    expect(projectReport(rowsMutated).headline).toEqual({ resolved: 1, total: 4 })
-
-    // PAIR: move the persisted metric and the headline MUST follow — proving the
-    // assertion above is not vacuously pinned to a constant.
-    const totalsMutated = tbCanonicalRaw(undefined, {
-      totals: { total: 3, resolved: 3, resolvedPct: 100 },
+    // PAIR: move the persisted tally (and the receipts it summarises, because the
+    // decode refuses a tally that disagrees with them) and the headline MUST
+    // follow — proving the assertion above is not pinned to a constant.
+    const morePasses = tbCanonicalRaw(undefined, {
+      ...encodeCanonicalReport(
+        buildTerminalRunReport({
+          datasetRef: TERMINAL_BENCH_DATASET_REF,
+          timestamp: "2026-08-22T01:00:00.000Z",
+          arm: "levers",
+          k: 1,
+          harborJobIds: ["job-1"],
+          sourcePaths: ["/jobs"],
+          model: "gpt-5.5",
+          preset: "TB +levers",
+          trials: [TB_TRIALS[0] as TerminalTrialRecord, tbTrial(1, "graded_pass", 1)],
+          defects: [],
+        }),
+      ),
     })
-    expect(projectReport(totalsMutated).headline).toEqual({ resolved: 3, total: 3 })
+    expect(projectReport(morePasses).headline).toEqual({ resolved: 2, total: 2 })
   })
 
-  test("legacy 4th-family artifact still renders — through ONE named legacy adapter", () => {
-    const p = projectReport(tbLegacyRaw())
-    expect(p.benchmarkSuite).toBe("terminal-bench")
-    expect(p.viewId).toBe("terminal-bench")
-    // Adapted onto the suite axis: the family key does NOT survive projection.
-    expect(p.datasetFamily).toBeUndefined()
-    expect(p.campaignIdentity).toBe("terminal-bench@2.1")
-    expect(p.campaignIdentity).not.toContain(LEGACY_TB_DATASET_REF)
-    // Totals synthesized by the ONE canonical builder ⇒ the same official-shaped
-    // rule (every trial counted, crash included).
-    expect(p.headline).toEqual({ resolved: 1, total: 4 })
+  test("versionless TB2.0 artifacts are QUARANTINED, not silently re-scored", () => {
+    // The pre-2.1 encoding folded a task's trials into ONE any-pass row; its
+    // trial ids, rewards and task versions were never recorded, so there is no
+    // honest 2.1 reading of it. It must not enter the new report set.
+    expect(() => projectReport(tbLegacyRaw())).toThrow(CanonicalReportIdentityError)
+    // …and neither may a report that claims the suite but omits the schema version.
+    const { schemaVersion: _dropped, ...versionless } = tbCanonicalRaw()
+    expect(() => projectReport(versionless)).toThrow(/schemaVersion/)
   })
 })
 
@@ -233,38 +313,32 @@ describe("BFND-03 registry — fail-closed identity rails", () => {
   })
 
   test("HIGH-A: a STRUCTURALLY malformed terminal artifact never reaches a projector", () => {
-    // These all keep the three identity fields intact, so only a real validating
-    // decode can refuse them. The Terminal projector used to re-check `totals`
-    // itself (a consumer compensating for a casting producer); that check is gone,
-    // and the boundary below is what holds the line.
-    refuses(tbCanonicalRaw(undefined, { totals: { total: "3", resolved: 1, resolvedPct: 33 } }))
-    refuses(tbCanonicalRaw(undefined, { totals: undefined }))
-    refuses(tbCanonicalRaw(undefined, { totals: { resolved: 1 } }))
-    refuses(tbCanonicalRaw(undefined, { perInstance: [{ id: "task-a", passed: true }] }))
-    refuses(tbCanonicalRaw(undefined, { perInstance: "task-a,task-b" }))
-    refuses(tbCanonicalRaw(undefined, { knobs: { preset: 7, resolved: {}, inactive: [] } }))
-    // MED-B: a trial receipt carrying the SWE branch's `error: string`.
+    // These all keep the identity fields intact, so only a real validating decode
+    // can refuse them. The Terminal projector re-checks nothing itself.
+    refuses(tbCanonicalRaw(undefined, { trials: "task-a,task-b" }))
+    refuses(tbCanonicalRaw(undefined, { trials: [{ trialId: "t" }] }))
+    refuses(tbCanonicalRaw(undefined, { admission: undefined }))
+    refuses(tbCanonicalRaw(undefined, { outcomes: undefined }))
+    refuses(tbCanonicalRaw(undefined, { preset: 7 }))
+    refuses(tbCanonicalRaw(undefined, { k: "five" }))
+    // A receipt whose OUTCOME is outside the closed eight-class taxonomy.
     refuses(
       tbCanonicalRaw(undefined, {
-        perInstance: [{ id: "task-a", passed: false, turns: 0, durationMs: 1, error: "boom" }],
+        trials: [{ ...TB_TRIALS[0], outcome: "flaky" }],
+        outcomes: { ...(tbCanonicalRaw().outcomes as Record<string, number>) },
       }),
     )
-    // NON-VACUITY: the same fixture with a VALID terminal fault still projects.
-    expect(
-      projectReport(
-        tbCanonicalRaw(undefined, {
-          perInstance: [
-            {
-              id: "task-a",
-              passed: false,
-              turns: 0,
-              durationMs: 1,
-              error: { kind: "agent-crash" },
-            },
-          ],
-        }),
-      ).viewId,
-    ).toBe("terminal-bench")
+    // A tally that disagrees with the receipts it claims to summarise.
+    refuses(
+      tbCanonicalRaw(undefined, {
+        outcomes: {
+          ...(tbCanonicalRaw().outcomes as Record<string, number>),
+          graded_pass: 99,
+        },
+      }),
+    )
+    // NON-VACUITY: the untouched fixture still projects.
+    expect(projectReport(tbCanonicalRaw()).viewId).toBe("terminal-bench")
   })
 
   test("mixed report roots: one poisoned artifact never blocks the healthy ones", () => {
@@ -304,7 +378,7 @@ describe("BFND-03 registry — benchmark views", () => {
       "SWE-bench Verified",
       "SWE-bench Pro",
       "SWE-bench Live",
-      "Terminal-Bench",
+      "Terminal-Bench 2.1",
     ])
     expect(views.map((v) => v.suite)).toEqual([
       "swe-bench",
@@ -358,9 +432,10 @@ describe("BFND-03 — cross-suite campaigns never coalesce", () => {
     const swe = projectReport(sweRaw())
     const tb = projectReport(tbCanonicalRaw())
     expect(keyOf("nightly", swe.campaignIdentity)).toBe("nightly")
-    expect(keyOf("nightly", tb.campaignIdentity)).toBe(
-      "[terminal-bench@2.1 terminal-bench@2.1.0#f00dcafe] nightly",
+    expect(keyOf("nightly", tb.campaignIdentity)).toContain(
+      `[terminal-bench@2.1 ${TERMINAL_BENCH_DATASET_REF} `,
     )
+    expect(keyOf("nightly", tb.campaignIdentity).endsWith("] nightly")).toBe(true)
     expect(keyOf("nightly", swe.campaignIdentity)).not.toBe(keyOf("nightly", tb.campaignIdentity))
   })
 

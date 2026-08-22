@@ -14,13 +14,14 @@ import { resolveBenchmarkRunConfig } from "../benchmark-suite"
 import { ensureBenchTraceSink } from "../default-trace-sink"
 import { resolveRemoteBenchExecutionPreset } from "../preset"
 import type { GradeBackend } from "../remote/backend"
-import { readDatasetInstanceIds } from "../remote/box-session/dataset-preflight"
+import type { FullRemoteConfig, FullRemoteResult } from "../remote/box-session"
 import { createEc2Backend } from "../remote/ec2"
 import { createFanoutBackend } from "../remote/fanout"
 import { refreshRemoteAuthJson } from "../remote/fresh-auth"
 import { createFullRemoteBackend, runWithRelaunch } from "../remote/full"
 import { createSshBackend } from "../remote/ssh"
 import { type BenchRunConfig, readDatasetFamilySelector } from "../run-config"
+import { resolveFullRemoteExpectedInstanceIds } from "./grade-expected"
 import {
   allowExtraBoxes,
   argValue,
@@ -126,7 +127,23 @@ const logFullRemoteOutcome = (out: {
  *  ships ONLY the stripped short-lived access_token over ssh STDIN (refresh/id
  *  dropped), enforces IMDSv2 hop-1 + TTL, and always terminates. --dry-run plans
  *  it safely without launching. Instance-aware relaunch recovers box loss. */
-const cmdGradeFullRemote = async (): Promise<void> => {
+/**
+ * INJECTED PORTS for the full-remote command root.
+ *
+ * Same shape `cmdBox` got, and for the same reason: proving what this command
+ * hands its backend requires DRIVING the command, and the un-injected root
+ * constructs the real full-remote backend. `cmdBox`'s first hellgate draft cost
+ * ten live spot instances by reaching the real provisioner, so the port both
+ * RECORDS and REPLACES it. The production call site passes nothing and is
+ * byte-identical.
+ */
+export interface FullRemoteCommandPorts {
+  readonly makeFullRemoteBackend?: (cfg: FullRemoteConfig) => {
+    run: () => Promise<FullRemoteResult>
+  }
+}
+
+export const cmdGradeFullRemote = async (ports: FullRemoteCommandPorts = {}): Promise<void> => {
   // T2 — re-resolve the ONE typed config (idempotent: cmdGrade already validated +
   // serialized the family into env). Threaded as the TYPED family into the preset
   // AND onto the full-remote backend config (`swebenchDatasetFamily`), so the box
@@ -171,15 +188,23 @@ const cmdGradeFullRemote = async (): Promise<void> => {
   })
   const fullModel = argValue("--model")
   // The expected instance set instance-aware relaunch reconciles against to detect
-  // partial loss. `--instance` wins; else every instance_id in the dataset jsonl.
-  const expected =
-    instance !== undefined
-      ? instance
-          .split(",")
-          .map((s) => s.trim())
-          .filter((s) => s !== "")
-      : // PMX-02 — decoded through the family's ONE reader.
-        readDatasetInstanceIds(dataset, runConfig.datasetFamily)
+  // partial loss — and, for a family with a sample manifest, the AUTHORITY that
+  // decides which instances this campaign runs at all.
+  //
+  // aug-22 residual #1: this used to be `--instance` else "every id in the
+  // dataset", so a full-remote ProMax campaign could name PMX-7 in its
+  // provenance while running an entirely different set. The one owner of that
+  // decision is now `resolveFullRemoteExpectedInstanceIds`, which shares the
+  // manifest/`--instance` two-authority refusal with the local path.
+  const expected = [
+    ...resolveFullRemoteExpectedInstanceIds({
+      datasetPath: dataset,
+      family: runConfig.datasetFamily,
+      env: process.env,
+      ...(instance !== undefined ? { instanceFilter: instance } : {}),
+      surface: "full-remote",
+    }),
+  ]
   // HARD GUARD: `--keep` forces 0 relaunches — a kept box is NOT auto-terminated
   // on loss, so relaunching would orphan it (runaway spot billing). Also 0 when
   // the expected set is unknown (can't reconcile what's missing).
@@ -194,8 +219,9 @@ const cmdGradeFullRemote = async (): Promise<void> => {
   // AMI could not be selected from the CLI — it was baked but unreachable, so every
   // run fell back to the hardcoded default. Now selectable per-run.
   const amiOverride = argValue("--ami") ?? process.env.QUANTA_FULL_REMOTE_AMI
+  const makeFullRemoteBackend = ports.makeFullRemoteBackend ?? createFullRemoteBackend
   const makeBackend = (ids: readonly string[]) =>
-    createFullRemoteBackend({
+    makeFullRemoteBackend({
       repoDir: process.cwd(),
       authJson,
       datasetPath: dataset,
@@ -260,7 +286,9 @@ const cmdGradeFullRemote = async (): Promise<void> => {
   }
 }
 
-export const cmdGrade = async (): Promise<void> => {
+export { resolveFullRemoteExpectedInstanceIds } from "./grade-expected"
+
+export const cmdGrade = async (ports: FullRemoteCommandPorts = {}): Promise<void> => {
   // T2 — resolve the ONE typed run config (fail-closed: an explicit-but-unknown
   // family errors instead of silently grading as Verified).
   //
@@ -271,7 +299,7 @@ export const cmdGrade = async (): Promise<void> => {
   // into a per-call ENVELOPE at the boundary that owns it
   // (`remote/full.ts` → `buildSubprocessFamilyEnv`), never here.
   const runConfig = resolveGradeRunConfig(readDatasetFamilySelector(process.argv))
-  if ((argValue("--mode") ?? "grade-only") === "full") return cmdGradeFullRemote()
+  if ((argValue("--mode") ?? "grade-only") === "full") return cmdGradeFullRemote(ports)
 
   const predictions = argValue("--predictions")
   const backendSpec = argValue("--backend")

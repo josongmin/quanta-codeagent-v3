@@ -11,8 +11,13 @@
  * Every assertion here observes the REAL fold function the IO shell calls.
  */
 import { describe, expect, test } from "bun:test"
+import {
+  CANONICAL_TASK_IDS,
+  canonicalTaskRef,
+  TERMINAL_BENCH_DATASET_REF,
+} from "@/apps/bench/terminal/dataset"
+import { buildTerminalRunReport, type TerminalTrialRecord } from "@/apps/bench/terminal/report"
 import { encodeCanonicalReport } from "@/runner/batch/report-envelope"
-import { buildTerminalBenchReport } from "@/runner/batch/report-terminal"
 import { solvedFromReports, sweRowsFromArtifact } from "./leaderboard-sync"
 
 const TS = 1_700_000_000_000
@@ -33,15 +38,40 @@ const terminalArtifact = (ids: readonly string[]): Record<string, unknown> =>
   JSON.parse(
     JSON.stringify(
       encodeCanonicalReport(
-        buildTerminalBenchReport(
-          ids.map((id) => ({ id, passed: true, durationMs: 1000 })),
-          {
-            datasetRef: "terminal-bench@2.1.0#f00dcafe",
-            timestamp: "2026-08-22T01:00:00.000Z",
-            model: "gpt-5.5",
-            preset: "TB +levers",
-          },
-        ),
+        buildTerminalRunReport({
+          datasetRef: TERMINAL_BENCH_DATASET_REF,
+          timestamp: "2026-08-22T01:00:00.000Z",
+          arm: "levers",
+          k: 1,
+          harborJobIds: ["job-1"],
+          sourcePaths: ["/jobs"],
+          model: "gpt-5.5",
+          preset: "TB +levers",
+          // The SWE-shaped id rides on the TRIAL id; the task keeps a canonical
+          // 2.1 identity so the artifact is admissible in the first place (an
+          // inadmissible fixture would prove nothing about the read boundary).
+          trials: ids.map((id, index): TerminalTrialRecord => {
+            const taskId = CANONICAL_TASK_IDS[index] as string
+            return {
+              trialId: id,
+              taskId,
+              taskName: taskId.split("/")[1] as string,
+              taskRef: canonicalTaskRef(taskId) as string,
+              reward: 1,
+              outcome: "graded_pass",
+              startedAt: null,
+              finishedAt: null,
+              durationSec: 1,
+              uncachedInputTokens: null,
+              cachedInputTokens: null,
+              outputTokens: null,
+              costUsd: null,
+              configOverrides: [],
+              sourcePath: `/jobs/${id}/result.json`,
+            }
+          }),
+          defects: [],
+        }),
       ),
     ),
   ) as Record<string, unknown>

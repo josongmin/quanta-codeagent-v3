@@ -87,6 +87,116 @@ export interface PreflightInput {
   readonly readRows: () => readonly FamilyCorpusRow[]
 }
 
+/**
+ * Input to a family's MANIFEST-DRIVEN SELECTION (PMX-06 / aug-22 G4).
+ *
+ * The generic run path decides WHICH instances execute. For most families that
+ * is the `--instance` filter and nothing else. A family whose campaigns are
+ * defined by a published, digest-sealed sample (ProMax's `PMX-7 ⊂ PMX-14 ⊂
+ * PMX-40 ⊂ PMX-170`) needs the manifest to be the AUTHORITY, or "we ran PMX-7"
+ * is an unverifiable claim about whatever `--instance` happened to say.
+ */
+export interface SelectionInput {
+  /** The env the composition root resolved from — never a fresh ambient read. */
+  readonly env: NodeJS.ProcessEnv
+  /** The corpus as this family's own reader decoded it, in dataset order. */
+  readonly rows: readonly FamilyCorpusRow[]
+  /** Caller label for refusal messages (`local-run`, `full-remote`, …). */
+  readonly surface: string
+}
+
+/**
+ * One on-box bootstrap command, as DATA.
+ *
+ * PMX-04. A family whose remote lane needs more than the shared box image (a
+ * pinned upstream checkout, a dedicated interpreter, a platform/disk gate)
+ * previously had two options, both bad: a shell script hidden inside
+ * `setupBox`, which nothing can assert about; or a family branch in
+ * `box-session.ts` / `ec2-lifecycle.ts`, which packet invariant 10 forbids.
+ *
+ * Expressing the bootstrap as an ordered argv list makes it a VALUE — a dry-run
+ * can print it, a receipt can record it, and a test can replay it through a fake
+ * executor — while the SEMANTICS stay with the family's own owner module.
+ */
+export interface FamilyBootstrapCommand {
+  /** Family-defined phase label, surfaced in plans and receipts. */
+  readonly step: string
+  /**
+   * WHICH CAMPAIGN PHASE this command may run in. Required, so a family cannot
+   * add a command without classifying it (a new member of the union is a
+   * compile error at every construction site, not a silent default).
+   *
+   * `agent` — runs on the box the AGENT will run on, before patch generation.
+   * `grader` — runs only once model patches are captured, on grading material
+   *   that invariant 3 forbids from co-existing with the agent.
+   */
+  readonly phase: FamilyBootstrapPhase
+  /**
+   * Does executing this command materialize or read ANSWER-KEY bytes on the box
+   * (gold patch, test patch, eval script, golden output, derived image receipt)?
+   *
+   * A separate axis from {@link phase} ON PURPOSE: `phase` says where a family
+   * INTENDS a command to run, `goldBearing` says what it does. The executor
+   * cross-checks the two and refuses a gold-bearing command in the agent phase,
+   * so a mislabelled phase fails closed instead of leaking.
+   */
+  readonly goldBearing: boolean
+  /** argv — never a shell string. */
+  readonly argv: readonly string[]
+  /** Why this command is in the plan, for an operator reading a dry-run. */
+  readonly purpose: string
+  /**
+   * The typed expectation this command's OUTPUT must satisfy: a sha256 the
+   * command is expected to report for {@link FamilyBootstrapDigestExpectation.absolutePath}.
+   *
+   * It lives in the plan DATA rather than being piped into `sha256sum --check`
+   * on stdin for two reasons: a stdin payload is not visible in a recorded argv,
+   * so a campaign receipt could not prove WHICH digest was checked; and the
+   * comparison then belongs to the executor, where a test can drive it, rather
+   * than to a remote shell's exit status.
+   */
+  readonly verifies?: FamilyBootstrapDigestExpectation
+}
+
+/** The campaign phases a bootstrap command can belong to. Closed union: adding
+ *  a member forces every construction site and classifier to be revisited. */
+export const FAMILY_BOOTSTRAP_PHASES = ["agent", "grader"] as const
+
+export type FamilyBootstrapPhase = (typeof FAMILY_BOOTSTRAP_PHASES)[number]
+
+/** A digest a bootstrap command's stdout must report. */
+export interface FamilyBootstrapDigestExpectation {
+  /** Family-facing label for the artifact — a repo-relative path, typically. */
+  readonly path: string
+  /** The ON-BOX absolute path the digest is taken over. */
+  readonly absolutePath: string
+  /** The sha256 the command's output must contain. */
+  readonly sha256: string
+}
+
+/**
+ * A family's REMOTE BOOTSTRAP specification: what a box must become before this
+ * family can grade on it.
+ *
+ * Deliberately narrow and generic. Remote code CARRIES this (owner split:
+ * "remote does not rediscover family behavior") and must not reach through it
+ * for family-specific semantics — the evaluator/image decisions stay in the
+ * family's own owner module, and only their RESULT travels here.
+ */
+export interface FamilyRemoteBootstrap {
+  readonly family: DatasetFamily
+  readonly commands: readonly FamilyBootstrapCommand[]
+  /**
+   * GRADER-side parallelism. Deliberately a separate number from the agent's
+   * patch-generation concurrency: they bound different resources (a Docker
+   * daemon versus a model rate limit) and collapsing them is how a box ends up
+   * grading 16-wide because the operator wanted 16 agents.
+   */
+  readonly graderWorkers: number
+  /** Extra operator-facing dry-run lines describing what would be bootstrapped. */
+  readonly planNotes: readonly string[]
+}
+
 /** Input to a family's ON-BOX bootstrap step. Structurally typed (not the
  *  box-session `SpawnResult` import) so the profile layer keeps no edge into its
  *  consumer. */
@@ -181,4 +291,34 @@ export interface DatasetFamilyProfile {
   /** layer 4 — preflight: Pro ⇒ fail-closed Scale-column shape check; else no-op.
    *  Throws RemoteDatasetPreflightError on a malformed Pro dataset. */
   readonly preflight: (input: PreflightInput) => void
+  /**
+   * layer 6 — MANIFEST-DRIVEN SELECTION (PMX-06 / aug-22 G4). The ORDERED
+   * instance ids this run must execute, or `undefined` when the operator named
+   * no manifest.
+   *
+   * Absent port (verified/live/pro) ⇒ the selection path is byte-identical to
+   * before: the generic consumer calls `profile.resolveSelection?.(…)` and a
+   * `undefined` result leaves the historical `--instance` filter untouched.
+   *
+   * FAIL-CLOSED by contract: an implementation that cannot prove the manifest and
+   * the loaded corpus are the same population must THROW, never fall back to
+   * "run everything" — a campaign silently running a different set than the one
+   * it names is the whole failure this port exists to prevent.
+   */
+  readonly resolveSelection?: (input: SelectionInput) => readonly string[] | undefined
+  /**
+   * layer 7 — the REMOTE BOOTSTRAP specification (PMX-04). What this family
+   * needs a grading box to become, derived from the ALREADY-RESOLVED typed
+   * config, never a fresh env read.
+   *
+   * Absent port (verified/live/pro) ⇒ `undefined` ⇒ every remote surface behaves
+   * byte-identically to before: the generic consumer calls
+   * `profile.remoteBootstrap?.(cfg)` and adds nothing when there is nothing.
+   *
+   * It is a PORT rather than a static object because the specification depends
+   * on the run (its concurrency, its operator knobs), and it returns DATA rather
+   * than performing IO because the ticket requires "argv and ordering are
+   * testable without executing anything".
+   */
+  readonly remoteBootstrap?: (cfg: BenchRunConfig) => FamilyRemoteBootstrap
 }

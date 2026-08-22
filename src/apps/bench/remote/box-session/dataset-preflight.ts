@@ -133,6 +133,40 @@ const datasetGoldPatchOf = (row: Record<string, unknown>): string | undefined =>
 
 const filesFromPatch = (patch: string): string[] => filesFromUnifiedDiff(patch)
 
+/**
+ * The probe target ONE row implies, or the `unknown-task-language` refusal it
+ * produces.
+ *
+ * aug-22 G3 — the whole per-row policy is here, in one place: a family that
+ * PUBLISHES a language grounds on it, EXCLUSIVELY. There is deliberately no gold
+ * fallback for such a row — falling back would re-open the leak this closes, and
+ * would silently ground a Rust task as Pyright whenever its gold patch happened
+ * to touch a `.py` helper. Families that publish no language keep the historical
+ * diff-header derivation, byte-identically.
+ */
+const strictGroundingTargetOf = (
+  row: FamilyCorpusRow,
+):
+  | { readonly ok: true; readonly target: RemoteStrictLspProbeTarget }
+  | { readonly ok: false; readonly refusal: RemoteStrictGroundingSupport } => {
+  const { instanceId, record, publicLanguage } = row
+  if (publicLanguage !== undefined) {
+    const byLanguage = strictBinForPublicLanguage(instanceId, publicLanguage)
+    return byLanguage === null
+      ? {
+          ok: false,
+          refusal: { kind: "unknown-task-language", instanceId, files: [], publicLanguage },
+        }
+      : { ok: true, target: byLanguage }
+  }
+  const patch = datasetGoldPatchOf(record)
+  const files = patch !== undefined ? filesFromPatch(patch) : []
+  const target = dominantRemoteStrictBinOf(instanceId, files)
+  return target === undefined
+    ? { ok: false, refusal: { kind: "unknown-task-language", instanceId, files } }
+    : { ok: true, target }
+}
+
 const remoteStrictGroundingSupportOf = (args: {
   readonly datasetPath: string
   readonly instanceIds?: readonly string[]
@@ -143,27 +177,12 @@ const remoteStrictGroundingSupportOf = (args: {
   const selected = args.instanceIds !== undefined ? new Set(args.instanceIds) : undefined
   const targets = new Map<string, RemoteStrictLspProbeTarget>()
   let sawSelected = false
-  for (const { instanceId, record, publicLanguage } of rows) {
-    if (selected !== undefined && !selected.has(instanceId)) continue
+  for (const row of rows) {
+    if (selected !== undefined && !selected.has(row.instanceId)) continue
     sawSelected = true
-    // aug-22 G3 — a family that PUBLISHES a language grounds on it, exclusively.
-    // No gold fallback: falling back would re-open the very leak this closes (and
-    // would silently ground a Rust task as Pyright whenever its gold patch
-    // happened to touch a `.py` helper).
-    if (publicLanguage !== undefined) {
-      const byLanguage = strictBinForPublicLanguage(instanceId, publicLanguage)
-      if (byLanguage === null) {
-        return { kind: "unknown-task-language", instanceId, files: [], publicLanguage }
-      }
-      if (!targets.has(byLanguage.bin)) targets.set(byLanguage.bin, byLanguage)
-      continue
-    }
-    // The historical path, for families that publish no language label.
-    const patch = datasetGoldPatchOf(record)
-    const files = patch !== undefined ? filesFromPatch(patch) : []
-    const target = dominantRemoteStrictBinOf(instanceId, files)
-    if (target === undefined) return { kind: "unknown-task-language", instanceId, files }
-    if (!targets.has(target.bin)) targets.set(target.bin, target)
+    const resolved = strictGroundingTargetOf(row)
+    if (!resolved.ok) return resolved.refusal
+    if (!targets.has(resolved.target.bin)) targets.set(resolved.target.bin, resolved.target)
   }
   if (!sawSelected) return { kind: "unknown-selection" }
   return { kind: "ok", targets: [...targets.values()] }

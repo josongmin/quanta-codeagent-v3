@@ -150,9 +150,7 @@ const JUSTIFIED: ReadonlyArray<{ readonly file: string; readonly reason: string 
 const FAMILY_TOKENS = "verified|promax|live|pro"
 /** Two quoted family tokens joined by `|` (a type union) or `,` (an array/Set
  *  literal) — the two spellings every real copy of this axis has used. */
-const UNION_RE = new RegExp(
-  `["'](?:${FAMILY_TOKENS})["']\\s*[|,]\\s*["'](?:${FAMILY_TOKENS})["']`,
-)
+const UNION_RE = new RegExp(`["'](?:${FAMILY_TOKENS})["']\\s*[|,]\\s*["'](?:${FAMILY_TOKENS})["']`)
 
 /** Drop comment content: every one of these modules DOCUMENTS the axis in prose. */
 const stripComments = (line: string): string => {
@@ -249,7 +247,8 @@ describe("G1 leg 3 — no UNDECLARED second family union anywhere in src/ + tool
     const clean = [
       'import { DATASET_FAMILIES } from "@/apps/bench/dataset-family-token"',
       "const FAMILIES: ReadonlySet<string> = new Set(DATASET_FAMILIES)",
-      "must(FAMILIES.has(spec.family), `unknown dataset family: ${spec.family}`)",
+      // (the `${…}` is split so this fixture is not itself a template literal)
+      `must(FAMILIES.has(spec.family), \`unknown dataset family: $${"{spec.family}"}\`)`,
       ' * ("verified" | "pro" | "live") to the right external coordinate',
       '// export type Family = "verified" | "pro" | "live"',
       'const suites = ["swe-bench", "terminal-bench"] as const',

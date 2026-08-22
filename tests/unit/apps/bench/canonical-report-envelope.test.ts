@@ -24,6 +24,16 @@ import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync } 
 import { tmpdir } from "node:os"
 import { join, relative } from "node:path"
 import {
+  CANONICAL_TASK_IDS,
+  canonicalTaskRef,
+  TERMINAL_BENCH_DATASET_REF,
+} from "../../../../src/apps/bench/terminal/dataset"
+import {
+  buildTerminalRunReport,
+  type TerminalTrialOutcome,
+  type TerminalTrialRecord,
+} from "../../../../src/apps/bench/terminal/report"
+import {
   buildReport,
   type CanonicalBenchReport,
   type DatasetFamily,
@@ -38,7 +48,6 @@ import {
   toCanonicalSweReport,
   writeReport,
 } from "../../../../src/runner/batch/report"
-import { buildTerminalBenchReport } from "../../../../src/runner/batch/report-terminal"
 import type { InstanceResult } from "../../../../src/runner/batch/types"
 import { __resetRuntimeConfig } from "../../../../src/shared/runtime-config"
 
@@ -157,99 +166,123 @@ describe("BFND-02 SWE branch — canonical identity in memory, legacy bytes on d
 // ───────────────────────── Terminal branch: separate lossless receipts ───────
 
 describe("BFND-02 Terminal branch — a SEPARATE lossless receipt, explicit identity", () => {
-  const trials = [
-    { id: "kv-store-grpc", passed: true, durationMs: 200_000 },
-    { id: "compile-compcert", passed: false, durationMs: 30_000 },
-    { id: "flaky-infra", passed: false, durationMs: 25_000, error: { kind: "agent-crash" } },
-    { id: "slow-task", passed: false, durationMs: 1_200_000, error: { kind: "agent-timeout" } },
-  ] as const
+  /** A REAL 2.1 trial receipt. TB21-04 widened this branch from the old
+   *  `{id, passed, turns, durationMs, error?}` fold — which carried no reward, no
+   *  task ref, no tokens, no cost and no trajectory — to the lossless record
+   *  below, so a run can no longer be scored losslessly and flattened on the way
+   *  to disk. */
+  const trial = (
+    index: number,
+    outcome: TerminalTrialOutcome,
+    reward: number | null,
+    extra: Partial<TerminalTrialRecord> = {},
+  ): TerminalTrialRecord => {
+    const taskId = CANONICAL_TASK_IDS[index] as string
+    return {
+      trialId: `trial-${index}`,
+      taskId,
+      taskName: taskId.split("/")[1] as string,
+      taskRef: canonicalTaskRef(taskId) as string,
+      reward,
+      outcome,
+      startedAt: "2026-08-22T01:00:00.000Z",
+      finishedAt: "2026-08-22T01:03:20.000Z",
+      durationSec: 200,
+      uncachedInputTokens: 900,
+      cachedInputTokens: 100,
+      outputTokens: 42,
+      costUsd: 0.25,
+      configOverrides: [],
+      sourcePath: `/jobs/trial-${index}/result.json`,
+      ...extra,
+    }
+  }
 
-  const report = (): TerminalBenchReport =>
-    buildTerminalBenchReport(trials, {
-      datasetRef: "harbor/terminal-bench@2.1.0",
+  const trials: readonly TerminalTrialRecord[] = [
+    trial(0, "graded_pass", 1, { trajectoryPath: "/jobs/trial-0/agent/trajectory.json" }),
+    trial(1, "graded_fail", 0),
+    trial(2, "agent_crash", null, { exceptionType: "RuntimeError" }),
+    trial(3, "agent_timeout", null, { exceptionType: "AgentTimeoutError" }),
+  ]
+
+  const report = (
+    rows: readonly TerminalTrialRecord[] = trials,
+    over: Partial<Parameters<typeof buildTerminalRunReport>[0]> = {},
+  ): TerminalBenchReport =>
+    buildTerminalRunReport({
+      datasetRef: TERMINAL_BENCH_DATASET_REF,
       timestamp: "T",
+      arm: "levers",
+      k: 1,
+      harborJobIds: ["job-1"],
+      sourcePaths: ["/jobs"],
       model: "gpt-5.5",
       preset: "TB +levers",
-      arm: "levers",
+      trials: rows,
+      defects: [],
+      ...over,
     })
 
-  test("carries explicit suite/version/datasetRef and NO family axis", () => {
+  test("carries explicit schema/suite/version/datasetRef and NO family axis", () => {
     const r = report() as unknown as Record<string, unknown>
+    expect(r.schemaVersion).toBe("terminal-bench-report/v2")
     expect(r.benchmarkSuite).toBe("terminal-bench")
     expect(r.benchmarkVersion).toBe("2.1")
-    expect(r.datasetRef).toBe("harbor/terminal-bench@2.1.0")
+    expect(r.datasetRef).toBe(TERMINAL_BENCH_DATASET_REF)
     expect("datasetFamily" in r).toBe(false)
   })
 
-  test("trial receipts stay LOSSLESS — every trial verbatim, none folded away", () => {
+  test("trial receipts stay LOSSLESS — reward, task ref, tokens, cost, trajectory, all verbatim", () => {
     const r = report()
-    expect(r.perInstance.map((t) => t.id)).toEqual([
-      "kv-store-grpc",
-      "compile-compcert",
-      "flaky-infra",
-      "slow-task",
+    expect(r.trials.map((t) => t.trialId)).toEqual(["trial-0", "trial-1", "trial-2", "trial-3"])
+    // The fields the OLD branch could not express at all:
+    expect(r.trials[0]?.reward).toBe(1)
+    expect(r.trials[2]?.reward).toBeNull()
+    expect(r.trials[0]?.taskRef).toBe(canonicalTaskRef(CANONICAL_TASK_IDS[0] as string))
+    expect(r.trials[0]?.costUsd).toBe(0.25)
+    expect(r.trials[0]?.outputTokens).toBe(42)
+    expect(r.trials[0]?.trajectoryPath).toBe("/jobs/trial-0/agent/trajectory.json")
+    // …and the EIGHT-class taxonomy, where the old branch had two error kinds.
+    expect(r.trials.map((t) => t.outcome)).toEqual([
+      "graded_pass",
+      "graded_fail",
+      "agent_crash",
+      "agent_timeout",
     ])
-    expect(r.perInstance[2]?.error).toEqual({ kind: "agent-crash" })
-    expect(r.perInstance[3]?.error).toEqual({ kind: "agent-timeout" })
-    expect(r.perInstance[0]?.durationMs).toBe(200_000)
+    expect(r.outcomes.agent_crash).toBe(1)
+    expect(r.outcomes.agent_timeout).toBe(1)
   })
 
-  test("official-shaped metrics keep EVERY trial in the denominator — a crash is a zero, not a hole", () => {
-    // CONTRACT CHANGE (aug-22). This previously encoded quanta's internal D1
-    // convention (RFC jul-3): an agent-CRASH was dropped from the denominator as
-    // a "re-runnable measurement hole". That inflated the headline — a run that
-    // crashed on half its tasks reported the accuracy of the surviving half —
-    // and it contradicts upstream Terminal-Bench 2.1, verified in TB21-04 by
-    // executing the pinned `leaderboard/core/metrics.py` as a live oracle: a
-    // trial with no reward is `is_success(null) === false`, so it scores zero
-    // and STAYS in the denominator. The ticket says the same thing as a
-    // non-negotiable: "errored trials carry reward 0; they are not removed from
-    // the denominator. Diagnostic taxonomy does not authorize denominator
-    // removal." The D1 view is not lost — `perInstance[].error.kind` is
-    // persisted on every receipt, so a consumer can still derive it.
+  test("official metrics keep EVERY trial in the denominator — a crash is a zero, not a hole", () => {
+    // CONTRACT (aug-22). Quanta's internal D1 convention dropped an agent-CRASH
+    // from the denominator as a "re-runnable measurement hole". That inflated the
+    // headline — a run that crashed on half its tasks reported the accuracy of
+    // the surviving half — and it contradicts upstream Terminal-Bench 2.1,
+    // verified in TB21-04 by executing the pinned `leaderboard/core/metrics.py`
+    // as a live oracle: a trial with no reward is `is_success(null) === false`,
+    // so it scores zero and STAYS in the denominator. The D1 view is not lost:
+    // `trials[].outcome` persists the taxonomy, so a consumer can still derive it.
     const r = report()
-    // 4 trials, NONE excluded ⇒ total 4; 1 pass ⇒ 25%.
-    expect(r.totals).toEqual({ total: 4, resolved: 1, resolvedPct: 25 })
-    // Paired control #1: dropping the crash from the INPUT now DOES move the
-    // denominator — proving the crash was genuinely counted, not coincidence.
-    const withoutCrash = buildTerminalBenchReport(
-      trials.filter((t) => t.id !== "flaky-infra"),
-      { datasetRef: "d", timestamp: "T", model: "m", preset: "p" },
+    expect(r.metrics?.nTrials).toBe(4)
+    expect(r.metrics?.accuracy).toBe(25)
+    // Paired control #1: dropping the crash from the INPUT moves the denominator.
+    expect(report(trials.filter((t) => t.outcome !== "agent_crash")).metrics?.accuracy).toBe(33.33)
+    // Paired control #2: a timeout is treated identically to a crash.
+    expect(report(trials.filter((t) => t.outcome !== "agent_timeout")).metrics?.accuracy).toBe(
+      33.33,
     )
-    expect(withoutCrash.totals).toEqual({ total: 3, resolved: 1, resolvedPct: 33 })
-    // Paired control #2: a genuine timeout FAIL moves it the same way — crash and
-    // timeout are treated identically by the official metric.
-    const withoutTimeout = buildTerminalBenchReport(
-      trials.filter((t) => t.id !== "slow-task"),
-      { datasetRef: "d", timestamp: "T", model: "m", preset: "p" },
-    )
-    expect(withoutTimeout.totals).toEqual({ total: 3, resolved: 1, resolvedPct: 33 })
-    // The diagnostic survives the change: the crash is still identifiable on the
-    // persisted receipt, so the D1 infra-hole view remains derivable.
-    expect(r.perInstance.filter((p) => p.error?.kind === "agent-crash")).toHaveLength(1)
+    // The diagnostic survives: the crash is still identifiable on the receipt.
+    expect(r.trials.filter((t) => t.outcome === "agent_crash")).toHaveLength(1)
   })
 
-  test("identity is fail-closed: a blank datasetRef is refused, never fabricated", () => {
-    expect(() =>
-      buildTerminalBenchReport(trials, {
-        datasetRef: "  ",
-        timestamp: "T",
-        model: "m",
-        preset: "p",
-      }),
-    ).toThrow(/datasetRef/)
+  test("identity is fail-closed: a non-pinned datasetRef is refused, never fabricated", () => {
+    expect(() => report(trials, { datasetRef: "  " })).toThrow(/datasetRef/)
+    expect(() => report(trials, { datasetRef: "sha256:deadbeef" })).toThrow(/datasetRef/)
   })
 
-  test("model:undefined is preserved (never fabricated) and arm is exact-optional", () => {
-    const r = buildTerminalBenchReport(trials, {
-      datasetRef: "d",
-      timestamp: "T",
-      model: undefined,
-      preset: "p",
-    })
-    expect(r.model).toBeUndefined()
-    expect("arm" in r).toBe(false)
-    expect(report().arm).toBe("levers")
+  test("model:undefined is preserved (never fabricated)", () => {
+    expect(report(trials, { model: undefined }).model).toBeUndefined()
+    expect(report().model).toBe("gpt-5.5")
   })
 
   test("BOTH branches serialize through the SAME writer to real bytes", async () => {
@@ -268,10 +301,48 @@ describe("BFND-02 Terminal branch — a SEPARATE lossless receipt, explicit iden
       expect("benchmarkSuite" in sweBytes).toBe(false)
       expect(tbBytes.benchmarkSuite).toBe("terminal-bench")
       expect(tbBytes.benchmarkVersion).toBe("2.1")
+      expect(tbBytes.schemaVersion).toBe("terminal-bench-report/v2")
       expect("datasetFamily" in tbBytes).toBe(false)
+      // The lossless channel survives to disk; the old folded one is gone.
+      expect((tbBytes.trials as unknown[]).length).toBe(4)
+      expect("perInstance" in tbBytes).toBe(false)
+      expect("totals" in tbBytes).toBe(false)
     })
   })
 })
+
+/** Shared Terminal fixture for the read-boundary + mirror suites below. */
+const terminalFixture = (): TerminalBenchReport =>
+  buildTerminalRunReport({
+    datasetRef: TERMINAL_BENCH_DATASET_REF,
+    timestamp: "T",
+    arm: "levers",
+    k: 1,
+    harborJobIds: ["job-1"],
+    sourcePaths: ["/jobs"],
+    model: "m",
+    preset: "p",
+    trials: [
+      {
+        trialId: "t1",
+        taskId: CANONICAL_TASK_IDS[0] as string,
+        taskName: (CANONICAL_TASK_IDS[0] as string).split("/")[1] as string,
+        taskRef: canonicalTaskRef(CANONICAL_TASK_IDS[0] as string) as string,
+        reward: 1,
+        outcome: "graded_pass",
+        startedAt: null,
+        finishedAt: null,
+        durationSec: null,
+        uncachedInputTokens: null,
+        cachedInputTokens: null,
+        outputTokens: null,
+        costUsd: null,
+        configOverrides: [],
+        sourcePath: "/jobs/t1/result.json",
+      },
+    ],
+    defects: [],
+  })
 
 // ───────────────────────── the ONE read-normalization boundary ───────────────
 
@@ -305,12 +376,7 @@ describe("BFND-02 decodeCanonicalReport — the single read boundary", () => {
           RESULTS,
         ),
       )
-      const tb = buildTerminalBenchReport([{ id: "t1", passed: true, durationMs: 5 }], {
-        datasetRef: "harbor@2.1.0",
-        timestamp: "T",
-        model: "m",
-        preset: "p",
-      })
+      const tb = terminalFixture()
       await writeReport(sweFile, swe)
       await writeReport(tbFile, tb)
       const sweBack = decodeCanonicalReport(JSON.parse(readFileSync(sweFile, "utf8")))
@@ -370,19 +436,10 @@ describe("BFND-02 decodeCanonicalReport — the single read boundary", () => {
 
   test("HIGH-A: a STRUCTURALLY malformed terminal artifact is refused at the boundary", () => {
     // The control: the real builder's bytes decode. Every mutation below keeps the
-    // three identity fields intact — so anything that still passes proves the decode
-    // is a cast, not a decode.
+    // identity fields intact — so anything that still passes proves the decode is
+    // a cast, not a decode.
     const wellFormed = JSON.parse(
-      JSON.stringify(
-        encodeCanonicalReport(
-          buildTerminalBenchReport([{ id: "t", passed: true, durationMs: 5, turns: 2 }], {
-            datasetRef: "harbor@2.1.0",
-            timestamp: "T",
-            model: "m",
-            preset: "p",
-          }),
-        ),
-      ),
+      JSON.stringify(encodeCanonicalReport(terminalFixture())),
     ) as Record<string, unknown>
     expect(decodeCanonicalReport(wellFormed).benchmarkSuite).toBe("terminal-bench")
 
@@ -391,91 +448,85 @@ describe("BFND-02 decodeCanonicalReport — the single read boundary", () => {
       ...patch,
     })
     const rows = (row: Record<string, unknown>): Record<string, unknown> =>
-      mutated({ perInstance: [row] })
+      mutated({ trials: [row] })
+    const goodRow = (wellFormed.trials as Record<string, unknown>[])[0] as Record<string, unknown>
 
-    // totals — the Terminal branch's OFFICIAL-metric channel (what the dashboard reads).
-    expect(() => decodeCanonicalReport(mutated({ totals: undefined }))).toThrow(/totals/)
-    expect(() => decodeCanonicalReport(mutated({ totals: "3/4" }))).toThrow(/totals/)
-    expect(() =>
-      decodeCanonicalReport(mutated({ totals: { total: "3", resolved: 1, resolvedPct: 33 } })),
-    ).toThrow(/totals\.total/)
+    // The lossless receipt channel.
+    expect(() => decodeCanonicalReport(mutated({ trials: undefined }))).toThrow(/trials/)
+    expect(() => decodeCanonicalReport(mutated({ trials: "t1" }))).toThrow(/trials/)
+    expect(() => decodeCanonicalReport(rows({ ...goodRow, trialId: 7 }))).toThrow(
+      /trials\[0\]\.trialId/,
+    )
+    expect(() => decodeCanonicalReport(rows({ ...goodRow, reward: "1" }))).toThrow(
+      /trials\[0\]\.reward/,
+    )
+    expect(() => decodeCanonicalReport(rows({ ...goodRow, outcome: "flaky" }))).toThrow(
+      /trials\[0\]\.outcome/,
+    )
+    expect(() => decodeCanonicalReport(rows({ ...goodRow, costUsd: "free" }))).toThrow(
+      /trials\[0\]\.costUsd/,
+    )
+    expect(() => decodeCanonicalReport(rows({ ...goodRow, configOverrides: "none" }))).toThrow(
+      /trials\[0\]\.configOverrides/,
+    )
+    // The metric + admission channels (what a leaderboard would read).
+    expect(() => decodeCanonicalReport(mutated({ admission: undefined }))).toThrow(/admission/)
     expect(() =>
       decodeCanonicalReport(
-        mutated({ totals: { total: 3, resolved: Number.NaN, resolvedPct: 0 } }),
+        mutated({ admission: { ...(wellFormed.admission as object), verdict: "great" } }),
       ),
-    ).toThrow(/totals\.resolved/)
-    // per-trial receipts
-    expect(() => decodeCanonicalReport(mutated({ perInstance: "nope" }))).toThrow(/perInstance/)
-    expect(() => decodeCanonicalReport(mutated({ perInstance: undefined }))).toThrow(/perInstance/)
-    expect(() => decodeCanonicalReport(rows({ passed: true, turns: 0, durationMs: 0 }))).toThrow(
-      /perInstance\[0\]\.id/,
-    )
+    ).toThrow(/admission\.verdict/)
     expect(() =>
-      decodeCanonicalReport(rows({ id: "t", passed: "yes", turns: 0, durationMs: 0 })),
-    ).toThrow(/perInstance\[0\]\.passed/)
-    expect(() =>
-      decodeCanonicalReport(rows({ id: "t", passed: true, turns: "3", durationMs: 0 })),
-    ).toThrow(/perInstance\[0\]\.turns/)
-    // provenance
-    expect(() => decodeCanonicalReport(mutated({ knobs: undefined }))).toThrow(/knobs/)
-    expect(() =>
-      decodeCanonicalReport(mutated({ knobs: { preset: 7, resolved: {}, inactive: [] } })),
-    ).toThrow(/knobs\.preset/)
+      decodeCanonicalReport(
+        mutated({ metrics: { ...(wellFormed.metrics as object), accuracy: "25%" } }),
+      ),
+    ).toThrow(/metrics\.accuracy/)
+    expect(() => decodeCanonicalReport(mutated({ outcomes: undefined }))).toThrow(/outcomes/)
+    // Provenance.
     expect(() => decodeCanonicalReport(mutated({ timestamp: 5 }))).toThrow(/timestamp/)
     expect(() => decodeCanonicalReport(mutated({ model: 5 }))).toThrow(/model/)
-    expect(() => decodeCanonicalReport(mutated({ source: undefined }))).toThrow(/source/)
-    expect(() => decodeCanonicalReport(mutated({ arm: "control" }))).toThrow(/arm/)
+    expect(() => decodeCanonicalReport(mutated({ preset: 5 }))).toThrow(/preset/)
+    expect(() => decodeCanonicalReport(mutated({ arm: 5 }))).toThrow(/arm/)
+    expect(() => decodeCanonicalReport(mutated({ k: "one" }))).toThrow(/k/)
+    expect(() => decodeCanonicalReport(mutated({ dataset: "terminal-bench" }))).toThrow(/dataset/)
   })
 
   test("HIGH-A: the decoded terminal report is a real typed value, not the raw object", () => {
     // A cast returns the SAME object identity and carries whatever junk rode along.
-    const raw = JSON.parse(
-      JSON.stringify(
-        encodeCanonicalReport(
-          buildTerminalBenchReport([{ id: "t", passed: true, durationMs: 5 }], {
-            datasetRef: "harbor@2.1.0",
-            timestamp: "T",
-            model: "m",
-            preset: "p",
-          }),
-        ),
-      ),
-    ) as Record<string, unknown>
+    const raw = JSON.parse(JSON.stringify(encodeCanonicalReport(terminalFixture()))) as Record<
+      string,
+      unknown
+    >
     raw.smuggled = { exec: "rm -rf /" }
     const decoded = decodeCanonicalReport(raw)
     expect(decoded).not.toBe(raw)
     expect("smuggled" in decoded).toBe(false)
   })
 
-  test("MED-B: the two branches' same-named `error` channel cannot cross (both ways)", () => {
-    const tb = JSON.parse(
-      JSON.stringify(
-        encodeCanonicalReport(
-          buildTerminalBenchReport([{ id: "t", passed: false, durationMs: 5 }], {
-            datasetRef: "harbor@2.1.0",
-            timestamp: "T",
-            model: "m",
-            preset: "p",
-          }),
-        ),
-      ),
-    ) as Record<string, unknown>
-    const withTrialError = (error: unknown): Record<string, unknown> => ({
-      ...tb,
-      perInstance: [{ id: "t", passed: false, turns: 0, durationMs: 5, error }],
-    })
-    // A terminal receipt must NOT accept the SWE branch's `error: string`.
-    expect(() => decodeCanonicalReport(withTrialError("boom"))).toThrow(/error/)
-    expect(() => decodeCanonicalReport(withTrialError({ kind: "boom" }))).toThrow(/error/)
-    // ...and the terminal kinds still decode (non-vacuity: it is not refusing everything).
-    for (const kind of ["agent-timeout", "agent-crash"] as const) {
-      const decoded = decodeCanonicalReport(withTrialError({ kind }))
-      expect(decoded.benchmarkSuite).toBe("terminal-bench")
-      if (decoded.benchmarkSuite === "terminal-bench") {
-        expect(decoded.perInstance[0]?.error).toEqual({ kind })
-      }
+  test("MED-B: the branches' fault channels cannot cross (now structurally, then by refusal)", () => {
+    // TB21-04 removed the collision at the SOURCE: the Terminal receipt has no
+    // `error` field at all — a fault is an `outcome` from the closed eight-class
+    // taxonomy plus the raw `exceptionType`. So the terminal side of this rail is
+    // now a SHAPE proof rather than a refusal…
+    const tb = JSON.parse(JSON.stringify(encodeCanonicalReport(terminalFixture()))) as Record<
+      string,
+      unknown
+    >
+    const trial = (tb.trials as Record<string, unknown>[])[0] as Record<string, unknown>
+    expect("error" in trial).toBe(false)
+    // …and a receipt that smuggles the SWE branch's `error: string` in is simply
+    // dropped by the rebuild, never carried through as an untyped passenger.
+    const smuggled = JSON.parse(JSON.stringify(tb)) as Record<string, unknown>
+    ;(smuggled.trials as Record<string, unknown>[])[0] = { ...trial, error: "boom" }
+    const decodedTb = decodeCanonicalReport(smuggled)
+    expect(decodedTb.benchmarkSuite).toBe("terminal-bench")
+    if (decodedTb.benchmarkSuite === "terminal-bench") {
+      expect("error" in (decodedTb.trials[0] as object)).toBe(false)
+      // NON-VACUITY: the real fault channel survived the same rebuild.
+      expect(decodedTb.trials[0]?.outcome).toBe("graded_pass")
     }
-    // Symmetrically: a SWE receipt must NOT accept the Terminal branch's `{kind}`.
+    // The SWE side of the rail is unchanged and still load-bearing: a SWE receipt
+    // must NOT accept the Terminal branch's old `{kind}` record.
     const swe = (error: unknown): Record<string, unknown> => ({
       timestamp: "t",
       model: "m",
@@ -493,11 +544,39 @@ describe("BFND-02 decodeCanonicalReport — the single read boundary", () => {
   test("MED-E: EVERY terminal-only key trips the branch-exclusion guard (red per key)", () => {
     // The set is type-derived (see report-envelope.ts) so a new Terminal field
     // cannot be added without listing it here.
-    expect([...TERMINAL_ONLY_KEYS].sort()).toEqual(["arm", "benchmarkVersion", "datasetRef"])
+    expect([...TERMINAL_ONLY_KEYS].sort()).toEqual([
+      "admission",
+      "arm",
+      "benchmarkVersion",
+      "dataset",
+      "datasetRef",
+      "defects",
+      "harborJobIds",
+      "k",
+      "manifest",
+      "metrics",
+      "outcomes",
+      "preset",
+      "schemaVersion",
+      "sourcePaths",
+      "trials",
+    ])
     const sample: Record<string, unknown> = {
+      admission: { verdict: "official" },
       arm: "levers",
       benchmarkVersion: "2.1",
+      dataset: "terminal-bench/terminal-bench-2-1",
       datasetRef: "harbor@2.1.0",
+      defects: [],
+      harborJobIds: [],
+      k: 5,
+      manifest: {},
+      metrics: {},
+      outcomes: {},
+      preset: "p",
+      schemaVersion: "terminal-bench-report/v2",
+      sourcePaths: [],
+      trials: [],
     }
     for (const key of TERMINAL_ONLY_KEYS) {
       const value = sample[key]
@@ -532,21 +611,36 @@ describe("BFND-02 decodeCanonicalReport — the single read boundary", () => {
     for (const key of TERMINAL_ONLY_KEYS) expect(key in encoded).toBe(false)
   })
 
-  test("terminal identity is validated, not trusted: bad version / blank ref fail", () => {
-    expect(() =>
-      decodeCanonicalReport({
-        benchmarkSuite: "terminal-bench",
-        benchmarkVersion: "9.9",
-        datasetRef: "d",
-      }),
-    ).toThrow(/benchmarkVersion/)
+  test("terminal identity is validated, not trusted: version, schema and ref each fail closed", () => {
+    // The SCHEMA version is checked first and by itself: a terminal artifact
+    // without one is the pre-2.1 fold, and no amount of correct benchmarkVersion
+    // makes it readable as a 2.1 receipt.
     expect(() =>
       decodeCanonicalReport({
         benchmarkSuite: "terminal-bench",
         benchmarkVersion: "2.1",
-        datasetRef: "",
+        datasetRef: "d",
       }),
+    ).toThrow(/schemaVersion/)
+    const identity = {
+      benchmarkSuite: "terminal-bench",
+      schemaVersion: "terminal-bench-report/v2",
+      dataset: "terminal-bench/terminal-bench-2-1",
+    }
+    expect(() =>
+      decodeCanonicalReport({ ...identity, benchmarkVersion: "9.9", datasetRef: "d" }),
+    ).toThrow(/benchmarkVersion/)
+    expect(() =>
+      decodeCanonicalReport({ ...identity, benchmarkVersion: "2.1", datasetRef: "" }),
     ).toThrow(/datasetRef/)
+    expect(() =>
+      decodeCanonicalReport({
+        ...identity,
+        dataset: "terminal-bench",
+        benchmarkVersion: "2.1",
+        datasetRef: "d",
+      }),
+    ).toThrow(/dataset/)
   })
 })
 
@@ -561,7 +655,7 @@ describe("BFND-02 decodeCanonicalReport — the single read boundary", () => {
  * be silently broken into always answering `false` (the vacuity failure mode).
  */
 type Assignable<A, B> = [A] extends [B] ? true : false
-type ErrorChannelOf<T> = T extends { error?: infer E } ? NonNullable<E> : never
+type HasKey<T, K extends string> = K extends keyof T ? true : false
 
 // Controls: the helper CAN answer true, and each branch is assignable to itself.
 const _selfTerminal: Assignable<TerminalTrialReceipt, TerminalTrialReceipt> = true
@@ -571,20 +665,17 @@ const _selfSwe: Assignable<PerInstanceReport, PerInstanceReport> = true
 const _terminalIsNotSwe: Assignable<TerminalTrialReceipt, PerInstanceReport> = false
 const _sweIsNotTerminal: Assignable<PerInstanceReport, TerminalTrialReceipt> = false
 
-// ...and specifically the same-named `error` CHANNEL cannot cross either way.
-const _terminalErrorIsNotSweError: Assignable<
-  ErrorChannelOf<TerminalTrialReceipt>,
-  ErrorChannelOf<PerInstanceReport>
-> = false
-const _sweErrorIsNotTerminalError: Assignable<
-  ErrorChannelOf<PerInstanceReport>,
-  ErrorChannelOf<TerminalTrialReceipt>
-> = false
-// Control for the extractor itself — it really does pull a non-never type out.
-const _errorChannelIsReal: Assignable<
-  { kind: "agent-crash" },
-  ErrorChannelOf<TerminalTrialReceipt>
-> = true
+// The old collision is gone at the SOURCE: TB21-04's receipt declares no `error`
+// channel at all (a fault is an `outcome` from the closed taxonomy), so the two
+// branches can no longer spell the same field with different meanings. The
+// paired control proves `HasKey` really can answer `true`.
+const _terminalHasNoErrorChannel: HasKey<TerminalTrialReceipt, "error"> = false
+const _sweHasErrorChannel: HasKey<PerInstanceReport, "error"> = true
+// …and the Terminal receipt carries the fields the OLD branch could not express.
+const _terminalHasReward: HasKey<TerminalTrialReceipt, "reward"> = true
+const _terminalHasOutcome: HasKey<TerminalTrialReceipt, "outcome"> = true
+const _terminalHasTaskRef: HasKey<TerminalTrialReceipt, "taskRef"> = true
+const _sweHasNoReward: HasKey<PerInstanceReport, "reward"> = false
 
 test("MED-B type-level disjointness assertions are LOADED (not dead code)", () => {
   // Keeps the compile-time assertions above referenced at runtime so a linter or
@@ -594,10 +685,13 @@ test("MED-B type-level disjointness assertions are LOADED (not dead code)", () =
     _selfSwe,
     _terminalIsNotSwe,
     _sweIsNotTerminal,
-    _terminalErrorIsNotSweError,
-    _sweErrorIsNotTerminalError,
-    _errorChannelIsReal,
-  ]).toEqual([true, true, false, false, false, false, true])
+    _terminalHasNoErrorChannel,
+    _sweHasErrorChannel,
+    _terminalHasReward,
+    _terminalHasOutcome,
+    _terminalHasTaskRef,
+    _sweHasNoReward,
+  ]).toEqual([true, true, false, false, false, true, true, true, true, false])
 })
 
 // ───────────────────────── one canonical mirror sink ─────────────────────────
@@ -630,24 +724,16 @@ describe("BFND-02 canonical mirror — one sink, no duplicate scatter", () => {
   })
 
   test("a report ALREADY written into the canonical dir is not re-mirrored as a mangled twin", async () => {
-    // The TB emitter writes straight into the results dir. Without this guard the
-    // mirror would drop a second `*.report.json` beside it and the dashboard would
-    // scan the SAME run twice.
+    // An operator who points `--out` straight at the results dir must not get a
+    // second, mangled `*.report.json` twin beside it — the dashboard would scan
+    // the SAME run twice.
     await withTmp(async (dir) => {
       const prev = process.env.QUANTA_BENCH_RESULTS_DIR
       process.env.QUANTA_BENCH_RESULTS_DIR = dir
       __resetRuntimeConfig()
       try {
         const file = join(dir, "report-terminal-bench-tb.report.json")
-        await writeReport(
-          file,
-          buildTerminalBenchReport([{ id: "t", passed: true, durationMs: 1 }], {
-            datasetRef: "harbor@2.1.0",
-            timestamp: "T",
-            model: "m",
-            preset: "p",
-          }),
-        )
+        await writeReport(file, terminalFixture())
         expect(readdirSync(dir)).toEqual(["report-terminal-bench-tb.report.json"])
       } finally {
         if (prev === undefined) delete process.env.QUANTA_BENCH_RESULTS_DIR
@@ -678,8 +764,11 @@ describe("BFND-02 writer ownership — one writer, one results-dir owner", () =>
   const WRITER_MODULE = "src/runner/batch/report-envelope.ts"
   /** Every product module allowed to invoke the canonical writer. */
   const KNOWN_WRITE_REPORT_CALLERS = [
+    // TB21-04: `tools/leaderboard-dashboard/tb-report-emit.ts` is GONE (it folded
+    // trials per task and wrote into the SSOT sink from the dashboard tree). The
+    // Terminal report command replaced it as the ONE Terminal product caller.
+    "src/apps/bench/commands/terminal.ts",
     "src/runner/batch/core.ts",
-    "tools/leaderboard-dashboard/tb-report-emit.ts",
   ]
   /**
    * Pre-canonical raw report writers that BFND-02 did not convert. Ratchet, not

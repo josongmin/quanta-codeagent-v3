@@ -27,11 +27,11 @@ import { afterAll, describe, expect, test } from "bun:test"
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import { presetRequiresLiveLspGrounding } from "@/apps/bench/preset"
 import {
   assertRemoteStrictGroundingSupported,
   UnsupportedRemoteStrictLspGroundingError,
 } from "@/apps/bench/remote/box-session/dataset-preflight"
-import { presetRequiresLiveLspGrounding } from "@/apps/bench/preset"
 import { PYRIGHT_LANGSERVER_BIN, RUST_ANALYZER_BIN } from "@/lsp/server-registry"
 
 const STRICT_PRESET = "agentless-v3-thin-strict"

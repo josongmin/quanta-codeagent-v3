@@ -11,13 +11,13 @@
  * checks nor the rendered receipt can leak a credential VALUE or the environment.
  */
 import { describe, expect, test } from "bun:test"
+import { TERMINAL_BENCH_DATASET, TERMINAL_BENCH_DATASET_REF } from "./dataset"
 import {
+  type DoctorPorts,
   formatDoctorReceipt,
   REQUIRED_DOCTOR_CHECKS,
   runTerminalDoctor,
-  type DoctorPorts,
 } from "./doctor"
-import { TERMINAL_BENCH_DATASET, TERMINAL_BENCH_DATASET_REF } from "./dataset"
 
 const SECRET = "sk-live-DOCTOR-MUST-NOT-PRINT-9876"
 
@@ -54,17 +54,21 @@ const classify = (bin: string, args: readonly string[]): string => {
   if (line.startsWith("uv --version")) return "uv --version"
   if (line.includes("docker info")) return "docker info"
   if (line.includes("docker --version")) return "docker --version"
+  // `quanta_agent` FIRST: the agent-import probe legitimately mentions harbor's
+  // own BaseAgent, so a harbor-first classifier would mislabel it.
+  if (line.includes("quanta_agent")) return "agent-import"
   if (line.includes("harbor")) return "harbor"
-  if (line.includes("import quanta_agent") || line.includes("quanta_agent")) return "agent-import"
   return "brain"
 }
 
-const makePorts = (over: {
-  readonly fail?: readonly string[]
-  readonly stdout?: Readonly<Record<string, string>>
-  readonly env?: NodeJS.ProcessEnv
-  readonly canWrite?: boolean
-} = {}): DoctorPorts => ({
+const makePorts = (
+  over: {
+    readonly fail?: readonly string[]
+    readonly stdout?: Readonly<Record<string, string>>
+    readonly env?: NodeJS.ProcessEnv
+    readonly canWrite?: boolean
+  } = {},
+): DoctorPorts => ({
   run: (bin, args) => {
     const key = classify(bin, args)
     const base = OK_RUNS[key] ?? { code: 0, stdout: "", stderr: "" }
@@ -135,9 +139,27 @@ describe("a required failure is non-zero — for EVERY required subject", () => 
 
   test("a NON-BaseAgent / abstract-open / ATIF-less agent each fail the import check", () => {
     for (const bad of [
-      { module: "quanta_agent", klass: "QuantaAgent", isBaseAgentSubclass: false, abstractMethods: [], supportsAtif: true },
-      { module: "quanta_agent", klass: "QuantaAgent", isBaseAgentSubclass: true, abstractMethods: ["version"], supportsAtif: true },
-      { module: "quanta_agent", klass: "QuantaAgent", isBaseAgentSubclass: true, abstractMethods: [], supportsAtif: false },
+      {
+        module: "quanta_agent",
+        klass: "QuantaAgent",
+        isBaseAgentSubclass: false,
+        abstractMethods: [],
+        supportsAtif: true,
+      },
+      {
+        module: "quanta_agent",
+        klass: "QuantaAgent",
+        isBaseAgentSubclass: true,
+        abstractMethods: ["version"],
+        supportsAtif: true,
+      },
+      {
+        module: "quanta_agent",
+        klass: "QuantaAgent",
+        isBaseAgentSubclass: true,
+        abstractMethods: [],
+        supportsAtif: false,
+      },
     ]) {
       const report = runTerminalDoctor(
         makePorts({ stdout: { "agent-import": JSON.stringify(bad) } }),

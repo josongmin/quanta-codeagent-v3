@@ -26,15 +26,17 @@ import {
   startSpan,
 } from "@/observability"
 import { matchesInstanceFilter, writeArtifacts as writeBatchArtifacts } from "@/runner/batch/core"
-import type { RunHealthSummary } from "@/runner/batch/report"
+import type { AggregateOfficialGradeInput, RunHealthSummary } from "@/runner/batch/report"
 import { logger } from "@/shared"
 import { benchRunDir, benchRunId } from "./corpus"
+import { resolveOfficialGradeReportInput } from "./official-grade-ingest-source"
 import type { DatasetFamily } from "./dataset-family"
 import { finalizeRun } from "./eval"
 import { prepareImages, resolveHarnessConfig } from "./harness"
 import type { AttemptObservation } from "./observe"
 import { readFamilyCorpusText } from "./profiles/corpus-read"
 import { type FamilyCorpusRow, type FamilyCorpusTask, runnableTasksOf } from "./profiles/corpus-row"
+import { applySelectionOrder, resolveFamilySelectedInstanceIds } from "./profiles/selection"
 import { argValue } from "./run-args"
 import type { ObserveCtx, RunCfg } from "./run-main"
 import type { InstanceResult } from "./types"
@@ -177,14 +179,36 @@ export const readSwebenchTasks = (
   ...runnableTasksOf(readFamilyCorpusText(readFileSync(datasetFile, "utf8"), family)),
 ]
 
-/** Apply the `--instance <substr>` filter to ALREADY-parsed tasks. Pure — no
- *  IO — so the dataset file is read + JSON-parsed exactly ONCE per run and the
- *  parsed corpus is threaded through (filter + empty-check + limit) instead of
- *  re-reading the same 500-row file three times. */
+/**
+ * Resolve WHICH already-parsed tasks a run executes.
+ *
+ * Two authorities, in this order:
+ *  1. the FAMILY's selection port (PMX-06 / aug-22 G4) — a sealed sample
+ *     manifest, when the operator named one. Its ORDER is authoritative.
+ *  2. the historical `--instance <substr>` filter.
+ *
+ * Byte-identical when no family declares a selection authority (the port is
+ * absent for verified/live/pro, and `resolveFamilySelectedInstanceIds` then
+ * returns `undefined`) — this stays the same substring filter it always was.
+ *
+ * `selection` is REQUIRED, deliberately: an optional parameter would let the one
+ * composition-root call site silently drop the family authority and leave the
+ * whole manifest lane inert, which is exactly the shape of the bug this closes.
+ * The compiler now enforces the binding.
+ */
 export const filterSwebenchTasks = (
   parsed: readonly SwebenchRunnableRow[],
+  selection: { readonly family: DatasetFamily; readonly env: NodeJS.ProcessEnv },
 ): SwebenchRunnableRow[] => {
   const instanceFilter = argValue("--instance")
+  const ids = resolveFamilySelectedInstanceIds({
+    family: selection.family,
+    rows: parsed,
+    env: selection.env,
+    surface: "local-run",
+    ...(instanceFilter !== undefined ? { instanceFilter } : {}),
+  })
+  if (ids !== undefined) return applySelectionOrder(parsed, ids, "local-run")
   return instanceFilter !== undefined && instanceFilter !== ""
     ? parsed.filter((t) => matchesInstanceFilter(t.instanceId, instanceFilter))
     : [...parsed]
@@ -207,10 +231,64 @@ export const writeArtifacts = async (
      *  Absent / verified ⇒ omitted from the report (byte-identical legacy shape). */
     datasetFamily?: DatasetFamily
     runHealth?: RunHealthSummary
+    /** PMX-05 residual #3 — the official grader's campaign receipt.
+     *
+     * This parameter's shape used to be a HAND-NARROWED list of five fields, so
+     * `BatchArtifactMeta.officialGrade` — which `buildReport` already knew how to
+     * aggregate and persist — was structurally unreachable from the bench
+     * composition root: the section had a reader, a dashboard view and a
+     * covering-partition guard, and no possible writer. Absent ⇒ no section ⇒
+     * byte-identical report. */
+    officialGrade?: AggregateOfficialGradeInput
   },
 ): Promise<void> => {
   await writeBatchArtifacts(predictionsFile, reportFile, results, meta)
   logger.info(`wrote ${predictionsFile} (${results.length} prediction(s)) and ${reportFile}`)
+}
+
+/**
+ * The SWE-bench run's ARTIFACT META, composed in one place.
+ *
+ * Extracted from the `run-main.ts` composition root (which is at the god-module
+ * line gate) so the composition is a testable value rather than an inline object
+ * literal — and so residual #3's ingress has an owner: an official grader's
+ * campaign receipt is read HERE, at the root, from the env the caller passes in,
+ * and threaded into the report the same way `runHealth` is.
+ *
+ * Every optional field stays OMITTED when absent, so a run with no official
+ * grader and no health verdict produces byte-identical meta to before.
+ */
+export const buildSwebenchArtifactMeta = (args: {
+  readonly provider: string
+  readonly model: string
+  readonly n: number
+  readonly datasetFamily: DatasetFamily
+  readonly runHealth?: RunHealthSummary | undefined
+  /** The env the composition root resolved from — never a fresh ambient read. */
+  readonly env: NodeJS.ProcessEnv
+}): {
+  provider: string
+  model: string
+  n: number
+  datasetFamily: DatasetFamily
+  runHealth?: RunHealthSummary
+  officialGrade?: AggregateOfficialGradeInput
+} => {
+  // FAIL-CLOSED: a named-but-broken grader document THROWS here rather than
+  // publishing a report that silently omits the verdict it claims to have.
+  const officialGrade = resolveOfficialGradeReportInput(args.env)
+  return {
+    provider: args.provider,
+    model: args.model,
+    n: args.n,
+    // BFND-02 — carry the resolved family into the report. The SAME typed field
+    // the corpus parse and the grade verifier were threaded (aug-22 HIGH-1), so
+    // the artifact can never disagree with the run that produced it. Verified ⇒
+    // omitted at serialization ⇒ byte-identical legacy report.
+    datasetFamily: args.datasetFamily,
+    ...(args.runHealth !== undefined ? { runHealth: args.runHealth } : {}),
+    ...(officialGrade !== undefined ? { officialGrade } : {}),
+  }
 }
 
 /** Run end (RFC §8): write `<observeDir>/<runId>/{metrics,summary}.json` and

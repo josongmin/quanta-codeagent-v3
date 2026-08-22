@@ -13,11 +13,13 @@ import { errMessage, gateOn } from "@/shared"
 import type { DatasetFamily } from "../../dataset-family-token"
 import { presetRequiresLiveLspGrounding } from "../../preset"
 import { resolveDatasetFamilyProfile } from "../../profiles/registry"
+import type { FamilyRemoteBootstrap } from "../../profiles/types"
 import { datasetFamilyOrDefault } from "../../run-config"
 import { defaultSpawn, type SpawnFn, type SpawnResult } from "../backend"
 import { createBootstrapTracer } from "../bootstrap-tracer"
 import { PHANTOM_DEPS } from "./auth"
 import { readDatasetInstanceIds } from "./dataset-preflight"
+import { ensureWarmBoxFamilyBootstrap, setupBoxForFamily } from "./family-box-setup"
 import { probePyrightGrounding, verifyPyrightGrounding } from "./pyright-grounding"
 import { aws, BENCH_SSH_SAFE_OPTS, defaultSleep, makeSsh, oneLine, shq } from "./shell"
 import {
@@ -485,6 +487,8 @@ const bootstrapBox = async (session: BoxSession, cfg: FullRemoteConfig): Promise
   // port. This module no longer branches on `family === "pro"`.
   await setupBoxForFamily({
     family: datasetFamilyOrDefault(cfg.swebenchDatasetFamily),
+    // PMX-04: CARRIED, never re-derived here (see `family-bootstrap-exec.ts`).
+    ...(cfg.remoteBootstrap !== undefined ? { bootstrap: cfg.remoteBootstrap } : {}),
     ssh: (cmd) => ssh(cmd),
     log,
   })
@@ -494,18 +498,12 @@ const bootstrapBox = async (session: BoxSession, cfg: FullRemoteConfig): Promise
   await verifyPyrightGrounding(ssh, log, cfg.preset ?? D.preset)
 }
 
-/** ON-BOX family bootstrap (aug-22 HIGH-4). `bootstrapBox`'s callee: resolve the
- *  family profile and run ITS `setupBox` port. Pro clones the ScaleAI harness +
- *  builds its grading venv; verified/live have a no-op setup, so their bootstrap
- *  issues no extra ssh at all (byte-identical). Exported so the T4 stop-rule test
- *  can drive the REAL bootstrap callee with a fake ssh. */
-export const setupBoxForFamily = async (args: {
-  readonly family: DatasetFamily
-  readonly ssh: (cmd: string) => Promise<SpawnResult>
-  readonly log: (m: string) => void
-}): Promise<void> => {
-  await resolveDatasetFamilyProfile(args.family).setupBox({ ssh: args.ssh, log: args.log })
-}
+/** ON-BOX family bootstrap (aug-22 HIGH-4). `bootstrapBox`'s callee — the
+ *  ordering (family ADMISSION GATE first, declared agent-phase bootstrap second)
+ *  and the warm-box reuse gate live in `family-box-setup.ts`. Re-exported here
+ *  because `bootstrapBox` is this module's, and callers import the callee from
+ *  its owner. */
+export { setupBoxForFamily }
 
 const describeInstancePublicIp = async (
   awsFn: (args: readonly string[]) => Promise<SpawnResult>,
@@ -953,6 +951,15 @@ export const attachBox = async (cfg: FullRemoteConfig, iid: string): Promise<Box
   // bun.lock/tsconfig*/bunfig + re-runs bun install when the dep graph drifted.
   // (Skip when we just re-bootstrapped — that already seed-synced fresh src+config.)
   if (!reBootstrapped) {
+    // FIRST, as on the provision path: `bootstrapBox` did not run here, so a
+    // family's declared pinned-checkout + digest gate was never verified on this
+    // box. Re-prove or refuse (rationale + byte-identical control: family-box-setup).
+    await ensureWarmBoxFamilyBootstrap({
+      family: datasetFamilyOrDefault(cfg.swebenchDatasetFamily),
+      ...(cfg.remoteBootstrap !== undefined ? { bootstrap: cfg.remoteBootstrap } : {}),
+      ssh: (c) => ssh(c),
+      log,
+    })
     await ensureBoxSrcCurrent({ spawn, repoDir: cfg.repoDir, host, keyPath, log })
     await ensureBoxConfigCurrent({
       spawn,

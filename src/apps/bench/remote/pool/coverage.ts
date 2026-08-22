@@ -6,11 +6,16 @@
  * orchestrator thin; the accumulator type + helpers are pool-internal.
  */
 import {
+  mergeOfficialGradeReceipts,
+  type OfficialGradeReceipt,
+} from "@/runner/batch/eval/official-grade"
+import {
   assertSafeArtifactSuffix,
   type ChunkPaths,
   coveredInstances,
   type FullRemoteResult,
 } from "../box-session"
+import { instancesCoveredByReceipts } from "../relaunch-coverage"
 import { absorbFullRemoteResult } from "../verdict-buckets"
 import type { PoolChunk } from "./types"
 
@@ -19,6 +24,11 @@ export interface ChunkCoverageAccumulator {
   readonly unresolved: Set<string>
   readonly errored: Set<string>
   readonly emptyPatch: Set<string>
+  /** PMX-03/04 — every official-grade receipt this chunk's pieces produced, in
+   *  arrival order. Kept as a LIST rather than folded on arrival so a duplicate
+   *  disposition across two pieces fails closed at merge time instead of
+   *  resolving itself by last-write-wins. */
+  readonly officialGrades: OfficialGradeReceipt[]
   reportPath?: string
   rateLimited: boolean
 }
@@ -28,6 +38,7 @@ export const createChunkCoverageAccumulator = (): ChunkCoverageAccumulator => ({
   unresolved: new Set<string>(),
   errored: new Set<string>(),
   emptyPatch: new Set<string>(),
+  officialGrades: [],
   rateLimited: false,
 })
 
@@ -48,17 +59,32 @@ export const accumulateChunkCoverage = (
 ): void => {
   if (result.reportPath !== undefined) acc.reportPath = result.reportPath
   if (result.rateLimited === true) acc.rateLimited = true
+  if (result.officialGrade !== undefined) acc.officialGrades.push(result.officialGrade)
   absorbFullRemoteResult(acc, result)
 }
 
-export const chunkCoverageResult = (acc: ChunkCoverageAccumulator): FullRemoteResult => ({
-  ...(acc.reportPath !== undefined ? { reportPath: acc.reportPath } : {}),
-  ...(acc.resolved.size > 0 ? { resolved: [...acc.resolved] } : {}),
-  ...(acc.unresolved.size > 0 ? { unresolved: [...acc.unresolved] } : {}),
-  ...(acc.errored.size > 0 ? { errored: [...acc.errored] } : {}),
-  ...(acc.emptyPatch.size > 0 ? { emptyPatch: [...acc.emptyPatch] } : {}),
-  ...(acc.rateLimited ? { rateLimited: true } : {}),
-})
+/** The chunk's MERGED receipt, or `undefined` when there is none — or when the
+ *  pieces refuse to merge, in which case the chunk is deliberately left looking
+ *  UNCOVERED (so it requeues) rather than silently reported from the lossier
+ *  four-bucket view. */
+const mergedChunkReceipt = (acc: ChunkCoverageAccumulator): OfficialGradeReceipt | undefined => {
+  if (acc.officialGrades.length === 0) return undefined
+  const merged = mergeOfficialGradeReceipts({ receipts: acc.officialGrades })
+  return merged.ok ? merged.receipt : undefined
+}
+
+export const chunkCoverageResult = (acc: ChunkCoverageAccumulator): FullRemoteResult => {
+  const officialGrade = mergedChunkReceipt(acc)
+  return {
+    ...(acc.reportPath !== undefined ? { reportPath: acc.reportPath } : {}),
+    ...(acc.resolved.size > 0 ? { resolved: [...acc.resolved] } : {}),
+    ...(acc.unresolved.size > 0 ? { unresolved: [...acc.unresolved] } : {}),
+    ...(acc.errored.size > 0 ? { errored: [...acc.errored] } : {}),
+    ...(acc.emptyPatch.size > 0 ? { emptyPatch: [...acc.emptyPatch] } : {}),
+    ...(officialGrade !== undefined ? { officialGrade } : {}),
+    ...(acc.rateLimited ? { rateLimited: true } : {}),
+  }
+}
 
 export const assertUniqueChunkRunIds = (chunks: readonly PoolChunk[]): void => {
   const seen = new Set<string>()
@@ -99,14 +125,28 @@ export const earnedVerdict = (r: FullRemoteResult): boolean =>
     (r.unresolved?.length ?? 0) +
     (r.errored?.length ?? 0) +
     (r.emptyPatch?.length ?? 0) >
-  0
+    0 ||
+  // PMX-03/04: a family graded by an OFFICIAL grader produces no legacy arrays at
+  // all. Without this clause a fully-graded ProMax chunk reads as "the box died"
+  // and is requeued forever.
+  officialGradeCoverage(r).size > 0
+
+/** Instances the chunk's official-grade receipt has a disposition for. */
+const officialGradeCoverage = (r: FullRemoteResult): ReadonlySet<string> =>
+  instancesCoveredByReceipts(r.officialGrade === undefined ? [] : [r.officialGrade])
 
 /** #2: instances the chunk REQUESTED but that earned no verdict. Empty when the
- *  chunk declares no instance set (we then fall back to the any-verdict test). */
+ *  chunk declares no instance set (we then fall back to the any-verdict test).
+ *
+ *  PMX-03/04: coverage is the UNION of the legacy buckets and the official
+ *  grader's dispositions. An `ambiguous` disposition has no legacy bucket, so a
+ *  bucket-only subtraction would call it missing and requeue an instance the
+ *  grader had already, deliberately, declined to decide. */
 export const missingInstances = (r: FullRemoteResult, chunk: PoolChunk): string[] => {
   if (chunk.instanceIds === undefined || chunk.instanceIds.length === 0) return []
   const covered = coveredInstances(r)
-  return chunk.instanceIds.filter((id) => !covered.has(id))
+  const byReceipt = officialGradeCoverage(r)
+  return chunk.instanceIds.filter((id) => !covered.has(id) && !byReceipt.has(id))
 }
 
 /** #2: a chunk is DONE only when it covered EVERY requested instance. A strict

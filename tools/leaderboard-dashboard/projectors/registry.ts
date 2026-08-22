@@ -22,6 +22,20 @@ import type {
   SuiteProjector,
 } from "./types"
 
+/**
+ * TB21-05 — one refused artifact, kept so the page can SHOW that it was refused.
+ *
+ * A quarantined report never contributes a run, a campaign, a badge or a score;
+ * it contributes a diagnostic line. `suite` is set only when a projector CLAIMS
+ * the refusal as its own (see {@link SuiteProjector.claimsRefused}); an
+ * unclaimed refusal stays suite-less rather than being guessed at.
+ */
+export interface QuarantinedArtifact {
+  readonly file: string
+  readonly reason: string
+  readonly suite?: BenchmarkSuiteId
+}
+
 /** Thrown when a suite id has no registered projector. Fail-closed: an unknown
  *  suite is never silently rendered as SWE. */
 export class UnknownBenchmarkSuiteError extends Error {
@@ -96,6 +110,36 @@ export const suiteData = (opts: SuiteDataOpts): Record<string, unknown> => {
   const merged: Record<string, unknown> = {}
   for (const projector of PROJECTORS.values()) Object.assign(merged, projector.data?.(opts) ?? {})
   return merged
+}
+
+/** Keyed by file so a re-scan of the same trove replaces rather than accumulates. */
+const QUARANTINE = new Map<string, QuarantinedArtifact>()
+
+/**
+ * Record a refused artifact. Called by the ONE trove reader at the exact point
+ * it drops a report, so the diagnostic and the drop can never disagree.
+ */
+export const recordQuarantine = (file: string, raw: unknown, error: unknown): void => {
+  const body = typeof raw === "object" && raw !== null && !Array.isArray(raw) ? raw : {}
+  let suite: BenchmarkSuiteId | undefined
+  for (const projector of PROJECTORS.values()) {
+    if (projector.claimsRefused?.(body as Record<string, unknown>) === true) {
+      suite = projector.suite
+      break
+    }
+  }
+  QUARANTINE.set(file, {
+    file,
+    reason: error instanceof Error ? error.message : String(error),
+    ...(suite !== undefined ? { suite } : {}),
+  })
+}
+
+/** Every artifact currently refused, newest scan wins. */
+export const quarantinedArtifacts = (): readonly QuarantinedArtifact[] => [...QUARANTINE.values()]
+
+export const clearQuarantine = (): void => {
+  QUARANTINE.clear()
 }
 
 /** The suite-owned client render code the page ships. */

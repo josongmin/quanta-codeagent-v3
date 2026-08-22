@@ -408,11 +408,18 @@ describe("PMX-01 — the promax profile's own ports (paired against the built-in
     const cfg = {
       datasetFamily: "promax",
       familySelector: "explicit",
-      promax: { upstreamCommit: "deadbeef", bundleRoot: "/opt/b", python: undefined },
+      promax: {
+        upstreamCommit: "deadbeef",
+        bundleRoot: "/opt/b",
+        python: undefined,
+        samplePath: "/opt/samples/PMX-7.manifest.json",
+      },
     } as const
     const notes = resolveDatasetFamilyProfile("promax").planNotes?.(cfg) ?? []
     expect(notes.join("\n")).toContain("promax-upstream-commit=deadbeef")
     expect(notes.join("\n")).toContain("promax-bundle-root=/opt/b")
+    // PMX-06 — a dry-run must show WHICH sample a launch would select.
+    expect(notes.join("\n")).toContain("promax-sample=/opt/samples/PMX-7.manifest.json")
     for (const family of ["verified", "live", "pro"] as const) {
       expect(resolveDatasetFamilyProfile(family).planNotes).toBeUndefined()
     }

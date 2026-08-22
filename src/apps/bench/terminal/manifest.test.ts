@@ -77,9 +77,9 @@ describe("versioned identity", () => {
   test("RED RAIL — datasetFamily is FORBIDDEN on the manifest", () => {
     const m = build()
     expect(Object.keys(m)).not.toContain("datasetFamily")
-    expect(() =>
-      validateTerminalRunManifest({ ...m, datasetFamily: "terminal-bench" }),
-    ).toThrow(/datasetFamily/i)
+    expect(() => validateTerminalRunManifest({ ...m, datasetFamily: "terminal-bench" })).toThrow(
+      /datasetFamily/i,
+    )
     // Every family token is refused, not just the suite-shaped typo.
     for (const family of ["verified", "live", "pro", "promax"]) {
       expect(() => validateTerminalRunManifest({ ...m, datasetFamily: family })).toThrow(
@@ -116,7 +116,10 @@ describe("agent version (the Python half's fail-closed contract)", () => {
     const py = readFileSync(join(REPO_ROOT, "adapters/terminal-bench/quanta_agent.py"), "utf8")
     // The adapter names its groups; strip them and compare the shape.
     const pySource = /AGENT_VERSION_RE = re\.compile\(\s*r"([^"]+)"/.exec(py)?.[1]
-    expect(pySource, "adapters/terminal-bench/quanta_agent.py AGENT_VERSION_RE not found").toBeDefined()
+    expect(
+      pySource,
+      "adapters/terminal-bench/quanta_agent.py AGENT_VERSION_RE not found",
+    ).toBeDefined()
     const normalized = (pySource as string).replace(/\?P<[a-z]+>/g, "")
     expect(AGENT_VERSION_RE.source).toBe(normalized)
   })

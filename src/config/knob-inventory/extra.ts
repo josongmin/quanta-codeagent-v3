@@ -267,6 +267,16 @@ export const EXTRA: readonly KnobInventoryEntry[] = [
     readSite: "apps/bench/promax/settings.ts",
   },
   {
+    envKey: "QUANTA_PROMAX_SAMPLE",
+    kind: "string",
+    default: undefined,
+    group: "bench",
+    home: "bench",
+    describe:
+      "SWE-bench ProMax: ABSOLUTE path of the PMX-*.manifest.json a run selects its instances from (PMX-06). The manifest is the SELECTION AUTHORITY — its ordered ids, and only those, execute — and it is fail-closed: a manifest whose sha256, ordering algorithm or dataset revision does not match, or that names an instance the loaded corpus lacks, REFUSES the run rather than falling back to the whole corpus. Cannot be combined with --instance. Unset ⇒ no manifest selection (byte-identical to the historical filter). A relative or blank value is REFUSED at the composition root.",
+    readSite: "apps/bench/promax/settings.ts",
+  },
+  {
     envKey: "QUANTA_ALLOW_EXTRA_BOXES",
     kind: "bool",
     default: false,
@@ -794,6 +804,32 @@ export const EXTRA: readonly KnobInventoryEntry[] = [
     describe:
       "TB `container_write_file` tool (opt-in). When ON, the terminal surface additionally mints exact-byte file authoring over the SAME container transport — content travels base64 (inert bytes, no heredoc/quoting mangling) and the write is verified by an in-container byte-count readback. Targets the file-is-the-deliverable failure class (polyglot / code-from-image). OFF ⇒ byte-identical tool menu.",
     readSite: "apps/terminal/brain-mode.ts (runTerminalBrain writeFile gate)",
+  },
+  // TB21-03 — TB2.1 run provenance + brain location. Both are CROSS-LANGUAGE
+  // knobs: quanta-TS materializes them at the bench composition root, and the
+  // Python agent adapter (`quanta_agent.py`) is the consumer. Registered here
+  // (rather than left as ad-hoc shell exports, retirement SR-13) so the unified
+  // knob catalog stays the true SSOT and `/knobs` can show an operator what a
+  // paid TB2.1 run is actually configured with.
+  {
+    envKey: "QUANTA_TB_AGENT_VERSION",
+    kind: "string",
+    default: undefined,
+    group: "bench",
+    home: "bench",
+    describe:
+      "TB2.1 agent provenance: `<package.json version>+g<sha>[.dirty]` (sha 7-40 lowercase hex; `.dirty` REQUIRED iff `git status --porcelain` is non-empty and FORBIDDEN when clean). DERIVED by `quanta-bench terminal run` and delivered as a per-run agent env override (`--ae`). The upstream leaderboard keys a submission on (agent, agent_version, model, reasoning_effort), so a trial without it is unattributable and the Python agent adapter refuses to construct.",
+    readSite: "apps/bench/terminal/manifest.ts",
+  },
+  {
+    envKey: "QUANTA_TERMINAL_BRAIN_CMD",
+    kind: "string",
+    default: undefined,
+    group: "bench",
+    home: "bench",
+    describe:
+      "Path/name of the quanta terminal-brain executable the TB2.1 Python agent adapter spawns as the 'brain' subprocess. Unset \u21d2 `quanta-terminal-brain` on PATH. Read by the TB doctor (to probe `--version`) and by the adapter (to spawn), so a box can point at an installed path without a code change.",
+    readSite: "apps/bench/terminal/doctor.ts",
   },
   // W4-b (ADR-0540 Wave 2 item 0) — on-disk kernel session event log. Default-OFF substrate for
   // wire connect({resume}) (transport-unified-sdk ticket 05): when set, kernel SessionEvents append

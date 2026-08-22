@@ -17,7 +17,12 @@
  */
 import { basename } from "node:path"
 import { resolveNoProgressBudgetMs } from "@/runner/batch/eval/no-progress-watchdog"
+import type {
+  OfficialGradeReceipt,
+  OfficialGradeReceiptFailure,
+} from "@/runner/batch/eval/official-grade"
 import { errMessage } from "@/shared"
+import { familyRemoteBootstrap } from "../profiles/bootstrap"
 import { familyPlanNotes } from "../profiles/plan"
 import { type BenchRunConfig, buildSubprocessFamilyEnv, resolveBenchRunConfig } from "../run-config"
 import { resolveBenchTrajectoryDefault } from "../trajectory"
@@ -38,6 +43,11 @@ import {
   gradeChunkOnBox,
   provisionBox,
 } from "./box-session"
+import {
+  instancesCoveredByReceipts,
+  type RelaunchCoverage,
+  resolveRelaunchCoverage,
+} from "./relaunch-coverage"
 import { acquireSingleBoxGuard, type SingleBoxGuard } from "./single-box-guard"
 import {
   acquirePatchGenBudgetLease,
@@ -78,8 +88,16 @@ export interface RelaunchOutcome {
   readonly reportPaths: string[]
   readonly attempts: number
   /** Expected instances that NEVER earned a verdict across all attempts — a
-   *  genuine loss the operator must see (NOT silently counted as resolved=0). */
+   *  genuine loss the operator must see (NOT silently counted as resolved=0).
+   *  Receipt-derived (`assigned - keys(dispositions)`) when the attempts carried
+   *  PMX-03 receipts; the historical legacy subtraction otherwise. */
   readonly missing: string[]
+  /** PMX-03/04 — the MERGED campaign receipt across every attempt. The four
+   *  arrays above stay a DERIVED, lossier view of it and never write back. */
+  readonly officialGrade?: OfficialGradeReceipt
+  /** Why merging the attempts' receipts was refused, when it was. Surfaced
+   *  rather than silently downgraded to "no receipt". */
+  readonly officialGradeFailures?: readonly OfficialGradeReceiptFailure[]
 }
 
 interface RelaunchAccumulator {
@@ -122,6 +140,7 @@ const accumulateRelaunchAttempt = (
 const remainingRelaunchInstances = (
   expected: readonly string[],
   acc: RelaunchAccumulator,
+  receipts: readonly OfficialGradeReceipt[],
 ): readonly string[] => {
   const covered = coveredInstances({
     resolved: [...acc.resolved],
@@ -129,14 +148,19 @@ const remainingRelaunchInstances = (
     errored: [...acc.errored],
     emptyPatch: [...acc.emptyPatch],
   })
-  return expected.filter((id) => !covered.has(id))
+  // UNION with receipt coverage: an instance the official grader spoke about is
+  // covered even when its state has no legacy bucket (`ambiguous`), and an
+  // instance in a legacy array is covered even when no receipt was carried. The
+  // retry set can therefore only shrink, never grow, from adding the receipt view.
+  const byReceipt = instancesCoveredByReceipts(receipts)
+  return expected.filter((id) => !covered.has(id) && !byReceipt.has(id))
 }
 
 const relaunchOutcomeOf = (
   acc: RelaunchAccumulator,
   reportPaths: string[],
   attempts: number,
-  missing: readonly string[],
+  coverage: RelaunchCoverage,
 ): RelaunchOutcome => ({
   resolved: [...acc.resolved],
   unresolved: [...acc.unresolved],
@@ -144,7 +168,11 @@ const relaunchOutcomeOf = (
   emptyPatch: [...acc.emptyPatch],
   reportPaths,
   attempts,
-  missing: [...missing],
+  missing: [...coverage.missing],
+  ...(coverage.officialGrade !== undefined ? { officialGrade: coverage.officialGrade } : {}),
+  ...(coverage.officialGradeFailures !== undefined
+    ? { officialGradeFailures: coverage.officialGradeFailures }
+    : {}),
 })
 
 const maybeLogRelaunchRetry = (args: {
@@ -190,6 +218,7 @@ export const runWithRelaunch = async (
 ): Promise<RelaunchOutcome> => {
   const acc = createRelaunchAccumulator()
   const reportPaths: string[] = []
+  const receipts: OfficialGradeReceipt[] = []
   const total = Math.max(0, opts.maxRelaunch) + 1
   let remaining = [...opts.expected]
   let attempt = 0
@@ -197,7 +226,8 @@ export const runWithRelaunch = async (
     attempt += 1
     const result = await runRelaunchAttempt(makeBackend, remaining, attempt, opts.onLog)
     accumulateRelaunchAttempt(acc, reportPaths, result)
-    remaining = [...remainingRelaunchInstances(opts.expected, acc)]
+    if (result.officialGrade !== undefined) receipts.push(result.officialGrade)
+    remaining = [...remainingRelaunchInstances(opts.expected, acc, receipts)]
     maybeLogRelaunchRetry({
       onLog: opts.onLog,
       remaining,
@@ -207,7 +237,21 @@ export const runWithRelaunch = async (
     })
   }
   maybeLogRelaunchExhausted({ onLog: opts.onLog, total, remaining })
-  return relaunchOutcomeOf(acc, reportPaths, attempt, remaining)
+  // PMX-03/04: `missing` is receipt-derived when the attempts carried receipts,
+  // and the legacy subtraction otherwise. `remaining` is the loop's retry set,
+  // which is the legacy answer.
+  const coverage = resolveRelaunchCoverage({
+    expected: opts.expected,
+    receipts,
+    legacyMissing: remaining,
+  })
+  if (coverage.officialGradeFailures !== undefined) {
+    opts.onLog?.(
+      "[full-remote] ⚠️ the attempts' official-grade receipts could NOT be merged into one " +
+        `campaign receipt: ${coverage.officialGradeFailures.map((f) => `${f.code}: ${f.message}`).join(" | ")}`,
+    )
+  }
+  return relaunchOutcomeOf(acc, reportPaths, attempt, coverage)
 }
 
 /** Dry-run plan lines — printed instead of provisioning anything. */
@@ -299,7 +343,7 @@ const runFullRemoteAttempt = async (args: {
     lease = await acquireFullRemoteLease(args.cfg, args.concurrency, args.log)
     const effectiveConcurrency = clampPatchGenConcurrency(lease.units)
     logGrantedFullRemoteLease(lease, effectiveConcurrency, args.log)
-    const session = await attachOrProvisionFullRemoteBox(args.cfg)
+    const session = await attachOrProvisionFullRemoteBox(args.cfg, args.runConfig)
     return {
       lease,
       result: await runSingleFullRemoteChunk({
@@ -368,10 +412,27 @@ const finalizeFullRemoteRun = (args: {
   return args.result
 }
 
-const attachOrProvisionFullRemoteBox = async (cfg: FullRemoteConfig): Promise<BoxSession> => {
-  const idle = await findIdleBox(cfg).catch(() => undefined)
-  if (idle !== undefined) return attachBox(cfg, idle)
-  const live = await countLiveBoxes(cfg)
+const attachOrProvisionFullRemoteBox = async (
+  cfg: FullRemoteConfig,
+  runConfig: BenchRunConfig,
+): Promise<BoxSession> => {
+  // PMX-04: resolve the family's DECLARED bootstrap HERE (the root owns the typed
+  // run config) and carry it onto the box config, so `ec2-lifecycle.ts` executes
+  // it without ever naming a family. `undefined` for every family without one ⇒
+  // provisioning is byte-identical.
+  //
+  // Resolved BEFORE the idle-box early return, not after: a warm box reached the
+  // attach path with `remoteBootstrap` undefined, so a REUSED box ran neither the
+  // pinned checkout nor the on-box hash verification while the report still
+  // claimed the pin. `attachBox` now refuses an unknown bootstrap state, which
+  // makes this ordering load-bearing rather than cosmetic.
+  const boxCfg: FullRemoteConfig = (() => {
+    const bootstrap = cfg.remoteBootstrap ?? familyRemoteBootstrap(runConfig)
+    return { ...cfg, ...(bootstrap !== undefined ? { remoteBootstrap: bootstrap } : {}) }
+  })()
+  const idle = await findIdleBox(boxCfg).catch(() => undefined)
+  if (idle !== undefined) return attachBox(boxCfg, idle)
+  const live = await countLiveBoxes(boxCfg)
   if (live > 0 && cfg.allowExtraBoxes !== true) {
     throw new Error(
       `[full-remote] refusing to launch another box while ${live} quanta-bench box(es) are already live (running/pending). ` +
@@ -379,7 +440,7 @@ const attachOrProvisionFullRemoteBox = async (cfg: FullRemoteConfig): Promise<Bo
     )
   }
   return provisionBox({
-    ...cfg,
+    ...boxCfg,
     launchMode: cfg.launchMode ?? "full-remote",
     // Resolve the OTEL endpoint HERE (allowlisted root) so provisionBox emits live
     // bootstrap spans without reading env. "" when unset ⇒ no spans (byte-identical).

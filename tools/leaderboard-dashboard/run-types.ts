@@ -9,7 +9,7 @@
  * (`instanceIsUnmeasured`, `classifyFail`, `tallyOf`) stay with the server, which
  * is where the parse pipeline lives.
  */
-import type { BenchmarkSuiteId, OfficialGradeView } from "./projectors/types"
+import type { BenchmarkSuiteId, OfficialGradeView, ProjectedInstanceRow } from "./projectors/types"
 
 /** Fields every run carries regardless of suite. Nothing suite-specific lives
  *  here — that is what {@link Run}'s two branches are for. */
@@ -57,13 +57,18 @@ export interface SweInstanceRow extends InstanceRowBase {
   goldResolved?: boolean
 }
 
-/** MED-D — the Terminal per-instance row. P1-C/D1 (RFC jul-3): a harbor INFRA
- *  fault (agent-timeout/crash), NOT a capability miss — excluded from the suite's
- *  miss denominator. It is the Terminal branch's OWN channel; the SWE branch
- *  persists `error` as a free-text message and never reaches this shape. */
-export interface TerminalInstanceRow extends InstanceRowBase {
-  error?: { kind: string }
-}
+/**
+ * TB21-05 — a suite-shaped per-instance row, produced by the suite's OWN
+ * projector.
+ *
+ * It replaced the shell-shaped `TerminalInstanceRow` (`{id, passed, turns,
+ * durationMs, error?}`). Two things forced the change: the persisted 2.1 channel
+ * is `trials`, not `perInstance`, so the shell cannot shape it; and the `error`
+ * field encoded the D1 exclusion that TB21-04 REVERSED (an errored trial has no
+ * reward, so it scores zero and stays in the official denominator). The shell now
+ * reads only `{id, passed}` — everything else is the suite's business.
+ */
+export type SuiteInstanceRow = ProjectedInstanceRow
 
 export interface SweRun extends RunBase {
   /**
@@ -89,7 +94,11 @@ export interface TerminalRun extends RunBase {
    *  BFND-02. Declaring it as `never` keeps `run.datasetFamily` readable across
    *  the union while making it impossible to ever assign one here. */
   datasetFamily?: never
-  perInstance: TerminalInstanceRow[]
+  perInstance: readonly SuiteInstanceRow[]
+  /** TB21-05 — the suite's own per-run payload (provenance, the persisted
+   *  admission, the persisted official metrics), carried verbatim to the suite's
+   *  client view. The shell never reads inside it. */
+  suiteView?: Record<string, unknown>
 }
 
 /** MED-D — one Run type per per-instance vocabulary, not one broad shape holding

@@ -30,10 +30,18 @@ import { PROMAX_V1_SNAPSHOT } from "./provenance/frozen-snapshot"
 export const PROMAX_BUNDLE_ROOT_ENV = "QUANTA_PROMAX_BUNDLE_ROOT"
 /** Interpreter that runs the pinned `test_run.py` (bare name or absolute path). */
 export const PROMAX_PYTHON_ENV = "QUANTA_PROMAX_PYTHON"
+/** PMX-06 — absolute path of the `PMX-*.manifest.json` a run SELECTS from.
+ *  PUBLIC by construction: a sample manifest holds ids, quotas and digests, never
+ *  a row body, so unlike the bundle root it is not grader-only material. */
+export const PROMAX_SAMPLE_ENV = "QUANTA_PROMAX_SAMPLE"
 
 /** Every env key this module reads. Exported so a drift guard can assert the
  *  ProMax axis never reaches for a `QUANTA_SWEBENCH_PRO_*` knob. */
-export const PROMAX_SETTING_ENV_KEYS = [PROMAX_BUNDLE_ROOT_ENV, PROMAX_PYTHON_ENV] as const
+export const PROMAX_SETTING_ENV_KEYS = [
+  PROMAX_BUNDLE_ROOT_ENV,
+  PROMAX_PYTHON_ENV,
+  PROMAX_SAMPLE_ENV,
+] as const
 
 export interface ProMaxSettings {
   /** The FROZEN upstream commit this build of Quanta grades ProMax against. Not
@@ -44,6 +52,9 @@ export interface ProMaxSettings {
   readonly bundleRoot: string | undefined
   /** Operator-supplied interpreter, or `undefined` when unset. */
   readonly python: string | undefined
+  /** PMX-06 — absolute path of the sample manifest this run SELECTS from, or
+   *  `undefined` when the operator named none (the whole corpus). */
+  readonly samplePath: string | undefined
 }
 
 /** A knob that is PRESENT but unusable is an error, not a fallback: an operator
@@ -69,7 +80,23 @@ const readOptional = (raw: string | undefined, key: string): string | undefined 
  *
  * Fail-closed on an explicit-but-unusable value; silent for an absent one.
  */
+const requireAbsolute = (value: string | undefined, key: string, why: string): void => {
+  if (value === undefined || value.startsWith("/")) return
+  throw new Error(
+    `bench: ${key}="${value}" is not an absolute path. ` +
+      "A cwd- or shell-relative campaign path cannot be replayed from a report, and " +
+      `\`~\` is not expanded inside an env value. ${why}`,
+  )
+}
+
 export const resolveProMaxSettings = (env: NodeJS.ProcessEnv): ProMaxSettings => {
+  const samplePath = readOptional(env[PROMAX_SAMPLE_ENV], PROMAX_SAMPLE_ENV)
+  requireAbsolute(
+    samplePath,
+    PROMAX_SAMPLE_ENV,
+    "Pass the absolute path of the PMX-*.manifest.json emitted by " +
+      "`tools/bench-promax/prepare-corpus.ts --samples-out`.",
+  )
   const bundleRoot = readOptional(env[PROMAX_BUNDLE_ROOT_ENV], PROMAX_BUNDLE_ROOT_ENV)
   if (bundleRoot !== undefined && !bundleRoot.startsWith("/")) {
     // Same rule the pinned-evaluator invocation boundary already enforces: a
@@ -86,6 +113,7 @@ export const resolveProMaxSettings = (env: NodeJS.ProcessEnv): ProMaxSettings =>
     upstreamCommit: PROMAX_V1_SNAPSHOT.upstream_git_commit,
     bundleRoot,
     python: readOptional(env[PROMAX_PYTHON_ENV], PROMAX_PYTHON_ENV),
+    samplePath,
   }
 }
 
@@ -99,4 +127,5 @@ export const proMaxPlanNotes = (settings: ProMaxSettings): readonly string[] => 
   `[dry-run] promax-upstream-commit=${settings.upstreamCommit}`,
   `[dry-run] promax-bundle-root=${settings.bundleRoot ?? `(unset — set ${PROMAX_BUNDLE_ROOT_ENV})`}`,
   `[dry-run] promax-python=${settings.python ?? "(unset — the pinned evaluator boundary defaults to `python`)"}`,
+  `[dry-run] promax-sample=${settings.samplePath ?? "(unset — the WHOLE corpus, no manifest selection)"}`,
 ]
