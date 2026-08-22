@@ -45,7 +45,12 @@ export const renderSkillRow = (s: SkillRow): string => {
     s.paths && s.paths.length > 0
       ? ` [paths: ${s.paths.slice(0, 3).join(", ")}${s.paths.length > 3 ? "…" : ""}]`
       : ""
-  return `  ${s.name.padEnd(24)} ${desc}${pathsTag}\n`
+  // RFC-06 F4 — a MANAGEMENT-projected row that is effectively disabled (durable
+  // user disable or admin ban) is tagged so the CLI list agrees with the live
+  // runtime view. Absent on active rows ⇒ byte-identical to the pre-F4 row.
+  const disabledTag =
+    s.disabled === true ? ` [disabled${s.disableReason ? `: ${s.disableReason}` : ""}]` : ""
+  return `  ${s.name.padEnd(24)} ${desc}${pathsTag}${disabledTag}\n`
 }
 
 export const renderSkills = (
@@ -173,6 +178,21 @@ export const runSkillsRender = async (
   if (args.length > 0) {
     ctx.err(`${name}: takes no arguments; got ${args.length}\n`)
     return 1
+  }
+  // RFC-06 F4 — `/reload-skills` in a live session routes through the shared
+  // authority's `sync()` (re-read the durable disabled set + republish) and
+  // renders the returned revision, NOT an independent disk re-scan. Absent the
+  // authority-backed hook (the one-shot shell path) ⇒ fall through to the
+  // {@link SlashContext.skills} re-scan below (byte-identical pre-F4).
+  if (name === "/reload-skills" && ctx.reloadSkills !== undefined) {
+    try {
+      const { rows, revision } = await ctx.reloadSkills()
+      renderSkills(ctx, rows, revision !== undefined ? `${prefix} rev ${revision} —` : prefix)
+      return 0
+    } catch (e) {
+      ctx.err(`${name}: reload failed: ${errMessage(e)}\n`)
+      return 1
+    }
   }
   if (ctx.skills === undefined) {
     ctx.out(`${name}: not wired in this surface\n`)

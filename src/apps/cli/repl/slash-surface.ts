@@ -65,6 +65,8 @@ export type ReplSlashCtx = Partial<{
    *  shell-entry ambient cwd (`process.cwd()`) is preserved. */
   cwd: string
   skills: () => Promise<SkillRow[]>
+  /** RFC-06 F4 — `/reload-skills` authority-backed sync + revision hook. */
+  reloadSkills: () => Promise<{ rows: SkillRow[]; revision?: number }>
   idle: IdleMonitor
   imageQueue: ImageQueue
   rewindSession: RewindSlashState
@@ -214,6 +216,9 @@ export type ReplSlashCtx = Partial<{
 
 export interface BuildReplSlashCtxArgs {
   skillsCb: (() => Promise<SkillRow[]>) | undefined
+  /** RFC-06 F4 — `/reload-skills` authority-backed hook (sync + revision).
+   *  Absent ⇒ `/reload-skills` falls back to {@link skillsCb} (pre-F4 re-scan). */
+  reloadSkillsCb?: (() => Promise<{ rows: SkillRow[]; revision?: number }>) | undefined
   idleMonitor: IdleMonitor
   imageQueue: ImageQueue | undefined
   rewindState: RewindSlashState | undefined
@@ -581,6 +586,7 @@ const spreadSurfacedSlots = (s: SurfacedSlotsInput): Partial<SurfacedSlots> => (
 export const buildReplSlashCtx = (args: BuildReplSlashCtxArgs): ReplSlashCtx => {
   const {
     skillsCb,
+    reloadSkillsCb,
     idleMonitor,
     imageQueue,
     rewindState,
@@ -616,6 +622,7 @@ export const buildReplSlashCtx = (args: BuildReplSlashCtxArgs): ReplSlashCtx => 
   const newSlots = buildNewSlotAdapters(args)
   return {
     ...(skillsCb !== undefined ? { skills: skillsCb } : {}),
+    ...(reloadSkillsCb !== undefined ? { reloadSkills: reloadSkillsCb } : {}),
     idle: idleMonitor,
     ...(imageQueue !== undefined ? { imageQueue } : {}),
     ...(rewindState !== undefined ? { rewindSession: rewindState } : {}),
@@ -711,6 +718,7 @@ export const buildReplSlashCtx = (args: BuildReplSlashCtxArgs): ReplSlashCtx => 
  *  biome's cognitive-complexity ceiling. */
 const projectLegacySlots = (s: ReplSlashCtx): Record<string, unknown> => ({
   ...(s.skills !== undefined ? { skills: s.skills } : {}),
+  ...(s.reloadSkills !== undefined ? { reloadSkills: s.reloadSkills } : {}),
   ...(s.idle !== undefined ? { idle: s.idle } : {}),
   // #18 — expose the image queue on the contract ctx so `/paste` can enqueue a
   // clipboard image (the SAME instance `/image` mutates). Absent ⇒ slot omitted

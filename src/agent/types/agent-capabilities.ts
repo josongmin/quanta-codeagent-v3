@@ -164,6 +164,18 @@ export type SubagentBlock = {
 export type SkillsBlock = {
   dir?: string
   changedPaths?: string[]
+  /** RFC-06 F4 — the SINGLE durable per-session skill runtime authority,
+   *  constructed ONCE at the composition root (`buildSkillRuntimeAuthority`:
+   *  real registry + admin policy + durable disabled-set store). When present,
+   *  {@link buildSkillBlock} USES it for the `Skill` tool resolver / ToolSearch /
+   *  live prompt reader instead of minting its own in-process interim authority,
+   *  so the prompt, search, invocation, CLI and web surfaces all read ONE
+   *  authority at ONE revision (no second cache; the F2/F3 interim is the
+   *  replacement target). ABSENT (direct unit tests, or a surface that has not
+   *  been converged) ⇒ `buildSkillBlock` mints the interim in-memory authority —
+   *  byte-identical to the pre-F4 path. Same surface-provided-or-mint-internal
+   *  pattern as {@link SubagentBlock.taskRegistry}. */
+  authority?: import("../../skill").SkillRuntimeAuthority
 }
 
 /**

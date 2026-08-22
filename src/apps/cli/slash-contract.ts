@@ -33,8 +33,18 @@ export interface SlashContext {
    *  consults to refuse new turns. */
   readonly idle?: IdleMonitor | undefined
   /** Re-discover skills from disk on demand so `/skills` and `/reload-skills`
-   *  can render the inventory without importing `@/skill` types. */
+   *  can render the inventory without importing `@/skill` types. In a live
+   *  session (RFC-06 F4) this reads the shared skill runtime authority's
+   *  MANAGEMENT projection (disabled rows retained + tagged); in the one-shot
+   *  shell path it is a fresh disk scan. */
   readonly skills?: (() => Promise<SkillRow[]>) | undefined
+  /** RFC-06 F4 — `/reload-skills` in a live session: invoke the shared skill
+   *  runtime authority's `sync()` (re-read the durable disabled set + republish
+   *  the projections at the persisted revision) and render the returned revision,
+   *  NOT an independent disk re-scan. Present ONLY when the REPL surface threaded
+   *  the session authority; absent ⇒ `/reload-skills` falls back to
+   *  {@link skills} (the pre-F4 re-scan, no revision) — byte-identical. */
+  readonly reloadSkills?: (() => Promise<{ rows: SkillRow[]; revision?: number }>) | undefined
   /** RFC03-def `/skills review` — the review/approve surface for staged imported
    *  skill proposals (from a gated startup config-migration IMPORT). The SAME
    *  approval machine + artifact port + staging store the import staged into:
@@ -358,6 +368,15 @@ export interface SkillRow {
   readonly name: string
   readonly description: string
   readonly paths?: readonly string[]
+  /** RFC-06 F4 — set on a row projected from the skill runtime authority's
+   *  MANAGEMENT view when the skill is effectively DISABLED (durable user disable
+   *  or admin ban). Absent (undefined) ⇒ the skill is active — byte-identical to
+   *  the pre-F4 row (the disk-scan surface never sets it). The renderer appends a
+   *  `[disabled: <reason>]` tag; the status pill counts only non-disabled rows. */
+  readonly disabled?: boolean
+  /** RFC-06 F4 — the effective disable reason (`administrator` | `user`) for a
+   *  {@link disabled} row. Absent on active rows. */
+  readonly disableReason?: string
 }
 
 export interface SlashCompletionHint {

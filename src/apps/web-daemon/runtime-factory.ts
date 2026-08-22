@@ -68,12 +68,13 @@ import {
 } from "@/sdk/runtime"
 import { checkSessionStoreHealth } from "@/session"
 import { errMessage, gateOn, logger } from "@/shared"
-import { discoverSkills, discoverSystemSkills } from "@/skill"
+import type { SkillRuntimeAuthority } from "@/skill"
 import { StdoutStream } from "@/stream"
 import { TaskRegistry } from "@/subagent"
 import { buildDefaultTools, type Tool, ToolRegistry } from "@/tool"
 import { askUserTool } from "@/tool/ask-user"
 import { type AgentStateSourceHandle, createAgentStateSource } from "./agent-state-source"
+import { buildSkillsReadoutSource, buildWebSkillAuthority } from "./authority-readouts"
 import {
   type CanvasArtifactSourceHandle,
   createCanvasArtifactSource,
@@ -416,8 +417,9 @@ const toMemoryReadoutEntry = (entry: {
  * thin projection over the SAME instance the loop runs on (no split-brain):
  *  - `agents`  → the TaskRegistry threaded into `subagent.taskRegistry`
  *  - `plan`    → the PlanStore on `base.planStore` (the 5 plan tools write it)
- *  - `skills`  → the same `discoverSkills`/`discoverSystemSkills` scan the CLI
- *                `/skills` slash performs (system wins name collisions)
+ *  - `skills`  → the shared skill runtime authority's `active` projection
+ *                (RFC-06 F4: NO independent discovery scan; converges with the
+ *                prompt/ToolSearch/invocation/CLI set)
  *  - `memory`  → the durable store `buildMemoryForSession(env)` resolves (the
  *                store the CLI writes; READ-ONLY here — this surface composes
  *                no memory config, so web turns do not write memories yet)
@@ -428,31 +430,23 @@ const toMemoryReadoutEntry = (entry: {
 const buildReadoutSources = (args: {
   readonly taskRegistry: TaskRegistry | undefined
   readonly planStore: PlanStore | undefined
-  readonly skills: { dir?: string } | undefined
+  readonly skillAuthority: SkillRuntimeAuthority | undefined
   readonly memoryStore: PersistentStorePort | undefined
   readonly usageHolder: CanvasUsageSourceHandle
 }): WebReadoutSources => {
-  const { taskRegistry, planStore, skills, memoryStore, usageHolder } = args
+  const { taskRegistry, planStore, skillAuthority, memoryStore, usageHolder } = args
   return {
     ...(taskRegistry !== undefined
       ? { agents: () => taskRegistry.list().map(toAgentFleetReadoutRow) }
       : {}),
     ...(planStore !== undefined ? { plan: () => planStore.current() } : {}),
-    ...(skills !== undefined
-      ? {
-          skills: async (): Promise<readonly { name: string; description: string }[]> => {
-            const user = skills.dir !== undefined ? await discoverSkills(skills.dir) : []
-            const system = await discoverSystemSkills()
-            // System wins a name collision — same override order buildSkillBlock
-            // uses, so the readout can never disagree with the model-visible set.
-            const byName = new Map<string, { name: string; description: string }>()
-            for (const s of [...user, ...system]) {
-              byName.set(s.name, { name: s.name, description: s.description })
-            }
-            return [...byName.values()]
-          },
-        }
-      : {}),
+    // RFC-06 F4 — the `/skills` readout reads the ONE shared authority's `active`
+    // projection (see {@link buildSkillsReadoutSource}); there is NO independent
+    // discovery scan on this surface any more (the discovery-owner ratchet pins
+    // it removed). So the web panel converges with the prompt/ToolSearch/
+    // invocation/CLI set — a disabled skill vanishes here too. Absent authority
+    // (skills off / fail-open) ⇒ honest missing-source line.
+    ...(skillAuthority !== undefined ? { skills: buildSkillsReadoutSource(skillAuthority) } : {}),
     ...(memoryStore !== undefined
       ? { memory: async () => (await memoryStore.all()).map(toMemoryReadoutEntry) }
       : {}),
@@ -867,6 +861,16 @@ export const buildProductionRuntimeFactory = (): (() => Promise<ObservableRuntim
     // store, memory store, prompt-usage holder). See {@link mintSessionCollaborators}.
     const { taskRegistry, subagent, skills, planStore, memoryStore, usageHolder, canvasUsage } =
       mintSessionCollaborators(env)
+    // RFC-06 F4 — the ONE durable skill runtime authority for this web session.
+    // Threaded to the AGENT via `config.skills.authority` (buildSkillBlock reads
+    // it) AND to the `/skills` readout (its `active` projection) — so prompt,
+    // ToolSearch, invocation and the web panel converge on one authority. This is
+    // the SINGLE discovery owner; the old independent readout scan is gone.
+    const skillAuthority = await buildWebSkillAuthority(skills, env)
+    const skillsWithAuthority =
+      skills !== undefined && skillAuthority !== undefined
+        ? { ...skills, authority: skillAuthority }
+        : skills
     // ADR-0415 — per-session observability wire. Gate OFF ⇒ noop handle +
     // undefined bus ⇒ `observabilitySlots` returns `{}` (byte-identical legacy).
     // Threading the live bus + promoted ports onto the session config makes the
@@ -907,7 +911,10 @@ export const buildProductionRuntimeFactory = (): (() => Promise<ObservableRuntim
       cwd,
       abort,
       subagent,
-      skills,
+      // RFC-06 F4 — pass the authority-augmented skills so buildSkillBlock reads
+      // the ONE shared authority (config.skills.authority) instead of minting an
+      // interim one (single authority across prompt/search/invocation/readout).
+      skills: skillsWithAuthority,
       planStore,
       usageHolder,
       canvasToolDiff,
@@ -962,7 +969,9 @@ export const buildProductionRuntimeFactory = (): (() => Promise<ObservableRuntim
       readoutSources: buildReadoutSources({
         taskRegistry,
         planStore,
-        skills,
+        // RFC-06 F4 — the `/skills` readout reads the shared authority's active
+        // projection (no independent discovery scan). Absent ⇒ honest missing line.
+        skillAuthority,
         memoryStore,
         usageHolder,
         ...(mcpAccessor !== undefined ? { mcp: mcpAccessor } : {}),

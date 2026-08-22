@@ -5,7 +5,7 @@ import { buildAttentionSlashState } from "../../slash/attention-cmd"
 import { buildRewindRestoreCoordinator } from "../rewind-restore-coordinator-wire"
 import type { SessionSetupResult } from "../session-setup"
 import { overlayRewindState } from "../session-switch-wire"
-import { buildSkillsCallback } from "../skills-surface"
+import { buildSkillsCallback, buildSkillsReloadCallback } from "../skills-surface"
 import { buildReplSlashCtx } from "../slash-surface"
 import type { SurfaceCoreState } from "./core-state"
 import type { MutableSurfaceWires } from "./mutable-wires"
@@ -89,7 +89,16 @@ export const buildSurfaceSlashContext = (
   env: NodeJS.ProcessEnv,
 ): ReturnType<typeof buildReplSlashCtx> =>
   buildReplSlashCtx({
-    skillsCb: buildSkillsCallback(setup.skillsConfig, setup.pills),
+    // RFC-06 F4 — thread the SHARED session skill authority so `/skills` and
+    // `/reload-skills` project its live view (management inventory + sync +
+    // revision), in lock-step with the prompt/ToolSearch/invocation. Absent ⇒
+    // pre-F4 disk re-scan (byte-identical).
+    skillsCb: buildSkillsCallback(setup.skillsConfig, setup.pills, setup.skillAuthority),
+    reloadSkillsCb: buildSkillsReloadCallback(
+      setup.skillsConfig,
+      setup.pills,
+      setup.skillAuthority,
+    ),
     idleMonitor: setup.idleMonitor,
     ...sharedOptionalSlots(core, mutable),
     imageQueue: state.imageQueue,

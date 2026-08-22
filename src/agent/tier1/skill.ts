@@ -182,35 +182,41 @@ export const buildSkillBlock = async (config: AgentConfig): Promise<SkillBlock |
   if (!config.skills) return undefined
 
   const dir = config.skills.dir
-  // RFC03-0 — canonical discovery+precedence authority. The prompt block, the
-  // `Skill` tool inventory, and the CLI `/skills` list all derive from the SAME
-  // `buildSkillSnapshot` so they cannot disagree on the collision winner or the
-  // ordering. `dir` OPTIONAL (ADR-0045): omitted ⇒ only bundled system skills.
-  // Precedence (ADR-0134): user WINS over system on a name collision — the
-  // canonical decision (§0134 "system: 사용자 disable 가능"). "System cannot be
-  // shadowed" belongs to the proposal/import admission layer, not read-time.
-  const snapshot = await buildSkillSnapshot(dir !== undefined ? { userDir: dir } : {})
-  const skills = [...snapshot.skills]
-  // RFC-06 F2 — the LIVE skill runtime authority for this session's invocation
-  // path. The `Skill` tool resolves EVERY invocation through this authority at
-  // action time (see `createAuthoritySkillResolver`), so a disable that lands
-  // after tool construction immediately blocks an already-created handle and a
-  // re-enable restores it at a higher revision — there is no captured snapshot.
+  // RFC-06 F4 — the ONE skill runtime authority for this session. When the
+  // composition root threaded the DURABLE authority (`buildSkillRuntimeAuthority`:
+  // real registry + admin policy + durable disabled-set store) onto
+  // `config.skills.authority`, USE it — so the prompt inventory, ToolSearch, the
+  // `Skill` invocation resolver, the CLI `/skills` surface and the web readout all
+  // read the SAME authority at the SAME revision (no second cache; a disable
+  // converges across every surface). This is F4's whole point: converge onto the
+  // single durable authority rather than leaving the F2/F3 interim in-process one.
   //
-  // Interim store/policy (F2 scope): an in-process disabled-set store and no
-  // admin policy (`policy: null`). This keys the same-session enable/disable
-  // receipt F2 owns. The DURABLE, org-policy-loaded authority is constructed
-  // once at the composition root (`buildSkillRuntimeAuthority`) and threaded to
-  // every surface by F4; this local authority is F4's convergence target, not a
-  // permanent second cache.
-  const disabledStore = createInMemoryDisabledStore()
-  const persisted = await disabledStore.read()
-  const authority = createSkillRuntimeAuthority({
-    snapshot,
-    policy: null,
-    disabledStore,
-    persisted,
-  })
+  // ABSENT (direct unit tests, or a surface not yet converged) ⇒ mint the F2/F3
+  // INTERIM authority: canonical `buildSkillSnapshot` discovery (RFC03-0 — the
+  // same precedence authority the prompt/tool/CLI derived from; ADR-0134 user
+  // WINS over system on a collision), an in-process disabled-set store, and no
+  // admin policy. Byte-identical to the pre-F4 path (nothing is durably disabled,
+  // so `active` === `snapshot.skills`).
+  const injected = config.skills.authority
+  let authority: SkillRuntimeAuthority
+  // Retained ONLY for the interim path's `skill_create` registry (proposal IO);
+  // the injected path derives its catalogue from the authority's live projection
+  // and builds the registry lazily in the gated `skill_create` branch below.
+  let interimRegistry: SkillRegistry | undefined
+  if (injected !== undefined) {
+    authority = injected
+  } else {
+    const snapshot = await buildSkillSnapshot(dir !== undefined ? { userDir: dir } : {})
+    interimRegistry = snapshot.registry
+    const disabledStore = createInMemoryDisabledStore()
+    const persisted = await disabledStore.read()
+    authority = createSkillRuntimeAuthority({ snapshot, policy: null, disabledStore, persisted })
+  }
+  // Construction-time catalogue for the allowlist/override maps + the `Skill`
+  // tool's fallback description. The authority's CURRENT active projection is
+  // identity with `snapshot.skills` when nothing is durably disabled (see
+  // `deriveSkillProjections`: `active = registry.entries.filter(enabled).map`).
+  const skills = [...authority.read().active]
   const tools: Tool[] = [
     // ACTION-TIME resolution: the tool never captures the discovered list — it
     // resolves each name through `authority` at invoke time. `catalogue` feeds
@@ -242,7 +248,10 @@ export const buildSkillBlock = async (config: AgentConfig): Promise<SkillBlock |
   if (runtimeConfig().skillCreator && dir !== undefined) {
     // Evidence roots: the user skills dir + the process cwd (memory/repo files
     // the model cites). The host reuses `@/storage` for hash/jail — no new impl.
-    const io = buildProposalIo(snapshot.registry, [dir, process.cwd()])
+    // The interim path already resolved the registry; the injected path resolves
+    // it lazily here (only when `skill_create` is actually enabled — default-OFF).
+    const registry = interimRegistry ?? (await buildSkillSnapshot({ userDir: dir })).registry
+    const io = buildProposalIo(registry, [dir, process.cwd()])
     const stage = buildProposalStagePort(dir, config.approvalStateMachine, config.sessionId ?? "")
     tools.push(createSkillCreatorTool({ io, stage, generatorVersion: SKILL_PROPOSAL_GENERATOR }))
   }

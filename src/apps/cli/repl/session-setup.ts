@@ -1,3 +1,4 @@
+import { join } from "node:path"
 import type { ConversationCheckpointStore } from "@/agent/conversation-checkpoint"
 import type { FollowUpQueue } from "@/agent/follow-up-queue"
 import type { PlanStore } from "@/agent/plan/state"
@@ -10,9 +11,11 @@ import type { ImageBlock, LLMPort, Message, ResponsesContinuationStore } from "@
 import type { StructuredLogger } from "@/observability"
 import type { PermissionMode, PermissionStore } from "@/permission"
 import type { PendingApprovalView } from "@/protocol/session"
+import { buildSkillRuntimeAuthority } from "@/runner/assemble/session-authorities"
 import type { ApprovalDecisionResult } from "@/runner/orchestrate"
 import type { RuntimeContext } from "@/sdk/runtime"
-import { gateOn, runtimeConfig } from "@/shared"
+import { gateOn, logger, quantaHomeDirFrom, runtimeConfig } from "@/shared"
+import type { SkillRuntimeAuthority } from "@/skill"
 import { clearFsJailDecisionSink, setFsJailDecisionSink } from "@/storage"
 import type { AgentEvent, StreamPort } from "@/stream"
 import type { TaskRegistry } from "@/subagent"
@@ -141,6 +144,16 @@ export interface SessionSetupResult {
   readonly mcpTools: SessionBootstrapResult["features"]["mcpTools"]
   readonly mcpSurface: McpSurfaceInfo | undefined
   readonly skillsConfig: Tooling["skillsConfig"]
+  /** RFC-06 F4 — the SINGLE durable per-session skill runtime authority, built
+   *  ONCE here (`buildSkillRuntimeAuthority`) and threaded to BOTH the agent
+   *  (attached to `boot.tooling.skillsConfig.authority`, so `buildSkillBlock`
+   *  reads it for the prompt/ToolSearch/invocation) AND the REPL slash surface
+   *  (`/skills` + `/reload-skills` project its management view). One authority ⇒
+   *  a disable converges across prompt, search, invocation, CLI and web at one
+   *  revision. Absent when skills are unconfigured (`QUANTA_SKILLS=0`) or the
+   *  build failed (fail-open: `buildSkillBlock` mints the interim authority and
+   *  the slash re-scans — pre-F4 behavior). */
+  readonly skillAuthority?: SkillRuntimeAuthority
   /** `/memory` slash store — the SAME {@link PersistentStorePort} the loop
    *  reads (built once in `tooling`). Absent ⇒ no store (`QUANTA_MEMORY=off`)
    *  ⇒ the `/memory` slash prints "not wired". Forwarded from
@@ -275,6 +288,42 @@ export interface SessionSetupResult {
 /** Terminal host wiring over the bootstrap session core. All env/argv/feature
  *  resolution happens in {@link bootstrapSession}; this layer attaches the
  *  status chrome and interactive prompt-only ports. */
+/**
+ * RFC-06 F4 — build the ONE durable skill runtime authority for a CLI
+ * interactive session. Mirrors the pre-F4 discovery `buildSkillBlock` performed
+ * (userDir only ⇒ byte-identical active set) but makes it DURABLE (a JSON
+ * disabled-set store under `~/.quanta`, or `<userSkillsDir>/.disabled.json`) and
+ * SHARED across every surface. `orgConfigDir` is left null (no admin policy
+ * wired at this surface yet — same posture as the interim `policy: null`; the
+ * builder's real `loadAdminPolicy` still runs and returns null). Fail-open: on
+ * any error the session degrades to the pre-F4 path (no authority ⇒
+ * `buildSkillBlock` mints the interim one, the slash re-scans) — session setup
+ * must never crash on the skill surface.
+ */
+const buildCliSkillAuthority = async (
+  skillsConfig: AgentConfigSkills,
+  env: Record<string, string | undefined>,
+): Promise<SkillRuntimeAuthority | undefined> => {
+  if (skillsConfig === undefined) return undefined
+  const dir = skillsConfig.dir
+  try {
+    return await buildSkillRuntimeAuthority({
+      snapshotInputs: dir !== undefined ? { userDir: dir } : {},
+      disabledSetPath:
+        dir !== undefined
+          ? join(dir, ".disabled.json")
+          : join(quantaHomeDirFrom(env), "skills-disabled.json"),
+    })
+  } catch (e) {
+    logger.warn("skill runtime authority build failed; continuing without convergence", {
+      error: e instanceof Error ? e.message : String(e),
+    })
+    return undefined
+  }
+}
+
+type AgentConfigSkills = import("@/agent").AgentConfig["skills"]
+
 export const setupSession = async (
   deps: SetupSessionDeps,
   options: {
@@ -293,6 +342,19 @@ export const setupSession = async (
   // stay byte-identical). Uninstalled in `shutdownMcp` below.
   const uninstallOperatorNoticeSink = installCliOperatorNoticeSink()
   const boot = await bootstrapSession(deps, runtime, featureCfg)
+
+  // RFC-06 F4 — build the ONE durable skill runtime authority and thread it to
+  // the AGENT by attaching it onto the shared `boot.tooling.skillsConfig` object
+  // (which `context-binding/base.ts` spreads BY REFERENCE into `config.skills`;
+  // `buildSkillBlock` runs at the loop's first turn, AFTER this attach, so it
+  // reads `config.skills.authority` instead of minting an interim one). The SAME
+  // instance is returned on `skillAuthority` for the slash surface — so `/skills`,
+  // `/reload-skills`, the prompt, ToolSearch and invocation all read one authority
+  // at one revision (no split-brain). Fail-open ⇒ pre-F4 behavior.
+  const skillAuthority = await buildCliSkillAuthority(boot.tooling.skillsConfig, runtime.env)
+  if (skillAuthority !== undefined && boot.tooling.skillsConfig !== undefined) {
+    boot.tooling.skillsConfig.authority = skillAuthority
+  }
 
   // Spinner-stall live wire (ADR-0227 → operator-notice, follow-up from
   // e81010371). NEW default-OFF gate `QUANTA_SPINNER_STALL`: when on, the
@@ -471,6 +533,11 @@ export const setupSession = async (
     mcpTools: boot.features.mcpTools,
     mcpSurface: boot.mcpSurface as McpSurfaceInfo | undefined,
     skillsConfig: boot.tooling.skillsConfig,
+    // RFC-06 F4 — the shared session skill authority for the slash surface
+    // (`/skills` + `/reload-skills` project its management view; the SAME
+    // instance the agent reads via `config.skills.authority`). Omitted when the
+    // build returned undefined (skills off / fail-open).
+    ...(skillAuthority !== undefined ? { skillAuthority } : {}),
     memoryStore: boot.tooling.store,
     memoryEmbedder: boot.tooling.embedder,
     // A3 (jul-04) — forward the minted KB store so `/kb` reads the SAME instance
