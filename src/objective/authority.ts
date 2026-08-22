@@ -30,10 +30,13 @@
  * exactOptionalPropertyTypes: optional fields are typed `x?: T | undefined`.
  */
 
+import type { ManualCompletionReceipt } from "./criteria/model"
+import { isVerifierReceipt } from "./criteria/model"
 import type { ObjectiveDomainSnapshot } from "./model"
-import type { ObjectiveMutation, ObjectiveOperationKind } from "./mutations"
+import type { ObjectiveActor, ObjectiveMutation, ObjectiveOperationKind } from "./mutations"
 import type {
   ApprovalReceipt,
+  CommitRejection,
   CommitResult,
   ObjectiveAuthority,
   ObjectiveAuthorityOptions,
@@ -45,18 +48,33 @@ import type { Objective, ObjectivePort } from "./types"
 
 const isNonEmptyString = (v: unknown): v is string => typeof v === "string" && v.length > 0
 
+/** RFC-03 C4 — provenance context threaded into every mutation handler: the
+ *  BOUND actor, the current (pre-apply) revision, and the clock reading. Handlers
+ *  that record completion evidence (markCriterion / markCriterionVerified) mint
+ *  receipts from this — never from the mutation payload. */
+interface MutationContext {
+  readonly actor: ObjectiveActor
+  readonly revision: number
+  readonly now: number
+}
+
 /** Outcome of applying one mutation to the core. `applied:false` ⇒ the op did
- *  not take effect (unknown thread for a non-`set` op, malformed input) so the
- *  revision must NOT advance; `result` is the core's byte-identical return. */
+ *  not take effect (unknown thread for a non-`set` op, malformed input, or a
+ *  policy refusal) so the revision must NOT advance; `result` is the core's
+ *  byte-identical return. `rejection` (RFC-03 C4) carries the precise refusal
+ *  reason a structural guard produced (e.g. `checked-verifier-only`); absent ⇒
+ *  the commit defaults to `invalid`. */
 interface ApplyOutcome {
   readonly applied: boolean
   readonly result: Objective | null
+  readonly rejection?: CommitRejection | undefined
 }
 
 type HandlerFor<K extends ObjectiveOperationKind> = (
   core: ObjectiveCore,
   threadId: string,
   m: Extract<ObjectiveMutation, { kind: K }>,
+  ctx: MutationContext,
 ) => ApplyOutcome
 
 /** The ONE exhaustive dispatch table. `{ [K in ObjectiveOperationKind]: … }`
@@ -71,9 +89,11 @@ const DISPATCH: DispatchTable = {
     const init: {
       goal: string
       successCriteria?: readonly string[]
+      criteria?: NonNullable<(typeof m)["criteria"]>
       budget?: { maxTokens?: number; maxTurns?: number }
     } = { goal: m.goal }
     if (m.successCriteria !== undefined) init.successCriteria = m.successCriteria
+    if (m.criteria !== undefined) init.criteria = m.criteria
     if (m.budget !== undefined) {
       const budget: { maxTokens?: number; maxTurns?: number } = {}
       if (m.budget.maxTokens !== undefined) budget.maxTokens = m.budget.maxTokens
@@ -90,7 +110,51 @@ const DISPATCH: DispatchTable = {
     applied(core.addBlocker(threadId, { reason: m.reason, waitingOn: m.waitingOn })),
   clearBlocker: (core, threadId, m) => applied(core.clearBlocker(threadId, m.blockerId)),
   setNextActions: (core, threadId, m) => applied(core.setNextActions(threadId, m.actions)),
-  markCriterion: (core, threadId, m) => applied(core.markCriterion(threadId, m.criterionId, m.met)),
+  // RFC-03 C4 — the MANUAL/provenance completion path. A CHECKED criterion is
+  // verifier-only (structural, gate-independent) ⇒ refused; a MANUAL criterion
+  // is completed with an AUTHORITY-minted receipt (actor + revision + clock from
+  // ctx — never the payload). A missing criterion ⇒ invalid (no bump).
+  markCriterion: (core, threadId, m, ctx) => {
+    const c = core.getCriterion(threadId, m.criterionId)
+    if (c === null) return { applied: false, result: core.get(threadId) }
+    if (c.kind === "checked") {
+      return { applied: false, result: core.get(threadId), rejection: "checked-verifier-only" }
+    }
+    const receipt: ManualCompletionReceipt | null =
+      m.met === true
+        ? {
+            source: "manual",
+            actor: ctx.actor,
+            objectiveRevision: ctx.revision,
+            verifiedAt: ctx.now,
+          }
+        : null
+    return applied(core.applyManualCompletion(threadId, m.criterionId, m.met, receipt))
+  },
+  // RFC-03 C4 — the VERIFIER-ONLY checked completion. Admitted ONLY for a
+  // `verifier` actor against a CHECKED criterion whose declared `check.id`
+  // matches the receipt, at the current revision, with a well-formed PASSING
+  // result. No tool input schema produces this kind (forgery stop-rule) and the
+  // receipt is re-validated here regardless.
+  markCriterionVerified: (core, threadId, m, ctx) => {
+    if (ctx.actor !== "verifier") {
+      return { applied: false, result: core.get(threadId), rejection: "forbidden-completion" }
+    }
+    const c = core.getCriterion(threadId, m.criterionId)
+    if (c === null || c.kind !== "checked") {
+      return { applied: false, result: core.get(threadId), rejection: "invalid" }
+    }
+    if (!isVerifierReceipt(m.receipt)) {
+      return { applied: false, result: core.get(threadId), rejection: "invalid" }
+    }
+    if (m.receipt.objectiveRevision !== ctx.revision) {
+      return { applied: false, result: core.get(threadId), rejection: "stale" }
+    }
+    const result = core.applyVerifierCompletion(threadId, m.criterionId, m.receipt)
+    return result !== null
+      ? { applied: true, result }
+      : { applied: false, result: core.get(threadId), rejection: "invalid" }
+  },
   recordUsage: (core, threadId, m) => {
     const used: { tokens?: number; turns?: number } = {}
     if (m.tokens !== undefined) used.tokens = m.tokens
@@ -110,8 +174,12 @@ const DISPATCH: DispatchTable = {
 export const objectiveMutationDispatchKeys = (): readonly ObjectiveOperationKind[] =>
   Object.keys(DISPATCH) as ObjectiveOperationKind[]
 
-const applyMutation = (core: ObjectiveCore, threadId: string, m: ObjectiveMutation): ApplyOutcome =>
-  (DISPATCH[m.kind] as HandlerFor<typeof m.kind>)(core, threadId, m as never)
+const applyMutation = (
+  core: ObjectiveCore,
+  threadId: string,
+  m: ObjectiveMutation,
+  ctx: MutationContext,
+): ApplyOutcome => (DISPATCH[m.kind] as HandlerFor<typeof m.kind>)(core, threadId, m as never, ctx)
 
 /** Policy classification of a bound command against the gate posture. */
 interface Policy {
@@ -238,6 +306,28 @@ const coreFromPort = (port: ObjectivePort): ObjectiveCore => ({
     })
     return true
   },
+  // RFC-03 C4 — a bare foreign port has no criterion-kind substrate; synthesize
+  // the read + completion surface from its public `get`/`markCriterion` so the
+  // authority protocol stays total (production always uses the real core).
+  getCriterion(threadId, criterionId) {
+    const c = port.get(threadId)?.successCriteria.find((x) => x.id === criterionId)
+    if (c === undefined) return null
+    return {
+      kind: c.kind,
+      met: c.met,
+      checkId: c.kind === "checked" ? c.check.id : null,
+    }
+  },
+  applyManualCompletion(threadId, criterionId, met) {
+    // No receipt substrate on a bare port; fall back to the plain flip.
+    return port.markCriterion(threadId, criterionId, met)
+  },
+  applyVerifierCompletion(threadId, criterionId, receipt) {
+    const c = port.get(threadId)?.successCriteria.find((x) => x.id === criterionId)
+    if (c === undefined || c.kind !== "checked" || receipt.checkId !== c.check.id) return null
+    if (receipt.verifierResult.passed !== true) return null
+    return port.markCriterion(threadId, criterionId, true)
+  },
 })
 
 /** RFC-03 C2 — restore-at-construction. Load each persisted per-thread domain
@@ -266,6 +356,15 @@ const createObjectiveAuthorityWithCore = (
 ): ObjectiveAuthority => {
   const gateOn = opts?.gateOn === true
   const confirmationAvailable = opts?.confirmationAvailable !== false
+  const nowFn = opts?.now ?? Date.now
+  const clockNow = (): number => {
+    try {
+      const t = nowFn()
+      return Number.isFinite(t) ? t : Date.now()
+    } catch {
+      return Date.now()
+    }
+  }
   const revisions = new Map<string, number>()
   const revisionOf = (threadId: string): number => revisions.get(threadId) ?? 0
   const bump = (threadId: string): number => {
@@ -282,13 +381,19 @@ const createObjectiveAuthorityWithCore = (
     revision: revisionOf(threadId),
     state: isNonEmptyString(threadId) ? core.snapshotThread(threadId) : null,
   })
-  const route = (threadId: string, mutation: ObjectiveMutation): ApplyOutcome => {
-    const outcome = applyMutation(core, threadId, mutation)
+  const route = (
+    threadId: string,
+    mutation: ObjectiveMutation,
+    actor: ObjectiveActor,
+  ): ApplyOutcome => {
+    const ctx: MutationContext = { actor, revision: revisionOf(threadId), now: clockNow() }
+    const outcome = applyMutation(core, threadId, mutation, ctx)
     if (outcome.applied) bump(threadId)
     return outcome
   }
+  // Legacy `ObjectivePort` surface commits as a trusted `system` actor.
   const system = (threadId: string, mutation: ObjectiveMutation): Objective | null =>
-    route(threadId, mutation).result
+    route(threadId, mutation, "system").result
   const prepare = (command: ObjectiveMutationCommand): PreparedObjectiveMutation => {
     const threadId = isNonEmptyString(command.threadId) ? command.threadId : ""
     return {
@@ -309,8 +414,13 @@ const createObjectiveAuthorityWithCore = (
     if (current !== prepared.expectedRevision) {
       return { ok: false, reason: "stale", currentRevision: current }
     }
-    const outcome = route(threadId, command.mutation)
-    if (!outcome.applied) return { ok: false, reason: "invalid", currentRevision: current }
+    const outcome = route(threadId, command.mutation, command.actor)
+    if (!outcome.applied) {
+      // Surface the structural refusal reason a handler produced (e.g. a checked
+      // criterion is verifier-only / a non-verifier tried the verified path);
+      // default to `invalid` for a plain no-op (unknown thread / missing target).
+      return { ok: false, reason: outcome.rejection ?? "invalid", currentRevision: current }
+    }
     return { ok: true, revision: revisionOf(threadId), snapshot: readDomain(threadId) }
   }
   const restore = (previous: ObjectiveDomainSnapshot, expectedRevision: number): CommitResult => {
@@ -335,6 +445,7 @@ const createObjectiveAuthorityWithCore = (
         kind: "set",
         goal: init?.goal,
         ...(init?.successCriteria !== undefined ? { successCriteria: init.successCriteria } : {}),
+        ...(init?.criteria !== undefined ? { criteria: init.criteria } : {}),
         ...(init?.budget !== undefined ? { budget: init.budget } : {}),
       }) ?? core.get(threadId)) as Objective,
     get: (threadId) => core.get(threadId),

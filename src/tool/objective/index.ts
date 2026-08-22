@@ -28,6 +28,7 @@
 import { z } from "zod"
 import type {
   CommitResult,
+  CriterionDeclaration,
   Objective,
   ObjectiveAuthority,
   ObjectiveMutation,
@@ -82,14 +83,41 @@ const MAX_REASON_CHARS = 8000
 const MAX_LIST_ITEM_CHARS = 2000
 const MAX_LIST_ITEMS = 256
 
+// RFC-03 C4 — the model may DECLARE a machine check on a criterion (argv +
+// timeout + success exit codes). It CANNOT supply a check `id`/`cwdPolicy` (both
+// domain-minted) nor any completion receipt — a checked criterion is completed
+// ONLY by a verifier, never through tool input (forgery stop-rule). The check is
+// a *declaration* only; execution is C5 (PARKED).
+const MAX_ARGV_ITEMS = 64
+const MAX_EXIT_CODES = 32
+const checkDeclarationSchema = z.object({
+  kind: z.literal("command"),
+  argv: z.array(z.string().max(MAX_LIST_ITEM_CHARS)).min(1).max(MAX_ARGV_ITEMS),
+  timeout_ms: z.number().int().positive().finite(),
+  success_exit_codes: z.array(z.number().int().finite()).max(MAX_EXIT_CODES),
+})
+// A success criterion is either a plain string (manual) or an object that may
+// carry a `check` (⇒ checked / verifier-only).
+const criterionEntrySchema = z.union([
+  z.string().max(MAX_LIST_ITEM_CHARS),
+  z.object({
+    text: z.string().min(1).max(MAX_LIST_ITEM_CHARS),
+    check: checkDeclarationSchema.optional(),
+  }),
+])
+
 export const objectiveSetSchema = z.object({
   thread_id: z.string().min(1).describe("Thread/conversation id this objective belongs to"),
   goal: z.string().min(1).max(MAX_GOAL_CHARS).describe("The current objective in 1-2 sentences"),
   success_criteria: z
-    .array(z.string().max(MAX_LIST_ITEM_CHARS))
+    .array(criterionEntrySchema)
     .max(MAX_LIST_ITEMS)
     .optional()
-    .describe("List of testable criteria (e.g. 'tests pass', 'tsc 0')"),
+    .describe(
+      "List of testable criteria. Each is a string (manual, self-attested) OR " +
+        "{ text, check:{ kind:'command', argv, timeout_ms, success_exit_codes } } " +
+        "for a machine-CHECKED criterion (verifier-only — you cannot mark it met).",
+    ),
   budget: z
     .object({
       max_tokens: z.number().int().nonnegative().finite().optional(),
@@ -238,6 +266,8 @@ const commitError = (res: Extract<CommitResult, { ok: false }>): string => {
       return "objective mutation requires approval but no confirmation surface is available"
     case "forbidden-completion":
       return "a criterion cannot be self-completed by the model; only a verifier may mark it met"
+    case "checked-verifier-only":
+      return "this is a CHECKED criterion — it can be marked met only by a verifier, never by an update"
     case "invalid":
       return "objective mutation could not be applied (no objective set for this thread)"
   }
@@ -318,6 +348,25 @@ const routeModelMutation = async (
 // TOOLS
 // ─────────────────────────────────────────────────────────────────────────────
 
+/** RFC-03 C4 — map a validated success-criteria entry (string OR object) to a
+ *  domain {@link CriterionDeclaration}. A `check` (snake_case tool shape) becomes
+ *  a checked declaration; the check `id`/`cwdPolicy` are NOT accepted here — they
+ *  are domain-minted so the model cannot choose them (nor mint a receipt). */
+type CriterionEntry = NonNullable<ObjectiveSetInput["success_criteria"]>[number]
+const toCriterionDeclaration = (entry: CriterionEntry): CriterionDeclaration => {
+  if (typeof entry === "string") return { text: entry }
+  if (entry.check === undefined) return { text: entry.text }
+  return {
+    text: entry.text,
+    check: {
+      kind: "command",
+      argv: entry.check.argv,
+      timeoutMs: entry.check.timeout_ms,
+      successExitCodes: entry.check.success_exit_codes,
+    },
+  }
+}
+
 const buildObjectiveSet = (authority: ObjectiveAuthority): Tool<ObjectiveSetInput> => ({
   name: "objective_set",
   description:
@@ -343,7 +392,7 @@ const buildObjectiveSet = (authority: ObjectiveAuthority): Tool<ObjectiveSetInpu
     try {
       const mutation: ObjectiveMutation = { kind: "set", goal: parsed.data.goal }
       if (parsed.data.success_criteria !== undefined) {
-        mutation.successCriteria = parsed.data.success_criteria
+        mutation.criteria = parsed.data.success_criteria.map(toCriterionDeclaration)
       }
       const budget: { maxTokens?: number; maxTurns?: number } = {}
       if (parsed.data.budget?.max_tokens !== undefined)

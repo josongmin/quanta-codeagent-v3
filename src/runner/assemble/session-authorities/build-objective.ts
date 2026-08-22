@@ -25,9 +25,16 @@
  * exactOptionalPropertyTypes: optional fields are OMITTED when absent.
  */
 
-import { asObjectiveAuthority, createObjectiveAuthority, type ObjectivePort } from "@/objective"
+import {
+  asObjectiveAuthority,
+  createObjectiveAuthority,
+  type ObjectivePort,
+  type SuccessCriterion,
+} from "@/objective"
 import {
   OBJECTIVE_SNAPSHOT_VERSION,
+  type PersistedObjectiveCompletion,
+  type PersistedObjectiveCriterion,
   type PersistedObjectiveSnapshot,
   type PersistedObjectiveThread,
 } from "@/session"
@@ -81,6 +88,57 @@ export const buildObjectiveAuthority = (input: BuildObjectiveAuthorityInput = {}
  * no state (e.g. a bare port double that lists nothing) are dropped. The thread
  * order is the port's list order (deterministic).
  */
+/** RFC-03 C4 — encode ONE domain criterion into its persisted DTO. `kind` is
+ *  OMITTED for a plain manual criterion (byte-identical to the pre-C4
+ *  `{ id, text, met }`); a CHECKED criterion carries its immutable `check`;
+ *  `completion` evidence rides along when present. */
+const encodeCriterion = (c: SuccessCriterion): PersistedObjectiveCriterion => {
+  const completion: PersistedObjectiveCompletion | undefined =
+    c.completion === undefined
+      ? undefined
+      : c.completion.source === "verifier"
+        ? {
+            source: "verifier",
+            checkId: c.completion.checkId,
+            objectiveRevision: c.completion.objectiveRevision,
+            sourceDigest: c.completion.sourceDigest,
+            verifierResult: {
+              exitCode: c.completion.verifierResult.exitCode,
+              passed: c.completion.verifierResult.passed,
+            },
+            verifiedAt: c.completion.verifiedAt,
+          }
+        : {
+            source: "manual",
+            actor: c.completion.actor,
+            objectiveRevision: c.completion.objectiveRevision,
+            verifiedAt: c.completion.verifiedAt,
+          }
+  if (c.kind === "checked") {
+    return {
+      id: c.id,
+      text: c.text,
+      met: c.met,
+      kind: "checked",
+      check: {
+        id: c.check.id,
+        kind: "command",
+        argv: [...c.check.argv],
+        cwdPolicy: "thread",
+        timeoutMs: c.check.timeoutMs,
+        successExitCodes: [...c.check.successExitCodes],
+      },
+      ...(completion !== undefined ? { completion } : {}),
+    }
+  }
+  return {
+    id: c.id,
+    text: c.text,
+    met: c.met,
+    ...(completion !== undefined ? { completion } : {}),
+  }
+}
+
 export const encodeObjectiveSnapshot = (port: ObjectivePort): PersistedObjectiveSnapshot => {
   const authority = asObjectiveAuthority(port)
   const threads: PersistedObjectiveThread[] = []
@@ -93,7 +151,7 @@ export const encodeObjectiveSnapshot = (port: ObjectivePort): PersistedObjective
       threadId: obj.threadId,
       revision: dom.revision,
       goal: obj.goal,
-      successCriteria: obj.successCriteria.map((c) => ({ id: c.id, text: c.text, met: c.met })),
+      successCriteria: obj.successCriteria.map(encodeCriterion),
       status: obj.status,
       explicitStatus: state.explicitStatus,
       ...(state.usageLimitedUntil !== undefined

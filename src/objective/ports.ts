@@ -70,6 +70,10 @@ export type CommitRejection =
   | "approval-unavailable"
   /** A model actor tried to COMPLETE a criterion — the authority owns completion. */
   | "forbidden-completion"
+  /** RFC-03 C4 — a non-verifier actor tried to `markCriterion(met:true)` on a
+   *  CHECKED criterion. Structural (independent of the propose gate): a checked
+   *  criterion is verifier-only and cannot be self-marked. */
+  | "checked-verifier-only"
   /** Malformed command / unknown thread for a non-`set` op. */
   | "invalid"
 

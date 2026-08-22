@@ -21,6 +21,15 @@
 
 import { randomUUID } from "node:crypto"
 import { errMessage, logger } from "@/shared"
+import type {
+  CheckSpec,
+  CompletionReceipt,
+  CriterionDeclaration,
+  CriterionKind,
+  ManualCompletionReceipt,
+  VerifierCompletionReceipt,
+} from "./criteria/model"
+import { isManualReceipt, isVerifierReceipt, normalizeCheckDeclaration } from "./criteria/model"
 import type { ExplicitStatus, ObjectiveThreadSnapshot } from "./model"
 import type {
   Blocker,
@@ -46,6 +55,44 @@ export interface ObjectiveCore extends ObjectivePort {
   /** Restore one thread's objective from a snapshot; `true` iff it applied. When
    *  `state` was captured as absent the thread is DELETED (exact undo of a set). */
   restoreThread(threadId: string, state: ObjectiveThreadSnapshot | null): boolean
+  /** RFC-03 C4 — read a criterion's kind + check identity for the authority's
+   *  policy decisions (verifier-only enforcement). `null` ⇒ no such criterion. */
+  getCriterion(
+    threadId: string,
+    criterionId: string,
+  ): { readonly kind: CriterionKind; readonly met: boolean; readonly checkId: string | null } | null
+  /** RFC-03 C4 — complete/uncomplete a MANUAL criterion with an authority-minted
+   *  receipt (`null` ⇒ set met with no receipt / clear on unmark). Refuses (⇒
+   *  `null`) a CHECKED criterion (verifier-only) or a missing one. */
+  applyManualCompletion(
+    threadId: string,
+    criterionId: string,
+    met: boolean,
+    receipt: ManualCompletionReceipt | null,
+  ): Objective | null
+  /** RFC-03 C4 — the VERIFIER-ONLY checked completion. Sets met:true + the
+   *  verifier receipt ONLY when the criterion is CHECKED and the receipt's
+   *  `checkId` matches the declared `check.id`; refuses (⇒ `null`) otherwise. */
+  applyVerifierCompletion(
+    threadId: string,
+    criterionId: string,
+    receipt: VerifierCompletionReceipt,
+  ): Objective | null
+}
+
+/** RFC-03 C4 — internal MUTABLE criterion cell. `kind` discriminates manual vs
+ *  checked; `check` is present (frozen, immutable) only for checked criteria;
+ *  `completion` is the evidence receipt present only while met with provenance.
+ *  Projected to the public frozen {@link SuccessCriterion} union by
+ *  {@link toCriterion}. Optional fields are OMITTED when absent (never
+ *  `: undefined`) so the projection is byte-stable. */
+interface CritCell {
+  id: string
+  text: string
+  met: boolean
+  kind: CriterionKind
+  check?: CheckSpec
+  completion?: CompletionReceipt
 }
 
 /** Internal mutable cell. `explicitStatus` is the caller's last non-derived
@@ -53,7 +100,7 @@ export interface ObjectiveCore extends ObjectivePort {
 interface Cell {
   threadId: string
   goal: string
-  criteria: SuccessCriterion[]
+  criteria: CritCell[]
   blockers: Blocker[]
   nextActions: string[]
   explicitStatus: "active" | "paused" | "completed"
@@ -115,6 +162,34 @@ const deriveStatus = (cell: Cell, enforce: boolean, now: number): ObjectiveStatu
   return cell.explicitStatus
 }
 
+/** RFC-03 C4 — project an internal {@link CritCell} to the frozen public
+ *  {@link SuccessCriterion} union. `kind` is ALWAYS present (discriminant);
+ *  `check`/`completion` are OMITTED when absent so the projection is byte-stable
+ *  for a plain manual criterion (`{ kind, id, text, met }`). */
+const toCriterion = (c: CritCell): SuccessCriterion => {
+  if (c.kind === "checked" && c.check !== undefined) {
+    return Object.freeze({
+      kind: "checked" as const,
+      id: c.id,
+      text: c.text,
+      met: c.met,
+      check: c.check,
+      ...(c.completion !== undefined && c.completion.source === "verifier"
+        ? { completion: c.completion }
+        : {}),
+    })
+  }
+  return Object.freeze({
+    kind: "manual" as const,
+    id: c.id,
+    text: c.text,
+    met: c.met,
+    ...(c.completion !== undefined && c.completion.source === "manual"
+      ? { completion: c.completion }
+      : {}),
+  })
+}
+
 const buildBudget = (cell: Cell): ObjectiveBudget => {
   const base = { tokensUsed: cell.tokensUsed, turnsUsed: cell.turnsUsed }
   return Object.freeze({
@@ -131,7 +206,7 @@ const toObjective = (cell: Cell, enforce: boolean, now: number): Objective =>
   Object.freeze({
     threadId: cell.threadId,
     goal: cell.goal,
-    successCriteria: Object.freeze(cell.criteria.map((c) => Object.freeze({ ...c }))),
+    successCriteria: Object.freeze(cell.criteria.map(toCriterion)),
     status: deriveStatus(cell, enforce, now),
     budget: buildBudget(cell),
     blockers: Object.freeze(cell.blockers.map((b) => Object.freeze({ ...b }))),
@@ -171,7 +246,7 @@ const toSnapshotObjective = (cell: Cell, enforce: boolean, now: number): Snapsho
   Object.freeze({
     threadId: cell.threadId,
     goal: cell.goal,
-    successCriteria: Object.freeze(cell.criteria.map((c) => Object.freeze({ ...c }))),
+    successCriteria: Object.freeze(cell.criteria.map(toCriterion)),
     status: deriveStatus(cell, enforce, now),
     explicitStatus: cell.explicitStatus,
     ...(cell.usageLimitedUntil !== undefined ? { usageLimitedUntil: cell.usageLimitedUntil } : {}),
@@ -191,13 +266,64 @@ const toSnapshotObjective = (cell: Cell, enforce: boolean, now: number): Snapsho
 const MAX_CRITERIA_PER_OBJECTIVE = 256
 const MAX_BLOCKERS_PER_OBJECTIVE = 64
 
-const sanitizeCriteria = (raw: readonly string[] | undefined): SuccessCriterion[] => {
-  if (!Array.isArray(raw)) return []
-  const out: SuccessCriterion[] = []
-  for (const entry of raw) {
-    if (typeof entry !== "string") continue
-    if (out.length >= MAX_CRITERIA_PER_OBJECTIVE) break
-    out.push({ id: randomUUID(), text: entry, met: false })
+/** RFC-03 C4 — mint a fresh MANUAL criterion cell (not met, no completion). */
+const manualCrit = (text: string): CritCell => ({
+  id: randomUUID(),
+  text,
+  met: false,
+  kind: "manual",
+})
+
+/** RFC-03 C4 — mint a fresh CHECKED criterion cell from a (validated) check
+ *  declaration. The `check` is domain-stamped with a fresh immutable `id` +
+ *  fixed `cwdPolicy:"thread"` and FROZEN so it can never mutate after creation. */
+const checkedCrit = (text: string, decl: CheckSpecDeclarationLike): CritCell => ({
+  id: randomUUID(),
+  text,
+  met: false,
+  kind: "checked",
+  check: Object.freeze({
+    id: randomUUID(),
+    kind: "command",
+    argv: Object.freeze([...decl.argv]),
+    cwdPolicy: "thread",
+    timeoutMs: decl.timeoutMs,
+    successExitCodes: Object.freeze([...decl.successExitCodes]),
+  }),
+})
+
+type CheckSpecDeclarationLike = {
+  argv: readonly string[]
+  timeoutMs: number
+  successExitCodes: readonly number[]
+}
+
+/** Build criterion cells from the legacy string list PLUS the RFC-03 C4 rich
+ *  declarations. Strings ⇒ manual; a declaration with a runnable `check` ⇒
+ *  checked; a declaration with no/invalid check ⇒ manual. Applies the live cap. */
+const sanitizeCriteria = (
+  raw: readonly string[] | undefined,
+  declarations: readonly CriterionDeclaration[] | undefined,
+): CritCell[] => {
+  const out: CritCell[] = []
+  const push = (c: CritCell): boolean => {
+    if (out.length >= MAX_CRITERIA_PER_OBJECTIVE) return false
+    out.push(c)
+    return true
+  }
+  if (Array.isArray(raw)) {
+    for (const entry of raw) {
+      if (typeof entry !== "string") continue
+      if (!push(manualCrit(entry))) break
+    }
+  }
+  if (Array.isArray(declarations)) {
+    for (const decl of declarations) {
+      if (decl === null || typeof decl !== "object") continue
+      const text = typeof decl.text === "string" ? decl.text : ""
+      const check = normalizeCheckDeclaration(decl.check)
+      if (!push(check !== null ? checkedCrit(text, check) : manualCrit(text))) break
+    }
   }
   return out
 }
@@ -223,6 +349,7 @@ const cellFromInit = (
   init: {
     goal: string
     successCriteria?: readonly string[]
+    criteria?: readonly CriterionDeclaration[]
     budget?: { maxTokens?: number; maxTurns?: number }
   },
   t: number,
@@ -232,7 +359,7 @@ const cellFromInit = (
   return {
     threadId,
     goal: typeof init.goal === "string" ? init.goal : "",
-    criteria: sanitizeCriteria(init.successCriteria),
+    criteria: sanitizeCriteria(init.successCriteria, init.criteria),
     blockers: [],
     nextActions: [],
     explicitStatus: "active",
@@ -380,9 +507,65 @@ export const createObjectiveCoreStore = (opts?: {
     },
 
     markCriterion(threadId, criterionId, met): Objective | null {
+      // RFC-03 C4 — the RAW (no-provenance) path. Kind-aware: a CHECKED criterion
+      // is verifier-only, so a plain markCriterion NEVER changes its met flag
+      // (structural, independent of any gate). A MANUAL criterion flips met and
+      // (this dumb path carries no receipt) CLEARS any completion evidence.
       return mutate(threadId, (cell) => {
-        cell.criteria = cell.criteria.map((c) =>
-          c.id === criterionId ? { ...c, met: met === true } : c,
+        cell.criteria = cell.criteria.map((c) => {
+          if (c.id !== criterionId) return c
+          if (c.kind === "checked") return c // verifier-only — no-op
+          const next: CritCell = { ...c, met: met === true }
+          delete next.completion
+          return next
+        })
+      })
+    },
+
+    getCriterion(threadId, criterionId) {
+      try {
+        if (!isNonEmptyString(threadId)) return null
+        const cell = cells.get(threadId)
+        if (cell === undefined) return null
+        const c = cell.criteria.find((x) => x.id === criterionId)
+        if (c === undefined) return null
+        return {
+          kind: c.kind,
+          met: c.met,
+          checkId: c.kind === "checked" && c.check !== undefined ? c.check.id : null,
+        }
+      } catch {
+        return null
+      }
+    },
+
+    applyManualCompletion(threadId, criterionId, met, receipt): Objective | null {
+      // Set met on a MANUAL criterion with an authority-minted receipt. Refuses a
+      // CHECKED criterion (verifier-only) or a missing one ⇒ null (no bump).
+      const c = cells.get(threadId)?.criteria.find((x) => x.id === criterionId)
+      if (c === undefined || c.kind === "checked") return null
+      return mutate(threadId, (cell) => {
+        cell.criteria = cell.criteria.map((x) => {
+          if (x.id !== criterionId || x.kind === "checked") return x
+          const next: CritCell = { ...x, met: met === true }
+          if (met === true && receipt !== null) next.completion = receipt
+          else delete next.completion
+          return next
+        })
+      })
+    },
+
+    applyVerifierCompletion(threadId, criterionId, receipt): Objective | null {
+      // The VERIFIER-ONLY path. Completes a CHECKED criterion ⇔ its declared
+      // `check.id` matches the receipt's `checkId` and the result passed. Refuses
+      // (⇒ null) a manual/missing criterion or an id/verdict mismatch.
+      const c = cells.get(threadId)?.criteria.find((x) => x.id === criterionId)
+      if (c === undefined || c.kind !== "checked" || c.check === undefined) return null
+      if (receipt.checkId !== c.check.id) return null
+      if (receipt.verifierResult.passed !== true) return null
+      return mutate(threadId, (cell) => {
+        cell.criteria = cell.criteria.map((x) =>
+          x.id === criterionId ? { ...x, met: true, completion: receipt } : x,
         )
       })
     },
@@ -493,11 +676,9 @@ const cellFromThreadSnapshot = (threadId: string, state: ObjectiveThreadSnapshot
   return {
     threadId,
     goal: typeof o.goal === "string" ? o.goal : "",
-    criteria: (Array.isArray(o.successCriteria) ? o.successCriteria : []).map((c) => ({
-      id: isNonEmptyString(c.id) ? c.id : randomUUID(),
-      text: typeof c.text === "string" ? c.text : "",
-      met: c.met === true,
-    })),
+    // RFC-03 C4 — rebuild criteria kind/check/completion verbatim (ids + check
+    // ids preserved) so an EXACT undo/restore never drops provenance.
+    criteria: rebuildCriteria(o.successCriteria),
     blockers: (Array.isArray(o.blockers) ? o.blockers : []).map((b) => ({
       id: isNonEmptyString(b.id) ? b.id : randomUUID(),
       reason: typeof b.reason === "string" ? b.reason : "",
@@ -536,17 +717,73 @@ const finiteOrZero = (v: unknown): number => (typeof v === "number" && Number.is
  *  inspecting why a snapshot lost data). Single line per rebuild — the
  *  label-keyed leaky bucket in `logger.ts` bounds the rate even under a
  *  pathological replay flood. */
-const rebuildCriteria = (raw: unknown): SuccessCriterion[] => {
+/** RFC-03 C4 — rebuild the IMMUTABLE {@link CheckSpec} from a persisted/snapshot
+ *  record, PRESERVING its `id` verbatim (a verifier receipt references it, so it
+ *  must never be re-minted). Returns `null` when the record is not a runnable
+ *  command check (⇒ the criterion downgrades to manual). Stored frozen. */
+const rebuildCheck = (raw: unknown): CheckSpec | null => {
+  if (raw === null || typeof raw !== "object") return null
+  const r = raw as { id?: unknown }
+  if (!isNonEmptyString(r.id)) return null
+  const decl = normalizeCheckDeclaration(raw)
+  if (decl === null) return null
+  return Object.freeze({
+    id: r.id,
+    kind: "command" as const,
+    argv: Object.freeze([...decl.argv]),
+    cwdPolicy: "thread" as const,
+    timeoutMs: decl.timeoutMs,
+    successExitCodes: Object.freeze([...decl.successExitCodes]),
+  })
+}
+
+/** RFC-03 C4 — rebuild a completion receipt from a persisted/snapshot record,
+ *  matching the arm: a MANUAL criterion accepts only a manual receipt, a CHECKED
+ *  criterion only a verifier receipt. A malformed/mismatched receipt is DROPPED
+ *  (⇒ undefined) rather than fabricated. Stored frozen. */
+const rebuildCompletion = (raw: unknown, kind: CriterionKind): CompletionReceipt | undefined => {
+  if (kind === "checked") return isVerifierReceipt(raw) ? Object.freeze({ ...raw }) : undefined
+  return isManualReceipt(raw) ? Object.freeze({ ...raw }) : undefined
+}
+
+/** RFC-03 C4 — rebuild ONE criterion cell from a persisted/snapshot record. A
+ *  record with `kind:"checked"` and a valid check ⇒ checked (id preserved); any
+ *  other record (legacy `{id,text,met}`, `kind:"manual"`, or a checked record
+ *  whose check is unrecoverable) ⇒ manual. Completion evidence rides along when
+ *  it matches the arm. */
+const rebuildCritCell = (raw: unknown): CritCell | null => {
+  if (raw === null || typeof raw !== "object") return null
+  const r = raw as {
+    id?: unknown
+    text?: unknown
+    met?: unknown
+    kind?: unknown
+    check?: unknown
+    completion?: unknown
+  }
+  const id = isNonEmptyString(r.id) ? r.id : randomUUID()
+  const text = typeof r.text === "string" ? r.text : ""
+  const met = r.met === true
+  const check = r.kind === "checked" ? rebuildCheck(r.check) : null
+  if (check !== null) {
+    const cell: CritCell = { id, text, met, kind: "checked", check }
+    const comp = rebuildCompletion(r.completion, "checked")
+    if (comp !== undefined) cell.completion = comp
+    return cell
+  }
+  const cell: CritCell = { id, text, met, kind: "manual" }
+  const comp = rebuildCompletion(r.completion, "manual")
+  if (comp !== undefined) cell.completion = comp
+  return cell
+}
+
+const rebuildCriteria = (raw: unknown): CritCell[] => {
   if (!Array.isArray(raw)) return []
-  const out: SuccessCriterion[] = []
+  const out: CritCell[] = []
   for (const c of raw) {
-    if (c === null || typeof c !== "object") continue
     if (out.length >= MAX_CRITERIA_PER_OBJECTIVE) break
-    out.push({
-      id: isNonEmptyString(c.id) ? c.id : randomUUID(),
-      text: typeof c.text === "string" ? c.text : "",
-      met: c.met === true,
-    })
+    const cell = rebuildCritCell(c)
+    if (cell !== null) out.push(cell)
   }
   if (raw.length > MAX_CRITERIA_PER_OBJECTIVE) {
     logger.warn(

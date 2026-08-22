@@ -33,7 +33,12 @@
 import { describe, expect, test } from "bun:test"
 import { createObjectiveStore } from "@/objective"
 
-const makeCriterion = (i: number) => ({ id: `c-${i}`, text: `criterion ${i}`, met: false })
+const makeCriterion = (i: number) => ({
+  id: `c-${i}`,
+  text: `criterion ${i}`,
+  met: false,
+  kind: "manual" as const,
+})
 const makeBlocker = (i: number) => ({
   id: `b-${i}`,
   reason: `blocker ${i}`,

@@ -30,6 +30,34 @@ export {
   evaluateContinuation,
   runIdleContinuation,
 } from "./continuation"
+// RFC-03 C4 — criterion declaration/provenance (manual/checked union + receipts)
+// and the verifier-only checked-completion transition.
+export type {
+  CheckSpec,
+  CheckSpecDeclaration,
+  CompletionReceipt,
+  CriterionDeclaration,
+  CriterionKind,
+  ManualCompletionReceipt,
+  VerifierCompletionReceipt,
+  VerifierResult,
+} from "./criteria/model"
+export {
+  isManualReceipt,
+  isVerifierReceipt,
+  normalizeCheckDeclaration,
+} from "./criteria/model"
+export type {
+  CheckExecutionContext,
+  CheckExecutionPort,
+  VerifierCompletionInput,
+  VerifierCompletionPort,
+} from "./criteria/verifier"
+export {
+  createVerifierCompletion,
+  UNSUPPORTED_CHECK_EXECUTION,
+  unsupportedCheckExecutionPort,
+} from "./criteria/verifier"
 export type { ObjectiveDomainSnapshot, ObjectiveThreadSnapshot } from "./model"
 export type { ObjectiveActor, ObjectiveMutation, ObjectiveOperationKind } from "./mutations"
 export {
@@ -51,6 +79,8 @@ export { buildPursuitContinuationPrompt, GOAL_PURSUIT_DISCIPLINE } from "./pursu
 export type { ObjectiveCore } from "./store"
 export type {
   Blocker,
+  CheckedCriterion,
+  ManualCriterion,
   Objective,
   ObjectiveBudget,
   ObjectivePort,

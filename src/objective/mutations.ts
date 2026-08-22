@@ -15,8 +15,11 @@
  * exactOptionalPropertyTypes: optional fields are typed `x?: T | undefined`.
  */
 
+import type { CriterionDeclaration, VerifierCompletionReceipt } from "./criteria/model"
 import type { ObjectiveDomainSnapshot } from "./model"
 import type { ObjectiveStatus, WaitingOn } from "./types"
+
+export type { CriterionDeclaration } from "./criteria/model"
 
 /**
  * WHO originated a mutation. Bound by the CALLER/session — NEVER read from model
@@ -41,6 +44,10 @@ export type ObjectiveMutation =
       kind: "set"
       goal: string
       successCriteria?: readonly string[] | undefined
+      /** RFC-03 C4 — rich criterion declarations (manual or checked). When
+       *  present it is the criterion source (a checked declaration carries a
+       *  `check`); `successCriteria` remains the string-only back-compat path. */
+      criteria?: readonly CriterionDeclaration[] | undefined
       budget?: { maxTokens?: number | undefined; maxTurns?: number | undefined } | undefined
     }
   | { kind: "updateStatus"; status: ObjectiveStatus }
@@ -48,6 +55,11 @@ export type ObjectiveMutation =
   | { kind: "clearBlocker"; blockerId: string }
   | { kind: "setNextActions"; actions: readonly string[] }
   | { kind: "markCriterion"; criterionId: string; met: boolean }
+  /** RFC-03 C4 — the VERIFIER-ONLY checked-criterion completion. Carries the
+   *  full verifier receipt; the authority admits it ONLY for a `verifier` actor
+   *  against a `checked` criterion whose `check.id` matches the receipt. No tool
+   *  input schema maps to this kind (forgery stop-rule). */
+  | { kind: "markCriterionVerified"; criterionId: string; receipt: VerifierCompletionReceipt }
   | { kind: "recordUsage"; tokens?: number | undefined; turns?: number | undefined }
   | { kind: "markUsageLimited"; untilEpochMs: number }
   | { kind: "restore"; snapshot: ObjectiveDomainSnapshot }
@@ -66,6 +78,7 @@ export const OBJECTIVE_OPERATION_KINDS = [
   "clearBlocker",
   "setNextActions",
   "markCriterion",
+  "markCriterionVerified",
   "recordUsage",
   "markUsageLimited",
   "restore",

@@ -271,12 +271,53 @@ export interface RollbackOperationRecord {
  *  incompatible record can never be half-read (mirrors the rollback records). */
 export const OBJECTIVE_SNAPSHOT_VERSION = 1 as const
 
+/** RFC-03 C4 — a persisted immutable check spec (mirrors `@/objective`
+ *  `CheckSpec`). The `id` survives verbatim so a verifier receipt keeps binding
+ *  to it across a reopen. Present only on a CHECKED criterion. */
+export interface PersistedObjectiveCheckSpec {
+  readonly id: string
+  readonly kind: "command"
+  readonly argv: readonly string[]
+  readonly cwdPolicy: "thread"
+  readonly timeoutMs: number
+  readonly successExitCodes: readonly number[]
+}
+
+/** RFC-03 C4 — a persisted completion receipt (manual OR verifier evidence),
+ *  mirroring `@/objective` `CompletionReceipt`. The `verifier` variant carries
+ *  the full check id + objective revision + source digest + verifier result. */
+export type PersistedObjectiveCompletion =
+  | {
+      readonly source: "manual"
+      readonly actor: string
+      readonly objectiveRevision: number
+      readonly verifiedAt: number
+    }
+  | {
+      readonly source: "verifier"
+      readonly checkId: string
+      readonly objectiveRevision: number
+      readonly sourceDigest: string
+      readonly verifierResult: { readonly exitCode: number; readonly passed: boolean }
+      readonly verifiedAt: number
+    }
+
 /** A single persisted success criterion (mirrors `@/objective` `SuccessCriterion`
- *  structurally — ids survive the round-trip verbatim, never re-minted). */
+ *  structurally — ids survive the round-trip verbatim, never re-minted).
+ *
+ *  RFC-03 C4: `kind`/`check`/`completion` are OPTIONAL and ADDITIVE — a legacy
+ *  record (no `kind`) decodes as a MANUAL criterion with no provenance (schema
+ *  migration; the snapshot version does NOT bump). `kind:"checked"` carries an
+ *  immutable `check`; `completion` is the evidence receipt present only when met.
+ *  Omitted for a plain manual criterion so serialization stays byte-identical to
+ *  the pre-C4 `{ id, text, met }` shape. */
 export interface PersistedObjectiveCriterion {
   readonly id: string
   readonly text: string
   readonly met: boolean
+  readonly kind?: "manual" | "checked"
+  readonly check?: PersistedObjectiveCheckSpec
+  readonly completion?: PersistedObjectiveCompletion
 }
 
 /** A single persisted blocker (mirrors `@/objective` `Blocker` structurally). */

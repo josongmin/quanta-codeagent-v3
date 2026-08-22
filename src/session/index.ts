@@ -177,6 +177,8 @@ export type {
   PersistedInterruptedTurn,
   PersistedObjectiveBlocker,
   PersistedObjectiveBudget,
+  PersistedObjectiveCheckSpec,
+  PersistedObjectiveCompletion,
   PersistedObjectiveCriterion,
   PersistedObjectiveSnapshot,
   PersistedObjectiveThread,

@@ -19,7 +19,9 @@
 
 import type {
   Blocker,
+  CompletionReceipt,
   Objective,
+  ObjectiveActor,
   ObjectiveBudget,
   ObjectiveDomainSnapshot,
   ObjectiveStatus,
@@ -27,8 +29,10 @@ import type {
   SuccessCriterion,
   WaitingOn,
 } from "@/objective"
+import { isObjectiveActor, normalizeCheckDeclaration } from "@/objective"
 import type {
   PersistedObjectiveBlocker,
+  PersistedObjectiveCompletion,
   PersistedObjectiveCriterion,
   PersistedObjectiveSnapshot,
   PersistedObjectiveThread,
@@ -59,11 +63,77 @@ const toStatus = (raw: string, explicit: ObjectiveStatus): ObjectiveStatus =>
 
 const toWaitingOn = (raw: string): WaitingOn => (WAITING_ON.has(raw) ? (raw as WaitingOn) : "user")
 
-const toCriterion = (c: PersistedObjectiveCriterion): SuccessCriterion => ({
-  id: c.id,
-  text: c.text,
-  met: c.met,
-})
+/** RFC-03 C4 — decode a persisted completion receipt into the domain evidence
+ *  union. The manual `actor` string is coerced to the closed `ObjectiveActor`
+ *  (unknown ⇒ `system`); a malformed receipt is dropped upstream by the caller. */
+const toCompletion = (raw: PersistedObjectiveCompletion): CompletionReceipt => {
+  if (raw.source === "verifier") {
+    return {
+      source: "verifier",
+      checkId: raw.checkId,
+      objectiveRevision: raw.objectiveRevision,
+      sourceDigest: raw.sourceDigest,
+      verifierResult: { exitCode: raw.verifierResult.exitCode, passed: raw.verifierResult.passed },
+      verifiedAt: raw.verifiedAt,
+    }
+  }
+  const actor: ObjectiveActor = isObjectiveActor(raw.actor) ? raw.actor : "system"
+  return {
+    source: "manual",
+    actor,
+    objectiveRevision: raw.objectiveRevision,
+    verifiedAt: raw.verifiedAt,
+  }
+}
+
+/** RFC-03 C4 — decode a persisted criterion into the domain manual/checked union.
+ *  A record with `kind:"checked"` + a check ⇒ checked (check id preserved verbatim
+ *  so a verifier receipt keeps binding); anything else ⇒ manual (legacy migration).
+ *  Completion evidence is carried only when it matches the arm. */
+const toCriterion = (c: PersistedObjectiveCriterion): SuccessCriterion => {
+  // A checked criterion needs a well-formed, id-bearing check; a malformed/absent
+  // one downgrades to manual (fail-safe) rather than crashing the restore. In
+  // production the persisted check is zod-validated, but `restoreFrom` is a public
+  // seam so this mirrors the store's defensive `rebuildCheck`.
+  const decl =
+    c.kind === "checked" && c.check !== undefined ? normalizeCheckDeclaration(c.check) : null
+  const checkId =
+    c.check !== undefined && typeof c.check.id === "string" && c.check.id.length > 0
+      ? c.check.id
+      : null
+  if (decl !== null && checkId !== null) {
+    const completion =
+      c.completion !== undefined && c.completion.source === "verifier"
+        ? toCompletion(c.completion)
+        : undefined
+    return {
+      kind: "checked",
+      id: c.id,
+      text: c.text,
+      met: c.met,
+      check: {
+        id: checkId,
+        kind: "command",
+        argv: [...decl.argv],
+        cwdPolicy: "thread",
+        timeoutMs: decl.timeoutMs,
+        successExitCodes: [...decl.successExitCodes],
+      },
+      ...(completion !== undefined && completion.source === "verifier" ? { completion } : {}),
+    }
+  }
+  const completion =
+    c.completion !== undefined && c.completion.source === "manual"
+      ? toCompletion(c.completion)
+      : undefined
+  return {
+    kind: "manual",
+    id: c.id,
+    text: c.text,
+    met: c.met,
+    ...(completion !== undefined && completion.source === "manual" ? { completion } : {}),
+  }
+}
 
 const toBlocker = (b: PersistedObjectiveBlocker): Blocker => ({
   id: b.id,

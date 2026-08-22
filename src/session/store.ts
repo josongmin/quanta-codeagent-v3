@@ -249,10 +249,42 @@ const sessionMetaSchema = z.object({
 // fidelity bug — same discipline as `messageSchema`). `version` is a literal, so
 // an UNKNOWN objective-snapshot version fail-closes the WHOLE session load (never
 // partially applied) — the fail-closed migration contract of RFC-03 C2.
+// RFC-03 C4 — the persisted immutable check spec + completion evidence. zod
+// strips unknown keys, so these MUST be modeled here or provenance would be
+// silently LOST on reopen (the exact resume-fidelity bug this packet closes).
+// The fields are OPTIONAL/ADDITIVE: a legacy criterion (no `kind`) validates and
+// decodes as manual-with-no-provenance (schema migration; version does NOT bump).
+const persistedObjectiveCheckSpecSchema = z.object({
+  id: z.string().min(1),
+  kind: z.literal("command"),
+  argv: z.array(z.string()),
+  cwdPolicy: z.literal("thread"),
+  timeoutMs: z.number().finite(),
+  successExitCodes: z.array(z.number().finite()),
+})
+const persistedObjectiveCompletionSchema = z.discriminatedUnion("source", [
+  z.object({
+    source: z.literal("manual"),
+    actor: z.string().min(1),
+    objectiveRevision: z.number().finite(),
+    verifiedAt: z.number().finite(),
+  }),
+  z.object({
+    source: z.literal("verifier"),
+    checkId: z.string().min(1),
+    objectiveRevision: z.number().finite(),
+    sourceDigest: z.string().min(1),
+    verifierResult: z.object({ exitCode: z.number().finite(), passed: z.boolean() }),
+    verifiedAt: z.number().finite(),
+  }),
+])
 const persistedObjectiveCriterionSchema = z.object({
   id: z.string(),
   text: z.string(),
   met: z.boolean(),
+  kind: z.enum(["manual", "checked"]).optional(),
+  check: persistedObjectiveCheckSpecSchema.optional(),
+  completion: persistedObjectiveCompletionSchema.optional(),
 })
 const persistedObjectiveBlockerSchema = z.object({
   id: z.string(),

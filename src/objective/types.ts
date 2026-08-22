@@ -17,6 +17,13 @@
  * exactOptional: optional fields are OMITTED when absent (never `: undefined`).
  */
 
+import type {
+  CheckSpec,
+  CriterionDeclaration,
+  ManualCompletionReceipt,
+  VerifierCompletionReceipt,
+} from "./criteria/model"
+
 /** Lifecycle of an objective. `completed` may be auto-derived (see port doc).
  *
  * H17 (Codex `core/src/goals.rs`) makes this the SIX-state goal machine:
@@ -51,12 +58,39 @@ export type ObjectiveStatus =
 /** What a blocker is waiting on. Closed enum — drives later HITL/resume logic. */
 export type WaitingOn = "user" | "tool" | "network" | "child_agent"
 
-/** A single, individually-checkable definition of "done". */
-export interface SuccessCriterion {
+/**
+ * A single, individually-checkable definition of "done" (RFC-03 C4).
+ *
+ * The criterion separates DECLARATION from EVIDENCE and comes in two families:
+ *   - `manual`  — completed by an explicit actor attestation (advisory). May be
+ *     self-marked by the model; carries a {@link ManualCompletionReceipt} when met.
+ *   - `checked` — declares an IMMUTABLE {@link CheckSpec}; may be completed ONLY
+ *     by a verifier receipt ({@link VerifierCompletionReceipt}), NEVER by a model
+ *     `markCriterion`. Verifier-only INDEPENDENT of the propose gate.
+ *
+ * `id` / `text` / `met` are shared by both arms (every existing reader keeps
+ * working). `kind` is the discriminant; a `checked` criterion additionally
+ * carries its `check`. `completion` (present only when `met`) is the evidence
+ * receipt whose variant matches the arm.
+ */
+export interface ManualCriterion {
+  readonly kind: "manual"
   readonly id: string
   readonly text: string
   readonly met: boolean
+  readonly completion?: ManualCompletionReceipt | undefined
 }
+
+export interface CheckedCriterion {
+  readonly kind: "checked"
+  readonly id: string
+  readonly text: string
+  readonly met: boolean
+  readonly check: CheckSpec
+  readonly completion?: VerifierCompletionReceipt | undefined
+}
+
+export type SuccessCriterion = ManualCriterion | CheckedCriterion
 
 /** Something preventing forward progress. `since` is an epoch-ms stamp. */
 export interface Blocker {
@@ -115,6 +149,10 @@ export interface ObjectivePort {
     init: {
       goal: string
       successCriteria?: readonly string[]
+      /** RFC-03 C4 — rich criterion declarations (manual or checked). When
+       *  present it is the criterion source; `successCriteria` (string-only) is
+       *  the back-compat path. Both may be supplied (concatenated). */
+      criteria?: readonly CriterionDeclaration[]
       budget?: { maxTokens?: number; maxTurns?: number }
     },
   ): Objective

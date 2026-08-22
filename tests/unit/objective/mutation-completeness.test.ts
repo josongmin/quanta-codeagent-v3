@@ -133,6 +133,53 @@ describe("C1 — every operation routes through the authority with a live effect
       )
       expect(a.get("t")?.successCriteria[0]?.met).toBe(true)
     },
+    markCriterionVerified: (a) => {
+      // Replace with a CHECKED criterion, then complete it via a verifier receipt
+      // (RFC-03 C4). Deleting this handler removes the only path to complete a
+      // checked criterion ⇒ this assertion goes RED.
+      a.commit(
+        a.prepare({
+          threadId: "t",
+          actor: "system",
+          mutation: {
+            kind: "set",
+            goal: "checked",
+            criteria: [
+              {
+                text: "tests pass",
+                check: { kind: "command", argv: ["x"], timeoutMs: 1, successExitCodes: [0] },
+              },
+            ],
+          },
+        }),
+        { admitted: true },
+      )
+      const c = a.get("t")?.successCriteria[0]
+      const cid = c?.id ?? ""
+      const checkId = c?.kind === "checked" ? c.check.id : ""
+      const rev = a.readDomain("t").revision
+      const res = a.commit(
+        a.prepare({
+          threadId: "t",
+          actor: "verifier",
+          mutation: {
+            kind: "markCriterionVerified",
+            criterionId: cid,
+            receipt: {
+              source: "verifier",
+              checkId,
+              objectiveRevision: rev,
+              sourceDigest: "sha256:d",
+              verifierResult: { exitCode: 0, passed: true },
+              verifiedAt: 1,
+            },
+          },
+        }),
+        { admitted: true },
+      )
+      expect(res.ok).toBe(true)
+      expect(a.get("t")?.successCriteria[0]?.met).toBe(true)
+    },
     recordUsage: (a) => {
       a.commit(
         a.prepare({ threadId: "t", actor: "system", mutation: { kind: "recordUsage", tokens: 7 } }),
