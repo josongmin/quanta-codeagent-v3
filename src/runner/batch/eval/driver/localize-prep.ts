@@ -17,12 +17,20 @@ import {
   extractIssueHint,
 } from "@/agent"
 import type { ObservationBundle } from "@/agent/observation/fragment"
+import {
+  extractFailureFacts,
+  type FailureFactsExtraction,
+  type FailureFactsIdentity,
+  type LiveFailureObservation,
+  type MetricEvent,
+} from "@/agent/observation/metrics"
 import { DEFAULT_SOURCE_AUTHORITY, gatherObservations } from "@/agent/observation/pipeline"
 import { lspEnrichProvider } from "@/agent/observation/providers/lsp-enrich/provider"
 import { agentlessProvider } from "@/agent/observation/render/agentless-provider"
 import { renderObservations, renderObservationsLegacy } from "@/agent/observation/render/render"
 import { decideEscalation, type EscalationDecision } from "@/agent/repair-escalation"
 import type { LLMPort } from "@/llm"
+import type { FailureTaxonomyFactsV1 } from "@/observability/failure-taxonomy"
 import type { LocalizeBudgetValue } from "@/runner/knobs/knobs/localize-budget"
 import { logger, normalizePublicIssueText } from "@/shared"
 import { localizeTool } from "@/tool/localize"
@@ -106,6 +114,69 @@ export interface PrepareIssueHintDeps {
     readonly truncatedChars?: number
     readonly rankedCandidateCount: number
   }) => void
+  /** RFC-07 G3 — bundle-live failure-facts seam (optional, no-op by default, same
+   *  gate class as `onObservationBundle`). Present ⇒ the live-seam adapter derives
+   *  a versioned `FailureTaxonomyFactsV1` from THIS attempt's live bundle and
+   *  routes it to the caller. Pure observation: does NOT affect the returned hint
+   *  and does NOT persist (G4 owns the canonical per-attempt result). */
+  readonly failureFacts?: FailureFactsWiring
+}
+
+/** The explicit `unavailable` arm of {@link FailureFactsExtraction} the seam
+ *  surfaces (incomplete/mismatched identity) — never a best-effort partial. */
+export type FailureFactsUnavailable = Extract<FailureFactsExtraction, { kind: "unavailable" }>
+
+/**
+ * Bundle-live failure-facts WIRING. Carries the EXACT identity binding (never
+ * inferred) plus the sinks the live-seam adapter routes to. `expected` is the
+ * caller's attempt identity + source digest (bound at attempt start via
+ * `computeFailureSourceDigest`); `capturedUnder` is the run/attempt the
+ * observation was actually recorded under. `events` is the OPTIONAL in-memory
+ * trajectory slice for the count facts — ABSENT at the pre-agent localize seam
+ * (counts unavailable), supplied by an authoritative producer later (G6); NEVER
+ * re-read from disk (§G3 stop rule).
+ */
+export interface FailureFactsWiring {
+  readonly expected: FailureFactsIdentity
+  readonly capturedUnder: LiveFailureObservation["capturedUnder"]
+  readonly events?: readonly MetricEvent[] | undefined
+  /** Sink for a successfully-extracted, identity-matched fact record. */
+  readonly onFacts: (facts: FailureTaxonomyFactsV1) => void
+  /** Sink for an explicit unavailable outcome. NOT a fallback — the caller
+   *  decides what to do (G4 persists it). */
+  readonly onUnavailable: (outcome: FailureFactsUnavailable) => void
+}
+
+/**
+ * Bundle-live failure-facts ADAPTER: derive facts from ONE live observation and
+ * route them to the wiring's sinks. This is the ONLY runtime CALL of the G3
+ * extractor at the live seam — deleting the `extractFailureFacts(...)` call below
+ * makes the live-seam integration RED (a bare import is insufficient). It reads
+ * only the in-memory bundle + event slice (§G3: no offline trajectory read, no
+ * bundle-field reconstruction) and never persists.
+ */
+export const deriveLiveFailureFacts = (
+  bundle: ObservationBundle,
+  wiring: FailureFactsWiring,
+): void => {
+  const observation: LiveFailureObservation = {
+    bundle,
+    capturedUnder: wiring.capturedUnder,
+    ...(wiring.events !== undefined ? { events: wiring.events } : {}),
+  }
+  const extraction = extractFailureFacts(observation, wiring.expected)
+  if (extraction.kind === "extracted") wiring.onFacts(extraction.facts)
+  else wiring.onUnavailable(extraction)
+}
+
+/** Seam guard: run the bundle-live failure-facts adapter only when a wiring is
+ *  present. Kept as its OWN unit so the (default-OFF) branch lives here rather
+ *  than inflating `prepareIssueHint`; an absent wiring is a byte-identical no-op. */
+const emitLiveFailureFacts = (
+  bundle: ObservationBundle,
+  wiring: FailureFactsWiring | undefined,
+): void => {
+  if (wiring !== undefined) deriveLiveFailureFacts(bundle, wiring)
 }
 
 const DEFAULT_PREPARE_TIMEOUT_MS = 30_000
@@ -458,6 +529,9 @@ export const prepareIssueHint = async (
     lspHarvested: bundle.contributors.includes("lsp-prefetch"),
   })
   deps.onObservationBundle?.(bundle)
+  // RFC-07 G3 — derive versioned failure-facts from the SAME live bundle. No-op
+  // when unwired (byte-identical); observe-only, never persisted here.
+  emitLiveFailureFacts(bundle, deps.failureFacts)
   return deps.renderObservations === false
     ? renderObservationsLegacy(bundle)
     : renderObservations(bundle)

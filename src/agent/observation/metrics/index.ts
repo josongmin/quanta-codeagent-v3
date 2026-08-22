@@ -17,6 +17,17 @@ export {
   VERIFY_TOOLS,
 } from "./event"
 export {
+  adaptFailureCountEvents,
+  computeFailureSourceDigest,
+  extractFailureFacts,
+  FAILURE_FACTS_UNAVAILABLE_REASONS,
+  type FailureFactsExtraction,
+  type FailureFactsIdentity,
+  type FailureFactsMismatch,
+  type FailureFactsUnavailableReason,
+  type LiveFailureObservation,
+} from "./failure-facts"
+export {
   classifyFailure,
   type FailureLabel,
   type TaxonomyOptions,

@@ -140,10 +140,15 @@ export {
 // Pre-agent localization + repair-escalation prep — extracted to
 // `./driver/localize-prep.ts` (pure code motion). These were public on driver;
 // re-export verbatim so importers are unaffected.
-export type { PrepareIssueHintDeps } from "./driver/localize-prep"
+export type {
+  FailureFactsUnavailable,
+  FailureFactsWiring,
+  PrepareIssueHintDeps,
+} from "./driver/localize-prep"
 export {
   adaptiveNextPassOwners,
   adaptiveRepairEscalationOwners,
+  deriveLiveFailureFacts,
   maybeRunRepairEscalationFollowup,
   parseLocalizeRankedLines,
   prepareIssueHint,
