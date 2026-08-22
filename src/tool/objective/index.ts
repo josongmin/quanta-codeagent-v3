@@ -26,7 +26,16 @@
  *  Nothing from `@/agent` core. */
 
 import { z } from "zod"
-import type { Objective, ObjectivePort, ObjectiveStatus, WaitingOn } from "@/objective"
+import {
+  asObjectiveAuthority,
+  type CommitResult,
+  type Objective,
+  type ObjectiveAuthority,
+  type ObjectiveMutation,
+  type ObjectivePort,
+  type ObjectiveStatus,
+  type WaitingOn,
+} from "@/objective"
 import { errMessage } from "@/shared"
 import type { Tool, ToolContext, ToolEvent, ToolResult } from "../types"
 
@@ -200,10 +209,65 @@ const okResult = (o: Objective): ToolResult => ({
 const errResult = (msg: string): ToolResult => ({ ok: false, output: msg })
 
 // ─────────────────────────────────────────────────────────────────────────────
+// AUTHORITY ROUTING (RFC-03 C1)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Resolve the SESSION-BOUND objective thread id. RFC-03 §8: thread identity must
+ * come from the caller/session, NEVER model input. The dispatch seam stamps
+ * `ctx.ownerId` from `AgentConfig.sessionId` — the same id the objective is bound
+ * to elsewhere (`/goal`, the continuation ticker). The model's `thread_id`
+ * argument is accepted for schema compatibility but is NOT the identity source;
+ * a missing session binding fails CLOSED rather than trusting the model.
+ */
+const boundThreadId = (ctx: ToolContext): string | null => {
+  const id = ctx.ownerId
+  return typeof id === "string" && id.length > 0 ? id : null
+}
+
+const NO_SESSION_THREAD =
+  "objective tools require a session-bound thread (no ctx.ownerId); refusing model-supplied identity"
+
+/** Map a non-`ok` commit to a model-facing message (heuristic-free, one per
+ *  closed rejection reason). */
+const commitError = (res: Extract<CommitResult, { ok: false }>): string => {
+  switch (res.reason) {
+    case "stale":
+      return "objective changed since read (stale revision) — re-read and retry"
+    case "approval-required":
+      return "objective mutation requires approval (denied or not yet granted)"
+    case "approval-unavailable":
+      return "objective mutation requires approval but no confirmation surface is available"
+    case "forbidden-completion":
+      return "a criterion cannot be self-completed by the model; only a verifier may mark it met"
+    case "invalid":
+      return "objective mutation could not be applied (no objective set for this thread)"
+  }
+}
+
+/** Prepare + commit ONE model-actor mutation through the authority, returning the
+ *  resulting objective or a typed error. Approval is C3's concern: under the
+ *  gate-OFF default the authority commits without approval (byte-identical); the
+ *  admitted flag is inert there and never bypasses a live gate. */
+const routeModelMutation = (
+  authority: ObjectiveAuthority,
+  threadId: string,
+  mutation: ObjectiveMutation,
+): ToolResult => {
+  const prepared = authority.prepare({ threadId, actor: "model", mutation })
+  const res = authority.commit(prepared, { admitted: !prepared.approvalRequired })
+  if (!res.ok) return errResult(commitError(res))
+  const o = res.snapshot.state?.objective
+  return o !== undefined && o !== null
+    ? okResult(o)
+    : errResult("objective mutation applied but not readable")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // TOOLS
 // ─────────────────────────────────────────────────────────────────────────────
 
-const buildObjectiveSet = (port: ObjectivePort): Tool<ObjectiveSetInput> => ({
+const buildObjectiveSet = (authority: ObjectiveAuthority): Tool<ObjectiveSetInput> => ({
   name: "objective_set",
   description:
     "Set or replace the per-thread Objective: goal (1-2 sentences), optional " +
@@ -214,64 +278,58 @@ const buildObjectiveSet = (port: ObjectivePort): Tool<ObjectiveSetInput> => ({
   isReadOnly: () => false,
   isConcurrencySafe: () => false,
   hitlTier: () => "pre-approval-ok",
-  async *execute(input, _ctx: ToolContext): AsyncIterable<ToolEvent> {
+  async *execute(input, ctx: ToolContext): AsyncIterable<ToolEvent> {
     const parsed = objectiveSetSchema.safeParse(input)
     if (!parsed.success) {
       yield { type: "result", result: errResult(`invalid input: ${parsed.error.message}`) }
       return
     }
+    const threadId = boundThreadId(ctx)
+    if (threadId === null) {
+      yield { type: "result", result: errResult(NO_SESSION_THREAD) }
+      return
+    }
     try {
-      const initBudget: { maxTokens?: number; maxTurns?: number } = {}
-      if (parsed.data.budget?.max_tokens !== undefined) {
-        initBudget.maxTokens = parsed.data.budget.max_tokens
-      }
-      if (parsed.data.budget?.max_turns !== undefined) {
-        initBudget.maxTurns = parsed.data.budget.max_turns
-      }
-      const init: {
-        goal: string
-        successCriteria?: readonly string[]
-        budget?: { maxTokens?: number; maxTurns?: number }
-      } = { goal: parsed.data.goal }
+      const mutation: ObjectiveMutation = { kind: "set", goal: parsed.data.goal }
       if (parsed.data.success_criteria !== undefined) {
-        init.successCriteria = parsed.data.success_criteria
+        mutation.successCriteria = parsed.data.success_criteria
       }
-      if (Object.keys(initBudget).length > 0) init.budget = initBudget
-      const o = port.set(parsed.data.thread_id, init)
-      yield { type: "result", result: okResult(o) }
+      const budget: { maxTokens?: number; maxTurns?: number } = {}
+      if (parsed.data.budget?.max_tokens !== undefined)
+        budget.maxTokens = parsed.data.budget.max_tokens
+      if (parsed.data.budget?.max_turns !== undefined)
+        budget.maxTurns = parsed.data.budget.max_turns
+      if (Object.keys(budget).length > 0) mutation.budget = budget
+      yield { type: "result", result: routeModelMutation(authority, threadId, mutation) }
     } catch (e) {
-      const msg = errMessage(e)
-      yield { type: "result", result: errResult(`objective_set error: ${msg}`) }
+      yield { type: "result", result: errResult(`objective_set error: ${errMessage(e)}`) }
     }
   },
 })
 
-const applyUpdate = (
-  port: ObjectivePort,
-  threadId: string,
-  op: ObjectiveUpdateInput["op"],
-): Objective | null => {
+/** Translate a validated `objective_update` op into the authority mutation. */
+const opToMutation = (op: ObjectiveUpdateInput["op"]): ObjectiveMutation => {
   switch (op.kind) {
     case "status":
-      return port.updateStatus(threadId, op.status)
+      return { kind: "updateStatus", status: op.status }
     case "addBlocker":
-      return port.addBlocker(threadId, { reason: op.reason, waitingOn: op.waiting_on })
+      return { kind: "addBlocker", reason: op.reason, waitingOn: op.waiting_on }
     case "clearBlocker":
-      return port.clearBlocker(threadId, op.blocker_id)
+      return { kind: "clearBlocker", blockerId: op.blocker_id }
     case "nextActions":
-      return port.setNextActions(threadId, op.actions)
+      return { kind: "setNextActions", actions: op.actions }
     case "markCriterion":
-      return port.markCriterion(threadId, op.criterion_id, op.met)
+      return { kind: "markCriterion", criterionId: op.criterion_id, met: op.met }
     case "recordUsage": {
-      const used: { tokens?: number; turns?: number } = {}
-      if (op.tokens !== undefined) used.tokens = op.tokens
-      if (op.turns !== undefined) used.turns = op.turns
-      return port.recordUsage(threadId, used)
+      const m: ObjectiveMutation = { kind: "recordUsage" }
+      if (op.tokens !== undefined) m.tokens = op.tokens
+      if (op.turns !== undefined) m.turns = op.turns
+      return m
     }
   }
 }
 
-const buildObjectiveUpdate = (port: ObjectivePort): Tool<ObjectiveUpdateInput> => ({
+const buildObjectiveUpdate = (authority: ObjectiveAuthority): Tool<ObjectiveUpdateInput> => ({
   name: "objective_update",
   description:
     "Partially mutate the per-thread Objective. `op.kind` selects: " +
@@ -284,30 +342,29 @@ const buildObjectiveUpdate = (port: ObjectivePort): Tool<ObjectiveUpdateInput> =
   isReadOnly: () => false,
   isConcurrencySafe: () => false,
   hitlTier: () => "pre-approval-ok",
-  async *execute(input, _ctx: ToolContext): AsyncIterable<ToolEvent> {
+  async *execute(input, ctx: ToolContext): AsyncIterable<ToolEvent> {
     const parsed = objectiveUpdateSchema.safeParse(input)
     if (!parsed.success) {
       yield { type: "result", result: errResult(`invalid input: ${parsed.error.message}`) }
       return
     }
+    const threadId = boundThreadId(ctx)
+    if (threadId === null) {
+      yield { type: "result", result: errResult(NO_SESSION_THREAD) }
+      return
+    }
     try {
-      const result = applyUpdate(port, parsed.data.thread_id, parsed.data.op)
-      if (result === null) {
-        yield {
-          type: "result",
-          result: errResult(`no objective set for thread ${parsed.data.thread_id}`),
-        }
-        return
+      yield {
+        type: "result",
+        result: routeModelMutation(authority, threadId, opToMutation(parsed.data.op)),
       }
-      yield { type: "result", result: okResult(result) }
     } catch (e) {
-      const msg = errMessage(e)
-      yield { type: "result", result: errResult(`objective_update error: ${msg}`) }
+      yield { type: "result", result: errResult(`objective_update error: ${errMessage(e)}`) }
     }
   },
 })
 
-const buildObjectiveGet = (port: ObjectivePort): Tool<ObjectiveGetInput> => ({
+const buildObjectiveGet = (authority: ObjectiveAuthority): Tool<ObjectiveGetInput> => ({
   name: "objective_get",
   description:
     "Read the current per-thread Objective. Returns goal/status/blockers/" +
@@ -317,34 +374,39 @@ const buildObjectiveGet = (port: ObjectivePort): Tool<ObjectiveGetInput> => ({
   isReadOnly: () => true,
   isConcurrencySafe: () => true,
   hitlTier: () => "pre-approval-ok",
-  async *execute(input, _ctx: ToolContext): AsyncIterable<ToolEvent> {
+  async *execute(input, ctx: ToolContext): AsyncIterable<ToolEvent> {
     const parsed = objectiveGetSchema.safeParse(input)
     if (!parsed.success) {
       yield { type: "result", result: errResult(`invalid input: ${parsed.error.message}`) }
       return
     }
+    const threadId = boundThreadId(ctx)
+    if (threadId === null) {
+      yield { type: "result", result: errResult(NO_SESSION_THREAD) }
+      return
+    }
     try {
-      const o = port.get(parsed.data.thread_id)
+      const o = authority.get(threadId)
       if (o === null) {
-        yield {
-          type: "result",
-          result: errResult(`no objective set for thread ${parsed.data.thread_id}`),
-        }
+        yield { type: "result", result: errResult(`no objective set for thread ${threadId}`) }
         return
       }
       yield { type: "result", result: okResult(o) }
     } catch (e) {
-      const msg = errMessage(e)
-      yield { type: "result", result: errResult(`objective_get error: ${msg}`) }
+      yield { type: "result", result: errResult(`objective_get error: ${errMessage(e)}`) }
     }
   },
 })
 
-/** Build the 3 objective tools wired to a single `ObjectivePort`. Returned as
- *  a stable array so the tier-1 composer can spread it uniformly (mirrors
- *  `delegateTools` / `subagentBgTools` shape). */
-export const objectiveTools = (port: ObjectivePort): Tool[] => [
-  buildObjectiveSet(port) as Tool,
-  buildObjectiveUpdate(port) as Tool,
-  buildObjectiveGet(port) as Tool,
-]
+/** Build the 3 objective tools routed through the revisioned mutation AUTHORITY
+ *  (RFC-03 C1). `port` may be the authority itself (production) or a bare
+ *  `ObjectivePort` double (tests); `asObjectiveAuthority` recovers the protocol.
+ *  Model-originated mutations carry `actor:"model"` + a SESSION-bound thread id. */
+export const objectiveTools = (port: ObjectivePort): Tool[] => {
+  const authority = asObjectiveAuthority(port)
+  return [
+    buildObjectiveSet(authority) as Tool,
+    buildObjectiveUpdate(authority) as Tool,
+    buildObjectiveGet(authority) as Tool,
+  ]
+}

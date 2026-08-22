@@ -21,6 +21,7 @@
 
 import { randomUUID } from "node:crypto"
 import { logger } from "@/shared"
+import type { ExplicitStatus, ObjectiveThreadSnapshot } from "./model"
 import type {
   Blocker,
   Objective,
@@ -31,6 +32,21 @@ import type {
   SuccessCriterion,
   WaitingOn,
 } from "./types"
+
+/**
+ * RFC-03 C1 — the store's per-thread snapshot/restore surface, consumed by the
+ * mutation authority (`./authority`) for EXACT undo. Extends `ObjectivePort`
+ * with two per-thread methods the whole-store `to/fromSnapshot` codec cannot
+ * express (they operate on ALL threads). `snapshotThread` captures the full
+ * serializable state of one thread; `restoreThread` writes it back verbatim.
+ */
+export interface ObjectiveCore extends ObjectivePort {
+  /** Full serializable state of one thread's objective, or `null` if unset. */
+  snapshotThread(threadId: string): ObjectiveThreadSnapshot | null
+  /** Restore one thread's objective from a snapshot; `true` iff it applied. When
+   *  `state` was captured as absent the thread is DELETED (exact undo of a set). */
+  restoreThread(threadId: string, state: ObjectiveThreadSnapshot | null): boolean
+}
 
 /** Internal mutable cell. `explicitStatus` is the caller's last non-derived
  *  intent ("active" | "completed"); the public status is always DERIVED. */
@@ -229,7 +245,11 @@ const cellFromInit = (
   }
 }
 
-export const createObjectiveStore = (opts?: {
+/** RFC-03 C1 — the raw in-memory objective CORE. Renamed from the historical
+ *  `createObjectiveStore`; the public `createObjectiveStore` now lives in
+ *  `./authority` and wraps this core so every mutation is revisioned + CAS-gated
+ *  (there is no un-revisioned store constructor in production). */
+export const createObjectiveCoreStore = (opts?: {
   now?: () => number
   /** H17 — when true the public `status` derives `"budget_limited"` once a
    *  configured cap is reached (see `deriveStatus`/`budgetExhausted`). Default
@@ -237,7 +257,7 @@ export const createObjectiveStore = (opts?: {
    *  to ADR-0394 (this flag is the SSOT for whether the store enforces; the
    *  host wires it from `QUANTA_OBJECTIVE_BUDGET_ENFORCE`). */
   enforceBudget?: boolean
-}): ObjectivePort => {
+}): ObjectiveCore => {
   const now = opts?.now ?? Date.now
   const enforce = opts?.enforceBudget === true
   const cells = new Map<string, Cell>()
@@ -411,6 +431,86 @@ export const createObjectiveStore = (opts?: {
         // leave whatever survived; never throw
       }
     },
+
+    // RFC-03 C1 — per-thread exact snapshot/restore for the authority's undo.
+    snapshotThread(threadId): ObjectiveThreadSnapshot | null {
+      try {
+        if (!isNonEmptyString(threadId)) return null
+        const cell = cells.get(threadId)
+        if (cell === undefined) return null
+        return Object.freeze({
+          objective: toObjective(cell, enforce, clockNow()),
+          explicitStatus: cell.explicitStatus,
+          ...(cell.usageLimitedUntil !== undefined
+            ? { usageLimitedUntil: cell.usageLimitedUntil }
+            : {}),
+        })
+      } catch {
+        return null
+      }
+    },
+
+    restoreThread(threadId, state): boolean {
+      try {
+        if (!isNonEmptyString(threadId)) return false
+        // A null prior state means the objective did not exist at snapshot time:
+        // exact undo of a `set` is DELETION of the thread's objective.
+        if (state === null) return cells.delete(threadId)
+        const cell = cellFromThreadSnapshot(threadId, state)
+        if (cell === null) return false
+        cells.set(threadId, cell)
+        return true
+      } catch {
+        return false
+      }
+    },
+  }
+}
+
+/** Reconstruct a mutable cell from a captured per-thread snapshot. Exact:
+ *  criterion ids/met, blocker ids/since, next actions, explicit intent, usage
+ *  window, budget and timestamps all round-trip verbatim (used by the
+ *  authority's `restore`, so an undo never re-mints ids or drops `met`). */
+const cellFromThreadSnapshot = (threadId: string, state: ObjectiveThreadSnapshot): Cell | null => {
+  const o = state.objective
+  if (o === null || typeof o !== "object") return null
+  const explicit: ExplicitStatus =
+    state.explicitStatus === "completed"
+      ? "completed"
+      : state.explicitStatus === "paused"
+        ? "paused"
+        : "active"
+  const maxTokens = finiteNonNegInt(o.budget?.maxTokens)
+  const maxTurns = finiteNonNegInt(o.budget?.maxTurns)
+  return {
+    threadId,
+    goal: typeof o.goal === "string" ? o.goal : "",
+    criteria: (Array.isArray(o.successCriteria) ? o.successCriteria : []).map((c) => ({
+      id: isNonEmptyString(c.id) ? c.id : randomUUID(),
+      text: typeof c.text === "string" ? c.text : "",
+      met: c.met === true,
+    })),
+    blockers: (Array.isArray(o.blockers) ? o.blockers : []).map((b) => ({
+      id: isNonEmptyString(b.id) ? b.id : randomUUID(),
+      reason: typeof b.reason === "string" ? b.reason : "",
+      waitingOn: b.waitingOn,
+      since: finiteOrZero(b.since),
+    })),
+    nextActions: Array.isArray(o.nextActions)
+      ? o.nextActions.filter((a): a is string => typeof a === "string")
+      : [],
+    explicitStatus: explicit,
+    ...(state.usageLimitedUntil !== undefined &&
+    Number.isFinite(state.usageLimitedUntil) &&
+    state.usageLimitedUntil > 0
+      ? { usageLimitedUntil: state.usageLimitedUntil }
+      : {}),
+    ...(maxTokens !== undefined ? { maxTokens } : {}),
+    tokensUsed: finiteNonNegInt(o.budget?.tokensUsed) ?? 0,
+    ...(maxTurns !== undefined ? { maxTurns } : {}),
+    turnsUsed: finiteNonNegInt(o.budget?.turnsUsed) ?? 0,
+    createdAt: finiteOrZero(o.createdAt),
+    updatedAt: finiteOrZero(o.updatedAt),
   }
 }
 

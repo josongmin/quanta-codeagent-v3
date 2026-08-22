@@ -119,6 +119,12 @@ const makeContinuationDeps = (args: {
       cfg({
         llm: args.llm,
         stream: new RecordingStream(),
+        // RFC-03 C1: the objective tools bind their thread from the SESSION id
+        // (ctx.ownerId ← AgentConfig.sessionId), never the model's `thread_id`
+        // argument. In production sessionId IS the objective thread; mirror that
+        // here so the scripted `objective_update` targets the same TID the ticker
+        // reads (the continuation prod wire uses the session id identically).
+        sessionId: tid,
         // REAL registration seam: the registry starts as JUST `defaultTools`, and
         // the `objective` port below is what drives the `objective_*` trio into it
         // — through the SAME production path a live session uses. `runAgent` →

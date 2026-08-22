@@ -25,7 +25,7 @@
  */
 
 import { afterAll, beforeEach, describe, expect, test } from "bun:test"
-import { createObjectiveStore } from "@/objective/store"
+import { createObjectiveStore } from "@/objective"
 import { __resetLoggerRateLimit, __resetRuntimeConfig, setTerminalIo } from "@/shared"
 
 let captured: string[] = []

@@ -12,6 +12,12 @@
  * directly (the closed ADR-0394 substrate is its own slice — separate from the
  * agent core). This builder is the composition root that threads the host-
  * supplied `ObjectivePort` into the tool factory at session-start.
+ *
+ * RFC-03 C1: in production `config.objective` IS the revisioned mutation
+ * authority (`createObjectiveStore` now returns it), so the tool factory's
+ * `asObjectiveAuthority` recovers the SAME instance — model-originated tool
+ * mutations and internal system mutations share one revision/CAS domain. This
+ * builder stays a thin adapter; it does not construct or unwrap the authority.
  */
 
 import type { Tool } from "@/tool"

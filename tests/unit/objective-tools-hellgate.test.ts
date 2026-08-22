@@ -47,9 +47,14 @@ const baseCfg = (over: Partial<AgentConfig> = {}): AgentConfig =>
     ...over,
   }) as AgentConfig
 
-const ctx = (signal: AbortSignal = new AbortController().signal): ToolContext => ({
+// RFC-03 C1: the objective tools bind their thread identity from the SESSION
+// (`ctx.ownerId`, stamped from AgentConfig.sessionId), NEVER from the model's
+// `thread_id` argument. Tests therefore supply the bound owner id here; the
+// default matches the "t" thread most cases seed/read.
+const ctx = (ownerId = "t", signal: AbortSignal = new AbortController().signal): ToolContext => ({
   cwd: "/tmp",
   signal,
+  ownerId,
 })
 
 /** Drive a tool to its terminal `result` event and return `{ok, output}`. */
@@ -114,9 +119,9 @@ describe("objective tools — wire hellgate (ADR-0402)", () => {
     const tools = buildObjectiveBlock(baseCfg({ objective: port }))
     const setTool = findTool(tools, "objective_set")
     const getTool = findTool(tools, "objective_get")
-    const setOut = await drain(setTool, { thread_id: "t1", goal: "ship it" })
+    const setOut = await drain(setTool, { thread_id: "t1", goal: "ship it" }, ctx("t1"))
     expect(setOut.ok).toBe(true)
-    const getOut = await drain(getTool, { thread_id: "t1" })
+    const getOut = await drain(getTool, { thread_id: "t1" }, ctx("t1"))
     expect(getOut.ok).toBe(true)
     expect(getOut.output).toContain("ship it")
   })
@@ -358,7 +363,7 @@ describe("objective tools — NO-THROW + output shape (ADR-0402)", () => {
   test("objective_get for unknown thread ⇒ ok:false 'no objective set for thread <id>'", async () => {
     const port = createObjectiveStore()
     const tools = objectiveTools(port)
-    const out = await drain(findTool(tools, "objective_get"), { thread_id: "missing" })
+    const out = await drain(findTool(tools, "objective_get"), { thread_id: "missing" }, ctx("missing"))
     expect(out.ok).toBe(false)
     expect(out.output).toContain("no objective set for thread missing")
   })
@@ -430,5 +435,35 @@ describe("objective tools — HITL tier (ADR-0402)", () => {
     expect(setT.isReadOnly()).toBe(false)
     const upd = findTool(tools, "objective_update")
     expect(upd.isReadOnly()).toBe(false)
+  })
+})
+
+// ─────────────────────────────────────────────────────────────────────────────
+// F. THREAD IDENTITY BINDING (RFC-03 §8 stop rule)
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("objective tools — thread identity is session-bound, never model input", () => {
+  test("the model's thread_id argument is IGNORED; ctx.ownerId is authoritative", async () => {
+    const port = createObjectiveStore()
+    const tools = objectiveTools(port)
+    // The model claims thread_id "attacker"; the session owner is "session-x".
+    const out = await drain(
+      findTool(tools, "objective_set"),
+      { thread_id: "attacker", goal: "ship it" },
+      ctx("session-x"),
+    )
+    expect(out.ok).toBe(true)
+    expect(port.get("session-x")?.goal).toBe("ship it") // bound to the session
+    expect(port.get("attacker")).toBeNull() // model-named thread never touched
+  })
+
+  test("fails CLOSED when no session-bound owner is present (no model fallback)", async () => {
+    const port = createObjectiveStore()
+    const tools = objectiveTools(port)
+    const bareCtx: ToolContext = { cwd: "/tmp", signal: new AbortController().signal }
+    const out = await drain(findTool(tools, "objective_set"), { thread_id: "t", goal: "g" }, bareCtx)
+    expect(out.ok).toBe(false)
+    expect(out.output.toLowerCase()).toContain("session-bound")
+    expect(port.get("t")).toBeNull() // nothing was written to the model-named thread
   })
 })

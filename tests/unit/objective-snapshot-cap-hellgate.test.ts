@@ -31,7 +31,7 @@
  */
 
 import { describe, expect, test } from "bun:test"
-import { createObjectiveStore } from "@/objective/store"
+import { createObjectiveStore } from "@/objective"
 
 const makeCriterion = (i: number) => ({ id: `c-${i}`, text: `criterion ${i}`, met: false })
 const makeBlocker = (i: number) => ({
