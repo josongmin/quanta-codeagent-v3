@@ -89,11 +89,13 @@ export {
 export {
   type CreateSystemPromptRebuilderArgs,
   createIdentityModeSessionState,
-  createPermissionModeSessionState,
   createSystemPromptRebuilder,
   createSystemSource,
   createToolProfileSessionState,
   type IdentityModeSessionState,
+  // RFC-05 E3 — the mode STATE-CELL factory is retired; this is now the
+  // delegating-adapter contract (re-exported from `session-state`, which
+  // re-exports it from the E3 posture builder).
   type PermissionModeSessionState,
   SYSTEM_PROMPT_REBUILD_FALLBACK_PREFIX,
   type SystemPromptRebuilderPort,

@@ -20,7 +20,11 @@ import { describe, expect, test } from "bun:test"
 import { readdirSync, readFileSync } from "node:fs"
 import { join } from "node:path"
 import type { PermissionContext } from "@/permission"
-import { createPermissionModeSessionState } from "@/runner/assemble"
+import {
+  buildPostureAuthority,
+  createPermissionModeAdapter,
+  createSeededPosturePersistence,
+} from "@/runner/assemble/session-authorities"
 
 const REPO_ROOT = join(import.meta.dir, "..", "..")
 const read = (path: string): string => readFileSync(join(REPO_ROOT, path), "utf8")
@@ -38,10 +42,23 @@ const readSessionLoopAggregate = (): string =>
     .map(read)
     .join("\n")
 
-describe("mode-cycle permission authority hellgate (ADR-0303)", () => {
-  test("engine cell backs permission.mode as a LIVE accessor (next-turn authority)", () => {
-    // Mirror exactly what bootstrap-session.ts constructs.
-    const state = createPermissionModeSessionState({ defaultMode: "default" })
+/** Drain the delegating adapter's fire-and-forget write chain (a real surface
+ *  writes mode before a turn; the durable publish lands across a macrotask). */
+const drain = async (): Promise<void> => {
+  await new Promise((resolve) => setTimeout(resolve, 0))
+  await new Promise((resolve) => setTimeout(resolve, 0))
+}
+
+describe("mode-cycle permission authority hellgate (ADR-0303 → RFC-05 E3)", () => {
+  test("the posture authority backs permission.mode as a LIVE accessor (next-turn authority)", async () => {
+    // Mirror exactly what bootstrap-session.ts constructs: the delegating adapter
+    // over the durable posture AUTHORITY (E3 retired the standalone mode cell).
+    const authority = buildPostureAuthority({
+      threadId: "session",
+      persistence: createSeededPosturePersistence("session", "default"),
+      reviewerAvailability: { hasAutoReview: false, hasGuardianReview: false },
+    })
+    const state = createPermissionModeAdapter(authority)
     const permission: PermissionContext = {
       get mode() {
         return state.get()
@@ -53,31 +70,42 @@ describe("mode-cycle permission authority hellgate (ADR-0303)", () => {
 
     expect(permission.mode).toBe("default")
 
-    // A mid-session shift+tab mutates the engine cell...
+    // A mid-session shift+tab delegates to the authority; the change is a durable
+    // posture mutation applied before the next turn reads it.
     state.set("acceptEdits")
-    // ...and every existing reader of `permission.mode` observes it live.
+    await drain()
+    // RED-ON-INJECTION: make the adapter `get` return a stale snapshot instead of
+    // the authority's live effectiveMode ⇒ this stays "default" ⇒ RED.
     expect(permission.mode).toBe("acceptEdits")
+    // The write flowed through the posture revision (not an out-of-band cell).
+    expect(authority.read().revision).toBeGreaterThan(0)
 
     // The per-turn base is produced by spreading `permission` into the turn
     // config (`...rest` in context-binding). A spread taken AFTER the mutation
     // must carry the NEW mode — this is the "applies on the next turn" property.
     state.set("bypass")
+    await drain()
     const perTurn = { ...permission }
     expect(perTurn.mode).toBe("bypass")
 
-    // Writing through the accessor also routes to the engine cell (so any code
-    // that assigns `permission.mode = x` stays authoritative).
+    // Writing through the accessor also delegates to the authority (so any code
+    // that assigns `permission.mode = x` stays authoritative, not a shadow cell).
     permission.mode = "default"
-    expect(state.get()).toBe("default")
+    await drain()
+    expect(authority.read().effective.effectiveMode).toBe("default")
   })
 
-  test("bootstrap builds permission as an accessor over the engine cell, not a static mirror", () => {
+  test("bootstrap builds permission as an accessor over the posture authority, not a static mirror", () => {
     const src = read("src/host/bootstrap/bootstrap-session.ts")
-    expect(src).toContain("createPermissionModeSessionState({ defaultMode: runtime.mode })")
+    // The mode is owned by the durable authority via the delegating adapter (the
+    // `buildLivePermissionModeState` seam) — NOT a standalone
+    // `createPermissionModeSessionState` state cell.
+    expect(src).toContain("buildLivePermissionModeState(runtime.mode)")
+    expect(src).not.toContain("createPermissionModeSessionState")
     // accessor-backed, not a frozen `{ mode: runtime.mode }` snapshot
     expect(src).toContain("get mode()")
     expect(src).toContain("set mode(next)")
-    // the cell is returned on the bootstrap result so the runtime can wire it
+    // the adapter is returned on the bootstrap result so the runtime can wire it
     expect(src).toMatch(/permission,\s*\n\s*permissionModeState,/)
   })
 

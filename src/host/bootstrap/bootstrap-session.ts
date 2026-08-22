@@ -63,13 +63,18 @@ import { StructuredLogger } from "@/observability"
 import type { PermissionContext } from "@/permission"
 import {
   createIdentityModeSessionState,
-  createPermissionModeSessionState,
   createSystemPromptRebuilder,
   createSystemSource,
   createToolProfileSessionState,
   type IdentityModeSessionState,
   type ToolProfileSessionState,
 } from "@/runner/assemble"
+// RFC-05 E3 — the behavior-live posture authority + delegating mode adapter that
+// retire the standalone permission-mode state cell (single production owner).
+import {
+  buildLivePermissionModeState,
+  type PermissionModeSessionState,
+} from "@/runner/assemble/session-authorities"
 import { resolveNetworkProxyFromEnv } from "@/runner/knobs/knobs/network-proxy"
 import { isPathLikeToken } from "@/runner/orchestrate"
 import { openSessionEgressProxy } from "@/runtime/network-proxy"
@@ -411,7 +416,7 @@ interface PreparedSessionRuntime {
   readonly idleMonitor: ReturnType<SessionBootstrapDeps["buildIdleGuards"]>["idleMonitor"]
   readonly rejectCounter: ReturnType<SessionBootstrapDeps["buildIdleGuards"]>["rejectCounter"]
   readonly permission: PermissionContext
-  readonly permissionModeState: ReturnType<typeof createPermissionModeSessionState>
+  readonly permissionModeState: PermissionModeSessionState
   readonly abort: AbortController
   readonly effortStore: ReturnType<typeof createEffortStore>
   readonly briefStore: ReturnType<typeof createBriefStore>
@@ -451,15 +456,18 @@ const prepareSessionRuntime = async (
   // no log). Observe-only: it never enforces or replaces a legacy gate.
   probeCapabilityConsistency(runtime.env)
   const { idleMonitor, rejectCounter } = deps.buildIdleGuards(runtime)
-  // ADR-0303 — the permission posture is engine-owned mutable state, not a
-  // slash-local mirror. `permission.mode` is an ACCESSOR over
-  // `permissionModeState`, so when a surface mutates the posture mid-session
-  // (CLI `shift+tab` mode-cycle → `RuntimeContext.permissionModeState().set()`)
-  // the change is read LIVE by the very next turn's admissibility gate — every
-  // existing `permission.mode` reader (snapshot getter, per-turn base spread,
-  // `describe()`) observes the new value with no hot-path change. Seeded from
-  // `runtime.mode` so the default path is byte-identical.
-  const permissionModeState = createPermissionModeSessionState({ defaultMode: runtime.mode })
+  // RFC-05 E3 — the permission posture mode is owned by the durable posture
+  // AUTHORITY (E2), not a standalone state cell. `permission.mode` is an ACCESSOR
+  // over the delegating adapter: `get` reads the authority's LIVE effectiveMode
+  // (the per-turn admissibility gate reads the current value, never a stale
+  // snapshot) and `set` delegates to `authority.set({ mode }, revision)` so a
+  // mid-session change (CLI `shift+tab` mode-cycle → `permissionModeState().set()`,
+  // web/agent control-request `permission.mode = …`) is a durable POSTURE
+  // mutation the very next turn reads. Seeded from `runtime.mode` (unmanaged ⇒
+  // effectiveMode == `runtime.mode`, byte-identical default path). The SAME
+  // adapter is threaded as `permissionModeState`, so the accessor and the CLI
+  // mode-cycle share one authority (no parallel mode cell).
+  const permissionModeState: PermissionModeSessionState = buildLivePermissionModeState(runtime.mode)
   const permission: PermissionContext = {
     get mode() {
       return permissionModeState.get()
@@ -791,7 +799,7 @@ const buildToolingBundle = (
  *  the SAME live cells ⇒ byte-identical. */
 const buildSessionConfigPort = (cells: {
   readonly effortStore: ReturnType<typeof createEffortStore>
-  readonly permissionModeState: ReturnType<typeof createPermissionModeSessionState>
+  readonly permissionModeState: PermissionModeSessionState
   readonly identityModeState: IdentityModeSessionState
   readonly toolProfileState: ToolProfileSessionState
   readonly model: string

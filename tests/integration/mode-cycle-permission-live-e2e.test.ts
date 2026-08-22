@@ -5,7 +5,11 @@ import { join } from "node:path"
 import { buildInteractiveTurnAssembler } from "@/apps/web-daemon/runtime-factory"
 import type { LLMPort, Message, StreamEvent, StreamInput } from "@/llm"
 import type { PermissionContext } from "@/permission"
-import { createPermissionModeSessionState } from "@/runner/assemble"
+import {
+  buildPostureAuthority,
+  createPermissionModeAdapter,
+  createSeededPosturePersistence,
+} from "@/runner/assemble/session-authorities"
 import { createRuntimeFromAgentConfigBase } from "@/sdk/runtime"
 import { defaultTools, ToolRegistry } from "@/tool"
 import { RecordingStream } from "./_harness"
@@ -69,8 +73,15 @@ const makeWorkspace = (name: string): string => {
 describe("ADR-0303 — permission posture is live per-turn (e2e)", () => {
   test("a mid-session permissionModeState.set() flips the gate decision on the next turn", async () => {
     const cwd = makeWorkspace("live")
-    // Mirror bootstrap-session.ts: accessor-backed permission over the engine cell.
-    const permissionModeState = createPermissionModeSessionState({ defaultMode: "default" })
+    // Mirror bootstrap-session.ts: accessor-backed permission over the delegating
+    // adapter that routes through the durable posture AUTHORITY (RFC-05 E3).
+    const permissionModeState = createPermissionModeAdapter(
+      buildPostureAuthority({
+        threadId: "session",
+        persistence: createSeededPosturePersistence("session", "default"),
+        reviewerAvailability: { hasAutoReview: false, hasGuardianReview: false },
+      }),
+    )
     const permission: PermissionContext = {
       get mode() {
         return permissionModeState.get()
@@ -120,6 +131,10 @@ describe("ADR-0303 — permission posture is live per-turn (e2e)", () => {
       // edits. NO new session is created.
       const confirmsBefore = confirmCalls
       permissionModeState.set("bypass")
+      // The delegating set is a durable posture mutation that lands on the next
+      // publish (before the next turn); flush it so turn 2 reads "bypass" live.
+      await new Promise((resolve) => setTimeout(resolve, 0))
+      await new Promise((resolve) => setTimeout(resolve, 0))
 
       // Turn 2 — the SAME session: the gate must read the NEW posture live and
       // apply the write without asking.

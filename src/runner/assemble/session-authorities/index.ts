@@ -11,6 +11,23 @@ export { buildSessionAuthorities } from "./build"
 // and the plain-JSON `@/session` DTO.
 export type { BuildObjectiveAuthorityInput } from "./build-objective"
 export { buildObjectiveAuthority, encodeObjectiveSnapshot } from "./build-objective"
+// RFC-05 E3 — the single posture-authority builder + the behavior-live
+// permission-mode delegating adapter. Surfaces construct the per-session posture
+// HERE (no surface-local mode cell); the adapter routes every mode read/write
+// through the durable authority.
+export {
+  type BuildPostureAuthorityInput,
+  type BuildThreadPostureBindingInput,
+  buildLivePermissionModeState,
+  buildPostureAuthority,
+  buildThreadPostureBinding,
+  createInMemoryPosturePersistence,
+  createPermissionModeAdapter,
+  createSeededPosturePersistence,
+  deriveManagedMode,
+  LIVE_POSTURE_THREAD_ID,
+  type PermissionModeSessionState,
+} from "./build-posture"
 export { decodeObjectiveSnapshot } from "./restore"
 export type {
   AttentionReader,

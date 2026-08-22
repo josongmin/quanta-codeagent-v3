@@ -8,7 +8,11 @@ import type { SlashContext } from "@/apps/cli/slash-contract"
 import { buildInteractiveTurnAssembler } from "@/apps/web-daemon/runtime-factory"
 import type { LLMPort, StreamEvent, StreamInput } from "@/llm"
 import type { PermissionContext } from "@/permission"
-import { createPermissionModeSessionState } from "@/runner/assemble"
+import {
+  buildPostureAuthority,
+  createPermissionModeAdapter,
+  createSeededPosturePersistence,
+} from "@/runner/assemble/session-authorities"
 import { createRuntimeFromAgentConfigBase } from "@/sdk/runtime"
 import { defaultTools, ToolRegistry } from "@/tool"
 import { RecordingStream } from "../_harness"
@@ -60,7 +64,13 @@ const makeWorkspace = (name: string): string => {
 describe("#13 — /mode slash drives the live permission gate (e2e)", () => {
   test("/mode bypass slash → store → per-turn projection → gate auto-allows the write", async () => {
     const cwd = makeWorkspace("slash-live")
-    const permissionModeState = createPermissionModeSessionState({ defaultMode: "default" })
+    const permissionModeState = createPermissionModeAdapter(
+      buildPostureAuthority({
+        threadId: "session",
+        persistence: createSeededPosturePersistence("session", "default"),
+        reviewerAvailability: { hasAutoReview: false, hasGuardianReview: false },
+      }),
+    )
     const permission: PermissionContext = {
       get mode() {
         return permissionModeState.get()
@@ -91,8 +101,12 @@ describe("#13 — /mode slash drives the live permission gate (e2e)", () => {
     }
     // The session loop's per-turn `beforeTurn` projection, replicated verbatim
     // (the source-match test pins that session-loop.ts runs exactly this line).
-    const projectPosture = (): void => {
+    const projectPosture = async (): Promise<void> => {
       permissionModeState.set(store.current().permissionMode)
+      // The delegating set lands on the next durable publish; flush it so the
+      // next turn's gate reads the projected posture live.
+      await new Promise((resolve) => setTimeout(resolve, 0))
+      await new Promise((resolve) => setTimeout(resolve, 0))
     }
     let confirmCalls = 0
     const { runtime } = await createRuntimeFromAgentConfigBase({
@@ -121,7 +135,7 @@ describe("#13 — /mode slash drives the live permission gate (e2e)", () => {
     const session = await runtime.createSession({ cwd, permissionMode: "default" })
     try {
       // Turn 1 — default posture: project, run, the write is gated + denied.
-      projectPosture()
+      await projectPosture()
       await session.input.append("patch it")
       await session.turn.run()
       expect(confirmCalls).toBeGreaterThan(0)
@@ -134,7 +148,7 @@ describe("#13 — /mode slash drives the live permission gate (e2e)", () => {
       expect(store.current().permissionMode).toBe("bypass")
 
       // Turn 2 — the loop projects the store's posture, the gate auto-allows.
-      projectPosture()
+      await projectPosture()
       await session.input.append("patch it again")
       await session.turn.run()
       expect(confirmCalls).toBe(confirmsBefore) // no approval prompt under bypass
