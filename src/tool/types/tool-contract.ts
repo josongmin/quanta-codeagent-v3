@@ -56,7 +56,8 @@ export type Tool<I = unknown, O = unknown> = ToolCore<I> &
   Partial<ToolSecurityHooks<I>> &
   Partial<ToolResultShape<O>> &
   Partial<ToolStreamingInput<I>> &
-  Partial<ToolInterruptPolicy>
+  Partial<ToolInterruptPolicy> &
+  Partial<ToolDynamicSpec>
 
 /**
  * Required surface every tool implements. The dispatch/registry seams call
@@ -257,6 +258,37 @@ export interface ToolStreamingInput<I = unknown> {
   /** @deprecated No built-in tool implements this; the parsed input is
    *  delivered to `execute(input, ctx)` directly. */
   onInputAvailable(input: I): void
+}
+
+/**
+ * RFC-06 F3 — OPTIONAL dynamic-spec arm. A tool whose advertised {@link ToolSpec}
+ * is NOT frozen at construction implements `getSpec()`, which the registry
+ * dereferences ON EVERY MODEL REQUEST (see `ToolRegistry.specs`). The `Skill`
+ * tool uses this so its "Available skills:" description tracks the LIVE runtime
+ * authority — a skill disabled after tool construction disappears from the model
+ * spec surface on the NEXT request, with no rebuilt registry.
+ *
+ * Contract:
+ *   - ABSENT (the common case — every static tool) ⇒ the registry advertises the
+ *     tool's static `{name, description, inputSchema}` exactly as today
+ *     (byte-identical). This is a `Partial` arm on {@link Tool}, so absence is
+ *     the default by construction.
+ *   - PRESENT but returns `undefined` ⇒ same fallback to the static fields (a
+ *     dynamic tool that has nothing new to say this request pays nothing).
+ *   - PRESENT and returns a `ToolSpec` ⇒ the registry advertises THAT spec for
+ *     this request. The returned `name` MUST equal the tool's `name` (the
+ *     registry keys dispatch by the static name; a dynamic spec only refreshes
+ *     the description / schema, never the identity or the tool set — a disable
+ *     changes what a tool SAYS, never the registry generation).
+ *
+ * Purely a READ: `getSpec` must be side-effect-free and cheap enough to call
+ * once per model request. It owns no mutation of the runtime authority.
+ */
+export interface ToolDynamicSpec {
+  /** The tool's CURRENT provider-facing spec, or `undefined` to use the static
+   *  `{name, description, inputSchema}` fields (byte-identical fallback).
+   *  Dereferenced by `ToolRegistry.specs()` on every model request. */
+  getSpec(): ToolSpec | undefined
 }
 
 /** Provider-agnostic schema the agent forwards to the LLM.

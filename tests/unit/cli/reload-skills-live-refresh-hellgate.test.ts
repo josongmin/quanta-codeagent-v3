@@ -58,8 +58,8 @@ describe("gate half — per-turn re-discovery (UUX-5-08)", () => {
     await writeSkill(dir, "boot-skill", "Read")
     // "Boot" turn: only boot-skill exists.
     const boot = await buildSkillBlock(cfgFor(dir))
-    expect(boot?.inventory.map((s) => s.name)).toContain("boot-skill")
-    expect(boot?.inventory.map((s) => s.name)).not.toContain("new-skill")
+    expect(boot?.runtime.activeInventory().map((s) => s.name)).toContain("boot-skill")
+    expect(boot?.runtime.activeInventory().map((s) => s.name)).not.toContain("new-skill")
 
     // Operator drops a new skill on disk mid-session.
     await writeSkill(dir, "new-skill", "Bash")
@@ -67,7 +67,7 @@ describe("gate half — per-turn re-discovery (UUX-5-08)", () => {
     // NEXT turn: createRunAgentContext re-runs buildSkillBlock — the new
     // skill must appear WITHOUT any process restart.
     const next = await buildSkillBlock(cfgFor(dir))
-    expect(next?.inventory.map((s) => s.name)).toContain("new-skill")
+    expect(next?.runtime.activeInventory().map((s) => s.name)).toContain("new-skill")
     expect(next?.allowlists?.get("new-skill")).toEqual(["Bash"])
 
     // And the gate built from the fresh block arms the new skill's scope.

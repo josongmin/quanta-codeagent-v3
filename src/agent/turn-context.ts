@@ -49,6 +49,7 @@ import type { WorkingMemory } from "@/memory"
 import type { TurnTiming } from "@/observability"
 import type { AutoModeClassifier } from "@/permission"
 import type { RedactionHit, RedactionOrigin } from "@/security"
+import type { SkillRuntimeReader } from "@/skill"
 import type { CompactionBreaker } from "./compaction-breaker"
 import type { ConversationSummaryArchive } from "./conversation-summary-archive"
 import type { EffortLevel } from "./effort"
@@ -145,7 +146,12 @@ export interface TurnSession {
   readonly recorder?: AgentRecorder
   readonly classifier?: AutoModeClassifier
   readonly skillGate?: SkillGate
-  readonly activeSkills?: { name: string; description: string }[]
+  /** RFC-06 F3 — the LIVE per-turn skill discovery reader (replaces the pre-F3
+   *  frozen `activeSkills` array). `runTurn` calls `activeInventory()` EACH turn
+   *  for the prompt "## Active skills" reminder, so a skill disabled after
+   *  session start drops from the prompt on the next turn. Absent ⇒ no block
+   *  emitted (skill-less sessions byte-identical). */
+  readonly skillRuntime?: SkillRuntimeReader
   readonly archive?: ConversationSummaryArchive
   /** ADR-0473 — per-session speculative (background) compaction controller.
    *  Present only when `QUANTA_BG_COMPACTION=1`; the turn loop borrows a ready

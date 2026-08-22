@@ -100,6 +100,7 @@ export type {
 export type {
   Tool,
   ToolCore,
+  ToolDynamicSpec,
   ToolInterruptPolicy,
   ToolResultShape,
   ToolSecurityHooks,

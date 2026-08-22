@@ -30,6 +30,8 @@ import type {
   Skill,
   SkillProposalStagePort,
   SkillRegistry,
+  SkillRuntimeAuthority,
+  SkillRuntimeReader,
 } from "../../skill"
 import {
   buildSkillSnapshot,
@@ -38,11 +40,11 @@ import {
   createSkillCreatorTool,
   createSkillProposalArtifactPort,
   createSkillRuntimeAuthority,
+  createSkillRuntimeReader,
   createSkillTool,
   createToolSearchTool,
   skillEffortOverride,
   skillModelOverride,
-  skillsActivatedFor,
   skillToolAllowlist,
 } from "../../skill"
 import type { ApprovalStateMachinePort } from "../approval-state-machine"
@@ -144,11 +146,18 @@ export interface SkillBlock {
   /** Skill name → author-declared `{model?, effort?}` override, for skills
    *  that declared at least one. Absent when no skill declared either. */
   overrides: Map<string, SkillTurnOverride> | undefined
-  /** Per-turn suggestion inventory (filtered by `changedPaths` when set).
-   *  `rawDependencies` (ADR-0476) is propagated ONLY when the
-   *  `QUANTA_SKILL_MCP_DEPS` gate is on AND the skill declared a deps block;
-   *  the prompt renderer ignores it, so the field is byte-identical otherwise. */
-  inventory: { name: string; description: string; rawDependencies?: unknown }[]
+  /** RFC-06 F3 — the LIVE per-turn discovery reader. The loop reads
+   *  `runtime.activeInventory()` EVERY turn for the prompt "## Active skills"
+   *  reminder (filtered by `changedPaths` + the MCP-deps gate over the CURRENT
+   *  active projection), so a skill disabled after session start drops from the
+   *  prompt on the next turn. Replaces the pre-F3 frozen `inventory` array. */
+  runtime: SkillRuntimeReader
+  /** RFC-06 F3 — the session's live skill runtime authority. Exposed so the
+   *  composition/tests (and later F4/F5 surfaces) can drive `setEnabled` and
+   *  observe the disable propagate to prompt + ToolSearch + the Skill spec. This
+   *  is the SAME authority the `Skill` tool resolver, the ToolSearch searchable
+   *  closure, the Skill tool `getSpec`, and `runtime` all read from. */
+  authority: SkillRuntimeAuthority
 }
 
 /** ADR-0011 §6.2 → L4: the per-skill model/effort override entry, or
@@ -205,16 +214,23 @@ export const buildSkillBlock = async (config: AgentConfig): Promise<SkillBlock |
   const tools: Tool[] = [
     // ACTION-TIME resolution: the tool never captures the discovered list — it
     // resolves each name through `authority` at invoke time. `catalogue` feeds
-    // only the (display-only) tool description; the `paths:` filter below narrows
-    // the per-turn SUGGESTION inventory, never the invocable surface.
-    createSkillTool({ resolve: createAuthoritySkillResolver(authority), catalogue: skills }),
-    // RFC03-1 — ToolSearch gets the pinned snapshot's registry entries so its
-    // additive `catalog:"skills"` mode reads the SAME resolved set (no second
-    // discovery / scorer). `catalog` defaults to "tools" ⇒ byte-identical for
+    // only the CONSTRUCTION-TIME (fallback) description; `liveCatalogue` (F3)
+    // makes the advertised description track the LIVE active projection so a
+    // disable drops from the Skill tool spec on the next model request.
+    createSkillTool({
+      resolve: createAuthoritySkillResolver(authority),
+      catalogue: skills,
+      liveCatalogue: () => authority.read().active,
+    }),
+    // RFC-06 F3 — ToolSearch's `catalog:"skills"` mode reads the LIVE `searchable`
+    // projection (dereferenced on every ToolSearch call), NOT the frozen
+    // `snapshot.registry.entries`. So a skill disabled after construction
+    // disappears from ToolSearch on the next call — the same revision the prompt
+    // and the Skill spec see. `catalog` defaults to "tools" ⇒ byte-identical for
     // any call that does not opt into skill mode.
     createToolSearchTool(
       () => config.registry.specs(),
-      () => snapshot.registry.entries,
+      () => authority.read().searchable,
     ),
   ]
   // jun-6 + RFC03-2 — register the agent-callable `skill_create` tool ONLY when
@@ -244,41 +260,27 @@ export const buildSkillBlock = async (config: AgentConfig): Promise<SkillBlock |
     const override = skillOverrideEntry(s)
     if (override) ov.set(s.name, override)
   }
-  // Plain `{name, description}` shape so the prompt slice never imports
-  // `@/skill` (slice isolation — Codex skills-audit mirror). Built ONCE here
-  // (the loop calls buildSessionFeatures once at session start), then passed
-  // through every turn without re-discovery.
+  // RFC-06 F3 — the LIVE discovery reader over THIS session's authority. It
+  // replaces the pre-F3 frozen `inventory` array: the loop reads
+  // `runtime.activeInventory()` EVERY turn, so the prompt "## Active skills"
+  // reminder tracks the CURRENT active projection (a disable drops the skill on
+  // the next turn) instead of a construction-time copy.
   //
-  // `paths:` conditional activation (L1→L2 host-driven wiring): when
-  // `config.skills.changedPaths` is set, narrow the suggestion inventory to
-  //   - every skill WITHOUT `paths:` (unconditional — always in the inventory),
-  //   - plus every skill WITH `paths:` whose globs match any changed path
-  //     (via `skillsActivatedFor` — the dedicated helper that already filters
-  //     out unconditional skills).
-  // `changedPaths` unset ⇒ identity, byte-identical with prior behavior —
-  // RFC §1.2 default-OFF. The invocable surface (the `Skill` tool) is NEVER
-  // narrowed — only the per-turn SUGGESTION inventory is filtered.
-  const changedPaths = config.skills.changedPaths
-  const activated =
-    changedPaths !== undefined && changedPaths.length > 0
-      ? [
-          ...skills.filter((s) => s.paths === undefined || s.paths.length === 0),
-          ...skillsActivatedFor(skills, changedPaths),
-        ]
-      : skills
-  // ADR-0476 — propagate each skill's lifted `dependencies` block onto the
-  // active-skill channel ONLY when the gate is on, so the per-turn reconcile can
-  // resolve declared MCP servers. Gate off ⇒ field omitted ⇒ byte-identical.
-  const wantDeps = runtimeConfig().skillMcpDeps
-  const inventory = activated.map((s) =>
-    wantDeps && s.rawDependencies !== undefined
-      ? { name: s.name, description: s.description, rawDependencies: s.rawDependencies }
-      : { name: s.name, description: s.description },
-  )
+  // The `paths:` conditional-activation filter and the MCP-deps gate live INSIDE
+  // the reader now (over the live active set), so this builder no longer copies a
+  // skill array. `changedPaths` unset ⇒ identity (byte-identical with prior
+  // behavior). The reader returns the plain `{name, description}` shape (no
+  // `@/skill` value type leaks into the prompt slice).
+  const runtime = createSkillRuntimeReader(authority, {
+    ...(config.skills.changedPaths !== undefined
+      ? { changedPaths: config.skills.changedPaths }
+      : {}),
+  })
   return {
     tools,
     allowlists: al.size > 0 ? al : undefined,
     overrides: ov.size > 0 ? ov : undefined,
-    inventory,
+    runtime,
+    authority,
   }
 }

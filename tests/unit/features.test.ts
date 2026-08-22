@@ -170,8 +170,9 @@ describe("buildSessionFeatures", () => {
     )
     expect(skill.description).toContain("progress-audit")
     expect(skill.description).toContain("localize-fault")
-    // The per-turn inventory carries both bundled skills too.
-    const invNames = (f.activeSkills ?? []).map((s) => s.name)
+    // The per-turn inventory carries both bundled skills too (RFC-06 F3 — read
+    // LIVE from the reader).
+    const invNames = (f.skillRuntime?.activeInventory() ?? []).map((s) => s.name)
     expect(invNames).toContain("progress-audit")
     expect(invNames).toContain("localize-fault")
   })
@@ -180,7 +181,7 @@ describe("buildSessionFeatures", () => {
     const f = await buildSessionFeatures(cfg())
     expect(names(f.extraTools)).not.toContain("Skill")
     expect(names(f.extraTools)).not.toContain("ToolSearch")
-    expect(f.activeSkills).toBeUndefined()
+    expect(f.skillRuntime).toBeUndefined()
   })
 
   test("ToolSearch tool ranks the live registry catalog", async () => {

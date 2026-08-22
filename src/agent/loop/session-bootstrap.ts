@@ -250,7 +250,7 @@ export const createRunAgentContext = async (config: AgentConfig): Promise<RunAge
     ...(recorder !== undefined ? { recorder } : {}),
     ...(features.classifier !== undefined ? { classifier: features.classifier } : {}),
     ...(skillGate !== undefined ? { skillGate } : {}),
-    ...(features.activeSkills !== undefined ? { activeSkills: features.activeSkills } : {}),
+    ...(features.skillRuntime !== undefined ? { skillRuntime: features.skillRuntime } : {}),
     ...(summaryArchive !== undefined ? { archive: summaryArchive } : {}),
     ...(ttfm !== undefined ? { ttfm } : {}),
     ...(bgCompaction !== undefined ? { bgCompaction } : {}),

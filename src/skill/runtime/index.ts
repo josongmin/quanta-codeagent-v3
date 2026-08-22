@@ -27,9 +27,13 @@ export {
 } from "./disabled-store-port"
 export type { EffectiveDisable } from "./projections"
 export { deriveSkillProjections, effectiveDisable } from "./projections"
+export type { SkillRuntimeReaderOptions } from "./reader"
+export { createSkillRuntimeReader } from "./reader"
 export type {
   ManagedSkill,
+  SkillActiveInventoryEntry,
   SkillDisableReason,
+  SkillRuntimeReader,
   SkillRuntimeView,
 } from "./types"
 export { SKILL_DISABLE_REASONS } from "./types"

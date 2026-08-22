@@ -151,7 +151,7 @@ describe("progress-audit system skill — discovery + scoping (e2e)", () => {
 
     // activeSkills (per-turn reminder inventory) must include progress-audit
     // so the model sees the trigger description in the dynamic reminder.
-    const pa = features.activeSkills?.find((s) => s.name === "progress-audit")
+    const pa = features.skillRuntime?.activeInventory().find((s) => s.name === "progress-audit")
     expect(pa).toBeDefined()
     expect(pa?.description).toContain("진행률")
   })
@@ -248,7 +248,7 @@ describe("progress-audit system skill — discovery + scoping (e2e)", () => {
     // the single precedence authority (RFC03-0 snapshot cutover 7c81f8d49).
     expect(al?.get("progress-audit")).toEqual(["Bash"])
     // The user's distinctly-named skill also appears in the catalogue.
-    const userHelper = features.activeSkills?.find((s) => s.name === "userhelper")
+    const userHelper = features.skillRuntime?.activeInventory().find((s) => s.name === "userhelper")
     expect(userHelper).toBeDefined()
 
     // Read-time user-wins: the Skill tool catalogue advertises the USER

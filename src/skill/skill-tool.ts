@@ -1,6 +1,7 @@
 import { z } from "zod"
 import { runtimeConfig } from "@/shared"
-import type { Tool, ToolContext, ToolEvent } from "@/tool"
+import type { Tool, ToolContext, ToolEvent, ToolSpec } from "@/tool"
+import { zodToJsonSchema } from "@/tool"
 import { createDefaultTemplateExpander, type ExpandContext, type ExpandError } from "./playbook"
 // RFC-06 F2 — the `Skill` tool resolves its target through the LIVE runtime
 // authority AT INVOCATION time (a sibling `@/skill/runtime` module, TYPE-only
@@ -302,35 +303,70 @@ export const staticSkillResolver = (skills: readonly Skill[]): SkillActionResolv
   }
 }
 
+/** Render the `Skill` tool's model-facing description from a skill list. Shared
+ *  by the static `description` field and the RFC-06 F3 live `getSpec()` so both
+ *  surfaces format the catalogue identically — the ONLY difference is whether the
+ *  list is the construction-time `catalogue` or the live active projection. */
+export const renderSkillToolDescription = (skills: readonly Skill[]): string => {
+  const catalogue = skills.map(skillCatalogueRow).join("\n")
+  return (
+    "Invoke a named skill: its instructions are injected into your context so " +
+    "you can proceed with them. Available skills:\n" +
+    (catalogue === "" ? "(none discovered)" : catalogue)
+  )
+}
+
 /**
  * Dependencies for {@link createSkillTool}. The `resolve` seam is the ONLY path
  * from a name to a skill body; `catalogue` feeds the tool DESCRIPTION only (a
- * display surface F3 makes live) and is NEVER consulted on execute.
+ * display surface) and is NEVER consulted on execute.
  */
 export interface SkillToolDeps {
   /** Action-time resolver (production: {@link createAuthoritySkillResolver}). */
   readonly resolve: SkillActionResolver
-  /** Skills to list in the tool description. Display-only; not a resolution
-   *  surface. */
+  /** Skills to list in the tool description at CONSTRUCTION (the fallback /
+   *  initial spec). Display-only; not a resolution surface. */
   readonly catalogue: readonly Skill[]
+  /** RFC-06 F3 — OPTIONAL LIVE catalogue provider. When present, the tool
+   *  implements the dynamic-spec arm (`getSpec`): the registry re-reads it on
+   *  EVERY model request, so a skill disabled after construction disappears from
+   *  the "Available skills:" description on the next request. ABSENT ⇒ no
+   *  `getSpec`, so the tool advertises the static `catalogue` description exactly
+   *  as before (byte-identical — tests/static callers are unchanged). */
+  readonly liveCatalogue?: () => readonly Skill[]
 }
 
 export const createSkillTool = (deps: SkillToolDeps): Tool<Input> => {
   // NOTE: NO `byName` map, NO captured skill list for resolution — the tool
   // resolves EVERY invocation through `deps.resolve` at action time (F2 cutover).
-  // `catalogue` is used ONLY to render the static description below.
-  const catalogue = deps.catalogue.map(skillCatalogueRow).join("\n")
+  // `catalogue` renders the STATIC/initial description; `liveCatalogue` (F3), when
+  // wired, makes the advertised description track the live runtime authority.
+  const staticDescription = renderSkillToolDescription(deps.catalogue)
+  const liveCatalogue = deps.liveCatalogue
 
   return {
     name: "Skill",
-    description:
-      "Invoke a named skill: its instructions are injected into your context so " +
-      "you can proceed with them. Available skills:\n" +
-      (catalogue === "" ? "(none discovered)" : catalogue),
+    description: staticDescription,
     inputSchema: schema,
     isReadOnly: () => true,
     // Returns static skill text; no observable interaction with other calls.
     isConcurrencySafe: () => true,
+    // RFC-06 F3 — dynamic-spec arm. ABSENT unless `liveCatalogue` was wired, so a
+    // Skill tool built without it is a plain static tool (no `getSpec`). When
+    // wired, the registry dereferences this on every model request; the returned
+    // `name`/`input_schema` are identical to the static ones (only the
+    // description tracks the live active projection), so dispatch identity and
+    // the schema payload are unchanged — a disable changes only what the tool
+    // SAYS, never the registry generation.
+    ...(liveCatalogue !== undefined
+      ? {
+          getSpec: (): ToolSpec => ({
+            name: "Skill",
+            description: renderSkillToolDescription(liveCatalogue()),
+            input_schema: zodToJsonSchema(schema),
+          }),
+        }
+      : {}),
 
     async *execute(input: Input, _ctx: ToolContext): AsyncIterable<ToolEvent> {
       const want = input.name.trim().replace(/^\//, "") // tolerate a "/foo" form

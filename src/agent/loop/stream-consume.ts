@@ -402,7 +402,20 @@ export const streamConsume = async (
   state: TurnState,
   ctx: ReturnType<typeof buildTurnContext>,
 ): Promise<StreamConsumeResult> => {
-  const { config, specs, recorder, skillGate, rateLimitProactive } = session
+  const { config, recorder, skillGate, rateLimitProactive } = session
+  // RFC-06 F3 — re-derive the model-visible specs from the LIVE registry ON THIS
+  // MODEL REQUEST, instead of reading the frozen `session.specs` snapshotted at
+  // session start. `ToolRegistry.specs()` dereferences each tool's optional
+  // dynamic-spec arm (`getSpec`), so the `Skill` tool's "Available skills:"
+  // description tracks the current runtime authority — a skill disabled after
+  // construction leaves the model spec surface on the next request. We read from
+  // the SAME registry the generation snapshot pinned (`registrySnapshot.registry`,
+  // falling back to `config.registry` for minimal hand-built test sessions), so
+  // the advertise==dispatch generation invariant (RFC04-0) is preserved: only the
+  // dynamic tool's DESCRIPTION changes, never the tool set / generation. For a
+  // session with no dynamic-spec tools (gate-OFF), `specs()` is deterministic ⇒
+  // byte-identical to the frozen `session.specs`.
+  const specs = (session.registrySnapshot?.registry ?? config.registry).specs()
   // `collector` / `taskSpend` are consumed inside `runSamplingScope` (which
   // re-destructures them from session/state), not here.
   const { toolChoiceState, onTurnTiming } = state

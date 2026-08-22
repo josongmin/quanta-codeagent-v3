@@ -545,6 +545,7 @@ export type { ReadOutlineParserPort } from "./read"
 export { ToolRegistry } from "./registry"
 export { requestPlanExitTool } from "./request-plan-exit"
 export { requestUserInputTool } from "./request-user-input"
+export { zodToJsonSchema } from "./schema"
 // `search_codebase` tool (ADR-0278). Caller-wired: surfaces register the tool
 // when they own a concrete workspace search pipeline. The product surface now
 // defaults to lexical repo search and upgrades to hybrid when `QUANTA_INDEX=on`,

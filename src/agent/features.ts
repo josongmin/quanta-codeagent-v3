@@ -51,6 +51,7 @@
  */
 
 import type { AutoModeClassifier } from "@/permission"
+import type { SkillRuntimeReader } from "@/skill"
 import type { Tool } from "@/tool"
 import type { TaskRegistry } from "../subagent"
 import type { SkillTurnOverride } from "./loop"
@@ -138,13 +139,16 @@ export interface SessionFeatures {
    *  Present only when ≥1 discovered skill declares `model:`/`effort:`; absent
    *  ⇒ no override (byte-identical). */
   skillOverrides?: Map<string, SkillTurnOverride>
-  /** Active-skill inventory cached at session start (Codex `skills-audit.md`
-   *  mirror). One `{name, description}` per discovered skill — used by the
-   *  per-turn reminder to advertise the catalogue + trigger rules without
-   *  re-discovering on every turn (Codex anti-reread). The skill BODY stays
-   *  lazy (progressive disclosure); only metadata rides here. Present only
-   *  when `config.skills` is set; absent ⇒ no block (byte-identical). */
-  activeSkills?: { name: string; description: string; rawDependencies?: unknown }[]
+  /** RFC-06 F3 — the LIVE per-turn skill discovery reader (Codex
+   *  `skills-audit.md` mirror, made live). Replaces the pre-F3 frozen
+   *  `activeSkills` array: the loop calls `skillRuntime.activeInventory()` EVERY
+   *  turn to advertise the catalogue + trigger rules, reading the CURRENT active
+   *  projection of the session's skill runtime authority — so a skill disabled
+   *  after session start drops from the prompt on the next turn (no
+   *  construction-time copy). The skill BODY stays lazy (progressive disclosure);
+   *  only metadata rides through the reader. Present only when `config.skills` is
+   *  set; absent ⇒ no block (byte-identical). */
+  skillRuntime?: SkillRuntimeReader
   /** Session-scoped WorkingState (Codex memory L3 absorption). Present only
    *  when `config.workingState?.enabled === true`; absent ⇒ the
    *  `update_working_state` tool is NOT in `extraTools` and the loop renders
@@ -301,10 +305,10 @@ export const buildSessionFeatures = async (config: AgentConfig): Promise<Session
       appshotDispose: appshotBlock.tools.length > 0 ? appshotBlock.dispose : undefined,
       skillAllowlists: skill?.allowlists,
       skillOverrides: skill?.overrides,
-      // Inventory is present whenever `config.skills` is set — even an empty
-      // array (no SKILL.md files yet) — so the prompt slice can gate purely
-      // on `length > 0` and stays byte-identical for skill-less sessions.
-      activeSkills: skill?.inventory,
+      // RFC-06 F3 — the LIVE reader is present whenever `config.skills` is set;
+      // the loop reads it per turn (an empty active projection ⇒ no prompt block,
+      // byte-identical for skill-less sessions).
+      skillRuntime: skill?.runtime,
       workingState: ws?.handle,
     }),
   }

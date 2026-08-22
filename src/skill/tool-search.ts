@@ -278,9 +278,13 @@ const runSkillCatalog = (
  */
 export const createToolSearchTool = (
   catalog: () => ToolSpec[],
-  /** RFC03-1 — pinned skill snapshot provider for `catalog:"skills"` mode. When
-   *  omitted, skill mode returns "no matching skills" (never a phantom entry).
-   *  Absent ⇒ tools-mode behavior is byte-identical. */
+  /** Skill-entry provider for `catalog:"skills"` mode, invoked at EXECUTION time
+   *  (see `execute` below — the closure is dereferenced on every ToolSearch
+   *  call, never cached). RFC-06 F3 wires this to the LIVE `searchable`
+   *  projection of the skill runtime authority, so a skill disabled after tool
+   *  construction disappears from ToolSearch on the next call. When omitted,
+   *  skill mode returns "no matching skills" (never a phantom entry); absent ⇒
+   *  tools-mode behavior is byte-identical. */
   skillCatalog?: () => readonly SkillRegistryEntry[],
 ): Tool<Input> => ({
   name: "ToolSearch",

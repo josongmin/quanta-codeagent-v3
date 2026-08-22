@@ -80,3 +80,42 @@ export interface SkillRuntimeView {
   /** Every registry winner, disabled rows RETAINED with reason. */
   readonly management: readonly ManagedSkill[]
 }
+
+/**
+ * One entry in the per-turn active-skill INVENTORY (the prompt "## Active skills"
+ * reminder surface). Plain `{name, description}` (+ optional lifted
+ * `rawDependencies` when the MCP-deps gate is on) so the agent prompt slice never
+ * imports a `@/skill` value type — the same shape the prompt already consumed as
+ * a frozen array, now read LIVE per turn.
+ */
+export interface SkillActiveInventoryEntry {
+  readonly name: string
+  readonly description: string
+  /** ADR-0476 — lifted `dependencies` block, propagated ONLY when the
+   *  `QUANTA_SKILL_MCP_DEPS` gate is on AND the skill declared one. Omitted
+   *  otherwise ⇒ byte-identical inventory shape. */
+  readonly rawDependencies?: unknown
+}
+
+/**
+ * RFC-06 F3 — the NARROW live read view every per-turn discovery consumer holds
+ * INSTEAD of a construction-time copy. `SessionFeatures` carries one of these
+ * (not a copied `activeSkills` array, not a frozen search catalogue), and the
+ * turn loop re-reads it EVERY turn, so a skill disabled after session start
+ * disappears from the prompt inventory and ToolSearch on the next request.
+ *
+ * Backed by the live {@link SkillRuntimeAuthority}: every method reads the
+ * CURRENT published {@link SkillRuntimeView}, never a captured snapshot. It is a
+ * read-only projection — mutation stays behind the authority's `setEnabled`.
+ */
+export interface SkillRuntimeReader {
+  /** The active-skill inventory for THIS turn's prompt reminder, at the current
+   *  revision. Applies the session's `paths:` conditional-activation filter and
+   *  the MCP-deps gate on each call over the LIVE active projection. */
+  activeInventory(): SkillActiveInventoryEntry[]
+  /** The searchable registry-entry projection at the current revision — what
+   *  `ToolSearch`'s `catalog:"skills"` mode reads at execution time. */
+  searchable(): readonly SkillRegistryEntry[]
+  /** The current unified revision (drift/observability; never mutates). */
+  revision(): number
+}

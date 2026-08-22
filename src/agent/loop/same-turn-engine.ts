@@ -19,7 +19,11 @@ export const runTurn = async (
   session: TurnSession,
   state: TurnState,
 ): Promise<TurnResult> => {
-  const { config, recorder, activeSkills, archive, hookPromptPending, bgCompaction } = session
+  const { config, recorder, archive, hookPromptPending, bgCompaction } = session
+  // RFC-06 F3 — read the LIVE active-skill inventory for THIS turn (not a frozen
+  // session array); a skill disabled after session start drops from the prompt
+  // reminder on the next turn. Absent reader ⇒ undefined ⇒ no block.
+  const activeSkills = session.skillRuntime?.activeInventory()
   const { wm, rec, breaker, toolHistory, workingState, citations } = state
   const { turnSession, gate } = buildTurnSessionView(session)
   const turnConfig = turnSession.config

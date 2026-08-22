@@ -63,13 +63,26 @@ export class ToolRegistry {
     return (tool.isEarlyDispatchSafe ?? tool.isReadOnly).call(tool)
   }
 
-  /** Schemas advertised to the model. */
+  /** Schemas advertised to the model. Called ON EVERY MODEL REQUEST (the loop
+   *  re-derives the visible spec list per turn), so a tool that implements the
+   *  optional {@link ToolDynamicSpec.getSpec} arm (RFC-06 F3 — the `Skill` tool)
+   *  gets its CURRENT spec re-read here every request; a stale skill disabled
+   *  after construction leaves the model surface on the next call.
+   *
+   *  Static-tool compatibility: a tool WITHOUT `getSpec` (every built-in), OR
+   *  one whose `getSpec()` returns `undefined`, is advertised from its static
+   *  `{name, description, inputSchema}` fields exactly as before — byte-identical
+   *  output, so the gate-OFF (no dynamic tools) spec list is unchanged. */
   specs(): ToolSpec[] {
-    return [...this.tools.values()].map((t) => ({
-      name: t.name,
-      description: t.description,
-      input_schema: zodToJsonSchema(t.inputSchema),
-    }))
+    return [...this.tools.values()].map((t) => {
+      const dynamic = t.getSpec?.()
+      if (dynamic !== undefined) return dynamic
+      return {
+        name: t.name,
+        description: t.description,
+        input_schema: zodToJsonSchema(t.inputSchema),
+      }
+    })
   }
 
   /** Concrete tool instances in stable registry order. Callers that need to
