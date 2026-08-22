@@ -13,6 +13,8 @@
  * needs resolution — see the navigation guard's DNS step). Pure + synchronous.
  */
 
+import { shouldStripOnRedirect, stripCrossOriginHeaders } from "./redirect-hygiene"
+
 const parseV4Octets = (host: string): readonly number[] | null => {
   const parts = host.split(".")
   if (parts.length !== 4) return null
@@ -429,8 +431,16 @@ export const fetchWithSsrfGuard = async (
   const policy = opts.networkPolicy ?? "public_https"
   let current = new URL(initialUrl)
   await assertUrlSafe(current, resolveHost, policy)
+  // aug-22 audit — REDIRECT CREDENTIAL HYGIENE. `redirect:"manual"` is what lets
+  // this loop re-guard every hop, but it also opts OUT of the platform's
+  // cross-origin `Authorization` strip, and the loop re-issued the ORIGINAL
+  // `init` on each hop. A 302 from a configured LLM endpoint to an attacker host
+  // therefore forwarded the Bearer token verbatim (paired control: plain `fetch`
+  // delivered `null`, this guard delivered the key). `hopInit` carries the
+  // caller's headers until a hop leaves the origin, then the stripped set.
+  let hopInit: RequestInit & { signal: AbortSignal } = init
   for (let hop = 0; hop <= SSRF_MAX_REDIRECTS; hop++) {
-    const res = await fetcher(current.toString(), { ...init, redirect: "manual" })
+    const res = await fetcher(current.toString(), { ...hopInit, redirect: "manual" })
     // 3xx with a Location is a redirect under redirect:"manual" — re-guard.
     // (304 Not Modified / 300 Multiple Choices without Location are NOT
     // redirects we follow; they fall through to the non-redirect return.)
@@ -459,6 +469,9 @@ export const fetchWithSsrfGuard = async (
       )
     }
     await assertUrlSafe(next, resolveHost, policy)
+    if (shouldStripOnRedirect(current.toString(), next.toString())) {
+      hopInit = { ...hopInit, headers: stripCrossOriginHeaders(hopInit.headers) }
+    }
     current = next
   }
   // Unreachable: the loop either returns a non-redirect response or throws on

@@ -62,6 +62,7 @@ import {
   createInMemoryPluginMcpRegistry,
   createIsolatedMcpLauncherPort,
 } from "@/agent/plugin-mcp-launcher"
+import { type AgentMode, modeLoadsRepoRules } from "@/agent/run-mode"
 import type { AgentConfig } from "@/agent/types"
 import { activatePluginsFromMentions } from "./composite-activation"
 import { createPluginActivationHandler } from "./handler"
@@ -118,8 +119,35 @@ const safeDiscover = (rootDir: string, fs: FilesystemPort): readonly PluginManif
  *              defaults work for production node hosts; tests inject
  *              fakes.
  */
-export const autoWirePluginActivation = (cfg: AgentConfig, deps: AutoWireDeps = {}): void => {
+/** Trust context for the auto-wire decision. `mode` omitted ⇒ the legacy
+ *  (ungated) behavior, so an existing caller that has no mode in scope is
+ *  byte-identical; every production caller SHOULD pass it. */
+export interface AutoWireTrust {
+  readonly mode?: AgentMode
+}
+
+export const autoWirePluginActivation = (
+  cfg: AgentConfig,
+  deps: AutoWireDeps = {},
+  opts: AutoWireTrust = {},
+): void => {
   try {
+    // aug-22 audit — REPO-SUPPLIED CODE IS UNTRUSTED IN UNTRUSTED TREES.
+    // The plugin root is `<cwd>/.quanta/plugins`, i.e. CONTENT THAT ARRIVES
+    // WITH A CLONE, and a discovered manifest's `mcpServers[].command` reaches
+    // an argv spawn. Nothing on this path consulted the trust store, so a PR
+    // that adds `.quanta/plugins/x/.codex-plugin/plugin.json` executed the
+    // attacker's argv on any surface that ran the checkout. Contrast the
+    // sibling design that got this right: `.mcp.json` is NEVER auto-loaded
+    // from the tree (`resolveMcpConfigPath` is env-only).
+    //
+    // This reuses the EXISTING repo-content trust policy rather than inventing
+    // a second one: `modeLoadsRepoRules` already classifies `ci-bot` (PR
+    // checkout) and `daemon` (host-created webhook worktree) as untrusted trees
+    // and `batch` as a hermetic sandbox. A mode that must not read a repo's
+    // AGENTS.md must certainly not execute its plugin manifests.
+    if (opts.mode !== undefined && !modeLoadsRepoRules(opts.mode)) return
+
     // Caller-override-precedence: already wired ⇒ no-op.
     if (cfg.activatePlugins !== undefined) return
 

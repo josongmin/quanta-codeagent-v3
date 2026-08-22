@@ -19,7 +19,9 @@ import type { SandboxPolicy } from "./types"
  *  - `workspace-write-net` → same as `workspace-write` PLUS a
  *                            `--network-deferred` marker (see note below).
  *  - `extraReadPaths`      → merged into `--ro-paths`
- *  - `extraWritePaths`     → merged into `--rw-paths`
+ *  - `extraWritePaths`     → merged into `--rw-paths` on EVERY compiled arm,
+ *                            `read-only` included (see the cross-backend
+ *                            contract on `SandboxPolicy.extraWritePaths`).
  *
  * Network enforcement note (deliberate gap):
  *   Landlock as of Linux 6.7+ has a partial `network.bind`/`network.connect`
@@ -88,8 +90,17 @@ export const compileLandlockCliArgs = (
     // Workspace itself joins the RO list.
     roList.push(workspace)
     for (const p of extraReads) roList.push(p)
-    // extraWritePaths on a read-only profile: silently dropped (mirrors
-    // bubblewrap behavior — RO profile means no writes by definition).
+    // extraWritePaths on a read-only profile are HONORED — `read-only` denies
+    // ambient writes (workspace included, which stays on the RO list above),
+    // not the caller-owned scratch scopes named by the policy. Seatbelt and
+    // bubblewrap have always honored them (`(allow file-write* ...)` /
+    // `--bind p p`); dropping them here made `bash(mode:"read")` here-docs and
+    // `mktemp` fail with EACCES on landlock-only hosts alone. The old comment
+    // claiming this "mirrors bubblewrap behavior" was factually wrong —
+    // `compileBubblewrapArgs` binds extras RW on every compiled arm.
+    if (extraWrites.length > 0) {
+      args.push("--rw-paths", extraWrites.join(","))
+    }
   } else {
     // workspace-write / workspace-write-net
     for (const p of extraReads) roList.push(p)

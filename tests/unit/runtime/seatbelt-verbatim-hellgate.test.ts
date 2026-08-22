@@ -46,6 +46,12 @@ describe("ADR-0199 — Seatbelt verbatim parity (HELL-SB-01..04, 10)", () => {
     expect(out.includes("(allow file-write*")).toBe(false)
   })
 
+  // aug-22: this arm states the CANONICAL cross-backend contract (now written
+  // down on `SandboxPolicy.extraWritePaths`) — read-only denies the ambient FS
+  // (workspace included) but keeps the caller-owned scopes. landlock-cli and
+  // windows used to pin the opposite and stayed green; the divergence is now
+  // pinned for all compilers at once in
+  // tests/unit/os-sandbox-write-scope-parity-hellgate.test.ts.
   test("HELL-SB-02c: read-only honors explicit scoped extraWritePaths only", () => {
     const out = compileSeatbeltProfile(
       {

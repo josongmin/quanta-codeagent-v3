@@ -200,17 +200,25 @@ describe("ADR-0313 hellgate — redaction is mandatory", () => {
         },
       },
     })
-    // postComment is no-throw — it catches the redact crash via the outer try.
-    // Without explicit catch, the throw would bubble. We accept either result
-    // as long as we don't double-post: assert "throw OR ok=false".
-    let threw = false
-    try {
-      const res = await sink.postComment({ body: "x", key })
-      expect(res.ok).toBe(false)
-    } catch {
-      threw = true
-    }
-    // Either path is correct; both signal "do not post" to the caller.
-    expect(threw || true).toBe(true)
+    // aug-22 audit: this used to be `try { expect(res.ok).toBe(false) } catch
+    // { threw = true }` closed by `expect(threw || true).toBe(true)` — a literal
+    // tautology, and worse, the `catch` converted the ONLY real assertion's
+    // failure into the "threw" branch. A mutation making `prepareBody` swallow
+    // the redact error and post the UNMASKED body (the secret-leak bug this file
+    // exists to catch) passed 1/0. Both admissible outcomes are now asserted
+    // explicitly, and the decisive invariant — nothing was POSTED — is checked
+    // against the gh call log rather than inferred.
+    const outcome = await sink
+      .postComment({ body: "x", key })
+      .then((res) => ({ threw: false, ok: res.ok }))
+      .catch(() => ({ threw: true, ok: undefined }))
+    // Either "threw" or "ok:false" is admissible; "ok:true" is not.
+    expect(outcome.threw || outcome.ok === false).toBe(true)
+    expect(outcome.ok).not.toBe(true)
+    // The load-bearing part: a crashed redact must never reach the wire. Uses
+    // this file's own `findPostBody` helper so the check reads the SAME call
+    // shape every other test here asserts on (a hand-rolled filter over the
+    // wrong element type would silently match nothing — vacuous again).
+    expect(findPostBody(gh.calls)).toBeUndefined()
   })
 })

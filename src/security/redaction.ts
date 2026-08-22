@@ -219,7 +219,11 @@ const patterns: ReadonlyArray<Pattern> = [
   {
     kind: "generic_api_key_assignment",
     regex:
-      /\b(?:api[_-]?key|access[_-]?token|secret[_-]?key|auth[_-]?token|private[_-]?token)["']?\s*[=:]\s*["']?[A-Za-z0-9_-]{20,}["']?/gi,
+      // aug-22 audit: `refresh[_-]?token` added. An OAuth record redacted its
+      // `access_token` (matched by `access[_-]?token`) while the sibling
+      // `refresh_token` — which re-mints access tokens indefinitely — passed
+      // through verbatim into model context, terminal, and JSONL trajectories.
+      /\b(?:api[_-]?key|access[_-]?token|refresh[_-]?token|secret[_-]?key|auth[_-]?token|private[_-]?token)["']?\s*[=:]\s*["']?[A-Za-z0-9_-]{20,}["']?/gi,
   },
 ]
 

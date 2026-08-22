@@ -90,14 +90,33 @@ describe("findBoundary", () => {
   })
 
   test("keepTurns=0 over a tool pair stays orphan-free and never out of bounds", () => {
-    // The empty-suffix path must not leave a dangling tool_result either.
+    // TEETH (aug-22 test-quality audit): this test used to run ZERO assertions.
+    // With an ASSISTANT tail the contract is an EMPTY suffix (`findBoundary`
+    // returns `messages.length`, pinned by the test above), so every `expect`
+    // lived inside a double loop over `[]`. Case (a) now asserts that emptiness
+    // explicitly, and case (b) adds the tool_result-tail shape where the suffix
+    // is NON-empty and the orphan walk actually executes.
+
+    // (a) assistant tail ⇒ nothing retained. An empty suffix is trivially
+    //     orphan-free; the CLAIM under test here is only "no out-of-bounds".
     const msgs = [
       assistantToolUse("t1", "calling"),
       toolResult("t1", "result"),
       assistantText("done"),
     ]
     const b = findBoundary(msgs, 0)
-    const suffix = msgs.slice(b)
+    expect(b).toBe(msgs.length)
+    expect(msgs.slice(b)).toEqual([]) // the contract, asserted — not assumed
+
+    // (b) tool_result TAIL ⇒ the initial cut retains the tool_result ALONE
+    //     (its tool_use sits in the prefix), so the backward orphan walk must
+    //     fire and pull the tool_use back in. This is the non-vacuous half:
+    //     the suffix is non-empty and every retained tool_result is checked.
+    const pair = [assistantToolUse("t2", "calling"), toolResult("t2", "result")]
+    const b2 = findBoundary(pair, 0)
+    const suffix = pair.slice(b2)
+    expect(suffix.length).toBeGreaterThan(0) // pin: the loops below are NOT vacuous
+    expect(b2).toBe(0) // walked back from 1 → 0 to keep the pair together
     const useIds = new Set(
       suffix.flatMap((m) =>
         m.content
@@ -105,11 +124,16 @@ describe("findBoundary", () => {
           .map((x) => (x.type === "tool_use" ? x.id : "")),
       ),
     )
+    let resultsChecked = 0
     for (const m of suffix) {
       for (const x of m.content) {
-        if (x.type === "tool_result") expect(useIds.has(x.tool_use_id)).toBe(true)
+        if (x.type === "tool_result") {
+          resultsChecked += 1
+          expect(useIds.has(x.tool_use_id)).toBe(true)
+        }
       }
     }
+    expect(resultsChecked).toBe(1) // exactly the one retained tool_result was checked
   })
 })
 

@@ -6,8 +6,14 @@
  * B4: Multi-line match text breaks one-line output format
  * B7: No stdout size cap before JSON.parse — OOM risk on large repos
  *
- * Tests that require ast-grep binary are skipped when it's not available.
- * Tests that are purely structural run always.
+ * GATING (aug-22 test-quality audit): binary-dependent tests are gated with
+ * `test.skipIf(!astGrepAvailable)` so the runner COUNTS them as `skip`. They
+ * previously opened with `if (!astGrepAvailable) { return }`, which bun tallies
+ * as a PASS — on a machine without ast-grep this file reported 22/22 green while
+ * 8 tests (including the B1 fs-jail SECURITY cases) executed zero assertions.
+ * `B2-2` is gated the other way (`skipIf(astGrepAvailable)`) — it is only
+ * meaningful when the binary is ABSENT. Purely structural source ratchets run
+ * always.
  */
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
@@ -176,66 +182,63 @@ describe("SRC-7: stdout is capped before JSON.parse (B7 source ratchet)", () => 
 // ════════════════════════════════════════════════════════════════════════════
 
 describe("B1: path argument is validated against fs-jail", () => {
-  test("B1-1: path outside the workspace cwd produces ok:false (FsJailError caught)", async () => {
-    if (!astGrepAvailable) {
-      return
-    }
+  test.skipIf(!astGrepAvailable)(
+    "B1-1: path outside the workspace cwd produces ok:false (FsJailError caught)",
+    async () => {
+      // Red-on-injection: remove the resolveJailed call in ast-grep/index.ts →
+      // the tool passes '/etc/passwd' straight to ast-grep, reads an arbitrary
+      // file outside the workspace; ok:true with real content instead of ok:false.
+      const result = await runTool({ pattern: "root", path: "/etc/passwd" }, tmpDir)
 
-    // Red-on-injection: remove the resolveJailed call in ast-grep/index.ts →
-    // the tool passes '/etc/passwd' straight to ast-grep, reads an arbitrary
-    // file outside the workspace; ok:true with real content instead of ok:false.
-    const result = await runTool({ pattern: "root", path: "/etc/passwd" }, tmpDir)
-
-    // The jail check must reject the path and return ok:false.
-    expect(result.ok).toBe(false)
-    // The error message must mention the path escaping or jail error.
-    expect(result.output.toLowerCase()).toMatch(/jail|escape|outside|root/i)
-  })
-
-  test("B1-2: path inside the workspace cwd succeeds (paired control)", async () => {
-    if (!astGrepAvailable) {
-      return
-    }
-
-    // Create a file inside tmpDir (which is the cwd / jail root).
-    const file = join(tmpDir, "b1-sample.ts")
-    writeFileSync(file, "console.log('hello');\n")
-
-    // Red-on-injection: if resolveJailed rejects ALL paths (over-strict), this
-    // test fails (ok:false for an in-jail path), catching the over-correction.
-    const result = await runTool({ pattern: "console.log($A)", path: file }, tmpDir)
-
-    expect(result.ok).toBe(true)
-    expect(result.output).toContain("b1-sample.ts")
-  })
-
-  test("B1-3: path with '..' escape sequence is rejected by jail (structural)", async () => {
-    if (!astGrepAvailable) {
-      return
-    }
-
-    // A path like '/tmp/quanta-ast-bugs-xxx/../../../etc' escapes the jail.
-    // resolveJailed must normalize and reject it.
-    const escapePath = join(tmpDir, "..", "..", "..", "etc", "hosts")
-
-    // Red-on-injection: without resolveJailed, the tool passes the path as-is;
-    // ast-grep reads /etc/hosts; result.ok is true.
-    const result = await runTool({ pattern: "localhost", path: escapePath }, tmpDir)
-
-    // Either the jail rejects it (ok:false) or the resolved path resolves
-    // inside tmpDir and returns no matches (ok:true with no-match).
-    // The important thing: it must NOT successfully read /etc/hosts with ok:true
-    // and content containing "localhost".
-    // Actually the canonical resolved path would be /etc/hosts — which is outside
-    // the jail. So ok:false is expected.
-    if (result.ok) {
-      // If it somehow returned ok:true, the output must NOT contain real /etc/hosts content
-      expect(result.output).not.toMatch(/^\/etc\/hosts:\d+:/m)
-    } else {
-      // ok:false — the jail rejected it
+      // The jail check must reject the path and return ok:false.
       expect(result.ok).toBe(false)
-    }
-  })
+      // The error message must mention the path escaping or jail error.
+      expect(result.output.toLowerCase()).toMatch(/jail|escape|outside|root/i)
+    },
+  )
+
+  test.skipIf(!astGrepAvailable)(
+    "B1-2: path inside the workspace cwd succeeds (paired control)",
+    async () => {
+      // Create a file inside tmpDir (which is the cwd / jail root).
+      const file = join(tmpDir, "b1-sample.ts")
+      writeFileSync(file, "console.log('hello');\n")
+
+      // Red-on-injection: if resolveJailed rejects ALL paths (over-strict), this
+      // test fails (ok:false for an in-jail path), catching the over-correction.
+      const result = await runTool({ pattern: "console.log($A)", path: file }, tmpDir)
+
+      expect(result.ok).toBe(true)
+      expect(result.output).toContain("b1-sample.ts")
+    },
+  )
+
+  test.skipIf(!astGrepAvailable)(
+    "B1-3: path with '..' escape sequence is rejected by jail (structural)",
+    async () => {
+      // A path like '/tmp/quanta-ast-bugs-xxx/../../../etc' escapes the jail.
+      // resolveJailed must normalize and reject it.
+      const escapePath = join(tmpDir, "..", "..", "..", "etc", "hosts")
+
+      // Red-on-injection: without resolveJailed, the tool passes the path as-is;
+      // ast-grep reads /etc/hosts; result.ok is true.
+      const result = await runTool({ pattern: "localhost", path: escapePath }, tmpDir)
+
+      // Either the jail rejects it (ok:false) or the resolved path resolves
+      // inside tmpDir and returns no matches (ok:true with no-match).
+      // The important thing: it must NOT successfully read /etc/hosts with ok:true
+      // and content containing "localhost".
+      // Actually the canonical resolved path would be /etc/hosts — which is outside
+      // the jail. So ok:false is expected.
+      if (result.ok) {
+        // If it somehow returned ok:true, the output must NOT contain real /etc/hosts content
+        expect(result.output).not.toMatch(/^\/etc\/hosts:\d+:/m)
+      } else {
+        // ok:false — the jail rejected it
+        expect(result.ok).toBe(false)
+      }
+    },
+  )
 })
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -283,33 +286,32 @@ describe("B2: probe cache must not permanently cache failure", () => {
     expect(astGrepTool.name).toBe("ast_grep")
   })
 
-  test("B2-2: structural source-code pattern — failure must not permanently block re-probe", async () => {
-    // Verify that if we call the tool twice when binary is absent, both calls
-    // still return ok:false (this is compatible with both the bug and the fix,
-    // but documents the contract).
-    //
-    // Red-on-injection: if the fix is reverted (probeResult cached as string
-    // and never re-probed), both calls still fail — but the failure is "stuck"
-    // even after binary install. We cannot test the "after install" scenario
-    // without controlling the module lifecycle.
-    //
-    // The meaningful test: call twice, verify shape.
-    if (astGrepAvailable) {
-      return
-    }
+  test.skipIf(astGrepAvailable)(
+    "B2-2: structural source-code pattern — failure must not permanently block re-probe",
+    async () => {
+      // Verify that if we call the tool twice when binary is absent, both calls
+      // still return ok:false (this is compatible with both the bug and the fix,
+      // but documents the contract).
+      //
+      // Red-on-injection: if the fix is reverted (probeResult cached as string
+      // and never re-probed), both calls still fail — but the failure is "stuck"
+      // even after binary install. We cannot test the "after install" scenario
+      // without controlling the module lifecycle.
+      //
+      // The meaningful test: call twice, verify shape.
+      const result1 = await runTool({ pattern: "foo($A)" }, tmpDir)
+      const result2 = await runTool({ pattern: "bar($A)" }, tmpDir)
 
-    const result1 = await runTool({ pattern: "foo($A)" }, tmpDir)
-    const result2 = await runTool({ pattern: "bar($A)" }, tmpDir)
-
-    // Red-on-injection: if probeResult is cached as a Promise (concurrent-safe
-    // fix) both calls use the same Promise — this is the desired behavior.
-    // If reverted to raw string cache, both still fail (indistinguishable
-    // without mock injection). We assert basic shape:
-    expect(result1.ok).toBe(false)
-    expect(result2.ok).toBe(false)
-    expect(typeof result1.output).toBe("string")
-    expect(typeof result2.output).toBe("string")
-  })
+      // Red-on-injection: if probeResult is cached as a Promise (concurrent-safe
+      // fix) both calls use the same Promise — this is the desired behavior.
+      // If reverted to raw string cache, both still fail (indistinguishable
+      // without mock injection). We assert basic shape:
+      expect(result1.ok).toBe(false)
+      expect(result2.ok).toBe(false)
+      expect(typeof result1.output).toBe("string")
+      expect(typeof result2.output).toBe("string")
+    },
+  )
 })
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -317,113 +319,110 @@ describe("B2: probe cache must not permanently cache failure", () => {
 // ════════════════════════════════════════════════════════════════════════════
 
 describe("B4: multi-line match text must be collapsed to single output line", () => {
-  test("B4-1: multi-line function body match produces one output line per match", async () => {
-    if (!astGrepAvailable) {
-      return
-    }
+  test.skipIf(!astGrepAvailable)(
+    "B4-1: multi-line function body match produces one output line per match",
+    async () => {
+      // Write a file with a multi-line function that ast-grep can match as a
+      // whole (using a pattern that captures the function body).
+      const file = join(tmpDir, "b4-multiline.ts")
+      writeFileSync(
+        file,
+        `${[
+          "function greet(name: string) {",
+          "  const msg = `Hello, ${name}!`;",
+          "  return msg;",
+          "}",
+          "function add(a: number, b: number) {",
+          "  return a + b;",
+          "}",
+        ].join("\n")}\n`,
+      )
 
-    // Write a file with a multi-line function that ast-grep can match as a
-    // whole (using a pattern that captures the function body).
-    const file = join(tmpDir, "b4-multiline.ts")
-    writeFileSync(
-      file,
-      `${[
-        "function greet(name: string) {",
-        "  const msg = `Hello, ${name}!`;",
-        "  return msg;",
-        "}",
-        "function add(a: number, b: number) {",
-        "  return a + b;",
-        "}",
-      ].join("\n")}\n`,
-    )
+      // Use a pattern that matches a function declaration — ast-grep may return
+      // the entire multi-line function body as m.text.
+      const result = await runTool(
+        { pattern: "function $NAME($$$ARGS) { $$$BODY }", path: file, language: "typescript" },
+        tmpDir,
+      )
 
-    // Use a pattern that matches a function declaration — ast-grep may return
-    // the entire multi-line function body as m.text.
-    const result = await runTool(
-      { pattern: "function $NAME($$$ARGS) { $$$BODY }", path: file, language: "typescript" },
-      tmpDir,
-    )
+      if (!result.ok) {
+        return
+      }
 
-    if (!result.ok) {
-      return
-    }
-
-    // Each match line in the output must have the format "file:line: text"
-    // WITHOUT embedded newlines. If m.text contains '\n' and it's not stripped,
-    // a single match would span multiple lines, breaking the file:line: contract.
-    //
-    // Red-on-injection: remove the .replace(/\n/g, '↵') or .split('\n')[0] call
-    // from the text formatter → multi-line matches break the output into multiple
-    // lines per match; some lines lack the "file:line: " prefix; the regex below fails.
-    const outputLines = result.output.split("\n").filter((l) => l.trim() && !l.startsWith("..."))
-    expect(outputLines.length).toBeGreaterThan(0)
-
-    for (const line of outputLines) {
-      // Every non-"more" line must match the file:line: text format.
-      // A line WITH embedded newlines would NOT match because it would have
-      // been split into sub-lines by the earlier split("\n"), and sub-lines
-      // after the first would lack the "file:line: " prefix.
+      // Each match line in the output must have the format "file:line: text"
+      // WITHOUT embedded newlines. If m.text contains '\n' and it's not stripped,
+      // a single match would span multiple lines, breaking the file:line: contract.
       //
-      // The key invariant: the number of output lines must equal the number
-      // of matches (each match = exactly one output line).
-      expect(line).toMatch(/^.+:\d+: /)
-    }
-  })
+      // Red-on-injection: remove the .replace(/\n/g, '↵') or .split('\n')[0] call
+      // from the text formatter → multi-line matches break the output into multiple
+      // lines per match; some lines lack the "file:line: " prefix; the regex below fails.
+      const outputLines = result.output.split("\n").filter((l) => l.trim() && !l.startsWith("..."))
+      expect(outputLines.length).toBeGreaterThan(0)
 
-  test("B4-2: single-line match format is unchanged (paired control)", async () => {
-    if (!astGrepAvailable) {
-      return
-    }
+      for (const line of outputLines) {
+        // Every non-"more" line must match the file:line: text format.
+        // A line WITH embedded newlines would NOT match because it would have
+        // been split into sub-lines by the earlier split("\n"), and sub-lines
+        // after the first would lack the "file:line: " prefix.
+        //
+        // The key invariant: the number of output lines must equal the number
+        // of matches (each match = exactly one output line).
+        expect(line).toMatch(/^.+:\d+: /)
+      }
+    },
+  )
 
-    const file = join(tmpDir, "b4-singleline.ts")
-    writeFileSync(file, "console.log('hello');\n")
+  test.skipIf(!astGrepAvailable)(
+    "B4-2: single-line match format is unchanged (paired control)",
+    async () => {
+      const file = join(tmpDir, "b4-singleline.ts")
+      writeFileSync(file, "console.log('hello');\n")
 
-    const result = await runTool({ pattern: "console.log($A)", path: file }, tmpDir)
+      const result = await runTool({ pattern: "console.log($A)", path: file }, tmpDir)
 
-    expect(result.ok).toBe(true)
+      expect(result.ok).toBe(true)
 
-    // Red-on-injection: if the newline replacement adds '↵' to single-line
-    // matches (it shouldn't since .trim() removes trailing whitespace and
-    // single-line text has no '\n'), this assertion would still pass — the
-    // control just verifies single-line behavior is not broken.
-    const lines = result.output.split("\n").filter((l) => l.trim() && !l.startsWith("..."))
-    expect(lines.length).toBeGreaterThanOrEqual(1)
-    for (const line of lines) {
-      expect(line).toMatch(/^.+:\d+: /)
-    }
-  })
+      // Red-on-injection: if the newline replacement adds '↵' to single-line
+      // matches (it shouldn't since .trim() removes trailing whitespace and
+      // single-line text has no '\n'), this assertion would still pass — the
+      // control just verifies single-line behavior is not broken.
+      const lines = result.output.split("\n").filter((l) => l.trim() && !l.startsWith("..."))
+      expect(lines.length).toBeGreaterThanOrEqual(1)
+      for (const line of lines) {
+        expect(line).toMatch(/^.+:\d+: /)
+      }
+    },
+  )
 
-  test("B4-3: output line count equals match count (one line per match invariant)", async () => {
-    if (!astGrepAvailable) {
-      return
-    }
+  test.skipIf(!astGrepAvailable)(
+    "B4-3: output line count equals match count (one line per match invariant)",
+    async () => {
+      // Create a file with exactly 3 single-statement matches.
+      const file = join(tmpDir, "b4-count.ts")
+      writeFileSync(
+        file,
+        `${[
+          "console.log('a');",
+          "const x = 1;",
+          "console.log('b');",
+          "const y = 2;",
+          "console.log('c');",
+        ].join("\n")}\n`,
+      )
 
-    // Create a file with exactly 3 single-statement matches.
-    const file = join(tmpDir, "b4-count.ts")
-    writeFileSync(
-      file,
-      `${[
-        "console.log('a');",
-        "const x = 1;",
-        "console.log('b');",
-        "const y = 2;",
-        "console.log('c');",
-      ].join("\n")}\n`,
-    )
+      const result = await runTool({ pattern: "console.log($A)", path: file }, tmpDir)
 
-    const result = await runTool({ pattern: "console.log($A)", path: file }, tmpDir)
+      expect(result.ok).toBe(true)
 
-    expect(result.ok).toBe(true)
-
-    // Red-on-injection: if multi-line text is not stripped and one match
-    // happens to span 3 lines, the output line count would be > match count
-    // (extra lines without the file:line: prefix would appear).
-    // For single-line matches, this is trivially 3 = 3.
-    // The real test is B4-1 which forces multi-line matches.
-    const matchLines = result.output.split("\n").filter((l) => l.includes("console.log"))
-    expect(matchLines.length).toBe(3)
-  })
+      // Red-on-injection: if multi-line text is not stripped and one match
+      // happens to span 3 lines, the output line count would be > match count
+      // (extra lines without the file:line: prefix would appear).
+      // For single-line matches, this is trivially 3 = 3.
+      // The real test is B4-1 which forces multi-line matches.
+      const matchLines = result.output.split("\n").filter((l) => l.includes("console.log"))
+      expect(matchLines.length).toBe(3)
+    },
+  )
 })
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -431,74 +430,72 @@ describe("B4: multi-line match text must be collapsed to single output line", ()
 // ════════════════════════════════════════════════════════════════════════════
 
 describe("B7: stdout is capped before JSON.parse to prevent OOM", () => {
-  test("B7-1: tool handles truncated / oversized JSON gracefully (no throw)", async () => {
-    if (!astGrepAvailable) {
-      return
-    }
+  test.skipIf(!astGrepAvailable)(
+    "B7-1: tool handles truncated / oversized JSON gracefully (no throw)",
+    async () => {
+      // We cannot easily generate millions of matches in a unit test.
+      // Instead, we verify the defensive behavior: if the JSON is malformed
+      // (as would happen after a stdout truncation), the tool returns ok:false
+      // rather than throwing a SyntaxError.
+      //
+      // The tool already has a JSON.parse catch block. What the fix adds is the
+      // stdout cap BEFORE parsing, so the parse attempt is on a bounded string.
+      //
+      // We verify the parse-failure path is handled gracefully: simulate it by
+      // searching a non-JSON-producing path that still causes an error.
+      // A pattern on a non-existent language triggers exitCode > 1.
 
-    // We cannot easily generate millions of matches in a unit test.
-    // Instead, we verify the defensive behavior: if the JSON is malformed
-    // (as would happen after a stdout truncation), the tool returns ok:false
-    // rather than throwing a SyntaxError.
-    //
-    // The tool already has a JSON.parse catch block. What the fix adds is the
-    // stdout cap BEFORE parsing, so the parse attempt is on a bounded string.
-    //
-    // We verify the parse-failure path is handled gracefully: simulate it by
-    // searching a non-JSON-producing path that still causes an error.
-    // A pattern on a non-existent language triggers exitCode > 1.
+      let threw = false
+      let result: { ok: boolean; output: string } | null = null
+      try {
+        // Use a pattern on a very broad match to stress-test output size.
+        // Since we can't generate GB of output in a test, we just verify no throw.
+        result = await runTool({ pattern: "$A", path: tmpDir }, tmpDir)
+      } catch {
+        threw = true
+      }
 
-    let threw = false
-    let result: { ok: boolean; output: string } | null = null
-    try {
-      // Use a pattern on a very broad match to stress-test output size.
-      // Since we can't generate GB of output in a test, we just verify no throw.
-      result = await runTool({ pattern: "$A", path: tmpDir }, tmpDir)
-    } catch {
-      threw = true
-    }
+      // Red-on-injection: remove the try/catch around JSON.parse and also
+      // remove the stdout cap → on large output, JSON.parse throws SyntaxError
+      // (after truncation) or OOM; this test catches the throw.
+      expect(threw).toBe(false)
+      expect(result).not.toBeNull()
+      expect(typeof result!.ok).toBe("boolean")
+      expect(typeof result!.output).toBe("string")
+    },
+  )
 
-    // Red-on-injection: remove the try/catch around JSON.parse and also
-    // remove the stdout cap → on large output, JSON.parse throws SyntaxError
-    // (after truncation) or OOM; this test catches the throw.
-    expect(threw).toBe(false)
-    expect(result).not.toBeNull()
-    expect(typeof result!.ok).toBe("boolean")
-    expect(typeof result!.output).toBe("string")
-  })
+  test.skipIf(!astGrepAvailable)(
+    "B7-2: result count is bounded at MAX_MATCHES (50) regardless of input size",
+    async () => {
+      // Create a file with 60 matches. Cap should limit output to 50.
+      const lines = Array.from({ length: 60 }, (_, i) => `const v${i} = ${i};`)
+      const file = join(tmpDir, "b7-60vars.ts")
+      writeFileSync(file, `${lines.join("\n")}\n`)
 
-  test("B7-2: result count is bounded at MAX_MATCHES (50) regardless of input size", async () => {
-    if (!astGrepAvailable) {
-      return
-    }
+      // Red-on-injection: remove the --max-count flag and/or the stdout cap →
+      // ast-grep returns all 60 matches; after JSON.parse and slice(0, 50),
+      // only 50 appear (slice still works). But without the stdout cap, the
+      // interim RAM usage is unbounded. The observable test is the cap:
+      const result = await runTool(
+        { pattern: "const $VAR = $VAL", path: file, language: "typescript" },
+        tmpDir,
+      )
 
-    // Create a file with 60 matches. Cap should limit output to 50.
-    const lines = Array.from({ length: 60 }, (_, i) => `const v${i} = ${i};`)
-    const file = join(tmpDir, "b7-60vars.ts")
-    writeFileSync(file, `${lines.join("\n")}\n`)
+      expect(result.ok).toBe(true)
 
-    // Red-on-injection: remove the --max-count flag and/or the stdout cap →
-    // ast-grep returns all 60 matches; after JSON.parse and slice(0, 50),
-    // only 50 appear (slice still works). But without the stdout cap, the
-    // interim RAM usage is unbounded. The observable test is the cap:
-    const result = await runTool(
-      { pattern: "const $VAR = $VAL", path: file, language: "typescript" },
-      tmpDir,
-    )
+      // Count match lines (lines with "const v" prefix)
+      const matchLines = result.output.split("\n").filter((l) => l.match(/:\d+: const v/))
+      // Must be bounded at MAX_MATCHES (50)
+      expect(matchLines.length).toBeLessThanOrEqual(50)
 
-    expect(result.ok).toBe(true)
-
-    // Count match lines (lines with "const v" prefix)
-    const matchLines = result.output.split("\n").filter((l) => l.match(/:\d+: const v/))
-    // Must be bounded at MAX_MATCHES (50)
-    expect(matchLines.length).toBeLessThanOrEqual(50)
-
-    // If all 60 were returned without cap, the "more matches" indicator fires
-    // (which is the correct behavior after the fix).
-    if (matchLines.length === 50) {
-      expect(result.output).toContain("more matches")
-    }
-  })
+      // If all 60 were returned without cap, the "more matches" indicator fires
+      // (which is the correct behavior after the fix).
+      if (matchLines.length === 50) {
+        expect(result.output).toContain("more matches")
+      }
+    },
+  )
 
   test("B7-3: malformed JSON from truncated stdout is handled as ok:false not a throw", () => {
     // Structural test: simulate what happens when stdout is truncated mid-JSON.

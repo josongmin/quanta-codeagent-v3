@@ -34,6 +34,7 @@
  * I/O. Leaf slice — depends only on the local pure types.
  */
 
+import { assertNever } from "@/shared"
 import type { ApprovalMode, PermissionProfile } from "./permission-profile"
 import type { PermissionMode } from "./types"
 
@@ -49,8 +50,12 @@ export const approvalModeToContextMode = (mode: ApprovalMode): PermissionMode =>
     case "session":
     case "always":
       return "default"
+    // aug-22 audit: this arm used to `return "default"`, which SWALLOWED the
+    // `never` narrowing — the exact "silently picking a mode" the doc above says
+    // it prevents. A new `ApprovalMode` member now fails the BUILD here instead
+    // of being classified as prompt-the-user. Matches `permission/outcome.ts`.
     default:
-      return "default"
+      return assertNever(mode, "ApprovalMode")
   }
 }
 

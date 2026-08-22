@@ -169,20 +169,32 @@ describe("closeout-guard module purity", () => {
   )
 
   test("imports nothing from node:* or @/*", () => {
-    // The module currently has no imports at all. If a future edit adds one, it
-    // must be from `./types` ONLY — anything else fails this assertion.
+    // TEETH (aug-22 test-quality audit): the module has ZERO import lines, so
+    // the per-line loop below ran zero times and this test executed ZERO
+    // assertions — it passed no matter what the module imported (or whether the
+    // file was even read). Both facts are now asserted EXPLICITLY:
+    //   (a) floor — the source really was read;
+    //   (b) the import set itself — today it is EMPTY, which is the intended
+    //       state, not an accident. Adding ANY import makes `importLines`
+    //       non-empty and the per-line rules below start carrying the check.
+    expect(source.length).toBeGreaterThan(0)
+    expect(source).toContain("export const decideCloseoutGuard")
     const importLines = source
       .split("\n")
       .filter((l) => /^\s*import\b/.test(l) || /^\s*export\s+.*\bfrom\b/.test(l))
-    for (const line of importLines) {
-      expect(line).not.toMatch(/from\s+["']node:/)
-      expect(line).not.toMatch(/from\s+["']@\//)
-      // Only `./types` is permitted as an internal import.
-      const fromMatch = line.match(/from\s+["']([^"']+)["']/)
-      if (fromMatch?.[1]) {
-        expect(fromMatch[1]).toBe("./types")
-      }
-    }
+    // RULE (holds for any future import): only `./types` is permitted — never
+    // `node:*`, never `@/*`, never a bare package. Expressed as an offender
+    // LIST so it is a single assertion that stays meaningful whether the module
+    // has zero imports or ten.
+    const offenders = importLines.filter(
+      (l) => l.match(/from\s+["']([^"']+)["']/)?.[1] !== "./types",
+    )
+    expect(offenders).toEqual([])
+    // PIN (today's fact, asserted on purpose rather than left implicit): the
+    // module has NO imports at all. A future `./types` import passes the RULE
+    // and trips only this pin — an intentional review trigger, updated in one
+    // line. Before this pin the whole test executed ZERO assertions.
+    expect(importLines).toEqual([])
   })
 
   test("contains no Bun.spawn / Date / Math.random / fetch", () => {

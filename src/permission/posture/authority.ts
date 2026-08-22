@@ -26,6 +26,7 @@
  * `x?: T | undefined`.
  */
 
+import { errMessage } from "@/shared"
 import type { PermissionStore } from "../permission-store"
 import { currentBehaviorDefaultRecord, POSTURE_SCHEMA_VERSION } from "../posture-persistence"
 import { buildResolvedPosture } from "./availability"
@@ -195,7 +196,7 @@ export const createPostureAuthority = (deps: PostureAuthorityDeps): PostureAutho
       try {
         await deps.persistence.writeRequested(deps.threadId, encodeRecord(candidate, newRevision))
       } catch (err) {
-        const detail = err instanceof Error ? err.message : String(err)
+        const detail = errMessage(err)
         return { ok: false, rejection: { kind: "persist_failed", detail } }
       }
 

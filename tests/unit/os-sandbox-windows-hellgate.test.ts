@@ -163,12 +163,38 @@ describe("A. compileWindowsSandboxSpec — pure spec (OS-independent)", () => {
     expect(spec?.writePaths).toEqual(["C:\\ws", "\\\\server\\share", "C:\\ws\\out"])
   })
 
-  test("HELL-A9: read-only drops extraWritePaths (no writes by definition)", () => {
-    const spec = compileWindowsSandboxSpec(
+  test("HELL-A9: read-only NEVER makes the workspace writable (ambient FS write denied)", () => {
+    // The original invariant this test defended: a `read-only` spec must not
+    // hand out a workspace write ACL. That is preserved — both with and
+    // without extras. What CHANGED (aug-22 cross-backend parity fix) is the
+    // over-broad half: extras are no longer dropped (see HELL-A9b).
+    const bare = compileWindowsSandboxSpec({ profile: "read-only" }, "C:\\ws")
+    expect(bare?.writePaths).toEqual([])
+
+    const withExtras = compileWindowsSandboxSpec(
       { profile: "read-only", extraWritePaths: ["D:\\x"] },
       "C:\\ws",
     )
-    expect(spec?.writePaths).toEqual([])
+    expect(withExtras?.writePaths).not.toContain("C:\\ws")
+    // ...and no relative-resolved workspace child sneaks in either.
+    for (const p of withExtras?.writePaths ?? []) {
+      expect(p.startsWith("C:\\ws")).toBe(false)
+    }
+  })
+
+  test("HELL-A9b: read-only HONORS scoped extraWritePaths (bash mode=read TMPDIR scope)", () => {
+    // Cross-backend contract (`SandboxPolicy.extraWritePaths`): seatbelt and
+    // bubblewrap always emitted these on read-only; windows silently dropped
+    // them, so `bash(mode:"read")` here-docs / `mktemp` would EACCES on this
+    // backend alone. Parity is pinned for all backends at once in
+    // tests/unit/os-sandbox-write-scope-parity-hellgate.test.ts.
+    const spec = compileWindowsSandboxSpec(
+      { profile: "read-only", extraWritePaths: ["D:\\x", "scratch"] },
+      "C:\\ws",
+    )
+    // Absolute verbatim; relative still resolves against the workspace (same
+    // resolution rule as the write profiles — HELL-A8).
+    expect(spec?.writePaths).toEqual(["D:\\x", "C:\\ws\\scratch"])
   })
 
   test("HELL-A10: memoryMb/timeoutMs exactOptional — present when set, omitted when absent", () => {

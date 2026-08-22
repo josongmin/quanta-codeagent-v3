@@ -950,7 +950,10 @@ export const assembleAgentConfig = (req: AssembleRequest, env: AssemblerEnv): Ag
   // circuits ⇒ byte-identical legacy. Intentionally NOT called from the
   // bench composition root (ADR-0334 row 4): bench cfg has no sessionId
   // and stays empty-deps for replay determinism.
-  autoWirePluginActivation(cfg)
+  // aug-22 audit — pass the run MODE so repo-supplied plugin manifests are not
+  // auto-wired in an UNTRUSTED tree (ci-bot = PR checkout, daemon = webhook
+  // worktree, batch = hermetic sandbox). Same policy that gates repo AGENTS.md.
+  autoWirePluginActivation(cfg, {}, { mode: req.mode })
   return cfg
 }
 

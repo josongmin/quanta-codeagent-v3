@@ -105,6 +105,17 @@ export const classifyPath = (absolutePath: string, home: string): SensitivityCla
   // gcloud Application Default Credentials — holds a refresh token. Lives
   // under ~/.config/gcloud so it would otherwise fall through to "internal".
   if (p.endsWith("/application_default_credentials.json")) return "secret"
+  // aug-22 audit — OUR OWN token stores. This list protected every other
+  // tool's credentials (~/.aws, ~/.docker, ~/.kube, gh, gcloud) while quanta's
+  // and codex's own OAuth records classified as `public`, so `cat
+  // ~/.quanta/auth/chatgpt.json` was never whole-file redacted. The records
+  // hold a `refresh_token`, which mints access tokens indefinitely — strictly
+  // more valuable than the access token Layer-2 already masks.
+  if (p.includes("/.quanta/auth/")) return "secret"
+  if (p.includes("/.quanta/mcp-oauth/")) return "secret"
+  if (p.endsWith("/.codex/auth.json")) return "secret"
+  // npm registry auth (`//registry.npmjs.org/:_authToken=…`).
+  if (bn === ".npmrc") return "secret"
 
   // 5. tree matches — anything under ~/.gnupg/ is a key ring.
   if (p.includes("/.gnupg/")) return "secret"

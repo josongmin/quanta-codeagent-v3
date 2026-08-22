@@ -31,7 +31,33 @@ export interface SandboxPolicy {
   /** Additional read-allow paths. Absolute paths preserved verbatim;
    *  workspace-relative resolved against the policy's workspace. */
   readonly extraReadPaths?: ReadonlyArray<string>
-  /** Additional write-allow paths. Same resolution rules. */
+  /** Additional write-allow paths. Same resolution rules.
+   *
+   *  CROSS-BACKEND CONTRACT (aug-22 parity fix) — **`read-only` HONORS
+   *  `extraWritePaths`.** A `read-only` profile denies writes to the
+   *  *ambient* filesystem (workspace included); it does NOT revoke the
+   *  narrow, caller-owned scopes named here. Every compiler
+   *  ({@link compileSeatbeltProfile}, {@link compileBubblewrapArgs},
+   *  {@link compileLandlockCliArgs}, {@link compileWindowsSandboxSpec})
+   *  MUST emit these paths as writable on EVERY profile arm it compiles,
+   *  and MUST still deny the workspace on `read-only`. Pinned for all
+   *  backends at once by `tests/unit/os-sandbox-write-scope-parity-hellgate.test.ts`
+   *  — do not re-derive the rule per backend.
+   *
+   *  Why honor (live consumer): `createReadModeTempScope`
+   *  (`src/tool/bash/index.ts`) mkdtemps a scratch dir, points `TMPDIR` at
+   *  it and passes it here for `bash(mode:"read")`. Shell here-docs and
+   *  python/ruby `tempfile` write under `TMPDIR`, so dropping these paths
+   *  turns every read-mode here-doc/`mktemp` into EACCES — and only on the
+   *  hosts whose backend drops them, which is a silent, host-dependent
+   *  failure rather than an honest refusal.
+   *
+   *  KNOWN NON-CONFORMANCE (not fixed here — Linux-only, needs a Rust
+   *  build to verify): the native Landlock backend grants these paths the
+   *  *profile's* access set, so on `read-only` they land read-only
+   *  (`crates/linux-sandbox-native/src/policy.rs` — `extra_write_paths`
+   *  loop reuses `workspace_access`). The TS mapper forwards them verbatim;
+   *  the drop is on the Rust side. */
   readonly extraWritePaths?: ReadonlyArray<string>
   /** Network policy override — when `profile` doesn't already allow.
    *  When the profile already allows network (e.g. `workspace-write-net`,

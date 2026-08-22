@@ -115,7 +115,20 @@ export const ALL_GIT_WRITE_PROTECT_REASONS: ReadonlyArray<GitWriteProtectReason>
  * it can never equal a literal pattern segment so it cannot cause a match).
  */
 const segmentsOf = (path: string): ReadonlyArray<string> =>
-  path.split(/[/\\]+/).filter((seg) => seg.length > 0 && seg !== ".")
+  path
+    .split(/[/\\]+/)
+    .filter((seg) => seg.length > 0 && seg !== ".")
+    // aug-22 audit — CASE-FOLDED. Every literal this matcher compares against
+    // (`.git`, `hooks`, `config`, `config.worktree`, `info`, `attributes`,
+    // `.vscode`) is lowercase, and macOS (APFS/HFS+) and Windows resolve
+    // `.git/CONFIG` to the SAME inode as `.git/config`. Comparing verbatim let
+    // `write { path: ".git/CONFIG" }` land a `[alias]` shell hook while the
+    // guard reported "not protected" — the FS jail correctly allows it (it IS
+    // inside the workspace), so this matcher was the only thing standing there.
+    // Folding is deny-WIDENING only: it can never un-protect a path that the
+    // verbatim comparison protected. `..` folds to itself, so the doc's
+    // "`..` can never equal a literal segment" property is preserved.
+    .map((seg) => seg.toLowerCase())
 
 /**
  * Index of the FIRST `.git` segment, or -1 if none. A nested `.git` (git

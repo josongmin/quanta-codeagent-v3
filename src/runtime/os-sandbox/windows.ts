@@ -29,7 +29,7 @@ import type { SandboxPolicy } from "./types"
  * | Profile               | restrictedToken | integrity | FS                            | network |
  * | --------------------- | --------------- | --------- | ----------------------------- | ------- |
  * | off                   | — (→ null)      | —         | —                             | —       |
- * | read-only             | true            | low       | all read, NO write            | deny    |
+ * | read-only             | true            | low       | all read, write ONLY extras   | deny    |
  * | workspace-write       | true            | low       | system read, workspace write  | deny    |
  * | workspace-write-net   | true            | low       | system read, workspace write  | allow   |
  * | danger-full-access    | — (→ null)      | —         | —                             | —       |
@@ -53,9 +53,11 @@ export interface WindowsSandboxSpec {
    *  objects (Windows Mandatory Integrity Control), which is the FS-write-deny
    *  backbone for the system tree. */
   readonly integrityLevel: "low" | "medium" | "untrusted"
-  /** Paths granted explicit write ACLs (workspace + extraWritePaths,
-   *  resolved). Empty for read-only. Verbatim path strings (no escaping — the
-   *  helper receives them JSON-over-stdin, so quoting/UNC is a non-issue). */
+  /** Paths granted explicit write ACLs, resolved. `workspace + extraWritePaths`
+   *  on the write profiles; `extraWritePaths` ONLY on `read-only` (the
+   *  workspace is never writable there). Empty for `read-only` with no extras.
+   *  Verbatim path strings (no escaping — the helper receives them
+   *  JSON-over-stdin, so quoting/UNC is a non-issue). */
   readonly writePaths: ReadonlyArray<string>
   /** Paths the child may read (system tree is implicit via Low integrity;
    *  this list is workspace + extraReadPaths, resolved). */
@@ -104,10 +106,13 @@ export const compileWindowsSandboxSpec = (
   // readPaths: workspace is always readable; plus extras.
   const readPaths: string[] = [workspace, ...extraReads]
 
-  // writePaths: empty for read-only (FS write fully denied); workspace + extras
-  // otherwise. read-only also drops extraWritePaths (a read-only profile means
-  // no writes by definition — same as landlock-cli's silent drop).
-  const writePaths: string[] = policy.profile === "read-only" ? [] : [workspace, ...extraWrites]
+  // writePaths: `read-only` denies the AMBIENT filesystem — the workspace is
+  // dropped — but still honors the caller-owned scopes in `extraWritePaths`
+  // (cross-backend contract on `SandboxPolicy.extraWritePaths`; seatbelt and
+  // bubblewrap have always honored them, and the old "same as landlock-cli's
+  // silent drop" justification pointed at the bug that was fixed there).
+  const writePaths: string[] =
+    policy.profile === "read-only" ? [...extraWrites] : [workspace, ...extraWrites]
 
   return {
     restrictedToken: true,

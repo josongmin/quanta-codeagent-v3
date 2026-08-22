@@ -154,7 +154,6 @@ export const FORBIDDEN_FRAMING: ReadonlySet<string> = new Set([
 /** Headers stripped when a redirect crosses ORIGIN (scheme+host+port). Mirrors
  *  Claude Code IDE's cross-origin token-strip — a redirect that leaves the origin
  *  must NOT carry the originating credentials/host onward (token-leak defense). */
-export const CROSS_ORIGIN_STRIP_HEADERS: readonly string[] = ["authorization", "cookie", "host"]
 
 /** Normalize a header name to its canonical lowercase match form. */
 const norm = (name: string): string => name.trim().toLowerCase()
@@ -279,52 +278,9 @@ export const applyHeaderRules = (
   return { headers: out, audit }
 }
 
-/**
- * True when a redirect from `fromUrl` to `toUrl` crosses ORIGIN — i.e. the scheme,
- * host, OR port differ. When true the caller drops the cross-origin-sensitive
- * headers ({@link CROSS_ORIGIN_STRIP_HEADERS}: `authorization`/`cookie`/`host`) so
- * a redirect that leaves the origin cannot leak the originating credentials.
- *
- * Default scheme ports are normalized (http→80, https→443) so `http://h` vs
- * `http://h:80` is the SAME origin (no spurious strip). An UNPARSEABLE url is
- * treated as cross-origin (fail-closed — strip rather than risk a leak). PURE /
- * NO-THROW.
- */
-export const shouldStripOnRedirect = (fromUrl: string, toUrl: string): boolean => {
-  const from = parseOrigin(fromUrl)
-  const to = parseOrigin(toUrl)
-  // A url we cannot parse ⇒ fail-closed: treat as cross-origin (strip).
-  if (from === null || to === null) return true
-  return from.scheme !== to.scheme || from.host !== to.host || from.port !== to.port
-}
-
-/** The canonical origin tuple (scheme + lowercased host + effective port). */
-interface Origin {
-  readonly scheme: string
-  readonly host: string
-  readonly port: number
-}
-
-/** Default port for the well-known schemes (so `:80`/`:443` is not a spurious
- *  origin difference). Unknown scheme ⇒ `0` (only matches another `0`-port). */
-const defaultPortFor = (scheme: string): number =>
-  scheme === "https:"
-    ? 443
-    : scheme === "http:"
-      ? 80
-      : scheme === "ws:"
-        ? 80
-        : scheme === "wss:"
-          ? 443
-          : 0
-
-const parseOrigin = (raw: string): Origin | null => {
-  try {
-    const u = new URL(raw)
-    const scheme = u.protocol.toLowerCase()
-    const port = u.port !== "" ? Number(u.port) : defaultPortFor(scheme)
-    return { scheme, host: u.hostname.toLowerCase(), port }
-  } catch {
-    return null
-  }
-}
+// aug-22 audit — the redirect-hygiene helpers MOVED to `@/shared/net/redirect-hygiene`.
+// They were written here and had ZERO callers while `fetchWithSsrfGuard` (in
+// `@/shared`, which may not import `@/runtime`) leaked `Authorization` across
+// cross-origin redirects. The implementation now lives in the lowest slice both
+// consumers can reach; this re-export keeps every existing importer working.
+export { CROSS_ORIGIN_STRIP_HEADERS, shouldStripOnRedirect } from "@/shared/net/redirect-hygiene"

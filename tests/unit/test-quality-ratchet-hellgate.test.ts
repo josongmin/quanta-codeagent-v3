@@ -26,9 +26,17 @@
 
 import { describe, expect, test } from "bun:test"
 import { readdirSync, readFileSync, statSync } from "node:fs"
-import { join } from "node:path"
+import { dirname, join } from "node:path"
 
-const ROOTS = ["tests", "src"]
+/** aug-22 audit — REPO-ANCHORED, not cwd-relative. `ROOTS = ["tests","src"]`
+ *  resolved against the PROCESS cwd, and `walkTests` swallowed the resulting
+ *  `readdirSync` ENOENT, so running this ratchet from any other directory
+ *  scanned ZERO files and still passed every `<= ceiling` assertion. Measured:
+ *  660ms from the repo root vs 15ms from `/tmp`, same 3-pass result. An
+ *  anti-vacuity ratchet that is itself vacuous is worse than none, so the roots
+ *  are now derived from this file's own location and the walk fails loud. */
+const REPO_ROOT = dirname(dirname(import.meta.dir))
+const ROOTS = [join(REPO_ROOT, "tests"), join(REPO_ROOT, "src")]
 
 /** This ratchet file embeds the offending patterns inside matcher self-tests;
  *  exclude it so it never counts itself. */
@@ -43,8 +51,11 @@ function* walkTests(dir: string): Generator<string> {
   let entries: string[]
   try {
     entries = readdirSync(dir)
-  } catch {
-    return
+  } catch (e) {
+    // Fail LOUD. Swallowing this is what let an empty scan report "clean".
+    throw new Error(
+      `test-quality ratchet: cannot read ${dir} — the scan would be vacuous (${String(e)})`,
+    )
   }
   for (const entry of entries) {
     const p = join(dir, entry)
@@ -72,11 +83,14 @@ const LOC_ASSERT_INLINE =
 const scan = (): {
   trueTerminators: { total: number; byFile: Record<string, number> }
   locBudgets: { total: number; byFile: Record<string, number> }
+  filesScanned: number
 } => {
   const tt: Record<string, number> = {}
   const loc: Record<string, number> = {}
+  let filesScanned = 0
   for (const root of ROOTS) {
     for (const file of walkTests(root)) {
+      filesScanned += 1
       const text = readFileSync(file, "utf8")
       const fileHasLineCount = LINE_COUNT_DERIVE.test(text)
       let ttN = 0
@@ -97,6 +111,7 @@ const scan = (): {
   return {
     trueTerminators: { total: sum(tt), byFile: tt },
     locBudgets: { total: sum(loc), byFile: loc },
+    filesScanned,
   }
 }
 
@@ -111,6 +126,15 @@ const TRUE_TERMINATOR_CEILING = 12
 const LOC_BUDGET_CEILING = 0
 
 describe("test-quality ratchet (jun-08 audit)", () => {
+  // ANTI-VACUITY FLOOR (aug-22 audit). Every assertion below is a `<= ceiling`,
+  // which an EMPTY scan satisfies trivially. Before this floor the ratchet passed
+  // 3/3 while reading zero files (cwd-relative roots + a swallowed readdir error).
+  // The floor is what makes the ceilings mean anything. Sibling precedent:
+  // `dangerous-gate-strict-ratchet-hellgate.test.ts` — "walk not broken".
+  test("the scan actually read the repo (floor — a vacuous scan cannot pass)", () => {
+    expect(scan().filesScanned).toBeGreaterThan(2000)
+  })
+
   test(`A: expect(true).toBe(true) terminators stay <= ${TRUE_TERMINATOR_CEILING} (burn-down)`, () => {
     const { trueTerminators } = scan()
     if (trueTerminators.total > TRUE_TERMINATOR_CEILING) {
