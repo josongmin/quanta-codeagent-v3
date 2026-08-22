@@ -133,10 +133,13 @@ export {
 // user-disabled set + unified revision; active/searchable/management projections;
 // CAS setEnabled; versioned fail-closed disabled-set store behind a port).
 export {
+  copySkillMarkdown,
   createInMemoryDisabledStore,
   createJsonDisabledStore,
+  createNodeSkillActionPorts,
   createSkillRuntimeAuthority,
   createSkillRuntimeReader,
+  DEFAULT_SKILL_COPY_MAX_BYTES,
   DISABLED_SET_SCHEMA_VERSION,
   type DisabledStoreFs,
   type DisabledStorePort,
@@ -147,10 +150,17 @@ export {
   emptyDisabledSet,
   type ManagedSkill,
   nodeDisabledStoreFs,
+  nodeRevealCapability,
   type PersistedDisabledSet,
+  revealSkill,
   SKILL_DISABLE_REASONS,
+  type SkillActionPorts,
   type SkillActiveInventoryEntry,
+  type SkillCopyRejection,
+  type SkillCopyResult,
   type SkillDisableReason,
+  type SkillRevealRejection,
+  type SkillRevealResult,
   type SkillRuntimeAuthority,
   type SkillRuntimeAuthorityDeps,
   type SkillRuntimeReader,
@@ -158,6 +168,7 @@ export {
   type SkillRuntimeView,
   type SkillSetEnabledRejection,
   type SkillSetEnabledResult,
+  setSkillEnabledAction,
 } from "./runtime"
 // jun-6 — agent-callable skill-authoring tool (scaffold + validate + install).
 export {

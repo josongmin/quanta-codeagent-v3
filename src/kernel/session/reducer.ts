@@ -211,6 +211,33 @@ export const reduceSessionCommand = (
         ],
       }
     }
+    case "session.skill.set_enabled": {
+      // RFC-06 F5 — the SKILL disabled-set DOMAIN state lives in the F1 authority
+      // (durable disabled-set + unified revision), NOT in `KernelSessionState`;
+      // the kernel owns only the session revision echo (mirrors
+      // `session.objective.mutate` / `session.posture.set`, whose live cells are
+      // also host-owned). The reducer bumps the session revision + emits a state
+      // echo so subscribers observe the command was processed; the SCHEDULER
+      // applies the CAS mutation to the host authority. A negative outcome
+      // (unsupported host / stale / policy / persist) is thrown by the scheduler
+      // BEFORE this echo is ever appended.
+      const nextState = withRevision({ ...state })
+      return {
+        state: nextState,
+        hostAction: { kind: "none" },
+        events: [
+          {
+            eventId: crypto.randomUUID(),
+            seq: state.seq + 1,
+            revision: nextState.revision,
+            emittedAt,
+            causedByCommandId: command.commandId,
+            type: "session.state.updated",
+            state: toSessionStateView(nextState),
+          },
+        ],
+      }
+    }
     case "session.transcript.replace": {
       if (state.status === "running" || state.pendingApproval !== null) {
         throw new SessionProtocolValidationError("transcript_replace_unavailable")

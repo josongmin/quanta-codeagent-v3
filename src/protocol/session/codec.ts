@@ -192,6 +192,20 @@ export const decodeSessionCommand = (raw: string): SessionCommand => {
     }
     assertOptionalFiniteNumber(envelope.payload, "command", "expectedPostureRevision")
   }
+  // RFC-06 F5 — the skill enable/disable front door carries only scalars: the
+  // canonical `name` (string), the desired `enabled` state (boolean), and an
+  // OPTIONAL SKILL-domain CAS target. The codec is a LEAF (no `@/skill` value
+  // import): it asserts wire-shape sanity — a mistyped `name`/`enabled`/revision
+  // would silently break the string-keyed authority lookup / the CAS compare, so
+  // fail closed here; the HOST authority is the full validator (unknown skill /
+  // policy / persist fail closed at `setEnabled`).
+  if (envelope.payload.type === "session.skill.set_enabled") {
+    assertString(envelope.payload, "command", "name")
+    if (typeof envelope.payload.enabled !== "boolean") {
+      throw new SessionProtocolValidationError("bad_command_enabled_type")
+    }
+    assertOptionalFiniteNumber(envelope.payload, "command", "expectedSkillRevision")
+  }
   return envelope.payload as unknown as SessionCommand
 }
 

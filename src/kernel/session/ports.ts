@@ -8,6 +8,7 @@ import type {
   PostureCommandScope,
   PostureProjectionView,
   SessionEvent,
+  SkillCommandOutcome,
 } from "@/protocol/session"
 import type { ItemStreamCore } from "@/shared/item-stream"
 import type {
@@ -282,6 +283,21 @@ export interface SessionHost {
     readonly scope: PostureCommandScope
     readonly expectedRevision?: number
   }): Promise<PostureCommandOutcome> | PostureCommandOutcome
+  /**
+   * RFC-06 F5 — apply a SKILL enable/disable (the CLI action / authenticated web
+   * composer front door). The host routes it through the SHARED F1
+   * {@link SkillRuntimeAuthority}'s CAS `setEnabled` under the caller's
+   * `expectedRevision`, and returns a TYPED outcome. `ok` ⇒ the scheduler emits
+   * the session revision echo; a `stale_revision` / `unknown_skill` /
+   * `policy_denied` / `persist_failed` arm is a typed negative (no live
+   * mutation). The method being ABSENT is the distinct unsupported-host negative
+   * — the scheduler MUST raise it rather than report a silent success. There is
+   * NO delete/uninstall method (F6 PARKED). */
+  setSkillEnabled?(args: {
+    readonly name: string
+    readonly enabled: boolean
+    readonly expectedRevision?: number
+  }): Promise<SkillCommandOutcome> | SkillCommandOutcome
   startSideConversation?(
     args: SessionHostSideConversationArgs,
   ): Promise<SessionHostSideConversationResult>

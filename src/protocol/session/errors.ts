@@ -67,6 +67,66 @@ export class SessionPosturePersistError extends SessionProtocolError {
   }
 }
 
+/**
+ * RFC-06 F5 — a `session.skill.set_enabled` could NOT be applied because the
+ * host wired NO skill runtime authority projection. A TYPED NEGATIVE — the
+ * command must never report success through an absent optional host method
+ * (RFC-06 F5 hard rule, mirroring {@link SessionPostureUnsupportedError}).
+ */
+export class SessionSkillUnsupportedError extends SessionProtocolError {
+  constructor() {
+    super("session skill command is unsupported: host wired no setSkillEnabled projection")
+    this.name = "SessionSkillUnsupportedError"
+  }
+}
+
+/**
+ * RFC-06 F5 — a `session.skill.set_enabled` was rejected by the F1 authority
+ * because its `expectedSkillRevision` no longer matches the live SKILL-domain
+ * revision (a stale multi-surface edit). A typed CONFLICT — the winner's commit
+ * is never clobbered.
+ */
+export class SessionSkillConflictError extends SessionProtocolError {
+  constructor(
+    readonly expectedRevision: number,
+    readonly actualRevision: number,
+  ) {
+    super(`stale skill revision: expected ${expectedRevision}, got ${actualRevision}`)
+    this.name = "SessionSkillConflictError"
+  }
+}
+
+/**
+ * RFC-06 F5 — a `session.skill.set_enabled` was refused by admin policy
+ * (admin-required skills cannot be disabled; admin-banned skills cannot be
+ * enabled) or targeted an unknown skill. A typed DENIAL — no durable write, no
+ * publish.
+ */
+export class SessionSkillDeniedError extends SessionProtocolError {
+  constructor(
+    readonly detail: string,
+    /** `"required"` / `"banned"` for a policy denial; `"unknown"` for an unknown
+     *  skill (the F1 fail-closed arm). */
+    readonly reason: "required" | "banned" | "unknown",
+  ) {
+    super(`skill mutation denied (${reason}): ${detail}`)
+    this.name = "SessionSkillDeniedError"
+  }
+}
+
+/**
+ * RFC-06 F5 — a `session.skill.set_enabled` could not durably persist (the F1
+ * authority's persist-before-publish barrier refused to publish). A typed
+ * negative — the old disabled set stays live, never a published-but-unpersisted
+ * mutation.
+ */
+export class SessionSkillPersistError extends SessionProtocolError {
+  constructor(readonly detail: string) {
+    super(`skill mutation failed to persist: ${detail}`)
+    this.name = "SessionSkillPersistError"
+  }
+}
+
 export class SessionClosedError extends SessionProtocolError {
   constructor(readonly sessionId: string) {
     super(`session ${sessionId} is closed`)

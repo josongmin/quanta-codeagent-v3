@@ -202,6 +202,12 @@ export interface SessionObjectiveMutateCommand extends SessionCommandEnvelope<"s
   readonly expectedObjectiveRevision?: number
 }
 
+export interface SessionSkillSetEnabledCommand extends SessionCommandEnvelope<"session.skill.set_enabled"> {
+  readonly name: string
+  readonly enabled: boolean
+  readonly expectedSkillRevision?: number
+}
+
 export interface ApprovalRespondCommand extends SessionCommandEnvelope<"approval.respond"> {
   readonly approvalId: string
   readonly decision: "approve" | "deny"
@@ -217,6 +223,7 @@ export const SESSION_COMMAND_TYPES = [
     "session.objective.mutate",
     "session.permission.set",
     "session.posture.set",
+    "session.skill.set_enabled",
     "session.transcript.replace",
     "session.tool_profile.set",
     "turn.cancel",
@@ -225,7 +232,7 @@ export const SESSION_COMMAND_TYPES = [
 
 export type PostureCommandScope = "current" | "default"
 
-export type SessionCommand = InputAppendCommand | TurnRunCommand | TurnCancelCommand | SessionIdentitySetCommand | SessionTranscriptReplaceCommand | SessionToolProfileSetCommand | SessionPermissionSetCommand | SessionPostureSetCommand | SessionObjectiveMutateCommand | ApprovalRespondCommand
+export type SessionCommand = InputAppendCommand | TurnRunCommand | TurnCancelCommand | SessionIdentitySetCommand | SessionTranscriptReplaceCommand | SessionToolProfileSetCommand | SessionPermissionSetCommand | SessionPostureSetCommand | SessionObjectiveMutateCommand | SessionSkillSetEnabledCommand | ApprovalRespondCommand
 
 export type SessionCommandType = (typeof SESSION_COMMAND_TYPES)[number]
 

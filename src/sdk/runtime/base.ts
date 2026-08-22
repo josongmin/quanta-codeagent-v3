@@ -37,6 +37,16 @@ export interface RuntimeAgentConfigAugments {
    *  mode-only compat write (the E3 `permission.mode` adapter), byte-identical for
    *  a runtime without a wired posture control. */
   postureControl?: unknown
+  /** RFC-06 F5 — the surface-owned SHARED F1 skill runtime authority
+   *  (`@/skill` `SkillRuntimeAuthority`) threaded DOWN from the composition root
+   *  so the host `setSkillEnabled` projection (the `session.skill.set_enabled`
+   *  front door) and the CLI `/skill` actions mutate the SAME live authority the
+   *  per-turn prompt/search/invocation read (a disable here reaches the next
+   *  turn). Duck-typed `unknown` at this SDK layer (the `@/skill` slice is not
+   *  importable here). Absent ⇒ the host omits `setSkillEnabled` ⇒ the scheduler
+   *  raises the typed unsupported negative (byte-identical for a runtime without
+   *  a wired authority). */
+  skillRuntimeAuthority?: unknown
   admissibility?: unknown
   planExitPort?: unknown
   userInputPort?: unknown

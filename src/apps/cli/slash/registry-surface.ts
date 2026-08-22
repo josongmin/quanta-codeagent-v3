@@ -82,6 +82,7 @@ import {
   waitCmd,
 } from "./registry-surface/preferences-cmds"
 import { runSkillsRender } from "./render-helpers"
+import { isSkillActionsEnabled, skillCmd } from "./skill"
 
 const skillsCmd: SlashCommand = {
   name: "/skills",
@@ -660,6 +661,11 @@ export const buildSurfaceSlashCommands = (
   // the command table are byte-identical when the gate is unset (registration ≠
   // execution; parity with the /objective + /attention gates).
   ...(isPostureSelectorEnabled() ? [postureCmd] : []),
+  // RFC-06 F5 — `/skill` per-skill copy/reveal/enable/disable actions. DEFAULT-OFF
+  // (opt-IN): only registered when QUANTA_SKILL_ACTIONS is on, so `/help` + the
+  // command table are byte-identical when the gate is unset (registration ≠
+  // execution; parity with the /posture gate).
+  ...(isSkillActionsEnabled() ? [skillCmd] : []),
   forkCheckpointCmd,
   queueCmd,
   webCmd,

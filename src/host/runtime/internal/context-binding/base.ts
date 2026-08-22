@@ -515,6 +515,11 @@ const buildOptionalSnapshotFields = (
   // RFC-05 E4 — surface the posture front-door control so the per-turn base
   // carries it onto the host `setPosture` projection (mirrors `objective`).
   ...whenDefined("postureControl", base.postureControl),
+  // RFC-06 F5 — surface the shared F1 skill runtime authority so the per-turn
+  // base carries it onto the host `setSkillEnabled` projection (mirrors
+  // `postureControl`). Absent ⇒ the host omits `setSkillEnabled` ⇒ the scheduler
+  // raises the typed unsupported negative.
+  ...whenDefined("skillRuntimeAuthority", base.skillRuntimeAuthority),
   // §9.6 `/presets` — surface the role→model resolver so the compose PASS_THROUGH
   // patch round-trips it onto the base, whence `buildAgentConfigFromBase` spreads
   // it onto `AgentConfig.roleModelResolver` (mirrors `objective`). Absent ⇒ omitted

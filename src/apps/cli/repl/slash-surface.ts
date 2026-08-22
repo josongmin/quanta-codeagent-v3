@@ -181,6 +181,10 @@ export type ReplSlashCtx = Partial<{
    *  absent ⇒ `/attention` prints "not wired". The `focus-next-attention`
    *  KEY_ACTION hook reads the SAME wire. */
   attention: import("../slash/attention-cmd").AttentionSlashState
+  /** RFC-06 F5 `/skill` — the per-skill copy/reveal/enable/disable wire over the
+   *  SAME live F1 authority + action ports. Present iff `QUANTA_SKILL_ACTIONS`
+   *  composed them; absent ⇒ `/skill` prints "not wired". */
+  skillActions: import("../slash/skill").SkillActionsState
   /** jun-15 P0-b `/activity` — the session Activity Spine store (shared with the
    *  loop's `run_workflow` writer). Absent ⇒ ephemeral fleet-only view. */
   activityStore: import("@/activity").ActivityStore
@@ -237,6 +241,11 @@ export interface BuildReplSlashCtxArgs {
    *  absent/omitted ⇒ the `attention` ctx slot is omitted and `/attention` prints
    *  "not wired" (default-OFF byte-identical). */
   attention?: import("../slash/attention-cmd").AttentionSlashState | undefined
+  /** RFC-06 F5 `/skill` — the per-skill copy/reveal/enable/disable wire over the
+   *  SAME live F1 authority + action ports. Present iff `QUANTA_SKILL_ACTIONS`
+   *  composed them; absent/omitted ⇒ the `skillActions` ctx slot is omitted and
+   *  `/skill` prints "not wired" (default-OFF byte-identical). */
+  skillActions?: import("../slash/skill").SkillActionsState | undefined
   /** jun-15 P0-b `/activity` — session Activity Spine store (shared with the
    *  loop's `run_workflow` writer). Absent ⇒ `/activity` falls back to an
    *  ephemeral fleet-only view. */
@@ -609,6 +618,7 @@ export const buildReplSlashCtx = (args: BuildReplSlashCtxArgs): ReplSlashCtx => 
     contextUsage,
     taskRegistry,
     attention,
+    skillActions,
     activityStore,
     itemStreamSink,
     activityItems,
@@ -672,6 +682,10 @@ export const buildReplSlashCtx = (args: BuildReplSlashCtxArgs): ReplSlashCtx => 
     // RFC-01 A4 — `/attention` list/next/answer over the SAME broker + registry
     // A2 assembled. Absent slot ⇒ `/attention` "not wired" (byte-identical).
     ...(attention !== undefined ? { attention } : {}),
+    // RFC-06 F5 — `/skill` copy/reveal/enable/disable over the SAME live F1
+    // authority + action ports. Absent slot ⇒ `/skill` "not wired"
+    // (byte-identical when QUANTA_SKILL_ACTIONS is off).
+    ...(skillActions !== undefined ? { skillActions } : {}),
     // RFC02-1 — `/ps` owner-scoped background-shell inventory. Wired ONLY when
     // QUANTA_PROC_PANEL is on (same gate as the command registration). Reads the
     // LIVE singleton registry each invocation, scoped to THIS session's owner
@@ -739,6 +753,9 @@ const projectLegacySlots = (s: ReplSlashCtx): Record<string, unknown> => ({
   ...(s.brief !== undefined ? { brief: s.brief } : {}),
   ...(s.contextUsage !== undefined ? { contextUsage: s.contextUsage } : {}),
   ...(s.agents !== undefined ? { agents: s.agents } : {}),
+  // RFC-06 F5 — `/skill` copy/reveal/enable/disable wire (SSOT projector so the
+  // live REPL path carries it, not just the builder). Absent ⇒ "not wired".
+  ...(s.skillActions !== undefined ? { skillActions: s.skillActions } : {}),
   ...(s.activityStore !== undefined ? { activityStore: s.activityStore } : {}),
   ...(s.itemStreamSink !== undefined ? { itemStreamSink: s.itemStreamSink } : {}),
   // jul-03 CLI-surfacing — one presence-gated helper (shared with the builder).

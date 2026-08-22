@@ -1,7 +1,9 @@
 import { EFFORT_LEVELS, effortToTokenBudget } from "@/agent"
 import { gateOn } from "@/shared"
+import { createNodeSkillActionPorts } from "@/skill"
 import type { RestoreFilesCoordinatorPort } from "../../rewind-cmd"
 import { buildAttentionSlashState } from "../../slash/attention-cmd"
+import { buildSkillActionsState, isSkillActionsEnabled } from "../../slash/skill"
 import { buildRewindRestoreCoordinator } from "../rewind-restore-coordinator-wire"
 import type { SessionSetupResult } from "../session-setup"
 import { overlayRewindState } from "../session-switch-wire"
@@ -126,6 +128,23 @@ export const buildSurfaceSlashContext = (
           attention: buildAttentionSlashState(
             setup.lifecycleAttention,
             setup.lifecycleQuestionBroker,
+          ),
+        }
+      : {}),
+    // RFC-06 F5 — `/skill` copy/reveal/enable/disable wire over the SAME shared
+    // F1 authority (the one `boot.tooling.skillsConfig.authority` also holds) +
+    // the node action ports (action-time re-scan, bounded read, path-jail, OS
+    // reveal). Present iff `QUANTA_SKILL_ACTIONS` is on AND the session built the
+    // authority; absent ⇒ slot omitted ⇒ `/skill` prints "not wired"
+    // (byte-identical when OFF).
+    ...(isSkillActionsEnabled() && setup.skillAuthority !== undefined
+      ? {
+          skillActions: buildSkillActionsState(
+            setup.skillAuthority,
+            createNodeSkillActionPorts({
+              snapshotInputs:
+                setup.skillsConfig?.dir !== undefined ? { userDir: setup.skillsConfig.dir } : {},
+            }),
           ),
         }
       : {}),

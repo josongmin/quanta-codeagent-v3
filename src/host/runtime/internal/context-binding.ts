@@ -14,8 +14,13 @@ import {
 } from "@/objective"
 import { isPermissionMode } from "@/permission"
 import type { PostureControl } from "@/permission/posture/control"
-import type { PostureCommandOutcome, PostureCommandScope } from "@/protocol/session"
+import type {
+  PostureCommandOutcome,
+  PostureCommandScope,
+  SkillCommandOutcome,
+} from "@/protocol/session"
 import type { RuntimeAgentConfigBase, RuntimeAgentTurnAssembler } from "@/sdk/runtime/base"
+import type { SkillRuntimeAuthority } from "@/skill"
 import { createSingleSessionRuntimeHost } from "../builder"
 import type { RuntimeSessionConfig } from "../types"
 import {
@@ -270,6 +275,73 @@ const applyHostPostureMutation = async (
   return { ok: true }
 }
 
+/** Duck-typed read of the wired {@link SkillRuntimeAuthority} on the base (RFC-06
+ *  F5). Reads the SAME shared authority every other surface converges on — the
+ *  one threaded onto `config.skills.authority` by F4's composition (CLI
+ *  `boot.tooling.skillsConfig.authority`, web `skillsWithAuthority`), with an
+ *  explicit `base.skillRuntimeAuthority` override taking precedence. Absent both
+ *  ⇒ the host omits `setSkillEnabled` entirely, so the scheduler raises the typed
+ *  unsupported negative (never a silent success). */
+const asSkillAuthority = (base: {
+  skillRuntimeAuthority?: unknown
+  skills?: { authority?: unknown } | undefined
+}): SkillRuntimeAuthority | undefined =>
+  (base.skillRuntimeAuthority ?? base.skills?.authority) as SkillRuntimeAuthority | undefined
+
+/**
+ * RFC-06 F5 — the `SessionHost.setSkillEnabled` body (module-level to keep the
+ * host factory under the god-function cap). Routes the enable/disable through the
+ * SHARED F1 authority's CAS `setEnabled` (so the next turn's prompt/search/
+ * invocation read it), binding the operator's `expectedRevision` (absent ⇒ the
+ * host binds the CURRENT revision — an atomic caller). Returns a TYPED outcome
+ * mirroring the F1 rejection arms — never a silent success. NO delete arm.
+ */
+const applyHostSkillMutation = async (
+  authority: SkillRuntimeAuthority,
+  args: { name: string; enabled: boolean; expectedRevision?: number },
+): Promise<SkillCommandOutcome> => {
+  const expected = args.expectedRevision ?? authority.read().revision
+  const result = await authority.setEnabled(args.name, args.enabled, expected)
+  if (result.ok) return { ok: true, revision: result.view.revision }
+  const r = result.rejection
+  switch (r.kind) {
+    case "stale_revision":
+      return { ok: false, kind: "stale_revision", expected: r.expected, actual: r.actual }
+    case "unknown_skill":
+      return { ok: false, kind: "unknown_skill", name: r.name }
+    case "policy_denied":
+      return { ok: false, kind: "policy_denied", name: r.name, reason: r.reason }
+    case "persist_failed":
+      return { ok: false, kind: "persist_failed", detail: r.detail }
+  }
+}
+
+/** The `SessionHost.describe()` body (module-level to keep the host factory under
+ *  the god-function cap). Projects the session id / permission mode / capability
+ *  manifest + the optional identity/tool-profile/posture/model echoes. */
+const buildSessionHostDescription = (
+  base: RuntimeBase,
+  args: { readonly options: CreateRuntimeContextHostArgs },
+  capabilityManifest: ReturnType<typeof buildCapabilityManifest>,
+): ReturnType<SessionHost["describe"]> => ({
+  sessionId: base.sessionId ?? crypto.randomUUID(),
+  permissionMode: base.permission.mode,
+  capabilityManifest,
+  ...(args.options.boot?.identityModeState !== undefined
+    ? { identityMode: args.options.boot.identityModeState.get() }
+    : {}),
+  ...(args.options.boot?.toolProfileState !== undefined
+    ? { toolProfile: args.options.boot.toolProfileState.get() }
+    : {}),
+  // RFC-05 E4 — echo the live resolved posture when a posture control is wired.
+  ...((): { posture?: import("@/protocol/session").PostureProjectionView } => {
+    const posture = asPostureControl(base)?.describe()
+    return posture !== undefined ? { posture } : {}
+  })(),
+  messages: [...args.options.history],
+  ...(base.llm.model !== undefined ? { modelSlug: base.llm.model } : {}),
+})
+
 const createRuntimeSessionHost = (args: {
   readonly state: RuntimeContextBindingState
   readonly options: CreateRuntimeContextHostArgs
@@ -278,6 +350,9 @@ const createRuntimeSessionHost = (args: {
   let closed = false
   let shutdownComplete = false
   const base = args.state.base
+  // RFC-06 F5 — the shared F1 authority (if any surface wired it); gates whether
+  // this host exposes the `setSkillEnabled` projection at all.
+  const skillAuthority = asSkillAuthority(base)
   const approvalProtocol = createRuntimeApprovalProtocolController(base)
   const capabilityManifest = buildCapabilityManifest(base)
   // A2 — per-SESSION artifact de-dup ledger. The turn runner drains
@@ -338,30 +413,7 @@ const createRuntimeSessionHost = (args: {
   }
 
   return {
-    describe: () => ({
-      sessionId: base.sessionId ?? crypto.randomUUID(),
-      permissionMode: base.permission.mode,
-      capabilityManifest,
-      ...(args.options.boot?.identityModeState !== undefined
-        ? { identityMode: args.options.boot.identityModeState.get() }
-        : {}),
-      ...(args.options.boot?.toolProfileState !== undefined
-        ? { toolProfile: args.options.boot.toolProfileState.get() }
-        : {}),
-      // RFC-05 E4 — echo the live resolved posture (requested / effective /
-      // locks) when a posture control is wired, so a posture mutation's reconcile
-      // carries it onto `session.state.updated`. Absent ⇒ omitted (byte-identical
-      // for a runtime without a posture control).
-      ...((): { posture?: import("@/protocol/session").PostureProjectionView } => {
-        const posture = asPostureControl(base)?.describe()
-        return posture !== undefined ? { posture } : {}
-      })(),
-      messages: [...args.options.history],
-      // Expose the LLM port's model slug so the kernel can carry it onto
-      // `session.created` + `turn.completed`. Optional — adapters without
-      // a `model` field just leave it undefined.
-      ...(base.llm.model !== undefined ? { modelSlug: base.llm.model } : {}),
-    }),
+    describe: () => buildSessionHostDescription(base, args, capabilityManifest),
     runTurn: async (turnArgs) => {
       if (closed) throw new Error("runtime session host is closed")
       return await runSessionHostTurn({
@@ -405,6 +457,11 @@ const createRuntimeSessionHost = (args: {
     // mode-only compat fallback; returns a typed outcome (never a silent
     // success). `setPermissionMode` is RETIRED — no both-old-and-new host arm.
     setPosture: (postureArgs) => applyHostPostureMutation(base, { mutation: postureArgs }),
+    // RFC-06 F5 — SKILL enable/disable front door; ABSENT authority ⇒ omitted ⇒
+    // scheduler raises the typed unsupported negative (never a silent success).
+    ...(skillAuthority !== undefined
+      ? { setSkillEnabled: (a) => applyHostSkillMutation(skillAuthority, a) }
+      : {}),
     startSideConversation: async (
       sideArgs: SessionHostSideConversationArgs,
     ): Promise<SessionHostSideConversationResult> =>

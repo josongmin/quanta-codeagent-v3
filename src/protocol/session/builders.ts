@@ -20,6 +20,7 @@ import type {
   SessionObjectiveMutateCommand,
   SessionPermissionSetCommand,
   SessionPostureSetCommand,
+  SessionSkillSetEnabledCommand,
   SessionToolProfileSetCommand,
   SessionTranscriptReplaceCommand,
   TurnCancelCommand,
@@ -187,6 +188,31 @@ export const buildPostureSet = (
   scope,
   ...(meta?.expectedPostureRevision !== undefined
     ? { expectedPostureRevision: meta.expectedPostureRevision }
+    : {}),
+  ...commandMeta(deps, meta),
+})
+
+/**
+ * RFC-06 F5 — build a `session.skill.set_enabled` command. `meta.expectedSkillRevision`
+ * is the SKILL-domain CAS target (distinct from the envelope's session-level
+ * `expectedRevision`); a stale multi-surface edit is rejected by the F1 authority.
+ * The actor is bound by the HOST (a surface-issued command is an operator action,
+ * never trusted from the wire).
+ */
+export const buildSkillSetEnabled = (
+  deps: CommandBuildDeps,
+  name: string,
+  enabled: boolean,
+  meta:
+    | Partial<Omit<SessionSkillSetEnabledCommand, "sessionId" | "type" | "name" | "enabled">>
+    | undefined,
+): SessionSkillSetEnabledCommand => ({
+  sessionId: deps.sessionId,
+  type: "session.skill.set_enabled",
+  name,
+  enabled,
+  ...(meta?.expectedSkillRevision !== undefined
+    ? { expectedSkillRevision: meta.expectedSkillRevision }
     : {}),
   ...commandMeta(deps, meta),
 })

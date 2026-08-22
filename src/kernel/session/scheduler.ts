@@ -14,6 +14,7 @@ import type {
 import { applyPostureCommand } from "./posture-command"
 import { reduceSessionCommand } from "./reducer"
 import { projectSessionHostTurnEvent } from "./session-host-turn-event-projection"
+import { applySkillCommand } from "./skill-command"
 import {
   type KernelSessionState,
   type KernelTranscriptState,
@@ -926,6 +927,8 @@ export const dispatchSessionCommand = async (
           ? { expectedRevision: command.expectedObjectiveRevision }
           : {}),
       })
+    } else if (command.type === "session.skill.set_enabled") {
+      await applySkillCommand(ctx, command) // RFC-06 F5 — CAS via host; typed-throw on negative
     }
     // Audit R2 H1: register the turn-owned cancel controller BEFORE the awaited
     // event-log persistence so a turn.cancel dispatched during that window —
@@ -951,15 +954,12 @@ export const dispatchSessionCommand = async (
       }
       throw e
     }
-
     switch (command.type) {
       case "session.identity.set":
-        return { state: nextState, events: immediateEvents }
       case "session.tool_profile.set":
-        return { state: nextState, events: immediateEvents }
       case "session.permission.set":
-        return { state: nextState, events: immediateEvents }
       case "session.posture.set":
+      case "session.skill.set_enabled":
         return { state: nextState, events: immediateEvents }
       case "session.transcript.replace":
         return {

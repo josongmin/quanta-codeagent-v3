@@ -123,6 +123,28 @@ export interface SessionObjectiveMutateCommand
   readonly expectedObjectiveRevision?: number
 }
 
+/**
+ * RFC-06 F5 — the versioned SKILL enable/disable front-door command (the CLI
+ * action / authenticated web composer verb). Carries the canonical skill `name`,
+ * the desired `enabled` state, and an OPTIONAL SKILL-domain
+ * `expectedSkillRevision` — the F1 authority's CAS target, DISTINCT from the
+ * envelope's `expectedRevision` (which the kernel reserves for SESSION-level
+ * optimistic concurrency). A stale multi-surface enable/disable is rejected by
+ * the host authority (a typed `stale_revision` conflict) instead of clobbering a
+ * newer commit; absent ⇒ the host binds the current skill revision (an atomic
+ * caller). Only scalars cross the wire (no `@/skill` domain type) — the HOST
+ * authority is the full validator (unknown skill / admin-required-disable /
+ * admin-banned-enable / non-durable persist all fail closed at `setEnabled`,
+ * never a silent success). There is NO delete/uninstall command — F6 stays
+ * PARKED.
+ */
+export interface SessionSkillSetEnabledCommand
+  extends SessionCommandEnvelope<"session.skill.set_enabled"> {
+  readonly name: string
+  readonly enabled: boolean
+  readonly expectedSkillRevision?: number
+}
+
 export interface ApprovalRespondCommand extends SessionCommandEnvelope<"approval.respond"> {
   readonly approvalId: string
   readonly decision: "approve" | "deny"
@@ -167,6 +189,7 @@ export type SessionCommand =
   | SessionPermissionSetCommand
   | SessionPostureSetCommand
   | SessionObjectiveMutateCommand
+  | SessionSkillSetEnabledCommand
   | ApprovalRespondCommand
 
 export const SESSION_COMMAND_TYPES = [
@@ -176,6 +199,7 @@ export const SESSION_COMMAND_TYPES = [
   "session.objective.mutate",
   "session.permission.set",
   "session.posture.set",
+  "session.skill.set_enabled",
   "session.transcript.replace",
   "session.tool_profile.set",
   "turn.cancel",

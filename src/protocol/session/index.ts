@@ -6,6 +6,7 @@ export {
   buildObjectiveMutate,
   buildPermissionSet,
   buildPostureSet,
+  buildSkillSetEnabled,
   buildToolProfileSet,
   buildTranscriptReplace,
   buildTurnCancel,
@@ -34,6 +35,7 @@ export type {
   SessionObjectiveMutateCommand,
   SessionPermissionSetCommand,
   SessionPostureSetCommand,
+  SessionSkillSetEnabledCommand,
   SessionToolProfileSetCommand,
   SessionTranscriptReplaceCommand,
   TurnCancelCommand,
@@ -54,6 +56,10 @@ export {
   SessionProtocolValidationError,
   SessionProtocolVersionError,
   SessionRevisionConflictError,
+  SessionSkillConflictError,
+  SessionSkillDeniedError,
+  SessionSkillPersistError,
+  SessionSkillUnsupportedError,
 } from "./errors"
 export type {
   ApprovalRequestedEvent,
@@ -116,6 +122,7 @@ export {
   SURFACE_READ_MODEL_STATUSES,
   supported,
 } from "./read-models"
+export type { SkillCommandOutcome } from "./skill-projection"
 export type {
   ApprovalScopeContext,
   ArtifactRef,

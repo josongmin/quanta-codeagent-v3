@@ -7,11 +7,26 @@
  */
 
 export {
+  copySkillMarkdown,
+  DEFAULT_SKILL_COPY_MAX_BYTES,
+  revealSkill,
+  type SkillActionPorts,
+  type SkillCopyRejection,
+  type SkillCopyResult,
+  type SkillRevealRejection,
+  type SkillRevealResult,
+  setSkillEnabledAction,
+} from "./actions"
+export {
   createInMemoryDisabledStore,
   createJsonDisabledStore,
   type DisabledStoreFs,
   nodeDisabledStoreFs,
 } from "./adapters/json-disabled-store"
+export {
+  createNodeSkillActionPorts,
+  nodeRevealCapability,
+} from "./adapters/node-skill-actions"
 export type {
   SkillRuntimeAuthority,
   SkillRuntimeAuthorityDeps,

@@ -360,6 +360,14 @@ export interface SlashContext {
    *  with `/objective`). `/posture` itself is only REGISTERED behind the same gate
    *  (help catalog byte-identical when OFF). */
   readonly postureEditor?: import("./slash/posture").PostureSlashState | undefined
+  /** RFC-06 F5 — the per-skill ACTION wire (`/skill copy|reveal|enable|disable`)
+   *  over the SAME live F1 authority the per-turn prompt/search/invocation read
+   *  (an enable/disable here converges every surface at one higher revision).
+   *  Present iff `QUANTA_SKILL_ACTIONS` is on AND the surface wired the authority
+   *  + action ports; absent ⇒ `/skill` prints "not wired" + exit 0 (parity with
+   *  `/posture`). `/skill` itself is only REGISTERED behind the same gate (help
+   *  catalog byte-identical when OFF). */
+  readonly skillActions?: import("./slash/skill").SkillActionsState | undefined
 }
 
 /** Inventory row returned by {@link SlashContext.skills}. Mirrors the host
