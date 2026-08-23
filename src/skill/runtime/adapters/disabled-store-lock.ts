@@ -57,6 +57,8 @@
  * `nodeDisabledStoreFs`). NO cross-slice imports. exactOptionalPropertyTypes.
  */
 
+import { abortableSleep } from "@/shared"
+
 /** The lock surface consumed by {@link createJsonDisabledStore}: run a critical
  *  section under a cross-process exclusive lock. `withLock` acquires (bounded
  *  retry + stale reclaim), runs `fn`, and ALWAYS releases in a `finally` —
@@ -94,8 +96,10 @@ export const DEFAULT_DISABLED_LOCK_STALE_THRESHOLD_MS = 30_000
  *  the atomic `<file>.<pid>.<ts>.tmp` write path never collides with it. */
 export const disabledSetLockPath = (path: string): string => `${path}.lock`
 
-const sleep = (ms: number): Promise<void> =>
-  ms <= 0 ? Promise.resolve() : new Promise((r) => setTimeout(r, ms))
+// Retry wait via the shared timer-clearing sleep (never a raw
+// `new Promise(setTimeout)` — no leaked timer; abort-aware if a signal is later
+// threaded). Bounded by the caller's `timeoutMs` budget in `acquire`.
+const sleep = (ms: number): Promise<void> => (ms <= 0 ? Promise.resolve() : abortableSleep(ms))
 
 /** Read the lockfile's mtime (ms). `null` when missing/unreadable ⇒ treat as
  *  "not stale, keep retrying". */
@@ -103,7 +107,7 @@ const readMtimeMs = async (path: string): Promise<number | null> => {
   const { stat } = await import("node:fs/promises")
   try {
     return (await stat(path)).mtimeMs
-  } catch {
+  } catch (_e) {
     return null
   }
 }
@@ -113,7 +117,7 @@ const unlinkSafe = async (path: string): Promise<void> => {
   const { unlink } = await import("node:fs/promises")
   try {
     await unlink(path)
-  } catch {
+  } catch (_e) {
     // ENOENT / EPERM — already gone or not ours to remove.
   }
 }
@@ -133,13 +137,13 @@ const tryCreate = async (lockPath: string, pid: number, at: number): Promise<Exc
   }
   try {
     await handle.writeFile(JSON.stringify({ pid, acquiredAt: at }), { encoding: "utf8" })
-  } catch {
+  } catch (_e) {
     // Body is diagnostic only — we already hold the lock (the file's existence
     // IS the contract).
   }
   try {
     await handle.close()
-  } catch {
+  } catch (_e) {
     // Close failure: still acquired; the kernel reclaims the fd on exit.
   }
   return "acquired"
