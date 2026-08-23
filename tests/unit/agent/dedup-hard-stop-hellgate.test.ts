@@ -117,3 +117,37 @@ describe("H6 — the ceiling is per-bucket", () => {
     expect(dedupNoProgressCondition(ctxWith(gate, 2), 8)).toBeUndefined()
   })
 })
+
+/* ------------------------------------------------------------------------- *
+ * H7 — the ceiling measures a CURRENT wedge, not a session-lifetime tally
+ * (audit R1 finding #7)
+ *
+ * `DedupGate` outlives a single `runAgent` (`loop-helpers.ts` mutates
+ * `cfg.dedupGate`). A monotonic counter would let two unrelated wedges earlier
+ * and later in a long session sum past the ceiling, ending a healthy run. The
+ * count must decay once the bucket leaves the sliding window — i.e. once the
+ * model actually moved on.
+ * ------------------------------------------------------------------------- */
+
+describe("H7 — blocks decay once the model moves on", () => {
+  test("a bucket that leaves the window does not keep its blocks forever", () => {
+    const gate = new DedupGate()
+    // Wedge 1: drive the bucket to 2 blocked verdicts.
+    let turn = 0
+    let blocked = 0
+    while (blocked < 2) {
+      turn += 1
+      if (gate.record("read_file", { path: "wedge" }, turn).blocked) blocked += 1
+    }
+    expect(gate.maxBlockedForOneBucket).toBeGreaterThanOrEqual(2)
+
+    // The model moves on: many turns of DIFFERENT work, far beyond the window.
+    for (let i = 0; i < 40; i += 1) {
+      turn += 1
+      gate.record("read_file", { path: `other-${i}` }, turn)
+    }
+
+    // The old wedge is long out of window — its tally must not still be armed.
+    expect(gate.maxBlockedForOneBucket).toBeLessThan(2)
+  })
+})

@@ -253,12 +253,27 @@ export class DedupGate {
   /** Hash key → ordered list of turns at which the call was issued (oldest
    *  first). Bounded: pruned to entries within `window` on every record. */
   private readonly history = new Map<string, number[]>()
-  /** Blocked verdicts issued PER BUCKET. aug-23 priority 2: the steer alone has
-   *  no brake — a model that keeps re-issuing the same call after being blocked
-   *  loops forever. This counter is what an opt-in hard-stop ceiling reads. It
-   *  is per-bucket on purpose: blocks spread across different calls are thrash
-   *  the sliding window already handles, not a wedge. */
+  /** Blocked verdicts issued PER BUCKET, for the CURRENT wedge only.
+   *
+   *  aug-23 priority 2: the steer alone has no brake — a model that keeps
+   *  re-issuing the same call after being blocked loops forever. This counter is
+   *  what an opt-in hard-stop ceiling reads. Per-bucket on purpose: blocks
+   *  spread across different calls are thrash the sliding window already
+   *  handles, not a wedge.
+   *
+   *  Audit R1: it must NOT be a session-lifetime tally. The gate outlives a
+   *  single `runAgent` (`loop-helpers.ts` mutates `cfg.dedupGate`), so a
+   *  monotonic count would let two unrelated wedges hours apart sum past the
+   *  ceiling and kill a healthy run. The entry is dropped the moment its bucket
+   *  falls out of the sliding window — i.e. once the model demonstrably moved
+   *  on — so the ceiling always measures a LIVE wedge. */
   private readonly blockedCounts = new Map<string, number>()
+  /** Last turn passed to {@link record}. Lets the ceiling evaluate staleness for
+   *  buckets that are simply never touched again (the common case once the model
+   *  moves on — nothing re-enters `record` to prune them). */
+  private lastSeenTurn = 0
+  /** Turn at which each bucket last produced a blocked verdict. */
+  private readonly blockedAtTurn = new Map<string, number>()
 
   constructor(caps: Partial<DedupGateCaps> = {}) {
     this.caps = { ...DEFAULT_DEDUP_GATE_CAPS, ...caps }
@@ -309,6 +324,10 @@ export class DedupGate {
     for (const t of prior) {
       if (turn - t < window && turn - t >= 0) kept.push(t)
     }
+    // The bucket aged out of its window ⇒ the wedge is over. Drop its tally so a
+    // later, unrelated repeat cannot inherit it (audit R1).
+    if (kept.length === 0) this.blockedCounts.delete(key)
+    this.lastSeenTurn = turn
     // Distinct-turn append: the history list holds ONE entry per turn. A second
     // (or Nth) record for the SAME bucket on the SAME turn is parallel fan-out,
     // not a repetition — it must not inflate the cross-turn count. `kept` is
@@ -319,6 +338,7 @@ export class DedupGate {
 
     if (kept.length < threshold) return { blocked: false }
     this.blockedCounts.set(key, (this.blockedCounts.get(key) ?? 0) + 1)
+    this.blockedAtTurn.set(key, turn)
     return {
       blocked: true,
       count: kept.length,
@@ -350,7 +370,13 @@ export class DedupGate {
    *  the opt-in no-progress ceiling; 0 when nothing has been blocked. */
   get maxBlockedForOneBucket(): number {
     let max = 0
-    for (const n of this.blockedCounts.values()) if (n > max) max = n
+    for (const [key, n] of this.blockedCounts) {
+      // Only a LIVE wedge counts: if the bucket has not blocked within its own
+      // window, the model moved on and the tally is stale (audit R1).
+      const at = this.blockedAtTurn.get(key)
+      if (at !== undefined && this.lastSeenTurn - at >= this.caps.generalWindow) continue
+      if (n > max) max = n
+    }
     return max
   }
 }

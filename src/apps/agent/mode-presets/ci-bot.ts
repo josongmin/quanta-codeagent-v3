@@ -366,6 +366,21 @@ const postPrComment = async (pr: string, body: string, gh: CiBotWiring["gh"]): P
  * When `req.seams.ghRun` is set, the real `gh` subprocess is bypassed and
  * the stub responds in-memory.
  */
+/** Fallback PR-comment line when the agent produced no assistant text.
+ *
+ *  aug-23 §13 / audit follow-up (misreport site #4): this used to hardcode the
+ *  word "completed" regardless of `reason`, so a run that hit the turn limit or
+ *  was refused posted "quanta ci-bot: completed" to the pull request and a
+ *  reviewer skimming it read success. The verb now follows the outcome; the
+ *  machine-readable `reason=`/`turns=` payload is unchanged. */
+export const ciBotHeartbeatLine = (outcome: {
+  readonly turns: number
+  readonly reason: string
+}): string => {
+  const verb = outcome.reason === "completed" ? "completed" : "stopped"
+  return `quanta ci-bot: ${verb} (turns=${outcome.turns}, reason=${outcome.reason})`
+}
+
 export const runMode = async (req: AssembleRequest): Promise<RunOutcome> => {
   if (req.mode !== "ci-bot") {
     throw new Error(`ci-bot.runMode: req.mode must be "ci-bot", got "${req.mode}"`)
@@ -388,18 +403,16 @@ export const runMode = async (req: AssembleRequest): Promise<RunOutcome> => {
   // assistant ⇒ a minimal "completed" line so the PR still sees a heartbeat.
   const last = outcome.messages.findLast?.((m) => m.role === "assistant")
   const summary = (() => {
-    if (!last) return `quanta ci-bot: completed (turns=${outcome.turns}, reason=${outcome.reason})`
+    if (!last) return ciBotHeartbeatLine(outcome)
     if (Array.isArray(last.content)) {
       const text = last.content
         .filter((p): p is { type: "text"; text: string } => p.type === "text")
         .map((p) => p.text)
         .join("")
         .trim()
-      return text !== ""
-        ? text
-        : `quanta ci-bot: completed (turns=${outcome.turns}, reason=${outcome.reason})`
+      return text !== "" ? text : ciBotHeartbeatLine(outcome)
     }
-    return `quanta ci-bot: completed (turns=${outcome.turns}, reason=${outcome.reason})`
+    return ciBotHeartbeatLine(outcome)
   })()
 
   // `--dry-run` (audit R2: this was a ghost field — `index.ts` set it but

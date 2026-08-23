@@ -30,7 +30,7 @@
 
 import { describe, expect, test } from "bun:test"
 import { SYNTHETIC_USER_MESSAGE_ID_PREFIX } from "@/agent/synthetic-user"
-import { resolveTargetForTest } from "@/apps/cli/rewind-cmd"
+import { findToLastTargetForTest, resolveTargetForTest } from "@/apps/cli/rewind-cmd"
 
 type Saved = { readonly messages: readonly { role: "user" | "assistant"; id?: string }[] }
 
@@ -103,5 +103,58 @@ describe("H5 — back-compat for untagged transcripts", () => {
     if (res.kind !== "ok") return
     expect(res.dropTurns).toBe(2)
     expect(res.dropMsgs).toBe(2)
+  })
+})
+
+/* ------------------------------------------------------------------------- *
+ * H6 — `--to-last` must not pick a harness message (audit R1 finding #5)
+ *
+ * `findToLastTarget` walks back to the trailing `role:"user"` message and
+ * returns the id BEFORE it. Harness reminders ride as `role:"user"`, so with a
+ * trailing reminder it treated the REMINDER as the turn to undo, and could
+ * return a synthetic id that `resolveTarget` now refuses — surfacing an
+ * internal id in an error message where the command used to work.
+ * ------------------------------------------------------------------------- */
+
+describe("H6 — --to-last skips harness messages", () => {
+  test("a trailing harness reminder is not the turn to undo", () => {
+    const withTrailingHarness = {
+      messages: [
+        { role: "user" as const, id: "u1" },
+        { role: "assistant" as const, id: "a1" },
+        { role: "user" as const, id: "u2" },
+        { role: "assistant" as const, id: "a2" },
+        { role: "user" as const, id: harnessId("peer-mail") },
+      ],
+    }
+    const target = findToLastTargetForTest(withTrailingHarness)
+    // The real last user turn is u2; the message before it is a1.
+    expect(target).toBe("a1")
+  })
+
+  test("the returned target always resolves", () => {
+    const withTrailingHarness = {
+      messages: [
+        { role: "user" as const, id: "u1" },
+        { role: "assistant" as const, id: "a1" },
+        { role: "user" as const, id: "u2" },
+        { role: "user" as const, id: harnessId("tool-nudge") },
+      ],
+    }
+    const target = findToLastTargetForTest(withTrailingHarness)
+    expect(target).toBeDefined()
+    if (target === undefined) return
+    expect(resolveTargetForTest(withTrailingHarness, target).kind).toBe("ok")
+  })
+
+  test("paired control — no harness messages behaves as before", () => {
+    const plain = {
+      messages: [
+        { role: "user" as const, id: "u1" },
+        { role: "assistant" as const, id: "a1" },
+        { role: "user" as const, id: "u2" },
+      ],
+    }
+    expect(findToLastTargetForTest(plain)).toBe("a1")
   })
 })

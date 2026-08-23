@@ -1,5 +1,6 @@
 import { lazy, memo, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { cx } from "../lib/classnames"
+import { type StopPresentation, stopBadgeFor } from "../lib/stop-presentation"
 import type { UiMessage } from "../types/protocol"
 
 export interface MessageBubbleProps {
@@ -19,6 +20,25 @@ const LazyMarkdownMessage = lazy(async () => {
   return { default: module.MarkdownMessage }
 })
 
+/** aug-23 §13 — the "why it stopped" chip beside the role label. Extracted so
+ *  the bubble body stays inside its cognitive-complexity budget. `null` badge
+ *  renders nothing (clean completions and pre-slice messages are untouched). */
+const StopBadge = ({ badge }: { readonly badge: StopPresentation | null }): JSX.Element | null => {
+  if (badge === null) return null
+  const isError = badge.tone === "failed" || badge.tone === "refused"
+  return (
+    <span
+      className={cx(
+        "ml-2 rounded px-1.5 py-0.5 text-[10px] font-medium",
+        isError ? "bg-err/10 text-err/90" : "bg-surface-raised text-ink-secondary",
+      )}
+      title={`Stopped: ${badge.label}`}
+    >
+      {badge.label}
+    </span>
+  )
+}
+
 const MessageBubbleInner = ({ message, isStreaming = false }: MessageBubbleProps): JSX.Element => {
   const hasImages = message.images !== undefined && message.images.length > 0
   const role = message.role
@@ -34,6 +54,12 @@ const MessageBubbleInner = ({ message, isStreaming = false }: MessageBubbleProps
   // formatter (one of the pricier DOM-free calls) on every delta for an
   // identical result.
   const formattedTime = useMemo(() => formatTime(message.timestamp), [message.timestamp])
+
+  /* aug-23 §13 — WHY the turn stopped. `null` for a clean completion and for
+     messages with no category, so ordinary rows are untouched. Without this the
+     reason rode all the way to the component and was never shown: a rate-limited
+     or turn-limited answer looked exactly like a finished one. */
+  const stopBadge = useMemo(() => stopBadgeFor(message.stopCategory), [message.stopCategory])
 
   const body =
     message.text.length > 0 ? (
@@ -73,7 +99,10 @@ const MessageBubbleInner = ({ message, isStreaming = false }: MessageBubbleProps
     <article className="group relative px-4 py-3">
       <div className="flex items-start gap-3">
         <header className="flex min-w-0 flex-1 items-center justify-between">
-          <span className="text-[11px] text-ink-tertiary">{ROLE_LABEL[role]}</span>
+          <span className="text-[11px] text-ink-tertiary">
+            {ROLE_LABEL[role]}
+            <StopBadge badge={stopBadge} />
+          </span>
           <time
             dateTime={message.timestamp}
             className="font-mono text-[11px] text-ink-faint opacity-0 transition-opacity group-hover:opacity-100"

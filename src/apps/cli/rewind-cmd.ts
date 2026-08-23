@@ -317,6 +317,20 @@ const renderRecentMessages = (ctx: SlashContext, saved: SavedSession, label: str
   }
 }
 
+/** True for an id minted by `makeSyntheticUserMessage` — a harness-authored
+ *  message, not something the operator said (aug-23 §10.3). */
+const isHarnessId = (id: unknown): boolean =>
+  typeof id === "string" && id.startsWith(SYNTHETIC_USER_MESSAGE_ID_PREFIX)
+
+/** Index of the LAST element satisfying `pred`, or -1. */
+const lastIndexWhere = <T,>(items: readonly T[], pred: (item: T) => boolean): number => {
+  for (let i = items.length - 1; i >= 0; i -= 1) {
+    const item = items[i]
+    if (item !== undefined && pred(item)) return i
+  }
+  return -1
+}
+
 /** Find the messageId immediately BEFORE the most-recent user message —
  *  the "rewind one turn" convenience target. Returns the FULL id, or
  *  undefined if there's no such message (single-turn session etc.). */
@@ -324,17 +338,16 @@ const findToLastTarget = (saved: SavedSession): string | undefined => {
   const msgs = saved.messages
   // Walk from the end, skip the trailing user-message (the one we want to
   // undo). Return the message id immediately before it.
-  for (let i = msgs.length - 1; i >= 0; i -= 1) {
-    const m = msgs[i]
-    if (m === undefined) continue
-    if (m.role === "user") {
-      const prior = msgs[i - 1]
-      if (prior === undefined) return undefined
-      const pid = prior.id
-      return typeof pid === "string" && pid.length > 0 ? pid : undefined
-    }
-  }
-  return undefined
+  /* aug-23 §10.3 / audit R1 — harness reminders ride as `role:"user"`. Treating
+     one as "the turn to undo" both picks the wrong turn AND can return a
+     synthetic id that `resolveTarget` refuses, surfacing an internal id where
+     the command used to work. Skip them on both the search and the answer. */
+  const lastOperatorTurn = lastIndexWhere(msgs, (m) => m.role === "user" && !isHarnessId(m.id))
+  if (lastOperatorTurn < 0) return undefined
+  const priorIdx = lastIndexWhere(msgs.slice(0, lastOperatorTurn), (m) => !isHarnessId(m.id))
+  if (priorIdx < 0) return undefined
+  const pid = msgs[priorIdx]?.id
+  return typeof pid === "string" && pid.length > 0 ? pid : undefined
 }
 
 /* ------------------------------------------------------------------ */
@@ -404,6 +417,9 @@ const resolveTarget = (
 /** Test seam for {@link resolveTarget} (pure). Exported so the hellgate can
  *  drive the resolver directly without a session store. */
 export const resolveTargetForTest = resolveTarget
+
+/** Test seam for {@link findToLastTarget} (pure). */
+export const findToLastTargetForTest = findToLastTarget
 
 /** Format the destructive confirm prompt. The "drop" word is wrapped in
  *  ANSI bold-red so a TTY surface highlights the destructive bit; non-TTY

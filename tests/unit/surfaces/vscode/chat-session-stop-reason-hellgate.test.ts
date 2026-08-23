@@ -25,9 +25,13 @@
  */
 
 import { describe, expect, test } from "bun:test"
-import { statusForTurnCompleted } from "@surfaces/vscode/chat-session-adapter"
+import {
+  ChatSessionProjection,
+  type SessionPort,
+  statusForTurnCompleted,
+} from "@surfaces/vscode/chat-session-adapter"
 import { CHAT_SESSION_STATUS } from "@surfaces/vscode/status"
-import type { SessionEvent } from "@/protocol/session"
+import type { SessionEvent, SessionSnapshotLite, SessionTransportMessage } from "@/protocol/session"
 
 const completedEvent = (
   outcomeReason: string,
@@ -58,6 +62,25 @@ describe("H1 — a non-success completion is not laundered into Idle", () => {
   })
 })
 
+describe("H1b — awaiting_approval is a PAUSE, not a failure (audit R-obj)", () => {
+  /* The first cut of this fix bucketed every non-`completed` reason as Failed,
+     which turned a paused-for-approval turn into an error badge — wrong in a
+     NEW way, and in direct conflict with `statusForStateView`, whose comment
+     states `awaiting_approval` is deliberately InProgress because the turn has
+     not ended. The two mappers must agree. */
+  test("awaiting_approval ⇒ InProgress, not Failed", () => {
+    expect(statusForTurnCompleted(completedEvent("awaiting_approval"))).toBe(
+      CHAT_SESSION_STATUS.InProgress,
+    )
+  })
+
+  test("it is still not Idle", () => {
+    expect(statusForTurnCompleted(completedEvent("awaiting_approval"))).not.toBe(
+      CHAT_SESSION_STATUS.Idle,
+    )
+  })
+})
+
 describe("H2 — paired control: a clean completion still settles Idle", () => {
   test("completed ⇒ Idle", () => {
     expect(statusForTurnCompleted(completedEvent("completed"))).toBe(CHAT_SESSION_STATUS.Idle)
@@ -82,5 +105,73 @@ describe("H3 — back-compat: classified off outcomeReason alone", () => {
 describe("H4 — the unknown sentinel is not a completion", () => {
   test("unknown ⇒ NOT Idle", () => {
     expect(statusForTurnCompleted(completedEvent("unknown"))).not.toBe(CHAT_SESSION_STATUS.Idle)
+  })
+})
+
+/* ------------------------------------------------------------------------- *
+ * H7 — WIRING PROOF (audit R1 finding #2)
+ *
+ * The pure-function tests above cannot catch the real defect: the kernel emits
+ * `turn.completed` IMMEDIATELY followed by `session.state.updated` with
+ * `status:"idle"`, and `applyStateView` overwrites whatever the completion arm
+ * just set. A fix proven only against the pure mapper is INERT in production.
+ * These drive the real event PAIR through the projection.
+ * ------------------------------------------------------------------------- */
+
+const SESSION_ID = "s-1"
+
+const makePort = (): { port: SessionPort; feed: (m: SessionTransportMessage) => void } => {
+  let handler: ((m: SessionTransportMessage) => void) | undefined
+  const port = {
+    sessionId: SESSION_ID,
+    onMessage: (h: (m: SessionTransportMessage) => void) => {
+      handler = h
+      return () => undefined
+    },
+    send: () => undefined,
+  } as unknown as SessionPort
+  return {
+    port,
+    feed: (m) => {
+      handler?.(m)
+    },
+  }
+}
+
+const stateUpdated = (status: string): SessionTransportMessage =>
+  ({
+    kind: "event",
+    event: {
+      eventId: "e-state",
+      seq: 3,
+      revision: 2,
+      emittedAt: "2026-08-23T00:00:01.000Z",
+      type: "session.state.updated",
+      state: { status, draftInput: "", permissionMode: "default", messageCount: 2 },
+    },
+  }) as unknown as SessionTransportMessage
+
+const completedMsg = (outcomeReason: string): SessionTransportMessage =>
+  ({ kind: "event", event: completedEvent(outcomeReason) }) as unknown as SessionTransportMessage
+
+describe("H7 — the real event pair, not just the pure mapper", () => {
+  const drive = (outcomeReason: string, idleAfter = true) => {
+    const { port, feed } = makePort()
+    const projection = new ChatSessionProjection(port)
+    feed(completedMsg(outcomeReason))
+    if (idleAfter) feed(stateUpdated("idle"))
+    return projection.current().status
+  }
+
+  test("a failed turn survives the trailing session.state.updated(idle)", () => {
+    expect(drive("error")).toBe(CHAT_SESSION_STATUS.Failed)
+  })
+
+  test("max_turns survives it too", () => {
+    expect(drive("max_turns")).toBe(CHAT_SESSION_STATUS.Failed)
+  })
+
+  test("paired control — a clean completion still settles Idle", () => {
+    expect(drive("completed")).toBe(CHAT_SESSION_STATUS.Idle)
   })
 })

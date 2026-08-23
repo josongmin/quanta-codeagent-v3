@@ -9,6 +9,7 @@ import {
   costPreflightCondition,
   DEFAULT_POST_CONTINUE_STOP_CONDITIONS,
   DEFAULT_PRE_TURN_STOP_CONDITIONS,
+  dedupNoProgressCondition,
   ledgerHardBreachCondition,
 } from "./stop-conditions"
 import type { RunAgentContext } from "./types"
@@ -36,7 +37,10 @@ const fakeCtx = (over: {
 describe("stop-conditions registry (H3)", () => {
   test("default arrays hold exactly today's conditions, in order (OCP surface pin)", () => {
     expect(DEFAULT_PRE_TURN_STOP_CONDITIONS).toEqual([costPreflightCondition])
-    expect(DEFAULT_POST_CONTINUE_STOP_CONDITIONS).toEqual([ledgerHardBreachCondition])
+    expect(DEFAULT_POST_CONTINUE_STOP_CONDITIONS).toEqual([
+      ledgerHardBreachCondition,
+      dedupNoProgressCondition,
+    ])
   })
 
   test("costPreflight: no budgetMeter ⇒ undefined (byte-identical default-OFF, no model resolve)", async () => {

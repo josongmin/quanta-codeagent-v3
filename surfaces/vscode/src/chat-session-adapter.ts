@@ -32,8 +32,15 @@ import { CHAT_SESSION_STATUS, type ChatSessionStatusValue, statusForStateView } 
  *  predates `stopCategory` is still handled. */
 export const statusForTurnCompleted = (
   event: Extract<SessionEvent, { type: "turn.completed" }>,
-): ChatSessionStatusValue =>
-  event.outcomeReason === "completed" ? CHAT_SESSION_STATUS.Idle : CHAT_SESSION_STATUS.Failed
+): ChatSessionStatusValue => {
+  if (event.outcomeReason === "completed") return CHAT_SESSION_STATUS.Idle
+  /* A paused-for-approval turn has NOT ended — it is resumable and the editor
+     should keep the spinner, matching `statusForStateView` (status.ts:36) which
+     already maps `awaiting_approval` to InProgress. The first cut of this fix
+     bucketed it as Failed, turning a pause into an error badge. */
+  if (event.outcomeReason === "awaiting_approval") return CHAT_SESSION_STATUS.InProgress
+  return CHAT_SESSION_STATUS.Failed
+}
 
 /** The slice of a connected session.v1 client this adapter needs. The real
  *  `SessionTransportClient` from `@/ipc/session` satisfies this structurally. */
@@ -92,6 +99,9 @@ export class ChatSessionProjection {
   private startTime: number | undefined
   private endTime: number | undefined
   private commandSeq = 0
+  /** Set when a turn ended non-successfully, so the trailing idle state update
+   *  cannot launder it back to settled. Cleared on the next turn start. */
+  private failedTurnLatched = false
   private readonly listeners = new Set<() => void>()
   private readonly unsubscribe: () => void
   private readonly now: () => string
@@ -162,6 +172,16 @@ export class ChatSessionProjection {
   }
 
   private applyStateView(state: SessionStateView): void {
+    /* The kernel emits `turn.completed` and then IMMEDIATELY
+       `session.state.updated` with `status:"idle"` (scheduler-turn-terminals.ts
+       sets it unconditionally). Without this latch the trailing update would
+       overwrite the failure the completion arm just recorded, making the whole
+       fix inert — the editor would show Idle for a rate-limited or refused turn.
+       Cleared on the next `turn.started`. */
+    if (this.failedTurnLatched && state.status === "idle") {
+      if (state.lastUserText !== undefined) this.label = deriveLabel(state.lastUserText)
+      return
+    }
     this.status = statusForStateView(state.status)
     if (state.lastUserText !== undefined) this.label = deriveLabel(state.lastUserText)
   }
@@ -181,6 +201,7 @@ export class ChatSessionProjection {
             this.applyStateView(event.state)
             break
           case "turn.started":
+            this.failedTurnLatched = false
             this.status = CHAT_SESSION_STATUS.InProgress
             this.startTime = isoToMs(event.emittedAt) ?? this.startTime
             this.endTime = undefined
@@ -188,9 +209,11 @@ export class ChatSessionProjection {
             break
           case "turn.completed":
             this.status = statusForTurnCompleted(event)
+            this.failedTurnLatched = this.status === CHAT_SESSION_STATUS.Failed
             this.endTime = isoToMs(event.emittedAt) ?? this.endTime
             break
           case "turn.failed":
+            this.failedTurnLatched = true
             this.status = CHAT_SESSION_STATUS.Failed
             this.endTime = isoToMs(event.emittedAt) ?? this.endTime
             break
