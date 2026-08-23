@@ -40,6 +40,7 @@
  * when absent.
  */
 
+import { errMessage } from "@/shared"
 import type { Skill, SkillScope } from "../types"
 import type { SkillRuntimeAuthority, SkillSetEnabledResult } from "./authority"
 
@@ -145,7 +146,7 @@ export const copySkillMarkdown = async (
     realFile = await ports.realpath(sourcePath)
     realDir = await ports.realpath(jailDir)
   } catch (err) {
-    const detail = err instanceof Error ? err.message : String(err)
+    const detail = errMessage(err)
     return { ok: false, rejection: { kind: "read_failed", name: args.name, detail } }
   }
   if (!isInsideDir(realFile, realDir)) {
@@ -163,7 +164,7 @@ export const copySkillMarkdown = async (
   try {
     bytes = await ports.statBytes(realFile)
   } catch (err) {
-    const detail = err instanceof Error ? err.message : String(err)
+    const detail = errMessage(err)
     return { ok: false, rejection: { kind: "read_failed", name: args.name, detail } }
   }
   if (bytes > limit) {
@@ -173,7 +174,7 @@ export const copySkillMarkdown = async (
   try {
     markdown = await ports.readFileUtf8(realFile)
   } catch (err) {
-    const detail = err instanceof Error ? err.message : String(err)
+    const detail = errMessage(err)
     return { ok: false, rejection: { kind: "read_failed", name: args.name, detail } }
   }
   return {
@@ -218,7 +219,7 @@ export const revealSkill = async (
   try {
     await ports.reveal(skill.sourcePath)
   } catch (err) {
-    const detail = err instanceof Error ? err.message : String(err)
+    const detail = errMessage(err)
     return { ok: false, rejection: { kind: "reveal_failed", name: args.name, detail } }
   }
   return { ok: true, name: skill.name, sourcePath: skill.sourcePath }

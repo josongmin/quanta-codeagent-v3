@@ -84,6 +84,45 @@ export type CapabilityExpectation = Partial<CapabilityManifest>
 
 /* --- Snapshot views -------------------------------------------------- */
 
+export interface PostureLockView {
+  readonly reason: string
+  readonly producer: string
+  readonly label: string
+  readonly detail?: string
+}
+
+export interface PostureRequestedView {
+  readonly preset: string | null
+  readonly patch: unknown
+}
+
+export interface PostureEffectiveView {
+  readonly threadPermission: unknown
+  readonly reviewerRoute: string
+  readonly askOutsidePlan: boolean
+  readonly effectiveMode: string
+}
+
+export interface PostureProjectionView {
+  readonly revision: number
+  readonly requested: PostureRequestedView
+  readonly effective: PostureEffectiveView
+  readonly locks: readonly PostureLockView[]
+}
+
+export type PostureCommandOutcome = {
+    readonly ok: true;
+} | {
+    readonly ok: false;
+    readonly kind: "stale_revision";
+    readonly expected: number;
+    readonly actual: number;
+} | {
+    readonly ok: false;
+    readonly kind: "persist_failed";
+    readonly detail: string;
+}
+
 export interface ArtifactRef {
   readonly artifactId: string
   readonly kind: string

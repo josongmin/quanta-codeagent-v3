@@ -47,7 +47,13 @@ import {
   deriveCampaignGolden,
   diffGoldenDocuments,
 } from "./golden-derive"
-import { PROMAX_REQUIRED_ARCHITECTURE, PROMAX_REQUIRED_OS, type ProMaxImageFreezeReceipt, assertImageFreezeReadyForModelLaunch, isDigestPinnedReference } from "./image-freeze"
+import {
+  assertImageFreezeReadyForModelLaunch,
+  isDigestPinnedReference,
+  PROMAX_REQUIRED_ARCHITECTURE,
+  PROMAX_REQUIRED_OS,
+  type ProMaxImageFreezeReceipt,
+} from "./image-freeze"
 import { type DockerPort, type ProMaxImageTarget, runProMaxImagePreflight } from "./image-preflight"
 
 /** The step a refusal happened at. Closed so a caller can branch exhaustively. */

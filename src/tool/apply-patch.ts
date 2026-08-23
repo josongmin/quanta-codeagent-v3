@@ -27,6 +27,7 @@
 
 import { randomBytes } from "node:crypto"
 import * as nodeFs from "node:fs/promises"
+import { homedir } from "node:os"
 import * as path from "node:path"
 import { z } from "zod"
 // Documented cross-slice carve-out (mirror of `coverage_check`'s
@@ -44,7 +45,8 @@ import {
   unifiedDiffToV4A,
   // biome-ignore lint/style/noRestrictedImports: @/patch is reachable by @/tool/apply-patch per the documented ADR slice carve-out.
 } from "@/patch"
-import { errMessage } from "@/shared"
+import { classifyPath } from "@/security"
+import { errMessage, errMessage, logger } from "@/shared"
 import { FsJailError, resolveJailed } from "@/storage"
 import { writeBudgetEvent } from "./_shared/exfil-rail-guards"
 import { classifyFastApplyError, failingTargetPath } from "./apply-patch-fallback-wire"
@@ -529,6 +531,31 @@ async function tryFastApplyFallback(
 
 export const applyPatchTool: Tool<Input> = {
   name: "apply_patch",
+  // aug-23 audit — Layer-1 SOURCE CLASS. A V4A patch names its targets in the
+  // patch TEXT, not in a `path` field, so this reuses the canonical parser
+  // rather than re-deriving the header grammar (a second grammar would drift
+  // from the applier's). The class is the MOST sensitive target touched: one
+  // op against `.env` makes the whole result secret, because the output
+  // interleaves per-file results and cannot be masked selectively.
+  // An unparseable patch is fail-CLOSED to `secret` — it is about to be
+  // rejected anyway, and guessing `public` on bytes we could not read is the
+  // wrong side to err on. Pinned by
+  // `tests/unit/tool-source-class-coverage-hellgate.test.ts`.
+  classifySource: (input) => {
+    const home = homedir()
+    try {
+      const targets = parsePatch(input.patch).ops.flatMap((op) =>
+        op.kind === "update" && op.moveTo !== undefined ? [op.path, op.moveTo] : [op.path],
+      )
+      return targets.some((t) => classifyPath(t, home) === "secret") ? "secret" : "public"
+    } catch (e) {
+      // Bound + attributed: fail-closed is the right answer, but an operator
+      // seeing every patch classified `secret` needs to know the PARSER is the
+      // reason, not that their patch really touches a credential file.
+      logger.debug(`apply_patch.classifySource: unparseable patch: ${errMessage(e)}`)
+      return "secret"
+    }
+  },
   description:
     "Apply a Codex V4A patch (Add/Update/Delete/Move) atomically against the session cwd. Every op is pre-flighted; a single failure aborts the whole patch.",
   inputSchema: schema,

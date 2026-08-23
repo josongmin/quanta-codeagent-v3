@@ -31,6 +31,7 @@ import type {
   PostureLockView,
   PostureProjectionView,
 } from "@/protocol/session"
+import { errMessage } from "@/shared"
 import type { ControlPolicy } from "../permission-profile"
 import type { PermissionMode } from "../types"
 import type { PostureAuthority } from "./authority"
@@ -134,7 +135,7 @@ export const buildPostureControl = (deps: PostureControlDeps): PostureControl =>
       return {
         ok: false,
         kind: "persist_failed",
-        detail: err instanceof Error ? err.message : String(err),
+        detail: errMessage(err),
       }
     }
     return { ok: true }

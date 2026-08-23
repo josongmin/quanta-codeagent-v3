@@ -97,6 +97,13 @@ const AT_TYPE_NARROWINGS: Readonly<Record<string, string>> = {
   // yet, so the UI treats the payload opaquely → top type (same as
   // `ObjectiveMutation`).
   PosturePatch: "unknown",
+  // @/permission (RFC-05 E4) — `PostureEffectiveView.threadPermission` echoes
+  // the resolved per-thread permission record. Verified aug-23: the frontend
+  // never reads `threadPermission` (grep over apps/web-frontend = 0 hits), so
+  // narrowing it keeps the generated bundle from dragging the whole
+  // `@/permission` type graph across the wire boundary. Same posture as
+  // `PosturePatch` above — widen to the real shape when a UI actually renders it.
+  ThreadPermission: "unknown",
 }
 
 /** Names imported from `@/*` in a canonical file — collected so the generator
@@ -359,6 +366,14 @@ import type { ImageBlock } from "./protocol"`
 export const generateProtocolBundle = (): string => {
   const capabilities = emitCanonicalFile("src/protocol/session/capabilities.ts")
   const commands = emitCanonicalFile("src/protocol/session/commands.ts")
+  // aug-23 audit — `posture-projection.ts` is a FIFTH canonical file. It was
+  // added as a RELATIVE import of `snapshot.ts`, and the emitter only reads the
+  // four listed here while its coverage proof only inspects `@/*` imports — so
+  // the bundle shipped a `posture?: PostureProjectionView` field whose type it
+  // never declared, and `typecheck:all` went red on a GENERATED file. Every
+  // drift guard stayed green because they compare unions and bytes, not
+  // closure. The `[closure]` hellgate now asserts the missing property.
+  const postureProjection = emitCanonicalFile("src/protocol/session/posture-projection.ts")
   const snapshot = emitCanonicalFile("src/protocol/session/snapshot.ts")
   const events = emitCanonicalFile("src/protocol/session/events.ts")
   const readModels = emitReadModelSurface()
@@ -381,6 +396,8 @@ export const generateProtocolBundle = (): string => {
   sections.push("/* --- Capabilities ---------------------------------------------------- */")
   sections.push(...capabilities.interfaces, ...capabilities.typeAliases)
   sections.push("/* --- Snapshot views -------------------------------------------------- */")
+  // Posture views FIRST — `SessionStateView.posture` references them.
+  sections.push(...postureProjection.interfaces, ...postureProjection.typeAliases)
   sections.push(...snapshot.interfaces, ...snapshot.typeAliases)
   // `SessionStatus` — a NAMED alias the frontend consumes (StatusBar /
   // ThinkingIndicator / ChatPanel). Canonical inlines the union on

@@ -1,4 +1,6 @@
+import { homedir } from "node:os"
 import { z } from "zod"
+import { classifyPath } from "@/security"
 import { defaultFileSystemPort, type FileSystemPort, FsJailError } from "@/storage"
 import { globWriteGuardEvent, writeBudgetDeny } from "../_shared/exfil-rail-guards"
 import { freshHashNote, refreshStaleReadBaseline } from "../_shared/fresh-hash"
@@ -97,6 +99,14 @@ type Input = z.infer<typeof schema>
 export const makeWriteTool = (fs: FileSystemPort = defaultFileSystemPort): Tool<Input> =>
   defineTool<Input>({
     name: "write",
+    // aug-23 audit — Layer-1 SOURCE CLASS. Pinned by
+    // `tests/unit/tool-source-class-coverage-hellgate.test.ts`: a tool whose
+    // input carries a filesystem path must declare this, or Layer-1's
+    // whole-output substitution is structurally unreachable for it and a
+    // `.env` body reaches the model verbatim (Layer-2 is format-based and
+    // `.env` values match no format). Same one-liner `read` has used since
+    // ADR-0078.
+    classifySource: (input) => classifyPath(input.path, homedir()),
     // ADR-0410 — when-not-to-use clause. Mirrors Codex `apply_patch` and
     // Claude Code 2.1.138 `tools/Write.ts` patterns: name `edit` as the
     // partial-mutation alternative, and flag repeated writes to the same

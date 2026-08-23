@@ -200,6 +200,84 @@ const extractStringConst = (source: string, constName: string): string => {
 }
 
 describe("wire-protocol GENERATED bundle is in sync with canonical (ticket 03-B structural guard)", () => {
+  // aug-23 audit — CLOSURE, not just sync. The byte-equality guard below proves
+  // the bundle matches a fresh emit, and 22 semantic guards prove the unions
+  // line up — yet all 23 stayed GREEN while the shipped bundle referenced
+  // `PostureProjectionView`, a type it never declared, so `typecheck:all` was
+  // red on a generated file. The emitter reads four canonical files
+  // (`capabilities/commands/snapshot/events`); `snapshot.ts` grew a RELATIVE
+  // import of a fifth (`./posture-projection`), and the emitter's coverage
+  // proof only inspects `@/*` imports, so the new type slipped through every
+  // net. This asserts the property none of the others do: every type NAME the
+  // bundle uses is one the bundle DEFINES (or imports).
+  /** Every type NAME the bundle brings into scope: its own declarations, its
+   *  imports, and the generic parameters a signature introduces. Extracted so
+   *  the test body stays under the cognitive-complexity ceiling. */
+  const declaredNames = (text: string): Set<string> => {
+    const declared = new Set<string>()
+    for (const m of text.matchAll(/^export (?:interface|type|const|enum) ([A-Za-z0-9_]+)/gm)) {
+      declared.add(m[1] as string)
+    }
+    for (const m of text.matchAll(/^import type \{([^}]*)\} from/gm)) {
+      for (const raw of (m[1] as string).split(",")) {
+        const name = raw
+          .trim()
+          .split(/\s+as\s+/)
+          .pop()
+          ?.trim()
+        if (name !== undefined && name.length > 0) declared.add(name)
+      }
+    }
+    // Generic PARAMETERS are declared by their own signature, not by the file.
+    for (const m of text.matchAll(/<([A-Z][A-Za-z0-9_]*)(?:\s+extends\b[^>]*)?>/g)) {
+      declared.add(m[1] as string)
+    }
+    return declared
+  }
+
+  test("[closure] every type the generated bundle references is declared in it", () => {
+    const text = generateProtocolBundle()
+    const declared = declaredNames(text)
+    // Scan TYPE POSITIONS only, on comment-stripped text: a `: Foo` annotation,
+    // an `extends Foo`, or a `| Foo` union arm. A bare PascalCase-word scan also
+    // matched ordinary English in the banner ("Source", "Regenerate", "UI"),
+    // which would make the guard noisy and eventually ignored.
+    const code = text.replace(/\/\*[\s\S]*?\*\//g, " ").replace(/(^|[^:])\/\/[^\n]*/g, "$1 ")
+    const BUILTIN = new Set([
+      "Array",
+      "ReadonlyArray",
+      "Readonly",
+      "Record",
+      "Partial",
+      "Pick",
+      "Omit",
+      "Promise",
+      "Map",
+      "Set",
+      "Date",
+      "Error",
+      "Exclude",
+      "Extract",
+      "NonNullable",
+      "Uint8Array",
+      "ArrayBuffer",
+      "Parameters",
+      "ReturnType",
+      "Awaited",
+      "Required",
+    ])
+    const missing = new Set<string>()
+    const TYPE_POSITION = /(?::\s*|\|\s*|extends\s+|<)([A-Z][A-Za-z0-9_]*)\b/g
+    for (const m of code.matchAll(TYPE_POSITION)) {
+      const name = m[1] as string
+      if (declared.has(name) || BUILTIN.has(name)) continue
+      missing.add(name)
+    }
+    // Anti-vacuity: the scan must actually see our vocabulary.
+    expect(declared.size).toBeGreaterThan(30)
+    expect([...missing].sort()).toEqual([])
+  })
+
   test("[regen] committed generated bundle BYTE-EQUALS a fresh in-process regeneration", () => {
     // The STRONGEST guard: the session copy is no longer hand-written — it is a
     // pure function of the four canonical session files. If a canonical edit

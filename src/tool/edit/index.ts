@@ -1,4 +1,6 @@
+import { homedir } from "node:os"
 import { z } from "zod"
+import { classifyPath } from "@/security"
 import { defaultFileSystemPort, type FileSystemPort, FsJailError, sha256Hex } from "@/storage"
 import { globWriteGuardEvent, writeBudgetEvent } from "../_shared/exfil-rail-guards"
 import { freshHashNote, refreshStaleReadBaseline } from "../_shared/fresh-hash"
@@ -519,6 +521,14 @@ const editPreCommitDeny = async (
  *  tests pass an in-memory port for isolation. */
 export const makeEditTool = (fs: FileSystemPort = defaultFileSystemPort): Tool<Input> => ({
   name: "edit",
+  // aug-23 audit — Layer-1 SOURCE CLASS. Pinned by
+  // `tests/unit/tool-source-class-coverage-hellgate.test.ts`: a tool whose
+  // input carries a filesystem path must declare this, or Layer-1's
+  // whole-output substitution is structurally unreachable for it and a
+  // `.env` body reaches the model verbatim (Layer-2 is format-based and
+  // `.env` values match no format). Same one-liner `read` has used since
+  // ADR-0078.
+  classifySource: (input) => classifyPath(input.path, homedir()),
   // ADR-0410 — when-not-to-use clause. Codex L83-110 (`apply_patch`) and
   // Claude Code 2.1.138 `tools/Edit.ts` both attach a do-not-use list to the
   // edit description; the negative anchors cut a recurring mis-routing

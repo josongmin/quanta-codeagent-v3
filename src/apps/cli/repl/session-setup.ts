@@ -14,7 +14,7 @@ import type { PendingApprovalView } from "@/protocol/session"
 import { buildSkillRuntimeAuthority } from "@/runner/assemble/session-authorities"
 import type { ApprovalDecisionResult } from "@/runner/orchestrate"
 import type { RuntimeContext } from "@/sdk/runtime"
-import { gateOn, logger, quantaHomeDirFrom, runtimeConfig } from "@/shared"
+import { errMessage, gateOn, logger, quantaHomeDirFrom, runtimeConfig } from "@/shared"
 import type { SkillRuntimeAuthority } from "@/skill"
 import { clearFsJailDecisionSink, setFsJailDecisionSink } from "@/storage"
 import type { AgentEvent, StreamPort } from "@/stream"
@@ -324,7 +324,7 @@ const buildCliSkillAuthority = async (
     })
   } catch (e) {
     logger.warn("skill runtime authority build failed; continuing without convergence", {
-      error: e instanceof Error ? e.message : String(e),
+      error: errMessage(e),
     })
     return undefined
   }

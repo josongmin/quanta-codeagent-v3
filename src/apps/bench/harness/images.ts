@@ -51,9 +51,7 @@ const DOCKER_QUERY_TIMEOUT_MS = 30_000
 const DOCKER_TRANSFER_TIMEOUT_MS = 20 * 60_000
 
 const dockerTimeoutMsFor = (argv: readonly string[]): number =>
-  argv[0] === "pull" || argv[0] === "push"
-    ? DOCKER_TRANSFER_TIMEOUT_MS
-    : DOCKER_QUERY_TIMEOUT_MS
+  argv[0] === "pull" || argv[0] === "push" ? DOCKER_TRANSFER_TIMEOUT_MS : DOCKER_QUERY_TIMEOUT_MS
 
 /** Default `docker` spawn via Bun.spawn (no shell). The timeout is chosen per
  *  verb ({@link dockerTimeoutMsFor}) — a hung daemon must not wedge the caller,

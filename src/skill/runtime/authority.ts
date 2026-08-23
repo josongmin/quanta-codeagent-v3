@@ -27,6 +27,7 @@
  * Slice rules: `@/skill` siblings + `@/shared` only. exactOptionalPropertyTypes.
  */
 
+import { errMessage } from "@/shared"
 import type { AdminPolicy } from "../admin-policy"
 import { bannedSkillNames, requiredAdminSkillNames } from "../install-enforcement"
 import type { SkillSnapshot } from "../registry"
@@ -185,7 +186,7 @@ export const createSkillRuntimeAuthority = (
       try {
         await deps.disabledStore.write(record)
       } catch (err) {
-        const detail = err instanceof Error ? err.message : String(err)
+        const detail = errMessage(err)
         return { ok: false, rejection: { kind: "persist_failed", detail } }
       }
 
