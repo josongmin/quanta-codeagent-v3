@@ -10,6 +10,7 @@
  *  `reason: "invalid-input"` (the second-time-around path of the retry). */
 
 import { spawn } from "node:child_process"
+import { sanitizeLogText } from "@/shared"
 import type { ElicitationFailureReason, ElicitationPrompter, ElicitationResult } from "./port"
 import {
   type BooleanRequest,
@@ -61,14 +62,42 @@ const defaultOpener = (url: string): void => {
   }
 }
 
+/** SECURITY — every string interpolated into a prompt LINE below originates
+ *  with the REMOTE MCP server (`elicitation/create` params), and `io.write`
+ *  goes straight to the operator's TTY. Raw ANSI/CSI + CR lets that server
+ *  erase the line the harness just printed and repaint a harness-looking
+ *  prompt (`[quanta] Paste your AWS secret key:`) whose answer is returned to
+ *  the SAME server; a raw LF forges an extra line. Unlike sampling there is no
+ *  `QUANTA_MCP_CAPS` gate in front of this surface.
+ *
+ *  We reuse `@/shared` {@link sanitizeLogText} (the log-plane defence) rather
+ *  than `@/tool` `neutralizeTerminalOutput`: the two differ exactly on LF/TAB,
+ *  which that one PRESERVES because model-visible command output needs its own
+ *  line structure. Here the PROMPTER owns the line structure (it inserts the
+ *  `\n` between prompt and options and the trailing `> `), so a server LF is
+ *  itself the forge vector — the single-line discipline of the log plane is
+ *  the matching threat model, and it also folds the C1 8-bit CSI introducer
+ *  and NFKC-equivalent homographs that a caret-defang would leave standing.
+ *
+ *  DISPLAY-ONLY: the enum matcher and the returned value still use the RAW
+ *  label, so the wire contract with the server is byte-unchanged (widening the
+ *  matcher to also accept the sanitized form would change which answers
+ *  resolve — a behavior change this hardening deliberately avoids). A benign
+ *  request is unaffected: control-free text passes through untouched. */
+const safeText = (s: string): string => sanitizeLogText(s)
+
+/** The `[Title] ` prefix when a request carries one, else "". */
+const titlePrefix = (title: string | undefined): string =>
+  title !== undefined ? `[${safeText(title)}] ` : ""
+
 /** Render one option row. A structured option shows its label plus (when set) a
  *  `— description` and a `[preview]` affordance; a bare string renders as before
  *  (byte-identical to the pre-widening single-line form). */
 const renderOption = (o: EnumOption, i: number): string => {
-  if (typeof o === "string") return `  ${i + 1}. ${o}`
-  const desc = o.description !== undefined ? ` — ${o.description}` : ""
-  const prev = o.preview !== undefined ? ` [${o.preview}]` : ""
-  return `  ${i + 1}. ${o.label}${desc}${prev}`
+  if (typeof o === "string") return `  ${i + 1}. ${safeText(o)}`
+  const desc = o.description !== undefined ? ` — ${safeText(o.description)}` : ""
+  const prev = o.preview !== undefined ? ` [${safeText(o.preview)}]` : ""
+  return `  ${i + 1}. ${safeText(o.label)}${desc}${prev}`
 }
 
 const renderOptions = (options: ReadonlyArray<EnumOption>): string =>
@@ -78,7 +107,7 @@ const renderOptions = (options: ReadonlyArray<EnumOption>): string =>
  *  Combined AFTER the title prefix so both render (title is the port label, the
  *  header is the AskUserQuestion chip). */
 const headerPrefix = (header: string | undefined): string =>
-  header !== undefined ? `(${header}) ` : ""
+  header !== undefined ? `(${safeText(header)}) ` : ""
 
 const fail = <T>(reason: ElicitationFailureReason): ElicitationResult<T> => ({
   ok: false,
@@ -147,12 +176,12 @@ export const cliPrompter = (
 ): ElicitationPrompter => ({
   async promptString(req: StringRequest, signal?: AbortSignal) {
     const s = signal ?? new AbortController().signal
-    io.write(`${req.title !== undefined ? `[${req.title}] ` : ""}${req.prompt}: `)
+    io.write(`${titlePrefix(req.title)}${safeText(req.prompt)}: `)
     return withRetry<string>(io, s, (raw) => validateString(req, raw))
   },
   async promptNumber(req: NumberRequest, signal?: AbortSignal) {
     const s = signal ?? new AbortController().signal
-    io.write(`${req.title !== undefined ? `[${req.title}] ` : ""}${req.prompt}: `)
+    io.write(`${titlePrefix(req.title)}${safeText(req.prompt)}: `)
     const result = await withRetry<number>(io, s, (raw) => validateNumber(req, raw))
     // After two validation failures, surface `invalid-input` (NaN/Infinity)
     // as the more-specific reason — Number/Integer is the only schema family
@@ -161,20 +190,20 @@ export const cliPrompter = (
   },
   async promptInteger(req: IntegerRequest, signal?: AbortSignal) {
     const s = signal ?? new AbortController().signal
-    io.write(`${req.title !== undefined ? `[${req.title}] ` : ""}${req.prompt}: `)
+    io.write(`${titlePrefix(req.title)}${safeText(req.prompt)}: `)
     const result = await withRetry<number>(io, s, (raw) => validateInteger(req, raw))
     return result.ok ? result : { ok: false, reason: "invalid-input" }
   },
   async promptBoolean(req: BooleanRequest, signal?: AbortSignal) {
     const s = signal ?? new AbortController().signal
-    io.write(`${req.title !== undefined ? `[${req.title}] ` : ""}${req.prompt} (y/n): `)
+    io.write(`${titlePrefix(req.title)}${safeText(req.prompt)} (y/n): `)
     return withRetry<boolean>(io, s, validateBoolean)
   },
   async promptEnum(req: EnumRequest, signal?: AbortSignal) {
     if (req.options.length === 0) return fail<string>("empty-enum")
     const s = signal ?? new AbortController().signal
     io.write(
-      `${req.title !== undefined ? `[${req.title}] ` : ""}${headerPrefix(req.header)}${req.prompt}\n${renderOptions(req.options)}\n> `,
+      `${titlePrefix(req.title)}${headerPrefix(req.header)}${safeText(req.prompt)}\n${renderOptions(req.options)}\n> `,
     )
     return withRetry<string>(io, s, (raw) => matchEnum(req.options, raw))
   },
@@ -182,7 +211,7 @@ export const cliPrompter = (
     if (req.options.length === 0) return fail<ReadonlyArray<string>>("empty-enum")
     const s = signal ?? new AbortController().signal
     io.write(
-      `${req.title !== undefined ? `[${req.title}] ` : ""}${headerPrefix(req.header)}${req.prompt}\n${renderOptions(req.options)}\n(comma-separated)> `,
+      `${titlePrefix(req.title)}${headerPrefix(req.header)}${safeText(req.prompt)}\n${renderOptions(req.options)}\n(comma-separated)> `,
     )
     return withRetry<ReadonlyArray<string>>(io, s, (raw) => matchMultiEnum(req, raw))
   },
@@ -190,7 +219,7 @@ export const cliPrompter = (
     if (req.options.length === 0) return fail<string>("empty-enum")
     const s = signal ?? new AbortController().signal
     io.write(
-      `${req.title !== undefined ? `[${req.title}] ` : ""}${headerPrefix(req.header)}${req.prompt}\n${renderOptions(req.options)}\n> `,
+      `${titlePrefix(req.title)}${headerPrefix(req.header)}${safeText(req.prompt)}\n${renderOptions(req.options)}\n> `,
     )
     return withRetry<string>(io, s, (raw) => matchEnum(req.options, raw))
   },
@@ -205,7 +234,7 @@ export const cliPrompter = (
     // Render the FULL url on its OWN line (phishing safety — the user sees the
     // exact destination, not a truncated/styled label), then confirm.
     io.write(
-      `${req.title !== undefined ? `[${req.title}] ` : ""}${req.prompt}\n${req.url}\nOpen in browser? (y/n): `,
+      `${titlePrefix(req.title)}${safeText(req.prompt)}\n${safeText(req.url)}\nOpen in browser? (y/n): `,
     )
     const confirm = await withRetry<boolean>(io, s, validateBoolean)
     if (!confirm.ok) return confirm // cancelled / validation-error pass through

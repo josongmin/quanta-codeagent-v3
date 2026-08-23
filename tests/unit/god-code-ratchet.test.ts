@@ -92,11 +92,11 @@ describe("god-code ratchet (SE size metric)", () => {
   // build — split one and LOWER the number. It never gets raised.
   test("the 900-999 approaching cohort does not grow", () => {
     // JSON import widens the tuple to `number[]`; pin it so the bounds are total.
-    const band = allowlist.approachingModuleCeiling as {
-      readonly band: readonly [number, number]
-      readonly max: number
-    }
-    const [lo, hi] = band.band
+    const band = allowlist.approachingModuleCeiling
+    // JSON import widens the tuple to `number[]`; read the bounds totally
+    // rather than asserting a tuple type the import cannot carry.
+    const lo = band.band[0] ?? 0
+    const hi = band.band[1] ?? 0
     const approaching = files
       .map((f) => ({ file: f.path, lines: f.text.split("\n").length }))
       .filter((m) => m.lines >= lo && m.lines <= hi)

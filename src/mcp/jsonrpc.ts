@@ -43,6 +43,24 @@ const concat = (a: Uint8Array, b: Uint8Array): Uint8Array<ArrayBuffer> => {
 
 const NEWLINE = 0x0a
 
+/** Single-line payload ceiling for the stdio transport (10MB).
+ *
+ *  WHY: without it, `push()` concatenates forever and `nextLine()` only ever
+ *  cuts at a `\n`, so a hostile or wedged server that streams bytes with NO
+ *  newline grows our heap until the process dies — a one-line OOM. The rest of
+ *  this file already treats the stream as adversarial (S15 envelope
+ *  validation, `.slice(0, 200)` on logged lines); this closes the memory hole
+ *  in that same threat model.
+ *
+ *  VALUE + BEHAVIOUR mirror the sibling framer
+ *  `src/plugin-isolation/bun-spawner.ts` (`MAX_MESSAGE_BYTES = 10MB`): an
+ *  over-cap line is DROPPED with a warn and the reader RESYNCS at the next
+ *  newline, which is also this file's own failure idiom for a malformed line
+ *  (warn + skip, never wedge). */
+export const MAX_LINE_BYTES = 10 * 1024 * 1024
+
+const EMPTY = (): Uint8Array<ArrayBuffer> => new Uint8Array(new ArrayBuffer(0))
+
 /** S15: strict JSON-RPC 2.0 envelope validator. Spec requires every message
  *  carry `jsonrpc:"2.0"` AND either an `id` (response) or a `method`
  *  (notification/request). Without this, a hostile or buggy MCP server can
@@ -69,8 +87,11 @@ const isValidEnvelope = (m: unknown): m is JsonRpcMessage => {
  *  is not valid JSON is logged and dropped so a poisoned stream cannot wedge
  *  the reader. */
 export class LineReader {
-  private buffer: Uint8Array<ArrayBuffer> = new Uint8Array(new ArrayBuffer(0))
+  private buffer: Uint8Array<ArrayBuffer> = EMPTY()
   private readonly decoder = new TextDecoder()
+  /** True while the TAIL of an over-cap line is still arriving: every byte up
+   *  to (and including) the next newline is discarded, then framing resumes. */
+  private resyncing = false
 
   push(chunk: Uint8Array): JsonRpcMessage[] {
     this.buffer = concat(this.buffer, chunk)
@@ -81,16 +102,45 @@ export class LineReader {
       if (parsed !== null) out.push(parsed)
       line = this.nextLine()
     }
+    this.enforceLineCap()
     return out
   }
 
-  /** Slice off the next `\n`-terminated line as text, or null if none yet. */
+  /** Slice off the next `\n`-terminated line as text, or null if none yet.
+   *  Two skip cases keep the loop going (rather than returning) so messages
+   *  BEHIND them in the same chunk are still delivered: the discarded tail of
+   *  an over-cap line ({@link resyncing}), and a fully-buffered line that is
+   *  itself over the cap. */
   private nextLine(): string | null {
-    const nl = this.buffer.indexOf(NEWLINE)
-    if (nl < 0) return null
-    const text = this.decoder.decode(this.buffer.subarray(0, nl))
-    this.buffer = this.buffer.subarray(nl + 1)
-    return text
+    for (;;) {
+      const nl = this.buffer.indexOf(NEWLINE)
+      if (nl < 0) return null
+      const head = this.buffer.subarray(0, nl)
+      this.buffer = this.buffer.subarray(nl + 1)
+      if (this.resyncing) {
+        this.resyncing = false
+        continue
+      }
+      if (head.byteLength > MAX_LINE_BYTES) {
+        this.warnOverCap(head.byteLength)
+        continue
+      }
+      return this.decoder.decode(head)
+    }
+  }
+
+  /** Bound the UNTERMINATED remainder. Reached only when the buffer holds no
+   *  newline at all, so those bytes cannot yet be a complete message: drop
+   *  them and skip forward to the next newline. */
+  private enforceLineCap(): void {
+    if (this.buffer.byteLength <= MAX_LINE_BYTES) return
+    this.warnOverCap(this.buffer.byteLength)
+    this.buffer = EMPTY()
+    this.resyncing = true
+  }
+
+  private warnOverCap(bytes: number): void {
+    logger.warn("mcp: dropping over-cap JSON-RPC line", { bytes, cap: MAX_LINE_BYTES })
   }
 
   private parseLine(line: string): JsonRpcMessage | null {

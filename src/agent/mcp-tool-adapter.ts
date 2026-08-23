@@ -10,7 +10,7 @@ import {
   type McpToolDef,
   tasksPortOver,
 } from "@/mcp"
-import { errMessage } from "@/shared"
+import { errMessage, sliceWholeChars } from "@/shared"
 import {
   mcpTasksTools,
   type TasksHandle,
@@ -18,6 +18,7 @@ import {
   type ToolContext,
   type ToolEvent,
 } from "@/tool"
+import { neutralizeTerminalOutput } from "@/tool/terminal-sanitize"
 import { toToolResult } from "./mcp-media-guard"
 
 /**
@@ -42,6 +43,47 @@ import { toToolResult } from "./mcp-media-guard"
 export const mcpToolName = (server: string, tool: string): string => {
   const clean = (s: string): string => s.replace(/[^A-Za-z0-9_]+/g, "_")
   return `mcp__${clean(server)}__${clean(tool)}`
+}
+
+/** Ceiling on a server-supplied tool description, in UTF-16 code units.
+ *
+ *  The description is UNTRUSTED third-party text that is re-sent to the model
+ *  on EVERY request, so an unbounded one is a context/cost DoS (and the wire
+ *  codecs pass it through verbatim). 4096 mirrors `MAX_USER_CONFIG_VALUE_LEN`
+ *  in `src/plugin-isolation/dxt-user-config.ts` — this repo's existing ceiling
+ *  for a single untrusted third-party string — and is ~7.6x the LONGEST
+ *  description this repo itself ships (535 chars, `src/tool/node-repl`), so a
+ *  legitimate server is not clipped. */
+export const MAX_TOOL_DESCRIPTION_CHARS = 4096
+
+/** Truncation is DISCLOSED to the model, never silent (idiom shared with
+ *  `src/runner/batch/eval/llm-candidate-select.ts`). */
+const TRUNCATION_MARKER = "\n…(truncated)"
+
+/** Make a server-declared `description` safe to splice into the model's
+ *  tool-definition block: defuse control bytes, then bound the length.
+ *
+ *  The sibling `mcpToolName` already sanitizes the server-supplied NAME; the
+ *  description had no guard at all, so raw ANSI/C0, the 8-bit C1 introducers,
+ *  bidi overrides, zero-width characters (invisible in every human-facing tool
+ *  listing, fully legible to the model) and lone surrogates all flowed
+ *  straight through. We reuse `@/tool` {@link neutralizeTerminalOutput} — the
+ *  house defence for untrusted text spliced into the model transcript — which
+ *  DEFANGS to a visible caret form (`^[`) instead of deleting, so the model
+ *  still reads what the server meant and an auditor can see the escape, while
+ *  PRESERVING `\n`/`\t` so a legitimate multi-line description renders
+ *  byte-identically. Neutralize runs BEFORE the cap so truncation only ever
+ *  measures already-defanged text (the contract documented on that helper);
+ *  `sliceWholeChars` keeps the cut off a surrogate pair.
+ *
+ *  DELIBERATELY OUT OF SCOPE: semantic prompt-injection isolation (delimiters,
+ *  refusal wrappers). That changes the tool MENU the model reads and is a
+ *  product decision, not a mechanical safety fix. */
+const safeDescription = (description: string): string => {
+  const neutralized = neutralizeTerminalOutput(description)
+  return neutralized.length <= MAX_TOOL_DESCRIPTION_CHARS
+    ? neutralized
+    : `${sliceWholeChars(neutralized, MAX_TOOL_DESCRIPTION_CHARS)}${TRUNCATION_MARKER}`
 }
 
 /**
@@ -205,7 +247,7 @@ export const mcpToolToTool = (
   const { isReadOnly, isConcurrencySafe } = annotationPredicates(def, opts)
   return {
     name,
-    description: def.description,
+    description: safeDescription(def.description),
     inputSchema: schema,
     isReadOnly: () => isReadOnly,
     isConcurrencySafe: () => isConcurrencySafe,
@@ -277,7 +319,7 @@ export const mcpToolToToolSupervised = (
   const { isReadOnly, isConcurrencySafe } = annotationPredicates(def, opts)
   return {
     name,
-    description: def.description,
+    description: safeDescription(def.description),
     inputSchema: schema,
     isReadOnly: () => isReadOnly,
     isConcurrencySafe: () => isConcurrencySafe,
