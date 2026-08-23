@@ -44,6 +44,7 @@ import { buildDatasetDryRunPlan, buildDryRunPlan, formatDryRunPlan } from "./dry
 import { runInstance } from "./eval"
 import { type ForkBranchOutcome, formatForkBranchReport } from "./eval/fork-branch-report"
 import { type ForkExperiment, resolveForkExperiments } from "./eval/fork-experiments"
+import { assertFamilySelectorHonored } from "./family-mode-honor"
 import { startHostResourceSampler } from "./host-resource-sampler"
 import { startLaneProgressRenderer } from "./lane-progress-renderer"
 import { resolveModelLanes } from "./model-lanes"
@@ -924,6 +925,9 @@ export const runMain = async (deps: MainDeps = {}): Promise<void> => {
     throw new Error("runMain is the swe-bench composition root; terminal-bench routes elsewhere")
   }
   const family = benchConfig.swe.datasetFamily
+  // Whether the operator NAMED the family or inherited the default. Needed at
+  // the mode split below: only an EXPLICIT selector can be wrong to accept.
+  const familySelector = benchConfig.swe.familySelector
   // Pro spans Python, Go, JS, and TS, so family selection must reach the preset
   // seeder — as a TYPED argument. Explicit preset selectors retain precedence.
   applyBenchEnvDefaults(process.env, {
@@ -983,5 +987,12 @@ export const runMain = async (deps: MainDeps = {}): Promise<void> => {
   if (await maybeRunDatasetMode({ n, limit, maxTurns, timeoutMs, family }, obs)) {
     return
   }
+  // We are now committed to CUSTOM-CORPUS mode, which has no family axis: it
+  // loads a local corpus, bypasses the family's reader/preflight/verifier/grader
+  // and (BFND-02) does not stamp the family into the report. The ONE effect that
+  // already leaked through is the execution preset, seeded above from the
+  // family's `remoteDefaultPreset` — so accepting an explicit selector here
+  // silently hands this run a different agent. Refuse instead of half-applying.
+  assertFamilySelectorHonored({ mode: "custom-corpus", familySelector, datasetFamily: family })
   await runCustomCorpusMode({ corpusRoot, n, limit, maxTurns, timeoutMs, family }, obs)
 }
