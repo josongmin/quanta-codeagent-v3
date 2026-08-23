@@ -1,26 +1,25 @@
 /**
  * RFC-04 D3 — worktree runtime-progress → activity adapter (aug-22 absorption).
  *
- * The ONE cross-domain adapter that maps a worktree-create runtime progress
- * stream onto the D1 staged activity nodes (workspace/checkout). Runner owns
- * this seam because it is the composition layer: `@/activity` must never import
- * `@/runtime`, and the runtime create must never speak the activity vocabulary.
- * This module TRANSLATES the runtime's typed progress union into `@/activity`
- * events, reusing D1's `worktreeStepOpen`/`worktreeStepSettle` and the
- * `worktreeCheckoutProgress` producer — NO new node kind, NO second spine, NO
- * status bus (blueprint §RFC-04: "Runner maps it to activity").
+ * The ONE cross-domain adapter that maps a worktree-create runtime STAGE
+ * progress stream onto the D1 staged activity nodes (workspace/checkout). Runner
+ * owns this seam because it is the composition layer: `@/activity` must never
+ * import `@/runtime`, and the runtime create must never speak the activity
+ * vocabulary. This module TRANSLATES the runtime's typed stage union into
+ * `@/activity` events, reusing D1's `worktreeStepOpen`/`worktreeStepSettle` — NO
+ * new node kind, NO second spine, NO status bus.
  *
- * ── D2 coupling (producer/consumer contract) ────────────────────────────────
- * The input {@link WorktreeCreateProgress} is the RFC-04 documented progress
- * SHAPE (rfc-04 domain contract; blueprint §RFC-04). D2 owns the concrete
- * `runtime/worktree/types.ts` PRODUCER of that shape and its git plumbing; this
- * adapter is the CONSUMER and depends only on the documented shape — it does not
- * reimplement any git plumbing. The stage vocabulary reuses D1's landed
- * {@link WorktreeStep} SSOT (workspace/checkout/setup) rather than minting a
- * second stage enum. When D2 lands its concrete union, D4 (which takes the
- * session/CLI composition lock) threads this adapter's observer into the runtime
- * progress callback and reconciles the two structurally-identical types. The
- * adapter is complete and unit-provable in isolation before that wiring exists.
+ * ── STATUS: UNWIRED FORWARD SEAM (no production caller) ──────────────────────
+ * This adapter has ZERO production callers — it is a forward contract, not a
+ * live path, and `worktree-checkout-progress-retired.test.ts` PINS that "no
+ * production caller" claim so it cannot silently rot into a second spine. The
+ * DELIVERED staged-card UX is emitted DIRECTLY by
+ * `current-thread-worktree.ts` (which calls `worktreeStepOpen`/
+ * `worktreeStepSettle` inline around the git effect), NOT through this adapter.
+ * The originally-planned D2 real-time checkout-% arm was RETIRED (RESOLUTION-PLAN
+ * R5): `git worktree add` rejects `--progress` and streams no per-file checkout
+ * meter, so a real checkout percentage is structurally impossible on that path —
+ * the union carries only lifecycle stages now, never a fabricated ratio.
  *
  * Pure of I/O: the mapping is a pure function; the only stateful surface is the
  * gated observer that writes mapped events to a supplied `ActivityStore`.
@@ -30,41 +29,24 @@ import {
   type ActivityStore,
   type AgentActivityEvent,
   type WorktreeStep,
-  worktreeCheckoutProgress,
   worktreeStepOpen,
   worktreeStepSettle,
 } from "@/activity"
 
 /**
- * The RFC-04 worktree-create runtime progress union — the documented contract
- * this adapter CONSUMES (D2 produces it). A CLOSED union: the exhaustive switch
- * in {@link worktreeProgressToActivity} is the drift-guard (a new arm fails to
+ * The RFC-04 worktree-create runtime STAGE union — the documented forward
+ * contract this adapter would CONSUME. A CLOSED union: the exhaustive switch in
+ * {@link worktreeProgressToActivity} is the drift-guard (a new arm fails to
  * compile until mapped). `stage` reuses the D1 {@link WorktreeStep} SSOT; `code`
- * is the failure code (D2's `WorktreeFailureCode`, typed as `string` here since
- * the activity mapping never branches on it — a failed stage settles `failed`
- * regardless of code).
+ * is the failure code (typed as `string` here since the activity mapping never
+ * branches on it — a failed stage settles `failed` regardless of code). There is
+ * deliberately NO `checkout-progress`/percentage arm: git worktree add streams no
+ * checkout meter, so no real ratio can ever be produced (RESOLUTION-PLAN R5).
  */
 export type WorktreeCreateProgress =
   | { readonly kind: "stage-started"; readonly stage: WorktreeStep }
-  | { readonly kind: "checkout-progress"; readonly completed: number; readonly total: number }
   | { readonly kind: "stage-completed"; readonly stage: WorktreeStep }
   | { readonly kind: "failed"; readonly stage: WorktreeStep; readonly code: string }
-
-/**
- * Convert a git-reported `(completed/total)` count pair to an integer percentage
- * in [0,100], or `null` when the counts are malformed/indeterminate. Reports
- * git's OWN ratio — NEVER a fabricated/heuristic number: a non-finite or
- * non-positive total, a negative/non-finite completed, or a regressing
- * `completed > total` is indeterminate (→ `null` → the adapter emits no progress
- * event, so the node stays `running` with no invented %). Aligns with
- * no-heuristics/no-optimistic-signal: it is git's number or nothing.
- */
-export const checkoutPercentage = (completed: number, total: number): number | null => {
-  if (!Number.isFinite(completed) || !Number.isFinite(total)) return null
-  if (total <= 0) return null
-  if (completed < 0 || completed > total) return null
-  return Math.round((completed / total) * 100)
-}
 
 /**
  * Pure, exhaustive translation of ONE runtime progress event into the activity
@@ -81,12 +63,6 @@ export const worktreeProgressToActivity = (
   switch (progress.kind) {
     case "stage-started":
       return [worktreeStepOpen(operationId, progress.stage, at)]
-    case "checkout-progress": {
-      const pct = checkoutPercentage(progress.completed, progress.total)
-      // Indeterminate ⇒ NO event: the checkout node stays `running` with no
-      // fabricated number.
-      return pct === null ? [] : [worktreeCheckoutProgress(operationId, pct)]
-    }
     case "stage-completed":
       return [worktreeStepSettle(operationId, progress.stage, "done", at)]
     case "failed":

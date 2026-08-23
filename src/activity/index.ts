@@ -32,7 +32,6 @@ export {
   type WorktreeSettledKind,
   type WorktreeStep,
   type WorktreeStepOutcome,
-  worktreeCheckoutProgress,
   worktreeOpenActivity,
   worktreeOpNodeId,
   worktreeSettleActivity,

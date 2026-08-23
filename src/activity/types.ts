@@ -130,7 +130,7 @@ export interface ActivityNode {
   /** RFC-04 R6 D1 — the node's TYPED live progress (a closed `Progress` union,
    *  NOT a free-form meta string). Set/updated by `node_progress`; absent for a
    *  node with no ratio (the default posture is byte-identical). A renderer reads
-   *  this typed field, never a stringly-typed `meta.checkoutPercentage`. */
+   *  this typed field, never a stringly-typed percentage smuggled through `meta`. */
   readonly progress?: Progress | undefined
   /** Free-form, surface-rendered hints (e.g. `{ tool: "Bash", model: "gpt-5" }`). */
   readonly meta?: Readonly<Record<string, string>>

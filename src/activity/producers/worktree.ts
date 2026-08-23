@@ -190,33 +190,3 @@ export const worktreeStepSettle = (
   status: outcome,
   ...(at !== undefined ? { at } : {}),
 })
-
-/**
- * RFC-04 D3 — refresh the `checkout` stage child's LIVE percentage as a
- * presentational `meta.checkoutPercentage` hint. This re-emits `node_open` for
- * the SAME `checkout` node id: the spine's idempotent re-open refreshes
- * `label`/`meta` while PRESERVING the node's identity, `running` status and
- * counters (`spine.ts` openNode) — so the percentage rides the EXISTING node
- * with NO new event type and NO `node_metric` abuse (percent is a presentational
- * hint, not a cumulative counter). `percentage` is git's OWN reported ratio,
- * already validated to an integer in [0,100] by the runner adapter; an
- * unparseable/indeterminate ratio never reaches here (the adapter emits nothing,
- * so the node stays `running` with no fabricated number — no-heuristics). The
- * full parentId/kind/status is supplied so this is also self-sufficient if a
- * progress line arrives before the coarse `checkout` open (it opens the node
- * running); a later open/settle for the same id is idempotent for identity.
- */
-export const worktreeCheckoutProgress = (
-  operationId: string,
-  percentage: number,
-): AgentActivityEvent => ({
-  type: "node_open",
-  node: {
-    id: worktreeStepId(operationId, "checkout"),
-    parentId: worktreeOpNodeId(operationId),
-    kind: "phase",
-    label: WORKTREE_STEP_LABEL.checkout,
-    status: "running",
-    meta: { checkoutPercentage: String(percentage) },
-  },
-})
