@@ -67,7 +67,7 @@ export const createJsonDisabledStore = (opts: {
       let raw: string | null
       try {
         raw = await fs.readText(opts.path)
-      } catch {
+      } catch (_e) {
         // A read failure (EACCES/corrupt handle) fails CLOSED to the empty set
         // rather than crashing session construction — the user-disabled overlay
         // is best-effort at load; admin bans still apply via the policy arm.
@@ -77,7 +77,7 @@ export const createJsonDisabledStore = (opts: {
       let parsed: unknown
       try {
         parsed = JSON.parse(raw)
-      } catch {
+      } catch (_e) {
         return emptyDisabledSet()
       }
       return decodeDisabledSet(parsed)
