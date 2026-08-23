@@ -31,10 +31,17 @@ import {
   REPO_MAP_DEFAULT_MAX_FILES,
 } from "@/agent"
 import { repoMapSchema } from "@/config/knob-schema/schemas/bench-loop"
+import { makeRepoMapScan } from "@/runner/assemble/repo-map-scan"
 import { deriveKnob } from "@/runner/batch/eval/kernel/derive"
+import { runShell } from "@/runtime"
 import type { ApplyContext, Surface } from "../types"
 
 const SURFACES: readonly Surface[] = ["cli", "agent-batch", "agent-interactive", "bench"]
+
+/** The scan adapter is STATELESS (it closes over `runShell` only), so build it
+ *  once. Constructing a fresh closure per `apply` also made two applies of the
+ *  same knob structurally unequal, which a knob-SSOT hellgate correctly caught. */
+const REPO_MAP_SCAN = makeRepoMapScan({ shell: runShell })
 
 interface RepoMapValue {
   readonly enabled: true
@@ -56,6 +63,13 @@ export const applyRepoMap = (
       maxFiles: REPO_MAP_DEFAULT_MAX_FILES,
       maxChars: REPO_MAP_DEFAULT_MAX_CHARS,
     },
+    // §17 packet E — the SCAN adapter, without which the caps above are inert.
+    // Setting only `repoMap` is exactly the state this knob shipped in: a
+    // documented, schema'd, preset-referenced knob whose probe had zero
+    // production call sites, so `QUANTA_REPO_MAP=1` produced a byte-identical
+    // prompt. The caps and the port are set TOGETHER because either alone is a
+    // no-op, and only one of them looks like a bug.
+    repoMapScan: REPO_MAP_SCAN,
   }
 }
 

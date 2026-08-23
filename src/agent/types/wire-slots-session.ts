@@ -128,6 +128,25 @@ export interface WireSlotsSessionConfig {
     readonly maxChars: number
   }
   /**
+   * §17 packet E — the injected SCAN adapter the repo-map probe runs.
+   *
+   * The probe is deliberately IO-free: the shell call (`rg --files` + the
+   * `file_tree_summary` aggregate/render helpers, capped) lives in the runner's
+   * `makeRepoMapScan`, mirroring how `probeTurnEnv` takes a pre-captured
+   * `git status`. Injecting it keeps `@/agent` free of `runShell` and lets a
+   * test hand in a canned tree for deterministic replay.
+   *
+   * Present TOGETHER with {@link repoMap} ⇒ the loop probes on turn 1. Absent ⇒
+   * the probe cannot run, so the env block stays byte-identical — which is also
+   * the fail-safe if a host wires the caps but forgets the adapter.
+   */
+  repoMapScan?: (opts: {
+    readonly cwd: string
+    readonly maxDepth: number
+    readonly maxFiles: number
+    readonly maxChars: number
+  }) => Promise<string | undefined>
+  /**
    * L4 wiring — control-op cluster (2026-05-23). Typed mid-turn
    * {@link ConversationActionPort} the loop polls at the TOP of each turn
    * (before `cfg.steerBarrier`, before the LLM stream opens). Absent ⇒ no

@@ -1,0 +1,80 @@
+id: repo-map-turn1-wire
+title: "`QUANTA_REPO_MAP` actually reaches the prompt — turn-1 bounded repo map (wire-or-delete ⇒ WIRE)"
+section: 1
+subsystem: Agent loop — turn-1 environment context
+order: 702
+maturity: L4
+status: new
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [interactive, headless]
+configurable: integrated
+config_refs:
+  env:
+    - QUANTA_REPO_MAP
+owners: ["@songmin"]
+labels: [correctness, surface:cli, tier:core]
+depends_on: []
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-08-24"
+  evidence:
+    cli: "`prepareTurnContext` builds the turn-1 env; the knob supplies caps + the scan port"
+    web: "the knob's surface list is cli/agent-batch/agent-interactive/bench; web is out of scope by design"
+purpose: |
+  `QUANTA_REPO_MAP` shipped as a registered runner knob with a schema, preset
+  references, a documented purpose ("turn-0 orientation reduces wasted nav turns on
+  SWE-bench"), a bounded probe, a scan adapter, a renderer and unit tests.
+
+  EVERYTHING EXCEPT THE CALL. `probeRepoMap` and `probeTurnEnv` had ZERO production
+  call sites — only tests. `TurnContextInput.env` had NO producer, so
+  `renderEnvBlock(input.env)` always saw `undefined` and the `## Environment` block
+  never rendered. Measured through the real loop: with `QUANTA_REPO_MAP=1` the
+  per-turn wire was BYTE-IDENTICAL to the knob being unset. An operator who set it got
+  nothing and believed they had enabled turn-0 orientation.
+
+  The wire-or-delete question resolves to WIRE: the plumbing is complete and the gap is
+  one missing call. Deleting would remove a documented, measurable bench lever because
+  someone forgot a line.
+
+  `prepareTurnContext` builds `env: { repoMap }` on TURN 1 ONLY, when both the caps and
+  the injected scan port are present. The port is a new slot because the probe is
+  deliberately IO-free — the `rg --files` call lives in the runner's `makeRepoMapScan`,
+  mirroring how `probeTurnEnv` takes a pre-captured `git status`.
+
+  The knob now sets BOTH halves. Either alone is a no-op, and only one of them looks
+  like a bug — which is exactly the state it shipped in.
+evidence:
+  code:
+    - src/agent/loop/context-assembler.ts
+    - src/agent/types/wire-slots-session.ts
+    - src/runner/knobs/knobs/repo-map.ts
+    - src/agent/env-context.ts
+  adrs:
+    - docs/decisions/0550-repo-map-wire-or-delete.md
+  tests:
+    unit:
+      - tests/unit/agent/repo-map-wire-hellgate.test.ts
+      - tests/unit/repo-map-injection.test.ts
+    integration: []
+    contract: []
+knobs: ["QUANTA_REPO_MAP"]
+deliberate_hold: null
+notes: |
+  THIS DISPROVES A PREMISE IN THE EXECUTION PLAN, which listed "env probe 신규 wiring"
+  under work-not-to-do on the grounds that it "already exists in the shipping CLI". It
+  does not — measured, not assumed.
+
+  SCOPE IS THE REPO MAP ONLY. `probeTurnEnv` (platform / shell / git status / package
+  manager) stays UNWIRED: it costs a `git status` per session and no knob asks for it.
+  Recorded rather than smuggled in under a packet that excluded it.
+
+  The scan adapter is built ONCE at module scope. It is stateless, and a fresh closure
+  per `apply` made two applies structurally unequal — which the knob-SSOT hellgate
+  correctly caught.
+
+  A first cut of the hellgate asserted on `input.system` and reported the WORKING fix as
+  broken: the env block rides the per-turn `<system-reminder>`, which is a MESSAGE. The
+  suite now captures the whole wire.

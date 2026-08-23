@@ -9,6 +9,7 @@ import { TokenBaselineBox } from "../compaction"
 import type { BackgroundSummarizationController } from "../compaction/index"
 import type { BreakerVerdict, CompactionBreaker } from "../compaction-breaker"
 import type { ConversationSummaryArchive } from "../conversation-summary-archive"
+import { probeRepoMap } from "../env-context"
 import type { HookPromptInject } from "../hooks"
 import { renderIdeContext } from "../ide-context"
 import { buildLanguageHint } from "../language-detect"
@@ -318,6 +319,44 @@ export interface PrepareTurnContextArgs {
   readonly activeModel?: string
 }
 
+/**
+ * §17 packet E — the turn-1 repo-map env context.
+ *
+ * `QUANTA_REPO_MAP` was a registered knob with a schema, presets, a bounded
+ * probe, a scan adapter, a renderer and tests — everything except the CALL.
+ * `probeRepoMap` had zero production call sites, `TurnContextInput.env` had no
+ * producer, and measured through the real loop the knob produced a
+ * BYTE-IDENTICAL prompt. An operator who set it got nothing.
+ *
+ * TURN 1 ONLY: the caps exist because turn-0 orientation is a one-time payment;
+ * re-scanning every turn would be the cost without the premise.
+ *
+ * FAIL-SOFT: `probeRepoMap` collapses every failure to `undefined`, and an
+ * absent scan adapter (a host that wired the caps but forgot the port) yields
+ * `undefined` too — so the env block stays byte-identical rather than breaking
+ * a turn over an orientation nicety.
+ *
+ * SCOPE: the repo map ONLY. `probeTurnEnv` (platform / shell / git status /
+ * package manager) stays unwired — it costs a `git status` per session and has
+ * no knob asking for it.
+ */
+const buildRepoMapEnv = async (
+  config: AgentConfig,
+  turn: number,
+): Promise<{ env: import("../env-context").TurnEnvContext } | Record<string, never>> => {
+  const caps = config.repoMap
+  const scan = config.repoMapScan
+  if (turn !== 1 || caps === undefined || scan === undefined) return {}
+  const repoMap = await probeRepoMap({
+    cwd: config.cwd,
+    scan,
+    maxDepth: caps.maxDepth,
+    maxFiles: caps.maxFiles,
+    maxChars: caps.maxChars,
+  })
+  return repoMap === undefined ? {} : { env: { repoMap } }
+}
+
 export const prepareTurnContext = async (
   args: PrepareTurnContextArgs,
 ): Promise<{
@@ -401,8 +440,10 @@ export const prepareTurnContext = async (
   // `buildLanguageHint` returns undefined when the gate is off / English /
   // ambiguous, so the prompt stays byte-identical.
   const languageHint = buildLanguageHint(latestUserTextFromWm(wm), runtimeConfig().langDetect)
+  const repoMapEnv = await buildRepoMapEnv(config, turn)
   const turnInput: import("../prompt").TurnContextInput = {
     baseMessages: [...wm.snapshot()],
+    ...repoMapEnv,
     cwd: config.cwd,
     planMode: config.planMode ?? false,
     ...(languageHint !== undefined ? { languageHint } : {}),
