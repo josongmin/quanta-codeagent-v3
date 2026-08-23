@@ -102,6 +102,9 @@ export const buildSurfaceSlashContext = (
       setup.skillAuthority,
     ),
     idleMonitor: setup.idleMonitor,
+    // F1a — hand `/rules` the SAME snapshot the per-turn AgentConfig carries,
+    // so the surface and the wire can never report different rules.
+    repoRules: setup.repoRules,
     ...sharedOptionalSlots(core, mutable),
     imageQueue: state.imageQueue,
     rewindState:

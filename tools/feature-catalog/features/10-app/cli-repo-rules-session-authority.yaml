@@ -1,0 +1,96 @@
+id: cli-repo-rules-session-authority
+title: "Shipping CLI repo-rules truth — one bootstrap snapshot feeds both the model wire and `/rules`"
+section: 10
+subsystem: CLI session bootstrap — repo-local rules authority
+order: 640
+maturity: L4
+status: new
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [interactive, headless]
+configurable: n-a
+owners: ["@songmin"]
+labels: [surface:cli, correctness, security]
+depends_on: [slash-rules-indicator, repo-rules-tree]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-08-24"
+  evidence:
+    cli: "every shipping CLI session — `runRepl()` composes through `bootstrapSession`"
+    web: "the web daemon already resolved repo rules in its own factory; unchanged here"
+purpose: |
+  `AgentConfig.repoRules` was fully wired DOWNSTREAM — `context-assembler.ts`
+  forwards it and `prompt.ts` renders it into the cached `project_md` system
+  section — and five mode PRESETS populated it (`interactive`, `headless`,
+  `ide`, `daemon`, `ci-bot`), as did the web daemon.
+
+  The shipping CLI does not use those presets. `src/apps/cli/index.ts` calls
+  `runRepl()`, which composes its own runtime through `bootstrapSession`, and
+  NOTHING in `src/apps/cli/**` or `src/host/bootstrap/**` ever resolved repo
+  rules. So on the surface a human actually drives, a repo's AGENTS.md /
+  CLAUDE.md reached the model on bench and web — but not on the CLI.
+
+  Worse than a missing feature, it was a SPLIT between two things a user
+  reasonably assumes agree:
+
+  - `/rules` (`rule-indicator.ts`) called `loadRepoRules` itself and listed the
+    repo's AGENTS.md, so the CLI SAID the file was in scope.
+  - the system prompt the model received never carried it.
+
+  The surface claimed a rule was active while the model never saw it — the worst
+  shape of untruth an agent surface can have, because the user writes rules and
+  watches the CLI confirm they loaded.
+
+  THE FIX IS ONE AUTHORITY, not a second loader. `bootstrapSession` resolves the
+  rules ONCE (`resolveBootstrapRepoRules`), returns them on
+  `SessionBootstrapResult.repoRules`, `buildBaseFromBootstrap` lifts them onto
+  the base (⇒ the per-turn `AgentConfig`), and the SAME snapshot is threaded to
+  the `/rules` slash context. `buildRuleInventory` prefers the snapshot and
+  falls back to its legacy self-read only when no session supplied one (callers
+  with no session stay byte-identical). Two independent disk reads could
+  disagree the moment a file changed mid-session; one snapshot cannot.
+
+  SECURITY: the resolve is gated on the surface-agnostic `modeLoadsRepoRules`
+  SSOT — the SAME predicate the presets and the web daemon gate on — so the CLI
+  can never drift from the trust classification. Defanging of a forged
+  `<system-reminder>` boundary inside a repo rule file is inherited from the
+  existing `buildSystemSections` escape and is pinned here on the live path
+  (F1a-5): a repo-authored file must never be able to forge harness speech while
+  riding the trusted system prefix.
+
+  FAIL-OPEN: an unreadable rule source must never break session start (F1a-6).
+evidence:
+  code:
+    - src/host/bootstrap/bootstrap-session.ts
+    - src/host/bootstrap/bootstrap-session/session-state-ports.ts
+    - src/host/runtime/internal/context-binding/base.ts
+    - src/apps/cli/rule-indicator.ts
+    - src/apps/cli/rules-cmd.ts
+  adrs: []
+  tests:
+    unit:
+      - tests/unit/apps/cli/cli-repo-rules-wire-hellgate.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  Not configurable: honoring the repo's own AGENTS.md on an interactive surface is
+  the documented L6 layer of the policy stack, not an opt-in. The trust decision
+  stays in `MODE_REPO_RULES_POLICY`.
+
+  Hell-audit finding worth keeping: the FIRST cut of the hellgate passed while two
+  of the four links were dead. It hand-assembled the AgentConfig from
+  `boot.repoRules` and handed `buildReplSlashCtx` the snapshot directly, so
+  deleting the bootstrap->base threading and the composer's `repoRules:
+  setup.repoRules` line both left every test GREEN. Rewritten to drive the
+  SHIPPING `buildBaseFromBootstrap` and `buildSurfaceSlashContext`; all four
+  links (bootstrap resolve / base threading / compose threading / rules-cmd
+  consumption) now fail independently under injection.
+
+  RESIDUAL (display-only): `repoRulesToSources` still stats the file for its
+  byte-size column, so the SIZE shown by `/rules` is read from disk even when the
+  content authority is the snapshot. The rule identity and body come from the
+  snapshot; only the size digit can lag.

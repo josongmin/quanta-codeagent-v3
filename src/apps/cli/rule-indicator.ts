@@ -243,6 +243,19 @@ export interface BuildRuleInventoryOpts {
   readonly changedPaths?: readonly string[]
   /** Env source — defaults to `process.env`. Injected for hermetic tests. */
   readonly env?: NodeJS.ProcessEnv
+  /** F1a — the SESSION's repo-rules snapshot, resolved once at bootstrap and
+   *  threaded onto the per-turn `AgentConfig`. PRESENT ⇒ the indicator reports
+   *  THIS, the exact thing the model was given, instead of re-reading disk.
+   *
+   *  Re-reading was the defect: `/rules` and the wire were two independent
+   *  reads, so an edit between session start and `/rules` made the surface
+   *  claim a rule the model never received — and on the shipping CLI, where
+   *  `AgentConfig.repoRules` was never populated at all, it claimed rules that
+   *  reached nothing.
+   *
+   *  Absent ⇒ the legacy self-read (callers with no session, e.g. a one-off
+   *  inventory), byte-identical to the pre-feature behavior. */
+  readonly repoRules?: RepoRules
 }
 
 /** Build the inventory by re-running the same loaders the agent loop runs.
@@ -256,7 +269,11 @@ export const buildRuleInventory = async (opts: BuildRuleInventoryOpts): Promise<
   // Both loaders are best-effort (they swallow ENOENT etc.). Run in parallel
   // since they touch disjoint paths.
   const [repo, glob] = await Promise.all([
-    loadRepoRules(opts.cwd).catch(() => undefined),
+    // F1a — prefer the session snapshot (the exact rules the model received).
+    // Only fall back to a self-read when no session supplied one.
+    opts.repoRules !== undefined
+      ? Promise.resolve(opts.repoRules)
+      : loadRepoRules(opts.cwd).catch(() => undefined),
     loadGlobRules(opts.cwd).catch(() => [] as GlobRule[]),
   ])
 

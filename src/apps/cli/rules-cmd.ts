@@ -87,7 +87,10 @@ export const rulesCmd: SlashCommand = {
         ctx.err('/rules: expected exactly one argument after "path"\n')
         return 1
       }
-      const inv = await buildRuleInventory({ cwd: ctx.cwd })
+      const inv = await buildRuleInventory({
+        cwd: ctx.cwd,
+        ...(ctx.repoRules !== undefined ? { repoRules: ctx.repoRules } : {}),
+      })
       const { path, matched } = await simulatePath(inv, pat)
       ctx.out(stripAnsi(renderSimulation(path, matched)))
       return 0
@@ -99,14 +102,20 @@ export const rulesCmd: SlashCommand = {
         ctx.err('/rules: "list" takes no further arguments\n')
         return 1
       }
-      const inv = await buildRuleInventory({ cwd: ctx.cwd })
+      const inv = await buildRuleInventory({
+        cwd: ctx.cwd,
+        ...(ctx.repoRules !== undefined ? { repoRules: ctx.repoRules } : {}),
+      })
       ctx.out(`${stripAnsi(renderRuleList(inv))}\n`)
       return 0
     }
 
     // /rules (no args) — short summary
     if (sub === undefined) {
-      const inv = await buildRuleInventory({ cwd: ctx.cwd })
+      const inv = await buildRuleInventory({
+        cwd: ctx.cwd,
+        ...(ctx.repoRules !== undefined ? { repoRules: ctx.repoRules } : {}),
+      })
       ctx.out(stripAnsi(renderSummary(inv)))
       return 0
     }

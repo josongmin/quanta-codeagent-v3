@@ -68,6 +68,8 @@ export type ReplSlashCtx = Partial<{
   /** RFC-06 F4 — `/reload-skills` authority-backed sync + revision hook. */
   reloadSkills: () => Promise<{ rows: SkillRow[]; revision?: number }>
   idle: IdleMonitor
+  /** F1a — the session's repo-rules snapshot for `/rules` (see SlashContext). */
+  repoRules: import("@/agent").RepoRules
   imageQueue: ImageQueue
   rewindSession: RewindSlashState
   mcp: McpSurfaceInfo
@@ -224,6 +226,8 @@ export interface BuildReplSlashCtxArgs {
    *  Absent ⇒ `/reload-skills` falls back to {@link skillsCb} (pre-F4 re-scan). */
   reloadSkillsCb?: (() => Promise<{ rows: SkillRow[]; revision?: number }>) | undefined
   idleMonitor: IdleMonitor
+  /** F1a — the session's repo-rules snapshot, forwarded to `/rules`. */
+  repoRules?: import("@/agent").RepoRules | undefined
   imageQueue: ImageQueue | undefined
   rewindState: RewindSlashState | undefined
   mcpSurface: McpSurfaceInfo | undefined
@@ -597,6 +601,7 @@ export const buildReplSlashCtx = (args: BuildReplSlashCtxArgs): ReplSlashCtx => 
     skillsCb,
     reloadSkillsCb,
     idleMonitor,
+    repoRules,
     imageQueue,
     rewindState,
     mcpSurface,
@@ -634,6 +639,7 @@ export const buildReplSlashCtx = (args: BuildReplSlashCtxArgs): ReplSlashCtx => 
     ...(skillsCb !== undefined ? { skills: skillsCb } : {}),
     ...(reloadSkillsCb !== undefined ? { reloadSkills: reloadSkillsCb } : {}),
     idle: idleMonitor,
+    ...(repoRules !== undefined ? { repoRules } : {}),
     ...(imageQueue !== undefined ? { imageQueue } : {}),
     ...(rewindState !== undefined ? { rewindSession: rewindState } : {}),
     ...(mcpSurface !== undefined ? { mcp: mcpSurface } : {}),
@@ -734,6 +740,7 @@ const projectLegacySlots = (s: ReplSlashCtx): Record<string, unknown> => ({
   ...(s.skills !== undefined ? { skills: s.skills } : {}),
   ...(s.reloadSkills !== undefined ? { reloadSkills: s.reloadSkills } : {}),
   ...(s.idle !== undefined ? { idle: s.idle } : {}),
+  ...(s.repoRules !== undefined ? { repoRules: s.repoRules } : {}),
   // #18 — expose the image queue on the contract ctx so `/paste` can enqueue a
   // clipboard image (the SAME instance `/image` mutates). Absent ⇒ slot omitted
   // ⇒ `/paste` degrades to the "save to disk + /image add" hint (byte-identical).

@@ -41,14 +41,9 @@ import { join } from "node:path"
 import { driveSessionTurn } from "@/runner/orchestrate"
 import type { WorktreeCwdPort } from "@/runner/orchestrate/worktree-cwd-pin-wire"
 import type { RuntimeSession } from "@/sdk/runtime"
-import type { SessionMeta } from "@/session"
+import type { SessionMeta, WorkspaceOwnership, WorkspaceOwnershipState } from "@/session"
 import { saveSessionById } from "@/session"
-import {
-  makeWorkspaceCreateIntent,
-  transitionWorkspaceState,
-  type WorkspaceOwnership,
-  type WorkspaceOwnershipState,
-} from "@/session/workspace-ownership"
+import { makeWorkspaceCreateIntent, transitionWorkspaceState } from "@/session/workspace-ownership"
 import { __resetRuntimeConfig } from "@/shared/runtime-config"
 
 const PIN = "QUANTA_WORKTREE_CWD_PIN"

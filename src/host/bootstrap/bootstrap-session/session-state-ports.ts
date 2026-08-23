@@ -15,7 +15,7 @@
  * {@link buildPromptState}; this module imports no sibling stage.
  */
 
-import { type AgentConfig, buildSystemPrompt } from "@/agent"
+import { type AgentConfig, buildSystemPrompt, loadRepoRules, type RepoRules } from "@/agent"
 import { defaultFocusChainTracker, type FocusChainPort } from "@/agent/focus-chain"
 import {
   defaultIdentityProvider,
@@ -23,6 +23,7 @@ import {
   type IdentityMode,
   isIdentityMode,
 } from "@/agent/identity"
+import { modeLoadsRepoRules } from "@/agent/run-mode"
 import {
   buildSystemPromptForMode,
   defaultModeVariantRegistry,
@@ -215,4 +216,32 @@ export const buildPromptState = (
     identityModeState,
     focusChain,
   }
+}
+
+/**
+ * F1a — resolve the session's repo-local rules ONCE, at bootstrap.
+ *
+ * The shipping CLI does not go through the `apps/agent` mode presets (
+ * `src/apps/cli/index.ts` calls `runRepl()`, which composes its own runtime via
+ * `bootstrapSession`), so the presets' `resolveModePresetRepoRules` never ran
+ * for it. `AgentConfig.repoRules` was therefore always undefined on the surface
+ * a human actually drives — while `/rules` called `loadRepoRules` itself and
+ * listed the very files the model was not being given. The surface claimed a
+ * rule was active that never reached the wire.
+ *
+ * This is the ONE authority for that session: the snapshot returned here is
+ * threaded onto the per-turn `AgentConfig` AND handed to the `/rules` indicator,
+ * so the two cannot disagree. A reload is an atomic swap of the whole snapshot,
+ * never a second independent read.
+ *
+ * SECURITY: gated on the surface-agnostic `modeLoadsRepoRules` SSOT — the SAME
+ * predicate the presets and the web daemon gate on — so the CLI can never drift
+ * from the trust classification. The shipping REPL is interactive-class (the
+ * tree is a repo the end user personally chose).
+ *
+ * FAIL-OPEN: a broken or unreadable rule source must never break session start.
+ */
+export const resolveBootstrapRepoRules = async (cwd: string): Promise<RepoRules | undefined> => {
+  if (!modeLoadsRepoRules("interactive")) return undefined
+  return loadRepoRules(cwd).catch(() => undefined)
 }

@@ -490,6 +490,14 @@ export interface SessionBootstrapDeps {
  *  resume FSM run / system-prompt assembly). */
 export interface SessionBootstrapResult {
   readonly runtime: SessionRuntimeConfigShape
+  /** F1a — the session's repo-local rules (AGENTS.md / CLAUDE.md), resolved ONCE
+   *  at bootstrap. `buildBaseFromBootstrap` lifts it onto the base as
+   *  `repoRules` (⇒ the per-turn `AgentConfig`, rendered into the cached
+   *  `project_md` system section), and the CLI `/rules` indicator consumes this
+   *  SAME snapshot rather than re-reading disk — so the surface can never claim
+   *  a rule the model did not receive. Absent ⇒ no rule file, an unreadable
+   *  source (fail-open), or a rule-less trust class. */
+  readonly repoRules?: import("@/agent").RepoRules
   readonly provider: Provider
   readonly model: string
   readonly mode: PermissionMode

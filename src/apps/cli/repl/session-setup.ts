@@ -282,6 +282,11 @@ export interface SessionSetupResult {
   readonly stderrIsTTY: boolean | undefined
   /** `$HOME` snapshot for ~-shortening (empty string => unknown). */
   readonly homeDir: string
+  /** F1a — the session's repo-rules snapshot, resolved ONCE at bootstrap and
+   *  already threaded onto the per-turn `AgentConfig`. Handed to `/rules` so
+   *  the surface reports exactly what the model received instead of a second,
+   *  independent disk read that can disagree with it. */
+  readonly repoRules?: SessionBootstrapResult["repoRules"]
   readonly systemSource: SessionBootstrapResult["systemSource"]
   readonly refreshSystemPrompt: SessionBootstrapResult["refreshSystemPrompt"]
   /** Tear down MCP clients on REPL exit. The host calls this in the
@@ -727,6 +732,7 @@ export const setupSession = async (
     argPrompt: boot.argPrompt,
     stderrIsTTY: process.stderr.isTTY,
     homeDir: runtime.homeDir,
+    repoRules: boot.repoRules,
     systemSource: boot.systemSource,
     refreshSystemPrompt: boot.refreshSystemPrompt,
     shutdownMcp: async () => {

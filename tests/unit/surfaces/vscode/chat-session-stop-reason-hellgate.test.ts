@@ -31,7 +31,8 @@ import {
   statusForTurnCompleted,
 } from "@surfaces/vscode/chat-session-adapter"
 import { CHAT_SESSION_STATUS } from "@surfaces/vscode/status"
-import type { SessionEvent, SessionSnapshotLite, SessionTransportMessage } from "@/protocol/session"
+import type { SessionTransportMessage } from "@/ipc/session"
+import type { SessionEvent, SessionSnapshotLite } from "@/protocol/session"
 
 const completedEvent = (
   outcomeReason: string,

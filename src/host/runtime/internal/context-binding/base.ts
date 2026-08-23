@@ -290,6 +290,10 @@ const buildBootstrapBaseShape = (
     permission: args.boot.permission,
     messages: [...args.boot.history],
     system: args.boot.system,
+    // F1a — the shipping CLI resolves repo-local rules at bootstrap; lift the
+    // snapshot onto the base so the per-turn AgentConfig carries it (the
+    // context-assembler already forwards `repoRules` into `buildTurnContext`).
+    ...whenDefined("repoRules", args.boot.repoRules),
     ...whenDefined(
       "promptSurfaceProfile",
       args.overlay?.promptSurfaceProfile ?? args.boot.promptSurfaceProfile,

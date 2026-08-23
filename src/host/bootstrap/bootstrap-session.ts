@@ -55,7 +55,10 @@ import {
   type PreparedSessionRuntime,
   prepareSessionRuntime,
 } from "./bootstrap-session/prepare-runtime"
-import { buildPromptState } from "./bootstrap-session/session-state-ports"
+import {
+  buildPromptState,
+  resolveBootstrapRepoRules,
+} from "./bootstrap-session/session-state-ports"
 import { resolveSessionResume } from "./bootstrap-session/startup-announcement"
 import { buildToolingBundle, parseOperatorCostDials } from "./bootstrap-session/tooling-bundle"
 import { resolveDurableLivePosture } from "./live-posture-runtime"
@@ -191,6 +194,10 @@ const assembleBootstrapResult = async (
       identityModeState,
       focusChain,
     } = buildPromptState(deps, runtime, cwd)
+    // F1a — the ONE repo-rules authority for this session. Resolved here, at the
+    // shipping CLI's own composition root, so the per-turn AgentConfig and the
+    // `/rules` indicator consume the SAME snapshot instead of reading disk twice.
+    const repoRules = await resolveBootstrapRepoRules(cwd)
     const onShellEvent = deps.composeShellEvent(features.metrics, runtime.stdoutIsTTY)
     const workMetricsSink = deps.buildWorkMetricsSink(features.metrics !== undefined)
     const costPanel = deps.buildCostPanelOrUndefined(featureCfg, runtime.model)
@@ -253,6 +260,7 @@ const assembleBootstrapResult = async (
       abort,
       argPrompt: runtime.argPrompt,
       system,
+      ...(repoRules !== undefined ? { repoRules } : {}),
       promptSurfaceProfile,
       systemSource,
       refreshSystemPrompt,

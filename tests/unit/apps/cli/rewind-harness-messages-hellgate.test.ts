@@ -106,6 +106,10 @@ describe("H5 — back-compat for untagged transcripts", () => {
   })
 })
 
+/** The H6 fixtures are role/id tables like the module-level {@link saved}; this
+ *  names the same shape so each case reads as the table it is. */
+const savedOf = (messages: Saved["messages"]): Saved => ({ messages })
+
 /* ------------------------------------------------------------------------- *
  * H6 — `--to-last` must not pick a harness message (audit R1 finding #5)
  *
@@ -118,29 +122,25 @@ describe("H5 — back-compat for untagged transcripts", () => {
 
 describe("H6 — --to-last skips harness messages", () => {
   test("a trailing harness reminder is not the turn to undo", () => {
-    const withTrailingHarness = {
-      messages: [
-        { role: "user" as const, id: "u1" },
-        { role: "assistant" as const, id: "a1" },
-        { role: "user" as const, id: "u2" },
-        { role: "assistant" as const, id: "a2" },
-        { role: "user" as const, id: harnessId("peer-mail") },
-      ],
-    }
+    const withTrailingHarness = savedOf([
+      { role: "user" as const, id: "u1" },
+      { role: "assistant" as const, id: "a1" },
+      { role: "user" as const, id: "u2" },
+      { role: "assistant" as const, id: "a2" },
+      { role: "user" as const, id: harnessId("peer-mail") },
+    ])
     const target = findToLastTargetForTest(withTrailingHarness)
     // The real last user turn is u2; the message before it is a1.
     expect(target).toBe("a1")
   })
 
   test("the returned target always resolves", () => {
-    const withTrailingHarness = {
-      messages: [
-        { role: "user" as const, id: "u1" },
-        { role: "assistant" as const, id: "a1" },
-        { role: "user" as const, id: "u2" },
-        { role: "user" as const, id: harnessId("tool-nudge") },
-      ],
-    }
+    const withTrailingHarness = savedOf([
+      { role: "user" as const, id: "u1" },
+      { role: "assistant" as const, id: "a1" },
+      { role: "user" as const, id: "u2" },
+      { role: "user" as const, id: harnessId("tool-nudge") },
+    ])
     const target = findToLastTargetForTest(withTrailingHarness)
     expect(target).toBeDefined()
     if (target === undefined) return
@@ -148,13 +148,11 @@ describe("H6 — --to-last skips harness messages", () => {
   })
 
   test("paired control — no harness messages behaves as before", () => {
-    const plain = {
-      messages: [
-        { role: "user" as const, id: "u1" },
-        { role: "assistant" as const, id: "a1" },
-        { role: "user" as const, id: "u2" },
-      ],
-    }
+    const plain = savedOf([
+      { role: "user" as const, id: "u1" },
+      { role: "assistant" as const, id: "a1" },
+      { role: "user" as const, id: "u2" },
+    ])
     expect(findToLastTargetForTest(plain)).toBe("a1")
   })
 })

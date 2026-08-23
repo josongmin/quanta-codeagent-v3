@@ -334,7 +334,15 @@ const lastIndexWhere = <T>(items: readonly T[], pred: (item: T) => boolean): num
 /** Find the messageId immediately BEFORE the most-recent user message —
  *  the "rewind one turn" convenience target. Returns the FULL id, or
  *  undefined if there's no such message (single-turn session etc.). */
-const findToLastTarget = (saved: SavedSession): string | undefined => {
+/** Narrow structural view both target resolvers read: role + optional id. Named
+ *  once so `findToLastTarget` and `resolveTarget` state the SAME requirement —
+ *  neither touches `version`/`meta`/`reason`/`turns`, and asking for the full
+ *  `SavedSession` only forced callers (and the hellgate) into casts. */
+type TranscriptView = {
+  readonly messages: readonly { role: "user" | "assistant"; id?: string }[]
+}
+
+const findToLastTarget = (saved: TranscriptView): string | undefined => {
   const msgs = saved.messages
   // Walk from the end, skip the trailing user-message (the one we want to
   // undo). Return the message id immediately before it.
@@ -369,10 +377,7 @@ type ResolvedTarget =
 /** Resolve `targetId` (exact / prefix) against the saved transcript and
  *  pre-count drops. Pulled out of the dispatch body so the cognitive-
  *  complexity budget on `run()` stays sane. Pure — no IO. */
-const resolveTarget = (
-  saved: { readonly messages: readonly { role: "user" | "assistant"; id?: string }[] },
-  targetId: string,
-): ResolvedTarget => {
+const resolveTarget = (saved: TranscriptView, targetId: string): ResolvedTarget => {
   const messages = saved.messages
   let hit: string | undefined
   for (const m of messages) {

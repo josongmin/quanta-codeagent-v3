@@ -14,6 +14,11 @@ export interface SlashContext {
   // `| undefined` is explicit on every optional field because the repo runs
   // `exactOptionalPropertyTypes: true` — `{ now: undefined }` and `{}` are
   // different there, and tests pass values that may legitimately be undefined.
+  /** F1a — the SESSION's repo-rules snapshot: the exact rules the model was
+   *  given, resolved once at bootstrap. `/rules` reports THIS rather than
+   *  re-reading disk, so the surface cannot claim a rule the model never
+   *  received. Absent ⇒ the legacy self-read (byte-identical). */
+  readonly repoRules?: import("@/agent").RepoRules | undefined
   readonly now?: (() => number) | undefined
   readonly sleep?: ((ms: number) => Promise<void>) | undefined
   /** Override the preferences file path (test seam). */
