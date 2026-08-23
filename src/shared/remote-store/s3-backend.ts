@@ -30,7 +30,28 @@ export interface S3BackendOptions {
   readonly runAws?: RunAws
   /** Kill + throw if a single `aws` invocation runs longer than this. Default 60s. */
   readonly timeoutMs?: number
+  /**
+   * §17 packet R — server-side-encryption mode for every PUT. Default
+   * {@link DEFAULT_SSE} (`AES256`, SSE-S3).
+   *
+   * The uploads here carry replay cassettes and run artifacts, which contain the
+   * full LLM request: system prompt, messages, file contents the agent read, and
+   * tool outputs. Encryption at rest was previously whatever the bucket happened
+   * to default to — fine on a bucket with default encryption configured, silent
+   * plaintext on one without. Asking EXPLICITLY makes the property a function of
+   * this code rather than of a bucket someone else set up.
+   *
+   * Set to `"aws:kms"` (with a bucket-level key) for CMK-managed buckets. There
+   * is deliberately no "off": a caller that wants no encryption can configure the
+   * bucket, not silently weaken every producer.
+   */
+  readonly sse?: string
 }
+
+/** SSE-S3. Universally available, needs no key configuration, and is what a
+ *  correctly-configured bucket would apply anyway — so this is a floor, not a
+ *  behavior change, for buckets that already had default encryption. */
+const DEFAULT_SSE = "AES256"
 
 const DEFAULT_AWS_TIMEOUT_MS = 60_000
 
@@ -91,10 +112,13 @@ export const s3Backend = (opts: S3BackendOptions): RemoteBackend => {
   const runAws = opts.runAws ?? makeDefaultRunAws(opts.timeoutMs ?? DEFAULT_AWS_TIMEOUT_MS)
   const regionArgs: readonly string[] = opts.region !== undefined ? ["--region", opts.region] : []
   const uri = (path: string): string => `s3://${opts.bucket}/${path}`
+  const sseArgs: readonly string[] = ["--sse", opts.sse ?? DEFAULT_SSE]
 
   return {
     async put(path, body) {
-      const res = await runAws([...regionArgs, "s3", "cp", "-", uri(path)], body)
+      // `--sse` on the WRITE only; reads need no flag (S3 decrypts SSE-S3
+      // transparently), which is why `get` is asserted to stay unchanged.
+      const res = await runAws([...regionArgs, "s3", "cp", "-", uri(path), ...sseArgs], body)
       if (res.exitCode !== 0) {
         // A swallowed PUT failure silently loses durability — throw so the
         // producer can mark the run degraded (fail-closed).

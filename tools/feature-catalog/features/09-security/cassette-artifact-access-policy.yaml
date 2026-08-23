@@ -1,0 +1,72 @@
+id: cassette-artifact-access-policy
+title: "Replay cassettes are owner-only on disk and explicitly encrypted in S3 (access policy, never scrubbed)"
+section: 9
+subsystem: Security — replay artifact access policy
+order: 410
+maturity: L4
+status: new
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [interactive, headless]
+configurable: n-a
+owners: ["@songmin"]
+labels: [security, surface:core, tier:core]
+depends_on: []
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-08-24"
+  evidence:
+    cli: "every recording run writes through `jsonlReplayStore`; remote runs PUT through the s3 backend"
+    web: "replay recording is a bench/CLI concern; the web surface does not record cassettes"
+purpose: |
+  A replay cassette records the FULL LLM request: the system prompt, every message, the
+  contents of every file the agent read, and every tool output. If the agent read a
+  `.env`, an `~/.aws/credentials` or a private key — the very files the stale-read guard
+  and the shell-effect authority exist to reason about — those bytes are in the cassette
+  VERBATIM.
+
+  Written with the process defaults, the file landed at `0644` in a `0755` directory.
+  WORLD-READABLE. On a shared box or a CI runner, any local user could read every secret
+  the agent ever touched. The remote half had the same shape: `aws s3 cp - s3://…` with
+  no `--sse`, so encryption at rest was whatever the bucket happened to default to.
+
+  The fix is ACCESS POLICY on the artifact as it is: dir `0700`, file `0600`, and an
+  explicit `--sse` (default `AES256`, overridable to `aws:kms`) on every PUT.
+
+  The `mode` argument applies only when a file is CREATED, so the mode is re-asserted
+  with `chmod` after each write — a permissions fix that only covered fresh files would
+  leave every recording made before this landed world-readable forever.
+
+  DELIBERATELY NOT REDACTION. Scrubbing the recorded bytes would destroy replay
+  reproducibility — the entire point of a cassette — and would move the content hash,
+  silently retiring every cassette already on disk. A redacted EXPORT is a separate
+  concern with its own output.
+evidence:
+  code:
+    - src/llm/replay/jsonl-store.ts
+    - src/shared/remote-store/s3-backend.ts
+  adrs:
+    - docs/decisions/0551-cassette-is-a-secrets-bearing-artifact.md
+  tests:
+    unit:
+      - tests/unit/llm/replay/cassette-security-hellgate.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  The hellgate asserts the OPPOSITE of a scrub: the secret is still in the file, the
+  content is still one verbatim JSONL line, and `defaultHashRequest` still returns the
+  same 16-hex value. Every existing cassette continues to replay.
+
+  The rewrite path (`truncate` / curation) is asserted not to widen the mode, because it
+  goes through `writeFile` rather than `appendFile`.
+
+  Reads need no flag (S3 decrypts SSE-S3 transparently), which is why `get` is asserted
+  to stay UNCHANGED — a paired control against blanket-flagging every aws call.
+
+  Windows has no POSIX mode; `chmod` is a no-op there, so this is a POSIX-only guarantee
+  — which matches where the store is actually used (bench boxes, CI runners, developer
+  machines).

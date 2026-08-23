@@ -18,10 +18,29 @@
  */
 
 import { createHash } from "node:crypto"
-import { appendFile, mkdir, readFile, writeFile } from "node:fs/promises"
+import { appendFile, chmod, mkdir, readFile, writeFile } from "node:fs/promises"
 import { dirname } from "node:path"
 import type { Message, StreamInput } from "../types"
 import type { MatchPolicy, RecordedInteraction, ReplayMatchOpts, ReplayStore } from "./types"
+
+/**
+ * §17 packet R — a cassette is a SECRETS-BEARING artifact.
+ *
+ * It records the FULL LLM request: the system prompt, every message, the
+ * contents of every file the agent read, and every tool output. If the agent
+ * read a `.env`, an `~/.aws/credentials` or a private key, those bytes are in
+ * here verbatim. Written with the process default the file landed at `0644` in
+ * a `0755` directory — world-readable, so on a shared box or a CI runner any
+ * local user could read every secret the agent ever touched.
+ *
+ * The fix is ACCESS POLICY on the artifact as it is. Deliberately NOT redaction:
+ * scrubbing the recorded bytes would destroy replay reproducibility — the whole
+ * point of a cassette — and would move the content hash, silently retiring every
+ * cassette already on disk. A redacted EXPORT is a separate concern with its own
+ * output.
+ */
+const CASSETTE_FILE_MODE = 0o600
+const CASSETTE_DIR_MODE = 0o700
 
 export interface JsonlReplayStoreOpts {
   /** Absolute path to the `.jsonl` cassette. Parent dir is created on demand. */
@@ -146,7 +165,7 @@ export function jsonlReplayStore(opts: JsonlReplayStoreOpts): ReplayStore {
   }
 
   async function ensureDir(): Promise<void> {
-    await mkdir(dirname(opts.path), { recursive: true })
+    await mkdir(dirname(opts.path), { recursive: true, mode: CASSETTE_DIR_MODE })
   }
 
   // Serialize appends: the bench runs N candidates CONCURRENTLY through one
@@ -164,7 +183,16 @@ export function jsonlReplayStore(opts: JsonlReplayStoreOpts): ReplayStore {
       const run = appendTail.then(async () => {
         const list = await ensureLoaded()
         await ensureDir()
-        await appendFile(opts.path, `${JSON.stringify(record)}\n`, "utf-8")
+        await appendFile(opts.path, `${JSON.stringify(record)}\n`, {
+          encoding: "utf-8",
+          mode: CASSETTE_FILE_MODE,
+        })
+        // `mode` on append applies only when the file is CREATED, so an existing
+        // cassette (from a prior run, or one this process already opened) keeps
+        // whatever mode it had. Re-assert it — a permissions fix that only
+        // covered fresh files would leave every recording made before this
+        // landed world-readable forever.
+        await chmod(opts.path, CASSETTE_FILE_MODE)
         // Keep cache coherent so subsequent matches see the just-recorded entry
         // exactly once. Loading AFTER append re-reads the just-written line from
         // disk and then `push(record)` duplicates it in-memory.
@@ -207,7 +235,11 @@ export function jsonlReplayStore(opts: JsonlReplayStoreOpts): ReplayStore {
     async save(records: ReadonlyArray<RecordedInteraction>): Promise<void> {
       await ensureDir()
       const body = records.map((r) => JSON.stringify(r)).join("\n")
-      await writeFile(opts.path, records.length === 0 ? "" : `${body}\n`, "utf-8")
+      await writeFile(opts.path, records.length === 0 ? "" : `${body}\n`, {
+        encoding: "utf-8",
+        mode: CASSETTE_FILE_MODE,
+      })
+      await chmod(opts.path, CASSETTE_FILE_MODE)
       cached = records.slice()
       used.clear()
     },
