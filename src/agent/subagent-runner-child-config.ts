@@ -2,6 +2,7 @@ import type { Message } from "@/llm"
 import { type RuntimeConfig, runtimeConfig } from "@/shared"
 import type { SubagentTurnGate } from "@/subagent"
 import { type Tool, ToolRegistry } from "@/tool"
+import { ReadFileState } from "@/tool/stale-read-guard"
 import type { SubagentRequest } from "../subagent/types"
 import {
   buildLeaderDecide,
@@ -168,8 +169,30 @@ const buildChildBase = (
     ...(ownershipPolicy !== undefined ? { ownershipPolicy } : {}),
     maxTurns: req.budget?.maxTurns ?? parent.maxTurns,
     signal: chainedSignal(parent.signal, req.signal),
+    ...childReadFileState(parent),
   }
 }
+
+/**
+ * §17 packet F2 — the child's OWN stale-read observations.
+ *
+ * Two things were wrong at once. The child config never mentioned
+ * `readFileState`, so a subagent ran with NO stale-read guard at all — every
+ * child mutation skipped it.
+ *
+ * And the fix must NOT be to hand down the parent's instance. A read is an
+ * OBSERVATION BY ONE AGENT: if the child inherited the parent's, it would
+ * believe it had read files it never saw and would happily overwrite them; and
+ * a sibling re-reading a file would launder another sibling's stale baseline
+ * back to fresh. Freshness is per-observer, so each child gets a NEW instance
+ * with the same posture.
+ *
+ * Absent parent guard ⇒ slot omitted ⇒ byte-identical to the prior child shape.
+ */
+const childReadFileState = (
+  parent: Pick<AgentConfig, "readFileState">,
+): Pick<AgentConfig, "readFileState"> | Record<string, never> =>
+  parent.readFileState === undefined ? {} : { readFileState: new ReadFileState() }
 
 /** WS2 (RFC jul-18 §4.2) — the child's control surface (port + active-turn
  *  holder), threaded ONLY when the control capability is wired. Absent ⇒ no port

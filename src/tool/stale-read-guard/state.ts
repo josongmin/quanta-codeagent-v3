@@ -88,6 +88,24 @@ export class ReadFileState {
    */
   private rangeHashes: Map<string, string> | undefined
 
+  /**
+   * §17 packet F2 — WHOLE-FILE content digest observed when the agent last read
+   * (or wrote) `path`.
+   *
+   * THIS is the freshness authority; the mtime map above is a hint. An mtime-only
+   * rule is bypassed by anything that changes content without advancing the
+   * timestamp — `cp -p`, `rsync --times`, `tar -x`, a build step that restores
+   * mtimes, or two writes landing in the same tick on a second-granularity
+   * filesystem. The guard's own comment concedes the rule ("only a FORWARD move
+   * is evidence"), which is precisely the hole.
+   *
+   * Populated ONLY by a full-file read (a ranged read cannot describe the whole
+   * file) and by a successful self-mutation. Absent for a path ⇒ the mtime rule
+   * decides exactly as before, so a caller that cannot cheaply hash keeps
+   * today's behavior byte-for-byte.
+   */
+  private contentDigests: Map<string, string> | undefined
+
   /** The cap on {@link rangeHashes}. Injected (defaults to
    *  {@link DEFAULT_RANGE_DEDUP_CAP}) so tests can drive the eviction path with a
    *  tiny bound and the host can tune it — never a hardcoded inline magic value. */
@@ -105,6 +123,27 @@ export class ReadFileState {
    *  message asks for. */
   record(path: string, mtimeMs: number): void {
     this.mtimes.set(path, mtimeMs)
+  }
+
+  /** §17 packet F2 — record (or overwrite) the WHOLE-FILE content digest observed
+   *  for `path`. The digest is an opaque string the CALLER computes (this pure
+   *  slice hashes nothing itself — the read tool owns the digest choice, exactly
+   *  like {@link recordReadRange}).
+   *
+   *  Call this ONLY for a full-file observation. A ranged read describes a
+   *  window, not the file, and recording its hash here would baseline the guard
+   *  against content that was never the file's content.
+   *
+   *  Lazily allocated, so a deployment where nothing supplies digests pays zero
+   *  extra allocation. */
+  recordContent(path: string, digest: string): void {
+    this.contentDigests ??= new Map<string, string>()
+    this.contentDigests.set(path, digest)
+  }
+
+  /** The recorded whole-file digest for `path`, or `undefined`. */
+  recordedContent(path: string): string | undefined {
+    return this.contentDigests?.get(path)
   }
 
   /** H9 — the canonical dedup key for a `(path, offset, limit)` range. The
@@ -194,9 +233,20 @@ export class ReadFileState {
    * window / magic epsilon): any advance of the integer-ms mtime past the
    * recorded value is an external modification.
    */
-  checkFresh(path: string, currentMtimeMs: number): Freshness {
+  checkFresh(path: string, currentMtimeMs: number, currentDigest?: string): Freshness {
     const recorded = this.mtimes.get(path)
     if (recorded === undefined) return { kind: "unread" }
+    // §17 packet F2 — CONTENT WINS when both sides have a digest. Equal content
+    // is fresh even if the mtime moved forward (a `touch`, a mode change, or a
+    // rewrite to identical bytes must not veto the next edit); different content
+    // is stale even if the mtime did not move (the mtime-only hole). The mtime
+    // is kept in the verdict for the operator-facing message.
+    const recordedDigest = this.contentDigests?.get(path)
+    if (recordedDigest !== undefined && currentDigest !== undefined) {
+      return recordedDigest === currentDigest
+        ? { kind: "fresh" }
+        : { kind: "stale", recordedMtimeMs: recorded, currentMtimeMs }
+    }
     if (currentMtimeMs > recorded) {
       return { kind: "stale", recordedMtimeMs: recorded, currentMtimeMs }
     }
@@ -221,8 +271,9 @@ export const guardWrite = (
   state: ReadFileState,
   path: string,
   currentMtimeMs: number,
+  currentDigest?: string,
 ): Result<void, StaleReadError> => {
-  const fresh = state.checkFresh(path, currentMtimeMs)
+  const fresh = state.checkFresh(path, currentMtimeMs, currentDigest)
   if (fresh.kind === "stale") {
     return err(new StaleReadError(path, fresh.recordedMtimeMs, fresh.currentMtimeMs))
   }

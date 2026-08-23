@@ -1,0 +1,87 @@
+id: file-observation-content-authority
+title: "Content digest is the stale-read freshness authority (mtime is a hint) + child-local ReadFileState"
+section: 2
+subsystem: Tool system — stale-read guard
+order: 320
+maturity: L4
+status: new
+ui_surfaces: [cli, web]
+monitoring: n-a
+modes: [interactive, headless]
+configurable: integrated
+config_refs:
+  env:
+    - QUANTA_STALE_READ_GUARD
+owners: ["@songmin"]
+labels: [correctness, security, surface:core, tier:core]
+depends_on: []
+surface_integration:
+  cli: full
+  web: full
+  method: audited
+  verified: "2026-08-24"
+  evidence:
+    cli: "the shipped read/edit tools issue and compare the observation"
+    web: "same tool slice; the guard is surface-agnostic"
+purpose: |
+  The stale-read guard recorded the mtime a file carried when the agent read it and
+  blocked a later write only on a STRICT FORWARD move — its own comment says "only a
+  FORWARD move is evidence of an external write after the read".
+
+  That makes it bypassable by anything that changes CONTENT without advancing the
+  timestamp, and none of it is exotic: `cp -p`, `rsync --times`, `tar -x`,
+  `git checkout` on some filesystems, a build step that restores mtimes, or two writes
+  landing in the same tick on a second-granularity filesystem. Measured on the shipping
+  guard: a same-mtime swap and a backward-mtime swap were BOTH allowed.
+
+  Separately, `subagent-runner-child-config.ts` never mentioned `readFileState`, so a
+  SUBAGENT ran with no stale-read guard at all. And the obvious fix — hand down the
+  parent's instance — is wrong in a second way: a read is an OBSERVATION BY ONE AGENT.
+  An inheriting child would believe it had read files it never saw, and one sibling
+  re-reading a file would launder another sibling's stale baseline back to fresh.
+
+  CONTENT WINS when both sides have a digest: equal ⇒ fresh even if the mtime moved
+  forward (a `touch`, a mode change, or a rewrite to identical bytes must not veto the
+  next edit); different ⇒ stale even if the mtime did not move. With no digest on
+  either side the forward-mtime rule runs unchanged, so a caller that cannot cheaply
+  hash keeps today's behavior byte-for-byte.
+
+  ONLY A FULL READ issues an observation — a ranged read describes a window, not the
+  file, and its hash would baseline the guard against content that was never the file's.
+
+  NO EXTRA IO on the wired paths: the read tool already holds the whole file in
+  `outcome.text`, and the edit tool already read the source in `planEdit` to match
+  `old_string` (`planned.before`). Both hash something already in memory.
+evidence:
+  code:
+    - src/tool/stale-read-guard/state.ts
+    - src/tool/read/index.ts
+    - src/tool/edit/index.ts
+    - src/agent/subagent-runner-child-config.ts
+  adrs:
+    - docs/decisions/0548-content-digest-is-the-freshness-authority.md
+  tests:
+    unit:
+      - tests/unit/tool/file-observation-content-authority-hellgate.test.ts
+    integration: []
+    contract: []
+knobs: ["QUANTA_STALE_READ_GUARD"]
+deliberate_hold: null
+notes: |
+  THIS IS NOT "ATOMIC CAS". A check-then-rename on an ordinary filesystem leaves an
+  external-writer TOCTOU window between the digest comparison and the rename. This
+  narrows quanta's OWN self-inflicted staleness; real isolation remains the
+  worktree/ownership boundary and the OS sandbox. Stated here so the guarantee is not
+  over-claimed downstream.
+
+  THE PAIRED CONTROL IS LOAD-BEARING: an unchanged digest must stay fresh under a
+  FORWARD mtime, or the "fix" degenerates into "block everything" — which satisfies the
+  bypass tests and makes the tool unusable.
+
+  REMAINING GAP (recorded, not guessed at): `apply_patch`'s multi-target preflight still
+  runs on mtime. Its port surface (`statTarget`) reports `{exists, resolvedPath,
+  mtimeMs}` and holds no content, so a digest there means a real extra read per target.
+
+  Verified END-TO-END through the real read/edit tools with an external writer that
+  moves the mtime BACKWARD — the case the old rule called fresh. Removing either link
+  (the read's `recordContent`, or the edit's digest argument) restores the bypass.

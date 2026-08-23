@@ -497,10 +497,15 @@ const editPreCommitDeny = async (
   ctx: EditToolContext,
   // ticket-11 — resolved target (worktree-aware path + session jail base).
   target: { readonly path: string; readonly base: string },
+  // §17 packet F2 — the file's CURRENT content, already read by `planEdit` to
+  // match `old_string`. Hashing it here costs no extra IO and makes the digest
+  // (not the mtime) the freshness authority, closing the same/backward-mtime
+  // content-swap hole.
+  currentContent: string,
 ): Promise<ToolEvent | null> => {
   if (ctx.readFileState !== undefined) {
     const cur = await fs.statFile(target.path, target.base)
-    const guard = guardWrite(ctx.readFileState, cur.path, cur.mtimeMs)
+    const guard = guardWrite(ctx.readFileState, cur.path, cur.mtimeMs, sha256Hex(currentContent))
     if (!guard.ok) {
       return {
         type: "result",
@@ -583,7 +588,7 @@ export const makeEditTool = (fs: FileSystemPort = defaultFileSystemPort): Tool<I
       // ADR-0474 stale-read-guard + jun-6 exfil-rail (a) per-turn write-budget,
       // both AFTER planning and BEFORE the commit (a deny is never a partial
       // write). Default-OFF ⇒ `null` ⇒ byte-identical.
-      const preCommitDeny = await editPreCommitDeny(fs, ctx, target)
+      const preCommitDeny = await editPreCommitDeny(fs, ctx, target, planned.before)
       if (preCommitDeny) {
         yield preCommitDeny
         return

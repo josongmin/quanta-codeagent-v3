@@ -7,7 +7,7 @@ import { TextDecoder } from "node:util"
 import { z } from "zod"
 import { classifyPath } from "@/security"
 import { escapeBoundary, runtimeConfig } from "@/shared"
-import { defaultFileSystemPort, type FileSystemPort, FsJailError } from "@/storage"
+import { defaultFileSystemPort, type FileSystemPort, FsJailError, sha256Hex } from "@/storage"
 import { defineTool } from "../factory"
 import type { Tool, ToolContext, ToolEvent, ToolResult } from "../types"
 import { resolveEditBase } from "../worktree/cwd-override"
@@ -592,6 +592,13 @@ export const makeReadTool = (
       // path so a later write/edit, which stats the same abs path, matches).
       // No-op when the guard is off (ctx.readFileState absent). UNCHANGED by H9.
       ctx.readFileState?.record(outcome.info.path, outcome.info.mtimeMs)
+      // §17 packet F2 — record the WHOLE-FILE content digest as the freshness
+      // authority. `outcome.text` is the entire file (the offset/limit window is
+      // applied later, at render), so this costs no extra IO. mtime alone is
+      // bypassed by any writer that preserves timestamps (`cp -p`, `rsync
+      // --times`, a build step that restores mtimes, two writes in one
+      // second-granularity tick); the digest is not.
+      ctx.readFileState?.recordContent(outcome.info.path, sha256Hex(outcome.text))
 
       // RFC jun-6 — outline mode. When `outline:true` is requested AND served
       // (knob on + parser wired + supported language + clean parse), return the
