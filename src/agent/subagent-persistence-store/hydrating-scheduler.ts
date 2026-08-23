@@ -204,9 +204,14 @@ const persistedToResult = (h: PersistedHandle): HydratedSubagentResult => ({
 /* factory                                                             */
 /* ------------------------------------------------------------------ */
 
-export const persistentBackgroundSubagentScheduler = async (
-  opts: HydratingSchedulerOpts,
-): Promise<PersistentBackgroundSubagentScheduler> => {
+/**
+ * The scheduler's shared state: the run table, the persistence port, and the
+ * helpers each operation resolves through. Split out of
+ * `persistentBackgroundSubagentScheduler` (god-function burndown).
+ */
+/** Injected seams (the wrapped scheduler, clock, liveness probe, depth) and
+ *  the interrupted/hydrated handle caches the live view is merged with. */
+const schedulerSeams = (opts: HydratingSchedulerOpts) => {
   const { inner, store, workspace } = opts
   const isProcessAlive = opts.isProcessAlive ?? defaultIsProcessAlive
   const now = opts.now ?? Date.now
@@ -251,6 +256,34 @@ export const persistentBackgroundSubagentScheduler = async (
 
   /* ---- 1. Hydration ---- */
   const tHydrate = now()
+  return {
+    opts,
+    inner,
+    store,
+    workspace,
+    isProcessAlive,
+    now,
+    hostPidFn,
+    childDepth,
+    onPersistError,
+    emitPersistError,
+    interruptedById,
+    hydratedById,
+    tHydrate,
+  }
+}
+
+/** The durable store binding and its per-id write bookkeeping. */
+const schedulerPersistence = async (ctx: ReturnType<typeof schedulerSeams>) => {
+  const {
+    store,
+    workspace,
+    isProcessAlive,
+    emitPersistError,
+    interruptedById,
+    hydratedById,
+    tHydrate,
+  } = ctx
   const persisted = await store.list(workspace)
   for (const h of persisted) {
     if (h.status === "running") {
@@ -299,6 +332,24 @@ export const persistentBackgroundSubagentScheduler = async (
    *  A rejected link MUST NOT wedge the chain: every link catches its own
    *  error so the next save still runs. */
   const lastWriteById = new Map<SubagentHandleId, Promise<void>>()
+  return { persisted, lastWriteById }
+}
+
+/** Persist a live handle, and watch a run to completion so its terminal state
+ *  is written exactly once. */
+const schedulerWatch = async (
+  ctx: ReturnType<typeof schedulerSeams> & Awaited<ReturnType<typeof schedulerPersistence>>,
+) => {
+  const {
+    inner,
+    store,
+    workspace,
+    hostPidFn,
+    childDepth,
+    emitPersistError,
+    hydratedById,
+    lastWriteById,
+  } = ctx
 
   const saveLiveHandle = (id: SubagentHandleId, critical: boolean): Promise<void> => {
     // Capture the snapshot NOW so ordering is decided by enqueue order, not by
@@ -352,6 +403,30 @@ export const persistentBackgroundSubagentScheduler = async (
   }
 
   /* ---- 3. Wrapper surface ---- */
+  return { saveLiveHandle, watchToCompletion }
+}
+
+/** Assemble the chained builders into the single shared context. */
+const schedulerState = async (opts: HydratingSchedulerOpts) => {
+  const p0 = schedulerSeams(opts)
+  const p1 = await schedulerPersistence({ ...p0 })
+  const p2 = await schedulerWatch({ ...p0, ...p1 })
+  return { ...p0, ...p1, ...p2 }
+}
+
+/** The state every operation group shares, inferred from {@link schedulerState} so it
+ *  can never drift from what that function actually builds. */
+type SchedulerCtx = Awaited<ReturnType<typeof schedulerState>>
+
+/** The run lifecycle: fork a background subagent, poll it, await it, cancel
+ *  it, or force an in-flight foreground run into the background. */
+const lifecycleOps = (
+  ctx: SchedulerCtx,
+): Pick<
+  PersistentBackgroundSubagentScheduler,
+  "fork" | "poll" | "await" | "cancel" | "forceBackground"
+> => {
+  const { inner, interruptedById, hydratedById, saveLiveHandle, watchToCompletion } = ctx
   return {
     fork(spec): SubagentHandleId {
       // inner.fork can throw on cap-exceeded — we propagate (saves only on
@@ -411,7 +486,15 @@ export const persistentBackgroundSubagentScheduler = async (
       }
       return outcome
     },
+  }
+}
 
+/** Enumeration and retention pruning. */
+const queryOps = (
+  ctx: SchedulerCtx,
+): Pick<PersistentBackgroundSubagentScheduler, "list" | "prune"> => {
+  const { inner, store, workspace, now, interruptedById, hydratedById } = ctx
+  return {
     list(): ReadonlyArray<{
       id: SubagentHandleId
       result: HydratedSubagentResult
@@ -462,7 +545,19 @@ export const persistentBackgroundSubagentScheduler = async (
       }
       return removedLive
     },
+  }
+}
 
+/** The durable codec: serialize the scheduler, rehydrate it, and evict the
+ *  runs a crash left mid-flight. */
+const persistOps = (
+  ctx: SchedulerCtx,
+): Pick<
+  PersistentBackgroundSubagentScheduler,
+  "serialize" | "hydrate" | "hydrateWithPrune" | "evictInterrupted"
+> => {
+  const { inner, interruptedById, hydratedById } = ctx
+  return {
     serialize(): string {
       return inner.serialize()
     },
@@ -479,6 +574,17 @@ export const persistentBackgroundSubagentScheduler = async (
       interruptedById.delete(id)
       hydratedById.delete(id)
     },
+  }
+}
+
+export const persistentBackgroundSubagentScheduler = async (
+  opts: HydratingSchedulerOpts,
+): Promise<PersistentBackgroundSubagentScheduler> => {
+  const ctx = await schedulerState(opts)
+  return {
+    ...lifecycleOps(ctx),
+    ...queryOps(ctx),
+    ...persistOps(ctx),
   }
 }
 

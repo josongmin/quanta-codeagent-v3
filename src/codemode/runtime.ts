@@ -601,7 +601,12 @@ const installConsole = (ctx: Ctx): void => {
  * out-of-bounds fault). `drive.inFlight` tracks outstanding host dispatches so the
  * drive loop keeps pumping until every out-of-band resolve has landed.
  */
-const installToolsBinding = (
+/**
+ * Everything the tools binding installs: the per-tool proxies and the pending
+ * registry they record into. Split out of `installToolsBinding`
+ * (god-function burndown).
+ */
+const toolsBindingState = (
   ctx: Ctx,
   bind: {
     dispatch: RunCodeCellOptions["dispatch"]
@@ -612,23 +617,28 @@ const installToolsBinding = (
     drive: DriveState
     onCall: (rec: CellToolCallRecord) => void
   },
-): { disposePending: () => void } => {
-  let seq = 0
-  let issued = 0
+) => {
+  /** The factory's MUTABLE state. `let` bindings cannot cross a function
+   *  boundary by value, so they live here and the groups mutate in place —
+   *  observationally identical to the closure they replace. */
+  const mut = {
+    seq: 0,
+    issued: 0,
+    disposed: false,
+  }
 
   // Every deferred we mint is tracked here until it settles AND its resolve/reject
   // job has been pumped — then it is removed. Any deferred STILL in this set at
   // teardown (early termination: timeout / abort / cap / a dangling in-cell
-  // promise) is disposed by `disposePending` BEFORE `ctx.dispose()` so the WASM
+  // promise) is mut.disposed by `disposePending` BEFORE `ctx.dispose()` so the WASM
   // runtime is never freed with a live promise handle (the GC-list assertion).
   const live = new Set<import("quickjs-emscripten").QuickJSDeferredPromise>()
   // Once teardown begins (`disposePending`), NO out-of-band resolve may touch the
   // VM again: a late `dispatch().then()` firing after `ctx.dispose()` would call
   // `executePendingJobs` on a freed runtime, which `abort()`s the WASM heap
   // (UNCATCHABLE by a JS try/catch). This flag fences every post-teardown VM
-  // touch — the deferred is already disposed by `disposePending`, so a late
+  // touch — the deferred is already mut.disposed by `disposePending`, so a late
   // resolve has nothing legitimate to do.
-  let disposed = false
 
   // ONE shared host bridge `__cmDispatch(toolName, args)` — a plain newFunction.
   // The in-VM `tools.*` wrapper (installed below) calls it with the tool name +
@@ -647,8 +657,8 @@ const installToolsBinding = (
     // swallow so a late host resolve never crashes the host.
     const settle = (apply: () => void): void => {
       // Teardown started: the VM is being / already freed. Do NOT touch it — the
-      // deferred was disposed by `disposePending`. (Uncatchable WASM abort guard.)
-      if (disposed) return
+      // deferred was mut.disposed by `disposePending`. (Uncatchable WASM abort guard.)
+      if (mut.disposed) return
       try {
         apply()
       } finally {
@@ -658,7 +668,7 @@ const installToolsBinding = (
         } catch {
           /* already freed by ctx teardown */
         }
-        if (!disposed) {
+        if (!mut.disposed) {
           try {
             ctx.runtime.executePendingJobs()
           } catch {
@@ -671,7 +681,7 @@ const installToolsBinding = (
     // Cap BEFORE dispatching — a runaway fan-out can never reach the host gate
     // more than `maxCalls` times (RFC §4.4 / §6.4). Reject the deferred with a
     // typed cap error; do NOT touch the host port.
-    if (issued >= bind.maxCalls) {
+    if (mut.issued >= bind.maxCalls) {
       bind.drive.abnormal = "cap"
       settle(() =>
         rejectWithError(
@@ -684,8 +694,8 @@ const installToolsBinding = (
       // The resolve job is queued; the drive loop pumps it. Return the handle.
       return deferred.handle
     }
-    issued += 1
-    const thisSeq = seq++
+    mut.issued += 1
+    const thisSeq = mut.seq++
     bind.drive.inFlight += 1
 
     // Out-of-band: run the REAL gated dispatch, then resolve/reject the deferred.
@@ -755,12 +765,24 @@ const installToolsBinding = (
 
   // Teardown hook: dispose every deferred STILL alive (an early-terminated cell
   // never `await`ed its rejected/dangling promise). Idempotent per deferred.
+  return { ctx, bind, live, dispatchFn, toolNames, wrapper, setup, mut }
+}
+
+/** The state every operation group shares, inferred from {@link toolsBindingState} so it
+ *  can never drift from what that function actually builds. */
+type ToolsBindingCtx = ReturnType<typeof toolsBindingState>
+
+/** Dispose whatever the binding still has in flight. */
+const disposeOps = (
+  sctx: ToolsBindingCtx,
+): Pick<{ disposePending: () => void }, "disposePending"> => {
+  const { live, mut } = sctx
   return {
     disposePending: () => {
       // Fence every future out-of-band resolve from touching the VM FIRST, then
       // dispose any deferred still alive (early-terminated cell never `await`ed
       // its rejected/dangling promise). Idempotent per deferred.
-      disposed = true
+      mut.disposed = true
       for (const deferred of live) {
         try {
           deferred.dispose()
@@ -770,6 +792,24 @@ const installToolsBinding = (
       }
       live.clear()
     },
+  }
+}
+
+const installToolsBinding = (
+  ctx: Ctx,
+  bind: {
+    dispatch: RunCodeCellOptions["dispatch"]
+    /** The ACTIVE cell surface (Phase 1 default OR the Phase-2 full registered
+     *  set). Each name becomes `tools.<name>`; a name absent here is unreachable. */
+    surfaceTools: readonly string[]
+    maxCalls: number
+    drive: DriveState
+    onCall: (rec: CellToolCallRecord) => void
+  },
+): { disposePending: () => void } => {
+  const sctx = toolsBindingState(ctx, bind)
+  return {
+    ...disposeOps(sctx),
   }
 }
 
