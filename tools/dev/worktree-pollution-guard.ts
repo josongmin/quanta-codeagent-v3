@@ -3,9 +3,18 @@
  *
  * WHY THIS EXISTS (aug-23). Five artifacts were sitting in the repo when three
  * unrelated gates went red at once: `rel.txt` ("based"), `a.txt` ("x"),
- * `b.txt` ("y"), `round.txt` ("jailed-ok") and `src/x.ts` ("no edit"). All five
- * were written by unit tests that passed a RELATIVE path to a write API with no
- * base directory, so the path resolved against `process.cwd()` — the repo root.
+ * `b.txt` ("y"), `round.txt` ("jailed-ok") and `src/x.ts` ("no edit"). Every one
+ * is a test FIXTURE by content — `rel.txt` holds exactly the bytes
+ * `storage.test.ts` writes — landed at the repo root, which is where a bare
+ * relative path resolves when a write API is given no base directory.
+ *
+ * The culprit was never identified, and this guard does not need it to be.
+ * Measured after the cleanup: a full `bun test tests/unit` (37k tests) and
+ * `bun test tests/integration` (3.1k tests) each reproduce NONE of them, so
+ * whatever wrote them ran under conditions those two do not cover — a killed
+ * run, a different cwd, or an ad-hoc invocation. That is precisely why the
+ * check is a live guard rather than a fix to one test: it names whoever does it
+ * next, on the run that does it.
  *
  * What made it expensive was that the damage landed nowhere near the tests that
  * caused it:
@@ -40,9 +49,12 @@
  *   - A path both created AND deleted inside the run is invisible. That is a
  *     clean test, so it is the correct answer.
  *   - On a shared checkout, another process creating a file during the run is
- *     attributed to the run. That is why the failure prints the byte size and a
- *     content preview of every offender: attribution is the reader's, and the
- *     preview is normally enough to tell a fixture from a colleague's edit.
+ *     attributed to the run. This is not theoretical: it happened on BOTH
+ *     measurement runs above, each time a concurrent session adding a new
+ *     `*-hellgate.test.ts`. It is also why the failure prints the byte size and
+ *     a content preview of every offender — both times the preview identified
+ *     the file as someone's new test in one line. In CI, where the checkout is
+ *     clean and single-writer, the case cannot arise.
  *   - It says nothing about writes to tracked files, or to `$HOME`, or to
  *     `/tmp`. The `/tmp` variant of this leak has its own history.
  *
@@ -51,7 +63,7 @@
  *   bun run test:pollution                       # the unit suite, guarded
  */
 
-import { readFileSync, statSync } from "node:fs"
+import { closeSync, openSync, readFileSync, readSync, statSync } from "node:fs"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
 
@@ -113,9 +125,20 @@ const describePath = (rel: string): string => {
   } catch {
     return `${rel}  (vanished before it could be read)`
   }
-  let preview = ""
+  // Read a PREFIX, not the file: a leak is by definition something nobody
+  // expected, so its size is unknown and `readFileSync` would pull all of it
+  // into memory to show 80 characters. Binary bytes are tolerated — the decoded
+  // mojibake still tells a reader "this is not a text fixture".
+  let preview = "<unreadable>"
   try {
-    preview = readFileSync(abs, "utf8").slice(0, 80).replace(/\s+/g, " ").trim()
+    const fd = openSync(abs, "r")
+    try {
+      const buf = Buffer.alloc(Math.min(size, 512))
+      const read = readSync(fd, buf, 0, buf.length, 0)
+      preview = buf.subarray(0, read).toString("utf8").slice(0, 80).replace(/\s+/g, " ").trim()
+    } finally {
+      closeSync(fd)
+    }
   } catch {
     preview = "<unreadable>"
   }

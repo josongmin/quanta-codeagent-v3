@@ -93,7 +93,11 @@ jobs:
         # The harness needs a real PTY (FFI openpty); every describe is
         # `skipIf(!PTY_AVAILABLE)`, so on a runner without one this degrades to
         # a visible skip rather than a false green.
-        run: bun run e2e:pty
+        #
+        # Guarded like the suites above: this one spawns REAL CLI processes, so
+        # it is the likeliest place for a stray file to be written next to the
+        # repo rather than into the harness's temp HOME.
+        run: bun run tools/dev/worktree-pollution-guard.ts -- bun run e2e:pty
       - name: feature-catalog — validate + diff + ratchet
         # Hard-gates on:
         #   validate     — every evidence file/ADR/test exists
