@@ -19,6 +19,7 @@ import {
   PROMAX_EVALUATOR_RELATIVE_PATH,
 } from "../harness/promax"
 import type { BenchRunConfig } from "../run-config"
+import { formatPythonVersion } from "./python-version"
 import type { FamilyBootstrapCommand, FamilyRemoteBootstrap } from "./types"
 
 /**
@@ -94,6 +95,10 @@ export const proMaxRemoteBootstrap = (cfg: BenchRunConfig): FamilyRemoteBootstra
       `[dry-run] promax-evaluator=${spec.checkoutRoot}/${PROMAX_EVALUATOR_RELATIVE_PATH}`,
       `[dry-run] promax-eval-meta=${spec.checkoutRoot}/${PROMAX_EVAL_META_RELATIVE_PATH}`,
       `[dry-run] promax-evaluator-python=${spec.evaluatorPython}`,
+      // The interpreter FLOOR, printed beside the interpreter it constrains. It
+      // is checked on the box (an agent-phase probe carrying the typed floor),
+      // so this line describes a gate rather than an expectation.
+      `[dry-run] promax-min-python=${formatPythonVersion(spec.minPythonVersion)} (REFUSES the box below this; pinned evaluator uses PEP 604)`,
       // The two concurrency axes, printed together on purpose: an operator who
       // raises patch-gen concurrency must be able to see that the grader did not
       // move with it.

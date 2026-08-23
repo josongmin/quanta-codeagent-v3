@@ -15,6 +15,7 @@ import { DATASET_FAMILIES, type DatasetFamily } from "@/apps/bench/dataset-famil
 import {
   buildProMaxBootstrapPlan,
   PROMAX_EVAL_META_RELATIVE_PATH,
+  PROMAX_EVALUATOR_PYTHON_FLOOR,
   PROMAX_EVALUATOR_RELATIVE_PATH,
 } from "@/apps/bench/harness/promax"
 import { familyRemoteBootstrap } from "@/apps/bench/profiles/bootstrap"
@@ -79,6 +80,9 @@ describe("PMX-04 — the family PROFILE supplies the typed remote bootstrap", ()
       venvRoot: PROMAX_ONBOX_VENV_ROOT,
       evaluatorPython: `${PROMAX_ONBOX_VENV_ROOT}/bin/python`,
       systemPython: "python3",
+      // Referenced, never re-typed: a second hand-written floor is a second
+      // thing that can drift from the pinned evaluator it describes.
+      minPythonVersion: PROMAX_EVALUATOR_PYTHON_FLOOR.minimum,
       evaluatorWorkers: 1,
       patchGenConcurrency: 1,
       requiredPlatform: { os: "linux", architecture: "amd64" },

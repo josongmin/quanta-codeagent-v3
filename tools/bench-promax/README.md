@@ -1,12 +1,12 @@
 # `tools/bench-promax` — the ProMax operator chain
 
-Four steps, in order, each refusing rather than guessing. Nothing here launches a
-run, resolves model/preset knobs, or writes a bench report — these are offline
-provenance/preparation tools.
+Five steps, in order, each refusing rather than guessing. Steps 1–4 are offline
+provenance/preparation tools: they launch no run and resolve no model/preset
+knobs. Step 5 is the one that executes something — the pinned evaluator.
 
 ```
-  fetch  ──▶  assemble  ──▶  verify  ──▶  prepare-corpus
- (manual)   assemble-bundle  verify-bundle   prepare-corpus
+  fetch  ──▶  assemble  ──▶  verify  ──▶  prepare-corpus  ──▶  run-gate
+ (manual)   assemble-bundle  verify-bundle   prepare-corpus     run-gate
 ```
 
 | step | tool | in | out |
@@ -15,6 +15,7 @@ provenance/preparation tools.
 | 2 assemble | `assemble-bundle.ts` | fetched tree + in-repo manifest | a bundle dir in the validator's shape |
 | 3 verify | `verify-bundle.ts` | bundle dir | `VERIFIED` + the manifest digest |
 | 4 prepare | `prepare-corpus.ts` | verified bundle dir | public tasks, grader bundle, sample manifests |
+| 5 run a gate | `run-gate.ts` | pinned checkout + campaign golden | `gate-receipt.json` + the gate verdict |
 
 Steps 2 and 4 both re-run the step-3 validator internally, so a bundle can never
 be consumed without being verified; step 3 is listed separately because it is
@@ -122,6 +123,60 @@ Verifies the bundle again, then splits it into the two artifacts:
 `--agent-root` receives **only** `public-tasks.json` (no gold), `--grader-root`
 receives `grader-bundle/`. `--grader-root` must **not** be inside `--agent-root`;
 the writer refuses an overlapping layout before writing anything.
+
+## 5 — run a gate
+
+```sh
+bun run tools/bench-promax/run-gate.ts \
+  --campaign     <campaign id> \
+  --pinned-root  <verified upstream checkout> \
+  --golden       <campaign-golden.json> \
+  --work-dir     <output directory> \
+  --python       <dedicated interpreter, Python ≥3.10> \
+  [--ids a,b,c]                # default: every instance in the golden file
+```
+
+Runs **Gate 1, the gold sentinel**: it submits a deterministic, campaign-unique
+patch that *cannot apply* and requires every instance to come back
+`model = apply_failed, golden = success`. That proves the reference patch passes
+in every selected image without the evaluator's model/golden promotion making the
+preflight vacuous. It spends **no model tokens**.
+
+The order is the contract — everything before the spawn can refuse, and refusing
+there means no process ever started:
+
+```
+verify pinned hashes ─▶ build sentinel predictions ─▶ build argv
+  ─▶ mint evaluator identity ─▶ SPAWN ─▶ read output ─▶ receipt ─▶ gate ─▶ persist
+```
+
+It **refuses** when:
+
+- the staged `src/evaluation/test_run.py` or `data/eval.json` does not hash to the
+  frozen pin (`evaluator_sha256_mismatch` / `eval_meta_sha256_mismatch`), or is
+  absent (`*_file_absent`). A gate that runs an unverified evaluator is not
+  evidence, so this happens **before** anything is spawned;
+- a required flag is absent — no campaign path is ever guessed;
+- the six-field evaluator identity cannot be built from real values
+  (`identity_incomplete`). Placeholders are never substituted: the receipt layer
+  refuses incomplete metadata (`evaluator_meta_invalid`) precisely so a receipt
+  stays replayable.
+
+A crashed evaluator, an absent output file, a non-zero exit, or a drifted schema
+are **not** refusals — they are graded as infrastructure
+(`evaluator_unavailable` / `evaluator_no_output` / `evaluator_nonzero_exit` /
+`schema_invalid`), never as a model failure and never as `missing`.
+
+Artifacts land in `--work-dir`: `preds.json`, `pass-rate.json`, and
+`gate-receipt.json`. **The receipt is written even when the gate FAILS** — that is
+the run an operator most needs the evidence for. Exit is `0` only on a passing
+gate.
+
+`--python` must be a dedicated interpreter of **Python ≥3.10**: the pinned
+evaluator uses PEP 604 (`int | None`) and a 3.9 interpreter dies with a
+SyntaxError that looks nothing like a grading failure. Evaluator concurrency is
+deliberately **not** a flag — it stays at the pinned `--workers 1` until a
+measured concurrency campaign changes it at the owner.
 
 ---
 

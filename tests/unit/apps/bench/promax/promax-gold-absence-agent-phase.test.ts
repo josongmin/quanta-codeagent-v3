@@ -87,7 +87,15 @@ const recorder = (respond?: (cmd: string, n: number) => SpawnResult): Recorder =
         }
       }
       commands.push(cmd)
-      return respond?.(cmd, commands.length) ?? { code: 0, stdout: "", stderr: "" }
+      const canned = respond?.(cmd, commands.length)
+      if (canned !== undefined) return canned
+      // DEFAULT answers must be what a WORKING box says, and a working box
+      // reports its interpreter version: the executor refuses a declared
+      // interpreter floor that the box answers with silence, so an empty
+      // default would make every caller fail the floor instead of exercising
+      // what it came to test.
+      if (cmd.includes("--version")) return { code: 0, stdout: "Python 3.11.14\n", stderr: "" }
+      return { code: 0, stdout: "", stderr: "" }
     },
   }
 }
@@ -282,6 +290,9 @@ const digestFor = (rendered: string): string | undefined => {
       return `${file.sha}  ${PROMAX_ONBOX_CHECKOUT_ROOT}/${file.path}\n`
     }
   }
+  // The interpreter probes carry a declared FLOOR the executor compares, so an
+  // honest box answers them too — an empty answer is a refusal, not a no-op.
+  if (rendered.includes("--version")) return "Python 3.11.14\n"
   return undefined
 }
 

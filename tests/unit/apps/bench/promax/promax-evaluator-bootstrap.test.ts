@@ -298,6 +298,10 @@ describe("PMX-04 bootstrap — readiness classification is fail-closed", () => {
       [PROMAX_V1_UPSTREAM_PATHS.evalMeta]: PROMAX_V1_SNAPSHOT.eval_sha256,
       [PROMAX_V1_UPSTREAM_PATHS.evaluator]: PROMAX_V1_SNAPSHOT.evaluator_sha256,
     },
+    // A ready box runs an interpreter the pinned evaluator can import. The
+    // floor's own refusals are owned by `promax-evaluator-python-floor.test.ts`;
+    // here it is a field of "fully ready" like the platform and the disk.
+    pythonVersion: { major: 3, minor: 11 },
     ...over,
   })
 

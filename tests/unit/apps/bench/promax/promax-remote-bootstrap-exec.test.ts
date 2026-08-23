@@ -56,6 +56,10 @@ const honestDigest = (cmd: string): string => {
   ] as const) {
     if (cmd.includes("sha256sum") && cmd.includes(rel)) return `${sha}  ${rel}\n`
   }
+  // An honest box also ANSWERS `--version`: the executor refuses a declared
+  // interpreter floor that the box does not satisfy (or does not report), so
+  // silence here would be a box failing the floor, not a neutral stub.
+  if (cmd.includes("--version")) return "Python 3.11.14\n"
   return ""
 }
 

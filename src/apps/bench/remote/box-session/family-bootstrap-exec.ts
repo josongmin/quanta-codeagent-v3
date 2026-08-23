@@ -85,6 +85,11 @@ import {
   assertFamilyBootstrapPhaseWiringInSync,
   bootstrapMaterializesGold,
 } from "../../profiles/bootstrap-phase-wiring"
+import {
+  describePythonFloorRefusal,
+  meetsPythonFloor,
+  parsePythonVersion,
+} from "../../profiles/python-version"
 import type {
   FamilyBootstrapCommand,
   FamilyBootstrapPhase,
@@ -148,6 +153,36 @@ export const classifyBootstrapDigest = (
     `step "${command.step}": ${expectation.path} hashes to ${observed} on-box, not the frozen ` +
     `${expectation.sha256} (${expectation.absolutePath}).`
   )
+}
+
+/**
+ * Compare a command's declared INTERPRETER FLOOR against the version the box
+ * reported. Returns an operator-facing problem string, or `undefined` when the
+ * command declares no floor or the box satisfies it.
+ *
+ * Same posture as {@link classifyBootstrapDigest}, for the same reason: an
+ * output that reports NO version is a REFUSAL, not a skipped check. A box whose
+ * interpreter cannot be identified is a box whose grading run would fail much
+ * later and much less legibly.
+ *
+ * Pure, and exported so the comparison is testable without a box.
+ */
+export const classifyBootstrapPythonFloor = (
+  command: FamilyBootstrapCommand,
+  observedOutput: string,
+): string | undefined => {
+  const floor = command.pythonFloor
+  if (floor === undefined) return undefined
+  const observed = parsePythonVersion(observedOutput)
+  if (observed !== null && meetsPythonFloor(observed, floor.minimum)) return undefined
+  return `step "${command.step}": ${describePythonFloorRefusal({
+    label: "interpreter",
+    // argv[0] IS the interpreter being probed — the plan builds these commands
+    // as `[<python>, "--version"]`.
+    executable: command.argv[0] ?? "(no executable in argv)",
+    observed,
+    floor,
+  })}`
 }
 
 /**
@@ -314,10 +349,12 @@ const runBootstrapPhase = async (
     if (result.code !== 0) {
       throw new FamilyBootstrapError(classifyNonZeroExit(bootstrap, command, rendered, result))
     }
-    const digestProblem = classifyBootstrapDigest(command, `${result.stdout}${result.stderr}`)
-    if (digestProblem !== undefined) {
+    const output = `${result.stdout}${result.stderr}`
+    const problem =
+      classifyBootstrapDigest(command, output) ?? classifyBootstrapPythonFloor(command, output)
+    if (problem !== undefined) {
       throw new FamilyBootstrapError(
-        `[full-remote] ${bootstrap.family} bootstrap VERIFICATION FAILED — ${digestProblem}\n` +
+        `[full-remote] ${bootstrap.family} bootstrap VERIFICATION FAILED — ${problem}\n` +
           `  command: ${rendered}\n` +
           `  purpose: ${command.purpose}`,
       )

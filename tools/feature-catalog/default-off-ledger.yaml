@@ -1754,7 +1754,14 @@ rows:
     proof: { on: real-loop, off_identity: unit, receipt: null }
     risk: security
     decision: measure-first
-    owner_seam: src/agent/sandbox-escalation/orchestrator.ts
+    # aug-23 — the gate-owning seam is the host wire that READS the knob and mints
+    # the PER-SESSION handler onto `cfg.bashSandboxEscalation` (the knob-agnostic
+    # orchestrator is the machine it adapts, not the arming point). Knob-OFF ⇒ the
+    # slot is never stamped ⇒ `ToolContext.sandboxEscalation` absent ⇒ bash
+    # byte-identical. Previously this armed a PROCESS-GLOBAL inside
+    # `src/tool/bash/sandbox-escalation-wire.ts`, which made the rollback
+    # cross-session (a knob-less run disarmed live siblings); it is now per-session.
+    owner_seam: src/host/runtime/sandbox-escalation-wire.ts
     rollback: QUANTA_SANDBOX_ESCALATION!=1
     duplicate_of: null
     lifecycle_evidence: null

@@ -63,7 +63,14 @@ import {
   PROMAX_V1_SNAPSHOT,
   PROMAX_V1_UPSTREAM_PATHS,
 } from "@/apps/bench/promax/provenance/frozen-snapshot"
+import type { PythonVersion } from "../../profiles/python-version"
+import {
+  describePythonFloorRefusal,
+  formatPythonVersion,
+  meetsPythonFloor,
+} from "../../profiles/python-version"
 import type { FamilyBootstrapCommand } from "../../profiles/types"
+import { PROMAX_EVALUATOR_PYTHON_FLOOR } from "./evaluator-python"
 import { PROMAX_REQUIRED_ARCHITECTURE, PROMAX_REQUIRED_OS } from "./image-freeze"
 
 /** One upstream file whose bytes the campaign pinned. */
@@ -79,6 +86,7 @@ export const PROMAX_BOOTSTRAP_STEPS = [
   "campaign-root",
   "docker-ready",
   "disk",
+  "python-floor",
   "checkout",
   "verify-hashes",
   "python-env",
@@ -128,6 +136,16 @@ export interface ProMaxEvaluatorBootstrapSpec {
   readonly evaluatorPython: string
   /** The interpreter used to BUILD the environment. */
   readonly systemPython: string
+  /**
+   * The MINIMUM interpreter version the pinned evaluator can run on, carried as
+   * typed spec data so a box that would fail is refused before it is
+   * provisioned rather than after.
+   *
+   * It is not an input: the floor is a property of the pinned evaluator's bytes
+   * (PMX-00), so a caller has no business choosing it. See
+   * {@link PROMAX_EVALUATOR_PYTHON_FLOOR} for the derivation.
+   */
+  readonly minPythonVersion: PythonVersion
   /** PINNED at 1 until a measured concurrency campaign changes it. */
   readonly evaluatorWorkers: 1
   /** The OTHER axis: agent patch generation. Never the same knob. */
@@ -201,6 +219,8 @@ export const buildProMaxBootstrapSpec = (
     venvRoot,
     evaluatorPython: `${venvRoot}/bin/python`,
     systemPython: input.systemPython ?? "python3",
+    // Not an input, and not defaulted: the pinned evaluator decides it.
+    minPythonVersion: PROMAX_EVALUATOR_PYTHON_FLOOR.minimum,
     evaluatorWorkers: 1,
     patchGenConcurrency: n,
     requiredPlatform: { os: PROMAX_REQUIRED_OS, architecture: PROMAX_REQUIRED_ARCHITECTURE },
@@ -224,16 +244,23 @@ export const buildProMaxBootstrapSpec = (
  * Every command is argv; nothing is a shell string, so there is no quoting layer
  * for a path to escape through.
  */
+/**
+ * ---- AGENT PHASE ---- pure capability probes, and the whole set of them.
+ *
+ * Gold-free by construction: the campaign root is a directory the agent phase
+ * CREATES EMPTY, so naming it reveals nothing (nothing is in it), and the
+ * checkout that fills it belongs to the grader phase.
+ *
+ * Split out of {@link buildProMaxBootstrapPlan} so each phase has one owner and
+ * neither grows past the size ratchet as probes are added.
+ */
 export const buildProMaxBootstrapPlan = (
   spec: ProMaxEvaluatorBootstrapSpec,
-): readonly ProMaxBootstrapCommand[] => {
+): ProMaxBootstrapCommand[] => {
   const root = spec.checkoutRoot
+  /** Every git command runs `-C <root>`, so no step depends on the process cwd. */
   const at = (...argv: string[]): string[] => ["git", "-C", root, ...argv]
   const commit = spec.upstreamGitCommit
-
-  // ---- AGENT PHASE ---- pure capability probes. Gold-free by construction:
-  // the campaign root is a directory the agent phase CREATES EMPTY, so naming it
-  // reveals nothing (nothing is in it) and the checkout that fills it is below.
   const probes: ProMaxBootstrapCommand[] = [
     {
       // 🔴 FIRST, and fail-closed. Absence is the WHOLE defence, and until this
@@ -274,6 +301,25 @@ export const buildProMaxBootstrapPlan = (
       goldBearing: false,
       argv: ["df", "-Pk", spec.campaignRoot],
       purpose: "free space on the campaign root, in 1K blocks (POSIX-portable output)",
+    },
+    {
+      // 🔴 AGENT phase, deliberately — this is a pure capability probe that
+      // names no upstream URL, no commit and no checkout root, so it is
+      // gold-free by construction and belongs with the other fail-fast checks.
+      //
+      // It probes the SYSTEM interpreter, the one that BUILDS the venv below,
+      // because `python3 -m venv` produces a venv of whatever version ran it: a
+      // 3.9 system python yields a 3.9 evaluator environment. Checking only the
+      // built venv would be refusing AFTER provisioning, and refusing after an
+      // agent run has been paid for is the expensive half of the same mistake.
+      step: "python-floor",
+      phase: "agent",
+      goldBearing: false,
+      argv: [spec.systemPython, "--version"],
+      purpose:
+        `prove the system interpreter can run the pinned evaluator (>=${formatPythonVersion(spec.minPythonVersion)}) ` +
+        "BEFORE the box is provisioned or an agent run is paid for",
+      pythonFloor: PROMAX_EVALUATOR_PYTHON_FLOOR,
     },
   ]
 
@@ -343,7 +389,14 @@ export const buildProMaxBootstrapPlan = (
       phase: "grader",
       goldBearing: false,
       argv: [spec.evaluatorPython, "--version"],
-      purpose: "prove the dedicated interpreter is executable before the campaign relies on it",
+      purpose:
+        "prove the dedicated interpreter is executable AND at least " +
+        `${formatPythonVersion(spec.minPythonVersion)} before the campaign relies on it`,
+      // The floor is re-checked on the BUILT venv, not only on the system
+      // interpreter that was probed in the agent phase: the two can differ (a
+      // pre-existing venv, a box whose `python3` moved between phases), and the
+      // interpreter that actually runs the evaluator is this one.
+      pythonFloor: PROMAX_EVALUATOR_PYTHON_FLOOR,
     },
     // ---- TEARDOWN ---- what the grader phase materialized, UNMADE.
     //
@@ -377,6 +430,16 @@ export interface ProMaxBootstrapObservation {
   readonly detached: boolean
   /** repo-relative upstream path → observed sha256. */
   readonly fileHashes: Readonly<Record<string, string>>
+  /**
+   * What the box's evaluator interpreter reported, or `null` when nothing
+   * readable came back.
+   *
+   * REQUIRED rather than optional: this classifier answers "may the box
+   * proceed", and an omitted interpreter check is the exact shape of the gap
+   * that let a 3.9 box through. An absent observation is a PROBLEM below, never
+   * a skipped check.
+   */
+  readonly pythonVersion: PythonVersion | null
 }
 
 /**
@@ -401,6 +464,19 @@ export const evaluateProMaxBootstrapReadiness = (
     problems.push(
       `promax bootstrap: free disk on ${spec.campaignRoot} is ${observed.freeDiskBytes} byte(s), ` +
         `below the ${spec.minFreeDiskBytes}-byte floor the image set needs. REFUSING.`,
+    )
+  }
+  if (
+    observed.pythonVersion === null ||
+    !meetsPythonFloor(observed.pythonVersion, spec.minPythonVersion)
+  ) {
+    problems.push(
+      `promax bootstrap: ${describePythonFloorRefusal({
+        label: "evaluator interpreter",
+        executable: spec.evaluatorPython,
+        observed: observed.pythonVersion,
+        floor: PROMAX_EVALUATOR_PYTHON_FLOOR,
+      })}`,
     )
   }
   if (!observed.detached) {

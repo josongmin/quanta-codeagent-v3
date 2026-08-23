@@ -120,6 +120,11 @@ class FakeBox {
     // `git init -q <root>` — the moment the gold-bearing tree appears.
     if (verb === "git init") return this.gitInit(argv[3] ?? "")
     if (argv[0] === "sha256sum") return ok(digestFor(argv[1] ?? ""))
+    // `<python> --version` — a real box answers, and the executor REFUSES a box
+    // that reports a version below the pinned evaluator's floor (or none at
+    // all). This box reports a compliant one; the floor's own refusals are
+    // owned by `promax-evaluator-python-floor.test.ts`.
+    if (argv[1] === "--version") return ok("Python 3.11.14")
     return ok()
   }
 

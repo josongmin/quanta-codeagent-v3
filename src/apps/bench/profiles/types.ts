@@ -29,6 +29,7 @@ import type { ProSwebenchOpts } from "../pro-swebench"
 import type { BenchRunConfig } from "../run-config"
 import type { Instance } from "../types"
 import type { FamilyCorpusReader, FamilyCorpusRow } from "./corpus-row"
+import type { FamilyBootstrapPythonFloor } from "./python-version"
 
 /** The grade evaluator shape shared by BOTH the official and the Pro verifier —
  *  it injects unchanged into the one `VerifyDeps.pythonSwebench` seam. */
@@ -170,6 +171,17 @@ export interface FamilyBootstrapCommand {
    * a non-zero exit is classified as "the path EXISTS", not as a broken step.
    */
   readonly absenceProbe?: FamilyBootstrapAbsenceProbe
+  /**
+   * The INTERPRETER FLOOR this command's output must satisfy: `argv[0]` is a
+   * Python interpreter being asked for its version, and the box is refused if it
+   * answers below {@link FamilyBootstrapPythonFloor.minimum}.
+   *
+   * Typed plan data for the same reason {@link verifies} is: the requirement was
+   * previously a sentence in a doc comment, so a box with an old interpreter
+   * provisioned successfully and then failed at grading time with an error that
+   * looked like a broken evaluator. A floor nobody compares is folklore.
+   */
+  readonly pythonFloor?: FamilyBootstrapPythonFloor
 }
 
 /**

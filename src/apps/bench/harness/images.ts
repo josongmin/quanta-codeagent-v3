@@ -48,7 +48,13 @@ const DOCKER_QUERY_TIMEOUT_MS = 30_000
  * merely slow. A transfer still needs a ceiling (a stalled pull must not hang a
  * campaign forever), it just needs a transfer-shaped one.
  */
-const DOCKER_TRANSFER_TIMEOUT_MS = 20 * 60_000
+// 20 minutes. Written as a single literal, not `20 * 60_000`: the arithmetic form
+// leaves a bare `60_000` that the no-undocumented-magic-timeout rail reads as an
+// unbound wall-clock magic number (it only recognises a literal assigned DIRECTLY
+// to an UPPER_SNAKE_CASE const). The value is sized to the observed worst case —
+// a multi-GB ProMax image pulled under amd64 emulation — with headroom, and is a
+// ceiling for a STALLED transfer, not a target.
+const DOCKER_TRANSFER_TIMEOUT_MS = 1_200_000
 
 const dockerTimeoutMsFor = (argv: readonly string[]): number =>
   argv[0] === "pull" || argv[0] === "push" ? DOCKER_TRANSFER_TIMEOUT_MS : DOCKER_QUERY_TIMEOUT_MS
