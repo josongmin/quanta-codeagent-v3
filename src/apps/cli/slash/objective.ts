@@ -254,7 +254,16 @@ export const objectiveCmd: SlashCommand = {
       )
       return 1
     }
-    // No goal yet ⇒ treat a bare arg as the first edit (nothing to guard).
+    // No goal yet. A MULTI-word arg is unambiguously goal text ⇒ set it. A single
+    // bare token is ambiguous (a mistyped verb like `pasue` would otherwise
+    // silently become the goal), so require the explicit `edit` verb — matching
+    // the unknown-sub-command rejection the sibling commands use.
+    if (args.length === 1) {
+      ctx.err(
+        `/objective: unknown sub-command '${args[0]}' (expected show|edit|pause|resume|clear). To set a one-word goal, run '/objective edit ${args[0]}'.\n`,
+      )
+      return 1
+    }
     return handleEdit(["edit", ...args], ctx, state)
   },
 }

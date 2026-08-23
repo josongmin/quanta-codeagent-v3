@@ -258,7 +258,7 @@ export const RUNNER: readonly KnobInventoryEntry[] = [
     group: "agent-feature",
     home: "runtime-config",
     describe:
-      "Objective HITL proposal gate (RFC-03 C3) — when ON, a model-originated objective mutation is PROPOSED and must be confirmed through the surface's confirm authority before it commits; a surface without that authority refuses activation (never an approval bypass). Unset ⇒ mutations commit directly (byte-identical).",
+      "Objective HITL proposal gate (RFC-03 C3) — when ON, a model-originated objective mutation is PROPOSED and must be confirmed through the surface's confirm authority before it commits; a surface without that authority refuses activation (never an approval bypass). Unset ⇒ mutations commit directly (byte-identical). CO-REQUISITE: requires QUANTA_OBJECTIVE_TOOLS on — without the objective authority (which that master gate builds) this gate is a silent no-op.",
     readSite: "host/runtime/objective-store-wire.ts",
   },
   {
@@ -268,7 +268,7 @@ export const RUNNER: readonly KnobInventoryEntry[] = [
     group: "agent-feature",
     home: "runtime-config",
     describe:
-      "Attention navigation gate (RFC-01) — wires the pure @/attention resolver + the user-question broker into a read-only AttentionReader on the session authorities and registers the `/attention` slash command. Opt-in; unset ⇒ no broker, no reader, no command (byte-identical).",
+      "Attention navigation gate (RFC-01) — wires the pure @/attention resolver + the user-question broker into a read-only AttentionReader on the session authorities and registers the `/attention` slash command. Opt-in; unset ⇒ no broker, no reader, no command (byte-identical). CO-REQUISITE: the reader only materializes when a TaskRegistry exists, so `/attention` also needs QUANTA_SUBAGENT (subagent pills) on — with attention on but subagents off, the command registers but prints 'not wired in this surface'.",
     readSite: "runner/assemble/session-authorities/build.ts",
   },
   {

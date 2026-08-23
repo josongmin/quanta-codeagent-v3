@@ -198,7 +198,8 @@ export const HOST: readonly KnobInventoryEntry[] = [
     default: false,
     group: "host-gate",
     home: "runtime-config",
-    describe: "Objective management tools gate.",
+    describe:
+      "Objective management tools gate (RFC-03) — the MASTER gate: ON builds the objective authority + exposes the objective_* model tools + the `/objective` command. It is the prerequisite for QUANTA_PROPOSE_GOAL (HITL approval) and QUANTA_OBJECTIVE_BUDGET_ENFORCE (budget→status), both of which are silent no-ops without it. Unset ⇒ no objective authority, no tools, no command (byte-identical).",
     readSite: "host/runtime/objective-store-wire.ts",
   },
   {

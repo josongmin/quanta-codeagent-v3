@@ -21,7 +21,8 @@ export const KNOBS_B: readonly RuntimeConfigKnob[] = [
     kind: "bool",
     default: false,
     group: "session",
-    describe: "Thread-goal budget enforcement gate.",
+    describe:
+      "Thread-goal budget enforcement gate (RFC-03) — ON derives usage_limited/budget_limited status from the measured budget. CO-REQUISITE: requires QUANTA_OBJECTIVE_TOOLS on — without the objective authority this gate is a silent no-op. Unset ⇒ informational store, no enforcement (byte-identical).",
   },
   {
     envKey: "QUANTA_CAP_ENFORCE",
