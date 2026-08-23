@@ -47,11 +47,7 @@ import {
   deriveCampaignGolden,
   diffGoldenDocuments,
 } from "./golden-derive"
-import {
-  assertImageFreezeReadyForModelLaunch,
-  isDigestPinnedReference,
-  type ProMaxImageFreezeReceipt,
-} from "./image-freeze"
+import { PROMAX_REQUIRED_ARCHITECTURE, PROMAX_REQUIRED_OS, type ProMaxImageFreezeReceipt, assertImageFreezeReadyForModelLaunch, isDigestPinnedReference } from "./image-freeze"
 import { type DockerPort, type ProMaxImageTarget, runProMaxImagePreflight } from "./image-preflight"
 
 /** The step a refusal happened at. Closed so a caller can branch exhaustively. */
@@ -247,7 +243,18 @@ const resolveDigest = async (
 ): Promise<{ readonly digest: string } | { readonly problem: string }> => {
   if (isDigestPinnedReference(selected.imageName)) return { digest: selected.imageName }
 
-  const pull = await docker(["pull", selected.imageName])
+  // aug-23: the tag→digest resolve pull MUST name the required platform, for the
+  // same reason the preflight pull does. Without it `docker pull` resolves the
+  // manifest list against the HOST, so on a non-amd64 machine this stage refuses
+  // every ProMax image with `no matching manifest for linux/arm64/v8` — measured
+  // 7/7 on PMX-7 — and a campaign can never be prepared from such a host even
+  // though the images it wants exist.
+  const pull = await docker([
+    "pull",
+    "--platform",
+    `${PROMAX_REQUIRED_OS}/${PROMAX_REQUIRED_ARCHITECTURE}`,
+    selected.imageName,
+  ])
   if (pull.code !== 0) {
     return {
       problem:

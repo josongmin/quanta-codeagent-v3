@@ -273,7 +273,7 @@ describe("P3 — assertImageFreezeReadyForModelLaunch, clause by clause", () => 
           code: "pull_failed",
           stage: "pull",
           message: "boom",
-          argv: ["pull", DIGEST_A],
+          argv: ["pull", "--platform", "linux/amd64", DIGEST_A],
           exit_code: 1,
         },
       ],

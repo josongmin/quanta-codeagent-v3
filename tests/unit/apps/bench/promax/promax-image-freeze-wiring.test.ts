@@ -153,13 +153,24 @@ describe("PMX-04 — the freeze composition runs on the real operator path", () 
     // The resolution pair, per assigned instance, on the TAG…
     const tags = ASSIGNED.map((_, i) => `synthetic.invalid/promax:${i}`)
     for (const tag of tags) {
-      expect(calls.some((c) => c.argv.join(" ") === `pull ${tag}`)).toBe(true)
+      // the tag→digest RESOLVE pull names the platform too — same reason as the
+      // preflight pull: a host-resolved manifest list fails on non-amd64.
+      expect(
+        calls.some((c) => c.argv.join(" ") === `pull --platform linux/amd64 ${tag}`),
+      ).toBe(true)
       expect(
         calls.some((c) => c.argv.join(" ") === `image inspect --format {{json .}} ${tag}`),
       ).toBe(true)
       // …and the full preflight on the resolved DIGEST.
       const digest = digestFor(tag)
-      expect(calls.some((c) => c.argv.join(" ") === `pull ${digest}`)).toBe(true)
+      // The pull NAMES the platform the evaluator requires — without it `docker
+      // pull` resolves the manifest list against the HOST and every ProMax image
+      // fails on a non-amd64 machine (measured: 7/7 of PMX-7 on Apple Silicon).
+      expect(
+        calls.some(
+          (c) => c.argv.join(" ") === `pull --platform linux/amd64 ${digest}`,
+        ),
+      ).toBe(true)
       expect(calls.some((c) => c.argv[0] === "run" && c.argv.includes(digest))).toBe(true)
     }
     expect(calls.filter((c) => c.argv[0] === "exec")).toHaveLength(ASSIGNED.length)

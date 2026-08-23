@@ -100,7 +100,7 @@ describe("PMX-04 — local harness receipt and remote transport receipt are the 
     const remote = await throughTransport(serializeProMaxImageFreezeReceipt(local))
     if (!remote.ok) throw new Error("transport refused")
     expect(remote.receipt).toEqual(local)
-    expect(remote.receipt.faults[0]?.argv).toEqual(["pull", DIGEST])
+    expect(remote.receipt.faults[0]?.argv).toEqual(["pull", "--platform", "linux/amd64", DIGEST])
   })
 })
 

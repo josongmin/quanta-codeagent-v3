@@ -38,7 +38,17 @@ describe.skipIf(!PTY_AVAILABLE)("CLI /goal (Pursuing goal) e2e (PTY)", () => {
   })
 
   const boot = async (): Promise<PtyCli> => {
-    const c = drivePtyCli({ cwd, env: { QUANTA_SESSIONS_DIR: sessionsDir } })
+    // aug-23: `/goal` is gated behind QUANTA_OBJECTIVE_TOOLS as of 8a0dadfd5
+    // ("gate CLI + web-daemon objective authority"). The surface builder now
+    // leaves the objective store undefined without it, so the command prints
+    // its not-wired posture. This suite asserts the WIRED behaviour, so it must
+    // opt in — the harness passes a whitelisted env, so an ambient export does
+    // not reach the child. NOTE this suite is exactly what caught that
+    // regression: the unit hellgates stayed 14/14 green through it.
+    const c = drivePtyCli({
+      cwd,
+      env: { QUANTA_SESSIONS_DIR: sessionsDir, QUANTA_OBJECTIVE_TOOLS: "1" },
+    })
     cli = c
     await c.waitFor(BOOT, T)
     return c

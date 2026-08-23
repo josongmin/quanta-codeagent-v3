@@ -35,7 +35,7 @@ export const DAEMON: readonly KnobInventoryEntry[] = [
     group: "web-daemon",
     home: "runtime-config",
     describe: "Subagent fan-out gate (default ON).",
-    readSite: "apps/web-daemon/runtime-factory.ts",
+    readSite: "apps/web-daemon/runtime-factory/session-collaborators.ts",
   },
   {
     envKey: "QUANTA_WEB_SUBAGENTS",

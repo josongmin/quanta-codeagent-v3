@@ -98,6 +98,16 @@ export type {
   NavSymbolInfo,
   NavSymbolKind,
 } from "./types"
+// aug-23 — FS-jail containment for the SERVER-CHOSEN targets of a workspace
+// edit. Shared by `rename-apply` and (via `@/tool`) the agent-slice
+// `lsp_code_action` apply port; `@/lsp` cannot own it (no `@/storage` import).
+export {
+  assertWorkspaceEditJailed,
+  checkWorkspaceEditJail,
+  type JailableDocumentEdit,
+  type JailableWorkspaceEdit,
+  type WorkspaceEditJailVerdict,
+} from "./workspace-edit-jail"
 
 /** Shared 1-based position input — converted to 0-based NavPos internally. */
 const positionSchema = z.object({

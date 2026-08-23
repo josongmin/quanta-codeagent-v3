@@ -155,7 +155,7 @@ export const CONST_KEYED: readonly KnobInventoryEntry[] = [
     // declaration-only registry) rather than runtime-config-knobs (which the
     // parity ratchet requires every entry be read by loadFromEnv).
     describe: "Web daemon — forward agent-state frames to the web client (opt-in).",
-    readSite: "apps/web-daemon/runtime-factory.ts",
+    readSite: "apps/web-daemon/runtime-factory/session-collaborators.ts",
   },
   {
     envKey: "QUANTA_SHADOW",
@@ -184,7 +184,7 @@ export const CONST_KEYED: readonly KnobInventoryEntry[] = [
     home: "runtime-config",
     describe:
       "Inbound message delivery mode while a turn is in flight (queue | weave | interrupt). Seeds the session inbound-mode ref (CLI /inbound + T02 follower set-queue-mode mutate it).",
-    readSite: "apps/web-daemon/runtime-factory.ts",
+    readSite: "apps/web-daemon/runtime-factory/session-collaborators.ts",
   },
   {
     envKey: "QUANTA_FOLLOWER_APPROVAL_TIMEOUT_MS",

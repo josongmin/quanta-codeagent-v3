@@ -108,7 +108,7 @@ describe("PMX-04 image preflight — the exact Docker argv, in order", () => {
     const { receipt, calls } = await runPreflight()
     const container = proMaxPreflightContainerName(CAMPAIGN, "promax__alpha-1")
     expect(calls.map((c) => c.argv)).toEqual([
-      ["pull", DIGEST_A],
+      ["pull", "--platform", "linux/amd64", DIGEST_A],
       ["image", "inspect", "--format", "{{json .}}", DIGEST_A],
       ["run", "-d", "--name", container, DIGEST_A, "tail", "-f", "/dev/null"],
       ["cp", "/campaign/preflight-probe.txt", `${container}:/tmp/quanta-preflight-probe.txt`],
@@ -174,7 +174,7 @@ describe("PMX-04 image preflight — every fault class maps to a DISTINCT reason
     expect(receipt.faults.map((f) => f.code)).toEqual(["pull_failed"])
     expect(receipt.images).toEqual([])
     expect(calls.map((c) => c.argv[0])).toEqual(["pull"])
-    expect(receipt.faults[0]?.argv).toEqual(["pull", DIGEST_A])
+    expect(receipt.faults[0]?.argv).toEqual(["pull", "--platform", "linux/amd64", DIGEST_A])
     expect(receipt.faults[0]?.exit_code).toBe(1)
   })
 
@@ -314,7 +314,7 @@ describe("PMX-04 image preflight — multi-instance coverage", () => {
     const calls: Recorded[] = []
     const docker: DockerPort = async (argv) => {
       calls.push({ argv: [...argv] })
-      if (argv[0] === "pull" && argv[1] === DIGEST_B) {
+      if (argv[0] === "pull" && argv.includes(DIGEST_B)) {
         return { code: 1, stdout: "", stderr: "denied" }
       }
       if (argv[0] === "image" && argv[1] === "inspect") {

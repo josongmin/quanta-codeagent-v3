@@ -342,6 +342,8 @@ export type {
   FormatPortPos,
   FormatPortRange,
   FormatPortTextEdit,
+  JailableDocumentEdit,
+  JailableWorkspaceEdit,
   LspNavProvider,
   LspNavSession,
   NavHover,
@@ -360,8 +362,11 @@ export type {
   SignatureHelpPort,
   SignatureHelpPortInfo,
   SignatureHelpPortParameter,
+  WorkspaceEditJailVerdict,
 } from "./lsp_nav"
 export {
+  assertWorkspaceEditJailed,
+  checkWorkspaceEditJail,
   isCheapLspNavTool,
   LSP_NAV_EXPENSIVE_TOOL_NAMES,
   lspCodeActionTool,

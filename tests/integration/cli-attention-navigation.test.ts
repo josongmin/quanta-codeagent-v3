@@ -508,7 +508,7 @@ describe("RFC-01 A5 — TaskRegistry constructor completeness (source scan)", ()
     const KNOWN = [
       "agent/optional-ports.ts", // FALLBACK mint (env-gated surfaces) — A2 must remove
       "apps/cli/repl/factories/lifecycle.ts", // CLI surface root — A2 moves to builder
-      "apps/web-daemon/runtime-factory.ts", // web surface root — A2 moves to builder
+      "apps/web-daemon/runtime-factory/session-collaborators.ts", // web surface root (god-module split of runtime-factory.ts) — A2 moves to builder
       "subagent/agent-tool.ts", // FALLBACK `?? new TaskRegistry()` — A2 must remove
     ]
     // Exact-set drift guard: catches BOTH a new competing constructor (hit not in

@@ -324,7 +324,20 @@ const preflightOneInstance = async (args: {
   const id = target.instanceId
   const ref = target.registryRepoDigest
 
-  const pullArgv = ["pull", ref]
+  // aug-23: the pull MUST name the platform the evaluator requires. Without it
+  // `docker pull` resolves the manifest list against the HOST, so on any
+  // non-amd64 machine every ProMax image fails with
+  //   `no matching manifest for linux/arm64/v8 in the manifest list entries`
+  // — measured on Apple Silicon, 7/7 of PMX-7. That made the freeze structurally
+  // impossible on the very hosts an operator prepares a campaign from, while the
+  // platform ASSERTION below (which refuses a non-amd64 image) implied the pull
+  // had already asked for one. Asking and asserting must name the same platform.
+  const pullArgv = [
+    "pull",
+    "--platform",
+    `${PROMAX_REQUIRED_OS}/${PROMAX_REQUIRED_ARCHITECTURE}`,
+    ref,
+  ]
   const pull = await docker(pullArgv)
   if (pull.code !== 0) {
     return {

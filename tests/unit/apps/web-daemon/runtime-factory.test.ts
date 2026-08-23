@@ -76,9 +76,12 @@ describe("web-daemon runtime factory", () => {
   // EVEN under bypass (CLI parity). This pins that the production base sets it —
   // the permission e2e suites mirror this flag, so if it were removed they would
   // pass falsely while the real daemon blanket-allowed every tool under bypass.
+  // PATH NOTE: the base assembly moved to `runtime-factory/agent-config-base.ts`
+  // in the god-MODULE split of `runtime-factory.ts` (pure code motion); the pins
+  // below follow the CODE.
   test("the production runtime base ENABLES the HITL gate (bypass cannot blanket-allow)", () => {
     const src = readFileSync(
-      join(import.meta.dir, "../../../../src/apps/web-daemon/runtime-factory.ts"),
+      join(import.meta.dir, "../../../../src/apps/web-daemon/runtime-factory/agent-config-base.ts"),
       "utf8",
     )
     expect(src).toMatch(/hitl:\s*\{\s*enabled:\s*true\s*\}/)
@@ -86,7 +89,7 @@ describe("web-daemon runtime factory", () => {
 
   test("the production runtime base publishes the interactive prompt surface profile", () => {
     const src = readFileSync(
-      join(import.meta.dir, "../../../../src/apps/web-daemon/runtime-factory.ts"),
+      join(import.meta.dir, "../../../../src/apps/web-daemon/runtime-factory/agent-config-base.ts"),
       "utf8",
     )
     // `("interactive"` may be followed by `)` OR `, {envPosture…}` (the env-posture

@@ -18,6 +18,7 @@ import { z } from "zod"
 import { errMessage } from "@/shared"
 import { FsJailError, resolveJailed } from "@/storage"
 import type { Tool, ToolContext, ToolEvent } from "../types"
+import { checkWorkspaceEditJail } from "./workspace-edit-jail"
 
 // ── Duck-typed mirror of `RenameApplyPort` ─────────────────────────────────
 
@@ -161,6 +162,17 @@ export const lspRenameApplyTool = (port: RenameApplyPort): Tool<LspRenameApplyIn
           output: `${parsed.data.path}:${parsed.data.line}:${parsed.data.character}: rename produced no edits (symbol unused)`,
         },
       }
+      return
+    }
+    // FS-JAIL on the SERVER'S OWN EDIT TARGETS (not just the model's anchor).
+    // `port.applyEdit` reaches an `@/lsp` writer that does a bare
+    // `fileURLToPath(doc.uri)` with no containment (that slice cannot import
+    // `@/storage`), so this is the LAST place the escape can be stopped.
+    // All-or-nothing: one out-of-jail target rejects the whole edit — filtering
+    // and applying the remainder would leave a half-renamed, broken source.
+    const jail = checkWorkspaceEditJail(edit, ctx.cwd, "lsp_rename_apply")
+    if (!jail.ok) {
+      yield { type: "result", result: { ok: false, output: jail.message } }
       return
     }
     yield { type: "progress", message: "lsp_rename_apply: applying workspace edit" }

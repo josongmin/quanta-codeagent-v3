@@ -149,6 +149,31 @@ describe("classifyCommandShape — first-token + arg shape", () => {
     expect(classifyCommandShape("security find-generic-password -s svc")).toBe("secret")
   })
 
+  // aug-23 audit — RELATIVE secret paths. `isSecretReaderPathArg` gated on a
+  // `/` or `~/` prefix, so the MOST COMMON shape an agent actually types —
+  // `cat .env` from the repo root — classified `public` and Layer-1's
+  // whole-output substitution never fired. `classifyPath` itself already
+  // answers `secret` for a bare `.env`; only the command-shape gate was
+  // dropping it on the floor.
+  test("relative secret paths are secret (the common shape, not just ~/ and /)", () => {
+    expect(classifyCommandShape("cat .env")).toBe("secret")
+    expect(classifyCommandShape("cat ./.env")).toBe("secret")
+    expect(classifyCommandShape("cat .env.local")).toBe("secret")
+    expect(classifyCommandShape("head -n 5 config/.env")).toBe("secret")
+    expect(classifyCommandShape("cat .ssh/id_rsa")).toBe("secret")
+  })
+
+  // PAIRED CONTROL for the widening above — a relative arg must not turn every
+  // ordinary read into `secret`. Without this the fix could pass by classifying
+  // everything, which would blank out normal tool output.
+  test("relative ORDINARY paths stay public (the widening is bounded)", () => {
+    expect(classifyCommandShape("cat package.json")).toBe("public")
+    expect(classifyCommandShape("cat src/index.ts")).toBe("public")
+    expect(classifyCommandShape("head -n 20 README.md")).toBe("public")
+    expect(classifyCommandShape("cat .gitignore")).toBe("public")
+    expect(classifyCommandShape("cat .envrc")).toBe("public")
+  })
+
   test("empty / unrelated command is public", () => {
     expect(classifyCommandShape("")).toBe("public")
     expect(classifyCommandShape("ls -la")).toBe("public")

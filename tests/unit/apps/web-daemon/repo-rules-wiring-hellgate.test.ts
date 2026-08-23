@@ -17,8 +17,12 @@ import { describe, expect, test } from "bun:test"
 import { readFileSync } from "node:fs"
 import { join } from "node:path"
 
+// PATH NOTE: `buildAgentConfigBase` moved out of `runtime-factory.ts` into the
+// cohesive `runtime-factory/agent-config-base.ts` when the parent crossed the
+// god-MODULE ceiling (pure code motion, re-exported surface unchanged). The pin
+// follows the CODE, not the old filename.
 const SRC = readFileSync(
-  join(import.meta.dir, "../../../../src/apps/web-daemon/runtime-factory.ts"),
+  join(import.meta.dir, "../../../../src/apps/web-daemon/runtime-factory/agent-config-base.ts"),
   "utf8",
 )
 

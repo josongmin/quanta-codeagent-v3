@@ -67,8 +67,11 @@ export const stripAnsi = (s: string): string => s.replace(ANSI_RE, "")
 
 export interface DrivePtyOpts {
   readonly args?: readonly string[]
-  /** Extra env on top of the isolated base (PATH/HOME/TERM + dummy provider). */
+  /** Extra env on top of the isolated base (PATH/TERM + temp HOME + dummy provider). */
   readonly env?: Record<string, string>
+  /** Opt OUT of the temp-HOME isolation. Only for a test that deliberately
+   *  asserts on the developer's real `~/.quanta` — none do today. */
+  readonly useRealHome?: boolean
   /** Working dir (defaults to a fresh tmp). Place fixture files here for `@`. */
   readonly cwd?: string
   readonly cols?: number
@@ -104,11 +107,30 @@ export const drivePtyCli = (opts: DrivePtyOpts = {}): PtyCli => {
   const slaveFd = slave[0] as number
 
   const cwd = opts.cwd ?? mkdtempSync(join(tmpdir(), "e2e-pty-cwd-"))
+  // aug-23 audit — HERMETIC HOME. This used to forward `process.env.HOME`, so
+  // the CLI under test resolved the DEVELOPER's `~/.quanta`: real OAuth
+  // credentials under `auth/`, a real `permission-state.json`, and whatever
+  // config happens to be on that machine. Measured paired control: the suite is
+  // 29/29 green under a scratch HOME and 2-3 red under the real one, with
+  // `/help` timing out because the developer's config changes which slash
+  // commands register. A non-hermetic e2e reports the machine, not the code.
+  //
+  // `HOME` (not `QUANTA_CONFIG_DIR`) is the right lever: `quantaHomeDir()`
+  // honors `QUANTA_CONFIG_DIR`, but the OAuth stores derive from `homedir()`
+  // via their OWN knobs (`QUANTA_PREFS_HOME`, `CODEX_HOME`), so only moving
+  // HOME relocates every default at once. The two knobs are pinned as well so a
+  // future default that reads them cannot escape back to the real home.
+  const home =
+    opts.useRealHome === true
+      ? (process.env.HOME ?? "/tmp")
+      : mkdtempSync(join(tmpdir(), "e2e-pty-home-"))
   const child = Bun.spawn(["bun", CLI_ENTRY, ...(opts.args ?? [])], {
     cwd,
     env: {
       PATH: process.env.PATH ?? "/usr/bin:/bin",
-      HOME: process.env.HOME ?? "/tmp",
+      HOME: home,
+      QUANTA_PREFS_HOME: home,
+      CODEX_HOME: join(home, ".codex"),
       TERM: "xterm-256color",
       QUANTA_PROVIDER: "anthropic",
       ANTHROPIC_API_KEY: "test",

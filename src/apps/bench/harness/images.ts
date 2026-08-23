@@ -32,10 +32,34 @@ export type DockerSpawn = (argv: string[]) => Promise<{
   stderr: string
 }>
 
-/** Default `docker` spawn via Bun.spawn (no shell). 30s internal timeout — a
- *  hung daemon must not wedge the caller. Swallows a spawn throw into a
- *  non-zero result so {@link listSwebenchImages} upholds its never-throw
- *  contract end-to-end. */
+/** A QUERY (`inspect`, `images`, `ps`) answers from local state; 30s means "the
+ *  daemon is wedged". */
+const DOCKER_QUERY_TIMEOUT_MS = 30_000
+
+/**
+ * A TRANSFER (`pull`, `push`) moves gigabytes over the network and cannot be
+ * held to the query budget.
+ *
+ * aug-23, measured: every ProMax image failed the PMX-7 freeze with exit 143
+ * (SIGTERM from this timer), because a multi-GB image pulled under amd64
+ * emulation does not finish in 30s. The 30s was never chosen for transfers — the
+ * docstring says "a hung daemon must not wedge the caller", which is a query
+ * concern — so a large image was structurally impossible to freeze rather than
+ * merely slow. A transfer still needs a ceiling (a stalled pull must not hang a
+ * campaign forever), it just needs a transfer-shaped one.
+ */
+const DOCKER_TRANSFER_TIMEOUT_MS = 20 * 60_000
+
+const dockerTimeoutMsFor = (argv: readonly string[]): number =>
+  argv[0] === "pull" || argv[0] === "push"
+    ? DOCKER_TRANSFER_TIMEOUT_MS
+    : DOCKER_QUERY_TIMEOUT_MS
+
+/** Default `docker` spawn via Bun.spawn (no shell). The timeout is chosen per
+ *  verb ({@link dockerTimeoutMsFor}) — a hung daemon must not wedge the caller,
+ *  and a multi-GB pull must not be killed for being a multi-GB pull. Swallows a
+ *  spawn throw into a non-zero result so {@link listSwebenchImages} upholds its
+ *  never-throw contract end-to-end. */
 export const defaultDockerSpawn: DockerSpawn = async (argv) => {
   try {
     const proc = Bun.spawn(["docker", ...argv], {
@@ -43,7 +67,7 @@ export const defaultDockerSpawn: DockerSpawn = async (argv) => {
       stderr: "pipe",
       env: process.env,
     })
-    const timer = setTimeout(() => proc.kill(), 30000)
+    const timer = setTimeout(() => proc.kill(), dockerTimeoutMsFor(argv))
     try {
       const [stdout, stderr] = await Promise.all([
         new Response(proc.stdout).text(),

@@ -55,7 +55,15 @@ const basename = (p: string): string => {
  *   5. tree matches (`~/.gnupg/**`).
  */
 export const classifyPath = (absolutePath: string, home: string): SensitivityClass => {
-  const p = expandHome(absolutePath, home)
+  // aug-23 audit — ROOT A RELATIVE PATH BEFORE MATCHING. Every tree rule below
+  // is written as `p.includes("/.ssh/")` etc., which silently misses the
+  // relative form an agent actually types (`.ssh/id_rsa`, `.gnupg/secring`).
+  // The basename rules already worked relative; the tree rules did not, so the
+  // two halves of this classifier disagreed on the same file depending only on
+  // how it was spelled. Prefixing "/" makes a relative path match exactly as
+  // its resolved form would — it can only ADD matches, never remove one.
+  const expanded = expandHome(absolutePath, home)
+  const p = expanded.startsWith("/") ? expanded : `/${expanded}`
   const bn = basename(p)
   const e = ext(p)
 
@@ -225,8 +233,21 @@ const FILE_READERS: ReadonlySet<string> = new Set([
  *  structural set so command-shape classification does not widen into fuzzy
  *  `.env` / `.aws` substring matching. */
 const isSecretReaderPathArg = (arg: string): boolean => {
-  if (!(arg.startsWith("/") || arg.startsWith("~/") || arg === "~")) return false
+  // aug-23 audit — RELATIVE paths count too. This gate used to require a `/`
+  // or `~/` prefix, which dropped the single most common shape an agent types:
+  // `cat .env` from the repo root classified `public`, so Layer-1's whole-output
+  // substitution never fired on it (`cat ~/.env` was covered, `cat .env` was
+  // not). `classifyPath` already answers `secret` for a bare `.env`; only this
+  // prefix guard was discarding the answer.
+  //
+  // The widening is BOUNDED by `classifyPath` itself — it matches an explicit
+  // closed set of secret basenames/trees, so `package.json`, `src/index.ts`,
+  // `.gitignore` and `.envrc` stay `public` (pinned by the paired control in
+  // `tests/unit/security/sensitivity-classifier.test.ts`). Only the two
+  // GLOB forms below still need an absolute/`~` anchor, because a bare `.env*`
+  // token is a shell glob rather than a path and must not widen fuzzily.
   if (classifyPath(arg, "~") === "secret") return true
+  if (!(arg.startsWith("/") || arg.startsWith("~/") || arg === "~")) return false
 
   const p = expandHome(arg, "~")
   const bn = basename(p)

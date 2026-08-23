@@ -9,6 +9,7 @@ import {
 } from "@/lsp"
 import { errMessage, logger } from "@/shared"
 import {
+  assertWorkspaceEditJailed,
   lspNavTools as buildLspNavTools,
   isCheapLspNavTool,
   lspCodeActionTool,
@@ -105,7 +106,7 @@ const stopClient = (client: LspClient, label: string): Promise<void> =>
 /** Stateless `CodeActionPort` — opens a fresh `LspClient` per call, uses
  *  it, then closes it. `lsp_code_action` is read-only (enumeration only)
  *  but the adapter also wires `applyEdit` for future apply tools. */
-const lspCodeActionPort = (getCwd: () => string): CodeActionPort => {
+export const lspCodeActionPort = (getCwd: () => string): CodeActionPort => {
   return {
     resolveCodeActions: async (file, line, col, kind, signal) => {
       const spec = specFor(file)
@@ -137,6 +138,14 @@ const lspCodeActionPort = (getCwd: () => string): CodeActionPort => {
     applyEdit: async (edit, signal) => {
       // applyEdit is not used by lsp_code_action (enumeration only) but the
       // port contract requires it. A dedicated apply tool can reuse this port.
+      //
+      // FS-JAIL (aug-23) — same seam as `lsp_rename_apply`: every target URI
+      // here was chosen by the LANGUAGE SERVER, and the `@/lsp` writer applies
+      // it with no containment check. Guard FIRST — before server selection or
+      // any process contact — so an out-of-workspace target can never reach
+      // disk. All-or-nothing (throws `FsJailError`); a partial apply would
+      // leave a half-applied refactor.
+      assertWorkspaceEditJailed(edit, getCwd(), "lsp_code_action")
       if (edit.changes.length === 0) return
       // Pick the first file's spec to open a server for the apply.
       const firstUri = edit.changes[0]?.uri

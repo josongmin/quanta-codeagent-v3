@@ -72,6 +72,18 @@ jobs:
         run: bun run tools/dev/unit-speed-budget.ts .cache/unit-junit.xml
       - name: integration
         run: bun test tests/integration
+      - name: interactive CLI e2e (PTY)
+        # aug-23 audit — this suite was the ONLY coverage of the raw-mode
+        # interactive input layer and ran in NO workflow, so it rotted unseen.
+        # Ground truth for adding it: commit 8a0dadfd5 gated `/goal` behind
+        # QUANTA_OBJECTIVE_TOOLS and left the shipped L3 command printing
+        # "not wired" in the real CLI — the unit hellgates stayed 14/14 green
+        # and only this suite caught it.
+        #
+        # The harness needs a real PTY (FFI openpty); every describe is
+        # `skipIf(!PTY_AVAILABLE)`, so on a runner without one this degrades to
+        # a visible skip rather than a false green.
+        run: bun run e2e:pty
       - name: feature-catalog — validate + diff + ratchet
         # Hard-gates on:
         #   validate     — every evidence file/ADR/test exists
