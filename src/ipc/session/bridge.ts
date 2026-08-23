@@ -732,10 +732,13 @@ const bridgeHandlers = (
 export const createSessionTransportBridge = (
   opts: CreateSessionTransportBridgeOpts,
 ): SessionTransportBridge => {
+  // `bridgePeers` re-exports `opts`, so the later links get it from the spread.
+  // Passing it again would be a duplicate key (TS2783) — same value, but the
+  // compiler is right that one of the two is dead.
   const b0 = bridgePeers(opts)
-  const b1 = bridgeSend({ opts, ...b0 })
-  const b2 = bridgeReject({ opts, ...b0, ...b1 })
-  const b3 = bridgeHandlers({ opts, ...b0, ...b1, ...b2 })
+  const b1 = bridgeSend({ ...b0 })
+  const b2 = bridgeReject({ ...b0, ...b1 })
+  const b3 = bridgeHandlers({ ...b0, ...b1, ...b2 })
   const {
     tailLimit,
     st,
