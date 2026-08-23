@@ -119,6 +119,22 @@ export interface FamilyBootstrapExecInput {
   readonly phase: FamilyBootstrapPhase
   readonly ssh: (cmd: string) => Promise<SpawnResult>
   readonly log: (m: string) => void
+  /**
+   * Work to run WHILE the grader phase's materialized state exists — i.e. the
+   * grade itself. Runs after the grader commands and before the teardown.
+   * Ignored for every other phase, because the window it names exists only here.
+   *
+   * A callback rather than exported `materialize()` / `teardown()` halves that a
+   * caller sequences: this module's rule is that a teardown with its own call
+   * site is a teardown that gets forgotten, which is exactly how the checkout
+   * survived into the next chunk. With the work INSIDE the call there is no code
+   * path that materializes the answer key and does not remove it.
+   *
+   * A throw here is treated exactly like a grader-command failure: the teardown
+   * still runs, and this error wins over a teardown error because it carries the
+   * diagnosis.
+   */
+  readonly whileMaterialized?: () => Promise<void>
 }
 
 /** A well-formed sha256 as `sha256sum`/`shasum -a 256` print it: the digest is
@@ -294,6 +310,12 @@ export const executeFamilyRemoteBootstrap = async (
   let ran = 0
   try {
     ran = await runBootstrapPhase(bootstrap, "grader", input)
+    // THE GRADING WINDOW. The grader commands materialize the answer key; they
+    // do not use it. Whatever does — the pinned evaluator — runs here, inside the
+    // same call, so the teardown below covers it too. A throw is deliberately
+    // NOT distinguished from a grader-command failure: both leave the key on the
+    // box, and both are a reason to tear down rather than to skip it.
+    if (input.whileMaterialized !== undefined) await input.whileMaterialized()
   } catch (err) {
     graderError = err
   }
