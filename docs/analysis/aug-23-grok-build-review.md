@@ -6,6 +6,8 @@
 - 방법: 1차 6축 병렬 리뷰 → 2차 적대 검증 3축 → 에이전트 루프 4축 정밀 추적 → quanta 4축 대조
 
 > 검증 등급 표기: **[직접]** = 내가 소스를 직접 읽어 확인 / **[에이전트]** = 서브에이전트 보고(교차검증 안 된 것) / **[정정]** = 1차 결론이 뒤집힌 항목
+>
+> **실행 정본은 §15다.** §11·§13의 초기 제안과 §14.4의 추가 목록은 조사 이력으로만 보존한다. 구현 티켓, 병렬화, merge 순서, 완료 판정은 §15만 따른다.
 
 ---
 
@@ -328,7 +330,9 @@ Apache §4(b) 고지에 명시:
 
 ---
 
-## 11. 흡수 우선순위
+## 11. 흡수 우선순위 — 중간안(실행 정본 아님)
+
+> 이 표는 추가 감사를 하기 전의 중간 결론이다. `TurnCompletedEvent`만 확장하는 안, 별도 `PhaseKey`/`WaitingReason` 도입, 날짜 마스킹 등은 뒤 조사에서 수정됐다. 최종 합집합은 §15 참조.
 
 | 순위 | 항목 | 근거 | 비용 |
 |---|---|---|---|
@@ -374,7 +378,7 @@ Apache §4(b) 고지에 명시:
 
 **미사용 자산 2건**: `shell.needs_approval`은 `config.stopReasonPolicy` 경유만 가능한데 **할당 0건**(문서의 "reserved, not wired" 확인). `src/permission/review-kind.ts:183`의 `stopCategoryFor`는 `edit.needs_approval` ×7의 **병렬 제2 분류체계**인데 프로덕션 호출자 0.
 
-**최소 수정**: ①`TurnCompletedEvent`에 `stopCategory` 탑재 ②공유 `Record<StopReasonCode,{label,tone}>` + 런타임 드리프트 가드 ③성공 기본값 3곳 수정.
+**[정정] `TurnCompletedEvent`만 늘리면 안 된다.** 커널의 현재 terminal 분류는 `aborted`만 abort, `error`만 failed, 나머지를 completed로 보내므로 `max_turns`·`budget_exhausted`·`refusal`·향후 `no_progress`·`output_limit`가 계속 성공 이벤트가 된다. §15의 T-lane처럼 `TurnStoppedEvent`를 신설하고, approval/input은 terminal이 아니라 pause 이벤트로 분리하며, 모든 surface를 하나의 exhaustive presenter에 연결해야 한다.
 
 ---
 
@@ -458,13 +462,13 @@ Apache §4(b) 고지에 명시:
 **① 캐시 브레이크포인트 5개 초과 — 하드 API 거부, 미테스트**
 `MAX_CACHE_BREAKPOINTS = 4`(`src/agent/prompt-sections.ts:25`)는 **시스템 섹션만** 셈. `cacheConversationPrefix`(`src/llm/anthropic-messages-codec.ts:115-144`)가 메시지 배열 마지막 텍스트 블록에 **무조건 5번째 마커**를 찍고(`:285`), 어디서도 대화 브레이크포인트를 예산에서 빼지 않음(grep 확인). repo규칙+세션ctx+user append가 모두 있는 세션 = 4+1 = 5 → Anthropic 거부. 헬게이트 테스트(`tests/unit/prompt-sections-hellgate.test.ts`)는 **섹션 수만 단언**해서 이 조합이 안 잡힘.
 
-**② 리플레이 해시의 휘발값 2종 — 크로스런 매칭 불가**
-- **날짜 미마스킹**: `Today's date is YYYY-MM-DD.`(`src/agent/prompt-reminders.ts:122-123`)가 `VOLATILE_MASKS`의 ISO 정규식(`canonicalize.ts:49`, `[T ]HH:MM:SS` 요구)에 **안 걸림**. 메시지에 있으므로 전 정책이 해시함 → **어제 카세트가 오늘 1턴에서 미스**
-- **`promptCacheKey` 미마스킹**: `exact` 정책이 해시에 포함(`jsonl-store.ts:104`)하는데 값은 세션id = `crypto.randomUUID()`. `canonicalizeRequest`는 `messages`/`system`만 건드림(`canonicalize.ts:139-150`) → **크로스런 영구 미스**
-- (앞서 지적한 `temperature`·`model`·`maxTokens` 미포함도 유효 — 팬아웃 0.8 후보가 greedy와 동일 해시)
-- 수정 방향: 맨 `\d{4}-\d{2}-\d{2}` 마스크 추가 / `promptCacheKey`를 해시에서 제외하거나 마스킹 / 벤치에서 `TurnContextInput.now` 주입(시임은 `prompt.ts:317-322`에 이미 존재하나 **프로덕션이 안 주입**)
+**② 리플레이 identity가 로컬 전송 메타와 모델 의미를 혼합**
+- 현재 exact 해시는 raw `StreamInput`에 가까워 로컬 message id(합성 UUID 포함), `promptCacheKey`, retention 같은 전송 메타에 민감하다.
+- 반대로 provider/model/effective max output/temperature 등 샘플링 의미 일부는 identity에서 빠질 수 있다.
+- **날짜를 exact replay에서 마스킹하면 안 된다.** 날짜는 모델이 실제로 보는 의미 입력이다. 동일 캠페인의 cross-day 재현이 목적이면 `TurnContextInput.now`를 캠페인 입력으로 고정해야 한다.
+- 수정 방향: provider-visible semantic request 기반 `ReplayIdentityV2`를 만들고 local id/phase/cache transport metadata는 제외, provider/model/effective sampling identity는 포함한다. v1은 명시적 legacy 모드에서만 허용한다.
 
-**③ 카세트에 스크러버 미배선** — `RecordingLlmOpts.scrubber`(`recording-llm.ts:26-32`) DI 훅은 있으나 프로덕션 배선 0 → **원본 프롬프트·툴 출력이 그대로 디스크에**. partial/error 경로는 의도적으로 스크러버 우회(`:164-166`)
+**③ 카세트 confidentiality 경계 미완성** — `RecordingLlmOpts.scrubber`(`recording-llm.ts:26-32`) DI 훅은 있으나 프로덕션 recorder 배선에서 강제되지 않는다. partial 경로도 scrubber가 설정돼 있으면 적용되므로 "partial/error가 무조건 우회"는 오판이었다. 실제 위험은 scrubber 없는 production 조립과, degraded sentinel이 scrubber를 거치지 않은 full request를 저장할 수 있다는 점이다.
 
 **④ 부수 발견**
 - **git status가 프로덕션 프롬프트에 안 들어감** — `TurnContextInput.env`를 `context-assembler.ts:404-431`이 한 번도 안 채움 → env 프로브 경로 사문
@@ -477,31 +481,258 @@ Apache §4(b) 고지에 명시:
 동시성 기본 **1**(`run-args.ts:63-76`), `mapWithConcurrency`가 인덱스로 기록해 "serial과 바이트 동일" 보장(`core.ts:123-146`), 도커 채점 별도 뮤텍스. 프롬프트에 랜덤 없음(randomUUID는 id에만, 합성-user id는 resume 경로서 `<SYN>`으로 마스킹). 시계 읽기는 전부 telemetry/timeout용.
 **단 temperature 미고정**(팬아웃 cand≥1이 0.8), **seed 미지원**.
 
-### 14.3 모드 — **Grok 우세**
+### 14.3 모드 — **[대폭 정정]** 축이 다를 뿐, 구조적 강제는 우리가 더 많음
 
-**읽기전용 강제 층수: Grok 3겹 vs 우리 1겹**
-- Grok: ①툴셋 omission(`explore`/`plan` 프리셋; 소스 자인 "read-only guarantee is enforced by the toolset, not merely by the prompt") ②권한 시스템보다 **앞선** 하드게이트(플랜모드 편집; 주석 "YOLO 빠른경로가 플랜모드를 모르게 일부러 만들었다" + 테스트로 allow-all 무력화 증명) ③커널 샌드박스. 추가로 서브에이전트 스폰시 툴 필터 + **부모와 교집합**(자식이 절대 확장 불가)
-- quanta: 디스패치 런타임 게이트 1개(`admissibility-gate/gates.ts:128-144`). 잘 만듦(양성 허용집합·fail-closed)이나 **읽기전용 모드에서도 변경 툴 카탈로그를 모델에 전량 노출** → 위반마다 툴 호출+턴 소모
+> ⚠️ 1차 판정("Grok 3겹 vs 우리 1겹", "우리에겐 툴셋 프리셋 개념 자체가 없음")은 **틀렸음**. 심층 감사 결과 우리 모드 축은 **14개**이고, 모델이 보는 툴 목록에서 실제로 제거하는 경로가 **5개** 존재.
 
-**샘플링을 바꾸는 모드**: Grok만. `AgentDefinition.effort`·역할/페르소나 `reasoning_effort`가 실제 샘플링 설정으로 유입. 우리 `EffortLevel`은 모드와 **미결합 독립축**
+**우리의 툴 제거(STRUCTURAL — 모델이 아예 못 봄) 5경로**
+| 경로 | 구현 |
+|---|---|
+| 스킬 스코프 `allowed-tools` | `filterSpecsByScope`(`skill-gate.ts:51-58`) → `stream-consume.ts:434`. L2 디스패치 게이트가 **같은 술어**라 visible == dispatchable |
+| 서브에이전트 `toolFilter`/`task_kind`/네임드 `tools:` | 교집합으로 **새 ToolRegistry 생성**(`subagent-runner-child-config.ts:22-42,142`). 네임드는 NARROW-ONLY(확장 불가) |
+| SDK `read-only` 프로필 | 레지스트리 필터(`sdk/embed.ts:114`) |
+| 사이드 대화 | 허용목록 밖이면 **throw**(`side-conversation/run.ts:403-412`), 조용한 드롭 없음 |
+| 툴 서피스 매니페스트 | 서피스별 등록 자체를 결정(`manifest.ts:123-151`). `terminal` 서피스는 BASE-free라 **구조적으로 repo 편집 도달 불가** |
 
-**🔴 우리 미배선 모드 레지스트리 2개** (성격이 나쁨 — 감사자에겐 강제로 읽히는데 아무것도 안 막음)
-- `src/agent/subagent-typed/mode-registry.ts` — `allowedToolKinds` **src 소비자 0** (라우터 주석엔 "호출자가 MUST honour"라 적힘). `maxTurns`/`maxTokens`만 사용됨
-- `src/subagent/role.ts` — `roleAllowsKind`/`getToolPolicyForRole` **src 호출자 0, 테스트만**
+**하드 런타임 게이트(툴은 보이되 거부)**: AgentMode(`gates.ts:128-146`, 스테이지1, HITL보다 앞) / CollaborationMode 플랜 펜스 / PermissionMode(`policy.ts:263-300`) / 툴 프로필 / 승인 사다리 / OS 샌드박스(백엔드 4종) / `bash mode:"read"`(호출별 샌드박스 + 검증명령 하드거부 `bash/index.ts:186-208`)
 
-**서로 없는 것**: Grok엔 `weave`/`interrupt` 턴중 주입 모드 없음(큐만), 벤치 knob 프리셋 계층 없음. 우리에겐 **툴셋 프리셋 개념 자체가 없음**(어떤 모드도 툴을 제거하지 않음), `Devbox`/`Strict` 커널 샌드박스 티어 없음, `DontAsk` 없음, **배선된** 서브에이전트 능력필터+부모교집합 없음
+**정확한 차이**: 툴 제거를 **Grok은 모드 축**에, **우리는 스킬·서브에이전트·서피스·SDK 축**에 걸어둠. 그래서 우리 `AgentMode`(plan/review/audit/architect)만 카탈로그 전량 노출 + 디스패치 거부 → 위반마다 툴 호출+턴 소모. **기계는 이미 보유**(스킬 스코프가 정확히 그 일을 함)이므로 AgentMode에 연결만 하면 됨.
+
+**✅ 우리가 오히려 모범인 부분**
+- 플랜 펜스 `MUTATING_TOOL_TABLE`이 **모든 툴에 명시적 항목**(~180행, `mode.ts:162-534`), 미분류 이름은 `isMutatingTool`이 **throw**(`:742-745`) — 조용한 허용 없음. **이것이 곧 §13에서 StopCategory에 적용하라고 한 exhaustive 분류 + 드리프트 가드 패턴** (우리는 방법을 이미 알고 있고 멈춤 사유에만 안 씀). 드리프트 가드 + 헬게이트 e2e 보유
+- 플랜 이탈이 self-service 아님 — 3방향 운영자 결정(`approved|rejected|changes_requested`), `changes_requested`는 펜스 유지
+- `bypass`에서도 HARD_DENY 선행(`policy.ts:275`), hand-off-required 층 해제 불가(`admissibility-gate.ts:113-118`), 미분류 변경툴은 `always-confirm`로 fail-closed(`policy.ts:254-256`) → Grok의 `--yolo`보다 강함
+- 서브에이전트 모드 clamp: repo 제어 자식 `mode:`가 읽기전용 부모를 **완화 불가**(`subagent-runner-child-config.ts:91-98`)
+
+**🔴 새로 발견된 실제 결함 — shift+tab `plan` 단이 장식**
+`MODE_CYCLE`(`mode-cycle.ts:39-72`) 4단 중 턴마다 권위 있게 투영되는 건 `permissionMode`뿐(`session-turn-driver.ts:65`). `plan` 단의 `agentMode`는 **상태 알약에만** 소비됨(`core-state.ts:41`, `prompt-ux.ts:87,95`). "파일을 절대 건드리지 않음"이라 표시하면서 `AgentConfig.mode`/`planMode`를 세팅하는 경로 없음 — `bypass`/`acceptEdits`는 진짜인데 `plan`만 cosmetic. `QUANTA_MODE_CYCLE=1` 기본 OFF라 범위는 제한적이나 **UI가 거짓말하는 클래스**(=우리가 Grok 관측성 실패를 비판한 바로 그것).
+
+**미배선 재판정**
+- `src/subagent/role.ts` — `roleAllowsKind`/`getToolPolicyForRole` **소비자 0, INERT 확정**. 모듈 헤더가 자인("wired by ./agent-tool.ts (in-flight on main)")
+- `src/agent/subagent-typed/mode-registry.ts` — 1차 판정("아무것도 안 막음")은 **과했음**. 강제가 주입 러너에게 계약 위임(`delegation-router.ts:37`), `maxTurns`/`maxTokens`는 구조적 강제(`budget-overflow`), 기능 전체가 `config.delegation?.delegator` 기본 OFF. "미배선"보다 "계약 위임 + 기본 OFF"가 정확
+
+**유지보수 위험**: `RunMode`의 `AgentMode`와 프롬프트 `AgentMode`가 **동명이형**(소스 주석에 명시, `agent-args.ts:35-37`)
+
+**샘플링을 바꾸는 모드**: Grok은 `AgentDefinition.effort`·페르소나 `reasoning_effort`가 샘플링 설정으로 유입. 우리 `EffortLevel`도 **구조적으로 wire 파라미터를 바꿈**(`skill-gate.ts:181-200`, thinking budget) — 단 **모드와 미결합 독립축**이고 스킬 frontmatter·`session_config` 툴·`/effort`로만 움직임
+
+**서로 없는 것**: Grok엔 `weave`/`interrupt` 턴중 주입 없음(큐만), 벤치 knob 프리셋 계층 없음, 사이드 대화 없음. 우리에겐 **모드↔툴셋 결합**이 없음(기계는 있으나 AgentMode에 미연결), `Devbox`/`Strict` 커널 티어 없음, `DontAsk` 없음
 
 ### 14.4 §14에서 추가된 흡수 항목
 
 | 순위 | 항목 | 근거 |
 |---|---|---|
-| 추가-A | 읽기전용 모드가 디스패치 게이트 **+ 툴 카탈로그 필터** 병행 | 못 쓸 메뉴 제공은 턴 낭비, Grok의 벨트+멜빵 |
-| 추가-B | 미배선 레지스트리 2개 **배선 또는 삭제** | 강제하는 척하는 죽은 코드 = 감사 오도 |
+| 추가-A | **AgentMode를 기존 툴 제거 기계에 연결** — 스킬 스코프의 `filterSpecsByScope`를 plan/review/audit/architect에도 적용 | 기계는 이미 있음(신규 구축 아님). 못 쓸 메뉴 제공은 턴+토큰 낭비 |
+| **추가-A2** | **shift+tab `plan` 단이 `AgentConfig.mode`를 실제로 세팅하게** | UI가 "파일 안 건드림"이라 표시하고 실제로는 안 막음(§14.3) |
+| 추가-B | `src/subagent/role.ts` **삭제 또는 배선**(INERT 확정) | 강제로 읽히는데 소비자 0 = 감사 오도 |
+| 참고-B2 | `subagent-typed/mode-registry.ts`는 "계약 위임 + 기본 OFF" — 삭제 대상 아님 | 1차 판정 정정 |
+| 참고-B3 | `RunMode.AgentMode` ↔ 프롬프트 `AgentMode` 동명이형 리네임 | 유지보수 위험 |
 | **추가-0** | **캐시 브레이크포인트 5개 초과 수정** — 대화 브레이크포인트를 예산에 편입 + 그 조합의 헬게이트 테스트 | **하드 API 거부**, 현재 미테스트 (§14.2.1①) |
-| **추가-C** | 카세트 해시 정합 — 날짜 마스크 추가 + `promptCacheKey` 해시 제외/마스킹 + `temperature`·`model`·`maxTokens` 포함 | 크로스런/크로스데이 리플레이 영구 미스 (§14.2.1②) |
-| 추가-D | 카세트 스크러버 프로덕션 배선 | 원본 프롬프트·툴출력 평문 저장 (§14.2.1③) |
+| **추가-C** | `ReplayIdentityV2` — provider-visible semantic request를 해시하고 local id/cache transport metadata 제외, sampling identity 포함. 날짜는 마스킹하지 않고 캠페인 `now`를 고정 | exact replay의 의미 보존 + cross-run 안정성 (§14.2.1②) |
+| 추가-D | 카세트 스크러버 production 강제 + request 없는 `RecordingGap` | 원본 프롬프트·툴출력 및 degraded sentinel 누출 방지 (§14.2.1③) |
 | 추가-E | `TurnContextInput.env` 배선 또는 삭제 | git status가 프롬프트에 안 들어가는 사문 경로 |
 | 참고 | 프롬프트 크기 3배(5.3k vs 1.75k)의 효용 미측정 | 측정 후 감량 여지 |
+
+---
+
+## 15. 최종 실행 정본 — 모듈별 병렬 lane
+
+### 15.0 기준과 현재 상태
+
+- 이 절은 §11·§13·§14.4의 **교체본**이다. 새 발견은 해당 표에 덧붙이지 말고 이 절의 lane/보류표를 갱신한다.
+- 문서 편집 중에도 `HEAD`가 `4c1ce01719ef24e669de1ddeb370544304d92e7c`에서 `27e7bc6cd1b8cccac0cf32873ba043d91575db08`로 이동했고 dirty 목록도 바뀌었다. 따라서 이 문서의 SHA는 실행 snapshot이 아니다. 구현 시작 시 한 coordinator가 `git rev-parse HEAD`와 `git status --short --branch`를 다시 기록하고 그 뒤 lane을 분기한다.
+- 마지막 관측에서 `src/agent/stop-category.ts`, `src/host/runtime/internal/context-binding/approval-support.ts`, `tests/unit/agent/stop-category-producer-completeness-hellgate.test.ts`가 dirty였다. **T-lane 선점 변경 후보**이므로 W0에서 diff의 소유자·의도를 고정하기 전에는 잃거나 다른 lane에서 동시에 편집하지 않는다.
+- 병렬화 단위는 아이디어가 아니라 **write set**이다. 같은 front door(`stream-consume.ts`, kernel terminal reducer/event, CLI session driver)를 건드리는 항목은 한 lane에 합치거나 integration wave에서 직렬화한다.
+- 각 lane은 독립 worktree/branch를 쓴다. 권장 branch는 `codex/aug23-grok-<lane>`이다. 공유 worktree의 dirty overlay는 구현 근거나 테스트 receipt로 사용하지 않는다.
+
+### 15.1 전체 DAG
+
+```text
+W0  snapshot + dirty-owner freeze + baseline RED
+ |
+ +--> Wave 1 (최대 4병렬, owner-disjoint)
+ |      C cache-budget
+ |      R replay-recording
+ |      T terminal-control-loop
+ |      A activity-spine
+ |
+ +--> Wave 2 (Wave 1 merge 뒤 최대 4병렬)
+ |      M mode-tool-projection
+ |      S synthetic-provenance
+ |      P plan-resume
+ |      E env-config-consumer-audit
+ |
+ +--> Wave 3 (직렬 integration)
+        I1 protocol generation + CLI/web/VS Code/headless receipts
+        I2 full regression + feature catalog + exact-SHA closeout
+```
+
+Wave 1의 네 lane도 아래 exclusive write set을 지킬 때만 병렬이다. T는 CLI/web/VS Code 파일을 직접 만지지 않고 terminal contract까지만 만든다. A의 CLI 소비자 연결, shared presenter 생성, T의 surface 연결은 Wave 3 integration owner가 직렬로 수행한다.
+
+### 15.2 W0 — 무조건 먼저: 변경 격리와 RED 고정
+
+| 항목 | 실행 계약 |
+|---|---|
+| snapshot | source SHA, branch/upstream, dirty/untracked 목록, runtime profile, Bun 버전을 receipt에 저장 |
+| dirty 분류 | 각 변경을 `KEEP/current-lane`, `UNRELATED/user-owned`, `DROP`으로만 분류. 추정으로 되돌리거나 합치지 않음 |
+| owner lock | 아래 lane별 exclusive write set을 선언. 겹치면 worker를 더 띄우지 말고 merge wave를 조정 |
+| RED | 실제 shipped front door에서 실패하는 최소 테스트를 먼저 작성. 소스 문자열 존재 테스트만으로 시작 금지 |
+| anti-vacuum | production call/use를 요구하고 known-item floor를 둠. guard mutation/injection으로 정확히 RED가 되는지 증명 |
+| stop | baseline 자체가 비결정적이거나 dirty overlay 없이는 재현되지 않으면 구현 중단 후 원인부터 분리 |
+
+### 15.3 Wave 1 — 독립 owner 4병렬
+
+#### C — Cache breakpoint hard budget (P0)
+
+- **목표**: 최종 Anthropic wire payload의 cache breakpoint가 어떤 조합에서도 4개를 넘지 않게 한다.
+- **authority/write set**: `src/llm/anthropic-messages-codec.ts`, 신규 `src/llm/cache-breakpoint-budget.ts`, `src/agent/prompt-sections.ts`, cache 관련 unit/hellgate. 다른 lane은 이 파일을 쓰지 않는다.
+- **구현**:
+  1. system section과 conversation prefix가 공유하는 `CacheBreakpointBudget`을 최종-wire owner에 둔다.
+  2. 1차 정책은 기존 system marker를 보존하고, 남은 예산이 없으면 conversation marker를 생략한다.
+  3. codec 직전 실제 wire count를 다시 세어 `<= 4`; 초과는 fail-fast한다.
+  4. 효율 최적화는 별도 P1 측정으로 분리한다. `4+0`과 `3+1` hit/token/cost를 비교하기 전 정책을 바꾸지 않는다.
+- **RED/negative**: base+repo+session+user-append+conversation 조합이 현재 5개로 RED; 각 system section 하나를 제거한 조합과 non-Anthropic adapter는 GREEN이어야 한다.
+- **완료**: mock 객체가 아니라 adapter가 실제 전송할 payload receipt에서 marker `<=4`, 기존 TTL/section ordering 불변, 관련 unit+adapter contract 통과.
+
+#### R — Replay identity + recording confidentiality (P0)
+
+- **목표**: 동일한 모델 의미 요청은 안정적으로 재생하고, 다른 샘플링 요청은 충돌하지 않으며, 카세트가 비밀을 평문 보존하지 않게 한다.
+- **authority/write set**: `src/llm/replay/**`, `src/llm/with-recording-lane.ts`, replay/recording tests. bench 조립 변경은 이 lane만 소유한다.
+- **구현**:
+  1. `ReplayIdentityV2`는 provider-visible messages/system/tools/toolChoice/thinking과 provider/model/effective max output/temperature 등 sampling identity를 canonicalize한다.
+  2. local message id, phase, `promptCacheKey`, retention 등 cache/transport metadata는 identity에서 제외한다.
+  3. 날짜는 마스킹하지 않는다. cross-day 캠페인은 `TurnContextInput.now`를 campaign manifest에서 고정한다.
+  4. key에 version을 포함하고, v1 fallback은 명시적 legacy 옵션에서만 허용한다. silent dual lookup 금지.
+  5. production recorder는 scrubber 필수. append 불가 시 verified benchmark는 fail-closed한다.
+  6. degraded 상태는 full request/events를 재기록하지 않는 `RecordingGap`만 남긴다. interactive diagnostic만 safe gap + warning을 허용한다.
+- **RED/negative**: UUID/cache key만 다른 요청은 같은 v2 key, model/temperature/max output 하나가 다른 요청은 다른 key; secret fixture는 정상/partial/error/gap 어느 record에도 없어야 한다.
+- **완료**: replay hit/miss reason과 key version이 receipt에 남고, v1 accidental reuse 및 raw-secret injection test가 RED.
+
+#### T — Terminal truth + structured failure + stationarity (P0)
+
+- **목표**: 실패·중단·정체·출력잘림을 정상 완료로 접는 모든 경로를 하나의 terminal authority에서 제거한다.
+- **authority/write set**: `src/agent/stop-category.ts`, `src/agent/loop/{types,stream-consume,recovery-executor,stop-conditions,turn-loop}.ts`, `src/agent/dispatch-dedup.ts`, `src/agent/recovery.ts`, `src/kernel/session/{scheduler-turn-terminals,reducer}.ts`, `src/protocol/session/events.ts`, terminal/protocol tests. 현재 dirty T 파일도 이 lane만 소유한다.
+- **구현 순서**:
+  1. `StopCategory.reasonCode: string`을 닫힌 `StopReasonCode`로 바꾸고 producer table을 exhaustive하게 만든다.
+  2. provider의 `LLMErrorKind`를 `StreamConsumeResult -> RecoveryAction -> TurnResult`까지 구조적으로 보존한다. regex는 legacy fallback으로만 남기고 fallback telemetry를 센다.
+  3. terminal event를 `completed | stopped | failed | aborted`로 분리한다. `max_turns`, `budget_exhausted`, `refusal`, `no_progress`, `model.output_truncated`는 `TurnStoppedEvent`; approval/input은 pause event다.
+  4. `max_tokens` continuation 소진은 visible marker만 붙이고 끝내지 말고 `model.output_truncated` non-success로 귀결한다.
+  5. `DedupGate` verdict를 `{fingerprint, regulation, count}`로 만들고, 첫 block은 steer, sampling round를 넘어 동일 blocked-equivalent이며 실질 progress가 없으면 `no_progress.stationarity`로 종료한다. reset은 성공한 distinct observation 또는 실제 mutation에서만 한다.
+  6. `awaitingApprovalCategory()`가 모든 승인을 `shell.needs_approval`로 오분류하지 않게 한다. 공통 `approval.required` 또는 실제 `ToolAction` 기반 code를 쓴다.
+- **RED/negative**: max turns, budget, refusal, empty exhausted, malformed tool use, output truncation, stationarity가 `turn.completed`로 가면 RED; user abort와 provider failure가 stopped로 섞여도 RED; approval 대기가 terminal이면 RED.
+- **완료**: terminal classifier exhaustive, producer completeness + red-on-mutation, protocol codec/generator 통과. surface 렌더 receipt는 Wave 3에서 닫는다.
+
+#### A — Existing activity spine에 turn projection (P1)
+
+- **목표**: 새 상태 저장소 없이 턴 전체/현재 작업의 이중 시계와 실제 대기/정체 이유를 기존 activity spine에서 노출한다.
+- **authority/write set**: `src/activity/**`, turn activity producer 신규 파일, activity tests. CLI renderer/front door는 Wave 3 전까지 수정하지 않는다.
+- **구현**:
+  1. 기존 root/child `startedAt`을 turn elapsed/current operation elapsed로 투영한다.
+  2. stable id는 `toolCallId`, request/task id를 사용한다. 설명 문자열 변경으로 시계를 재시작하지 않는다.
+  3. 새 `PhaseKey` store와 별도 `WaitingReason` enum은 만들지 않는다. 기존 `StuckReason`을 exhaustive하게 필요한 만큼만 확장한다.
+  4. 완료 뒤 살아 있는 task/monitor는 idle watcher child로 남긴다.
+- **RED/negative**: 같은 작업의 label만 바꾸면 child 시작시각 불변; 실제 tool/request id 변경 시에만 재시작; 완료 후 monitor가 있으면 activity가 사라지면 RED.
+- **완료**: activity projection unit + fake clock 통과, 구독자가 상태를 재구성하지 않고 spine snapshot만으로 동일 렌더 가능.
+
+### 15.4 Wave 2 — Wave 1 merge 뒤 4병렬
+
+#### M — Live AgentMode + visible tool projection (P1)
+
+- **목표**: Shift+Tab plan 표시를 실제 `AgentConfig.mode`에 연결하고, 모델이 보는 툴과 dispatch 가능한 툴을 동일 authority로 만든다.
+- **authority/write set**: `src/agent/mode.ts`, `src/agent/loop/{skill-gate,skill-scope-view,stream-consume}.ts`, 신규 generic tool projection 모듈, `src/apps/cli/mode-cycle.ts`, CLI session driver와 관련 tests.
+- **구현**:
+  1. skill 전용 `filterSpecsByScope`를 mode authority로 재사용하지 말고 generic final-wire projection을 추출한다.
+  2. visible set은 `registered ∩ surface/profile ∩ skill ∩ agent mode`; dispatch gate도 같은 predicate/manifest 결과를 사용한다.
+  3. 기존 `isMutatingMode`/`isMutatingTool`을 변경 가능성 SSOT로 유지한다. 미분류 tool은 fail-closed한다.
+  4. Shift+Tab `plan`이 매 턴 실제 mode를 세팅하고 상태 pill은 그 effective mode를 읽는다.
+- **RED/negative**: plan UI인데 mutating tool이 visible하거나 dispatch되면 RED; normal/bypass에서 허용 tool이 사라지면 RED; unknown tool이 보이거나 허용되면 RED.
+- **완료**: visibility-dispatch parity, mode cycle PTY, bypass/HARD_DENY negative control 통과. `src/subagent/role.ts`는 실제 owner가 없으면 별도 삭제 commit으로 처리한다.
+
+#### S — Synthetic message provenance (P1)
+
+- **목표**: message id를 provenance로 오용하지 않고, persisted synthetic user message를 저장/포크/되감기/압축 후에도 식별한다.
+- **authority/write set**: `src/agent/synthetic-user.ts`, message persistence/fork/rewind/compaction adapters, provenance tests. T/M lane 파일이 필요하면 직접 수정하지 않고 integration patch로 넘긴다.
+- **구현**:
+  1. 부록 A의 50개 혼합 채널을 그대로 producer 수로 세지 않는다. persisted user message, transient prompt block, tool result, assistant rewrite, UI observation으로 machine census한다.
+  2. message id는 identity만 담당한다. local-only metadata에 닫힌 `syntheticReason`을 둔다.
+  3. save/load/fork/rewind/compaction에서 metadata를 보존하고 provider adapter 직전에만 제거한다.
+  4. legacy `<SYN>`/id-prefix는 load migration에서만 해석하고 새 write에는 사용하지 않는다.
+- **RED/negative**: synthetic message가 round-trip 후 human으로 바뀌거나 metadata가 wire에 노출되면 RED; 실제 human message가 synthetic으로 분류되어도 RED.
+- **완료**: producer census receipt, migration/round-trip/adapter-strip E2E, boundary/compaction consumer가 metadata authority를 사용.
+
+#### P — Existing PlanStore restart/resume closure (P1, 제품 요구 확인 후 BUILD)
+
+- **목표**: 별도 `plan.md` SSOT를 만들지 않고 기존 typed `PlanStore`/`planSnapshotStore`로 승인 대기 상태를 재시작 후 복구한다.
+- **authority/write set**: `src/agent/plan/**`, `src/agent/plan-exit-*.ts`, `src/apps/cli/repl/factories/plan-store.ts`, kernel/session persistence adapter와 plan tests.
+- **구현**: plan snapshot과 pending approval identity를 동일 session checkpoint에 원자적으로 저장하고, reopen 시 승인 요청을 한 번만 재발행한다. snapshot만 있고 approval identity가 없으면 fail-closed paused로 복구한다.
+- **RED/negative**: kill 직전/직후, torn final write, 중복 reopen, stale plan version을 주입한다. 중복 승인·자동 실행·plan 유실은 RED.
+- **완료**: `start -> plan approval pending -> kill -9 -> reopen -> approve/reject` 실제 프로세스 E2E. restart-resume가 제품 요구가 아니면 구현하지 않고 PARK 근거를 남긴다.
+
+#### E — Existing trust/config authority와 env dead-wire audit (P2)
+
+- **목표**: 새 trust/config subsystem을 만들지 않고 기존 authority를 모든 실행형 consumer가 사용하게 하며, 죽은 env/repo-map knob는 배선 또는 삭제한다.
+- **authority/write set**: `src/config/{merge,trust-store}.ts`, `src/agent/env-context.ts`, context assembler/bootstrap 소비자, 관련 trust/env tests.
+- **구현**:
+  1. hooks, MCP, endpoint, credential helper, plugin/app, LSP executable config가 기존 workspace trust 결정을 우회하는지 consumer census한다.
+  2. 우회 consumer만 기존 authority에 연결한다. 별도 trust store/overlay 계층은 금지한다.
+  3. `TurnContextInput.env`, `probeTurnEnv`, `probeRepoMap`, `AgentConfig.repoMap`은 한 `TurnEnvironmentProvider` owner로 연결하거나 knob/docs/types를 삭제한다.
+  4. 기본 경로에 매 턴 `git status` subprocess를 추가하지 않는다. TTL/event invalidation 또는 session snapshot 정책을 명시한다.
+- **RED/negative**: untrusted workspace에서 각 실행 consumer를 하나씩 주입해 fail-closed 확인; env knob ON인데 wire prompt 변화가 없거나 OFF인데 subprocess가 실행되면 RED.
+- **완료**: consumer inventory와 negative receipt, dead knob 0. authority 신규 복제 0.
+
+### 15.5 Wave 3 — 공유 front door 직렬 integration
+
+Wave 3는 병렬 금지다. 앞 lane들이 일부러 건드리지 않은 공유 surface를 한 owner가 현재 merged SHA에서 연결한다.
+
+1. **Protocol/generator**: `TurnStoppedEvent`와 pause/failed/aborted를 session protocol, codec, generated clients에 반영하고 drift 0을 확인한다.
+2. **Terminal presenter**: `Record<StopReasonCode,{label,tone,exitClass}>` 하나를 만들고 CLI, web, VS Code, headless가 이를 소비한다. 각 surface의 unknown/default-to-success 분기를 제거한다.
+3. **Activity consumer**: CLI spinner/status가 activity spine snapshot을 소비하고 별도 phase/reason 재구성을 하지 않게 한다.
+4. **Shared-loop patches**: S/M/P lane이 제출한 integration patch를 `stream-consume.ts`, session lifecycle/driver에 하나씩 적용하고 매 적용 후 focused tests를 돌린다.
+5. **Real front-door matrix**:
+
+| 시나리오 | CLI | web | VS Code | headless/protocol |
+|---|---:|---:|---:|---:|
+| completed.normal | 성공 표시 | 성공 표시 | completed | exit 0 + completed event |
+| max_turns/budget/refusal | stopped + 정확한 code | stopped | stopped | non-success + stopped event |
+| provider failure | failed | failed | failed | error exit + failed event |
+| user abort | aborted | aborted | aborted | signal/user-abort event |
+| approval/input wait | paused, 재개 가능 | paused | paused | pause event, terminal 아님 |
+| stationarity/output truncation | stopped + 정확한 code | stopped | stopped | non-success + stopped event |
+
+### 15.6 ALREADY / DROP / PARK — 다시 만들지 말 것
+
+| 판정 | 항목 | 처리 |
+|---|---|---|
+| ALREADY | workspace trust store, config overlay merge | consumer coverage만 감사. 새 subsystem 금지 |
+| ALREADY | kernel session JSONL torn-final-line repair + single-writer lock | global JSONL abstraction 금지. retry 의미가 필요한 writer에만 committed/not-committed 계약 |
+| ALREADY | `too_many_failed_attempts` decorator/routing/tests | 신규 decorator 티켓 삭제; T-lane structured provenance와 연결 여부만 확인 |
+| ALREADY | `.scratch-prompt` 제거 | 재작업 금지 |
+| ALREADY | typed `PlanStore` + optional snapshot port | Grok식 `plan.md` SSOT 복제 금지 |
+| DROP | 새 `PhaseKey` store / 별도 `WaitingReason` enum | 기존 activity spine/`StuckReason` 사용 |
+| DROP | 날짜 regex masking을 exact replay 해법으로 사용 | campaign `now` 고정 + semantic identity 사용 |
+| PARK | 파일경로별 write lock | 현재 barrier 방식의 실측 병목/안전성 손실 없이는 복잡도 불필요 |
+| PARK | server doom signal, PreToolUse target rewrite | provider/hook authority와 threat model을 먼저 확정 |
+| PARK | 조기하차 regex를 control-flow로 사용 | telemetry label로만 실험; 종료 authority로 승격 금지 |
+| PARK | prompt tone/크기 감량, hashline edit, MCP indirect exposure | ablation/비용 자료 후 결정 |
+| PARK | global recovery cap | 실패 종류별 budget과 terminal truth가 먼저. 임의 전역 상한 금지 |
+| DROP/PARK | `src/subagent/role.ts` | 소비자 owner가 없으면 삭제; 미래 배선을 이유로 강제 연결하지 않음 |
+
+### 15.7 각 lane 공통 완료 계약
+
+다음 항목이 하나라도 없으면 branch는 merge-ready가 아니다.
+
+- start SHA / result SHA / branch / clean-or-dirty 상태
+- exclusive write set과 실제 `git diff --name-only` 일치
+- authoritative RED signature와 fix 후 GREEN
+- paired negative control
+- guard의 red-on-injection 또는 red-on-mutation 증명
+- owner-local tests + `bun run typecheck`
+- 변경 범위에 따른 `bun run lint:debt`, god-code ratchet
+- public/front-door receipt. helper unit test만으로 완료 금지
+- gate/default-OFF 변경이면 OFF byte/parity receipt
+- 기능 maturity/evidence가 바뀌면 해당 feature YAML 수정 후 `bun fc validate && bun fc build`; 생성 MD 직접 편집 금지
+- `git diff --check`, protocol generator drift 0, 최종 exact SHA와 잔여 dirty 목록
+
+전체 closeout은 위 조건에 더해 full unit/integration/contract 범위, real CLI PTY 또는 실제 provider wire receipt, 모든 surface terminal matrix를 요구한다. 기존의 targeted 90-test green과 typecheck green은 조사 시점 관측일 뿐 이 실행계획의 완료 증거가 아니다.
 
 ---
 

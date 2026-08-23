@@ -38,6 +38,8 @@
  *                                failure). NOT wired by default; reserved
  *                                for the admissibility-gate seam.
  */
+import type { StopReason } from "@/agent/types/agent-outcome"
+
 export type StopCategoryKind =
   | "completed"
   | "max_turns"
@@ -320,4 +322,73 @@ export const refusalCategory = (): StopCategory => ({
   kind: "refusal",
   reasonCode: STOP_REASON_CODE.MODEL_REFUSAL,
   hint: "Model declined to continue.",
+})
+
+/* ------------------------------------------------------------------------- *
+ * StopReason ⇄ StopCategoryKind completeness (aug-23 §13 slice 1a)
+ *
+ * The audit in `docs/analysis/aug-23-grok-build-review.md` §13 found a producer
+ * that emits a terminal outcome with NO category (`approvalPlaceholderOutcome`).
+ * A surface that cannot see a category falls back to success copy — the exact
+ * competitor bug we are avoiding. This table makes the coverage TYPED: adding a
+ * `StopReason` member fails compilation here, and the runtime guard catches a
+ * stale or extra key at module load (precedent: `promax/classify.ts`).
+ * ------------------------------------------------------------------------- */
+
+/** Coarse bucket for every legacy {@link StopReason}. Exhaustive by type. */
+export const STOP_CATEGORY_KIND_BY_STOP_REASON: Record<StopReason, StopCategoryKind> = {
+  completed: "completed",
+  max_turns: "max_turns",
+  aborted: "interrupted",
+  error: "failed",
+  budget_exhausted: "budget",
+  refusal: "refusal",
+  /* PAUSED pending a human decision — deliberately NOT `completed`/`failed`:
+     the run is resumable, and a surface must render "waiting on you", not a
+     success or a hard error. */
+  awaiting_approval: "needs_user_approval",
+}
+
+/** Every `StopReason`, for the runtime guard. Kept beside the table so the two
+ *  drift together or not at all. */
+const ALL_STOP_REASONS_RUNTIME: readonly StopReason[] = [
+  "completed",
+  "max_turns",
+  "aborted",
+  "error",
+  "budget_exhausted",
+  "refusal",
+  "awaiting_approval",
+]
+
+/**
+ * Runtime drift guard — throws when the mapping table and the union disagree.
+ * Called at module load (below) so a mismatch fails fast rather than silently
+ * degrading a surface to success copy. Args are injectable ONLY so the hellgate
+ * can prove the guard actually fires (red-on-injection).
+ */
+export const assertStopReasonTablesInSync = (
+  table: Record<string, StopCategoryKind> = STOP_CATEGORY_KIND_BY_STOP_REASON,
+  reasons: readonly StopReason[] = ALL_STOP_REASONS_RUNTIME,
+): void => {
+  const keys = new Set(Object.keys(table))
+  const missing = reasons.filter((r) => !keys.has(r))
+  if (missing.length > 0) {
+    throw new Error(`STOP_CATEGORY_KIND_BY_STOP_REASON is missing: ${missing.join(", ")}`)
+  }
+  const known = new Set<string>(reasons)
+  const extra = [...keys].filter((k) => !known.has(k))
+  if (extra.length > 0) {
+    throw new Error(`STOP_CATEGORY_KIND_BY_STOP_REASON has unknown keys: ${extra.join(", ")}`)
+  }
+}
+
+assertStopReasonTablesInSync()
+
+/** Stop category for the paused-awaiting-approval path (ALBB-18). The turn is
+ *  RESUMABLE — a surface should render "waiting on you", never success. */
+export const awaitingApprovalCategory = (): StopCategory => ({
+  kind: STOP_CATEGORY_KIND_BY_STOP_REASON.awaiting_approval,
+  reasonCode: STOP_REASON_CODE.SHELL_NEEDS_APPROVAL,
+  hint: "Paused — waiting for your approval decision.",
 })

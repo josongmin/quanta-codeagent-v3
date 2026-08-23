@@ -1,5 +1,6 @@
 import type { AgentOutcome } from "@/agent"
 import type { ConfirmDecision } from "@/agent/confirm-decision"
+import { awaitingApprovalCategory } from "@/agent/stop-category"
 import type { Message } from "@/llm"
 import { inferReviewKind, reasonCodeFor, type ToolAction } from "@/permission"
 import type { PendingApprovalView } from "@/protocol/session"
@@ -172,4 +173,8 @@ export const approvalPlaceholderOutcome = (messages: readonly Message[]): AgentO
   reason: "awaiting_approval",
   turns: 0,
   messages: [...messages],
+  /* aug-23 §13 slice 1a — categorize the paused path. Without this a surface
+     sees no category and falls back to success copy; the turn is RESUMABLE, so
+     it must read as "waiting on you", never as done. */
+  stopCategory: awaitingApprovalCategory(),
 })
