@@ -170,47 +170,21 @@ const DEFAULT_MAX_DIRTY_BYTES = 500 * 1024 * 1024
 const FORCE_WITH_LEASE_REJECTED_MARKER = "stale info"
 
 /**
- * Snapshot the working tree onto a fresh cloud-agent branch.
+ * Phases 1-3: prove we may snapshot at all, and read the dirty tree once.
  *
- * Returns `{ branch, sha }` on success. On EVERY error path the working tree
- * is restored (best-effort) to its pre-call branch + stash state before the
- * error propagates.
+ * Every failure here THROWS `SnapshotErrorThrown` with the reason, which is why
+ * this can be a plain function returning the two values the rest of the run
+ * needs — there is no "failed" return to thread. Extracted from
+ * {@link runSnapshot} (god-function burndown); the probes, their order, and
+ * their abort checkpoints are unchanged.
+ *
+ * `status.stdout` is returned rather than re-read because the size pre-check
+ * downstream needs the SAME porcelain rows (its `??` entries are how untracked
+ * files get sized), and running `status` twice could observe a different tree.
  */
-export const snapshotDirtyToCloudBranch = async (opts: SnapshotOpts): Promise<SnapshotResult> => {
-  const branchPrefix = opts.branchPrefix ?? DEFAULT_BRANCH_PREFIX
-  const pushRemote = opts.pushRemote ?? DEFAULT_PUSH_REMOTE
-  const lockPath = opts.lockPath ?? DEFAULT_LOCK_PATH
-  const maxDirtyBytes = opts.maxDirtyBytes ?? DEFAULT_MAX_DIRTY_BYTES
-
-  // Acquire the file lock FIRST so two concurrent snapshots can never race
-  // the working tree (the stash + checkout sequence is not idempotent across
-  // processes).
-  const lock = await opts.fileLockPort.acquire(lockPath)
-  if (lock === null) {
-    throw new SnapshotErrorThrown({ kind: "lock-busy", lockPath })
-  }
-
-  try {
-    return await runSnapshot({
-      ...opts,
-      branchPrefix,
-      pushRemote,
-      maxDirtyBytes,
-    })
-  } finally {
-    await lock.release()
-  }
-}
-
-interface ResolvedOpts extends SnapshotOpts {
-  readonly branchPrefix: string
-  readonly pushRemote: string
-  readonly maxDirtyBytes: number
-}
-
-const runSnapshot = async (opts: ResolvedOpts): Promise<SnapshotResult> => {
-  checkAbort(opts.abortSignal, "rev-parse")
-
+const preflight = async (
+  opts: ResolvedOpts,
+): Promise<{ readonly originalRef: string; readonly statusStdout: string }> => {
   // 1. Confirm we're inside a git repo. `git rev-parse --git-dir` is the
   //    cheapest non-mutating probe.
   const inside = await opts.gitPort.run(["rev-parse", "--git-dir"], opts.repoCwd, opts.abortSignal)
@@ -254,6 +228,52 @@ const runSnapshot = async (opts: ResolvedOpts): Promise<SnapshotResult> => {
   if (status.stdout.trim().length === 0) {
     throw new SnapshotErrorThrown({ kind: "no-dirty-changes" })
   }
+  return { originalRef, statusStdout: status.stdout }
+}
+
+/**
+ * Snapshot the working tree onto a fresh cloud-agent branch.
+ *
+ * Returns `{ branch, sha }` on success. On EVERY error path the working tree
+ * is restored (best-effort) to its pre-call branch + stash state before the
+ * error propagates.
+ */
+export const snapshotDirtyToCloudBranch = async (opts: SnapshotOpts): Promise<SnapshotResult> => {
+  const branchPrefix = opts.branchPrefix ?? DEFAULT_BRANCH_PREFIX
+  const pushRemote = opts.pushRemote ?? DEFAULT_PUSH_REMOTE
+  const lockPath = opts.lockPath ?? DEFAULT_LOCK_PATH
+  const maxDirtyBytes = opts.maxDirtyBytes ?? DEFAULT_MAX_DIRTY_BYTES
+
+  // Acquire the file lock FIRST so two concurrent snapshots can never race
+  // the working tree (the stash + checkout sequence is not idempotent across
+  // processes).
+  const lock = await opts.fileLockPort.acquire(lockPath)
+  if (lock === null) {
+    throw new SnapshotErrorThrown({ kind: "lock-busy", lockPath })
+  }
+
+  try {
+    return await runSnapshot({
+      ...opts,
+      branchPrefix,
+      pushRemote,
+      maxDirtyBytes,
+    })
+  } finally {
+    await lock.release()
+  }
+}
+
+interface ResolvedOpts extends SnapshotOpts {
+  readonly branchPrefix: string
+  readonly pushRemote: string
+  readonly maxDirtyBytes: number
+}
+
+const runSnapshot = async (opts: ResolvedOpts): Promise<SnapshotResult> => {
+  checkAbort(opts.abortSignal, "rev-parse")
+
+  const { originalRef, statusStdout } = await preflight(opts)
 
   // 4. Size pre-check. `git diff HEAD --numstat` reports the +/- line counts
   //    for TRACKED changes; we estimate per +/- line for safety. But the
@@ -265,7 +285,7 @@ const runSnapshot = async (opts: ResolvedOpts): Promise<SnapshotResult> => {
   //    untracked file that cannot be stat'd / no stat port), we fail CLOSED
   //    (reason: estimate-unavailable) rather than assume small and let the cap
   //    be defeated.
-  const estimate = await estimateDirtyBytes(opts, status.stdout)
+  const estimate = await estimateDirtyBytes(opts, statusStdout)
   // Fail CLOSED: a probe failure means we CANNOT bound the dirty-tree size, so
   // we must NOT assume it's small (that would defeat the cap for exactly the
   // pathological trees the cap exists to reject). Treat it as over-cap.

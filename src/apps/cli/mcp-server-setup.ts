@@ -207,6 +207,52 @@ export const runMcpServerCmd = async (
 
 /** Assemble the headless config, build the whitelisted server, and pump stdin.
  *  Split out so {@link runMcpServerCmd} owns only the help + gate fast paths. */
+/**
+ * The `ToolCallPort` an external client's `tools/call` lands on: fold the REAL
+ * dispatch through the FULL locked pipeline. Mirrors `@/agent/codemode-wire` —
+ * synthesize a ToolUseBlock, dispatch under the fail-closed SERVER permission
+ * (never the parent's), and fold the outcome to `{ text, isError }`.
+ *
+ * Extracted from {@link assembleAndServe} so the security-bearing part of that
+ * function is one named thing rather than a closure buried mid-procedure. The
+ * dispatch port is a PARAMETER for the same reason it is resolved rather than
+ * imported: it is the injectable seam (H1/DIP) stream-callbacks and codemode
+ * already share, so a wired substitute reaches MCP tool calls too.
+ *
+ * NO-THROW: dispatch is no-throw by contract and the try/catch is belt-and-
+ * braces, so a pathological pre-execute throw becomes an `isError` result
+ * rather than a host fault.
+ */
+const buildToolCallPort = (
+  resolveDispatchPort: (config: import("@/agent").AgentConfig) => (
+    block: { type: "tool_use"; id: string; name: string; input: unknown },
+    config: import("@/agent").AgentConfig,
+    permission: import("@/agent").AgentConfig["permission"],
+  ) => Promise<{
+    readonly ok: boolean
+    readonly preview: string
+    readonly block: { readonly content: unknown; readonly is_error?: boolean }
+  }>,
+  config: import("@/agent").AgentConfig,
+  serverPermission: import("@/agent").AgentConfig["permission"],
+): ToolCallPort => {
+  const mintId = idMinter()
+  return async (name, args) => {
+    try {
+      const result = await resolveDispatchPort(config)(
+        { type: "tool_use", id: mintId(), name, input: args },
+        config,
+        serverPermission,
+      )
+      const text = typeof result.block.content === "string" ? result.block.content : result.preview
+      // isError iff the dispatch was not ok OR the tool_result block flagged it.
+      return { text, isError: !result.ok || result.block.is_error === true }
+    } catch (e) {
+      return { text: `tool dispatch failed for ${name}: ${errMessage(e)}`, isError: true }
+    }
+  }
+}
+
 const assembleAndServe = async (io: McpServerCmdIo, deps?: McpServerCmdDeps): Promise<number> => {
   // `assembleAgentConfig` + the arg builders live in `@/host/runtime` (ADR-0303
   // thin-surface). `dispatchTool` is internal to `@/agent` (not on the barrel),
@@ -300,28 +346,7 @@ const assembleAndServe = async (io: McpServerCmdIo, deps?: McpServerCmdDeps): Pr
   // bindings — a separate, deliberate change, not the default.)
   const serverPermission: typeof config.permission = { mode: "default" }
 
-  // ToolCallPort = fold the REAL dispatchTool through the FULL locked pipeline.
-  // Mirrors `@/agent/codemode-wire`: synthesize a ToolUseBlock, dispatch with the
-  // fail-closed server permission, fold to { text, isError }. The dispatch is
-  // no-throw by contract; the try/catch is belt-and-braces so a pathological
-  // pre-execute throw becomes an isError result, never a host fault.
-  const mintId = idMinter()
-  const toolCall: ToolCallPort = async (name, args) => {
-    try {
-      // H1 (DIP): route through the injectable dispatch port (default dispatchTool) — the SAME seam
-      // stream-callbacks/codemode use, so a wired substitute reaches MCP tool calls too. Byte-identical.
-      const result = await resolveDispatchPort(config)(
-        { type: "tool_use", id: mintId(), name, input: args },
-        config,
-        serverPermission,
-      )
-      const text = typeof result.block.content === "string" ? result.block.content : result.preview
-      // isError iff the dispatch was not ok OR the tool_result block flagged it.
-      return { text, isError: !result.ok || result.block.is_error === true }
-    } catch (e) {
-      return { text: `tool dispatch failed for ${name}: ${errMessage(e)}`, isError: true }
-    }
-  }
+  const toolCall = buildToolCallPort(resolveDispatchPort, config, serverPermission)
 
   const explicitOptIn = resolveExplicitOptIn(process.env.QUANTA_MCP_SERVER_EXPOSE, knownNames, io)
 

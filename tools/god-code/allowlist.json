@@ -6,8 +6,6 @@
   "functions": [
     "src/agent/tier1/subagent.ts::buildSubagentBlock",
     "src/apps/cli/index.ts::main",
-    "src/apps/cli/mcp-server-setup.ts::assembleAndServe",
-    "src/git/cloud-branch-snapshot.ts::runSnapshot",
     "src/ipc/session/bridge.ts::createSessionTransportBridge",
     "src/observability/otel-exporter.ts::otelHttpExporter",
     "src/runtime/shell.ts::runShell",
