@@ -19,7 +19,12 @@
  */
 
 import type { RuntimeSession } from "@/sdk/runtime"
-import { type SessionMeta, type SessionRootProvider, saveSessionById } from "@/session"
+import {
+  type PersistedObjectiveSnapshot,
+  type SessionMeta,
+  type SessionRootProvider,
+  saveSessionById,
+} from "@/session"
 import { errMessage, logger } from "@/shared"
 
 export interface TranscriptPersistOptions {
@@ -29,6 +34,16 @@ export interface TranscriptPersistOptions {
   readonly rootProvider?: SessionRootProvider
   /** Session cwd for the SavedSession meta. */
   readonly cwd: string
+  /** RFC-03 C2 — lazy objective-snapshot provider: ENCODES the web session's live
+   *  objective authority into its persisted DTO on each transcript save so the
+   *  goal / criterion-ids / revision / provenance land durably (a `--resume` of
+   *  this same id — CLI or a future web thread-swap — then restores them). ABSENT
+   *  (gate off / no goal authority) or a call returning `undefined` (no live
+   *  threads) ⇒ the payload omits `objective` ⇒ the store PRESERVES any on-disk
+   *  snapshot and the write is byte-identical (default-OFF). Built by the server
+   *  from `runtime.objective` via `buildObjectiveSnapshotProvider` (which returns
+   *  `undefined` when no authority is present — passed through verbatim here). */
+  readonly objectiveSnapshot?: (() => PersistedObjectiveSnapshot | undefined) | undefined
 }
 
 export interface TranscriptPersistence {
@@ -67,9 +82,26 @@ export const attachTranscriptPersistence = (
       lastTouched: Date.now(),
       archived: false,
     }
+    // RFC-03 C2 — encode the live objective authority (if any) so the web session's
+    // goal survives durably. Guarded: an authority-read bug must never break the
+    // transcript persist. Absent/undefined ⇒ omitted ⇒ store preserves on-disk
+    // snapshot (byte-identical).
+    let objective: PersistedObjectiveSnapshot | undefined
+    if (opts.objectiveSnapshot !== undefined) {
+      try {
+        objective = opts.objectiveSnapshot()
+      } catch (error) {
+        logger.warn("web-daemon: objective snapshot encode failed", { error: errMessage(error) })
+      }
+    }
     await saveSessionById(
       meta,
-      { reason: "web-turn", turns, messages: [...s.transcript.messages()] },
+      {
+        reason: "web-turn",
+        turns,
+        messages: [...s.transcript.messages()],
+        ...(objective !== undefined ? { objective } : {}),
+      },
       opts.rootProvider,
     )
   }

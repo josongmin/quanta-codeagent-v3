@@ -204,6 +204,13 @@ export const buildDefaultSessionIo = (): SessionIoState => ({
         ...(session.rollbackOperations !== undefined
           ? { rollbackOperations: session.rollbackOperations }
           : {}),
+        // RFC-03 C2 — an imported session carries its durable objective snapshot;
+        // thread it EXPLICITLY (the payload-wins path) so `/session import` never
+        // drops the goal. Without this, importing a session that carries an
+        // objective would write a fresh id with an empty objective (store
+        // preserve-on-omit only guards the auto-save callers, which have none
+        // in-hand). Absent ⇒ omitted ⇒ byte-identical.
+        ...(session.objective !== undefined ? { objective: session.objective } : {}),
       })
     } catch (e) {
       // Rethrow so the slash surfaces the error message — this matches the

@@ -14,7 +14,11 @@
 
 import type { AgentConfig } from "@/agent"
 import type { ObjectivePort } from "@/objective"
-import { buildObjectiveAuthority } from "@/runner/assemble/session-authorities"
+import {
+  buildObjectiveAuthority,
+  encodeObjectiveSnapshot,
+} from "@/runner/assemble/session-authorities"
+import type { PersistedObjectiveSnapshot } from "@/session"
 import { gateOn } from "@/shared"
 
 /** Minimal env view — same record shape the assembler threads everywhere. */
@@ -50,17 +54,49 @@ type Env = Record<string, string | undefined>
  */
 export const resolveGatedObjectiveAuthority = (
   env: Env,
-  opts: { readonly confirmationAvailable: boolean },
+  opts: {
+    readonly confirmationAvailable: boolean
+    /** RFC-03 C2 — durable resume: the objective snapshot loaded from the
+     *  reopened session's `SavedSession.objective`. When present it is decoded
+     *  and restored VERBATIM at construction (ids / revision / provenance
+     *  preserved; forged completions fail-closed on decode). Absent ⇒ a fresh
+     *  empty authority (byte-identical legacy). */
+    readonly restoreFrom?: PersistedObjectiveSnapshot | undefined
+  },
 ): ObjectivePort | undefined => {
   if (!gateOn(env, "QUANTA_OBJECTIVE_TOOLS")) return undefined
   const enforceBudget = gateOn(env, "QUANTA_OBJECTIVE_BUDGET_ENFORCE")
   const gateProposal = gateOn(env, "QUANTA_PROPOSE_GOAL")
   // RFC-03 C2 — construct through the ONE objective-authority builder (assembly
-  // owns lifetime/restore), never a surface-local `createObjectiveStore()`.
+  // owns lifetime/restore), never a surface-local `createObjectiveStore()`. A
+  // present `restoreFrom` rebuilds a byte-equivalent authority from the reopened
+  // session; absent ⇒ fresh empty (default-OFF byte-identical).
   return buildObjectiveAuthority({
     ...(enforceBudget ? { enforceBudget: true } : {}),
     ...(gateProposal ? { gateOn: true, confirmationAvailable: opts.confirmationAvailable } : {}),
+    ...(opts.restoreFrom !== undefined ? { restoreFrom: opts.restoreFrom } : {}),
   })
+}
+
+/**
+ * RFC-03 C2 — build the LAZY objective-snapshot provider the per-turn save
+ * (`persistTurn`) attaches to the durable `SavePayload`. Encodes the live
+ * objective authority into its persisted DTO on demand (once per id-mode save),
+ * so the goal / criterion-ids / revision / provenance survive a real `--resume`.
+ *
+ * `objective` is the base's slice-opaque `ObjectivePort` slot (typed `unknown`
+ * on `RuntimeBase` so the host layer never value-couples to the domain). ABSENT
+ * (no authority ⇒ `QUANTA_OBJECTIVE_TOOLS` off, or a surface with no goal wire)
+ * ⇒ `undefined` ⇒ `persistTurn` omits the field ⇒ the store PRESERVES any
+ * on-disk snapshot and the write is byte-identical (default-OFF). This is the
+ * ONE place the encode adapter is reached on the save path.
+ */
+export const buildObjectiveSnapshotProvider = (
+  objective: unknown,
+): (() => PersistedObjectiveSnapshot | undefined) | undefined => {
+  if (objective === undefined || objective === null) return undefined
+  const port = objective as ObjectivePort
+  return () => encodeObjectiveSnapshot(port)
 }
 
 /**

@@ -141,7 +141,16 @@ export const buildSurfaceCoreState = (
     // a gated proposal is MEDIATED (prompted) rather than fail-closed. The SAME
     // instance backs the surface (`/goal` slash + idle ticker + status chip) and,
     // threaded DOWN via the compose seam, the LLM `objective_*` tools.
-    objectiveStore: resolveGatedObjectiveAuthority(env, { confirmationAvailable: true }),
+    //
+    // RFC-03 C2 — durable resume: when this session was reopened by id and carried
+    // a persisted objective (`setup.restoredObjective`), thread it as `restoreFrom`
+    // so the reopened authority reconstructs the goal / criterion-ids / revision /
+    // provenance. Absent (fresh / legacy / no-objective) ⇒ a fresh empty authority
+    // (byte-identical legacy).
+    objectiveStore: resolveGatedObjectiveAuthority(env, {
+      confirmationAvailable: true,
+      ...(setup.restoredObjective !== undefined ? { restoreFrom: setup.restoredObjective } : {}),
+    }),
     presetResolver: createStickyPresetResolver(),
   }
 }

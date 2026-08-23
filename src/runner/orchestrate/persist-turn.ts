@@ -1,7 +1,13 @@
 import type { AgentOutcome } from "@/agent"
 import { saveSession } from "@/agent"
 import type { Message } from "@/llm"
-import { assignMessageIds, type SavePayload, type SessionMeta, saveSessionById } from "@/session"
+import {
+  assignMessageIds,
+  type PersistedObjectiveSnapshot,
+  type SavePayload,
+  type SessionMeta,
+  saveSessionById,
+} from "@/session"
 import { errMessage, logger, runtimeConfig } from "@/shared"
 
 /**
@@ -60,6 +66,17 @@ export interface PersistTurnInput {
    *  identical (no extra call). Only fires alongside the id-mode auto-save (the
    *  ids it binds to must be persisted first). See {@link PersistTurnCheckpointHook}. */
   captureCheckpoint?: PersistTurnCheckpointHook
+  /** RFC-03 C2 — durable-resume objective feeder. The composition root (the
+   *  turn-runner, which owns the live `ObjectivePort`) supplies a lazy provider
+   *  that ENCODES the live objective authority into its persisted DTO. It is
+   *  called ONCE per id-mode save (only when `idMeta` is set) and its result is
+   *  attached to the `SavePayload` so the goal/criterion-ids/revision/provenance
+   *  survive a real `--resume`. ABSENT (no objective authority) ⇒ the payload
+   *  omits `objective` ⇒ the store PRESERVES any on-disk snapshot and the write
+   *  is byte-identical (default-OFF). A provider that returns `undefined` (no
+   *  live threads) likewise omits the field. The encode lives at the caller so
+   *  this slice never value-imports the `@/objective` domain. */
+  objectiveSnapshot?: () => PersistedObjectiveSnapshot | undefined
   /** RFC-13 HOP-2 — id-assign gate (injectable purely for tests; production
    *  reads it from `runtimeConfig()`). When true, id-LESS messages are minted a
    *  stable deterministic id at the TOP of `persistTurn` (before BOTH saves and
@@ -122,6 +139,22 @@ export const maybeAssignMessageIds = (messages: Message[], gateOn: boolean): Mes
   }
 }
 
+/** RFC-03 C2 — best-effort encode of the live objective snapshot for the id-mode
+ *  save. GUARDED so an authority-read bug can never break the turn's persistence
+ *  (fail-soft: a throw is surfaced at warn and the field is simply omitted). No
+ *  provider ⇒ `undefined` ⇒ the payload omits `objective` (byte-identical). */
+const resolveObjectiveSnapshot = (
+  provider: (() => PersistedObjectiveSnapshot | undefined) | undefined,
+): PersistedObjectiveSnapshot | undefined => {
+  if (provider === undefined) return undefined
+  try {
+    return provider()
+  } catch (e) {
+    logger.warn(`persist-turn: objective snapshot encode failed: ${errMessage(e)}`)
+    return undefined
+  }
+}
+
 export const persistTurn = async (input: PersistTurnInput): Promise<void> => {
   const { state, idMeta, sessionId, outcome } = input
   // RFC-13 HOP-2 — assign STABLE ids FIRST (before BOTH saves AND the checkpoint
@@ -144,10 +177,16 @@ export const persistTurn = async (input: PersistTurnInput): Promise<void> => {
     // Auto-save in id-mode: per-turn persistence so `quanta --resume <id>`
     // self-persists without the user touching `--state`. No log emitted
     // here — would be too chatty inside the REPL.
+    // RFC-03 C2 — encode the live objective authority into its durable DTO so a
+    // real `--resume` restores the goal (ids / revision / provenance). Absent /
+    // undefined ⇒ `objective` OMITTED ⇒ the store preserves any on-disk snapshot
+    // (byte-identical). See {@link resolveObjectiveSnapshot} (guarded encode).
+    const objective = resolveObjectiveSnapshot(input.objectiveSnapshot)
     const payload: SavePayload = {
       reason: outcome.reason,
       turns: outcome.turns,
       messages,
+      ...(objective !== undefined ? { objective } : {}),
     }
     await saveSessionById(idMeta, payload)
     // RFC-01 A2 — feed a durable rewind checkpoint AFTER the transcript is on

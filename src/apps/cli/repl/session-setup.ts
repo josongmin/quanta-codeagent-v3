@@ -216,6 +216,13 @@ export interface SessionSetupResult {
   readonly history: readonly Message[]
   readonly pendingImages: readonly ImageBlock[]
   readonly idMeta: SessionBootstrapResult["idMeta"]
+  /** RFC-03 C2 — the reopened session's durable objective snapshot (id-mode
+   *  resume only), forwarded from `boot.restoredObjective`. The surface composer
+   *  (`buildSurfaceCoreState`) threads it into
+   *  `resolveGatedObjectiveAuthority({ restoreFrom })` so a reopened `/goal`
+   *  authority restores ids / revision / provenance. Absent ⇒ fresh authority
+   *  (byte-identical legacy). */
+  readonly restoredObjective?: SessionBootstrapResult["restoredObjective"]
   readonly statusBar: StatusBar
   readonly turnIndicator: TurnIndicator
   /** Track D / S3 — the `/context` gauge holder, created at setup so its
@@ -692,6 +699,10 @@ export const setupSession = async (
     history: boot.history,
     pendingImages: boot.pendingImages,
     idMeta: boot.idMeta,
+    // RFC-03 C2 — forward the reopened objective snapshot (id-mode resume only)
+    // so the surface composer restores the goal authority. Absent ⇒ omitted ⇒
+    // fresh authority (byte-identical legacy).
+    ...(boot.restoredObjective !== undefined ? { restoredObjective: boot.restoredObjective } : {}),
     statusBar,
     turnIndicator,
     contextUsageHolder,

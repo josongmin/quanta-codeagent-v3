@@ -156,13 +156,8 @@ const assembleBootstrapResult = async (
     bindRouteSinkToStream(bindRouteEventTarget, stream)
     const pendingImages = loadSeedImages(runtime, deps.loadImageBlock)
 
-    const { cwd, idMeta, history, sessionId } = await resolveSessionResume(
-      deps,
-      runtime,
-      slog,
-      features,
-      tooling.sessionId,
-    )
+    const resume = await resolveSessionResume(deps, runtime, slog, features, tooling.sessionId)
+    const { cwd, idMeta, history, sessionId } = resume
 
     const {
       system,
@@ -231,6 +226,8 @@ const assembleBootstrapResult = async (
       history,
       pendingImages,
       idMeta,
+      // RFC-03 C2 — reopened objective snapshot (id-mode resume); absent ⇒ fresh authority.
+      ...(resume.objective !== undefined ? { restoredObjective: resume.objective } : {}),
       onShellEvent,
       workMetricsSink,
       stream,

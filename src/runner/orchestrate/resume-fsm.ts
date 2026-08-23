@@ -3,7 +3,12 @@ import { wireSessionGitFingerprint } from "@/agent/git-observability"
 import type { Message } from "@/llm"
 import { reconcileToolPairing } from "@/memory/history-sanitization"
 import type { StructuredLogger } from "@/observability"
-import { loadSessionById, type SessionMeta, saveSessionById } from "@/session"
+import {
+  loadSessionById,
+  type PersistedObjectiveSnapshot,
+  type SessionMeta,
+  saveSessionById,
+} from "@/session"
 import { defaultGitRunner } from "@/storage/git-runner"
 
 /**
@@ -86,6 +91,17 @@ export interface ResumeResolution {
    *  The combination is ambiguous (which session id wins?), so the caller
    *  prints an error and exits 1 instead of silently ignoring one flag. */
   conflictError: string | undefined
+  /** RFC-03 C2 — the durable objective snapshot loaded from the resumed
+   *  `SavedSession.objective`. Present ONLY on the id-mode resume branch when the
+   *  reopened session carried an objective; the surface threads it into
+   *  `resolveGatedObjectiveAuthority({ restoreFrom })` so the goal / criterion
+   *  ids / revision / provenance survive the reopen. Absent on every other branch
+   *  (fresh mint, path-mode, no-resume, legacy session with no objective) ⇒ a
+   *  fresh empty authority (byte-identical legacy). Typed `?: T | undefined`
+   *  (exactOptionalPropertyTypes) so the id-mode branch can assign
+   *  `saved.objective` unconditionally — `JSON.stringify` drops the absent field,
+   *  and every consumer already presence-checks. */
+  objective?: PersistedObjectiveSnapshot | undefined
 }
 
 /** HIGH-LOW: default title for `--new-session`. Compact UTC `YYYY-MM-DD HH:mm`
@@ -191,6 +207,10 @@ export const resolveResume = async (input: ResolveResumeInput): Promise<ResumeRe
       inIdMode: true,
       missingIdError: undefined,
       conflictError: undefined,
+      // RFC-03 C2 — carry the reopened session's durable objective snapshot so the
+      // surface can restore the goal authority (ids/revision/provenance). Absent
+      // on legacy/no-objective sessions ⇒ undefined ⇒ dropped ⇒ fresh authority.
+      objective: saved.objective,
     }
   }
   if (newSession) {

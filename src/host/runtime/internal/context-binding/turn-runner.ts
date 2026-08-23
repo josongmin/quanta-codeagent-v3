@@ -1,4 +1,5 @@
 import { type AgentConfig, type AgentOutcome, runAgent } from "@/agent"
+import { buildObjectiveSnapshotProvider } from "@/host/runtime/objective-store-wire"
 import type { SessionHostTurnEvent } from "@/kernel/session"
 import type { ContentBlock, ImageBlock, Message } from "@/llm"
 import type { ArtifactRef, PendingApprovalView } from "@/protocol/session"
@@ -163,6 +164,11 @@ export const runRuntimeTurn = async (args: {
     // undefined (⇒ persistTurn byte-identical) unless QUANTA_REWIND_CAPTURE is set
     // AND a granular checkpoint registry is wired. Best-effort / non-throwing.
     const captureCheckpoint = buildRewindCaptureHook(args.base)
+    // RFC-03 C2 — supply the lazy objective-snapshot provider so the id-mode
+    // auto-save persists the live goal authority (ids / revision / provenance).
+    // ABSENT (no objective authority on the base) ⇒ undefined ⇒ persistTurn omits
+    // the field ⇒ byte-identical (the store preserves any on-disk snapshot).
+    const objectiveSnapshot = buildObjectiveSnapshotProvider(args.base.objective)
     await persistTurn({
       state: args.state,
       idMeta: args.idMeta,
@@ -170,6 +176,7 @@ export const runRuntimeTurn = async (args: {
       messages,
       outcome,
       ...(captureCheckpoint !== undefined ? { captureCheckpoint } : {}),
+      ...(objectiveSnapshot !== undefined ? { objectiveSnapshot } : {}),
     })
     // A2 — drain artifacts registered during THIS turn into protocol refs. The
     // registry is present ONLY when `QUANTA_ARTIFACT_STORE` lifted it onto the

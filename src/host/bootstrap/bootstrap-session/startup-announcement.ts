@@ -81,6 +81,10 @@ export const resolveSessionResume = async (
   readonly idMeta: Awaited<ReturnType<SessionBootstrapDeps["resolveResume"]>>["idMeta"]
   readonly history: Message[]
   readonly sessionId: string
+  /** RFC-03 C2 — the reopened session's durable objective snapshot (id-mode
+   *  resume only). Threaded onto the bootstrap result so the surface restores the
+   *  goal authority. Absent on fresh/legacy/no-objective sessions. */
+  readonly objective: Awaited<ReturnType<SessionBootstrapDeps["resolveResume"]>>["objective"]
 }> => {
   let cwd = runtime.cwd
   // `startupLog` is `undefined` when the welcome banner will render (see
@@ -125,5 +129,5 @@ export const resolveSessionResume = async (
       `quanta ready (provider=${runtime.provider}, model=${runtime.model}, mode=${runtime.mode}, cwd=${cwd}, session=${idMeta.id})`,
     )
   }
-  return { cwd, idMeta, history, sessionId }
+  return { cwd, idMeta, history, sessionId, objective: resolved.objective }
 }

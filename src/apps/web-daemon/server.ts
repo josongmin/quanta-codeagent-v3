@@ -17,9 +17,10 @@
 import type { Server } from "bun"
 import type { FollowerCoControlDispatcher } from "@/agent/thread-follower"
 import type { ArtifactPreviewResolver } from "@/host/runtime"
+import { buildObjectiveSnapshotProvider } from "@/host/runtime/objective-store-wire"
 import type { SupportedReadModels } from "@/protocol/session"
 import type { RuntimeSession } from "@/sdk/runtime"
-import { loadSessionById } from "@/session"
+import { loadSessionById, type PersistedObjectiveSnapshot } from "@/session"
 import { errMessage, logger } from "@/shared"
 import type { CostReadoutTotals, WebReadoutSources } from "./readout"
 import { setupApprovalContinuation } from "./server/approval-continuation"
@@ -271,6 +272,16 @@ const buildDaemonListener = (params: {
   return { server, boundPort, boundHost }
 }
 
+/** RFC-03 C2 — the transcript-persist objective provider for the web session,
+ *  encoded from the live authority (`runtime.objective`, duck-read like
+ *  `readoutSources` — the base `RuntimeFacade` type does not surface it). Returns
+ *  `undefined` when no authority is present ⇒ transcript-persist omits `objective`
+ *  ⇒ byte-identical. Module-scope so it stays off `startWebDaemon`'s body budget. */
+const webObjectiveSnapshot = (
+  runtime: unknown,
+): (() => PersistedObjectiveSnapshot | undefined) | undefined =>
+  buildObjectiveSnapshotProvider((runtime as { objective?: unknown }).objective)
+
 export const startWebDaemon = async (config: WebDaemonServerConfig): Promise<WebDaemonHandle> => {
   const runtime = await config.runtimeFactory()
   // ONE shared session for the whole daemon lifetime. New WS connections
@@ -324,6 +335,8 @@ export const startWebDaemon = async (config: WebDaemonServerConfig): Promise<Web
   const transcriptPersist = attachTranscriptPersistence(sharedSession, {
     enabled: threadStore !== null,
     cwd: config.sessionConfig.cwd ?? process.cwd(),
+    // RFC-03 C2 — durable objective snapshot from the live web authority.
+    objectiveSnapshot: webObjectiveSnapshot(runtime),
   })
   let transcriptPersistUnsub: (() => void) | null = transcriptPersist.unsub
   // P1 Phase 2 — swap-on-attach closure: load the opened thread's lossless

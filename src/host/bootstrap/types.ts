@@ -558,6 +558,12 @@ export interface SessionBootstrapResult {
   readonly history: readonly Message[]
   readonly pendingImages: readonly ImageBlock[]
   readonly idMeta: ResumeResolution["idMeta"]
+  /** RFC-03 C2 — the reopened session's durable objective snapshot (id-mode
+   *  resume only; `ResumeResolution.objective`). The CLI surface threads it into
+   *  `resolveGatedObjectiveAuthority({ restoreFrom })` so the goal / criterion
+   *  ids / revision / provenance survive `--resume`. Absent on fresh / legacy /
+   *  no-objective sessions ⇒ a fresh empty authority (byte-identical). */
+  readonly restoredObjective?: ResumeResolution["objective"]
   readonly onShellEvent: ShellExecObserver | undefined
   readonly workMetricsSink: AgentConfig["workMetricsSink"] | undefined
   readonly stream: StreamPort
