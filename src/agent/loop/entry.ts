@@ -1,4 +1,5 @@
 import { attrs, endSpan, mergeAttrs, SPAN_NAMES, type Span, startSpan } from "@/observability"
+import { initShellEffectParser } from "@/permission/shell"
 import { withEgressProxy } from "@/runtime/network-proxy"
 import { attachLspDiagnosticsHookIfEnabled } from "../lsp-bridge"
 import { runMemoryConsolidatorHook } from "../memory-consolidator-hook"
@@ -10,6 +11,16 @@ import { runSessionStartSequence } from "./session-lifecycle"
 import { runAgentTurnLoop } from "./turn-loop"
 
 export const runAgent = async (config: AgentConfig): Promise<AgentOutcome> => {
+  // §17 packet B — load the shell grammar BEFORE the first tool can be gated.
+  // `runAgent` is the single entry every surface goes through (CLI, headless,
+  // web daemon, bench, subagents), so this is the one place that guarantees the
+  // structural hard-deny authority is READY for the first command rather than
+  // the second. Idempotent and cached: N sessions in one process load one
+  // grammar. No-throw by contract — a failed load leaves the authority
+  // answering `unknown`, which the hard-deny seam treats as "no opinion", so a
+  // grammar problem degrades to today's regex-only behavior instead of either
+  // blocking work or silently permitting more.
+  await initShellEffectParser()
   const sessionId = config.sessionId ?? "default"
   // F3 — fold the bench trajectory identity (instanceId/attempt) onto the
   // top-level span so the OTLP span is joinable to its `<runId>/<instanceId>.

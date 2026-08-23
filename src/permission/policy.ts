@@ -27,6 +27,7 @@ import {
   type PermissionRiskLevel,
   type PermissionStackSource,
 } from "./recorder"
+import { assessShellCommand } from "./shell"
 import type {
   HITLTier,
   PermissionContext,
@@ -81,7 +82,19 @@ export const hardDenyReason = (action: ToolAction): string | null => {
   for (const pat of HARD_DENY) {
     if (pat.test(probe)) return `Blocked dangerous command: ${cmd}`
   }
-  return null
+  // §17 packet B — the structural authority. A regex reads the command as TEXT,
+  // so a dangerous effect assembled out of SHELL STRUCTURE reads as harmless:
+  // a sequence that first `cd /`, a word split by `${IFS}`, a force-push written
+  // as `+refspec`, a delete behind `npx`. `assessShellCommand` parses the
+  // command once and judges the effect, catching those.
+  //
+  // DENY-WIDENING ONLY at this seam. Only a `hard-deny` verdict is consulted;
+  // `unknown` (an unresolvable expansion, an interpreter payload, or a parser
+  // that has not initialized) changes NOTHING here and falls through to the
+  // existing ask/allow ladder exactly as before. That keeps the hard-deny gate
+  // monotonic — this can refuse more, never permit more — and means a
+  // not-ready parser is a no-op rather than a session-wide behavior change.
+  return assessShellCommand(cmd).kind === "hard-deny" ? `Blocked dangerous command: ${cmd}` : null
 }
 
 const hardDeny = (action: ToolAction): PermissionDenyDecision | null => {

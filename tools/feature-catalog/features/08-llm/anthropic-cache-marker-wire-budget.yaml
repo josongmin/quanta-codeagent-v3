@@ -67,7 +67,9 @@ purpose: |
 evidence:
   code:
     - src/llm/anthropic-messages-codec.ts
-  adrs: []
+    - src/agent/prompt-sections.ts
+  adrs:
+    - docs/decisions/0542-anthropic-cache-marker-wire-budget.md
   tests:
     unit:
       - tests/unit/llm/anthropic-cache-marker-budget-hellgate.test.ts

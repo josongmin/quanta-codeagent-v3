@@ -45,7 +45,7 @@ import {
   type IdentityModeSessionState,
   type ToolProfileSessionState,
 } from "@/runner/assemble"
-import { gateOn, logger } from "@/shared"
+import { errMessage, gateOn, logger } from "@/shared"
 import type { SessionBootstrapDeps, SessionRuntimeConfigShape } from "../types"
 
 const DEFAULT_TOOL_PROFILE: ToolProfileName = "write"
@@ -179,19 +179,25 @@ export const buildSessionStatePorts = (args: {
   }
 }
 
-export const buildPromptState = (
+export const buildPromptState = async (
   deps: SessionBootstrapDeps,
   runtime: SessionRuntimeConfigShape,
   cwd: string,
-): {
+): Promise<{
   readonly system: string
+  /** F1a — the session's repo-local rules. Part of the PROMPT state because
+   *  that is what they are: `prompt.ts` renders them into the cached
+   *  `project_md` system section. Resolving them here keeps the one authority
+   *  next to the system prompt it feeds, instead of as a separate step in the
+   *  bootstrap assembler. */
+  readonly repoRules: RepoRules | undefined
   readonly promptSurfaceProfile: AgentConfig["promptSurfaceProfile"]
   readonly systemSource: ReturnType<typeof createSystemSource>
   readonly refreshSystemPrompt: () => void
   readonly toolProfileState: ToolProfileSessionState
   readonly identityModeState: IdentityModeSessionState
   readonly focusChain: { readonly tracker: FocusChainPort; readonly reinjectEveryN: number }
-} => {
+}> => {
   const persona = deps.pickPersona()
   const identity = deps.pickIdentity()
   // Mirror the SAME envPosture seam `buildSessionStatePorts` uses for the rendered
@@ -209,6 +215,7 @@ export const buildPromptState = (
     })
   return {
     system: systemSource.get(),
+    repoRules: await resolveBootstrapRepoRules(cwd),
     promptSurfaceProfile: promptSurfaceProfileForRunMode("interactive", { envPosture }),
     systemSource,
     refreshSystemPrompt,
@@ -243,5 +250,11 @@ export const buildPromptState = (
  */
 export const resolveBootstrapRepoRules = async (cwd: string): Promise<RepoRules | undefined> => {
   if (!modeLoadsRepoRules("interactive")) return undefined
-  return loadRepoRules(cwd).catch(() => undefined)
+  return loadRepoRules(cwd).catch((e) => {
+    // ATTRIBUTED fail-open: session start must never die on a bad rule file, but
+    // an operator who wrote AGENTS.md deserves to know it was not loaded rather
+    // than wonder why the model ignores it.
+    logger.warn(`repo rules: load failed for ${cwd}; continuing without them: ${errMessage(e)}`)
+    return undefined
+  })
 }

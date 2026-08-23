@@ -68,7 +68,8 @@ evidence:
     - src/host/runtime/internal/context-binding/base.ts
     - src/apps/cli/rule-indicator.ts
     - src/apps/cli/rules-cmd.ts
-  adrs: []
+  adrs:
+    - docs/decisions/0543-cli-repo-rules-session-authority.md
   tests:
     unit:
       - tests/unit/apps/cli/cli-repo-rules-wire-hellgate.test.ts

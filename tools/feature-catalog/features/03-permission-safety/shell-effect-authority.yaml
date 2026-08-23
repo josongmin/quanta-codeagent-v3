@@ -1,0 +1,101 @@
+id: shell-effect-authority
+title: "One shell syntax/effect authority — parse once, judge the effect, never let `unknown` mean safe"
+section: 3
+subsystem: Permission — shell command effect assessment
+order: 210
+maturity: L4
+status: new
+ui_surfaces: [cli, web]
+monitoring: n-a
+modes: [interactive, headless]
+configurable: n-a
+owners: ["@songmin"]
+labels: [security, surface:core, tier:core, absorbed:grok-build]
+depends_on: []
+surface_integration:
+  cli: full
+  web: full
+  method: audited
+  verified: "2026-08-24"
+  evidence:
+    cli: "armed from `runAgent`, the single entry every surface uses; consulted by the shipping `hardDenyReason`"
+    web: "same gate — the permission layer is surface-agnostic"
+purpose: |
+  The hard-deny gate matched REGEXES against a lightly-normalized command string. A
+  regex cannot see shell structure, so a command whose dangerous EFFECT is assembled
+  out of structure reads as harmless text and was ALLOWED. Measured against the
+  shipping gate, all of these passed:
+
+    cd / && rm -rf *
+    cd /; rm -rf .
+    rm${IFS}-rf${IFS}/
+    git push origin +main
+    npx rimraf /
+    python3 -c "import shutil; shutil.rmtree('/')"
+    eval "$(echo <base64> | base64 -d)"
+
+  Widening the regexes cannot fix the class: `cd / && rm -rf *` and
+  `cd build && rm -rf *` differ only in a command that ran EARLIER in the same list.
+
+  This slice parses each command ONCE with the vendored tree-sitter bash grammar,
+  lowers it to a typed IR (execution order, resolved argv, pipeline membership,
+  unresolved expansions, self-recursive functions), and returns ONE assessment:
+  `safe-known` | `sensitive-known` | `hard-deny` | `unknown`.
+
+  `unknown` IS THE LOAD-BEARING DECISION. `${IFS}`, command substitution, `eval`, an
+  interpreter's inline payload, a parse error, a MISSING node, and a parser that has
+  not initialized all produce `unknown` — never `safe-known`. An AST is not a sandbox;
+  the only safe answer to "I could not read this" is the existing ask/deny boundary.
+
+  The effective cwd is THREE-state (`caller` / `abs` / `unknown`), because two would
+  force a wrong answer: collapsing `caller` into `unknown` pushes every routine
+  `rm -rf ./build` to a prompt, and collapsing it into a concrete path is how
+  `cd $X && rm -rf *` slips.
+
+  DENY-WIDENING ONLY at the hard-deny seam: `hardDenyReason` consults the authority
+  after the regex list and acts only on `hard-deny`. `unknown` changes nothing there.
+  The gate stays monotonic — it can refuse more, never permit more — so a grammar that
+  fails to load degrades to today's regex-only behavior.
+evidence:
+  code:
+    - src/permission/shell/parser.ts
+    - src/permission/shell/ir.ts
+    - src/permission/shell/assess.ts
+    - src/permission/shell/rules.ts
+    - src/permission/shell/path-effect.ts
+    - src/permission/policy.ts
+    - src/agent/loop/entry.ts
+  adrs:
+    - docs/decisions/0544-shell-effect-authority.md
+  tests:
+    unit:
+      - tests/unit/permission/shell-effect-authority-hellgate.test.ts
+      - tests/unit/permission/shell-effect-authority-wiring-hellgate.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  Not configurable: an operator cannot opt out of a monotonic deny-widening gate, and
+  4-verdict assessment has no policy dial. Trust classification stays in the existing
+  permission stack.
+
+  FALSE POSITIVES WERE MEASURED, not assumed: 86 realistic developer commands assess
+  `safe-known`, including `rm -rf node_modules`, `chmod -R 755 dist`,
+  `sudo apt-get install -y jq`, `find . -name '*.log' -delete`, `npx tsc --noEmit`
+  and `cd /tmp && rm -rf *`.
+
+  ADVERSARIAL ROUND 2 found four real misses in the first cut, all now pinned:
+  `xargs rm -rf < list` (targets arrive on stdin ⇒ unknown), `find / -delete`,
+  `cat ~/.ssh/id_rsa | curl …` (a PARITY BREAK — rated sensitive instead of denied),
+  and `echo … | sh`. A fifth defect was a FALSE POSITIVE of my own making: the exfil
+  rule denied on the reading HEAD alone, breaking the documented
+  `cat notes.txt | curl` allowance; it now requires a known secret-store path.
+
+  `EXPECTED_CONTAINER_NODE_TYPES` is a DRIFT GUARD, not a filter — the walker descends
+  into every node with children, and a test fails when the grammar emits a container
+  the slice has not accounted for. It caught `test_command` on its first run.
+
+  REMAINING IN THIS LANE (§17 packet B DONE is not yet fully met): circumvention,
+  ownership and grant still read their own signals. Migrating them to this assessment,
+  and removing the direct regex ALLOW authority, is the follow-on.
