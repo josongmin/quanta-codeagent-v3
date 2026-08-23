@@ -88,6 +88,14 @@ const isReadLine = (line: string): boolean => {
     /\benv\s*[.[]/.test(line) ||
     /\bgate(?:On|Disabled)(?:Strict)?\s*\(/.test(line) ||
     /\bparseEnvFlag\s*\(/.test(line) ||
+    // the CLI-LOCAL typed accessor `readCliKnob("QUANTA_X", …)` — a REAL env read
+    // (session>env>registry-default) that carries no `process.env`/`gateOn`/`env.`
+    // token, so it was INVISIBLE to the clauses above. That blind spot let a
+    // readCliKnob key declared in NO registry pass green (proven when
+    // QUANTA_WORKTREE_PROGRESS was unregistered; re-proven for
+    // QUANTA_POSTURE_SELECTOR + QUANTA_SKILL_ACTIONS). Same read form the sibling
+    // cli-knob-readsite-domain ratchet already scans (ADR-0527).
+    /\breadCliKnob\s*\(/.test(line) ||
     // destructure read: `const { QUANTA_X } = env` / `… = process.env`
     /\}\s*=\s*(?:process\.)?env\b/.test(line) ||
     // const-keyed gate: `const FOO_ENV = "QUANTA_X"` then `gateOn(env, FOO_ENV)`.
@@ -366,6 +374,15 @@ describe("knob-registry completeness ratchet (ADR-0503 P0)", () => {
     expect(isReadLine(`  const x = gateOn(env, "QUANTA_FAKE_ORPHAN")`)).toBe(true)
     expect(isReadLine(`  // QUANTA_FAKE_ORPHAN is just a comment`)).toBe(false)
     expect(isReadLine(`  throw new Error("QUANTA_FAKE_ORPHAN failed")`)).toBe(false)
+    // R4 blind-spot close: the CLI-LOCAL `readCliKnob("QUANTA_X", …)` accessor is a
+    // REAL env read and MUST be scanned — else a readCliKnob key declared in no
+    // registry passes green (the QUANTA_POSTURE_SELECTOR / QUANTA_SKILL_ACTIONS hole).
+    expect(isReadLine(`  readCliKnob("QUANTA_FAKE_ORPHAN", "bool") ?? false`)).toBe(true)
+    expect(knobsOnLine(`  readCliKnob("QUANTA_FAKE_ORPHAN", "bool") ?? false`)).toEqual([
+      "QUANTA_FAKE_ORPHAN",
+    ])
+    // ...but a readCliKnob NAMED in prose (not called) is NOT a read
+    expect(isReadLine(`   * the source readCliKnob(envKey,"bool") resolves to`)).toBe(false)
     // quoted + env-dot are caught; bare const-name (the `*_ENV` indirection) is NOT
     expect(knobsOnLine(`gateOn(env, "QUANTA_FAKE_ORPHAN")`)).toEqual(["QUANTA_FAKE_ORPHAN"])
     expect(knobsOnLine(`const x = process.env.QUANTA_DOT_READ`)).toEqual(["QUANTA_DOT_READ"])

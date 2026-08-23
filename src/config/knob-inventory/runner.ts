@@ -281,4 +281,24 @@ export const RUNNER: readonly KnobInventoryEntry[] = [
       "Live worktree-command progress gate (RFC-04) — when ON, the `worktree` command stages child-step renders as they land instead of one final render; resolved ONCE at the repl composition root via readCliKnob. Opt-in; unset ⇒ single final render, byte-identical.",
     readSite: "apps/cli/repl.ts",
   },
+  {
+    envKey: "QUANTA_POSTURE_SELECTOR",
+    kind: "bool",
+    default: false,
+    group: "agent-feature",
+    home: "runtime-config",
+    describe:
+      "`/posture` slash-command registration gate (RFC-05 E4) — when ON, registers the posture selector command (view/set the env×task×verify posture); resolved via readCliKnob in slash/posture.ts (isPostureSelectorEnabled). Opt-in; unset ⇒ the command is never registered so `/help` + the command table are byte-identical (parity with `/objective`).",
+    readSite: "apps/cli/slash/posture.ts",
+  },
+  {
+    envKey: "QUANTA_SKILL_ACTIONS",
+    kind: "bool",
+    default: false,
+    group: "agent-feature",
+    home: "runtime-config",
+    describe:
+      "`/skill` slash-command registration gate (RFC-06 F5) — when ON, registers the skill-actions command (copy/discover/invoke skills); resolved via readCliKnob in slash/skill.ts (isSkillActionsEnabled). Opt-in; unset ⇒ the command is never registered so `/help` + the command table are byte-identical (parity with `/posture`).",
+    readSite: "apps/cli/slash/skill.ts",
+  },
 ]

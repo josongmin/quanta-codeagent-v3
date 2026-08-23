@@ -144,4 +144,26 @@ describe("knob-catalog merge/search/resolve (ADR-0503 P3)", () => {
     // proving the declaration is the one the read site consults.
     expect(readCliKnob("QUANTA_WORKTREE_PROGRESS", "bool", {})).toBe(false)
   })
+
+  // R4 — QUANTA_POSTURE_SELECTOR (RFC-05 E4) + QUANTA_SKILL_ACTIONS (RFC-06 F5) are
+  // READ via readCliKnob at apps/cli/slash/{posture,skill}.ts, so each MUST be a
+  // declared catalog knob (discoverable in `/knobs` + default-parity), not an
+  // orphan CLI read. Registered in the shared inventory next to their sibling
+  // gates QUANTA_ATTENTION_NAV / QUANTA_WORKTREE_PROGRESS.
+  test.each([
+    ["QUANTA_POSTURE_SELECTOR", "apps/cli/slash/posture.ts"] as const,
+    ["QUANTA_SKILL_ACTIONS", "apps/cli/slash/skill.ts"] as const,
+  ])("%s is a registered catalog knob (bool, default OFF)", (envKey, readSite) => {
+    const cat = buildKnobCatalog()
+    const knob = cat.get(envKey)
+    expect(knob).toBeDefined()
+    expect(knob?.kind).toBe("bool")
+    expect(knob?.default).toBe(false)
+    expect(knob?.home).toBe("runtime-config")
+    expect(knob?.readSite).toBe(readSite)
+    expect(knob?.describe.length).toBeGreaterThan(0)
+    // the readCliKnob accessor resolves the declared default (OFF) when unset,
+    // proving the declaration is the one the read site consults (default-parity).
+    expect(readCliKnob(envKey, "bool", {})).toBe(false)
+  })
 })
