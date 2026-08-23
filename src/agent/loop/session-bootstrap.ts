@@ -123,7 +123,14 @@ export const maybeStartAutomationTicker = (
 ): AutomationEngineTickerHandle | undefined =>
   deps !== undefined ? startAutomationEngineTicker(cfg, deps) : startAutomationEngineTicker(cfg)
 
-export const createRunAgentContext = async (config: AgentConfig): Promise<RunAgentContext> => {
+/** Config resolution and the plan-mode / skill / recorder seams. */
+const ctxSeams = async (config: AgentConfig) => {
+  /** The factory's MUTABLE state. `let` bindings cannot cross a function
+   *  boundary by value, so they live here and every link mutates in place —
+   *  observationally identical to the closure they replace. */
+  const mut = {
+    lastTurnTiming: null as TurnTiming | null,
+  }
   const cfg: AgentConfig = { ...config }
   // Finalize the session-owned LLM BEFORE feature construction so any
   // stateful feature that captures `config.llm` (classifier, branch-search,
@@ -172,6 +179,29 @@ export const createRunAgentContext = async (config: AgentConfig): Promise<RunAge
     ? undefined
     : new CompactionBreaker(cfg.compactionBreaker?.caps)
   const dedupGate = attachDedupGate(cfg)
+  return {
+    config,
+    cfg,
+    rawWm,
+    wm,
+    features,
+    pendingPlanExitRef,
+    onPlanExitOutcome,
+    pendingPlanEntryRef,
+    onPlanEnterRequest,
+    skillGate,
+    recorder,
+    ttfm,
+    sessionId,
+    breaker,
+    dedupGate,
+    mut,
+  }
+}
+
+/** The per-turn guard states and the collectors that ride with them. */
+const ctxGuards = (ctx: Awaited<ReturnType<typeof ctxSeams>>) => {
+  const { cfg, mut } = ctx
   const { state: verifyGuardState, history: toolHistory } = buildVerifyGuard(cfg)
   const closeoutGuardState = buildCloseoutGuard(cfg)
   attachCapEnforcer(cfg)
@@ -189,12 +219,36 @@ export const createRunAgentContext = async (config: AgentConfig): Promise<RunAge
   const { agg: redactionAgg, record: recordRedaction } = createRedactionRollup()
   const summaryArchive: ConversationSummaryArchive | undefined =
     cfg.compaction?.archive === true ? createArchive() : undefined
-  let lastTurnTiming: TurnTiming | null = null
   const recordTurnTiming = (timing: TurnTiming): void => {
-    lastTurnTiming = timing
+    mut.lastTurnTiming = timing
   }
   const turnDiffSession: TurnDiffSession | undefined = buildTurnDiffSession(cfg)
   const gitDirectiveCollector = buildGitDirectiveEmit(cfg)
+  return {
+    verifyGuardState,
+    toolHistory,
+    closeoutGuardState,
+    localizePhaseState,
+    guardChain,
+    toolChoiceState,
+    hookPromptPending,
+    memoryCitations,
+    redactionEnabled,
+    redactionAgg,
+    recordRedaction,
+    summaryArchive,
+    recordTurnTiming,
+    turnDiffSession,
+    gitDirectiveCollector,
+  }
+}
+
+/** Background workers: compaction, proactive rate-limit handling, the shell
+ *  snapshot session and the registry snapshot. */
+const ctxBackground = async (
+  ctx: Awaited<ReturnType<typeof ctxSeams>> & ReturnType<typeof ctxGuards>,
+) => {
+  const { cfg, wm } = ctx
   const bgCompaction: BackgroundSummarizationController<BgSummaryPayload> | undefined =
     makeBgCompactionController(
       { [BG_COMPACTION_ENV]: runtimeConfig().bgCompaction ? "1" : "0" },
@@ -242,6 +296,36 @@ export const createRunAgentContext = async (config: AgentConfig): Promise<RunAge
   // the ref is seeded from the SAME registry so even turn-0 matches).
   const registrySnapshot =
     cfg.registrySnapshotRef?.current() ?? buildTurnRegistrySnapshot(cfg.registry)
+  return { bgCompaction, rlProactive, rateLimitProactive, shellSnapshotSession, registrySnapshot }
+}
+
+/** The session object itself and its seed turn state. */
+const ctxSession = (
+  ctx: Awaited<ReturnType<typeof ctxSeams>> &
+    ReturnType<typeof ctxGuards> &
+    Awaited<ReturnType<typeof ctxBackground>>,
+) => {
+  const {
+    config,
+    cfg,
+    wm,
+    features,
+    skillGate,
+    recorder,
+    ttfm,
+    breaker,
+    toolHistory,
+    guardChain,
+    toolChoiceState,
+    hookPromptPending,
+    memoryCitations,
+    recordRedaction,
+    summaryArchive,
+    recordTurnTiming,
+    bgCompaction,
+    rateLimitProactive,
+    registrySnapshot,
+  } = ctx
 
   const session: TurnSession = {
     config: cfg,
@@ -302,6 +386,29 @@ export const createRunAgentContext = async (config: AgentConfig): Promise<RunAge
   // Its `stop()` rides `disposeResources` below — guaranteed on clean finish AND
   // throw (idempotent).
   const automationTicker = maybeStartAutomationTicker(cfg)
+  return { session, turnStateSeed, automationTicker }
+}
+
+/** Teardown: the dispose guard, the finish hook, and resource disposal. */
+const ctxTeardown = async (
+  ctx: Awaited<ReturnType<typeof ctxSeams>> &
+    ReturnType<typeof ctxGuards> &
+    Awaited<ReturnType<typeof ctxBackground>> &
+    ReturnType<typeof ctxSession>,
+) => {
+  const {
+    cfg,
+    wm,
+    features,
+    recorder,
+    sessionId,
+    mut,
+    memoryCitations,
+    redactionEnabled,
+    redactionAgg,
+    recordRedaction,
+    automationTicker,
+  } = ctx
 
   // D12 — ONE dispose guard shared by the normal finish chain and the throw-path
   // `finally` in `runAgentInner`, so the resource-dispose pass runs at most once.
@@ -318,7 +425,7 @@ export const createRunAgentContext = async (config: AgentConfig): Promise<RunAge
       features,
       memoryCitations,
       redactionAgg,
-      lastTurnTiming,
+      lastTurnTiming: mut.lastTurnTiming,
       reason,
       turns,
       disposeGuard,
@@ -338,6 +445,37 @@ export const createRunAgentContext = async (config: AgentConfig): Promise<RunAge
     await disposeSessionResources({ cfg, features, guard: disposeGuard })
   }
 
+  return { disposeGuard, finish, disposeResources }
+}
+
+/** Assemble the chained builders. */
+export const createRunAgentContext = async (config: AgentConfig): Promise<RunAgentContext> => {
+  const p0 = await ctxSeams(config)
+  const p1 = ctxGuards({ ...p0 })
+  const p2 = await ctxBackground({ ...p0, ...p1 })
+  const p3 = ctxSession({ ...p0, ...p1, ...p2 })
+  const p4 = await ctxTeardown({ ...p0, ...p1, ...p2, ...p3 })
+  const {
+    cfg,
+    wm,
+    features,
+    pendingPlanExitRef,
+    pendingPlanEntryRef,
+    recorder,
+    sessionId,
+    breaker,
+    dedupGate,
+    localizePhaseState,
+    hookPromptPending,
+    turnDiffSession,
+    gitDirectiveCollector,
+    bgCompaction,
+    shellSnapshotSession,
+    session,
+    turnStateSeed,
+    finish,
+    disposeResources,
+  } = { ...p0, ...p1, ...p2, ...p3, ...p4 }
   return {
     features,
     cfg,

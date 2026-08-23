@@ -131,7 +131,17 @@ const resolveCtor = (override: AttachSocketCtor | undefined): AttachSocketCtor =
   return g.WebSocket
 }
 
-export const attachToDaemon = async (opts: AttachToDaemonOptions): Promise<AttachedSession> => {
+/** The socket, the framed transport over it, and the handshake result. */
+const attachTransport = (opts: AttachToDaemonOptions) => {
+  /** The factory's MUTABLE state. `let` bindings cannot cross a function
+   *  boundary by value, so they live here and every link mutates in place —
+   *  observationally identical to the closure they replace. */
+  const mut = {
+    closed: false,
+    sendBroken: false,
+    resolveDone: undefined as (() => void) | undefined,
+    disconnectBannerPrinted: false,
+  }
   const Ctor = resolveCtor(opts.webSocketCtor)
   const newCommandId = opts.newCommandId ?? (() => crypto.randomUUID())
   const issuedAt = opts.issuedAt ?? (() => new Date().toISOString())
@@ -148,15 +158,16 @@ export const attachToDaemon = async (opts: AttachToDaemonOptions): Promise<Attac
     transport,
     sessionId: HANDSHAKE_DISCOVERY_SESSION_ID,
   })
-
-  let closed = false
-  // Latched true once any send is observed to fail (dead socket) so the read
-  // loop stops accepting further input instead of silently dropping lines.
-  let sendBroken = false
-  let resolveDone: (() => void) | undefined
   const done = new Promise<void>((resolve) => {
-    resolveDone = resolve
+    mut.resolveDone = resolve
   })
+  return { opts, Ctor, newCommandId, issuedAt, socket, transport, handshake, client, done, mut }
+}
+
+/** Outbound protocol: send a command, wait for ready, run the approval flow,
+ *  and issue the initial connect. */
+const attachProtocol = async (ctx: ReturnType<typeof attachTransport>) => {
+  const { opts, newCommandId, issuedAt, socket, transport, handshake, mut } = ctx
 
   const sendCommand = async (command: SessionCommand): Promise<void> => {
     // Send straight through the transport (bypassing the client's seed-id
@@ -168,17 +179,17 @@ export const attachToDaemon = async (opts: AttachToDaemonOptions): Promise<Attac
   // (bounded — a handshake that never settles fails visibly, not silently).
   const waitForReady = async (): Promise<boolean> => {
     const start = Date.now()
-    while (!handshake.ready && !closed) {
+    while (!handshake.ready && !mut.closed) {
       if (Date.now() - start > 10_000) return false
       await new Promise((resolve) => setTimeout(resolve, 10))
     }
-    return handshake.ready && !closed
+    return handshake.ready && !mut.closed
   }
 
   // S3 (jul-16 SDK ticket 01) — the approval round-trip (serialized prompts →
   // respond → ADR-0540 marker-gated turn.run re-issue) is the HOISTED shared
   // flow; this surface supplies only its own seams: the TTY prompter, the
-  // pre-handshake banner, and the loud sendBroken latch on a dead socket.
+  // pre-handshake banner, and the loud mut.sendBroken latch on a dead socket.
   // Continuation reporting stays unwired here (attach has no awaitTurnEnd).
   const approvalFlow: SessionApprovalFlow = createSessionApprovalFlow({
     waitForReady,
@@ -194,16 +205,50 @@ export const attachToDaemon = async (opts: AttachToDaemonOptions): Promise<Attac
       )
     },
     onRespondSendFailed: () => {
-      sendBroken = true
+      mut.sendBroken = true
       opts.write("\n[disconnected from daemon (approval response not delivered)]\n")
     },
   })
+
+  // Kick the handshake: send the discovery connect once the socket is open.
+  // Bun's client WS may already be CONNECTING; the `open` listener fires the
+  // first frame. If the socket opens before we attach (unlikely), the readyState
+  // guard sends immediately.
+  const sendInitialConnect = (): void => {
+    void transport.send(handshake.initialConnect()).catch(() => undefined)
+  }
+  if (socket.readyState === 1 /* OPEN */) {
+    sendInitialConnect()
+  } else {
+    socket.addEventListener("open", sendInitialConnect)
+  }
+  return { sendCommand, waitForReady, approvalFlow, sendInitialConnect }
+}
+
+/** Inbound dispatch and teardown. These are one link because the event
+ *  handlers and `disconnect` reference each other — splitting them would turn
+ *  a legal closure-level forward reference into a compile error. */
+const attachDispatch = async (
+  ctx: ReturnType<typeof attachTransport> & Awaited<ReturnType<typeof attachProtocol>>,
+) => {
+  const {
+    opts,
+    newCommandId,
+    issuedAt,
+    socket,
+    transport,
+    handshake,
+    client,
+    mut,
+    sendCommand,
+    approvalFlow,
+  } = ctx
 
   const handleEvent = (event: SessionEvent): void => {
     const chunk = renderSessionEvent(event)
     if (chunk.length > 0) opts.write(chunk)
     // The daemon told us the shared session is gone — the render already
-    // printed the "[session closed by daemon]" banner; now actually tear the
+    // printed the "[session mut.closed by daemon]" banner; now actually tear the
     // client down (stop the read loop, close the socket, resolve `done`) rather
     // than leaving the CLI attached to a dead session. (audit finding #2)
     if (event.type === "session.closed") {
@@ -235,26 +280,13 @@ export const attachToDaemon = async (opts: AttachToDaemonOptions): Promise<Attac
 
   const unsubscribe = client.onMessage(onMessage)
 
-  // Kick the handshake: send the discovery connect once the socket is open.
-  // Bun's client WS may already be CONNECTING; the `open` listener fires the
-  // first frame. If the socket opens before we attach (unlikely), the readyState
-  // guard sends immediately.
-  const sendInitialConnect = (): void => {
-    void transport.send(handshake.initialConnect()).catch(() => undefined)
-  }
-  if (socket.readyState === 1 /* OPEN */) {
-    sendInitialConnect()
-  } else {
-    socket.addEventListener("open", sendInitialConnect)
-  }
-
   const close = async (): Promise<void> => {
-    if (closed) return
-    closed = true
+    if (mut.closed) return
+    mut.closed = true
     const sid = handshake.sessionId
     // Skip the best-effort `turn.cancel` when the socket is already broken/
     // closing — a send on a dead socket only throws (it's swallowed anyway).
-    if (sid !== undefined && !sendBroken && socket.readyState !== 3 /* CLOSED */) {
+    if (sid !== undefined && !mut.sendBroken && socket.readyState !== 3 /* CLOSED */) {
       await sendCommand(
         buildTurnCancel(
           { sessionId: sid, clock: ATTACH_CLOCK },
@@ -264,19 +296,12 @@ export const attachToDaemon = async (opts: AttachToDaemonOptions): Promise<Attac
     }
     unsubscribe()
     await client.close().catch(() => undefined)
-    resolveDone?.()
+    mut.resolveDone?.()
   }
-
-  // Single teardown path for an INVOLUNTARY end of the session (daemon dropped
-  // the socket, fired an error, or sent `session.closed`). Prints a one-line
-  // banner so the operator isn't left staring at a silently-dead prompt, then
-  // routes through `close()` (idempotent) to stop the read loop + resolve
-  // `done`. (audit findings #1, #2)
-  let disconnectBannerPrinted = false
   const disconnect = (banner?: string): Promise<void> => {
-    if (closed) return Promise.resolve()
-    if (banner !== undefined && !disconnectBannerPrinted) {
-      disconnectBannerPrinted = true
+    if (mut.closed) return Promise.resolve()
+    if (banner !== undefined && !mut.disconnectBannerPrinted) {
+      mut.disconnectBannerPrinted = true
       opts.write(banner)
     }
     return close()
@@ -292,6 +317,16 @@ export const attachToDaemon = async (opts: AttachToDaemonOptions): Promise<Attac
   socket.addEventListener("error", () => {
     void disconnect("\n[disconnected from daemon (connection error)]\n")
   })
+  return { handleEvent, onMessage, unsubscribe, close, disconnect }
+}
+
+/** The read loop that feeds the dispatch above. */
+const attachReadLoop = async (
+  ctx: ReturnType<typeof attachTransport> &
+    Awaited<ReturnType<typeof attachProtocol>> &
+    Awaited<ReturnType<typeof attachDispatch>>,
+) => {
+  const { opts, newCommandId, issuedAt, handshake, mut, sendCommand, waitForReady, close } = ctx
 
   // stdin read loop — each line becomes input.append + turn.run, but only once
   // the handshake is READY (so commands carry the canonical id the daemon
@@ -301,7 +336,7 @@ export const attachToDaemon = async (opts: AttachToDaemonOptions): Promise<Attac
   const readLoop = async (): Promise<void> => {
     try {
       for await (const line of opts.stdin) {
-        if (closed || sendBroken) break
+        if (mut.closed || mut.sendBroken) break
         // WS-B (UUX-3-02) — a pending approval claims the next line as its
         // answer BEFORE the line becomes session input (previously a second
         // readline raced this loop for the same stdin and the "y" could be
@@ -311,7 +346,7 @@ export const attachToDaemon = async (opts: AttachToDaemonOptions): Promise<Attac
         if (!ready) {
           // UUX-3-14 — a handshake that never settles must not eat the typed
           // line and exit SILENTLY: say why the input went nowhere.
-          if (!closed) {
+          if (!mut.closed) {
             opts.write(
               "\n[handshake with the daemon never completed — input not sent; detaching]\n",
             )
@@ -335,8 +370,8 @@ export const attachToDaemon = async (opts: AttachToDaemonOptions): Promise<Attac
             // socket died must not vanish silently — the user typed a line and
             // it went nowhere. Surface it + stop accepting further input (the
             // close/error listeners normally fire too, but a send can race
-            // ahead of them). Latch `sendBroken` so the loop drains and exits.
-            sendBroken = true
+            // ahead of them). Latch `mut.sendBroken` so the loop drains and exits.
+            mut.sendBroken = true
             failed = true
             opts.write("\n[disconnected from daemon (send failed)]\n")
             break
@@ -351,6 +386,16 @@ export const attachToDaemon = async (opts: AttachToDaemonOptions): Promise<Attac
 
   void readLoop()
 
+  return { readLoop }
+}
+
+/** Assemble the chained builders. */
+export const attachToDaemon = async (opts: AttachToDaemonOptions): Promise<AttachedSession> => {
+  const p0 = attachTransport(opts)
+  const p1 = await attachProtocol({ ...p0 })
+  const p2 = await attachDispatch({ ...p0, ...p1 })
+  const p3 = await attachReadLoop({ ...p0, ...p1, ...p2 })
+  const { handshake, done, close } = { ...p0, ...p1, ...p2, ...p3 }
   return {
     get sessionId() {
       return handshake.sessionId

@@ -4,13 +4,11 @@
   "godFunctionMaxLines": 150,
   "modules": [],
   "functions": [
-    "src/agent/loop/session-bootstrap.ts::createRunAgentContext",
     "src/agent/memory-tools.ts::memoryTools",
     "src/agent/session-resource-registry/disk-adapter/disk-store.ts::createDiskSessionResourceRegistry",
     "src/agent/stream-callbacks.ts::createStreamDispatcher",
     "src/agent/tier1/subagent.ts::buildSubagentBlock",
     "src/apps/bench/remote/ec2.ts::createEc2Backend",
-    "src/apps/cli/attach/attach-client.ts::attachToDaemon",
     "src/apps/cli/index.ts::main",
     "src/apps/cli/mcp-server-setup.ts::assembleAndServe",
     "src/apps/cli/repl/session-setup.ts::setupSession",
