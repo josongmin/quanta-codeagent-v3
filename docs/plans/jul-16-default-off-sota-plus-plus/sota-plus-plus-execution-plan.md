@@ -4,7 +4,7 @@
 >
 > **어딧 핵심 수치**: unwired/seam-only 라벨 41행 중 **18행이 실은 ENV-GATED-LIVE**(라벨만 stale), 진짜 dormant는 **21행**. repair-first 17 중 **11행은 blocker가 STALE**(이미 고쳐짐/배선됨). 진짜 신규 코드 갭은 **6건**, 통합대상 중복은 **5건**.
 
-> **2026-07-20 current-state addendum**: 아래 Track 목록은 당시 실행 계획이다. 현재 authority는 `default-off-ledger.yaml`과 `00-index.md`이며, live source 재감사 결과는 **165/173 wired (95.4%)**, unknown 0이다. `typed-event` bounded reader, stream cancellation, compaction `PostCompact` consumer는 이미 landed했고, `search_codebase`는 기본 lexical wire(semantic index opt-in과 별개)로 정정됐다. `fast-apply-merge`는 host-provided review authority를 `ToolContext`까지 전달하지만, env/model만으로는 계속 fail-closed다. `identity-mid-session-prompt-rebuild`는 inline duplicate를 runner factory로 대체했다. 남은 8건은 외부/product contract 4, lifecycle owner 없는 producer 3, loop producer 없는 transport seam 1이다. 따라서 아래의 “배선 가능” 목록을 현재 작업 지시로 해석하지 않는다.
+> **2026-07-20 current-state addendum**: 아래 Track 목록은 당시 실행 계획이다. 현재 authority는 `default-off-ledger.yaml`과 `00-index.md`이며, live source 재감사 결과는 **172/180 wired (95.6%)**, unknown 0이다. `typed-event` bounded reader, stream cancellation, compaction `PostCompact` consumer는 이미 landed했고, `search_codebase`는 기본 lexical wire(semantic index opt-in과 별개)로 정정됐다. `fast-apply-merge`는 host-provided review authority를 `ToolContext`까지 전달하지만, env/model만으로는 계속 fail-closed다. `identity-mid-session-prompt-rebuild`는 inline duplicate를 runner factory로 대체했다. 남은 8건은 외부/product contract 4, lifecycle owner 없는 producer 3, loop producer 없는 transport seam 1이다. 따라서 아래의 “배선 가능” 목록을 현재 작업 지시로 해석하지 않는다.
 
 ---
 

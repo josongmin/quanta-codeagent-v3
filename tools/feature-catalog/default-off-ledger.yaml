@@ -43,6 +43,98 @@ runtime_cli_seed_mappings:
 row_defaults: {}
 
 rows:
+  - feature_id: aug22-rfc01-attention-nav
+    gate_owner: [QUANTA_ATTENTION_NAV]
+    activation: env/config
+    effective_default: { cli: off, web: na, bench: na, headless: na, daemon: na }
+    reachability: wired
+    proof: { on: wire, off_identity: wire, receipt: null }
+    risk: behavioral-cost
+    decision: measure-first
+    owner_seam: src/runner/assemble/session-authorities/build.ts
+    rollback: unset QUANTA_ATTENTION_NAV
+    duplicate_of: null
+    lifecycle_evidence: null
+  - feature_id: aug22-rfc03-objective-propose-goal-hitl
+    gate_owner: [QUANTA_PROPOSE_GOAL]
+    activation: env/config
+    effective_default: { cli: off, web: off, bench: na, headless: na, daemon: off }
+    reachability: wired
+    proof: { on: unit, off_identity: unit, receipt: null }
+    risk: security
+    decision: hold
+    owner_seam: src/host/runtime/objective-store-wire.ts
+    rollback: unset QUANTA_PROPOSE_GOAL
+    duplicate_of: null
+    lifecycle_evidence: null
+  - feature_id: aug22-rfc04-worktree-live-progress
+    gate_owner: [QUANTA_WORKTREE_PROGRESS]
+    activation: env/config
+    effective_default: { cli: off, web: na, bench: na, headless: na, daemon: na }
+    reachability: wired
+    proof: { on: wire, off_identity: wire, receipt: null }
+    risk: behavioral-cost
+    decision: measure-first
+    owner_seam: src/runner/session-ops/worktree/live-progress.ts
+    rollback: unset QUANTA_WORKTREE_PROGRESS
+    duplicate_of: null
+    lifecycle_evidence: null
+  - feature_id: aug22-rfc05-posture-selector
+    gate_owner: [QUANTA_POSTURE_SELECTOR, QUANTA_POSTURE_DURABLE_RESUME]
+    activation: env/config
+    effective_default: { cli: off, web: na, bench: na, headless: na, daemon: na }
+    reachability: wired
+    proof: { on: wire, off_identity: wire, receipt: null }
+    risk: security
+    decision: measure-first
+    owner_seam: src/apps/cli/slash/posture.ts
+    rollback: unset QUANTA_POSTURE_SELECTOR (and QUANTA_POSTURE_DURABLE_RESUME)
+    duplicate_of: null
+    lifecycle_evidence: null
+  # NOTE: no env gate exists. The guard is bound unconditionally at bootstrap
+  # (live-posture-runtime.ts), so it is always LIVE on cli/headless; what makes
+  # that benign is the VALUE — `askOutsidePlan` defaults to the current-behavior
+  # preset, i.e. admitted, so behavior is unchanged. `effective_default` is the
+  # CLI-SEED axis (checker derives it from runtime_cli_seed_mappings), and this
+  # feature has no seed entry, so `off` is the accurate value there. Do not
+  # rewrite this row as `env/config`: the feature YAML itself records
+  # "No dedicated env var".
+  - feature_id: aug22-rfc05-question-availability-guard
+    gate_owner: [AgentConfig.questionGuard, posture.askOutsidePlan]
+    activation: port-present
+    effective_default: { cli: off, web: na, bench: na, headless: off, daemon: na }
+    reachability: wired
+    proof: { on: unit, off_identity: unit, receipt: null }
+    risk: security
+    decision: hold
+    owner_seam: src/agent/dispatch-guard/question-availability.ts
+    rollback: unbind AgentConfig.questionGuard at bootstrap (no env gate); or /posture ask on
+    duplicate_of: null
+    lifecycle_evidence: null
+  - feature_id: aug22-rfc06-2-worktree-cwd-pin
+    gate_owner: [QUANTA_WORKTREE_CWD_PIN]
+    activation: env/config
+    effective_default: { cli: off, web: na, bench: na, headless: na, daemon: na }
+    reachability: wired
+    proof: { on: unit, off_identity: unit, receipt: null }
+    risk: mutating
+    decision: measure-first
+    owner_seam: src/runner/orchestrate/worktree-cwd-pin-wire.ts
+    rollback: unset QUANTA_WORKTREE_CWD_PIN
+    duplicate_of: null
+    lifecycle_evidence: null
+  - feature_id: aug22-rfc06-skill-actions
+    gate_owner: [QUANTA_SKILL_ACTIONS]
+    activation: env/config
+    effective_default: { cli: off, web: na, bench: na, headless: na, daemon: na }
+    reachability: wired
+    proof: { on: wire, off_identity: wire, receipt: null }
+    risk: mutating
+    decision: measure-first
+    owner_seam: src/apps/cli/slash/skill.ts
+    rollback: unset QUANTA_SKILL_ACTIONS
+    duplicate_of: null
+    lifecycle_evidence: null
   - feature_id: adaptive-thinking
     gate_owner: [QUANTA_ADAPTIVE_THINKING]
     activation: env/config

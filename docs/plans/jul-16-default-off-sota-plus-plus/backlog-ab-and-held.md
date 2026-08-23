@@ -2,8 +2,8 @@
 
 > 레저·소스·테스트를 대조한 백로그다. 기능별 **역할 / 왜 default-ON 안 했나 / 코드위치**는 레저 ID와 대조한다. 경쟁사 비교는 별도 출처 상태를 명시하며, 인용 없는 항목은 roadmap 근거로 쓰지 않는다.
 >
-> **Closure 현황 (2026-08-01 source re-audit)**: eligible 173행, **wired 165/173 = 95.4%**, runtime CLI seed 31, unknown-surface 0, unknown-value 0, checker error 0. `compaction-event-emit`와 `context-change-injection`은 normal host에 항상 조립되는 production wire라 default-off denominator에서 제외했다. `fast-apply-merge`는 명시적 host `FastApplyMergeReviewSeam`을 `ToolContext`까지 전달한다; env/model만으로는 계속 fail-closed다.
-> decisions: measure-first 67 · **enable-now 69** · repair-first 0 · hold 37.
+> **Closure 현황 (2026-08-23 source re-audit)**: eligible 180행, **wired 172/180 = 95.6%**, runtime CLI seed 31, unknown-surface 0, unknown-value 0, checker error 0. `compaction-event-emit`와 `context-change-injection`은 normal host에 항상 조립되는 production wire라 default-off denominator에서 제외했다. `fast-apply-merge`는 명시적 host `FastApplyMergeReviewSeam`을 `ToolContext`까지 전달한다; env/model만으로는 계속 fail-closed다.
+> decisions: measure-first 72 · **enable-now 69** · repair-first 0 · hold 39.
 >
 > **남은 8행의 성격**: 4개는 실제 외부 계약/credential 또는 image policy가 먼저 필요하고, 3개는 producer-only여서 수명 소유자가 없으며, 1개는 실행 loop producer가 없는 transport seam이다. 가짜 consumer 또는 자동승인을 만들지 않는 한 이들은 `wired`가 될 수 없다. measure-first 67행은 행동/비용을 바꿔 **efficacy A/B(operator 결정)**가 선행돼야 기본값을 바꿀 수 있다.
 

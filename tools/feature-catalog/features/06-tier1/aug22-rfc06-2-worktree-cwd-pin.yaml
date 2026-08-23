@@ -44,6 +44,7 @@ evidence:
       - tests/unit/session-ops/worktree-cwd-pin.test.ts
       - tests/unit/runner/session-turn-driver.test.ts
       - tests/unit/session-ops/worktree-reconcile-resume.test.ts
+      - tests/unit/session-ops/worktree-cwd-pin-hellgate.test.ts
     integration: []
     contract: []
 knobs:
