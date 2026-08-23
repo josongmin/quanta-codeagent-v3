@@ -13,8 +13,21 @@
 import { extractIssueHint, pytestReportPathFor } from "@/agent"
 import { type OwnerSibling, resolveOwnerSiblings } from "@/agent/closure"
 import { startBackgroundLspPrewarm } from "@/agent/lsp-bridge"
+import type { ObservationBundle } from "@/agent/observation/fragment"
+import {
+  computeFailureSourceDigest,
+  type FailureFactsExtraction,
+  type FailureFactsIdentity,
+} from "@/agent/observation/metrics"
 import { type LLMPort, laneLabeledPort } from "@/llm"
-import type { BenchObserver } from "../../observe"
+import { logger } from "@/shared"
+import {
+  attemptFactsRecordPath,
+  commitAttemptFacts,
+  type FactsStoreIO,
+  nodeFactsStoreIO,
+} from "../../failure-facts"
+import type { AttemptObservation, BenchObserver } from "../../observe"
 import { emitLocalize } from "../../report"
 import type { BenchReproTestTelemetry, Instance, InstanceResult } from "../../types"
 import { buildClosureSession, type ClosureSessionState } from "../closure-session"
@@ -55,7 +68,11 @@ import {
   readSandboxSource,
   stage1FilesOf,
 } from "./context-types"
-import { prepareIssueHint, resolveChaMultisiteContext } from "./localize-prep"
+import {
+  type FailureFactsWiring,
+  prepareIssueHint,
+  resolveChaMultisiteContext,
+} from "./localize-prep"
 import { verifyStrictPresetLspGrounding } from "./repo-source-scan"
 import {
   installReproTestHint,
@@ -68,6 +85,75 @@ import {
   terminalAgentResult,
 } from "./result-assembly"
 
+/** The localize-seam failure-facts wiring PLUS the bundle observer that binds its
+ *  expected source digest. Both ride the SAME `prepareIssueHint` call. */
+interface LocalizeFailureFactsSeam {
+  readonly failureFacts: FailureFactsWiring
+  readonly onObservationBundle: (bundle: ObservationBundle) => void
+}
+
+/**
+ * RFC-07 G4 — build the PRODUCTION failure-facts wiring for the live localize
+ * seam. This is the provider that makes G3's `extractFailureFacts` actually run
+ * in production (its only prior caller was a test) and PERSIST its output inline
+ * with the per-attempt facts record via the G4 atomic writer.
+ *
+ * Identity: `runId` + `<instanceId>.<attempt>` are the caller's EXACT binding.
+ * The source digest is only knowable once the live bundle is built inside
+ * `prepareIssueHint`; `onObservationBundle` fires with that SAME bundle
+ * immediately before the failure-facts seam, so we capture the live digest there
+ * and bind it as the expected source. A freshly-built per-attempt bundle has no
+ * crossed stream, so this is the truthful self-consistent binding (run/attempt
+ * stay the meaningful strict axes); `extractFailureFacts` still recomputes and
+ * re-checks the digest, so a divergence remains representable.
+ *
+ * A mismatched / incomplete extraction routes to `commitAttemptFacts`, which
+ * REJECTS it (nothing persisted) — never a partial record.
+ */
+export const buildLocalizeFailureFactsSeam = (
+  observe: AttemptObservation,
+  instanceId: string,
+  io: FactsStoreIO = nodeFactsStoreIO,
+): LocalizeFailureFactsSeam => {
+  const attempt = observe.attempt ?? 0
+  const attemptId = `${instanceId}.${attempt}`
+  const factsPath = attemptFactsRecordPath(observe.dir, observe.runId, instanceId, attempt)
+  let liveSourceDigest = ""
+  const expected: FailureFactsIdentity = {
+    runId: observe.runId,
+    attemptId,
+    get sourceDigest() {
+      return liveSourceDigest
+    },
+  }
+  const persist = (extraction: FailureFactsExtraction): void => {
+    // BEST-EFFORT: failure-facts persistence is observe-only and MUST NOT abort
+    // the attempt (the seam docs pin it as pure observation). The atomic writer
+    // still guarantees no PARTIAL record lands on a write fault — we only swallow
+    // the throw here so an IO hiccup degrades to "facts unavailable", never a
+    // failed instance. `commitAttemptFacts` itself stays strict (throws) so the
+    // atomicity unit test can observe the failure.
+    try {
+      commitAttemptFacts(io, factsPath, extraction)
+    } catch (e) {
+      logger.warn("observation: failure-facts persist failed (observe-only, ignored)", {
+        error: e instanceof Error ? e.message : String(e),
+      })
+    }
+  }
+  return {
+    onObservationBundle: (bundle) => {
+      liveSourceDigest = computeFailureSourceDigest(bundle)
+    },
+    failureFacts: {
+      expected,
+      capturedUnder: { runId: observe.runId, attemptId },
+      onFacts: (facts) => persist({ kind: "extracted", facts }),
+      onUnavailable: (outcome) => persist(outcome),
+    },
+  }
+}
+
 const prepareHintAndReproContext = async (
   instance: Instance,
   sandbox: string,
@@ -79,8 +165,18 @@ const prepareHintAndReproContext = async (
    *  post-mortem localization RCA can see truncation / candidate breadth. Absent
    *  ⇒ no-op (behaviour-neutral), same gate as `emitSandbox`. */
   observer?: BenchObserver,
+  /** RFC-07 G4 — the per-attempt observation handle (run/attempt/dir). Present ⇒
+   *  the live localize seam derives versioned failure-facts and PERSISTS them via
+   *  the G4 atomic writer. Absent ⇒ byte-identical (no facts wiring, no write),
+   *  same default-OFF gate as observation itself. */
+  observe?: AttemptObservation,
 ): Promise<HintReproContext> => {
   let localizeCandidates: readonly string[] = []
+  // RFC-07 G4 — construct the production failure-facts seam once (gated on the
+  // observe handle, so a non-observing run stays byte-identical: no wiring, no
+  // extractor run, no write).
+  const factsSeam =
+    observe !== undefined ? buildLocalizeFailureFactsSeam(observe, instance.id) : undefined
   const precomputedHint = await prepareIssueHint(instance, sandbox, posture.issueHintMode, {
     // Phase lane → recorded as metadata.lane, so the localize turns group under
     // one authoritative "localize" band in the viewer (replay-neutral label).
@@ -96,6 +192,14 @@ const prepareHintAndReproContext = async (
     // observer (no-op when unbound). Kept behind the observer gate so a
     // non-observing run stays byte-identical.
     onLocalize: (data) => emitLocalize(observer, data),
+    // RFC-07 G4 — the live failure-facts seam + the bundle observer that binds
+    // its expected source digest. Both ride this same call (default-OFF absent).
+    ...(factsSeam !== undefined
+      ? {
+          failureFacts: factsSeam.failureFacts,
+          onObservationBundle: factsSeam.onObservationBundle,
+        }
+      : {}),
   })
   const chaMultisite = await resolveChaMultisiteContext({
     instance,
@@ -315,6 +419,9 @@ export const prepareAttemptContext = async (
     posture,
     deps.reproArtifactSink,
     observer,
+    // RFC-07 G4 — the observe handle lights up the live failure-facts persist
+    // seam (default-OFF when observation is unwired).
+    deps.observe,
   )
   const stage1Files = mergeForwardLocalizeStage1Files(hintRepro, forwardLocalizeOwners)
   const ownerResolved = await resolveOwnerResolved({

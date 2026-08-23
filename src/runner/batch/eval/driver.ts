@@ -102,6 +102,7 @@ export { buildAdaptivePhasePacket } from "./driver/adaptive-evidence"
 // `./driver/attempt-context.ts` (pure code motion). These were public on driver;
 // re-export verbatim.
 export {
+  buildLocalizeFailureFactsSeam,
   maybeValidateTerminalResult,
   prepareAttemptContext,
 } from "./driver/attempt-context"
