@@ -31,11 +31,13 @@ export class WorktreeError extends Error {
 const git = async (
   repoRoot: string,
   args: string,
-  // RFC-04 D2 — OPTIONAL typed output observer. When supplied, git's own
-  // stderr (e.g. checkout progress) streams through the existing
-  // `runShell.onShellEvent` seam so a caller can surface a REAL checkout ratio.
-  // Absent ⇒ `runShell` is byte-identical to the pre-D2 path (its own
-  // documented contract: no observer ⇒ no events, no extra branching).
+  // OPTIONAL typed output observer. When supplied, git's own stdout/stderr/exit
+  // events stream through the existing `runShell.onShellEvent` seam (generic
+  // command observability). NOTE: `git worktree add` shares the object store and
+  // rejects `--progress`, so it emits NO per-file checkout meter — there is no
+  // real checkout percentage to surface here (RESOLUTION-PLAN R5: the delivered
+  // UX is the D1 staged card). Absent ⇒ `runShell` is byte-identical to the
+  // legacy path (its own contract: no observer ⇒ no events, no extra branching).
   onShellEvent?: (event: RunShellEvent) => void,
 ) => {
   // `args` is fully controlled by this module (ids are sanitized); no
@@ -86,17 +88,17 @@ const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms
  *
  * @param git           the module's `git(repoRoot, args, onShellEvent?)` runner.
  * @param repoRoot      repo to run git in.
- * @param addArgs       the full `worktree add ...` arg string. RFC-04 D2:
- *                      this string is NEVER mutated by the observer path (no
- *                      `--progress` is smuggled in — that flag is invalid for
- *                      `git worktree add` on every git; see worktree-progress
- *                      doc). Observer-present and observer-absent runs issue a
- *                      byte-identical add command.
+ * @param addArgs       the full `worktree add ...` arg string. This string is
+ *                      NEVER mutated by the observer path — no `--progress` is
+ *                      smuggled in (that flag is invalid for `git worktree add`
+ *                      on every git). Observer-present and observer-absent runs
+ *                      issue a byte-identical add command.
  * @param worktreePath  the dir the add targets (for leftover cleanup).
- * @param onShellEvent  RFC-04 D2 — OPTIONAL observer threaded ONLY to the
+ * @param onShellEvent  OPTIONAL generic runShell observer threaded ONLY to the
  *                      `worktree add` invocations (not the prune/remove
- *                      idempotency cleanup) so a caller can stream git's own
- *                      checkout output. Absent ⇒ byte-identical legacy path.
+ *                      idempotency cleanup). `git worktree add` streams no
+ *                      checkout meter, so this yields no progress ratio. Absent ⇒
+ *                      byte-identical legacy path.
  * @returns the final {@link ShellResult}-shaped result (success, or the last
  *          failure if retries are exhausted / the failure was non-transient).
  */
@@ -162,9 +164,9 @@ export const withWorktree = async <T>(
   id: string,
   repoRoot: string,
   fn: (worktreePath: string) => Promise<T>,
-  // RFC-04 D2 — OPTIONAL observer forwarded to the `git worktree add` step so a
-  // caller can stream git's own checkout output (parse via
-  // `@/runtime/worktree-progress`). Absent ⇒ byte-identical legacy behavior.
+  // OPTIONAL generic runShell observer forwarded to the `git worktree add` step
+  // (stdout/stderr/exit events). `git worktree add` streams no checkout meter, so
+  // no real checkout percentage is produced. Absent ⇒ byte-identical legacy path.
   onShellEvent?: (event: RunShellEvent) => void,
 ): Promise<WorktreeRun<T>> => {
   if (!(await isGitRepo(repoRoot))) {

@@ -125,14 +125,18 @@ export const worktreeTargetIdentity = (
 export const createPersistentWorktree = async (
   id: string,
   repoRoot: string,
-  // RFC-04 D2 — `onShellEvent` is an OPTIONAL observer forwarded to the
-  // `git worktree add` step. A caller can build it with
-  // `checkoutProgressObserver` (`@/runtime/worktree-progress`) to surface git's
-  // OWN checkout ratio as it streams. Absent ⇒ byte-identical legacy path: the
-  // add command and its result are unchanged. NOTE: `git worktree add` has no
-  // `--progress` flag, so on a piped stderr it emits only `Preparing worktree`;
-  // real `Updating files: N% (x/y)` requires a git that streams it (or the
-  // consumer restructuring into `add --no-checkout` + `checkout --progress`).
+  // `onShellEvent` is an OPTIONAL generic runShell observer forwarded to the
+  // `git worktree add` step (stdout/stderr/exit events). Absent ⇒ byte-identical
+  // legacy path: the add command and its result are unchanged.
+  //
+  // NOTE (RESOLUTION-PLAN R5): `git worktree add` shares the repo's object store
+  // (no fetch/checkout phase) and REJECTS `--progress` (`error: unknown option
+  // 'progress'`), so on a piped stderr it emits only `Preparing worktree` — it
+  // streams NO `Updating files: N% (x/y)` meter. A real per-file checkout
+  // percentage is therefore structurally impossible on this path, and the dead
+  // D2 checkout-% chain that tried to surface one was retired. The delivered
+  // worktree-progress UX is the D1 staged card (workspace → checkout → done),
+  // emitted directly by the session-ops transition, not a fabricated ratio.
   opts?: {
     branch?: string
     baseRef?: string

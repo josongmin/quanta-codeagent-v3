@@ -97,12 +97,3 @@ export {
   inspectWorktrees,
   parseWorktreePorcelain,
 } from "./worktree-inspect"
-// RFC-04 D2 — git-owned checkout-progress parser (pure; no fabricated %).
-export {
-  type CheckoutProgress,
-  type CheckoutProgressReader,
-  checkoutProgressObserver,
-  createCheckoutProgressReader,
-  INDETERMINATE,
-  parseCheckoutProgressLine,
-} from "./worktree-progress"
