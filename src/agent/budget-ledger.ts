@@ -551,7 +551,21 @@ const tryEmitBreach = (
 
 /** Construct the default ledger. Caller wires `policy`, `pricing`, `maxEvents`,
  *  `now`. */
-export const defaultBudgetLedger = (opts?: BudgetLedgerOpts): BudgetLedger => {
+/**
+ * The ledger's shared state: the per-scope accumulators and the limit
+ * resolution every record passes through. Split out of `defaultBudgetLedger`
+ * (god-function burndown).
+ */
+/** The ledger's tables: policy, pricing resolution, and the per-scope buckets
+ *  every entry lands in. */
+const ledgerTables = (opts?: BudgetLedgerOpts) => {
+  /** The factory's MUTABLE state. `let` bindings cannot cross a function
+   *  boundary by value, so they live here and the groups mutate in place —
+   *  observationally identical to the closure they replace. */
+  const mut = {
+    start: 0,
+    totalCost: 0,
+  }
   const policy = opts?.policy ?? {}
   const pricingOverride = opts?.pricing ?? {}
   const maxEvents = Math.max(1, Math.floor(opts?.maxEvents ?? DEFAULT_MAX_EVENTS))
@@ -562,21 +576,42 @@ export const defaultBudgetLedger = (opts?: BudgetLedgerOpts): BudgetLedger => {
   // input, we still need a real pricing object.
   const safeFallback: ModelPricing = fallback ?? { inputPerM: 0, outputPerM: 0 }
 
-  // Retained event queue. `start` advances as older entries are evicted; we
+  // Retained event queue. `mut.start` advances as older entries are evicted; we
   // compact the prefix opportunistically so record() never pays `shift()`.
   const events: RetainedEvent[] = []
-  let start = 0
   // Debounce: keys of breaches already fired. `<kind>:<scope>` (e.g.
   // `session-soft:abc-123`).
   const fired = new Set<string>()
-  let totalCost = 0
   const perModel = new Map<string, MutableCost>()
   const perSession = new Map<string, MutableCost>()
   const perDay = new Map<string, MutableCost>()
 
   const resolvePricing = (model: string): ModelPricing => pricing[model] ?? safeFallback
 
-  const activeLength = (): number => events.length - start
+  const activeLength = (): number => events.length - mut.start
+  return {
+    opts,
+    mut,
+    policy,
+    pricingOverride,
+    maxEvents,
+    pricing,
+    fallback,
+    safeFallback,
+    events,
+    fired,
+    perModel,
+    perSession,
+    perDay,
+    resolvePricing,
+    activeLength,
+  }
+}
+
+/** Bucket maintenance: apply and remove an entry, compact the event prefix,
+ *  and reset. These are the ONLY writers of the tables above. */
+const ledgerBuckets = (ctx: ReturnType<typeof ledgerTables>) => {
+  const { mut, events, perModel, perSession, perDay, resolvePricing } = ctx
 
   const ensureBucket = (map: Map<string, MutableCost>, key: string, model: string): MutableCost => {
     const existing = map.get(key)
@@ -596,14 +631,14 @@ export const defaultBudgetLedger = (opts?: BudgetLedgerOpts): BudgetLedger => {
   }
 
   const applyEntry = (entry: RetainedEvent): void => {
-    totalCost += entry.cost.totalCost
+    mut.totalCost += entry.cost.totalCost
     foldInto(ensureBucket(perModel, entry.event.model, entry.event.model), entry.cost)
     foldInto(ensureBucket(perSession, entry.event.sessionId, entry.event.model), entry.cost)
     foldInto(ensureBucket(perDay, entry.dayKey, entry.event.model), entry.cost)
   }
 
   const removeEntry = (entry: RetainedEvent): void => {
-    totalCost -= entry.cost.totalCost
+    mut.totalCost -= entry.cost.totalCost
     const modelAgg = perModel.get(entry.event.model)
     if (modelAgg !== undefined) {
       unfoldFrom(modelAgg, entry.cost)
@@ -622,12 +657,12 @@ export const defaultBudgetLedger = (opts?: BudgetLedgerOpts): BudgetLedger => {
   }
 
   const compactPrefixIfNeeded = (): void => {
-    if (start === 0) return
+    if (mut.start === 0) return
     // Wait until the dead prefix is meaningfully amortized before shifting the
     // backing array; otherwise frequent single-step evictions churn copies.
-    if (start < COMPACT_PREFIX_THRESHOLD && start * 2 < events.length) return
-    events.splice(0, start)
-    start = 0
+    if (mut.start < COMPACT_PREFIX_THRESHOLD && mut.start * 2 < events.length) return
+    events.splice(0, mut.start)
+    mut.start = 0
   }
 
   const pushEvent = (event: UsageEvent): MutableCost => {
@@ -643,12 +678,39 @@ export const defaultBudgetLedger = (opts?: BudgetLedgerOpts): BudgetLedger => {
 
   const resetState = (): void => {
     events.length = 0
-    start = 0
-    totalCost = 0
+    mut.start = 0
+    mut.totalCost = 0
     perModel.clear()
     perSession.clear()
     perDay.clear()
   }
+  return {
+    ensureBucket,
+    maybeDropBucket,
+    applyEntry,
+    removeEntry,
+    compactPrefixIfNeeded,
+    pushEvent,
+    resetState,
+  }
+}
+
+/** Derived views: the snapshot projection, retention eviction, and the
+ *  breach check that decides when a limit has actually been crossed. */
+const ledgerViews = (ctx: ReturnType<typeof ledgerTables> & ReturnType<typeof ledgerBuckets>) => {
+  const {
+    mut,
+    policy,
+    maxEvents,
+    events,
+    fired,
+    perModel,
+    perSession,
+    perDay,
+    activeLength,
+    removeEntry,
+    compactPrefixIfNeeded,
+  } = ctx
 
   /** Build the snapshot's three breakdown maps + total. */
   const buildSnapshot = (): BudgetSnapshot => {
@@ -658,7 +720,7 @@ export const defaultBudgetLedger = (opts?: BudgetLedgerOpts): BudgetLedger => {
       return out
     }
     return Object.freeze({
-      totalCost,
+      totalCost: mut.totalCost,
       perModel: freezeMap(perModel),
       perSession: freezeMap(perSession),
       perDay: freezeMap(perDay),
@@ -668,10 +730,10 @@ export const defaultBudgetLedger = (opts?: BudgetLedgerOpts): BudgetLedger => {
 
   const evictIfOver = (): void => {
     while (activeLength() > maxEvents) {
-      const evicted = events[start]
+      const evicted = events[mut.start]
       if (evicted === undefined) break
       removeEntry(evicted)
-      start += 1
+      mut.start += 1
     }
     compactPrefixIfNeeded()
   }
@@ -704,7 +766,34 @@ export const defaultBudgetLedger = (opts?: BudgetLedgerOpts): BudgetLedger => {
     tryEmitBreach(breaches, fired, "daily-hard", policy.dailyHardLimit, daily, day)
     return breaches
   }
+  return { buildSnapshot, evictIfOver, checkBreaches }
+}
 
+/** Assemble the chained builders into the single shared context. */
+const ledgerState = (opts?: BudgetLedgerOpts) => {
+  const p0 = ledgerTables(opts)
+  const p1 = ledgerBuckets({ ...p0 })
+  const p2 = ledgerViews({ ...p0, ...p1 })
+  return { ...p0, ...p1, ...p2 }
+}
+
+/** The state every operation group shares, inferred from {@link ledgerState} so it
+ *  can never drift from what that function actually builds. */
+type LedgerCtx = ReturnType<typeof ledgerState>
+
+/** The write path and the two reads derived from it — the running snapshot
+ *  and the hard-breach verdict. */
+const recordOps = (ctx: LedgerCtx): Pick<BudgetLedger, "record" | "snapshot" | "hardBreach"> => {
+  const {
+    policy,
+    fired,
+    perSession,
+    perDay,
+    pushEvent,
+    buildSnapshot,
+    evictIfOver,
+    checkBreaches,
+  } = ctx
   return {
     record(event): RecordResult {
       // Defensive: a malformed event (missing required string fields) is a
@@ -725,47 +814,6 @@ export const defaultBudgetLedger = (opts?: BudgetLedgerOpts): BudgetLedger => {
 
     snapshot() {
       return buildSnapshot()
-    },
-
-    clear(scope) {
-      if (scope === undefined) {
-        const n = activeLength()
-        resetState()
-        fired.clear()
-        return n
-      }
-      const active = events.slice(start)
-      const survivors = clearScoped(active, fired, scope)
-      const removed = active.length - survivors.length
-      resetState()
-      for (const entry of survivors) {
-        events.push(entry)
-        applyEntry(entry)
-      }
-      return removed
-    },
-
-    serialize() {
-      const payload: SerializedLedger = {
-        v: 1,
-        events: events.slice(start).map((entry) => entry.event),
-        firedBreaches: [...fired],
-      }
-      return JSON.stringify(payload)
-    },
-
-    hydrate(jsonl) {
-      // Reset to a known state first — even on garbage input, the ledger ends
-      // up empty (contract #7). Either we replace with valid data or we end
-      // up cleared.
-      resetState()
-      fired.clear()
-      const hydratedEvents: UsageEvent[] = []
-      rehydrate(jsonl, hydratedEvents, fired, maxEvents)
-      for (const event of hydratedEvents) {
-        pushEvent(event)
-      }
-      evictIfOver()
     },
 
     hardBreach(): BudgetBreach | undefined {
@@ -790,5 +838,70 @@ export const defaultBudgetLedger = (opts?: BudgetLedgerOpts): BudgetLedger => {
       }
       return undefined
     },
+  }
+}
+
+/** Reset and the durable codec. */
+const stateOps = (ctx: LedgerCtx): Pick<BudgetLedger, "clear" | "serialize" | "hydrate"> => {
+  const {
+    maxEvents,
+    events,
+    fired,
+    activeLength,
+    applyEntry,
+    pushEvent,
+    resetState,
+    evictIfOver,
+    mut,
+  } = ctx
+  return {
+    clear(scope) {
+      if (scope === undefined) {
+        const n = activeLength()
+        resetState()
+        fired.clear()
+        return n
+      }
+      const active = events.slice(mut.start)
+      const survivors = clearScoped(active, fired, scope)
+      const removed = active.length - survivors.length
+      resetState()
+      for (const entry of survivors) {
+        events.push(entry)
+        applyEntry(entry)
+      }
+      return removed
+    },
+
+    serialize() {
+      const payload: SerializedLedger = {
+        v: 1,
+        events: events.slice(mut.start).map((entry) => entry.event),
+        firedBreaches: [...fired],
+      }
+      return JSON.stringify(payload)
+    },
+
+    hydrate(jsonl) {
+      // Reset to a known state first — even on garbage input, the ledger ends
+      // up empty (contract #7). Either we replace with valid data or we end
+      // up cleared.
+      resetState()
+      fired.clear()
+      const hydratedEvents: UsageEvent[] = []
+      rehydrate(jsonl, hydratedEvents, fired, maxEvents)
+      for (const event of hydratedEvents) {
+        pushEvent(event)
+      }
+      evictIfOver()
+    },
+  }
+}
+
+export const defaultBudgetLedger = (opts?: BudgetLedgerOpts): BudgetLedger => {
+  const ctx = ledgerState(opts)
+  return {
+    ...recordOps(ctx),
+    ...stateOps(ctx),
   }
 }
