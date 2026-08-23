@@ -58,15 +58,18 @@ export interface InMemoryAutomationEngine extends AutomationEnginePort {
   readonly inbox: ReadonlyArray<InboxItem>
 }
 
-export const inMemoryAutomationEngine = (
-  opts: InMemoryAutomationEngineOpts = {},
-): InMemoryAutomationEngine => {
+/** The backing tables and the id/sequence allocators. */
+const autoTables = (opts: InMemoryAutomationEngineOpts = {}) => {
   const rows = new Map<string, EngineAutomation>()
   const runsBacking: AutomationRun[] = []
   const inboxBacking: InboxItem[] = []
   const idAlloc = opts.idAllocator ?? defaultRunIdAllocator
   const nextSeq = makeSeq()
+  return { opts, rows, runsBacking, inboxBacking, idAlloc, nextSeq }
+}
 
+/** Row construction from a rule. */
+const autoRows = () => {
   // exactOptional: rebuild row WITHOUT setting absent optional keys to
   // `undefined`. Re-used by `schedule` and `markRun` so the omission rule
   // lives in one place.
@@ -123,6 +126,12 @@ export const inMemoryAutomationEngine = (
         : {}),
     }
   }
+  return { buildRow }
+}
+
+/** The advance step every execution path funnels through. */
+const autoAdvance = (ctx: ReturnType<typeof autoTables> & ReturnType<typeof autoRows>) => {
+  const { rows, runsBacking, inboxBacking, idAlloc, nextSeq, buildRow } = ctx
 
   /** Append run + inbox rows + advance the automation. Shared by `markRun`
    *  and `finalize` so both paths are byte-equal. Caller guarantees `existing`
@@ -185,8 +194,17 @@ export const inMemoryAutomationEngine = (
     rows.set(advanced.id, advanced)
     return advanced
   }
+  return { recordAndAdvance }
+}
 
-  const engine: AutomationEnginePort = {
+/** The scheduling half of the engine surface. */
+const autoSchedule = (
+  ctx: ReturnType<typeof autoTables> & ReturnType<typeof autoRows> & ReturnType<typeof autoAdvance>,
+) => {
+  const { rows, buildRow } = ctx
+
+  /** Scheduling surface: create a row, list them, cancel one. */
+  const engineSchedule: Pick<AutomationEnginePort, "schedule" | "list" | "cancel"> = {
     schedule(input: ScheduleInput): Promise<EngineResult<EngineAutomation>> {
       if (input.id.length === 0) {
         return Promise.resolve(invalid("id is empty"))
@@ -240,7 +258,22 @@ export const inMemoryAutomationEngine = (
       rows.set(id, { ...existing, status: "cancelled" })
       return Promise.resolve({ ok: true, value: undefined })
     },
+  }
+  return { engineSchedule }
+}
 
+/** The execution half, and the assembled engine. */
+const autoExecute = (
+  ctx: ReturnType<typeof autoTables> &
+    ReturnType<typeof autoRows> &
+    ReturnType<typeof autoAdvance> &
+    ReturnType<typeof autoSchedule>,
+) => {
+  const { rows, nextSeq, buildRow, recordAndAdvance, engineSchedule } = ctx
+
+  /** Execution surface: take the next due row, record a run, claim it, and
+   *  finalize the outcome. */
+  const engineExecute: Pick<AutomationEnginePort, "next" | "markRun" | "claim" | "finalize"> = {
     next(now: number): Promise<EngineResult<EngineAutomation | null>> {
       let best: EngineAutomation | null = null
       for (const r of rows.values()) {
@@ -330,6 +363,21 @@ export const inMemoryAutomationEngine = (
     },
   }
 
+  const engine: AutomationEnginePort = { ...engineSchedule, ...engineExecute }
+
+  return { engineExecute, engine }
+}
+
+/** Assemble the chained builders. */
+export const inMemoryAutomationEngine = (
+  opts: InMemoryAutomationEngineOpts = {},
+): InMemoryAutomationEngine => {
+  const p0 = autoTables(opts)
+  const p1 = autoRows()
+  const p2 = autoAdvance({ ...p0, ...p1 })
+  const p3 = autoSchedule({ ...p0, ...p1, ...p2 })
+  const p4 = autoExecute({ ...p0, ...p1, ...p2, ...p3 })
+  const { runsBacking, inboxBacking, engine } = { ...p0, ...p1, ...p2, ...p3, ...p4 }
   return Object.freeze({
     schedule: engine.schedule,
     list: engine.list,

@@ -99,11 +99,21 @@ interface OwnedSession {
  * Build the owned (Bun-native) `PtySessionPort` superset over an INJECTED
  * {@link PtyFactoryPort}. Every op is NO-THROW.
  */
-export const createBunPtyAdapter = (factory: PtyFactoryPort): BunPtyAdapter => {
+/**
+ * The adapter's shared state: the owned-session table, its bounded chunk
+ * buffer, and the lookup every operation resolves a handle through. Split out
+ * of `createBunPtyAdapter` (god-function burndown).
+ */
+const ptyState = (factory: PtyFactoryPort) => {
+  /** The factory's MUTABLE state. `let` bindings cannot cross a function
+   *  boundary by value, so they live here and the groups mutate in place —
+   *  observationally identical to the closure they replace. */
+  const mut = {
+    nextHandleSeq: 0,
+  }
   const sessions = new Map<PtyHandle, OwnedSession>()
   // Monotone handle counter — `pty:<seq>` handles are never reused even after a
   // kill, so a stale handle can never alias a fresh session.
-  let nextHandleSeq = 0
 
   /** Drain `data` into the ring with a monotone seq, then TRUNCATE the head so
    *  retained chars never exceed {@link PTY_RING_BYTES}. A truncated head bumps
@@ -138,8 +148,20 @@ export const createBunPtyAdapter = (factory: PtyFactoryPort): BunPtyAdapter => {
     if (s === undefined) return errR("not-found", `no owned pty ${handle}`)
     return okR(s)
   }
+  return { factory, sessions, pushChunk, lookup, mut }
+}
 
-  const adapter: BunPtyAdapter = {
+/** The state every operation group shares, inferred from {@link ptyState} so it
+ *  can never drift from what that function actually builds. */
+type PtyCtx = ReturnType<typeof ptyState>
+
+/** Session lifecycle: spawn a pty we OWN, enumerate, attach/detach, and the
+ *  two teardown paths. */
+const ptyLifecycleOps = (
+  ctx: PtyCtx,
+): Pick<BunPtyAdapter, "spawn" | "list" | "attach" | "detach" | "kill" | "closeAll"> => {
+  const { factory, sessions, pushChunk, lookup, mut } = ctx
+  return {
     async spawn(argv: readonly string[], opts: BunPtySpawnOpts): Promise<PtyResult<AttachResult>> {
       try {
         // The ONLY trust boundary: the cwd-jail at spawn (owned ⇒ no foreign
@@ -154,7 +176,7 @@ export const createBunPtyAdapter = (factory: PtyFactoryPort): BunPtyAdapter => {
         if (cols < PTY_MIN_DIM || cols > PTY_MAX_DIM || rows < PTY_MIN_DIM || rows > PTY_MAX_DIM) {
           return errR("invalid-size", `(${cols},${rows}) out of 1..${PTY_MAX_DIM}`)
         }
-        const handle = `${PTY_PREFIX}${++nextHandleSeq}`
+        const handle = `${PTY_PREFIX}${++mut.nextHandleSeq}`
         const session: OwnedSession = {
           handle,
           // biome-ignore lint/style/noNonNullAssertion: terminal is set immediately below
@@ -211,57 +233,6 @@ export const createBunPtyAdapter = (factory: PtyFactoryPort): BunPtyAdapter => {
       return okR({ handle, cursor: r.value.seq })
     },
 
-    async write(handle: PtyHandle, data: string, wopts?: PtyWriteOpts): Promise<PtyResult<void>> {
-      const r = lookup(handle)
-      if (!r.ok) return r
-      const payload = wopts?.appendNewline === true ? `${data}\n` : data
-      // 64 KiB cap measured in UTF-8 BYTES (the wire size), matching the tmux
-      // adapter / `write_stdin` discipline.
-      if (Buffer.byteLength(payload, "utf8") > PTY_MAX_WRITE_BYTES) {
-        return errR("too-large", `write exceeds ${PTY_MAX_WRITE_BYTES} bytes`)
-      }
-      try {
-        r.value.terminal.write(payload)
-        return okR(undefined)
-      } catch (e) {
-        return errR("backend-error", `terminal write failed: ${errMessage(e)}`)
-      }
-    },
-
-    async read(handle: PtyHandle, sinceSeq: number): Promise<PtyResult<ReadResult>> {
-      const r = lookup(handle)
-      if (!r.ok) return r
-      const s = r.value
-      const chunks = s.ring.filter((c) => c.seq > sinceSeq)
-      // Gap signal (RFC §4.2): if the caller's cursor is older than the oldest
-      // retained chunk, head-truncation dropped output between them. Surface it
-      // as a synthetic chunk rather than silently dropping (vs tmux's snapshot
-      // lossiness). `firstSeq > sinceSeq + 1` ⇒ at least one seq was evicted.
-      if (s.firstSeq > sinceSeq + 1 && s.ring.length > 0) {
-        const missed = s.firstSeq - (sinceSeq + 1)
-        const marker: PtyChunk = {
-          seq: s.firstSeq - 1,
-          data: `… [${missed} output chunk(s) dropped: ring buffer overflow] …\n`,
-        }
-        return okR({ chunks: [marker, ...chunks], nextSeq: s.seq })
-      }
-      return okR({ chunks, nextSeq: chunks.length > 0 ? s.seq : sinceSeq })
-    },
-
-    async resize(handle: PtyHandle, cols: number, rows: number): Promise<PtyResult<void>> {
-      const r = lookup(handle)
-      if (!r.ok) return r
-      if (cols < PTY_MIN_DIM || cols > PTY_MAX_DIM || rows < PTY_MIN_DIM || rows > PTY_MAX_DIM) {
-        return errR("invalid-size", `(${cols},${rows}) out of 1..${PTY_MAX_DIM}`)
-      }
-      try {
-        r.value.terminal.resize(cols, rows)
-        return okR(undefined)
-      } catch (e) {
-        return errR("backend-error", `terminal resize failed: ${errMessage(e)}`)
-      }
-    },
-
     async detach(handle: PtyHandle): Promise<PtyResult<void>> {
       const r = lookup(handle)
       if (!r.ok) return r
@@ -313,6 +284,69 @@ export const createBunPtyAdapter = (factory: PtyFactoryPort): BunPtyAdapter => {
       sessions.clear()
     },
   }
+}
 
-  return adapter
+/** I/O against an attached session: stdin write, buffered read, and resize. */
+const ptyIoOps = (ctx: PtyCtx): Pick<BunPtyAdapter, "write" | "read" | "resize"> => {
+  const { lookup } = ctx
+  return {
+    async write(handle: PtyHandle, data: string, wopts?: PtyWriteOpts): Promise<PtyResult<void>> {
+      const r = lookup(handle)
+      if (!r.ok) return r
+      const payload = wopts?.appendNewline === true ? `${data}\n` : data
+      // 64 KiB cap measured in UTF-8 BYTES (the wire size), matching the tmux
+      // adapter / `write_stdin` discipline.
+      if (Buffer.byteLength(payload, "utf8") > PTY_MAX_WRITE_BYTES) {
+        return errR("too-large", `write exceeds ${PTY_MAX_WRITE_BYTES} bytes`)
+      }
+      try {
+        r.value.terminal.write(payload)
+        return okR(undefined)
+      } catch (e) {
+        return errR("backend-error", `terminal write failed: ${errMessage(e)}`)
+      }
+    },
+
+    async read(handle: PtyHandle, sinceSeq: number): Promise<PtyResult<ReadResult>> {
+      const r = lookup(handle)
+      if (!r.ok) return r
+      const s = r.value
+      const chunks = s.ring.filter((c) => c.seq > sinceSeq)
+      // Gap signal (RFC §4.2): if the caller's cursor is older than the oldest
+      // retained chunk, head-truncation dropped output between them. Surface it
+      // as a synthetic chunk rather than silently dropping (vs tmux's snapshot
+      // lossiness). `firstSeq > sinceSeq + 1` ⇒ at least one seq was evicted.
+      if (s.firstSeq > sinceSeq + 1 && s.ring.length > 0) {
+        const missed = s.firstSeq - (sinceSeq + 1)
+        const marker: PtyChunk = {
+          seq: s.firstSeq - 1,
+          data: `… [${missed} output chunk(s) dropped: ring buffer overflow] …\n`,
+        }
+        return okR({ chunks: [marker, ...chunks], nextSeq: s.seq })
+      }
+      return okR({ chunks, nextSeq: chunks.length > 0 ? s.seq : sinceSeq })
+    },
+
+    async resize(handle: PtyHandle, cols: number, rows: number): Promise<PtyResult<void>> {
+      const r = lookup(handle)
+      if (!r.ok) return r
+      if (cols < PTY_MIN_DIM || cols > PTY_MAX_DIM || rows < PTY_MIN_DIM || rows > PTY_MAX_DIM) {
+        return errR("invalid-size", `(${cols},${rows}) out of 1..${PTY_MAX_DIM}`)
+      }
+      try {
+        r.value.terminal.resize(cols, rows)
+        return okR(undefined)
+      } catch (e) {
+        return errR("backend-error", `terminal resize failed: ${errMessage(e)}`)
+      }
+    },
+  }
+}
+
+export const createBunPtyAdapter = (factory: PtyFactoryPort): BunPtyAdapter => {
+  const ctx = ptyState(factory)
+  return {
+    ...ptyLifecycleOps(ctx),
+    ...ptyIoOps(ctx),
+  }
 }
