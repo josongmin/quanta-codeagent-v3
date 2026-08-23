@@ -1,7 +1,8 @@
 # Grok Build (xAI) 리뷰 — 에이전트 루프 해부 + quanta 비교
 
 - 작성: 2026-08-23
-- 대상: `xai-org/grok-build` (Apache 2.0), 클론 `~/Documents/code-new/competitor-scaffolds/grok-build`, `SOURCE_REV 7d67dea`
+- 대상: `xai-org/grok-build` (Apache 2.0), 최초 분석 snapshot `SOURCE_REV 7d67dea`
+- 재검증: 2026-08-23 현재 로컬 클론 `19d42e35c07a9c9244f03f6df0c4c353f970d4f9` clean. 아래에서 revision을 따로 적지 않은 Grok 관측은 최초 snapshot 기준이며, §5.2와 §14.5의 정정은 현재 snapshot 기준이다.
 - 규모: Rust 1,657,018줄 / 2,765 파일 (자체코드 1,630,968, `crates/codegen` 이 95%)
 - 방법: 1차 6축 병렬 리뷰 → 2차 적대 검증 3축 → 에이전트 루프 4축 정밀 추적 → quanta 4축 대조
 
@@ -171,11 +172,10 @@
 - 권한 규칙 기본 동작 = **Deny** (CWE-1188 명시)
 - "항상 허용"이 **단어 단위 스코프** (←/→로 argv 단어 범위 조정, 관리자 최소 스코프 하한)
 
-### 5.2 🔴 실제 우회 (2차 적대검증에서 발견)
-**HIGH — 따옴표 결합 파싱 차이**: 명령 분할 시 따옴표 붙은 조각을 **원문 그대로**(따옴표 포함) 단어 목록에 넣음. 플래그 검사는 문자열 비교라, 빈 따옴표를 끼우면 검사기는 못 보고 bash는 정상 실행.
-- `rg --pr''e /tmp/evil.sh pat .` → `--pre` 가드 우회 → **프롬프트 없이 실행**
-- 동일 수법으로 `kubectl --kubeconfig''=`, `sort --compress-program''=`, `git --ext-di''ff` 전부 우회
-- **버그라는 증거**: 같은 코드베이스의 **파일 쓰기 판정 경로는 따옴표를 제대로 디코딩함**. 한쪽만 정규화 누락
+### 5.2 🔴 실제 우회와 current-head 정정
+**[역사 관측, `7d67dea`] HIGH — 따옴표 결합 파싱 차이**: 최초 snapshot에서는 명령 분할 시 따옴표 붙은 조각을 원문 그대로 단어 목록에 넣어 `rg --pr''e`, `kubectl --kubeconfig''=`, `sort --compress-program''=`, `git --ext-di''ff` 류가 플래그 검사를 우회했다.
+
+**[정정, `19d42e35`]** 현재 소스에는 `decode_shell_literal_spelling()`과 정규화 라운드가 추가되어 해당 불일치가 구조적으로 보완돼 있다(`bash_command_splitting.rs:206`, `shell_access.rs:884`). 현재 revision의 runtime regression은 이번 문서 갱신에서 실행하지 않았으므로 **소스상 수정, 실행 미확인**으로 분류한다. 이 과거 결함을 현재 Grok의 열린 취약점으로 인용하면 안 된다.
 
 **HIGH — `rg --hostname-bin` 미모델링**: ripgrep이 외부 실행하는 플래그인데 `--pre`만 알고 있음.
 
@@ -534,13 +534,44 @@ Apache §4(b) 고지에 명시:
 
 ---
 
+### 14.5 추가 근거안 재검증 — 최종 판정
+
+첨부안의 핵심 오류는 **기능이 없다는 판정과 shipped front door에 연결되지 않았다는 판정을 섞은 것**이다. 심볼·부분 테스트만으로 LIVE라 할 수 없지만, 이미 존재하는 authority를 ABSENT로 판정해서도 안 된다.
+
+| # | 주장 | 최종 판정 | 근거와 처리 |
+|---:|---|---|---|
+| 1 | 설치 CLI에 AGENTS.md가 실제 주입되지 않음 | **BUILD P0** | `repo-rules.ts` 로더와 `prompt.ts` 렌더는 존재하지만 shipping `src/apps/cli/index.ts -> runRepl()` bootstrap은 `AgentConfig.repoRules`를 채우지 않는다. `/rules`는 별도로 읽어 **보이지만 모델에는 안 들어가는** 거짓 양성 가능. F1에서 실제 바이너리 PTY로 닫는다. |
+| 2 | existing-file read-before-edit 강제 | **BUILD P1** | 현재 stale guard는 `UNREAD`를 의도적으로 허용한다. interactive/live에서는 신규 파일 생성은 허용하고 기존 미독 파일 변경은 deny하도록 분리한다. bench default만 fresh-hash baseline 갱신 포함 A/B 후 정한다. |
+| 3 | regex 명령 분류를 parser/AST로 전환 | **BUILD P0** | 현재 `hardDenyReason()`에서 `cd / && rm -rf *`, `rm${IFS}-rf${IFS}/`, `git push origin +main`, `npx rimraf /`, Python `shutil.rmtree('/')`가 모두 통과했다. 대조군 네 개는 차단됐다. B lane에서 구조 분류 authority로 교체한다. |
+| 4 | bypass-immune 계층이 없음 | **오보 / ALREADY** | HARD_DENY는 read-only/mode/bypass보다 먼저 평가되고, admissibility hand-off floor도 grant보다 먼저다. 새 개념을 만들 문제가 아니라 #3의 분류 coverage가 뚫린 문제다. |
+| 5 | Hashline 편집 흡수 | **PARK / 실험만** | Grok도 `FileToolset::Standard`가 기본이며 Hashline은 opt-in이다. Quanta에는 `expected_hash`, fresh hash, 성공 후 baseline 갱신이 이미 있다. shifted-line·다중편집·ambiguity·retry/token A/B가 유의미하게 이길 때만 채택한다. |
+| 6 | Goals 런타임이 없음 | **오보 / substrate ALREADY** | `src/objective/**`, `objective_set/update/get`, `/goal`, persistence, continuation, verifier receipt가 존재한다. 실제 빈칸은 기본 opt-in 상태의 **모델 engagement와 제품 기본값 증거**다. G lane에서 real CLI로 측정한다. |
+| 7 | PhaseKey 2중 시계와 typed wait reason 필요 | **부분 맞음 / BUILD P1** | shipping turn indicator에는 빈칸이 있지만 `src/activity/**`에 root/child `startedAt`과 닫힌 `StuckReason`이 이미 있다. 새 store/enum 대신 기존 spine을 턴에 투영한다(A lane). |
+| 8 | 폴더 신뢰 게이트가 없음 | **오보 / ALREADY** | default-untrusted path-pinned trust store와 repo grant/MCP/hook/endpoint drop이 존재하고 실제 composition 소비자도 있다. E lane은 우회 consumer 전수감사만 한다. |
+| 9 | 설정 overlay/security split가 없음 | **과장 / ALREADY+AUDIT** | managed/user/project/local merge, managed non-override, untrusted repo grant drop, security-boundary knob 차단이 이미 있다. Grok과 필드 모양이 다르다는 이유로 재구축하지 않고 넓은 env consumer/provenance만 감사한다. |
+| 10 | AGENTS.md injection 방어가 없음 | **오보 / ALREADY** | `src/shared/untrusted.ts`의 `escapeBoundary/embedUntrusted`와 `prompt.ts`의 `system-reminder` defang, forged opener/closer hellgate가 존재한다. #1의 shipping wire가 이 기존 경로를 통과하는지만 증명한다. |
+
+추가로 확인된 자체 결함은 다음 다섯 가지다.
+
+| 결함 | 판정 | 최종 처리 |
+|---|---|---|
+| `QUANTA_VERIFY_GUARD=0`이 활성화됨 | **확정** | `!== undefined`를 canonical boolean parser/gate authority로 교체. unset/1/0/off/garbage 회귀 테스트(F1). |
+| child config가 `readFileState`를 누락 | **확정** | 같은 workspace는 조정된 shared authority, 격리 worktree는 child-local authority로 명시. 부모 ON→자식 enforcement와 sibling mutation 테스트(F2). |
+| MCP writer는 `./.mcp.json`에 쓰지만 reader는 기본 경로를 읽지 않음 | **확정** | effective MCP config path를 단일 resolver로 통합. reader가 trust-gated default를 읽거나 writer가 명시 경로 없이는 거부해야 하며 silent split은 금지(F1). |
+| bench stale guard 기본 OFF | **설계부채, 버그 미확정** | 현재 fresh-hash 갱신이 과거 오탐 원인을 없앴는지 A/B 후 결정(F2). |
+| SDK mutating profile의 `permission:bypass + autoApprove` | **위험한 암묵 기본값** | HARD_DENY/hand-off는 여전히 면역이지만 ordinary sensitive action은 자동승인 가능. 명시적 `sensitiveActionPolicy`/reviewer callback을 요구하고 callback 부재 기본 deny(F2). |
+
+신뢰도 경계: Claude Code/Cursor 바이너리 strings·오프셋 자료는 재현 가능한 보조근거이지 공개 소스 수준의 provenance가 아니다. Codex goal 이벤트 빈도는 관측 자료이며 자동 goal inference의 구현 증거가 아니다. Quanta 결론은 이 저장소의 live consumer, 직접 함수 프로브, 테스트를 우선한다.
+
+---
+
 ## 15. 최종 실행 정본 — 모듈별 병렬 lane
 
 ### 15.0 기준과 현재 상태
 
-- 이 절은 §11·§13·§14.4의 **교체본**이다. 새 발견은 해당 표에 덧붙이지 말고 이 절의 lane/보류표를 갱신한다.
-- 문서 편집 중에도 `HEAD`가 `4c1ce01719ef24e669de1ddeb370544304d92e7c`에서 `27e7bc6cd1b8cccac0cf32873ba043d91575db08`로 이동했고 dirty 목록도 바뀌었다. 따라서 이 문서의 SHA는 실행 snapshot이 아니다. 구현 시작 시 한 coordinator가 `git rev-parse HEAD`와 `git status --short --branch`를 다시 기록하고 그 뒤 lane을 분기한다.
-- 마지막 관측에서 `src/agent/stop-category.ts`, `src/host/runtime/internal/context-binding/approval-support.ts`, `tests/unit/agent/stop-category-producer-completeness-hellgate.test.ts`가 dirty였다. **T-lane 선점 변경 후보**이므로 W0에서 diff의 소유자·의도를 고정하기 전에는 잃거나 다른 lane에서 동시에 편집하지 않는다.
+- 이 절은 §11·§13·§14.4·§14.5의 **교체본**이다. 새 발견은 앞 표에 누적하지 말고 이 절의 lane/보류표를 갱신한다.
+- 문서 편집 중 Quanta `HEAD`가 `ec6b3821`, `7b0cb3ab` 등으로 계속 이동했고 dirty 목록도 stop-category에서 ProMax harness 쪽으로 변했다. 따라서 이 문서에 적힌 SHA/dirty 목록은 실행 snapshot이 아니다. 구현 시작 시 coordinator가 `git rev-parse HEAD`, upstream, `git status --short --branch`, toolchain을 다시 기록한 뒤 lane을 분기한다.
+- 현재 main에는 terminal presentation 변경이 이미 들어왔다. T lane은 새로 덮어쓰지 말고 해당 commit을 `ALREADY/PARTIAL`로 감사한 뒤 남은 producer·protocol·surface gap만 잡는다. ProMax 관련 dirty/untracked는 R lane과 write-set 충돌 가능성이 있으므로 owner 확인 전 접근 금지다.
 - 병렬화 단위는 아이디어가 아니라 **write set**이다. 같은 front door(`stream-consume.ts`, kernel terminal reducer/event, CLI session driver)를 건드리는 항목은 한 lane에 합치거나 integration wave에서 직렬화한다.
 - 각 lane은 독립 worktree/branch를 쓴다. 권장 branch는 `codex/aug23-grok-<lane>`이다. 공유 worktree의 dirty overlay는 구현 근거나 테스트 receipt로 사용하지 않는다.
 
@@ -550,23 +581,29 @@ Apache §4(b) 고지에 명시:
 W0  snapshot + dirty-owner freeze + baseline RED
  |
  +--> Wave 1 (최대 4병렬, owner-disjoint)
+ |      B shell-security-classifier
  |      C cache-budget
  |      R replay-recording
  |      T terminal-control-loop
- |      A activity-spine
  |
- +--> Wave 2 (Wave 1 merge 뒤 최대 4병렬)
+ +--> Wave 2A (Wave 1 merge 뒤 최대 4병렬)
+ |      A activity-spine
  |      M mode-tool-projection
  |      S synthetic-provenance
- |      P plan-resume
+ |      F1 shipping-cli-composition
+ |
+ +--> Wave 2B (선행 lane 선택 merge 뒤 최대 4병렬)
+ |      F2 mutation-child-sdk-safety    [after B]
  |      E env-config-consumer-audit
+ |      G objective-engagement          [measure first]
+ |      P plan-resume                   [product gate]
  |
  +--> Wave 3 (직렬 integration)
         I1 protocol generation + CLI/web/VS Code/headless receipts
         I2 full regression + feature catalog + exact-SHA closeout
 ```
 
-Wave 1의 네 lane도 아래 exclusive write set을 지킬 때만 병렬이다. T는 CLI/web/VS Code 파일을 직접 만지지 않고 terminal contract까지만 만든다. A의 CLI 소비자 연결, shared presenter 생성, T의 surface 연결은 Wave 3 integration owner가 직렬로 수행한다.
+Wave 1의 네 lane도 아래 exclusive write set을 지킬 때만 병렬이다. B는 permission classifier까지만 소유하고 SDK/admissibility composition은 F2로 넘긴다. T는 CLI/web/VS Code 파일을 직접 만지지 않고 terminal contract까지만 만든다. A의 CLI 소비자 연결과 T의 surface 연결은 Wave 3 integration owner가 직렬로 수행한다. E는 F1의 MCP/config path 정규화가 merge된 뒤 시작한다.
 
 ### 15.2 W0 — 무조건 먼저: 변경 격리와 RED 고정
 
@@ -580,6 +617,21 @@ Wave 1의 네 lane도 아래 exclusive write set을 지킬 때만 병렬이다. 
 | stop | baseline 자체가 비결정적이거나 dirty overlay 없이는 재현되지 않으면 구현 중단 후 원인부터 분리 |
 
 ### 15.3 Wave 1 — 독립 owner 4병렬
+
+#### B — Shell security classifier authority (P0)
+
+- **목표**: 위험 shell 문자열 regex를 primary security authority로 쓰지 않고, 실행 구조·세그먼트·래퍼·대상을 해석한 typed assessment로 HARD_DENY/ask를 결정한다.
+- **authority/write set**: `src/permission/policy-rules.ts`, 신규 `src/permission/shell-analysis/**`, shell assessment를 `ToolAction`에 싣는 dispatch seam, permission unit/contract/fixture. `src/retrieval/**` import는 slice fence 위반이므로 금지한다. SDK policy는 F2까지 수정하지 않는다.
+- **구현**:
+  1. `ShellSecurityAssessment = deny | review | safe`와 reason code를 permission owner에 둔다. regex는 legacy defense-in-depth/telemetry로만 남긴다.
+  2. top-level chain의 각 segment를 평가하고, `env`/`command`/`sudo`/package runner/interpreter 같은 execution wrapper를 깊이 상한과 함께 벗긴다. 순차 `cd` builtin의 effective cwd를 다음 `&&`/`;` segment에 전달한다. 동적 cwd나 분기 의미를 확정할 수 없으면 `review`다.
+  3. quote concatenation, option `=` 형태, root/home/drive-root target, force-push refspec, destructive library/interpreter payload를 구조적으로 분류한다.
+  4. parse failure, unsupported expansion, wrapper depth 초과는 allow가 아니라 `review` 또는 HARD_DENY로 fail-closed한다. 원문 exact grant가 필요한 예외는 별도 typed path로 제한한다.
+  5. parser는 composition 시작 시 준비된 `ShellAnalysisPort`로 주입하고 dispatch seam에서 assessment를 한 번 계산한다. shell action에 assessment가 없거나 parser가 준비되지 않은 경우 sync `evaluate()`가 regex-only allow로 내려가지 않고 `ask/deny`해야 한다.
+  6. tree-sitter를 쓸 경우 WASM/grammar가 packaged CLI에서도 로드되는지 증명한다.
+- **authoritative RED**: `cd / && rm -rf *`, `rm${IFS}-rf${IFS}/`, `git push origin +main`, `npx rimraf /`, `python3 -c "...shutil.rmtree('/')..."` 다섯 실제 bypass가 모두 현재 GREEN이므로 이를 RED corpus로 고정한다.
+- **negative controls**: 일반 `rm ./tmp-file`, non-force feature branch push, read-only Python, quoted harmless args는 불필요하게 deny되면 안 된다. Grok의 과거 `rg --pr''e`와 wrapper-depth/command-substitution/heredoc도 회귀 corpus에 넣되 경쟁사 current bug라고 표기하지 않는다.
+- **완료**: direct policy unit뿐 아니라 installed `quanta`/SDK 실제 permission front door에서 다섯 bypass 차단, safe controls 보존, parse-error fail-closed, package artifact grammar receipt까지 남긴다.
 
 #### C — Cache breakpoint hard budget (P0)
 
@@ -610,7 +662,7 @@ Wave 1의 네 lane도 아래 exclusive write set을 지킬 때만 병렬이다. 
 #### T — Terminal truth + structured failure + stationarity (P0)
 
 - **목표**: 실패·중단·정체·출력잘림을 정상 완료로 접는 모든 경로를 하나의 terminal authority에서 제거한다.
-- **authority/write set**: `src/agent/stop-category.ts`, `src/agent/loop/{types,stream-consume,recovery-executor,stop-conditions,turn-loop}.ts`, `src/agent/dispatch-dedup.ts`, `src/agent/recovery.ts`, `src/kernel/session/{scheduler-turn-terminals,reducer}.ts`, `src/protocol/session/events.ts`, terminal/protocol tests. 현재 dirty T 파일도 이 lane만 소유한다.
+- **authority/write set**: `src/agent/stop-category.ts`, `src/agent/loop/{types,stream-consume,recovery-executor,stop-conditions,turn-loop}.ts`, `src/agent/dispatch-dedup.ts`, `src/agent/recovery.ts`, `src/kernel/session/{scheduler-turn-terminals,reducer}.ts`, `src/protocol/session/events.ts`, terminal/protocol tests. main에 들어온 presentation table은 먼저 감사하고 부족한 owner만 수정한다.
 - **구현 순서**:
   1. `StopCategory.reasonCode: string`을 닫힌 `StopReasonCode`로 바꾸고 producer table을 exhaustive하게 만든다.
   2. provider의 `LLMErrorKind`를 `StreamConsumeResult -> RecoveryAction -> TurnResult`까지 구조적으로 보존한다. regex는 legacy fallback으로만 남기고 fallback telemetry를 센다.
@@ -620,6 +672,8 @@ Wave 1의 네 lane도 아래 exclusive write set을 지킬 때만 병렬이다. 
   6. `awaitingApprovalCategory()`가 모든 승인을 `shell.needs_approval`로 오분류하지 않게 한다. 공통 `approval.required` 또는 실제 `ToolAction` 기반 code를 쓴다.
 - **RED/negative**: max turns, budget, refusal, empty exhausted, malformed tool use, output truncation, stationarity가 `turn.completed`로 가면 RED; user abort와 provider failure가 stopped로 섞여도 RED; approval 대기가 terminal이면 RED.
 - **완료**: terminal classifier exhaustive, producer completeness + red-on-mutation, protocol codec/generator 통과. surface 렌더 receipt는 Wave 3에서 닫는다.
+
+### 15.4 Wave 2A — Wave 1 merge 뒤 독립 owner 4병렬
 
 #### A — Existing activity spine에 turn projection (P1)
 
@@ -632,8 +686,6 @@ Wave 1의 네 lane도 아래 exclusive write set을 지킬 때만 병렬이다. 
   4. 완료 뒤 살아 있는 task/monitor는 idle watcher child로 남긴다.
 - **RED/negative**: 같은 작업의 label만 바꾸면 child 시작시각 불변; 실제 tool/request id 변경 시에만 재시작; 완료 후 monitor가 있으면 activity가 사라지면 RED.
 - **완료**: activity projection unit + fake clock 통과, 구독자가 상태를 재구성하지 않고 spine snapshot만으로 동일 렌더 가능.
-
-### 15.4 Wave 2 — Wave 1 merge 뒤 4병렬
 
 #### M — Live AgentMode + visible tool projection (P1)
 
@@ -659,6 +711,32 @@ Wave 1의 네 lane도 아래 exclusive write set을 지킬 때만 병렬이다. 
 - **RED/negative**: synthetic message가 round-trip 후 human으로 바뀌거나 metadata가 wire에 노출되면 RED; 실제 human message가 synthetic으로 분류되어도 RED.
 - **완료**: producer census receipt, migration/round-trip/adapter-strip E2E, boundary/compaction consumer가 metadata authority를 사용.
 
+#### F1 — Shipping CLI composition truth (P0/P1)
+
+- **목표**: helper/preset test가 아니라 설치 CLI가 실제 effective repo rules와 config path/gate를 사용하게 한다.
+- **authority/write set**: `src/apps/cli/{index,internal,rule-indicator}.ts`, `src/host/bootstrap/**`, `src/host/mcp-composition.ts`, `src/host/runtime/agent-arg-builder/gated-tool-ports.ts`, `src/config/knob-inventory/host.ts`, 전용 CLI/composition tests. M lane의 mode-cycle/session 파일과 겹치면 F1이 bootstrap/config owner, M이 mode projection owner로 patch를 분리한다.
+- **구현**:
+  1. shipping CLI session bootstrap에 하나의 `RepoRulesProvider`를 두고 prompt config와 `/rules` indicator가 같은 resolved snapshot/digest를 소비하게 한다.
+  2. repo rules content/path는 기존 `escapeBoundary("system-reminder", ...)` 경로를 그대로 통과시킨다. defang subsystem을 새로 만들지 않는다.
+  3. verify guard는 canonical boolean/gate parser를 사용한다. `QUANTA_VERIFY_GUARD=0|off`는 OFF, `1|on`은 ON, garbage는 명시 오류 또는 문서화된 fail-closed 정책이어야 한다.
+  4. MCP reader/writer/inventory가 하나의 `EffectiveMcpConfigPath` resolver를 쓴다. trust-gated project default를 채택하거나 명시 경로 없이는 writer를 거부하되, 쓰고도 읽지 않는 상태는 금지한다.
+- **RED/negative**: static composition audit에서 확인한 repoRules 누락을 실제 `quanta` provider-wire RED로 먼저 재현한다. `/rules`에만 보이는 거짓 양성, forged `</system-reminder>` 포함 규칙, nested root→cwd layers, verify `0`, MCP default write/read split을 함께 고정한다.
+- **완료**: source helper import가 아니라 built/installed CLI PTY 또는 provider-wire receipt에서 동일 repo-rules digest 확인, forged boundary 무력화, verify truth table, MCP write→restart→read round trip 통과.
+
+### 15.5 Wave 2B — 선행 owner merge 뒤 독립 owner 최대 4병렬
+
+#### F2 — Mutation freshness, child inheritance, SDK sensitive policy (P0/P1)
+
+- **선행**: B의 shell assessment 계약 merge. 같은-workspace child state ownership을 W0에서 확정.
+- **authority/write set**: `src/tool/stale-read-guard/**`, mutation tool guard adapters, `src/agent/subagent-runner-child-config.ts`, `src/sdk/embed.ts`, 관련 tests. `admissibility-gate/gates.ts` 변경이 필요하면 B 뒤 F2만 소유한다.
+- **구현**:
+  1. typed `MutationFreshnessPolicy`로 신규 파일 생성, 기존 미독 파일 변경, stale 변경, 성공 후 baseline refresh를 분리한다. interactive/live 기본은 `create=allow`, `existing-unread=deny`, `stale=deny`로 고정한다.
+  2. 같은 workspace/worktree child는 parent와 조정된 freshness authority를 공유하고, 격리 worktree child는 child-local authority를 받는다. 단순 mutable map 공유로 race를 숨기지 않는다.
+  3. bench guard OFF는 fresh-hash 적용 전/후 오탐·재시도·성공률 A/B 뒤 결정한다. 측정 전 default flip 금지.
+  4. SDK mutating profile은 `sensitiveActionPolicy` 또는 reviewer callback을 명시하게 한다. callback 부재 시 ordinary sensitive action도 deny; HARD_DENY/hand-off는 어떤 옵션으로도 자동승인 불가다.
+- **RED/negative**: existing unread write, sibling external mutation, parent ON→child OFF, isolated child false sharing, safe new-file create, SDK callback 부재 git push를 모두 고정한다.
+- **완료**: CLI/child/SDK public API receipt, concurrent child race test, bench A/B report, safe create negative control. bench의 default만 측정 결과와 함께 별도 결정 기록을 남긴다.
+
 #### P — Existing PlanStore restart/resume closure (P1, 제품 요구 확인 후 BUILD)
 
 - **목표**: 별도 `plan.md` SSOT를 만들지 않고 기존 typed `PlanStore`/`planSnapshotStore`로 승인 대기 상태를 재시작 후 복구한다.
@@ -669,6 +747,7 @@ Wave 1의 네 lane도 아래 exclusive write set을 지킬 때만 병렬이다. 
 
 #### E — Existing trust/config authority와 env dead-wire audit (P2)
 
+- **선행**: F1 merge. 새 trust/config subsystem 구축 금지.
 - **목표**: 새 trust/config subsystem을 만들지 않고 기존 authority를 모든 실행형 consumer가 사용하게 하며, 죽은 env/repo-map knob는 배선 또는 삭제한다.
 - **authority/write set**: `src/config/{merge,trust-store}.ts`, `src/agent/env-context.ts`, context assembler/bootstrap 소비자, 관련 trust/env tests.
 - **구현**:
@@ -679,12 +758,20 @@ Wave 1의 네 lane도 아래 exclusive write set을 지킬 때만 병렬이다. 
 - **RED/negative**: untrusted workspace에서 각 실행 consumer를 하나씩 주입해 fail-closed 확인; env knob ON인데 wire prompt 변화가 없거나 OFF인데 subprocess가 실행되면 RED.
 - **완료**: consumer inventory와 negative receipt, dead knob 0. authority 신규 복제 0.
 
-### 15.5 Wave 3 — 공유 front door 직렬 integration
+#### G — Existing objective runtime engagement (P1, MEASURE→ACTIVATE)
+
+- **목표**: 새 goal store/tool을 만들지 않고 현재 opt-in objective runtime이 실제 모델·재개 루프에서 쓰이는지 증명해 default를 결정한다.
+- **authority/write set**: `src/objective/**`는 원칙적으로 읽기 전용 감사, objective tool-surface/config/CLI E2E tests와 feature YAML. 결함이 입증된 owner만 최소 수정한다.
+- **측정 시나리오**: 명확한 다단계 요청, 단순 한 턴 질문, 중단 후 재개, budget/blocked, verifier receipt, session reopen. objective set/update/get 호출률, false goal 생성, stale objective, continuation 성공/중복을 기록한다.
+- **결정 gate**: engagement와 재개 이점이 확인되면 default-on 후보로 올리고 OFF parity를 보존한다. 모델이 툴을 거의 쓰지 않거나 짧은 요청에 오탐이면 prompt/tool exposure를 먼저 고치고 default는 유지한다.
+- **완료**: 실제 CLI/provider wire+session persistence receipt. 외부 Codex event 빈도나 unit symbol 존재만으로 activation 완료를 선언하지 않는다.
+
+### 15.6 Wave 3 — 공유 front door 직렬 integration
 
 Wave 3는 병렬 금지다. 앞 lane들이 일부러 건드리지 않은 공유 surface를 한 owner가 현재 merged SHA에서 연결한다.
 
 1. **Protocol/generator**: `TurnStoppedEvent`와 pause/failed/aborted를 session protocol, codec, generated clients에 반영하고 drift 0을 확인한다.
-2. **Terminal presenter**: `Record<StopReasonCode,{label,tone,exitClass}>` 하나를 만들고 CLI, web, VS Code, headless가 이를 소비한다. 각 surface의 unknown/default-to-success 분기를 제거한다.
+2. **Terminal presenter**: main에 들어온 shared presentation table을 정본 후보로 감사하고, `Record<StopReasonCode,{label,tone,exitClass}>` 완결성과 CLI/web/VS Code/headless 소비를 닫는다. 이미 충족된 부분을 재작성하지 않고 각 surface의 unknown/default-to-success 분기만 제거한다.
 3. **Activity consumer**: CLI spinner/status가 activity spine snapshot을 소비하고 별도 phase/reason 재구성을 하지 않게 한다.
 4. **Shared-loop patches**: S/M/P lane이 제출한 integration patch를 `stream-consume.ts`, session lifecycle/driver에 하나씩 적용하고 매 적용 후 focused tests를 돌린다.
 5. **Real front-door matrix**:
@@ -698,11 +785,14 @@ Wave 3는 병렬 금지다. 앞 lane들이 일부러 건드리지 않은 공유 
 | approval/input wait | paused, 재개 가능 | paused | paused | pause event, terminal 아님 |
 | stationarity/output truncation | stopped + 정확한 code | stopped | stopped | non-success + stopped event |
 
-### 15.6 ALREADY / DROP / PARK — 다시 만들지 말 것
+### 15.7 ALREADY / DROP / PARK — 다시 만들지 말 것
 
 | 판정 | 항목 | 처리 |
 |---|---|---|
 | ALREADY | workspace trust store, config overlay merge | consumer coverage만 감사. 새 subsystem 금지 |
+| ALREADY | HARD_DENY/hand-off의 bypass 면역 precedence | 새 `bypassImmune` 계층 복제 금지. B/F2에서 classifier coverage와 SDK 명시 정책만 보강 |
+| ALREADY | repo-rules boundary defang | 새 escape subsystem 금지. F1 shipping CLI wire가 기존 `escapeBoundary`를 쓰는지 증명 |
+| ALREADY | objective store/tools/persistence/continuation | 새 goal DB/tool 금지. G에서 engagement와 default만 결정 |
 | ALREADY | kernel session JSONL torn-final-line repair + single-writer lock | global JSONL abstraction 금지. retry 의미가 필요한 writer에만 committed/not-committed 계약 |
 | ALREADY | `too_many_failed_attempts` decorator/routing/tests | 신규 decorator 티켓 삭제; T-lane structured provenance와 연결 여부만 확인 |
 | ALREADY | `.scratch-prompt` 제거 | 재작업 금지 |
@@ -712,11 +802,12 @@ Wave 3는 병렬 금지다. 앞 lane들이 일부러 건드리지 않은 공유 
 | PARK | 파일경로별 write lock | 현재 barrier 방식의 실측 병목/안전성 손실 없이는 복잡도 불필요 |
 | PARK | server doom signal, PreToolUse target rewrite | provider/hook authority와 threat model을 먼저 확정 |
 | PARK | 조기하차 regex를 control-flow로 사용 | telemetry label로만 실험; 종료 authority로 승격 금지 |
-| PARK | prompt tone/크기 감량, hashline edit, MCP indirect exposure | ablation/비용 자료 후 결정 |
+| PARK | prompt tone/크기 감량, MCP indirect exposure | ablation/비용 자료 후 결정 |
+| PARK | hashline edit | standard+expected_hash+fresh-baseline 대비 shifted-line/multi-edit A/B 승리 전 포팅 금지 |
 | PARK | global recovery cap | 실패 종류별 budget과 terminal truth가 먼저. 임의 전역 상한 금지 |
 | DROP/PARK | `src/subagent/role.ts` | 소비자 owner가 없으면 삭제; 미래 배선을 이유로 강제 연결하지 않음 |
 
-### 15.7 각 lane 공통 완료 계약
+### 15.8 각 lane 공통 완료 계약
 
 다음 항목이 하나라도 없으면 branch는 merge-ready가 아니다.
 
@@ -765,3 +856,43 @@ cap 강제 리마인더 / repro-doubt steer / **dedup-gate 관찰**(3규제) / l
 `<quanta_observations>` — **유일하게 mid-turn 아님**(벤치 초기 프롬프트에만, `QUANTA_OBS_RENDER` 게이트)
 
 **태그 현황**: `synthetic-user.ts`의 5종(`same-turn-recovery`/`hook-context`/`context-change`/`mention-injection`/`focus-chain`)만 표식. 나머지 무표식.
+
+
+---
+
+## 14. 실행 기록 — 흡수 구현 + 헬어딧 (2026-08-23 야간)
+
+§11 우선순위대로 헬게이트 프로토콜(RED e2e → 구현 → 검증 → 커밋)로 완주하고, 적대 2R + 객관 1시선 헬어딧 후 보완까지 마침. 커밋 11개.
+
+### 랜딩 목록
+| 커밋 | 내용 |
+|---|---|
+| `036dd2a77` | `Record<StopReason, StopCategoryKind>` + 런타임 드리프트 가드; 승인대기 경로 카테고리 부여 |
+| `ec6b38215` | 공유 표현 테이블 `Record<StopReasonCode,{label,tone}>` + 가드 |
+| `7b0cb3ab1` | `TurnCompletedEvent.stopCategory?` 탑재; **`?? "completed"` 성공위조 제거** |
+| `ef16e6a93` | CLI 알림이 존재여부 아닌 실제 결과로 판정 |
+| `50e3e65d6` | 웹이 카테고리를 메시지까지 운반 |
+| `e72117680` | VS Code가 실패 턴을 Idle로 세탁하지 않음 |
+| `ccfef3376` | DedupGate 옵트인 무진전 상한(`loop.no_progress`) |
+| `ef00a2496` | 압축이 하네스 발화를 사용자 말로 요약하지 않음(`[harness]` 라벨) |
+| `8aa6b61bd` | rewind가 하네스 메시지를 대상/턴수에서 제외 |
+| `cb711aa55` | **헬어딧 보완 1차** (아래) |
+| `c9a699ea7` | **헬어딧 보완 2차** — 커널 전 종료경로 카테고리 파생, `hint` 실사용 |
+
+### 🔴 헬어딧이 잡아낸 것 (전부 수정됨)
+1. **main이 RED였음** — `ccfef3376`이 `src/` 아래 **co-located** 테스트(`stop-conditions.test.ts:39`)의 OCP 핀을 깨뜨림. 내 검증이 `tests/` 범위여서 못 봤음. **교훈: `src/**/*.test.ts`도 검증 범위에 넣을 것.**
+2. **VS Code 수정이 inert였음** — 커널이 `turn.completed` 직후 `session.state.updated{idle}`를 보내 덮어씀. 순수 함수만 테스트해서 놓침. **교훈: 표면 수정은 실제 이벤트 시퀀스로 배선증명할 것.**
+3. **내가 만든 회귀** — 비-`completed`를 전부 `Failed`로 묶어 승인대기 일시정지가 에러 배지가 됨. `awaiting_approval`→`InProgress`로 수정(`statusForStateView`와 일치).
+4. **"보이게 했다"면서 아무것도 안 보였음** — 웹이 카테고리를 운반만 하고 어떤 `.tsx`도 안 읽음. `MessageBubble` 배지 추가 + 웹/코어 표 드리프트 가드(주입검증 완료).
+5. **`/rewind --to-last` 회귀** — 트레일링 하네스 메시지가 있으면 내부 id를 노출하며 실패.
+6. **`maxBlockedForOneBucket`이 세션 전체 누적** — 무관한 두 wedge가 합산돼 정상 런을 죽일 수 있었음. 윈도우 이탈시 소멸하도록.
+7. **4번째 성공 오표시 지점** — `ci-bot`이 PR에 `completed (reason=error)`를 게시.
+8. **커널 abort/failed/errored가 카테고리 유실 + 이전 턴 카테고리 누수** — 파생으로 전환.
+
+### 남은 것
+- **`default-off-ledger` 구조적 갭**: `gate_owner`가 non-empty 필수라 **config 필드로만 도달하는 default-OFF 기능은 ledger에 표현 불가**하고 두 가드(ledger hellgate / knob-registry 라쳇) 모두를 통과 못 함. `hardStopAfter`가 그 첫 사례. 스키마 확장이 필요(행 추가는 시도 후 되돌림).
+- **압축의 턴예산 리마인더**: 태깅하면 id가 생겨 "rewind 게이트 OFF ⇒ 트랜스크립트 id-less" 불변식을 깨서 되돌림. 제대로 고치려면 `id`가 아닌 별도 마커 필요.
+- **선존재 RED(내 것 아님)**: `default-off-ledger-hellgate` 2 fail(`a5c56e652`가 catalog 7건을 ledger 행 없이 등록), `pm-dod-ratchet` 1 fail(`aug22-rfc06-2-worktree-cwd-pin`).
+
+### 최종 상태
+멈춤 사유가 생산 → 커널 → 이벤트 → 4개 표면까지 배선됨. 성공 오표시 4곳 전부 수정. 표현 테이블에 실사용 소비자 2개(CLI 판정, 웹 배지) + 웹/코어 드리프트 가드. 새 `StopReason` 추가시 컴파일 실패, 새 `StopReasonCode` 추가시 표현 미정의로 컴파일 실패.
