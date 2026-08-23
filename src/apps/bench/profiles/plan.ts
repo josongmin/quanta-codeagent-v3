@@ -11,7 +11,18 @@
  * actually happen, not a second, independently-resolved one.
  */
 import type { BenchRunConfig } from "../run-config"
+import { familyRemoteBootstrap } from "./bootstrap"
+import { familyBootstrapWiringPlanNotes } from "./bootstrap-phase-wiring"
 import { resolveDatasetFamilyProfile } from "./registry"
 
-export const familyPlanNotes = (cfg: BenchRunConfig): readonly string[] =>
-  resolveDatasetFamilyProfile(cfg.datasetFamily).planNotes?.(cfg) ?? []
+/**
+ * A family's own notes, PLUS the one note no family would write about itself:
+ * whether the answer-key lifecycle its bootstrap declares is actually executed
+ * by anything in production (see `bootstrap-phase-wiring.ts`). Empty for every
+ * family whose bootstrap materializes no gold — i.e. all of them but ProMax —
+ * so existing plans stay byte-identical.
+ */
+export const familyPlanNotes = (cfg: BenchRunConfig): readonly string[] => [
+  ...(resolveDatasetFamilyProfile(cfg.datasetFamily).planNotes?.(cfg) ?? []),
+  ...familyBootstrapWiringPlanNotes(familyRemoteBootstrap(cfg)),
+]

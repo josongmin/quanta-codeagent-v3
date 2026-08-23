@@ -43,6 +43,14 @@ import type { FamilyBootstrapCommand, FamilyRemoteBootstrap } from "./types"
  * `goldBearing: true` in `harness/promax/evaluator-bootstrap.ts`, and the
  * executor refuses to run a gold-bearing command in the agent phase.
  *
+ * 🔴 AND TODAY, MORE BLUNTLY THAN THAT: none of this plan executes on any lane.
+ * ProMax's `admitBox` refuses every box (PMX-04), and NO production caller runs
+ * the `grader` phase at all, so the checkout below is never created and its
+ * teardown never runs. The plan is a specification that a dry-run prints, not a
+ * sequence a box has performed. `profiles/bootstrap-phase-wiring.ts` owns that
+ * statement as checked data, and surfaces it on the dry-run plan so an operator
+ * is not left inferring liveness from the plan's existence.
+ *
  * {@link PROMAX_ONBOX_ROOT} is the CAMPAIGN root: the agent phase creates it
  * EMPTY (so the disk gate has a real mount to measure) and nothing is in it
  * until grading starts.

@@ -15,7 +15,9 @@
  *     [--head-commit <sha> [--attached-ref <ref>]]
  *
  * Expected layout under <dir>: manifest.json, dataset.json, eval.json,
- * evaluator.py, and optionally hf/dataset.json + hf/eval.json.
+ * evaluator.py, and optionally hf/dataset.json + hf/eval.json. That directory is
+ * produced by `assemble-bundle.ts`; the full operator chain (fetch → assemble →
+ * verify → prepare-corpus) is documented in `tools/bench-promax/README.md`.
  */
 import { existsSync, readFileSync } from "node:fs"
 import { join } from "node:path"
@@ -24,17 +26,19 @@ import type {
   ProMaxVerification,
   ProMaxVerifyPolicy,
 } from "@/apps/bench/promax/provenance"
-import { requireExplicitBundleRoot, verifyProMaxBundle } from "@/apps/bench/promax/provenance"
+import {
+  PROMAX_BUNDLE_FILES,
+  requireExplicitBundleRoot,
+  verifyProMaxBundle,
+} from "@/apps/bench/promax/provenance"
 
-/** Names are fixed so a bundle directory is self-describing. */
-export const BUNDLE_FILES = Object.freeze({
-  manifest: "manifest.json",
-  dataset: "dataset.json",
-  evalMeta: "eval.json",
-  evaluator: "evaluator.py",
-  hfDataset: join("hf", "dataset.json"),
-  hfEvalMeta: join("hf", "eval.json"),
-})
+/**
+ * Names are fixed so a bundle directory is self-describing. The table itself is
+ * owned by `provenance/bundle-layout.ts` because `assemble-bundle.ts` WRITES the
+ * same layout this tool READS — a second spelling here would let an assembled
+ * bundle drift out of the shape the validator consumes.
+ */
+export const BUNDLE_FILES = PROMAX_BUNDLE_FILES
 
 export interface CheckoutClaim {
   readonly headCommit: string

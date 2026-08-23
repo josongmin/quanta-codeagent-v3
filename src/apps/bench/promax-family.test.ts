@@ -43,6 +43,7 @@ import { resolveRemoteBenchExecutionPreset } from "./preset"
 import { loadFamilyCorpusRowsOrThrow, readFamilyCorpusText } from "./profiles/corpus-read"
 import type { FamilyCorpusRow } from "./profiles/corpus-row"
 import { assertProMaxDatasetShape } from "./profiles/promax-dataset-shape"
+import { projectProMaxRowForAgent } from "./profiles/promax-projection"
 import {
   DATASET_FAMILY_PROFILES,
   registerDatasetFamilyProfile,
@@ -506,12 +507,15 @@ describe("PMX-01 — promax preflight refuses a mislabeled or gold-bearing datas
   // family reader — exactly what `assertDatasetGradeableForFamily` hands it.
   const promaxRows = (path: string): readonly FamilyCorpusRow[] =>
     loadFamilyCorpusRowsOrThrow({ datasetPath: path, surface: "t", family: "promax" })
-  const sound = (): Record<string, unknown> => {
-    const row = promaxRow()
-    delete row.patch
-    delete row.test_patch
-    return row
-  }
+  // aug-22 A1 — built by the REAL production projection instead of by deleting
+  // two keys by hand. This helper claims to be "an already-projected chunk", but
+  // hand-deleting `patch`/`test_patch` left `image_name` / `working_dir` /
+  // `environment_setup_commit` / `hints_text` on the row — all of which the
+  // now-closed deny-list floor (`profiles/promax-field-class.ts`) correctly
+  // refuses. Round-tripping through the production projection makes the claim
+  // true by construction rather than by hand, so this pairing is a real
+  // projection⇄preflight round trip.
+  const sound = (): Record<string, unknown> => projectProMaxRowForAgent(promaxRow())
 
   test("a Verified-shaped dataset mislabeled `promax` is refused as a CORPUS problem", () => {
     const path = writeJsonl("verified-shaped.jsonl", [

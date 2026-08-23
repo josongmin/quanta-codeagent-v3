@@ -133,6 +133,11 @@ export interface FamilyBootstrapCommand {
    *   executor call as `grader` (it runs in that call's `finally`), because a
    *   teardown with its own call site is a teardown someone forgets: the box
    *   then carries the answer key into the NEXT chunk's agent phase.
+   *
+   * 🔴 REACHABILITY, aug-22: only `agent` has a production caller today. NOTHING
+   * under `src/` executes the `grader` phase, so the `teardown` bound to it does
+   * not run either — see `profiles/bootstrap-phase-wiring.ts`, which owns that
+   * claim as checked data rather than as this comment.
    */
   readonly phase: FamilyBootstrapPhase
   /**

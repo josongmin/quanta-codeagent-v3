@@ -28,6 +28,9 @@
  *
  * `--agent-root` receives ONLY `public-tasks.json`. `--grader-root` receives
  * `grader-bundle/` and MUST NOT be inside `--agent-root`.
+ *
+ * This is the LAST step of the operator chain (fetch → assemble → verify →
+ * prepare-corpus), documented in `tools/bench-promax/README.md`.
  */
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { join } from "node:path"

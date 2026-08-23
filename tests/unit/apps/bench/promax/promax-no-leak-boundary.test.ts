@@ -24,6 +24,7 @@ import { tmpdir } from "node:os"
 import { join, relative } from "node:path"
 import { DATASET_FAMILIES, type DatasetFamily } from "@/apps/bench/dataset-family-token"
 import { readFamilyCorpusText } from "@/apps/bench/profiles/corpus-read"
+import { PROMAX_NON_AGENT_ROW_FIELDS } from "@/apps/bench/profiles/promax-field-class"
 import { resolveDatasetFamilyProfile } from "@/apps/bench/profiles/registry"
 import {
   assertGraderBundleOutsideAgentRoot,
@@ -64,19 +65,26 @@ afterAll(() => {
 })
 
 const GOLD_MARKERS = [GOLD_PATCH_MARKER, GOLD_TEST_PATCH_MARKER, EVAL_SCRIPT_MARKER] as const
-/** Grader-only KEY names, in every spelling either artifact could use. */
+/**
+ * Grader-only KEY names, in every spelling either artifact could use.
+ *
+ * aug-22 A1 — the snake_case half is DERIVED from the closed row-field
+ * classification rather than hand-listed. The hand-list had drifted: it never
+ * named `hints_text`, so this scanner would have reported a clean agent root for
+ * an artifact carrying upstream issue hints. Deriving it means classifying a new
+ * field widens this scan in the same commit.
+ */
 const GRADER_KEYS = [
-  "patch",
-  "test_patch",
+  ...PROMAX_NON_AGENT_ROW_FIELDS,
+  // camelCase spellings of `PromaxGraderTaskView`, plus the eval-map script and
+  // the evaluator's golden document, which are not dataset row fields.
   "testPatch",
   "eval_script",
   "evalScript",
-  "image_name",
   "imageName",
-  "working_dir",
   "workingDir",
-  "environment_setup_commit",
   "environmentSetupCommit",
+  "hintsText",
   "golden",
 ] as const
 

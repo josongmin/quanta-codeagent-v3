@@ -8,6 +8,26 @@
  * bytes.
  */
 export {
+  assertProMaxBundleLayoutInSync,
+  PROMAX_ASSEMBLY_FAILURE_CODES,
+  PROMAX_ASSEMBLY_FAILURE_REASONS,
+  PROMAX_BUNDLE_SOURCES,
+  type ProMaxAssemblyFailure,
+  type ProMaxAssemblyFailureCode,
+  type ProMaxAssemblyPlan,
+  type ProMaxAssemblyPorts,
+  type ProMaxAssemblyRequest,
+  type ProMaxBundleSourceSpec,
+  type ProMaxFetchedSource,
+  type ProMaxPlannedFile,
+  planProMaxBundleAssembly,
+} from "./assemble"
+export {
+  PROMAX_BUNDLE_FILE_KEYS,
+  PROMAX_BUNDLE_FILES,
+  type ProMaxBundleFileKey,
+} from "./bundle-layout"
+export {
   type CorpusIdentity,
   type CorpusParse,
   type EvalParse,
@@ -23,7 +43,12 @@ export {
 } from "./frozen-snapshot"
 export { createFailureSink, describeValue, type FailureSink, isRecord } from "./json"
 export { type ManifestParse, parseManifest } from "./manifest"
-export { isPinnedCommit, requireExplicitBundleRoot, requirePinnedCommit } from "./selector"
+export {
+  isPinnedCommit,
+  requireExplicitBundleRoot,
+  requireExplicitUpstreamRoot,
+  requirePinnedCommit,
+} from "./selector"
 export {
   type BundleBytes,
   PROMAX_FAILURE_CODES,

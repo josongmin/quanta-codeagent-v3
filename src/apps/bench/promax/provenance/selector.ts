@@ -52,3 +52,21 @@ export const requireExplicitBundleRoot = (raw: string | undefined): string => {
   }
   return norm
 }
+
+/**
+ * Return an explicitly supplied FETCHED-upstream root, or THROW. Same posture as
+ * {@link requireExplicitBundleRoot}: the assembler never searches for "the
+ * latest fetch" and never downloads one — a hybrid assembled from whichever
+ * tree happened to be lying around is the failure PMX-00 exists to refuse.
+ */
+export const requireExplicitUpstreamRoot = (raw: string | undefined): string => {
+  const norm = (raw ?? "").trim()
+  if (norm === "") {
+    throw new Error(
+      "promax provenance: no upstream fetch root supplied. " +
+        "REFUSING to search for or download upstream — pass the explicit fetched tree " +
+        "(e.g. ~/.quanta/bench/promax-upstream/<40-hex-commit>/).",
+    )
+  }
+  return norm
+}

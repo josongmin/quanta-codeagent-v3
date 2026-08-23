@@ -1,6 +1,33 @@
 /**
  * LEAF — EXECUTE a family's declared REMOTE BOOTSTRAP on a box, FOR ONE PHASE.
  *
+ * ## 🔴 READ FIRST — WHICH of these clauses is LIVE today
+ *
+ * Everything below is implemented, tested and fail-closed. Only part of it is
+ * currently REACHED, and the distinction matters because a receipt must not cite
+ * a guard that never runs:
+ *
+ *   • the AGENT phase (its gold-bearing cross-check, and the absence probe it
+ *     demands) HAS a production caller — `family-box-setup.ts`, which is the
+ *     ONLY non-test call site of {@link executeFamilyRemoteBootstrap} and passes
+ *     `phase: "agent"`. It is nonetheless reached by NO SHIPPED FAMILY today,
+ *     because ProMax is the only family declaring a bootstrap and its `admitBox`
+ *     refuses the lane (PMX-04);
+ *   • the GRADER phase and the TEARDOWN bound to it have NO production caller AT
+ *     ALL. Nothing under `src/` invokes this function with `phase: "grader"`.
+ *
+ * So the answer-key lifecycle described below is PRODUCTION-INERT, not a live
+ * defence. That is safe rather than leaky — the grader phase is the only thing
+ * that materializes gold, and a phase nobody executes materializes nothing — but
+ * it is not what the previous version of this comment implied.
+ *
+ * The claim is DATA, not prose: `profiles/bootstrap-phase-wiring.ts` declares
+ * which phases have production callers, {@link assertFamilyBootstrapPhaseWiringInSync}
+ * re-checks it on this function's default path, the operator sees it on every
+ * `--dry-run` plan, and `promax-bootstrap-phase-reachability.test.ts` refuses to
+ * let a shipped family start ADMITTING boxes while its teardown is still
+ * unreachable.
+ *
  * PMX-04 split the question in two on purpose:
  *
  *   • WHAT a box must become — which commit, which interpreter, which hashes,
@@ -54,6 +81,10 @@
  * without a remote bootstrap (verified / live / pro) byte-identical.
  */
 import { errMessage } from "@/shared"
+import {
+  assertFamilyBootstrapPhaseWiringInSync,
+  bootstrapMaterializesGold,
+} from "../../profiles/bootstrap-phase-wiring"
 import type {
   FamilyBootstrapCommand,
   FamilyBootstrapPhase,
@@ -151,9 +182,12 @@ export const selectBootstrapCommandsForPhase = (
 }
 
 /** Does this bootstrap put answer-key bytes on the box at all? Families that
- *  never do are untouched by the two lifecycle clauses below. */
-const materializesGold = (bootstrap: FamilyRemoteBootstrap): boolean =>
-  bootstrap.commands.some((command) => command.phase === "grader" && command.goldBearing)
+ *  never do are untouched by the two lifecycle clauses below.
+ *
+ *  Defined in `profiles/bootstrap-phase-wiring.ts` rather than here so the gate
+ *  and the operator-facing dry-run note cannot drift into two different
+ *  meanings of "materializes gold". */
+const materializesGold = bootstrapMaterializesGold
 
 /**
  * A family that MATERIALIZES gold must declare its REMOVAL.
@@ -207,6 +241,13 @@ const assertAbsenceIsProven = (
 export const executeFamilyRemoteBootstrap = async (
   input: FamilyBootstrapExecInput,
 ): Promise<number> => {
+  // 🔴 The reachability TABLE this module's docs now rest on (which phases a
+  // production caller actually executes) is re-checked HERE, on the default
+  // path, for every family and every phase — before the `undefined` early
+  // return, so it is not gated on a family happening to declare a bootstrap.
+  // Pure: it issues no command, so a family without a bootstrap is still
+  // byte-identical.
+  assertFamilyBootstrapPhaseWiringInSync()
   const bootstrap = input.bootstrap
   if (bootstrap === undefined) return 0
   // The grader phase MATERIALIZES the answer key, so its teardown is bound to
