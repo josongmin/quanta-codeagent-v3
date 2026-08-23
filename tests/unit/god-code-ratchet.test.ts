@@ -79,4 +79,40 @@ describe("god-code ratchet (SE size metric)", () => {
     expect(dupes(allowlist.functions)).toEqual([])
     expect(dupes(allowlist.modules)).toEqual([])
   })
+
+  // aug-23 audit — COHORT ceiling. The 1000-line gate above caps an INDIVIDUAL
+  // module, but nothing capped the population walking up to it: a file may grow
+  // to 999 freely, so every split this campaign lands is undone by the next
+  // feature. Measured over one day of commits the 900-999 band went 30 -> 27
+  // with six members ADVANCING (`runtime-factory` 989->999,
+  // `bootstrap-session` 988->999, `objective/store` 876->905 as a new entrant).
+  // Splitting without this is a treadmill.
+  //
+  // One-directional, same contract as the allowlist: a new entrant fails the
+  // build — split one and LOWER the number. It never gets raised.
+  test("the 900-999 approaching cohort does not grow", () => {
+    // JSON import widens the tuple to `number[]`; pin it so the bounds are total.
+    const band = allowlist.approachingModuleCeiling as {
+      readonly band: readonly [number, number]
+      readonly max: number
+    }
+    const [lo, hi] = band.band
+    const approaching = files
+      .map((f) => ({ file: f.path, lines: f.text.split("\n").length }))
+      .filter((m) => m.lines >= lo && m.lines <= hi)
+      .sort((a, b) => b.lines - a.lines)
+    // Anti-vacuity: the walk must have actually read the tree.
+    expect(files.length).toBeGreaterThan(1000)
+    if (approaching.length > band.max) {
+      throw new Error(
+        `${approaching.length} modules are in the ${lo}-${hi} band (ceiling ${band.max}). ` +
+          "Split one and LOWER the ceiling; never raise it. Closest to the hard gate:\n" +
+          approaching
+            .slice(0, 8)
+            .map((m) => `  ${m.lines}  ${m.file}`)
+            .join("\n"),
+      )
+    }
+    expect(approaching.length).toBeLessThanOrEqual(band.max)
+  })
 })

@@ -1,5 +1,5 @@
 {
-  "_comment": "FROZEN god-code ratchet allowlist (SE-metric). Grandfathered violations only. NEVER add — split the code instead. REMOVE an entry when its file/function drops below threshold (the ratchet only goes DOWN). Regenerate via tools/god-code/detect.ts.",
+  "_comment": "FROZEN god-code ratchet allowlist (SE-metric). Grandfathered violations only. NEVER add \u2014 split the code instead. REMOVE an entry when its file/function drops below threshold (the ratchet only goes DOWN). Regenerate via tools/god-code/detect.ts.",
   "godModuleMaxLines": 1000,
   "godFunctionMaxLines": 150,
   "modules": [],
@@ -43,5 +43,13 @@
     "src/runner/batch/eval/repo-regression-discovery-adapter.ts::makeDiscoveredRepoRegressionWitness",
     "src/tool/pty/bun-pty-adapter.ts::createBunPtyAdapter",
     "src/workflow/executor.ts::runWorkflow"
-  ]
+  ],
+  "approachingModuleCeiling": {
+    "_comment": "aug-23 audit \u2014 the 1000-line god-MODULE gate caps INDIVIDUAL files, but nothing capped the COHORT approaching it, so files creep to 999 and every split is undone by the next feature. Measured drift: 30 -> 27 across one day of commits, with six members advancing and one new entrant. This is a one-directional ceiling on how many src modules sit in the 900-999 band. Raise NEVER \u2014 split one, then lower this.",
+    "band": [
+      900,
+      999
+    ],
+    "max": 26
+  }
 }

@@ -63,6 +63,14 @@ The ratchet only goes DOWN: a NEW violation **fails the build — you must split
 never add it to the allowlist**; and when a refactor drops a file/function below
 threshold you **remove its stale allowlist entry** (the test demands it).
 
+There is also a **COHORT ceiling** on modules in the 900-999 band
+(`approachingModuleCeiling` in the same allowlist). The 1000-line gate caps an
+individual file, but nothing capped the population walking up to it — measured
+over one day the band moved 30 → 27 with six members ADVANCING and one new
+entrant, so every split was being undone by the next feature. A new entrant into
+the band fails the build: split one and **lower** the number. Like every other
+ceiling here, it is never raised.
+
 ### Lint WARNINGS are not free — `bun run lint:debt`
 
 `biome check` (`bun run lint`) exits non-zero only on **error**-level
