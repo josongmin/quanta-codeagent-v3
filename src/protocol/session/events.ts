@@ -49,8 +49,33 @@ export interface TokenUsage {
   readonly costMicroUsd?: number
 }
 
+/** Sentinel for a `turn.completed` whose reason could not be resolved.
+ *
+ *  aug-23 §13: the scheduler used to fall back to `"completed"`, i.e. it
+ *  invented a success when it had no reason — the same source-side bug the
+ *  Grok-Build audit found. An unresolved outcome is NOT a completion; surfaces
+ *  must be able to tell the two apart. */
+export const UNKNOWN_OUTCOME_REASON = "unknown"
+
+/** Structured stop category as it rides the wire.
+ *
+ *  Declared STRUCTURALLY here (not imported from `@/agent/stop-category`) on
+ *  purpose: the web-frontend protocol generator hard-errors on `@/*` types
+ *  absent a narrowing-manifest entry, and the protocol layer should not depend
+ *  on the agent layer. `@/agent`'s `StopCategory` is assignable to this. */
+export interface StopCategoryWire {
+  readonly kind: string
+  readonly reasonCode: string
+  readonly hint?: string
+}
+
 export interface TurnCompletedEvent extends SessionEventEnvelope<"turn.completed"> {
   readonly outcomeReason: string
+  /** Optional structured stop category (aug-23 §13 slice 1c). Absent ⇒ the
+   *  event is byte-identical to its pre-slice shape, so existing consumers are
+   *  unaffected; surfaces that read it can render an honest stop instead of
+   *  re-deriving one from `outcomeReason`. */
+  readonly stopCategory?: StopCategoryWire
   readonly assistantText?: string
   readonly tokenUsage?: TokenUsage
   readonly modelSlug?: string

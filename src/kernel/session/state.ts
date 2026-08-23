@@ -6,6 +6,7 @@ import type {
   PostureProjectionView,
   SessionSnapshotLite,
   SessionStateView,
+  StopCategoryWire,
 } from "@/protocol/session"
 import { fullFidelityEnabled } from "@/shared"
 import type { LlmContinuationObservation, LlmRequestObservation } from "@/shared/llm-route-types"
@@ -49,6 +50,10 @@ export interface KernelSessionState {
   readonly artifacts: readonly ArtifactRef[]
   readonly capabilityManifest: CapabilityManifest
   readonly lastOutcomeReason?: string
+  /** Structured stop category for the last finished turn (aug-23 §13 slice 1c).
+   *  Optional — absent ⇒ `turn.completed` omits the field, byte-identical to
+   *  the pre-slice shape. */
+  readonly lastStopCategory?: StopCategoryWire
   /** Active LLM model slug — captured from the host description at session
    *  creation. Echoed on `session.created` and `turn.completed`. */
   readonly modelSlug?: string
@@ -138,6 +143,7 @@ export const toSessionStateView = (state: KernelSessionState): SessionStateView 
     ? { streamingAssistantText: state.transcript.streamingAssistantText }
     : {}),
   ...(state.lastOutcomeReason !== undefined ? { lastOutcomeReason: state.lastOutcomeReason } : {}),
+  ...(state.lastStopCategory !== undefined ? { lastStopCategory: state.lastStopCategory } : {}),
   ...(state.lastLlmRequest !== undefined ? { lastLlmRequest: state.lastLlmRequest } : {}),
   ...(state.lastLlmContinuation !== undefined
     ? { lastLlmContinuation: state.lastLlmContinuation }

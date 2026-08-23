@@ -78,6 +78,7 @@ export type {
   SessionEventEnvelope,
   SessionEventType,
   SessionStateUpdatedEvent,
+  StopCategoryWire,
   TokenUsage,
   ToolCompletedEvent,
   ToolInvokedEvent,
@@ -93,6 +94,7 @@ export type {
 export {
   isSessionEventType,
   SESSION_EVENT_TYPES,
+  UNKNOWN_OUTCOME_REASON,
 } from "./events"
 export type { ObjectiveCommandOutcome } from "./objective-projection"
 export type {

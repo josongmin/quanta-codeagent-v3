@@ -307,8 +307,15 @@ export interface TokenUsage {
   readonly costMicroUsd?: number
 }
 
+export interface StopCategoryWire {
+  readonly kind: string
+  readonly reasonCode: string
+  readonly hint?: string
+}
+
 export interface TurnCompletedEvent extends SessionEventEnvelope<"turn.completed"> {
   readonly outcomeReason: string
+  readonly stopCategory?: StopCategoryWire
   readonly assistantText?: string
   readonly tokenUsage?: TokenUsage
   readonly modelSlug?: string

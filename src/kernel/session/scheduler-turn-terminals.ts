@@ -1,6 +1,6 @@
 import type { Message } from "@/llm"
 import type { ArtifactRef, SessionEvent, TurnRunCommand } from "@/protocol/session"
-import { SessionProtocolValidationError } from "@/protocol/session"
+import { SessionProtocolValidationError, UNKNOWN_OUTCOME_REASON } from "@/protocol/session"
 import { isAbort } from "@/shared/abortable"
 import type { KernelDispatchContext, SessionHostTurnResult } from "./ports"
 import { appendEvents, appendTerminalEvents } from "./scheduler-append-isolation"
@@ -141,7 +141,13 @@ const completionEventsForTurn = (args: {
       emittedAt,
       causedByCommandId: args.command.commandId,
       type: "turn.completed",
-      outcomeReason: args.state.lastOutcomeReason ?? "completed",
+      /* aug-23 §13 — was `?? "completed"`, which invented a success whenever the
+         reason was missing (the competitor's source-side bug). An unresolved
+         outcome is explicitly unknown, never a completion. */
+      outcomeReason: args.state.lastOutcomeReason ?? UNKNOWN_OUTCOME_REASON,
+      ...(args.state.lastStopCategory !== undefined
+        ? { stopCategory: args.state.lastStopCategory }
+        : {}),
       ...(args.state.transcript.lastAssistantText !== undefined
         ? { assistantText: args.state.transcript.lastAssistantText }
         : {}),
@@ -179,6 +185,9 @@ export const onTurnCompleted = async (args: {
     transcript: clearStreamingAssistantText(summarizeTranscript(args.result.messages)),
     artifacts: [...args.state.artifacts, ...artifacts],
     lastOutcomeReason: args.result.outcome.reason,
+    ...(args.result.outcome.stopCategory !== undefined
+      ? { lastStopCategory: args.result.outcome.stopCategory }
+      : {}),
     ...(args.result.tokenUsage !== undefined ? { lastTokenUsage: args.result.tokenUsage } : {}),
   }
   const completionEvents = completionEventsForTurn({
