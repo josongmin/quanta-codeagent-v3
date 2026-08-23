@@ -85,6 +85,12 @@ const shapeTag = (value: unknown, depth: number): string => {
   if (t === "symbol") return "sym"
   if (t === "string") {
     const s = value as string
+    // The `cwd` slot bakes an ABSOLUTE repo path (`cwd = opts.cwd ?? process.cwd()`),
+    // which differs per checkout/worktree/CI and is NOT touched by the slot-registry
+    // refactor — render it as a STABLE sentinel (same rationale as the `env` bag)
+    // so a regen from a worktree does not poison main and the fingerprint stays
+    // machine-independent.
+    if (s === process.cwd()) return "str:<cwd>"
     return s.length <= STR_VERBATIM_MAX ? `str:${JSON.stringify(s)}` : `str[${s.length}]`
   }
   if (Array.isArray(value)) {

@@ -2,14 +2,14 @@
 
 exports[`composition slot-registry — byte-identical hellgate fingerprint stable — all-off default: all-off default :: base 1`] = `
 "KEYS[12]: llm,registry,stream,promptSurfaceProfile,permission,messages,system,cwd,maxTurns,signal,searchPipeline,stickyModelStore
-llm :: obj{model=str:"gpt-5.4",provider=str:"chatgpt-oauth",surfaceId=str:"openai-responses",transportId=str:"chatgpt-oauth",authMode=str:"ChatGPT subscription",env=<ambient-env-bag>,fetchImpl=fn,nowMs=fn,maxTokens=undefined,streamTimeoutMs=obj{firstChunkMs=num,idleMs=num},serviceTier=undefined,reasoningEffort=undefined,reasoningSummary=bool:false,reasoningSummaryDetail=undefined,reasoningVerbosity=undefined,reasoningCarryover=bool:false,reasoningCarryoverStore=undefined,debugOAuth=bool:false,memTokenFallback=undefined}
+llm :: obj{model=str:"gpt-5.6-terra",provider=str:"chatgpt-oauth",surfaceId=str:"openai-responses",transportId=str:"chatgpt-oauth",authMode=str:"ChatGPT subscription",env=<ambient-env-bag>,fetchImpl=fn,nowMs=fn,maxTokens=undefined,streamTimeoutMs=obj{firstChunkMs=num,idleMs=num},serviceTier=undefined,reasoningEffort=undefined,reasoningSummary=bool:false,reasoningSummaryDetail=undefined,reasoningVerbosity=undefined,reasoningCarryover=bool:false,reasoningCarryoverStore=undefined,debugOAuth=bool:false,memTokenFallback=undefined}
 registry :: obj{tools=obj{},origin=undefined}
 stream :: obj{emit=fn}
 promptSurfaceProfile :: obj{envPosture=str:"frozen",promptPack=str:"interactive",verifyStrategy=str:"none"}
 permission :: obj{mode=str:"acceptEdits"}
 messages :: arr[]
 system :: str[20762]
-cwd :: str:"/Users/songmin/quanta-codeagent-v3"
+cwd :: str:<cwd>
 maxTurns :: num
 signal :: obj{}
 searchPipeline :: obj{search=fn}
@@ -17,15 +17,15 @@ stickyModelStore :: obj{store=obj{get=fn,set=fn,load=fn}}"
 `;
 
 exports[`composition slot-registry — byte-identical hellgate fingerprint stable — all-off default: all-off default :: assembled 1`] = `
-"KEYS[21]: llm,registry,stream,promptSurfaceProfile,permission,messages,system,cwd,maxTurns,signal,searchPipeline,stickyModelStore,modePolicy,budgetMeter,lspDiagnosticsHookEnabled,secretCheckToolEnabled,readFileState,activeSkillCursor,contextEventsForTurn,mentionInjector,compactionEventEmit
-llm :: obj{model=str:"gpt-5.4",provider=str:"chatgpt-oauth",surfaceId=str:"openai-responses",transportId=str:"chatgpt-oauth",authMode=str:"ChatGPT subscription",env=<ambient-env-bag>,fetchImpl=fn,nowMs=fn,maxTokens=undefined,streamTimeoutMs=obj{firstChunkMs=num,idleMs=num},serviceTier=undefined,reasoningEffort=undefined,reasoningSummary=bool:false,reasoningSummaryDetail=undefined,reasoningVerbosity=undefined,reasoningCarryover=bool:false,reasoningCarryoverStore=undefined,debugOAuth=bool:false,memTokenFallback=undefined}
+"KEYS[23]: llm,registry,stream,promptSurfaceProfile,permission,messages,system,cwd,maxTurns,signal,searchPipeline,stickyModelStore,modePolicy,budgetMeter,lspDiagnosticsHookEnabled,secretCheckToolEnabled,bgShellRegistry,contentCaptureEnabled,readFileState,activeSkillCursor,contextEventsForTurn,mentionInjector,compactionEventEmit
+llm :: obj{model=str:"gpt-5.6-terra",provider=str:"chatgpt-oauth",surfaceId=str:"openai-responses",transportId=str:"chatgpt-oauth",authMode=str:"ChatGPT subscription",env=<ambient-env-bag>,fetchImpl=fn,nowMs=fn,maxTokens=undefined,streamTimeoutMs=obj{firstChunkMs=num,idleMs=num},serviceTier=undefined,reasoningEffort=undefined,reasoningSummary=bool:false,reasoningSummaryDetail=undefined,reasoningVerbosity=undefined,reasoningCarryover=bool:false,reasoningCarryoverStore=undefined,debugOAuth=bool:false,memTokenFallback=undefined}
 registry :: obj{tools=obj{},origin=undefined}
 stream :: obj{emit=fn}
 promptSurfaceProfile :: obj{envPosture=str:"frozen",promptPack=str:"interactive",verifyStrategy=str:"none"}
 permission :: obj{mode=str:"acceptEdits"}
 messages :: arr[]
 system :: str[20762]
-cwd :: str:"/Users/songmin/quanta-codeagent-v3"
+cwd :: str:<cwd>
 maxTurns :: num
 signal :: obj{}
 searchPipeline :: obj{search=fn}
@@ -34,6 +34,8 @@ modePolicy :: obj{mode=str:"interactive",permission=obj{kind=str:"reviewer-backe
 budgetMeter :: obj{dials=obj{maxTurns=num,maxRetries=num,maxConsecutiveFailures=num},caps=obj{},exhaustion=str:"stop",clock=fn,startedAtMs=num,turns=num,modelCalls=num,toolCalls=num,shellCommands=num,testRuns=num,inputTokens=num,outputTokens=num,reasoningTokens=num,filesChanged=num,patchBytes=num,retries=num,consecutiveFailures=num,costUsdAccum=num,costUsdThisTurn=num,providerRateLimitRemainingPct=undefined}
 lspDiagnosticsHookEnabled :: bool:false
 secretCheckToolEnabled :: bool:false
+bgShellRegistry :: obj{register=fn,adopt=fn,get=fn,awaitHandle=fn,kill=fn,listOwned=fn,killOwned=fn,killAll=fn,size=fn,oldestId=fn}
+contentCaptureEnabled :: bool:false
 readFileState :: obj{mtimes=obj{},rangeHashes=undefined,rangeDedupCap=num}
 activeSkillCursor :: obj{ids=arr[]}
 contextEventsForTurn :: fn
@@ -43,14 +45,14 @@ compactionEventEmit :: fn"
 
 exports[`composition slot-registry — byte-identical hellgate fingerprint stable — identity env: identity env :: base 1`] = `
 "KEYS[12]: llm,registry,stream,promptSurfaceProfile,permission,messages,system,cwd,maxTurns,signal,searchPipeline,stickyModelStore
-llm :: obj{model=str:"gpt-5.4",provider=str:"chatgpt-oauth",surfaceId=str:"openai-responses",transportId=str:"chatgpt-oauth",authMode=str:"ChatGPT subscription",env=<ambient-env-bag>,fetchImpl=fn,nowMs=fn,maxTokens=undefined,streamTimeoutMs=obj{firstChunkMs=num,idleMs=num},serviceTier=undefined,reasoningEffort=undefined,reasoningSummary=bool:false,reasoningSummaryDetail=undefined,reasoningVerbosity=undefined,reasoningCarryover=bool:false,reasoningCarryoverStore=undefined,debugOAuth=bool:false,memTokenFallback=undefined}
+llm :: obj{model=str:"gpt-5.6-terra",provider=str:"chatgpt-oauth",surfaceId=str:"openai-responses",transportId=str:"chatgpt-oauth",authMode=str:"ChatGPT subscription",env=<ambient-env-bag>,fetchImpl=fn,nowMs=fn,maxTokens=undefined,streamTimeoutMs=obj{firstChunkMs=num,idleMs=num},serviceTier=undefined,reasoningEffort=undefined,reasoningSummary=bool:false,reasoningSummaryDetail=undefined,reasoningVerbosity=undefined,reasoningCarryover=bool:false,reasoningCarryoverStore=undefined,debugOAuth=bool:false,memTokenFallback=undefined}
 registry :: obj{tools=obj{},origin=undefined}
 stream :: obj{emit=fn}
 promptSurfaceProfile :: obj{envPosture=str:"frozen",promptPack=str:"interactive",verifyStrategy=str:"none"}
 permission :: obj{mode=str:"acceptEdits"}
 messages :: arr[]
 system :: str[20910]
-cwd :: str:"/Users/songmin/quanta-codeagent-v3"
+cwd :: str:<cwd>
 maxTurns :: num
 signal :: obj{}
 searchPipeline :: obj{search=fn}
@@ -58,15 +60,15 @@ stickyModelStore :: obj{store=obj{get=fn,set=fn,load=fn}}"
 `;
 
 exports[`composition slot-registry — byte-identical hellgate fingerprint stable — identity env: identity env :: assembled 1`] = `
-"KEYS[21]: llm,registry,stream,promptSurfaceProfile,permission,messages,system,cwd,maxTurns,signal,searchPipeline,stickyModelStore,modePolicy,budgetMeter,lspDiagnosticsHookEnabled,secretCheckToolEnabled,readFileState,activeSkillCursor,contextEventsForTurn,mentionInjector,compactionEventEmit
-llm :: obj{model=str:"gpt-5.4",provider=str:"chatgpt-oauth",surfaceId=str:"openai-responses",transportId=str:"chatgpt-oauth",authMode=str:"ChatGPT subscription",env=<ambient-env-bag>,fetchImpl=fn,nowMs=fn,maxTokens=undefined,streamTimeoutMs=obj{firstChunkMs=num,idleMs=num},serviceTier=undefined,reasoningEffort=undefined,reasoningSummary=bool:false,reasoningSummaryDetail=undefined,reasoningVerbosity=undefined,reasoningCarryover=bool:false,reasoningCarryoverStore=undefined,debugOAuth=bool:false,memTokenFallback=undefined}
+"KEYS[23]: llm,registry,stream,promptSurfaceProfile,permission,messages,system,cwd,maxTurns,signal,searchPipeline,stickyModelStore,modePolicy,budgetMeter,lspDiagnosticsHookEnabled,secretCheckToolEnabled,bgShellRegistry,contentCaptureEnabled,readFileState,activeSkillCursor,contextEventsForTurn,mentionInjector,compactionEventEmit
+llm :: obj{model=str:"gpt-5.6-terra",provider=str:"chatgpt-oauth",surfaceId=str:"openai-responses",transportId=str:"chatgpt-oauth",authMode=str:"ChatGPT subscription",env=<ambient-env-bag>,fetchImpl=fn,nowMs=fn,maxTokens=undefined,streamTimeoutMs=obj{firstChunkMs=num,idleMs=num},serviceTier=undefined,reasoningEffort=undefined,reasoningSummary=bool:false,reasoningSummaryDetail=undefined,reasoningVerbosity=undefined,reasoningCarryover=bool:false,reasoningCarryoverStore=undefined,debugOAuth=bool:false,memTokenFallback=undefined}
 registry :: obj{tools=obj{},origin=undefined}
 stream :: obj{emit=fn}
 promptSurfaceProfile :: obj{envPosture=str:"frozen",promptPack=str:"interactive",verifyStrategy=str:"none"}
 permission :: obj{mode=str:"acceptEdits"}
 messages :: arr[]
 system :: str[20910]
-cwd :: str:"/Users/songmin/quanta-codeagent-v3"
+cwd :: str:<cwd>
 maxTurns :: num
 signal :: obj{}
 searchPipeline :: obj{search=fn}
@@ -75,6 +77,8 @@ modePolicy :: obj{mode=str:"interactive",permission=obj{kind=str:"reviewer-backe
 budgetMeter :: obj{dials=obj{maxTurns=num,maxRetries=num,maxConsecutiveFailures=num},caps=obj{},exhaustion=str:"stop",clock=fn,startedAtMs=num,turns=num,modelCalls=num,toolCalls=num,shellCommands=num,testRuns=num,inputTokens=num,outputTokens=num,reasoningTokens=num,filesChanged=num,patchBytes=num,retries=num,consecutiveFailures=num,costUsdAccum=num,costUsdThisTurn=num,providerRateLimitRemainingPct=undefined}
 lspDiagnosticsHookEnabled :: bool:false
 secretCheckToolEnabled :: bool:false
+bgShellRegistry :: obj{register=fn,adopt=fn,get=fn,awaitHandle=fn,kill=fn,listOwned=fn,killOwned=fn,killAll=fn,size=fn,oldestId=fn}
+contentCaptureEnabled :: bool:false
 readFileState :: obj{mtimes=obj{},rangeHashes=undefined,rangeDedupCap=num}
 activeSkillCursor :: obj{ids=arr[]}
 contextEventsForTurn :: fn
@@ -84,14 +88,14 @@ compactionEventEmit :: fn"
 
 exports[`composition slot-registry — byte-identical hellgate fingerprint stable — retrieval hybrid: retrieval hybrid :: base 1`] = `
 "KEYS[13]: llm,registry,stream,promptSurfaceProfile,permission,messages,system,cwd,maxTurns,signal,retrievalStack,searchPipeline,stickyModelStore
-llm :: obj{model=str:"gpt-5.4",provider=str:"chatgpt-oauth",surfaceId=str:"openai-responses",transportId=str:"chatgpt-oauth",authMode=str:"ChatGPT subscription",env=<ambient-env-bag>,fetchImpl=fn,nowMs=fn,maxTokens=undefined,streamTimeoutMs=obj{firstChunkMs=num,idleMs=num},serviceTier=undefined,reasoningEffort=undefined,reasoningSummary=bool:false,reasoningSummaryDetail=undefined,reasoningVerbosity=undefined,reasoningCarryover=bool:false,reasoningCarryoverStore=undefined,debugOAuth=bool:false,memTokenFallback=undefined}
+llm :: obj{model=str:"gpt-5.6-terra",provider=str:"chatgpt-oauth",surfaceId=str:"openai-responses",transportId=str:"chatgpt-oauth",authMode=str:"ChatGPT subscription",env=<ambient-env-bag>,fetchImpl=fn,nowMs=fn,maxTokens=undefined,streamTimeoutMs=obj{firstChunkMs=num,idleMs=num},serviceTier=undefined,reasoningEffort=undefined,reasoningSummary=bool:false,reasoningSummaryDetail=undefined,reasoningVerbosity=undefined,reasoningCarryover=bool:false,reasoningCarryoverStore=undefined,debugOAuth=bool:false,memTokenFallback=undefined}
 registry :: obj{tools=obj{},origin=undefined}
 stream :: obj{emit=fn}
 promptSurfaceProfile :: obj{envPosture=str:"frozen",promptPack=str:"interactive",verifyStrategy=str:"none"}
 permission :: obj{mode=str:"acceptEdits"}
 messages :: arr[]
 system :: str[20762]
-cwd :: str:"/Users/songmin/quanta-codeagent-v3"
+cwd :: str:<cwd>
 maxTurns :: num
 signal :: obj{}
 retrievalStack :: obj{registry=obj{byKind=obj{}},defaultReranker=obj{kind=str:"identity",rerank=fn}}
@@ -100,15 +104,15 @@ stickyModelStore :: obj{store=obj{get=fn,set=fn,load=fn}}"
 `;
 
 exports[`composition slot-registry — byte-identical hellgate fingerprint stable — retrieval hybrid: retrieval hybrid :: assembled 1`] = `
-"KEYS[22]: llm,registry,stream,promptSurfaceProfile,permission,messages,system,cwd,maxTurns,signal,retrievalStack,searchPipeline,stickyModelStore,modePolicy,budgetMeter,lspDiagnosticsHookEnabled,secretCheckToolEnabled,readFileState,activeSkillCursor,contextEventsForTurn,mentionInjector,compactionEventEmit
-llm :: obj{model=str:"gpt-5.4",provider=str:"chatgpt-oauth",surfaceId=str:"openai-responses",transportId=str:"chatgpt-oauth",authMode=str:"ChatGPT subscription",env=<ambient-env-bag>,fetchImpl=fn,nowMs=fn,maxTokens=undefined,streamTimeoutMs=obj{firstChunkMs=num,idleMs=num},serviceTier=undefined,reasoningEffort=undefined,reasoningSummary=bool:false,reasoningSummaryDetail=undefined,reasoningVerbosity=undefined,reasoningCarryover=bool:false,reasoningCarryoverStore=undefined,debugOAuth=bool:false,memTokenFallback=undefined}
+"KEYS[24]: llm,registry,stream,promptSurfaceProfile,permission,messages,system,cwd,maxTurns,signal,retrievalStack,searchPipeline,stickyModelStore,modePolicy,budgetMeter,lspDiagnosticsHookEnabled,secretCheckToolEnabled,bgShellRegistry,contentCaptureEnabled,readFileState,activeSkillCursor,contextEventsForTurn,mentionInjector,compactionEventEmit
+llm :: obj{model=str:"gpt-5.6-terra",provider=str:"chatgpt-oauth",surfaceId=str:"openai-responses",transportId=str:"chatgpt-oauth",authMode=str:"ChatGPT subscription",env=<ambient-env-bag>,fetchImpl=fn,nowMs=fn,maxTokens=undefined,streamTimeoutMs=obj{firstChunkMs=num,idleMs=num},serviceTier=undefined,reasoningEffort=undefined,reasoningSummary=bool:false,reasoningSummaryDetail=undefined,reasoningVerbosity=undefined,reasoningCarryover=bool:false,reasoningCarryoverStore=undefined,debugOAuth=bool:false,memTokenFallback=undefined}
 registry :: obj{tools=obj{},origin=undefined}
 stream :: obj{emit=fn}
 promptSurfaceProfile :: obj{envPosture=str:"frozen",promptPack=str:"interactive",verifyStrategy=str:"none"}
 permission :: obj{mode=str:"acceptEdits"}
 messages :: arr[]
 system :: str[20762]
-cwd :: str:"/Users/songmin/quanta-codeagent-v3"
+cwd :: str:<cwd>
 maxTurns :: num
 signal :: obj{}
 retrievalStack :: obj{registry=obj{byKind=obj{}},defaultReranker=obj{kind=str:"identity",rerank=fn}}
@@ -118,6 +122,8 @@ modePolicy :: obj{mode=str:"interactive",permission=obj{kind=str:"reviewer-backe
 budgetMeter :: obj{dials=obj{maxTurns=num,maxRetries=num,maxConsecutiveFailures=num},caps=obj{},exhaustion=str:"stop",clock=fn,startedAtMs=num,turns=num,modelCalls=num,toolCalls=num,shellCommands=num,testRuns=num,inputTokens=num,outputTokens=num,reasoningTokens=num,filesChanged=num,patchBytes=num,retries=num,consecutiveFailures=num,costUsdAccum=num,costUsdThisTurn=num,providerRateLimitRemainingPct=undefined}
 lspDiagnosticsHookEnabled :: bool:false
 secretCheckToolEnabled :: bool:false
+bgShellRegistry :: obj{register=fn,adopt=fn,get=fn,awaitHandle=fn,kill=fn,listOwned=fn,killOwned=fn,killAll=fn,size=fn,oldestId=fn}
+contentCaptureEnabled :: bool:false
 readFileState :: obj{mtimes=obj{},rangeHashes=undefined,rangeDedupCap=num}
 activeSkillCursor :: obj{ids=arr[]}
 contextEventsForTurn :: fn
@@ -127,14 +133,14 @@ compactionEventEmit :: fn"
 
 exports[`composition slot-registry — byte-identical hellgate fingerprint stable — mcp caps full: mcp caps full :: base 1`] = `
 "KEYS[12]: llm,registry,stream,promptSurfaceProfile,permission,messages,system,cwd,maxTurns,signal,searchPipeline,stickyModelStore
-llm :: obj{model=str:"gpt-5.4",provider=str:"chatgpt-oauth",surfaceId=str:"openai-responses",transportId=str:"chatgpt-oauth",authMode=str:"ChatGPT subscription",env=<ambient-env-bag>,fetchImpl=fn,nowMs=fn,maxTokens=undefined,streamTimeoutMs=obj{firstChunkMs=num,idleMs=num},serviceTier=undefined,reasoningEffort=undefined,reasoningSummary=bool:false,reasoningSummaryDetail=undefined,reasoningVerbosity=undefined,reasoningCarryover=bool:false,reasoningCarryoverStore=undefined,debugOAuth=bool:false,memTokenFallback=undefined}
+llm :: obj{model=str:"gpt-5.6-terra",provider=str:"chatgpt-oauth",surfaceId=str:"openai-responses",transportId=str:"chatgpt-oauth",authMode=str:"ChatGPT subscription",env=<ambient-env-bag>,fetchImpl=fn,nowMs=fn,maxTokens=undefined,streamTimeoutMs=obj{firstChunkMs=num,idleMs=num},serviceTier=undefined,reasoningEffort=undefined,reasoningSummary=bool:false,reasoningSummaryDetail=undefined,reasoningVerbosity=undefined,reasoningCarryover=bool:false,reasoningCarryoverStore=undefined,debugOAuth=bool:false,memTokenFallback=undefined}
 registry :: obj{tools=obj{},origin=undefined}
 stream :: obj{emit=fn}
 promptSurfaceProfile :: obj{envPosture=str:"frozen",promptPack=str:"interactive",verifyStrategy=str:"none"}
 permission :: obj{mode=str:"acceptEdits"}
 messages :: arr[]
 system :: str[20762]
-cwd :: str:"/Users/songmin/quanta-codeagent-v3"
+cwd :: str:<cwd>
 maxTurns :: num
 signal :: obj{}
 searchPipeline :: obj{search=fn}
@@ -142,15 +148,15 @@ stickyModelStore :: obj{store=obj{get=fn,set=fn,load=fn}}"
 `;
 
 exports[`composition slot-registry — byte-identical hellgate fingerprint stable — mcp caps full: mcp caps full :: assembled 1`] = `
-"KEYS[21]: llm,registry,stream,promptSurfaceProfile,permission,messages,system,cwd,maxTurns,signal,searchPipeline,stickyModelStore,modePolicy,budgetMeter,lspDiagnosticsHookEnabled,secretCheckToolEnabled,readFileState,activeSkillCursor,contextEventsForTurn,mentionInjector,compactionEventEmit
-llm :: obj{model=str:"gpt-5.4",provider=str:"chatgpt-oauth",surfaceId=str:"openai-responses",transportId=str:"chatgpt-oauth",authMode=str:"ChatGPT subscription",env=<ambient-env-bag>,fetchImpl=fn,nowMs=fn,maxTokens=undefined,streamTimeoutMs=obj{firstChunkMs=num,idleMs=num},serviceTier=undefined,reasoningEffort=undefined,reasoningSummary=bool:false,reasoningSummaryDetail=undefined,reasoningVerbosity=undefined,reasoningCarryover=bool:false,reasoningCarryoverStore=undefined,debugOAuth=bool:false,memTokenFallback=undefined}
+"KEYS[23]: llm,registry,stream,promptSurfaceProfile,permission,messages,system,cwd,maxTurns,signal,searchPipeline,stickyModelStore,modePolicy,budgetMeter,lspDiagnosticsHookEnabled,secretCheckToolEnabled,bgShellRegistry,contentCaptureEnabled,readFileState,activeSkillCursor,contextEventsForTurn,mentionInjector,compactionEventEmit
+llm :: obj{model=str:"gpt-5.6-terra",provider=str:"chatgpt-oauth",surfaceId=str:"openai-responses",transportId=str:"chatgpt-oauth",authMode=str:"ChatGPT subscription",env=<ambient-env-bag>,fetchImpl=fn,nowMs=fn,maxTokens=undefined,streamTimeoutMs=obj{firstChunkMs=num,idleMs=num},serviceTier=undefined,reasoningEffort=undefined,reasoningSummary=bool:false,reasoningSummaryDetail=undefined,reasoningVerbosity=undefined,reasoningCarryover=bool:false,reasoningCarryoverStore=undefined,debugOAuth=bool:false,memTokenFallback=undefined}
 registry :: obj{tools=obj{},origin=undefined}
 stream :: obj{emit=fn}
 promptSurfaceProfile :: obj{envPosture=str:"frozen",promptPack=str:"interactive",verifyStrategy=str:"none"}
 permission :: obj{mode=str:"acceptEdits"}
 messages :: arr[]
 system :: str[20762]
-cwd :: str:"/Users/songmin/quanta-codeagent-v3"
+cwd :: str:<cwd>
 maxTurns :: num
 signal :: obj{}
 searchPipeline :: obj{search=fn}
@@ -159,6 +165,8 @@ modePolicy :: obj{mode=str:"interactive",permission=obj{kind=str:"reviewer-backe
 budgetMeter :: obj{dials=obj{maxTurns=num,maxRetries=num,maxConsecutiveFailures=num},caps=obj{},exhaustion=str:"stop",clock=fn,startedAtMs=num,turns=num,modelCalls=num,toolCalls=num,shellCommands=num,testRuns=num,inputTokens=num,outputTokens=num,reasoningTokens=num,filesChanged=num,patchBytes=num,retries=num,consecutiveFailures=num,costUsdAccum=num,costUsdThisTurn=num,providerRateLimitRemainingPct=undefined}
 lspDiagnosticsHookEnabled :: bool:false
 secretCheckToolEnabled :: bool:false
+bgShellRegistry :: obj{register=fn,adopt=fn,get=fn,awaitHandle=fn,kill=fn,listOwned=fn,killOwned=fn,killAll=fn,size=fn,oldestId=fn}
+contentCaptureEnabled :: bool:false
 readFileState :: obj{mtimes=obj{},rangeHashes=undefined,rangeDedupCap=num}
 activeSkillCursor :: obj{ids=arr[]}
 contextEventsForTurn :: fn
@@ -168,14 +176,14 @@ compactionEventEmit :: fn"
 
 exports[`composition slot-registry — byte-identical hellgate fingerprint stable — automation on: automation on :: base 1`] = `
 "KEYS[13]: llm,registry,stream,promptSurfaceProfile,permission,messages,system,cwd,maxTurns,signal,searchPipeline,stickyModelStore,automationEngine
-llm :: obj{model=str:"gpt-5.4",provider=str:"chatgpt-oauth",surfaceId=str:"openai-responses",transportId=str:"chatgpt-oauth",authMode=str:"ChatGPT subscription",env=<ambient-env-bag>,fetchImpl=fn,nowMs=fn,maxTokens=undefined,streamTimeoutMs=obj{firstChunkMs=num,idleMs=num},serviceTier=undefined,reasoningEffort=undefined,reasoningSummary=bool:false,reasoningSummaryDetail=undefined,reasoningVerbosity=undefined,reasoningCarryover=bool:false,reasoningCarryoverStore=undefined,debugOAuth=bool:false,memTokenFallback=undefined}
+llm :: obj{model=str:"gpt-5.6-terra",provider=str:"chatgpt-oauth",surfaceId=str:"openai-responses",transportId=str:"chatgpt-oauth",authMode=str:"ChatGPT subscription",env=<ambient-env-bag>,fetchImpl=fn,nowMs=fn,maxTokens=undefined,streamTimeoutMs=obj{firstChunkMs=num,idleMs=num},serviceTier=undefined,reasoningEffort=undefined,reasoningSummary=bool:false,reasoningSummaryDetail=undefined,reasoningVerbosity=undefined,reasoningCarryover=bool:false,reasoningCarryoverStore=undefined,debugOAuth=bool:false,memTokenFallback=undefined}
 registry :: obj{tools=obj{},origin=undefined}
 stream :: obj{emit=fn}
 promptSurfaceProfile :: obj{envPosture=str:"frozen",promptPack=str:"interactive",verifyStrategy=str:"none"}
 permission :: obj{mode=str:"acceptEdits"}
 messages :: arr[]
 system :: str[20762]
-cwd :: str:"/Users/songmin/quanta-codeagent-v3"
+cwd :: str:<cwd>
 maxTurns :: num
 signal :: obj{}
 searchPipeline :: obj{search=fn}
@@ -184,15 +192,15 @@ automationEngine :: obj{engine=obj{schedule=fn,list=fn,cancel=fn,next=fn,markRun
 `;
 
 exports[`composition slot-registry — byte-identical hellgate fingerprint stable — automation on: automation on :: assembled 1`] = `
-"KEYS[22]: llm,registry,stream,promptSurfaceProfile,permission,messages,system,cwd,maxTurns,signal,searchPipeline,stickyModelStore,automationEngine,modePolicy,budgetMeter,lspDiagnosticsHookEnabled,secretCheckToolEnabled,readFileState,activeSkillCursor,contextEventsForTurn,mentionInjector,compactionEventEmit
-llm :: obj{model=str:"gpt-5.4",provider=str:"chatgpt-oauth",surfaceId=str:"openai-responses",transportId=str:"chatgpt-oauth",authMode=str:"ChatGPT subscription",env=<ambient-env-bag>,fetchImpl=fn,nowMs=fn,maxTokens=undefined,streamTimeoutMs=obj{firstChunkMs=num,idleMs=num},serviceTier=undefined,reasoningEffort=undefined,reasoningSummary=bool:false,reasoningSummaryDetail=undefined,reasoningVerbosity=undefined,reasoningCarryover=bool:false,reasoningCarryoverStore=undefined,debugOAuth=bool:false,memTokenFallback=undefined}
+"KEYS[24]: llm,registry,stream,promptSurfaceProfile,permission,messages,system,cwd,maxTurns,signal,searchPipeline,stickyModelStore,automationEngine,modePolicy,budgetMeter,lspDiagnosticsHookEnabled,secretCheckToolEnabled,bgShellRegistry,contentCaptureEnabled,readFileState,activeSkillCursor,contextEventsForTurn,mentionInjector,compactionEventEmit
+llm :: obj{model=str:"gpt-5.6-terra",provider=str:"chatgpt-oauth",surfaceId=str:"openai-responses",transportId=str:"chatgpt-oauth",authMode=str:"ChatGPT subscription",env=<ambient-env-bag>,fetchImpl=fn,nowMs=fn,maxTokens=undefined,streamTimeoutMs=obj{firstChunkMs=num,idleMs=num},serviceTier=undefined,reasoningEffort=undefined,reasoningSummary=bool:false,reasoningSummaryDetail=undefined,reasoningVerbosity=undefined,reasoningCarryover=bool:false,reasoningCarryoverStore=undefined,debugOAuth=bool:false,memTokenFallback=undefined}
 registry :: obj{tools=obj{},origin=undefined}
 stream :: obj{emit=fn}
 promptSurfaceProfile :: obj{envPosture=str:"frozen",promptPack=str:"interactive",verifyStrategy=str:"none"}
 permission :: obj{mode=str:"acceptEdits"}
 messages :: arr[]
 system :: str[20762]
-cwd :: str:"/Users/songmin/quanta-codeagent-v3"
+cwd :: str:<cwd>
 maxTurns :: num
 signal :: obj{}
 searchPipeline :: obj{search=fn}
@@ -202,6 +210,8 @@ modePolicy :: obj{mode=str:"interactive",permission=obj{kind=str:"reviewer-backe
 budgetMeter :: obj{dials=obj{maxTurns=num,maxRetries=num,maxConsecutiveFailures=num},caps=obj{},exhaustion=str:"stop",clock=fn,startedAtMs=num,turns=num,modelCalls=num,toolCalls=num,shellCommands=num,testRuns=num,inputTokens=num,outputTokens=num,reasoningTokens=num,filesChanged=num,patchBytes=num,retries=num,consecutiveFailures=num,costUsdAccum=num,costUsdThisTurn=num,providerRateLimitRemainingPct=undefined}
 lspDiagnosticsHookEnabled :: bool:false
 secretCheckToolEnabled :: bool:false
+bgShellRegistry :: obj{register=fn,adopt=fn,get=fn,awaitHandle=fn,kill=fn,listOwned=fn,killOwned=fn,killAll=fn,size=fn,oldestId=fn}
+contentCaptureEnabled :: bool:false
 readFileState :: obj{mtimes=obj{},rangeHashes=undefined,rangeDedupCap=num}
 activeSkillCursor :: obj{ids=arr[]}
 contextEventsForTurn :: fn
@@ -211,14 +221,14 @@ compactionEventEmit :: fn"
 
 exports[`composition slot-registry — byte-identical hellgate fingerprint stable — sandbox: sandbox :: base 1`] = `
 "KEYS[12]: llm,registry,stream,promptSurfaceProfile,permission,messages,system,cwd,maxTurns,signal,searchPipeline,stickyModelStore
-llm :: obj{model=str:"gpt-5.4",provider=str:"chatgpt-oauth",surfaceId=str:"openai-responses",transportId=str:"chatgpt-oauth",authMode=str:"ChatGPT subscription",env=<ambient-env-bag>,fetchImpl=fn,nowMs=fn,maxTokens=undefined,streamTimeoutMs=obj{firstChunkMs=num,idleMs=num},serviceTier=undefined,reasoningEffort=undefined,reasoningSummary=bool:false,reasoningSummaryDetail=undefined,reasoningVerbosity=undefined,reasoningCarryover=bool:false,reasoningCarryoverStore=undefined,debugOAuth=bool:false,memTokenFallback=undefined}
+llm :: obj{model=str:"gpt-5.6-terra",provider=str:"chatgpt-oauth",surfaceId=str:"openai-responses",transportId=str:"chatgpt-oauth",authMode=str:"ChatGPT subscription",env=<ambient-env-bag>,fetchImpl=fn,nowMs=fn,maxTokens=undefined,streamTimeoutMs=obj{firstChunkMs=num,idleMs=num},serviceTier=undefined,reasoningEffort=undefined,reasoningSummary=bool:false,reasoningSummaryDetail=undefined,reasoningVerbosity=undefined,reasoningCarryover=bool:false,reasoningCarryoverStore=undefined,debugOAuth=bool:false,memTokenFallback=undefined}
 registry :: obj{tools=obj{},origin=undefined}
 stream :: obj{emit=fn}
 promptSurfaceProfile :: obj{envPosture=str:"frozen",promptPack=str:"interactive",verifyStrategy=str:"none"}
 permission :: obj{mode=str:"acceptEdits"}
 messages :: arr[]
 system :: str[20762]
-cwd :: str:"/Users/songmin/quanta-codeagent-v3"
+cwd :: str:<cwd>
 maxTurns :: num
 signal :: obj{}
 searchPipeline :: obj{search=fn}
@@ -226,15 +236,15 @@ stickyModelStore :: obj{store=obj{get=fn,set=fn,load=fn}}"
 `;
 
 exports[`composition slot-registry — byte-identical hellgate fingerprint stable — sandbox: sandbox :: assembled 1`] = `
-"KEYS[21]: llm,registry,stream,promptSurfaceProfile,permission,messages,system,cwd,maxTurns,signal,searchPipeline,stickyModelStore,modePolicy,budgetMeter,lspDiagnosticsHookEnabled,secretCheckToolEnabled,readFileState,activeSkillCursor,contextEventsForTurn,mentionInjector,compactionEventEmit
-llm :: obj{model=str:"gpt-5.4",provider=str:"chatgpt-oauth",surfaceId=str:"openai-responses",transportId=str:"chatgpt-oauth",authMode=str:"ChatGPT subscription",env=<ambient-env-bag>,fetchImpl=fn,nowMs=fn,maxTokens=undefined,streamTimeoutMs=obj{firstChunkMs=num,idleMs=num},serviceTier=undefined,reasoningEffort=undefined,reasoningSummary=bool:false,reasoningSummaryDetail=undefined,reasoningVerbosity=undefined,reasoningCarryover=bool:false,reasoningCarryoverStore=undefined,debugOAuth=bool:false,memTokenFallback=undefined}
+"KEYS[23]: llm,registry,stream,promptSurfaceProfile,permission,messages,system,cwd,maxTurns,signal,searchPipeline,stickyModelStore,modePolicy,budgetMeter,lspDiagnosticsHookEnabled,secretCheckToolEnabled,bgShellRegistry,contentCaptureEnabled,readFileState,activeSkillCursor,contextEventsForTurn,mentionInjector,compactionEventEmit
+llm :: obj{model=str:"gpt-5.6-terra",provider=str:"chatgpt-oauth",surfaceId=str:"openai-responses",transportId=str:"chatgpt-oauth",authMode=str:"ChatGPT subscription",env=<ambient-env-bag>,fetchImpl=fn,nowMs=fn,maxTokens=undefined,streamTimeoutMs=obj{firstChunkMs=num,idleMs=num},serviceTier=undefined,reasoningEffort=undefined,reasoningSummary=bool:false,reasoningSummaryDetail=undefined,reasoningVerbosity=undefined,reasoningCarryover=bool:false,reasoningCarryoverStore=undefined,debugOAuth=bool:false,memTokenFallback=undefined}
 registry :: obj{tools=obj{},origin=undefined}
 stream :: obj{emit=fn}
 promptSurfaceProfile :: obj{envPosture=str:"frozen",promptPack=str:"interactive",verifyStrategy=str:"none"}
 permission :: obj{mode=str:"acceptEdits"}
 messages :: arr[]
 system :: str[20762]
-cwd :: str:"/Users/songmin/quanta-codeagent-v3"
+cwd :: str:<cwd>
 maxTurns :: num
 signal :: obj{}
 searchPipeline :: obj{search=fn}
@@ -243,6 +253,8 @@ modePolicy :: obj{mode=str:"interactive",permission=obj{kind=str:"reviewer-backe
 budgetMeter :: obj{dials=obj{maxTurns=num,maxRetries=num,maxConsecutiveFailures=num},caps=obj{},exhaustion=str:"stop",clock=fn,startedAtMs=num,turns=num,modelCalls=num,toolCalls=num,shellCommands=num,testRuns=num,inputTokens=num,outputTokens=num,reasoningTokens=num,filesChanged=num,patchBytes=num,retries=num,consecutiveFailures=num,costUsdAccum=num,costUsdThisTurn=num,providerRateLimitRemainingPct=undefined}
 lspDiagnosticsHookEnabled :: bool:false
 secretCheckToolEnabled :: bool:false
+bgShellRegistry :: obj{register=fn,adopt=fn,get=fn,awaitHandle=fn,kill=fn,listOwned=fn,killOwned=fn,killAll=fn,size=fn,oldestId=fn}
+contentCaptureEnabled :: bool:false
 readFileState :: obj{mtimes=obj{},rangeHashes=undefined,rangeDedupCap=num}
 activeSkillCursor :: obj{ids=arr[]}
 contextEventsForTurn :: fn
@@ -252,14 +264,14 @@ compactionEventEmit :: fn"
 
 exports[`composition slot-registry — byte-identical hellgate fingerprint stable — network proxy: network proxy :: base 1`] = `
 "KEYS[13]: llm,registry,stream,promptSurfaceProfile,permission,messages,system,cwd,maxTurns,signal,networkProxy,searchPipeline,stickyModelStore
-llm :: obj{model=str:"gpt-5.4",provider=str:"chatgpt-oauth",surfaceId=str:"openai-responses",transportId=str:"chatgpt-oauth",authMode=str:"ChatGPT subscription",env=<ambient-env-bag>,fetchImpl=fn,nowMs=fn,maxTokens=undefined,streamTimeoutMs=obj{firstChunkMs=num,idleMs=num},serviceTier=undefined,reasoningEffort=undefined,reasoningSummary=bool:false,reasoningSummaryDetail=undefined,reasoningVerbosity=undefined,reasoningCarryover=bool:false,reasoningCarryoverStore=undefined,debugOAuth=bool:false,memTokenFallback=undefined}
+llm :: obj{model=str:"gpt-5.6-terra",provider=str:"chatgpt-oauth",surfaceId=str:"openai-responses",transportId=str:"chatgpt-oauth",authMode=str:"ChatGPT subscription",env=<ambient-env-bag>,fetchImpl=fn,nowMs=fn,maxTokens=undefined,streamTimeoutMs=obj{firstChunkMs=num,idleMs=num},serviceTier=undefined,reasoningEffort=undefined,reasoningSummary=bool:false,reasoningSummaryDetail=undefined,reasoningVerbosity=undefined,reasoningCarryover=bool:false,reasoningCarryoverStore=undefined,debugOAuth=bool:false,memTokenFallback=undefined}
 registry :: obj{tools=obj{},origin=undefined}
 stream :: obj{emit=fn}
 promptSurfaceProfile :: obj{envPosture=str:"frozen",promptPack=str:"interactive",verifyStrategy=str:"none"}
 permission :: obj{mode=str:"acceptEdits"}
 messages :: arr[]
 system :: str[20762]
-cwd :: str:"/Users/songmin/quanta-codeagent-v3"
+cwd :: str:<cwd>
 maxTurns :: num
 signal :: obj{}
 networkProxy :: obj{enabled=bool:true,allowlist=arr[str:"api.github.com",str:"github.com",str:"raw.githubusercontent.com",str:"objects.githubusercontent.com",str:"codeload.github.com",str:"registry.npmjs.org",str:"registry.yarnpkg.com",str:"pypi.org",str:"files.pythonhosted.org",str:"*.githubusercontent.com"]}
@@ -268,15 +280,15 @@ stickyModelStore :: obj{store=obj{get=fn,set=fn,load=fn}}"
 `;
 
 exports[`composition slot-registry — byte-identical hellgate fingerprint stable — network proxy: network proxy :: assembled 1`] = `
-"KEYS[22]: llm,registry,stream,promptSurfaceProfile,permission,messages,system,cwd,maxTurns,signal,networkProxy,searchPipeline,stickyModelStore,modePolicy,budgetMeter,lspDiagnosticsHookEnabled,secretCheckToolEnabled,readFileState,activeSkillCursor,contextEventsForTurn,mentionInjector,compactionEventEmit
-llm :: obj{model=str:"gpt-5.4",provider=str:"chatgpt-oauth",surfaceId=str:"openai-responses",transportId=str:"chatgpt-oauth",authMode=str:"ChatGPT subscription",env=<ambient-env-bag>,fetchImpl=fn,nowMs=fn,maxTokens=undefined,streamTimeoutMs=obj{firstChunkMs=num,idleMs=num},serviceTier=undefined,reasoningEffort=undefined,reasoningSummary=bool:false,reasoningSummaryDetail=undefined,reasoningVerbosity=undefined,reasoningCarryover=bool:false,reasoningCarryoverStore=undefined,debugOAuth=bool:false,memTokenFallback=undefined}
+"KEYS[24]: llm,registry,stream,promptSurfaceProfile,permission,messages,system,cwd,maxTurns,signal,networkProxy,searchPipeline,stickyModelStore,modePolicy,budgetMeter,lspDiagnosticsHookEnabled,secretCheckToolEnabled,bgShellRegistry,contentCaptureEnabled,readFileState,activeSkillCursor,contextEventsForTurn,mentionInjector,compactionEventEmit
+llm :: obj{model=str:"gpt-5.6-terra",provider=str:"chatgpt-oauth",surfaceId=str:"openai-responses",transportId=str:"chatgpt-oauth",authMode=str:"ChatGPT subscription",env=<ambient-env-bag>,fetchImpl=fn,nowMs=fn,maxTokens=undefined,streamTimeoutMs=obj{firstChunkMs=num,idleMs=num},serviceTier=undefined,reasoningEffort=undefined,reasoningSummary=bool:false,reasoningSummaryDetail=undefined,reasoningVerbosity=undefined,reasoningCarryover=bool:false,reasoningCarryoverStore=undefined,debugOAuth=bool:false,memTokenFallback=undefined}
 registry :: obj{tools=obj{},origin=undefined}
 stream :: obj{emit=fn}
 promptSurfaceProfile :: obj{envPosture=str:"frozen",promptPack=str:"interactive",verifyStrategy=str:"none"}
 permission :: obj{mode=str:"acceptEdits"}
 messages :: arr[]
 system :: str[20762]
-cwd :: str:"/Users/songmin/quanta-codeagent-v3"
+cwd :: str:<cwd>
 maxTurns :: num
 signal :: obj{}
 networkProxy :: obj{enabled=bool:true,allowlist=arr[str:"api.github.com",str:"github.com",str:"raw.githubusercontent.com",str:"objects.githubusercontent.com",str:"codeload.github.com",str:"registry.npmjs.org",str:"registry.yarnpkg.com",str:"pypi.org",str:"files.pythonhosted.org",str:"*.githubusercontent.com"]}
@@ -286,6 +298,8 @@ modePolicy :: obj{mode=str:"interactive",permission=obj{kind=str:"reviewer-backe
 budgetMeter :: obj{dials=obj{maxTurns=num,maxRetries=num,maxConsecutiveFailures=num},caps=obj{},exhaustion=str:"stop",clock=fn,startedAtMs=num,turns=num,modelCalls=num,toolCalls=num,shellCommands=num,testRuns=num,inputTokens=num,outputTokens=num,reasoningTokens=num,filesChanged=num,patchBytes=num,retries=num,consecutiveFailures=num,costUsdAccum=num,costUsdThisTurn=num,providerRateLimitRemainingPct=undefined}
 lspDiagnosticsHookEnabled :: bool:false
 secretCheckToolEnabled :: bool:false
+bgShellRegistry :: obj{register=fn,adopt=fn,get=fn,awaitHandle=fn,kill=fn,listOwned=fn,killOwned=fn,killAll=fn,size=fn,oldestId=fn}
+contentCaptureEnabled :: bool:false
 readFileState :: obj{mtimes=obj{},rangeHashes=undefined,rangeDedupCap=num}
 activeSkillCursor :: obj{ids=arr[]}
 contextEventsForTurn :: fn
@@ -295,14 +309,14 @@ compactionEventEmit :: fn"
 
 exports[`composition slot-registry — byte-identical hellgate fingerprint stable — prewarm: prewarm :: base 1`] = `
 "KEYS[13]: llm,registry,stream,promptSurfaceProfile,permission,messages,system,cwd,maxTurns,signal,searchPipeline,stickyModelStore,prewarm
-llm :: obj{model=str:"gpt-5.4",provider=str:"chatgpt-oauth",surfaceId=str:"openai-responses",transportId=str:"chatgpt-oauth",authMode=str:"ChatGPT subscription",env=<ambient-env-bag>,fetchImpl=fn,nowMs=fn,maxTokens=undefined,streamTimeoutMs=obj{firstChunkMs=num,idleMs=num},serviceTier=undefined,reasoningEffort=undefined,reasoningSummary=bool:false,reasoningSummaryDetail=undefined,reasoningVerbosity=undefined,reasoningCarryover=bool:false,reasoningCarryoverStore=undefined,debugOAuth=bool:false,memTokenFallback=undefined}
+llm :: obj{model=str:"gpt-5.6-terra",provider=str:"chatgpt-oauth",surfaceId=str:"openai-responses",transportId=str:"chatgpt-oauth",authMode=str:"ChatGPT subscription",env=<ambient-env-bag>,fetchImpl=fn,nowMs=fn,maxTokens=undefined,streamTimeoutMs=obj{firstChunkMs=num,idleMs=num},serviceTier=undefined,reasoningEffort=undefined,reasoningSummary=bool:false,reasoningSummaryDetail=undefined,reasoningVerbosity=undefined,reasoningCarryover=bool:false,reasoningCarryoverStore=undefined,debugOAuth=bool:false,memTokenFallback=undefined}
 registry :: obj{tools=obj{},origin=undefined}
 stream :: obj{emit=fn}
 promptSurfaceProfile :: obj{envPosture=str:"frozen",promptPack=str:"interactive",verifyStrategy=str:"none"}
 permission :: obj{mode=str:"acceptEdits"}
 messages :: arr[]
 system :: str[20762]
-cwd :: str:"/Users/songmin/quanta-codeagent-v3"
+cwd :: str:<cwd>
 maxTurns :: num
 signal :: obj{}
 searchPipeline :: obj{search=fn}
@@ -311,15 +325,15 @@ prewarm :: obj{enabled=bool:true,now=fn}"
 `;
 
 exports[`composition slot-registry — byte-identical hellgate fingerprint stable — prewarm: prewarm :: assembled 1`] = `
-"KEYS[22]: llm,registry,stream,promptSurfaceProfile,permission,messages,system,cwd,maxTurns,signal,searchPipeline,stickyModelStore,prewarm,modePolicy,budgetMeter,lspDiagnosticsHookEnabled,secretCheckToolEnabled,readFileState,activeSkillCursor,contextEventsForTurn,mentionInjector,compactionEventEmit
-llm :: obj{model=str:"gpt-5.4",provider=str:"chatgpt-oauth",surfaceId=str:"openai-responses",transportId=str:"chatgpt-oauth",authMode=str:"ChatGPT subscription",env=<ambient-env-bag>,fetchImpl=fn,nowMs=fn,maxTokens=undefined,streamTimeoutMs=obj{firstChunkMs=num,idleMs=num},serviceTier=undefined,reasoningEffort=undefined,reasoningSummary=bool:false,reasoningSummaryDetail=undefined,reasoningVerbosity=undefined,reasoningCarryover=bool:false,reasoningCarryoverStore=undefined,debugOAuth=bool:false,memTokenFallback=undefined}
+"KEYS[24]: llm,registry,stream,promptSurfaceProfile,permission,messages,system,cwd,maxTurns,signal,searchPipeline,stickyModelStore,prewarm,modePolicy,budgetMeter,lspDiagnosticsHookEnabled,secretCheckToolEnabled,bgShellRegistry,contentCaptureEnabled,readFileState,activeSkillCursor,contextEventsForTurn,mentionInjector,compactionEventEmit
+llm :: obj{model=str:"gpt-5.6-terra",provider=str:"chatgpt-oauth",surfaceId=str:"openai-responses",transportId=str:"chatgpt-oauth",authMode=str:"ChatGPT subscription",env=<ambient-env-bag>,fetchImpl=fn,nowMs=fn,maxTokens=undefined,streamTimeoutMs=obj{firstChunkMs=num,idleMs=num},serviceTier=undefined,reasoningEffort=undefined,reasoningSummary=bool:false,reasoningSummaryDetail=undefined,reasoningVerbosity=undefined,reasoningCarryover=bool:false,reasoningCarryoverStore=undefined,debugOAuth=bool:false,memTokenFallback=undefined}
 registry :: obj{tools=obj{},origin=undefined}
 stream :: obj{emit=fn}
 promptSurfaceProfile :: obj{envPosture=str:"frozen",promptPack=str:"interactive",verifyStrategy=str:"none"}
 permission :: obj{mode=str:"acceptEdits"}
 messages :: arr[]
 system :: str[20762]
-cwd :: str:"/Users/songmin/quanta-codeagent-v3"
+cwd :: str:<cwd>
 maxTurns :: num
 signal :: obj{}
 searchPipeline :: obj{search=fn}
@@ -329,6 +343,8 @@ modePolicy :: obj{mode=str:"interactive",permission=obj{kind=str:"reviewer-backe
 budgetMeter :: obj{dials=obj{maxTurns=num,maxRetries=num,maxConsecutiveFailures=num},caps=obj{},exhaustion=str:"stop",clock=fn,startedAtMs=num,turns=num,modelCalls=num,toolCalls=num,shellCommands=num,testRuns=num,inputTokens=num,outputTokens=num,reasoningTokens=num,filesChanged=num,patchBytes=num,retries=num,consecutiveFailures=num,costUsdAccum=num,costUsdThisTurn=num,providerRateLimitRemainingPct=undefined}
 lspDiagnosticsHookEnabled :: bool:false
 secretCheckToolEnabled :: bool:false
+bgShellRegistry :: obj{register=fn,adopt=fn,get=fn,awaitHandle=fn,kill=fn,listOwned=fn,killOwned=fn,killAll=fn,size=fn,oldestId=fn}
+contentCaptureEnabled :: bool:false
 readFileState :: obj{mtimes=obj{},rangeHashes=undefined,rangeDedupCap=num}
 activeSkillCursor :: obj{ids=arr[]}
 contextEventsForTurn :: fn
@@ -338,14 +354,14 @@ compactionEventEmit :: fn"
 
 exports[`composition slot-registry — byte-identical hellgate fingerprint stable — lsp prewarm (nav on): lsp prewarm (nav on) :: base 1`] = `
 "KEYS[13]: llm,registry,stream,promptSurfaceProfile,permission,messages,system,cwd,maxTurns,signal,searchPipeline,stickyModelStore,lspPrewarm
-llm :: obj{model=str:"gpt-5.4",provider=str:"chatgpt-oauth",surfaceId=str:"openai-responses",transportId=str:"chatgpt-oauth",authMode=str:"ChatGPT subscription",env=<ambient-env-bag>,fetchImpl=fn,nowMs=fn,maxTokens=undefined,streamTimeoutMs=obj{firstChunkMs=num,idleMs=num},serviceTier=undefined,reasoningEffort=undefined,reasoningSummary=bool:false,reasoningSummaryDetail=undefined,reasoningVerbosity=undefined,reasoningCarryover=bool:false,reasoningCarryoverStore=undefined,debugOAuth=bool:false,memTokenFallback=undefined}
+llm :: obj{model=str:"gpt-5.6-terra",provider=str:"chatgpt-oauth",surfaceId=str:"openai-responses",transportId=str:"chatgpt-oauth",authMode=str:"ChatGPT subscription",env=<ambient-env-bag>,fetchImpl=fn,nowMs=fn,maxTokens=undefined,streamTimeoutMs=obj{firstChunkMs=num,idleMs=num},serviceTier=undefined,reasoningEffort=undefined,reasoningSummary=bool:false,reasoningSummaryDetail=undefined,reasoningVerbosity=undefined,reasoningCarryover=bool:false,reasoningCarryoverStore=undefined,debugOAuth=bool:false,memTokenFallback=undefined}
 registry :: obj{tools=obj{},origin=undefined}
 stream :: obj{emit=fn}
 promptSurfaceProfile :: obj{envPosture=str:"frozen",promptPack=str:"interactive",verifyStrategy=str:"none"}
 permission :: obj{mode=str:"acceptEdits"}
 messages :: arr[]
 system :: str[20762]
-cwd :: str:"/Users/songmin/quanta-codeagent-v3"
+cwd :: str:<cwd>
 maxTurns :: num
 signal :: obj{}
 searchPipeline :: obj{search=fn}
@@ -354,15 +370,15 @@ lspPrewarm :: obj{enabled=bool:true}"
 `;
 
 exports[`composition slot-registry — byte-identical hellgate fingerprint stable — lsp prewarm (nav on): lsp prewarm (nav on) :: assembled 1`] = `
-"KEYS[22]: llm,registry,stream,promptSurfaceProfile,permission,messages,system,cwd,maxTurns,signal,searchPipeline,stickyModelStore,lspPrewarm,modePolicy,budgetMeter,lspDiagnosticsHookEnabled,secretCheckToolEnabled,readFileState,activeSkillCursor,contextEventsForTurn,mentionInjector,compactionEventEmit
-llm :: obj{model=str:"gpt-5.4",provider=str:"chatgpt-oauth",surfaceId=str:"openai-responses",transportId=str:"chatgpt-oauth",authMode=str:"ChatGPT subscription",env=<ambient-env-bag>,fetchImpl=fn,nowMs=fn,maxTokens=undefined,streamTimeoutMs=obj{firstChunkMs=num,idleMs=num},serviceTier=undefined,reasoningEffort=undefined,reasoningSummary=bool:false,reasoningSummaryDetail=undefined,reasoningVerbosity=undefined,reasoningCarryover=bool:false,reasoningCarryoverStore=undefined,debugOAuth=bool:false,memTokenFallback=undefined}
+"KEYS[24]: llm,registry,stream,promptSurfaceProfile,permission,messages,system,cwd,maxTurns,signal,searchPipeline,stickyModelStore,lspPrewarm,modePolicy,budgetMeter,lspDiagnosticsHookEnabled,secretCheckToolEnabled,bgShellRegistry,contentCaptureEnabled,readFileState,activeSkillCursor,contextEventsForTurn,mentionInjector,compactionEventEmit
+llm :: obj{model=str:"gpt-5.6-terra",provider=str:"chatgpt-oauth",surfaceId=str:"openai-responses",transportId=str:"chatgpt-oauth",authMode=str:"ChatGPT subscription",env=<ambient-env-bag>,fetchImpl=fn,nowMs=fn,maxTokens=undefined,streamTimeoutMs=obj{firstChunkMs=num,idleMs=num},serviceTier=undefined,reasoningEffort=undefined,reasoningSummary=bool:false,reasoningSummaryDetail=undefined,reasoningVerbosity=undefined,reasoningCarryover=bool:false,reasoningCarryoverStore=undefined,debugOAuth=bool:false,memTokenFallback=undefined}
 registry :: obj{tools=obj{},origin=undefined}
 stream :: obj{emit=fn}
 promptSurfaceProfile :: obj{envPosture=str:"frozen",promptPack=str:"interactive",verifyStrategy=str:"none"}
 permission :: obj{mode=str:"acceptEdits"}
 messages :: arr[]
 system :: str[20762]
-cwd :: str:"/Users/songmin/quanta-codeagent-v3"
+cwd :: str:<cwd>
 maxTurns :: num
 signal :: obj{}
 searchPipeline :: obj{search=fn}
@@ -372,6 +388,8 @@ modePolicy :: obj{mode=str:"interactive",permission=obj{kind=str:"reviewer-backe
 budgetMeter :: obj{dials=obj{maxTurns=num,maxRetries=num,maxConsecutiveFailures=num},caps=obj{},exhaustion=str:"stop",clock=fn,startedAtMs=num,turns=num,modelCalls=num,toolCalls=num,shellCommands=num,testRuns=num,inputTokens=num,outputTokens=num,reasoningTokens=num,filesChanged=num,patchBytes=num,retries=num,consecutiveFailures=num,costUsdAccum=num,costUsdThisTurn=num,providerRateLimitRemainingPct=undefined}
 lspDiagnosticsHookEnabled :: bool:false
 secretCheckToolEnabled :: bool:false
+bgShellRegistry :: obj{register=fn,adopt=fn,get=fn,awaitHandle=fn,kill=fn,listOwned=fn,killOwned=fn,killAll=fn,size=fn,oldestId=fn}
+contentCaptureEnabled :: bool:false
 readFileState :: obj{mtimes=obj{},rangeHashes=undefined,rangeDedupCap=num}
 activeSkillCursor :: obj{ids=arr[]}
 contextEventsForTurn :: fn
@@ -380,49 +398,49 @@ compactionEventEmit :: fn"
 `;
 
 exports[`composition slot-registry — byte-identical hellgate fingerprint stable — observability on: observability on :: base 1`] = `
-"KEYS[17]: llm,registry,stream,promptSurfaceProfile,permission,messages,system,cwd,maxTurns,signal,searchPipeline,stickyModelStore,objective,shadowVerify,runLedger,approvalStateMachine,hooks
-llm :: obj{model=str:"gpt-5.4",provider=str:"chatgpt-oauth",surfaceId=str:"openai-responses",transportId=str:"chatgpt-oauth",authMode=str:"ChatGPT subscription",env=<ambient-env-bag>,fetchImpl=fn,nowMs=fn,maxTokens=undefined,streamTimeoutMs=obj{firstChunkMs=num,idleMs=num},serviceTier=undefined,reasoningEffort=undefined,reasoningSummary=bool:false,reasoningSummaryDetail=undefined,reasoningVerbosity=undefined,reasoningCarryover=bool:false,reasoningCarryoverStore=undefined,debugOAuth=bool:false,memTokenFallback=undefined}
+"KEYS[16]: llm,registry,stream,promptSurfaceProfile,permission,messages,system,cwd,maxTurns,signal,searchPipeline,stickyModelStore,shadowVerify,runLedger,approvalStateMachine,hooks
+llm :: obj{model=str:"gpt-5.6-terra",provider=str:"chatgpt-oauth",surfaceId=str:"openai-responses",transportId=str:"chatgpt-oauth",authMode=str:"ChatGPT subscription",env=<ambient-env-bag>,fetchImpl=fn,nowMs=fn,maxTokens=undefined,streamTimeoutMs=obj{firstChunkMs=num,idleMs=num},serviceTier=undefined,reasoningEffort=undefined,reasoningSummary=bool:false,reasoningSummaryDetail=undefined,reasoningVerbosity=undefined,reasoningCarryover=bool:false,reasoningCarryoverStore=undefined,debugOAuth=bool:false,memTokenFallback=undefined}
 registry :: obj{tools=obj{},origin=undefined}
 stream :: obj{emit=fn}
 promptSurfaceProfile :: obj{envPosture=str:"frozen",promptPack=str:"interactive",verifyStrategy=str:"none"}
 permission :: obj{mode=str:"acceptEdits"}
 messages :: arr[]
 system :: str[20762]
-cwd :: str:"/Users/songmin/quanta-codeagent-v3"
+cwd :: str:<cwd>
 maxTurns :: num
 signal :: obj{}
 searchPipeline :: obj{search=fn}
 stickyModelStore :: obj{store=obj{get=fn,set=fn,load=fn}}
-objective :: obj{set=fn,get=fn,updateStatus=fn,markUsageLimited=fn,addBlocker=fn,clearBlocker=fn,setNextActions=fn,markCriterion=fn,recordUsage=fn,list=fn,toSnapshot=fn,fromSnapshot=fn}
 shadowVerify :: obj{verify=fn}
 runLedger :: obj{start=fn,touch=fn,settle=fn,get=fn,list=fn,running=fn,waiting=fn,toSnapshot=fn,fromSnapshot=fn}
-approvalStateMachine :: obj{request=fn,settle=fn,expire=fn,cancel=fn,get=fn,list=fn,pending=fn,toSnapshot=fn,fromSnapshot=fn}
+approvalStateMachine :: obj{request=fn,settle=fn,expire=fn,cancel=fn,get=fn,list=fn,pending=fn,toSnapshot=fn,fromSnapshot=fn,bindObjective=fn}
 hooks :: obj{handlers=obj{},logger=undefined,opts=obj{}}"
 `;
 
 exports[`composition slot-registry — byte-identical hellgate fingerprint stable — observability on: observability on :: assembled 1`] = `
-"KEYS[26]: llm,registry,stream,promptSurfaceProfile,permission,messages,system,cwd,maxTurns,signal,searchPipeline,stickyModelStore,objective,shadowVerify,runLedger,approvalStateMachine,hooks,modePolicy,budgetMeter,lspDiagnosticsHookEnabled,secretCheckToolEnabled,readFileState,activeSkillCursor,contextEventsForTurn,mentionInjector,compactionEventEmit
-llm :: obj{model=str:"gpt-5.4",provider=str:"chatgpt-oauth",surfaceId=str:"openai-responses",transportId=str:"chatgpt-oauth",authMode=str:"ChatGPT subscription",env=<ambient-env-bag>,fetchImpl=fn,nowMs=fn,maxTokens=undefined,streamTimeoutMs=obj{firstChunkMs=num,idleMs=num},serviceTier=undefined,reasoningEffort=undefined,reasoningSummary=bool:false,reasoningSummaryDetail=undefined,reasoningVerbosity=undefined,reasoningCarryover=bool:false,reasoningCarryoverStore=undefined,debugOAuth=bool:false,memTokenFallback=undefined}
+"KEYS[27]: llm,registry,stream,promptSurfaceProfile,permission,messages,system,cwd,maxTurns,signal,searchPipeline,stickyModelStore,shadowVerify,runLedger,approvalStateMachine,hooks,modePolicy,budgetMeter,lspDiagnosticsHookEnabled,secretCheckToolEnabled,bgShellRegistry,contentCaptureEnabled,readFileState,activeSkillCursor,contextEventsForTurn,mentionInjector,compactionEventEmit
+llm :: obj{model=str:"gpt-5.6-terra",provider=str:"chatgpt-oauth",surfaceId=str:"openai-responses",transportId=str:"chatgpt-oauth",authMode=str:"ChatGPT subscription",env=<ambient-env-bag>,fetchImpl=fn,nowMs=fn,maxTokens=undefined,streamTimeoutMs=obj{firstChunkMs=num,idleMs=num},serviceTier=undefined,reasoningEffort=undefined,reasoningSummary=bool:false,reasoningSummaryDetail=undefined,reasoningVerbosity=undefined,reasoningCarryover=bool:false,reasoningCarryoverStore=undefined,debugOAuth=bool:false,memTokenFallback=undefined}
 registry :: obj{tools=obj{},origin=undefined}
 stream :: obj{emit=fn}
 promptSurfaceProfile :: obj{envPosture=str:"frozen",promptPack=str:"interactive",verifyStrategy=str:"none"}
 permission :: obj{mode=str:"acceptEdits"}
 messages :: arr[]
 system :: str[20762]
-cwd :: str:"/Users/songmin/quanta-codeagent-v3"
+cwd :: str:<cwd>
 maxTurns :: num
 signal :: obj{}
 searchPipeline :: obj{search=fn}
 stickyModelStore :: obj{store=obj{get=fn,set=fn,load=fn}}
-objective :: obj{set=fn,get=fn,updateStatus=fn,markUsageLimited=fn,addBlocker=fn,clearBlocker=fn,setNextActions=fn,markCriterion=fn,recordUsage=fn,list=fn,toSnapshot=fn,fromSnapshot=fn}
 shadowVerify :: obj{verify=fn}
 runLedger :: obj{start=fn,touch=fn,settle=fn,get=fn,list=fn,running=fn,waiting=fn,toSnapshot=fn,fromSnapshot=fn}
-approvalStateMachine :: obj{request=fn,settle=fn,expire=fn,cancel=fn,get=fn,list=fn,pending=fn,toSnapshot=fn,fromSnapshot=fn}
+approvalStateMachine :: obj{request=fn,settle=fn,expire=fn,cancel=fn,get=fn,list=fn,pending=fn,toSnapshot=fn,fromSnapshot=fn,bindObjective=fn}
 hooks :: obj{handlers=obj{},logger=undefined,opts=obj{}}
 modePolicy :: obj{mode=str:"interactive",permission=obj{kind=str:"reviewer-backed"},termination=obj{kind=str:"user-stop"},sandbox=obj{kind=str:"user-cwd"},output=obj{kind=str:"stdout-chat"},externalDeps=obj{kind=str:"host"},toolSurface=obj{kind=str:"full"},promptPack=obj{kind=str:"assistant"},memory=obj{kind=str:"persistent"},observation=obj{kind=str:"stream-only"},network=obj{kind=str:"open"},gitWrite=obj{kind=str:"free"},secrets=obj{kind=str:"host-env"}}
 budgetMeter :: obj{dials=obj{maxTurns=num,maxRetries=num,maxConsecutiveFailures=num},caps=obj{},exhaustion=str:"stop",clock=fn,startedAtMs=num,turns=num,modelCalls=num,toolCalls=num,shellCommands=num,testRuns=num,inputTokens=num,outputTokens=num,reasoningTokens=num,filesChanged=num,patchBytes=num,retries=num,consecutiveFailures=num,costUsdAccum=num,costUsdThisTurn=num,providerRateLimitRemainingPct=undefined}
 lspDiagnosticsHookEnabled :: bool:false
 secretCheckToolEnabled :: bool:false
+bgShellRegistry :: obj{register=fn,adopt=fn,get=fn,awaitHandle=fn,kill=fn,listOwned=fn,killOwned=fn,killAll=fn,size=fn,oldestId=fn}
+contentCaptureEnabled :: bool:false
 readFileState :: obj{mtimes=obj{},rangeHashes=undefined,rangeDedupCap=num}
 activeSkillCursor :: obj{ids=arr[]}
 contextEventsForTurn :: fn
@@ -432,14 +450,14 @@ compactionEventEmit :: fn"
 
 exports[`composition slot-registry — byte-identical hellgate fingerprint stable — remember patterns: remember patterns :: base 1`] = `
 "KEYS[13]: llm,registry,stream,promptSurfaceProfile,permission,messages,system,cwd,maxTurns,signal,searchPipeline,stickyModelStore,permissionPatternStore
-llm :: obj{model=str:"gpt-5.4",provider=str:"chatgpt-oauth",surfaceId=str:"openai-responses",transportId=str:"chatgpt-oauth",authMode=str:"ChatGPT subscription",env=<ambient-env-bag>,fetchImpl=fn,nowMs=fn,maxTokens=undefined,streamTimeoutMs=obj{firstChunkMs=num,idleMs=num},serviceTier=undefined,reasoningEffort=undefined,reasoningSummary=bool:false,reasoningSummaryDetail=undefined,reasoningVerbosity=undefined,reasoningCarryover=bool:false,reasoningCarryoverStore=undefined,debugOAuth=bool:false,memTokenFallback=undefined}
+llm :: obj{model=str:"gpt-5.6-terra",provider=str:"chatgpt-oauth",surfaceId=str:"openai-responses",transportId=str:"chatgpt-oauth",authMode=str:"ChatGPT subscription",env=<ambient-env-bag>,fetchImpl=fn,nowMs=fn,maxTokens=undefined,streamTimeoutMs=obj{firstChunkMs=num,idleMs=num},serviceTier=undefined,reasoningEffort=undefined,reasoningSummary=bool:false,reasoningSummaryDetail=undefined,reasoningVerbosity=undefined,reasoningCarryover=bool:false,reasoningCarryoverStore=undefined,debugOAuth=bool:false,memTokenFallback=undefined}
 registry :: obj{tools=obj{},origin=undefined}
 stream :: obj{emit=fn}
 promptSurfaceProfile :: obj{envPosture=str:"frozen",promptPack=str:"interactive",verifyStrategy=str:"none"}
 permission :: obj{mode=str:"acceptEdits"}
 messages :: arr[]
 system :: str[20762]
-cwd :: str:"/Users/songmin/quanta-codeagent-v3"
+cwd :: str:<cwd>
 maxTurns :: num
 signal :: obj{}
 searchPipeline :: obj{search=fn}
@@ -448,15 +466,15 @@ permissionPatternStore :: obj{allowed=obj{},baseline=obj{}}"
 `;
 
 exports[`composition slot-registry — byte-identical hellgate fingerprint stable — remember patterns: remember patterns :: assembled 1`] = `
-"KEYS[22]: llm,registry,stream,promptSurfaceProfile,permission,messages,system,cwd,maxTurns,signal,searchPipeline,stickyModelStore,permissionPatternStore,modePolicy,budgetMeter,lspDiagnosticsHookEnabled,secretCheckToolEnabled,readFileState,activeSkillCursor,contextEventsForTurn,mentionInjector,compactionEventEmit
-llm :: obj{model=str:"gpt-5.4",provider=str:"chatgpt-oauth",surfaceId=str:"openai-responses",transportId=str:"chatgpt-oauth",authMode=str:"ChatGPT subscription",env=<ambient-env-bag>,fetchImpl=fn,nowMs=fn,maxTokens=undefined,streamTimeoutMs=obj{firstChunkMs=num,idleMs=num},serviceTier=undefined,reasoningEffort=undefined,reasoningSummary=bool:false,reasoningSummaryDetail=undefined,reasoningVerbosity=undefined,reasoningCarryover=bool:false,reasoningCarryoverStore=undefined,debugOAuth=bool:false,memTokenFallback=undefined}
+"KEYS[24]: llm,registry,stream,promptSurfaceProfile,permission,messages,system,cwd,maxTurns,signal,searchPipeline,stickyModelStore,permissionPatternStore,modePolicy,budgetMeter,lspDiagnosticsHookEnabled,secretCheckToolEnabled,bgShellRegistry,contentCaptureEnabled,readFileState,activeSkillCursor,contextEventsForTurn,mentionInjector,compactionEventEmit
+llm :: obj{model=str:"gpt-5.6-terra",provider=str:"chatgpt-oauth",surfaceId=str:"openai-responses",transportId=str:"chatgpt-oauth",authMode=str:"ChatGPT subscription",env=<ambient-env-bag>,fetchImpl=fn,nowMs=fn,maxTokens=undefined,streamTimeoutMs=obj{firstChunkMs=num,idleMs=num},serviceTier=undefined,reasoningEffort=undefined,reasoningSummary=bool:false,reasoningSummaryDetail=undefined,reasoningVerbosity=undefined,reasoningCarryover=bool:false,reasoningCarryoverStore=undefined,debugOAuth=bool:false,memTokenFallback=undefined}
 registry :: obj{tools=obj{},origin=undefined}
 stream :: obj{emit=fn}
 promptSurfaceProfile :: obj{envPosture=str:"frozen",promptPack=str:"interactive",verifyStrategy=str:"none"}
 permission :: obj{mode=str:"acceptEdits"}
 messages :: arr[]
 system :: str[20762]
-cwd :: str:"/Users/songmin/quanta-codeagent-v3"
+cwd :: str:<cwd>
 maxTurns :: num
 signal :: obj{}
 searchPipeline :: obj{search=fn}
@@ -466,6 +484,8 @@ modePolicy :: obj{mode=str:"interactive",permission=obj{kind=str:"reviewer-backe
 budgetMeter :: obj{dials=obj{maxTurns=num,maxRetries=num,maxConsecutiveFailures=num},caps=obj{},exhaustion=str:"stop",clock=fn,startedAtMs=num,turns=num,modelCalls=num,toolCalls=num,shellCommands=num,testRuns=num,inputTokens=num,outputTokens=num,reasoningTokens=num,filesChanged=num,patchBytes=num,retries=num,consecutiveFailures=num,costUsdAccum=num,costUsdThisTurn=num,providerRateLimitRemainingPct=undefined}
 lspDiagnosticsHookEnabled :: bool:false
 secretCheckToolEnabled :: bool:false
+bgShellRegistry :: obj{register=fn,adopt=fn,get=fn,awaitHandle=fn,kill=fn,listOwned=fn,killOwned=fn,killAll=fn,size=fn,oldestId=fn}
+contentCaptureEnabled :: bool:false
 readFileState :: obj{mtimes=obj{},rangeHashes=undefined,rangeDedupCap=num}
 activeSkillCursor :: obj{ids=arr[]}
 contextEventsForTurn :: fn
@@ -475,14 +495,14 @@ compactionEventEmit :: fn"
 
 exports[`composition slot-registry — byte-identical hellgate fingerprint stable — remember patterns dangerous: remember patterns dangerous :: base 1`] = `
 "KEYS[13]: llm,registry,stream,promptSurfaceProfile,permission,messages,system,cwd,maxTurns,signal,searchPipeline,stickyModelStore,permissionPatternStore
-llm :: obj{model=str:"gpt-5.4",provider=str:"chatgpt-oauth",surfaceId=str:"openai-responses",transportId=str:"chatgpt-oauth",authMode=str:"ChatGPT subscription",env=<ambient-env-bag>,fetchImpl=fn,nowMs=fn,maxTokens=undefined,streamTimeoutMs=obj{firstChunkMs=num,idleMs=num},serviceTier=undefined,reasoningEffort=undefined,reasoningSummary=bool:false,reasoningSummaryDetail=undefined,reasoningVerbosity=undefined,reasoningCarryover=bool:false,reasoningCarryoverStore=undefined,debugOAuth=bool:false,memTokenFallback=undefined}
+llm :: obj{model=str:"gpt-5.6-terra",provider=str:"chatgpt-oauth",surfaceId=str:"openai-responses",transportId=str:"chatgpt-oauth",authMode=str:"ChatGPT subscription",env=<ambient-env-bag>,fetchImpl=fn,nowMs=fn,maxTokens=undefined,streamTimeoutMs=obj{firstChunkMs=num,idleMs=num},serviceTier=undefined,reasoningEffort=undefined,reasoningSummary=bool:false,reasoningSummaryDetail=undefined,reasoningVerbosity=undefined,reasoningCarryover=bool:false,reasoningCarryoverStore=undefined,debugOAuth=bool:false,memTokenFallback=undefined}
 registry :: obj{tools=obj{},origin=undefined}
 stream :: obj{emit=fn}
 promptSurfaceProfile :: obj{envPosture=str:"frozen",promptPack=str:"interactive",verifyStrategy=str:"none"}
 permission :: obj{mode=str:"acceptEdits"}
 messages :: arr[]
 system :: str[20762]
-cwd :: str:"/Users/songmin/quanta-codeagent-v3"
+cwd :: str:<cwd>
 maxTurns :: num
 signal :: obj{}
 searchPipeline :: obj{search=fn}
@@ -491,15 +511,15 @@ permissionPatternStore :: obj{allowed=obj{},baseline=obj{}}"
 `;
 
 exports[`composition slot-registry — byte-identical hellgate fingerprint stable — remember patterns dangerous: remember patterns dangerous :: assembled 1`] = `
-"KEYS[22]: llm,registry,stream,promptSurfaceProfile,permission,messages,system,cwd,maxTurns,signal,searchPipeline,stickyModelStore,permissionPatternStore,modePolicy,budgetMeter,lspDiagnosticsHookEnabled,secretCheckToolEnabled,readFileState,activeSkillCursor,contextEventsForTurn,mentionInjector,compactionEventEmit
-llm :: obj{model=str:"gpt-5.4",provider=str:"chatgpt-oauth",surfaceId=str:"openai-responses",transportId=str:"chatgpt-oauth",authMode=str:"ChatGPT subscription",env=<ambient-env-bag>,fetchImpl=fn,nowMs=fn,maxTokens=undefined,streamTimeoutMs=obj{firstChunkMs=num,idleMs=num},serviceTier=undefined,reasoningEffort=undefined,reasoningSummary=bool:false,reasoningSummaryDetail=undefined,reasoningVerbosity=undefined,reasoningCarryover=bool:false,reasoningCarryoverStore=undefined,debugOAuth=bool:false,memTokenFallback=undefined}
+"KEYS[24]: llm,registry,stream,promptSurfaceProfile,permission,messages,system,cwd,maxTurns,signal,searchPipeline,stickyModelStore,permissionPatternStore,modePolicy,budgetMeter,lspDiagnosticsHookEnabled,secretCheckToolEnabled,bgShellRegistry,contentCaptureEnabled,readFileState,activeSkillCursor,contextEventsForTurn,mentionInjector,compactionEventEmit
+llm :: obj{model=str:"gpt-5.6-terra",provider=str:"chatgpt-oauth",surfaceId=str:"openai-responses",transportId=str:"chatgpt-oauth",authMode=str:"ChatGPT subscription",env=<ambient-env-bag>,fetchImpl=fn,nowMs=fn,maxTokens=undefined,streamTimeoutMs=obj{firstChunkMs=num,idleMs=num},serviceTier=undefined,reasoningEffort=undefined,reasoningSummary=bool:false,reasoningSummaryDetail=undefined,reasoningVerbosity=undefined,reasoningCarryover=bool:false,reasoningCarryoverStore=undefined,debugOAuth=bool:false,memTokenFallback=undefined}
 registry :: obj{tools=obj{},origin=undefined}
 stream :: obj{emit=fn}
 promptSurfaceProfile :: obj{envPosture=str:"frozen",promptPack=str:"interactive",verifyStrategy=str:"none"}
 permission :: obj{mode=str:"acceptEdits"}
 messages :: arr[]
 system :: str[20762]
-cwd :: str:"/Users/songmin/quanta-codeagent-v3"
+cwd :: str:<cwd>
 maxTurns :: num
 signal :: obj{}
 searchPipeline :: obj{search=fn}
@@ -509,6 +529,8 @@ modePolicy :: obj{mode=str:"interactive",permission=obj{kind=str:"reviewer-backe
 budgetMeter :: obj{dials=obj{maxTurns=num,maxRetries=num,maxConsecutiveFailures=num},caps=obj{},exhaustion=str:"stop",clock=fn,startedAtMs=num,turns=num,modelCalls=num,toolCalls=num,shellCommands=num,testRuns=num,inputTokens=num,outputTokens=num,reasoningTokens=num,filesChanged=num,patchBytes=num,retries=num,consecutiveFailures=num,costUsdAccum=num,costUsdThisTurn=num,providerRateLimitRemainingPct=undefined}
 lspDiagnosticsHookEnabled :: bool:false
 secretCheckToolEnabled :: bool:false
+bgShellRegistry :: obj{register=fn,adopt=fn,get=fn,awaitHandle=fn,kill=fn,listOwned=fn,killOwned=fn,killAll=fn,size=fn,oldestId=fn}
+contentCaptureEnabled :: bool:false
 readFileState :: obj{mtimes=obj{},rangeHashes=undefined,rangeDedupCap=num}
 activeSkillCursor :: obj{ids=arr[]}
 contextEventsForTurn :: fn
@@ -518,14 +540,14 @@ compactionEventEmit :: fn"
 
 exports[`composition slot-registry — byte-identical hellgate fingerprint stable — file history: file history :: base 1`] = `
 "KEYS[13]: llm,registry,stream,promptSurfaceProfile,permission,messages,system,cwd,maxTurns,signal,searchPipeline,stickyModelStore,fileHistory
-llm :: obj{model=str:"gpt-5.4",provider=str:"chatgpt-oauth",surfaceId=str:"openai-responses",transportId=str:"chatgpt-oauth",authMode=str:"ChatGPT subscription",env=<ambient-env-bag>,fetchImpl=fn,nowMs=fn,maxTokens=undefined,streamTimeoutMs=obj{firstChunkMs=num,idleMs=num},serviceTier=undefined,reasoningEffort=undefined,reasoningSummary=bool:false,reasoningSummaryDetail=undefined,reasoningVerbosity=undefined,reasoningCarryover=bool:false,reasoningCarryoverStore=undefined,debugOAuth=bool:false,memTokenFallback=undefined}
+llm :: obj{model=str:"gpt-5.6-terra",provider=str:"chatgpt-oauth",surfaceId=str:"openai-responses",transportId=str:"chatgpt-oauth",authMode=str:"ChatGPT subscription",env=<ambient-env-bag>,fetchImpl=fn,nowMs=fn,maxTokens=undefined,streamTimeoutMs=obj{firstChunkMs=num,idleMs=num},serviceTier=undefined,reasoningEffort=undefined,reasoningSummary=bool:false,reasoningSummaryDetail=undefined,reasoningVerbosity=undefined,reasoningCarryover=bool:false,reasoningCarryoverStore=undefined,debugOAuth=bool:false,memTokenFallback=undefined}
 registry :: obj{tools=obj{},origin=undefined}
 stream :: obj{emit=fn}
 promptSurfaceProfile :: obj{envPosture=str:"frozen",promptPack=str:"interactive",verifyStrategy=str:"none"}
 permission :: obj{mode=str:"acceptEdits"}
 messages :: arr[]
 system :: str[20762]
-cwd :: str:"/Users/songmin/quanta-codeagent-v3"
+cwd :: str:<cwd>
 maxTurns :: num
 signal :: obj{}
 searchPipeline :: obj{search=fn}
@@ -534,15 +556,15 @@ fileHistory :: obj{record=fn}"
 `;
 
 exports[`composition slot-registry — byte-identical hellgate fingerprint stable — file history: file history :: assembled 1`] = `
-"KEYS[22]: llm,registry,stream,promptSurfaceProfile,permission,messages,system,cwd,maxTurns,signal,searchPipeline,stickyModelStore,fileHistory,modePolicy,budgetMeter,lspDiagnosticsHookEnabled,secretCheckToolEnabled,readFileState,activeSkillCursor,contextEventsForTurn,mentionInjector,compactionEventEmit
-llm :: obj{model=str:"gpt-5.4",provider=str:"chatgpt-oauth",surfaceId=str:"openai-responses",transportId=str:"chatgpt-oauth",authMode=str:"ChatGPT subscription",env=<ambient-env-bag>,fetchImpl=fn,nowMs=fn,maxTokens=undefined,streamTimeoutMs=obj{firstChunkMs=num,idleMs=num},serviceTier=undefined,reasoningEffort=undefined,reasoningSummary=bool:false,reasoningSummaryDetail=undefined,reasoningVerbosity=undefined,reasoningCarryover=bool:false,reasoningCarryoverStore=undefined,debugOAuth=bool:false,memTokenFallback=undefined}
+"KEYS[24]: llm,registry,stream,promptSurfaceProfile,permission,messages,system,cwd,maxTurns,signal,searchPipeline,stickyModelStore,fileHistory,modePolicy,budgetMeter,lspDiagnosticsHookEnabled,secretCheckToolEnabled,bgShellRegistry,contentCaptureEnabled,readFileState,activeSkillCursor,contextEventsForTurn,mentionInjector,compactionEventEmit
+llm :: obj{model=str:"gpt-5.6-terra",provider=str:"chatgpt-oauth",surfaceId=str:"openai-responses",transportId=str:"chatgpt-oauth",authMode=str:"ChatGPT subscription",env=<ambient-env-bag>,fetchImpl=fn,nowMs=fn,maxTokens=undefined,streamTimeoutMs=obj{firstChunkMs=num,idleMs=num},serviceTier=undefined,reasoningEffort=undefined,reasoningSummary=bool:false,reasoningSummaryDetail=undefined,reasoningVerbosity=undefined,reasoningCarryover=bool:false,reasoningCarryoverStore=undefined,debugOAuth=bool:false,memTokenFallback=undefined}
 registry :: obj{tools=obj{},origin=undefined}
 stream :: obj{emit=fn}
 promptSurfaceProfile :: obj{envPosture=str:"frozen",promptPack=str:"interactive",verifyStrategy=str:"none"}
 permission :: obj{mode=str:"acceptEdits"}
 messages :: arr[]
 system :: str[20762]
-cwd :: str:"/Users/songmin/quanta-codeagent-v3"
+cwd :: str:<cwd>
 maxTurns :: num
 signal :: obj{}
 searchPipeline :: obj{search=fn}
@@ -552,6 +574,8 @@ modePolicy :: obj{mode=str:"interactive",permission=obj{kind=str:"reviewer-backe
 budgetMeter :: obj{dials=obj{maxTurns=num,maxRetries=num,maxConsecutiveFailures=num},caps=obj{},exhaustion=str:"stop",clock=fn,startedAtMs=num,turns=num,modelCalls=num,toolCalls=num,shellCommands=num,testRuns=num,inputTokens=num,outputTokens=num,reasoningTokens=num,filesChanged=num,patchBytes=num,retries=num,consecutiveFailures=num,costUsdAccum=num,costUsdThisTurn=num,providerRateLimitRemainingPct=undefined}
 lspDiagnosticsHookEnabled :: bool:false
 secretCheckToolEnabled :: bool:false
+bgShellRegistry :: obj{register=fn,adopt=fn,get=fn,awaitHandle=fn,kill=fn,listOwned=fn,killOwned=fn,killAll=fn,size=fn,oldestId=fn}
+contentCaptureEnabled :: bool:false
 readFileState :: obj{mtimes=obj{},rangeHashes=undefined,rangeDedupCap=num}
 activeSkillCursor :: obj{ids=arr[]}
 contextEventsForTurn :: fn
@@ -561,14 +585,14 @@ compactionEventEmit :: fn"
 
 exports[`composition slot-registry — byte-identical hellgate fingerprint stable — artifact store: artifact store :: base 1`] = `
 "KEYS[14]: llm,registry,stream,promptSurfaceProfile,permission,messages,system,cwd,maxTurns,signal,searchPipeline,stickyModelStore,artifactRegistry,artifactPreviewResolver
-llm :: obj{model=str:"gpt-5.4",provider=str:"chatgpt-oauth",surfaceId=str:"openai-responses",transportId=str:"chatgpt-oauth",authMode=str:"ChatGPT subscription",env=<ambient-env-bag>,fetchImpl=fn,nowMs=fn,maxTokens=undefined,streamTimeoutMs=obj{firstChunkMs=num,idleMs=num},serviceTier=undefined,reasoningEffort=undefined,reasoningSummary=bool:false,reasoningSummaryDetail=undefined,reasoningVerbosity=undefined,reasoningCarryover=bool:false,reasoningCarryoverStore=undefined,debugOAuth=bool:false,memTokenFallback=undefined}
+llm :: obj{model=str:"gpt-5.6-terra",provider=str:"chatgpt-oauth",surfaceId=str:"openai-responses",transportId=str:"chatgpt-oauth",authMode=str:"ChatGPT subscription",env=<ambient-env-bag>,fetchImpl=fn,nowMs=fn,maxTokens=undefined,streamTimeoutMs=obj{firstChunkMs=num,idleMs=num},serviceTier=undefined,reasoningEffort=undefined,reasoningSummary=bool:false,reasoningSummaryDetail=undefined,reasoningVerbosity=undefined,reasoningCarryover=bool:false,reasoningCarryoverStore=undefined,debugOAuth=bool:false,memTokenFallback=undefined}
 registry :: obj{tools=obj{},origin=undefined}
 stream :: obj{emit=fn}
 promptSurfaceProfile :: obj{envPosture=str:"frozen",promptPack=str:"interactive",verifyStrategy=str:"none"}
 permission :: obj{mode=str:"acceptEdits"}
 messages :: arr[]
 system :: str[20762]
-cwd :: str:"/Users/songmin/quanta-codeagent-v3"
+cwd :: str:<cwd>
 maxTurns :: num
 signal :: obj{}
 searchPipeline :: obj{search=fn}
@@ -578,15 +602,15 @@ artifactPreviewResolver :: obj{resolve=fn}"
 `;
 
 exports[`composition slot-registry — byte-identical hellgate fingerprint stable — artifact store: artifact store :: assembled 1`] = `
-"KEYS[23]: llm,registry,stream,promptSurfaceProfile,permission,messages,system,cwd,maxTurns,signal,searchPipeline,stickyModelStore,artifactRegistry,artifactPreviewResolver,modePolicy,budgetMeter,lspDiagnosticsHookEnabled,secretCheckToolEnabled,readFileState,activeSkillCursor,contextEventsForTurn,mentionInjector,compactionEventEmit
-llm :: obj{model=str:"gpt-5.4",provider=str:"chatgpt-oauth",surfaceId=str:"openai-responses",transportId=str:"chatgpt-oauth",authMode=str:"ChatGPT subscription",env=<ambient-env-bag>,fetchImpl=fn,nowMs=fn,maxTokens=undefined,streamTimeoutMs=obj{firstChunkMs=num,idleMs=num},serviceTier=undefined,reasoningEffort=undefined,reasoningSummary=bool:false,reasoningSummaryDetail=undefined,reasoningVerbosity=undefined,reasoningCarryover=bool:false,reasoningCarryoverStore=undefined,debugOAuth=bool:false,memTokenFallback=undefined}
+"KEYS[25]: llm,registry,stream,promptSurfaceProfile,permission,messages,system,cwd,maxTurns,signal,searchPipeline,stickyModelStore,artifactRegistry,artifactPreviewResolver,modePolicy,budgetMeter,lspDiagnosticsHookEnabled,secretCheckToolEnabled,bgShellRegistry,contentCaptureEnabled,readFileState,activeSkillCursor,contextEventsForTurn,mentionInjector,compactionEventEmit
+llm :: obj{model=str:"gpt-5.6-terra",provider=str:"chatgpt-oauth",surfaceId=str:"openai-responses",transportId=str:"chatgpt-oauth",authMode=str:"ChatGPT subscription",env=<ambient-env-bag>,fetchImpl=fn,nowMs=fn,maxTokens=undefined,streamTimeoutMs=obj{firstChunkMs=num,idleMs=num},serviceTier=undefined,reasoningEffort=undefined,reasoningSummary=bool:false,reasoningSummaryDetail=undefined,reasoningVerbosity=undefined,reasoningCarryover=bool:false,reasoningCarryoverStore=undefined,debugOAuth=bool:false,memTokenFallback=undefined}
 registry :: obj{tools=obj{},origin=undefined}
 stream :: obj{emit=fn}
 promptSurfaceProfile :: obj{envPosture=str:"frozen",promptPack=str:"interactive",verifyStrategy=str:"none"}
 permission :: obj{mode=str:"acceptEdits"}
 messages :: arr[]
 system :: str[20762]
-cwd :: str:"/Users/songmin/quanta-codeagent-v3"
+cwd :: str:<cwd>
 maxTurns :: num
 signal :: obj{}
 searchPipeline :: obj{search=fn}
@@ -597,6 +621,8 @@ modePolicy :: obj{mode=str:"interactive",permission=obj{kind=str:"reviewer-backe
 budgetMeter :: obj{dials=obj{maxTurns=num,maxRetries=num,maxConsecutiveFailures=num},caps=obj{},exhaustion=str:"stop",clock=fn,startedAtMs=num,turns=num,modelCalls=num,toolCalls=num,shellCommands=num,testRuns=num,inputTokens=num,outputTokens=num,reasoningTokens=num,filesChanged=num,patchBytes=num,retries=num,consecutiveFailures=num,costUsdAccum=num,costUsdThisTurn=num,providerRateLimitRemainingPct=undefined}
 lspDiagnosticsHookEnabled :: bool:false
 secretCheckToolEnabled :: bool:false
+bgShellRegistry :: obj{register=fn,adopt=fn,get=fn,awaitHandle=fn,kill=fn,listOwned=fn,killOwned=fn,killAll=fn,size=fn,oldestId=fn}
+contentCaptureEnabled :: bool:false
 readFileState :: obj{mtimes=obj{},rangeHashes=undefined,rangeDedupCap=num}
 activeSkillCursor :: obj{ids=arr[]}
 contextEventsForTurn :: fn
@@ -606,14 +632,14 @@ compactionEventEmit :: fn"
 
 exports[`composition slot-registry — byte-identical hellgate fingerprint stable — index on: index on :: base 1`] = `
 "KEYS[12]: llm,registry,stream,promptSurfaceProfile,permission,messages,system,cwd,maxTurns,signal,searchPipeline,stickyModelStore
-llm :: obj{model=str:"gpt-5.4",provider=str:"chatgpt-oauth",surfaceId=str:"openai-responses",transportId=str:"chatgpt-oauth",authMode=str:"ChatGPT subscription",env=<ambient-env-bag>,fetchImpl=fn,nowMs=fn,maxTokens=undefined,streamTimeoutMs=obj{firstChunkMs=num,idleMs=num},serviceTier=undefined,reasoningEffort=undefined,reasoningSummary=bool:false,reasoningSummaryDetail=undefined,reasoningVerbosity=undefined,reasoningCarryover=bool:false,reasoningCarryoverStore=undefined,debugOAuth=bool:false,memTokenFallback=undefined}
+llm :: obj{model=str:"gpt-5.6-terra",provider=str:"chatgpt-oauth",surfaceId=str:"openai-responses",transportId=str:"chatgpt-oauth",authMode=str:"ChatGPT subscription",env=<ambient-env-bag>,fetchImpl=fn,nowMs=fn,maxTokens=undefined,streamTimeoutMs=obj{firstChunkMs=num,idleMs=num},serviceTier=undefined,reasoningEffort=undefined,reasoningSummary=bool:false,reasoningSummaryDetail=undefined,reasoningVerbosity=undefined,reasoningCarryover=bool:false,reasoningCarryoverStore=undefined,debugOAuth=bool:false,memTokenFallback=undefined}
 registry :: obj{tools=obj{},origin=undefined}
 stream :: obj{emit=fn}
 promptSurfaceProfile :: obj{envPosture=str:"frozen",promptPack=str:"interactive",verifyStrategy=str:"none"}
 permission :: obj{mode=str:"acceptEdits"}
 messages :: arr[]
 system :: str[20762]
-cwd :: str:"/Users/songmin/quanta-codeagent-v3"
+cwd :: str:<cwd>
 maxTurns :: num
 signal :: obj{}
 searchPipeline :: obj{search=fn}
@@ -621,15 +647,15 @@ stickyModelStore :: obj{store=obj{get=fn,set=fn,load=fn}}"
 `;
 
 exports[`composition slot-registry — byte-identical hellgate fingerprint stable — index on: index on :: assembled 1`] = `
-"KEYS[21]: llm,registry,stream,promptSurfaceProfile,permission,messages,system,cwd,maxTurns,signal,searchPipeline,stickyModelStore,modePolicy,budgetMeter,lspDiagnosticsHookEnabled,secretCheckToolEnabled,readFileState,activeSkillCursor,contextEventsForTurn,mentionInjector,compactionEventEmit
-llm :: obj{model=str:"gpt-5.4",provider=str:"chatgpt-oauth",surfaceId=str:"openai-responses",transportId=str:"chatgpt-oauth",authMode=str:"ChatGPT subscription",env=<ambient-env-bag>,fetchImpl=fn,nowMs=fn,maxTokens=undefined,streamTimeoutMs=obj{firstChunkMs=num,idleMs=num},serviceTier=undefined,reasoningEffort=undefined,reasoningSummary=bool:false,reasoningSummaryDetail=undefined,reasoningVerbosity=undefined,reasoningCarryover=bool:false,reasoningCarryoverStore=undefined,debugOAuth=bool:false,memTokenFallback=undefined}
+"KEYS[23]: llm,registry,stream,promptSurfaceProfile,permission,messages,system,cwd,maxTurns,signal,searchPipeline,stickyModelStore,modePolicy,budgetMeter,lspDiagnosticsHookEnabled,secretCheckToolEnabled,bgShellRegistry,contentCaptureEnabled,readFileState,activeSkillCursor,contextEventsForTurn,mentionInjector,compactionEventEmit
+llm :: obj{model=str:"gpt-5.6-terra",provider=str:"chatgpt-oauth",surfaceId=str:"openai-responses",transportId=str:"chatgpt-oauth",authMode=str:"ChatGPT subscription",env=<ambient-env-bag>,fetchImpl=fn,nowMs=fn,maxTokens=undefined,streamTimeoutMs=obj{firstChunkMs=num,idleMs=num},serviceTier=undefined,reasoningEffort=undefined,reasoningSummary=bool:false,reasoningSummaryDetail=undefined,reasoningVerbosity=undefined,reasoningCarryover=bool:false,reasoningCarryoverStore=undefined,debugOAuth=bool:false,memTokenFallback=undefined}
 registry :: obj{tools=obj{},origin=undefined}
 stream :: obj{emit=fn}
 promptSurfaceProfile :: obj{envPosture=str:"frozen",promptPack=str:"interactive",verifyStrategy=str:"none"}
 permission :: obj{mode=str:"acceptEdits"}
 messages :: arr[]
 system :: str[20762]
-cwd :: str:"/Users/songmin/quanta-codeagent-v3"
+cwd :: str:<cwd>
 maxTurns :: num
 signal :: obj{}
 searchPipeline :: obj{search=fn}
@@ -638,6 +664,8 @@ modePolicy :: obj{mode=str:"interactive",permission=obj{kind=str:"reviewer-backe
 budgetMeter :: obj{dials=obj{maxTurns=num,maxRetries=num,maxConsecutiveFailures=num},caps=obj{},exhaustion=str:"stop",clock=fn,startedAtMs=num,turns=num,modelCalls=num,toolCalls=num,shellCommands=num,testRuns=num,inputTokens=num,outputTokens=num,reasoningTokens=num,filesChanged=num,patchBytes=num,retries=num,consecutiveFailures=num,costUsdAccum=num,costUsdThisTurn=num,providerRateLimitRemainingPct=undefined}
 lspDiagnosticsHookEnabled :: bool:false
 secretCheckToolEnabled :: bool:false
+bgShellRegistry :: obj{register=fn,adopt=fn,get=fn,awaitHandle=fn,kill=fn,listOwned=fn,killOwned=fn,killAll=fn,size=fn,oldestId=fn}
+contentCaptureEnabled :: bool:false
 readFileState :: obj{mtimes=obj{},rangeHashes=undefined,rangeDedupCap=num}
 activeSkillCursor :: obj{ids=arr[]}
 contextEventsForTurn :: fn
@@ -647,29 +675,29 @@ compactionEventEmit :: fn"
 
 exports[`composition slot-registry — byte-identical hellgate fingerprint stable — pipeline none: pipeline none :: base 1`] = `
 "KEYS[11]: llm,registry,stream,promptSurfaceProfile,permission,messages,system,cwd,maxTurns,signal,stickyModelStore
-llm :: obj{model=str:"gpt-5.4",provider=str:"chatgpt-oauth",surfaceId=str:"openai-responses",transportId=str:"chatgpt-oauth",authMode=str:"ChatGPT subscription",env=<ambient-env-bag>,fetchImpl=fn,nowMs=fn,maxTokens=undefined,streamTimeoutMs=obj{firstChunkMs=num,idleMs=num},serviceTier=undefined,reasoningEffort=undefined,reasoningSummary=bool:false,reasoningSummaryDetail=undefined,reasoningVerbosity=undefined,reasoningCarryover=bool:false,reasoningCarryoverStore=undefined,debugOAuth=bool:false,memTokenFallback=undefined}
+llm :: obj{model=str:"gpt-5.6-terra",provider=str:"chatgpt-oauth",surfaceId=str:"openai-responses",transportId=str:"chatgpt-oauth",authMode=str:"ChatGPT subscription",env=<ambient-env-bag>,fetchImpl=fn,nowMs=fn,maxTokens=undefined,streamTimeoutMs=obj{firstChunkMs=num,idleMs=num},serviceTier=undefined,reasoningEffort=undefined,reasoningSummary=bool:false,reasoningSummaryDetail=undefined,reasoningVerbosity=undefined,reasoningCarryover=bool:false,reasoningCarryoverStore=undefined,debugOAuth=bool:false,memTokenFallback=undefined}
 registry :: obj{tools=obj{},origin=undefined}
 stream :: obj{emit=fn}
 promptSurfaceProfile :: obj{envPosture=str:"frozen",promptPack=str:"interactive",verifyStrategy=str:"none"}
 permission :: obj{mode=str:"acceptEdits"}
 messages :: arr[]
 system :: str[20762]
-cwd :: str:"/Users/songmin/quanta-codeagent-v3"
+cwd :: str:<cwd>
 maxTurns :: num
 signal :: obj{}
 stickyModelStore :: obj{store=obj{get=fn,set=fn,load=fn}}"
 `;
 
 exports[`composition slot-registry — byte-identical hellgate fingerprint stable — pipeline none: pipeline none :: assembled 1`] = `
-"KEYS[20]: llm,registry,stream,promptSurfaceProfile,permission,messages,system,cwd,maxTurns,signal,stickyModelStore,modePolicy,budgetMeter,lspDiagnosticsHookEnabled,secretCheckToolEnabled,readFileState,activeSkillCursor,contextEventsForTurn,mentionInjector,compactionEventEmit
-llm :: obj{model=str:"gpt-5.4",provider=str:"chatgpt-oauth",surfaceId=str:"openai-responses",transportId=str:"chatgpt-oauth",authMode=str:"ChatGPT subscription",env=<ambient-env-bag>,fetchImpl=fn,nowMs=fn,maxTokens=undefined,streamTimeoutMs=obj{firstChunkMs=num,idleMs=num},serviceTier=undefined,reasoningEffort=undefined,reasoningSummary=bool:false,reasoningSummaryDetail=undefined,reasoningVerbosity=undefined,reasoningCarryover=bool:false,reasoningCarryoverStore=undefined,debugOAuth=bool:false,memTokenFallback=undefined}
+"KEYS[22]: llm,registry,stream,promptSurfaceProfile,permission,messages,system,cwd,maxTurns,signal,stickyModelStore,modePolicy,budgetMeter,lspDiagnosticsHookEnabled,secretCheckToolEnabled,bgShellRegistry,contentCaptureEnabled,readFileState,activeSkillCursor,contextEventsForTurn,mentionInjector,compactionEventEmit
+llm :: obj{model=str:"gpt-5.6-terra",provider=str:"chatgpt-oauth",surfaceId=str:"openai-responses",transportId=str:"chatgpt-oauth",authMode=str:"ChatGPT subscription",env=<ambient-env-bag>,fetchImpl=fn,nowMs=fn,maxTokens=undefined,streamTimeoutMs=obj{firstChunkMs=num,idleMs=num},serviceTier=undefined,reasoningEffort=undefined,reasoningSummary=bool:false,reasoningSummaryDetail=undefined,reasoningVerbosity=undefined,reasoningCarryover=bool:false,reasoningCarryoverStore=undefined,debugOAuth=bool:false,memTokenFallback=undefined}
 registry :: obj{tools=obj{},origin=undefined}
 stream :: obj{emit=fn}
 promptSurfaceProfile :: obj{envPosture=str:"frozen",promptPack=str:"interactive",verifyStrategy=str:"none"}
 permission :: obj{mode=str:"acceptEdits"}
 messages :: arr[]
 system :: str[20762]
-cwd :: str:"/Users/songmin/quanta-codeagent-v3"
+cwd :: str:<cwd>
 maxTurns :: num
 signal :: obj{}
 stickyModelStore :: obj{store=obj{get=fn,set=fn,load=fn}}
@@ -677,6 +705,8 @@ modePolicy :: obj{mode=str:"interactive",permission=obj{kind=str:"reviewer-backe
 budgetMeter :: obj{dials=obj{maxTurns=num,maxRetries=num,maxConsecutiveFailures=num},caps=obj{},exhaustion=str:"stop",clock=fn,startedAtMs=num,turns=num,modelCalls=num,toolCalls=num,shellCommands=num,testRuns=num,inputTokens=num,outputTokens=num,reasoningTokens=num,filesChanged=num,patchBytes=num,retries=num,consecutiveFailures=num,costUsdAccum=num,costUsdThisTurn=num,providerRateLimitRemainingPct=undefined}
 lspDiagnosticsHookEnabled :: bool:false
 secretCheckToolEnabled :: bool:false
+bgShellRegistry :: obj{register=fn,adopt=fn,get=fn,awaitHandle=fn,kill=fn,listOwned=fn,killOwned=fn,killAll=fn,size=fn,oldestId=fn}
+contentCaptureEnabled :: bool:false
 readFileState :: obj{mtimes=obj{},rangeHashes=undefined,rangeDedupCap=num}
 activeSkillCursor :: obj{ids=arr[]}
 contextEventsForTurn :: fn
@@ -686,14 +716,14 @@ compactionEventEmit :: fn"
 
 exports[`composition slot-registry — byte-identical hellgate fingerprint stable — env default posture: env default posture :: base 1`] = `
 "KEYS[12]: llm,registry,stream,promptSurfaceProfile,permission,messages,system,cwd,maxTurns,signal,searchPipeline,stickyModelStore
-llm :: obj{model=str:"gpt-5.4",provider=str:"chatgpt-oauth",surfaceId=str:"openai-responses",transportId=str:"chatgpt-oauth",authMode=str:"ChatGPT subscription",env=<ambient-env-bag>,fetchImpl=fn,nowMs=fn,maxTokens=undefined,streamTimeoutMs=obj{firstChunkMs=num,idleMs=num},serviceTier=undefined,reasoningEffort=undefined,reasoningSummary=bool:false,reasoningSummaryDetail=undefined,reasoningVerbosity=undefined,reasoningCarryover=bool:false,reasoningCarryoverStore=undefined,debugOAuth=bool:false,memTokenFallback=undefined}
+llm :: obj{model=str:"gpt-5.6-terra",provider=str:"chatgpt-oauth",surfaceId=str:"openai-responses",transportId=str:"chatgpt-oauth",authMode=str:"ChatGPT subscription",env=<ambient-env-bag>,fetchImpl=fn,nowMs=fn,maxTokens=undefined,streamTimeoutMs=obj{firstChunkMs=num,idleMs=num},serviceTier=undefined,reasoningEffort=undefined,reasoningSummary=bool:false,reasoningSummaryDetail=undefined,reasoningVerbosity=undefined,reasoningCarryover=bool:false,reasoningCarryoverStore=undefined,debugOAuth=bool:false,memTokenFallback=undefined}
 registry :: obj{tools=obj{},origin=undefined}
 stream :: obj{emit=fn}
 promptSurfaceProfile :: obj{envPosture=str:"default",promptPack=str:"interactive",verifyStrategy=str:"none"}
 permission :: obj{mode=str:"acceptEdits"}
 messages :: arr[]
 system :: str[19851]
-cwd :: str:"/Users/songmin/quanta-codeagent-v3"
+cwd :: str:<cwd>
 maxTurns :: num
 signal :: obj{}
 searchPipeline :: obj{search=fn}
@@ -701,15 +731,15 @@ stickyModelStore :: obj{store=obj{get=fn,set=fn,load=fn}}"
 `;
 
 exports[`composition slot-registry — byte-identical hellgate fingerprint stable — env default posture: env default posture :: assembled 1`] = `
-"KEYS[21]: llm,registry,stream,promptSurfaceProfile,permission,messages,system,cwd,maxTurns,signal,searchPipeline,stickyModelStore,modePolicy,budgetMeter,lspDiagnosticsHookEnabled,secretCheckToolEnabled,readFileState,activeSkillCursor,contextEventsForTurn,mentionInjector,compactionEventEmit
-llm :: obj{model=str:"gpt-5.4",provider=str:"chatgpt-oauth",surfaceId=str:"openai-responses",transportId=str:"chatgpt-oauth",authMode=str:"ChatGPT subscription",env=<ambient-env-bag>,fetchImpl=fn,nowMs=fn,maxTokens=undefined,streamTimeoutMs=obj{firstChunkMs=num,idleMs=num},serviceTier=undefined,reasoningEffort=undefined,reasoningSummary=bool:false,reasoningSummaryDetail=undefined,reasoningVerbosity=undefined,reasoningCarryover=bool:false,reasoningCarryoverStore=undefined,debugOAuth=bool:false,memTokenFallback=undefined}
+"KEYS[23]: llm,registry,stream,promptSurfaceProfile,permission,messages,system,cwd,maxTurns,signal,searchPipeline,stickyModelStore,modePolicy,budgetMeter,lspDiagnosticsHookEnabled,secretCheckToolEnabled,bgShellRegistry,contentCaptureEnabled,readFileState,activeSkillCursor,contextEventsForTurn,mentionInjector,compactionEventEmit
+llm :: obj{model=str:"gpt-5.6-terra",provider=str:"chatgpt-oauth",surfaceId=str:"openai-responses",transportId=str:"chatgpt-oauth",authMode=str:"ChatGPT subscription",env=<ambient-env-bag>,fetchImpl=fn,nowMs=fn,maxTokens=undefined,streamTimeoutMs=obj{firstChunkMs=num,idleMs=num},serviceTier=undefined,reasoningEffort=undefined,reasoningSummary=bool:false,reasoningSummaryDetail=undefined,reasoningVerbosity=undefined,reasoningCarryover=bool:false,reasoningCarryoverStore=undefined,debugOAuth=bool:false,memTokenFallback=undefined}
 registry :: obj{tools=obj{},origin=undefined}
 stream :: obj{emit=fn}
 promptSurfaceProfile :: obj{envPosture=str:"default",promptPack=str:"interactive",verifyStrategy=str:"none"}
 permission :: obj{mode=str:"acceptEdits"}
 messages :: arr[]
 system :: str[19851]
-cwd :: str:"/Users/songmin/quanta-codeagent-v3"
+cwd :: str:<cwd>
 maxTurns :: num
 signal :: obj{}
 searchPipeline :: obj{search=fn}
@@ -718,6 +748,8 @@ modePolicy :: obj{mode=str:"interactive",permission=obj{kind=str:"reviewer-backe
 budgetMeter :: obj{dials=obj{maxTurns=num,maxRetries=num,maxConsecutiveFailures=num},caps=obj{},exhaustion=str:"stop",clock=fn,startedAtMs=num,turns=num,modelCalls=num,toolCalls=num,shellCommands=num,testRuns=num,inputTokens=num,outputTokens=num,reasoningTokens=num,filesChanged=num,patchBytes=num,retries=num,consecutiveFailures=num,costUsdAccum=num,costUsdThisTurn=num,providerRateLimitRemainingPct=undefined}
 lspDiagnosticsHookEnabled :: bool:false
 secretCheckToolEnabled :: bool:false
+bgShellRegistry :: obj{register=fn,adopt=fn,get=fn,awaitHandle=fn,kill=fn,listOwned=fn,killOwned=fn,killAll=fn,size=fn,oldestId=fn}
+contentCaptureEnabled :: bool:false
 readFileState :: obj{mtimes=obj{},rangeHashes=undefined,rangeDedupCap=num}
 activeSkillCursor :: obj{ids=arr[]}
 contextEventsForTurn :: fn
@@ -727,14 +759,14 @@ compactionEventEmit :: fn"
 
 exports[`composition slot-registry — byte-identical hellgate fingerprint stable — objective tools: objective tools :: base 1`] = `
 "KEYS[12]: llm,registry,stream,promptSurfaceProfile,permission,messages,system,cwd,maxTurns,signal,searchPipeline,stickyModelStore
-llm :: obj{model=str:"gpt-5.4",provider=str:"chatgpt-oauth",surfaceId=str:"openai-responses",transportId=str:"chatgpt-oauth",authMode=str:"ChatGPT subscription",env=<ambient-env-bag>,fetchImpl=fn,nowMs=fn,maxTokens=undefined,streamTimeoutMs=obj{firstChunkMs=num,idleMs=num},serviceTier=undefined,reasoningEffort=undefined,reasoningSummary=bool:false,reasoningSummaryDetail=undefined,reasoningVerbosity=undefined,reasoningCarryover=bool:false,reasoningCarryoverStore=undefined,debugOAuth=bool:false,memTokenFallback=undefined}
+llm :: obj{model=str:"gpt-5.6-terra",provider=str:"chatgpt-oauth",surfaceId=str:"openai-responses",transportId=str:"chatgpt-oauth",authMode=str:"ChatGPT subscription",env=<ambient-env-bag>,fetchImpl=fn,nowMs=fn,maxTokens=undefined,streamTimeoutMs=obj{firstChunkMs=num,idleMs=num},serviceTier=undefined,reasoningEffort=undefined,reasoningSummary=bool:false,reasoningSummaryDetail=undefined,reasoningVerbosity=undefined,reasoningCarryover=bool:false,reasoningCarryoverStore=undefined,debugOAuth=bool:false,memTokenFallback=undefined}
 registry :: obj{tools=obj{},origin=undefined}
 stream :: obj{emit=fn}
 promptSurfaceProfile :: obj{envPosture=str:"frozen",promptPack=str:"interactive",verifyStrategy=str:"none"}
 permission :: obj{mode=str:"acceptEdits"}
 messages :: arr[]
 system :: str[20762]
-cwd :: str:"/Users/songmin/quanta-codeagent-v3"
+cwd :: str:<cwd>
 maxTurns :: num
 signal :: obj{}
 searchPipeline :: obj{search=fn}
@@ -742,15 +774,15 @@ stickyModelStore :: obj{store=obj{get=fn,set=fn,load=fn}}"
 `;
 
 exports[`composition slot-registry — byte-identical hellgate fingerprint stable — objective tools: objective tools :: assembled 1`] = `
-"KEYS[22]: llm,registry,stream,promptSurfaceProfile,permission,messages,system,cwd,maxTurns,signal,searchPipeline,stickyModelStore,modePolicy,budgetMeter,lspDiagnosticsHookEnabled,secretCheckToolEnabled,objective,readFileState,activeSkillCursor,contextEventsForTurn,mentionInjector,compactionEventEmit
-llm :: obj{model=str:"gpt-5.4",provider=str:"chatgpt-oauth",surfaceId=str:"openai-responses",transportId=str:"chatgpt-oauth",authMode=str:"ChatGPT subscription",env=<ambient-env-bag>,fetchImpl=fn,nowMs=fn,maxTokens=undefined,streamTimeoutMs=obj{firstChunkMs=num,idleMs=num},serviceTier=undefined,reasoningEffort=undefined,reasoningSummary=bool:false,reasoningSummaryDetail=undefined,reasoningVerbosity=undefined,reasoningCarryover=bool:false,reasoningCarryoverStore=undefined,debugOAuth=bool:false,memTokenFallback=undefined}
+"KEYS[24]: llm,registry,stream,promptSurfaceProfile,permission,messages,system,cwd,maxTurns,signal,searchPipeline,stickyModelStore,modePolicy,budgetMeter,lspDiagnosticsHookEnabled,secretCheckToolEnabled,bgShellRegistry,contentCaptureEnabled,objective,readFileState,activeSkillCursor,contextEventsForTurn,mentionInjector,compactionEventEmit
+llm :: obj{model=str:"gpt-5.6-terra",provider=str:"chatgpt-oauth",surfaceId=str:"openai-responses",transportId=str:"chatgpt-oauth",authMode=str:"ChatGPT subscription",env=<ambient-env-bag>,fetchImpl=fn,nowMs=fn,maxTokens=undefined,streamTimeoutMs=obj{firstChunkMs=num,idleMs=num},serviceTier=undefined,reasoningEffort=undefined,reasoningSummary=bool:false,reasoningSummaryDetail=undefined,reasoningVerbosity=undefined,reasoningCarryover=bool:false,reasoningCarryoverStore=undefined,debugOAuth=bool:false,memTokenFallback=undefined}
 registry :: obj{tools=obj{},origin=undefined}
 stream :: obj{emit=fn}
 promptSurfaceProfile :: obj{envPosture=str:"frozen",promptPack=str:"interactive",verifyStrategy=str:"none"}
 permission :: obj{mode=str:"acceptEdits"}
 messages :: arr[]
 system :: str[20762]
-cwd :: str:"/Users/songmin/quanta-codeagent-v3"
+cwd :: str:<cwd>
 maxTurns :: num
 signal :: obj{}
 searchPipeline :: obj{search=fn}
@@ -759,7 +791,9 @@ modePolicy :: obj{mode=str:"interactive",permission=obj{kind=str:"reviewer-backe
 budgetMeter :: obj{dials=obj{maxTurns=num,maxRetries=num,maxConsecutiveFailures=num},caps=obj{},exhaustion=str:"stop",clock=fn,startedAtMs=num,turns=num,modelCalls=num,toolCalls=num,shellCommands=num,testRuns=num,inputTokens=num,outputTokens=num,reasoningTokens=num,filesChanged=num,patchBytes=num,retries=num,consecutiveFailures=num,costUsdAccum=num,costUsdThisTurn=num,providerRateLimitRemainingPct=undefined}
 lspDiagnosticsHookEnabled :: bool:false
 secretCheckToolEnabled :: bool:false
-objective :: obj{set=fn,get=fn,updateStatus=fn,markUsageLimited=fn,addBlocker=fn,clearBlocker=fn,setNextActions=fn,markCriterion=fn,recordUsage=fn,list=fn,toSnapshot=fn,fromSnapshot=fn}
+bgShellRegistry :: obj{register=fn,adopt=fn,get=fn,awaitHandle=fn,kill=fn,listOwned=fn,killOwned=fn,killAll=fn,size=fn,oldestId=fn}
+contentCaptureEnabled :: bool:false
+objective :: obj{readDomain=fn,prepare=fn,commit=fn,restore=fn,set=fn,get=fn,updateStatus=fn,addBlocker=fn,clearBlocker=fn,setNextActions=fn,markCriterion=fn,recordUsage=fn,markUsageLimited=fn,list=fn,toSnapshot=fn,fromSnapshot=fn}
 readFileState :: obj{mtimes=obj{},rangeHashes=undefined,rangeDedupCap=num}
 activeSkillCursor :: obj{ids=arr[]}
 contextEventsForTurn :: fn
@@ -769,14 +803,14 @@ compactionEventEmit :: fn"
 
 exports[`composition slot-registry — byte-identical hellgate fingerprint stable — mailbox: mailbox :: base 1`] = `
 "KEYS[13]: llm,registry,stream,promptSurfaceProfile,permission,messages,system,cwd,maxTurns,signal,searchPipeline,stickyModelStore,subagentMailbox
-llm :: obj{model=str:"gpt-5.4",provider=str:"chatgpt-oauth",surfaceId=str:"openai-responses",transportId=str:"chatgpt-oauth",authMode=str:"ChatGPT subscription",env=<ambient-env-bag>,fetchImpl=fn,nowMs=fn,maxTokens=undefined,streamTimeoutMs=obj{firstChunkMs=num,idleMs=num},serviceTier=undefined,reasoningEffort=undefined,reasoningSummary=bool:false,reasoningSummaryDetail=undefined,reasoningVerbosity=undefined,reasoningCarryover=bool:false,reasoningCarryoverStore=undefined,debugOAuth=bool:false,memTokenFallback=undefined}
+llm :: obj{model=str:"gpt-5.6-terra",provider=str:"chatgpt-oauth",surfaceId=str:"openai-responses",transportId=str:"chatgpt-oauth",authMode=str:"ChatGPT subscription",env=<ambient-env-bag>,fetchImpl=fn,nowMs=fn,maxTokens=undefined,streamTimeoutMs=obj{firstChunkMs=num,idleMs=num},serviceTier=undefined,reasoningEffort=undefined,reasoningSummary=bool:false,reasoningSummaryDetail=undefined,reasoningVerbosity=undefined,reasoningCarryover=bool:false,reasoningCarryoverStore=undefined,debugOAuth=bool:false,memTokenFallback=undefined}
 registry :: obj{tools=obj{},origin=undefined}
 stream :: obj{emit=fn}
 promptSurfaceProfile :: obj{envPosture=str:"frozen",promptPack=str:"interactive",verifyStrategy=str:"none"}
 permission :: obj{mode=str:"acceptEdits"}
 messages :: arr[]
 system :: str[20762]
-cwd :: str:"/Users/songmin/quanta-codeagent-v3"
+cwd :: str:<cwd>
 maxTurns :: num
 signal :: obj{}
 searchPipeline :: obj{search=fn}
@@ -785,15 +819,15 @@ subagentMailbox :: obj{send=fn,read=fn,peek=fn,ack=fn,list=fn,pendingFor=fn,toSn
 `;
 
 exports[`composition slot-registry — byte-identical hellgate fingerprint stable — mailbox: mailbox :: assembled 1`] = `
-"KEYS[22]: llm,registry,stream,promptSurfaceProfile,permission,messages,system,cwd,maxTurns,signal,searchPipeline,stickyModelStore,subagentMailbox,modePolicy,budgetMeter,lspDiagnosticsHookEnabled,secretCheckToolEnabled,readFileState,activeSkillCursor,contextEventsForTurn,mentionInjector,compactionEventEmit
-llm :: obj{model=str:"gpt-5.4",provider=str:"chatgpt-oauth",surfaceId=str:"openai-responses",transportId=str:"chatgpt-oauth",authMode=str:"ChatGPT subscription",env=<ambient-env-bag>,fetchImpl=fn,nowMs=fn,maxTokens=undefined,streamTimeoutMs=obj{firstChunkMs=num,idleMs=num},serviceTier=undefined,reasoningEffort=undefined,reasoningSummary=bool:false,reasoningSummaryDetail=undefined,reasoningVerbosity=undefined,reasoningCarryover=bool:false,reasoningCarryoverStore=undefined,debugOAuth=bool:false,memTokenFallback=undefined}
+"KEYS[24]: llm,registry,stream,promptSurfaceProfile,permission,messages,system,cwd,maxTurns,signal,searchPipeline,stickyModelStore,subagentMailbox,modePolicy,budgetMeter,lspDiagnosticsHookEnabled,secretCheckToolEnabled,bgShellRegistry,contentCaptureEnabled,readFileState,activeSkillCursor,contextEventsForTurn,mentionInjector,compactionEventEmit
+llm :: obj{model=str:"gpt-5.6-terra",provider=str:"chatgpt-oauth",surfaceId=str:"openai-responses",transportId=str:"chatgpt-oauth",authMode=str:"ChatGPT subscription",env=<ambient-env-bag>,fetchImpl=fn,nowMs=fn,maxTokens=undefined,streamTimeoutMs=obj{firstChunkMs=num,idleMs=num},serviceTier=undefined,reasoningEffort=undefined,reasoningSummary=bool:false,reasoningSummaryDetail=undefined,reasoningVerbosity=undefined,reasoningCarryover=bool:false,reasoningCarryoverStore=undefined,debugOAuth=bool:false,memTokenFallback=undefined}
 registry :: obj{tools=obj{},origin=undefined}
 stream :: obj{emit=fn}
 promptSurfaceProfile :: obj{envPosture=str:"frozen",promptPack=str:"interactive",verifyStrategy=str:"none"}
 permission :: obj{mode=str:"acceptEdits"}
 messages :: arr[]
 system :: str[20762]
-cwd :: str:"/Users/songmin/quanta-codeagent-v3"
+cwd :: str:<cwd>
 maxTurns :: num
 signal :: obj{}
 searchPipeline :: obj{search=fn}
@@ -803,6 +837,8 @@ modePolicy :: obj{mode=str:"interactive",permission=obj{kind=str:"reviewer-backe
 budgetMeter :: obj{dials=obj{maxTurns=num,maxRetries=num,maxConsecutiveFailures=num},caps=obj{},exhaustion=str:"stop",clock=fn,startedAtMs=num,turns=num,modelCalls=num,toolCalls=num,shellCommands=num,testRuns=num,inputTokens=num,outputTokens=num,reasoningTokens=num,filesChanged=num,patchBytes=num,retries=num,consecutiveFailures=num,costUsdAccum=num,costUsdThisTurn=num,providerRateLimitRemainingPct=undefined}
 lspDiagnosticsHookEnabled :: bool:false
 secretCheckToolEnabled :: bool:false
+bgShellRegistry :: obj{register=fn,adopt=fn,get=fn,awaitHandle=fn,kill=fn,listOwned=fn,killOwned=fn,killAll=fn,size=fn,oldestId=fn}
+contentCaptureEnabled :: bool:false
 readFileState :: obj{mtimes=obj{},rangeHashes=undefined,rangeDedupCap=num}
 activeSkillCursor :: obj{ids=arr[]}
 contextEventsForTurn :: fn
@@ -812,14 +848,14 @@ compactionEventEmit :: fn"
 
 exports[`composition slot-registry — byte-identical hellgate fingerprint stable — stale-read guard off: stale-read guard off :: base 1`] = `
 "KEYS[12]: llm,registry,stream,promptSurfaceProfile,permission,messages,system,cwd,maxTurns,signal,searchPipeline,stickyModelStore
-llm :: obj{model=str:"gpt-5.4",provider=str:"chatgpt-oauth",surfaceId=str:"openai-responses",transportId=str:"chatgpt-oauth",authMode=str:"ChatGPT subscription",env=<ambient-env-bag>,fetchImpl=fn,nowMs=fn,maxTokens=undefined,streamTimeoutMs=obj{firstChunkMs=num,idleMs=num},serviceTier=undefined,reasoningEffort=undefined,reasoningSummary=bool:false,reasoningSummaryDetail=undefined,reasoningVerbosity=undefined,reasoningCarryover=bool:false,reasoningCarryoverStore=undefined,debugOAuth=bool:false,memTokenFallback=undefined}
+llm :: obj{model=str:"gpt-5.6-terra",provider=str:"chatgpt-oauth",surfaceId=str:"openai-responses",transportId=str:"chatgpt-oauth",authMode=str:"ChatGPT subscription",env=<ambient-env-bag>,fetchImpl=fn,nowMs=fn,maxTokens=undefined,streamTimeoutMs=obj{firstChunkMs=num,idleMs=num},serviceTier=undefined,reasoningEffort=undefined,reasoningSummary=bool:false,reasoningSummaryDetail=undefined,reasoningVerbosity=undefined,reasoningCarryover=bool:false,reasoningCarryoverStore=undefined,debugOAuth=bool:false,memTokenFallback=undefined}
 registry :: obj{tools=obj{},origin=undefined}
 stream :: obj{emit=fn}
 promptSurfaceProfile :: obj{envPosture=str:"frozen",promptPack=str:"interactive",verifyStrategy=str:"none"}
 permission :: obj{mode=str:"acceptEdits"}
 messages :: arr[]
 system :: str[20762]
-cwd :: str:"/Users/songmin/quanta-codeagent-v3"
+cwd :: str:<cwd>
 maxTurns :: num
 signal :: obj{}
 searchPipeline :: obj{search=fn}
@@ -827,15 +863,15 @@ stickyModelStore :: obj{store=obj{get=fn,set=fn,load=fn}}"
 `;
 
 exports[`composition slot-registry — byte-identical hellgate fingerprint stable — stale-read guard off: stale-read guard off :: assembled 1`] = `
-"KEYS[20]: llm,registry,stream,promptSurfaceProfile,permission,messages,system,cwd,maxTurns,signal,searchPipeline,stickyModelStore,modePolicy,budgetMeter,lspDiagnosticsHookEnabled,secretCheckToolEnabled,activeSkillCursor,contextEventsForTurn,mentionInjector,compactionEventEmit
-llm :: obj{model=str:"gpt-5.4",provider=str:"chatgpt-oauth",surfaceId=str:"openai-responses",transportId=str:"chatgpt-oauth",authMode=str:"ChatGPT subscription",env=<ambient-env-bag>,fetchImpl=fn,nowMs=fn,maxTokens=undefined,streamTimeoutMs=obj{firstChunkMs=num,idleMs=num},serviceTier=undefined,reasoningEffort=undefined,reasoningSummary=bool:false,reasoningSummaryDetail=undefined,reasoningVerbosity=undefined,reasoningCarryover=bool:false,reasoningCarryoverStore=undefined,debugOAuth=bool:false,memTokenFallback=undefined}
+"KEYS[22]: llm,registry,stream,promptSurfaceProfile,permission,messages,system,cwd,maxTurns,signal,searchPipeline,stickyModelStore,modePolicy,budgetMeter,lspDiagnosticsHookEnabled,secretCheckToolEnabled,bgShellRegistry,contentCaptureEnabled,activeSkillCursor,contextEventsForTurn,mentionInjector,compactionEventEmit
+llm :: obj{model=str:"gpt-5.6-terra",provider=str:"chatgpt-oauth",surfaceId=str:"openai-responses",transportId=str:"chatgpt-oauth",authMode=str:"ChatGPT subscription",env=<ambient-env-bag>,fetchImpl=fn,nowMs=fn,maxTokens=undefined,streamTimeoutMs=obj{firstChunkMs=num,idleMs=num},serviceTier=undefined,reasoningEffort=undefined,reasoningSummary=bool:false,reasoningSummaryDetail=undefined,reasoningVerbosity=undefined,reasoningCarryover=bool:false,reasoningCarryoverStore=undefined,debugOAuth=bool:false,memTokenFallback=undefined}
 registry :: obj{tools=obj{},origin=undefined}
 stream :: obj{emit=fn}
 promptSurfaceProfile :: obj{envPosture=str:"frozen",promptPack=str:"interactive",verifyStrategy=str:"none"}
 permission :: obj{mode=str:"acceptEdits"}
 messages :: arr[]
 system :: str[20762]
-cwd :: str:"/Users/songmin/quanta-codeagent-v3"
+cwd :: str:<cwd>
 maxTurns :: num
 signal :: obj{}
 searchPipeline :: obj{search=fn}
@@ -844,6 +880,8 @@ modePolicy :: obj{mode=str:"interactive",permission=obj{kind=str:"reviewer-backe
 budgetMeter :: obj{dials=obj{maxTurns=num,maxRetries=num,maxConsecutiveFailures=num},caps=obj{},exhaustion=str:"stop",clock=fn,startedAtMs=num,turns=num,modelCalls=num,toolCalls=num,shellCommands=num,testRuns=num,inputTokens=num,outputTokens=num,reasoningTokens=num,filesChanged=num,patchBytes=num,retries=num,consecutiveFailures=num,costUsdAccum=num,costUsdThisTurn=num,providerRateLimitRemainingPct=undefined}
 lspDiagnosticsHookEnabled :: bool:false
 secretCheckToolEnabled :: bool:false
+bgShellRegistry :: obj{register=fn,adopt=fn,get=fn,awaitHandle=fn,kill=fn,listOwned=fn,killOwned=fn,killAll=fn,size=fn,oldestId=fn}
+contentCaptureEnabled :: bool:false
 activeSkillCursor :: obj{ids=arr[]}
 contextEventsForTurn :: fn
 mentionInjector :: fn
@@ -852,14 +890,14 @@ compactionEventEmit :: fn"
 
 exports[`composition slot-registry — byte-identical hellgate fingerprint stable — edit repair loop: edit repair loop :: base 1`] = `
 "KEYS[12]: llm,registry,stream,promptSurfaceProfile,permission,messages,system,cwd,maxTurns,signal,searchPipeline,stickyModelStore
-llm :: obj{model=str:"gpt-5.4",provider=str:"chatgpt-oauth",surfaceId=str:"openai-responses",transportId=str:"chatgpt-oauth",authMode=str:"ChatGPT subscription",env=<ambient-env-bag>,fetchImpl=fn,nowMs=fn,maxTokens=undefined,streamTimeoutMs=obj{firstChunkMs=num,idleMs=num},serviceTier=undefined,reasoningEffort=undefined,reasoningSummary=bool:false,reasoningSummaryDetail=undefined,reasoningVerbosity=undefined,reasoningCarryover=bool:false,reasoningCarryoverStore=undefined,debugOAuth=bool:false,memTokenFallback=undefined}
+llm :: obj{model=str:"gpt-5.6-terra",provider=str:"chatgpt-oauth",surfaceId=str:"openai-responses",transportId=str:"chatgpt-oauth",authMode=str:"ChatGPT subscription",env=<ambient-env-bag>,fetchImpl=fn,nowMs=fn,maxTokens=undefined,streamTimeoutMs=obj{firstChunkMs=num,idleMs=num},serviceTier=undefined,reasoningEffort=undefined,reasoningSummary=bool:false,reasoningSummaryDetail=undefined,reasoningVerbosity=undefined,reasoningCarryover=bool:false,reasoningCarryoverStore=undefined,debugOAuth=bool:false,memTokenFallback=undefined}
 registry :: obj{tools=obj{},origin=undefined}
 stream :: obj{emit=fn}
 promptSurfaceProfile :: obj{envPosture=str:"frozen",promptPack=str:"interactive",verifyStrategy=str:"none"}
 permission :: obj{mode=str:"acceptEdits"}
 messages :: arr[]
 system :: str[20762]
-cwd :: str:"/Users/songmin/quanta-codeagent-v3"
+cwd :: str:<cwd>
 maxTurns :: num
 signal :: obj{}
 searchPipeline :: obj{search=fn}
@@ -867,15 +905,15 @@ stickyModelStore :: obj{store=obj{get=fn,set=fn,load=fn}}"
 `;
 
 exports[`composition slot-registry — byte-identical hellgate fingerprint stable — edit repair loop: edit repair loop :: assembled 1`] = `
-"KEYS[22]: llm,registry,stream,promptSurfaceProfile,permission,messages,system,cwd,maxTurns,signal,searchPipeline,stickyModelStore,modePolicy,budgetMeter,lspDiagnosticsHookEnabled,secretCheckToolEnabled,readFileState,diagnosticsProvider,activeSkillCursor,contextEventsForTurn,mentionInjector,compactionEventEmit
-llm :: obj{model=str:"gpt-5.4",provider=str:"chatgpt-oauth",surfaceId=str:"openai-responses",transportId=str:"chatgpt-oauth",authMode=str:"ChatGPT subscription",env=<ambient-env-bag>,fetchImpl=fn,nowMs=fn,maxTokens=undefined,streamTimeoutMs=obj{firstChunkMs=num,idleMs=num},serviceTier=undefined,reasoningEffort=undefined,reasoningSummary=bool:false,reasoningSummaryDetail=undefined,reasoningVerbosity=undefined,reasoningCarryover=bool:false,reasoningCarryoverStore=undefined,debugOAuth=bool:false,memTokenFallback=undefined}
+"KEYS[24]: llm,registry,stream,promptSurfaceProfile,permission,messages,system,cwd,maxTurns,signal,searchPipeline,stickyModelStore,modePolicy,budgetMeter,lspDiagnosticsHookEnabled,secretCheckToolEnabled,bgShellRegistry,contentCaptureEnabled,readFileState,diagnosticsProvider,activeSkillCursor,contextEventsForTurn,mentionInjector,compactionEventEmit
+llm :: obj{model=str:"gpt-5.6-terra",provider=str:"chatgpt-oauth",surfaceId=str:"openai-responses",transportId=str:"chatgpt-oauth",authMode=str:"ChatGPT subscription",env=<ambient-env-bag>,fetchImpl=fn,nowMs=fn,maxTokens=undefined,streamTimeoutMs=obj{firstChunkMs=num,idleMs=num},serviceTier=undefined,reasoningEffort=undefined,reasoningSummary=bool:false,reasoningSummaryDetail=undefined,reasoningVerbosity=undefined,reasoningCarryover=bool:false,reasoningCarryoverStore=undefined,debugOAuth=bool:false,memTokenFallback=undefined}
 registry :: obj{tools=obj{},origin=undefined}
 stream :: obj{emit=fn}
 promptSurfaceProfile :: obj{envPosture=str:"frozen",promptPack=str:"interactive",verifyStrategy=str:"none"}
 permission :: obj{mode=str:"acceptEdits"}
 messages :: arr[]
 system :: str[20762]
-cwd :: str:"/Users/songmin/quanta-codeagent-v3"
+cwd :: str:<cwd>
 maxTurns :: num
 signal :: obj{}
 searchPipeline :: obj{search=fn}
@@ -884,6 +922,8 @@ modePolicy :: obj{mode=str:"interactive",permission=obj{kind=str:"reviewer-backe
 budgetMeter :: obj{dials=obj{maxTurns=num,maxRetries=num,maxConsecutiveFailures=num},caps=obj{},exhaustion=str:"stop",clock=fn,startedAtMs=num,turns=num,modelCalls=num,toolCalls=num,shellCommands=num,testRuns=num,inputTokens=num,outputTokens=num,reasoningTokens=num,filesChanged=num,patchBytes=num,retries=num,consecutiveFailures=num,costUsdAccum=num,costUsdThisTurn=num,providerRateLimitRemainingPct=undefined}
 lspDiagnosticsHookEnabled :: bool:false
 secretCheckToolEnabled :: bool:false
+bgShellRegistry :: obj{register=fn,adopt=fn,get=fn,awaitHandle=fn,kill=fn,listOwned=fn,killOwned=fn,killAll=fn,size=fn,oldestId=fn}
+contentCaptureEnabled :: bool:false
 readFileState :: obj{mtimes=obj{},rangeHashes=undefined,rangeDedupCap=num}
 diagnosticsProvider :: obj{unavailableReason=fn,open=fn}
 activeSkillCursor :: obj{ids=arr[]}
@@ -894,14 +934,14 @@ compactionEventEmit :: fn"
 
 exports[`composition slot-registry — byte-identical hellgate fingerprint stable — prompt cache status: prompt cache status :: base 1`] = `
 "KEYS[12]: llm,registry,stream,promptSurfaceProfile,permission,messages,system,cwd,maxTurns,signal,searchPipeline,stickyModelStore
-llm :: obj{model=str:"gpt-5.4",provider=str:"chatgpt-oauth",surfaceId=str:"openai-responses",transportId=str:"chatgpt-oauth",authMode=str:"ChatGPT subscription",env=<ambient-env-bag>,fetchImpl=fn,nowMs=fn,maxTokens=undefined,streamTimeoutMs=obj{firstChunkMs=num,idleMs=num},serviceTier=undefined,reasoningEffort=undefined,reasoningSummary=bool:false,reasoningSummaryDetail=undefined,reasoningVerbosity=undefined,reasoningCarryover=bool:false,reasoningCarryoverStore=undefined,debugOAuth=bool:false,memTokenFallback=undefined}
+llm :: obj{model=str:"gpt-5.6-terra",provider=str:"chatgpt-oauth",surfaceId=str:"openai-responses",transportId=str:"chatgpt-oauth",authMode=str:"ChatGPT subscription",env=<ambient-env-bag>,fetchImpl=fn,nowMs=fn,maxTokens=undefined,streamTimeoutMs=obj{firstChunkMs=num,idleMs=num},serviceTier=undefined,reasoningEffort=undefined,reasoningSummary=bool:false,reasoningSummaryDetail=undefined,reasoningVerbosity=undefined,reasoningCarryover=bool:false,reasoningCarryoverStore=undefined,debugOAuth=bool:false,memTokenFallback=undefined}
 registry :: obj{tools=obj{},origin=undefined}
 stream :: obj{emit=fn}
 promptSurfaceProfile :: obj{envPosture=str:"frozen",promptPack=str:"interactive",verifyStrategy=str:"none"}
 permission :: obj{mode=str:"acceptEdits"}
 messages :: arr[]
 system :: str[20762]
-cwd :: str:"/Users/songmin/quanta-codeagent-v3"
+cwd :: str:<cwd>
 maxTurns :: num
 signal :: obj{}
 searchPipeline :: obj{search=fn}
@@ -909,15 +949,15 @@ stickyModelStore :: obj{store=obj{get=fn,set=fn,load=fn}}"
 `;
 
 exports[`composition slot-registry — byte-identical hellgate fingerprint stable — prompt cache status: prompt cache status :: assembled 1`] = `
-"KEYS[22]: llm,registry,stream,promptSurfaceProfile,permission,messages,system,cwd,maxTurns,signal,searchPipeline,stickyModelStore,modePolicy,budgetMeter,lspDiagnosticsHookEnabled,secretCheckToolEnabled,readFileState,promptCacheObserver,activeSkillCursor,contextEventsForTurn,mentionInjector,compactionEventEmit
-llm :: obj{model=str:"gpt-5.4",provider=str:"chatgpt-oauth",surfaceId=str:"openai-responses",transportId=str:"chatgpt-oauth",authMode=str:"ChatGPT subscription",env=<ambient-env-bag>,fetchImpl=fn,nowMs=fn,maxTokens=undefined,streamTimeoutMs=obj{firstChunkMs=num,idleMs=num},serviceTier=undefined,reasoningEffort=undefined,reasoningSummary=bool:false,reasoningSummaryDetail=undefined,reasoningVerbosity=undefined,reasoningCarryover=bool:false,reasoningCarryoverStore=undefined,debugOAuth=bool:false,memTokenFallback=undefined}
+"KEYS[24]: llm,registry,stream,promptSurfaceProfile,permission,messages,system,cwd,maxTurns,signal,searchPipeline,stickyModelStore,modePolicy,budgetMeter,lspDiagnosticsHookEnabled,secretCheckToolEnabled,bgShellRegistry,contentCaptureEnabled,readFileState,promptCacheObserver,activeSkillCursor,contextEventsForTurn,mentionInjector,compactionEventEmit
+llm :: obj{model=str:"gpt-5.6-terra",provider=str:"chatgpt-oauth",surfaceId=str:"openai-responses",transportId=str:"chatgpt-oauth",authMode=str:"ChatGPT subscription",env=<ambient-env-bag>,fetchImpl=fn,nowMs=fn,maxTokens=undefined,streamTimeoutMs=obj{firstChunkMs=num,idleMs=num},serviceTier=undefined,reasoningEffort=undefined,reasoningSummary=bool:false,reasoningSummaryDetail=undefined,reasoningVerbosity=undefined,reasoningCarryover=bool:false,reasoningCarryoverStore=undefined,debugOAuth=bool:false,memTokenFallback=undefined}
 registry :: obj{tools=obj{},origin=undefined}
 stream :: obj{emit=fn}
 promptSurfaceProfile :: obj{envPosture=str:"frozen",promptPack=str:"interactive",verifyStrategy=str:"none"}
 permission :: obj{mode=str:"acceptEdits"}
 messages :: arr[]
 system :: str[20762]
-cwd :: str:"/Users/songmin/quanta-codeagent-v3"
+cwd :: str:<cwd>
 maxTurns :: num
 signal :: obj{}
 searchPipeline :: obj{search=fn}
@@ -926,6 +966,8 @@ modePolicy :: obj{mode=str:"interactive",permission=obj{kind=str:"reviewer-backe
 budgetMeter :: obj{dials=obj{maxTurns=num,maxRetries=num,maxConsecutiveFailures=num},caps=obj{},exhaustion=str:"stop",clock=fn,startedAtMs=num,turns=num,modelCalls=num,toolCalls=num,shellCommands=num,testRuns=num,inputTokens=num,outputTokens=num,reasoningTokens=num,filesChanged=num,patchBytes=num,retries=num,consecutiveFailures=num,costUsdAccum=num,costUsdThisTurn=num,providerRateLimitRemainingPct=undefined}
 lspDiagnosticsHookEnabled :: bool:false
 secretCheckToolEnabled :: bool:false
+bgShellRegistry :: obj{register=fn,adopt=fn,get=fn,awaitHandle=fn,kill=fn,listOwned=fn,killOwned=fn,killAll=fn,size=fn,oldestId=fn}
+contentCaptureEnabled :: bool:false
 readFileState :: obj{mtimes=obj{},rangeHashes=undefined,rangeDedupCap=num}
 promptCacheObserver :: obj{record=fn,attributeBreakpoint=fn,snapshot=fn,reset=fn}
 activeSkillCursor :: obj{ids=arr[]}
@@ -936,14 +978,14 @@ compactionEventEmit :: fn"
 
 exports[`composition slot-registry — byte-identical hellgate fingerprint stable — passive vcs: passive vcs :: base 1`] = `
 "KEYS[12]: llm,registry,stream,promptSurfaceProfile,permission,messages,system,cwd,maxTurns,signal,searchPipeline,stickyModelStore
-llm :: obj{model=str:"gpt-5.4",provider=str:"chatgpt-oauth",surfaceId=str:"openai-responses",transportId=str:"chatgpt-oauth",authMode=str:"ChatGPT subscription",env=<ambient-env-bag>,fetchImpl=fn,nowMs=fn,maxTokens=undefined,streamTimeoutMs=obj{firstChunkMs=num,idleMs=num},serviceTier=undefined,reasoningEffort=undefined,reasoningSummary=bool:false,reasoningSummaryDetail=undefined,reasoningVerbosity=undefined,reasoningCarryover=bool:false,reasoningCarryoverStore=undefined,debugOAuth=bool:false,memTokenFallback=undefined}
+llm :: obj{model=str:"gpt-5.6-terra",provider=str:"chatgpt-oauth",surfaceId=str:"openai-responses",transportId=str:"chatgpt-oauth",authMode=str:"ChatGPT subscription",env=<ambient-env-bag>,fetchImpl=fn,nowMs=fn,maxTokens=undefined,streamTimeoutMs=obj{firstChunkMs=num,idleMs=num},serviceTier=undefined,reasoningEffort=undefined,reasoningSummary=bool:false,reasoningSummaryDetail=undefined,reasoningVerbosity=undefined,reasoningCarryover=bool:false,reasoningCarryoverStore=undefined,debugOAuth=bool:false,memTokenFallback=undefined}
 registry :: obj{tools=obj{},origin=undefined}
 stream :: obj{emit=fn}
 promptSurfaceProfile :: obj{envPosture=str:"frozen",promptPack=str:"interactive",verifyStrategy=str:"none"}
 permission :: obj{mode=str:"acceptEdits"}
 messages :: arr[]
 system :: str[20762]
-cwd :: str:"/Users/songmin/quanta-codeagent-v3"
+cwd :: str:<cwd>
 maxTurns :: num
 signal :: obj{}
 searchPipeline :: obj{search=fn}
@@ -951,15 +993,15 @@ stickyModelStore :: obj{store=obj{get=fn,set=fn,load=fn}}"
 `;
 
 exports[`composition slot-registry — byte-identical hellgate fingerprint stable — passive vcs: passive vcs :: assembled 1`] = `
-"KEYS[22]: llm,registry,stream,promptSurfaceProfile,permission,messages,system,cwd,maxTurns,signal,searchPipeline,stickyModelStore,modePolicy,budgetMeter,lspDiagnosticsHookEnabled,secretCheckToolEnabled,readFileState,vcsEventSink,activeSkillCursor,contextEventsForTurn,mentionInjector,compactionEventEmit
-llm :: obj{model=str:"gpt-5.4",provider=str:"chatgpt-oauth",surfaceId=str:"openai-responses",transportId=str:"chatgpt-oauth",authMode=str:"ChatGPT subscription",env=<ambient-env-bag>,fetchImpl=fn,nowMs=fn,maxTokens=undefined,streamTimeoutMs=obj{firstChunkMs=num,idleMs=num},serviceTier=undefined,reasoningEffort=undefined,reasoningSummary=bool:false,reasoningSummaryDetail=undefined,reasoningVerbosity=undefined,reasoningCarryover=bool:false,reasoningCarryoverStore=undefined,debugOAuth=bool:false,memTokenFallback=undefined}
+"KEYS[24]: llm,registry,stream,promptSurfaceProfile,permission,messages,system,cwd,maxTurns,signal,searchPipeline,stickyModelStore,modePolicy,budgetMeter,lspDiagnosticsHookEnabled,secretCheckToolEnabled,bgShellRegistry,contentCaptureEnabled,readFileState,vcsEventSink,activeSkillCursor,contextEventsForTurn,mentionInjector,compactionEventEmit
+llm :: obj{model=str:"gpt-5.6-terra",provider=str:"chatgpt-oauth",surfaceId=str:"openai-responses",transportId=str:"chatgpt-oauth",authMode=str:"ChatGPT subscription",env=<ambient-env-bag>,fetchImpl=fn,nowMs=fn,maxTokens=undefined,streamTimeoutMs=obj{firstChunkMs=num,idleMs=num},serviceTier=undefined,reasoningEffort=undefined,reasoningSummary=bool:false,reasoningSummaryDetail=undefined,reasoningVerbosity=undefined,reasoningCarryover=bool:false,reasoningCarryoverStore=undefined,debugOAuth=bool:false,memTokenFallback=undefined}
 registry :: obj{tools=obj{},origin=undefined}
 stream :: obj{emit=fn}
 promptSurfaceProfile :: obj{envPosture=str:"frozen",promptPack=str:"interactive",verifyStrategy=str:"none"}
 permission :: obj{mode=str:"acceptEdits"}
 messages :: arr[]
 system :: str[20762]
-cwd :: str:"/Users/songmin/quanta-codeagent-v3"
+cwd :: str:<cwd>
 maxTurns :: num
 signal :: obj{}
 searchPipeline :: obj{search=fn}
@@ -968,6 +1010,8 @@ modePolicy :: obj{mode=str:"interactive",permission=obj{kind=str:"reviewer-backe
 budgetMeter :: obj{dials=obj{maxTurns=num,maxRetries=num,maxConsecutiveFailures=num},caps=obj{},exhaustion=str:"stop",clock=fn,startedAtMs=num,turns=num,modelCalls=num,toolCalls=num,shellCommands=num,testRuns=num,inputTokens=num,outputTokens=num,reasoningTokens=num,filesChanged=num,patchBytes=num,retries=num,consecutiveFailures=num,costUsdAccum=num,costUsdThisTurn=num,providerRateLimitRemainingPct=undefined}
 lspDiagnosticsHookEnabled :: bool:false
 secretCheckToolEnabled :: bool:false
+bgShellRegistry :: obj{register=fn,adopt=fn,get=fn,awaitHandle=fn,kill=fn,listOwned=fn,killOwned=fn,killAll=fn,size=fn,oldestId=fn}
+contentCaptureEnabled :: bool:false
 readFileState :: obj{mtimes=obj{},rangeHashes=undefined,rangeDedupCap=num}
 vcsEventSink :: obj{emit=fn}
 activeSkillCursor :: obj{ids=arr[]}
@@ -978,14 +1022,14 @@ compactionEventEmit :: fn"
 
 exports[`composition slot-registry — byte-identical hellgate fingerprint stable — pii redaction: pii redaction :: base 1`] = `
 "KEYS[12]: llm,registry,stream,promptSurfaceProfile,permission,messages,system,cwd,maxTurns,signal,searchPipeline,stickyModelStore
-llm :: obj{model=str:"gpt-5.4",provider=str:"chatgpt-oauth",surfaceId=str:"openai-responses",transportId=str:"chatgpt-oauth",authMode=str:"ChatGPT subscription",env=<ambient-env-bag>,fetchImpl=fn,nowMs=fn,maxTokens=undefined,streamTimeoutMs=obj{firstChunkMs=num,idleMs=num},serviceTier=undefined,reasoningEffort=undefined,reasoningSummary=bool:false,reasoningSummaryDetail=undefined,reasoningVerbosity=undefined,reasoningCarryover=bool:false,reasoningCarryoverStore=undefined,debugOAuth=bool:false,memTokenFallback=undefined}
+llm :: obj{model=str:"gpt-5.6-terra",provider=str:"chatgpt-oauth",surfaceId=str:"openai-responses",transportId=str:"chatgpt-oauth",authMode=str:"ChatGPT subscription",env=<ambient-env-bag>,fetchImpl=fn,nowMs=fn,maxTokens=undefined,streamTimeoutMs=obj{firstChunkMs=num,idleMs=num},serviceTier=undefined,reasoningEffort=undefined,reasoningSummary=bool:false,reasoningSummaryDetail=undefined,reasoningVerbosity=undefined,reasoningCarryover=bool:false,reasoningCarryoverStore=undefined,debugOAuth=bool:false,memTokenFallback=undefined}
 registry :: obj{tools=obj{},origin=undefined}
 stream :: obj{emit=fn}
 promptSurfaceProfile :: obj{envPosture=str:"frozen",promptPack=str:"interactive",verifyStrategy=str:"none"}
 permission :: obj{mode=str:"acceptEdits"}
 messages :: arr[]
 system :: str[20762]
-cwd :: str:"/Users/songmin/quanta-codeagent-v3"
+cwd :: str:<cwd>
 maxTurns :: num
 signal :: obj{}
 searchPipeline :: obj{search=fn}
@@ -993,15 +1037,15 @@ stickyModelStore :: obj{store=obj{get=fn,set=fn,load=fn}}"
 `;
 
 exports[`composition slot-registry — byte-identical hellgate fingerprint stable — pii redaction: pii redaction :: assembled 1`] = `
-"KEYS[22]: llm,registry,stream,promptSurfaceProfile,permission,messages,system,cwd,maxTurns,signal,searchPipeline,stickyModelStore,modePolicy,budgetMeter,lspDiagnosticsHookEnabled,secretCheckToolEnabled,readFileState,redaction,activeSkillCursor,contextEventsForTurn,mentionInjector,compactionEventEmit
-llm :: obj{model=str:"gpt-5.4",provider=str:"chatgpt-oauth",surfaceId=str:"openai-responses",transportId=str:"chatgpt-oauth",authMode=str:"ChatGPT subscription",env=<ambient-env-bag>,fetchImpl=fn,nowMs=fn,maxTokens=undefined,streamTimeoutMs=obj{firstChunkMs=num,idleMs=num},serviceTier=undefined,reasoningEffort=undefined,reasoningSummary=bool:false,reasoningSummaryDetail=undefined,reasoningVerbosity=undefined,reasoningCarryover=bool:false,reasoningCarryoverStore=undefined,debugOAuth=bool:false,memTokenFallback=undefined}
+"KEYS[24]: llm,registry,stream,promptSurfaceProfile,permission,messages,system,cwd,maxTurns,signal,searchPipeline,stickyModelStore,modePolicy,budgetMeter,lspDiagnosticsHookEnabled,secretCheckToolEnabled,bgShellRegistry,contentCaptureEnabled,readFileState,redaction,activeSkillCursor,contextEventsForTurn,mentionInjector,compactionEventEmit
+llm :: obj{model=str:"gpt-5.6-terra",provider=str:"chatgpt-oauth",surfaceId=str:"openai-responses",transportId=str:"chatgpt-oauth",authMode=str:"ChatGPT subscription",env=<ambient-env-bag>,fetchImpl=fn,nowMs=fn,maxTokens=undefined,streamTimeoutMs=obj{firstChunkMs=num,idleMs=num},serviceTier=undefined,reasoningEffort=undefined,reasoningSummary=bool:false,reasoningSummaryDetail=undefined,reasoningVerbosity=undefined,reasoningCarryover=bool:false,reasoningCarryoverStore=undefined,debugOAuth=bool:false,memTokenFallback=undefined}
 registry :: obj{tools=obj{},origin=undefined}
 stream :: obj{emit=fn}
 promptSurfaceProfile :: obj{envPosture=str:"frozen",promptPack=str:"interactive",verifyStrategy=str:"none"}
 permission :: obj{mode=str:"acceptEdits"}
 messages :: arr[]
 system :: str[20762]
-cwd :: str:"/Users/songmin/quanta-codeagent-v3"
+cwd :: str:<cwd>
 maxTurns :: num
 signal :: obj{}
 searchPipeline :: obj{search=fn}
@@ -1010,6 +1054,8 @@ modePolicy :: obj{mode=str:"interactive",permission=obj{kind=str:"reviewer-backe
 budgetMeter :: obj{dials=obj{maxTurns=num,maxRetries=num,maxConsecutiveFailures=num},caps=obj{},exhaustion=str:"stop",clock=fn,startedAtMs=num,turns=num,modelCalls=num,toolCalls=num,shellCommands=num,testRuns=num,inputTokens=num,outputTokens=num,reasoningTokens=num,filesChanged=num,patchBytes=num,retries=num,consecutiveFailures=num,costUsdAccum=num,costUsdThisTurn=num,providerRateLimitRemainingPct=undefined}
 lspDiagnosticsHookEnabled :: bool:false
 secretCheckToolEnabled :: bool:false
+bgShellRegistry :: obj{register=fn,adopt=fn,get=fn,awaitHandle=fn,kill=fn,listOwned=fn,killOwned=fn,killAll=fn,size=fn,oldestId=fn}
+contentCaptureEnabled :: bool:false
 readFileState :: obj{mtimes=obj{},rangeHashes=undefined,rangeDedupCap=num}
 redaction :: obj{pii=obj{enabled=bool:true}}
 activeSkillCursor :: obj{ids=arr[]}
@@ -1020,14 +1066,14 @@ compactionEventEmit :: fn"
 
 exports[`composition slot-registry — byte-identical hellgate fingerprint stable — sticky model flag: sticky model flag :: base 1`] = `
 "KEYS[12]: llm,registry,stream,promptSurfaceProfile,permission,messages,system,cwd,maxTurns,signal,searchPipeline,stickyModelStore
-llm :: obj{model=str:"gpt-5.4",provider=str:"chatgpt-oauth",surfaceId=str:"openai-responses",transportId=str:"chatgpt-oauth",authMode=str:"ChatGPT subscription",env=<ambient-env-bag>,fetchImpl=fn,nowMs=fn,maxTokens=undefined,streamTimeoutMs=obj{firstChunkMs=num,idleMs=num},serviceTier=undefined,reasoningEffort=undefined,reasoningSummary=bool:false,reasoningSummaryDetail=undefined,reasoningVerbosity=undefined,reasoningCarryover=bool:false,reasoningCarryoverStore=undefined,debugOAuth=bool:false,memTokenFallback=undefined}
+llm :: obj{model=str:"gpt-5.6-terra",provider=str:"chatgpt-oauth",surfaceId=str:"openai-responses",transportId=str:"chatgpt-oauth",authMode=str:"ChatGPT subscription",env=<ambient-env-bag>,fetchImpl=fn,nowMs=fn,maxTokens=undefined,streamTimeoutMs=obj{firstChunkMs=num,idleMs=num},serviceTier=undefined,reasoningEffort=undefined,reasoningSummary=bool:false,reasoningSummaryDetail=undefined,reasoningVerbosity=undefined,reasoningCarryover=bool:false,reasoningCarryoverStore=undefined,debugOAuth=bool:false,memTokenFallback=undefined}
 registry :: obj{tools=obj{},origin=undefined}
 stream :: obj{emit=fn}
 promptSurfaceProfile :: obj{envPosture=str:"frozen",promptPack=str:"interactive",verifyStrategy=str:"none"}
 permission :: obj{mode=str:"acceptEdits"}
 messages :: arr[]
 system :: str[20762]
-cwd :: str:"/Users/songmin/quanta-codeagent-v3"
+cwd :: str:<cwd>
 maxTurns :: num
 signal :: obj{}
 searchPipeline :: obj{search=fn}
@@ -1035,15 +1081,15 @@ stickyModelStore :: obj{store=obj{get=fn,set=fn,load=fn}}"
 `;
 
 exports[`composition slot-registry — byte-identical hellgate fingerprint stable — sticky model flag: sticky model flag :: assembled 1`] = `
-"KEYS[21]: llm,registry,stream,promptSurfaceProfile,permission,messages,system,cwd,maxTurns,signal,searchPipeline,stickyModelStore,modePolicy,budgetMeter,lspDiagnosticsHookEnabled,secretCheckToolEnabled,readFileState,activeSkillCursor,contextEventsForTurn,mentionInjector,compactionEventEmit
-llm :: obj{model=str:"gpt-5.4",provider=str:"chatgpt-oauth",surfaceId=str:"openai-responses",transportId=str:"chatgpt-oauth",authMode=str:"ChatGPT subscription",env=<ambient-env-bag>,fetchImpl=fn,nowMs=fn,maxTokens=undefined,streamTimeoutMs=obj{firstChunkMs=num,idleMs=num},serviceTier=undefined,reasoningEffort=undefined,reasoningSummary=bool:false,reasoningSummaryDetail=undefined,reasoningVerbosity=undefined,reasoningCarryover=bool:false,reasoningCarryoverStore=undefined,debugOAuth=bool:false,memTokenFallback=undefined}
+"KEYS[23]: llm,registry,stream,promptSurfaceProfile,permission,messages,system,cwd,maxTurns,signal,searchPipeline,stickyModelStore,modePolicy,budgetMeter,lspDiagnosticsHookEnabled,secretCheckToolEnabled,bgShellRegistry,contentCaptureEnabled,readFileState,activeSkillCursor,contextEventsForTurn,mentionInjector,compactionEventEmit
+llm :: obj{model=str:"gpt-5.6-terra",provider=str:"chatgpt-oauth",surfaceId=str:"openai-responses",transportId=str:"chatgpt-oauth",authMode=str:"ChatGPT subscription",env=<ambient-env-bag>,fetchImpl=fn,nowMs=fn,maxTokens=undefined,streamTimeoutMs=obj{firstChunkMs=num,idleMs=num},serviceTier=undefined,reasoningEffort=undefined,reasoningSummary=bool:false,reasoningSummaryDetail=undefined,reasoningVerbosity=undefined,reasoningCarryover=bool:false,reasoningCarryoverStore=undefined,debugOAuth=bool:false,memTokenFallback=undefined}
 registry :: obj{tools=obj{},origin=undefined}
 stream :: obj{emit=fn}
 promptSurfaceProfile :: obj{envPosture=str:"frozen",promptPack=str:"interactive",verifyStrategy=str:"none"}
 permission :: obj{mode=str:"acceptEdits"}
 messages :: arr[]
 system :: str[20762]
-cwd :: str:"/Users/songmin/quanta-codeagent-v3"
+cwd :: str:<cwd>
 maxTurns :: num
 signal :: obj{}
 searchPipeline :: obj{search=fn}
@@ -1052,6 +1098,8 @@ modePolicy :: obj{mode=str:"interactive",permission=obj{kind=str:"reviewer-backe
 budgetMeter :: obj{dials=obj{maxTurns=num,maxRetries=num,maxConsecutiveFailures=num},caps=obj{},exhaustion=str:"stop",clock=fn,startedAtMs=num,turns=num,modelCalls=num,toolCalls=num,shellCommands=num,testRuns=num,inputTokens=num,outputTokens=num,reasoningTokens=num,filesChanged=num,patchBytes=num,retries=num,consecutiveFailures=num,costUsdAccum=num,costUsdThisTurn=num,providerRateLimitRemainingPct=undefined}
 lspDiagnosticsHookEnabled :: bool:false
 secretCheckToolEnabled :: bool:false
+bgShellRegistry :: obj{register=fn,adopt=fn,get=fn,awaitHandle=fn,kill=fn,listOwned=fn,killOwned=fn,killAll=fn,size=fn,oldestId=fn}
+contentCaptureEnabled :: bool:false
 readFileState :: obj{mtimes=obj{},rangeHashes=undefined,rangeDedupCap=num}
 activeSkillCursor :: obj{ids=arr[]}
 contextEventsForTurn :: fn
@@ -1061,14 +1109,14 @@ compactionEventEmit :: fn"
 
 exports[`composition slot-registry — byte-identical hellgate fingerprint stable — tool profile flag: tool profile flag :: base 1`] = `
 "KEYS[13]: llm,registry,stream,promptSurfaceProfile,permission,messages,system,cwd,maxTurns,signal,searchPipeline,stickyModelStore,toolProfile
-llm :: obj{model=str:"gpt-5.4",provider=str:"chatgpt-oauth",surfaceId=str:"openai-responses",transportId=str:"chatgpt-oauth",authMode=str:"ChatGPT subscription",env=<ambient-env-bag>,fetchImpl=fn,nowMs=fn,maxTokens=undefined,streamTimeoutMs=obj{firstChunkMs=num,idleMs=num},serviceTier=undefined,reasoningEffort=undefined,reasoningSummary=bool:false,reasoningSummaryDetail=undefined,reasoningVerbosity=undefined,reasoningCarryover=bool:false,reasoningCarryoverStore=undefined,debugOAuth=bool:false,memTokenFallback=undefined}
+llm :: obj{model=str:"gpt-5.6-terra",provider=str:"chatgpt-oauth",surfaceId=str:"openai-responses",transportId=str:"chatgpt-oauth",authMode=str:"ChatGPT subscription",env=<ambient-env-bag>,fetchImpl=fn,nowMs=fn,maxTokens=undefined,streamTimeoutMs=obj{firstChunkMs=num,idleMs=num},serviceTier=undefined,reasoningEffort=undefined,reasoningSummary=bool:false,reasoningSummaryDetail=undefined,reasoningVerbosity=undefined,reasoningCarryover=bool:false,reasoningCarryoverStore=undefined,debugOAuth=bool:false,memTokenFallback=undefined}
 registry :: obj{tools=obj{},origin=undefined}
 stream :: obj{emit=fn}
 promptSurfaceProfile :: obj{envPosture=str:"frozen",promptPack=str:"interactive",verifyStrategy=str:"none"}
 permission :: obj{mode=str:"acceptEdits"}
 messages :: arr[]
 system :: str[20762]
-cwd :: str:"/Users/songmin/quanta-codeagent-v3"
+cwd :: str:<cwd>
 maxTurns :: num
 signal :: obj{}
 searchPipeline :: obj{search=fn}
@@ -1077,15 +1125,15 @@ toolProfile :: obj{resolver=obj{resolve=fn},defaultName=str:"minimal"}"
 `;
 
 exports[`composition slot-registry — byte-identical hellgate fingerprint stable — tool profile flag: tool profile flag :: assembled 1`] = `
-"KEYS[22]: llm,registry,stream,promptSurfaceProfile,permission,messages,system,cwd,maxTurns,signal,searchPipeline,stickyModelStore,toolProfile,modePolicy,budgetMeter,lspDiagnosticsHookEnabled,secretCheckToolEnabled,readFileState,activeSkillCursor,contextEventsForTurn,mentionInjector,compactionEventEmit
-llm :: obj{model=str:"gpt-5.4",provider=str:"chatgpt-oauth",surfaceId=str:"openai-responses",transportId=str:"chatgpt-oauth",authMode=str:"ChatGPT subscription",env=<ambient-env-bag>,fetchImpl=fn,nowMs=fn,maxTokens=undefined,streamTimeoutMs=obj{firstChunkMs=num,idleMs=num},serviceTier=undefined,reasoningEffort=undefined,reasoningSummary=bool:false,reasoningSummaryDetail=undefined,reasoningVerbosity=undefined,reasoningCarryover=bool:false,reasoningCarryoverStore=undefined,debugOAuth=bool:false,memTokenFallback=undefined}
+"KEYS[24]: llm,registry,stream,promptSurfaceProfile,permission,messages,system,cwd,maxTurns,signal,searchPipeline,stickyModelStore,toolProfile,modePolicy,budgetMeter,lspDiagnosticsHookEnabled,secretCheckToolEnabled,bgShellRegistry,contentCaptureEnabled,readFileState,activeSkillCursor,contextEventsForTurn,mentionInjector,compactionEventEmit
+llm :: obj{model=str:"gpt-5.6-terra",provider=str:"chatgpt-oauth",surfaceId=str:"openai-responses",transportId=str:"chatgpt-oauth",authMode=str:"ChatGPT subscription",env=<ambient-env-bag>,fetchImpl=fn,nowMs=fn,maxTokens=undefined,streamTimeoutMs=obj{firstChunkMs=num,idleMs=num},serviceTier=undefined,reasoningEffort=undefined,reasoningSummary=bool:false,reasoningSummaryDetail=undefined,reasoningVerbosity=undefined,reasoningCarryover=bool:false,reasoningCarryoverStore=undefined,debugOAuth=bool:false,memTokenFallback=undefined}
 registry :: obj{tools=obj{},origin=undefined}
 stream :: obj{emit=fn}
 promptSurfaceProfile :: obj{envPosture=str:"frozen",promptPack=str:"interactive",verifyStrategy=str:"none"}
 permission :: obj{mode=str:"acceptEdits"}
 messages :: arr[]
 system :: str[20762]
-cwd :: str:"/Users/songmin/quanta-codeagent-v3"
+cwd :: str:<cwd>
 maxTurns :: num
 signal :: obj{}
 searchPipeline :: obj{search=fn}
@@ -1095,6 +1143,8 @@ modePolicy :: obj{mode=str:"interactive",permission=obj{kind=str:"reviewer-backe
 budgetMeter :: obj{dials=obj{maxTurns=num,maxRetries=num,maxConsecutiveFailures=num},caps=obj{},exhaustion=str:"stop",clock=fn,startedAtMs=num,turns=num,modelCalls=num,toolCalls=num,shellCommands=num,testRuns=num,inputTokens=num,outputTokens=num,reasoningTokens=num,filesChanged=num,patchBytes=num,retries=num,consecutiveFailures=num,costUsdAccum=num,costUsdThisTurn=num,providerRateLimitRemainingPct=undefined}
 lspDiagnosticsHookEnabled :: bool:false
 secretCheckToolEnabled :: bool:false
+bgShellRegistry :: obj{register=fn,adopt=fn,get=fn,awaitHandle=fn,kill=fn,listOwned=fn,killOwned=fn,killAll=fn,size=fn,oldestId=fn}
+contentCaptureEnabled :: bool:false
 readFileState :: obj{mtimes=obj{},rangeHashes=undefined,rangeDedupCap=num}
 activeSkillCursor :: obj{ids=arr[]}
 contextEventsForTurn :: fn
@@ -1104,14 +1154,14 @@ compactionEventEmit :: fn"
 
 exports[`composition slot-registry — byte-identical hellgate fingerprint stable — focus chain flag: focus chain flag :: base 1`] = `
 "KEYS[13]: llm,registry,stream,promptSurfaceProfile,permission,messages,system,cwd,maxTurns,signal,searchPipeline,stickyModelStore,focusChain
-llm :: obj{model=str:"gpt-5.4",provider=str:"chatgpt-oauth",surfaceId=str:"openai-responses",transportId=str:"chatgpt-oauth",authMode=str:"ChatGPT subscription",env=<ambient-env-bag>,fetchImpl=fn,nowMs=fn,maxTokens=undefined,streamTimeoutMs=obj{firstChunkMs=num,idleMs=num},serviceTier=undefined,reasoningEffort=undefined,reasoningSummary=bool:false,reasoningSummaryDetail=undefined,reasoningVerbosity=undefined,reasoningCarryover=bool:false,reasoningCarryoverStore=undefined,debugOAuth=bool:false,memTokenFallback=undefined}
+llm :: obj{model=str:"gpt-5.6-terra",provider=str:"chatgpt-oauth",surfaceId=str:"openai-responses",transportId=str:"chatgpt-oauth",authMode=str:"ChatGPT subscription",env=<ambient-env-bag>,fetchImpl=fn,nowMs=fn,maxTokens=undefined,streamTimeoutMs=obj{firstChunkMs=num,idleMs=num},serviceTier=undefined,reasoningEffort=undefined,reasoningSummary=bool:false,reasoningSummaryDetail=undefined,reasoningVerbosity=undefined,reasoningCarryover=bool:false,reasoningCarryoverStore=undefined,debugOAuth=bool:false,memTokenFallback=undefined}
 registry :: obj{tools=obj{},origin=undefined}
 stream :: obj{emit=fn}
 promptSurfaceProfile :: obj{envPosture=str:"frozen",promptPack=str:"interactive",verifyStrategy=str:"none"}
 permission :: obj{mode=str:"acceptEdits"}
 messages :: arr[]
 system :: str[20762]
-cwd :: str:"/Users/songmin/quanta-codeagent-v3"
+cwd :: str:<cwd>
 maxTurns :: num
 signal :: obj{}
 searchPipeline :: obj{search=fn}
@@ -1120,15 +1170,15 @@ focusChain :: obj{tracker=obj{setTodos=fn,tickTurn=fn,getInjection=fn,peekInject
 `;
 
 exports[`composition slot-registry — byte-identical hellgate fingerprint stable — focus chain flag: focus chain flag :: assembled 1`] = `
-"KEYS[22]: llm,registry,stream,promptSurfaceProfile,permission,messages,system,cwd,maxTurns,signal,searchPipeline,stickyModelStore,focusChain,modePolicy,budgetMeter,lspDiagnosticsHookEnabled,secretCheckToolEnabled,readFileState,activeSkillCursor,contextEventsForTurn,mentionInjector,compactionEventEmit
-llm :: obj{model=str:"gpt-5.4",provider=str:"chatgpt-oauth",surfaceId=str:"openai-responses",transportId=str:"chatgpt-oauth",authMode=str:"ChatGPT subscription",env=<ambient-env-bag>,fetchImpl=fn,nowMs=fn,maxTokens=undefined,streamTimeoutMs=obj{firstChunkMs=num,idleMs=num},serviceTier=undefined,reasoningEffort=undefined,reasoningSummary=bool:false,reasoningSummaryDetail=undefined,reasoningVerbosity=undefined,reasoningCarryover=bool:false,reasoningCarryoverStore=undefined,debugOAuth=bool:false,memTokenFallback=undefined}
+"KEYS[24]: llm,registry,stream,promptSurfaceProfile,permission,messages,system,cwd,maxTurns,signal,searchPipeline,stickyModelStore,focusChain,modePolicy,budgetMeter,lspDiagnosticsHookEnabled,secretCheckToolEnabled,bgShellRegistry,contentCaptureEnabled,readFileState,activeSkillCursor,contextEventsForTurn,mentionInjector,compactionEventEmit
+llm :: obj{model=str:"gpt-5.6-terra",provider=str:"chatgpt-oauth",surfaceId=str:"openai-responses",transportId=str:"chatgpt-oauth",authMode=str:"ChatGPT subscription",env=<ambient-env-bag>,fetchImpl=fn,nowMs=fn,maxTokens=undefined,streamTimeoutMs=obj{firstChunkMs=num,idleMs=num},serviceTier=undefined,reasoningEffort=undefined,reasoningSummary=bool:false,reasoningSummaryDetail=undefined,reasoningVerbosity=undefined,reasoningCarryover=bool:false,reasoningCarryoverStore=undefined,debugOAuth=bool:false,memTokenFallback=undefined}
 registry :: obj{tools=obj{},origin=undefined}
 stream :: obj{emit=fn}
 promptSurfaceProfile :: obj{envPosture=str:"frozen",promptPack=str:"interactive",verifyStrategy=str:"none"}
 permission :: obj{mode=str:"acceptEdits"}
 messages :: arr[]
 system :: str[20762]
-cwd :: str:"/Users/songmin/quanta-codeagent-v3"
+cwd :: str:<cwd>
 maxTurns :: num
 signal :: obj{}
 searchPipeline :: obj{search=fn}
@@ -1138,6 +1188,8 @@ modePolicy :: obj{mode=str:"interactive",permission=obj{kind=str:"reviewer-backe
 budgetMeter :: obj{dials=obj{maxTurns=num,maxRetries=num,maxConsecutiveFailures=num},caps=obj{},exhaustion=str:"stop",clock=fn,startedAtMs=num,turns=num,modelCalls=num,toolCalls=num,shellCommands=num,testRuns=num,inputTokens=num,outputTokens=num,reasoningTokens=num,filesChanged=num,patchBytes=num,retries=num,consecutiveFailures=num,costUsdAccum=num,costUsdThisTurn=num,providerRateLimitRemainingPct=undefined}
 lspDiagnosticsHookEnabled :: bool:false
 secretCheckToolEnabled :: bool:false
+bgShellRegistry :: obj{register=fn,adopt=fn,get=fn,awaitHandle=fn,kill=fn,listOwned=fn,killOwned=fn,killAll=fn,size=fn,oldestId=fn}
+contentCaptureEnabled :: bool:false
 readFileState :: obj{mtimes=obj{},rangeHashes=undefined,rangeDedupCap=num}
 activeSkillCursor :: obj{ids=arr[]}
 contextEventsForTurn :: fn
@@ -1147,14 +1199,14 @@ compactionEventEmit :: fn"
 
 exports[`composition slot-registry — byte-identical hellgate fingerprint stable — fork session flag: fork session flag :: base 1`] = `
 "KEYS[15]: llm,registry,stream,promptSurfaceProfile,permission,messages,system,cwd,maxTurns,signal,searchPipeline,stickyModelStore,conversationCheckpoint,fork,forkSession
-llm :: obj{model=str:"gpt-5.4",provider=str:"chatgpt-oauth",surfaceId=str:"openai-responses",transportId=str:"chatgpt-oauth",authMode=str:"ChatGPT subscription",env=<ambient-env-bag>,fetchImpl=fn,nowMs=fn,maxTokens=undefined,streamTimeoutMs=obj{firstChunkMs=num,idleMs=num},serviceTier=undefined,reasoningEffort=undefined,reasoningSummary=bool:false,reasoningSummaryDetail=undefined,reasoningVerbosity=undefined,reasoningCarryover=bool:false,reasoningCarryoverStore=undefined,debugOAuth=bool:false,memTokenFallback=undefined}
+llm :: obj{model=str:"gpt-5.6-terra",provider=str:"chatgpt-oauth",surfaceId=str:"openai-responses",transportId=str:"chatgpt-oauth",authMode=str:"ChatGPT subscription",env=<ambient-env-bag>,fetchImpl=fn,nowMs=fn,maxTokens=undefined,streamTimeoutMs=obj{firstChunkMs=num,idleMs=num},serviceTier=undefined,reasoningEffort=undefined,reasoningSummary=bool:false,reasoningSummaryDetail=undefined,reasoningVerbosity=undefined,reasoningCarryover=bool:false,reasoningCarryoverStore=undefined,debugOAuth=bool:false,memTokenFallback=undefined}
 registry :: obj{tools=obj{},origin=undefined}
 stream :: obj{emit=fn}
 promptSurfaceProfile :: obj{envPosture=str:"frozen",promptPack=str:"interactive",verifyStrategy=str:"none"}
 permission :: obj{mode=str:"acceptEdits"}
 messages :: arr[]
 system :: str[20762]
-cwd :: str:"/Users/songmin/quanta-codeagent-v3"
+cwd :: str:<cwd>
 maxTurns :: num
 signal :: obj{}
 searchPipeline :: obj{search=fn}
@@ -1165,15 +1217,15 @@ forkSession :: obj{forker=obj{fork=fn,listBranches=fn,resolveParent=fn}}"
 `;
 
 exports[`composition slot-registry — byte-identical hellgate fingerprint stable — fork session flag: fork session flag :: assembled 1`] = `
-"KEYS[24]: llm,registry,stream,promptSurfaceProfile,permission,messages,system,cwd,maxTurns,signal,searchPipeline,stickyModelStore,conversationCheckpoint,fork,forkSession,modePolicy,budgetMeter,lspDiagnosticsHookEnabled,secretCheckToolEnabled,readFileState,activeSkillCursor,contextEventsForTurn,mentionInjector,compactionEventEmit
-llm :: obj{model=str:"gpt-5.4",provider=str:"chatgpt-oauth",surfaceId=str:"openai-responses",transportId=str:"chatgpt-oauth",authMode=str:"ChatGPT subscription",env=<ambient-env-bag>,fetchImpl=fn,nowMs=fn,maxTokens=undefined,streamTimeoutMs=obj{firstChunkMs=num,idleMs=num},serviceTier=undefined,reasoningEffort=undefined,reasoningSummary=bool:false,reasoningSummaryDetail=undefined,reasoningVerbosity=undefined,reasoningCarryover=bool:false,reasoningCarryoverStore=undefined,debugOAuth=bool:false,memTokenFallback=undefined}
+"KEYS[26]: llm,registry,stream,promptSurfaceProfile,permission,messages,system,cwd,maxTurns,signal,searchPipeline,stickyModelStore,conversationCheckpoint,fork,forkSession,modePolicy,budgetMeter,lspDiagnosticsHookEnabled,secretCheckToolEnabled,bgShellRegistry,contentCaptureEnabled,readFileState,activeSkillCursor,contextEventsForTurn,mentionInjector,compactionEventEmit
+llm :: obj{model=str:"gpt-5.6-terra",provider=str:"chatgpt-oauth",surfaceId=str:"openai-responses",transportId=str:"chatgpt-oauth",authMode=str:"ChatGPT subscription",env=<ambient-env-bag>,fetchImpl=fn,nowMs=fn,maxTokens=undefined,streamTimeoutMs=obj{firstChunkMs=num,idleMs=num},serviceTier=undefined,reasoningEffort=undefined,reasoningSummary=bool:false,reasoningSummaryDetail=undefined,reasoningVerbosity=undefined,reasoningCarryover=bool:false,reasoningCarryoverStore=undefined,debugOAuth=bool:false,memTokenFallback=undefined}
 registry :: obj{tools=obj{},origin=undefined}
 stream :: obj{emit=fn}
 promptSurfaceProfile :: obj{envPosture=str:"frozen",promptPack=str:"interactive",verifyStrategy=str:"none"}
 permission :: obj{mode=str:"acceptEdits"}
 messages :: arr[]
 system :: str[20762]
-cwd :: str:"/Users/songmin/quanta-codeagent-v3"
+cwd :: str:<cwd>
 maxTurns :: num
 signal :: obj{}
 searchPipeline :: obj{search=fn}
@@ -1185,6 +1237,8 @@ modePolicy :: obj{mode=str:"interactive",permission=obj{kind=str:"reviewer-backe
 budgetMeter :: obj{dials=obj{maxTurns=num,maxRetries=num,maxConsecutiveFailures=num},caps=obj{},exhaustion=str:"stop",clock=fn,startedAtMs=num,turns=num,modelCalls=num,toolCalls=num,shellCommands=num,testRuns=num,inputTokens=num,outputTokens=num,reasoningTokens=num,filesChanged=num,patchBytes=num,retries=num,consecutiveFailures=num,costUsdAccum=num,costUsdThisTurn=num,providerRateLimitRemainingPct=undefined}
 lspDiagnosticsHookEnabled :: bool:false
 secretCheckToolEnabled :: bool:false
+bgShellRegistry :: obj{register=fn,adopt=fn,get=fn,awaitHandle=fn,kill=fn,listOwned=fn,killOwned=fn,killAll=fn,size=fn,oldestId=fn}
+contentCaptureEnabled :: bool:false
 readFileState :: obj{mtimes=obj{},rangeHashes=undefined,rangeDedupCap=num}
 activeSkillCursor :: obj{ids=arr[]}
 contextEventsForTurn :: fn
@@ -1194,14 +1248,14 @@ compactionEventEmit :: fn"
 
 exports[`composition slot-registry — byte-identical hellgate fingerprint stable — delegate modes flag: delegate modes flag :: base 1`] = `
 "KEYS[13]: llm,registry,stream,promptSurfaceProfile,permission,messages,system,cwd,maxTurns,signal,searchPipeline,stickyModelStore,delegation
-llm :: obj{model=str:"gpt-5.4",provider=str:"chatgpt-oauth",surfaceId=str:"openai-responses",transportId=str:"chatgpt-oauth",authMode=str:"ChatGPT subscription",env=<ambient-env-bag>,fetchImpl=fn,nowMs=fn,maxTokens=undefined,streamTimeoutMs=obj{firstChunkMs=num,idleMs=num},serviceTier=undefined,reasoningEffort=undefined,reasoningSummary=bool:false,reasoningSummaryDetail=undefined,reasoningVerbosity=undefined,reasoningCarryover=bool:false,reasoningCarryoverStore=undefined,debugOAuth=bool:false,memTokenFallback=undefined}
+llm :: obj{model=str:"gpt-5.6-terra",provider=str:"chatgpt-oauth",surfaceId=str:"openai-responses",transportId=str:"chatgpt-oauth",authMode=str:"ChatGPT subscription",env=<ambient-env-bag>,fetchImpl=fn,nowMs=fn,maxTokens=undefined,streamTimeoutMs=obj{firstChunkMs=num,idleMs=num},serviceTier=undefined,reasoningEffort=undefined,reasoningSummary=bool:false,reasoningSummaryDetail=undefined,reasoningVerbosity=undefined,reasoningCarryover=bool:false,reasoningCarryoverStore=undefined,debugOAuth=bool:false,memTokenFallback=undefined}
 registry :: obj{tools=obj{},origin=undefined}
 stream :: obj{emit=fn}
 promptSurfaceProfile :: obj{envPosture=str:"frozen",promptPack=str:"interactive",verifyStrategy=str:"none"}
 permission :: obj{mode=str:"acceptEdits"}
 messages :: arr[]
 system :: str[20762]
-cwd :: str:"/Users/songmin/quanta-codeagent-v3"
+cwd :: str:<cwd>
 maxTurns :: num
 signal :: obj{}
 searchPipeline :: obj{search=fn}
@@ -1210,15 +1264,15 @@ delegation :: obj{delegator=obj{delegate=fn,listModes=fn,describeMode=fn},modes=
 `;
 
 exports[`composition slot-registry — byte-identical hellgate fingerprint stable — delegate modes flag: delegate modes flag :: assembled 1`] = `
-"KEYS[22]: llm,registry,stream,promptSurfaceProfile,permission,messages,system,cwd,maxTurns,signal,searchPipeline,stickyModelStore,delegation,modePolicy,budgetMeter,lspDiagnosticsHookEnabled,secretCheckToolEnabled,readFileState,activeSkillCursor,contextEventsForTurn,mentionInjector,compactionEventEmit
-llm :: obj{model=str:"gpt-5.4",provider=str:"chatgpt-oauth",surfaceId=str:"openai-responses",transportId=str:"chatgpt-oauth",authMode=str:"ChatGPT subscription",env=<ambient-env-bag>,fetchImpl=fn,nowMs=fn,maxTokens=undefined,streamTimeoutMs=obj{firstChunkMs=num,idleMs=num},serviceTier=undefined,reasoningEffort=undefined,reasoningSummary=bool:false,reasoningSummaryDetail=undefined,reasoningVerbosity=undefined,reasoningCarryover=bool:false,reasoningCarryoverStore=undefined,debugOAuth=bool:false,memTokenFallback=undefined}
+"KEYS[24]: llm,registry,stream,promptSurfaceProfile,permission,messages,system,cwd,maxTurns,signal,searchPipeline,stickyModelStore,delegation,modePolicy,budgetMeter,lspDiagnosticsHookEnabled,secretCheckToolEnabled,bgShellRegistry,contentCaptureEnabled,readFileState,activeSkillCursor,contextEventsForTurn,mentionInjector,compactionEventEmit
+llm :: obj{model=str:"gpt-5.6-terra",provider=str:"chatgpt-oauth",surfaceId=str:"openai-responses",transportId=str:"chatgpt-oauth",authMode=str:"ChatGPT subscription",env=<ambient-env-bag>,fetchImpl=fn,nowMs=fn,maxTokens=undefined,streamTimeoutMs=obj{firstChunkMs=num,idleMs=num},serviceTier=undefined,reasoningEffort=undefined,reasoningSummary=bool:false,reasoningSummaryDetail=undefined,reasoningVerbosity=undefined,reasoningCarryover=bool:false,reasoningCarryoverStore=undefined,debugOAuth=bool:false,memTokenFallback=undefined}
 registry :: obj{tools=obj{},origin=undefined}
 stream :: obj{emit=fn}
 promptSurfaceProfile :: obj{envPosture=str:"frozen",promptPack=str:"interactive",verifyStrategy=str:"none"}
 permission :: obj{mode=str:"acceptEdits"}
 messages :: arr[]
 system :: str[20762]
-cwd :: str:"/Users/songmin/quanta-codeagent-v3"
+cwd :: str:<cwd>
 maxTurns :: num
 signal :: obj{}
 searchPipeline :: obj{search=fn}
@@ -1228,6 +1282,8 @@ modePolicy :: obj{mode=str:"interactive",permission=obj{kind=str:"reviewer-backe
 budgetMeter :: obj{dials=obj{maxTurns=num,maxRetries=num,maxConsecutiveFailures=num},caps=obj{},exhaustion=str:"stop",clock=fn,startedAtMs=num,turns=num,modelCalls=num,toolCalls=num,shellCommands=num,testRuns=num,inputTokens=num,outputTokens=num,reasoningTokens=num,filesChanged=num,patchBytes=num,retries=num,consecutiveFailures=num,costUsdAccum=num,costUsdThisTurn=num,providerRateLimitRemainingPct=undefined}
 lspDiagnosticsHookEnabled :: bool:false
 secretCheckToolEnabled :: bool:false
+bgShellRegistry :: obj{register=fn,adopt=fn,get=fn,awaitHandle=fn,kill=fn,listOwned=fn,killOwned=fn,killAll=fn,size=fn,oldestId=fn}
+contentCaptureEnabled :: bool:false
 readFileState :: obj{mtimes=obj{},rangeHashes=undefined,rangeDedupCap=num}
 activeSkillCursor :: obj{ids=arr[]}
 contextEventsForTurn :: fn
@@ -1237,14 +1293,14 @@ compactionEventEmit :: fn"
 
 exports[`composition slot-registry — byte-identical hellgate fingerprint stable — identity mode flag: identity mode flag :: base 1`] = `
 "KEYS[13]: llm,registry,stream,promptSurfaceProfile,permission,messages,system,cwd,maxTurns,signal,searchPipeline,identityModeVariant,stickyModelStore
-llm :: obj{model=str:"gpt-5.4",provider=str:"chatgpt-oauth",surfaceId=str:"openai-responses",transportId=str:"chatgpt-oauth",authMode=str:"ChatGPT subscription",env=<ambient-env-bag>,fetchImpl=fn,nowMs=fn,maxTokens=undefined,streamTimeoutMs=obj{firstChunkMs=num,idleMs=num},serviceTier=undefined,reasoningEffort=undefined,reasoningSummary=bool:false,reasoningSummaryDetail=undefined,reasoningVerbosity=undefined,reasoningCarryover=bool:false,reasoningCarryoverStore=undefined,debugOAuth=bool:false,memTokenFallback=undefined}
+llm :: obj{model=str:"gpt-5.6-terra",provider=str:"chatgpt-oauth",surfaceId=str:"openai-responses",transportId=str:"chatgpt-oauth",authMode=str:"ChatGPT subscription",env=<ambient-env-bag>,fetchImpl=fn,nowMs=fn,maxTokens=undefined,streamTimeoutMs=obj{firstChunkMs=num,idleMs=num},serviceTier=undefined,reasoningEffort=undefined,reasoningSummary=bool:false,reasoningSummaryDetail=undefined,reasoningVerbosity=undefined,reasoningCarryover=bool:false,reasoningCarryoverStore=undefined,debugOAuth=bool:false,memTokenFallback=undefined}
 registry :: obj{tools=obj{},origin=undefined}
 stream :: obj{emit=fn}
 promptSurfaceProfile :: obj{envPosture=str:"frozen",promptPack=str:"interactive",verifyStrategy=str:"none"}
 permission :: obj{mode=str:"acceptEdits"}
 messages :: arr[]
 system :: str[20910]
-cwd :: str:"/Users/songmin/quanta-codeagent-v3"
+cwd :: str:<cwd>
 maxTurns :: num
 signal :: obj{}
 searchPipeline :: obj{search=fn}
@@ -1253,15 +1309,15 @@ stickyModelStore :: obj{store=obj{get=fn,set=fn,load=fn}}"
 `;
 
 exports[`composition slot-registry — byte-identical hellgate fingerprint stable — identity mode flag: identity mode flag :: assembled 1`] = `
-"KEYS[22]: llm,registry,stream,promptSurfaceProfile,permission,messages,system,cwd,maxTurns,signal,searchPipeline,identityModeVariant,stickyModelStore,modePolicy,budgetMeter,lspDiagnosticsHookEnabled,secretCheckToolEnabled,readFileState,activeSkillCursor,contextEventsForTurn,mentionInjector,compactionEventEmit
-llm :: obj{model=str:"gpt-5.4",provider=str:"chatgpt-oauth",surfaceId=str:"openai-responses",transportId=str:"chatgpt-oauth",authMode=str:"ChatGPT subscription",env=<ambient-env-bag>,fetchImpl=fn,nowMs=fn,maxTokens=undefined,streamTimeoutMs=obj{firstChunkMs=num,idleMs=num},serviceTier=undefined,reasoningEffort=undefined,reasoningSummary=bool:false,reasoningSummaryDetail=undefined,reasoningVerbosity=undefined,reasoningCarryover=bool:false,reasoningCarryoverStore=undefined,debugOAuth=bool:false,memTokenFallback=undefined}
+"KEYS[24]: llm,registry,stream,promptSurfaceProfile,permission,messages,system,cwd,maxTurns,signal,searchPipeline,identityModeVariant,stickyModelStore,modePolicy,budgetMeter,lspDiagnosticsHookEnabled,secretCheckToolEnabled,bgShellRegistry,contentCaptureEnabled,readFileState,activeSkillCursor,contextEventsForTurn,mentionInjector,compactionEventEmit
+llm :: obj{model=str:"gpt-5.6-terra",provider=str:"chatgpt-oauth",surfaceId=str:"openai-responses",transportId=str:"chatgpt-oauth",authMode=str:"ChatGPT subscription",env=<ambient-env-bag>,fetchImpl=fn,nowMs=fn,maxTokens=undefined,streamTimeoutMs=obj{firstChunkMs=num,idleMs=num},serviceTier=undefined,reasoningEffort=undefined,reasoningSummary=bool:false,reasoningSummaryDetail=undefined,reasoningVerbosity=undefined,reasoningCarryover=bool:false,reasoningCarryoverStore=undefined,debugOAuth=bool:false,memTokenFallback=undefined}
 registry :: obj{tools=obj{},origin=undefined}
 stream :: obj{emit=fn}
 promptSurfaceProfile :: obj{envPosture=str:"frozen",promptPack=str:"interactive",verifyStrategy=str:"none"}
 permission :: obj{mode=str:"acceptEdits"}
 messages :: arr[]
 system :: str[20910]
-cwd :: str:"/Users/songmin/quanta-codeagent-v3"
+cwd :: str:<cwd>
 maxTurns :: num
 signal :: obj{}
 searchPipeline :: obj{search=fn}
@@ -1271,6 +1327,8 @@ modePolicy :: obj{mode=str:"interactive",permission=obj{kind=str:"reviewer-backe
 budgetMeter :: obj{dials=obj{maxTurns=num,maxRetries=num,maxConsecutiveFailures=num},caps=obj{},exhaustion=str:"stop",clock=fn,startedAtMs=num,turns=num,modelCalls=num,toolCalls=num,shellCommands=num,testRuns=num,inputTokens=num,outputTokens=num,reasoningTokens=num,filesChanged=num,patchBytes=num,retries=num,consecutiveFailures=num,costUsdAccum=num,costUsdThisTurn=num,providerRateLimitRemainingPct=undefined}
 lspDiagnosticsHookEnabled :: bool:false
 secretCheckToolEnabled :: bool:false
+bgShellRegistry :: obj{register=fn,adopt=fn,get=fn,awaitHandle=fn,kill=fn,listOwned=fn,killOwned=fn,killAll=fn,size=fn,oldestId=fn}
+contentCaptureEnabled :: bool:false
 readFileState :: obj{mtimes=obj{},rangeHashes=undefined,rangeDedupCap=num}
 activeSkillCursor :: obj{ids=arr[]}
 contextEventsForTurn :: fn
@@ -1280,14 +1338,14 @@ compactionEventEmit :: fn"
 
 exports[`composition slot-registry — byte-identical hellgate fingerprint stable — batch mode: batch mode :: base 1`] = `
 "KEYS[12]: llm,registry,stream,promptSurfaceProfile,permission,messages,system,cwd,maxTurns,signal,searchPipeline,stickyModelStore
-llm :: obj{model=str:"gpt-5.4",provider=str:"chatgpt-oauth",surfaceId=str:"openai-responses",transportId=str:"chatgpt-oauth",authMode=str:"ChatGPT subscription",env=<ambient-env-bag>,fetchImpl=fn,nowMs=fn,maxTokens=undefined,streamTimeoutMs=obj{firstChunkMs=num,idleMs=num},serviceTier=undefined,reasoningEffort=undefined,reasoningSummary=bool:false,reasoningSummaryDetail=undefined,reasoningVerbosity=undefined,reasoningCarryover=bool:false,reasoningCarryoverStore=undefined,debugOAuth=bool:false,memTokenFallback=undefined}
+llm :: obj{model=str:"gpt-5.6-terra",provider=str:"chatgpt-oauth",surfaceId=str:"openai-responses",transportId=str:"chatgpt-oauth",authMode=str:"ChatGPT subscription",env=<ambient-env-bag>,fetchImpl=fn,nowMs=fn,maxTokens=undefined,streamTimeoutMs=obj{firstChunkMs=num,idleMs=num},serviceTier=undefined,reasoningEffort=undefined,reasoningSummary=bool:false,reasoningSummaryDetail=undefined,reasoningVerbosity=undefined,reasoningCarryover=bool:false,reasoningCarryoverStore=undefined,debugOAuth=bool:false,memTokenFallback=undefined}
 registry :: obj{tools=obj{},origin=undefined}
 stream :: obj{emit=fn}
 promptSurfaceProfile :: obj{envPosture=str:"frozen",promptPack=str:"batch",verifyStrategy=str:"none"}
 permission :: obj{mode=str:"acceptEdits"}
 messages :: arr[]
 system :: str[20954]
-cwd :: str:"/Users/songmin/quanta-codeagent-v3"
+cwd :: str:<cwd>
 maxTurns :: num
 signal :: obj{}
 searchPipeline :: obj{search=fn}
@@ -1295,15 +1353,15 @@ stickyModelStore :: obj{store=obj{get=fn,set=fn,load=fn}}"
 `;
 
 exports[`composition slot-registry — byte-identical hellgate fingerprint stable — batch mode: batch mode :: assembled 1`] = `
-"KEYS[22]: llm,registry,stream,promptSurfaceProfile,permission,messages,system,cwd,maxTurns,signal,searchPipeline,stickyModelStore,modePolicy,budgetMeter,lspDiagnosticsHookEnabled,secretCheckToolEnabled,dispatchGuard,readFileState,activeSkillCursor,contextEventsForTurn,mentionInjector,compactionEventEmit
-llm :: obj{model=str:"gpt-5.4",provider=str:"chatgpt-oauth",surfaceId=str:"openai-responses",transportId=str:"chatgpt-oauth",authMode=str:"ChatGPT subscription",env=<ambient-env-bag>,fetchImpl=fn,nowMs=fn,maxTokens=undefined,streamTimeoutMs=obj{firstChunkMs=num,idleMs=num},serviceTier=undefined,reasoningEffort=undefined,reasoningSummary=bool:false,reasoningSummaryDetail=undefined,reasoningVerbosity=undefined,reasoningCarryover=bool:false,reasoningCarryoverStore=undefined,debugOAuth=bool:false,memTokenFallback=undefined}
+"KEYS[24]: llm,registry,stream,promptSurfaceProfile,permission,messages,system,cwd,maxTurns,signal,searchPipeline,stickyModelStore,modePolicy,budgetMeter,lspDiagnosticsHookEnabled,secretCheckToolEnabled,dispatchGuard,bgShellRegistry,contentCaptureEnabled,readFileState,activeSkillCursor,contextEventsForTurn,mentionInjector,compactionEventEmit
+llm :: obj{model=str:"gpt-5.6-terra",provider=str:"chatgpt-oauth",surfaceId=str:"openai-responses",transportId=str:"chatgpt-oauth",authMode=str:"ChatGPT subscription",env=<ambient-env-bag>,fetchImpl=fn,nowMs=fn,maxTokens=undefined,streamTimeoutMs=obj{firstChunkMs=num,idleMs=num},serviceTier=undefined,reasoningEffort=undefined,reasoningSummary=bool:false,reasoningSummaryDetail=undefined,reasoningVerbosity=undefined,reasoningCarryover=bool:false,reasoningCarryoverStore=undefined,debugOAuth=bool:false,memTokenFallback=undefined}
 registry :: obj{tools=obj{},origin=undefined}
 stream :: obj{emit=fn}
 promptSurfaceProfile :: obj{envPosture=str:"frozen",promptPack=str:"batch",verifyStrategy=str:"none"}
 permission :: obj{mode=str:"acceptEdits"}
 messages :: arr[]
 system :: str[20954]
-cwd :: str:"/Users/songmin/quanta-codeagent-v3"
+cwd :: str:<cwd>
 maxTurns :: num
 signal :: obj{}
 searchPipeline :: obj{search=fn}
@@ -1313,6 +1371,8 @@ budgetMeter :: obj{dials=obj{maxTurns=num,maxWallClockMs=num,maxModelCalls=num,m
 lspDiagnosticsHookEnabled :: bool:false
 secretCheckToolEnabled :: bool:false
 dispatchGuard :: obj{check=fn}
+bgShellRegistry :: obj{register=fn,adopt=fn,get=fn,awaitHandle=fn,kill=fn,listOwned=fn,killOwned=fn,killAll=fn,size=fn,oldestId=fn}
+contentCaptureEnabled :: bool:false
 readFileState :: obj{mtimes=obj{},rangeHashes=undefined,rangeDedupCap=num}
 activeSkillCursor :: obj{ids=arr[]}
 contextEventsForTurn :: fn
@@ -1321,23 +1381,22 @@ compactionEventEmit :: fn"
 `;
 
 exports[`composition slot-registry — byte-identical hellgate fingerprint stable — combo: obs + artifact + file-history + patterns: combo: obs + artifact + file-history + patterns :: base 1`] = `
-"KEYS[21]: llm,registry,stream,promptSurfaceProfile,permission,messages,system,cwd,maxTurns,signal,searchPipeline,stickyModelStore,objective,shadowVerify,runLedger,approvalStateMachine,hooks,permissionPatternStore,fileHistory,artifactRegistry,artifactPreviewResolver
-llm :: obj{model=str:"gpt-5.4",provider=str:"chatgpt-oauth",surfaceId=str:"openai-responses",transportId=str:"chatgpt-oauth",authMode=str:"ChatGPT subscription",env=<ambient-env-bag>,fetchImpl=fn,nowMs=fn,maxTokens=undefined,streamTimeoutMs=obj{firstChunkMs=num,idleMs=num},serviceTier=undefined,reasoningEffort=undefined,reasoningSummary=bool:false,reasoningSummaryDetail=undefined,reasoningVerbosity=undefined,reasoningCarryover=bool:false,reasoningCarryoverStore=undefined,debugOAuth=bool:false,memTokenFallback=undefined}
+"KEYS[20]: llm,registry,stream,promptSurfaceProfile,permission,messages,system,cwd,maxTurns,signal,searchPipeline,stickyModelStore,shadowVerify,runLedger,approvalStateMachine,hooks,permissionPatternStore,fileHistory,artifactRegistry,artifactPreviewResolver
+llm :: obj{model=str:"gpt-5.6-terra",provider=str:"chatgpt-oauth",surfaceId=str:"openai-responses",transportId=str:"chatgpt-oauth",authMode=str:"ChatGPT subscription",env=<ambient-env-bag>,fetchImpl=fn,nowMs=fn,maxTokens=undefined,streamTimeoutMs=obj{firstChunkMs=num,idleMs=num},serviceTier=undefined,reasoningEffort=undefined,reasoningSummary=bool:false,reasoningSummaryDetail=undefined,reasoningVerbosity=undefined,reasoningCarryover=bool:false,reasoningCarryoverStore=undefined,debugOAuth=bool:false,memTokenFallback=undefined}
 registry :: obj{tools=obj{},origin=undefined}
 stream :: obj{emit=fn}
 promptSurfaceProfile :: obj{envPosture=str:"frozen",promptPack=str:"interactive",verifyStrategy=str:"none"}
 permission :: obj{mode=str:"acceptEdits"}
 messages :: arr[]
 system :: str[20762]
-cwd :: str:"/Users/songmin/quanta-codeagent-v3"
+cwd :: str:<cwd>
 maxTurns :: num
 signal :: obj{}
 searchPipeline :: obj{search=fn}
 stickyModelStore :: obj{store=obj{get=fn,set=fn,load=fn}}
-objective :: obj{set=fn,get=fn,updateStatus=fn,markUsageLimited=fn,addBlocker=fn,clearBlocker=fn,setNextActions=fn,markCriterion=fn,recordUsage=fn,list=fn,toSnapshot=fn,fromSnapshot=fn}
 shadowVerify :: obj{verify=fn}
 runLedger :: obj{start=fn,touch=fn,settle=fn,get=fn,list=fn,running=fn,waiting=fn,toSnapshot=fn,fromSnapshot=fn}
-approvalStateMachine :: obj{request=fn,settle=fn,expire=fn,cancel=fn,get=fn,list=fn,pending=fn,toSnapshot=fn,fromSnapshot=fn}
+approvalStateMachine :: obj{request=fn,settle=fn,expire=fn,cancel=fn,get=fn,list=fn,pending=fn,toSnapshot=fn,fromSnapshot=fn,bindObjective=fn}
 hooks :: obj{handlers=obj{},logger=undefined,opts=obj{}}
 permissionPatternStore :: obj{allowed=obj{},baseline=obj{}}
 fileHistory :: obj{record=fn}
@@ -1346,23 +1405,22 @@ artifactPreviewResolver :: obj{resolve=fn}"
 `;
 
 exports[`composition slot-registry — byte-identical hellgate fingerprint stable — combo: obs + artifact + file-history + patterns: combo: obs + artifact + file-history + patterns :: assembled 1`] = `
-"KEYS[30]: llm,registry,stream,promptSurfaceProfile,permission,messages,system,cwd,maxTurns,signal,searchPipeline,stickyModelStore,objective,shadowVerify,runLedger,approvalStateMachine,hooks,permissionPatternStore,fileHistory,artifactRegistry,artifactPreviewResolver,modePolicy,budgetMeter,lspDiagnosticsHookEnabled,secretCheckToolEnabled,readFileState,activeSkillCursor,contextEventsForTurn,mentionInjector,compactionEventEmit
-llm :: obj{model=str:"gpt-5.4",provider=str:"chatgpt-oauth",surfaceId=str:"openai-responses",transportId=str:"chatgpt-oauth",authMode=str:"ChatGPT subscription",env=<ambient-env-bag>,fetchImpl=fn,nowMs=fn,maxTokens=undefined,streamTimeoutMs=obj{firstChunkMs=num,idleMs=num},serviceTier=undefined,reasoningEffort=undefined,reasoningSummary=bool:false,reasoningSummaryDetail=undefined,reasoningVerbosity=undefined,reasoningCarryover=bool:false,reasoningCarryoverStore=undefined,debugOAuth=bool:false,memTokenFallback=undefined}
+"KEYS[31]: llm,registry,stream,promptSurfaceProfile,permission,messages,system,cwd,maxTurns,signal,searchPipeline,stickyModelStore,shadowVerify,runLedger,approvalStateMachine,hooks,permissionPatternStore,fileHistory,artifactRegistry,artifactPreviewResolver,modePolicy,budgetMeter,lspDiagnosticsHookEnabled,secretCheckToolEnabled,bgShellRegistry,contentCaptureEnabled,readFileState,activeSkillCursor,contextEventsForTurn,mentionInjector,compactionEventEmit
+llm :: obj{model=str:"gpt-5.6-terra",provider=str:"chatgpt-oauth",surfaceId=str:"openai-responses",transportId=str:"chatgpt-oauth",authMode=str:"ChatGPT subscription",env=<ambient-env-bag>,fetchImpl=fn,nowMs=fn,maxTokens=undefined,streamTimeoutMs=obj{firstChunkMs=num,idleMs=num},serviceTier=undefined,reasoningEffort=undefined,reasoningSummary=bool:false,reasoningSummaryDetail=undefined,reasoningVerbosity=undefined,reasoningCarryover=bool:false,reasoningCarryoverStore=undefined,debugOAuth=bool:false,memTokenFallback=undefined}
 registry :: obj{tools=obj{},origin=undefined}
 stream :: obj{emit=fn}
 promptSurfaceProfile :: obj{envPosture=str:"frozen",promptPack=str:"interactive",verifyStrategy=str:"none"}
 permission :: obj{mode=str:"acceptEdits"}
 messages :: arr[]
 system :: str[20762]
-cwd :: str:"/Users/songmin/quanta-codeagent-v3"
+cwd :: str:<cwd>
 maxTurns :: num
 signal :: obj{}
 searchPipeline :: obj{search=fn}
 stickyModelStore :: obj{store=obj{get=fn,set=fn,load=fn}}
-objective :: obj{set=fn,get=fn,updateStatus=fn,markUsageLimited=fn,addBlocker=fn,clearBlocker=fn,setNextActions=fn,markCriterion=fn,recordUsage=fn,list=fn,toSnapshot=fn,fromSnapshot=fn}
 shadowVerify :: obj{verify=fn}
 runLedger :: obj{start=fn,touch=fn,settle=fn,get=fn,list=fn,running=fn,waiting=fn,toSnapshot=fn,fromSnapshot=fn}
-approvalStateMachine :: obj{request=fn,settle=fn,expire=fn,cancel=fn,get=fn,list=fn,pending=fn,toSnapshot=fn,fromSnapshot=fn}
+approvalStateMachine :: obj{request=fn,settle=fn,expire=fn,cancel=fn,get=fn,list=fn,pending=fn,toSnapshot=fn,fromSnapshot=fn,bindObjective=fn}
 hooks :: obj{handlers=obj{},logger=undefined,opts=obj{}}
 permissionPatternStore :: obj{allowed=obj{},baseline=obj{}}
 fileHistory :: obj{record=fn}
@@ -1372,6 +1430,8 @@ modePolicy :: obj{mode=str:"interactive",permission=obj{kind=str:"reviewer-backe
 budgetMeter :: obj{dials=obj{maxTurns=num,maxRetries=num,maxConsecutiveFailures=num},caps=obj{},exhaustion=str:"stop",clock=fn,startedAtMs=num,turns=num,modelCalls=num,toolCalls=num,shellCommands=num,testRuns=num,inputTokens=num,outputTokens=num,reasoningTokens=num,filesChanged=num,patchBytes=num,retries=num,consecutiveFailures=num,costUsdAccum=num,costUsdThisTurn=num,providerRateLimitRemainingPct=undefined}
 lspDiagnosticsHookEnabled :: bool:false
 secretCheckToolEnabled :: bool:false
+bgShellRegistry :: obj{register=fn,adopt=fn,get=fn,awaitHandle=fn,kill=fn,listOwned=fn,killOwned=fn,killAll=fn,size=fn,oldestId=fn}
+contentCaptureEnabled :: bool:false
 readFileState :: obj{mtimes=obj{},rangeHashes=undefined,rangeDedupCap=num}
 activeSkillCursor :: obj{ids=arr[]}
 contextEventsForTurn :: fn
@@ -1381,14 +1441,14 @@ compactionEventEmit :: fn"
 
 exports[`composition slot-registry — byte-identical hellgate fingerprint stable — combo: automation + mcp-full + sandbox + network-proxy: combo: automation + mcp-full + sandbox + network-proxy :: base 1`] = `
 "KEYS[14]: llm,registry,stream,promptSurfaceProfile,permission,messages,system,cwd,maxTurns,signal,networkProxy,searchPipeline,stickyModelStore,automationEngine
-llm :: obj{model=str:"gpt-5.4",provider=str:"chatgpt-oauth",surfaceId=str:"openai-responses",transportId=str:"chatgpt-oauth",authMode=str:"ChatGPT subscription",env=<ambient-env-bag>,fetchImpl=fn,nowMs=fn,maxTokens=undefined,streamTimeoutMs=obj{firstChunkMs=num,idleMs=num},serviceTier=undefined,reasoningEffort=undefined,reasoningSummary=bool:false,reasoningSummaryDetail=undefined,reasoningVerbosity=undefined,reasoningCarryover=bool:false,reasoningCarryoverStore=undefined,debugOAuth=bool:false,memTokenFallback=undefined}
+llm :: obj{model=str:"gpt-5.6-terra",provider=str:"chatgpt-oauth",surfaceId=str:"openai-responses",transportId=str:"chatgpt-oauth",authMode=str:"ChatGPT subscription",env=<ambient-env-bag>,fetchImpl=fn,nowMs=fn,maxTokens=undefined,streamTimeoutMs=obj{firstChunkMs=num,idleMs=num},serviceTier=undefined,reasoningEffort=undefined,reasoningSummary=bool:false,reasoningSummaryDetail=undefined,reasoningVerbosity=undefined,reasoningCarryover=bool:false,reasoningCarryoverStore=undefined,debugOAuth=bool:false,memTokenFallback=undefined}
 registry :: obj{tools=obj{},origin=undefined}
 stream :: obj{emit=fn}
 promptSurfaceProfile :: obj{envPosture=str:"frozen",promptPack=str:"interactive",verifyStrategy=str:"none"}
 permission :: obj{mode=str:"acceptEdits"}
 messages :: arr[]
 system :: str[20762]
-cwd :: str:"/Users/songmin/quanta-codeagent-v3"
+cwd :: str:<cwd>
 maxTurns :: num
 signal :: obj{}
 networkProxy :: obj{enabled=bool:true,allowlist=arr[str:"api.github.com",str:"github.com",str:"raw.githubusercontent.com",str:"objects.githubusercontent.com",str:"codeload.github.com",str:"registry.npmjs.org",str:"registry.yarnpkg.com",str:"pypi.org",str:"files.pythonhosted.org",str:"*.githubusercontent.com"]}
@@ -1398,15 +1458,15 @@ automationEngine :: obj{engine=obj{schedule=fn,list=fn,cancel=fn,next=fn,markRun
 `;
 
 exports[`composition slot-registry — byte-identical hellgate fingerprint stable — combo: automation + mcp-full + sandbox + network-proxy: combo: automation + mcp-full + sandbox + network-proxy :: assembled 1`] = `
-"KEYS[23]: llm,registry,stream,promptSurfaceProfile,permission,messages,system,cwd,maxTurns,signal,networkProxy,searchPipeline,stickyModelStore,automationEngine,modePolicy,budgetMeter,lspDiagnosticsHookEnabled,secretCheckToolEnabled,readFileState,activeSkillCursor,contextEventsForTurn,mentionInjector,compactionEventEmit
-llm :: obj{model=str:"gpt-5.4",provider=str:"chatgpt-oauth",surfaceId=str:"openai-responses",transportId=str:"chatgpt-oauth",authMode=str:"ChatGPT subscription",env=<ambient-env-bag>,fetchImpl=fn,nowMs=fn,maxTokens=undefined,streamTimeoutMs=obj{firstChunkMs=num,idleMs=num},serviceTier=undefined,reasoningEffort=undefined,reasoningSummary=bool:false,reasoningSummaryDetail=undefined,reasoningVerbosity=undefined,reasoningCarryover=bool:false,reasoningCarryoverStore=undefined,debugOAuth=bool:false,memTokenFallback=undefined}
+"KEYS[25]: llm,registry,stream,promptSurfaceProfile,permission,messages,system,cwd,maxTurns,signal,networkProxy,searchPipeline,stickyModelStore,automationEngine,modePolicy,budgetMeter,lspDiagnosticsHookEnabled,secretCheckToolEnabled,bgShellRegistry,contentCaptureEnabled,readFileState,activeSkillCursor,contextEventsForTurn,mentionInjector,compactionEventEmit
+llm :: obj{model=str:"gpt-5.6-terra",provider=str:"chatgpt-oauth",surfaceId=str:"openai-responses",transportId=str:"chatgpt-oauth",authMode=str:"ChatGPT subscription",env=<ambient-env-bag>,fetchImpl=fn,nowMs=fn,maxTokens=undefined,streamTimeoutMs=obj{firstChunkMs=num,idleMs=num},serviceTier=undefined,reasoningEffort=undefined,reasoningSummary=bool:false,reasoningSummaryDetail=undefined,reasoningVerbosity=undefined,reasoningCarryover=bool:false,reasoningCarryoverStore=undefined,debugOAuth=bool:false,memTokenFallback=undefined}
 registry :: obj{tools=obj{},origin=undefined}
 stream :: obj{emit=fn}
 promptSurfaceProfile :: obj{envPosture=str:"frozen",promptPack=str:"interactive",verifyStrategy=str:"none"}
 permission :: obj{mode=str:"acceptEdits"}
 messages :: arr[]
 system :: str[20762]
-cwd :: str:"/Users/songmin/quanta-codeagent-v3"
+cwd :: str:<cwd>
 maxTurns :: num
 signal :: obj{}
 networkProxy :: obj{enabled=bool:true,allowlist=arr[str:"api.github.com",str:"github.com",str:"raw.githubusercontent.com",str:"objects.githubusercontent.com",str:"codeload.github.com",str:"registry.npmjs.org",str:"registry.yarnpkg.com",str:"pypi.org",str:"files.pythonhosted.org",str:"*.githubusercontent.com"]}
@@ -1417,6 +1477,8 @@ modePolicy :: obj{mode=str:"interactive",permission=obj{kind=str:"reviewer-backe
 budgetMeter :: obj{dials=obj{maxTurns=num,maxRetries=num,maxConsecutiveFailures=num},caps=obj{},exhaustion=str:"stop",clock=fn,startedAtMs=num,turns=num,modelCalls=num,toolCalls=num,shellCommands=num,testRuns=num,inputTokens=num,outputTokens=num,reasoningTokens=num,filesChanged=num,patchBytes=num,retries=num,consecutiveFailures=num,costUsdAccum=num,costUsdThisTurn=num,providerRateLimitRemainingPct=undefined}
 lspDiagnosticsHookEnabled :: bool:false
 secretCheckToolEnabled :: bool:false
+bgShellRegistry :: obj{register=fn,adopt=fn,get=fn,awaitHandle=fn,kill=fn,listOwned=fn,killOwned=fn,killAll=fn,size=fn,oldestId=fn}
+contentCaptureEnabled :: bool:false
 readFileState :: obj{mtimes=obj{},rangeHashes=undefined,rangeDedupCap=num}
 activeSkillCursor :: obj{ids=arr[]}
 contextEventsForTurn :: fn
@@ -1426,14 +1488,14 @@ compactionEventEmit :: fn"
 
 exports[`composition slot-registry — byte-identical hellgate fingerprint stable — combo: assembler caps (objective+mailbox+prompt-cache+edit-repair+pii): combo: assembler caps (objective+mailbox+prompt-cache+edit-repair+pii) :: base 1`] = `
 "KEYS[13]: llm,registry,stream,promptSurfaceProfile,permission,messages,system,cwd,maxTurns,signal,searchPipeline,stickyModelStore,subagentMailbox
-llm :: obj{model=str:"gpt-5.4",provider=str:"chatgpt-oauth",surfaceId=str:"openai-responses",transportId=str:"chatgpt-oauth",authMode=str:"ChatGPT subscription",env=<ambient-env-bag>,fetchImpl=fn,nowMs=fn,maxTokens=undefined,streamTimeoutMs=obj{firstChunkMs=num,idleMs=num},serviceTier=undefined,reasoningEffort=undefined,reasoningSummary=bool:false,reasoningSummaryDetail=undefined,reasoningVerbosity=undefined,reasoningCarryover=bool:false,reasoningCarryoverStore=undefined,debugOAuth=bool:false,memTokenFallback=undefined}
+llm :: obj{model=str:"gpt-5.6-terra",provider=str:"chatgpt-oauth",surfaceId=str:"openai-responses",transportId=str:"chatgpt-oauth",authMode=str:"ChatGPT subscription",env=<ambient-env-bag>,fetchImpl=fn,nowMs=fn,maxTokens=undefined,streamTimeoutMs=obj{firstChunkMs=num,idleMs=num},serviceTier=undefined,reasoningEffort=undefined,reasoningSummary=bool:false,reasoningSummaryDetail=undefined,reasoningVerbosity=undefined,reasoningCarryover=bool:false,reasoningCarryoverStore=undefined,debugOAuth=bool:false,memTokenFallback=undefined}
 registry :: obj{tools=obj{},origin=undefined}
 stream :: obj{emit=fn}
 promptSurfaceProfile :: obj{envPosture=str:"frozen",promptPack=str:"interactive",verifyStrategy=str:"none"}
 permission :: obj{mode=str:"acceptEdits"}
 messages :: arr[]
 system :: str[20762]
-cwd :: str:"/Users/songmin/quanta-codeagent-v3"
+cwd :: str:<cwd>
 maxTurns :: num
 signal :: obj{}
 searchPipeline :: obj{search=fn}
@@ -1442,15 +1504,15 @@ subagentMailbox :: obj{send=fn,read=fn,peek=fn,ack=fn,list=fn,pendingFor=fn,toSn
 `;
 
 exports[`composition slot-registry — byte-identical hellgate fingerprint stable — combo: assembler caps (objective+mailbox+prompt-cache+edit-repair+pii): combo: assembler caps (objective+mailbox+prompt-cache+edit-repair+pii) :: assembled 1`] = `
-"KEYS[26]: llm,registry,stream,promptSurfaceProfile,permission,messages,system,cwd,maxTurns,signal,searchPipeline,stickyModelStore,subagentMailbox,modePolicy,budgetMeter,lspDiagnosticsHookEnabled,secretCheckToolEnabled,objective,readFileState,diagnosticsProvider,promptCacheObserver,redaction,activeSkillCursor,contextEventsForTurn,mentionInjector,compactionEventEmit
-llm :: obj{model=str:"gpt-5.4",provider=str:"chatgpt-oauth",surfaceId=str:"openai-responses",transportId=str:"chatgpt-oauth",authMode=str:"ChatGPT subscription",env=<ambient-env-bag>,fetchImpl=fn,nowMs=fn,maxTokens=undefined,streamTimeoutMs=obj{firstChunkMs=num,idleMs=num},serviceTier=undefined,reasoningEffort=undefined,reasoningSummary=bool:false,reasoningSummaryDetail=undefined,reasoningVerbosity=undefined,reasoningCarryover=bool:false,reasoningCarryoverStore=undefined,debugOAuth=bool:false,memTokenFallback=undefined}
+"KEYS[28]: llm,registry,stream,promptSurfaceProfile,permission,messages,system,cwd,maxTurns,signal,searchPipeline,stickyModelStore,subagentMailbox,modePolicy,budgetMeter,lspDiagnosticsHookEnabled,secretCheckToolEnabled,bgShellRegistry,contentCaptureEnabled,objective,readFileState,diagnosticsProvider,promptCacheObserver,redaction,activeSkillCursor,contextEventsForTurn,mentionInjector,compactionEventEmit
+llm :: obj{model=str:"gpt-5.6-terra",provider=str:"chatgpt-oauth",surfaceId=str:"openai-responses",transportId=str:"chatgpt-oauth",authMode=str:"ChatGPT subscription",env=<ambient-env-bag>,fetchImpl=fn,nowMs=fn,maxTokens=undefined,streamTimeoutMs=obj{firstChunkMs=num,idleMs=num},serviceTier=undefined,reasoningEffort=undefined,reasoningSummary=bool:false,reasoningSummaryDetail=undefined,reasoningVerbosity=undefined,reasoningCarryover=bool:false,reasoningCarryoverStore=undefined,debugOAuth=bool:false,memTokenFallback=undefined}
 registry :: obj{tools=obj{},origin=undefined}
 stream :: obj{emit=fn}
 promptSurfaceProfile :: obj{envPosture=str:"frozen",promptPack=str:"interactive",verifyStrategy=str:"none"}
 permission :: obj{mode=str:"acceptEdits"}
 messages :: arr[]
 system :: str[20762]
-cwd :: str:"/Users/songmin/quanta-codeagent-v3"
+cwd :: str:<cwd>
 maxTurns :: num
 signal :: obj{}
 searchPipeline :: obj{search=fn}
@@ -1460,7 +1522,9 @@ modePolicy :: obj{mode=str:"interactive",permission=obj{kind=str:"reviewer-backe
 budgetMeter :: obj{dials=obj{maxTurns=num,maxRetries=num,maxConsecutiveFailures=num},caps=obj{},exhaustion=str:"stop",clock=fn,startedAtMs=num,turns=num,modelCalls=num,toolCalls=num,shellCommands=num,testRuns=num,inputTokens=num,outputTokens=num,reasoningTokens=num,filesChanged=num,patchBytes=num,retries=num,consecutiveFailures=num,costUsdAccum=num,costUsdThisTurn=num,providerRateLimitRemainingPct=undefined}
 lspDiagnosticsHookEnabled :: bool:false
 secretCheckToolEnabled :: bool:false
-objective :: obj{set=fn,get=fn,updateStatus=fn,markUsageLimited=fn,addBlocker=fn,clearBlocker=fn,setNextActions=fn,markCriterion=fn,recordUsage=fn,list=fn,toSnapshot=fn,fromSnapshot=fn}
+bgShellRegistry :: obj{register=fn,adopt=fn,get=fn,awaitHandle=fn,kill=fn,listOwned=fn,killOwned=fn,killAll=fn,size=fn,oldestId=fn}
+contentCaptureEnabled :: bool:false
+objective :: obj{readDomain=fn,prepare=fn,commit=fn,restore=fn,set=fn,get=fn,updateStatus=fn,addBlocker=fn,clearBlocker=fn,setNextActions=fn,markCriterion=fn,recordUsage=fn,markUsageLimited=fn,list=fn,toSnapshot=fn,fromSnapshot=fn}
 readFileState :: obj{mtimes=obj{},rangeHashes=undefined,rangeDedupCap=num}
 diagnosticsProvider :: obj{unavailableReason=fn,open=fn}
 promptCacheObserver :: obj{record=fn,attributeBreakpoint=fn,snapshot=fn,reset=fn}
@@ -1472,50 +1536,48 @@ compactionEventEmit :: fn"
 `;
 
 exports[`composition slot-registry — byte-identical hellgate fingerprint stable — combo: base flags + env gates together: combo: base flags + env gates together :: base 1`] = `
-"KEYS[21]: llm,registry,stream,promptSurfaceProfile,permission,messages,system,cwd,maxTurns,signal,searchPipeline,stickyModelStore,toolProfile,focusChain,objective,shadowVerify,runLedger,approvalStateMachine,hooks,artifactRegistry,artifactPreviewResolver
-llm :: obj{model=str:"gpt-5.4",provider=str:"chatgpt-oauth",surfaceId=str:"openai-responses",transportId=str:"chatgpt-oauth",authMode=str:"ChatGPT subscription",env=<ambient-env-bag>,fetchImpl=fn,nowMs=fn,maxTokens=undefined,streamTimeoutMs=obj{firstChunkMs=num,idleMs=num},serviceTier=undefined,reasoningEffort=undefined,reasoningSummary=bool:false,reasoningSummaryDetail=undefined,reasoningVerbosity=undefined,reasoningCarryover=bool:false,reasoningCarryoverStore=undefined,debugOAuth=bool:false,memTokenFallback=undefined}
+"KEYS[20]: llm,registry,stream,promptSurfaceProfile,permission,messages,system,cwd,maxTurns,signal,searchPipeline,stickyModelStore,toolProfile,focusChain,shadowVerify,runLedger,approvalStateMachine,hooks,artifactRegistry,artifactPreviewResolver
+llm :: obj{model=str:"gpt-5.6-terra",provider=str:"chatgpt-oauth",surfaceId=str:"openai-responses",transportId=str:"chatgpt-oauth",authMode=str:"ChatGPT subscription",env=<ambient-env-bag>,fetchImpl=fn,nowMs=fn,maxTokens=undefined,streamTimeoutMs=obj{firstChunkMs=num,idleMs=num},serviceTier=undefined,reasoningEffort=undefined,reasoningSummary=bool:false,reasoningSummaryDetail=undefined,reasoningVerbosity=undefined,reasoningCarryover=bool:false,reasoningCarryoverStore=undefined,debugOAuth=bool:false,memTokenFallback=undefined}
 registry :: obj{tools=obj{},origin=undefined}
 stream :: obj{emit=fn}
 promptSurfaceProfile :: obj{envPosture=str:"frozen",promptPack=str:"interactive",verifyStrategy=str:"none"}
 permission :: obj{mode=str:"acceptEdits"}
 messages :: arr[]
 system :: str[20762]
-cwd :: str:"/Users/songmin/quanta-codeagent-v3"
+cwd :: str:<cwd>
 maxTurns :: num
 signal :: obj{}
 searchPipeline :: obj{search=fn}
 stickyModelStore :: obj{store=obj{get=fn,set=fn,load=fn}}
 toolProfile :: obj{resolver=obj{resolve=fn},defaultName=str:"minimal"}
 focusChain :: obj{tracker=obj{setTodos=fn,tickTurn=fn,getInjection=fn,peekInjection=fn,getDriftWarning=fn,markDone=fn,snapshotTodos=fn,currentTurn=fn},reinjectEveryN=num}
-objective :: obj{set=fn,get=fn,updateStatus=fn,markUsageLimited=fn,addBlocker=fn,clearBlocker=fn,setNextActions=fn,markCriterion=fn,recordUsage=fn,list=fn,toSnapshot=fn,fromSnapshot=fn}
 shadowVerify :: obj{verify=fn}
 runLedger :: obj{start=fn,touch=fn,settle=fn,get=fn,list=fn,running=fn,waiting=fn,toSnapshot=fn,fromSnapshot=fn}
-approvalStateMachine :: obj{request=fn,settle=fn,expire=fn,cancel=fn,get=fn,list=fn,pending=fn,toSnapshot=fn,fromSnapshot=fn}
+approvalStateMachine :: obj{request=fn,settle=fn,expire=fn,cancel=fn,get=fn,list=fn,pending=fn,toSnapshot=fn,fromSnapshot=fn,bindObjective=fn}
 hooks :: obj{handlers=obj{},logger=undefined,opts=obj{}}
 artifactRegistry :: obj{register=fn,get=fn,list=fn,destroy=fn}
 artifactPreviewResolver :: obj{resolve=fn}"
 `;
 
 exports[`composition slot-registry — byte-identical hellgate fingerprint stable — combo: base flags + env gates together: combo: base flags + env gates together :: assembled 1`] = `
-"KEYS[30]: llm,registry,stream,promptSurfaceProfile,permission,messages,system,cwd,maxTurns,signal,searchPipeline,stickyModelStore,toolProfile,focusChain,objective,shadowVerify,runLedger,approvalStateMachine,hooks,artifactRegistry,artifactPreviewResolver,modePolicy,budgetMeter,lspDiagnosticsHookEnabled,secretCheckToolEnabled,readFileState,activeSkillCursor,contextEventsForTurn,mentionInjector,compactionEventEmit
-llm :: obj{model=str:"gpt-5.4",provider=str:"chatgpt-oauth",surfaceId=str:"openai-responses",transportId=str:"chatgpt-oauth",authMode=str:"ChatGPT subscription",env=<ambient-env-bag>,fetchImpl=fn,nowMs=fn,maxTokens=undefined,streamTimeoutMs=obj{firstChunkMs=num,idleMs=num},serviceTier=undefined,reasoningEffort=undefined,reasoningSummary=bool:false,reasoningSummaryDetail=undefined,reasoningVerbosity=undefined,reasoningCarryover=bool:false,reasoningCarryoverStore=undefined,debugOAuth=bool:false,memTokenFallback=undefined}
+"KEYS[31]: llm,registry,stream,promptSurfaceProfile,permission,messages,system,cwd,maxTurns,signal,searchPipeline,stickyModelStore,toolProfile,focusChain,shadowVerify,runLedger,approvalStateMachine,hooks,artifactRegistry,artifactPreviewResolver,modePolicy,budgetMeter,lspDiagnosticsHookEnabled,secretCheckToolEnabled,bgShellRegistry,contentCaptureEnabled,readFileState,activeSkillCursor,contextEventsForTurn,mentionInjector,compactionEventEmit
+llm :: obj{model=str:"gpt-5.6-terra",provider=str:"chatgpt-oauth",surfaceId=str:"openai-responses",transportId=str:"chatgpt-oauth",authMode=str:"ChatGPT subscription",env=<ambient-env-bag>,fetchImpl=fn,nowMs=fn,maxTokens=undefined,streamTimeoutMs=obj{firstChunkMs=num,idleMs=num},serviceTier=undefined,reasoningEffort=undefined,reasoningSummary=bool:false,reasoningSummaryDetail=undefined,reasoningVerbosity=undefined,reasoningCarryover=bool:false,reasoningCarryoverStore=undefined,debugOAuth=bool:false,memTokenFallback=undefined}
 registry :: obj{tools=obj{},origin=undefined}
 stream :: obj{emit=fn}
 promptSurfaceProfile :: obj{envPosture=str:"frozen",promptPack=str:"interactive",verifyStrategy=str:"none"}
 permission :: obj{mode=str:"acceptEdits"}
 messages :: arr[]
 system :: str[20762]
-cwd :: str:"/Users/songmin/quanta-codeagent-v3"
+cwd :: str:<cwd>
 maxTurns :: num
 signal :: obj{}
 searchPipeline :: obj{search=fn}
 stickyModelStore :: obj{store=obj{get=fn,set=fn,load=fn}}
 toolProfile :: obj{resolver=obj{resolve=fn},defaultName=str:"minimal"}
 focusChain :: obj{tracker=obj{setTodos=fn,tickTurn=fn,getInjection=fn,peekInjection=fn,getDriftWarning=fn,markDone=fn,snapshotTodos=fn,currentTurn=fn},reinjectEveryN=num}
-objective :: obj{set=fn,get=fn,updateStatus=fn,markUsageLimited=fn,addBlocker=fn,clearBlocker=fn,setNextActions=fn,markCriterion=fn,recordUsage=fn,list=fn,toSnapshot=fn,fromSnapshot=fn}
 shadowVerify :: obj{verify=fn}
 runLedger :: obj{start=fn,touch=fn,settle=fn,get=fn,list=fn,running=fn,waiting=fn,toSnapshot=fn,fromSnapshot=fn}
-approvalStateMachine :: obj{request=fn,settle=fn,expire=fn,cancel=fn,get=fn,list=fn,pending=fn,toSnapshot=fn,fromSnapshot=fn}
+approvalStateMachine :: obj{request=fn,settle=fn,expire=fn,cancel=fn,get=fn,list=fn,pending=fn,toSnapshot=fn,fromSnapshot=fn,bindObjective=fn}
 hooks :: obj{handlers=obj{},logger=undefined,opts=obj{}}
 artifactRegistry :: obj{register=fn,get=fn,list=fn,destroy=fn}
 artifactPreviewResolver :: obj{resolve=fn}
@@ -1523,6 +1585,8 @@ modePolicy :: obj{mode=str:"interactive",permission=obj{kind=str:"reviewer-backe
 budgetMeter :: obj{dials=obj{maxTurns=num,maxRetries=num,maxConsecutiveFailures=num},caps=obj{},exhaustion=str:"stop",clock=fn,startedAtMs=num,turns=num,modelCalls=num,toolCalls=num,shellCommands=num,testRuns=num,inputTokens=num,outputTokens=num,reasoningTokens=num,filesChanged=num,patchBytes=num,retries=num,consecutiveFailures=num,costUsdAccum=num,costUsdThisTurn=num,providerRateLimitRemainingPct=undefined}
 lspDiagnosticsHookEnabled :: bool:false
 secretCheckToolEnabled :: bool:false
+bgShellRegistry :: obj{register=fn,adopt=fn,get=fn,awaitHandle=fn,kill=fn,listOwned=fn,killOwned=fn,killAll=fn,size=fn,oldestId=fn}
+contentCaptureEnabled :: bool:false
 readFileState :: obj{mtimes=obj{},rangeHashes=undefined,rangeDedupCap=num}
 activeSkillCursor :: obj{ids=arr[]}
 contextEventsForTurn :: fn
