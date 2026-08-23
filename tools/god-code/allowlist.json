@@ -20,7 +20,6 @@
     "src/apps/cli/index.ts::main",
     "src/apps/cli/mcp-server-setup.ts::assembleAndServe",
     "src/apps/cli/repl/session-setup.ts::setupSession",
-    "src/browser/cdp-adapter.ts::createCdpBrowser",
     "src/browser/cdp/cdp-session.ts::createCdpSession",
     "src/codemode/runtime.ts::installToolsBinding",
     "src/git/cloud-branch-snapshot.ts::runSnapshot",

@@ -1,26 +1,115 @@
 /**
- * CDP adapter — element interaction: click / box / highlight / type / fill /
- * select / scroll / key / drag / raw mouse.
+ * CDP adapter — element interaction: click / bounding box / highlight / type /
+ * fill / select / scroll / key / drag / raw mouse.
  *
- * Every ref-taking method here resolves through the ACTIVE tab's refMap first
- * and fails closed (`element-not-found`) on a stale ref before it evaluates
- * anything — the invariant a navigation and a tab switch both rely on.
+ * Every ref-taking method resolves through the ACTIVE tab's refMap and fails
+ * closed with `element-not-found` on a stale ref BEFORE evaluating anything —
+ * the invariant both a navigation and a tab switch rely on.
  */
 
+import { err, ok, type Result } from "@/shared"
 import type { BrowserPort } from "../port"
-import type { BoundingBox, BrowserError, BrowserHandle, DragTarget, HighlightOpts, ScrollOpts, TypeOpts } from "../types"
+import type {
+  BoundingBox,
+  BrowserError,
+  BrowserHandle,
+  DragTarget,
+  HighlightOpts,
+  ScrollOpts,
+  TypeOpts,
+} from "../types"
 import { evalAction, refPoint, scrollDelta } from "./element-ops"
 import { keyEventBase, mouseClick, mouseDrag } from "./input-events"
-import { boxJs, clickJs, fillJs, highlightJs, scrollByJs, scrollToRefJs, selectJs, typeJs } from "./page-scripts"
-import { type CdpBrowserCtx, activeTab } from "./session-state"
-import { type Result, err, ok } from "@/shared"
+import {
+  boxJs,
+  clickJs,
+  fillJs,
+  highlightJs,
+  scrollByJs,
+  scrollToRefJs,
+  selectJs,
+  typeJs,
+} from "./page-scripts"
+import { activeTab, type CdpBrowserCtx } from "./session-state"
+
+/** Element bounding box. Hoisted out of the group object (its rect-shape
+ *  validation is the longest body here) so `interactionOps` stays thin. */
+const getBoundingBoxImpl = async (
+  ctx: CdpBrowserCtx,
+  h: BrowserHandle,
+  ref: string,
+  signal: AbortSignal | undefined,
+): Promise<Result<BoundingBox, BrowserError>> => {
+  const { live, evalValue } = ctx
+  const s = live(h)
+  if (!s.ok) return s
+  const path = activeTab(s.value).refMap.resolve(ref)
+  if (path === null) return err({ kind: "element-not-found", ref })
+  const r = await evalValue(s.value, boxJs(path), signal)
+  if (!r.ok) return r
+  const v = r.value as {
+    x?: unknown
+    y?: unknown
+    w?: unknown
+    h?: unknown
+    visible?: unknown
+  } | null
+  if (v === null) return err({ kind: "element-not-found", ref })
+  if (
+    typeof v.x !== "number" ||
+    typeof v.y !== "number" ||
+    typeof v.w !== "number" ||
+    typeof v.h !== "number" ||
+    typeof v.visible !== "boolean"
+  ) {
+    return err({ kind: "cdp-error", detail: "bounding box returned a malformed value" })
+  }
+  return ok({ x: v.x, y: v.y, w: v.w, h: v.h, visible: v.visible })
+}
+
+/** Synthesised keyDown+keyUp pair. Hoisted for the same reason as above. */
+const pressKeyImpl = async (
+  ctx: CdpBrowserCtx,
+  h: BrowserHandle,
+  key: string,
+  signal: AbortSignal | undefined,
+): Promise<Result<void, BrowserError>> => {
+  const { live } = ctx
+  const s = live(h)
+  if (!s.ok) return s
+  const opts = signal ? { signal } : undefined
+  const base = keyEventBase(key)
+  const down = await s.value.session.request(
+    "Input.dispatchKeyEvent",
+    { ...base, type: "keyDown" },
+    opts,
+  )
+  if (!down.ok) return down
+  const up = await s.value.session.request(
+    "Input.dispatchKeyEvent",
+    { ...base, type: "keyUp" },
+    opts,
+  )
+  return up.ok ? ok(undefined) : up
+}
 
 export const interactionOps = (
   ctx: CdpBrowserCtx,
-): Pick<BrowserPort, "click" | "getBoundingBox" | "highlight" | "type" | "fill" | "selectOption" | "scroll" | "pressKey" | "drag" | "mouseClickXY"> => {
+): Pick<
+  BrowserPort,
+  | "click"
+  | "getBoundingBox"
+  | "highlight"
+  | "type"
+  | "fill"
+  | "selectOption"
+  | "scroll"
+  | "pressKey"
+  | "drag"
+  | "mouseClickXY"
+> => {
   const { live, evalValue } = ctx
   return {
-
     async click(
       h: BrowserHandle,
       ref: string,
@@ -40,35 +129,8 @@ export const interactionOps = (
     // synchronous): an unknown ref fails closed with ZERO Runtime.evaluate. A
     // resolved-but-vanished element ⇒ element-not-found (boxJs returns null); a
     // malformed page value (non-numeric rect) ⇒ cdp-error (never a NaN box).
-    async getBoundingBox(
-      h: BrowserHandle,
-      ref: string,
-      signal?: AbortSignal,
-    ): Promise<Result<BoundingBox, BrowserError>> {
-      const s = live(h)
-      if (!s.ok) return s
-      const path = activeTab(s.value).refMap.resolve(ref)
-      if (path === null) return err({ kind: "element-not-found", ref })
-      const r = await evalValue(s.value, boxJs(path), signal)
-      if (!r.ok) return r
-      const v = r.value as {
-        x?: unknown
-        y?: unknown
-        w?: unknown
-        h?: unknown
-        visible?: unknown
-      } | null
-      if (v === null) return err({ kind: "element-not-found", ref })
-      if (
-        typeof v.x !== "number" ||
-        typeof v.y !== "number" ||
-        typeof v.w !== "number" ||
-        typeof v.h !== "number" ||
-        typeof v.visible !== "boolean"
-      ) {
-        return err({ kind: "cdp-error", detail: "bounding box returned a malformed value" })
-      }
-      return ok({ x: v.x, y: v.y, w: v.w, h: v.h, visible: v.visible })
+    async getBoundingBox(h: BrowserHandle, ref: string, signal?: AbortSignal) {
+      return getBoundingBoxImpl(ctx, h, ref, signal)
     },
 
     // TICKET-24 Wave A — cosmetic overlay highlight (read-only; mutates nothing
@@ -139,22 +201,7 @@ export const interactionOps = (
     },
 
     async pressKey(h: BrowserHandle, key: string, signal?: AbortSignal) {
-      const s = live(h)
-      if (!s.ok) return s
-      const opts = signal ? { signal } : undefined
-      const base = keyEventBase(key)
-      const down = await s.value.session.request(
-        "Input.dispatchKeyEvent",
-        { ...base, type: "keyDown" },
-        opts,
-      )
-      if (!down.ok) return down
-      const up = await s.value.session.request(
-        "Input.dispatchKeyEvent",
-        { ...base, type: "keyUp" },
-        opts,
-      )
-      return up.ok ? ok(undefined) : up
+      return pressKeyImpl(ctx, h, key, signal)
     },
 
     async drag(h: BrowserHandle, sourceRef: string, target: DragTarget, signal?: AbortSignal) {

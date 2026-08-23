@@ -1,25 +1,26 @@
 /**
  * CDP adapter — element/timing helpers shared by the operation groups.
  *
- * These were already at module scope in `cdp-adapter.ts` (deliberately: keeping
- * the polling loop and the ref-resolve/normalize shape out of the port methods
- * is what held their cognitive complexity down). They move here unchanged so
- * the interaction and page groups can both reach them after the split.
+ * These were already at module scope in `cdp-adapter.ts`, deliberately: keeping
+ * the polling loop and the resolve-then-normalize shape OUT of the port methods
+ * is what holds those methods under the cognitive-complexity ceiling. They move
+ * here unchanged so the interaction and page groups can both reach them.
  */
 
-import { readDevToolsEndpoint } from "../cdp/dev-tools-endpoint"
+import { err, ok, type Result } from "@/shared"
 import type { Clock, Scheduler } from "../cdp/ports"
 import type { BrowserError, ScrollOpts, WaitOpts } from "../types"
 import type { Pt } from "./input-events"
 import { rectJs, selectorPresentJs } from "./page-scripts"
-import { type EvalFn, type SessionState, activeTab } from "./session-state"
-import { type Result, err, ok } from "@/shared"
-
-}
+import { activeTab, type EvalFn, type SessionState } from "./session-state"
 
 /** Sleep `ms` on the injected scheduler, racing an optional abort and cancelling
  *  the timer on settle (same deterministic pattern as readDevToolsEndpoint). */
-export const sleep = (scheduler: Scheduler, ms: number, signal: AbortSignal | undefined): Promise<void> =>
+export const sleep = (
+  scheduler: Scheduler,
+  ms: number,
+  signal: AbortSignal | undefined,
+): Promise<void> =>
   new Promise<void>((resolve) => {
     const cancel = scheduler.schedule(ms, () => {
       signal?.removeEventListener("abort", onAbort)
@@ -40,7 +41,7 @@ interface PollDeps {
 
 /** Default `waitForSelector` deadline when the caller omits `opts.timeoutMs`.
  *  5s matches the CDP/Puppeteer convention for a single selector wait. */
-const DEFAULT_WAIT_SELECTOR_MS = 5_000
+export const DEFAULT_WAIT_SELECTOR_MS = 5_000
 
 /** Poll the page for `opts.selector` until present, timeout, or abort. Kept at
  *  module scope (out of the adapter object) so the loop's branching does not
@@ -64,7 +65,7 @@ export const pollForSelector = async (
     if (d.clock.now() - start >= timeoutMs) return err({ kind: "timeout", ms: timeoutMs })
     await sleep(d.scheduler, pollMs, signal)
   }
-
+}
 
 export const scrollDelta = (opts: ScrollOpts): [number, number] => {
   const amt = opts.amount ?? 400
@@ -78,7 +79,7 @@ export const scrollDelta = (opts: ScrollOpts): [number, number] => {
     default:
       return [0, amt]
   }
-
+}
 
 /** Resolve a ref, run the per-element JS, and normalize the `false`/not-found
  *  result — the shared shape for click/fill/select/scroll-to-ref. */
@@ -97,7 +98,7 @@ export const evalAction = async (
   return ok(undefined)
 }
 
-
+/** Resolve a ref to its element-center viewport point (for drag endpoints). */
 export const refPoint = async (
   s: SessionState,
   ref: string,

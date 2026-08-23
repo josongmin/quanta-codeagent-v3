@@ -1,29 +1,46 @@
 /**
  * CDP adapter — page-level operations: navigate, snapshot, screenshot, the
- * console/network drains, selector wait, element read, and the allowlisted raw
- * `cdp()` escape hatch.
+ * console/network drains, selector wait, element read, and the raw `cdp()`
+ * escape hatch.
  *
  * `cdp()` enforces the closed method allowlist; the internal evaluates and
- * `screenshot()` bypass it BY DESIGN (the allowlist gates the MODEL's surface,
- * not this implementation).
+ * `screenshot()` bypass it BY DESIGN — the allowlist gates the MODEL's surface,
+ * not this implementation.
  */
 
-import { isCdpMethodAllowed } from "../cdp-allowlist"
+import { err, ok, type Result } from "@/shared"
 import { COLLECT_SCRIPT, parseDomModel } from "../cdp/collect"
+import { isCdpMethodAllowed } from "../cdp-allowlist"
 import type { BrowserPort } from "../port"
 import { buildSnapshot } from "../snapshot"
-import type { BrowserError, BrowserHandle, ConsoleOpts, NetworkOpts, PageSnapshot, ReadOpts, WaitOpts } from "../types"
+import type {
+  BrowserError,
+  BrowserHandle,
+  ConsoleOpts,
+  NetworkOpts,
+  PageSnapshot,
+  ReadOpts,
+  WaitOpts,
+} from "../types"
 import { pollForSelector } from "./element-ops"
 import { readJs } from "./page-scripts"
-import { type CdpBrowserCtx, activeTab } from "./session-state"
-import { type Result, err, ok } from "@/shared"
+import { activeTab, type CdpBrowserCtx } from "./session-state"
 
 export const pageOps = (
   ctx: CdpBrowserCtx,
-): Pick<BrowserPort, "navigate" | "snapshot" | "screenshot" | "consoleMessages" | "networkMessages" | "wait" | "read" | "cdp"> => {
+): Pick<
+  BrowserPort,
+  | "navigate"
+  | "snapshot"
+  | "screenshot"
+  | "consoleMessages"
+  | "networkMessages"
+  | "wait"
+  | "read"
+  | "cdp"
+> => {
   const { deps, live, evalValue } = ctx
   return {
-
     async navigate(
       h: BrowserHandle,
       url: string,

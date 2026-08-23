@@ -1,13 +1,14 @@
 /**
- * CDP adapter — process lifecycle: availability probe, liveness, `spawn`, `close`.
+ * CDP adapter — process lifecycle: availability probe, liveness, spawn, close.
  *
- * This is the only group that MUTATES the session map, and the only one that
- * owns OS resources (the Chrome child process and its temp profile dir). The
- * teardown invariants it encodes — idempotent close, full teardown on BOTH
- * death modes before the map entry is reaped, rmrf even when the spawn itself
- * threw — are unchanged from the pre-split factory; see the inline audit notes.
+ * The only group that MUTATES the session map and the only one owning OS
+ * resources (the Chrome child process and its temp profile dir). Its teardown
+ * invariants are unchanged from the pre-split factory: close is idempotent,
+ * BOTH death modes run the full teardown before the map entry is reaped, and
+ * the profile dir is removed even when the spawn itself threw.
  */
 
+import { err, errMessage, ok, type Result } from "@/shared"
 import { readDevToolsEndpoint } from "../cdp/dev-tools-endpoint"
 import type { SpawnedProcess } from "../cdp/ports"
 import type { BrowserPort } from "../port"
@@ -16,8 +17,8 @@ import type { BrowserError, BrowserHandle, BrowserStartOpts } from "../types"
 import { connectAndEnable } from "./bring-up"
 import { resolveChromeBinary } from "./deps"
 import type { CdpBrowserCtx, SessionState, TabState } from "./session-state"
-import { type Result, err, errMessage, ok } from "@/shared"
 
+// Globally-unique profile-dir suffix (R4 audit [8]) — independent of the
 // per-instance seq so concurrent adapters sharing a profileRoot never collide.
 const uniqueNonce = (): string => `${process.pid}-${crypto.randomUUID().slice(0, 8)}`
 
@@ -34,7 +35,7 @@ const killQuietly = (proc: SpawnedProcess): void => {
 export const lifecycleOps = (
   ctx: CdpBrowserCtx,
 ): Pick<BrowserPort, "availability" | "isLive" | "spawn" | "close"> => {
-  const { deps, sessions, live } = ctx
+  const { deps, sessions } = ctx
   return {
     availability: () => (resolveChromeBinary(deps) !== null ? "chromium" : null),
 

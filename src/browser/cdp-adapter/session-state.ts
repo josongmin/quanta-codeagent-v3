@@ -1,24 +1,23 @@
 /**
- * CDP adapter — shared session state + the context its operation groups take.
+ * CDP adapter — shared session/tab state and the context its operation groups take.
  *
- * Split out of `cdp-adapter.ts` (god-function burndown): the factory there had
- * grown to 596 lines because every one of the 26 `BrowserPort` methods closed
- * over the same four values. Naming that closure as {@link CdpBrowserCtx} lets
- * the methods live in cohesive sibling modules (lifecycle / interaction / page /
- * tabs) while the factory keeps ONE job: build the state and compose the groups.
+ * Split out of `cdp-adapter.ts` (god-function burndown). All 26 `BrowserPort`
+ * methods closed over the same four values, which is why the factory had grown
+ * to 596 lines; naming that closure as {@link CdpBrowserCtx} lets them move into
+ * lifecycle / interaction / page / tab modules while the factory keeps one job.
  *
- * The tab invariants documented below are unchanged — they are upheld by
- * spawn/newTab/switchTab/closeTab exactly as before.
+ * The tab invariants below are unchanged — spawn/newTab/switchTab/closeTab
+ * uphold them exactly as before.
  */
 
+import type { Result } from "@/shared"
 import type { CdpSession } from "../cdp/cdp-session"
 import type { ConsoleBuffer } from "../cdp/console-buffer"
 import type { NetworkBuffer } from "../cdp/network-buffer"
 import type { SpawnedProcess } from "../cdp/ports"
-import { type RefMap, createRefMap } from "../snapshot"
+import { createRefMap, type RefMap } from "../snapshot"
 import type { BrowserError, BrowserHandle } from "../types"
 import type { CdpBrowserDeps } from "./deps"
-import type { Result } from "@/shared"
 
 /** TICKET-24 Wave B — one open tab. The `refMap` is PER-TAB so a ref minted on
  *  tab A fails closed when tab B is active (same invariant a navigation enforces).
@@ -79,14 +78,22 @@ export const resolveTab = (s: SessionState, idOrIndex: string): TabState | null 
     const i = Number(idOrIndex)
     if (i >= 0 && i < arr.length) return arr[i] ?? null
   }
+  return null
+}
 
-/** The closure a {@link CdpBrowserDeps}-built adapter shares with its operation
- *  groups. `createCdpBrowser` owns the mutable session map and the id counter;
- *  every group below receives them through this context instead of closing over
- *  them, which is what let the 596-line factory become one composition site. */
+export type EvalFn = (
+  s: SessionState,
+  expr: string,
+  signal?: AbortSignal,
+) => Promise<Result<unknown, BrowserError>>
+
+/** The closure a CDP adapter shares with its operation groups. `createCdpBrowser`
+ *  owns the mutable session map and the id counter; every group receives them
+ *  through this context instead of closing over them, which is what lets the
+ *  26 port methods live in cohesive modules instead of one 596-line factory. */
 export interface CdpBrowserCtx {
   readonly deps: CdpBrowserDeps
-  /** Live sessions keyed by handle id. Mutated by spawn/close ONLY. */
+  /** Live sessions keyed by handle id. Mutated by the lifecycle group ONLY. */
   readonly sessions: Map<string, SessionState>
   /** Handle -> live session, or a typed `closed` Err. */
   readonly live: (h: BrowserHandle) => Result<SessionState, BrowserError>
@@ -95,9 +102,3 @@ export interface CdpBrowserCtx {
   /** Next per-instance sequence number for a spawned profile dir. */
   readonly nextSeq: () => number
 }
-
-
-export type EvalFn = (
-  s: SessionState,
-  expr: string,
-  signal?: AbortSignal,
