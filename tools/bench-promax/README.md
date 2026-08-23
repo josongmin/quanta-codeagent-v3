@@ -15,7 +15,7 @@ knobs. Step 5 is the one that executes something — the pinned evaluator.
 | 2 assemble | `assemble-bundle.ts` | fetched tree + in-repo manifest | a bundle dir in the validator's shape |
 | 3 verify | `verify-bundle.ts` | bundle dir | `VERIFIED` + the manifest digest |
 | 4 prepare | `prepare-corpus.ts` | verified bundle dir | public tasks, grader bundle, sample manifests |
-| 5 run a gate | `run-gate.ts` | pinned checkout + campaign golden | `gate-receipt.json` + the gate verdict |
+| 5 run a gate | `run-gate.ts` | pinned checkout + campaign golden | `~/.quanta/bench/promax-campaign/<campaign id>/` — `gate-receipt.json` + the gate verdict |
 
 Steps 2 and 4 both re-run the step-3 validator internally, so a bundle can never
 be consumed without being verified; step 3 is listed separately because it is
@@ -172,11 +172,34 @@ Artifacts land in `--work-dir`: `preds.json`, `pass-rate.json`, and
 the run an operator most needs the evidence for. Exit is `0` only on a passing
 gate.
 
+**Point `--work-dir` at `~/.quanta/bench/promax-campaign/<campaign id>/`.** Steps
+1–4 each name a durable root; step 5 takes an operator-chosen directory, and that
+asymmetry has already cost evidence once — the aug-23 Gate 1 receipt was written
+to a session scratch directory and survived only by being copied out before the
+directory was reaped. The gate receipt is the campaign's *authoritative* record:
+PMX-06's gates are pure predicates over landed receipts, so a reaped receipt is a
+gate that has to be re-run, images and all. A temp directory is not a work-dir
+for this step.
+
 `--python` must be a dedicated interpreter of **Python ≥3.10**: the pinned
-evaluator uses PEP 604 (`int | None`) and a 3.9 interpreter dies with a
-SyntaxError that looks nothing like a grading failure. Evaluator concurrency is
-deliberately **not** a flag — it stays at the pinned `--workers 1` until a
-measured concurrency campaign changes it at the owner.
+evaluator uses PEP 604 (`int | None`) in an annotation, and on 3.9 it dies at
+**import** with
+
+```
+TypeError: unsupported operand type(s) for |: 'type' and 'NoneType'
+```
+
+— a traceback pointing at the evaluator's own source, which reads like a broken
+grader rather than a wrong interpreter.
+
+It is a **TypeError, not a SyntaxError** (this page said otherwise until it was
+measured on 3.9.6 against the pinned `test_run.py`, sha256 `af2ee720…`). The
+module parses and compiles cleanly; the annotation is only evaluated at import.
+So no syntax check can catch this — **only the version can**, which is why
+`run-gate.ts` checks the interpreter before spawning anything.
+
+Evaluator concurrency is deliberately **not** a flag — it stays at the pinned
+`--workers 1` until a measured concurrency campaign changes it at the owner.
 
 ---
 
