@@ -55,10 +55,15 @@ const build = (evaluator: OfficialGradeEvaluatorMeta) =>
         // A scored outcome must cite evidence — the receipt refuses a `resolved`
         // with no raw artifact, which is its own (correct) rule.
         rawArtifact: { path: "/out/pass-rate.json", sha256: "b".repeat(64), byteLength: 1041790 },
+        // The disposition-level summary is REQUIRED by the type. All-null is the
+        // "grader emitted nothing usable" shape, which is what these cases mean:
+        // they exercise the receipt-level evaluator IDENTITY guard, not the
+        // per-instance pass summary.
+        evaluator: { passed: null, model: null, golden: null },
       },
     ],
     evaluator,
-  } as Parameters<typeof buildOfficialGradeReceipt>[0])
+  })
 
 /** Every identity field, so the guard is proven field-by-field rather than by
  *  one representative. A guard that checks six of seven passes a single-field
