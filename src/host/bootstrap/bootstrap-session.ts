@@ -58,7 +58,9 @@ import {
 import { buildPromptState } from "./bootstrap-session/session-state-ports"
 import { resolveSessionResume } from "./bootstrap-session/startup-announcement"
 import { buildToolingBundle, parseOperatorCostDials } from "./bootstrap-session/tooling-bundle"
+import { resolveDurableLivePosture } from "./live-posture-runtime"
 import type {
+  BootstrapFeatures,
   SessionBootstrapDeps,
   SessionBootstrapResult,
   SessionFeatureConfig,
@@ -114,6 +116,20 @@ const buildSessionConfigPort = (cells: {
  *  seed images, startup logs, resume resolution, prompt state, session config
  *  port, and the MCP shutdown hook. This is the verbatim body of the inner
  *  `try` block; the caller wraps it in the MCP/proxy-cleanup `catch`. */
+/** Session teardown: stop the MCP fleet, THEN close the session egress proxy on
+ *  the SAME hook (the proxy exists ONLY to gate those clients' children, so its
+ *  lifetime is exactly the MCP fleet's — no-op when the proxy is OFF, byte-identical;
+ *  closing AFTER the clients stop avoids tearing the socket out from under an
+ *  in-flight child shutdown). Extracted so `assembleBootstrapResult` stays under the
+ *  god-function line cap. */
+const buildShutdownMcp = async (
+  features: BootstrapFeatures,
+  sessionProxy: PreparedSessionRuntime["sessionProxy"],
+): Promise<void> => {
+  await stopMcpClients(features.mcpClients)
+  await sessionProxy.close()
+}
+
 const assembleBootstrapResult = async (
   deps: SessionBootstrapDeps,
   runtime: SessionRuntimeConfigShape,
@@ -125,7 +141,7 @@ const assembleBootstrapResult = async (
     idleMonitor,
     rejectCounter,
     permission,
-    permissionModeState,
+    bindLivePosture,
     abort,
     effortStore,
     briefStore,
@@ -158,6 +174,13 @@ const assembleBootstrapResult = async (
 
     const resume = await resolveSessionResume(deps, runtime, slog, features, tooling.sessionId)
     const { cwd, idMeta, history, sessionId } = resume
+    // RFC-05 E3 (durable resume) — bind the ONE authority now the session id resolved.
+    const { permissionModeState, postureControl, questionGuard } = await resolveDurableLivePosture({
+      bind: bindLivePosture,
+      loadPermissionStore: deps.loadPermissionStore,
+      env: runtime.env,
+      sessionId,
+    })
 
     const {
       system,
@@ -181,15 +204,7 @@ const assembleBootstrapResult = async (
       model: runtime.model,
       provider: runtime.provider,
     })
-    const shutdownMcp = async (): Promise<void> => {
-      await stopMcpClients(features.mcpClients)
-      // H3 (jun-10) — close the session egress proxy on the SAME teardown hook
-      // that stops the MCP clients: the proxy exists ONLY to gate those clients'
-      // children, so its lifetime is exactly the MCP fleet's. No-op when the proxy
-      // is OFF (byte-identical). Closing AFTER the clients stop avoids tearing the
-      // socket out from under an in-flight child shutdown.
-      await sessionProxy.close()
-    }
+    const shutdownMcp = (): Promise<void> => buildShutdownMcp(features, sessionProxy)
 
     return {
       runtime,
@@ -201,8 +216,8 @@ const assembleBootstrapResult = async (
       slog,
       permission,
       permissionModeState,
-      postureControl: prepared.postureControl, // RFC-05 E4 (→ base.postureControl)
-      questionGuard: prepared.questionGuard, // RFC-05 E5 (→ AgentConfig.questionGuard)
+      postureControl, // RFC-05 E4 (→ base.postureControl)
+      questionGuard, // RFC-05 E5 (→ AgentConfig.questionGuard)
       idleMonitor,
       rejectCounter,
       effortStore,

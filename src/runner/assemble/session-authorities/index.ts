@@ -24,6 +24,7 @@ export {
   createInMemoryPosturePersistence,
   createPermissionModeAdapter,
   createSeededPosturePersistence,
+  createStoreSeededPosturePersistence,
   deriveManagedMode,
   LIVE_POSTURE_THREAD_ID,
   type PermissionModeSessionState,
@@ -33,7 +34,11 @@ export {
 // The host composition root calls this at bootstrap in place of the mode-only
 // `buildLivePermissionModeState` so `/posture`, the wire `session.posture.set`,
 // and the `request_user_input` guard all share the SAME live authority.
-export { buildLivePosture, type LivePosture } from "./build-posture-control"
+export {
+  buildLivePosture,
+  type LivePosture,
+  type LivePostureDurableStore,
+} from "./build-posture-control"
 // RFC-06 F1 — the single skill-runtime-authority builder. Surfaces construct the
 // per-session skill authority HERE (no surface-local discovery scan + per-consumer
 // disabled filter); it calls the REAL registry + admin-policy loaders and derives

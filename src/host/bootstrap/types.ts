@@ -20,7 +20,7 @@ import type { FollowUpQueue } from "@/agent/follow-up-queue"
 import type { PlanStore } from "@/agent/plan/state"
 import type { ImageBlock, LLMPort, Message } from "@/llm"
 import type { Metrics, StructuredLogger } from "@/observability"
-import type { PermissionContext, PermissionMode, ReviewerPort } from "@/permission"
+import type { PermissionContext, PermissionMode, PermissionStore, ReviewerPort } from "@/permission"
 import type {
   IdentityModeSessionState,
   PermissionModeSessionState,
@@ -473,6 +473,15 @@ export interface SessionBootstrapDeps {
    *  ports touch node:fs/node:os and live in the surface; the host carries
    *  the values through opaquely. */
   readonly buildIdleGuards: BuildIdleGuardsFactory
+  /** RFC-05 E3 (durable posture resume) — load the host-owned durable
+   *  {@link PermissionStore} (the process singleton) so the live posture authority
+   *  can be keyed by the RESOLVED per-session id and RESTORE the last effective
+   *  posture across a restart. OPTIONAL: a surface that omits it (headless / bench /
+   *  serve-stdio / brain-mode) keeps the legacy process-local in-memory seed
+   *  (byte-identical, nothing persists). Even when supplied, the durable path is
+   *  further gated by `QUANTA_POSTURE_DURABLE_RESUME` (default-OFF) at the assembly
+   *  seam, so shipping this dep alone never changes default behavior. */
+  readonly loadPermissionStore?: () => Promise<PermissionStore | undefined>
 }
 
 /** The result of `bootstrapSession` — everything the surface needs to wire

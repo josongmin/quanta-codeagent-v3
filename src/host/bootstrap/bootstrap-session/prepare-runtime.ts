@@ -19,20 +19,18 @@
  */
 
 import { createBriefStore, createEffortStore, parseBoolKnob, parseEffort } from "@/agent"
-import type { QuestionAvailabilityReader } from "@/agent/dispatch-guard"
 import { buildRouteEventForwarder } from "@/host/bootstrap/route-event-forwarder"
 import type { LLMPort } from "@/llm"
 import { StructuredLogger } from "@/observability"
 import type { PermissionContext } from "@/permission"
-import type { PostureControl } from "@/permission/posture/control"
-import type { PermissionModeSessionState } from "@/runner/assemble/session-authorities"
+import type { LivePostureDurableStore } from "@/runner/assemble/session-authorities"
 import { resolveNetworkProxyFromEnv } from "@/runner/knobs/knobs/network-proxy"
 import { openSessionEgressProxy } from "@/runtime/network-proxy"
 import { errMessage } from "@/shared"
 import type { AgentEvent } from "@/stream"
 // RFC-05 E4/E5 — the behavior-live posture RUNTIME (ONE authority behind the mode
 // accessor/adapter, the E4 control, and the E5 question guard).
-import { buildLivePostureRuntime } from "../live-posture-runtime"
+import { buildLivePostureRuntime, type LivePostureRuntime } from "../live-posture-runtime"
 import type { BootstrapFeatures, SessionBootstrapDeps, SessionRuntimeConfigShape } from "../types"
 import { failSessionBootstrap } from "./bootstrap-fault"
 import { probeCapabilityConsistency } from "./capability-probe"
@@ -48,12 +46,19 @@ export interface PreparedSessionRuntime {
   readonly slog: StructuredLogger
   readonly idleMonitor: ReturnType<SessionBootstrapDeps["buildIdleGuards"]>["idleMonitor"]
   readonly rejectCounter: ReturnType<SessionBootstrapDeps["buildIdleGuards"]>["rejectCounter"]
+  /** The forwarding permission-mode accessor handed to `buildLlm` in THIS
+   *  prologue (before the session id is resolved). It delegates to the ONE live
+   *  authority once {@link PreparedSessionRuntime.bindLivePosture} installs it;
+   *  before then (and if nothing ever binds) it reads the seed `initialMode` —
+   *  the same value the authority would publish pre-mutation, so byte-identical. */
   readonly permission: PermissionContext
-  readonly permissionModeState: PermissionModeSessionState
-  /** RFC-05 E4 — posture front-door control (SAME authority); → base.postureControl. */
-  readonly postureControl: PostureControl
-  /** RFC-05 E5 — live question guard (SAME authority); → base/AgentConfig.questionGuard. */
-  readonly questionGuard: QuestionAvailabilityReader
+  /** RFC-05 E3 — DEFERRED live-posture binding. Called ONCE by the assembler AFTER
+   *  `resolveSessionResume`, with the durable store option (gated) so the ONE
+   *  authority is keyed by the RESOLVED per-session id — durable restart resume, no
+   *  split-brain, no "session"-constant clobber. It installs the authority behind
+   *  the forwarding `permission` above and returns the E3 mode adapter, the E4
+   *  control, and the E5 question guard (all one authority, three views). */
+  readonly bindLivePosture: (durable?: LivePostureDurableStore) => LivePostureRuntime
   readonly abort: AbortController
   readonly effortStore: ReturnType<typeof createEffortStore>
   readonly briefStore: ReturnType<typeof createBriefStore>
@@ -106,8 +111,30 @@ export const prepareSessionRuntime = async (
   // RFC-05 E4/E5 — `buildLivePostureRuntime` composes ONE authority into the mode
   // accessor + adapter, the E4 `postureControl` (host `session.posture.set` + CLI
   // `/posture`, full lossless patch), and the E5 `questionGuard` — see that seam.
-  const { permission, permissionModeState, postureControl, questionGuard } =
-    buildLivePostureRuntime(runtime.mode)
+  //
+  // RFC-05 E3 (durable resume) — DEFER that construction until the assembler has
+  // resolved the per-session id: the ONE authority must be keyed by the RESOLVED
+  // session id (durable restart resume + no shared-"session"-constant clobber), and
+  // that id is minted DOWNSTREAM by `resolveSessionResume`. `buildLlm` below needs a
+  // stable `permission` NOW, so we hand it a forwarding accessor over a slot the
+  // assembler fills via `bindLivePosture`. No mode mutation occurs before the first
+  // turn, and the slot's pre-bind fallback is `runtime.mode` (the same seed the
+  // authority publishes pre-mutation) ⇒ byte-identical whether or not anything reads
+  // it in the window, and ONE authority (the binder's) — no split-brain.
+  const postureSlot: { runtime: LivePostureRuntime | undefined } = { runtime: undefined }
+  const permission: PermissionContext = {
+    get mode() {
+      return postureSlot.runtime?.permission.mode ?? runtime.mode
+    },
+    set mode(next) {
+      if (postureSlot.runtime !== undefined) postureSlot.runtime.permission.mode = next
+    },
+  }
+  const bindLivePosture = (durable?: LivePostureDurableStore): LivePostureRuntime => {
+    const live = buildLivePostureRuntime(runtime.mode, durable)
+    postureSlot.runtime = live
+    return live
+  }
   const abort = new AbortController()
   const effortStore = createEffortStore(parseEffort(runtime.env.QUANTA_EFFORT) ?? "default")
   // #17 (C3) — seed the brief-mode store from `QUANTA_BRIEF` (default-OFF). The
@@ -175,9 +202,7 @@ export const prepareSessionRuntime = async (
     idleMonitor,
     rejectCounter,
     permission,
-    permissionModeState,
-    postureControl,
-    questionGuard,
+    bindLivePosture,
     abort,
     effortStore,
     briefStore,

@@ -12,7 +12,7 @@ configurable: static
 owners: ["@songmin"]
 labels: ["rfc:aug22-05", "surface:cli", "default-off"]
 config_refs:
-  env: [QUANTA_POSTURE_SELECTOR]
+  env: [QUANTA_POSTURE_SELECTOR, QUANTA_POSTURE_DURABLE_RESUME]
 purpose: |
   RFC-05 E4 `/posture` CLI approval-posture selector — the surface realization of
   the `session.posture.set` verb. The web/SDK daemon dispatches the SAME verb
@@ -56,6 +56,15 @@ knobs:
       /posture selector gate (RFC-05 E4), read via readCliKnob at the repl
       composition root. ON ⇒ `/posture` registered + wired to the live posture
       authority. Unset ⇒ command absent, byte-identical.
+  - name: QUANTA_POSTURE_DURABLE_RESUME
+    where: src/host/bootstrap/live-posture-runtime.ts
+    default: false
+    purpose: |
+      Posture durable-resume gate (RFC-05 E3), read via gateOn at the bootstrap
+      assembler. ON (and a loadPermissionStore dep present) ⇒ the live posture
+      authority is backed by the on-disk permission store keyed by the resolved
+      session id, so a restart restores the last effective mode/sandbox/reviewer/
+      askOutsidePlan. Unset ⇒ in-memory seed, byte-identical legacy behavior.
 notes: |
   Durable posture persistence (E2 createStorePosturePersistence) is BUILT but the
   live path still seeds in-memory — the R3 follow-up wires the durable store so a

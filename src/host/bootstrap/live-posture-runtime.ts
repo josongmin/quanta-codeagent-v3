@@ -24,13 +24,15 @@
  */
 
 import { livePostureQuestionReader, type QuestionAvailabilityReader } from "@/agent/dispatch-guard"
-import type { PermissionContext } from "@/permission"
+import type { PermissionContext, PermissionStore } from "@/permission"
 import type { PostureControl } from "@/permission/posture/control"
 import type { PermissionMode } from "@/permission/types"
 import {
   buildLivePosture,
+  type LivePostureDurableStore,
   type PermissionModeSessionState,
 } from "@/runner/assemble/session-authorities"
+import { gateOn } from "@/shared"
 
 /** The composed live-posture runtime the bootstrap threads onto its result. */
 export interface LivePostureRuntime {
@@ -41,9 +43,14 @@ export interface LivePostureRuntime {
 }
 
 /** Build the live-posture runtime: ONE authority behind the mode accessor, the E4
- *  control, and the E5 question guard. */
-export const buildLivePostureRuntime = (initialMode: PermissionMode): LivePostureRuntime => {
-  const livePosture = buildLivePosture(initialMode)
+ *  control, and the E5 question guard. When `durable` is supplied the ONE authority
+ *  reads/persists through the on-disk permission store keyed by the unique session
+ *  id (RFC-05 E3 restart resume); absent ⇒ the legacy in-memory seed (byte-identical). */
+export const buildLivePostureRuntime = (
+  initialMode: PermissionMode,
+  durable?: LivePostureDurableStore,
+): LivePostureRuntime => {
+  const livePosture = buildLivePosture(initialMode, durable)
   const permissionModeState = livePosture.modeState
   const permission: PermissionContext = {
     get mode() {
@@ -59,4 +66,32 @@ export const buildLivePostureRuntime = (initialMode: PermissionMode): LivePostur
     postureControl: livePosture.control,
     questionGuard: livePostureQuestionReader(livePosture.authority),
   }
+}
+
+/**
+ * RFC-05 E3 (durable resume) — resolve the DURABLE binding for the deferred live
+ * posture and install it. GATED + default-OFF: only when the surface supplied a
+ * durable `loadPermissionStore` AND `QUANTA_POSTURE_DURABLE_RESUME` is on does the
+ * ONE authority read/persist through the on-disk permission store keyed by the
+ * RESOLVED per-session id (restart resume; a REAL per-session key — never the
+ * shared `LIVE_POSTURE_THREAD_ID` constant concurrent processes would clobber).
+ * OFF / no store ⇒ the legacy process-local in-memory seed ⇒ byte-identical. The
+ * `bind` closure is the prologue's `PreparedSessionRuntime.bindLivePosture` — this
+ * is where the forwarding `permission` handed to `buildLlm` gets its real backing
+ * (ONE authority, no split-brain). Extracted from the assembler to keep it under
+ * the god-function line cap.
+ */
+export const resolveDurableLivePosture = async (args: {
+  readonly bind: (durable?: LivePostureDurableStore) => LivePostureRuntime
+  readonly loadPermissionStore?: (() => Promise<PermissionStore | undefined>) | undefined
+  readonly env: Record<string, string | undefined>
+  readonly sessionId: string
+}): Promise<LivePostureRuntime> => {
+  const durableStore =
+    args.loadPermissionStore !== undefined && gateOn(args.env, "QUANTA_POSTURE_DURABLE_RESUME")
+      ? await args.loadPermissionStore()
+      : undefined
+  return args.bind(
+    durableStore !== undefined ? { store: durableStore, sessionId: args.sessionId } : undefined,
+  )
 }

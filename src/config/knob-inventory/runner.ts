@@ -292,6 +292,16 @@ export const RUNNER: readonly KnobInventoryEntry[] = [
     readSite: "apps/cli/slash/posture.ts",
   },
   {
+    envKey: "QUANTA_POSTURE_DURABLE_RESUME",
+    kind: "bool",
+    default: false,
+    group: "agent-feature",
+    home: "runtime-config",
+    describe:
+      "Posture durable-resume gate (RFC-05 E3) — when ON (and the surface supplies a loadPermissionStore dep), the live posture authority is backed by the on-disk permission store keyed by the resolved session id, so a restart restores the last effective mode/sandbox/reviewer/askOutsidePlan instead of reseeding from runtime.mode. Unset ⇒ in-memory seed, byte-identical legacy behavior; resolved via gateOn in host/bootstrap/live-posture-runtime.ts.",
+    readSite: "host/bootstrap/live-posture-runtime.ts",
+  },
+  {
     envKey: "QUANTA_SKILL_ACTIONS",
     kind: "bool",
     default: false,

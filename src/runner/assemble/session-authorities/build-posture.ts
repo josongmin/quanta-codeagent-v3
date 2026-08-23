@@ -30,8 +30,10 @@
  */
 
 import type { ControlPolicy } from "@/permission/permission-profile"
+import type { PermissionStore } from "@/permission/permission-store"
 import {
   createPostureAuthority,
+  createStorePosturePersistence,
   createThreadPostureBinding,
   type PostureAuthority,
 } from "@/permission/posture/authority"
@@ -181,6 +183,42 @@ export const createSeededPosturePersistence = (
     writeRequested: async (id, record) => {
       store.set(id, record)
     },
+  }
+}
+
+/**
+ * A durable, STORE-backed posture persistence port that SEEDS `initialMode` on an
+ * ABSENT record. E2's {@link createStorePosturePersistence} returns `undefined`
+ * for a thread with no persisted record, which the authority would decode to the
+ * current-behavior default — LOSING the `initialMode` seed (a default-mode
+ * REGRESSION on a clean machine). This wrapper injects the SAME lossless
+ * `{ mode: initialMode }` seed {@link createSeededPosturePersistence} uses, so a
+ * fresh machine is byte-identical to the legacy in-memory seed; only a PERSISTED
+ * record overrides. A CORRUPT record never reaches the seed branch — the store
+ * DROPS it at load (`getPosture` returns `undefined`), so the current-behavior
+ * seed stands (fail-closed to current behavior). Writes/durability delegate to the
+ * store adapter (persist-before-publish barrier preserved). The seed is scoped to
+ * the authority's own `threadId` so it never fabricates a record for a sibling
+ * (concurrent) session that legitimately has none.
+ */
+export const createStoreSeededPosturePersistence = (
+  store: PermissionStore,
+  threadId: string,
+  initialMode: PermissionMode,
+): PosturePersistencePort => {
+  const backing = createStorePosturePersistence(store)
+  return {
+    readRequested: (id) =>
+      backing.readRequested(id) ??
+      (id === threadId
+        ? {
+            requestedPatch: { mode: initialMode },
+            boundAskOutsidePlan: CURRENT_BEHAVIOR_ASK_OUTSIDE_PLAN,
+            revision: INITIAL_REVISION,
+            schemaVersion: POSTURE_SCHEMA_VERSION,
+          }
+        : undefined),
+    writeRequested: backing.writeRequested,
   }
 }
 
