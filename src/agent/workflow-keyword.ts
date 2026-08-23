@@ -21,6 +21,7 @@
  * continuation turn.
  */
 
+import { makeSyntheticUserMessage } from "@/agent/synthetic-user"
 import type { Message } from "@/llm"
 import type { WorkingMemory } from "@/memory"
 import { latestUserTextFromWm } from "./loop/context-assembler"
@@ -66,5 +67,6 @@ export const injectWorkflowKeywordNudge = (cfg: AgentConfig, wm: WorkingMemory<M
   if (!detectWorkflowKeyword(latestUserTextFromWm(wm))) return
   // NUDGE-ONLY — never flip the gate; only nudge toward an available tool.
   if (cfg.registry?.has(WORKFLOW_TOOL_NAME) !== true) return
-  wm.append({ role: "user", content: [{ type: "text", text: NUDGE_TEXT }] })
+  /* aug-23 §10.3 — harness-authored nudge, not operator speech. */
+  wm.append(makeSyntheticUserMessage("tool-nudge", [{ type: "text", text: NUDGE_TEXT }]))
 }

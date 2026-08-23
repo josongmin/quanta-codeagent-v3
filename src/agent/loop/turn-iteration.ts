@@ -433,7 +433,9 @@ export const injectTurnBudgetReminder = (
 ): void => {
   const text = turnBudgetReminderText(turn, cfg.maxTurns)
   if (text === null) return
-  wm.append({ role: "user", content: [{ type: "text", text }] })
+  /* aug-23 §10.3 — tagged so compaction does not summarize the harness's own
+     turn-budget reminder as something the operator said. */
+  wm.append(makeSyntheticUserMessage("turn-budget", [{ type: "text", text }]))
 }
 
 export const injectFocusChainMessage = (cfg: AgentConfig, wm: WorkingMemory<Message>): void => {

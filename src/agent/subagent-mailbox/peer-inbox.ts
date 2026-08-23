@@ -27,6 +27,7 @@
  * `QUANTA_TEAM_PEER_MSG` knob. Pure, deterministic, no clock / no randomness.
  */
 
+import { makeSyntheticUserMessage } from "@/agent/synthetic-user"
 import type { Message } from "@/llm"
 import { escapeBodyForLine } from "@/shared"
 import type { MailboxMessage, MailboxPort } from "./types"
@@ -117,7 +118,8 @@ export const createPeerInboxDrain = (
       const messages = port.read(agentId, { limit })
       if (messages.length === 0) return null
       const text = messages.map((m) => renderPeerLine(m, redact)).join("\n")
-      return { role: "user", content: [{ type: "text", text }] }
+      /* aug-23 §10.3 — peer mail is delivered BY the harness. */
+      return makeSyntheticUserMessage("peer-mail", [{ type: "text", text }])
     },
   }
 }

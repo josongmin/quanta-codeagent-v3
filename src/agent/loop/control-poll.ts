@@ -1,4 +1,5 @@
 import { rootMailboxRecipient } from "@/agent/subagent-mailbox"
+import { makeSyntheticUserMessage } from "@/agent/synthetic-user"
 import type { Message } from "@/llm"
 import { errMessage } from "@/shared"
 import { cancelSubagent } from "../control-op-handler"
@@ -38,7 +39,8 @@ const handleResumeAction = (cfg: AgentConfig): ConversationActionPollOutcome => 
   }
   return {
     kind: "injection",
-    message: { role: "user", content: [{ type: "text", text: buildResumeMessage(turn) }] },
+    /* aug-23 §10.3 — the resume preamble is harness prose about a prior turn. */
+    message: makeSyntheticUserMessage("resume", [{ type: "text", text: buildResumeMessage(turn) }]),
   }
 }
 

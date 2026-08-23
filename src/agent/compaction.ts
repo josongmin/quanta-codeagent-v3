@@ -1,6 +1,7 @@
 import type { ContentBlock, LLMPort, Message, SystemPromptInput } from "@/llm"
 import { assembleFromEvents } from "@/llm"
 import { emitOperatorNotice, errMessage, logger, type Result } from "@/shared"
+import { summaryRoleOf } from "./compaction/harness-speech"
 import {
   BackgroundSummarizationController,
   type BgCompactionConfig,
@@ -137,8 +138,13 @@ const renderBlock = (b: ContentBlock): string => {
   }
 }
 
-const renderForSummary = (messages: Message[]): string =>
-  messages.map((m) => `[${m.role}] ${m.content.map(renderBlock).join("\n")}`).join("\n\n")
+/** Render the transcript the summarizer sees.
+ *
+ *  aug-23 §10.3 — attribution goes through {@link summaryRoleOf}, so a harness
+ *  reminder is labelled `[harness]` instead of being presented as something the
+ *  human said. Exported because the hellgate drives it directly. */
+export const renderMessagesForSummary = (messages: Message[]): string =>
+  messages.map((m) => `[${summaryRoleOf(m)}] ${m.content.map(renderBlock).join("\n")}`).join("\n\n")
 
 export interface CompactInput {
   messages: Message[]
@@ -314,7 +320,7 @@ const summarizeWith = async (
     messages: [
       {
         role: "user",
-        content: [{ type: "text", text: renderForSummary(prefix) }],
+        content: [{ type: "text", text: renderMessagesForSummary(prefix) }],
       },
     ],
     system,

@@ -6,6 +6,16 @@ export type SyntheticUserMessageKind =
   | "context-change"
   | "mention-injection"
   | "focus-chain"
+  /* aug-23 §10.3 — the audit found ~8 harness injectors appending untagged
+     `role:"user"` messages, which compaction then summarized as human speech.
+     Kinds stay lowercase-hyphen: bench resume canonicalization matches
+     `[a-z-]+` on the kind segment. */
+  | "turn-budget"
+  | "tool-nudge"
+  | "resume"
+  | "peer-mail"
+  | "conversation-summary"
+  | "identity-reminder"
 
 export const SYNTHETIC_USER_MESSAGE_ID_PREFIX = "quanta:synthetic-user:"
 
