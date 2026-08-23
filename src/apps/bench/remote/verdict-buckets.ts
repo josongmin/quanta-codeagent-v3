@@ -1,3 +1,5 @@
+import { LEGACY_BUCKET_BY_STATE } from "@/runner/batch/eval/official-grade"
+import type { OfficialGradeState } from "@/runner/batch/eval/official-grade"
 import type { FullRemoteResult } from "./box-session"
 
 export interface VerdictBuckets {
@@ -40,4 +42,46 @@ export const absorbFullRemoteResult = (
   for (const [bucket, field] of VERDICT_PRECEDENCE) {
     for (const id of result[field] ?? []) placeIntoBucket(buckets, bucket, id)
   }
+}
+
+/** One instance as a family's OWN grader scored it. */
+export interface GradedInstance {
+  readonly instanceId: string
+  readonly state: OfficialGradeState
+}
+
+/**
+ * PMX-04 — project a family's official-state grades into the legacy four arrays.
+ *
+ * This lives HERE, with the rest of the bucket-placement logic, rather than in
+ * the family that produced the grades. A family knows what it MEASURED (the four
+ * official states); the four arrays are the remote layer's lossier wire shape,
+ * and deciding how a state squeezes into them is a transport concern. Keeping it
+ * here also means every family that ever grades on-box shares one answer instead
+ * of each shipping its own.
+ *
+ * The mapping itself is IMPORTED from PMX-03's canonical table — notably
+ * `ambiguous → errored`, never `unresolved`: a grader that declined to decide has
+ * observed no model failure, and scoring it as one would flatter the denominator.
+ *
+ * `emptyPatch` stays empty: "the model submitted nothing" is a property of the
+ * PREDICTIONS, not of a grade row, and an empty patch is graded as a real model
+ * miss rather than being siphoned out of the measurement.
+ */
+export const bucketsFromGradedInstances = (
+  graded: readonly GradedInstance[],
+): {
+  resolved: string[]
+  unresolved: string[]
+  errored: string[]
+  emptyPatch: string[]
+} => {
+  const out = {
+    resolved: [] as string[],
+    unresolved: [] as string[],
+    errored: [] as string[],
+    emptyPatch: [] as string[],
+  }
+  for (const g of graded) out[LEGACY_BUCKET_BY_STATE[g.state]].push(g.instanceId)
+  return out
 }

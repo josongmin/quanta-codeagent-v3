@@ -60,7 +60,7 @@ import {
 } from "../promax/settings"
 import { shq } from "../remote/box-session/shell"
 import { buildProMaxBoxGradeCommand } from "../harness/promax/box-grade"
-import { projectProMaxChunkVerdicts } from "../harness/promax/chunk-verdicts"
+import { projectProMaxGradedInstances } from "../harness/promax/chunk-verdicts"
 import {
   PROMAX_ONBOX_CHECKOUT_ROOT,
   PROMAX_ONBOX_VENV_ROOT,
@@ -248,8 +248,9 @@ export const PROMAX_PROFILE: DatasetFamilyProfile = {
   // layer 3e — PMX-04. The chunk's verdicts come from the evaluator's own
   // pass-rate document, NOT from the bench report: that report is written by a
   // patch-gen-only pass, in which every instance is an explicit "harness not
-  // wired" infra error by construction.
-  parseBoxGradeVerdicts: projectProMaxChunkVerdicts,
+  // wired" infra error by construction. It reports official STATES; the remote
+  // layer decides how those land in its four legacy arrays.
+  parseBoxGradeVerdicts: projectProMaxGradedInstances,
 
   // layer 4 — preflight. REAL and fail-closed, and it runs BEFORE a box is
   // provisioned on both the full-remote and pool roots.

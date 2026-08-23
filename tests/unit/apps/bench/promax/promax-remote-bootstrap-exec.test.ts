@@ -21,7 +21,12 @@
  */
 import { describe, expect, test } from "bun:test"
 import { proMaxRemoteBootstrap } from "@/apps/bench/profiles/promax-bootstrap"
-import { resolveDatasetFamilyProfile } from "@/apps/bench/profiles/registry"
+import {
+  DATASET_FAMILY_PROFILES,
+  registerDatasetFamilyProfile,
+  resolveDatasetFamilyProfile,
+} from "@/apps/bench/profiles/registry"
+import type { DatasetFamily } from "@/apps/bench/dataset-family-token"
 import {
   PROMAX_V1_SNAPSHOT,
   PROMAX_V1_UPSTREAM_PATHS,
@@ -155,17 +160,57 @@ describe("the executor is generic and fail-closed", () => {
 })
 
 describe("the REAL bootstrapBox callee carries it", () => {
-  test("setupBoxForFamily runs the family's REFUSAL before any carried command", async () => {
-    const rec = recorder()
-    const bootstrap = promaxBootstrap()
-    // 🔴 The ProMax profile's own `setupBox` is the ADMISSION GATE. It used to
-    // fire only AFTER the carried bootstrap had already fetched the gold-bearing
+  test("setupBoxForFamily runs the family's ADMISSION before any carried command", async () => {
+    // 🔴 The ordering clause: admission fires BEFORE the carried bootstrap. It
+    // used to fire only AFTER the bootstrap had already fetched the gold-bearing
     // upstream tree onto the box — a guard that ran after the leak. The recorded
     // SEQUENCE, not the error text, is what tells the two apart.
-    await expect(
-      setupBoxForFamily({ family: "promax", bootstrap, ssh: rec.ssh, log: () => {} }),
-    ).rejects.toThrow(/on-box ProMax bootstrap is not wired yet/)
-    expect(rec.commands).toEqual([])
+    //
+    // Driven by a family that actually refuses. ProMax used to be that family;
+    // PMX-04 wired its grader phase and the teardown bound to it, so ProMax now
+    // admits — and a refusal clause driven by an admitting family is a test of
+    // nothing.
+    const refusing = "pmx-exec-refusing-probe" as DatasetFamily
+    const drop = registerDatasetFamilyProfile({
+      ...DATASET_FAMILY_PROFILES.verified,
+      family: refusing,
+      reportPartitionKey: refusing,
+      admitBox: () => {
+        throw new Error("refused by its own family")
+      },
+      setupBox: async () => {
+        throw new Error("refused by its own family")
+      },
+    })
+    try {
+      const rec = recorder()
+      await expect(
+        setupBoxForFamily({
+          family: refusing,
+          bootstrap: promaxBootstrap(),
+          ssh: rec.ssh,
+          log: () => {},
+        }),
+      ).rejects.toThrow(/refused by its own family/)
+      expect(rec.commands).toEqual([])
+    } finally {
+      drop()
+    }
+  })
+
+  test("PMX-04 — ProMax now ADMITS, and its agent-phase commands actually reach the box", async () => {
+    const rec = recorder()
+    await setupBoxForFamily({
+      family: "promax",
+      bootstrap: promaxBootstrap(),
+      ssh: rec.ssh,
+      log: () => {},
+    })
+    // the absence probe is the FIRST thing the agent phase issues: the box is
+    // proven clean of the answer key before the agent is allowed to run.
+    expect(rec.commands[0]).toContain("/opt/quanta/promax/upstream")
+    // …and nothing gold-bearing ran: the checkout belongs to the grader phase.
+    expect(rec.commands.some((c: string) => c.includes("git"))).toBe(false)
   })
 
   test("BYTE-IDENTICAL CONTROL — verified through the SAME callee issues nothing", async () => {

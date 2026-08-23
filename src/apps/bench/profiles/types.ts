@@ -23,10 +23,7 @@
  * no longer imports family logic back out of `remote/box-session*`, which is what
  * left the remote-env and preflight ports with zero production consumers.
  */
-import type {
-  LegacyBucketName,
-  LegacyBucketProjection,
-} from "@/runner/batch/eval/official-grade"
+import type { GradedInstance } from "../remote/verdict-buckets"
 import type { PythonSwebenchResult } from "@/runner/batch/eval/verdict"
 import type { DatasetFamily } from "../dataset-family-token"
 import type { ProSwebenchOpts } from "../pro-swebench"
@@ -275,16 +272,15 @@ export interface BoxGradeInput {
 }
 
 /**
- * The four verdict id-sets a chunk reports, as produced by a family's own
- * grader.
+ * What a family's OWN grader measured, per instance.
  *
- * DERIVED from PMX-03's canonical projection rather than respelled: the four
- * names are declared in exactly one place, so this port cannot drift from the
- * shape the rest of the campaign uses. `droppedMissing` is excluded — it is a
- * property of projecting a RECEIPT (which knows what was assigned), and a chunk
- * grader has no assigned set to compare against.
+ * Official STATES, all four distinct — deliberately not the remote layer's
+ * lossier verdict arrays. A family reports what it measured; squeezing that into
+ * the wire buckets is a transport concern and lives with the rest of the bucket
+ * placement (`remote/verdict-buckets.ts`), so every family that grades on-box
+ * shares one answer.
  */
-export type FamilyBoxGradeVerdicts = Pick<LegacyBucketProjection, LegacyBucketName>
+export type FamilyBoxGradeVerdicts = readonly GradedInstance[]
 
 /**
  * The ONE per-family backend port. Every family-conditional behavior is a field
@@ -401,9 +397,8 @@ export interface DatasetFamilyProfile {
    */
   readonly boxGrade?: (input: BoxGradeInput) => string
   /**
-   * layer 3e — PMX-04. Project the fetched grade artifact into the chunk's four
-   * verdict id-sets, for a family whose verdicts do NOT come from the bench
-   * report.
+   * layer 3e — PMX-04. Read the fetched grade artifact into per-instance official
+   * states, for a family whose verdicts do NOT come from the bench report.
    *
    * Required whenever {@link boxGrade} is present: that family's report.json is
    * written by a patch-gen-only pass, so every instance in it is an explicit

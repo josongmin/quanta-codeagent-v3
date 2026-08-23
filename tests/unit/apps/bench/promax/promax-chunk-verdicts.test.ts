@@ -25,7 +25,15 @@
  * pool/dashboard bookkeeping.
  */
 import { describe, expect, test } from "bun:test"
-import { projectProMaxChunkVerdicts } from "@/apps/bench/harness/promax/chunk-verdicts"
+import { projectProMaxGradedInstances } from "@/apps/bench/harness/promax/chunk-verdicts"
+import { bucketsFromGradedInstances } from "@/apps/bench/remote/verdict-buckets"
+
+/** The chunk's four arrays, as the REMOTE layer builds them from the states this
+ *  module reports. Composed here so the tests below still pin the end-to-end
+ *  answer, while each side keeps its own job: the family says what it MEASURED,
+ *  the transport decides how that lands in four lossier buckets. */
+const projectProMaxChunkVerdicts = (text: string) =>
+  bucketsFromGradedInstances(projectProMaxGradedInstances(text))
 
 /** A pass-rate row shaped exactly as the pinned evaluator writes one. */
 const row = (instanceId: string, model: string, golden = "success"): Record<string, unknown> => ({

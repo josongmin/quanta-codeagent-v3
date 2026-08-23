@@ -703,13 +703,20 @@ describe("A-C — a refusing family refuses before the box is touched", () => {
     expect(okBox.commands).toContain(`'test' '!' '-e' '${GOLD_ROOT}'`)
   })
 
-  test("ADMISSION CANNOT MUTATE — the gate refuses ProMax having issued nothing at all", () => {
+  test("ADMISSION CANNOT MUTATE — the gate refuses having issued nothing at all", () => {
     // `assertFamilyAdmitsBox` takes no ssh, so this is structural rather than
     // observational — but drive it anyway, since a port that is never called is
     // the failure mode this whole round exists to kill.
-    expect(() => assertFamilyAdmitsBox({ family: "promax", log: () => {} })).toThrow(
-      /on-box ProMax bootstrap is not wired yet/,
+    //
+    // The subject is the SYNTHETIC refuser, not ProMax: PMX-04 wired ProMax's
+    // grader phase and its teardown, so ProMax now admits. A clause about how a
+    // REFUSAL behaves has to be driven by something that actually refuses, or it
+    // silently becomes a test of nothing.
+    expect(() => assertFamilyAdmitsBox({ family: REFUSING_FAMILY, log: () => {} })).toThrow(
+      new RegExp(REFUSAL),
     )
+    // PAIRED CONTROL: an admitting family passes the same gate.
+    expect(() => assertFamilyAdmitsBox({ family: "promax", log: () => {} })).not.toThrow()
   })
 
   test("DRIFT GUARD — admission and setupBox agree for EVERY registered family", async () => {
@@ -734,8 +741,10 @@ describe("A-C — a refusing family refuses before the box is touched", () => {
       expect(admitRefused, `${family}: admitBox and setupBox disagree`).toBe(setupRefused)
       if (admitRefused) refusers += 1
     }
-    // KNOWN-ITEM FLOOR — at least ProMax and the synthetic refuser really refuse,
-    // so the agreement above is not agreement between two no-ops.
-    expect(refusers).toBeGreaterThanOrEqual(2)
+    // KNOWN-ITEM FLOOR — the synthetic refuser really refuses, so the agreement
+    // above is not agreement between a set of no-ops. It used to be ProMax AND
+    // the synthetic; ProMax now admits (PMX-04 wired its grader phase and the
+    // teardown bound to it), so the floor is one.
+    expect(refusers).toBeGreaterThanOrEqual(1)
   })
 })

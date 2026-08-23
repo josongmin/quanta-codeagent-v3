@@ -43,6 +43,7 @@ import { presetRequiresLiveLspGrounding } from "../preset"
 import { resolveDatasetFamilyProfile } from "../profiles/registry"
 import type { SpawnFn, SpawnResult } from "./backend"
 import { assertRemoteAccessTokenFreshEnough, stripToAccessToken } from "./box-session/auth"
+import { bucketsFromGradedInstances } from "./verdict-buckets"
 import {
   parseFamilyBoxGradeVerdicts,
   runFamilyBoxGrade,
@@ -776,19 +777,11 @@ const executeGradeChunk = async (args: {
   const parsed: GradeChunkVerdicts =
     boxGradeText === undefined
       ? parseVerdicts(fetched.reportText)
-      : (() => {
-          // Copied into the chunk's own mutable arrays. The family's port returns
-          // the canonical READONLY projection; this is the one boundary where it
-          // becomes a chunk verdict record, and it decides nothing about which
-          // bucket a row is in.
-          const v = parseFamilyBoxGradeVerdicts(args.params.datasetFamily, boxGradeText)
-          return {
-            resolved: [...v.resolved],
-            unresolved: [...v.unresolved],
-            errored: [...v.errored],
-            emptyPatch: [...v.emptyPatch],
-          }
-        })()
+      : // The family reports official STATES; `verdict-buckets` owns how those
+        // land in the four legacy arrays. This module still classifies nothing.
+        bucketsFromGradedInstances(
+          parseFamilyBoxGradeVerdicts(args.params.datasetFamily, boxGradeText),
+        )
   const reportStatus = classifyReportText(fetched.reportText)
   if (reportStatus === "unparseable") {
     args.state.finalReportUnparseable = true
