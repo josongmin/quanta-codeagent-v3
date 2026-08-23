@@ -36,6 +36,7 @@
  * — git operations route through an injected port, not direct shell-out.
  */
 
+import { SYNTHETIC_USER_MESSAGE_ID_PREFIX } from "@/agent/synthetic-user"
 import type { Message } from "@/llm"
 import {
   forkSessionAtMessage,
@@ -364,6 +365,10 @@ const resolveTarget = (
   for (const m of messages) {
     const id = m.id
     if (typeof id !== "string") continue
+    /* aug-23 §10.3 — harness-authored reminders ride as `role:"user"`. They are
+       not something the operator said, so they are not addressable rewind
+       targets (they would also be dropped by any rewind past them anyway). */
+    if (id.startsWith(SYNTHETIC_USER_MESSAGE_ID_PREFIX)) continue
     if (id === targetId) {
       hit = id
       break
@@ -384,10 +389,21 @@ const resolveTarget = (
   if (idx >= 0) {
     const slice = messages.slice(idx + 1)
     dropMsgs = slice.length
-    for (const m of slice) if (m.role === "user") dropTurns += 1
+    /* Count only turns the OPERATOR took: a harness reminder is dropped (and is
+       counted in `dropMsgs`) but must not inflate the "you will lose N turns"
+       figure the destructive confirm shows. */
+    for (const m of slice) {
+      if (m.role !== "user") continue
+      if (typeof m.id === "string" && m.id.startsWith(SYNTHETIC_USER_MESSAGE_ID_PREFIX)) continue
+      dropTurns += 1
+    }
   }
   return { kind: "ok", fullId: hit, dropMsgs, dropTurns }
 }
+
+/** Test seam for {@link resolveTarget} (pure). Exported so the hellgate can
+ *  drive the resolver directly without a session store. */
+export const resolveTargetForTest = resolveTarget
 
 /** Format the destructive confirm prompt. The "drop" word is wrapped in
  *  ANSI bold-red so a TTY surface highlights the destructive bit; non-TTY
