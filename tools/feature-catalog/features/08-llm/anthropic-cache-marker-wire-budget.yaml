@@ -1,0 +1,87 @@
+id: anthropic-cache-marker-wire-budget
+title: "Anthropic `cache_control` marker budget enforced on the FINAL wire (not on system sections)"
+section: 8
+subsystem: LLM Anthropic Messages codec — prompt-cache breakpoint budget
+order: 321
+maturity: L4
+status: new
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [interactive, headless]
+configurable: n-a
+owners: ["@songmin"]
+labels: [surface:core, tier:core, correctness]
+depends_on: [prompt-cache-1h-ttl]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-08-23"
+  evidence:
+    cli: "every Anthropic-family request built by the shared codec — the CLI's default provider path"
+    web: "pure internal codec invariant on the request payload; no user-visible affordance on any surface"
+purpose: |
+  Anthropic rejects any request carrying more than 4 `cache_control` blocks with an
+  HTTP 400. Before this slice the budget was enforced in the WRONG LAYER, against the
+  WRONG DENOMINATOR, and its verdict was DISCARDED:
+
+  - `prompt-sections.ts` declares `MAX_CACHE_BREAKPOINTS = 4` and
+    `validateSectionsCacheBudget` counts only the SYSTEM SECTIONS.
+  - `buildAnthropicMessagesRequest` then ALWAYS adds one more marker via
+    `cacheConversationPrefix` (the trailing conversation breakpoint), which no budget
+    accounts for. 4 cached sections therefore produce 5 markers on the wire.
+  - `src/agent/prompt.ts` calls `validateSectionsCacheBudget(sections)` and THROWS THE
+    RESULT AWAY, so even the partial check it does perform cannot warn.
+
+  Reachability was measured honestly rather than assumed: `userAppend` currently has NO
+  producer in the loop, so the live preset tops out at 3 cached sections
+  (`base`, `project_md`, `session_ctx`) + 1 conversation marker = exactly 4. Today's
+  requests are AT the cap, not over it. That is precisely why this had to be locked at
+  the wire — the budget has ZERO headroom, and the moment a 4th cached section appears
+  EVERY Anthropic request 400s across all five providers that share this codec
+  (public, Bedrock, Vertex, Foundry, Mantle).
+
+  The fix counts markers on the ASSEMBLED request (`tools + system + messages`), reserves
+  the conversation marker first (it covers the longest prefix — all of system plus the
+  prior turns — so it is the highest-value breakpoint), and caps the system markers
+  against what remains.
+
+  WHICH markers are dropped is NOT a heuristic: `prompt-sections.ts` declares its section
+  order to BE the cache prefix, emitted most-stable-first
+  (`base` -> `project_md` -> `session_ctx` -> `user_append`). Keeping the LEADING markers
+  preserves the fallback ladder — when a late section drifts, an earlier breakpoint still
+  hits. Dropping a middle marker instead would strand every later breakpoint behind a
+  prefix that just changed. A dropped block always keeps its TEXT on the wire; only the
+  `cache_control` key is removed.
+
+  INERT at and under budget: a legal request is returned BY REFERENCE, byte-identical —
+  which is what the paired-control tests assert, so the cap can never degrade into a
+  blanket stripper.
+
+  Marker accounting is STRUCTURAL (walks properties), not a `JSON.stringify` substring
+  count. An adversarial audit of the first cut found that a stringify-based count could be
+  inflated by MESSAGE CONTENT: a message whose text is exactly `cache_control` serializes
+  as `"text":"cache_control"` and was counted as a marker, silently dropping a real system
+  breakpoint — a cache downgrade any user could trigger by typing, and enough such
+  messages would strip every system breakpoint. That regression is pinned by C1-8.
+evidence:
+  code:
+    - src/llm/anthropic-messages-codec.ts
+  adrs: []
+  tests:
+    unit:
+      - tests/unit/llm/anthropic-cache-marker-budget-hellgate.test.ts
+      - tests/unit/anthropic-cache.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  Not configurable: 4 is Anthropic's hard API limit, not a policy choice, so there is no
+  knob to expose. `MAX_ANTHROPIC_CACHE_MARKERS` is exported from the codec as the single
+  named authority.
+
+  KNOWN RESIDUAL (outside this lane's write set, recorded for the integration lane):
+  `src/agent/prompt.ts` still discards the `validateSectionsCacheBudget` verdict. The wire
+  cap now makes that check non-load-bearing for correctness, but as written it is a
+  silent no-op whose comment claims it "surfaces in dev".

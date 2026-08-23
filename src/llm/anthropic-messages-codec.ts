@@ -239,6 +239,88 @@ export const resolveAnthropicResponseFormat = (
   }
 }
 
+/** Anthropic's hard per-request limit: a request carrying more than this many
+ *  `cache_control` blocks is rejected with an HTTP 400. */
+export const MAX_ANTHROPIC_CACHE_MARKERS = 4
+
+/** Count the `cache_control` markers a built request part actually carries.
+ *
+ *  STRUCTURAL on purpose. An earlier cut counted occurrences of the literal
+ *  `"cache_control"` in `JSON.stringify(part)`, which a user could inflate
+ *  simply by typing: a message whose text is exactly `cache_control`
+ *  serializes as `"text":"cache_control"` and was counted as a marker, so the
+ *  budget silently dropped a real system breakpoint (and enough such messages
+ *  stripped every one of them). Marker accounting must read PROPERTIES, never
+ *  content bytes. */
+const countMarkers = (part: unknown): number => {
+  if (part === null || typeof part !== "object") return 0
+  if (Array.isArray(part)) {
+    let n = 0
+    for (const item of part) n += countMarkers(item)
+    return n
+  }
+  let n = 0
+  for (const [key, value] of Object.entries(part)) {
+    if (key === "cache_control") {
+      if (value !== undefined) n++
+      continue
+    }
+    n += countMarkers(value)
+  }
+  return n
+}
+
+/** Cap the FINAL request's `cache_control` markers at Anthropic's limit.
+ *
+ *  The budget MUST be counted here, on the assembled request, because the
+ *  marker sources are in different layers and no single upstream layer sees
+ *  the total: `prompt-sections.ts` allocates up to `MAX_CACHE_BREAKPOINTS`
+ *  SYSTEM sections, and {@link cacheConversationPrefix} then ALWAYS adds the
+ *  trailing conversation breakpoint on top. Four cached sections therefore
+ *  produce five markers on the wire — an unconditional 400 for every one of
+ *  the five providers sharing this codec.
+ *
+ *  WHICH markers are dropped is not a heuristic: `prompt-sections.ts` declares
+ *  its section order to BE the cache prefix, emitted most-stable-first
+ *  (`base` -> `project_md` -> `session_ctx` -> `user_append`). Keeping the
+ *  LEADING markers preserves the fallback ladder — when a late section drifts,
+ *  an earlier breakpoint still hits. Dropping a middle marker instead would
+ *  strand every later breakpoint behind a prefix that just changed.
+ *
+ *  The conversation marker is never dropped: it covers the longest prefix (all
+ *  of system plus the prior turns), so it is the single highest-value
+ *  breakpoint in the request.
+ *
+ *  INERT at and under budget: a legal request is returned by reference,
+ *  byte-identical. Only the offending blocks lose their `cache_control` key —
+ *  the block and its text always stay on the wire. */
+const capSystemCacheMarkers = (
+  system: string | Anthropic.TextBlockParam[] | undefined,
+  reserved: number,
+): string | Anthropic.TextBlockParam[] | undefined => {
+  if (system === undefined || typeof system === "string") return system
+  const budget = MAX_ANTHROPIC_CACHE_MARKERS - reserved
+  let seen = 0
+  let over = false
+  for (const block of system) {
+    if (block.cache_control === undefined) continue
+    seen++
+    if (seen > budget) {
+      over = true
+      break
+    }
+  }
+  if (!over) return system
+  let kept = 0
+  return system.map((block) => {
+    if (block.cache_control === undefined) return block
+    kept++
+    if (kept <= budget) return block
+    const { cache_control: _dropped, ...rest } = block
+    return rest as Anthropic.TextBlockParam
+  })
+}
+
 export const buildAnthropicMessagesRequest = (
   model: string,
   maxTokens: number,
@@ -265,6 +347,25 @@ export const buildAnthropicMessagesRequest = (
   // thinking is active so the request defaults to the required temperature=1
   // (an explicitly `disabled`/absent thinking turn keeps the caller's value).
   const thinkingActive = input.thinking !== undefined && input.thinking.type !== "disabled"
+  // Cache-marker budget — see `capSystemCacheMarkers`. The two marker sources
+  // must be built BEFORE the request literal so the total can be counted; the
+  // conversation breakpoint is reserved first (it covers the longest prefix)
+  // and the system sections are capped against what is left. `tools` is counted
+  // too: the tool mapping below emits no `cache_control` today, so this is
+  // structurally 0, but counting it keeps the invariant on the ACTUAL request
+  // rather than on an assumption about which parts may carry markers.
+  const cachedMessages = cacheConversationPrefix(toAnthropicMessages(input.messages), cacheTtl)
+  const builtTools =
+    effectiveTools ??
+    input.tools.map((t) => ({
+      name: t.name,
+      description: t.description,
+      input_schema: t.input_schema as Anthropic.Tool.InputSchema,
+    }))
+  const reserved = countMarkers(cachedMessages) + countMarkers(builtTools)
+  const cappedSystem = input.system
+    ? capSystemCacheMarkers(toAnthropicSystem(input.system, cacheTtl), reserved)
+    : undefined
   return {
     model,
     max_tokens: maxTokens,
@@ -273,7 +374,7 @@ export const buildAnthropicMessagesRequest = (
     // omitted (byte-identical). The installed @anthropic-ai/sdk@0.40.1 type lacks
     // the field, so the same scoped-cast style as `thinking` below is used.
     ...(tier !== undefined ? ({ service_tier: tier } as { service_tier: string }) : {}),
-    ...(input.system ? { system: toAnthropicSystem(input.system, cacheTtl) } : {}),
+    ...(cappedSystem !== undefined ? { system: cappedSystem } : {}),
     // The `thinking` object is already the correct wire JSON for every arm
     // (`enabled` / `adaptive` / `disabled`). The installed `@anthropic-ai/sdk`
     // @0.40.1 types `thinking` as `enabled | disabled` only — it has NO
@@ -282,19 +383,13 @@ export const buildAnthropicMessagesRequest = (
     // satisfy the pinned SDK type until a bump adds the adaptive arm. Same
     // in-house style as the raw-SSE `as unknown as` narrow in `anthropic.ts`.
     ...(input.thinking ? { thinking: input.thinking as Anthropic.ThinkingConfigParam } : {}),
-    messages: cacheConversationPrefix(toAnthropicMessages(input.messages), cacheTtl),
+    messages: cachedMessages,
     // ADR-0469 — when a schema-forced response is requested, the SINGLE forced
     // tool (whose input_schema IS the json schema) replaces the caller's tool
     // list; otherwise the caller's tools pass through unchanged (byte-identical
     // default-OFF: `forced` is undefined ⇒ `effectiveTools` is undefined ⇒ this
     // maps the caller's `input.tools` exactly as before).
-    tools:
-      effectiveTools ??
-      input.tools.map((t) => ({
-        name: t.name,
-        description: t.description,
-        input_schema: t.input_schema as Anthropic.Tool.InputSchema,
-      })),
+    tools: builtTools,
     ...(toolChoice !== undefined ? { tool_choice: toolChoice } : {}),
     // Per-call sampling temperature (repair-breadth fanout). Present ⇒ spread
     // Anthropic's `temperature` field; absent (or thinking active, see above) ⇒

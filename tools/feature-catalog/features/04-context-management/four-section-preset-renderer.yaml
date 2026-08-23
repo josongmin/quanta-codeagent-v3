@@ -47,3 +47,10 @@ notes: |
   PromptSection.cache 가 `false` 인 entry 는 breakpoint 를 소비하지 않음
   (`validateSectionsCacheBudget` 의 count 로 honor). 4-section 위반은 by-construction
   불가능하지만 future preset 확장 대비 dev-mode guard 로 유지.
+
+  주의 — 이 4는 SECTION 축이지 WIRE 축이 아니다. codec 이 `cacheConversationPrefix` 로
+  대화 breakpoint 를 항상 하나 더 찍으므로, cached section 4개는 wire 에서 마커 5개가 되어
+  Anthropic 이 400 으로 거절한다. 실제 예산 강제는 최종 request 에서 이뤄진다:
+  [[anthropic-cache-marker-wire-budget]] (`MAX_ANTHROPIC_CACHE_MARKERS`).
+  또한 `src/agent/prompt.ts` 는 `validateSectionsCacheBudget` 의 반환값을 버리므로
+  이 dev-mode guard 는 현재 경고를 내지 못한다.

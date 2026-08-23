@@ -92,7 +92,7 @@ describe("toAnthropicSystem — SystemBlock[] → text params + cache_control", 
     }
   })
 
-  test("exactly ONE cache_control breakpoint even with multiple cache:true blocks present", async () => {
+  test("EVERY `cache:true` block is stamped — the mapping is per-block, not last-only", async () => {
     const system: SystemBlock[] = [
       { type: "text", text: "p0", cache: true },
       { type: "text", text: "p1" },
