@@ -81,16 +81,25 @@ interface DaemonState {
   inFlight: boolean
 }
 
-export const createSideAgentDaemonRegistry = (
-  opts: SideAgentDaemonOpts,
-): SideAgentDaemonRegistry => {
+/**
+ * The registry's shared state: the daemon table and the helpers each operation
+ * resolves through. Split out of `createSideAgentDaemonRegistry`
+ * (god-function burndown).
+ */
+/** The registry's tables and the cheap derivations over them. */
+const registryTables = (opts: SideAgentDaemonOpts) => {
+  /** The factory's MUTABLE state. `let` bindings cannot cross a function
+   *  boundary by value, so they live here and the groups mutate in place —
+   *  observationally identical to the closure they replace. */
+  const mut = {
+    idCounter: 0,
+  }
   const maxConcurrent = opts.maxConcurrent ?? DEFAULT_MAX_CONCURRENT
   const maxFindings = opts.maxFindings ?? DEFAULT_MAX_FINDINGS
   const maxRetained = opts.maxRetained ?? DEFAULT_MAX_RETAINED
   const daemons = new Map<string, DaemonState>()
   const findingsLog: SideAgentFinding[] = []
-  let idCounter = 0
-  const mintId = (): string => opts.idGen?.() ?? `sa-${++idCounter}`
+  const mintId = (): string => opts.idGen?.() ?? `sa-${++mut.idCounter}`
 
   const runningCount = (): number => {
     let n = 0
@@ -105,6 +114,24 @@ export const createSideAgentDaemonRegistry = (
     for (const d of daemons.values()) if (d.status === "running") ids.push(d.id)
     return ids
   }
+  return {
+    opts,
+    mut,
+    maxConcurrent,
+    maxFindings,
+    maxRetained,
+    daemons,
+    findingsLog,
+    mintId,
+    runningCount,
+    runningIds,
+  }
+}
+
+/** Daemon lifecycle: terminal transition, pruning, finding publication and
+ *  the post-pass bounds. */
+const registryLifecycle = (ctx: ReturnType<typeof registryTables>) => {
+  const { opts, maxFindings, maxRetained, daemons, findingsLog } = ctx
 
   /** Tear a daemon down to a terminal status. Idempotent. */
   const finish = (id: string, status: SideAgentStatus): boolean => {
@@ -177,6 +204,14 @@ export const createSideAgentDaemonRegistry = (
       if (opts.now() - lastSignal >= d.spec.idleReapMs) finish(d.id, "idle-reaped")
     }
   }
+  return { finish, pruneTerminal, publish, applyPostPassBounds }
+}
+
+/** Concurrency scheduling: the wake pump and its trigger arming. */
+const registryScheduling = (
+  ctx: ReturnType<typeof registryTables> & ReturnType<typeof registryLifecycle>,
+) => {
+  const { opts, daemons, finish, pruneTerminal, publish, applyPostPassBounds } = ctx
 
   /** Run ONE bounded pass for daemon `id` (drops overlapping wakes). */
   const wake = async (id: string): Promise<void> => {
@@ -225,7 +260,25 @@ export const createSideAgentDaemonRegistry = (
       })
     }
   }
+  return { wake, armTrigger }
+}
 
+/** Assemble the chained builders into the single shared context. */
+const registryState = (opts: SideAgentDaemonOpts) => {
+  const p0 = registryTables(opts)
+  const p1 = registryLifecycle({ ...p0 })
+  const p2 = registryScheduling({ ...p0, ...p1 })
+  return { ...p0, ...p1, ...p2 }
+}
+
+/** The state every operation group shares, inferred from {@link registryState} so it
+ *  can never drift from what that function actually builds. */
+type RegistryCtx = ReturnType<typeof registryState>
+
+/** Spawn a side-agent daemon: allocate its record, start it, and register it
+ *  so the query and stop paths can find it. */
+const spawnOps = (ctx: RegistryCtx): Pick<SideAgentDaemonRegistry, "spawn"> => {
+  const { opts, maxConcurrent, daemons, mintId, runningCount, pruneTerminal, armTrigger } = ctx
   return {
     spawn(spec: SideAgentSpec): string {
       validateSpec(spec, opts.events !== undefined)
@@ -262,7 +315,15 @@ export const createSideAgentDaemonRegistry = (
       pruneTerminal()
       return id
     },
+  }
+}
 
+/** Read-only views over the registered daemons. */
+const queryOps = (
+  ctx: RegistryCtx,
+): Pick<SideAgentDaemonRegistry, "findings" | "list" | "teamIdle" | "idleSince"> => {
+  const { opts, daemons, findingsLog, runningIds } = ctx
+  return {
     findings(o?: { since?: number }): ReadonlyArray<SideAgentFinding> {
       const since = o?.since
       return findingsLog.filter((f) => since === undefined || f.at > since)
@@ -283,6 +344,23 @@ export const createSideAgentDaemonRegistry = (
       return snaps
     },
 
+    teamIdle(): boolean {
+      // The members are the RUNNING daemons. No barrier wired ⇒ false (team-idle
+      // is opt-in). Empty team ⇒ the barrier's own `teamIdle` returns false
+      // (never report a vacuous team as done).
+      return opts.idleBarrier?.teamIdle(runningIds()) ?? false
+    },
+
+    idleSince(): number | undefined {
+      return opts.idleBarrier?.idleSince(runningIds())
+    },
+  }
+}
+
+/** Termination — single daemon and whole-registry. */
+const stopOps = (ctx: RegistryCtx): Pick<SideAgentDaemonRegistry, "stop" | "stopAll"> => {
+  const { daemons, finish, pruneTerminal } = ctx
+  return {
     stop(id: string): boolean {
       if (!daemons.has(id)) return false
       finish(id, "stopped")
@@ -301,16 +379,16 @@ export const createSideAgentDaemonRegistry = (
       pruneTerminal()
       return n
     },
+  }
+}
 
-    teamIdle(): boolean {
-      // The members are the RUNNING daemons. No barrier wired ⇒ false (team-idle
-      // is opt-in). Empty team ⇒ the barrier's own `teamIdle` returns false
-      // (never report a vacuous team as done).
-      return opts.idleBarrier?.teamIdle(runningIds()) ?? false
-    },
-
-    idleSince(): number | undefined {
-      return opts.idleBarrier?.idleSince(runningIds())
-    },
+export const createSideAgentDaemonRegistry = (
+  opts: SideAgentDaemonOpts,
+): SideAgentDaemonRegistry => {
+  const ctx = registryState(opts)
+  return {
+    ...spawnOps(ctx),
+    ...queryOps(ctx),
+    ...stopOps(ctx),
   }
 }

@@ -91,12 +91,27 @@ const parseMessage = (raw: string): CdpMessage | null => {
  *  the Chrome DevTools Protocol default request timeout. */
 const DEFAULT_CDP_COMMAND_MS = 30_000
 
-export const createCdpSession = (deps: CdpSessionDeps): CdpSession => {
+type EventSub = (params: Readonly<Record<string, unknown>>) => void
+
+/**
+ * The CDP session's shared state: the connection, the pending-request map, the
+ * subscriber sets, and the routing/liveness flags. Split out of
+ * `createCdpSession` (god-function burndown); the flags live in a mutable
+ * holder because a `let` binding cannot cross a function boundary by value.
+ */
+/** The connection's tables: pending replies, event waiters and subscribers,
+ *  plus the liveness flags. */
+const sessionTables = (deps: CdpSessionDeps) => {
+  /** The factory's MUTABLE state. `let` bindings cannot cross a function
+   *  boundary by value, so they live here and the groups mutate in place —
+   *  observationally identical to the closure they replace. */
+  const mut = {
+    seq: 0,
+    disposed: false,
+    dead: false,
+    pageSessionId: null as string | null,
+  }
   const defaultTimeoutMs = deps.defaultTimeoutMs ?? DEFAULT_CDP_COMMAND_MS
-  let seq = 0
-  let disposed = false
-  let dead = false
-  let pageSessionId: string | null = null
   const pending = new Map<number, (r: Result<unknown, BrowserError>) => void>()
   const eventWaiters = new Map<string, EventWaiter[]>()
   type EventSub = (params: Readonly<Record<string, unknown>>) => void
@@ -108,14 +123,21 @@ export const createCdpSession = (deps: CdpSessionDeps): CdpSession => {
   /** Fail-fast on a detached/crashed page target — settle everything in flight
    *  instead of letting each call grind to its full timeout (R3 audit [5]). */
   const deadCbs: Array<() => void> = []
+  return { deps, mut, defaultTimeoutMs, pending, eventWaiters, eventSubs, DEAD_ERR, deadCbs }
+}
+
+/** Inbound routing: decide what a frame IS (reply / event / death) and deliver
+ *  it to whoever is waiting. */
+const sessionRouting = (ctx: ReturnType<typeof sessionTables>) => {
+  const { deps, mut, pending, eventWaiters, eventSubs, DEAD_ERR, deadCbs } = ctx
   const markDead = (): void => {
-    if (dead) return
-    dead = true
+    if (mut.dead) return
+    mut.dead = true
     for (const settle of [...pending.values()]) settle(DEAD_ERR())
     pending.clear()
     for (const waiters of [...eventWaiters.values()]) for (const w of [...waiters]) w.onClosed()
     eventWaiters.clear()
-    eventSubs.clear() // persistent subscribers stop on a dead session
+    eventSubs.clear() // persistent subscribers stop on a mut.dead session
     for (const cb of [...deadCbs]) cb() // notify the adapter (R3 audit [7])
   }
 
@@ -124,12 +146,12 @@ export const createCdpSession = (deps: CdpSessionDeps): CdpSession => {
     // Inspector.detached = devtools-side detach of the attached page session
     // (graceful) — arrives on our session in flat mode (R3 audit [4]).
     if (msg.method === "Inspector.detached")
-      return pageSessionId === null || msg.sessionId === pageSessionId
-    if (msg.method !== "Target.detachedFromTarget" || pageSessionId === null) return false
+      return mut.pageSessionId === null || msg.sessionId === mut.pageSessionId
+    if (msg.method !== "Target.detachedFromTarget" || mut.pageSessionId === null) return false
     const p = msg.params
     const sid =
       typeof p === "object" && p !== null ? (p as { sessionId?: unknown }).sessionId : undefined
-    return sid === pageSessionId
+    return sid === mut.pageSessionId
   }
 
   const routeReply = (id: number, msg: CdpMessage): void => {
@@ -156,7 +178,7 @@ export const createCdpSession = (deps: CdpSessionDeps): CdpSession => {
   // Event from our page session? (a browser-level or foreign-target event with
   // the same method name must not satisfy a page-scoped waiter — R3 audit [4].)
   const isOurSession = (sessionId: unknown): boolean =>
-    pageSessionId === null || sessionId === pageSessionId
+    mut.pageSessionId === null || sessionId === mut.pageSessionId
 
   const deliverToWaiters = (method: string, params: Readonly<Record<string, unknown>>): void => {
     const waiters = eventWaiters.get(method)
@@ -193,8 +215,25 @@ export const createCdpSession = (deps: CdpSessionDeps): CdpSession => {
   })
 
   // Transport drop (socket close / process death) has no CDP event — hook it
-  // straight to markDead so a dead connection fails fast (R3 audit [1]).
+  // straight to markDead so a mut.dead connection fails fast (R3 audit [1]).
   deps.conn.onClose?.(markDead)
+  return {
+    markDead,
+    isTargetGone,
+    routeReply,
+    normalizeParams,
+    isOurSession,
+    deliverToWaiters,
+    deliverToSubs,
+    routeEvent,
+  }
+}
+
+/** Arm the settle path that resolves a pending request or times it out. */
+const sessionSettle = (
+  ctx: ReturnType<typeof sessionTables> & ReturnType<typeof sessionRouting>,
+) => {
+  const { deps } = ctx
 
   const armSettle = <T>(
     timeoutMs: number,
@@ -223,16 +262,35 @@ export const createCdpSession = (deps: CdpSessionDeps): CdpSession => {
     signal?.addEventListener("abort", onAbort, { once: true })
     return { settle, aborted: false }
   }
+  return { armSettle }
+}
 
+/** Assemble the chained builders into the single shared context. */
+const sessionState = (deps: CdpSessionDeps) => {
+  const p0 = sessionTables(deps)
+  const p1 = sessionRouting({ ...p0 })
+  const p2 = sessionSettle({ ...p0, ...p1 })
+  return { ...p0, ...p1, ...p2 }
+}
+
+/** The state every operation group shares, inferred from {@link sessionState} so it
+ *  can never drift from what that function actually builds. */
+type SessionCtx = ReturnType<typeof sessionState>
+
+/** The two awaiting paths — a method call and an event wait. Both settle
+ *  through the same pending bookkeeping, so a socket death rejects each one
+ *  rather than leaving it hanging. */
+const requestOps = (ctx: SessionCtx): Pick<CdpSession, "request" | "waitForEvent"> => {
+  const { deps, defaultTimeoutMs, pending, eventWaiters, DEAD_ERR, armSettle, mut } = ctx
   return {
     request(
       method: string,
       params?: Readonly<Record<string, unknown>>,
       opts?: CdpRequestOpts,
     ): Promise<Result<unknown, BrowserError>> {
-      if (disposed) return Promise.resolve(err({ kind: "closed" }))
-      if (dead) return Promise.resolve(DEAD_ERR())
-      const id = ++seq
+      if (mut.disposed) return Promise.resolve(err({ kind: "closed" }))
+      if (mut.dead) return Promise.resolve(DEAD_ERR())
+      const id = ++mut.seq
       const timeoutMs = opts?.timeoutMs ?? defaultTimeoutMs
       return new Promise<Result<unknown, BrowserError>>((resolve) => {
         const armed = armSettle<unknown>(timeoutMs, opts?.signal, () => pending.delete(id), resolve)
@@ -246,7 +304,7 @@ export const createCdpSession = (deps: CdpSessionDeps): CdpSession => {
           // Per-request routing: an explicit `sessionId` (a specific tab) wins;
           // explicit `null` forces a browser-level call (no sessionId); omitted ⇒
           // the active page session (back-compat — envelope byte-identical).
-          const sid = opts?.sessionId === undefined ? pageSessionId : opts.sessionId
+          const sid = opts?.sessionId === undefined ? mut.pageSessionId : opts.sessionId
           if (sid !== null) envelope.sessionId = sid
           deps.conn.send(JSON.stringify(envelope))
         } catch (e) {
@@ -259,8 +317,8 @@ export const createCdpSession = (deps: CdpSessionDeps): CdpSession => {
       method: string,
       opts?: CdpRequestOpts,
     ): Promise<Result<Readonly<Record<string, unknown>>, BrowserError>> {
-      if (disposed) return Promise.resolve(err({ kind: "closed" }))
-      if (dead) return Promise.resolve(DEAD_ERR())
+      if (mut.disposed) return Promise.resolve(err({ kind: "closed" }))
+      if (mut.dead) return Promise.resolve(DEAD_ERR())
       const timeoutMs = opts?.timeoutMs ?? defaultTimeoutMs
       return new Promise<Result<Readonly<Record<string, unknown>>, BrowserError>>((resolve) => {
         const waiter: EventWaiter = {
@@ -288,11 +346,19 @@ export const createCdpSession = (deps: CdpSessionDeps): CdpSession => {
         eventWaiters.set(method, list)
       })
     },
+  }
+}
 
+/** Subscriptions, session routing, and teardown. */
+const subscriptionOps = (
+  ctx: SessionCtx,
+): Pick<CdpSession, "onEvent" | "onDead" | "useSessionId" | "dispose"> => {
+  const { deps, pending, eventWaiters, eventSubs, deadCbs, mut } = ctx
+  return {
     onEvent(method: string, cb: (params: Readonly<Record<string, unknown>>) => void): () => void {
-      // A disposed/dead session delivers nothing — hand back an inert unsubscribe
+      // A mut.disposed/mut.dead session delivers nothing — hand back an inert unsubscribe
       // so the caller's bring-up wiring never throws.
-      if (disposed || dead) return () => {}
+      if (mut.disposed || mut.dead) return () => {}
       const set = eventSubs.get(method) ?? new Set<EventSub>()
       set.add(cb)
       eventSubs.set(method, set)
@@ -305,18 +371,18 @@ export const createCdpSession = (deps: CdpSessionDeps): CdpSession => {
     },
 
     onDead(cb: () => void): void {
-      if (dead)
-        cb() // already dead — fire immediately so the caller can react
+      if (mut.dead)
+        cb() // already mut.dead — fire immediately so the caller can react
       else deadCbs.push(cb)
     },
 
     useSessionId(sessionId: string): void {
-      pageSessionId = sessionId
+      mut.pageSessionId = sessionId
     },
 
     dispose(): void {
-      if (disposed) return
-      disposed = true
+      if (mut.disposed) return
+      mut.disposed = true
       for (const settle of [...pending.values()]) settle(err({ kind: "closed" }))
       pending.clear()
       // waitForEvent waiters live ONLY here — settle them too, or any in-flight
@@ -328,5 +394,13 @@ export const createCdpSession = (deps: CdpSessionDeps): CdpSession => {
       eventSubs.clear()
       deps.conn.close()
     },
+  }
+}
+
+export const createCdpSession = (deps: CdpSessionDeps): CdpSession => {
+  const ctx = sessionState(deps)
+  return {
+    ...requestOps(ctx),
+    ...subscriptionOps(ctx),
   }
 }

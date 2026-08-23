@@ -409,9 +409,21 @@ export const __resetDefaultMetricSink = (): void => {
   processDefaultSink = null
 }
 
-export const defaultMetricsRegistry = (
-  opts: InMemoryRegistryOpts = {},
-): MetricsRegistry & { diagnostics(): RegistryDiagnostics } => {
+/**
+ * The registry's shared state: the series maps, the guards every write passes,
+ * and the drop counters. Split out of `defaultMetricsRegistry` (god-function
+ * burndown); the counters live in a mutable holder because a `let` binding
+ * cannot cross a function boundary by value.
+ */
+const registryState = (opts: InMemoryRegistryOpts = {}) => {
+  /** The factory's MUTABLE state. `let` bindings cannot cross a function
+   *  boundary by value, so they live here and the groups mutate in place —
+   *  observationally identical to the closure they replace. */
+  const mut = {
+    exportDropped: 0,
+    flushDropped: 0,
+    seriesDropped: 0,
+  }
   // Explicit sink wins; otherwise fall back to the process-default (null ⇒ none).
   const sink = opts.sink ?? processDefaultSink ?? undefined
   const now = opts.now ?? Date.now
@@ -436,9 +448,6 @@ export const defaultMetricsRegistry = (
   // Health counters — exported, flush, and cardinality drops are all silent by
   // contract; these make them observable via diagnostics() without touching the
   // snapshot plane.
-  let exportDropped = 0
-  let flushDropped = 0
-  let seriesDropped = 0
 
   /** Admit a brand-new series under the per-name cap. Returns `true` when there
    *  is headroom (caller proceeds to `series.set`), `false` when the name is at
@@ -447,7 +456,7 @@ export const defaultMetricsRegistry = (
   const admitNewSeries = (name: string): boolean => {
     const count = seriesCountByName.get(name) ?? 0
     if (count >= maxSeriesPerName) {
-      seriesDropped += 1
+      mut.seriesDropped += 1
       return false
     }
     seriesCountByName.set(name, count + 1)
@@ -469,9 +478,37 @@ export const defaultMetricsRegistry = (
   }
 
   const emit = (sample: MetricSample): void => {
-    if (!safeSend(sink, sample)) exportDropped += 1
+    if (!safeSend(sink, sample)) mut.exportDropped += 1
   }
+  return {
+    sink,
+    now,
+    admitNewSeries,
+    histogramMaxObservations,
+    maxSeriesPerName,
+    buckets,
+    kindByName,
+    series,
+    seriesCountByName,
+    commitKind,
+    emit,
+    mut,
+  }
+}
 
+/** The state every operation group shares, inferred from {@link registryState} so it
+ *  can never drift from what that function actually builds. */
+type RegistryCtx = ReturnType<typeof registryState>
+
+/** The three write paths — counter, histogram, gauge. Each passes the same
+ *  name/cardinality guards before it touches a series. */
+const recordOps = (
+  ctx: RegistryCtx,
+): Pick<
+  MetricsRegistry & { diagnostics(): RegistryDiagnostics },
+  "increment" | "observe" | "gauge"
+> => {
+  const { now, histogramMaxObservations, series, admitNewSeries, commitKind, emit } = ctx
   return {
     increment(name, delta, labels) {
       commitKind(name, "counter")
@@ -553,7 +590,19 @@ export const defaultMetricsRegistry = (
         at: now(),
       })
     },
+  }
+}
 
+/** Read/drain surface: project the series, clear them, flush to the sink, and
+ *  report the registry's own drop counters. */
+const readOps = (
+  ctx: RegistryCtx,
+): Pick<
+  MetricsRegistry & { diagnostics(): RegistryDiagnostics },
+  "snapshot" | "reset" | "flush" | "diagnostics"
+> => {
+  const { sink, kindByName, series, seriesCountByName, mut } = ctx
+  return {
     snapshot() {
       // O(series) allocation is irreducible — the public contract returns one
       // MetricSnapshot row per series, so a fresh array is the cheapest faithful
@@ -579,14 +628,28 @@ export const defaultMetricsRegistry = (
         // Swallow — same posture as `safeSend`. A strict-mode flag could
         // rethrow here in the future. Still counted so a permanently-failing
         // drain on shutdown is visible via diagnostics().flushDropped.
-        flushDropped += 1
+        mut.flushDropped += 1
       }
     },
 
     /** Snapshot of the silent-failure health counters (export / flush / series
      *  cardinality drops). Frozen so callers can't mutate registry state. */
     diagnostics(): RegistryDiagnostics {
-      return Object.freeze({ exportDropped, flushDropped, seriesDropped })
+      return Object.freeze({
+        exportDropped: mut.exportDropped,
+        flushDropped: mut.flushDropped,
+        seriesDropped: mut.seriesDropped,
+      })
     },
+  }
+}
+
+export const defaultMetricsRegistry = (
+  opts: InMemoryRegistryOpts = {},
+): MetricsRegistry & { diagnostics(): RegistryDiagnostics } => {
+  const ctx = registryState(opts)
+  return {
+    ...recordOps(ctx),
+    ...readOps(ctx),
   }
 }

@@ -278,7 +278,12 @@ const settleLedger = (
  *  a long session cannot grow the request Map without bound. */
 const DEFAULT_MAX_RETAINED = 1024
 
-export const createApprovalStateMachine = (opts?: {
+/**
+ * The machine's shared state: the request table, the clock seam, the late-bound
+ * objective authority and the attribution helpers the transitions share. Split
+ * out of `createApprovalStateMachine` (god-function burndown).
+ */
+const machineState = (opts?: {
   now?: () => number
   objective?: ObjectivePort
   ledger?: RunLedgerPort
@@ -291,13 +296,18 @@ export const createApprovalStateMachine = (opts?: {
    *  sink itself is invoked NO-THROW — a throwing observer cannot break the
    *  mutator's `null`-return contract. */
   onUnattributed?: (gap: ApprovalAttributionGap) => void
-}): ApprovalStateMachinePort => {
-  // RFC-03 H1 — MUTABLE so the composition root can LATE-BIND the gated objective
+}) => {
+  /** The factory's MUTABLE state. `let` bindings cannot cross a function
+   *  boundary by value, so they live here and the groups mutate in place —
+   *  observationally identical to the closure they replace. */
+  const mut = {
+    objective: opts?.objective,
+  }
+  // RFC-03 H1 — MUTABLE so the composition root can LATE-BIND the gated mut.objective
   // authority after the assembler constructs it (`bindObjective`). Construction-time
   // injection (`opts.objective`, e.g. web-daemon) still wins; a late bind only fills
   // an EMPTY slot, so there is never a second authority (bind-once-if-empty). The
   // attribution helpers close over this binding and read its CURRENT value per call.
-  let objective = opts?.objective
   const ledger = opts?.ledger
   const onUnattributed = opts?.onUnattributed
   const maxRetained =
@@ -411,7 +421,33 @@ export const createApprovalStateMachine = (opts?: {
       return null
     }
   }
+  return {
+    opts,
+    ledger,
+    onUnattributed,
+    maxRetained,
+    requests,
+    evictIfOverCap,
+    clock,
+    store,
+    matchesFilter,
+    emitGap,
+    onlyIfPending,
+    mut,
+  }
+}
 
+/** The state every operation group shares, inferred from {@link machineState} so it
+ *  can never drift from what that function actually builds. */
+type MachineCtx = ReturnType<typeof machineState>
+
+/** The state transitions. Each is the ONLY writer of the record it moves, so
+ *  an illegal transition is refused in one place rather than defended against
+ *  at every reader. */
+const transitionOps = (
+  ctx: MachineCtx,
+): Pick<ApprovalStateMachinePort, "request" | "settle" | "expire" | "cancel"> => {
+  const { ledger, requests, clock, store, onlyIfPending, mut } = ctx
   return {
     request(req): ApprovalRequest {
       try {
@@ -430,11 +466,11 @@ export const createApprovalStateMachine = (opts?: {
         const pending = buildPending(safe, at)
         // A kernel replay can deliver the same deferred approval more than
         // once. Preserve the original attribution rather than double-starting
-        // its ledger entry or adding another objective blocker.
+        // its ledger entry or adding another mut.objective blocker.
         const existing = requests.get(pending.id)
         if (existing !== undefined) return existing
         // Best-effort attribution — failure must not propagate.
-        const blockerId = attributeObjective(objective, pending.threadId, pending.reason)
+        const blockerId = attributeObjective(mut.objective, pending.threadId, pending.reason)
         const runEntryId = attributeLedger(
           ledger,
           pending.id,
@@ -487,7 +523,7 @@ export const createApprovalStateMachine = (opts?: {
             decision: d,
             ...(modifiedAction !== undefined ? { modifiedAction } : {}),
           }
-          clearObjectiveBlocker(objective, cur.threadId, cur.blockerId)
+          clearObjectiveBlocker(mut.objective, cur.threadId, cur.blockerId)
           settleLedger(ledger, cur.runEntryId, decisionToLedgerStatus(d))
           return next
         },
@@ -498,7 +534,7 @@ export const createApprovalStateMachine = (opts?: {
     expire(id): ApprovalRequest | null {
       return onlyIfPending(id, "expire", (cur) => {
         const next: ApprovalRequest = { ...cur, status: "expired", settledAt: clock() }
-        clearObjectiveBlocker(objective, cur.threadId, cur.blockerId)
+        clearObjectiveBlocker(mut.objective, cur.threadId, cur.blockerId)
         settleLedger(ledger, cur.runEntryId, statusToLedgerStatus("expired"))
         return next
       })
@@ -507,12 +543,23 @@ export const createApprovalStateMachine = (opts?: {
     cancel(id): ApprovalRequest | null {
       return onlyIfPending(id, "cancel", (cur) => {
         const next: ApprovalRequest = { ...cur, status: "cancelled", settledAt: clock() }
-        clearObjectiveBlocker(objective, cur.threadId, cur.blockerId)
+        clearObjectiveBlocker(mut.objective, cur.threadId, cur.blockerId)
         settleLedger(ledger, cur.runEntryId, statusToLedgerStatus("cancelled"))
         return next
       })
     },
+  }
+}
 
+/** Read-only views, the snapshot codec, and the late objective binding. */
+const queryOps = (
+  ctx: MachineCtx,
+): Pick<
+  ApprovalStateMachinePort,
+  "get" | "list" | "pending" | "toSnapshot" | "fromSnapshot" | "bindObjective"
+> => {
+  const { requests, matchesFilter, mut } = ctx
+  return {
     get(id): ApprovalRequest | null {
       try {
         if (!isString(id)) return null
@@ -564,13 +611,34 @@ export const createApprovalStateMachine = (opts?: {
       }
     },
 
-    // RFC-03 H1 — LATE-BIND the objective authority for attribution. BIND-ONCE:
+    // RFC-03 H1 — LATE-BIND the mut.objective authority for attribution. BIND-ONCE:
     // only fills an EMPTY slot, so a construction-time injection is never replaced
     // and there is never a second authority. The attribution helpers read the
-    // captured `objective` binding per call, so a later bind takes effect for every
+    // captured `mut.objective` binding per call, so a later bind takes effect for every
     // subsequent pause/settle.
     bindObjective(port: ObjectivePort): void {
-      if (objective === undefined) objective = port
+      if (mut.objective === undefined) mut.objective = port
     },
+  }
+}
+
+export const createApprovalStateMachine = (opts?: {
+  now?: () => number
+  objective?: ObjectivePort
+  ledger?: RunLedgerPort
+  maxRetained?: number
+  /** FAIL-CLOSED audit-gap sink (DOF-40). Invoked when a terminal mutator
+   *  (`settle` / `expire` / `cancel`) is called for an id the machine has NO
+   *  record of — i.e. a producer never `request()`ed it, so the resolution
+   *  attributes NOTHING. The observer surfaces the missing audit trail instead
+   *  of the swallowed `null`. Absent ⇒ byte-identical legacy (zero calls). The
+   *  sink itself is invoked NO-THROW — a throwing observer cannot break the
+   *  mutator's `null`-return contract. */
+  onUnattributed?: (gap: ApprovalAttributionGap) => void
+}): ApprovalStateMachinePort => {
+  const ctx = machineState(opts)
+  return {
+    ...transitionOps(ctx),
+    ...queryOps(ctx),
   }
 }

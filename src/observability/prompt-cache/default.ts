@@ -132,9 +132,14 @@ const validateEvent = (event: CacheHitEvent): void => {
 }
 
 /** Construct the default observer. */
-export const defaultPromptCacheObserver = (
-  opts: PromptCacheObserverOpts = {},
-): PromptCacheObserver => {
+/**
+ * The observer's shared state: everything the port needs that is NOT a running
+ * total — the config seams and the fold helpers. Split out of
+ * `defaultPromptCacheObserver` (god-function burndown); the four accumulators
+ * stay `let` bindings in the factory, with the members that mutate them.
+ */
+/** Config seams and the accumulators a usage report folds into. */
+const observerConfig = (opts: PromptCacheObserverOpts = {}) => {
   const pricing: Record<string, ObserverPricing> = {
     ...BUNDLED_OBSERVER_PRICING,
     ...(opts.pricing ?? {}),
@@ -152,13 +157,26 @@ export const defaultPromptCacheObserver = (
   const perModel = new Map<string, RollupAcc>()
   const perSession = new Map<string, SessionAcc>()
   const breakpoints = new Map<string, CacheBreakpointAttribution>()
+  return {
+    opts,
+    pricing,
+    fallback,
+    sink,
+    now,
+    warnedUnknownModels,
+    perModel,
+    perSession,
+    breakpoints,
+  }
+}
+
+/** The fold: resolve pricing for a model, roll a usage report into the
+ *  per-model and per-session series, and emit the derived metrics. */
+const observerFold = (ctx: ReturnType<typeof observerConfig>) => {
+  const { pricing, fallback, sink, now, warnedUnknownModels, perSession } = ctx
 
   // Lifetime totals (computed once on record so snapshot is O(states), not
   // O(events)).
-  let totalInputTokens = 0
-  let totalCacheCreationTokens = 0
-  let totalCacheReadTokens = 0
-  let totalSavingsUsd = 0
 
   const resolvePricing = (model: string): { inputPerM: number; cacheReadPerM: number } => {
     const hit = pricing[model]
@@ -231,7 +249,12 @@ export const defaultPromptCacheObserver = (
       at,
     })
   }
+  return { resolvePricing, updateRollupAcc, updateRollup, getOrCreateSession, emitMetrics }
+}
 
+/** Projection: freeze the mutable rollups into the snapshot shapes callers
+ *  see, so a returned snapshot can never alias live state. */
+const observerProject = () => {
   const freezeRollup = (r: RollupAcc): CacheModelRollup =>
     Object.freeze({
       inputTokens: r.inputTokens,
@@ -269,8 +292,74 @@ export const defaultPromptCacheObserver = (
       perSession: new Map<string, CachePerformanceSnapshot>(),
     })
   }
+  return { freezeRollup, freezeBreakpoint, buildPerModelMap, buildSessionSnapshot }
+}
 
+/** Assemble the chained builders into the single shared context. */
+const observerState = (opts: PromptCacheObserverOpts = {}) => {
+  const p0 = observerConfig(opts)
+  const p1 = observerFold({ ...p0 })
+  const p2 = observerProject()
+  return { ...p0, ...p1, ...p2 }
+}
+
+/** The state every operation group shares, inferred from {@link observerState} so it
+ *  can never drift from what that function actually builds. */
+type ObserverCtx = ReturnType<typeof observerState>
+
+/** Attribute a cache breakpoint to the segment that produced it. Touches no
+ *  mutable total, so it lives outside the factory. */
+const attributionOps = (ctx: ObserverCtx): Pick<PromptCacheObserver, "attributeBreakpoint"> => {
+  const { breakpoints } = ctx
   return {
+    attributeBreakpoint(name: string, tokenSpan: number, wasHit: boolean): void {
+      // No-throw — caller-supplied tokenSpan that is non-finite or negative
+      // contributes 0 to the running span; hit/miss count still updates.
+      const span = Number.isFinite(tokenSpan) && tokenSpan > 0 ? tokenSpan : 0
+      const existing = breakpoints.get(name)
+      if (existing === undefined) {
+        breakpoints.set(name, {
+          breakpointName: name,
+          tokenSpan: span,
+          hitCount: wasHit ? 1 : 0,
+          missCount: wasHit ? 0 : 1,
+        })
+        return
+      }
+      breakpoints.set(name, {
+        breakpointName: name,
+        tokenSpan: existing.tokenSpan + span,
+        hitCount: existing.hitCount + (wasHit ? 1 : 0),
+        missCount: existing.missCount + (wasHit ? 0 : 1),
+      })
+    },
+  }
+}
+
+export const defaultPromptCacheObserver = (
+  opts: PromptCacheObserverOpts = {},
+): PromptCacheObserver => {
+  const ctx = observerState(opts)
+  const {
+    warnedUnknownModels,
+    perModel,
+    perSession,
+    breakpoints,
+    resolvePricing,
+    updateRollupAcc,
+    updateRollup,
+    getOrCreateSession,
+    emitMetrics,
+    freezeBreakpoint,
+    buildPerModelMap,
+    buildSessionSnapshot,
+  } = ctx
+  let totalInputTokens = 0
+  let totalCacheCreationTokens = 0
+  let totalCacheReadTokens = 0
+  let totalSavingsUsd = 0
+  return {
+    ...attributionOps(ctx),
     record(event: CacheHitEvent): void {
       validateEvent(event)
       const p = resolvePricing(event.model)
@@ -299,28 +388,6 @@ export const defaultPromptCacheObserver = (
         event.cacheReadTokens,
       )
       emitMetrics(event, hitRate)
-    },
-
-    attributeBreakpoint(name: string, tokenSpan: number, wasHit: boolean): void {
-      // No-throw — caller-supplied tokenSpan that is non-finite or negative
-      // contributes 0 to the running span; hit/miss count still updates.
-      const span = Number.isFinite(tokenSpan) && tokenSpan > 0 ? tokenSpan : 0
-      const existing = breakpoints.get(name)
-      if (existing === undefined) {
-        breakpoints.set(name, {
-          breakpointName: name,
-          tokenSpan: span,
-          hitCount: wasHit ? 1 : 0,
-          missCount: wasHit ? 0 : 1,
-        })
-        return
-      }
-      breakpoints.set(name, {
-        breakpointName: name,
-        tokenSpan: existing.tokenSpan + span,
-        hitCount: existing.hitCount + (wasHit ? 1 : 0),
-        missCount: existing.missCount + (wasHit ? 0 : 1),
-      })
     },
 
     snapshot(): CachePerformanceSnapshot {
