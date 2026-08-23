@@ -396,6 +396,115 @@ Apache §4(b) 고지에 명시:
 
 ---
 
+## 14. 프롬프트 · 결정성 · 모드 비교
+
+### 14.1 시스템 프롬프트
+
+| | Grok Build | quanta |
+|---|---|---|
+| 크기 | **6,992 B / ~1.75k 토큰** | **21,053 B / ~5.3k 토큰** (3배) |
+| 지시문 수 | ~30 | ~90 |
+| 환경정보 위치 | **시스템 프롬프트에 없음** → 대화 인덱스1 user 메시지 | 끝단 `<system-reminder>` user 메시지 |
+| 재조립 | **세션 시작 1회**, 턴마다 안 함(재작성 함수 주석: "호출자는 턴 0임을 보장") | 정적부 세션당 1회 + 휘발부 매 턴 |
+| 최신성 | git status·날짜가 **세션 시작 스냅샷**, 긴 세션서 낡음 | 매 턴 갱신 |
+| 구조 | `<work_policy>` `<tool_calling>` `<background_tasks>` `<communication>` `<formatting>` `<user_guide>` `<browser_verification>` | 인트로/정책 L1–L9/운영원칙/내부어휘/프로덕션 규범(한영 이중)/git 자세/증거·신뢰 사다리/예산/툴 라우팅/정직성 레일/주입 방어/보고 형태/검증 리포트/완료 기준 |
+| 배포 | **XOR 난독화본을 런타임이 사용**(평문은 staleness 테스트용). 소스에 "보안 아닌 난독화" 자인 | 평문 |
+
+**[정정] `apply_patch_prompt.md` 21,360B는 추가분이 아님** — **Codex 시스템 프롬프트를 거의 그대로 포팅한 대체 베이스 템플릿**(`TemplateOverride::Codex`), `codex` 프로필에서만. 기본 1.75k vs codex 5.3k, **합산 안 됨**. 내용도 V4A 문법이 아니라 Personality/AGENTS.md 스펙/preamble 예시 8줄/최종답변 스타일가이드 ~90줄. 패치 문법 언급은 한 줄뿐(`NEVER try applypatch or apply-patch`).
+
+**톤 지시 (걔네, 인상적)**
+> "Concise means being selective about what you include, not clipping the prose: no telegraphic fragments, no shorthand the user hasn't used."
+> "Write every user-facing message for a reader who has NOT seen your tool calls"
+> "NEVER coin acronyms, shorthand, or technical-sounding labels of your own."
+> "State facts literally. Do not invent metaphors, idioms, or catchy labels."
+
+⚠️ codex 프로필 프롬프트는 **정반대**를 지시("서문을 툴 호출과 항상 같이", "10줄 이내") — 한 코드베이스에 두 인격 공존.
+
+**사고 유래 규칙 (goal_rules.md)**
+> "NO TEST THEATER: a passing test must prove the SHIPPED code works on the real path. Never hard-code the expected value... **A test that passes while the program is broken is worse than none.**"
+> "never shared `/tmp/...` paths (skeptics and concurrent goals collide there)"
+
+포팅 흔적 미정리: Codex의 `【F:README.md†L5-L14】` 인용금지 문구가 그대로 잔존.
+
+**우리 3축 구성**: `env posture(frozen|default|owned) × task pack(interactive|ide|headless|daemon|batch|ci-bot) × verify strategy(none|reproduce-first|verify-after-edit|grader-only)` + 4번째 `promptStyle(flat|sectioned)`. 기본 = CLI `frozen+interactive+none`, 벤치 `frozen+batch+(grader-only|reproduce-first|none)`. `grader-only`는 **감산적** — 검증·repro·아티팩트·ORIENT 사다리·검증리포트·완료기준을 제거하고 19,145B로 축소.
+
+**우리 지시문 9종 전부 default-OFF, 다 끄면 바이트 0**(골든 테스트로 고정). AUTONOMOUS/READ_COMPLETE/PROGRESS/MEMORY_VERIFY/THINK_FREQ/ANTI_PLATITUDE/PARALLEL_TOOLS/ADVISOR_RAIL/CODE_MODE_ONLY.
+
+### 14.2 결정성 — **우리 우세**
+
+| | Grok Build | quanta |
+|---|---|---|
+| temperature | 기본 미전송(키 생략), 0 사용처 없음. 보조 호출만 명시(web_search 0.1 / 압축 1.0 / recap 0.1) | 기본 미전송. repair 팬아웃만 cand0 greedy·cand≥1 **0.8** |
+| top_p / top_k | top_p 배관만, **top_k 없음** | **둘 다 없음** |
+| max output | `None` → provider 기본 | **기본 8192 명시** |
+| stop | 구조체에만, 하드코딩 `None` | 미전송 |
+| **seed** | **없음** (필드·플래그 전무) | **없음** (필드·어댑터·knob 전무) |
+| 추론강도 | 7단계, 기본 `Medium`, 모델별 기본 설정파일, 서브에이전트 상속 | 2축 분리 — OpenAI 6단계 **기본 없음**(provider 위임), Anthropic thinking 예산(미설정/1024/4096/16384/64000), 스킬·서브에이전트별 오버라이드 |
+| 캐시 | Anthropic `cache_control` 4중 중 3개 사용(4번째 의도적 여유), Responses는 `prompt_cache_key`=세션id | 4구획 `base｜project_md｜session_ctx｜user_append` + 대화꼬리 1개, ttl 5m/1h, **드리프트 탐지기 + 캐시 감사기** 보유 |
+| 캐시 위험 | 🔴 메모리 리마인더가 **시스템 아이템을 제자리 변형** → 메모리 변경시 시스템 브레이크포인트 전체 무효 | 없음(휘발부 전량 끝단 분리) |
+
+**양쪽 다 날짜·턴카운터가 캐시 접두어에 없음** — 걔넨 날짜를 세션시작 첫 user 메시지에, 턴 인덱스는 `#[serde(skip)]`으로 헤더에만. 우리는 명시적 제외.
+
+**모델 외 비결정성**
+- **Grok — 미완화**: 병렬 툴 결과를 `FuturesUnordered` **완료 순서**로 트랜스크립트에 push → 순서가 벽시계 의존(코드가 자인). 정렬은 doom-loop 서명에만
+- **quanta — 고정됨**: 미리 시작하되 결과는 **원래 모델 호출 순서**로 방출, 시계 주입식, 벤치 검증-선택 동시성 1 고정, 카세트 append는 tail-promise 뮤텍스로 직렬화. 잔여 누수 2 = 동시성>1시 샌드박스 경로 랜덤 접미어(의도), 동적 블록의 cwd
+
+**리플레이**
+- **quanta만 보유** — `LLMPort` 레벨 카세트(ADR-0192), 키=messages/system/tools/thinking/toolChoice/promptCacheKey/retention의 sha256. 메타(시각·durationMs·trace·lane·runId)는 계약상 replay-neutral. 정책 3종(`exact`/`messages-only`/`fuzzy-content`), miss 기본 `throw`, append는 tail-promise 뮤텍스로 직렬화, S3 내구화
+- **Grok 없음** — 스크립트 HTTP 응답 / ACP 이벤트 UI 재생 / 텔레메트리 jsonl뿐
+
+### 14.2.1 🔴 우리 쪽 실측 결함 (심층 조사)
+
+**① 캐시 브레이크포인트 5개 초과 — 하드 API 거부, 미테스트**
+`MAX_CACHE_BREAKPOINTS = 4`(`src/agent/prompt-sections.ts:25`)는 **시스템 섹션만** 셈. `cacheConversationPrefix`(`src/llm/anthropic-messages-codec.ts:115-144`)가 메시지 배열 마지막 텍스트 블록에 **무조건 5번째 마커**를 찍고(`:285`), 어디서도 대화 브레이크포인트를 예산에서 빼지 않음(grep 확인). repo규칙+세션ctx+user append가 모두 있는 세션 = 4+1 = 5 → Anthropic 거부. 헬게이트 테스트(`tests/unit/prompt-sections-hellgate.test.ts`)는 **섹션 수만 단언**해서 이 조합이 안 잡힘.
+
+**② 리플레이 해시의 휘발값 2종 — 크로스런 매칭 불가**
+- **날짜 미마스킹**: `Today's date is YYYY-MM-DD.`(`src/agent/prompt-reminders.ts:122-123`)가 `VOLATILE_MASKS`의 ISO 정규식(`canonicalize.ts:49`, `[T ]HH:MM:SS` 요구)에 **안 걸림**. 메시지에 있으므로 전 정책이 해시함 → **어제 카세트가 오늘 1턴에서 미스**
+- **`promptCacheKey` 미마스킹**: `exact` 정책이 해시에 포함(`jsonl-store.ts:104`)하는데 값은 세션id = `crypto.randomUUID()`. `canonicalizeRequest`는 `messages`/`system`만 건드림(`canonicalize.ts:139-150`) → **크로스런 영구 미스**
+- (앞서 지적한 `temperature`·`model`·`maxTokens` 미포함도 유효 — 팬아웃 0.8 후보가 greedy와 동일 해시)
+- 수정 방향: 맨 `\d{4}-\d{2}-\d{2}` 마스크 추가 / `promptCacheKey`를 해시에서 제외하거나 마스킹 / 벤치에서 `TurnContextInput.now` 주입(시임은 `prompt.ts:317-322`에 이미 존재하나 **프로덕션이 안 주입**)
+
+**③ 카세트에 스크러버 미배선** — `RecordingLlmOpts.scrubber`(`recording-llm.ts:26-32`) DI 훅은 있으나 프로덕션 배선 0 → **원본 프롬프트·툴 출력이 그대로 디스크에**. partial/error 경로는 의도적으로 스크러버 우회(`:164-166`)
+
+**④ 부수 발견**
+- **git status가 프로덕션 프롬프트에 안 들어감** — `TurnContextInput.env`를 `context-assembler.ts:404-431`이 한 번도 안 채움 → env 프로브 경로 사문
+- 대화 브레이크포인트가 **휘발 블록에 앵커됨** — 마지막 텍스트 블록이 곧 날짜·cwd를 담은 리마인더라, 매 턴 캐시 **쓰기**만 발생(읽기 앵커 아님)
+- `injectIdeContext`(`context-assembler.ts:228-247`)가 **과거 user 메시지를 매 턴 재작성** → IDE 프로바이더 배선시 그 지점부터 메시지 캐시 무효화(리댁션 배너는 세션 상수라 무해)
+- 마이크로컴팩션이 **벽시계 주기로 트랜스크립트 변형**(`compaction-wire.ts:154-155,194,656`, 기본 OFF) → 같은 입력도 실행 속도에 따라 다른 프롬프트
+- MCP 서버 연결 실패시 조용히 스킵(`mcp-bridge.ts:427-432`) → 툴 배열이 바뀌어 **tools 구간부터 캐시 무효**
+
+**⑤ 벤치 고정 상태 (양호)**
+동시성 기본 **1**(`run-args.ts:63-76`), `mapWithConcurrency`가 인덱스로 기록해 "serial과 바이트 동일" 보장(`core.ts:123-146`), 도커 채점 별도 뮤텍스. 프롬프트에 랜덤 없음(randomUUID는 id에만, 합성-user id는 resume 경로서 `<SYN>`으로 마스킹). 시계 읽기는 전부 telemetry/timeout용.
+**단 temperature 미고정**(팬아웃 cand≥1이 0.8), **seed 미지원**.
+
+### 14.3 모드 — **Grok 우세**
+
+**읽기전용 강제 층수: Grok 3겹 vs 우리 1겹**
+- Grok: ①툴셋 omission(`explore`/`plan` 프리셋; 소스 자인 "read-only guarantee is enforced by the toolset, not merely by the prompt") ②권한 시스템보다 **앞선** 하드게이트(플랜모드 편집; 주석 "YOLO 빠른경로가 플랜모드를 모르게 일부러 만들었다" + 테스트로 allow-all 무력화 증명) ③커널 샌드박스. 추가로 서브에이전트 스폰시 툴 필터 + **부모와 교집합**(자식이 절대 확장 불가)
+- quanta: 디스패치 런타임 게이트 1개(`admissibility-gate/gates.ts:128-144`). 잘 만듦(양성 허용집합·fail-closed)이나 **읽기전용 모드에서도 변경 툴 카탈로그를 모델에 전량 노출** → 위반마다 툴 호출+턴 소모
+
+**샘플링을 바꾸는 모드**: Grok만. `AgentDefinition.effort`·역할/페르소나 `reasoning_effort`가 실제 샘플링 설정으로 유입. 우리 `EffortLevel`은 모드와 **미결합 독립축**
+
+**🔴 우리 미배선 모드 레지스트리 2개** (성격이 나쁨 — 감사자에겐 강제로 읽히는데 아무것도 안 막음)
+- `src/agent/subagent-typed/mode-registry.ts` — `allowedToolKinds` **src 소비자 0** (라우터 주석엔 "호출자가 MUST honour"라 적힘). `maxTurns`/`maxTokens`만 사용됨
+- `src/subagent/role.ts` — `roleAllowsKind`/`getToolPolicyForRole` **src 호출자 0, 테스트만**
+
+**서로 없는 것**: Grok엔 `weave`/`interrupt` 턴중 주입 모드 없음(큐만), 벤치 knob 프리셋 계층 없음. 우리에겐 **툴셋 프리셋 개념 자체가 없음**(어떤 모드도 툴을 제거하지 않음), `Devbox`/`Strict` 커널 샌드박스 티어 없음, `DontAsk` 없음, **배선된** 서브에이전트 능력필터+부모교집합 없음
+
+### 14.4 §14에서 추가된 흡수 항목
+
+| 순위 | 항목 | 근거 |
+|---|---|---|
+| 추가-A | 읽기전용 모드가 디스패치 게이트 **+ 툴 카탈로그 필터** 병행 | 못 쓸 메뉴 제공은 턴 낭비, Grok의 벨트+멜빵 |
+| 추가-B | 미배선 레지스트리 2개 **배선 또는 삭제** | 강제하는 척하는 죽은 코드 = 감사 오도 |
+| **추가-0** | **캐시 브레이크포인트 5개 초과 수정** — 대화 브레이크포인트를 예산에 편입 + 그 조합의 헬게이트 테스트 | **하드 API 거부**, 현재 미테스트 (§14.2.1①) |
+| **추가-C** | 카세트 해시 정합 — 날짜 마스크 추가 + `promptCacheKey` 해시 제외/마스킹 + `temperature`·`model`·`maxTokens` 포함 | 크로스런/크로스데이 리플레이 영구 미스 (§14.2.1②) |
+| 추가-D | 카세트 스크러버 프로덕션 배선 | 원본 프롬프트·툴출력 평문 저장 (§14.2.1③) |
+| 추가-E | `TurnContextInput.env` 배선 또는 삭제 | git status가 프롬프트에 안 들어가는 사문 경로 |
+| 참고 | 프롬프트 크기 3배(5.3k vs 1.75k)의 효용 미측정 | 측정 후 감량 여지 |
+
+---
+
 ## 부록 A — quanta 하네스→모델 주입 전수 (50개 / 8채널)
 
 다시 뽑기 비싼 인벤토리라 보존. 상세 file:line은 조사 원본 참조.
