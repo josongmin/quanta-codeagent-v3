@@ -85,6 +85,95 @@ const wireOtelSpanExport = (): void => {
   })
 }
 
+/**
+ * `quanta remote …` (ADR-0290). Lifted out of {@link main} — the route body is
+ * signal wiring plus a conditionally-spread options object, and `main` should
+ * read as the route TABLE it is. Ends in `process.exit`, hence `Promise<never>`.
+ */
+const routeRemote = async (): Promise<never> => {
+  const ac = new AbortController()
+  const onSig = () => ac.abort()
+  process.on("SIGINT", onSig)
+  process.on("SIGTERM", onSig)
+  const runner = selectRemoteRunner(process.env, {})
+  const code = await runRemoteCmd(process.argv.slice(3), {
+    runner,
+    io: {
+      out: (s) => process.stdout.write(s),
+      err: (s) => process.stderr.write(s),
+    },
+    signal: ac.signal,
+    ...(process.env.QUANTA_REMOTE_DEFAULT_IMAGE !== undefined
+      ? { defaultImage: process.env.QUANTA_REMOTE_DEFAULT_IMAGE }
+      : {}),
+    ...remoteTimeoutOverride(process.env.QUANTA_REMOTE_TIMEOUT_MS),
+  })
+  process.off("SIGINT", onSig)
+  process.off("SIGTERM", onSig)
+  process.exit(code)
+}
+
+/**
+ * `quanta batch …` (ADR-0463) — CSV row fan-out. Lifted out of {@link main} for
+ * the same reason, and it is the longest route by far: `--help` short-circuits
+ * BEFORE the API-key-requiring parent assembly, then the headless parent config
+ * and its SubagentRunner are built so each CSV row runs as a child. Dynamic
+ * imports keep that assembly off the common startup path. Ends in
+ * `process.exit`, hence `Promise<never>`.
+ */
+const routeBatch = async (): Promise<never> => {
+  const batchArgv = process.argv.slice(3)
+  const { runBatchCmd } = await import("./batch-cmd")
+  // `--help` renders usage WITHOUT assembling the (API-key-requiring) parent
+  // config: runBatchCmd returns on help before it ever calls the runner, so
+  // the stub is genuinely never invoked.
+  if (batchArgv.includes("--help") || batchArgv.includes("-h")) {
+    process.exit(
+      await runBatchCmd(batchArgv, {
+        runner: () => Promise.reject(new Error("unreachable: batch --help")),
+      }),
+    )
+  }
+  const ac = new AbortController()
+  const onSig = () => ac.abort()
+  process.on("SIGINT", onSig)
+  process.on("SIGTERM", onSig)
+  // ADR-0303 thin-surface — these moved DOWN into `@/host/runtime`, so the
+  // CLI reaches them by reaching DOWN (allowed) instead of sideways into
+  // `apps/agent` (a cross-surface edge the coupling ratchet forbids).
+  const [
+    { parseAgentArgs, buildBaseFromArgs, toAssembleRequest },
+    { createSubagentRunner, loadNamedAgents },
+  ] = await Promise.all([import("@/host/runtime"), import("@/agent")])
+  // F2 (round-2) — load `.quanta/agents` (+ native dir) ONCE and thread the
+  // resolver onto the assemble partial so a `quanta batch` row whose model
+  // emits `agent_type:"foo"` resolves the named definition (parity with the
+  // headless `apps/agent` surface). `buildBaseFromArgs` lifts the partial slot
+  // onto `AgentConfig.namedAgentResolver`, which the SubagentRunner consults
+  // per spawn. cwd = `process.cwd()` (batch has no jailed cwd before assembly;
+  // each child row inherits the headless parent base's cwd, also process.cwd()).
+  // FAIL-OPEN + default-OFF byte-identical: no agent dir ⇒ EMPTY registry ⇒
+  // slot stays absent ⇒ no named agent ever resolves; a thrown loader is
+  // swallowed to `undefined` so assembly can NEVER fault on the registry load.
+  const batchPartial = toAssembleRequest(
+    parseAgentArgs(["--mode", "headless", "-p", "batch-runner-parent"]),
+  )
+  const batchNamedAgents = await loadNamedAgents(process.cwd()).catch(() => undefined)
+  if (batchNamedAgents !== undefined && batchNamedAgents.size > 0) {
+    batchPartial.namedAgentResolver = batchNamedAgents
+  }
+  // A headless parent config is enough to build the row-dispatch SubagentRunner
+  // (batch never enters the parent's own agent loop — each row is a child, so
+  // the placeholder `-p` is never consumed; it only satisfies headless arg
+  // validation).
+  const base = buildBaseFromArgs(batchPartial, ac.signal)
+  const runner = createSubagentRunner(base)
+  const code = await runBatchCmd(batchArgv, { runner })
+  process.off("SIGINT", onSig)
+  process.off("SIGTERM", onSig)
+  process.exit(code)
+}
+
 const main = async (): Promise<void> => {
   // S1 — OS sandbox wire-up. Reads `QUANTA_SANDBOX` ONCE at boot (after
   // dotenv load so `.env.local` overrides are honored). Default-OFF: when
@@ -117,26 +206,7 @@ const main = async (): Promise<void> => {
   // `QUANTA_REMOTE_RUNNER` is unset / `none` the dispatcher exits with
   // `remote-not-configured` (exit 64) WITHOUT spawning any subprocess.
   if (process.argv[2] === "remote") {
-    const ac = new AbortController()
-    const onSig = () => ac.abort()
-    process.on("SIGINT", onSig)
-    process.on("SIGTERM", onSig)
-    const runner = selectRemoteRunner(process.env, {})
-    const code = await runRemoteCmd(process.argv.slice(3), {
-      runner,
-      io: {
-        out: (s) => process.stdout.write(s),
-        err: (s) => process.stderr.write(s),
-      },
-      signal: ac.signal,
-      ...(process.env.QUANTA_REMOTE_DEFAULT_IMAGE !== undefined
-        ? { defaultImage: process.env.QUANTA_REMOTE_DEFAULT_IMAGE }
-        : {}),
-      ...remoteTimeoutOverride(process.env.QUANTA_REMOTE_TIMEOUT_MS),
-    })
-    process.off("SIGINT", onSig)
-    process.off("SIGTERM", onSig)
-    process.exit(code)
+    await routeRemote()
   }
 
   // ADR-0463 — `quanta batch …` CSV row-fan-out subcommand. Default-OFF: inert
@@ -146,56 +216,7 @@ const main = async (): Promise<void> => {
   // loop per CSV row. Dynamic imports keep the heavy agent-assembly out of the
   // common startup path.
   if (process.argv[2] === "batch") {
-    const batchArgv = process.argv.slice(3)
-    const { runBatchCmd } = await import("./batch-cmd")
-    // `--help` renders usage WITHOUT assembling the (API-key-requiring) parent
-    // config: runBatchCmd returns on help before it ever calls the runner, so
-    // the stub is genuinely never invoked.
-    if (batchArgv.includes("--help") || batchArgv.includes("-h")) {
-      process.exit(
-        await runBatchCmd(batchArgv, {
-          runner: () => Promise.reject(new Error("unreachable: batch --help")),
-        }),
-      )
-    }
-    const ac = new AbortController()
-    const onSig = () => ac.abort()
-    process.on("SIGINT", onSig)
-    process.on("SIGTERM", onSig)
-    // ADR-0303 thin-surface — these moved DOWN into `@/host/runtime`, so the
-    // CLI reaches them by reaching DOWN (allowed) instead of sideways into
-    // `apps/agent` (a cross-surface edge the coupling ratchet forbids).
-    const [
-      { parseAgentArgs, buildBaseFromArgs, toAssembleRequest },
-      { createSubagentRunner, loadNamedAgents },
-    ] = await Promise.all([import("@/host/runtime"), import("@/agent")])
-    // F2 (round-2) — load `.quanta/agents` (+ native dir) ONCE and thread the
-    // resolver onto the assemble partial so a `quanta batch` row whose model
-    // emits `agent_type:"foo"` resolves the named definition (parity with the
-    // headless `apps/agent` surface). `buildBaseFromArgs` lifts the partial slot
-    // onto `AgentConfig.namedAgentResolver`, which the SubagentRunner consults
-    // per spawn. cwd = `process.cwd()` (batch has no jailed cwd before assembly;
-    // each child row inherits the headless parent base's cwd, also process.cwd()).
-    // FAIL-OPEN + default-OFF byte-identical: no agent dir ⇒ EMPTY registry ⇒
-    // slot stays absent ⇒ no named agent ever resolves; a thrown loader is
-    // swallowed to `undefined` so assembly can NEVER fault on the registry load.
-    const batchPartial = toAssembleRequest(
-      parseAgentArgs(["--mode", "headless", "-p", "batch-runner-parent"]),
-    )
-    const batchNamedAgents = await loadNamedAgents(process.cwd()).catch(() => undefined)
-    if (batchNamedAgents !== undefined && batchNamedAgents.size > 0) {
-      batchPartial.namedAgentResolver = batchNamedAgents
-    }
-    // A headless parent config is enough to build the row-dispatch SubagentRunner
-    // (batch never enters the parent's own agent loop — each row is a child, so
-    // the placeholder `-p` is never consumed; it only satisfies headless arg
-    // validation).
-    const base = buildBaseFromArgs(batchPartial, ac.signal)
-    const runner = createSubagentRunner(base)
-    const code = await runBatchCmd(batchArgv, { runner })
-    process.off("SIGINT", onSig)
-    process.off("SIGTERM", onSig)
-    process.exit(code)
+    await routeBatch()
   }
 
   // TICKET-19 — `quanta mcp-server` reverse-MCP subcommand (quanta AS an MCP

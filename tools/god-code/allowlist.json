@@ -4,7 +4,6 @@
   "godFunctionMaxLines": 150,
   "modules": [],
   "functions": [
-    "src/apps/cli/index.ts::main",
     "src/ipc/session/bridge.ts::createSessionTransportBridge",
     "src/observability/otel-exporter.ts::otelHttpExporter",
     "src/runtime/shell.ts::runShell",
