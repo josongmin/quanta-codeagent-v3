@@ -477,3 +477,33 @@ export const stopPresentationFor = (reasonCode: string): StopPresentation =>
     label: "Stopped for an unrecognized reason",
     tone: "failed",
   }
+
+/** Canonical {@link StopCategory} for a legacy {@link StopReason}, used when a
+ *  terminal path has no richer category of its own.
+ *
+ *  aug-23 objective audit: the kernel's abort/failed/errored arms used to leave
+ *  the PREVIOUS turn's category in place. Deriving instead of inheriting means
+ *  reason and category can never disagree, and every code stays one the
+ *  presentation table knows (no `derived.*` strings leaking to a surface). */
+export const stopCategoryForReason = (reason: StopReason): StopCategory => {
+  switch (reason) {
+    case "completed":
+      return completedCategory("normal")
+    case "max_turns":
+      return completedCategory("max_turns")
+    case "aborted":
+      return interruptedCategory("user")
+    case "budget_exhausted":
+      return budgetCategory("meter")
+    case "refusal":
+      return refusalCategory()
+    case "awaiting_approval":
+      return awaitingApprovalCategory()
+    case "error":
+      return {
+        kind: "failed",
+        reasonCode: STOP_REASON_CODE.RUNTIME_UNKNOWN_ERROR,
+        hint: "The turn ended with an error.",
+      }
+  }
+}

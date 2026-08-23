@@ -1,5 +1,12 @@
+import { stopCategoryForReason } from "@/agent/stop-category"
+import type { StopReason } from "@/agent/types/agent-outcome"
 import type { Message } from "@/llm"
-import type { ArtifactRef, SessionEvent, TurnRunCommand } from "@/protocol/session"
+import type {
+  ArtifactRef,
+  SessionEvent,
+  StopCategoryWire,
+  TurnRunCommand,
+} from "@/protocol/session"
 import { SessionProtocolValidationError, UNKNOWN_OUTCOME_REASON } from "@/protocol/session"
 import { isAbort } from "@/shared/abortable"
 import type { KernelDispatchContext, SessionHostTurnResult } from "./ports"
@@ -30,6 +37,40 @@ import {
  *
  * Split out of `scheduler.ts` (god-module ratchet) — pure move, no logic change.
  */
+/** Resolve `{lastOutcomeReason, lastStopCategory}` for a terminal arm.
+ *
+ *  aug-23 objective audit: the aborted / failed / errored arms set only the
+ *  reason and spread `...args.state`, so (a) a category the outcome DID carry
+ *  (provider.rate_limit, compaction.thrash, loop.no_progress) was discarded, and
+ *  (b) the PREVIOUS turn's category survived — a failed turn could be projected
+ *  with a stale `completed.normal`, i.e. a success label on a failure.
+ *
+ *  Given no category, one is DERIVED from the reason rather than inherited, so
+ *  reason and category can never disagree. */
+export const terminalStopFields = (args: {
+  readonly reason: StopReason
+  readonly category?: StopCategoryWire
+}): { lastOutcomeReason: StopReason; lastStopCategory: StopCategoryWire } => ({
+  lastOutcomeReason: args.reason,
+  lastStopCategory: args.category ?? stopCategoryForReason(args.reason),
+})
+
+/** Test seam for {@link terminalStopFields}. Pure. */
+export const nextStateForTerminalTest = (args: {
+  readonly prior: {
+    readonly lastOutcomeReason?: string
+    readonly lastStopCategory?: StopCategoryWire
+  }
+  readonly reason: string
+  readonly category?: StopCategoryWire
+}): { lastOutcomeReason: string; lastStopCategory?: StopCategoryWire } => ({
+  ...args.prior,
+  ...terminalStopFields({
+    reason: args.reason as StopReason,
+    ...(args.category !== undefined ? { category: args.category } : {}),
+  }),
+})
+
 const readyEvents = (args: {
   readonly state: KernelSessionState
   readonly commandId: string
@@ -184,10 +225,12 @@ export const onTurnCompleted = async (args: {
     pendingApproval: null,
     transcript: clearStreamingAssistantText(summarizeTranscript(args.result.messages)),
     artifacts: [...args.state.artifacts, ...artifacts],
-    lastOutcomeReason: args.result.outcome.reason,
-    ...(args.result.outcome.stopCategory !== undefined
-      ? { lastStopCategory: args.result.outcome.stopCategory }
-      : {}),
+    ...terminalStopFields({
+      reason: args.result.outcome.reason,
+      ...(args.result.outcome.stopCategory !== undefined
+        ? { category: args.result.outcome.stopCategory }
+        : {}),
+    }),
     ...(args.result.tokenUsage !== undefined ? { lastTokenUsage: args.result.tokenUsage } : {}),
   }
   const completionEvents = completionEventsForTurn({
@@ -296,7 +339,7 @@ export const onTurnAborted = async (args: {
       : {
           transcript: clearStreamingAssistantText(args.state.transcript),
         }),
-    lastOutcomeReason: "aborted",
+    ...terminalStopFields({ reason: "aborted" }),
   }
   const abortedEvents: SessionEvent[] = [
     {
@@ -342,7 +385,7 @@ export const onTurnFailed = async (args: {
     seq: args.state.seq + 2,
     status: "failed",
     transcript: clearStreamingAssistantText(args.state.transcript),
-    lastOutcomeReason: "error",
+    ...terminalStopFields({ reason: "error" }),
   }
   const failedEvents: SessionEvent[] = [
     {
@@ -386,7 +429,7 @@ export const onTurnErrored = async (args: {
     draftImages: [],
     pendingApproval: null,
     transcript: clearStreamingAssistantText(summarizeTranscript(args.result.messages)),
-    lastOutcomeReason: "error",
+    ...terminalStopFields({ reason: "error" }),
   }
   const failedEvents: SessionEvent[] = [
     {

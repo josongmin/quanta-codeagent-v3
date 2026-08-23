@@ -23,7 +23,13 @@ const LazyMarkdownMessage = lazy(async () => {
 /** aug-23 §13 — the "why it stopped" chip beside the role label. Extracted so
  *  the bubble body stays inside its cognitive-complexity budget. `null` badge
  *  renders nothing (clean completions and pre-slice messages are untouched). */
-const StopBadge = ({ badge }: { readonly badge: StopPresentation | null }): JSX.Element | null => {
+const StopBadge = ({
+  badge,
+  hint,
+}: {
+  readonly badge: StopPresentation | null
+  readonly hint?: string | undefined
+}): JSX.Element | null => {
   if (badge === null) return null
   const isError = badge.tone === "failed" || badge.tone === "refused"
   return (
@@ -32,7 +38,7 @@ const StopBadge = ({ badge }: { readonly badge: StopPresentation | null }): JSX.
         "ml-2 rounded px-1.5 py-0.5 text-[10px] font-medium",
         isError ? "bg-err/10 text-err/90" : "bg-surface-raised text-ink-secondary",
       )}
-      title={`Stopped: ${badge.label}`}
+      title={hint ?? `Stopped: ${badge.label}`}
     >
       {badge.label}
     </span>
@@ -101,7 +107,7 @@ const MessageBubbleInner = ({ message, isStreaming = false }: MessageBubbleProps
         <header className="flex min-w-0 flex-1 items-center justify-between">
           <span className="text-[11px] text-ink-tertiary">
             {ROLE_LABEL[role]}
-            <StopBadge badge={stopBadge} />
+            <StopBadge badge={stopBadge} hint={message.stopCategory?.hint} />
           </span>
           <time
             dateTime={message.timestamp}
