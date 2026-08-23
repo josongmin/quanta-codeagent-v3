@@ -20,6 +20,7 @@ import type {
   SessionRejectedFrame,
   SessionSnapshotLite,
   SessionStateView,
+  StopCategoryWire,
   UiMessage,
 } from "../types/protocol"
 import type { SessionClient } from "./client"
@@ -59,6 +60,10 @@ interface PendingCompletion {
   readonly outcomeReason: string
   readonly assistantText?: string
   readonly timestamp: string
+  /** aug-23 §13 slice 1d — carried so a stop that left work undone stays
+   *  distinguishable from a clean completion even when the model produced
+   *  prose first (previously the prose masked the reason entirely). */
+  readonly stopCategory?: StopCategoryWire
 }
 
 interface StreamingAssistant {
@@ -170,6 +175,9 @@ const finalizeStreamingAssistant = (args: {
   readonly streaming: StreamingAssistant
   readonly text: string
   readonly signature?: string
+  /** aug-23 §13 slice 1d — carried through the streaming finalize path too, so
+   *  a stop reason is not lost just because the answer arrived incrementally. */
+  readonly stopCategory?: StopCategoryWire
 }): TranscriptState =>
   appendTranscriptMessage(
     clearCompletionTracking(args.state, args.signature ?? args.state.lastAssistantSignature),
@@ -178,6 +186,7 @@ const finalizeStreamingAssistant = (args: {
       role: "assistant",
       text: args.text,
       timestamp: args.streaming.timestamp,
+      ...(args.stopCategory !== undefined ? { stopCategory: args.stopCategory } : {}),
     },
   )
 
@@ -186,6 +195,7 @@ const pendingCompletionMessage = (pending: PendingCompletion): UiMessage => ({
   role: "assistant",
   text: fallbackTextOf(pending),
   timestamp: pending.timestamp,
+  ...(pending.stopCategory !== undefined ? { stopCategory: pending.stopCategory } : {}),
 })
 
 const fallbackTextOf = (pending: PendingCompletion): string =>
@@ -219,6 +229,12 @@ const appendFinalAssistantMessage = (args: {
     role: "assistant",
     text: args.text,
     timestamp: args.fallback?.timestamp ?? args.timestamp,
+    /* aug-23 §13 slice 1d — the reason travels with the row. Previously the
+       prose won and the stop reason was dropped entirely, so a turn that hit
+       the turn limit / a provider error looked like an ordinary answer. */
+    ...(args.fallback?.stopCategory !== undefined
+      ? { stopCategory: args.fallback.stopCategory }
+      : {}),
   })
 
 const repairTrailingAssistantMessage = (args: {
@@ -278,11 +294,13 @@ const applyAssistantSignatureToTranscript = (args: {
   // Streaming in progress: the live text was never mirrored into `messages`, so
   // finalize the slot into a NEW appended row (do not repair a trailing row).
   if (args.state.streamingAssistant !== null) {
+    const pending = args.state.pendingCompletion ?? args.state.fallbackCompletion
     return finalizeStreamingAssistant({
       state: args.state,
       streaming: args.state.streamingAssistant,
       text,
       signature,
+      ...(pending?.stopCategory !== undefined ? { stopCategory: pending.stopCategory } : {}),
     })
   }
   const fallback = args.state.pendingCompletion ?? args.state.fallbackCompletion
@@ -329,6 +347,7 @@ const settlePendingCompletionOnIdle = (
       state,
       streaming: state.streamingAssistant,
       text: fallback.assistantText ?? (streamed.length > 0 ? streamed : fallbackTextOf(fallback)),
+      ...(fallback.stopCategory !== undefined ? { stopCategory: fallback.stopCategory } : {}),
     })
   }
   return appendTranscriptMessage(
@@ -476,6 +495,7 @@ const TRANSCRIPT_EVENT_HANDLERS = {
         eventId: event.eventId,
         outcomeReason: event.outcomeReason,
         ...(event.assistantText !== undefined ? { assistantText: event.assistantText } : {}),
+        ...(event.stopCategory !== undefined ? { stopCategory: event.stopCategory } : {}),
         timestamp: event.emittedAt,
       },
       fallbackCompletion: null,

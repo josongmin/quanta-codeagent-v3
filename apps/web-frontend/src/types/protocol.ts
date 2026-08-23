@@ -27,7 +27,7 @@
 
 export * from "./protocol.session.generated"
 
-import type { SessionCommand, SessionEvent } from "./protocol.session.generated"
+import type { SessionCommand, SessionEvent, StopCategoryWire } from "./protocol.session.generated"
 
 /* --- @/llm mirror (referenced by the generated session types) ---------- */
 
@@ -95,6 +95,10 @@ export interface UiMessage {
   readonly text: string
   readonly timestamp: string
   readonly images?: readonly ImageBlock[]
+  /** aug-23 §13 slice 1d — WHY the turn stopped, when it stopped for a reason
+   *  worth showing. Absent on ordinary rows and on events from a producer that
+   *  predates the field, so existing rendering is unchanged. */
+  readonly stopCategory?: StopCategoryWire
 }
 
 export type ConnectionState =
