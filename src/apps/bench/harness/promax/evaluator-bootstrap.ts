@@ -229,22 +229,6 @@ export const buildProMaxBootstrapSpec = (
 }
 
 /**
- * The ordered bootstrap plan, in TWO PHASES.
- *
- * `agent` first: capability probes that must fail fast, BEFORE an agent run is
- * paid for — the campaign root exists, the daemon is up and on the right
- * platform, the disk has headroom. None of them names the upstream URL, the
- * pinned commit, or the checkout root, because none of them may hint at, let
- * alone materialize, gold.
- *
- * `grader` second: the pinned checkout, its hash verification, and the dedicated
- * evaluator interpreter. These run only once model patches are captured, and the
- * executor refuses to run the gold-bearing ones in the agent phase.
- *
- * Every command is argv; nothing is a shell string, so there is no quoting layer
- * for a path to escape through.
- */
-/**
  * ---- AGENT PHASE ---- pure capability probes, and the whole set of them.
  *
  * Gold-free by construction: the campaign root is a directory the agent phase
@@ -254,14 +238,9 @@ export const buildProMaxBootstrapSpec = (
  * Split out of {@link buildProMaxBootstrapPlan} so each phase has one owner and
  * neither grows past the size ratchet as probes are added.
  */
-export const buildProMaxBootstrapPlan = (
-  spec: ProMaxEvaluatorBootstrapSpec,
-): ProMaxBootstrapCommand[] => {
+const agentPhaseProbes = (spec: ProMaxEvaluatorBootstrapSpec): ProMaxBootstrapCommand[] => {
   const root = spec.checkoutRoot
-  /** Every git command runs `-C <root>`, so no step depends on the process cwd. */
-  const at = (...argv: string[]): string[] => ["git", "-C", root, ...argv]
-  const commit = spec.upstreamGitCommit
-  const probes: ProMaxBootstrapCommand[] = [
+  return [
     {
       // 🔴 FIRST, and fail-closed. Absence is the WHOLE defence, and until this
       // command existed it was ASSUMED: the grader phase created the
@@ -322,9 +301,22 @@ export const buildProMaxBootstrapPlan = (
       pythonFloor: PROMAX_EVALUATOR_PYTHON_FLOOR,
     },
   ]
+}
 
-  // ---- GRADER PHASE ---- everything that touches the answer key.
-  const checkout: ProMaxBootstrapCommand[] = [
+/**
+ * ---- GRADER PHASE, part 1 ---- the pinned checkout.
+ *
+ * `git init` + fetch-by-object-id + detached checkout, never a clone: a clone
+ * would take the remote's default branch, which is a MOVING ref. Split out of
+ * {@link buildProMaxBootstrapPlan} for the same reason as the probes — one
+ * owner per phase, and no phase grows past the size ratchet as steps are added.
+ */
+const graderCheckout = (spec: ProMaxEvaluatorBootstrapSpec): ProMaxBootstrapCommand[] => {
+  const root = spec.checkoutRoot
+  const commit = spec.upstreamGitCommit
+  /** Every git command runs `-C <root>`, so no step depends on the process cwd. */
+  const at = (...argv: string[]): string[] => ["git", "-C", root, ...argv]
+  return [
     {
       step: "checkout",
       phase: "grader",
@@ -362,8 +354,16 @@ export const buildProMaxBootstrapPlan = (
       purpose: "read the pin back — the checkout is verified, not assumed",
     },
   ]
+}
 
-  const verify: ProMaxBootstrapCommand[] = spec.upstreamFiles.map((file) => ({
+/**
+ * ---- GRADER PHASE, part 2 ---- on-box hash verification of the pinned files.
+ * One `sha256sum` per upstream file; the campaign refuses unless each equals
+ * the frozen digest, so the checkout is verified rather than assumed.
+ */
+const graderVerifyHashes = (spec: ProMaxEvaluatorBootstrapSpec): ProMaxBootstrapCommand[] => {
+  const root = spec.checkoutRoot
+  return spec.upstreamFiles.map((file) => ({
     step: "verify-hashes" as const,
     phase: "grader" as const,
     // It READS the gold-bearing file to hash it.
@@ -372,11 +372,19 @@ export const buildProMaxBootstrapPlan = (
     purpose: `hash ${file.path} on-box; the campaign refuses unless it equals ${file.sha256}`,
     verifies: { path: file.path, absolutePath: `${root}/${file.path}`, sha256: file.sha256 },
   }))
+}
 
+/**
+ * ---- GRADER PHASE, part 3 + TEARDOWN ---- the dedicated evaluator interpreter,
+ * then the answer key UNMADE. The venv deliberately survives (it holds no
+ * answer-key bytes and rebuilding one per chunk is cost without a defence);
+ * only the gold-bearing checkout is removed.
+ */
+const graderPythonEnvAndTeardown = (
+  spec: ProMaxEvaluatorBootstrapSpec,
+): ProMaxBootstrapCommand[] => {
+  const root = spec.checkoutRoot
   return [
-    ...probes,
-    ...checkout,
-    ...verify,
     {
       step: "python-env",
       phase: "grader",
@@ -417,6 +425,31 @@ export const buildProMaxBootstrapPlan = (
     },
   ]
 }
+
+/**
+ * The ordered bootstrap plan, in TWO PHASES.
+ *
+ * `agent` first: capability probes that must fail fast, BEFORE an agent run is
+ * paid for — the campaign root exists, the daemon is up and on the right
+ * platform, the disk has headroom. None of them names the upstream URL, the
+ * pinned commit, or the checkout root, because none of them may hint at, let
+ * alone materialize, gold.
+ *
+ * `grader` second: the pinned checkout, its hash verification, and the dedicated
+ * evaluator interpreter. These run only once model patches are captured, and the
+ * executor refuses to run the gold-bearing ones in the agent phase.
+ *
+ * Every command is argv; nothing is a shell string, so there is no quoting layer
+ * for a path to escape through.
+ */
+export const buildProMaxBootstrapPlan = (
+  spec: ProMaxEvaluatorBootstrapSpec,
+): ProMaxBootstrapCommand[] => [
+  ...agentPhaseProbes(spec),
+  ...graderCheckout(spec),
+  ...graderVerifyHashes(spec),
+  ...graderPythonEnvAndTeardown(spec),
+]
 
 /**
  * What a bootstrap RUN observed on the box. Supplied by the caller, because
