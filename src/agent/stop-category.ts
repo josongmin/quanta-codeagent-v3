@@ -392,3 +392,82 @@ export const awaitingApprovalCategory = (): StopCategory => ({
   reasonCode: STOP_REASON_CODE.SHELL_NEEDS_APPROVAL,
   hint: "Paused — waiting for your approval decision.",
 })
+
+/* ------------------------------------------------------------------------- *
+ * Presentation table (aug-23 §13 slice 1b)
+ *
+ * Every render rail today re-derives its own mapping from the legacy 7-value
+ * `reason` and falls through to success-looking copy on anything unrecognized
+ * (§13: three such defaults shipped). This is the ONE table those rails
+ * consume, so a new code cannot be added without deciding how it reads.
+ *
+ * `tone` is the surface-agnostic bucket. It is pinned to the classification
+ * `exitCodeForOutcome` (src/apps/agent/run.ts:54) already ships, which is
+ * currently the only place in the codebase that gets this right:
+ *   success 0 · incomplete 1 · failed 1 · blocked 2 · refused 3 · cancelled 130
+ * ------------------------------------------------------------------------- */
+
+/** Surface-agnostic outcome bucket. `success` is reserved for genuine
+ *  completion — never assign it to a stop that left work undone. */
+export type StopTone = "success" | "incomplete" | "blocked" | "failed" | "cancelled" | "refused"
+
+export interface StopPresentation {
+  /** Short human label a surface may render verbatim. Distinct per code. */
+  readonly label: string
+  readonly tone: StopTone
+}
+
+/** Presentation for every {@link StopReasonCode}. Exhaustive by type. */
+export const STOP_PRESENTATION_BY_REASON_CODE: Record<StopReasonCode, StopPresentation> = {
+  [STOP_REASON_CODE.COMPLETED_NORMAL]: { label: "Done", tone: "success" },
+  [STOP_REASON_CODE.COMPLETED_MAX_TURNS]: { label: "Stopped at turn limit", tone: "incomplete" },
+  [STOP_REASON_CODE.USER_INTERRUPT]: { label: "Interrupted", tone: "cancelled" },
+  [STOP_REASON_CODE.SYSTEM_ABORT]: { label: "Aborted by host", tone: "cancelled" },
+  [STOP_REASON_CODE.BUDGET_COST_CAP]: { label: "Stopped at cost cap", tone: "blocked" },
+  [STOP_REASON_CODE.BUDGET_LEDGER_BREACH]: { label: "Stopped at spend ceiling", tone: "blocked" },
+  [STOP_REASON_CODE.SHELL_NEEDS_APPROVAL]: { label: "Waiting for approval", tone: "blocked" },
+  [STOP_REASON_CODE.MODEL_REFUSAL]: { label: "Model declined", tone: "refused" },
+  [STOP_REASON_CODE.MODEL_EMPTY_EXHAUSTED]: { label: "Model returned nothing", tone: "failed" },
+  [STOP_REASON_CODE.MODEL_MALFORMED_TOOL_USE]: { label: "Tool call was malformed", tone: "failed" },
+  [STOP_REASON_CODE.COMPACTION_THRASH]: { label: "Context compaction thrashed", tone: "failed" },
+  [STOP_REASON_CODE.PROVIDER_RATE_LIMIT]: { label: "Provider rate limit", tone: "failed" },
+  [STOP_REASON_CODE.PROVIDER_OVERLOADED]: { label: "Provider overloaded", tone: "failed" },
+  [STOP_REASON_CODE.PROVIDER_NETWORK]: { label: "Network failure", tone: "failed" },
+  [STOP_REASON_CODE.PROVIDER_AUTH]: { label: "Provider auth failed", tone: "failed" },
+  [STOP_REASON_CODE.PROVIDER_BAD_REQUEST]: { label: "Malformed request", tone: "failed" },
+  [STOP_REASON_CODE.PROVIDER_UNKNOWN]: { label: "Provider error", tone: "failed" },
+  [STOP_REASON_CODE.RUNTIME_UNKNOWN_ERROR]: { label: "Unexpected error", tone: "failed" },
+}
+
+const ALL_STOP_REASON_CODES_RUNTIME: readonly StopReasonCode[] = Object.values(STOP_REASON_CODE)
+
+/**
+ * Runtime drift guard for the presentation table. Injectable args exist ONLY so
+ * the hellgate can prove the guard fires (red-on-injection).
+ */
+export const assertStopPresentationInSync = (
+  table: Record<string, StopPresentation> = STOP_PRESENTATION_BY_REASON_CODE,
+  codes: readonly StopReasonCode[] = ALL_STOP_REASON_CODES_RUNTIME,
+): void => {
+  const keys = new Set(Object.keys(table))
+  const missing = codes.filter((c) => !keys.has(c))
+  if (missing.length > 0) {
+    throw new Error(`STOP_PRESENTATION_BY_REASON_CODE is missing: ${missing.join(", ")}`)
+  }
+  const known = new Set<string>(codes)
+  const extra = [...keys].filter((k) => !known.has(k))
+  if (extra.length > 0) {
+    throw new Error(`STOP_PRESENTATION_BY_REASON_CODE has unknown keys: ${extra.join(", ")}`)
+  }
+}
+
+assertStopPresentationInSync()
+
+/** Presentation for a reason code. An UNKNOWN code degrades to a `failed`
+ *  tone — never to `success`. Falling through to success on an unrecognized
+ *  value is the exact competitor bug §13 documents. */
+export const stopPresentationFor = (reasonCode: string): StopPresentation =>
+  STOP_PRESENTATION_BY_REASON_CODE[reasonCode as StopReasonCode] ?? {
+    label: "Stopped for an unrecognized reason",
+    tone: "failed",
+  }
