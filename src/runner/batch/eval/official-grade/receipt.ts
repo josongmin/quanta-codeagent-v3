@@ -168,6 +168,14 @@ const validateEvaluator = (
     isBlank(meta.evaluatorId) ||
     isBlank(meta.upstreamCommit) ||
     isBlank(meta.evaluatorPath) ||
+    // aug-23 audit: `evaluatorSha256` was the one identity field this guard did
+    // NOT check, and it is the field that makes a receipt replayable at all — a
+    // commit names a tree and a path names a location, but only the hash pins
+    // the BYTES that produced these verdicts. A receipt could assert "here is
+    // how to replay me" while naming no evaluator content, under a type that
+    // declares the field required. The old message did not list it either, so
+    // the omission read as deliberate rather than missed.
+    isBlank(meta.evaluatorSha256) ||
     isBlank(meta.cwd) ||
     !Array.isArray(meta.argv) ||
     typeof meta.stdout !== "string" ||
@@ -177,7 +185,8 @@ const validateEvaluator = (
         {
           code: "evaluator_meta_invalid" as const,
           message:
-            "evaluator metadata is incomplete — id, commit, path, cwd, argv, and raw streams are all required replay evidence",
+            "evaluator metadata is incomplete — id, commit, path, evaluator sha256, cwd, argv, " +
+            "and raw streams are all required replay evidence",
         },
       ]
     : []
