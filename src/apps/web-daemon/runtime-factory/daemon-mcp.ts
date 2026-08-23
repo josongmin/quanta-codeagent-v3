@@ -52,7 +52,13 @@ export const loadDaemonMcp = async (
 }> => {
   try {
     const slog = new StructuredLogger()
-    const configs = await readMcpConfig(slog, env, await resolveMcpLaunchPolicy(slog))
+    // §17 packet F1b — same effective path the connector installer writes.
+    const configs = await readMcpConfig(
+      slog,
+      env,
+      await resolveMcpLaunchPolicy(slog),
+      process.cwd(),
+    )
     if (configs.length === 0) return { tools: [], clients: [], mcpAccessor: undefined }
     const mcpHealth = createMcpHealthHolder()
     const loadOpts = buildMcpLoadOpts(slog, {

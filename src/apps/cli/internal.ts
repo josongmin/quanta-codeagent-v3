@@ -388,8 +388,25 @@ export const buildSubagentConfig = (
  * When set, a finish right after an unverified mutating tool is blocked,
  * forcing one more turn up to `QUANTA_VERIFY_GUARD_MAX_TRIPS` (else default 2).
  */
+/**
+ * §17 packet F1b — the verify-guard gate, read through the CANONICAL vocabulary.
+ *
+ * This was `process.env.QUANTA_VERIFY_GUARD !== undefined`, i.e. presence-only.
+ * `QUANTA_VERIFY_GUARD=0`, `=off`, `=false`, `=no` and `=""` all turned the guard
+ * ON — the exact opposite of what an operator typing `0` means, and a shape this
+ * repo already has a standing ratchet against for the dangerous-command gate.
+ *
+ * `gateOn` is the one reader every `QUANTA_*` gate is interpreted against
+ * (`1|on|true|yes` truthy, `0|off|false|no` falsy, an empty export deliberately
+ * NOT an opt-in, unrecognized values NOT an opt-in). Default-OFF is preserved:
+ * unset is still off. Exported so the truth table is testable without touching
+ * the process env.
+ */
+export const verifyGuardEnabled = (env: NodeJS.ProcessEnv = process.env): boolean =>
+  gateOn(env, "QUANTA_VERIFY_GUARD")
+
 export const buildVerifyGuardConfig = (): AgentConfig["verifyGuard"] | undefined => {
-  const enabled = process.env.QUANTA_VERIFY_GUARD !== undefined
+  const enabled = verifyGuardEnabled()
   const trips = readCliKnob("QUANTA_VERIFY_GUARD_MAX_TRIPS", "int")
   return buildVerifyGuardConfigCore({
     enabled,
@@ -563,7 +580,15 @@ export const loadFeatures = async (
   // §12.4 LIVE-wire — the central-config MCP launch policy (E2 denylist +
   // E1-sub managed-only) now actually gates which `.mcp.json` servers launch.
   // Gate OFF / no policy configured / resolve fault ⇒ undefined ⇒ byte-identical.
-  const mcpConfigs = await readMcpConfig(slog, process.env, await resolveMcpLaunchPolicy(slog))
+  // §17 packet F1b — pass the project root so a `.mcp.json` the connector
+  // installer wrote with no env override is actually read on this launch. The
+  // writer's fallback is `<cwd>/.mcp.json`; the reader now resolves the same.
+  const mcpConfigs = await readMcpConfig(
+    slog,
+    process.env,
+    await resolveMcpLaunchPolicy(slog),
+    process.cwd(),
+  )
   // Track C — interactive MCP elicitation prompter. Built only when an
   // interactive CLI prompt seam is available (TTY stdin); headless / piped
   // runs get `undefined` so each McpClient keeps its headlessRejecter default

@@ -324,6 +324,18 @@ export const resolveMcpOAuthProvider = (
  *  Precedence is explicit config first so existing callers stay byte-identical. */
 export const resolveMcpConfigPath = (
   envSource: NodeJS.ProcessEnv = process.env,
+  // §17 packet F1b — the PROJECT root. Supplied ⇒ the resolver falls back to
+  // `<cwd>/.mcp.json`, which is the file the connector installer writes when no
+  // env override is set (`gated-tool-ports.ts`).
+  //
+  // Without this the writer and the reader disagreed about which file IS the
+  // config: an install wrote `<cwd>/.mcp.json` and the next launch resolved
+  // `undefined`, whereupon `readMcpConfig` returns `[]`. The connector silently
+  // did not exist. "Install" has to round-trip or it is a lie.
+  //
+  // Omitted ⇒ `undefined` exactly as before, so callers that have no project
+  // root (and every existing call site that passes only the env) are unchanged.
+  projectRoot?: string,
 ): string | undefined => {
   const explicit = envSource.QUANTA_MCP_CONFIG?.trim()
   if (explicit) return explicit
@@ -331,6 +343,7 @@ export const resolveMcpConfigPath = (
   if (browserConfig) return browserConfig
   const browserPluginDir = envSource.QUANTA_BROWSER_MCP_PLUGIN_DIR?.trim()
   if (browserPluginDir) return `${browserPluginDir.replace(/\/+$/, "")}/${PLUGIN_MCP_FILE}`
+  if (projectRoot !== undefined) return joinPath(projectRoot, PLUGIN_MCP_FILE)
   return undefined
 }
 
@@ -372,6 +385,10 @@ export const readMcpConfig = async (
   // managed-only enforcement). `undefined` ⇒ no filtering (legacy byte-identical:
   // the gate-OFF path and the no-policy-configured path both pass undefined).
   policy?: McpLaunchPolicy,
+  // §17 packet F1b — the project root, so a `.mcp.json` written by the connector
+  // installer with no env override is actually READ on the next launch. Omitted
+  // ⇒ env-only resolution exactly as before.
+  projectRoot?: string,
 ): Promise<McpServerConfig[]> => {
   // Observable governance: every dropped server is slog'd — never a silent
   // disappearance the operator can't diagnose.
@@ -393,7 +410,7 @@ export const readMcpConfig = async (
       if (off) slog.info("mcp.config.disabled", { server: name })
       return !off
     })
-  const path = resolveMcpConfigPath(envSource)
+  const path = resolveMcpConfigPath(envSource, projectRoot)
   if (!path) return []
   try {
     const raw = await Bun.file(path).text()

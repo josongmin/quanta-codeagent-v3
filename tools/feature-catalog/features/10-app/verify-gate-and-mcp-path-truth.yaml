@@ -1,0 +1,80 @@
+id: verify-gate-and-mcp-path-truth
+title: "`QUANTA_VERIFY_GUARD` reads the canonical gate vocabulary + the MCP writer/reader share one effective path"
+section: 10
+subsystem: CLI config truth — gate vocabulary and MCP config path
+order: 641
+maturity: L4
+status: new
+ui_surfaces: [cli, web]
+monitoring: n-a
+modes: [interactive, headless]
+configurable: integrated
+config_refs:
+  env:
+    - QUANTA_VERIFY_GUARD
+    - QUANTA_MCP_CONFIG
+owners: ["@songmin"]
+labels: [correctness, surface:cli, tier:core]
+depends_on: [cli-repo-rules-session-authority]
+surface_integration:
+  cli: full
+  web: full
+  method: audited
+  verified: "2026-08-24"
+  evidence:
+    cli: "`loadFeatures` threads `process.cwd()` into `readMcpConfig`; the verify gate reads `gateOn`"
+    web: "the daemon MCP factory threads the same project root"
+purpose: |
+  TWO config-truth defects.
+
+  1. A GATE THAT READ PRESENCE, NOT VALUE. `buildVerifyGuardConfig` read
+     `process.env.QUANTA_VERIFY_GUARD !== undefined`. Measured: every value except
+     `undefined` enabled the guard — `0`, `off`, `false`, `no` and `""` all turned it
+     ON, the exact opposite of what an operator typing `0` means.
+
+     The repo already has ONE vocabulary for this (`gateOn`: `1|on|true|yes` truthy,
+     `0|off|false|no` falsy, an empty export deliberately NOT an opt-in, unrecognized
+     values NOT an opt-in) and a standing ratchet against this precise drift for the
+     dangerous-command gate. This gate had never been migrated.
+
+  2. THE MCP WRITER AND READER DISAGREED ABOUT WHICH FILE IS THE CONFIG. The connector
+     installer writes `QUANTA_MCP_CONFIG ?? <cwd>/.mcp.json`. The reader resolved only
+     the three env forms and returned `undefined` otherwise, whereupon `readMcpConfig`
+     does `if (!path) return []`. In the DEFAULT configuration an install wrote
+     `<cwd>/.mcp.json` and the next launch read nothing — the connector silently did
+     not exist. "Install" has to round-trip or it is a lie.
+
+  `verifyGuardEnabled(env)` reads through `gateOn` and is exported so the truth table
+  is testable without touching the process env; default-OFF is preserved.
+  `resolveMcpConfigPath(env, projectRoot?)` falls back to `<projectRoot>/.mcp.json`
+  AFTER the three explicit env resolutions (precedence unchanged), and the CLI + web
+  daemon thread `process.cwd()`.
+
+  The parameter is OPTIONAL on purpose: omitted, resolution is env-only exactly as
+  before, so every existing call site is byte-identical.
+evidence:
+  code:
+    - src/apps/cli/internal.ts
+    - src/host/mcp-composition.ts
+    - src/apps/web-daemon/runtime-factory/daemon-mcp.ts
+  adrs:
+    - docs/decisions/0549-verify-gate-vocabulary-and-mcp-effective-path.md
+  tests:
+    unit:
+      - tests/unit/apps/cli/verify-guard-and-mcp-path-truth-hellgate.test.ts
+    integration: []
+    contract: []
+knobs: ["QUANTA_VERIFY_GUARD"]
+deliberate_hold: null
+notes: |
+  The truth table is asserted VALUE BY VALUE, including `garbage` (must not enable a
+  guard), `ON` (case-insensitive) and `"  1  "` (trimmed), so a future reader swap that
+  quietly widens the vocabulary fails here.
+
+  The round-trip is asserted through the REAL `readMcpConfig`, not just the path
+  resolver: the resolver agreeing with the writer is necessary but not sufficient when
+  the reader short-circuits on `!path`.
+
+  The red-on-injection control is the OLD behavior preserved — with no project root the
+  same file is still invisible — which is what shows the fix is the threading and not
+  an unrelated change.
