@@ -73,7 +73,12 @@ const SENTINEL_PREFIX = "__quanta_repl_done_"
 
 /** Build a production-shaped `NodeReplKernel`. STATEFUL — call once at
  *  composition-root and reuse across the session. */
-export const createDefaultNodeReplKernel = (opts: DefaultKernelOptions = {}): NodeReplKernel => {
+/**
+ * The kernel's shared state: the session table and the helpers every operation
+ * resolves through. Split out of `createDefaultNodeReplKernel` (god-function
+ * burndown).
+ */
+const kernelState = (opts: DefaultKernelOptions = {}) => {
   const nodeBin = opts.nodeBin ?? "node"
   const home = opts.home
   const readyTimeoutMs = opts.readyTimeoutMs ?? DEFAULT_READY_TIMEOUT_MS
@@ -94,7 +99,26 @@ export const createDefaultNodeReplKernel = (opts: DefaultKernelOptions = {}): No
   const dropKernel = (id: KernelId): void => {
     kernels.delete(id)
   }
+  return {
+    nodeBin,
+    home,
+    readyTimeoutMs,
+    kernels,
+    writeIfHome,
+    touchIfHome,
+    removeIfHome,
+    dropKernel,
+  }
+}
 
+/** The state every operation group shares, inferred from {@link kernelState} so it
+ *  can never drift from what that function actually builds. */
+type KernelCtx = ReturnType<typeof kernelState>
+
+/** Session spawn — the long pole: allocate the child, wire its streams, and
+ *  register the session so `exec`/`kill` can find it. */
+const spawnOps = (ctx: KernelCtx): Pick<NodeReplKernel, "spawn"> => {
+  const { nodeBin, readyTimeoutMs, kernels, writeIfHome, removeIfHome } = ctx
   return {
     async spawn(spawnOpts: NodeReplSpawnOptions): Promise<Result<KernelSpec, KernelError>> {
       if (spawnOpts.signal?.aborted === true) {
@@ -202,7 +226,14 @@ export const createDefaultNodeReplKernel = (opts: DefaultKernelOptions = {}): No
 
       return ok(spec)
     },
+  }
+}
 
+/** Operations over an already-spawned session: evaluate, report, terminate,
+ *  enumerate. */
+const sessionOps = (ctx: KernelCtx): Pick<NodeReplKernel, "exec" | "status" | "kill" | "list"> => {
+  const { kernels, touchIfHome, removeIfHome, dropKernel } = ctx
+  return {
     async exec(
       id: KernelId,
       code: string,
@@ -282,6 +313,14 @@ export const createDefaultNodeReplKernel = (opts: DefaultKernelOptions = {}): No
       }
       return out
     },
+  }
+}
+
+export const createDefaultNodeReplKernel = (opts: DefaultKernelOptions = {}): NodeReplKernel => {
+  const ctx = kernelState(opts)
+  return {
+    ...spawnOps(ctx),
+    ...sessionOps(ctx),
   }
 }
 

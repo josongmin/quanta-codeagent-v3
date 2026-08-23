@@ -301,7 +301,14 @@ const cellFromMessage = (m: unknown): Cell | null => {
  *  `maxUndeliveredPerSender` option; this constant governs the default path. */
 export const DEFAULT_SUBAGENT_MAILBOX_MAX_UNDELIVERED_PER_SENDER = 32
 
-export const createSubagentMailbox = (opts?: CreateSubagentMailboxOptions): MailboxPort => {
+/**
+ * The mailbox's shared state: the option-derived caps, the cell map, the
+ * observed-reader set, and the two selection helpers every operation needs.
+ *
+ * Split out of `createSubagentMailbox` (god-function burndown) so the port
+ * methods can live in groups instead of one 210-line factory body.
+ */
+const mailboxState = (opts?: CreateSubagentMailboxOptions) => {
   const now = opts?.now ?? Date.now
   const maxRetained =
     typeof opts?.maxRetained === "number" &&
@@ -370,7 +377,39 @@ export const createSubagentMailbox = (opts?: CreateSubagentMailboxOptions): Mail
     if (limit !== undefined && limit >= 0 && out.length > limit) return out.slice(0, limit)
     return out
   }
+  return {
+    now,
+    maxRetained,
+    retentionMs,
+    maxUndeliveredPerSender,
+    cells,
+    knownReaders,
+    clockNow,
+    isUndeliveredFor,
+    collect,
+  }
+}
 
+/** The state every operation group shares, inferred from {@link mailboxState} so it
+ *  can never drift from what that function actually builds. */
+type MailboxCtx = ReturnType<typeof mailboxState>
+
+/**
+ * Delivery: enqueue a message, read (which MARKS delivered), peek (which does
+ * not), and acknowledge. `read` and `collect` share one selection predicate so
+ * a `limit`/`since` cut can never advance delivery past a cell it did not
+ * return — the invariant that keeps a truncated read from stranding mail.
+ */
+const deliveryOps = (ctx: MailboxCtx): Pick<MailboxPort, "send" | "read" | "peek" | "ack"> => {
+  const {
+    maxRetained,
+    retentionMs,
+    maxUndeliveredPerSender,
+    cells,
+    knownReaders,
+    clockNow,
+    collect,
+  } = ctx
   return {
     send(init): MailboxMessage {
       try {
@@ -449,7 +488,16 @@ export const createSubagentMailbox = (opts?: CreateSubagentMailboxOptions): Mail
         return null
       }
     },
+  }
+}
 
+/** Read-only views and the snapshot codec. None of these mutate delivery
+ *  state; `fromSnapshot` repopulates the shared cell map in place. */
+const queryOps = (
+  ctx: MailboxCtx,
+): Pick<MailboxPort, "list" | "pendingFor" | "toSnapshot" | "fromSnapshot"> => {
+  const { maxUndeliveredPerSender, cells, knownReaders, isUndeliveredFor } = ctx
+  return {
     list(filter): readonly MailboxMessage[] {
       try {
         const out: MailboxMessage[] = []
@@ -511,6 +559,14 @@ export const createSubagentMailbox = (opts?: CreateSubagentMailboxOptions): Mail
         // leave whatever survived; never throw
       }
     },
+  }
+}
+
+export const createSubagentMailbox = (opts?: CreateSubagentMailboxOptions): MailboxPort => {
+  const ctx = mailboxState(opts)
+  return {
+    ...deliveryOps(ctx),
+    ...queryOps(ctx),
   }
 }
 

@@ -150,7 +150,11 @@ const padLabel = (label: string, width = 14): string => label.padEnd(width)
 
 // ── factory ─────────────────────────────────────────────────────────────
 
-export const createCostPanel = (opts: CostPanelOptions): CostPanel => {
+/**
+ * The panel's shared state: the running totals and the formatting helpers both
+ * renderers use. Split out of `createCostPanel` (god-function burndown).
+ */
+const panelState = (opts: CostPanelOptions) => {
   const enabled = opts.enabled ?? true
   const now = opts.now ?? Date.now
   const state: CostPanelState = {
@@ -231,7 +235,29 @@ export const createCostPanel = (opts: CostPanelOptions): CostPanel => {
       },
     ]
   > => [...perModel.entries()].sort((a, z) => (a[0] < z[0] ? -1 : a[0] > z[0] ? 1 : 0))
+  return {
+    enabled,
+    now,
+    state,
+    perModel,
+    bucketFor,
+    accumulateCost,
+    PATCH_KEYS,
+    applyPatch,
+    sortedModelEntries,
+  }
+}
 
+/** The state every operation group shares, inferred from {@link panelState} so it
+ *  can never drift from what that function actually builds. */
+type PanelCtx = ReturnType<typeof panelState>
+
+/** Accounting: the totals, their per-model breakdown, and the two mutators
+ *  that advance them. */
+const accountingOps = (
+  ctx: PanelCtx,
+): Pick<CostPanel, "snapshot" | "byModel" | "update" | "incrementTurn"> => {
+  const { enabled, state, bucketFor, accumulateCost, applyPatch, sortedModelEntries } = ctx
   return {
     snapshot: () => ({ ...state }),
 
@@ -272,7 +298,14 @@ export const createCostPanel = (opts: CostPanelOptions): CostPanel => {
         b.costUsd = (b.costUsd ?? 0) + turnCost
       }
     },
+  }
+}
 
+/** Presentation + teardown. Rendering reads the accounting state and never
+ *  mutates it. */
+const renderOps = (ctx: PanelCtx): Pick<CostPanel, "render" | "renderDetailed" | "dispose"> => {
+  const { enabled, now, state, perModel, sortedModelEntries } = ctx
+  return {
     render: () => {
       if (!enabled) return renderDisabled()
       const cost = formatUsd(state.totalCostUsd)
@@ -323,6 +356,14 @@ export const createCostPanel = (opts: CostPanelOptions): CostPanel => {
     },
 
     dispose: () => undefined,
+  }
+}
+
+export const createCostPanel = (opts: CostPanelOptions): CostPanel => {
+  const ctx = panelState(opts)
+  return {
+    ...accountingOps(ctx),
+    ...renderOps(ctx),
   }
 }
 
