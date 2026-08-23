@@ -48,7 +48,7 @@ import {
 import { deny, HANDOFF_SUFFIX } from "../dispatch-helpers"
 import type { DispatchResult } from "../dispatch-types"
 import { type HookPermissionDecision, routePermissionHookVerdict } from "../hooks"
-import { isMutatingToolBlockedInMode, modeBlockReason, resolveAgentMode } from "../mode"
+import { isMutatingToolBlockedInMode, modeBlockReason, resolveLiveAgentMode } from "../mode"
 import type { AdmissibilityGateConfig } from "../types"
 import { reviewAndDecide, runAlwaysConfirmBranch, runHitlGate } from "./hitl"
 import {
@@ -130,7 +130,7 @@ const denyIfModeBlocked = (
   config: AdmissibilityGateConfig,
   action: AdmissibilityAction,
 ): DispatchResult | null => {
-  const effectiveMode = resolveAgentMode(config.mode, config.planMode)
+  const effectiveMode = resolveLiveAgentMode(config)
   if (!isMutatingToolBlockedInMode(effectiveMode, action)) return null
   const reason = modeBlockReason(effectiveMode, call.name)
   return deny(

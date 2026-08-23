@@ -270,6 +270,24 @@ export interface AgentConfig
    */
   mode?: AgentMode
   /**
+   * §17 packet M — LIVE agent-mode reader, the posture axis's counterpart to
+   * `permissionModeState`.
+   *
+   * `mode` above is fixed when the config is built, which is fine for a
+   * launch-time `--plan` but useless for a surface that lets the operator flip
+   * posture mid-session. The CLI's `shift+tab` cycle has a PLAN rung described
+   * as "research and propose, never touch files", and its `agentMode` reached a
+   * status pill and nothing else — `RuntimeSessionConfig` had no mode field at
+   * all. The chrome promised a guarantee the runtime did not enforce, which is
+   * worse than no plan mode: the operator stops watching because the CLI told
+   * them it was safe.
+   *
+   * Read ONCE per turn (never mid-turn), so a flip takes effect on the NEXT
+   * turn — the same contract `permissionModeState` has. Absent ⇒ `mode` /
+   * `planMode` decide exactly as before (byte-identical).
+   */
+  agentModeState?: { get(): AgentMode }
+  /**
    * Plan-vs-Default collaboration mode (ADR-0036). 2-mode enum tied to the
    * DISPATCH SEAM (orthogonal to {@link mode}, which drives the per-turn
    * PROMPT posture). In `"plan"` posture every mutating tool is blocked at

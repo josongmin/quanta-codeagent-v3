@@ -10,7 +10,8 @@ import { attrs, createTurnTimingCapture, SPAN_NAMES, type Span, startSpan } from
 import { abortReasonOf, classify, errMessage, LLMError, type LLMErrorKind, logger } from "@/shared"
 import { estimateTokens, TokenBaselineBox } from "../compaction"
 import { finalizeSamplingSpan, type SamplingUsage, samplingUsageFromEvent } from "../loop-helpers"
-import type { buildTurnContext } from "../prompt"
+import { isToolBlockedInMode, resolveLiveAgentMode } from "../mode"
+import type { AgentMode, buildTurnContext } from "../prompt"
 import { withActiveSpanScope } from "../session-resources"
 import { createStreamDispatcher, type TurnTimingAnchors } from "../stream-callbacks"
 import { streamingTurn } from "../streaming-dispatch"
@@ -316,6 +317,43 @@ const classifyStreamTurnError = (e: unknown, config: AgentConfig): StreamTurnErr
   return { status: "error", result: { error: e, message }, errorKind: classify(e) }
 }
 
+/** Hide the tools this mode's dispatch gate would refuse.
+ *
+ *  Returns the SAME array reference when nothing is hidden (a write-capable
+ *  mode), so the byte-identical default path allocates nothing.
+ *
+ *  Read-only tools are never hidden: plan mode has to be able to investigate,
+ *  and `request_plan_exit` has to stay reachable or the model cannot leave the
+ *  mode it is in. */
+const filterSpecsByMode = <T extends { readonly name: string }>(
+  specs: T[],
+  mode: AgentMode,
+  isReadOnly: (name: string) => boolean,
+): T[] => {
+  const kept = specs.filter((s) => !isToolBlockedInMode(mode, isReadOnly(s.name)))
+  return kept.length === specs.length ? specs : kept
+}
+
+/** The tool surface the model is advertised this turn.
+ *
+ *  TWO gates, one rule: the model must not be advertised a tool dispatch will
+ *  refuse. `filterSpecsByScope` already does this for the SKILL gate, with a
+ *  comment naming the failure it avoids ("see-but-can't-call"); the MODE gate
+ *  never got the same treatment, so plan/review/audit advertised `write`,
+ *  `edit`, `apply_patch` and `bash` and the model burned a turn reading a denial.
+ *
+ *  Both filters consult the SAME predicate their dispatch gate uses —
+ *  `isToolBlockedInMode` over `registry.isReadOnly(name)`, which is exactly the
+ *  `action.isReadOnly` the gate reads — so visible == dispatchable. */
+const resolveVisibleSpecs = (
+  specs: TurnSession["specs"],
+  skillGate: Parameters<typeof filterSpecsByScope>[1],
+  config: AgentConfig,
+): TurnSession["specs"] =>
+  filterSpecsByMode(filterSpecsByScope(specs, skillGate), resolveLiveAgentMode(config), (name) =>
+    config.registry.isReadOnly(name),
+  )
+
 /** The sampling-turn stream execution: activate the `chat` span in async
  *  context, emit `llm_request` INSIDE that scope (so its OBSERVE event + the
  *  paired usage events + the cassette all sample the SAME sampling-span ref, not
@@ -431,7 +469,7 @@ export const streamConsume = async (
   // `filterSpecsByScope` returns the SAME `specs` reference (byte-identical). v2
   // ON is unchanged (it already filtered). NOTE: the flag still gates the v2
   // escalation UX in `handleSkillScope`; only the VISIBILITY filter is unified.
-  const visibleSpecs = filterSpecsByScope(specs, skillGate)
+  const visibleSpecs = resolveVisibleSpecs(specs, skillGate, config)
   const toolChoice = resolveToolChoice(consumeTurnSignals(toolChoiceState))
   session.ttfm?.markFirstDispatch()
   config.budgetMeter?.tick("model_call")

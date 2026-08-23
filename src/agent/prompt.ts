@@ -14,7 +14,7 @@ import { buildPersistentInjectionMessages } from "./context-change"
 import type { TurnEnvContext } from "./env-context"
 import { type GlobRule, selectGlobRules } from "./glob-rules"
 import { assertValidIdentityLines } from "./identity"
-import { resolveAgentMode } from "./mode"
+import { resolveLiveAgentMode } from "./mode"
 import { type PersonaKind, personaLines } from "./persona"
 import { INTRO_LINES } from "./prompt-body"
 import { type DirectiveConfig, selectActiveDirectives } from "./prompt-directives"
@@ -727,7 +727,7 @@ const buildPromptPolicy = (
 
 export const compile = (input: TurnContextInput): CompiledPromptArtifact => {
   const { staticBase, projectMd, useSectioned } = resolveCompileStatics(input)
-  const effectiveMode = resolveAgentMode(input.mode, input.planMode)
+  const effectiveMode = resolveLiveAgentMode(input)
   const selectedGlobRules =
     input.globRules !== undefined && input.globRules.length > 0
       ? selectGlobRules(input.globRules, input.changedPaths ?? [])

@@ -495,6 +495,7 @@ const buildOptionalSnapshotFields = (
   ...whenDefined("toolProfileState", base.toolProfileState),
   ...whenDefined("identityModeState", base.identityModeState),
   ...whenDefined("permissionModeState", base.permissionModeState),
+  ...whenDefined("agentModeState", base.agentModeState),
   ...whenDefined("focusChain", base.focusChain),
   ...whenDefined("stickyModelStore", base.stickyModelStore),
   ...whenDefined("decisionEmitter", base.decisionEmitter),

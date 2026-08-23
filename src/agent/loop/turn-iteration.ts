@@ -7,7 +7,7 @@ import { estimateTokens } from "../compaction"
 import { syncFocusChainFromPlan } from "../focus-chain/plan-bridge"
 import { captureAbortedTurn } from "../interrupted-turn"
 import { buildIdentityReminderText } from "../loop-helpers"
-import { resolveAgentMode } from "../mode"
+import { resolveLiveAgentMode } from "../mode"
 import { stampTurn } from "../session-resources"
 import type { ShellSnapshotSession } from "../shell-snapshot-session"
 import { makeSyntheticUserMessage } from "../synthetic-user"
@@ -486,7 +486,7 @@ const identityRegistryThrowWarned = new WeakSet<AgentConfig>()
  *  silent swallow): a throwing `variantFor` emits a one-shot session-deduped
  *  error event instead of vanishing. */
 export const injectIdentityReminder = (cfg: AgentConfig, wm: WorkingMemory<Message>): void => {
-  const mode = resolveAgentMode(cfg.mode, cfg.planMode)
+  const mode = resolveLiveAgentMode(cfg)
   const text = buildIdentityReminderText(cfg, mode, (e) => {
     if (identityRegistryThrowWarned.has(cfg)) return
     identityRegistryThrowWarned.add(cfg)

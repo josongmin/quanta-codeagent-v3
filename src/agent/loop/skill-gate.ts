@@ -3,7 +3,7 @@ import { supportsAdaptiveThinking } from "@/llm"
 import { runtimeConfig } from "@/shared"
 import { effortToTokenBudget } from "../effort"
 import { READ_ONLY_EXPLORATION } from "../exploration-ladder"
-import { resolveAgentMode } from "../mode"
+import { resolveLiveAgentMode } from "../mode"
 import type { SkillGate, SkillTurnOverride } from "../turn-context"
 import type { AgentConfig } from "../types"
 
@@ -121,7 +121,7 @@ export type ResolvedTurnOverride = {
 export const readStickyModelForMode = async (config: AgentConfig): Promise<string | undefined> => {
   if (config.stickyModelStore === undefined) return undefined
   return config.stickyModelStore.store.get({
-    mode: resolveAgentMode(config.mode, config.planMode),
+    mode: resolveLiveAgentMode(config),
   })
 }
 

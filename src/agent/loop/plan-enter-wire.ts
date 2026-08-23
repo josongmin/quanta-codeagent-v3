@@ -21,7 +21,7 @@ import type { HookPromptInject } from "../hooks"
 import {
   applyCollaborationModeTransition,
   isMutatingMode,
-  resolveAgentMode,
+  resolveLiveAgentMode,
   resolveCollaborationMode,
 } from "../mode"
 import type { PlanLifecycleConfig } from "../types"
@@ -47,7 +47,7 @@ export const applyPendingPlanEntry = (
   // (default/editor) has anything to fence off. This prevents both a duplicate
   // event and a silent review→plan downgrade.
   if (resolveCollaborationMode(cfg) === "plan") return
-  const fromAgentMode = resolveAgentMode(cfg.mode, cfg.planMode)
+  const fromAgentMode = resolveLiveAgentMode(cfg)
   if (!isMutatingMode(fromAgentMode)) return
   const transition = applyCollaborationModeTransition(cfg, "plan")
   if (!transition.changed) return

@@ -1,7 +1,8 @@
-import type { AgentConfig } from "@/agent"
+import type { AgentConfig, AgentMode } from "@/agent"
 import type { Message } from "@/llm"
 import { createCronSlashAdapter } from "@/scheduler"
 import { assembleAutomation } from "@/scheduler/runtime-wire"
+import type { RuntimeFacadeComposeOptions } from "@/sdk/runtime/context"
 import { errMessage, runtimeConfig } from "@/shared"
 import type { AgentEvent } from "@/stream"
 import { ExternalPromptQueue } from "../external-prompt-queue"
@@ -122,6 +123,29 @@ export const buildAutomationRerouteDeps = (input: {
   ...(input.routeEventSink !== undefined ? { onModelReroute: input.routeEventSink } : {}),
 })
 
+/** §17 packet M — fold the LIVE agent-mode reader into the runtime compose.
+ *
+ *  A reader, not a snapshot. The `shift+tab` PLAN rung is described as "research
+ *  and propose, never touch files"; before this its `agentMode` reached a status
+ *  pill and nothing else, so the chrome promised a guarantee the runtime did not
+ *  enforce. Reading the store PER TURN makes a mid-session flip real at the
+ *  prompt, the visible tool surface AND the dispatch gate.
+ *
+ *  No cycle wired ⇒ the compose is passed through untouched (or omitted), so the
+ *  launch-time `--plan` path is byte-identical. */
+const withLiveAgentMode = (
+  compose: RuntimeFacadeComposeOptions | undefined,
+  modeCycle: { current(): { agentMode: AgentMode } } | undefined,
+): { compose?: RuntimeFacadeComposeOptions } => {
+  if (modeCycle === undefined) return compose === undefined ? {} : { compose }
+  return {
+    compose: {
+      ...(compose ?? {}),
+      agentModeState: { get: () => modeCycle.current().agentMode },
+    },
+  }
+}
+
 /** Phase 2 — automation engine + runtime compose. Mints the `/cron` engine
  *  (LATE-BINDING the slash slot the instant it exists), strips the bootstrap
  *  ticker so the REPL stays the SINGLE interval owner (ALBB-14), and folds the
@@ -195,19 +219,27 @@ export const bootstrapSessionLoop = async (
   // L5 H-7 — single close stack + drain + init guard.
   const { closeStack, drainCloseStack, guardInit } = createCloseStackController()
 
+  const modeCycleRef = ux?.modeCycle
   const runtimeFacade = await runtimeContext.createRuntimeFacade({
     boot: {
       mode: setup.mode,
       refreshSystemPrompt: setup.refreshSystemPrompt,
       toolProfileState: activeToolProfileState,
       identityModeState: activeIdentityModeState,
+      // §17 packet M — a LIVE reader, not a snapshot. The `shift+tab` PLAN rung
+      // is described as "research and propose, never touch files"; before this
+      // its `agentMode` reached a status pill and nothing else, so the chrome
+      // promised a guarantee the runtime did not enforce. Reading the store per
+      // turn makes a mid-session flip real at the prompt, the visible tool
+      // surface AND the dispatch gate. Absent cycle ⇒ slot omitted ⇒ the
+      // launch-time `--plan` path is byte-identical.
     },
     history: [...state.surfaceState.history],
     state: featureState,
     idMeta,
     shutdown: async () => undefined,
     mcpClients: setup.mcpClients as Array<{ stop: () => Promise<void> }>,
-    ...(runtimeCompose !== undefined ? { compose: runtimeCompose } : {}),
+    ...withLiveAgentMode(runtimeCompose, modeCycleRef),
   })
   closeStack.push({ label: "runtimeFacade.close", dispose: () => runtimeFacade.close() })
   const session = await guardInit(() =>

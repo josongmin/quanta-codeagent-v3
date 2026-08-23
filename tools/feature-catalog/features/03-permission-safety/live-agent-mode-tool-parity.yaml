@@ -1,0 +1,93 @@
+id: live-agent-mode-tool-parity
+title: "Live AgentMode reaches the dispatch gate + the model is never advertised a tool dispatch will refuse"
+section: 3
+subsystem: Permission — agent-mode posture and tool visibility
+order: 211
+maturity: L4
+status: new
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [interactive, headless]
+configurable: n-a
+owners: ["@songmin"]
+labels: [security, correctness, surface:cli, tier:core]
+depends_on: []
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-08-24"
+  evidence:
+    cli: "the shift+tab mode cycle feeds `agentModeState` through the runtime compose into the per-turn AgentConfig"
+    web: "the web surface has no mode cycle; the launch-time `mode`/`planMode` path is unchanged"
+purpose: |
+  TWO defects, measured on the shipping composition.
+
+  1. THE PLAN PILL PROMISED A GUARANTEE NOTHING ENFORCED. `MODE_CYCLE`'s plan rung is
+     `{ permissionMode: "default", agentMode: "plan" }`, described to the operator as
+     "research and propose, never touch files". The `permissionMode` half reaches
+     `createSession`; the `agentMode` half reached a status pill and NOTHING else —
+     `RuntimeSessionConfig` had no mode field at all, and `agentMode` appeared nowhere
+     under src/host, src/sdk or src/agent. So `shift+tab` → PLAN repainted the chrome
+     while the agent kept full write capability.
+
+     The gap was easy to miss because the LAUNCH-TIME paths do work (`--plan` /
+     `QUANTA_PLAN=1` set `cfg.planMode`). Only the interactive cycle — the affordance
+     an operator actually reaches for — was inert. A posture that is announced but not
+     enforced is worse than one that does not exist: the operator stops watching after
+     the CLI tells them it is safe.
+
+  2. A READ-ONLY MODE STILL ADVERTISED TOOLS DISPATCH WOULD REFUSE. `visibleSpecs` was
+     filtered by the SKILL gate only, so plan/review/audit advertised `write`, `edit`,
+     `apply_patch` and `bash` and the model burned a turn reading a denial. The
+     skill-scope comments name this exact failure ("see-but-can't-call") as the reason
+     that filter exists; mode never got the same treatment.
+
+  ONE LIVE RESOLUTION: `resolveLiveAgentMode` reads `agentModeState?.get()` first, then
+  `mode`, then legacy `planMode`. Every consumer that called
+  `resolveAgentMode(config.mode, config.planMode)` now goes through it — the prompt, the
+  admissibility gate, the plan-enter wire, the skill gate, the turn iteration, and
+  `resolveCollaborationMode` (the dispatch seam).
+
+  ONE PREDICATE: `isToolBlockedInMode(mode, isReadOnly)` is the rule;
+  `isMutatingToolBlockedInMode(mode, action)` delegates. The visible-spec filter and the
+  dispatch gate consult the SAME predicate over the SAME value
+  (`registry.isReadOnly(name)` IS the gate's `action.isReadOnly`), so visible ==
+  dispatchable by construction, not by convention.
+
+  Read-only tools are never hidden: plan mode must be able to investigate, and
+  `request_plan_exit` must stay reachable or the model cannot leave the mode it is in.
+evidence:
+  code:
+    - src/agent/mode.ts
+    - src/agent/types.ts
+    - src/agent/loop/stream-consume.ts
+    - src/sdk/runtime/context.ts
+    - src/apps/cli/repl/session-loop/bootstrap.ts
+  adrs:
+    - docs/decisions/0547-live-agent-mode-and-tool-visibility-parity.md
+  tests:
+    unit:
+      - tests/unit/apps/cli/agent-mode-live-parity-hellgate.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  THE PAIRED CONTROL IS LOAD-BEARING. A "fix" that hid mutating tools in every mode
+  would satisfy the parity invariant and destroy the product, so `default`/`editor` are
+  asserted to keep the FULL surface, and read-only tools are asserted visible in plan.
+
+  Fail-closed is asserted, not assumed: an unrecognized mode hides mutating tools,
+  because `MUTATING_MODES` membership is the test.
+
+  `PASS_THROUGH_COMPOSE_KEYS` is exported so the wiring proof asserts the contract at
+  RUNTIME rather than by grepping the source — a key silently dropped from that list is
+  exactly how a wired-looking feature ends up reaching nothing.
+
+  Three injections each produce a distinct RED: removing the spec filter (5 fail),
+  making the live resolution ignore `agentModeState` (3 fail), and dropping the compose
+  key (1 fail).
+
+  Two functions crossed the 150-line god-function cap from the additions and were SPLIT
+  (`withLiveAgentMode`, `resolveVisibleSpecs`) rather than allowlisted.

@@ -279,6 +279,8 @@ export {
 export { AgentRecorder, METRIC } from "./metrics"
 export {
   isMutatingToolBlockedInMode,
+  isToolBlockedInMode,
+  resolveLiveAgentMode,
   modeBlockReason,
   mutatingToolKind,
   resolveAgentMode,

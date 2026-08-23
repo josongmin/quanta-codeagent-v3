@@ -41,6 +41,12 @@ export interface RuntimeFacadeComposeOptions {
    *  breakdown). Absent ⇒ slot omitted ⇒ `AgentConfig.onPromptAssembled`
    *  undefined ⇒ loop byte-identical. */
   readonly onPromptAssembled?: AgentConfig["onPromptAssembled"]
+  /** §17 packet M — LIVE agent-mode reader (the CLI's `shift+tab` cycle). Patched
+   *  onto the runtime-context state so the per-turn `AgentConfig` carries
+   *  `agentModeState`, and the prompt, the visible tool surface and the dispatch
+   *  gate all resolve the SAME live posture. Absent ⇒ slot omitted ⇒ `mode` /
+   *  `planMode` decide exactly as before (byte-identical). */
+  readonly agentModeState?: AgentConfig["agentModeState"]
   /** Working-state feature gate (`/state`). When `enabled === true` the loop
    *  builds the session-scoped WorkingState + registers `update_working_state`.
    *  Absent ⇒ feature OFF (byte-identical). */
@@ -223,8 +229,13 @@ const patchRuntimeContextState = (
  *  two NON-uniform keys (`registryToolMapper`, `automationEngine` — they derive
  *  a new `registry`) stay as explicit branches below. ADR-0512 added
  *  `onSkillScopeReady` to this set. */
-const PASS_THROUGH_COMPOSE_KEYS = [
+/** Exported so a test can assert the CONTRACT at runtime rather than by grepping
+ *  the source: a key silently dropped from this list makes the corresponding
+ *  compose option inert, which is exactly how a wired-looking feature ends up
+ *  reaching nothing. */
+export const PASS_THROUGH_COMPOSE_KEYS = [
   "onPromptAssembled",
+  "agentModeState",
   "workingState",
   "onWorkingStateReady",
   "onSkillScopeReady",

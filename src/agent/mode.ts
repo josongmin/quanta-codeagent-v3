@@ -47,14 +47,51 @@ export const resolveAgentMode = (
   return "default"
 }
 
+/** Shape every live-mode consumer reads. Structural so `AgentConfig`, the
+ *  turn-context input, and the admissibility-gate config all satisfy it without
+ *  importing each other. */
+export interface AgentModeSource {
+  readonly mode?: AgentMode
+  readonly planMode?: boolean
+  readonly agentModeState?: { get(): AgentMode }
+}
+
+/** §17 packet M — the ONE resolution every consumer must use.
+ *
+ *  Precedence: the LIVE reader wins, then the fixed `mode`, then legacy
+ *  `planMode`. The live reader is what makes a mid-session posture flip real —
+ *  without it the CLI's `shift+tab` PLAN rung repainted the chrome while the
+ *  agent kept full write capability, because `agentMode` reached a status pill
+ *  and nothing else.
+ *
+ *  Read ONCE per turn by each consumer; never mid-turn. */
+export const resolveLiveAgentMode = (source: AgentModeSource): AgentMode => {
+  const live = source.agentModeState?.get()
+  if (live !== undefined) return live
+  return resolveAgentMode(source.mode, source.planMode)
+}
+
 /** True iff `mode` forbids mutating tools and `action` is mutating. Read-only
  *  actions pass through every mode unchanged. Fail-closed: a mode that is NOT
  *  in {@link MUTATING_MODES} (including any unknown runtime value) blocks
  *  mutating tools — a new mode forgotten by a future PR ships safe by default. */
-export const isMutatingToolBlockedInMode = (mode: AgentMode, action: ToolAction): boolean => {
-  if (action.isReadOnly) return false
-  return !MUTATING_MODES.has(mode)
-}
+/** THE mode predicate, stated over the one fact it actually needs: is the tool
+ *  read-only?
+ *
+ *  Both the DISPATCH gate and the model's VISIBLE tool list must answer this the
+ *  same way, or the model is advertised tools that will be refused — the
+ *  "see-but-can't-call fumble" the skill-scope filter already avoids. Dispatch
+ *  reads `action.isReadOnly`, which is exactly `registry.isReadOnly(name)`, so
+ *  the visible-spec filter can consult the same predicate with the same value.
+ *
+ *  Fail-closed: a mode NOT in {@link MUTATING_MODES} — including any unknown
+ *  runtime value — blocks mutating tools, so a mode a future PR forgets ships
+ *  safe. */
+export const isToolBlockedInMode = (mode: AgentMode, isReadOnly: boolean): boolean =>
+  !isReadOnly && !MUTATING_MODES.has(mode)
+
+export const isMutatingToolBlockedInMode = (mode: AgentMode, action: ToolAction): boolean =>
+  isToolBlockedInMode(mode, action.isReadOnly)
 
 /** True iff `mode` PERMITS mutating tools (a write-capable posture). SSOT
  *  membership check over {@link MUTATING_MODES}: `default`/`editor` are mutating;
@@ -785,14 +822,14 @@ export const assertNotMutatingInPlanMode = (mode: CollaborationMode, toolName: s
  *
  *  Pure: no IO, no clock, no read of process env. Takes the narrow slice it
  *  needs (the three optional `AgentConfig` fields). */
-export const resolveCollaborationMode = (config: {
-  collaborationMode?: CollaborationMode
-  mode?: AgentMode
-  planMode?: boolean
-}): CollaborationMode => {
+export const resolveCollaborationMode = (
+  config: AgentModeSource & { collaborationMode?: CollaborationMode },
+): CollaborationMode => {
   if (config.collaborationMode === "plan") return "plan"
   if (config.collaborationMode === "default") return "default"
-  return resolveAgentMode(config.mode, config.planMode) === "plan" ? "plan" : "default"
+  // §17 packet M — via the LIVE resolution, so a mid-session flip reaches the
+  // dispatch seam and not only the prompt.
+  return resolveLiveAgentMode(config) === "plan" ? "plan" : "default"
 }
 
 /** Mutable config slice owned by the collaboration-mode transition seam. The

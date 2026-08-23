@@ -118,6 +118,11 @@ export interface BootBindings {
   readonly refreshSystemPrompt: SessionBootstrapResult["refreshSystemPrompt"]
   readonly toolProfileState?: SessionBootstrapResult["toolProfileState"] | undefined
   readonly identityModeState?: SessionBootstrapResult["identityModeState"] | undefined
+  /** §17 packet M — LIVE agent-mode reader (the CLI's `shift+tab` cycle). The
+   *  posture axis's counterpart to `permissionModeState`: read once per turn so
+   *  a mid-session flip reaches the prompt, the visible tool surface AND the
+   *  dispatch gate, instead of only repainting a status pill. */
+  readonly agentModeState?: AgentConfig["agentModeState"] | undefined
 }
 
 export interface RuntimeContextSnapshot {
@@ -128,6 +133,7 @@ export interface RuntimeContextSnapshot {
   readonly toolProfileState?: ToolProfileSessionState
   readonly identityModeState?: IdentityModeSessionState
   readonly permissionModeState?: PermissionModeSessionState
+  readonly agentModeState?: AgentConfig["agentModeState"]
   readonly focusChain?: AgentConfig["focusChain"]
   readonly stickyModelStore?: AgentConfig["stickyModelStore"]
   readonly decisionEmitter?: AgentConfig["decisionEmitter"]
@@ -195,6 +201,7 @@ export type RuntimeContextPatch = Partial<
     | "automationEngine"
     | "toolProfileState"
     | "identityModeState"
+    | "agentModeState"
     | "focusChain"
     | "stickyModelStore"
     | "decisionEmitter"
