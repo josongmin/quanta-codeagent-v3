@@ -1,0 +1,4 @@
+{
+  "note": "Paths a guarded test run is PERMITTED to create. One-directional: an entry that stops firing is reported as STALE and must be removed. Empty is the goal — a test should write under a temp dir it removes, or pass an explicit base directory.",
+  "allowed": {}
+}

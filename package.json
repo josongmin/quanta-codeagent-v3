@@ -26,6 +26,7 @@
     "test:admission:audit": "bun fc audit",
     "test": "bun run typecheck && bun run test:clean-js && bun test tests/unit tests/integration --parallel=1",
     "test:unit": "bun run typecheck && bun run test:clean-js && bun test tests/unit --parallel=1",
+    "test:pollution": "bun run tools/dev/worktree-pollution-guard.ts -- bun test tests/unit",
     "test:fast": "bun run typecheck && bun run test:clean-js && bun test tests/unit/agent tests/unit/llm tests/unit/permission tests/unit/runtime --parallel=1",
     "test:integration": "bun run test:clean-js && bun test tests/integration --parallel=1",
     "test:resilient": "bun run test:clean-js && bun run tools/test-resilience/cli.ts run tests/unit tests/integration",
