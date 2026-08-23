@@ -272,14 +272,72 @@ const rebuildCommandReplayIndex = (
   return next
 }
 
-export const createSessionTransportBridge = (
-  opts: CreateSessionTransportBridgeOpts,
-): SessionTransportBridge => {
-  let closed = false
+type Peer = {
+  readonly transport: SessionTransport
+  unsubscribe: (() => void) | undefined
+  closed: boolean
+  connected: boolean
+  /**
+   * J-MED-1 (jul-16 종합/J audit) — the per-peer SEND-SERIALIZATION tail.
+   * Every frame this peer receives — the connect handshake's replay answer
+   * (snapshot / tail / durable rescue + the ticket-05 `resumed` marker), a
+   * command's rejected/resync reply, and every live `publishEvents` /
+   * `publishSnapshot` fan-out — is emitted inside a task threaded through
+   * `enqueueSend`, so frames leave in strict enqueue order down a single
+   * channel.
+   *
+   * WHY (the audited out-of-order bug): `connect` flips `connected = true`
+   * SYNCHRONOUSLY and then `handleConnect` serves the replay through a chain
+   * of `await peer.send(...)`; on an async transport a concurrent
+   * `publishEvents` saw the peer already connected and interleaved its live
+   * frames BETWEEN the replay frames (e.g. 12, 14, 13, resumed). Serializing
+   * every emission makes the whole replay answer complete before any live
+   * frame enqueued after the connect can run — WITHOUT the naive "flip
+   * connected after replay" fix, which would instead DROP the live events
+   * that arrive during the replay (they gate out and are never re-served):
+   * here they simply queue behind the replay and flush after it.
+   *
+   * IDLE FAST-PATH: `enqueueSend` runs a task INLINE (no `.then` deferral)
+   * when the channel is quiescent (`pendingSends === 0`), so the uncontended
+   * case — the overwhelmingly common one, e.g. a reject reply with no
+   * concurrent handshake — keeps its pre-fix same-tick send timing. The tail
+   * only interposes when a send is genuinely in flight; that is exactly (and
+   * only) when an interleave could otherwise occur.
+   *
+   * The tail is `.catch`-guarded (engine.ts `transportDispatchQueue`
+   * precedent) so one poisoned send can never wedge the channel. Only frame
+   * EMISSION rides it — command DISPATCH (`handleCommand` → `onCommand` →
+   * kernel, which re-enters via `publishEvents`) stays OFF, so a dispatch
+   * that publishes cannot deadlock waiting on its own enqueued fan-out
+   * (ADR-0540 web-inline deadlock class).
+   */
+  sendChain: Promise<void>
+  /** Count of send tasks currently queued-or-running on `sendChain`. Zero ⇒
+   *  the channel is idle and `enqueueSend` may run the next task inline. */
+  pendingSends: number
+  /**
+   * Ticket 04 (S2/S3) — whether THIS peer negotiated wire full fidelity. Set
+   * by `handleConnect` when the connect frame carried `requestedFidelity:"full"`
+   * AND the production gate granted it. FALSE by default (per-peer state lives
+   * for the connection lifetime — a reconnect must re-negotiate). Non-granted ⇒
+   * every event frame is stripped of full fields before send (`sendMessages`).
+   */
+  fidelityGranted: boolean
+}
+
+/** The bridge's state and its peer table: the per-command state each peer
+ *  advances, and the serialized send queue every peer write goes through. */
+const bridgePeers = (opts: CreateSessionTransportBridgeOpts) => {
   const tailLimit = opts.tailLimit ?? DEFAULT_TAIL_LIMIT
-  let snapshot = cloneSnapshot(opts.snapshot)
-  let tail = trimTail(snapshot, [], tailLimit)
-  let commandReplayIndex = rebuildCommandReplayIndex(tail)
+  /** The bridge's MUTABLE state, in ONE holder so the operation builders can
+   *  share it: a `let` cannot cross a function boundary by value, and each of
+   *  these is written by one path and read by several. */
+  const st = {
+    closed: false,
+    snapshot: cloneSnapshot(opts.snapshot),
+    tail: trimTail(cloneSnapshot(opts.snapshot), [], opts.tailLimit ?? DEFAULT_TAIL_LIMIT),
+    replayIndex: new Map<string, readonly SessionEvent[]>(),
+  }
   // M18(a): the command-dedup window. Previously this Map only ever GREW —
   // a long-lived daemon session accumulated one entry per accepted command
   // forever, and the dedup window silently diverged from the BOUNDED replay
@@ -299,58 +357,6 @@ export const createSessionTransportBridge = (
       commandStates.delete(oldest)
     }
     commandStates.set(commandId, state)
-  }
-  type Peer = {
-    readonly transport: SessionTransport
-    unsubscribe: (() => void) | undefined
-    closed: boolean
-    connected: boolean
-    /**
-     * J-MED-1 (jul-16 종합/J audit) — the per-peer SEND-SERIALIZATION tail.
-     * Every frame this peer receives — the connect handshake's replay answer
-     * (snapshot / tail / durable rescue + the ticket-05 `resumed` marker), a
-     * command's rejected/resync reply, and every live `publishEvents` /
-     * `publishSnapshot` fan-out — is emitted inside a task threaded through
-     * `enqueueSend`, so frames leave in strict enqueue order down a single
-     * channel.
-     *
-     * WHY (the audited out-of-order bug): `connect` flips `connected = true`
-     * SYNCHRONOUSLY and then `handleConnect` serves the replay through a chain
-     * of `await peer.send(...)`; on an async transport a concurrent
-     * `publishEvents` saw the peer already connected and interleaved its live
-     * frames BETWEEN the replay frames (e.g. 12, 14, 13, resumed). Serializing
-     * every emission makes the whole replay answer complete before any live
-     * frame enqueued after the connect can run — WITHOUT the naive "flip
-     * connected after replay" fix, which would instead DROP the live events
-     * that arrive during the replay (they gate out and are never re-served):
-     * here they simply queue behind the replay and flush after it.
-     *
-     * IDLE FAST-PATH: `enqueueSend` runs a task INLINE (no `.then` deferral)
-     * when the channel is quiescent (`pendingSends === 0`), so the uncontended
-     * case — the overwhelmingly common one, e.g. a reject reply with no
-     * concurrent handshake — keeps its pre-fix same-tick send timing. The tail
-     * only interposes when a send is genuinely in flight; that is exactly (and
-     * only) when an interleave could otherwise occur.
-     *
-     * The tail is `.catch`-guarded (engine.ts `transportDispatchQueue`
-     * precedent) so one poisoned send can never wedge the channel. Only frame
-     * EMISSION rides it — command DISPATCH (`handleCommand` → `onCommand` →
-     * kernel, which re-enters via `publishEvents`) stays OFF, so a dispatch
-     * that publishes cannot deadlock waiting on its own enqueued fan-out
-     * (ADR-0540 web-inline deadlock class).
-     */
-    sendChain: Promise<void>
-    /** Count of send tasks currently queued-or-running on `sendChain`. Zero ⇒
-     *  the channel is idle and `enqueueSend` may run the next task inline. */
-    pendingSends: number
-    /**
-     * Ticket 04 (S2/S3) — whether THIS peer negotiated wire full fidelity. Set
-     * by `handleConnect` when the connect frame carried `requestedFidelity:"full"`
-     * AND the production gate granted it. FALSE by default (per-peer state lives
-     * for the connection lifetime — a reconnect must re-negotiate). Non-granted ⇒
-     * every event frame is stripped of full fields before send (`sendMessages`).
-     */
-    fidelityGranted: boolean
   }
 
   const peers = new Set<Peer>()
@@ -389,11 +395,28 @@ export const createSessionTransportBridge = (
     peer.sendChain = run.catch(() => undefined).finally(decrement)
     return run
   }
+  return {
+    opts,
+    tailLimit,
+    st,
+    commandStateCap,
+    commandStates,
+    recordCommandState,
+    peers,
+    peerOf,
+    enqueueSend,
+  }
+}
+
+/** Sending: snapshot-state updates, error reporting, the replay path, and the
+ *  guarded durable-log port. */
+const bridgeSend = (bctx: ReturnType<typeof bridgePeers>) => {
+  const { opts, tailLimit, st, peerOf } = bctx
 
   const updateSnapshotState = (nextSnapshot: SessionSnapshotLite): void => {
-    snapshot = cloneSnapshot(nextSnapshot)
-    tail = trimTail(snapshot, tail, tailLimit)
-    commandReplayIndex = rebuildCommandReplayIndex(tail)
+    st.snapshot = cloneSnapshot(nextSnapshot)
+    st.tail = trimTail(st.snapshot, st.tail, tailLimit)
+    st.replayIndex = rebuildCommandReplayIndex(st.tail)
   }
 
   const reportBridgeError = (peer: SessionTransport, error: unknown): void => {
@@ -458,8 +481,8 @@ export const createSessionTransportBridge = (
     resumeFromSeq?: number,
   ): Promise<{ mode: "replay" | "snapshot"; servedThroughSeq: number }> => {
     const plan = planSessionReplay({
-      snapshot,
-      tail,
+      snapshot: st.snapshot,
+      tail: st.tail,
       ...(resumeFromSeq !== undefined ? { resumeFromSeq } : {}),
       ...(guardedDurableLog !== undefined ? { durableLog: guardedDurableLog(peer) } : {}),
     })
@@ -472,9 +495,23 @@ export const createSessionTransportBridge = (
     return {
       mode: plan.snapshot !== undefined ? "snapshot" : "replay",
       servedThroughSeq:
-        plan.tail.at(-1)?.seq ?? plan.snapshot?.seq ?? resumeFromSeq ?? snapshot.seq,
+        plan.tail.at(-1)?.seq ?? plan.snapshot?.seq ?? resumeFromSeq ?? st.snapshot.seq,
     }
   }
+  return {
+    updateSnapshotState,
+    reportBridgeError,
+    sendMessages,
+    durablePort,
+    guardedDurableLog,
+    sendReplay,
+  }
+}
+
+/** The three refusal paths. Kept together because they share the reply shape
+ *  a refused command, a dispatch failure and a refused connect all produce. */
+const bridgeReject = (bctx: ReturnType<typeof bridgePeers> & ReturnType<typeof bridgeSend>) => {
+  const { opts, st, sendMessages, sendReplay } = bctx
 
   const rejectCommand = async (
     peer: SessionTransport,
@@ -487,7 +524,7 @@ export const createSessionTransportBridge = (
     opts.onCommandRejected?.({ command, error })
     await sendMessages(peer, [
       toRejectedMessage({
-        sessionId: snapshot.sessionId,
+        sessionId: st.snapshot.sessionId,
         target: "command",
         reason: rejectReasonOf(error),
         command,
@@ -495,7 +532,7 @@ export const createSessionTransportBridge = (
       }),
     ])
     if (error instanceof SessionDuplicateCommandError) {
-      const replay = commandReplayIndex.get(command.commandId)
+      const replay = st.replayIndex.get(command.commandId)
       if (replay !== undefined && replay.length > 0) {
         await sendMessages(peer, toEventMessages(replay))
         return
@@ -532,7 +569,7 @@ export const createSessionTransportBridge = (
     opts.onCommandRejected?.({ command, error: rejection })
     await sendMessages(peer, [
       toRejectedMessage({
-        sessionId: snapshot.sessionId,
+        sessionId: st.snapshot.sessionId,
         target: "command",
         reason: rejectReasonOf(rejection),
         command,
@@ -547,7 +584,7 @@ export const createSessionTransportBridge = (
   ): Promise<void> => {
     await sendMessages(peer, [
       toRejectedMessage({
-        sessionId: snapshot.sessionId,
+        sessionId: st.snapshot.sessionId,
         target: "connect",
         reason:
           error.issue === "session_id_mismatch" ? "session_id_mismatch" : "protocol_validation",
@@ -555,12 +592,35 @@ export const createSessionTransportBridge = (
       }),
     ])
   }
+  return { rejectCommand, rejectDispatchFailure, rejectConnect }
+}
+
+/** The inbound handlers and peer close. */
+const bridgeHandlers = (
+  bctx: ReturnType<typeof bridgePeers> &
+    ReturnType<typeof bridgeSend> &
+    ReturnType<typeof bridgeReject>,
+) => {
+  const {
+    opts,
+    st,
+    commandStates,
+    recordCommandState,
+    peers,
+    peerOf,
+    reportBridgeError,
+    sendMessages,
+    sendReplay,
+    rejectCommand,
+    rejectDispatchFailure,
+    rejectConnect,
+  } = bctx
 
   const handleConnect = async (
     peer: SessionTransport,
     message: SessionTransportConnectMessage,
   ): Promise<void> => {
-    if (message.sessionId !== snapshot.sessionId) {
+    if (message.sessionId !== st.snapshot.sessionId) {
       await rejectConnect(peer, new SessionProtocolValidationError("session_id_mismatch"))
       return
     }
@@ -583,7 +643,7 @@ export const createSessionTransportBridge = (
     // The ack rides `sendMessages` only when the peer actually REQUESTED — a
     // non-requesting connect gets no ack and stays byte-identical.
     if (message.requestedFidelity === "full") {
-      await sendMessages(peer, [{ kind: "fidelity", sessionId: snapshot.sessionId, granted }])
+      await sendMessages(peer, [{ kind: "fidelity", sessionId: st.snapshot.sessionId, granted }])
     }
     const served = await sendReplay(peer, message.resumeFromSeq)
     // Ticket 05 — the `resumed` served-marker, EXACTLY ONCE per requesting
@@ -598,7 +658,7 @@ export const createSessionTransportBridge = (
       await sendMessages(peer, [
         {
           kind: "resumed",
-          sessionId: snapshot.sessionId,
+          sessionId: st.snapshot.sessionId,
           servedThroughSeq: served.servedThroughSeq,
           mode: served.mode,
         },
@@ -616,7 +676,7 @@ export const createSessionTransportBridge = (
     // (`publishEvents` / `publishSnapshot` — those ride the per-peer send tail),
     // NOT on this peer's own reply. Command DISPATCH also stays off the tail (it
     // re-enters via `publishEvents`) to avoid the self-wait deadlock.
-    if (command.sessionId !== snapshot.sessionId) {
+    if (command.sessionId !== st.snapshot.sessionId) {
       await rejectCommand(peer, command, new SessionProtocolValidationError("session_id_mismatch"))
       return
     }
@@ -626,7 +686,7 @@ export const createSessionTransportBridge = (
       return
     }
 
-    const actualRevision = currentRevisionOf(snapshot, tail)
+    const actualRevision = currentRevisionOf(st.snapshot, st.tail)
     const expectedRevision = command.expectedRevision
     if (expectedRevision !== undefined && expectedRevision !== actualRevision) {
       await rejectCommand(
@@ -666,10 +726,32 @@ export const createSessionTransportBridge = (
     }
   }
 
+  return { handleConnect, handleCommand, closePeer }
+}
+
+export const createSessionTransportBridge = (
+  opts: CreateSessionTransportBridgeOpts,
+): SessionTransportBridge => {
+  const b0 = bridgePeers(opts)
+  const b1 = bridgeSend({ opts, ...b0 })
+  const b2 = bridgeReject({ opts, ...b0, ...b1 })
+  const b3 = bridgeHandlers({ opts, ...b0, ...b1, ...b2 })
+  const {
+    tailLimit,
+    st,
+    peers,
+    enqueueSend,
+    updateSnapshotState,
+    sendMessages,
+    rejectConnect,
+    handleConnect,
+    handleCommand,
+    closePeer,
+  } = { ...b0, ...b1, ...b2, ...b3 }
   return {
-    sessionId: snapshot.sessionId,
+    sessionId: st.snapshot.sessionId,
     async connect(transport) {
-      if (closed) {
+      if (st.closed) {
         await transport.close()
         return { close: async () => undefined }
       }
@@ -735,7 +817,7 @@ export const createSessionTransportBridge = (
     },
     async publishSnapshot(nextSnapshot) {
       updateSnapshotState(nextSnapshot)
-      const frame: SessionTransportMessage = { kind: "snapshot", snapshot }
+      const frame: SessionTransportMessage = { kind: "snapshot", snapshot: st.snapshot }
       await Promise.all(
         [...peers]
           .filter((peer) => !peer.closed)
@@ -746,8 +828,8 @@ export const createSessionTransportBridge = (
     },
     async publishEvents(events) {
       if (events.length === 0) return
-      tail = trimTail(snapshot, [...tail, ...events], tailLimit)
-      commandReplayIndex = rebuildCommandReplayIndex(tail)
+      st.tail = trimTail(st.snapshot, [...st.tail, ...events], tailLimit)
+      st.replayIndex = rebuildCommandReplayIndex(st.tail)
       const messages = toEventMessages(events)
       await Promise.all(
         [...peers]
@@ -768,14 +850,14 @@ export const createSessionTransportBridge = (
       )
     },
     currentSnapshot() {
-      return cloneSnapshot(snapshot)
+      return cloneSnapshot(st.snapshot)
     },
     currentTail() {
-      return [...tail]
+      return [...st.tail]
     },
     async close() {
-      if (closed) return
-      closed = true
+      if (st.closed) return
+      st.closed = true
       await Promise.all([...peers].map((peer) => closePeer(peer)))
     },
   }
