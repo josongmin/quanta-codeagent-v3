@@ -17,8 +17,23 @@
  */
 
 import type { SessionTransportMessage } from "@/ipc/session"
-import type { SessionCommand, SessionStateView } from "@/protocol/session"
+import type { SessionCommand, SessionEvent, SessionStateView } from "@/protocol/session"
 import { CHAT_SESSION_STATUS, type ChatSessionStatusValue, statusForStateView } from "./status"
+
+/** Editor status for a `turn.completed`.
+ *
+ *  aug-23 §13: this arm used to set `Idle` unconditionally and discard
+ *  `outcomeReason`, so a provider error / refusal / turn-limit stop looked
+ *  exactly like a clean completion in the editor. The loop reports all of those
+ *  as an ORDINARY `turn.completed` with a non-`completed` reason — `turn.failed`
+ *  is a different, rarer path — so the reason has to be consulted.
+ *
+ *  Classified off `outcomeReason` alone so an event from a producer that
+ *  predates `stopCategory` is still handled. */
+export const statusForTurnCompleted = (
+  event: Extract<SessionEvent, { type: "turn.completed" }>,
+): ChatSessionStatusValue =>
+  event.outcomeReason === "completed" ? CHAT_SESSION_STATUS.Idle : CHAT_SESSION_STATUS.Failed
 
 /** The slice of a connected session.v1 client this adapter needs. The real
  *  `SessionTransportClient` from `@/ipc/session` satisfies this structurally. */
@@ -172,7 +187,7 @@ export class ChatSessionProjection {
             if (event.prompt.trim().length > 0) this.label = deriveLabel(event.prompt)
             break
           case "turn.completed":
-            this.status = CHAT_SESSION_STATUS.Idle
+            this.status = statusForTurnCompleted(event)
             this.endTime = isoToMs(event.emittedAt) ?? this.endTime
             break
           case "turn.failed":
