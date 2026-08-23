@@ -75,4 +75,55 @@ describe("I — the shell effect authority survives compilation", () => {
     },
     { timeout: 180_000 },
   )
+
+  test(
+    "the retrieval code-parser's grammar-dir OVERRIDE is usable in a compiled binary",
+    async () => {
+      // Same class, measured separately rather than presumed: the retrieval
+      // parser resolves its grammars from `node_modules` too. From source it
+      // parses; in a compiled binary run OUTSIDE the repo it returned
+      // `{ok:false, reason:"parse-error"}` — indistinguishable from a genuinely
+      // unparseable file.
+      //
+      // Only the 200 KB RUNTIME wasm is embedded. The grammars are ~21 MB across
+      // 16 languages and this parser is opt-in (`QUANTA_INDEX`), so bundling all
+      // of them is a product decision, not an integration fix. What the embed
+      // buys is that `QUANTA_TREE_SITTER_DIR` — which already existed — now
+      // actually works, because init no longer aborts before any grammar is
+      // looked up. This asserts exactly that, and nothing stronger.
+      const entry = join(REPO_ROOT, `__compiled-retrieval-probe-${process.pid}.ts`)
+      const out = mkdtempSync(join(tmpdir(), "compiled-retrieval-"))
+      const bin = join(out, "probe")
+      const grammarDir = join(REPO_ROOT, "node_modules/@vscode/tree-sitter-wasm/wasm")
+      try {
+        writeFileSync(
+          entry,
+          [
+            `import { createTreeSitterParser } from "@/retrieval/code-parser"`,
+            `const p = createTreeSitterParser()`,
+            `const r = await p.parse("x.ts", "export const a = 1\\n")`,
+            `console.log(JSON.stringify({ ok: r.ok }))`,
+          ].join("\n"),
+          "utf8",
+        )
+        const build = Bun.spawnSync({
+          cmd: ["bun", "build", "--compile", entry, "--outfile", bin],
+          cwd: REPO_ROOT,
+        })
+        expect(build.exitCode).toBe(0)
+
+        const run = Bun.spawnSync({
+          cmd: [bin],
+          cwd: out, // deliberately OUTSIDE the repo: no `node_modules` to fall back to
+          env: { ...process.env, QUANTA_TREE_SITTER_DIR: grammarDir },
+        })
+        const stdout = new TextDecoder().decode(run.stdout).trim()
+        expect(JSON.parse(stdout.split("\n").at(-1) ?? "{}")).toEqual({ ok: true })
+      } finally {
+        rmSync(entry, { force: true })
+        rmSync(out, { recursive: true, force: true })
+      }
+    },
+    { timeout: 180_000 },
+  )
 })

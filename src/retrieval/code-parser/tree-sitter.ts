@@ -19,6 +19,20 @@
 import { readFile } from "node:fs/promises"
 import { createRequire } from "node:module"
 import { join } from "node:path"
+// EMBEDDED (§17 packet I). `bun build --compile` has no `node_modules` beside
+// it, so `web-tree-sitter` fell back to loading its runtime wasm from
+// `/$bunfs/root/web-tree-sitter.wasm` and `Parser.init()` aborted. Measured: a
+// parse that returns `{ok:true}` from source returns
+// `{ok:false, reason:"parse-error"}` in the compiled binary — indistinguishable
+// from a genuinely unparseable file.
+//
+// Only the 200 KB RUNTIME is embedded. The GRAMMARS are ~21 MB across 16
+// languages and this parser is opt-in (`QUANTA_INDEX`), so bundling them all is
+// a product decision, not an integration fix. What this does buy: the existing
+// `QUANTA_TREE_SITTER_DIR` override becomes USABLE in a compiled binary for the
+// first time — before this it was inert, because init aborted before any
+// grammar was ever looked up.
+import runtimeWasmPath from "web-tree-sitter/web-tree-sitter.wasm" with { type: "file" }
 import { runtimeConfig } from "@/shared"
 import { isContainer, isWrapper, kindForNodeType, langForPath, wasmBasename } from "./lang-table"
 import type { CodeParserPort, DeclNode, ParsedFile, ParseLang, ParseOutcome } from "./types"
@@ -36,6 +50,9 @@ import type { CodeParserPort, DeclNode, ParsedFile, ParseLang, ParseOutcome } fr
 const resolveGrammarDir = (): string => {
   const override = runtimeConfig().treeSitterDir
   if (override !== undefined) return override
+  // Throws inside a compiled binary (no `node_modules` to resolve against). The
+  // caller already treats a throw as "no grammar", and `QUANTA_TREE_SITTER_DIR`
+  // is the supported way to supply one there.
   const req = createRequire(import.meta.url)
   const pkgJson = req.resolve("@vscode/tree-sitter-wasm/package.json")
   return join(pkgJson, "..", "wasm")
@@ -185,12 +202,14 @@ const ensureInit = async (): Promise<void> => {
   if (initPromise === undefined) {
     initPromise = (async () => {
       const mod = (await import("web-tree-sitter")) as unknown as {
-        Parser: { init(): Promise<void>; new (): TsParser }
+        Parser: { init(opts?: unknown): Promise<void>; new (): TsParser }
         Language: { load(bytes: Uint8Array): Promise<unknown> }
       }
       ParserClass = mod.Parser
       LanguageClass = mod.Language
-      await mod.Parser.init()
+      // `locateFile` tells emscripten where its runtime wasm is; without it the
+      // module guesses a sibling path that does not exist in a compiled binary.
+      await mod.Parser.init({ locateFile: () => runtimeWasmPath })
     })()
   }
   await initPromise

@@ -37,4 +37,18 @@ The regression is pinned by a test that **compiles a real binary and runs it**. 
 
 - The compiled front-door matrix now checks all eleven landed packets inside the binary — 18 assertions covering the shell authority, the cache-marker budget, the stop-reason codes, harness provenance, mode parity, the file-observation guard and the config-truth fixes.
 - `src/permission/shell/wasm-assets.d.ts` declares the two `.wasm` modules as `string`, since TypeScript has no notion of bun's file-import attribute.
-- Generalizable rule this campaign should keep: **any slice that resolves an asset from `node_modules` at runtime is dev-only until proven in a compiled binary.** The retrieval code-parser resolves its grammars the same way and is presumed to have the same gap; it is opt-in behind `QUANTA_INDEX`, so it is recorded here rather than changed under an integration pass.
+- Generalizable rule this campaign should keep: **any slice that resolves an asset from `node_modules` at runtime is dev-only until proven in a compiled binary.**
+
+### The retrieval code-parser: measured, not presumed
+
+The same class was then measured on `src/retrieval/code-parser`. From source a parse returns `{ok:true}`; in a compiled binary run **outside the repo** it returned `{ok:false, reason:"parse-error"}` — indistinguishable from a genuinely unparseable file.
+
+The exact matrix:
+
+| binary run from | `QUANTA_TREE_SITTER_DIR` | before | after |
+| --- | --- | --- | --- |
+| the repo (node_modules present) | unset | fails | works |
+| anywhere else | unset | fails | still fails |
+| anywhere else | set | **fails** | **works** |
+
+Only the 200 KB **runtime** wasm is embedded there. The grammars are ~21 MB across 16 languages and the parser is opt-in behind `QUANTA_INDEX`, so bundling all of them is a product decision, not an integration fix. What the embed buys is that `QUANTA_TREE_SITTER_DIR` — an override that already existed — is **usable for the first time**, because `Parser.init` no longer aborts before any grammar is looked up. The test asserts exactly that row and nothing stronger.
