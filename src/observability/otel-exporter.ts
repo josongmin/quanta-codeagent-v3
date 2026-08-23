@@ -57,7 +57,8 @@
 
 import { errMessage } from "@/shared"
 import type { MetricSink } from "./metrics/port"
-import { otlpAttributes } from "./otlp-attr-value"
+import type { ExportMetric, ExportSpan } from "./otel-exporter/otlp-encode"
+import { serializeMetrics, serializeSpans } from "./otel-exporter/otlp-encode"
 import { hexId } from "./tracing/hex-id"
 import { noopTracer } from "./tracing/noop-tracer"
 import type {
@@ -68,68 +69,20 @@ import type {
   SpanStatusCode,
   Tracer,
 } from "./tracing/port"
-import { GEN_AI_ATTRS, QUANTA_ATTRS } from "./vocabulary"
+
+// The wire types moved DOWN with the encoder that owns them; re-exported here so
+// every existing importer of `@/observability/otel-exporter` is unaffected.
+export type {
+  ExportMetric,
+  ExportSpan,
+  SpanExportAttributes,
+} from "./otel-exporter/otlp-encode"
+
 // ────────────────────────────────────────────────────────────────────────────
 // Export envelope shapes — the typed records that producers hand to the
 // exporter. Intentionally minimal: only the fields that survive the OTLP/JSON
 // wire format we emit.
 // ────────────────────────────────────────────────────────────────────────────
-
-/** Attribute value the wire serializer accepts. Widens the port's scalar-only
- *  `SpanAttributes` to also carry the homogeneous arrays the `attrs.ts` builder
- *  already validates (`vocabulary.ts` `AttrValue`) — e.g.
- *  `gen_ai.response.finish_reasons` as a `string[]`. Scalars stay identical, so
- *  every existing producer of `SpanAttributes` remains assignable. */
-export type SpanExportAttributes = Readonly<
-  Record<
-    string,
-    | string
-    | number
-    | boolean
-    | ReadonlyArray<string>
-    | ReadonlyArray<number>
-    | ReadonlyArray<boolean>
-  >
->
-
-/** One finished span ready for export. All timestamps are EPOCH MILLIS — the
- *  exporter converts to nanos at serialize time. */
-export interface ExportSpan {
-  /** 32-hex lowercase trace ID. */
-  readonly traceId: string
-  /** 16-hex lowercase span ID. */
-  readonly spanId: string
-  /** 16-hex lowercase parent span ID. Omitted for root spans. */
-  readonly parentSpanId?: string
-  readonly name: string
-  /** OTel SpanKind — closed 5-arm union from `./tracing/port`. Default
-   *  `"internal"` when omitted. */
-  readonly kind?: SpanKind
-  /** Span lifecycle status. Default `"unset"`. */
-  readonly status?: SpanStatusCode
-  /** Optional human-readable status message (only meaningful for `"error"`). */
-  readonly statusMessage?: string
-  readonly startTimeEpochMs: number
-  readonly endTimeEpochMs: number
-  readonly attributes?: SpanExportAttributes
-}
-
-/** One metric observation ready for export. Counter / histogram / gauge map to
- *  OTLP `sum` / `histogram` / `gauge` respectively. */
-export interface ExportMetric {
-  readonly name: string
-  readonly kind: "counter" | "histogram" | "gauge"
-  readonly value: number
-  readonly attributes?: Readonly<Record<string, string | number | boolean>>
-  readonly timeEpochMs: number
-  /** UCUM unit for the OTLP metric descriptor (`unit` field). OMITTED ⇒ no
-   *  `unit` key is serialized — byte-identical to the pre-T-C1 wire. Required
-   *  for OTel-GenAI metrics (`s`, `{token}`); legacy metrics leave it unset. */
-  readonly unit?: string
-  /** Human-readable description for the OTLP metric descriptor (`description`
-   *  field). OMITTED ⇒ no `description` key is serialized. */
-  readonly description?: string
-}
 
 // ────────────────────────────────────────────────────────────────────────────
 // Public surface
@@ -241,301 +194,51 @@ const METRICS_PATH = "/v1/metrics"
 // https://github.com/open-telemetry/opentelemetry-proto/blob/main/opentelemetry/proto/metrics/v1/metrics.proto
 // ────────────────────────────────────────────────────────────────────────────
 
-/** Map our SpanKind union to the OTLP enum integer (SPAN_KIND_UNSPECIFIED=0,
- *  INTERNAL=1, SERVER=2, CLIENT=3, PRODUCER=4, CONSUMER=5). The exhaustive
- *  switch + `never` fallthrough means a future addition to the union triggers
- *  a compile error here. */
-const otlpKind = (kind: SpanKind | undefined): number => {
-  if (kind === undefined) return 1 // INTERNAL
-  switch (kind) {
-    case "internal":
-      return 1
-    case "server":
-      return 2
-    case "client":
-      return 3
-    case "producer":
-      return 4
-    case "consumer":
-      return 5
-    default: {
-      const _exhaustive: never = kind
-      void _exhaustive
-      return 1
-    }
-  }
-}
-
-/** Map our status union to OTLP StatusCode (UNSET=0, OK=1, ERROR=2). */
-const otlpStatusCode = (code: SpanStatusCode | undefined): number => {
-  if (code === undefined) return 0
-  switch (code) {
-    case "unset":
-      return 0
-    case "ok":
-      return 1
-    case "error":
-      return 2
-    default: {
-      const _exhaustive: never = code
-      void _exhaustive
-      return 0
-    }
-  }
-}
-
-/** Convert epoch millis → string of unix nanos. OTLP requires nanos as a
- *  STRING to avoid 64-bit precision loss in JSON (per spec). We multiply once
- *  by 1e6 and convert to string. */
-const nanos = (epochMs: number): string => `${Math.trunc(epochMs * 1_000_000)}`
-
-/** Resource attributes shared by every span/metric of one process. `quanta.run.id`
- *  is attached when the operator sets a run id (env `QUANTA_OTEL_RUN_ID`) so the
- *  trace-viewer can FILTER one bench run out of a sink that mixes many concurrent
- *  runs (e.g. an A/B fan-out) — the run-id deep-link (`?run=<id>`). Omitted (not
- *  empty-string) when unset, so Default-OFF stays byte-identical. */
-const buildResource = (serviceName: string, runId?: string): Record<string, unknown> => ({
-  attributes: otlpAttributes({
-    "service.name": serviceName,
-    ...(runId !== undefined && runId !== "" ? { [QUANTA_ATTRS.run.id]: runId } : {}),
-  }),
-})
-
-/** Read a span attribute as a plain string (the gen_ai discriminator attrs are
- *  always scalar strings). Returns undefined for absent / non-string values so
- *  the name mapper never stringifies an array/number into the span name. */
-const spanAttrString = (
-  attrs: SpanExportAttributes | undefined,
-  key: string,
-): string | undefined => {
-  const v = attrs?.[key]
-  return typeof v === "string" && v.length > 0 ? v : undefined
-}
-
-/**
- * OTel-GenAI PINNED span name (`63f8200…`, gen-ai-spans.md). A gen_ai span's
- * name on the wire is `{gen_ai.operation.name} {subject}` where the subject is
- * the request model (chat), the tool name (execute_tool), or the agent name
- * (invoke_agent). We keep the INTERNAL Codex-style `SPAN_NAMES` id
- * (`run_sampling_request`) on the `ExportSpan` — the viewer joins on ids, not
- * names — and only re-map at THIS export boundary so every collector sees the
- * conformant name.
- *
- * Pure mapper over the span's own attributes:
- *   - No `gen_ai.operation.name` attr ⇒ NOT a gen_ai span; return the internal
- *     name verbatim (byte-identical for session_loop / turn / handle_tool_call…).
- *   - operation.name present + a subject attr (request.model / tool.name /
- *     agent.name, in that precedence) ⇒ `{operation} {subject}`.
- *   - operation.name present but NO subject attr ⇒ bare `{operation}` (the pin's
- *     fallback when the model/tool/agent is unavailable).
- */
-const otlpSpanName = (s: ExportSpan): string => {
-  const operation = spanAttrString(s.attributes, GEN_AI_ATTRS.operation.name)
-  if (operation === undefined) return s.name
-  const subject =
-    spanAttrString(s.attributes, GEN_AI_ATTRS.request.model) ??
-    spanAttrString(s.attributes, GEN_AI_ATTRS.tool.name) ??
-    spanAttrString(s.attributes, GEN_AI_ATTRS.agent.name)
-  return subject !== undefined ? `${operation} ${subject}` : operation
-}
-
-/** Serialize an array of spans → OTLP/JSON `resourceSpans` envelope. */
-const serializeSpans = (
-  spans: ReadonlyArray<ExportSpan>,
-  serviceName: string,
-  runId?: string,
-): Record<string, unknown> => ({
-  resourceSpans: [
-    {
-      resource: buildResource(serviceName, runId),
-      scopeSpans: [
-        {
-          scope: { name: "quanta" },
-          spans: spans.map((s) => {
-            const out: Record<string, unknown> = {
-              traceId: s.traceId,
-              spanId: s.spanId,
-              name: otlpSpanName(s),
-              kind: otlpKind(s.kind),
-              startTimeUnixNano: nanos(s.startTimeEpochMs),
-              endTimeUnixNano: nanos(s.endTimeEpochMs),
-              attributes: otlpAttributes(s.attributes),
-              status: {
-                code: otlpStatusCode(s.status),
-                ...(s.statusMessage !== undefined && s.status === "error"
-                  ? { message: s.statusMessage }
-                  : {}),
-              },
-            }
-            if (s.parentSpanId !== undefined) out.parentSpanId = s.parentSpanId
-            return out
-          }),
-        },
-      ],
-    },
-  ],
-})
-
-/** OTLP `AggregationTemporality` enum. DELTA=1, CUMULATIVE=2. */
-const AGG_TEMPORALITY_DELTA = 1
-
-/** Serialize an array of metrics → OTLP/JSON `resourceMetrics` envelope. Each
- *  metric is its own entry — we do NOT cross-aggregate samples with the same
- *  name in this exporter (the collector handles that). Counter → `sum`,
- *  histogram → `histogram` (single-point dataPoint), gauge → `gauge`.
- *
- *  ── TEMPORALITY (audit L9 M1) + START-TIME (audit L9 M2) ──────────────────
- *  This exporter ships each observation AS IT ARRIVES — every counter/histogram
- *  dataPoint is a SINGLE DELTA sample, not a running cumulative total. The
- *  pre-T09 code stamped these `aggregationTemporality: 2` (CUMULATIVE), which
- *  tells the collector "this value is the total since startTime". Two bugs
- *  followed:
- *    - M1: the collector double-counts (it diffs consecutive cumulatives, but
- *      our values are already deltas) — metric series come out inflated/wrong.
- *    - M2: a CUMULATIVE point whose `startTimeUnixNano === timeUnixNano` (which
- *      every first sample has, since we emit immediately) is REJECTED or
- *      zero-dropped by spec-strict collectors ("zero-length cumulative window").
- *  Emitting DELTA (1) fixes both: a delta point's window IS `[start, time]`
- *  with start==time meaning "this instant", which is valid, and the value is
- *  taken verbatim with no diffing. `isMonotonic` stays true for counters. */
-const serializeMetrics = (
-  ms: ReadonlyArray<ExportMetric>,
-  serviceName: string,
-  runId?: string,
-): Record<string, unknown> => ({
-  resourceMetrics: [
-    {
-      resource: buildResource(serviceName, runId),
-      scopeMetrics: [
-        {
-          scope: { name: "quanta" },
-          metrics: ms.map((m) => {
-            const dp = {
-              attributes: otlpAttributes(m.attributes),
-              startTimeUnixNano: nanos(m.timeEpochMs),
-              timeUnixNano: nanos(m.timeEpochMs),
-              asDouble: m.value,
-            }
-            // Descriptor-level fields (`unit`/`description`) — spread ONLY when
-            // declared so a metric without them serializes byte-identical to
-            // the pre-T-C1 wire (no `unit`/`description` key appears). OTLP puts
-            // both at the metric object level, alongside `name` + the
-            // sum/histogram/gauge data. (audit T-C1)
-            const descriptor: Record<string, string> = {
-              name: m.name,
-              ...(m.unit !== undefined ? { unit: m.unit } : {}),
-              ...(m.description !== undefined ? { description: m.description } : {}),
-            }
-            if (m.kind === "counter") {
-              return {
-                ...descriptor,
-                sum: {
-                  dataPoints: [dp],
-                  aggregationTemporality: AGG_TEMPORALITY_DELTA,
-                  isMonotonic: true,
-                },
-              }
-            }
-            if (m.kind === "histogram") {
-              return {
-                ...descriptor,
-                histogram: {
-                  dataPoints: [
-                    {
-                      attributes: dp.attributes,
-                      startTimeUnixNano: dp.startTimeUnixNano,
-                      timeUnixNano: dp.timeUnixNano,
-                      count: "1",
-                      sum: m.value,
-                    },
-                  ],
-                  aggregationTemporality: AGG_TEMPORALITY_DELTA,
-                },
-              }
-            }
-            // gauge — a gauge has NO temporality (it's a point-in-time value).
-            return {
-              ...descriptor,
-              gauge: { dataPoints: [dp] },
-            }
-          }),
-        },
-      ],
-    },
-  ],
-})
-
 // ────────────────────────────────────────────────────────────────────────────
 // Factory
 // ────────────────────────────────────────────────────────────────────────────
 
-/** Construct an OTLP/HTTP exporter. The returned instance buffers spans +
- *  metrics in memory, flushes on `batchSize` reach OR every
- *  `flushIntervalMs`, and tears down via `teardown()` (flush + clear timer). */
-export const otelHttpExporter = (opts: OtelExporterOpts): OtelExporter => {
-  const fetchImpl = opts.fetch ?? (globalThis.fetch as typeof fetch)
-  const serviceName = opts.serviceName ?? DEFAULT_SERVICE_NAME
-  const runId = opts.runId
-  const batchSize = opts.batchSize ?? DEFAULT_BATCH_SIZE
-  const flushIntervalMs = opts.flushIntervalMs ?? DEFAULT_FLUSH_INTERVAL_MS
-  // Buffer cap is at least `batchSize` so a single batch always fits.
-  const maxBufferSize = Math.max(opts.maxBufferSize ?? DEFAULT_MAX_BUFFER_SIZE, batchSize)
-  const setIntervalImpl =
-    opts.setIntervalImpl ??
-    ((cb: () => void, ms: number): IntervalHandle => {
-      // `unref()` so the recurring flush timer does NOT keep the Node event
-      // loop alive on its own (audit L9 M3 timer-exit): a short-lived CLI run
-      // that turned the exporter on would otherwise HANG at exit waiting on
-      // this interval. `teardown()` clears it for graceful shutdown; `unref`
-      // covers the path where the process is otherwise idle and should exit.
-      const handle = globalThis.setInterval(cb, ms)
-      ;(handle as { unref?: () => void }).unref?.()
-      return handle
-    })
-  const clearIntervalImpl =
-    opts.clearIntervalImpl ??
-    ((handle: IntervalHandle): void => {
-      globalThis.clearInterval(handle)
-    })
-  const warn = opts.warn
-
-  // Normalize endpoint — strip trailing slash so we can append `/v1/traces`.
-  const endpoint = opts.endpoint.endsWith("/") ? opts.endpoint.slice(0, -1) : opts.endpoint
-
-  const spanBuffer: ExportSpan[] = []
-  const metricBuffer: ExportMetric[] = []
-  // Coalesce the overflow warning so a wedged collector doesn't produce one
-  // warn line per dropped record (which would just relocate the DoS to the
-  // logger). One warn per buffer until it next drains below the cap.
-  let spanOverflowWarned = false
-  let metricOverflowWarned = false
-
-  const safeWarn = (msg: string): void => {
-    if (warn === undefined) return
-    try {
-      warn(msg)
-    } catch {
-      // even the warn sink may throw — swallow
-    }
-  }
-
-  /** Push `entry` onto `buf`, dropping the OLDEST entries when the cap would be
-   *  exceeded (audit L9 H1 — bound the in-memory buffer so a permanently
-   *  unreachable collector cannot OOM the process). Returns true if anything
-   *  was dropped. */
-  const boundedPush = <T>(buf: T[], entry: T): boolean => {
-    buf.push(entry)
-    if (buf.length <= maxBufferSize) return false
-    buf.splice(0, buf.length - maxBufferSize)
-    return true
-  }
-
-  /** Resolve the per-POST header set. Static {@link OtelExporterOpts.headers}
-   *  is the base; when {@link OtelExporterOpts.getHeaders} is present its
-   *  awaited result is merged ON TOP (dynamic keys override static). A
-   *  throw/rejection from the dynamic port is swallowed (no-throw) and we fall
-   *  back to the static headers — a rotating-token endpoint blip degrades to
-   *  "send with last static creds", never drops the batch. */
+/**
+ * The OTLP transport: resolve headers, POST one envelope, and the two buffer
+ * flushes built on it.
+ *
+ * The flush logic is the reason this is worth naming. It takes the whole buffer
+ * out BY IDENTITY and clears it, so records arriving during the awaited POST
+ * land in the now-empty buffer; on failure the unsent snapshot is re-queued
+ * AHEAD of the newcomers and the cap re-applied. Indexing by front-count
+ * instead would drop unsent records beyond the documented drop-oldest policy
+ * whenever `boundedPush` evicted from the front mid-flush (audit R1 D-F1).
+ *
+ * Extracted from {@link otelHttpExporter} (god-function burndown).
+ */
+const buildOtlpTransport = (
+  opts: OtelExporterOpts,
+  ctx: {
+    readonly fetchImpl: typeof fetch
+    readonly endpoint: string
+    readonly serviceName: string
+    readonly runId: string | undefined
+    readonly maxBufferSize: number
+    readonly spanBuffer: ExportSpan[]
+    readonly metricBuffer: ExportMetric[]
+    readonly overflowWarned: { span: boolean; metric: boolean }
+    readonly safeWarn: (message: string) => void
+  },
+): {
+  readonly flushSpans: () => Promise<void>
+  readonly flushMetrics: () => Promise<void>
+} => {
+  const {
+    fetchImpl,
+    endpoint,
+    serviceName,
+    runId,
+    maxBufferSize,
+    spanBuffer,
+    metricBuffer,
+    overflowWarned,
+    safeWarn,
+  } = ctx
   const resolveHeaders = async (): Promise<Record<string, string>> => {
     const staticHeaders = { ...(opts.headers ?? {}) }
     if (opts.getHeaders === undefined) return staticHeaders
@@ -593,7 +296,7 @@ export const otelHttpExporter = (opts: OtelExporterOpts): OtelExporter => {
     const snapshot = spanBuffer.splice(0, spanBuffer.length)
     const ok = await post(TRACES_PATH, serializeSpans(snapshot, serviceName, runId))
     if (ok) {
-      if (spanBuffer.length < maxBufferSize) spanOverflowWarned = false
+      if (spanBuffer.length < maxBufferSize) overflowWarned.span = false
     } else {
       // Failed — re-queue the unsent snapshot ahead of any newcomers, then
       // re-apply the cap (drop-oldest) so the buffer cannot grow unbounded.
@@ -609,7 +312,7 @@ export const otelHttpExporter = (opts: OtelExporterOpts): OtelExporter => {
     const snapshot = metricBuffer.splice(0, metricBuffer.length)
     const ok = await post(METRICS_PATH, serializeMetrics(snapshot, serviceName, runId))
     if (ok) {
-      if (metricBuffer.length < maxBufferSize) metricOverflowWarned = false
+      if (metricBuffer.length < maxBufferSize) overflowWarned.metric = false
     } else {
       metricBuffer.unshift(...snapshot)
       if (metricBuffer.length > maxBufferSize) {
@@ -624,6 +327,88 @@ export const otelHttpExporter = (opts: OtelExporterOpts): OtelExporter => {
   // simple Promise queue: when a flush is in-flight, the next caller awaits
   // the same promise; new buffer entries arriving DURING the in-flight flush
   // are picked up by the NEXT flush.
+  return { flushSpans, flushMetrics }
+}
+
+/** Construct an OTLP/HTTP exporter. The returned instance buffers spans +
+ *  metrics in memory, flushes on `batchSize` reach OR every
+ *  `flushIntervalMs`, and tears down via `teardown()` (flush + clear timer). */
+export const otelHttpExporter = (opts: OtelExporterOpts): OtelExporter => {
+  const fetchImpl = opts.fetch ?? (globalThis.fetch as typeof fetch)
+  const serviceName = opts.serviceName ?? DEFAULT_SERVICE_NAME
+  const runId = opts.runId
+  const batchSize = opts.batchSize ?? DEFAULT_BATCH_SIZE
+  const flushIntervalMs = opts.flushIntervalMs ?? DEFAULT_FLUSH_INTERVAL_MS
+  // Buffer cap is at least `batchSize` so a single batch always fits.
+  const maxBufferSize = Math.max(opts.maxBufferSize ?? DEFAULT_MAX_BUFFER_SIZE, batchSize)
+  const setIntervalImpl =
+    opts.setIntervalImpl ??
+    ((cb: () => void, ms: number): IntervalHandle => {
+      // `unref()` so the recurring flush timer does NOT keep the Node event
+      // loop alive on its own (audit L9 M3 timer-exit): a short-lived CLI run
+      // that turned the exporter on would otherwise HANG at exit waiting on
+      // this interval. `teardown()` clears it for graceful shutdown; `unref`
+      // covers the path where the process is otherwise idle and should exit.
+      const handle = globalThis.setInterval(cb, ms)
+      ;(handle as { unref?: () => void }).unref?.()
+      return handle
+    })
+  const clearIntervalImpl =
+    opts.clearIntervalImpl ??
+    ((handle: IntervalHandle): void => {
+      globalThis.clearInterval(handle)
+    })
+  const warn = opts.warn
+
+  // Normalize endpoint — strip trailing slash so we can append `/v1/traces`.
+  const endpoint = opts.endpoint.endsWith("/") ? opts.endpoint.slice(0, -1) : opts.endpoint
+
+  const spanBuffer: ExportSpan[] = []
+  const metricBuffer: ExportMetric[] = []
+  // Coalesce the overflow warning so a wedged collector doesn't produce one
+  // warn line per dropped record (which would just relocate the DoS to the
+  // logger). One warn per buffer until it next drains below the cap.
+  /** Overflow-warned latches. A HOLDER because both `boundedPush` (which stays
+   *  in the factory) and the flush paths (which do not) latch and clear them. */
+  const overflowWarned = { span: false, metric: false }
+
+  const safeWarn = (msg: string): void => {
+    if (warn === undefined) return
+    try {
+      warn(msg)
+    } catch {
+      // even the warn sink may throw — swallow
+    }
+  }
+
+  /** Push `entry` onto `buf`, dropping the OLDEST entries when the cap would be
+   *  exceeded (audit L9 H1 — bound the in-memory buffer so a permanently
+   *  unreachable collector cannot OOM the process). Returns true if anything
+   *  was dropped. */
+  const boundedPush = <T>(buf: T[], entry: T): boolean => {
+    buf.push(entry)
+    if (buf.length <= maxBufferSize) return false
+    buf.splice(0, buf.length - maxBufferSize)
+    return true
+  }
+
+  /** Resolve the per-POST header set. Static {@link OtelExporterOpts.headers}
+   *  is the base; when {@link OtelExporterOpts.getHeaders} is present its
+   *  awaited result is merged ON TOP (dynamic keys override static). A
+   *  throw/rejection from the dynamic port is swallowed (no-throw) and we fall
+   *  back to the static headers — a rotating-token endpoint blip degrades to
+   *  "send with last static creds", never drops the batch. */
+  const { flushSpans, flushMetrics } = buildOtlpTransport(opts, {
+    fetchImpl,
+    endpoint,
+    serviceName,
+    runId,
+    maxBufferSize,
+    spanBuffer,
+    metricBuffer,
+    overflowWarned,
+    safeWarn,
+  })
   let inFlight: Promise<void> | undefined
   const flushAll = (): Promise<void> => {
     if (inFlight !== undefined) return inFlight
@@ -651,8 +436,8 @@ export const otelHttpExporter = (opts: OtelExporterOpts): OtelExporter => {
 
   return {
     recordSpan(span) {
-      if (boundedPush(spanBuffer, span) && !spanOverflowWarned) {
-        spanOverflowWarned = true
+      if (boundedPush(spanBuffer, span) && !overflowWarned.span) {
+        overflowWarned.span = true
         safeWarn(
           `[otel-exporter] span buffer hit cap (${maxBufferSize}) — dropping oldest spans (collector unreachable?)`,
         )
@@ -664,8 +449,8 @@ export const otelHttpExporter = (opts: OtelExporterOpts): OtelExporter => {
       }
     },
     recordMetric(metric) {
-      if (boundedPush(metricBuffer, metric) && !metricOverflowWarned) {
-        metricOverflowWarned = true
+      if (boundedPush(metricBuffer, metric) && !overflowWarned.metric) {
+        overflowWarned.metric = true
         safeWarn(
           `[otel-exporter] metric buffer hit cap (${maxBufferSize}) — dropping oldest metrics (collector unreachable?)`,
         )
