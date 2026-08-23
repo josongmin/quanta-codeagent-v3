@@ -116,7 +116,12 @@ describe("mode-cycle permission authority hellgate (ADR-0303 → RFC-05 E3)", ()
     // `live-posture-runtime.ts` for the god-module cap) which composes the SAME
     // authority into the mode accessor/adapter + the E4 control + the E5 guard —
     // NOT a standalone `createPermissionModeSessionState` state cell.
-    expect(src).toContain("buildLivePostureRuntime(runtime.mode)")
+    // Matched as a PREFIX, not an exact call: RFC-05 E3 added the durable store
+    // as a second argument (`buildLivePostureRuntime(runtime.mode, durable)`)
+    // and an exact-string pin broke on it. The fact being pinned is unchanged —
+    // the mode accessor comes from the ONE seam, fed by `runtime.mode` — and it
+    // now survives further arguments instead of re-breaking on each.
+    expect(src).toMatch(/buildLivePostureRuntime\(\s*runtime\.mode\b/)
     expect(src).not.toContain("createPermissionModeSessionState")
     // the adapter + control + guard are returned on the bootstrap result so the
     // runtime can wire them.
@@ -125,7 +130,10 @@ describe("mode-cycle permission authority hellgate (ADR-0303 → RFC-05 E3)", ()
     // the accessor-backed permission (NOT a frozen `{ mode }` snapshot) lives in
     // the extracted seam, over the SAME `buildLivePosture` authority.
     const seam = read("src/host/bootstrap/live-posture-runtime.ts")
-    expect(seam).toContain("buildLivePosture(initialMode)")
+    // Prefix-matched for the same reason as the pin above: E3 added the durable
+    // store as a second argument. The pinned fact — the seam builds the ONE
+    // authority from `initialMode` — is unchanged.
+    expect(seam).toMatch(/buildLivePosture\(\s*initialMode\b/)
     expect(seam).toContain("livePosture.modeState")
     expect(seam).toContain("get mode()")
     expect(seam).toContain("set mode(next)")

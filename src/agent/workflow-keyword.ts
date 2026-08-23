@@ -21,7 +21,7 @@
  * continuation turn.
  */
 
-import { makeSyntheticUserMessage } from "@/agent/synthetic-user"
+import { isSyntheticUserMessage, makeSyntheticUserMessage } from "@/agent/synthetic-user"
 import type { Message } from "@/llm"
 import type { WorkingMemory } from "@/memory"
 import { latestUserTextFromWm } from "./loop/context-assembler"
@@ -63,8 +63,22 @@ export const WORKFLOW_TOOL_NAME = "run_workflow"
  * loop (tool_result turns surface no user text; the reminder body omits the
  * keyword so it never re-fires off its own text).
  */
+/** The concatenated text of a message's text blocks — enough to compare a
+ *  single-block harness nudge against its own body. */
+const messageText = (message: Message | undefined): string =>
+  (message?.content ?? []).map((block) => (block.type === "text" ? block.text : "")).join("")
+
 export const injectWorkflowKeywordNudge = (cfg: AgentConfig, wm: WorkingMemory<Message>): void => {
   if (!detectWorkflowKeyword(latestUserTextFromWm(wm))) return
+  // SELF-RETRIGGER GUARD. It used to be implicit: the nudge was a plain `user`
+  // message, so after one inject `latestUserTextFromWm` returned the nudge body
+  // (which omits the keyword) and the check above short-circuited. Tagging the
+  // nudge synthetic (aug-23 §10.3) defeated that — `latestUserTextFromWm` now
+  // SKIPS harness speech, so the operator's keyword stays "latest" and every
+  // call stacked another copy. The guard is explicit now: if the last thing in
+  // memory is already this nudge, there is nothing to add.
+  const last = wm.snapshot().at(-1)
+  if (isSyntheticUserMessage(last) && messageText(last) === NUDGE_TEXT) return
   // NUDGE-ONLY — never flip the gate; only nudge toward an available tool.
   if (cfg.registry?.has(WORKFLOW_TOOL_NAME) !== true) return
   /* aug-23 §10.3 — harness-authored nudge, not operator speech. */
