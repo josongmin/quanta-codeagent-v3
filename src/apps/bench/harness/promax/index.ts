@@ -64,11 +64,15 @@ export {
   PROMAX_EVALUATOR_ID,
   PROMAX_GATE_RECEIPT_FILENAME,
   PROMAX_GOLD_SENTINEL_GATE,
+  PROMAX_MODEL_SMOKE_GATE,
   PROMAX_PASS_RATE_FILENAME,
   PROMAX_PREDICTIONS_FILENAME,
   PROMAX_V1_EVALUATOR_PINS,
   type ProMaxEvaluatorPins,
+  type ProMaxGateGraded,
   type ProMaxGateJudged,
+  type ProMaxGateName,
+  type ProMaxGateProduced,
   type ProMaxGateReceiptDocument,
   type ProMaxGateRefusal,
   type ProMaxGateRefused,
@@ -172,3 +176,10 @@ export {
   parseOfficialPassRateDocument,
   parseOfficialPassRateRow,
 } from "./official-result"
+export {
+  buildProMaxSubmission,
+  type ProMaxSubmission,
+  type ProMaxSubmissionFailure,
+  type ProMaxSubmissionResult,
+  type ProMaxSubmittedPatch,
+} from "./submission"

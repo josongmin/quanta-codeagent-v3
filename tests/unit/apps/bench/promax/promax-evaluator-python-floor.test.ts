@@ -252,6 +252,9 @@ const makeGateHarness = (versionOutput: string): GateHarness => {
 
 const gateInput = {
   campaignId: "pmx7-floor-test",
+  // the python floor is checked BEFORE the payload is built, so the
+  // submission kind is irrelevant to these tests — it just has to be one.
+  submission: { kind: "gold-sentinel" } as const,
   assignedInstanceIds: IDS,
   pinnedRoot: ROOT,
   goldenPath: "/campaign/golden.json",

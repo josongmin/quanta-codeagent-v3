@@ -61,16 +61,34 @@ import {
 import { buildProMaxOfficialGradeReceipt } from "./adapter"
 import { PROMAX_EVALUATOR_PYTHON_FLOOR } from "./evaluator-python"
 import type { GoldSentinelGateFailure, GoldSentinelGateResult } from "./gold-sentinel"
-import { buildGoldSentinelPatch, evaluateGoldSentinelGate } from "./gold-sentinel"
+import { evaluateGoldSentinelGate } from "./gold-sentinel"
 import {
   buildProMaxEvaluatorInvocation,
   PROMAX_EVAL_META_RELATIVE_PATH,
   PROMAX_EVALUATOR_RELATIVE_PATH,
   serializeProMaxPredictions,
 } from "./invocation"
+import type { ProMaxSubmission } from "./submission"
+import { buildProMaxSubmission } from "./submission"
 
 /** The gate this module runs. Gate 2+ consume the same boundary. */
 export const PROMAX_GOLD_SENTINEL_GATE = "gold-sentinel"
+
+/**
+ * The model-spending stage this module runs for Gate 2+.
+ *
+ * It is deliberately NOT judged here. The gold sentinel is a self-contained
+ * property of one receipt ("every instance apply-failed, every golden passed"),
+ * so this module can decide it. Gate 2's clauses are not: they need the FROZEN
+ * CAMPAIGN RECORD (sample identity, image freeze, model/preset/budget
+ * provenance, leakage checks, and that the results were observed after the
+ * freeze). Those live in PMX-06's `evaluateProMaxModelSmokeGate`. Judging a
+ * model run here with the sentinel gate would report PASS for "the patches did
+ * not apply" — the exact inverse of what a model stage wants.
+ */
+export const PROMAX_MODEL_SMOKE_GATE = "model-smoke"
+
+export type ProMaxGateName = typeof PROMAX_GOLD_SENTINEL_GATE | typeof PROMAX_MODEL_SMOKE_GATE
 
 export const PROMAX_PREDICTIONS_FILENAME = "preds.json"
 export const PROMAX_PASS_RATE_FILENAME = "pass-rate.json"
@@ -126,6 +144,14 @@ export interface ProMaxGateRunPorts {
 
 export interface ProMaxGateRunInput {
   readonly campaignId: string
+  /**
+   * WHAT to submit: the gold sentinel, or real model patches.
+   *
+   * REQUIRED, not defaulted. A default would let a Gate 2 run that forgot to
+   * pass its patches silently grade a sentinel instead — a green-looking model
+   * gate that measured nothing.
+   */
+  readonly submission: ProMaxSubmission
   /** the campaign denominator — coverage is measured against exactly this set. */
   readonly assignedInstanceIds: readonly string[]
   /** absolute root of the verified pinned checkout. */
@@ -175,9 +201,8 @@ export interface ProMaxGateRefused {
   readonly failures: readonly ProMaxGateRefusal[]
 }
 
-export interface ProMaxGateJudged {
-  readonly outcome: "judged"
-  readonly gate: GoldSentinelGateResult
+/** Everything a completed run produces, whether or not it was judged here. */
+export interface ProMaxGateProduced {
   readonly summary: OfficialGradeSummary
   readonly receipt: OfficialGradeReceipt
   readonly receiptPath: string
@@ -187,7 +212,26 @@ export interface ProMaxGateJudged {
   readonly verdictCounts: readonly ProMaxVerdictCount[]
 }
 
-export type ProMaxGateRunResult = ProMaxGateJudged | ProMaxGateRefused
+/** A gold-sentinel run: graded AND judged, because the sentinel gate is a
+ *  self-contained property of the receipt. */
+export interface ProMaxGateJudged extends ProMaxGateProduced {
+  readonly outcome: "judged"
+  readonly gate: GoldSentinelGateResult
+}
+
+/**
+ * A model run: graded, deliberately NOT judged here.
+ *
+ * A separate variant rather than `gate: GoldSentinelGateResult | null` on one
+ * shape: a caller that renders `result.gate.ok` must be forced to say what it
+ * does for a model stage. With a nullable field the same caller compiles and
+ * then crashes, or worse prints FAIL for a run that was never judged.
+ */
+export interface ProMaxGateGraded extends ProMaxGateProduced {
+  readonly outcome: "graded"
+}
+
+export type ProMaxGateRunResult = ProMaxGateJudged | ProMaxGateGraded | ProMaxGateRefused
 
 /** The pinned files a gate verifies before it runs anything. */
 export interface ProMaxVerifiedEvaluator {
@@ -409,10 +453,17 @@ export const countVerdicts = (receipt: OfficialGradeReceipt): readonly ProMaxVer
 /** The persisted gate artifact. Plain JSON — a `Map` does not survive. */
 export interface ProMaxGateReceiptDocument {
   readonly schema_version: 1
-  readonly gate: typeof PROMAX_GOLD_SENTINEL_GATE
+  readonly gate: ProMaxGateName
   readonly campaignId: string
   readonly producedAt: string
-  readonly gateOk: boolean
+  /**
+   * `null` for a model stage: NOT "failed", but "not judged in this file".
+   * Gate 2's verdict needs the frozen campaign record, so PMX-06 decides it from
+   * the persisted receipt. Encoded as null rather than omitted so a reader that
+   * forgets the distinction gets a value it must handle instead of `undefined`
+   * quietly reading as false.
+   */
+  readonly gateOk: boolean | null
   readonly gateFailures: readonly GoldSentinelGateFailure[]
   readonly summary: OfficialGradeSummary
   readonly verdictCounts: readonly ProMaxVerdictCount[]
@@ -423,15 +474,16 @@ export interface ProMaxGateReceiptDocument {
 export const buildProMaxGateReceiptDocument = (input: {
   readonly campaignId: string
   readonly producedAt: string
-  readonly gate: GoldSentinelGateResult
+  /** `null` ⇒ a model stage, judged by PMX-06 from the receipt rather than here. */
+  readonly gate: GoldSentinelGateResult | null
   readonly receipt: OfficialGradeReceipt
 }): ProMaxGateReceiptDocument => ({
   schema_version: 1,
-  gate: PROMAX_GOLD_SENTINEL_GATE,
+  gate: input.gate === null ? PROMAX_MODEL_SMOKE_GATE : PROMAX_GOLD_SENTINEL_GATE,
   campaignId: input.campaignId,
   producedAt: input.producedAt,
-  gateOk: input.gate.ok,
-  gateFailures: input.gate.failures,
+  gateOk: input.gate === null ? null : input.gate.ok,
+  gateFailures: input.gate === null ? [] : input.gate.failures,
   summary: summarizeOfficialGrade(input.receipt),
   verdictCounts: countVerdicts(input.receipt),
   // composed, not reimplemented: the receipt's own owner decides its shape.
@@ -464,10 +516,18 @@ export const runProMaxGate = (
     return { outcome: "refused", stage: "python", failures: pythonFailures }
   }
 
-  const patch = buildGoldSentinelPatch(input.campaignId)
-  const predictions = serializeProMaxPredictions(
-    input.assignedInstanceIds.map((instanceId) => ({ instanceId, modelPatch: patch })),
-  )
+  // WHAT to submit is the caller's typed choice; reconciling it against the
+  // assigned set is `submission.ts`'s job. Both refusals land on the same
+  // `predictions` stage as the serializer's, because an operator debugging this
+  // is asking one question: "what went into the file the evaluator read?"
+  const submitted = buildProMaxSubmission(input.submission, {
+    assignedInstanceIds: input.assignedInstanceIds,
+    campaignId: input.campaignId,
+  })
+  if (!submitted.ok) {
+    return { outcome: "refused", stage: "predictions", failures: submitted.failures }
+  }
+  const predictions = serializeProMaxPredictions(submitted.predictions)
   if (!predictions.ok) {
     return { outcome: "refused", stage: "predictions", failures: predictions.failures }
   }
@@ -545,7 +605,11 @@ export const runProMaxGate = (
   }
 
   const receipt = built.receipt
-  const gate = evaluateGoldSentinelGate(receipt)
+  // The sentinel gate is a self-contained property of THIS receipt, so it is
+  // decided here. A model stage is not: its clauses need the frozen campaign
+  // record, so PMX-06 judges it from the persisted receipt (see
+  // PROMAX_MODEL_SMOKE_GATE).
+  const gate = input.submission.kind === "gold-sentinel" ? evaluateGoldSentinelGate(receipt) : null
   const receiptPath = posix.join(workDir, PROMAX_GATE_RECEIPT_FILENAME)
   const document = buildProMaxGateReceiptDocument({
     campaignId: input.campaignId,
@@ -556,9 +620,7 @@ export const runProMaxGate = (
   // Persisted for a FAILED gate too — that is the one an operator needs.
   ports.writeText(receiptPath, `${JSON.stringify(document, null, 2)}\n`)
 
-  return {
-    outcome: "judged",
-    gate,
+  const produced = {
     summary: document.summary,
     receipt,
     receiptPath,
@@ -566,5 +628,9 @@ export const runProMaxGate = (
     outputPath,
     observation,
     verdictCounts: document.verdictCounts,
-  }
+  } as const
+
+  return gate === null
+    ? { outcome: "graded", ...produced }
+    : { outcome: "judged", gate, ...produced }
 }

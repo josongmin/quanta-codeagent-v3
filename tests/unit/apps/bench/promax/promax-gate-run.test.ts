@@ -122,6 +122,9 @@ const makeHarness = (options: HarnessOptions = {}): Harness => {
 
 const baseInput = {
   campaignId: CAMPAIGN,
+  // Gate 1 shape. `submission` is REQUIRED so a model run cannot silently
+  // grade a sentinel; these tests are the sentinel path.
+  submission: { kind: "gold-sentinel" } as const,
   assignedInstanceIds: IDS,
   pinnedRoot: ROOT,
   goldenPath: GOLDEN,

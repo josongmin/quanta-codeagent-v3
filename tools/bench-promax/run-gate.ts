@@ -41,6 +41,7 @@ import {
   type ProMaxGateRunInput,
   type ProMaxGateRunPorts,
   type ProMaxGateRunResult,
+  type ProMaxSubmittedPatch,
   runProMaxGate,
 } from "@/apps/bench/harness/promax"
 
@@ -100,10 +101,12 @@ const renderRefused = (result: Extract<ProMaxGateRunResult, { outcome: "refused"
     ...result.failures.map((f) => `  [${f.code}] ${f.message}`),
   ].join("\n")
 
-const renderJudged = (result: Extract<ProMaxGateRunResult, { outcome: "judged" }>): string => {
+/** The counts + artifact block both completed outcomes share. */
+const renderProduced = (
+  result: Extract<ProMaxGateRunResult, { outcome: "judged" | "graded" }>,
+): string[] => {
   const s = result.summary
-  const lines = [
-    `GATE gold-sentinel — ${result.gate.ok ? "PASS" : "FAIL"}`,
+  return [
     `  assigned ${s.assigned} | gradingValid ${s.gradingValid} | coverage ${s.coverage} | ` +
       `missing ${s.missing} | infraInvalid ${s.infraInvalid}`,
     `  evaluator exit ${String(result.observation.exitCode)}`,
@@ -112,22 +115,59 @@ const renderJudged = (result: Extract<ProMaxGateRunResult, { outcome: "judged" }
       (v) => `    ${String(v.count).padStart(4)}/${s.assigned}  ${v.state} / ${v.reason}`,
     ),
   ]
+}
+
+const renderArtifacts = (
+  result: Extract<ProMaxGateRunResult, { outcome: "judged" | "graded" }>,
+): string[] => [
+  "  artifacts",
+  `    receipt      ${result.receiptPath}`,
+  `    predictions  ${result.predictionsPath}`,
+  `    evaluator    ${result.outputPath}`,
+]
+
+const renderJudged = (result: Extract<ProMaxGateRunResult, { outcome: "judged" }>): string => {
+  const lines = [
+    `GATE gold-sentinel — ${result.gate.ok ? "PASS" : "FAIL"}`,
+    ...renderProduced(result),
+  ]
   if (!result.gate.ok) {
     lines.push(`  gate failures (${result.gate.failures.length})`)
     for (const f of result.gate.failures.slice(0, 20)) {
       lines.push(`    [${f.code}] ${f.instanceId}`)
     }
   }
-  lines.push("  artifacts", `    receipt      ${result.receiptPath}`)
-  lines.push(`    predictions  ${result.predictionsPath}`)
-  lines.push(`    evaluator    ${result.outputPath}`)
+  lines.push(...renderArtifacts(result))
   return lines.join("\n")
 }
 
-export const renderGateResult = (result: ProMaxGateRunResult): RunGateResult =>
-  result.outcome === "refused"
-    ? { exitCode: 1, output: renderRefused(result) }
-    : { exitCode: result.gate.ok ? 0 : 1, output: renderJudged(result) }
+/**
+ * A model stage. Says GRADED, never PASS/FAIL.
+ *
+ * The verdict is not this tool's to give: Gate 2's clauses need the frozen
+ * campaign record, so `campaign-gates.ts` judges it from the receipt below.
+ * Printing a PASS here — or reusing the sentinel gate, which would report PASS
+ * for "the patches did not apply" — would be an authoritative-looking verdict
+ * that no gate actually issued.
+ */
+const renderGraded = (result: Extract<ProMaxGateRunResult, { outcome: "graded" }>): string =>
+  [
+    "STAGE model-smoke — GRADED (not judged here)",
+    ...renderProduced(result),
+    ...renderArtifacts(result),
+    "  next: judge it with",
+    "    bun tools/bench-promax/campaign-gates.ts gate --gate gate2_pmx7_model \\",
+    "      --record <campaign-record.json> --evidence <evidence.json> --out gate2.result.json",
+  ].join("\n")
+
+export const renderGateResult = (result: ProMaxGateRunResult): RunGateResult => {
+  if (result.outcome === "refused") return { exitCode: 1, output: renderRefused(result) }
+  // A graded-but-unjudged stage exits 0: the RUN succeeded. Exiting non-zero
+  // would read as "the model stage failed", which is a verdict this tool is
+  // explicitly not entitled to make.
+  if (result.outcome === "graded") return { exitCode: 0, output: renderGraded(result) }
+  return { exitCode: result.gate.ok ? 0 : 1, output: renderJudged(result) }
+}
 
 const flag = (argv: readonly string[], name: string): string | undefined => {
   const i = argv.indexOf(name)
@@ -162,6 +202,45 @@ export const readAssignedIdsFromGolden = (goldenPath: string): readonly string[]
   })
 }
 
+/**
+ * Read the AGENT's patches for a model stage (Gate 2+).
+ *
+ * The file is the official ProMax prediction shape — a JSON ARRAY of
+ * `{instance_id, model_patch}` — which is what a ProMax agent run produces.
+ *
+ * Every row is PROJECTED to those two fields and re-serialized downstream; the
+ * file is never copied through. That is the leak guard: a richer row carrying a
+ * trajectory, a reasoning trace, or a `patch` field holding gold cannot ride
+ * into the file the evaluator reads.
+ *
+ * `model_patch` may be EMPTY — an agent that produced nothing is a model miss,
+ * which is a measurement. It is the ABSENT field that is refused, because that
+ * is a malformed row rather than an empty result.
+ */
+export const readModelPatches = (predictionsPath: string): readonly ProMaxSubmittedPatch[] => {
+  const parsed = JSON.parse(readFileSync(predictionsPath, "utf8")) as unknown
+  if (!Array.isArray(parsed)) {
+    throw new Error(
+      `predictions document at ${predictionsPath} is not a JSON array — ProMax predictions ` +
+        "are an array of {instance_id, model_patch}, not the JSONL other families use",
+    )
+  }
+  return parsed.map((row, i) => {
+    const r = row as { instance_id?: unknown; model_patch?: unknown }
+    if (typeof r.instance_id !== "string" || r.instance_id.trim() === "") {
+      throw new Error(`prediction row ${i} has no usable instance_id`)
+    }
+    if (typeof r.model_patch !== "string") {
+      throw new Error(
+        `prediction row ${i} (${r.instance_id}) has no model_patch string. An empty patch is ` +
+          "valid and grades as a model miss; an ABSENT one is a malformed row and is refused " +
+          "rather than guessed as empty.",
+      )
+    }
+    return { instanceId: r.instance_id, modelPatch: r.model_patch }
+  })
+}
+
 export const buildRunGateInput = (argv: readonly string[]): ProMaxGateRunInput => {
   // EVERY required flag is resolved before any file is touched. Reading the
   // golden first made a missing `--pinned-root` surface as an ENOENT about a
@@ -172,9 +251,18 @@ export const buildRunGateInput = (argv: readonly string[]): ProMaxGateRunInput =
   const workDir = required(argv, "--work-dir")
   const pythonExecutable = required(argv, "--python")
 
+  // ABSENT ⇒ Gate 1, the gold sentinel (byte-identical to before this flag
+  // existed). PRESENT ⇒ a model stage: the agent's patches are submitted
+  // instead, and the sentinel gate is NOT applied to the result.
+  const modelPredictions = flag(argv, "--predictions")
+
   const explicit = flag(argv, "--ids")
   return {
     campaignId,
+    submission:
+      modelPredictions === undefined
+        ? { kind: "gold-sentinel" }
+        : { kind: "model", patches: readModelPatches(modelPredictions) },
     assignedInstanceIds:
       explicit === undefined
         ? readAssignedIdsFromGolden(goldenPath)
