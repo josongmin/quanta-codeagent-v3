@@ -122,8 +122,10 @@ const resultCell = (r: AgentFleetRow): string => {
 }
 
 /** Short id for the table — keep the `task_` prefix dropped, show a stable
- *  head so log lines remain greppable while staying narrow. */
-const shortId = (id: string): string =>
+ *  head so log lines remain greppable while staying narrow. Exported so sibling
+ *  surfaces (e.g. `/attention` list) render the SAME short-id vocabulary as the
+ *  `/agents` inspect drill instead of dumping raw opaque ids. */
+export const shortId = (id: string): string =>
   id.startsWith("task_") ? id.slice(5, 5 + 12) : id.slice(0, 12)
 
 /** Stable ordering: running first, then settled by `endedAt` descending

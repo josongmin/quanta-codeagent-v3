@@ -35,9 +35,11 @@ import type { AttentionAgent, PendingQuestionView } from "@/attention"
 import type { AttentionReader } from "@/runner/assemble/session-authorities"
 import type { UserQuestionBroker } from "@/session/user-question"
 import { byteCompare } from "@/shared"
-import { type AgentFleetRow, renderAgentInspect } from "../agents-fleet-panel"
+import { bold, cyan, dim, renderBox, statusPill, visibleWidth } from "@/ui/ui-helpers"
+import { type AgentFleetRow, renderAgentInspect, shortId } from "../agents-fleet-panel"
 import { readCliKnob } from "../cli-knobs-accessor"
 import type { SlashCommand, SlashContext } from "../slash-contract"
+import { successReceipt } from "./render-helpers"
 
 /** One agent-attention row surfaced to the operator. Mirrors the render-relevant
  *  subset of A1's `PendingQuestion` joined to a live task — the opaque
@@ -161,10 +163,38 @@ export const buildAttentionSlashState = (
   }
 }
 
-/** Render one attention row as a one-line list entry. */
-const renderRow = (r: AttentionListRow, now: number): string => {
-  const ageS = Math.max(0, Math.round((now - r.askedAt) / 1000))
-  return `  [${r.taskId}] (${r.requestId}) ${r.summary} — asked ${ageS}s ago`
+/** Pad a possibly-coloured cell to `w` VISIBLE columns (ANSI-aware, mirrors the
+ *  `/agents` table's `padEndVis`). */
+const padEndVis = (s: string, w: number): string => s + " ".repeat(Math.max(0, w - visibleWidth(s)))
+
+/**
+ * Render the awaiting-agents list as a boxed panel that speaks the SAME
+ * vocabulary as the `/attention next` drill (`renderAgentInspect`): a `renderBox`
+ * frame, an `awaiting` status pill, the short task id (`shortId`), the agent
+ * label, and the question preview in aligned columns — no more raw uncoloured
+ * `[fullTaskId] (fullRequestId)` dump. The opaque requestId is shown IN FULL but
+ * dim-LABELLED (`req …`) so the operator can copy it verbatim into
+ * `/attention answer` — the routing key is never shortened, only the display of
+ * the (greppable) taskId is.
+ */
+const renderAttentionList = (rows: readonly AttentionListRow[], now: number): string => {
+  const idW = Math.max(2, ...rows.map((r) => visibleWidth(shortId(r.taskId))))
+  const labelW = Math.max(5, ...rows.map((r) => visibleWidth(r.label)))
+  const lines = rows.map((r) => {
+    const ageS = Math.max(0, Math.round((now - r.askedAt) / 1000))
+    return [
+      statusPill("warn", "awaiting"),
+      padEndVis(dim(shortId(r.taskId)), idW),
+      padEndVis(bold(r.label), labelW),
+      r.summary,
+      dim(`· req ${r.requestId} · ${ageS}s ago`),
+    ].join("  ")
+  })
+  return renderBox(lines, {
+    title: `Agents awaiting your input — ${rows.length}`,
+    titleStyle: bold,
+    footer: "oldest first · /attention next to drill · /attention answer <requestId> <text>",
+  })
 }
 
 /**
@@ -187,7 +217,10 @@ export const runFocusNextAttention = (deps: {
     deps.out("/attention: all caught up — no agent is awaiting your input\n")
     return undefined
   }
-  deps.out(`→ next needing attention: [${pick.taskId}] (${pick.requestId}) ${pick.summary}\n`)
+  deps.out(
+    `${cyan("→")} next needing attention: ${bold(pick.label)} ${dim(shortId(pick.taskId))} — ` +
+      `${pick.summary} ${dim(`(req ${pick.requestId})`)}\n`,
+  )
   // Drill the pick (identification, not a literal focus move). Absent fleet
   // getter ⇒ the notice above is the whole receipt.
   if (deps.agents !== undefined) {
@@ -220,7 +253,7 @@ const handleAnswer = (
   }
   const res = state.answer(requestId, text)
   if (res.kind === "answered") {
-    ctx.out(`/attention: answered ${requestId} — the waiting agent resumes\n`)
+    ctx.out(`${successReceipt(`Answered ${requestId} — the waiting agent resumes`)}\n`)
     return 0
   }
   if (res.kind === "unknown") {
@@ -264,11 +297,7 @@ export const attentionCmd: SlashCommand = {
       ctx.out("/attention: no agent is awaiting your input\n")
       return 0
     }
-    const lines = rows.map((r) => renderRow(r, now))
-    ctx.out(
-      `Agents awaiting input — ${rows.length} (oldest first):\n${lines.join("\n")}\n` +
-        `Use '/attention next' to go to the oldest, or '/attention answer <requestId> <text>'.\n`,
-    )
+    ctx.out(`${renderAttentionList(rows, now)}\n`)
     return 0
   },
 }

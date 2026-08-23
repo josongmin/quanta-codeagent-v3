@@ -37,6 +37,7 @@ import type { ObjectivePort, ObjectiveStatus } from "@/objective"
 import { asObjectiveAuthority } from "@/objective"
 import { readCliKnob } from "../cli-knobs-accessor"
 import type { SlashCommand, SlashContext } from "../slash-contract"
+import { successReceipt } from "./render-helpers"
 
 const MAX_GOAL_CHARS = 4000
 
@@ -200,7 +201,7 @@ const handleEdit = (
   return reportOutcome(
     ctx,
     state.edit(text),
-    (o) => `🎯 Goal updated (rev ${o.revision}): ${o.goal}\n`,
+    (o) => `${successReceipt(`Goal updated (rev ${o.revision}): ${o.goal}`)}\n`,
   )
 }
 
@@ -233,18 +234,22 @@ export const objectiveCmd: SlashCommand = {
       return reportOutcome(
         ctx,
         state.setStatus("paused"),
-        () => "Goal paused — auto-pursuit suppressed.\n",
+        () => `${successReceipt("Goal paused — auto-pursuit suppressed.")}\n`,
       )
     }
     if (sub === "resume") {
       return reportOutcome(
         ctx,
         state.setStatus("active"),
-        () => "Goal resumed — auto-pursuit re-armed.\n",
+        () => `${successReceipt("Goal resumed — auto-pursuit re-armed.")}\n`,
       )
     }
     if (sub === "clear") {
-      return reportOutcome(ctx, state.clear(), () => "Goal cleared (paused).\n")
+      return reportOutcome(
+        ctx,
+        state.clear(),
+        () => `${successReceipt("Goal cleared (paused).")}\n`,
+      )
     }
     // REPLACE-GUARD: bare `/objective <text>` never silently overwrites.
     const view = state.read()

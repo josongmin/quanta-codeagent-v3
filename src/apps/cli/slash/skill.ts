@@ -38,6 +38,7 @@ import type {
 import { copySkillMarkdown, revealSkill, setSkillEnabledAction } from "@/skill"
 import { readCliKnob } from "../cli-knobs-accessor"
 import type { SlashCommand, SlashContext } from "../slash-contract"
+import { successReceipt } from "./render-helpers"
 
 /** The CLI `/skill` wire (`ctx.skillActions`). A thin projection over the shared
  *  live {@link SkillRuntimeAuthority} + the action ports; the surface builds it
@@ -147,7 +148,7 @@ const handleSetEnabled = async (
   const result = await state.setEnabled(name, enabled)
   if (result.ok) {
     const verb = enabled ? "enabled" : "disabled"
-    ctx.out(`✅ Skill '${name}' ${verb} (rev ${result.view.revision}).\n`)
+    ctx.out(`${successReceipt(`Skill '${name}' ${verb} (rev ${result.view.revision}).`)}\n`)
     return 0
   }
   const r = result.rejection

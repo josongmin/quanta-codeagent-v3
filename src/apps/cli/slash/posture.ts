@@ -35,6 +35,7 @@ import { ALL_PERMISSION_MODES, isPermissionMode } from "@/permission/types"
 import type { PostureCommandScope, PostureProjectionView } from "@/protocol/session"
 import { readCliKnob } from "../cli-knobs-accessor"
 import type { SlashCommand, SlashContext } from "../slash-contract"
+import { successReceipt } from "./render-helpers"
 
 /** CLOSED outcome of an in-process posture edit. `stale` carries the revision the
  *  operator must re-read; `unsupported` means the scope had no durable target. */
@@ -107,13 +108,29 @@ export const isPostureSelectorEnabled = (): boolean =>
 const scopeLabel = (scope: PostureCommandScope): string =>
   scope === "default" ? "future-thread default" : "current thread"
 
+/** Render a CUSTOM (off-ladder) requested patch as labelled `key=value` fields
+ *  — the SAME vocabulary the effective line uses — instead of a raw
+ *  `JSON.stringify` dump. Only the fields the patch actually carries are shown
+ *  (an empty patch ⇒ `(no fields)`); the nested sandbox policy collapses to its
+ *  discriminant `type`. */
+const renderPatchFields = (patch: PosturePatch): string => {
+  const parts: string[] = []
+  if (patch.mode !== undefined) parts.push(`mode=${patch.mode}`)
+  if (patch.approvalPolicy !== undefined) parts.push(`approval=${patch.approvalPolicy}`)
+  if (patch.approvalsReviewer !== undefined) parts.push(`reviewer=${patch.approvalsReviewer}`)
+  if (patch.sandboxPolicy !== undefined) parts.push(`sandbox=${patch.sandboxPolicy.type}`)
+  if (patch.askOutsidePlan !== undefined) parts.push(`ask-outside-plan=${patch.askOutsidePlan}`)
+  return parts.length > 0 ? parts.join(" · ") : "(no fields)"
+}
+
 /** Render a posture projection — named PRESET when the record projects to one,
- *  else the CUSTOM patch verbatim; the effective view (incl `effectiveMode`) and
- *  any admitted locks (surfaced from the E1 producers VERBATIM — never remapped). */
+ *  else the CUSTOM patch as labelled `key=value` fields; the effective view (incl
+ *  `effectiveMode`) and any admitted locks (surfaced from the E1 producers
+ *  VERBATIM — never remapped). */
 const renderProjection = (view: PostureProjectionView, scope: PostureCommandScope): string => {
   const presetLine =
     view.requested.preset === null
-      ? `  requested: custom ${JSON.stringify(view.requested.patch)}`
+      ? `  requested: custom · ${renderPatchFields(view.requested.patch)}`
       : `  requested: ${view.requested.preset}`
   const eff = view.effective
   const lockLines = view.locks.map(
@@ -148,7 +165,7 @@ const reportOutcome = (
   switch (outcome.kind) {
     case "ok":
       ctx.out(
-        `✅ Posture updated (${scopeLabel(scope)}).\n${renderProjection(outcome.projection, scope)}`,
+        `${successReceipt(`Posture updated (${scopeLabel(scope)}).`)}\n${renderProjection(outcome.projection, scope)}`,
       )
       return 0
     case "stale":

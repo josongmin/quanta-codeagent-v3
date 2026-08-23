@@ -199,6 +199,37 @@ describe("/posture selector — CLI front door", () => {
     expect(view.requested.preset).toBe("read-only")
   })
 
+  test("a CUSTOM (off-ladder) patch renders as labelled key=value fields, NOT a raw JSON dump", async () => {
+    const { control } = buildLivePosture("default")
+    const state = buildPostureSlashState(control)
+    const { ctx, out } = makeCtx(state)
+
+    // An off-ladder combination projects to NO offered preset ⇒ the custom path
+    // (identical to the `projectPreset → null` fixture in preset-projection.test).
+    await state.applyPatch(
+      {
+        approvalPolicy: "on-failure",
+        approvalsReviewer: "user",
+        sandboxPolicy: { type: "read-only" },
+      },
+      "current",
+    )
+    expect(state.readCurrent().requested.preset).toBeNull() // the custom path is truly hit
+
+    out.length = 0
+    await postureCmd.run([], ctx) // show current
+    const shown = out.join("")
+    // The custom patch renders as labelled `key=value · key=value` fields — the
+    // SAME vocabulary the effective line uses...
+    expect(shown).toContain("requested: custom · ")
+    expect(shown).toContain("approval=on-failure")
+    expect(shown).toContain("sandbox=read-only")
+    // ...NOT a raw `JSON.stringify` dump (the pre-polish shape). RED-on-injection:
+    // reverting to JSON.stringify reintroduces the `{`/`"approvalPolicy"` tokens.
+    expect(shown).not.toContain("{")
+    expect(shown).not.toContain('"approvalPolicy"')
+  })
+
   test("a stale mutation ⇒ conflict outcome (no clobber of the winner)", async () => {
     const { control } = buildLivePosture("default")
     const state = buildPostureSlashState(control)

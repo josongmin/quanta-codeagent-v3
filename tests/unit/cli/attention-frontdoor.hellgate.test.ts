@@ -146,7 +146,9 @@ describe("RFC-01 A4 — /attention real front-door receipt", () => {
       const { box, ctx } = capture(state, tasks)
       const code = await attentionCmd.run(["answer", rid as string, "use", "postgres"], ctx)
       expect(code).toBe(0)
-      expect(box.out).toContain("answered")
+      // Unified ✅ success receipt (CLI-render polish): "✅ Answered <id> — …".
+      expect(box.out).toContain("Answered")
+      expect(box.out).toContain(rid as string) // still echoes the FULL routing id
     }
     const outcomeA = await childAResumed
     expect(outcomeA).toEqual({ decision: "answer", text: "use postgres" })

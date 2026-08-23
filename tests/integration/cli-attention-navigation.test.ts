@@ -205,7 +205,9 @@ describe("RFC-01 A5 — product closure receipt (real rail)", () => {
     {
       const { box, ctx } = capture(state, tasks)
       expect(await attentionCmd.run(["answer", rid as string, "use", "postgres"], ctx)).toBe(0)
-      expect(box.out).toContain("answered")
+      // Unified ✅ success receipt (CLI-render polish): "✅ Answered <id> — …".
+      expect(box.out).toContain("Answered")
+      expect(box.out).toContain(rid as string) // still echoes the FULL routing id
     }
 
     // The child RESUMES with the exact answer text (the post-answer marker).

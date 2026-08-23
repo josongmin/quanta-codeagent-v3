@@ -15,7 +15,18 @@
  */
 
 import { errMessage } from "@/shared"
+import { green } from "@/ui/ui-helpers"
 import type { SkillRow, SlashContext } from "../slash-contract"
+
+/** The ONE success marker for slash-command mutation receipts (`/attention`
+ *  answer, `/posture` update, `/objective` edit·pause·resume·clear, `/skill`
+ *  enable·disable). Unifies the previously-forked success vocabulary (`✅` /
+ *  `🎯` / plain sentence) onto a single ✅ badge so every "it worked" receipt
+ *  reads the same across the CLI. Each command keeps its own SEMANTIC badge
+ *  where it adds meaning (🎯 goal identity, 🛡️ posture, 📂 reveal) — this
+ *  helper unifies only the SUCCESS marker. The body is green-tinted when colour
+ *  is on (byte-identical no-op when the resolved policy is off / non-TTY). */
+export const successReceipt = (body: string): string => `✅ ${green(body)}`
 /** Grapheme-cluster-aware truncator. Walks {@link Intl.Segmenter}'s grapheme
  *  boundaries so an emoji / combining-mark / high-plane char near the limit is
  *  never split (naive `slice(0, max-3) + "..."` can yield half a surrogate pair

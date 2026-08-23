@@ -134,21 +134,6 @@ const req = (repo: string, id: string, ownershipId: string): TransitionRequest =
   baseSha: "HEAD",
 })
 
-/** Group a flat line stream into `/activity` render blocks (one block per
- *  `ACTIVITY` header). Used to count DISTINCT pre-completion renders. */
-const groupRenders = (lines: readonly string[]): string[] => {
-  const blocks: string[] = []
-  let cur: string[] | null = null
-  for (const l of lines) {
-    if (/^ACTIVITY/.test(l)) {
-      if (cur) blocks.push(cur.join(""))
-      cur = [l]
-    } else if (cur) cur.push(l)
-  }
-  if (cur) blocks.push(cur.join(""))
-  return blocks
-}
-
 const firstIndex = (writes: readonly string[], re: RegExp): number =>
   writes.findIndex((w) => re.test(w))
 
@@ -211,10 +196,13 @@ describe("RFC-04 D5 — worktree live-progress product + negative-control receip
       // Everything before the (synchronous, post-resolution) `worktree ready:`
       // line was rendered while the operation was still running.
       const preWrites = writes.slice(0, readyIdx)
-      const preRenders = groupRenders(preWrites)
       // THE D5 rail: at least two DISTINCT pre-completion renders (observable
-      // stage changes), not a single terminal snapshot.
-      expect(new Set(preRenders).size).toBeGreaterThanOrEqual(2)
+      // stage changes), not a single terminal snapshot. Since the CLI-render
+      // polish, the live path prints the `ACTIVITY` header ONCE and then emits
+      // each subsequent render as a single staged-delta write — so distinct
+      // pre-completion renders are counted per WRITE (one out() per render),
+      // not per repeated header block. The count assertion (≥2) is unchanged.
+      expect(new Set(preWrites).size).toBeGreaterThanOrEqual(2)
       // And the two staged stages became observable pre-completion.
       const preText = preWrites.join("")
       expect(preText).toContain("Preparing workspace")
@@ -248,10 +236,11 @@ describe("RFC-04 D5 — worktree live-progress product + negative-control receip
       if (result.kind === "ready") cleanups.push(result.nextCwd)
 
       const preLines = tagged.filter((t) => !t.settled).map((t) => t.line)
-      const preRenders = groupRenders(preLines)
       // Pre-completion, proven independently of buffer ordering: ≥2 distinct
-      // renders occurred while the transition promise was still unresolved.
-      expect(new Set(preRenders).size).toBeGreaterThanOrEqual(2)
+      // renders occurred while the transition promise was still unresolved. Each
+      // render is a single write (header printed once, then staged deltas), so
+      // distinct renders are counted per-write — the count assertion is unchanged.
+      expect(new Set(preLines).size).toBeGreaterThanOrEqual(2)
       // Sanity: SOMETHING was actually rendered (guards against a vacuous "the
       // delayed checkout never emitted at all" fixture).
       expect(preLines.some((l) => /Preparing workspace/.test(l))).toBe(true)
