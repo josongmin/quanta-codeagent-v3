@@ -46,7 +46,7 @@ import {
   // biome-ignore lint/style/noRestrictedImports: @/patch is reachable by @/tool/apply-patch per the documented ADR slice carve-out.
 } from "@/patch"
 import { classifyPath } from "@/security"
-import { errMessage, errMessage, logger } from "@/shared"
+import { errMessage, logger } from "@/shared"
 import { FsJailError, resolveJailed } from "@/storage"
 import { writeBudgetEvent } from "./_shared/exfil-rail-guards"
 import { classifyFastApplyError, failingTargetPath } from "./apply-patch-fallback-wire"
@@ -552,7 +552,7 @@ export const applyPatchTool: Tool<Input> = {
       // Bound + attributed: fail-closed is the right answer, but an operator
       // seeing every patch classified `secret` needs to know the PARSER is the
       // reason, not that their patch really touches a credential file.
-      logger.debug(`apply_patch.classifySource: unparseable patch: ${errMessage(e)}`)
+      logger.warn(`apply_patch.classifySource: unparseable patch: ${errMessage(e)}`)
       return "secret"
     }
   },
