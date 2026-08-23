@@ -63,12 +63,44 @@ export const decodeDisabledSet = (raw: unknown): PersistedDisabledSet => {
   return { schemaVersion: DISABLED_SET_SCHEMA_VERSION, revision: raw.revision, names }
 }
 
+/** A pure name-set transform for a {@link DisabledStorePort.mutate}: given the
+ *  disabled names read FRESH under the cross-process lock, return the next set
+ *  (add to disable, remove to enable). Called INSIDE the critical section so it
+ *  always composes onto the current on-disk truth — never a stale in-process
+ *  snapshot. The passed set is a private copy; mutate-and-return or return a new
+ *  one, either is fine. */
+export type DisabledSetTransform = (currentNames: Set<string>) => Set<string>
+
+/** The committed result of a {@link DisabledStorePort.mutate}. `record` is the
+ *  durably-written set (its `revision` is the fresh on-disk revision + 1, which
+ *  may jump past the caller's `basedOnRevision` when a concurrent writer landed
+ *  while we waited for the lock). `resynced` is that optimistic-check signal:
+ *  `true` iff the on-disk revision differed from `basedOnRevision` — i.e. the
+ *  transform was re-applied onto another process's newer state. */
+export interface DisabledSetMutateOutcome {
+  readonly record: PersistedDisabledSet
+  readonly resynced: boolean
+}
+
 /**
  * Durable versioned disabled-set store. `read()` fail-closes a corrupt payload to
  * the empty set; `write()` THROWS on a non-durable write so the authority's
  * persist-before-publish barrier can refuse to publish.
+ *
+ * `mutate()` is the CONCURRENCY-SAFE mutation path (RFC-06 R1): it runs the
+ * read→transform→write as a single critical section under a cross-process
+ * exclusive lock, so two processes sharing the file can never lost-update each
+ * other. It bumps the revision from the FRESH on-disk value (re-sync + re-apply),
+ * preserves the persist-observing throw (a non-durable write propagates so the
+ * authority refuses to publish), and ALWAYS releases the lock — including on a
+ * persist failure. `write()` remains the raw/seed primitive (absolute record, no
+ * lock); production mutations go through `mutate()`.
  */
 export interface DisabledStorePort {
   read(): Promise<PersistedDisabledSet>
   write(next: PersistedDisabledSet): Promise<void>
+  mutate(
+    basedOnRevision: number,
+    transform: DisabledSetTransform,
+  ): Promise<DisabledSetMutateOutcome>
 }

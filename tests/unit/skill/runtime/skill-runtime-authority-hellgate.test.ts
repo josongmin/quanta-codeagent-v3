@@ -184,6 +184,11 @@ describe("F1 (c) — persist before publish", () => {
       write: async () => {
         throw new Error("disk full")
       },
+      // The authority mutates through the locked `mutate` path; a non-durable
+      // write there propagates so persist-before-publish can refuse.
+      mutate: async () => {
+        throw new Error("disk full")
+      },
     }
     const { authority } = build([{ name: "x", scope: "user" }], { store: failing })
     const before = authority.read()

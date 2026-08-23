@@ -134,6 +134,7 @@ export {
 // CAS setEnabled; versioned fail-closed disabled-set store behind a port).
 export {
   copySkillMarkdown,
+  createFileLock,
   createInMemoryDisabledStore,
   createJsonDisabledStore,
   createNodeSkillActionPorts,
@@ -141,10 +142,15 @@ export {
   createSkillRuntimeReader,
   DEFAULT_SKILL_COPY_MAX_BYTES,
   DISABLED_SET_SCHEMA_VERSION,
+  type DisabledSetMutateOutcome,
+  type DisabledSetTransform,
   type DisabledStoreFs,
+  type DisabledStoreLock,
+  type DisabledStoreLockOpts,
   type DisabledStorePort,
   decodeDisabledSet,
   deriveSkillProjections,
+  disabledSetLockPath,
   type EffectiveDisable,
   effectiveDisable,
   emptyDisabledSet,

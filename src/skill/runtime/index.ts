@@ -18,6 +18,15 @@ export {
   setSkillEnabledAction,
 } from "./actions"
 export {
+  createFileLock,
+  DEFAULT_DISABLED_LOCK_RETRY_INTERVAL_MS,
+  DEFAULT_DISABLED_LOCK_STALE_THRESHOLD_MS,
+  DEFAULT_DISABLED_LOCK_TIMEOUT_MS,
+  type DisabledStoreLock,
+  type DisabledStoreLockOpts,
+  disabledSetLockPath,
+} from "./adapters/disabled-store-lock"
+export {
   createInMemoryDisabledStore,
   createJsonDisabledStore,
   type DisabledStoreFs,
@@ -36,7 +45,12 @@ export type {
   SkillSetEnabledResult,
 } from "./authority"
 export { createSkillRuntimeAuthority } from "./authority"
-export type { DisabledStorePort, PersistedDisabledSet } from "./disabled-store-port"
+export type {
+  DisabledSetMutateOutcome,
+  DisabledSetTransform,
+  DisabledStorePort,
+  PersistedDisabledSet,
+} from "./disabled-store-port"
 export {
   DISABLED_SET_SCHEMA_VERSION,
   decodeDisabledSet,

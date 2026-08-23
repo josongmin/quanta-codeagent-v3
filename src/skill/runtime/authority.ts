@@ -33,7 +33,6 @@ import { bannedSkillNames, requiredAdminSkillNames } from "../install-enforcemen
 import type { SkillSnapshot } from "../registry"
 import type { Skill } from "../types"
 import type { DisabledStorePort, PersistedDisabledSet } from "./disabled-store-port"
-import { DISABLED_SET_SCHEMA_VERSION } from "./disabled-store-port"
 import { deriveSkillProjections } from "./projections"
 import type { SkillRuntimeView } from "./types"
 
@@ -103,25 +102,18 @@ const precheckMutation = (
   return null
 }
 
-/** Compute the next persisted disabled-set record for an admitted mutation. */
-const nextDisabledRecord = (
-  currentNames: ReadonlySet<string>,
-  name: string,
-  enabled: boolean,
-  newRevision: number,
-): { next: Set<string>; record: PersistedDisabledSet } => {
-  const next = new Set(currentNames)
-  if (enabled === false) next.add(name)
-  else next.delete(name)
-  return {
-    next,
-    record: {
-      schemaVersion: DISABLED_SET_SCHEMA_VERSION,
-      revision: newRevision,
-      names: [...next].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0)),
-    },
+/** The pure name-set transform for an admitted mutation: disabling adds the
+ *  name, enabling removes it. Applied INSIDE the store's cross-process critical
+ *  section (`mutate`), so it composes onto the FRESH on-disk names — never a
+ *  stale in-process snapshot — which is what makes a cross-process re-apply
+ *  (rather than a lost-update clobber) possible. */
+const disabledSetTransform =
+  (name: string, enabled: boolean) =>
+  (names: Set<string>): Set<string> => {
+    if (enabled === false) names.add(name)
+    else names.delete(name)
+    return names
   }
-}
 
 export const createSkillRuntimeAuthority = (
   deps: SkillRuntimeAuthorityDeps,
@@ -178,21 +170,30 @@ export const createSkillRuntimeAuthority = (
       const rejection = precheckMutation(registry, required, banned, name, enabled)
       if (rejection !== null) return { ok: false, rejection }
 
-      const newRevision = current.revision + 1
-      const { next, record } = nextDisabledRecord(current.disabledNames, name, enabled, newRevision)
-
-      // PERSIST FIRST. A failure MUST leave the old view live — we do NOT touch
-      // `current`/`view` until the durable write succeeds.
+      // PERSIST FIRST, under the store's CROSS-PROCESS lock. `mutate` re-reads the
+      // fresh on-disk set and re-applies the transform inside the critical
+      // section, so a concurrent process's disable (that landed while we waited
+      // for the lock) is preserved (re-sync + re-apply) instead of clobbered —
+      // the returned `record.revision` is bumped from the FRESH on-disk value and
+      // may jump past `current.revision`. A failure MUST leave the old view live:
+      // we do NOT touch `current`/`view` until the durable write succeeds.
+      let record: PersistedDisabledSet
       try {
-        await deps.disabledStore.write(record)
+        const outcome = await deps.disabledStore.mutate(
+          current.revision,
+          disabledSetTransform(name, enabled),
+        )
+        record = outcome.record
       } catch (err) {
         const detail = errMessage(err)
         return { ok: false, rejection: { kind: "persist_failed", detail } }
       }
 
-      // Durable ⇒ NOW rebuild all three projections + publish atomically.
-      current = { disabledNames: next, revision: newRevision }
-      view = deriveSkillProjections(registry, policy, next, newRevision)
+      // Durable ⇒ adopt the freshly-committed {names, revision} and rebuild all
+      // three projections + publish atomically.
+      const next = new Set(record.names)
+      current = { disabledNames: next, revision: record.revision }
+      view = deriveSkillProjections(registry, policy, next, record.revision)
       return { ok: true, view }
     })
 
