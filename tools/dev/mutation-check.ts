@@ -84,7 +84,10 @@ const MUTATIONS: readonly Mutation[] = [
     id: "t03-cancel-aborts-live-controller",
     severity: "CRITICAL",
     guards: "T03 L5 H-? — turn.cancel aborts the SAME signal the host observes",
-    src: "src/kernel/session/scheduler.ts",
+    // Path repoint (aug-23 god-module split): `runTurn` + the `activeTurnControllers`
+    // registry moved out of `scheduler.ts` into `scheduler-turn-execution.ts`.
+    // The pinned `find` text is unchanged — only its home moved.
+    src: "src/kernel/session/scheduler-turn-execution.ts",
     // The turn-owned controller registration is what the cancel fast-path
     // aborts. Reverting the runTurn-side registration to a fresh, UNregistered
     // controller means turn.cancel can never reach the live signal.
@@ -157,7 +160,10 @@ const MUTATIONS: readonly Mutation[] = [
     id: "t03-m5-oncommitted-no-throw-sink",
     severity: "HIGH",
     guards: "T03 M-5 — observer/onCommitted failure must not redefine turn outcome",
-    src: "src/kernel/session/scheduler.ts",
+    // Path repoint (aug-23 god-module split): `notifyCommitted` + the observer
+    // sink moved out of `scheduler.ts` into `scheduler-append-isolation.ts`.
+    // The pinned `find` text is unchanged — only its home moved.
+    src: "src/kernel/session/scheduler-append-isolation.ts",
     find: `  if (ctx.onCommitted === undefined) return
   try {
     await ctx.onCommitted(args)

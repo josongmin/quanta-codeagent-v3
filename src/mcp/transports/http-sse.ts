@@ -27,7 +27,7 @@
  *  deployments are byte-identical. */
 
 import { errMessage, logger, throwIfAborted } from "@/shared"
-import { isResponse, type JsonRpcMessage } from "../jsonrpc"
+import { isResponse, type JsonRpcMessage, MAX_LINE_BYTES } from "../jsonrpc"
 import { LATEST_PROTOCOL_VERSION } from "../protocol-version"
 import type {
   McpTransport,
@@ -35,6 +35,44 @@ import type {
   McpTransportMessageHandler,
   McpTransportPayload,
 } from "./port"
+
+/** aug-23 audit — SSE EVENT BUFFER CAP. `consumeSseBody` only drains on a
+ *  `\n\n` boundary, so a server that streams bytes and never emits a blank line
+ *  grew the accumulator without bound — the same one-line OOM the stdio framer
+ *  had, arriving over the other transport. Deliberately the SAME budget as
+ *  `MAX_LINE_BYTES` rather than a second invented one: it is one process, one
+ *  hostile-server threat, and two divergent budgets would drift. Over-cap input
+ *  is DROPPED with a warn and the pump RESYNCS at the next event boundary,
+ *  matching the stdio framer's behaviour and this file's warn-and-continue
+ *  idiom (never wedge the pump). */
+export const MAX_SSE_BUFFER_BYTES = MAX_LINE_BYTES
+
+/** PURE SSE framer: split `buffer` into complete `\n\n`-terminated blocks,
+ *  enforcing {@link MAX_SSE_BUFFER_BYTES}. Extracted from the pump so the cap
+ *  and the boundary walk are testable without a live server or a test-only
+ *  backdoor on the transport class. Returns the leftover partial block, the
+ *  complete blocks in order, and whether an over-cap block was dropped (the
+ *  caller must then NOT treat the remainder as a complete trailing event). */
+export const takeSseBlocks = (
+  buffer: string,
+  cap: number = MAX_SSE_BUFFER_BYTES,
+): { readonly blocks: readonly string[]; readonly rest: string; readonly dropped: boolean } => {
+  let rest = buffer
+  let dropped = false
+  if (rest.length > cap) {
+    const resume = rest.indexOf("\n\n")
+    rest = resume === -1 ? "" : rest.slice(resume + 2)
+    dropped = true
+  }
+  const blocks: string[] = []
+  let boundary = rest.indexOf("\n\n")
+  while (boundary !== -1) {
+    blocks.push(rest.slice(0, boundary))
+    rest = rest.slice(boundary + 2)
+    boundary = rest.indexOf("\n\n")
+  }
+  return { blocks, rest, dropped }
+}
 
 const SESSION_HEADER = "mcp-session-id"
 
@@ -531,6 +569,9 @@ export class HttpSseMcpTransport implements McpTransport {
     if (body === null) return { outcome: "ended" }
     const reader = body.getReader()
     let buffer = ""
+    // True once an over-cap block was dropped — the trailing flush below must
+    // not treat the resynced remainder as a complete final event.
+    let resynced = false
     // Resolves the moment the owning signal aborts. We race it against
     // reader.read() so the drain loop exits PROMPTLY on close() even when
     // reader.cancel() does not unblock an already-pending read() — a real
@@ -562,14 +603,19 @@ export class HttpSseMcpTransport implements McpTransport {
         const { value, done } = next
         if (done) break
         if (value !== undefined) buffer += this.decoder.decode(value, { stream: true })
-        let boundary = buffer.indexOf("\n\n")
-        while (boundary !== -1) {
-          const block = buffer.slice(0, boundary)
-          buffer = buffer.slice(boundary + 2)
+        const over = buffer.length > MAX_SSE_BUFFER_BYTES
+        const taken = takeSseBlocks(buffer)
+        if (over) {
+          logger.warn(
+            `mcp/sse: dropping over-cap event buffer {"bytes":${buffer.length},"cap":${MAX_SSE_BUFFER_BYTES}}`,
+          )
+        }
+        buffer = taken.rest
+        if (taken.dropped) resynced = true
+        for (const block of taken.blocks) {
           const parsed = sseDataFromBlock(block)
           if (parsed.id !== null) this.lastEventId = parsed.id // §1.2 resume cursor
           if (parsed.data !== null) this.decodeAndEmit(parsed.data)
-          boundary = buffer.indexOf("\n\n")
         }
       }
       // Flush a trailing event with no terminating blank line (back-compat: some
@@ -578,7 +624,7 @@ export class HttpSseMcpTransport implements McpTransport {
       // a complete-but-not-blank-terminated event's id is real (else a reconnect
       // RE-replays the just-delivered event = duplicate), but a stream cut
       // MID-line (`id: ab…`) must NOT record a truncated id.
-      const trailingComplete = buffer.endsWith("\n")
+      const trailingComplete = !resynced && buffer.endsWith("\n")
       const parsed = sseDataFromBlock(buffer)
       if (trailingComplete && parsed.id !== null) this.lastEventId = parsed.id
       if (parsed.data !== null) this.decodeAndEmit(parsed.data)

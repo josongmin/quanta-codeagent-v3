@@ -83,7 +83,7 @@ evidence:
     - src/observability/tracing/hex-id.ts
     - src/observability/otel-span-export.ts
     - src/observability/metrics/instrument-genai.ts
-    - src/agent/loop-helpers.ts
+    - src/agent/sampling-span.ts
     - src/agent/loop/stream-consume.ts
     - src/agent/session-resources.ts
     - src/apps/bench/run-main-helpers.ts

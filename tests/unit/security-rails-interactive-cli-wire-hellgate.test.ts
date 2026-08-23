@@ -30,6 +30,13 @@
  *   3. overlay→base LIFT — `buildBaseFromBootstrap` (the REAL CLI base builder)
  *      carries `overlay.writeBudget` onto the base so the chain is unbroken.
  *
+ * aug-23 — BOTH rails are now per-SESSION `AgentConfig` slots (the escalation
+ * handler stopped being a module-global; it is minted once per session and
+ * projected onto `ToolContext.sandboxEscalation` per turn). So
+ * `wireSecurityRailsForOverlay` must RETURN both slots and the compose must
+ * thread both onto the overlay — a dropped slot is a DARK rail with no global
+ * back channel to save it. The source-regression guards below pin both.
+ *
  * RED-ON-INJECTION (proof the assertions are load-bearing, not vacuous):
  *   - write-budget: SKIP the `wireSecurityRailsForOverlay` call (the removed CLI
  *     wire) ⇒ overlay `writeBudget` undefined ⇒ config carries no budget ⇒ the
@@ -66,7 +73,6 @@ import { __resetRuntimeConfig, runtimeConfigFromEnv } from "@/shared"
 import type { ToolContext, ToolEvent, ToolResult } from "@/tool"
 import { bashTool } from "@/tool/bash"
 import { __setBashPerCallSandboxFactory } from "@/tool/bash/per-call-factory"
-import { __setBashSandboxEscalationHandler } from "@/tool/bash/sandbox-escalation-wire"
 import { writeTool } from "@/tool/write"
 
 const dir = mkdtempSync(join(tmpdir(), "sec-rails-cli-"))
@@ -84,7 +90,6 @@ beforeEach(async () => {
 afterEach(() => {
   __resetShellSandbox()
   __setBashPerCallSandboxFactory(undefined)
-  __setBashSandboxEscalationHandler(undefined)
   __resetDefaultPermissionStore()
   __resetRuntimeConfig()
 })
@@ -219,12 +224,17 @@ const blockingSandbox = (): PerCallSandboxPort => ({
   }),
 })
 
-const bashCtx = (): ToolContext =>
+/** The bash ctx the per-turn dispatch seam would build: the SESSION's
+ *  sandbox-escalation handler (stage 1, minted by the compose wire) projected onto
+ *  `ToolContext.sandboxEscalation` (stage 2). Pass `undefined` for the
+ *  no-compose-wire control. */
+const bashCtx = (sandboxEscalation?: AgentConfig["bashSandboxEscalation"]): ToolContext =>
   ({
     cwd: dir,
     signal: new AbortController().signal,
     agentLabel: "root",
     turnId: "turn-1",
+    ...(sandboxEscalation !== undefined ? { sandboxEscalation } : {}),
   }) as ToolContext
 
 const runBash = async (command: string, ctx: ToolContext): Promise<ToolResult> => {
@@ -239,14 +249,18 @@ const runBash = async (command: string, ctx: ToolContext): Promise<ToolResult> =
   return result
 }
 
-describe("HELLGATE — interactive CLI sandbox-escalation installs a FIRING handler", () => {
+describe("HELLGATE — interactive CLI sandbox-escalation mints a FIRING per-session handler", () => {
   beforeEach(() => {
     __setBashPerCallSandboxFactory(() => blockingSandbox())
   })
 
-  test("GREEN: compose wire installs the handler ⇒ block + APPROVE re-runs UNSANDBOXED (failure → success)", async () => {
-    composeRails(RAILS_ON, /* approve */ true) // installs the handler as a side-effect
-    const r = await runBash("echo unsandboxed-ok", bashCtx())
+  test("GREEN: compose wire mints the handler ⇒ block + APPROVE re-runs UNSANDBOXED (failure → success)", async () => {
+    // The compose wire RETURNS the per-session handler; the CLI threads it onto
+    // its overlay → base → per-turn config → ctx. A dropped return value is a
+    // DARK rail (there is no process-global back channel any more).
+    const { bashSandboxEscalation } = composeRails(RAILS_ON, /* approve */ true)
+    expect(bashSandboxEscalation).toBeDefined()
+    const r = await runBash("echo unsandboxed-ok", bashCtx(bashSandboxEscalation))
     // onConfirm FIRED (approve) ⇒ the unsandboxed re-run flipped failure → success.
     expect(r.ok).toBe(true)
     expect(r.output).toContain("unsandboxed-ok")
@@ -255,8 +269,8 @@ describe("HELLGATE — interactive CLI sandbox-escalation installs a FIRING hand
   })
 
   test("GREEN: block + DENY ⇒ onConfirm fired, escalation declined, command stays blocked", async () => {
-    composeRails(RAILS_ON, /* approve */ false)
-    const r = await runBash("echo SHOULD-NOT-RUN", bashCtx())
+    const { bashSandboxEscalation } = composeRails(RAILS_ON, /* approve */ false)
+    const r = await runBash("echo SHOULD-NOT-RUN", bashCtx(bashSandboxEscalation))
     expect(r.ok).toBe(false)
     expect(r.output).not.toContain("SHOULD-NOT-RUN")
     expect(r.output).toContain("blocked by the OS sandbox")
@@ -264,21 +278,21 @@ describe("HELLGATE — interactive CLI sandbox-escalation installs a FIRING hand
   })
 
   test("RED-ON-INJECTION: WITHOUT the compose wire, NO handler ⇒ block surfaces as a plain failure (never escalated)", async () => {
-    // Do NOT call composeRails — the removed CLI wire ⇒ no handler installed.
+    // Do NOT call composeRails — the removed CLI wire ⇒ no handler on the ctx.
     // The GREEN test above proves that WITH the wire this exact sandboxed failure
     // routes through onConfirm + emits the "blocked by the OS sandbox" note and
     // (on approve) flips to success. Here neither happens: the failure stands and
     // no escalation note appears — the rail is dark, exactly the pinned bug.
-    __setBashSandboxEscalationHandler(undefined)
-    const r = await runBash("echo never-unsandboxed", bashCtx())
+    const r = await runBash("echo never-unsandboxed", bashCtx(undefined))
     expect(r.ok).toBe(false)
     expect(r.output).not.toContain("never-unsandboxed")
     expect(r.output).not.toContain("blocked by the OS sandbox")
   })
 
-  test("OFF ⇒ knobs unset ⇒ compose installs NO handler (default-OFF byte-identical)", async () => {
-    composeRails({}) // both knobs off
-    const r = await runBash("echo off-plain", bashCtx())
+  test("OFF ⇒ knobs unset ⇒ compose mints NO handler (default-OFF byte-identical)", async () => {
+    const { bashSandboxEscalation } = composeRails({}) // both knobs off
+    expect(bashSandboxEscalation).toBeUndefined()
+    const r = await runBash("echo off-plain", bashCtx(bashSandboxEscalation))
     expect(r.ok).toBe(false)
     expect(r.output).not.toContain("blocked by the OS sandbox")
   })
@@ -337,8 +351,18 @@ describe("HELLGATE — the interactive CLI compose CALLS the security-rails owne
   })
 
   test("the minted writeBudget is threaded onto the overlay (base carries it to dispatch)", () => {
-    expect(composeSrc).toMatch(/writeBudget: securityWriteBudget/)
+    // comp-root → bootstrap args (via the shared slot projection) → overlay slot.
+    expect(composeSrc).toMatch(/securityOverlaySlots\(securityRails\)/)
+    expect(composeSrc).toMatch(/writeBudget: rails\.writeBudget/)
     expect(composeSrc).toMatch(/writeBudget !== undefined \? \{ writeBudget \}/)
+  })
+
+  test("the minted PER-SESSION sandbox-escalation handler is ALSO threaded onto the overlay", () => {
+    // aug-23 — the handler stopped being a process-global, so the compose MUST
+    // carry the returned slot onto the overlay or the rail is silently dark on the
+    // interactive CLI (exactly the class of bug the write-budget guard above pins).
+    expect(composeSrc).toMatch(/bashSandboxEscalation: rails\.bashSandboxEscalation/)
+    expect(composeSrc).toMatch(/bashSandboxEscalation !== undefined \? \{ bashSandboxEscalation \}/)
   })
 })
 

@@ -194,6 +194,16 @@ const buildCodeAndWorkspaceSeams = (
     ...(budget !== undefined && max !== undefined
       ? { writeBudget: bindWriteBudgetTurn(budget, config.run?.turn ?? 0, max) }
       : {}),
+    // RFC jun-6 Binding 1 — PROJECT the SESSION's sandbox-escalation handler onto
+    // the ctx (stage 2 of the writeBudget-shaped mint/bind pair). The handler AND
+    // its escalation cap were minted ONCE per session by the composition root, so
+    // this is a pure pass-through: building them HERE would re-create the cap's
+    // counter on every tool call and silently void
+    // `QUANTA_SANDBOX_ESCALATION_MAX`. Absent (knob off / non-wiring host) ⇒ the
+    // field is omitted ⇒ bash is byte-identical (default-OFF).
+    ...(config.bashSandboxEscalation !== undefined
+      ? { sandboxEscalation: config.bashSandboxEscalation }
+      : {}),
     ...(config.activeWorktreeSlot !== undefined
       ? {
           worktreeSlot: config.activeWorktreeSlot,

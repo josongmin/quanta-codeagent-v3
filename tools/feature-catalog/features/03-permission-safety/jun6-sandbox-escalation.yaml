@@ -18,9 +18,9 @@ surface_integration:
   cli: full
   web: partial
   method: audited
-  verified: "2026-06-09"
+  verified: "2026-08-23"
   evidence:
-    cli: "runs in the interactive CLI — 15/15 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    cli: "runs in the interactive CLI — 19/19 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "the onConfirm escape-hatch can route to the EscalationCard approve|deny path but the sandbox-blocked classification, re-run argv and escalation context ride dropped events; only the collapsed confirm reaches the browser"
 purpose: |
   OS sandbox 가 syscall 을 BLOCK 했을 때(=sandbox 가 제대로 작동) 와 일반 명령
@@ -60,7 +60,11 @@ evidence:
     - src/agent/error-routing/default-classifier.ts
     - src/tool/bash/sandbox-escalation-wire.ts
     - src/tool/bash/index.ts
+    - src/tool/types/tool-context.ts
+    - src/agent/types/wire-slots-runtime.ts
+    - src/agent/dispatch/tool-context.ts
     - src/host/runtime/sandbox-escalation-wire.ts
+    - src/host/runtime/security-rails-wire.ts
     - src/host/runtime/agent-config-assembler.ts
   adrs: ["docs/plans/jun-6-sandbox-escalation.md"]
   tests:
@@ -69,7 +73,10 @@ evidence:
       - tests/unit/sandbox-escalation-loop-hellgate.test.ts
       - tests/unit/sandbox-escalation-off-byte-identity-hellgate.test.ts
       - tests/unit/sandbox-escalation-bash-wire-hellgate.test.ts
-    integration: []
+      - tests/unit/sandbox-escalation-per-session-slot-hellgate.test.ts
+      - tests/unit/security-rails-interactive-cli-wire-hellgate.test.ts
+    integration:
+      - tests/integration/sandbox-escalation-real-loop-e2e.test.ts
     contract: []
 knobs:
   - name: QUANTA_SANDBOX_ESCALATION
@@ -80,20 +87,39 @@ knobs:
     purpose: per-turn escalation-retry cap (ExecPolicyAmendmentExhausted analog). 부재/무효 ⇒ cap 모듈 default 3. escalation REQUESTS 만 bound(tool 콜 아님) — 초과 시 typed escalation-exhausted, 추가 prompt 없음. KNOB(no-heuristics) — baked constant 아님.
 notes: |
   ✅ host-wired LIVE (jun-06) — bash hot-path 배선 완료 → L3. mode="read" sandboxed
-  명령이 APPLIED-sandbox nonzero exit 을 내면 bash tool 이 module-level seam
-  (`src/tool/bash/sandbox-escalation-wire.ts`, per-call-factory 선례 미러 — `@/tool`
-  은 `@/agent`/`@/permission` fence 격리라 직접 import 불가)을 호출. 컴포지션 루트
-  (`src/host/runtime/sandbox-escalation-wire.ts` `maybeWireBashSandboxEscalation`,
-  assembler 에서 knob-ON 시 install)가 classifier+orchestrator+post-denial store+
-  onConfirm gate 를 그 seam 의 handler 로 adapt: classifySandboxDenial(backend=
-  seatbelt, per-call port 은 darwin/sandbox-exec only) → seedSandboxBlockDenial →
-  runSandboxEscalation(cap→presentRisk(onConfirm)→recordRiskSeen/Override→NORMAL gate
-  (2번째 onConfirm consult, NOT bypass)→unsandboxed re-run). 승인 시 bash 가
-  baseShellOpts 로 perCallWrap 없이 byte-same 명령 re-run. knob-OFF ⇒ handler 미설치
-  ⇒ bash byte-identical. e2e: tests/unit/sandbox-escalation-bash-wire-hellgate.test.ts
+  명령이 APPLIED-sandbox nonzero exit 을 내면 bash tool 이 duck-typed handler
+  (`src/tool/bash/sandbox-escalation-wire.ts` 가 계약만 소유 — `@/tool` 은
+  `@/agent`/`@/permission` fence 격리라 직접 import 불가)를 `ctx.sandboxEscalation`
+  에서 읽어 호출. 컴포지션 루트(`src/host/runtime/sandbox-escalation-wire.ts`
+  `maybeWireBashSandboxEscalation`, assembler / interactive-CLI compose 양쪽에서
+  knob-ON 시 mint)가 classifier+orchestrator+post-denial store+onConfirm gate 를 그
+  handler 로 adapt: classifySandboxDenial(backend=seatbelt, per-call port 은
+  darwin/sandbox-exec only) → seedSandboxBlockDenial → runSandboxEscalation(cap→
+  presentRisk(onConfirm)→recordRiskSeen/Override→NORMAL gate (2번째 onConfirm consult,
+  NOT bypass)→unsandboxed re-run). 승인 시 bash 가 baseShellOpts 로 perCallWrap 없이
+  byte-same 명령 re-run. knob-OFF ⇒ 슬롯 미스탬프 ⇒ ctx 에 seam 없음 ⇒ bash
+  byte-identical.
+  🔒 aug-23 PER-SESSION 재배선(감사 수정): handler 는 예전엔 그 seam 파일의
+  module-level `let installed` 프로세스 전역이었다. handler 가 세션 고유 권한
+  (그 세션의 `PermissionStore` / `onConfirm` HITL / escalation cap)을 클로저로 물기
+  때문에 이건 결함 — 한 프로세스 다세션(`@/sdk` embed 는 `run()` 마다
+  `assembleAgentConfig` 호출)에서 last-writer-wins 라 A 세션의 승인 프롬프트가 B 의
+  operator 에게 가고 ADR-0046 override 가 B 의 store 에 기록됐으며, knob 없는 `run()`
+  이 살아있는 형제 세션을 무장해제했다. 이제 `writeBudget` 와 동일한 2단계:
+  (1) 세션당 mint = `cfg.bashSandboxEscalation`(`src/agent/types/wire-slots-runtime.ts`
+  슬롯; cap 도 여기서 한 번만 생성 — cap 카운트가 클로저 Map 이라 여기서 안 만들면
+  `QUANTA_SANDBOX_ESCALATION_MAX` 가 조용히 무력화된다), (2) 턴당 투영 =
+  `src/agent/dispatch/tool-context.ts` → `ToolContext.sandboxEscalation`
+  (`ShellToolContext` Pick 경유로 bash 가 읽음). interactive CLI 는
+  `wireSecurityRailsForOverlay` 반환값 → overlay → base lift → per-turn config 로
+  탄다(전역 back channel 이 없으므로 반환값을 흘리면 레일이 dark 가 된다).
+  e2e: tests/unit/sandbox-escalation-bash-wire-hellgate.test.ts
   (REAL bash tool + fake blocking sandbox: block→approve→unsandboxed re-run 성공 /
   deny→stays blocked / cap exhaustion / knob-OFF byte-identical / 성공 미분류 /
-  mode=write 미에스컬레이션).
+  mode=write 미에스컬레이션); 세션 격리 hellgate:
+  tests/unit/sandbox-escalation-per-session-slot-hellgate.test.ts
+  (2세션 cross-wire 금지 / knob-less run 이 형제 무장해제 안 함 / cap 이 세션당 누적
+  — 마지막은 per-call cap 주입으로 red-on-injection 확인).
   설계/증명: RFC `docs/plans/jun-6-sandbox-escalation.md` (✅ host-wired LIVE jun-06).
   ADR 미발행. discriminant(Phase 1)는 pure+tested; escalation 루프(Phase 2 머신)는
   pure orchestrator 로 hellgate 완비 + bash hot-path 배선 LIVE(L3).

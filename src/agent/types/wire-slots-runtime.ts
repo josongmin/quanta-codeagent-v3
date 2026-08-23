@@ -495,6 +495,29 @@ export interface WireSlotsRuntimeConfig {
    * `SessionWriteBudget` so `@/tool` stays a leaf. */
   writeBudget?: import("@/tool/_shared/write-budget").SessionWriteBudget
   /**
+   * RFC jun-6 Binding 1 — the SESSION's bash sandbox-block escalation handler.
+   * MINTED ONCE PER SESSION by the composition root
+   * (`@/host/runtime` `maybeWireBashSandboxEscalation`, behind
+   * `QUANTA_SANDBOX_ESCALATION`) over THIS session's gate-shared
+   * `PermissionStore`, THIS session's `onConfirm` HITL authority, and ONE
+   * `SandboxEscalationCap` (so `QUANTA_SANDBOX_ESCALATION_MAX` actually
+   * accumulates); the dispatch seam then PROJECTS it onto
+   * `ToolContext.sandboxEscalation` per turn, where `bash` reads it. Exactly the
+   * 2-stage mint/bind shape as {@link WireSlotsRuntimeConfig.writeBudget}.
+   *
+   * WHY A SLOT AND NOT A MODULE GLOBAL (aug-23 audit): the handler closes over
+   * session-unique authority. As a process-global it was last-writer-wins — in a
+   * multi-session process (`@/sdk` `embed` re-assembles on every `run()`) session
+   * A's approval prompt reached session B's operator, the ADR-0046 override
+   * landed in B's store, and a knob-less `run()` disarmed a live sibling.
+   *
+   * Absent (knob off / non-wiring host) ⇒ the dispatch seam omits the ctx field
+   * ⇒ a sandboxed nonzero exit surfaces exactly as today (default-OFF,
+   * byte-identical). Duck-typed via `@/tool/bash/sandbox-escalation-wire` so
+   * `@/tool` stays a leaf.
+   */
+  bashSandboxEscalation?: import("@/tool/bash/sandbox-escalation-wire").BashSandboxEscalationHandler
+  /**
    * RFC04-2/3 (MCP tool hot-reload) — OPTIONAL atomically-swappable capability
    * snapshot pointer. When present, `session-bootstrap` reads
    * `registrySnapshotRef.current()` at the turn boundary INSTEAD of building a

@@ -217,7 +217,7 @@ export const HOST: readonly KnobInventoryEntry[] = [
     group: "host-gate",
     home: "runtime-config",
     describe: "Identity system-prompt variant.",
-    readSite: "host/bootstrap/bootstrap-session.ts",
+    readSite: "host/bootstrap/bootstrap-session/session-state-ports.ts",
   },
   {
     envKey: "QUANTA_EFFORT",
@@ -226,7 +226,7 @@ export const HOST: readonly KnobInventoryEntry[] = [
     group: "host-gate",
     home: "runtime-config",
     describe: "Effort tier for budget/thinking.",
-    readSite: "host/bootstrap/bootstrap-session.ts",
+    readSite: "host/bootstrap/bootstrap-session/prepare-runtime.ts",
   },
   {
     envKey: "QUANTA_FOCUS_CHAIN_EVERY",
@@ -235,7 +235,7 @@ export const HOST: readonly KnobInventoryEntry[] = [
     group: "host-gate",
     home: "runtime-config",
     describe: "Re-inject focus-chain every N turns.",
-    readSite: "host/bootstrap/bootstrap-session.ts",
+    readSite: "host/bootstrap/bootstrap-session/session-state-ports.ts",
   },
   {
     envKey: "QUANTA_TOOL_PROFILE",
@@ -244,7 +244,7 @@ export const HOST: readonly KnobInventoryEntry[] = [
     group: "host-gate",
     home: "runtime-config",
     describe: "Tool profile (read/write/execute/all).",
-    readSite: "host/bootstrap/bootstrap-session.ts",
+    readSite: "host/bootstrap/bootstrap-session/session-state-ports.ts",
   },
   {
     envKey: "QUANTA_MEMORY_AUTO",
@@ -284,7 +284,7 @@ export const HOST: readonly KnobInventoryEntry[] = [
     // default (opt-in). TODO(measure-first): pick a validated floor from a bench
     // run before shipping a default — do NOT guess a cutoff (no-heuristics).
     describe: "Write-guard floor % (local budget OR provider rate-limit remaining).",
-    readSite: "host/bootstrap/bootstrap-session.ts",
+    readSite: "host/bootstrap/bootstrap-session/tooling-bundle.ts",
   },
   {
     envKey: "QUANTA_STALE_READ_GUARD",
@@ -535,7 +535,7 @@ export const HOST: readonly KnobInventoryEntry[] = [
     group: "host-gate",
     home: "runtime-config",
     describe: "Operator per-run cost cap (USD). Unset ⇒ no meter (byte-identical).",
-    readSite: "host/bootstrap/bootstrap-session.ts",
+    readSite: "host/bootstrap/bootstrap-session/tooling-bundle.ts",
   },
   {
     envKey: "QUANTA_MAX_COST_PER_TURN_USD",
@@ -544,7 +544,7 @@ export const HOST: readonly KnobInventoryEntry[] = [
     group: "host-gate",
     home: "runtime-config",
     describe: "Operator per-turn cost cap (USD). Unset ⇒ no per-turn meter (byte-identical).",
-    readSite: "host/bootstrap/bootstrap-session.ts",
+    readSite: "host/bootstrap/bootstrap-session/tooling-bundle.ts",
   },
   {
     envKey: "QUANTA_BUDGET_LEDGER",

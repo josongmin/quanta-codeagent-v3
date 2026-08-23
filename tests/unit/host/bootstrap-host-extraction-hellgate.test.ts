@@ -555,7 +555,16 @@ describe("ADR-0299 host-bootstrap-extraction hellgate", () => {
   })
 
   test("13. Host slice imports isPathLikeToken from @/runner/orchestrate (not apps/cli/internal)", () => {
-    const src = readFileSync(join(REPO_ROOT, "src/host/bootstrap/bootstrap-session.ts"), "utf8")
+    // The `bootstrap-session.ts` god-MODULE split moved the `isPathLikeToken`
+    // read into `bootstrap-session/startup-announcement.ts`. The pin is unchanged
+    // — only the path it reads: aggregate the entrypoint + every stage so the
+    // fence follows the code and covers the new modules too.
+    const src = [
+      join(REPO_ROOT, "src/host/bootstrap/bootstrap-session.ts"),
+      ...walk(join(REPO_ROOT, "src/host/bootstrap/bootstrap-session")),
+    ]
+      .map((f) => readFileSync(f, "utf8"))
+      .join("\n")
     expect(src).toContain('from "@/runner/orchestrate"')
     expect(src).not.toContain('from "../../apps/cli')
     expect(src).not.toMatch(/from\s+["'][^"']*apps\/cli/)

@@ -9,10 +9,12 @@
  *   - `@/permission/post-denial`                     — the user-gated override.
  *
  * The bash tool (in the fence-isolated `@/tool` slice) can NOT import any of
- * those, so it exposes a duck-typed install seam
+ * those, so it declares a duck-typed handler contract
  * (`@/tool/bash/sandbox-escalation-wire`). THIS module is the composition root
- * that adapts the machine into that seam's handler and installs it — but ONLY
- * when `QUANTA_SANDBOX_ESCALATION` is on.
+ * that adapts the machine into that contract and mints the handler onto the
+ * SESSION's `AgentConfig.bashSandboxEscalation` slot — but ONLY when
+ * `QUANTA_SANDBOX_ESCALATION` is on. Dispatch then projects the slot onto
+ * `ToolContext.sandboxEscalation` per turn (the `writeBudget` 2-stage shape).
  *
  * Wiring (all per-RFC §4.3, NEVER-auto):
  *   1. `classifySandboxDenial(result, "seatbelt")` — the per-call bash sandbox is
@@ -26,8 +28,16 @@
  *      `recordRiskSeen`/`recordUserOverride` → NORMAL gate (a second `onConfirm`
  *      consult — escalation does NOT bypass the gate) → unsandboxed re-run.
  *
- * DEFAULT-OFF / byte-identical: knob unset ⇒ nothing installed ⇒ the bash seam
- * has no handler ⇒ a sandboxed nonzero exit surfaces exactly as today.
+ * DEFAULT-OFF / byte-identical: knob unset ⇒ the slot is never stamped ⇒ the ctx
+ * omits the seam ⇒ a sandboxed nonzero exit surfaces exactly as today.
+ *
+ * SESSION-SCOPED, NEVER PROCESS-GLOBAL (aug-23 audit fix): the handler closes
+ * over session-unique authority (this session's `PermissionStore`, its
+ * `onConfirm`, and its ONE escalation cap). It used to live in a module-level
+ * `let installed` inside the bash seam, which made a multi-session process
+ * last-writer-wins (A's prompt to B's operator, A's ADR-0046 override into B's
+ * store) and let a knob-less `run()` DISARM a live sibling. It now rides the
+ * session's own config.
  *
  * SECURITY: escalation NEVER auto-grants — the orchestrator enforces the
  * timestamp-ordered 3-step re-approval (a fabricated/out-of-order override keeps
@@ -47,10 +57,9 @@ import type { AgentConfig } from "@/agent/types"
 import type { PermissionStore, PostDenialAction, ToolAction } from "@/permission"
 import { classifySandboxDenial } from "@/runtime/os-sandbox"
 import type { RuntimeConfig } from "@/shared"
-import {
-  __setBashSandboxEscalationHandler,
-  type BashSandboxEscalationHandler,
-  type BashSandboxEscalationRequest,
+import type {
+  BashSandboxEscalationHandler,
+  BashSandboxEscalationRequest,
 } from "@/tool/bash/sandbox-escalation-wire"
 
 /** The per-call bash sandbox is Seatbelt-only (the per-call port wraps via
@@ -180,35 +189,38 @@ const buildHandler = (
 }
 
 /**
- * Install the bash sandbox-escalation handler when `QUANTA_SANDBOX_ESCALATION`
- * is on. Uses the SAME `PermissionStore` the admissibility gate consults —
- * `cfg.admissibility.permissionStore` — so the post-denial override the
- * escalation records is the one the gate reads. The store is INJECTED at the
- * `src/apps/**` surface (the CLI's `runtime-context-compose.ts` threads
- * `getDefaultPermissionStore()` onto `admissibility.permissionStore`); this host
- * layer never reaches for the singleton (the service-locator invariant). When
- * the surface did NOT inject a store, escalation has no gate-shared store to
- * record into ⇒ we SKIP (no handler) rather than fabricate a detached one —
- * fail-closed, byte-identical. Mints ONE per-session cap from
- * `QUANTA_SANDBOX_ESCALATION_MAX`. Knob-OFF ⇒ no-op; idempotent (the assembler
- * is the single caller).
+ * STAGE 1 (per-SESSION mint) — set `cfg.bashSandboxEscalation` when
+ * `QUANTA_SANDBOX_ESCALATION` is on. Uses the SAME `PermissionStore` the
+ * admissibility gate consults — `cfg.admissibility.permissionStore` — so the
+ * post-denial override the escalation records is the one the gate reads. The
+ * store is INJECTED at the `src/apps/**` surface (the CLI's
+ * `runtime-context-compose.ts` threads `getDefaultPermissionStore()` onto
+ * `admissibility.permissionStore`); this host layer never reaches for the
+ * singleton (the service-locator invariant). When the surface did NOT inject a
+ * store, escalation has no gate-shared store to record into ⇒ we SKIP (slot left
+ * unset) rather than fabricate a detached one — fail-closed, byte-identical.
+ *
+ * Mints ONE cap per session from `QUANTA_SANDBOX_ESCALATION_MAX` and closes the
+ * handler over it. THIS is why the mint must NOT move into the per-turn
+ * projection: `createSandboxEscalationCap` counts in a closure `Map`, so a cap
+ * re-created per tool call would make `admit()` always return `count:1` and the
+ * anti-spam ceiling would be silently inert.
+ *
+ * KNOB-OFF ⇒ TRUE NO-OP — the slot is not even stamped as an own property, so
+ * the config stays byte-identical AND a knob-less session can never disarm a
+ * live sibling (the pre-fix global did exactly that). Caller-override-safe: an
+ * already-populated slot (e.g. lifted from the interactive CLI's overlay, where
+ * the session-long cap lives) WINS, so a per-turn re-assemble never re-mints and
+ * never resets the counter — the same precedence `maybeWireWriteBudget` uses.
  */
 export const maybeWireBashSandboxEscalation = (
   cfg: AgentConfig,
   config: Pick<RuntimeConfig, "sandboxEscalation" | "sandboxEscalationMax">,
 ): void => {
-  if (!config.sandboxEscalation) {
-    // Default-OFF: ensure no stale handler from a prior session lingers.
-    __setBashSandboxEscalationHandler(undefined)
-    return
-  }
+  if (cfg.bashSandboxEscalation !== undefined) return
+  if (!config.sandboxEscalation) return
   const store = cfg.admissibility?.permissionStore
-  if (store === undefined) {
-    // No gate-shared store injected by the surface ⇒ nothing to record the
-    // post-denial override into ⇒ escalation would be inert. Clear + skip.
-    __setBashSandboxEscalationHandler(undefined)
-    return
-  }
+  if (store === undefined) return
   const cap = createSandboxEscalationCap(config.sandboxEscalationMax)
-  __setBashSandboxEscalationHandler(buildHandler(store, cap, cfg.onConfirm))
+  cfg.bashSandboxEscalation = buildHandler(store, cap, cfg.onConfirm)
 }

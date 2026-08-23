@@ -373,6 +373,13 @@ const buildBootstrapBaseShape = (
     // `wireSecurityRails` mints this behind `QUANTA_WRITE_BUDGET`. Absent ⇒
     // omitted (default-OFF, byte-identical: no counter).
     ...whenDefined("writeBudget", args.overlay?.writeBudget),
+    // SECURITY-RAIL (b) — lift the per-SESSION sandbox-escalation handler onto the
+    // base so the per-turn dispatch projects it onto `ToolContext.sandboxEscalation`
+    // (a sandbox-blocked bash command routes through THIS session's onConfirm +
+    // permission store, never a sibling's). The interactive CLI's
+    // `wireSecurityRailsForOverlay` mints it behind `QUANTA_SANDBOX_ESCALATION`.
+    // Absent ⇒ omitted (default-OFF, byte-identical: plain failure).
+    ...whenDefined("bashSandboxEscalation", args.overlay?.bashSandboxEscalation),
     // F2 (round-2) — lift the host-wired named-agent resolver onto the base so
     // the per-turn `assembleAgentConfig` spread carries it to the SubagentRunner.
     ...whenDefined("namedAgentResolver", args.overlay?.namedAgentResolver),

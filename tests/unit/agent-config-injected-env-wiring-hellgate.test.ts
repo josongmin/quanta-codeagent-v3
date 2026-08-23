@@ -13,10 +13,6 @@ import type { AgentConfig } from "@/agent"
 import { type AssembleRequest, assembleAgentConfig } from "@/host/runtime/agent-config-assembler"
 import { createPermissionStore } from "@/permission"
 import { __resetRuntimeConfig } from "@/shared"
-import {
-  __setBashSandboxEscalationHandler,
-  getBashSandboxEscalationHandler,
-} from "@/tool/bash/sandbox-escalation-wire"
 
 const keys = ["QUANTA_SUBAGENT_QUEUE", "QUANTA_SANDBOX_ESCALATION", "QUANTA_TEAM_PEER_MSG"] as const
 const originalEnv = new Map(keys.map((key) => [key, process.env[key]]))
@@ -55,7 +51,6 @@ afterEach(() => {
     else process.env[key] = original
   }
   __resetRuntimeConfig()
-  __setBashSandboxEscalationHandler(undefined)
 })
 
 describe("P0 — assembler injected env owns queue, sandbox escalation, and peer team wiring", () => {
@@ -77,7 +72,9 @@ describe("P0 — assembler injected env owns queue, sandbox escalation, and peer
     // Queue OFF is observable without starting a child: the queue-only command
     // returns `queue_disabled`; when admission is installed it returns not_found.
     expect(scheduler?.forceBackground("missing")).toBe("queue_disabled")
-    expect(getBashSandboxEscalationHandler()).toBeUndefined()
+    // aug-23 — the escalation handler is a PER-SESSION slot on the assembled
+    // config, not a process-global. Request-OFF ⇒ the slot is never stamped.
+    expect(cfg.bashSandboxEscalation).toBeUndefined()
     expect(cfg.peerInbox).toBeUndefined()
     expect(cfg.teamRegistry).toBeUndefined()
   })
@@ -101,7 +98,7 @@ describe("P0 — assembler injected env owns queue, sandbox escalation, and peer
     const scheduler = cfg.subagentBackground?.scheduler
     expect(scheduler).toBeDefined()
     expect(scheduler?.forceBackground("missing")).toBe("not_found")
-    expect(getBashSandboxEscalationHandler()).toBeDefined()
+    expect(cfg.bashSandboxEscalation).toBeDefined()
     expect(cfg.peerInbox).toBeDefined()
     expect(cfg.teamRegistry).toBeDefined()
   })

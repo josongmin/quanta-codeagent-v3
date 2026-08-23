@@ -5,17 +5,28 @@
  * + `@/runtime/os-sandbox` (the `classifySandboxDenial` discriminant) +
  * `@/permission/post-denial` (the 3-step re-approval store). The `@/tool` slice
  * is FENCE-ISOLATED from `@/agent` and `@/permission` (RFC §3.1) — so the bash
- * tool can NOT import those directly. This module is the duck-typed, module-level
- * install seam (mirroring the existing `per-call-factory.ts` precedent) that the
- * COMPOSITION ROOT (`@/host/runtime`) wires: it adapts the orchestrator +
- * classifier + store + HITL gate into a single handler the bash tool invokes
- * when a `mode="read"` sandboxed command exits nonzero.
+ * tool can NOT import those directly. This module owns the duck-typed HANDLER
+ * CONTRACT the COMPOSITION ROOT (`@/host/runtime`) adapts the orchestrator +
+ * classifier + store + HITL gate into, and the bash tool invokes when a
+ * `mode="read"` sandboxed command exits nonzero.
  *
- * DEFAULT-OFF / byte-identical: no handler installed ⇒ the bash tool never calls
+ * PER-SESSION, NOT PROCESS-GLOBAL (aug-23 audit fix): this seam used to be a
+ * module-level `let installed` singleton (the `per-call-factory.ts` precedent).
+ * That was WRONG here — the handler closes over SESSION-UNIQUE authority (the
+ * session `PermissionStore`, its `onConfirm` HITL gate, and its ONE escalation
+ * cap), so a process hosting two sessions (`@/sdk` `embed` re-assembles on every
+ * `run()`) got last-writer-wins: session A's approval prompt went to session B's
+ * operator, the ADR-0046 override landed in B's store, and a knob-less `run()`
+ * DISARMED a live sibling. The handler now rides the session's `AgentConfig`
+ * (`cfg.bashSandboxEscalation`, minted ONCE per session so the cap accumulates)
+ * and dispatch projects it per turn onto `ToolContext.sandboxEscalation` — the
+ * same 2-stage mint/bind shape as `writeBudget`.
+ *
+ * DEFAULT-OFF / byte-identical: no handler on the ctx ⇒ the bash tool never calls
  * this ⇒ a sandboxed nonzero exit surfaces exactly as today (a plain failure).
- * The host installs a handler ONLY when `QUANTA_SANDBOX_ESCALATION` is on. The
- * handler itself ALSO re-checks the knob + classifies; an unrecognised result
- * returns `undefined` so the bash tool yields its normal result unchanged.
+ * The host wires a handler ONLY when `QUANTA_SANDBOX_ESCALATION` is on. The
+ * handler itself ALSO classifies; an unrecognised result returns `undefined` so
+ * the bash tool yields its normal result unchanged.
  *
  * SECURITY: escalation NEVER auto-grants (the orchestrator enforces the ADR-0046
  * 3-step ordered re-approval + routes the unsandboxed re-run through the NORMAL
@@ -66,16 +77,3 @@ export interface BashSandboxEscalationOutcome {
 export type BashSandboxEscalationHandler = (
   req: BashSandboxEscalationRequest,
 ) => Promise<BashSandboxEscalationOutcome | undefined>
-
-let installed: BashSandboxEscalationHandler | undefined
-
-/** Read the installed handler (undefined ⇒ default-OFF, byte-identical bash). */
-export const getBashSandboxEscalationHandler = (): BashSandboxEscalationHandler | undefined =>
-  installed
-
-/** Composition-root install seam. Pass `undefined` to clear (tests / teardown). */
-export const __setBashSandboxEscalationHandler = (
-  handler: BashSandboxEscalationHandler | undefined,
-): void => {
-  installed = handler
-}

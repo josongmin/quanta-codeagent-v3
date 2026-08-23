@@ -66,7 +66,7 @@ evidence:
     - src/observability/otel-span-export.ts
     - src/observability/metrics/in-memory-registry.ts
     - src/observability/metrics/instrument-tool.ts
-    - src/agent/loop-helpers.ts
+    - src/agent/sampling-span.ts
     - src/agent/loop/stream-consume.ts
     - src/runner/assemble/tooling.ts
     - src/apps/cli/index.ts
@@ -149,7 +149,7 @@ notes: |
   COVERAGE BUILDOUT (jun-16, iterative):
    - SPAN ATTRS: the run_sampling_request span now carries gen_ai.* model + token
      usage + finish reason (was TTFT-only). teeUsage captures the provider usage
-     event → buildSamplingSpanAttrs (loop-helpers.ts) → endSpan. Sealed by
+     event → buildSamplingSpanAttrs (sampling-span.ts) → endSpan. Sealed by
      spans-e2e.test.ts ("carries gen_ai model + token + finish attrs") +
      red-on-injection. Empty-safe on early abort.
    - MULTI-SURFACE: installOtelSpanExportFromEnv now wired at ALL THREE process

@@ -19,6 +19,7 @@
  * so every external importer of `@/tool/types` stays byte-compatible.
  */
 import type { WriteBudgetPort } from "../_shared/write-budget"
+import type { BashSandboxEscalationHandler } from "../bash/sandbox-escalation-wire"
 import type { ShellExecObserver } from "../shell-exec-types"
 import type { ReadFileState } from "../stale-read-guard"
 import type {
@@ -475,6 +476,24 @@ export interface ToolContext {
    *  the write proceeds byte-identically (default-OFF). Duck-typed (the seam
    *  lives in `@/tool/_shared/write-budget`) so `@/tool` stays a leaf. */
   writeBudget?: WriteBudgetPort
+  /** RFC jun-6 Binding 1 — OPTIONAL SESSION-scoped sandbox-block escalation
+   *  handler. When a `mode="read"` command ran inside an APPLIED per-call sandbox
+   *  and exited nonzero, `bash` hands the result here; the host-built handler
+   *  classifies the denial, seeds the ADR-0046 post-denial record in THIS
+   *  session's `PermissionStore`, runs the user-gated escalation through THIS
+   *  session's `onConfirm`, and (on approve + gate-clear) re-runs the byte-same
+   *  argv unsandboxed. ABSENT (knob off / non-wiring host) ⇒ omitted ⇒ the
+   *  sandboxed nonzero exit surfaces exactly as today (default-OFF,
+   *  byte-identical). Duck-typed via `@/tool/bash/sandbox-escalation-wire` so
+   *  `@/tool` stays fence-isolated from `@/agent` + `@/permission`.
+   *
+   *  SESSION-scoped by construction: the composition root mints ONE handler (and
+   *  ONE escalation cap) per session onto `AgentConfig.bashSandboxEscalation` and
+   *  dispatch projects it here per turn — the same 2-stage shape as
+   *  {@link ToolContext.writeBudget}. It is NOT a process-global: two sessions in
+   *  one process must never share an `onConfirm` authority, a permission store,
+   *  or a `QUANTA_SANDBOX_ESCALATION_MAX` counter. */
+  sandboxEscalation?: BashSandboxEscalationHandler
   /** file_history_rewind — OPTIONAL per-file snapshot capture sink. The
    *  file-mutating tools (`write`/`edit`) call `record` with the file's NEW
    *  bytes after a successful mutation so the `file_history_rewind` tool can
@@ -586,6 +605,10 @@ export type ShellToolContext = CoreToolContext &
     // RFC02-0 — the stable session owner stamped onto detached background
     // shells so kill is owner-scoped (see `ToolContext.ownerId`).
     | "ownerId"
+    // RFC jun-6 Binding 1 — the SESSION-scoped sandbox-block escalation handler
+    // (`bash` is the only tool that can be sandbox-blocked). Absent ⇒ a blocked
+    // command surfaces as a plain nonzero exit (default-OFF, byte-identical).
+    | "sandboxEscalation"
   >
 
 /** File-mutating tools (`write`/`edit`/`apply_patch`/`scripted_replace`/notebook). */

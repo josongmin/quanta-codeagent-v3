@@ -183,6 +183,15 @@ const buildBootstrapContextArgs = (args: {
    *  (N+1)th untrusted write is rejected). Absent ⇒ slot omitted (default-OFF,
    *  byte-identical: no counter). */
   readonly writeBudget?: ReturnType<typeof wireSecurityRailsForOverlay>["writeBudget"]
+  /** SECURITY-RAIL (b) — the per-SESSION bash sandbox-escalation handler minted by
+   *  {@link wireSecurityRailsForOverlay} when `QUANTA_SANDBOX_ESCALATION` is on (+
+   *  a gate-shared permission store). Threaded onto the overlay so the base carries
+   *  it to per-turn dispatch (a sandbox-blocked bash command routes through THIS
+   *  session's onConfirm + store — never a sibling session's). Absent ⇒ slot
+   *  omitted (default-OFF, byte-identical: the block surfaces as a plain failure). */
+  readonly bashSandboxEscalation?: ReturnType<
+    typeof wireSecurityRailsForOverlay
+  >["bashSandboxEscalation"]
 }): Parameters<typeof composeRuntimeBootstrapContext>[0] => {
   const {
     boot,
@@ -202,6 +211,7 @@ const buildBootstrapContextArgs = (args: {
     activeWorktreeSlot,
     trustScope,
     writeBudget,
+    bashSandboxEscalation,
   } = args
   // ADR-0428 jun-02 wire — DIRECT env read of `QUANTA_NETWORK_PROXY` (this
   // surface builds its base via the host overlay, not `applyKnobs`). Absent /
@@ -278,6 +288,11 @@ const buildBootstrapContextArgs = (args: {
       // comp-root when QUANTA_WRITE_BUDGET is on. Absent ⇒ slot omitted ⇒ no
       // counter (default-OFF byte-identical).
       ...(writeBudget !== undefined ? { writeBudget } : {}),
+      // SECURITY-RAIL (b) — overlay the per-SESSION sandbox-escalation handler
+      // minted at the comp-root when QUANTA_SANDBOX_ESCALATION is on. Absent ⇒
+      // slot omitted ⇒ a sandbox-blocked bash command surfaces as a plain failure
+      // (default-OFF byte-identical).
+      ...(bashSandboxEscalation !== undefined ? { bashSandboxEscalation } : {}),
     },
   }
 }
@@ -304,25 +319,41 @@ const wireAskQueue = (): MidTurnApprovalChannel => {
  *  sandbox-escalation anti-exfil rails onto the interactive REPL's runtime
  *  overlay path (NOT the host assembler), which was DARK here: `QUANTA_WRITE_BUDGET`
  *  / `QUANTA_SANDBOX_ESCALATION` gave zero protection on `quanta`. Route the SAME
- *  owner the assembler uses:
+ *  owner the assembler uses. BOTH rails are per-SESSION `AgentConfig` slots, so
+ *  BOTH must be returned and threaded onto the overlay — a dropped slot is a rail
+ *  that stays dark (there is no process-global back channel any more):
  *   - write-budget: the returned `writeBudget` is threaded onto the overlay so the
  *     base carries it to per-turn dispatch (the (N+1)th untrusted write is rejected).
- *   - sandbox-escalation: the handler is installed as a side-effect against the
- *     gate-shared `permissionStore` + the composed `onConfirm` authority.
- *  Both knobs off ⇒ writeBudget undefined (overlay slot omitted) + handler cleared
- *  ⇒ byte-identical to today (default-OFF). Extracted from
- *  {@link composeCliRuntimeContext} verbatim (pure code motion). */
+ *   - sandbox-escalation: the returned `bashSandboxEscalation` handler (bound to the
+ *     gate-shared `permissionStore` + the composed `onConfirm` authority, holding
+ *     this session's ONE escalation cap) rides the overlay the same way.
+ *  Both knobs off ⇒ both undefined (overlay slots omitted) ⇒ byte-identical to
+ *  today (default-OFF). Extracted from {@link composeCliRuntimeContext}. */
 const wireSecurityOverlay = (deps: {
   readonly envSource?: Readonly<Record<string, string | undefined>>
   readonly permissionStore: PermissionStore | undefined
   readonly onConfirm: (action: ToolAction) => Promise<boolean | ConfirmDecision>
-}): ReturnType<typeof wireSecurityRailsForOverlay>["writeBudget"] => {
-  const { writeBudget } = wireSecurityRailsForOverlay(
-    runtimeConfigFromEnv(deps.envSource ?? process.env),
-    { permissionStore: deps.permissionStore, onConfirm: deps.onConfirm },
-  )
-  return writeBudget
-}
+}): ReturnType<typeof wireSecurityRailsForOverlay> =>
+  wireSecurityRailsForOverlay(runtimeConfigFromEnv(deps.envSource ?? process.env), {
+    permissionStore: deps.permissionStore,
+    onConfirm: deps.onConfirm,
+  })
+
+/** Present-only projection of the two minted security-rail slots onto the
+ *  bootstrap-context args. Each is omitted when its knob left it unminted, so
+ *  both-off ⇒ `{}` ⇒ byte-identical (default-OFF). Extracted so
+ *  {@link composeCliRuntimeContext} does not carry the two extra branches. */
+const securityOverlaySlots = (
+  rails: ReturnType<typeof wireSecurityRailsForOverlay>,
+): Pick<
+  Parameters<typeof buildBootstrapContextArgs>[0],
+  "writeBudget" | "bashSandboxEscalation"
+> => ({
+  ...(rails.writeBudget !== undefined ? { writeBudget: rails.writeBudget } : {}),
+  ...(rails.bashSandboxEscalation !== undefined
+    ? { bashSandboxEscalation: rails.bashSandboxEscalation }
+    : {}),
+})
 
 /** #20 (durable prefix grants) — hydrate the PERSISTENT trust-scope registry
  *  ONLY when `QUANTA_TRUST_SCOPE` is on (opt-in; NOT seeded default-ON like the
@@ -394,8 +425,8 @@ export const composeCliRuntimeContext = async (
   const permissionStore = await loadPermissionStore()
   // SECURITY RAILS — wire the write-budget + sandbox-escalation anti-exfil rails
   // onto this overlay path (see {@link wireSecurityOverlay}). Both knobs off ⇒
-  // writeBudget undefined + handler cleared ⇒ byte-identical to today (default-OFF).
-  const securityWriteBudget = wireSecurityOverlay({
+  // both per-session slots undefined ⇒ byte-identical to today (default-OFF).
+  const securityRails = wireSecurityOverlay({
     ...(args.envSource !== undefined ? { envSource: args.envSource } : {}),
     permissionStore,
     onConfirm,
@@ -451,7 +482,7 @@ export const composeCliRuntimeContext = async (
       ...(mentionOwnerSources !== undefined ? { mentionOwnerSources } : {}),
       ...(activeWorktreeSlot !== undefined ? { activeWorktreeSlot } : {}),
       ...(trustScope !== undefined ? { trustScope } : {}), // #20 durable
-      ...(securityWriteBudget !== undefined ? { writeBudget: securityWriteBudget } : {}),
+      ...securityOverlaySlots(securityRails),
     }),
     ...(args.convStore !== undefined || args.responsesStore !== undefined
       ? {

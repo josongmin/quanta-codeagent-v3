@@ -6,9 +6,11 @@
  *       `SessionWriteBudget` onto `cfg.writeBudget`; dispatch then binds the
  *       current turn onto `ToolContext.writeBudget` so write/edit tally each
  *       mutation and the (N+1)th write in an untrusted turn is rejected.
- *   (b) sandbox-escalation (`QUANTA_SANDBOX_ESCALATION`) — installs the bash
- *       sandbox-block → escalation-retry handler (routes a sandboxed nonzero
- *       exit through the host `onConfirm` authority).
+ *   (b) sandbox-escalation (`QUANTA_SANDBOX_ESCALATION`) — mints the per-session
+ *       bash sandbox-block → escalation-retry handler onto
+ *       `cfg.bashSandboxEscalation` (routes a sandboxed nonzero exit through the
+ *       host `onConfirm` authority); dispatch then projects it onto
+ *       `ToolContext.sandboxEscalation` per turn.
  *
  * WHY THIS OWNER EXISTS: the host `assembleAgentConfig` wired BOTH rails, but the
  * primary INTERACTIVE CLI builds its per-turn config through the runtime-context
@@ -21,9 +23,10 @@
  *   - the interactive-CLI compose calls {@link wireSecurityRails} with the deps it
  *     already has in scope (permissionStore + onConfirm).
  *
- * DEFAULT-OFF / byte-identical: knob unset ⇒ neither rail installs anything (the
- * write-budget slot stays unset; the escalation handler is cleared). Each helper
- * is caller-override-safe (a pre-set `cfg.writeBudget` / handler wins/skips).
+ * DEFAULT-OFF / byte-identical: knob unset ⇒ neither rail installs anything (both
+ * slots stay unset). Each helper is caller-override-safe (a pre-set
+ * `cfg.writeBudget` / `cfg.bashSandboxEscalation` wins/skips). BOTH rails are
+ * per-SESSION slots on the config — neither touches process-global state.
  */
 
 import type { AgentConfig } from "@/agent/types"
@@ -85,11 +88,12 @@ export interface SecurityRailsSurfaceDeps {
  * `cfg.admissibility` yet (the interactive CLI) supply the escalation store +
  * onConfirm directly; when present they are projected onto a shallow view of
  * `cfg` so {@link maybeWireBashSandboxEscalation} reads the gate-shared store.
- * Absent ⇒ the assembler path (reads `cfg.admissibility.permissionStore` /
- * `cfg.onConfirm` as before).
+ * That view is a COPY, so the minted handler is copied BACK onto the real `cfg`
+ * — otherwise the rail would mint into a throwaway object and silently stay dark
+ * on this surface. Absent ⇒ the assembler path (reads
+ * `cfg.admissibility.permissionStore` / `cfg.onConfirm` as before).
  *
- * Default-OFF: both knobs unset ⇒ write-budget slot stays unset + the escalation
- * handler is cleared ⇒ byte-identical.
+ * Default-OFF: both knobs unset ⇒ both slots stay unset ⇒ byte-identical.
  */
 export const wireSecurityRails = (
   cfg: AgentConfig,
@@ -116,26 +120,37 @@ export const wireSecurityRails = (
           },
         } as AgentConfig)
   maybeWireBashSandboxEscalation(escalationCfg, config)
+  // The surfaceDeps branch built a COPY; carry the per-session handler back onto
+  // the caller's cfg (the copy is discarded). Knob-OFF ⇒ nothing was minted ⇒ the
+  // slot is not stamped (no own property) ⇒ byte-identical default-OFF.
+  if (escalationCfg !== cfg && escalationCfg.bashSandboxEscalation !== undefined) {
+    cfg.bashSandboxEscalation = escalationCfg.bashSandboxEscalation
+  }
 }
 
 /**
  * CLI-friendly entrypoint — install BOTH rails at the interactive-CLI compose
  * seam (which builds its per-turn config through the runtime overlay, NOT the
- * assembler) and RETURN the minted `writeBudget` so the surface can thread it
- * onto its overlay slot (the base then carries it to per-turn dispatch). The
- * sandbox-escalation handler is installed as a side-effect (global seam) against
- * the surface-supplied gate-shared store + onConfirm.
+ * assembler) and RETURN BOTH minted per-session slots so the surface can thread
+ * them onto its overlay (the base then carries them to per-turn dispatch).
+ *
+ * BOTH slots must be returned: neither rail has a process-global back channel
+ * any more, so a slot this function drops is a rail that silently stays DARK on
+ * this surface.
  *
  * A NARROW carrier `AgentConfig` is minted here (not exposed to the surface) so
- * the CLI never has to construct a full config just to mint one budget slot.
+ * the CLI never has to construct a full config just to mint the two slots.
  *
- * Default-OFF: knobs unset ⇒ returns `{ writeBudget: undefined }` (overlay slot
- * omitted) + clears the escalation handler ⇒ byte-identical to today.
+ * Default-OFF: knobs unset ⇒ returns both fields `undefined` (overlay slots
+ * omitted) ⇒ byte-identical to today.
  */
 export const wireSecurityRailsForOverlay = (
   config: SecurityRailsConfig,
   surfaceDeps: SecurityRailsSurfaceDeps,
-): { readonly writeBudget: AgentConfig["writeBudget"] } => {
+): {
+  readonly writeBudget: AgentConfig["writeBudget"]
+  readonly bashSandboxEscalation: AgentConfig["bashSandboxEscalation"]
+} => {
   const carrier = {
     onConfirm: surfaceDeps.onConfirm,
     ...(surfaceDeps.permissionStore !== undefined
@@ -143,5 +158,8 @@ export const wireSecurityRailsForOverlay = (
       : {}),
   } as AgentConfig
   wireSecurityRails(carrier, config, surfaceDeps)
-  return { writeBudget: carrier.writeBudget }
+  return {
+    writeBudget: carrier.writeBudget,
+    bashSandboxEscalation: carrier.bashSandboxEscalation,
+  }
 }

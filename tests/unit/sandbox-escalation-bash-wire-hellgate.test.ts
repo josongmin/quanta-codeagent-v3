@@ -16,8 +16,14 @@
  * escalation flips the tool result from a failure to a success — observable
  * end-to-end through the real `bashTool.execute`.
  *
- * Knob-OFF ⇒ byte-identical: no handler installed ⇒ the blocked command surfaces
- * as a plain nonzero exit (today's behavior).
+ * Knob-OFF ⇒ byte-identical: no handler minted ⇒ the ctx omits the seam ⇒ the
+ * blocked command surfaces as a plain nonzero exit (today's behavior).
+ *
+ * aug-23 — the handler is a PER-SESSION `AgentConfig` slot
+ * (`cfg.bashSandboxEscalation`), projected onto `ToolContext.sandboxEscalation`,
+ * NOT a process-global. This battery therefore wires a session config and hands
+ * ITS handler to the ctx; the cross-session isolation invariant itself is pinned
+ * by `sandbox-escalation-per-session-slot-hellgate.test.ts`.
  *
  * Determinism: no Date.now/Math.random in the assertions; the escalation cap +
  * permission store are the real ones, driven by an injected fake onConfirm.
@@ -27,6 +33,7 @@ import { mkdtempSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import type { ConfirmDecision } from "@/agent"
+import type { AgentConfig } from "@/agent/types"
 import { maybeWireBashSandboxEscalation } from "@/host/runtime/sandbox-escalation-wire"
 import type { PermissionStore, ToolAction } from "@/permission"
 import { __resetDefaultPermissionStore, createPermissionStore } from "@/permission"
@@ -36,7 +43,6 @@ import { runtimeConfigFromEnv } from "@/shared"
 import type { ToolContext, ToolEvent, ToolResult } from "@/tool"
 import { bashTool } from "@/tool/bash"
 import { __setBashPerCallSandboxFactory } from "@/tool/bash/per-call-factory"
-import { __setBashSandboxEscalationHandler } from "@/tool/bash/sandbox-escalation-wire"
 
 const dir = mkdtempSync(join(tmpdir(), "sbxesc-bash-wire-"))
 
@@ -55,11 +61,17 @@ const blockingSandbox = (): PerCallSandboxPort => ({
   }),
 })
 
+/** The SESSION's escalation handler, minted by {@link wireWith} onto the session
+ *  config and projected onto every ctx this battery builds (the dispatch seam
+ *  does exactly this projection in production). */
+let sessionHandler: AgentConfig["bashSandboxEscalation"]
+
 const ctx = (overrides?: Partial<ToolContext>): ToolContext => ({
   cwd: dir,
   signal: new AbortController().signal,
   agentLabel: "root",
   turnId: "turn-1",
+  ...(sessionHandler !== undefined ? { sandboxEscalation: sessionHandler } : {}),
   ...overrides,
 })
 
@@ -76,27 +88,31 @@ const collect = async (input: unknown, c: ToolContext): Promise<ToolResult> => {
  *  default permission store (the same the gate would consult). */
 let store: PermissionStore
 
-/** Install the REAL host wire with a fresh injected permission store (the
- *  gate-shared store the surface threads onto `admissibility.permissionStore`)
- *  + a fake onConfirm authority. */
+/** Run the REAL host wire over a session config with a fresh injected permission
+ *  store (the gate-shared store the surface threads onto
+ *  `admissibility.permissionStore`) + a fake onConfirm authority, and capture the
+ *  minted PER-SESSION handler so every ctx below carries it (stage 2). */
 const wireWith = (approve: boolean, max?: string): void => {
   const onConfirm = async (_a: ToolAction): Promise<ConfirmDecision> => ({
     decision: approve ? "allow" : "deny",
   })
+  const cfg = {
+    onConfirm,
+    admissibility: { permissionStore: store },
+  } as unknown as AgentConfig
   maybeWireBashSandboxEscalation(
-    {
-      onConfirm,
-      admissibility: { permissionStore: store },
-    } as never,
+    cfg,
     runtimeConfigFromEnv({
       QUANTA_SANDBOX_ESCALATION: "1",
       ...(max !== undefined ? { QUANTA_SANDBOX_ESCALATION_MAX: max } : {}),
     }),
   )
+  sessionHandler = cfg.bashSandboxEscalation
 }
 
 beforeEach(async () => {
   __resetShellSandbox()
+  sessionHandler = undefined
   __resetDefaultPermissionStore()
   store = createPermissionStore({ filePath: join(dir, "perm-state.json"), debounceMs: 0 })
   await store.load()
@@ -106,7 +122,7 @@ beforeEach(async () => {
 afterEach(() => {
   __resetShellSandbox()
   __setBashPerCallSandboxFactory(undefined)
-  __setBashSandboxEscalationHandler(undefined)
+  sessionHandler = undefined
   __resetDefaultPermissionStore()
 })
 
@@ -147,11 +163,11 @@ describe("RFC jun-6 Binding 1 — bash sandbox-escalation LIVE wire", () => {
   })
 
   test("HELL-4: knob-OFF ⇒ byte-identical — no handler, blocked command surfaces as a plain failure", async () => {
-    // Wire is a no-op when the knob is off (clears any handler).
-    maybeWireBashSandboxEscalation(
-      { onConfirm: async () => true } as never,
-      runtimeConfigFromEnv({}),
-    )
+    // Wire is a no-op when the knob is off (the slot is never stamped).
+    const cfg = { onConfirm: async () => true } as unknown as AgentConfig
+    maybeWireBashSandboxEscalation(cfg, runtimeConfigFromEnv({}))
+    expect(cfg.bashSandboxEscalation).toBeUndefined()
+    expect(ctx().sandboxEscalation).toBeUndefined()
     const r = await collect({ command: "echo never-unsandboxed", mode: "read" }, ctx())
     // No escalation: the sandboxed failure stands, no escalation note, the
     // original command never ran unsandboxed.

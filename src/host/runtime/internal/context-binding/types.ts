@@ -343,6 +343,16 @@ export type RuntimeBootstrapOverlay = {
    *  byte-identical: no counter). The web daemon / assembler set `cfg.writeBudget`
    *  directly; the interactive CLI rides this overlay slot. */
   readonly writeBudget?: AgentConfig["writeBudget"]
+  /** SECURITY-RAIL (b) — the per-SESSION bash sandbox-escalation handler minted
+   *  by the comp-root's {@link wireSecurityRails} when
+   *  `QUANTA_SANDBOX_ESCALATION=1` (+ a gate-shared permission store). When set,
+   *  the base carries `bashSandboxEscalation` so the per-turn dispatch projects it
+   *  onto `ToolContext.sandboxEscalation` and a sandbox-blocked `bash` command
+   *  routes through THIS session's `onConfirm` + `PermissionStore`. Absent ⇒ slot
+   *  omitted (default-OFF, byte-identical: a block surfaces as a plain failure).
+   *  Riding the overlay is what makes the handler + its escalation cap live for
+   *  the whole session instead of being re-minted (and reset) per turn. */
+  readonly bashSandboxEscalation?: AgentConfig["bashSandboxEscalation"]
   /** jul-16 GAP-3 (02 serve --stdio) — the wire transport this surface's
    *  composition root declares, stamped onto `capabilities.transport`. Set by
    *  the connect stdio door (`"stdio"`); absent ⇒ the base omits the slot and

@@ -33,7 +33,7 @@ import type {
 import { resolveBashCwd } from "../worktree/cwd-override"
 import { lowerSimpleHereDocForReadMode } from "./heredoc-lowering"
 import { getBashPerCallSandboxFactory } from "./per-call-factory"
-import { getBashSandboxEscalationHandler } from "./sandbox-escalation-wire"
+import type { BashSandboxEscalationHandler } from "./sandbox-escalation-wire"
 
 const schema = z.object({
   command: z.string().describe("Shell command to run via bash -lc"),
@@ -521,12 +521,14 @@ interface EscalatableShellResult {
 }
 
 /** RFC jun-6 — offer the user-gated sandbox-block escalation when a `mode="read"`
- *  sandboxed command exited nonzero. Delegates to the host-installed handler
- *  (`@/host/runtime` adapts the orchestrator + classifier + post-denial store +
- *  HITL gate). Returns the (possibly re-run) result + an optional model-facing
- *  note. DEFAULT-OFF / byte-identical: no handler installed, the sandbox was not
- *  applied (mode="write" / degraded), a zero exit, or a timeout ⇒ returns the
- *  ORIGINAL result with no note (the handler is never even consulted). */
+ *  sandboxed command exited nonzero. Delegates to the SESSION's handler, taken
+ *  from `ctx.sandboxEscalation` (`@/host/runtime` adapts the orchestrator +
+ *  classifier + that session's post-denial store + its HITL gate; dispatch
+ *  projects it per turn). Returns the (possibly re-run) result + an optional
+ *  model-facing note. DEFAULT-OFF / byte-identical: no handler on the ctx, the
+ *  sandbox was not applied (mode="write" / degraded), a zero exit, or a timeout ⇒
+ *  returns the ORIGINAL result with no note (the handler is never even
+ *  consulted). */
 const maybeEscalate = async (
   r: EscalatableShellResult,
   meta: {
@@ -536,6 +538,9 @@ const maybeEscalate = async (
     readonly timedOut: boolean
     readonly agentLabel?: string
     readonly turnId?: string
+    /** The SESSION's escalation handler, projected onto the ctx by dispatch.
+     *  Absent ⇒ default-OFF (never consulted). */
+    readonly handler?: BashSandboxEscalationHandler
     readonly rerunUnsandboxed: () => Promise<{
       exitCode: number
       stdout: string
@@ -550,7 +555,7 @@ const maybeEscalate = async (
   // Fast default-OFF / not-a-block guards — the handler is consulted ONLY for an
   // applied-sandbox nonzero non-timeout exit. A timeout is never a sandbox block.
   if (!meta.sandboxApplied || r.exitCode === 0 || meta.timedOut) return { result: r }
-  const handler = getBashSandboxEscalationHandler()
+  const handler = meta.handler
   if (handler === undefined) return { result: r }
 
   const outcome = await handler({
@@ -581,9 +586,10 @@ const maybeEscalate = async (
 /** RFC jun-6 — run the foreground command and offer the sandbox-block
  *  escalation in one place (keeps `bashExecute` under the complexity cap). The
  *  per-call wrap records whether the sandbox was APPLIED; an applied-sandbox
- *  nonzero exit is handed to the host escalation handler, which (on approve +
- *  gate-clear) re-runs the BYTE-SAME command UNSANDBOXED. Knob-OFF / no handler
- *  / not-a-block ⇒ returns the ORIGINAL result with no note (byte-identical). */
+ *  nonzero exit is handed to the SESSION's escalation handler (`ctx.
+ *  sandboxEscalation`), which (on approve + gate-clear) re-runs the BYTE-SAME
+ *  command UNSANDBOXED. Knob-OFF / no handler on the ctx / not-a-block ⇒ returns
+ *  the ORIGINAL result with no note (byte-identical). */
 const runShellWithEscalation = async (
   cmd: string,
   ctx: ShellToolContext,
@@ -640,6 +646,9 @@ const runShellWithEscalation = async (
     timedOut: r.timedOut,
     ...(ctx.agentLabel !== undefined ? { agentLabel: ctx.agentLabel } : {}),
     ...(ctx.turnId !== undefined ? { turnId: ctx.turnId } : {}),
+    // RFC jun-6 Binding 1 — the SESSION's escalation handler (per-session mint,
+    // per-turn projection). Absent ⇒ `maybeEscalate` short-circuits (default-OFF).
+    ...(ctx.sandboxEscalation !== undefined ? { handler: ctx.sandboxEscalation } : {}),
     rerunUnsandboxed: () => runShell(cmd, baseShellOpts),
   })
 }

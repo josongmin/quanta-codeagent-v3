@@ -4,6 +4,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import type { ConfirmDecision } from "@/agent"
 import { runAgent } from "@/agent"
+import type { AgentConfig } from "@/agent/types"
 import { maybeWireBashSandboxEscalation } from "@/host/runtime/sandbox-escalation-wire"
 import type { LLMPort, StreamEvent, StreamInput } from "@/llm"
 import type { PermissionContext, PermissionStore, ToolAction } from "@/permission"
@@ -13,7 +14,6 @@ import type { PerCallSandboxAvailability, PerCallSandboxPort } from "@/runtime/o
 import { runtimeConfigFromEnv } from "@/shared"
 import { defaultTools, ToolRegistry } from "@/tool"
 import { __setBashPerCallSandboxFactory } from "@/tool/bash/per-call-factory"
-import { __setBashSandboxEscalationHandler } from "@/tool/bash/sandbox-escalation-wire"
 import { cfg, RecordingStream, withTimeout } from "./_harness"
 
 /**
@@ -30,11 +30,15 @@ import { cfg, RecordingStream, withTimeout } from "./_harness"
  * with GROUND TRUTH on whether the approved retry actually re-ran the command
  * UNSANDBOXED.
  *
- * The escalation handler is a MODULE-LEVEL singleton the bash tool consults
- * (`__setBashSandboxEscalationHandler`), installed by the host wire
- * (`maybeWireBashSandboxEscalation`) — NOT carried on `AgentConfig`. So we
- * install it (with an injected `onConfirm` authority + gate-shared permission
- * store) exactly as the composition root's assembler does, then run `runAgent`.
+ * The escalation handler is a PER-SESSION `AgentConfig` slot
+ * (`cfg.bashSandboxEscalation`) minted by the host wire
+ * (`maybeWireBashSandboxEscalation`) and projected by dispatch onto
+ * `ToolContext.sandboxEscalation` — NOT a process-global (aug-23 audit fix; the
+ * cross-session isolation invariant is pinned by
+ * `tests/unit/sandbox-escalation-per-session-slot-hellgate.test.ts`). So we mint
+ * it onto the run config (with an injected `onConfirm` authority + gate-shared
+ * permission store) exactly as the composition root's assembler does, then run
+ * `runAgent` over that SAME config.
  *
  * The fake per-call sandbox APPLIES (`sandboxApplied:true`) and rewrites the
  * argv to emit a high-confidence `Sandbox: deny(1) ...` stderr + exit 1; the
@@ -101,14 +105,19 @@ describe("sandbox-escalation — real loop + fake LLM, block → HITL escalation
   let dir: string
   let store: PermissionStore
 
-  const wireWith = (approve: boolean): void => {
+  /** The PER-SESSION handler minted for this run (undefined ⇒ knob off). */
+  let sessionHandler: AgentConfig["bashSandboxEscalation"]
+
+  const wireWith = (approve: boolean, env: Record<string, string>): void => {
     const onConfirm = async (_a: ToolAction): Promise<ConfirmDecision> => ({
       decision: approve ? "allow" : "deny",
     })
-    maybeWireBashSandboxEscalation(
-      { onConfirm, admissibility: { permissionStore: store } } as never,
-      runtimeConfigFromEnv({ QUANTA_SANDBOX_ESCALATION: "1" }),
-    )
+    const wired = {
+      onConfirm,
+      admissibility: { permissionStore: store },
+    } as unknown as AgentConfig
+    maybeWireBashSandboxEscalation(wired, runtimeConfigFromEnv(env))
+    sessionHandler = wired.bashSandboxEscalation
   }
 
   const runOnce = async (command: string, label: string) => {
@@ -124,6 +133,9 @@ describe("sandbox-escalation — real loop + fake LLM, block → HITL escalation
           permission: { mode: "bypass" } as PermissionContext,
           cwd: dir,
           maxTurns: 6,
+          // The session's escalation slot — the loop's dispatch seam projects it
+          // onto every ToolContext it builds. Absent ⇒ default-OFF.
+          ...(sessionHandler !== undefined ? { bashSandboxEscalation: sessionHandler } : {}),
         }),
       ),
       15_000,
@@ -134,6 +146,7 @@ describe("sandbox-escalation — real loop + fake LLM, block → HITL escalation
 
   beforeEach(async () => {
     dir = mkdtempSync(join(tmpdir(), "sbxesc-loop-e2e-"))
+    sessionHandler = undefined
     __resetShellSandbox()
     __resetDefaultPermissionStore()
     store = createPermissionStore({ filePath: join(dir, "perm-state.json"), debounceMs: 0 })
@@ -143,7 +156,7 @@ describe("sandbox-escalation — real loop + fake LLM, block → HITL escalation
   afterEach(async () => {
     __resetShellSandbox()
     __setBashPerCallSandboxFactory(undefined)
-    __setBashSandboxEscalationHandler(undefined)
+    sessionHandler = undefined
     __resetDefaultPermissionStore()
     // The escalation seeds a post-denial record (a store mutation → debounced
     // flush); settle it BEFORE removing the dir so the async flush doesn't race
@@ -153,7 +166,7 @@ describe("sandbox-escalation — real loop + fake LLM, block → HITL escalation
   })
 
   test("block + APPROVE ⇒ the escalation RETRY re-runs the command UNSANDBOXED (failure → success) through the loop", async () => {
-    wireWith(true)
+    wireWith(true, { QUANTA_SANDBOX_ESCALATION: "1" })
     const { out, llm } = await runOnce("echo unsandboxed-ok", "sbx-esc-approve")
     expect(out.reason).toBe("completed")
 
@@ -170,7 +183,7 @@ describe("sandbox-escalation — real loop + fake LLM, block → HITL escalation
   })
 
   test("block + DENY ⇒ the loop gets the DENIAL and the command NEVER runs unsandboxed (stays blocked)", async () => {
-    wireWith(false)
+    wireWith(false, { QUANTA_SANDBOX_ESCALATION: "1" })
     const { out } = await runOnce("echo SHOULD-NOT-RUN", "sbx-esc-deny")
     expect(out.reason).toBe("completed")
 
@@ -184,15 +197,13 @@ describe("sandbox-escalation — real loop + fake LLM, block → HITL escalation
   })
 
   test("CONTROL: knob OFF (no handler installed) ⇒ the block surfaces as a PLAIN failure, no escalation note", async () => {
-    // The wire is a no-op when the knob is off (clears any handler). Through the
-    // loop, a sandboxed nonzero exit then surfaces byte-identically — no
-    // escalation note, and the original command never runs unsandboxed. This
+    // The wire is a no-op when the knob is off (the slot is never stamped).
+    // Through the loop, a sandboxed nonzero exit then surfaces byte-identically —
+    // no escalation note, and the original command never runs unsandboxed. This
     // proves the APPROVE test's success is the ESCALATION path, not the bash
     // tool independently retrying.
-    maybeWireBashSandboxEscalation(
-      { onConfirm: async () => true } as never,
-      runtimeConfigFromEnv({}),
-    )
+    wireWith(true, {})
+    expect(sessionHandler).toBeUndefined()
     const { out } = await runOnce("echo never-unsandboxed", "sbx-esc-off")
     expect(out.reason).toBe("completed")
     const results = allToolResults(out)

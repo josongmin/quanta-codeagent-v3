@@ -41,6 +41,20 @@ const readSessionLoopAggregate = (): string =>
   ]
     .map(read)
     .join("\n")
+// Likewise, the `bootstrap-session.ts` god-MODULE split moved the posture-runtime
+// mint out of the entrypoint into `bootstrap-session/prepare-runtime.ts`; aggregate
+// the entrypoint + every stage so this behavior pin follows the code, not the file.
+// (The pin itself is unchanged — only the path it reads.)
+const BOOTSTRAP_REL = "src/host/bootstrap/bootstrap-session"
+const readBootstrapAggregate = (): string =>
+  [
+    `${BOOTSTRAP_REL}.ts`,
+    ...readdirSync(join(REPO_ROOT, BOOTSTRAP_REL))
+      .filter((f) => f.endsWith(".ts"))
+      .map((f) => `${BOOTSTRAP_REL}/${f}`),
+  ]
+    .map(read)
+    .join("\n")
 
 /** Drain the delegating adapter's fire-and-forget write chain (a real surface
  *  writes mode before a turn; the durable publish lands across a macrotask). */
@@ -96,7 +110,7 @@ describe("mode-cycle permission authority hellgate (ADR-0303 → RFC-05 E3)", ()
   })
 
   test("bootstrap builds permission as an accessor over the posture authority, not a static mirror", () => {
-    const src = read("src/host/bootstrap/bootstrap-session.ts")
+    const src = readBootstrapAggregate()
     // RFC-05 E4/E5 — the mode is owned by the durable authority via the delegating
     // adapter, now built by the ONE `buildLivePostureRuntime` seam (extracted to
     // `live-posture-runtime.ts` for the god-module cap) which composes the SAME
