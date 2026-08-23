@@ -36,10 +36,16 @@ const CORRECTIVE =
 /** Internal per-agent outcome: a recorded {@link StepOutcome} OR a skip. */
 type AgentRunOutcome = StepOutcome | { readonly skipped: SkipReason }
 
-export const runWorkflow = async (
-  root: WorkflowNode,
-  opts: RunWorkflowOptions,
-): Promise<WorkflowResult> => {
+/** The run's accumulators, the concurrency semaphore, the abort signal and
+ *  the emitter every node reports through. */
+const wfState = (root: WorkflowNode, opts: RunWorkflowOptions) => {
+  /** The factory's MUTABLE state. `let` bindings cannot cross a function
+   *  boundary by value, so they live here and every link mutates in place —
+   *  observationally identical to the closure they replace. */
+  const mut = {
+    agentRuns: 0,
+    anyFailure: false,
+  }
   const results = new Map<string, StepOutcome>()
   const events: WorkflowEvent[] = []
   const reservedIds = new Set<string>()
@@ -47,8 +53,6 @@ export const runWorkflow = async (
   const maxAgents = opts.maxAgents ?? DEFAULT_MAX_AGENTS
   const signal = opts.signal
   const budget = opts.budget
-  let agentRuns = 0
-  let anyFailure = false
 
   const emit = (e: WorkflowEvent): void => {
     events.push(e)
@@ -64,6 +68,25 @@ export const runWorkflow = async (
       return results.get(id)?.ok === true
     },
   }
+  return {
+    root,
+    opts,
+    results,
+    events,
+    reservedIds,
+    sem,
+    maxAgents,
+    signal,
+    budget,
+    emit,
+    ctx,
+    mut,
+  }
+}
+
+/** Outcome recording and the admission gate an agent node passes first. */
+const wfRecord = async (sctx: ReturnType<typeof wfState>) => {
+  const { results, reservedIds, maxAgents, signal, budget, emit, mut } = sctx
 
   const recordOk = (id: string, value: unknown, text: string): StepOutcome => {
     const o: StepOutcome = { id, ok: true, value, text }
@@ -74,7 +97,7 @@ export const runWorkflow = async (
   const recordFail = (id: string, reason: StepFailureReason, error: string): StepOutcome => {
     const o: StepOutcome = { id, ok: false, reason, error }
     results.set(id, o)
-    anyFailure = true
+    mut.anyFailure = true
     emit({ type: "step_complete", id, ok: false, reason })
     return o
   }
@@ -91,15 +114,23 @@ export const runWorkflow = async (
     const id = node.id
     if (signal?.aborted) return skip(id, "aborted")
     if (reservedIds.has(id) || results.has(id)) {
-      anyFailure = true
+      mut.anyFailure = true
       emit({ type: "step_complete", id, ok: false, reason: "duplicate_id" })
       return { id, ok: false, reason: "duplicate_id", error: `duplicate step id: ${id}` }
     }
     reservedIds.add(id)
     if (budget !== undefined && budget.remaining() <= 0) return skip(id, "budget_exhausted")
-    if (agentRuns >= maxAgents) return skip(id, "max_agents")
+    if (mut.agentRuns >= maxAgents) return skip(id, "max_agents")
     return null
   }
+  return { recordOk, recordFail, skip, gateAgent }
+}
+
+/** One agent dispatch, its retry preparation, and the retry loop. */
+const wfDispatch = async (
+  sctx: ReturnType<typeof wfState> & Awaited<ReturnType<typeof wfRecord>>,
+) => {
+  const { opts, sem, signal, emit, ctx, mut, recordOk, recordFail, gateAgent } = sctx
 
   // One concurrency-capped dispatch + validation. Returns a terminal outcome
   // (`done`) or, on a schema miss, the validation error to retry with (`retry`).
@@ -132,7 +163,7 @@ export const runWorkflow = async (
   const prepRetry = (attempt: number, id: string): StepOutcome | null => {
     if (attempt === 0) return null
     if (signal?.aborted) return recordFail(id, "aborted", "aborted before retry")
-    agentRuns += 1
+    mut.agentRuns += 1
     return null
   }
 
@@ -170,9 +201,20 @@ export const runWorkflow = async (
     } catch (e) {
       return recordFail(id, "builder_threw", errMessage(e))
     }
-    agentRuns += 1 // reserve the attempt-0 dispatch (synchronous)
+    mut.agentRuns += 1 // reserve the attempt-0 dispatch (synchronous)
     return dispatchWithRetry(node, basePrompt, id, label)
   }
+  return { runOnce, prepRetry, dispatchWithRetry, runAgentNode }
+}
+
+/** The node executors — pipeline item, fan-out, pipeline, loop — and the
+ *  dispatcher that routes a node to one of them. */
+const wfExec = async (
+  sctx: ReturnType<typeof wfState> &
+    Awaited<ReturnType<typeof wfRecord>> &
+    Awaited<ReturnType<typeof wfDispatch>>,
+) => {
+  const { root, signal, emit, ctx, skip, runAgentNode } = sctx
 
   // --- pipeline: per-item staged flow, NO barrier between stages ------------
   const runPipelineItem = async (
@@ -286,5 +328,18 @@ export const runWorkflow = async (
 
   await execNode(root)
 
-  return { ok: !anyFailure, results, events, agentRuns }
+  return { runPipelineItem, execFanout, execPipeline, execLoop, safeUntil, execNode }
+}
+
+/** Assemble the chained builders. */
+export const runWorkflow = async (
+  root: WorkflowNode,
+  opts: RunWorkflowOptions,
+): Promise<WorkflowResult> => {
+  const p0 = wfState(root, opts)
+  const p1 = await wfRecord({ ...p0 })
+  const p2 = await wfDispatch({ ...p0, ...p1 })
+  const p3 = await wfExec({ ...p0, ...p1, ...p2 })
+  const { results, events, mut } = { ...p0, ...p1, ...p2, ...p3 }
+  return { ok: !mut.anyFailure, results, events, agentRuns: mut.agentRuns }
 }

@@ -443,9 +443,15 @@ const emptyWitnessResult = (
  * `failures`: the static `candidateTests` + `sourceEvidence` are telemetry and
  * never produce a `false` by themselves.
  */
-export const makeDiscoveredRepoRegressionWitness = (
-  args: DiscoveredRepoRegressionPortArgs,
-): ((c: Candidate) => Promise<ExecutedWitnessResult>) => {
+/** Instance config, the oracles, and the per-key caches that keep discovery
+ *  from re-running for the same instance. */
+const witnessConfig = (args: DiscoveredRepoRegressionPortArgs) => {
+  /** The factory's MUTABLE state. `let` bindings cannot cross a function
+   *  boundary by value, so they live here and every link mutates in place —
+   *  observationally identical to the closure they replace. */
+  const mut = {
+    repoTestSnapshot: undefined as Promise<readonly RepoTextFile[] | null> | undefined,
+  }
   const { instance, sandbox, timeoutMs } = args
   const baseCommit = instance.swebench?.baseCommit
   const maxTests = args.maxTests ?? DEFAULT_DISCOVERY_MAX_TESTS
@@ -464,17 +470,36 @@ export const makeDiscoveredRepoRegressionWitness = (
   const baseGreenCache = new Map<string, Promise<readonly string[] | null>>()
   // #6: cap-truncation telemetry per changed-file key (witnesses dropped by maxTests).
   const cappedByKey = new Map<string, { readonly discovered: number; readonly executed: number }>()
-  let repoTestSnapshot: Promise<readonly RepoTextFile[] | null> | undefined
+  return {
+    args,
+    instance,
+    sandbox,
+    timeoutMs,
+    baseCommit,
+    maxTests,
+    oracle,
+    batchOracle,
+    discoveryCache,
+    baseGreenCache,
+    cappedByKey,
+    mut,
+  }
+}
+
+/** Discovery: the repo's tests at the base commit, and the per-instance
+ *  discovery that caps and caches them. */
+const witnessDiscovery = (ctx: ReturnType<typeof witnessConfig>) => {
+  const { sandbox, timeoutMs, baseCommit, maxTests, discoveryCache, cappedByKey, mut } = ctx
 
   const repoTestsOnBase = (): Promise<readonly RepoTextFile[] | null> => {
-    if (repoTestSnapshot !== undefined) return repoTestSnapshot
-    repoTestSnapshot = (async () => {
+    if (mut.repoTestSnapshot !== undefined) return mut.repoTestSnapshot
+    mut.repoTestSnapshot = (async () => {
       if (baseCommit === undefined) return null
       if (!(await resetToBase(sandbox, baseCommit, timeoutMs))) return null
       const paths = await listTrackedPythonFiles(sandbox, timeoutMs)
       return readRepoTestFiles(sandbox, paths)
     })()
-    return repoTestSnapshot
+    return mut.repoTestSnapshot
   }
 
   // STATIC candidate building (no verdict authority): ordered witness list +
@@ -507,6 +532,15 @@ export const makeDiscoveredRepoRegressionWitness = (
     discoveryCache.set(key, p)
     return p
   }
+  return { repoTestsOnBase, discoverFor }
+}
+
+/** Base-green verification: run one test at base, in batch, and the cached
+ *  verdict the witness answers with. */
+const witnessBaseGreen = (
+  ctx: ReturnType<typeof witnessConfig> & ReturnType<typeof witnessDiscovery>,
+) => {
+  const { sandbox, timeoutMs, baseCommit, oracle, batchOracle, baseGreenCache } = ctx
 
   const runOneBaseTest = async (test: string): Promise<boolean | null> => {
     if (baseCommit === undefined) return null
@@ -551,6 +585,19 @@ export const makeDiscoveredRepoRegressionWitness = (
     return p
   }
 
+  return { runOneBaseTest, batchPorts, baseGreenFor }
+}
+
+/** Assemble the chained builders. */
+export const makeDiscoveredRepoRegressionWitness = (args: DiscoveredRepoRegressionPortArgs) => {
+  const p0 = witnessConfig(args)
+  const p1 = witnessDiscovery({ ...p0 })
+  const p2 = witnessBaseGreen({ ...p0, ...p1 })
+  const { sandbox, timeoutMs, baseCommit, oracle, cappedByKey, discoverFor, baseGreenFor } = {
+    ...p0,
+    ...p1,
+    ...p2,
+  }
   return async (candidate: Candidate): Promise<ExecutedWitnessResult> => {
     const candidates = await discoverFor(candidate)
     const capped = cappedByKey.get(keyOf(candidate.files))
