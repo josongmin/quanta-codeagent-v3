@@ -5,7 +5,7 @@ import { applyLocalEnv } from "./local-env"
 import { withProxyEnv } from "./network-proxy"
 import { defaultPpidWalkKiller } from "./process-tree"
 import { DEFAULT_ENV_ALLOWLIST, SandboxUnavailableError, scrubEnv } from "./sandbox"
-import { asScrubbedEnv, bunScrubbedSpawner } from "./scrubbed-spawn"
+import { asScrubbedEnv, bunScrubbedSpawner, type ScrubbedEnv } from "./scrubbed-spawn"
 import { buildBaseShellArgv, discoverShells, resolveWinShellMode } from "./shell-argv"
 import { getShellSandbox } from "./shell-sandbox-holder"
 import type { RunShellEvent, ShellOptions, ShellResult } from "./types"
@@ -91,91 +91,36 @@ const foldSandboxStatus = (
 const requiresFullSandboxEnforcement = (profile: string): boolean =>
   profile === "read-only" || profile === "workspace-write"
 
-/** Run a command through the system shell. Captures stdout/stderr, never
- *  throws on non-zero exit (the caller decides what a failure means).
+/**
+ * Build the argv that will actually be spawned: base shell argv → snapshot
+ * restore → per-call wrap → installed sandbox slot, in that order, and emit the
+ * honest sandbox verdict exactly once before the spawn.
  *
- *  ENV SCRUBBING (ADR-0006, now actually enforced for tool execution): unless
- *  `inheritEnv: true` is passed, the child runs with a SCRUBBED env built by
- *  the shared {@link scrubEnv} (ONE source of truth — the allowlist lives in
- *  src/runtime/sandbox.ts, this module does not duplicate it). That means
- *  only PATH/HOME/LANG/LC_ALL/TZ/TERM (when present in the parent) reach the
- *  child; `*_API_KEY`/`*_TOKEN`/`*_SECRET` and every other parent var are
- *  dropped. All LLM-driven shell tools (bash/grep/localize/test-runner) call
- *  this without `inheritEnv`, so provider keys can no longer leak into a
- *  child process. Default behavior stays functional: PATH/HOME are forwarded
- *  when set, so normal commands (`echo`, `pwd`, `rg`, `bun test`) still run.
+ * The ORDER is load-bearing and is why this is one phase: the snapshot restore
+ * must happen BEFORE sandbox wrapping, because a sandbox adapter prepends its
+ * own executable and a later restore could no longer find the `*sh -c` command.
  *
- *  PR-5 / ADR-0081 — TYPED OUTPUT EVENTS. When `options.onShellEvent` is
- *  provided, the function emits a closed-union event stream IN ADDITION TO
- *  the accumulator that still produces the final `ShellResult`:
- *    1. exactly one `start` event with pid/command/cwd/startedAt,
- *    2. zero or more `stdout` / `stderr` chunks interleaved arbitrarily
- *       (each carries the per-stream byte `offset` of the chunk's first byte),
- *    3. exactly one terminal event — `exit` (code/signal/exitedAt), `aborted`
- *       (reason: user_abort | timeout, abortedAt — a REAL kill), or `detached`
- *       (WS-H: an intentional background handoff; the child is ALIVE in the
- *       registry). `exit`/`aborted` are emitted AFTER both pipes have drained;
- *       `detached` ends the foreground observation only.
- *  Concatenating all `stdout` chunks reproduces the bytes of `result.stdout`
- *  (and the same for stderr) — the streamed path runs through the SAME
- *  accumulator as the legacy buffered path, so a session that supplies an
- *  observer sees identical final output. When the observer is ABSENT, no
- *  events are emitted and the run is byte-identical to the pre-PR-5 path. */
-export const runShell = async (
+ * Returns a UNION rather than throwing on a bad decision: `buildBaseShellArgv`
+ * failing is a deterministic no-throw result (exit 127 = "cannot execute"), and
+ * the caller must return it WITHOUT emitting a synthetic start/exit pair — no
+ * process was spawned. A profile that requires full enforcement and cannot get
+ * it still THROWS `SandboxUnavailableError`, unchanged.
+ *
+ * Extracted from {@link runShell} (god-function burndown).
+ */
+const resolveShellArgv = async (
   command: string,
-  options: ShellOptions = {},
-): Promise<ShellResult> => {
-  const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS
-  let timedOutFlag = false
-  const cwd = options.cwd ?? process.cwd()
-  const observer = options.onShellEvent
-
-  // Scrubbed by default; opt OUT only with an explicit `inheritEnv: true`.
-  // When inheriting we pass `process.env` explicitly (Bun.spawn snapshots the
-  // original env if `env` is omitted and would miss vars set after startup).
-  const baseEnv =
-    options.inheritEnv === true ? (process.env as Record<string, string | undefined>) : scrubEnv()
-  // ADR-0455 — DECLARED local-environment overlay. Compose the selected env's
-  // vars / PATH-prepends ON TOP of the scrubbed base, GOVERNED BY the same
-  // allowlist that scrubbed it (a declared var whose name is not allowlisted is
-  // dropped; `pathPrepend` is prepended to the surviving PATH). Absent / empty
-  // selection ⇒ `applyLocalEnv` returns the SAME `baseEnv` reference
-  // (byte-identical legacy). Applied BEFORE the proxy injection so an operator
-  // proxy still wins for the proxy keys. NOTE: when `inheritEnv:true` the base
-  // is the FULL parent env; the allowlist still governs which DECLARED names
-  // overlay (the inherit decision is orthogonal to the declared overlay).
-  const localEnvBase = applyLocalEnv(baseEnv, options.localEnv, DEFAULT_ENV_ALLOWLIST)
-  // ADR-0428 — socket-level egress proxy. When the caller threads a bound proxy
-  // address via `options.proxyEnv`, inject `HTTP_PROXY`/`HTTPS_PROXY`/`NO_PROXY`
-  // so the child's OWN sockets are funneled through the loopback egress proxy,
-  // closing the subprocess egress bypass. Absent (or `address` undefined) ⇒
-  // `withProxyEnv` returns the SAME `baseEnv` reference — byte-identical legacy.
-  // S1 — brand the composed env at the scrubber chokepoint; the spawn below
-  // routes through the typed `spawnScrubbed` boundary so an env leak is a tsc
-  // error (the `inheritEnv:true` opt-out is still rooted here, explicit).
-  const env = asScrubbedEnv(withProxyEnv(localEnvBase, options.proxyEnv ?? {}))
-
-  // S1 — OS sandbox wire-up. Default-OFF: when the CLI surface did not
-  // install a slot (via `installShellSandbox`), `getShellSandbox()` returns
-  // `undefined` and `argv` is the legacy `["bash","-lc",cmd]` byte-for-byte.
-  // When installed, the slot wraps the argv with the active OS backend
-  // (`sandbox-exec`, `bwrap`, `landlock-cli`) or an honest degraded
-  // passthrough. Policy internals only flow INTO the spawn argv; they are
-  // never echoed back to the tool result.
-  //
-  // ADR-0295 — per-call wrap. When the caller supplies `options.perCallWrap`,
-  // it runs FIRST: the per-call wrapper composes the outermost sandbox
-  // (typically the bash tool's `mode="read"` Seatbelt read-only profile).
-  // The session-wide slot still runs on top of the per-call result so a
-  // session policy that further constrains the call still applies. Order:
-  //   snapshot restore → per-call wrap → slot wrap.
-  // P16/ADR-0529 — platform-aware base shell argv. POSIX hosts resolve bash to
-  // an absolute executable BEFORE sandbox wrapping, so Seatbelt/bwrap cannot
-  // turn a bare `bash` into an opaque execvp failure by changing PATH. Win32
-  // still refuses by default unless the operator opts into a shell mode.
-  const winMode = process.platform === "win32" ? resolveWinShellMode() : "error"
-  const shellProbe =
-    process.platform !== "win32" || winMode === "auto" ? discoverShells() : undefined
+  options: ShellOptions,
+  ctx: {
+    readonly cwd: string
+    readonly winMode: ReturnType<typeof resolveWinShellMode>
+    readonly shellProbe: Parameters<typeof buildBaseShellArgv>[3]
+  },
+): Promise<
+  | { readonly kind: "error"; readonly result: ShellResult }
+  | { readonly kind: "ok"; readonly argv: readonly string[] }
+> => {
+  const { cwd, winMode, shellProbe } = ctx
   const argvDecision = buildBaseShellArgv(command, process.platform, winMode, shellProbe)
   if (argvDecision.kind === "error") {
     // No-throw: a clear, deterministic failure result instead of a silent spawn
@@ -183,7 +128,10 @@ export const runShell = async (
     // execute"). When an event observer is present we do NOT emit a synthetic
     // `start`/`exit` pair (no process was spawned) — the caller reads the
     // result shape, which is the same contract a non-zero exit carries.
-    return { stdout: "", stderr: argvDecision.reason, exitCode: 127, timedOut: false }
+    return {
+      kind: "error",
+      result: { stdout: "", stderr: argvDecision.reason, exitCode: 127, timedOut: false },
+    }
   }
   const baseArgv: ReadonlyArray<string> = argvDecision.argv
   // Restore before sandbox wrapping. Sandbox adapters prepend their own
@@ -241,7 +189,233 @@ export const runShell = async (
       anyWrapLayerRan ? sandboxStatus : { applied: false, reason: "no-sandbox-installed" },
     )
   }
-  const argv = sandboxedArgv
+  return { kind: "ok", argv: sandboxedArgv }
+}
+
+/**
+ * The STREAMING collection path — taken only when an event observer is wired.
+ *
+ * It shares the same `Bun.spawn` invocation and the same kill/timeout/abort
+ * plumbing as the buffered path; the difference is that it drains the pipes
+ * incrementally so `output` events can be emitted as the child writes, instead
+ * of materialising both streams at exit.
+ *
+ * `timedOut` is a THUNK, not a boolean: the flag is set by the timeout timer
+ * while this function is awaiting the child, so a value captured at call time
+ * would always read `false`.
+ *
+ * Extracted from {@link runShell} (god-function burndown).
+ */
+const collectStreamed = async (
+  proc: Subprocess<"ignore", "pipe", "pipe">,
+  observer: NonNullable<ShellOptions["onShellEvent"]>,
+  ctx: {
+    readonly options: ShellOptions
+    readonly kill: () => void
+    readonly timer: ReturnType<typeof setTimeout>
+    readonly disarm: () => void
+    readonly onAbort: () => void
+    readonly timedOut: () => boolean
+    /** A THUNK for the same reason as `timedOut`: the abort listener and the
+     *  timeout timer both set it while this function is awaiting the child. */
+    readonly abortReason: () => "user_abort" | "timeout" | null
+  },
+): Promise<ShellResult> => {
+  const { options, kill, disarm, onAbort, timedOut } = ctx
+  const timer = ctx.timer
+  let stdout: string
+  let stderr: string
+
+  const stdoutChunks: Uint8Array[] = []
+  const stderrChunks: Uint8Array[] = []
+  let stdoutOffset = 0
+  let stderrOffset = 0
+
+  const drain = async (
+    stream: ReadableStream<Uint8Array>,
+    onChunk: (chunk: Uint8Array) => void,
+  ): Promise<void> => {
+    const reader = stream.getReader()
+    try {
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) return
+        if (value && value.byteLength > 0) onChunk(value)
+      }
+    } finally {
+      reader.releaseLock()
+    }
+  }
+
+  const stdoutDone = drain(proc.stdout as ReadableStream<Uint8Array>, (chunk) => {
+    const event: RunShellEvent = { kind: "stdout", chunk, offset: stdoutOffset }
+    stdoutOffset += chunk.byteLength
+    stdoutChunks.push(chunk)
+    observer(event)
+  })
+  const stderrDone = drain(proc.stderr as ReadableStream<Uint8Array>, (chunk) => {
+    const event: RunShellEvent = { kind: "stderr", chunk, offset: stderrOffset }
+    stderrOffset += chunk.byteLength
+    stderrChunks.push(chunk)
+    observer(event)
+  })
+
+  // GUARDED: kill-on-throw + timer/abort-listener teardown live in
+  // `withSpawnedChild` (src/runtime/guarded-spawn.ts), not inline here. The
+  // body emits the terminal `exit`/`aborted` event on its NORMAL-return path
+  // only — a throw skips it, which is the contract (exactly one terminal on
+  // normal/abort completion, none on an internal observer-thrown failure;
+  // the guard kills the still-running child instead).
+  return withSpawnedChild(
+    {
+      kill,
+      timer,
+      cleanup: () => {
+        disarm()
+        options.signal?.removeEventListener("abort", onAbort)
+      },
+    },
+    async () => {
+      await Promise.all([stdoutDone, stderrDone])
+      const exitCode = await proc.exited
+      const decoder = new TextDecoder("utf-8")
+      stdout = decoder.decode(concat(stdoutChunks))
+      stderr = decoder.decode(concat(stderrChunks))
+      // Terminal event: aborted takes precedence (timeout/user_abort) over a
+      // plain exit. `proc.exited` resolves with the OS exit code; on a kill
+      // it is typically non-zero. Bun does not surface `NodeJS.Signals` on
+      // its ShellPromise here, so we report `signal: null` and rely on the
+      // `aborted` event to carry the reason.
+      // Read LATE, never at entry: the abort listener and the timeout timer set
+      // it while this function is awaiting the child, so a value captured on the
+      // way in is always `null` and every abort would paint as a plain exit.
+      const abortReason = ctx.abortReason()
+      if (abortReason !== null) {
+        const aborted: RunShellEvent = {
+          kind: "aborted",
+          reason: abortReason,
+          abortedAt: Date.now(),
+        }
+        observer(aborted)
+      } else {
+        const exit: RunShellEvent = {
+          kind: "exit",
+          code: exitCode,
+          signal: null,
+          exitedAt: Date.now(),
+        }
+        observer(exit)
+      }
+      return { stdout, stderr, exitCode, timedOut: timedOut() }
+    },
+  )
+}
+
+/**
+ * The child's environment, composed in the order the security model requires:
+ * scrub (or an explicit `inheritEnv` opt-out) → local `.env` overlay under the
+ * allowlist → egress-proxy variables → brand at the scrubber chokepoint.
+ *
+ * The branding is what makes an env leak a `tsc` error rather than a review
+ * question: the spawn routes through the typed `spawnScrubbed` boundary, which
+ * only accepts a `ScrubbedEnv`.
+ *
+ * Extracted from {@link runShell} (god-function burndown); every step and its
+ * byte-identical absent-path is unchanged.
+ */
+const resolveShellEnv = (options: ShellOptions): ScrubbedEnv => {
+  const baseEnv =
+    options.inheritEnv === true ? (process.env as Record<string, string | undefined>) : scrubEnv()
+  // ADR-0455 — DECLARED local-environment overlay. Compose the selected env's
+  // vars / PATH-prepends ON TOP of the scrubbed base, GOVERNED BY the same
+  // allowlist that scrubbed it (a declared var whose name is not allowlisted is
+  // dropped; `pathPrepend` is prepended to the surviving PATH). Absent / empty
+  // selection ⇒ `applyLocalEnv` returns the SAME `baseEnv` reference
+  // (byte-identical legacy). Applied BEFORE the proxy injection so an operator
+  // proxy still wins for the proxy keys. NOTE: when `inheritEnv:true` the base
+  // is the FULL parent env; the allowlist still governs which DECLARED names
+  // overlay (the inherit decision is orthogonal to the declared overlay).
+  const localEnvBase = applyLocalEnv(baseEnv, options.localEnv, DEFAULT_ENV_ALLOWLIST)
+  // ADR-0428 — socket-level egress proxy. When the caller threads a bound proxy
+  // address via `options.proxyEnv`, inject `HTTP_PROXY`/`HTTPS_PROXY`/`NO_PROXY`
+  // so the child's OWN sockets are funneled through the loopback egress proxy,
+  // closing the subprocess egress bypass. Absent (or `address` undefined) ⇒
+  // `withProxyEnv` returns the SAME `baseEnv` reference — byte-identical legacy.
+  // S1 — brand the composed env at the scrubber chokepoint; the spawn below
+  // routes through the typed `spawnScrubbed` boundary so an env leak is a tsc
+  // error (the `inheritEnv:true` opt-out is still rooted here, explicit).
+  const env = asScrubbedEnv(withProxyEnv(localEnvBase, options.proxyEnv ?? {}))
+  return env
+}
+
+/** Run a command through the system shell. Captures stdout/stderr, never
+ *  throws on non-zero exit (the caller decides what a failure means).
+ *
+ *  ENV SCRUBBING (ADR-0006, now actually enforced for tool execution): unless
+ *  `inheritEnv: true` is passed, the child runs with a SCRUBBED env built by
+ *  the shared {@link scrubEnv} (ONE source of truth — the allowlist lives in
+ *  src/runtime/sandbox.ts, this module does not duplicate it). That means
+ *  only PATH/HOME/LANG/LC_ALL/TZ/TERM (when present in the parent) reach the
+ *  child; `*_API_KEY`/`*_TOKEN`/`*_SECRET` and every other parent var are
+ *  dropped. All LLM-driven shell tools (bash/grep/localize/test-runner) call
+ *  this without `inheritEnv`, so provider keys can no longer leak into a
+ *  child process. Default behavior stays functional: PATH/HOME are forwarded
+ *  when set, so normal commands (`echo`, `pwd`, `rg`, `bun test`) still run.
+ *
+ *  PR-5 / ADR-0081 — TYPED OUTPUT EVENTS. When `options.onShellEvent` is
+ *  provided, the function emits a closed-union event stream IN ADDITION TO
+ *  the accumulator that still produces the final `ShellResult`:
+ *    1. exactly one `start` event with pid/command/cwd/startedAt,
+ *    2. zero or more `stdout` / `stderr` chunks interleaved arbitrarily
+ *       (each carries the per-stream byte `offset` of the chunk's first byte),
+ *    3. exactly one terminal event — `exit` (code/signal/exitedAt), `aborted`
+ *       (reason: user_abort | timeout, abortedAt — a REAL kill), or `detached`
+ *       (WS-H: an intentional background handoff; the child is ALIVE in the
+ *       registry). `exit`/`aborted` are emitted AFTER both pipes have drained;
+ *       `detached` ends the foreground observation only.
+ *  Concatenating all `stdout` chunks reproduces the bytes of `result.stdout`
+ *  (and the same for stderr) — the streamed path runs through the SAME
+ *  accumulator as the legacy buffered path, so a session that supplies an
+ *  observer sees identical final output. When the observer is ABSENT, no
+ *  events are emitted and the run is byte-identical to the pre-PR-5 path. */
+export const runShell = async (
+  command: string,
+  options: ShellOptions = {},
+): Promise<ShellResult> => {
+  const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS
+  let timedOutFlag = false
+  const cwd = options.cwd ?? process.cwd()
+  const observer = options.onShellEvent
+
+  // Scrubbed by default; opt OUT only with an explicit `inheritEnv: true`.
+  // When inheriting we pass `process.env` explicitly (Bun.spawn snapshots the
+  // original env if `env` is omitted and would miss vars set after startup).
+  const env = resolveShellEnv(options)
+
+  // S1 — OS sandbox wire-up. Default-OFF: when the CLI surface did not
+  // install a slot (via `installShellSandbox`), `getShellSandbox()` returns
+  // `undefined` and `argv` is the legacy `["bash","-lc",cmd]` byte-for-byte.
+  // When installed, the slot wraps the argv with the active OS backend
+  // (`sandbox-exec`, `bwrap`, `landlock-cli`) or an honest degraded
+  // passthrough. Policy internals only flow INTO the spawn argv; they are
+  // never echoed back to the tool result.
+  //
+  // ADR-0295 — per-call wrap. When the caller supplies `options.perCallWrap`,
+  // it runs FIRST: the per-call wrapper composes the outermost sandbox
+  // (typically the bash tool's `mode="read"` Seatbelt read-only profile).
+  // The session-wide slot still runs on top of the per-call result so a
+  // session policy that further constrains the call still applies. Order:
+  //   snapshot restore → per-call wrap → slot wrap.
+  // P16/ADR-0529 — platform-aware base shell argv. POSIX hosts resolve bash to
+  // an absolute executable BEFORE sandbox wrapping, so Seatbelt/bwrap cannot
+  // turn a bare `bash` into an opaque execvp failure by changing PATH. Win32
+  // still refuses by default unless the operator opts into a shell mode.
+  const winMode = process.platform === "win32" ? resolveWinShellMode() : "error"
+  const shellProbe =
+    process.platform !== "win32" || winMode === "auto" ? discoverShells() : undefined
+  const argvPhase = await resolveShellArgv(command, options, { cwd, winMode, shellProbe })
+  if (argvPhase.kind === "error") return argvPhase.result
+  const argv = argvPhase.argv
   const proc = bunScrubbedSpawner(argv, {
     cwd,
     env,
@@ -310,89 +484,16 @@ export const runShell = async (
   // preserve byte-identical behavior in the no-observer case we DELEGATE to
   // exactly that path and never touch the reader. The two paths share the
   // same `Bun.spawn` invocation and the same kill/timeout/abort plumbing.
-  let stdout: string
-  let stderr: string
-
   if (observer) {
-    const stdoutChunks: Uint8Array[] = []
-    const stderrChunks: Uint8Array[] = []
-    let stdoutOffset = 0
-    let stderrOffset = 0
-
-    const drain = async (
-      stream: ReadableStream<Uint8Array>,
-      onChunk: (chunk: Uint8Array) => void,
-    ): Promise<void> => {
-      const reader = stream.getReader()
-      try {
-        while (true) {
-          const { done, value } = await reader.read()
-          if (done) return
-          if (value && value.byteLength > 0) onChunk(value)
-        }
-      } finally {
-        reader.releaseLock()
-      }
-    }
-
-    const stdoutDone = drain(proc.stdout as ReadableStream<Uint8Array>, (chunk) => {
-      const event: RunShellEvent = { kind: "stdout", chunk, offset: stdoutOffset }
-      stdoutOffset += chunk.byteLength
-      stdoutChunks.push(chunk)
-      observer(event)
+    return await collectStreamed(proc, observer, {
+      options,
+      kill,
+      timer,
+      disarm,
+      onAbort,
+      timedOut: () => timedOutFlag,
+      abortReason: () => abortReason,
     })
-    const stderrDone = drain(proc.stderr as ReadableStream<Uint8Array>, (chunk) => {
-      const event: RunShellEvent = { kind: "stderr", chunk, offset: stderrOffset }
-      stderrOffset += chunk.byteLength
-      stderrChunks.push(chunk)
-      observer(event)
-    })
-
-    // GUARDED: kill-on-throw + timer/abort-listener teardown live in
-    // `withSpawnedChild` (src/runtime/guarded-spawn.ts), not inline here. The
-    // body emits the terminal `exit`/`aborted` event on its NORMAL-return path
-    // only — a throw skips it, which is the contract (exactly one terminal on
-    // normal/abort completion, none on an internal observer-thrown failure;
-    // the guard kills the still-running child instead).
-    return withSpawnedChild(
-      {
-        kill,
-        timer,
-        cleanup: () => {
-          disarm()
-          options.signal?.removeEventListener("abort", onAbort)
-        },
-      },
-      async () => {
-        await Promise.all([stdoutDone, stderrDone])
-        const exitCode = await proc.exited
-        const decoder = new TextDecoder("utf-8")
-        stdout = decoder.decode(concat(stdoutChunks))
-        stderr = decoder.decode(concat(stderrChunks))
-        // Terminal event: aborted takes precedence (timeout/user_abort) over a
-        // plain exit. `proc.exited` resolves with the OS exit code; on a kill
-        // it is typically non-zero. Bun does not surface `NodeJS.Signals` on
-        // its ShellPromise here, so we report `signal: null` and rely on the
-        // `aborted` event to carry the reason.
-        if (abortReason !== null) {
-          const aborted: RunShellEvent = {
-            kind: "aborted",
-            reason: abortReason,
-            abortedAt: Date.now(),
-          }
-          observer(aborted)
-        } else {
-          const exit: RunShellEvent = {
-            kind: "exit",
-            code: exitCode,
-            signal: null,
-            exitedAt: Date.now(),
-          }
-          observer(exit)
-        }
-        return { stdout, stderr, exitCode, timedOut: timedOutFlag }
-      },
-    )
   }
 
   // Legacy buffered path — byte-identical to the pre-PR-5 code. No observer

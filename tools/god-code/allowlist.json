@@ -5,8 +5,7 @@
   "modules": [],
   "functions": [
     "src/ipc/session/bridge.ts::createSessionTransportBridge",
-    "src/observability/otel-exporter.ts::otelHttpExporter",
-    "src/runtime/shell.ts::runShell"
+    "src/observability/otel-exporter.ts::otelHttpExporter"
   ],
   "approachingModuleCeiling": {
     "_comment": "aug-23 audit \u2014 the 1000-line god-MODULE gate caps INDIVIDUAL files, but nothing capped the COHORT approaching it, so files creep to 999 and every split is undone by the next feature. Measured drift: 30 -> 27 across one day of commits, with six members advancing and one new entrant. This is a one-directional ceiling on how many src modules sit in the 900-999 band. Raise NEVER \u2014 split one, then lower this.",

@@ -40,7 +40,7 @@ import {
   decodeFailureTaxonomyFacts,
   type FailureTaxonomyFactsV1,
 } from "@/observability/failure-taxonomy"
-import { isRecord } from "@/shared"
+import { errMessage, isRecord, logger } from "@/shared"
 
 /**
  * The persisted RECORD envelope version — DISTINCT from the taxonomy facts
@@ -200,8 +200,12 @@ export const readAttemptFacts = (
   let parsed: unknown
   try {
     parsed = JSON.parse(raw)
-  } catch {
-    // Unparseable payload — a corrupt record is NOT a partial we can trust.
+  } catch (e) {
+    // Unparseable payload — a corrupt record is NOT a partial we can trust. The
+    // verdict stays `corrupt` (callers branch on it), but the parse fault is
+    // ATTRIBUTED: silently classifying a record as corrupt hides whether the
+    // writer truncated it or the reader is looking at the wrong file.
+    logger.warn(`failure-facts.readAttemptFacts[${path}]: ${errMessage(e)}`)
     return { kind: "unavailable", reason: "corrupt" }
   }
   if (!isRecord(parsed)) return { kind: "unavailable", reason: "corrupt" }
