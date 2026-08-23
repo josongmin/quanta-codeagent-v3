@@ -75,6 +75,10 @@ const SRC = join(REPO, "src")
  *  (a definition is not a caller) but named so a move is loud. */
 const EXECUTOR_MODULE = "apps/bench/remote/box-session/family-bootstrap-exec.ts"
 const EXPECTED_CALLER = "apps/bench/remote/box-session/family-box-setup.ts"
+/** PMX-04 — the GRADER-phase caller. It appeared when ProMax gained an on-box
+ *  grade: the grade runs inside the grader window, so the phase acquired a real
+ *  production call site and the teardown bound to it now runs. */
+const EXPECTED_GRADER_CALLER = "apps/bench/remote/box-session/family-box-grade.ts"
 const EXECUTOR_SYMBOL = "executeFamilyRemoteBootstrap"
 
 // ---------------------------------------------------------------------------
@@ -230,7 +234,7 @@ describe("S1 — the phase-wiring table is checked against real production bytes
     expect(stripCommentsAndStrings(`const run = ${EXECUTOR_SYMBOL}`)).toContain(EXECUTOR_SYMBOL)
   })
 
-  test("NO ALIAS ESCAPE — only two production modules even MENTION the executor", () => {
+  test("NO ALIAS ESCAPE — only the KNOWN production modules even MENTION the executor", () => {
     // The call scan matches `executeFamilyRemoteBootstrap({`, so a caller that
     // aliased or re-exported the binding (`const run = executeFamilyRemoteBootstrap`)
     // would slip past it. Aliasing requires an import, and an import mentions
@@ -241,7 +245,7 @@ describe("S1 — the phase-wiring table is checked against real production bytes
       .filter((abs) => stripCommentsAndStrings(readFileSync(abs, "utf8")).includes(EXECUTOR_SYMBOL))
       .map((abs) => relative(SRC, abs))
       .sort()
-    expect(mentions).toEqual([EXECUTOR_MODULE, EXPECTED_CALLER].sort())
+    expect(mentions).toEqual([EXECUTOR_MODULE, EXPECTED_CALLER, EXPECTED_GRADER_CALLER].sort())
   })
 
   test("KNOWN-ITEM FLOOR — the scan finds the real agent caller, exactly once", () => {
@@ -401,42 +405,70 @@ describe("S2 — a shipped family cannot start admitting boxes without its teard
 // TODAY'S STATE — the only assertions a legitimate PMX-04 landing must update
 // ---------------------------------------------------------------------------
 
-describe("TODAY'S STATE — the lane is INERT, and that is pinned in exactly one place", () => {
-  // Everything above is a durable clause: it stays green when PMX-04 wires the
-  // grader transport and ProMax starts admitting (verified by running that whole
-  // change as an injection). These three are the deliberate state pins. When the
-  // lane goes live they are updated HERE, together with
+describe("TODAY'S STATE — the grade transport is WIRED, the lane is still shut", () => {
+  // Everything above is a durable clause: it stayed green through this change.
+  // These are the deliberate state pins, updated HERE together with
   // FAMILY_BOOTSTRAP_PHASE_WIRING — and nowhere else.
+  //
+  // PMX-04 gave the GRADER phase a production caller: ProMax grades on the box
+  // with its own pinned evaluator, and that grade runs inside the grader window
+  // (`runFamilyBoxGrade` → `whileMaterialized`). The teardown bound to that call
+  // therefore runs too. Admission still refuses, so the lane is CLOSED-BUT-WIRED
+  // rather than live — which is the honest description of a transport that
+  // exists and a door that is still shut.
 
-  test("no production caller runs the grader phase; the teardown therefore does not run", () => {
-    // The WHOLE tree, not just the declared table: exactly one call site exists.
-    expect(productionCallSites().map((c) => `${c.file}:${c.phase}`)).toEqual([
-      `${EXPECTED_CALLER}:agent`,
-    ])
-    expect([...productionExecutedBootstrapPhases()]).toEqual(["agent"])
-    expect(familyBootstrapPhaseIsExecutedInProduction("grader")).toBe(false)
-    expect(familyBootstrapPhaseIsExecutedInProduction("teardown")).toBe(false)
-    // All three wiring kinds are in use today, each making a different claim.
+  test("the grader phase now HAS a production caller, and the teardown runs with it", () => {
+    // The WHOLE tree, not just the declared table.
+    expect(productionCallSites().map((c) => `${c.file}:${c.phase}`).sort()).toEqual(
+      [`${EXPECTED_CALLER}:agent`, `${EXPECTED_GRADER_CALLER}:grader`].sort(),
+    )
+    expect([...productionExecutedBootstrapPhases()].sort()).toEqual(["agent", "grader"])
+    expect(familyBootstrapPhaseIsExecutedInProduction("grader")).toBe(true)
+    // `bound-to` resolves through its host: the teardown has no call site of its
+    // own, and that is the point — it cannot be forgotten because it is not
+    // separately invocable.
+    expect(FAMILY_BOOTSTRAP_PHASE_WIRING.teardown.kind).toBe("bound-to")
+    expect(familyBootstrapPhaseIsExecutedInProduction("teardown")).toBe(true)
+  })
+
+  test("`unwired` is no longer claimed by any phase — and the kind still exists to be claimed", () => {
     const kinds = new Set(
       Object.values(FAMILY_BOOTSTRAP_PHASE_WIRING).map((w: FamilyBootstrapPhaseWiring) => w.kind),
     )
-    expect([...kinds].sort()).toEqual([...FAMILY_BOOTSTRAP_PHASE_WIRING_KINDS].sort())
+    // Two kinds in use today. It was three while the grader was unwired; that
+    // assertion is updated rather than relaxed, so the table cannot quietly
+    // collapse to a single kind without this going red.
+    expect([...kinds].sort()).toEqual(["bound-to", "executed"])
+    // …and `unwired` is still a member of the closed union, so a future phase
+    // CAN be honestly marked as such.
+    expect([...FAMILY_BOOTSTRAP_PHASE_WIRING_KINDS]).toContain("unwired")
   })
 
-  test("promax is `inert` — it refuses admission AND has no grader caller", () => {
+  test("promax is `closed-but-wired` — the transport exists, admission still refuses", () => {
     expect(
       classifyLane({
         admits: admits("promax"),
         teardownExecuted: familyBootstrapPhaseIsExecutedInProduction("teardown"),
       }),
-    ).toBe("inert")
+    ).toBe("closed-but-wired")
   })
 
-  test("so the operator IS shown the note (it is not conditional on nothing)", () => {
+  test("the inertness note is GONE, because the claim it made is no longer true", () => {
+    // It said the declared teardown does not run. It does now, so emitting it
+    // would be a receipt citing a defence that had stopped being absent.
     expect(
       familyPlanNotes(resolveBenchRunConfig({ argvFamily: "promax", env: {} })).filter((n) =>
         n.includes(NOTE_MARK),
       ),
+    ).toHaveLength(0)
+    // PAIRED CONTROL: the emitter is not simply dead — given a table that still
+    // calls a phase unwired, it speaks up.
+    expect(
+      familyBootstrapWiringPlanNotes(declaredBootstrap("promax"), {
+        agent: { kind: "executed", callSite: "x" },
+        grader: { kind: "unwired", owner: "PMX-04", why: "hypothetical" },
+        teardown: { kind: "bound-to", phase: "grader" },
+      }).filter((n) => n.includes(NOTE_MARK)),
     ).toHaveLength(1)
   })
 })

@@ -93,7 +93,22 @@ export const buildPythonSwebench = async (
 ): Promise<RunCfg["pythonSwebench"]> => {
   const profile = resolveDatasetFamilyProfile(family)
   if (profile.gradesWithProHarness) return buildProGradeVerifier(profile, exit)
-  if (!gateOn(process.env, "QUANTA_SWEBENCH_PYTHON")) return undefined
+  if (!gateOn(process.env, "QUANTA_SWEBENCH_PYTHON")) {
+    // WARN LOUD AT LAUNCH (aug-23). Returning `undefined` here is not a soft
+    // degrade: `verdict.ts` REFUSES to grade every official-dataset instance
+    // (their shipped `testCmd` is the `"true"` no-op, so grading locally would
+    // fake-pass everything). The refusal surfaces per-instance as a plain FAIL,
+    // which reads exactly like "the agent could not solve it" — a live misread
+    // cost a full picks-10 run scored 2/10 that was really 6/10 once graded.
+    // The run is still useful for patch generation, so warn rather than abort.
+    logger.warn(
+      `QUANTA_SWEBENCH_PYTHON is not set — official ${family} grading is OFF. ` +
+        "Every instance will be REFUSED (reported as FAIL, not solved-0); patches are still written. " +
+        "Read `score official_harness N/M` in the summary, not the per-instance PASS/FAIL. " +
+        "To grade for real: QUANTA_SWEBENCH_PYTHON=1 (plus QUANTA_SWEBENCH_PYTHON_BIN=<python that can `import swebench`>).",
+    )
+    return undefined
+  }
   if (!(await isPythonSwebenchAvailable())) {
     // FAIL LOUD — no silent fake fallback. The operator explicitly asked for
     // real grading (QUANTA_SWEBENCH_PYTHON=1); silently degrading to the

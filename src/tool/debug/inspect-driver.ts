@@ -140,6 +140,207 @@ interface VarBudget {
   remaining: number
 }
 
+/**
+ * The DAP configuration phase: group the requested breakpoints per source file,
+ * arm them, and (best-effort) arm exception breakpoints for break-on-throw.
+ * Both MUST happen before `configurationDone`, which is why they are one phase.
+ *
+ * Returns the three binding facts the outcome depends on. `allResponded` is the
+ * subtle one: a verified-verdict is only TRUSTWORTHY when every `setBreakpoints`
+ * actually answered — if one timed out we cannot conclude "couldn't bind" (the
+ * adapter is at fault, not the binary), so the caller leaves `breakpointsBound`
+ * undefined rather than emitting a false NOTE.
+ *
+ * Extracted from {@link inspectViaDap} (god-function burndown).
+ */
+const armBreakpoints = async (
+  client: DapClient,
+  spec: InspectSpec,
+  stopTimeoutMs: number,
+): Promise<{
+  readonly anyRequested: boolean
+  readonly anyVerified: boolean
+  readonly allResponded: boolean
+}> => {
+  // Set breakpoints grouped per source file (preserving per-bp condition).
+  const byFile = new Map<string, { line: number; condition?: string }[]>()
+  for (const bp of spec.breakpoints) {
+    const arr = byFile.get(bp.file) ?? []
+    arr.push({
+      line: bp.line,
+      ...(bp.condition !== undefined ? { condition: bp.condition } : {}),
+    })
+    byFile.set(bp.file, arr)
+  }
+  // Track whether ANY breakpoint actually bound — an adapter returns
+  // `verified:false` when it can't map a {file,line} to real code (missing
+  // debug info, or a source-path mismatch e.g. /tmp vs /private/tmp). If none
+  // bind and the program then exits, that is the real reason — far more useful
+  // than a bare "ran to completion".
+  let anyRequested = false
+  let anyVerified = false
+  // Adversarial-audit fix: only TRUST a verified-verdict when EVERY
+  // setBreakpoints call actually returned a real response. If any timed
+  // out/errored, we can't conclude "couldn't bind" (the adapter, not the
+  // binary, is at fault) — leave breakpointsBound undefined (no false NOTE).
+  let allResponded = true
+  for (const [file, bps] of byFile) {
+    anyRequested = anyRequested || bps.length > 0
+    const bpRes = await withTimeout<DapResponse>(
+      client.request("setBreakpoints", { source: { path: file }, breakpoints: bps }),
+      stopTimeoutMs,
+      { success: false, message: "setBreakpoints timed out" },
+    )
+    if (!bpRes.success) {
+      allResponded = false
+      continue
+    }
+    if (asArr(asObj(bpRes.body).breakpoints).some((b) => asObj(b).verified === true))
+      anyVerified = true
+  }
+  // Break-on-throw: arm exception breakpoints (best-effort — an adapter that
+  // doesn't support them just answers an error, which we ignore). MUST be in
+  // the config phase, like setBreakpoints, before configurationDone.
+  if (spec.exceptionFilters !== undefined && spec.exceptionFilters.length > 0) {
+    await withTimeout<DapResponse>(
+      client.request("setExceptionBreakpoints", { filters: [...spec.exceptionFilters] }),
+      stopTimeoutMs,
+      { success: false, message: "setExceptionBreakpoints timed out" },
+    )
+  }
+  return { anyRequested, anyVerified, allResponded }
+}
+
+/**
+ * Everything read AT the stop: stack trace, per-frame scopes/locals, an optional
+ * evaluate, the live thread list, and (when we stopped on a throw) the exception
+ * detail.
+ *
+ * Every query here is TIMEOUT-GUARDED for one reason discovered the hard way:
+ * adapters differ in what they answer while stopped — lldb-dap does not respond
+ * to `terminate` at a breakpoint — so an unguarded await hangs the tool forever.
+ * A timed request degrades to a failure response instead.
+ *
+ * Locals are captured for the top K frames under ONE shared node budget and
+ * visited-ref set, so deep callers contribute context but a huge object graph
+ * cannot blow the packet.
+ *
+ * Extracted from {@link inspectViaDap} (god-function burndown).
+ */
+const captureAtStop = async (
+  client: DapClient,
+  spec: InspectSpec,
+  stopped: { readonly body?: unknown },
+  ctx: {
+    readonly stopTimeoutMs: number
+    readonly threadId: number
+    readonly reason: string
+    /** Read through a closure, not a captured boolean: the EXTERNAL signal can
+     *  flip across any of the awaits below, and a cancelled turn must stop
+     *  capturing further frames instead of waiting out per-query timeouts. */
+    readonly aborted: () => boolean
+    readonly signal: AbortSignal | undefined
+  },
+): Promise<{
+  readonly stack: StackFrameInfo[]
+  readonly frames: FrameScopes[]
+  readonly evaluated: { expression: string; result: string } | undefined
+  readonly threads: readonly { readonly id: number; readonly name: string }[]
+  readonly exception: { id: string; description: string } | undefined
+}> => {
+  const { stopTimeoutMs, threadId, reason, aborted, signal } = ctx
+  // Post-stop QUERIES must each be timeout-guarded: adapters differ in what
+  // they answer while stopped (e.g. lldb-dap does NOT respond to `terminate`
+  // at a breakpoint — an unguarded await would hang the tool forever). A timed
+  // request degrades to a failure response instead of hanging.
+  const queryTimeoutMs = Math.min(stopTimeoutMs, 15_000)
+  const timed = (command: string, args?: unknown): Promise<DapResponse> =>
+    withTimeout<DapResponse>(client.request(command, args), queryTimeoutMs, {
+      success: false,
+      message: `${command} timed out`,
+    })
+
+  const stRes = await timed("stackTrace", { threadId, startFrame: 0, levels: 20 })
+  const rawFrames = asArr(asObj(stRes.body).stackFrames)
+  const stack = rawFrames.map((f): StackFrameInfo => {
+    const fo = asObj(f)
+    const src = asObj(fo.source).path
+    return {
+      name: str(fo.name, "?"),
+      line: num(fo.line),
+      ...(typeof src === "string" ? { source: src } : {}),
+    }
+  })
+
+  // Capture scopes+locals for the TOP K frames (not just the stop frame) under
+  // ONE shared node budget + visited-ref set, so deep callers contribute
+  // context but a huge graph can't blow the packet. `frames[0]` = stop frame.
+  const budget: VarBudget = { remaining: MAX_TOTAL_VARS }
+  const visited = new Set<number>()
+  const frames: FrameScopes[] = []
+  const framesToCapture = Math.min(rawFrames.length, MAX_FRAMES_WITH_LOCALS)
+  for (let i = 0; i < framesToCapture; i++) {
+    // A cancelled turn stops capturing further frames immediately (we return
+    // whatever we have) rather than waiting out per-query timeouts × frames.
+    if (aborted()) break
+    const fo = asObj(rawFrames[i])
+    const frameId = num(fo.id, 0)
+    const scopesRes = await timed("scopes", { frameId })
+    const scopes: ScopeVars[] = []
+    for (const sc of asArr(asObj(scopesRes.body).scopes)) {
+      const so = asObj(sc)
+      const ref = num(so.variablesReference)
+      if (ref <= 0) continue
+      const vars = await expandVariables(timed, ref, 1, budget, visited, signal)
+      if (vars.length > 0) scopes.push({ scope: str(so.name, "scope"), vars })
+    }
+    const src = asObj(fo.source).path
+    frames.push({
+      frame: str(fo.name, "?"),
+      line: num(fo.line),
+      ...(typeof src === "string" ? { source: src } : {}),
+      scopes,
+    })
+  }
+  const topFrameId = num(asObj(rawFrames[0]).id, 0)
+
+  let evaluated: { expression: string; result: string } | undefined
+  if (spec.evaluate !== undefined && spec.evaluate.length > 0) {
+    const evRes = await timed("evaluate", {
+      expression: spec.evaluate,
+      frameId: topFrameId,
+      context: "repl",
+    })
+    if (evRes.success)
+      evaluated = { expression: spec.evaluate, result: str(asObj(evRes.body).result, "") }
+  }
+
+  // Concurrency dump: list the live threads (dlv maps goroutines onto DAP
+  // threads). Best-effort + bounded; absent when the adapter doesn't answer.
+  const thRes = await timed("threads")
+  const threads = asArr(asObj(thRes.body).threads)
+    .slice(0, MAX_THREADS)
+    .map((t) => ({ id: num(asObj(t).id), name: str(asObj(t).name, "?") }))
+
+  // If we stopped ON an exception, pull its type+message (break-on-throw). The
+  // `text` on the stopped event is a fallback id when exceptionInfo is absent.
+  let exception: { id: string; description: string } | undefined
+  if (reason === "exception") {
+    const exRes = await timed("exceptionInfo", { threadId })
+    if (exRes.success) {
+      const eb = asObj(exRes.body)
+      exception = {
+        id: str(eb.exceptionId, str(asObj(stopped.body).text, "exception")),
+        description: str(eb.description),
+      }
+    } else {
+      const text = str(asObj(stopped.body).text)
+      if (text.length > 0) exception = { id: text, description: "" }
+    }
+  }
+  return { stack, frames, evaluated, threads, exception }
+}
+
 /** Recursively expand a `variablesReference` into a BOUNDED {@link DapVariable}
  *  tree. Depth-, breadth-, and total-node-capped; a `visited` ref set guards
  *  against cyclic / shared references re-expanding forever. Each `variables`
@@ -246,52 +447,11 @@ export const inspectViaDap = async (
     // Wait for the adapter to be configuration-ready (triggered by launch).
     await withTimeout(initializedP, stopTimeoutMs, undefined)
 
-    // Set breakpoints grouped per source file (preserving per-bp condition).
-    const byFile = new Map<string, { line: number; condition?: string }[]>()
-    for (const bp of spec.breakpoints) {
-      const arr = byFile.get(bp.file) ?? []
-      arr.push({
-        line: bp.line,
-        ...(bp.condition !== undefined ? { condition: bp.condition } : {}),
-      })
-      byFile.set(bp.file, arr)
-    }
-    // Track whether ANY breakpoint actually bound — an adapter returns
-    // `verified:false` when it can't map a {file,line} to real code (missing
-    // debug info, or a source-path mismatch e.g. /tmp vs /private/tmp). If none
-    // bind and the program then exits, that is the real reason — far more useful
-    // than a bare "ran to completion".
-    let anyRequested = false
-    let anyVerified = false
-    // Adversarial-audit fix: only TRUST a verified-verdict when EVERY
-    // setBreakpoints call actually returned a real response. If any timed
-    // out/errored, we can't conclude "couldn't bind" (the adapter, not the
-    // binary, is at fault) — leave breakpointsBound undefined (no false NOTE).
-    let allResponded = true
-    for (const [file, bps] of byFile) {
-      anyRequested = anyRequested || bps.length > 0
-      const bpRes = await withTimeout<DapResponse>(
-        client.request("setBreakpoints", { source: { path: file }, breakpoints: bps }),
-        stopTimeoutMs,
-        { success: false, message: "setBreakpoints timed out" },
-      )
-      if (!bpRes.success) {
-        allResponded = false
-        continue
-      }
-      if (asArr(asObj(bpRes.body).breakpoints).some((b) => asObj(b).verified === true))
-        anyVerified = true
-    }
-    // Break-on-throw: arm exception breakpoints (best-effort — an adapter that
-    // doesn't support them just answers an error, which we ignore). MUST be in
-    // the config phase, like setBreakpoints, before configurationDone.
-    if (spec.exceptionFilters !== undefined && spec.exceptionFilters.length > 0) {
-      await withTimeout<DapResponse>(
-        client.request("setExceptionBreakpoints", { filters: [...spec.exceptionFilters] }),
-        stopTimeoutMs,
-        { success: false, message: "setExceptionBreakpoints timed out" },
-      )
-    }
+    const { anyRequested, anyVerified, allResponded } = await armBreakpoints(
+      client,
+      spec,
+      stopTimeoutMs,
+    )
     await client.request("configurationDone")
 
     // Race the breakpoint hit against the program terminating / launch failing.
@@ -333,95 +493,12 @@ export const inspectViaDap = async (
     const reason = str(asObj(stopped.body).reason, "stopped")
     const threadId = num(asObj(stopped.body).threadId, 1)
 
-    // Post-stop QUERIES must each be timeout-guarded: adapters differ in what
-    // they answer while stopped (e.g. lldb-dap does NOT respond to `terminate`
-    // at a breakpoint — an unguarded await would hang the tool forever). A timed
-    // request degrades to a failure response instead of hanging.
-    const queryTimeoutMs = Math.min(stopTimeoutMs, 15_000)
-    const timed = (command: string, args?: unknown): Promise<DapResponse> =>
-      withTimeout<DapResponse>(client.request(command, args), queryTimeoutMs, {
-        success: false,
-        message: `${command} timed out`,
-      })
-
-    const stRes = await timed("stackTrace", { threadId, startFrame: 0, levels: 20 })
-    const rawFrames = asArr(asObj(stRes.body).stackFrames)
-    const stack = rawFrames.map((f): StackFrameInfo => {
-      const fo = asObj(f)
-      const src = asObj(fo.source).path
-      return {
-        name: str(fo.name, "?"),
-        line: num(fo.line),
-        ...(typeof src === "string" ? { source: src } : {}),
-      }
-    })
-
-    // Capture scopes+locals for the TOP K frames (not just the stop frame) under
-    // ONE shared node budget + visited-ref set, so deep callers contribute
-    // context but a huge graph can't blow the packet. `frames[0]` = stop frame.
-    const budget: VarBudget = { remaining: MAX_TOTAL_VARS }
-    const visited = new Set<number>()
-    const frames: FrameScopes[] = []
-    const framesToCapture = Math.min(rawFrames.length, MAX_FRAMES_WITH_LOCALS)
-    for (let i = 0; i < framesToCapture; i++) {
-      // A cancelled turn stops capturing further frames immediately (we return
-      // whatever we have) rather than waiting out per-query timeouts × frames.
-      if (aborted()) break
-      const fo = asObj(rawFrames[i])
-      const frameId = num(fo.id, 0)
-      const scopesRes = await timed("scopes", { frameId })
-      const scopes: ScopeVars[] = []
-      for (const sc of asArr(asObj(scopesRes.body).scopes)) {
-        const so = asObj(sc)
-        const ref = num(so.variablesReference)
-        if (ref <= 0) continue
-        const vars = await expandVariables(timed, ref, 1, budget, visited, opts.signal)
-        if (vars.length > 0) scopes.push({ scope: str(so.name, "scope"), vars })
-      }
-      const src = asObj(fo.source).path
-      frames.push({
-        frame: str(fo.name, "?"),
-        line: num(fo.line),
-        ...(typeof src === "string" ? { source: src } : {}),
-        scopes,
-      })
-    }
-    const topFrameId = num(asObj(rawFrames[0]).id, 0)
-
-    let evaluated: { expression: string; result: string } | undefined
-    if (spec.evaluate !== undefined && spec.evaluate.length > 0) {
-      const evRes = await timed("evaluate", {
-        expression: spec.evaluate,
-        frameId: topFrameId,
-        context: "repl",
-      })
-      if (evRes.success)
-        evaluated = { expression: spec.evaluate, result: str(asObj(evRes.body).result, "") }
-    }
-
-    // Concurrency dump: list the live threads (dlv maps goroutines onto DAP
-    // threads). Best-effort + bounded; absent when the adapter doesn't answer.
-    const thRes = await timed("threads")
-    const threads = asArr(asObj(thRes.body).threads)
-      .slice(0, MAX_THREADS)
-      .map((t) => ({ id: num(asObj(t).id), name: str(asObj(t).name, "?") }))
-
-    // If we stopped ON an exception, pull its type+message (break-on-throw). The
-    // `text` on the stopped event is a fallback id when exceptionInfo is absent.
-    let exception: { id: string; description: string } | undefined
-    if (reason === "exception") {
-      const exRes = await timed("exceptionInfo", { threadId })
-      if (exRes.success) {
-        const eb = asObj(exRes.body)
-        exception = {
-          id: str(eb.exceptionId, str(asObj(stopped.body).text, "exception")),
-          description: str(eb.description),
-        }
-      } else {
-        const text = str(asObj(stopped.body).text)
-        if (text.length > 0) exception = { id: text, description: "" }
-      }
-    }
+    const { stack, frames, evaluated, threads, exception } = await captureAtStop(
+      client,
+      spec,
+      stopped,
+      { stopTimeoutMs, threadId, reason, aborted, signal: opts.signal },
+    )
 
     // Best-effort teardown — fire `terminate` but NEVER block on it (lldb-dap
     // doesn't answer it at a breakpoint). `dispose()` kills the child process

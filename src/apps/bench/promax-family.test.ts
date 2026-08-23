@@ -719,7 +719,12 @@ describe("PMX-01 — the real CLI routes promax end to end", () => {
       expect(planLine(pro.out, "verifier")).toBe("ScaleAI SWE-bench Pro harness")
       expect(planLine(pro.out, "dataset family")).toBe("pro")
       const verified = runPlan("verified")
-      expect(planLine(verified.out, "verifier")).toBe("local testCmd")
+      // Gate off ⇒ NO grader (official rows ship `testCmd:"true"`; verdict.ts
+      // refuses them rather than fake-passing), so the line must not claim the
+      // local-testCmd mode that only the custom-corpus path actually uses.
+      expect(planLine(verified.out, "verifier")).toBe(
+        "NONE — official grading OFF (every instance REFUSED, reported FAIL). Set QUANTA_SWEBENCH_PYTHON=1 to grade",
+      )
       // …and the ABSENT default is byte-identical to explicit verified.
       const absent = runPlan(undefined)
       expect(planLine(absent.out, "dataset family")).toBe("verified")

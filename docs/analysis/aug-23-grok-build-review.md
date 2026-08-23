@@ -8,7 +8,7 @@
 
 > 검증 등급 표기: **[직접]** = 내가 소스를 직접 읽어 확인 / **[에이전트]** = 서브에이전트 보고(교차검증 안 된 것) / **[정정]** = 1차 결론이 뒤집힌 항목
 >
-> **실행 정본은 §15다.** §11·§13의 초기 제안과 §14.4의 추가 목록은 조사 이력으로만 보존한다. 구현 티켓, 병렬화, merge 순서, 완료 판정은 §15만 따른다.
+> **실행 정본은 §17이다.** §11·§13·§15의 제안과 §16의 실행 기록은 조사 이력으로만 보존한다. 구현 티켓, 병렬화, merge 순서, 완료 판정은 current-head 잔여만 재분류한 §17만 따른다.
 
 ---
 
@@ -332,7 +332,7 @@ Apache §4(b) 고지에 명시:
 
 ## 11. 흡수 우선순위 — 중간안(실행 정본 아님)
 
-> 이 표는 추가 감사를 하기 전의 중간 결론이다. `TurnCompletedEvent`만 확장하는 안, 별도 `PhaseKey`/`WaitingReason` 도입, 날짜 마스킹 등은 뒤 조사에서 수정됐다. 최종 합집합은 §15 참조.
+> 이 표는 추가 감사를 하기 전의 중간 결론이다. `TurnCompletedEvent`만 확장하는 안, 별도 `PhaseKey`/`WaitingReason` 도입, 날짜 마스킹 등은 뒤 조사에서 수정됐다. 최종 합집합은 §17 참조.
 
 | 순위 | 항목 | 근거 | 비용 |
 |---|---|---|---|
@@ -378,7 +378,7 @@ Apache §4(b) 고지에 명시:
 
 **미사용 자산 2건**: `shell.needs_approval`은 `config.stopReasonPolicy` 경유만 가능한데 **할당 0건**(문서의 "reserved, not wired" 확인). `src/permission/review-kind.ts:183`의 `stopCategoryFor`는 `edit.needs_approval` ×7의 **병렬 제2 분류체계**인데 프로덕션 호출자 0.
 
-**[정정] `TurnCompletedEvent`만 늘리면 안 된다.** 커널의 현재 terminal 분류는 `aborted`만 abort, `error`만 failed, 나머지를 completed로 보내므로 `max_turns`·`budget_exhausted`·`refusal`·향후 `no_progress`·`output_limit`가 계속 성공 이벤트가 된다. §15의 T-lane처럼 `TurnStoppedEvent`를 신설하고, approval/input은 terminal이 아니라 pause 이벤트로 분리하며, 모든 surface를 하나의 exhaustive presenter에 연결해야 한다.
+**[당시 정정, §17에서 재정정] `TurnCompletedEvent`만 늘려서는 부족하다는 문제 진단은 맞았지만 새 `TurnStoppedEvent` family 제안은 과했다.** 이후 `turn.failed|aborted`, stop category, surface presenter가 랜딩됐다. 현재 잔여는 §17 T처럼 기존 terminal event의 closed category와 truncation 판정을 닫는 것이다.
 
 ---
 
@@ -565,7 +565,9 @@ Apache §4(b) 고지에 명시:
 
 ---
 
-## 15. 최종 실행 정본 — 모듈별 병렬 lane
+## 15. 구 실행안 — 모듈별 병렬 lane (SUPERSEDED)
+
+> **SUPERSEDED — 실행 금지.** 이 절은 뒤의 §16 랜딩을 반영하지 않은 pre-implementation 계획이다. 현재 구현을 다시 만드는 항목과 mtime 기반 잘못된 방향이 섞여 있으므로 §17로 교체됐다.
 
 ### 15.0 기준과 현재 상태
 
@@ -860,7 +862,7 @@ cap 강제 리마인더 / repro-doubt steer / **dedup-gate 관찰**(3규제) / l
 
 ---
 
-## 14. 실행 기록 — 흡수 구현 + 헬어딧 (2026-08-23 야간)
+## 16. 실행 기록 — 흡수 구현 + 헬어딧 (2026-08-23 야간)
 
 §11 우선순위대로 헬게이트 프로토콜(RED e2e → 구현 → 검증 → 커밋)로 완주하고, 적대 2R + 객관 1시선 헬어딧 후 보완까지 마침. 커밋 11개.
 
@@ -890,9 +892,247 @@ cap 강제 리마인더 / repro-doubt steer / **dedup-gate 관찰**(3규제) / l
 8. **커널 abort/failed/errored가 카테고리 유실 + 이전 턴 카테고리 누수** — 파생으로 전환.
 
 ### 남은 것
-- **`default-off-ledger` 구조적 갭**: `gate_owner`가 non-empty 필수라 **config 필드로만 도달하는 default-OFF 기능은 ledger에 표현 불가**하고 두 가드(ledger hellgate / knob-registry 라쳇) 모두를 통과 못 함. `hardStopAfter`가 그 첫 사례. 스키마 확장이 필요(행 추가는 시도 후 되돌림).
+- **[후속 재검증에서 오보] `default-off-ledger` 구조적 갭**: 당시에는 `gate_owner`가 non-empty라 config-only 기능을 표현할 수 없다고 봤으나, schema는 임의 string owner를 받고 기존 ledger에도 `AgentConfig.*` 선례가 다수다. 스키마 확장이 아니라 누락 row/evidence 수선이 맞다(§17 W0).
 - **압축의 턴예산 리마인더**: 태깅하면 id가 생겨 "rewind 게이트 OFF ⇒ 트랜스크립트 id-less" 불변식을 깨서 되돌림. 제대로 고치려면 `id`가 아닌 별도 마커 필요.
 - **선존재 RED(내 것 아님)**: `default-off-ledger-hellgate` 2 fail(`a5c56e652`가 catalog 7건을 ledger 행 없이 등록), `pm-dod-ratchet` 1 fail(`aug22-rfc06-2-worktree-cwd-pin`).
 
 ### 최종 상태
 멈춤 사유가 생산 → 커널 → 이벤트 → 4개 표면까지 배선됨. 성공 오표시 4곳 전부 수정. 표현 테이블에 실사용 소비자 2개(CLI 판정, 웹 배지) + 웹/코어 드리프트 가드. 새 `StopReason` 추가시 컴파일 실패, 새 `StopReasonCode` 추가시 표현 미정의로 컴파일 실패.
+
+---
+
+## 17. 최종 current-head 잔여 실행 정본
+
+### 17.0 결론
+
+§15를 그대로 실행하면 중복 구현과 잘못된 추상화가 생긴다. 최종 방침은 다음과 같다.
+
+1. **기존 authority를 확장한다.** `ActivityStore`, `ObjectiveStore`, `PlanStore`, stop event family, replay recorder/sentinel, trust/config merge, `expected_hash`를 대체하는 새 store·protocol·DB를 만들지 않는다.
+2. **실제 front door에서 재현되는 잔여만 BUILD한다.** RED가 재현되지 않으면 해당 티켓을 닫고 구현하지 않는다.
+3. **mtime freshness는 폐기 방향이다.** 파일 안전성은 content digest 기반 optimistic version precondition으로 올린다. 일반 파일시스템에는 원자적 CAS가 없으므로 CAS라고 과장하지 않으며, mtime은 telemetry/빠른 사전 필터일 수는 있어도 허용 판정 authority가 될 수 없다.
+4. **shell AST는 sandbox가 아니다.** 하나의 syntax/effect IR을 hard deny·circumvention·ownership·grant가 같이 쓰되, 미지원 expansion/parse error는 `unknown`으로 fail-closed한다. OS sandbox/HITL 경계는 유지한다.
+5. **이미 랜딩된 terminal surface 작업은 재작성하지 않는다.** 남은 일은 closed typing, failed/aborted category, structured error provenance, truncation의 non-success 판정뿐이다.
+
+### 17.1 판정 snapshot과 직접 재현
+
+최종 재검증 snapshot은 `HEAD=77995f933cb4ddb0f74fd8a16a32f5e9868fa24b`, `main == origin/main`이다. 공유 worktree에는 ProMax bench 중심의 수정·미추적 파일과 별도 oauth/debug 수정이 있으므로 **R(replay/recording) lane은 owner가 bench overlay를 회수하거나 별도 clean worktree를 만들기 전 접근 금지**다. 구현 시작 시 SHA/upstream/dirty/toolchain을 다시 freeze한다.
+
+| 직접 확인 | 결과 | 의미 |
+|---|---|---|
+| `hardDenyReason()` 적대 5종 | `cd / && rm -rf *`, `${IFS}`, force refspec, `npx rimraf`, Python `shutil.rmtree` **5/5 통과** | regex 보강이 아니라 공용 shell effect authority가 필요 |
+| Anthropic 실제 request build | system marker 4 + conversation marker 1 = **총 5개** | provider wire 최종 cap이 없음. 현재 API 제한 위반 가능. 기존 “exactly ONE” 테스트명도 실제로는 multiple system marker를 허용해 오해를 유발 |
+| default-off + PM DoD targeted rail | **6 pass / 3 fail** | catalog 7행 ledger 누락 + worktree cwd pin e2e-hellgate 부재 |
+| default-off schema | `gate_owner: string[]`이며 `AgentConfig.*` 선례 다수 | “config-only gate 표현 불가” 주장은 오보. schema 확장 금지 |
+| mode cycle | UI/store에는 `agentMode:"plan"`, `beforeTurn`은 `permissionMode`만 set | plan pill과 실제 engine mode가 불일치 |
+| tool visibility | skill scope만 model-visible specs에서 필터 | plan/review에서 호출 불가 mutator를 모델이 계속 봄 |
+| stale guard | 동일/역행 mtime을 fresh로 고정한 테스트 존재 | timestamp 기반 판정은 content 변경을 놓침 |
+| synthetic provenance | `Message.id` prefix만 authority | id-less gate와 충돌하고 일부 harness message 미분류 |
+| replay | recorder, stable hash, resume canonicalizer, degraded sentinel 이미 존재 | 새 recorder/`RecordingGap` 구축은 중복. identity/privacy 잔여만 필요 |
+
+외부 현재 계약도 방향을 뒷받침한다. [Anthropic 공식 prompt-caching 문서](https://platform.claude.com/docs/en/build-with-claude/prompt-caching)는 explicit/automatic을 합쳐 breakpoint slot을 최대 4개로 제한하고, 4개 explicit가 이미 있으면 추가 automatic marker가 400을 낸다고 명시한다. 또한 cache prefix 순서는 `tools -> system -> messages`다. 따라서 section-local count가 아니라 **최종 provider request**가 authority여야 한다. [Tree-sitter 공식 parsing 문서](https://tree-sitter.github.io/tree-sitter/using-parsers/2-basic-parsing.html)는 concrete syntax tree를 제공하며 parse recovery는 `ERROR`/`MISSING` node로 드러난다. 이것이 shell expansion의 안전 의미까지 보장하는 것은 아니므로 AST 위에 보수적 effect interpretation이 필요하다.
+
+### 17.2 최종 분류 — 무엇을 만들고 무엇을 버리는가
+
+| 영역 | 현재 판정 | 최종 처리 |
+|---|---|---|
+| shell deny/circumvention/ownership | **PARTIAL, P0** | 기존 regex authority들을 하나의 `ShellCommandIR + EffectAssessment`로 합침 |
+| Anthropic cache budget | **PARTIAL, P0** | 최종 wire total `<=4` invariant를 codec/provider capability 경계에 둠 |
+| shipping CLI repo rules | **PARTIAL, P0** | 한 번 resolve한 snapshot을 prompt와 `/rules`가 공동 소비 |
+| file mutation freshness | **PARTIAL, P0** | 기존 `ReadFileState`를 content-version precondition authority로 진화. 새 병렬 store 금지 |
+| terminal reason pipeline | **대부분 ALREADY, P1 residual** | 새 event family 금지. closed type·failed/aborted·truncation만 보완 |
+| mode runtime/tool visibility | **PARTIAL, P1** | 기존 `AgentMode` predicate를 engine state·visibility·dispatch가 공동 사용 |
+| synthetic message provenance | **PARTIAL, P1** | id가 아닌 local-only typed provenance로 migration |
+| verify bool/MCP path truth | **PARTIAL, P1** | 기존 gate parser와 단일 resolver로 소규모 수선 |
+| replay/recording | **대부분 ALREADY, P1 residual** | hash V2 + mandatory recording policy만. dirty bench owner 해소 후 |
+| activity/phase | **store ALREADY, producer PARTIAL, P1** | 기존 activity spine에 turn/tool/model-wait producer만 추가 |
+| SDK sensitive default | **PARTIAL, P1** | mutating profile의 암묵 auto-approve 제거; 명시 reviewer/policy 요구 |
+| env/repo-map | **producer PARTIAL, live consumer ABSENT, P2 DECIDE** | 먼저 wire utility/비용 측정. 이득 없으면 knob/type/docs 삭제 |
+| objective/goals | **ALREADY** | 새 goal runtime 금지. 실제 engagement/default만 실험 |
+| plan restart persistence | **substrate ALREADY, 요구 불명** | PARK. 제품 요구와 kill/reopen RED가 생길 때만 session checkpoint에 추가 |
+| Hashline | **대안 ALREADY, 우위 미증명** | PARK. standard+content-CAS 대비 A/B 승리 전 포팅 금지 |
+| trust/config overlay, injection defang | **ALREADY** | consumer 우회가 입증된 곳만 수선. 새 subsystem 금지 |
+
+### 17.3 삭제된 삽질 목록
+
+다음은 실행 티켓에서 제거한다.
+
+- 새 `PhaseKey` store, 새 `WaitingReason`: 기존 `ActivityStore.startedAt`/`StuckReason`과 이중 권위.
+- 새 objective/goal DB·tool·continuation loop: 기존 `src/objective/**`와 중복.
+- 새 `TurnStoppedEvent` family: `turn.completed|failed|aborted`와 input-required/pause 경로가 이미 존재. 기존 terminal event에 category를 닫는다.
+- 새 replay recorder, 새 `RecordingGap`: recorder와 degraded sentinel이 이미 존재.
+- hard-deny 전용 AST parser: `circumvention.ts`, ownership parser와 세 번째 shell 해석기가 됨. 공용 IR 하나로 합친다.
+- generic tool-projection registry: 기존 `isMutatingToolBlockedInMode`가 authority다. 같은 predicate로 spec만 필터한다.
+- `MutationFreshnessPolicy`를 mtime 위에 덧씌우기: 동일/역행 timestamp 취약점을 보존하므로 폐기.
+- 새 `RepoRulesProvider` store: bootstrap에서 기존 loader를 한 번 호출한 immutable `RepoRulesSnapshot`이면 충분.
+- default-off ledger schema 확장: config owner를 이미 표현할 수 있다. 누락 7행을 사실대로 추가하면 된다.
+- Grok식 `plan.md` SSOT, 즉시 Hashline 포팅, 새 trust store/config overlay: 각각 기존 authority와 충돌하거나 우위 증거가 없다.
+
+### 17.4 실행 DAG
+
+```text
+W0 governance RED closure + exact snapshot
+ |
+ +--> Wave 1: P0 owner-disjoint, 최대 4병렬
+ |      B   shell command IR/effect authority
+ |      C1  provider-wire cache cap
+ |      F1a shipping CLI repo-rules truth
+ |      F2  content-version mutation precondition
+ |
+ +--> Wave 2: 잔여 correctness, 최대 4병렬
+ |      T   terminal typed residual
+ |      M   live AgentMode + visible tools
+ |      S   synthetic provenance migration
+ |      F1b verify boolean + MCP path truth
+ |
+ +--> Wave 3: 선행 owner merge 뒤 최대 4병렬
+ |      R   replay identity/privacy          [clean bench owner 필요]
+ |      A   activity turn projection         [after T]
+ |      SDK explicit sensitive policy        [after B, F2]
+ |      E   env/repo-map wire-or-delete experiment
+ |
+ +--> I: current merged SHA에서 직렬 integration
+        protocol/client generation -> CLI/provider wire -> child/SDK -> full rails
+
+MEASURE/PARK (build wave 밖): objective engagement, cache automatic-mode A/B,
+Hashline A/B, plan restart product gate
+```
+
+같은 wave라도 `git diff --name-only`가 아래 exclusive write set을 벗어나면 즉시 중지하고 coordinator에게 integration patch로 넘긴다. barrel export, generated protocol, shared CLI composition root는 lane에서 동시에 수정하지 않고 I 단계가 소유한다.
+
+### 17.5 실행 packet
+
+#### W0 — governance baseline closure (merge blocker)
+
+- **owner/write set**: `tools/feature-catalog/default-off-ledger.yaml`, 누락된 7개 feature YAML의 사실 확인, `aug22-rfc06-2-worktree-cwd-pin` evidence/test, 생성물 `docs/10.feature-catalog.md`. 다른 product code 금지.
+- **현재 RED**: default-off ledger 누락 7행; PM DoD는 cwd-pin에 real composition `*-hellgate.test.ts`가 없음.
+- **구현**: 각 feature의 실제 gate owner/default/reachability/on·off proof를 읽어 ledger 행을 추가한다. 추정값/`unknown` surface로 녹색 만들기 금지. cwd-pin은 gate OFF, ready/active, load/chdir failure, 실제 turn-boundary composition을 한 hellgate에서 고정한다.
+- **금지**: schema 완화, baseline grandfather 추가, feature label 삭제, 테스트 기대값에 7개 오류를 섞어 통과시키기.
+- **DONE**: 위 두 targeted 파일 전부 green, `bun fc validate && bun fc build`, PM per-feature check PASS. W0가 green이 아니면 새 default-off feature merge 금지.
+
+#### B — one shell command IR/effect authority (P0)
+
+- **owner/write set**: `src/permission/{policy-rules,circumvention,policy}.ts`를 migration 대상으로 두고 `src/permission/shell/**`, shell assessment port, ownership/admissibility integration tests. 기존 regex 모듈을 남긴 채 새 parser를 병렬 authority로 추가하지 않는다.
+- **설계**:
+  - host가 Bash grammar(`tree-sitter-bash.wasm`은 이미 dependency에 존재)를 준비하고 command당 한 번 parse한다.
+  - typed `ShellCommandIR`에서 sequence/pipeline/subshell/env assignment/redirect/wrapper/interpreter payload와 effective cwd를 추적한다.
+  - `ShellEffectAssessment = safe-known | sensitive-known | hard-deny | unknown`을 만들고 hard deny, circumvention write paths, ownership, grant/simple-command가 같은 결과를 소비한다.
+  - `${IFS}`, command substitution, dynamic eval, parse `ERROR/MISSING`, 알 수 없는 interpreter code는 자동 allow하지 않고 `unknown -> ask/deny`로 보낸다.
+  - regex는 defense-in-depth telemetry 또는 parser bootstrap failure의 deny-widening 용도로만 남긴다. parser 실패 시 regex-only allow 금지.
+- **RED**: 현재 5개 우회 + quote concat, `--option=value`, sequential `cd`, symlink cwd, `sh -c`, heredoc/interpreter, malformed AST. 안전 대조군(`rm ./build.tmp`, normal push, read-only commands)도 함께 고정한다.
+- **DONE**: 모든 shell-equivalent tool이 assessment 없이는 dispatch되지 않음; 네 consumer가 동일 IR hash/reason code를 기록; parser-not-ready/unknown fail-closed; sandbox/bypass precedence 불변.
+- **STOP**: AST만 만들고 effect consumer가 둘 이상 기존 regex를 계속 직접 읽으면 merge 금지.
+
+#### C1 — final provider-wire cache budget (P0)
+
+- **owner/write set**: `src/llm/anthropic-messages-codec.ts`, provider capability input과 cache tests. `PromptSections`를 또 다른 최종 authority로 만들지 않는다.
+- **설계**:
+  - request builder 마지막 단계에서 `tools + system + messages`의 marker 총수를 센다.
+  - 우선 universally safe policy는 conversation marker가 있으면 system marker budget 3, 없으면 4다. marker 선택은 stable prefix/value priority로 결정한다.
+  - provider별 automatic caching 지원 여부를 capability로 분리한다. 현재 공유 codec은 public/Bedrock/Vertex/Foundry/Mantle가 같이 쓰므로 한 provider의 최신 기능을 전부에 무조건 전송하지 않는다.
+  - 최신 automatic mode 전환은 SDK upgrade와 legacy Bedrock negative receipt 후 별도 C2 실험으로 한다. C1 correctness를 SDK upgrade에 묶지 않는다.
+- **RED**: 현재 실제 builder의 5-marker request를 그대로 fixture로 고정. system 4+conversation 1, thinking tail, tool result tail, TTL 혼합, provider capability matrix를 검사한다. 현재 `anthropic-cache.test.ts`의 “exactly ONE”이라는 이름과 달리 multiple marker를 허용하는 테스트는 정확한 이름으로 고치고, 최종 request total count + red-on-injection을 추가한다.
+- **DONE**: 모든 실제 request에서 marker `<=4`; 기존 1~4 marker layout/TTL byte parity; API 400 없음; cache read/write token receipt로 가장 낮은 가치 marker가 제거됐음을 확인.
+
+#### F1a — shipping CLI repo-rules truth (P0)
+
+- **owner/write set**: shipping CLI bootstrap, `src/agent/repo-rules.ts` 결과 threading, `/rules` indicator. loader/defang subsystem 재작성 금지.
+- **설계**: bootstrap에서 `loadRepoRules(cwd)`를 한 번 실행해 immutable `{content, sources, digest}` snapshot을 만들고 `AgentConfig.repoRules`와 `/rules`가 같은 snapshot을 소비한다. refresh가 필요하면 새 snapshot으로 원자 교체한다.
+- **RED**: built CLI/provider fake에서 AGENTS.md sentinel이 system wire에 없지만 `/rules`에는 보이는 현재 split을 먼저 재현한다. nested cwd priority, forged `</system-reminder>`, rules reload digest도 포함한다.
+- **DONE**: source import가 아니라 built CLI PTY/provider-wire에서 정확히 한 번 주입; `/rules` digest 일치; existing `escapeBoundary` 경로 통과; rules 없음/불신 workspace negative parity.
+
+#### F2 — content-version mutation precondition (P0)
+
+- **owner/write set**: 기존 `src/tool/stale-read-guard/**`, read/edit/apply_patch/notebook/file-history mutation adapters, `subagent-runner-child-config` state threading. SDK API는 Wave 3가 소유한다.
+- **설계**:
+  - `ReadFileState`를 canonical realpath 기준 `{exists, contentDigest, observedAt}` token authority로 진화시킨다. mtime은 telemetry/fast hint만 맡는다.
+  - read가 token을 발급하고 existing-file mutation은 write 직전 현재 digest와 optimistic version 비교를 한다. 신규 파일은 `expected-absent` token을 사용한다.
+  - 자체 성공 mutation은 새 digest로 token을 갱신한다. apply_patch 다중 파일은 모든 precondition을 먼저 검증하고 하나라도 stale이면 쓰기 전 전부 거부한다.
+  - 같은 workspace child는 같은 authority를 사용하고 isolated worktree는 별도 authority를 사용한다.
+  - sibling 동시 mutation RED가 기존 barrier를 실제로 뚫을 때만 canonical-path keyed lock을 추가한다. 근거 없이 lock subsystem부터 만들지 않는다. Quanta 밖의 비협조적 writer와 hash-check 사이 TOCTOU는 완전 제거할 수 없음을 residual로 명시한다.
+- **RED**: 같은 mtime content swap, backward mtime restore, read 후 sibling/external write, unread existing file, safe new file, multi-file one-stale/no-partial-write, same-workspace child, isolated child.
+- **DONE**: timestamp 조작으로 stale bypass 불가; 모든 mutation tool이 같은 precondition authority 사용; child inheritance; content hashing overhead benchmark와 bench default 결정 receipt.
+
+#### T — terminal typed residual only (P1)
+
+- **ALREADY 보존**: stop category map, presentation table, `turn.completed.stopCategory`, CLI/web/VS Code/ci-bot 수정, `turn.failed`, `turn.aborted`, input-required/pause 경로, no-progress stop.
+- **owner/write set**: `src/agent/stop-category.ts`, structured turn outcome/error path, existing protocol terminal payload와 tests. 새 event 이름/상태 머신 금지.
+- **구현**:
+  - `StopCategory.reasonCode: StopReasonCode`; wire도 generated literal union 또는 versioned closed schema로 고정.
+  - free-form `classifyErrorReason(string)` 대신 producer가 `LLMErrorKind`/recovery reason을 구조적으로 넘긴다. legacy string adapter는 경계 하나에만 둔다.
+  - `turn.failed`와 `turn.aborted`에도 structured category를 싣고 producer non-absence를 검사한다.
+  - continuation budget 후에도 `max_tokens`이면 visible marker만 붙인 `completed`가 아니라 `model.output_truncated` non-success로 종료한다.
+- **RED/DONE**: failed/aborted/truncated/unknown을 실제 event sequence로 각 surface가 성공으로 렌더하지 않음. 기존 normal completed와 approval pause는 회귀 없음.
+
+#### M — live AgentMode and model-visible tools (P1)
+
+- **owner/write set**: 기존 `src/agent/mode.ts`, live mode holder, `stream-consume.ts` spec filtering, CLI turn driver. generic registry 금지.
+- **설계**: `ModeCycleStore.current().agentMode`를 turn-scoped engine state에 넣고 prompt, visible specs, dispatch가 기존 `isMutatingToolBlockedInMode`에서 파생된 같은 predicate를 사용한다. `permissionMode`는 approval posture 축으로 별도 유지한다.
+- **RED**: Shift-Tab로 plan pill인데 `edit` spec이 wire에 있고 dispatch에서만 거부되는 실제 CLI/provider fixture. mid-session plan→default, unknown tool/mode fail-closed도 고정한다.
+- **DONE**: `model-visible tools == dispatch-admissible tools`가 plan/review/audit/default에서 성립; read-only tools 유지; UI pill·prompt·engine snapshot 동일.
+
+#### S — local-only synthetic provenance (P1)
+
+- **owner/write set**: `Message` local metadata, `synthetic-user.ts`, persistence/fork/rewind/compaction adapters와 provider-strip tests.
+- **설계**: message `id`는 identity만 담당한다. optional local-only `provenance: { origin:"harness"; reason:SyntheticReason }`를 추가하고, absence는 정상 human/provider message를 뜻하게 한다. 새 synthetic write는 특수 id를 만들지 않는다. load는 metadata 우선, legacy id-prefix fallback으로 migration한다.
+- **범위**: persisted user message producer census만 대상으로 한다. transient prompt block/tool_result/UI observation을 억지로 Message provenance에 넣지 않는다.
+- **RED/DONE**: save/load/fork/rewind/compaction round-trip 후 origin 보존; id-less mode 유지; human false-positive 0; Anthropic/OpenAI/Responses 실제 serialized request에 local field 0.
+
+#### F1b — verify boolean and MCP path truth (P1)
+
+- **owner/write set**: `src/apps/cli/internal.ts`, 기존 gate parser, `resolveMcpConfigPath`, connector writer/inventory tests.
+- **구현**: verify guard의 `!== undefined`를 canonical strict boolean parser로 교체한다. MCP reader/writer/inventory가 하나의 effective path resolver를 사용한다. project default를 읽는다면 trust gate를 반드시 통과한다.
+- **RED/DONE**: unset/0/off/false/1/on/garbage truth table; MCP write→restart→read round-trip; untrusted project `.mcp.json` negative. 새 config abstraction 금지.
+
+#### R — replay identity V2 and recording policy (P1, dirty-owner gate)
+
+- **ALREADY 보존**: JSONL/S3 stores, append serialization, resume canonicalizer, default-on bench recording, degraded sentinel. 새 recorder/sentinel 금지.
+- **owner/write set**: `src/llm/replay/**`, recording composition tests. 현재 dirty `src/apps/bench/**`는 owner 해소 전 수정 금지.
+- **구현**:
+  - 기존 request hash를 versioned V2로 진화시킨다. provider/model/실효 sampling·thinking/tool choice와 provider-visible semantic request를 포함하고 trace/run id, cache routing/TTL 같은 replay-neutral transport metadata는 제외한다.
+  - v1 cassette는 명시 migration 또는 명시 reject한다. 조용히 mixed-match하지 않는다.
+  - optional scrubber 대신 composition이 `RecordingPolicy`를 반드시 고르게 한다. bench/public artifact는 secret scrub + 허용 필드 정책, sensitive local debug는 명시 opt-in/보관 위치·권한을 요구한다.
+- **RED/DONE**: 같은 semantic request의 volatile 차이는 hit, model/provider/temperature/tool schema 차이는 miss; secret fixture가 plaintext artifact에 없음; append failure는 기존 sentinel로 visible; current ProMax overlay 무접촉.
+
+#### A — project turns onto existing activity spine (P1, after T)
+
+- **owner/write set**: 기존 `src/activity/**` producer adapter, turn/tool/model/approval lifecycle emitters, CLI activity consumer. 새 store/PhaseKey/WaitingReason 금지.
+- **구현**: turn root와 현재 child operation을 stable id로 upsert하고 기존 `startedAt`, parent/child, `StuckReason`을 사용한다. T의 structured terminal/category를 종료 reason으로 소비한다.
+- **RED/DONE**: model wait, long tool, approval, child task, abort/failure에서 one-live-child invariant; duration 단조; 종료 후 orphan activity 0; CLI는 별도 phase 추론 없이 snapshot 렌더.
+
+#### SDK — explicit sensitive-action policy (P1, after B/F2)
+
+- **owner/write set**: `src/sdk/embed.ts`, SDK public types/migration tests. permission core는 B 결과를 소비만 한다.
+- **구현**: mutating profile의 `permission:bypass + hitl.autoApprove` 암묵 조합을 제거하고 `sensitiveActionPolicy`/reviewer callback을 명시 요구한다. callback 부재 기본 deny. HARD_DENY/hand-off는 어떤 profile로도 우회 불가.
+- **RED/DONE**: callback 없는 shell/git/network mutation deny, read-only allow, explicit reviewer allow/deny, compile-time migration/semver note, embedded public E2E.
+
+#### E — env/repo-map wire-or-delete (P2 decision packet)
+
+- **현재 사실**: `probeTurnEnv`, `probeRepoMap`, knobs/tests는 있으나 production caller가 확인되지 않았다.
+- **순서**: 먼저 provider-wire에서 knob ON/OFF prompt delta, token cost, task utility를 측정한다. 유의미하면 session snapshot+event invalidation으로 기존 context assembler에 연결한다. 유의미하지 않으면 knob/type/docs/tests를 삭제한다.
+- **금지**: 증거 없이 `TurnEnvironmentProvider`부터 만들기, 매 턴 `git status` subprocess, dead knob를 “future seam”으로 유지.
+- **DONE**: live consumer 1개 또는 dead surface 0 중 하나. 중간 상태 금지.
+
+### 17.6 MEASURE/PARK packet
+
+- **Objective engagement**: durable resume까지 이미 구현됐다. 다단계/단순질문/중단재개에서 set/update/get 호출률, stale goal, false goal, continuation 이득을 측정해 default만 결정한다. 새 runtime 금지.
+- **Cache C2 automatic mode**: Anthropic 최신 automatic caching은 유력하지만 현재 SDK가 오래됐고 shared codec이 legacy Bedrock까지 사용된다. SDK upgrade + provider capability receipt + explicit 3+1 대비 hit/cost A/B 후 선택한다.
+- **Hashline**: content-version precondition 적용 후 shifted-line/multi-edit ambiguity, retry, token, latency에서 standard edit를 유의하게 이길 때만 추가한다.
+- **Plan restart**: 실제 제품 요구가 확정되면 기존 kernel session checkpoint에 plan snapshot+pending approval identity를 원자 저장한다. 별도 `plan.md`/DB 금지.
+
+### 17.7 merge와 완료 판정
+
+권장 merge 순서는 `W0 -> (B,C1,F1a,F2) -> (T,M,S,F1b) -> (R,A,SDK,E decision) -> I`다. 괄호 안은 write set이 실제로 겹치지 않을 때만 병렬이다. 공유 barrel/generated client/CLI composition 변경은 각 lane이 patch로 제출하고 I owner가 merged SHA에서 직렬 적용한다.
+
+각 packet의 완료 조건은 전부 다음을 포함한다.
+
+- start/result exact SHA, upstream, clean worktree 또는 명시된 사용자 overlay
+- exclusive write set과 실제 diff 일치; 사용자 ProMax overlay 보존
+- authoritative RED signature와 fix 후 GREEN, paired negative control
+- static scan이면 anti-vacuum + red-on-injection; 가능하면 runtime reflection 우선
+- owner-local test, `src/**/*.test.ts` 포함 targeted test, typecheck, lint debt/god-code ratchet
+- 실제 built CLI/SDK/provider/protocol front-door receipt. helper unit·symbol 존재만으로 완료 금지
+- gate/default 변경이면 OFF parity와 rollback receipt
+- feature YAML 변경 후 `bun fc validate && bun fc build`; 생성 MD 직접 수정 금지
+- integration SHA에서 protocol generation drift 0, `git diff --check`, full unit/integration/contract
+
+최종 closeout은 다음 failure matrix를 실제 event sequence로 통과해야 한다: normal completion, provider failure, user abort, approval pause/resume, output truncation, dangerous shell unknown/deny, stale content-version precondition, plan-mode hidden mutator, synthetic provenance strip, cache marker cap. 하나라도 helper-only거나 dirty overlay receipt면 완료가 아니다.

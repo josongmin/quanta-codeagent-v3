@@ -297,9 +297,16 @@ describe("LOW-10 — the resolved family reaches an OBSERVABLE decision at each 
       // Known items: the Pro root really selects the Pro harness + Pro preset.
       expect(planLine(pro.out, "verifier")).toBe("ScaleAI SWE-bench Pro harness")
       expect(planLine(pro.out, "preset")).toBe("agentless-v1")
-      // PAIRED: non-Pro families must NOT get the Pro decisions...
-      expect(planLine(verified.out, "verifier")).toBe("local testCmd")
-      expect(planLine(live.out, "verifier")).toBe("local testCmd")
+      // PAIRED: non-Pro families must NOT get the Pro decisions. With the
+      // harness gate off they get NO grader at all — official rows ship
+      // `testCmd:"true"`, so `verdict.ts` refuses them instead of fake-passing.
+      // The line must say so: calling it "local testCmd" advertised a grading
+      // mode that never runs and made refusals read as agent misses.
+      const refusedLabel =
+        "NONE — official grading OFF (every instance REFUSED, reported FAIL). Set QUANTA_SWEBENCH_PYTHON=1 to grade"
+      expect(planLine(verified.out, "verifier")).toBe(refusedLabel)
+      expect(planLine(live.out, "verifier")).toBe(refusedLabel)
+      expect(planLine(verified.out, "verifier")).not.toMatch(/local testCmd/)
       expect(planLine(verified.out, "preset")).not.toBe(planLine(pro.out, "preset"))
       // ...and absent must be byte-equal to explicit verified.
       expect(planLine(absent.out, "preset")).toBe(planLine(verified.out, "preset"))

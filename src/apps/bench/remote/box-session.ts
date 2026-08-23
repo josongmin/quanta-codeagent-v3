@@ -44,6 +44,10 @@ import { resolveDatasetFamilyProfile } from "../profiles/registry"
 import type { SpawnFn, SpawnResult } from "./backend"
 import { assertRemoteAccessTokenFreshEnough, stripToAccessToken } from "./box-session/auth"
 import {
+  parseFamilyBoxGradeVerdicts,
+  runFamilyBoxGrade,
+} from "./box-session/family-box-grade"
+import {
   buildChunkScrubCommand,
   closureDiagnosticsPathFor,
   runExitPathFor,
@@ -380,7 +384,15 @@ export const buildBenchCommand = (params: GradeChunkParams, paths: ChunkPaths): 
     // never aborts launch. Docker grading runs as root (separate uid) — unaffected.
     `set -o pipefail; ulimit -S -u 2048 2>/dev/null || true; cd ~/quanta && export PATH="$HOME/.local/bin:$PATH"; ` +
     resumePrelaunch +
-    `QUANTA_BENCH_PRESET=${shq(params.preset)} QUANTA_PROVIDER=chatgpt-oauth QUANTA_SWEBENCH_PYTHON=1 ` +
+    `QUANTA_BENCH_PRESET=${shq(params.preset)} QUANTA_PROVIDER=chatgpt-oauth ` +
+    // PMX-04 — INLINE grading is for families that grade during patch-gen. A
+    // family declaring `boxGrade` grades from a SECOND invocation inside its
+    // grader window, and this pass must run with the answer key ABSENT, so the
+    // shim is deliberately not enabled here. Its report then records every
+    // instance as an explicit "requires the official Python harness — REFUSING
+    // to fake-grade" infra error, which is why such a family also supplies
+    // `parseBoxGradeVerdicts` and the chunk reads its verdicts elsewhere.
+    (profile.boxGrade === undefined ? "QUANTA_SWEBENCH_PYTHON=1 " : "") +
     `QUANTA_PREFS_HOME="$HOME/.quanta" ` +
     `QUANTA_SWEBENCH_PYTHON_BIN="$HOME/swebench-python" ` +
     // Live publishes prebuilt images under `starryzhang`, not `swebench` — derive the
@@ -736,6 +748,18 @@ const executeGradeChunk = async (args: {
     params: args.params,
     onLine: args.snapshots.makeLineStreamer(),
   })
+  // PMX-04 — THE SECOND INVOCATION. A family that declares `boxGrade` has just
+  // finished PATCH-GEN ONLY, with the answer key absent. Grading happens now,
+  // inside the grader window, and the teardown bound to the same executor call
+  // removes the key afterwards — including when the grade throws.
+  const boxGradeText = await runFamilyBoxGrade({
+    ssh,
+    log,
+    family: args.params.datasetFamily,
+    bootstrap: args.params.remoteBootstrap,
+    paths: args.paths,
+  })
+
   await args.snapshots.publish("fetching", {
     ...(args.state.finalExitCode !== undefined ? { lastExitCode: args.state.finalExitCode } : {}),
   })
@@ -747,7 +771,24 @@ const executeGradeChunk = async (args: {
     recordTrajectory: args.params.recordTrajectory,
     log,
   })
-  const parsed = parseVerdicts(fetched.reportText)
+  // Verdicts come from the family's OWN grade artifact when it has one; the
+  // bench report of a patch-gen-only pass is all-infra by construction.
+  const parsed: GradeChunkVerdicts =
+    boxGradeText === undefined
+      ? parseVerdicts(fetched.reportText)
+      : (() => {
+          // Copied into the chunk's own mutable arrays. The family's port returns
+          // the canonical READONLY projection; this is the one boundary where it
+          // becomes a chunk verdict record, and it decides nothing about which
+          // bucket a row is in.
+          const v = parseFamilyBoxGradeVerdicts(args.params.datasetFamily, boxGradeText)
+          return {
+            resolved: [...v.resolved],
+            unresolved: [...v.unresolved],
+            errored: [...v.errored],
+            emptyPatch: [...v.emptyPatch],
+          }
+        })()
   const reportStatus = classifyReportText(fetched.reportText)
   if (reportStatus === "unparseable") {
     args.state.finalReportUnparseable = true

@@ -282,6 +282,25 @@ const CLASSIFICATION_RULES: readonly OwnerAuditRule[] = [
 
   // ── legacy verdict-bucket consumers ───────────────────────────────────────
   {
+    path: "src/apps/bench/harness/promax/chunk-verdicts.ts",
+    detector: "legacy_verdict_consumer",
+    classification: "compatibility_projection",
+    why: "PMX-04 — projects the pinned evaluator's pass-rate document into the legacy quartet for CHUNK bookkeeping; it imports LEGACY_BUCKET_BY_STATE rather than declaring a second state→bucket table (it had one when first written, and this detector is what caught it)",
+  },
+  {
+    path: "src/apps/bench/profiles/types.ts",
+    detector: "legacy_verdict_consumer",
+    classification: "compatibility_projection",
+    why: "PMX-04 — declares the SHAPE (FamilyBoxGradeVerdicts) a family's own grader returns; a type with no mapping and no denominator, spelled structurally so profiles stay a leaf under remote/",
+  },
+  {
+    path: "src/apps/bench/remote/box-session/family-box-grade.ts",
+    detector: "legacy_verdict_consumer",
+    classification: "compatibility_projection",
+    why: "PMX-04 — transports the quartet from the family's profile port to the chunk result; it copies the arrays and decides nothing about which bucket a row belongs in",
+  },
+
+  {
     path: "src/runner/batch/eval/official-grade/legacy-buckets.ts",
     detector: "legacy_verdict_consumer",
     classification: "canonical_definition",

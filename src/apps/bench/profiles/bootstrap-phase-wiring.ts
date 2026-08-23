@@ -87,11 +87,8 @@ export const FAMILY_BOOTSTRAP_PHASE_WIRING = {
     callSite: "src/apps/bench/remote/box-session/family-box-setup.ts (setupBoxForFamily)",
   },
   grader: {
-    kind: "unwired",
-    owner: "PMX-04",
-    why:
-      'no module under src/ calls executeFamilyRemoteBootstrap with phase="grader" — the remote ' +
-      "ProMax grade transport is not written, and ProMax's admitBox refuses the lane until it is",
+    kind: "executed",
+    callSite: "src/apps/bench/remote/box-session/family-box-grade.ts (runFamilyBoxGrade)",
   },
   teardown: { kind: "bound-to", phase: "grader" },
 } as const satisfies Record<FamilyBootstrapPhase, FamilyBootstrapPhaseWiring>

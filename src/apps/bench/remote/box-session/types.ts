@@ -193,6 +193,16 @@ export interface ChunkPaths {
   readonly runLog: string
   readonly observeDir: string
   readonly trajectory: string
+  /**
+   * PMX-04 — where a family that grades in its OWN grader phase writes its grade
+   * artifact (ProMax: the pinned evaluator's `pass-rate.json`).
+   *
+   * Unused by families that grade inline during patch-gen; it is still scrubbed
+   * for them, because a leftover from a previous run on a reused box would be
+   * fetched as this run's verdicts. That is the same hazard the local gate
+   * refuses as `stale_output_present`.
+   */
+  readonly passRate: string
 }
 
 // NOTE on `~` vs `$HOME`: every path below is interpolated UNQUOTED into the
@@ -208,6 +218,7 @@ export const DEFAULT_CHUNK_PATHS: ChunkPaths = {
   runLog: "~/run.log",
   observeDir: "~/observe",
   trajectory: "$HOME/quanta/bench-trajectory.jsonl",
+  passRate: "~/pass-rate.json",
 }
 
 /** Parameters for one patch-gen+grading chunk on an already-provisioned box. */
@@ -237,6 +248,16 @@ export interface GradeChunkParams {
    *  on-box env prefix and the prebuilt-image namespace before, and which only
    *  held the right value because the composition root had mutated ambient env. */
   readonly datasetFamily: DatasetFamily
+  /**
+   * PMX-04 — the family's DECLARED remote bootstrap, carried onto the CHUNK for
+   * the same reason it is carried onto the box config: `remote/**` transports,
+   * it does not rediscover family behaviour.
+   *
+   * A family that grades in its own grader phase needs it at GRADE time, not
+   * only at provision time — the grade runs inside that phase's window. Absent
+   * for families that grade inline (verified / live / pro): not one extra ssh.
+   */
+  readonly remoteBootstrap?: FamilyRemoteBootstrap
   /** jun-20 multi-auth (T-6): auth-pool account that leased this chunk. Surfaced
    *  in the box status snapshot for operator attribution. Omitted in single-auth. */
   readonly accountLabel?: string

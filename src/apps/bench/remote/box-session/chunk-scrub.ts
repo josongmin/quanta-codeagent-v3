@@ -66,6 +66,11 @@ export const CHUNK_PATH_SCRUB_POLICY: Readonly<Record<keyof ChunkPaths, ChunkPat
   // aug-22 A-B — the omission this module exists to make impossible. Gold-bearing
   // for ProMax, whose rows carry `patch` / `test_patch`.
   dataset: "file",
+  // PMX-04 — the grade artifact of a family that grades in its own grader phase.
+  // A leftover would be fetched as THIS run's verdicts on a reused box: the
+  // evaluator writes it only on success, so a run that dies early would be
+  // graded against the previous run's numbers.
+  passRate: "file",
 }
 
 /** The bench writes its exit code beside its log. */

@@ -23,6 +23,10 @@
  * no longer imports family logic back out of `remote/box-session*`, which is what
  * left the remote-env and preflight ports with zero production consumers.
  */
+import type {
+  LegacyBucketName,
+  LegacyBucketProjection,
+} from "@/runner/batch/eval/official-grade"
 import type { PythonSwebenchResult } from "@/runner/batch/eval/verdict"
 import type { DatasetFamily } from "../dataset-family-token"
 import type { ProSwebenchOpts } from "../pro-swebench"
@@ -262,6 +266,26 @@ export interface FamilyAdmissionInput {
   readonly log: (m: string) => void
 }
 
+/** Input to a family's on-box grade command builder (PMX-04). */
+export interface BoxGradeInput {
+  /** on-box path of the predictions the AGENT phase produced. */
+  readonly predictionsPath: string
+  /** on-box path the family's grader writes its artifact to. */
+  readonly outputPath: string
+}
+
+/**
+ * The four verdict id-sets a chunk reports, as produced by a family's own
+ * grader.
+ *
+ * DERIVED from PMX-03's canonical projection rather than respelled: the four
+ * names are declared in exactly one place, so this port cannot drift from the
+ * shape the rest of the campaign uses. `droppedMissing` is excluded — it is a
+ * property of projecting a RECEIPT (which knows what was assigned), and a chunk
+ * grader has no assigned set to compare against.
+ */
+export type FamilyBoxGradeVerdicts = Pick<LegacyBucketProjection, LegacyBucketName>
+
 /**
  * The ONE per-family backend port. Every family-conditional behavior is a field
  * here; consumers resolve the profile via {@link resolveDatasetFamilyProfile}
@@ -360,6 +384,33 @@ export interface DatasetFamilyProfile {
    *  Pro ⇒ clone the Scale harness + build its venv; verified/live ⇒ no-op (not
    *  even an ssh round-trip, so their bootstrap is byte-identical). */
   readonly setupBox: (input: BoxSetupInput) => Promise<void>
+  /**
+   * layer 3d — PMX-04. The on-box GRADE command for a family that grades inside
+   * its OWN grader phase, or `undefined` for a family that grades inline during
+   * patch-gen (verified / live / pro — byte-identical, no branch reaches them).
+   *
+   * Its presence is what splits the chunk into TWO on-box invocations, and that
+   * split is a correctness requirement rather than a structuring choice: ProMax's
+   * grader phase materializes the answer key, and the agent must run while it is
+   * absent (the agent phase carries an `absenceProbe` that proves exactly that).
+   * One invocation cannot satisfy both.
+   *
+   * The returned command is run inside `executeFamilyRemoteBootstrap`'s
+   * `whileMaterialized` seam, so the teardown that removes the key covers it —
+   * including when it throws.
+   */
+  readonly boxGrade?: (input: BoxGradeInput) => string
+  /**
+   * layer 3e — PMX-04. Project the fetched grade artifact into the chunk's four
+   * verdict id-sets, for a family whose verdicts do NOT come from the bench
+   * report.
+   *
+   * Required whenever {@link boxGrade} is present: that family's report.json is
+   * written by a patch-gen-only pass, so every instance in it is an explicit
+   * "harness not wired" infra error by construction. Reading verdicts from it
+   * would report a total infra failure for a chunk that graded fine.
+   */
+  readonly parseBoxGradeVerdicts?: (artifactText: string) => FamilyBoxGradeVerdicts
   /** layer 4 — preflight: Pro ⇒ fail-closed Scale-column shape check; else no-op.
    *  Throws RemoteDatasetPreflightError on a malformed Pro dataset. */
   readonly preflight: (input: PreflightInput) => void

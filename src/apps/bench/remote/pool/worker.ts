@@ -776,6 +776,11 @@ const gradeChunkAttempt = async (
       // prefix + image namespace from the LAUNCHING process's ambient
       // `process.env.QUANTA_SWEBENCH_DATASET_FAMILY`.
       datasetFamily: datasetFamilyOrDefault(cfg.provision.swebenchDatasetFamily),
+      // PMX-04 — same reason as full-remote: the grade for a family that
+      // grades in its grader phase runs inside that phase's window.
+      ...(cfg.provision.remoteBootstrap !== undefined
+        ? { remoteBootstrap: cfg.provision.remoteBootstrap }
+        : {}),
       // DEFAULT-OFF: resumeForwardEnvFor returns "" unless bench-resume is active
       // AND this is a single-instance chunk, so the OFF path is byte-identical.
       forwardedBenchEnv: `${cfg.forwardedBenchEnv ?? ""}${resumeForwardEnvFor(chunk)}`,

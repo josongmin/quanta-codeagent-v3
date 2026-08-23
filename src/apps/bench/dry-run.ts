@@ -100,6 +100,22 @@ export const buildDatasetDryRunPlan = (
     cfg,
   )
 
+/** Verifier line for plans with no family-supplied label.
+ *
+ *  The `dataset` path (official SWE-bench rows) does NOT fall back to local
+ *  grading when the harness gate is off: those rows ship `testCmd:"true"`, so
+ *  `verdict.ts` REFUSES them rather than fake-passing. Printing "local testCmd"
+ *  there claimed a grading mode that never runs and made a refusal read as an
+ *  agent miss (a live picks-10 run looked like 2/10; official grading scored the
+ *  same patches 6/10). Only the custom-corpus path really uses `testCmd`. */
+const verifierLabelFor = (plan: DryRunPlan): string => {
+  if (plan.pythonHarness) return "official python swebench harness"
+  if (plan.sourceLabel === "dataset") {
+    return "NONE — official grading OFF (every instance REFUSED, reported FAIL). Set QUANTA_SWEBENCH_PYTHON=1 to grade"
+  }
+  return "local testCmd"
+}
+
 /** Render a DryRunPlan as the lines the CLI prints (also asserted by tests). */
 export const formatDryRunPlan = (plan: DryRunPlan): string[] => [
   "dry-run plan (NO LLM will be called)",
@@ -110,6 +126,6 @@ export const formatDryRunPlan = (plan: DryRunPlan): string[] => [
   `  best-of-n: ${plan.n}`,
   ...(plan.datasetFamily !== undefined ? [`  dataset family: ${plan.datasetFamily}`] : []),
   `  preset: ${plan.preset}`,
-  `  verifier: ${plan.verifierLabel ?? (plan.pythonHarness ? "official python swebench harness" : "local testCmd")}`,
+  `  verifier: ${plan.verifierLabel ?? verifierLabelFor(plan)}`,
   `  sample ids: ${plan.sample.join(", ") || "(none)"}`,
 ]

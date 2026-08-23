@@ -13,6 +13,48 @@ import { createLLM } from "@/llm"
 import type { Message, StreamInput, ToolResultBlock, ToolSchema, ContentBlock } from "@/llm/types"
 
 const PORT = Number(process.env.OAUTH_PROXY_PORT ?? 8765)
+/** Bind loopback by default. `Bun.serve` with no hostname listens on 0.0.0.0,
+ *  which put an UNAUTHENTICATED bridge to the user's ChatGPT credential on
+ *  every interface. Scaffolds all connect to localhost; override only for a
+ *  container that must reach the host (see OAUTH_PROXY_HOST). */
+const HOST = process.env.OAUTH_PROXY_HOST ?? "127.0.0.1"
+/** Optional shared secret. Foreign scaffolds send a dummy key, so this is off
+ *  by default; set it when binding beyond loopback. */
+const TOKEN = process.env.OAUTH_PROXY_TOKEN
+
+const ZERO_USAGE = { input: 0, output: 0, cacheRead: 0, reasoning: 0 }
+type ProxyUsage = typeof ZERO_USAGE
+
+/** Real token counts, forwarded so scaffold comparisons can be scored on cost
+ *  as well as pass/fail. Reporting 0 made every foreign runner print
+ *  "Tokens: 0 · $0.00" (observed in OpenHands + opencode). */
+const usageFrom = (ev: {
+  inputTokens: number
+  outputTokens: number
+  cacheReadTokens?: number
+  reasoningTokens?: number
+}): ProxyUsage => ({
+  input: ev.inputTokens,
+  output: ev.outputTokens,
+  cacheRead: ev.cacheReadTokens ?? 0,
+  reasoning: ev.reasoningTokens ?? 0,
+})
+
+const chatUsage = (u: ProxyUsage) => ({
+  prompt_tokens: u.input,
+  completion_tokens: u.output,
+  total_tokens: u.input + u.output,
+  prompt_tokens_details: { cached_tokens: u.cacheRead },
+  completion_tokens_details: { reasoning_tokens: u.reasoning },
+})
+
+const responsesUsage = (u: ProxyUsage) => ({
+  input_tokens: u.input,
+  output_tokens: u.output,
+  total_tokens: u.input + u.output,
+  input_tokens_details: { cached_tokens: u.cacheRead },
+  output_tokens_details: { reasoning_tokens: u.reasoning },
+})
 
 /** OpenAI chat messages -> quanta {system, messages}. */
 function mapMessages(oai: any[]): { system: string; messages: Message[] } {
@@ -64,10 +106,12 @@ async function handleChat(body: any) {
   const input: StreamInput = { system, messages, tools }
 
   let text = ""
+  let usage = ZERO_USAGE
   const toolCalls: { id: string; name: string; args: string }[] = []
   const partial = new Map<string, { name: string; input: unknown }>()
   for await (const ev of llm.stream(input)) {
-    if (ev.type === "text_delta") text += ev.delta
+    if (ev.type === "usage") usage = usageFrom(ev)
+    else if (ev.type === "text_delta") text += ev.delta
     else if (ev.type === "tool_use_start") partial.set(ev.id, { name: ev.name, input: {} })
     else if (ev.type === "tool_use_end") {
       const p = partial.get(ev.id) ?? { name: "bash", input: {} }
@@ -85,7 +129,7 @@ async function handleChat(body: any) {
     created: 0,
     model: `openai/${model}`,
     choices: [{ index: 0, message, finish_reason: toolCalls.length ? "tool_calls" : "stop" }],
-    usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 },
+    usage: chatUsage(usage),
   }
 }
 
@@ -129,8 +173,11 @@ function handleChatStream(body: any): Response {
         let toolIdx = 0
         let sawTool = false
         let nText = 0
+        let usage = ZERO_USAGE
         for await (const ev of llm.stream(input)) {
-          if (ev.type === "text_delta") {
+          if (ev.type === "usage") {
+            usage = usageFrom(ev)
+          } else if (ev.type === "text_delta") {
             nText += ev.delta.length
             send({ content: ev.delta })
           } else if (ev.type === "tool_use_start") {
@@ -151,6 +198,12 @@ function handleChatStream(body: any): Response {
           }
         }
         send({}, sawTool ? "tool_calls" : "stop")
+        // OpenAI streams usage as a final chunk with an empty choices array.
+        controller.enqueue(
+          enc.encode(
+            `data: ${JSON.stringify({ id, object: "chat.completion.chunk", created: 0, model: `openai/${model}`, choices: [], usage: chatUsage(usage) })}\n\n`,
+          ),
+        )
         if (process.env.PROXY_DEBUG) {
           console.error("[res]", JSON.stringify({ nText: nText, nTools: toolIdx }))
         }
@@ -253,10 +306,12 @@ async function handleResponses(body: any) {
   const streamInput: StreamInput = { system, messages, tools }
 
   let text = ""
+  let usage = ZERO_USAGE
   const toolCalls: { id: string; name: string; args: string }[] = []
   const partial = new Map<string, { name: string; input: unknown }>()
   for await (const ev of llm.stream(streamInput)) {
-    if (ev.type === "text_delta") text += ev.delta
+    if (ev.type === "usage") usage = usageFrom(ev)
+    else if (ev.type === "text_delta") text += ev.delta
     else if (ev.type === "tool_use_start") partial.set(ev.id, { name: ev.name, input: {} })
     else if (ev.type === "tool_use_end") {
       const p = partial.get(ev.id) ?? { name: "bash", input: {} }
@@ -291,7 +346,7 @@ async function handleResponses(body: any) {
     status: "completed",
     model: `openai/${model}`,
     output,
-    usage: { input_tokens: 0, output_tokens: 0, total_tokens: 0 },
+    usage: responsesUsage(usage),
   }
 }
 
@@ -322,6 +377,7 @@ function handleResponsesStream(body: any): Response {
         const ev = { type, sequence_number: seq++, ...payload }
         controller.enqueue(enc.encode(`event: ${type}\ndata: ${JSON.stringify(ev)}\n\n`))
       }
+      let usage = ZERO_USAGE
       const envelope = (status: string, output: any[]) => ({
         id: respId,
         object: "response",
@@ -329,7 +385,7 @@ function handleResponsesStream(body: any): Response {
         status,
         model: `openai/${model}`,
         output,
-        usage: { input_tokens: 0, output_tokens: 0, total_tokens: 0 },
+        usage: responsesUsage(usage),
       })
 
       try {
@@ -372,7 +428,9 @@ function handleResponsesStream(body: any): Response {
         }
 
         for await (const ev of llm.stream(streamInput)) {
-          if (ev.type === "text_delta") {
+          if (ev.type === "usage") {
+            usage = usageFrom(ev)
+          } else if (ev.type === "text_delta") {
             openMsg()
             text += ev.delta
             send("response.output_text.delta", {
@@ -440,10 +498,14 @@ function handleResponsesStream(body: any): Response {
 
 Bun.serve({
   port: PORT,
+  hostname: HOST,
   idleTimeout: 240,
   async fetch(req) {
     const url = new URL(req.url)
     if (process.env.PROXY_DEBUG) console.error("[hit]", req.method, url.pathname)
+    if (TOKEN !== undefined && req.headers.get("authorization") !== `Bearer ${TOKEN}`) {
+      return Response.json({ error: { message: "unauthorized", type: "proxy_auth" } }, { status: 401 })
+    }
     if (url.pathname.endsWith("/chat/completions") && req.method === "POST") {
       try {
         const body = await req.json()

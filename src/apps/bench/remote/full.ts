@@ -543,6 +543,11 @@ const runSingleFullRemoteChunk = async (args: {
         buildSubprocessFamilyEnv(args.runConfig, process.env),
       ),
       datasetFamily: args.runConfig.datasetFamily,
+      // PMX-04 — carried, not re-derived: a family that grades in its own
+      // grader phase needs the declared bootstrap at GRADE time too.
+      ...(args.cfg.remoteBootstrap !== undefined
+        ? { remoteBootstrap: args.cfg.remoteBootstrap }
+        : {}),
       // No-progress (wedged-box) idle-abort budget, resolved HERE at the
       // allowlisted full-remote composition root (env reads belong at the root;
       // box-session stays env-free). Unset ⇒ Infinity ⇒ off (byte-identical).

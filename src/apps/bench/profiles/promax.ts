@@ -59,7 +59,13 @@ import {
   resolveProMaxSettings,
 } from "../promax/settings"
 import { shq } from "../remote/box-session/shell"
-import { proMaxRemoteBootstrap } from "./promax-bootstrap"
+import { buildProMaxBoxGradeCommand } from "../harness/promax/box-grade"
+import { projectProMaxChunkVerdicts } from "../harness/promax/chunk-verdicts"
+import {
+  PROMAX_ONBOX_CHECKOUT_ROOT,
+  PROMAX_ONBOX_VENV_ROOT,
+  proMaxRemoteBootstrap,
+} from "./promax-bootstrap"
 import { promaxFamilyCorpusReader } from "./promax-corpus"
 import { assertProMaxDatasetShape } from "./promax-dataset-shape"
 import type { DatasetFamilyProfile } from "./types"
@@ -177,20 +183,73 @@ export const PROMAX_PROFILE: DatasetFamilyProfile = {
     return `QUANTA_PROMAX_UPSTREAM_COMMIT=${shq(settings.upstreamCommit)} `
   },
 
-  // layer 3b′ — ADMISSION. The SAME refusal `setupBox` carries, hoisted into the
-  // port that runs BEFORE the box is mutated. `setupBox` fired at the END of
-  // `bootstrapBox` — after mkdir, a full `src/` rsync, an scp and a `bun
-  // install` — so ProMax's refusal was already landing on a rewritten box.
-  // Admission carries no ssh, so it cannot mutate anything on its way to
-  // refusing (aug-22 A-C).
-  admitBox: () => refuseOnBoxBootstrap(),
+  // layer 3b′ — ADMISSION. ProMax's lane is wired, so this admits.
+  //
+  // It admits rather than checking something because the port can see nothing to
+  // check: `FamilyAdmissionInput` carries only `log` — no env, no cfg, and
+  // deliberately no ssh (aug-22 A-C: admission must be unable to mutate a box on
+  // its way to a decision). Every ProMax precondition that CAN be decided has
+  // inputs, and lives where those inputs are:
+  //
+  //   - corpus shape + gold-leak checks → `preflight`, which also runs BEFORE
+  //     the box is provisioned, so a bad corpus still costs no box;
+  //   - the pinned checkout and its on-box digest verification → the DECLARED
+  //     bootstrap, executed by the generic fail-closed executor (including the
+  //     warm-box gate, which refuses a reused box carrying no bootstrap rather
+  //     than assuming the pin was proved);
+  //   - keeping grader material off the agent box → `onBoxEnvPrefix`, which
+  //     emits the upstream COMMIT and never the bundle ROOT.
+  //
+  // What made this refusal load-bearing until now was the S2 rail: a family that
+  // materializes answer-key bytes in its grader phase must not admit a box while
+  // no production caller executes that phase, because the declared teardown then
+  // never runs and the key survives into the next chunk's agent phase. That
+  // caller now exists (`runFamilyBoxGrade`), and the teardown is bound to it.
+  admitBox: () => {},
 
-  // layer 3c — on-box bootstrap. Refuses; the bundle is deliberately not fetchable.
-  // ONE spelling with `admitBox` above: a lane that admission refuses must not be
-  // reachable through a second, later gate that says something different.
-  setupBox: async () => {
-    refuseOnBoxBootstrap()
+  // layer 3c — extra imperative ON-BOX setup. ProMax needs none: its pinned
+  // checkout, venv and digest verification are the DECLARED bootstrap's
+  // commands, executed and receipted by the generic executor. Repeating them
+  // here would be a second provisioning path no receipt describes.
+  //
+  // Still NOT a bundle fetch, and that is the true half of the old refusal: the
+  // frozen bundle is gold-bearing, so it must never land on the box the agent
+  // runs on. The grader phase materializes the pinned upstream instead — inside
+  // a window whose teardown removes it — and the agent phase proves its absence
+  // before the agent starts.
+  setupBox: async () => {},
+
+  // layer 3d — PMX-04. ProMax grades with its OWN pinned evaluator, inside the
+  // grader window, from a SECOND on-box invocation.
+  //
+  // Its presence is what splits the chunk in two, and the split is a correctness
+  // requirement: the grader phase materializes the answer key, and the agent
+  // must run while it is absent — the agent phase carries an `absenceProbe` that
+  // proves exactly that. One invocation cannot satisfy both.
+  //
+  // Every path resolves inside the materialized checkout (see `box-grade.ts`),
+  // so the key is read from the window and destroyed with it.
+  boxGrade: (input) => {
+    const built = buildProMaxBoxGradeCommand({
+      checkoutRoot: PROMAX_ONBOX_CHECKOUT_ROOT,
+      venvRoot: PROMAX_ONBOX_VENV_ROOT,
+      predictionsPath: input.predictionsPath,
+      outputPath: input.outputPath,
+    })
+    if (!built.ok) {
+      throw new Error(
+        `bench: dataset-family=promax — cannot build the on-box grade command: ` +
+          built.failures.map((f) => `[${f.code}] ${f.message}`).join("; "),
+      )
+    }
+    return built.command
   },
+
+  // layer 3e — PMX-04. The chunk's verdicts come from the evaluator's own
+  // pass-rate document, NOT from the bench report: that report is written by a
+  // patch-gen-only pass, in which every instance is an explicit "harness not
+  // wired" infra error by construction.
+  parseBoxGradeVerdicts: projectProMaxChunkVerdicts,
 
   // layer 4 — preflight. REAL and fail-closed, and it runs BEFORE a box is
   // provisioned on both the full-remote and pool roots.
@@ -209,11 +268,6 @@ export const PROMAX_PROFILE: DatasetFamilyProfile = {
       ...(input.instanceIds !== undefined ? { instanceIds: input.instanceIds } : {}),
       surface: input.surface,
     })
-    refuse(
-      `the REMOTE ProMax lane (${input.surface})`,
-      "The corpus checks above passed, so the refusal is the LANE, not this dataset. " +
-        "Refused here, before RunInstances, so no box is spent learning it.",
-    )
   },
 
   // layer 6 — MANIFEST-DRIVEN SELECTION (PMX-06 / aug-22 G4). The sample
