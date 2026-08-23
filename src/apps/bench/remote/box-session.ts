@@ -43,11 +43,6 @@ import { presetRequiresLiveLspGrounding } from "../preset"
 import { resolveDatasetFamilyProfile } from "../profiles/registry"
 import type { SpawnFn, SpawnResult } from "./backend"
 import { assertRemoteAccessTokenFreshEnough, stripToAccessToken } from "./box-session/auth"
-import { bucketsFromGradedInstances } from "./verdict-buckets"
-import {
-  parseFamilyBoxGradeVerdicts,
-  runFamilyBoxGrade,
-} from "./box-session/family-box-grade"
 import {
   buildChunkScrubCommand,
   closureDiagnosticsPathFor,
@@ -55,6 +50,7 @@ import {
   trajectoriesDirFor,
 } from "./box-session/chunk-scrub"
 import { runBenchDetachedPoll } from "./box-session/detached-poll"
+import { parseFamilyBoxGradeVerdicts, runFamilyBoxGrade } from "./box-session/family-box-grade"
 import { probePyrightGrounding, remoteLspLaunchReceipt } from "./box-session/pyright-grounding"
 import { BENCH_SSH_SAFE_OPTS, openOtelReverseTunnel, shq } from "./box-session/shell"
 import {
@@ -81,6 +77,7 @@ import {
   parseVerdicts,
   verdictCount,
 } from "./box-session/verdict-parse"
+import { bucketsFromGradedInstances } from "./verdict-buckets"
 
 /** Durable dir for fetched full-remote artifacts (predictions / report / closure
  *  sidecar / trajectory). NEVER /tmp — the OS reaps it on the next session and

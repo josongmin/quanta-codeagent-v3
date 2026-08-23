@@ -510,7 +510,7 @@ describe("A-B — the warm-box scrub covers every path the chunk writes", () => 
       runLog: "~/S-run.log",
       observeDir: "~/S-observe",
       trajectory: "$HOME/S-traj/cassette.jsonl",
-  passRate: "~/S-pass-rate.json",
+      passRate: "~/S-pass-rate.json",
     } as const
     const cmd = buildChunkScrubCommand(paths, true)
     for (const key of Object.keys(CHUNK_PATH_SCRUB_POLICY) as Array<keyof typeof paths>) {

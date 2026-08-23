@@ -23,10 +23,11 @@
  * no longer imports family logic back out of `remote/box-session*`, which is what
  * left the remote-env and preflight ports with zero production consumers.
  */
-import type { GradedInstance } from "../remote/verdict-buckets"
+
 import type { PythonSwebenchResult } from "@/runner/batch/eval/verdict"
 import type { DatasetFamily } from "../dataset-family-token"
 import type { ProSwebenchOpts } from "../pro-swebench"
+import type { GradedInstance } from "../remote/verdict-buckets"
 import type { BenchRunConfig } from "../run-config"
 import type { Instance } from "../types"
 import type { FamilyCorpusReader, FamilyCorpusRow } from "./corpus-row"

@@ -405,7 +405,7 @@ describe("S2 — a shipped family cannot start admitting boxes without its teard
 // TODAY'S STATE — the only assertions a legitimate PMX-04 landing must update
 // ---------------------------------------------------------------------------
 
-describe("TODAY'S STATE — the grade transport is WIRED, the lane is still shut", () => {
+describe("TODAY'S STATE — the lane is LIVE", () => {
   // Everything above is a durable clause: it stayed green through this change.
   // These are the deliberate state pins, updated HERE together with
   // FAMILY_BOOTSTRAP_PHASE_WIRING — and nowhere else.
@@ -413,15 +413,17 @@ describe("TODAY'S STATE — the grade transport is WIRED, the lane is still shut
   // PMX-04 gave the GRADER phase a production caller: ProMax grades on the box
   // with its own pinned evaluator, and that grade runs inside the grader window
   // (`runFamilyBoxGrade` → `whileMaterialized`). The teardown bound to that call
-  // therefore runs too. Admission still refuses, so the lane is CLOSED-BUT-WIRED
-  // rather than live — which is the honest description of a transport that
-  // exists and a door that is still shut.
+  // therefore runs too — which is exactly what the S2 clause above requires
+  // before a gold-materializing family may admit a box. With that satisfied,
+  // admission opened, and the lane is LIVE.
 
   test("the grader phase now HAS a production caller, and the teardown runs with it", () => {
     // The WHOLE tree, not just the declared table.
-    expect(productionCallSites().map((c) => `${c.file}:${c.phase}`).sort()).toEqual(
-      [`${EXPECTED_CALLER}:agent`, `${EXPECTED_GRADER_CALLER}:grader`].sort(),
-    )
+    expect(
+      productionCallSites()
+        .map((c) => `${c.file}:${c.phase}`)
+        .sort(),
+    ).toEqual([`${EXPECTED_CALLER}:agent`, `${EXPECTED_GRADER_CALLER}:grader`].sort())
     expect([...productionExecutedBootstrapPhases()].sort()).toEqual(["agent", "grader"])
     expect(familyBootstrapPhaseIsExecutedInProduction("grader")).toBe(true)
     // `bound-to` resolves through its host: the teardown has no call site of its
@@ -444,13 +446,13 @@ describe("TODAY'S STATE — the grade transport is WIRED, the lane is still shut
     expect([...FAMILY_BOOTSTRAP_PHASE_WIRING_KINDS]).toContain("unwired")
   })
 
-  test("promax is `closed-but-wired` — the transport exists, admission still refuses", () => {
+  test("promax is `live` — it admits boxes AND its teardown has a production executor", () => {
     expect(
       classifyLane({
         admits: admits("promax"),
         teardownExecuted: familyBootstrapPhaseIsExecutedInProduction("teardown"),
       }),
-    ).toBe("closed-but-wired")
+    ).toBe("live")
   })
 
   test("the inertness note is GONE, because the claim it made is no longer true", () => {

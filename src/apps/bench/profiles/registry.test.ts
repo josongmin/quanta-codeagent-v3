@@ -390,17 +390,20 @@ describe("PMX-01 — the promax profile's own ports (paired against the built-in
     }
   })
 
-  test("setupBox refuses (PMX-04 owns live ProMax provisioning) without issuing ssh", async () => {
+  test("setupBox issues NO ssh — the DECLARED bootstrap does ProMax's provisioning", async () => {
+    // It used to REFUSE here (PMX-04 was unwired). It is now a no-op, and the
+    // observable property is the same one that mattered then: this port must not
+    // provision anything itself. ProMax's checkout, venv and digest verification
+    // are the declared bootstrap's commands, executed and receipted by the
+    // generic executor; doing them here too would be a second, unreceipted path.
     const cmds: string[] = []
-    await expect(
-      resolveDatasetFamilyProfile("promax").setupBox({
-        ssh: async (c: string) => {
-          cmds.push(c)
-          return { code: 0, stdout: "", stderr: "" }
-        },
-        log: () => {},
-      }),
-    ).rejects.toThrow(/promax/i)
+    await resolveDatasetFamilyProfile("promax").setupBox({
+      ssh: async (c: string) => {
+        cmds.push(c)
+        return { code: 0, stdout: "", stderr: "" }
+      },
+      log: () => {},
+    })
     expect(cmds).toEqual([])
   })
 

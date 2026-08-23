@@ -46,7 +46,7 @@ export const absolutizeOnBox = (path: string, home: string): string => {
 /** Ask the box where its home is. One round trip, and only for a family that
  *  actually grades on-box — an inline-grading family never reaches here. */
 const resolveBoxHome = async (ssh: BoxSession["ssh"]): Promise<string> => {
-  const r = await ssh("printf %s \"$HOME\"")
+  const r = await ssh('printf %s "$HOME"')
   const home = r.stdout.trim()
   if (r.code !== 0 || home === "" || !home.startsWith("/")) {
     throw new Error(

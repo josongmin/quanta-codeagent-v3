@@ -33,6 +33,10 @@ import { DATASET_FAMILIES, type DatasetFamily } from "@/apps/bench/dataset-famil
 import { familyRemoteBootstrap } from "@/apps/bench/profiles/bootstrap"
 import { PROMAX_ONBOX_CHECKOUT_ROOT } from "@/apps/bench/profiles/promax-bootstrap"
 import {
+  DATASET_FAMILY_PROFILES,
+  registerDatasetFamilyProfile,
+} from "@/apps/bench/profiles/registry"
+import {
   FAMILY_BOOTSTRAP_PHASES,
   type FamilyBootstrapCommand,
   type FamilyBootstrapPhase,
@@ -228,20 +232,40 @@ describe("L1 — no gold-bearing path exists on the box during the AGENT phase",
 // ---------------------------------------------------------------------------
 
 describe("L2 — the family admission refusal fires BEFORE any bootstrap command", () => {
-  test("a ProMax lane issues ZERO commands before it is refused", async () => {
-    const rec = recorder()
-    await expect(
-      setupBoxForFamily({
-        family: "promax",
-        bootstrap: promaxBootstrap(),
-        ssh: rec.ssh,
-        log: () => {},
-      }),
-    ).rejects.toThrow(/on-box ProMax bootstrap is not wired yet/)
+  test("a REFUSED lane issues ZERO commands before it is refused", async () => {
     // THE claim: the recorded SEQUENCE is empty. A refusal that fires after the
     // fetch is not a guard, and asserting only on the error text cannot tell the
     // two apart.
-    expect(rec.commands).toEqual([])
+    //
+    // ProMax used to be the subject here. PMX-04 wired its grader phase and the
+    // teardown bound to it, so ProMax admits now — and an ordering clause about
+    // refusal has to be driven by something that still refuses.
+    const refusing = "pmx-agent-phase-refusing-probe" as DatasetFamily
+    const drop = registerDatasetFamilyProfile({
+      ...DATASET_FAMILY_PROFILES.verified,
+      family: refusing,
+      reportPartitionKey: refusing,
+      admitBox: () => {
+        throw new Error("lane refused by its own family")
+      },
+      setupBox: async () => {
+        throw new Error("lane refused by its own family")
+      },
+    })
+    try {
+      const rec = recorder()
+      await expect(
+        setupBoxForFamily({
+          family: refusing,
+          bootstrap: promaxBootstrap(),
+          ssh: rec.ssh,
+          log: () => {},
+        }),
+      ).rejects.toThrow(/lane refused by its own family/)
+      expect(rec.commands).toEqual([])
+    } finally {
+      drop()
+    }
   })
 
   test("POSITIVE CONTROL — an ADMITTED family does run its agent-phase bootstrap", async () => {
@@ -393,18 +417,37 @@ describe("L4 — warm-box reuse cannot bypass the family bootstrap", () => {
     ...over,
   })
 
-  test("a warm ProMax box hits the family admission gate on ATTACH", async () => {
-    const { fn } = warmSpawn()
-    await expect(
-      attachBox(
-        attachCfg({
-          spawn: fn,
-          swebenchDatasetFamily: "promax" as DatasetFamily,
-          remoteBootstrap: promaxBootstrap(),
-        }),
-        "i-warm",
-      ),
-    ).rejects.toThrow(/on-box ProMax bootstrap is not wired yet/)
+  test("a warm box hits the family admission gate on ATTACH", async () => {
+    // THE claim: admission is REACHED on the attach path, not only on provision.
+    // Driven by a family that refuses, since ProMax admits now (PMX-04).
+    const refusing = "pmx-warm-refusing-probe" as DatasetFamily
+    const drop = registerDatasetFamilyProfile({
+      ...DATASET_FAMILY_PROFILES.verified,
+      family: refusing,
+      reportPartitionKey: refusing,
+      admitBox: () => {
+        throw new Error("warm attach refused by its own family")
+      },
+      setupBox: async () => {
+        throw new Error("warm attach refused by its own family")
+      },
+      remoteBootstrap: () => promaxBootstrap(),
+    })
+    try {
+      const { fn } = warmSpawn()
+      await expect(
+        attachBox(
+          attachCfg({
+            spawn: fn,
+            swebenchDatasetFamily: refusing,
+            remoteBootstrap: promaxBootstrap(),
+          }),
+          "i-warm",
+        ),
+      ).rejects.toThrow(/warm attach refused by its own family/)
+    } finally {
+      drop()
+    }
   })
 
   test("a warm box whose bootstrap state is UNKNOWN is refused, not reused", async () => {
@@ -413,17 +456,18 @@ describe("L4 — warm-box reuse cannot bypass the family bootstrap", () => {
     // That must be a refusal — silently reusing skips the pinned checkout and
     // the hash step, which defeats the pin.
     //
-    // aug-22 A-C: on a ProMax lane the ADMISSION gate now fires first and refuses
-    // the lane outright, which is strictly earlier and stronger — so this case
-    // asserts THAT refusal, and the unknown-bootstrap-state clause is covered
-    // NON-VACUOUSLY (on a family that admits) in promax-gold-absence-lifecycle.
+    // This used to be SHADOWED: ProMax refused admission outright, so the
+    // refusal observed here was that one and this clause was covered only
+    // indirectly. PMX-04 wired ProMax's lane, so the real clause is now
+    // observable head-on — a warm ProMax box carrying no bootstrap is refused
+    // for exactly this reason.
     const { fn } = warmSpawn()
     await expect(
       attachBox(
         attachCfg({ spawn: fn, swebenchDatasetFamily: "promax" as DatasetFamily }),
         "i-warm",
       ),
-    ).rejects.toThrow(/on-box ProMax bootstrap is not wired yet/)
+    ).rejects.toThrow(/bootstrap state is unknown|declares a remote bootstrap/i)
   })
 
   test("the launch root resolves the bootstrap for the ATTACH branch too", async () => {

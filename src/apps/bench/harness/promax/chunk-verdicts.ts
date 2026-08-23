@@ -34,9 +34,7 @@ import type { GradedInstance } from "../../remote/verdict-buckets"
 import { classifyOfficialPair } from "./classify"
 import { parseOfficialPassRateDocument } from "./official-result"
 
-export const projectProMaxGradedInstances = (
-  artifactText: string,
-): readonly GradedInstance[] => {
+export const projectProMaxGradedInstances = (artifactText: string): readonly GradedInstance[] => {
   const parsed = parseOfficialPassRateDocument(artifactText)
   if (!parsed.ok) return []
 

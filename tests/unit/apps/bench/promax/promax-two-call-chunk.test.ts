@@ -24,10 +24,10 @@
  */
 import { describe, expect, test } from "bun:test"
 import { familyRemoteBootstrap } from "@/apps/bench/profiles/bootstrap"
-import { resolveBenchRunConfig } from "@/apps/bench/run-config"
+import { PROMAX_V1_SNAPSHOT } from "@/apps/bench/promax/provenance/frozen-snapshot"
 import { runFamilyBoxGrade } from "@/apps/bench/remote/box-session/family-box-grade"
 import { DEFAULT_CHUNK_PATHS } from "@/apps/bench/remote/box-session/types"
-import { PROMAX_V1_SNAPSHOT } from "@/apps/bench/promax/provenance/frozen-snapshot"
+import { resolveBenchRunConfig } from "@/apps/bench/run-config"
 
 /** The grader phase hash-verifies each pinned file before anything is graded —
  *  a rail this fixture ran into the honest way. A fake box that answers with

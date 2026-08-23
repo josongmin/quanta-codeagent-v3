@@ -1,5 +1,5 @@
-import { LEGACY_BUCKET_BY_STATE } from "@/runner/batch/eval/official-grade"
 import type { OfficialGradeState } from "@/runner/batch/eval/official-grade"
+import { LEGACY_BUCKET_BY_STATE } from "@/runner/batch/eval/official-grade"
 import type { FullRemoteResult } from "./box-session"
 
 export interface VerdictBuckets {

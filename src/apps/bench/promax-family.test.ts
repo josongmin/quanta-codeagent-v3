@@ -465,16 +465,17 @@ describe("PMX-01 — the promax remote bootstrap specification is fail-closed", 
     )
   })
 
-  test("the on-box bootstrap callee REFUSES promax and still bootstraps the others", async () => {
+  test("the on-box bootstrap callee issues nothing for promax WITHOUT a carried bootstrap", async () => {
+    // PMX-04 wired ProMax's lane, so this no longer refuses. With no bootstrap
+    // carried there is simply nothing to run — and the property that mattered is
+    // unchanged: the profile's own `setupBox` provisions nothing by itself.
     const seen: string[] = []
     const ssh = async (cmd: string) => {
       seen.push(cmd)
       return { code: 0, stdout: "", stderr: "" }
     }
-    await expect(setupBoxForFamily({ family: "promax", ssh, log: () => {} })).rejects.toThrow(
-      /promax/i,
-    )
-    expect(seen, "a refused promax bootstrap must issue NO ssh").toEqual([])
+    await setupBoxForFamily({ family: "promax", ssh, log: () => {} })
+    expect(seen, "promax's setupBox must issue NO ssh of its own").toEqual([])
     // PAIRED CONTROL: verified is still a silent no-op, pro still clones Scale.
     const verifiedSeen: string[] = []
     await setupBoxForFamily({
@@ -577,26 +578,20 @@ describe("PMX-01 — promax preflight refuses a mislabeled or gold-bearing datas
     ).toThrow(/GRADER-ONLY/)
   })
 
-  test("SPEND GUARD — the remote lane is refused BEFORE a box, even for a sound chunk", () => {
-    // `setupBox` and `harnessSpec` also refuse, but both fire AFTER RunInstances.
-    // The preflight callee is the one that runs before provisioning on BOTH the
-    // full-remote and pool roots, so this is what makes "ProMax cannot run
-    // remotely yet" free rather than a box-priced lesson.
+  test("SPEND GUARD — a SOUND chunk is admitted, and the checks still ran before any box", () => {
+    // This used to assert the whole remote lane was refused here (PMX-04 was
+    // unwired). The lane is live now, so a sound chunk must PASS — and the
+    // durable half of the clause is unchanged and asserted below: preflight runs
+    // before provisioning on both the full-remote and pool roots, so a BAD
+    // corpus is still refused free rather than as a box-priced lesson.
     const path = writeJsonl("sound-for-lane.jsonl", [sound()])
-    let message = ""
-    try {
+    expect(() =>
       assertDatasetGradeableForFamily({
         datasetPath: path,
         surface: "full-remote",
         family: "promax",
-      })
-    } catch (err) {
-      message = errMessage(err)
-    }
-    expect(message).toMatch(/REMOTE ProMax lane/)
-    expect(message).toMatch(/PMX-04/)
-    // …and it says the corpus was FINE, so the operator does not go hunting.
-    expect(message).toMatch(/refusal is the LANE/)
+      }),
+    ).not.toThrow()
     // PAIRED: pro's own corpus rule still fires on the same file, and
     // verified/live still pass — no global gate was armed.
     expect(() =>

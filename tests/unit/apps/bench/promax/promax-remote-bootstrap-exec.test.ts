@@ -20,13 +20,13 @@
  * containing `run-instances`.
  */
 import { describe, expect, test } from "bun:test"
+import type { DatasetFamily } from "@/apps/bench/dataset-family-token"
 import { proMaxRemoteBootstrap } from "@/apps/bench/profiles/promax-bootstrap"
 import {
   DATASET_FAMILY_PROFILES,
   registerDatasetFamilyProfile,
   resolveDatasetFamilyProfile,
 } from "@/apps/bench/profiles/registry"
-import type { DatasetFamily } from "@/apps/bench/dataset-family-token"
 import {
   PROMAX_V1_SNAPSHOT,
   PROMAX_V1_UPSTREAM_PATHS,

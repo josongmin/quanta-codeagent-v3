@@ -49,6 +49,8 @@
 
 import { readFileSync } from "node:fs"
 import { errMessage } from "@/shared"
+import { buildProMaxBoxGradeCommand } from "../harness/promax/box-grade"
+import { projectProMaxGradedInstances } from "../harness/promax/chunk-verdicts"
 import { ProMaxSampleError, selectProMaxSampleIds } from "../promax/corpus"
 import { PROMAX_V1_SNAPSHOT } from "../promax/provenance/frozen-snapshot"
 import {
@@ -59,8 +61,6 @@ import {
   resolveProMaxSettings,
 } from "../promax/settings"
 import { shq } from "../remote/box-session/shell"
-import { buildProMaxBoxGradeCommand } from "../harness/promax/box-grade"
-import { projectProMaxGradedInstances } from "../harness/promax/chunk-verdicts"
 import {
   PROMAX_ONBOX_CHECKOUT_ROOT,
   PROMAX_ONBOX_VENV_ROOT,
