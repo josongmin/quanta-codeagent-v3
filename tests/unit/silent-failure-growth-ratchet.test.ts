@@ -227,7 +227,30 @@ const SRC = join(__dirname, "..", "..", "src")
 // control flow (a missing leaf is the normal case, per its jsdoc); and
 // public-reader.ts's second `JSON.parse` is the documented object-vs-JSONL format
 // DISCRIMINATOR, where failing over to the line reader is the success path.
-const BARE_CATCH_BASELINE = 1147
+// Re-measured 2026-08-23 (RFC-06 F1: cross-process O_EXCL lock for the skill
+// disabled-store, src/skill/runtime/adapters/disabled-store-lock.ts). +4, and
+// they are the one case this form's remedy CANNOT be applied to: the remedy is
+// "bind and attribute through the logger", and `@/skill` is a leaf slice that
+// structurally has no logger to attribute through — `src/skill/discover.ts`
+// carries the standing `biome-ignore lint/suspicious/noConsole: leaf slice
+// cannot import a structured logger`. AUDITED all 4; none is a stranded work
+// path — every one is fail-CLOSED or inert:
+//   • `readMtimeMs` stat probe -> null. Consumed by `acquire` as "not stale,
+//     keep retrying", so an unreadable lockfile NEVER reclaims and never grants
+//     the lock; the budget expires and the acquire THROWS. Same handled-null
+//     probe class already audited three times above.
+//   • `unlinkSafe` unlink. Best-effort by contract, on BOTH its paths: a failed
+//     stale-reap re-enters the bounded loop (then throws with a real message),
+//     and a failed release leaves the lockfile for the 30s stale path to
+//     reclaim. Bounded and self-healing; it can never admit two holders.
+//   • `handle.writeFile` diagnostic body — the lock contract is the FILE'S
+//     EXISTENCE, and no production reader parses the body (verified: only the
+//     hellgates write bodies, to stage stale-lock fixtures).
+//   • `handle.close()` — the lock is already acquired and the kernel reclaims
+//     the fd at exit.
+// The fix that WOULD retire these is a logging seam for the skill slice, which
+// is a slice-architecture change, not an error-handling one. Ceiling 1147 -> 1151.
+const BARE_CATCH_BASELINE = 1151
 // Re-measured 2026-06-25 (repo-cache GC + committed in-flight bench work): the
 // `reapStaleMirrorTemps` `stat(p).catch(() => null)` not-found PROBE (handled via
 // `if (st !== null …)`, a vanished orphan tmp is simply skipped) plus one further
@@ -307,7 +330,15 @@ const DEBUG_ONLY_CATCH_BASELINE = 13
 // Promise+setTimeout form (already in committed HEAD); ceiling raised to 13.
 // Re-measured 2026-06-15: quanta-home SSOT + bench-preset merge adds 2 new
 // non-abortable sleeps; ceiling raised to 15.
-const NON_ABORTABLE_SLEEP_BASELINE = 16
+// Re-measured 2026-08-23 (RFC-06 F1 disabled-store lock): +1 for the lock's
+// contended-retry sleep. The remedy this form names — `src/agent/loop/sleep.ts`
+// — is UNREACHABLE from `@/skill` (slice fence; that fence is why the lock is a
+// re-implementation of the agent file-lock rather than an import, see the
+// module header). AUDITED: the hazard the form exists to stop is "an aborted
+// turn keeps waiting the FULL delay", and this delay is one 100ms retry tick
+// inside a 5s-bounded acquire loop, so the worst-case strand is 100ms, not a
+// stranded wait. Ceiling 16 -> 17.
+const NON_ABORTABLE_SLEEP_BASELINE = 17
 // Re-measured 2026-07-07 (jul-6/7 observation + bench diagnostics): +4 truncating
 // writes, AUDITED — all DIAGNOSTIC / bench-artifact dumps, NOT durable load-bearing
 // state: closure-diagnostics-io + patch-static-sanity + repro-artifacts-sink (bench
@@ -316,7 +347,19 @@ const NON_ABORTABLE_SLEEP_BASELINE = 16
 // (durable state — auth token-store, node-repl state — already writes temp+rename).
 // Standing rule for the NEXT one: route any LOAD-BEARING persisted JSON through
 // `writeFileAtomic` (@/storage, ADR-0398); diagnostics may stay direct. Ceiling 9 → 13.
-const STRINGIFY_TRUNCATING_WRITE_BASELINE = 13
+// Re-measured 2026-08-23 (RFC-06 F1 disabled-store lock): +1, and this one is
+// STRUCTURALLY exempt rather than merely diagnostic. The write is the lock's
+// `{pid, acquiredAt}` body, written through the handle returned by
+// `open(lockPath,"wx")`. The remedy — `writeFileAtomic` (temp file + rename) —
+// cannot be applied here by construction: a rename would REPLACE the
+// exclusively-created inode and destroy the mutual-exclusion contract the
+// O_EXCL create exists to establish. It also clears the standing rule's bar
+// anyway (diagnostics may stay direct): no production reader parses the body —
+// staleness is decided from the file's MTIME — so a crash mid-write loses a
+// diagnostic, never persisted state. The sibling agent file-lock writes the
+// identical payload for the identical reason (disk-adapter/file-lock.ts:281),
+// via a variable, which is this form's documented blind spot. Ceiling 13 -> 14.
+const STRINGIFY_TRUNCATING_WRITE_BASELINE = 14
 
 // Same canonical form as silent-catch-24h-ratchet: no binding, swallowed.
 // A bound `} catch (e) {` deliberately does NOT match.
