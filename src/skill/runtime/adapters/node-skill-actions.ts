@@ -54,17 +54,58 @@ const dirOf = (p: string): string => {
 }
 
 /**
+ * The SURFACE that owns a `/skill reveal` — the reveal degrade is SURFACE-keyed,
+ * never inferred from `process.platform` alone (RFC-06 D1 / R1-BREAK). A headless
+ * mac (`platform==="darwin"`) still has NO WindowServer, so keying on platform
+ * would spawn `open -R` into nothing → hang/error.
+ */
+export type SkillRevealSurface = "cli" | "web" | "tauri" | "headless"
+
+/**
+ * RFC-06 D1 / R1-BREAK — resolve the OPTIONAL reveal capability for a SURFACE
+ * (not a platform):
+ *   - `tauri` / `web` (Tauri shell bridge): a real native OS spawn — the ONLY
+ *     surfaces that spawn `open -R` / `explorer /select,` / `xdg-open`.
+ *   - `cli`: the PATH-PRINTED degrade — a no-op reveal that RESOLVES without
+ *     spawning any OS process, so the surface's success receipt prints the abs
+ *     path (copy-pasteable) instead of opening a file manager.
+ *   - `headless`: NO capability (`undefined`) ⇒ {@link revealSkill} returns the
+ *     honest typed `unsupported` receipt, and the spawner is NEVER reached.
+ * OS process spawning is behind the `tauri`/`web` arm ONLY — never derived from
+ * `process.platform` for `cli` or `headless`.
+ */
+export const resolveRevealCapability = (
+  surfaceKind: SkillRevealSurface,
+  platform: NodeJS.Platform = process.platform,
+): ((absPath: string) => Promise<void>) | undefined => {
+  switch (surfaceKind) {
+    case "tauri":
+    case "web":
+      return nodeRevealCapability(platform)
+    case "cli":
+      // path-printed: the surface's ok-receipt carries the abs path; NO spawn.
+      return async (): Promise<void> => {}
+    case "headless":
+      return undefined
+  }
+}
+
+/**
  * Build the production {@link SkillActionPorts}. `snapshotInputs` drives the
  * ACTION-TIME re-scan (the SAME inputs the session's `buildSkillRuntimeAuthority`
- * used, so the winner resolution matches). `reveal` defaults to the
- * platform-derived capability but can be overridden (a headless/web surface
- * passes `null` to force the honest `unsupported` receipt).
+ * used, so the winner resolution matches). The reveal capability is resolved
+ * from `surfaceKind` via {@link resolveRevealCapability} — SURFACE-keyed, never
+ * a `process.platform`-inferred OS spawn. `reveal` may still be overridden (a
+ * test passes an explicit function, or `null` to force the `unsupported`
+ * receipt); when omitted the surface arm decides.
  */
 export const createNodeSkillActionPorts = (opts: {
   readonly snapshotInputs: SkillSnapshotInputs
+  readonly surfaceKind: SkillRevealSurface
   readonly reveal?: ((absPath: string) => Promise<void>) | null
 }): SkillActionPorts => {
-  const reveal = opts.reveal === null ? undefined : (opts.reveal ?? nodeRevealCapability())
+  const reveal =
+    opts.reveal === null ? undefined : (opts.reveal ?? resolveRevealCapability(opts.surfaceKind))
   return {
     resolveCanonicalSkill: async (name) => {
       const snapshot = await buildSkillSnapshot(opts.snapshotInputs)

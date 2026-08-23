@@ -31,6 +31,7 @@
  * exit 0 (parity with `/agents`).
  */
 
+import type { AttentionAgent, PendingQuestionView } from "@/attention"
 import type { AttentionReader } from "@/runner/assemble/session-authorities"
 import type { UserQuestionBroker } from "@/session/user-question"
 import { byteCompare } from "@/shared"
@@ -78,6 +79,46 @@ export interface AttentionSlashState {
   readonly answer: (requestId: string, text: string) => AttentionAnswerOutcome
 }
 
+/** An `AttentionAgent` narrowed to a live pending question. */
+type AwaitingAgent = AttentionAgent & { readonly pendingQuestion: PendingQuestionView }
+const isAwaiting = (a: AttentionAgent): a is AwaitingAgent => a.pendingQuestion !== null
+
+/** Project one derived agent row into the render-facing list row. */
+const toListRow = (a: AwaitingAgent): AttentionListRow => ({
+  taskId: a.id,
+  label: a.label,
+  requestId: a.pendingQuestion.requestId,
+  askedAt: a.pendingQuestion.askedAt,
+  summary: a.pendingQuestion.summary,
+})
+
+/**
+ * The lineage the operator's `/attention next` is scoped to — consumed by A1's
+ * lineage gate so a foreign-lineage agent is NEVER navigated to (jul-15 sibling-
+ * leak class). With a cursor, the scope is the cursored agent's OWN lineage (so
+ * cycling stays inside it, never crossing into a sibling root). With no/unknown
+ * cursor it is the operator's most-urgent lineage = the globally-oldest awaiting
+ * agent's root (the resolver also falls back to oldest), so a SINGLE-root session
+ * selects byte-identically to the pre-gate flat order. `undefined` ⇒ nothing
+ * awaiting. SELECTION + cursor advance stay the resolver's job (one authority).
+ */
+const operatorLineageRoot = (
+  agents: readonly AttentionAgent[],
+  afterRequestId: string | undefined,
+): string | undefined => {
+  const awaiting = agents.filter(isAwaiting)
+  if (awaiting.length === 0) return undefined
+  if (afterRequestId !== undefined) {
+    const cursor = awaiting.find((a) => a.pendingQuestion.requestId === afterRequestId)
+    if (cursor !== undefined) return cursor.rootId
+  }
+  return [...awaiting].sort(
+    (a, b) =>
+      a.pendingQuestion.askedAt - b.pendingQuestion.askedAt ||
+      byteCompare(a.pendingQuestion.requestId, b.pendingQuestion.requestId),
+  )[0]?.rootId
+}
+
 /**
  * Build the `/attention` wire from the LIVE authorities A2 assembled. PURE
  * projection: it holds no state and re-reads both authorities on every call, so
@@ -86,6 +127,11 @@ export interface AttentionSlashState {
  * out by A2's reader). Ordering is oldest-first by `(askedAt, requestId)` — the
  * SAME deterministic order A1's pure resolver uses, so the CLI's session-wide
  * navigation cannot silently diverge from the resolver's per-lineage order.
+ *
+ * `next` delegates SELECTION to A1's pure `nextNeedingAttention` via the reader's
+ * `next` (the ONE ordering + cursor authority) after resolving the operator's
+ * lineage scope, so the lineage gate is actually exercised on the CLI path — the
+ * `rootId` A2 stamps on every row is consumed here, not ignored.
  */
 export const buildAttentionSlashState = (
   attention: AttentionReader,
@@ -94,28 +140,16 @@ export const buildAttentionSlashState = (
   const rows = (): AttentionListRow[] =>
     attention
       .snapshot()
-      .flatMap((a): AttentionListRow[] =>
-        a.pendingQuestion === null
-          ? []
-          : [
-              {
-                taskId: a.id,
-                label: a.label,
-                requestId: a.pendingQuestion.requestId,
-                askedAt: a.pendingQuestion.askedAt,
-                summary: a.pendingQuestion.summary,
-              },
-            ],
-      )
+      .filter(isAwaiting)
+      .map(toListRow)
       .sort((x, y) => x.askedAt - y.askedAt || byteCompare(x.requestId, y.requestId))
   return {
     list: rows,
     next: (afterRequestId) => {
-      const sorted = rows()
-      if (afterRequestId === undefined) return sorted[0]
-      const idx = sorted.findIndex((r) => r.requestId === afterRequestId)
-      // Unknown cursor ⇒ oldest; otherwise the strictly-next awaiting agent.
-      return idx === -1 ? sorted[0] : sorted[idx + 1]
+      const ownRootId = operatorLineageRoot(attention.snapshot(), afterRequestId)
+      if (ownRootId === undefined) return undefined
+      const pick = attention.next(ownRootId, afterRequestId)
+      return pick !== undefined && isAwaiting(pick) ? toListRow(pick) : undefined
     },
     answer: (requestId, text) => {
       // In-process CAS: read the LIVE revision immediately before the settle so a

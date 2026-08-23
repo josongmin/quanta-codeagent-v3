@@ -321,6 +321,45 @@ describe("RFC-01 A5 — anti-vacuum (root · child · parked · cancel · stale/
     expect(await attentionCmd.run(["answer", "q_not_real", "hi"], ctx)).toBe(1)
     expect(box.err).toContain("no pending question")
   })
+
+  // M6 — the CLI `/attention next` cursor is routed through A1's pure
+  // `nextNeedingAttention` (the ONE ordering authority) via the live
+  // `AttentionReader.next`, so the resolver's LINEAGE GATE (jul-15 sibling-leak
+  // class) is actually EXERCISED on the real CLI wire — not the prior un-gated
+  // re-implementation that cycled the flat session-wide list.
+  test("lineage gate: cycling past an own agent NEVER jumps to a foreign-lineage sibling", async () => {
+    const { tasks, broker, state } = buildRig()
+    // Two DIRECT children ⇒ each is its OWN lineage root (parentTaskId absent).
+    registerChild(tasks, "child-A", "own-lineage")
+    registerChild(tasks, "child-X", "foreign-lineage")
+
+    // child-A asks FIRST (older); the FOREIGN child-X asks SECOND (newer). In the
+    // flat session-wide order child-X is therefore the row AFTER child-A.
+    const aCtx = ctxFor(baseCfg({ questionBroker: broker, spawnedAsTaskId: "child-A" }))
+    const xCtx = ctxFor(baseCfg({ questionBroker: broker, spawnedAsTaskId: "child-X" }))
+    const aRun = askViaTool(aCtx, "own?")
+    await waitPending(broker, 1)
+    const xRun = askViaTool(xCtx, "foreign?")
+    await waitPending(broker, 2)
+
+    // List (full inventory) shows BOTH, oldest-first — unchanged.
+    const rows = state.list()
+    expect(rows.map((r) => r.taskId)).toEqual(["child-A", "child-X"])
+    const aReq = rows[0]?.requestId
+    expect(aReq).toBeDefined()
+
+    // Cursor PAST child-A stays inside child-A's lineage: child-X is foreign, so
+    // it is gated out ⇒ "all caught up". RED-on-injection: reverting `next` to the
+    // un-gated flat re-impl returns child-X here (the sibling leak).
+    expect(state.next(aReq)).toBeUndefined()
+
+    // No-cursor still surfaces the globally-oldest own agent (not over-gated).
+    expect(state.next()?.taskId).toBe("child-A")
+
+    broker.cancelAll("teardown")
+    await aRun
+    await xRun
+  })
 })
 
 // ── (3) CROSS-CASE — subagent panel ON + attention OFF: zero delta ──────────

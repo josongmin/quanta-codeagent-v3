@@ -271,4 +271,14 @@ export const RUNNER: readonly KnobInventoryEntry[] = [
       "Attention navigation gate (RFC-01) — wires the pure @/attention resolver + the user-question broker into a read-only AttentionReader on the session authorities and registers the `/attention` slash command. Opt-in; unset ⇒ no broker, no reader, no command (byte-identical).",
     readSite: "runner/assemble/session-authorities/build.ts",
   },
+  {
+    envKey: "QUANTA_WORKTREE_PROGRESS",
+    kind: "bool",
+    default: false,
+    group: "agent-feature",
+    home: "runtime-config",
+    describe:
+      "Live worktree-command progress gate (RFC-04) — when ON, the `worktree` command stages child-step renders as they land instead of one final render; resolved ONCE at the repl composition root via readCliKnob. Opt-in; unset ⇒ single final render, byte-identical.",
+    readSite: "apps/cli/repl.ts",
+  },
 ]

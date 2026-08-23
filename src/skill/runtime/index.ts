@@ -26,6 +26,8 @@ export {
 export {
   createNodeSkillActionPorts,
   nodeRevealCapability,
+  resolveRevealCapability,
+  type SkillRevealSurface,
 } from "./adapters/node-skill-actions"
 export type {
   SkillRuntimeAuthority,

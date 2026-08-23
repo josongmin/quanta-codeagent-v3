@@ -4,6 +4,7 @@
  */
 
 import { describe, expect, test } from "bun:test"
+import { readCliKnob } from "@/apps/cli/cli-knobs-accessor"
 import { buildKnobCatalog } from "@/apps/cli/knob-catalog-wire"
 import {
   type CatalogSources,
@@ -125,5 +126,22 @@ describe("knob-catalog merge/search/resolve (ADR-0503 P3)", () => {
     }
     // the runner registry actually populated (side-effect import worked)
     expect([...cat.values()].some((k) => k.home === "runner-knobs")).toBe(true)
+  })
+
+  // M5 (RFC-04 contract #1) — QUANTA_WORKTREE_PROGRESS is READ via readCliKnob at
+  // apps/cli/repl.ts, so it MUST be a declared catalog knob (discoverable in
+  // `/knobs` + default-parity), not an orphan CLI read. Registered in the shared
+  // inventory next to its RFC-01 sibling QUANTA_ATTENTION_NAV.
+  test("QUANTA_WORKTREE_PROGRESS is a registered catalog knob (bool, default OFF)", () => {
+    const cat = buildKnobCatalog()
+    const knob = cat.get("QUANTA_WORKTREE_PROGRESS")
+    expect(knob).toBeDefined()
+    expect(knob?.kind).toBe("bool")
+    expect(knob?.default).toBe(false)
+    expect(knob?.home).toBe("runtime-config")
+    expect(knob?.describe.length).toBeGreaterThan(0)
+    // and the readCliKnob accessor resolves the declared default (OFF) when unset,
+    // proving the declaration is the one the read site consults.
+    expect(readCliKnob("QUANTA_WORKTREE_PROGRESS", "bool", {})).toBe(false)
   })
 })

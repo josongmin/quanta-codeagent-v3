@@ -41,7 +41,9 @@ import * as skillActionsModule from "@/skill"
 import {
   copySkillMarkdown,
   createInMemoryDisabledStore,
+  createNodeSkillActionPorts,
   createSkillRuntimeAuthority,
+  resolveRevealCapability,
   revealSkill,
   setSkillEnabledAction,
 } from "@/skill"
@@ -255,6 +257,68 @@ describe("F5 reveal — capability-based typed negative", () => {
     const res = await revealSkill(mkPorts({ disk: new Map() }), { name: "ghost" })
     expect(res.ok).toBe(false)
     if (!res.ok) expect(res.rejection.kind).toBe("unknown_skill")
+  })
+})
+
+/* ------------------------------------------------------------------------- *
+ * (M3) SURFACE-keyed reveal composition — the reveal degrade is chosen by the
+ * SURFACE, NEVER inferred from `process.platform` (RFC-06 D1 / R1-BREAK). CLI ⇒
+ * path-printed (no spawn); headless ⇒ unsupported; only tauri/web spawn.
+ * ------------------------------------------------------------------------- */
+
+describe("M3 reveal — surface-keyed composition (no process.platform-inferred spawn)", () => {
+  test("headless surface ⇒ NO reveal capability, even when the platform WOULD spawn", () => {
+    // A headless mac (`darwin`) still has no WindowServer; keying on platform
+    // would hand back a real `open -R` spawner. Surface-keyed ⇒ always undefined.
+    expect(resolveRevealCapability("headless", "darwin")).toBeUndefined()
+    expect(resolveRevealCapability("headless", "linux")).toBeUndefined()
+    expect(resolveRevealCapability("headless", "win32")).toBeUndefined()
+
+    const ports = createNodeSkillActionPorts({ snapshotInputs: {}, surfaceKind: "headless" })
+    expect(ports.reveal).toBeUndefined()
+  })
+
+  test("headless surface via the real leaf ⇒ typed `unsupported` (never a spawn)", async () => {
+    const ports = createNodeSkillActionPorts({
+      snapshotInputs: {},
+      surfaceKind: "headless",
+      // reveal omitted ⇒ the surface arm decides (headless ⇒ no capability).
+    })
+    const withResolver: SkillActionPorts = {
+      ...ports,
+      resolveCanonicalSkill: async (name) => mkSkill(name, "user"),
+    }
+    const res = await revealSkill(withResolver, { name: "rr" })
+    expect(res.ok).toBe(false)
+    if (!res.ok) expect(res.rejection.kind).toBe("unsupported")
+  })
+
+  test("CLI surface ⇒ path-printed degrade: capability present, RESOLVES without spawning", async () => {
+    // The CLI arm must NOT be the platform spawner: invoking it for a bogus path
+    // RESOLVES (a no-op). The real `open -R`/`xdg-open` spawner would REJECT for
+    // a nonexistent path (bad exit) or a missing binary (ENOENT) — so `.resolves`
+    // discriminates path-printed from an OS spawn on any host.
+    const cap = resolveRevealCapability("cli", "darwin")
+    expect(cap).toBeDefined()
+    await expect(cap?.("/definitely/not/a/real/path/SKILL.md")).resolves.toBeUndefined()
+
+    // ...and the leaf returns an ok receipt carrying the abs path (path-printed).
+    const ports = createNodeSkillActionPorts({ snapshotInputs: {}, surfaceKind: "cli" })
+    const withResolver: SkillActionPorts = {
+      ...ports,
+      resolveCanonicalSkill: async (name) => mkSkill(name, "user"),
+    }
+    const res = await revealSkill(withResolver, { name: "rr" })
+    expect(res.ok).toBe(true)
+    if (res.ok) expect(res.sourcePath).toBe("/skills/rr/SKILL.md")
+  })
+
+  test("only tauri/web surfaces resolve a native spawner (present capability)", () => {
+    // darwin desktop shells DO get a spawner; the spawn is behind THIS arm only.
+    expect(resolveRevealCapability("tauri", "darwin")).toBeDefined()
+    expect(resolveRevealCapability("web", "win32")).toBeDefined()
+    // ...but an exotic platform still has no reveal command ⇒ undefined.
+    expect(resolveRevealCapability("tauri", "freebsd" as NodeJS.Platform)).toBeUndefined()
   })
 })
 

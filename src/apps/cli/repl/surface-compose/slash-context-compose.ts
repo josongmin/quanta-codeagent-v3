@@ -142,6 +142,11 @@ export const buildSurfaceSlashContext = (
           skillActions: buildSkillActionsState(
             setup.skillAuthority,
             createNodeSkillActionPorts({
+              // RFC-06 D1 / R1-BREAK — the CLI reveal is the SURFACE-keyed
+              // path-printed degrade (success receipt prints the abs path); it
+              // NEVER spawns `open`/`explorer`/`xdg-open` inferred from
+              // `process.platform` (which would hang on a headless SSH/bench box).
+              surfaceKind: "cli",
               snapshotInputs:
                 setup.skillsConfig?.dir !== undefined ? { userDir: setup.skillsConfig.dir } : {},
             }),
