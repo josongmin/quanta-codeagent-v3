@@ -20,6 +20,13 @@ export {
   type ProMaxGradeInput,
 } from "./adapter"
 export {
+  buildProMaxBoxGradeCommand,
+  PROMAX_ONBOX_GOLDEN_RELATIVE_PATH,
+  type ProMaxBoxGradeFailure,
+  type ProMaxBoxGradeInput,
+  type ProMaxBoxGradeResult,
+} from "./box-grade"
+export {
   admitProMaxCampaignForLaunch,
   freezeProMaxCampaignImages,
   PROMAX_FREEZE_STAGE_REASONS,
