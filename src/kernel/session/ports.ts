@@ -3,6 +3,7 @@ import type { ImageBlock, Message } from "@/llm"
 import type {
   ArtifactRef,
   CapabilityManifest,
+  ObjectiveCommandOutcome,
   PendingApprovalView,
   PostureCommandOutcome,
   PostureCommandScope,
@@ -260,11 +261,18 @@ export interface SessionHost {
    *  stale revision is a no-op (the authority rejects it without clobbering a
    *  newer commit). Absent ⇒ the surface wired no objective authority (the
    *  reducer still echoes the session revision). Duck-typed `unknown` mutation so
-   *  `@/kernel` needs no `@/objective` value import; the host casts it back. */
+   *  `@/kernel` needs no `@/objective` value import; the host casts it back.
+   *
+   *  RFC-03 M7 — returns a TYPED outcome (mirrors `setPosture` / `setSkillEnabled`):
+   *  `ok` ⇒ the scheduler emits the reducer's revision echo; a `stale_revision` /
+   *  `rejected` arm is a typed negative the scheduler THROWS on (a stale/policy-
+   *  rejected wire mutate must conflict, never a silent success echo). An ABSENT
+   *  authority is a benign `ok:true` no-op (the host adapter returns it), so the
+   *  method being present with no wired authority stays byte-identical. */
   mutateObjective?(args: {
     readonly mutation: unknown
     readonly expectedRevision?: number
-  }): Promise<void> | void
+  }): Promise<ObjectiveCommandOutcome> | ObjectiveCommandOutcome
   /**
    * RFC-05 E4 — apply a POSTURE mutation (the CLI selector / web composer front
    * door). The single posture host projection: `session.posture.set` routes here

@@ -44,6 +44,7 @@ describe("session.objective.mutate — kernel dispatch", () => {
     const host = baseHost({
       mutateObjective: (args) => {
         seen.push(args)
+        return { ok: true }
       },
     })
     const cmd = buildObjectiveMutate(
@@ -75,6 +76,7 @@ describe("session.objective.mutate — kernel dispatch", () => {
     const host = baseHost({
       mutateObjective: ({ expectedRevision }) => {
         seenRev = expectedRevision
+        return { ok: true }
       },
     })
     const cmd = buildObjectiveMutate(

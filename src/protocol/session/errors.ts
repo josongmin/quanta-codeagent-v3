@@ -127,6 +127,38 @@ export class SessionSkillPersistError extends SessionProtocolError {
   }
 }
 
+/**
+ * RFC-03 M7 — a `session.objective.mutate` was rejected by the host authority
+ * because its `expectedRevision` no longer matches the live OBJECTIVE-domain
+ * revision (a stale multi-surface / wire edit). A typed CONFLICT — the winner's
+ * commit is never clobbered, and the stale mutate must NOT report a silent
+ * success echo (mirrors {@link SessionPostureConflictError} /
+ * {@link SessionSkillConflictError}; the CLI direct path surfaces the same stale).
+ */
+export class SessionObjectiveConflictError extends SessionProtocolError {
+  constructor(
+    readonly expectedRevision: number,
+    readonly actualRevision: number,
+  ) {
+    super(`stale objective revision: expected ${expectedRevision}, got ${actualRevision}`)
+    this.name = "SessionObjectiveConflictError"
+  }
+}
+
+/**
+ * RFC-03 M7 — a `session.objective.mutate` was refused by the objective
+ * authority's policy/validation (an unknown thread / malformed command, an
+ * un-admitted approval-gated model mutation, a forbidden completion, or a
+ * verifier-only checked mutation). A typed NEGATIVE — no live mutation, and NEVER
+ * a silent success echo. `reason` carries the authority's `CommitRejection` tag.
+ */
+export class SessionObjectiveRejectedError extends SessionProtocolError {
+  constructor(readonly reason: string) {
+    super(`objective mutation rejected: ${reason}`)
+    this.name = "SessionObjectiveRejectedError"
+  }
+}
+
 export class SessionClosedError extends SessionProtocolError {
   constructor(readonly sessionId: string) {
     super(`session ${sessionId} is closed`)

@@ -292,7 +292,12 @@ export const createApprovalStateMachine = (opts?: {
    *  mutator's `null`-return contract. */
   onUnattributed?: (gap: ApprovalAttributionGap) => void
 }): ApprovalStateMachinePort => {
-  const objective = opts?.objective
+  // RFC-03 H1 — MUTABLE so the composition root can LATE-BIND the gated objective
+  // authority after the assembler constructs it (`bindObjective`). Construction-time
+  // injection (`opts.objective`, e.g. web-daemon) still wins; a late bind only fills
+  // an EMPTY slot, so there is never a second authority (bind-once-if-empty). The
+  // attribution helpers close over this binding and read its CURRENT value per call.
+  let objective = opts?.objective
   const ledger = opts?.ledger
   const onUnattributed = opts?.onUnattributed
   const maxRetained =
@@ -557,6 +562,15 @@ export const createApprovalStateMachine = (opts?: {
         // leave whatever survived; never throw
         logger.warn(`approval-state.attr.fromSnapshot: ${errMessage(e)}`)
       }
+    },
+
+    // RFC-03 H1 — LATE-BIND the objective authority for attribution. BIND-ONCE:
+    // only fills an EMPTY slot, so a construction-time injection is never replaced
+    // and there is never a second authority. The attribution helpers read the
+    // captured `objective` binding per call, so a later bind takes effect for every
+    // subsequent pause/settle.
+    bindObjective(port: ObjectivePort): void {
+      if (objective === undefined) objective = port
     },
   }
 }

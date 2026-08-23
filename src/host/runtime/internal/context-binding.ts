@@ -15,6 +15,7 @@ import {
 import { isPermissionMode } from "@/permission"
 import type { PostureControl } from "@/permission/posture/control"
 import type {
+  ObjectiveCommandOutcome,
   PostureCommandOutcome,
   PostureCommandScope,
   SkillCommandOutcome,
@@ -218,14 +219,17 @@ const asWireObjectiveMutation = (mutation: unknown): ObjectiveMutation | null =>
  * prepare/commit under CAS on `expectedRevision`. A stale revision, unknown
  * thread, or unwired authority is a no-op (never a clobber of a newer commit).
  */
-const applyHostObjectiveMutation = (
+export const applyHostObjectiveMutation = (
   base: { objective?: unknown; sessionId?: string },
   args: { mutation: unknown; expectedRevision?: number },
-): void => {
+): ObjectiveCommandOutcome => {
   const port = base.objective
   const threadId = base.sessionId
   const parsed = asWireObjectiveMutation(args.mutation)
-  if (port === undefined || threadId === undefined || parsed === null) return
+  // RFC-03 M7 — an absent authority / unwired thread / unparseable mutation is a
+  // benign no-op: the reducer still echoes the session revision (byte-identical
+  // legacy). It is NOT a conflict, so report `ok`.
+  if (port === undefined || threadId === undefined || parsed === null) return { ok: true }
   const authority = asObjectiveAuthority(port as ObjectivePort)
   const prepared = authority.prepare({
     threadId,
@@ -233,7 +237,21 @@ const applyHostObjectiveMutation = (
     mutation: parsed,
     ...(args.expectedRevision !== undefined ? { expectedRevision: args.expectedRevision } : {}),
   })
-  authority.commit(prepared, { admitted: true })
+  const res = authority.commit(prepared, { admitted: true })
+  if (res.ok) return { ok: true }
+  // RFC-03 M7 — surface the CAS/policy refusal instead of swallowing it. A stale
+  // revision is a typed conflict (the scheduler raises it); every other refusal
+  // (invalid / approval-* / forbidden-completion / checked-verifier-only) is a
+  // typed rejection. NEVER a silent success echo on a dropped mutation.
+  if (res.reason === "stale") {
+    return {
+      ok: false,
+      kind: "stale_revision",
+      expected: prepared.expectedRevision,
+      actual: res.currentRevision,
+    }
+  }
+  return { ok: false, kind: "rejected", reason: res.reason }
 }
 
 /** Duck-typed read of a wired {@link PostureControl} on the base. */

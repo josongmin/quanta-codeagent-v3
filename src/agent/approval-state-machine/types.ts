@@ -27,6 +27,8 @@
  * exactOptional: optional fields are OMITTED when absent (never `: undefined`).
  */
 
+import type { ObjectivePort } from "@/objective"
+
 /** What flavour of approval the agent is asking for.
  *
  *  - `permission`    — pre-execute gate for a mutating tool / boundary action.
@@ -210,4 +212,17 @@ export interface ApprovalStateMachinePort {
   /** Replace all approvals from a snapshot (not a merge). Malformed entries
    *  are silently dropped; a malformed snapshot is a no-op. */
   fromSnapshot(snap: ApprovalSnapshot): void
+
+  /** RFC-03 H1 — LATE-BIND the per-session objective authority for attribution
+   *  (`addBlocker`/`clearBlocker` on approval pause/settle). The composition root
+   *  constructs the ASM in the base wire BEFORE the gated objective authority
+   *  exists (the authority needs the surface's `onConfirm`, known only in the
+   *  assembler), so the ASM starts objective-less and the assembler binds the ONE
+   *  gated authority here after `maybeWireObjective`. BIND-ONCE: an already-bound
+   *  authority (e.g. a construction-time injection) is never replaced, so there is
+   *  never a second authority. Absent binding ⇒ attribution to objective is a
+   *  graceful no-op (the store already handles an undefined objective). Optional
+   *  so pre-existing port stubs stay valid; the production store always provides
+   *  it and the assembler calls it (`?.`) unconditionally after the gated wire. */
+  bindObjective?(objective: ObjectivePort): void
 }

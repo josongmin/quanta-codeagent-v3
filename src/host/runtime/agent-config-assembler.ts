@@ -917,6 +917,16 @@ export const assembleAgentConfig = (req: AssembleRequest, env: AssemblerEnv): Ag
   // caller-override-safe + byte-identical when its gate/resource is absent (see
   // the per-helper docs); the single call keeps this fn under the complexity cap.
   wireOptionalCapabilitySlots(cfg, env)
+  // RFC-03 H1 — LATE-BIND the ONE gated objective authority (built just now by
+  // `maybeWireObjective` under `QUANTA_OBJECTIVE_TOOLS`) onto the observability
+  // approval-state-machine so it attributes approval pauses to the SAME authority
+  // the tools mutate. The ASM was constructed in the base wire BEFORE the authority
+  // existed (its policy needs the surface's `onConfirm`, known only here), so this
+  // is the earliest single-authority binding point. `bindObjective` is bind-once
+  // (never replaces a construction-time injection). Absent objective (tools gate
+  // off) ⇒ no bind ⇒ byte-identical (the ASM stays objective-less, as before this
+  // wire ever set `base.objective`).
+  if (cfg.objective !== undefined) cfg.approvalStateMachine?.bindObjective?.(cfg.objective)
   // RFC jun-6 Binding 1 — install the bash sandbox-block escalation handler when
   // `QUANTA_SANDBOX_ESCALATION` is on (else clears any stale handler). Runs AFTER
   // the optional slots so it can read the freshly-resolved `cfg.admissibility`

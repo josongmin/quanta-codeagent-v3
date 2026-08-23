@@ -142,38 +142,44 @@ export const isReadModelSubscribed = (
   id: SurfaceReadModelId,
 ): boolean => subscription[id].status === "subscribed"
 
+/** Resolve ONE read-model's tri-state from its support + subscription status:
+ *  supported+subscribed ⇒ `subscribed`, supported-only ⇒ `supported`, else
+ *  `unsupported`. Extracted so `resolveReadModels` stays a flat per-model fold
+ *  (one call each) under biome's cognitive-complexity cap. */
+const resolveOne = <TProtocol extends string>(
+  supportStatus: "supported" | "unsupported",
+  subscriptionStatus: SurfaceReadModelStatus,
+  version: TProtocol,
+): ResolvedReadModelSupport<TProtocol> => {
+  if (supportStatus !== "supported") return unsupported()
+  return subscriptionStatus === "subscribed" ? subscribed(version) : supported(version)
+}
+
 export const resolveReadModels = (
   supportedReadModels: SupportedReadModels,
   subscription: SurfaceSubscription | undefined,
 ): ResolvedReadModels => {
   const normalized = normalizeSurfaceSubscription(subscription)
   return {
-    session:
-      supportedReadModels.session.status === "supported" &&
-      normalized.session.status === "subscribed"
-        ? subscribed(SESSION_PROTOCOL_VERSION)
-        : supportedReadModels.session.status === "supported"
-          ? supported(SESSION_PROTOCOL_VERSION)
-          : unsupported(),
-    agentState:
-      supportedReadModels.agentState.status === "supported" &&
-      normalized.agentState.status === "subscribed"
-        ? subscribed(AGENT_STATE_PROTOCOL_VERSION)
-        : supportedReadModels.agentState.status === "supported"
-          ? supported(AGENT_STATE_PROTOCOL_VERSION)
-          : unsupported(),
-    canvas:
-      supportedReadModels.canvas.status === "supported" && normalized.canvas.status === "subscribed"
-        ? subscribed(CANVAS_PROTOCOL_VERSION)
-        : supportedReadModels.canvas.status === "supported"
-          ? supported(CANVAS_PROTOCOL_VERSION)
-          : unsupported(),
-    observability:
-      supportedReadModels.observability.status === "supported" &&
-      normalized.observability.status === "subscribed"
-        ? subscribed(OBSERVABILITY_PROTOCOL_VERSION)
-        : supportedReadModels.observability.status === "supported"
-          ? supported(OBSERVABILITY_PROTOCOL_VERSION)
-          : unsupported(),
+    session: resolveOne(
+      supportedReadModels.session.status,
+      normalized.session.status,
+      SESSION_PROTOCOL_VERSION,
+    ),
+    agentState: resolveOne(
+      supportedReadModels.agentState.status,
+      normalized.agentState.status,
+      AGENT_STATE_PROTOCOL_VERSION,
+    ),
+    canvas: resolveOne(
+      supportedReadModels.canvas.status,
+      normalized.canvas.status,
+      CANVAS_PROTOCOL_VERSION,
+    ),
+    observability: resolveOne(
+      supportedReadModels.observability.status,
+      normalized.observability.status,
+      OBSERVABILITY_PROTOCOL_VERSION,
+    ),
   }
 }

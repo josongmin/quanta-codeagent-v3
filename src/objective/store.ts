@@ -298,9 +298,39 @@ type CheckSpecDeclarationLike = {
   successExitCodes: readonly number[]
 }
 
+/** Append manual cells for each string in the legacy list, honoring the live cap
+ *  (`push` returns false when full ⇒ stop). Non-string entries are skipped. */
+const collectStringCriteria = (
+  raw: readonly string[] | undefined,
+  push: (c: CritCell) => boolean,
+): void => {
+  if (!Array.isArray(raw)) return
+  for (const entry of raw) {
+    if (typeof entry !== "string") continue
+    if (!push(manualCrit(entry))) break
+  }
+}
+
+/** Append cells for each RFC-03 C4 rich declaration: a runnable `check` ⇒ checked,
+ *  else manual. Honors the live cap via `push` (false ⇒ stop); malformed entries
+ *  are skipped. */
+const collectDeclarationCriteria = (
+  declarations: readonly CriterionDeclaration[] | undefined,
+  push: (c: CritCell) => boolean,
+): void => {
+  if (!Array.isArray(declarations)) return
+  for (const decl of declarations) {
+    if (decl === null || typeof decl !== "object") continue
+    const text = typeof decl.text === "string" ? decl.text : ""
+    const check = normalizeCheckDeclaration(decl.check)
+    if (!push(check !== null ? checkedCrit(text, check) : manualCrit(text))) break
+  }
+}
+
 /** Build criterion cells from the legacy string list PLUS the RFC-03 C4 rich
  *  declarations. Strings ⇒ manual; a declaration with a runnable `check` ⇒
- *  checked; a declaration with no/invalid check ⇒ manual. Applies the live cap. */
+ *  checked; a declaration with no/invalid check ⇒ manual. Applies the live cap
+ *  via the shared `push` (both collectors share the ONE cap budget). */
 const sanitizeCriteria = (
   raw: readonly string[] | undefined,
   declarations: readonly CriterionDeclaration[] | undefined,
@@ -311,20 +341,8 @@ const sanitizeCriteria = (
     out.push(c)
     return true
   }
-  if (Array.isArray(raw)) {
-    for (const entry of raw) {
-      if (typeof entry !== "string") continue
-      if (!push(manualCrit(entry))) break
-    }
-  }
-  if (Array.isArray(declarations)) {
-    for (const decl of declarations) {
-      if (decl === null || typeof decl !== "object") continue
-      const text = typeof decl.text === "string" ? decl.text : ""
-      const check = normalizeCheckDeclaration(decl.check)
-      if (!push(check !== null ? checkedCrit(text, check) : manualCrit(text))) break
-    }
-  }
+  collectStringCriteria(raw, push)
+  collectDeclarationCriteria(declarations, push)
   return out
 }
 
@@ -770,9 +788,20 @@ const rebuildCritCell = (raw: unknown): CritCell | null => {
   const met = r.met === true
   const check = r.kind === "checked" ? rebuildCheck(r.check) : null
   if (check !== null) {
-    const cell: CritCell = { id, text, met, kind: "checked", check }
+    // RFC-03 C4 + M8 — a CHECKED criterion is met ONLY with a valid verifier
+    // receipt that BINDS this check (checkId === check.id) AND passed — the exact
+    // invariant `applyVerifierCompletion` enforces on the live path. A forged
+    // `met:true` with an absent/mismatched/failed receipt (hand-edited snapshot)
+    // is downgraded to the un-completed checked state (met:false, no completion).
     const comp = rebuildCompletion(r.completion, "checked")
-    if (comp !== undefined) cell.completion = comp
+    const bound =
+      comp !== undefined &&
+      comp.source === "verifier" &&
+      comp.checkId === check.id &&
+      comp.verifierResult.passed === true
+    const metChecked = met && bound
+    const cell: CritCell = { id, text, met: metChecked, kind: "checked", check }
+    if (metChecked && comp !== undefined) cell.completion = comp
     return cell
   }
   const cell: CritCell = { id, text, met, kind: "manual" }

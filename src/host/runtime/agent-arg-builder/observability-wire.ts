@@ -14,7 +14,6 @@ import {
   wireObservability,
 } from "@/agent/observability-wire"
 import type { AssembleRequest } from "@/host/runtime/agent-config-assembler"
-import { buildObjectiveAuthority } from "@/runner/assemble/session-authorities"
 import { gateOn } from "@/shared"
 
 /**
@@ -64,10 +63,17 @@ export const resolveObservabilityWire = (
   return wireObservability({
     enabled,
     repoRoot: process.cwd(),
-    // RFC-03 C2 — INJECT the objective authority (constructed at the ONE assembly
-    // builder); the wire no longer mints its own. Only on the enabled path so the
-    // default-OFF byte-identity (noop handle, zero allocations) is preserved.
-    ...(enabled ? { objective: buildObjectiveAuthority() } : {}),
+    // RFC-03 H1 (HITL bypass fix) — this wire NO LONGER injects an objective
+    // authority. The single per-session objective authority is constructed ONCE by
+    // the assembly's gated `maybeWireObjective` (behind `QUANTA_OBJECTIVE_TOOLS` +
+    // `QUANTA_PROPOSE_GOAL`), and the assembler LATE-BINDS it onto this wire's
+    // `approvalStateMachine` (`ApprovalStateMachinePort.bindObjective`) after that
+    // gated construction — so the ASM observes the SAME gated authority (attribution
+    // preserved) while `AgentConfig.objective` is only ever set by the tools gate.
+    // Minting one here would (a) win over the gated wiring UNGATED (the C3/D0
+    // autonomous-goal-set door) and (b) leak `objective_*` tools under
+    // `QUANTA_OBSERVABILITY` alone (features.ts composes them whenever
+    // `config.objective` is set). Both are closed by NOT setting it here.
     // ADR-0415 — forward the adapted live bus so attribution subscribes to
     // `post_tool_use`. Omitted ⇒ ports populate, attribution stays inert.
     ...(opts.hookBus !== undefined ? { hookBus: toObservabilityHookBus(opts.hookBus) } : {}),

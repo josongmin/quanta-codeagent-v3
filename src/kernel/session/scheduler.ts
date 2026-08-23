@@ -4,6 +4,7 @@ import { SessionProtocolValidationError } from "@/protocol/session"
 import { errMessage } from "@/shared"
 import { isAbort } from "@/shared/abortable"
 import { writeStderr } from "@/shared/terminal-io"
+import { applyObjectiveCommand } from "./objective-command"
 import type {
   KernelCommittedEvents,
   KernelDispatchContext,
@@ -917,16 +918,13 @@ export const dispatchSessionCommand = async (
       nextState = reconcileSessionPostureState(nextState, ctx.host.describe())
       immediateEvents = immediateEvents.map((event) => rewriteStateUpdatedEvent(event, nextState))
     } else if (command.type === "session.objective.mutate") {
-      // RFC-03 C3 — apply the objective mutation to the host authority (actor
-      // `user`, CAS on `expectedRevision`). Fire-and-await like the posture
-      // setters: the objective domain is host-owned, so there is no kernel-state
-      // reconcile — the reducer already emitted the session revision echo.
-      await ctx.host.mutateObjective?.({
-        mutation: command.mutation,
-        ...(command.expectedObjectiveRevision !== undefined
-          ? { expectedRevision: command.expectedObjectiveRevision }
-          : {}),
-      })
+      // RFC-03 C3/M7 — apply the objective mutation to the host authority (actor
+      // `user`, CAS on `expectedRevision`) through the single projection; a
+      // stale/policy-rejected outcome THROWS a typed conflict BEFORE any success
+      // echo is appended (never a silent success). The objective domain is
+      // host-owned, so on `ok` there is no kernel-state reconcile — the reducer
+      // already emitted the session revision echo.
+      await applyObjectiveCommand(ctx, command)
     } else if (command.type === "session.skill.set_enabled") {
       await applySkillCommand(ctx, command) // RFC-06 F5 — CAS via host; typed-throw on negative
     }

@@ -86,42 +86,51 @@ const toCompletion = (raw: PersistedObjectiveCompletion): CompletionReceipt => {
   }
 }
 
-/** RFC-03 C4 — decode a persisted criterion into the domain manual/checked union.
- *  A record with `kind:"checked"` + a check ⇒ checked (check id preserved verbatim
- *  so a verifier receipt keeps binding); anything else ⇒ manual (legacy migration).
- *  Completion evidence is carried only when it matches the arm. */
-const toCriterion = (c: PersistedObjectiveCriterion): SuccessCriterion => {
-  // A checked criterion needs a well-formed, id-bearing check; a malformed/absent
-  // one downgrades to manual (fail-safe) rather than crashing the restore. In
-  // production the persisted check is zod-validated, but `restoreFrom` is a public
-  // seam so this mirrors the store's defensive `rebuildCheck`.
-  const decl =
-    c.kind === "checked" && c.check !== undefined ? normalizeCheckDeclaration(c.check) : null
-  const checkId =
-    c.check !== undefined && typeof c.check.id === "string" && c.check.id.length > 0
-      ? c.check.id
-      : null
-  if (decl !== null && checkId !== null) {
-    const completion =
-      c.completion !== undefined && c.completion.source === "verifier"
-        ? toCompletion(c.completion)
-        : undefined
-    return {
-      kind: "checked",
-      id: c.id,
-      text: c.text,
-      met: c.met,
-      check: {
-        id: checkId,
-        kind: "command",
-        argv: [...decl.argv],
-        cwdPolicy: "thread",
-        timeoutMs: decl.timeoutMs,
-        successExitCodes: [...decl.successExitCodes],
-      },
-      ...(completion !== undefined && completion.source === "verifier" ? { completion } : {}),
-    }
+/** RFC-03 C4 + M8 — decode a CHECKED criterion. The `met` flag is FAIL-CLOSED:
+ *  a checked criterion is met ONLY when it carries a valid VERIFIER receipt that
+ *  BINDS this check (`checkId === check.id`) AND passed — the exact invariant the
+ *  store's `applyVerifierCompletion` enforces on the live path. A `met:true` with
+ *  an absent/mismatched/failed receipt (a hand-edited / forged session file) is
+ *  downgraded to the un-completed checked state (met:false, no completion), never
+ *  admitted as a real completion without its verifier receipt. */
+const toCheckedCriterion = (
+  c: PersistedObjectiveCriterion,
+  checkId: string,
+  decl: { argv: readonly string[]; timeoutMs: number; successExitCodes: readonly number[] },
+): SuccessCriterion => {
+  const receipt =
+    c.completion !== undefined && c.completion.source === "verifier"
+      ? toCompletion(c.completion)
+      : undefined
+  const bound =
+    receipt !== undefined &&
+    receipt.source === "verifier" &&
+    receipt.checkId === checkId &&
+    receipt.verifierResult.passed === true
+  const met = c.met === true && bound
+  return {
+    kind: "checked",
+    id: c.id,
+    text: c.text,
+    met,
+    check: {
+      id: checkId,
+      kind: "command",
+      argv: [...decl.argv],
+      cwdPolicy: "thread",
+      timeoutMs: decl.timeoutMs,
+      successExitCodes: [...decl.successExitCodes],
+    },
+    // Attach the receipt only when it actually completes the criterion (met);
+    // a bound-but-unmet or absent receipt leaves the checked criterion evidence-free.
+    ...(met && receipt !== undefined ? { completion: receipt } : {}),
   }
+}
+
+/** RFC-03 C4 — decode a MANUAL criterion (legacy migration + explicit manual).
+ *  A manual receipt rides along when present; `met` is the persisted flag (manual
+ *  completion carries no verifier invariant — the store mints its own receipt). */
+const toManualCriterion = (c: PersistedObjectiveCriterion): SuccessCriterion => {
   const completion =
     c.completion !== undefined && c.completion.source === "manual"
       ? toCompletion(c.completion)
@@ -133,6 +142,23 @@ const toCriterion = (c: PersistedObjectiveCriterion): SuccessCriterion => {
     met: c.met,
     ...(completion !== undefined && completion.source === "manual" ? { completion } : {}),
   }
+}
+
+/** RFC-03 C4 — decode a persisted criterion into the domain manual/checked union.
+ *  A record with `kind:"checked"` + a well-formed, id-bearing check ⇒ checked
+ *  (check id preserved verbatim so a verifier receipt keeps binding); anything
+ *  else ⇒ manual (legacy migration; a malformed/absent check downgrades rather
+ *  than crashing the restore, mirroring the store's defensive `rebuildCheck`). */
+const toCriterion = (c: PersistedObjectiveCriterion): SuccessCriterion => {
+  const decl =
+    c.kind === "checked" && c.check !== undefined ? normalizeCheckDeclaration(c.check) : null
+  const checkId =
+    c.check !== undefined && typeof c.check.id === "string" && c.check.id.length > 0
+      ? c.check.id
+      : null
+  return decl !== null && checkId !== null
+    ? toCheckedCriterion(c, checkId, decl)
+    : toManualCriterion(c)
 }
 
 const toBlocker = (b: PersistedObjectiveBlocker): Blocker => ({

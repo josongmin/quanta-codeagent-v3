@@ -49,6 +49,8 @@ export {
 } from "./commands"
 export {
   SessionClosedError,
+  SessionObjectiveConflictError,
+  SessionObjectiveRejectedError,
   SessionPostureConflictError,
   SessionPosturePersistError,
   SessionPostureUnsupportedError,
@@ -92,6 +94,7 @@ export {
   isSessionEventType,
   SESSION_EVENT_TYPES,
 } from "./events"
+export type { ObjectiveCommandOutcome } from "./objective-projection"
 export type {
   PostureCommandOutcome,
   PostureEffectiveView,

@@ -148,12 +148,14 @@ describe("ADR-0415 Part 2 — resolveObservabilityWire(env, {hookBus}) [real Hoo
     handle.detach()
   })
 
-  test("[2] gate ON ⇒ all four ports + bash-background event drives runLedger.start", async () => {
+  test("[2] gate ON ⇒ ledger/ASM/shadow ports + bash-background event drives runLedger.start", async () => {
     const bus = new RecordingHookBus()
     const handle = resolveObservabilityWire({ [ENV_KEY]: "on" } as NodeJS.ProcessEnv, {
       hookBus: bus,
     })
-    expect(handle.objective).toBeDefined()
+    // RFC-03 H1 — the HOST wire no longer mints an objective; the ONE gated
+    // authority is owned by the assembler and late-bound onto the ASM there.
+    expect(handle.objective).toBeUndefined()
     expect(handle.runLedger).toBeDefined()
     expect(handle.approvalStateMachine).toBeDefined()
     // shadowVerify present too (repoRoot defaults to process.cwd()).
@@ -202,7 +204,8 @@ describe("ADR-0415 Part 2 — resolveObservabilityWire(env, {hookBus}) [real Hoo
   test("[5] gate ON without hookBus ⇒ ports present, no subscribe, no throw", () => {
     const handle = resolveObservabilityWire({ [ENV_KEY]: "on" } as NodeJS.ProcessEnv)
     expect(handle.runLedger).toBeDefined()
-    expect(handle.objective).toBeDefined()
+    // RFC-03 H1 — host wire mints NO objective (owned by the gated assembler path).
+    expect(handle.objective).toBeUndefined()
     // No hookBus ⇒ attribution silently inert; ledger has no entries.
     expect(handle.runLedger?.list().length).toBe(0)
     expect(() => handle.detach()).not.toThrow()
@@ -301,12 +304,17 @@ describe("ADR-0415 Part 2 — buildBaseFromArgs AgentConfig injection", () => {
     else process.env[ENV_KEY] = prevObs
   })
 
-  test("[11] gate ON ⇒ runLedger + approvalStateMachine + objective slots populated", () => {
+  test("[11] gate ON ⇒ runLedger + approvalStateMachine populated; objective is NOT set by observability (RFC-03 H1)", () => {
     process.env[ENV_KEY] = "on"
     const base = buildBaseFromArgs({ mode: "interactive", dials: {} })
     expect(base.runLedger).toBeDefined()
     expect(base.approvalStateMachine).toBeDefined()
-    expect(base.objective).toBeDefined()
+    // RFC-03 H1 (HITL bypass fix) — the observability wire NO LONGER mints an
+    // objective authority. `base.objective` is only ever set by the GATED
+    // `maybeWireObjective` (assembler, behind QUANTA_OBJECTIVE_TOOLS), so
+    // QUANTA_OBSERVABILITY alone must NOT populate it (else an ungated authority
+    // would win + `objective_*` tools would leak under observability alone).
+    expect(base.objective).toBeUndefined()
   })
 
   test("[12] gate ON ⇒ hooks bus present AND attribution is subscribed end-to-end", async () => {
