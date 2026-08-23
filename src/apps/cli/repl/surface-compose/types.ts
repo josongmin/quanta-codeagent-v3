@@ -41,7 +41,11 @@ export interface ReplSurfaceWires {
     fn: ((args: RuntimeSideConversationArgs) => Promise<RuntimeSideConversationResult>) | undefined,
   ) => void
   readonly planQueueStore: PlanQueueStore
-  readonly objectiveStore: ObjectivePort
+  /** RFC-03 H1 — the surface-owned objective authority, PRESENT only under
+   *  `QUANTA_OBJECTIVE_TOOLS` (undefined ⇒ `/goal` not-wired + no `objective_*`
+   *  tools, the `objective_set` SSOT `cli: "opt-in"` default). Gated by
+   *  `QUANTA_PROPOSE_GOAL` when present. */
+  readonly objectiveStore: ObjectivePort | undefined
   readonly setPlanQueueSendNow: (
     fn: ((inj: SendNowInjection) => { ok: true } | { ok: false; reason: string }) | undefined,
   ) => void

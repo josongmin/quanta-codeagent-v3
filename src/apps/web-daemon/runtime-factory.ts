@@ -48,6 +48,7 @@ import {
   createArtifactPreviewResolver,
   type InteractiveTurnAssemblerRequest,
 } from "@/host/runtime"
+import { resolveGatedObjectiveAuthority } from "@/host/runtime/objective-store-wire"
 import type { LLMPort } from "@/llm"
 import { pickProvider, tryCreateLLM } from "@/llm"
 import type { PersistentStorePort } from "@/memory"
@@ -60,7 +61,6 @@ import {
   buildSubagentConfigCore,
   parseEnvFlag,
 } from "@/runner/assemble"
-import { buildObjectiveAuthority } from "@/runner/assemble/session-authorities"
 import {
   createRuntimeFromAgentConfigBase,
   type RuntimeAgentConfigBase,
@@ -306,7 +306,7 @@ export const buildInteractiveTurnAssembler = (req: InteractiveTurnAssemblerReque
  * ⇒ `bus` is `undefined`, the wire is the shared noop handle, every port is
  * absent ⇒ the session config + facade are byte-identical to the legacy path.
  */
-const wireSessionObservability = (
+export const wireSessionObservability = (
   env: Record<string, string | undefined>,
   cwd: string,
 ): { readonly handle: ObservabilityWireHandle; readonly bus: HookBus | undefined } => {
@@ -314,12 +314,13 @@ const wireSessionObservability = (
     return { handle: wireObservability(), bus: undefined }
   }
   const bus = new HookBus()
+  // RFC-03 H1 — the ONE GATED session-stable objective authority (no longer UNGATED);
+  // `confirmationAvailable:false` (web has no `onConfirm`) ⇒ FAIL-CLOSED, TOOLS off ⇒ no leak.
+  const objective = resolveGatedObjectiveAuthority(env, { confirmationAvailable: false })
   const handle = wireObservability({
     enabled: true,
     repoRoot: cwd,
-    // RFC-03 C2 — inject the objective authority from the ONE assembly builder
-    // (the wire no longer mints its own store).
-    objective: buildObjectiveAuthority(),
+    ...(objective !== undefined ? { objective } : {}),
     hookBus: toObservabilityHookBus(bus),
   })
   return { handle, bus }

@@ -231,8 +231,10 @@ export const buildSessionLoopOptions = async (deps: {
     planQueueStore: wires.planQueueStore,
     // `/goal` (Codex parity) — the surface-owned objective store, threaded so
     // the loop can arm the idle goal-continuation ticker over the SAME instance
-    // `/goal` mutates (gated by QUANTA_GOAL_ENFORCE).
-    objectiveStore: wires.objectiveStore,
+    // `/goal` mutates (gated by QUANTA_GOAL_ENFORCE). RFC-03 H1 — present only
+    // under QUANTA_OBJECTIVE_TOOLS; absent ⇒ slot omitted ⇒ no ticker
+    // (exactOptionalPropertyTypes; the loop's own `objectiveStore` is optional).
+    ...(wires.objectiveStore !== undefined ? { objectiveStore: wires.objectiveStore } : {}),
     // #8 last-mile (jun-6) — the stdin source for the in-turn reader (host-
     // injected; default-OFF unless the capture knob is set). Spread by-presence.
     ...(deps.inTurnStdin !== undefined ? { inTurnStdin: deps.inTurnStdin } : {}),

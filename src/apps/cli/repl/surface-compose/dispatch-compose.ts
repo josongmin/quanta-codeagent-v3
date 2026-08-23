@@ -107,13 +107,20 @@ export const buildSurfaceDispatchWire = (
     slashCtx,
     convCheckpointSlot,
     sessionIo: mutable.sessionIo,
-    ...(typeof setup.sessionId === "string" && setup.sessionId.length > 0
+    // RFC-03 H1 — the `/goal` wire needs the surface's objective authority; it is
+    // present only under `QUANTA_OBJECTIVE_TOOLS`. Absent ⇒ slot omitted ⇒ `/goal`
+    // prints its not-wired posture (`goal-cmd`), exit 0.
+    ...(core.objectiveStore !== undefined &&
+    typeof setup.sessionId === "string" &&
+    setup.sessionId.length > 0
       ? { goal: { port: core.objectiveStore, threadId: setup.sessionId } }
       : {}),
     // RFC-03 C3 — the CAS-guarded `/objective` editor wire over the SAME store.
-    // Gated on QUANTA_PROPOSE_GOAL (registration parity) AND a session thread id;
+    // Gated on QUANTA_PROPOSE_GOAL (registration parity) AND the objective
+    // authority being present (QUANTA_OBJECTIVE_TOOLS) AND a session thread id;
     // absent ⇒ `/objective` prints "not wired" (default-OFF byte-identical).
     ...(isObjectiveEditorEnabled() &&
+    core.objectiveStore !== undefined &&
     typeof setup.sessionId === "string" &&
     setup.sessionId.length > 0
       ? { objectiveEditor: buildObjectiveSlashState(core.objectiveStore, setup.sessionId) }

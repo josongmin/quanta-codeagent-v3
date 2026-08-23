@@ -64,7 +64,11 @@ export const buildRuntimeFacadeCompose = (
   env: NodeJS.ProcessEnv,
   core: SurfaceCoreState,
 ): RuntimeFacadeComposeOptions => ({
-  objective: core.objectiveStore,
+  // RFC-03 H1 — thread the SESSION-STABLE objective authority DOWN only when the
+  // surface actually minted one (`QUANTA_OBJECTIVE_TOOLS` on). Absent ⇒ the key is
+  // omitted ⇒ `maybeWireObjective` mints nothing (gate off) ⇒ no `objective_*`
+  // tools, no ungated `config.objective` (exactOptionalPropertyTypes).
+  ...(core.objectiveStore !== undefined ? { objective: core.objectiveStore } : {}),
   roleModelResolver: buildPresetRoleModelResolver(core.presetResolver),
   ...radarOptions(setup, env, core),
   onPromptAssembled: core.contextUsageHolder.sink,

@@ -4,9 +4,9 @@ import { type InboundMode, parseInboundMode } from "@/agent/inbound-mode"
 import { createInterruptedTurnBuffer } from "@/agent/interrupted-turn"
 import { createShadowVerify } from "@/agent/shadow-verify"
 import { createShadowVerifyAdapters } from "@/agent/shadow-verify-adapters"
+import { resolveGatedObjectiveAuthority } from "@/host/runtime/objective-store-wire"
 import { createStickyPresetResolver, type StreamInput } from "@/llm"
 import type { RadarStore } from "@/radar"
-import { buildObjectiveAuthority } from "@/runner/assemble/session-authorities"
 import { isApprovedDecision } from "@/runner/orchestrate"
 import type { RuntimeFacadeComposeOptions } from "@/sdk/runtime"
 import { gateOn } from "@/shared"
@@ -130,9 +130,18 @@ export const buildSurfaceCoreState = (
     backgroundPortal,
     radarStore,
     browserNetHolder,
-    // RFC-03 C2 — the objective authority is constructed at the ONE builder
-    // (`buildObjectiveAuthority`), never a surface-local `createObjectiveStore()`.
-    objectiveStore: buildObjectiveAuthority(),
+    // RFC-03 H1 — the objective authority is resolved through the ONE gated
+    // surface builder: PRESENT only under `QUANTA_OBJECTIVE_TOOLS` (else undefined
+    // ⇒ `/goal` prints its not-wired posture + no `objective_*` tools, matching
+    // the `objective_set` SSOT `cli: "opt-in"` default), and — under
+    // `QUANTA_PROPOSE_GOAL` — GATED so a model-originated objective mutation
+    // requires an admitted approval (no ungated authority reaches `config.objective`
+    // to bypass HITL). The interactive REPL unconditionally composes an `onConfirm`
+    // authority (`runtime-context-compose`), so `confirmationAvailable` is true and
+    // a gated proposal is MEDIATED (prompted) rather than fail-closed. The SAME
+    // instance backs the surface (`/goal` slash + idle ticker + status chip) and,
+    // threaded DOWN via the compose seam, the LLM `objective_*` tools.
+    objectiveStore: resolveGatedObjectiveAuthority(env, { confirmationAvailable: true }),
     presetResolver: createStickyPresetResolver(),
   }
 }
