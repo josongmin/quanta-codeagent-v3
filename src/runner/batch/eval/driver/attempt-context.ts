@@ -20,7 +20,7 @@ import {
   type FailureFactsIdentity,
 } from "@/agent/observation/metrics"
 import { type LLMPort, laneLabeledPort } from "@/llm"
-import { logger } from "@/shared"
+import { errMessage, logger } from "@/shared"
 import {
   attemptFactsRecordPath,
   commitAttemptFacts,
@@ -137,7 +137,7 @@ export const buildLocalizeFailureFactsSeam = (
       commitAttemptFacts(io, factsPath, extraction)
     } catch (e) {
       logger.warn("observation: failure-facts persist failed (observe-only, ignored)", {
-        error: e instanceof Error ? e.message : String(e),
+        error: errMessage(e),
       })
     }
   }

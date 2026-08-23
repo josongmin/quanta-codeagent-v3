@@ -323,7 +323,7 @@ const isHarnessId = (id: unknown): boolean =>
   typeof id === "string" && id.startsWith(SYNTHETIC_USER_MESSAGE_ID_PREFIX)
 
 /** Index of the LAST element satisfying `pred`, or -1. */
-const lastIndexWhere = <T,>(items: readonly T[], pred: (item: T) => boolean): number => {
+const lastIndexWhere = <T>(items: readonly T[], pred: (item: T) => boolean): number => {
   for (let i = items.length - 1; i >= 0; i -= 1) {
     const item = items[i]
     if (item !== undefined && pred(item)) return i

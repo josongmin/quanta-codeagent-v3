@@ -262,27 +262,40 @@ describe("RFC06-2 cwd pin — loader THROWS (the real catch branch)", () => {
     // corrupt file (H5) exercises the "no target" branch. To reach the wire's
     // own `catch` the loader itself must throw.
     const real = await import("@/session")
+    // A PLAIN COPY taken BEFORE the mock: `real` is a live module namespace, so
+    // spreading it after `mock.module` would spread the MOCKED exports and the
+    // "restore" would reinstall the thrower.
+    const realExports = { ...real }
+    // `mock.module` is PROCESS-GLOBAL and `mock.restore()` does not undo it, so
+    // this override has to be reverted explicitly — otherwise every later file
+    // in the run that loads a session gets "store exploded" (it took out 112
+    // tests across the session/rewind/fork/worktree suites before this
+    // `finally` existed).
     mock.module("@/session", () => ({
-      ...real,
+      ...realExports,
       loadSessionById: async () => {
         throw new Error("store exploded")
       },
     }))
-    const { driveSessionTurn: freshDrive } = await import("@/runner/orchestrate")
+    try {
+      const { driveSessionTurn: freshDrive } = await import("@/runner/orchestrate")
 
-    process.env[PIN] = "1"
-    const timeline: string[] = []
-    const port = recordingPort(timeline)
-    await freshDrive({
-      env: { ...process.env },
-      session: timelineSession(timeline),
-      resolveApproval: async () => "approve",
-      text: "go",
-      turnSignal: new AbortController().signal,
-      sessionId: "s-boom",
-      cwdPin: port,
-    })
-    expect(timeline).toEqual(["append", "turn.run"])
-    expect(port.here).toBe(REPO)
+      process.env[PIN] = "1"
+      const timeline: string[] = []
+      const port = recordingPort(timeline)
+      await freshDrive({
+        env: { ...process.env },
+        session: timelineSession(timeline),
+        resolveApproval: async () => "approve",
+        text: "go",
+        turnSignal: new AbortController().signal,
+        sessionId: "s-boom",
+        cwdPin: port,
+      })
+      expect(timeline).toEqual(["append", "turn.run"])
+      expect(port.here).toBe(REPO)
+    } finally {
+      mock.module("@/session", () => realExports)
+    }
   })
 })
