@@ -1,0 +1,80 @@
+id: aug22-rfc03-objective-propose-goal-hitl
+title: Objective propose-goal HITL — QUANTA_PROPOSE_GOAL approval gate + /objective mutate (RFC-03)
+section: 9
+subsystem: Objective substrate (ADR-0394) — model-mutation HITL approval posture (aug-22 RFC-03)
+order: 96
+maturity: L3
+status: new
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [interactive, headless]
+configurable: integrated
+owners: ["@songmin"]
+labels: ["rfc:aug22-03", "surface:cli", "default-off"]
+depends_on: [objective-tools]
+config_refs:
+  env: [QUANTA_PROPOSE_GOAL]
+purpose: |
+  RFC-03 C3 — a HITL approval POSTURE layered ON TOP of the ADR-0402
+  `objective_set`/`objective_update` tools (feature `objective-tools`), plus the
+  `session.objective.mutate` surface verb. It is NOT a second objective feature:
+  it is the gate that decides whether a MODEL-originated objective mutation
+  commits directly (legacy) or must be confirmed first.
+
+  ONE gated authority per surface: `resolveGatedObjectiveAuthority`
+  (objective-store-wire) reads three gates — `QUANTA_OBJECTIVE_TOOLS` (authority
+  present at all), `QUANTA_PROPOSE_GOAL` (this feature: proposal mediation), and
+  the surface's static `confirmationAvailable` — and routes construction through
+  the single production builder `buildObjectiveAuthority({ gateOn,
+  confirmationAvailable })`. When `QUANTA_PROPOSE_GOAL` is ON, every
+  model-originated set/replace/completion is PROPOSED: the objective tool adapter
+  awaits the confirm port BETWEEN `prepare` and `commit` (no store lock across the
+  wait). A surface that CANNOT raise an approval dialog is FAIL-CLOSED
+  (`approval-unavailable` ⇒ refused), NEVER an approval bypass. OFF ⇒
+  byte-identical legacy (mutations commit without approval).
+
+  Surface: `/objective` (show | edit <text> | pause | resume | clear) is
+  registered ONLY when `QUANTA_PROPOSE_GOAL` is on — the operator-side CAS twin of
+  the model's mutation, dispatching `session.objective.mutate` in-process (the
+  web/SDK daemon dispatches the same verb through the kernel/host bus).
+evidence:
+  code:
+    - src/host/runtime/objective-store-wire.ts
+    - src/runner/assemble/session-authorities/build-objective.ts
+    - src/apps/cli/slash/objective.ts
+    - src/objective/ports.ts
+  adrs: ["docs/plans/aug-22-흡수계획/rfc-03-goal-propose-edit.md"]
+  tests:
+    unit:
+      - tests/unit/objective-hitl-bypass-h1-hellgate.test.ts
+      - tests/unit/apps/cli/objective-cli-hitl-gating-hellgate.test.ts
+      - tests/unit/objective/gated-authority-resolver-hellgate.test.ts
+      - tests/unit/objective/hitl-proposal.test.ts
+      - tests/unit/cli/objective-frontdoor.hellgate.test.ts
+    integration: []
+    contract: []
+knobs:
+  - name: QUANTA_PROPOSE_GOAL
+    where: src/config/knob-inventory/runner.ts
+    default: false
+    purpose: |
+      Objective HITL proposal gate (RFC-03 C3). ON ⇒ model-originated objective
+      mutations are PROPOSED and must be confirmed through the surface's confirm
+      authority before commit; a surface without that authority refuses activation
+      (never a bypass) + registers `/objective`. Unset ⇒ mutations commit directly
+      (byte-identical).
+deliberate_hold:
+  reason: |
+    The HITL proposal path + the CLI `/objective` mutate surface are wired and
+    fail-closed, but the approval round-trip is proven under isolation only. The
+    web/SDK daemon dispatches the same `session.objective.mutate` verb through the
+    kernel/host bus (a separate surface-parity wave), and the durable
+    posture-of-record for the proposal decision is not yet resumed across restart.
+  promotion_path: |
+    Promote to L4 when the web-daemon confirm surface is wired end-to-end (not
+    just isolation-proven) and an owner is on the operational monitoring.
+notes: |
+  Cross-ref: `objective-tools` (ADR-0402) owns the LLM tools themselves gated on
+  QUANTA_OBJECTIVE_TOOLS; THIS feature owns only the QUANTA_PROPOSE_GOAL approval
+  posture + the operator `/objective` mutate command, so the two gates compose
+  without duplicating the tool surface.

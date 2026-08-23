@@ -1,0 +1,66 @@
+id: aug22-rfc05-question-availability-guard
+title: Question-availability guard — one predicate at spec + dispatch (RFC-05 E5)
+section: 3
+subsystem: Permission posture — request_user_input availability SSOT (aug-22 RFC-05 E5)
+order: 341
+maturity: L3
+status: new
+ui_surfaces: [none]
+monitoring: n-a
+modes: [interactive, headless, batch]
+configurable: n-a
+owners: ["@songmin"]
+labels: ["rfc:aug22-05", "safety", "default-off"]
+depends_on: [aug22-rfc05-posture-selector]
+purpose: |
+  RFC-05 E5 — the ONE `request_user_input` availability PREDICATE resolved at BOTH
+  the model tool-SPEC projection AND the pre-DISPATCH admission consult, so
+  visibility and execution can never diverge. `canRequestUserInput`
+  (`@/permission/posture/question-policy`) is a pure leaf mapping two facts — the
+  bound question knob (`askOutsidePlan`, E1) and the current turn's plan-mode
+  context — onto a closed admitted/denied result with a machine reason. The
+  agent bridge (`@/agent/dispatch-guard/question-availability`) binds the LIVE
+  values into a duck-typed reader; `buildUserInputBlock` reads it for the spec and
+  `consultQuestionAvailability` reads it pre-dispatch.
+
+  Fail-safe: an UNKNOWN plan-mode context is RESTRICTIVE (deny), never permissive.
+  A STALE handle — obtained while questions were allowed, dispatched after a
+  posture change denied them — is REJECTED by the pre-dispatch consult BEFORE the
+  wired `userInputPort` fires. GATE-OFF byte-identity: when no `questionGuard`
+  reader is bound the tool is present in the spec AND dispatched (current-behavior
+  default: question available). Slice fence: `@/tool` never imports
+  `@/permission` — the guard is agent-owned and duck-typed.
+evidence:
+  code:
+    - src/permission/posture/question-policy.ts
+    - src/agent/dispatch-guard/question-availability.ts
+    - src/agent/dispatch/preflight-consults.ts
+    - src/agent/dispatch-guard/index.ts
+  adrs: ["docs/plans/aug-22-흡수계획/rfc-05-permission-posture-surface.md"]
+  tests:
+    unit:
+      - tests/unit/e5-question-availability-guard-hellgate.test.ts
+    integration: []
+    contract: []
+knobs:
+  - name: askOutsidePlan
+    where: src/permission/posture/question-policy.ts
+    default: 'posture-derived'
+    purpose: |
+      The bound question knob (E1 AskOutsidePlan) — one of the two facts the
+      predicate reads. Surfaced/toggled through `/posture ask <on|off>`
+      (aug22-rfc05-posture-selector). No dedicated env var: activation is
+      port-present (a `questionGuard`/reader bound onto the dispatch path).
+deliberate_hold:
+  reason: |
+    Both read sites resolve through the one predicate and are hellgate-pinned, but
+    the guard only takes effect when a live posture reader is bound onto the
+    dispatch path — which today is the posture-selector's in-session authority.
+    Cross-surface (web/SDK) binding of the same reader is a separate parity wave.
+  promotion_path: |
+    Promote to L4 when the live posture reader is bound on every agent surface
+    (not just the CLI in-session path) and an owner is on monitoring.
+notes: |
+  No user-visible surface of its own — it is the invariant BEHIND
+  request_user_input availability. The SPEC/DISPATCH parity table in the hellgate
+  pins agreement cell-for-cell across the (askOutsidePlan × turnMode) matrix.

@@ -1,0 +1,63 @@
+id: aug22-rfc05-posture-selector
+title: Approval-posture selector — /posture front door (RFC-05)
+section: 3
+subsystem: Permission posture surface — /posture selector over PostureAuthority (aug-22 RFC-05)
+order: 340
+maturity: L3
+status: new
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [interactive]
+configurable: static
+owners: ["@songmin"]
+labels: ["rfc:aug22-05", "surface:cli", "default-off"]
+config_refs:
+  env: [QUANTA_POSTURE_SELECTOR]
+purpose: |
+  RFC-05 E4 `/posture` CLI approval-posture selector — the surface realization of
+  the `session.posture.set` verb. The web/SDK daemon dispatches the SAME verb
+  through the kernel/host command bus; the single-focus CLI REPL applies it
+  IN-PROCESS through the SHARED `PostureControl` wrapping the SAME live
+  `PostureAuthority` the per-turn gate reads, so a mutation changes the NEXT
+  turn's effective posture and the echo reflects the fresh requested/effective/
+  locks at the freshly-bumped revision.
+
+  It exposes E2's two durable entries as explicit scopes: `/posture` (current
+  thread), `/posture default` (future-thread default), `/posture use <preset>
+  [--default]`, `/posture mode <mode> [--default]`, `/posture ask <on|off>
+  [--default]`. A stale current-scope mutation is a typed `stale_revision`
+  conflict — never a clobber of a newer commit.
+
+  DEFAULT-OFF: registered only when `QUANTA_POSTURE_SELECTOR` is on — `/help`
+  catalog + command table are byte-identical when unset (parity with `/objective`
+  / `/attention`). When the slot (`ctx.postureEditor`) is absent it prints "not
+  wired" + exit 0. The gate is read via readCliKnob directly (not yet in the
+  `/knobs` inventory — tracked by R4).
+evidence:
+  code:
+    - src/apps/cli/slash/posture.ts
+    - src/permission/posture/authority.ts
+    - src/apps/cli/repl/surface-compose/dispatch-compose.ts
+    - src/apps/cli/slash/registry-surface.ts
+  adrs: ["docs/plans/aug-22-흡수계획/rfc-05-permission-posture-surface.md"]
+  tests:
+    unit:
+      - tests/unit/apps/cli/posture-compose-wiring-hellgate.test.ts
+      - tests/unit/apps/cli/posture-selector.test.ts
+      - tests/unit/permission/posture/store-posture-persistence.test.ts
+      - tests/unit/permission/posture/authority-cas.test.ts
+    integration: []
+    contract: []
+knobs:
+  - name: QUANTA_POSTURE_SELECTOR
+    where: src/apps/cli/slash/posture.ts
+    default: false
+    purpose: |
+      /posture selector gate (RFC-05 E4), read via readCliKnob at the repl
+      composition root. ON ⇒ `/posture` registered + wired to the live posture
+      authority. Unset ⇒ command absent, byte-identical.
+notes: |
+  Durable posture persistence (E2 createStorePosturePersistence) is BUILT but the
+  live path still seeds in-memory — the R3 follow-up wires the durable store so a
+  posture survives restart. The selector itself is complete for the in-session
+  case.

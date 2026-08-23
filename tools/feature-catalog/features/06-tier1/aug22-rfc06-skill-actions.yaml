@@ -1,0 +1,60 @@
+id: aug22-rfc06-skill-actions
+title: Per-skill actions — /skill copy / reveal / enable / disable (RFC-06 F5)
+section: 6
+subsystem: Skill runtime actions — copy / reveal / CAS enable-disable (aug-22 RFC-06 F5)
+order: 630
+maturity: L3
+status: new
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [interactive]
+configurable: static
+owners: ["@songmin"]
+labels: ["rfc:aug22-06", "surface:cli", "default-off"]
+config_refs:
+  env: [QUANTA_SKILL_ACTIONS]
+purpose: |
+  RFC-06 F5 `/skill` CLI per-skill action surface over the live F1
+  `SkillRuntimeAuthority`. Enable/disable is the surface twin of the
+  `session.skill.set_enabled` command (the web/SDK daemon dispatches the SAME
+  verb through the kernel/host bus; the single-focus CLI applies it IN-PROCESS
+  through the authority's CAS `setEnabled`, so a toggle changes the NEXT turn's
+  active set and the echo shows the freshly-bumped revision).
+
+  Every arm is a TYPED receipt, never a silent optional-success no-op:
+  `/skill copy <name>` re-resolves the canonical winner BY NAME at action time
+  and reads the RAW on-disk bytes of that winner's `sourcePath` (path-jailed under
+  the skill's own dir, bounded — oversize ⇒ typed `too_large`, escape ⇒ typed
+  `path_jail`); `/skill reveal <name>` reveals via a wired capability, an ABSENT
+  capability being the DISTINCT typed `unsupported` receipt (never
+  indistinguishable from success); `/skill enable|disable <name>` CAS through the
+  F1 authority. There is NO `/skill uninstall` — destructive F6 stays PARKED.
+
+  DEFAULT-OFF: registered only when `QUANTA_SKILL_ACTIONS` is on — `/help` +
+  command table byte-identical when unset (parity with `/posture`). Absent slot
+  (`ctx.skillActions`) ⇒ "not wired" + exit 0. Gate read via readCliKnob directly
+  (not yet in `/knobs` inventory — tracked by R4).
+evidence:
+  code:
+    - src/skill/runtime/actions.ts
+    - src/skill/runtime/adapters/node-skill-actions.ts
+    - src/apps/cli/slash/skill.ts
+    - src/skill/runtime/index.ts
+  adrs: ["docs/plans/aug-22-흡수계획/rfc-06-skills-actions.md"]
+  tests:
+    unit:
+      - tests/unit/skill/runtime/f5-skill-actions-hellgate.test.ts
+    integration: []
+    contract: []
+knobs:
+  - name: QUANTA_SKILL_ACTIONS
+    where: src/apps/cli/slash/skill.ts
+    default: false
+    purpose: |
+      /skill actions gate (RFC-06 F5), read via readCliKnob at the repl
+      composition root. ON ⇒ `/skill` copy/reveal/enable/disable registered +
+      wired to the F1 authority. Unset ⇒ command absent, byte-identical.
+notes: |
+  M9 open decision (R2): copy/reveal currently resolve through an independent
+  snapshot lookup that does NOT consult the authority's admin-banned/user-disabled
+  projection — a policy-vs-inspect call the R2 follow-up settles.

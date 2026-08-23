@@ -86,17 +86,19 @@ knobs:
       reference store via `createObjectiveStore()`.
 deliberate_hold:
   reason: |
-    Tools are registered + reachable, but ZERO downstream consumers read the
-    typed object yet. Compaction does not preserve { goal, success_criteria,
-    next_actions, blockers } across a summarize; resume does not re-hydrate
-    via fromSnapshot; subagent results do not attribute to the parent's
-    objective; the per-turn reminder does not surface the current objective.
-    All of these are separate ADRs.
+    Since ADR-0402 the "ZERO downstream consumers" premise has been overtaken —
+    consumers of the typed object HAVE landed: RFC-03 C2 durable resume
+    re-hydrates via `restoreFrom` / `decodeObjectiveSnapshot`
+    (build-objective.ts); ADR-0409 compaction preserves next_actions across a
+    summarize (compaction.ts `objectiveSetNextActions`); and RFC-03 C3 adds the
+    HITL-proposal consumer of the SAME authority
+    (aug22-rfc03-objective-propose-goal-hitl). What remains OPEN: subagent
+    results do not attribute to the parent's objective, and the per-turn reminder
+    does not yet surface the current objective — separate ADRs.
   promotion_path: |
-    Promote to L4 when at least ONE downstream consumer is wired — typically
-    the compaction-preserve path (next ADR) that re-injects the objective
-    snapshot into the compacted prefix so the model never re-derives intent
-    from message scrollback.
+    The original promotion trigger (compaction-preserve) has landed. Promote to
+    L4 when the remaining consumers (subagent attribution + per-turn reminder) are
+    wired and the objective is on operational monitoring.
 notes: |
   30 hellgate cases / 62 expects pin: tier1 barrel re-export; AgentConfig
   slot + FeaturesConfig Pick; default-OFF (slot absent ⇒ no tools); wired

@@ -1,0 +1,59 @@
+id: aug22-rfc06-2-worktree-cwd-pin
+title: Turn-boundary worktree cwd pin (RFC06-2)
+section: 6
+subsystem: Worktree lifecycle — next-turn cwd pin follower (aug-22 RFC06-2)
+order: 564
+maturity: L3
+status: new
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [interactive]
+configurable: integrated
+owners: ["@songmin"]
+labels: ["rfc:aug22-06", "surface:cli", "default-off"]
+depends_on: [aug02-rfc06-workspace-ownership]
+config_refs:
+  env: [QUANTA_WORKTREE_CWD_PIN]
+purpose: |
+  RFC06-2 follower that closes the gap workspace-ownership left open:
+  `transitionThreadToWorktree` persists the intent→git-effect→ready publish and
+  returns `nextCwd` (the owned worktree path), but nothing swapped the working cwd
+  to it ("next-turn cwd pin is a turn-loop follower, deferred"). This module is
+  that follower. It lives in the runner orchestration layer — the only seam that
+  may import BOTH the turn loop (`session-turn-driver`) and `@/session` (the
+  persisted `SessionMeta.workspaceOwnership` authority) — and re-uses that
+  persisted record (no new store).
+
+  `pinTurnBoundaryCwd` runs at the START of a turn, BEFORE the turn body appends
+  input — AT the next turn boundary, never mid-turn. When the gate is on AND the
+  session's persisted ownership is a LIVE worktree (`ready`/`active`), it chdir's
+  the working cwd to that owned path via the INJECTED `chdir` port. DEFAULT-OFF:
+  the read delegates to `@/session` `worktreeCwdPinEnabled`, a no-op unless
+  `QUANTA_WORKTREE_CWD_PIN` is on — absent ⇒ nothing loads, nothing chdir's,
+  byte-identical to the unwired turn path. NEVER throws (a follower must not break
+  a turn): a load/chdir failure is logged and the turn proceeds in the current cwd.
+evidence:
+  code:
+    - src/runner/orchestrate/worktree-cwd-pin-wire.ts
+    - src/runner/orchestrate/session-turn-driver.ts
+    - src/session/workspace-ownership.ts
+    - src/apps/cli/repl/session-loop/turn-driver.ts
+  adrs: ["docs/plans/aug-22-흡수계획/rfc-06-skills-actions.md"]
+  tests:
+    unit:
+      - tests/unit/session-ops/worktree-cwd-pin.test.ts
+      - tests/unit/runner/session-turn-driver.test.ts
+      - tests/unit/session-ops/worktree-reconcile-resume.test.ts
+    integration: []
+    contract: []
+knobs:
+  - name: QUANTA_WORKTREE_CWD_PIN
+    where: src/config/knob-inventory/host.ts
+    default: false
+    purpose: |
+      Turn-boundary cwd pin (RFC06-2). ON ⇒ after a current-thread→worktree
+      transition, pin the working cwd to the owned worktree at the NEXT turn
+      boundary (never mid-turn). Unset ⇒ cwd unchanged, byte-identical.
+notes: |
+  Read site is `session/workspace-ownership.ts` (`worktreeCwdPinEnabled`); the pin
+  re-uses the SSOT ownership record the transition already wrote — no new store.

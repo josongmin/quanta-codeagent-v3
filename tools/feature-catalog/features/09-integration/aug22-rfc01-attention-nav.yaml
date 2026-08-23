@@ -1,0 +1,65 @@
+id: aug22-rfc01-attention-nav
+title: Agent attention navigation — /attention front door (RFC-01)
+section: 9
+subsystem: Attention navigation — resolver + question broker + CLI front door (aug-22 RFC-01)
+order: 610
+maturity: L3
+status: new
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [interactive]
+configurable: integrated
+owners: ["@songmin"]
+labels: ["rfc:aug22-01", "surface:cli", "default-off"]
+config_refs:
+  env: [QUANTA_ATTENTION_NAV]
+purpose: |
+  RFC-01 answer to "which of my agents is blocked on me right now — take me
+  there." A pure stateless resolver (`@/attention`) joins two LIVE authorities —
+  the session `TaskRegistry` (task truth) and the `UserQuestionBroker`
+  (pending-question truth) — through A2's read-only `AttentionReader` wired onto
+  `buildSessionAuthorities`. The `/attention` CLI command owns NO accumulator and
+  NO per-viewer state: every invocation re-derives the live snapshot.
+
+  Sub-commands: `/attention` lists agents with a real pending question
+  (oldest-first, exposing the opaque requestId); `/attention next` selects+drills
+  the next agent needing attention (honest single-focus degrade — prints the pick
+  then drills `/agents inspect`, not a literal focus move); `/attention answer
+  <id> <text>` delivers the operator's answer IN-PROCESS via `broker.answer`,
+  routing ONLY by opaque requestId (never label, task id, or "latest").
+
+  DEFAULT-OFF: the broker, the reader, and the command are only wired/registered
+  when `QUANTA_ATTENTION_NAV` is on. Unset ⇒ no broker, no reader, no `/attention`
+  command — the `/help` catalog and command table are byte-identical to the
+  pre-RFC-01 surface. NOTE: `/attention` needs a live `TaskRegistry`, which is
+  itself gated on `QUANTA_SUBAGENT`; without subagents the front door registers
+  but has nothing to navigate.
+evidence:
+  code:
+    - src/attention/resolver.ts
+    - src/attention/index.ts
+    - src/apps/cli/slash/attention-cmd.ts
+    - src/runner/assemble/session-authorities/build.ts
+    - src/host/bootstrap/bootstrap-session/tooling-bundle.ts
+  adrs: ["docs/plans/aug-22-흡수계획/rfc-01-agent-attention-nav.md"]
+  tests:
+    unit:
+      - tests/unit/cli/attention-frontdoor.hellgate.test.ts
+      - tests/unit/attention/attention-default-off-byte-identity.test.ts
+      - tests/unit/runner/session-authorities-attention-join.test.ts
+    integration:
+      - tests/integration/cli-attention-navigation.test.ts
+      - tests/integration/child-question-attention-projection.test.ts
+    contract: []
+knobs:
+  - name: QUANTA_ATTENTION_NAV
+    where: src/config/knob-inventory/runner.ts
+    default: false
+    purpose: |
+      Attention-navigation gate (RFC-01). ON ⇒ wires the pure `@/attention`
+      resolver + the user-question broker into a read-only AttentionReader on the
+      session authorities and registers `/attention`. Unset ⇒ byte-identical.
+notes: |
+  Web is PARKED (v1 is CLI-only). The reader is derived, not authoritative — it
+  re-joins the two live authorities on every call, so a stale handle cannot
+  navigate to an already-answered question.
