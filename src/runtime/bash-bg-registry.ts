@@ -398,7 +398,8 @@ export const resolveOwnedShellId = (
 
 /** Build a fresh registry. The module-level singleton calls this with defaults;
  *  tests call it directly to get an isolated instance. */
-export const createBashBgRegistry = (config: BashBgRegistryConfig = {}): BashBgRegistry => {
+/** The bounded entry table and its eviction/drain helpers. */
+const bgTables = (config: BashBgRegistryConfig = {}) => {
   const port = config.port ?? defaultBashProcessHandlePort
   const maxEntries = config.maxEntries ?? DEFAULT_MAX_BG_SHELLS
   // Map iteration order = insertion order — gives us LRU-by-insertion for free.
@@ -425,6 +426,13 @@ export const createBashBgRegistry = (config: BashBgRegistryConfig = {}): BashBgR
     stream: ReadableStream<Uint8Array>,
     onChunk: (text: string) => void,
   ): Promise<void> => drainReadableStream(stream, onChunk)
+  return { config, port, maxEntries, entries, evictOldest, drainStream }
+}
+
+/** Admission: register a spawned job, adopt an already-running one, and read
+ *  a handle back. These are the only writers of the table. */
+const bgAdmission = (ctx: ReturnType<typeof bgTables>) => {
+  const { port, maxEntries, entries, evictOldest, drainStream } = ctx
 
   const register: BashBgRegistry["register"] = async ({ command, cwd, signal, ownerId }) => {
     if (entries.size >= maxEntries) {
@@ -562,6 +570,12 @@ export const createBashBgRegistry = (config: BashBgRegistryConfig = {}): BashBgR
     if (h === undefined) return null
     return snapshot(h)
   }
+  return { register, snapshot, adopt, get }
+}
+
+/** Waiting: poll a job to a terminal state, or await its handle. */
+const bgWaiting = (ctx: ReturnType<typeof bgTables> & ReturnType<typeof bgAdmission>) => {
+  const { entries, snapshot } = ctx
 
   /** Polling body of `awaitHandle`. Returns a "found" outcome (matched OR
    *  exited) by snapshotting the live handle. Extracted so `awaitHandle` stays
@@ -610,6 +624,14 @@ export const createBashBgRegistry = (config: BashBgRegistryConfig = {}): BashBgR
       deadline.dispose()
     }
   }
+  return { pollUntilTerminal, awaitHandle }
+}
+
+/** Termination: kill one job, the caller's own, or every one. */
+const bgTermination = (
+  ctx: ReturnType<typeof bgTables> & ReturnType<typeof bgAdmission> & ReturnType<typeof bgWaiting>,
+) => {
+  const { entries, snapshot } = ctx
 
   const kill: BashBgRegistry["kill"] = async (id) => {
     const h = entries.get(id)
@@ -682,6 +704,21 @@ export const createBashBgRegistry = (config: BashBgRegistryConfig = {}): BashBgR
     entries.clear()
   }
 
+  return { kill, listOwned, killOwned, killAll }
+}
+
+/** Assemble the chained builders. */
+export const createBashBgRegistry = (config: BashBgRegistryConfig = {}): BashBgRegistry => {
+  const p0 = bgTables(config)
+  const p1 = bgAdmission({ ...p0 })
+  const p2 = bgWaiting({ ...p0, ...p1 })
+  const p3 = bgTermination({ ...p0, ...p1, ...p2 })
+  const { entries, register, adopt, get, awaitHandle, kill, listOwned, killOwned, killAll } = {
+    ...p0,
+    ...p1,
+    ...p2,
+    ...p3,
+  }
   return {
     register,
     adopt,

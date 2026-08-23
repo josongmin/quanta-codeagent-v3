@@ -492,17 +492,18 @@ const findWinningIn = (args: {
  * Create the persistent registry. Wire it into the gate via
  * `config.trustScope = { registry, projectKey }`.
  */
-export const createPersistentTrustScopeRegistry = (
-  opts: PersistentTrustScopeOptions = {},
-): PersistentTrustScopeRegistry => {
+/** The two persisted files (global + per-workspace overlay), their debounced
+ *  writers, and the tombstone set that makes a revoke survive a merge. */
+const trustFiles = (opts: PersistentTrustScopeOptions = {}) => {
+  /** The factory's MUTABLE state. `let` bindings cannot cross a function
+   *  boundary by value, so they live here and every link mutates in place —
+   *  observationally identical to the closure they replace. */
+  const mut = {
+    globalState: { version: STATE_VERSION, grants: {} } as PersistentTrustScopeFile,
+    overlayState: { version: STATE_VERSION, grants: {} } as PersistentTrustScopeFile,
+  }
   const now = opts.now ?? Date.now
   const debounceMs = opts.debounceMs ?? 50
-
-  // Live state — the gate / hasGrant reads from this. Synthesized from
-  // (global file load) ∪ (project overlay load); writes go to the right file
-  // based on the projectKey at grant() time.
-  let globalState: PersistentTrustScopeFile = { version: STATE_VERSION, grants: {} }
-  let overlayState: PersistentTrustScopeFile = { version: STATE_VERSION, grants: {} }
 
   // Per-instance tombstones: identities this instance has revoked/consumed since
   // construction. Threaded into the merge so a concurrent peer's flush does NOT
@@ -544,19 +545,38 @@ export const createPersistentTrustScopeRegistry = (
           mergeWithDisk: mergeFiles,
         })
       : null
+  return {
+    opts,
+    now,
+    debounceMs,
+    tombstones,
+    mergeFiles,
+    tombstone,
+    globalFile,
+    overlayPath,
+    overlayFile,
+    mut,
+  }
+}
+
+/** Resolution: which state a scope reads from, which grant WINS, and the
+ *  once-only consumption bookkeeping. */
+const trustLookup = (ctx: ReturnType<typeof trustFiles>) => {
+  const { now, tombstone, globalFile, overlayFile, mut } = ctx
 
   // Convenience — the effective lookup state is overlay ∪ global. We do NOT
   // cache the union; the input arrays are tiny so recomputing on each lookup
   // is cheaper than maintaining a derived cache + cache-invalidate dance.
-  const lookupState = (): PersistentTrustScopeFile => overlayFiles(globalState, overlayState)
+  const lookupState = (): PersistentTrustScopeFile =>
+    overlayFiles(mut.globalState, mut.overlayState)
 
   /** Lookup helper used by hasGrant. Delegates to the pure {@link findWinningIn}
    *  with the live state snapshots so the factory's complexity stays bounded. */
   const findWinning = (projectKey: string, action: TrustScopeAction): WinningHit | null =>
     findWinningIn({
-      overlayBucket: overlayState.grants[projectKey] ?? [],
-      globalProjectBucket: globalState.grants[projectKey] ?? [],
-      globalStarBucket: globalState.grants[GLOBAL_PROJECT_KEY] ?? [],
+      overlayBucket: mut.overlayState.grants[projectKey] ?? [],
+      globalProjectBucket: mut.globalState.grants[projectKey] ?? [],
+      globalStarBucket: mut.globalState.grants[GLOBAL_PROJECT_KEY] ?? [],
       action,
       clock: now(),
     })
@@ -568,12 +588,12 @@ export const createPersistentTrustScopeRegistry = (
   const consumeOnceOnly = (projectKey: string, win: WinningHit): void => {
     tombstone(projectKey, win.record)
     if (win.layer === "overlay") {
-      overlayState = removeRecord(overlayState, projectKey, win.record)
-      if (overlayFile !== null) overlayFile.flushDebounced(() => overlayState)
+      mut.overlayState = removeRecord(mut.overlayState, projectKey, win.record)
+      if (overlayFile !== null) overlayFile.flushDebounced(() => mut.overlayState)
       return
     }
-    globalState = removeRecord(globalState, projectKey, win.record)
-    globalFile.flushDebounced(() => globalState)
+    mut.globalState = removeRecord(mut.globalState, projectKey, win.record)
+    globalFile.flushDebounced(() => mut.globalState)
   }
 
   /** Remove the FIRST matching record in a layer. Returns true iff a record
@@ -583,43 +603,51 @@ export const createPersistentTrustScopeRegistry = (
     projectKey: string,
     pred: (r: PersistentTrustScopeRecord) => boolean,
   ): boolean => {
-    const state = layer === "overlay" ? overlayState : globalState
+    const state = layer === "overlay" ? mut.overlayState : mut.globalState
     const list = state.grants[projectKey] ?? []
     const idx = list.findIndex(pred)
     if (idx < 0) return false
     const removed = list[idx]
     if (removed !== undefined) tombstone(projectKey, removed)
     if (layer === "overlay") {
-      overlayState = removeAt(overlayState, projectKey, idx)
-      if (overlayFile !== null) overlayFile.flushDebounced(() => overlayState)
+      mut.overlayState = removeAt(mut.overlayState, projectKey, idx)
+      if (overlayFile !== null) overlayFile.flushDebounced(() => mut.overlayState)
     } else {
-      globalState = removeAt(globalState, projectKey, idx)
-      globalFile.flushDebounced(() => globalState)
+      mut.globalState = removeAt(mut.globalState, projectKey, idx)
+      globalFile.flushDebounced(() => mut.globalState)
     }
     return true
   }
+  return { lookupState, findWinning, consumeOnceOnly, removeFirstFrom }
+}
+
+/** The operations the port delegates to. Split out of
+ *  `createPersistentTrustScopeRegistry` (god-function burndown): the port
+ *  object was already one-line delegators, so the body WAS the function. */
+const trustMutations = (ctx: ReturnType<typeof trustFiles> & ReturnType<typeof trustLookup>) => {
+  const { now, globalFile, overlayFile, mut, findWinning, consumeOnceOnly, removeFirstFrom } = ctx
 
   const doHydrate = async (): Promise<void> => {
     await globalFile.load((s) => {
-      globalState = s
+      mut.globalState = s
     })
     if (overlayFile !== null) {
       await overlayFile.load((s) => {
-        overlayState = s
+        mut.overlayState = s
       })
     }
   }
 
   const doFlush = async (): Promise<void> => {
-    await globalFile.flush(() => globalState)
-    if (overlayFile !== null) await overlayFile.flush(() => overlayState)
+    await globalFile.flush(() => mut.globalState)
+    if (overlayFile !== null) await overlayFile.flush(() => mut.overlayState)
   }
 
   const doFlushDurable = async (): Promise<PersistOutcome> => {
-    const globalOutcome = await globalFile.flushDurable(() => globalState)
+    const globalOutcome = await globalFile.flushDurable(() => mut.globalState)
     const overlayOutcome =
       overlayFile !== null
-        ? await overlayFile.flushDurable(() => overlayState)
+        ? await overlayFile.flushDurable(() => mut.overlayState)
         : ({ durable: true } as PersistOutcome)
     // Durable only when BOTH files persisted. Surface the first failure reason
     // so the caller has something actionable (opaque, not a stack trace).
@@ -663,12 +691,12 @@ export const createPersistentTrustScopeRegistry = (
     // Project-keyed grants land in the overlay when one exists; otherwise
     // they go to the global file under their projectKey.
     if (overlayFile !== null && projectKey !== GLOBAL_PROJECT_KEY) {
-      overlayState = appendRecord(overlayState, projectKey, record)
-      overlayFile.flushDebounced(() => overlayState)
+      mut.overlayState = appendRecord(mut.overlayState, projectKey, record)
+      overlayFile.flushDebounced(() => mut.overlayState)
       return
     }
-    globalState = appendRecord(globalState, projectKey, record)
-    globalFile.flushDebounced(() => globalState)
+    mut.globalState = appendRecord(mut.globalState, projectKey, record)
+    globalFile.flushDebounced(() => mut.globalState)
   }
 
   const doRevoke = (projectKey: string, target: TrustScopeGrant): void => {
@@ -682,6 +710,26 @@ export const createPersistentTrustScopeRegistry = (
     removeFirstFrom("global", projectKey, matches)
   }
 
+  return { doHydrate, doFlush, doFlushDurable, doHasGrant, doConsume, doGrant, doRevoke }
+}
+
+/** Assemble the chained builders. */
+export const createPersistentTrustScopeRegistry = (
+  opts: PersistentTrustScopeOptions = {},
+): PersistentTrustScopeRegistry => {
+  const p0 = trustFiles(opts)
+  const p1 = trustLookup({ ...p0 })
+  const p2 = trustMutations({ ...p0, ...p1 })
+  const {
+    lookupState,
+    doHydrate,
+    doFlush,
+    doFlushDurable,
+    doHasGrant,
+    doConsume,
+    doGrant,
+    doRevoke,
+  } = { ...p0, ...p1, ...p2 }
   return {
     hydrate: doHydrate,
     flush: doFlush,
