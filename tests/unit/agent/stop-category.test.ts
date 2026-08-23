@@ -28,7 +28,7 @@ import { DEFAULT_STOP_REASON_ROUTING } from "@/agent/stop-reason/default-policy"
 import { ALL_STOP_ACTION_KINDS, type StopAction } from "@/agent/stop-reason/types"
 
 describe("classifyErrorReason — matrix coverage", () => {
-  test.each<[string, StopCategory["kind"], string]>([
+  test.each<[string, StopCategory["kind"], StopCategory["reasonCode"]]>([
     [
       "LLM stream failed after retries: status 429 rate_limit",
       "failed",

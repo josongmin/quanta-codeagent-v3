@@ -1,0 +1,82 @@
+id: truncated-output-nonsuccess
+title: "A truncated answer is a non-success outcome (`model.output_truncated`) + `StopCategory.reasonCode` closed to the table"
+section: 1
+subsystem: Agent loop — terminal classification
+order: 700
+maturity: L4
+status: new
+ui_surfaces: [cli, web]
+monitoring: n-a
+modes: [interactive, headless]
+configurable: n-a
+owners: ["@songmin"]
+labels: [correctness, surface:core, tier:core, observability]
+depends_on: []
+surface_integration:
+  cli: full
+  web: full
+  method: audited
+  verified: "2026-08-24"
+  evidence:
+    cli: "`AgentOutcome.reason` + the shared stop-presentation table the CLI renders"
+    web: "mirrored in apps/web-frontend/src/lib/stop-presentation.ts, pinned by the web-drift hellgate"
+purpose: |
+  When the model stops at `max_tokens` the loop spends a continuation budget. Once
+  that budget was spent the turn sealed with `{do:"proceed"}` — the ordinary
+  text-completion path — so a mid-sentence answer reported `completed`, SUCCESS.
+
+  The only trace was `OUTPUT_TRUNCATED_MARKER` in the visible text. That marker is
+  genuinely good (in-band truncation honesty beats every competitor rail examined),
+  but a marker is not an outcome: every programmatic consumer branches on
+  `AgentOutcome.reason` — the subagent runner's `ok: reason === "completed"` map, the
+  ci-bot's completed/stopped verb, a bench harness — and none can read a string
+  buried in assistant text.
+
+  This codebase already refuses the same fold twice: a fumbled tool call seals
+  `model.malformed_tool_use`, a produced-nothing stall seals `model.empty_exhausted`,
+  both NON-success. Truncation is the third member of that family.
+
+  Landed here:
+    - `OUTPUT_TRUNCATED_REASON` — a `[output-truncated]` non-success terminal. The
+      `error` recovery path appends the assembled message to working memory, so the
+      PARTIAL ANSWER SURVIVES; refusing to call it a success must not throw the
+      model's words away.
+    - `MODEL_OUTPUT_TRUNCATED` — its own code, tone `incomplete` (nothing went wrong;
+      the answer is unfinished, like hitting the turn limit).
+    - `StopCategory.reasonCode: StopReasonCode` — the type IS the table. It was a bare
+      `string` whose valid values lived in a prose comment that had already gone stale
+      (it never gained `loop.no_progress`).
+    - `TURN_AWAITING_APPROVAL` — split from `SHELL_NEEDS_APPROVAL`, which the
+      awaiting-approval path was borrowing. That code is documented "reserved for the
+      gate seam" and is SHELL-specific, so using it for a tool-agnostic pause
+      attributed every approval wait to the shell.
+evidence:
+  code:
+    - src/agent/recovery.ts
+    - src/agent/stop-category.ts
+    - apps/web-frontend/src/lib/stop-presentation.ts
+  adrs:
+    - docs/decisions/0545-truncated-output-is-not-a-completion.md
+  tests:
+    unit:
+      - tests/unit/agent/stop-truncation-nonsuccess-hellgate.test.ts
+      - tests/unit/agent/stop-category.test.ts
+      - tests/unit/recovery-hellgate.test.ts
+      - tests/unit/loop-control-cutoff-fixes.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  Four existing tests PINNED `proceed` as the intended seal for a spent-budget
+  truncation — they encoded the defect. Updated with the reason rather than worked
+  around.
+
+  Both runtime drift guards fired immediately and correctly:
+  `assertStopPresentationInSync` refused the new code until it had presentation, and
+  the web-mirror drift hellgate refused it until the web table gained both new codes.
+
+  The load-bearing test is T-7, which drives the REAL `runAgent` and asserts on
+  `AgentOutcome.reason`. Everything else drives `decideOnAssembled`, a pure decision —
+  a fix that got the decision right but never reached the outcome would look identical
+  in those tests. Reverting the seal restores `completed` end-to-end.

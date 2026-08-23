@@ -140,8 +140,13 @@ describe("decideOnAssembled — FIX-3 truncated output is marked", () => {
     }
     const finalMsg = textMsg("the final mid-sentence text that got")
     const sealed = decideOnAssembled("max_tokens", finalMsg, rec)
-    // The turn seals via the text-completion path (proceed → completed downstream).
-    expect(sealed.do).toBe("proceed")
+    // §17 packet T — this used to seal via the text-completion path
+    // (`proceed` → `completed` downstream), so a cut-off answer reported
+    // SUCCESS and the marker below was its only trace. A caller branching on
+    // `outcome.reason` could not see it. It is now a NON-success terminal, and
+    // the marker (asserted below) is kept: in-band honesty AND a reason a
+    // program can read.
+    expect(sealed.do).toBe("error")
     const tail = finalMsg.content.find((b) => b.type === "text")
     // TEETH: pre-fix the text was UNMARKED — a mid-sentence answer read clean.
     expect(tail?.type === "text" && tail.text.endsWith(OUTPUT_TRUNCATED_MARKER)).toBe(true)

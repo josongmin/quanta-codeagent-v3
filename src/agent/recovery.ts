@@ -53,6 +53,29 @@ export type RecoveryReason =
  *  was CUT, not cleanly finished. Exported so tests pin the exact literal. */
 export const OUTPUT_TRUNCATED_MARKER = "\n\n[output truncated at token budget]"
 
+/** §17 packet T — reason tag prefixed onto the `error`-class terminal minted
+ *  when the model was STILL `max_tokens`-truncated after the continuation budget
+ *  was spent.
+ *
+ *  Previously this sealed via `{do:"proceed"}`, i.e. the ordinary
+ *  text-completion path, so a mid-sentence answer reported `completed` —
+ *  SUCCESS. The visible {@link OUTPUT_TRUNCATED_MARKER} was the only trace, and
+ *  a caller branching on `outcome.reason` (the subagent runner's
+ *  `ok: reason === "completed"` map, a bench harness, `/status`) cannot read a
+ *  string buried in assistant text.
+ *
+ *  This is the third member of the family that already refuses to fold a failure
+ *  into a success: {@link MALFORMED_TOOL_USE_REASON} (the model tried to act and
+ *  could not) and {@link EMPTY_TURN_EXHAUSTED_REASON} (the model produced
+ *  nothing). Truncation is "the model was cut off mid-answer" and belongs with
+ *  them. `classifyErrorReason` recognises the `[output-truncated]` prefix.
+ *
+ *  The marker is KEPT: the `error` recovery path appends the assembled message
+ *  to working memory, so the partial answer survives — refusing to call it a
+ *  success must not throw the model's words away. */
+export const OUTPUT_TRUNCATED_REASON =
+  "[output-truncated] model output hit the token budget and was still truncated after the continuation budget"
+
 /** Loop-control fix (jun-25): reason tag prefixed onto the `error`-class
  *  terminal minted when the model signalled `tool_use` intent but could not
  *  emit a valid tool call within the malformed-retry budget. Routed to a
@@ -355,10 +378,14 @@ export const decideOnAssembled = (
   if (refusal) return refusal
   const maxTokensNudge = decideMaxTokensNudge(stopReason, rec)
   if (maxTokensNudge) return maxTokensNudge
-  // Reaching here on `max_tokens` means the continuation budget is SPENT: append a
-  // visible (idempotent) truncation marker so a mid-sentence answer doesn't seal as
-  // a clean `completed` — the turn still seals via the text-completion path below.
-  if (stopReason === "max_tokens") markTruncatedOutput(message)
+  // Reaching here on `max_tokens` means the continuation budget is SPENT. Append
+  // the visible (idempotent) in-band marker AND seal as a NON-success terminal:
+  // the marker keeps quanta's honest in-band signal, the terminal gives every
+  // programmatic caller a reason it can branch on. See OUTPUT_TRUNCATED_REASON.
+  if (stopReason === "max_tokens") {
+    markTruncatedOutput(message)
+    return { do: "error", reason: OUTPUT_TRUNCATED_REASON }
+  }
   const hasTools = message.content.some((b) => b.type === "tool_use")
   const malformed = decideMalformed(stopReason, hasTools, rec)
   if (malformed) return malformed

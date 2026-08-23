@@ -60,19 +60,16 @@ export type StopCategoryKind =
  * Structured stop category.
  *
  *   - `kind` — coarse bucket, see {@link StopCategoryKind}.
- *   - `reasonCode` — stable namespaced code. Canonical codes (extend the
- *     {@link STOP_REASON_CODE} table below — never inline a literal):
- *       provider.rate_limit, provider.overloaded, provider.network,
- *       provider.auth, provider.bad_request, provider.unknown,
- *       compaction.thrash, user.interrupt, system.abort, shell.needs_approval,
- *       runtime.unknown_error, completed.normal, completed.max_turns,
- *       budget.cost_cap, budget.ledger_breach,
- *       model.empty_exhausted, model.malformed_tool_use.
+ *   - `reasonCode` — stable namespaced code from {@link STOP_REASON_CODE}. The
+ *     type is the table, deliberately: this used to be a bare `string` with the
+ *     valid values listed HERE in prose, and the prose went stale (it never
+ *     gained `loop.no_progress`). Adding an arm to the table is now the only way
+ *     to produce a code, and the compiler enforces it.
  *   - `hint` — optional surface-facing copy, never used for control flow.
  */
 export interface StopCategory {
   kind: StopCategoryKind
-  reasonCode: string
+  reasonCode: StopReasonCode
   hint?: string
 }
 
@@ -101,9 +98,17 @@ export const STOP_REASON_CODE = {
   USER_INTERRUPT: "user.interrupt",
   /** System-issued abort (host shutdown / parent process). */
   SYSTEM_ABORT: "system.abort",
-  /** Admissibility-gate hand-off-required: tool needs explicit user
-   *  approval. Reserved for the gate seam (not wired in this round). */
+  /** Admissibility-gate hand-off-required: a SHELL command needs explicit user
+   *  approval. Reserved for the gate seam (not wired in this round). Distinct
+   *  from {@link TURN_AWAITING_APPROVAL} — see there. */
   SHELL_NEEDS_APPROVAL: "shell.needs_approval",
+  /** §17 packet T — the turn is PAUSED on an approval decision and is
+   *  RESUMABLE. Split from `SHELL_NEEDS_APPROVAL`, which the awaiting-approval
+   *  path was borrowing: that code names a SHELL-specific gate hand-off, so
+   *  using it for a tool-AGNOSTIC pause attributed every approval wait to the
+   *  shell in analytics, and contradicted its own "reserved for the gate seam"
+   *  contract. */
+  TURN_AWAITING_APPROVAL: "turn.awaiting_approval",
   /** Runtime exception not classified as an LLM error. */
   RUNTIME_UNKNOWN_ERROR: "runtime.unknown_error",
   /** Normal completion — model produced a final assistant turn with no
@@ -132,6 +137,12 @@ export const STOP_REASON_CODE = {
    *  NOTHING stall — NON-success (the model never gave text, a tool call, OR a
    *  final answer), distinct from a clean completion. */
   MODEL_EMPTY_EXHAUSTED: "model.empty_exhausted",
+  /** §17 packet T — the model's output hit the token budget and was STILL
+   *  truncated after the same-turn continuation budget was spent. A CUT-OFF
+   *  answer — NON-success (the model never reached its own end of turn),
+   *  distinct from a clean completion. The partial text is preserved and carries
+   *  the in-band `[output truncated at token budget]` marker. */
+  MODEL_OUTPUT_TRUNCATED: "model.output_truncated",
   /** aug-23 priority 2 — the dedup gate's opt-in no-progress ceiling tripped:
    *  the model kept re-issuing a call the gate had already blocked. A WEDGE,
    *  distinct from `max_turns` (budget spent doing varied work) and from any
@@ -188,6 +199,18 @@ export const classifyErrorReason = (reason: string): StopCategory => {
       kind: "failed",
       reasonCode: STOP_REASON_CODE.MODEL_EMPTY_EXHAUSTED,
       hint: "Model returned only empty responses; stopped after the retry budget.",
+    }
+  }
+  // §17 packet T: output truncation. The truncated terminal (recovery.ts
+  // OUTPUT_TRUNCATED_REASON) carries a fixed `[output-truncated]` prefix so a
+  // host renders "the answer was cut off" distinctly from a provider/runtime
+  // failure. Checked BEFORE the provider patterns (its prefix is unambiguous),
+  // same as the malformed and empty-turn arms above.
+  if (/^\[output-truncated\]/.test(reason)) {
+    return {
+      kind: "failed",
+      reasonCode: STOP_REASON_CODE.MODEL_OUTPUT_TRUNCATED,
+      hint: "The answer was cut off at the token budget; it is incomplete.",
     }
   }
   // ALBB-17 claim 3 — stop-reason-policy terminals. `decideFromStopPolicy`
@@ -394,7 +417,7 @@ assertStopReasonTablesInSync()
  *  RESUMABLE — a surface should render "waiting on you", never success. */
 export const awaitingApprovalCategory = (): StopCategory => ({
   kind: STOP_CATEGORY_KIND_BY_STOP_REASON.awaiting_approval,
-  reasonCode: STOP_REASON_CODE.SHELL_NEEDS_APPROVAL,
+  reasonCode: STOP_REASON_CODE.TURN_AWAITING_APPROVAL,
   hint: "Paused — waiting for your approval decision.",
 })
 
@@ -431,9 +454,20 @@ export const STOP_PRESENTATION_BY_REASON_CODE: Record<StopReasonCode, StopPresen
   [STOP_REASON_CODE.BUDGET_COST_CAP]: { label: "Stopped at cost cap", tone: "blocked" },
   [STOP_REASON_CODE.BUDGET_LEDGER_BREACH]: { label: "Stopped at spend ceiling", tone: "blocked" },
   [STOP_REASON_CODE.SHELL_NEEDS_APPROVAL]: { label: "Waiting for approval", tone: "blocked" },
+  [STOP_REASON_CODE.TURN_AWAITING_APPROVAL]: {
+    label: "Paused for your approval",
+    tone: "blocked",
+  },
   [STOP_REASON_CODE.MODEL_REFUSAL]: { label: "Model declined", tone: "refused" },
   [STOP_REASON_CODE.MODEL_EMPTY_EXHAUSTED]: { label: "Model returned nothing", tone: "failed" },
   [STOP_REASON_CODE.MODEL_MALFORMED_TOOL_USE]: { label: "Tool call was malformed", tone: "failed" },
+  // `incomplete`, not `failed`: the model was working and got cut off. Nothing
+  // went wrong — the answer is simply unfinished, which is the same shape as
+  // hitting the turn limit.
+  [STOP_REASON_CODE.MODEL_OUTPUT_TRUNCATED]: {
+    label: "Answer was cut off at the token budget",
+    tone: "incomplete",
+  },
   [STOP_REASON_CODE.COMPACTION_THRASH]: { label: "Context compaction thrashed", tone: "failed" },
   [STOP_REASON_CODE.PROVIDER_RATE_LIMIT]: { label: "Provider rate limit", tone: "failed" },
   [STOP_REASON_CODE.PROVIDER_OVERLOADED]: { label: "Provider overloaded", tone: "failed" },

@@ -205,9 +205,11 @@ describe("A3 boundary — output-continue budget (=3)", () => {
       expect(decideOnAssembled("max_tokens", textMsg(`p${i}`), rec).do).toBe("nudge")
     }
     expect(rec.outputContinues).toBe(3)
-    // 4th: budget spent → max_tokens with text content is treated as a normal
-    // (proceed) turn, NOT a hard error and NOT a 4th nudge.
-    expect(decideOnAssembled("max_tokens", textMsg("done"), rec).do).toBe("proceed")
+    // 4th: budget spent. §17 packet T — this used to be treated as a normal
+    // (`proceed`) turn, which sealed a cut-off answer as `completed`. It is now
+    // a NON-success truncation terminal. NOT a 4th nudge either: the budget is
+    // the budget.
+    expect(decideOnAssembled("max_tokens", textMsg("done"), rec).do).toBe("error")
     expect(rec.outputContinues).toBe(3)
   })
 })
@@ -244,10 +246,10 @@ describe("A3 interleaving — what a successful `proceed` turn resets (DOCUMENTE
     expect(decideOnAssembled("tool_use", toolMsg("t1"), rec).do).toBe("proceed")
     expect(rec.outputContinues).toBe(3) // NOT reset
     expect(rec.malformedRetries).toBe(1) // NOT reset
-    // So the next max_tokens proceeds (budget already spent) and the next
-    // malformed seals as a NON-success terminal (FIX-2; budget already spent) —
-    // no fresh allowance.
-    expect(decideOnAssembled("max_tokens", textMsg("x"), rec).do).toBe("proceed")
+    // So the next max_tokens seals as a NON-success truncation terminal (§17
+    // packet T; budget already spent) and the next malformed seals as a
+    // NON-success terminal (FIX-2; budget already spent) — no fresh allowance.
+    expect(decideOnAssembled("max_tokens", textMsg("x"), rec).do).toBe("error")
     expect(decideOnAssembled("tool_use", textMsg("y"), rec).do).toBe("error")
   })
 
@@ -415,8 +417,9 @@ describe("decideOnAssembled", () => {
       const a = decideOnAssembled("max_tokens", textMsg("partial"), rec)
       expect(a.do).toBe("nudge")
     }
-    // Budget spent: max_tokens with text now treated as a normal turn.
-    expect(decideOnAssembled("max_tokens", textMsg("done"), rec).do).toBe("proceed")
+    // Budget spent. §17 packet T — a still-truncated turn seals NON-success
+    // rather than as a normal turn; see `OUTPUT_TRUNCATED_REASON`.
+    expect(decideOnAssembled("max_tokens", textMsg("done"), rec).do).toBe("error")
   })
 
   test("malformed tool_use: one nudge, then NON-success terminal (FIX-2)", () => {
