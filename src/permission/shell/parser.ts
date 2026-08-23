@@ -21,8 +21,23 @@
  */
 
 import { readFile } from "node:fs/promises"
-import { createRequire } from "node:module"
-import { join } from "node:path"
+import bashGrammarPath from "@vscode/tree-sitter-wasm/wasm/tree-sitter-bash.wasm" with {
+  type: "file",
+}
+// EMBEDDED, not resolved from disk. `bun build --compile` produces a single-file
+// binary with no `node_modules` beside it, so a `createRequire` lookup resolves
+// nothing and `web-tree-sitter` falls back to loading its runtime wasm from
+// `/$bunfs/root/web-tree-sitter.wasm` — which is not there either.
+//
+// Measured: in `dist/agent` the load failed with
+// `ENOENT '/$bunfs/root/web-tree-sitter.wasm'`, so the structural hard-deny
+// authority answered `unknown` for EVERY command and the SHIPPING binary
+// silently ran on the regex-only gate this lane was built to replace. Dev runs
+// were fine, which is exactly what made it invisible until the integration pass.
+//
+// `with { type: "file" }` makes bun embed the bytes and hand back a path that
+// resolves in BOTH modes (a real path in dev, `/$bunfs/root/…` when compiled).
+import runtimeWasmPath from "web-tree-sitter/web-tree-sitter.wasm" with { type: "file" }
 import { errMessage, logger } from "@/shared"
 
 /** The subset of a tree-sitter node this slice reads. Declared structurally so
@@ -44,15 +59,6 @@ interface ShellParser {
 let parser: ShellParser | null = null
 let initPromise: Promise<void> | null = null
 
-/** Resolve the directory holding the grammar `.wasm` files — the same
- *  `@vscode/tree-sitter-wasm/wasm` dir the retrieval parser resolves. Kept as a
- *  local resolution (rather than importing the retrieval helper) so the
- *  permission slice does not take a dependency on the retrieval slice. */
-const grammarDir = (): string => {
-  const req = createRequire(import.meta.url)
-  return join(req.resolve("@vscode/tree-sitter-wasm/package.json"), "..", "wasm")
-}
-
 /** Load the grammar once. Idempotent and concurrency-safe: repeated calls await
  *  the SAME promise, so N sessions in one process load one grammar. */
 export const initShellEffectParser = async (): Promise<void> => {
@@ -61,18 +67,21 @@ export const initShellEffectParser = async (): Promise<void> => {
   initPromise = (async () => {
     try {
       const mod = (await import("web-tree-sitter")) as unknown as {
-        Parser?: { init(): Promise<void>; new (): unknown }
+        Parser?: { init(opts?: unknown): Promise<void>; new (): unknown }
         Language?: { load(bytes: Uint8Array): Promise<unknown> }
         default?: {
-          Parser?: { init(): Promise<void>; new (): unknown }
+          Parser?: { init(opts?: unknown): Promise<void>; new (): unknown }
           Language?: { load(bytes: Uint8Array): Promise<unknown> }
         }
       }
       const ParserCtor = mod.Parser ?? mod.default?.Parser
       const Language = mod.Language ?? mod.default?.Language
       if (ParserCtor === undefined || Language === undefined) return
-      await ParserCtor.init()
-      const wasm = await readFile(join(grammarDir(), "tree-sitter-bash.wasm"))
+      // `locateFile` is how emscripten asks where its runtime wasm lives; without
+      // it the module guesses a sibling path that does not exist in a compiled
+      // binary.
+      await ParserCtor.init({ locateFile: () => runtimeWasmPath })
+      const wasm = await readFile(bashGrammarPath)
       const language = await Language.load(wasm)
       const p = new ParserCtor() as { setLanguage(l: unknown): void } & ShellParser
       p.setLanguage(language)

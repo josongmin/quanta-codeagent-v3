@@ -67,10 +67,12 @@ evidence:
     - src/agent/loop/entry.ts
   adrs:
     - docs/decisions/0544-shell-effect-authority.md
+    - docs/decisions/0552-integration-lane-compiled-binary-parity.md
   tests:
     unit:
       - tests/unit/permission/shell-effect-authority-hellgate.test.ts
       - tests/unit/permission/shell-effect-authority-wiring-hellgate.test.ts
+      - tests/unit/permission/shell-parser-compiled-binary-hellgate.test.ts
     integration: []
     contract: []
 knobs: []
@@ -95,6 +97,20 @@ notes: |
   `EXPECTED_CONTAINER_NODE_TYPES` is a DRIFT GUARD, not a filter — the walker descends
   into every node with children, and a test fails when the grammar emits a container
   the slice has not accounted for. It caught `test_command` on its first run.
+
+  COMPILED-BINARY PARITY (found by the integration lane, ADR-0552): the grammar was
+  resolved from `node_modules`, which does not exist inside a `bun build --compile`
+  artifact. `dist/agent` failed with `ENOENT '/$bunfs/root/web-tree-sitter.wasm'` and the
+  authority answered `unknown` for EVERY command — the shipping binary silently ran on
+  the regex-only gate this lane replaces, while every unit test passed from source. Both
+  wasm assets are now EMBEDDED (`with { type: "file" }`) and the runtime path is passed
+  via `Parser.init({ locateFile })`. Pinned by a test that compiles a real binary and
+  runs it.
+
+  GENERALIZABLE: any slice that resolves an asset from `node_modules` at runtime is
+  DEV-ONLY until proven in a compiled binary. The retrieval code-parser resolves its
+  grammars the same way and is presumed to share the gap (opt-in behind `QUANTA_INDEX`,
+  so recorded rather than changed under an integration pass).
 
   REMAINING IN THIS LANE (§17 packet B DONE is not yet fully met): circumvention,
   ownership and grant still read their own signals. Migrating them to this assessment,
