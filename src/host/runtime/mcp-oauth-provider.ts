@@ -192,9 +192,8 @@ const parseTokenResponse = (
 
 /** The connectors-backed {@link McpOAuthProviderPort}. Per-server state (the
  *  resolved endpoints + client id) is memoized so discovery/DCR run once. */
-export const createConnectorsMcpOAuthProvider = (
-  cfg: ConnectorsMcpOAuthConfig,
-): McpOAuthProviderPort => {
+/** Endpoint discovery and its cache. */
+const oauthEndpoints = (cfg: ConnectorsMcpOAuthConfig) => {
   const rotator = createTokenRotator({ tokenStore: cfg.tokenStore, clockPort: cfg.clockPort })
   // Per-server resolved endpoints + effective client id (discovery/DCR once).
   const endpointsCache = new Map<string, { endpoints: OAuthEndpoints; clientId: string }>()
@@ -231,6 +230,13 @@ export const createConnectorsMcpOAuthProvider = (
     endpointsCache.set(serverName, resolved)
     return resolved
   }
+  return { cfg, rotator, endpointsCache, resolveEndpoints }
+}
+
+/** The three grant paths — auth-code exchange, refresh, and a fresh
+ *  authorization. */
+const oauthGrants = (ctx: ReturnType<typeof oauthEndpoints>) => {
+  const { cfg, resolveEndpoints } = ctx
 
   /** Exchange an authorization code for a token (RFC 6749 §4.1.3, PKCE). */
   const exchangeAuthCode = async (
@@ -288,6 +294,12 @@ export const createConnectorsMcpOAuthProvider = (
     await cfg.tokenStore.write(serverName, record)
     return record
   }
+  return { exchangeAuthCode, refreshGrant, authorizeFresh }
+}
+
+/** Token resolution, its single-flight guard, and invalidation. */
+const oauthTokens = (ctx: ReturnType<typeof oauthEndpoints> & ReturnType<typeof oauthGrants>) => {
+  const { cfg, rotator, resolveEndpoints, refreshGrant, authorizeFresh } = ctx
 
   // Coalesce concurrent `tokenFor` calls for the SAME server: the rotator only
   // coalesces the refresh GRANT, but the FRESH-authorization path (RFC 6749
@@ -369,6 +381,17 @@ export const createConnectorsMcpOAuthProvider = (
 
   // Return a frozen object with non-enumerable internals — `JSON.stringify` /
   // `String()` of the provider expose no token-bearing closure state.
+  return { inFlightToken, resolveTokenFor, tokenFor, invalidate }
+}
+
+/** Assemble the chained builders. */
+export const createConnectorsMcpOAuthProvider = (
+  cfg: ConnectorsMcpOAuthConfig,
+): McpOAuthProviderPort => {
+  const p0 = oauthEndpoints(cfg)
+  const p1 = oauthGrants({ ...p0 })
+  const p2 = oauthTokens({ ...p0, ...p1 })
+  const { tokenFor, invalidate } = { ...p0, ...p1, ...p2 }
   return Object.freeze({ tokenFor, invalidate })
 }
 

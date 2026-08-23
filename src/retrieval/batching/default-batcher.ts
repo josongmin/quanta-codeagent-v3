@@ -75,7 +75,17 @@ const makeDeferred = (text: string): Deferred => {
   return { text, promise, resolve: resolveFn }
 }
 
-export const createDefaultBatcher = (opts: DefaultBatcherOptions): EmbedBatcher => {
+/** The in-flight window and its timer. */
+const batcherState = (opts: DefaultBatcherOptions) => {
+  /** The factory's MUTABLE state. `let` bindings cannot cross a function
+   *  boundary by value, so they live here and every link mutates in place —
+   *  observationally identical to the closure they replace. */
+  const mut = {
+    pending: [] as PendingEntry[],
+    timer: null as ReturnType<typeof setTimeout> | null,
+    microtaskArmed: false,
+    flushing: null as Promise<void> | null,
+  }
   const configErr = validateConfig(opts.config)
   const { windowMs, maxBatchSize } = opts.config
 
@@ -83,17 +93,12 @@ export const createDefaultBatcher = (opts: DefaultBatcherOptions): EmbedBatcher 
   // in-flight chunk does NOT get re-enqueued; new callers subscribe.
   const flight = createSingleFlight<Result<EmbeddingVector, BatchError>>()
 
-  let pending: PendingEntry[] = []
-  let timer: ReturnType<typeof setTimeout> | null = null
-  let microtaskArmed = false
-  let flushing: Promise<void> | null = null
-
   const clearTimer = (): void => {
-    if (timer !== null) {
-      clearTimeout(timer)
-      timer = null
+    if (mut.timer !== null) {
+      clearTimeout(mut.timer)
+      mut.timer = null
     }
-    microtaskArmed = false
+    mut.microtaskArmed = false
   }
 
   const settleAll = (
@@ -105,6 +110,12 @@ export const createDefaultBatcher = (opts: DefaultBatcherOptions): EmbedBatcher 
       e.resolve(r)
     }
   }
+  return { opts, configErr, windowMs, maxBatchSize, flight, clearTimer, settleAll, mut }
+}
+
+/** Chunking: group by text, issue a chunk, and settle or fail it. */
+const batcherChunks = (ctx: ReturnType<typeof batcherState>) => {
+  const { opts, flight, settleAll } = ctx
 
   const resolveVectors = (
     texts: readonly string[],
@@ -179,12 +190,27 @@ export const createDefaultBatcher = (opts: DefaultBatcherOptions): EmbedBatcher 
     }
     return { newDeferreds, subscriberPromises }
   }
+  return { resolveVectors, failChunk, issueChunk, groupByText, setupFlights }
+}
+
+/** The flush paths and the public embed entry point. */
+const batcherFlush = (ctx: ReturnType<typeof batcherState> & ReturnType<typeof batcherChunks>) => {
+  const {
+    configErr,
+    windowMs,
+    maxBatchSize,
+    clearTimer,
+    mut,
+    issueChunk,
+    groupByText,
+    setupFlights,
+  } = ctx
 
   const doFlush = async (): Promise<void> => {
     clearTimer()
-    if (pending.length === 0) return
-    const batch = pending
-    pending = []
+    if (mut.pending.length === 0) return
+    const batch = mut.pending
+    mut.pending = []
 
     const byText = groupByText(batch)
     const { newDeferreds, subscriberPromises } = setupFlights(byText)
@@ -202,30 +228,30 @@ export const createDefaultBatcher = (opts: DefaultBatcherOptions): EmbedBatcher 
   }
 
   const runFlush = (): Promise<void> => {
-    if (flushing !== null) return flushing
+    if (mut.flushing !== null) return mut.flushing
     const p = doFlush().finally(() => {
-      flushing = null
+      mut.flushing = null
       // If new entries arrived during the flush, arm again.
-      if (pending.length > 0) armTimer()
+      if (mut.pending.length > 0) armTimer()
     })
-    flushing = p
+    mut.flushing = p
     return p
   }
 
   function armTimer(): void {
     if (windowMs === 0) {
-      if (microtaskArmed) return
-      microtaskArmed = true
+      if (mut.microtaskArmed) return
+      mut.microtaskArmed = true
       queueMicrotask(() => {
-        if (!microtaskArmed) return // cancelled by flush()
-        microtaskArmed = false
+        if (!mut.microtaskArmed) return // cancelled by flush()
+        mut.microtaskArmed = false
         void runFlush()
       })
       return
     }
-    if (timer !== null) return
-    timer = setTimeout(() => {
-      timer = null
+    if (mut.timer !== null) return
+    mut.timer = setTimeout(() => {
+      mut.timer = null
       void runFlush()
     }, windowMs)
   }
@@ -245,8 +271,8 @@ export const createDefaultBatcher = (opts: DefaultBatcherOptions): EmbedBatcher 
       const entry: PendingEntry = { text, resolve }
       if (sig !== undefined) {
         const onAbort = (): void => {
-          const idx = pending.indexOf(entry)
-          if (idx !== -1) pending.splice(idx, 1)
+          const idx = mut.pending.indexOf(entry)
+          if (idx !== -1) mut.pending.splice(idx, 1)
           entry.cleanupAbort?.()
           resolve(err<BatchError>({ kind: "aborted" }))
         }
@@ -255,18 +281,27 @@ export const createDefaultBatcher = (opts: DefaultBatcherOptions): EmbedBatcher 
           sig.removeEventListener("abort", onAbort)
         }
       }
-      pending.push(entry)
+      mut.pending.push(entry)
       armTimer()
     })
   }
 
   const flush = (): Promise<void> => {
-    if (pending.length === 0 && flushing === null) return Promise.resolve()
+    if (mut.pending.length === 0 && mut.flushing === null) return Promise.resolve()
     clearTimer()
     return runFlush()
   }
 
-  const pendingCount = (): number => pending.length
+  const pendingCount = (): number => mut.pending.length
 
+  return { doFlush, runFlush, embed, flush, pendingCount }
+}
+
+/** Assemble the chained builders. */
+export const createDefaultBatcher = (opts: DefaultBatcherOptions): EmbedBatcher => {
+  const p0 = batcherState(opts)
+  const p1 = batcherChunks({ ...p0 })
+  const p2 = batcherFlush({ ...p0, ...p1 })
+  const { embed, flush, pendingCount } = { ...p0, ...p1, ...p2 }
   return { embed, flush, pending: pendingCount }
 }

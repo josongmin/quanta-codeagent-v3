@@ -2,7 +2,7 @@
   "note": "Per-rule one-directional ceilings for biome diagnostics that do NOT fail `bun run lint` (warn/info level). Raise NEVER — fix the site. Tighten with `bun run lint:debt --tighten`. A rule that fires but is absent here is treated as ceiling 0 and FAILS: that is deliberate, so a newly-enabled rule or a biome upgrade cannot add debt silently. `worstComplexity` pins the highest single cognitive-complexity score, which a plain count cannot see.",
   "rules": {
     "lint/style/noNonNullAssertion": 696,
-    "lint/complexity/noExcessiveCognitiveComplexity": 378,
+    "lint/complexity/noExcessiveCognitiveComplexity": 376,
     "lint/suspicious/noConsole": 71,
     "lint/suspicious/noTemplateCurlyInString": 22
   },

@@ -285,7 +285,15 @@ const updateSchema = z.object({
 type UpdateInput = z.infer<typeof updateSchema>
 
 /** Build the three self-edit memory tools bound to a store (+ optional embedder). */
-export const memoryTools = (deps: MemoryToolsDeps): Tool[] => {
+/** Clock/id seams and the mode gates that decide whether a memory read or
+ *  write is admissible at all. */
+const memoryGates = (deps: MemoryToolsDeps) => {
+  /** The factory's MUTABLE state. `let` bindings cannot cross a function
+   *  boundary by value, so they live here and every link mutates in place —
+   *  observationally identical to the closure they replace. */
+  const mut = {
+    blockNotified: false,
+  }
   // ADR-0078 determinism leak: `id` and `createdAt` are PERSISTED into the
   // store the LLM reads back next session. Default-bind to Date.now /
   // crypto.randomUUID so production output is byte-identical; replay/test
@@ -297,14 +305,9 @@ export const memoryTools = (deps: MemoryToolsDeps): Tool[] => {
   const mode: ThreadMemoryMode = deps.threadMode ?? "enabled"
   const recallDisabled = mode === "disabled"
   const writesDisabled = mode === "disabled" || mode === "read-only"
-  // WS-G (UUX-5-11) — a blocked write's typed `ok:false` surfaces to the MODEL
-  // only; the OPERATOR saw nothing (onArm goes to slog.debug). Emit one
-  // LATCHED warn per memoryTools instance on the first block — a model
-  // retry-looping on a blocked write must not spam the terminal.
-  let blockNotified = false
   const noteBlocked = (reason: string): void => {
-    if (blockNotified) return
-    blockNotified = true
+    if (mut.blockNotified) return
+    mut.blockNotified = true
     emitOperatorNotice({
       severity: "warn",
       source: "memory",
@@ -358,6 +361,23 @@ export const memoryTools = (deps: MemoryToolsDeps): Tool[] => {
     if (reason !== undefined) noteBlocked(reason)
     return reason
   }
+  return {
+    deps,
+    now,
+    uuid,
+    mode,
+    recallDisabled,
+    writesDisabled,
+    noteBlocked,
+    writeBlockReasonInner,
+    writeBlockReason,
+    mut,
+  }
+}
+
+/** The three memory tools. */
+const memoryOps = (ctx: ReturnType<typeof memoryGates>) => {
+  const { deps, now, uuid, recallDisabled, writeBlockReason } = ctx
   const memorySearch: Tool<SearchInput> = {
     name: "memory_search",
     description:
@@ -491,5 +511,13 @@ export const memoryTools = (deps: MemoryToolsDeps): Tool[] => {
     },
   }
 
+  return { memorySearch, memoryWrite, memoryUpdate }
+}
+
+/** Assemble the chained builders. */
+export const memoryTools = (deps: MemoryToolsDeps): Tool[] => {
+  const p0 = memoryGates(deps)
+  const p1 = memoryOps({ ...p0 })
+  const { memorySearch, memoryWrite, memoryUpdate } = { ...p0, ...p1 }
   return [memorySearch as Tool, memoryWrite as Tool, memoryUpdate as Tool]
 }

@@ -332,13 +332,21 @@ const buildCliSkillAuthority = async (
 
 type AgentConfigSkills = import("@/agent").AgentConfig["skills"]
 
-export const setupSession = async (
+/** Boot: resolve the runtime + feature config, install the operator-notice
+ *  sink, and bring up the session's LLM. */
+const setupBoot = async (
   deps: SetupSessionDeps,
   options: {
     readonly convStore?: ConversationCheckpointStore
     readonly responsesStore?: ResponsesContinuationStore
   } = {},
-): Promise<SessionSetupResult> => {
+) => {
+  /** The factory's MUTABLE state. `let` bindings cannot cross a function
+   *  boundary by value, so they live here and every link mutates in place —
+   *  observationally identical to the closure they replace. */
+  const mut = {
+    statusLineDriver: undefined as StatusLineDriver | undefined,
+  }
   const runtime = readSessionRuntimeConfig()
   const featureCfg = readCliFeatureConfig(runtime.env, runtime.stdoutIsTTY, process.stderr.isTTY)
   // WS-G operator-notice sink — installed BEFORE bootstrapSession (audit W3-A1:
@@ -382,6 +390,25 @@ export const setupSession = async (
   const shortCwd = boot.cwd.startsWith(runtime.homeDir)
     ? `~${boot.cwd.slice(runtime.homeDir.length)}`
     : boot.cwd
+  return {
+    deps,
+    options,
+    runtime,
+    featureCfg,
+    uninstallOperatorNoticeSink,
+    boot,
+    skillAuthority,
+    spinnerStallWire,
+    sessionLlm,
+    shortCwd,
+    mut,
+  }
+}
+
+/** The status surfaces — status bar, turn summary, debug/timeline streams,
+ *  context-usage holder, background capture and the turn indicator. */
+const setupStatus = (ctx: Awaited<ReturnType<typeof setupBoot>>) => {
+  const { deps, runtime, featureCfg, boot, shortCwd } = ctx
   const statusDefault =
     `${boot.provider} · ${boot.model} · ${boot.mode} · ${shortCwd}` +
     "    Esc Esc · cancel    Ctrl+C · exit"
@@ -436,6 +463,29 @@ export const setupSession = async (
     bgCaptureStream,
     { observeUsage: contextUsageHolder.observeUsage },
   )
+  return {
+    statusDefault,
+    statusBar,
+    turnSummary,
+    summaryStream,
+    debugStream,
+    debugHandle,
+    timelineStream,
+    timelinePanel,
+    contextUsageHolder,
+    bgCaptureStream,
+    backgroundStreamCapture,
+    turnIndicator,
+    turnStream,
+  }
+}
+
+/** Interaction: approval prompting, the decision emitter, the status pills
+ *  and the status-line config. */
+const setupInteraction = async (
+  ctx: Awaited<ReturnType<typeof setupBoot>> & ReturnType<typeof setupStatus>,
+) => {
+  const { deps, options, runtime, boot, statusBar, turnStream } = ctx
 
   const { approvalPrompt, midTurnApprovalChannel, runtimeContext, permissionStore, hunkUndoStore } =
     await composeCliRuntimeContext({
@@ -481,7 +531,25 @@ export const setupSession = async (
   // command's first line is routed into the pills row as the far-right segment
   // (NOT a direct `setDefault`, which would clobber the pill composer).
   const statusLineCfg = runtimeConfig().statusLineConfig
-  let statusLineDriver: StatusLineDriver | undefined
+  return {
+    approvalPrompt,
+    midTurnApprovalChannel,
+    runtimeContext,
+    permissionStore,
+    hunkUndoStore,
+    decisionEmitter,
+    pills,
+    statusLineCfg,
+  }
+}
+
+/** The live model source the REPL rebinds on a model switch. */
+const setupModel = async (
+  ctx: Awaited<ReturnType<typeof setupBoot>> &
+    ReturnType<typeof setupStatus> &
+    Awaited<ReturnType<typeof setupInteraction>>,
+) => {
+  const { runtime, boot, mut, turnStream, pills, statusLineCfg } = ctx
   // WS-G (UUX-1-17) — the model is read through a REPOINTABLE source so a
   // mid-session `/model` change shows up on the next tick. Created here
   // (anchored at the boot model), re-pointed by surface-compose once the
@@ -497,14 +565,14 @@ export const setupSession = async (
       effort: () => boot.effortStore.get(),
       cost: () => costPanel?.snapshot(),
     })
-    statusLineDriver = createStatusLineDriver({
+    mut.statusLineDriver = createStatusLineDriver({
       cfg: statusLineCfg,
       view: statusView,
       pills,
       width: process.stdout.columns ?? 0,
     })
-    void statusLineDriver.tick() // initial paint (async, non-blocking)
-    statusLineDriver.start() // poll iff the config carries refreshInterval
+    void mut.statusLineDriver.tick() // initial paint (async, non-blocking)
+    mut.statusLineDriver.start() // poll iff the config carries refreshInterval
   }
 
   // ADR-0466 — one-shot startup environment probe. Default-OFF: a no-op that
@@ -518,6 +586,45 @@ export const setupSession = async (
   // because it only forwards them through; the CLI surface owns the real
   // shapes (concrete McpClient instances, the surface `LifecyclePills`,
   // the surface `IdleMonitor` etc.).
+  return { liveModelSource }
+}
+
+/** Assemble the chained builders. */
+export const setupSession = async (
+  deps: SetupSessionDeps,
+  options: {
+    readonly convStore?: ConversationCheckpointStore
+    readonly responsesStore?: ResponsesContinuationStore
+  } = {},
+): Promise<SessionSetupResult> => {
+  const p0 = await setupBoot(deps, options)
+  const p1 = setupStatus({ ...p0 })
+  const p2 = await setupInteraction({ ...p0, ...p1 })
+  const p3 = await setupModel({ ...p0, ...p1, ...p2 })
+  const {
+    runtime,
+    featureCfg,
+    uninstallOperatorNoticeSink,
+    boot,
+    skillAuthority,
+    spinnerStallWire,
+    sessionLlm,
+    statusBar,
+    turnSummary,
+    debugHandle,
+    timelinePanel,
+    contextUsageHolder,
+    backgroundStreamCapture,
+    turnIndicator,
+    approvalPrompt,
+    midTurnApprovalChannel,
+    runtimeContext,
+    permissionStore,
+    hunkUndoStore,
+    pills,
+    liveModelSource,
+    mut,
+  } = { ...p0, ...p1, ...p2, ...p3 }
   return {
     provider: boot.provider,
     model: boot.model,
@@ -621,7 +728,7 @@ export const setupSession = async (
       uninstallOperatorNoticeSink()
       // #15 — stop the status-line poll on session end (idempotent; undefined
       // when the feature is gated off).
-      statusLineDriver?.stop()
+      mut.statusLineDriver?.stop()
       // Spinner-stall live wire — cancel the 1s stall-poll interval
       // (idempotent; undefined when QUANTA_SPINNER_STALL is off).
       spinnerStallWire?.teardown()

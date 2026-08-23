@@ -329,9 +329,14 @@ const rewriteCacheFile = async (
 }
 
 /** Construct the disk-backed registry. */
-export const createDiskSessionResourceRegistry = (
-  cfg: DiskRegistryConfig,
-): SessionResourceRegistry => {
+/** The in-memory entry table and the per-session lock bookkeeping. */
+const diskTables = (cfg: DiskRegistryConfig) => {
+  /** The factory's MUTABLE state. `let` bindings cannot cross a function
+   *  boundary by value, so they live here and every link mutates in place —
+   *  observationally identical to the closure they replace. */
+  const mut = {
+    sweepInFlight: null as Promise<void> | null,
+  }
   const now = cfg.now ?? Date.now
   const entries = new Map<string, Entry>()
   // ADR-0356 — per-session lock acquisitions. Key: sessionId. Value:
@@ -353,6 +358,12 @@ export const createDiskSessionResourceRegistry = (
     const emitter = base.metricsEmitter ?? cfg.metricsEmitter
     return emitter === undefined ? base : { ...base, metricsEmitter: emitter }
   })()
+  return { cfg, now, entries, lockMap, resolvedLockOpts, mut }
+}
+
+/** Cross-process locking and the sweep it triggers. */
+const diskLocks = (ctx: ReturnType<typeof diskTables>) => {
+  const { cfg, lockMap, resolvedLockOpts, mut } = ctx
 
   const ensureLock = (sessionId: string): Promise<SessionLock | null> => {
     const existing = lockMap.get(sessionId)
@@ -371,19 +382,22 @@ export const createDiskSessionResourceRegistry = (
     void promise.then((lock) => (lock !== null ? lock.release() : undefined)).catch(() => undefined)
   }
 
-  // Track which session ids we have already swept; sweep runs lazily
-  // at most once per `getOrCreate` to keep the sync surface fast.
-  let sweepInFlight: Promise<void> | null = null
-
   const triggerSweep = (): void => {
-    if (sweepInFlight !== null) return
-    sweepInFlight = sweepDiskRegistry(cfg)
+    if (mut.sweepInFlight !== null) return
+    mut.sweepInFlight = sweepDiskRegistry(cfg)
       .then(() => undefined)
       .catch(() => undefined)
       .finally(() => {
-        sweepInFlight = null
+        mut.sweepInFlight = null
       })
   }
+  return { ensureLock, releaseLock, triggerSweep }
+}
+
+/** The write path: mint a fresh resource set, touch it on activity, and the
+ *  get-or-create that ties both together. */
+const diskCreate = (ctx: ReturnType<typeof diskTables> & ReturnType<typeof diskLocks>) => {
+  const { cfg, now, entries, ensureLock, triggerSweep } = ctx
 
   const mintFreshResources = (): SessionResources => ({
     store: createInMemoryTypedHistoryEventStore(),
@@ -502,6 +516,14 @@ export const createDiskSessionResourceRegistry = (
       return mintFreshResources()
     }
   }
+  return { mintFreshResources, touchOnActivity, getOrCreate }
+}
+
+/** Reads and eviction. */
+const diskQuery = (
+  ctx: ReturnType<typeof diskTables> & ReturnType<typeof diskLocks> & ReturnType<typeof diskCreate>,
+) => {
+  const { cfg, entries, releaseLock } = ctx
 
   const peek = (sessionId: string): SessionResources | null => {
     try {
@@ -569,6 +591,18 @@ export const createDiskSessionResourceRegistry = (
     }
   }
 
+  return { peek, evict, size, clear, listSessionIds }
+}
+
+/** Assemble the chained builders. */
+export const createDiskSessionResourceRegistry = (
+  cfg: DiskRegistryConfig,
+): SessionResourceRegistry => {
+  const p0 = diskTables(cfg)
+  const p1 = diskLocks({ ...p0 })
+  const p2 = diskCreate({ ...p0, ...p1 })
+  const p3 = diskQuery({ ...p0, ...p1, ...p2 })
+  const { getOrCreate, peek, evict, size, clear, listSessionIds } = { ...p0, ...p1, ...p2, ...p3 }
   return { getOrCreate, peek, evict, size, clear, listSessionIds }
 }
 

@@ -147,7 +147,8 @@ const buildSshBackendConfig = (
   ...(cfg.maxPolls !== undefined ? { maxPolls: cfg.maxPolls } : {}),
 })
 
-export const createEc2Backend = (cfg: Ec2BackendConfig = {}): GradeBackend => {
+/** Resolved EC2 configuration and the `aws` CLI shim every call goes through. */
+const ec2Config = (cfg: Ec2BackendConfig = {}) => {
   const spawn = cfg.spawn ?? defaultSpawn
   const region = cfg.region ?? DEFAULTS.region
   const ami = cfg.ami ?? DEFAULTS.ami
@@ -167,6 +168,29 @@ export const createEc2Backend = (cfg: Ec2BackendConfig = {}): GradeBackend => {
     args: readonly string[],
   ): Promise<{ code: number; stdout: string; stderr: string }> =>
     spawn("aws", ["--region", region, ...args])
+  return {
+    cfg,
+    spawn,
+    region,
+    ami,
+    instanceType,
+    keyName,
+    keyPath,
+    subnetId,
+    vpcId,
+    sgName,
+    onDemand,
+    diskGb,
+    ttlMinutes,
+    keep,
+    sleep,
+    aws,
+  }
+}
+
+/** Security-group discovery/creation — the precondition for a launch. */
+const ec2SecurityGroup = (ctx: ReturnType<typeof ec2Config>) => {
+  const { spawn, region, vpcId, sgName, aws } = ctx
 
   /** Stage 0: ensure the SG exists + :22 ingress from current public IP. */
   const ensureSecurityGroup = async (): Promise<string> => {
@@ -240,6 +264,12 @@ export const createEc2Backend = (cfg: Ec2BackendConfig = {}): GradeBackend => {
     }
     return sgId
   }
+  return { ensureSecurityGroup }
+}
+
+/** Launch and wait for the instance to have a host. */
+const ec2Launch = (ctx: ReturnType<typeof ec2Config> & ReturnType<typeof ec2SecurityGroup>) => {
+  const { cfg, ami, instanceType, keyName, subnetId, onDemand, diskGb, ttlMinutes, aws } = ctx
 
   /** Stage 1: run-instances SPOT with the validated params. */
   const launchInstance = async (sgId: string): Promise<string> => {
@@ -319,6 +349,27 @@ export const createEc2Backend = (cfg: Ec2BackendConfig = {}): GradeBackend => {
     }
     return ip
   }
+  return { launchInstance, waitForHost }
+}
+
+/** SSH readiness, teardown, and the grade step that runs on the box. */
+const ec2Session = (
+  ctx: ReturnType<typeof ec2Config> &
+    ReturnType<typeof ec2SecurityGroup> &
+    ReturnType<typeof ec2Launch>,
+) => {
+  const {
+    cfg,
+    spawn,
+    keyPath,
+    ttlMinutes,
+    keep,
+    sleep,
+    aws,
+    ensureSecurityGroup,
+    launchInstance,
+    waitForHost,
+  } = ctx
 
   /** Stage 2.5: wait for sshd to accept connections AND cloud-init (docker + uv
    *  bootstrap) to finish. `instance-running` only means the VM booted — sshd
@@ -394,5 +445,15 @@ export const createEc2Backend = (cfg: Ec2BackendConfig = {}): GradeBackend => {
     }
   }
 
+  return { sshReadyArgs, waitForSsh, terminate, grade }
+}
+
+/** Assemble the chained builders. */
+export const createEc2Backend = (cfg: Ec2BackendConfig = {}): GradeBackend => {
+  const p0 = ec2Config(cfg)
+  const p1 = ec2SecurityGroup({ ...p0 })
+  const p2 = ec2Launch({ ...p0, ...p1 })
+  const p3 = ec2Session({ ...p0, ...p1, ...p2 })
+  const { grade } = { ...p0, ...p1, ...p2, ...p3 }
   return { name: "ec2", grade }
 }

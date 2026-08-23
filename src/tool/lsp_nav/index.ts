@@ -319,7 +319,8 @@ export const isCheapLspNavTool = (name: string): boolean =>
  * concurrency-safe (each call drives a per-session language-server subprocess
  * that interleaves didOpen / request traffic).
  */
-export const lspNavTools = (provider: LspNavProvider): Tool[] => {
+/** The location-returning navigations. */
+const navLocationTools = (provider: LspNavProvider) => {
   const definition = positionTool<PositionInput>(
     "lsp_definition",
     positionSchema,
@@ -395,6 +396,12 @@ export const lspNavTools = (provider: LspNavProvider): Tool[] => {
     (_input, _abs, locs: NavLocation[] | null) => formatLocations("implementation", locs),
     provider,
   )
+  return { provider, definition, references, hover, typeDefinition, implementation }
+}
+
+/** Symbol listings, rename preview and the call hierarchy. */
+const navSymbolTools = (ctx: ReturnType<typeof navLocationTools>) => {
+  const { provider } = ctx
 
   const documentSymbol: Tool<DocumentInput> = {
     name: "lsp_document_symbol",
@@ -523,6 +530,25 @@ export const lspNavTools = (provider: LspNavProvider): Tool[] => {
       "clean message when no language server is available — never fails the turn.",
   }
 
+  return { documentSymbol, workspaceSymbol, renamePreview, incomingCalls, outgoingCalls }
+}
+
+/** Assemble the chained builders. */
+export const lspNavTools = (provider: LspNavProvider): Tool[] => {
+  const p0 = navLocationTools(provider)
+  const p1 = navSymbolTools({ ...p0 })
+  const {
+    definition,
+    references,
+    hover,
+    typeDefinition,
+    implementation,
+    documentSymbol,
+    workspaceSymbol,
+    renamePreview,
+    incomingCalls,
+    outgoingCalls,
+  } = { ...p0, ...p1 }
   return [
     definition as Tool,
     references as Tool,

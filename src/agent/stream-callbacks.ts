@@ -249,22 +249,40 @@ const scopeOutcome = (
  *
  * @see {@link StreamCallbacks}
  */
-export const createStreamDispatcher = (
-  session: TurnSession,
-  state: TurnState,
-  anchors: TurnTimingAnchors,
-): StreamCallbacks => {
+/** Config, the tool-call history, the turn-timing capture and the pending
+ *  assistant text the handlers below record into. */
+const dispatchConfig = (session: TurnSession, state: TurnState, anchors: TurnTimingAnchors) => {
+  /** The factory's MUTABLE state. `let` bindings cannot cross a function
+   *  boundary by value, so they live here and every link mutates in place —
+   *  observationally identical to the closure they replace. */
+  const mut = {
+    pendingAssistantText: "",
+  }
   // R2-B P1: destructure into the same local names the original body used so
   // every reference below stays byte-identical (config/recorder/classifier/…).
   const { config, recorder, classifier, skillGate } = session
   const { toolHistory, workingState, collector, onRedaction } = state
   const { turnTimingCapture } = anchors
+  return {
+    session,
+    state,
+    anchors,
+    config,
+    recorder,
+    classifier,
+    skillGate,
+    toolHistory,
+    workingState,
+    collector,
+    onRedaction,
+    turnTimingCapture,
+    mut,
+  }
+}
 
-  // ADR-0512 P3 — assistant prose streamed since the last tool dispatch. Read as
-  // the escalation card's `justification`, then reset on every dispatch so each
-  // tool call's rationale is the text that immediately preceded IT. Captured only
-  // here (no global) — absent skill-scope v2 it is written but never read.
-  let pendingAssistantText = ""
+/** Skill-scope handling — the one branch big enough to own a link. */
+const dispatchSkill = (ctx: ReturnType<typeof dispatchConfig>) => {
+  const { config, skillGate, mut } = ctx
 
   // ADR-0512 — resolve a skill-scope outcome for a tool the active skill does
   // NOT permit. Returns a recoverable tool_result to SHORT-CIRCUIT with, or
@@ -285,7 +303,7 @@ export const createStreamDispatcher = (
     const reason = scopeReasonFor(call.name, activeSkill)
     const isReadOnly = config.registry.isReadOnly(call.name)
     // ADR-0512 P3 — seed the card's justification from the model's pre-tool prose.
-    const justification = deriveJustification(pendingAssistantText)
+    const justification = deriveJustification(mut.pendingAssistantText)
     const verdict = await decideScopeEscalation({
       tool: call.name,
       input: call.input,
@@ -338,6 +356,25 @@ export const createStreamDispatcher = (
     if (verdict.kind === "dispatch" && verdict.widen) skillGate.widenScope(call.name)
     return scopeOutcome(verdict, call.id, reason)
   }
+  return { handleSkillScope }
+}
+
+/** The central dispatch. */
+const dispatchCore = (
+  ctx: ReturnType<typeof dispatchConfig> & ReturnType<typeof dispatchSkill>,
+) => {
+  const {
+    config,
+    recorder,
+    classifier,
+    skillGate,
+    toolHistory,
+    workingState,
+    collector,
+    onRedaction,
+    mut,
+    handleSkillScope,
+  } = ctx
 
   const dispatch = async (call: StreamingCall): Promise<DispatchOutcome> => {
     const s = recorder?.toolExec()
@@ -424,20 +461,30 @@ export const createStreamDispatcher = (
     } finally {
       // ADR-0512 P3 — the next tool's justification is the prose that precedes
       // IT, so reset after every dispatch (in/out of scope alike).
-      pendingAssistantText = ""
+      mut.pendingAssistantText = ""
       s?.()
     }
   }
+  return { dispatch }
+}
+
+/** The stream callbacks themselves. */
+const dispatchEvents = (
+  ctx: ReturnType<typeof dispatchConfig> &
+    ReturnType<typeof dispatchSkill> &
+    ReturnType<typeof dispatchCore>,
+) => {
+  const { config, recorder, toolHistory, turnTimingCapture, mut } = ctx
 
   const onTextDelta = (delta: string): void => {
     // ADR-0512 P3 — accumulate the pre-tool rationale for the escalation card.
-    pendingAssistantText += delta
+    mut.pendingAssistantText += delta
     config.stream.emit({ type: "assistant_text", delta })
   }
 
   // jun-11 (#11) — reasoning/thinking deltas onto the stream as a DISTINCT event
   // (rendered DIM by the stdout adapter). NOT accumulated into
-  // `pendingAssistantText` — thinking is not the pre-tool answer rationale the
+  // `mut.pendingAssistantText` — thinking is not the pre-tool answer rationale the
   // escalation card snapshots.
   const onThinkingDelta = (delta: string): void => {
     config.stream.emit({ type: "assistant_thinking", delta })
@@ -497,5 +544,24 @@ export const createStreamDispatcher = (
     turnTimingCapture.markFirstToken()
   }
 
+  return { onTextDelta, onThinkingDelta, onToolStart, onInProgress, onFirstChunk }
+}
+
+/** Assemble the chained builders. */
+export const createStreamDispatcher = (
+  session: TurnSession,
+  state: TurnState,
+  anchors: TurnTimingAnchors,
+): StreamCallbacks => {
+  const p0 = dispatchConfig(session, state, anchors)
+  const p1 = dispatchSkill({ ...p0 })
+  const p2 = dispatchCore({ ...p0, ...p1 })
+  const p3 = dispatchEvents({ ...p0, ...p1, ...p2 })
+  const { dispatch, onTextDelta, onThinkingDelta, onToolStart, onInProgress, onFirstChunk } = {
+    ...p0,
+    ...p1,
+    ...p2,
+    ...p3,
+  }
   return { dispatch, onTextDelta, onThinkingDelta, onToolStart, onInProgress, onFirstChunk }
 }
