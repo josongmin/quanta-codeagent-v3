@@ -1,4 +1,10 @@
 import type { InboundMode } from "@/agent/inbound-mode"
+import {
+  STOP_CATEGORY_KIND_BY_STOP_REASON,
+  STOP_REASON_CODE,
+  stopPresentationFor,
+} from "@/agent/stop-category"
+import type { StopReason } from "@/agent/types/agent-outcome"
 import { sliceWholeChars } from "@/shared"
 import {
   acquireRegion as acquireSharedRegion,
@@ -247,10 +253,49 @@ export const notifyTurnComplete = (
 ): void => {
   notify?.onTurnComplete({
     durationMs: out.durationMs,
-    ok: out.result !== undefined && !out.turnAborted,
+    ok: turnOutcomeIsOk(out),
     cwdBasename,
   })
 }
+
+/** True ONLY for a genuine completion.
+ *
+ *  aug-23 §13 (success-misreport site #2): this used to be
+ *  `result !== undefined && !turnAborted` — i.e. PRESENCE, not outcome. Every
+ *  non-aborted terminal returns a result, so `error` / `refusal` / `max_turns`
+ *  / `budget_exhausted` all notified as `✓ … — done`. The reason was already
+ *  on the result; the notifier just never read it.
+ *
+ *  Decided off the shipped presentation table so a future reason code cannot
+ *  quietly re-enter the success path. An ABSENT reason is not a completion. */
+const turnOutcomeIsOk = (out: {
+  readonly result: unknown
+  readonly turnAborted: boolean
+}): boolean => {
+  if (out.result === undefined || out.turnAborted) return false
+  /* `RunOneTurnResult.result` is generic: the session-loop path yields a
+     `RunSessionTurnResult` (`outcomeReason`), while the one-shot/e2e path
+     yields the `AgentOutcome` itself (`reason`). Read both rather than
+     privileging one shape — a missed shape would silently mean "not ok". */
+  const carrier = out.result as {
+    readonly outcomeReason?: string
+    readonly reason?: string
+  }
+  const reason = carrier.outcomeReason ?? carrier.reason
+  if (reason === undefined) return false
+  const kind = STOP_CATEGORY_KIND_BY_STOP_REASON[reason as StopReason]
+  if (kind === undefined) return false
+  /* The notifier only holds the legacy `reason`, so success is decided on the
+     coarse kind. `completed` is the ONLY success bucket — asserted against the
+     presentation table so the two classifications cannot drift apart. */
+  return kind === "completed" && SUCCESS_TONE_IS_COMPLETED
+}
+
+/** Pins "the success tone belongs to `completed.normal`" at module load, so a
+ *  future re-tone of that code breaks here rather than silently widening what
+ *  the CLI reports as done. */
+const SUCCESS_TONE_IS_COMPLETED =
+  stopPresentationFor(STOP_REASON_CODE.COMPLETED_NORMAL).tone === "success"
 
 /** RFC-09 — build the optional prompt-pipeline deps (A idle notify + B warning
  *  preamble) as an `exactOptionalPropertyTypes`-safe partial. Each field is
