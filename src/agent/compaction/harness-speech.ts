@@ -39,3 +39,25 @@ export const summaryRoleOf = (message: Message): string =>
  *  a compaction. */
 export const isHarnessAuthored = (message: Message | undefined): boolean =>
   isSyntheticUserMessage(message)
+
+/**
+ * §17 packet S — the ONE builder for a compaction summary message.
+ *
+ * All three summary sites (reactive squeeze, proactive, background) used to
+ * construct this inline. The local variable was even named `synthetic`, but the
+ * message carried no marker of any kind, so the harness's own output re-entered
+ * the transcript indistinguishable from human speech: the NEXT compaction
+ * summarized the PREVIOUS summary as the user's words, `/rewind` offered it as
+ * a turn to undo, and memory recall anchored on it.
+ *
+ * Three inline constructions were three chances to forget the marker; one
+ * builder is one place that cannot. `origin` (not an id) carries the
+ * provenance, because a summary is a synthesized replacement for a whole prefix
+ * and has no identity of its own to mint — and because provenance encoded in an
+ * id dies the moment `assignMessageIds` is not the thing that wrote it.
+ */
+export const buildCompactionSummaryMessage = (header: string, summary: string): Message => ({
+  role: "user",
+  origin: "harness",
+  content: [{ type: "text", text: `${header}\n${summary}` }],
+})

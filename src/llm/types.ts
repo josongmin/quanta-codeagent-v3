@@ -20,6 +20,24 @@ export interface Message {
    * shaping `StreamInput`.
    */
   id?: string
+  /**
+   * LOCAL-ONLY provenance: this message was authored by the HARNESS, not the
+   * human, even though it rides as `role:"user"`.
+   *
+   * Separate from {@link id} on purpose. Provenance used to be encoded INTO the
+   * id (`quanta:synthetic-user:<kind>:<uuid>`), which meant a harness message
+   * without an id had no provenance at all — and the compaction summaries, the
+   * harness's own output re-entering the transcript, are exactly that. The next
+   * compaction then summarized the previous summary as if the user had written
+   * it, `/rewind` offered it as a turn to undo, and memory recall anchored on
+   * it. `id` is IDENTITY; this is ORIGIN. A message can carry either, both, or
+   * neither.
+   *
+   * Never sent to the LLM adapters. The codecs map `role` + `content` only, so
+   * this is structurally unreachable from a provider payload — pinned by a
+   * wire-purity test rather than left to convention.
+   */
+  origin?: "harness"
 }
 
 export type ContentBlock =

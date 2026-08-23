@@ -1,7 +1,7 @@
 import type { ContentBlock, LLMPort, Message, SystemPromptInput } from "@/llm"
 import { assembleFromEvents } from "@/llm"
 import { emitOperatorNotice, errMessage, logger, type Result } from "@/shared"
-import { summaryRoleOf } from "./compaction/harness-speech"
+import { buildCompactionSummaryMessage, summaryRoleOf } from "./compaction/harness-speech"
 import {
   BackgroundSummarizationController,
   type BgCompactionConfig,
@@ -426,10 +426,7 @@ export const reactiveCompact = async (
   if (summary.trim() === "") {
     return { ok: false, reason: "continuation summary came back empty" }
   }
-  const synthetic: Message = {
-    role: "user",
-    content: [{ type: "text", text: `<continuation summary>\n${summary}` }],
-  }
+  const synthetic = buildCompactionSummaryMessage("<continuation summary>", summary)
   const messages = [synthetic, ...suffix]
   // Fail-fast: even with a non-empty summary and a valid boundary the squeeze
   // can be a no-op when the retained suffix itself holds the limiting payload
@@ -749,10 +746,7 @@ export const compactIfNeeded = async (input: CompactInput): Promise<CompactResul
   if (summary.trim() === "") {
     return { compacted: false, messages: input.messages, reason: "empty_summary" }
   }
-  const synthetic: Message = {
-    role: "user",
-    content: [{ type: "text", text: `<conversation summary>\n${summary}` }],
-  }
+  const synthetic = buildCompactionSummaryMessage("<conversation summary>", summary)
   const messages = [synthetic, ...suffix]
   const summaryTokens = estimateTokens([synthetic])
   // ADR-0409 — post_compact emission + Objective wire. Byte-identical when
@@ -941,10 +935,7 @@ const speculativeSummarizeAdapter = (
     if (summaryText.trim() === "") {
       return { ok: false, error: { kind: "other", detail: "continuation summary came back empty" } }
     }
-    const synthetic: Message = {
-      role: "user",
-      content: [{ type: "text", text: `<continuation summary>\n${summaryText}` }],
-    }
+    const synthetic = buildCompactionSummaryMessage("<continuation summary>", summaryText)
     const summary: BgSummaryPayload = [synthetic, ...suffix]
     // H1 (jul-2) — report the prefix boundary we folded (`boundary` messages of
     // the START snapshot). The host installs `[synthetic, ...liveSuffix]` where

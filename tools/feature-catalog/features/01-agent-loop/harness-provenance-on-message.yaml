@@ -1,0 +1,75 @@
+id: harness-provenance-on-message
+title: "Harness provenance lives on the message (`Message.origin`), not inside its id"
+section: 1
+subsystem: Agent loop — harness speech attribution
+order: 701
+maturity: L4
+status: new
+ui_surfaces: [cli, web]
+monitoring: n-a
+modes: [interactive, headless]
+configurable: n-a
+owners: ["@songmin"]
+labels: [correctness, surface:core, tier:core, absorbed:grok-build]
+depends_on: []
+surface_integration:
+  cli: full
+  web: full
+  method: audited
+  verified: "2026-08-24"
+  evidence:
+    cli: "compaction summaries, /rewind targets and memory recall all read `isSyntheticUserMessage`"
+    web: "same persisted transcript; the field is local-only and never reaches a provider"
+purpose: |
+  `makeSyntheticUserMessage` marked harness-authored `role:"user"` messages by encoding
+  the kind INTO the id (`quanta:synthetic-user:<kind>:<uuid>`). That works only for
+  messages the harness both authors AND gives an id to.
+
+  The compaction summaries are neither. All three summary sites built the message
+  inline — the local variable was literally named `synthetic` — with no id and no
+  marker. So the harness's own output re-entered the transcript indistinguishable from
+  human speech, and the consequence was self-inflicted: THE NEXT COMPACTION SUMMARIZED
+  THE PREVIOUS SUMMARY AS IF THE USER HAD WRITTEN IT. `SUMMARY_SYSTEM` tells the
+  summarizer to preserve "constraints the user stated… verbatim", so a synthesized
+  summary could be canonized as a user constraint. `/rewind` offered it as a turn to
+  undo; memory recall anchored on it.
+
+  `id` is now IDENTITY and `origin` is PROVENANCE. `makeSyntheticUserMessage` sets both;
+  `isSyntheticUserMessage` reads `origin` first with the id prefix as the LEGACY
+  fallback, so sessions written before this change keep working. The three inline
+  constructions collapse into one builder — three constructions were three chances to
+  forget the marker.
+
+  WIRE PURITY is structural, not conventional: the codecs map `role` + `content` only,
+  so `origin` is unreachable from a provider payload. Pinned by a test on the built
+  Anthropic request.
+evidence:
+  code:
+    - src/llm/types.ts
+    - src/agent/synthetic-user.ts
+    - src/agent/compaction/harness-speech.ts
+    - src/agent/compaction.ts
+  adrs:
+    - docs/decisions/0546-harness-provenance-on-the-message.md
+  tests:
+    unit:
+      - tests/unit/agent/synthetic-provenance-hellgate.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  ZERO FALSE POSITIVES is the load-bearing control. Mislabelling human speech as harness
+  output would silently drop the user's own words from recall and from the summary's
+  "preserve verbatim" instruction — a WORSE failure than the one being fixed. The paired
+  controls assert a genuine user message carries no provenance, including one whose text
+  merely MENTIONS a summary header.
+
+  `origin` is deliberately a single literal (`"harness"`), not the full
+  `SyntheticUserMessageKind`. The kind still lives in the id for producers that mint one;
+  nothing downstream branches on kind today, and a wider local field would be
+  shipped-but-unread.
+
+  The builder lives in `compaction/harness-speech.ts`, not `compaction.ts`: that file
+  sits just under the 1000-line god-module ceiling and adding the builder there pushed
+  it to 1004.
