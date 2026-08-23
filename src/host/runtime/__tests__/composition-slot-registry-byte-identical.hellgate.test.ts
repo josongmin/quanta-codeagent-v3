@@ -74,7 +74,14 @@ const STR_VERBATIM_MAX = 200
  * Depth-bounded so a deep port graph / class instance collapses to its ordered
  * own-key set at the leaf rather than walking forever.
  */
-const shapeTag = (value: unknown, depth: number): string => {
+/**
+ * Tag for a NON-recursive value — every leaf kind, i.e. everything except an
+ * array or a plain object. Returns `null` for those two so {@link shapeTag} can
+ * keep only the recursive arms. Split out purely to keep each function under
+ * the cognitive-complexity ceiling; the tags are byte-identical to the ones the
+ * single combined function produced, which is what the committed snapshot pins.
+ */
+const leafTag = (value: unknown): string | null => {
   if (value === null) return "null"
   if (value === undefined) return "undefined"
   const t = typeof value
@@ -83,16 +90,20 @@ const shapeTag = (value: unknown, depth: number): string => {
   if (t === "bigint") return "bigint"
   if (t === "number") return "num"
   if (t === "symbol") return "sym"
-  if (t === "string") {
-    const s = value as string
-    // The `cwd` slot bakes an ABSOLUTE repo path (`cwd = opts.cwd ?? process.cwd()`),
-    // which differs per checkout/worktree/CI and is NOT touched by the slot-registry
-    // refactor — render it as a STABLE sentinel (same rationale as the `env` bag)
-    // so a regen from a worktree does not poison main and the fingerprint stays
-    // machine-independent.
-    if (s === process.cwd()) return "str:<cwd>"
-    return s.length <= STR_VERBATIM_MAX ? `str:${JSON.stringify(s)}` : `str[${s.length}]`
-  }
+  if (t !== "string") return null
+  const s = value as string
+  // The `cwd` slot bakes an ABSOLUTE repo path (`cwd = opts.cwd ?? process.cwd()`),
+  // which differs per checkout/worktree/CI and is NOT touched by the slot-registry
+  // refactor — render it as a STABLE sentinel (same rationale as the `env` bag)
+  // so a regen from a worktree does not poison main and the fingerprint stays
+  // machine-independent.
+  if (s === process.cwd()) return "str:<cwd>"
+  return s.length <= STR_VERBATIM_MAX ? `str:${JSON.stringify(s)}` : `str[${s.length}]`
+}
+
+const shapeTag = (value: unknown, depth: number): string => {
+  const leaf = leafTag(value)
+  if (leaf !== null) return leaf
   if (Array.isArray(value)) {
     if (depth <= 0) return `arr[${value.length}]`
     return `arr[${value.map((v) => shapeTag(v, depth - 1)).join(",")}]`
