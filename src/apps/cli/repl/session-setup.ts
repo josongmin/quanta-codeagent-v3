@@ -132,6 +132,14 @@ export interface SessionSetupResult {
   // REPL surface composer can wire `/brief` against the SAME instance the loop
   // reads via `AgentConfig.sessionBrief`. Mirrors `effortStore`.
   readonly briefStore: import("@/agent").BriefStore
+  /** RFC-05 E4 — the posture FRONT-DOOR control forwarded from `boot.postureControl`
+   *  (the SAME live authority the host `session.posture.set` projection + the gate
+   *  read). The surface composer wires the CLI `/posture` selector over the EXACT
+   *  instance the host mutates (one control, both consumers) — so a `/posture`
+   *  edit changes the next turn's gate. Absent only on a bootstrap that predates
+   *  the wire (hermetic test doubles); the live bootstrap always sets it. Gated for
+   *  REGISTRATION by `QUANTA_POSTURE_SELECTOR` in the surface composer. */
+  readonly postureControl?: import("@/permission/posture/control").PostureControl | undefined
   readonly llm: LLMPort
   readonly planMode: boolean
   /** Live provider quota remaining percentage from the session BudgetMeter.
@@ -521,6 +529,10 @@ export const setupSession = async (
     effortStore: boot.effortStore,
     // #17 (Agent-B, additive) — forward the bootstrap brief-mode store.
     briefStore: boot.briefStore,
+    // RFC-05 E4 — forward the posture front-door control so the surface composer
+    // wires `/posture` over the SAME live authority the host `session.posture.set`
+    // + the gate read. Undefined only for a bootstrap double that predates the wire.
+    postureControl: boot.postureControl,
     llm: sessionLlm,
     planMode: boot.features.planMode,
     providerRateLimitRemainingPercent:

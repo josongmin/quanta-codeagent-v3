@@ -106,6 +106,11 @@ type SurfaceDispatchArgs = {
    *  surface minted the store; absent ⇒ slot omitted ⇒ `/objective` prints "not
    *  wired" (default-OFF byte-identical). */
   readonly objectiveEditor?: SlashContext["objectiveEditor"]
+  /** RFC-05 E4 `/posture` — the posture selector wire over the SAME live
+   *  `PostureControl` the host mutates. Present iff QUANTA_POSTURE_SELECTOR is on
+   *  AND the bootstrap wired the control; absent ⇒ slot omitted ⇒ `/posture` prints
+   *  "not wired" (default-OFF byte-identical). */
+  readonly postureEditor?: SlashContext["postureEditor"]
   /** §9.6 `/presets` — the shared `StickyPresetResolver` (the SAME instance the
    *  loop's role→model resolution consults). Present iff the surface minted it;
    *  absent ⇒ slot omitted ⇒ `/presets` prints "not wired" (default-OFF
@@ -152,6 +157,7 @@ const buildLiveSlashContext = (args: SurfaceDispatchArgs): SlashContext => {
     ...optionalSlashSlot("permissionInspect", args.permissionInspect),
     ...optionalSlashSlot("goal", args.goal),
     ...optionalSlashSlot("objectiveEditor", args.objectiveEditor),
+    ...optionalSlashSlot("postureEditor", args.postureEditor),
     ...optionalSlashSlot("presets", args.presets),
     ...optionalSlashSlot("skillReview", args.skillReview),
   }

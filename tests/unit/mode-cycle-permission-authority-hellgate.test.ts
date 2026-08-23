@@ -97,16 +97,24 @@ describe("mode-cycle permission authority hellgate (ADR-0303 → RFC-05 E3)", ()
 
   test("bootstrap builds permission as an accessor over the posture authority, not a static mirror", () => {
     const src = read("src/host/bootstrap/bootstrap-session.ts")
-    // The mode is owned by the durable authority via the delegating adapter (the
-    // `buildLivePermissionModeState` seam) — NOT a standalone
-    // `createPermissionModeSessionState` state cell.
-    expect(src).toContain("buildLivePermissionModeState(runtime.mode)")
+    // RFC-05 E4/E5 — the mode is owned by the durable authority via the delegating
+    // adapter, now built by the ONE `buildLivePostureRuntime` seam (extracted to
+    // `live-posture-runtime.ts` for the god-module cap) which composes the SAME
+    // authority into the mode accessor/adapter + the E4 control + the E5 guard —
+    // NOT a standalone `createPermissionModeSessionState` state cell.
+    expect(src).toContain("buildLivePostureRuntime(runtime.mode)")
     expect(src).not.toContain("createPermissionModeSessionState")
-    // accessor-backed, not a frozen `{ mode: runtime.mode }` snapshot
-    expect(src).toContain("get mode()")
-    expect(src).toContain("set mode(next)")
-    // the adapter is returned on the bootstrap result so the runtime can wire it
+    // the adapter + control + guard are returned on the bootstrap result so the
+    // runtime can wire them.
     expect(src).toMatch(/permission,\s*\n\s*permissionModeState,/)
+
+    // the accessor-backed permission (NOT a frozen `{ mode }` snapshot) lives in
+    // the extracted seam, over the SAME `buildLivePosture` authority.
+    const seam = read("src/host/bootstrap/live-posture-runtime.ts")
+    expect(seam).toContain("buildLivePosture(initialMode)")
+    expect(seam).toContain("livePosture.modeState")
+    expect(seam).toContain("get mode()")
+    expect(seam).toContain("set mode(next)")
   })
 
   test("permissionModeState is threaded through snapshot + exposed on RuntimeContext", () => {

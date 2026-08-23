@@ -6,6 +6,11 @@ import type { PermissionInspectSlashState } from "../../permission-explain"
 import type { RetryWithSessionState } from "../../retry-with"
 import type { ConvCheckpointSlashState } from "../../rewind-conv-cmd"
 import { buildObjectiveSlashState, isObjectiveEditorEnabled } from "../../slash/objective"
+import {
+  buildPostureSlashState,
+  isPostureSelectorEnabled,
+  type PostureSlashState,
+} from "../../slash/posture"
 import type { SessionSetupResult } from "../session-setup"
 import type { SurfaceCoreState } from "./core-state"
 import { buildSurfaceDispatch, buildVoiceLiveSlot } from "./dispatch"
@@ -37,6 +42,19 @@ const dreamSlot = (setup: SessionSetupResult): DreamSlashState | undefined => {
   const trigger = setup.runtimeContext.dreamTrigger()
   return trigger === undefined ? undefined : { trigger }
 }
+
+/** RFC-05 E4 — build the CLI `/posture` selector slot (`ctx.postureEditor`) over
+ *  the SAME live {@link PostureControl} the host `session.posture.set` projection +
+ *  the gate mutate (forwarded from `boot.postureControl` via `setup.postureControl`).
+ *  Mirrors the `objectiveEditor` line: gated on `QUANTA_POSTURE_SELECTOR`
+ *  (REGISTRATION parity — the authority/control is always wired, like E3 mode) AND
+ *  the control being present. Absent ⇒ `undefined` ⇒ `/posture` prints "not wired"
+ *  (default-OFF byte-identical). Extracted + exported so the compose seam is
+ *  FRONT-DOOR testable (mirrors {@link buildRetryState}). */
+export const buildPostureEditorSlot = (setup: SessionSetupResult): PostureSlashState | undefined =>
+  isPostureSelectorEnabled() && setup.postureControl !== undefined
+    ? buildPostureSlashState(setup.postureControl)
+    : undefined
 
 /** RFC02-3 (A8, feeder) — build the live `/retry-with` session state, attaching
  *  the gated route-event sink to `onModelReroute` when (and only when) the host
@@ -125,6 +143,13 @@ export const buildSurfaceDispatchWire = (
     setup.sessionId.length > 0
       ? { objectiveEditor: buildObjectiveSlashState(core.objectiveStore, setup.sessionId) }
       : {}),
+    // RFC-05 E4 — the `/posture` selector wire over the SAME live posture control
+    // the host mutates. Gated on QUANTA_POSTURE_SELECTOR (registration parity with
+    // `/objective`); absent ⇒ `/posture` prints "not wired" (default-OFF byte-identical).
+    ...((): { postureEditor?: PostureSlashState } => {
+      const postureEditor = buildPostureEditorSlot(setup)
+      return postureEditor !== undefined ? { postureEditor } : {}
+    })(),
     presets: core.presetResolver,
     contextUsage: () => core.contextUsageHolder.view(),
     ...(voiceLive === undefined ? {} : { voiceLive }),

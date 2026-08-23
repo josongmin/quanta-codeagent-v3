@@ -26,6 +26,7 @@ import {
   parseBoolKnob,
   parseEffort,
 } from "@/agent"
+import type { QuestionAvailabilityReader } from "@/agent/dispatch-guard"
 import { defaultFocusChainTracker, type FocusChainPort } from "@/agent/focus-chain"
 import {
   defaultIdentityProvider,
@@ -61,6 +62,7 @@ import { createMcpToolReloadController } from "@/host/runtime/mcp-tool-reload"
 import type { ImageBlock, LLMPort, Message } from "@/llm"
 import { StructuredLogger } from "@/observability"
 import type { PermissionContext } from "@/permission"
+import type { PostureControl } from "@/permission/posture/control"
 import {
   createIdentityModeSessionState,
   createSystemPromptRebuilder,
@@ -69,17 +71,15 @@ import {
   type IdentityModeSessionState,
   type ToolProfileSessionState,
 } from "@/runner/assemble"
-// RFC-05 E3 — the behavior-live posture authority + delegating mode adapter that
-// retire the standalone permission-mode state cell (single production owner).
-import {
-  buildLivePermissionModeState,
-  type PermissionModeSessionState,
-} from "@/runner/assemble/session-authorities"
+import type { PermissionModeSessionState } from "@/runner/assemble/session-authorities"
 import { resolveNetworkProxyFromEnv } from "@/runner/knobs/knobs/network-proxy"
 import { isPathLikeToken } from "@/runner/orchestrate"
 import { openSessionEgressProxy } from "@/runtime/network-proxy"
 import { errMessage, gateOn, type Logger, logger, runtimeConfigFromEnv } from "@/shared"
 import type { AgentEvent } from "@/stream"
+// RFC-05 E4/E5 — the behavior-live posture RUNTIME (ONE authority behind the mode
+// accessor/adapter, the E4 control, and the E5 question guard).
+import { buildLivePostureRuntime } from "./live-posture-runtime"
 import {
   type BootstrapFeatures,
   type SessionBootstrapDeps,
@@ -417,6 +417,10 @@ interface PreparedSessionRuntime {
   readonly rejectCounter: ReturnType<SessionBootstrapDeps["buildIdleGuards"]>["rejectCounter"]
   readonly permission: PermissionContext
   readonly permissionModeState: PermissionModeSessionState
+  /** RFC-05 E4 — posture front-door control (SAME authority); → base.postureControl. */
+  readonly postureControl: PostureControl
+  /** RFC-05 E5 — live question guard (SAME authority); → base/AgentConfig.questionGuard. */
+  readonly questionGuard: QuestionAvailabilityReader
   readonly abort: AbortController
   readonly effortStore: ReturnType<typeof createEffortStore>
   readonly briefStore: ReturnType<typeof createBriefStore>
@@ -464,18 +468,13 @@ const prepareSessionRuntime = async (
   // mid-session change (CLI `shift+tab` mode-cycle → `permissionModeState().set()`,
   // web/agent control-request `permission.mode = …`) is a durable POSTURE
   // mutation the very next turn reads. Seeded from `runtime.mode` (unmanaged ⇒
-  // effectiveMode == `runtime.mode`, byte-identical default path). The SAME
-  // adapter is threaded as `permissionModeState`, so the accessor and the CLI
-  // mode-cycle share one authority (no parallel mode cell).
-  const permissionModeState: PermissionModeSessionState = buildLivePermissionModeState(runtime.mode)
-  const permission: PermissionContext = {
-    get mode() {
-      return permissionModeState.get()
-    },
-    set mode(next) {
-      permissionModeState.set(next)
-    },
-  }
+  // effectiveMode == `runtime.mode`, byte-identical default path).
+  //
+  // RFC-05 E4/E5 — `buildLivePostureRuntime` composes ONE authority into the mode
+  // accessor + adapter, the E4 `postureControl` (host `session.posture.set` + CLI
+  // `/posture`, full lossless patch), and the E5 `questionGuard` — see that seam.
+  const { permission, permissionModeState, postureControl, questionGuard } =
+    buildLivePostureRuntime(runtime.mode)
   const abort = new AbortController()
   const effortStore = createEffortStore(parseEffort(runtime.env.QUANTA_EFFORT) ?? "default")
   // #17 (C3) — seed the brief-mode store from `QUANTA_BRIEF` (default-OFF). The
@@ -544,6 +543,8 @@ const prepareSessionRuntime = async (
     rejectCounter,
     permission,
     permissionModeState,
+    postureControl,
+    questionGuard,
     abort,
     effortStore,
     briefStore,
@@ -908,6 +909,8 @@ const assembleBootstrapResult = async (
       slog,
       permission,
       permissionModeState,
+      postureControl: prepared.postureControl, // RFC-05 E4 (→ base.postureControl)
+      questionGuard: prepared.questionGuard, // RFC-05 E5 (→ AgentConfig.questionGuard)
       idleMonitor,
       rejectCounter,
       effortStore,

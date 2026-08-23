@@ -18,7 +18,7 @@
  * root calls in place of the mode-only `buildLivePermissionModeState`.
  */
 
-import { createPostureAuthority } from "@/permission/posture/authority"
+import { createPostureAuthority, type PostureAuthority } from "@/permission/posture/authority"
 import { buildPostureControl, type PostureControl } from "@/permission/posture/control"
 import type { PermissionDefaultsPort } from "@/permission/posture/ports"
 import type { PostureRecord } from "@/permission/posture/types"
@@ -49,12 +49,19 @@ export interface LivePosture {
   readonly modeState: PermissionModeSessionState
   /** The E4 front-door control — CLI `/posture` + the wire projection share it. */
   readonly control: PostureControl
+  /** The ONE live authority backing BOTH the mode adapter and the control. The
+   *  composition root adapts it into the E5 `livePostureQuestionReader` so the
+   *  `request_user_input` guard re-reads the SAME live `askOutsidePlan` a
+   *  `/posture ask off` mutates (H3). Exposed here because a `PostureControl`
+   *  deliberately hides the raw authority; the question guard needs it. */
+  readonly authority: PostureAuthority
 }
 
 /**
  * Build the live session's posture: ONE seeded authority (unmanaged ⇒
  * effectiveMode == `initialMode`, byte-identical to the legacy `runtime.mode`
- * seed) exposed BOTH as the E3 mode adapter and the E4 front-door control, plus a
+ * seed) exposed as the E3 mode adapter, the E4 front-door control, AND the raw
+ * authority (for the E5 question reader) — one authority, three views — plus a
  * process-local future-thread default store so `--default` scope is available.
  */
 export const buildLivePosture = (initialMode: PermissionMode): LivePosture => {
@@ -71,5 +78,6 @@ export const buildLivePosture = (initialMode: PermissionMode): LivePosture => {
   return {
     modeState: createPermissionModeAdapter(authority),
     control,
+    authority,
   }
 }

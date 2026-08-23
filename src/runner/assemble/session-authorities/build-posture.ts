@@ -204,6 +204,19 @@ export const createSeededPosturePersistence = (
  * bumped revision (none stale-reject) — a fire-and-forget surface write applies
  * on the next durable publish, before the next turn.
  *
+ * M1 (RFC-05 E4) — CAS-loser resilience against the SECOND writer. Once the E4
+ * {@link PostureControl} shares this ONE authority (a `/posture` mutation), a
+ * mode-cycle (`shift+tab`) can race a `/posture` commit: the mode `set` reads
+ * revision N, a posture write commits N→N+1 first, and the mode `set`'s CAS is
+ * stale-rejected. A fire-and-forget adapter would DISCARD that `PostureMutationResult`
+ * and SILENTLY LOSE the mode change. So `set()` RE-READS the freshly-published
+ * revision and RE-APPLIES the `{ mode }` patch on top of the committed record on a
+ * `stale_revision` reject — the mode write composes with the posture change (last
+ * writer on the mode axis) instead of being lost or clobbering the non-mode
+ * fields. Only `stale_revision` retries; a `persist_failed` is a real failure and
+ * is NOT retried. Progress is guaranteed: the authority serializes writes, so each
+ * retry follows a completed conflicting commit, and operator writes are finite.
+ *
  * This is the moved home of the `PermissionModeSessionState` contract every
  * surface writes through (formerly the state-cell shape in `session-state.ts`,
  * re-exported from there for compatibility). It is now the delegating-adapter
@@ -221,11 +234,22 @@ export const createPermissionModeAdapter = (
   authority: PostureAuthority,
 ): PermissionModeSessionState => {
   let chain: Promise<unknown> = Promise.resolve()
-  const runSet = (next: PermissionMode): Promise<unknown> =>
+  const runSet = async (next: PermissionMode): Promise<unknown> => {
     // Read the revision INSIDE the continuation so it reflects any prior set's
     // durable bump; `authority.set` never rejects (persist failure is a typed
     // result), so the chain never needs a rejection handler.
-    authority.set({ mode: next }, authority.read().revision)
+    //
+    // M1 — retry ONLY on `stale_revision`: the SECOND writer (the E4 PostureControl
+    // sharing this authority) committed between our read and the authority's CAS.
+    // Re-read the freshly-published revision and re-apply `{ mode }` on top so the
+    // mode write is never silently lost. `persist_failed` is a real failure ⇒ no
+    // retry. Progress is bounded — the authority serializes writes, so each retry
+    // trails a completed commit.
+    for (;;) {
+      const result = await authority.set({ mode: next }, authority.read().revision)
+      if (result.ok || result.rejection.kind !== "stale_revision") return result
+    }
+  }
   return {
     get: () => authority.read().effective.effectiveMode,
     set: (next) => {

@@ -492,6 +492,23 @@ export interface SessionBootstrapResult {
    *  accessor. The CLI `shift+tab` mode-cycle mutates THIS via
    *  `RuntimeContext.permissionModeState().set()`; the next turn reads it live. */
   readonly permissionModeState: PermissionModeSessionState
+  /** RFC-05 E4 — the posture FRONT-DOOR control over the SAME live authority
+   *  `permissionModeState` wraps. `buildBaseFromBootstrap` lifts it onto the base
+   *  as `postureControl`, so the host `session.posture.set` projection applies the
+   *  FULL lossless patch (mode + sandbox + askOutsidePlan) under CAS and `describe`
+   *  echoes the live posture; the CLI `/posture` selector shares this SAME control.
+   *  Always built (parity with the E3 mode adapter); byte-identical until a posture
+   *  mutation occurs. Optional so hermetic-test result constructors stay valid; the
+   *  live bootstrap always sets it. */
+  readonly postureControl?: import("@/permission/posture/control").PostureControl
+  /** RFC-05 E5 — the live `request_user_input` availability reader over the SAME
+   *  authority. `buildBaseFromBootstrap` lifts it onto the base as `questionGuard`
+   *  (⇒ `AgentConfig.questionGuard`), so the model tool-SPEC projection and the
+   *  pre-dispatch admission consult BOTH consult the live `askOutsidePlan`. Default-
+   *  OFF: with no posture change the guard returns AVAILABLE (byte-identical); it
+   *  subtracts only after a `/posture ask off` denies. Optional for the same reason
+   *  as `postureControl`. */
+  readonly questionGuard?: import("@/agent/dispatch-guard").QuestionAvailabilityReader
   readonly idleMonitor: BootstrapIdleMonitor
   readonly rejectCounter: BootstrapRejectCounter
   /** Session-level reasoning-effort store (Codex `/model`-style UX, effort-

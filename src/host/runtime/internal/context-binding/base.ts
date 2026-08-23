@@ -336,6 +336,19 @@ const buildBootstrapBaseShape = (
     ...whenDefined("toolProfileState", args.boot.toolProfileState),
     ...whenDefined("identityModeState", args.boot.identityModeState),
     ...whenDefined("permissionModeState", args.boot.permissionModeState),
+    // RFC-05 E4 — lift the posture front-door control onto the base so the host
+    // `session.posture.set` projection + `describe` apply/echo the FULL lossless
+    // patch through the SAME live authority the gate reads (`buildOptionalSnapshotFields`
+    // then surfaces it onto the per-turn base). Absent ⇒ the host's `setPosture`
+    // falls back to the mode-only compat write (byte-identical for a runtime
+    // without a wired control).
+    ...whenDefined("postureControl", args.boot.postureControl),
+    // RFC-05 E5 — lift the live `request_user_input` guard onto the base so
+    // `buildAgentConfigFromBase`'s `...rest` spread carries it onto
+    // `AgentConfig.questionGuard` (the spec projection + dispatch consult both read
+    // it, mirroring how `questionBroker` is threaded). Absent ⇒ question available
+    // by default (byte-identical, default-OFF).
+    ...whenDefined("questionGuard", args.boot.questionGuard),
     ...whenDefined("focusChain", args.boot.focusChain),
     ...whenDefined("onShellEvent", args.boot.onShellEvent),
     ...whenDefined("workMetricsSink", args.boot.workMetricsSink),
