@@ -58,7 +58,15 @@ export interface WireSlotsCoreConfig {
    *  gate itself, i.e. caller did not pre-build `dedupGate`). Absent ⇒
    *  {@link DEFAULT_DEDUP_GATE_CAPS}. Set `disabled:true` to opt out entirely
    *  (gate not constructed, no consult cost). */
-  dedupGateConfig?: { disabled?: boolean; caps?: Partial<DedupGateCaps> }
+  dedupGateConfig?: {
+    disabled?: boolean
+    caps?: Partial<DedupGateCaps>
+    /** aug-23 priority 2 — OPT-IN no-progress ceiling. After this many blocked
+     *  verdicts against ONE bucket the run ends (`loop.no_progress`). Absent ⇒
+     *  the gate only steers, byte-identical to before. Deliberately NOT on
+     *  `DedupGateCaps` (a total interface whose defaults would force a value). */
+    hardStopAfter?: number
+  }
   /**
    * ADR-0229 — pre-flight dispatch guard composing three already-shipped pure
    * detectors (`gitWriteProtectReason` / `decideBranchOnly` / `isHostAllowed`)

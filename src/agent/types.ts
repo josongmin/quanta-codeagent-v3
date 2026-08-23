@@ -702,7 +702,15 @@ export interface SafetyConfig {
    *  AgentConfig and SafetyConfig). See AgentConfig.closeoutCritic. */
   closeoutCritic?: CloseoutCriticConfig
   dedupGate?: DedupGate
-  dedupGateConfig?: { disabled?: boolean; caps?: Partial<DedupGateCaps> }
+  dedupGateConfig?: {
+    disabled?: boolean
+    caps?: Partial<DedupGateCaps>
+    /** aug-23 priority 2 — OPT-IN no-progress ceiling. After this many blocked
+     *  verdicts against ONE bucket the run ends (`loop.no_progress`). Absent ⇒
+     *  the gate only steers, byte-identical to before. Deliberately NOT on
+     *  `DedupGateCaps` (a total interface whose defaults would force a value). */
+    hardStopAfter?: number
+  }
 }
 
 /** Permission-stack add-ons orthogonal to the core {@link AgentConfig.permission}

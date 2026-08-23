@@ -19,7 +19,8 @@
  */
 
 import { emitBudgetExhaustedDecision } from "../decision-emit-phase3"
-import { budgetCategory, type StopCategory } from "../stop-category"
+import { DedupGate } from "../dispatch-dedup"
+import { budgetCategory, STOP_REASON_CODE, type StopCategory } from "../stop-category"
 import { resolveActiveModelId } from "./skill-gate"
 import { projectCostPreflight } from "./turn-iteration"
 import type { FinishAgentSession, RunAgentContext } from "./types"
@@ -92,7 +93,37 @@ export const DEFAULT_PRE_TURN_STOP_CONDITIONS: readonly PreTurnStopCondition[] =
   costPreflightCondition,
 ]
 
+/**
+ * OPT-IN no-progress ceiling for {@link DedupGate} (aug-23 priority 2).
+ *
+ * The gate already detects repeated identical calls and STEERS (a synthetic
+ * observation). It has no brake: a model that keeps re-issuing the same call
+ * after being blocked loops until some other budget runs out. Grok Build ends
+ * the turn at its stationarity threshold; this is the equivalent, gated.
+ *
+ * DEFAULT-OFF: absent `hardStopAfter` returns after one property read, so an
+ * unconfigured run is byte-identical. Counted PER BUCKET — blocks spread across
+ * different calls are thrash the sliding window already handles.
+ */
+export const dedupNoProgressCondition: PostContinueStopCondition = (ctx, turn) => {
+  const ceiling = ctx.cfg.dedupGateConfig?.hardStopAfter
+  if (ceiling === undefined || ceiling <= 0) return undefined
+  const gate = ctx.dedupGate
+  if (!(gate instanceof DedupGate)) return undefined
+  if (gate.maxBlockedForOneBucket < ceiling) return undefined
+  return {
+    reason: "error",
+    turns: turn,
+    stopCategory: {
+      kind: "failed",
+      reasonCode: STOP_REASON_CODE.LOOP_NO_PROGRESS,
+      hint: "The agent repeated the same blocked action without making progress.",
+    },
+  }
+}
+
 /** Ordered POST-CONTINUE conditions the loop iterates before the next iteration. Register here. */
 export const DEFAULT_POST_CONTINUE_STOP_CONDITIONS: readonly PostContinueStopCondition[] = [
   ledgerHardBreachCondition,
+  dedupNoProgressCondition,
 ]

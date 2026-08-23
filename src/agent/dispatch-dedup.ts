@@ -253,6 +253,12 @@ export class DedupGate {
   /** Hash key → ordered list of turns at which the call was issued (oldest
    *  first). Bounded: pruned to entries within `window` on every record. */
   private readonly history = new Map<string, number[]>()
+  /** Blocked verdicts issued PER BUCKET. aug-23 priority 2: the steer alone has
+   *  no brake — a model that keeps re-issuing the same call after being blocked
+   *  loops forever. This counter is what an opt-in hard-stop ceiling reads. It
+   *  is per-bucket on purpose: blocks spread across different calls are thrash
+   *  the sliding window already handles, not a wedge. */
+  private readonly blockedCounts = new Map<string, number>()
 
   constructor(caps: Partial<DedupGateCaps> = {}) {
     this.caps = { ...DEFAULT_DEDUP_GATE_CAPS, ...caps }
@@ -312,6 +318,7 @@ export class DedupGate {
     this.history.set(key, kept)
 
     if (kept.length < threshold) return { blocked: false }
+    this.blockedCounts.set(key, (this.blockedCounts.get(key) ?? 0) + 1)
     return {
       blocked: true,
       count: kept.length,
@@ -337,6 +344,14 @@ export class DedupGate {
   /** Internal state size, for telemetry / assertions only. */
   get size(): number {
     return this.history.size
+  }
+
+  /** Highest number of blocked verdicts issued against a SINGLE bucket. Read by
+   *  the opt-in no-progress ceiling; 0 when nothing has been blocked. */
+  get maxBlockedForOneBucket(): number {
+    let max = 0
+    for (const n of this.blockedCounts.values()) if (n > max) max = n
+    return max
   }
 }
 

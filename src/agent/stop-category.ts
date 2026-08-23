@@ -132,6 +132,11 @@ export const STOP_REASON_CODE = {
    *  NOTHING stall — NON-success (the model never gave text, a tool call, OR a
    *  final answer), distinct from a clean completion. */
   MODEL_EMPTY_EXHAUSTED: "model.empty_exhausted",
+  /** aug-23 priority 2 — the dedup gate's opt-in no-progress ceiling tripped:
+   *  the model kept re-issuing a call the gate had already blocked. A WEDGE,
+   *  distinct from `max_turns` (budget spent doing varied work) and from any
+   *  completion. */
+  LOOP_NO_PROGRESS: "loop.no_progress",
 } as const
 
 export type StopReasonCode = (typeof STOP_REASON_CODE)[keyof typeof STOP_REASON_CODE]
@@ -437,6 +442,7 @@ export const STOP_PRESENTATION_BY_REASON_CODE: Record<StopReasonCode, StopPresen
   [STOP_REASON_CODE.PROVIDER_BAD_REQUEST]: { label: "Malformed request", tone: "failed" },
   [STOP_REASON_CODE.PROVIDER_UNKNOWN]: { label: "Provider error", tone: "failed" },
   [STOP_REASON_CODE.RUNTIME_UNKNOWN_ERROR]: { label: "Unexpected error", tone: "failed" },
+  [STOP_REASON_CODE.LOOP_NO_PROGRESS]: { label: "Stopped making progress", tone: "failed" },
 }
 
 const ALL_STOP_REASON_CODES_RUNTIME: readonly StopReasonCode[] = Object.values(STOP_REASON_CODE)
