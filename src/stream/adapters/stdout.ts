@@ -99,6 +99,133 @@ export class StdoutStream implements StreamPort {
     }
   }
 
+  private onAssistantText(event: Extract<AgentEvent, { type: "assistant_text" }>): void {
+    // S4: a secret pasted into model output must not hit the terminal.
+    // ADR: inline markdown highlighter — when wired, route the delta
+    // through the painter's streaming FSM. When absent, write the
+    // delta verbatim (byte-identical to the pre-painter path).
+    this.writeAssistantText(event.delta)
+  }
+
+  private onAssistantThinking(event: Extract<AgentEvent, { type: "assistant_thinking" }>): void {
+    // jun-11 (#11) — reasoning rendered DIM, distinct from the answer. Each
+    // delta is self-contained (DIM…RESET) so an interleaved no-op event can
+    // never strand an open ANSI escape; redacted like all model output.
+    const safe = redactStr(event.delta)
+    if (safe !== "") this.write(`${DIM}${safe}${RESET}`)
+    this.inThinking = true
+  }
+
+  private onToolResult(event: Extract<AgentEvent, { type: "tool_result" }>): void {
+    const mark = event.ok ? `${GREEN}✓${RESET}` : `${RED}✗${RESET}`
+    const tail =
+      event.stderrTail !== undefined && event.stderrTail !== ""
+        ? ` ${DIM}stderr: ${oneLine(redactStr(event.stderrTail))}${RESET}`
+        : ""
+    this.write(`${mark} ${DIM}${event.name}: ${oneLine(redactStr(event.preview))}${RESET}${tail}\n`)
+  }
+
+  private onRecovery(event: Extract<AgentEvent, { type: "recovery" }>): void {
+    const detail =
+      event.detail !== undefined && event.detail !== ""
+        ? `: ${oneLine(redactStr(event.detail))}`
+        : ""
+    this.write(`${DIM}↺ recovery (${event.reason})${detail}${RESET}\n`)
+  }
+
+  private onContextCompacted(event: Extract<AgentEvent, { type: "context_compacted" }>): void {
+    // ADR-0075: one-line proactive-compaction marker — `from..to` lets a
+    // grep distinguish the new emit from the legacy `↺ recovery (compact)`
+    // line that fires immediately before it.
+    this.write(
+      `${DIM}↺ context_compacted (${event.fromTurnId}..${event.toTurnId}, ${event.tokens}t)${RESET}\n`,
+    )
+  }
+
+  private onLlmRequest(event: Extract<AgentEvent, { type: "llm_request" }>): void {
+    // Render an unambiguous auth-mode badge so the user can see at a
+    // glance whether this turn is on a ChatGPT subscription token or
+    // a BYOK API key. ADR-0094 §SOTA — the on-wire path differs
+    // (chatgpt.com/backend-api/codex vs api.openai.com / api.anthropic.com)
+    // and so does the billing line; do not hide that.
+    const badge = event.authMode !== undefined ? ` · ${event.authMode}` : ""
+    this.write(`${DIM}— llm request (${event.model})${badge} —${RESET}\n`)
+  }
+
+  private onInProgress(event: Extract<AgentEvent, { type: "in_progress" }>): void {
+    // ADR-0048: provider "thinking…" heartbeat. The two optional-field
+    // branches live in `renderInProgress` so this case stays a single
+    // statement (keeps `emit`'s cognitive complexity under the budget).
+    this.write(renderInProgress(event))
+  }
+
+  /** Renders NOTHING by design — see below. Takes no event because it reads
+   *  none; the switch arm calls it so the no-op stays documented in one place. */
+  private onRatelimitSnapshot(): void {
+    // jun-6 account-ratelimit-snapshot — transient quota-meter notice for
+    // the CLI spinner/status-bar (presence + N-left + reset-in), NOT this
+    // line-oriented monitor. Ignored here for the same reason as
+    // `output_progress` (a richer surface renders it in place).
+  }
+
+  private onBudgetBreach(event: Extract<AgentEvent, { type: "budget_breach" }>): void {
+    // ALBB-21 — advisory cost-cap crossing banner (Claude Code / Codex UX).
+    // RENDER-ONLY and NON-MUTATING: printing it never stops the turn (the
+    // HARD *stop* is `ledgerHardBreachCondition`'s job); this is a passive
+    // notice, the same class as the `usage`/`ratelimit_snapshot` readouts.
+    this.write(renderBudgetBreach(event))
+  }
+
+  private onContextHeadroomCrossed(
+    event: Extract<AgentEvent, { type: "context_headroom_crossed" }>,
+  ): void {
+    // RFC-01 A7 — advisory context-headroom banner. RENDER-ONLY and NON-
+    // MUTATING: the same passive-notice class as `budget_breach`; printing
+    // it never triggers compaction or stops the loop (that stays with the
+    // existing reactive/proactive compaction paths).
+    this.write(renderContextHeadroom(event))
+  }
+
+  private onModelRouteChanged(event: Extract<AgentEvent, { type: "model_route_changed" }>): void {
+    // RFC02-3 A8 — model-route transition banner ("↻ from → to (reason)").
+    // RENDER-ONLY: observing a model swap never re-routes the loop; the
+    // swap itself was decided by the caller (retry/fallback/scheduler).
+    this.write(renderModelRouteChanged(event))
+  }
+
+  private onTurnDiffUpdated(event: Extract<AgentEvent, { type: "turn_diff_updated" }>): void {
+    // ADR-0102 turn-diff: one-line dim status summarizing the cumulative
+    // diff. The full unified body is recorded by jsonl-recorder; stdout
+    // surface shows just the shape (turn, sha range, stats) so a user
+    // watching the CLI sees the shape without scrolling through 64 KiB
+    // of diff text.
+    this.write(
+      `${DIM}— turn ${event.turn} diff: ${event.filesChanged} files, +${event.insertions} -${event.deletions} (${event.fromSha.slice(0, 8)}..${event.toSha.slice(0, 8)}) —${RESET}\n`,
+    )
+  }
+
+  private onDecision(event: Extract<AgentEvent, { type: "decision" }>): void {
+    // Debug/developer-mode (Track A, 2026-05-25): gate-decision tracer
+    // line. One-liner — kind/outcome/reason are the three salient facts.
+    // The reason is scrubbed (the gate caller is responsible for not
+    // leaking secrets in `reason`/`metadata` per the type doc, but we
+    // route through `redactStr` anyway as defence-in-depth).
+    this.write(
+      `${DIM}• decision (${event.kind} → ${event.outcome}): ${oneLine(redactStr(event.reason))}${RESET}\n`,
+    )
+  }
+
+  private onProgressUpdate(event: Extract<AgentEvent, { type: "progress_update" }>): void {
+    // C2 (jun-4-communicate-update.md): structured progress report. Render a
+    // dim one-line status for the live `currentStep`, and when present a
+    // terminal subtitle line for `completedSubtitle`. All model-derived text
+    // routes through `redactStr` (defence-in-depth, same as the `decision`
+    // case). The full triple is recorded by jsonl-recorder; stdout is a
+    // monitor, so the executive `finalSummary` lives in the trajectory, not
+    // a flooded terminal line.
+    this.write(renderProgressUpdate(event))
+  }
+
   emit(event: AgentEvent): void {
     // Events that produce no visible stdout line — must not trigger the inText
     // flush or they insert a spurious \n between streaming text deltas.
@@ -121,75 +248,37 @@ export class StdoutStream implements StreamPort {
         this.write(`${DIM}— turn ${event.turn} —${RESET}\n`)
         break
       case "assistant_text":
-        // S4: a secret pasted into model output must not hit the terminal.
-        // ADR: inline markdown highlighter — when wired, route the delta
-        // through the painter's streaming FSM. When absent, write the
-        // delta verbatim (byte-identical to the pre-painter path).
-        this.writeAssistantText(event.delta)
+        this.onAssistantText(event)
         break
-      case "assistant_thinking": {
-        // jun-11 (#11) — reasoning rendered DIM, distinct from the answer. Each
-        // delta is self-contained (DIM…RESET) so an interleaved no-op event can
-        // never strand an open ANSI escape; redacted like all model output.
-        const safe = redactStr(event.delta)
-        if (safe !== "") this.write(`${DIM}${safe}${RESET}`)
-        this.inThinking = true
+      case "assistant_thinking":
+        this.onAssistantThinking(event)
         break
-      }
       case "tool_call":
         this.write(`${CYAN}⚙ ${event.name}${RESET} ${DIM}${compact(event.input)}${RESET}\n`)
         break
       case "tool_progress":
         this.write(`${DIM}  ↳ ${event.name}: ${oneLine(event.message)}${RESET}\n`)
         break
-      case "tool_result": {
-        const mark = event.ok ? `${GREEN}✓${RESET}` : `${RED}✗${RESET}`
-        const tail =
-          event.stderrTail !== undefined && event.stderrTail !== ""
-            ? ` ${DIM}stderr: ${oneLine(redactStr(event.stderrTail))}${RESET}`
-            : ""
-        this.write(
-          `${mark} ${DIM}${event.name}: ${oneLine(redactStr(event.preview))}${RESET}${tail}\n`,
-        )
+      case "tool_result":
+        this.onToolResult(event)
         break
-      }
-      case "recovery": {
-        const detail =
-          event.detail !== undefined && event.detail !== ""
-            ? `: ${oneLine(redactStr(event.detail))}`
-            : ""
-        this.write(`${DIM}↺ recovery (${event.reason})${detail}${RESET}\n`)
+      case "recovery":
+        this.onRecovery(event)
         break
-      }
       case "context_compacted":
-        // ADR-0075: one-line proactive-compaction marker — `from..to` lets a
-        // grep distinguish the new emit from the legacy `↺ recovery (compact)`
-        // line that fires immediately before it.
-        this.write(
-          `${DIM}↺ context_compacted (${event.fromTurnId}..${event.toTurnId}, ${event.tokens}t)${RESET}\n`,
-        )
+        this.onContextCompacted(event)
         break
       case "error":
         this.write(`${RED}error: ${redactStr(event.message)}${RESET}\n`)
         break
-      case "llm_request": {
-        // Render an unambiguous auth-mode badge so the user can see at a
-        // glance whether this turn is on a ChatGPT subscription token or
-        // a BYOK API key. ADR-0094 §SOTA — the on-wire path differs
-        // (chatgpt.com/backend-api/codex vs api.openai.com / api.anthropic.com)
-        // and so does the billing line; do not hide that.
-        const badge = event.authMode !== undefined ? ` · ${event.authMode}` : ""
-        this.write(`${DIM}— llm request (${event.model})${badge} —${RESET}\n`)
+      case "llm_request":
+        this.onLlmRequest(event)
         break
-      }
       case "llm_continuation":
         this.write(renderLlmContinuation(event))
         break
       case "in_progress":
-        // ADR-0048: provider "thinking…" heartbeat. The two optional-field
-        // branches live in `renderInProgress` so this case stays a single
-        // statement (keeps `emit`'s cognitive complexity under the budget).
-        this.write(renderInProgress(event))
+        this.onInProgress(event)
         break
       case "output_progress":
         // Live "· N tokens" counter — rendered by the CLI spinner/status-bar
@@ -197,10 +286,7 @@ export class StdoutStream implements StreamPort {
         // line per streamed delta would flood stdout, so this sink ignores it.
         break
       case "ratelimit_snapshot":
-        // jun-6 account-ratelimit-snapshot — transient quota-meter notice for
-        // the CLI spinner/status-bar (presence + N-left + reset-in), NOT this
-        // line-oriented monitor. Ignored here for the same reason as
-        // `output_progress` (a richer surface renders it in place).
+        this.onRatelimitSnapshot()
         break
       case "plan_created":
         this.write(renderPlanCreated(event))
@@ -226,57 +312,25 @@ export class StdoutStream implements StreamPort {
         )
         break
       case "budget_breach":
-        // ALBB-21 — advisory cost-cap crossing banner (Claude Code / Codex UX).
-        // RENDER-ONLY and NON-MUTATING: printing it never stops the turn (the
-        // HARD *stop* is `ledgerHardBreachCondition`'s job); this is a passive
-        // notice, the same class as the `usage`/`ratelimit_snapshot` readouts.
-        this.write(renderBudgetBreach(event))
+        this.onBudgetBreach(event)
         break
       case "context_headroom_crossed":
-        // RFC-01 A7 — advisory context-headroom banner. RENDER-ONLY and NON-
-        // MUTATING: the same passive-notice class as `budget_breach`; printing
-        // it never triggers compaction or stops the loop (that stays with the
-        // existing reactive/proactive compaction paths).
-        this.write(renderContextHeadroom(event))
+        this.onContextHeadroomCrossed(event)
         break
       case "model_route_changed":
-        // RFC02-3 A8 — model-route transition banner ("↻ from → to (reason)").
-        // RENDER-ONLY: observing a model swap never re-routes the loop; the
-        // swap itself was decided by the caller (retry/fallback/scheduler).
-        this.write(renderModelRouteChanged(event))
+        this.onModelRouteChanged(event)
         break
       case "done":
         this.write(`${DIM}— done (${event.reason}, ${event.turns} turns) —${RESET}\n`)
         break
       case "turn_diff_updated":
-        // ADR-0102 turn-diff: one-line dim status summarizing the cumulative
-        // diff. The full unified body is recorded by jsonl-recorder; stdout
-        // surface shows just the shape (turn, sha range, stats) so a user
-        // watching the CLI sees the shape without scrolling through 64 KiB
-        // of diff text.
-        this.write(
-          `${DIM}— turn ${event.turn} diff: ${event.filesChanged} files, +${event.insertions} -${event.deletions} (${event.fromSha.slice(0, 8)}..${event.toSha.slice(0, 8)}) —${RESET}\n`,
-        )
+        this.onTurnDiffUpdated(event)
         break
       case "decision":
-        // Debug/developer-mode (Track A, 2026-05-25): gate-decision tracer
-        // line. One-liner — kind/outcome/reason are the three salient facts.
-        // The reason is scrubbed (the gate caller is responsible for not
-        // leaking secrets in `reason`/`metadata` per the type doc, but we
-        // route through `redactStr` anyway as defence-in-depth).
-        this.write(
-          `${DIM}• decision (${event.kind} → ${event.outcome}): ${oneLine(redactStr(event.reason))}${RESET}\n`,
-        )
+        this.onDecision(event)
         break
       case "progress_update":
-        // C2 (jun-4-communicate-update.md): structured progress report. Render a
-        // dim one-line status for the live `currentStep`, and when present a
-        // terminal subtitle line for `completedSubtitle`. All model-derived text
-        // routes through `redactStr` (defence-in-depth, same as the `decision`
-        // case). The full triple is recorded by jsonl-recorder; stdout is a
-        // monitor, so the executive `finalSummary` lives in the trajectory, not
-        // a flooded terminal line.
-        this.write(renderProgressUpdate(event))
+        this.onProgressUpdate(event)
         break
       case "knobs_applied":
         // Knob telemetry (2026-05-26): per-run resolved knob posture. Render

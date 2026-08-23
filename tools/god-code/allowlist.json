@@ -9,7 +9,6 @@
     "src/ipc/session/bridge.ts::createSessionTransportBridge",
     "src/observability/otel-exporter.ts::otelHttpExporter",
     "src/runtime/shell.ts::runShell",
-    "src/stream/adapters/stdout.ts::emit",
     "src/tool/debug/inspect-driver.ts::inspectViaDap"
   ],
   "approachingModuleCeiling": {
