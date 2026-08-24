@@ -29,6 +29,10 @@
  *  R-4  CONTENT + HASH ARE UNCHANGED — the bytes on disk and the match hash are
  *        byte-identical to before, so every existing cassette still replays.
  *  R-5  The remote PUT asks for encryption at rest EXPLICITLY.
+ *  R-6  A remote PUT whose `aws` invocation FAILS throws — a swallowed PUT
+ *        failure silently loses durability (fail-closed).
+ *  R-7  A remote GET distinguishes a genuine not-found (`undefined`, per the
+ *        RemoteBackend contract) from a transport failure (throws).
  */
 
 import { describe, expect, test } from "bun:test"
@@ -143,5 +147,75 @@ describe("R-5 — the remote PUT asks for encryption at rest explicitly", () => 
     } as never)
     await backend.get("k/v.jsonl")
     expect(calls[0]).not.toContain("--sse")
+  })
+
+  test("R-6 a FAILED put THROWS — a swallowed PUT failure silently loses durability", async () => {
+    const { s3Backend } = await import("@/shared/remote-store/s3-backend")
+    const backend = s3Backend({
+      bucket: "b",
+      runAws: async () => ({ exitCode: 1, stdout: "", stderr: "AccessDenied" }),
+    } as never)
+    // PREVENTS: `put` returning normally on a non-zero `aws` exit. That is the
+    // durability hole — the producer believes the cassette/artifact is off-host,
+    // nothing is there, and the run is never marked degraded. Fail-closed means
+    // the caller MUST see the failure.
+    await expect(backend.put("k/v.jsonl", "body")).rejects.toThrow(
+      /put k\/v\.jsonl failed \(exit 1\)/,
+    )
+  })
+
+  test("R-6b the put failure carries the cli stderr — a blind throw is not diagnosable", async () => {
+    const { s3Backend } = await import("@/shared/remote-store/s3-backend")
+    const backend = s3Backend({
+      bucket: "b",
+      runAws: async () => ({ exitCode: 1, stdout: "", stderr: "Unable to locate credentials" }),
+    } as never)
+    // PREVENTS: a throw that drops the reason, leaving "the upload failed" with
+    // no way to tell creds from network from bucket policy.
+    await expect(backend.put("k/v.jsonl", "body")).rejects.toThrow(/Unable to locate credentials/)
+  })
+
+  test("R-7 `get` returns undefined for a GENUINE not-found", async () => {
+    const { s3Backend } = await import("@/shared/remote-store/s3-backend")
+    const backend = s3Backend({
+      bucket: "b",
+      runAws: async () => ({
+        exitCode: 1,
+        stdout: "",
+        stderr:
+          "fatal error: An error occurred (404) when calling the HeadObject operation: Key does not exist",
+      }),
+    } as never)
+    // PREVENTS: a missing key throwing. The RemoteBackend contract says callers
+    // branch on presence, so a resume/load path that legitimately has nothing
+    // stored yet must get `undefined`, not an exception.
+    expect(await backend.get("k/v.jsonl")).toBeUndefined()
+  })
+
+  test("R-7b `get` THROWS on a TRANSPORT failure — not-found is never faked", async () => {
+    const { s3Backend } = await import("@/shared/remote-store/s3-backend")
+    const backend = s3Backend({
+      bucket: "b",
+      runAws: async () => ({ exitCode: 1, stdout: "", stderr: "Unable to locate credentials" }),
+    } as never)
+    // PREVENTS: the pre-fix `exit≠0 ⇒ undefined` collapse, which reports a
+    // creds/network/throttle/access-denied failure as "no such object". A caller
+    // that branches on presence would then treat an unreachable bucket as an
+    // empty one and overwrite or restart from scratch.
+    await expect(backend.get("k/v.jsonl")).rejects.toThrow(
+      /get k\/v\.jsonl failed \(exit 1\): Unable to locate credentials/,
+    )
+  })
+
+  test("R-7c PAIRED CONTROL — a zero exit is never reinterpreted, even with empty stdout", async () => {
+    const { s3Backend } = await import("@/shared/remote-store/s3-backend")
+    const backend = s3Backend({
+      bucket: "b",
+      runAws: async () => ({ exitCode: 0, stdout: "", stderr: "" }),
+    } as never)
+    // PREVENTS: an over-eager "empty means missing" rule. A stored empty object
+    // is a successful get of "", not a not-found — otherwise R-7's undefined arm
+    // could be satisfied by a blanket falsy check.
+    expect(await backend.get("k/v.jsonl")).toBe("")
   })
 })

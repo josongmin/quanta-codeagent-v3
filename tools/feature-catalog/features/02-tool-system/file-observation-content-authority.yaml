@@ -82,6 +82,16 @@ notes: |
   runs on mtime. Its port surface (`statTarget`) reports `{exists, resolvedPath,
   mtimeMs}` and holds no content, so a digest there means a real extra read per target.
 
+  HASH OVERHEAD, MEASURED (`sha256Hex`, tight loop, this machine): 1 kB -> 0.7 us,
+  10 kB -> 3.9 us, 100 kB -> 34 us, 1 MB -> 350 us per hash. An earlier run reported
+  4.9 us at 1 kB; that was per-call harness overhead, not hashing — it is inconsistent
+  on its face (1 kB and 10 kB cannot cost the same for 10x the bytes). The figures above
+  are the corrected measurement of record. That hash is the WHOLE cost of the wiring, because it
+  adds ZERO EXTRA IO: the read tool already holds the entire file in `outcome.text`, and
+  the edit tool already read the source in `planEdit` to match `old_string`
+  (`planned.before`). Both hash bytes already in memory — no extra stat, open, or read on
+  any wired path.
+
   Verified END-TO-END through the real read/edit tools with an external writer that
   moves the mtime BACKWARD — the case the old rule called fresh. Removing either link
   (the read's `recordContent`, or the edit's digest argument) restores the bypass.
