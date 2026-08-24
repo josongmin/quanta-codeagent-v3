@@ -367,6 +367,17 @@ export type RuntimeBootstrapOverlay = {
    *  pre-seam hardcode). Presence-only seam, mirrors `serverAutoContinues` (the
    *  web daemon stamps its own `"websocket"` on the base directly). */
   readonly sessionTransport?: import("@/protocol/session").CapabilityManifest["transport"]
+  /** serve-stdio objective parity — the SESSION-STABLE gated objective authority
+   *  a HEADLESS surface (the `quanta serve --stdio` door) mints ONCE at boot via
+   *  `resolveGatedObjectiveAuthority`. Threaded through the overlay so the base
+   *  carries `objective`, giving the `objective_*` tools ONE authority for the
+   *  whole session (no per-turn re-mint ⇒ no cross-turn goal amnesia). Mirrors how
+   *  the CLI rides the compose seam and the web daemon stamps its own base slot.
+   *  Absent (default; `QUANTA_OBJECTIVE_TOOLS` off ⇒ `resolveGatedObjectiveAuthority`
+   *  returns undefined) ⇒ slot omitted ⇒ no objective tools (byte-identical). The
+   *  CLI-interactive path leaves this unset and sets `base.objective` via the
+   *  compose PASS_THROUGH patch instead, so the two doors never double-source. */
+  readonly objective?: AgentConfig["objective"]
 }
 
 export interface RuntimeBootstrapHelpers {

@@ -87,6 +87,14 @@ export interface HeadlessRunInput {
   /** Optional subagent config so the shared execution-plane helper can
    *  wire real delegation/background slots in the second-consumer surface. */
   readonly subagentConfig?: AgentConfig["subagent"]
+  /** serve-stdio objective parity — a SESSION-STABLE gated objective authority the
+   *  surface minted ONCE (via `resolveGatedObjectiveAuthority`). Threaded onto the
+   *  runtime overlay → base so the `objective_*` tools mutate ONE store for the
+   *  whole session (no per-turn re-mint ⇒ no cross-turn goal amnesia). The
+   *  `quanta serve --stdio` door passes this; absent ⇒ omitted (default-OFF,
+   *  `QUANTA_OBJECTIVE_TOOLS` off ⇒ the resolver returns undefined ⇒ no objective
+   *  tools, byte-identical). */
+  readonly objective?: AgentConfig["objective"]
 }
 
 /** Public proof that the second-consumer surface got the same reusable

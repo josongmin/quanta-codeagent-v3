@@ -33,6 +33,7 @@
  */
 
 import type { SessionBootstrapDeps, SessionRuntimeConfigShape } from "@/host/bootstrap"
+import { resolveGatedObjectiveAuthority } from "@/host/runtime/objective-store-wire"
 import { createSessionStdioTransport } from "@/ipc/session"
 import type { ImageBlock, LLMPort, Message } from "@/llm"
 import { DEFAULT_MODEL, pickProvider, tryCreateLLM } from "@/llm"
@@ -238,7 +239,7 @@ const parseServeStdioArgs = (argv: readonly string[]): ServeStdioArgs | undefine
  *  and those are fake anyway); every dep quanta's loop needs that this surface
  *  does not own (memory / subagents / reviewer / MCP / images) is a leanest
  *  valid stub. */
-const buildServeStdioDeps = (llm: LLMPort, stream: StreamPort): SessionBootstrapDeps => {
+export const buildServeStdioDeps = (llm: LLMPort, stream: StreamPort): SessionBootstrapDeps => {
   const registry = new ToolRegistry([...buildDefaultTools()])
   return {
     // RFC-04 D4 — one session `ActivityStore` from the authority builder (DI; no
@@ -328,7 +329,7 @@ const buildServeStdioDeps = (llm: LLMPort, stream: StreamPort): SessionBootstrap
  *  (stdout is the protocol channel — the banner/ready logs are stderr-TTY-gated
  *  and stay off), no idle monitor. `provider` is a config-label; the injected
  *  LLM owns behavior. */
-const buildServeStdioRuntime = (
+export const buildServeStdioRuntime = (
   args: ServeStdioArgs,
   provider: SessionRuntimeConfigShape["provider"],
   model: string,
@@ -447,6 +448,19 @@ const serveOverStdio = async (io: ServeStdioCmdIo, args: ServeStdioArgs): Promis
     QUANTA_MEMORY_AUTO: "0",
   }
 
+  // serve-stdio objective parity — mint the ONE session-stable gated objective
+  // authority for this served session and thread it onto the base (via the
+  // headless `input.objective` → runtime overlay → `base.objective`). Without
+  // this the served session had NO session-stable objective slot, so the model's
+  // `objective_*` tools had no cross-turn store (goal amnesia). Ephemeral by
+  // design: this served session owns no persistent store (QUANTA_MEMORY_AUTO=0
+  // above), so a FRESH mint is correct — no durable restore. Headless / no inline
+  // operator ⇒ `confirmationAvailable:false` (fail-closed under
+  // QUANTA_PROPOSE_GOAL), the SAME posture the web daemon uses. Returns undefined
+  // when `QUANTA_OBJECTIVE_TOOLS` is off ⇒ the slot is omitted (default-OFF,
+  // byte-identical: no objective tools).
+  const objective = resolveGatedObjectiveAuthority(sessionEnv, { confirmationAvailable: false })
+
   // The stdio transport over THIS process's stdin/stdout — stdout is the pure
   // protocol channel; the reader is data-only (EOF is wired below, not here).
   const transport = createSessionStdioTransport({ reader: io.reader, writer: io.writer })
@@ -470,6 +484,9 @@ const serveOverStdio = async (io: ServeStdioCmdIo, args: ServeStdioArgs): Promis
         env: sessionEnv,
         homeDir: process.env.HOME ?? "/tmp",
         maxTurns: runtime.maxTurns,
+        // serve-stdio objective parity — thread the session-stable authority
+        // (undefined when QUANTA_OBJECTIVE_TOOLS off ⇒ omitted, byte-identical).
+        ...(objective !== undefined ? { objective } : {}),
       },
       deps,
       runtime,

@@ -330,6 +330,14 @@ const buildBootstrapBaseShape = (
     // seam, mirrors `serverAutoContinues`). Absent ⇒ omitted ⇒ `"inproc"`
     // fallback (byte-identical to the pre-seam hardcode).
     ...whenDefined("sessionTransport", args.overlay?.sessionTransport),
+    // serve-stdio objective parity — lift the SURFACE-minted session-stable
+    // objective authority onto the base so the per-turn config carries ONE
+    // `objective` for the whole headless session (the `objective_*` tools mutate
+    // the SAME store across turns ⇒ no goal amnesia). Only the headless serve
+    // door supplies this; the CLI-interactive path leaves it unset here and sets
+    // `base.objective` via the compose PASS_THROUGH patch, so the two never
+    // double-source. Absent ⇒ omitted (default-OFF, byte-identical).
+    ...whenDefined("objective", args.overlay?.objective),
     ...whenDefined("planExitPort", args.overlay?.planExitPort),
     ...whenDefined("userInputPort", args.overlay?.userInputPort),
     // RFC-01 A4 — carry the pending-question authority onto the base so the A3

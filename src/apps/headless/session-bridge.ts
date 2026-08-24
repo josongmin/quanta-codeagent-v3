@@ -61,6 +61,12 @@ const buildHeadlessRuntimeArgs = (
       ? { approvalProtocol: approval.approvalProtocol }
       : {}),
     ...(input.sessionTransport !== undefined ? { sessionTransport: input.sessionTransport } : {}),
+    // serve-stdio objective parity — thread the surface-minted session-stable
+    // objective authority onto the overlay so `buildBaseFromBootstrap` lifts it
+    // to `base.objective` (ONE store for the whole session, no per-turn re-mint).
+    // Absent ⇒ omitted (byte-identical; the caller only mints it under
+    // `QUANTA_OBJECTIVE_TOOLS`).
+    ...(input.objective !== undefined ? { objective: input.objective } : {}),
   }
   return {
     boot,
