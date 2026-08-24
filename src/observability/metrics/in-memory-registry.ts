@@ -339,6 +339,32 @@ const buildHistogramSketchSet = (values: ReadonlyArray<number>): HistogramSketch
   return sketches
 }
 
+/** Fold ONE observation into an ALREADY-EXISTING histogram series.
+ *
+ *  Split out of `observe` so that method states only the series lifecycle
+ *  (absent ⇒ admit-and-seed, present ⇒ fold) and the retention rule lives in
+ *  one place: exact samples are kept until `maxExact`, then collapsed into
+ *  sketches once and fed as sketches from there on. The two arms are mutually
+ *  exclusive by construction — `exactObservations` and `sketches` are never
+ *  both non-null — which is far easier to see here than inline. */
+const foldHistogramObservation = (
+  existing: HistogramAcc,
+  value: number,
+  maxExact: number,
+): void => {
+  existing.sum += value
+  existing.count += 1
+  if (existing.exactObservations !== null) {
+    existing.exactObservations.push(value)
+    if (existing.exactObservations.length > maxExact) {
+      existing.sketches = buildHistogramSketchSet(existing.exactObservations)
+      existing.exactObservations = null
+    }
+    return
+  }
+  if (existing.sketches !== null) observeHistogramSketchSet(existing.sketches, value)
+}
+
 const histogramPercentiles = (acc: HistogramAcc): { p50: number; p95: number; p99: number } => {
   if (acc.exactObservations !== null) {
     const sorted = [...acc.exactObservations].sort((a, b) => a - b)
@@ -576,17 +602,7 @@ const recordOps = (
           sketches: null,
         })
       } else if (existing.kind === "histogram") {
-        existing.sum += v
-        existing.count += 1
-        if (existing.exactObservations !== null) {
-          existing.exactObservations.push(v)
-          if (existing.exactObservations.length > histogramMaxObservations) {
-            existing.sketches = buildHistogramSketchSet(existing.exactObservations)
-            existing.exactObservations = null
-          }
-        } else if (existing.sketches !== null) {
-          observeHistogramSketchSet(existing.sketches, v)
-        }
+        foldHistogramObservation(existing, v, histogramMaxObservations)
       }
       emit({
         name,

@@ -396,30 +396,22 @@ const pytestNameKey = (id: string): string =>
     .replace(/::/g, ".") // unify `Class::method` ⇄ `Class.method`
     .trim()
 
-/** `python -m pytest` (text): a `=== FAILURES ===` and/or `=== ERRORS ===` section
- *  with one `___ name ___` block per failing/erroring test (each ending in
- *  `FILE:LINE: ExcType`), and a `short test summary info` listing `FAILED`/`ERROR
- *  FILE::test - message` lines + an `N failed, M passed` total. The summary lists
- *  FAILED-before-ERROR while the sections print ERRORS-before-FAILURES, so blocks
- *  are paired to summary entries BY TEST NAME (not by order/index — a positional
- *  zip mis-localizes the ERROR rows). Pinned to VERBATIM pytest 9.x. NEVER-throws. */
-export const parsePytest = (output: string): TestRunResult => {
-  const lines = output.split("\n")
-  const passed = Number(/(\d+) passed/.exec(output)?.[1] ?? "0")
-
-  // Short summary (authoritative failure list + messages).
-  const summary: { testid: string; message?: string }[] = []
-  for (const l of lines) {
-    const m = /^(?:FAILED|ERROR)\s+(\S+)(?:\s+-\s+(.*))?$/.exec(l.trim())
-    if (m !== null) summary.push({ testid: group(m, 1), ...(m[2] ? { message: m[2].trim() } : {}) })
-  }
-
-  // FAILURES + ERRORS blocks: header `___ name ___`; the LAST `FILE.py:LINE:`
-  // inside a block is the assertion / raise site (deepest user frame). Keyed by
-  // the block's parsed name so it pairs to the matching summary entry regardless
-  // of section vs summary ordering. The ERRORS header carries a prefix
-  // (`ERROR at setup of <test>` / `ERROR collecting <file>`) — strip it to the
-  // bare test/file id before keying.
+/** Scan the `=== FAILURES ===` / `=== ERRORS ===` sections and return the
+ *  assertion site for each block, keyed by the block's normalized test name.
+ *
+ *  Split out of {@link parsePytest} so that function reads as its three real
+ *  stages (summary → block locations → join) instead of carrying this scanner's
+ *  section/​header/​location state machine inline.
+ *
+ *  Within a block the LAST `FILE.py:LINE:` wins — that is the deepest user
+ *  frame, i.e. the assertion or raise site rather than the outer caller. The
+ *  first block for a given name wins, so a later duplicate cannot overwrite it.
+ *  A `=== FAILURES ===` or `=== ERRORS ===` header keeps the scanner running
+ *  into the next section; only the short summary / totals / warnings headers
+ *  close it. */
+const pytestBlockLocations = (
+  lines: readonly string[],
+): Map<string, { file: string; line: number }> => {
   const blockLocByKey = new Map<string, { file: string; line: number }>()
   let inBlocks = false
   let curName: string | undefined
@@ -462,6 +454,34 @@ export const parsePytest = (output: string): TestRunResult => {
     if (fm !== null) cur = { file: group(fm, 1), line: Number(fm[2]) }
   }
   flush()
+  return blockLocByKey
+}
+
+/** `python -m pytest` (text): a `=== FAILURES ===` and/or `=== ERRORS ===` section
+ *  with one `___ name ___` block per failing/erroring test (each ending in
+ *  `FILE:LINE: ExcType`), and a `short test summary info` listing `FAILED`/`ERROR
+ *  FILE::test - message` lines + an `N failed, M passed` total. The summary lists
+ *  FAILED-before-ERROR while the sections print ERRORS-before-FAILURES, so blocks
+ *  are paired to summary entries BY TEST NAME (not by order/index — a positional
+ *  zip mis-localizes the ERROR rows). Pinned to VERBATIM pytest 9.x. NEVER-throws. */
+export const parsePytest = (output: string): TestRunResult => {
+  const lines = output.split("\n")
+  const passed = Number(/(\d+) passed/.exec(output)?.[1] ?? "0")
+
+  // Short summary (authoritative failure list + messages).
+  const summary: { testid: string; message?: string }[] = []
+  for (const l of lines) {
+    const m = /^(?:FAILED|ERROR)\s+(\S+)(?:\s+-\s+(.*))?$/.exec(l.trim())
+    if (m !== null) summary.push({ testid: group(m, 1), ...(m[2] ? { message: m[2].trim() } : {}) })
+  }
+
+  // FAILURES + ERRORS blocks: header `___ name ___`; the LAST `FILE.py:LINE:`
+  // inside a block is the assertion / raise site (deepest user frame). Keyed by
+  // the block's parsed name so it pairs to the matching summary entry regardless
+  // of section vs summary ordering. The ERRORS header carries a prefix
+  // (`ERROR at setup of <test>` / `ERROR collecting <file>`) — strip it to the
+  // bare test/file id before keying.
+  const blockLocByKey = pytestBlockLocations(lines)
 
   const failed: TestFailure[] = summary.map((s) => {
     const sep = s.testid.indexOf("::")
@@ -479,6 +499,46 @@ export const parsePytest = (output: string): TestRunResult => {
   return { runner: "pytest", passed, failed, ok: failed.length === 0 }
 }
 
+/** Read the location and exception message out of ONE `FAIL:`/`ERROR:` block
+ *  of `python -m unittest -v` output, given the index of its header line.
+ *
+ *  Split out of {@link parsePythonUnittest} so that function states only the
+ *  block LOOP and this one states the block BODY.
+ *
+ *  The `---` underline directly under the header is PART of the block; blocks
+ *  are separated by `====…` and the run ends at `Ran N tests in …`, so the scan
+ *  stops at either. The LAST `File "PATH", line N, in …` frame wins — that is
+ *  the deepest user frame, the raise site rather than the harness above it. */
+const unittestBlockDetail = (
+  lines: readonly string[],
+  headerIndex: number,
+): { readonly file?: string; readonly line?: number; readonly message?: string } => {
+  let file: string | undefined
+  let lineNo: number | undefined
+  let message: string | undefined
+  for (
+    let j = headerIndex + 1;
+    j < lines.length &&
+    !/^={10,}$/.test(lineAt(lines, j).trim()) &&
+    !/^Ran \d+ tests? in /.test(lineAt(lines, j).trim());
+    j++
+  ) {
+    const fm = /File "([^"]+)", line (\d+), in /.exec(lineAt(lines, j))
+    if (fm !== null) {
+      file = fm[1]
+      lineNo = Number(fm[2])
+    }
+    // The exception line is a `SomeError: message` after the traceback.
+    const em = /^([A-Za-z_][\w.]*(?:Error|Exception|Failure)): (.*)$/.exec(lineAt(lines, j).trim())
+    if (em !== null) message = `${em[1]}: ${em[2]}`
+  }
+  return {
+    ...(file !== undefined ? { file } : {}),
+    ...(lineNo !== undefined ? { line: lineNo } : {}),
+    ...(message !== undefined ? { message } : {}),
+  }
+}
+
 /** `python -m unittest -v` (text): `name (mod.Class) ... ok|FAIL|ERROR`,
  *  `FAIL: name (mod.Class)` blocks with a traceback `File "PATH", line N, in name`
  *  + a trailing exception line, and a `Ran N tests` + `OK`/`FAILED` summary. */
@@ -494,29 +554,7 @@ export const parsePythonUnittest = (output: string): TestRunResult => {
     const hm = /^(?:FAIL|ERROR): (.+)$/.exec(lineAt(lines, i).trim())
     if (hm === null) continue
     const name = group(hm, 1).trim()
-    let file: string | undefined
-    let lineNo: number | undefined
-    let message: string | undefined
-    // Scan the block body (the `---` underline right after the header is PART
-    // of the block; blocks are separated by `===`, and the run ends at `Ran N`).
-    for (
-      let j = i + 1;
-      j < lines.length &&
-      !/^={10,}$/.test(lineAt(lines, j).trim()) &&
-      !/^Ran \d+ tests? in /.test(lineAt(lines, j).trim());
-      j++
-    ) {
-      const fm = /File "([^"]+)", line (\d+), in /.exec(lineAt(lines, j))
-      if (fm !== null) {
-        file = fm[1]
-        lineNo = Number(fm[2])
-      }
-      // The exception line is a `SomeError: message` after the traceback.
-      const em = /^([A-Za-z_][\w.]*(?:Error|Exception|Failure)): (.*)$/.exec(
-        lineAt(lines, j).trim(),
-      )
-      if (em !== null) message = `${em[1]}: ${em[2]}`
-    }
+    const { file, line: lineNo, message } = unittestBlockDetail(lines, i)
     failed.push({
       name,
       ...(file ? { file } : {}),
