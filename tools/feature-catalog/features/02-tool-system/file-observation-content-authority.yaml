@@ -49,20 +49,24 @@ purpose: |
   ONLY A FULL READ issues an observation — a ranged read describes a window, not the
   file, and its hash would baseline the guard against content that was never the file's.
 
-  NO EXTRA IO on the wired paths: the read tool already holds the whole file in
+  NO EXTRA IO on the read/edit paths: the read tool already holds the whole file in
   `outcome.text`, and the edit tool already read the source in `planEdit` to match
-  `old_string` (`planned.before`). Both hash something already in memory.
+  `old_string` (`planned.before`). Both hash something already in memory. The
+  `apply_patch` multi-target preflight is the one path that pays a real read per target
+  — measured at 27 us warm and wired anyway (see notes).
 evidence:
   code:
     - src/tool/stale-read-guard/state.ts
     - src/tool/read/index.ts
     - src/tool/edit/index.ts
+    - src/tool/patch-mutation-safety.ts
     - src/agent/subagent-runner-child-config.ts
   adrs:
     - docs/decisions/0548-content-digest-is-the-freshness-authority.md
   tests:
     unit:
       - tests/unit/tool/file-observation-content-authority-hellgate.test.ts
+      - tests/unit/tool/apply-patch-preflight-content-authority-hellgate.test.ts
     integration: []
     contract: []
 knobs: ["QUANTA_STALE_READ_GUARD"]
@@ -78,19 +82,53 @@ notes: |
   FORWARD mtime, or the "fix" degenerates into "block everything" — which satisfies the
   bypass tests and makes the tool unusable.
 
-  REMAINING GAP (recorded, not guessed at): `apply_patch`'s multi-target preflight still
-  runs on mtime. Its port surface (`statTarget`) reports `{exists, resolvedPath,
-  mtimeMs}` and holds no content, so a digest there means a real extra read per target.
+  GAP CLOSED (2026-08-24 follow-on): `apply_patch`'s multi-target preflight now runs on
+  the digest too. It was deferred as "a real extra read per target"; that cost was then
+  MEASURED, not guessed: fs.stat 10.9 us (already paid today), fs.readFile(utf8) 20.2 us,
+  readFile + sha256Hex 27.0 us — the whole addition — and 64.3 us on the corpus's largest
+  file (65 kB). Corpus: all 316 .ts files under src/tool (p50 5.1 kB, p90 16.2 kB,
+  p99 35.8 kB, max 64.6 kB), Bun 1.3.14, Apple Silicon, warm page cache, n=2000 after 50
+  warm-up iterations. That is +0.27 ms on a 10-file patch and +1.35 ms on a 50-file patch
+  — three to four orders of magnitude under the LLM turn that produced the patch. The read
+  lands warm by construction: applier.ts's plan phase re-reads every Update target
+  microseconds later. NO PORT METHOD WAS ADDED — content was always reachable through the
+  inherited `PatchFileSystemPort.readFile`; only the freshness rule changed.
+
+  Three properties hold in the preflight. (1) ALL-TARGET PREFLIGHT-THEN-WRITE is untouched:
+  the digest is taken inside the same pre-mutation loop, so a deny is never a partial write.
+  (2) FAIL-SOFT PARITY: a failed content read routes to the same `stale_read_check_failed`
+  deny the existing `statTarget` failure uses, through one shared helper, so the two
+  fail-closed branches cannot drift apart. (3) ZERO EXTRA IO where a digest cannot decide —
+  the read is skipped unless a whole-file digest was recorded for that resolved path, so an
+  UNREAD target (creating a file) and a ranged-read target both pay nothing and keep today's
+  behavior byte-for-byte.
+
+  A SUCCESSFUL PATCH RE-OBSERVES ITS OWN OUTPUT: `refreshPatchBaselines` now refreshes the
+  content digest alongside the mtime. Without it, the digest in the preflight would deny the
+  SECOND patch to a file the FIRST patch just wrote — the agent vetoed by its own write, the
+  same self-inflicted staleness the jul-13 edit-fresh-hash work cured for the mtime rule.
+
+  OPEN DEFECT (not fixed here — `src/tool/edit` was outside the change's write set):
+  `edit` HAS THIS SELF-VETO. `recordContent` is called from src/tool/read/index.ts ONLY, so
+  nothing refreshes the digest after a successful edit — even though state.ts's docstring
+  claims the digest is "Populated ONLY by a full-file read ... and by a successful
+  self-mutation". With the DEFAULT-ON guard and DEFAULT-ON QUANTA_EDIT_FRESH_HASH, the
+  SECOND consecutive edit to the same file with no re-read in between is denied stale_read.
+  Measured through the shipped tools and pinned with `test.failing` (AP-9) so a fix turns it
+  red. Fix mirrors refreshPatchBaselines: refreshStaleReadBaseline (or its caller in
+  src/tool/edit/index.ts) must also recordContent(committed.path, sha256Hex(planned.next)).
+  `write` / `scripted_replace` / `notebook_edit` are unaffected — they pass no digest.
 
   HASH OVERHEAD, MEASURED (`sha256Hex`, tight loop, this machine): 1 kB -> 0.7 us,
   10 kB -> 3.9 us, 100 kB -> 34 us, 1 MB -> 350 us per hash. An earlier run reported
   4.9 us at 1 kB; that was per-call harness overhead, not hashing — it is inconsistent
   on its face (1 kB and 10 kB cannot cost the same for 10x the bytes). The figures above
-  are the corrected measurement of record. That hash is the WHOLE cost of the wiring, because it
-  adds ZERO EXTRA IO: the read tool already holds the entire file in `outcome.text`, and
-  the edit tool already read the source in `planEdit` to match `old_string`
-  (`planned.before`). Both hash bytes already in memory — no extra stat, open, or read on
-  any wired path.
+  are the corrected measurement of record. That hash is the WHOLE cost ON THE READ AND EDIT
+  PATHS, because it adds ZERO EXTRA IO there: the read tool already holds the entire file in
+  `outcome.text`, and the edit tool already read the source in `planEdit` to match
+  `old_string` (`planned.before`). Both hash bytes already in memory — no extra stat, open,
+  or read. The apply_patch preflight is the one path that does pay a read; its measured cost
+  is above.
 
   Verified END-TO-END through the real read/edit tools with an external writer that
   moves the mtime BACKWARD — the case the old rule called fresh. Removing either link
