@@ -1,0 +1,73 @@
+id: memory-store-truth-and-embedder-provenance
+title: Memory store truth (resolved kind, volatile banner/stats) + dotenv-sourced embedder egress opt-in (ADR-0555)
+section: 5
+subsystem: L2 memory bootstrap — store-kind truth + credential provenance gate
+order: 555
+maturity: L4
+status: stable
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [interactive, headless]
+configurable: integrated
+owners: ["@songmin"]
+labels: ["surface:core", "tier:core", "security:egress"]
+depends_on: [memory-learning-default-on, embedder-port]
+config_refs:
+  env:
+    - QUANTA_MEMORY
+    - QUANTA_MEMORY_PATH
+    - QUANTA_MEMORY_EMBED
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-08-25"
+  evidence:
+    cli: "the REAL buildTooling banner prints kind=memory (volatile) for the default/unset case (hellgate T2 drives buildTooling itself); /memory stats prints the Store: line; buildEmbedder refuses a dotenv-sourced key without QUANTA_MEMORY_EMBED=1 and warns with the file path"
+    web: "the web-daemon composes its own store/embedder (scripts/reactor-watch.ts passes the narrowed literal kind to the same banner core); the dotenv provenance registry only fills when a surface calls loadEnvFiles — the daemon does not"
+purpose: |
+  Two lies closed. (M4) The CLI seeds QUANTA_MEMORY=1, which resolves to the
+  VOLATILE InMemoryStore; the banner echoed the raw token (kind=1) and was
+  omitted entirely for the default/unset case, and /memory stats never said the
+  store evaporates at exit. Now buildMemoryForSession returns the RESOLVED
+  kind (+ sqlite path), the banner type is MemoryStoreKind (not string), it
+  prints for the default case as kind=memory (volatile), and /memory stats
+  prints Store: in-memory (volatile — …) or Store: sqlite (<path>) — from the
+  threaded kind or, failing that, the store instance's class. (M5) loadEnvFiles
+  resolves against the LAUNCH cwd and a repo's .env* OPENAI_API_KEY silently
+  armed OpenAIEmbedder (knob default-ON) — POSTing memory text to
+  OPENAI_BASE_URL. Now env-files records key→file provenance (never values),
+  and a dotenv-sourced key arms the embedder ONLY with an explicit
+  QUANTA_MEMORY_EMBED=1 (gateOn vocab; presence-only and the accessor default
+  are not consent); the refusal is one logger.warn naming the file, and an
+  armed dotenv key is attributed in the banner (embed=on (key from <file>)).
+  Real-env keys are byte-identical to before.
+evidence:
+  code:
+    - src/runner/assemble/memory-factory.ts   # kind/storePath on the slot; resolveAutoTrigger delegates to assembleMemoryAuto
+    - src/runner/assemble/store.ts            # EmbedderProvenance + resolveEmbedderProvenance + the provenance gate in buildEmbedderCore
+    - src/runner/assemble/tooling.ts          # renderMemoryBanner (MemoryStoreKind label, provenance suffix); Tooling.memoryKind/memoryStorePath
+    - src/apps/cli/memory-compose.ts          # CLI buildStore/buildEmbedder/buildMemoryConfig + memoryEmbedProvenance (split from internal.ts)
+    - src/apps/cli/internal.ts                # buildTooling threads the resolved kind + provenance into the banner
+    - src/apps/cli/memory-cmd.ts              # /memory stats Store: line
+    - src/apps/cli/repl/session-setup.ts      # toolingSlashSlots threads memoryKind/memoryStorePath
+    - src/shared/env-files.ts                 # envFileProvenance / envFileSourceOf / __resetEnvFileProvenanceForTest
+  adrs: [555, 413]
+  tests:
+    unit:
+      - tests/unit/apps/cli/memory-truth-and-egress-hellgate.test.ts
+      - tests/unit/memory-factory-hellgate.test.ts
+      - tests/unit/memory-cmd.test.ts
+      - tests/unit/dotenv.test.ts
+    integration:
+      - tests/integration/memory-default-on-e2e-hellgate.test.ts
+    contract: []
+knobs:
+  - name: QUANTA_MEMORY_EMBED
+    where: src/apps/cli/memory-compose.ts
+    default: true
+    purpose: "Kill-switch as before (=0/off); ADR-0555 adds: an EXPLICIT truthy token is the only consent to arm the embedder with a dotenv-sourced OPENAI_API_KEY (default-ON is not consent)."
+  - name: QUANTA_MEMORY
+    where: src/runner/assemble/memory-factory.ts
+    default: "1 (CLI seed) → memory (volatile)"
+    purpose: "Store kind; the RESOLVED kind (memory|sqlite) is what the banner and /memory stats print, never this raw token."

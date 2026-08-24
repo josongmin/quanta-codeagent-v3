@@ -14,13 +14,11 @@ import type { PermissionContext, PermissionMode } from "@/permission"
 import {
   buildCompactionBreakerConfigCore,
   buildCredentialSource,
-  buildEmbedderCore,
   buildLLMWithByokCore,
   buildMainLLMCore,
   buildMemoryForSession,
   buildSearchPipelineFromEnv,
   buildSkillsConfigCore,
-  type buildStoreCore,
   buildStreamingCore,
   buildSubagentConfigCore,
   buildSummarizerLlmCore,
@@ -34,7 +32,6 @@ import {
   pickProviderCore,
   type ResolvedEndpoint,
   type Provider as RunnerProvider,
-  resolveMemoryConfigFromEnv,
   selectLlmTransport,
 } from "@/runner/assemble"
 import type { Tooling } from "@/runner/assemble/tooling"
@@ -85,6 +82,7 @@ import {
 import { createMarkdownPainter } from "./markdown-painter"
 import { buildCliElicitationPrompterFactory } from "./mcp-elicitation-prompter"
 import { createMcpHealthHolder } from "./mcp-health"
+import { buildEmbedder, buildMemoryConfig, memoryEmbedProvenance } from "./memory-compose"
 import { isIndicatorEnabled } from "./turn-indicator"
 
 /**
@@ -229,94 +227,16 @@ export const buildLLM = (
   })
 }
 
+/** The memory composition trio (ADR-0413 store / ADR-0555 embedder / ADR-0414
+ *  tuning block) lives in `./memory-compose` — re-exported so consumers keep
+ *  resolving the historical names from `./internal`. */
+export { buildEmbedder, buildMemoryConfig, buildStore } from "./memory-compose"
 /** Default model id per provider — re-exported from the runner barrel (the
  *  single source of truth the three app entry points used to each duplicate). */
-export { DEFAULT_MODEL }
-
-/**
- * Build the long-term memory store from env. ADR-0413 changed the default
- * from OFF to ON. The default-ON store is the VOLATILE `InMemoryStore` (no
- * disk side effect — TKT-003 req #4): unset / bare-truthy `QUANTA_MEMORY`
- * (`1` / `true` / `on` / `""` / unknown) ⇒ volatile InMemoryStore.
- * `QUANTA_MEMORY=sqlite` ⇒ on-disk SqliteStore (the ONLY persistent opt-in;
- * path from `QUANTA_MEMORY_PATH`, default `.quanta/memory.sqlite`).
- * `QUANTA_MEMORY=memory` ⇒ volatile InMemoryStore (explicit). `=off` / `0` /
- * `false` / `no` ⇒ no store (legacy default-OFF byte-identical escape hatch).
- *
- * Long-term memory env:
- *   QUANTA_MEMORY              on (default, volatile) | off | 0 | 1 | sqlite | memory | …
- *   QUANTA_MEMORY_PATH         override sqlite path (sqlite kind only; default `.quanta/memory.sqlite`)
- *   QUANTA_MEMORY_EMBED        openai (default when store + OPENAI_API_KEY) | off
- *   QUANTA_MEMORY_EMBED_MODEL  override embedding model (else adapter default)
- *   QUANTA_MEMORY_RECALL_LIMIT int → memory.recallLimit
- *   QUANTA_MEMORY_DISTILL      off → memory.distill=false
- *   QUANTA_MEMORY_CONSOLIDATE  off → memory.consolidate=false
- *   QUANTA_MEMORY_SELF_EDIT    off → memory.selfEditTools=false (also skips
- *                              registering the memory_* self-edit tools)
- *   QUANTA_MEMORY_RECALL_TIERS comma list of episodic,semantic →
- *                              memory.recallTiers (invalid/empty ⇒ omitted)
- *   QUANTA_MEMORY_AUTO         on (default) | off — cross-session auto-trigger
- *   QUANTA_MEMORY_THRESHOLD    float → auto-trigger promote threshold (default 0.7)
- *   QUANTA_MEMORY_MIN_USAGE    int → auto-trigger minUsageCount gate (default 1)
- *
- * Legacy shim — implementation delegates to ADR-0413
- * `buildMemoryForSession` so the default-ON contract is centralized.
- */
-export const buildStore = (): ReturnType<typeof buildStoreCore> =>
-  buildMemoryForSession(process.env).store
-
-/**
- * Build the semantic embedder from env. Default OFF so lexical-only recall is
- * unchanged: enabled only when a `store` exists, `QUANTA_MEMORY_EMBED` is not
- * `off`, and `OPENAI_API_KEY` is set (reusing the OpenAI env pattern from
- * `buildLLM`). Absent ⇒ pure lexical/tag/freshness recall, zero behavior
- * change vs today.
- */
-export const buildEmbedder = (
-  store: ReturnType<typeof buildStoreCore>,
-): ReturnType<typeof buildEmbedderCore> =>
-  buildEmbedderCore({
-    store,
-    // ADR-0503 P4: routed through the typed accessor (was gateDisabled). The
-    // knob default is ON, so disabled = NOT readBool(raw, true) — byte-identical
-    // to gateDisabled (both treat unset/empty/unrecognized as ON, falsy as off).
-    disabled: !(readCliKnob("QUANTA_MEMORY_EMBED", "bool") ?? true),
-    ...(process.env.OPENAI_API_KEY !== undefined ? { apiKey: process.env.OPENAI_API_KEY } : {}),
-    ...(process.env.OPENAI_BASE_URL !== undefined ? { baseURL: process.env.OPENAI_BASE_URL } : {}),
-    ...(process.env.QUANTA_MEMORY_EMBED_MODEL !== undefined
-      ? { model: process.env.QUANTA_MEMORY_EMBED_MODEL }
-      : {}),
-  })
-
 /** Re-export the pure helper so existing tests
  *  (`tests/unit/env-knob-branches.test.ts`) keep resolving it from
  *  `./internal`. */
-export { parseRecallTiers }
-
-/**
- * Build the `memory` tuning block from env. ADR-0414 single-source-of-truth:
- * this is a THIN shim that delegates the env → config projection to the
- * factory's {@link resolveMemoryConfigFromEnv} — the SAME helper
- * `buildMemoryForSession` uses internally. The CLI no longer re-reads any
- * `QUANTA_MEMORY_*` tuning knob (recallLimit / distill / consolidate /
- * selfEdit / recallTiers); that truth lives in exactly one place.
- *
- * Contract (unchanged, now centralized):
- *   - `store === undefined` + no knobs ⇒ `undefined` (key omitted).
- *   - `store === undefined` + any sub-knob set ⇒ a block carrying that knob
- *     (the loop's `config.store` check is separate; the block is informational
- *     until a store is wired). This is the legacy escape-hatch symmetry: a
- *     caller that already opted out of the store can still surface a tuning
- *     block when an operator set a sub-knob.
- *   - `store` present ⇒ a truthy block (possibly empty) so the loop wires it.
- *
- * The `store` argument is forwarded verbatim to the factory helper, which
- * uses it ONLY to decide whether an empty block is still returned — never to
- * change a knob value. Byte-identical config bytes for the same env.
- */
-export const buildMemoryConfig = (
-  store: ReturnType<typeof buildStoreCore>,
-): AgentConfig["memory"] | undefined => resolveMemoryConfigFromEnv(process.env, store)
+export { DEFAULT_MODEL, parseRecallTiers }
 
 /**
  * Resolve the `subagent` config block from env (Tier 1 capability, ADR-0011).
@@ -836,7 +756,10 @@ export const buildTooling = (
    *  (byte-identical). */
   providerRateLimitRemainingPercent?: () => number | undefined,
 ): Tooling => {
-  const store = buildStore()
+  // ADR-0555 — ONE factory call: store + its RESOLVED kind come from the same
+  // slot, so the banner / `/memory stats` describe the store the loop uses.
+  const memory = buildMemoryForSession(process.env)
+  const store = memory.store
   const embedder = buildEmbedder(store)
   const sessionId = crypto.randomUUID()
   const searchMetrics =
@@ -923,9 +846,11 @@ export const buildTooling = (
         }
       : {}),
     slog,
-    ...(process.env.QUANTA_MEMORY !== undefined
-      ? { memoryKindLabel: process.env.QUANTA_MEMORY }
-      : {}),
+    // ADR-0555 — RESOLVED kind (never the raw `QUANTA_MEMORY` token the CLI seeds
+    // as "1"); the banner now also prints for the default/unset case.
+    memoryKindLabel: memory.kind,
+    memoryStorePath: memory.storePath,
+    memoryEmbedProvenance: memoryEmbedProvenance(),
     onMemoryReady: (line) => logger.info(line),
     ...(sandboxProfile !== undefined ? { sandboxProfile } : {}),
     // ADR-0464 — CLI surface owns the env read; default-ON in the CLI is seeded

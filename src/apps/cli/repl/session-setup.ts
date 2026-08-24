@@ -170,6 +170,12 @@ export interface SessionSetupResult {
   /** Optional embedder for `/memory search` semantic recall (same instance
    *  the loop's recall uses). Absent ⇒ lexical-only fallback. */
   readonly memoryEmbedder: Tooling["embedder"]
+  /** ADR-0555 — the RESOLVED kind of `memoryStore` (+ sqlite path), forwarded
+   *  from `boot.tooling.memoryKind` / `.memoryStorePath` so the `/memory` slash
+   *  state (`MemorySlashState.kind` / `.storePath`) tells the operator the same
+   *  truth the banner does. Absent ⇒ the slash derives kind from the instance. */
+  readonly memoryKind?: Tooling["memoryKind"]
+  readonly memoryStorePath?: Tooling["memoryStorePath"]
   /** A3 (jul-04 CLI-surfacing) `/kb` — the SAME {@link ProjectsKbStore} the
    *  `projects_kb` tool was registered over (built once in `tooling` when
    *  `QUANTA_PROJECTS_KB` is on). Forwarded from `boot.tooling.projectsKbStore` so
@@ -602,6 +608,25 @@ const setupModel = async (
 }
 
 /** Assemble the chained builders. */
+/** The slash-surface slots forwarded VERBATIM from the one per-session
+ *  `Tooling` — the `/memory` store + embedder (the SAME instances the loop
+ *  reads/writes), their ADR-0555 resolved kind + sqlite path (so `/memory
+ *  stats` tells the banner's truth), and the A3 (jul-04) `/kb` store (the SAME
+ *  instance the `projects_kb` tool writes into; absent when the gate is off ⇒
+ *  `/kb` "not wired"). Hoisted out of `setupSession` (god-function ceiling). */
+const toolingSlashSlots = (
+  tooling: SessionBootstrapResult["tooling"],
+): Pick<
+  SessionSetupResult,
+  "memoryStore" | "memoryEmbedder" | "memoryKind" | "memoryStorePath" | "projectsKbStore"
+> => ({
+  memoryStore: tooling.store,
+  memoryEmbedder: tooling.embedder,
+  memoryKind: tooling.memoryKind,
+  memoryStorePath: tooling.memoryStorePath,
+  projectsKbStore: tooling.projectsKbStore,
+})
+
 export const setupSession = async (
   deps: SetupSessionDeps,
   options: {
@@ -669,11 +694,7 @@ export const setupSession = async (
     // instance the agent reads via `config.skills.authority`). Omitted when the
     // build returned undefined (skills off / fail-open).
     ...(skillAuthority !== undefined ? { skillAuthority } : {}),
-    memoryStore: boot.tooling.store,
-    memoryEmbedder: boot.tooling.embedder,
-    // A3 (jul-04) — forward the minted KB store so `/kb` reads the SAME instance
-    // the `projects_kb` tool writes into. Absent (gate off) ⇒ `/kb` "not wired".
-    projectsKbStore: boot.tooling.projectsKbStore,
+    ...toolingSlashSlots(boot.tooling),
     // B4 (jul-04) — narrow the host-opaque `boot.features` back to the CLI
     // `Features` shape to read the capture holder the mcp resource tools write
     // into (the host forwards `Features` as `BootstrapFeatures`, which does not

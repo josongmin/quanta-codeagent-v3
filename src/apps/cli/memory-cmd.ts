@@ -46,11 +46,13 @@
 
 import {
   type EmbedderPort,
+  InMemoryStore,
   MEMORY_TIERS,
   type MemoryEntry,
   type MemoryQuery,
   type MemoryTier,
   type PersistentStorePort,
+  SqliteStore,
 } from "@/memory"
 import { emitOperatorNotice, errMessage } from "@/shared"
 import type { SlashCommand, SlashContext } from "./slash-commands"
@@ -68,6 +70,14 @@ export interface MemorySlashState {
   /** Optional embedder for `search` semantic recall. Absent ⇒ lexical-only
    *  fallback (still works — `recall` degrades gracefully). */
   readonly embedder?: EmbedderPort
+  /** ADR-0555 — the RESOLVED store kind the surface composed (from
+   *  `Tooling.memoryKind`). Optional: when a surface does not thread it,
+   *  `/memory stats` falls back to the store INSTANCE's class, which is the
+   *  same truth (the two can never disagree — the store IS the kind). */
+  readonly kind?: "memory" | "sqlite"
+  /** ADR-0555 — resolved sqlite path (present iff `kind === "sqlite"` and the
+   *  surface threaded it); rendered as `Store: sqlite (<path>)`. */
+  readonly storePath?: string
   /** Override env access (test seam). Defaults to `process.env`. */
   readonly env?: Readonly<Record<string, string | undefined>>
 }
@@ -404,7 +414,30 @@ const runDelete = async (
 /* subcommand: stats                                                   */
 /* ------------------------------------------------------------------ */
 
-const runStats = async (ctx: SlashContext, store: PersistentStorePort): Promise<number> => {
+/** ADR-0555 — one truthful `Store:` line. The threaded `kind` wins; otherwise
+ *  the store INSTANCE's class is the kind (it cannot lie — the object IS the
+ *  store). The volatile default says so and names the opt-in, because the CLI
+ *  seeds `QUANTA_MEMORY=1` and nothing else told the operator their memories
+ *  evaporate at exit. */
+const storeLine = (state: MemorySlashState): string => {
+  const kind =
+    state.kind ??
+    (state.store instanceof SqliteStore
+      ? "sqlite"
+      : state.store instanceof InMemoryStore
+        ? "memory"
+        : undefined)
+  if (kind === "memory") {
+    return "in-memory (volatile — not kept across restarts; set QUANTA_MEMORY=sqlite to persist)"
+  }
+  if (kind === "sqlite") {
+    return state.storePath !== undefined ? `sqlite (${state.storePath})` : "sqlite"
+  }
+  return "custom store (kind not threaded by this surface)"
+}
+
+const runStats = async (ctx: SlashContext, state: MemorySlashState): Promise<number> => {
+  const store = state.store
   const all = await store.all()
   const counts = new Map<string, number>()
   let bytes = 0
@@ -415,6 +448,7 @@ const runStats = async (ctx: SlashContext, store: PersistentStorePort): Promise<
   }
   ctx.out(`/memory stats:\n`)
   ctx.out(`- Memory store -\n`)
+  ctx.out(`  Store:      ${storeLine(state)}\n`)
   ctx.out(`  Total:      ${all.length} entr${all.length === 1 ? "y" : "ies"}\n`)
   ctx.out(`  Total size: ${bytes} byte${bytes === 1 ? "" : "s"} (content only)\n`)
   ctx.out(`  - Per tier -\n`)
@@ -472,7 +506,7 @@ export const memoryCmd: SlashCommand = {
       case "delete":
         return runDelete(ctx, state.store, rest)
       case "stats":
-        return runStats(ctx, state.store)
+        return runStats(ctx, state)
       default:
         ctx.err(`/memory: unknown subcommand: ${sub}\n`)
         ctx.out(`${HELP_TEXT}\n`)

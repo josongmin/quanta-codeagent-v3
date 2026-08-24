@@ -695,7 +695,12 @@ const buildDaemonTooling = (opts: {
     ...(extraTools.length > 0 ? { extraTools } : {}),
     ...(searchWire !== null ? { searchPipeline: searchWire.pipeline } : {}),
     slog,
-    ...(envSource.QUANTA_MEMORY !== undefined ? { memoryKindLabel: envSource.QUANTA_MEMORY } : {}),
+    // ADR-0555 — the banner takes the RESOLVED kind, never the raw token.
+    // `buildDaemonStore` builds a store ONLY for these two literals, so narrowing
+    // the raw value is exact (any other token ⇒ no store ⇒ no banner anyway).
+    ...(envSource.QUANTA_MEMORY === "sqlite" || envSource.QUANTA_MEMORY === "memory"
+      ? { memoryKindLabel: envSource.QUANTA_MEMORY }
+      : {}),
     ...(resolveSandboxProfileFromEnv(envSource) !== undefined
       ? { sandboxProfile: resolveSandboxProfileFromEnv(envSource) }
       : {}),

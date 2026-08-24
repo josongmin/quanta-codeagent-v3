@@ -44,6 +44,7 @@
 
 import type { AgentConfig } from "@/agent"
 import type { PersistentStorePort } from "@/memory"
+import { assembleMemoryAuto } from "@/memory/auto-trigger"
 import {
   parseMemoryLineCitations,
   parseMemoryThreadMode,
@@ -58,16 +59,22 @@ import { buildStoreCore } from "./store"
 /* public types                                                        */
 /* ------------------------------------------------------------------ */
 
-/** Trigger policy mirror of `@/memory/auto-trigger`'s `TriggerPolicy`.
- *  Re-declared inline so the factory has zero compile-time dependency on
- *  the auto-trigger slice — surfaces wire the concrete trigger at the
- *  plug site, and the factory only carries the resolved knobs. */
+/** Trigger policy mirror of `@/memory/auto-trigger`'s `TriggerPolicy`. The
+ *  SHAPE is re-declared so callers of this factory never import the trigger
+ *  slice for a type; the VALUES are resolved by delegating to that slice's
+ *  `assembleMemoryAuto` (ADR-0555 — one env→policy projection, not two copies
+ *  that can drift). */
 export interface MemoryAutoTriggerPolicy {
   /** Phase-2 promote threshold (default 0.7). */
   readonly promoteThreshold: number
   /** Minimum usageCount gate (default 1). */
   readonly minUsageCount: number
 }
+
+/** The two store kinds the factory can resolve. `"memory"` is the VOLATILE
+ *  `InMemoryStore` (default-ON, gone at process exit); `"sqlite"` is the
+ *  on-disk `SqliteStore` (explicit `QUANTA_MEMORY=sqlite` opt-in). */
+export type MemoryStoreKind = "memory" | "sqlite"
 
 /** The resolved memory slots for one session. Every field is optional —
  *  absent ⇒ that slot is omitted at the host plug site (legacy
@@ -76,6 +83,13 @@ export interface MemorySessionSlot {
   readonly store?: PersistentStorePort
   readonly config?: AgentConfig["memory"]
   readonly autoTrigger?: MemoryAutoTriggerPolicy
+  /** ADR-0555 — the RESOLVED kind of `store` (never the raw env token, which
+   *  the CLI seeds as `"1"`). Present iff `store` is present, so a surface can
+   *  tell the operator the truth (`kind=memory (volatile)`) instead of echoing
+   *  the env value. */
+  readonly kind?: MemoryStoreKind
+  /** ADR-0555 — the resolved on-disk path; present iff `kind === "sqlite"`. */
+  readonly storePath?: string
 }
 
 /** Per-session override surface. Bench / replay sets `storeDisabled:true`
@@ -95,17 +109,13 @@ export interface MemorySessionOverride {
 }
 
 /* ------------------------------------------------------------------ */
-/* defaults                                                            */
-/* ------------------------------------------------------------------ */
-
-const DEFAULT_AUTO_TRIGGER_POLICY: MemoryAutoTriggerPolicy = {
-  promoteThreshold: 0.7,
-  minUsageCount: 1,
-}
-
-/* ------------------------------------------------------------------ */
 /* internals                                                           */
 /* ------------------------------------------------------------------ */
+
+/** Default sqlite path when `QUANTA_MEMORY_PATH` / `override.storePath` are
+ *  both absent — mirrors `buildStoreCore`'s own fallback so the `storePath`
+ *  the slot REPORTS is the path the store actually opened. */
+const DEFAULT_SQLITE_PATH = ".quanta/memory.sqlite"
 
 /** Resolve the `kind` argument to `buildStoreCore` from the env value
  *  and the default-ON contract. Accepts the legacy literal kinds
@@ -113,13 +123,17 @@ const DEFAULT_AUTO_TRIGGER_POLICY: MemoryAutoTriggerPolicy = {
  *
  *  SAFETY (TKT-003 req #4): the default-ON kind is the VOLATILE
  *  `InMemoryStore`, never the on-disk `SqliteStore`. A fresh run with no
- *  env knob (or a bare truthy `QUANTA_MEMORY=1`) learns in-process only and
- *  writes NOTHING to disk — so turning the feature on by default introduces
- *  zero filesystem side effects. Persistent cross-process memory is an
- *  EXPLICIT opt-in: the operator must set `QUANTA_MEMORY=sqlite` (with an
- *  optional `QUANTA_MEMORY_PATH`). This keeps the default safe while still
- *  giving the model in-session recall + consolidation. */
-const resolveStoreKind = (raw: string | undefined): string | undefined => {
+ *  env knob (or a bare truthy `QUANTA_MEMORY=1`) learns in-process only:
+ *  THIS store writes nothing to disk and is gone at process exit (its
+ *  contents are NOT kept across restarts — ADR-0555 makes the surfaces say
+ *  so). Note this is a property of the STORE, not of the launch: the
+ *  session-memory (B) and consolidator (C) systems still write under
+ *  `~/.quanta/memory/` by default regardless of this kind. Persistent
+ *  cross-process memory for THIS store is an EXPLICIT opt-in: the operator
+ *  must set `QUANTA_MEMORY=sqlite` (with an optional `QUANTA_MEMORY_PATH`).
+ *  This keeps the default safe while still giving the model in-session
+ *  recall + consolidation. */
+const resolveStoreKind = (raw: string | undefined): MemoryStoreKind | undefined => {
   if (raw === undefined) return "memory"
   const v = raw.trim().toLowerCase()
   // Explicit kinds — pass through verbatim. `sqlite` is the ONLY way to opt
@@ -134,22 +148,15 @@ const resolveStoreKind = (raw: string | undefined): string | undefined => {
 }
 
 /** Resolve the auto-trigger policy from env. Default-ON unless the
- *  operator explicitly opts out. Mirrors the env truth-table of
- *  `parseEnvFlag` — invalid value ⇒ default = ON. */
+ *  operator explicitly opts out. ADR-0555: this DELEGATES to the trigger
+ *  slice's own `assembleMemoryAuto` (the env truth-table lives there once —
+ *  `QUANTA_MEMORY_AUTO` / `_THRESHOLD` / `_MIN_USAGE`, invalid ⇒ default);
+ *  this file used to carry a verbatim copy that could drift. `null` from the
+ *  slice ⇒ `undefined` here (slot omitted). */
 const resolveAutoTrigger = (env: NodeJS.ProcessEnv): MemoryAutoTriggerPolicy | undefined => {
-  const enabled = parseEnvFlag(env.QUANTA_MEMORY_AUTO, /* defaultOn */ true)
-  if (!enabled) return undefined
-  const rawT = env.QUANTA_MEMORY_THRESHOLD
-  const rawU = env.QUANTA_MEMORY_MIN_USAGE
-  const parsedT = rawT === undefined ? DEFAULT_AUTO_TRIGGER_POLICY.promoteThreshold : Number(rawT)
-  const parsedU = rawU === undefined ? DEFAULT_AUTO_TRIGGER_POLICY.minUsageCount : Number(rawU)
-  const promoteThreshold = Number.isFinite(parsedT)
-    ? parsedT
-    : DEFAULT_AUTO_TRIGGER_POLICY.promoteThreshold
-  const minUsageCount =
-    Number.isFinite(parsedU) && parsedU >= 0
-      ? Math.floor(parsedU)
-      : DEFAULT_AUTO_TRIGGER_POLICY.minUsageCount
+  const auto = assembleMemoryAuto(env)
+  if (auto === null) return undefined
+  const { promoteThreshold, minUsageCount } = auto.policy
   return { promoteThreshold, minUsageCount }
 }
 
@@ -243,21 +250,18 @@ export const buildMemoryForSession = (
   // "one knob = legacy off" contract intact (mirrors the storeDisabled
   // hard path above).
   if (kind === undefined) return {}
-  const store = buildStoreCore({
-    kind,
-    ...(override?.storePath !== undefined
-      ? { path: override.storePath }
-      : env.QUANTA_MEMORY_PATH !== undefined
-        ? { path: env.QUANTA_MEMORY_PATH }
-        : {}),
-  })
+  // Resolved path (override > env > default) — reported on the slot for the
+  // sqlite kind so surfaces name the file the store actually opened.
+  const storePath = override?.storePath ?? env.QUANTA_MEMORY_PATH ?? DEFAULT_SQLITE_PATH
+  const store = buildStoreCore({ kind, path: storePath })
   const config = resolveMemoryConfigFromEnv(env, store, override)
-  // Auto-trigger: override wins; null forces off, undefined falls through
-  // to env. The env path is default-ON.
+  // Auto-trigger: override wins; null forces off (ADR-0413 veto arm), undefined
+  // falls through to env. The env path is default-ON.
   const autoTrigger =
     override?.autoTrigger === null ? undefined : (override?.autoTrigger ?? resolveAutoTrigger(env))
   return {
-    ...(store !== undefined ? { store } : {}),
+    ...(store !== undefined ? { store, kind } : {}),
+    ...(store !== undefined && kind === "sqlite" ? { storePath } : {}),
     ...(config !== undefined ? { config } : {}),
     ...(autoTrigger !== undefined ? { autoTrigger } : {}),
   }

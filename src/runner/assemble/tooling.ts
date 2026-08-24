@@ -12,6 +12,8 @@ import {
   type ToolOrigin,
   ToolRegistry,
 } from "@/tool"
+import type { MemoryStoreKind } from "./memory-factory"
+import type { EmbedderProvenance } from "./store"
 
 /**
  * Surface-agnostic tooling assembly. The pre-split `internal.ts#buildTooling`
@@ -32,6 +34,13 @@ import {
 export interface Tooling {
   store: PersistentStorePort | undefined
   embedder: EmbedderPort | undefined
+  /** ADR-0555 — RESOLVED kind of `store` (present iff the surface threaded
+   *  `memoryKindLabel`, i.e. iff a store exists on the CLI). The surface
+   *  forwards it to `/memory stats` so the slash tells the same truth the
+   *  banner does (`in-memory (volatile …)` vs `sqlite (<path>)`). */
+  memoryKind?: MemoryStoreKind
+  /** ADR-0555 — resolved sqlite path; present iff `memoryKind === "sqlite"`. */
+  memoryStorePath?: string
   sessionId: string
   registry: ToolRegistry
   searchPipeline?: AgentConfig["searchPipeline"]
@@ -103,11 +112,21 @@ export interface ToolingAssembleInput {
   /** Structured logger for per-config gate logs. The shape mirrors the prior
    *  inline `slog.info(...)` calls in `internal.ts#buildTooling` 1:1. */
   slog: StructuredLogger
-  /** Optional descriptor that lets the runner emit the same prior
-   *  `memory on (kind=…, embed=…, session=…)` info line. The CLI shim passes
-   *  `process.env.QUANTA_MEMORY`; absent ⇒ the line is suppressed (Web/Tauri
-   *  surfaces typically prefer structured-only logs). */
-  memoryKindLabel?: string | undefined
+  /** Optional descriptor that lets the runner emit the
+   *  `memory on (kind=…, embed=…, session=…)` info line. ADR-0555: this is the
+   *  RESOLVED kind from `buildMemoryForSession(...).kind` (the CLI used to pass
+   *  the raw `QUANTA_MEMORY` token, which printed `kind=1` and vanished when
+   *  unset). `"memory"` renders as `kind=memory (volatile)` so the operator
+   *  learns the store is gone at exit. Absent ⇒ the line is suppressed
+   *  (Web/Tauri surfaces typically prefer structured-only logs). */
+  memoryKindLabel?: MemoryStoreKind | undefined
+  /** ADR-0555 — resolved sqlite path (present iff kind is `"sqlite"`); carried
+   *  up on {@link Tooling.memoryStorePath} so `/memory stats` names the file. */
+  memoryStorePath?: string | undefined
+  /** ADR-0555 — where the embedder's credentials came from. Only rendered in
+   *  the banner when the embedder is ON (`embed=on (key from <file>)` /
+   *  `base_url from <file>`); absent or real-env ⇒ banner text unchanged. */
+  memoryEmbedProvenance?: EmbedderProvenance | undefined
   /** Optional log sink for the `memory on (…)` line — same `console.info`-shaped
    *  signature as `@/shared#logger.info`. Absent ⇒ no log. Decouples this slice
    *  from `@/shared#logger` so a non-CLI surface can route it elsewhere. */
@@ -267,10 +286,34 @@ const buildDefaultToolPorts = (
   ...(input.projectsKb !== undefined ? { projectsKb: input.projectsKb } : {}),
 })
 
+/** ADR-0555 — render the `memory on (…)` banner from RESOLVED facts: the store
+ *  kind (volatile tagged), the embedder state, and — only when armed — the
+ *  dotenv file(s) its credentials came from. Paths only; never a value. */
+const renderMemoryBanner = (
+  kind: MemoryStoreKind,
+  embedder: EmbedderPort | undefined,
+  provenance: EmbedderProvenance | undefined,
+  sessionId: string,
+): string => {
+  const kindLabel = kind === "memory" ? "memory (volatile)" : kind
+  const sources: string[] = []
+  if (embedder !== undefined && provenance?.apiKeyFrom !== undefined)
+    sources.push(`key from ${provenance.apiKeyFrom}`)
+  if (embedder !== undefined && provenance?.baseUrlFrom !== undefined)
+    sources.push(`base_url from ${provenance.baseUrlFrom}`)
+  const embed = embedder ? (sources.length > 0 ? `on (${sources.join(", ")})` : "on") : "off"
+  return `memory on (kind=${kindLabel}, embed=${embed}, session=${sessionId})`
+}
+
 export const buildToolingCore = (input: ToolingAssembleInput): Tooling => {
   if (input.store && input.memoryKindLabel !== undefined && input.onMemoryReady !== undefined) {
     input.onMemoryReady(
-      `memory on (kind=${input.memoryKindLabel}, embed=${input.embedder ? "on" : "off"}, session=${input.sessionId})`,
+      renderMemoryBanner(
+        input.memoryKindLabel,
+        input.embedder,
+        input.memoryEmbedProvenance,
+        input.sessionId,
+      ),
     )
   }
   if (input.subagentConfig) input.slog.debug("subagent.on", input.subagentConfig)
@@ -329,6 +372,11 @@ export const buildToolingCore = (input: ToolingAssembleInput): Tooling => {
   return {
     store: input.store,
     embedder: input.embedder,
+    // ADR-0555 — carry the RESOLVED kind (+ sqlite path) up so the surface's
+    // `/memory stats` and the banner name the same store. Omitted when the
+    // surface did not thread a kind (non-CLI surfaces) ⇒ byte-identical shape.
+    ...(input.memoryKindLabel !== undefined ? { memoryKind: input.memoryKindLabel } : {}),
+    ...(input.memoryStorePath !== undefined ? { memoryStorePath: input.memoryStorePath } : {}),
     sessionId: input.sessionId,
     registry,
     // RFC04-2/3 — expose the rebuild closure ONLY when the surface opted in

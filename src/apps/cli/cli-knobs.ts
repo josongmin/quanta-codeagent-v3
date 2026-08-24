@@ -712,7 +712,7 @@ export const CLI_KNOBS: readonly CliKnob[] = [
     default: true,
     group: "misc",
     describe: "Memory vector embedding (default ON).",
-    readSite: "internal.ts",
+    readSite: "memory-compose.ts",
   },
   {
     envKey: "QUANTA_MEMORY_EMBED_MODEL",
@@ -720,7 +720,7 @@ export const CLI_KNOBS: readonly CliKnob[] = [
     default: "",
     group: "misc",
     describe: "Custom memory embedding model.",
-    readSite: "internal.ts",
+    readSite: "memory-compose.ts",
   },
   {
     envKey: "QUANTA_ENABLE_ENV_PROBE",
