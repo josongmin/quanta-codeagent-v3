@@ -55,6 +55,9 @@ beforeAll(async () => {
 const MEASURED_BYPASSES = [
   "cd / && rm -rf *",
   "cd /; rm -rf .",
+  // The payload word-splits via the shell's own IFS expansion, so the braces
+  // must reach the parser as literal text — this is the ATTACK, not a template.
+  // biome-ignore lint/suspicious/noTemplateCurlyInString: literal ${IFS} is the payload
   "rm${IFS}-rf${IFS}/",
   "git push origin +main",
   "npx rimraf /",
@@ -100,6 +103,7 @@ describe("B — shell effect authority", () => {
   })
 
   test.each([
+    // biome-ignore lint/suspicious/noTemplateCurlyInString: literal ${IFS} is the payload
     ["rm${IFS}-rf${IFS}/", "word split by an expansion"],
     ['eval "$(echo x | base64 -d)"', "eval of a command substitution"],
     ["python3 -c \"import shutil; shutil.rmtree('/')\"", "interpreter inline payload"],
