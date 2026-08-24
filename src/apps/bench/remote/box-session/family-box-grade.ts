@@ -94,12 +94,64 @@ export const proveAnswerKeyAbsentForAgent = async (input: {
   })
 }
 
+/** How long to let a finishing bench wrapper exit before giving up, and how
+ *  often to ask. Sized to the observed gap — the wrapper writes `run.exit` right
+ *  after the bench returns — with headroom, and it is a CEILING for a wedged
+ *  process, not a target. */
+const AGENT_EXIT_GRACE_MS = 120_000
+const AGENT_EXIT_POLL_MS = 3_000
+
+/**
+ * Wait for the bench process to leave the box, then let the caller proceed.
+ *
+ * The completion probe accepts EITHER `run.exit` or a fallback ("the report
+ * parses and predictions is non-empty"). On the fallback the wrapper has not
+ * written `run.exit` yet, so the process is typically alive for a moment longer.
+ * That is the common case, not a failure.
+ *
+ * Throws only when it is STILL alive after the grace period — a wedged agent, and
+ * the one case where materializing the answer key beside it would be wrong.
+ */
+const awaitAgentExit = async (input: {
+  readonly ssh: BoxSession["ssh"]
+  readonly log: (m: string) => void
+  readonly family: DatasetFamily
+  readonly sleep?: (ms: number) => Promise<void>
+}): Promise<void> => {
+  const sleep = input.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)))
+  const deadline = AGENT_EXIT_GRACE_MS
+  let waited = 0
+  for (;;) {
+    const probe = await input.ssh("pgrep -f 'apps/bench/cli.ts run' >/dev/null && echo ALIVE")
+    if (probe.stdout.trim() !== "ALIVE") return
+    if (waited >= deadline) {
+      throw new Error(
+        `[full-remote] ${input.family}: the bench process is STILL RUNNING after ` +
+          `${Math.round(deadline / 1000)}s — REFUSING to materialize the answer key beside a live ` +
+          "agent. The run was reported complete by the artifact fallback (report parses + " +
+          "predictions non-empty) rather than by `run.exit`, so its process state was never " +
+          "established, and it has not since exited.",
+      )
+    }
+    if (waited === 0) {
+      input.log(
+        `[full-remote] ${input.family}: the bench wrapper is still finishing (it writes ` +
+          "`run.exit` last) — waiting for it to exit before the answer key is materialized…",
+      )
+    }
+    await sleep(AGENT_EXIT_POLL_MS)
+    waited += AGENT_EXIT_POLL_MS
+  }
+}
+
 export interface FamilyBoxGradeInput {
   readonly ssh: BoxSession["ssh"]
   readonly log: (m: string) => void
   readonly family: DatasetFamily
   readonly bootstrap: FamilyRemoteBootstrap | undefined
   readonly paths: ChunkPaths
+  /** test seam for the agent-exit wait; real runs use `setTimeout`. */
+  readonly sleep?: (ms: number) => Promise<void>
 }
 
 /**
@@ -133,15 +185,13 @@ const assertNoLiveBenchProcess = async (input: FamilyBoxGradeInput): Promise<voi
   // The probe matches the literal command the box was told to run, not a guess
   // at process names. `pgrep` exits non-zero when nothing matches, which is the
   // answer we want.
-  const stillRunning = await input.ssh("pgrep -f 'apps/bench/cli.ts run' >/dev/null && echo ALIVE")
-  if (stillRunning.stdout.trim() === "ALIVE") {
-    throw new Error(
-      `[full-remote] ${input.family}: the bench process is STILL RUNNING on the box — REFUSING to ` +
-        "materialize the answer key beside a live agent. The run was reported complete by the " +
-        "artifact fallback (report parses + predictions non-empty) rather than by `run.exit`, so " +
-        "its process state was never established.",
-    )
-  }
+  //
+  // MEASURED on a live box: this is the NORMAL path, not an edge case. Patch-gen
+  // finished all 7 instances, the poll accepted the artifact fallback, and the
+  // wrapper was still finishing — it writes `run.exit` LAST. Refusing outright
+  // discarded a completed run and bought another box, so the guard WAITS: the
+  // safety property is "never materialize beside a live agent", not "never wait".
+  await awaitAgentExit(input)
 }
 
 /** PREFLIGHT 2 — the predictions to grade, or `undefined` when there is nothing

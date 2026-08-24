@@ -46,16 +46,25 @@ const PASS_RATE = JSON.stringify([
 ])
 
 /** `agentAlive` ⇒ the box reports a live bench process. */
-const recorder = (opts: { agentAlive?: boolean } = {}) => {
+/**
+ * `agentAlive` ⇒ alive forever (a wedged agent).
+ * `aliveForProbes` ⇒ alive for the first N probes, then gone — the REAL shape,
+ * because the wrapper writes `run.exit` LAST and so outlives the artifacts.
+ */
+const recorder = (opts: { agentAlive?: boolean; aliveForProbes?: number } = {}) => {
   const issued: string[] = []
+  let probes = 0
   return {
     issued,
+    probeCount: () => probes,
     ssh: async (cmd: string) => {
       issued.push(cmd)
       if (cmd.includes("pgrep")) {
         // Models the REAL command: `pgrep -f … >/dev/null && echo ALIVE`. When
         // nothing matches, the `&&` short-circuits — empty stdout, non-zero exit.
-        return opts.agentAlive === true
+        probes += 1
+        const alive = opts.agentAlive === true || probes <= (opts.aliveForProbes ?? 0)
+        return alive
           ? { code: 0, stdout: "ALIVE\n", stderr: "" }
           : { code: 1, stdout: "", stderr: "" }
       }
@@ -85,6 +94,9 @@ const grade = (r: ReturnType<typeof recorder>) =>
     family: "promax",
     bootstrap: promaxBootstrap(),
     paths: DEFAULT_CHUNK_PATHS,
+    // no real sleeping in a unit test — the WAIT is the behaviour under test,
+    // not the wall clock.
+    sleep: async () => {},
   })
 
 const materializedGold = (issued: readonly string[]): boolean =>
@@ -107,6 +119,18 @@ describe("a live agent process blocks the grader window", () => {
     expect(probeAt).toBeGreaterThan(-1)
     // nothing gold-bearing issued at all, so ordering is trivially satisfied
     expect(r.issued.filter((c) => c.includes("'git'"))).toEqual([])
+  })
+
+  test("🔴 an agent that is FINISHING is WAITED for, not refused", async () => {
+    // The real shape: the wrapper writes `run.exit` last, so the process outlives
+    // the artifacts by moments. Refusing there discards a completed run.
+    const r = recorder({ aliveForProbes: 2 })
+    const out = await grade(r)
+    expect(out?.artifactText).toBe(PASS_RATE)
+    expect(r.probeCount(), "it did not re-probe — it decided on the first answer").toBeGreaterThan(
+      1,
+    )
+    expect(materializedGold(r.issued)).toBe(true)
   })
 
   test("PAIRED CONTROL: with the agent gone, the grade proceeds normally", async () => {
