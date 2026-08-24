@@ -64,6 +64,14 @@ import { tmpdir } from "node:os"
 import { join, relative, resolve } from "node:path"
 
 const REPO_ROOT = new URL("../../", import.meta.url).pathname.replace(/\/$/, "")
+
+/** How many bundled system skills exist on disk. Compared against what the
+ *  COMPILED binary discovers, so the proof tracks the tree instead of a literal
+ *  that would quietly go stale the next time a skill is added. */
+const systemSkillDirCount = (): number =>
+  readdirSync(join(REPO_ROOT, "src/skill/system-skills"), { withFileTypes: true }).filter((e) =>
+    e.isDirectory(),
+  ).length
 const SRC_ROOT = join(REPO_ROOT, "src")
 const ALLOWLIST_PATH = join(REPO_ROOT, "tools/dev/compiled-binary-assets.json")
 
@@ -369,6 +377,7 @@ describe("compiled-binary asset ratchet", () => {
       const PROVEN = [
         "src/permission/shell/parser.ts",
         "src/retrieval/code-parser/tree-sitter.ts",
+        "src/skill/system-skills/index.ts",
       ].sort()
       const claimed = allowlist.sites
         .filter((s) => OBLIGATION[s.status].needsCompiledProof)
@@ -389,12 +398,14 @@ describe("compiled-binary asset ratchet", () => {
           [
             `import { assessShellCommand, initShellEffectParser, shellEffectParserReady } from "@/permission/shell"`,
             `import { createTreeSitterParser } from "@/retrieval/code-parser"`,
+            `import { discoverSystemSkills } from "@/skill/system-skills"`,
             `await initShellEffectParser()`,
             `const parsed = await createTreeSitterParser().parse("x.ts", "export const a = 1\\n")`,
             `console.log(JSON.stringify({`,
             `  shellReady: shellEffectParserReady(),`,
             `  shellVerdict: assessShellCommand("cd / && rm -rf *").kind,`,
             `  retrievalOk: parsed.ok,`,
+            `  skillCount: (await discoverSystemSkills()).length,`,
             `}))`,
           ].join("\n"),
           "utf8",
@@ -436,6 +447,10 @@ describe("compiled-binary asset ratchet", () => {
           // Proves `Parser.init()` no longer aborts, which is what makes the
           // pre-existing QUANTA_TREE_SITTER_DIR override usable at all here.
           retrievalOk: true,
+          // The shipped CLI carried ZERO bundled skills before the SKILL.md
+          // files were embedded; the count is compared to the tree, not to a
+          // literal, so adding a skill cannot make this assertion stale.
+          skillCount: systemSkillDirCount(),
         })
       } finally {
         rmSync(entry, { force: true })

@@ -33,8 +33,9 @@
 
 import { dirname, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
-import { discoverSkills } from "../discover"
+import { discoverSkills, readSkillAt } from "../discover"
 import type { Skill } from "../types"
+import { SYSTEM_SKILL_ASSETS } from "./manifest.generated"
 
 /** Absolute path to the bundled `system-skills/` directory. Resolved from
  *  this module's location so the layout works under both `bun run` (source
@@ -61,7 +62,30 @@ export const systemSkillsDir = (): string => {
  *   for (const s of systemSkills) byName.set(s.name, s)
  *   const merged = [...byName.values()]
  */
-export const discoverSystemSkills = async (): Promise<Skill[]> => discoverSkills(systemSkillsDir())
+export const discoverSystemSkills = async (): Promise<Skill[]> => {
+  // Read the EMBEDDED manifest, not a directory walk.
+  //
+  // `systemSkillsDir()` resolves from `import.meta.url`, which in a
+  // `bun build --compile` binary is `/$bunfs/root` — a path that does not exist.
+  // `discoverSkills` then `readdir`'d it, caught the ENOENT by design ("the user
+  // has no skills here") and returned `[]`. Measured: 22 skills from source, ZERO
+  // in the shipped CLI, with every unit test green because they run from source.
+  // The doc above conceded the shape ("must be shipped alongside the binary") but
+  // a single-file binary has no alongside.
+  //
+  // A directory cannot be embedded; a FILE can. `manifest.generated.ts` imports
+  // each SKILL.md with bun's file attribute, so the bytes travel inside the
+  // artifact and the path resolves in BOTH modes. Bundled resources
+  // (`agents/`, `scripts/`) are still read relative to that path — present in
+  // dev, absent in the binary, which the resource reader already treats as
+  // fail-safe.
+  const read = await Promise.all(
+    SYSTEM_SKILL_ASSETS.map(async (a) => await readSkillAt(a.name, a.path)),
+  )
+  return read
+    .filter((s): s is Skill => s !== null)
+    .sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))
+}
 
 // CTK git skills cluster (ADR-0102 absorption batch — Track 3 router).
 // Each per-skill index.ts mirrors the progress-audit/localize-fault pattern:

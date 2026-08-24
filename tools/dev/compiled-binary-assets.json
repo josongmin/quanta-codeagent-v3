@@ -1,8 +1,8 @@
 {
-  "note": "CLOSED UNIVERSE of every `src/**` site that resolves a runtime path from the module's OWN install location (see tests/unit/compiled-binary-asset-ratchet.test.ts). A site that fires but is ABSENT here is treated as ceiling 0 and FAILS. Counts are per-file/per-pattern and only ever go DOWN: growth is a REGRESSION, never a ceiling bump. `status` is a closed union — embedded | dev-only | not-shipped | not-self-rooted — and every value is exhaustively classified by the test's drift guard.",
+  "note": "CLOSED UNIVERSE of every `src/**` site that resolves a runtime path from the module's OWN install location (see tests/unit/compiled-binary-asset-ratchet.test.ts). A site that fires but is ABSENT here is treated as ceiling 0 and FAILS. Counts are per-file/per-pattern and only ever go DOWN: growth is a REGRESSION, never a ceiling bump. `status` is a closed union \u2014 embedded | dev-only | not-shipped | not-self-rooted \u2014 and every value is exhaustively classified by the test's drift guard.",
   "statusMeaning": {
     "embedded": "Asset bytes are embedded into the bundle via `import x from \"pkg/y.wasm\" with { type: \"file\" }`. PROVEN by this test: it compiles a real binary and runs it from a cwd OUTSIDE the repo, so `createRequire`'s cwd `node_modules` fallback cannot mask a failure. Every `embedded` entry MUST have a matching in-test proof or the test goes red.",
-    "dev-only": "Resolves correctly under `bun run src/...` and is MEASURED to fail inside `bun build --compile`. This is a documented, live limitation of the shipped binary — recorded here rather than guessed at. `compiledBehavior` is the measured result; `override` is the operator escape hatch, or null when none exists.",
+    "dev-only": "Resolves correctly under `bun run src/...` and is MEASURED to fail inside `bun build --compile`. This is a documented, live limitation of the shipped binary \u2014 recorded here rather than guessed at. `compiledBehavior` is the measured result; `override` is the operator escape hatch, or null when none exists.",
     "not-shipped": "The file is NOT reachable from the shipped compile entry (`src/apps/cli/index.ts`), so the compiled-binary defect class does not apply to it. VERIFIED, not asserted: the test builds the real module graph of that entry and fails if a `not-shipped` file turns out to be reachable (or if any other listed file turns out NOT to be).",
     "not-self-rooted": "The pattern matched, but the path is rooted at caller-supplied or foreign data (a user workspace, an installed third-party extension), never at our own install location. Nothing about `bun build --compile` changes its behaviour."
   },
@@ -13,73 +13,93 @@
       "status": "embedded",
       "justification": "The shell security authority. Both the web-tree-sitter RUNTIME wasm and the tree-sitter-bash GRAMMAR wasm are embedded with `type: \"file\"`, and `Parser.init({ locateFile })` points emscripten at the embedded runtime path. Before this, `dist/agent` failed with ENOENT '/$bunfs/root/web-tree-sitter.wasm', answered `unknown` for EVERY command, and the shipping binary silently ran on the regex-only gate this lane exists to replace.",
       "override": null,
-      "patterns": { "asset-import": 2 }
+      "patterns": {
+        "asset-import": 2
+      }
     },
     {
       "file": "src/retrieval/code-parser/tree-sitter.ts",
       "status": "embedded",
       "justification": "Only the 200 KB web-tree-sitter RUNTIME is embedded; that is what stops `Parser.init()` from aborting in a compiled binary. The ~21 MB of grammars across 16 languages stay on disk (this parser is opt-in under QUANTA_INDEX, so bundling them all is a product decision, not an integration fix). The `createRequire` grammar-dir lookup below is the dev-only half of the SAME file.",
       "override": null,
-      "patterns": { "asset-import": 1 }
+      "patterns": {
+        "asset-import": 1
+      }
     },
     {
       "file": "src/retrieval/code-parser/tree-sitter.ts#grammar-dir",
       "status": "dev-only",
-      "justification": "`resolveGrammarDir()` falls back to `createRequire(import.meta.url).resolve(\"@vscode/tree-sitter-wasm/package.json\")`, which resolves nothing inside a compiled binary. The caller already treats the throw as `no-grammar`. Because the runtime wasm is now embedded, the pre-existing QUANTA_TREE_SITTER_DIR override finally WORKS in a compiled binary for the first time — proven by this test.",
+      "justification": "`resolveGrammarDir()` falls back to `createRequire(import.meta.url).resolve(\"@vscode/tree-sitter-wasm/package.json\")`, which resolves nothing inside a compiled binary. The caller already treats the throw as `no-grammar`. Because the runtime wasm is now embedded, the pre-existing QUANTA_TREE_SITTER_DIR override finally WORKS in a compiled binary for the first time \u2014 proven by this test.",
       "override": "QUANTA_TREE_SITTER_DIR",
       "compiledBehavior": "Without the override: throws, degrades to `{ok:false, reason:\"no-grammar\"}`. With the override: parses correctly (measured).",
-      "patterns": { "createRequire": 2, "import.meta": 1 }
+      "patterns": {
+        "createRequire": 2,
+        "import.meta": 1
+      }
     },
     {
       "file": "src/skill/system-skills/index.ts",
-      "status": "dev-only",
-      "justification": "`systemSkillsDir()` = `dirname(fileURLToPath(import.meta.url))`, then `discoverSkills()` reads `<name>/SKILL.md` off disk. The SKILL.md files are never imported, so bun embeds none of them and the directory does not exist in the bundle. LIVE DEFECT of this class, recorded rather than guessed: this ratchet exists to make it visible, and fixing it is out of scope for the ratchet slice.",
+      "status": "embedded",
+      "justification": "The bundled system skills. Each `<name>/SKILL.md` is embedded via `manifest.generated.ts` (`with { type: \"file\" }`) and read by path, so the bytes travel inside the artifact \u2014 a directory cannot be embedded, a file can. Before this, `systemSkillsDir()` resolved to `/$bunfs/root` and `discoverSkills` readdir'd a path that does not exist, catching the ENOENT as the normal \"user has no skills here\" case: 22 skills from source, ZERO in the shipped CLI, with every unit test green because they run from source. A generator + drift test keeps the manifest equal to the tree, so a skill added without regenerating fails there rather than silently vanishing from the binary. The `asset-import` hits live in the sibling `manifest.generated.ts`, which the scanner does not flag: a generated file of pure imports is not a self-rooting site.",
       "override": null,
-      "compiledBehavior": "MEASURED — from source: systemSkillsDir=/…/src/skill/system-skills, 22 skills discovered. Compiled binary run outside the repo: systemSkillsDir=/$bunfs/root, 0 skills discovered. The shipped CLI silently ships ZERO bundled system skills.",
-      "patterns": { "import.meta": 1 }
+      "patterns": {
+        "import.meta": 1
+      }
     },
     {
       "file": "src/host/runtime/side-agent-fork-port.ts",
       "status": "dev-only",
       "justification": "`sideAgentWorkerModulePath()` = `new URL(\"../../side-agent/worker-entry.mjs\", import.meta.url)`. `new URL(...)` is not an import, so bun embeds nothing, and the relative walk escapes the bundle root entirely. Latent rather than live: nothing constructs this port unless the composition root opts in under QUANTA_SIDE_AGENT_PROCESS (default-OFF).",
       "override": null,
-      "compiledBehavior": "MEASURED — from source: /…/src/side-agent/worker-entry.mjs, exists=true. Compiled binary: /side-agent/worker-entry.mjs (escaped to filesystem root, not even /$bunfs/root), exists=false. A fork would fail.",
-      "patterns": { "import.meta": 1 }
+      "compiledBehavior": "MEASURED \u2014 from source: /\u2026/src/side-agent/worker-entry.mjs, exists=true. Compiled binary: /side-agent/worker-entry.mjs (escaped to filesystem root, not even /$bunfs/root), exists=false. A fork would fail.",
+      "patterns": {
+        "import.meta": 1
+      }
     },
     {
       "file": "src/plugin-isolation/dxt-user-config.ts",
       "status": "not-self-rooted",
-      "justification": "`if (token === \"__dirname\") return ctx.dirname` is a STRING comparison implementing DXT manifest variable substitution. `ctx.dirname` is the installed third-party extension's own directory, supplied by the caller — it is never our install location, so compilation does not change it. Matched only because the scanner's `__dirname` pattern is deliberately literal.",
+      "justification": "`if (token === \"__dirname\") return ctx.dirname` is a STRING comparison implementing DXT manifest variable substitution. `ctx.dirname` is the installed third-party extension's own directory, supplied by the caller \u2014 it is never our install location, so compilation does not change it. Matched only because the scanner's `__dirname` pattern is deliberately literal.",
       "override": null,
-      "patterns": { "__dirname": 1 }
+      "patterns": {
+        "__dirname": 1
+      }
     },
     {
       "file": "src/apps/bench/otel-trace-sink.ts",
       "status": "not-shipped",
       "justification": "`Bun.file(`${import.meta.dir}/trace-viewer.html`)` serves the live OTEL waterfall UI. Bench tooling, run from source; verified absent from the `src/apps/cli/index.ts` module graph.",
       "override": null,
-      "patterns": { "import.meta": 1 }
+      "patterns": {
+        "import.meta": 1
+      }
     },
     {
       "file": "src/apps/bench/commands/terminal.ts",
       "status": "not-shipped",
-      "justification": "`repoRoot()` walks up from `import.meta.dir` to read the repo's own package.json for run provenance — meaningful only when running from the source tree. Verified absent from the shipped module graph.",
+      "justification": "`repoRoot()` walks up from `import.meta.dir` to read the repo's own package.json for run provenance \u2014 meaningful only when running from the source tree. Verified absent from the shipped module graph.",
       "override": null,
-      "patterns": { "import.meta": 1 }
+      "patterns": {
+        "import.meta": 1
+      }
     },
     {
       "file": "src/apps/eval/grounding/loader.ts",
       "status": "not-shipped",
       "justification": "`DEFAULT_CASES_ROOT = join(import.meta.dir, \"cases\")` loads the grounding eval corpus from the source tree. Eval harness; verified absent from the shipped module graph.",
       "override": null,
-      "patterns": { "import.meta": 1 }
+      "patterns": {
+        "import.meta": 1
+      }
     },
     {
       "file": "src/apps/eval/grounding/harness.ts",
       "status": "not-shipped",
-      "justification": "Hashes its own sibling source files (`readFileSync(join(import.meta.dir, file))`) to fingerprint the harness version — inherently a source-tree operation. Verified absent from the shipped module graph.",
+      "justification": "Hashes its own sibling source files (`readFileSync(join(import.meta.dir, file))`) to fingerprint the harness version \u2014 inherently a source-tree operation. Verified absent from the shipped module graph.",
       "override": null,
-      "patterns": { "import.meta": 1 }
+      "patterns": {
+        "import.meta": 1
+      }
     }
   ]
 }

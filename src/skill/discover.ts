@@ -226,8 +226,19 @@ const unreadableWarning = (path: string, reason: string): void => {
 }
 
 /** Read the directory-form skill (`<dir>/<name>/SKILL.md`), or null if absent. */
-const readNestedSkill = async (dir: string, name: string): Promise<Skill | null> => {
-  const skillFile = join(dir, name, "SKILL.md")
+const readNestedSkill = async (dir: string, name: string): Promise<Skill | null> =>
+  readSkillAt(name, join(dir, name, "SKILL.md"))
+
+/**
+ * Read ONE directory-form skill from an explicit `SKILL.md` path.
+ *
+ * Split out of {@link readNestedSkill} because the bundled system skills cannot
+ * be found by walking a directory: in a `bun build --compile` binary the source
+ * tree does not exist, so their SKILL.md files are EMBEDDED and addressed by
+ * path, not discovered. Same parse, same fail-safe resource handling — only the
+ * way the path is obtained differs.
+ */
+export const readSkillAt = async (name: string, skillFile: string): Promise<Skill | null> => {
   const sized = await checkSkillSize(skillFile)
   if (!sized.ok) {
     if (sized.reason === "too-large") tooLargeWarning(sized.path, sized.size)
