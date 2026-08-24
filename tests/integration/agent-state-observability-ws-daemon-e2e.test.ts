@@ -86,7 +86,28 @@ afterEach(async () => {
   }
 })
 
+/** The run-ledger owner, and DELIBERATELY the wrong key for the objective pane —
+ *  see {@link LIVE_SESSION_KEY}. */
 const THREAD = "default"
+
+/**
+ * The key the objective pane is actually read under.
+ *
+ * `startWebDaemon` calls `bindObjectivePaneThread`, which OVERWRITES
+ * `observabilityPorts.threadId` with the live session key — because the
+ * tools/authority key an objective by `config.sessionId`, so a pane bound to
+ * anything else shows an empty goal. That rebinding is the fix; this is how it
+ * is checked.
+ *
+ * The seed goes under the live key while `ports.threadId` is left at
+ * {@link THREAD}, which is NOT it. The pane can therefore only be non-empty if
+ * the daemon really did rebind — with the rebinding removed the test goes red,
+ * which is not true if the test seeds under the key it also passes in.
+ *
+ * The stub runtime factory mints `stub-session-<n>` and each `boot()` creates
+ * exactly one session, so the live key is `stub-session-1`.
+ */
+const LIVE_SESSION_KEY = "stub-session-1"
 
 /**
  * A captured-callback timer seam: the observability emitter calls `setInterval`
@@ -130,7 +151,10 @@ const buildLivePorts = (
   const objective = createObjectiveStore()
   // Seed state BEFORE the first connection so the snapshot is non-empty.
   ledger.start({ id: "run-1", kind: "exec", owner: THREAD, title: "build the thing" })
-  objective.set(THREAD, { goal: "ship W4", successCriteria: ["frames reach the client"] })
+  objective.set(LIVE_SESSION_KEY, {
+    goal: "ship W4",
+    successCriteria: ["frames reach the client"],
+  })
   const ports: ObservabilityPorts = {
     objective,
     runLedger: ledger,
@@ -279,10 +303,31 @@ const boot = async (extra: Partial<WebDaemonServerConfig>): Promise<WebDaemonHan
 // the event loop turn), not a timing assertion on event latency.
 const yieldLoop = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 25))
 
+/** Fail with the REASON rather than with an empty pane, if either half of the
+ *  rebinding contract drifts. */
+const assertLiveObjectiveKey = (
+  objective: ReturnType<typeof createObjectiveStore>,
+  ports: ObservabilityPorts,
+): void => {
+  if (objective.get(LIVE_SESSION_KEY) === null) {
+    throw new Error(
+      `nothing seeded under "${LIVE_SESSION_KEY}" — if the stub factory's session ` +
+        "naming drifted, update LIVE_SESSION_KEY to match it.",
+    )
+  }
+  if (ports.threadId === LIVE_SESSION_KEY) {
+    throw new Error(
+      "the ports were handed the live key directly, so the daemon's rebinding is no " +
+        "longer under test — leave threadId at THREAD.",
+    )
+  }
+}
+
 describe("W4 — observability + agent-state through the REAL daemon WS", () => {
   test("(1) fresh connection's FIRST observability frame is a snapshot with seeded state", async () => {
     const { timer, tickAll } = captureTimer()
-    const { ports } = buildLivePorts(timer)
+    const { ports, objective } = buildLivePorts(timer)
+    assertLiveObjectiveKey(objective, ports)
     const handle = await boot({ observabilityPorts: ports })
 
     const client = connect(handle)
