@@ -433,13 +433,14 @@ export const injectTurnBudgetReminder = (
 ): void => {
   const text = turnBudgetReminderText(turn, cfg.maxTurns)
   if (text === null) return
-  /* aug-23 §10.3 — NOT tagged. Tagging mints a message id, and
-     `rewind-capture-turn-wire-hellgate` pins that with the rewind gate OFF the
-     saved transcript stays entirely id-less (byte-identical). This reminder is
-     appended on EVERY bounded run, so tagging it would break that invariant for
-     every session. Compaction still mislabels it as user speech — tracked as
-     follow-up: the fix is an out-of-band marker that does not live on `id`. */
-  wm.append({ role: "user", content: [{ type: "text", text }] })
+  /* aug-23 §10.3 — provenance WITHOUT an id. `makeSyntheticUserMessage` is
+     deliberately not used here: it mints one, and this reminder is appended on
+     EVERY bounded run, so an id here would break the `rewind-capture-turn-wire`
+     invariant that a gate-OFF saved transcript stays entirely id-less. `origin`
+     is the out-of-band marker that does not live on `id` — compaction, /rewind
+     and memory recall all read it through `isSyntheticUserMessage`, so this no
+     longer reads back as human speech. */
+  wm.append({ origin: "harness", role: "user", content: [{ type: "text", text }] })
 }
 
 export const injectFocusChainMessage = (cfg: AgentConfig, wm: WorkingMemory<Message>): void => {
