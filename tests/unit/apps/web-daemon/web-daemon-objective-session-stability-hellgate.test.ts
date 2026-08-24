@@ -65,7 +65,7 @@ const buildDaemonBaseWithObjective = async (
 }> => {
   const objective = resolveGatedObjectiveAuthority(env, { confirmationAvailable: false })
   const observability = wireSessionObservability(env, CWD, objective)
-  const { permission } = resolveWebLivePosture(env)
+  const { permission } = await resolveWebLivePosture(env)
   const base = await buildAgentConfigBase({
     env,
     llm: new StubLLM(),

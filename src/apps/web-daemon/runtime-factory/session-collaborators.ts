@@ -12,7 +12,9 @@
  *                                   / QUANTA_PLAN_STORE / QUANTA_MEMORY / QUANTA_WEB_CANVAS)
  *   - `mintLivePermissionCell`     (ungated — the ADR-0211 live mode cell)
  *   - `resolveWebLivePosture`      (QUANTA_POSTURE_SELECTOR — the RFC-05 E4/E5
- *                                   live posture: mode cell + control + guard)
+ *                                   live posture: mode cell + control + guard;
+ *                                   QUANTA_POSTURE_DURABLE_RESUME — E3 durable
+ *                                   restart-resume off the on-disk permission store)
  *   - `mintInboundPorts`           (QUANTA_WEB_AGENT_STATE / QUANTA_WEB_SUBAGENTS
  *                                   / QUANTA_CONTROL_REQUEST / QUANTA_ASK_USER)
  *
@@ -35,10 +37,13 @@ import { type InboundMode, parseInboundMode } from "@/agent/inbound-mode"
 import { createInMemoryPlanStore, type PlanStore } from "@/agent/plan/state"
 import { FollowerCoControlDispatcher, isFollowerCoControlEnabled } from "@/agent/thread-follower"
 import { type ArtifactRegistry, createArtifactRegistry, monotonicIdFactory } from "@/artifact"
-import { buildLivePostureRuntime } from "@/host/bootstrap/live-posture-runtime"
+import {
+  buildLivePostureRuntime,
+  resolveDurableLivePosture,
+} from "@/host/bootstrap/live-posture-runtime"
 import { type ArtifactPreviewResolver, createArtifactPreviewResolver } from "@/host/runtime"
 import type { PersistentStorePort } from "@/memory"
-import type { PermissionContext } from "@/permission"
+import type { PermissionContext, PermissionStore } from "@/permission"
 import type { PostureControl } from "@/permission/posture/control"
 import {
   buildMemoryForSession,
@@ -244,28 +249,64 @@ export interface WebLivePosture {
 }
 
 /**
- * RFC-05 E4/E5 — resolve the web daemon's live posture. The CLI + `serve --stdio`
- * doors thread `postureControl` + `questionGuard` through `bootstrap-session.ts`
- * so a wire `session.posture.set` applies the FULL lossless patch (sandboxPolicy /
- * askOutsidePlan / approvalPolicy / reviewer). The WebSocket daemon BYPASSES
- * bootstrap, so it reuses the SAME `buildLivePostureRuntime` seam here (ONE
- * authority; no second posture authority, no re-implementation) — the
- * `permission` mode accessor is that authority's E3 adapter, so the control's
- * mutations and the control-request/`session.permission.set` mode writes converge
- * on ONE authority the next turn's gate + the E5 guard read.
+ * The STABLE durable-posture key for the web daemon. The daemon is ONE shared,
+ * long-running session whose real session id (`ensureSessionId`) is minted LATE
+ * inside the runtime binding — there is NO resolved per-session id at config-base
+ * build. So the durable path keys the daemon's posture by this CONSTANT DAEMON
+ * IDENTITY instead: the daemon persists ONE posture across restarts (the RFC-05 E3
+ * "durable resume" semantics for the shared-daemon model), and a restart re-derives
+ * the SAME key ⇒ reads back the last effective posture. It is deliberately DISTINCT
+ * from the process-local `LIVE_POSTURE_THREAD_ID = "session"` constant (the
+ * in-memory path) AND from the CLI's per-session resume ids (unique per session), so
+ * the shared on-disk `permission-state.json` record for the daemon never clobbers,
+ * and is never clobbered by, a CLI session record. CLI and web still share the SAME
+ * store FILE (`getDefaultPermissionStore`), so the operator's durable posture lives
+ * on one machine — this key just carves the daemon its own stable slot in it.
+ */
+export const WEB_DAEMON_POSTURE_KEY = "web-daemon"
+
+/**
+ * RFC-05 E4/E5 (+ E3 durable resume) — resolve the web daemon's live posture. The
+ * CLI + `serve --stdio` doors thread `postureControl` + `questionGuard` through
+ * `bootstrap-session.ts` so a wire `session.posture.set` applies the FULL lossless
+ * patch (sandboxPolicy / askOutsidePlan / approvalPolicy / reviewer). The WebSocket
+ * daemon BYPASSES bootstrap, so it reuses the SAME `buildLivePostureRuntime` /
+ * `resolveDurableLivePosture` seam here (ONE authority; no second posture authority,
+ * no re-implementation) — the `permission` mode accessor is that authority's E3
+ * adapter, so the control's mutations and the control-request/`session.permission.set`
+ * mode writes converge on ONE authority the next turn's gate + the E5 guard read.
  *
  * GATED on `QUANTA_POSTURE_SELECTOR` (registration parity with the CLI `/posture`
- * selector): OFF ⇒ the legacy in-memory mode cell only (byte-identical). E3
- * durable restart-resume is NOT wired here (the daemon has no resolved per-session
- * id at config-base build — `ensureSessionId` mints it late inside the runtime
- * binding), so the live posture is in-memory only; durable web-posture resume is a
- * follow-up (parity with the objective per-connection Phase-2 park).
+ * selector): OFF ⇒ the legacy in-memory mode cell only (byte-identical).
+ *
+ * E3 durable restart-resume (RFC-05 E3, web parity): when the surface supplies
+ * `loadPermissionStore` AND `QUANTA_POSTURE_DURABLE_RESUME` is on, the SAME durable
+ * seam backs the ONE authority with the on-disk permission store keyed by the STABLE
+ * {@link WEB_DAEMON_POSTURE_KEY} (the daemon has no resolved per-session id at build,
+ * so the daemon-identity key is what stays stable across restarts). A restart then
+ * RESTORES the last effective posture instead of the "default" seed. BOTH gates are
+ * default-OFF: `QUANTA_POSTURE_DURABLE_RESUME` unset (or no store dep) ⇒
+ * `resolveDurableLivePosture` binds the in-memory seed with NO store I/O ⇒
+ * byte-identical to today; a corrupt/absent store fails soft to that same seed
+ * (`loadPermissionStore` returns undefined, or the store drops the corrupt record at
+ * load), never crashing daemon boot.
  */
-export const resolveWebLivePosture = (env: Record<string, string | undefined>): WebLivePosture => {
+export const resolveWebLivePosture = async (
+  env: Record<string, string | undefined>,
+  loadPermissionStore?: () => Promise<PermissionStore | undefined>,
+): Promise<WebLivePosture> => {
   if (!gateOn(env, "QUANTA_POSTURE_SELECTOR")) {
     return { permission: mintLivePermissionCell() }
   }
-  const live = buildLivePostureRuntime("default")
+  // ONE authority: reuse the CLI/stdio durable seam (`resolveDurableLivePosture`)
+  // verbatim — it owns the DURABLE_RESUME gate + the store-vs-in-memory bind, so the
+  // web surface adds no second posture authority and re-implements no store seeding.
+  const live = await resolveDurableLivePosture({
+    bind: (durable) => buildLivePostureRuntime("default", durable),
+    ...(loadPermissionStore !== undefined ? { loadPermissionStore } : {}),
+    env,
+    sessionId: WEB_DAEMON_POSTURE_KEY,
+  })
   return {
     permission: live.permission,
     postureControl: live.postureControl,

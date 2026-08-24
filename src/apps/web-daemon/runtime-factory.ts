@@ -38,6 +38,7 @@ import {
 } from "@/host/runtime"
 import { resolveGatedObjectiveAuthority } from "@/host/runtime/objective-store-wire"
 import { pickProvider, tryCreateLLM } from "@/llm"
+import { getDefaultPermissionStore, type PermissionStore } from "@/permission"
 import { createRuntimeFromAgentConfigBase } from "@/sdk/runtime"
 import { gateOn } from "@/shared"
 import { buildWebSkillAuthority } from "./authority-readouts"
@@ -91,6 +92,11 @@ const assembleWebRuntimeParts = async (
   // closure this was extracted from only ever saw a live port — and that narrowing
   // cannot cross a function boundary.
   llm: NonNullable<ReturnType<typeof tryCreateLLM>>,
+  // RFC-05 E3 (web parity) — the SAME on-disk permission store loader the CLI
+  // threads (`getDefaultPermissionStore().load()`, fail-soft). Passed as a dep so
+  // tests can inject a temp store; `resolveWebLivePosture` only consumes it when
+  // BOTH QUANTA_POSTURE_SELECTOR and QUANTA_POSTURE_DURABLE_RESUME are on.
+  loadPermissionStore: () => Promise<PermissionStore | undefined>,
 ) => {
   const cwd = process.cwd()
   const abort = new AbortController()
@@ -100,7 +106,13 @@ const assembleWebRuntimeParts = async (
   // E5 `questionGuard` mutate/read, so a wire `session.posture.set` applies the
   // FULL patch (not the silent mode-only drop). Gate OFF ⇒ mode cell only ⇒
   // control/guard undefined (byte-identical). See {@link resolveWebLivePosture}.
-  const { permission, postureControl, questionGuard } = resolveWebLivePosture(env)
+  // RFC-05 E3 — under both QUANTA_POSTURE_SELECTOR + QUANTA_POSTURE_DURABLE_RESUME the
+  // live posture is backed by the on-disk store keyed by the stable daemon identity
+  // (a restart restores the last effective posture); either gate OFF ⇒ in-memory seed.
+  const { permission, postureControl, questionGuard } = await resolveWebLivePosture(
+    env,
+    loadPermissionStore,
+  )
   // UUX-1-11 — the loop/readout collaborator bundle (subagent registry, plan
   // store, memory store, prompt-usage holder). See {@link mintSessionCollaborators}.
   const { taskRegistry, subagent, skills, planStore, memoryStore, usageHolder, canvasUsage } =
@@ -190,6 +202,23 @@ const assembleWebRuntimeParts = async (
 }
 
 /**
+ * The production durable-posture store loader — the SAME shape the CLI threads
+ * (`repl.ts`): `getDefaultPermissionStore().load()`, fail-soft to `undefined` on any
+ * error so a corrupt/unreadable store degrades to the in-memory seed and NEVER
+ * crashes daemon boot. CLI and web share this default store file, so the operator's
+ * durable posture lives on one machine. Only consumed when both posture gates are on.
+ */
+const loadDefaultPermissionStore = async (): Promise<PermissionStore | undefined> => {
+  try {
+    const store = getDefaultPermissionStore()
+    await store.load()
+    return store
+  } catch {
+    return undefined
+  }
+}
+
+/**
  * Build a `runtimeFactory` suitable for `WebDaemonConfig`. The LLM port is
  * resolved ONCE at boot (env-driven provider pick); each invocation of the
  * returned factory mints a fresh {@link ObservableRuntimeFacade} (= fresh
@@ -238,7 +267,7 @@ export const buildProductionRuntimeFactory = (): (() => Promise<ObservableRuntim
       mcpTools,
       mcpClients,
       mcpAccessor,
-    } = await assembleWebRuntimeParts(env, llm)
+    } = await assembleWebRuntimeParts(env, llm, loadDefaultPermissionStore)
     const base = await buildAgentConfigBase({
       env,
       llm,

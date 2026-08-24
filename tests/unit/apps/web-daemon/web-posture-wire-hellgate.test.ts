@@ -60,7 +60,7 @@ class StubLLM implements LLMPort {
  *  the SAME authority the host mutates.
  *
  *  HONEST SCOPE BOUND (the one leg this file does NOT drive): this REPRODUCES the
- *  factory's two-line thread (`const live = resolveWebLivePosture(env)` →
+ *  factory's two-line thread (`const live = await resolveWebLivePosture(env)` →
  *  `buildAgentConfigBase({..., postureControl: live.postureControl, questionGuard:
  *  live.questionGuard})`) by hand, so it proves the CONSUMER seam
  *  (base.postureControl → applyHostPostureMutation rich-field apply) but NOT that
@@ -117,7 +117,7 @@ const sessionHostFrom = async (base: RuntimeAgentConfigBase): Promise<SessionHos
 describe("RFC-05 E4b — web-daemon posture front-door applies the FULL patch (no silent drop)", () => {
   test("[E4B-1] selector ON ⇒ a wire session.posture.set with a RICH patch APPLIES the field through the live authority", async () => {
     const env = { QUANTA_POSTURE_SELECTOR: "1" }
-    const live = resolveWebLivePosture(env)
+    const live = await resolveWebLivePosture(env)
     // The daemon actually BUILT a control + guard (the wiring the daemon lacked).
     expect(live.postureControl).toBeDefined()
     expect(live.questionGuard).toBeDefined()
@@ -152,7 +152,7 @@ describe("RFC-05 E4b — web-daemon posture front-door applies the FULL patch (n
 
   test("[E4B-2] selector OFF ⇒ NO postureControl/questionGuard on the base (mode-only compat, byte-identical)", async () => {
     const env = {}
-    const live = resolveWebLivePosture(env)
+    const live = await resolveWebLivePosture(env)
     expect(live.postureControl).toBeUndefined()
     expect(live.questionGuard).toBeUndefined()
 
@@ -176,7 +176,7 @@ describe("RFC-05 E4b — web-daemon posture front-door applies the FULL patch (n
 
   test("[E4B-3] selector ON ⇒ the mode axis still lands on the SAME live authority cell (control-request path unaffected)", async () => {
     const env = { QUANTA_POSTURE_SELECTOR: "1" }
-    const live = resolveWebLivePosture(env)
+    const live = await resolveWebLivePosture(env)
     const base = await buildDaemonBase(live, env)
     const host = await sessionHostFrom(base)
 
