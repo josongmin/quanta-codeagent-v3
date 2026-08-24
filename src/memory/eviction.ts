@@ -38,6 +38,14 @@ export interface EvictionPlan {
 /** Min importance for a decay to be worthwhile (else it's noise). */
 const DECAY_MIN_IMPORTANCE = 0.05
 
+/**
+ * ADR-0554 — minimum elapsed time between two decays of the same entry. Reuses
+ * the archived-window length ({@link STALE_MAX_MS}, 30d) rather than inventing
+ * a new interval: an entry is halved at most once per age window, so decay
+ * tracks ELAPSED TIME, not how many sessions ran while it was archived.
+ */
+export const DECAY_WINDOW_MS = STALE_MAX_MS
+
 /** Freshness contribution to value, by bucket (same scale as ranking). */
 const FRESHNESS_WEIGHT: Record<FreshnessBucket, number> = {
   fresh: 3,
@@ -96,9 +104,15 @@ const tierDeletes = (inTier: ValuedEntry[], cap: number, now: number): Set<strin
   return deleted
 }
 
-/** A survivor (not deleted) is decayed when archived and above the floor. */
+/**
+ * A survivor (not deleted) is decayed when archived, above the floor, AND not
+ * already decayed within the last {@link DECAY_WINDOW_MS} (ADR-0554). A missing
+ * `lastDecayedAt` (legacy row) is eligible immediately — the pre-0554 behavior.
+ */
 const shouldDecay = (e: NormalizedEntry, now: number): boolean =>
-  bucketOf(now - e.createdAt) === "archived" && e.importance > DECAY_MIN_IMPORTANCE
+  bucketOf(now - e.createdAt) === "archived" &&
+  e.importance > DECAY_MIN_IMPORTANCE &&
+  (e.lastDecayedAt === undefined || now - e.lastDecayedAt >= DECAY_WINDOW_MS)
 
 /**
  * Plan eviction over the whole store. Pure; `now` injectable. Processes the
@@ -107,7 +121,8 @@ const shouldDecay = (e: NormalizedEntry, now: number): boolean =>
  * - delete: (a) superseded entries older than {@link STALE_MAX_MS} (30d), and
  *   (b) lowest-value entries beyond the tier cap.
  * - decay:  surviving entries in the `archived` bucket with importance above a
- *   small floor (caller multiplies their importance by {@link EVICTION_DECAY}).
+ *   small floor (caller multiplies their importance by {@link EVICTION_DECAY}
+ *   and stamps `lastDecayedAt = now`), at most once per {@link DECAY_WINDOW_MS}.
  *
  * An id appears in at most one list (delete wins).
  */

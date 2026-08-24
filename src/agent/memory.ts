@@ -463,8 +463,12 @@ const sweepEviction = async (
     const e = byId.get(id)
     if (!e) continue
     try {
+      // ADR-0554: stamp the dedicated decay clock so the next sweep within the
+      // same age window skips this entry (decay per elapsed time, not per
+      // session). `updatedAt` is NOT usable here — adapters/reinforce() bump it.
       await deps.store.update(id, {
         importance: clamp((e.importance ?? 0.5) * EVICTION_DECAY, 0, 1),
+        lastDecayedAt: now,
       })
       stats.decayed++
     } catch {

@@ -25,6 +25,8 @@ interface MemoryRow {
   updated_at: number | null
   access_count: number | null
   last_accessed_at: number | null
+  // ADR-0554 decay clock (forward-migrated; null on legacy rows).
+  last_decayed_at: number | null
   embedding: Uint8Array | null
   superseded_by: string | null
   session_id: string | null
@@ -54,6 +56,8 @@ const NEW_COLUMNS: ReadonlyArray<readonly [string, string]> = [
   ["task_group", "TEXT"],
   ["applies_to_cwd", "TEXT"],
   ["reuse_rule", "TEXT"],
+  // ADR-0554 — once-per-window decay clock; legacy dbs migrate on open.
+  ["last_decayed_at", "INTEGER"],
 ]
 
 /**
@@ -124,7 +128,8 @@ export class SqliteStore implements PersistentStorePort {
         session_id TEXT,
         task_group TEXT,
         applies_to_cwd TEXT,
-        reuse_rule TEXT
+        reuse_rule TEXT,
+        last_decayed_at INTEGER
       )
     `)
     this.migrate()
@@ -136,11 +141,11 @@ export class SqliteStore implements PersistentStorePort {
       INSERT INTO memories (
         id, kind, tier, text, tags, importance, created_at, updated_at,
         access_count, last_accessed_at, embedding, superseded_by, session_id,
-        task_group, applies_to_cwd, reuse_rule
+        task_group, applies_to_cwd, reuse_rule, last_decayed_at
       ) VALUES (
         $id, $kind, $tier, $text, $tags, $importance, $created_at, $updated_at,
         $access_count, $last_accessed_at, $embedding, $superseded_by, $session_id,
-        $task_group, $applies_to_cwd, $reuse_rule
+        $task_group, $applies_to_cwd, $reuse_rule, $last_decayed_at
       )
       ON CONFLICT(id) DO UPDATE SET
         kind = excluded.kind,
@@ -157,7 +162,8 @@ export class SqliteStore implements PersistentStorePort {
         session_id = excluded.session_id,
         task_group = excluded.task_group,
         applies_to_cwd = excluded.applies_to_cwd,
-        reuse_rule = excluded.reuse_rule
+        reuse_rule = excluded.reuse_rule,
+        last_decayed_at = excluded.last_decayed_at
     `)
     this.selectAllStmt = this.db.query("SELECT * FROM memories")
     this.selectByIdStmt = this.db.query("SELECT * FROM memories WHERE id = ?")
@@ -206,6 +212,7 @@ export class SqliteStore implements PersistentStorePort {
         $task_group: n.taskGroup ?? null,
         $applies_to_cwd: n.appliesTo?.cwd ?? null,
         $reuse_rule: n.reuseRule ?? null,
+        $last_decayed_at: n.lastDecayedAt ?? null,
       })
     } catch (e) {
       const message = errMessage(e)
@@ -333,5 +340,6 @@ const rowToEntry = (row: MemoryRow): MemoryEntry => {
     ...(row.task_group !== null ? { taskGroup: row.task_group } : {}),
     ...(row.applies_to_cwd !== null ? { appliesTo: { cwd: row.applies_to_cwd } } : {}),
     ...(row.reuse_rule !== null ? { reuseRule: row.reuse_rule } : {}),
+    ...(row.last_decayed_at !== null ? { lastDecayedAt: row.last_decayed_at } : {}),
   }
 }

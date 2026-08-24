@@ -81,6 +81,13 @@ export interface MemoryEntry {
   /** Epoch ms it was last recalled, if ever. */
   lastAccessedAt?: number
   /**
+   * ADR-0554 — epoch ms the eviction sweep last halved `importance`. Absent on
+   * legacy rows (⇒ eligible on the next sweep, as before). Dedicated field:
+   * `updatedAt` cannot serve — adapters stamp it on every update and
+   * reinforce() on every recall, so it would double-count access.
+   */
+  lastDecayedAt?: number
+  /**
    * Semantic embedding (length {@link EMBED_DIM}). Absent ⇒ entry participates
    * in lexical/tag/freshness ranking only. A wrong-length vector is ignored.
    */
@@ -164,6 +171,10 @@ export const normalizeEntry = (e: MemoryEntry): NormalizedEntry => {
   // an explicit `embedding: undefined` is not assignable to `embedding?:`).
   if (embedding) out.embedding = embedding
   else delete out.embedding
+  // ADR-0554 — carry `lastDecayedAt` only when it is a finite number; a corrupt
+  // persisted value must degrade to "never decayed" (legacy semantics), not NaN.
+  if (Number.isFinite(e.lastDecayedAt)) out.lastDecayedAt = e.lastDecayedAt as number
+  else delete out.lastDecayedAt
   // §10.6 routing meta — tolerantly carry only well-typed values, drop garbage
   // (a corrupt persisted row / malformed save must never throw or pollute
   // scoring). Absent / wrong-typed ⇒ field stays absent (byte-identical).

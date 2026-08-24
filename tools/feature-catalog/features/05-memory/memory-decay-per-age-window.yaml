@@ -1,0 +1,59 @@
+id: memory-decay-per-age-window
+title: Importance decay bounded to once per age window (elapsed time, not session count)
+section: 5
+subsystem: 장기 메모리 — eviction 정책 (adapter-shared)
+order: 61
+maturity: L4
+status: stable
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [interactive, headless, batch, daemon, ide, ci-bot]
+configurable: static
+owners: ["@songmin"]
+labels: ["surface:core"]
+depends_on: [memory-eviction-planner, sqlite-persistent-store]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-08-25"
+  evidence:
+    cli: "sweepEviction runs inside persistSession on every interactive turn (src/agent/loop/session-lifecycle.ts); the once-per-window gate is on that path"
+    web: "pure internal planner gate + persisted field; ui_surfaces n-a; no surface affordance"
+purpose: |
+  ADR-0554. The eviction planner used to decay every "archived" (>30d) survivor
+  on EVERY sweep, and the sweep runs once per persistSession — i.e. once per
+  interactive turn. Importance was therefore halved per SESSION, not per unit of
+  elapsed time: four sessions in one afternoon took a 31-day entry from 0.5 to
+  0.03, which (importance * 4 in ranking) is what let 1-hour episodic entries
+  outrank durable semantic ones. Now each entry carries a dedicated
+  `lastDecayedAt` clock and is decayed at most once per DECAY_WINDOW_MS
+  (= STALE_MAX_MS, the archived boundary itself — no new interval). Legacy rows
+  without the field decay on their first sweep exactly as before; the SQLite
+  adapter forward-migrates `last_decayed_at` on open. `updatedAt` was rejected as
+  the clock because adapters and reinforce() stamp it on every update/recall.
+evidence:
+  code:
+    - src/memory/eviction.ts
+    - src/memory/types.ts
+    - src/memory/adapters/sqlite.ts
+    - src/memory/adapters/in-memory.ts
+    - src/agent/memory.ts
+  adrs: [554]
+  tests:
+    unit:
+      - tests/unit/memory/decay-frequency-hellgate.test.ts
+      - tests/unit/eviction.test.ts
+      - tests/unit/memory-hellgate.test.ts
+    integration:
+      - tests/integration/memory-sqlite.test.ts
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  The hellgate pins six contracts: H1 same-clock sweeps decay once; H2 sweeps a
+  window apart decay each time; H3 paired control (29d never, 30d+1ms first
+  sweep — C5 boundary untouched); H4 tier symmetry (no exemption); H5 window is
+  independent of updatedAt (real recallContext reinforce between sweeps); H6
+  sqlite round-trip + pre-migration db heals additively. Red-on-injection:
+  age-only shouldDecay fails 8/15, sweep write without the stamp fails 4/15.
