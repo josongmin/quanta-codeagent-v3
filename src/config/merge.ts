@@ -48,6 +48,200 @@ const uniq = (xs: readonly string[]): string[] => {
 const isRepoLayer = (layer: SettingsLayerName): boolean => REPO_LAYERS.includes(layer)
 
 /**
+ * Apply one LOOSENING grant from one layer, under both gates.
+ *
+ * Every capability-granting category — permission allow, permission ask, hooks,
+ * mcp enabledServers, openaiEndpoints, and the benign band — was written out
+ * with the same four lines: is it present, is the layer an untrusted repo, is
+ * it blocked by a managed-only lock, otherwise apply. Six near-identical copies
+ * is not merely 56 cognitive complexity in one function; it is the shape in
+ * which a security bug hides, because a category that forgets one of the two
+ * gates reads exactly like the five that do not.
+ *
+ * Returns whether the grant was DROPPED for untrust, which the caller ORs into
+ * the layer's `droppedForUntrust` provenance. Note the asymmetry that is
+ * deliberate and preserved: a drop is recorded only when the grant was
+ * non-empty (a defined-but-empty `allow: []` drops nothing material and must
+ * not raise a spurious "settings ignored" signal), and a MANAGED-blocked grant
+ * is silently not applied WITHOUT being recorded as a trust drop — it was not
+ * dropped for untrust, it was overridden by policy.
+ *
+ * TIGHTENING categories (permission `deny`, mcp `deniedServers`) deliberately do
+ * NOT go through here: they are never trust-gated and never managed-blocked, so
+ * routing them through a gate helper would invite someone to "make them
+ * consistent".
+ */
+interface LooseningGrant {
+  /** False for an absent or empty collection — nothing to drop, nothing to do. */
+  readonly present: boolean
+  /** The layer is a repo layer AND the project is untrusted. */
+  readonly dropLoosening: boolean
+  /** A managed-only lock covers this category and this is not the managed layer. */
+  readonly blocked: boolean
+  readonly apply: () => void
+}
+
+const applyLooseningGrant = (args: LooseningGrant): boolean => {
+  if (!args.present) return false
+  if (args.dropLoosening) return true
+  if (!args.blocked) args.apply()
+  return false
+}
+
+/** The mutable accumulators one layer folds into. */
+interface MergeAcc {
+  readonly allow: string[]
+  readonly deny: string[]
+  readonly ask: string[]
+  readonly hooks: Record<string, HookGroupSetting[]>
+  readonly mcpEnabled: string[]
+  readonly mcpDenied: string[]
+  readonly openaiEndpoints: Record<string, OpenAIEndpointOptions>
+  model: string | undefined
+}
+
+/** The managed layer's non-overridable locks, read once. */
+interface ManagedLocks {
+  readonly perms: boolean
+  readonly hooks: boolean
+  readonly mcp: boolean
+}
+
+/**
+ * Fold ONE layer into the accumulator, and report whether a non-empty loosening
+ * grant was dropped for untrust (the caller records that in
+ * `droppedForUntrust`).
+ *
+ * Split out of {@link mergeSettings}, which held the four refusal/lock reads,
+ * this whole body and the final defense-in-depth subtraction in one 56-complexity
+ * function. Per-layer folding is the unit that actually has a contract — "what
+ * does THIS layer contribute, under these two gates" — and it is the one a
+ * reader has to hold in their head to answer a security question about any
+ * single category.
+ */
+const contributeLayer = (
+  acc: MergeAcc,
+  layerName: SettingsLayerName,
+  layer: SettingsLayer,
+  trusted: boolean,
+  locks: ManagedLocks,
+): boolean => {
+  const repo = isRepoLayer(layerName)
+  const managedLayer = layerName === "managed"
+
+  // For an UNTRUSTED repo layer, its LOOSENING grants are dropped. Note: deny
+  // (tightening) still applies below regardless of trust.
+  const dropLoosening = repo && !trusted
+
+  // ── managed-non-overridable: when managed sets the flag, lower layers cannot
+  //    contribute allow/ask/hooks/mcp. Managed itself still applies. ──
+  const permsBlocked = locks.perms && !managedLayer
+  const hooksBlocked = locks.hooks && !managedLayer
+  const mcpBlocked = locks.mcp && !managedLayer
+
+  // ── benign band — §9 Q6 v1 decision: DROP the WHOLE repo band when the
+  //    project is untrusted (benign keys included). A repo-shipped `model`
+  //    could redirect the agent's model id, so an untrusted repo contributes
+  //    nothing — not even a "benign" override. Machine-owned (managed/user)
+  //    benign keys always apply. ──
+  //
+  // A drop is recorded in `droppedForUntrust` provenance ONLY when a NON-EMPTY
+  // loosening grant was actually dropped (round-3 F5 precision). A
+  // defined-but-empty collection (`allow:[]`, `events:{}`, `enabledServers:[]`)
+  // drops nothing material, so it must NOT surface a spurious "settings
+  // ignored" signal — which is what every `present:` predicate below encodes.
+  // (The parse path collapses empties to `undefined`; the guard makes the public
+  // `mergeSettings` seam — consumed by ticket 04 — precise for direct
+  // construction too.)
+  const benignModel = layer.benign?.model
+  const grants: LooseningGrant[] = [
+    {
+      present: benignModel !== undefined,
+      dropLoosening,
+      blocked: false,
+      apply: () => {
+        acc.model = benignModel
+      },
+    },
+  ]
+
+  const sec = layer.security
+  if (sec !== undefined) {
+    // ── TIGHTENING — permission deny and the mcp denylist are applied even for
+    //    an untrusted repo and are never managed-blocked: a layer narrowing its
+    //    own boundary is safe, only widening needs trust. They are deliberately
+    //    NOT expressed as grants, so nobody "makes them consistent" later. ──
+    acc.deny.push(...(sec.permissions?.deny ?? []))
+    acc.mcpDenied.push(...(sec.mcp?.deniedServers ?? []))
+
+    const secAllow = sec.permissions?.allow ?? []
+    const secAsk = sec.permissions?.ask ?? []
+    const secEvents = sec.hooks?.events ?? {}
+    const secEnabled = sec.mcp?.enabledServers ?? []
+    const eps = sec.openaiEndpoints ?? {}
+    grants.push(
+      {
+        present: secAllow.length > 0,
+        dropLoosening,
+        blocked: permsBlocked,
+        apply: () => acc.allow.push(...secAllow),
+      },
+      {
+        present: secAsk.length > 0,
+        dropLoosening,
+        blocked: permsBlocked,
+        apply: () => acc.ask.push(...secAsk),
+      },
+      {
+        // hooks — command EXECUTION, the most capability-granting category here.
+        present: Object.keys(secEvents).length > 0,
+        dropLoosening,
+        blocked: hooksBlocked,
+        apply: () => {
+          for (const [event, groups] of Object.entries(secEvents)) {
+            const bucket = acc.hooks[event] ?? []
+            // T04 — STAMP the provenance authoritatively from the LAYER NAME,
+            // overwriting any (already-stripped) disk `source`. This is the
+            // single trusted derivation point: a repo (project/local) layer's
+            // groups carry a repo-class source ⇒ the command-hooks loader marks
+            // them `needsReview`; managed/user stay trusted. Migration-imported
+            // hooks land in the project layer, so they inherit `source:"project"`
+            // here even without the legacy import marker.
+            bucket.push(...groups.map((g) => ({ ...g, source: layerName })))
+            acc.hooks[event] = bucket
+          }
+        },
+      },
+      {
+        present: secEnabled.length > 0,
+        dropLoosening,
+        blocked: mcpBlocked,
+        apply: () => acc.mcpEnabled.push(...secEnabled),
+      },
+      {
+        // openaiEndpoints — redirects the LLM transport / references a
+        // credential, so it is loosening. Id-keyed REPLACE, not a field union,
+        // so a higher-precedence layer's same id wins. No managed-only lockdown
+        // flag exists for endpoints (none is defined in the schema), so this
+        // category is never policy-blocked.
+        present: Object.keys(eps).length > 0,
+        dropLoosening,
+        blocked: false,
+        apply: () => {
+          for (const [id, ep] of Object.entries(eps)) acc.openaiEndpoints[id] = ep
+        },
+      },
+    )
+  }
+
+  // Every grant is evaluated — no short-circuit — because each has its own
+  // side effect and its own drop verdict.
+  let droppedHere = false
+  for (const grant of grants) droppedHere = applyLooseningGrant(grant) || droppedHere
+  return droppedHere
+}
+
+/**
  * Merge the parsed layers into the trust-gated {@link ResolvedSettings}.
  *
  * @param layers   parsed layers (a subset of the four; absent ⇒ contributes
@@ -60,9 +254,11 @@ export const mergeSettings = (
   trusted: boolean,
 ): ResolvedSettings => {
   const managed = layers.managed
-  const managedPermsOnly = managed?.security?.permissions?.allowManagedPermissionRulesOnly === true
-  const managedHooksOnly = managed?.security?.hooks?.allowManagedHooksOnly === true
-  const managedMcpOnly = managed?.security?.mcp?.allowManagedMcpServersOnly === true
+  const locks: ManagedLocks = {
+    perms: managed?.security?.permissions?.allowManagedPermissionRulesOnly === true,
+    hooks: managed?.security?.hooks?.allowManagedHooksOnly === true,
+    mcp: managed?.security?.mcp?.allowManagedMcpServersOnly === true,
+  }
 
   const allow: string[] = []
   const deny: string[] = []
@@ -80,7 +276,16 @@ export const mergeSettings = (
   // same-id endpoint OVERWRITES the lower one (deterministic replace, §4.a) —
   // NOT a field union. NULL-PROTO so an id of `__proto__` stays a safe own-key.
   const openaiEndpoints: Record<string, OpenAIEndpointOptions> = Object.create(null)
-  let model: string | undefined
+  const acc: MergeAcc = {
+    allow,
+    deny,
+    ask,
+    hooks,
+    mcpEnabled,
+    mcpDenied,
+    openaiEndpoints,
+    model: undefined,
+  }
   const droppedForUntrust: SettingsLayerName[] = []
 
   // Low→high so higher-precedence layers append last; `uniq` then preserves the
@@ -89,101 +294,7 @@ export const mergeSettings = (
   for (const layerName of lowToHigh) {
     const layer = layers[layerName]
     if (layer === undefined) continue
-    const repo = isRepoLayer(layerName)
-    const managedLayer = layerName === "managed"
-
-    // For an UNTRUSTED repo layer, its LOOSENING grants are dropped. Note: deny
-    // (tightening) still applies below regardless of trust.
-    const dropLoosening = repo && !trusted
-
-    let droppedHere = false
-
-    // ── benign band — §9 Q6 v1 decision: DROP the WHOLE repo band when the
-    //    project is untrusted (benign keys included). A repo-shipped `model`
-    //    could redirect the agent's model id, so an untrusted repo contributes
-    //    nothing — not even a "benign" override. Machine-owned (managed/user)
-    //    benign keys always apply. ──
-    // `droppedHere` records the layer in `droppedForUntrust` provenance, but
-    // ONLY when a NON-EMPTY loosening grant was actually dropped (round-3 F5
-    // precision). A defined-but-empty collection (`allow:[]`, `events:{}`,
-    // `enabledServers:[]`) drops nothing material, so it must NOT surface a
-    // spurious "settings ignored" signal. (The parse path collapses empties to
-    // `undefined`; this guard makes the public `mergeSettings` seam — consumed
-    // by ticket 04 — precise for direct construction too.)
-    if (layer.benign?.model !== undefined) {
-      if (dropLoosening) droppedHere = true
-      else model = layer.benign.model
-    }
-
-    const sec = layer.security
-    if (sec === undefined) {
-      if (droppedHere) droppedForUntrust.push(layerName)
-      continue
-    }
-
-    // ── permission deny — TIGHTENING, always applied (even untrusted repo) ──
-    if (sec.permissions?.deny !== undefined) deny.push(...sec.permissions.deny)
-
-    // ── managed-non-overridable: when managed sets the flag, lower layers
-    //    cannot contribute allow/ask/hooks. Managed itself still applies. ──
-    const permsBlocked = managedPermsOnly && !managedLayer
-    const hooksBlocked = managedHooksOnly && !managedLayer
-    const mcpBlocked = managedMcpOnly && !managedLayer
-
-    // ── permission allow/ask — LOOSENING ──
-    if (sec.permissions?.allow !== undefined && sec.permissions.allow.length > 0) {
-      if (dropLoosening) droppedHere = true
-      else if (!permsBlocked) allow.push(...sec.permissions.allow)
-    }
-    if (sec.permissions?.ask !== undefined && sec.permissions.ask.length > 0) {
-      if (dropLoosening) droppedHere = true
-      else if (!permsBlocked) ask.push(...sec.permissions.ask)
-    }
-
-    // ── hooks — command execution, LOOSENING ──
-    if (sec.hooks?.events !== undefined && Object.keys(sec.hooks.events).length > 0) {
-      if (dropLoosening) droppedHere = true
-      else if (!hooksBlocked) {
-        for (const [event, groups] of Object.entries(sec.hooks.events)) {
-          const bucket = hooks[event] ?? []
-          // T04 — STAMP the provenance authoritatively from the LAYER NAME,
-          // overwriting any (already-stripped) disk `source`. This is the
-          // single trusted derivation point: a repo (project/local) layer's
-          // groups carry a repo-class source ⇒ the command-hooks loader marks
-          // them `needsReview`; managed/user stay trusted. Migration-imported
-          // hooks land in the project layer, so they inherit `source:"project"`
-          // here even without the legacy import marker.
-          bucket.push(...groups.map((g) => ({ ...g, source: layerName })))
-          hooks[event] = bucket
-        }
-      }
-    }
-
-    // ── mcp server launchers — LOOSENING (enabled) ──
-    if (sec.mcp?.enabledServers !== undefined && sec.mcp.enabledServers.length > 0) {
-      if (dropLoosening) droppedHere = true
-      else if (!mcpBlocked) mcpEnabled.push(...sec.mcp.enabledServers)
-    }
-    // ── mcp denylist — TIGHTENING: never trust-gated, never managed-blocked
-    //    (a deny narrows the boundary; like permission `deny` it always applies). ──
-    if (sec.mcp?.deniedServers !== undefined && sec.mcp.deniedServers.length > 0) {
-      mcpDenied.push(...sec.mcp.deniedServers)
-    }
-
-    // ── openaiEndpoints — LOOSENING (redirects the LLM transport / references a
-    //    credential). Dropped for an untrusted repo layer; id-keyed replace so a
-    //    higher-precedence layer's same id wins. No managed-only lockdown flag
-    //    exists for endpoints (none defined in the schema), so `managedX` gating
-    //    does not apply here. ──
-    const eps = sec.openaiEndpoints
-    if (eps !== undefined && Object.keys(eps).length > 0) {
-      if (dropLoosening) droppedHere = true
-      else {
-        for (const [id, ep] of Object.entries(eps)) openaiEndpoints[id] = ep
-      }
-    }
-
-    if (droppedHere) droppedForUntrust.push(layerName)
+    if (contributeLayer(acc, layerName, layer, trusted, locks)) droppedForUntrust.push(layerName)
   }
 
   // deny always wins over allow (defense-in-depth, §4.b).
@@ -200,7 +311,7 @@ export const mergeSettings = (
     hooks,
     mcpEnabledServers: mcpEnabledFinal,
     mcpDeniedServers: uniq(mcpDenied),
-    model,
+    model: acc.model,
     openaiEndpoints,
     droppedForUntrust,
   }
