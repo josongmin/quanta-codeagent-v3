@@ -153,6 +153,34 @@ const logFullRemoteOutcome = (out: {
  *  dropped), enforces IMDSv2 hop-1 + TTL, and always terminates. --dry-run plans
  *  it safely without launching. Instance-aware relaunch recovers box loss. */
 /**
+ * The two refuse-and-exit argument gates `--mode full` opens with: the explicit
+ * secrets acknowledgement, and a dataset to run. Extracted so the command body
+ * stays under the cognitive-complexity ceiling; both messages and both exit
+ * codes are unchanged.
+ *
+ * Returns the resolved dataset path — `process.exit` is `never`, so the caller
+ * gets a plain `string` and no second undefined-check.
+ */
+const requireFullRemoteArgs = (): string => {
+  if (!hasFlag("--allow-remote-secrets")) {
+    logger.info(
+      "refused: --mode full runs patch-gen on the remote box and needs an LLM credential there. " +
+        "Re-run with --allow-remote-secrets to acknowledge the risk (ADR-0536 §6). " +
+        "Tip: --dry-run shows the plan without launching or shipping anything.",
+    )
+    process.exit(2)
+  }
+  const dataset = argValue("--dataset") ?? process.env.QUANTA_SWEBENCH_DATASET
+  if (dataset === undefined) {
+    logger.info(
+      "usage: quanta-bench grade --mode full --allow-remote-secrets --dataset <instances.jsonl> [--instance id] [--dry-run] [--allow-extra-boxes]",
+    )
+    process.exit(2)
+  }
+  return dataset
+}
+
+/**
  * INJECTED PORTS for the full-remote command root.
  *
  * Same shape `cmdBox` got, and for the same reason: proving what this command
@@ -174,21 +202,7 @@ export const cmdGradeFullRemote = async (ports: FullRemoteCommandPorts = {}): Pr
   // AND onto the full-remote backend config (`swebenchDatasetFamily`), so the box
   // launch reads the typed field instead of a fresh `resolveDatasetFamily(undefined, env)`.
   const runConfig = resolveGradeRunConfig(readDatasetFamilySelector(process.argv))
-  if (!hasFlag("--allow-remote-secrets")) {
-    logger.info(
-      "refused: --mode full runs patch-gen on the remote box and needs an LLM credential there. " +
-        "Re-run with --allow-remote-secrets to acknowledge the risk (ADR-0536 §6). " +
-        "Tip: --dry-run shows the plan without launching or shipping anything.",
-    )
-    process.exit(2)
-  }
-  const dataset = argValue("--dataset") ?? process.env.QUANTA_SWEBENCH_DATASET
-  if (dataset === undefined) {
-    logger.info(
-      "usage: quanta-bench grade --mode full --allow-remote-secrets --dataset <instances.jsonl> [--instance id] [--dry-run] [--allow-extra-boxes]",
-    )
-    process.exit(2)
-  }
+  const dataset = requireFullRemoteArgs()
   const dry = hasFlag("--dry-run")
   // Only read the on-disk credential when actually launching (dry-run never
   // touches it). Stripped to access_token only inside the executor.
