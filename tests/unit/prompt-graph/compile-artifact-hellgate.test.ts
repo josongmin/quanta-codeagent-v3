@@ -23,7 +23,12 @@
 import { describe, expect, test } from "bun:test"
 import type { TurnContextInput } from "@/agent/prompt"
 import { buildTurnContext, compile } from "@/agent/prompt"
-import { DYNAMIC_ATOMS, PROMPT_CTX_DEFAULTS, type PromptChannel } from "@/agent/prompt-graph"
+import {
+  DYNAMIC_ATOMS,
+  PROMPT_CTX_DEFAULTS,
+  type PromptChannel,
+  type PromptContext,
+} from "@/agent/prompt-graph"
 import { buildSectionedSystemBlocks } from "@/agent/prompt-sections"
 import { embedUntrusted } from "@/agent/untrusted"
 import type { Message, SystemBlock } from "@/llm"
@@ -393,7 +398,7 @@ describe("ADR-0538 Phase 3 — channel chronology + static/dynamic separation he
     const { BODY_AFTER_PERSONA_ATOMS, renderAtoms } = await import("@/agent/prompt-graph")
     const ctx = compile(base()) // just to reuse the module; build a real ctx below
     void ctx
-    const anyCtx = {
+    const anyCtx: PromptContext = {
       ...PROMPT_CTX_DEFAULTS,
       envPosture: "frozen",
       verifyStrategy: undefined,
