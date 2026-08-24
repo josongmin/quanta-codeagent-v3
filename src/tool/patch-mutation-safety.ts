@@ -72,14 +72,21 @@ export const guardPatchTargets = (
 const staleCheckFailed = (
   toolName: "apply_patch" | "apply_patch_structured",
   path: string,
+  // WHY the check could not run, carried through to the model. Without it the
+  // deny is indistinguishable across "the file vanished", "permission denied"
+  // and "the disk is failing", and the model's only move is to retry blind.
+  why: string,
 ): ToolEvent => ({
   type: "result",
   result: {
     ok: false,
-    output: `${toolName}: cannot safely verify freshness of ${path}; re-read the target and retry`,
+    output: `${toolName}: cannot safely verify freshness of ${path} (${why}); re-read the target and retry`,
     failure: { mode: "rejected", reason: "stale_read_check_failed" },
   },
 })
+
+/** Narrow an unknown thrown value to a one-line reason for the model. */
+const reasonOf = (err: unknown): string => (err instanceof Error ? err.message : String(err))
 
 /**
  * ADR-0548 — the target's CURRENT whole-file digest for the content-authority
@@ -104,14 +111,16 @@ const currentTargetDigest = async (
   port: GuardedPatchFileSystemPort,
   state: ReadFileState,
   resolvedPath: string,
-): Promise<{ readonly ok: true; readonly digest?: string } | { readonly ok: false }> => {
+): Promise<
+  { readonly ok: true; readonly digest?: string } | { readonly ok: false; readonly why: string }
+> => {
   if (state.recordedContent(resolvedPath) === undefined) return { ok: true }
   try {
     return { ok: true, digest: sha256Hex(await port.readFile(resolvedPath)) }
-  } catch {
+  } catch (err) {
     // A failed read is not evidence the target is unchanged. Same fail-closed
     // shape the `statTarget` failure already uses — never a new crash path.
-    return { ok: false }
+    return { ok: false, why: reasonOf(err) }
   }
 }
 
@@ -132,10 +141,10 @@ export const guardStalePatchTargets = async (
     let stat: Awaited<ReturnType<GuardedPatchFileSystemPort["statTarget"]>>
     try {
       stat = await port.statTarget(op.path)
-    } catch {
+    } catch (err) {
       // A failed stat is not evidence that the target is absent. Deny before
       // mutation and preserve the model-facing no-throw ToolResult boundary.
-      return staleCheckFailed(toolName, op.path)
+      return staleCheckFailed(toolName, op.path, reasonOf(err))
     }
     if (!stat.exists) continue
     // ADR-0548 — CONTENT is the authority; the mtime is a hint. Without the
@@ -144,7 +153,7 @@ export const guardStalePatchTargets = async (
     // refused on an `edit` target and ALLOWED here, so the verdict depended on
     // which tool the model happened to pick.
     const digest = await currentTargetDigest(port, state, stat.resolvedPath)
-    if (!digest.ok) return staleCheckFailed(toolName, op.path)
+    if (!digest.ok) return staleCheckFailed(toolName, op.path, digest.why)
     const guard = guardWrite(state, stat.resolvedPath, stat.mtimeMs, digest.digest)
     if (!guard.ok) {
       return {
