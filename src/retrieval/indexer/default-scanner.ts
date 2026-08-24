@@ -101,8 +101,129 @@ interface FileVisit {
   readonly relPath: string
 }
 
+/**
+ * What the walker should do with one directory entry.
+ *
+ * `walk` used to decide this inline, which is what made it the single most
+ * cognitively complex function in `src/` (score 65 against a cap of 15): four
+ * independent concerns — ignore matching, symlink resolution, inode
+ * cycle-detection, glob matching — interleaved across two nearly identical
+ * tails, one for the symlink case and one for everything else. The duplication
+ * is the dangerous part: a rule fixed in one tail and forgotten in the other
+ * changes behaviour only for symlinked paths, which is exactly the input nobody
+ * has a fixture for.
+ */
+type EntryVerdict =
+  | { readonly kind: "skip" }
+  /** A symlink whose target inode was already visited — the caller records it. */
+  | { readonly kind: "cycle" }
+  | { readonly kind: "descend" }
+  | { readonly kind: "file" }
+
+/**
+ * Classify one entry: ignore rules, then `lstat`, then (for a symlink) the
+ * target's identity, then the inode ledger.
+ *
+ * `seenInodes` is MUTATED here, exactly as before — an entry claims its inode at
+ * the moment it is classified, and that ordering is load-bearing: when a symlink
+ * is popped before the file it points at, the LINK path is the one that gets
+ * yielded and the real path is deduped away. Preserved deliberately, not
+ * inherited by accident; the differential fixture pins it.
+ *
+ * Every failed syscall is a `skip`, matching the original's `try/catch continue`
+ * — an unreadable entry must not abort a scan of the tree around it.
+ */
+const classifyEntry = async (
+  ent: Dirent,
+  abs: string,
+  rel: string,
+  matcher: IgnoreMatcher,
+  globRe: RegExp,
+  seenInodes: Set<string>,
+): Promise<EntryVerdict> => {
+  if (ent.isDirectory()) {
+    if (matcher.isIgnored(rel) && !matcher.shouldDescend(rel)) return { kind: "skip" }
+  } else if (matcher.isIgnored(rel)) {
+    return { kind: "skip" }
+  }
+
+  let stats: Awaited<ReturnType<typeof fsp.lstat>>
+  try {
+    stats = await fsp.lstat(abs)
+  } catch {
+    return { kind: "skip" }
+  }
+
+  // A symlink is judged by what it RESOLVES to, so both branches end up asking
+  // the same three questions of a stat result — asked once, here.
+  let target = stats
+  if (stats.isSymbolicLink()) {
+    try {
+      target = await fsp.stat(abs)
+    } catch {
+      return { kind: "skip" }
+    }
+  }
+
+  const inoKey = `${target.dev}:${target.ino}`
+  if (seenInodes.has(inoKey)) {
+    // Only a symlink revisit is reported as a cycle; a hard-link or repeat
+    // sighting of a plain entry is silently deduped, as before.
+    return stats.isSymbolicLink() ? { kind: "cycle" } : { kind: "skip" }
+  }
+  seenInodes.add(inoKey)
+
+  if (target.isDirectory()) return { kind: "descend" }
+  if (target.isFile() && globRe.test(rel)) return { kind: "file" }
+  return { kind: "skip" }
+}
+
 /** Walk `root` and yield every file visit, honouring the ignore matcher
  *  and breaking out on symlink cycles. Pure of upsert side effects. */
+/** Everything `walk` needs to act on one directory's entries. `stack` and
+ *  `seenInodes` are the walk's own mutable ledgers, threaded rather than
+ *  rebuilt so the traversal order and the inode dedup are unchanged. */
+interface WalkContext {
+  readonly root: string
+  readonly matcher: IgnoreMatcher
+  readonly signal: AbortSignal | undefined
+  readonly globRe: RegExp
+  readonly seenInodes: Set<string>
+  readonly stack: string[]
+  readonly cycleDetected: Set<string>
+  readonly cycleSink: (path: string) => void
+}
+
+/** Yield the file visits in ONE directory, pushing its subdirectories onto the
+ *  walk's stack. An unreadable directory yields nothing rather than aborting the
+ *  traversal — the same `try/catch continue` the caller used to hold inline. */
+async function* visitDirectory(
+  ctx: WalkContext,
+  dir: string,
+): AsyncGenerator<FileVisit, void, void> {
+  let entries: Dirent[]
+  try {
+    entries = await fsp.readdir(dir, { withFileTypes: true })
+  } catch {
+    return
+  }
+  for (const ent of entries) {
+    if (ctx.signal?.aborted) return
+    const abs = join(dir, ent.name)
+    const rel = toPosix(relative(ctx.root, abs))
+    if (rel === "" || rel.startsWith("..")) continue
+    const verdict = await classifyEntry(ent, abs, rel, ctx.matcher, ctx.globRe, ctx.seenInodes)
+    if (verdict.kind === "cycle") {
+      ctx.cycleSink(rel)
+      ctx.cycleDetected.add(rel)
+    } else if (verdict.kind === "descend") {
+      ctx.stack.push(abs)
+    } else if (verdict.kind === "file") {
+      yield { absPath: abs, relPath: rel }
+    }
+  }
+}
+
 async function* walk(
   root: string,
   matcher: IgnoreMatcher,
@@ -111,64 +232,19 @@ async function* walk(
   cycleDetected: Set<string>,
   cycleSink: (path: string) => void,
 ): AsyncGenerator<FileVisit, void, void> {
-  const seenInodes = new Set<string>()
-  const stack: string[] = [root]
-  while (stack.length > 0) {
+  const ctx: WalkContext = {
+    root,
+    matcher,
+    signal,
+    globRe,
+    seenInodes: new Set<string>(),
+    stack: [root],
+    cycleDetected,
+    cycleSink,
+  }
+  while (ctx.stack.length > 0) {
     if (signal?.aborted) return
-    const dir = stack.pop() as string
-    let entries: Dirent[]
-    try {
-      entries = await fsp.readdir(dir, { withFileTypes: true })
-    } catch {
-      continue
-    }
-    for (const ent of entries) {
-      if (signal?.aborted) return
-      const abs = join(dir, ent.name)
-      const rel = toPosix(relative(root, abs))
-      if (rel === "" || rel.startsWith("..")) continue
-      if (ent.isDirectory()) {
-        if (matcher.isIgnored(rel) && !matcher.shouldDescend(rel)) continue
-      } else if (matcher.isIgnored(rel)) {
-        continue
-      }
-      let stats: Awaited<ReturnType<typeof fsp.lstat>>
-      try {
-        stats = await fsp.lstat(abs)
-      } catch {
-        continue
-      }
-      if (stats.isSymbolicLink()) {
-        // Resolve target; if the target inode was already visited, bail.
-        let real: Awaited<ReturnType<typeof fsp.stat>>
-        try {
-          real = await fsp.stat(abs)
-        } catch {
-          continue
-        }
-        const inoKey = `${real.dev}:${real.ino}`
-        if (seenInodes.has(inoKey)) {
-          cycleSink(rel)
-          cycleDetected.add(rel)
-          continue
-        }
-        seenInodes.add(inoKey)
-        if (real.isDirectory()) {
-          stack.push(abs)
-        } else if (real.isFile()) {
-          if (globRe.test(rel)) yield { absPath: abs, relPath: rel }
-        }
-        continue
-      }
-      const inoKey = `${stats.dev}:${stats.ino}`
-      if (seenInodes.has(inoKey)) continue
-      seenInodes.add(inoKey)
-      if (stats.isDirectory()) {
-        stack.push(abs)
-      } else if (stats.isFile()) {
-        if (globRe.test(rel)) yield { absPath: abs, relPath: rel }
-      }
-    }
+    yield* visitDirectory(ctx, ctx.stack.pop() as string)
   }
 }
 
@@ -312,6 +388,39 @@ const applyDeletes = async (
   }
 }
 
+/**
+ * Project a completed scan into the public {@link IndexStats}.
+ *
+ * Split out of `runScan` with {@link DefaultIndexer.commitScanState}: that
+ * method was one function carrying the refusal gates, the scan, the upsert
+ * bracket, three state-mutation loops and this projection, and the `mode`
+ * ternaries below read very differently depending on which of those you are
+ * looking at. Pure — it reads the scan output, never the indexer's state — so
+ * the "initial reports everything as added" convention is checkable on its own.
+ */
+const buildScanStats = (
+  mode: "initial" | "delta",
+  out: Awaited<ReturnType<typeof doScan>>,
+  parts: {
+    readonly added: readonly string[]
+    readonly modified: readonly string[]
+    readonly deleted: readonly string[]
+  },
+  changed: readonly string[],
+): IndexStats => {
+  let chunksProduced = 0
+  for (const path of changed) chunksProduced += (out.chunksByPath.get(path) ?? []).length
+  return {
+    filesScanned: out.snapshot.size,
+    filesSkipped: out.skipped.size,
+    chunksProduced,
+    added: mode === "initial" ? out.snapshot.size : parts.added.length,
+    modified: mode === "initial" ? 0 : parts.modified.length,
+    deleted: mode === "initial" ? 0 : parts.deleted.length,
+    skipped: out.skipped,
+  }
+}
+
 class DefaultIndexer implements CodebaseIndexer {
   private readonly opts: ScannerInternalOpts
   private readonly st = newScanState()
@@ -350,34 +459,33 @@ class DefaultIndexer implements CodebaseIndexer {
       } catch (cause) {
         return err({ kind: "scan-failed" as const, cause })
       }
-      // Update corpus: drop deletions, set added + modified, keep unchanged.
-      for (const path of parts.deleted) this.st.corpus.delete(path)
-      for (const path of changed) {
-        const c = out.chunksByPath.get(path)
-        if (c !== undefined) this.st.corpus.set(path, c)
-      }
-      // Update tracker.
-      for (const path of parts.deleted) this.st.tracker.delete(path)
-      for (const [path, stamp] of out.snapshot) this.st.tracker.put(path, stamp)
-      let chunksProduced = 0
-      for (const path of changed) {
-        chunksProduced += (out.chunksByPath.get(path) ?? []).length
-      }
-      const stats: IndexStats = {
-        filesScanned: out.snapshot.size,
-        filesSkipped: out.skipped.size,
-        chunksProduced,
-        added: mode === "initial" ? out.snapshot.size : parts.added.length,
-        modified: mode === "initial" ? 0 : parts.modified.length,
-        deleted: mode === "initial" ? 0 : parts.deleted.length,
-        skipped: out.skipped,
-      }
-      return ok(stats)
+      this.commitScanState(out, parts.deleted, changed)
+      return ok(buildScanStats(mode, out, parts, changed))
     } catch (cause) {
       return err({ kind: "scan-failed" as const, cause })
     } finally {
       this.st.scanning = false
     }
+  }
+
+  /** Land a completed scan in the corpus and the change tracker.
+   *
+   *  Ordering is load-bearing and unchanged: deletions leave the corpus before
+   *  the scan's chunks are written, and the tracker is only told about a path
+   *  after the corpus already holds its chunks — so a caller that observes the
+   *  tracker can never see a path claimed as indexed whose chunks are missing. */
+  private commitScanState(
+    out: Awaited<ReturnType<typeof doScan>>,
+    deleted: readonly string[],
+    changed: readonly string[],
+  ): void {
+    for (const path of deleted) this.st.corpus.delete(path)
+    for (const path of changed) {
+      const c = out.chunksByPath.get(path)
+      if (c !== undefined) this.st.corpus.set(path, c)
+    }
+    for (const path of deleted) this.st.tracker.delete(path)
+    for (const [path, stamp] of out.snapshot) this.st.tracker.put(path, stamp)
   }
 
   *getCorpus(): Iterable<FileChunk> {
