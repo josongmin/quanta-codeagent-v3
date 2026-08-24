@@ -465,7 +465,7 @@ describe("ADR-0538 Phase 3 — dynamic-atom manifest ⟺ wire reminder (drift gu
 
   test("EVERY DynamicContentKey: DYN atom fires IFF its block text is in trailingReminder", () => {
     // One input that turns ON every cleanly-triggerable dynamic block, leaving the
-    // rest OFF — so BOTH directions of the ⟺ are exercised for all 12 keys (a
+    // rest OFF — so BOTH directions of the ⟺ are exercised for all 13 keys (a
     // future edit to one predicate but not the other goes RED here). Witnesses are
     // strings I control verbatim in the wire (or stable block prefixes).
     const input = base({
@@ -489,7 +489,7 @@ describe("ADR-0538 Phase 3 — dynamic-atom manifest ⟺ wire reminder (drift gu
     const artifact = compile(input)
     const reminder = artifact.trailingReminder ?? ""
     const dyn = firedDyn(artifact)
-    // [DYN id, wire witness, present?] — all 12 DynamicContentKey values.
+    // [DYN id, wire witness, present?] — all 13 DynamicContentKey values.
     const cases: ReadonlyArray<readonly [string, string, boolean]> = [
       ["DYN-date", "Today's date is", true],
       ["DYN-cwd", "Working directory:", true],
@@ -502,6 +502,7 @@ describe("ADR-0538 Phase 3 — dynamic-atom manifest ⟺ wire reminder (drift gu
       ["DYN-repo-rules", "", false],
       ["DYN-glob-rules", "", false],
       ["DYN-active-skills", "", false],
+      ["DYN-objective", "", false],
       ["DYN-working-state", "", false],
     ]
     // Guard: the case list must cover the WHOLE closed key set — a new

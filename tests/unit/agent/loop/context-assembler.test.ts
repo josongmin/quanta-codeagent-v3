@@ -9,9 +9,10 @@
  */
 
 import { describe, expect, test } from "bun:test"
-import { applyTurnContextMutator } from "@/agent/loop/context-assembler"
+import { applyTurnContextMutator, resolveObjectiveThunk } from "@/agent/loop/context-assembler"
 import type { TurnContextInput } from "@/agent/prompt"
 import type { AgentConfig } from "@/agent/types"
+import { createObjectiveStore } from "@/objective"
 import type { AgentEvent } from "@/stream"
 import { ToolRegistry } from "@/tool"
 
@@ -67,5 +68,36 @@ describe("context-assembler #12 turnContextMutator observability", () => {
 
     const noMutator = baseConfig({})
     expect(applyTurnContextMutator(noMutator, 1, base)).toBe(base)
+  })
+})
+
+describe("C2b — loop wires the LIVE objective-visibility thunk (gated like objective_*)", () => {
+  test("config.objective + sessionId ⇒ a LIVE thunk reading the SAME authority", () => {
+    const port = createObjectiveStore()
+    port.set("SESS", { goal: "close the visibility gap" })
+    const thunk = resolveObjectiveThunk(baseConfig({ objective: port, sessionId: "SESS" }))
+    expect(thunk).toBeDefined()
+    expect(thunk?.()).toEqual({ goal: "close the visibility gap", status: "active" })
+    // LIVE: a pause on the authority is reflected on the NEXT thunk read (not a
+    // construction-time snapshot).
+    port.updateStatus("SESS", "paused")
+    expect(thunk?.()?.status).toBe("paused")
+  })
+
+  test("gated: no objective authority ⇒ NO thunk (field omitted ⇒ byte-identical)", () => {
+    expect(resolveObjectiveThunk(baseConfig({ sessionId: "SESS" }))).toBeUndefined()
+  })
+
+  test("gated: no sessionId ⇒ NO thunk (thread identity must be session-bound)", () => {
+    const port = createObjectiveStore()
+    port.set("SESS", { goal: "orphaned" })
+    expect(resolveObjectiveThunk(baseConfig({ objective: port }))).toBeUndefined()
+  })
+
+  test("absence-gated: authority present but no goal for the thread ⇒ thunk returns undefined", () => {
+    const port = createObjectiveStore() // no goal set for SESS
+    const thunk = resolveObjectiveThunk(baseConfig({ objective: port, sessionId: "SESS" }))
+    expect(thunk).toBeDefined()
+    expect(thunk?.()).toBeUndefined()
   })
 })

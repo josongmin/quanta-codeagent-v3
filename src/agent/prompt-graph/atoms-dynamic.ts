@@ -65,6 +65,7 @@ export type DynamicContentKey =
   | "repo-rules"
   | "glob-rules"
   | "active-skills"
+  | "objective"
   | "working-state"
   | "memory-context"
   | "hook-context-tail"
@@ -94,7 +95,8 @@ const dyn = (
 //    orders 104/106, so ONE `selectAtoms([...NOTICE, ...DYNAMIC])` sort produces:
 //    date(100) → cwd(102) → mode-notice(104) → brief(106) → directives(110) →
 //    langhint(120) → env(130) → repo(140) → glob(150) → skills(160) →
-//    working-state(170) → memory(180) → hook-tail(190) → task-budget(200). The
+//    objective(165) → working-state(170) → memory(180) → hook-tail(190) →
+//    task-budget(200). The
 //    compiler resolves each block from this ONE selection (wire + manifest), so
 //    they cannot drift. ──
 
@@ -128,6 +130,12 @@ const A_GLOB_RULES = dyn("glob-rules", 150, { hasGlobRules: true }, "L6_repo")
 const A_ACTIVE_SKILLS = dyn("active-skills", 160, { hasActiveSkills: true }, "L7_skill", [
   "Codex skills-audit",
 ])
+/** C2b — the CURRENT objective (goal + status), a LIVE per-turn read of the
+ *  session objective authority. Fires ONLY when a goal is active, so a restored
+ *  goal is visible-to-model without a proactive `objective_get`. */
+const A_OBJECTIVE = dyn("objective", 165, { hasObjective: true }, "L9_working_state", [
+  "C2b objective model-visibility",
+])
 /** Per-turn working state (Codex memory L3 scratchpad). */
 const A_WORKING_STATE = dyn("working-state", 170, { hasWorkingState: true }, "L9_working_state")
 /** Memory recall body (trust-ladder routing hint). */
@@ -158,6 +166,7 @@ export const DYNAMIC_ATOMS: readonly InstructionAtom[] = [
   A_REPO_RULES,
   A_GLOB_RULES,
   A_ACTIVE_SKILLS,
+  A_OBJECTIVE,
   A_WORKING_STATE,
   A_MEMORY,
   A_HOOK_TAIL,

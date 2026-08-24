@@ -51,6 +51,7 @@ export const noticeCtx = (mode: GraphMode, brief: boolean): PromptContext => ({
   hasEnvBlock: false,
   hasRepoRulesDynamic: false,
   hasTaskBudget: false,
+  hasObjective: false,
   hasDirectives: false,
   hasDelegationSuppress: false,
 })
@@ -73,6 +74,9 @@ export const dynamicReminderCtx = (
   hasRepoRulesDynamic: input.repoRules !== undefined && !repoRulesInStaticSystem,
   hasGlobRules: selectedGlobRules.length > 0,
   hasActiveSkills: input.activeSkills !== undefined && input.activeSkills.length > 0,
+  // C2b — LIVE per-turn read: invoke the thunk here so the facet reflects the
+  // CURRENT goal (mirrors the task-budget renderer double-call pattern below).
+  hasObjective: renderObjectiveBlock(input.objective?.()) !== undefined,
   hasWorkingState: input.workingState !== undefined,
   hasMemorySummary: (input.memoryContext?.trim().length ?? 0) > 0,
   hasHookInjects: collectHookPromptSide(input.hookPromptInjects, "injectAfterSystem") !== undefined,
@@ -110,6 +114,22 @@ export const renderActiveSkillsBlock = (
     "  4. Progressive disclosure: load SKILL.md body via the `Skill` tool only",
     "     when you decide to invoke it.",
   ].join("\n")
+}
+
+/** C2b — render the CONCISE `## Current objective` awareness block from the LIVE
+ *  objective view (goal + 6-state status only). Mirrors {@link renderActiveSkillsBlock}:
+ *  returns `undefined` for an absent view OR an empty goal so the caller emits NO
+ *  block — byte-identical for goal-less / authority-less sessions. Deliberately
+ *  NOT a dump: no criteria / blockers / nextActions (the `objective_*` tools
+ *  already stream those); this is a passive per-turn cue so a restored/active goal
+ *  is visible-to-model without a proactive `objective_get`. */
+export const renderObjectiveBlock = (
+  view: import("./prompt").ObjectiveContextView | undefined,
+): string | undefined => {
+  if (view === undefined) return undefined
+  const goal = view.goal.trim()
+  if (goal.length === 0) return undefined
+  return ["## Current objective", `goal: ${goal}`, `status: ${view.status}`].join("\n")
 }
 
 /** ADR-0078 determinism leak (date): the per-turn block is model-facing — every
@@ -209,6 +229,9 @@ export const contentByKey = (
       return input.activeSkills !== undefined && input.activeSkills.length > 0
         ? renderActiveSkillsBlock(input.activeSkills)
         : undefined
+    case "objective":
+      // C2b — LIVE per-turn read of the session objective authority (thunk).
+      return renderObjectiveBlock(input.objective?.())
     case "working-state":
       return input.workingState !== undefined
         ? renderWorkingStateBlock(input.workingState)

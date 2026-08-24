@@ -43,6 +43,7 @@ const BASE: Omit<PromptContext, "envPosture" | "verifyStrategy"> = {
   hasEnvBlock: false,
   hasRepoRulesDynamic: false,
   hasTaskBudget: false,
+  hasObjective: false,
   hasDirectives: false,
   hasDelegationSuppress: false,
 }
@@ -113,6 +114,7 @@ export const DYNAMIC_PRESENCE_FACETS: readonly (keyof PromptContext)[] = [
   "hasMemorySummary",
   "hasHookInjects",
   "hasTaskBudget",
+  "hasObjective",
   "hasImages",
   "hasDirectives",
 ]

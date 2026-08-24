@@ -254,6 +254,16 @@ const identityLines = (identity: readonly string[] | undefined): readonly string
  *  gate unless explicitly added to `MUTATING_MODES`. */
 export type AgentMode = AgentPromptMode
 
+/** C2b — the concise, model-facing projection of the session objective the
+ *  per-turn `## Current objective` reminder renders. A PLAIN shape (no
+ *  `@/objective` type leak into the prompt slice), carrying ONLY the goal + the
+ *  6-state status — never criteria / blockers / nextActions (those the
+ *  `objective_*` tools already stream; this is a passive awareness cue). */
+export interface ObjectiveContextView {
+  readonly goal: string
+  readonly status: string
+}
+
 export interface TurnContextInput {
   baseMessages: Message[]
   cwd: string
@@ -421,6 +431,24 @@ export interface TurnContextInput {
    *  the pure selector ({@link selectActiveDirectives}) consumes this slice.
    *  ALL-false / omitted-with-knobs-unset ⇒ no directive bytes (byte-identical). */
   directiveConfig?: DirectiveConfig
+
+  /** C2b (codex/aug22-c2c-objective-prompt) — a LIVE per-turn read of the session
+   *  objective authority, projected to the concise {@link ObjectiveContextView}.
+   *  A THUNK (not a value): the loop wires `() => config.objective.get(sessionId)`
+   *  mapped to `{goal,status}`, so the read hits the SAME authority the
+   *  `objective_*` tools mutate at buildDynamicContext time — it tracks
+   *  edit/pause/resume, never a construction-time snapshot. When it returns a
+   *  view, `buildDynamicContext` renders the `## Current objective` block in the
+   *  per-turn DYNAMIC `<system-reminder>` tail so a restored/active goal is
+   *  visible-to-model without a proactive `objective_get`.
+   *
+   *  GATED exactly like the objective tools: the loop supplies the thunk ONLY
+   *  when `config.objective` is wired (which is itself `QUANTA_OBJECTIVE_TOOLS`-
+   *  gated). Absent thunk ⇒ NO block. ABSENCE-gated too: a thunk that returns
+   *  `undefined` (authority present but no goal for the thread) ⇒ NO block ⇒ the
+   *  dynamic tail is BYTE-IDENTICAL to the pre-feature path (prompt-cache safe —
+   *  only the trailing dynamic reminder grows, and only when a goal exists). */
+  objective?: () => ObjectiveContextView | undefined
 }
 
 export interface TurnContext {

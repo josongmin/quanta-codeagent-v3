@@ -122,6 +122,28 @@ const resolvePromptActiveLevers = (config: AgentConfig): PromptActiveLeversSnaps
   subagentTurnGate: config.subagentTurnGate !== undefined,
 })
 
+/**
+ * C2b — build the LIVE per-turn objective-visibility thunk. Gated EXACTLY like
+ * the `objective_*` tools: only when `config.objective` (itself
+ * `QUANTA_OBJECTIVE_TOOLS`-gated) AND a session-bound `sessionId` are wired — the
+ * SAME thread identity the tools bind to (`ctx.ownerId` ← `AgentConfig.sessionId`).
+ * The returned thunk reads the authority at buildDynamicContext time (NOT now), so
+ * it tracks edit/pause/resume; it returns `undefined` when the thread has no goal
+ * (⇒ NO block ⇒ byte-identical). Absent authority / sessionId ⇒ `undefined` ⇒ the
+ * `objective` field is omitted ⇒ byte-identical default-OFF.
+ */
+export const resolveObjectiveThunk = (
+  config: AgentConfig,
+): (() => import("../prompt").ObjectiveContextView | undefined) | undefined => {
+  const port = config.objective
+  const threadId = config.sessionId
+  if (port === undefined || threadId === undefined || threadId.length === 0) return undefined
+  return () => {
+    const o = port.get(threadId)
+    return o === null ? undefined : { goal: o.goal, status: o.status }
+  }
+}
+
 export const resolveMentionInjectionMessages = async (
   config: AgentConfig,
   wm: WorkingMemory<Message>,
@@ -441,6 +463,7 @@ export const prepareTurnContext = async (
   // ambiguous, so the prompt stays byte-identical.
   const languageHint = buildLanguageHint(latestUserTextFromWm(wm), runtimeConfig().langDetect)
   const repoMapEnv = await buildRepoMapEnv(config, turn)
+  const objectiveThunk = resolveObjectiveThunk(config)
   const turnInput: import("../prompt").TurnContextInput = {
     baseMessages: [...wm.snapshot()],
     ...repoMapEnv,
@@ -475,6 +498,10 @@ export const prepareTurnContext = async (
     ...(contextEvents.length > 0 ? { contextChangeEvents: contextEvents } : {}),
     ...(mentionMessages.length > 0 ? { mentionInjectionMessages: mentionMessages } : {}),
     ...(taskBudgetForTurn !== undefined ? { taskBudget: taskBudgetForTurn } : {}),
+    // C2b — LIVE per-turn objective-visibility thunk. Gated like the objective_*
+    // tools (config.objective + sessionId). Absent ⇒ omitted ⇒ byte-identical;
+    // no goal for the thread ⇒ the thunk returns undefined ⇒ no block.
+    ...(objectiveThunk !== undefined ? { objective: objectiveThunk } : {}),
     // #17 (C3) — brief-mode posture. Read the session accessor once per turn so a
     // mid-session `/brief on` (or a `set_brief` control-op) splices BRIEF_NOTICE
     // into the per-turn DYNAMIC tail (prompt.ts). Absent/false ⇒ omitted ⇒

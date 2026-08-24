@@ -305,7 +305,13 @@ export {
   planExitAllowsMutation,
   planExitStaysInPlan,
 } from "./plan-exit"
-export type { AgentMode, EnvironmentPosture, TurnContext, TurnContextInput } from "./prompt"
+export type {
+  AgentMode,
+  EnvironmentPosture,
+  ObjectiveContextView,
+  TurnContext,
+  TurnContextInput,
+} from "./prompt"
 export { buildSystemPrompt, buildTurnContext, escapeReminderBoundary } from "./prompt"
 export {
   type MaybeProposeRadarCardArgs,

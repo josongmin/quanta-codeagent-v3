@@ -102,6 +102,10 @@ export interface AtomMatcher {
    *  presence-anywhere) — the dynamic repo-rules atom fires only on this. */
   hasRepoRulesDynamic?: boolean
   hasTaskBudget?: boolean
+  /** C2b — the session objective authority has an ACTIVE goal for this thread.
+   *  The dynamic objective atom fires only then (a LIVE per-turn read of
+   *  `config.objective.get(sessionId)`); no authority OR no goal ⇒ no block. */
+  hasObjective?: boolean
   /** ≥1 §5 prompt-directive is active (resolved from runtimeConfig knobs). The
    *  dynamic directives atom fires only when the selection is non-empty, so the
    *  manifest never reports it for a default-OFF (zero-byte) turn. */
@@ -186,6 +190,8 @@ export interface PromptContext {
   readonly hasEnvBlock: boolean
   readonly hasRepoRulesDynamic: boolean
   readonly hasTaskBudget: boolean
+  /** C2b — session objective authority has an ACTIVE goal for this thread. */
+  readonly hasObjective: boolean
   readonly hasDirectives: boolean
   /** C5059-05 — `QUANTA_SUBAGENT_DELEGATE_SUPPRESS` resolved. Gates the
    *  tool-routing fan-out line: false (default) ⇒ unconditional fan-out
