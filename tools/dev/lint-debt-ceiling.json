@@ -1,24 +1,25 @@
 {
-  "note": "Per-rule one-directional ceilings for biome diagnostics that do NOT fail `bun run lint` (warn/info level). Raise NEVER — fix the site. Tighten with `bun run lint:debt --tighten`. A rule that fires but is absent here is treated as ceiling 0 and FAILS: that is deliberate, so a newly-enabled rule or a biome upgrade cannot add debt silently. `worstComplexity` pins the highest single cognitive-complexity score, which a plain count cannot see.",
+  "note": "Per-rule one-directional ceilings for biome diagnostics that do NOT fail `bun run lint` (warn/info level). Raise NEVER \u2014 fix the site. Tighten with `bun run lint:debt --tighten`. A rule that fires but is absent here is treated as ceiling 0 and FAILS: that is deliberate, so a newly-enabled rule or a biome upgrade cannot add debt silently. `worstComplexity` pins the highest single cognitive-complexity score, which a plain count cannot see.",
   "rules": {
-    "lint/suspicious/noConsole": 71,
+    "lint/suspicious/noConsole": 69,
     "lint/suspicious/noTemplateCurlyInString": 22,
     "lint/correctness/noUnusedVariables": 0
   },
   "scopedRules": {
     "lint/style/noNonNullAssertion": {
       "prod": 0,
-      "tests": 593
+      "tests": 0
     },
     "lint/complexity/noExcessiveCognitiveComplexity": {
-      "prod": 274,
+      "prod": 143,
       "tests": 97
     }
   },
   "worstComplexity": 59,
   "justifications": {
-    "lint/correctness/noUnusedVariables": "1 site: `src/apps/bench/profiles/promax.ts` `refuseOnBoxBootstrap` — a helper whose own doc says it is 'shared by the admission gate and the bootstrap port so the two can never drift', called by NEITHER. Pinned, not fixed: those two call sites do not exist in the file, so wiring it is a guess, and deleting it would discard an active lane's in-flight intent. This is the ceiling file's documented path for a newly-firing rule (admit at the true count; it only goes DOWN), NOT a raise to absorb new debt. When that lane wires or removes the helper, `bun run lint:debt --tighten` locks in 0.",
-    "lint/suspicious/noConsole": "ALREADY CLASSIFIED, not unreviewed debt: the rule is `error` repo-wide and biome.json downgrades it to `warn` for six named files. 70 of the 71 sites are `src/apps/eval/index.ts` — a CLI entrypoint whose stdout IS its product — and the 71st is one allowlisted test. Routing them through a logger port would be churn that makes the tool worse. Pinned so the count cannot GROW without someone widening the biome override, which is a reviewable edit.",
-    "lint/suspicious/noTemplateCurlyInString": "ALL 22 are `${…}` that is NOT JS interpolation. The 7 prod sites are SHELL script bodies held in single-quoted JS strings (`project-env-python-shim.ts` writes a POSIX shim using `${VIRTUAL_ENV}`/`${0##*/}`; `lima-adapter.ts` uses `\"${@:2}\"` precisely so workload tokens are re-quoted by the shell rather than spliced). The 15 test sites are ratchet/scan messages quoting the recommended `} catch (e) { logger.warn(`…`) }` form as literal text. Every one is correct as written and 'fixing' it would break the script or the message."
+    "lint/correctness/noUnusedVariables": "1 site: `src/apps/bench/profiles/promax.ts` `refuseOnBoxBootstrap` \u2014 a helper whose own doc says it is 'shared by the admission gate and the bootstrap port so the two can never drift', called by NEITHER. Pinned, not fixed: those two call sites do not exist in the file, so wiring it is a guess, and deleting it would discard an active lane's in-flight intent. This is the ceiling file's documented path for a newly-firing rule (admit at the true count; it only goes DOWN), NOT a raise to absorb new debt. When that lane wires or removes the helper, `bun run lint:debt --tighten` locks in 0.",
+    "lint/suspicious/noConsole": "ALREADY CLASSIFIED, not unreviewed debt: the rule is `error` repo-wide and biome.json downgrades it to `warn` for six named files. 70 of the 71 sites are `src/apps/eval/index.ts` \u2014 a CLI entrypoint whose stdout IS its product \u2014 and the 71st is one allowlisted test. Routing them through a logger port would be churn that makes the tool worse. Pinned so the count cannot GROW without someone widening the biome override, which is a reviewable edit.",
+    "lint/suspicious/noTemplateCurlyInString": "ALL 22 are `${\u2026}` that is NOT JS interpolation. The 7 prod sites are SHELL script bodies held in single-quoted JS strings (`project-env-python-shim.ts` writes a POSIX shim using `${VIRTUAL_ENV}`/`${0##*/}`; `lima-adapter.ts` uses `\"${@:2}\"` precisely so workload tokens are re-quoted by the shell rather than spliced). The 15 test sites are ratchet/scan messages quoting the recommended `} catch (e) { logger.warn(`\u2026`) }` form as literal text. Every one is correct as written and 'fixing' it would break the script or the message.",
+    "lint/style/noNonNullAssertion": "AT ZERO IN BOTH SCOPES as of 2026-08-25. Production reached 0 first; the 593 test-side sites were then retired through `tests/_helpers/expect-present.ts` (`nth`/`present`), which read the same values and fail naming the index and the real length instead of `Cannot read property 'x' of undefined`. A new `!` anywhere is now a REGRESSION in whichever scope it lands, with no grandfathered slack left to hide in \u2014 which is the point of having carried the two halves separately."
   }
 }
