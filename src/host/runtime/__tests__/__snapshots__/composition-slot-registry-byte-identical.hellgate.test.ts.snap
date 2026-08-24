@@ -36,7 +36,7 @@ lspDiagnosticsHookEnabled :: bool:false
 secretCheckToolEnabled :: bool:false
 bgShellRegistry :: obj{register=fn,adopt=fn,get=fn,awaitHandle=fn,kill=fn,listOwned=fn,killOwned=fn,killAll=fn,size=fn,oldestId=fn}
 contentCaptureEnabled :: bool:false
-readFileState :: obj{mtimes=obj{},rangeHashes=undefined,rangeDedupCap=num}
+readFileState :: obj{mtimes=obj{},rangeHashes=undefined,contentDigests=undefined,rangeDedupCap=num}
 activeSkillCursor :: obj{ids=arr[]}
 contextEventsForTurn :: fn
 mentionInjector :: fn
@@ -79,7 +79,7 @@ lspDiagnosticsHookEnabled :: bool:false
 secretCheckToolEnabled :: bool:false
 bgShellRegistry :: obj{register=fn,adopt=fn,get=fn,awaitHandle=fn,kill=fn,listOwned=fn,killOwned=fn,killAll=fn,size=fn,oldestId=fn}
 contentCaptureEnabled :: bool:false
-readFileState :: obj{mtimes=obj{},rangeHashes=undefined,rangeDedupCap=num}
+readFileState :: obj{mtimes=obj{},rangeHashes=undefined,contentDigests=undefined,rangeDedupCap=num}
 activeSkillCursor :: obj{ids=arr[]}
 contextEventsForTurn :: fn
 mentionInjector :: fn
@@ -124,7 +124,7 @@ lspDiagnosticsHookEnabled :: bool:false
 secretCheckToolEnabled :: bool:false
 bgShellRegistry :: obj{register=fn,adopt=fn,get=fn,awaitHandle=fn,kill=fn,listOwned=fn,killOwned=fn,killAll=fn,size=fn,oldestId=fn}
 contentCaptureEnabled :: bool:false
-readFileState :: obj{mtimes=obj{},rangeHashes=undefined,rangeDedupCap=num}
+readFileState :: obj{mtimes=obj{},rangeHashes=undefined,contentDigests=undefined,rangeDedupCap=num}
 activeSkillCursor :: obj{ids=arr[]}
 contextEventsForTurn :: fn
 mentionInjector :: fn
@@ -167,7 +167,7 @@ lspDiagnosticsHookEnabled :: bool:false
 secretCheckToolEnabled :: bool:false
 bgShellRegistry :: obj{register=fn,adopt=fn,get=fn,awaitHandle=fn,kill=fn,listOwned=fn,killOwned=fn,killAll=fn,size=fn,oldestId=fn}
 contentCaptureEnabled :: bool:false
-readFileState :: obj{mtimes=obj{},rangeHashes=undefined,rangeDedupCap=num}
+readFileState :: obj{mtimes=obj{},rangeHashes=undefined,contentDigests=undefined,rangeDedupCap=num}
 activeSkillCursor :: obj{ids=arr[]}
 contextEventsForTurn :: fn
 mentionInjector :: fn
@@ -212,7 +212,7 @@ lspDiagnosticsHookEnabled :: bool:false
 secretCheckToolEnabled :: bool:false
 bgShellRegistry :: obj{register=fn,adopt=fn,get=fn,awaitHandle=fn,kill=fn,listOwned=fn,killOwned=fn,killAll=fn,size=fn,oldestId=fn}
 contentCaptureEnabled :: bool:false
-readFileState :: obj{mtimes=obj{},rangeHashes=undefined,rangeDedupCap=num}
+readFileState :: obj{mtimes=obj{},rangeHashes=undefined,contentDigests=undefined,rangeDedupCap=num}
 activeSkillCursor :: obj{ids=arr[]}
 contextEventsForTurn :: fn
 mentionInjector :: fn
@@ -255,7 +255,7 @@ lspDiagnosticsHookEnabled :: bool:false
 secretCheckToolEnabled :: bool:false
 bgShellRegistry :: obj{register=fn,adopt=fn,get=fn,awaitHandle=fn,kill=fn,listOwned=fn,killOwned=fn,killAll=fn,size=fn,oldestId=fn}
 contentCaptureEnabled :: bool:false
-readFileState :: obj{mtimes=obj{},rangeHashes=undefined,rangeDedupCap=num}
+readFileState :: obj{mtimes=obj{},rangeHashes=undefined,contentDigests=undefined,rangeDedupCap=num}
 activeSkillCursor :: obj{ids=arr[]}
 contextEventsForTurn :: fn
 mentionInjector :: fn
@@ -300,7 +300,7 @@ lspDiagnosticsHookEnabled :: bool:false
 secretCheckToolEnabled :: bool:false
 bgShellRegistry :: obj{register=fn,adopt=fn,get=fn,awaitHandle=fn,kill=fn,listOwned=fn,killOwned=fn,killAll=fn,size=fn,oldestId=fn}
 contentCaptureEnabled :: bool:false
-readFileState :: obj{mtimes=obj{},rangeHashes=undefined,rangeDedupCap=num}
+readFileState :: obj{mtimes=obj{},rangeHashes=undefined,contentDigests=undefined,rangeDedupCap=num}
 activeSkillCursor :: obj{ids=arr[]}
 contextEventsForTurn :: fn
 mentionInjector :: fn
@@ -345,7 +345,7 @@ lspDiagnosticsHookEnabled :: bool:false
 secretCheckToolEnabled :: bool:false
 bgShellRegistry :: obj{register=fn,adopt=fn,get=fn,awaitHandle=fn,kill=fn,listOwned=fn,killOwned=fn,killAll=fn,size=fn,oldestId=fn}
 contentCaptureEnabled :: bool:false
-readFileState :: obj{mtimes=obj{},rangeHashes=undefined,rangeDedupCap=num}
+readFileState :: obj{mtimes=obj{},rangeHashes=undefined,contentDigests=undefined,rangeDedupCap=num}
 activeSkillCursor :: obj{ids=arr[]}
 contextEventsForTurn :: fn
 mentionInjector :: fn
@@ -390,7 +390,7 @@ lspDiagnosticsHookEnabled :: bool:false
 secretCheckToolEnabled :: bool:false
 bgShellRegistry :: obj{register=fn,adopt=fn,get=fn,awaitHandle=fn,kill=fn,listOwned=fn,killOwned=fn,killAll=fn,size=fn,oldestId=fn}
 contentCaptureEnabled :: bool:false
-readFileState :: obj{mtimes=obj{},rangeHashes=undefined,rangeDedupCap=num}
+readFileState :: obj{mtimes=obj{},rangeHashes=undefined,contentDigests=undefined,rangeDedupCap=num}
 activeSkillCursor :: obj{ids=arr[]}
 contextEventsForTurn :: fn
 mentionInjector :: fn
@@ -441,7 +441,7 @@ lspDiagnosticsHookEnabled :: bool:false
 secretCheckToolEnabled :: bool:false
 bgShellRegistry :: obj{register=fn,adopt=fn,get=fn,awaitHandle=fn,kill=fn,listOwned=fn,killOwned=fn,killAll=fn,size=fn,oldestId=fn}
 contentCaptureEnabled :: bool:false
-readFileState :: obj{mtimes=obj{},rangeHashes=undefined,rangeDedupCap=num}
+readFileState :: obj{mtimes=obj{},rangeHashes=undefined,contentDigests=undefined,rangeDedupCap=num}
 activeSkillCursor :: obj{ids=arr[]}
 contextEventsForTurn :: fn
 mentionInjector :: fn
@@ -486,7 +486,7 @@ lspDiagnosticsHookEnabled :: bool:false
 secretCheckToolEnabled :: bool:false
 bgShellRegistry :: obj{register=fn,adopt=fn,get=fn,awaitHandle=fn,kill=fn,listOwned=fn,killOwned=fn,killAll=fn,size=fn,oldestId=fn}
 contentCaptureEnabled :: bool:false
-readFileState :: obj{mtimes=obj{},rangeHashes=undefined,rangeDedupCap=num}
+readFileState :: obj{mtimes=obj{},rangeHashes=undefined,contentDigests=undefined,rangeDedupCap=num}
 activeSkillCursor :: obj{ids=arr[]}
 contextEventsForTurn :: fn
 mentionInjector :: fn
@@ -531,7 +531,7 @@ lspDiagnosticsHookEnabled :: bool:false
 secretCheckToolEnabled :: bool:false
 bgShellRegistry :: obj{register=fn,adopt=fn,get=fn,awaitHandle=fn,kill=fn,listOwned=fn,killOwned=fn,killAll=fn,size=fn,oldestId=fn}
 contentCaptureEnabled :: bool:false
-readFileState :: obj{mtimes=obj{},rangeHashes=undefined,rangeDedupCap=num}
+readFileState :: obj{mtimes=obj{},rangeHashes=undefined,contentDigests=undefined,rangeDedupCap=num}
 activeSkillCursor :: obj{ids=arr[]}
 contextEventsForTurn :: fn
 mentionInjector :: fn
@@ -576,7 +576,7 @@ lspDiagnosticsHookEnabled :: bool:false
 secretCheckToolEnabled :: bool:false
 bgShellRegistry :: obj{register=fn,adopt=fn,get=fn,awaitHandle=fn,kill=fn,listOwned=fn,killOwned=fn,killAll=fn,size=fn,oldestId=fn}
 contentCaptureEnabled :: bool:false
-readFileState :: obj{mtimes=obj{},rangeHashes=undefined,rangeDedupCap=num}
+readFileState :: obj{mtimes=obj{},rangeHashes=undefined,contentDigests=undefined,rangeDedupCap=num}
 activeSkillCursor :: obj{ids=arr[]}
 contextEventsForTurn :: fn
 mentionInjector :: fn
@@ -623,7 +623,7 @@ lspDiagnosticsHookEnabled :: bool:false
 secretCheckToolEnabled :: bool:false
 bgShellRegistry :: obj{register=fn,adopt=fn,get=fn,awaitHandle=fn,kill=fn,listOwned=fn,killOwned=fn,killAll=fn,size=fn,oldestId=fn}
 contentCaptureEnabled :: bool:false
-readFileState :: obj{mtimes=obj{},rangeHashes=undefined,rangeDedupCap=num}
+readFileState :: obj{mtimes=obj{},rangeHashes=undefined,contentDigests=undefined,rangeDedupCap=num}
 activeSkillCursor :: obj{ids=arr[]}
 contextEventsForTurn :: fn
 mentionInjector :: fn
@@ -666,7 +666,7 @@ lspDiagnosticsHookEnabled :: bool:false
 secretCheckToolEnabled :: bool:false
 bgShellRegistry :: obj{register=fn,adopt=fn,get=fn,awaitHandle=fn,kill=fn,listOwned=fn,killOwned=fn,killAll=fn,size=fn,oldestId=fn}
 contentCaptureEnabled :: bool:false
-readFileState :: obj{mtimes=obj{},rangeHashes=undefined,rangeDedupCap=num}
+readFileState :: obj{mtimes=obj{},rangeHashes=undefined,contentDigests=undefined,rangeDedupCap=num}
 activeSkillCursor :: obj{ids=arr[]}
 contextEventsForTurn :: fn
 mentionInjector :: fn
@@ -707,7 +707,7 @@ lspDiagnosticsHookEnabled :: bool:false
 secretCheckToolEnabled :: bool:false
 bgShellRegistry :: obj{register=fn,adopt=fn,get=fn,awaitHandle=fn,kill=fn,listOwned=fn,killOwned=fn,killAll=fn,size=fn,oldestId=fn}
 contentCaptureEnabled :: bool:false
-readFileState :: obj{mtimes=obj{},rangeHashes=undefined,rangeDedupCap=num}
+readFileState :: obj{mtimes=obj{},rangeHashes=undefined,contentDigests=undefined,rangeDedupCap=num}
 activeSkillCursor :: obj{ids=arr[]}
 contextEventsForTurn :: fn
 mentionInjector :: fn
@@ -750,7 +750,7 @@ lspDiagnosticsHookEnabled :: bool:false
 secretCheckToolEnabled :: bool:false
 bgShellRegistry :: obj{register=fn,adopt=fn,get=fn,awaitHandle=fn,kill=fn,listOwned=fn,killOwned=fn,killAll=fn,size=fn,oldestId=fn}
 contentCaptureEnabled :: bool:false
-readFileState :: obj{mtimes=obj{},rangeHashes=undefined,rangeDedupCap=num}
+readFileState :: obj{mtimes=obj{},rangeHashes=undefined,contentDigests=undefined,rangeDedupCap=num}
 activeSkillCursor :: obj{ids=arr[]}
 contextEventsForTurn :: fn
 mentionInjector :: fn
@@ -793,8 +793,8 @@ lspDiagnosticsHookEnabled :: bool:false
 secretCheckToolEnabled :: bool:false
 bgShellRegistry :: obj{register=fn,adopt=fn,get=fn,awaitHandle=fn,kill=fn,listOwned=fn,killOwned=fn,killAll=fn,size=fn,oldestId=fn}
 contentCaptureEnabled :: bool:false
-objective :: obj{readDomain=fn,prepare=fn,commit=fn,restore=fn,set=fn,get=fn,updateStatus=fn,addBlocker=fn,clearBlocker=fn,setNextActions=fn,markCriterion=fn,recordUsage=fn,markUsageLimited=fn,list=fn,toSnapshot=fn,fromSnapshot=fn}
-readFileState :: obj{mtimes=obj{},rangeHashes=undefined,rangeDedupCap=num}
+objective :: obj{readDomain=fn,prepare=fn,commit=fn,restore=fn,restoreDomain=fn,set=fn,get=fn,updateStatus=fn,addBlocker=fn,clearBlocker=fn,setNextActions=fn,markCriterion=fn,recordUsage=fn,markUsageLimited=fn,list=fn,toSnapshot=fn,fromSnapshot=fn}
+readFileState :: obj{mtimes=obj{},rangeHashes=undefined,contentDigests=undefined,rangeDedupCap=num}
 activeSkillCursor :: obj{ids=arr[]}
 contextEventsForTurn :: fn
 mentionInjector :: fn
@@ -839,7 +839,7 @@ lspDiagnosticsHookEnabled :: bool:false
 secretCheckToolEnabled :: bool:false
 bgShellRegistry :: obj{register=fn,adopt=fn,get=fn,awaitHandle=fn,kill=fn,listOwned=fn,killOwned=fn,killAll=fn,size=fn,oldestId=fn}
 contentCaptureEnabled :: bool:false
-readFileState :: obj{mtimes=obj{},rangeHashes=undefined,rangeDedupCap=num}
+readFileState :: obj{mtimes=obj{},rangeHashes=undefined,contentDigests=undefined,rangeDedupCap=num}
 activeSkillCursor :: obj{ids=arr[]}
 contextEventsForTurn :: fn
 mentionInjector :: fn
@@ -924,7 +924,7 @@ lspDiagnosticsHookEnabled :: bool:false
 secretCheckToolEnabled :: bool:false
 bgShellRegistry :: obj{register=fn,adopt=fn,get=fn,awaitHandle=fn,kill=fn,listOwned=fn,killOwned=fn,killAll=fn,size=fn,oldestId=fn}
 contentCaptureEnabled :: bool:false
-readFileState :: obj{mtimes=obj{},rangeHashes=undefined,rangeDedupCap=num}
+readFileState :: obj{mtimes=obj{},rangeHashes=undefined,contentDigests=undefined,rangeDedupCap=num}
 diagnosticsProvider :: obj{unavailableReason=fn,open=fn}
 activeSkillCursor :: obj{ids=arr[]}
 contextEventsForTurn :: fn
@@ -968,8 +968,8 @@ lspDiagnosticsHookEnabled :: bool:false
 secretCheckToolEnabled :: bool:false
 bgShellRegistry :: obj{register=fn,adopt=fn,get=fn,awaitHandle=fn,kill=fn,listOwned=fn,killOwned=fn,killAll=fn,size=fn,oldestId=fn}
 contentCaptureEnabled :: bool:false
-readFileState :: obj{mtimes=obj{},rangeHashes=undefined,rangeDedupCap=num}
-promptCacheObserver :: obj{record=fn,attributeBreakpoint=fn,snapshot=fn,reset=fn}
+readFileState :: obj{mtimes=obj{},rangeHashes=undefined,contentDigests=undefined,rangeDedupCap=num}
+promptCacheObserver :: obj{attributeBreakpoint=fn,record=fn,snapshot=fn,reset=fn}
 activeSkillCursor :: obj{ids=arr[]}
 contextEventsForTurn :: fn
 mentionInjector :: fn
@@ -1012,7 +1012,7 @@ lspDiagnosticsHookEnabled :: bool:false
 secretCheckToolEnabled :: bool:false
 bgShellRegistry :: obj{register=fn,adopt=fn,get=fn,awaitHandle=fn,kill=fn,listOwned=fn,killOwned=fn,killAll=fn,size=fn,oldestId=fn}
 contentCaptureEnabled :: bool:false
-readFileState :: obj{mtimes=obj{},rangeHashes=undefined,rangeDedupCap=num}
+readFileState :: obj{mtimes=obj{},rangeHashes=undefined,contentDigests=undefined,rangeDedupCap=num}
 vcsEventSink :: obj{emit=fn}
 activeSkillCursor :: obj{ids=arr[]}
 contextEventsForTurn :: fn
@@ -1056,7 +1056,7 @@ lspDiagnosticsHookEnabled :: bool:false
 secretCheckToolEnabled :: bool:false
 bgShellRegistry :: obj{register=fn,adopt=fn,get=fn,awaitHandle=fn,kill=fn,listOwned=fn,killOwned=fn,killAll=fn,size=fn,oldestId=fn}
 contentCaptureEnabled :: bool:false
-readFileState :: obj{mtimes=obj{},rangeHashes=undefined,rangeDedupCap=num}
+readFileState :: obj{mtimes=obj{},rangeHashes=undefined,contentDigests=undefined,rangeDedupCap=num}
 redaction :: obj{pii=obj{enabled=bool:true}}
 activeSkillCursor :: obj{ids=arr[]}
 contextEventsForTurn :: fn
@@ -1100,7 +1100,7 @@ lspDiagnosticsHookEnabled :: bool:false
 secretCheckToolEnabled :: bool:false
 bgShellRegistry :: obj{register=fn,adopt=fn,get=fn,awaitHandle=fn,kill=fn,listOwned=fn,killOwned=fn,killAll=fn,size=fn,oldestId=fn}
 contentCaptureEnabled :: bool:false
-readFileState :: obj{mtimes=obj{},rangeHashes=undefined,rangeDedupCap=num}
+readFileState :: obj{mtimes=obj{},rangeHashes=undefined,contentDigests=undefined,rangeDedupCap=num}
 activeSkillCursor :: obj{ids=arr[]}
 contextEventsForTurn :: fn
 mentionInjector :: fn
@@ -1145,7 +1145,7 @@ lspDiagnosticsHookEnabled :: bool:false
 secretCheckToolEnabled :: bool:false
 bgShellRegistry :: obj{register=fn,adopt=fn,get=fn,awaitHandle=fn,kill=fn,listOwned=fn,killOwned=fn,killAll=fn,size=fn,oldestId=fn}
 contentCaptureEnabled :: bool:false
-readFileState :: obj{mtimes=obj{},rangeHashes=undefined,rangeDedupCap=num}
+readFileState :: obj{mtimes=obj{},rangeHashes=undefined,contentDigests=undefined,rangeDedupCap=num}
 activeSkillCursor :: obj{ids=arr[]}
 contextEventsForTurn :: fn
 mentionInjector :: fn
@@ -1190,7 +1190,7 @@ lspDiagnosticsHookEnabled :: bool:false
 secretCheckToolEnabled :: bool:false
 bgShellRegistry :: obj{register=fn,adopt=fn,get=fn,awaitHandle=fn,kill=fn,listOwned=fn,killOwned=fn,killAll=fn,size=fn,oldestId=fn}
 contentCaptureEnabled :: bool:false
-readFileState :: obj{mtimes=obj{},rangeHashes=undefined,rangeDedupCap=num}
+readFileState :: obj{mtimes=obj{},rangeHashes=undefined,contentDigests=undefined,rangeDedupCap=num}
 activeSkillCursor :: obj{ids=arr[]}
 contextEventsForTurn :: fn
 mentionInjector :: fn
@@ -1239,7 +1239,7 @@ lspDiagnosticsHookEnabled :: bool:false
 secretCheckToolEnabled :: bool:false
 bgShellRegistry :: obj{register=fn,adopt=fn,get=fn,awaitHandle=fn,kill=fn,listOwned=fn,killOwned=fn,killAll=fn,size=fn,oldestId=fn}
 contentCaptureEnabled :: bool:false
-readFileState :: obj{mtimes=obj{},rangeHashes=undefined,rangeDedupCap=num}
+readFileState :: obj{mtimes=obj{},rangeHashes=undefined,contentDigests=undefined,rangeDedupCap=num}
 activeSkillCursor :: obj{ids=arr[]}
 contextEventsForTurn :: fn
 mentionInjector :: fn
@@ -1284,7 +1284,7 @@ lspDiagnosticsHookEnabled :: bool:false
 secretCheckToolEnabled :: bool:false
 bgShellRegistry :: obj{register=fn,adopt=fn,get=fn,awaitHandle=fn,kill=fn,listOwned=fn,killOwned=fn,killAll=fn,size=fn,oldestId=fn}
 contentCaptureEnabled :: bool:false
-readFileState :: obj{mtimes=obj{},rangeHashes=undefined,rangeDedupCap=num}
+readFileState :: obj{mtimes=obj{},rangeHashes=undefined,contentDigests=undefined,rangeDedupCap=num}
 activeSkillCursor :: obj{ids=arr[]}
 contextEventsForTurn :: fn
 mentionInjector :: fn
@@ -1329,7 +1329,7 @@ lspDiagnosticsHookEnabled :: bool:false
 secretCheckToolEnabled :: bool:false
 bgShellRegistry :: obj{register=fn,adopt=fn,get=fn,awaitHandle=fn,kill=fn,listOwned=fn,killOwned=fn,killAll=fn,size=fn,oldestId=fn}
 contentCaptureEnabled :: bool:false
-readFileState :: obj{mtimes=obj{},rangeHashes=undefined,rangeDedupCap=num}
+readFileState :: obj{mtimes=obj{},rangeHashes=undefined,contentDigests=undefined,rangeDedupCap=num}
 activeSkillCursor :: obj{ids=arr[]}
 contextEventsForTurn :: fn
 mentionInjector :: fn
@@ -1373,7 +1373,7 @@ secretCheckToolEnabled :: bool:false
 dispatchGuard :: obj{check=fn}
 bgShellRegistry :: obj{register=fn,adopt=fn,get=fn,awaitHandle=fn,kill=fn,listOwned=fn,killOwned=fn,killAll=fn,size=fn,oldestId=fn}
 contentCaptureEnabled :: bool:false
-readFileState :: obj{mtimes=obj{},rangeHashes=undefined,rangeDedupCap=num}
+readFileState :: obj{mtimes=obj{},rangeHashes=undefined,contentDigests=undefined,rangeDedupCap=num}
 activeSkillCursor :: obj{ids=arr[]}
 contextEventsForTurn :: fn
 mentionInjector :: fn
@@ -1432,7 +1432,7 @@ lspDiagnosticsHookEnabled :: bool:false
 secretCheckToolEnabled :: bool:false
 bgShellRegistry :: obj{register=fn,adopt=fn,get=fn,awaitHandle=fn,kill=fn,listOwned=fn,killOwned=fn,killAll=fn,size=fn,oldestId=fn}
 contentCaptureEnabled :: bool:false
-readFileState :: obj{mtimes=obj{},rangeHashes=undefined,rangeDedupCap=num}
+readFileState :: obj{mtimes=obj{},rangeHashes=undefined,contentDigests=undefined,rangeDedupCap=num}
 activeSkillCursor :: obj{ids=arr[]}
 contextEventsForTurn :: fn
 mentionInjector :: fn
@@ -1479,7 +1479,7 @@ lspDiagnosticsHookEnabled :: bool:false
 secretCheckToolEnabled :: bool:false
 bgShellRegistry :: obj{register=fn,adopt=fn,get=fn,awaitHandle=fn,kill=fn,listOwned=fn,killOwned=fn,killAll=fn,size=fn,oldestId=fn}
 contentCaptureEnabled :: bool:false
-readFileState :: obj{mtimes=obj{},rangeHashes=undefined,rangeDedupCap=num}
+readFileState :: obj{mtimes=obj{},rangeHashes=undefined,contentDigests=undefined,rangeDedupCap=num}
 activeSkillCursor :: obj{ids=arr[]}
 contextEventsForTurn :: fn
 mentionInjector :: fn
@@ -1524,10 +1524,10 @@ lspDiagnosticsHookEnabled :: bool:false
 secretCheckToolEnabled :: bool:false
 bgShellRegistry :: obj{register=fn,adopt=fn,get=fn,awaitHandle=fn,kill=fn,listOwned=fn,killOwned=fn,killAll=fn,size=fn,oldestId=fn}
 contentCaptureEnabled :: bool:false
-objective :: obj{readDomain=fn,prepare=fn,commit=fn,restore=fn,set=fn,get=fn,updateStatus=fn,addBlocker=fn,clearBlocker=fn,setNextActions=fn,markCriterion=fn,recordUsage=fn,markUsageLimited=fn,list=fn,toSnapshot=fn,fromSnapshot=fn}
-readFileState :: obj{mtimes=obj{},rangeHashes=undefined,rangeDedupCap=num}
+objective :: obj{readDomain=fn,prepare=fn,commit=fn,restore=fn,restoreDomain=fn,set=fn,get=fn,updateStatus=fn,addBlocker=fn,clearBlocker=fn,setNextActions=fn,markCriterion=fn,recordUsage=fn,markUsageLimited=fn,list=fn,toSnapshot=fn,fromSnapshot=fn}
+readFileState :: obj{mtimes=obj{},rangeHashes=undefined,contentDigests=undefined,rangeDedupCap=num}
 diagnosticsProvider :: obj{unavailableReason=fn,open=fn}
-promptCacheObserver :: obj{record=fn,attributeBreakpoint=fn,snapshot=fn,reset=fn}
+promptCacheObserver :: obj{attributeBreakpoint=fn,record=fn,snapshot=fn,reset=fn}
 redaction :: obj{pii=obj{enabled=bool:true}}
 activeSkillCursor :: obj{ids=arr[]}
 contextEventsForTurn :: fn
@@ -1587,7 +1587,7 @@ lspDiagnosticsHookEnabled :: bool:false
 secretCheckToolEnabled :: bool:false
 bgShellRegistry :: obj{register=fn,adopt=fn,get=fn,awaitHandle=fn,kill=fn,listOwned=fn,killOwned=fn,killAll=fn,size=fn,oldestId=fn}
 contentCaptureEnabled :: bool:false
-readFileState :: obj{mtimes=obj{},rangeHashes=undefined,rangeDedupCap=num}
+readFileState :: obj{mtimes=obj{},rangeHashes=undefined,contentDigests=undefined,rangeDedupCap=num}
 activeSkillCursor :: obj{ids=arr[]}
 contextEventsForTurn :: fn
 mentionInjector :: fn
