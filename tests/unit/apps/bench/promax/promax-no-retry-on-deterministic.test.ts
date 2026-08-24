@@ -23,12 +23,6 @@ import { describe, expect, test } from "bun:test"
 import { FamilyBootstrapError } from "@/apps/bench/remote/box-session/family-bootstrap-exec"
 import { runWithRelaunch } from "@/apps/bench/remote/full"
 
-const backendThatThrows = (err: Error) => () => ({
-  run: async () => {
-    throw err
-  },
-})
-
 describe("relaunch stops on a deterministic failure", () => {
   test("🔴 a FamilyBootstrapError is attempted ONCE, not relaunched", async () => {
     let attempts = 0
