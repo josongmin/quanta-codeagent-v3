@@ -828,8 +828,23 @@ describe("BFND-02 writer ownership — one writer, one results-dir owner", () =>
       expect(read(caller).includes("QUANTA_BENCH_RESULTS_DIR")).toBe(false)
     }
     // The full-remote sidecar reuses the SAME sink rather than opening its own.
-    const box = read("src/apps/bench/remote/box-session.ts")
-    expect(box).toContain("mirrorReportToSsot")
+    // Read the entrypoint AND its stages: `9f3544af0` moved the mirror call into
+    // `box-session/chunk-artifacts.ts`, and a pin that reads only the entrypoint
+    // reported that extraction as the sidecar having stopped mirroring. The
+    // behaviour is what this owns, so it follows the code (same aggregate shape
+    // `_arch`/mode-cycle use for the bootstrap-session split).
+    const box = [
+      "src/apps/bench/remote/box-session.ts",
+      ...readdirSync(join(REPO_ROOT, "src/apps/bench/remote/box-session"))
+        .filter((f) => f.endsWith(".ts"))
+        .map((f) => `src/apps/bench/remote/box-session/${f}`),
+    ]
+      .map(read)
+      .join("\n")
+    // Word-BOUNDED: `toContain` is a substring test, so it passed against
+    // `mirrorReportToSsotXX` — i.e. it would have survived the call being renamed
+    // away, which is the exact regression it exists to catch.
+    expect(box).toMatch(/\bmirrorReportToSsot\b/)
     expect(/const\s+benchResultsDir\s*=\s*\(/.test(box)).toBe(false)
   })
 })

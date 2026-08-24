@@ -347,7 +347,7 @@ document.getElementById("auto").onclick = (e)=>{ auto=!auto; e.target.classList.
 
 // drag the divider to resize the detail panel; width persists across reloads.
 // double-click the divider to snap back to the default width.
-(function(){
+(()=> {
   const rz = document.getElementById("resizer"), root = document.documentElement, DEFAULT = 460;
   const clamp = (w)=>Math.min(window.innerWidth*0.85, Math.max(300, w));
   const setW = (w)=>root.style.setProperty("--side-w", clamp(w)+"px");

@@ -241,6 +241,44 @@ export const readModelPatches = (predictionsPath: string): readonly ProMaxSubmit
   })
 }
 
+/**
+ * The note a NARROWED run prints, or `undefined` for a full one.
+ *
+ * `--ids a` on a 170-instance campaign printed `assigned 1 | coverage 1` and
+ * exited 0 — a probe that reads exactly like a clean full gate. Coverage is
+ * always 1.0 of whatever was assigned, so the only thing that distinguishes the
+ * two is saying which set was assigned.
+ */
+export const renderNarrowedNote = (assigned: number, inGolden: number): string | undefined =>
+  assigned >= inGolden
+    ? undefined
+    : `  ⚠️ NARROWED RUN — ${assigned} of the ${inGolden} instance(s) in the golden file. ` +
+      "Coverage below is of the SELECTED set, not the campaign; this is not a campaign gate."
+
+/** Resolve `--ids` against the golden, fail-closed.
+ *
+ *  An id the golden does not carry can never produce a row: the pinned evaluator
+ *  looks golden up by id and `continue`s past what it cannot find. Accepting it
+ *  would spend the whole run to report it as `missing`, so it is refused here as
+ *  the typo it is. */
+const resolveExplicitIds = (explicit: string, goldenPath: string): readonly string[] => {
+  const requested = explicit
+    .split(",")
+    .map((s) => s.trim())
+    .filter((s) => s !== "")
+  const inGolden = new Set(readAssignedIdsFromGolden(goldenPath))
+  const unknown = requested.filter((id) => !inGolden.has(id))
+  if (unknown.length > 0) {
+    throw new Error(
+      `--ids names ${unknown.length} instance(s) the golden file does not carry: ` +
+        `${unknown.join(", ")}. REFUSING — the pinned evaluator looks golden up by id and skips ` +
+        "what it cannot find, so such an instance can NEVER be graded; it would cost the whole " +
+        "run to come back as `missing`.",
+    )
+  }
+  return requested
+}
+
 export const buildRunGateInput = (argv: readonly string[]): ProMaxGateRunInput => {
   // EVERY required flag is resolved before any file is touched. Reading the
   // golden first made a missing `--pinned-root` surface as an ENOENT about a
@@ -266,10 +304,7 @@ export const buildRunGateInput = (argv: readonly string[]): ProMaxGateRunInput =
     assignedInstanceIds:
       explicit === undefined
         ? readAssignedIdsFromGolden(goldenPath)
-        : explicit
-            .split(",")
-            .map((s) => s.trim())
-            .filter((s) => s !== ""),
+        : resolveExplicitIds(explicit, goldenPath),
     pinnedRoot,
     goldenPath,
     workDir,
@@ -277,8 +312,18 @@ export const buildRunGateInput = (argv: readonly string[]): ProMaxGateRunInput =
   }
 }
 
-export const runGateCli = (argv: readonly string[]): RunGateResult =>
-  renderGateResult(runProMaxGate(buildRunGateInput(argv), makeRunGatePorts()))
+export const runGateCli = (argv: readonly string[]): RunGateResult => {
+  const input = buildRunGateInput(argv)
+  const rendered = renderGateResult(runProMaxGate(input, makeRunGatePorts()))
+  // A NARROWED run must say so in the same block as its coverage number.
+  // Coverage is always 1.0 of whatever was assigned, so without this a one-instance
+  // probe is textually indistinguishable from a clean full gate.
+  const note = renderNarrowedNote(
+    input.assignedInstanceIds.length,
+    readAssignedIdsFromGolden(flag(argv, "--golden") ?? required(argv, "--golden")).length,
+  )
+  return note === undefined ? rendered : { ...rendered, output: `${rendered.output}\n${note}` }
+}
 
 if (import.meta.main) {
   try {

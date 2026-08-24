@@ -114,9 +114,49 @@ describe("run-gate tool — argument handling refuses rather than guesses", () =
     }
   })
 
-  test("an explicit --ids list overrides the golden file", () => {
-    const argv = [...base, "--ids", "x__y-1, x__y-2 ,"]
-    expect(buildRunGateInput(argv).assignedInstanceIds).toEqual(["x__y-1", "x__y-2"])
+  // `--ids` NARROWS the golden's set; it does not replace it. The name this test
+  // used to carry ("overrides the golden file") described the older behaviour and
+  // passed `/golden.json`, a path that does not exist — so once `--ids` began
+  // being validated the test failed with ENOENT rather than on anything it meant
+  // to assert.
+  test("an explicit --ids list narrows the golden's set (and is trimmed)", () => {
+    const dir = mkdtempSync(join(tmpdir(), "pmx-gate-tool-"))
+    try {
+      const golden = join(dir, "golden.json")
+      writeFileSync(
+        golden,
+        JSON.stringify([
+          { instance_id: "x__y-1" },
+          { instance_id: "x__y-2" },
+          { instance_id: "x__y-3" },
+        ]),
+      )
+      const argv = [...base]
+      argv[base.indexOf("/golden.json")] = golden
+      expect(buildRunGateInput([...argv, "--ids", "x__y-1, x__y-2 ,"]).assignedInstanceIds).toEqual(
+        ["x__y-1", "x__y-2"],
+      )
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  test("🔴 an id the golden does not carry is REFUSED before the run is spent", () => {
+    // The point of validating `--ids` at all: the pinned evaluator looks golden
+    // up by id and skips what it cannot find, so a typo would cost a whole run
+    // and come back as `missing`.
+    const dir = mkdtempSync(join(tmpdir(), "pmx-gate-tool-"))
+    try {
+      const golden = join(dir, "golden.json")
+      writeFileSync(golden, JSON.stringify([{ instance_id: "x__y-1" }]))
+      const argv = [...base]
+      argv[base.indexOf("/golden.json")] = golden
+      expect(() => buildRunGateInput([...argv, "--ids", "x__y-1,typo__z-9"])).toThrow(
+        /does not carry: typo__z-9/,
+      )
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
   })
 })
 

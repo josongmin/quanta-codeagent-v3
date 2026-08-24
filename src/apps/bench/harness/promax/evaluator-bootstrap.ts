@@ -83,6 +83,7 @@ export interface ProMaxUpstreamFile {
 /** The bootstrap steps, in execution order. */
 export const PROMAX_BOOTSTRAP_STEPS = [
   "gold-absence",
+  "grader-container-absence",
   "campaign-root",
   "docker-ready",
   "disk",
@@ -259,6 +260,39 @@ const agentPhaseProbes = (spec: ProMaxEvaluatorBootstrapSpec): ProMaxBootstrapCo
         "REFUSE to start the agent phase on a box that still carries the gold-bearing upstream " +
         "checkout (a prior chunk's grader phase, or a teardown that failed)",
       absenceProbe: { absolutePath: root },
+    },
+    {
+      // The checkout is not the only answer-key state a grade leaves behind.
+      // Read from the pinned evaluator's own source (hash-verified, so it cannot
+      // drift without the pin changing):
+      //
+      //   run_single_patch → `docker run -d --name {container_name} …`
+      //                      `docker cp {patch_file} {container_name}:/tmp/patch.diff`
+      //   container_name   = f"{role}_{uuid4().hex[:6]}", role ∈ {"m", "g"}
+      //   finally          → `subprocess.run(f"docker rm -f {container_name}", …)`
+      //
+      // So it reaps its own containers — best-effort, with the result unchecked.
+      // Killed mid-run, or against a wedged daemon, `m_*` / `g_*` containers
+      // survive, and a `g_*` container is the one the GOLDEN patch and the test
+      // patch were copied into. A STOPPED container is still `docker cp`-able by
+      // anything on the box, including the next chunk's unsandboxed agent.
+      //
+      // IMAGES are deliberately NOT probed: `--cleanup` is never passed because
+      // they are the campaign's replay evidence, and the golden patch is applied
+      // inside a container rather than committed back to the image — so an image
+      // is not answer-key state.
+      //
+      // A PROBE, not a reaper: refusing is honest when state we cannot fully
+      // account for is present, and inventing a cleanup for a third party's
+      // container lifecycle would be guessing at it.
+      step: "grader-container-absence",
+      phase: "agent",
+      goldBearing: false,
+      argv: ["sh", "-c", 'test -z "$(docker ps -aq --filter name=^m_ --filter name=^g_)"'],
+      purpose:
+        "REFUSE to start the agent phase while the pinned evaluator's own grader containers " +
+        "survive — a `g_*` container had the GOLDEN patch and the test patch copied into it, " +
+        "and a stopped container is still readable with `docker cp`",
     },
     {
       step: "campaign-root",

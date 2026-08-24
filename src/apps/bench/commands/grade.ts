@@ -106,17 +106,42 @@ export const buildBackend = (spec: string, modelName: string | undefined): Grade
 
 /** Log the merged outcome of an instance-aware full-remote run — resolved count,
  *  any box-loss (`missing`, surfaced NOT silently dropped), and attempt count. */
+/**
+ * The one line an operator actually reads, as a PURE string.
+ *
+ * It used to print `resolved` and `unresolved` only. For most families the
+ * omitted `errored` bucket is small; for ProMax it is the entire golden-authority
+ * class — a golden patch that failed to apply, an `ambiguous` grade where the
+ * grader declined to decide, and an assigned instance the evaluator never
+ * reported on. `resolved 12 | unresolved 40` on a 170-instance campaign then
+ * reads as 12 of 52 when the truth may be 12 of 170: a denominator that omits its
+ * own errors, printed where it is least likely to be questioned.
+ *
+ * Pure and exported so the claim is testable without driving a remote run.
+ */
+export const renderFullRemoteOutcomeLine = (out: {
+  resolved: readonly string[]
+  unresolved: readonly string[]
+  errored?: readonly string[]
+  missing: readonly string[]
+  attempts: number
+}): string => {
+  const erroredCount = out.errored?.length ?? 0
+  // Omitted entirely when zero, so a family with no errors reads exactly as before.
+  const erroredNote = erroredCount > 0 ? ` | errored ${erroredCount}` : ""
+  const lostNote = out.missing.length > 0 ? ` | ⚠️ LOST ${out.missing.length} (box-loss)` : ""
+  const attemptNote = out.attempts > 1 ? ` [${out.attempts} attempts]` : ""
+  return `full-remote done — resolved ${out.resolved.length} | unresolved ${out.unresolved.length}${erroredNote}${lostNote}${attemptNote}`
+}
+
 const logFullRemoteOutcome = (out: {
   resolved: string[]
   unresolved: string[]
+  errored?: string[]
   missing: string[]
   attempts: number
 }): void => {
-  const lostNote = out.missing.length > 0 ? ` | ⚠️ LOST ${out.missing.length} (box-loss)` : ""
-  const attemptNote = out.attempts > 1 ? ` [${out.attempts} attempts]` : ""
-  logger.info(
-    `full-remote done — resolved ${out.resolved.length} | unresolved ${out.unresolved.length}${lostNote}${attemptNote}`,
-  )
+  logger.info(renderFullRemoteOutcomeLine(out))
   for (const id of out.resolved) logger.info(`  ✅ ${id}`)
   for (const id of out.missing)
     logger.info(`  ❓ LOST (never graded across ${out.attempts} attempts): ${id}`)
@@ -270,6 +295,10 @@ export const cmdGradeFullRemote = async (ports: FullRemoteCommandPorts = {}): Pr
       logFullRemoteOutcome({
         resolved: [...(res.resolved ?? [])],
         unresolved: [...(res.unresolved ?? [])],
+        // Carried here too: this is the branch with an UNKNOWN expected set, so
+        // `missing` is structurally empty and `errored` is the only signal an
+        // operator gets that instances were graded but not measured.
+        errored: [...(res.errored ?? [])],
         missing: [],
         attempts: 1,
       })

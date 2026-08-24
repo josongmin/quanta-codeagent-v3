@@ -33,15 +33,11 @@
  * surface so every importer stays byte-compatible.
  */
 
-import { execFileSync } from "node:child_process"
-import { mkdirSync, rmSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
-import { mirrorReportToSsot } from "@/runner/batch/report"
 import { foldGroundingReceipts } from "@/shared"
-import { benchHome } from "../corpus"
 import { presetRequiresLiveLspGrounding } from "../preset"
 import { resolveDatasetFamilyProfile } from "../profiles/registry"
-import type { SpawnFn, SpawnResult } from "./backend"
+import type { SpawnFn } from "./backend"
 import { assertRemoteAccessTokenFreshEnough, stripToAccessToken } from "./box-session/auth"
 import {
   collectRunDiagnostics,
@@ -49,12 +45,7 @@ import {
   fullRemoteArtifactDir,
   saveLocalArtifact,
 } from "./box-session/chunk-artifacts"
-import {
-  buildChunkScrubCommand,
-  closureDiagnosticsPathFor,
-  runExitPathFor,
-  trajectoriesDirFor,
-} from "./box-session/chunk-scrub"
+import { buildChunkScrubCommand, runExitPathFor } from "./box-session/chunk-scrub"
 
 // Re-exported so every importer of the original module surface stays unchanged.
 export { collectRunDiagnostics, fullRemoteArtifactDir }
@@ -72,7 +63,6 @@ import {
   createSnapshotBase,
   createSnapshotController,
   type GradeChunkState,
-  normalizeStatusText,
 } from "./box-session/snapshot"
 import {
   type BoxSession,
@@ -85,12 +75,7 @@ import {
   type GradeChunkVerdicts,
   POOL_BUSY_ERROR,
 } from "./box-session/types"
-import {
-  classifyReportText,
-  detectRateLimit,
-  parseVerdicts,
-  verdictCount,
-} from "./box-session/verdict-parse"
+import { classifyReportText, parseVerdicts, verdictCount } from "./box-session/verdict-parse"
 import { bucketsFromGradedInstances } from "./verdict-buckets"
 
 /** Durable dir for fetched full-remote artifacts (predictions / report / closure
