@@ -32,6 +32,7 @@ import {
   assertDatasetGradeableForFamily,
   assertRemoteDatasetLaunchable,
   assertRemoteDatasetSelectionExists,
+  assertRemoteHarnessResolvable,
   assertRemoteStrictGroundingSupported,
 } from "./box-session"
 import type { ChunkCoverageAccumulator } from "./pool/coverage"
@@ -105,6 +106,9 @@ const assertPoolChunksLaunchable = (chunks: readonly PoolChunk[], cfg: PoolConfi
       surface: `pool chunk ${chunk.runId}`,
       family,
     })
+    // Same free question the full-remote root asks: a family the box path will
+    // request a harness spec from must be able to answer BEFORE provisioning.
+    assertRemoteHarnessResolvable({ surface: `pool chunk ${chunk.runId}`, family })
   }
 }
 

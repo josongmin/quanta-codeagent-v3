@@ -307,4 +307,56 @@ describe("R3 — the forwarded box-command env reproduces HEAD's absent-selector
       explicit.replace(/ QUANTA_SWEBENCH_DATASET_FAMILY=(?:'\\''|')[a-z0-9_-]+(?:'\\''|')/, ""),
     ).toBe(absent)
   }, 90_000)
+
+  // PMX-04 wiring proof. `withResolvedFamilyBootstrap` calls itself "the ONE
+  // resolution point", but it was called INSIDE the provision helper, so the
+  // resolved config never left that function and the GRADE phase read the
+  // UNRESOLVED one. For a family that grades on-box that meant
+  // `bootstrap: undefined`, and the refusal landed ON THE BOX — after
+  // RunInstances, i.e. after the money was already spent. Resolution now happens
+  // once, at the top of the attempt, so both the provision and the grade path
+  // see it.
+  //
+  // Red-on-injection: put the resolution back inside the provision helper and
+  // this run dies with "grades in its own grader phase but the chunk carried NO
+  // declared bootstrap".
+  test("a ProMax full-remote run reaches the grade phase WITH its declared bootstrap", async () => {
+    const dataset = join(alloc("bench-wire-promax-pub-"), "promax.jsonl")
+    writeFileSync(
+      dataset,
+      `${JSON.stringify({
+        instance_id: "psf__requests-5414",
+        repo: "psf/requests",
+        base_commit: "c".repeat(40),
+        problem_statement: "x",
+        language: "python",
+      })}\n`,
+    )
+    const { fn } = mockSpawn()
+    let runErr: unknown
+    await createFullRemoteBackend({
+      repoDir: "/tmp/fake-repo",
+      authJson: AUTH,
+      datasetPath: dataset,
+      instanceIds: ["psf__requests-5414"],
+      singleBoxGuardDir: join(alloc("bench-wire-guard-pub-"), "guard"),
+      tokenBudgetDir: alloc("bench-wire-budget-pub-"),
+      tokenBudgetWaitMs: 5_000,
+      tokenBudgetPollMs: 10,
+      sleep: async () => {},
+      maxReadyPolls: 2,
+      ami: "ami-0testtesttesttest",
+      preset: "agentless-v1",
+      spawn: fn,
+      swebenchDatasetFamily: "promax",
+    })
+      .run()
+      .catch((e: unknown) => {
+        runErr = e
+      })
+    expect(
+      String(runErr ?? ""),
+      "the declared bootstrap must reach the grade phase, not go missing between provision and grade",
+    ).not.toMatch(/NO declared bootstrap/)
+  }, 120_000)
 })

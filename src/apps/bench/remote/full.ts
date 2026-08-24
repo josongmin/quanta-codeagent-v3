@@ -30,6 +30,7 @@ import {
   assertDatasetGradeableForFamily,
   assertRemoteDatasetLaunchable,
   assertRemoteDatasetSelectionExists,
+  assertRemoteHarnessResolvable,
   assertRemoteStrictGroundingSupported,
   attachBox,
   type BoxSession,
@@ -352,17 +353,24 @@ const runFullRemoteAttempt = async (args: {
   readonly runConfig: BenchRunConfig
   readonly log: (msg: string) => void
 }): Promise<FullRemoteRunAttempt> => {
+  // THE one resolution point, which is what `withResolvedFamilyBootstrap`'s own
+  // doc calls itself. It used to be called inside `attachOrProvisionFullRemoteBox`,
+  // where the resolved config never left the function — so the GRADE phase below
+  // read `args.cfg.remoteBootstrap`, found it undefined for a family that grades
+  // on-box, and refused ON THE BOX. Same class of positional defect that doc
+  // already records for the attach path, one call site over.
+  const cfg = withResolvedFamilyBootstrap(args.cfg, args.runConfig)
   let lease: FullRemoteLease | undefined
   try {
-    lease = await acquireFullRemoteLease(args.cfg, args.concurrency, args.log)
+    lease = await acquireFullRemoteLease(cfg, args.concurrency, args.log)
     const effectiveConcurrency = clampPatchGenConcurrency(lease.units)
     logGrantedFullRemoteLease(lease, effectiveConcurrency, args.log)
-    const session = await attachOrProvisionFullRemoteBox(args.cfg, args.runConfig)
+    const session = await attachOrProvisionFullRemoteBox(cfg, args.runConfig)
     return {
       lease,
       result: await runSingleFullRemoteChunk({
         session,
-        cfg: args.cfg,
+        cfg,
         preset: args.preset,
         model: args.model,
         concurrency: effectiveConcurrency,
@@ -627,6 +635,10 @@ export const createFullRemoteBackend = (
       surface: "full-remote",
       family,
     })
+    // Ask the family for the harness the BOX path will ask it for, here where a
+    // refusal is free. Last of the preflights and immediately before the guard,
+    // so nothing below it can be reached without a box.
+    assertRemoteHarnessResolvable({ surface: "full-remote", family })
     const guard = await acquireFullRemoteSingleBoxGuard(cfg)
     const attempt = await runFullRemoteAttempt({
       cfg,

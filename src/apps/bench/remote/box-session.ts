@@ -927,6 +927,7 @@ export {
   assertDatasetGradeableForFamily,
   assertRemoteDatasetLaunchable,
   assertRemoteDatasetSelectionExists,
+  assertRemoteHarnessResolvable,
   assertRemoteStrictGroundingSupported,
   RemoteDatasetPreflightError,
   RemoteDatasetSelectionPreflightError,

@@ -251,6 +251,39 @@ export const assertDatasetGradeableForFamily = (args: {
   })
 }
 
+/**
+ * FAIL-FREE preflight for the harness the BOX path will ask this family for.
+ *
+ * WHY (aug-24). `promax.ts` documents preflight as two steps and says why the
+ * second exists: "`setupBox` and `harnessSpec` also refuse, but those fire AFTER
+ * `RunInstances` — an operator would have paid for a box before learning ProMax
+ * cannot run yet. This makes the refusal free." Opening the ProMax lane deleted
+ * that step from the family's own port while `harnessSpec` kept refusing, so a
+ * full-remote ProMax launch spent a box and THEN died at the harness spec.
+ *
+ * The check is generic rather than a ProMax special case, because the hazard is:
+ * any family whose `harnessSpec` refuses, but which does not grade on-box, will
+ * be asked for one after provisioning. It mirrors the box path's OWN condition
+ * (`box-session.ts` and `ec2-lifecycle.ts` both skip the port exactly when
+ * `boxGrade` is present) and simply asks the same question earlier, where a
+ * refusal costs nothing.
+ *
+ * The resolved spec is DISCARDED: this asks whether the port answers at all.
+ * `datasetName` is therefore `""` — it only steers the stock-vs-Live selection
+ * inside a value nobody reads here, and `stockOrLiveHarnessSpec` cannot throw on
+ * it. Keeping it empty is what lets this module stay env-free.
+ */
+export const assertRemoteHarnessResolvable = (args: {
+  readonly surface: string
+  readonly family: DatasetFamily
+}): void => {
+  const profile = resolveDatasetFamilyProfile(args.family)
+  // Grades in its own grader phase ⇒ the swebench harness is never consulted,
+  // and the box path guards on this exact field. Nothing to resolve.
+  if (profile.boxGrade !== undefined) return
+  void profile.harnessSpec({ datasetName: "" })
+}
+
 export const assertRemoteStrictGroundingSupported = (args: {
   readonly preset: string
   readonly datasetPath: string
