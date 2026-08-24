@@ -3,11 +3,19 @@
  *
  * The per-feature hellgates each flip ONE gate on and prove that feature live.
  * This file is the NOVEL proof the campaign lacked: every campaign gate ON
- * SIMULTANEOUSLY, driving the REAL composition roots the individual tests use
- * (`buildLifecycleBundle`, `composeSurfaceWires`, `buildBaseFromBootstrap`,
+ * SIMULTANEOUSLY, driving the REAL CONSUMER composition roots the individual
+ * tests use (`buildLifecycleBundle`, `composeSurfaceWires`, `buildBaseFromBootstrap`,
  * `assembleAgentConfig`, `buildLivePosture(Runtime)`, `resolveGatedObjectiveAuthority`),
  * asserting PER FEATURE that it assembles LIVE — so no gate INTERACTION breaks
  * assembly.
+ *
+ * SCOPE BOUND (honest — do not over-read): this proves the CONSUMER half (given
+ * the bootstrap/setup PRODUCED the authorities, the surface composes them live
+ * under all gates). The PRODUCER legs — that the real bootstrap actually mints &
+ * threads each authority — are owned by their own tests (e.g. the posture
+ * bootstrap producer leg, the session-authorities join), NOT here: the boundary
+ * inputs below are typed fakes (see FIDELITY). A regression where a producer
+ * stops threading an authority would NOT fail this file.
  *
  * Markers are COMPOSITION-REAL, not source greps: the real assembled config's
  * slots (`cfg.questionGuard`, `cfg.objective`, `base.postureControl`), the real
@@ -415,14 +423,23 @@ describe("aug-22 ALL-GATES-ON — the whole campaign assembles live, no gate int
     })
   })
 
-  test("A6 · WORKTREE — QUANTA_WORKTREE_PROGRESS + QUANTA_WORKTREE_CWD_PIN resolve true at the composition root (deps threaded)", async () => {
+  test("A6 · WORKTREE — QUANTA_WORKTREE_PROGRESS + QUANTA_WORKTREE_CWD_PIN resolve ON through the CLI knob accessor (registration parity; discriminating, not always-true)", async () => {
+    // SCOPE (honest): this asserts only that repl.ts's dep-resolution accessor
+    // (`readCliKnob`) reads these two gates as ON under the all-gates env and OFF
+    // when unset — i.e. the gate DISCRIMINATES (a paired control, not a tautology
+    // that returns whatever the test wrote). It does NOT prove the resolved value
+    // is threaded into the session-ops deps; that BEHAVIORAL wiring is proven where
+    // it actually runs: CWD_PIN by worktree-cwd-pin-hellgate.test.ts (drives the
+    // shipped driveSessionTurn + real ownership state machine, H7 paired control),
+    // and staged PROGRESS by the D5 worktree-live-progress e2e.
     await withGates(ALL_GATES, async (env) => {
-      // repl.ts resolves the staged-progress dep through THIS accessor (the CLI
-      // composition root); ON ⇒ true ⇒ threaded as `worktreeProgress` into the
-      // session-ops deps (behavioral staged-progress covered by the D5 e2e).
       expect(readCliKnob("QUANTA_WORKTREE_PROGRESS", "bool", env)).toBe(true)
       expect(readCliKnob("QUANTA_WORKTREE_CWD_PIN", "bool", env)).toBe(true)
     })
+    // Paired OFF control: unset ⇒ false. Without this the ON assert alone is the
+    // "reads back what the test wrote" vacuity the audit flagged.
+    expect(readCliKnob("QUANTA_WORKTREE_PROGRESS", "bool", {})).toBe(false)
+    expect(readCliKnob("QUANTA_WORKTREE_CWD_PIN", "bool", {})).toBe(false)
   })
 
   test("A7 · DURABLE POSTURE + OBJECTIVE RESTORE — store-backed posture survives a restart; restoreFrom is accepted", async () => {
