@@ -440,11 +440,27 @@ const createObjectiveAuthorityWithCore = (
     bump(threadId)
     return { ok: true, revision: revisionOf(threadId), snapshot: readDomain(threadId) }
   }
+  // RFC-03 C2 (web parity) — LIVE post-construction durable-resume load of ONE
+  // per-thread snapshot. Plants the state verbatim and pins the EXACT persisted
+  // revision (identical to the per-thread body of `hydrateDomains`), so a reopened
+  // web thread recovers its goal/criteria/revision without the +1 bump `restore`
+  // would apply. Skips a malformed / stateless snapshot (nothing planted).
+  const restoreDomain = (snapshot: ObjectiveDomainSnapshot): boolean => {
+    const threadId = isNonEmptyString(snapshot?.threadId) ? snapshot.threadId : ""
+    if (threadId === "" || snapshot.state === null) return false
+    if (!core.restoreThread(threadId, snapshot.state)) return false
+    revisions.set(
+      threadId,
+      Number.isFinite(snapshot.revision) && snapshot.revision >= 0 ? snapshot.revision : 1,
+    )
+    return true
+  }
   return {
     readDomain,
     prepare,
     commit,
     restore,
+    restoreDomain,
     set: (threadId, init) =>
       (system(threadId, {
         kind: "set",

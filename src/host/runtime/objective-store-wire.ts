@@ -13,9 +13,10 @@
  */
 
 import type { AgentConfig } from "@/agent"
-import type { ObjectivePort } from "@/objective"
+import { asObjectiveAuthority, type ObjectivePort } from "@/objective"
 import {
   buildObjectiveAuthority,
+  decodeObjectiveSnapshot,
   encodeObjectiveSnapshot,
 } from "@/runner/assemble/session-authorities"
 import type { PersistedObjectiveSnapshot } from "@/session"
@@ -97,6 +98,37 @@ export const buildObjectiveSnapshotProvider = (
   if (objective === undefined || objective === null) return undefined
   const port = objective as ObjectivePort
   return () => encodeObjectiveSnapshot(port)
+}
+
+/**
+ * RFC-03 C2 (web parity) — restore a persisted objective snapshot INTO an already
+ * live, session-stable authority at HYDRATE time (the DECODE mirror of
+ * {@link buildObjectiveSnapshotProvider}'s encode). The web daemon mints ONE
+ * objective authority per session, BEFORE any thread id is known, so it cannot use
+ * the construction-time `restoreFrom` seam the CLI does; when a persisted thread is
+ * reopened its durable goal must be planted into the live authority here.
+ *
+ * `authority` is the base's slice-opaque `ObjectivePort` slot (`runtime.objectiveAuthority`).
+ * ABSENT (`QUANTA_OBJECTIVE_TOOLS` off ⇒ no authority) or an ABSENT snapshot (a
+ * thread that never had an objective — `SavedSession.objective` is optional) ⇒ a
+ * no-op (byte-identical default-OFF; no empty-goal fabrication). Each decoded
+ * per-thread domain is planted VERBATIM with its exact revision via the authority's
+ * `restoreDomain` seam — UNLESS the live authority already holds that thread (a
+ * same-thread reopen / an already-active thread), in which case it is SKIPPED so a
+ * live goal is never clobbered by an older disk snapshot. Malformed/forged
+ * completions fail-closed inside `decodeObjectiveSnapshot` (unchanged).
+ */
+export const restoreObjectiveSnapshotInto = (
+  authority: unknown,
+  snapshot: PersistedObjectiveSnapshot | undefined,
+): void => {
+  if (authority === undefined || authority === null || snapshot === undefined) return
+  const auth = asObjectiveAuthority(authority as ObjectivePort)
+  for (const domain of decodeObjectiveSnapshot(snapshot)) {
+    // No-clobber: never overwrite a thread the live session already holds.
+    if (auth.readDomain(domain.threadId).state !== null) continue
+    auth.restoreDomain(domain)
+  }
 }
 
 /**

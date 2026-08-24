@@ -17,7 +17,10 @@
 import type { Server } from "bun"
 import type { FollowerCoControlDispatcher } from "@/agent/thread-follower"
 import type { ArtifactPreviewResolver } from "@/host/runtime"
-import { buildObjectiveSnapshotProvider } from "@/host/runtime/objective-store-wire"
+import {
+  buildObjectiveSnapshotProvider,
+  restoreObjectiveSnapshotInto,
+} from "@/host/runtime/objective-store-wire"
 import type { SupportedReadModels } from "@/protocol/session"
 import type { RuntimeSession } from "@/sdk/runtime"
 import { loadSessionById, type PersistedObjectiveSnapshot } from "@/session"
@@ -359,6 +362,16 @@ export const startWebDaemon = async (config: WebDaemonServerConfig): Promise<Web
               await sharedSession.transcript.replace(messages)
             },
             setActiveThreadId: (id) => transcriptPersist.setActiveThreadId(id),
+            // RFC-03 C2 (web parity) — restore the reopened thread's durable goal
+            // into the SAME session-stable authority the persist snapshot encodes
+            // from (`runtime.objectiveAuthority`, duck-read like `webObjectiveSnapshot`).
+            // Absent authority (TOOLS off) ⇒ no-op (byte-identical). Only fires on
+            // the hydrated success path (see thread-hydrate).
+            restoreObjective: (snapshot) =>
+              restoreObjectiveSnapshotInto(
+                (runtime as { objectiveAuthority?: unknown }).objectiveAuthority,
+                snapshot,
+              ),
           })
         }
       : undefined

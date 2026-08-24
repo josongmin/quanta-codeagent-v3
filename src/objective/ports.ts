@@ -97,6 +97,20 @@ export interface ObjectiveAuthority extends ObjectivePort {
   commit(prepared: PreparedObjectiveMutation, approval: ApprovalReceipt): CommitResult
   /** Exact undo: restore a prior domain snapshot under CAS. */
   restore(previous: ObjectiveDomainSnapshot, expectedRevision: number): CommitResult
+  /**
+   * RFC-03 C2 (web parity) — LIVE, post-construction restore of ONE persisted
+   * per-thread {@link ObjectiveDomainSnapshot}, planting its state VERBATIM and
+   * preserving its EXACT revision (the per-thread parallel of the construction
+   * `restoreDomains` seam, NOT the `restore`/mutation path which bumps the
+   * revision). This exists because a surface whose authority is minted
+   * session-stable BEFORE any thread id is known — the web daemon's single live
+   * session, which hydrates threads on demand — cannot reach the
+   * construction-time `restoreDomains` seam and must restore at HYDRATE time.
+   * Returns `false` (nothing planted) for a malformed / stateless snapshot; the
+   * caller owns the no-clobber policy (skip a thread already live). Unlike
+   * `restore` there is NO CAS check — it is a durable-resume load, not an undo.
+   */
+  restoreDomain(snapshot: ObjectiveDomainSnapshot): boolean
 }
 
 /**
