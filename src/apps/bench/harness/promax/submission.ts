@@ -13,13 +13,23 @@
  *
  * ## What this owns, and what it deliberately does not
  *
- * It owns exactly one thing the predictions serializer cannot know: the
- * relationship between the submitted patches and the campaign's ASSIGNED SET.
- * Blank/duplicate instance ids, and the explicit field projection that keeps a
- * gold-bearing `patch` field out of the file the evaluator reads, are already
- * `serializeProMaxPredictions`'s job and are NOT re-implemented here.
+ * It owns the campaign-level questions the predictions serializer cannot answer:
+ * how the submitted patches relate to the ASSIGNED SET, and whether any instance
+ * was submitted twice.
  *
- * ## Why the two refusals exist
+ * The BLANK-id check and the explicit field projection — the guard that keeps a
+ * gold-bearing `patch` field out of the file the evaluator reads — remain
+ * `serializeProMaxPredictions`'s job and are not re-implemented here.
+ *
+ * Duplicate ids USED to be on that list too, and this paragraph said so. It was
+ * wrong: this function collapses the patches into a Map before the serializer
+ * ever sees them, so the serializer only ever received `assigned.map(...)`,
+ * unique by construction — its `instance_id_duplicated` refusal could not fire
+ * on this path. The check had to move here, and the doc is corrected rather than
+ * quietly swapped, because a comment that assigns a guard to a module that
+ * cannot run it is how the gap survived review in the first place.
+ *
+ * ## Why the refusals exist
  *
  * Gate 2 requires a covering partition with zero `missing`
  * (`assigned = resolved + model_miss + infra_invalid + ambiguous + missing`):
@@ -30,6 +40,9 @@
  *  - a row for an UNASSIGNED instance would have the pinned evaluator grade work
  *    the campaign never assigned, silently widening the denominator the coverage
  *    number is computed against.
+ *  - a DUPLICATED instance was silently last-won: the first patch was discarded
+ *    with no failure and no record of which one was graded. Concatenated shard
+ *    files and best-of-N exports both take that shape.
  *
  * ## The case that must NOT refuse
  *
