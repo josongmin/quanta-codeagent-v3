@@ -21,7 +21,7 @@
  */
 
 import type { InstructionAtom, PromptContext } from "../prompt-graph"
-import { POSTURE_ATOMS, selectAtoms } from "../prompt-graph"
+import { POSTURE_ATOMS, PROMPT_CTX_DEFAULTS, selectAtoms } from "../prompt-graph"
 
 export interface PromptRule {
   /** Stable ID embedded inline (`[R-…]`) — anti-regression tests pin this. */
@@ -34,28 +34,9 @@ export interface PromptRule {
  *  no posture atom conditions on the other axes, so they hold representative
  *  values (see prompt-graph/contexts.ts for the full reachable enumeration). */
 const posCtx = (envPosture: PromptContext["envPosture"]): PromptContext => ({
+  ...PROMPT_CTX_DEFAULTS,
   envPosture,
-  promptPack: "interactive",
   verifyStrategy: undefined,
-  mode: "default",
-  hasRepoRules: false,
-  hasGlobRules: false,
-  hasSessionCtx: false,
-  hasMemorySummary: false,
-  hasWorkingState: false,
-  hasActiveSkills: false,
-  hasContextEvents: false,
-  hasMentionInjection: false,
-  hasHookInjects: false,
-  hasImages: false,
-  brief: false,
-  untrustedEnvelope: false,
-  hasLanguageHint: false,
-  hasEnvBlock: false,
-  hasRepoRulesDynamic: false,
-  hasTaskBudget: false,
-  hasDirectives: false,
-  hasDelegationSuppress: false,
 })
 
 /**

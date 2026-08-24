@@ -7,6 +7,7 @@ import {
   type InstructionAtom,
   NOTICE_ATOMS,
   POSTURE_ATOMS,
+  PROMPT_CTX_DEFAULTS,
   type PromptContext,
   reachableAllContexts,
   reachableBodyContexts,
@@ -108,28 +109,9 @@ describe("prompt-graph verifyRuleGraph — RED on injection", () => {
 
 describe("prompt-graph — byte-equivalence with the render path", () => {
   const posture = (p: PromptContext["envPosture"]): PromptContext => ({
+    ...PROMPT_CTX_DEFAULTS,
     envPosture: p,
-    promptPack: "interactive",
     verifyStrategy: undefined,
-    mode: "default",
-    hasRepoRules: false,
-    hasGlobRules: false,
-    hasSessionCtx: false,
-    hasMemorySummary: false,
-    hasWorkingState: false,
-    hasActiveSkills: false,
-    hasContextEvents: false,
-    hasMentionInjection: false,
-    hasHookInjects: false,
-    hasImages: false,
-    brief: false,
-    untrustedEnvelope: false,
-    hasLanguageHint: false,
-    hasEnvBlock: false,
-    hasRepoRulesDynamic: false,
-    hasTaskBudget: false,
-    hasDirectives: false,
-    hasDelegationSuppress: false,
   })
 
   test("renderPostureBase == graph render for every posture", () => {

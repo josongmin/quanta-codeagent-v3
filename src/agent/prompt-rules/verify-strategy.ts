@@ -22,7 +22,7 @@
  * grader test. These are pure text-data rules (no `@/llm`, no `@/tool`).
  */
 
-import { type PromptContext, renderAtoms, VERIFY_ATOMS } from "../prompt-graph"
+import { PROMPT_CTX_DEFAULTS, type PromptContext, renderAtoms, VERIFY_ATOMS } from "../prompt-graph"
 import type { PromptRule } from "./core"
 
 /** The verify-strategy axis value. Absent ⇒ no verify rule (byte-identical).
@@ -35,28 +35,9 @@ export type VerifyStrategy = "reproduce-first" | "verify-after-edit" | "grader-o
  *  atom whose `when.verifyStrategy` admits it. `atomLines` looks up the atom's
  *  rendered lines by the strategy's ctx (there is exactly one per strategy). */
 const verifyCtx = (verifyStrategy: VerifyStrategy): PromptContext => ({
+  ...PROMPT_CTX_DEFAULTS,
   envPosture: "frozen",
-  promptPack: "interactive",
   verifyStrategy,
-  mode: "default",
-  hasRepoRules: false,
-  hasGlobRules: false,
-  hasSessionCtx: false,
-  hasMemorySummary: false,
-  hasWorkingState: false,
-  hasActiveSkills: false,
-  hasContextEvents: false,
-  hasMentionInjection: false,
-  hasHookInjects: false,
-  hasImages: false,
-  brief: false,
-  untrustedEnvelope: false,
-  hasLanguageHint: false,
-  hasEnvBlock: false,
-  hasRepoRulesDynamic: false,
-  hasTaskBudget: false,
-  hasDirectives: false,
-  hasDelegationSuppress: false,
 })
 
 /** Rule constant kept for back-compat callers/tests — its `.lines` are the

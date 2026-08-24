@@ -24,6 +24,7 @@ export {
 } from "./atoms-notices"
 export {
   DYNAMIC_PRESENCE_FACETS,
+  PROMPT_CTX_DEFAULTS,
   reachableAllContexts,
   reachableBodyContexts,
   reachableToolUseContexts,

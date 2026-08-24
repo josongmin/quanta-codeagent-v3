@@ -16,7 +16,12 @@
  * `AgentMode`. No `@/llm`, no `@/tool`, no `@/apps` — rules are pure text data.
  */
 
-import { POSTURE_ATOMS, type PromptContext, renderAtoms } from "../prompt-graph"
+import {
+  POSTURE_ATOMS,
+  PROMPT_CTX_DEFAULTS,
+  type PromptContext,
+  renderAtoms,
+} from "../prompt-graph"
 import { BATCH_RULES } from "./benchmark"
 import type { PromptRule } from "./core"
 import { PR_RULES } from "./pr-agent"
@@ -54,28 +59,9 @@ import type { AgentMode } from "../run-mode/types"
 /** Base ctx skeleton for the posture-base projection — only `envPosture` varies;
  *  no posture atom conditions on the other axes (ADR-0538 §Migration). */
 const postureCtx = (envPosture: PromptContext["envPosture"]): PromptContext => ({
+  ...PROMPT_CTX_DEFAULTS,
   envPosture,
-  promptPack: "interactive",
   verifyStrategy: undefined,
-  mode: "default",
-  hasRepoRules: false,
-  hasGlobRules: false,
-  hasSessionCtx: false,
-  hasMemorySummary: false,
-  hasWorkingState: false,
-  hasActiveSkills: false,
-  hasContextEvents: false,
-  hasMentionInjection: false,
-  hasHookInjects: false,
-  hasImages: false,
-  brief: false,
-  untrustedEnvelope: false,
-  hasLanguageHint: false,
-  hasEnvBlock: false,
-  hasRepoRulesDynamic: false,
-  hasTaskBudget: false,
-  hasDirectives: false,
-  hasDelegationSuppress: false,
 })
 
 /** POSTURE-BASE rules (env axis) — DERIVED from the ADR-0538 atom graph, NOT from

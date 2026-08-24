@@ -26,6 +26,7 @@ import {
   type AgentMode as GraphMode,
   NOTICE_ATOMS as NOTICE_ATOMS_ALL,
   POSTURE_ATOMS,
+  PROMPT_CTX_DEFAULTS,
   type PromptChannel,
   type PromptContext,
   renderAtoms,
@@ -99,27 +100,11 @@ const bodyRenderCtx = (opts?: {
   verifyStrategy?: VerifyStrategy
   mode?: GraphMode
 }): PromptContext => ({
+  ...PROMPT_CTX_DEFAULTS,
   envPosture: opts?.envPosture ?? "frozen",
   promptPack: opts?.promptPack ?? "interactive",
   verifyStrategy: opts?.verifyStrategy,
   mode: opts?.mode ?? "default",
-  hasRepoRules: false,
-  hasGlobRules: false,
-  hasSessionCtx: false,
-  hasMemorySummary: false,
-  hasWorkingState: false,
-  hasActiveSkills: false,
-  hasContextEvents: false,
-  hasMentionInjection: false,
-  hasHookInjects: false,
-  hasImages: false,
-  brief: false,
-  untrustedEnvelope: false,
-  hasLanguageHint: false,
-  hasEnvBlock: false,
-  hasRepoRulesDynamic: false,
-  hasTaskBudget: false,
-  hasDirectives: false,
   // C5059-05 — session-CONSTANT env knob (not per-turn), so reading it at build
   // time keeps the prefix byte-stable per session (the prompt is static per
   // session, ADR-0003). Default-OFF ⇒ false ⇒ the base tool-routing atom renders

@@ -23,7 +23,7 @@
 import { describe, expect, test } from "bun:test"
 import type { TurnContextInput } from "@/agent/prompt"
 import { buildTurnContext, compile } from "@/agent/prompt"
-import { DYNAMIC_ATOMS, type PromptChannel } from "@/agent/prompt-graph"
+import { DYNAMIC_ATOMS, PROMPT_CTX_DEFAULTS, type PromptChannel } from "@/agent/prompt-graph"
 import { buildSectionedSystemBlocks } from "@/agent/prompt-sections"
 import { embedUntrusted } from "@/agent/untrusted"
 import type { Message, SystemBlock } from "@/llm"
@@ -394,28 +394,9 @@ describe("ADR-0538 Phase 3 — channel chronology + static/dynamic separation he
     const ctx = compile(base()) // just to reuse the module; build a real ctx below
     void ctx
     const anyCtx = {
-      envPosture: "frozen" as const,
-      promptPack: "interactive" as const,
+      ...PROMPT_CTX_DEFAULTS,
+      envPosture: "frozen",
       verifyStrategy: undefined,
-      mode: "default" as const,
-      hasRepoRules: false,
-      hasGlobRules: false,
-      hasSessionCtx: false,
-      hasMemorySummary: false,
-      hasWorkingState: false,
-      hasActiveSkills: false,
-      hasContextEvents: false,
-      hasMentionInjection: false,
-      hasHookInjects: false,
-      hasImages: false,
-      brief: false,
-      untrustedEnvelope: false,
-      hasLanguageHint: false,
-      hasEnvBlock: false,
-      hasRepoRulesDynamic: false,
-      hasTaskBudget: false,
-      hasDirectives: false,
-      hasDelegationSuppress: false,
     }
     const original = renderAtoms(BODY_AFTER_PERSONA_ATOMS, anyCtx)
     // Reorder: push the FIRST atom (policy stack) to a huge order so it renders last.

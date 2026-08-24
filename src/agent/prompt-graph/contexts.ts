@@ -23,8 +23,16 @@ const VERIFY_STRATEGIES: readonly (VerifyStrategy | undefined)[] = [
   "grader-only",
 ]
 
-/** Representative fixed values for axes no migrated atom conditions on. */
-const BASE: Omit<PromptContext, "envPosture" | "verifyStrategy"> = {
+/**
+ * Representative fixed values for axes no migrated atom conditions on.
+ *
+ * EXPORTED because three rule-graph builders and `prompt.ts#bodyRenderCtx` used
+ * to hand-copy this same 18-field literal, and a facet added to `PromptContext`
+ * then had to be added in five places. `hasObjective` (C2b) was added in one and
+ * broke `typecheck:all` in the other four. Spreading this is the fix: a new
+ * required facet lands here once.
+ */
+export const PROMPT_CTX_DEFAULTS: Omit<PromptContext, "envPosture" | "verifyStrategy"> = {
   promptPack: "interactive",
   mode: "default",
   hasRepoRules: false,
@@ -56,7 +64,7 @@ export const reachableToolUseContexts = (): readonly PromptContext[] => {
   const out: PromptContext[] = []
   for (const envPosture of POSTURES) {
     for (const verifyStrategy of VERIFY_STRATEGIES) {
-      out.push({ ...BASE, envPosture, verifyStrategy })
+      out.push({ ...PROMPT_CTX_DEFAULTS, envPosture, verifyStrategy })
     }
   }
   return out
@@ -83,7 +91,14 @@ export const reachableBodyContexts = (): readonly PromptContext[] => {
           // (two mutually-exclusive variants), so it is crossed here (like `brief`)
           // to keep both variants' coverage decidable over the body surface.
           for (const hasDelegationSuppress of [false, true]) {
-            out.push({ ...BASE, envPosture, verifyStrategy, mode, brief, hasDelegationSuppress })
+            out.push({
+              ...PROMPT_CTX_DEFAULTS,
+              envPosture,
+              verifyStrategy,
+              mode,
+              brief,
+              hasDelegationSuppress,
+            })
           }
         }
       }
@@ -129,7 +144,12 @@ export const DYNAMIC_PRESENCE_FACETS: readonly (keyof PromptContext)[] = [
 export const reachableAllContexts = (): readonly PromptContext[] => {
   const out: PromptContext[] = [...reachableBodyContexts()]
   for (const facet of DYNAMIC_PRESENCE_FACETS) {
-    out.push({ ...BASE, envPosture: "frozen", verifyStrategy: undefined, [facet]: true })
+    out.push({
+      ...PROMPT_CTX_DEFAULTS,
+      envPosture: "frozen",
+      verifyStrategy: undefined,
+      [facet]: true,
+    })
   }
   return out
 }
