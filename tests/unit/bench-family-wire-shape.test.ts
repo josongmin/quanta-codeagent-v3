@@ -223,6 +223,9 @@ describe("R3 — the forwarded box-command env reproduces HEAD's absent-selector
         base_commit: "c".repeat(40),
         problem_statement: "x",
         language: "python",
+        // GRADER-ONLY fields on purpose: they are what makes the gold-leak
+        // preflight the FIRST gate this row hits, and that gate is the one that
+        // refuses before any box is launched. See the pin below.
         image_name: "promax/psf-requests:pinned",
         working_dir: "/testbed",
       })}\n`,
@@ -250,7 +253,19 @@ describe("R3 — the forwarded box-command env reproduces HEAD's absent-selector
         runErr = e
       })
     expect(runErr).toBeDefined()
-    expect(String(runErr)).toMatch(/REMOTE ProMax lane/)
+    // `caa32c3f6` OPENED the ProMax lane, which DELETED the "REMOTE ProMax lane"
+    // refusal this used to pin — that string now exists nowhere but in this file.
+    // What refuses this row today is the gold-leak preflight, and it is the gate
+    // that makes the money assertion below true: it lands before any launch.
+    //
+    // ⚠️ KNOWN GAP, deliberately not papered over here. Drop the two grader-only
+    // fields above (i.e. ship the PUBLIC projection, which is what a real
+    // full-remote row should be) and the run gets PAST this gate and reaches
+    // RunInstances before refusing at the harness spec — it spends a box. That
+    // is a fail-late in the ProMax lane's own money path, not something this
+    // test can fix; it needs the lane owner. The pin here states what the code
+    // actually guarantees today rather than what we wish it did.
+    expect(String(runErr)).toMatch(/GRADER-ONLY gold fields/)
     const spentMoney = calls.filter((c) => c.args.includes("run-instances"))
     expect(spentMoney, "a refused ProMax launch must never reach RunInstances").toEqual([])
     // PAIRED CONTROL: the SAME harness DOES reach RunInstances for `pro`, so the
