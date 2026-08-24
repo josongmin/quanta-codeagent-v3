@@ -8,6 +8,13 @@
 - **DEFER**: R3(posture durable) — "wiring only" 거짓: initialMode seed 누락→default 회귀, `"session"` 상수키→동시세션 clobber, hot-path 미게이트 I/O. unique-session-key+seed+gating 설계 필요한 실 packet, default-OFF+rare-trigger=저urgency. / R7(near-god preemptive) — bootstrap-session 999·scheduler 997·loop-helpers 997·agent-config-assembler 997·agent-arg-builder 990이나 scheduler/agent-config-assembler는 동시세션 활발 편집=concurrent-hot, preemptive라 지금 착수 안 함.
 - **NOT-OURS**: lint:debt 현재 RED=동시세션 `.claude/wf-*.js` format(commit 5872a3a5b); composition-slot 35의 32/35=동시세션 모델 bump(landed). R0는 내 몫(cwd 마스킹+objective) 포함해 마감하되 모델은 landed 반영.
 
+## POST-PLAN 갱신 (2026-08-24 최종 어딧 reconcile — 위 FINAL 결정 이후 실제 결과)
+이 계획 작성 이후 8시선 completeness 어딧에서 defer 2건 중 1건이 되살아나 랜딩됨. 위 "DEFER" 줄은 작성 시점 스냅샷이며 아래가 실제 현황이다:
+- **R3(posture durable) — DEFER→LANDED** `86ad9bd50`. 3 우려 전부 해소: absent→initialMode seed(byte-identical), resolved-sessionId 키(`"session"` 상수 clobber 제거), 신규 default-OFF 게이트 `QUANTA_POSTURE_DURABLE_RESUME`(`live-posture-runtime.ts:91` gateOn). 형제 C2 objective-durable `97c20feb` 동반 랜딩. → **"DEFER R3"는 이제 stale, 실제 구현 완비.**
+- **R7(near-god preemptive) — DEFER 유지(정당)**: scheduler/agent-config-assembler 등 concurrent-hot 모듈 미착수 유지(`9630e4b72`가 agent-config-assembler 997 그대로 둠, cohort cap ratchet `d0d5b67c9`). 단 저위험 sub-item은 랜딩: F4 attention/subagent co-req doc `5d7d2257c`, skill ungated-read는 benign(output-identical) 문서화.
+- **"33 packet 전량 랜딩" qualifier**: "전량"=active packet 전량. G5(RFC-07 report last-turn)는 dirty-owner BLOCKED로 active set 밖(미랜딩), G4·A2b는 "이미 guard됨" 오전제로 잠시 defer됐다 2차 패스에서 색출·랜딩(`08c6c94e0`/`603ba00b3`). 즉 RFC-01~06 완결 + 07 부분.
+- 최종 어딧 잔여(별도 처리): web objective↔observability 커플링(HIGH, 수정 중), budget-enforce 등록 비대칭(LOW), 테스트품질 F4/F6~F9(잔여 wiring-proof 경화).
+
 ## R0 — composition-slot 스냅샷 red (CI-red, P0)
 - **기능**: `src/host/runtime/__tests__/composition-slot-registry-byte-identical.hellgate` 35 snapshot 실패
 - **왜**: 스냅샷이 현재 합성과 불일치 — 전 35개가 모델기본값 `gpt-5.4→gpt-5.6-terra`(동시세션 변경), 6개는 추가로 C3 objective-port(`readDomain/prepare/commit/restore`). cwd 절대경로도 worktree/main 차이로 흔들릴 소지.
