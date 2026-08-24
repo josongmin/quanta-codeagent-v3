@@ -57,7 +57,19 @@ class StubLLM implements LLMPort {
 /** Build the daemon config base EXACTLY as `buildProductionRuntimeFactory` does
  *  (same `buildAgentConfigBase` seam), threading the live-posture slice the
  *  factory resolves. Returns the base + the control/guard so the test can assert
- *  the SAME authority the host mutates. */
+ *  the SAME authority the host mutates.
+ *
+ *  HONEST SCOPE BOUND (the one leg this file does NOT drive): this REPRODUCES the
+ *  factory's two-line thread (`const live = resolveWebLivePosture(env)` →
+ *  `buildAgentConfigBase({..., postureControl: live.postureControl, questionGuard:
+ *  live.questionGuard})`) by hand, so it proves the CONSUMER seam
+ *  (base.postureControl → applyHostPostureMutation rich-field apply) but NOT that
+ *  `buildProductionRuntimeFactory` itself still calls `resolveWebLivePosture` and
+ *  threads its result. That factory-call leg is left reconstructed (same boundary
+ *  as the objective sibling `web-daemon-objective-session-stability-hellgate`): an
+ *  independent factory-driven guard would have to expose the private base off the
+ *  factory purely for the test — a production change for testing, the wrong trade
+ *  for a 2-line thread. Guarding it is a documented LOW residual, not covered here. */
 const buildDaemonBase = async (
   live: WebLivePosture,
   env: Record<string, string | undefined>,
