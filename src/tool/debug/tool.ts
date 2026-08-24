@@ -151,6 +151,117 @@ const render = (program: string, r: Inspection): string => {
   return lines.join("\n")
 }
 
+/** Both carriers finish the SAME way — one `result` event whose `ok` is
+ *  "the inspection did not error" and whose output is the rendered report.
+ *  This tail was written out once per carrier; it is one place now. */
+const inspectionEvent = (program: string, result: Inspection): ToolEvent => ({
+  type: "result",
+  result: { ok: result.outcome !== "error", output: render(program, result) },
+})
+
+/** Turn-abort forwarding. Passed as `{}` (not `{signal: undefined}`) when the
+ *  context has no signal — `exactOptionalPropertyTypes` makes those different. */
+const signalOpt = (ctx: CoreToolContext): { signal?: AbortSignal } =>
+  ctx.signal !== undefined ? { signal: ctx.signal } : {}
+
+/** Anchor a user-supplied path to the session cwd unless it is already absolute. */
+const underCwd = (cwd: string, p: string): string => (isAbsolute(p) ? p : resolve(cwd, p))
+
+/** `adapterCommand` (explicit argv) wins over the `adapter` preset table.
+ *  `undefined` / empty ⇒ the caller gave us nothing to spawn. */
+const resolveAdapterCommand = (input: Input): readonly string[] | undefined =>
+  input.adapterCommand ?? (input.adapter ? ADAPTER_PRESETS[input.adapter] : undefined)
+
+/** The DAP `inspect` request: breakpoints (with optional per-bp condition),
+ *  the adapter-specific launch config, and the two opt-in extras (`evaluate`,
+ *  break-on-throw filters). Every extra is a conditional spread so an absent
+ *  input never puts the key on the wire. */
+const buildDapInspectRequest = (input: Input, cwd: string) => ({
+  adapterID: input.adapter ?? "custom",
+  launch: buildLaunchConfig(input, cwd),
+  breakpoints: input.breakpoints.map((b) => ({
+    file: b.file,
+    line: b.line,
+    ...(b.condition !== undefined ? { condition: b.condition } : {}),
+  })),
+  ...(input.evaluate !== undefined ? { evaluate: input.evaluate } : {}),
+  // Break-on-throw filters by adapter (debugpy uses uncaught/userUnhandled;
+  // lldb-dap uses cpp_throw). Only armed when the caller opts in.
+  ...(input.exceptionBreakpoints === true
+    ? { exceptionFilters: EXCEPTION_FILTERS[input.adapter ?? "custom"] ?? [] }
+    : {}),
+})
+
+/** NODE preset carrier — not a DAP adapter: speak CDP to `node --inspect-brk`.
+ *  Single process (no `--test`), stop at the FIRST breakpoint, snapshot via CDP.
+ *
+ *  A generator (delegated with `yield*`), NOT a function returning an event:
+ *  that keeps the `yield` INSIDE the try, so `cdp.dispose()` still runs in the
+ *  same position relative to the consumer resuming — including when a consumer
+ *  abandons the iteration at the yield. */
+async function* runNodeCdpSession(
+  input: Input,
+  ctx: CoreToolContext,
+  cwd: string,
+  nodeCdp: (spec: NodeCdpSpawnSpec) => Promise<CdpTransport>,
+): AsyncGenerator<ToolEvent, void, unknown> {
+  const program = underCwd(cwd, input.program)
+  const bp = input.breakpoints[0] // schema guarantees ≥1
+  if (bp === undefined) {
+    yield err("debug_inspect: node preset needs at least one breakpoint")
+    return
+  }
+  const bpFile = underCwd(cwd, bp.file)
+  let cdp: CdpClient | undefined
+  try {
+    const transport = await nodeCdp({
+      command: (p) => ["node", `--inspect-brk=${p}`, program, ...(input.args ?? [])],
+      cwd,
+    })
+    cdp = new CdpClient(transport)
+    const result = await inspectViaCdp(
+      cdp,
+      // node wraps the entry module, so a top-level throw looks "caught" to
+      // V8 ⇒ "uncaught" never fires; use "all" (stops at the first throw —
+      // for a focused break-on-throw run that is the failing exception).
+      {
+        url: pathToFileURL(bpFile).href,
+        line: bp.line,
+        ...(input.exceptionBreakpoints === true ? { pauseOnExceptions: "all" as const } : {}),
+      },
+      signalOpt(ctx),
+    )
+    yield inspectionEvent(input.program, result)
+  } catch (e) {
+    yield err(`debug_inspect: ${errMessage(e)}`)
+  } finally {
+    cdp?.dispose()
+  }
+}
+
+/** DAP carrier — spawn the adapter argv, run the launch/breakpoint/stop
+ *  choreography, report. Same generator-delegation rule as the CDP carrier so
+ *  `client.dispose()` keeps its position relative to the yield. */
+async function* runDapSession(
+  input: Input,
+  ctx: CoreToolContext,
+  cwd: string,
+  command: readonly string[],
+  port: DebugAdapterPort,
+): AsyncGenerator<ToolEvent, void, unknown> {
+  let client: DapClient | undefined
+  try {
+    const transport = await port.spawn({ command: [...command], cwd })
+    client = new DapClient(transport)
+    const result = await inspectViaDap(client, buildDapInspectRequest(input, cwd), signalOpt(ctx))
+    yield inspectionEvent(input.program, result)
+  } catch (e) {
+    yield err(`debug_inspect: ${errMessage(e)}`)
+  } finally {
+    client?.dispose()
+  }
+}
+
 /** Build `debug_inspect` against an injected adapter port (defaults to the real
  *  `Bun.spawn` port; tests pass a scripted in-memory adapter). The `nodeCdp`
  *  factory is the carrier for the `node` preset (CDP over a WebSocket) — also
@@ -177,91 +288,18 @@ export const makeDebugInspectTool = (
       return
     }
     const cwd = input.cwd ?? ctx.cwd
-
-    // NODE preset: not a DAP adapter — speak CDP to `node --inspect-brk`. Single
-    // process (no `--test`), stop at the FIRST breakpoint, snapshot via CDP.
     if (input.adapter === "node") {
-      const program = isAbsolute(input.program) ? input.program : resolve(cwd, input.program)
-      const bp = input.breakpoints[0] // schema guarantees ≥1
-      if (bp === undefined) {
-        yield err("debug_inspect: node preset needs at least one breakpoint")
-        return
-      }
-      const bpFile = isAbsolute(bp.file) ? bp.file : resolve(cwd, bp.file)
-      let cdp: CdpClient | undefined
-      try {
-        const transport = await nodeCdp({
-          command: (p) => ["node", `--inspect-brk=${p}`, program, ...(input.args ?? [])],
-          cwd,
-        })
-        cdp = new CdpClient(transport)
-        const result = await inspectViaCdp(
-          cdp,
-          // node wraps the entry module, so a top-level throw looks "caught" to
-          // V8 ⇒ "uncaught" never fires; use "all" (stops at the first throw —
-          // for a focused break-on-throw run that is the failing exception).
-          {
-            url: pathToFileURL(bpFile).href,
-            line: bp.line,
-            ...(input.exceptionBreakpoints === true ? { pauseOnExceptions: "all" as const } : {}),
-          },
-          { ...(ctx.signal !== undefined ? { signal: ctx.signal } : {}) },
-        )
-        yield {
-          type: "result",
-          result: { ok: result.outcome !== "error", output: render(input.program, result) },
-        }
-      } catch (e) {
-        yield err(`debug_inspect: ${errMessage(e)}`)
-      } finally {
-        cdp?.dispose()
-      }
+      yield* runNodeCdpSession(input, ctx, cwd, nodeCdp)
       return
     }
-
-    const command =
-      input.adapterCommand ?? (input.adapter ? ADAPTER_PRESETS[input.adapter] : undefined)
+    const command = resolveAdapterCommand(input)
     if (command === undefined || command.length === 0) {
       yield err(
         "debug_inspect: provide `adapter` (preset) or `adapterCommand` (explicit adapter argv)",
       )
       return
     }
-    let client: DapClient | undefined
-    try {
-      const transport = await port.spawn({ command: [...command], cwd })
-      client = new DapClient(transport)
-      const result = await inspectViaDap(
-        client,
-        {
-          adapterID: input.adapter ?? "custom",
-          launch: buildLaunchConfig(input, cwd),
-          breakpoints: input.breakpoints.map((b) => ({
-            file: b.file,
-            line: b.line,
-            ...(b.condition !== undefined ? { condition: b.condition } : {}),
-          })),
-          ...(input.evaluate !== undefined ? { evaluate: input.evaluate } : {}),
-          // Break-on-throw filters by adapter (debugpy uses uncaught/userUnhandled;
-          // lldb-dap uses cpp_throw). Only armed when the caller opts in.
-          ...(input.exceptionBreakpoints === true
-            ? { exceptionFilters: EXCEPTION_FILTERS[input.adapter ?? "custom"] ?? [] }
-            : {}),
-        },
-        {
-          // Turn-abort tears the session down instead of lingering to the timeout.
-          ...(ctx.signal !== undefined ? { signal: ctx.signal } : {}),
-        },
-      )
-      yield {
-        type: "result",
-        result: { ok: result.outcome !== "error", output: render(input.program, result) },
-      }
-    } catch (e) {
-      yield err(`debug_inspect: ${errMessage(e)}`)
-    } finally {
-      client?.dispose()
-    }
+    yield* runDapSession(input, ctx, cwd, command, port)
   },
 })
 
