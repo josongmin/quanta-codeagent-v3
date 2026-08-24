@@ -44,6 +44,7 @@ import {
   gradeChunkOnBox,
   provisionBox,
 } from "./box-session"
+import { FamilyBootstrapError } from "./box-session/family-bootstrap-exec"
 import {
   instancesCoveredByReceipts,
   type RelaunchCoverage,
@@ -115,17 +116,40 @@ const createRelaunchAccumulator = (): RelaunchAccumulator => ({
   emptyPatch: new Set<string>(),
 })
 
+/**
+ * Is this failure DETERMINISTIC — i.e. would a fresh box fail the same way?
+ *
+ * A `FamilyBootstrapError` is a refusal on a DECLARED precondition: a wrong path,
+ * an unverified digest, an interpreter below the pinned floor. A new box refuses
+ * identically by construction, so relaunching is not resilience, it is spend.
+ *
+ * MEASURED: the ProMax canary refused at `campaign-root`
+ * (`mkdir: cannot create directory '/opt/quanta': Permission denied`), was
+ * reported as "7/7 instance(s) lost (spot reclaim / ssh-255)", and bought a
+ * second box to hit the identical refusal.
+ */
+const isDeterministicFailure = (err: unknown): boolean => err instanceof FamilyBootstrapError
+
 const runRelaunchAttempt = async (
   makeBackend: (instanceIds: readonly string[]) => { run: () => Promise<FullRemoteResult> },
   instanceIds: readonly string[],
   attempt: number,
   onLog: ((m: string) => void) | undefined,
-): Promise<FullRemoteResult> => {
+): Promise<{ result: FullRemoteResult; fatal: boolean }> => {
   try {
-    return await makeBackend(instanceIds).run()
+    return { result: await makeBackend(instanceIds).run(), fatal: false }
   } catch (err) {
     onLog?.(`[full-remote] attempt ${attempt} threw: ${errMessage(err)}`)
-    return {}
+    if (isDeterministicFailure(err)) {
+      onLog?.(
+        "[full-remote] 🔴 that is a DETERMINISTIC refusal on a declared precondition — a fresh " +
+          "box would refuse identically. STOPPING instead of relaunching; this is a " +
+          "configuration failure, not box loss. Whatever earlier attempts earned is still " +
+          "reported below.",
+      )
+      return { result: {}, fatal: true }
+    }
+    return { result: {}, fatal: false }
   }
 }
 
@@ -236,10 +260,13 @@ export const runWithRelaunch = async (
   let attempt = 0
   while (remaining.length > 0 && attempt < total) {
     attempt += 1
-    const result = await runRelaunchAttempt(makeBackend, remaining, attempt, opts.onLog)
+    const { result, fatal } = await runRelaunchAttempt(makeBackend, remaining, attempt, opts.onLog)
     accumulateRelaunchAttempt(acc, reportPaths, result)
     if (result.officialGrade !== undefined) receipts.push(result.officialGrade)
     remaining = [...remainingRelaunchInstances(opts.expected, acc, receipts)]
+    // BREAK rather than throw: a later attempt's permanent refusal must not
+    // discard what an earlier one already measured.
+    if (fatal) break
     maybeLogRelaunchRetry({
       onLog: opts.onLog,
       remaining,

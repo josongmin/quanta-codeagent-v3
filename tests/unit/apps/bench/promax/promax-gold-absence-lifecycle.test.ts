@@ -433,7 +433,12 @@ describe("A-A/A-C acceptance — absence across two chunks, on BOTH box paths", 
     // …and it came BEFORE the campaign root was created, i.e. before the
     // bootstrap did anything on this family's behalf.
     const probeAt = box.commands.indexOf(`'test' '!' '-e' '${GOLD_ROOT}'`)
-    const mkdirAt = box.commands.findIndex((c) => c.includes("'mkdir' '-p' '/opt/quanta/promax'"))
+    // The campaign root is created with `sudo mkdir … && sudo chown …` (a plain
+    // mkdir into root-owned /opt was MEASURED to fail on a real box), so the
+    // needle is the root path in a creating command, not the old literal argv.
+    const mkdirAt = box.commands.findIndex(
+      (c) => c.includes("mkdir") && c.includes("/opt/quanta/promax"),
+    )
     expect(mkdirAt).toBeGreaterThan(probeAt)
     // NON-VACUOUS: the provision sequence really did run (rsync + install).
     expect(first.spawns.some((s) => s.cmd === "rsync")).toBe(true)

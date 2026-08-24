@@ -298,8 +298,28 @@ const agentPhaseProbes = (spec: ProMaxEvaluatorBootstrapSpec): ProMaxBootstrapCo
       step: "campaign-root",
       phase: "agent",
       goldBearing: false,
-      argv: ["mkdir", "-p", spec.campaignRoot],
-      purpose: "create the EMPTY campaign root so the disk probe has a real mount to measure",
+      // MEASURED on a real box: a plain `mkdir -p /opt/quanta/promax` fails with
+      // "cannot create directory '/opt/quanta': Permission denied". The bench
+      // runs as `ubuntu`; `/opt` is root-owned. So the ProMax lane could never
+      // get past this step on any box — it just needed a launch to find out.
+      //
+      // The ROOT stays where it is. `/opt` was never an isolation boundary (the
+      // agent's bash is unsandboxed, so "outside $HOME" is a filename, not a
+      // fence, and the real defences are the absence probe and the teardown).
+      // What it buys is hygiene: the answer-key checkout is not in the agent's
+      // own working tree, where a repo-map root or a stray `ls` reaches it. That
+      // is worth one privileged mkdir on a box we own and destroy.
+      //
+      // CHOWNed to the running user in the same command, because every later
+      // step — the checkout, the venv, the teardown — writes there as that user;
+      // creating it as root and stopping would just move the failure downstream.
+      argv: [
+        "sh",
+        "-c",
+        `sudo mkdir -p ${spec.campaignRoot} && sudo chown "$(id -u):$(id -g)" ${spec.campaignRoot}`,
+      ],
+      purpose:
+        "create the EMPTY campaign root, owned by the bench user, so the disk probe has a real mount to measure",
     },
     {
       step: "docker-ready",
