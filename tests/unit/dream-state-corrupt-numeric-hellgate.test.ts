@@ -38,29 +38,24 @@ afterEach(() => {
   root = undefined
 })
 
-const fakeStage1Store = () =>
-  ({
-    list: () =>
-      Object.freeze([
-        {
-          threadId: "t0",
-          sourceUpdatedAt: 1,
-          rawMemory: "- a durable fact",
-          rolloutSummary: "- a durable fact",
-          generatedAt: 1,
-          rolloutSlug: "slug-0",
-          usageCount: 1,
-          lastUsage: 1,
-          selectedForPhase2: true,
-        },
-      ]),
-    get: () => null,
-    put: () => undefined,
-    touch: () => undefined,
-    markSelectedForPhase2: () => undefined,
-    prune: () => 0,
-    // biome-ignore lint/suspicious/noExplicitAny: test fake narrowed to `list`
-  }) as any
+const fakeStage1Store = () => ({
+  // ADR-0556: the dream reads the sqlite `Stage1StorePort` (`fetchSince(null)`
+  // = every Phase-1 row), not the deleted JSONL mirror.
+  fetchSince: async () => [
+    {
+      threadId: "t0",
+      rolloutSlug: "slug-0",
+      rolloutSummary: "- a durable fact",
+      rawMemory: "- a durable fact",
+      preferenceSignals: [],
+      sourceUpdatedAt: 1,
+      selectedForPhase2: true,
+      selectedForPhase2SourceUpdatedAt: 1,
+      lastUsage: 1,
+      usageCount: 1,
+    },
+  ],
+})
 
 const deps = (o: { root: string; nowMs?: number; summarizer?: Phase2Summarizer }) => ({
   env: { QUANTA_AUTO_DREAM: "1", QUANTA_AUTO_DREAM_SESSIONS: "5" } as Record<
@@ -68,7 +63,7 @@ const deps = (o: { root: string; nowMs?: number; summarizer?: Phase2Summarizer }
     string | undefined
   >,
   memoryRoot: o.root,
-  stage1OutputsStore: fakeStage1Store(),
+  stage1Store: fakeStage1Store(),
   summarizer: o.summarizer ?? (async () => ({ text: "consolidated" })),
   now: () => o.nowMs ?? 1_000_000,
   logWarn: () => undefined,

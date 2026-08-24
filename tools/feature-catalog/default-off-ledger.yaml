@@ -1107,24 +1107,6 @@ rows:
     rollback: QUANTA_MCP_TOOL_ANNOTATIONS=off
     duplicate_of: null
     lifecycle_evidence: null
-  - feature_id: memory-cross-session-inject
-    # TRUTH-FIX (jul-18): gate is `parseEnvFlag(QUANTA_MEMORY_AUTO, defaultOn=true)`
-    # at 3 assembly sites (agent-arg-builder.ts:228 host, memory-factory.ts:140
-    # runner, auto-trigger/wire.ts:49) — an OPT-OUT gate per ADR-0413, so it ships
-    # ON wherever an agent is assembled (host→cli, runner→bench/headless). The
-    # prior `off` + `!=on` rollback mislabelled it as opt-in. decision stays
-    # measure-first: bench-efficacy A/B (memory contamination on fresh boxes) open.
-    gate_owner: [QUANTA_MEMORY_AUTO]
-    activation: inverse-kill-switch
-    effective_default: { cli: on, web: na, bench: on, headless: on, daemon: na }
-    reachability: wired
-    proof: { on: unit, off_identity: unit, receipt: null }
-    risk: behavioral-cost
-    decision: measure-first
-    owner_seam: src/memory/cross-session/default-injector.ts
-    rollback: QUANTA_MEMORY_AUTO=off
-    duplicate_of: null
-    lifecycle_evidence: null
   - feature_id: memory-self-edit-tools
     gate_owner: [QUANTA_MEMORY]
     activation: host-seeded

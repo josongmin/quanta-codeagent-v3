@@ -842,12 +842,8 @@ const projectMemoryAutoOptionals = (
     | "budgetMeter"
   >
 > => ({
-  ...(memoryAuto?.sessionCtx !== undefined ? { sessionCtx: memoryAuto.sessionCtx } : {}),
   ...(memoryAuto?.memoryConsolidator !== undefined
     ? { memoryConsolidator: memoryAuto.memoryConsolidator }
-    : {}),
-  ...(memoryAuto?.stage1OutputsStore !== undefined
-    ? { stage1OutputsStore: memoryAuto.stage1OutputsStore }
     : {}),
 })
 

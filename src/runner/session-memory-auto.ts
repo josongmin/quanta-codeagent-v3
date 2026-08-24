@@ -22,6 +22,7 @@ import {
   type Phase2Port,
   type Phase2Summarizer,
   Stage1Store as SqliteStage1Store,
+  type Stage1Output,
   type Stage1StorePort,
 } from "@/memory"
 import { assembleMemoryAuto } from "@/memory/auto-trigger"
@@ -30,13 +31,7 @@ import { resolveMemoryDirPaths } from "@/memory/consolidate/paths"
 import { LlmPhase2Port } from "@/memory/consolidate/phase2-llm"
 import { loadMemorySummary } from "@/memory/consolidate/reader"
 import type { NodeFsLike } from "@/memory/consolidate/writer"
-import {
-  DEFAULT_INJECT_MAX_BYTES,
-  DefaultCrossSessionInjector,
-  renderMemorySection,
-} from "@/memory/cross-session"
 import { type DreamOutcomeKind, INITIAL_DREAM_STATE } from "@/memory/dream/types"
-import { JsonlFileStage1Store, type Stage1OutputsStore } from "@/memory/stage1-store"
 import { redactSecrets } from "@/security"
 import { errMessage, gateOn, throwIfAborted } from "@/shared"
 
@@ -67,6 +62,35 @@ const DREAM_CONSOLIDATE_SYSTEM =
   "markdown note capturing the stable, reusable knowledge. Merge duplicates, drop " +
   "ephemera, keep only what stays true across sessions. Output markdown only — no " +
   "preamble. Invent nothing beyond the provided entries."
+
+/** Hard cap on the Σ `rolloutSummary` bytes handed to the dream summarizer.
+ *  8 KiB — comfortable for ~10-20 stage1 rows; the greedy accumulator below
+ *  STOPS at the first row that would overflow (deterministic, no skipping). */
+const DREAM_INPUT_MAX_BYTES = 8_192
+
+/** Heading of the dream summarizer's user text (NOT a prompt section — the
+ *  session-start injector that used to render a similar block was deleted by
+ *  ADR-0556; this text only ever reaches the dream consolidation LLM call). */
+const DREAM_INPUT_HEADER = "## Prior-session memory entries"
+
+/** Render the Phase-1 stage1 rows into the dream summarizer's input: oldest
+ *  first (`fetchSince` returns newest first), empty / whitespace summaries
+ *  dropped, greedy byte cap. Empty ⇒ `""` (the caller maps that to `no_op`). */
+const renderDreamInput = (rows: readonly Stage1Output[]): string => {
+  const enc = new TextEncoder()
+  const oldestFirst = rows
+    .filter((r) => typeof r.rolloutSummary === "string" && r.rolloutSummary.trim().length > 0)
+    .sort((a, b) => a.sourceUpdatedAt - b.sourceUpdatedAt)
+  const lines: string[] = []
+  let used = 0
+  for (const row of oldestFirst) {
+    const bytes = enc.encode(row.rolloutSummary).byteLength
+    if (used + bytes > DREAM_INPUT_MAX_BYTES) break
+    lines.push(`${lines.length + 1}. ${row.rolloutSummary}`)
+    used += bytes
+  }
+  return lines.length === 0 ? "" : [DREAM_INPUT_HEADER, ...lines].join("\n")
+}
 
 /** Parse a strict-positive integer env value; undefined when absent/invalid so
  *  {@link assembleDreamPolicy} falls back to the documented default. */
@@ -196,7 +220,6 @@ export const buildPhase2SummarizerFromLlm = (llm: LLMPort): Phase2Summarizer => 
 
 export interface SessionStartMemoryInput {
   readonly env: Readonly<Record<string, string | undefined>>
-  readonly stage1OutputsStore?: Stage1OutputsStore
   readonly phase2?: {
     readonly store: Stage1StorePort
     readonly writer: MemoryWriter
@@ -207,14 +230,10 @@ export interface SessionStartMemoryInput {
   readonly logWarn?: (msg: string) => void
 }
 
-export interface SessionStartMemoryResult {
-  readonly sessionCtx?: string
-}
-
 export interface SessionMemoryAutoWires {
-  readonly sessionCtx?: string
+  /** Phase-2 `memory_summary.md` body (System C) — the ONLY memory text that
+   *  reaches the cached `session_ctx` prompt section (ADR-0556). */
   readonly memorySummaryMd?: string
-  readonly stage1OutputsStore: Stage1OutputsStore
   readonly memoryConsolidator: NonNullable<AgentConfig["memoryConsolidator"]>
   /** Release the per-session resources this wire bundle owns — namely the
    *  `bun:sqlite` WAL handle backing the Phase-1 Stage1Store (audit U7-10).
@@ -231,8 +250,8 @@ export interface SessionMemoryAutoWires {
    *  store dispose closes. Resolves immediately when nothing is in flight. */
   drain(): Promise<void>
   /** H16 — the cross-session auto-dream trigger, present ONLY when
-   *  `QUANTA_AUTO_DREAM=1` (and memory-auto produced a cross-session store to
-   *  dream over). The session host calls `onSessionEnd()` once at teardown;
+   *  `QUANTA_AUTO_DREAM=1`. It dreams over the SAME sqlite stage1 store the
+   *  consolidator writes. The session host calls `onSessionEnd()` once at teardown;
    *  absent ⇒ no dream pass (byte-identical default-OFF). */
   dreamTrigger?: CrossSessionDreamTrigger
 }
@@ -300,18 +319,6 @@ export interface SessionMemoryAutoWireInput {
 }
 
 const resolveStage1SqlitePath = (root: string): string => join(root, "stage1.sqlite")
-const resolveStage1JsonlPath = (root: string): string => join(root, "stage1.jsonl")
-
-const selectSessionStartMemoryContext = (
-  stage1OutputsStore: Stage1OutputsStore | undefined,
-): string | undefined => {
-  if (stage1OutputsStore === undefined) return undefined
-  const selected = new DefaultCrossSessionInjector({
-    stage1Store: stage1OutputsStore,
-  }).selectForInject({ maxBytes: DEFAULT_INJECT_MAX_BYTES })
-  const rendered = renderMemorySection(selected).text.trim()
-  return rendered.length > 0 ? rendered : undefined
-}
 
 const warnPhase2Failure = (logWarn: (msg: string) => void, detail: string): void => {
   logWarn(`session-start memory phase2 auto-trigger failed: ${detail}`)
@@ -370,29 +377,23 @@ export const buildSessionMemoryAutoWires = async (
   const stage1Db = new Database(resolveStage1SqlitePath(paths.root))
   stage1Db.exec("PRAGMA journal_mode = WAL")
   const phase1Store: Stage1StorePort = new SqliteStage1Store(stage1Db)
-  const stage1OutputsStore = new JsonlFileStage1Store({
-    filePath: resolveStage1JsonlPath(paths.root),
-    now,
-    onWarn: logWarn,
-  })
   const summarizer = buildPhase2SummarizerFromLlm(input.summarizerLlm ?? input.llm)
   const phase2Port: Phase2Port = new LlmPhase2Port(summarizer)
 
-  // H16 — cross-session auto-dream trigger (default-OFF; reuses the stage1
-  // store + summarizer + memory root just minted). The session host fires
-  // `onSessionEnd()` once at teardown.
+  // H16 — cross-session auto-dream trigger (default-OFF; reuses the sqlite
+  // stage1 store + summarizer + memory root just minted). The session host
+  // fires `onSessionEnd()` once at teardown.
   const dreamTrigger = buildCrossSessionDreamTrigger({
     env: input.env,
     memoryRoot: paths.root,
-    stage1OutputsStore,
+    stage1Store: phase1Store,
     summarizer,
     now,
     logWarn,
   })
 
-  const start = await prepareSessionStartMemory({
+  await prepareSessionStartMemory({
     env: input.env,
-    stage1OutputsStore,
     phase2: {
       store: phase1Store,
       writer,
@@ -431,15 +432,12 @@ export const buildSessionMemoryAutoWires = async (
   })
 
   return {
-    ...(start.sessionCtx !== undefined ? { sessionCtx: start.sessionCtx } : {}),
     ...(memorySummaryMd !== undefined ? { memorySummaryMd } : {}),
-    stage1OutputsStore,
     memoryConsolidator: {
       enabled: true,
       port: buildPhase1PortFromLlm(input.llm),
       store: phase1Store,
       redact: (content) => redactSecrets(content, { origin: "memory_distill" }).text,
-      promotionPolicy: auto.policy,
       threadId: input.sessionId,
       defer: lane.defer,
     },
@@ -452,9 +450,10 @@ export const buildSessionMemoryAutoWires = async (
 /**
  * H16 — build the cross-session `CrossSessionDreamTrigger` from the resolved
  * env view + the SAME memory substrate buildSessionMemoryAutoWires already
- * minted (the JSONL stage1 store + the LLM summarizer + the memory root). The
- * consolidate adapter REUSES the existing cross-session injector + Phase-2
- * summarizer (it does NOT reimplement consolidation); the team write target is
+ * minted (the sqlite stage1 store + the LLM summarizer + the memory root). The
+ * consolidate adapter reads EVERY Phase-1 row (`fetchSince(null)`) and hands
+ * them to the Phase-2 summarizer (it does NOT reimplement consolidation —
+ * ADR-0556 re-pointed it from the deleted JSONL mirror); the team write target is
  * `<root>/team/cross-session.md` (NEVER the live MEMORY.md). Returns undefined
  * when `QUANTA_AUTO_DREAM` is off (byte-identical default-OFF).
  *
@@ -465,7 +464,7 @@ export const buildSessionMemoryAutoWires = async (
 export const buildCrossSessionDreamTrigger = (deps: {
   readonly env: Readonly<Record<string, string | undefined>>
   readonly memoryRoot: string
-  readonly stage1OutputsStore: Stage1OutputsStore
+  readonly stage1Store: Pick<Stage1StorePort, "fetchSince">
   readonly summarizer: Phase2Summarizer
   readonly now: () => number
   readonly logWarn: (msg: string) => void
@@ -480,10 +479,7 @@ export const buildCrossSessionDreamTrigger = (deps: {
 
   const consolidate: DreamConsolidatePort = {
     async consolidate({ signal }) {
-      const entries = new DefaultCrossSessionInjector({
-        stage1Store: deps.stage1OutputsStore,
-      }).selectForInject({ maxBytes: DEFAULT_INJECT_MAX_BYTES })
-      const section = renderMemorySection(entries).text.trim()
+      const section = renderDreamInput(await deps.stage1Store.fetchSince(null)).trim()
       if (section.length === 0) return { kind: "no_op" }
       const { text } = await deps.summarizer({
         system: DREAM_CONSOLIDATE_SYSTEM,
@@ -507,14 +503,15 @@ export const buildCrossSessionDreamTrigger = (deps: {
   })
 }
 
-export const prepareSessionStartMemory = async (
-  input: SessionStartMemoryInput,
-): Promise<SessionStartMemoryResult> => {
+/** Session-start memory work: fire the Phase-2 auto-trigger check (non-blocking
+ *  when it schedules). ADR-0556: the session-start injector that used to mint a
+ *  `sessionCtx` block here is gone — `memory_summary.md` (loaded separately by
+ *  the wire builder) is the only session-start memory text. */
+export const prepareSessionStartMemory = async (input: SessionStartMemoryInput): Promise<void> => {
   const auto = assembleMemoryAuto(input.env)
-  if (auto === null) return {}
+  if (auto === null) return
 
   const logWarn = input.logWarn ?? noopWarn
-  const sessionCtx = selectSessionStartMemoryContext(input.stage1OutputsStore)
 
   if (input.phase2 !== undefined) {
     await runSessionStartPhase2AutoTrigger(input.phase2, {
@@ -523,6 +520,4 @@ export const prepareSessionStartMemory = async (
       logWarn,
     })
   }
-
-  return sessionCtx !== undefined ? { sessionCtx } : {}
 }

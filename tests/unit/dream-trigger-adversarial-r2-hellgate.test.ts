@@ -41,29 +41,24 @@ afterEach(() => {
   root = undefined
 })
 
-const fakeStage1Store = (summaries: readonly string[]) =>
-  ({
-    list: () =>
-      Object.freeze(
-        summaries.map((rolloutSummary, i) => ({
-          threadId: `t${i}`,
-          sourceUpdatedAt: 1,
-          rawMemory: rolloutSummary,
-          rolloutSummary,
-          generatedAt: i + 1,
-          rolloutSlug: `slug-${i}`,
-          usageCount: 1,
-          lastUsage: 1,
-          selectedForPhase2: true,
-        })),
-      ),
-    get: () => null,
-    put: () => undefined,
-    touch: () => undefined,
-    markSelectedForPhase2: () => undefined,
-    prune: () => 0,
-    // biome-ignore lint/suspicious/noExplicitAny: test fake narrowed to `list`
-  }) as any
+const fakeStage1Store = (summaries: readonly string[]) => ({
+  // ADR-0556: the dream reads the sqlite `Stage1StorePort` (`fetchSince(null)`
+  // = every Phase-1 row), not the deleted JSONL mirror. Only `fetchSince` is
+  // consumed; the fake exposes exactly that.
+  fetchSince: async () =>
+    summaries.map((rolloutSummary, i) => ({
+      threadId: `t${i}`,
+      rolloutSlug: `slug-${i}`,
+      rolloutSummary,
+      rawMemory: rolloutSummary,
+      preferenceSignals: [],
+      sourceUpdatedAt: i + 1,
+      selectedForPhase2: true,
+      selectedForPhase2SourceUpdatedAt: i + 1,
+      lastUsage: 1,
+      usageCount: 1,
+    })),
+})
 
 const deps = (o: {
   env: Record<string, string | undefined>
@@ -74,7 +69,7 @@ const deps = (o: {
 }) => ({
   env: o.env,
   memoryRoot: o.root,
-  stage1OutputsStore: fakeStage1Store(o.summaries ?? ["- a durable fact"]),
+  stage1Store: fakeStage1Store(o.summaries ?? ["- a durable fact"]),
   summarizer: o.summarizer ?? (async () => ({ text: "consolidated" })),
   now: () => o.nowMs ?? 1_000_000,
   logWarn: () => undefined,

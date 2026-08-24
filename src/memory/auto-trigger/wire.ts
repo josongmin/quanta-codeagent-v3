@@ -1,5 +1,5 @@
 /**
- * ADR-0281 + ADR-0282 + ADR-0413 — env → `TriggerPolicy` projection helper.
+ * ADR-0281 + ADR-0413 + ADR-0556 — env → memory-auto slot projection helper.
  *
  * Co-located WITH the slice (rather than in `@/apps/agent`) so the
  * commit landing the slice is self-contained: the hellgate's
@@ -10,27 +10,25 @@
  * helper (or calls it directly) — either route is byte-identical
  * because the function is pure of `process.env`.
  *
- * Reads three env knobs and produces a small typed config object the
- * host plugs into its session-start / session-end hooks:
+ * Reads ONE env knob:
  *
  *   - `QUANTA_MEMORY_AUTO`        — default ON (ADR-0413). Falsey set
  *                                   `0 / off / no / false` (case-insensitive,
  *                                   trim) ⇒ disabled (returns `null`).
  *                                   Any other value (incl. absent / "on" /
  *                                   "1" / "true") ⇒ enabled.
- *   - `QUANTA_MEMORY_THRESHOLD`   — promote threshold (default 0.7).
- *                                   Invalid number ⇒ default.
- *   - `QUANTA_MEMORY_MIN_USAGE`   — minimum usageCount gate (default 1).
- *                                   Invalid int OR negative ⇒ default.
  *
- * Default-ON (ADR-0413): a fresh install with no env knobs gets cross-
- * session memory automatically. The legacy default-OFF behavior is
- * reachable via `QUANTA_MEMORY_AUTO=off`. The function is PURE w.r.t.
- * its input env view; no `process.env` reads.
+ * ADR-0556 removed the two promotion knobs (`QUANTA_MEMORY_` threshold /
+ * min-usage): the promotion gate they tuned fed a session-start injector that
+ * selected nothing in practice, and the gate itself is gone from the
+ * session-end consolidator. The returned `policy` is the constant
+ * {@link DEFAULT_TRIGGER_POLICY} (kept only for `memory-factory.ts`, see
+ * `./types.ts`).
  *
- * The return shape carries the resolved `TriggerPolicy`; the session-memory
- * composition root threads it into the live consolidator hook alongside its
- * Phase 1 and Stage-1 stores.
+ * Default-ON (ADR-0413): a fresh install with no env knobs gets session-end
+ * distillation + Phase-2 consolidation automatically. The legacy default-OFF
+ * behavior is reachable via `QUANTA_MEMORY_AUTO=off`. The function is PURE
+ * w.r.t. its input env view; no `process.env` reads.
  */
 
 import { parseEnvFlag } from "@/shared"
@@ -39,6 +37,7 @@ import { DEFAULT_TRIGGER_POLICY, type TriggerPolicy } from "./types"
 /** Return shape of {@link assembleMemoryAuto}. `null` ⇒ disabled. */
 export interface MemoryAutoSlot {
   readonly enabled: true
+  /** Constant since ADR-0556 — see `./types.ts`. */
   readonly policy: TriggerPolicy
 }
 
@@ -47,19 +46,5 @@ export const assembleMemoryAuto = (
   env: Readonly<Record<string, string | undefined>>,
 ): MemoryAutoSlot | null => {
   if (!parseEnvFlag(env.QUANTA_MEMORY_AUTO, /* defaultOn */ true)) return null
-  const rawT = env.QUANTA_MEMORY_THRESHOLD
-  const rawU = env.QUANTA_MEMORY_MIN_USAGE
-  const parsedT = rawT === undefined ? DEFAULT_TRIGGER_POLICY.promoteThreshold : Number(rawT)
-  const parsedU = rawU === undefined ? DEFAULT_TRIGGER_POLICY.minUsageCount : Number(rawU)
-  const promoteThreshold = Number.isFinite(parsedT)
-    ? parsedT
-    : DEFAULT_TRIGGER_POLICY.promoteThreshold
-  const minUsageCount =
-    Number.isFinite(parsedU) && parsedU >= 0
-      ? Math.floor(parsedU)
-      : DEFAULT_TRIGGER_POLICY.minUsageCount
-  return {
-    enabled: true,
-    policy: { promoteThreshold, minUsageCount },
-  }
+  return { enabled: true, policy: DEFAULT_TRIGGER_POLICY }
 }

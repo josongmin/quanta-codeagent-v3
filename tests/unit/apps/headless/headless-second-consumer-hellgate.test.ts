@@ -510,7 +510,10 @@ describe("ADR-0308 headless second-consumer hellgate", () => {
       })
 
       expect(result.wires.memoryAuto.sessionCtx).toBe(false)
-      expect(result.wires.memoryAuto.stage1OutputsStore).toBe(true)
+      // ADR-0556: the sibling JSONL stage1 store was deleted (System B was dead
+      // in effect). The key stays in the contract for shape stability; its
+      // value is now constant `false`.
+      expect(result.wires.memoryAuto.stage1OutputsStore).toBe(false)
       expect(result.wires.memoryAuto.memoryConsolidator).toBe(true)
       expect(result.wires.memoryAuto.memoryConsolidatorEnabled).toBe(true)
     } finally {

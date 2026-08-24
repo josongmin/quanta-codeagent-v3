@@ -150,7 +150,6 @@ export interface RuntimeContextSnapshot {
   readonly autoBackground?: AgentConfig["autoBackground"]
   readonly sessionCtx?: AgentConfig["sessionCtx"]
   readonly memorySummaryMd?: AgentConfig["memorySummaryMd"]
-  readonly stage1OutputsStore?: AgentConfig["stage1OutputsStore"]
   readonly memoryConsolidator?: AgentConfig["memoryConsolidator"]
   readonly onPromptAssembled?: AgentConfig["onPromptAssembled"]
   readonly workingState?: AgentConfig["workingState"]
@@ -218,7 +217,6 @@ export type RuntimeContextPatch = Partial<
     | "autoBackground"
     | "sessionCtx"
     | "memorySummaryMd"
-    | "stage1OutputsStore"
     | "memoryConsolidator"
     | "onPromptAssembled"
     | "workingState"

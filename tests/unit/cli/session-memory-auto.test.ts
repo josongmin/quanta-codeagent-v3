@@ -10,7 +10,6 @@ import type {
   Stage1StorePort,
   WatermarkState,
 } from "@/memory"
-import { InMemoryStage1Store } from "@/memory/stage1-store"
 import {
   buildSessionMemoryAutoWires,
   prepareSessionStartMemory,
@@ -30,29 +29,6 @@ describe("session-memory-auto", () => {
 
   afterEach(async () => {
     await rm(tempHome, { recursive: true, force: true })
-  })
-
-  test("prepareSessionStartMemory renders selected cross-session memory into sessionCtx", async () => {
-    const stage1 = new InMemoryStage1Store({ now: () => 100 })
-    stage1.put({
-      threadId: "thr-1",
-      sourceUpdatedAt: 100,
-      rawMemory: "- raw",
-      rolloutSummary: "Remember the repo uses bun and rg first.",
-      generatedAt: 100,
-      rolloutSlug: "sess-1",
-      usageCount: 1,
-      lastUsage: 100,
-      selectedForPhase2: true,
-    })
-
-    const out = await prepareSessionStartMemory({
-      env: { QUANTA_MEMORY_AUTO: "on" },
-      stage1OutputsStore: stage1,
-    })
-
-    expect(out.sessionCtx).toContain("Cross-session memory")
-    expect(out.sessionCtx).toContain("Remember the repo uses bun and rg first.")
   })
 
   test("prepareSessionStartMemory schedules phase2 auto-trigger when thresholds are met", async () => {

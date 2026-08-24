@@ -238,7 +238,9 @@ describe("buildMemoryForSession — auto-trigger semantics", () => {
     })
   })
 
-  test("QUANTA_MEMORY_THRESHOLD=0.5 + MIN_USAGE=3 ⇒ policy carries values", () => {
+  // ADR-0556: the promotion knobs were deleted with the cross-session inject
+  // slice; the policy is now a fixed default until the vestigial slot goes too.
+  test("QUANTA_MEMORY_THRESHOLD/MIN_USAGE are inert after ADR-0556 ⇒ default policy", () => {
     withTmpSqlite((p) => {
       const slot = buildMemoryForSession(
         env({

@@ -178,7 +178,7 @@ describe("memory auto-trigger — session-end consolidation fires through runAge
     wires.dispose()
   })
 
-  test("session-end persisted stage1 entry reaches the NEXT session's system prompt", async () => {
+  test("session-end persisted stage1 row is readable by the NEXT session's consolidator store (cross-run durability)", async () => {
     const priorLlm = new DualRoleLLM()
     const prior = await buildSessionMemoryAutoWires({
       env: {},
@@ -198,8 +198,6 @@ describe("memory auto-trigger — session-end consolidation fires through runAge
           messages: [{ role: "user", content: [{ type: "text", text: "remember the workflow" }] }],
           maxTurns: 10,
           memoryConsolidator: prior.memoryConsolidator,
-          // This is the production host's sibling output-store wire.
-          stage1OutputsStore: prior.stage1OutputsStore,
         }),
       ),
       15_000,
@@ -207,81 +205,34 @@ describe("memory auto-trigger — session-end consolidation fires through runAge
     )
     await prior.drain()
     expect(first.reason).toBe("completed")
-    expect(prior.stage1OutputsStore.get("auto-trigger-lifecycle-prior")?.usageCount).toBe(1)
+    expect(priorLlm.distillCalls).toBe(1)
     prior.dispose()
 
-    const nextLlm = new PromptCapturingLLM()
+    // ADR-0556: there is no session-start injector any more — the next session
+    // does NOT get a `sessionCtx` block minted from raw stage1 rows. What MUST
+    // still hold is durability: the row the prior session distilled is readable
+    // through the next session's OWN sqlite store (the input Phase 2 consolidates
+    // into `memory_summary.md`, the only memory text that reaches the prompt).
     const next = await buildSessionMemoryAutoWires({
       env: {},
-      llm: nextLlm,
+      llm: new PromptCapturingLLM(),
       sessionId: "auto-trigger-lifecycle-next",
       homeDir: tempHome,
     })
     if (next === undefined) throw new Error("expected default-on memory wires")
-    if (next.sessionCtx === undefined) throw new Error("expected prior session memory injection")
-
-    const second = await withTimeout(
-      runAgent(
-        cfg({
-          llm: nextLlm,
-          stream: new RecordingStream(),
-          registry: new ToolRegistry([...defaultTools]),
-          sessionId: "auto-trigger-lifecycle-next",
-          messages: [{ role: "user", content: [{ type: "text", text: "what carries forward?" }] }],
-          maxTurns: 1,
-          sessionCtx: next.sessionCtx,
-        }),
-      ),
-      15_000,
-      "memory-auto-trigger-lifecycle-next",
-    )
-    next.dispose()
-
-    expect(second.reason).toBe("completed")
-    expect(nextLlm.seenSystem.some((system) => system.includes(DISTILLED_FACT))).toBe(true)
-  })
-
-  test("resolved promotion policy can reject a session-end row before next-session injection", async () => {
-    const llm = new DualRoleLLM()
-    const prior = await buildSessionMemoryAutoWires({
-      env: { QUANTA_MEMORY_THRESHOLD: "1.1" },
-      llm,
-      sessionId: "auto-trigger-policy-off-prior",
-      homeDir: tempHome,
-    })
-    if (prior === undefined) throw new Error("expected default-on memory wires")
-
-    await withTimeout(
-      runAgent(
-        cfg({
-          llm,
-          stream: new RecordingStream(),
-          registry: new ToolRegistry([...defaultTools]),
-          sessionId: "auto-trigger-policy-off-prior",
-          messages: [{ role: "user", content: [{ type: "text", text: "remember the workflow" }] }],
-          maxTurns: 10,
-          memoryConsolidator: prior.memoryConsolidator,
-          stage1OutputsStore: prior.stage1OutputsStore,
-        }),
-      ),
-      15_000,
-      "memory-auto-trigger-policy-off-prior",
-    )
-    await prior.drain()
-    expect(prior.stage1OutputsStore.get("auto-trigger-policy-off-prior")?.selectedForPhase2).toBe(
-      false,
-    )
-    prior.dispose()
-
-    const next = await buildSessionMemoryAutoWires({
-      env: { QUANTA_MEMORY_THRESHOLD: "1.1" },
-      llm: new DualRoleLLM(),
-      sessionId: "auto-trigger-policy-off-next",
-      homeDir: tempHome,
-    })
-    if (next === undefined) throw new Error("expected default-on memory wires")
-    expect(next.sessionCtx).toBeUndefined()
-    next.dispose()
+    try {
+      expect((next as { readonly sessionCtx?: string }).sessionCtx).toBeUndefined()
+      const store = next.memoryConsolidator.store
+      if (store === undefined) throw new Error("expected the next session's sqlite stage1 store")
+      const rows = await store.fetchSince(null)
+      const carried = rows.find((r) => r.threadId === "auto-trigger-lifecycle-prior")
+      if (carried === undefined)
+        throw new Error("prior session's row must survive into the next session")
+      expect(carried.rawMemory).toContain("AUTO-TRIGGER-42")
+    } finally {
+      await next.drain()
+      next.dispose()
+    }
   })
 
   test("CONTROL: QUANTA_MEMORY_AUTO=off ⇒ assembler returns NO wires ⇒ no session-end firing (non-vacuous)", async () => {

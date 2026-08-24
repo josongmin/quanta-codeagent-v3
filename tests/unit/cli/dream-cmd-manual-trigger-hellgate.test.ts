@@ -52,30 +52,23 @@ afterEach(() => {
 
 const fixedClock = (ms: number) => () => ms
 
-/** Fake stage1 store exposing only `list` (the cross-session injector's read). */
-const fakeStage1Store = (summaries: readonly string[]) =>
-  ({
-    list: () =>
-      Object.freeze(
-        summaries.map((rolloutSummary, i) => ({
-          threadId: `t${i}`,
-          sourceUpdatedAt: 1,
-          rawMemory: rolloutSummary,
-          rolloutSummary,
-          generatedAt: i + 1,
-          rolloutSlug: `slug-${i}`,
-          usageCount: 1,
-          lastUsage: 1,
-          selectedForPhase2: true,
-        })),
-      ),
-    get: () => null,
-    put: () => undefined,
-    touch: () => undefined,
-    markSelectedForPhase2: () => undefined,
-    prune: () => 0,
-    // biome-ignore lint/suspicious/noExplicitAny: test fake narrowed to `list`
-  }) as any
+/** Fake stage1 store exposing only `fetchSince` — ADR-0556: the dream reads
+ *  the sqlite `Stage1StorePort` (every Phase-1 row), not the deleted JSONL mirror. */
+const fakeStage1Store = (summaries: readonly string[]) => ({
+  fetchSince: async () =>
+    summaries.map((rolloutSummary, i) => ({
+      threadId: `t${i}`,
+      rolloutSlug: `slug-${i}`,
+      rolloutSummary,
+      rawMemory: rolloutSummary,
+      preferenceSignals: [],
+      sourceUpdatedAt: i + 1,
+      selectedForPhase2: true,
+      selectedForPhase2SourceUpdatedAt: i + 1,
+      lastUsage: 1,
+      usageCount: 1,
+    })),
+})
 
 const fakeSummarizer =
   (text: string): Phase2Summarizer =>
@@ -93,7 +86,7 @@ const liveTrigger = (opts: {
     // sessions=1 so a single manual /dream consolidates deterministically
     env: { QUANTA_AUTO_DREAM: "1", QUANTA_AUTO_DREAM_SESSIONS: "1" },
     memoryRoot: opts.root,
-    stage1OutputsStore: fakeStage1Store(opts.summaries ?? []),
+    stage1Store: fakeStage1Store(opts.summaries ?? []),
     summarizer: fakeSummarizer(opts.summary ?? "## Team knowledge\n- byteCompare"),
     now: fixedClock(1_000_000),
     logWarn: () => undefined,
@@ -236,7 +229,7 @@ describe("H16 — /dream MANUAL trigger (REPL composer ctx injection)", () => {
     const trigger = buildCrossSessionDreamTrigger({
       env: { QUANTA_AUTO_DREAM: "1", QUANTA_AUTO_DREAM_SESSIONS: "999" },
       memoryRoot: r,
-      stage1OutputsStore: fakeStage1Store(["- decision: override the gate"]),
+      stage1Store: fakeStage1Store(["- decision: override the gate"]),
       summarizer: fakeSummarizer("## Team knowledge\n- override"),
       now: fixedClock(1_000_000),
       logWarn: () => undefined,

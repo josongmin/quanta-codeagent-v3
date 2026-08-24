@@ -14,7 +14,6 @@ export interface RuntimeAgentConfigAugments {
   fork?: unknown
   forkSession?: unknown
   conversationCheckpoint?: unknown
-  stage1OutputsStore?: unknown
   automationEngine?: unknown
   /** S1 (jul-04) `/browser-net` — surface-owned net-capture sink threaded DOWN
    *  from the CLI compose seam onto the per-turn base, read duck-typed by

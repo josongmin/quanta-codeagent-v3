@@ -487,9 +487,7 @@ export const extendBaseWithMemoryAuto = async (
   const dreamTrigger = auto.dreamTrigger
   return {
     ...args.base,
-    ...(auto.sessionCtx !== undefined ? { sessionCtx: auto.sessionCtx } : {}),
     ...(auto.memorySummaryMd !== undefined ? { memorySummaryMd: auto.memorySummaryMd } : {}),
-    stage1OutputsStore: auto.stage1OutputsStore,
     memoryConsolidator: auto.memoryConsolidator,
     // U7-10: carry the WAL-handle teardown onto the base so the session host's
     // close() releases the fd. Previously `auto.dispose` was dropped here, so
@@ -539,7 +537,6 @@ const buildOptionalSnapshotFields = (
   ...whenDefined("autoBackground", base.autoBackground),
   ...whenDefined("sessionCtx", base.sessionCtx),
   ...whenDefined("memorySummaryMd", base.memorySummaryMd),
-  ...whenDefined("stage1OutputsStore", base.stage1OutputsStore),
   ...whenDefined("memoryConsolidator", base.memoryConsolidator),
   ...whenDefined("onPromptAssembled", base.onPromptAssembled),
   ...whenDefined("workingState", base.workingState),

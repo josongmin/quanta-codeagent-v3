@@ -1,105 +1,71 @@
 id: memory-cross-session-inject
-title: ADR-0282 — Cross-session memory inject (selectForInject → prompt section)
+title: Cross-session memory inject — RETIRED (JSONL stage1 mirror + promotion gate + selectForInject prompt block deleted, ADR-0556)
 section: 5
 subsystem: 장기 메모리 — E3 productization (cross-session 자동 누적, Phase B)
 order: 282
-maturity: L3
-status: stable
-ui_surfaces: [n-a]
+maturity: L1
+status: deprecated
+lifecycle_stage: removed
+sunset_date: "2026-08-25"
+ui_surfaces: [none]
 monitoring: n-a
-modes: [interactive, headless, batch, daemon, ide, ci-bot]
-configurable: integrated
+modes: []
+configurable: none
 owners: ["@songmin"]
-labels: ["surface:core", "default-off", "absorbed:cursor", "absorbed:codex"]
-depends_on: [memory-auto-trigger, phase1-stage1-store]
-config_refs:
-  env: [QUANTA_MEMORY_AUTO]
+labels: ["surface:core", "adr:0282", "adr:0556", "retired"]
+depends_on: []
 surface_integration:
-  cli: full
+  cli: na
   web: na
   method: audited
-  verified: "2026-06-09"
+  verified: "2026-08-25"
   evidence:
-    cli: "runs in the interactive CLI — 5/5 evidence file(s) reachable from src/apps/cli/index.ts import graph"
-    web: "pure internal session-start prompt injector (src/memory/cross-session/) — emits a system-prompt MemorySystemBlock server-side, no user-visible affordance on any surface"
+    cli: "deleted — `src/memory/cross-session/**`, `src/memory/stage1-store/**` (the JSONL mirror), the hook's `mirrorStage1ToOutputsStore` / `shouldPromoteForInjection` gate, the `AgentConfig.stage1OutputsStore` slot and the `QUANTA_MEMORY_THRESHOLD` / `QUANTA_MEMORY_MIN_USAGE` knobs are gone (ADR-0556); tests/unit/memory/cross-session-inject-removed-ratchet.test.ts keeps them gone and pins the byte-identical `session_ctx` section"
+    web: "never reached the web surface; nothing to remove"
 purpose: |
-  Read path for ADR-0281: at session start, `CrossSessionInjector.
-  selectForInject({maxBytes})` reads the stage1 store, filters to
-  `selectedForPhase2 && usageCount ≥ 1`, drops empty/whitespace and
-  non-string summaries, applies optional kindFilter (first-token
-  match on `rolloutSummary`), sorts oldest-first by `generatedAt`,
-  and greedy-accumulates until the next candidate would overflow
-  `maxBytes` (deterministic: STOPs, does NOT skip to try smaller
-  subsequent entries — keeps the prompt-cache key stable).
+  RETIRED 2026-08-25 (ADR-0556). This entry is kept as the tombstone so the
+  catalog history stays honest; it no longer describes shipped behavior.
 
-  `renderMemorySection(entries)` returns a `MemorySystemBlock`
-  (structural mirror of `@/llm` `SystemBlock` — the memory slice
-  cannot import `@/llm` per RFC §3.1 / biome override) which the
-  composition root one-to-one-translates at the plug site. Empty
-  input ⇒ `{text:"", cache:true}` (caller filters before injecting).
+  What it was: ADR-0282's session-start read path — `DefaultCrossSessionInjector.
+  selectForInject({maxBytes})` over a JSONL mirror (`JsonlFileStage1Store`,
+  ADR-0207) of the Phase-1 sqlite rows, filtered to `selectedForPhase2 &&
+  usageCount ≥ 1`, rendered as a `## Cross-session memory (auto)` block into
+  the cached `session_ctx` prompt section. The mirror row's `selectedForPhase2`
+  was set at session end by a lexical-overlap gate (ADR-0281, tuned by
+  `QUANTA_MEMORY_THRESHOLD` / `QUANTA_MEMORY_MIN_USAGE`).
 
-  Default-OFF: when `assembleMemoryAuto(env)` returns null
-  (`QUANTA_MEMORY_AUTO !== "on"`), the host never constructs the
-  injector and the system prompt is byte-identical.
-
-  Boundary cases sealed by hellgate:
-    - kindFilter=[] ⇒ matches NOTHING (explicit hard NO; use absent
-      for "no filter")
-    - maxBytes ≤ 0 ⇒ returns []
-    - maxBytes exactly equal to cumulative bytes ⇒ accept the
-      candidate (`>` cap test, not `>=`)
-    - oldest-first ordering deterministic on tie-break (V8 stable
-      sort)
+  Why it was deleted instead of tuned: the gate scored Jaccard(candidate, UNION
+  of all siblings' tokens) — a ceiling that shrinks as the corpus grows
+  (measured 0.03–0.15 against the 0.7 threshold); `touch()`, the only
+  `usageCount` raiser, had zero production callers; the real store held 15 rows
+  with 0 eligible. Every default-ON session paid a second store write and
+  injected an EMPTY block. Phase 2's `memory_summary.md` (System C,
+  `memory-summary-aggregate-coalesce`) already carries every fact those raw
+  summaries held, into the SAME `session_ctx` section, LLM-deduplicated.
+  Reviving B would have put ~4.5× C's bytes of stale raw summaries into the
+  cached prefix for zero new facts. Re-deriving a threshold from n=15 is an
+  arbitrary heuristic (rejected).
 evidence:
   code:
-    - src/memory/cross-session/port.ts
-    - src/memory/cross-session/types.ts
-    - src/memory/cross-session/default-injector.ts
-    - src/memory/cross-session/prompt-section.ts
-    - src/memory/cross-session/index.ts
+    - src/runner/session-memory-auto.ts
+    - src/agent/memory-consolidator-hook.ts
   adrs:
+    - docs/decisions/0556-remove-cross-session-inject.md
     - docs/decisions/0282-cross-session-memory-inject.md
     - docs/decisions/0281-memory-auto-trigger.md
     - docs/decisions/0207-stage1-outputs-persist.md
   tests:
     unit:
-      - tests/unit/memory-consolidator-hook-hellgate.test.ts
+      - tests/unit/memory/cross-session-inject-removed-ratchet.test.ts
     integration: []
     contract: []
-knobs:
-  - name: InjectOpts.maxBytes
-    default: 'DEFAULT_INJECT_MAX_BYTES=8192'
-    purpose: 'hard cap on Σ rolloutSummary bytes'
-  - name: InjectOpts.kindFilter
-    default: 'undefined'
-    purpose: 'optional first-token startsWith filter (OMIT semantics)'
-  - name: DEFAULT_INJECT_MAX_BYTES
-    default: 'undefined'
-    purpose: '8 KiB'
-  - name: MEMORY_SECTION_HEADER
-    default: 'undefined'
-    purpose: '''## Cross-session memory (auto)'''
-  - name: DefaultCrossSessionInjectorOpts.stage1Store
-    default: 'undefined'
-    purpose: 'Stage1OutputsStore (sibling read port)'
-deliberate_hold:
-  reason: |
-    Untrusted-aggregate wrapper around the injected section is NOT yet
-    applied here — Phase 2's `memory_summary.md` already has it; the
-    cross-session inject runs ALONGSIDE that, not inside it. A
-    follow-up ADR adds the wrapper if/when entries can carry
-    user-written fragments (today they are LLM-distilled only).
-  promotion_path: |
-    1. Decide wrapper format (likely identical to memory_summary.md's
-       `<UNTRUSTED_AGGREGATE>…</UNTRUSTED_AGGREGATE>`);
-    2. Apply in `renderMemorySection` (1-line wrap) when a config
-       flag opts in;
-    3. Adversarial test for prompt-injection (a malicious
-       rolloutSummary that says "ignore previous instructions" must
-       NOT change behavior).
+knobs: []
+deliberate_hold: null
 notes: |
-  Pairs with `memory-auto-trigger` (ADR-0281 — the write half).
-  Prompt-cache friendly: `cache:true` on the produced block keeps the
-  Anthropic breakpoint stable. Oldest-first sort is deliberate (NEW
-  entries appearing at the END of the prefix invalidate fewer cache
-  hits than NEW entries appearing at the START).
+  Retired, not held: there is no promotion path for this entry. A future
+  relevance-scored session-start inject is a NEW catalog entry and must (per
+  ADR-0556) read a source that is NOT already summarized into
+  `memory_summary.md`, use a threshold measured on real data (not a guessed
+  constant), and prove a non-empty, non-duplicate block on a fixture before it
+  touches the cached prefix. The H16 auto-dream (`auto-dream`) survives; it now
+  reads the sqlite `Stage1StorePort` directly.

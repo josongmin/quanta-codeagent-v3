@@ -548,17 +548,6 @@ export interface WireSlotsSessionConfig {
    */
   threadToolRegistry?: import("../thread-tools").ThreadToolRegistry
   /**
-   * ADR-0207 wire (helper-only slot) — per-thread Stage-1 distillation
-   * usage/selection cache. SIBLING to `memoryConsolidator.store` (which
-   * owns the watermark/promotion surface); this slot owns the
-   * `get/put/touch/markSelectedForPhase2/list/prune` surface so future
-   * phase1-completion hooks can mirror the entry and Phase 2 candidate
-   * selectors can read across runs. Absent ⇒ no consumer touches it
-   * (byte-identical default-OFF — RFC §1.2). The loop never reads this
-   * slot directly today.
-   */
-  stage1OutputsStore?: import("../../memory/stage1-store").Stage1OutputsStore
-  /**
    * ADR-0235 — per-turn shell-snapshot wire (caller-side composition).
    * Sibling to ADR-0204 (the snapshot primitive). When set, the loop
    * captures a snapshot at turn-start (`captureAtTurnStart`, default `true`)

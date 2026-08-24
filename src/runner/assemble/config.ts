@@ -111,9 +111,6 @@ export interface SessionDeps {
    *  consume this to keep `previous_response_id` state off shared adapter
    *  instances. */
   responsesContinuation?: AgentConfig["responsesContinuation"]
-  /** ADR-0207 helper-only usage/selection cache for cross-session memory
-   *  injection and promotion bookkeeping. */
-  stage1OutputsStore?: AgentConfig["stage1OutputsStore"]
   /** ADR-0215 / ADR-0239 automation engine slot. Absent ⇒ no ticker and no
    *  `automation_update` default tool registration. */
   automationEngine?: AgentConfig["automationEngine"]
@@ -319,7 +316,6 @@ const buildExecutionPlaneSpreads = (d: SessionDeps): Partial<AgentConfig> => ({
   ...(d.responsesContinuation !== undefined
     ? { responsesContinuation: d.responsesContinuation }
     : {}),
-  ...(d.stage1OutputsStore !== undefined ? { stage1OutputsStore: d.stage1OutputsStore } : {}),
   ...(d.automationEngine !== undefined ? { automationEngine: d.automationEngine } : {}),
   ...(d.sessionConfigPort !== undefined ? { sessionConfigPort: d.sessionConfigPort } : {}),
 })

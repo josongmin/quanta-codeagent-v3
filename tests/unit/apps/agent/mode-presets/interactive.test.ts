@@ -117,7 +117,6 @@ describe("interactive.runMode — hermetic via seams.runAgent", () => {
       },
       reinjectEveryN: 3,
     } as never
-    const stage1OutputsStore = { put: () => undefined } as never
     const base = {
       llm: fakeLlm,
       registry: new ToolRegistry(defaultTools),
@@ -132,7 +131,6 @@ describe("interactive.runMode — hermetic via seams.runAgent", () => {
       sessionId: "interactive-test-session",
       planMode: false,
       sessionCtx: "ctx",
-      stage1OutputsStore,
       toolProfileState,
       identityModeState,
       focusChain,

@@ -143,6 +143,8 @@ export interface RuntimeWireSummary {
   }
   readonly memoryAuto: {
     readonly sessionCtx: boolean
+    /** ADR-0556 — always `false`; the sibling JSONL stage1 store was deleted.
+     *  Kept so the wire shape is stable for SDK / headless consumers. */
     readonly stage1OutputsStore: boolean
     readonly memoryConsolidator: boolean
     readonly memoryConsolidatorEnabled: boolean
@@ -299,7 +301,9 @@ const summarizeRuntimeSnapshot = (snapshot: RuntimeContextSnapshot): RuntimeWire
   },
   memoryAuto: {
     sessionCtx: snapshot.sessionCtx !== undefined,
-    stage1OutputsStore: snapshot.stage1OutputsStore !== undefined,
+    // ADR-0556: the sibling JSONL stage1 store is gone. The key stays so the
+    // SDK / headless wire shape is unchanged; its value is now always `false`.
+    stage1OutputsStore: false,
     memoryConsolidator: snapshot.memoryConsolidator !== undefined,
     memoryConsolidatorEnabled: snapshot.memoryConsolidator?.enabled === true,
   },

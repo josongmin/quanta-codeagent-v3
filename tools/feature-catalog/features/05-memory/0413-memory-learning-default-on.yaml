@@ -21,8 +21,6 @@ config_refs:
     - QUANTA_MEMORY_DISTILL
     - QUANTA_MEMORY_CONSOLIDATE
     - QUANTA_MEMORY_SELF_EDIT
-    - QUANTA_MEMORY_THRESHOLD
-    - QUANTA_MEMORY_MIN_USAGE
 surface_integration:
   cli: full
   web: na

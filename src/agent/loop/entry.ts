@@ -61,9 +61,6 @@ export const runAgent = async (config: AgentConfig): Promise<AgentOutcome> => {
             sessionId: config.sessionId,
             rolloutMessages: outcome.messages,
             turnCount: outcome.turns,
-            ...(config.stage1OutputsStore !== undefined
-              ? { stage1OutputsStore: config.stage1OutputsStore }
-              : {}),
             signal: config.signal,
           },
           (event) => {

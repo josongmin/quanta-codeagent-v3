@@ -35,8 +35,6 @@ import {
   type Stage1StorePort,
   type WatermarkState,
 } from "@/memory"
-import { DEFAULT_TRIGGER_POLICY, type TriggerPolicy } from "@/memory/auto-trigger"
-import type { Stage1Entry, Stage1OutputsStore } from "@/memory/stage1-store"
 import { errMessage } from "@/shared"
 
 /** Outcome of a session-end consolidator attempt. Mirrors `Phase1Outcome`
@@ -89,8 +87,6 @@ export interface ConsolidatorHookInput {
         threadId?: string
         /** Optional redactor — see {@link DistillRedactor}. */
         redact?: DistillRedactor
-        /** Resolved memory-auto promotion policy. */
-        promotionPolicy?: TriggerPolicy
       }
     | undefined
   /** Session id — fallback for `threadId` when consolidator.threadId is unset. */
@@ -101,10 +97,6 @@ export interface ConsolidatorHookInput {
   /** Real (non-meta) turn count from the session — drives the
    *  MIN_TURN_THRESHOLD skip arm. */
   readonly turnCount: number
-  /** Optional sibling stage1 usage/selection cache mirror. When present, a
-   *  successful Phase 1 distill also writes a selected-for-phase2 row here so
-   *  future session-start injectors can reuse it. */
-  readonly stage1OutputsStore?: Stage1OutputsStore
   /** Optional caller cancellation propagated to the Phase 1 port. */
   readonly signal?: AbortSignal
   /** Injected clock — defaults to `Date.now`. */
@@ -166,61 +158,6 @@ const emitObservation = <E>(observer: ((event: E) => void) | undefined, event: E
     // No-throw contract: an observer is advisory; its failure must never
     // derail the session-finishing / session-start path it reports on.
   }
-}
-
-const mirrorStage1ToOutputsStore = (
-  slot: Stage1OutputsStore | undefined,
-  out: Phase1Outcome & { kind: "distilled" },
-  generatedAtMs: number,
-  policy: TriggerPolicy,
-): void => {
-  if (slot === undefined) return
-  const selected = shouldPromoteForInjection(out.stage1.rolloutSummary, slot, policy)
-  const entry: Stage1Entry = {
-    threadId: out.stage1.threadId,
-    sourceUpdatedAt: out.stage1.sourceUpdatedAt,
-    rawMemory: out.stage1.rawMemory,
-    rolloutSummary: out.stage1.rolloutSummary,
-    generatedAt: generatedAtMs,
-    rolloutSlug: out.stage1.rolloutSlug,
-    // The completed source session is the first observed use. Without this
-    // seed, the injector's minUsage:1 defense can never admit a new row.
-    usageCount: 1,
-    lastUsage: generatedAtMs,
-    selectedForPhase2: selected,
-    ...(selected ? { selectedForPhase2SourceUpdatedAt: out.stage1.sourceUpdatedAt } : {}),
-  }
-  slot.put(entry)
-}
-
-const tokenize = (text: string): Set<string> =>
-  new Set(text.toLowerCase().match(/[a-z0-9]+/g) ?? [])
-
-const lexicalOverlap = (summary: string, siblings: readonly Stage1Entry[]): number => {
-  const candidate = tokenize(summary)
-  if (candidate.size === 0) return 0
-  const corpus = new Set<string>()
-  for (const sibling of siblings) {
-    for (const token of tokenize(sibling.rolloutSummary)) corpus.add(token)
-  }
-  if (corpus.size === 0) return 0
-  let intersection = 0
-  for (const token of candidate) if (corpus.has(token)) intersection++
-  return intersection / (candidate.size + corpus.size - intersection)
-}
-
-const shouldPromoteForInjection = (
-  summary: string,
-  store: Stage1OutputsStore,
-  policy: TriggerPolicy,
-): boolean => {
-  if (1 < policy.minUsageCount || policy.promoteThreshold > 1) return false
-  if (policy.promoteThreshold <= 0) return true
-  const siblings = store.list()
-  // The first durable entry has no corpus to score against; keeping it makes
-  // default-on cross-session memory reachable without a synthetic touch.
-  if (siblings.length === 0) return true
-  return lexicalOverlap(summary, siblings) >= policy.promoteThreshold
 }
 
 /** Run the consolidator hook. ALL failure paths return an outcome — the
@@ -296,19 +233,9 @@ const runMemoryConsolidatorHookInner = async (
   if (outcome.kind === "skipped") {
     return { kind: "skipped", reason: outcome.reason }
   }
-  try {
-    mirrorStage1ToOutputsStore(
-      input.stage1OutputsStore,
-      outcome,
-      (input.now ?? Date.now)(),
-      cfg.promotionPolicy ?? DEFAULT_TRIGGER_POLICY,
-    )
-  } catch (e) {
-    return {
-      kind: "error",
-      message: `stage1OutputsStore mirror failed: ${errMessage(e)}`,
-    }
-  }
+  // ADR-0556: the sqlite `upsert` inside `runPhase1` is the ONE durable write
+  // per session end. The former JSONL mirror (+ its lexical promotion gate)
+  // fed a session-start injector that selected nothing in practice; it is gone.
   return { kind: "distilled", durationMs: outcome.durationMs, threadId }
 }
 

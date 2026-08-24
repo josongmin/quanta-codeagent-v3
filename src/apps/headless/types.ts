@@ -112,6 +112,8 @@ export interface HeadlessRuntimeWires {
   }
   readonly memoryAuto: {
     readonly sessionCtx: boolean
+    /** ADR-0556 — always `false` (the sibling JSONL stage1 store was
+     *  deleted). Kept in the contract so consumers' shape is unchanged. */
     readonly stage1OutputsStore: boolean
     readonly memoryConsolidator: boolean
     readonly memoryConsolidatorEnabled: boolean
