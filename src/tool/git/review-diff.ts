@@ -19,7 +19,13 @@ import { z } from "zod"
 import type { DiffSource, DiffSourceUnavailableReason, GitDiffOperation } from "@/git"
 import { applyGeneratedFilter, diffSourceSchema, resolveDiffSource } from "@/git"
 import { errMessage } from "@/shared"
-import type { ReviewerRequest, ReviewerResult, Tool, ToolContext, ToolEvent } from "../types"
+import type {
+  ReviewerRequest,
+  ReviewerResult,
+  ReviewerToolContext,
+  Tool,
+  ToolEvent,
+} from "../types"
 import { safeRun, stderrReason } from "./_shared"
 import { emitReviewCanvasDiffs } from "./review-diff-canvas"
 import {
@@ -356,7 +362,7 @@ type DiffOutcome =
 const extractDiff = async (
   runner: GitRunner,
   args: string[],
-  ctx: ToolContext,
+  ctx: ReviewerToolContext,
 ): Promise<DiffOutcome> => {
   const out = await safeRun(runner, args, ctx.cwd, "git diff", ctx.signal)
   if (out.kind === "spawn-error") return { kind: "deny", output: out.message }
@@ -370,7 +376,7 @@ const extractDiff = async (
   return { kind: "ok", body }
 }
 
-const buildReviewerRequest = (prompt: string, ctx: ToolContext): ReviewerRequest => {
+const buildReviewerRequest = (prompt: string, ctx: ReviewerToolContext): ReviewerRequest => {
   const childDepth = (typeof ctx.depth === "number" && ctx.depth >= 0 ? ctx.depth : 0) + 1
   return {
     prompt,
@@ -393,7 +399,7 @@ export const gitReviewDiffTool = (runner: GitRunner): Tool<GitReviewDiffInput> =
   isConcurrencySafe: () => true,
   hitlTier: () => "none",
 
-  async *execute(input: GitReviewDiffInput, ctx: ToolContext): AsyncIterable<ToolEvent> {
+  async *execute(input: GitReviewDiffInput, ctx: ReviewerToolContext): AsyncIterable<ToolEvent> {
     const prep = await prepareArgs(input, runner, ctx)
     if (prep.kind === "deny") {
       yield { type: "result", result: { ok: false, output: prep.output } }
@@ -463,7 +469,7 @@ type FinalArgs =
 const enumerateChangedPaths = async (
   prep: Extract<PreparedDiff, { kind: "ok" }>,
   runner: GitRunner,
-  ctx: ToolContext,
+  ctx: ReviewerToolContext,
 ): Promise<{ kind: "deny"; output: string } | { kind: "ok"; paths: string[] }> => {
   const nameArgs = [
     "diff",
@@ -488,7 +494,7 @@ const enumerateChangedPaths = async (
 const finalizeArgs = async (
   prep: Extract<PreparedDiff, { kind: "ok" }>,
   runner: GitRunner,
-  ctx: ToolContext,
+  ctx: ReviewerToolContext,
 ): Promise<FinalArgs> => {
   if (!prep.filterGenerated) {
     return { kind: "ok", argv: withPaths(prep.rangeArgs, prep.paths) }
@@ -514,7 +520,7 @@ const finalizeArgs = async (
  *  findings already went back to the model). */
 const maybeEmitReviewCanvas = async (
   runner: GitRunner,
-  ctx: ToolContext,
+  ctx: ReviewerToolContext,
   args: {
     unifiedDiff: string
     findings: readonly ReviewFinding[]
@@ -617,7 +623,7 @@ const sourcePrepared = async (
   source: DiffSource,
   data: GitReviewDiffInput,
   runner: GitRunner,
-  ctx: ToolContext,
+  ctx: ReviewerToolContext,
 ): Promise<PreparedDiff> => {
   const port = gitRunnerReadPort(runner, ctx.cwd, ctx.signal)
   const res = await resolveDiffSource(source, port)
@@ -674,7 +680,7 @@ const prepareSource = async (
   source: FrontDoorSource,
   data: GitReviewDiffInput,
   runner: GitRunner,
-  ctx: ToolContext,
+  ctx: ReviewerToolContext,
 ): Promise<PreparedDiff> => {
   switch (source.kind) {
     case "branch-base":
@@ -695,7 +701,7 @@ const prepareSource = async (
 const prepareArgs = async (
   input: GitReviewDiffInput,
   runner: GitRunner,
-  ctx: ToolContext,
+  ctx: ReviewerToolContext,
 ): Promise<PreparedDiff> => {
   const parsed = gitReviewDiffInputSchema.safeParse(input)
   if (!parsed.success) {
@@ -723,7 +729,7 @@ const emptyDiffResult = () => {
  *  `ToolResult` shape (ok+structured | ok+freeText | ok:false+message).
  *  Pulled out of `execute()` so the generator stays under the cog cap. */
 const invokeReviewer = async (
-  reviewer: NonNullable<ToolContext["reviewerAgent"]>,
+  reviewer: NonNullable<ReviewerToolContext["reviewerAgent"]>,
   req: ReviewerRequest,
 ): Promise<{ ok: boolean; output: string; structured?: ReviewReport }> => {
   let reviewerResult: ReviewerResult

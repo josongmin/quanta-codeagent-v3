@@ -22,7 +22,7 @@
 
 import { z } from "zod"
 import { errMessage } from "@/shared"
-import type { Tool, ToolContext, ToolEvent, ToolResult } from "../types"
+import type { AgentIdentityToolContext, Tool, ToolEvent, ToolResult } from "../types"
 
 /** The slice of `TeamRegistryPort` these tools need (duck-typed). */
 export interface TeamRegistryWriter {
@@ -54,7 +54,7 @@ const errResult = (msg: string): ToolResult => ({ ok: false, output: msg })
 
 /** The caller's stable mailbox identity (so `team_create` auto-adds the caller
  *  to its own team). Mirrors the subagent-mailbox tool's id derivation. */
-const callerId = (ctx: ToolContext): string =>
+const callerId = (ctx: AgentIdentityToolContext): string =>
   typeof ctx.agentLabel === "string" && ctx.agentLabel.length > 0 ? ctx.agentLabel : "root"
 
 const buildTeamCreate = (registry: TeamRegistryWriter): Tool<TeamCreateInput> => ({
@@ -67,7 +67,7 @@ const buildTeamCreate = (registry: TeamRegistryWriter): Tool<TeamCreateInput> =>
   isReadOnly: () => false,
   isConcurrencySafe: () => false,
   hitlTier: () => "pre-approval-ok",
-  async *execute(input, ctx: ToolContext): AsyncIterable<ToolEvent> {
+  async *execute(input, ctx: AgentIdentityToolContext): AsyncIterable<ToolEvent> {
     const parsed = teamCreateSchema.safeParse(input)
     if (!parsed.success) {
       yield { type: "result", result: errResult(`invalid input: ${parsed.error.message}`) }
@@ -104,7 +104,7 @@ const buildTeamDelete = (registry: TeamRegistryWriter): Tool<TeamDeleteInput> =>
   isReadOnly: () => false,
   isConcurrencySafe: () => false,
   hitlTier: () => "pre-approval-ok",
-  async *execute(input, ctx: ToolContext): AsyncIterable<ToolEvent> {
+  async *execute(input, ctx: AgentIdentityToolContext): AsyncIterable<ToolEvent> {
     const parsed = teamDeleteSchema.safeParse(input)
     if (!parsed.success) {
       yield { type: "result", result: errResult(`invalid input: ${parsed.error.message}`) }

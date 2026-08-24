@@ -634,6 +634,41 @@ export type EditToolContext = CoreToolContext &
 export type PlanToolContext = CoreToolContext &
   Pick<ToolContext, "planMutator" | "requestPlanExit" | "enterPlanMode">
 
-/** Subagent / mailbox / reviewer tools (identity + child-loop seams). */
-export type SubagentToolContext = CoreToolContext &
-  Pick<ToolContext, "agentLabel" | "parentAgentLabel" | "workingState" | "reviewerAgent">
+/**
+ * Tools that need to know WHICH agent is calling them.
+ *
+ * Split out of a former `SubagentToolContext`, which bundled these identity
+ * seams together with `reviewerAgent` and `workingState` and had ZERO consumers
+ * as a result. Measured before splitting: no module under `src/tool` reads
+ * `reviewerAgent` and an identity seam in the same file — not one. The old view
+ * described a role nobody plays, which is exactly why nothing ever narrowed to
+ * it, and a role view with no consumer cannot make a capability grant a type
+ * error.
+ *
+ * `bash` also reads `agentLabel`, but for the background-process mailbox rather
+ * than for identity, and it needs the shell seams besides — so it narrows to
+ * {@link ShellToolContext}, which carries its own copy. Two views naming the
+ * same seam is not duplication here; they are answering different questions.
+ */
+export type AgentIdentityToolContext = CoreToolContext &
+  Pick<ToolContext, "agentLabel" | "parentAgentLabel">
+
+/**
+ * Tools that can SPAWN a reviewer child-loop.
+ *
+ * The narrowest seam in this file that actually matters: `reviewerAgent` runs a
+ * whole nested agent. A read-class tool that quietly gained it would be a
+ * capability grant with no diff to review, and this view is what makes that a
+ * compile error instead.
+ */
+export type ReviewerToolContext = CoreToolContext & Pick<ToolContext, "reviewerAgent">
+
+/**
+ * The working-state writer.
+ *
+ * One consumer (`update-working-state`), so this is deliberately NOT presented
+ * as a "role" — it is a precise `Pick` for the single tool that mutates the
+ * pane. Naming it anyway keeps `workingState` from drifting back into a wider
+ * bundle the way it did in the view this replaced.
+ */
+export type WorkingStateToolContext = CoreToolContext & Pick<ToolContext, "workingState">

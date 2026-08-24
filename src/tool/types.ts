@@ -84,12 +84,14 @@ export type {
  * keeps its byte-identical public API.
  */
 export type {
+  AgentIdentityToolContext,
   CoreToolContext,
   EditToolContext,
   PlanToolContext,
+  ReviewerToolContext,
   ShellToolContext,
-  SubagentToolContext,
   ToolContext,
+  WorkingStateToolContext,
 } from "./types/tool-context"
 
 /**

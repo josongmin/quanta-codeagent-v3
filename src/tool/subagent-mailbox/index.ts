@@ -44,7 +44,7 @@
 
 import { z } from "zod"
 import { errMessage, escapeBodyForLine } from "@/shared"
-import type { Tool, ToolContext, ToolEvent, ToolResult } from "../types"
+import type { AgentIdentityToolContext, Tool, ToolEvent, ToolResult } from "../types"
 
 /** The mailbox protocol this LLM-facing surface actually consumes. It is
  * deliberately narrower than the host-owned store: send/read/peek/pending are
@@ -144,7 +144,7 @@ const usableLabel = (v: unknown): v is string => typeof v === "string" && v.leng
  *  a child at depth N ⇒ "agent@depth-N". Correct for root↔single-child, but
  *  COLLAPSES same-depth siblings onto one label — which is exactly why the
  *  stable `agentLabel` seam exists (audit H). */
-const depthLabel = (ctx: ToolContext): string => {
+const depthLabel = (ctx: AgentIdentityToolContext): string => {
   const d = ctx.depth
   const depth = typeof d === "number" && Number.isFinite(d) && d >= 0 ? Math.floor(d) : 0
   // F1 (jul-15) SSOT: a root caller's manual-read id MUST be the SAME label the
@@ -156,7 +156,7 @@ const depthLabel = (ctx: ToolContext): string => {
  *  `ctx.agentLabel` (deterministic per-agent id from the subagent runner);
  *  FALLS BACK to the depth-derived label so a legacy caller that sets only
  *  `ctx.depth` is byte-identical. */
-const senderId = (ctx: ToolContext): string =>
+const senderId = (ctx: AgentIdentityToolContext): string =>
   usableLabel(ctx.agentLabel) ? ctx.agentLabel : depthLabel(ctx)
 
 /** Resolve the literal target `"parent"`. PREFERS the stable
@@ -165,7 +165,7 @@ const senderId = (ctx: ToolContext): string =>
  *  depth arithmetic (a depth-N child's parent is depth N-1) when the stable
  *  parent label is absent. Everything else (a concrete id or `"*"`) passes
  *  through verbatim. */
-const resolveTarget = (to: string, ctx: ToolContext): string => {
+const resolveTarget = (to: string, ctx: AgentIdentityToolContext): string => {
   if (to !== "parent") return to
   if (usableLabel(ctx.parentAgentLabel)) return ctx.parentAgentLabel
   const d = ctx.depth
@@ -190,7 +190,7 @@ type ResolvedAddress =
  *  the verbatim/parent path so concrete ids and legacy addresses stay compatible. */
 const resolveNamedOrVerbatim = (
   to: string,
-  ctx: ToolContext,
+  ctx: AgentIdentityToolContext,
   resolveNamedTarget: ResolveNamedTarget | undefined,
 ): ResolvedAddress => {
   if (resolveNamedTarget !== undefined && to !== "parent" && to !== "*") {
@@ -236,7 +236,7 @@ const buildSubagentSendMessage = (
   isReadOnly: () => false,
   isConcurrencySafe: () => false,
   hitlTier: () => "pre-approval-ok",
-  async *execute(input, ctx: ToolContext): AsyncIterable<ToolEvent> {
+  async *execute(input, ctx: AgentIdentityToolContext): AsyncIterable<ToolEvent> {
     const parsed = subagentSendMessageSchema.safeParse(input)
     if (!parsed.success) {
       yield { type: "result", result: errResult(`invalid input: ${parsed.error.message}`) }
@@ -359,7 +359,7 @@ const buildSubagentReadMessages = (
   isReadOnly: () => true,
   isConcurrencySafe: () => false,
   hitlTier: () => "pre-approval-ok",
-  async *execute(input, ctx: ToolContext): AsyncIterable<ToolEvent> {
+  async *execute(input, ctx: AgentIdentityToolContext): AsyncIterable<ToolEvent> {
     const parsed = subagentReadMessagesSchema.safeParse(input)
     if (!parsed.success) {
       yield { type: "result", result: errResult(`invalid input: ${parsed.error.message}`) }

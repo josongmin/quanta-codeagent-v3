@@ -44,7 +44,7 @@ import type { LLMPort, Message, StreamEvent } from "@/llm"
 // allow-listing this one reviewed edge (@/llm/assemble). See slice-boundary-configs.
 import { assembleFromEvents } from "@/llm/assemble"
 import { byteCompare, errMessage } from "@/shared"
-import type { Tool, ToolContext, ToolEvent } from "../types"
+import type { ReviewerToolContext, Tool, ToolEvent } from "../types"
 import { safeRun, stderrReason } from "./_shared"
 import {
   type GitComposeCommitInput,
@@ -497,7 +497,7 @@ type DiffOutcome =
 const classifyDiff = async (
   runner: GitRunner,
   args: readonly string[],
-  ctx: ToolContext,
+  ctx: ReviewerToolContext,
 ): Promise<DiffOutcome> => {
   const out = await safeRun(runner, args, ctx.cwd, "git diff", ctx.signal)
   if (out.kind === "spawn-error") return { kind: "deny", output: out.message }
@@ -556,7 +556,7 @@ export const gitComposeCommitTool = (
   isConcurrencySafe: () => true,
   hitlTier: () => "none",
 
-  async *execute(input: GitComposeCommitInput, ctx: ToolContext): AsyncIterable<ToolEvent> {
+  async *execute(input: GitComposeCommitInput, ctx: ReviewerToolContext): AsyncIterable<ToolEvent> {
     const parsed = gitComposeCommitInputSchema.safeParse(input)
     if (!parsed.success) {
       yield {
@@ -630,7 +630,7 @@ export const composePrText = async (
   runner: GitRunner,
   authorLLM: LLMPort,
   input: GitComposePrInput,
-  ctx: ToolContext,
+  ctx: ReviewerToolContext,
   onProgress?: (message: string) => void,
 ): Promise<ComposePrOutcome> => {
   const parsed = gitComposePrInputSchema.safeParse(input)
@@ -685,7 +685,7 @@ export const gitComposePrTool = (
   isConcurrencySafe: () => true,
   hitlTier: () => "none",
 
-  async *execute(input: GitComposePrInput, ctx: ToolContext): AsyncIterable<ToolEvent> {
+  async *execute(input: GitComposePrInput, ctx: ReviewerToolContext): AsyncIterable<ToolEvent> {
     const messages: ToolEvent[] = []
     const out = await composePrText(runner, authorLLM, input, ctx, (message) => {
       messages.push({ type: "progress", message })

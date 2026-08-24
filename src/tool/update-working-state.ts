@@ -1,10 +1,10 @@
 import { z } from "zod"
 import type {
   Tool,
-  ToolContext,
   ToolEvent,
   WorkingStateHandle,
   WorkingStateSnapshot,
+  WorkingStateToolContext,
 } from "./types"
 
 /**
@@ -183,7 +183,7 @@ export const createUpdateWorkingStateTool = (
   // and reversible (the next `mutate` is a full replacement).
   hitlTier: (): "pre-approval-ok" => "pre-approval-ok",
 
-  async *execute(input: Input, ctx: ToolContext): AsyncIterable<ToolEvent> {
+  async *execute(input: Input, ctx: WorkingStateToolContext): AsyncIterable<ToolEvent> {
     const h = handle ?? ctx.workingState
     if (!h) {
       yield {

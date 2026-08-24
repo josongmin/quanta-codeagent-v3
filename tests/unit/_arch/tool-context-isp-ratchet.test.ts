@@ -106,7 +106,19 @@ describe("tool-context ISP ratchet", () => {
       .filter((f) => !f.endsWith("tool-context.ts") && !f.endsWith("src/tool/types.ts"))
       .map((f) => readFileSync(f, "utf8"))
       .join("\n")
-    for (const view of ["CoreToolContext", "ShellToolContext", "EditToolContext"]) {
+    // `AgentIdentityToolContext` and `ReviewerToolContext` are here because
+    // their predecessor is the cautionary tale: a single `SubagentToolContext`
+    // bundled the identity seams WITH `reviewerAgent`, and had zero consumers
+    // for a measurable reason — no module under `src/tool` reads `reviewerAgent`
+    // and an identity seam in the same file, so the view described a role nobody
+    // plays. Splitting it gave each half real consumers; this keeps them.
+    for (const view of [
+      "CoreToolContext",
+      "ShellToolContext",
+      "EditToolContext",
+      "AgentIdentityToolContext",
+      "ReviewerToolContext",
+    ]) {
       expect(new RegExp(`\\b${view}\\b`).test(body), `${view} has no consumer`).toBe(true)
     }
   })
