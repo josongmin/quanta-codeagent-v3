@@ -26,7 +26,7 @@
 import path from "node:path"
 import { z } from "zod"
 import { errMessage } from "@/shared"
-import type { Tool, ToolContext, ToolEvent } from "../types"
+import type { CoreToolContext, Tool, ToolEvent } from "../types"
 import { safeRun, stderrReason } from "./_shared"
 import { type ConflictParseResult, parseConflicts } from "./conflict-parser"
 import type { GitRunner } from "./types"
@@ -208,7 +208,7 @@ interface DiscoverOutcome {
   readonly errorOutput?: string
 }
 
-const discoverPaths = async (runner: GitRunner, ctx: ToolContext): Promise<DiscoverOutcome> => {
+const discoverPaths = async (runner: GitRunner, ctx: CoreToolContext): Promise<DiscoverOutcome> => {
   const out = await safeRun(runner, ["status", "--porcelain=v1"], ctx.cwd, "git status", ctx.signal)
   if (out.kind === "spawn-error") return { ok: false, errorOutput: out.message }
   const r = out.result
@@ -227,7 +227,7 @@ type PathResolution =
 const resolvePaths = async (
   inputPaths: ReadonlyArray<string> | undefined,
   runner: GitRunner,
-  ctx: ToolContext,
+  ctx: CoreToolContext,
 ): Promise<PathResolution> => {
   if (inputPaths !== undefined) {
     const v = validatePaths(inputPaths)
@@ -260,7 +260,7 @@ export const gitConflictInspectTool = (runner: GitRunner): Tool<GitConflictInspe
   isReadOnly: () => true,
   isConcurrencySafe: () => true,
 
-  async *execute(input: GitConflictInspectInput, ctx: ToolContext): AsyncIterable<ToolEvent> {
+  async *execute(input: GitConflictInspectInput, ctx: CoreToolContext): AsyncIterable<ToolEvent> {
     const parsed = gitConflictInspectInputSchema.safeParse(input)
     if (!parsed.success) {
       yield {

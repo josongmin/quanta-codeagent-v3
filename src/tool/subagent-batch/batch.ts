@@ -11,7 +11,7 @@
  */
 
 import { z } from "zod"
-import type { Tool, ToolContext, ToolEvent } from "@/tool"
+import type { CoreToolContext, Tool, ToolEvent } from "@/tool"
 import { loadItems } from "./load-items"
 import type { BatchItemResult, BatchRunResult, SubagentBatchDeps } from "./port"
 import { type ChildSpawnOptions, deriveId, type RunBatchArgs, runBatch } from "./run-batch"
@@ -255,7 +255,7 @@ export const spawnBatchTool = (deps: SubagentBatchDeps): Tool<SpawnBatchInput> =
   isConcurrencySafe: () => true,
   hitlTier: () => "pre-approval-ok",
 
-  async *execute(input: SpawnBatchInput, ctx: ToolContext): AsyncIterable<ToolEvent> {
+  async *execute(input: SpawnBatchInput, ctx: CoreToolContext): AsyncIterable<ToolEvent> {
     const parsed = spawnBatchInputSchema.safeParse(input)
     if (!parsed.success) {
       yield errResult(`invalid input: ${parsed.error.message}`)

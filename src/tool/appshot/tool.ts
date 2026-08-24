@@ -26,7 +26,7 @@
 
 import { z } from "zod"
 import { defineTool } from "../factory"
-import type { Tool, ToolContext, ToolEvent, ToolResult } from "../types"
+import type { CoreToolContext, Tool, ToolEvent, ToolResult } from "../types"
 import {
   APPSHOT_MAX_ITER,
   APPSHOT_MIN_ITER,
@@ -158,7 +158,7 @@ export const appshotVerifyTool = (options: AppshotToolOptions): Tool<AppshotVeri
     // mutation — pre-approval covers it (mirrors `write` / `image_gen`).
     hitlTier: (): "pre-approval-ok" => "pre-approval-ok",
 
-    async *execute(input: AppshotVerifyInput, ctx: ToolContext): AsyncIterable<ToolEvent> {
+    async *execute(input: AppshotVerifyInput, ctx: CoreToolContext): AsyncIterable<ToolEvent> {
       const parsed = appshotVerifyInputSchema.safeParse(input)
       if (!parsed.success) {
         yield { type: "result", result: err(`invalid input: ${parsed.error.message}`) }

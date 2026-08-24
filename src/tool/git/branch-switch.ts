@@ -17,7 +17,7 @@
  *  name cannot escape the argv we hand to `git`. */
 
 import type { GitDirectiveEmitter } from "../../agent/git-directives"
-import type { Tool, ToolContext, ToolEvent } from "../types"
+import type { CoreToolContext, Tool, ToolEvent } from "../types"
 import { mutate } from "./_shared"
 import {
   type GitBranchSwitchInput,
@@ -195,7 +195,7 @@ export const gitBranchSwitchTool = (
   hitlTier: (input): "pre-approval-ok" | "always-confirm" =>
     input.dirtyAction === "discard" ? "always-confirm" : "pre-approval-ok",
 
-  async *execute(input: GitBranchSwitchInput, ctx: ToolContext): AsyncIterable<ToolEvent> {
+  async *execute(input: GitBranchSwitchInput, ctx: CoreToolContext): AsyncIterable<ToolEvent> {
     const parsed = gitBranchSwitchInputSchema.safeParse(input)
     if (!parsed.success) {
       yield failResult(`invalid input: ${parsed.error.message}`)

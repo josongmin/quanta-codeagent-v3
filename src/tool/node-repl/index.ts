@@ -30,7 +30,7 @@
 import { z } from "zod"
 import type { KernelId, NodeReplKernel } from "@/runtime/node-repl"
 import { errMessage } from "@/shared"
-import type { Tool, ToolContext, ToolEvent } from "../types"
+import type { CoreToolContext, Tool, ToolEvent } from "../types"
 
 const schema = z.object({
   op: z
@@ -105,7 +105,7 @@ interface SessionSlot {
 const ensureSessionKernel = async (
   kernel: NodeReplKernel,
   slot: SessionSlot,
-  ctx: ToolContext,
+  ctx: CoreToolContext,
 ): Promise<{ ok: true; id: KernelId } | { ok: false; output: string }> => {
   if (slot.id !== undefined) return { ok: true, id: slot.id }
   const spawned = await kernel.spawn({
@@ -155,7 +155,7 @@ const handleExec = async (
   kernel: NodeReplKernel,
   slot: SessionSlot,
   input: Input,
-  ctx: ToolContext,
+  ctx: CoreToolContext,
 ): Promise<ToolEvent> => {
   if (input.code === undefined || input.code === "")
     return fail("node_repl: op:'exec' requires non-empty `code`.")
@@ -213,7 +213,7 @@ export const makeNodeReplTool = (kernel: NodeReplKernel): Tool<Input> => {
     // Arbitrary Node code exec (full host access, no sandbox) ⇒ confirm every call.
     hitlTier: (): "always-confirm" => "always-confirm",
 
-    async *execute(input: Input, ctx: ToolContext): AsyncIterable<ToolEvent> {
+    async *execute(input: Input, ctx: CoreToolContext): AsyncIterable<ToolEvent> {
       if (ctx.signal?.aborted === true) {
         yield fail("node_repl: aborted before start")
         return

@@ -1,7 +1,7 @@
 import { z } from "zod"
 import { errMessage } from "@/shared"
 import { FsJailError, resolveJailed } from "@/storage"
-import type { Tool, ToolContext, ToolEvent } from "../types"
+import type { CoreToolContext, Tool, ToolEvent } from "../types"
 
 /**
  * `diagnostics` tool — surfaces language-server errors/warnings for one file.
@@ -119,7 +119,7 @@ export const diagnosticsTool = (provider: DiagnosticsProvider): Tool<Input> => (
   inputSchema: schema,
   isReadOnly: () => true,
   isConcurrencySafe: () => false,
-  async *execute(input: Input, ctx: ToolContext): AsyncIterable<ToolEvent> {
+  async *execute(input: Input, ctx: CoreToolContext): AsyncIterable<ToolEvent> {
     // S14: jail before opening — `path: "/etc/shadow"` would otherwise be
     // opened by the LSP. The branded JailedPath is the only path the LSP
     // provider may receive.

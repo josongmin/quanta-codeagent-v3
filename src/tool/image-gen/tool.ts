@@ -29,7 +29,7 @@ import { errMessage } from "@/shared"
 import { FsJailError, resolveJailed } from "@/storage"
 import type { ArtifactRegistryPort } from "../artifact"
 import { defineTool } from "../factory"
-import type { Tool, ToolContext, ToolEvent, ToolResult } from "../types"
+import type { CoreToolContext, Tool, ToolEvent, ToolResult } from "../types"
 import {
   type GeneratedImage,
   type ImageGenFormat,
@@ -500,7 +500,7 @@ const successResult = (
 /** Whole image-gen flow as ONE typed ToolResult (no generator branching). */
 const runImageGen = async (
   input: ImageGenInput,
-  ctx: ToolContext,
+  ctx: CoreToolContext,
   port: ImageGenPort,
   writePort: ImageWritePort,
   artifactRegistry: ArtifactRegistryPort | undefined,
@@ -564,7 +564,7 @@ export const imageGenTool = (options: ImageGenToolOptions = {}): Tool<ImageGenIn
     // be explicit: the mutating-tool fallback tier is `always-confirm`.
     hitlTier: (): "pre-approval-ok" => "pre-approval-ok",
 
-    async *execute(input: ImageGenInput, ctx: ToolContext): AsyncIterable<ToolEvent> {
+    async *execute(input: ImageGenInput, ctx: CoreToolContext): AsyncIterable<ToolEvent> {
       yield {
         type: "result",
         result: await runImageGen(input, ctx, port, writePort, artifactRegistry),

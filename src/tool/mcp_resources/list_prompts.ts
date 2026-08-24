@@ -3,7 +3,7 @@
  *  envelope wraps it at dispatch. */
 
 import { z } from "zod"
-import type { Tool, ToolContext, ToolEvent } from "../types"
+import type { CoreToolContext, Tool, ToolEvent } from "../types"
 import type { ResourcesHandle } from "./port"
 import { callPort, renderFailure, renderPromptList } from "./render"
 
@@ -19,7 +19,7 @@ export const mcpListPromptsTool = (port: ResourcesHandle): Tool<ListPromptsInput
   inputSchema: listPromptsInputSchema,
   isReadOnly: () => true,
   isConcurrencySafe: () => true,
-  async *execute(input: ListPromptsInput, ctx: ToolContext): AsyncIterable<ToolEvent> {
+  async *execute(input: ListPromptsInput, ctx: CoreToolContext): AsyncIterable<ToolEvent> {
     const parsed = listPromptsInputSchema.safeParse(input)
     if (!parsed.success) {
       yield {

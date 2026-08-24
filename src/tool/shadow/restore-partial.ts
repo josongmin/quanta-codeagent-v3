@@ -17,7 +17,7 @@
 
 import { z } from "zod"
 import { type ShadowOdb, ShadowOdbError } from "@/storage/shadow-odb"
-import type { Tool, ToolContext, ToolEvent } from "../types"
+import type { CoreToolContext, Tool, ToolEvent } from "../types"
 
 export const shadowRestorePartialInputSchema = z.object({
   paths: z
@@ -80,7 +80,7 @@ export const shadowRestorePartialTool = (odb: ShadowOdb): Tool<ShadowRestorePart
   // The blast radius is smaller (only listed paths), but the cost of a
   // mistake (silent overwrite of a file the user just edited) is the same.
   hitlTier: () => "always-confirm",
-  async *execute(input, ctx: ToolContext): AsyncIterable<ToolEvent> {
+  async *execute(input, ctx: CoreToolContext): AsyncIterable<ToolEvent> {
     const parsed = shadowRestorePartialInputSchema.safeParse(input)
     if (!parsed.success) {
       yield {

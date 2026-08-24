@@ -22,7 +22,7 @@ import {
   WorkflowSpecSchema,
 } from "@/workflow"
 import { defineTool } from "../factory"
-import type { Tool, ToolContext, ToolEvent } from "../types"
+import type { CoreToolContext, Tool, ToolEvent } from "../types"
 
 export interface RunWorkflowToolDeps {
   /** Bridge to a real subagent loop — each workflow `agent` step is one spawn. */
@@ -70,7 +70,7 @@ export const createRunWorkflowTool = (deps: RunWorkflowToolDeps): Tool<WorkflowS
     isReadOnly: () => false,
     // The spawned subagents may write; the workflow itself is not a pure read.
     isConcurrencySafe: () => false,
-    async *execute(input: WorkflowSpec, ctx: ToolContext): AsyncIterable<ToolEvent> {
+    async *execute(input: WorkflowSpec, ctx: CoreToolContext): AsyncIterable<ToolEvent> {
       // Defensive re-validation: dispatch validates `inputSchema`, but a direct
       // caller might not. Fail with a clean tool error, never a compile crash.
       const parsed = WorkflowSpecSchema.safeParse(input)

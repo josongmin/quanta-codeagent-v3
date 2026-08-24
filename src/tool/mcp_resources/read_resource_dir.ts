@@ -7,7 +7,7 @@
  *  blob-to-disk write makes it mutating). */
 
 import { z } from "zod"
-import type { Tool, ToolContext, ToolEvent } from "../types"
+import type { CoreToolContext, Tool, ToolEvent } from "../types"
 import type { McpResourceCaptureHolder } from "./capture"
 import type { ResourcesHandle } from "./port"
 import { callPort, renderFailure, renderResourceDirList } from "./render"
@@ -42,7 +42,7 @@ export const mcpReadResourceDirTool = (
   inputSchema: readResourceDirInputSchema,
   isReadOnly: () => true,
   isConcurrencySafe: () => true,
-  async *execute(input: ReadResourceDirInput, ctx: ToolContext): AsyncIterable<ToolEvent> {
+  async *execute(input: ReadResourceDirInput, ctx: CoreToolContext): AsyncIterable<ToolEvent> {
     const parsed = readResourceDirInputSchema.safeParse(input)
     if (!parsed.success) {
       yield {

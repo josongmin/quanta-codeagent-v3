@@ -19,7 +19,7 @@
  * become a `git` option.
  */
 import { z } from "zod"
-import type { Tool, ToolContext, ToolEvent } from "../types"
+import type { CoreToolContext, Tool, ToolEvent } from "../types"
 import { safeRun, stderrReason } from "./_shared"
 import { type ClassifyOptions, classifyDiff, parseUnifiedDiff } from "./moved-code"
 import type { GitRunner } from "./types"
@@ -208,7 +208,7 @@ export const gitMovedCodeTool = (runner: GitRunner): Tool<GitMovedCodeInput> => 
   isReadOnly: () => true,
   isConcurrencySafe: () => true,
 
-  async *execute(input: GitMovedCodeInput, ctx: ToolContext): AsyncIterable<ToolEvent> {
+  async *execute(input: GitMovedCodeInput, ctx: CoreToolContext): AsyncIterable<ToolEvent> {
     const parsed = gitMovedCodeInputSchema.safeParse(input)
     if (!parsed.success) {
       yield {

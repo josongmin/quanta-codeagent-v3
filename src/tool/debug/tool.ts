@@ -13,7 +13,7 @@ import { isAbsolute, resolve } from "node:path"
 import { pathToFileURL } from "node:url"
 import { z } from "zod"
 import { errMessage } from "@/shared"
-import type { Tool, ToolContext, ToolEvent } from "../types"
+import type { CoreToolContext, Tool, ToolEvent } from "../types"
 import { CdpClient, type CdpTransport } from "./cdp-client"
 import { inspectViaCdp } from "./cdp-inspect"
 import { DapClient } from "./dap-client"
@@ -171,7 +171,7 @@ export const makeDebugInspectTool = (
   // Launching a debug adapter executes the program (arbitrary code) ⇒ confirm.
   hitlTier: (): "always-confirm" => "always-confirm",
 
-  async *execute(input: Input, ctx: ToolContext): AsyncIterable<ToolEvent> {
+  async *execute(input: Input, ctx: CoreToolContext): AsyncIterable<ToolEvent> {
     if (ctx.signal?.aborted === true) {
       yield err("aborted before start")
       return

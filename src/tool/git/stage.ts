@@ -18,7 +18,7 @@
 import { z } from "zod"
 import type { GitDirective as Directive0220, GitDirectiveEmitter } from "../../agent/git-directives"
 import type { GitDirective as Directive0234, GitDirectiveCollector } from "../../git/directive-emit"
-import type { Tool, ToolContext, ToolEvent } from "../types"
+import type { CoreToolContext, Tool, ToolEvent } from "../types"
 import { mutate } from "./_shared"
 import type { GitRunner } from "./types"
 
@@ -106,7 +106,7 @@ export const gitStageTool = (
   isConcurrencySafe: () => false,
   hitlTier: (): "pre-approval-ok" => "pre-approval-ok",
 
-  async *execute(input: GitStageInput, ctx: ToolContext): AsyncIterable<ToolEvent> {
+  async *execute(input: GitStageInput, ctx: CoreToolContext): AsyncIterable<ToolEvent> {
     const parsed = gitStageInputSchema.safeParse(input)
     if (!parsed.success) {
       yield {

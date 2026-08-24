@@ -20,7 +20,7 @@
 import { z } from "zod"
 import { errMessage } from "@/shared"
 import type { ArtifactRegistryPort } from "../../artifact"
-import type { Tool, ToolContext, ToolEvent, ToolResult } from "../../types"
+import type { CoreToolContext, Tool, ToolEvent, ToolResult } from "../../types"
 import { OOXML_MEDIA_TYPES, registerArtifactBestEffort } from "./artifact-register"
 import { resolveVersionedJailedTarget, writeJailedBytes } from "./jailed-write"
 import { buildPptx, type PptxSlide, type PptxSpec } from "./pptx"
@@ -83,7 +83,7 @@ export const makePptxWriteTool = (options: PptxWriteToolOptions = {}): Tool<Pptx
   isReadOnly: () => false,
   isConcurrencySafe: () => false,
 
-  async *execute(input: PptxWriteInput, ctx: ToolContext): AsyncIterable<ToolEvent> {
+  async *execute(input: PptxWriteInput, ctx: CoreToolContext): AsyncIterable<ToolEvent> {
     const parsed = pptxWriteInputSchema.safeParse(input)
     if (!parsed.success) {
       yield { type: "result", result: errResult(`invalid input: ${parsed.error.message}`) }

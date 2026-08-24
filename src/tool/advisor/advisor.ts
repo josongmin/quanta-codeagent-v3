@@ -30,7 +30,7 @@
 
 import { z } from "zod"
 import { errMessage } from "@/shared"
-import type { Tool, ToolContext, ToolEvent, ToolFailure } from "../types"
+import type { CoreToolContext, Tool, ToolEvent, ToolFailure } from "../types"
 import type {
   AdvisorConsultRequest,
   AdvisorConsultResult,
@@ -134,7 +134,7 @@ export const advisorTool = (port: AdvisorPort): Tool<AdvisorInput> => ({
   isReadOnly: () => true,
   isConcurrencySafe: () => true,
   hitlTier: () => "none",
-  async *execute(input, ctx: ToolContext): AsyncIterable<ToolEvent> {
+  async *execute(input, ctx: CoreToolContext): AsyncIterable<ToolEvent> {
     const parsed = advisorInputSchema.safeParse(input)
     if (!parsed.success) {
       yield {

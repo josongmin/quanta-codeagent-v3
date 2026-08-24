@@ -1,5 +1,5 @@
 import { byteCompare } from "@/shared"
-import type { Tool, ToolContext, ToolEvent } from "../types"
+import type { CoreToolContext, Tool, ToolEvent } from "../types"
 import { safeRun, stderrReason } from "./_shared"
 import { type GitChurnInput, type GitRunner, gitChurnInputSchema } from "./types"
 
@@ -44,7 +44,7 @@ export const gitChurnTool = (runner: GitRunner): Tool<GitChurnInput> => ({
   isReadOnly: () => true,
   isConcurrencySafe: () => true,
 
-  async *execute(input: GitChurnInput, ctx: ToolContext): AsyncIterable<ToolEvent> {
+  async *execute(input: GitChurnInput, ctx: CoreToolContext): AsyncIterable<ToolEvent> {
     const parsed = gitChurnInputSchema.safeParse(input)
     if (!parsed.success) {
       yield {

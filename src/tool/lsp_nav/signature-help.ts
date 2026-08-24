@@ -10,7 +10,7 @@
 import { z } from "zod"
 import { errMessage } from "@/shared"
 import { FsJailError, resolveJailed } from "@/storage"
-import type { Tool, ToolContext, ToolEvent } from "../types"
+import type { CoreToolContext, Tool, ToolEvent } from "../types"
 
 // ── Duck-typed mirror of `SignatureHelpPort` ───────────────────────────────
 
@@ -78,7 +78,7 @@ export const lspSignatureHelpTool = (port: SignatureHelpPort): Tool<LspSignature
   inputSchema: lspSignatureHelpInputSchema,
   isReadOnly: () => true,
   isConcurrencySafe: () => true,
-  async *execute(input, ctx: ToolContext): AsyncIterable<ToolEvent> {
+  async *execute(input, ctx: CoreToolContext): AsyncIterable<ToolEvent> {
     const parsed = lspSignatureHelpInputSchema.safeParse(input)
     if (!parsed.success) {
       yield {

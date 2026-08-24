@@ -36,7 +36,7 @@ import { z } from "zod"
 import { errMessage } from "@/shared"
 import { FsJailError } from "@/storage"
 import { resolveJailedDoc } from "../_shared/resolve-jailed-doc"
-import type { Tool, ToolContext, ToolEvent, ToolResult } from "../types"
+import type { CoreToolContext, Tool, ToolEvent, ToolResult } from "../types"
 export const YAML_READ_DEFAULT_MAX_KEYS = 200
 export const YAML_READ_MAX_KEYS_CEILING = 5000
 export const YAML_READ_MAX_OUTPUT = 50_000
@@ -96,7 +96,7 @@ const countKeys = (v: unknown, budget: number): number => {
  *  `permission_denied` failure so existing hellgate tests stay green. */
 const preflight = (
   input: YamlReadInput,
-  ctx: ToolContext,
+  ctx: CoreToolContext,
 ): { kind: "fail"; result: ToolResult } | { kind: "ok"; abs: string; visiblePath: string } => {
   const parsed = yamlReadInputSchema.safeParse(input)
   if (!parsed.success) {
@@ -219,7 +219,7 @@ export const yamlReadTool: Tool<YamlReadInput> = {
   isReadOnly: () => true,
   isConcurrencySafe: () => true,
 
-  async *execute(input: YamlReadInput, ctx: ToolContext): AsyncIterable<ToolEvent> {
+  async *execute(input: YamlReadInput, ctx: CoreToolContext): AsyncIterable<ToolEvent> {
     const pre = preflight(input, ctx)
     if (pre.kind === "fail") {
       yield { type: "result", result: pre.result }

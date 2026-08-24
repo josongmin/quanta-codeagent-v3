@@ -1,5 +1,5 @@
 import { byteCompare } from "@/shared"
-import type { Tool, ToolContext, ToolEvent } from "../types"
+import type { CoreToolContext, Tool, ToolEvent } from "../types"
 import { safeRun, stderrReason } from "./_shared"
 import { type GitBlameHeatmapInput, type GitRunner, gitBlameHeatmapInputSchema } from "./types"
 
@@ -46,7 +46,7 @@ export const gitBlameHeatmapTool = (runner: GitRunner): Tool<GitBlameHeatmapInpu
   isReadOnly: () => true,
   isConcurrencySafe: () => true,
 
-  async *execute(input: GitBlameHeatmapInput, ctx: ToolContext): AsyncIterable<ToolEvent> {
+  async *execute(input: GitBlameHeatmapInput, ctx: CoreToolContext): AsyncIterable<ToolEvent> {
     const parsed = gitBlameHeatmapInputSchema.safeParse(input)
     if (!parsed.success) {
       yield {

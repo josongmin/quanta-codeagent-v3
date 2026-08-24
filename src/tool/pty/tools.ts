@@ -9,7 +9,7 @@
 import { z } from "zod"
 import { errMessage, sliceTailWholeChars, sliceWholeChars } from "@/shared"
 import { neutralizeTerminalOutput } from "../terminal-sanitize"
-import type { Tool, ToolContext, ToolEvent, ToolResult } from "../types"
+import type { CoreToolContext, Tool, ToolEvent, ToolResult } from "../types"
 import {
   PTY_MAX_DIM,
   PTY_MAX_WRITE_BYTES,
@@ -119,7 +119,7 @@ const fromPort = (produce: () => Promise<ToolResult>): AsyncIterable<ToolEvent> 
 const guard = <S extends z.ZodTypeAny>(
   schema: S,
   input: unknown,
-  ctx: ToolContext,
+  ctx: CoreToolContext,
 ): { ok: true; data: z.infer<S> } | { ok: false; result: ToolResult } => {
   const parsed = schema.safeParse(input)
   if (!parsed.success) return { ok: false, result: fail(`invalid input: ${parsed.error.message}`) }

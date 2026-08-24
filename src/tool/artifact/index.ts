@@ -19,7 +19,7 @@
 
 import { z } from "zod"
 import { sliceWholeChars } from "@/shared/slice-whole-chars"
-import type { Tool, ToolContext, ToolEvent, ToolFailure, ToolResult } from "../types"
+import type { CoreToolContext, Tool, ToolEvent, ToolFailure, ToolResult } from "../types"
 
 /** Duck-typed mirror of `@/artifact`'s `ArtifactKind` (closed). */
 export type ArtifactKind = "image" | "spreadsheet" | "document" | "presentation" | "other"
@@ -115,7 +115,7 @@ const makeRegisterTool = (registry: ArtifactRegistryPort): Tool<ArtifactRegister
   inputSchema: artifactRegisterInputSchema,
   isReadOnly: () => false,
   isConcurrencySafe: () => false,
-  async *execute(input: ArtifactRegisterInput, _ctx: ToolContext): AsyncIterable<ToolEvent> {
+  async *execute(input: ArtifactRegisterInput, _ctx: CoreToolContext): AsyncIterable<ToolEvent> {
     const parsed = artifactRegisterInputSchema.safeParse(input)
     if (!parsed.success) {
       yield {
@@ -145,7 +145,7 @@ const makeListTool = (registry: ArtifactRegistryPort): Tool<ArtifactListInput> =
   inputSchema: artifactListInputSchema,
   isReadOnly: () => true,
   isConcurrencySafe: () => true,
-  async *execute(input: ArtifactListInput, ctx: ToolContext): AsyncIterable<ToolEvent> {
+  async *execute(input: ArtifactListInput, ctx: CoreToolContext): AsyncIterable<ToolEvent> {
     const parsed = artifactListInputSchema.safeParse(input)
     if (!parsed.success) {
       yield {
@@ -181,7 +181,7 @@ const makeGetTool = (registry: ArtifactRegistryPort): Tool<ArtifactGetInput> => 
   inputSchema: artifactGetInputSchema,
   isReadOnly: () => true,
   isConcurrencySafe: () => true,
-  async *execute(input: ArtifactGetInput, _ctx: ToolContext): AsyncIterable<ToolEvent> {
+  async *execute(input: ArtifactGetInput, _ctx: CoreToolContext): AsyncIterable<ToolEvent> {
     const parsed = artifactGetInputSchema.safeParse(input)
     if (!parsed.success) {
       yield {
@@ -215,7 +215,7 @@ const makeDestroyTool = (registry: ArtifactRegistryPort): Tool<ArtifactDestroyIn
   inputSchema: artifactDestroyInputSchema,
   isReadOnly: () => false,
   isConcurrencySafe: () => false,
-  async *execute(input: ArtifactDestroyInput, _ctx: ToolContext): AsyncIterable<ToolEvent> {
+  async *execute(input: ArtifactDestroyInput, _ctx: CoreToolContext): AsyncIterable<ToolEvent> {
     const parsed = artifactDestroyInputSchema.safeParse(input)
     if (!parsed.success) {
       yield {

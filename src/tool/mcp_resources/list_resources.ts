@@ -3,7 +3,7 @@
  *  envelope wraps it at dispatch. */
 
 import { z } from "zod"
-import type { Tool, ToolContext, ToolEvent } from "../types"
+import type { CoreToolContext, Tool, ToolEvent } from "../types"
 import type { ResourcesHandle } from "./port"
 import { callPort, renderFailure, renderResourceList } from "./render"
 
@@ -18,7 +18,7 @@ export const mcpListResourcesTool = (port: ResourcesHandle): Tool<ListResourcesI
   inputSchema: listResourcesInputSchema,
   isReadOnly: () => true,
   isConcurrencySafe: () => true,
-  async *execute(input: ListResourcesInput, ctx: ToolContext): AsyncIterable<ToolEvent> {
+  async *execute(input: ListResourcesInput, ctx: CoreToolContext): AsyncIterable<ToolEvent> {
     const parsed = listResourcesInputSchema.safeParse(input)
     if (!parsed.success) {
       yield {

@@ -3,7 +3,7 @@ import { z } from "zod"
 import { runShell } from "@/runtime"
 import { FsJailError, resolveJailed } from "@/storage"
 import { defineTool } from "../factory"
-import type { ToolContext, ToolEvent } from "../types"
+import type { CoreToolContext, ToolEvent } from "../types"
 
 const schema = z.object({
   pattern: z.string().describe("Regex pattern (ripgrep syntax)"),
@@ -96,7 +96,7 @@ export const grepTool = defineTool<Input>({
   // Read-only content search (rg has no side effects); safe to parallelize.
   isConcurrencySafe: () => true,
 
-  async *execute(input: Input, ctx: ToolContext): AsyncIterable<ToolEvent> {
+  async *execute(input: Input, ctx: CoreToolContext): AsyncIterable<ToolEvent> {
     yield { type: "progress", message: `searching for ${input.pattern}…` }
 
     // S14: jail-validate the model-supplied path BEFORE building argv.

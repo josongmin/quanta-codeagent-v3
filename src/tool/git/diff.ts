@@ -1,4 +1,4 @@
-import type { Tool, ToolContext, ToolEvent } from "../types"
+import type { CoreToolContext, Tool, ToolEvent } from "../types"
 import { safeRun, stderrReason } from "./_shared"
 import { type GitDiffInput, type GitRunner, gitDiffInputSchema } from "./types"
 
@@ -47,7 +47,7 @@ export const gitDiffTool = (runner: GitRunner): Tool<GitDiffInput> => ({
   isReadOnly: () => true,
   isConcurrencySafe: () => true,
 
-  async *execute(input: GitDiffInput, ctx: ToolContext): AsyncIterable<ToolEvent> {
+  async *execute(input: GitDiffInput, ctx: CoreToolContext): AsyncIterable<ToolEvent> {
     const parsed = gitDiffInputSchema.safeParse(input)
     if (!parsed.success) {
       yield {

@@ -25,7 +25,7 @@ import {
   type TestRunPort,
   type Toolchain,
 } from "../testrun"
-import type { Tool, ToolContext, ToolEvent } from "../types"
+import type { CoreToolContext, Tool, ToolEvent } from "../types"
 import { buildEvidence, type EvidenceSources } from "./builder"
 import { defaultRuntimePort } from "./runtime"
 import type { EvidencePacket, FailureEvidence, RuntimeEvidence, StaticEvidence } from "./types"
@@ -139,7 +139,7 @@ export const makeCollectEvidenceTool = (deps: EvidenceToolDeps = {}): Tool<Input
     isConcurrencySafe: () => false,
     hitlTier: (): "always-confirm" => "always-confirm",
 
-    async *execute(input: Input, ctx: ToolContext): AsyncIterable<ToolEvent> {
+    async *execute(input: Input, ctx: CoreToolContext): AsyncIterable<ToolEvent> {
       if (ctx.signal?.aborted === true) {
         yield { type: "result", result: { ok: false, output: "aborted before start" } }
         return

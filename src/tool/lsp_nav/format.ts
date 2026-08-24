@@ -17,7 +17,7 @@
 import { z } from "zod"
 import { errMessage } from "@/shared"
 import { FsJailError, resolveJailed } from "@/storage"
-import type { Tool, ToolContext, ToolEvent } from "../types"
+import type { CoreToolContext, Tool, ToolEvent } from "../types"
 
 // ── Duck-typed mirror of `FormatPort` ──────────────────────────────────────
 
@@ -85,7 +85,7 @@ export const lspFormatTool = (port: FormatPort): Tool<LspFormatInput> => ({
   isReadOnly: () => false,
   isConcurrencySafe: () => false,
   hitlTier: () => "pre-approval-ok",
-  async *execute(input, ctx: ToolContext): AsyncIterable<ToolEvent> {
+  async *execute(input, ctx: CoreToolContext): AsyncIterable<ToolEvent> {
     const parsed = lspFormatInputSchema.safeParse(input)
     if (!parsed.success) {
       yield {

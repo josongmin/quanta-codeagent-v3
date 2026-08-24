@@ -25,7 +25,7 @@
  * path for determinism.
  */
 import { byteCompare } from "@/shared"
-import type { Tool, ToolContext, ToolEvent } from "../types"
+import type { CoreToolContext, Tool, ToolEvent } from "../types"
 import { safeRun, stderrReason } from "./_shared"
 import { type GitCoChangeInput, type GitRunner, gitCoChangeInputSchema } from "./types"
 
@@ -184,7 +184,7 @@ export const gitCoChangeTool = (runner: GitRunner): Tool<GitCoChangeInput> => ({
   isReadOnly: () => true,
   isConcurrencySafe: () => true,
 
-  async *execute(input: GitCoChangeInput, ctx: ToolContext): AsyncIterable<ToolEvent> {
+  async *execute(input: GitCoChangeInput, ctx: CoreToolContext): AsyncIterable<ToolEvent> {
     const parsed = gitCoChangeInputSchema.safeParse(input)
     if (!parsed.success) {
       yield {

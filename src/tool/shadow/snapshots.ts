@@ -11,7 +11,7 @@
 
 import { z } from "zod"
 import { type ShadowOdb, ShadowOdbError } from "@/storage/shadow-odb"
-import type { Tool, ToolContext, ToolEvent } from "../types"
+import type { CoreToolContext, Tool, ToolEvent } from "../types"
 
 export const shadowSnapshotsInputSchema = z.object({
   limit: z.number().int().positive().max(200).optional().describe("Cap on entries (default: all)"),
@@ -54,7 +54,7 @@ export const shadowSnapshotsTool = (odb: ShadowOdb): Tool<ShadowSnapshotsInput> 
   inputSchema: shadowSnapshotsInputSchema,
   isReadOnly: () => true,
   isConcurrencySafe: () => true,
-  async *execute(input, ctx: ToolContext): AsyncIterable<ToolEvent> {
+  async *execute(input, ctx: CoreToolContext): AsyncIterable<ToolEvent> {
     const parsed = shadowSnapshotsInputSchema.safeParse(input)
     if (!parsed.success) {
       yield {

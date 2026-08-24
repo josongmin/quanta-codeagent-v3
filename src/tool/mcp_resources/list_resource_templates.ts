@@ -5,7 +5,7 @@
  *  `mcp`-origin ⇒ the H2 untrusted-source envelope wraps it at dispatch. */
 
 import { z } from "zod"
-import type { Tool, ToolContext, ToolEvent } from "../types"
+import type { CoreToolContext, Tool, ToolEvent } from "../types"
 import type { ResourcesHandle } from "./port"
 import { callPort, renderFailure, renderResourceTemplateList } from "./render"
 
@@ -24,7 +24,10 @@ export const mcpListResourceTemplatesTool = (
   inputSchema: listResourceTemplatesInputSchema,
   isReadOnly: () => true,
   isConcurrencySafe: () => true,
-  async *execute(input: ListResourceTemplatesInput, ctx: ToolContext): AsyncIterable<ToolEvent> {
+  async *execute(
+    input: ListResourceTemplatesInput,
+    ctx: CoreToolContext,
+  ): AsyncIterable<ToolEvent> {
     const parsed = listResourceTemplatesInputSchema.safeParse(input)
     if (!parsed.success) {
       yield {

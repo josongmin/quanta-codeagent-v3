@@ -3,7 +3,7 @@
  *  status, not a failure — the model should poll later. */
 
 import { z } from "zod"
-import type { Tool, ToolContext, ToolEvent } from "../types"
+import type { CoreToolContext, Tool, ToolEvent } from "../types"
 import { backendErrorEvent, callPort } from "./no-throw"
 import type { TasksHandle, TasksTaskInfo, TasksTaskResult } from "./port"
 
@@ -51,7 +51,7 @@ export const getMcpTaskTool = (port: TasksHandle): Tool<GetTaskInput> => ({
   inputSchema: getTaskInputSchema,
   isReadOnly: () => true,
   isConcurrencySafe: () => true,
-  async *execute(input, ctx: ToolContext): AsyncIterable<ToolEvent> {
+  async *execute(input, ctx: CoreToolContext): AsyncIterable<ToolEvent> {
     const parsed = getTaskInputSchema.safeParse(input)
     if (!parsed.success) {
       yield {

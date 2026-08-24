@@ -20,7 +20,7 @@
  *  `SessionForker` from `@/agent/fork-session`. */
 
 import { z } from "zod"
-import type { Tool, ToolContext, ToolEvent } from "../types"
+import type { CoreToolContext, Tool, ToolEvent } from "../types"
 
 /** Duck-typed mirror of `@/agent/fork-session.SessionForker`. Structurally
  *  identical to the producer (same method + return shape). Equivalence is
@@ -69,7 +69,7 @@ export const forkSessionTool = (forker: SessionForkerLike): Tool<ForkSessionInpu
   // entry is added under a freshly-minted UUID. No operator confirmation
   // required (mistakes are reversible: the forked session can be discarded).
   hitlTier: () => "none",
-  async *execute(input, ctx: ToolContext): AsyncIterable<ToolEvent> {
+  async *execute(input, ctx: CoreToolContext): AsyncIterable<ToolEvent> {
     const parsed = forkSessionInputSchema.safeParse(input)
     if (!parsed.success) {
       yield {

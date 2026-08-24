@@ -27,7 +27,7 @@ import { z } from "zod"
 import { type FileSystemPort, FsJailError, resolveJailed } from "@/storage"
 import { refreshStaleReadBaseline } from "../_shared/fresh-hash"
 import { defineTool } from "../factory"
-import type { Tool, ToolContext, ToolEvent, ToolResult } from "../types"
+import type { CoreToolContext, Tool, ToolEvent, ToolResult } from "../types"
 import type { FileHistoryStore } from "./store"
 
 const schema = z.object({
@@ -97,7 +97,7 @@ export const makeFileHistoryRewindTool = (
     // worst-case op.
     hitlTier: () => "always-confirm",
 
-    async *execute(input: Input, ctx: ToolContext): AsyncIterable<ToolEvent> {
+    async *execute(input: Input, ctx: CoreToolContext): AsyncIterable<ToolEvent> {
       const parsed = schema.safeParse(input)
       if (!parsed.success) {
         yield {
@@ -152,7 +152,7 @@ export const makeFileHistoryRewindTool = (
 const restore = async (
   store: FileHistoryStore,
   fs: FileSystemPort,
-  ctx: ToolContext,
+  ctx: CoreToolContext,
   key: string,
   input: Input,
 ): Promise<ToolResult> => {

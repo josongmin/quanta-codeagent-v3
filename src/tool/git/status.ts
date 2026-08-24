@@ -1,4 +1,4 @@
-import type { Tool, ToolContext, ToolEvent } from "../types"
+import type { CoreToolContext, Tool, ToolEvent } from "../types"
 import { safeRun, stderrReason } from "./_shared"
 import { type GitRunner, type GitStatusInput, gitStatusInputSchema } from "./types"
 
@@ -134,7 +134,7 @@ export const gitStatusTool = (runner: GitRunner): Tool<GitStatusInput> => ({
   isReadOnly: () => true,
   isConcurrencySafe: () => true,
 
-  async *execute(_input: GitStatusInput, ctx: ToolContext): AsyncIterable<ToolEvent> {
+  async *execute(_input: GitStatusInput, ctx: CoreToolContext): AsyncIterable<ToolEvent> {
     yield { type: "progress", message: "git status" }
     const out = await safeRun(
       runner,

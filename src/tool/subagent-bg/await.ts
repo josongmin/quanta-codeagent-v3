@@ -12,7 +12,7 @@
  *  underlying subagent is NOT cancelled. */
 
 import { z } from "zod"
-import type { Tool, ToolContext, ToolEvent } from "../types"
+import type { CoreToolContext, Tool, ToolEvent } from "../types"
 import type { BackgroundSubagentSchedulerPort, SubagentBgResult, SubagentBgStatus } from "./port"
 
 /** `queued` and `running` are NON-terminal — an await on either MUST block until
@@ -89,7 +89,7 @@ export const subagentAwaitTool = (
   inputSchema: subagentAwaitInputSchema,
   isReadOnly: () => true,
   isConcurrencySafe: () => true,
-  async *execute(input, ctx: ToolContext): AsyncIterable<ToolEvent> {
+  async *execute(input, ctx: CoreToolContext): AsyncIterable<ToolEvent> {
     const parsed = subagentAwaitInputSchema.safeParse(input)
     if (!parsed.success) {
       yield {

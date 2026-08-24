@@ -3,7 +3,7 @@
  *  failure as `ok:false` (the model retries with no cursor). */
 
 import { z } from "zod"
-import type { Tool, ToolContext, ToolEvent } from "../types"
+import type { CoreToolContext, Tool, ToolEvent } from "../types"
 import { backendErrorEvent, callPort } from "./no-throw"
 import type { TasksHandle, TasksTaskInfo } from "./port"
 
@@ -38,7 +38,7 @@ export const listMcpTasksTool = (port: TasksHandle): Tool<ListTasksInput> => ({
   inputSchema: listTasksInputSchema,
   isReadOnly: () => true,
   isConcurrencySafe: () => true,
-  async *execute(input, ctx: ToolContext): AsyncIterable<ToolEvent> {
+  async *execute(input, ctx: CoreToolContext): AsyncIterable<ToolEvent> {
     const parsed = listTasksInputSchema.safeParse(input)
     if (!parsed.success) {
       yield {

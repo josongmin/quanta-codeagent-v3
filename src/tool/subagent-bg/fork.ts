@@ -13,7 +13,7 @@
 
 import { z } from "zod"
 import { errMessage } from "@/shared"
-import type { Tool, ToolContext, ToolEvent } from "../types"
+import type { CoreToolContext, Tool, ToolEvent } from "../types"
 import type { BackgroundSubagentSchedulerPort, SubagentBgSpec } from "./port"
 export const subagentForkInputSchema = z.object({
   task: z.string().min(1).describe("The prompt handed to the background subagent."),
@@ -57,7 +57,7 @@ export const subagentForkTool = (
   isReadOnly: () => false,
   isConcurrencySafe: () => false,
   hitlTier: () => "pre-approval-ok",
-  async *execute(input, ctx: ToolContext): AsyncIterable<ToolEvent> {
+  async *execute(input, ctx: CoreToolContext): AsyncIterable<ToolEvent> {
     const parsed = subagentForkInputSchema.safeParse(input)
     if (!parsed.success) {
       yield {

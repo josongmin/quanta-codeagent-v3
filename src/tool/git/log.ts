@@ -1,4 +1,4 @@
-import type { Tool, ToolContext, ToolEvent } from "../types"
+import type { CoreToolContext, Tool, ToolEvent } from "../types"
 import { safeRun, stderrReason } from "./_shared"
 import { type GitLogInput, type GitRunner, gitLogInputSchema } from "./types"
 
@@ -60,7 +60,7 @@ export const gitLogTool = (runner: GitRunner): Tool<GitLogInput> => ({
   isReadOnly: () => true,
   isConcurrencySafe: () => true,
 
-  async *execute(input: GitLogInput, ctx: ToolContext): AsyncIterable<ToolEvent> {
+  async *execute(input: GitLogInput, ctx: CoreToolContext): AsyncIterable<ToolEvent> {
     const parsed = gitLogInputSchema.safeParse(input)
     if (!parsed.success) {
       yield {

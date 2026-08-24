@@ -6,7 +6,7 @@
  *  concurrency-safe (multiple polls of the same id can run in parallel). */
 
 import { z } from "zod"
-import type { Tool, ToolContext, ToolEvent } from "../types"
+import type { CoreToolContext, Tool, ToolEvent } from "../types"
 import type { BackgroundSubagentSchedulerPort, SubagentBgResult } from "./port"
 
 export const subagentPollInputSchema = z.object({
@@ -38,7 +38,7 @@ export const subagentPollTool = (
   inputSchema: subagentPollInputSchema,
   isReadOnly: () => true,
   isConcurrencySafe: () => true,
-  async *execute(input, ctx: ToolContext): AsyncIterable<ToolEvent> {
+  async *execute(input, ctx: CoreToolContext): AsyncIterable<ToolEvent> {
     const parsed = subagentPollInputSchema.safeParse(input)
     if (!parsed.success) {
       yield {

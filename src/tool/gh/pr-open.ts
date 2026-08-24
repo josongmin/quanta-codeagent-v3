@@ -31,7 +31,7 @@ import { errMessage } from "../../shared"
 import { publishGitDirective } from "../git/_directive-publish"
 import { composePrText } from "../git/compose"
 import type { GitRunner } from "../git/types"
-import type { Tool, ToolContext, ToolEvent } from "../types"
+import type { CoreToolContext, Tool, ToolEvent } from "../types"
 import type { GhPrCreateToolOpts } from "./index"
 import { DEFAULT_TIMEOUT_MS, defaultGhRunner, type GhRunner } from "./runner"
 
@@ -70,7 +70,10 @@ type GitProbe<T> =
 /** Resolve the current branch via `git rev-parse --abbrev-ref HEAD`.
  *  exitCode 0 + a real name ⇒ ok; exitCode 0 + "HEAD" ⇒ negative (detached);
  *  a throw or exitCode>0 (e.g. 128 not-a-repo) ⇒ git-failed. */
-const currentBranch = async (runner: GitRunner, ctx: ToolContext): Promise<GitProbe<string>> => {
+const currentBranch = async (
+  runner: GitRunner,
+  ctx: CoreToolContext,
+): Promise<GitProbe<string>> => {
   try {
     const r = await runner.run(["rev-parse", "--abbrev-ref", "HEAD"], ctx.cwd, ctx.signal)
     if (r.exitCode !== 0) {
@@ -94,7 +97,7 @@ const currentBranch = async (runner: GitRunner, ctx: ToolContext): Promise<GitPr
 const headOnOrigin = async (
   runner: GitRunner,
   head: string,
-  ctx: ToolContext,
+  ctx: CoreToolContext,
 ): Promise<GitProbe<true>> => {
   try {
     const r = await runner.run(
@@ -120,7 +123,7 @@ const err = (output: string): ToolEvent => ({ type: "result", result: { ok: fals
 const resolveBranches = async (
   input: PrOpenInput,
   gitRunner: GitRunner,
-  ctx: ToolContext,
+  ctx: CoreToolContext,
 ): Promise<{ ok: true; base: string; head: string } | { ok: false; output: string }> => {
   const base = stripOriginPrefix(input.base ?? "main")
   let head = input.head
@@ -154,7 +157,7 @@ const resolveBranches = async (
 const runGhCreate = async (
   ghRunner: GhRunner,
   a: { title: string; body: string; base: string; head: string; draft: boolean },
-  ctx: ToolContext,
+  ctx: CoreToolContext,
 ): Promise<{ ok: true; url: string } | { ok: false; output: string }> => {
   const argv = [
     "gh",
@@ -210,7 +213,7 @@ export const ghPrOpenTool = (
   // autonomous surfaces opt out via `hitl.autoApprove`).
   capability: (): { confirm: "sensitive" } => ({ confirm: "sensitive" }),
 
-  async *execute(input: PrOpenInput, ctx: ToolContext): AsyncIterable<ToolEvent> {
+  async *execute(input: PrOpenInput, ctx: CoreToolContext): AsyncIterable<ToolEvent> {
     const parsed = prOpenSchema.safeParse(input)
     if (!parsed.success) {
       yield err(`invalid input: ${parsed.error.message}`)

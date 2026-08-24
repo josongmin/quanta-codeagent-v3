@@ -15,7 +15,13 @@
 import type { NetworkEntry } from "@/browser"
 import { type BrowserHandle, type BrowserPort, CDP_ALLOWED_METHODS } from "@/browser"
 import { sliceWholeChars } from "@/shared"
-import { defineTool, type Tool, type ToolContext, type ToolEvent, type ToolResult } from "@/tool"
+import {
+  type CoreToolContext,
+  defineTool,
+  type Tool,
+  type ToolEvent,
+  type ToolResult,
+} from "@/tool"
 import { type DnsResolver, guardNavigationUrl } from "./net-guard"
 import { guardPageText, mapBrowserError } from "./result-map"
 import {
@@ -151,7 +157,7 @@ const navigateTool = (port: BrowserPort, session: BrowserSession, resolver?: Dns
     isReadOnly: () => false,
     isConcurrencySafe: () => false,
     hitlTier: () => "pre-approval-ok",
-    async *execute(input: NavigateInput, ctx: ToolContext): AsyncIterable<ToolEvent> {
+    async *execute(input: NavigateInput, ctx: CoreToolContext): AsyncIterable<ToolEvent> {
       const guard = await guardNavigationUrl(input.url, resolver)
       if (!guard.ok) {
         yield {
@@ -194,7 +200,7 @@ const snapshotTool = (port: BrowserPort, session: BrowserSession): Tool =>
     isReadOnly: () => true,
     isConcurrencySafe: () => false,
     hitlTier: () => "pre-approval-ok",
-    async *execute(_input, ctx: ToolContext): AsyncIterable<ToolEvent> {
+    async *execute(_input, ctx: CoreToolContext): AsyncIterable<ToolEvent> {
       const ens = await ensureHandle(session, ctx.signal)
       if (!ens.ok) {
         yield { type: "result", result: ens.result }
@@ -217,7 +223,7 @@ const clickTool = (port: BrowserPort, session: BrowserSession): Tool =>
     isReadOnly: () => false,
     isConcurrencySafe: () => false,
     hitlTier: () => "always-confirm",
-    async *execute(input: ClickInput, ctx: ToolContext): AsyncIterable<ToolEvent> {
+    async *execute(input: ClickInput, ctx: CoreToolContext): AsyncIterable<ToolEvent> {
       const ens = await ensureHandle(session, ctx.signal)
       if (!ens.ok) {
         yield { type: "result", result: ens.result }
@@ -240,7 +246,7 @@ const typeTool = (port: BrowserPort, session: BrowserSession): Tool =>
     isReadOnly: () => false,
     isConcurrencySafe: () => false,
     hitlTier: () => "always-confirm",
-    async *execute(input: TypeInput, ctx: ToolContext): AsyncIterable<ToolEvent> {
+    async *execute(input: TypeInput, ctx: CoreToolContext): AsyncIterable<ToolEvent> {
       const ens = await ensureHandle(session, ctx.signal)
       if (!ens.ok) {
         yield { type: "result", result: ens.result }
@@ -266,7 +272,7 @@ const screenshotTool = (port: BrowserPort, session: BrowserSession): Tool =>
     isReadOnly: () => true,
     isConcurrencySafe: () => false,
     hitlTier: () => "pre-approval-ok",
-    async *execute(_input, ctx: ToolContext): AsyncIterable<ToolEvent> {
+    async *execute(_input, ctx: CoreToolContext): AsyncIterable<ToolEvent> {
       const ens = await ensureHandle(session, ctx.signal)
       if (!ens.ok) {
         yield { type: "result", result: ens.result }
@@ -317,7 +323,7 @@ const cdpTool = (port: BrowserPort, session: BrowserSession): Tool =>
     isReadOnly: () => false,
     isConcurrencySafe: () => false,
     hitlTier: () => "always-confirm",
-    async *execute(input, ctx: ToolContext): AsyncIterable<ToolEvent> {
+    async *execute(input, ctx: CoreToolContext): AsyncIterable<ToolEvent> {
       const ens = await ensureHandle(session, ctx.signal)
       if (!ens.ok) {
         yield { type: "result", result: ens.result }
@@ -487,7 +493,7 @@ const consoleTool = (port: BrowserPort, session: BrowserSession): Tool =>
     isReadOnly: () => true,
     isConcurrencySafe: () => false,
     hitlTier: () => "pre-approval-ok",
-    async *execute(input, ctx: ToolContext): AsyncIterable<ToolEvent> {
+    async *execute(input, ctx: CoreToolContext): AsyncIterable<ToolEvent> {
       const ens = await ensureHandle(session, ctx.signal)
       if (!ens.ok) return yield { type: "result", result: ens.result }
       const r = await port.consoleMessages(
@@ -518,7 +524,7 @@ const networkTool = (port: BrowserPort, session: BrowserSession, netSink?: Brows
     isReadOnly: () => true,
     isConcurrencySafe: () => false,
     hitlTier: () => "pre-approval-ok",
-    async *execute(input, ctx: ToolContext): AsyncIterable<ToolEvent> {
+    async *execute(input, ctx: CoreToolContext): AsyncIterable<ToolEvent> {
       const ens = await ensureHandle(session, ctx.signal)
       if (!ens.ok) return yield { type: "result", result: ens.result }
       const r = await port.networkMessages(
@@ -571,7 +577,7 @@ const waitTool = (port: BrowserPort, session: BrowserSession): Tool =>
     isReadOnly: () => true,
     isConcurrencySafe: () => false,
     hitlTier: () => "pre-approval-ok",
-    async *execute(input: WaitInput, ctx: ToolContext): AsyncIterable<ToolEvent> {
+    async *execute(input: WaitInput, ctx: CoreToolContext): AsyncIterable<ToolEvent> {
       const ens = await ensureHandle(session, ctx.signal)
       if (!ens.ok) return yield { type: "result", result: ens.result }
       const r = await port.wait(
@@ -600,7 +606,7 @@ const readTool = (port: BrowserPort, session: BrowserSession): Tool =>
     isReadOnly: () => true,
     isConcurrencySafe: () => false,
     hitlTier: () => "pre-approval-ok",
-    async *execute(input: ReadInput, ctx: ToolContext): AsyncIterable<ToolEvent> {
+    async *execute(input: ReadInput, ctx: CoreToolContext): AsyncIterable<ToolEvent> {
       const ens = await ensureHandle(session, ctx.signal)
       if (!ens.ok) return yield { type: "result", result: ens.result }
       const r = await port.read(
@@ -632,7 +638,7 @@ const boundsTool = (port: BrowserPort, session: BrowserSession): Tool =>
     isReadOnly: () => true,
     isConcurrencySafe: () => true,
     hitlTier: () => "pre-approval-ok",
-    async *execute(input: ElementBoundsInput, ctx: ToolContext): AsyncIterable<ToolEvent> {
+    async *execute(input: ElementBoundsInput, ctx: CoreToolContext): AsyncIterable<ToolEvent> {
       const ens = await ensureHandle(session, ctx.signal)
       if (!ens.ok) return yield { type: "result", result: ens.result }
       const r = await port.getBoundingBox(ens.handle, input.ref, ctx.signal)
@@ -655,7 +661,7 @@ const highlightTool = (port: BrowserPort, session: BrowserSession): Tool =>
     isReadOnly: () => true,
     isConcurrencySafe: () => true,
     hitlTier: () => "pre-approval-ok",
-    async *execute(input: HighlightInput, ctx: ToolContext): AsyncIterable<ToolEvent> {
+    async *execute(input: HighlightInput, ctx: CoreToolContext): AsyncIterable<ToolEvent> {
       const ens = await ensureHandle(session, ctx.signal)
       if (!ens.ok) return yield { type: "result", result: ens.result }
       const r = await port.highlight(
@@ -690,7 +696,7 @@ const tabNewTool = (port: BrowserPort, session: BrowserSession): Tool =>
     isReadOnly: () => false,
     isConcurrencySafe: () => false,
     hitlTier: () => "pre-approval-ok",
-    async *execute(_input: TabNewInput, ctx: ToolContext): AsyncIterable<ToolEvent> {
+    async *execute(_input: TabNewInput, ctx: CoreToolContext): AsyncIterable<ToolEvent> {
       const ens = await ensureHandle(session, ctx.signal)
       if (!ens.ok) return yield { type: "result", result: ens.result }
       const r = await port.newTab(ens.handle, undefined, ctx.signal)
@@ -714,7 +720,7 @@ const tabSwitchTool = (port: BrowserPort, session: BrowserSession): Tool =>
     isReadOnly: () => false,
     isConcurrencySafe: () => false,
     hitlTier: () => "always-confirm",
-    async *execute(input: TabSwitchInput, ctx: ToolContext): AsyncIterable<ToolEvent> {
+    async *execute(input: TabSwitchInput, ctx: CoreToolContext): AsyncIterable<ToolEvent> {
       const ens = await ensureHandle(session, ctx.signal)
       if (!ens.ok) return yield { type: "result", result: ens.result }
       const r = await port.switchTab(ens.handle, input.tab, ctx.signal)
@@ -739,7 +745,7 @@ const tabCloseTool = (port: BrowserPort, session: BrowserSession): Tool =>
     isReadOnly: () => false,
     isConcurrencySafe: () => false,
     hitlTier: () => "always-confirm",
-    async *execute(input: TabCloseInput, ctx: ToolContext): AsyncIterable<ToolEvent> {
+    async *execute(input: TabCloseInput, ctx: CoreToolContext): AsyncIterable<ToolEvent> {
       const ens = await ensureHandle(session, ctx.signal)
       if (!ens.ok) return yield { type: "result", result: ens.result }
       const r = await port.closeTab(ens.handle, input.tab, ctx.signal)
@@ -756,7 +762,7 @@ const tabListTool = (port: BrowserPort, session: BrowserSession): Tool =>
     isReadOnly: () => true,
     isConcurrencySafe: () => true,
     hitlTier: () => "pre-approval-ok",
-    async *execute(_input: TabListInput, ctx: ToolContext): AsyncIterable<ToolEvent> {
+    async *execute(_input: TabListInput, ctx: CoreToolContext): AsyncIterable<ToolEvent> {
       const ens = await ensureHandle(session, ctx.signal)
       if (!ens.ok) return yield { type: "result", result: ens.result }
       const r = await port.listTabs(ens.handle, ctx.signal)

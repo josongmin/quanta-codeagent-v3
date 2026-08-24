@@ -30,7 +30,7 @@ import { z } from "zod"
 import type { ImageBlock } from "@/llm"
 import { errMessage } from "@/shared"
 import { fetchWithSsrfGuard, type HostResolver, SsrfGuardError, ssrfDeny } from "@/shared/net/ssrf"
-import type { Tool, ToolContext, ToolEvent, ToolResult } from "../types"
+import type { CoreToolContext, Tool, ToolEvent, ToolResult } from "../types"
 import { MAX_IMAGE_BYTES, type SupportedMediaType, sniffMediaType } from "./read"
 export const readImageUrlInputSchema = z.object({
   url: z.string().url().describe("HTTPS image URL"),
@@ -60,7 +60,7 @@ const errResult = (output: string, failure?: ToolResult["failure"]): ToolResult 
 /** Pre-flight (schema + abort + URL parse + protocol + SSRF). */
 const preflight = (
   input: ReadImageUrlInput,
-  ctx: ToolContext,
+  ctx: CoreToolContext,
 ): { kind: "fail"; result: ToolResult } | { kind: "ok"; url: URL } => {
   const parsed = readImageUrlInputSchema.safeParse(input)
   if (!parsed.success) {
@@ -204,7 +204,7 @@ export const readImageUrlTool = (options: ReadImageUrlOpts = {}): Tool<ReadImage
     isReadOnly: () => true,
     isConcurrencySafe: () => true,
 
-    async *execute(input: ReadImageUrlInput, ctx: ToolContext): AsyncIterable<ToolEvent> {
+    async *execute(input: ReadImageUrlInput, ctx: CoreToolContext): AsyncIterable<ToolEvent> {
       const pre = preflight(input, ctx)
       if (pre.kind === "fail") {
         yield { type: "result", result: pre.result }

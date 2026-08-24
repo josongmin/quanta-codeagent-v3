@@ -19,7 +19,7 @@ import { isAbsolute } from "node:path"
 import { z } from "zod"
 import type { PipelineError, SearchHit, SearchPipeline } from "@/retrieval/pipeline"
 import { errMessage } from "@/shared"
-import type { Tool, ToolContext, ToolEvent, ToolResult } from "../types"
+import type { CoreToolContext, Tool, ToolEvent, ToolResult } from "../types"
 
 const DEFAULT_K = 10
 const MAX_K = 50
@@ -173,7 +173,7 @@ export const searchCodebaseTool = (pipeline: SearchPipeline): Tool<SearchCodebas
   isReadOnly: () => true,
   isConcurrencySafe: () => true,
 
-  async *execute(input: SearchCodebaseInput, ctx: ToolContext): AsyncIterable<ToolEvent> {
+  async *execute(input: SearchCodebaseInput, ctx: CoreToolContext): AsyncIterable<ToolEvent> {
     const parsed = searchCodebaseInputSchema.safeParse(input)
     if (!parsed.success) {
       yield {

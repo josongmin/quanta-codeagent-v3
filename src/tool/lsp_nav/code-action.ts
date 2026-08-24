@@ -19,7 +19,7 @@
 import { z } from "zod"
 import { errMessage } from "@/shared"
 import { FsJailError, resolveJailed } from "@/storage"
-import type { Tool, ToolContext, ToolEvent } from "../types"
+import type { CoreToolContext, Tool, ToolEvent } from "../types"
 
 // ── Duck-typed mirror of `CodeActionPort` (`@/lsp/ports/code-action-port`) ──
 // Adding a field to the canonical port must be mirrored here. The slice fence
@@ -133,7 +133,7 @@ export const lspCodeActionTool = (port: CodeActionPort): Tool<LspCodeActionInput
   inputSchema: lspCodeActionInputSchema,
   isReadOnly: () => true,
   isConcurrencySafe: () => true,
-  async *execute(input, ctx: ToolContext): AsyncIterable<ToolEvent> {
+  async *execute(input, ctx: CoreToolContext): AsyncIterable<ToolEvent> {
     const parsed = lspCodeActionInputSchema.safeParse(input)
     if (!parsed.success) {
       yield {

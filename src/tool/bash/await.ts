@@ -25,7 +25,7 @@ import {
   getBashBgRegistry,
 } from "@/runtime/bash-bg-registry"
 import { errMessage } from "@/shared"
-import type { Tool, ToolContext, ToolEvent, ToolResult, ToolResultEvidence } from "../types"
+import type { CoreToolContext, Tool, ToolEvent, ToolResult, ToolResultEvidence } from "../types"
 export const bashAwaitInputSchema = z.object({
   shell_id: z
     .string()
@@ -140,7 +140,7 @@ export const makeBashAwaitTool = (
   isReadOnly: () => true,
   // Pure polling against an in-memory registry; safe to parallelize.
   isConcurrencySafe: () => true,
-  async *execute(input, ctx: ToolContext): AsyncIterable<ToolEvent> {
+  async *execute(input, ctx: CoreToolContext): AsyncIterable<ToolEvent> {
     const parsed = bashAwaitInputSchema.safeParse(input)
     if (!parsed.success) {
       yield {

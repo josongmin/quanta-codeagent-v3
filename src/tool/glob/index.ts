@@ -3,7 +3,7 @@ import { z } from "zod"
 import { runShell } from "@/runtime"
 import { FsJailError, resolveJailed } from "@/storage"
 import { defineTool } from "../factory"
-import type { ToolContext, ToolEvent } from "../types"
+import type { CoreToolContext, ToolEvent } from "../types"
 
 const schema = z.object({
   pattern: z.string().describe("Glob pattern, e.g. 'src/**/*.ts'"),
@@ -66,7 +66,7 @@ export const globTool = defineTool<Input>({
   isConcurrencySafe: () => true,
 
   // A bounded directory scan is fast; no progress event needed.
-  async *execute(input: Input, ctx: ToolContext): AsyncIterable<ToolEvent> {
+  async *execute(input: Input, ctx: CoreToolContext): AsyncIterable<ToolEvent> {
     // S14: jail the base dir BEFORE handing it to ripgrep — otherwise
     // `path: "/Users/other"` would enumerate every file the process can read.
     // Default is the jail root itself (cwd), which is trivially in-jail.

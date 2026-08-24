@@ -21,7 +21,7 @@
  *  behavior (no rev-parse, no emit). */
 
 import type { GitDirectiveEmitter } from "../../agent/git-directives"
-import type { Tool, ToolContext, ToolEvent } from "../types"
+import type { CoreToolContext, Tool, ToolEvent } from "../types"
 import { mutate } from "./_shared"
 import { type GitCommitInput, type GitRunner, gitCommitInputSchema } from "./types"
 
@@ -70,7 +70,7 @@ export const gitCommitTool = (
   hitlTier: (input): "pre-approval-ok" | "always-confirm" =>
     input.mode === "wip" ? "pre-approval-ok" : "always-confirm",
 
-  async *execute(input: GitCommitInput, ctx: ToolContext): AsyncIterable<ToolEvent> {
+  async *execute(input: GitCommitInput, ctx: CoreToolContext): AsyncIterable<ToolEvent> {
     const parsed = gitCommitInputSchema.safeParse(input)
     if (!parsed.success) {
       yield {

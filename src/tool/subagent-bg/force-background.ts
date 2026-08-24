@@ -18,7 +18,7 @@
  *  Plane-clean: imports only `../types` + `zod` + `./port`. NO `@/agent`. */
 
 import { z } from "zod"
-import type { Tool, ToolContext, ToolEvent } from "../types"
+import type { CoreToolContext, Tool, ToolEvent } from "../types"
 import type { BackgroundSubagentSchedulerPort, SubagentBgForceOutcome } from "./port"
 
 export const subagentForceBackgroundInputSchema = z.object({
@@ -70,7 +70,7 @@ export const subagentForceBackgroundTool = (
   isReadOnly: () => false,
   isConcurrencySafe: () => false,
   hitlTier: () => "pre-approval-ok",
-  async *execute(input, ctx: ToolContext): AsyncIterable<ToolEvent> {
+  async *execute(input, ctx: CoreToolContext): AsyncIterable<ToolEvent> {
     const parsed = subagentForceBackgroundInputSchema.safeParse(input)
     if (!parsed.success) {
       yield {

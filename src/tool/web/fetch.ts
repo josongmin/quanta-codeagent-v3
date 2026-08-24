@@ -39,7 +39,7 @@
 import { z } from "zod"
 import { errMessage } from "@/shared"
 import { fetchWithSsrfGuard, type HostResolver, SsrfGuardError, ssrfDeny } from "@/shared/net/ssrf"
-import type { Tool, ToolContext, ToolEvent, ToolResult } from "../types"
+import type { CoreToolContext, Tool, ToolEvent, ToolResult } from "../types"
 import { htmlToMarkdown } from "./html-to-markdown"
 
 // Re-export so the legacy import path (`./fetch` → `htmlToMarkdown`)
@@ -106,7 +106,7 @@ export interface WebFetchOptions {
  *  early `ToolResult` on any rejection, else the parsed URL + cap. */
 const preflight = (
   input: WebFetchInput,
-  ctx: ToolContext,
+  ctx: CoreToolContext,
 ): { kind: "fail"; result: ToolResult } | { kind: "ok"; url: URL; maxBytes: number } => {
   const parsed = webFetchInputSchema.safeParse(input)
   if (!parsed.success) {
@@ -410,7 +410,7 @@ export const webFetchTool = (options: WebFetchOptions = {}): Tool<WebFetchInput>
     isReadOnly: () => true,
     isConcurrencySafe: () => true,
 
-    async *execute(input: WebFetchInput, ctx: ToolContext): AsyncIterable<ToolEvent> {
+    async *execute(input: WebFetchInput, ctx: CoreToolContext): AsyncIterable<ToolEvent> {
       const pre = preflight(input, ctx)
       if (pre.kind === "fail") {
         yield { type: "result", result: pre.result }

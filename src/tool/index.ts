@@ -636,6 +636,9 @@ export type {
   ActiveWorktree,
   BlockerSurface,
   CodeCellDispatchSeam,
+  // The ROLE VIEWS (ADR: interface-segregation over the 39-seam bag). Exported
+  // from the barrel so a tool can narrow to the seams its role may touch.
+  CoreToolContext,
   CriticalSectionHandle,
   CriticalSectionSeam,
   DeferredHandle,

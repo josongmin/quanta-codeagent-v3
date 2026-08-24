@@ -12,7 +12,7 @@
 
 import { z } from "zod"
 import { defaultImageWritePort, type ImageWritePort } from "../image-gen/store"
-import type { Tool, ToolContext, ToolEvent } from "../types"
+import type { CoreToolContext, Tool, ToolEvent } from "../types"
 import type { McpResourceCaptureHolder } from "./capture"
 import type { ResourcesHandle } from "./port"
 import { callPort, renderFailure, renderResourceContentSavingBlobs } from "./render"
@@ -96,7 +96,7 @@ export const mcpReadResourceTool = (
     isReadOnly: () => false,
     isConcurrencySafe: () => false,
     hitlTier: (): "pre-approval-ok" => "pre-approval-ok",
-    async *execute(input: ReadResourceInput, ctx: ToolContext): AsyncIterable<ToolEvent> {
+    async *execute(input: ReadResourceInput, ctx: CoreToolContext): AsyncIterable<ToolEvent> {
       const parsed = readResourceInputSchema.safeParse(input)
       if (!parsed.success) {
         yield {

@@ -1,4 +1,4 @@
-import type { Tool, ToolContext, ToolEvent } from "../types"
+import type { CoreToolContext, Tool, ToolEvent } from "../types"
 import { isNotARepo, safeRun } from "./_shared"
 import { type GitBlameInput, type GitRunner, gitBlameInputSchema } from "./types"
 
@@ -89,7 +89,7 @@ export const gitBlameTool = (runner: GitRunner): Tool<GitBlameInput> => ({
   isReadOnly: () => true,
   isConcurrencySafe: () => true,
 
-  async *execute(input: GitBlameInput, ctx: ToolContext): AsyncIterable<ToolEvent> {
+  async *execute(input: GitBlameInput, ctx: CoreToolContext): AsyncIterable<ToolEvent> {
     const parsed = gitBlameInputSchema.safeParse(input)
     if (!parsed.success) {
       yield {

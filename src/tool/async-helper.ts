@@ -2,7 +2,7 @@ import type { z } from "zod"
 import { errMessage } from "@/shared"
 import type { DeferredResultRegistry } from "./deferred/port"
 import { type DefineToolSpec, defineTool } from "./factory"
-import type { Tool, ToolContext, ToolEvent, ToolResult } from "./types"
+import type { CoreToolContext, Tool, ToolEvent, ToolResult } from "./types"
 /**
  * ADR-0287 — `defineToolAsync` wrapper. The async-tool seam.
  *
@@ -51,7 +51,7 @@ export interface DefineToolAsyncSpec<I, O> {
    *  the `ToolContext`, AND the per-handle AbortSignal the registry owns
    *  (chained from the registry's controller for the handle the wrapper
    *  registers). Must return a final `ToolResult`. */
-  work(input: I, ctx: ToolContext, signal: AbortSignal): Promise<ToolResult>
+  work(input: I, ctx: CoreToolContext, signal: AbortSignal): Promise<ToolResult>
   /** Optional message yielded on the placeholder result while the work runs.
    *  Default: `"<async work registered; poll with poll_deferred>"`. */
   pendingMessage?: string
@@ -93,7 +93,7 @@ export const defineToolAsync = <I, O = unknown>(spec: DefineToolAsyncSpec<I, O>)
     isReadOnly: spec.isReadOnly,
     isConcurrencySafe: spec.isConcurrencySafe,
     supportsDeferredResults: true,
-    async *execute(input: I, ctx: ToolContext): AsyncIterable<ToolEvent> {
+    async *execute(input: I, ctx: CoreToolContext): AsyncIterable<ToolEvent> {
       if (registry === undefined) {
         // Default-OFF degradation. Run work synchronously; chain ctx.signal
         // so abort still flows.

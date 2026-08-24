@@ -1,4 +1,4 @@
-import type { Tool, ToolContext, ToolEvent } from "../types"
+import type { CoreToolContext, Tool, ToolEvent } from "../types"
 import { safeRun, stderrReason } from "./_shared"
 import { type GitRunner, type GitUpstreamCheckInput, gitUpstreamCheckInputSchema } from "./types"
 
@@ -46,7 +46,7 @@ export const gitUpstreamCheckTool = (runner: GitRunner): Tool<GitUpstreamCheckIn
   isReadOnly: () => true,
   isConcurrencySafe: () => true,
 
-  async *execute(_input: GitUpstreamCheckInput, ctx: ToolContext): AsyncIterable<ToolEvent> {
+  async *execute(_input: GitUpstreamCheckInput, ctx: CoreToolContext): AsyncIterable<ToolEvent> {
     yield { type: "progress", message: "git upstream check" }
 
     // 1. Resolve the upstream ref name. A missing upstream is a graceful ok.

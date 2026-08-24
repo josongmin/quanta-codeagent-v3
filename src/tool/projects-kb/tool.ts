@@ -32,7 +32,7 @@ import { z } from "zod"
 import type { SearchHit } from "@/retrieval/pipeline"
 import { sliceWholeChars } from "@/shared"
 import { resolveJailedDoc } from "../_shared/resolve-jailed-doc"
-import type { Tool, ToolContext, ToolEvent, ToolResult } from "../types"
+import type { CoreToolContext, Tool, ToolEvent, ToolResult } from "../types"
 import type { ProjectsKbSlot } from "./port"
 import { type ProjectsKbHit, type ProjectsKbStore, renderKnowledge } from "./store"
 
@@ -118,7 +118,7 @@ const doDelete = (store: ProjectsKbStore, d: ProjectsKbInput): Outcome => {
 const doWrite = async (
   store: ProjectsKbStore,
   d: ProjectsKbInput,
-  ctx: ToolContext,
+  ctx: CoreToolContext,
 ): Promise<Outcome> => {
   if (d.local_path === undefined) return errOut("project_write requires: local_path")
   // Path safety — a jail escape / empty / NUL throws FsJailError; convert to a
@@ -209,7 +209,7 @@ const doSearch = async (slot: ProjectsKbSlot, d: ProjectsKbInput): Promise<Outco
 const runProjectsKb = async (
   slot: ProjectsKbSlot,
   d: ProjectsKbInput,
-  ctx: ToolContext,
+  ctx: CoreToolContext,
 ): Promise<Outcome> => {
   try {
     switch (d.op) {
@@ -242,7 +242,7 @@ export const projectsKbTool = (slot: ProjectsKbSlot): Tool<ProjectsKbInput> => (
   isReadOnly: () => true,
   isConcurrencySafe: () => true,
   hitlTier: () => "none",
-  async *execute(input: ProjectsKbInput, ctx: ToolContext): AsyncIterable<ToolEvent> {
+  async *execute(input: ProjectsKbInput, ctx: CoreToolContext): AsyncIterable<ToolEvent> {
     const parsed = projectsKbSchema.safeParse(input)
     if (!parsed.success) {
       yield {

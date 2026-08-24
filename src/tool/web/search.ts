@@ -18,7 +18,7 @@
 
 import { z } from "zod"
 import { errMessage } from "@/shared"
-import type { Tool, ToolContext, ToolEvent, ToolResult } from "../types"
+import type { CoreToolContext, Tool, ToolEvent, ToolResult } from "../types"
 export const WEB_SEARCH_DEFAULT_LIMIT = 5
 export const WEB_SEARCH_MAX_LIMIT = 20
 export const WEB_SEARCH_QUERY_MAX = 500
@@ -99,7 +99,7 @@ export const webSearchTool = (provider?: WebSearchProvider): Tool<WebSearchInput
     isReadOnly: () => true,
     isConcurrencySafe: () => true,
 
-    async *execute(input: WebSearchInput, ctx: ToolContext): AsyncIterable<ToolEvent> {
+    async *execute(input: WebSearchInput, ctx: CoreToolContext): AsyncIterable<ToolEvent> {
       const parsed = webSearchInputSchema.safeParse(input)
       if (!parsed.success) {
         yield { type: "result", result: errResult(`invalid input: ${parsed.error.message}`) }

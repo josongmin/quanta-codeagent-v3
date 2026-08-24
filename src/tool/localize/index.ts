@@ -3,7 +3,7 @@ import { runShell } from "@/runtime"
 import { byteCompare } from "@/shared"
 import { FsJailError, resolveJailed } from "@/storage"
 import { classifyFrame, type FrameTier } from "../parse-test-failure"
-import type { Tool, ToolContext, ToolEvent } from "../types"
+import type { CoreToolContext, Tool, ToolEvent } from "../types"
 
 const schema = z.object({
   query: z
@@ -124,7 +124,7 @@ interface TermStat {
  *  in the JS event loop — concurrent rg subprocesses, single writer. */
 const collectTerm = async (
   term: string,
-  ctx: ToolContext,
+  ctx: CoreToolContext,
   scope: string | undefined,
   hits: Map<string, Hit>,
 ): Promise<TermStat> => {
@@ -165,7 +165,7 @@ interface ScopeScan {
 
 /** Single `rg --files` pass that yields both the BM25 corpus size N AND the
  *  set of `.ts`-family stems for the R-Phase10 sibling-`.js` detection. */
-const scanScope = async (ctx: ToolContext, scope: string | undefined): Promise<ScopeScan> => {
+const scanScope = async (ctx: CoreToolContext, scope: string | undefined): Promise<ScopeScan> => {
   const parts = ["rg", "--files"]
   if (scope) parts.push(sq(scope))
   const r = await runShell(parts.join(" "), { cwd: ctx.cwd, signal: ctx.signal })
@@ -345,7 +345,7 @@ export const localizeTool: Tool<Input> = {
   // Only spawns ripgrep reads; no shared mutable state. Safe to parallelize.
   isConcurrencySafe: () => true,
 
-  async *execute(input: Input, ctx: ToolContext): AsyncIterable<ToolEvent> {
+  async *execute(input: Input, ctx: CoreToolContext): AsyncIterable<ToolEvent> {
     const parsed = schema.safeParse(input)
     if (!parsed.success) {
       yield {

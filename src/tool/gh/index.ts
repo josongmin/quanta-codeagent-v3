@@ -26,7 +26,7 @@ import type { LLMPort } from "../../llm"
 import type { CiFindingStore } from "../ci-finding"
 import { ciFindingTool } from "../ci-finding"
 import type { GitRunner } from "../git/types"
-import type { Tool, ToolContext, ToolEvent } from "../types"
+import type { CoreToolContext, Tool, ToolEvent } from "../types"
 import { ghPrBlameTool } from "./pr-blame"
 import { ghPrCodeTourTool } from "./pr-code-tour"
 import { ghPrEditLabelsTool } from "./pr-edit-labels"
@@ -65,7 +65,7 @@ export const ghPrViewTool = (runner: GhRunner = defaultGhRunner): Tool<PrViewInp
   inputSchema: prViewSchema,
   isReadOnly: () => true,
   isConcurrencySafe: () => true,
-  async *execute(input: PrViewInput, ctx: ToolContext): AsyncIterable<ToolEvent> {
+  async *execute(input: PrViewInput, ctx: CoreToolContext): AsyncIterable<ToolEvent> {
     const ref = normalizeRef(input.pr)
     if (ref === undefined) {
       yield { type: "result", result: { ok: false, output: refRejected("PR", input.pr) } }
@@ -97,7 +97,7 @@ export const ghIssueViewTool = (runner: GhRunner = defaultGhRunner): Tool<IssueV
   inputSchema: issueViewSchema,
   isReadOnly: () => true,
   isConcurrencySafe: () => true,
-  async *execute(input: IssueViewInput, ctx: ToolContext): AsyncIterable<ToolEvent> {
+  async *execute(input: IssueViewInput, ctx: CoreToolContext): AsyncIterable<ToolEvent> {
     const ref = normalizeRef(input.issue)
     if (ref === undefined) {
       yield { type: "result", result: { ok: false, output: refRejected("issue", input.issue) } }
@@ -128,7 +128,7 @@ export const ghCheckStatusTool = (runner: GhRunner = defaultGhRunner): Tool<Chec
   inputSchema: checkStatusSchema,
   isReadOnly: () => true,
   isConcurrencySafe: () => true,
-  async *execute(input: CheckStatusInput, ctx: ToolContext): AsyncIterable<ToolEvent> {
+  async *execute(input: CheckStatusInput, ctx: CoreToolContext): AsyncIterable<ToolEvent> {
     const ref = normalizeRef(input.pr)
     if (ref === undefined) {
       yield { type: "result", result: { ok: false, output: refRejected("PR", input.pr) } }
@@ -168,7 +168,7 @@ export const ghPrCommentTool = (runner: GhRunner = defaultGhRunner): Tool<PrComm
   // PDP capability (P2-T3): posting to a GitHub PR is an externally-visible
   // action ⇒ the UNIVERSAL floor (confirm on every surface, even bypass).
   capability: (): { confirm: "sensitive" } => ({ confirm: "sensitive" }),
-  async *execute(input: PrCommentInput, ctx: ToolContext): AsyncIterable<ToolEvent> {
+  async *execute(input: PrCommentInput, ctx: CoreToolContext): AsyncIterable<ToolEvent> {
     const ref = normalizeRef(input.pr)
     if (ref === undefined) {
       yield { type: "result", result: { ok: false, output: refRejected("PR", input.pr) } }
@@ -221,7 +221,7 @@ export const ghPrCreateTool = (
   // PDP capability (P2-T3): creating a GitHub PR is an externally-visible action
   // ⇒ the UNIVERSAL floor (confirm on every surface, even bypass).
   capability: (): { confirm: "sensitive" } => ({ confirm: "sensitive" }),
-  async *execute(input: PrCreateInput, ctx: ToolContext): AsyncIterable<ToolEvent> {
+  async *execute(input: PrCreateInput, ctx: CoreToolContext): AsyncIterable<ToolEvent> {
     const argv = [
       "gh",
       "pr",
@@ -289,7 +289,7 @@ export const ghPrReviewDiffTool = (
   inputSchema: prReviewDiffSchema,
   isReadOnly: () => true,
   isConcurrencySafe: () => true,
-  async *execute(input: PrReviewDiffInput, ctx: ToolContext): AsyncIterable<ToolEvent> {
+  async *execute(input: PrReviewDiffInput, ctx: CoreToolContext): AsyncIterable<ToolEvent> {
     const ref = normalizeRef(input.pr)
     if (ref === undefined) {
       yield { type: "result", result: { ok: false, output: refRejected("PR", input.pr) } }
@@ -337,7 +337,7 @@ export const ghPrAutoMergeTool = (runner: GhRunner = defaultGhRunner): Tool<PrAu
   // PDP capability (P2-T3): merging a PR is an IRREVERSIBLE external action ⇒ the
   // UNIVERSAL floor (confirm on every surface, even bypass).
   capability: (): { confirm: "sensitive" } => ({ confirm: "sensitive" }),
-  async *execute(input: PrAutoMergeInput, ctx: ToolContext): AsyncIterable<ToolEvent> {
+  async *execute(input: PrAutoMergeInput, ctx: CoreToolContext): AsyncIterable<ToolEvent> {
     const ref = normalizeRef(input.pr)
     if (ref === undefined) {
       yield { type: "result", result: { ok: false, output: refRejected("PR", input.pr) } }
@@ -389,7 +389,7 @@ export const ghPrListTool = (runner: GhRunner = defaultGhRunner): Tool<PrListInp
   inputSchema: prListSchema,
   isReadOnly: () => true,
   isConcurrencySafe: () => true,
-  async *execute(input: PrListInput, ctx: ToolContext): AsyncIterable<ToolEvent> {
+  async *execute(input: PrListInput, ctx: CoreToolContext): AsyncIterable<ToolEvent> {
     const argv = [
       "gh",
       "pr",

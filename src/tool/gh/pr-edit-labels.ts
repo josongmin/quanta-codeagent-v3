@@ -22,7 +22,7 @@
  * network in tests).
  */
 import { z } from "zod"
-import type { Tool, ToolContext, ToolEvent } from "../types"
+import type { CoreToolContext, Tool, ToolEvent } from "../types"
 import { normalizeRef, refRejected } from "./ref"
 import { DEFAULT_TIMEOUT_MS, defaultGhRunner, type GhRunner } from "./runner"
 
@@ -65,7 +65,7 @@ export const ghPrEditLabelsTool = (
   inputSchema: prEditLabelsSchema,
   isReadOnly: () => false,
   isConcurrencySafe: () => false,
-  async *execute(input: PrEditLabelsInput, ctx: ToolContext): AsyncIterable<ToolEvent> {
+  async *execute(input: PrEditLabelsInput, ctx: CoreToolContext): AsyncIterable<ToolEvent> {
     const ref = normalizeRef(input.pr)
     if (ref === undefined) {
       yield { type: "result", result: { ok: false, output: refRejected("PR", input.pr) } }

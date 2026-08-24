@@ -4,7 +4,7 @@
  *  outbound RPC. Output is `mcp`-origin ⇒ H2 untrusted-source envelope. */
 
 import { z } from "zod"
-import type { Tool, ToolContext, ToolEvent } from "../types"
+import type { CoreToolContext, Tool, ToolEvent } from "../types"
 import type { ResourcesHandle } from "./port"
 import { callPort, renderFailure, renderPromptResult } from "./render"
 
@@ -26,7 +26,7 @@ export const mcpGetPromptTool = (port: ResourcesHandle): Tool<GetPromptInput> =>
   inputSchema: getPromptInputSchema,
   isReadOnly: () => true,
   isConcurrencySafe: () => true,
-  async *execute(input: GetPromptInput, ctx: ToolContext): AsyncIterable<ToolEvent> {
+  async *execute(input: GetPromptInput, ctx: CoreToolContext): AsyncIterable<ToolEvent> {
     const parsed = getPromptInputSchema.safeParse(input)
     if (!parsed.success) {
       yield {

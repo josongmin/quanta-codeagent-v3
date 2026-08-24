@@ -17,7 +17,7 @@
 
 import { z } from "zod"
 import { errMessage } from "@/shared/errors"
-import type { Tool, ToolContext, ToolEvent, ToolFailure, ToolResult } from "../types"
+import type { CoreToolContext, Tool, ToolEvent, ToolFailure, ToolResult } from "../types"
 
 /** One catalog entry as the model sees it (duck-typed view). */
 export interface McpConnectorEntryView {
@@ -100,7 +100,7 @@ const makeListTool = (port: McpConnectorDiscoveryPort): Tool<McpConnectorListInp
   inputSchema: mcpConnectorListInputSchema,
   isReadOnly: () => true,
   isConcurrencySafe: () => true,
-  async *execute(input: McpConnectorListInput, ctx: ToolContext): AsyncIterable<ToolEvent> {
+  async *execute(input: McpConnectorListInput, ctx: CoreToolContext): AsyncIterable<ToolEvent> {
     const parsed = mcpConnectorListInputSchema.safeParse(input)
     if (!parsed.success) {
       yield {
@@ -156,7 +156,7 @@ const makeInstallTool = (port: McpConnectorDiscoveryPort): Tool<McpConnectorInst
   inputSchema: mcpConnectorInstallInputSchema,
   isReadOnly: () => false,
   isConcurrencySafe: () => false,
-  async *execute(input: McpConnectorInstallInput, ctx: ToolContext): AsyncIterable<ToolEvent> {
+  async *execute(input: McpConnectorInstallInput, ctx: CoreToolContext): AsyncIterable<ToolEvent> {
     const parsed = mcpConnectorInstallInputSchema.safeParse(input)
     if (!parsed.success) {
       yield {

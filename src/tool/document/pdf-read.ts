@@ -29,7 +29,7 @@ import type { DocumentBlock } from "@/llm"
 import { errMessage } from "@/shared"
 import { FsJailError } from "@/storage"
 import { resolveJailedDoc } from "../_shared/resolve-jailed-doc"
-import type { Tool, ToolContext, ToolEvent, ToolResult } from "../types"
+import type { CoreToolContext, Tool, ToolEvent, ToolResult } from "../types"
 export const readPdfInputSchema = z.object({
   path: z.string().min(1).describe("Repo-relative or absolute path to the PDF file"),
 })
@@ -70,7 +70,7 @@ const errResult = (output: string, failure?: ToolResult["failure"]): ToolResult 
  *  `permission_denied` failure so existing hellgate tests stay green. */
 const preflight = (
   input: ReadPdfInput,
-  ctx: ToolContext,
+  ctx: CoreToolContext,
 ): { kind: "fail"; result: ToolResult } | { kind: "ok"; abs: string; visiblePath: string } => {
   const parsed = readPdfInputSchema.safeParse(input)
   if (!parsed.success) {
@@ -185,7 +185,7 @@ export const pdfReadTool: Tool<ReadPdfInput> = {
   isReadOnly: () => true,
   isConcurrencySafe: () => true,
 
-  async *execute(input: ReadPdfInput, ctx: ToolContext): AsyncIterable<ToolEvent> {
+  async *execute(input: ReadPdfInput, ctx: CoreToolContext): AsyncIterable<ToolEvent> {
     const pre = preflight(input, ctx)
     if (pre.kind === "fail") {
       yield { type: "result", result: pre.result }

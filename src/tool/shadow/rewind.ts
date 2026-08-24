@@ -16,7 +16,7 @@
 
 import { z } from "zod"
 import { type ShadowOdb, ShadowOdbError } from "@/storage/shadow-odb"
-import type { Tool, ToolContext, ToolEvent } from "../types"
+import type { CoreToolContext, Tool, ToolEvent } from "../types"
 
 export const shadowRewindInputSchema = z.object({
   untracked: z
@@ -67,7 +67,7 @@ export const shadowRewindTool = (odb: ShadowOdb): Tool<ShadowRewindInput> => ({
   // cost) and never `hand-off-required` (rewind is the SAFETY-NET undo, not a
   // security primitive — operator confirmation is the right gate).
   hitlTier: () => "always-confirm",
-  async *execute(input, ctx: ToolContext): AsyncIterable<ToolEvent> {
+  async *execute(input, ctx: CoreToolContext): AsyncIterable<ToolEvent> {
     const parsed = shadowRewindInputSchema.safeParse(input)
     if (!parsed.success) {
       yield {

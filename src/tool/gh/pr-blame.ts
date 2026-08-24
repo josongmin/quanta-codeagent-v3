@@ -21,7 +21,7 @@
 
 import { z } from "zod"
 import { errMessage } from "@/shared"
-import type { Tool, ToolContext, ToolEvent } from "../types"
+import type { CoreToolContext, Tool, ToolEvent } from "../types"
 import { buildBlameBody } from "./pr-blame-parser"
 import type { RawPrViewJson } from "./pr-blame-types"
 import { normalizeRef, refRejected } from "./ref"
@@ -48,7 +48,7 @@ export const ghPrBlameTool = (runner: GhRunner = defaultGhRunner): Tool<PrBlameI
   inputSchema: prBlameSchema,
   isReadOnly: () => true,
   isConcurrencySafe: () => true,
-  async *execute(input: PrBlameInput, ctx: ToolContext): AsyncIterable<ToolEvent> {
+  async *execute(input: PrBlameInput, ctx: CoreToolContext): AsyncIterable<ToolEvent> {
     const ref = normalizeRef(input.pr)
     if (ref === undefined) {
       yield { type: "result", result: { ok: false, output: refRejected("PR", input.pr) } }

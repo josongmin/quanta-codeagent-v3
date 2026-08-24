@@ -25,7 +25,7 @@
 import { z } from "zod"
 import type { GitDirective as Directive0220, GitDirectiveEmitter } from "../../agent/git-directives"
 import type { GitDirective as Directive0234, GitDirectiveCollector } from "../../git/directive-emit"
-import type { Tool, ToolContext, ToolEvent } from "../types"
+import type { CoreToolContext, Tool, ToolEvent } from "../types"
 import { mutate } from "./_shared"
 import type { GitRunner } from "./types"
 
@@ -143,7 +143,7 @@ export const gitPushTool = (runner: GitRunner, opts: GitPushToolOpts = {}): Tool
   // accepts the risk opts out via `hitl.autoApprove`).
   capability: (): { confirm: "sensitive" } => ({ confirm: "sensitive" }),
 
-  async *execute(input: GitPushInput, ctx: ToolContext): AsyncIterable<ToolEvent> {
+  async *execute(input: GitPushInput, ctx: CoreToolContext): AsyncIterable<ToolEvent> {
     const parsed = gitPushInputSchema.safeParse(input)
     if (!parsed.success) {
       yield {

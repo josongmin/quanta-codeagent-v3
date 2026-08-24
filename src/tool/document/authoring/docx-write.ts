@@ -16,7 +16,7 @@
 import { z } from "zod"
 import { errMessage } from "@/shared"
 import type { ArtifactRegistryPort } from "../../artifact"
-import type { Tool, ToolContext, ToolEvent, ToolResult } from "../../types"
+import type { CoreToolContext, Tool, ToolEvent, ToolResult } from "../../types"
 import { OOXML_MEDIA_TYPES, registerArtifactBestEffort } from "./artifact-register"
 import { buildDocx, type DocxParagraph, type DocxSpec } from "./docx"
 import { resolveVersionedJailedTarget, writeJailedBytes } from "./jailed-write"
@@ -97,7 +97,7 @@ export const makeDocxWriteTool = (options: DocxWriteToolOptions = {}): Tool<Docx
   isReadOnly: () => false,
   isConcurrencySafe: () => false,
 
-  async *execute(input: DocxWriteInput, ctx: ToolContext): AsyncIterable<ToolEvent> {
+  async *execute(input: DocxWriteInput, ctx: CoreToolContext): AsyncIterable<ToolEvent> {
     const parsed = docxWriteInputSchema.safeParse(input)
     if (!parsed.success) {
       yield { type: "result", result: errResult(`invalid input: ${parsed.error.message}`) }

@@ -2,7 +2,7 @@ import { z } from "zod"
 import { runShell } from "@/runtime"
 import { FsJailError, resolveJailed } from "@/storage"
 import { defineTool } from "../factory"
-import type { ToolContext, ToolEvent } from "../types"
+import type { CoreToolContext, ToolEvent } from "../types"
 
 const schema = z.object({
   pattern: z.string().describe("ast-grep pattern. Use $VAR for metavariables matching any code."),
@@ -86,7 +86,7 @@ export const astGrepTool = defineTool<Input>({
   isReadOnly: () => true,
   isConcurrencySafe: () => true,
 
-  async *execute(input: Input, ctx: ToolContext): AsyncIterable<ToolEvent> {
+  async *execute(input: Input, ctx: CoreToolContext): AsyncIterable<ToolEvent> {
     yield { type: "progress", message: `ast-grep: searching for pattern ${input.pattern}…` }
 
     const probeError = await probeAstGrep(ctx.cwd)

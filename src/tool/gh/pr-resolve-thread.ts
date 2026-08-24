@@ -47,7 +47,7 @@
 import { z } from "zod"
 import { errMessage } from "../../shared"
 import type { GitRunner } from "../git/types"
-import type { Tool, ToolContext, ToolEvent } from "../types"
+import type { CoreToolContext, Tool, ToolEvent } from "../types"
 import { normalizeRef, refRejected } from "./ref"
 import { DEFAULT_TIMEOUT_MS, defaultGhRunner, type GhRunner } from "./runner"
 
@@ -128,7 +128,7 @@ const err = (output: string): ToolEvent => ({ type: "result", result: { ok: fals
  *  call still yields the canonical owner/repo for the typed `-F` vars.) */
 const resolveRepo = async (
   runner: GhRunner,
-  ctx: ToolContext,
+  ctx: CoreToolContext,
 ): Promise<{ ok: true; owner: string; repo: string } | { ok: false; output: string }> => {
   const r = await runner(
     ["gh", "repo", "view", "--json", "owner,name"],
@@ -157,7 +157,7 @@ const listUnresolved = async (
   owner: string,
   repo: string,
   prNum: string,
-  ctx: ToolContext,
+  ctx: CoreToolContext,
 ): Promise<
   | { ok: true; headRefName?: string; threads: Array<{ id: string; path?: string }> }
   | { ok: false; output: string }
@@ -205,7 +205,7 @@ const listUnresolved = async (
 const resolveOne = async (
   runner: GhRunner,
   threadId: string,
-  ctx: ToolContext,
+  ctx: CoreToolContext,
 ): Promise<{ ok: true } | { ok: false; output: string }> => {
   const argv = [
     "gh",
@@ -256,7 +256,7 @@ export const isUnsafeHeadRef = (ref: string): boolean => {
 const remoteAhead = async (
   git: GitRunner,
   headRef: string,
-  ctx: ToolContext,
+  ctx: CoreToolContext,
 ): Promise<
   { outcome: "diverged" } | { outcome: "same" } | { outcome: "git_failed"; detail: string }
 > => {
@@ -280,7 +280,7 @@ const handleDivergence = async (
   git: GitRunner,
   headRef: string,
   rebaseOnDivergence: boolean,
-  ctx: ToolContext,
+  ctx: CoreToolContext,
 ): Promise<DivergenceOutcome> => {
   // SECURITY — `headRef` came from the GraphQL response (network trust boundary);
   // reject an arg-injection-unsafe ref BEFORE it reaches ANY git argv (the bare
@@ -381,7 +381,7 @@ export const ghPrResolveThreadTool = (
   inputSchema: prResolveThreadSchema,
   isReadOnly: () => false,
   isConcurrencySafe: () => false,
-  async *execute(input: PrResolveThreadInput, ctx: ToolContext): AsyncIterable<ToolEvent> {
+  async *execute(input: PrResolveThreadInput, ctx: CoreToolContext): AsyncIterable<ToolEvent> {
     const ref = normalizeRef(input.pr)
     if (ref === undefined) {
       yield err(refRejected("PR", input.pr))
@@ -410,7 +410,7 @@ async function* runListMode(
   r: { owner: string; repo: string },
   ref: string,
   prLabel: string | number,
-  ctx: ToolContext,
+  ctx: CoreToolContext,
 ): AsyncIterable<ToolEvent> {
   yield { type: "progress", message: `gh api graphql (list threads) #${prLabel}` }
   const listed = await listUnresolved(runner, r.owner, r.repo, ref, ctx)
@@ -430,7 +430,7 @@ async function* runResolveModes(
   r: { owner: string; repo: string },
   ref: string,
   input: PrResolveThreadInput,
-  ctx: ToolContext,
+  ctx: CoreToolContext,
 ): AsyncIterable<ToolEvent> {
   const listed = await listUnresolved(runner, r.owner, r.repo, ref, ctx)
   if (!listed.ok) {

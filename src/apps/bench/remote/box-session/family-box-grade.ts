@@ -300,7 +300,7 @@ export const runFamilyBoxGrade = async (
 const verifiedEvaluatorSha256 = (bootstrap: FamilyRemoteBootstrap): string => {
   for (const command of bootstrap.commands) {
     const expectation = command.verifies
-    if (expectation !== undefined && expectation.path.endsWith("test_run.py")) {
+    if (expectation?.path.endsWith("test_run.py") === true) {
       return expectation.sha256
     }
   }

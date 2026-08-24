@@ -4,7 +4,7 @@ import { enforceOutputSchema } from "./factory"
 import type { ToolOrigin } from "./origin"
 import { capToolOutput, DEFAULT_SPILL_KEEP, DEFAULT_TOOL_OUTPUT_MAX } from "./output-spill"
 import { zodToJsonSchema } from "./schema"
-import type { Tool, ToolContext, ToolResult, ToolSpec } from "./types"
+import type { CoreToolContext, Tool, ToolResult, ToolSpec } from "./types"
 
 export class ToolRegistry {
   private readonly tools = new Map<string, Tool>()
@@ -149,7 +149,7 @@ export class ToolRegistry {
   async run(
     name: string,
     rawInput: unknown,
-    ctx: ToolContext,
+    ctx: CoreToolContext,
     onProgress?: (message: string) => void,
   ): Promise<ToolResult> {
     const tool = this.tools.get(name)

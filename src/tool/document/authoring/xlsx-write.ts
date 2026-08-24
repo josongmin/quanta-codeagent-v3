@@ -22,7 +22,7 @@
 import { z } from "zod"
 import { errMessage } from "@/shared"
 import type { ArtifactRegistryPort } from "../../artifact"
-import type { Tool, ToolContext, ToolEvent, ToolResult } from "../../types"
+import type { CoreToolContext, Tool, ToolEvent, ToolResult } from "../../types"
 import { OOXML_MEDIA_TYPES, registerArtifactBestEffort } from "./artifact-register"
 import { resolveVersionedJailedTarget, writeJailedBytes } from "./jailed-write"
 import { buildXlsx, type XlsxCellValue, type XlsxSpec } from "./xlsx"
@@ -85,7 +85,7 @@ export const makeXlsxWriteTool = (options: XlsxWriteToolOptions = {}): Tool<Xlsx
   isReadOnly: () => false,
   isConcurrencySafe: () => false,
 
-  async *execute(input: XlsxWriteInput, ctx: ToolContext): AsyncIterable<ToolEvent> {
+  async *execute(input: XlsxWriteInput, ctx: CoreToolContext): AsyncIterable<ToolEvent> {
     const parsed = xlsxWriteInputSchema.safeParse(input)
     if (!parsed.success) {
       yield { type: "result", result: errResult(`invalid input: ${parsed.error.message}`) }

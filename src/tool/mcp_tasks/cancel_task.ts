@@ -3,7 +3,7 @@
  *  `{ok:true}` so we surface the same. */
 
 import { z } from "zod"
-import type { Tool, ToolContext, ToolEvent } from "../types"
+import type { CoreToolContext, Tool, ToolEvent } from "../types"
 import { backendErrorEvent, callPort } from "./no-throw"
 import type { TasksHandle } from "./port"
 
@@ -21,7 +21,7 @@ export const cancelMcpTaskTool = (port: TasksHandle): Tool<CancelTaskInput> => (
   isReadOnly: () => false,
   isConcurrencySafe: () => false,
   hitlTier: () => "always-confirm",
-  async *execute(input, ctx: ToolContext): AsyncIterable<ToolEvent> {
+  async *execute(input, ctx: CoreToolContext): AsyncIterable<ToolEvent> {
     const parsed = cancelTaskInputSchema.safeParse(input)
     if (!parsed.success) {
       yield {

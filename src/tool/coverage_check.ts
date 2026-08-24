@@ -38,7 +38,7 @@ import {
 import { errMessage } from "@/shared"
 import { FsJailError } from "@/storage"
 import { resolveJailedDoc } from "./_shared/resolve-jailed-doc"
-import type { Tool, ToolContext, ToolEvent, ToolResult } from "./types"
+import type { CoreToolContext, Tool, ToolEvent, ToolResult } from "./types"
 export const coverageCheckInputSchema = z.object({
   coverageJsonPath: z
     .string()
@@ -114,7 +114,7 @@ const renderReport = (report: CoverageReport, verdict: CoverageVerdict): string 
  *  reject. */
 const preflight = async (
   input: unknown,
-  ctx: ToolContext,
+  ctx: CoreToolContext,
 ): Promise<
   { kind: "fail"; result: ToolResult } | { kind: "ok"; abs: string; parsed: CoverageCheckInput }
 > => {
@@ -180,7 +180,7 @@ export const coverageCheckTool: Tool<CoverageCheckInput> = {
   isReadOnly: () => true,
   isConcurrencySafe: () => true,
 
-  async *execute(input: CoverageCheckInput, ctx: ToolContext): AsyncIterable<ToolEvent> {
+  async *execute(input: CoverageCheckInput, ctx: CoreToolContext): AsyncIterable<ToolEvent> {
     const pre = await preflight(input, ctx)
     if (pre.kind === "fail") {
       yield { type: "result", result: pre.result }

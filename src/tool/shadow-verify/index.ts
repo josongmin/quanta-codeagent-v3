@@ -25,7 +25,7 @@
 
 import { z } from "zod"
 import { errMessage } from "@/shared"
-import type { Tool, ToolContext, ToolEvent } from "../types"
+import type { CoreToolContext, Tool, ToolEvent } from "../types"
 
 /** Duck-typed mirror of `@/agent/shadow-verify`'s `ShadowCheck`. Closed union. */
 export type ShadowCheckMirror = "lint" | "typecheck" | "test"
@@ -123,7 +123,7 @@ export const shadowVerifyTool = (port: ShadowVerifyPortMirror): Tool<ShadowVerif
   // Read-only against the real workspace ⇒ pre-approval-ok. The model can
   // call verify freely inside the accept-edits envelope without re-prompting.
   hitlTier: (): "pre-approval-ok" => "pre-approval-ok",
-  async *execute(input: ShadowVerifyInput, ctx: ToolContext): AsyncIterable<ToolEvent> {
+  async *execute(input: ShadowVerifyInput, ctx: CoreToolContext): AsyncIterable<ToolEvent> {
     const parsed = shadowVerifyInputSchema.safeParse(input)
     if (!parsed.success) {
       yield {

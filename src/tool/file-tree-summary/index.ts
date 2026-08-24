@@ -4,7 +4,7 @@ import { z } from "zod"
 import { runShell } from "@/runtime"
 import { byteCompare } from "@/shared"
 import { FsJailError, resolveJailed } from "@/storage"
-import type { NextAction, Tool, ToolContext, ToolEvent } from "../types"
+import type { CoreToolContext, NextAction, Tool, ToolEvent } from "../types"
 
 /**
  * `file_tree_summary` — Stage-1 fault-localization aid (Codex "file topology"
@@ -442,7 +442,7 @@ export const fileTreeSummaryTool: Tool<Input> = {
   isReadOnly: () => true,
   isConcurrencySafe: () => true,
 
-  async *execute(input: Input, ctx: ToolContext): AsyncIterable<ToolEvent> {
+  async *execute(input: Input, ctx: CoreToolContext): AsyncIterable<ToolEvent> {
     const maxDepth = input.max_depth ?? DEFAULT_DEPTH
     const maxFiles = input.max_files ?? DEFAULT_MAX_FILES
 

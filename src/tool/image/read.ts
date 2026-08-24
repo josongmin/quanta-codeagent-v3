@@ -30,7 +30,7 @@ import type { ImageBlock } from "@/llm"
 import { errMessage } from "@/shared"
 import { FsJailError } from "@/storage"
 import { resolveJailedDoc } from "../_shared/resolve-jailed-doc"
-import type { Tool, ToolContext, ToolEvent, ToolResult } from "../types"
+import type { CoreToolContext, Tool, ToolEvent, ToolResult } from "../types"
 import { planImageRead } from "./downsample-plan"
 import type { ImageDownsamplePort } from "./downsample-port"
 export const readImageInputSchema = z.object({
@@ -258,7 +258,7 @@ const decodePhase = async (
  *  `permission_denied` failure so existing hellgate tests stay green. */
 const preflight = (
   input: ReadImageInput,
-  ctx: ToolContext,
+  ctx: CoreToolContext,
 ): { kind: "fail"; result: ToolResult } | { kind: "ok"; abs: string; visiblePath: string } => {
   const parsed = readImageInputSchema.safeParse(input)
   if (!parsed.success) {
@@ -298,7 +298,7 @@ export const makeReadImageTool = (downsamplePort?: ImageDownsamplePort): Tool<Re
   isReadOnly: () => true,
   isConcurrencySafe: () => true,
 
-  async *execute(input: ReadImageInput, ctx: ToolContext): AsyncIterable<ToolEvent> {
+  async *execute(input: ReadImageInput, ctx: CoreToolContext): AsyncIterable<ToolEvent> {
     const pre = preflight(input, ctx)
     if (pre.kind === "fail") {
       yield { type: "result", result: pre.result }

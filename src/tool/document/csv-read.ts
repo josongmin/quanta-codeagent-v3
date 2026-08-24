@@ -26,7 +26,7 @@ import { classifyPath } from "@/security"
 import { errMessage } from "@/shared"
 import { FsJailError } from "@/storage"
 import { resolveJailedDoc } from "../_shared/resolve-jailed-doc"
-import type { Tool, ToolContext, ToolEvent, ToolResult } from "../types"
+import type { CoreToolContext, Tool, ToolEvent, ToolResult } from "../types"
 import { parseCsv } from "./csv-parse"
 export const CSV_READ_DEFAULT_MAX_ROWS = 100
 export const CSV_READ_MAX_ROWS_CEILING = 1000
@@ -66,7 +66,7 @@ const errResult = (output: string, failure?: ToolResult["failure"]): ToolResult 
  *  `permission_denied` failure so existing hellgate tests stay green. */
 const preflight = (
   input: CsvReadInput,
-  ctx: ToolContext,
+  ctx: CoreToolContext,
 ): { kind: "fail"; result: ToolResult } | { kind: "ok"; abs: string; visiblePath: string } => {
   const parsed = csvReadInputSchema.safeParse(input)
   if (!parsed.success) {
@@ -188,7 +188,7 @@ export const csvReadTool: Tool<CsvReadInput> = {
   isReadOnly: () => true,
   isConcurrencySafe: () => true,
 
-  async *execute(input: CsvReadInput, ctx: ToolContext): AsyncIterable<ToolEvent> {
+  async *execute(input: CsvReadInput, ctx: CoreToolContext): AsyncIterable<ToolEvent> {
     const pre = preflight(input, ctx)
     if (pre.kind === "fail") {
       yield { type: "result", result: pre.result }

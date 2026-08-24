@@ -34,7 +34,7 @@
 
 import { z } from "zod"
 import { errMessage } from "@/shared"
-import type { Tool, ToolContext, ToolEvent } from "../types"
+import type { CoreToolContext, Tool, ToolEvent } from "../types"
 import {
   type AgentMode,
   type BoomerangResult,
@@ -134,7 +134,7 @@ export const delegateTool = (port: DelegationPort): Tool<DelegateInput> => ({
   isReadOnly: () => false,
   isConcurrencySafe: () => false,
   hitlTier: () => "always-confirm",
-  async *execute(input, ctx: ToolContext): AsyncIterable<ToolEvent> {
+  async *execute(input, ctx: CoreToolContext): AsyncIterable<ToolEvent> {
     const parsed = delegateInputSchema.safeParse(input)
     if (!parsed.success) {
       yield {

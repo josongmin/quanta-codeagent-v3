@@ -18,7 +18,7 @@ import { z } from "zod"
 import { errMessage } from "@/shared"
 import { FsJailError } from "@/storage"
 import { resolveJailedDoc } from "../_shared/resolve-jailed-doc"
-import type { Tool, ToolContext, ToolEvent, ToolResult } from "../types"
+import type { CoreToolContext, Tool, ToolEvent, ToolResult } from "../types"
 import { unescapeXml } from "./authoring/ooxml-read"
 import { findZipPart, unzip } from "./authoring/zip-store"
 
@@ -220,7 +220,7 @@ export const xlsxReadTool: Tool<XlsxReadInput> = {
   isReadOnly: () => true,
   isConcurrencySafe: () => true,
 
-  async *execute(input: XlsxReadInput, ctx: ToolContext): AsyncIterable<ToolEvent> {
+  async *execute(input: XlsxReadInput, ctx: CoreToolContext): AsyncIterable<ToolEvent> {
     const parsed = xlsxReadInputSchema.safeParse(input)
     if (!parsed.success) {
       yield { type: "result", result: errResult(`invalid input: ${parsed.error.message}`) }
@@ -271,7 +271,7 @@ export type JailedBytes =
 
 /** Resolve + jail + symlink-reject + size-cap + read a doc's bytes. No-throw. */
 export const readJailedFileBytes = async (
-  ctx: ToolContext,
+  ctx: CoreToolContext,
   visiblePath: string,
   maxBytes: number,
 ): Promise<JailedBytes> => {

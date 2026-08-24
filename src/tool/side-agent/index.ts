@@ -21,7 +21,7 @@
 
 import { z } from "zod"
 import { errMessage } from "@/shared"
-import type { Tool, ToolContext, ToolEvent, ToolFailure, ToolResult } from "../types"
+import type { CoreToolContext, Tool, ToolEvent, ToolFailure, ToolResult } from "../types"
 
 /** Duck-typed mirror of `@/side-agent`'s `SideAgentTrigger`. */
 export type SideAgentTriggerView =
@@ -150,7 +150,7 @@ const makeSpawnTool = (
   inputSchema: sideAgentSpawnInputSchema,
   isReadOnly: () => false,
   isConcurrencySafe: () => false,
-  async *execute(input: SideAgentSpawnInput, ctx: ToolContext): AsyncIterable<ToolEvent> {
+  async *execute(input: SideAgentSpawnInput, ctx: CoreToolContext): AsyncIterable<ToolEvent> {
     const parsed = sideAgentSpawnInputSchema.safeParse(input)
     if (!parsed.success) {
       yield {
@@ -208,7 +208,7 @@ const makeListTool = (registry: SideAgentDaemonPort): Tool<SideAgentListInput> =
   inputSchema: sideAgentListInputSchema,
   isReadOnly: () => true,
   isConcurrencySafe: () => true,
-  async *execute(_input: SideAgentListInput, ctx: ToolContext): AsyncIterable<ToolEvent> {
+  async *execute(_input: SideAgentListInput, ctx: CoreToolContext): AsyncIterable<ToolEvent> {
     if (ctx.signal.aborted) {
       yield {
         type: "result",
@@ -246,7 +246,7 @@ const makeStopTool = (registry: SideAgentDaemonPort): Tool<SideAgentStopInput> =
   inputSchema: sideAgentStopInputSchema,
   isReadOnly: () => false,
   isConcurrencySafe: () => false,
-  async *execute(input: SideAgentStopInput, ctx: ToolContext): AsyncIterable<ToolEvent> {
+  async *execute(input: SideAgentStopInput, ctx: CoreToolContext): AsyncIterable<ToolEvent> {
     const parsed = sideAgentStopInputSchema.safeParse(input)
     if (!parsed.success) {
       yield {
@@ -295,7 +295,7 @@ const makeFindingsTool = (registry: SideAgentDaemonPort): Tool<SideAgentFindings
   inputSchema: sideAgentFindingsInputSchema,
   isReadOnly: () => true,
   isConcurrencySafe: () => true,
-  async *execute(input: SideAgentFindingsInput, ctx: ToolContext): AsyncIterable<ToolEvent> {
+  async *execute(input: SideAgentFindingsInput, ctx: CoreToolContext): AsyncIterable<ToolEvent> {
     const parsed = sideAgentFindingsInputSchema.safeParse(input)
     if (!parsed.success) {
       yield {

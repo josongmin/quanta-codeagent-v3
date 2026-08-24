@@ -17,7 +17,7 @@
 import { z } from "zod"
 import { errMessage } from "@/shared"
 import { FsJailError, resolveJailed } from "@/storage"
-import type { Tool, ToolContext, ToolEvent } from "../types"
+import type { CoreToolContext, Tool, ToolEvent } from "../types"
 import { checkWorkspaceEditJail } from "./workspace-edit-jail"
 
 // ── Duck-typed mirror of `RenameApplyPort` ─────────────────────────────────
@@ -98,7 +98,7 @@ export const lspRenameApplyTool = (port: RenameApplyPort): Tool<LspRenameApplyIn
   isReadOnly: () => false,
   isConcurrencySafe: () => false,
   hitlTier: () => "always-confirm",
-  async *execute(input, ctx: ToolContext): AsyncIterable<ToolEvent> {
+  async *execute(input, ctx: CoreToolContext): AsyncIterable<ToolEvent> {
     const parsed = lspRenameApplyInputSchema.safeParse(input)
     if (!parsed.success) {
       yield {
