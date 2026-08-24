@@ -295,6 +295,20 @@ export const buildProductionRuntimeFactory = (): (() => Promise<ObservableRuntim
     // preview resolver; QUANTA_WEB_AGENT_STATE agent-state + inbound; ADR-0496 A1
     // control-request; T02 follower.
     defineOptionalFacadeGetters(facade, {
+      // RFC-03 C2 (web-parity persistence seam) — expose the SESSION-STABLE
+      // objective authority (minted once above under QUANTA_OBJECTIVE_TOOLS) as a
+      // NON-obs, plain value getter for TRANSCRIPT PERSISTENCE only. The daemon's
+      // `webObjectiveSnapshot` reads THIS field — NOT the obs-gated `objective`
+      // getter (which `attachObservabilityPorts` proxies off the wire handle and
+      // returns undefined under obs-off) — so the durable goal persists whenever
+      // TOOLS is on, independent of observability. It is NOT an observability
+      // emitter port ⇒ exposing it emits no obs frame (obs stream byte-identical).
+      // Absent when TOOLS is off: `objective` is undefined and
+      // `defineOptionalFacadeGetters` SKIPS undefined values ⇒ no getter ⇒
+      // snapshot undefined ⇒ transcript omits `objective` (byte-identical
+      // default-OFF). Passed directly (like `canvasUsage`) — the helper's
+      // undefined-skip removes the need for a guard ternary here.
+      objectiveAuthority: objective,
       canvasUsage,
       canvasToolDiff,
       canvasArtifact,

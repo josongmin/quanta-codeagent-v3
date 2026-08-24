@@ -273,14 +273,22 @@ const buildDaemonListener = (params: {
 }
 
 /** RFC-03 C2 — the transcript-persist objective provider for the web session,
- *  encoded from the live authority (`runtime.objective`, duck-read like
- *  `readoutSources` — the base `RuntimeFacade` type does not surface it). Returns
- *  `undefined` when no authority is present ⇒ transcript-persist omits `objective`
- *  ⇒ byte-identical. Module-scope so it stays off `startWebDaemon`'s body budget. */
+ *  encoded from the SESSION-STABLE authority (`runtime.objectiveAuthority`,
+ *  duck-read like `readoutSources` — the base `RuntimeFacade` type does not
+ *  surface it). This is deliberately the NON-obs persistence handle the factory
+ *  exposes under `QUANTA_OBJECTIVE_TOOLS` alone — NOT the obs-gated `objective`
+ *  facade getter (which proxies the observability wire handle and reads undefined
+ *  when `QUANTA_OBSERVABILITY` is off, silently dropping the durable goal). Both
+ *  are the SAME instance when observability is on; the persistence field is the
+ *  one that is ALSO present with observability off, so the goal is saved either
+ *  way — and reading it emits NO observability frame (obs stream byte-identical).
+ *  Returns `undefined` when no authority is present (TOOLS off) ⇒ transcript-
+ *  persist omits `objective` ⇒ byte-identical. Module-scope so it stays off
+ *  `startWebDaemon`'s body budget. */
 const webObjectiveSnapshot = (
   runtime: unknown,
 ): (() => PersistedObjectiveSnapshot | undefined) | undefined =>
-  buildObjectiveSnapshotProvider((runtime as { objective?: unknown }).objective)
+  buildObjectiveSnapshotProvider((runtime as { objectiveAuthority?: unknown }).objectiveAuthority)
 
 export const startWebDaemon = async (config: WebDaemonServerConfig): Promise<WebDaemonHandle> => {
   const runtime = await config.runtimeFactory()
@@ -438,3 +446,8 @@ export {
   constantTimeEquals as _constantTimeEqualsForTest,
   extractToken as _extractTokenForTest,
 } from "./server/auth"
+
+// RFC-03 C2 (web-parity persistence seam) — exported for the hellgate so the
+// EXACT server snapshot builder (`objectiveSnapshot: webObjectiveSnapshot(runtime)`)
+// can be driven against a production-shaped facade without booting Bun.serve.
+export { webObjectiveSnapshot as _webObjectiveSnapshotForTest }

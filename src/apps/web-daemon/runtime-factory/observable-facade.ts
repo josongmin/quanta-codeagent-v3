@@ -42,6 +42,22 @@ import type { WebUserInputPortHandle } from "../web-user-input-port"
  */
 export interface ObservableRuntimeFacade extends RuntimeFacade {
   readonly objective?: ObjectivePort
+  /**
+   * RFC-03 C2 (web-parity persistence seam) — the SESSION-STABLE objective
+   * AUTHORITY threaded for TRANSCRIPT PERSISTENCE ONLY, decoupled from
+   * observability. Distinct from the `objective` getter above: that one proxies
+   * the OBSERVABILITY wire handle (`attachObservabilityPorts`) and reads
+   * `undefined` whenever `QUANTA_OBSERVABILITY` is off (so the obs emitter stays
+   * silent); THIS field is the ONE authority `buildProductionRuntimeFactory`
+   * mints under `QUANTA_OBJECTIVE_TOOLS` alone (the SAME instance on
+   * `base.objective`), present whenever TOOLS is on REGARDLESS of observability.
+   * The daemon's `webObjectiveSnapshot` reads THIS (not the obs getter) so the
+   * durable goal persists even with observability OFF. It is a plain value
+   * getter — NOT an observability emitter port — so exposing it emits NO
+   * observability frame (obs emission stays byte-identical). Absent when TOOLS
+   * is off ⇒ the snapshot is undefined ⇒ the transcript omits `objective`.
+   */
+  readonly objectiveAuthority?: ObjectivePort
   readonly runLedger?: RunLedgerPort
   readonly approvalStateMachine?: ApprovalStateMachinePort
   readonly shadowVerify?: ShadowVerifyPort
