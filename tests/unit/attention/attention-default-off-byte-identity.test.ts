@@ -73,16 +73,27 @@ describe("A1 foundation — panel-ON / attention-OFF cross-case byte-identity", 
   })
 })
 
-describe("A1 foundation — leak path does not exist", () => {
-  test("park-site loop + registry do not import the new attention/question modules", () => {
+describe("A1 foundation — leak path does not exist (source-absence heuristic)", () => {
+  // HONEST SCOPE: this is a SOURCE-ABSENCE heuristic, not a byte-identity proof —
+  // the byte-identity guarantee is carried by the BEHAVIORAL cross-case above
+  // (the emitted stream + records carry zero attention bytes) and by the ADR-0024
+  // slice-boundary tests. This check adds a cheap "the import edge isn't even
+  // present" tripwire. It is import-FORM-agnostic: matching only `@/attention`
+  // would let a relative `../attention` / barrel re-export evade it, so we match
+  // any import specifier that resolves to the attention or user-question module.
+  const importsModule = (src: string, seg: string): boolean =>
+    // `from "...<seg>..."` or `import("...<seg>...")` in any path form (@/, relative, barrel).
+    new RegExp(`(from|import)\\s*\\(?\\s*["'][^"']*\\b${seg}\\b[^"']*["']`).test(src)
+
+  test("park-site loop + registry do not import the new attention/question modules (any import form)", () => {
     for (const rel of [
       "src/agent/loop/turn-outcome.ts",
       "src/agent/loop/turn-loop.ts",
       "src/subagent/registry.ts",
     ]) {
       const src = read(rel)
-      expect(src.includes("@/attention")).toBe(false)
-      expect(src.includes("@/session/user-question")).toBe(false)
+      expect(importsModule(src, "attention")).toBe(false)
+      expect(importsModule(src, "user-question")).toBe(false)
     }
   })
 })
