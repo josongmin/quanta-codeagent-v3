@@ -146,6 +146,28 @@ const CANDIDATE_FAMILIES: ReadonlySet<string> = new Set<CandidateFamily>([
 const asCandidateFamily = (value: string | undefined): CandidateFamily | undefined =>
   value !== undefined && CANDIDATE_FAMILIES.has(value) ? (value as CandidateFamily) : undefined
 
+/** What ONE failed selection contract demands of the counterfactual, or
+ *  `undefined` when that failure cannot steer at all.
+ *
+ *  A unit because "does this failure steer, and toward which family?" is one
+ *  decision with two independent ways to decline, and BOTH must decline before
+ *  anything is accumulated: the contract kind has no semantic mapping, or cand0
+ *  already lives in the demanded family so there is no opposite side to steer
+ *  to. Note the asymmetry that makes this worth naming — an UNKNOWN cand0 family
+ *  does NOT decline, because we cannot prove same-side and the counterfactual
+ *  must never be silently dropped. */
+const demandedSteer = (
+  failed: FailedSelectionContract,
+  cand0Family: CandidateFamily | undefined,
+): { contract: SemanticCounterfactualContractKind; family: CandidateFamily } | undefined => {
+  const mapped = SEMANTIC_BY_CONTRACT_KIND[failed.kind]
+  if (mapped === undefined) return undefined
+  // Prefer the bundle-declared family if it is a known family, else the mapped one.
+  const family = asCandidateFamily(failed.targetFamily) ?? mapped.family
+  if (cand0Family !== undefined && cand0Family === family) return undefined
+  return { contract: mapped.contract, family }
+}
+
 /**
  * Derive the SEMANTIC counterfactual contract(s) — the "opposite side of the
  * failed contract" — from the failed public contract(s), the contrast between
@@ -178,14 +200,10 @@ export const deriveSemanticCounterfactualContracts = (args: {
   const cand0Family = asCandidateFamily(args.candidateFamily)
 
   for (const failed of args.failedContracts) {
-    const mapped = SEMANTIC_BY_CONTRACT_KIND[failed.kind]
-    if (mapped === undefined) continue
-    // Prefer the bundle-declared family if it is a known family, else the mapped one.
-    const demanded = asCandidateFamily(failed.targetFamily) ?? mapped.family
-    // Opposite-side rule: skip when cand0 already lives in the demanded family.
-    if (cand0Family !== undefined && cand0Family === demanded) continue
-    if (!contracts.includes(mapped.contract)) contracts.push(mapped.contract)
-    if (!families.includes(demanded)) families.push(demanded)
+    const steer = demandedSteer(failed, cand0Family)
+    if (steer === undefined) continue
+    if (!contracts.includes(steer.contract)) contracts.push(steer.contract)
+    if (!families.includes(steer.family)) families.push(steer.family)
     for (const f of failed.subjectFiles ?? []) {
       if (f !== "" && !targetFiles.includes(f)) targetFiles.push(f)
     }

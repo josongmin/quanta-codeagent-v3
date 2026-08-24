@@ -27,6 +27,7 @@ import {
   type ParseOutcome,
 } from "@/retrieval"
 import type { ChunkInput } from "@/retrieval/indexer"
+import { nth } from "../_helpers/expect-present"
 
 const leaf = (
   kind: "function" | "method" | "const",
@@ -84,7 +85,7 @@ describe("syntax-chunk hellgate", () => {
     expect(fnB?.endLine).toBe(180)
     // The class is split at method boundaries — every method line range is
     // covered by exactly one chunk that begins at-or-before the method start.
-    for (const m of parsed.decls[2]!.children) {
+    for (const m of nth(parsed.decls, 2, "parsed.decls").children) {
       const owner = chunks.find((c) => c.startLine <= m.startLine && c.endLine >= m.endLine)
       expect(owner).toBeDefined()
     }
@@ -109,11 +110,11 @@ describe("syntax-chunk hellgate", () => {
     }
     const chunks = [...chunkFileSyntactic(mkInput(text), { ok: true, parsed }, { maxLines: 80 })]
     chunks.sort((a, b) => a.startLine - b.startLine)
-    expect(chunks[0]!.startLine).toBe(1)
-    expect(chunks[chunks.length - 1]!.endLine).toBe(300)
+    expect(nth(chunks, 0, "chunks").startLine).toBe(1)
+    expect(nth(chunks, chunks.length - 1, "chunks").endLine).toBe(300)
     for (let i = 1; i < chunks.length; i++) {
       // Contiguous, non-overlapping: next.start == prev.end + 1.
-      expect(chunks[i]!.startLine).toBe(chunks[i - 1]!.endLine + 1)
+      expect(nth(chunks, i, "chunks").startLine).toBe(nth(chunks, i - 1, "chunks").endLine + 1)
     }
   })
 
@@ -125,8 +126,8 @@ describe("syntax-chunk hellgate", () => {
     }
     const chunks = chunkFileSyntactic(mkInput(text), { ok: true, parsed }, { maxLines: 80 })
     expect(chunks.length).toBe(1)
-    expect(chunks[0]!.startLine).toBe(1)
-    expect(chunks[0]!.endLine).toBe(30)
+    expect(nth(chunks, 0, "chunks").startLine).toBe(1)
+    expect(nth(chunks, 0, "chunks").endLine).toBe(30)
   })
 
   test("tiny-sibling merge respects maxLines — splits into bounded groups", () => {
@@ -156,8 +157,8 @@ describe("syntax-chunk hellgate", () => {
     expect(chunks.length).toBeGreaterThan(1)
     // Coverage still exact.
     const sorted = [...chunks].sort((a, b) => a.startLine - b.startLine)
-    expect(sorted[0]!.startLine).toBe(1)
-    expect(sorted[sorted.length - 1]!.endLine).toBe(400)
+    expect(nth(sorted, 0, "sorted").startLine).toBe(1)
+    expect(nth(sorted, sorted.length - 1, "sorted").endLine).toBe(400)
   })
 
   test("oversize-by-gap — tiny decls split by a large inter-decl gap never exceed maxLines", () => {
@@ -182,10 +183,10 @@ describe("syntax-chunk hellgate", () => {
     // INVARIANT 2: coverage is still EXACT over [1, lineCount] — the gap lines
     // (21-199) must still land in SOME chunk — and contiguous (no holes/overlaps).
     chunks.sort((a, b) => a.startLine - b.startLine)
-    expect(chunks[0]!.startLine).toBe(1)
-    expect(chunks[chunks.length - 1]!.endLine).toBe(205)
+    expect(nth(chunks, 0, "chunks").startLine).toBe(1)
+    expect(nth(chunks, chunks.length - 1, "chunks").endLine).toBe(205)
     for (let i = 1; i < chunks.length; i++) {
-      expect(chunks[i]!.startLine).toBe(chunks[i - 1]!.endLine + 1)
+      expect(nth(chunks, i, "chunks").startLine).toBe(nth(chunks, i - 1, "chunks").endLine + 1)
     }
   })
 
@@ -204,10 +205,10 @@ describe("syntax-chunk hellgate", () => {
       expect(c.endLine - c.startLine + 1).toBeLessThanOrEqual(maxLines)
     }
     chunks.sort((a, b) => a.startLine - b.startLine)
-    expect(chunks[0]!.startLine).toBe(1)
-    expect(chunks[chunks.length - 1]!.endLine).toBe(300)
+    expect(nth(chunks, 0, "chunks").startLine).toBe(1)
+    expect(nth(chunks, chunks.length - 1, "chunks").endLine).toBe(300)
     for (let i = 1; i < chunks.length; i++) {
-      expect(chunks[i]!.startLine).toBe(chunks[i - 1]!.endLine + 1)
+      expect(nth(chunks, i, "chunks").startLine).toBe(nth(chunks, i - 1, "chunks").endLine + 1)
     }
   })
 
@@ -242,10 +243,10 @@ describe("syntax-chunk hellgate", () => {
     }
     // INVARIANT 2: coverage still EXACT over [1, lineCount] + contiguous.
     chunks.sort((a, b) => a.startLine - b.startLine)
-    expect(chunks[0]!.startLine).toBe(1)
-    expect(chunks[chunks.length - 1]!.endLine).toBe(lineCount)
+    expect(nth(chunks, 0, "chunks").startLine).toBe(1)
+    expect(nth(chunks, chunks.length - 1, "chunks").endLine).toBe(lineCount)
     for (let i = 1; i < chunks.length; i++) {
-      expect(chunks[i]!.startLine).toBe(chunks[i - 1]!.endLine + 1)
+      expect(nth(chunks, i, "chunks").startLine).toBe(nth(chunks, i - 1, "chunks").endLine + 1)
     }
   })
 
@@ -311,7 +312,7 @@ describe("syntax-chunk hellgate", () => {
       parsed: { lang: "typescript", decls: [] },
     })
     expect(chunks.length).toBe(1)
-    expect(chunks[0]!.startLine).toBe(1)
-    expect(chunks[0]!.endLine).toBe(12)
+    expect(nth(chunks, 0, "chunks").startLine).toBe(1)
+    expect(nth(chunks, 0, "chunks").endLine).toBe(12)
   })
 })

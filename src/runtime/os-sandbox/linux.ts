@@ -122,6 +122,50 @@ const passthrough = async (
   }
 }
 
+/**
+ * Spawn under the landlock-cli backend.
+ *
+ * A unit because landlock-cli has NO network primitive, and the two halves of
+ * that gap must not drift apart: the compiled policy's network-deferred marker
+ * is stripped from the argv AND the same fact is reported on `degradeReason`.
+ * A caller that saw the strip without the report would believe the network was
+ * fenced when it is not.
+ */
+const spawnViaLandlockCli = async (
+  spec: SandboxedSpawnSpec,
+  policy: SandboxPolicy,
+  spawner: Spawner,
+): Promise<SandboxedSpawnResult> => {
+  const rawArgs = compileLandlockCliArgs(policy, spec.cwd) ?? []
+  const filtered = rawArgs.filter((tok) => tok !== LANDLOCK_CLI_NETWORK_DEFERRED_MARKER)
+  const networkDeferred = rawArgs.length !== filtered.length
+  const argv = ["landlock-cli", ...filtered, "--", ...spec.command]
+  const opts: { cwd: string; env?: Record<string, string>; signal?: AbortSignal } = {
+    cwd: spec.cwd,
+    ...(spec.env !== undefined ? { env: { ...spec.env } } : {}),
+    ...(spec.signal !== undefined ? { signal: spec.signal } : {}),
+  }
+  try {
+    const r = await spawner(argv, opts)
+    return {
+      exitCode: r.exitCode,
+      stdout: r.stdout,
+      stderr: r.stderr,
+      sandboxApplied: true,
+      ...(networkDeferred ? { degradeReason: "landlock-network-policy-not-enforced" } : {}),
+    }
+  } catch (e) {
+    const msg = errMessage(e)
+    return {
+      exitCode: 127,
+      stdout: "",
+      stderr: `spawn-failed: ${msg}`,
+      sandboxApplied: false,
+      degradeReason: "spawn-failed",
+    }
+  }
+}
+
 /** Linux OsSandbox impl. Picks bubblewrap → landlock-cli → passthrough at
  *  spawn-time; profile="off"/"danger-full-access" always passes through. */
 export const linuxOsSandbox = (cfg?: OsSandboxConfig): OsSandbox => {
@@ -147,37 +191,7 @@ export const linuxOsSandbox = (cfg?: OsSandboxConfig): OsSandbox => {
       if (backend === "bubblewrap") {
         return spawnViaBubblewrap(spec, policy, spawner)
       }
-      // landlock-cli backend: compile policy → filter the network-deferred
-      // marker (landlock-cli has no network primitive; we record the gap on
-      // `degradeReason` so callers see the partial fence honestly).
-      const rawArgs = compileLandlockCliArgs(policy, spec.cwd) ?? []
-      const filtered = rawArgs.filter((tok) => tok !== LANDLOCK_CLI_NETWORK_DEFERRED_MARKER)
-      const networkDeferred = rawArgs.length !== filtered.length
-      const argv = ["landlock-cli", ...filtered, "--", ...spec.command]
-      const opts: { cwd: string; env?: Record<string, string>; signal?: AbortSignal } = {
-        cwd: spec.cwd,
-        ...(spec.env !== undefined ? { env: { ...spec.env } } : {}),
-        ...(spec.signal !== undefined ? { signal: spec.signal } : {}),
-      }
-      try {
-        const r = await spawner(argv, opts)
-        return {
-          exitCode: r.exitCode,
-          stdout: r.stdout,
-          stderr: r.stderr,
-          sandboxApplied: true,
-          ...(networkDeferred ? { degradeReason: "landlock-network-policy-not-enforced" } : {}),
-        }
-      } catch (e) {
-        const msg = errMessage(e)
-        return {
-          exitCode: 127,
-          stdout: "",
-          stderr: `spawn-failed: ${msg}`,
-          sandboxApplied: false,
-          degradeReason: "spawn-failed",
-        }
-      }
+      return spawnViaLandlockCli(spec, policy, spawner)
     },
 
     async availability(): Promise<SandboxAvailability> {

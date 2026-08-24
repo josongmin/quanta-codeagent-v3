@@ -44,6 +44,19 @@ Type a line to run a turn on the shared session. Approval prompts offer
 Ctrl-C cancels the in-flight turn and detaches.
 `
 
+/** The two spellings of `--token`: `--token X` takes the NEXT argv slot,
+ *  `--token=X` carries its own. Returns undefined when `tok` is not a token
+ *  flag at all. A unit because `consumed` is the single reason the parse loop
+ *  owns a mutable index — nothing else in the grammar looks ahead. */
+const readTokenFlag = (
+  tok: string,
+  next: string | undefined,
+): { readonly value: string | undefined; readonly consumed: number } | undefined => {
+  if (tok === "--token") return { value: next, consumed: 1 }
+  if (tok.startsWith("--token=")) return { value: tok.slice("--token=".length), consumed: 0 }
+  return undefined
+}
+
 /** Pure argv → {url, token, help}. The first non-flag positional is the URL;
  *  `--token X` / `--token=X` sets the token; env `QUANTA_WEB_AUTH_TOKEN` is the
  *  fallback (an explicit `--token` wins). */
@@ -58,13 +71,10 @@ export const parseAttachArgs = (argv: readonly string[], env: NodeJS.ProcessEnv)
       help = true
       continue
     }
-    if (tok === "--token") {
-      token = argv[i + 1]
-      i += 1
-      continue
-    }
-    if (tok.startsWith("--token=")) {
-      token = tok.slice("--token=".length)
+    const flag = readTokenFlag(tok, argv[i + 1])
+    if (flag !== undefined) {
+      token = flag.value
+      i += flag.consumed
       continue
     }
     if (!tok.startsWith("-") && url === undefined) {

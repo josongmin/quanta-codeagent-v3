@@ -128,6 +128,78 @@ const ALL_BAG_KEYS: ReadonlyArray<keyof ObservabilityBag> = [
   "tools",
 ] as const
 
+/** The ONE wrap-or-passthrough gate. Every bag slice used to spell this
+ *  3-way decision out inline (`present? -> instrument(..., prefix? -> {namePrefix} : {})
+ *  : undefined`), seven times over. Contract, unchanged from the inline form:
+ *   - `value === undefined` (slice unwired)  -> `undefined`, no instrument call
+ *   - falsy `prefix` (absent OR empty string) -> `{}`, so the instrument keeps
+ *     its own default prefix. Empty string deliberately falls back — matching
+ *     the original truthiness test, NOT an `!== undefined` test. */
+const wrapSlice = <V, R>(
+  value: V | undefined,
+  metrics: MetricsRegistry,
+  prefix: string | undefined,
+  instrument: (v: V, m: MetricsRegistry, opts: { namePrefix?: string }) => R,
+): R | undefined =>
+  value === undefined ? undefined : instrument(value, metrics, prefix ? { namePrefix: prefix } : {})
+
+/** ADR-0169 — one combined operator warning naming every unwired-and-unexpected
+ *  slice. `skippedExpected` silences intentional skips (and ONLY the log; the
+ *  ADR-0172 gauge still reports the truth). Silent when nothing qualifies. */
+const warnSkippedSlices = (bag: ObservabilityBag, opts: ObservabilityOpts): void => {
+  const expected = opts.skippedExpected
+  const actuallySkipped = ALL_BAG_KEYS.filter(
+    (k) => bag[k] === undefined && !(expected?.has(k) ?? false),
+  )
+  if (actuallySkipped.length === 0) return
+  const msg = `[observability] withFullObservability: ${actuallySkipped.length} slice(s) unwired and not in skippedExpected: ${actuallySkipped.join(", ")}. Set 'skippedExpected' to silence intentional skips.`
+  // Slice invariant (ADR-0144): no console.* in @/observability. Caller injects warn sink; absent ⇒ silent.
+  opts.warn?.(msg)
+}
+
+/** ADR-0172 — one `observability.wired.total` gauge per bag key, in
+ *  `ALL_BAG_KEYS` order, value 1 (wired) / 0 (unwired). The gauge name ignores
+ *  `opts.prefixes` on purpose: prefixes scope per-subsystem metrics, this one
+ *  is about the helper itself. Sink failures are swallowed PER KEY so one
+ *  broken gauge cannot block the remaining six. */
+const emitWiredGauges = (metrics: MetricsRegistry, out: InstrumentedBag): void => {
+  for (const k of ALL_BAG_KEYS) {
+    try {
+      metrics.gauge("observability.wired.total", out[k] === undefined ? 0 : 1, { slice: k })
+    } catch {
+      // continue — other slices still get their gauge.
+    }
+  }
+}
+
+/** ADR-0177 — fire-and-forget JSON health snapshot mirroring the wired-gauge
+ *  state. The helper stays SYNC (construction-time convenience, never a hot
+ *  path), so the write is launched and its promise parked in `lastInFlight`
+ *  for tests. Build errors and write errors both route to `opts.warn`; neither
+ *  may propagate. No-op when `healthSnapshotPath` is absent. */
+const writeHealthSnapshotIfRequested = (out: InstrumentedBag, opts: ObservabilityOpts): void => {
+  if (opts.healthSnapshotPath === undefined) return
+  try {
+    const snap = buildHealthSnapshot(
+      out,
+      opts.skippedExpected ? { skippedExpected: opts.skippedExpected } : {},
+    )
+    const pathOpt = opts.healthSnapshotPath === true ? undefined : opts.healthSnapshotPath
+    const writeOpts = pathOpt !== undefined ? { path: pathOpt } : {}
+    const warn = opts.warn
+    lastInFlight = writeHealthSnapshot(snap, writeOpts).catch((err: unknown) => {
+      const msg = `[observability] health snapshot write failed: ${errMessage(err)}`
+      // Slice invariant: warn opt only; no console.* fallback.
+      warn?.(msg)
+      return ""
+    })
+  } catch (err) {
+    const msg = `[observability] health snapshot build failed: ${errMessage(err)}`
+    // Slice invariant: warn opt only; no console.* fallback.
+    opts.warn?.(msg)
+  }
+}
+
 export const withFullObservability = (
   bag: ObservabilityBag,
   opts: ObservabilityOpts,
@@ -135,93 +207,17 @@ export const withFullObservability = (
   const m = opts.metrics
   const px = opts.prefixes ?? {}
   const out: InstrumentedBag = {
-    llmProvider:
-      bag.llmProvider !== undefined
-        ? instrumentLlmProvider(bag.llmProvider, m, px.llm ? { namePrefix: px.llm } : {})
-        : undefined,
-    scheduler:
-      bag.scheduler !== undefined
-        ? instrumentSubagentScheduler(
-            bag.scheduler,
-            m,
-            px.subagent ? { namePrefix: px.subagent } : {},
-          )
-        : undefined,
-    shadowOdb:
-      bag.shadowOdb !== undefined
-        ? instrumentShadowOdb(bag.shadowOdb, m, px.shadow ? { namePrefix: px.shadow } : {})
-        : undefined,
-    planQueue:
-      bag.planQueue !== undefined
-        ? instrumentPlanQueue(bag.planQueue, m, px.planQueue ? { namePrefix: px.planQueue } : {})
-        : undefined,
-    budgetLedger:
-      bag.budgetLedger !== undefined
-        ? instrumentBudgetLedger(bag.budgetLedger, m, px.budget ? { namePrefix: px.budget } : {})
-        : undefined,
-    lspClient:
-      bag.lspClient !== undefined
-        ? instrumentLspClient(bag.lspClient, m, px.lsp ? { namePrefix: px.lsp } : {})
-        : undefined,
-    tools:
-      bag.tools !== undefined
-        ? instrumentTools(bag.tools, m, px.tool ? { namePrefix: px.tool } : {})
-        : undefined,
+    llmProvider: wrapSlice(bag.llmProvider, m, px.llm, instrumentLlmProvider),
+    scheduler: wrapSlice(bag.scheduler, m, px.subagent, instrumentSubagentScheduler),
+    shadowOdb: wrapSlice(bag.shadowOdb, m, px.shadow, instrumentShadowOdb),
+    planQueue: wrapSlice(bag.planQueue, m, px.planQueue, instrumentPlanQueue),
+    budgetLedger: wrapSlice(bag.budgetLedger, m, px.budget, instrumentBudgetLedger),
+    lspClient: wrapSlice(bag.lspClient, m, px.lsp, instrumentLspClient),
+    tools: wrapSlice(bag.tools, m, px.tool, instrumentTools),
   }
-  if (opts.warnOnSkipped === true) {
-    const expected = opts.skippedExpected
-    const actuallySkipped = ALL_BAG_KEYS.filter(
-      (k) => bag[k] === undefined && !(expected?.has(k) ?? false),
-    )
-    if (actuallySkipped.length > 0) {
-      const msg = `[observability] withFullObservability: ${actuallySkipped.length} slice(s) unwired and not in skippedExpected: ${actuallySkipped.join(", ")}. Set 'skippedExpected' to silence intentional skips.`
-      // Slice invariant (ADR-0144): no console.* in @/observability. Caller injects warn sink; absent ⇒ silent.
-      opts.warn?.(msg)
-    }
-  }
-  if (opts.emitWiredGauge === true) {
-    // ADR-0172: emit one gauge per bag key. Value = 1 when wrapped output is
-    // defined (slice was wired), 0 otherwise. Gauge name is the meta-metric
-    // `observability.wired.total` regardless of `opts.prefixes` (prefixes
-    // scope per-subsystem metrics; this gauge is about the helper itself).
-    // Sink failures are swallowed per-key so one broken gauge does not block
-    // the remaining 6 — `metrics.gauge` is documented no-throw on the
-    // in-memory registry, but a custom adapter may throw; we defend here.
-    for (const k of ALL_BAG_KEYS) {
-      try {
-        m.gauge("observability.wired.total", out[k] === undefined ? 0 : 1, { slice: k })
-      } catch {
-        // continue — other slices still get their gauge.
-      }
-    }
-  }
-  if (opts.healthSnapshotPath !== undefined) {
-    // ADR-0177: write a JSON health snapshot mirroring the wired-gauge state.
-    // Sync helper signature is preserved — the write is fire-and-forget
-    // (construction-time, not hot path) so existing call sites need not
-    // become async. Errors are swallowed and routed to the warn sink.
-    // The in-flight promise is exposed via `lastHealthSnapshotInFlight()`
-    // so tests (and any caller who cares) can await completion deterministically.
-    try {
-      const snap = buildHealthSnapshot(
-        out,
-        opts.skippedExpected ? { skippedExpected: opts.skippedExpected } : {},
-      )
-      const pathOpt = opts.healthSnapshotPath === true ? undefined : opts.healthSnapshotPath
-      const writeOpts = pathOpt !== undefined ? { path: pathOpt } : {}
-      const warn = opts.warn
-      lastInFlight = writeHealthSnapshot(snap, writeOpts).catch((err: unknown) => {
-        const msg = `[observability] health snapshot write failed: ${errMessage(err)}`
-        // Slice invariant: warn opt only; no console.* fallback.
-        warn?.(msg)
-        return ""
-      })
-    } catch (err) {
-      const msg = `[observability] health snapshot build failed: ${errMessage(err)}`
-      // Slice invariant: warn opt only; no console.* fallback.
-      opts.warn?.(msg)
-    }
-  }
+  if (opts.warnOnSkipped === true) warnSkippedSlices(bag, opts)
+  if (opts.emitWiredGauge === true) emitWiredGauges(m, out)
+  writeHealthSnapshotIfRequested(out, opts)
   return out
 }
 

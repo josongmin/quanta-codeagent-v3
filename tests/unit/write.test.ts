@@ -81,6 +81,9 @@ describe("writeTool", () => {
     const r = await run({ path: "relative-write.txt", content: "based" })
     expect(r.ok).toBe(true)
     // Written under the session cwd (dir), not the process cwd.
+    // NOTE: under the sandboxed-cwd runner this negative check inspects a
+    // THROWAWAY directory that starts empty, not the repo root — so it can no
+    // longer be satisfied-or-poisoned by a leftover file in the checkout.
     expect(readFileSync(join(dir, "relative-write.txt"), "utf8")).toBe("based")
     expect(existsSync(join(process.cwd(), "relative-write.txt"))).toBe(false)
   })

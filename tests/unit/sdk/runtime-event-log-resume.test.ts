@@ -30,6 +30,7 @@ import { InMemorySessionEventLog, JsonlSessionEventLog, systemClock } from "@/ke
 import { decodeSessionEvent, type SessionEvent } from "@/protocol/session"
 import { createRuntime } from "@/sdk/runtime"
 import { createRuntimeSession } from "@/sdk/runtime/session"
+import { nth } from "../../_helpers/expect-present"
 import { capabilitiesFor } from "../../support/session-fixtures"
 
 const ENV_KEY = "QUANTA_SESSION_EVENT_LOG_DIR"
@@ -115,7 +116,7 @@ describe("W4-b runtime event-log resume (seq continuity hellgate)", () => {
     ])
     // Strictly increasing across the restart boundary — the wire-resume invariant.
     for (let i = 1; i < events.length; i += 1) {
-      expect(events[i]!.seq).toBeGreaterThan(events[i - 1]!.seq)
+      expect(nth(events, i, "events").seq).toBeGreaterThan(nth(events, i - 1, "events").seq)
     }
   })
 

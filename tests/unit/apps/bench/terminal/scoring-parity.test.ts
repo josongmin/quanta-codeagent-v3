@@ -58,6 +58,7 @@ import {
   type ScorableTrial,
   submissionByTask,
 } from "../../../../../src/apps/bench/terminal/scoring"
+import { nth } from "../../../../_helpers/expect-present"
 
 const FIXTURES = join(import.meta.dir, "fixtures")
 const UPSTREAM_METRICS = join(FIXTURES, "upstream_metrics.py")
@@ -203,11 +204,11 @@ describe("TB21-04 scorer parity — pinned upstream leaderboard calculator", () 
       disqualified_trials: [],
       trials: [
         // one task with a single trial (undefined per-task variance term)
-        rows[0]!,
+        nth(rows, 0, "rows"),
         // one task with three trials (skipped by pass@4 and pass@5)
-        rows[5]!,
-        rows[6]!,
-        rows[7]!,
+        nth(rows, 5, "rows"),
+        nth(rows, 6, "rows"),
+        nth(rows, 7, "rows"),
         // one full k=5 task
         ...rows.slice(10, 15),
       ],

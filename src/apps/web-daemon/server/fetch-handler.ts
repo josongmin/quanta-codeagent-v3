@@ -131,6 +131,143 @@ const tryStatusRoutes = (url: URL, req: Request, deps: FetchHandlerDeps): RouteR
   return undefined
 }
 
+/**
+ * The knob catalog body served to the web settings UI, grouped and redacted.
+ *
+ * A unit because the redaction is the point: `webSafeKnobValue` must be applied
+ * to EVERY value on the way out (CUSTOM string knobs carry paths, credential-
+ * helper commands, and policy JSON), so the projection lives in exactly one
+ * place rather than being re-derived per group. (security re-audit jun-7.)
+ */
+const knobCatalogResponse = (): Response => {
+  const catalog = buildWebKnobCatalog()
+  const current = resolveCatalogValues(catalog, process.env)
+  const grouped = [...catalogByGroup(catalog).entries()].map(([group, knobs]) => ({
+    group,
+    knobs: knobs.map((k) => {
+      const v = current.get(k.envKey)
+      return {
+        ...k,
+        value: webSafeKnobValue(k.kind, v),
+        source: v?.source,
+        isDefault: v?.isDefault,
+      }
+    }),
+  }))
+  return jsonResponse(200, { total: catalog.size, groups: grouped })
+}
+
+/**
+ * The `GET /threads/:id/events` body: the persisted log from `?since`, plus the
+ * honest `boundary` label.
+ *
+ * A unit because the two facts it reports are one answer: a malformed / absent
+ * `since` degrades to 0 (a clean full replay, never a crash), and `boundary`
+ * tells the client whether new turns will coincide with this history
+ * (`live-attach`) or not (`read-only-history`). Reporting one without the other
+ * is what would let a client silently treat read-only history as live.
+ */
+const threadEventsResponse = (
+  threadStore: NonNullable<FetchHandlerDeps["threadStore"]>,
+  threadId: string,
+  sinceRaw: string | null,
+  liveThreadId: string,
+): Response => {
+  const since = sinceRaw === null ? 0 : Number.parseInt(sinceRaw, 10)
+  const sinceSeq = Number.isFinite(since) && since >= 0 ? since : 0
+  const boundary = threadId === liveThreadId ? "live-attach" : "read-only-history"
+  return jsonResponse(200, {
+    threadId,
+    boundary,
+    events: threadStore.loadEvents(threadId, sinceSeq),
+  })
+}
+
+/**
+ * `GET /threads/:id/events` — one thread's persisted transcript.
+ *
+ * A unit because this route carries its own boundary story (below): it is the
+ * only read seam addressed by an ARBITRARY thread id rather than the live
+ * session, so its auth scope and its `live-attach` vs `read-only-history`
+ * answer belong together, not scattered through the read-route table.
+ */
+const tryThreadEventsRoute = (
+  url: URL,
+  req: Request,
+  deps: FetchHandlerDeps,
+  requireAuth: RequireAuth,
+  liveThreadId: () => string,
+): RouteResult => {
+  const { threadStore } = deps
+  // `GET /threads/:id/events?since=N` returns the SessionEvent log for that
+  // thread so a reloaded client can rebuild its transcript without losing what
+  // the previous tab saw. B2 — this is ALSO the cross-surface thread RESUME
+  // seam: a `?thread=<id>` deeplink asks the web surface to OPEN an
+  // externally-addressed thread, and this thread-ADDRESSED route serves THAT
+  // thread's persisted transcript for ANY id (not only the live session id).
+  //
+  // HONEST BOUNDARY (single-shared-session daemon): the daemon runs ONE live
+  // `RuntimeSession` whose id is server-minted; the LIVE session cannot be
+  // switched to an arbitrary thread (every WS client joins the SAME live
+  // transcript). So a resume of a DIFFERENT thread is READ-ONLY HISTORY — new
+  // turns still advance the live session. We report which case applies in
+  // `boundary` so the client can be honest with the user: `live-attach` when the
+  // requested id IS the live session (history + new turns coincide), else
+  // `read-only-history`. An unknown / malformed id is a CLEAN empty log (200,
+  // `events:[]`) — never a crash or an auth-bypassing error.
+  //
+  // OWNERSHIP / AUTH SCOPE: this is a SINGLE-TENANT daemon (one shared session,
+  // one bearer token). Any client that presents the daemon's bearer token may
+  // read any persisted thread on THIS daemon — the token IS the ownership
+  // boundary. There is no per-thread ACL because there is no multi-tenant
+  // identity model here; a future multi-user daemon would gate `threadId`
+  // against the caller's identity at this exact seam.
+  const eventsMatch = url.pathname.match(/^\/threads\/([^/]+)\/events$/)
+  if (eventsMatch !== null && req.method === "GET") {
+    const denied = requireAuth(url, req)
+    if (denied !== null) return denied
+    if (threadStore === null) {
+      return jsonResponse(404, { error: "persistence_disabled" })
+    }
+    return threadEventsResponse(
+      threadStore,
+      decodeURIComponent(eventsMatch[1] ?? ""),
+      url.searchParams.get("since"),
+      liveThreadId(),
+    )
+  }
+  return undefined
+}
+
+/**
+ * `GET /artifact/:id` — a registered artifact's jailed preview bytes.
+ *
+ * A unit because the route is a pure gate: authenticate, then hand the opaque
+ * registry id to the resolver, which owns the traversal rejection and the jail
+ * assertion. Keeping it separate is what stops a future edit from growing path
+ * handling here, outside the resolver's jail.
+ */
+const tryArtifactRoute = (
+  url: URL,
+  req: Request,
+  deps: FetchHandlerDeps,
+  requireAuth: RequireAuth,
+): RouteResult => {
+  // A2 — `GET /artifact/:id` serves a registered artifact's JAILED preview bytes
+  // read-only. The `:id` is the opaque registry id carried in the
+  // `quanta-artifact://<id>` locator (the surface strips the scheme). Disabled
+  // (404 `artifact_store_disabled`) when the resolver is absent (gate OFF). This
+  // is the consumer for the resolver minted at the composition root — the
+  // `quanta-artifact://` scheme is now resolvable by a surface.
+  const artifactMatch = url.pathname.match(/^\/artifact\/([^/]+)$/)
+  if (artifactMatch !== null && req.method === "GET") {
+    const denied = requireAuth(url, req)
+    if (denied !== null) return denied
+    return tryResolveArtifact(deps.artifactPreviewResolver, artifactMatch[1] ?? "")
+  }
+  return undefined
+}
+
 /** Authenticated read routes — `/threads`, `/api/knobs`, `/readout/:name`,
  *  `/threads/:id/events`. Each requires the same bearer auth as WS upgrade. */
 const tryReadRoutes = (
@@ -157,24 +294,7 @@ const tryReadRoutes = (
   if (url.pathname === "/api/knobs" && req.method === "GET") {
     const denied = requireAuth(url, req)
     if (denied !== null) return denied
-    const catalog = buildWebKnobCatalog()
-    const current = resolveCatalogValues(catalog, process.env)
-    const grouped = [...catalogByGroup(catalog).entries()].map(([group, knobs]) => ({
-      group,
-      knobs: knobs.map((k) => {
-        const v = current.get(k.envKey)
-        // webSafeKnobValue redacts CUSTOM string values (paths / credential-
-        // helper commands / policy JSON live in string knobs); bool/int/enum
-        // + registry defaults are safe. (security re-audit jun-7.)
-        return {
-          ...k,
-          value: webSafeKnobValue(k.kind, v),
-          source: v?.source,
-          isDefault: v?.isDefault,
-        }
-      }),
-    }))
-    return jsonResponse(200, { total: catalog.size, groups: grouped })
+    return knobCatalogResponse()
   }
   // OUT-OF-BAND read-only readouts (jun-9 ticket 05 + UUX-1-11 sources).
   // `GET /readout/:name` reads the live session snapshot (lease-free — no WS
@@ -196,64 +316,10 @@ const tryReadRoutes = (
         .then((result) => jsonResponse(result.isError ? 404 : 200, result))
     }
   }
-  // `GET /threads/:id/events?since=N` returns the SessionEvent log for that
-  // thread so a reloaded client can rebuild its transcript without losing what
-  // the previous tab saw. B2 — this is ALSO the cross-surface thread RESUME
-  // seam: a `?thread=<id>` deeplink asks the web surface to OPEN an
-  // externally-addressed thread, and this thread-ADDRESSED route serves THAT
-  // thread's persisted transcript for ANY id (not only the live session id).
-  //
-  // HONEST BOUNDARY (single-shared-session daemon): the daemon runs ONE live
-  // `RuntimeSession` whose id is server-minted; the LIVE session cannot be
-  // switched to an arbitrary thread (every WS client joins the SAME live
-  // transcript). So a resume of a DIFFERENT thread is READ-ONLY HISTORY — new
-  // turns still advance the live session. We report which case applies in
-  // `boundary` so the client can be honest with the user: `live-attach` when the
-  // requested id IS the live session (history + new turns coincide), else
-  // `read-only-history`. An unknown / malformed id is a CLEAN empty log (200,
-  // `events:[]`) — never a crash or an auth-bypassing error.
-  //
-  // OWNERSHIP / AUTH SCOPE: this is a SINGLE-TENANT daemon (one shared session,
-  // one bearer token). Any client that presents the daemon's bearer token may
-  // read any persisted thread on THIS daemon — the token IS the ownership
-  // boundary. There is no per-thread ACL because there is no multi-tenant
-  // identity model here; a future multi-user daemon would gate `threadId`
-  // against the caller's identity at this exact seam.
-  {
-    const eventsMatch = url.pathname.match(/^\/threads\/([^/]+)\/events$/)
-    if (eventsMatch !== null && req.method === "GET") {
-      const denied = requireAuth(url, req)
-      if (denied !== null) return denied
-      if (threadStore === null) {
-        return jsonResponse(404, { error: "persistence_disabled" })
-      }
-      const threadId = decodeURIComponent(eventsMatch[1] ?? "")
-      const sinceRaw = url.searchParams.get("since")
-      const since = sinceRaw === null ? 0 : Number.parseInt(sinceRaw, 10)
-      const sinceSeq = Number.isFinite(since) && since >= 0 ? since : 0
-      const boundary = threadId === liveThreadId() ? "live-attach" : "read-only-history"
-      return jsonResponse(200, {
-        threadId,
-        boundary,
-        events: threadStore.loadEvents(threadId, sinceSeq),
-      })
-    }
-  }
-  // A2 — `GET /artifact/:id` serves a registered artifact's JAILED preview bytes
-  // read-only. The `:id` is the opaque registry id carried in the
-  // `quanta-artifact://<id>` locator (the surface strips the scheme). Disabled
-  // (404 `artifact_store_disabled`) when the resolver is absent (gate OFF). This
-  // is the consumer for the resolver minted at the composition root — the
-  // `quanta-artifact://` scheme is now resolvable by a surface.
-  {
-    const artifactMatch = url.pathname.match(/^\/artifact\/([^/]+)$/)
-    if (artifactMatch !== null && req.method === "GET") {
-      const denied = requireAuth(url, req)
-      if (denied !== null) return denied
-      return tryResolveArtifact(deps.artifactPreviewResolver, artifactMatch[1] ?? "")
-    }
-  }
-  return undefined
+  return (
+    tryThreadEventsRoute(url, req, deps, requireAuth, liveThreadId) ??
+    tryArtifactRoute(url, req, deps, requireAuth)
+  )
 }
 
 /** A2 — resolve `:id` to jailed preview bytes via the read-only resolver. The

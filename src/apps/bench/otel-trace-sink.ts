@@ -255,20 +255,30 @@ export interface ParsedMetric {
   readonly value: number | undefined
   readonly attrs: Record<string, string | number | boolean>
 }
+/**
+ * Flatten ONE OTLP metric into its data points.
+ *
+ * A unit because the three point-bearing shapes — sum, gauge, histogram — are mutually
+ * exclusive on a single metric, so "where do this metric's points live" is one question
+ * answered in one place; and because the metric's name has to be stamped onto every
+ * point it produces, which only this scope knows.
+ */
+const flattenMetricPoints = (m: OtlpMetric): ParsedMetric[] => {
+  const dps = m.sum?.dataPoints ?? m.gauge?.dataPoints ?? m.histogram?.dataPoints ?? []
+  return dps.map((dp) => ({
+    name: m.name ?? "(unnamed)",
+    value: dp.asDouble ?? dp.sum,
+    attrs: attrsOf(dp.attributes),
+  }))
+}
+
 export const parseResourceMetrics = (body: OtlpResourceMetrics): ParsedMetric[] => {
   const out: ParsedMetric[] = []
   for (const rm of body.resourceMetrics ?? []) {
     for (const sm of rm.scopeMetrics ?? []) {
-      for (const m of sm.metrics ?? []) {
-        const dps = m.sum?.dataPoints ?? m.gauge?.dataPoints ?? m.histogram?.dataPoints ?? []
-        for (const dp of dps) {
-          out.push({
-            name: m.name ?? "(unnamed)",
-            value: dp.asDouble ?? dp.sum,
-            attrs: attrsOf(dp.attributes),
-          })
-        }
-      }
+      // Pushed one at a time rather than spread: a spread `push` of a large point
+      // batch is an argument-count blowup, and an OTLP export is caller-sized.
+      for (const m of sm.metrics ?? []) for (const p of flattenMetricPoints(m)) out.push(p)
     }
   }
   return out

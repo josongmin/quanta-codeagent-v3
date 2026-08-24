@@ -31,37 +31,50 @@ import type {
 export const ttlControl = (ttl: CacheTtl = "5m"): { type: "ephemeral"; ttl?: "1h" } =>
   ttl === "1h" ? { type: "ephemeral", ttl: "1h" } : { type: "ephemeral" }
 
+/** Render a `tool_result` block into the SDK parameter shape.
+ *
+ *  A unit because the structured-content path carries one rule no other block
+ *  kind shares: `contentBlocks` is projected into text/image params, unknown
+ *  kinds are DROPPED, and the projection only REPLACES the flat `content`
+ *  string when at least one block survived it. A tool result with no (or only
+ *  unrecognized) structured blocks therefore stays byte-identical to the
+ *  flat-string form the codec emitted before structured content existed. */
+const toAnthropicToolResult = (
+  block: Extract<ContentBlock, { type: "tool_result" }>,
+): Anthropic.ToolResultBlockParam => {
+  const structuredContent: Array<Anthropic.TextBlockParam | Anthropic.ImageBlockParam> = []
+  for (const p of block.contentBlocks ?? []) {
+    if (p.type === "text") {
+      structuredContent.push({ type: "text", text: p.text })
+      continue
+    }
+    if (p.type === "image") {
+      structuredContent.push({
+        type: "image",
+        source: {
+          type: "base64",
+          media_type: p.mediaType as "image/jpeg" | "image/png" | "image/gif" | "image/webp",
+          data: p.data,
+        },
+      })
+    }
+  }
+  return {
+    type: "tool_result",
+    tool_use_id: block.tool_use_id,
+    content: structuredContent.length > 0 ? structuredContent : block.content,
+    ...(block.is_error ? { is_error: true } : {}),
+  }
+}
+
 const toAnthropicContent = (block: ContentBlock): Anthropic.ContentBlockParam | null => {
   switch (block.type) {
     case "text":
       return { type: "text", text: block.text }
     case "tool_use":
       return { type: "tool_use", id: block.id, name: block.name, input: block.input }
-    case "tool_result": {
-      const structuredContent: Array<Anthropic.TextBlockParam | Anthropic.ImageBlockParam> = []
-      for (const p of block.contentBlocks ?? []) {
-        if (p.type === "text") {
-          structuredContent.push({ type: "text", text: p.text })
-          continue
-        }
-        if (p.type === "image") {
-          structuredContent.push({
-            type: "image",
-            source: {
-              type: "base64",
-              media_type: p.mediaType as "image/jpeg" | "image/png" | "image/gif" | "image/webp",
-              data: p.data,
-            },
-          })
-        }
-      }
-      return {
-        type: "tool_result",
-        tool_use_id: block.tool_use_id,
-        content: structuredContent.length > 0 ? structuredContent : block.content,
-        ...(block.is_error ? { is_error: true } : {}),
-      }
-    }
+    case "tool_result":
+      return toAnthropicToolResult(block)
     case "thinking":
       if (block.redacted) {
         return {

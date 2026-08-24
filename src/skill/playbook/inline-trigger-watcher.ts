@@ -280,24 +280,36 @@ export const expandBraces = (glob: string): string[] => {
     let expandedAny = false
     const next: string[] = []
     for (const g of pending) {
-      const m = g.match(/^(.*?)\{([^{}]+)\}(.*)$/)
-      if (m === null) {
-        next.push(g)
-        continue
-      }
-      expandedAny = true
-      const [, pre, body, post] = m
-      for (const p of (body ?? "").split(",")) {
-        next.push(`${pre ?? ""}${p}${post ?? ""}`)
-        if (next.length > MAX_BRACE_EXPANSIONS) {
-          // Overflow — abandon expansion, treat the original glob literally.
-          return [glob]
-        }
-      }
+      const outcome = expandFirstBrace(g, next)
+      // Overflow — abandon expansion, treat the original glob literally.
+      if (outcome === "overflow") return [glob]
+      if (outcome === "expanded") expandedAny = true
     }
     pending = next
     if (!expandedAny) return pending
   }
+}
+
+/** ONE pass over ONE pending glob: append the alternatives of its FIRST `{…}`
+ *  block to `next` (or the glob itself, unchanged, when it has none), and say
+ *  which happened. A unit because the worklist's two decisions — "is another
+ *  pass needed" and "has the cap been crossed" — are BOTH answered here, from
+ *  the single string being expanded; the loop above only routes the answers. */
+const expandFirstBrace = (
+  glob: string,
+  next: string[],
+): "unchanged" | "expanded" | "overflow" => {
+  const m = glob.match(/^(.*?)\{([^{}]+)\}(.*)$/)
+  if (m === null) {
+    next.push(glob)
+    return "unchanged"
+  }
+  const [, pre, body, post] = m
+  for (const p of (body ?? "").split(",")) {
+    next.push(`${pre ?? ""}${p}${post ?? ""}`)
+    if (next.length > MAX_BRACE_EXPANSIONS) return "overflow"
+  }
+  return "expanded"
 }
 
 const matchOne = (path: string, glob: string): boolean => {

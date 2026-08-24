@@ -33,17 +33,19 @@ import {
   resolveModelForRole,
   resolveModelPreset,
 } from "@/llm/model-preset"
+import { present } from "../../_helpers/expect-present"
 
 describe("§9.6 built-in opusplan preset", () => {
   test("MP-01: opusplan maps plan-writer→opus, executor→sonnet", () => {
     const preset = resolveModelPreset("opusplan")
     expect(preset).toBeDefined()
-    expect(resolveModelForRole(preset!, "plan-writer")).toBe("claude-opus-4-8")
-    expect(resolveModelForRole(preset!, "executor")).toBe("claude-sonnet-4-6")
+    const opusplan = present(preset, 'resolveModelPreset("opusplan")')
+    expect(resolveModelForRole(opusplan, "plan-writer")).toBe("claude-opus-4-8")
+    expect(resolveModelForRole(opusplan, "executor")).toBe("claude-sonnet-4-6")
   })
 
   test("MP-02: unmapped role falls back to preset default (no throw)", () => {
-    const preset = resolveModelPreset("opusplan")!
+    const preset = present(resolveModelPreset("opusplan"), 'resolveModelPreset("opusplan")')
     // a role the preset does not name explicitly
     expect(() => resolveModelForRole(preset, "explorer" as never)).not.toThrow()
     expect(resolveModelForRole(preset, "explorer")).toBe(preset.defaultModel)

@@ -106,7 +106,7 @@ import type { WebSearchProvider } from "@/tool/web"
 import { providerFromEnv } from "@/tool/web/providers"
 import { buildAppshotPortWire } from "./appshot-port-wire"
 import { persistBudgetLedger } from "./budget-ledger-persist"
-import { applyCapabilityWires, buildCapabilityWires } from "./capability-wire-registry"
+import { buildCapabilityWires, foldCapabilityWires } from "./capability-wire-registry"
 import { buildAppPluginMentionDeps } from "./internal/mention-app-plugin-deps"
 import { buildMentionSymbolDeps } from "./internal/mention-symbol-deps"
 import { maybeWireObjective } from "./objective-store-wire"
@@ -468,9 +468,12 @@ const parseAssemblerPositiveInt = (raw: string | undefined): number | undefined 
  *  in a single ordered loop (each entry env-gated, caller-override-safe, no-op
  *  when absent). `config` (the derived runtime-config) is computed ONCE and
  *  threaded via the context — byte-identical to the prior per-call arity. */
+/** Open the optional agent-capability slots by folding {@link CAPABILITY_WIRES}
+ *  in a single ordered loop. Kept as a thin local alias so this module's callers
+ *  read the same as before; the registry owns the fold and the reason there are
+ *  TWO callers (see `capability-wire-registry.ts#foldCapabilityWires`). */
 const wireOptionalCapabilitySlots = (cfg: AgentConfig, env: AssemblerEnv): void => {
-  const config = runtimeConfigFromEnv(env)
-  applyCapabilityWires(CAPABILITY_WIRES, cfg, { env, config })
+  foldCapabilityWires(CAPABILITY_WIRES, cfg, env)
 }
 
 /** Parse a USD cost cap (`QUANTA_BUDGET_LEDGER_*_USD`) from the env bag: a
@@ -836,7 +839,7 @@ const wireSessionResourcesAndCodexR2 = (cfg: AgentConfig, env: AssemblerEnv): vo
  *  `assertWireOrder` so a reorder breaking a "runs AFTER" contract fails loudly.
  *  Array order === the legacy call sequence ⇒ byte-identical. Declared AFTER its
  *  `maybeWire*` helpers (TDZ). */
-const CAPABILITY_WIRES = buildCapabilityWires({
+export const CAPABILITY_WIRES = buildCapabilityWires({
   maybeWireBrowser,
   maybeWireAppshot,
   maybeWireObjective,

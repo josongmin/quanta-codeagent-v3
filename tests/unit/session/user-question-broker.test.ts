@@ -9,6 +9,7 @@
 
 import { describe, expect, test } from "bun:test"
 import { createUserQuestionBroker } from "@/session/user-question"
+import { nth, present } from "../../_helpers/expect-present"
 
 /** Deterministic broker: monotonic clock + sequential ids. */
 const makeBroker = () => {
@@ -42,7 +43,7 @@ describe("UserQuestionBroker — publish/settle", () => {
     const pending = broker.listPending()
     expect(pending).toHaveLength(1)
     expect(settled).toBe("UNSET")
-    const row = pending[0]!
+    const row = nth(pending, 0, "row")
     expect(row.owner).toEqual({ kind: "root" })
 
     const res = broker.answer(row.requestId, { text: "main" }, broker.revision())
@@ -57,7 +58,7 @@ describe("UserQuestionBroker — publish/settle", () => {
     const broker = makeBroker()
     const p = broker.request({ owner: { kind: "task", taskId: "task_abc" }, prompt: "go?" })
     void p.catch(() => {})
-    const row = broker.listPending()[0]!
+    const row = nth(broker.listPending(), 0, "row")
     expect(row.owner).toEqual({ kind: "task", taskId: "task_abc" })
     broker.cancel(row.requestId, "teardown", broker.revision())
     await p.catch(() => {})
@@ -66,7 +67,7 @@ describe("UserQuestionBroker — publish/settle", () => {
   test("decline settles with a declined outcome", async () => {
     const broker = makeBroker()
     const p = broker.request({ owner: { kind: "root" }, prompt: "q" })
-    const row = broker.listPending()[0]!
+    const row = nth(broker.listPending(), 0, "row")
     expect(broker.decline(row.requestId, broker.revision()).ok).toBe(true)
     expect(await p).toEqual({ kind: "declined" })
   })
@@ -74,7 +75,7 @@ describe("UserQuestionBroker — publish/settle", () => {
   test("cancel settles with the given cancel reason", async () => {
     const broker = makeBroker()
     const p = broker.request({ owner: { kind: "root" }, prompt: "q" })
-    const row = broker.listPending()[0]!
+    const row = nth(broker.listPending(), 0, "row")
     expect(broker.cancel(row.requestId, "superseded", broker.revision()).ok).toBe(true)
     expect(await p).toEqual({ kind: "cancelled", reason: "superseded" })
   })
@@ -84,7 +85,7 @@ describe("UserQuestionBroker — lifecycle races", () => {
   test("double-answer: the second settlement of the same id is rejected (unknown)", async () => {
     const broker = makeBroker()
     const p = broker.request({ owner: { kind: "root" }, prompt: "q" })
-    const row = broker.listPending()[0]!
+    const row = nth(broker.listPending(), 0, "row")
     const first = broker.answer(row.requestId, { text: "a" }, broker.revision())
     expect(first.ok).toBe(true)
     const second = broker.answer(row.requestId, { text: "b" }, first.revision)
@@ -101,7 +102,10 @@ describe("UserQuestionBroker — lifecycle races", () => {
     // A second request advances the domain revision.
     const second = broker.request({ owner: { kind: "root" }, prompt: "q2" })
     void second.catch(() => {})
-    const firstId = broker.listPending().find((r) => r.preview.includes("q1"))!.requestId
+    const firstId = present(
+      broker.listPending().find((r) => r.preview.includes("q1")),
+      'broker.listPending().find((r) => r.preview.includes("...',
+    ).requestId
     const stale = broker.answer(firstId, { text: "x" }, revAtRead)
     expect(stale).toMatchObject({ ok: false, reason: "stale" })
     // Still pending — the stale answer did not settle it.
@@ -151,7 +155,7 @@ describe("UserQuestionBroker — projection", () => {
     const secret = "sk-ant-api03-ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789abcdef"
     const long = `token=${secret} ${"x".repeat(500)}`
     void broker.request({ owner: { kind: "root" }, prompt: long }).catch(() => {})
-    const row = broker.listPending()[0]!
+    const row = nth(broker.listPending(), 0, "row")
     // Bounded well under the raw length.
     expect(row.preview.length).toBeLessThanOrEqual(260)
     // The literal secret is not present verbatim.
@@ -166,7 +170,7 @@ describe("UserQuestionBroker — projection", () => {
     expect(broker.revision()).toBe(0)
     void broker.request({ owner: { kind: "root" }, prompt: "q" }).catch(() => {})
     expect(broker.revision()).toBe(1)
-    const id = broker.listPending()[0]!.requestId
+    const id = nth(broker.listPending(), 0, "broker.listPending()").requestId
     broker.answer(id, { text: "a" }, broker.revision())
     expect(broker.revision()).toBe(2)
   })

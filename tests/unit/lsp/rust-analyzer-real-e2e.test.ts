@@ -13,6 +13,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { RustAnalyzerAdapter } from "@/lsp"
 import { gateOn } from "@/shared"
+import { nth, present } from "../../_helpers/expect-present"
 
 const has = (bin: string, arg = "--version"): boolean => {
   try {
@@ -110,11 +111,12 @@ D("RustAnalyzerAdapter — REAL rust-analyzer LSP e2e", () => {
         file,
         { line: 5, character: 18 },
         40_000,
-        (r) => r !== null && r.length > 0 && r[0]!.range.start.line === 0,
+        (r) => r !== null && r.length > 0 && nth(r, 0, "defs").range.start.line === 0,
       )
       expect(defs).not.toBeNull()
-      expect(defs!.length).toBeGreaterThan(0)
-      expect(defs![0]!.range.start.line).toBe(0)
+      const found = present(defs, "defs")
+      expect(found.length).toBeGreaterThan(0)
+      expect(nth(found, 0, "defs").range.start.line).toBe(0)
 
       // Hover (poll — cold index can return null OR throw ContentModified).
       const tryHover = async () => {

@@ -4,6 +4,7 @@
  * confidence sort, evidenceRefs default [], snapshot shape.
  */
 import { describe, expect, test } from "bun:test"
+import { nth } from "../../../tests/_helpers/expect-present"
 import { createLocalizationTracker } from "./pass"
 import type { CandidateInput } from "./types"
 
@@ -64,7 +65,7 @@ describe("active() ranks by confidence desc", () => {
     t.addCandidate(cand({ ref: "high", confidence: 0.9 }))
     const mid = t.addCandidate(cand({ ref: "mid", confidence: 0.5 }))
     t.addCandidate(cand({ ref: "excluded", confidence: 0.99 }))
-    t.exclude(t.snapshot().candidates[3]!.id, "ruled out")
+    t.exclude(nth(t.snapshot().candidates, 3, "snapshot().candidates").id, "ruled out")
     void mid
     expect(t.active().map((c) => c.ref)).toEqual(["high", "mid", "low"]) // excluded(0.99) gone
   })

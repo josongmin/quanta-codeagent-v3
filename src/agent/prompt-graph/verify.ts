@@ -504,6 +504,31 @@ const parity = (message: string, id: string): GraphViolation => ({
   variantIds: [id],
 })
 
+/**
+ * Both directions of the `firedVariantIds` ↔ channel-union agreement.
+ *
+ * A unit because a set EQUALITY is only meaningful as both inclusions at once: check
+ * one direction alone and a manifest that lists a variant in a channel but omits it
+ * from `firedVariantIds` reads as merely "extra", which is exactly the drift this
+ * parity check exists to catch.
+ */
+const checkFiredVariantParity = (
+  firedVariantIds: readonly string[],
+  unionOfChannels: ReadonlySet<string>,
+): readonly GraphViolation[] => {
+  const out: GraphViolation[] = []
+  const flat = new Set(firedVariantIds)
+  for (const id of unionOfChannels) {
+    if (!flat.has(id))
+      out.push(parity(`manifest lists ${id} in a channel but not firedVariantIds`, id))
+  }
+  for (const id of flat) {
+    if (!unionOfChannels.has(id))
+      out.push(parity(`manifest firedVariantIds carries ${id} which appears in no channel`, id))
+  }
+  return out
+}
+
 const checkSnapshotParity = (
   atoms: readonly InstructionAtom[],
   manifest: ManifestParityView,
@@ -521,15 +546,7 @@ const checkSnapshotParity = (
     }
   }
   // (b) firedVariantIds == the channel union (both directions).
-  const flat = new Set(manifest.firedVariantIds)
-  for (const id of unionOfChannels) {
-    if (!flat.has(id))
-      out.push(parity(`manifest lists ${id} in a channel but not firedVariantIds`, id))
-  }
-  for (const id of flat) {
-    if (!unionOfChannels.has(id))
-      out.push(parity(`manifest firedVariantIds carries ${id} which appears in no channel`, id))
-  }
+  out.push(...checkFiredVariantParity(manifest.firedVariantIds, unionOfChannels))
   // (c) policy.firedAtomIds ⊆ the reminder channel (the notice snapshot parity).
   const reminder = new Set(manifest.byChannel["message.system_reminder"] ?? [])
   for (const id of manifest.policy.firedAtomIds ?? []) {

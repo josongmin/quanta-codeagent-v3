@@ -129,6 +129,31 @@ export const __resetPreflightFailureNoticeForTest = (): void => {
 // edit
 // ───────────────────────────────────────────────────────────────────────
 
+/** Read the file an `edit` targets, or the warning to surface INSTEAD of a
+ *  match verdict. A unit because every read failure means the same thing to the
+ *  preflight — "we cannot judge this edit" — but each failure has a different
+ *  operator-facing reason (jailed path, missing file, unreadable), and mixing
+ *  those three messages into the match logic is what made the check unreadable.
+ *  Exactly one of `source` / `warning` is set. */
+const readEditTarget = async (
+  filePath: string,
+  resolve: (p: string) => string,
+  reader: (p: string) => Promise<string>,
+): Promise<{ readonly source: string; readonly warning?: undefined } | { readonly source?: undefined; readonly warning: string }> => {
+  try {
+    return { source: await reader(resolve(filePath)) }
+  } catch (e) {
+    if (e instanceof FsJailError) return { warning: jailWarning("edit", filePath) }
+    if (isAbsentReadError(e)) {
+      // edit requires an existing file; a missing target is a hard miss.
+      return { warning: `${WARN} edit ${filePath} — file not found; the edit will fail` }
+    }
+    return {
+      warning: `${WARN} edit ${filePath} — cannot safely inspect the target; the tool may reject it`,
+    }
+  }
+}
+
 const preflightEdit = async (
   input: unknown,
   resolve: (p: string) => string,
@@ -152,17 +177,9 @@ const preflightEdit = async (
   }
   const ranges = rangesRaw !== undefined && rangesRaw.length > 0 ? rangesRaw : undefined
 
-  let source: string
-  try {
-    source = await reader(resolve(filePath))
-  } catch (e) {
-    if (e instanceof FsJailError) return jailWarning("edit", filePath)
-    if (isAbsentReadError(e)) {
-      // edit requires an existing file; a missing target is a hard miss.
-      return `${WARN} edit ${filePath} — file not found; the edit will fail`
-    }
-    return `${WARN} edit ${filePath} — cannot safely inspect the target; the tool may reject it`
-  }
+  const read = await readEditTarget(filePath, resolve, reader)
+  if (read.warning !== undefined) return read.warning
+  const source = read.source
 
   const exact = applyExactEdit(source, oldString, newString, replaceAll, ranges)
   if (exact.ok) return undefined

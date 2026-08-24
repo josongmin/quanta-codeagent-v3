@@ -137,43 +137,61 @@ export const executeTurnWithObservability = async (args: {
     flushKind = classification.flushKind
     throw e
   } finally {
-    try {
-      await flushTurnObservability({
-        cfg: args.ctx.cfg,
-        stream: args.ctx.cfg.stream,
-        turn: args.turn,
-        turnDiffSession: args.ctx.turnDiffSession,
-        gitDirectiveCollector: args.ctx.gitDirectiveCollector,
-        workCollector,
-        workTurnId,
-        resultKind: flushKind,
-      })
-    } catch (flushErr) {
-      // ALBB-20 #9 — the flush failure was warn-only (operator log), so a UI
-      // watching the stream sink never learned turn telemetry was dropped. Add a
-      // non-fatal stream emit alongside the warn so the drop is observable on the
-      // agent-state surface too (north-star). Never rethrows (finally block).
-      logger.warn(`loop.flushTurnObservability: ${errMessage(flushErr)}`)
-      args.ctx.cfg.stream.emit({
-        type: "error",
-        message: `turn observability flush failed: ${errMessage(flushErr)}`,
-      })
-    }
-    // ADR-0231 (wire phase) — radar proposal-queue producer hook. Absent
-    // block (`cfg.radar === undefined`) ⇒ the guard above left
-    // `radarTurnStartMs` undefined and this never runs (byte-identical). When
-    // wired, deposit a heuristic card ONLY on a COMPLETED turn (the hook
-    // enforces the `flushKind` gate too) — the hook NEVER throws.
-    if (args.ctx.cfg.radar !== undefined && radarTurnStartMs !== undefined) {
-      maybeProposeRadarCard(args.ctx.cfg.radar, {
-        lastTaskDurationMs: Date.now() - radarTurnStartMs,
-        flushKind,
-        ...(args.ctx.cfg.sessionId !== undefined ? { sessionId: args.ctx.cfg.sessionId } : {}),
-      })
-    }
+    await runTurnEpilogue(args, { workCollector, workTurnId, flushKind, radarTurnStartMs })
     endSpan(turnSpan, turnSpanStatus, attrs({}))
   }
   return { result }
+}
+
+/** The turn's side-effect EPILOGUE: flush the turn's telemetry, then run the
+ *  ADR-0231 radar producer hook. A unit because nothing in it can change the
+ *  turn's result — it runs from a `finally` on every exit path, success or
+ *  throw — and because both halves must survive their own failure: a flush
+ *  error is warned AND surfaced on the stream rather than escaping a `finally`
+ *  and replacing the real outcome. Never throws. */
+const runTurnEpilogue = async (
+  args: { readonly ctx: RunAgentContext; readonly turn: number },
+  telemetry: {
+    readonly workCollector: ReturnType<typeof buildWorkMetricsResources>["collector"]
+    readonly workTurnId: ReturnType<typeof buildWorkMetricsResources>["turnId"]
+    readonly flushKind: "tools" | "completed" | "aborted" | "interrupted" | "error" | "refusal"
+    readonly radarTurnStartMs: number | undefined
+  },
+): Promise<void> => {
+  try {
+    await flushTurnObservability({
+      cfg: args.ctx.cfg,
+      stream: args.ctx.cfg.stream,
+      turn: args.turn,
+      turnDiffSession: args.ctx.turnDiffSession,
+      gitDirectiveCollector: args.ctx.gitDirectiveCollector,
+      workCollector: telemetry.workCollector,
+      workTurnId: telemetry.workTurnId,
+      resultKind: telemetry.flushKind,
+    })
+  } catch (flushErr) {
+    // ALBB-20 #9 — the flush failure was warn-only (operator log), so a UI
+    // watching the stream sink never learned turn telemetry was dropped. Add a
+    // non-fatal stream emit alongside the warn so the drop is observable on the
+    // agent-state surface too (north-star). Never rethrows (finally block).
+    logger.warn(`loop.flushTurnObservability: ${errMessage(flushErr)}`)
+    args.ctx.cfg.stream.emit({
+      type: "error",
+      message: `turn observability flush failed: ${errMessage(flushErr)}`,
+    })
+  }
+  // ADR-0231 (wire phase) — radar proposal-queue producer hook. Absent
+  // block (`cfg.radar === undefined`) ⇒ the caller left `radarTurnStartMs`
+  // undefined and this never runs (byte-identical). When wired, deposit a
+  // heuristic card ONLY on a COMPLETED turn (the hook enforces the
+  // `flushKind` gate too) — the hook NEVER throws.
+  if (args.ctx.cfg.radar !== undefined && telemetry.radarTurnStartMs !== undefined) {
+    maybeProposeRadarCard(args.ctx.cfg.radar, {
+      lastTaskDurationMs: Date.now() - telemetry.radarTurnStartMs,
+      flushKind: telemetry.flushKind,
+      ...(args.ctx.cfg.sessionId !== undefined ? { sessionId: args.ctx.cfg.sessionId } : {}),
+    })
+  }
 }
 
 export const runAgentTurnLoop = async (ctx: RunAgentContext): Promise<AgentOutcome> => {

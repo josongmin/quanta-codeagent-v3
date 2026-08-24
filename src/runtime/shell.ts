@@ -92,6 +92,30 @@ const requiresFullSandboxEnforcement = (profile: string): boolean =>
   profile === "read-only" || profile === "workspace-write"
 
 /**
+ * Throw when a profile that PROMISES enforcement did not actually get it.
+ *
+ * A unit because "enforced" is one predicate over two independent shapes of failure —
+ * the wrapper reporting it was never applied, and the wrapper reporting a degrade
+ * reason — and an explicit restrictive profile must stop the spawn on either. Read
+ * apart, a degraded-but-applied wrap passes as enforcement and an unsandboxed shell
+ * reaches `Bun.spawn`.
+ */
+const assertSandboxEnforced = (
+  profile: string,
+  wrapped: { readonly sandboxApplied: boolean; readonly degradeReason?: string | undefined },
+): void => {
+  if (
+    requiresFullSandboxEnforcement(profile) &&
+    (!wrapped.sandboxApplied || wrapped.degradeReason !== undefined)
+  ) {
+    throw new SandboxUnavailableError(
+      `QUANTA_SANDBOX=${profile} cannot be enforced: ` +
+        (wrapped.degradeReason ?? "sandbox wrapper was not applied"),
+    )
+  }
+}
+
+/**
  * Build the argv that will actually be spawned: base shell argv → snapshot
  * restore → per-call wrap → installed sandbox slot, in that order, and emit the
  * honest sandbox verdict exactly once before the spawn.
@@ -164,15 +188,7 @@ const resolveShellArgv = async (
   let sandboxedArgv: string[]
   if (slot !== undefined) {
     const wrapped = await slot.wrap(perCallArgv, cwd)
-    if (
-      requiresFullSandboxEnforcement(slot.policy.profile) &&
-      (!wrapped.sandboxApplied || wrapped.degradeReason !== undefined)
-    ) {
-      throw new SandboxUnavailableError(
-        `QUANTA_SANDBOX=${slot.policy.profile} cannot be enforced: ` +
-          (wrapped.degradeReason ?? "sandbox wrapper was not applied"),
-      )
-    }
+    assertSandboxEnforced(slot.policy.profile, wrapped)
     sandboxedArgv = wrapped.argv
     anyWrapLayerRan = true
     if (onSandboxStatus !== undefined) sandboxStatus = foldSandboxStatus(sandboxStatus, wrapped)

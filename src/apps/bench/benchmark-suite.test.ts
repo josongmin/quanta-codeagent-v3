@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import { readdirSync, readFileSync, statSync } from "node:fs"
 import { join } from "node:path"
+import { nth, present } from "../../../tests/_helpers/expect-present"
 import {
   BENCHMARK_SUITES,
   isBenchmarkSuite,
@@ -351,9 +352,9 @@ describe("in-process family env-AUTHORITY rail (typed config is the only authori
 
   test("detectors are non-vacuous — each matches its REALISTIC live spelling", () => {
     const byId = new Map(DETECTORS.map((d) => [d.id, d.re]))
-    const literal = byId.get("literal-assign")!
-    const computed = byId.get("computed-key-on-ambient-env")!
-    const helper = byId.get("serializer-into-ambient-env")!
+    const literal = present(byId.get("literal-assign"), "literal")
+    const computed = present(byId.get("computed-key-on-ambient-env"), "computed")
+    const helper = present(byId.get("serializer-into-ambient-env"), "helper")
 
     // spelling 1 — the bare literal nobody would actually write
     expect(literal.test(`env.${FAMILY_KEY} = family`)).toBe(true)
@@ -385,10 +386,10 @@ describe("in-process family env-AUTHORITY rail (typed config is the only authori
     expect(files.length).toBeGreaterThan(40)
     const owner = files.find((f) => f.endsWith("/run-config.ts"))
     expect(owner).toBeDefined()
-    const ownerText = readFileSync(owner!, "utf8")
+    const ownerText = readFileSync(present(owner, "owner"), "utf8")
     // The one sanctioned write EXISTS and IS matched by the literal detector —
     // proof the detector fires on real file bytes, not only on synthetic strings.
-    const literal = DETECTORS[0]!.re
+    const literal = nth(DETECTORS, 0, "DETECTORS").re
     expect(ownerText.split("\n").some((l) => literal.test(l))).toBe(true)
     // …and it is excluded only because run-config.ts is the allowlisted owner.
     expect(ALLOWED.has("run-config.ts")).toBe(true)

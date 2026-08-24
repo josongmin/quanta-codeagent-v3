@@ -19,6 +19,7 @@ import {
   makeStaticWitness,
   witnessStructuralOwnerCandidates,
 } from "@/runner/batch/eval/static-witness"
+import { nth } from "../_helpers/expect-present"
 
 const A = "pkg/base/client.py"
 const B = "pkg/postgres/client.py"
@@ -97,13 +98,13 @@ describe("SCAFF-03 — static witness evidence stays advisory in clean owner adm
       stage1Files: [{ file: A, score: 9 }],
       witnessOwners: [{ file: A, forSymbol: SYM }],
     })
-    expect(ownerStrength(witnessed.candidates[0]!)).toBe("advisory")
+    expect(ownerStrength(nth(witnessed.candidates, 0, "witnessed.candidates"))).toBe("advisory")
 
     const stage1Only = buildFaultEvidencePacket({
       issueText: `${SYM} drops the empty environment`,
       stage1Files: [{ file: A, score: 9 }],
     })
-    expect(ownerStrength(stage1Only.candidates[0]!)).toBe("advisory")
+    expect(ownerStrength(nth(stage1Only.candidates, 0, "stage1Only.candidates"))).toBe("advisory")
   })
 
   it("HELLGATE: stage1-only evidence cannot admit a clean owner", () => {

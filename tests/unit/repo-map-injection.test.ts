@@ -9,6 +9,7 @@ import {
   type TurnEnvContext,
 } from "@/agent"
 import { repoMapKnob } from "@/runner/knobs/knobs/repo-map"
+import { present } from "../_helpers/expect-present"
 
 /**
  * RFC jun-6 §6.1 — repo-map turn-0 injection hellgate (TDD red→green).
@@ -139,7 +140,7 @@ describe("repo-map — bench surface now in SURFACES", () => {
     // the empty llm/registry stubs are cast (through unknown) to the real shape.
     const baseCfg = { llm: {}, registry: {} } as unknown as AgentConfig
     const ctx = { surface: "bench" as const }
-    const result = knob.apply(baseCfg, parsed!, ctx)
+    const result = knob.apply(baseCfg, present(parsed, "repoMapKnob.parse"), ctx)
     expect(result.repoMap).toBeDefined()
     expect(result.repoMap?.maxDepth).toBeGreaterThan(0)
     expect(result.repoMap?.maxFiles).toBeGreaterThan(0)

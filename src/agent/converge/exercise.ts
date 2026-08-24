@@ -30,6 +30,35 @@ import {
   type ToolResultEvent,
 } from "./tokenize"
 
+/**
+ * True iff an INTERPRETER invocation (`python`, `node`, …) is running the deliverable.
+ *
+ * A unit because "interpreter" is one dispatch over three mutually-exclusive forms that only make
+ * sense read against each other: `-c` is an inline probe, `-m <module>` is whatever that module is
+ * (a test runner or a packaging tool — neither is the deliverable), and anything else counts only
+ * if it names a file to run. Deciding them at separate call sites is how `python -m pytest` came to
+ * read as an exercise and inflate the best-of-N tie-break.
+ */
+const isInterpreterExercise = (args: readonly string[]): boolean => {
+  if (args.includes("-c")) return false // inline snippet / probe, not a run of a produced file
+  const mIdx = args.indexOf("-m")
+  if (mIdx >= 0) {
+    const mod = (args[mIdx + 1] ?? "").toLowerCase()
+    if (TEST_RUNNERS.has(mod)) return false // `python -m pytest` = running the suite, not the deliverable
+    return ![
+      "pip",
+      "pip3",
+      "venv",
+      "virtualenv",
+      "ensurepip",
+      "build",
+      "installer",
+      "wheel",
+    ].includes(mod)
+  }
+  return args.some((a) => !a.startsWith("-")) // a non-flag arg = a script/file to run
+}
+
 /** True iff a SINGLE command segment affirmatively RUNS the deliverable (fail-closed: anything not
  *  affirmatively an exercise returns false). */
 const isExerciseSegment = (segment: string): boolean => {
@@ -62,25 +91,7 @@ const isExerciseSegment = (segment: string): boolean => {
 
   // 4. interpreter → exercise ONLY when running a FILE (not `-c`, not a pkg-manager `-m`, not a
   //    test-runner `-m pytest`).
-  if (INTERPRETERS.has(base)) {
-    if (args.includes("-c")) return false // inline snippet / probe, not a run of a produced file
-    const mIdx = args.indexOf("-m")
-    if (mIdx >= 0) {
-      const mod = (args[mIdx + 1] ?? "").toLowerCase()
-      if (TEST_RUNNERS.has(mod)) return false // `python -m pytest` = running the suite, not the deliverable
-      return ![
-        "pip",
-        "pip3",
-        "venv",
-        "virtualenv",
-        "ensurepip",
-        "build",
-        "installer",
-        "wheel",
-      ].includes(mod)
-    }
-    return args.some((a) => !a.startsWith("-")) // a non-flag arg = a script/file to run
-  }
+  if (INTERPRETERS.has(base)) return isInterpreterExercise(args)
 
   // 5. a path-invoked leader (`./x`, `/abs/x`, `../x`, `dir/x`) = running a produced artifact —
   //    UNLESS its basename is itself a build/install tool (`/usr/bin/make`).

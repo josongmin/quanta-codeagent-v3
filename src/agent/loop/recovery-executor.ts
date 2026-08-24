@@ -243,6 +243,22 @@ const applyCompactRecovery = async (
   // post-compact is observable (north-star). The loop MUST still complete
   // (no-throw contract preserved); on the happy path (no throw) this is
   // byte-identical (a `post_compact` emit + the same advisory `setNextActions`).
+  await announceReactiveCompaction(session, threadId, provenance)
+  return CONTINUE
+}
+
+/** The OBSERVABLE epilogue of a reactive compaction: the `post_compact` hook
+ *  emit followed by the advisory "resuming" next-action. A unit because both
+ *  halves are pure announcement — neither can change the loop Step — and both
+ *  carry the same no-throw contract: a throwing subscriber (or a throwing
+ *  `setNextActions`) is surfaced through {@link surfacePostCompactFailure}
+ *  rather than swallowed, and never breaks the turn. */
+const announceReactiveCompaction = async (
+  session: TurnSession,
+  threadId: string,
+  provenance: import("../recovery-reason").RecoveryProvenance,
+): Promise<void> => {
+  const { config } = session
   const postCompactEmit = buildPostCompactEmit(config.hooks, threadId)
   if (postCompactEmit !== undefined) {
     try {
@@ -264,7 +280,6 @@ const applyCompactRecovery = async (
       surfacePostCompactFailure(session, "post_compact setNextActions", e)
     }
   }
-  return CONTINUE
 }
 
 /** claim 1 (ALBB-07) — make a swallowed reactive post-compact failure OBSERVABLE

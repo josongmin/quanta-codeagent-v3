@@ -24,7 +24,7 @@
  * from other mode-preset siblings.
  */
 
-import type { AgentConfig } from "@/agent"
+import type { AgentConfig, AgentOutcome } from "@/agent"
 import { wireOptionalAgentPorts } from "@/agent"
 import type { Message } from "@/llm"
 import type { PermissionContext } from "@/permission"
@@ -113,6 +113,26 @@ const buildHeadlessBase = async (
   )
 }
 
+/** Print the run's final assistant text on stdout, if there is any.
+ *
+ *  A unit because "the final answer" is ONE derivation with four distinct ways
+ *  to come out empty — no assistant turn at all (an immediate error), a
+ *  non-array content block, no `text` parts among the blocks, or whitespace-only
+ *  text — and every one of them means the same thing here: print NOTHING and let
+ *  the exit code carry the signal. Callers only decide *whether* to emit (a
+ *  structured run must not corrupt its jq-parseable stdout), never how. */
+const emitFinalAssistantText = (outcome: AgentOutcome): void => {
+  const lastAssistant = outcome.messages.findLast?.((m) => m.role === "assistant")
+  if (!lastAssistant) return
+  const textParts = Array.isArray(lastAssistant.content)
+    ? lastAssistant.content
+        .filter((p): p is { type: "text"; text: string } => p.type === "text")
+        .map((p) => p.text)
+    : []
+  const final = textParts.join("").trim()
+  if (final !== "") logger.info(final)
+}
+
 /**
  * HEADLESS runner.
  *
@@ -160,18 +180,7 @@ export const runMode = async (req: AssembleRequest): Promise<RunOutcome> => {
   // jq-parseable stdout). Plain text mode prints the LAST assistant message
   // verbatim. When the outcome carries no assistant turn (e.g. immediate
   // error), nothing is printed — the exit code carries the signal.
-  if (!wantsStructuredOutput(req)) {
-    const lastAssistant = outcome.messages.findLast?.((m) => m.role === "assistant")
-    if (lastAssistant) {
-      const textParts = Array.isArray(lastAssistant.content)
-        ? lastAssistant.content
-            .filter((p): p is { type: "text"; text: string } => p.type === "text")
-            .map((p) => p.text)
-        : []
-      const final = textParts.join("").trim()
-      if (final !== "") logger.info(final)
-    }
-  }
+  if (!wantsStructuredOutput(req)) emitFinalAssistantText(outcome)
 
   // Canonical exit-code table lives in `../run` (audit R2: headless previously
   // mapped aborted→0 and max_turns→2, diverging from the shared table where

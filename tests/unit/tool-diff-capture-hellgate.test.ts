@@ -39,6 +39,7 @@ import type { FileInfo, FileSystemPort } from "@/storage"
 import type { ToolContext, ToolResult } from "@/tool"
 import { makeEditTool } from "@/tool/edit"
 import { makeWriteTool } from "@/tool/write"
+import { nth } from "../_helpers/expect-present"
 
 /** Recording in-memory FS port; counts reads so we can prove the gate-OFF
  *  `write` path performs NO extra pre-read. */
@@ -118,7 +119,7 @@ describe("ADR-0440 wire-finish — tool.diff agent-seam capture", () => {
     )
     expect(res.ok).toBe(true)
     expect(captured).toHaveLength(1)
-    const c = captured[0]!
+    const c = nth(captured, 0, "c")
     expect(c.toolCallId).toBe("call-123")
     expect(c.path).toBe("a.ts")
     // Raw strings — the tool did NO diff math; before is the pre-edit source.
@@ -137,8 +138,8 @@ describe("ADR-0440 wire-finish — tool.diff agent-seam capture", () => {
       { ...baseCtx("/"), toolDiff: s1.sink, toolCallId: "c1" },
     )
     expect(s1.captured).toHaveLength(1)
-    expect(s1.captured[0]!.before).toBe("old content\n")
-    expect(s1.captured[0]!.after).toBe("new content\n")
+    expect(nth(s1.captured, 0, "s1.captured").before).toBe("old content\n")
+    expect(nth(s1.captured, 0, "s1.captured").after).toBe("new content\n")
 
     const s2 = makeSink()
     await run(
@@ -147,8 +148,8 @@ describe("ADR-0440 wire-finish — tool.diff agent-seam capture", () => {
       { ...baseCtx("/"), toolDiff: s2.sink, toolCallId: "c2" },
     )
     expect(s2.captured).toHaveLength(1)
-    expect(s2.captured[0]!.before).toBe("") // new file
-    expect(s2.captured[0]!.after).toBe("hello\n")
+    expect(nth(s2.captured, 0, "s2.captured").before).toBe("") // new file
+    expect(nth(s2.captured, 0, "s2.captured").after).toBe("hello\n")
   })
 
   test("INV-3 gate OFF ⇒ no capture AND no extra pre-read (byte-identical)", async () => {

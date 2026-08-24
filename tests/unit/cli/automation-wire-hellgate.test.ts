@@ -52,6 +52,7 @@ import type { AgentLoopPort, RRule } from "@/scheduler/types"
 import { buildDefaultTools } from "@/tool"
 import { automationUpdateTool } from "@/tool/automation_update"
 import type { ToolContext, ToolEvent } from "@/tool/types"
+import { nth, present } from "../../_helpers/expect-present"
 
 // ── Fixtures ───────────────────────────────────────────────────────────────
 
@@ -154,9 +155,9 @@ describe("ADR-0279/0280 — automation wire hellgate", () => {
     const handle = startAutomationEngineTicker(cfg, deps)
     expect(handle).toBeDefined()
     expect(arms).toHaveLength(1)
-    expect(arms[0]!.ms).toBe(100)
-    handle!.stop()
-    expect(arms[0]!.cleared).toBe(true)
+    expect(nth(arms, 0, "arms").ms).toBe(100)
+    present(handle, "handle").stop()
+    expect(nth(arms, 0, "arms").cleared).toBe(true)
   })
 
   test("HELL-AW-03: due automation ⇒ run row in engine.runs", async () => {
@@ -180,7 +181,7 @@ describe("ADR-0279/0280 — automation wire hellgate", () => {
     })
     expect(outcome.kind).toBe("fired")
     expect(engine.runs).toHaveLength(1)
-    expect(engine.runs[0]!.automationId).toBe("a1")
+    expect(nth(engine.runs, 0, "engine.runs").automationId).toBe("a1")
     expect(enqueued).toEqual(["do thing"])
   })
 
@@ -199,8 +200,8 @@ describe("ADR-0279/0280 — automation wire hellgate", () => {
     })
     await tickScheduler({ engine, now: utc(2026, 5, 25, 11), handler: slot.handler })
     expect(engine.inbox).toHaveLength(1)
-    expect(engine.inbox[0]!.automationId).toBe("a1")
-    expect(engine.inbox[0]!.read).toBe(false)
+    expect(nth(engine.inbox, 0, "engine.inbox").automationId).toBe("a1")
+    expect(nth(engine.inbox, 0, "engine.inbox").read).toBe(false)
   })
 
   // ───────────────────────────────────────────────────────────────────────
@@ -313,7 +314,7 @@ describe("ADR-0279/0280 — automation wire hellgate", () => {
     if (out.kind !== "errored") throw new Error("unreachable")
     expect(out.errorMessage).toMatch(/spawn boom/)
     expect(engine.runs).toHaveLength(1)
-    expect(engine.runs[0]!.outcome).toBe("errored")
+    expect(nth(engine.runs, 0, "engine.runs").outcome).toBe("errored")
     // Now exercise onTick → stderr surface
     slot.onTick(out)
     expect(stderrCaptured.join("")).toMatch(/automation.*errored.*a1/)
@@ -321,10 +322,7 @@ describe("ADR-0279/0280 — automation wire hellgate", () => {
 
   test("HELL-AW-09: ticker stop mid-handler ⇒ in-flight run finalizes", async () => {
     const env = makeEnv({ [AUTOMATION_ENV_FLAG]: "on" })
-    let resolveHandler!: () => void
-    const handlerGate = new Promise<void>((res) => {
-      resolveHandler = res
-    })
+    const { promise: handlerGate, resolve: resolveHandler } = Promise.withResolvers<void>()
     const slowLoop: AgentLoopPort = {
       enqueueUserMessage: async () => {
         await handlerGate
@@ -358,10 +356,10 @@ describe("ADR-0279/0280 — automation wire hellgate", () => {
     } as unknown as AgentConfig
     const handle = startAutomationEngineTicker(cfg, deps)
     // Fire one tick
-    arms[0]!.cb()
+    nth(arms, 0, "arms").cb()
     // Stop while handler is still pending
-    handle!.stop()
-    expect(arms[0]!.cleared).toBe(true)
+    present(handle, "handle").stop()
+    expect(nth(arms, 0, "arms").cleared).toBe(true)
     // Let the handler finalize
     resolveHandler()
     // Wait for in-flight to drain
@@ -685,11 +683,11 @@ describe("ADR-0279/0280 — automation wire hellgate", () => {
     const cfg = { automationEngine: slot } as unknown as AgentConfig
     const handle = startAutomationEngineTicker(cfg, deps)
     expect(handle).toBeDefined()
-    handle!.stop()
-    expect(arms[0]!.cleared).toBe(true)
+    present(handle, "handle").stop()
+    expect(nth(arms, 0, "arms").cleared).toBe(true)
     // Idempotent: second stop is a no-op
-    handle!.stop()
-    expect(arms[0]!.cleared).toBe(true)
+    present(handle, "handle").stop()
+    expect(nth(arms, 0, "arms").cleared).toBe(true)
   })
 
   test("HELL-AW-21: no zombie timer after stop (fake setInterval not re-armed)", () => {
@@ -709,10 +707,10 @@ describe("ADR-0279/0280 — automation wire hellgate", () => {
     }
     const cfg = { automationEngine: slot } as unknown as AgentConfig
     const handle = startAutomationEngineTicker(cfg, deps)
-    handle!.stop()
+    present(handle, "handle").stop()
     // No additional setInterval was armed.
     expect(arms).toHaveLength(1)
-    expect(arms[0]!.cleared).toBe(true)
+    expect(nth(arms, 0, "arms").cleared).toBe(true)
   })
 
   test("HELL-AW-22: invalid interval env ⇒ null + warn", () => {

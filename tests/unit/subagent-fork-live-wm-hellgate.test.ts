@@ -24,6 +24,7 @@ import * as runnerModule from "@/agent/subagent-runner"
 import type { AgentConfig } from "@/agent/types"
 import type { Message } from "@/llm"
 import type { SubagentRequest, SubagentResult } from "@/subagent"
+import { present } from "../_helpers/expect-present"
 
 // Spy runner: capture every `req.prompt` the trio `agent` tool composes.
 // Namespace spy (mockRestore-able) — NOT `mock.module`, which leaks the fake
@@ -79,9 +80,12 @@ describe("ALBB-16 #1 — fork_turns reads LIVE working-memory", () => {
     const seed: Message[] = [u("seed-turn")]
     // The live working-memory buffer is a SEPARATE array the loop owns.
     const liveWM: Message[] = [u("seed-turn")]
-    const block = buildSubagentBlock(cfg(seed), {
-      transcriptSource: () => liveWM,
-    })!
+    const block = present(
+      buildSubagentBlock(cfg(seed), {
+        transcriptSource: () => liveWM,
+      }),
+      "subagent block",
+    )
 
     // Session progresses: a NEW user turn accrues in LIVE WM only (the seed
     // stays frozen — exactly the production divergence).
@@ -105,8 +109,11 @@ describe("ALBB-16 #1 — fork_turns reads LIVE working-memory", () => {
     const seed: Message[] = [u("only-seed-turn")]
     // Two blocks over the SAME seed: one seed-sourced (no thunk), one whose
     // thunk returns the SAME seed. The composed prompts must be byte-identical.
-    const blockNoThunk = buildSubagentBlock(cfg(seed))!
-    const blockThunk = buildSubagentBlock(cfg(seed), { transcriptSource: () => seed })!
+    const blockNoThunk = present(buildSubagentBlock(cfg(seed)), "subagent block (seed-sourced)")
+    const blockThunk = present(
+      buildSubagentBlock(cfg(seed), { transcriptSource: () => seed }),
+      "subagent block (thunk)",
+    )
 
     const noThunk = await spawnAndCapture(blockNoThunk, {
       prompt: "t",

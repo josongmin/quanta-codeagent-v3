@@ -114,17 +114,25 @@ const parseSandboxPolicy = (v: unknown): ThreadPermission["sandboxPolicy"] | nul
   }
 }
 
-/** Validate a lossless posture PATCH (every field optional). Returns the
- *  canonical patch, or `null` when any PRESENT field is malformed (fail-closed:
- *  a bad patch is never partially trusted). */
-const parsePosturePatch = (v: unknown): PosturePatch | null => {
-  if (!isRecord(v)) return null
+/** Validate the THREAD-PERMISSION axes of a posture patch — approval policy,
+ *  approvals reviewer, sandbox policy — each still optional.
+ *
+ *  A unit because these three fields travel together everywhere else in this
+ *  module: the full record nests them under `threadPermission`, and applying a
+ *  patch writes them back onto that same object. They also share the patch's
+ *  fail-closed rule exactly — absent ⇒ omitted, present-but-malformed ⇒ `null`
+ *  for the WHOLE patch, never a partially-trusted posture. */
+const parseThreadPermissionPatchAxes = (
+  v: Record<string, unknown>,
+): {
+  approvalPolicy?: ThreadPermission["approvalPolicy"]
+  approvalsReviewer?: ThreadPermission["approvalsReviewer"]
+  sandboxPolicy?: ThreadPermission["sandboxPolicy"]
+} | null => {
   const out: {
     approvalPolicy?: ThreadPermission["approvalPolicy"]
     approvalsReviewer?: ThreadPermission["approvalsReviewer"]
     sandboxPolicy?: ThreadPermission["sandboxPolicy"]
-    askOutsidePlan?: boolean
-    mode?: PosturePatch["mode"]
   } = {}
   if (v.approvalPolicy !== undefined) {
     if (!isApprovalPolicy(v.approvalPolicy)) return null
@@ -139,6 +147,23 @@ const parsePosturePatch = (v: unknown): PosturePatch | null => {
     if (sandbox === null) return null
     out.sandboxPolicy = sandbox
   }
+  return out
+}
+
+/** Validate a lossless posture PATCH (every field optional). Returns the
+ *  canonical patch, or `null` when any PRESENT field is malformed (fail-closed:
+ *  a bad patch is never partially trusted). */
+const parsePosturePatch = (v: unknown): PosturePatch | null => {
+  if (!isRecord(v)) return null
+  const permission = parseThreadPermissionPatchAxes(v)
+  if (permission === null) return null
+  const out: {
+    approvalPolicy?: ThreadPermission["approvalPolicy"]
+    approvalsReviewer?: ThreadPermission["approvalsReviewer"]
+    sandboxPolicy?: ThreadPermission["sandboxPolicy"]
+    askOutsidePlan?: boolean
+    mode?: PosturePatch["mode"]
+  } = { ...permission }
   if (v.askOutsidePlan !== undefined) {
     if (typeof v.askOutsidePlan !== "boolean") return null
     out.askOutsidePlan = v.askOutsidePlan

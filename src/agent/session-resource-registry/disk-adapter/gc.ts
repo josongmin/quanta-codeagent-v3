@@ -375,10 +375,29 @@ const truncateSession = async (
   // Contended ⇒ a LIVE owner elsewhere is appending; defer to a later
   // sweep rather than racing it.
   if (lock === null) return false
+  try {
+    return await truncateHeldSession(eventsPath, cachePath, maxBytes, hooks)
+  } finally {
+    await lock.release()
+  }
+}
+
+/** The half of {@link truncateSession} that is only valid while the session
+ *  lock is HELD: re-read both files (rows appended between the unlocked
+ *  pre-check and the acquire land here — the pre-check alone would be a
+ *  TOCTOU), split the budget between them, and rewrite whichever is over its
+ *  share. A unit because that is exactly the work the lock exists to protect,
+ *  and because the NO-THROW degrade belongs with it: on a throwing hook /
+ *  hostile fs it reports "whatever landed so far", which only this scope can
+ *  know. Returns true iff at least one file was rewritten. */
+const truncateHeldSession = async (
+  eventsPath: string,
+  cachePath: string,
+  maxBytes: number,
+  hooks?: SweepTestHooks,
+): Promise<boolean> => {
   let touched = false
   try {
-    // Fresh read UNDER the lock — rows appended between the pre-check
-    // and the acquire are captured here.
     const events = await readBodyWithSize(eventsPath)
     const cache = await readBodyWithSize(cachePath)
     if (hooks?.afterReadForTest !== undefined) await hooks.afterReadForTest()
@@ -403,8 +422,6 @@ const truncateSession = async (
     // NO-THROW: a throwing test hook / hostile fs degrades to "whatever
     // landed so far" — the atomic rewrite guarantees no torn file either way.
     return touched
-  } finally {
-    await lock.release()
   }
 }
 

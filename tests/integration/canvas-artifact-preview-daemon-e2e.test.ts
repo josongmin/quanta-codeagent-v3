@@ -46,6 +46,7 @@ import { type CanvasMessage, decodeCanvasFrame } from "@/protocol/canvas"
 import { createRuntimeFromAgentConfigBase, type RuntimeAgentConfigBase } from "@/sdk/runtime"
 import { StdoutStream } from "@/stream"
 import { buildDefaultTools, ToolRegistry } from "@/tool"
+import { present } from "../_helpers/expect-present"
 
 /* ------------------------------------------------------------------ */
 /* RecordingLLM — a single text turn (no tools, no network).           */
@@ -360,7 +361,7 @@ describe("A2 e2e — artifact.ready Canvas frame + jailed IPC preview", () => {
     const { waitFor } = collectCanvas(ws)
     await new Promise((r) => setTimeout(r, 30))
 
-    driveTurn(ws, bag.sessionId!)
+    driveTurn(ws, present(bag.sessionId, "bag.sessionId"))
 
     const ready = await waitFor("artifact.ready")
     if (ready.kind !== "artifact.ready") throw new Error("narrow")
@@ -397,7 +398,7 @@ describe("A2 e2e — artifact.ready Canvas frame + jailed IPC preview", () => {
     const { waitFor } = collectCanvas(ws)
     await new Promise((r) => setTimeout(r, 30))
 
-    driveTurn(ws, bag.sessionId!)
+    driveTurn(ws, present(bag.sessionId, "bag.sessionId"))
 
     const ready = await waitFor("artifact.ready", 6000)
     if (ready.kind !== "artifact.ready") throw new Error("narrow")
@@ -425,7 +426,7 @@ describe("A2 e2e — artifact.ready Canvas frame + jailed IPC preview", () => {
     const { frames } = collectCanvas(ws)
     await new Promise((r) => setTimeout(r, 30))
 
-    driveTurn(ws, bag.sessionId!)
+    driveTurn(ws, present(bag.sessionId, "bag.sessionId"))
     await new Promise((r) => setTimeout(r, 500))
     expect(frames.filter((f) => f.kind === "artifact.ready")).toHaveLength(0)
 
@@ -472,7 +473,7 @@ describe("A2 e2e — artifact.ready Canvas frame + jailed IPC preview", () => {
     const { frames } = collectCanvas(ws)
     await new Promise((r) => setTimeout(r, 30))
 
-    driveTurn(ws, bag.sessionId!)
+    driveTurn(ws, present(bag.sessionId, "bag.sessionId"))
     await new Promise((r) => setTimeout(r, 500))
     expect(frames.some((f) => f.kind === "artifact.ready")).toBe(false)
 

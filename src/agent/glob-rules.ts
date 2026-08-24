@@ -157,6 +157,40 @@ const tryLoadRule = async (path: string): Promise<GlobRule | undefined> => {
   return rule
 }
 
+/** The rule-file names in ONE directory, in the deterministic order the
+ *  renderers rely on: sorted, then filtered to the rule extensions. `[]` for an
+ *  absent directory — a missing rule dir is the norm, not a fault. */
+const listRuleFileNames = async (abs: string): Promise<string[]> => {
+  let names: string[]
+  try {
+    names = await readdir(abs)
+  } catch {
+    return [] // directory absent ⇒ skip
+  }
+  return [...names].sort().filter((n) => RULE_EXTENSIONS.some((ext) => n.endsWith(ext)))
+}
+
+/** Walk every rule file under `cwd` in load order (dir priority, then sorted
+ *  name), stopping the moment `reachedCap` says the caller has taken all it
+ *  will accept. A unit because the ORDER and the {@link MAX_RULE_FILES} bound
+ *  are the same contract for both loaders below — the bound is checked against
+ *  the caller's own accumulator (a callback, not a count) precisely because the
+ *  two loaders keep different accumulators but must be bounded identically. */
+const forEachRuleFile = async (
+  cwd: string,
+  reachedCap: () => boolean,
+  visit: (path: string) => Promise<void>,
+): Promise<void> => {
+  for (const dir of GLOB_RULE_DIRS) {
+    if (reachedCap()) break
+    const abs = join(cwd, dir)
+    for (const name of await listRuleFileNames(abs)) {
+      if (reachedCap()) break
+      await visit(join(abs, name))
+    }
+  }
+}
+
 /** Load every file-scoped rule under `cwd`'s rule directories. Returns `[]`
  *  when no rule directory exists or none parse — the byte-identical no-op.
  *  Files are loaded in a deterministic order (dir priority, then sorted name)
@@ -167,22 +201,14 @@ const tryLoadRule = async (path: string): Promise<GlobRule | undefined> => {
  *  by convention (the loop snapshots the result; selection is per-turn). */
 export const loadGlobRules = async (cwd: string): Promise<GlobRule[]> => {
   const rules: GlobRule[] = []
-  for (const dir of GLOB_RULE_DIRS) {
-    if (rules.length >= MAX_RULE_FILES) break
-    const abs = join(cwd, dir)
-    let names: string[]
-    try {
-      names = await readdir(abs)
-    } catch {
-      continue // directory absent ⇒ skip
-    }
-    for (const name of [...names].sort()) {
-      if (rules.length >= MAX_RULE_FILES) break
-      if (!RULE_EXTENSIONS.some((ext) => name.endsWith(ext))) continue
-      const rule = await tryLoadRule(join(abs, name))
+  await forEachRuleFile(
+    cwd,
+    () => rules.length >= MAX_RULE_FILES,
+    async (path) => {
+      const rule = await tryLoadRule(path)
       if (rule) rules.push(rule)
-    }
-  }
+    },
+  )
   return rules
 }
 
@@ -195,19 +221,11 @@ export const loadGlobRules = async (cwd: string): Promise<GlobRule[]> => {
  *  session convention as `loadGlobRules`. Returns `[]` when none exist. */
 export const loadRequestableRules = async (cwd: string): Promise<RequestableRule[]> => {
   const out: RequestableRule[] = []
-  for (const dir of GLOB_RULE_DIRS) {
-    if (out.length >= MAX_RULE_FILES) break
-    const abs = join(cwd, dir)
-    let names: string[]
-    try {
-      names = await readdir(abs)
-    } catch {
-      continue // directory absent ⇒ skip
-    }
-    for (const name of [...names].sort()) {
-      if (out.length >= MAX_RULE_FILES) break
-      if (!RULE_EXTENSIONS.some((ext) => name.endsWith(ext))) continue
-      const rule = await parseRuleFile(join(abs, name))
+  await forEachRuleFile(
+    cwd,
+    () => out.length >= MAX_RULE_FILES,
+    async (path) => {
+      const rule = await parseRuleFile(path)
       if (
         rule !== undefined &&
         rule.globs.length === 0 &&
@@ -220,8 +238,8 @@ export const loadRequestableRules = async (cwd: string): Promise<RequestableRule
           body: rule.body,
         })
       }
-    }
-  }
+    },
+  )
   return out
 }
 

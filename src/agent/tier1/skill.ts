@@ -175,6 +175,35 @@ const skillOverrideEntry = (s: Skill): SkillTurnOverride | undefined => {
   }
 }
 
+/** Fold the discovered skills into the two per-skill advisory maps the block
+ *  exposes: tool allowlists (ADR-0011 §6.1) and model/effort overrides (§6.2).
+ *
+ *  A unit because both maps are derived from ONE pass over the SAME skill list
+ *  and share one emptiness contract: a skill that declares neither advisory
+ *  leaves both untouched, and an all-advisory-free skill set yields `undefined`
+ *  for both rather than empty maps — so the composer can skip them.
+ *  (A skill contributes an override only for a non-empty `model:` string AND/OR
+ *  any defined `effort:`, numeric 0 included.) */
+const buildSkillAdvisoryMaps = (
+  skills: readonly Skill[],
+): {
+  allowlists: Map<string, string[]> | undefined
+  overrides: Map<string, SkillTurnOverride> | undefined
+} => {
+  const al = new Map<string, string[]>()
+  const ov = new Map<string, SkillTurnOverride>()
+  for (const s of skills) {
+    const allow = skillToolAllowlist(s)
+    if (allow) al.set(s.name, allow)
+    const override = skillOverrideEntry(s)
+    if (override) ov.set(s.name, override)
+  }
+  return {
+    allowlists: al.size > 0 ? al : undefined,
+    overrides: ov.size > 0 ? ov : undefined,
+  }
+}
+
 /** Build the skill block from `config.skills`. Returns `undefined` when the
  *  block is absent so the composer can skip it. Pure except for
  *  `discoverSkills`'s directory IO. */
@@ -255,20 +284,7 @@ export const buildSkillBlock = async (config: AgentConfig): Promise<SkillBlock |
     const stage = buildProposalStagePort(dir, config.approvalStateMachine, config.sessionId ?? "")
     tools.push(createSkillCreatorTool({ io, stage, generatorVersion: SKILL_PROPOSAL_GENERATOR }))
   }
-  const al = new Map<string, string[]>()
-  // ADR-0011 §6.2 → L4: build the per-skill model/effort override map alongside
-  // the allowlist map. A skill contributes an entry only when it declares
-  // `model:` AND/OR `effort:` (a non-empty model string, or any defined effort
-  // including numeric 0). Skills with neither leave the map untouched, so an
-  // all-advisory-free skill set yields `undefined` and the loop stays
-  // byte-identical.
-  const ov = new Map<string, SkillTurnOverride>()
-  for (const s of skills) {
-    const allow = skillToolAllowlist(s)
-    if (allow) al.set(s.name, allow)
-    const override = skillOverrideEntry(s)
-    if (override) ov.set(s.name, override)
-  }
+  const { allowlists, overrides } = buildSkillAdvisoryMaps(skills)
   // RFC-06 F3 — the LIVE discovery reader over THIS session's authority. It
   // replaces the pre-F3 frozen `inventory` array: the loop reads
   // `runtime.activeInventory()` EVERY turn, so the prompt "## Active skills"
@@ -287,8 +303,8 @@ export const buildSkillBlock = async (config: AgentConfig): Promise<SkillBlock |
   })
   return {
     tools,
-    allowlists: al.size > 0 ? al : undefined,
-    overrides: ov.size > 0 ? ov : undefined,
+    allowlists,
+    overrides,
     runtime,
     authority,
   }

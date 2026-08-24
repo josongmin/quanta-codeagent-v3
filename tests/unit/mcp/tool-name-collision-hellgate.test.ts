@@ -19,6 +19,7 @@ import { describe, expect, test } from "bun:test"
 import { z } from "zod"
 import { disambiguateMcpToolNames, mcpToolName } from "@/agent"
 import { type Tool, type ToolEvent, ToolRegistry } from "@/tool"
+import { nth } from "../../_helpers/expect-present"
 
 /** A minimal `Tool` whose `execute` yields a result tagging WHICH source tool
  *  ran — so we can prove BOTH colliding tools remain independently callable
@@ -90,8 +91,8 @@ describe("F1 — disambiguateMcpToolNames keeps both colliding tools callable", 
     const { tools } = disambiguateMcpToolNames([fakeTool(a, "A"), fakeTool(b, "B")])
     const reg = new ToolRegistry(tools)
     const ctx = { cwd: process.cwd() } as never
-    const r1 = await reg.run(tools[0]!.name, {}, ctx)
-    const r2 = await reg.run(tools[1]!.name, {}, ctx)
+    const r1 = await reg.run(nth(tools, 0, "tools").name, {}, ctx)
+    const r2 = await reg.run(nth(tools, 1, "tools").name, {}, ctx)
     expect(r1.output).toBe("A")
     expect(r2.output).toBe("B") // NOT shadowed — both reachable
   })

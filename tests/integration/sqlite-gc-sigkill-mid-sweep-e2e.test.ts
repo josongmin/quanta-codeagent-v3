@@ -359,7 +359,9 @@ describe.skipIf(IS_WIN)("H13 (2) real sweep fuzzed under randomized SIGKILL", ()
 
     const child = writeChild("real-sweep.mjs", REAL_SWEEP_CHILD)
     const gcUrl = new URL(
-      `file://${join(process.cwd(), "src/agent/session-resource-registry/sqlite-adapter/gc.ts")}`,
+      // Repo-anchored on this file, not the ambient cwd — the child imports the
+      // real gc.ts out of the checkout.
+      `file://${join(import.meta.dir, "..", "..", "src/agent/session-resource-registry/sqlite-adapter/gc.ts")}`,
     ).href
 
     const ITERS = 24

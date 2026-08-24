@@ -35,6 +35,35 @@ export interface OpenAIRetrievalEmbedderOptions extends EmbeddingAdapterOptions 
   http: EmbeddingsHttp
 }
 
+/** One batch → its vectors, carrying the adapter's whole error contract: an
+ *  abort propagates UNTOUCHED (the caller's cancellation must not be disguised
+ *  as a vendor failure) while any other vendor error becomes an `LLMError` with
+ *  a redacted message. A unit because that abort-vs-failure distinction is the
+ *  only judgement in the loop; batching itself has none. */
+const embedOneBatch = async (
+  http: EmbeddingsHttp,
+  model: string,
+  batch: readonly string[],
+  signal: AbortSignal | undefined,
+): Promise<readonly (readonly number[])[]> => {
+  try {
+    const res = await http.embeddingsCreate(
+      { model, input: batch },
+      signal === undefined ? undefined : { signal },
+    )
+    // Iterate rather than `.map` so a malformed `data` fails exactly as it did
+    // when this loop lived at the call site.
+    const vectors: (readonly number[])[] = []
+    for (const d of res.data) vectors.push(d.embedding)
+    return vectors
+  } catch (e) {
+    if (isAbortError(e)) throw e
+    throw new LLMError(`OpenAI retrieval embeddings failed: ${safeVendorErrMessage(e)}`, {
+      cause: e,
+    })
+  }
+}
+
 export const createOpenAIEmbedder = (opts: OpenAIRetrievalEmbedderOptions): EmbeddingPort => {
   const model = opts.model ?? DEFAULT_MODEL
   const batchSize = opts.batchSize ?? DEFAULT_BATCH
@@ -49,17 +78,8 @@ export const createOpenAIEmbedder = (opts: OpenAIRetrievalEmbedderOptions): Embe
       const out: (readonly number[])[] = []
       for (const batch of chunkBatches(texts, batchSize)) {
         throwIfAborted(callOpts?.signal)
-        try {
-          const res = await opts.http.embeddingsCreate(
-            { model, input: batch },
-            callOpts?.signal === undefined ? undefined : { signal: callOpts.signal },
-          )
-          for (const d of res.data) out.push(d.embedding)
-        } catch (e) {
-          if (isAbortError(e)) throw e
-          throw new LLMError(`OpenAI retrieval embeddings failed: ${safeVendorErrMessage(e)}`, {
-            cause: e,
-          })
+        for (const vec of await embedOneBatch(opts.http, model, batch, callOpts?.signal)) {
+          out.push(vec)
         }
       }
       return out

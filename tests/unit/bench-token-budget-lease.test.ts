@@ -420,7 +420,7 @@ describe("patch-gen budget lease", () => {
         const script = `
         import { pathToFileURL } from "node:url"
 
-        const mod = await import(pathToFileURL(${JSON.stringify(join(process.cwd(), "src/apps/bench/remote/token-budget.ts"))}).href)
+        const mod = await import(pathToFileURL(${JSON.stringify(join(import.meta.dir, "..", "..", "src/apps/bench/remote/token-budget.ts"))}).href)
         const { acquirePatchGenBudgetLease } = mod
         const realSetTimeout = globalThis.setTimeout
         globalThis.setTimeout = ((fn, _ms, ...args) => realSetTimeout(fn, 5, ...args)) as typeof setTimeout
@@ -478,7 +478,7 @@ describe("patch-gen budget lease", () => {
       const script = `
       import { pathToFileURL } from "node:url"
 
-      const mod = await import(pathToFileURL(${JSON.stringify(join(process.cwd(), "src/apps/bench/remote/token-budget.ts"))}).href)
+      const mod = await import(pathToFileURL(${JSON.stringify(join(import.meta.dir, "..", "..", "src/apps/bench/remote/token-budget.ts"))}).href)
       const { acquirePatchGenBudgetLease } = mod
 
       const lease = await acquirePatchGenBudgetLease({

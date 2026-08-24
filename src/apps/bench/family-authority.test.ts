@@ -27,6 +27,7 @@ import { describe, expect, test } from "bun:test"
 import { mkdtempSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import { present } from "../../../tests/_helpers/expect-present"
 import { resolveDatasetFamily } from "./dataset-family"
 import { DATASET_FAMILIES, normalizeDatasetFamilyToken } from "./dataset-family-token"
 import { buildSubprocessFamilyEnv, parseDatasetFamilyOrThrow } from "./run-config"
@@ -108,9 +109,10 @@ describe("HIGH-3 — one normalization owner: every in-process family resolution
     for (const padded of [" pro", "pro ", "  PRO  ", "\tlive ", " Verified\n"]) {
       const expected = normalizeDatasetFamilyToken(padded)
       expect(expected).toBeDefined()
-      expect(resolveDatasetFamily(padded, {})).toBe(expected!)
-      expect(resolveDatasetFamily(undefined, { [FAMILY_KEY]: padded })).toBe(expected!)
-      expect(parseDatasetFamilyOrThrow(padded)).toBe(expected!)
+      const family = present(expected, "normalizeDatasetFamilyToken(padded)")
+      expect(resolveDatasetFamily(padded, {})).toBe(family)
+      expect(resolveDatasetFamily(undefined, { [FAMILY_KEY]: padded })).toBe(family)
+      expect(parseDatasetFamilyOrThrow(padded)).toBe(family)
     }
   })
 

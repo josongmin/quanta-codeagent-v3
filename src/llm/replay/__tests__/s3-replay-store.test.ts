@@ -15,6 +15,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import type { RemoteBackend } from "@/shared/remote-store"
 import { segmentStore } from "@/shared/remote-store"
+import { nth, present } from "../../../../tests/_helpers/expect-present"
 import type { StreamEvent, StreamInput } from "../../types"
 import { jsonlReplayStore } from "../jsonl-store"
 import { s3ReplayStore } from "../s3-replay-store"
@@ -117,7 +118,7 @@ describe("s3ReplayStore — load order + byte fidelity", () => {
     const rec = recordFor("solo", "S")
     await store.append(rec)
     expect(be.puts).toHaveLength(1)
-    const body = be.puts[0]!.body
+    const body = nth(be.puts, 0, "be.puts").body
     expect(body).toBe(JSON.stringify(rec))
     expect(body).not.toContain("\n")
   })
@@ -134,9 +135,12 @@ describe("s3ReplayStore — load order + byte fidelity", () => {
     await second.append(recordFor("c", "C"))
 
     const loaded = await second.load()
-    expect(loaded.map((r) => (r.request.messages[0]!.content[0] as { text: string }).text)).toEqual(
-      ["a", "b", "c"],
-    )
+    expect(
+      loaded.map(
+        (r) =>
+          (nth(r.request.messages, 0, "r.request.messages").content[0] as { text: string }).text,
+      ),
+    ).toEqual(["a", "b", "c"])
     expect(be.putCount()).toBe(3)
     expect(new Set(be.puts.map((p) => p.path)).size).toBe(3)
   })
@@ -159,7 +163,7 @@ describe("s3ReplayStore — match() parity with jsonlReplayStore", () => {
 
     const hit = await store.match(reqWithText("find-me"))
     expect(hit).not.toBeNull()
-    expect((hit!.events[0] as { delta: string }).delta).toBe("HIT")
+    expect((present(hit, "hit").events[0] as { delta: string }).delta).toBe("HIT")
 
     // A request not in the cassette misses.
     expect(await store.match(reqWithText("absent"))).toBeNull()
@@ -229,13 +233,13 @@ describe("s3ReplayStore — match() parity with jsonlReplayStore", () => {
     const h1 = await store.match(reqWithText("dup"))
     const h2 = await store.match(reqWithText("dup"))
     const h3 = await store.match(reqWithText("dup"))
-    expect((h1!.events[0] as { delta: string }).delta).toBe("first")
-    expect((h2!.events[0] as { delta: string }).delta).toBe("second")
+    expect((present(h1, "h1").events[0] as { delta: string }).delta).toBe("first")
+    expect((present(h2, "h2").events[0] as { delta: string }).delta).toBe("second")
     expect(h3).toBeNull() // both consumed
 
     store.reset()
     const again = await store.match(reqWithText("dup"))
-    expect((again!.events[0] as { delta: string }).delta).toBe("first")
+    expect((present(again, "again").events[0] as { delta: string }).delta).toBe("first")
   })
 })
 

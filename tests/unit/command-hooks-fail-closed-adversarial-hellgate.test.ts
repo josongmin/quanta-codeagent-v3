@@ -55,6 +55,7 @@ import {
   normalizeCommandHookGate,
   runCommandHooks,
 } from "@/agent"
+import { nth, present } from "../_helpers/expect-present"
 
 // ── fake spawn port (records the child's would-be command + stdin) ───────────
 interface RecordedCall {
@@ -144,7 +145,7 @@ describe("G1 adversarial payloads — payload is DATA, command is verbatim, neve
         { type: "pre_tool_use", toolName: "write", payload },
       )
       expect(calls.length).toBe(1)
-      const call = calls[0]!
+      const call = nth(calls, 0, "call")
       // Command NEVER carries any payload content — it is the operator string.
       expect(call.command).toBe(command)
       if (probe !== undefined) expect(call.command).not.toContain(probe)
@@ -169,7 +170,7 @@ describe("G1 adversarial payloads — payload is DATA, command is verbatim, neve
     )
     expect(calls.length).toBe(1)
     // Round-trips as valid JSON.
-    expect(() => JSON.parse(calls[0]!.stdinJson)).not.toThrow()
+    expect(() => JSON.parse(nth(calls, 0, "calls").stdinJson)).not.toThrow()
   })
 
   test("CIRCULAR payload ⇒ minimal safe envelope (payload dropped, hook still fires, no throw)", async () => {
@@ -184,7 +185,7 @@ describe("G1 adversarial payloads — payload is DATA, command is verbatim, neve
     )
     // Fail-SAFE: the hook still fired (observability preserved) ...
     expect(calls.length).toBe(1)
-    const envelope = JSON.parse(calls[0]!.stdinJson)
+    const envelope = JSON.parse(nth(calls, 0, "calls").stdinJson)
     // ... but the un-serializable payload was DROPPED + marked, never thrown.
     expect(envelope.hook_event_name).toBe("pre_tool_use")
     expect(envelope.payload).toBeNull()
@@ -209,7 +210,7 @@ describe("G1 adversarial payloads — payload is DATA, command is verbatim, neve
       { exec: port, permission: allow, cwd: "/repo" },
       { type: "pre_tool_use", toolName: "write", payload: blob },
     )
-    const call = calls[0]!
+    const call = nth(calls, 0, "call")
     expect(Buffer.byteLength(call.stdinJson, "utf8")).toBeLessThanOrEqual(256)
     expect(JSON.parse(call.stdinJson).payload).toBeNull()
     expect(call.stdinJson).not.toContain("PWNED")
@@ -483,9 +484,9 @@ describe("G5 every mapped event type reaches the spawn port through the real bus
       installCommandHooks(bus, gate, { exec: port, permission: allow, cwd: "/repo" })
       await bus.emit(event)
       expect(calls.length).toBe(1)
-      expect(calls[0]!.command).toBe(command)
+      expect(nth(calls, 0, "calls").command).toBe(command)
       // The envelope's hook_event_name is the QUANTA type, not the Claude spelling.
-      const envelope = JSON.parse(calls[0]!.stdinJson)
+      const envelope = JSON.parse(nth(calls, 0, "calls").stdinJson)
       expect(typeof envelope.hook_event_name).toBe("string")
     })
   }
@@ -582,7 +583,9 @@ describe("G7 property — spawn happens IFF the gate is genuinely armed", () => 
               command: b.command === "" ? "" : uniqueCommand("g7"),
             })),
           }
-          const validBindings = cfg.bindings!.filter((b) => b.command.trim().length > 0).length
+          const validBindings = present(cfg.bindings, "cfg.bindings").filter(
+            (b) => b.command.trim().length > 0,
+          ).length
           const shouldArm =
             enabled === true &&
             typeof ack === "string" &&
@@ -606,11 +609,11 @@ describe("G7 property — spawn happens IFF the gate is genuinely armed", () => 
             continue
           }
           expect(threw).toBe(false)
-          expect(gate!.armed).toBe(shouldArm)
+          expect(present(gate, "gate").armed).toBe(shouldArm)
 
           const { port, calls } = recordingExec()
           await runCommandHooks(
-            gate!,
+            present(gate, "gate"),
             { exec: port, permission: allow, cwd: "/repo" },
             { type: "pre_tool_use", toolName: "write", payload: {} },
           )

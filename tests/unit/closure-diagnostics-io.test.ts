@@ -13,6 +13,7 @@ import {
   summarizeClosureDiagnostics,
 } from "@/runner/batch/eval/closure-diagnostics-io"
 import type { InstanceResult } from "@/runner/batch/types"
+import { nth, present } from "../_helpers/expect-present"
 
 const DIFF = `diff --git a/pkg/a.py b/pkg/a.py
 --- a/pkg/a.py
@@ -53,7 +54,7 @@ describe("closure-diagnostics-io", () => {
         attemptOutcomes: [{ kind: "real-fail", subkind: "max_turns_exhausted" }],
       },
     }
-    const f = buildFacts([r])[0]!
+    const f = nth(buildFacts([r]), 0, "f")
     expect(f.emptyPatch).toBe(true)
     expect(f.endReason).toBe("max_turns")
   })
@@ -71,7 +72,7 @@ describe("closure-diagnostics-io", () => {
         attemptOutcomes: [{ kind: "real-fail", subkind: "budget_exhausted" }],
       },
     }
-    const f = buildFacts([r])[0]!
+    const f = nth(buildFacts([r]), 0, "f")
     expect(f.emptyPatch).toBe(true)
     expect(f.endReason).toBe("budget_exhausted")
   })
@@ -96,7 +97,7 @@ describe("closure-diagnostics-io", () => {
         ],
       },
     }
-    const f = buildFacts([r])[0]!
+    const f = nth(buildFacts([r]), 0, "f")
     expect(f.emptyPatch).toBe(true)
     expect(f.endReason).toBe("admission_blocked")
   })
@@ -121,7 +122,7 @@ describe("closure-diagnostics-io", () => {
         escalate: true,
       },
     }
-    const f = buildFacts([over])[0]!
+    const f = nth(buildFacts([over]), 0, "f")
     expect(f.overBudget).toBe(true)
     expect(f.newDef).toBe(true)
     expect(f.crossFile).toBe(true)
@@ -134,7 +135,7 @@ describe("closure-diagnostics-io", () => {
       patch: "diff --git a/x.py b/x.py\n--- a/x.py\n+++ b/x.py\n",
       turns: 1,
     }
-    const f = buildFacts([r])[0]!
+    const f = nth(buildFacts([r]), 0, "f")
     expect(f.overBudget).toBeNull()
     expect(f.newDef).toBeNull()
     expect(f.crossFile).toBe(false)
@@ -160,7 +161,7 @@ describe("closure-diagnostics-io", () => {
       ].join("\n"),
       turns: 1,
     }
-    const f = buildFacts([r])[0]!
+    const f = nth(buildFacts([r]), 0, "f")
     expect(f.overBudget).toBeNull()
     expect(f.newDef).toBeNull()
     expect(f.crossFile).toBe(true)
@@ -174,7 +175,7 @@ describe("closure-diagnostics-io", () => {
       turns: 1,
       verdict: "grader_invalid",
     }
-    expect(buildFacts([r])[0]!.resolved).toBeNull()
+    expect(nth(buildFacts([r]), 0, "buildFacts([r])").resolved).toBeNull()
   })
 
   test("diagnoseRun with no dataset → owner metrics unavailable, no crash", () => {
@@ -186,7 +187,9 @@ describe("closure-diagnostics-io", () => {
     }
     const d = diagnoseRun([r], undefined)
     expect(d.total).toBe(1)
-    expect(d.metrics["owner_recall@1"]!.available).toBe(false)
+    expect(present(d.metrics["owner_recall@1"], 'd.metrics["owner_recall@1"]').available).toBe(
+      false,
+    )
   })
 
   test("summarizeClosureDiagnostics surfaces the anti-flattering coverage/oracle signals", () => {

@@ -9,6 +9,7 @@ import {
 } from "@/observability/metrics/instrument-lsp"
 import { instrumentPlanQueue } from "@/observability/metrics/instrument-plan-queue"
 import { withFullObservability } from "@/observability/metrics/observability-helper"
+import { present } from "../_helpers/expect-present"
 
 // ────────────────────────────────────────────────────────────────────────────
 // PlanQueue
@@ -319,7 +320,7 @@ describe("withFullObservability", () => {
       },
       { metrics: m },
     )
-    out.planQueue!.enqueue({
+    present(out.planQueue, "out.planQueue").enqueue({
       threadId: "t1",
       text: "x",
       source: "user_keystroke",
@@ -328,14 +329,14 @@ describe("withFullObservability", () => {
       urgent: false,
       metadata: {},
     } as never)
-    out.budgetLedger!.record({
+    present(out.budgetLedger, "out.budgetLedger").record({
       model: "x",
       inputTokens: 1,
       outputTokens: 1,
       sessionId: "s",
       at: 0,
     } as UsageEvent)
-    await out.lspClient!.requestCodeActions("a.ts", 1, 1)
+    await present(out.lspClient, "out.lspClient").requestCodeActions("a.ts", 1, 1)
     const names = m.snapshot().map((s) => s.name)
     expect(names).toContain("plan_queue.enqueue.total")
     expect(names).toContain("budget.record.total")
@@ -348,7 +349,7 @@ describe("withFullObservability", () => {
       { planQueue: fakeQueue() },
       { metrics: m, prefixes: { planQueue: "custom_pq" } },
     )
-    out.planQueue!.enqueue({
+    present(out.planQueue, "out.planQueue").enqueue({
       threadId: "t1",
       text: "x",
       source: "user_keystroke",

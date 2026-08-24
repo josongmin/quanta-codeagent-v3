@@ -28,6 +28,7 @@ import {
   minimalChangeSelector,
   patchSizeVerifier,
 } from "@/agent/branch-search"
+import { nth, present } from "../_helpers/expect-present"
 
 /* ------------------------------------------------------------------ */
 /* helpers                                                             */
@@ -68,7 +69,7 @@ describe("HELL-A: patchSizeVerifier", () => {
     const cand = baseCand("c") // no delta
     const out = await patchSizeVerifier()(cand)
     expect(out).toHaveLength(1)
-    const s = out[0]!
+    const s = nth(out, 0, "s")
     expect(s.kind).toBe("patch_size")
     expect(s.pass).toBe(true)
     expect(s.magnitude).toBe(0)
@@ -78,7 +79,7 @@ describe("HELL-A: patchSizeVerifier", () => {
   test("A2: small delta (5/5, 1 file) ⇒ magnitude in [0.3,0.4]", async () => {
     const cand = baseCand("c", { addedLines: 5, removedLines: 5, changedFiles: 1 })
     const out = await patchSizeVerifier()(cand)
-    const s = out[0]!
+    const s = nth(out, 0, "s")
     expect(s.magnitude).toBeGreaterThanOrEqual(0.3)
     expect(s.magnitude).toBeLessThanOrEqual(0.4)
     expect(s.detail).toBe("+5/-5, 1 file")
@@ -87,7 +88,7 @@ describe("HELL-A: patchSizeVerifier", () => {
   test("A3: large delta (500/500, 10 files) ⇒ saturates at 1.0", async () => {
     const cand = baseCand("c", { addedLines: 500, removedLines: 500, changedFiles: 10 })
     const out = await patchSizeVerifier()(cand)
-    const s = out[0]!
+    const s = nth(out, 0, "s")
     expect(s.magnitude).toBe(1)
     expect(s.detail).toBe("+500/-500, 10 files")
   })
@@ -95,7 +96,7 @@ describe("HELL-A: patchSizeVerifier", () => {
   test("A4: zero delta (0/0, 0 files) ⇒ magnitude 0", async () => {
     const cand = baseCand("c", { addedLines: 0, removedLines: 0, changedFiles: 0 })
     const out = await patchSizeVerifier()(cand)
-    const s = out[0]!
+    const s = nth(out, 0, "s")
     expect(s.magnitude).toBe(0)
     expect(s.detail).toBe("+0/-0, 0 files")
   })
@@ -104,11 +105,11 @@ describe("HELL-A: patchSizeVerifier", () => {
     const one = await patchSizeVerifier()(
       baseCand("c", { addedLines: 1, removedLines: 0, changedFiles: 1 }),
     )
-    expect(one[0]!.detail).toBe("+1/-0, 1 file")
+    expect(nth(one, 0, "one").detail).toBe("+1/-0, 1 file")
     const two = await patchSizeVerifier()(
       baseCand("c", { addedLines: 2, removedLines: 0, changedFiles: 2 }),
     )
-    expect(two[0]!.detail).toBe("+2/-0, 2 files")
+    expect(nth(two, 0, "two").detail).toBe("+2/-0, 2 files")
   })
 })
 
@@ -357,11 +358,11 @@ describe("HELL-E: branch-search-runner wiring", () => {
       { kind: "candidate-scored", id: "cand-0", total: 0.5, signals: [] },
       { kind: "winner-selected", winnerId: "cand-0", total: 0.5 },
     ]
-    for (const e of events) composed!(e)
+    for (const e of events) present(composed, "composed")(e)
     expect(lines).toHaveLength(3)
-    expect(lines[0]!.text).toContain("started")
-    expect(lines[1]!.text).toContain("scored")
-    expect(lines[2]!.severity).toBe("success")
+    expect(nth(lines, 0, "lines").text).toContain("started")
+    expect(nth(lines, 1, "lines").text).toContain("scored")
+    expect(nth(lines, 2, "lines").severity).toBe("success")
   })
 
   test("E25: onProgress AND base onTrace both wired ⇒ BOTH called per event", () => {
@@ -376,11 +377,11 @@ describe("HELL-E: branch-search-runner wiring", () => {
       { kind: "candidate-started", id: "c", seed: {} },
       { kind: "candidate-failed", id: "c", reason: "x" },
     ]
-    for (const e of events) composed!(e)
+    for (const e of events) present(composed, "composed")(e)
     expect(baseEvents).toHaveLength(2)
     expect(progressLines).toHaveLength(2)
-    expect(baseEvents[0]!.kind).toBe("candidate-started")
-    expect(progressLines[0]!.text).toContain("started")
-    expect(progressLines[1]!.severity).toBe("warning")
+    expect(nth(baseEvents, 0, "baseEvents").kind).toBe("candidate-started")
+    expect(nth(progressLines, 0, "progressLines").text).toContain("started")
+    expect(nth(progressLines, 1, "progressLines").severity).toBe("warning")
   })
 })

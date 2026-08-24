@@ -77,6 +77,7 @@ import {
 } from "@/sdk/runtime"
 import { StdoutStream } from "@/stream"
 import { ToolRegistry } from "@/tool"
+import { nth } from "../_helpers/expect-present"
 
 const ENV_KEY = "QUANTA_SESSION_EVENT_LOG_DIR"
 
@@ -215,7 +216,7 @@ describe("GAP-1: session event-log SURFACE wiring regression (web-daemon + inter
     // Seqs are dense & strictly increasing from 1 (a fresh session, real issuance).
     expect(events[0]?.seq).toBe(1)
     for (let i = 1; i < events.length; i += 1) {
-      expect(events[i]!.seq).toBeGreaterThan(events[i - 1]!.seq)
+      expect(nth(events, i, "events").seq).toBeGreaterThan(nth(events, i - 1, "events").seq)
     }
     // The turn lifecycle actually reached disk — this is what a broken surface
     // wiring (in-memory backend) could NOT produce.

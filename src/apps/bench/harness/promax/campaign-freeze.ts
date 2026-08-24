@@ -148,6 +148,70 @@ interface SelectedRow {
 }
 
 /**
+ * The verdict on ONE upstream golden row: not ours (`skip`), ours but unusable
+ * (`problem`, carrying the operator-facing reason), or ours and pinnable (`row`).
+ */
+type GoldenRowVerdict =
+  | { readonly kind: "skip" }
+  | { readonly kind: "problem"; readonly problem: string }
+  | { readonly kind: "row"; readonly row: SelectedRow }
+
+/**
+ * Decide what ONE upstream golden row is worth to the freeze.
+ *
+ * A unit because every rejection here answers the same question — "can this row be
+ * trusted to pin an image?" — and they are ordered, not independent: a duplicate is
+ * reported before its image is read, and the two projections of the row (golden
+ * document and grader bundle) are compared only once both are known present. Splitting
+ * them apart would let a row be pinned off a check that had not run yet.
+ *
+ * `found` is mutated here on purpose: "have we already claimed this instance" is part
+ * of the row's verdict, not a bookkeeping detail the caller can be trusted to repeat.
+ */
+const classifyGoldenRow = (
+  raw: unknown,
+  assigned: ReadonlySet<string>,
+  found: Set<string>,
+  graderImageNames: ReadonlyMap<string, string>,
+): GoldenRowVerdict => {
+  if (!isRecord(raw)) return { kind: "skip" }
+  const instanceId = raw.instance_id
+  if (!nonBlank(instanceId) || !assigned.has(instanceId)) return { kind: "skip" }
+  if (found.has(instanceId)) {
+    return {
+      kind: "problem",
+      problem: `instance "${instanceId}" appears more than once in the upstream golden document — two rows would race for one image pin`,
+    }
+  }
+  found.add(instanceId)
+  const imageName = raw.image_name
+  if (!nonBlank(imageName)) {
+    // Upstream substitutes `key4127/refactor-dockerhub:<id>` for a falsy
+    // value, so a blank here is not "no image" — it is a SILENT mutable tag.
+    return {
+      kind: "problem",
+      problem: `instance "${instanceId}" has an absent or blank \`image_name\``,
+    }
+  }
+  const fromBundle = graderImageNames.get(instanceId)
+  if (fromBundle === undefined) {
+    return {
+      kind: "problem",
+      problem: `instance "${instanceId}" is assigned and present in the golden document, but the grader bundle has no record for it`,
+    }
+  }
+  if (fromBundle !== imageName) {
+    return {
+      kind: "problem",
+      problem:
+        `instance "${instanceId}": the golden document says image_name "${imageName}" but the grader bundle says ` +
+        `"${fromBundle}" — the two projections of one upstream row disagree, so neither may be trusted`,
+    }
+  }
+  return { kind: "row", row: { instanceId, imageName, row: raw } }
+}
+
+/**
  * Cut the campaign's rows out of the upstream document, PRESERVING upstream
  * order, and cross-check each row's `image_name` against the grader bundle's.
  *
@@ -182,38 +246,9 @@ const selectCampaignRows = (
   const found = new Set<string>()
 
   for (const raw of parsed) {
-    if (!isRecord(raw)) continue
-    const instanceId = raw.instance_id
-    if (!nonBlank(instanceId) || !assigned.has(instanceId)) continue
-    if (found.has(instanceId)) {
-      problems.push(
-        `instance "${instanceId}" appears more than once in the upstream golden document — two rows would race for one image pin`,
-      )
-      continue
-    }
-    found.add(instanceId)
-    const imageName = raw.image_name
-    if (!nonBlank(imageName)) {
-      // Upstream substitutes `key4127/refactor-dockerhub:<id>` for a falsy
-      // value, so a blank here is not "no image" — it is a SILENT mutable tag.
-      problems.push(`instance "${instanceId}" has an absent or blank \`image_name\``)
-      continue
-    }
-    const fromBundle = input.graderImageNames.get(instanceId)
-    if (fromBundle === undefined) {
-      problems.push(
-        `instance "${instanceId}" is assigned and present in the golden document, but the grader bundle has no record for it`,
-      )
-      continue
-    }
-    if (fromBundle !== imageName) {
-      problems.push(
-        `instance "${instanceId}": the golden document says image_name "${imageName}" but the grader bundle says ` +
-          `"${fromBundle}" — the two projections of one upstream row disagree, so neither may be trusted`,
-      )
-      continue
-    }
-    rows.push({ instanceId, imageName, row: raw })
+    const verdict = classifyGoldenRow(raw, assigned, found, input.graderImageNames)
+    if (verdict.kind === "problem") problems.push(verdict.problem)
+    else if (verdict.kind === "row") rows.push(verdict.row)
   }
 
   // An assigned instance with NO golden row is deliberately NOT refused here.

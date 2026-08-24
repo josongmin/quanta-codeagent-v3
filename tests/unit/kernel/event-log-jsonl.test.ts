@@ -32,6 +32,7 @@ import {
   JsonlSessionEventLogLockError,
 } from "@/kernel/session"
 import { decodeSessionEvent, encodeSessionEvent, type SessionEvent } from "@/protocol/session"
+import { nth } from "../../_helpers/expect-present"
 
 const tmpDirs: string[] = []
 const freshDir = (): string => {
@@ -77,7 +78,7 @@ describe("JsonlSessionEventLog substrate", () => {
     expect(second.list()).toEqual(events)
     expect(second.tip()).toBe(3)
     expect(second.readFrom(0)).toEqual(events)
-    expect(second.readFrom(2)).toEqual([events[2]!])
+    expect(second.readFrom(2)).toEqual([nth(events, 2, "events")])
     expect(second.readFrom(3)).toEqual([])
     second.close()
 
@@ -241,7 +242,7 @@ describe("JsonlSessionEventLog substrate", () => {
     const all = reopened.list()
     expect(all.length).toBe(10_000)
     for (let i = 0; i < all.length; i += 1) {
-      expect(all[i]!.seq).toBe(i + 1)
+      expect(nth(all, i, "all").seq).toBe(i + 1)
     }
     // Deterministic deep spot-checks (first / middle / last).
     expect(all[0]).toEqual(deltaEvent(1, "payload-1"))
@@ -249,7 +250,7 @@ describe("JsonlSessionEventLog substrate", () => {
     expect(all[9999]).toEqual(deltaEvent(10_000, "payload-10000"))
     const tail = reopened.readFrom(9_990)
     expect(tail.length).toBe(10)
-    expect(tail[0]!.seq).toBe(9_991)
+    expect(nth(tail, 0, "tail").seq).toBe(9_991)
     expect(reopened.tip()).toBe(10_000)
     reopened.close()
   })

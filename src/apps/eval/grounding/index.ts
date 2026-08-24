@@ -14,9 +14,23 @@ import {
 } from "./execution-contract"
 import { groundingHarnessFingerprint } from "./harness"
 import { type LoadGroundingCasesOpts, loadGroundingCases } from "./loader"
-import { normalizeGroundingDecision } from "./normalizer"
-import { type GroundingPreflightResult, runGroundingPreflight, runGroundingProbe } from "./probe"
-import type { GroundingCase, GroundingCorpus, GroundingMode, GroundingSuite } from "./schema"
+import {
+  type GroundingNormalizationResult,
+  normalizeGroundingDecision,
+} from "./normalizer"
+import {
+  type GroundingPreflightResult,
+  type GroundingProbeResult,
+  runGroundingPreflight,
+  runGroundingProbe,
+} from "./probe"
+import type {
+  GroundingCase,
+  GroundingCorpus,
+  GroundingDecision,
+  GroundingMode,
+  GroundingSuite,
+} from "./schema"
 import { emptyGroundingMatches, scoreGroundingDecision } from "./scorer"
 import { shortHash, stableJson } from "./stable-json"
 
@@ -211,6 +225,90 @@ const caseSetFingerprint = (cases: readonly GroundingCase[]): string => shortHas
 
 const routeFingerprint = (route: GroundingExecutionRoute): string => shortHash(stableJson(route))
 
+/** The scored view of one probe response: what the model said (`rawActual`),
+ *  what normalization made of it (`normalizedActual`), and which of the two the
+ *  scorer actually saw (`scoredActual`). */
+interface GroundingCaseOutcome {
+  readonly verdict: Verdict
+  readonly matches: ReturnType<typeof emptyGroundingMatches>
+  readonly normalization: GroundingNormalizationResult | undefined
+  readonly rawActual: GroundingDecision | undefined
+  readonly normalizedActual: GroundingDecision | undefined
+  readonly scoredActual: GroundingDecision | undefined
+}
+
+/**
+ * Score one probe response against its case.
+ *
+ * A unit because the three decision views above are derived from the SAME
+ * response under one profile: keeping the selection and the scoring together is
+ * what guarantees the payload's `scoredActual` is the value that produced
+ * `verdict`, rather than a second, independently-recomputed guess.
+ */
+const resolveGroundingOutcome = (
+  groundingCase: GroundingCase,
+  probe: GroundingProbeResult,
+  normalizationProfile: GroundingExecutionConfig["normalizationProfile"],
+): GroundingCaseOutcome => {
+  const normalization =
+    probe.error === undefined && probe.decision !== undefined
+      ? normalizeGroundingDecision(groundingCase, probe.decision, normalizationProfile)
+      : undefined
+  const rawActual = probe.error === undefined ? probe.decision : undefined
+  const normalizedActual = normalizationProfile === "none" ? undefined : normalization?.decision
+  const scoredActual = normalizationProfile === "none" ? rawActual : normalizedActual
+  const matches = emptyGroundingMatches()
+  let verdict: Verdict = "error"
+  if (probe.error === undefined && scoredActual !== undefined) {
+    const scored = scoreGroundingDecision(groundingCase, scoredActual)
+    verdict = scored.verdict
+    Object.assign(matches, scored.matches)
+  }
+  return { verdict, matches, normalization, rawActual, normalizedActual, scoredActual }
+}
+
+/**
+ * The case-authoring metadata copied verbatim onto the payload.
+ *
+ * A unit because every field here is pure pass-through provenance the runner
+ * never derives, and each must be OMITTED rather than set to `undefined` when
+ * the case omits it — one shared rule, stated once.
+ */
+const caseProvenanceFields = (
+  groundingCase: GroundingCase,
+): Partial<
+  Pick<
+    GroundingPayload,
+    | "sourceProvenance"
+    | "humanAudit"
+    | "candidateThreadIds"
+    | "candidateReferentIds"
+    | "ambiguityClass"
+    | "blockingEligible"
+    | "pairId"
+    | "pairRole"
+  >
+> => ({
+  ...(groundingCase.sourceProvenance !== undefined
+    ? { sourceProvenance: groundingCase.sourceProvenance }
+    : {}),
+  ...(groundingCase.humanAudit !== undefined ? { humanAudit: groundingCase.humanAudit } : {}),
+  ...(groundingCase.candidateThreadIds !== undefined
+    ? { candidateThreadIds: groundingCase.candidateThreadIds }
+    : {}),
+  ...(groundingCase.candidateReferentIds !== undefined
+    ? { candidateReferentIds: groundingCase.candidateReferentIds }
+    : {}),
+  ...(groundingCase.ambiguityClass !== undefined
+    ? { ambiguityClass: groundingCase.ambiguityClass }
+    : {}),
+  ...(groundingCase.blockingEligible !== undefined
+    ? { blockingEligible: groundingCase.blockingEligible }
+    : {}),
+  ...(groundingCase.pairId !== undefined ? { pairId: groundingCase.pairId } : {}),
+  ...(groundingCase.pairRole !== undefined ? { pairRole: groundingCase.pairRole } : {}),
+})
+
 const executeGroundingCase = async (
   groundingCase: GroundingCase,
   opts: GroundingRunOpts,
@@ -222,25 +320,12 @@ const executeGroundingCase = async (
     outputProtocol: execConfig.outputProtocol,
     ...(opts.now !== undefined ? { now: opts.now } : {}),
   })
-  let verdict: Verdict = "error"
-  const matches = emptyGroundingMatches()
-  const normalization =
-    probe.error === undefined && probe.decision !== undefined
-      ? normalizeGroundingDecision(groundingCase, probe.decision, execConfig.normalizationProfile)
-      : undefined
-  const rawActual = probe.error === undefined ? probe.decision : undefined
-  const normalizedActual =
-    execConfig.normalizationProfile === "none" ? undefined : normalization?.decision
-  const scoredActual = execConfig.normalizationProfile === "none" ? rawActual : normalizedActual
+  const { verdict, matches, normalization, rawActual, normalizedActual, scoredActual } =
+    resolveGroundingOutcome(groundingCase, probe, execConfig.normalizationProfile)
   const route = llmRoute(opts.llm)
   const executionContractFingerprint = groundingExecutionContractFingerprint(
     buildGroundingExecutionContract(route, execConfig, groundingCase.corpus ?? "canary"),
   )
-  if (probe.error === undefined && scoredActual !== undefined) {
-    const scored = scoreGroundingDecision(groundingCase, scoredActual)
-    verdict = scored.verdict
-    Object.assign(matches, scored.matches)
-  }
   const payload: GroundingPayload = {
     kind: "grounding",
     suite: manualSuiteForCorpus(groundingCase.corpus ?? "canary") ?? "canary",
@@ -265,24 +350,7 @@ const executeGroundingCase = async (
     normalizationApplied: normalization?.applied ?? false,
     ...(normalization !== undefined ? { normalizationReasons: [...normalization.reasons] } : {}),
     executionContractFingerprint,
-    ...(groundingCase.sourceProvenance !== undefined
-      ? { sourceProvenance: groundingCase.sourceProvenance }
-      : {}),
-    ...(groundingCase.humanAudit !== undefined ? { humanAudit: groundingCase.humanAudit } : {}),
-    ...(groundingCase.candidateThreadIds !== undefined
-      ? { candidateThreadIds: groundingCase.candidateThreadIds }
-      : {}),
-    ...(groundingCase.candidateReferentIds !== undefined
-      ? { candidateReferentIds: groundingCase.candidateReferentIds }
-      : {}),
-    ...(groundingCase.ambiguityClass !== undefined
-      ? { ambiguityClass: groundingCase.ambiguityClass }
-      : {}),
-    ...(groundingCase.blockingEligible !== undefined
-      ? { blockingEligible: groundingCase.blockingEligible }
-      : {}),
-    ...(groundingCase.pairId !== undefined ? { pairId: groundingCase.pairId } : {}),
-    ...(groundingCase.pairRole !== undefined ? { pairRole: groundingCase.pairRole } : {}),
+    ...caseProvenanceFields(groundingCase),
     ...(probe.error !== undefined ? { parseError: probe.error } : {}),
     ...(probe.errorKind !== undefined ? { errorKind: probe.errorKind } : {}),
     ...(probe.tokens !== undefined ? { tokens: probe.tokens } : {}),
@@ -320,6 +388,25 @@ export const runGroundingPreflightCheck = async (
     ...(now !== undefined ? { now } : {}),
   })
 
+/**
+ * The exact case set this run will execute: load the corpus, then apply the
+ * caller's `caseId` pin and `limit` budget in that order.
+ *
+ * A unit because the selection is what `caseSetFingerprint` hashes — pin and
+ * limit must be applied in one place, in this order, or a re-run with the same
+ * options can fingerprint a different set than it executes.
+ */
+const selectGroundingCases = (
+  opts: GroundingRunOpts,
+  corpus: GroundingCorpus,
+): readonly GroundingCase[] => {
+  const loaded = loadGroundingCases({ ...opts, corpus })
+  const filtered = loaded.filter((groundingCase) =>
+    opts.caseId === undefined ? true : groundingCase.id === opts.caseId,
+  )
+  return opts.limit !== undefined && opts.limit >= 0 ? filtered.slice(0, opts.limit) : filtered
+}
+
 export const runGrounding = async (opts: GroundingRunOpts): Promise<GroundingRunSummary> => {
   const start = Date.now()
   const corpus = resolveGroundingCorpus(opts.corpus, opts.suite)
@@ -330,12 +417,7 @@ export const runGrounding = async (opts: GroundingRunOpts): Promise<GroundingRun
     ...(opts.now !== undefined ? { now: opts.now } : {}),
   })
   const runId = makeRunId("grounding", opts.now)
-  const loaded = loadGroundingCases({ ...opts, corpus })
-  const filtered = loaded.filter((groundingCase) =>
-    opts.caseId === undefined ? true : groundingCase.id === opts.caseId,
-  )
-  const selected =
-    opts.limit !== undefined && opts.limit >= 0 ? filtered.slice(0, opts.limit) : filtered
+  const selected = selectGroundingCases(opts, corpus)
   const concurrency = Math.max(1, Math.floor(opts.concurrency ?? 1))
   const caseFingerprint = caseSetFingerprint(selected)
   const executed = await mapWithConcurrency(selected, concurrency, (groundingCase) =>

@@ -689,6 +689,39 @@ export interface OtelExporterFromEnvResult {
  *  `overrides`. The endpoint MUST come from the env var (composition root
  *  policy: a default endpoint would silently leak observations to localhost).
  */
+/** The PASS-THROUGH half of {@link OtelExporterOpts}: the seams that have no
+ *  env knob and no default, so the only question per field is "was one
+ *  supplied". A unit because `exactOptionalPropertyTypes` forbids handing an
+ *  explicit `undefined` to an optional field — every one of these MUST be
+ *  spread-or-omitted, and keeping that rule in one place is what stops a newly
+ *  added seam from being forwarded as `undefined` by accident. */
+const forwardedExporterOverrides = (
+  overrides?: Partial<OtelExporterOpts>,
+): Partial<
+  Pick<
+    OtelExporterOpts,
+    | "fetch"
+    | "headers"
+    | "getHeaders"
+    | "now"
+    | "setIntervalImpl"
+    | "clearIntervalImpl"
+    | "warn"
+  >
+> => ({
+  ...(overrides?.fetch !== undefined ? { fetch: overrides.fetch } : {}),
+  ...(overrides?.headers !== undefined ? { headers: overrides.headers } : {}),
+  ...(overrides?.getHeaders !== undefined ? { getHeaders: overrides.getHeaders } : {}),
+  ...(overrides?.now !== undefined ? { now: overrides.now } : {}),
+  ...(overrides?.setIntervalImpl !== undefined
+    ? { setIntervalImpl: overrides.setIntervalImpl }
+    : {}),
+  ...(overrides?.clearIntervalImpl !== undefined
+    ? { clearIntervalImpl: overrides.clearIntervalImpl }
+    : {}),
+  ...(overrides?.warn !== undefined ? { warn: overrides.warn } : {}),
+})
+
 export const attachOtelExporterFromEnv = (
   env: Readonly<Record<string, string | undefined>> = {},
   overrides?: Partial<OtelExporterOpts>,
@@ -720,17 +753,7 @@ export const attachOtelExporterFromEnv = (
     ...(runId !== undefined ? { runId } : {}),
     batchSize,
     flushIntervalMs,
-    ...(overrides?.fetch !== undefined ? { fetch: overrides.fetch } : {}),
-    ...(overrides?.headers !== undefined ? { headers: overrides.headers } : {}),
-    ...(overrides?.getHeaders !== undefined ? { getHeaders: overrides.getHeaders } : {}),
-    ...(overrides?.now !== undefined ? { now: overrides.now } : {}),
-    ...(overrides?.setIntervalImpl !== undefined
-      ? { setIntervalImpl: overrides.setIntervalImpl }
-      : {}),
-    ...(overrides?.clearIntervalImpl !== undefined
-      ? { clearIntervalImpl: overrides.clearIntervalImpl }
-      : {}),
-    ...(overrides?.warn !== undefined ? { warn: overrides.warn } : {}),
+    ...forwardedExporterOverrides(overrides),
   })
   const metricSink = exporterMetricSink(exporter)
   const tracer = buildExportingTracer(

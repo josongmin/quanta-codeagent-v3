@@ -30,6 +30,7 @@
 
 import { describe, expect, test } from "bun:test"
 import { createMessageBatchesClient, type MessageBatchesClient } from "@/llm/message-batches"
+import { nth, present } from "../../_helpers/expect-present"
 
 interface Call {
   readonly url: string
@@ -120,13 +121,13 @@ describe("§9.6 Message Batches client", () => {
     expect(res.value.processing_status).toBe("in_progress")
     expect(res.value.request_counts.processing).toBe(2)
 
-    const c = calls[0]!
+    const c = nth(calls, 0, "c")
     expect(c.url).toBe(`${BASE}/v1/messages/batches`)
     expect(c.method).toBe("POST")
     expect(c.headers["x-api-key"]).toBe("sk-test")
     expect(c.headers["anthropic-version"]).toBe("2023-06-01")
     expect(c.headers["content-type"] ?? c.headers["Content-Type"]).toBe("application/json")
-    expect(JSON.parse(c.body!).requests[0].custom_id).toBe("r1")
+    expect(JSON.parse(present(c.body, "c.body")).requests[0].custom_id).toBe("r1")
   })
 
   test("MB-03: retrieve GETs by id", async () => {
@@ -135,8 +136,8 @@ describe("§9.6 Message Batches client", () => {
     const res = await client.retrieve("msgbatch_01")
     expect(res.ok).toBe(true)
     if (res.ok) expect(res.value.processing_status).toBe("ended")
-    expect(calls[0]!.url).toBe(`${BASE}/v1/messages/batches/msgbatch_01`)
-    expect(calls[0]!.method).toBe("GET")
+    expect(nth(calls, 0, "calls").url).toBe(`${BASE}/v1/messages/batches/msgbatch_01`)
+    expect(nth(calls, 0, "calls").method).toBe("GET")
   })
 
   test("MB-04/MB-08: results parses JSONL with blank + trailing lines", async () => {
@@ -158,10 +159,10 @@ describe("§9.6 Message Batches client", () => {
     expect(res.ok).toBe(true)
     if (!res.ok) return
     expect(res.value.length).toBe(2)
-    expect(res.value[0]!.custom_id).toBe("r1")
-    expect(res.value[0]!.result.type).toBe("succeeded")
-    expect(res.value[1]!.result.type).toBe("errored")
-    expect(calls[0]!.url).toBe(`${BASE}/v1/messages/batches/msgbatch_01/results`)
+    expect(nth(res.value, 0, "res.value").custom_id).toBe("r1")
+    expect(nth(res.value, 0, "res.value").result.type).toBe("succeeded")
+    expect(nth(res.value, 1, "res.value").result.type).toBe("errored")
+    expect(nth(calls, 0, "calls").url).toBe(`${BASE}/v1/messages/batches/msgbatch_01/results`)
   })
 
   test("MB-09: malformed JSONL line skipped, others parsed (no-throw)", async () => {
@@ -175,7 +176,7 @@ describe("§9.6 Message Batches client", () => {
     expect(res.ok).toBe(true)
     if (res.ok) {
       expect(res.value.length).toBe(1)
-      expect(res.value[0]!.custom_id).toBe("r2")
+      expect(nth(res.value, 0, "res.value").custom_id).toBe("r2")
     }
   })
 
@@ -191,8 +192,8 @@ describe("§9.6 Message Batches client", () => {
     const res = await client.cancel("msgbatch_01")
     expect(res.ok).toBe(true)
     if (res.ok) expect(res.value.processing_status).toBe("canceling")
-    expect(calls[0]!.url).toBe(`${BASE}/v1/messages/batches/msgbatch_01/cancel`)
-    expect(calls[0]!.method).toBe("POST")
+    expect(nth(calls, 0, "calls").url).toBe(`${BASE}/v1/messages/batches/msgbatch_01/cancel`)
+    expect(nth(calls, 0, "calls").method).toBe("POST")
   })
 
   test("MB-06: non-2xx ⇒ typed {ok:false} carrying status (NO-THROW)", async () => {
@@ -274,8 +275,8 @@ describe("§9.6 Message Batches e2e", () => {
     const results = await client.results(id)
     expect(results.ok).toBe(true)
     if (results.ok) {
-      expect(results.value[0]!.custom_id).toBe("r1")
-      expect(results.value[0]!.result.type).toBe("succeeded")
+      expect(nth(results.value, 0, "results.value").custom_id).toBe("r1")
+      expect(nth(results.value, 0, "results.value").result.type).toBe("succeeded")
     }
     // create + 2 retrieves + results
     expect(calls.length).toBe(4)

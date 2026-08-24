@@ -683,7 +683,7 @@ describe("full-remote executor (injected spawn — no real box/token)", () => {
     const script = `
       import { pathToFileURL } from "node:url"
 
-      const mod = await import(pathToFileURL(${JSON.stringify(join(process.cwd(), "src/apps/bench/remote/full.ts"))}).href)
+      const mod = await import(pathToFileURL(${JSON.stringify(join(import.meta.dir, "..", "..", "src/apps/bench/remote/full.ts"))}).href)
       const { createFullRemoteBackend } = mod
       const realSetTimeout = globalThis.setTimeout
       globalThis.setTimeout = ((fn, _ms, ...args) => realSetTimeout(fn, 5, ...args)) as typeof setTimeout

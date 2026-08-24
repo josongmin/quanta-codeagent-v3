@@ -49,6 +49,7 @@ import {
 } from "@/agent"
 import { bindingsFromHookEvents } from "@/agent/command-hooks/settings-loader"
 import { mergeSettings } from "@/config"
+import { nth } from "../_helpers/expect-present"
 
 // ---- fakes -----------------------------------------------------------------
 
@@ -117,7 +118,7 @@ describe("T04 trust gate — UC1 imported hook held until review", () => {
     const cleared: CommandHookBinding = { ...importedBinding, needsReview: false }
     await fire(armed([cleared], true), port)
     expect(calls.length).toBe(1)
-    expect(calls[0]!.command).toBe("imported-hook.sh")
+    expect(nth(calls, 0, "calls").command).toBe("imported-hook.sh")
   })
 
   test("fail-closed — no review port ⇒ needsReview binding never fires", async () => {
@@ -146,7 +147,7 @@ describe("T04 trust gate — UC2 user hook fires", () => {
     const { port, calls } = fakeExec()
     await fire(armed([userBinding], true), port, approveAll)
     expect(calls.length).toBe(1)
-    expect(calls[0]!.command).toBe("user-hook.sh")
+    expect(nth(calls, 0, "calls").command).toBe("user-hook.sh")
   })
 
   test("mixed set — user fires, imported held (only the imported is suppressed)", async () => {
@@ -271,7 +272,7 @@ describe("T04 — UC4 Codex 10-event coverage", () => {
       taskPrompt: "do x",
     })
     expect(calls.length).toBe(1)
-    expect(calls[0]!.command).toBe("on-subagent.sh")
+    expect(nth(calls, 0, "calls").command).toBe("on-subagent.sh")
   })
 })
 
@@ -317,7 +318,7 @@ describe("UC5 — fail-closed by provenance (decoupled from the opt-in knob)", (
     const { port, calls } = fakeExec()
     await fire(armed([userBinding], false), port) // trustGate OFF, no review port
     expect(calls.length).toBe(1)
-    expect(calls[0]!.command).toBe("user-hook.sh")
+    expect(nth(calls, 0, "calls").command).toBe("user-hook.sh")
   })
 
   test("TEETH 3 — WITH approval: repo/needsReview hook fires once a review port approves (knob OFF)", async () => {
@@ -326,7 +327,7 @@ describe("UC5 — fail-closed by provenance (decoupled from the opt-in knob)", (
     const { port, calls } = fakeExec()
     await fire(armed([importedBinding], false), port, approveAll)
     expect(calls.length).toBe(1)
-    expect(calls[0]!.command).toBe("imported-hook.sh")
+    expect(nth(calls, 0, "calls").command).toBe("imported-hook.sh")
   })
 
   test("knob is decoupled — enforcement is IDENTICAL whether trustGate is ON or OFF", async () => {

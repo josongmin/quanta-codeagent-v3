@@ -78,6 +78,29 @@ interface IndexEntry {
   readonly isDir: boolean
 }
 
+/** The cached index: entries PLUS the two match-key arrays (full-rel +
+ *  basename) precomputed ONCE, so a keystroke never re-maps `basename()`
+ *  over the whole index (the empty-`@` query touches every entry, ~50k worst
+ *  case). {@link projectQuery} then reads the right key array. */
+interface BuiltIndex {
+  readonly entries: readonly IndexEntry[]
+  readonly rels: readonly string[]
+  readonly bases: readonly string[]
+}
+
+/** Lexical `Array#sort` comparator. Extracted because BOTH orderings below
+ *  (walk sibling order, index depth tie-break) need it and a nested ternary
+ *  inline in a callback is where a third of this module's complexity lived.
+ *  Code-unit order — NOT locale collation, which would make the index order
+ *  environment-dependent. */
+const compareNames = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0)
+
+/** Read one numeric option. Contract: a finite number > 0 is truncated toward
+ *  zero; anything else (absent, 0, negative, NaN, Infinity, non-number) yields
+ *  `fallback`. The two option sites were byte-identical guard chains. */
+const positiveIntOption = (value: number | undefined, fallback: number): number =>
+  typeof value === "number" && Number.isFinite(value) && value > 0 ? Math.trunc(value) : fallback
+
 // ── ripgrep file source ────────────────────────────────────────────────
 
 /** Default {@link FileSource}: `rg --files` rooted at `root`. NO-THROW —
@@ -139,7 +162,7 @@ const deriveEntries = (relFiles: readonly string[], maxFiles: number): readonly 
     ...[...dirs].map((rel) => ({ rel, isDir: true })),
   ]
   const depth = (e: IndexEntry): number => e.rel.split("/").length
-  entries.sort((a, b) => depth(a) - depth(b) || (a.rel < b.rel ? -1 : a.rel > b.rel ? 1 : 0))
+  entries.sort((a, b) => depth(a) - depth(b) || compareNames(a.rel, b.rel))
   return entries.length > maxFiles ? entries.slice(0, maxFiles) : entries
 }
 
@@ -165,48 +188,132 @@ const isInsideRoot = async (canonRoot: string, abs: string): Promise<boolean> =>
   }
 }
 
+/** Everything the per-entry classifier needs that does not change during a
+ *  walk. Bundled so the three helpers below take one argument instead of
+ *  three, and so the `canonRoot` realpath happens exactly once. */
+interface WalkContext {
+  /** The root EXACTLY as the caller passed it — `relative()` must use this
+   *  (not the realpath) so emitted `rel`s match the caller's notion of root. */
+  readonly root: string
+  /** `realpath(resolve(root))`. The containment comparison basis. */
+  readonly canonRoot: string
+  readonly matcher: IgnoreMatcher
+}
+
+/** What the walk should do with one directory entry.
+ *  - `skip`  — drop it entirely (hidden / pruned / ignored / escapes the jail)
+ *  - `file`  — emit a file candidate; never descended
+ *  - `dir`   — descend into `abs`; `emit` says whether the directory ITSELF is
+ *              offered as a candidate. `emit:false` + descend is the negated
+ *              re-include case (`ignored/` + `!ignored/keep.ts`): the child is
+ *              reachable while the parent stays hidden. */
+type WalkStep =
+  | { readonly kind: "skip" }
+  | { readonly kind: "file"; readonly rel: string }
+  | { readonly kind: "dir"; readonly rel: string; readonly abs: string; readonly emit: boolean }
+
+const WALK_SKIP: WalkStep = { kind: "skip" }
+
+/** Classify ONE directory entry. This is where the walk's whole prune policy
+ *  lives, in the order it must be applied:
+ *    1. hidden (leading dot — covers `.git`, and the ignore FILES themselves)
+ *    2. `ALWAYS_PRUNE` by name (`node_modules`), independent of any ignore file
+ *    3. path-shape guard (defensive; unreachable after rule 1 — see below)
+ *    4. jail — a SYMLINK whose realpath escapes `root` is dropped. Note a
+ *       symlink is never `isDirectory()` under `withFileTypes`, so a link to a
+ *       directory becomes a FILE candidate and is never descended; that is
+ *       also why no cycle ledger is needed. A BROKEN link canonicalises to
+ *       itself, tests as in-root, and is therefore KEPT.
+ *    5. ignore-file rules, with the dir/file asymmetry described on `WalkStep`.
+ *  NO-THROW (the only I/O is `isInsideRoot`, which swallows). Async ONLY
+ *  because rule 4 awaits — matching the original inline code. */
+const classifyWalkEntry = async (ctx: WalkContext, dir: string, ent: Dirent): Promise<WalkStep> => {
+  const name = ent.name
+  if (name.startsWith(".")) return WALK_SKIP // hidden (covers .git)
+  if (ALWAYS_PRUNE.has(name)) return WALK_SKIP
+  const abs = join(dir, name)
+  const rel = toPosix(relative(ctx.root, abs))
+  // Defence-in-depth only: `readdir` never yields "." / ".." and rule 1 already
+  // dropped every dot-name, so `rel` cannot be "" or start with "..". Kept
+  // because it is the last line between a future `dir` source and the jail.
+  if (rel === "" || rel.startsWith("..")) return WALK_SKIP
+  if (ent.isSymbolicLink() && !(await isInsideRoot(ctx.canonRoot, abs))) return WALK_SKIP
+  if (ent.isDirectory()) {
+    const ignored = ctx.matcher.isIgnored(rel)
+    if (ignored && !ctx.matcher.shouldDescend(rel)) return WALK_SKIP
+    return { kind: "dir", rel, abs, emit: !ignored }
+  }
+  if (ctx.matcher.isIgnored(rel)) return WALK_SKIP
+  return { kind: "file", rel }
+}
+
+/** One directory's contribution to the walk. */
+interface DirScan {
+  /** Candidates to append, in emission order. */
+  readonly emitted: readonly IndexEntry[]
+  /** Absolute paths to enqueue for a later level, in the same order. */
+  readonly descend: readonly string[]
+}
+
+/** Read ONE directory and classify its children.
+ *
+ *  `budget` is how many more entries the caller may accept; the scan stops
+ *  emitting AND enqueueing the moment it is reached, which is exactly what the
+ *  original inner `break` did (it abandoned the rest of the directory, queued
+ *  siblings included). Callers pass `maxFiles - out.length`, which is always
+ *  >= 1 because the outer loop breaks first.
+ *
+ *  Siblings are sorted by name BEFORE classification, so emission order — and
+ *  therefore the order the user sees in the dropdown — is deterministic.
+ *  An unreadable directory yields an EMPTY scan (not an error): the walk keeps
+ *  going and the directory itself, already emitted by its parent, stays. */
+const scanDirectory = async (ctx: WalkContext, dir: string, budget: number): Promise<DirScan> => {
+  const emitted: IndexEntry[] = []
+  const descend: string[] = []
+  let entries: Dirent[]
+  try {
+    entries = await fs.readdir(dir, { withFileTypes: true })
+  } catch {
+    return { emitted, descend }
+  }
+  entries.sort((a, b) => compareNames(a.name, b.name))
+  for (const ent of entries) {
+    if (emitted.length >= budget) break
+    const step = await classifyWalkEntry(ctx, dir, ent)
+    if (step.kind === "skip") continue
+    if (step.kind === "file") {
+      emitted.push({ rel: step.rel, isDir: false })
+      continue
+    }
+    if (step.emit) emitted.push({ rel: step.rel, isDir: true })
+    descend.push(step.abs)
+  }
+  return { emitted, descend }
+}
+
 /** Breadth-first workspace walk → flat, ignore-pruned, jailed entry list.
  *  The rg fallback. Slower + only honours the ROOT ignore files, but correct
- *  and bounded by `maxFiles`. NO-THROW. */
+ *  and bounded by `maxFiles`. NO-THROW.
+ *
+ *  ORDER IS PART OF THE CONTRACT: level-order (FIFO queue), alphabetical
+ *  within each directory, a directory emitted before its own contents but
+ *  interleaved with its sibling files. The `@`-dropdown shows the head of this
+ *  list, so changing it is a user-visible change. */
 const buildIndexViaWalk = async (
   root: string,
   matcher: IgnoreMatcher,
   maxFiles: number,
   signal: AbortSignal | undefined,
 ): Promise<readonly IndexEntry[]> => {
-  const canonRoot = await canonicalize(resolvePath(root))
+  const ctx: WalkContext = { root, canonRoot: await canonicalize(resolvePath(root)), matcher }
   const out: IndexEntry[] = []
   const queue: string[] = [resolvePath(root)]
   let head = 0
   while (head < queue.length) {
     if (signal?.aborted || out.length >= maxFiles) break
-    const dir = queue[head++] as string
-    let entries: Dirent[]
-    try {
-      entries = await fs.readdir(dir, { withFileTypes: true })
-    } catch {
-      continue
-    }
-    entries.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))
-    for (const ent of entries) {
-      if (out.length >= maxFiles) break
-      const name = ent.name
-      if (name.startsWith(".")) continue // hidden (covers .git)
-      if (ALWAYS_PRUNE.has(name)) continue
-      const abs = join(dir, name)
-      const rel = toPosix(relative(root, abs))
-      if (rel === "" || rel.startsWith("..")) continue
-      if (ent.isSymbolicLink() && !(await isInsideRoot(canonRoot, abs))) continue
-      if (ent.isDirectory()) {
-        const ignored = matcher.isIgnored(rel)
-        if (ignored && !matcher.shouldDescend(rel)) continue
-        if (!ignored) out.push({ rel, isDir: true })
-        queue.push(abs)
-      } else {
-        if (matcher.isIgnored(rel)) continue
-        out.push({ rel, isDir: false })
-      }
-    }
+    const scan = await scanDirectory(ctx, queue[head++] as string, maxFiles - out.length)
+    out.push(...scan.emitted)
+    queue.push(...scan.descend)
   }
   return out
 }
@@ -225,6 +332,38 @@ const toCandidate = (entry: IndexEntry): AtCandidate => {
   }
 }
 
+/** Is this (root, query) pair answerable at all? Three cheap refusals that
+ *  must all happen BEFORE the index is built:
+ *    - no usable `fileRoot`             ⇒ the lister is inert
+ *    - a non-string query               ⇒ refused, never coerced
+ *    - an ABSOLUTE query                ⇒ the jail; short-circuits so an
+ *      absolute path can never even trigger an enumeration.
+ *  `&&` short-circuit keeps `isAbsolute` off a non-string query. */
+const isQueryable = (root: unknown, query: unknown): boolean =>
+  typeof root === "string" && root.length > 0 && typeof query === "string" && !isAbsolute(query)
+
+/** Filter + rank + project a built index for one query, capped at `max`.
+ *
+ *  Key selection is the whole point: a query WITHOUT a `/` ranks against
+ *  BASENAMES (so `@driver` reaches `src/apps/bench/driver.ts`), a query WITH
+ *  one ranks against full relative paths (so `@src/apps` works). A consequence
+ *  worth knowing: once the user types the trailing `/`, the directory itself
+ *  drops out of its own listing, because rel keys carry no trailing slash.
+ *
+ *  Pure + NO-THROW; ties and order come entirely from `rankByTier`. */
+const projectQuery = (built: BuiltIndex, query: string, max: number): readonly AtCandidate[] => {
+  const q = toPosix(query)
+  const keys = q.includes("/") ? built.rels : built.bases
+  const out: AtCandidate[] = []
+  for (const r of rankByTier(keys, q)) {
+    if (out.length >= max) break
+    const entry = built.entries[r.index]
+    if (entry === undefined) continue
+    out.push(toCandidate(entry))
+  }
+  return out
+}
+
 /**
  * Build a recursive workspace file lister. The enumeration runs at most once
  * per lister instance (cached); concurrent first-calls share the one
@@ -234,26 +373,11 @@ export const createRecursiveFileLister = (
   opts: RecursiveFileListerOptions,
 ): ((query: string, signal?: AbortSignal) => Promise<readonly AtCandidate[]>) => {
   const root = opts?.fileRoot
-  const max =
-    typeof opts?.maxResults === "number" && Number.isFinite(opts.maxResults) && opts.maxResults > 0
-      ? Math.trunc(opts.maxResults)
-      : DEFAULT_MAX
-  const maxFiles =
-    typeof opts?.maxFiles === "number" && Number.isFinite(opts.maxFiles) && opts.maxFiles > 0
-      ? Math.trunc(opts.maxFiles)
-      : DEFAULT_MAX_FILES
+  const max = positiveIntOption(opts?.maxResults, DEFAULT_MAX)
+  const maxFiles = positiveIntOption(opts?.maxFiles, DEFAULT_MAX_FILES)
   const honor = opts?.honorIgnore !== false
   const fileSource = opts?.fileSource ?? ripgrepFileSource
 
-  // The cached index carries the entries PLUS the two match-key arrays
-  // (full-rel + basename) precomputed ONCE — so a keystroke never re-maps
-  // `basename()` over the whole index (the empty-`@` query touches every
-  // entry, ~50k worst case). `rankByTier` then reads the right key array.
-  interface BuiltIndex {
-    readonly entries: readonly IndexEntry[]
-    readonly rels: readonly string[]
-    readonly bases: readonly string[]
-  }
   let index: BuiltIndex | null = null
   let building: Promise<BuiltIndex> | null = null
 
@@ -299,29 +423,18 @@ export const createRecursiveFileLister = (
   }
 
   return async (query: string, signal?: AbortSignal): Promise<readonly AtCandidate[]> => {
-    if (typeof root !== "string" || root.length === 0) return []
-    if (typeof query !== "string") return []
-    if (isAbsolute(query)) return [] // absolute queries never escape the jail
+    if (!isQueryable(root, query)) return []
     if (signal?.aborted) return []
     let built: BuiltIndex
     try {
       built = await ensureIndex()
     } catch {
+      // A failed build is NOT cached — the next keystroke retries.
       return []
     }
+    // Re-check: the build deliberately outlives a superseded keystroke, so a
+    // signal aborted DURING it drops this result while keeping the cache.
     if (signal?.aborted) return []
-    const q = toPosix(query)
-    // Bare query ⇒ match the BASENAME (so `@driver` reaches a deep file);
-    // a slash query ⇒ match the full relative path (so `@src/apps` works).
-    const keys = q.includes("/") ? built.rels : built.bases
-    const ranked = rankByTier(keys, q)
-    const outCands: AtCandidate[] = []
-    for (const r of ranked) {
-      if (outCands.length >= max) break
-      const entry = built.entries[r.index]
-      if (entry === undefined) continue
-      outCands.push(toCandidate(entry))
-    }
-    return outCands
+    return projectQuery(built, query, max)
   }
 }

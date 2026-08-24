@@ -41,6 +41,8 @@ const expectUnifiedDefault = (path: string | undefined): void => {
   if (path === undefined) return
   expect(path.startsWith(`${RUNS_ROOT}/`)).toBe(true) // under <benchHome>/runs/
   expect(path.endsWith("/trajectory.jsonl")).toBe(true)
+  // Under the sandboxed-cwd runner `process.cwd()` is a throwaway dir rather
+  // than the repo root, so this still reads "not dumped into the ambient cwd".
   expect(path).not.toBe(`${process.cwd()}/bench-trajectory.jsonl`) // moved OUT of cwd
 }
 

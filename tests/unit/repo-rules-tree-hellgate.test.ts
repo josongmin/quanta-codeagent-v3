@@ -14,6 +14,7 @@ import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { loadRepoRules } from "@/agent"
+import { nth, present } from "../_helpers/expect-present"
 
 describe("ADR-0098 loadRepoRules tree scoping (hellgate)", () => {
   let base: string
@@ -43,9 +44,9 @@ describe("ADR-0098 loadRepoRules tree scoping (hellgate)", () => {
     expect(out).toBeDefined()
     expect(out?.layers).toHaveLength(3)
     // Root → deeper order in rendered body (deeper-wins via LLM positional bias).
-    const rootIdx = out!.body.indexOf("root rule")
-    const pkgsIdx = out!.body.indexOf("packages rule")
-    const fooIdx = out!.body.indexOf("foo rule")
+    const rootIdx = present(out, "out").body.indexOf("root rule")
+    const pkgsIdx = present(out, "out").body.indexOf("packages rule")
+    const fooIdx = present(out, "out").body.indexOf("foo rule")
     expect(rootIdx).toBeGreaterThan(-1)
     expect(pkgsIdx).toBeGreaterThan(rootIdx)
     expect(fooIdx).toBeGreaterThan(pkgsIdx)
@@ -156,9 +157,9 @@ describe("ADR-0098 loadRepoRules tree scoping (hellgate)", () => {
 
     const out = await loadRepoRules(join(base, "a/b"))
     expect(out?.layers).toHaveLength(2)
-    const cwdLayer = out!.layers!.find((l) => l.depth === 0)
+    const cwdLayer = present(present(out, "out").layers, "out.layers").find((l) => l.depth === 0)
     expect(cwdLayer?.relativePath).toBe("./AGENTS.md")
-    const rootLayer = out!.layers!.find((l) => l.depth === 2)
+    const rootLayer = present(present(out, "out").layers, "out.layers").find((l) => l.depth === 2)
     expect(rootLayer?.relativePath).toBe("../../AGENTS.md")
   })
 
@@ -188,7 +189,9 @@ describe("ADR-0098 loadRepoRules tree scoping (hellgate)", () => {
     expect(out?.body).toContain("### From ./AGENTS.md")
     expect(out?.body).toContain("SUB_BODY")
     // Sub appears AFTER root in the rendered body.
-    expect(out!.body.indexOf("ROOT_BODY")).toBeLessThan(out!.body.indexOf("SUB_BODY"))
+    expect(present(out, "out").body.indexOf("ROOT_BODY")).toBeLessThan(
+      present(out, "out").body.indexOf("SUB_BODY"),
+    )
   })
 
   // ── MAX_BYTES per-layer truncation ────────────────────────────────────
@@ -200,10 +203,10 @@ describe("ADR-0098 loadRepoRules tree scoping (hellgate)", () => {
 
     const out = await loadRepoRules(join(base, "sub"))
     expect(out?.layers).toHaveLength(2)
-    const rootLayer = out!.layers![0]!
+    const rootLayer = nth(present(present(out, "out").layers, "out.layers"), 0, "rootLayer")
     expect(rootLayer.body).toContain("[truncated:")
     expect(rootLayer.body).toContain(`${100 * 1024} bytes total`)
-    const subLayer = out!.layers![1]!
+    const subLayer = nth(present(present(out, "out").layers, "out.layers"), 1, "subLayer")
     expect(subLayer.body).toBe("tiny")
   })
 

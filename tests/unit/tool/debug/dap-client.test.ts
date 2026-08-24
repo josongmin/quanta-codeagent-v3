@@ -8,6 +8,7 @@
 import { describe, expect, test } from "bun:test"
 import { DapClient, type DapTransport } from "@/tool/debug/dap-client"
 import { DapFrameDecoder, encodeDapMessage } from "@/tool/debug/dap-codec"
+import { nth } from "../../../_helpers/expect-present"
 
 /** A controllable in-memory transport: captures what the client sends (decoded)
  *  and lets the test inject adapter→client frames. */
@@ -38,8 +39,8 @@ describe("DapClient", () => {
     const client = new DapClient(fake.transport)
     const p = client.request("initialize", { adapterID: "python" })
     expect(fake.sent).toHaveLength(1)
-    const seq = fake.sent[0]!.seq as number
-    expect(fake.sent[0]!.command).toBe("initialize")
+    const seq = nth(fake.sent, 0, "fake.sent").seq as number
+    expect(nth(fake.sent, 0, "fake.sent").command).toBe("initialize")
     fake.emit({
       type: "response",
       request_seq: seq,
@@ -57,8 +58,8 @@ describe("DapClient", () => {
     const client = new DapClient(fake.transport)
     const p1 = client.request("threads")
     const p2 = client.request("stackTrace", { threadId: 1 })
-    const seq1 = fake.sent[0]!.seq as number
-    const seq2 = fake.sent[1]!.seq as number
+    const seq1 = nth(fake.sent, 0, "fake.sent").seq as number
+    const seq2 = nth(fake.sent, 1, "fake.sent").seq as number
     // Reply to the SECOND request first.
     fake.emit({
       type: "response",
@@ -82,7 +83,7 @@ describe("DapClient", () => {
     const fake = makeFakeTransport()
     const client = new DapClient(fake.transport)
     const p = client.request("evaluate", { expression: "bogus" })
-    const seq = fake.sent[0]!.seq as number
+    const seq = nth(fake.sent, 0, "fake.sent").seq as number
     fake.emit({
       type: "response",
       request_seq: seq,
@@ -102,7 +103,7 @@ describe("DapClient", () => {
     client.onEvent("stopped", (body) => stops.push(body))
     const p = client.request("configurationDone")
     fake.emit({ type: "event", event: "stopped", body: { reason: "breakpoint", threadId: 1 } })
-    const seq = fake.sent[0]!.seq as number
+    const seq = nth(fake.sent, 0, "fake.sent").seq as number
     fake.emit({ type: "response", request_seq: seq, success: true, command: "configurationDone" })
     await p
     expect(stops).toEqual([{ reason: "breakpoint", threadId: 1 }])

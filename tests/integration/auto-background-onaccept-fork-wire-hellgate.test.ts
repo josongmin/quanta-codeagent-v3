@@ -37,6 +37,7 @@ import {
   defaultStuckDetector,
   type SubagentForkSink,
 } from "@/agent/auto-background"
+import { nth, present } from "../_helpers/expect-present"
 
 /** Build a fake scheduler that records every `fork` call. */
 const fakeScheduler = (): {
@@ -98,10 +99,10 @@ describe("ADR-0239 §A — auto-background onAccept fork bridge", () => {
     proposer.accept({ toolCallId: "call-A1" })
 
     expect(fake.calls.length).toBe(1)
-    expect(fake.calls[0]!.task).toContain("call-A1")
-    expect(fake.calls[0]!.task).toContain("2500")
-    expect(fake.calls[0]!.metadata?.["quanta.autoBg.toolCallId"]).toBe("call-A1")
-    expect(fake.calls[0]!.metadata?.["quanta.autoBg.elapsedMs"]).toBe("2500")
+    expect(nth(fake.calls, 0, "fake.calls").task).toContain("call-A1")
+    expect(nth(fake.calls, 0, "fake.calls").task).toContain("2500")
+    expect(nth(fake.calls, 0, "fake.calls").metadata?.["quanta.autoBg.toolCallId"]).toBe("call-A1")
+    expect(nth(fake.calls, 0, "fake.calls").metadata?.["quanta.autoBg.elapsedMs"]).toBe("2500")
   })
 
   // ── §A2 ── dismiss → no fork (bridge consulted ONLY on accept) ───────────
@@ -219,7 +220,7 @@ describe("ADR-0239 §A — auto-background onAccept fork bridge", () => {
     proposer.shouldPropose({ toolCallId: "call-A8", now: clock })
     proposer.accept({ toolCallId: "call-A8" })
 
-    const md = fake.calls[0]!.metadata!
+    const md = present(nth(fake.calls, 0, "fake.calls").metadata, "md")
     expect(md["quanta.autoBg"]).toBe("1")
     expect(md["quanta.autoBg.toolCallId"]).toBe("call-A8")
     expect(md["quanta.autoBg.elapsedMs"]).toBe("3500")
@@ -240,7 +241,7 @@ describe("ADR-0239 §A — auto-background onAccept fork bridge", () => {
     clock = 2_500
     proposer1.shouldPropose({ toolCallId: "call-A9-happy", now: clock })
     proposer1.accept({ toolCallId: "call-A9-happy" })
-    expect(fake.calls[0]!.task).toBe("CUSTOM: continue call-A9-happy")
+    expect(nth(fake.calls, 0, "fake.calls").task).toBe("CUSTOM: continue call-A9-happy")
 
     // Throwing taskFrom path — must NOT crash, falls back to default text.
     const fake2 = fakeScheduler()
@@ -257,8 +258,8 @@ describe("ADR-0239 §A — auto-background onAccept fork bridge", () => {
     proposer2.shouldPropose({ toolCallId: "call-A9-bug", now: clock })
     expect(() => proposer2.accept({ toolCallId: "call-A9-bug" })).not.toThrow()
     expect(fake2.calls.length).toBe(1)
-    expect(fake2.calls[0]!.task).toContain("call-A9-bug")
-    expect(fake2.calls[0]!.task).not.toContain("CUSTOM")
+    expect(nth(fake2.calls, 0, "fake2.calls").task).toContain("call-A9-bug")
+    expect(nth(fake2.calls, 0, "fake2.calls").task).not.toContain("CUSTOM")
   })
 
   // ── §A10 ── maxTurns forwarded; omitted when absent ──────────────────────
@@ -275,7 +276,7 @@ describe("ADR-0239 §A — auto-background onAccept fork bridge", () => {
     proposer.shouldPropose({ toolCallId: "call-A10", now: clock })
     proposer.accept({ toolCallId: "call-A10" })
 
-    expect(fake.calls[0]!.maxTurns).toBe(4)
+    expect(nth(fake.calls, 0, "fake.calls").maxTurns).toBe(4)
 
     // Now without maxTurns — must be omitted (not undefined).
     const fake2 = fakeScheduler()
@@ -287,7 +288,7 @@ describe("ADR-0239 §A — auto-background onAccept fork bridge", () => {
     proposer2.shouldPropose({ toolCallId: "call-A10b", now: clock })
     proposer2.accept({ toolCallId: "call-A10b" })
 
-    expect(fake2.calls[0]!.maxTurns).toBeUndefined()
+    expect(nth(fake2.calls, 0, "fake2.calls").maxTurns).toBeUndefined()
   })
 
   // ── §A11 ── host metadata propagates; reserved keys NOT overridable ──────
@@ -313,7 +314,7 @@ describe("ADR-0239 §A — auto-background onAccept fork bridge", () => {
     proposer.shouldPropose({ toolCallId: "call-A11", now: clock })
     proposer.accept({ toolCallId: "call-A11" })
 
-    const md = fake.calls[0]!.metadata!
+    const md = present(nth(fake.calls, 0, "fake.calls").metadata, "md")
     expect(md.origin).toBe("ci") // non-reserved host metadata propagates
     expect(md["quanta.autoBg"]).toBe("0") // host wins on collision (documented)
     expect(md["quanta.autoBg.toolCallId"]).toBe("call-A11") // dynamic label still present

@@ -341,6 +341,33 @@ export class HttpSseMcpTransport implements McpTransport {
     })
   }
 
+  /**
+   * Drain the SSE body of a POST response, rejecting the awaited reply if that stream
+   * dies before delivering it.
+   *
+   * A unit because a mid-stream death is otherwise INVISIBLE: the pending entry has no
+   * body left to arrive on, so it waits out the full per-request timeout. The rejection
+   * is safe after a clean reply — `rejectPending` finds nothing to take — which is why
+   * the drain and the rejection belong together rather than behind a caller-side test.
+   * A clean `ended` is this stream's NORMAL termination, so it stays quiet.
+   */
+  private async consumePostSseBody(
+    body: ReadableStream<Uint8Array> | null,
+    signal: AbortSignal,
+    requestId: number | string | undefined,
+  ): Promise<void> {
+    const pump = await this.consumeSseBody(body, signal)
+    if (pump.outcome === "failed" && !this.closed) {
+      logger.warn("mcp: http POST SSE stream failed", {
+        server: this.name,
+        error: pump.error,
+      })
+      if (requestId !== undefined) {
+        this.rejectPending(requestId, `transport POST SSE stream failed: ${pump.error}`)
+      }
+    }
+  }
+
   private async post(payload: McpTransportPayload, requestId?: number | string): Promise<void> {
     // T01 (audit L9 H12): each POST gets a tracked AbortController so `close()`
     // can sever the request + any SSE body it is draining. The signal is wired
@@ -389,23 +416,10 @@ export class HttpSseMcpTransport implements McpTransport {
 
       const contentType = (res.headers.get("content-type") ?? "").toLowerCase()
       if (contentType.includes("text/event-stream")) {
-        const pump = await this.consumeSseBody(res.body, ctrl.signal)
-        // Audit jun-10 #4 (POST arm): the SSE body carrying the awaited reply
-        // died MID-STREAM. Without this, the pending entry waits out the FULL
-        // per-request timeout — reject it promptly via the same synthesized
-        // envelope the other fast-fail siblings use. `rejectPending` is a
-        // no-op at the client if the reply already landed before the death
-        // (takePending finds nothing), so a post-reply death is harmless. A
-        // clean `ended` is this stream's NORMAL termination, so it stays quiet.
-        if (pump.outcome === "failed" && !this.closed) {
-          logger.warn("mcp: http POST SSE stream failed", {
-            server: this.name,
-            error: pump.error,
-          })
-          if (requestId !== undefined) {
-            this.rejectPending(requestId, `transport POST SSE stream failed: ${pump.error}`)
-          }
-        }
+        // Audit jun-10 #4 (POST arm): the SSE body carrying the awaited reply can die
+        // MID-STREAM; the pending entry is rejected promptly via the same synthesized
+        // envelope the other fast-fail siblings use.
+        await this.consumePostSseBody(res.body, ctrl.signal, requestId)
         return
       }
       // Single JSON response.
@@ -415,6 +429,28 @@ export class HttpSseMcpTransport implements McpTransport {
     } finally {
       this.inFlightPosts.delete(ctrl)
     }
+  }
+
+  /**
+   * Classify a standalone-GET handshake that never produced a response.
+   *
+   * A unit because the two outcomes are indistinguishable at the throw site and mean
+   * opposite things: our own `close()` severing the fetch is deliberate teardown and
+   * must stay quiet, while a real network failure is the transport LOSING its
+   * server→client channel and has to surface so the ADR-0435 supervisor can restart.
+   * Conflating them is what silently degraded a whole session to POST-only (audit
+   * jun-10 #11).
+   */
+  private reportStandaloneGetFailure(e: unknown, abortSignal: AbortSignal): void {
+    if (this.closed || abortSignal.aborted) {
+      logger.debug("mcp: standalone SSE GET aborted by close", {
+        server: this.name,
+        error: errMessage(e),
+      })
+      return
+    }
+    logger.warn("mcp: standalone SSE GET failed", { server: this.name, error: errMessage(e) })
+    this.fireExit(`mcp server "${this.name}" standalone SSE GET failed: ${errMessage(e)}`)
   }
 
   private async openStandaloneStream(isResumeRetry = false): Promise<void> {
@@ -456,24 +492,9 @@ export class HttpSseMcpTransport implements McpTransport {
         }),
       ])
     } catch (e) {
-      // close() aborting the in-flight handshake is DELIBERATE teardown — keep
-      // it at debug and let the pump settle so close() never wedges.
-      if (this.closed || abort.signal.aborted) {
-        logger.debug("mcp: standalone SSE GET aborted by close", {
-          server: this.name,
-          error: errMessage(e),
-        })
-        return
-      }
-      // Audit jun-10 #11 — a REAL network failure opening the channel used to
-      // be conflated with the close()-abort above and silently degrade the
-      // whole session to POST-only. The server→client channel is the
-      // transport's contract: surface the death so the ADR-0435 supervisor can
-      // restart (the replacement re-opens the GET, resuming via §1.2
-      // `Last-Event-ID`). Without a supervisor the client fails pending
-      // promptly instead of half-living on a one-way wire.
-      logger.warn("mcp: standalone SSE GET failed", { server: this.name, error: errMessage(e) })
-      this.fireExit(`mcp server "${this.name}" standalone SSE GET failed: ${errMessage(e)}`)
+      // close()-teardown stays quiet; a real network death fires the exit so the
+      // ADR-0435 supervisor can restart the channel (audit jun-10 #11).
+      this.reportStandaloneGetFailure(e, abort.signal)
       return
     }
     // 405 = server has no standalone stream; that's spec-legal, proceed.

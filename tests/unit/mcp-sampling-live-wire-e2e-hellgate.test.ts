@@ -20,7 +20,10 @@
  *       (an unattended run must not silently spend a remote server's tokens).
  */
 
-import { afterEach, beforeEach, describe, expect, it } from "bun:test"
+import { afterAll, afterEach, beforeEach, describe, expect, it } from "bun:test"
+import { mkdtempSync, rmSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 import type { ElicitationPrompterFactory } from "@/agent"
 import type { LLMPort, StreamEvent, StreamInput } from "@/llm"
 import type { ElicitationPrompter } from "@/mcp"
@@ -122,6 +125,15 @@ const sampleParams = {
 
 // A one-server MCP config written to a temp file + pointed to via env so
 // `readMcpConfig` yields exactly one server for the load.
+// (c) fix: this config file used to be written into `process.cwd()` — i.e. the
+// REPO ROOT under the normal runner — so a crashed test left a `.tmp-…json`
+// behind in the checkout. It now lives in its own OS temp dir, removed in
+// afterAll.
+const TMP_ROOT = mkdtempSync(join(tmpdir(), "mcp-sampling-e2e-"))
+afterAll(() => {
+  rmSync(TMP_ROOT, { recursive: true, force: true })
+})
+
 let configPath: string
 const savedEnv: Record<string, string | undefined> = {}
 
@@ -132,7 +144,10 @@ const setEnv = (k: string, v: string | undefined): void => {
 }
 
 beforeEach(async () => {
-  configPath = `${process.cwd()}/.tmp-mcp-sampling-e2e-${Date.now()}-${Math.random().toString(36).slice(2)}.json`
+  configPath = join(
+    TMP_ROOT,
+    `.tmp-mcp-sampling-e2e-${Date.now()}-${Math.random().toString(36).slice(2)}.json`,
+  )
   await Bun.write(configPath, JSON.stringify({ servers: [{ name: "s1", command: ["x"] }] }))
   setEnv("QUANTA_MCP_CONFIG", configPath)
 })

@@ -11,6 +11,7 @@ import {
 import type { SessionDeps } from "@/runner/assemble/config"
 import { buildSharedExecutionPlaneSessionDeps } from "@/runner/session-execution-plane"
 import { ToolRegistry } from "@/tool"
+import { present } from "../../_helpers/expect-present"
 
 const mkMsg = (text: string): Message => ({
   role: "user",
@@ -121,7 +122,7 @@ describe("session execution plane", () => {
 
     expect(wired.responsesContinuation?.store).toBe(responsesStore)
     expect(wired.llm).toBeDefined()
-    for await (const _ of wired.llm!.stream({
+    for await (const _ of present(wired.llm, "wired.llm").stream({
       messages: [mkMsg("hi")],
       tools: [],
     })) {

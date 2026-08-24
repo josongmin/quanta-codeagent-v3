@@ -28,6 +28,7 @@ import {
   type SettingsLayer,
   type SettingsLayerName,
 } from "@/config"
+import { nth } from "../_helpers/expect-present"
 
 // ── helpers ────────────────────────────────────────────────────────────────
 
@@ -232,8 +233,8 @@ describe("governance — filterMcpServersByPolicy boundary semantics", () => {
       { name: "c", tag: 3 },
     ]
     const res = filterMcpServersByPolicy(servers, { enabledServers: [], deniedServers: ["b"] })
-    expect(res.kept).toEqual([servers[0]!, servers[2]!])
-    expect(res.kept[0]).toBe(servers[0]!) // same reference, not a copy
+    expect(res.kept).toEqual([nth(servers, 0, "servers"), nth(servers, 2, "servers")])
+    expect(res.kept[0]).toBe(nth(servers, 0, "servers")) // same reference, not a copy
   })
 
   test("filter is pure — never throws on empty server list", () => {

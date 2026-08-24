@@ -53,6 +53,7 @@ import { type CanvasMessage, decodeCanvasFrame } from "@/protocol/canvas"
 import { createRuntimeFromAgentConfigBase } from "@/sdk/runtime"
 import { StdoutStream } from "@/stream"
 import { buildDefaultTools, ToolRegistry } from "@/tool"
+import { present } from "../_helpers/expect-present"
 
 /* ------------------------------------------------------------------ */
 /* RecordingLLM — scripts a write tool_use then a text completion.     */
@@ -305,7 +306,7 @@ describe("W3 canvas e2e — tool.diff + context.usage flow daemon → WS client"
     // Let the server-side open() finish wiring the canvas sink + session.
     await new Promise((r) => setTimeout(r, 30))
 
-    driveTurn(ws, bag.sessionId!, "please edit the file")
+    driveTurn(ws, present(bag.sessionId, "bag.sessionId"), "please edit the file")
 
     const diff = await waitFor("tool.diff")
     expect(diff.kind).toBe("tool.diff")
@@ -336,7 +337,7 @@ describe("W3 canvas e2e — tool.diff + context.usage flow daemon → WS client"
     const { waitFor } = collectCanvas(ws)
     await new Promise((r) => setTimeout(r, 30))
 
-    driveTurn(ws, bag.sessionId!, "please edit the file")
+    driveTurn(ws, present(bag.sessionId, "bag.sessionId"), "please edit the file")
 
     const usage = await waitFor("context.usage")
     expect(usage.kind).toBe("context.usage")
@@ -362,7 +363,7 @@ describe("W3 canvas e2e — tool.diff + context.usage flow daemon → WS client"
     const { frames } = collectCanvas(ws)
     await new Promise((r) => setTimeout(r, 30))
 
-    driveTurn(ws, bag.sessionId!, "please edit the file")
+    driveTurn(ws, present(bag.sessionId, "bag.sessionId"), "please edit the file")
     // Give the whole turn ample time to run + any (absent) frames to arrive.
     await new Promise((r) => setTimeout(r, 600))
 
@@ -382,7 +383,7 @@ describe("W3 canvas e2e — tool.diff + context.usage flow daemon → WS client"
     const { frames, waitFor } = collectCanvas(ws)
     await new Promise((r) => setTimeout(r, 30))
 
-    driveTurn(ws, bag.sessionId!, "please edit the file")
+    driveTurn(ws, present(bag.sessionId, "bag.sessionId"), "please edit the file")
 
     // Usage still flows (its wire is intact) — use it as a turn-progressed barrier.
     await waitFor("context.usage")
@@ -404,7 +405,7 @@ describe("W3 canvas e2e — tool.diff + context.usage flow daemon → WS client"
     const { frames, waitFor } = collectCanvas(ws)
     await new Promise((r) => setTimeout(r, 30))
 
-    driveTurn(ws, bag.sessionId!, "please edit the file")
+    driveTurn(ws, present(bag.sessionId, "bag.sessionId"), "please edit the file")
 
     // Diff still flows (its wire is intact) — use it as a turn-progressed barrier.
     await waitFor("tool.diff")

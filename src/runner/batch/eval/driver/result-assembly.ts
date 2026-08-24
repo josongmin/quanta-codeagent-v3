@@ -76,6 +76,32 @@ export const reproArtifactPathOf = (
 export const shouldValidateGold = (deps: RunInstanceDeps, agentPassed: boolean): boolean =>
   deps.goldSanity !== undefined && (deps.goldSanity.mode === "always" || agentPassed === false)
 
+/** The "stopped before producing anything" message for a phase that ended with
+ *  an EMPTY patch, or `undefined` when the stop reason is not one of those.
+ *
+ *  A unit because all five branches share ONE precondition — the patch is empty,
+ *  so there is nothing to grade — and differ only in which stop reason to name.
+ *  Stating that precondition once, as a guard, makes it impossible to add a stop
+ *  reason here that silently forgets it and starts swallowing runs that DID
+ *  produce a patch. */
+const emptyPatchStopReasonError = (phase: Phase): string | undefined => {
+  if (phase.patch.trim() !== "") return undefined
+  switch (phase.stopReason) {
+    case "max_turns":
+      return "agent reached max turns before verification"
+    case "error":
+      return phase.agentError ?? "agent stopped with error before verification"
+    case "refusal":
+      return "agent stopped with refusal before verification"
+    case "aborted":
+      return "agent aborted before verification"
+    case "budget_exhausted":
+      return "agent exhausted token budget before verification"
+    default:
+      return undefined
+  }
+}
+
 const agentPhaseError = (phase: Phase): string | undefined => {
   // T5 — a capture-desync (successful source edits observed but an empty done-time
   // diff) is an INFRA fault, not a model miss. On the SINGLE-PASS path the agent can
@@ -100,22 +126,7 @@ const agentPhaseError = (phase: Phase): string | undefined => {
     ...(phase.editCount !== undefined ? { editCount: phase.editCount } : {}),
   })
   if (noPatchExhausted !== undefined) return noPatchExhausted
-  if (phase.stopReason === "max_turns" && phase.patch.trim() === "") {
-    return "agent reached max turns before verification"
-  }
-  if (phase.stopReason === "error" && phase.patch.trim() === "") {
-    return phase.agentError ?? "agent stopped with error before verification"
-  }
-  if (phase.stopReason === "refusal" && phase.patch.trim() === "") {
-    return "agent stopped with refusal before verification"
-  }
-  if (phase.stopReason === "aborted" && phase.patch.trim() === "") {
-    return "agent aborted before verification"
-  }
-  if (phase.stopReason === "budget_exhausted" && phase.patch.trim() === "") {
-    return "agent exhausted token budget before verification"
-  }
-  return undefined
+  return emptyPatchStopReasonError(phase)
 }
 
 const patchCaptureMissErrorOf = (phase: Phase): string | undefined =>
@@ -461,6 +472,32 @@ const attachLlmEvidenceArtifacts = (args: {
   if (Object.keys(llmEvidence).length > 0) args.extra.llmEvidence = llmEvidence
 }
 
+/** Copy the phase's report-only telemetry onto the result, verbatim.
+ *
+ *  A unit because every field here is a pure pass-through under one rule —
+ *  absent stays absent, nothing is derived, and NO posture knob gates it. That
+ *  is exactly what separates them from the artifacts assembled below, each of
+ *  which is both derived and knob-gated. Keeping the two kinds in different
+ *  functions is what stops a new pass-through from quietly acquiring a gate, or
+ *  a gated artifact from quietly losing one. */
+const copyPhaseTelemetryFields = (extra: Partial<InstanceResult>, phase: Phase): void => {
+  if (phase.reproOracleCalibration !== undefined) {
+    extra.reproOracleCalibration = phase.reproOracleCalibration
+  }
+  if (phase.selectionTelemetry !== undefined) {
+    extra.selectionTelemetry = phase.selectionTelemetry
+  }
+  if (phase.ownerWidening !== undefined) {
+    extra.ownerWidening = phase.ownerWidening
+  }
+  if (phase.submissionReview !== undefined) {
+    extra.submissionReview = phase.submissionReview
+  }
+  if (phase.reproViabilityReview !== undefined) {
+    extra.reproViabilityReview = phase.reproViabilityReview
+  }
+}
+
 const attachSelectionAndClosureArtifacts = (args: {
   readonly extra: Partial<InstanceResult>
   readonly instance: Instance
@@ -470,21 +507,7 @@ const attachSelectionAndClosureArtifacts = (args: {
 }): void => {
   const { posture, verificationPlan, closureSession, primaryRailStep, ownerResolved } =
     args.prepared
-  if (args.phase.reproOracleCalibration !== undefined) {
-    args.extra.reproOracleCalibration = args.phase.reproOracleCalibration
-  }
-  if (args.phase.selectionTelemetry !== undefined) {
-    args.extra.selectionTelemetry = args.phase.selectionTelemetry
-  }
-  if (args.phase.ownerWidening !== undefined) {
-    args.extra.ownerWidening = args.phase.ownerWidening
-  }
-  if (args.phase.submissionReview !== undefined) {
-    args.extra.submissionReview = args.phase.submissionReview
-  }
-  if (args.phase.reproViabilityReview !== undefined) {
-    args.extra.reproViabilityReview = args.phase.reproViabilityReview
-  }
+  copyPhaseTelemetryFields(args.extra, args.phase)
   attachLlmEvidenceArtifacts(args)
   const ownerHint = relFromSandbox(args.sandbox, args.phase.firstEditFile)
   const hygiene =

@@ -34,6 +34,7 @@ import {
   type SessionTransportMessage,
 } from "@/ipc/session"
 import type { SessionEvent, SessionSnapshotLite } from "@/protocol/session"
+import { nth } from "../../_helpers/expect-present"
 import { capabilitiesFor } from "../../support/session-fixtures"
 
 /* ------------------------------------------------------------------------- */
@@ -137,7 +138,11 @@ const orderingSeqs = (messages: readonly SessionTransportMessage[]): number[] =>
   )
 
 const isNonDecreasing = (xs: readonly number[]): boolean =>
-  xs.every((x, i) => i === 0 || Number.isNaN(x) || Number.isNaN(xs[i - 1]!) || xs[i - 1]! <= x)
+  xs.every((x, i) => {
+    if (i === 0 || Number.isNaN(x)) return true
+    const prev = nth(xs, i - 1, "xs")
+    return Number.isNaN(prev) || prev <= x
+  })
 
 /* ------------------------------------------------------------------------- */
 /* RED → GREEN — in-window incremental replay racing a mid-handshake publish */

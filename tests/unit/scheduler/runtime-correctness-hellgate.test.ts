@@ -40,6 +40,7 @@ import {
 } from "@/scheduler/automation-engine"
 import { parseRRule } from "@/scheduler/rrule-parser"
 import type { RRule } from "@/scheduler/types"
+import { nth, present } from "../../_helpers/expect-present"
 
 const ruleOf = (s: string): RRule => {
   const r = parseRRule(s)
@@ -82,7 +83,7 @@ describe("T10 H5 — errored automation retries (does not die permanently)", () 
     expect(out.kind).toBe("errored")
     const list = await eng.list()
     if (!list.ok) throw new Error("unreachable")
-    const row = list.value[0]!
+    const row = nth(list.value, 0, "row")
     // RETRY contract: a recurring automation is NOT retired by one failure.
     expect(row.status).toBe("scheduled")
     expect(row.lastError).toBe("transient boom")
@@ -107,7 +108,7 @@ describe("T10 H5 — errored automation retries (does not die permanently)", () 
     expect(out.kind).toBe("errored")
     const list = await eng.list()
     if (!list.ok) throw new Error("unreachable")
-    expect(list.value[0]!.status).toBe("errored")
+    expect(nth(list.value, 0, "list.value").status).toBe("errored")
   })
 
   test("[H5-3] sqlite parity: errored+future stays scheduled, errored+exhausted retires", async () => {
@@ -122,8 +123,14 @@ describe("T10 H5 — errored automation retries (does not die permanently)", () 
     await tickScheduler({ engine: eng, now: utc(2026, 5, 25, 10), handler: throwHandler })
     const list = await eng.list()
     if (!list.ok) throw new Error("unreachable")
-    const rec = list.value.find((a) => a.id === "rec")!
-    const fin = list.value.find((a) => a.id === "fin")!
+    const rec = present(
+      list.value.find((a) => a.id === "rec"),
+      "rec",
+    )
+    const fin = present(
+      list.value.find((a) => a.id === "fin"),
+      "fin",
+    )
     expect(rec.status).toBe("scheduled")
     expect(fin.status).toBe("errored")
   })
@@ -143,7 +150,7 @@ describe("T10 H5 — errored automation retries (does not die permanently)", () 
     const eng2 = sqliteAutomationEngine(db)
     const list = await eng2.list()
     if (!list.ok) throw new Error("unreachable")
-    const row = list.value[0]!
+    const row = nth(list.value, 0, "row")
     expect(row.status).toBe("scheduled")
     // The next fire is due → it retries.
     const n = await eng2.next(row.nextRunAt)
@@ -187,7 +194,7 @@ describe("T10 M8/M11 — same-ms dedup + ticker-overlap claim isolation", () => 
       await tickScheduler({ engine: eng, now, handler: async () => {} })
       const list = await eng.list()
       if (!list.ok) throw new Error("unreachable")
-      return list.value[0]!
+      return nth(list.value, 0, "list.value")
     }
     const m = await run(mem)
     const s = await run(sql)
@@ -208,7 +215,9 @@ describe("T10 M8/M11 — same-ms dedup + ticker-overlap claim isolation", () => 
     expect(c1.value).not.toBeNull()
     expect(c2.value).not.toBeNull()
     // Disjoint — the in-flight row is durably marked and not re-handed-out.
-    expect(c1.value!.automation.id).not.toBe(c2.value!.automation.id)
+    expect(present(c1.value, "c1.value").automation.id).not.toBe(
+      present(c2.value, "c2.value").automation.id,
+    )
     // A third claim returns null — both due rows are now in-flight.
     const c3 = await eng.claim(now)
     if (!c3.ok) throw new Error("unreachable")
@@ -248,8 +257,8 @@ describe("T10 M8/M11 — same-ms dedup + ticker-overlap claim isolation", () => 
     expect(runs.length).toBe(1)
     const list = await eng.list()
     if (!list.ok) throw new Error("unreachable")
-    expect(list.value[0]!.status).toBe("scheduled")
-    expect(list.value[0]!.nextRunAt).toBe(now + 86_400_000)
+    expect(nth(list.value, 0, "list.value").status).toBe("scheduled")
+    expect(nth(list.value, 0, "list.value").nextRunAt).toBe(now + 86_400_000)
   })
 
   test("[claim-2] crash recovery: a claimed-but-unfinalized row is reclaimable after restart", async () => {

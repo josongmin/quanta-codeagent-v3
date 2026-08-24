@@ -18,6 +18,7 @@ import { describe, expect, test } from "bun:test"
 import type { z } from "zod"
 import { astGrepTool } from "@/tool/ast-grep"
 import { BASE_TOOL_NAMES, GATED_TOOLS } from "@/tool/surface/manifest"
+import { nth, present } from "../_helpers/expect-present"
 
 // ─── HELL-1: tool name ───────────────────────────────────────────────────────
 
@@ -98,7 +99,7 @@ describe("HELL-4: MAX_MATCHES constant range", () => {
     const entry = GATED_TOOLS.find((e) => e.name === "ast_grep")
     const match = entry?.note?.match(/Capped at (\d+) matches/)
     expect(match).not.toBeNull()
-    const cap = Number(match![1])
+    const cap = Number(nth(present(match, "Capped-at note match"), 1, "match groups"))
     expect(cap).toBeGreaterThanOrEqual(10)
     expect(cap).toBeLessThanOrEqual(100)
   })

@@ -43,6 +43,7 @@ import type { FileInfo, FileSystemPort } from "@/storage"
 import { sha256Hex } from "@/storage"
 import type { ToolContext, ToolResult } from "@/tool"
 import { makeEditTool } from "@/tool/edit"
+import { nth } from "../_helpers/expect-present"
 
 /* ======================================================= seeded PRNG (mulberry32)
  * Pure, deterministic, self-contained. Same construction as the OmO chaos-bench
@@ -300,12 +301,16 @@ describe("jul-13 edit-fresh-hash CHAOS — seeded property (interleaved multi-fi
     for (let f = 0; f < FILE_COUNT; f++) {
       const r = await run(
         tool,
-        { path: paths[f], old_string: `v = ${version[f]}`, new_string: `v = ${version[f]! + 1}` },
+        {
+          path: paths[f],
+          old_string: `v = ${version[f]}`,
+          new_string: `v = ${nth(version, f, "version") + 1}`,
+        },
         CWD,
         true,
       )
       expect(r.ok).toBe(true)
-      version[f] = version[f]! + 1
+      version[f] = nth(version, f, "version") + 1
       lastHash[f] = advertisedHash(r)
     }
 
@@ -320,8 +325,8 @@ describe("jul-13 edit-fresh-hash CHAOS — seeded property (interleaved multi-fi
 
     for (let op = 0; op < OPS; op++) {
       const f = randInt(rng, FILE_COUNT)
-      const p = paths[f]!
-      const cur = version[f]!
+      const p = nth(paths, f, "p")
+      const cur = nth(version, f, "cur")
       const useStale = staleHash[f] !== undefined && rng() < 0.4
 
       if (useStale) {
@@ -384,7 +389,7 @@ describe("jul-13 edit-fresh-hash CHAOS — seeded property (interleaved multi-fi
     expect(badPassViolations).toBe(0)
     // Final consistency: every file's recorded lastHash matches its on-disk bytes.
     for (let f = 0; f < FILE_COUNT; f++) {
-      expect(lastHash[f]).toBe(sha256Hex(files.get(paths[f]!) ?? ""))
+      expect(lastHash[f]).toBe(sha256Hex(files.get(nth(paths, f, "paths")) ?? ""))
     }
   })
 })

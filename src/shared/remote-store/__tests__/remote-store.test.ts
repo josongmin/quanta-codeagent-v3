@@ -1,4 +1,5 @@
 import { describe, expect, it } from "bun:test"
+import { nth } from "../../../../tests/_helpers/expect-present"
 import type { RemoteBackend } from "../backend"
 import {
   isResumeEligible,
@@ -320,7 +321,7 @@ describe("s3-backend", () => {
     const be = s3Backend({ bucket: "bkt", runAws })
     await be.put("camp/inst/events/000001.json", "payload-body")
     expect(calls).toHaveLength(1)
-    const c = calls[0]!
+    const c = nth(calls, 0, "c")
     expect(c.args).toContain("s3")
     expect(c.args).toContain("cp")
     expect(c.args).toContain("-")
@@ -334,8 +335,8 @@ describe("s3-backend", () => {
     const { runAws, calls } = recordingRunAws([{ stdout: "", exitCode: 0 }])
     const be = s3Backend({ bucket: "bkt", region: "ap-northeast-2", runAws })
     await be.put("p", "b")
-    expect(calls[0]!.args).toContain("--region")
-    expect(calls[0]!.args).toContain("ap-northeast-2")
+    expect(nth(calls, 0, "calls").args).toContain("--region")
+    expect(nth(calls, 0, "calls").args).toContain("ap-northeast-2")
   })
 
   it("get builds `aws s3 cp s3://<bucket>/<path> -` and returns stdout on exit 0", async () => {
@@ -343,7 +344,7 @@ describe("s3-backend", () => {
     const be = s3Backend({ bucket: "bkt", runAws })
     const got = await be.get("camp/inst/resume-state.json")
     expect(got).toBe("the-object-body")
-    const c = calls[0]!
+    const c = nth(calls, 0, "c")
     expect(c.args).toContain("s3")
     expect(c.args).toContain("cp")
     expect(c.args).toContain("s3://bkt/camp/inst/resume-state.json")
@@ -405,7 +406,7 @@ describe("s3-backend", () => {
       "camp/inst/events/000002.json",
       "camp/inst/resume-state.json",
     ])
-    const c = calls[0]!
+    const c = nth(calls, 0, "c")
     expect(c.args).toContain("s3")
     expect(c.args).toContain("ls")
     expect(c.args).toContain("--recursive")
@@ -437,18 +438,18 @@ describe("s3-backend", () => {
       const a = [...args]
       if (a.includes("cp") && a[a.length - 1] === "-") {
         // get: cp s3://... -
-        const src = a[a.indexOf("cp") + 1]!.replace("s3://bkt/", "")
+        const src = nth(a, a.indexOf("cp") + 1, "a").replace("s3://bkt/", "")
         const body = objects.get(src)
         return body === undefined ? { stdout: "", exitCode: 1 } : { stdout: body, exitCode: 0 }
       }
       if (a.includes("cp") && a[a.indexOf("cp") + 1] === "-") {
         // put: cp - s3://...
-        const dest = a[a.indexOf("cp") + 2]!.replace("s3://bkt/", "")
+        const dest = nth(a, a.indexOf("cp") + 2, "a").replace("s3://bkt/", "")
         objects.set(dest, stdin ?? "")
         return { stdout: "", exitCode: 0 }
       }
       if (a.includes("ls")) {
-        const prefix = a[a.indexOf("ls") + 1]!.replace("s3://bkt/", "")
+        const prefix = nth(a, a.indexOf("ls") + 1, "a").replace("s3://bkt/", "")
         const lines = [...objects.keys()]
           .filter((k) => k.startsWith(prefix))
           .map((k) => `2026-06-27 08:00:00  10 ${k}`)

@@ -430,6 +430,62 @@ const classify = (
 }
 
 /**
+ * Record every hit ONE source line produces, and count any canonical owner it defines.
+ *
+ * A unit because "what does this line say about ownership" is one pass over one line:
+ * the owner sweep, the family-env read and the family branch all read the SAME
+ * comment-stripped text, and a blank-after-stripping line answers all three at once.
+ * Hoisted to module scope rather than left inline so the sweep is nested in nothing —
+ * its own control flow is the four detectors, not the file/line loops around it.
+ */
+const collectLineHits = (
+  path: string,
+  raw: string,
+  index: number,
+  hits: OwnerAuditHit[],
+  ownerCounts: Record<ProMaxOwnerRole, number>,
+): void => {
+  const code = stripComments(raw)
+  if (code.trim() === "") return
+  for (const role of PROMAX_OWNER_ROLES) {
+    if (!OWNER_DETECTORS[role].test(code)) continue
+    ownerCounts[role] += 1
+    hits.push({ ...classify(path, index + 1, "owner_definition", raw), text: role })
+  }
+  if (FAMILY_ENV_DETECTOR.test(code)) {
+    hits.push(classify(path, index + 1, "family_env", raw))
+  }
+  if (FAMILY_BRANCH_DETECTOR.test(code)) {
+    hits.push(classify(path, index + 1, "family_branch", raw))
+  }
+}
+
+/**
+ * The hits a file earns as a WHOLE rather than at any one line — it speaks the legacy
+ * verdict vocabulary, or it is a promax module living outside the owning prefixes.
+ *
+ * A unit because both verdicts are properties of the file, not of a line: they are
+ * reported at line 1 with the PATH as their text, and neither can be decided by the
+ * per-line sweep, which only ever sees one line's worth of context.
+ */
+const collectFileHits = (file: OwnerAuditSourceFile): readonly OwnerAuditHit[] => {
+  const out: OwnerAuditHit[] = []
+  const speaksLegacy =
+    LEGACY_OWNER_SYMBOLS.test(file.text) ||
+    LEGACY_QUARTET.every((word) => new RegExp(`\\b${word}\\b`).test(file.text))
+  if (speaksLegacy) {
+    out.push(classify(file.path, 1, "legacy_verdict_consumer", file.path))
+  }
+  if (
+    file.path.toLowerCase().includes(FAMILY_TOKEN) &&
+    !startsWithAny(file.path, PROMAX_MODULE_OWNER_PREFIXES)
+  ) {
+    out.push(classify(file.path, 1, "promax_module_location", file.path))
+  }
+  return out
+}
+
+/**
  * THE audit. Pure: source text in, receipt out.
  */
 export const auditProMaxSourceOwners = (
@@ -449,35 +505,8 @@ export const auditProMaxSourceOwners = (
 
   for (const file of files) {
     const lines = file.text.split("\n")
-    lines.forEach((raw, index) => {
-      const code = stripComments(raw)
-      if (code.trim() === "") return
-      for (const role of PROMAX_OWNER_ROLES) {
-        if (!OWNER_DETECTORS[role].test(code)) continue
-        ownerCounts[role] += 1
-        hits.push({ ...classify(file.path, index + 1, "owner_definition", raw), text: role })
-      }
-      if (FAMILY_ENV_DETECTOR.test(code)) {
-        hits.push(classify(file.path, index + 1, "family_env", raw))
-      }
-      if (FAMILY_BRANCH_DETECTOR.test(code)) {
-        hits.push(classify(file.path, index + 1, "family_branch", raw))
-      }
-    })
-
-    // module-level detectors
-    const speaksLegacy =
-      LEGACY_OWNER_SYMBOLS.test(file.text) ||
-      LEGACY_QUARTET.every((word) => new RegExp(`\\b${word}\\b`).test(file.text))
-    if (speaksLegacy) {
-      hits.push(classify(file.path, 1, "legacy_verdict_consumer", file.path))
-    }
-    if (
-      file.path.toLowerCase().includes(FAMILY_TOKEN) &&
-      !startsWithAny(file.path, PROMAX_MODULE_OWNER_PREFIXES)
-    ) {
-      hits.push(classify(file.path, 1, "promax_module_location", file.path))
-    }
+    lines.forEach((raw, index) => collectLineHits(file.path, raw, index, hits, ownerCounts))
+    hits.push(...collectFileHits(file))
   }
 
   const unclassified = hits

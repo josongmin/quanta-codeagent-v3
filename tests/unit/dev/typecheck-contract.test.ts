@@ -2,7 +2,9 @@ import { describe, expect, test } from "bun:test"
 import { readFileSync } from "node:fs"
 import { join } from "node:path"
 
-const repoRoot = process.cwd()
+// Repo root anchored on this file, not the ambient cwd — every read below is a
+// repo-relative config file in the checkout.
+const repoRoot = join(import.meta.dir, "..", "..", "..")
 
 const readJson = <T>(relativePath: string): T =>
   JSON.parse(readFileSync(join(repoRoot, relativePath), "utf8")) as T

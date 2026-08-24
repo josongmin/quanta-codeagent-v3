@@ -259,6 +259,35 @@ const validateBlockingGovernance = (
   }
 }
 
+/**
+ * Throw unless one collected pair is a usable summary-equivalence probe: both
+ * sides present, both carrying structured history metadata, and both agreeing
+ * on the pair contract.
+ *
+ * A unit because the three checks are the definition of "equivalent" — a pair
+ * that passes any two of them is still not comparable, so they are stated and
+ * enforced as one rule rather than as three independent loop guards.
+ */
+const assertPairEquivalent = (
+  pairId: string,
+  group: ReadonlyMap<"raw" | "summary", GroundingCase>,
+): void => {
+  const raw = group.get("raw")
+  const summary = group.get("summary")
+  if (raw === undefined || summary === undefined) {
+    throw new Error(`grounding pair ${pairId} must contain exactly one raw and one summary case`)
+  }
+  if (
+    !raw.history.some(hasStructuredHistoryMetadata) ||
+    !summary.history.some(hasStructuredHistoryMetadata)
+  ) {
+    throw new Error(`grounding pair ${pairId} must expose structured history metadata on both sides`)
+  }
+  if (stableJson(pairContract(raw)) !== stableJson(pairContract(summary))) {
+    throw new Error(`grounding pair ${pairId} raw/summary contract mismatch`)
+  }
+}
+
 const validateSummaryEquivalencePairs = (cases: readonly GroundingCase[]): void => {
   const pairs = new Map<string, Map<"raw" | "summary", GroundingCase>>()
   for (const groundingCase of cases) {
@@ -279,22 +308,7 @@ const validateSummaryEquivalencePairs = (cases: readonly GroundingCase[]): void 
     pairs.set(groundingCase.pairId, group)
   }
   for (const [pairId, group] of pairs) {
-    const raw = group.get("raw")
-    const summary = group.get("summary")
-    if (raw === undefined || summary === undefined) {
-      throw new Error(`grounding pair ${pairId} must contain exactly one raw and one summary case`)
-    }
-    if (
-      !raw.history.some(hasStructuredHistoryMetadata) ||
-      !summary.history.some(hasStructuredHistoryMetadata)
-    ) {
-      throw new Error(
-        `grounding pair ${pairId} must expose structured history metadata on both sides`,
-      )
-    }
-    if (stableJson(pairContract(raw)) !== stableJson(pairContract(summary))) {
-      throw new Error(`grounding pair ${pairId} raw/summary contract mismatch`)
-    }
+    assertPairEquivalent(pairId, group)
   }
 }
 

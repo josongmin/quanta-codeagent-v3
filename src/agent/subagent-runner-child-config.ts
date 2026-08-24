@@ -238,6 +238,18 @@ const inheritQuestionBroker = (
 ): Pick<AgentConfig, "questionBroker"> | Record<string, never> =>
   parent.questionBroker !== undefined ? { questionBroker: parent.questionBroker } : {}
 
+/** The parent's approval/verification gates, inherited verbatim so a child can
+ *  never escape a gate its parent runs under. A unit because the three travel
+ *  together — dropping one silently downgrades the child's safety posture — and
+ *  because hoisting them keeps the caller under the cognitive-complexity cap. */
+const inheritParentGuards = (
+  parent: AgentConfig,
+): Pick<AgentConfig, "verifyGuard" | "closeoutGuard" | "hitl"> | Record<string, never> => ({
+  ...(parent.verifyGuard !== undefined ? { verifyGuard: parent.verifyGuard } : {}),
+  ...(parent.closeoutGuard !== undefined ? { closeoutGuard: parent.closeoutGuard } : {}),
+  ...(parent.hitl !== undefined ? { hitl: parent.hitl } : {}),
+})
+
 const buildChildInheritedConfig = (
   parent: AgentConfig,
   req: SubagentRequest,
@@ -264,9 +276,7 @@ const buildChildInheritedConfig = (
     ...(parent.compaction ? { compaction: parent.compaction } : {}),
     ...(parent.planMode !== undefined ? { planMode: parent.planMode } : {}),
     ...resolveChildMode(parent, req),
-    ...(parent.verifyGuard !== undefined ? { verifyGuard: parent.verifyGuard } : {}),
-    ...(parent.closeoutGuard !== undefined ? { closeoutGuard: parent.closeoutGuard } : {}),
-    ...(parent.hitl !== undefined ? { hitl: parent.hitl } : {}),
+    ...inheritParentGuards(parent),
     ...(parent.subagent ? { subagent: parent.subagent } : {}),
     // Propagate the Sub-Agents panel observer DOWN the whole spawn tree so a
     // depth-2+ descendant emits + registers too (the panel shows the full tree,

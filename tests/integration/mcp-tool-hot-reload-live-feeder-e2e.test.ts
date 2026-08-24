@@ -53,6 +53,7 @@ import { createMcpToolReloadController } from "@/host/runtime"
 import type { StructuredLogger } from "@/observability"
 import { buildToolingCore, type ToolingAssembleInput } from "@/runner/assemble"
 import { deriveProvenance, type Tool, type ToolContext, type ToolEvent } from "@/tool"
+import { nth, present } from "../_helpers/expect-present"
 
 const SERVER_SRC = `
 const MALFORM = process.env.QUANTA_FAKE_MALFORM === "1"
@@ -184,7 +185,7 @@ describe("RFC04-2/3 MCP hot-reload LIVE feeder e2e", () => {
     // once for the successfully-loaded server. Without the emit this stays [].
     expect(wiring.sources).toHaveLength(1)
     // And the collected source is a working relister over the live client.
-    const relisted = await wiring.sources[0]!.relist()
+    const relisted = await nth(wiring.sources, 0, "wiring.sources").relist()
     expect(relisted.map((t) => t.name)).toContain(mcpToolName(SERVER_NAME, "alpha"))
   })
 
@@ -194,10 +195,16 @@ describe("RFC04-2/3 MCP hot-reload LIVE feeder e2e", () => {
 
     // Build the feeder EXACTLY as the composition root does.
     const rebuildRegistry = (mcpTools: Tool[]) =>
-      buildToolingCore(toolingInput(mcpTools, true)).rebuildRegistryWithMcpTools!(mcpTools)
+      present(
+        buildToolingCore(toolingInput(mcpTools, true)).rebuildRegistryWithMcpTools,
+        "rebuildRegistryWithMcpTools",
+      )(mcpTools)
     const seedRegistry = buildToolingCore(toolingInput(seedTools, true)).registry
     const { ref, publish } = createTurnRegistrySnapshotRef(buildTurnRegistrySnapshot(seedRegistry))
-    const sources: McpReloadableSource[] = mcpHotReloadFeatureFields(wiring).mcpReloadSources!
+    const sources: McpReloadableSource[] = present(
+      mcpHotReloadFeatureFields(wiring).mcpReloadSources,
+      "sources",
+    )
     const rebuild = async (): Promise<TurnRegistrySnapshot> =>
       buildTurnRegistrySnapshot(rebuildRegistry(await relistMcpTools(sources)))
     const controller = createMcpToolReloadController({ current: ref.current, publish }, rebuild)
@@ -249,7 +256,10 @@ describe("RFC04-2/3 MCP hot-reload LIVE feeder e2e", () => {
     const wiring = buildMcpHotReloadWiring()
     const seedTools = await loadWithWiring(wiring, { QUANTA_FAKE_MALFORM: "1" })
     const rebuildRegistry = (mcpTools: Tool[]) =>
-      buildToolingCore(toolingInput(mcpTools, true)).rebuildRegistryWithMcpTools!(mcpTools)
+      present(
+        buildToolingCore(toolingInput(mcpTools, true)).rebuildRegistryWithMcpTools,
+        "rebuildRegistryWithMcpTools",
+      )(mcpTools)
     const seedRegistry = buildToolingCore(toolingInput(seedTools, true)).registry
     const { ref, publish } = createTurnRegistrySnapshotRef(buildTurnRegistrySnapshot(seedRegistry))
     const sources = wiring.sources

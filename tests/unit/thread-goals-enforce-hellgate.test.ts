@@ -42,6 +42,7 @@ import {
   evaluateContinuation,
   type GoalContinuationInput,
 } from "@/objective/continuation"
+import { nth, present } from "../_helpers/expect-present"
 
 const TID = "thread-h17"
 
@@ -96,7 +97,15 @@ describe("HELLGATE [H17] — 6-state status machine", () => {
     const store = enforcingStore(() => t)
     store.set(TID, { goal: "g", successCriteria: ["c"], budget: { maxTokens: 1 } })
     store.recordUsage(TID, { tokens: 1 }) // exhausted
-    store.markCriterion(TID, store.get(TID)!.successCriteria[0]!.id, true) // all met
+    store.markCriterion(
+      TID,
+      nth(
+        present(store.get(TID), "store.get(TID)").successCriteria,
+        0,
+        'present(store.get(TID), "store.get(TID)").successCrit...',
+      ).id,
+      true,
+    ) // all met
     // budget_limited outranks completed
     expect(store.get(TID)?.status).toBe("budget_limited")
     // usage_limited outranks budget_limited
@@ -220,22 +229,22 @@ describe("HELLGATE [H17] — single-permit continuation semaphore", () => {
     // second acquire while the first is held ⇒ refused
     expect(sem.tryAcquire()).toBeNull()
     // release the first permit
-    a!.release()
+    present(a, "a").release()
     // now a fresh acquire succeeds
     const b = sem.tryAcquire()
     expect(b).not.toBeNull()
-    b!.release()
+    present(b, "b").release()
   })
 
   test("double-release is idempotent (no extra permits leak)", () => {
     const sem = new ContinuationSemaphore()
-    const a = sem.tryAcquire()!
+    const a = present(sem.tryAcquire(), "a")
     a.release()
     a.release() // idempotent
     const b = sem.tryAcquire()
     expect(b).not.toBeNull()
     // still single-permit after the buggy double-release
     expect(sem.tryAcquire()).toBeNull()
-    b!.release()
+    present(b, "b").release()
   })
 })

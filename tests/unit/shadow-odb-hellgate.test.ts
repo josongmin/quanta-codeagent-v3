@@ -44,6 +44,7 @@ import {
   workspaceHash,
 } from "@/storage"
 import { defaultGitRunner, type GitRunner } from "@/tool/git"
+import { nth, present } from "../_helpers/expect-present"
 
 /* ------------------------------------------------------------------ */
 /* test harness                                                        */
@@ -491,7 +492,7 @@ describe("rewindToLast — safety net (HELL-24)", () => {
     const snapsAfter = await odb.listSnapshots(ws)
     const preRewinds = snapsAfter.filter((s) => s.ref.startsWith(SHADOW_PRE_REWIND_REF_PREFIX))
     expect(preRewinds.length).toBe(1)
-    expect(preRewinds[0]!.ref).toMatch(PRE_REWIND_REF_RE)
+    expect(nth(preRewinds, 0, "preRewinds").ref).toMatch(PRE_REWIND_REF_RE)
   })
 
   test("HELL-24b: two rewinds with 1s gap ⇒ two distinct pre-rewind refs", async () => {
@@ -530,7 +531,7 @@ describe("rewindToLast — safety net (HELL-24)", () => {
     const snaps = await odb.listSnapshots(ws)
     const pr = snaps.find((s) => s.ref.startsWith(SHADOW_PRE_REWIND_REF_PREFIX))
     expect(pr).toBeDefined()
-    const captured = await readShadowFile(shadowDir, pr!.ref, "A.txt")
+    const captured = await readShadowFile(shadowDir, present(pr, "pr").ref, "A.txt")
     expect(captured).toBe("Y\n")
   })
 })
@@ -578,8 +579,8 @@ describe("listSnapshots (HELL-26)", () => {
     await odb.registerHead(ws)
     const after1 = await odb.listSnapshots(ws)
     expect(after1.length).toBe(1)
-    expect(after1[0]!.ref).toBe(SHADOW_LAST_REF)
-    expect(after1[0]!.sha).toMatch(/^[0-9a-f]{40}$/)
+    expect(nth(after1, 0, "after1").ref).toBe(SHADOW_LAST_REF)
+    expect(nth(after1, 0, "after1").sha).toMatch(/^[0-9a-f]{40}$/)
     // Wait 1s so the pre-rewind commit's committer time is strictly
     // greater than the registerHead commit's — newest-first ordering
     // becomes provably deterministic.
@@ -589,7 +590,9 @@ describe("listSnapshots (HELL-26)", () => {
     const after2 = await odb.listSnapshots(ws)
     expect(after2.length).toBe(2)
     // Newest first: pre-rewind ref's committerdate >= SHADOW_LAST_REF's.
-    expect(after2[0]!.timestampSec).toBeGreaterThanOrEqual(after2[1]!.timestampSec)
+    expect(nth(after2, 0, "after2").timestampSec).toBeGreaterThanOrEqual(
+      nth(after2, 1, "after2").timestampSec,
+    )
     const refs = after2.map((s) => s.ref).sort()
     expect(refs).toContain(SHADOW_LAST_REF)
     const pre = after2.find((s) => s.ref.startsWith(SHADOW_PRE_REWIND_REF_PREFIX))

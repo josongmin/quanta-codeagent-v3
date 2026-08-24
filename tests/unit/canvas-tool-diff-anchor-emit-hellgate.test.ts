@@ -37,6 +37,7 @@ import {
 } from "@/apps/web-daemon/canvas-tool-diff-source"
 import { decodeCanvasFrame, type ToolDiffMessage } from "@/protocol/canvas"
 import type { ReviewFinding } from "@/tool/git/review-diff"
+import { nth, present } from "../_helpers/expect-present"
 
 /* ------------------------------------------------------------------ */
 /* Fixtures                                                            */
@@ -97,7 +98,7 @@ describe("reviewFindingsToAnchors — projects ReviewFinding anchors onto the ne
     const f = anchoredFinding()
     // finding.line says 3 but the ANCHOR (validated new-side line) says 2.
     const anchors = reviewFindingsToAnchors(
-      [{ ...f, line: 99, anchor: { ...f.anchor!, line: 2 } }],
+      [{ ...f, line: 99, anchor: { ...present(f.anchor, "f.anchor"), line: 2 } }],
       "src/x.ts",
     )
     expect(anchors[0]?.line).toBe(2)
@@ -119,7 +120,7 @@ describe("reviewFindingsToAnchors — projects ReviewFinding anchors onto the ne
   test("SKIPS a finding whose anchor path != the diff path (wrong file)", () => {
     const f = anchoredFinding()
     const anchors = reviewFindingsToAnchors(
-      [{ ...f, anchor: { ...f.anchor!, path: "other/file.ts" } }],
+      [{ ...f, anchor: { ...present(f.anchor, "f.anchor"), path: "other/file.ts" } }],
       "src/x.ts",
     )
     expect(anchors).toEqual([])
@@ -148,7 +149,7 @@ describe("canvas emitter — projects captured anchors onto ToolDiffMessage.anch
     emitter.feedToolDiff(input)
 
     expect(frames).toHaveLength(1)
-    const msg = decodeToolDiff(frames[0]!)
+    const msg = decodeToolDiff(nth(frames, 0, "frames"))
     expect(msg.anchors).toEqual([
       {
         line: 3,
@@ -177,8 +178,12 @@ describe("canvas emitter — projects captured anchors onto ToolDiffMessage.anch
     })
     // An empty anchors array must NOT serialize an `anchors` key — absent by
     // default, byte-identical to a diff that never had review anchors.
-    expect(JSON.parse(withoutAnchors.frames[0]!).payload).not.toHaveProperty("anchors")
-    expect(JSON.parse(withAnchors.frames[0]!).payload).not.toHaveProperty("anchors")
+    expect(
+      JSON.parse(nth(withoutAnchors.frames, 0, "withoutAnchors.frames")).payload,
+    ).not.toHaveProperty("anchors")
+    expect(JSON.parse(nth(withAnchors.frames, 0, "withAnchors.frames")).payload).not.toHaveProperty(
+      "anchors",
+    )
     // And the two frames are byte-identical.
     expect(withAnchors.frames[0]).toBe(withoutAnchors.frames[0])
   })
@@ -189,7 +194,7 @@ describe("canvas emitter — projects captured anchors onto ToolDiffMessage.anch
     // The regression: the projection is dropped — feedToolDiff gets no anchors.
     const input: ToolDiffInput = { toolCallId: "t1", before: BEFORE, after: AFTER }
     emitter.feedToolDiff(input)
-    const msg = decodeToolDiff(frames[0]!)
+    const msg = decodeToolDiff(nth(frames, 0, "frames"))
     expect(msg.anchors).toBeUndefined()
   })
 })

@@ -38,6 +38,7 @@
 import { describe, expect, test } from "bun:test"
 import { readdirSync, readFileSync, statSync } from "node:fs"
 import { join, resolve } from "node:path"
+import { nth } from "../_helpers/expect-present"
 
 const REPO_ROOT = resolve(import.meta.dir, "../..")
 const SRC = join(REPO_ROOT, "src")
@@ -117,7 +118,7 @@ function extractFields(): string[] {
   for (const file of TYPES_FILES) {
     const text = readFileSync(file, "utf8")
     for (const m of text.matchAll(/^\s*readonly\s+([a-zA-Z][a-zA-Z0-9]*)\s*[?:]/gm)) {
-      names.add(m[1]!)
+      names.add(nth(m, 1, "readonly-field match groups"))
     }
   }
   return [...names].sort()

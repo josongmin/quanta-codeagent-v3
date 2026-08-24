@@ -23,6 +23,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import type { ToolContext, ToolEvent } from "@/tool"
 import { astGrepTool } from "@/tool/ast-grep"
+import { present } from "../_helpers/expect-present"
 
 // ─── source-level ratchets ──────────────────────────────────────────────────
 
@@ -460,8 +461,8 @@ describe("B7: stdout is capped before JSON.parse to prevent OOM", () => {
       // (after truncation) or OOM; this test catches the throw.
       expect(threw).toBe(false)
       expect(result).not.toBeNull()
-      expect(typeof result!.ok).toBe("boolean")
-      expect(typeof result!.output).toBe("string")
+      expect(typeof present(result, "result").ok).toBe("boolean")
+      expect(typeof present(result, "result").output).toBe("string")
     },
   )
 

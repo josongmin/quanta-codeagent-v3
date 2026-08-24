@@ -164,7 +164,9 @@ describe("HELLGATE (c2) — exec_command spawns in the jailed path (not raw cwd)
       if (r.kind === "success") {
         const out = r.stdout.trim()
         expect(out.startsWith(jailRoot)).toBe(true)
-        // Anti-regression: must NOT have run under the process cwd (the repo).
+        // Anti-regression: must NOT have run under the ambient process cwd
+        // (the repo root today; a throwaway sandbox dir under the sandboxed-cwd
+        // runner — either way a directory that is not `jailRoot`).
         expect(out.startsWith(realpathSync(process.cwd()))).toBe(false)
       }
     } finally {

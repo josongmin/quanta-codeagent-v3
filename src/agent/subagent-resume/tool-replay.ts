@@ -88,6 +88,73 @@ export interface ShadowCommitRestorer {
 /* default policy                                                      */
 /* ------------------------------------------------------------------ */
 
+/** Cache HIT — the tool ALREADY ran, so no tier may re-run it: `pure` because
+ *  the output is reproducible, `mutating-recoverable` because the orchestrator
+ *  restores the shadow commit alongside, and `mutating-external` because its
+ *  real-world effect landed before the crash and must not be repeated. The one
+ *  tier that halts is a tier we do not recognise — an evolved table or a
+ *  hand-edited record is a reason to stop, not to guess. */
+const decideOnCacheHit = (record: ToolCallRecord): ToolReplayDecision => {
+  const tier = record.tier
+  switch (tier) {
+    case "pure":
+      return { action: "replay-from-cache", record }
+    case "mutating-recoverable":
+      // Output already captured; orchestrator ALSO restores shadowCommit.
+      return { action: "replay-from-cache", record }
+    case "mutating-external":
+      // External side effect already produced its real effect before
+      // the crash — DO NOT re-run; surface cached output to the LLM.
+      return { action: "replay-from-cache", record }
+    default: {
+      // Defensive — unknown tier on a persisted record (table evolved,
+      // record was hand-edited, etc.). Halt rather than guess.
+      const tierRepr: string = typeof tier === "string" ? (tier as string) : JSON.stringify(tier)
+      return { action: "halt", reason: `unknown tier on record: ${tierRepr}` }
+    }
+  }
+}
+
+/** Cache MISS — nothing was captured, so the question is whether re-running is
+ *  SAFE, and the classifier's tier is the only evidence: `pure` re-runs,
+ *  `mutating-recoverable` halts (there is no shadow anchor to restore from),
+ *  `mutating-external` asks the human. An unclassified tool halts: the policy
+ *  refuses to assume a tool it has never heard of is harmless. */
+const decideOnCacheMiss = (
+  toolName: string,
+  classifier: IdempotencyClassifier,
+): ToolReplayDecision => {
+  const tier = classifier.classify(toolName)
+  if (tier === null) {
+    return {
+      action: "halt",
+      reason: `unknown tool '${toolName}' on cache miss (no classifier entry)`,
+    }
+  }
+  switch (tier) {
+    case "pure":
+      return {
+        action: "safe-re-run",
+        reason: `cache miss for pure tool '${toolName}' — safe to re-run`,
+      }
+    case "mutating-recoverable":
+      return {
+        action: "halt",
+        reason: `cache miss for mutating-recoverable tool '${toolName}' — re-running would mutate workspace and no shadow anchor exists to restore`,
+      }
+    case "mutating-external":
+      return {
+        action: "ask-user-confirm",
+        reason: `cache miss for mutating-external tool '${toolName}' — re-running would repeat side effect; caller must confirm`,
+      }
+    default: {
+      // Defensive — exhaustiveness check; should be unreachable.
+      const tierRepr: string = typeof tier === "string" ? (tier as string) : JSON.stringify(tier)
+      return { action: "halt", reason: `unknown tier from classifier: ${tierRepr}` }
+    }
+  }
+}
+
 /** Default 3-tier policy — see module-doc for the full matrix. */
 export const defaultToolReplayPolicy = (): ToolReplayPolicy => ({
   decide(
@@ -96,60 +163,7 @@ export const defaultToolReplayPolicy = (): ToolReplayPolicy => ({
     classifier: IdempotencyClassifier,
   ): ToolReplayDecision {
     try {
-      // ---- Cache HIT path ----
-      if (record !== null) {
-        const tier = record.tier
-        switch (tier) {
-          case "pure":
-            return { action: "replay-from-cache", record }
-          case "mutating-recoverable":
-            // Output already captured; orchestrator ALSO restores shadowCommit.
-            return { action: "replay-from-cache", record }
-          case "mutating-external":
-            // External side effect already produced its real effect before
-            // the crash — DO NOT re-run; surface cached output to the LLM.
-            return { action: "replay-from-cache", record }
-          default: {
-            // Defensive — unknown tier on a persisted record (table evolved,
-            // record was hand-edited, etc.). Halt rather than guess.
-            const tierRepr: string =
-              typeof tier === "string" ? (tier as string) : JSON.stringify(tier)
-            return { action: "halt", reason: `unknown tier on record: ${tierRepr}` }
-          }
-        }
-      }
-
-      // ---- Cache MISS path ----
-      const tier = classifier.classify(toolName)
-      if (tier === null) {
-        return {
-          action: "halt",
-          reason: `unknown tool '${toolName}' on cache miss (no classifier entry)`,
-        }
-      }
-      switch (tier) {
-        case "pure":
-          return {
-            action: "safe-re-run",
-            reason: `cache miss for pure tool '${toolName}' — safe to re-run`,
-          }
-        case "mutating-recoverable":
-          return {
-            action: "halt",
-            reason: `cache miss for mutating-recoverable tool '${toolName}' — re-running would mutate workspace and no shadow anchor exists to restore`,
-          }
-        case "mutating-external":
-          return {
-            action: "ask-user-confirm",
-            reason: `cache miss for mutating-external tool '${toolName}' — re-running would repeat side effect; caller must confirm`,
-          }
-        default: {
-          // Defensive — exhaustiveness check; should be unreachable.
-          const tierRepr: string =
-            typeof tier === "string" ? (tier as string) : JSON.stringify(tier)
-          return { action: "halt", reason: `unknown tier from classifier: ${tierRepr}` }
-        }
-      }
+      return record !== null ? decideOnCacheHit(record) : decideOnCacheMiss(toolName, classifier)
     } catch (e) {
       // NO-THROW contract: collapse any policy-internal throw into halt.
       const msg = errMessage(e)

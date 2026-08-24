@@ -125,6 +125,46 @@ const parseHeartbeatPolicy = (raw: string | null): HeartbeatPolicySnapshot | und
   })
 }
 
+/**
+ * Translate the nullable columns of one row into present-or-omitted keys.
+ *
+ * A unit because the whole set obeys one rule SQLite cannot express: a NULL
+ * column means the key is ABSENT on the domain object, never present-and-
+ * `undefined` (exactOptionalPropertyTypes) — which is what makes a round-tripped
+ * row structurally equal to one the in-memory engine built. The two JSON-backed
+ * columns arrive already decoded so they are parsed exactly once per row.
+ */
+const rowNullableFields = (
+  row: AutomationRow,
+  modelFallbacks: ReadonlyArray<string> | undefined,
+  inheritedPolicy: HeartbeatPolicySnapshot | undefined,
+): Pick<
+  EngineAutomation,
+  | "lastRunAt"
+  | "lastError"
+  | "claimToken"
+  | "claimedAt"
+  | "model"
+  | "modelFallbacks"
+  | "agentRole"
+  | "baseBranch"
+  | "kind"
+  | "targetThreadId"
+  | "inheritedPolicy"
+> => ({
+  ...(row.last_run_at !== null ? { lastRunAt: row.last_run_at } : {}),
+  ...(row.last_error !== null ? { lastError: row.last_error } : {}),
+  ...(row.claim_token !== null ? { claimToken: row.claim_token } : {}),
+  ...(row.claimed_at !== null ? { claimedAt: row.claimed_at } : {}),
+  ...(row.model !== null ? { model: row.model } : {}),
+  ...(modelFallbacks !== undefined ? { modelFallbacks } : {}),
+  ...(row.agent_role !== null ? { agentRole: row.agent_role } : {}),
+  ...(row.base_branch !== null ? { baseBranch: row.base_branch } : {}),
+  ...(row.kind === "heartbeat" ? { kind: "heartbeat" as const } : {}),
+  ...(row.target_thread_id !== null ? { targetThreadId: row.target_thread_id } : {}),
+  ...(inheritedPolicy !== undefined ? { inheritedPolicy } : {}),
+})
+
 const rowToEngineAutomation = (row: AutomationRow): EngineAutomation | undefined => {
   if (!isEngineStatus(row.status)) return undefined
   const rule = parseRuleJson(row.rule_json)
@@ -147,26 +187,66 @@ const rowToEngineAutomation = (row: AutomationRow): EngineAutomation | undefined
   ) {
     return undefined
   }
-  return {
-    ...base,
-    ...(row.last_run_at !== null ? { lastRunAt: row.last_run_at } : {}),
-    ...(row.last_error !== null ? { lastError: row.last_error } : {}),
-    ...(row.claim_token !== null ? { claimToken: row.claim_token } : {}),
-    ...(row.claimed_at !== null ? { claimedAt: row.claimed_at } : {}),
-    ...(row.model !== null ? { model: row.model } : {}),
-    ...(modelFallbacks !== undefined ? { modelFallbacks } : {}),
-    ...(row.agent_role !== null ? { agentRole: row.agent_role } : {}),
-    ...(row.base_branch !== null ? { baseBranch: row.base_branch } : {}),
-    ...(row.kind === "heartbeat" ? { kind: "heartbeat" as const } : {}),
-    ...(row.target_thread_id !== null ? { targetThreadId: row.target_thread_id } : {}),
-    ...(inheritedPolicy !== undefined ? { inheritedPolicy } : {}),
-  }
+  return { ...base, ...rowNullableFields(row, modelFallbacks, inheritedPolicy) }
 }
 
 const ioFail = (message: string): EngineResult<never> => ({
   ok: false,
   code: "io-failed",
   message,
+})
+
+/**
+ * Admission check for a heartbeat automation — the rejection to return, or
+ * `undefined` to proceed.
+ *
+ * A unit because a heartbeat is only well-formed as a *triple*: it must name a
+ * thread, carry the policy snapshot it inherited, and be the ONLY live heartbeat
+ * on that thread. Non-heartbeat rows are unconstrained, so the whole rule lives
+ * behind the one `kind` test.
+ */
+const rejectHeartbeat = (deps: Deps, input: ScheduleInput): EngineResult<never> | undefined => {
+  if (input.kind !== "heartbeat") return undefined
+  if (input.targetThreadId === undefined || input.targetThreadId.length === 0) {
+    return { ok: false, code: "invalid-input", message: "heartbeat requires targetThreadId" }
+  }
+  if (input.inheritedPolicy === undefined) {
+    return { ok: false, code: "invalid-input", message: "heartbeat requires inheritedPolicy" }
+  }
+  if (deps.stmts.liveHeartbeatForThread.get(input.targetThreadId) !== null) {
+    return {
+      ok: false,
+      code: "heartbeat-thread-occupied",
+      message: `thread '${input.targetThreadId}' already has a live heartbeat`,
+    }
+  }
+  return undefined
+}
+
+/**
+ * Bind parameters for the insert statement.
+ *
+ * A unit because it is the inverse of {@link rowNullableFields}: an absent
+ * domain key becomes SQL NULL, and the two structured fields become JSON text.
+ * Keeping both directions of that translation adjacent is what lets a reader
+ * check the round trip.
+ */
+const insertParams = (input: ScheduleInput) => ({
+  $id: input.id,
+  $title: input.title,
+  $rule: JSON.stringify(input.rule),
+  $prompt: input.prompt,
+  $next_run_at: input.nextRunAt,
+  $created_at: input.createdAt,
+  $model: input.model ?? null,
+  $model_fallbacks:
+    input.modelFallbacks !== undefined ? JSON.stringify(input.modelFallbacks) : null,
+  $agent_role: input.agentRole ?? null,
+  $base_branch: input.baseBranch ?? null,
+  $kind: input.kind ?? null,
+  $target_thread_id: input.targetThreadId ?? null,
+  $inherited_policy:
+    input.inheritedPolicy !== undefined ? JSON.stringify(input.inheritedPolicy) : null,
 })
 
 export const schedule = (
@@ -180,30 +260,8 @@ export const schedule = (
       message: "id is empty",
     })
   }
-  if (input.kind === "heartbeat") {
-    if (input.targetThreadId === undefined || input.targetThreadId.length === 0) {
-      return Promise.resolve({
-        ok: false,
-        code: "invalid-input",
-        message: "heartbeat requires targetThreadId",
-      })
-    }
-    if (input.inheritedPolicy === undefined) {
-      return Promise.resolve({
-        ok: false,
-        code: "invalid-input",
-        message: "heartbeat requires inheritedPolicy",
-      })
-    }
-    const live = deps.stmts.liveHeartbeatForThread.get(input.targetThreadId)
-    if (live !== null) {
-      return Promise.resolve({
-        ok: false,
-        code: "heartbeat-thread-occupied",
-        message: `thread '${input.targetThreadId}' already has a live heartbeat`,
-      })
-    }
-  }
+  const heartbeatRejection = rejectHeartbeat(deps, input)
+  if (heartbeatRejection !== undefined) return Promise.resolve(heartbeatRejection)
   try {
     const dup = deps.stmts.exists.get(input.id)
     if (dup !== null) {
@@ -213,23 +271,7 @@ export const schedule = (
         message: `automation '${input.id}' already scheduled`,
       })
     }
-    deps.stmts.insert.run({
-      $id: input.id,
-      $title: input.title,
-      $rule: JSON.stringify(input.rule),
-      $prompt: input.prompt,
-      $next_run_at: input.nextRunAt,
-      $created_at: input.createdAt,
-      $model: input.model ?? null,
-      $model_fallbacks:
-        input.modelFallbacks !== undefined ? JSON.stringify(input.modelFallbacks) : null,
-      $agent_role: input.agentRole ?? null,
-      $base_branch: input.baseBranch ?? null,
-      $kind: input.kind ?? null,
-      $target_thread_id: input.targetThreadId ?? null,
-      $inherited_policy:
-        input.inheritedPolicy !== undefined ? JSON.stringify(input.inheritedPolicy) : null,
-    })
+    deps.stmts.insert.run(insertParams(input))
   } catch (e) {
     if (
       input.kind === "heartbeat" &&

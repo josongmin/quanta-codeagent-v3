@@ -26,6 +26,7 @@ import {
   type TimerPort,
   throwIfAborted,
 } from "@/shared"
+import { nth } from "../../_helpers/expect-present"
 
 /** A controllable fake timer so tests drive deadlines without real time and can
  *  assert every armed timer was cleared (leak detector). */
@@ -89,7 +90,7 @@ describe("abortableSleep — rejects promptly and never leaks", () => {
     const p = abortableSleep(50, undefined, timers)
     // exactly one live timer was armed
     expect(timers.live.size).toBe(1)
-    const id = [...timers.live][0]!
+    const id = nth([...timers.live], 0, "timers.live")
     timers.fire(id)
     await p
   })
@@ -99,7 +100,7 @@ describe("abortableSleep — rejects promptly and never leaks", () => {
     const c = new AbortController()
     const p = abortableSleep(10_000, c.signal, timers)
     expect(timers.live.size).toBe(1)
-    const armed = [...timers.live][0]!
+    const armed = nth([...timers.live], 0, "timers.live")
     c.abort()
     await expect(p).rejects.toMatchObject({ name: "AbortError", reason: "abort" })
     // LEAK PROOF: the timer that would have kept the event loop alive is cleared.
@@ -121,7 +122,7 @@ describe("abortableSleep — rejects promptly and never leaks", () => {
     // Run+complete many sleeps against ONE shared signal.
     for (let i = 0; i < 100; i++) {
       const p = abortableSleep(1, c.signal, timers)
-      timers.fire([...timers.live][0]!)
+      timers.fire(nth([...timers.live], 0, "timers.live"))
       await p
     }
     // If listeners leaked, aborting now would reject 100 stale promises; instead
@@ -149,7 +150,7 @@ describe("fetchWithDeadline — deadline tears down the REAL request, typed reas
     const p = fetchWithDeadline("https://x", { timeoutMs: 30, fetchFn, timers })
     // Fire the deadline timer.
     expect(timers.live.size).toBe(1)
-    timers.fire([...timers.live][0]!)
+    timers.fire(nth([...timers.live], 0, "timers.live"))
     const err = await p.then(
       () => null,
       (e) => e,

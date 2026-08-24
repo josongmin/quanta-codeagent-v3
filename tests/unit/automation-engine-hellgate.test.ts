@@ -28,6 +28,7 @@ import {
 } from "@/scheduler/automation-engine"
 import { parseRRule } from "@/scheduler/rrule-parser"
 import type { RRule } from "@/scheduler/types"
+import { nth, present } from "../_helpers/expect-present"
 
 const ruleOf = (s: string): RRule => {
   const r = parseRRule(s)
@@ -62,7 +63,7 @@ describe("ADR-0215 — AutomationEnginePort adversarial battery", () => {
     expect(list.ok).toBe(true)
     if (!list.ok) throw new Error("unreachable")
     expect(list.value).toHaveLength(1)
-    expect(list.value[0]!.id).toBe("a1")
+    expect(nth(list.value, 0, "list.value").id).toBe("a1")
   })
 
   test("[2] duplicate id rejected, original survives", async () => {
@@ -145,7 +146,7 @@ describe("ADR-0215 — AutomationEnginePort adversarial battery", () => {
     const r = await eng.next(due)
     if (!r.ok) throw new Error("unreachable")
     expect(r.value).not.toBeNull()
-    expect(r.value!.id).toBe("a")
+    expect(present(r.value, "r.value").id).toBe("a")
   })
 
   test("[6] markRun on non-existent id → not-found", async () => {
@@ -281,8 +282,8 @@ describe("ADR-0215 — AutomationEnginePort adversarial battery", () => {
     // T10 runtime-correctness H5-1/H5-2 hellgates).
     const list = await eng.list()
     if (!list.ok) throw new Error("unreachable")
-    expect(list.value[0]!.status).toBe("scheduled")
-    expect(list.value[0]!.lastError).toBe("kaboom")
+    expect(nth(list.value, 0, "list.value").status).toBe("scheduled")
+    expect(nth(list.value, 0, "list.value").lastError).toBe("kaboom")
   })
 
   test("[11] tickScheduler successful fire → status scheduled + nextRunAt advanced", async () => {
@@ -307,8 +308,8 @@ describe("ADR-0215 — AutomationEnginePort adversarial battery", () => {
     expect(invoked).toBe(1)
     const list = await eng.list()
     if (!list.ok) throw new Error("unreachable")
-    expect(list.value[0]!.status).toBe("scheduled")
-    expect(list.value[0]!.nextRunAt).toBeGreaterThan(utc(2026, 5, 25, 10))
+    expect(nth(list.value, 0, "list.value").status).toBe("scheduled")
+    expect(nth(list.value, 0, "list.value").nextRunAt).toBeGreaterThan(utc(2026, 5, 25, 10))
   })
 
   test("[12] sqlite parity — schedule/list/cancel/next/markRun byte-equal to in-memory", async () => {
@@ -373,10 +374,10 @@ describe("ADR-0215 — AutomationEnginePort adversarial battery", () => {
     const inbox = listInboxItems(db, "a1")
     expect(runs).toHaveLength(1)
     expect(inbox).toHaveLength(1)
-    expect(runs[0]!.outcome).toBe("fired")
-    expect(inbox[0]!.title).toBe("hi")
-    expect(inbox[0]!.summary).toBe("world")
-    expect(inbox[0]!.read).toBe(false)
+    expect(nth(runs, 0, "runs").outcome).toBe("fired")
+    expect(nth(inbox, 0, "inbox").title).toBe("hi")
+    expect(nth(inbox, 0, "inbox").summary).toBe("world")
+    expect(nth(inbox, 0, "inbox").read).toBe(false)
   })
 
   test("[14] exactOptional: schedule with no last_run_at OMITS the key (no `field: undefined`)", async () => {

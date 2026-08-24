@@ -8,10 +8,13 @@
  */
 
 import { describe, expect, test } from "bun:test"
+import { join } from "node:path"
 import { buildBugCmd, renderBug } from "@/../src/apps/cli/bug-cmd"
 import { repoUrl, resolveCommit, resolveVersion } from "@/../src/apps/cli/repo-info"
 import type { SlashContext } from "@/../src/apps/cli/slash-contract"
 import { buildReleaseNotesCmd, buildVersionCmd, renderVersion } from "@/../src/apps/cli/version-cmd"
+
+const REPO_ROOT = join(import.meta.dir, "..", "..", "..")
 
 const capCtx = (): { ctx: SlashContext; lines: string[] } => {
   const lines: string[] = []
@@ -29,13 +32,14 @@ describe("HELL-VER-1 — version resolution precedence", () => {
   })
 
   test("falls back to package.json version at repo root", () => {
-    // cwd is the repo root in the test runner; package.json has a real version.
-    const v = resolveVersion({}, process.cwd())
+    // The repo root is anchored on THIS FILE, not on the runner's ambient cwd:
+    // resolveVersion walks up from the dir it is given looking for package.json.
+    const v = resolveVersion({}, REPO_ROOT)
     expect(v).toMatch(/^\d+\.\d+\.\d+/)
   })
 
   test("blank QUANTA_VERSION is ignored (not treated as a version)", () => {
-    expect(resolveVersion({ QUANTA_VERSION: "  " }, process.cwd())).toMatch(/^\d+\.\d+\.\d+/)
+    expect(resolveVersion({ QUANTA_VERSION: "  " }, REPO_ROOT)).toMatch(/^\d+\.\d+\.\d+/)
   })
 
   test("unresolvable ⇒ 'unknown' (never throws)", () => {

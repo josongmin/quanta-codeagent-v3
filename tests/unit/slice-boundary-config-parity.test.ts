@@ -16,6 +16,7 @@ import { readdirSync, readFileSync } from "node:fs"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
 import ts from "typescript"
+import { nth } from "../_helpers/expect-present"
 import { SLICE_BOUNDARY_CONFIGS } from "./_arch/slice-boundary-configs"
 
 const UNIT_DIR = dirname(fileURLToPath(import.meta.url))
@@ -26,7 +27,7 @@ const entrypointFileNames = (): ReadonlyArray<readonly [string, string]> => {
   const out: Array<[string, string]> = []
   for (const name of readdirSync(UNIT_DIR)) {
     const m = ENTRYPOINT_RE.exec(name)
-    if (m) out.push([m[1]!, name])
+    if (m) out.push([nth(m, 1, "entrypoint match groups"), name])
   }
   return out
 }

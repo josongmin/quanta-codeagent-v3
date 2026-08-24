@@ -93,16 +93,10 @@ export const compileSeatbeltProfile = (
     }
   }
 
-  // Writes: read-only skips workspace writes but still honors explicit scoped
-  // extraWritePaths, used for caller-owned scratch dirs such as TMPDIR.
-  if (policy.profile !== "read-only" || extraWrites.length > 0) {
-    const writeSubpaths: string[] = policy.profile !== "read-only" ? [`(subpath "${escWs}")`] : []
-    for (const p of extraWrites) {
-      const escaped = escapeSbpl(p)
-      writeSubpaths.push(`(literal "${escaped}")`, `(subpath "${escaped}")`)
-    }
+  const writeLine = writeAllowLine(policy.profile, escWs, extraWrites)
+  if (writeLine !== null) {
     lines.push(";; workspace + extra writes")
-    lines.push(`(allow file-write* ${writeSubpaths.join(" ")})`)
+    lines.push(writeLine)
   }
 
   // Network.
@@ -111,6 +105,30 @@ export const compileSeatbeltProfile = (
   const baseline = `${lines.join("\n")}\n`
   if (isDefaultStrict(opts)) return baseline
   return applyStrictKnobs(baseline, opts as StrictKnobs)
+}
+
+/**
+ * The single `(allow file-write* ...)` line for this profile, or `null` when
+ * nothing at all is writable.
+ *
+ * A unit because it is where the cross-backend write-scope contract documented
+ * on {@link SandboxPolicy.extraWritePaths} is decided: `read-only` must deny the
+ * AMBIENT filesystem — the workspace included — while STILL granting the narrow
+ * caller-owned scopes (a read-mode TMPDIR). Both halves in one place, so a
+ * reader can see that read-only neither gains the workspace nor loses TMPDIR.
+ */
+const writeAllowLine = (
+  profile: SandboxPolicy["profile"],
+  escWs: string,
+  extraWrites: readonly string[],
+): string | null => {
+  if (profile === "read-only" && extraWrites.length === 0) return null
+  const writeSubpaths: string[] = profile !== "read-only" ? [`(subpath "${escWs}")`] : []
+  for (const p of extraWrites) {
+    const escaped = escapeSbpl(p)
+    writeSubpaths.push(`(literal "${escaped}")`, `(subpath "${escaped}")`)
+  }
+  return `(allow file-write* ${writeSubpaths.join(" ")})`
 }
 
 /** Escape `"` and `\` for inclusion in an SBPL string literal. */

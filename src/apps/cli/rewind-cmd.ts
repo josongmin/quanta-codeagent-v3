@@ -193,18 +193,28 @@ const shortId = (id: string): string => (id.length <= SHORT_ID_LEN ? id : id.sli
 /** One-line content preview for a message — the first text block, trimmed +
  *  truncated to 80 chars. Tool-use / tool-result blocks contribute their
  *  tool name in `[brackets]`. Empty messages yield `(empty)`. */
-const previewMessage = (m: {
-  role: "user" | "assistant"
-  content: readonly { type: string; text?: string; name?: string }[]
-}): string => {
-  for (const block of m.content) {
+type PreviewBlock = { type: string; text?: string; name?: string }
+
+/** The first NON-EMPTY text block, collapsed to one line and truncated, or
+ *  undefined when the message carries no prose. Its own unit because "the
+ *  first text block wins" is the preview's whole ranking rule — every other
+ *  block kind is only a fallback for a message that has none. */
+const firstTextPreview = (content: readonly PreviewBlock[]): string | undefined => {
+  for (const block of content) {
     if (block.type === "text" && typeof block.text === "string" && block.text.length > 0) {
       const oneLine = block.text.replace(/\s+/g, " ").trim()
       return oneLine.length > 80 ? `${oneLine.slice(0, 77)}...` : oneLine
     }
   }
-  // No text — look for a tool name.
-  for (const block of m.content) {
+  return undefined
+}
+
+/** The `[bracketed]` stand-in for a prose-less message — the first block whose
+ *  kind we have a label for. A unit because the ORDER here is a display
+ *  preference (a tool call is more informative than the thinking around it),
+ *  not a property of any single block. */
+const firstBlockTag = (content: readonly PreviewBlock[]): string | undefined => {
+  for (const block of content) {
     if (block.type === "tool_use" && typeof block.name === "string") {
       return `[tool:${block.name}]`
     }
@@ -212,8 +222,13 @@ const previewMessage = (m: {
     if (block.type === "thinking") return "[thinking]"
     if (block.type === "image") return "[image]"
   }
-  return "(empty)"
+  return undefined
 }
+
+const previewMessage = (m: {
+  role: "user" | "assistant"
+  content: readonly PreviewBlock[]
+}): string => firstTextPreview(m.content) ?? firstBlockTag(m.content) ?? "(empty)"
 
 interface RewindFlags {
   readonly idPrefix?: string
@@ -223,36 +238,45 @@ interface RewindFlags {
   readonly recover: boolean
 }
 
+type RewindBoolFlag = "toLast" | "yes" | "restoreFiles" | "recover"
+
+/** Alias → field for `/rewind`'s boolean switches. A TABLE rather than an
+ *  if/else chain so an added alias cannot land on the wrong field, and so the
+ *  parse loop is left with exactly one decision: flag, or positional. */
+const REWIND_BOOL_ALIASES: Readonly<Record<string, RewindBoolFlag>> = {
+  "--to-last": "toLast",
+  "--last": "toLast",
+  "--yes": "yes",
+  "-y": "yes",
+  "--restore-files": "restoreFiles",
+  "--recover": "recover",
+}
+
 const parseRewindArgs = (args: readonly string[]): RewindFlags | string => {
-  let toLast = false
-  let yes = false
-  let restoreFiles = false
-  let recover = false
+  const bools: Record<RewindBoolFlag, boolean> = {
+    toLast: false,
+    yes: false,
+    restoreFiles: false,
+    recover: false,
+  }
   let idPrefix: string | undefined
   for (const a of args) {
-    if (a === "--to-last" || a === "--last") {
-      toLast = true
-    } else if (a === "--yes" || a === "-y") {
-      yes = true
-    } else if (a === "--restore-files") {
-      restoreFiles = true
-    } else if (a === "--recover") {
-      recover = true
-    } else if (a.startsWith("--")) {
-      return `unknown flag: ${a}`
-    } else {
-      if (idPrefix !== undefined) {
-        return `unexpected extra argument: ${a}`
-      }
-      idPrefix = a
+    const field = REWIND_BOOL_ALIASES[a]
+    if (field !== undefined) {
+      bools[field] = true
+      continue
     }
+    if (a.startsWith("--")) {
+      return `unknown flag: ${a}`
+    }
+    if (idPrefix !== undefined) {
+      return `unexpected extra argument: ${a}`
+    }
+    idPrefix = a
   }
   const out: RewindFlags = {
     ...(idPrefix !== undefined ? { idPrefix } : {}),
-    toLast,
-    yes,
-    restoreFiles,
-    recover,
+    ...bools,
   }
   return out
 }

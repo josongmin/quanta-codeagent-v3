@@ -78,6 +78,10 @@ import type { GitRunner, GitRunResult } from "@/tool/git/types"
 import { composeToolResultContent, readImageTool } from "@/tool/image"
 import { webFetchTool } from "@/tool/web"
 
+// Repo root anchored on this file, not the ambient cwd — the port-boundary scan
+// below reads real `src/**` files out of the checkout.
+const REPO_ROOT_FOR_PORT_SCAN = path.join(import.meta.dir, "..", "..")
+
 /* ────────────────────────────────────────────────────────────────────────── */
 /* Helpers + minimal-config harness (mirrors the precedent test)              */
 /* ────────────────────────────────────────────────────────────────────────── */
@@ -799,7 +803,7 @@ describe("Cross-plane composition", () => {
     ]
     const offenders: { path: string; line: number; text: string }[] = []
     for (const rel of portFiles) {
-      const abs = path.join(process.cwd(), rel)
+      const abs = path.join(REPO_ROOT_FOR_PORT_SCAN, rel)
       const content = await readFile(abs, "utf8")
       const lines = content.split("\n")
       lines.forEach((line, i) => {

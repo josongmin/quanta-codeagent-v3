@@ -86,6 +86,29 @@ const toError = (e: unknown): Error => (e instanceof Error ? e : new Error(Strin
  * NEVER throws — failures are returned as `{kind:"failed", ...}` envelopes,
  * including signal-driven cancellation.
  */
+/**
+ * The `failed` envelope for a caller signal that was ALREADY aborted before the first
+ * call, or undefined when there is nothing to short-circuit.
+ *
+ * A unit because it owns the one honest reading of `signal.reason`, which is `any`: an
+ * Error passes through, a string becomes its message, and anything else becomes a
+ * generic "aborted" rather than a stringified object. It reports `attempts: 0` because
+ * that is the literal truth — `fn` was never invoked — and p-retry@8 cannot be handed
+ * an already-aborted signal without racing its first call.
+ */
+const preAbortedRetryEnvelope = <T>(
+  signal: AbortSignal | undefined,
+): RetryResult<T> | undefined => {
+  if (signal === undefined || !signal.aborted) return undefined
+  const reason = signal.reason
+  return {
+    kind: "failed",
+    error:
+      reason instanceof Error ? reason : new Error(typeof reason === "string" ? reason : "aborted"),
+    attempts: 0,
+  }
+}
+
 export const withRetryPRetry = async <T>(
   fn: () => Promise<T>,
   opts: PRetryOpts = {},
@@ -104,19 +127,9 @@ export const withRetryPRetry = async <T>(
   let lastError: Error | undefined
 
   // Caller cannot pass an already-aborted signal to p-retry@8 — it would
-  // race with the first call. Honor it explicitly up front so the envelope
-  // reads `attempts: 0` (no fn invocation occurred).
-  if (opts.signal?.aborted) {
-    const reason = opts.signal.reason
-    return {
-      kind: "failed",
-      error:
-        reason instanceof Error
-          ? reason
-          : new Error(typeof reason === "string" ? reason : "aborted"),
-      attempts: 0,
-    }
-  }
+  // race with the first call. Honor it explicitly up front.
+  const preAborted = preAbortedRetryEnvelope<T>(opts.signal)
+  if (preAborted !== undefined) return preAborted
 
   try {
     const value = await pRetry<T>(

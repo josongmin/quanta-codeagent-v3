@@ -108,6 +108,10 @@ describe("writeFile / readFile round-trip", () => {
     expect((await statFile("rel.txt", dir)).path).toBe(join(dir, "rel.txt"))
     expect(parentDir("sub/rel.txt", dir)).toBe(join(dir, "sub"))
     // The same relative name must NOT exist under process.cwd().
+    // NOTE: under the sandboxed-cwd runner process.cwd() is a THROWAWAY dir
+    // that starts empty every run, so this is a real negative rather than the
+    // self-poisoning check it was against the repo root (a leaked `rel.txt` at
+    // the root used to redden the NEXT run).
     expect(await fileExists("rel.txt")).toBe(false)
   })
 })

@@ -66,6 +66,31 @@ async function* replayEvents(
   }
 }
 
+/** Pick the port a cassette MISS falls through to, or raise
+ *  {@link ReplayMissError} when this replay port has no fallthrough.
+ *
+ *  A unit because "what a miss means" is ONE decision with exactly three
+ *  outcomes — refuse (`onMiss:"throw"`), fall through to the recording chain
+ *  (`record-and-passthrough`), or fall through to the bare fallback — and all
+ *  three converge on the same error when no port is actually available. The
+ *  final `undefined` check is defensive only: the constructor already rejects a
+ *  non-throw policy without a fallback, but TS cannot narrow that across the
+ *  closure. Deliberately SYNC (the original inline form was too), so no await
+ *  point moves relative to the cassette lookup. */
+const resolveMissUpstream = (
+  input: StreamInput,
+  policy: MatchPolicy,
+  onMiss: OnMissPolicy,
+  fallback: LLMPort | undefined,
+  recordingFallback: LLMPort | null,
+): LLMPort => {
+  if (onMiss === "throw") throw new ReplayMissError(input, policy)
+  const upstream =
+    onMiss === "record-and-passthrough" && recordingFallback !== null ? recordingFallback : fallback
+  if (upstream === undefined) throw new ReplayMissError(input, policy)
+  return upstream
+}
+
 export function replayLlmPort(opts: ReplayLlmOpts): LLMPort {
   const policy: MatchPolicy = opts.matchPolicy ?? "exact"
   const onMiss: OnMissPolicy = opts.onMiss ?? "throw"
@@ -95,18 +120,8 @@ export function replayLlmPort(opts: ReplayLlmOpts): LLMPort {
           yield* replayEvents(hit, input.signal)
           return
         }
-        if (onMiss === "throw") {
-          throw new ReplayMissError(input, policy)
-        }
         // passthrough — caller's signal flows through `input` unchanged.
-        const upstream =
-          onMiss === "record-and-passthrough" && recordingFallback !== null
-            ? recordingFallback
-            : fallback
-        if (upstream === undefined) {
-          // Defensive: constructor already guarded, but TS narrows nullably.
-          throw new ReplayMissError(input, policy)
-        }
+        const upstream = resolveMissUpstream(input, policy, onMiss, fallback, recordingFallback)
         for await (const ev of upstream.stream(input)) {
           // L6 M9: honour caller cancellation between yields so the passthrough
           // path has parity with the replay-hit path (replayEvents already does

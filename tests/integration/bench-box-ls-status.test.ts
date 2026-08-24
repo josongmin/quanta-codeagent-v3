@@ -4,7 +4,9 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 
 const ENTRY = "src/apps/bench/cli.ts"
-const REPO = process.cwd()
+// Repo root anchored on this file, not on the ambient cwd: ENTRY below is a
+// repo-RELATIVE path, so the spawn only works when `cwd` is the real repo root.
+const REPO = join(import.meta.dir, "..", "..")
 
 let dir = ""
 let fakeBin = ""

@@ -13,6 +13,7 @@
 import { describe, expect, test } from "bun:test"
 import { selectForPhase2Promotion } from "../../src/memory/consolidate"
 import type { MemoryOutcome, Stage1Output } from "../../src/memory/consolidate/types"
+import { nth } from "../_helpers/expect-present"
 
 const mk = (over: Partial<Stage1Output>): Stage1Output => ({
   threadId: over.threadId ?? "thr-?",
@@ -76,7 +77,7 @@ describe("ADR-0131 — selectForPhase2Promotion: score ranking", () => {
     ]
     const out = selectForPhase2Promotion(entries, { sampleRate: 0.5 })
     expect(out).toHaveLength(1)
-    expect(out[0]!.threadId).toBe("thr-high")
+    expect(nth(out, 0, "out").threadId).toBe("thr-high")
   })
 
   test("score 2 (evidence only) beats score 1 (prefs only)", () => {
@@ -86,7 +87,7 @@ describe("ADR-0131 — selectForPhase2Promotion: score ranking", () => {
     ]
     const out = selectForPhase2Promotion(entries, { sampleRate: 0.5 })
     expect(out).toHaveLength(1)
-    expect(out[0]!.threadId).toBe("thr-evid")
+    expect(nth(out, 0, "out").threadId).toBe("thr-evid")
   })
 
   test("score 0 entries are still eligible but rank last", () => {
@@ -97,10 +98,10 @@ describe("ADR-0131 — selectForPhase2Promotion: score ranking", () => {
     ]
     const out = selectForPhase2Promotion(entries, { sampleRate: 1 })
     expect(out).toHaveLength(3)
-    expect(out[0]!.threadId).toBe("thr-one") // score 1
+    expect(nth(out, 0, "out").threadId).toBe("thr-one") // score 1
     // Within score=0, sourceUpdatedAt DESC (200 before 100)
-    expect(out[1]!.threadId).toBe("thr-zero-b")
-    expect(out[2]!.threadId).toBe("thr-zero-a")
+    expect(nth(out, 1, "out").threadId).toBe("thr-zero-b")
+    expect(nth(out, 2, "out").threadId).toBe("thr-zero-a")
   })
 
   test("tiebreak: same score → younger sourceUpdatedAt first", () => {
@@ -110,7 +111,7 @@ describe("ADR-0131 — selectForPhase2Promotion: score ranking", () => {
     ]
     const out = selectForPhase2Promotion(entries, { sampleRate: 0.5 })
     expect(out).toHaveLength(1)
-    expect(out[0]!.threadId).toBe("thr-newer")
+    expect(nth(out, 0, "out").threadId).toBe("thr-newer")
   })
 
   test("empty outcomeEvidence string scores 0 for evidence (must be non-empty)", () => {
@@ -120,7 +121,7 @@ describe("ADR-0131 — selectForPhase2Promotion: score ranking", () => {
     ]
     const out = selectForPhase2Promotion(entries, { sampleRate: 0.5 })
     expect(out).toHaveLength(1)
-    expect(out[0]!.threadId).toBe("thr-real-ev")
+    expect(nth(out, 0, "out").threadId).toBe("thr-real-ev")
   })
 })
 
@@ -145,7 +146,7 @@ describe("ADR-0131 — selectForPhase2Promotion: 'fail' exclusion", () => {
     ]
     const out = selectForPhase2Promotion(entries, { sampleRate: 1 })
     expect(out).toHaveLength(1)
-    expect(out[0]!.threadId).toBe("thr-noout")
+    expect(nth(out, 0, "out").threadId).toBe("thr-noout")
   })
 
   test("mix of all 4 outcomes — only 'fail' is excluded", () => {

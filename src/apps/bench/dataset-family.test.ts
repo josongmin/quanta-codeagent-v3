@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test"
+import { nth } from "../../../tests/_helpers/expect-present"
 import { gradeEvaluatorForFamily, resolveDatasetFamily } from "./dataset-family"
 import type { DatasetFamily } from "./dataset-family-token"
 import { readFamilyCorpusText } from "./profiles/corpus-read"
@@ -40,10 +41,10 @@ describe("corpus parse — Pro normalizes, verified does not (de-theaters normal
     repo_language: "python",
   })
   test("family=pro ⇒ lowercase fail_to_pass becomes a real testCmd", () => {
-    expect(instancesFor(proRow, "pro")[0]!.testCmd).toContain("test_y")
+    expect(nth(instancesFor(proRow, "pro"), 0, "pro instances").testCmd).toContain("test_y")
   })
   test("family=verified ⇒ same lowercase row degrades to the no-op (no normalize)", () => {
-    expect(instancesFor(proRow, "verified")[0]!.testCmd).toBe("true")
+    expect(nth(instancesFor(proRow, "verified"), 0, "verified instances").testCmd).toBe("true")
   })
 })
 
@@ -61,7 +62,7 @@ describe("corpus parse — live uses the standard (verified-identical) parse", (
     PASS_TO_PASS: JSON.stringify([]),
   })
   test("family=live ⇒ core fields carry through + uppercase FAIL_TO_PASS yields a real testCmd", () => {
-    const inst = instancesFor(liveRow, "live")[0]!
+    const inst = nth(instancesFor(liveRow, "live"), 0, "live instances")
     expect(inst.swebench?.instanceId).toBe("getmoto__moto-7141")
     expect(inst.swebench?.repo).toBe("getmoto/moto")
     expect(inst.swebench?.baseCommit).toBe("a".repeat(40))

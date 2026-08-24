@@ -4,6 +4,7 @@
  * empty ledger ⇒ "", contradiction banner, most-recent bounding.
  */
 import { describe, expect, test } from "bun:test"
+import { nth } from "../../../tests/_helpers/expect-present"
 import { ingestRawObservation, ingestTestFrames, type ParsedTestFrame } from "./ingest"
 import { createEvidenceLedger } from "./ledger"
 import { renderEvidenceDigest } from "./reducer"
@@ -72,7 +73,7 @@ describe("renderEvidenceDigest — end to end through the ledger", () => {
 
   test("contradiction leads with a banner", () => {
     const l = createEvidenceLedger()
-    const base = l.add(ingestTestFrames([frame()], 1)[0]!)
+    const base = l.add(nth(ingestTestFrames([frame()], 1), 0, "ingested frames"))
     l.add({
       turn: 2,
       source: "grep",

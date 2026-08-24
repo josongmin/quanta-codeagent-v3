@@ -44,6 +44,7 @@ import {
 import { parseRRule } from "@/scheduler/rrule-parser"
 import { assembleAutomation, type EnvReader } from "@/scheduler/runtime-wire"
 import type { AgentLoopPort, RRule } from "@/scheduler/types"
+import { nth } from "../_helpers/expect-present"
 
 // ─── fixtures ─────────────────────────────────────────────────────────────
 
@@ -133,7 +134,7 @@ describe("DOF-21 — automation-engine gate → assembler → ticker → engine 
     expect(handle).toBeDefined()
     expect(arms).toHaveLength(1)
     // Interval knob flowed through the assembler verbatim.
-    expect(arms[0]!.ms).toBe(30)
+    expect(nth(arms, 0, "arms").ms).toBe(30)
 
     // Pre-tick invariant: nothing has fired yet.
     const before = await engine.list()
@@ -144,7 +145,7 @@ describe("DOF-21 — automation-engine gate → assembler → ticker → engine 
     expect(dispatched).toHaveLength(0)
 
     // DRIVER: fire the timer body once (what the real setInterval would do).
-    arms[0]!.cb()
+    nth(arms, 0, "arms").cb()
     await settle()
 
     // OBSERVABLE EFFECT #1 — real engine run-model advanced: fireCount bumped,
@@ -162,10 +163,10 @@ describe("DOF-21 — automation-engine gate → assembler → ticker → engine 
     // OBSERVABLE EFFECT #2 — handler dispatched the automation prompt onto the
     // real AgentLoopPort seam (the downstream consumer).
     expect(dispatched).toHaveLength(1)
-    expect(dispatched[0]!.prompt).toBe("summarize today")
+    expect(nth(dispatched, 0, "dispatched").prompt).toBe("summarize today")
 
     handle?.stop()
-    expect(arms[0]!.cleared).toBe(true)
+    expect(nth(arms, 0, "arms").cleared).toBe(true)
   })
 
   // ── PAIRED CONTROL: gate OFF ⇒ NOTHING drives ───────────────────────────
@@ -267,7 +268,7 @@ describe("DOF-21 — automation-engine gate → assembler → ticker → engine 
     const { arms, deps } = fakeIntervalDeps()
     startAutomationEngineTicker(cfgWithSlot(slot), deps)
 
-    arms[0]!.cb()
+    nth(arms, 0, "arms").cb()
     await settle()
     let list = await engine.list()
     let row = list.ok ? list.value.find((a) => a.id === "auto-recur") : undefined
@@ -275,7 +276,7 @@ describe("DOF-21 — automation-engine gate → assembler → ticker → engine 
 
     // Advance the clock WELL past the recurring next-fire so tick #2 claims it.
     clock = 100_000_000
-    arms[0]!.cb()
+    nth(arms, 0, "arms").cb()
     await settle()
     list = await engine.list()
     row = list.ok ? list.value.find((a) => a.id === "auto-recur") : undefined

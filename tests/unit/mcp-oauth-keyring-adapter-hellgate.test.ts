@@ -24,6 +24,7 @@ import {
   selectKeyring,
   serializeRecord,
 } from "@/host/runtime/keyring"
+import { present } from "../_helpers/expect-present"
 
 const REC: TokenRecord = {
   accessToken: "ACCESS-SECRET-XYZ",
@@ -116,7 +117,7 @@ describe("keyring adapters — name injection is inert (argv array, no shell)", 
       expect(i).toBeGreaterThan(0)
       const preceding = c.args[i - 1]
       expect(preceding).toBeDefined()
-      expect(["-s", "service"]).toContain(preceding!)
+      expect(["-s", "service"]).toContain(present(preceding, "preceding arg"))
     }
   })
 })

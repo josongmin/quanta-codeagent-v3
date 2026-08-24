@@ -48,6 +48,16 @@ interface RawReport {
   summary?: { passed?: number; failed?: number; degraded?: number; total?: number }
 }
 
+/**
+ * Map SWE-bench's tri-state `resolved` flag to a verdict.
+ *
+ * A unit because the third state is the whole point: `undefined` means the
+ * bench has not graded the instance yet — that is NOT a fail, it is missing
+ * data. Recording it as `error` keeps un-evaluated rows out of the pass rate.
+ */
+const swebenchVerdict = (resolved: boolean | undefined): Verdict =>
+  resolved === true ? "pass" : resolved === false ? "fail" : "error"
+
 /** Read a bench-report.json and translate each instance into a `PublicPayload`
  *  keyed under the SWE-bench primary use case. Missing/malformed report ⇒
  *  empty run that records ONE warning record so the operator notices. */
@@ -100,10 +110,7 @@ export const runSwebenchAdapter = async (
   const instances = Array.isArray(report.instances) ? report.instances : []
   for (const inst of instances) {
     if (typeof inst.id !== "string") continue
-    // `inst.resolved === undefined` means the bench hasn't graded the
-    // instance yet — that is NOT a fail, it's missing data. Record as error
-    // so the report doesn't tank the bench's pass rate with un-evaluated rows.
-    const v: Verdict = inst.resolved === true ? "pass" : inst.resolved === false ? "fail" : "error"
+    const v = swebenchVerdict(inst.resolved)
     counts[v] += 1
     await store.append(runId, {
       tier: "public",

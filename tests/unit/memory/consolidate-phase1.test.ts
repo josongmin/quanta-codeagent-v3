@@ -11,6 +11,7 @@ import {
   type Stage1StorePort,
   type WatermarkState,
 } from "../../../src/memory/consolidate/types"
+import { nth } from "../../_helpers/expect-present"
 
 /**
  * ADR-0068 Wave A — `runPhase1` orchestration conformance.
@@ -246,8 +247,8 @@ describe("runPhase1 — happy path (distilled outcome)", () => {
     await runPhase1(baseInput(), okPort, store)
     const rows = await store.fetchSince(null)
     expect(rows).toHaveLength(1)
-    expect(rows[0]!.threadId).toBe("thr-1")
-    expect(rows[0]!.preferenceSignals).toEqual(["pref-a"])
+    expect(nth(rows, 0, "rows").threadId).toBe("thr-1")
+    expect(nth(rows, 0, "rows").preferenceSignals).toEqual(["pref-a"])
   })
 
   test("re-running Phase 1 for the same thread REPLACEs (1 row, latest values)", async () => {
@@ -263,9 +264,9 @@ describe("runPhase1 — happy path (distilled outcome)", () => {
     await runPhase1(baseInput({ now: () => FIXED_NOW + 1000 }), port2, store)
     expect(await store.countSince(null)).toBe(1)
     const rows = await store.fetchSince(null)
-    expect(rows[0]!.rolloutSummary).toBe("v2")
-    expect(rows[0]!.preferenceSignals).toEqual(["pref-v2"])
-    expect(rows[0]!.sourceUpdatedAt).toBe(FIXED_NOW + 1000)
+    expect(nth(rows, 0, "rows").rolloutSummary).toBe("v2")
+    expect(nth(rows, 0, "rows").preferenceSignals).toEqual(["pref-v2"])
+    expect(nth(rows, 0, "rows").sourceUpdatedAt).toBe(FIXED_NOW + 1000)
   })
 
   test("disjoint threadIds → independent rows after two runPhase1 calls", async () => {
@@ -287,7 +288,7 @@ describe("runPhase1 — happy path (distilled outcome)", () => {
     }
     await runPhase1(baseInput(), port, store)
     const rows = await store.fetchSince(null)
-    expect(rows[0]!.preferenceSignals).toEqual([])
+    expect(nth(rows, 0, "rows").preferenceSignals).toEqual([])
   })
 })
 

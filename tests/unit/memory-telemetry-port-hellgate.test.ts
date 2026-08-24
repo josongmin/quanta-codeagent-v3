@@ -45,6 +45,7 @@ import type { MemoryWriter } from "@/memory/consolidate/writer"
 import type { MemoryEntry, MemoryQuery } from "@/memory/types"
 import { buildMemoryTelemetry, MEMORY_TELEMETRY_KEYS } from "@/observability/memory-telemetry"
 import type { MetricSnapshot, MetricsRegistry } from "@/observability/metrics/port"
+import { nth } from "../_helpers/expect-present"
 
 // ─── Test fakes ────────────────────────────────────────────────────────────
 
@@ -364,7 +365,7 @@ describe("outcome enum mapping (phase1)", () => {
   test("phase1 'stored' on happy path", async () => {
     const rec = recordingPort()
     await runPhase1(phase1InputSuccess(), distillPort(), fakeStage1Store(), rec.port)
-    const e = rec.phase1[0]!
+    const e = nth(rec.phase1, 0, "e")
     expect(e.outcome).toBe("stored")
     expect(e.turnsConsumed).toBe(5)
     expect(e.latencyMs).toBeGreaterThanOrEqual(0)
@@ -378,7 +379,7 @@ describe("outcome enum mapping (phase1)", () => {
       fakeStage1Store(),
       rec.port,
     )
-    expect(rec.phase1[0]!.outcome).toBe("skipped")
+    expect(nth(rec.phase1, 0, "rec.phase1").outcome).toBe("skipped")
   })
 
   test("phase1 'skipped' on thread_id empty", async () => {
@@ -389,7 +390,7 @@ describe("outcome enum mapping (phase1)", () => {
       fakeStage1Store(),
       rec.port,
     )
-    expect(rec.phase1[0]!.outcome).toBe("skipped")
+    expect(nth(rec.phase1, 0, "rec.phase1").outcome).toBe("skipped")
   })
 
   test("phase1 'skipped' on turns below threshold", async () => {
@@ -400,7 +401,7 @@ describe("outcome enum mapping (phase1)", () => {
       fakeStage1Store(),
       rec.port,
     )
-    expect(rec.phase1[0]!.outcome).toBe("skipped")
+    expect(nth(rec.phase1, 0, "rec.phase1").outcome).toBe("skipped")
   })
 
   test("phase1 'error' when distill throws", async () => {
@@ -413,7 +414,7 @@ describe("outcome enum mapping (phase1)", () => {
     await expect(
       runPhase1(phase1InputSuccess(), failingPort, fakeStage1Store(), rec.port),
     ).rejects.toThrow(Phase1DistillError)
-    expect(rec.phase1[0]!.outcome).toBe("error")
+    expect(nth(rec.phase1, 0, "rec.phase1").outcome).toBe("error")
   })
 
   test("phase1 'error' when store upsert throws", async () => {
@@ -427,7 +428,7 @@ describe("outcome enum mapping (phase1)", () => {
     await expect(
       runPhase1(phase1InputSuccess(), distillPort(), badStore, rec.port),
     ).rejects.toThrow("db dead")
-    expect(rec.phase1[0]!.outcome).toBe("error")
+    expect(nth(rec.phase1, 0, "rec.phase1").outcome).toBe("error")
   })
 })
 
@@ -441,8 +442,8 @@ describe("outcome enum mapping (phase2)", () => {
       fakeWriter(),
       rec.port,
     )
-    expect(rec.phase2[0]!.outcome).toBe("incremental_ok")
-    expect(rec.phase2[0]!.filesProcessed).toBe(1)
+    expect(nth(rec.phase2, 0, "rec.phase2").outcome).toBe("incremental_ok")
+    expect(nth(rec.phase2, 0, "rec.phase2").filesProcessed).toBe(1)
   })
 
   test("phase2 'full_ok' on INIT happy path", async () => {
@@ -454,7 +455,7 @@ describe("outcome enum mapping (phase2)", () => {
       fakeWriter(),
       rec.port,
     )
-    expect(rec.phase2[0]!.outcome).toBe("full_ok")
+    expect(nth(rec.phase2, 0, "rec.phase2").outcome).toBe("full_ok")
   })
 
   test("phase2 'no_op' on incremental with zero entries", async () => {
@@ -466,8 +467,8 @@ describe("outcome enum mapping (phase2)", () => {
       fakeWriter(),
       rec.port,
     )
-    expect(rec.phase2[0]!.outcome).toBe("no_op")
-    expect(rec.phase2[0]!.filesProcessed).toBe(0)
+    expect(nth(rec.phase2, 0, "rec.phase2").outcome).toBe("no_op")
+    expect(nth(rec.phase2, 0, "rec.phase2").filesProcessed).toBe(0)
   })
 
   test("phase2 'error' when port throws", async () => {
@@ -480,7 +481,7 @@ describe("outcome enum mapping (phase2)", () => {
     await expect(
       runPhase2(phase2InputSuccess(), failing, fakeStage1Store(), fakeWriter(), rec.port),
     ).rejects.toThrow(Phase2ConsolidateError)
-    expect(rec.phase2[0]!.outcome).toBe("error")
+    expect(nth(rec.phase2, 0, "rec.phase2").outcome).toBe("error")
   })
 })
 

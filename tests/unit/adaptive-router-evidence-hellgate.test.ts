@@ -17,6 +17,7 @@ import {
   projectRouterEvidence,
 } from "@/runner/batch/eval/adaptive-escalation/router-evidence"
 import type { LlmEvidencePacket } from "@/runner/batch/eval/llm-evidence-packet"
+import { present } from "../_helpers/expect-present"
 
 /** A blind, fully-evidenced baseline packet (no gaps when derived). */
 const goodPacket = (): LlmEvidencePacket => ({
@@ -105,7 +106,7 @@ describe("router evidence projection (P5)", () => {
           ...p,
           proofReceipts: [{ source: "public_mwe", state: "candidate_green" }],
           verificationTarget: {
-            primaryRail: p.verificationTarget!.primaryRail,
+            primaryRail: present(p.verificationTarget, "p.verificationTarget").primaryRail,
             required: [],
             optional: [],
             baseValidatedRed: false,

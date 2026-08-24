@@ -36,6 +36,7 @@ import type { CodeActionPort, FormatPort, SignatureHelpPort } from "@/lsp"
 import { isUnifiedDiff, parsePatch, unifiedDiffToV4A } from "@/patch"
 import { lspCodeActionTool, lspFormatTool, lspSignatureHelpTool } from "@/tool/lsp_nav"
 import type { ToolContext, ToolEvent, ToolResult } from "@/tool/types"
+import { present } from "../_helpers/expect-present"
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -308,17 +309,17 @@ describe("A5-SILENT-NOHEADER: missing +++ line produces zero-op (documented beha
     // isUnifiedDiff must still detect it as a unified diff
     expect(isUnifiedDiff(malformed)).toBe(true)
     // The converter must not throw
-    let v4a: string
+    let v4a: string | undefined
     expect(() => {
       v4a = unifiedDiffToV4A(malformed)
     }).not.toThrow()
     // parsePatch must not throw either
-    let patch: ReturnType<typeof parsePatch>
+    let patch: ReturnType<typeof parsePatch> | undefined
     expect(() => {
-      patch = parsePatch(v4a!)
+      patch = parsePatch(present(v4a, "unifiedDiffToV4A output"))
     }).not.toThrow()
     // The result must have zero ops (best-effort skips the malformed entry)
-    expect(patch!.ops).toHaveLength(0)
+    expect(present(patch, "parsePatch result").ops).toHaveLength(0)
   })
 
   test("A5-2: well-formed unified diff after a malformed entry is still parsed", () => {

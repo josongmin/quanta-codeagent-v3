@@ -98,6 +98,29 @@ export const decodeProMaxStageEvidence = (value: unknown): ProMaxDecode<ProMaxSt
   }
 }
 
+/**
+ * The enabled leakage-check ids named by a stage document, appending every rejection
+ * reason to `problems`.
+ *
+ * A unit because the three checks are one question — "is this a check list the gate can
+ * act on?" — and they must run together: a caller that validated the shape but skipped
+ * the unknown-id sweep would admit ids no check is registered for, and the gate would
+ * then silently enforce fewer checks than the document claims.
+ */
+const decodeLeakageCheckIds = (raw: unknown, problems: string[]): string[] => {
+  if (!Array.isArray(raw)) {
+    problems.push("`leakageChecks` must be an array of enabled leakage-check ids")
+  }
+  const ids = (Array.isArray(raw) ? raw : []).filter(
+    (id): id is string => typeof id === "string",
+  )
+  const known = new Set<string>(PROMAX_LEAKAGE_CHECK_IDS)
+  for (const id of ids) {
+    if (!known.has(id)) problems.push(`\`leakageChecks\` names unknown check "${id}"`)
+  }
+  return ids
+}
+
 export const decodeProMaxModelStageEvidence = (
   value: unknown,
 ): ProMaxDecode<ProMaxModelStageEvidence> => {
@@ -139,17 +162,7 @@ export const decodeProMaxModelStageEvidence = (
     )
   }
 
-  const rawChecks = record.leakageChecks
-  const known = new Set<string>(PROMAX_LEAKAGE_CHECK_IDS)
-  if (!Array.isArray(rawChecks)) {
-    problems.push("`leakageChecks` must be an array of enabled leakage-check ids")
-  }
-  const leakageChecks = (Array.isArray(rawChecks) ? rawChecks : []).filter(
-    (id): id is string => typeof id === "string",
-  )
-  for (const id of leakageChecks) {
-    if (!known.has(id)) problems.push(`\`leakageChecks\` names unknown check "${id}"`)
-  }
+  const leakageChecks = decodeLeakageCheckIds(record.leakageChecks, problems)
 
   if (problems.length > 0) return { ok: false, problems }
   return {

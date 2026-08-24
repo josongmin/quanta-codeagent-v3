@@ -8,6 +8,7 @@
  */
 import { describe, expect, test } from "bun:test"
 import { parseNodeTest } from "@/tool/testrun/parse"
+import { nth } from "../../../_helpers/expect-present"
 
 // ── VERBATIM: bun test (location printed BEFORE the `(fail)` marker) ──────────
 const BUN = `bun test v1.3.14 (0d9b296a)
@@ -73,7 +74,7 @@ describe("parseNodeTest", () => {
     expect(r.ok).toBe(false)
     expect(r.passed).toBe(1)
     expect(r.failed.length).toBe(1)
-    const f = r.failed[0]!
+    const f = nth(r.failed, 0, "r.failed")
     expect(f.name).toBe("adds")
     expect(f.file).toBe("/private/tmp/nodeparse/sum.test.ts")
     expect(f.line).toBe(2)
@@ -87,7 +88,7 @@ describe("parseNodeTest", () => {
     expect(r.passed).toBe(1)
     // The `✖ adds` marker appears twice (inline + failing-tests section) — deduped.
     expect(r.failed.length).toBe(1)
-    const f = r.failed[0]!
+    const f = nth(r.failed, 0, "r.failed")
     expect(f.name).toBe("adds")
     expect(f.file).toMatch(/nt\.test\.mjs$/)
     expect(f.line).toBe(3)
@@ -99,7 +100,7 @@ describe("parseNodeTest", () => {
     expect(r.runner).toBe("node")
     expect(r.ok).toBe(false)
     expect(r.passed).toBe(3)
-    const f = r.failed[0]!
+    const f = nth(r.failed, 0, "r.failed")
     expect(f.name).toBe("adds numbers")
     // The node_modules frame is skipped; the user source frame wins.
     expect(f.file).toBe("/repo/src/math.test.ts")
@@ -145,7 +146,7 @@ describe("parseNodeTest — mocha", () => {
     const r = parseNodeTest(MOCHA)
     expect(r.ok).toBe(false)
     expect(r.failed.length).toBe(1)
-    const f = r.failed[0]!
+    const f = nth(r.failed, 0, "r.failed")
     expect(f.name).toBe("adds correctly") // summary `1) adds correctly`, NOT the detail `1) math suite`
     expect(f.file).toBe("sum.test.js")
     expect(f.line).toBe(6)

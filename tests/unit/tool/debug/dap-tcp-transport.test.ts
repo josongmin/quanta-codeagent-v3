@@ -10,6 +10,7 @@ import { createServer, type Server } from "node:net"
 import { DapClient } from "@/tool/debug/dap-client"
 import { DapFrameDecoder, encodeDapMessage } from "@/tool/debug/dap-codec"
 import { connectTcpTransport, getFreePort } from "@/tool/debug/port"
+import { present } from "../../../_helpers/expect-present"
 
 let server: Server | undefined
 afterEach(async () => {
@@ -50,7 +51,9 @@ const startFakeDapServer = async (): Promise<number> => {
       }
     })
   })
-  await new Promise<void>((resolve) => server!.listen(port, "127.0.0.1", () => resolve()))
+  await new Promise<void>((resolve) =>
+    present(server, "fake DAP server").listen(port, "127.0.0.1", () => resolve()),
+  )
   return port
 }
 

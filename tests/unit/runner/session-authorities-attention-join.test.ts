@@ -33,6 +33,7 @@ import {
 } from "@/runner/assemble/session-authorities"
 import { createUserQuestionBroker, type UserQuestionBroker } from "@/session/user-question"
 import { TaskRegistry } from "@/subagent"
+import { present } from "../../_helpers/expect-present"
 
 /** Deterministic broker: counter clock + counter ids so `askedAt`/`requestId`
  *  ordering is stable and oldest-first is observable. */
@@ -76,7 +77,7 @@ describe("RFC-01 A2 — session-authorities question/attention join", () => {
     // A real question emitted for child C (fire-and-forget; published sync).
     void questions.request({ owner: { kind: "task", taskId: "C" }, prompt: "which file?" })
 
-    const snap = auth.attention!.snapshot()
+    const snap = present(auth.attention, "auth.attention").snapshot()
     expect(snap).toHaveLength(1)
     expect(snap[0]).toMatchObject({
       id: "C",
@@ -85,7 +86,7 @@ describe("RFC-01 A2 — session-authorities question/attention join", () => {
       pendingQuestion: { requestId: "q0", askedAt: 1, summary: "which file?" },
     })
 
-    const pick = auth.attention!.next("R")
+    const pick = present(auth.attention, "auth.attention").next("R")
     expect(pick?.id).toBe("C")
     expect(pick?.pendingQuestion?.requestId).toBe("q0")
 
@@ -120,12 +121,12 @@ describe("RFC-01 A2 — session-authorities question/attention join", () => {
     void questions.request({ owner: { kind: "task", taskId: "S" }, prompt: "foreign?" })
     void questions.request({ owner: { kind: "task", taskId: "C" }, prompt: "own?" })
 
-    const pick = auth.attention!.next("R")
+    const pick = present(auth.attention, "auth.attention").next("R")
     // Despite S being globally oldest, lineage gate forces C (rootId === R).
     expect(pick?.id).toBe("C")
     expect(pick?.rootId).toBe("R")
     // And S is never selectable from R's scope (after C ⇒ nothing else in lineage).
-    expect(auth.attention!.next("R", "q1")).toBeUndefined()
+    expect(present(auth.attention, "auth.attention").next("R", "q1")).toBeUndefined()
 
     questions.cancelAll("teardown")
   })
@@ -145,14 +146,14 @@ describe("RFC-01 A2 — session-authorities question/attention join", () => {
     void questions.request({ owner: { kind: "task", taskId: "C1" }, prompt: "own older" }) // q2 askedAt3
 
     // Snapshot carries only task rows that are actually pending & joinable.
-    const snap = auth.attention!.snapshot()
+    const snap = present(auth.attention, "auth.attention").snapshot()
     expect(snap.map((a) => a.id).sort()).toEqual(["C1", "C2", "S"]) // Cidle absent
 
     // Within R's lineage, oldest-first ⇒ C2 (askedAt2) before C1 (askedAt3).
-    expect(auth.attention!.next("R")?.id).toBe("C2")
+    expect(present(auth.attention, "auth.attention").next("R")?.id).toBe("C2")
     // Cursor advance: after C2 ⇒ C1; after C1 ⇒ nothing.
-    expect(auth.attention!.next("R", "q1")?.id).toBe("C1")
-    expect(auth.attention!.next("R", "q2")).toBeUndefined()
+    expect(present(auth.attention, "auth.attention").next("R", "q1")?.id).toBe("C1")
+    expect(present(auth.attention, "auth.attention").next("R", "q2")).toBeUndefined()
 
     questions.cancelAll("teardown")
   })
@@ -165,8 +166,8 @@ describe("RFC-01 A2 — session-authorities question/attention join", () => {
 
     void questions.request({ owner: { kind: "root" }, prompt: "root-level question" })
 
-    expect(auth.attention!.snapshot()).toHaveLength(0)
-    expect(auth.attention!.next("R")).toBeUndefined()
+    expect(present(auth.attention, "auth.attention").snapshot()).toHaveLength(0)
+    expect(present(auth.attention, "auth.attention").next("R")).toBeUndefined()
 
     questions.cancelAll("teardown")
   })
@@ -179,7 +180,7 @@ describe("RFC-01 A2 — session-authorities question/attention join", () => {
 
     void questions.request({ owner: { kind: "task", taskId: "ghost" }, prompt: "no such task" })
 
-    expect(auth.attention!.snapshot()).toHaveLength(0)
+    expect(present(auth.attention, "auth.attention").snapshot()).toHaveLength(0)
 
     questions.cancelAll("teardown")
   })

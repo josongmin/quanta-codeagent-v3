@@ -16,7 +16,9 @@ import { describe, expect, test } from "bun:test"
 import { readdir, readFile } from "node:fs/promises"
 import { join } from "node:path"
 
-const MEMORY_ROOT = join(process.cwd(), "src", "memory")
+// Repo-anchored on this file, not the ambient cwd — this fence walks real
+// source in the checkout.
+const MEMORY_ROOT = join(import.meta.dir, "..", "..", "src", "memory")
 
 async function* walkTs(dir: string): AsyncGenerator<string> {
   const entries = await readdir(dir, { withFileTypes: true })

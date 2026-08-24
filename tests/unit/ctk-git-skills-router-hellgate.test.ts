@@ -35,6 +35,7 @@ import {
   triggerPrReviewCanvas,
   triggerReviewAndShip,
 } from "@/skill"
+import { nth } from "../_helpers/expect-present"
 
 const CTK = [
   { name: BABYSIT_SKILL_NAME, trigger: triggerBabysit, find: findBabysitSkill, kebab: "babysit" },
@@ -143,7 +144,7 @@ describe("ADR-0102 Track 3 — CTK skills slash-command router (hellgate)", () =
     const results = await Promise.all(CTK.map((s) => s.find()))
     expect(results.length).toBe(8)
     for (let i = 0; i < CTK.length; i++) {
-      expect(results[i]?.name).toBe(CTK[i]!.name)
+      expect(results[i]?.name).toBe(nth(CTK, i, "CTK").name)
     }
   })
 

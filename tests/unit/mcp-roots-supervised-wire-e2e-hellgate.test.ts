@@ -22,7 +22,10 @@
  *  boot that does not spawn a process.
  */
 
-import { afterEach, beforeEach, describe, expect, it } from "bun:test"
+import { afterAll, afterEach, beforeEach, describe, expect, it } from "bun:test"
+import { mkdtempSync, rmSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 import type { JsonRpcMessage } from "@/mcp/jsonrpc"
 import { MCP_ROOTS_LIST_METHOD } from "@/mcp/resources"
 import type { McpTransport } from "@/mcp/transports/port"
@@ -72,6 +75,15 @@ const noopLog: StructuredLogger = {
   debug: () => undefined,
 } as unknown as StructuredLogger
 
+// (c) fix: this config file used to be written into `process.cwd()` — i.e. the
+// REPO ROOT under the normal runner — so a crashed test left a `.tmp-…json`
+// behind in the checkout. It now lives in its own OS temp dir, removed in
+// afterAll.
+const TMP_ROOT = mkdtempSync(join(tmpdir(), "mcp-roots-e2e-"))
+afterAll(() => {
+  rmSync(TMP_ROOT, { recursive: true, force: true })
+})
+
 let configPath: string
 const savedEnv: Record<string, string | undefined> = {}
 const setEnv = (k: string, v: string | undefined): void => {
@@ -81,7 +93,10 @@ const setEnv = (k: string, v: string | undefined): void => {
 }
 
 beforeEach(async () => {
-  configPath = `${process.cwd()}/.tmp-mcp-roots-e2e-${Date.now()}-${Math.random().toString(36).slice(2)}.json`
+  configPath = join(
+    TMP_ROOT,
+    `.tmp-mcp-roots-e2e-${Date.now()}-${Math.random().toString(36).slice(2)}.json`,
+  )
   await Bun.write(configPath, JSON.stringify({ servers: [{ name: "s1", command: ["x"] }] }))
   setEnv("QUANTA_MCP_CONFIG", configPath)
 })

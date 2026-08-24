@@ -57,6 +57,7 @@ import {
   segmentStore,
   writeReceipt,
 } from "@/shared/remote-store"
+import { nth, present } from "../_helpers/expect-present"
 
 // ── Fakes ────────────────────────────────────────────────────────────────────
 
@@ -301,9 +302,9 @@ describe("bench spot-resume KEYSTONE e2e (record → durable → reclaim → res
 
     let misses = 0
     for (let i = 0; i < recordedRequests.length; i++) {
-      const events = await drain(replayPort.stream(recordedRequests[i]!))
+      const events = await drain(replayPort.stream(nth(recordedRequests, i, "recordedRequests")))
       // A HIT replays the recorded events verbatim — NOT the LIVE-prefixed ones.
-      expect(events).toEqual(recordedEventsByTurn[i]!)
+      expect(events).toEqual(nth(recordedEventsByTurn, i, "recordedEventsByTurn"))
       const isHit = events.some(
         (e) => e.type === "text_delta" && e.delta === `reply-to:turn-${i + 1}`,
       )
@@ -349,7 +350,7 @@ describe("bench spot-resume KEYSTONE e2e (record → durable → reclaim → res
     // Overwrite the receipt with a degraded one (the fail-closed marker).
     const healthy = await readReceipt(backend, KEY)
     expect(healthy?.degraded).toBe(false)
-    await writeReceipt(backend, KEY, { ...healthy!, degraded: true })
+    await writeReceipt(backend, KEY, { ...present(healthy, "healthy receipt"), degraded: true })
     expect(isResumeEligible(await readReceipt(backend, KEY))).toBe(false)
 
     const makeStore = (_cfg: { bucket: string; region?: string }, key: string): ResumeStore => {

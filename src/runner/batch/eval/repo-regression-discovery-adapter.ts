@@ -658,23 +658,32 @@ export const makeDiscoveredRepoRegressionWitness = (args: DiscoveredRepoRegressi
   }
 }
 
+/** Classify an executed witness run into its public proof STATE.
+ *
+ *  A unit because these states form ONE ordered ladder that only reads correctly
+ *  top-down: having no candidate tests at all outranks a non-green base, which
+ *  outranks a red candidate, which outranks a capped-coverage green. The capped
+ *  check must stay ABOVE plain green — a capped witness set fails open, because
+ *  a regression could be hiding in the witnesses that were dropped. Written as
+ *  guards so that precedence is legible rather than buried in a five-deep
+ *  ternary; `execution_failed` is the residue when `regressionGreen` is neither
+ *  true nor false (the witness never ran). */
+const publicRegressionProofStateOf = (
+  result: ExecutedWitnessResult,
+): PublicRegressionProofState => {
+  if (result.candidateTests.length === 0) return "not_available"
+  if (result.baseGreenTests.length === 0) return "base_not_green"
+  if (result.regressionGreen === false) return "candidate_red"
+  if (result.cappedWitnesses !== undefined && result.regressionGreen === true) {
+    return "coverage_capped"
+  }
+  if (result.regressionGreen === true) return "safety_green"
+  return "execution_failed"
+}
+
 export const publicRegressionProofReceiptOf = (
   result: ExecutedWitnessResult,
-): PublicRegressionProofReceipt => {
-  const state: PublicRegressionProofState =
-    result.candidateTests.length === 0
-      ? "not_available"
-      : result.baseGreenTests.length === 0
-        ? "base_not_green"
-        : result.regressionGreen === false
-          ? "candidate_red"
-          : result.cappedWitnesses !== undefined && result.regressionGreen === true
-            ? "coverage_capped"
-            : result.regressionGreen === true
-              ? "safety_green"
-              : "execution_failed"
-  return { state, ...result }
-}
+): PublicRegressionProofReceipt => ({ state: publicRegressionProofStateOf(result), ...result })
 
 export const regressionAuthorityOf = (receipt: PublicRegressionProofReceipt): boolean | null =>
   receipt.state === "candidate_red" ? false : receipt.state === "safety_green" ? true : null

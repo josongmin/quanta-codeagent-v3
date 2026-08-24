@@ -70,6 +70,7 @@ import {
   type ResolvePeerHost,
   withEgressProxy,
 } from "@/../src/runtime/network-proxy"
+import { present } from "../_helpers/expect-present"
 
 // ── Hermetic upstream origin (the "real internet" for this test) ────────────
 let origin: Server
@@ -147,7 +148,10 @@ const childThroughTransport = async (
     config,
     async (ctx) => {
       let captured: Record<string, string> = {}
-      let child: Subprocess<"pipe", "pipe", "pipe"> | null = null
+      // The child is captured from inside the `spawn` seam below, so control-flow
+      // analysis cannot see the assignment; a holder keeps the declared type at
+      // the read site instead of an assertion.
+      const spawned: { proc?: Subprocess<"pipe", "pipe", "pipe"> } = {}
       const dir = mkdtempSync(join(tmpdir(), "mcp-egress-"))
       const outFile = join(dir, "verdict.txt")
       const escaped = CHILD_SCRIPT.replace(/'/g, `'\\''`)
@@ -167,20 +171,21 @@ const childThroughTransport = async (
         // contends with the transport's stdout JSON-RPC pump.
         spawn: (command, spawnOpts) => {
           captured = spawnOpts.env
-          child = Bun.spawn(command, {
+          const proc = Bun.spawn(command, {
             cwd: spawnOpts.cwd,
             env: spawnOpts.env,
             stdin: "pipe",
             stdout: "pipe",
             stderr: "pipe",
           }) as Subprocess<"pipe", "pipe", "pipe">
-          return child
+          spawned.proc = proc
+          return proc
         },
       })
       await transport.start()
       // Let the child finish its socket round-trip + verdict write on its OWN
       // before tearing down (transport.close() would `kill()` it mid-flight).
-      await child!.exited
+      await present(spawned.proc, "spawned MCP child").exited
       await transport.close()
       let line = ""
       try {

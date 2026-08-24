@@ -351,6 +351,37 @@ export const compactNowOnDemand = async (
  *
  * PURE + side-effect-free; the caller applies `wm.replace`.
  */
+/** STALE-HISTORY guard — is the FROZEN suffix still sitting at the head of the
+ *  LIVE suffix, BY REFERENCE? Turn N+1 only APPENDS, and the wm hands back the
+ *  SAME stored objects, so anything else means the live history was rewritten
+ *  or replaced under us (a microcompact, a reactive squeeze). A unit because
+ *  reference-prefix-ness is the whole staleness test: it subsumes a bare length
+ *  check AND catches a same-length in-place rewrite. */
+const frozenSuffixStillHeadsLive = (
+  frozenSuffix: readonly Message[],
+  liveSuffix: readonly Message[],
+): boolean => {
+  // The live suffix must be at least as long as the frozen one (appends grow it).
+  if (liveSuffix.length < frozenSuffix.length) return false
+  for (let i = 0; i < frozenSuffix.length; i++) if (frozenSuffix[i] !== liveSuffix[i]) return false
+  return true
+}
+
+/** ORPHAN re-check at the synthetic↔suffix seam: does the suffix contain a
+ *  `tool_result` whose `tool_use` the suffix itself never produced? The
+ *  synthetic replaces the whole summarized prefix and carries NO tool_use, so
+ *  such a ref would dangle and Anthropic rejects an unpaired tool_result. A
+ *  unit because the suffix interior was already self-consistent in the live wm
+ *  — the only NEW risk is a ref reaching back into the removed prefix, and this
+ *  catches all of them by construction. */
+const suffixHasOrphanToolResult = (liveSuffix: readonly Message[]): boolean => {
+  const suffixToolUseIds = new Set<string>()
+  for (const m of liveSuffix) for (const id of toolUseIds(m)) suffixToolUseIds.add(id)
+  for (const m of liveSuffix)
+    for (const ref of toolResultRefs(m)) if (!suffixToolUseIds.has(ref)) return true
+  return false
+}
+
 export const rebuildBgInstallAgainstLive = (
   frozenSummary: readonly Message[],
   summarizedPrefixLen: number,
@@ -367,10 +398,7 @@ export const rebuildBgInstallAgainstLive = (
   // suffix (turn N+1 only appends). A reference mismatch ⇒ the wm was rewritten/
   // replaced between maybeStart and reconcile ⇒ discard (do NOT corrupt). The
   // live suffix must be at least as long as the frozen one (appends grow it).
-  const frozenSuffix = frozenSummary.slice(1)
-  if (liveSuffix.length < frozenSuffix.length) return undefined
-  for (let i = 0; i < frozenSuffix.length; i++)
-    if (frozenSuffix[i] !== liveSuffix[i]) return undefined
+  if (!frozenSuffixStillHeadsLive(frozenSummary.slice(1), liveSuffix)) return undefined
   // ORPHAN RE-CHECK at the synthetic↔suffix seam. The synthetic replaces the
   // whole summarized prefix and carries NO tool_use, so any tool_result in the
   // live suffix whose matching tool_use lived in the (now-summarized) prefix is
@@ -379,10 +407,7 @@ export const rebuildBgInstallAgainstLive = (
   // produces, then reject if any suffix tool_result references an id NOT in that
   // set. (The suffix interior was already self-consistent in the live wm; the
   // only NEW risk is refs into the removed prefix — this catches all of them.)
-  const suffixToolUseIds = new Set<string>()
-  for (const m of liveSuffix) for (const id of toolUseIds(m)) suffixToolUseIds.add(id)
-  for (const m of liveSuffix)
-    for (const ref of toolResultRefs(m)) if (!suffixToolUseIds.has(ref)) return undefined
+  if (suffixHasOrphanToolResult(liveSuffix)) return undefined
   return [synthetic, ...liveSuffix]
 }
 

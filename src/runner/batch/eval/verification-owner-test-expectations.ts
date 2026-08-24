@@ -98,6 +98,33 @@ export const ownerTestPathsFromCommands = (commands: readonly string[]): readonl
   return out
 }
 
+/** The conventional Python test paths for ONE owner module, in probe order.
+ *  Empty when the owner is not a probeable module (not `.py`, itself a test
+ *  file, or a bare `.py` with no basename).
+ *
+ *  A unit because the OWNER-RELATIVE rule is the whole contract and it is easy
+ *  to violate one path at a time: a bare repo-root `tests/test_<base>.py` is
+ *  deliberately NOT probed for a NESTED owner, because multiple owners sharing a
+ *  module basename would each generate that same repo-root path and mis-attribute
+ *  an unrelated global test. A repo-root owner (`dir === ""`) still gets
+ *  `tests/test_<base>.py` — that is its OWN sibling dir, which is the same rule. */
+const pythonTestLayoutCandidates = (owner: string): string[] => {
+  const norm = normalizeRepoPath(owner)
+  if (!norm.endsWith(".py") || isPythonTestFile(norm)) return []
+  const slash = norm.lastIndexOf("/")
+  const dir = slash === -1 ? "" : norm.slice(0, slash)
+  const base = norm.slice(slash + 1).replace(/\.py$/, "")
+  if (base === "") return []
+  const parentSlash = dir.lastIndexOf("/")
+  const parent = parentSlash === -1 ? "" : dir.slice(0, parentSlash)
+  const candidates = [
+    dir === "" ? `tests/test_${base}.py` : `${dir}/tests/test_${base}.py`,
+    dir === "" ? `test_${base}.py` : `${dir}/test_${base}.py`,
+  ]
+  if (parent !== "") candidates.push(`${parent}/tests/test_${base}.py`)
+  return candidates
+}
+
 /**
  * T2 — convention-based test-file candidates for owner modules, used as a
  * bounded source-search FALLBACK when no command-derived test path exists. For
@@ -112,28 +139,12 @@ export const ownerTestCandidatesFromModules = (
 ): readonly string[] => {
   const out: string[] = []
   const seen = new Set<string>()
-  const push = (candidate: string): void => {
-    if (candidate === "" || seen.has(candidate)) return
-    seen.add(candidate)
-    out.push(candidate)
-  }
   for (const owner of ownerFiles) {
-    const norm = normalizeRepoPath(owner)
-    if (!norm.endsWith(".py") || isPythonTestFile(norm)) continue
-    const slash = norm.lastIndexOf("/")
-    const dir = slash === -1 ? "" : norm.slice(0, slash)
-    const base = norm.slice(slash + 1).replace(/\.py$/, "")
-    if (base === "") continue
-    const parentSlash = dir.lastIndexOf("/")
-    const parent = parentSlash === -1 ? "" : dir.slice(0, parentSlash)
-    // Owner-RELATIVE layouts only. A bare repo-root `tests/test_${base}.py` is
-    // deliberately NOT probed for a nested owner: multiple owners sharing a module
-    // basename would each generate the same repo-root path and mis-attribute an
-    // unrelated global test (audit finding). A repo-root owner (dir === "") still
-    // gets `tests/test_${base}.py` as its own first candidate below.
-    push(dir === "" ? `tests/test_${base}.py` : `${dir}/tests/test_${base}.py`)
-    push(dir === "" ? `test_${base}.py` : `${dir}/test_${base}.py`)
-    if (parent !== "") push(`${parent}/tests/test_${base}.py`)
+    for (const candidate of pythonTestLayoutCandidates(owner)) {
+      if (candidate === "" || seen.has(candidate)) continue
+      seen.add(candidate)
+      out.push(candidate)
+    }
   }
   return out
 }
@@ -178,6 +189,52 @@ const dedupePaths = (paths: readonly string[]): string[] => {
  *  convention (e.g. astropy's `tests/test_sampled.py` for `timeseries/core.py`),
  *  which the pure-convention candidates miss. Pure directory listing of the
  *  sandbox working tree — no gold / oracle / test_patch. */
+/** The two directories one owner module contributes to the glob probe: its
+ *  sibling `tests/` dir and its own dir, IN THAT ORDER. Empty when the owner is
+ *  not a probeable module (not `.py`, or itself a test file).
+ *
+ *  A unit because that order is load-bearing — a project that keeps a real
+ *  `tests/` package must be probed there before the loose files sitting next to
+ *  the module — and because the skip rule and the dir derivation are one single
+ *  decision about whether this owner has a module namespace at all. */
+const ownerModuleProbeDirs = (owner: string): readonly string[] => {
+  const norm = normalizeRepoPath(owner)
+  if (!norm.endsWith(".py") || isPythonTestFile(norm)) return []
+  const slash = norm.lastIndexOf("/")
+  const dir = slash === -1 ? "" : norm.slice(0, slash)
+  return [dir === "" ? "tests" : `${dir}/tests`, dir]
+}
+
+/** Append every `test_*.py` file directly inside `testDir` to `out`, in sorted
+ *  name order. Returns true once `out` has reached `max`, meaning the caller
+ *  must stop probing entirely.
+ *
+ *  A unit because the cap has to be honoured MID-directory — one huge `tests/`
+ *  dir must not blow past `max` — which is only expressible where the push
+ *  happens, so the caller cannot re-check the bound instead. An unreadable or
+ *  slow directory yields nothing rather than throwing: this probe is
+ *  best-effort evidence, never a hard dependency. */
+const appendTestFilesFrom = async (
+  sandbox: string,
+  testDir: string,
+  timeoutMs: number,
+  max: number,
+  out: string[],
+): Promise<boolean> => {
+  const names = await withFsTimeout(
+    readdir(join(sandbox, testDir)).catch(() => [] as string[]),
+    timeoutMs,
+    [] as string[],
+  )
+  for (const name of [...names].sort()) {
+    if (name.startsWith("test_") && name.endsWith(".py")) {
+      out.push(testDir === "" ? name : `${testDir}/${name}`)
+      if (out.length >= max) return true
+    }
+  }
+  return false
+}
+
 const globOwnerModuleTests = async (
   sandbox: string,
   ownerFiles: readonly string[],
@@ -187,24 +244,10 @@ const globOwnerModuleTests = async (
   const out: string[] = []
   const seenDir = new Set<string>()
   for (const owner of ownerFiles) {
-    const norm = normalizeRepoPath(owner)
-    if (!norm.endsWith(".py") || isPythonTestFile(norm)) continue
-    const slash = norm.lastIndexOf("/")
-    const dir = slash === -1 ? "" : norm.slice(0, slash)
-    for (const testDir of [dir === "" ? "tests" : `${dir}/tests`, dir]) {
+    for (const testDir of ownerModuleProbeDirs(owner)) {
       if (seenDir.has(testDir)) continue
       seenDir.add(testDir)
-      const names = await withFsTimeout(
-        readdir(join(sandbox, testDir)).catch(() => [] as string[]),
-        timeoutMs,
-        [] as string[],
-      )
-      for (const name of [...names].sort()) {
-        if (name.startsWith("test_") && name.endsWith(".py")) {
-          out.push(testDir === "" ? name : `${testDir}/${name}`)
-          if (out.length >= max) return out
-        }
-      }
+      if (await appendTestFilesFrom(sandbox, testDir, timeoutMs, max, out)) return out
     }
   }
   return out
@@ -223,6 +266,63 @@ const expectationFact = (args: {
   }
   const normalized = boundedLiteral(args.line, 180)
   return normalized === "" ? undefined : `${location} assertion: ${normalized}`
+}
+
+/** The triple-quote token OPENING at `i`, or undefined. `"""` is tested first so
+ *  the two tokens can never be confused at the same index. */
+const tripleTokenAt = (text: string, i: number): '"""' | "'''" | undefined =>
+  text.startsWith('"""', i) ? '"""' : text.startsWith("'''", i) ? "'''" : undefined
+
+/** Consume the triple-quoted span whose OPENING token sits at `open`, returning
+ *  the newline-only replacement for its content plus the index just past it.
+ *
+ *  A unit because proper open/close PAIRING is the whole subtlety: the close is
+ *  searched from `open + 3` — never from `open` — so a span's own opening token
+ *  can never be re-read as its own close, and a lone CLOSING `'''` is never
+ *  mis-read as an open (the M1 bug). An UNTERMINATED span is consumed to EOF and
+ *  keeps only its newlines too: mining fake asserts out of an invalid open string
+ *  is a worse failure mode than losing recall after that point. Blanking to
+ *  exactly the newlines is what keeps line / `TEST_DEF` tracking aligned. */
+const consumeTripleSpan = (
+  text: string,
+  quote: string,
+  open: number,
+): { blanked: string; next: number } => {
+  const contentStart = open + 3
+  const close = text.indexOf(quote, contentStart)
+  const end = close === -1 ? text.length : close
+  return {
+    blanked: text.slice(contentStart, end).replace(/[^\n]/g, ""),
+    next: close === -1 ? text.length : close + 3,
+  }
+}
+
+/** Consume the single/double-quoted literal whose OPENING quote sits at `open`,
+ *  returning its verbatim text (quotes included) and the index just past it.
+ *
+ *  A unit, and the deliberate sibling of {@link consumeTripleSpan}, because
+ *  escape handling is its entire subtlety: a backslash consumes the NEXT
+ *  character without ever testing it against the closing quote, so `"a\""` does
+ *  not close early. Consuming a whole literal at once is also what guarantees a
+ *  triple-quote token appearing INSIDE an ordinary string is never mistaken for
+ *  a docstring opener — the scanner simply never looks at those bytes. An
+ *  unterminated literal is consumed to EOF. */
+const consumeQuotedLiteral = (text: string, open: number): { text: string; next: number } => {
+  const quote = text[open] ?? ""
+  let literal = quote
+  let i = open + 1
+  while (i < text.length) {
+    const ch = text[i] ?? ""
+    literal += ch
+    if (ch === "\\") {
+      literal += text[i + 1] ?? ""
+      i += 2
+      continue
+    }
+    i += 1
+    if (ch === quote) break
+  }
+  return { text: literal, next: i }
 }
 
 /** Remove EVERY triple-quoted span (docstrings AND triple-quoted string values)
@@ -248,56 +348,43 @@ const expectationFact = (args: {
 const stripTripleQuoted = (text: string): string => {
   let out = ""
   let i = 0
-  let quote: string | undefined
-  let triple: { quote: string; contentStart: number } | undefined
-
   while (i < text.length) {
-    if (triple !== undefined) {
-      if (text.startsWith(triple.quote, i)) {
-        out += text.slice(triple.contentStart, i).replace(/[^\n]/g, "")
-        i += 3
-        triple = undefined
-      } else {
-        i += 1
-      }
-      continue
-    }
-
-    const ch = text[i] ?? ""
-    if (quote !== undefined) {
-      out += ch
-      if (ch === "\\") {
-        out += text[i + 1] ?? ""
-        i += 2
-        continue
-      }
-      if (ch === quote) quote = undefined
-      i += 1
-      continue
-    }
-
-    const maybeTriple = text.startsWith('"""', i)
-      ? '"""'
-      : text.startsWith("'''", i)
-        ? "'''"
-        : undefined
+    const maybeTriple = tripleTokenAt(text, i)
     if (maybeTriple !== undefined) {
-      triple = { quote: maybeTriple, contentStart: i + 3 }
-      i += 3
+      const span = consumeTripleSpan(text, maybeTriple, i)
+      out += span.blanked
+      i = span.next
       continue
     }
-
+    const ch = text[i] ?? ""
+    if (ch === '"' || ch === "'") {
+      const literal = consumeQuotedLiteral(text, i)
+      out += literal.text
+      i = literal.next
+      continue
+    }
     out += ch
-    if (ch === '"' || ch === "'") quote = ch
     i += 1
   }
-  if (triple !== undefined) out += text.slice(triple.contentStart).replace(/[^\n]/g, "")
   return out
 }
 
 /** Strip triple-quoted spans, then strip `#` comments (whole-line AND inline). */
 const stripCommentsAndDocstrings = (text: string): string[] =>
   stripTripleQuoted(text).split("\n").map(stripInlineComment)
+
+/** How ONE character outside any string literal moves the bracket depth: `+1`
+ *  for an opener, `-1` for a closer, `0` for everything else.
+ *
+ *  A unit because the opener and closer sets must stay SYMMETRIC — an opener
+ *  listed without its closer leaves a line permanently unbalanced, which makes
+ *  `toLogicalLines` over-join across the next test boundary. Keeping both lists
+ *  adjacent in one function is what makes such an asymmetry visible. */
+const bracketDelta = (c: string | undefined): number => {
+  if (c === "(" || c === "[" || c === "{") return 1
+  if (c === ")" || c === "]" || c === "}") return -1
+  return 0
+}
 
 /** Net bracket depth contributed by a line, IGNORING brackets inside single/double
  *  quoted string literals (with backslash escapes). String-aware so an in-string
@@ -316,8 +403,7 @@ const netBracketDelta = (line: string): number => {
       continue
     }
     if (c === '"' || c === "'") q = c
-    else if (c === "(" || c === "[" || c === "{") depth += 1
-    else if (c === ")" || c === "]" || c === "}") depth -= 1
+    else depth += bracketDelta(c)
   }
   return depth
 }

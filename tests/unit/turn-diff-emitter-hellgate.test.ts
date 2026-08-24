@@ -15,6 +15,7 @@ import {
   TURN_DIFF_DEFAULT_MAX_BYTES,
 } from "@/agent/turn-diff"
 import type { GitRunner, GitRunResult } from "@/tool/git/types"
+import { present } from "../_helpers/expect-present"
 
 /** Build a runner that replies to argv prefixes with canned results. The map
  *  key is the argv joined by space; the runner matches by exact join. */
@@ -157,7 +158,7 @@ describe("ADR-0102 turn-diff emitter — computeTurnDiff (hellgate)", () => {
     expect(payload?.unifiedDiff).toContain("[truncated:")
     expect(payload?.unifiedDiff).toContain(`${200 * 1024} bytes total`)
     // Visible body up to the truncation marker is exactly maxUnifiedBytes.
-    const upTo = payload!.unifiedDiff.indexOf("\n\n[truncated:")
+    const upTo = present(payload, "computeTurnDiff payload").unifiedDiff.indexOf("\n\n[truncated:")
     expect(upTo).toBe(64 * 1024)
   })
 
@@ -175,7 +176,7 @@ describe("ADR-0102 turn-diff emitter — computeTurnDiff (hellgate)", () => {
       maxUnifiedBytes: -1,
     })
     expect(payload?.unifiedDiff).toContain("[truncated:")
-    const upTo = payload!.unifiedDiff.indexOf("\n\n[truncated:")
+    const upTo = present(payload, "computeTurnDiff payload").unifiedDiff.indexOf("\n\n[truncated:")
     expect(upTo).toBe(TURN_DIFF_DEFAULT_MAX_BYTES)
   })
 

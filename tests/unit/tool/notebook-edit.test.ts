@@ -8,6 +8,7 @@
  */
 import { describe, expect, test } from "bun:test"
 import { editNotebook } from "@/tool/notebook-edit"
+import { nth } from "../../_helpers/expect-present"
 
 const nb = (cells: unknown[]): string =>
   JSON.stringify({
@@ -43,8 +44,8 @@ describe("editNotebook — str_replace within a cell", () => {
     expect(r.ok).toBe(true)
     if (!r.ok) return
     const out = parse(r.json)
-    expect(cellText(out.cells[0]!)).toBe("x = 42\nprint(x)\n")
-    expect(cellText(out.cells[1]!)).toBe("y = 2\n") // sibling intact
+    expect(cellText(nth(out.cells, 0, "out.cells"))).toBe("x = 42\nprint(x)\n")
+    expect(cellText(nth(out.cells, 1, "out.cells"))).toBe("y = 2\n") // sibling intact
     expect(out.cells).toHaveLength(2)
   })
 
@@ -67,7 +68,7 @@ describe("editNotebook — str_replace within a cell", () => {
       replaceAll: true,
     })
     expect(r.ok).toBe(true)
-    if (r.ok) expect(cellText(parse(r.json).cells[0]!)).toBe("b\nb\n")
+    if (r.ok) expect(cellText(nth(parse(r.json).cells, 0, "parse(r.json).cells"))).toBe("b\nb\n")
   })
 
   test("match not found ⇒ typed error", () => {
@@ -101,9 +102,9 @@ describe("editNotebook — insert / delete", () => {
     if (!r.ok) return
     const out = parse(r.json)
     expect(out.cells).toHaveLength(3)
-    expect(cellText(out.cells[1]!)).toBe("middle\n")
-    expect(out.cells[1]!.cell_type).toBe("code")
-    expect(cellText(out.cells[2]!)).toBe("second\n")
+    expect(cellText(nth(out.cells, 1, "out.cells"))).toBe("middle\n")
+    expect(nth(out.cells, 1, "out.cells").cell_type).toBe("code")
+    expect(cellText(nth(out.cells, 2, "out.cells"))).toBe("second\n")
   })
 
   test("insert at end (index = length) appends", () => {

@@ -74,6 +74,78 @@ export const buildSemanticCounterfactualSeed = (
   return lines.join("\n")
 }
 
+/** The structural flags the seed keys off, derived from the facts EXACTLY once.
+ *  Shared by the two bullet builders below so an observation ("we saw new defs")
+ *  and the constraint it justifies ("maybe you don't need them") can never
+ *  disagree about whether the flag fired. */
+interface StructuralFlags {
+  readonly multiFile: boolean
+  readonly hasNewDefs: boolean
+  readonly hasNewFiles: boolean
+  readonly hasRuntimeCalls: boolean
+  readonly isEmpty: boolean
+}
+
+/** The "facts about candidate 0's patch" bullets — what the structural gate
+ *  OBSERVED, stated back to the model.
+ *
+ *  A unit because every bullet here is a pure restatement of one fired flag with
+ *  its count, in a fixed order, and none of them asks the model to do anything.
+ *  Note `hasNewFiles` deliberately has no reason bullet: it only ever appears as
+ *  a CONSTRAINT (folded into the new-defs line), which is easy to misread as an
+ *  omission when the two lists are interleaved inline. */
+const buildReasonBullets = (facts: CandidateRiskFacts, flags: StructuralFlags): string[] => {
+  const bullets: string[] = []
+  if (flags.multiFile) bullets.push(`- touched ${pluralFiles(facts.touchedSourceFiles)}`)
+  if (flags.hasNewDefs) bullets.push(`- added ${pluralDefs(facts.newDefs)}`)
+  if (flags.hasRuntimeCalls) bullets.push(`- added ${pluralCalls(facts.runtimeExpandingCalls)}`)
+  if (flags.isEmpty) bullets.push("- produced an empty patch")
+  return bullets
+}
+
+/** The "consider a smaller in-place alternative" bullets — what candidate 1 is
+ *  ASKED to weigh.
+ *
+ *  A unit because these bullets are advisory in a way the reason bullets are
+ *  not, and they share one escape hatch that must stay LAST among the advisory
+ *  lines: "if the broader change is genuinely required, keep it and explain why"
+ *  is emitted unconditionally, so the gate can never read as a hard reject. Only
+ *  the empty-patch line — a real requirement, not advice — follows it. */
+const buildConstraintBullets = (
+  facts: CandidateRiskFacts,
+  flags: StructuralFlags,
+  owner: string | undefined,
+): string[] => {
+  const bullets: string[] = []
+  if (facts.crossFile || flags.multiFile || facts.filesOutsideOwner.length > 0) {
+    bullets.push(
+      owner !== undefined && owner !== ""
+        ? `- the owner file appears to be \`${owner}\`; if a smaller in-place edit there fully fixes the issue, prefer it`
+        : "- if a smaller edit to fewer source files fully fixes the issue, prefer it",
+    )
+  }
+  if (flags.hasNewDefs || flags.hasNewFiles) {
+    bullets.push(
+      "- new helpers/classes/methods may not be necessary; weigh whether an in-place change suffices",
+    )
+  }
+  if (flags.hasRuntimeCalls) {
+    bullets.push(
+      "- changing the existing control flow may not be necessary; weigh whether it can be preserved",
+    )
+    bullets.push(
+      "- runtime-expanding calls (compiler/IO/DB/subprocess) may not be necessary; weigh whether they can be avoided",
+    )
+  }
+  bullets.push(
+    "- if the broader change is genuinely required to fix the issue, keep it and explain why",
+  )
+  if (flags.isEmpty) {
+    bullets.push("- the patch must be non-empty and apply cleanly")
+  }
+  return bullets
+}
+
 export const buildCounterfactualSeed = (args: {
   readonly facts: CandidateRiskFacts
   /** primary owner file to focus cand1 on (overrides facts.ownerFiles[0]). */
@@ -99,41 +171,10 @@ export const buildCounterfactualSeed = (args: {
     facts.crossFile || multiFile || hasNewDefs || hasNewFiles || hasRuntimeCalls || isEmpty
   if (!fired) return semanticSeed
 
-  const reasonBullets: string[] = []
-  if (multiFile) reasonBullets.push(`- touched ${pluralFiles(facts.touchedSourceFiles)}`)
-  if (hasNewDefs) reasonBullets.push(`- added ${pluralDefs(facts.newDefs)}`)
-  if (hasRuntimeCalls) reasonBullets.push(`- added ${pluralCalls(facts.runtimeExpandingCalls)}`)
-  if (isEmpty) reasonBullets.push("- produced an empty patch")
-
+  const flags: StructuralFlags = { multiFile, hasNewDefs, hasNewFiles, hasRuntimeCalls, isEmpty }
+  const reasonBullets = buildReasonBullets(facts, flags)
   const owner = args.ownerFile ?? facts.ownerFiles[0]
-  const constraintBullets: string[] = []
-
-  if (facts.crossFile || multiFile || facts.filesOutsideOwner.length > 0) {
-    constraintBullets.push(
-      owner !== undefined && owner !== ""
-        ? `- the owner file appears to be \`${owner}\`; if a smaller in-place edit there fully fixes the issue, prefer it`
-        : "- if a smaller edit to fewer source files fully fixes the issue, prefer it",
-    )
-  }
-  if (hasNewDefs || hasNewFiles) {
-    constraintBullets.push(
-      "- new helpers/classes/methods may not be necessary; weigh whether an in-place change suffices",
-    )
-  }
-  if (hasRuntimeCalls) {
-    constraintBullets.push(
-      "- changing the existing control flow may not be necessary; weigh whether it can be preserved",
-    )
-    constraintBullets.push(
-      "- runtime-expanding calls (compiler/IO/DB/subprocess) may not be necessary; weigh whether they can be avoided",
-    )
-  }
-  constraintBullets.push(
-    "- if the broader change is genuinely required to fix the issue, keep it and explain why",
-  )
-  if (isEmpty) {
-    constraintBullets.push("- the patch must be non-empty and apply cleanly")
-  }
+  const constraintBullets = buildConstraintBullets(facts, flags, owner)
 
   const structuralSeed = [
     "Candidate 0 was expanded/rejected by the structural risk gate. Facts about its patch:",

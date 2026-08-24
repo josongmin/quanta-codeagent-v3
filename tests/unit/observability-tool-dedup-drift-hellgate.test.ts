@@ -5,6 +5,7 @@ import {
   type PerToolTtlDriftKind,
   RECOMMENDED_PER_TOOL_TTL_MS,
 } from "@/observability/metrics/instrument-tool-dedup"
+import { nth, present } from "../_helpers/expect-present"
 
 /**
  * Per-tool TTL drift detector hellgate (ADR-0189).
@@ -100,7 +101,9 @@ describe("ADR-0189: per-tool TTL drift detector", () => {
       const warnMsgs: string[] = []
       defaultToolCallCache({
         checkRecommendedDrift: true,
-        perToolTtlMs: { read: RECOMMENDED_PER_TOOL_TTL_MS.read! }, // only `read` set
+        perToolTtlMs: {
+          read: present(RECOMMENDED_PER_TOOL_TTL_MS.read, "RECOMMENDED_PER_TOOL_TTL_MS.read"),
+        }, // only `read` set
         metrics,
         onDriftWarn: (m) => warnMsgs.push(m),
       })
@@ -142,7 +145,7 @@ describe("ADR-0189: per-tool TTL drift detector", () => {
         onDriftWarn: (m) => warnMsgs.push(m),
       })
       expect(warnMsgs).toHaveLength(1) // one combined call, not per-drift
-      const msg = warnMsgs[0]!
+      const msg = nth(warnMsgs, 0, "warnMsgs")
       expect(msg).toContain("too-permissive=[read]")
       expect(msg).toContain("too-restrictive=[grep]")
       expect(msg).toContain("unknown=[custom]")

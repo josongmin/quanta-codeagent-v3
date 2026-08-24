@@ -614,9 +614,10 @@ export const registerSliceBoundarySuite = (config: SliceBoundaryConfig): void =>
       })
     }
 
-    if (config.requireSubSliceBarrels && config.requireSubSliceBarrels.length > 0) {
-      test(`sub-slice barrels exist (${config.requireSubSliceBarrels.join(", ")})`, () => {
-        const missing = config.requireSubSliceBarrels!.filter((p) => {
+    const subSliceBarrels = config.requireSubSliceBarrels
+    if (subSliceBarrels && subSliceBarrels.length > 0) {
+      test(`sub-slice barrels exist (${subSliceBarrels.join(", ")})`, () => {
+        const missing = subSliceBarrels.filter((p) => {
           try {
             return !statSync(join(dir, p)).isFile()
           } catch {

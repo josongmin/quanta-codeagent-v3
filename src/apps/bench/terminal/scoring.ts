@@ -179,6 +179,20 @@ export const submissionByTask = (
  * A task with a single trial contributes no variance term (`p(1-p)/(k-1)` is
  * undefined at k=1) but still counts in `n`.
  */
+/**
+ * How many of one task's trials cleared the success threshold.
+ *
+ * A unit because "successful" has exactly one definition — {@link isSuccess} applied
+ * per trial — and three estimators (accuracy, its variance term, and pass@k's `c`) all
+ * need that same count. Open-coding the tally at each of them is how a null reward
+ * could come to mean "failure" in one estimator and "absent" in another.
+ */
+const countSuccesses = (rewards: readonly (number | null)[]): number => {
+  let hits = 0
+  for (const reward of rewards) if (isSuccess(reward)) hits += 1
+  return hits
+}
+
 export const computeMetrics = (
   byTask: RewardsByTask,
 ): { readonly accuracy: number; readonly accuracyStderr: number } => {
@@ -186,7 +200,7 @@ export const computeMetrics = (
   let successful = 0
   for (const rewards of byTask.values()) {
     total += rewards.length
-    for (const reward of rewards) if (isSuccess(reward)) successful += 1
+    successful += countSuccesses(rewards)
   }
   const accuracy = total === 0 ? 0 : (100 * successful) / total
 
@@ -195,9 +209,7 @@ export const computeMetrics = (
   for (const rewards of byTask.values()) {
     const k = rewards.length
     if (k < 2) continue
-    let hits = 0
-    for (const reward of rewards) if (isSuccess(reward)) hits += 1
-    const p = hits / k
+    const p = countSuccesses(rewards) / k
     variance += (p * (1 - p)) / (k - 1)
   }
   variance = n === 0 ? 0 : variance / (n * n)
@@ -219,8 +231,7 @@ export const computePassAtK = (
     for (const rewards of byTask.values()) {
       const n = rewards.length
       if (n < k) continue
-      let c = 0
-      for (const reward of rewards) if (isSuccess(reward)) c += 1
+      const c = countSuccesses(rewards)
       if (n - c < k) {
         values.push(1)
         continue

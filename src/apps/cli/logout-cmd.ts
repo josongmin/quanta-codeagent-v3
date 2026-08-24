@@ -136,6 +136,32 @@ const maybeRevoke = async (
   return outcome.ok ? "server session revoked" : "local only (revoke unavailable)"
 }
 
+/** What `/logout` knows about the credential it is about to delete: the record
+ *  (null when there is nothing to sign out of), which tool owns it, and the
+ *  path to name in the output. A unit because the WHOLE read is best-effort —
+ *  a bad-perms / bad-shape read is non-fatal for a command whose entire job is
+ *  making the credential go away, so every failure collapses to "nothing known,
+ *  use the first candidate path" and the delete attempt proceeds. */
+const readPriorToken = async (
+  tokenEnv: NodeJS.ProcessEnv,
+): Promise<{
+  readonly record: TokenRecord | null
+  readonly source: "quanta" | "codex" | null
+  readonly path: string
+}> => {
+  const path = resolveChatgptTokenCandidates(tokenEnv)[0]?.path ?? ""
+  try {
+    const resolved = await readResolvedToken(tokenEnv)
+    return {
+      record: resolved?.record ?? null,
+      source: resolved?.source ?? null,
+      path: resolved?.path ?? path,
+    }
+  } catch {
+    return { record: null, source: null, path }
+  }
+}
+
 export const buildLogoutCmd = (deps: LogoutDeps = {}): SlashCommand => ({
   name: "/logout",
   describe: "Sign out and delete the ChatGPT-OAuth token from disk",
@@ -150,20 +176,7 @@ export const buildLogoutCmd = (deps: LogoutDeps = {}): SlashCommand => ({
       ...env,
       ...(ctx.prefsHome !== undefined ? { QUANTA_PREFS_HOME: ctx.prefsHome } : {}),
     }
-    const path = resolveChatgptTokenCandidates(tokenEnv)[0]?.path ?? ""
-
-    let prior: TokenRecord | null = null
-    let source: "quanta" | "codex" | null = null
-    let pathUsed = path
-    try {
-      const resolved = await readResolvedToken(tokenEnv)
-      prior = resolved?.record ?? null
-      source = resolved?.source ?? null
-      pathUsed = resolved?.path ?? path
-    } catch {
-      // Read errors (bad perms / shape) are non-fatal here — the user
-      // explicitly asked to delete. Fall through to the delete attempt.
-    }
+    const { record: prior, source, path: pathUsed } = await readPriorToken(tokenEnv)
 
     if (source === "codex") {
       ctx.out(renderExternallyManaged(pathUsed))

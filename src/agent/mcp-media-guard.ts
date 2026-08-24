@@ -85,9 +85,14 @@ const validateResourceBlock = (data: string, mimeType: string): DocumentBlock | 
   return { type: "document", data: bytes.toString("base64"), mediaType: PDF_MEDIA_TYPE }
 }
 
-const mediaToResultFields = (
+/** Sort the server's media blocks into the ones that survived validation and a
+ *  count of the ones that did not. A unit because this partition IS the whole
+ *  admission decision: everything downstream (the two block arrays, the
+ *  attribution note, the skip note) only reads this classification back out,
+ *  and no caller ever re-inspects a raw {@link McpMediaBlock}. */
+const partitionValidatedMedia = (
   media: readonly McpMediaBlock[] | undefined,
-): { images?: ImageBlock[]; documents?: DocumentBlock[]; note: string } => {
+): { images: ImageBlock[]; documents: DocumentBlock[]; skipped: number } => {
   const images: ImageBlock[] = []
   const documents: DocumentBlock[] = []
   let skipped = 0
@@ -102,6 +107,13 @@ const mediaToResultFields = (
       else documents.push(doc)
     }
   }
+  return { images, documents, skipped }
+}
+
+const mediaToResultFields = (
+  media: readonly McpMediaBlock[] | undefined,
+): { images?: ImageBlock[]; documents?: DocumentBlock[]; note: string } => {
+  const { images, documents, skipped } = partitionValidatedMedia(media)
   const attached = images.length + documents.length
   // Attribution into the TEXT channel (which dispatch wraps in the ADR-0471
   // untrusted-source envelope as `provenance:"mcp"`). The image/document BLOCKS

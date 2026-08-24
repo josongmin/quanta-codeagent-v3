@@ -34,6 +34,7 @@ import {
 import { parseRRule } from "@/scheduler/rrule-parser"
 import type { RRule } from "@/scheduler/types"
 import { type Tool, type ToolEvent, ToolRegistry } from "@/tool"
+import { nth, present } from "../_helpers/expect-present"
 
 const ruleOf = (s: string): RRule => {
   const r = parseRRule(s)
@@ -93,11 +94,11 @@ describe("ALBB-14 §Automation — shared-lifecycle ticker delivery", () => {
     expect(handle).toBeDefined()
     expect(arms.length).toBe(1)
     // Fire the timer body once; let the async tick chain settle.
-    arms[0]!.cb()
+    nth(arms, 0, "arms").cb()
     await new Promise((r) => setTimeout(r, 5))
     expect(delivered).toContain("auto-A1")
     handle?.stop()
-    expect(arms[0]!.cleared).toBe(true)
+    expect(nth(arms, 0, "arms").cleared).toBe(true)
   })
 
   // ── §A2 ── absent slot ⇒ no ticker (default-OFF byte-identical) ──────────
@@ -184,7 +185,10 @@ describe("ALBB-14 §Automation — composition-root stub is fail-loud (posture b
     const counterName = AUTOMATION_FIRES_DROPPED_COUNTER
     const before = metrics.snapshot().counters[counterName] ?? 0
     // Directly exercise the stub handler the base composition-root installed.
-    await slot!.handler!({
+    await present(
+      present(slot, "slot").handler,
+      "slot.handler",
+    )({
       id: "drop-A3",
       title: "t",
       rule: ruleOf("FREQ=DAILY"),

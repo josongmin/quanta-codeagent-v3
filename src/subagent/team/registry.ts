@@ -50,6 +50,44 @@ export interface TeamRegistryPort {
 
 const isUsableId = (v: unknown): v is string => typeof v === "string" && v.length > 0
 
+/** caller-auth: may `caller` seed `m` into `teamId`? Only ITSELF or an UNTEAMED
+ *  agent — re-homing a member already in ANOTHER team is the hijack that would
+ *  hand the caller that team's cross-team send scope, bypassing the
+ *  `teamScopedMailbox` deny. A host path (no caller) re-homes freely. Its own
+ *  unit because it is a SECURITY predicate: it must read as one sentence, and
+ *  it must be impossible to widen by accident while editing the seed loop. */
+const maySeedMember = (
+  teamByAgent: ReadonlyMap<string, string>,
+  teamId: string,
+  m: string,
+  caller: string | undefined,
+): boolean =>
+  caller === undefined ||
+  m === caller ||
+  !teamByAgent.has(m) ||
+  teamByAgent.get(m) === teamId
+
+/** Seed `members` into `teamId`, skipping anyone {@link maySeedMember} refuses.
+ *  A unit because it is the ONE place membership is granted in bulk, and the
+ *  `Array.isArray` check is not redundant defensiveness: `members` arrives from
+ *  an LLM tool call, so the declared `readonly string[]` is a claim, not a
+ *  guarantee. Takes the registry's two indexes as a bag so the caller-auth rule
+ *  cannot be applied to a DIFFERENT `join` than the one that maintains them. */
+const seedMembers = (
+  reg: {
+    readonly teamByAgent: ReadonlyMap<string, string>
+    readonly join: (teamId: string, agentId: string) => void
+  },
+  teamId: string,
+  members: readonly string[],
+  caller: string | undefined,
+): void => {
+  if (!Array.isArray(members)) return
+  for (const m of members) {
+    if (maySeedMember(reg.teamByAgent, teamId, m, caller)) reg.join(teamId, m)
+  }
+}
+
 /**
  * In-memory `TeamRegistryPort`. A single global `agentId → teamId` map (an
  * agent belongs to exactly ONE team) plus a `teamId → Set<agentId>` reverse
@@ -95,22 +133,7 @@ export const createTeamRegistry = (): TeamRegistryPort => {
       // joining an existing foreign team would grant it that team's cross-team send scope.
       if (caller !== undefined && existed && teamByAgent.get(caller) !== teamId) return
       if (!existed) agentsByTeam.set(teamId, new Set<string>())
-      if (Array.isArray(members)) {
-        for (const m of members) {
-          // caller-auth: may seed only ITSELF or an UNTEAMED agent — never re-home a
-          // member already in ANOTHER team (that is the re-home hijack that bypasses the
-          // teamScopedMailbox cross-team deny). Host path (no caller) re-homes freely.
-          if (
-            caller !== undefined &&
-            m !== caller &&
-            teamByAgent.has(m) &&
-            teamByAgent.get(m) !== teamId
-          ) {
-            continue
-          }
-          join(teamId, m)
-        }
-      }
+      seedMembers({ teamByAgent, join }, teamId, members, caller)
     },
 
     delete(teamId, caller): readonly string[] {

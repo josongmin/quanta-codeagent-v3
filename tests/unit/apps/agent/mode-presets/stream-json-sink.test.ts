@@ -21,6 +21,7 @@ import {
 } from "@/../src/apps/agent/mode-presets/stream-json-sink"
 import { decodeSessionEvent, SESSION_PROTOCOL_VERSION, type SessionEvent } from "@/protocol/session"
 import type { AgentEvent } from "@/stream"
+import { nth } from "../../../../_helpers/expect-present"
 
 /** Deterministic id/clock seams so envelopes are byte-stable across runs. */
 const det = () => {
@@ -93,7 +94,7 @@ describe("StreamJsonSink — json (b) one well-formed top-level JSON value", () 
     sink.finalize()
     // Exactly one write, one top-level JSON value.
     expect(cap.lines.length).toBe(1)
-    const raw = cap.lines[0]!.trimEnd()
+    const raw = nth(cap.lines, 0, "cap.lines").trimEnd()
     const arr = JSON.parse(raw) as unknown[]
     expect(Array.isArray(arr)).toBe(true)
     expect(arr.length).toBe(6)
@@ -133,7 +134,7 @@ describe("StreamJsonSink — (c) partial gating", () => {
     })
     sink.emit({ type: "assistant_text", delta: "x" })
     expect(cap.lines.length).toBe(1)
-    const ev = decodeSessionEvent(cap.lines[0]!.trimEnd())
+    const ev = decodeSessionEvent(nth(cap.lines, 0, "cap.lines").trimEnd())
     expect(ev.type).toBe("turn.output.delta")
     expect((ev as { delta: string }).delta).toBe("x")
   })

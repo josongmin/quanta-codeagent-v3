@@ -95,6 +95,27 @@ const errResult = (raw: string, error: string): ClassifyResult => ({
   error,
 })
 
+/**
+ * The runner-up leaf ids from a classifier reply.
+ *
+ * A unit because three rules together define "an alternate": it must be a leaf
+ * that exists in the taxonomy, it must not repeat the primary pick, and the
+ * list stops at `maxAlt`. A caller applying only two of them would surface the
+ * primary twice, or an id the taxonomy does not carry.
+ */
+const collectAlternates = (rawAlt: unknown, id: string | null, maxAlt: number): UseCaseId[] => {
+  const alt: UseCaseId[] = []
+  if (!Array.isArray(rawAlt)) return alt
+  for (const a of rawAlt) {
+    if (typeof a !== "string") continue
+    if (a === id) continue
+    if (leafById(a) === undefined) continue
+    alt.push(a)
+    if (alt.length >= maxAlt) break
+  }
+  return alt
+}
+
 const parse = (raw: string, maxAlt: number): ClassifyResult => {
   const block = extractJsonObject(raw)
   if (block === null) return errResult(raw, "no JSON object in response")
@@ -112,16 +133,7 @@ const parse = (raw: string, maxAlt: number): ClassifyResult => {
     typeof obj.confidence === "number" && obj.confidence >= 0 && obj.confidence <= 1
       ? obj.confidence
       : 0
-  const altIn = Array.isArray(obj.alt) ? obj.alt : []
-  const alt: UseCaseId[] = []
-  for (const a of altIn) {
-    if (typeof a !== "string") continue
-    if (a === id) continue
-    if (leafById(a) === undefined) continue
-    alt.push(a)
-    if (alt.length >= maxAlt) break
-  }
-  return { id, confidence: conf, alt, raw }
+  return { id, confidence: conf, alt: collectAlternates(obj.alt, id, maxAlt), raw }
 }
 
 export const classifyQuery = async (query: string, opts: ClassifyOpts): Promise<ClassifyResult> => {

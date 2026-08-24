@@ -139,19 +139,29 @@ const unquote = (v: string): string =>
     ? v.slice(1, -1)
     : v
 
+/** One `KEY=value` assignment from a dotenv file, or `null` for a line that
+ *  carries none (blank, comment, or missing `=`).
+ *
+ *  A unit because "what counts as an assignment" is the whole of this dialect:
+ *  the blank/comment skip, the optional `export ` prefix, and the quote
+ *  stripping are one grammar, and `loadEnv` above only decides first-wins. */
+const parseEnvLine = (raw: string): { key: string; value: string } | null => {
+  let line = raw.trim()
+  if (line === "" || line.startsWith("#")) return null
+  if (line.startsWith("export ")) line = line.slice("export ".length).trimStart()
+  const eq = line.indexOf("=")
+  if (eq <= 0) return null
+  return { key: line.slice(0, eq).trim(), value: unquote(line.slice(eq + 1).trim()) }
+}
+
 const loadEnv = (files: readonly string[]): void => {
   for (const f of files) {
     const p = resolve(process.cwd(), f)
     if (!existsSync(p)) continue
     for (const raw of readFileSync(p, "utf8").split("\n")) {
-      let line = raw.trim()
-      if (line === "" || line.startsWith("#")) continue
-      if (line.startsWith("export ")) line = line.slice("export ".length).trimStart()
-      const eq = line.indexOf("=")
-      if (eq <= 0) continue
-      const k = line.slice(0, eq).trim()
-      const v = unquote(line.slice(eq + 1).trim())
-      if (process.env[k] === undefined) process.env[k] = v
+      const entry = parseEnvLine(raw)
+      if (entry === null) continue
+      if (process.env[entry.key] === undefined) process.env[entry.key] = entry.value
     }
   }
 }
@@ -214,62 +224,96 @@ const cmdSynthetic = async (): Promise<number> => {
 
 type LoadGroundingReport = (runId: string) => ReturnType<typeof buildGroundingReport>
 
-const groundingRun = async (storeDir: string | undefined): Promise<number> => {
+/** A validated CLI flag: the value, or the message to print before exiting 1. */
+type FlagParse<T> =
+  | { readonly ok: true; readonly value: T }
+  | { readonly ok: false; readonly message: string }
+
+/** The closed-set selectors of `eval grounding run` — which fixtures to load
+ *  and which probe shape to run them under. */
+interface GroundingSelectors {
+  readonly suite?: "canary" | "nightly"
+  readonly corpus?: (typeof GROUNDING_CORPORA)[number]
+  readonly mode?: (typeof GROUNDING_MODES)[number]
+}
+
+/**
+ * Validate `--suite` / `--corpus` / `--mode` against their closed sets.
+ *
+ * A unit because each of the three is only meaningful as a member of its set,
+ * and every one reaches {@link runGrounding} through a cast — validating them
+ * in one place is what makes those casts true rather than hopeful. Reports the
+ * FIRST offending flag, in declaration order, exactly as the inline guards did.
+ */
+const parseGroundingSelectors = (): FlagParse<GroundingSelectors> => {
   const suite = argValue("--suite")
   const corpus = argValue("--corpus")
-  if (suite !== undefined && suite !== "canary" && suite !== "nightly") {
-    console.error("eval grounding run: --suite must be canary or nightly")
-    return 1
-  }
+  const mode = argValue("--mode")
+  if (suite !== undefined && suite !== "canary" && suite !== "nightly")
+    return { ok: false, message: "--suite must be canary or nightly" }
   if (
     corpus !== undefined &&
     !GROUNDING_CORPORA.includes(corpus as (typeof GROUNDING_CORPORA)[number])
-  ) {
-    console.error(`eval grounding run: --corpus must be one of ${GROUNDING_CORPORA.join(", ")}`)
+  )
+    return { ok: false, message: `--corpus must be one of ${GROUNDING_CORPORA.join(", ")}` }
+  if (mode !== undefined && !GROUNDING_MODES.includes(mode as (typeof GROUNDING_MODES)[number]))
+    return { ok: false, message: `--mode must be one of ${GROUNDING_MODES.join(", ")}` }
+  return {
+    ok: true,
+    value: {
+      ...(suite !== undefined ? { suite } : {}),
+      ...(corpus !== undefined ? { corpus: corpus as (typeof GROUNDING_CORPORA)[number] } : {}),
+      ...(mode !== undefined ? { mode: mode as (typeof GROUNDING_MODES)[number] } : {}),
+    },
+  }
+}
+
+/**
+ * Read an optional integer flag with a floor, or report it invalid.
+ *
+ * A unit because `--limit` and `--concurrency` differ only in that floor: one
+ * parser stops the two from drifting into subtly different notions of "a valid
+ * integer" (NaN, `1.5`, and a negative are rejected for both).
+ */
+const parseIntFlag = (flag: string, min: number): FlagParse<number | undefined> => {
+  const raw = argValue(flag)
+  if (raw === undefined) return { ok: true, value: undefined }
+  const value = Number.parseInt(raw, 10)
+  if (!Number.isFinite(value) || !Number.isInteger(value) || value < min)
+    return { ok: false, message: `invalid ${flag} ${raw}` }
+  return { ok: true, value }
+}
+
+const groundingRun = async (storeDir: string | undefined): Promise<number> => {
+  const selectors = parseGroundingSelectors()
+  if (!selectors.ok) {
+    console.error(`eval grounding run: ${selectors.message}`)
     return 1
   }
-  const mode = argValue("--mode")
   // Read once. The spread used to call `argValue("--case")` twice — once to test
   // it, once to use it — and assert the second read non-null, which only holds
   // because the reader is pure. A local makes the guard and the value the same
   // fact instead of two hopefully-agreeing calls.
   const caseId = argValue("--case")
-  if (mode !== undefined && !GROUNDING_MODES.includes(mode as (typeof GROUNDING_MODES)[number])) {
-    console.error(`eval grounding run: --mode must be one of ${GROUNDING_MODES.join(", ")}`)
+  const limit = parseIntFlag("--limit", 0)
+  if (!limit.ok) {
+    console.error(`eval grounding run: ${limit.message}`)
     return 1
   }
-  const limitRaw = argValue("--limit")
-  const limit = limitRaw !== undefined ? Number.parseInt(limitRaw, 10) : undefined
-  if (
-    limitRaw !== undefined &&
-    (!Number.isFinite(limit) || limit === undefined || limit < 0 || !Number.isInteger(limit))
-  ) {
-    console.error(`eval grounding run: invalid --limit ${limitRaw}`)
-    return 1
-  }
-  const concurrencyRaw = argValue("--concurrency")
-  const concurrency = concurrencyRaw !== undefined ? Number.parseInt(concurrencyRaw, 10) : undefined
-  if (
-    concurrencyRaw !== undefined &&
-    (!Number.isFinite(concurrency) ||
-      concurrency === undefined ||
-      concurrency < 1 ||
-      !Number.isInteger(concurrency))
-  ) {
-    console.error(`eval grounding run: invalid --concurrency ${concurrencyRaw}`)
+  const concurrency = parseIntFlag("--concurrency", 1)
+  if (!concurrency.ok) {
+    console.error(`eval grounding run: ${concurrency.message}`)
     return 1
   }
   const agent = resolveLLM("agent")
   if (agent === null) return 0
   const summary = await runGrounding({
     llm: agent.llm,
-    ...(suite !== undefined ? { suite } : {}),
-    ...(corpus !== undefined ? { corpus: corpus as (typeof GROUNDING_CORPORA)[number] } : {}),
-    ...(mode !== undefined ? { mode: mode as (typeof GROUNDING_MODES)[number] } : {}),
+    ...selectors.value,
     ...(storeDir !== undefined ? { storeDir } : {}),
     ...(caseId !== undefined ? { caseId } : {}),
-    ...(limit !== undefined ? { limit } : {}),
-    ...(concurrency !== undefined ? { concurrency } : {}),
+    ...(limit.value !== undefined ? { limit: limit.value } : {}),
+    ...(concurrency.value !== undefined ? { concurrency: concurrency.value } : {}),
   })
   const jsonOut = argValue("--json-out")
   if (jsonOut !== undefined) writeTextFile(jsonOut, `${JSON.stringify(summary, null, 2)}\n`)
@@ -475,6 +519,26 @@ const groundingScaffoldReplay = (): number => {
   return 0
 }
 
+/**
+ * The reviewer stamp a promoted replay fixture carries, or `undefined` when the
+ * operator named neither reviewer nor review time.
+ *
+ * A unit because supplying EITHER half is what marks the fixture reviewed — the
+ * `status: "reviewed"` flag and the two identifying fields are one attestation,
+ * and splitting them lets a fixture claim review with neither field set.
+ */
+const reviewerStamp = (
+  reviewer: string | undefined,
+  reviewedAt: string | undefined,
+): { status: "reviewed"; reviewer?: string; reviewedAt?: string } | undefined =>
+  reviewer !== undefined || reviewedAt !== undefined
+    ? {
+        status: "reviewed" as const,
+        ...(reviewer !== undefined ? { reviewer } : {}),
+        ...(reviewedAt !== undefined ? { reviewedAt } : {}),
+      }
+    : undefined
+
 const groundingPromoteReplay = (): number => {
   const draftPath = argValue("--draft")
   const goldJson = argValue("--gold-json")
@@ -498,16 +562,7 @@ const groundingPromoteReplay = (): number => {
     return 1
   }
   const blockingEligibleRaw = argValue("--blocking-eligible")
-  const reviewer = argValue("--reviewer")
-  const reviewedAt = argValue("--reviewed-at")
-  const humanAudit =
-    reviewer !== undefined || reviewedAt !== undefined
-      ? {
-          status: "reviewed" as const,
-          ...(reviewer !== undefined ? { reviewer } : {}),
-          ...(reviewedAt !== undefined ? { reviewedAt } : {}),
-        }
-      : undefined
+  const humanAudit = reviewerStamp(argValue("--reviewer"), argValue("--reviewed-at"))
   const result = writePromotedGroundingReplayCase({
     draft: readGroundingReplayDraft(draftPath),
     gold: readJsonFile(goldJson) as never,

@@ -19,7 +19,7 @@
  */
 
 import type { AgentConfig } from "@/agent"
-import type { runtimeConfigFromEnv } from "@/shared"
+import { runtimeConfigFromEnv as runtimeConfigFromEnvImpl } from "@/shared"
 
 /** Surface-owned env view + the derived runtime-config snapshot, threaded to
  *  every wire so entries with different arities in the legacy code (some read
@@ -27,7 +27,7 @@ import type { runtimeConfigFromEnv } from "@/shared"
  *  signature. `config` is computed ONCE per assembly (as before) and passed in. */
 export interface CapabilityWireContext {
   readonly env: Record<string, string | undefined>
-  readonly config: ReturnType<typeof runtimeConfigFromEnv>
+  readonly config: ReturnType<typeof runtimeConfigFromEnvImpl>
 }
 
 /** One capability-wiring step. `apply` MUTATES `cfg` in place (caller-override-
@@ -200,6 +200,30 @@ export const assertWireOrder = (wires: readonly CapabilityWire[]): void => {
 /** Apply the registry in array order (== topological order, guarded above),
  *  mutating `cfg`. This is the single loop that replaces the ~17 hand-ordered
  *  calls; byte-identical because array order === legacy call order. */
+/** Fold `wires` onto `cfg`, in place, deriving the runtime-config once.
+ *
+ *  This exists as its own export because the registry has TWO consumers, not
+ *  one. `assembleAgentConfig` folds it for the headless / SDK / batch surfaces;
+ *  the INTERACTIVE CLI never calls that function — it binds through
+ *  `context-binding#wireRuntimePorts`, which must fold the SAME registry or the
+ *  two surfaces disagree about which capabilities exist.
+ *
+ *  They did disagree. Measured slot-by-slot under identical gates, the CLI left
+ *  `browser`, `appshot`, `diagnosticsProvider`, `promptCacheObserver`,
+ *  `vcsEventSink` and `sideAgentDaemons` unset while the assembler set all six,
+ *  so an operator who turned those gates on got nothing and no error saying why.
+ *  `readFileState` was a seventh and worse, because its gate is DEFAULT-ON.
+ *
+ *  Every wire is env-gated and caller-override-safe, so folding on a path whose
+ *  gates are unset is a no-op. */
+export const foldCapabilityWires = (
+  wires: readonly CapabilityWire[],
+  cfg: AgentConfig,
+  env: CapabilityWireContext["env"],
+): void => {
+  applyCapabilityWires(wires, cfg, { env, config: runtimeConfigFromEnvImpl(env) })
+}
+
 export const applyCapabilityWires = (
   wires: readonly CapabilityWire[],
   cfg: AgentConfig,

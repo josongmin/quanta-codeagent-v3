@@ -156,77 +156,124 @@ const buildTodoItem = (
 
 // ── createPlan ───────────────────────────────────────────────────────────
 
-export const createPlan = (args: CreatePlanArgs, now: number, idGen: () => string): PlanResult => {
-  if (args.todos.length === 0 && (args.phases?.length ?? 0) === 0) {
-    return err({ kind: "empty_plan_create" })
-  }
+/** Every PLAN_LIMITS bound `createPlan` enforces BEFORE it builds anything, in the fixed order
+ *  emptiness → todo count → phase count → name → overview. Returns the FIRST violation or `null`. */
+const createPlanBoundsError = (args: CreatePlanArgs): PlanMutationError | null => {
+  const phaseCount = args.phases?.length ?? 0
+  if (args.todos.length === 0 && phaseCount === 0) return { kind: "empty_plan_create" }
   if (args.todos.length > PLAN_LIMITS.MAX_TODOS) {
-    return err({
+    return {
       kind: "content_too_long",
       field: "content",
       max: PLAN_LIMITS.MAX_TODOS,
       actual: args.todos.length,
-    })
+    }
   }
-  if ((args.phases?.length ?? 0) > PLAN_LIMITS.MAX_PHASES) {
-    return err({
+  if (phaseCount > PLAN_LIMITS.MAX_PHASES) {
+    return {
       kind: "content_too_long",
       field: "content",
       max: PLAN_LIMITS.MAX_PHASES,
-      actual: args.phases?.length ?? 0,
-    })
+      actual: phaseCount,
+    }
   }
-  const nameErr = checkLen("name", args.name, PLAN_LIMITS.MAX_NAME)
-  if (nameErr !== null) return err(nameErr)
-  const overErr = checkLen("overview", args.overview, PLAN_LIMITS.MAX_OVERVIEW)
-  if (overErr !== null) return err(overErr)
+  return (
+    checkLen("name", args.name, PLAN_LIMITS.MAX_NAME) ??
+    checkLen("overview", args.overview, PLAN_LIMITS.MAX_OVERVIEW)
+  )
+}
 
-  // Build phases first (with generated ids), then todos with phaseId binding.
+/** Materialise the phase records with generated ids, in input order. `todoIds` is filled later by
+ *  {@link bindOnePhase} — membership is derived from the todo side, never invented here. */
+const buildPhases = (newPhases: readonly NewPhase[] | undefined, idGen: () => string): Phase[] => {
   const phases: Phase[] = []
-  const phaseIdByIndex: string[] = []
-  for (let i = 0; i < (args.phases?.length ?? 0); i += 1) {
-    const p = args.phases?.[i]
+  for (let i = 0; i < (newPhases?.length ?? 0); i += 1) {
+    const p = newPhases?.[i]
     if (p === undefined) continue
-    const pid = idGen()
-    phaseIdByIndex.push(pid)
-    phases.push({ id: pid, name: p.name, todoIds: [], order: i })
+    phases.push({ id: idGen(), name: p.name, todoIds: [], order: i })
   }
+  return phases
+}
 
-  // Build todos.
+type BuiltTodos =
+  | { ok: true; todos: Record<string, TodoItem>; newIds: string[] }
+  | { ok: false; error: PlanMutationError }
+
+/** Materialise the todo records with generated ids. `newIds` is the INDEX-ALIGNED id list the
+ *  phase binding below resolves `todoIndexes` against. A colliding `idGen` ⇒ `duplicate_id`. */
+const buildTodos = (
+  inputs: readonly NewTodo[],
+  now: number,
+  idGen: () => string,
+): BuiltTodos => {
   const todos: Record<string, TodoItem> = {}
   const newIds: string[] = []
-  for (let i = 0; i < args.todos.length; i += 1) {
-    const ni = args.todos[i]
+  for (let i = 0; i < inputs.length; i += 1) {
+    const ni = inputs[i]
     if (ni === undefined) continue
     const id = idGen()
-    if (todos[id] !== undefined) return err({ kind: "duplicate_id", id })
+    if (todos[id] !== undefined) return { ok: false, error: { kind: "duplicate_id", id } }
     const built = buildTodoItem(ni, id, now)
-    if (!built.ok) return err(built.error)
+    if (!built.ok) return { ok: false, error: built.error }
     todos[id] = built.item
     newIds.push(id)
   }
+  return { ok: true, todos, newIds }
+}
 
-  // Bind todos → phases via NewPhase.todoIndexes (or default: spread evenly into phase 0).
-  const argPhases: readonly NewPhase[] = args.phases ?? []
+/** Resolve ONE phase's `todoIndexes` into todo ids, stamping `phaseId` onto each bound todo.
+ *  MUTATES `todos` in place. An index with no corresponding todo ⇒ `todo_not_found index:N`. */
+const bindOnePhase = (
+  phaseId: string,
+  indexes: readonly number[],
+  todos: Record<string, TodoItem>,
+  newIds: readonly string[],
+): { ok: true; todoIds: string[] } | { ok: false; error: PlanMutationError } => {
+  const todoIds: string[] = []
+  for (const idx of indexes) {
+    const tid: string | undefined = newIds[idx]
+    if (tid === undefined) {
+      return { ok: false, error: { kind: "todo_not_found", id: `index:${idx}` } }
+    }
+    const todo: TodoItem | undefined = todos[tid]
+    if (todo !== undefined) todos[tid] = { ...todo, phaseId }
+    todoIds.push(tid)
+  }
+  return { ok: true, todoIds }
+}
+
+/** Bind todos → phases via `NewPhase.todoIndexes`. MUTATES both `phases` (rewriting each entry's
+ *  `todoIds`) and `todos` (stamping `phaseId`). Returns the first binding error, or `null`. */
+const bindTodosToPhases = (
+  phases: Phase[],
+  argPhases: readonly NewPhase[],
+  todos: Record<string, TodoItem>,
+  newIds: readonly string[],
+): PlanMutationError | null => {
   for (let pi = 0; pi < argPhases.length; pi += 1) {
     const p: NewPhase | undefined = argPhases[pi]
     const phase: Phase | undefined = phases[pi]
     if (p === undefined || phase === undefined) continue
-    const indexes: readonly number[] = p.todoIndexes ?? []
-    const todoIds: string[] = []
-    for (const idx of indexes) {
-      const tid: string | undefined = newIds[idx]
-      if (tid === undefined) {
-        return err({ kind: "todo_not_found", id: `index:${idx}` })
-      }
-      const todo: TodoItem | undefined = todos[tid]
-      if (todo !== undefined) {
-        todos[tid] = { ...todo, phaseId: phase.id }
-      }
-      todoIds.push(tid)
-    }
-    phases[pi] = { ...phase, todoIds }
+    const bound = bindOnePhase(phase.id, p.todoIndexes ?? [], todos, newIds)
+    if (!bound.ok) return bound.error
+    phases[pi] = { ...phase, todoIds: bound.todoIds }
   }
+  return null
+}
+
+export const createPlan = (args: CreatePlanArgs, now: number, idGen: () => string): PlanResult => {
+  const bounds = createPlanBoundsError(args)
+  if (bounds !== null) return err(bounds)
+
+  // Build phases first (with generated ids), then todos with phaseId binding.
+  const phases = buildPhases(args.phases, idGen)
+  const built = buildTodos(args.todos, now, idGen)
+  if (!built.ok) return err(built.error)
+  const { todos, newIds } = built
+
+  // Bind todos → phases via NewPhase.todoIndexes.
+  const bindErr = bindTodosToPhases(phases, args.phases ?? [], todos, newIds)
+  if (bindErr !== null) return err(bindErr)
 
   // DAG validation.
   const dagOk = validateDag(todos)
@@ -298,76 +345,90 @@ export const addTodos = (
 
 // ── updateTodos ──────────────────────────────────────────────────────────
 
+/** The status gate: a patch that CHANGES status must name a transition the matrix in
+ *  `transitions.ts` permits. Re-stating the SAME status is always allowed (a no-op edit). */
+const patchStatusError = (existing: TodoItem, patch: TodoPatch): PlanMutationError | null => {
+  if (patch.status === undefined || patch.status === existing.status) return null
+  if (isValidTransition(existing.status, patch.status)) return null
+  return {
+    kind: "invalid_status_transition",
+    from: existing.status,
+    to: patch.status,
+    id: existing.id,
+  }
+}
+
+/** The dependency fan-out bound. */
+const patchDepsError = (patch: TodoPatch): PlanMutationError | null => {
+  const count = patch.dependencies?.length ?? 0
+  if (count <= PLAN_LIMITS.MAX_DEPS_PER_TODO) return null
+  return {
+    kind: "content_too_long",
+    field: "content",
+    max: PLAN_LIMITS.MAX_DEPS_PER_TODO,
+    actual: count,
+  }
+}
+
+/** Every bound a patch must clear BEFORE anything is written, in the fixed order
+ *  content → verifyHint → status → dependencies. First violation wins. */
+const patchValidationError = (existing: TodoItem, patch: TodoPatch): PlanMutationError | null =>
+  (patch.content !== undefined
+    ? checkLen("content", patch.content, PLAN_LIMITS.MAX_TODO_CONTENT)
+    : null) ??
+  (patch.verifyHint !== undefined && patch.verifyHint !== null
+    ? checkVerifyHint(patch.verifyHint)
+    : null) ??
+  patchStatusError(existing, patch) ??
+  patchDepsError(patch)
+
+/**
+ * The ONE resolution rule for an OPTIONAL todo field under a patch — applied identically to
+ * `phaseId`, `assignee` and `verifyHint` (the pre-split code spelled this same four-way ladder out
+ * three times, once per field, which is where most of the branch count lived):
+ *
+ *   - `null`      ⇒ explicit CLEAR. The sentinel wins under BOTH merge and replace.
+ *   - a value     ⇒ set it.
+ *   - `undefined` ⇒ keep the existing value under `merge`, DROP it under replace.
+ *
+ * `undefined` out means "omit the key entirely" (exactOptionalPropertyTypes), never "set to
+ * undefined".
+ */
+const resolveOptionalField = (
+  patched: string | null | undefined,
+  existing: string | undefined,
+  merge: boolean,
+): string | undefined => {
+  if (patched === null) return undefined // explicit clear
+  if (patched !== undefined) return patched
+  return merge ? existing : undefined
+}
+
 const applyPatch = (
   existing: TodoItem,
   patch: TodoPatch,
   merge: boolean,
   now: number,
 ): { ok: true; item: TodoItem } | { ok: false; error: PlanMutationError } => {
-  if (patch.content !== undefined) {
-    const e = checkLen("content", patch.content, PLAN_LIMITS.MAX_TODO_CONTENT)
-    if (e !== null) return { ok: false, error: e }
-  }
-  if (patch.verifyHint !== undefined && patch.verifyHint !== null) {
-    const e = checkVerifyHint(patch.verifyHint)
-    if (e !== null) return { ok: false, error: e }
-  }
-  if (patch.status !== undefined && patch.status !== existing.status) {
-    if (!isValidTransition(existing.status, patch.status)) {
-      return {
-        ok: false,
-        error: {
-          kind: "invalid_status_transition",
-          from: existing.status,
-          to: patch.status,
-          id: existing.id,
-        },
-      }
-    }
-  }
-  if ((patch.dependencies?.length ?? 0) > PLAN_LIMITS.MAX_DEPS_PER_TODO) {
-    return {
-      ok: false,
-      error: {
-        kind: "content_too_long",
-        field: "content",
-        max: PLAN_LIMITS.MAX_DEPS_PER_TODO,
-        actual: patch.dependencies?.length ?? 0,
-      },
-    }
-  }
+  const invalid = patchValidationError(existing, patch)
+  if (invalid !== null) return { ok: false, error: invalid }
 
-  // Merge vs replace: under merge=false, missing fields drop to default/clear.
-  // We treat content/status/dependencies as REQUIRED-fields so merge=false keeps them; the difference
-  // is on optional fields (phaseId, assignee, verifyHint) where null SENTINEL clears under either mode.
+  // Merge vs replace: the difference is ONLY on the optional fields (phaseId, assignee,
+  // verifyHint), where a null SENTINEL clears under either mode — see resolveOptionalField.
+  // content/status/dependencies are treated as REQUIRED, so merge=false keeps them too.
+  const phaseId = resolveOptionalField(patch.phaseId, existing.phaseId, merge)
+  const assignee = resolveOptionalField(patch.assignee, existing.assignee, merge)
+  const verifyHint = resolveOptionalField(patch.verifyHint, existing.verifyHint, merge)
   const item: TodoItem = {
     id: existing.id,
-    content: patch.content ?? (merge ? existing.content : existing.content),
-    status: patch.status ?? (merge ? existing.status : existing.status),
+    content: patch.content ?? existing.content,
+    status: patch.status ?? existing.status,
     createdAt: existing.createdAt,
     updatedAt: now,
-    dependencies: patch.dependencies ?? (merge ? existing.dependencies : existing.dependencies),
-    ...(patch.phaseId === null
-      ? {}
-      : patch.phaseId !== undefined
-        ? { phaseId: patch.phaseId }
-        : merge && existing.phaseId !== undefined
-          ? { phaseId: existing.phaseId }
-          : {}),
-    ...(patch.assignee === null
-      ? {}
-      : patch.assignee !== undefined
-        ? { assignee: patch.assignee }
-        : merge && existing.assignee !== undefined
-          ? { assignee: existing.assignee }
-          : {}),
-    ...(patch.verifyHint === null
-      ? {}
-      : patch.verifyHint !== undefined
-        ? { verifyHint: patch.verifyHint }
-        : merge && existing.verifyHint !== undefined
-          ? { verifyHint: existing.verifyHint }
-          : {}),
+    dependencies: patch.dependencies ?? existing.dependencies,
+    ...(phaseId !== undefined ? { phaseId } : {}),
+    ...(assignee !== undefined ? { assignee } : {}),
+    ...(verifyHint !== undefined ? { verifyHint } : {}),
   }
   return { ok: true, item }
 }
@@ -463,6 +524,46 @@ export const removeTodos = (plan: Plan, ids: readonly string[], now: number): Pl
 
 // ── reorderPhases ────────────────────────────────────────────────────────
 
+/** A reorder must name EVERY phase exactly once — a partial reorder is ambiguous. When the counts
+ *  differ, name the offending phase id in a fixed priority: an UNKNOWN id first (scanning the
+ *  request), then an EXTRA id (only possible when the request is longer), then a MISSING one.
+ *  Matching counts ⇒ `null` (the per-index rebuild still re-checks each id). */
+const phaseSetMismatchError = (
+  plan: Plan,
+  phaseIds: readonly string[],
+): PlanMutationError | null => {
+  if (phaseIds.length === plan.phases.length) return null
+  for (const id of phaseIds) {
+    if (!plan.phases.some((p) => p.id === id)) return { kind: "phase_not_found", id }
+  }
+  // Or unknown phase if length mismatch with extras.
+  if (phaseIds.length > plan.phases.length) {
+    const extra = phaseIds.find((id) => !plan.phases.some((p) => p.id === id))
+    if (extra !== undefined) return { kind: "phase_not_found", id: extra }
+  }
+  // Length less than current → missing required ids.
+  const missing = plan.phases.find((p) => !phaseIds.includes(p.id))
+  if (missing !== undefined) return { kind: "phase_not_found", id: missing.id }
+  return null
+}
+
+/** Rebuild the phase list in `phaseIds` order, re-stamping `order` to the new index. */
+const reorderedPhases = (
+  plan: Plan,
+  phaseIds: readonly string[],
+): { ok: true; phases: Phase[] } | { ok: false; error: PlanMutationError } => {
+  const byId = new Map(plan.phases.map((p) => [p.id, p]))
+  const newPhases: Phase[] = []
+  for (let i = 0; i < phaseIds.length; i += 1) {
+    const id = phaseIds[i]
+    if (id === undefined) continue
+    const p = byId.get(id)
+    if (p === undefined) return { ok: false, error: { kind: "phase_not_found", id } }
+    newPhases.push({ ...p, order: i })
+  }
+  return { ok: true, phases: newPhases }
+}
+
 export const reorderPhases = (plan: Plan, phaseIds: readonly string[], now: number): PlanResult => {
   if (plan.phases.length === 0 && phaseIds.length === 0) {
     return {
@@ -472,31 +573,17 @@ export const reorderPhases = (plan: Plan, phaseIds: readonly string[], now: numb
   }
   const dupId = dedupeIds(phaseIds)
   if (dupId !== null) return err({ kind: "duplicate_id", id: dupId })
-  if (phaseIds.length !== plan.phases.length) {
-    // Must reorder full set (partial reorder ambiguous); treat as not_found if any id missing.
-    for (const id of phaseIds) {
-      if (!plan.phases.some((p) => p.id === id)) return err({ kind: "phase_not_found", id })
-    }
-    // Or unknown phase if length mismatch with extras.
-    if (phaseIds.length > plan.phases.length) {
-      const extra = phaseIds.find((id) => !plan.phases.some((p) => p.id === id))
-      if (extra !== undefined) return err({ kind: "phase_not_found", id: extra })
-    }
-    // Length less than current → missing required ids.
-    const missing = plan.phases.find((p) => !phaseIds.includes(p.id))
-    if (missing !== undefined) return err({ kind: "phase_not_found", id: missing.id })
-  }
+  const mismatch = phaseSetMismatchError(plan, phaseIds)
+  if (mismatch !== null) return err(mismatch)
   // All ids match — reorder by index in phaseIds.
-  const byId = new Map(plan.phases.map((p) => [p.id, p]))
-  const newPhases: Phase[] = []
-  for (let i = 0; i < phaseIds.length; i += 1) {
-    const id = phaseIds[i]
-    if (id === undefined) continue
-    const p = byId.get(id)
-    if (p === undefined) return err({ kind: "phase_not_found", id })
-    newPhases.push({ ...p, order: i })
+  const rebuilt = reorderedPhases(plan, phaseIds)
+  if (!rebuilt.ok) return err(rebuilt.error)
+  const newPlan: Plan = {
+    ...plan,
+    version: plan.version + 1,
+    phases: rebuilt.phases,
+    updatedAt: now,
   }
-  const newPlan: Plan = { ...plan, version: plan.version + 1, phases: newPhases, updatedAt: now }
   return { ok: true, value: { kind: "phases_reordered", plan: newPlan } }
 }
 

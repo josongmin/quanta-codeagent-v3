@@ -1,6 +1,6 @@
 import { buildTurnContext, type RepoRules } from "@/agent"
 import type { ContextEvent } from "@/agent/context-change"
-import type { LLMPort, Message } from "@/llm"
+import type { LLMPort, Message, StreamEvent } from "@/llm"
 import { costUsd } from "@/observability/pricing"
 import { errMessage } from "@/shared"
 import type { TokenUsage } from "../storage/schema"
@@ -203,6 +203,23 @@ const isRetryableGroundingStreamError = (message: string, rawText: string): bool
   )
 }
 
+/**
+ * Fold one stream event into the run's token counters.
+ *
+ * A unit because usage accrues ACROSS retry attempts while `rawText` is reset
+ * per attempt: keeping the three counters (and the cache-read default) in one
+ * place is what stops a retry from double-counting or dropping a field.
+ */
+const accumulateStreamUsage = (
+  usage: { input: number; output: number; cacheRead: number },
+  event: StreamEvent,
+): void => {
+  if (event.type !== "usage") return
+  usage.input += event.inputTokens
+  usage.output += event.outputTokens
+  usage.cacheRead += event.cacheReadTokens ?? 0
+}
+
 const runGroundingStream = async (
   llm: LLMPort,
   system: ReturnType<typeof buildTurnContext>["system"],
@@ -220,11 +237,7 @@ const runGroundingStream = async (
         tools: [],
       })) {
         if (event.type === "text_delta") rawText += event.delta
-        if (event.type === "usage") {
-          usage.input += event.inputTokens
-          usage.output += event.outputTokens
-          usage.cacheRead += event.cacheReadTokens ?? 0
-        }
+        accumulateStreamUsage(usage, event)
       }
     } catch (error) {
       const message = `llm stream failed: ${errMessage(error)}`

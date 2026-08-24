@@ -79,6 +79,153 @@ export interface AtomicFileWriteStrategyOpts {
   readonly randomBytes?: () => Uint8Array
 }
 
+/** One prepared Phase-A temp: the temp path plus the entry it will commit. */
+interface PreparedTemp {
+  readonly tempPath: string
+  readonly entry: FileWriteBatch
+}
+
+/** Phase-A result. `failIndex < 0` ⇒ every entry got a temp. */
+interface PrepareResult {
+  readonly prepared: ReadonlyArray<PreparedTemp>
+  readonly failIndex: number
+  readonly failReason: string
+}
+
+const failed = (path: string, reason: string): FileWriteOutcome => ({
+  kind: "failed",
+  path,
+  reason,
+})
+
+/** Reason strings are part of the wire contract (callers surface them verbatim
+ *  and tests pin them) — table, so a phase can never drift its own wording. */
+const REASON = {
+  aborted: "aborted",
+  priorEntryFailed: "aborted: prior entry failed",
+  priorCommitFailed: "aborted: prior commit failed (temp file remains for recovery)",
+  abortedMidCommit: "aborted: signal raised mid-commit (temp file remains for recovery)",
+  exdevFallback: "non-atomic-fallback: cross-fs rename (EXDEV) fell back to copyFile",
+} as const
+
+/** Phase A — write every entry's content to its temp path, in batch order.
+ *  Stops at the FIRST failure (write throw OR signal abort) and reports where.
+ *  Never touches an original file; the caller rolls back what was prepared. */
+const prepareTemps = async (
+  fs: FileWriteFs,
+  batch: ReadonlyArray<FileWriteBatch>,
+  makeTempPath: (path: string) => string,
+  signal: AbortSignal | undefined,
+): Promise<PrepareResult> => {
+  const prepared: PreparedTemp[] = []
+  for (let i = 0; i < batch.length; i++) {
+    const entry = batch[i]
+    if (!entry) continue
+    if (signal?.aborted) return { prepared, failIndex: i, failReason: REASON.aborted }
+    const tempPath = makeTempPath(entry.path)
+    try {
+      await fs.write(tempPath, entry.content)
+      prepared.push({ tempPath, entry })
+    } catch (e) {
+      return { prepared, failIndex: i, failReason: errMessage(e) }
+    }
+  }
+  return { prepared, failIndex: -1, failReason: "" }
+}
+
+/** Phase-A rollback: unlink every temp already written, in preparation order.
+ *  Cleanup errors are swallowed — the rollback must not mask the real failure. */
+const rollbackTemps = async (
+  fs: FileWriteFs,
+  prepared: ReadonlyArray<PreparedTemp>,
+): Promise<void> => {
+  for (const { tempPath } of prepared) {
+    await fs.unlink(tempPath).catch(() => undefined)
+  }
+}
+
+/** Phase-A abort outcome set: every entry failed. The failing entry carries its
+ *  own reason; every OTHER entry (rolled back before it, or never attempted
+ *  after it) carries the same `prior entry failed` reason — the two sides of
+ *  `failIndex` were spelled out separately but always agreed. */
+const phaseAFailureOutcomes = (
+  batch: ReadonlyArray<FileWriteBatch>,
+  failIndex: number,
+  failReason: string,
+): ReadonlyArray<FileWriteOutcome> =>
+  batch.map((b, i) => failed(b.path, i === failIndex ? failReason : REASON.priorEntryFailed))
+
+/** Outcome of committing ONE prepared temp. `stop` ⇒ the batch must not commit
+ *  any further entry (their temps stay on disk for operator recovery). */
+interface CommitStep {
+  readonly outcome: FileWriteOutcome
+  readonly stop: boolean
+}
+
+/** EXDEV fallback: copy the temp's bytes onto the original (new inode ⇒ readers
+ *  see pre- or post-content, never a partial write) then drop the temp. Loses
+ *  crash-atomicity for this file, so the outcome carries a `warning`. The
+ *  copy MUST precede the unlink — unlinking first would destroy the only good
+ *  copy of the content if the copy then failed. */
+const commitViaCopyFallback = async (
+  fs: FileWriteFs,
+  tempPath: string,
+  path: string,
+): Promise<CommitStep> => {
+  try {
+    await fs.copyFile(tempPath, path)
+    await fs.unlink(tempPath).catch(() => undefined)
+    return { outcome: { kind: "ok", path, warning: REASON.exdevFallback }, stop: false }
+  } catch (copyErr) {
+    return {
+      outcome: failed(
+        path,
+        `EXDEV cross-fs rename + copyFile fallback failed: ${errMessage(copyErr)}`,
+      ),
+      stop: true,
+    }
+  }
+}
+
+/** Phase-B single commit: POSIX `rename(temp, original)`, with the documented
+ *  EXDEV copy+delete degradation. Any other rename failure stops the batch. */
+const commitOne = async (fs: FileWriteFs, tempPath: string, path: string): Promise<CommitStep> => {
+  try {
+    await fs.rename(tempPath, path)
+    return { outcome: { kind: "ok", path }, stop: false }
+  } catch (e) {
+    if (isExdev(e)) return commitViaCopyFallback(fs, tempPath, path)
+    return { outcome: failed(path, errMessage(e)), stop: true }
+  }
+}
+
+/** Phase B — commit prepared temps in order. Three per-entry states, one place:
+ *  already-dead (a prior commit failed) ⇒ failed; live-but-aborted ⇒ failed and
+ *  the batch dies; otherwise attempt the commit and adopt its `stop`. */
+const commitPrepared = async (
+  fs: FileWriteFs,
+  prepared: ReadonlyArray<PreparedTemp>,
+  signal: AbortSignal | undefined,
+): Promise<ReadonlyArray<FileWriteOutcome>> => {
+  const outcomes: FileWriteOutcome[] = []
+  let commitFailed = false
+  for (const { tempPath, entry } of prepared) {
+    if (commitFailed) {
+      outcomes.push(failed(entry.path, REASON.priorCommitFailed))
+      continue
+    }
+    if (signal?.aborted) {
+      outcomes.push(failed(entry.path, REASON.abortedMidCommit))
+      commitFailed = true
+      continue
+    }
+    const step = await commitOne(fs, tempPath, entry.path)
+    outcomes.push(step.outcome)
+    commitFailed = step.stop
+  }
+  return outcomes
+}
+
 /** Build the 2-phase commit strategy. See module docstring for semantics. */
 export const atomicFileWriteStrategy = (
   opts: AtomicFileWriteStrategyOpts = {},
@@ -97,134 +244,23 @@ export const atomicFileWriteStrategy = (
     ): Promise<ReadonlyArray<FileWriteOutcome>> {
       if (batch.length === 0) return []
 
-      // Pre-flight abort: nothing has happened yet → ALL entries failed.
-      if (signal?.aborted) {
-        return batch.map(
-          (b): FileWriteOutcome => ({ kind: "failed", path: b.path, reason: "aborted" }),
-        )
+      // Pre-flight abort: nothing has happened yet -> ALL entries failed.
+      if (signal?.aborted) return batch.map((b) => failed(b.path, REASON.aborted))
+
+      // Phase A: every temp is written BEFORE any original is touched.
+      const { prepared, failIndex, failReason } = await prepareTemps(
+        fs,
+        batch,
+        makeTempPath,
+        signal,
+      )
+      if (failIndex >= 0) {
+        await rollbackTemps(fs, prepared)
+        return phaseAFailureOutcomes(batch, failIndex, failReason)
       }
 
-      // ── Phase A: prepare temps ──────────────────────────────────────────
-      // Walk batch in order; on first failure (write throw OR signal abort)
-      // stop, unlink every temp written so far, and mark THIS entry + every
-      // later entry as failed. Originals are never touched in Phase A.
-      const prepared: { tempPath: string; entry: FileWriteBatch }[] = []
-      let phaseAFailIndex = -1
-      let phaseAFailReason = ""
-      for (let i = 0; i < batch.length; i++) {
-        const entry = batch[i]
-        if (!entry) continue
-        if (signal?.aborted) {
-          phaseAFailIndex = i
-          phaseAFailReason = "aborted"
-          break
-        }
-        const tempPath = makeTempPath(entry.path)
-        try {
-          await fs.write(tempPath, entry.content)
-          prepared.push({ tempPath, entry })
-        } catch (e) {
-          phaseAFailIndex = i
-          phaseAFailReason = errMessage(e)
-          break
-        }
-      }
-
-      if (phaseAFailIndex >= 0) {
-        // Rollback every prepared temp; cleanup errors are swallowed
-        // (best-effort — the rollback must not mask the original failure).
-        for (const { tempPath } of prepared) {
-          await fs.unlink(tempPath).catch(() => undefined)
-        }
-        // Mark every batch entry as failed: the ones we attempted (0..fail-1)
-        // had their temps rolled back; the failing entry carries its reason;
-        // the rest were never attempted (aborted by the upstream failure).
-        return batch.map((b, i): FileWriteOutcome => {
-          if (i < phaseAFailIndex) {
-            return { kind: "failed", path: b.path, reason: "aborted: prior entry failed" }
-          }
-          if (i === phaseAFailIndex) {
-            return { kind: "failed", path: b.path, reason: phaseAFailReason }
-          }
-          return { kind: "failed", path: b.path, reason: "aborted: prior entry failed" }
-        })
-      }
-
-      // ── Phase B: commit ─────────────────────────────────────────────────
-      // POSIX rename is atomic on the same filesystem. EXDEV (cross-FS) is
-      // the documented degradation; copy+delete keeps the data flowing but
-      // surfaces `warning: "non-atomic-fallback"` so the caller knows that
-      // file is no longer crash-atomic. Other rename failures mark that
-      // entry failed + leave remaining temps on disk for caller recovery.
-      const outcomes: FileWriteOutcome[] = []
-      let commitFailed = false
-      for (let i = 0; i < prepared.length; i++) {
-        const { tempPath, entry } = prepared[i] as { tempPath: string; entry: FileWriteBatch }
-        if (commitFailed) {
-          // Once a commit fails mid-way, the spec is: don't keep mutating —
-          // surface the remaining as failed. Their temps remain on disk for
-          // the caller to recover (atomic strategy explicitly does NOT
-          // clean up remaining temps after a commit-mid failure so the
-          // operator can inspect / replay).
-          outcomes.push({
-            kind: "failed",
-            path: entry.path,
-            reason: "aborted: prior commit failed (temp file remains for recovery)",
-          })
-          continue
-        }
-        // Signal abort mid-Phase-B: rename(K) already committed (destructive
-        // on K's prior content). We surface K+1..N as failed-aborted. The
-        // commit is partial — that's the cost of mid-flight cancellation on
-        // a destructive op. Documented in the ADR.
-        if (signal?.aborted) {
-          outcomes.push({
-            kind: "failed",
-            path: entry.path,
-            reason: "aborted: signal raised mid-commit (temp file remains for recovery)",
-          })
-          commitFailed = true
-          continue
-        }
-        try {
-          await fs.rename(tempPath, entry.path)
-          outcomes.push({ kind: "ok", path: entry.path })
-        } catch (e) {
-          if (isExdev(e)) {
-            // Cross-FS fallback: copy the temp file's bytes onto the original
-            // (writes a new inode — readers see either pre- or post-content,
-            // not a partial write) then unlink the temp. This loses crash-
-            // atomicity for this file (window between copy + unlink), so the
-            // outcome carries `warning: "non-atomic-fallback"` to surface the
-            // degradation. If copy ALSO fails, mark failed and stop committing.
-            try {
-              await fs.copyFile(tempPath, entry.path)
-              await fs.unlink(tempPath).catch(() => undefined)
-              outcomes.push({
-                kind: "ok",
-                path: entry.path,
-                warning: "non-atomic-fallback: cross-fs rename (EXDEV) fell back to copyFile",
-              })
-              continue
-            } catch (copyErr) {
-              outcomes.push({
-                kind: "failed",
-                path: entry.path,
-                reason: `EXDEV cross-fs rename + copyFile fallback failed: ${errMessage(copyErr)}`,
-              })
-              commitFailed = true
-              continue
-            }
-          }
-          outcomes.push({
-            kind: "failed",
-            path: entry.path,
-            reason: errMessage(e),
-          })
-          commitFailed = true
-        }
-      }
-      return outcomes
+      // Phase B: commit, in the same order the temps were prepared.
+      return commitPrepared(fs, prepared, signal)
     },
   }
 }

@@ -20,7 +20,10 @@ import { describe, expect, test } from "bun:test"
 import { readdir, readFile } from "node:fs/promises"
 import { join } from "node:path"
 
-const MEMORY_ROOT = join(process.cwd(), "src", "memory")
+// Repo-anchored on this file, not the ambient cwd — this fence walks real
+// source in the checkout.
+const REPO_ROOT = join(import.meta.dir, "..", "..")
+const MEMORY_ROOT = join(REPO_ROOT, "src", "memory")
 
 async function* walkTs(dir: string): AsyncGenerator<string> {
   const entries = await readdir(dir, { withFileTypes: true })
@@ -80,7 +83,7 @@ describe("memory-fence-no-llm-import-hellgate — static scan", () => {
   })
 
   test("biome.json `noRestrictedImports` for src/memory/** still bans @/llm", async () => {
-    const biome = await readFile(join(process.cwd(), "biome.json"), "utf8")
+    const biome = await readFile(join(REPO_ROOT, "biome.json"), "utf8")
     // Find the override block whose `includes` covers src/memory and whose
     // noRestrictedImports paths includes "@/llm".
     expect(biome).toContain('"@/llm"')

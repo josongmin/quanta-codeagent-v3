@@ -12,6 +12,7 @@ import {
   parsePytest,
   parsePythonUnittest,
 } from "@/tool/testrun/parse"
+import { nth } from "../../../_helpers/expect-present"
 
 const GO_JSON = [
   '{"Action":"run","Package":"t","Test":"TestPass"}',
@@ -67,10 +68,10 @@ describe("parseGoJson", () => {
     const r = parseGoJson(GO_JSON)
     expect(r.passed).toBe(1)
     expect(r.failed).toHaveLength(1)
-    expect(r.failed[0]!.name).toBe("TestFail")
-    expect(r.failed[0]!.file).toBe("m_test.go")
-    expect(r.failed[0]!.line).toBe(4)
-    expect(r.failed[0]!.message).toContain("got 4 want 5")
+    expect(nth(r.failed, 0, "r.failed").name).toBe("TestFail")
+    expect(nth(r.failed, 0, "r.failed").file).toBe("m_test.go")
+    expect(nth(r.failed, 0, "r.failed").line).toBe(4)
+    expect(nth(r.failed, 0, "r.failed").message).toContain("got 4 want 5")
     expect(r.ok).toBe(false)
   })
 
@@ -96,7 +97,7 @@ describe("parseGoJson", () => {
     const r = parseGoJson(buildFail)
     expect(r.ok).toBe(false)
     expect(r.failed.length).toBeGreaterThan(0)
-    expect(r.failed[0]!.message ?? "").toContain("undefined: foo")
+    expect(nth(r.failed, 0, "r.failed").message ?? "").toContain("undefined: foo")
   })
 
   test("duplicate fail events for one test are de-duplicated", () => {
@@ -112,10 +113,10 @@ describe("parseCargo", () => {
     const r = parseCargo(CARGO_TEXT)
     expect(r.passed).toBe(1)
     expect(r.failed).toHaveLength(1)
-    expect(r.failed[0]!.name).toBe("tests::fail_test")
-    expect(r.failed[0]!.file).toBe("src/lib.rs")
-    expect(r.failed[0]!.line).toBe(6)
-    expect(r.failed[0]!.message).toContain("left == right")
+    expect(nth(r.failed, 0, "r.failed").name).toBe("tests::fail_test")
+    expect(nth(r.failed, 0, "r.failed").file).toBe("src/lib.rs")
+    expect(nth(r.failed, 0, "r.failed").line).toBe(6)
+    expect(nth(r.failed, 0, "r.failed").message).toContain("left == right")
     expect(r.ok).toBe(false)
   })
 
@@ -141,8 +142,8 @@ describe("parseCargo", () => {
 
   test("multi-line panic message keeps the assertion detail", () => {
     const r = parseCargo(CARGO_TEXT)
-    expect(r.failed[0]!.message).toContain("left: 4")
-    expect(r.failed[0]!.message).toContain("right: 5")
+    expect(nth(r.failed, 0, "r.failed").message).toContain("left: 4")
+    expect(nth(r.failed, 0, "r.failed").message).toContain("right: 5")
   })
 })
 
@@ -150,10 +151,10 @@ describe("parsePythonUnittest", () => {
   test("extracts failing test + file:line + message; passed count", () => {
     const r = parsePythonUnittest(PY_UNITTEST)
     expect(r.failed).toHaveLength(1)
-    expect(r.failed[0]!.name).toContain("test_fail")
-    expect(r.failed[0]!.file).toContain("test_m.py")
-    expect(r.failed[0]!.line).toBe(4)
-    expect(r.failed[0]!.message).toContain("AssertionError: 4 != 5")
+    expect(nth(r.failed, 0, "r.failed").name).toContain("test_fail")
+    expect(nth(r.failed, 0, "r.failed").file).toContain("test_m.py")
+    expect(nth(r.failed, 0, "r.failed").line).toBe(4)
+    expect(nth(r.failed, 0, "r.failed").message).toContain("AssertionError: 4 != 5")
     expect(r.passed).toBe(1) // 2 ran, 1 failed
     expect(r.ok).toBe(false)
   })

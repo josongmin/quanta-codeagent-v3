@@ -51,6 +51,7 @@ import { describe, expect, test } from "bun:test"
 import { createTreeSitterParser, type ParseOutcome } from "@/retrieval/code-parser"
 // Test-only seam: the module-private decl-walk + name extractor (grammar-independent).
 import { __test } from "@/retrieval/code-parser/tree-sitter"
+import { nth, present } from "../../_helpers/expect-present"
 
 const parser = createTreeSitterParser()
 
@@ -115,7 +116,7 @@ describe("tree-sitter collectDecls — class-with-two-methods (via real parse)",
       const out = await parseOk("a.ts", src)
       const decls = out.parsed.decls
       expect(decls.length).toBe(1)
-      const cls = decls[0]!
+      const cls = nth(decls, 0, "cls")
       expect(cls.kind).toBe("class")
       expect(cls.name).toBe("C")
       // Two methods, source order, both leaves.
@@ -128,15 +129,15 @@ describe("tree-sitter collectDecls — class-with-two-methods (via real parse)",
   test.skipIf(!GRAMMAR_TS)("line bounds are 1-based inclusive (TsPoint.row + 1)", async () => {
     const src = "class C {\n  m1() { return 1 }\n  m2() { return 2 }\n}\n"
     const out = await parseOk("a.ts", src)
-    const cls = out.parsed.decls[0]!
+    const cls = nth(out.parsed.decls, 0, "cls")
     // class spans lines 1..4 (closing brace on line 4).
     expect(cls.startLine).toBe(1)
     expect(cls.endLine).toBe(4)
     // m1 on line 2, m2 on line 3.
-    expect(cls.children[0]!.startLine).toBe(2)
-    expect(cls.children[0]!.endLine).toBe(2)
-    expect(cls.children[1]!.startLine).toBe(3)
-    expect(cls.children[1]!.endLine).toBe(3)
+    expect(nth(cls.children, 0, "cls.children").startLine).toBe(2)
+    expect(nth(cls.children, 0, "cls.children").endLine).toBe(2)
+    expect(nth(cls.children, 1, "cls.children").startLine).toBe(3)
+    expect(nth(cls.children, 1, "cls.children").endLine).toBe(3)
   })
 
   test.skipIf(!GRAMMAR_TS)(
@@ -145,10 +146,12 @@ describe("tree-sitter collectDecls — class-with-two-methods (via real parse)",
       // class header on line 1, first method on line 2 ⇒ signatureEndLine = max(1, 2-1) = 1.
       const src = "class C {\n  m1() { return 1 }\n  m2() { return 2 }\n}\n"
       const out = await parseOk("a.ts", src)
-      const cls = out.parsed.decls[0]!
+      const cls = nth(out.parsed.decls, 0, "cls")
       expect(cls.signatureEndLine).toBe(1)
       // A leaf method's signatureEndLine equals its own startLine.
-      expect(cls.children[0]!.signatureEndLine).toBe(cls.children[0]!.startLine)
+      expect(nth(cls.children, 0, "cls.children").signatureEndLine).toBe(
+        nth(cls.children, 0, "cls.children").startLine,
+      )
     },
   )
 
@@ -176,7 +179,7 @@ describe("tree-sitter collectDecls — class-with-two-methods (via real parse)",
       // class_declaration; collectDecls descends and lifts the inner class.
       const cls = out.parsed.decls.find((d) => d.kind === "class" && d.name === "E")
       expect(cls).toBeDefined()
-      expect(cls!.children.map((c) => c.name)).toEqual(["k"])
+      expect(present(cls, "cls").children.map((c) => c.name)).toEqual(["k"])
     },
   )
 
@@ -197,9 +200,9 @@ describe("tree-sitter collectDecls — class-with-two-methods (via real parse)",
       const out = await parseOk("m.py", "class C:\n    def m1(self):\n        return 1\n")
       const cls = out.parsed.decls.find((d) => d.kind === "class")
       expect(cls).toBeDefined()
-      expect(cls!.name).toBe("C")
+      expect(present(cls, "cls").name).toBe("C")
       // The method is collected as a child (python class_definition is a container).
-      expect(cls!.children.map((c) => c.name)).toContain("m1")
+      expect(present(cls, "cls").children.map((c) => c.name)).toContain("m1")
     },
   )
 
@@ -218,7 +221,7 @@ describe("tree-sitter collectDecls — class-with-two-methods (via real parse)",
       const out = await parseOk("d.py", src)
       const decls = out.parsed.decls
       expect(decls.length).toBe(1)
-      const cls = decls[0]!
+      const cls = nth(decls, 0, "cls")
       // (a) kind is "class", NOT "function" (the pre-fix mislabel).
       expect(cls.kind).toBe("class")
       expect(cls.name).toBe("Foo")
@@ -243,7 +246,7 @@ describe("tree-sitter collectDecls — class-with-two-methods (via real parse)",
       const out = await parseOk("d.py", src)
       const decls = out.parsed.decls
       expect(decls.length).toBe(1)
-      const fn = decls[0]!
+      const fn = nth(decls, 0, "fn")
       expect(fn.kind).toBe("function")
       expect(fn.name).toBe("plain")
       expect(fn.children.length).toBe(0) // a function is a leaf
@@ -258,9 +261,9 @@ describe("tree-sitter collectDecls — class-with-two-methods (via real parse)",
       const out = await parseOk("d.py", "class Bare:\n    def k(self):\n        return 9\n")
       const cls = out.parsed.decls.find((d) => d.kind === "class")
       expect(cls).toBeDefined()
-      expect(cls!.name).toBe("Bare")
-      expect(cls!.startLine).toBe(1) // no decorators — span starts at `class`
-      expect(cls!.children.map((c) => c.name)).toEqual(["k"])
+      expect(present(cls, "cls").name).toBe("Bare")
+      expect(present(cls, "cls").startLine).toBe(1) // no decorators — span starts at `class`
+      expect(present(cls, "cls").children.map((c) => c.name)).toEqual(["k"])
     },
   )
 })

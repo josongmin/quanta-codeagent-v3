@@ -19,6 +19,7 @@ import {
   selectForPhase2Promotion,
 } from "../../src/memory/consolidate"
 import type { MemoryOutcome, Stage1Output } from "../../src/memory/consolidate/types"
+import { nth, present } from "../_helpers/expect-present"
 
 const baseOutput = (over: Partial<Stage1Output> = {}): Stage1Output => ({
   threadId: "thr-base",
@@ -76,7 +77,7 @@ describe("ADR-0131 — Stage1Output backward compatibility", () => {
     await store.upsert(out)
     const rows = await store.fetchSince(null)
     expect(rows).toHaveLength(1)
-    const r = rows[0]!
+    const r = nth(rows, 0, "r")
     expect(r.threadId).toBe("thr-legacy")
     // The optional keys MUST be absent (not `undefined`) to match
     // exactOptionalPropertyTypes — Object.hasOwn is the precise check.
@@ -93,7 +94,7 @@ describe("ADR-0131 — Stage1Output backward compatibility", () => {
         outcomeEvidence: "src/foo.ts:42",
       }),
     )
-    const r = (await store.fetchSince(null))[0]!
+    const r = nth(await store.fetchSince(null), 0, "r")
     expect(r.outcome).toBe("partial")
     expect(r.outcomeEvidence).toBe("src/foo.ts:42")
   })
@@ -107,7 +108,7 @@ describe("ADR-0131 — Stage1Output backward compatibility", () => {
         outcomeEvidence: null,
       }),
     )
-    const r = (await store.fetchSince(null))[0]!
+    const r = nth(await store.fetchSince(null), 0, "r")
     expect(r.outcome).toBe("success")
     // null evidence column → absent key on the domain object (mapper drops nulls).
     expect(Object.hasOwn(r, "outcomeEvidence")).toBe(false)
@@ -131,7 +132,7 @@ describe("ADR-0131 — Stage1Output backward compatibility", () => {
     for (const oc of MEMORY_OUTCOMES) {
       const got = byOutcome.get(oc)
       expect(got).toBeDefined()
-      expect(got!.outcomeEvidence).toBe(`evidence-${oc}`)
+      expect(present(got, "got").outcomeEvidence).toBe(`evidence-${oc}`)
     }
   })
 
@@ -143,7 +144,7 @@ describe("ADR-0131 — Stage1Output backward compatibility", () => {
     await store.upsert(
       baseOutput({ threadId: "thr-upd", outcome: "success", outcomeEvidence: "src/a.ts:1" }),
     )
-    const r = (await store.fetchSince(null))[0]!
+    const r = nth(await store.fetchSince(null), 0, "r")
     expect(r.outcome).toBe("success")
     expect(r.outcomeEvidence).toBe("src/a.ts:1")
   })
@@ -155,7 +156,7 @@ describe("ADR-0131 — Stage1Output backward compatibility", () => {
     )
     // Re-upsert without outcome (legacy-shape path).
     await store.upsert(baseOutput({ threadId: "thr-clr" }))
-    const r = (await store.fetchSince(null))[0]!
+    const r = nth(await store.fetchSince(null), 0, "r")
     expect(Object.hasOwn(r, "outcome")).toBe(false)
     expect(Object.hasOwn(r, "outcomeEvidence")).toBe(false)
   })
@@ -212,7 +213,7 @@ describe("ADR-0131 — schema migration idempotency", () => {
       .query("SELECT name FROM sqlite_master WHERE type='index' AND name=?")
       .get("idx_stage1_outputs_outcome") as { name: string } | null
     expect(idx).not.toBeNull()
-    expect(idx!.name).toBe("idx_stage1_outputs_outcome")
+    expect(present(idx, "idx").name).toBe("idx_stage1_outputs_outcome")
   })
 
   test("migration on already-migrated DB does not duplicate the index or columns", () => {

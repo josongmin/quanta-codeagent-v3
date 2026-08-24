@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import type { ClosureBundleInput } from "@/agent/closure"
 import { assembleClosureBundle } from "@/agent/closure"
+import { present } from "../../_helpers/expect-present"
 
 /**
  * T-3 — ClosureBundle SSOT. The one artifact prompt/gate/repair/diagnostics
@@ -66,7 +67,7 @@ describe("assembleClosureBundle — SSOT", () => {
     // and that admitted owner MUST be one of the assembled evidence candidates
     // (same packet) — red-on-injection if owner were derived from other evidence.
     const candidateFiles = b.evidence.candidates.map((c) => c.file)
-    expect(candidateFiles).toContain(b.owner.owner!)
+    expect(candidateFiles).toContain(present(b.owner.owner, "b.owner.owner"))
   })
 
   test("no repro ⇒ plan rail falls back to owner-near test (not a synth repro)", () => {

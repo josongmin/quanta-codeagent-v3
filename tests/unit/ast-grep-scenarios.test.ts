@@ -22,6 +22,7 @@ import { join } from "node:path"
 import type { z } from "zod"
 import type { ToolContext, ToolEvent } from "@/tool"
 import { astGrepTool } from "@/tool/ast-grep"
+import { present } from "../_helpers/expect-present"
 
 // ─── binary probe (sync, once) ──────────────────────────────────────────────
 
@@ -108,7 +109,7 @@ describe("S-PROBE-3: missing pattern field → schema rejects or execute returns
       expect(result).not.toBeNull()
       // If it didn't throw, it must surface an error (ok:false) rather than
       // silently pretending the call succeeded.
-      expect(result!.ok).toBe(false)
+      expect(present(result, "result").ok).toBe(false)
     }
     // Either path satisfies the contract; reaching here means no silent success.
     expect(threw || result?.ok === false).toBe(true)
@@ -181,9 +182,9 @@ describe("S-BIN-3: result shape is {ok:false, output:string} not a throw", () =>
     }
     expect(threw).toBe(false)
     expect(result).not.toBeNull()
-    expect(result!.ok).toBe(false)
-    expect(typeof result!.output).toBe("string")
-    expect(result!.output.length).toBeGreaterThan(0)
+    expect(present(result, "result").ok).toBe(false)
+    expect(typeof present(result, "result").output).toBe("string")
+    expect(present(result, "result").output.length).toBeGreaterThan(0)
   })
 })
 
@@ -399,8 +400,8 @@ describe("S-PATH-1: path=undefined → searches current dir, no crash", () => {
     }
     expect(threw).toBe(false)
     expect(result).not.toBeNull()
-    expect(typeof result!.ok).toBe("boolean")
-    expect(typeof result!.output).toBe("string")
+    expect(typeof present(result, "result").ok).toBe("boolean")
+    expect(typeof present(result, "result").output).toBe("string")
   })
 })
 
@@ -446,8 +447,8 @@ describe("S-PATH-3: path=nonexistent → ok:false or empty, no throw or crash", 
     expect(threw).toBe(false)
     expect(result).not.toBeNull()
     // Either ok:false with error, or ok:true with empty/no-match
-    expect(typeof result!.ok).toBe("boolean")
-    expect(typeof result!.output).toBe("string")
+    expect(typeof present(result, "result").ok).toBe("boolean")
+    expect(typeof present(result, "result").output).toBe("string")
   })
 })
 
@@ -499,8 +500,8 @@ describe("S-LANG-2: language='nonexistentlang999' → ok:false with error, no th
     expect(threw).toBe(false)
     expect(result).not.toBeNull()
     // Must signal failure — ok:false — not silently succeed
-    expect(result!.ok).toBe(false)
-    expect(typeof result!.output).toBe("string")
-    expect(result!.output.length).toBeGreaterThan(0)
+    expect(present(result, "result").ok).toBe(false)
+    expect(typeof present(result, "result").output).toBe("string")
+    expect(present(result, "result").output.length).toBeGreaterThan(0)
   })
 })

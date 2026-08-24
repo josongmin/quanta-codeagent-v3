@@ -4,6 +4,7 @@
  * throwing into the proposal loop.
  */
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
+import { nth } from "../_helpers/expect-present"
 
 const children: Array<Record<string, unknown>> = []
 
@@ -60,7 +61,7 @@ describe("HELLGATE branch-search runner", () => {
     expect(children).toHaveLength(1)
     expect(children[0]?.depth).toBe(1)
     expect(children[0]?.cwd).toBe("/tmp/candidate-0")
-    expect(Object.hasOwn(children[0]!, "branchSearch")).toBe(false)
+    expect(Object.hasOwn(nth(children, 0, "children"), "branchSearch")).toBe(false)
   })
 
   test("cap-zero denial returns a failed candidate and never throws or forks", async () => {

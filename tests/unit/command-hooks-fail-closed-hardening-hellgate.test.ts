@@ -42,6 +42,7 @@ import {
   normalizeCommandHookGate,
   runCommandHooks,
 } from "@/agent"
+import { nth } from "../_helpers/expect-present"
 
 // ---- fake spawn port (records exactly what the child would receive) ---------
 
@@ -111,7 +112,7 @@ describe("command-hooks ON-proof (real HookBus path, injected spawn port)", () =
 
     // The injected spawn port — and ONLY it — executed the hook.
     expect(calls.length).toBe(1)
-    const call = calls[0]!
+    const call = nth(calls, 0, "call")
     // Command is the operator config VERBATIM (never concatenated with payload).
     expect(call.command).toBe("policy-guard.sh --strict")
     // The tool input reaches the child ONLY as JSON on stdin.
@@ -236,7 +237,7 @@ describe("stdin bound — oversized payload never produces an unbounded stdin wr
     )
     // The hook STILL fired (fail-safe) ...
     expect(calls.length).toBe(1)
-    const call = calls[0]!
+    const call = nth(calls, 0, "call")
     // ... but the stdin write is BOUNDED — never the 50KB payload.
     expect(Buffer.byteLength(call.stdinJson, "utf8")).toBeLessThanOrEqual(gate.maxOutputBytes)
     const envelope = JSON.parse(call.stdinJson)
@@ -260,7 +261,7 @@ describe("stdin bound — oversized payload never produces an unbounded stdin wr
       { exec: port, permission: allow, cwd: "/repo" },
       { type: "pre_tool_use", toolName: "write", payload: small },
     )
-    const envelope = JSON.parse(calls[0]!.stdinJson)
+    const envelope = JSON.parse(nth(calls, 0, "calls").stdinJson)
     // Full payload present, NO truncation marker.
     expect(envelope.payload.input.path).toBe("/x")
     expect("payload_truncated" in envelope).toBe(false)
@@ -279,7 +280,7 @@ describe("stdin bound — oversized payload never produces an unbounded stdin wr
       { exec: port, permission: allow, cwd: "/repo" },
       { type: "pre_tool_use", toolName: "write", payload: overshoot },
     )
-    const call = calls[0]!
+    const call = nth(calls, 0, "call")
     expect(Buffer.byteLength(call.stdinJson, "utf8")).toBeLessThanOrEqual(256)
     expect(JSON.parse(call.stdinJson).payload).toBeNull()
   })

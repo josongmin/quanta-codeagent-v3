@@ -38,6 +38,7 @@ import {
   type TerminalTrialOutcome,
   type TerminalTrialRecord,
 } from "../../../../../src/apps/bench/terminal/report"
+import { nth, present } from "../../../../_helpers/expect-present"
 
 const FIXTURES = join(import.meta.dir, "fixtures")
 const CANARY = join(FIXTURES, "harbor-jobs", "canary-k5")
@@ -118,7 +119,7 @@ describe("TB21-04 — Harbor result scanning is filesystem-only", () => {
       expect(files.length).toBe(1)
       expect(files[0]?.raw).toBeUndefined()
       expect(files[0]?.readError).toBeTruthy()
-      const parsed = parseHarborTrialResult(files[0]!)
+      const parsed = parseHarborTrialResult(nth(files, 0, "files"))
       expect(isTrialDefect(parsed)).toBe(true)
     } finally {
       rmSync(dir, { recursive: true, force: true })
@@ -141,7 +142,7 @@ describe("TB21-04 — one receipt per distinct trial id (the fold is gone)", () 
 
   test("one pass and one fail of the SAME task remain two receipts, not one any-pass row", () => {
     const trials = canaryTrials()
-    const taskId = CANONICAL_TASK_IDS[0]!
+    const taskId = nth(CANONICAL_TASK_IDS, 0, "taskId")
     const group = trials.filter((t) => t.taskId === taskId)
     const report = buildFrom(group)
 
@@ -159,7 +160,7 @@ describe("TB21-04 — one receipt per distinct trial id (the fold is gone)", () 
     expect(trial).toBeDefined()
     if (trial === undefined) throw new Error("fixture has no graded pass")
     expect(trial.trialId).toMatch(/^[0-9a-f-]{36}$/)
-    expect(trial.taskId).toBe(CANONICAL_TASK_IDS[0]!)
+    expect(trial.taskId).toBe(nth(CANONICAL_TASK_IDS, 0, "CANONICAL_TASK_IDS"))
     expect(trial.taskRef).toBe(canonicalTaskRef(trial.taskId))
     expect(trial.reward).toBe(1)
     expect(trial.datasetSource).toBe(TERMINAL_BENCH_DATASET)
@@ -242,7 +243,7 @@ describe("TB21-04 — outcome taxonomy", () => {
   })
 
   test("verifier and environment faults are their own kinds", () => {
-    const base = scanHarborJobDir(CANARY)[0]!
+    const base = nth(scanHarborJobDir(CANARY), 0, "base")
     const withException = (type: string) => {
       const raw = JSON.parse(JSON.stringify(base.raw)) as Record<string, unknown>
       raw.verifier_result = null
@@ -265,7 +266,7 @@ describe("TB21-04 — outcome taxonomy", () => {
   })
 
   test("an unnameable primary reward is MALFORMED — never guessed at", () => {
-    const base = scanHarborJobDir(CANARY)[0]!
+    const base = nth(scanHarborJobDir(CANARY), 0, "base")
     const withRewards = (rewards: unknown) => {
       const raw = JSON.parse(JSON.stringify(base.raw)) as Record<string, unknown>
       raw.verifier_result = { rewards }
@@ -290,7 +291,7 @@ describe("TB21-04 — outcome taxonomy", () => {
   test("a malformed trial makes the run incomplete without inventing a reward", () => {
     const trials = canaryTrials()
     const malformed: TerminalTrialRecord = {
-      ...trials[0]!,
+      ...nth(trials, 0, "trials"),
       trialId: "malformed-1",
       outcome: "malformed_result",
       reward: null,
@@ -344,7 +345,10 @@ describe("TB21-04 — outcome taxonomy", () => {
 describe("TB21-04 — completeness and standard-config admission", () => {
   /** A full 89x5 synthetic run assembled from the REAL canonical task manifest. */
   const fullRun = (k: number): TerminalTrialRecord[] => {
-    const template = canaryTrials().find((t) => t.outcome === "graded_pass")!
+    const template = present(
+      canaryTrials().find((t) => t.outcome === "graded_pass"),
+      "template",
+    )
     const out: TerminalTrialRecord[] = []
     for (const taskId of CANONICAL_TASK_IDS) {
       for (let attempt = 0; attempt < k; attempt += 1) {
@@ -353,7 +357,7 @@ describe("TB21-04 — completeness and standard-config admission", () => {
           trialId: `${taskId}#${attempt}`,
           taskId,
           taskName: taskId,
-          taskRef: canonicalTaskRef(taskId)!,
+          taskRef: present(canonicalTaskRef(taskId), "canonicalTaskRef(taskId)"),
           reward: attempt === 0 ? 1 : 0,
           outcome: attempt === 0 ? "graded_pass" : "graded_fail",
         })
@@ -410,7 +414,9 @@ describe("TB21-04 — completeness and standard-config admission", () => {
   // clauses they claim to defend can be deleted while the suite stays green.
 
   test("88 complete tasks are still an INCOMPLETE run (task coverage is its own rule)", () => {
-    const trials = fullRun(5).filter((t) => t.taskId !== CANONICAL_TASK_IDS[88]!)
+    const trials = fullRun(5).filter(
+      (t) => t.taskId !== nth(CANONICAL_TASK_IDS, 88, "CANONICAL_TASK_IDS"),
+    )
     const report = buildFrom(trials)
     expect(report.admission.observedTaskCount).toBe(88)
     expect(report.admission.admittedTrials).toBe(440)
@@ -464,7 +470,10 @@ describe("TB21-04 — completeness and standard-config admission", () => {
 
   test("ONE extra trial on one task makes an otherwise perfect run incomplete", () => {
     const trials = fullRun(5)
-    const report = buildFrom([...trials, { ...trials[0]!, trialId: "extra-1", reward: 1 }])
+    const report = buildFrom([
+      ...trials,
+      { ...nth(trials, 0, "trials"), trialId: "extra-1", reward: 1 },
+    ])
     expect(report.admission.admittedTrials).toBe(446)
     expect(report.admission.observedTaskCount).toBe(89)
     expect(report.admission.complete).toBe(false)
@@ -473,10 +482,13 @@ describe("TB21-04 — completeness and standard-config admission", () => {
 
   test("duplicate trial ids FAIL the run", () => {
     const trials = fullRun(5)
-    const duplicated = [...trials, { ...trials[0]!, taskId: trials[0]!.taskId }]
+    const duplicated = [
+      ...trials,
+      { ...nth(trials, 0, "trials"), taskId: nth(trials, 0, "trials").taskId },
+    ]
     const report = buildFrom(duplicated)
     expect(report.admission.verdict).toBe("rejected")
-    expect(report.admission.duplicateTrialIds).toEqual([trials[0]!.trialId])
+    expect(report.admission.duplicateTrialIds).toEqual([nth(trials, 0, "trials").trialId])
     expect(report.admission.promotable).toBe(false)
     // Both copies stay on the receipt — a duplicate is evidence, not a silent drop.
     expect(report.trials.length).toBe(446)
@@ -487,7 +499,11 @@ describe("TB21-04 — completeness and standard-config admission", () => {
     const trials = fullRun(5)
     const report = buildFrom([
       ...trials,
-      { ...trials[0]!, trialId: "intruder", taskId: "terminal-bench/not-a-real-task" },
+      {
+        ...nth(trials, 0, "trials"),
+        trialId: "intruder",
+        taskId: "terminal-bench/not-a-real-task",
+      },
     ])
     expect(report.admission.verdict).toBe("rejected")
     expect(report.admission.rejections.map((r) => r.kind)).toContain("unknown_task")
@@ -497,7 +513,7 @@ describe("TB21-04 — completeness and standard-config admission", () => {
     const trials = fullRun(5)
     const tampered = [
       {
-        ...trials[0]!,
+        ...nth(trials, 0, "trials"),
         taskRef: "sha256:0000000000000000000000000000000000000000000000000000000000000000",
       },
       ...trials.slice(1),
@@ -516,13 +532,13 @@ describe("TB21-04 — completeness and standard-config admission", () => {
   test("nonstandard timeout/resource overrides make the run NONSTANDARD, not official", () => {
     const scanned = scanHarborJobDir(NONSTANDARD)
     expect(scanned.length).toBe(1)
-    const override = parseHarborTrialResult(scanned[0]!)
+    const override = parseHarborTrialResult(nth(scanned, 0, "scanned"))
     if (isTrialDefect(override)) throw new Error("unexpected defect")
     expect(override.configOverrides).toEqual(["agent.override_timeout_sec=7200"])
 
     const trials = fullRun(5)
     const report = buildFrom([
-      { ...trials[0]!, configOverrides: override.configOverrides },
+      { ...nth(trials, 0, "trials"), configOverrides: override.configOverrides },
       ...trials.slice(1),
     ])
     expect(report.admission.complete).toBe(true)
@@ -535,7 +551,7 @@ describe("TB21-04 — completeness and standard-config admission", () => {
 
   test("a rewarded trial with no trajectory makes the run non-promotable", () => {
     const trials = fullRun(5)
-    const report = buildFrom([withoutTrajectory(trials[0]!), ...trials.slice(1)])
+    const report = buildFrom([withoutTrajectory(nth(trials, 0, "trials")), ...trials.slice(1)])
     expect(report.admission.verdict).toBe("official")
     expect(report.admission.complete).toBe(true)
     expect(report.admission.promotable).toBe(false)
@@ -554,7 +570,7 @@ describe("TB21-04 — versionless TB2.0 artifacts are quarantined", () => {
   test("a 2.0 trial (retired dataset, no task ref) is rejected, not silently scored", () => {
     const scanned = scanHarborJobDir(TB20)
     expect(scanned.length).toBe(1)
-    const legacy = parseHarborTrialResult(scanned[0]!)
+    const legacy = parseHarborTrialResult(nth(scanned, 0, "scanned"))
     if (isTrialDefect(legacy)) throw new Error("unexpected defect")
     expect(legacy.datasetSource).toBe("terminal-bench/terminal-bench-2-0")
     expect(legacy.taskRef).toBeUndefined()

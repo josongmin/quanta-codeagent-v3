@@ -326,6 +326,30 @@ const serializeFile = (state: PersistentTrustScopeFile): string => {
 const recordIdentity = (projectKey: string, r: PersistentTrustScopeRecord): string =>
   `${projectKey}\u0000${r.tool}|${r.actionKey ?? ""}|${r.commandPattern ?? ""}|${r.grantedAt}`
 
+/** Union ONE project's on-disk bucket into that project's in-memory bucket.
+ *
+ *  A unit because the adoption rule is per-project and entirely local: this
+ *  instance's own records always survive, and a disk record joins them UNLESS we
+ *  already hold it in memory or we explicitly tombstoned (revoked/consumed) it.
+ *  Record identity is computed against THIS `project`, so keeping the rule in one
+ *  function makes it impossible to compare identities across buckets by accident
+ *  — and there is deliberately no baseline inference here, which is what caused
+ *  the concurrent-grant lost-update the tombstone set replaced. */
+const mergeProjectBucket = (
+  project: string,
+  diskBucket: ReadonlyArray<PersistentTrustScopeRecord>,
+  memBucket: ReadonlyArray<PersistentTrustScopeRecord>,
+  tombstones: ReadonlySet<string>,
+): PersistentTrustScopeRecord[] => {
+  const memIds = new Set(memBucket.map((r) => recordIdentity(project, r)))
+  const merged: PersistentTrustScopeRecord[] = [...memBucket]
+  for (const r of diskBucket) {
+    const id = recordIdentity(project, r)
+    if (!memIds.has(id) && !tombstones.has(id)) merged.push(r)
+  }
+  return merged
+}
+
 /**
  * Merge factory closing over a per-instance TOMBSTONE set of records this
  * instance has explicitly revoked / consumed.
@@ -367,17 +391,12 @@ const makeMergeFiles =
       ...Object.keys(args.inMemory.grants),
     ])
     for (const project of projects) {
-      const diskBucket = args.onDisk.grants[project] ?? []
-      const memBucket = args.inMemory.grants[project] ?? []
-      const memIds = new Set(memBucket.map((r) => recordIdentity(project, r)))
-      const merged: PersistentTrustScopeRecord[] = [...memBucket]
-      for (const r of diskBucket) {
-        const id = recordIdentity(project, r)
-        // Adopt a peer/disk record UNLESS we already hold it in memory OR we
-        // explicitly tombstoned (revoked/consumed) it. No baseline inference —
-        // that was the source of the concurrent-grant lost-update.
-        if (!memIds.has(id) && !tombstones.has(id)) merged.push(r)
-      }
+      const merged = mergeProjectBucket(
+        project,
+        args.onDisk.grants[project] ?? [],
+        args.inMemory.grants[project] ?? [],
+        tombstones,
+      )
       if (merged.length > 0) out[project] = merged
     }
     return { version: STATE_VERSION, grants: out }

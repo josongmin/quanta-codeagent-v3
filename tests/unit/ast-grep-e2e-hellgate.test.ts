@@ -28,6 +28,7 @@ import { PatchParseError } from "@/patch"
 import type { ToolContext, ToolEvent } from "@/tool"
 import { applyPatchTool } from "@/tool/apply-patch"
 import { astGrepTool } from "@/tool/ast-grep"
+import { present } from "../_helpers/expect-present"
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
 
@@ -336,8 +337,8 @@ describe("APPLY-4: malformed diff → ok:false or PatchParseError, no crash", ()
       // Tool swallowed and returned ok:false
       // Red-on-injection: make the tool always return ok:true on parse failure →
       // this assertion fails.
-      expect(result!.ok).toBe(false)
-      expect(result!.output).toBeTruthy()
+      expect(present(result, "result").ok).toBe(false)
+      expect(present(result, "result").output).toBeTruthy()
     }
   })
 })

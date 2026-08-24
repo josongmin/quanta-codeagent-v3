@@ -14,7 +14,7 @@
  *  NEVER throws.
  */
 import { isAbsolute, resolve } from "node:path"
-import type { TestRunResult, Toolchain } from "../testrun"
+import type { TestFailure, TestRunResult, Toolchain } from "../testrun"
 import type {
   EvidencePacket,
   FailureEvidence,
@@ -71,6 +71,34 @@ const safe = async <T>(fn: (() => Promise<T>) | undefined, fallback: T): Promise
   }
 }
 
+/**
+ * Project the top failing test into the packet's failure evidence.
+ *
+ * A unit because the three optional fields are one contract with the consumer: each is
+ * OMITTED rather than set to `undefined` (`exactOptionalPropertyTypes`), so a packet
+ * never claims to carry a message/file/line it does not have. Spelling that out at the
+ * point of use is how one of them drifts into an explicit `undefined`.
+ */
+const toFailureEvidence = (top: TestFailure, tc: Toolchain): FailureEvidence => ({
+  command: tc.command.join(" "),
+  test_name: top.name,
+  ...(top.message !== undefined ? { message: top.message } : {}),
+  ...(top.file !== undefined ? { file: top.file } : {}),
+  ...(top.line !== undefined ? { line: top.line } : {}),
+})
+
+/**
+ * The failing test's file as an ABSOLUTE path, or undefined when it reported none.
+ *
+ * A unit because the normalization is load-bearing, not cosmetic: runners report the
+ * file relative to cwd, and LSP/DAP silently fail to bind or hover on a relative path —
+ * a failure mode with no error, just empty enrichment.
+ */
+const absoluteFailureFile = (file: string | undefined, cwd: string): string | undefined => {
+  if (file === undefined) return undefined
+  return isAbsolute(file) ? file : resolve(cwd, file)
+}
+
 export const buildEvidence = async (
   cwd: string,
   sources: EvidenceSources,
@@ -103,20 +131,13 @@ export const buildEvidence = async (
   const top =
     result.failed.find((f) => f.file !== undefined && f.line !== undefined) ?? result.failed[0]
   if (top === undefined) return empty
-  const failure: FailureEvidence = {
-    command: tc.command.join(" "),
-    test_name: top.name,
-    ...(top.message !== undefined ? { message: top.message } : {}),
-    ...(top.file !== undefined ? { file: top.file } : {}),
-    ...(top.line !== undefined ? { line: top.line } : {}),
-  }
+  const failure: FailureEvidence = toFailureEvidence(top, tc)
 
   // Enrich ONLY when the failure is localizable (file+line) for static; runtime
   // is keyed by the failing test name. The file is normalized to an ABSOLUTE
   // path before handoff — test runners report it relative to cwd, but LSP/DAP
   // need an absolute path (a relative one silently fails to bind/hover).
-  const absFile =
-    top.file !== undefined ? (isAbsolute(top.file) ? top.file : resolve(cwd, top.file)) : undefined
+  const absFile = absoluteFailureFile(top.file, cwd)
   // Bound to consts before the closures: narrowing a MUTABLE property
   // (`sources.lspStatic !== undefined`, `top.line !== undefined`) does not
   // survive into an arrow body, which is the only reason these reads carried

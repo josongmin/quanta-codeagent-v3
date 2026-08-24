@@ -46,6 +46,7 @@ import {
   aggregateOfficialGrade,
   type OfficialGradeSection,
 } from "@/runner/batch/report-official-grade"
+import { nth } from "../../../../_helpers/expect-present"
 import { evaluatorMeta, OUTPUT_PATH, oracleSha256 } from "./promax-official-fixtures"
 
 const artifact = { path: OUTPUT_PATH, sha256: oracleSha256("doc"), byteLength: 3 }
@@ -126,14 +127,17 @@ describe("C-A — the default chunk builder declares what the chunk is accountab
     const chunk = defaultChunkFor(IDS)
     const acc = createChunkCoverageAccumulator()
     accumulateChunkCoverage(acc, {
-      officialGrade: receiptOf(IDS.slice(0, 2), [dispo(IDS[0]!), dispo(IDS[1]!, "model_miss")]),
-      resolved: [IDS[0]!],
+      officialGrade: receiptOf(IDS.slice(0, 2), [
+        dispo(nth(IDS, 0, "IDS")),
+        dispo(nth(IDS, 1, "IDS"), "model_miss"),
+      ]),
+      resolved: [nth(IDS, 0, "IDS")],
     })
     const result = chunkCoverageResult(acc, chunk)
     // THE defect: without the declared set this merged to assigned=2 — a 100%
     // coverage claim over the two rows that happened to come back.
     expect([...(result.officialGrade?.assignedInstanceIds ?? [])].sort()).toEqual([...IDS].sort())
-    expect(missingInstances(result, chunk)).toEqual([IDS[2]!])
+    expect(missingInstances(result, chunk)).toEqual([nth(IDS, 2, "IDS")])
   })
 
   test("PAIRED CONTROL — a chunk that graded everything is still complete", () => {
@@ -247,7 +251,7 @@ describe("C-B — a hand-edited section cannot delete the rows it lost", () => {
   test("a section that names a DUPLICATE graded row is REFUSED", () => {
     const raw = JSON.parse(JSON.stringify(sectionFor(ASSIGNED, GRADED))) as Record<string, unknown>
     const rows = raw.instances as Record<string, unknown>[]
-    rows[2] = { ...rows[0]! }
+    rows[2] = { ...nth(rows, 0, "rows") }
     expect(() => decodeCanonicalReport(reportDoc(raw, ASSIGNED))).toThrow(/i-1/)
   })
 

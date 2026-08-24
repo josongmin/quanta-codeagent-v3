@@ -198,6 +198,23 @@ export interface WitnessOwner {
   readonly forSymbol?: string
 }
 
+/** Does this witness confer STRUCTURAL owner candidacy?
+ *
+ *  A unit because candidacy is a conjunction of four independent admission
+ *  facts that must all hold — the witness can be a clean authority, its kind is
+ *  candidate-bearing, it actually names subject files, and (for the multi-file
+ *  family kinds ONLY) its obligation is COMPLETE. Dropping any one of them
+ *  silently promotes an advisory or partial witness to an owner, which is
+ *  exactly what SCAFF-03 forbids. The `unique-symbol-definer` short-circuit is
+ *  load-bearing: that kind is single-file by construction, so the multi-site
+ *  check must not run for it. */
+const confersOwnerCandidacy = (w: StaticWitness): boolean => {
+  if (!canBeCleanAuthority(w)) return false
+  if (!CLEAN_OWNER_AUTHORITY_KINDS.has(w.kind)) return false
+  if (w.subjectFiles.length === 0) return false
+  return w.kind === "unique-symbol-definer" || canBeMultiSiteObligation(w)
+}
+
 /**
  * Owner candidate files derived from structurally admissible typed-relation
  * witnesses (SCAFF-03).
@@ -215,11 +232,7 @@ export function witnessStructuralOwnerCandidates(
 ): WitnessOwner[] {
   const byFile = new Map<string, WitnessOwner>()
   for (const w of witnesses) {
-    if (!canBeCleanAuthority(w)) continue
-    if (!CLEAN_OWNER_AUTHORITY_KINDS.has(w.kind)) continue
-    if (w.subjectFiles.length === 0) continue
-    // family kinds need a COMPLETE (>= 2 files) obligation to confer authority.
-    if (w.kind !== "unique-symbol-definer" && !canBeMultiSiteObligation(w)) continue
+    if (!confersOwnerCandidacy(w)) continue
     const symbol = w.subjectSymbols[0]
     for (const file of w.subjectFiles) {
       if (byFile.has(file)) continue

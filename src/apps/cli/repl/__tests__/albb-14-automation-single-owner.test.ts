@@ -19,6 +19,7 @@ import { describe, expect, test } from "bun:test"
 import type { AgentConfig } from "@/agent"
 import { startAutomationEngineTicker } from "@/agent/loop-helpers"
 import { inMemoryAutomationEngine } from "@/scheduler/automation-engine"
+import { nth } from "../../../../../tests/_helpers/expect-present"
 import { stripAutomationTickerHandler } from "../session-loop"
 
 const fakeIntervalDeps = () => {
@@ -59,7 +60,7 @@ describe("ALBB-14 automation ticker — single owner (no double-arm)", () => {
     expect(handle).toBeDefined()
     expect(arms.length).toBe(1)
     handle?.stop()
-    expect(arms[0]!.cleared).toBe(true)
+    expect(nth(arms, 0, "arms").cleared).toBe(true)
   })
 
   // §2 RED-ON-INJECTION — the config-path slot (handler stripped) MUST NOT arm a

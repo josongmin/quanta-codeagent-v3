@@ -184,15 +184,20 @@ const reinforce = async (
   }
 }
 
-export const recallContext = async (
-  deps: RecallDeps,
-  queryText: string | undefined,
-  opts?: { limit?: number; tiers?: MemoryTier[]; routing?: RoutingContext },
-): Promise<string | null> => {
-  const limit = opts?.limit ?? RECALL_LIMIT
-  const text = queryText && queryText.length > 0 ? queryText : undefined
-  const embedding = text ? await embedOne(deps.embedder, text) : undefined
-
+/**
+ * Assemble the store query for one recall.
+ *
+ * A unit because every optional field here is *conditionally present* under
+ * `exactOptionalPropertyTypes` — the assignments must stay together so the
+ * "absent vs. present-but-undefined" distinction that drives ranking is
+ * decided in exactly one place.
+ */
+const buildRecallQuery = (
+  limit: number,
+  text: string | undefined,
+  embedding: number[] | undefined,
+  opts?: { tiers?: MemoryTier[]; routing?: RoutingContext },
+): MemoryQuery => {
   const query: MemoryQuery = { limit }
   if (text) query.text = text
   if (embedding) query.embedding = embedding
@@ -203,6 +208,19 @@ export const recallContext = async (
   if (opts?.routing && (opts.routing.taskGroup || opts.routing.cwd)) {
     query.routing = opts.routing
   }
+  return query
+}
+
+export const recallContext = async (
+  deps: RecallDeps,
+  queryText: string | undefined,
+  opts?: { limit?: number; tiers?: MemoryTier[]; routing?: RoutingContext },
+): Promise<string | null> => {
+  const limit = opts?.limit ?? RECALL_LIMIT
+  const text = queryText && queryText.length > 0 ? queryText : undefined
+  const embedding = text ? await embedOne(deps.embedder, text) : undefined
+
+  const query = buildRecallQuery(limit, text, embedding, opts)
 
   // Capturing telemetry sink: reuse the ranker's content-free counts (the
   // SAME `hits`/`totalScanned` it emits) to drive the recall-budget hint, so

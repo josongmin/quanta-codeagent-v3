@@ -306,6 +306,50 @@ const OWNER_AUDIT_COUNTER_KEYS = [
 const recordDigest = (record: Omit<ProMaxFrozenCampaignRecord, "sha256">): string =>
   sha256Hex(canonicalJson(record))
 
+/**
+ * Check ONE sample against the sample it must contain: the parent-digest pin, then the
+ * actual set nesting.
+ *
+ * A unit because both assert the same invariant — the family is nested draws, not
+ * independent ones — with the digest as the cheap proof and the set difference as the
+ * expensive one, and reporting a digest mismatch without also naming the escaped
+ * instances leaves an operator unable to tell a re-hash from a genuinely different draw.
+ * `parent === null` is a legitimate input, not a caller-side guard: the smallest sample
+ * has no parent and must instead prove it names none.
+ */
+const auditSampleNesting = (
+  sample: ProMaxSampleManifest,
+  parent: ProMaxSampleManifest | null,
+  add: (code: ProMaxCampaignRecordFailureCode, message: string) => void,
+): void => {
+  if (parent === null) {
+    if (sample.parentSubsetSha256 !== null) {
+      add(
+        "sample_parent_digest_broken",
+        `${sample.name} is the smallest sample but names a parent subset digest`,
+      )
+    }
+    return
+  }
+  if (sample.parentSubsetSha256 !== parent.sha256) {
+    add(
+      "sample_parent_digest_broken",
+      `${sample.name} names parent digest ${String(sample.parentSubsetSha256)} but the sample it ` +
+        `must contain (${parent.name}) hashes to ${parent.sha256}`,
+    )
+  }
+  const contained = new Set(sample.instanceIds)
+  const escaped = parent.instanceIds.filter((id) => !contained.has(id))
+  if (escaped.length > 0) {
+    add(
+      "sample_not_nested",
+      `${parent.name} ⊄ ${sample.name}: ${escaped.length} instance(s) are in the smaller sample ` +
+        `but not the larger (${escaped.slice(0, 3).join(", ")}) — these are independent draws, ` +
+        "not one nested family",
+    )
+  }
+}
+
 const auditSamples = (
   samples: readonly ProMaxSampleManifest[],
   add: (code: ProMaxCampaignRecordFailureCode, message: string) => void,
@@ -338,33 +382,7 @@ const auditSamples = (
           `grades ProMax against ${PROMAX_V1_SNAPSHOT.hf_dataset_revision}`,
       )
     }
-    const parent = index === 0 ? null : (samples[index - 1] ?? null)
-    if (parent === null) {
-      if (sample.parentSubsetSha256 !== null) {
-        add(
-          "sample_parent_digest_broken",
-          `${sample.name} is the smallest sample but names a parent subset digest`,
-        )
-      }
-      return
-    }
-    if (sample.parentSubsetSha256 !== parent.sha256) {
-      add(
-        "sample_parent_digest_broken",
-        `${sample.name} names parent digest ${String(sample.parentSubsetSha256)} but the sample it ` +
-          `must contain (${parent.name}) hashes to ${parent.sha256}`,
-      )
-    }
-    const contained = new Set(sample.instanceIds)
-    const escaped = parent.instanceIds.filter((id) => !contained.has(id))
-    if (escaped.length > 0) {
-      add(
-        "sample_not_nested",
-        `${parent.name} ⊄ ${sample.name}: ${escaped.length} instance(s) are in the smaller sample ` +
-          `but not the larger (${escaped.slice(0, 3).join(", ")}) — these are independent draws, ` +
-          "not one nested family",
-      )
-    }
+    auditSampleNesting(sample, index === 0 ? null : (samples[index - 1] ?? null), add)
   })
 }
 

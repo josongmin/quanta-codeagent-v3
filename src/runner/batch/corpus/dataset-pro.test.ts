@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test"
+import { nth } from "../../../../tests/_helpers/expect-present"
 import { normalizeProRow, parseSwebenchJsonl, toInstance } from "./dataset"
 
 // Base fixture = a PYTHON Pro row, so the normalizer's load-bearing effect (lowercase
@@ -33,7 +34,7 @@ describe("Pro ingest — normalize + parse + carry (RFC jun-29)", () => {
   test("parse(text, normalizeProRow) → toInstance derives a real testCmd + carries Pro meta", () => {
     const tasks = parseSwebenchJsonl(JSON.stringify(proRow), normalizeProRow)
     expect(tasks).toHaveLength(1)
-    const inst = toInstance(tasks[0]!, "/tmp/repo")
+    const inst = toInstance(nth(tasks, 0, "tasks"), "/tmp/repo")
     expect(inst.testCmd).not.toBe("true")
     expect(inst.testCmd).toContain("test_y")
     expect(inst.swebench?.dockerhubTag).toBe("demo-demo-1")
@@ -48,7 +49,11 @@ describe("Pro ingest — normalize + parse + carry (RFC jun-29)", () => {
       pass_to_pass: "['tests/test_x.py::test_regression']",
     }
     const inst = toInstance(
-      parseSwebenchJsonl(JSON.stringify(row), normalizeProRow)[0]!,
+      nth(
+        parseSwebenchJsonl(JSON.stringify(row), normalizeProRow),
+        0,
+        "parseSwebenchJsonl(JSON.stringify(row), normalizeProRow)",
+      ),
       "/tmp/repo",
     )
     expect(inst.testCmd).not.toBe("true")
@@ -60,7 +65,11 @@ describe("Pro ingest — normalize + parse + carry (RFC jun-29)", () => {
   test("Python-literal parser stays data-only and rejects expressions", () => {
     const row = { ...proRow, fail_to_pass: "[dangerous()]" }
     const inst = toInstance(
-      parseSwebenchJsonl(JSON.stringify(row), normalizeProRow)[0]!,
+      nth(
+        parseSwebenchJsonl(JSON.stringify(row), normalizeProRow),
+        0,
+        "parseSwebenchJsonl(JSON.stringify(row), normalizeProRow)",
+      ),
       "/tmp/repo",
     )
     expect(inst.testCmd).toBe("true")
@@ -71,7 +80,7 @@ describe("Pro ingest — normalize + parse + carry (RFC jun-29)", () => {
   // the ONLY reason for "true" is the missing FAIL_TO_PASS, not the repo_language gate.
   test("WITHOUT normalizer, lowercase Python Pro row ⇒ testCmd:'true' (normalizer is load-bearing)", () => {
     const tasks = parseSwebenchJsonl(JSON.stringify(proRow)) // default identity
-    const inst = toInstance(tasks[0]!, "/tmp/repo")
+    const inst = toInstance(nth(tasks, 0, "tasks"), "/tmp/repo")
     expect(inst.testCmd).toBe("true")
   })
 
@@ -81,7 +90,7 @@ describe("Pro ingest — normalize + parse + carry (RFC jun-29)", () => {
   test("non-Python repo_language (go) ⇒ testCmd 'true' (no pytest fake-grade) + meta carried", () => {
     const goRow = { ...proRow, repo_language: "go" }
     const tasks = parseSwebenchJsonl(JSON.stringify(goRow), normalizeProRow)
-    const inst = toInstance(tasks[0]!, "/tmp/repo")
+    const inst = toInstance(nth(tasks, 0, "tasks"), "/tmp/repo")
     expect(inst.testCmd).toBe("true")
     expect(inst.swebench?.repoLanguage).toBe("go")
     expect(inst.swebench?.dockerhubTag).toBe("demo-demo-1")
@@ -94,7 +103,7 @@ describe("Pro ingest — normalize + parse + carry (RFC jun-29)", () => {
       selected_test_files_to_run: JSON.stringify(["TestEvents"]),
     }
     const goTasks = parseSwebenchJsonl(JSON.stringify(goRow), normalizeProRow)
-    const goInst = toInstance(goTasks[0]!, "/tmp/repo")
+    const goInst = toInstance(nth(goTasks, 0, "goTasks"), "/tmp/repo")
     expect(goInst.testCmd).toBe("go test -count=1 ./... -run '^(?:TestEvents)$'")
     expect(goInst.swebench?.selectedTestFilesToRun).toEqual(["TestEvents"])
 
@@ -104,7 +113,7 @@ describe("Pro ingest — normalize + parse + carry (RFC jun-29)", () => {
       selected_test_files_to_run: JSON.stringify(["test/uploads.js"]),
     }
     const jsTasks = parseSwebenchJsonl(JSON.stringify(jsRow), normalizeProRow)
-    const jsInst = toInstance(jsTasks[0]!, "/tmp/repo")
+    const jsInst = toInstance(nth(jsTasks, 0, "jsTasks"), "/tmp/repo")
     expect(jsInst.testCmd).toBe("npm test -- test/uploads.js")
     expect(jsInst.swebench?.selectedTestFilesToRun).toEqual(["test/uploads.js"])
   })
@@ -117,7 +126,7 @@ describe("Pro ingest — normalize + parse + carry (RFC jun-29)", () => {
         JSON.stringify({ ...proRow, repo_language }),
         normalizeProRow,
       )
-      const inst = toInstance(tasks[0]!, "/tmp/repo")
+      const inst = toInstance(nth(tasks, 0, "tasks"), "/tmp/repo")
       expect(inst.testCmd).not.toBe("true")
       expect(inst.testCmd).toContain("test_y")
     }
@@ -141,7 +150,7 @@ describe("Pro ingest — normalize + parse + carry (RFC jun-29)", () => {
       FAIL_TO_PASS: JSON.stringify(["tests/t.py::test_a"]),
     }
     const tasks = parseSwebenchJsonl(JSON.stringify(verifiedRow))
-    const inst = toInstance(tasks[0]!, "/tmp/repo")
+    const inst = toInstance(nth(tasks, 0, "tasks"), "/tmp/repo")
     expect(inst.testCmd).toContain("test_a")
     expect(inst.swebench?.dockerhubTag).toBeUndefined()
     expect(inst.swebench?.repoLanguage).toBeUndefined()

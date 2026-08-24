@@ -25,6 +25,27 @@ const collectText = (events: readonly StreamEvent[]): string =>
     .join("")
     .trim()
 
+/** Read the router's decision out of a completed event stream.
+ *
+ *  A unit because the router accepts exactly three wire shapes in a strict
+ *  preference order, and every caller wants the same one answer regardless of
+ *  which arrived: the forced `ROUTER_TOOL_NAME` tool call (the happy path), a
+ *  text body that validates against the same schema, or the raw text as a last
+ *  resort — with `null` reserved for "the model said nothing at all". Kept SYNC
+ *  (the inline form was too), so no await point is introduced after the drain. */
+const extractRouterDecision = (
+  events: readonly StreamEvent[],
+  schema: Record<string, unknown>,
+): unknown => {
+  const assembled = assembleFromEvents([...events]).message
+  for (const block of assembled.content) {
+    if (block.type === "tool_use" && block.name === ROUTER_TOOL_NAME) return block.input
+  }
+  const text = collectText(events)
+  const parsed = validateAgainstResponseSchema(text, schema)
+  return parsed.ok ? parsed.value : text === "" ? null : text
+}
+
 /**
  * Provider-agnostic adaptive router call. The primary path is one forced
  * schema-tool call (`toolChoice:{kind:"tool"}`), which Anthropic and OpenAI
@@ -83,13 +104,7 @@ export const makeAdaptiveToolModelCall = (args: {
     })) {
       events.push(event)
     }
-    const assembled = assembleFromEvents([...events]).message
-    for (const block of assembled.content) {
-      if (block.type === "tool_use" && block.name === ROUTER_TOOL_NAME) return block.input
-    }
-    const text = collectText(events)
-    const parsed = validateAgainstResponseSchema(text, input.schema as Record<string, unknown>)
-    return parsed.ok ? parsed.value : text === "" ? null : text
+    return extractRouterDecision(events, input.schema as Record<string, unknown>)
   }
 }
 

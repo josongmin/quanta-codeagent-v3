@@ -135,14 +135,7 @@ export const tickScheduler = async (opts: TickOpts): Promise<TickOutcome> => {
   }
 
   const outcome: "fired" | "errored" = handlerThrew === undefined ? "fired" : "errored"
-  const errorMessage =
-    handlerThrew === undefined
-      ? undefined
-      : handlerThrew instanceof Error
-        ? handlerThrew.message
-        : typeof handlerThrew === "string"
-          ? handlerThrew
-          : "handler threw non-Error"
+  const errorMessage = handlerErrorMessage(handlerThrew)
   const built = inbox(due, outcome)
 
   const finRes = await engine.finalize({
@@ -167,6 +160,18 @@ export const tickScheduler = async (opts: TickOpts): Promise<TickOutcome> => {
     }
   }
   return { kind: "fired", at: now, automationId: due.id }
+}
+
+/** Render whatever the handler threw, or `undefined` when it completed.
+ *
+ *  A unit because `undefined` is load-bearing here: it is the SAME signal the
+ *  `fired`/`errored` outcome is read from, so the "did it throw" sentinel and
+ *  the naming of the three non-`Error` shapes have to be decided in one place.
+ *  Note a handler that throws `undefined` counts as a clean fire, as before. */
+const handlerErrorMessage = (thrown: unknown): string | undefined => {
+  if (thrown === undefined) return undefined
+  if (thrown instanceof Error) return thrown.message
+  return typeof thrown === "string" ? thrown : "handler threw non-Error"
 }
 
 /** Wrap `computeNextFire` — translate the rule-evaluator's `"never"` sentinel

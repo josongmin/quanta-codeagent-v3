@@ -500,6 +500,29 @@ type DirtyEstimate = { ok: true; bytes: number } | { ok: false; stderr: string }
 
 const BYTES_PER_LINE_UPPER_BOUND = 200
 
+/**
+ * Sum the added + deleted line counts across a `git diff --numstat` report.
+ *
+ * A unit because the numstat row format is one thing to know, in one place: a binary
+ * file's `-` is NOT zero — it is charged a flat per-line allowance so binaries cannot
+ * slip past the cap for free — and a malformed row is skipped rather than parsed into
+ * NaN and added. The total feeds an UPPER bound, so over-counting is the safe direction
+ * and under-counting is the one that defeats the cap.
+ */
+const sumNumstatLines = (numstat: string): number => {
+  let totalLines = 0
+  for (const line of numstat.split("\n")) {
+    if (line.length === 0) continue
+    const [addedStr, deletedStr] = line.split("\t")
+    if (addedStr === undefined || deletedStr === undefined) continue
+    const added = addedStr === "-" ? 200 : Number.parseInt(addedStr, 10)
+    const deleted = deletedStr === "-" ? 200 : Number.parseInt(deletedStr, 10)
+    if (Number.isFinite(added)) totalLines += added
+    if (Number.isFinite(deleted)) totalLines += deleted
+  }
+  return totalLines
+}
+
 const estimateDirtyBytes = async (
   opts: ResolvedOpts,
   porcelainStatus: string,
@@ -519,17 +542,7 @@ const estimateDirtyBytes = async (
     // block the agent loop for push-minutes — the exact failure the cap guards.
     return { ok: false, stderr: res.stderr.trim() }
   }
-  let totalLines = 0
-  for (const line of res.stdout.split("\n")) {
-    if (line.length === 0) continue
-    const [addedStr, deletedStr] = line.split("\t")
-    if (addedStr === undefined || deletedStr === undefined) continue
-    const added = addedStr === "-" ? 200 : Number.parseInt(addedStr, 10)
-    const deleted = deletedStr === "-" ? 200 : Number.parseInt(deletedStr, 10)
-    if (Number.isFinite(added)) totalLines += added
-    if (Number.isFinite(deleted)) totalLines += deleted
-  }
-  const trackedBytes = totalLines * BYTES_PER_LINE_UPPER_BOUND
+  const trackedBytes = sumNumstatLines(res.stdout) * BYTES_PER_LINE_UPPER_BOUND
 
   // (b) UNTRACKED files. `stash -u` pushes these too, but `git diff HEAD` never
   // reports them — sizing only the tracked diff is the hole. We size each `??`

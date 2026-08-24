@@ -15,6 +15,7 @@
 
 import { describe, expect, test } from "bun:test"
 import { lintMemoryFrontmatter, parsePreferenceSignal } from "../../src/memory/consolidate"
+import { present } from "../_helpers/expect-present"
 
 describe("ADR-0131 — parsePreferenceSignal: quote extraction", () => {
   test("Korean quote preserved byte-for-byte", () => {
@@ -308,7 +309,7 @@ describe("ADR-0131 — lintMemoryFrontmatter: W3 percentage-grace", () => {
     const w3 = report.warnings.find((w) => w.rule === "percentage-grace")
     expect(w3).toBeDefined()
     // Body starts after the closing `---`; line numbers are 1-based whole-file.
-    expect(w3!.line).toBeGreaterThanOrEqual(5)
+    expect(present(w3, "percentage-grace warning").line).toBeGreaterThanOrEqual(5)
   })
 
   test("multiple W3 hits on different lines each get their own warning", () => {

@@ -57,6 +57,43 @@ export interface RerankOpts {
 
 const range = (n: number): number[] => Array.from({ length: n }, (_, i) => i)
 
+/** The three ranking keys a candidate is compared on, in priority order. */
+interface VoteRank {
+  readonly votes: number
+  readonly priority: number
+  readonly firstAppear: number
+}
+
+/** Project one candidate onto its ranking keys, defaulting every missing key to
+ *  the same value the inline comparison used (`0`, and index 0 for an unseen
+ *  patch key). A unit because these three lookups must stay in lockstep: the
+ *  challenger and the incumbent have to be projected the SAME way or the
+ *  comparison below silently stops being a total order. */
+const voteRankOf = (
+  candidate: RerankCandidate,
+  votes: ReadonlyMap<string, number>,
+  firstAppear: ReadonlyMap<string, number>,
+): VoteRank => ({
+  votes: votes.get(candidate.patchKey) ?? 0,
+  priority: candidate.structuralPriority ?? 0,
+  firstAppear: firstAppear.get(candidate.patchKey) ?? 0,
+})
+
+/** Does `challenger` beat the current best under the rerank ordering?
+ *
+ *  A unit because this is ONE total order stated three keys deep — more votes
+ *  wins, ties go to the higher structural priority, remaining ties go to the
+ *  EARLIER first appearance — which is exactly rerank.py's
+ *  `max(key=lambda i: (vote[key], -first_appear_idx[key]))` plus our structural
+ *  tiebreak. Every level compares STRICTLY, so a full tie never displaces the
+ *  incumbent and the scan keeps its first-seen-wins behaviour. */
+const beatsIncumbent = (challenger: VoteRank, incumbent: VoteRank): boolean =>
+  challenger.votes > incumbent.votes ||
+  (challenger.votes === incumbent.votes &&
+    (challenger.priority > incumbent.priority ||
+      (challenger.priority === incumbent.priority &&
+        challenger.firstAppear < incumbent.firstAppear)))
+
 /** Majority vote over the candidate ids: winner maximises (votes, -firstAppearance)
  *  — faithful to `max(key=lambda i: (vote[key], -first_appear_idx[key]))`. */
 const voteWinner = (
@@ -73,15 +110,9 @@ const voteWinner = (
   }
   let best = ids[0] as number
   for (const i of ids) {
-    const k = (candidates[i] as RerankCandidate).patchKey
-    const bk = (candidates[best] as RerankCandidate).patchKey
-    const v = vote.get(k) ?? 0
-    const bv = vote.get(bk) ?? 0
-    const sp = (candidates[i] as RerankCandidate).structuralPriority ?? 0
-    const bsp = (candidates[best] as RerankCandidate).structuralPriority ?? 0
-    const fa = firstAppear.get(k) ?? 0
-    const bfa = firstAppear.get(bk) ?? 0
-    if (v > bv || (v === bv && (sp > bsp || (sp === bsp && fa < bfa)))) best = i
+    const challenger = voteRankOf(candidates[i] as RerankCandidate, vote, firstAppear)
+    const incumbent = voteRankOf(candidates[best] as RerankCandidate, vote, firstAppear)
+    if (beatsIncumbent(challenger, incumbent)) best = i
   }
   const winner = candidates[best] as RerankCandidate
   return { patch: winner.patch, tier, votes: vote.get(winner.patchKey) ?? 0 }

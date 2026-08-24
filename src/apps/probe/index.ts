@@ -71,6 +71,9 @@ const selectInstances = (run: ParsedRun, only?: string): Array<[string, AttemptT
   return only === undefined ? all : all.filter(([id]) => id === only)
 }
 
+/** One row of `summary.json`'s `instances` array. */
+type SummaryInstance = NonNullable<RunSummaryLike["instances"]>[number]
+
 const isFailed = (summary: RunSummaryLike | undefined, id: string): boolean => {
   const hit = summary?.instances?.find((i) => i.id === id)
   // No summary row ⇒ inspect (can't prove pass). NOTE: `main` pairs the
@@ -97,6 +100,18 @@ const skippedTotal = (run: ParsedRun): number => {
   return n
 }
 
+/** One instance row of the overview. `----` is NOT a third verdict: it is the
+ *  absence of a summary row, and the probe never renders a verdict it cannot
+ *  prove. A unit because the mark, the optional score label and the attempt
+ *  count are ONE claim about ONE instance — the caller only decides which
+ *  instances to make it about. */
+const overviewRow = (hit: SummaryInstance | undefined, id: string, attempts: number): string => {
+  const passed = hit?.passed
+  const mark = passed === true ? "PASS" : passed === false ? "FAIL" : "----"
+  const score = hit?.scoreLabel !== undefined ? `[${hit.scoreLabel}]` : ""
+  return `  [${mark}]${score} ${id} (${attempts} attempt(s))`
+}
+
 const renderOverview = (run: ParsedRun, args: Args): void => {
   const s = run.summary
   emit(`run ${run.runId ?? "(unknown id)"}`)
@@ -106,11 +121,7 @@ const renderOverview = (run: ParsedRun, args: Args): void => {
     if (line !== undefined) emit(line)
   }
   for (const [id, attempts] of selectInstances(run, args.instance)) {
-    const hit = s?.instances?.find((i) => i.id === id)
-    const passed = hit?.passed
-    const mark = passed === true ? "PASS" : passed === false ? "FAIL" : "----"
-    const score = hit?.scoreLabel !== undefined ? `[${hit.scoreLabel}]` : ""
-    emit(`  [${mark}]${score} ${id} (${attempts.length} attempt(s))`)
+    emit(overviewRow(s?.instances?.find((i) => i.id === id), id, attempts.length))
   }
   const skipped = skippedTotal(run)
   if (skipped > 0) emit(`note: skipped ${skipped} unparseable/foreign line(s)`)

@@ -53,6 +53,7 @@ import type {
 } from "@/permission/permission-profile"
 import { mergeProfileLayers } from "@/permission/profile-layer-merge"
 import { LLMError } from "@/shared"
+import { present } from "../_helpers/expect-present"
 
 /* ════════════════════════════════════════════════════════════════════════ */
 /* B2 — config-provenance: LIVE merge wiring drops repo widens per-pillar     */
@@ -534,10 +535,12 @@ describe("H13 — migration persist credential-scrub even when source == destina
       mcpServers: Record<string, Record<string, unknown>>
     }
     // Existing entry survives but ONLY with command/args.
-    expect(Object.keys(parsed.mcpServers.legacy!).sort()).toEqual(["args", "command"])
-    expect(parsed.mcpServers.legacy!.command).toBe("mcp-legacy")
+    expect(
+      Object.keys(present(parsed.mcpServers.legacy, "parsed.mcpServers.legacy")).sort(),
+    ).toEqual(["args", "command"])
+    expect(present(parsed.mcpServers.legacy, "parsed.mcpServers.legacy").command).toBe("mcp-legacy")
     // New entry merged in alongside.
-    expect(parsed.mcpServers.fresh!.command).toBe("mcp-fresh")
+    expect(present(parsed.mcpServers.fresh, "parsed.mcpServers.fresh").command).toBe("mcp-fresh")
   })
 
   test("a NEW mcp server colliding by NAME with an existing one is NOT clobbered (existing scrubbed entry kept)", async () => {
@@ -561,7 +564,7 @@ describe("H13 — migration persist credential-scrub even when source == destina
       mcpServers: Record<string, Record<string, unknown>>
     }
     // The existing `dup` command is preserved (no clobber) but scrubbed of env.
-    expect(parsed.mcpServers.dup!.command).toBe("original")
+    expect(present(parsed.mcpServers.dup, "parsed.mcpServers.dup").command).toBe("original")
     expect(JSON.stringify(parsed)).not.toContain(MCP_SECRET)
   })
 

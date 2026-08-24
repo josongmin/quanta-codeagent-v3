@@ -33,9 +33,12 @@ import { describe, expect, test } from "bun:test"
 import { readdirSync, readFileSync, statSync } from "node:fs"
 import { join, resolve } from "node:path"
 
-const SLICE_DIR = resolve(process.cwd(), "src/integrations/github")
-const CLI_LIB = resolve(process.cwd(), "src/apps/cli/from-pr-cmd.ts")
-const CLI_ADAPTERS = resolve(process.cwd(), "src/apps/cli/from-pr-cmd-adapters.ts")
+// Repo-anchored on this file, not the ambient cwd — this fence reads real
+// source out of the checkout.
+const REPO_ROOT = resolve(import.meta.dir, "..", "..", "..", "..")
+const SLICE_DIR = resolve(REPO_ROOT, "src/integrations/github")
+const CLI_LIB = resolve(REPO_ROOT, "src/apps/cli/from-pr-cmd.ts")
+const CLI_ADAPTERS = resolve(REPO_ROOT, "src/apps/cli/from-pr-cmd-adapters.ts")
 
 /**
  * Path prefixes that MUST NOT appear anywhere on the LHS of an `import …

@@ -37,7 +37,9 @@ const buildSelectionGenerationPacket = (input: SelectionGenerationPacketInput): 
 const buildRepairSeedPacket = (input: RepairSeedPacketInput): string =>
   renderLlmEvidencePacket(buildRepairSeedLlmEvidencePacket(input))
 
-const REPO_ROOT = process.cwd()
+// Repo root anchored on this file, not the ambient cwd — `readSrc` reads real
+// source out of the checkout.
+const REPO_ROOT = join(import.meta.dir, "..", "..")
 const readSrc = (rel: string): string => readFileSync(join(REPO_ROOT, rel), "utf8")
 const PLACEHOLDER_SMELL = "already attached in the main task prompt"
 const instanceIdOf = (rendered: string): string | undefined =>

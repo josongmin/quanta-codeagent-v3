@@ -25,6 +25,7 @@ import { readFileSync } from "node:fs"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
 import { type SubagentLifecycleEvent, TaskRegistry } from "@/subagent"
+import { nth, present } from "../../_helpers/expect-present"
 
 const REPO = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..")
 const read = (rel: string) => readFileSync(join(REPO, rel), "utf8")
@@ -35,12 +36,22 @@ describe("A1 foundation — no 5th TaskStatus value, no awaitingInput field", ()
   test("TaskStatus stays the exact 4-valued closed union", () => {
     const m = /export type TaskStatus =\s*("[^"]+"(?:\s*\|\s*"[^"]+")*)/.exec(registrySrc)
     expect(m).not.toBeNull()
-    const values = m![1]!.match(/"([^"]+)"/g)!.map((s) => s.replace(/"/g, ""))
+    const union = nth(present(m, "TaskStatus union match"), 1, "TaskStatus union match")
+    const values = present(union.match(/"([^"]+)"/g), "quoted TaskStatus values").map((s) =>
+      s.replace(/"/g, ""),
+    )
     expect(values.sort()).toEqual(["completed", "failed", "running", "stopped"])
   })
 
   test("TaskRecord gains no `awaitingInput` (or attention) field", () => {
-    const recordBlock = /export interface TaskRecord \{([\s\S]*?)\n\}/.exec(registrySrc)![1]!
+    const recordBlock = nth(
+      present(
+        /export interface TaskRecord \{([\s\S]*?)\n\}/.exec(registrySrc),
+        "TaskRecord interface block",
+      ),
+      1,
+      "recordBlock",
+    )
     expect(recordBlock.includes("awaitingInput")).toBe(false)
     expect(/\battention\b/i.test(recordBlock)).toBe(false)
   })

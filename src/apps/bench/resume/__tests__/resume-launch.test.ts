@@ -22,6 +22,7 @@ import { describe, expect, test } from "bun:test"
 import { readFileSync } from "node:fs"
 import type { RemoteBackend } from "@/shared/remote-store"
 import { type ResumeReceipt, segmentStore } from "@/shared/remote-store"
+import { nth, present } from "../../../../../tests/_helpers/expect-present"
 import { prepareResume } from "../resume-launch"
 import type { ResumeStore } from "../store"
 
@@ -75,7 +76,7 @@ const seededStore = async (args: {
   const segs = segmentStore(backend, key)
   const segments = args.segments ?? []
   for (let i = 0; i < segments.length; i++) {
-    await segs.putSegment(i + 1, segments[i]!)
+    await segs.putSegment(i + 1, nth(segments, i, "segments"))
   }
   const rcpt = args.receipt
   const store: ResumeStore = {
@@ -131,10 +132,11 @@ describe("prepareResume — eligible ⇒ materialize cassette + replay env", () 
 
     const out = await prepareResume(RESUME_ON_ENV, INSTANCE, { makeStore: () => store })
     expect(out).toBeDefined()
-    expect(out?.replayEnv.QUANTA_BENCH_REPLAY_TRAJECTORY).toBe(out!.localCassettePath)
+    const prepared = present(out, "prepareResume result")
+    expect(out?.replayEnv.QUANTA_BENCH_REPLAY_TRAJECTORY).toBe(prepared.localCassettePath)
     expect(out?.replayEnv.QUANTA_BENCH_REPLAY_ON_MISS).toBe("record-and-passthrough")
     // The materialized cassette is byte-equal to the concatenated segment log.
-    const onDisk = readFileSync(out!.localCassettePath, "utf8")
+    const onDisk = readFileSync(prepared.localCassettePath, "utf8")
     expect(onDisk).toBe(expectedConcat)
     expect(onDisk).toContain('"turn":"a"')
     expect(onDisk).toContain('"turn":"b"')

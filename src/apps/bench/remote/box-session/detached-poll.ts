@@ -8,7 +8,10 @@
  * `ssh` / `aws`.
  */
 
-import { makeNoProgressWatchdog } from "@/runner/batch/eval/no-progress-watchdog"
+import {
+  makeNoProgressWatchdog,
+  type NoProgressWatchdog,
+} from "@/runner/batch/eval/no-progress-watchdog"
 import type { SpawnResult } from "../backend"
 import { defaultSleep, shq } from "./shell"
 import { BOX_DIED_DURING_RUN_ERROR } from "./types"
@@ -181,6 +184,65 @@ const confirmBoxLivenessOnPollFailures = async (
 }
 
 /**
+ * Throws {@link BoxDiedDuringRunError} if the poll loop must stop waiting for an exit
+ * sentinel that is never going to land — either the wall-clock ceiling elapsed, or the
+ * box is alive-but-wedged past its idle budget.
+ *
+ * These two are ONE unit because they are the same verdict from the loop's point of
+ * view: give up on this box and hand the chunk back to the pool's requeue path. They
+ * share the error type deliberately — the pool keys its requeue off it — so a future
+ * edit that gives one of them a different type has to change them together.
+ */
+const assertDetachedRunNotAbandoned = (args: {
+  iid: string
+  startedAt: number
+  now: () => number
+  watchdog: NoProgressWatchdog
+}): void => {
+  if (args.now() - args.startedAt >= RUN_WALL_CEILING_MS) {
+    throw new BoxDiedDuringRunError(
+      `${BOX_DIED_DURING_RUN_ERROR}: detached run on box ${args.iid} exceeded the ${Math.round(
+        RUN_WALL_CEILING_MS / 60000,
+      )}min wall-clock ceiling without an exit sentinel — abandoning to the pool's requeue path`,
+    )
+  }
+  // Wedged-but-alive (polls succeed, run.log frozen past the idle budget) — the
+  // 77min throttle hang. Abort to the SAME requeue path as box-death so the run
+  // moves on instead of polling a stuck box forever (off unless budget is finite).
+  if (args.watchdog.stalled()) {
+    throw new BoxDiedDuringRunError(
+      `${BOX_DIED_DURING_RUN_ERROR}: ${args.watchdog.reason(args.iid)}`,
+    )
+  }
+}
+
+/**
+ * The poll loop's injectable ports, resolved once at entry to their production
+ * defaults.
+ *
+ * A unit because "which clock, sleep and log is this run on" is a single decision: a
+ * test either drives the whole set deterministically or none of it. Defaulting them
+ * one-by-one at each point of use is what let a later-added call site read the real
+ * `Date.now()` while the rest of the loop ran on the injected clock.
+ */
+const resolveDetachedPollPorts = (args: {
+  sleep?: (ms: number) => Promise<void>
+  now?: () => number
+  log?: (msg: string) => void
+  pollIntervalMs?: number
+}): {
+  sleep: (ms: number) => Promise<void>
+  now: () => number
+  log: (msg: string) => void
+  pollIntervalMs: number
+} => ({
+  sleep: args.sleep ?? defaultSleep,
+  now: args.now ?? (() => Date.now()),
+  log: args.log ?? (() => {}),
+  pollIntervalMs: args.pollIntervalMs ?? RUN_POLL_INTERVAL_MS,
+})
+
+/**
  * Detached run + poll — ssh-resilience (RCA jun-20). Launches `benchCmd` under
  * `setsid` so it is its OWN session leader: an ssh teardown's SIGHUP never
  * reaches it, and the bench runs to completion regardless of any local-side
@@ -209,9 +271,7 @@ export const runBenchDetachedPoll = async (args: {
   noProgressBudgetMs?: number
   completionArtifacts?: CompletionArtifacts
 }): Promise<{ code: number }> => {
-  const sleep = args.sleep ?? defaultSleep
-  const now = args.now ?? (() => Date.now())
-  const log = args.log ?? (() => {})
+  const { sleep, now, log, pollIntervalMs } = resolveDetachedPollPorts(args)
   // No-progress watchdog: progress() fires ONLY when run.log grows; a wedged box
   // (polls succeed, log frozen) trips stalled() and aborts to the requeue path —
   // distinct from box-DEATH (consecutive poll FAILURES, handled below).
@@ -256,19 +316,7 @@ export const runBenchDetachedPoll = async (args: {
         log,
       )
     }
-    if (now() - startedAt >= RUN_WALL_CEILING_MS) {
-      throw new BoxDiedDuringRunError(
-        `${BOX_DIED_DURING_RUN_ERROR}: detached run on box ${args.iid} exceeded the ${Math.round(
-          RUN_WALL_CEILING_MS / 60000,
-        )}min wall-clock ceiling without an exit sentinel — abandoning to the pool's requeue path`,
-      )
-    }
-    // Wedged-but-alive (polls succeed, run.log frozen past the idle budget) — the
-    // 77min throttle hang. Abort to the SAME requeue path as box-death so the run
-    // moves on instead of polling a stuck box forever (off unless budget is finite).
-    if (watchdog.stalled()) {
-      throw new BoxDiedDuringRunError(`${BOX_DIED_DURING_RUN_ERROR}: ${watchdog.reason(args.iid)}`)
-    }
-    await sleep(args.pollIntervalMs ?? RUN_POLL_INTERVAL_MS)
+    assertDetachedRunNotAbandoned({ iid: args.iid, startedAt, now, watchdog })
+    await sleep(pollIntervalMs)
   }
 }

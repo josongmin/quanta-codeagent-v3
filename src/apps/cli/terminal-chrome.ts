@@ -126,6 +126,26 @@ interface RegionEntry {
   released: boolean
 }
 
+/** Pop `entry` out of the ownership stack and hand DECSTBM back: when the entry
+ *  was the one on the terminal, emit its release and re-establish whatever it
+ *  had been suspending. A unit because it is pure stack surgery — it needs
+ *  nothing from the manager closure but the stack itself — and because the
+ *  "re-establish the resumed owner" step is only correct when paired with the
+ *  splice, so the two must never drift apart. */
+const detachRegionEntry = (
+  stack: RegionEntry[],
+  entry: RegionEntry,
+  wasActive: boolean,
+  safeWrite: (e: RegionEntry, bytes: string) => void,
+): void => {
+  const idx = stack.lastIndexOf(entry)
+  if (idx !== -1) stack.splice(idx, 1)
+  if (!wasActive) return
+  safeWrite(entry, entry.spec.release())
+  const resumed = stack[stack.length - 1]
+  if (resumed !== undefined) safeWrite(resumed, resumed.spec.establish())
+}
+
 /** Build an isolated manager (unit tests / hermetic composition). Production
  *  chrome shares {@link acquireRegion} — the module singleton — because the
  *  DECSTBM region is terminal-global across BOTH stdio streams. */
@@ -189,13 +209,7 @@ export const createScrollRegionManager = (): ScrollRegionManager => {
         const wasActive = isActive()
         const occupiedBottomRow = spec.occupiesBottomRow === true
         entry.released = true
-        const idx = stack.lastIndexOf(entry)
-        if (idx !== -1) stack.splice(idx, 1)
-        if (wasActive) {
-          safeWrite(entry, spec.release())
-          const resumed = top()
-          if (resumed !== undefined) safeWrite(resumed, resumed.spec.establish())
-        }
+        detachRegionEntry(stack, entry, wasActive, safeWrite)
         // Audit-R1 — even a SUSPENDED occupier leaving can free the bottom
         // row for owners below it; notify unconditionally when the released
         // entry occupied it.

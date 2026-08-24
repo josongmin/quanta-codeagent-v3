@@ -1,5 +1,9 @@
 import type { SessionEvent, TurnRunCommand } from "@/protocol/session"
-import type { KernelDispatchContext, SessionHostTurnEvent } from "./ports"
+import type {
+  KernelDispatchContext,
+  SessionHostTurnEvent,
+  SessionHostTurnResult,
+} from "./ports"
 import { reduceSessionCommand } from "./reducer"
 import {
   appendEvents,
@@ -97,6 +101,50 @@ const emitTurnStreamEvent = async (args: {
   return projected
 }
 
+/**
+ * Route a host turn that RETURNED to its terminal — aborted, errored, or completed.
+ *
+ * A unit because the three-way choice is ONE classification: {@link classifyTerminal}
+ * over the host's outcome plus the turn controller's abort state, with every arm handed
+ * the same accumulated state and events. Keeping the routing next to the classification
+ * is the point — when they were apart, a cooperative `"aborted"` outcome fell through to
+ * `turn.completed` on the return path while an abort THROW settled as `turn.aborted`,
+ * so one cancel had two terminals depending on how the host chose to report it.
+ */
+const settleReturnedTurn = async (args: {
+  readonly state: KernelSessionState
+  readonly command: TurnRunCommand
+  readonly ctx: KernelDispatchContext
+  readonly result: SessionHostTurnResult
+  readonly events: readonly SessionEvent[]
+  readonly turnController: AbortController
+}): Promise<KernelDispatchResult> => {
+  const terminal = classifyTerminal({
+    outcome: args.result.outcome,
+    aborted: args.turnController.signal.aborted,
+  })
+  const settled = {
+    state: args.state,
+    command: args.command,
+    result: args.result,
+    ctx: args.ctx,
+    events: args.events,
+  }
+  if (terminal === "aborted") {
+    // ALBB-04 P2 — the cooperative RETURN-abort path: hand the host result
+    // through so its accumulated `messages` are COMMITTED (and the draft
+    // cleared), not silently discarded back to the pre-turn message set.
+    return await onTurnAborted({
+      ...settled,
+      ...(args.turnController.signal.reason !== undefined
+        ? { error: args.turnController.signal.reason }
+        : {}),
+    })
+  }
+  if (terminal === "error") return await onTurnErrored(settled)
+  return await onTurnCompleted(settled)
+}
+
 export const runTurn = async (args: {
   readonly state: KernelSessionState
   readonly command: TurnRunCommand
@@ -187,39 +235,14 @@ export const runTurn = async (args: {
     // mid-flight abort that threw. Previously only `"error"` was special-cased
     // and `"aborted"` fell to `onTurnCompleted`, surfacing an identical cancel
     // as `turn.completed` on the return path and `turn.failed` on the throw path.
-    const terminal = classifyTerminal({
-      outcome: result.outcome,
-      aborted: turnController.signal.aborted,
+    return await settleReturnedTurn({
+      state: streamState,
+      command: args.command,
+      ctx: args.ctx,
+      result,
+      events: [...args.events, ...streamedEvents],
+      turnController,
     })
-    return terminal === "aborted"
-      ? await onTurnAborted({
-          state: streamState,
-          command: args.command,
-          // ALBB-04 P2 — the cooperative RETURN-abort path: hand the host result
-          // through so its accumulated `messages` are COMMITTED (and the draft
-          // cleared), not silently discarded back to the pre-turn message set.
-          result,
-          ...(turnController.signal.reason !== undefined
-            ? { error: turnController.signal.reason }
-            : {}),
-          ctx: args.ctx,
-          events: [...args.events, ...streamedEvents],
-        })
-      : terminal === "error"
-        ? await onTurnErrored({
-            state: streamState,
-            command: args.command,
-            result,
-            ctx: args.ctx,
-            events: [...args.events, ...streamedEvents],
-          })
-        : await onTurnCompleted({
-            state: streamState,
-            command: args.command,
-            result,
-            ctx: args.ctx,
-            events: [...args.events, ...streamedEvents],
-          })
   } catch (error) {
     await pendingStream
     // ALBB-04 single-classifier. The catch arm (host THREW) consults the SAME

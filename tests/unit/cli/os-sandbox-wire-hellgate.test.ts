@@ -32,6 +32,7 @@ import {
   wrapShellArgv,
 } from "@/runtime"
 import { buildCliOsSandbox } from "../../../src/apps/cli/sandbox-wire"
+import { present } from "../../_helpers/expect-present"
 
 /* ------------------------------------------------------------------ */
 /*  helpers                                                            */
@@ -182,7 +183,7 @@ describe("C. wrap — Linux backend routing", () => {
       which: async (binary) => (binary === "bwrap" ? "/usr/bin/bwrap" : null),
     })
     expect(slot).toBeDefined()
-    const out = await slot!.wrap(["bash", "-lc", ":"], "/ws")
+    const out = await present(slot, "sandbox slot").wrap(["bash", "-lc", ":"], "/ws")
     expect(out.sandboxApplied).toBe(true)
     expect(out.degradeReason).toBeUndefined()
     expect(out.argv[0]).toBe("bwrap")
@@ -196,7 +197,7 @@ describe("C. wrap — Linux backend routing", () => {
       which: async (binary) => (binary === "landlock-cli" ? "/usr/bin/landlock-cli" : null),
     })
     expect(slot).toBeDefined()
-    const out = await slot!.wrap(["bash", "-lc", ":"], "/ws")
+    const out = await present(slot, "sandbox slot").wrap(["bash", "-lc", ":"], "/ws")
     expect(out.sandboxApplied).toBe(true)
     expect(out.degradeReason).toBe("landlock-network-policy-not-enforced")
     expect(out.argv[0]).toBe("landlock-cli")
@@ -210,7 +211,7 @@ describe("C. wrap — Linux backend routing", () => {
       which: async () => null,
     })
     expect(slot).toBeDefined()
-    const out = await slot!.wrap(["bash", "-lc", ":"], "/ws")
+    const out = await present(slot, "sandbox slot").wrap(["bash", "-lc", ":"], "/ws")
     expect(out.sandboxApplied).toBe(false)
     expect((out.degradeReason as string).startsWith("linux-bwrap-missing")).toBe(true)
     expect(out.argv).toEqual(["bash", "-lc", ":"])

@@ -39,6 +39,7 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises"
 import { homedir, tmpdir } from "node:os"
 import { join } from "node:path"
 import { loadRepoRules, MAX_BYTES, REPO_RULE_CANDIDATES } from "@/agent/repo-rules"
+import { present } from "../_helpers/expect-present"
 
 const roots: string[] = []
 const freshRoot = async (label: string): Promise<string> => {
@@ -48,7 +49,7 @@ const freshRoot = async (label: string): Promise<string> => {
 }
 afterEach(async () => {
   while (roots.length > 0) {
-    const r = roots.pop()!
+    const r = present(roots.pop(), "roots.pop()")
     await rm(r, { recursive: true, force: true })
   }
 })

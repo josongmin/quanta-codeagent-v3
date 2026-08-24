@@ -25,6 +25,7 @@ import type { CodeParserPort, ParsedFile, ParseOutcome } from "@/retrieval/code-
 import { fakeParser } from "@/retrieval/code-parser"
 import { createDefaultIndexer, type FileChunk } from "@/retrieval/indexer"
 import { __resetRuntimeConfig } from "@/shared"
+import { nth } from "../../_helpers/expect-present"
 
 const SCAN_GLOB = "**/*.ts"
 
@@ -100,10 +101,10 @@ describe("default-scanner chunkOneFile — knob ON + parser (ok:true) ⇒ syntac
     // Two decl-aligned chunks, contiguous & non-overlapping, covering [1,300].
     const sorted = [...chunks].sort((x, y) => x.startLine - y.startLine)
     expect(sorted.length).toBe(2)
-    expect(sorted[0]!.startLine).toBe(1)
-    expect(sorted[0]!.endLine).toBe(150)
-    expect(sorted[1]!.startLine).toBe(151)
-    expect(sorted[1]!.endLine).toBe(300)
+    expect(nth(sorted, 0, "sorted").startLine).toBe(1)
+    expect(nth(sorted, 0, "sorted").endLine).toBe(150)
+    expect(nth(sorted, 1, "sorted").startLine).toBe(151)
+    expect(nth(sorted, 1, "sorted").endLine).toBe(300)
     ix.stop()
   })
 
@@ -196,10 +197,10 @@ describe("default-scanner chunkOneFile — knob ON + parser THROWS ⇒ line-wind
       .filter((c) => c.path === "a.ts")
       .sort((a, b) => a.startLine - b.startLine)
     expect(chunks.length).toBe(4)
-    expect(chunks[0]!.startLine).toBe(1)
-    expect(chunks[0]!.endLine).toBe(50)
-    expect(chunks[1]!.startLine).toBe(31)
-    expect(chunks[chunks.length - 1]!.endLine).toBe(120)
+    expect(nth(chunks, 0, "chunks").startLine).toBe(1)
+    expect(nth(chunks, 0, "chunks").endLine).toBe(50)
+    expect(nth(chunks, 1, "chunks").startLine).toBe(31)
+    expect(nth(chunks, chunks.length - 1, "chunks").endLine).toBe(120)
     ix.stop()
   })
 
@@ -267,7 +268,7 @@ describe("default-scanner chunkOneFile — knob OFF ⇒ parser never consulted",
       .filter((c) => c.path === "a.ts")
       .sort((a, b) => a.startLine - b.startLine)
     expect(chunks.length).toBe(4)
-    expect(chunks[0]!.endLine).toBe(50)
+    expect(nth(chunks, 0, "chunks").endLine).toBe(50)
     ix.stop()
   })
 

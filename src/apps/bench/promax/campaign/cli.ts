@@ -293,6 +293,43 @@ const evaluateGate = (
 }
 
 /**
+ * Print the operator-facing verdict for one evaluated gate: the headline, the
+ * continuation arithmetic when the gate produced any, then every failure.
+ *
+ * A unit because this is the whole of what a human reads off a gate run, and the three
+ * parts are one message in a fixed order — the headline names the sample the numbers
+ * below it belong to, so emitting failures from somewhere else would strand them from
+ * the gate that produced them.
+ */
+const reportGateResult = (
+  ports: CampaignCliPorts,
+  gate: ProMaxGateId,
+  result: ProMaxGateResult,
+): void => {
+  const coverage = result.coverage
+  const summary = result.summary
+  ports.log(
+    `[promax] ${gate} (${PROMAX_GATE_SAMPLE[gate]}): ${result.ok ? "PASS" : "REFUSED"} ` +
+      (summary === null
+        ? ""
+        : `assigned=${summary.assigned} grading_valid=${summary.gradingValid} resolved=${summary.resolved} ` +
+          `model_miss=${summary.modelMiss} infra_invalid=${summary.infraInvalid} ambiguous=${summary.ambiguous} ` +
+          `missing=${summary.missing}`) +
+      (coverage === undefined
+        ? ""
+        : ` | coverage: assigned=${coverage.assigned} valid=${coverage.valid} exceptions=${coverage.exceptions}`),
+  )
+  if (result.continuation !== undefined) {
+    const c = result.continuation
+    ports.log(
+      `[promax] continuation: paired=${c.pairedInstances} resolved_delta=${c.resolvedDelta} ` +
+        `cost_delta=${c.costUsdDelta} continue=${String(c.continue)}`,
+    )
+  }
+  for (const failure of result.failures) ports.log(`[promax] ${failure.code}: ${failure.message}`)
+}
+
+/**
  * Evaluate ONE gate and report it. The result receipt is written when `--out` is
  * given, which is what lets gate 6 read gates 1-5 back as ARTEFACTS rather than
  * taking a caller's word that they passed.
@@ -330,28 +367,7 @@ const runGate = (argv: readonly string[], ports: CampaignCliPorts): number => {
     return 1
   }
   const { result } = evaluated
-
-  const coverage = result.coverage
-  const summary = result.summary
-  ports.log(
-    `[promax] ${gate} (${PROMAX_GATE_SAMPLE[gate]}): ${result.ok ? "PASS" : "REFUSED"} ` +
-      (summary === null
-        ? ""
-        : `assigned=${summary.assigned} grading_valid=${summary.gradingValid} resolved=${summary.resolved} ` +
-          `model_miss=${summary.modelMiss} infra_invalid=${summary.infraInvalid} ambiguous=${summary.ambiguous} ` +
-          `missing=${summary.missing}`) +
-      (coverage === undefined
-        ? ""
-        : ` | coverage: assigned=${coverage.assigned} valid=${coverage.valid} exceptions=${coverage.exceptions}`),
-  )
-  if (result.continuation !== undefined) {
-    const c = result.continuation
-    ports.log(
-      `[promax] continuation: paired=${c.pairedInstances} resolved_delta=${c.resolvedDelta} ` +
-        `cost_delta=${c.costUsdDelta} continue=${String(c.continue)}`,
-    )
-  }
-  for (const failure of result.failures) ports.log(`[promax] ${failure.code}: ${failure.message}`)
+  reportGateResult(ports, gate, result)
 
   const out = flag(argv, "out")
   if (out !== undefined) {

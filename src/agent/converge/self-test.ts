@@ -161,17 +161,53 @@ const collectOwnCommands = (events: readonly AgentEvent[]): string[] => {
   return out
 }
 
+/**
+ * The three per-tool-result facts both self-test walkers key on, indexed by call id.
+ *
+ * A unit because both need the SAME reading of a result — did the agent observe output, did it run
+ * clean, and what did it print — and the jul-3 finding was precisely the two of them reading a
+ * result differently. One index, one reading, no drift.
+ */
+const indexSelfTestResults = (
+  events: readonly AgentEvent[],
+): {
+  readonly observed: ReadonlyMap<string, boolean>
+  readonly clean: ReadonlyMap<string, boolean>
+  readonly preview: ReadonlyMap<string, string>
+} => {
+  const observed = new Map<string, boolean>()
+  const clean = new Map<string, boolean>()
+  const preview = new Map<string, string>()
+  for (const ev of events) {
+    if (ev.type !== "tool_result") continue
+    observed.set(ev.id, resultObservedOutput(ev))
+    clean.set(ev.id, resultRanClean(ev))
+    preview.set(ev.id, typeof ev.preview === "string" ? ev.preview : "")
+  }
+  return { observed, clean, preview }
+}
+
+/**
+ * The id + command of an event that IS an agent-authored self-test run, or undefined.
+ *
+ * A unit — and shared by both walkers — because "credited self-test" has exactly one definition: a
+ * `container_exec` whose command {@link isSelfTestCommand} accepts against the SAME taint set.
+ * Two copies of that definition is the jul-3 audit finding #2; this is the one place it can drift.
+ */
+const creditedSelfTestCall = (
+  ev: AgentEvent,
+  tainted: ReadonlySet<string>,
+): { readonly id: string; readonly command: string } | undefined => {
+  if (ev.type !== "tool_call" || ev.name !== CONTAINER_EXEC) return undefined
+  const command = containerExecCommand(ev)
+  if (command === undefined || !isSelfTestCommand(command, tainted)) return undefined
+  return { id: ev.id, command }
+}
+
 /** Inspect the stream for an agent-authored self-test run (S1b). Container-exec only for now (self-
  *  tests are non-interactive); a pty-driven self-test is out of scope and simply not credited. */
 export const inspectSelfTest = (events: readonly AgentEvent[]): SelfTestReceipt => {
-  const observedById = new Map<string, boolean>()
-  const cleanById = new Map<string, boolean>()
-  for (const ev of events) {
-    if (ev.type === "tool_result") {
-      observedById.set(ev.id, resultObservedOutput(ev))
-      cleanById.set(ev.id, resultRanClean(ev))
-    }
-  }
+  const results = indexSelfTestResults(events)
   // F2: laundering taint from the same SSOT — but keyed on the oracle LOCATION as the source (an
   // agent's own `cp test_fib.py ref` must not taint `ref`; only a real oracle read does).
   const tainted = buildTaintedRefs(collectOwnCommands(events), isOracleLocation)
@@ -182,14 +218,13 @@ export const inspectSelfTest = (events: readonly AgentEvent[]): SelfTestReceipt 
   let evidence: string | undefined
   // Chronological: the LAST observed self-test decides `green` (iterate-to-green ⇒ final run counts).
   for (const ev of events) {
-    if (ev.type !== "tool_call" || ev.name !== CONTAINER_EXEC) continue
-    const command = containerExecCommand(ev)
-    if (command === undefined || !isSelfTestCommand(command, tainted)) continue
-    if (observedById.get(ev.id) !== true) continue
+    const call = creditedSelfTestCall(ev, tainted)
+    if (call === undefined) continue
+    if (results.observed.get(call.id) !== true) continue
     executed = true
-    green = cleanById.get(ev.id) === true
+    green = results.clean.get(call.id) === true
     if (!green) sawRed = true
-    evidence = `ran a self-test the agent authored${green ? " (passed)" : " (did not pass)"}: \`${command.trim().slice(0, 160)}\``
+    evidence = `ran a self-test the agent authored${green ? " (passed)" : " (did not pass)"}: \`${call.command.trim().slice(0, 160)}\``
   }
   // F4: green reached only AFTER an earlier red self-test — surface it so a gating consumer can
   // distinguish honest iterate-to-green from a switch to a weaker test.
@@ -216,25 +251,17 @@ export const inspectSelfTest = (events: readonly AgentEvent[]): SelfTestReceipt 
 export const lastSelfTestFailure = (
   events: readonly AgentEvent[],
 ): { command: string; output: string } | undefined => {
-  const previewById = new Map<string, string>()
-  const cleanById = new Map<string, boolean>()
-  const observedById = new Map<string, boolean>()
-  for (const ev of events) {
-    if (ev.type !== "tool_result") continue
-    previewById.set(ev.id, typeof ev.preview === "string" ? ev.preview : "")
-    cleanById.set(ev.id, resultRanClean(ev))
-    observedById.set(ev.id, resultObservedOutput(ev))
-  }
+  const results = indexSelfTestResults(events)
   // F2: SAME taint source as inspectSelfTest (collectOwnCommands: container_exec + pty_write) so both
   // refuse a laundered self-test byte-identically — no drift (jul-3 final-audit finding #2).
   const tainted = buildTaintedRefs(collectOwnCommands(events), isOracleLocation)
   let last: { command: string; output: string } | undefined
   for (const ev of events) {
-    if (ev.type !== "tool_call" || ev.name !== CONTAINER_EXEC) continue
-    const command = containerExecCommand(ev)
-    if (command === undefined || !isSelfTestCommand(command, tainted)) continue
-    if (observedById.get(ev.id) !== true || cleanById.get(ev.id) === true) continue // observed RED only
-    last = { command, output: (previewById.get(ev.id) ?? "").slice(0, 4000) }
+    const call = creditedSelfTestCall(ev, tainted)
+    if (call === undefined) continue
+    // observed RED only
+    if (results.observed.get(call.id) !== true || results.clean.get(call.id) === true) continue
+    last = { command: call.command, output: (results.preview.get(call.id) ?? "").slice(0, 4000) }
   }
   return last
 }

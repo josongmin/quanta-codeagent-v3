@@ -386,46 +386,68 @@ const fetchPipeRule = (producer: string, consumer: string): string =>
       : "curl-wget-pipe-to-interpreter"
 
 /** Judge ONE producer→consumer hop of a pipeline. */
+/** The hop where the CONSUMER executes its stdin as a program (`… | sh`,
+ *  `… | python`). Returns undefined when it does not — the whole point of the
+ *  guard is that a consumer of this kind makes the PRODUCER's output into code,
+ *  so nothing below it may be judged by ordinary argv rules. */
+const assessExecutedPipe = (
+  prod: ShellCommandIr,
+  producer: string,
+  consumer: string,
+  ctx: Ctx,
+): ShellAssessment | undefined => {
+  if (!SHELL_HEADS.has(consumer) && !INTERPRETER_HEADS.has(consumer)) return undefined
+  if (FETCH_HEADS.has(producer)) {
+    return deny(
+      fetchPipeRule(producer, consumer),
+      `${producer} output is executed as a program by ${consumer}`,
+    )
+  }
+  // A literal producer's output IS readable: assess what it actually emits
+  // rather than guessing. `echo 'rm -rf /' | sh` is the delete it spells;
+  // `echo hi | sh` is nothing.
+  if (LITERAL_PRODUCER_HEADS.has(producer) && prod.args.every((w) => w.resolved)) {
+    return SHELL_HEADS.has(consumer)
+      ? assessScript(prod.args.map((w) => w.text).join(" "), ctx)
+      : safe()
+  }
+  // Anything else: the program text is produced at runtime and cannot be read.
+  return unknown(`${consumer} executes program text produced at runtime by ${producer}`)
+}
+
+/** The hop that READS a file and SENDS it off the machine. Returns undefined
+ *  when the pair is not a read→egress, and `safe` is left to the caller for the
+ *  ordinary case: reading a file and uploading it is normal work (`cat
+ *  report.json | curl -d @- …`), so ONLY a known secret store — or an argument
+ *  we cannot resolve well enough to rule one out — is a finding. */
+const assessExfilPipe = (
+  prod: ShellCommandIr,
+  producer: string,
+  consumer: string,
+): ShellAssessment | undefined => {
+  if (!SECRET_READ_HEADS.has(producer) || !EGRESS_HEADS.has(consumer)) return undefined
+  const secret = prod.args.find((w) => w.resolved && isSecretStorePath(w.text))
+  if (secret !== undefined) {
+    return deny(
+      "credential-exfil-pipe",
+      `${producer} ${secret.text} is sent off the machine by ${consumer}`,
+    )
+  }
+  if (prod.args.some((w) => !w.resolved)) {
+    return unknown(`${producer}: the file piped into ${consumer} is not statically resolvable`)
+  }
+  return undefined
+}
+
 const assessPipeHop = (
   prod: ShellCommandIr,
   producer: string,
   consumer: string,
   ctx: Ctx,
-): ShellAssessment => {
-  if (SHELL_HEADS.has(consumer) || INTERPRETER_HEADS.has(consumer)) {
-    if (FETCH_HEADS.has(producer)) {
-      return deny(
-        fetchPipeRule(producer, consumer),
-        `${producer} output is executed as a program by ${consumer}`,
-      )
-    }
-    // A literal producer's output IS readable: assess what it actually emits
-    // rather than guessing. `echo 'rm -rf /' | sh` is the delete it spells;
-    // `echo hi | sh` is nothing.
-    if (LITERAL_PRODUCER_HEADS.has(producer) && prod.args.every((w) => w.resolved)) {
-      return SHELL_HEADS.has(consumer)
-        ? assessScript(prod.args.map((w) => w.text).join(" "), ctx)
-        : safe()
-    }
-    // Anything else: the program text is produced at runtime and cannot be read.
-    return unknown(`${consumer} executes program text produced at runtime by ${producer}`)
-  }
-  if (SECRET_READ_HEADS.has(producer) && EGRESS_HEADS.has(consumer)) {
-    const secret = prod.args.find((w) => w.resolved && isSecretStorePath(w.text))
-    if (secret !== undefined) {
-      return deny(
-        "credential-exfil-pipe",
-        `${producer} ${secret.text} is sent off the machine by ${consumer}`,
-      )
-    }
-    // Reading an ORDINARY file and uploading it is normal work (`cat report.json
-    // | curl -d @- …`). Only a known secret store makes this exfiltration.
-    if (prod.args.some((w) => !w.resolved)) {
-      return unknown(`${producer}: the file piped into ${consumer} is not statically resolvable`)
-    }
-  }
-  return safe()
-}
+): ShellAssessment =>
+  assessExfilPipe(prod, producer, consumer) ??
+  assessExecutedPipe(prod, producer, consumer, ctx) ??
+  safe()
 
 /** Group the flat command list back into its pipelines. */
 const pipelineGroups = (commands: readonly ShellCommandIr[]): ShellCommandIr[][] => {

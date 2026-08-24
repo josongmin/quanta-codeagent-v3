@@ -38,7 +38,12 @@
 
 import type { PlanQueueStore } from "@/agent/plan-queue"
 import type { AudioRecorderPort } from "@/voice"
-import type { TranscribeReq, TranscriberPort, VoiceTranscript } from "@/voice/transcriber"
+import type {
+  TranscribeReq,
+  TranscriberError,
+  TranscriberPort,
+  VoiceTranscript,
+} from "@/voice/transcriber"
 
 /** Subset of {@link PlanQueueStore} the slash command depends on. Keeps
  *  the ctx port minimal so tests inject a tiny shim without building
@@ -202,6 +207,34 @@ interface TranscribeArgs {
   readonly err: (s: string) => void
 }
 
+/** One operator-facing line per {@link TranscriberError} kind — the whole
+ *  reason the union is closed. A unit because every branch does the SAME two
+ *  things (say why, give up); only the wording differs, so the wording is what
+ *  gets to live on its own. Each line keeps its trailing newline: it is written
+ *  straight to stderr. */
+const describeTranscriberError = (e: TranscriberError): string => {
+  switch (e.kind) {
+    case "auth-failed":
+      return `/voice: transcriber auth failed (status ${e.status})\n`
+    case "rate-limited":
+      return `/voice: transcriber rate-limited (status ${e.status})\n`
+    case "empty-audio":
+      return "/voice: no audio captured\n"
+    case "timeout":
+      return `/voice: transcriber timed out after ${e.elapsedMs} ms\n`
+    case "aborted":
+      return "/voice: transcription aborted\n"
+    case "unsupported-format":
+      return `/voice: transcriber rejected format=${e.format}\n`
+    case "no-transcription":
+      return `/voice: ${e.degradeReason}\n`
+    case "network-error":
+      return `/voice: transcriber network error (${e.degradeReason})\n`
+    default:
+      return `/voice: transcription failed (status ${e.status}): ${e.degradeReason}\n`
+  }
+}
+
 const runTranscribe = async (args: TranscribeArgs): Promise<VoiceTranscript | null> => {
   args.err("/voice: transcribing...\n")
   const req: TranscribeReq = {
@@ -211,41 +244,7 @@ const runTranscribe = async (args: TranscribeArgs): Promise<VoiceTranscript | nu
   }
   const r = await args.transcriber.transcribe(req)
   if (!r.ok) {
-    const e = r.error
-    if (e.kind === "auth-failed") {
-      args.err(`/voice: transcriber auth failed (status ${e.status})\n`)
-      return null
-    }
-    if (e.kind === "rate-limited") {
-      args.err(`/voice: transcriber rate-limited (status ${e.status})\n`)
-      return null
-    }
-    if (e.kind === "empty-audio") {
-      args.err("/voice: no audio captured\n")
-      return null
-    }
-    if (e.kind === "timeout") {
-      args.err(`/voice: transcriber timed out after ${e.elapsedMs} ms\n`)
-      return null
-    }
-    if (e.kind === "aborted") {
-      args.err("/voice: transcription aborted\n")
-      return null
-    }
-    if (e.kind === "unsupported-format") {
-      args.err(`/voice: transcriber rejected format=${e.format}\n`)
-      return null
-    }
-    if (e.kind === "no-transcription") {
-      args.err(`/voice: ${e.degradeReason}\n`)
-      return null
-    }
-    if (e.kind === "network-error") {
-      args.err(`/voice: transcriber network error (${e.degradeReason})\n`)
-      return null
-    }
-    // transcription-failed
-    args.err(`/voice: transcription failed (status ${e.status}): ${e.degradeReason}\n`)
+    args.err(describeTranscriberError(r.error))
     return null
   }
   return r.value

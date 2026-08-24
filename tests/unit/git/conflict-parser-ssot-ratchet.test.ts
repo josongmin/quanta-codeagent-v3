@@ -15,7 +15,9 @@ import { describe, expect, test } from "bun:test"
 import { readFileSync } from "node:fs"
 import { join } from "node:path"
 
-const root = process.cwd()
+// Repo root anchored on this file, not the ambient cwd — `read` reads real
+// source out of the checkout.
+const root = join(import.meta.dir, "..", "..", "..")
 const read = (p: string): string => readFileSync(join(root, p), "utf8")
 
 describe("L9 H13 — conflict-parser single source of truth", () => {

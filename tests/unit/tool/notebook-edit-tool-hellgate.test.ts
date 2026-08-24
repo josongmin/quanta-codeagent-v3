@@ -10,6 +10,7 @@ import { describe, expect, test } from "bun:test"
 import type { FileInfo, FileSystemPort } from "@/storage"
 import { makeNotebookEditTool } from "@/tool/notebook-edit/tool"
 import type { ToolContext, ToolEvent, ToolResult } from "@/tool/types"
+import { nth, present } from "../../_helpers/expect-present"
 
 const NB = JSON.stringify({
   nbformat: 4,
@@ -89,9 +90,11 @@ describe("notebook_edit tool — FS-jail wrapper hellgate", () => {
     })
     expect(r.ok).toBe(true)
     expect(writes).toHaveLength(1)
-    const written = JSON.parse(files.get("/repo/nb.ipynb")!) as { cells: { source: string[] }[] }
-    expect(written.cells[0]!.source.join("")).toBe("x = 99\nprint(x)\n")
-    expect(written.cells[1]!.source.join("")).toBe("# notes\n") // sibling intact
+    const written = JSON.parse(present(files.get("/repo/nb.ipynb"), "written notebook")) as {
+      cells: { source: string[] }[]
+    }
+    expect(nth(written.cells, 0, "written.cells").source.join("")).toBe("x = 99\nprint(x)\n")
+    expect(nth(written.cells, 1, "written.cells").source.join("")).toBe("# notes\n") // sibling intact
   })
 
   test("non-.ipynb path ⇒ ok:false, NO write", async () => {

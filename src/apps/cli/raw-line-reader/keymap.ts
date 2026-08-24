@@ -154,6 +154,77 @@ export interface KeyBinding {
 const isBackTab = (k: KeyEvent): boolean =>
   (k.name === "tab" && k.shift === true) || k.sequence === `${ESC}Z`
 
+/** Backspace INSIDE the `@`-dropdown. `classifyBackspace` decides whether the
+ *  delete takes the `@` sigil with it (dismiss) or merely shortens the query
+ *  (requery); both delete the same character, only the follow-up differs.
+ *  Returns undefined for the `ignore` verdict so the key falls through to the
+ *  shared editing handlers — the same fall-through the inline block produced by
+ *  running off its end. Split out because it is the ONLY branch of the routing
+ *  link that edits the buffer, and the only one that needs two nesting levels. */
+/** Enter under `multiline`: the three-state heredoc machine — OPEN a fence,
+ *  CLOSE a matching fence (which submits the joined body), or APPEND the row to
+ *  an open heredoc. Returns undefined when Enter is none of those, i.e. an
+ *  ordinary submit, which the caller then performs. A unit because the fence is
+ *  read once and all three transitions are decided from it; nothing outside the
+ *  heredoc state belongs in here. */
+const runHeredocReturn = (c: KeyContext): KeyResult | undefined => {
+  const { state, opts } = c
+  const fence = detectFence(state.buf)
+  if (!state.heredocOpen && fence !== "") {
+    state.heredocOpen = true
+    state.heredocFence = fence
+    state.heredocLines = []
+    state.buf = ""
+    state.cursor = 0
+    c.refreshCandidates()
+    c.redraw()
+    return "handled"
+  }
+  if (state.heredocOpen && fence === state.heredocFence) {
+    const body = state.heredocLines.join("\n")
+    state.heredocOpen = false
+    state.heredocFence = ""
+    state.heredocLines = []
+    state.buf = body
+    state.cursor = body.length
+    if (opts.history !== undefined && body !== "") opts.history.push(body)
+    c.settleResolve(body)
+    return "handled"
+  }
+  if (state.heredocOpen) {
+    state.heredocLines.push(state.buf)
+    state.buf = ""
+    state.cursor = 0
+    c.refreshCandidates()
+    c.redraw()
+    return "handled"
+  }
+  return undefined
+}
+
+const runAtBackspace = (c: KeyContext): KeyResult | undefined => {
+  const { state } = c
+  const verdict = classifyBackspace(state.at, state.cursor)
+  if (verdict.kind === "dismiss") {
+    if (state.cursor > 0) {
+      state.buf = state.buf.slice(0, state.cursor - 1) + state.buf.slice(state.cursor)
+      state.cursor -= 1
+    }
+    dismissAt(state.at)
+    c.refreshCandidates()
+    c.redraw()
+    return "handled"
+  }
+  if (verdict.kind === "requery") {
+    state.buf = state.buf.slice(0, state.cursor - 1) + state.buf.slice(state.cursor)
+    state.cursor -= 1
+    c.runAtList()
+    c.redraw()
+    return "handled"
+  }
+  return undefined
+}
+
 /**
  * The dispatch table. Order == the source order of the original `onKey` if
  * blocks. DO NOT REORDER — a reordered binding changes which handler wins for
@@ -364,26 +435,8 @@ export const KEY_BINDINGS: readonly KeyBinding[] = [
         c.redraw()
         return "handled"
       }
-      if (k.name === "backspace") {
-        const verdict = classifyBackspace(state.at, state.cursor)
-        if (verdict.kind === "dismiss") {
-          if (state.cursor > 0) {
-            state.buf = state.buf.slice(0, state.cursor - 1) + state.buf.slice(state.cursor)
-            state.cursor -= 1
-          }
-          dismissAt(state.at)
-          c.refreshCandidates()
-          c.redraw()
-          return "handled"
-        }
-        if (verdict.kind === "requery") {
-          state.buf = state.buf.slice(0, state.cursor - 1) + state.buf.slice(state.cursor)
-          state.cursor -= 1
-          c.runAtList()
-          c.redraw()
-          return "handled"
-        }
-      }
+      const backspace = k.name === "backspace" ? runAtBackspace(c) : undefined
+      if (backspace !== undefined) return backspace
       // Any other key (printable char, Left/Right/Home/End, Delete) FALLS
       // THROUGH to the shared handlers below; the char branch re-queries.
       return "fallthrough"
@@ -396,38 +449,7 @@ export const KEY_BINDINGS: readonly KeyBinding[] = [
     run: (c) => {
       const { state, opts } = c
       if (state.listOpen && state.selectedIdx >= 0) c.commitSelected()
-      if (opts.multiline === true) {
-        const fence = detectFence(state.buf)
-        if (!state.heredocOpen && fence !== "") {
-          state.heredocOpen = true
-          state.heredocFence = fence
-          state.heredocLines = []
-          state.buf = ""
-          state.cursor = 0
-          c.refreshCandidates()
-          c.redraw()
-          return "handled"
-        }
-        if (state.heredocOpen && fence === state.heredocFence) {
-          const body = state.heredocLines.join("\n")
-          state.heredocOpen = false
-          state.heredocFence = ""
-          state.heredocLines = []
-          state.buf = body
-          state.cursor = body.length
-          if (opts.history !== undefined && body !== "") opts.history.push(body)
-          c.settleResolve(body)
-          return "handled"
-        }
-        if (state.heredocOpen) {
-          state.heredocLines.push(state.buf)
-          state.buf = ""
-          state.cursor = 0
-          c.refreshCandidates()
-          c.redraw()
-          return "handled"
-        }
-      }
+      if (opts.multiline === true && runHeredocReturn(c) === "handled") return "handled"
       if (opts.history !== undefined) opts.history.push(state.buf)
       c.settleResolve(state.buf)
       return "handled"

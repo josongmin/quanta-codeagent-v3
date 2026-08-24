@@ -40,6 +40,7 @@ import {
   parseCommandHookBindings,
   runCommandHooks,
 } from "@/agent"
+import { nth } from "../_helpers/expect-present"
 
 // ---- fakes -----------------------------------------------------------------
 
@@ -212,7 +213,7 @@ describe("command hooks — injection safety", () => {
       },
     )
     expect(calls.length).toBe(1)
-    const call = calls[0]!
+    const call = nth(calls, 0, "calls")
     // The command string is EXACTLY the user config — payload never appended.
     expect(call.command).toBe("guard.sh --check")
     expect(call.command).not.toContain("rm -rf")
@@ -238,7 +239,7 @@ describe("command hooks — injection safety", () => {
       { type: "pre_tool_use", toolName: "write", payload: circular },
     )
     expect(verdict.deny).toBeNull()
-    const envelope = JSON.parse(calls[0]!.stdinJson)
+    const envelope = JSON.parse(nth(calls, 0, "calls").stdinJson)
     expect(envelope.hook_event_name).toBe("pre_tool_use")
   })
 })
@@ -361,7 +362,7 @@ describe("command hooks — env allowlist", () => {
         payload: {},
       },
     )
-    expect(calls[0]!.envAllowlist).toEqual(["PATH", "HOME"])
+    expect(nth(calls, 0, "calls").envAllowlist).toEqual(["PATH", "HOME"])
   })
 })
 

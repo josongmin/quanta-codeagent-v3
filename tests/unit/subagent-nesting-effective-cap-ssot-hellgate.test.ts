@@ -69,6 +69,7 @@ import {
 } from "@/subagent"
 import type { Tool, ToolContext, ToolEvent } from "@/tool"
 import { defaultTools, ToolRegistry } from "@/tool"
+import { present } from "../_helpers/expect-present"
 
 // ── fixtures ────────────────────────────────────────────────────────────────
 
@@ -148,7 +149,10 @@ const cfg = (opts: { depth?: number; maxDepth?: number } = {}): AgentConfig =>
   }) as unknown as AgentConfig
 
 const agentOf = (block: NonNullable<ReturnType<typeof buildSubagentBlock>>): Tool =>
-  block.extraTools.find((t) => t.name === "agent")!
+  present(
+    block.extraTools.find((t) => t.name === "agent"),
+    'block.extraTools.find((t) => t.name === "agent")',
+  )
 
 const asResult = (ev: ToolEvent): { ok: boolean; output: string } => {
   // Denials are surfaced as `result` events with `ok:false` (agent-tool.ts
@@ -172,11 +176,14 @@ describe("A0 — raw @/subagent constructors fall back to DEFAULT_MAX_DEPTH=3", 
 
   test("raw createSubagent6Tools (no maxDepth) ADMITS childDepth 3 (parentDepth 2)", async () => {
     const spy = spyRunner()
-    const spawn = createSubagent6Tools({
-      runner: spy.runner,
-      registry: new TaskRegistry(),
-      parentDepth: 2,
-    }).tools.find((t) => t.name === "spawn_agent")!
+    const spawn = present(
+      createSubagent6Tools({
+        runner: spy.runner,
+        registry: new TaskRegistry(),
+        parentDepth: 2,
+      }).tools.find((t) => t.name === "spawn_agent"),
+      "spawn",
+    )
     // childDepth = parentDepth(2) + 1 = 3; fallback cap 3 ⇒ admit.
     const r = asResult(await driveLast(spawn, { prompt: "x" }, ctxAtDepth(0)))
     await new Promise<void>((res) => setTimeout(res, 5))
@@ -194,7 +201,7 @@ describe("A1 — block-built `agent` tool uses the resolved cap, NOT DEFAULT_MAX
     // Root builds the block (depth 0 < cap 1). The `agent` tool reads depth from
     // ctx.depth at CALL time (runtime lineage), independent of config.depth — so
     // a host that plumbs ctx.depth=2 reaches the pre-check with childDepth 3.
-    const block = buildSubagentBlock(cfg({ depth: 0 }))!
+    const block = present(buildSubagentBlock(cfg({ depth: 0 })), "block")
     const agent = agentOf(block)
     const r = asResult(await driveLast(agent, { prompt: "x" }, ctxAtDepth(2)))
     // FIX-A: wired cap === spawnDepthCap() === 1 ⇒ childDepth 3 > 1 ⇒ DENY.
@@ -224,7 +231,7 @@ describe("A1 — block-built `agent` tool uses the resolved cap, NOT DEFAULT_MAX
     // ⇒ min(1,5)=1. So childDepth 2 (ctx.depth 1) is REJECTED at cap 1 — config
     // did NOT raise the cap. RED-ON-INJECTION: reverting to `?? override` makes
     // the cap 5 ⇒ this call ADMITS ⇒ the assertion below flips.
-    const block = buildSubagentBlock(cfg({ depth: 0, maxDepth: 5 }))!
+    const block = present(buildSubagentBlock(cfg({ depth: 0, maxDepth: 5 })), "block")
     const agent = agentOf(block)
     const denied = asResult(await driveLast(agent, { prompt: "x" }, ctxAtDepth(1)))
     expect(denied.ok).toBe(false)
@@ -237,7 +244,7 @@ describe("A1 — block-built `agent` tool uses the resolved cap, NOT DEFAULT_MAX
     __resetRuntimeConfig()
     // policy 3, requested 1 ⇒ min(3,1)=1. childDepth 2 (ctx.depth 1) now REJECTED
     // (would be admitted at policy 3). Proves the config tightens.
-    const block = buildSubagentBlock(cfg({ depth: 0, maxDepth: 1 }))!
+    const block = present(buildSubagentBlock(cfg({ depth: 0, maxDepth: 1 })), "block")
     const agent = agentOf(block)
     const denied = asResult(await driveLast(agent, { prompt: "x" }, ctxAtDepth(1)))
     expect(denied.ok).toBe(false)
@@ -254,12 +261,15 @@ describe("A2 — spawn_agent secondary pre-check receives the resolved cap", () 
     const spy = spyRunner()
     // Simulate the deps the FIXED block wires when spawnDepthCap()===1: an
     // explicit maxDepth=1 (resolved) instead of an omitted one (→ fallback 3).
-    const spawn = createSubagent6Tools({
-      runner: spy.runner,
-      registry: new TaskRegistry(),
-      parentDepth: 1, // childDepth 2
-      maxDepth: spawnDepthCap(), // 1 — the resolved cap the block now threads
-    }).tools.find((t) => t.name === "spawn_agent")!
+    const spawn = present(
+      createSubagent6Tools({
+        runner: spy.runner,
+        registry: new TaskRegistry(),
+        parentDepth: 1, // childDepth 2
+        maxDepth: spawnDepthCap(), // 1 — the resolved cap the block now threads
+      }).tools.find((t) => t.name === "spawn_agent"),
+      "spawn",
+    )
     const r = asResult(await driveLast(spawn, { prompt: "x" }, ctxAtDepth(0)))
     expect(r.ok).toBe(false)
     expect(r.output).toContain("depth 2")
@@ -324,12 +334,15 @@ const assertThreeSourceAgreement = async (
 
   // (3) Secondary pre-check (spawn_agent) — the @/agent caller threads the
   //     already-RESOLVED `cap` in (FIX-A); the @/subagent slice does not re-min.
-  const spawn = createSubagent6Tools({
-    runner: async () => settledResult(),
-    registry: new TaskRegistry(),
-    parentDepth: depth,
-    maxDepth: cap,
-  }).tools.find((t) => t.name === "spawn_agent")!
+  const spawn = present(
+    createSubagent6Tools({
+      runner: async () => settledResult(),
+      registry: new TaskRegistry(),
+      parentDepth: depth,
+      maxDepth: cap,
+    }).tools.find((t) => t.name === "spawn_agent"),
+    "spawn",
+  )
   const preAdmits = asResult(await driveLast(spawn, { prompt: "p" }, ctxAtDepth(0))).ok
   await new Promise<void>((res) => setTimeout(res, 2))
 
@@ -364,7 +377,7 @@ describe("QUANTA_MAX_DESCENDANT_DEPTH=0 is a total kill-switch (root included)",
     const config = cfg(opts)
     const block = buildSubagentBlock(config)
     expect(block).toBeDefined() // builder unconditionally mints (SSOT moved out)
-    return projectSpawnTools(block!.extraTools, config)
+    return projectSpawnTools(present(block, "block").extraTools, config)
       .map((t) => t.name)
       .filter((n) => n === "agent" || n === "spawn_agent")
   }

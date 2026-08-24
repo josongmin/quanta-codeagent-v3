@@ -2,6 +2,7 @@ import { Database } from "bun:sqlite"
 import { describe, expect, test } from "bun:test"
 import { Stage1Store } from "../../../src/memory/consolidate/store"
 import type { Stage1Output, WatermarkState } from "../../../src/memory/consolidate/types"
+import { nth } from "../../_helpers/expect-present"
 
 /**
  * ADR-0068 Wave A — `Stage1Store` SQLite adapter conformance.
@@ -77,7 +78,7 @@ describe("Stage1Store — upsert JSON roundtrip", () => {
     await store.upsert(out)
     const rows = await store.fetchSince(null)
     expect(rows).toHaveLength(1)
-    const r = rows[0]!
+    const r = nth(rows, 0, "r")
     expect(r.threadId).toBe("thr-scalar")
     expect(r.rolloutSlug).toBe("slug-x")
     expect(r.rolloutSummary).toBe("summary X")
@@ -92,14 +93,14 @@ describe("Stage1Store — upsert JSON roundtrip", () => {
   test("preferenceSignals: empty array roundtrips as []", async () => {
     const store = makeStore()
     await store.upsert(baseOutput({ threadId: "thr-empty", preferenceSignals: [] }))
-    const r = (await store.fetchSince(null))[0]!
+    const r = nth(await store.fetchSince(null), 0, "r")
     expect(r.preferenceSignals).toEqual([])
   })
 
   test("preferenceSignals: single element roundtrips", async () => {
     const store = makeStore()
     await store.upsert(baseOutput({ threadId: "thr-one", preferenceSignals: ["uses bun"] }))
-    const r = (await store.fetchSince(null))[0]!
+    const r = nth(await store.fetchSince(null), 0, "r")
     expect(r.preferenceSignals).toEqual(["uses bun"])
   })
 
@@ -111,7 +112,7 @@ describe("Stage1Store — upsert JSON roundtrip", () => {
         preferenceSignals: ["uses bun", "terse", "prefers TS strict"],
       }),
     )
-    const r = (await store.fetchSince(null))[0]!
+    const r = nth(await store.fetchSince(null), 0, "r")
     expect(r.preferenceSignals).toEqual(["uses bun", "terse", "prefers TS strict"])
   })
 
@@ -119,7 +120,7 @@ describe("Stage1Store — upsert JSON roundtrip", () => {
     const store = makeStore()
     const tricky = ['has "quotes"', "has\nnewline", "has\\backslash"]
     await store.upsert(baseOutput({ threadId: "thr-tricky", preferenceSignals: tricky }))
-    const r = (await store.fetchSince(null))[0]!
+    const r = nth(await store.fetchSince(null), 0, "r")
     expect(r.preferenceSignals).toEqual(tricky)
   })
 
@@ -132,7 +133,7 @@ describe("Stage1Store — upsert JSON roundtrip", () => {
         selectedForPhase2SourceUpdatedAt: null,
       }),
     )
-    const r = (await store.fetchSince(null))[0]!
+    const r = nth(await store.fetchSince(null), 0, "r")
     expect(r.selectedForPhase2).toBe(false)
     expect(r.selectedForPhase2SourceUpdatedAt).toBeNull()
   })
@@ -140,7 +141,7 @@ describe("Stage1Store — upsert JSON roundtrip", () => {
   test("lastUsage=null roundtrips as null (no coercion to 0)", async () => {
     const store = makeStore()
     await store.upsert(baseOutput({ threadId: "thr-nulluse", lastUsage: null }))
-    const r = (await store.fetchSince(null))[0]!
+    const r = nth(await store.fetchSince(null), 0, "r")
     expect(r.lastUsage).toBeNull()
   })
 
@@ -148,7 +149,7 @@ describe("Stage1Store — upsert JSON roundtrip", () => {
     const store = makeStore()
     const text = "한국어 + emoji works"
     await store.upsert(baseOutput({ threadId: "thr-utf", rolloutSummary: text }))
-    const r = (await store.fetchSince(null))[0]!
+    const r = nth(await store.fetchSince(null), 0, "r")
     expect(r.rolloutSummary).toBe(text)
   })
 
@@ -156,7 +157,7 @@ describe("Stage1Store — upsert JSON roundtrip", () => {
     const store = makeStore()
     const txt = "line1\tcol\nline2"
     await store.upsert(baseOutput({ threadId: "thr-ws", rawMemory: txt }))
-    const r = (await store.fetchSince(null))[0]!
+    const r = nth(await store.fetchSince(null), 0, "r")
     expect(r.rawMemory).toBe(txt)
   })
 })
@@ -191,7 +192,7 @@ describe("Stage1Store — upsert REPLACE semantics", () => {
         usageCount: 0,
       }),
     )
-    const r = (await store.fetchSince(null))[0]!
+    const r = nth(await store.fetchSince(null), 0, "r")
     expect(r.rolloutSummary).toBe("new")
     expect(r.rawMemory).toBe("new-raw")
     expect(r.preferenceSignals).toEqual(["new"])
@@ -360,6 +361,6 @@ describe("Stage1Store — store sharing one Database", () => {
     await a.upsert(baseOutput({ threadId: "thr-shared", sourceUpdatedAt: 500 }))
     const rows = await b.fetchSince(null)
     expect(rows).toHaveLength(1)
-    expect(rows[0]!.threadId).toBe("thr-shared")
+    expect(nth(rows, 0, "rows").threadId).toBe("thr-shared")
   })
 })

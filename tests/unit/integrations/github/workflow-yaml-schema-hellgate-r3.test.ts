@@ -72,7 +72,18 @@ interface ParsedWorkflow {
   readonly jobs?: Record<string, WorkflowJob>
 }
 
-const WORKFLOW_PATH = resolve(process.cwd(), ".github", "workflows", "quanta-pr-bot.yml.template")
+// Repo-anchored on this file, not the ambient cwd — the template lives in the
+// checkout.
+const WORKFLOW_PATH = resolve(
+  import.meta.dir,
+  "..",
+  "..",
+  "..",
+  "..",
+  ".github",
+  "workflows",
+  "quanta-pr-bot.yml.template",
+)
 
 let text: string
 let wf: ParsedWorkflow

@@ -31,7 +31,9 @@ import {
 import { createDeliveryStore } from "@/integrations/github"
 import type { EnvPort, GhCliPort, GhCliResult } from "@/reactor"
 
-const FIXTURE_DIR = resolve(process.cwd(), "tests/fixtures/github-events")
+// Anchored on this file, not the ambient cwd: the fixtures live in the repo
+// checkout regardless of where the test runner was invoked from.
+const FIXTURE_DIR = resolve(import.meta.dir, "..", "..", "..", "fixtures/github-events")
 
 interface RealCtx {
   readonly dir: string

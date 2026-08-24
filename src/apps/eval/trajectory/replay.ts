@@ -141,6 +141,21 @@ export const verdictFromDiff = (diff: DiffSummary): Verdict => {
   return ratio <= REPLAY_PARTIAL_RATIO ? "partial" : "fail"
 }
 
+/** Why a fixture has no usable metadata — the sidecar was unreadable, or it
+ *  was never there. A unit because the two are the same outcome (skip) but must
+ *  stay distinguishable in the record: "malformed" is an authoring bug an
+ *  operator can fix, "missing" is just an un-annotated fixture. */
+const missingMetaReason = (metaResult: SessionView["metaResult"]): string =>
+  metaResult.kind === "malformed" ? `meta_malformed: ${metaResult.error}` : "no_meta_sidecar"
+
+/** The fixture's declared use case, checked against the LIVE taxonomy.
+ *
+ *  A unit because the check is the point: a leaf that was renamed or removed
+ *  since the fixture was authored must fall back to `unclassified` rather than
+ *  silently landing the record in a bucket that no longer exists. */
+const resolveFixtureUsecase = (declared: unknown): UseCaseId | "unclassified" =>
+  typeof declared === "string" && leafById(declared) !== undefined ? declared : "unclassified"
+
 /** Run ONE fixture and append a `TrajectoryPayload.replay` record. */
 export const replayFixture = async (opts: ReplayOpts): Promise<ReplayResult> => {
   const start = Date.now()
@@ -159,21 +174,17 @@ export const replayFixture = async (opts: ReplayOpts): Promise<ReplayResult> => 
     return r
   }
   if (original.meta === null) {
-    const reason =
-      original.metaResult.kind === "malformed"
-        ? `meta_malformed: ${original.metaResult.error}`
-        : "no_meta_sidecar"
-    const r = skippedResult(runId, fixtureId, start, reason, original.turns)
+    const r = skippedResult(
+      runId,
+      fixtureId,
+      start,
+      missingMetaReason(original.metaResult),
+      original.turns,
+    )
     await persistResult(store, runId, opts.fixture, r)
     return r
   }
-  // Validate the fixture's declared use case against the live taxonomy. A
-  // renamed / removed leaf must not silently land in an invalid bucket.
-  const declaredUsecase = original.meta.usecase
-  const usecase: UseCaseId | "unclassified" =
-    typeof declaredUsecase === "string" && leafById(declaredUsecase) !== undefined
-      ? declaredUsecase
-      : "unclassified"
+  const usecase = resolveFixtureUsecase(original.meta.usecase)
   // Write the replay trajectory under the eval store dir — never adjacent to
   // a checked-in fixture (would pollute the repo + overwrite priors).
   const replayDir = join(opts.storeDir ?? DEFAULT_RUNS_DIR, runId)

@@ -10,6 +10,9 @@ export interface CliUserInputPortOptions extends CliPromptPortOptions {
   stream: StreamPort
 }
 
+/** What `buildPlanExit` returns — the plan-exit port's wire result. */
+type PlanExit = ReturnType<typeof buildPlanExit>
+
 const CANCEL_TOKEN = "/cancel"
 /** UUX-2-19 — consecutive unusable answers (garbage / empty from a released
  *  channel) before the plan-exit prompt fail-closes to REJECTED. Bounded so a
@@ -199,42 +202,73 @@ const promptMultilineInput = async (
   }
 }
 
+/** UUX-2-19 — the shared "consecutive unusable answers" budget. Both plan-exit
+ *  prompt loops (choice + feedback) draw down the SAME counter, so a dead input
+ *  source alternating garbage-choice / blank-feedback still fail-closes after
+ *  `PLAN_EXIT_MAX_UNUSABLE` total. `spend()` returns true once exhausted. */
+const makeUnusableBudget = (): { spend: () => boolean } => {
+  let unusable = 0
+  return {
+    spend: () => {
+      unusable += 1
+      return unusable >= PLAN_EXIT_MAX_UNUSABLE
+    },
+  }
+}
+
+const rejected = (): PlanExit => buildPlanExit({ decision: "rejected" })
+
+/** Inner feedback loop for the `changes_requested` choice. Terminates in one of
+ *  three ways, and NOTHING else:
+ *    - `/cancel`                -> REJECTED (fail-closed)
+ *    - `/back`                  -> `"back"` (caller re-asks the choice; `/back`
+ *                                  deliberately does NOT spend the budget)
+ *    - any non-blank feedback   -> CHANGES_REQUESTED carrying it verbatim
+ *  A blank reply spends one unit of the shared budget; exhausting it REJECTS. */
+const promptPlanExitFeedback = async (
+  ask: CliPromptPortOptions["ask"],
+  budget: { spend: () => boolean },
+): Promise<PlanExit | "back"> => {
+  while (true) {
+    const feedback = await ask(renderPlanExitFeedbackPrompt())
+    if (isCancel(feedback)) return rejected()
+    if (feedback.trim().toLowerCase() === BACK_TOKEN) return "back"
+    if (feedback.trim().length === 0) {
+      if (budget.spend()) return rejected()
+      continue
+    }
+    return buildPlanExit({ decision: "changes_requested", feedback })
+  }
+}
+
+/** UUX-2-19 (jul-10 W4) — the plan-exit prompt loop is BOUNDED and cancellable:
+ *  `/cancel` (or repeated unusable input — e.g. a released mid-turn channel
+ *  feeding "") fail-closes to REJECTED instead of re-prompting forever. */
+const promptPlanExit = async (
+  ask: CliPromptPortOptions["ask"],
+  plan: string,
+): Promise<PlanExit> => {
+  const budget = makeUnusableBudget()
+  while (true) {
+    const raw = await ask(renderPlanExitPrompt(plan))
+    if (isCancel(raw)) return rejected()
+    const choice = normalizePlanExitChoice(raw)
+    if (choice === "approved" || choice === "rejected") return buildPlanExit({ decision: choice })
+    if (choice === "changes_requested") {
+      const outcome = await promptPlanExitFeedback(ask, budget)
+      // "back" is the ONLY non-terminal result — re-ask the choice prompt.
+      if (outcome !== "back") return outcome
+      continue
+    }
+    // Unrecognized choice: spend a unit; exhausting the budget fail-closes.
+    if (budget.spend()) return rejected()
+  }
+}
+
 export const createCliPlanExitPort = (
   opts: CliPromptPortOptions,
 ): NonNullable<AgentConfig["planExitPort"]> => ({
-  request: async (plan) => {
-    // UUX-2-19 (jul-10 W4) — the prompt loop is BOUNDED and cancellable:
-    // /cancel (or repeated unusable input — e.g. a released mid-turn channel
-    // feeding "") fail-closes to REJECTED instead of re-prompting forever.
-    let unusable = 0
-    while (true) {
-      const raw = await opts.ask(renderPlanExitPrompt(plan))
-      if (isCancel(raw)) return buildPlanExit({ decision: "rejected" })
-      const choice = normalizePlanExitChoice(raw)
-      if (choice === "approved" || choice === "rejected") {
-        return buildPlanExit({ decision: choice })
-      }
-      if (choice === "changes_requested") {
-        while (true) {
-          const feedback = await opts.ask(renderPlanExitFeedbackPrompt())
-          if (isCancel(feedback)) return buildPlanExit({ decision: "rejected" })
-          if (feedback.trim().toLowerCase() === BACK_TOKEN) break
-          if (feedback.trim().length === 0) {
-            unusable += 1
-            if (unusable >= PLAN_EXIT_MAX_UNUSABLE) {
-              return buildPlanExit({ decision: "rejected" })
-            }
-            continue
-          }
-          return buildPlanExit({ decision: "changes_requested", feedback })
-        }
-      }
-      if (choice === null) {
-        unusable += 1
-        if (unusable >= PLAN_EXIT_MAX_UNUSABLE) return buildPlanExit({ decision: "rejected" })
-      }
-    }
-  },
+  request: (plan) => promptPlanExit(opts.ask, plan),
 })
 
 export const createCliUserInputPort =

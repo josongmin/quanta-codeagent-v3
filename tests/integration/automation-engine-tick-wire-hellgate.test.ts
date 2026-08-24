@@ -29,6 +29,7 @@ import {
 } from "@/scheduler/automation-engine"
 import { parseRRule } from "@/scheduler/rrule-parser"
 import type { RRule } from "@/scheduler/types"
+import { nth } from "../_helpers/expect-present"
 
 /** Build a minimal AgentConfig with ONLY the automationEngine slot wired.
  *  Other AgentConfig fields are stubbed via `as` because the helper reads
@@ -108,7 +109,7 @@ describe("ADR-0239 §B — automation-engine tick wire", () => {
     )
     expect(handle).toBeDefined()
     expect(arms.length).toBe(1)
-    expect(arms[0]!.ms).toBe(100)
+    expect(nth(arms, 0, "arms").ms).toBe(100)
   })
 
   // ── §B5 ── tickIntervalMs forwarded verbatim ─────────────────────────────
@@ -119,7 +120,7 @@ describe("ADR-0239 §B — automation-engine tick wire", () => {
       cfgWithEngine({ engine, handler: async () => {}, tickIntervalMs: 250 }),
       deps,
     )
-    expect(arms[0]!.ms).toBe(250)
+    expect(nth(arms, 0, "arms").ms).toBe(250)
   })
 
   // ── §B6 ── onTick observer fires with TickOutcome ────────────────────────
@@ -138,11 +139,11 @@ describe("ADR-0239 §B — automation-engine tick wire", () => {
       deps,
     )
     // Manually fire the timer body once and let the promise resolve.
-    arms[0]!.cb()
+    nth(arms, 0, "arms").cb()
     await Promise.resolve() // micro-tick for the inner .then()
     await Promise.resolve()
     expect(observed.length).toBe(1)
-    expect(observed[0]!.kind).toBe("idle") // empty engine ⇒ no due rows
+    expect(nth(observed, 0, "observed").kind).toBe("idle") // empty engine ⇒ no due rows
   })
 
   // ── §B7 ── due automation handler invoked on tick ────────────────────────
@@ -172,12 +173,12 @@ describe("ADR-0239 §B — automation-engine tick wire", () => {
       }),
       deps,
     )
-    arms[0]!.cb()
+    nth(arms, 0, "arms").cb()
     // Wait for async tickScheduler chain to settle.
     await new Promise((r) => setTimeout(r, 5))
     expect(handlerCalls).toContain("auto-B7")
     expect(observed.length).toBeGreaterThan(0)
-    expect(observed[0]!.kind).toBe("fired")
+    expect(nth(observed, 0, "observed").kind).toBe("fired")
   })
 
   // ── §B8 ── idle tick when nothing is due ────────────────────────────────
@@ -207,10 +208,10 @@ describe("ADR-0239 §B — automation-engine tick wire", () => {
       }),
       deps,
     )
-    arms[0]!.cb()
+    nth(arms, 0, "arms").cb()
     await new Promise((r) => setTimeout(r, 5))
     expect(handlerCalls.length).toBe(0)
-    expect(observed[0]!.kind).toBe("idle")
+    expect(nth(observed, 0, "observed").kind).toBe("idle")
   })
 
   // ── §B9 ── handler throw ⇒ errored outcome, timer keeps running ──────────
@@ -239,13 +240,13 @@ describe("ADR-0239 §B — automation-engine tick wire", () => {
       }),
       deps,
     )
-    arms[0]!.cb()
+    nth(arms, 0, "arms").cb()
     await new Promise((r) => setTimeout(r, 5))
-    expect(observed[0]!.kind).toBe("errored")
+    expect(nth(observed, 0, "observed").kind).toBe("errored")
     // Timer NOT cleared by the throw — the handle is still active.
-    expect(arms[0]!.cleared).toBe(false)
+    expect(nth(arms, 0, "arms").cleared).toBe(false)
     handle?.stop()
-    expect(arms[0]!.cleared).toBe(true)
+    expect(nth(arms, 0, "arms").cleared).toBe(true)
   })
 
   // ── §B10 ── stop() idempotent ───────────────────────────────────────────
@@ -257,9 +258,9 @@ describe("ADR-0239 §B — automation-engine tick wire", () => {
       deps,
     )
     expect(handle).toBeDefined()
-    expect(arms[0]!.cleared).toBe(false)
+    expect(nth(arms, 0, "arms").cleared).toBe(false)
     handle?.stop()
-    expect(arms[0]!.cleared).toBe(true)
+    expect(nth(arms, 0, "arms").cleared).toBe(true)
     // Track that a second stop doesn't crash AND doesn't re-clear (the
     // internal handle is nulled so the clearInterval would receive null;
     // the guard inside stop() short-circuits before that).
@@ -282,13 +283,13 @@ describe("ADR-0239 §B — automation-engine tick wire", () => {
       }),
       deps,
     )
-    arms[0]!.cb()
+    nth(arms, 0, "arms").cb()
     await new Promise((r) => setTimeout(r, 5))
     // Second tick must also fire without error.
-    expect(() => arms[0]!.cb()).not.toThrow()
+    expect(() => nth(arms, 0, "arms").cb()).not.toThrow()
     await new Promise((r) => setTimeout(r, 5))
     // Timer not cleared by either tick.
-    expect(arms[0]!.cleared).toBe(false)
+    expect(nth(arms, 0, "arms").cleared).toBe(false)
   })
 
   // ── §B12 ── OFF parity — slot is optional on AgentConfig ─────────────────

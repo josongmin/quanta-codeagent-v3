@@ -56,6 +56,7 @@ import {
 import type { StructuredLogger } from "@/observability"
 import { buildToolingCore } from "@/runner/assemble"
 import { deriveProvenance, type Tool, type ToolContext, type ToolEvent } from "@/tool"
+import { nth } from "../_helpers/expect-present"
 
 /** Same stdio fake server the frontdoor/live-feeder e2e use: starts at [alpha],
  *  flips to [alpha, beta] after an `unlock` call, then emits
@@ -216,7 +217,7 @@ describe("RFC04 hot-reload SUPERVISED e2e", () => {
     // once for the successfully-loaded supervised server. RED before the emit ⇒ [].
     expect(sources).toHaveLength(1)
     // And the collected source relists over the supervisor's stable handle.
-    const relisted = await sources[0]!.relist()
+    const relisted = await nth(sources, 0, "sources").relist()
     expect(relisted.map((t) => t.name)).toContain(mcpToolName(SERVER_NAME, "alpha"))
   })
 

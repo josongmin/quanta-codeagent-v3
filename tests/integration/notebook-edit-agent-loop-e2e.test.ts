@@ -54,6 +54,7 @@ import { defaultFileSystemPort } from "@/storage"
 import { ToolRegistry } from "@/tool"
 import { makeNotebookEditTool } from "@/tool/notebook-edit/tool"
 import { ReadFileState } from "@/tool/stale-read-guard"
+import { nth } from "../_helpers/expect-present"
 
 /* ─────────────────────────────── fixtures ──────────────────────────────── */
 
@@ -184,16 +185,16 @@ describe("notebook_edit — agent-loop dispatch e2e (real fs, real dispatchTool)
     // ROUND-TRIP: the written file re-parses as a valid notebook.
     const parsed = JSON.parse(readFileUtf8(file)) as ParsedNb
     // Edited cell got the replacement; the rest of cell 0 is preserved.
-    expect(sourceOf(parsed.cells[0]!)).toBe("x = 99\nprint(x)\nprint(x + 1)\n")
+    expect(sourceOf(nth(parsed.cells, 0, "parsed.cells"))).toBe("x = 99\nprint(x)\nprint(x + 1)\n")
     // Sibling markdown cell BYTE-untouched.
-    expect(sourceOf(parsed.cells[1]!)).toBe("# notes\ndo not touch\n")
+    expect(sourceOf(nth(parsed.cells, 1, "parsed.cells"))).toBe("# notes\ndo not touch\n")
     // Notebook-level metadata + per-cell metadata/ids survive the round trip.
     expect(parsed.nbformat).toBe(4)
     expect(parsed.metadata.kernelspec?.name).toBe("python3")
     expect(parsed.metadata.language_info?.name).toBe("python")
-    expect(parsed.cells[0]!.id).toBe("cell-a")
-    expect(parsed.cells[0]!.metadata?.tags).toEqual(["keep"])
-    expect(parsed.cells[1]!.id).toBe("cell-b")
+    expect(nth(parsed.cells, 0, "parsed.cells").id).toBe("cell-a")
+    expect(nth(parsed.cells, 0, "parsed.cells").metadata?.tags).toEqual(["keep"])
+    expect(nth(parsed.cells, 1, "parsed.cells").id).toBe("cell-b")
 
     // ATOMIC WRITE TOOTH: a temp→rename promotes a fresh inode (a truncating
     // in-place write would keep the SAME inode ⇒ this fails RED on revert).
@@ -212,11 +213,11 @@ describe("notebook_edit — agent-loop dispatch e2e (real fs, real dispatchTool)
 
     const parsed = JSON.parse(readFileUtf8(file)) as ParsedNb
     expect(parsed.cells).toHaveLength(3)
-    expect(sourceOf(parsed.cells[0]!)).toBe("x = 1\nprint(x)\nprint(x + 1)\n") // before
-    expect(parsed.cells[1]!.cell_type).toBe("code")
-    expect(sourceOf(parsed.cells[1]!)).toBe("y = 2\n") // inserted
-    expect(parsed.cells[1]!.execution_count).toBeNull() // code-cell shape
-    expect(sourceOf(parsed.cells[2]!)).toBe("# notes\ndo not touch\n") // shifted, intact
+    expect(sourceOf(nth(parsed.cells, 0, "parsed.cells"))).toBe("x = 1\nprint(x)\nprint(x + 1)\n") // before
+    expect(nth(parsed.cells, 1, "parsed.cells").cell_type).toBe("code")
+    expect(sourceOf(nth(parsed.cells, 1, "parsed.cells"))).toBe("y = 2\n") // inserted
+    expect(nth(parsed.cells, 1, "parsed.cells").execution_count).toBeNull() // code-cell shape
+    expect(sourceOf(nth(parsed.cells, 2, "parsed.cells"))).toBe("# notes\ndo not touch\n") // shifted, intact
   })
 
   test("delete through dispatch ⇒ cell removed, remaining cell preserved, round-trips", async () => {
@@ -226,9 +227,9 @@ describe("notebook_edit — agent-loop dispatch e2e (real fs, real dispatchTool)
 
     const parsed = JSON.parse(readFileUtf8(file)) as ParsedNb
     expect(parsed.cells).toHaveLength(1)
-    expect(parsed.cells[0]!.cell_type).toBe("markdown")
-    expect(parsed.cells[0]!.id).toBe("cell-b")
-    expect(sourceOf(parsed.cells[0]!)).toBe("# notes\ndo not touch\n")
+    expect(nth(parsed.cells, 0, "parsed.cells").cell_type).toBe("markdown")
+    expect(nth(parsed.cells, 0, "parsed.cells").id).toBe("cell-b")
+    expect(sourceOf(nth(parsed.cells, 0, "parsed.cells"))).toBe("# notes\ndo not touch\n")
   })
 
   test("replace_all through dispatch ⇒ every occurrence in the cell changed, round-trips", async () => {
@@ -246,7 +247,7 @@ describe("notebook_edit — agent-loop dispatch e2e (real fs, real dispatchTool)
     )
     expect(res.ok).toBe(true)
     const parsed = JSON.parse(readFileUtf8(file)) as ParsedNb
-    expect(sourceOf(parsed.cells[0]!)).toBe("x = 1\nlog(x)\nlog(x + 1)\n")
+    expect(sourceOf(nth(parsed.cells, 0, "parsed.cells"))).toBe("x = 1\nlog(x)\nlog(x + 1)\n")
   })
 
   /* ─────────────────────────── adversarial ──────────────────────────────── */
@@ -339,7 +340,7 @@ describe("notebook_edit — agent-loop dispatch e2e (real fs, real dispatchTool)
     expect(res.ok).toBe(true)
     const parsed = JSON.parse(readFileUtf8(file)) as ParsedNb
     expect(parsed.cells).toHaveLength(1)
-    expect(parsed.cells[0]!.id).toBe("cell-a")
+    expect(nth(parsed.cells, 0, "parsed.cells").id).toBe("cell-a")
   })
 
   test("GATE: stale-read guard (real ReadFileState) refuses write over a changed-since-read notebook, file BYTE-UNCHANGED", async () => {

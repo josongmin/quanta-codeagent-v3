@@ -118,29 +118,56 @@ export {
   toAssembleRequest,
 }
 
+/** The `headless` extras block for a parsed argv that carries a prompt.
+ *  A unit because P26's structured-output flags only ever reach the request
+ *  through THIS block: absent ⇒ each spread is `{}` ⇒ exactly `{ prompt }`,
+ *  the byte-identical legacy text path. `prompt` is passed narrowed so the
+ *  caller's presence check stays the single gate. */
+const headlessExtrasFrom = (
+  p: AssembleRequestPartial,
+  prompt: string,
+): NonNullable<AssembleRequest["headless"]> => ({
+  prompt,
+  ...(p.outputFormat ? { output: p.outputFormat } : {}),
+  ...(p.includePartial ? { includePartial: true } : {}),
+})
+
+/** The `batch` extras block for a parsed argv that names a corpus. A unit
+ *  because every optional batch path (instance filter, predictions, report) is
+ *  omitted-when-absent under the SAME rule, so the corpus-only invocation stays
+ *  exactly `{ corpus }`. */
+const batchExtrasFrom = (
+  p: AssembleRequestPartial,
+  corpus: NonNullable<AssembleRequestPartial["corpus"]>,
+): NonNullable<AssembleRequest["batch"]> => ({
+  corpus,
+  ...(p.instance !== undefined ? { instance: p.instance } : {}),
+  ...(p.predictions !== undefined ? { predictionsPath: p.predictions } : {}),
+  ...(p.report !== undefined ? { reportPath: p.report } : {}),
+})
+
+/** The `ci-bot` extras block for a parsed argv that names a PR. A unit for the
+ *  same reason as its siblings: dry-run is omitted-when-false so the plain
+ *  invocation stays exactly `{ pr }`. */
+const ciBotExtrasFrom = (
+  p: AssembleRequestPartial,
+  pr: NonNullable<AssembleRequestPartial["pr"]>,
+): NonNullable<AssembleRequest["ciBot"]> => ({
+  pr,
+  ...(p.ciBotDryRun ? { dryRun: true } : {}),
+})
+
 const applyModeSpecificRequestFields = (out: AssembleRequest, p: AssembleRequestPartial): void => {
   if (p.mode === "headless" && p.prompt !== undefined) {
-    // P26 — fold the structured-output flags onto HeadlessExtras. Absent ⇒ each
-    // spread is `{}` ⇒ `out.headless` is exactly `{ prompt }` as before (the
-    // byte-identical legacy text path).
-    out.headless = {
-      prompt: p.prompt,
-      ...(p.outputFormat ? { output: p.outputFormat } : {}),
-      ...(p.includePartial ? { includePartial: true } : {}),
-    }
+    out.headless = headlessExtrasFrom(p, p.prompt)
     return
   }
   if (p.mode === "batch" && p.corpus !== undefined) {
-    out.batch = {
-      corpus: p.corpus,
-      ...(p.instance !== undefined ? { instance: p.instance } : {}),
-      ...(p.predictions !== undefined ? { predictionsPath: p.predictions } : {}),
-      ...(p.report !== undefined ? { reportPath: p.report } : {}),
-    }
+    out.batch = batchExtrasFrom(p, p.corpus)
     return
   }
   if (p.mode === "ci-bot" && p.pr !== undefined) {
-    out.ciBot = { pr: p.pr, ...(p.ciBotDryRun ? { dryRun: true } : {}) }
+    out.ciBot = ciBotExtrasFrom(p, p.pr)
   }
 }
 
@@ -378,6 +405,56 @@ export const resolveCommandHookBindings = async (
   return bindingsFromHookEvents(resolved.hooks)
 }
 
+/** Resolve the three inputs that can only be loaded at the ASYNC composition
+ *  root — the local-env selection, the settings.json command-hook bindings, and
+ *  the named-agent registry — and thread them onto the flat partial.
+ *
+ *  A unit because all three obey the SAME contract: default-OFF and
+ *  absent-means-absent. An unset knob, a missing config file, or an empty
+ *  registry leaves its field unset, so a plain boot yields a partial that is
+ *  byte-identical to the legacy no-config path. They are also the only disk IO
+ *  on this path, so grouping them keeps `runMain` itself pure routing.
+ *
+ *  Mutates `p` in place rather than returning a copy, because every later step
+ *  in `runMain` reads the SAME partial object. */
+const applyAsyncRootConfigSources = async (p: AssembleRequestPartial): Promise<void> => {
+  // ADR-0455 jun-02 wire — load the local-env config at the async composition
+  // root and thread the resolved selection onto the partial. Default-OFF: no
+  // config / no selection ⇒ field stays absent ⇒ ambient env byte-identical.
+  const localEnvSelection = await resolveLocalEnvSelection(process.env, process.cwd())
+  if (localEnvSelection !== undefined) p.localEnv = localEnvSelection
+  // ADR-0454 jun-02 wire — load command-hook bindings from settings.json#hooks at
+  // the async root, ONLY when opted in, and thread onto the partial. Default-OFF:
+  // knob unset ⇒ not loaded ⇒ no command hooks. The enabled-without-ack fail-fast
+  // throw happens later in buildBaseFromArgs (startup, never mid-turn).
+  if (gateOn(process.env, "QUANTA_COMMAND_HOOKS")) {
+    // ADR-0497 jun-7-misc 05 wire — the source of the bindings is gated on
+    // `runtimeConfig().centralConfig` inside `resolveCommandHookBindings`:
+    // knob OFF ⇒ the EXACT ADR-0454 legacy `loadCommandHookBindings(
+    // <cwd>/settings.json)` read (byte-identical, no disk-config / trust read);
+    // knob ON ⇒ the trust-gated central loader (an UNTRUSTED repo's hook
+    // commands are dropped before they can become live bindings).
+    p.commandHookBindings = await resolveCommandHookBindings(process.cwd(), {
+      // Audit R1 #6 — TTY-guard at the WIRE (defense-in-depth): only arm the
+      // interactive prompt on a real terminal, so a headless / piped / CI boot
+      // never even constructs a readline (the prompt ALSO self-guards, but the
+      // wire-site gate means removing the inner check can't regress into a hang).
+      ...(process.stdin.isTTY && process.stdout.isTTY ? { confirmTrust: defaultTrustPrompt } : {}),
+    })
+  }
+  // Named-agent registry — load `.quanta/agents` (+ native dir) ONCE per session
+  // at the async root and thread the resolver onto the partial; `buildBaseFromArgs`
+  // lifts it onto `AgentConfig.namedAgentResolver` (read by the subagent runner per
+  // spawn). Default-OFF byte-identical: no agent dir ⇒ EMPTY registry ⇒ field stays
+  // absent ⇒ no named agent ever resolves. FAIL-OPEN: the loader already swallows an
+  // absent/unreadable dir, but we guard defensively so a registry-load fault can
+  // NEVER throw on the assembly path — a thrown loader yields an empty resolver.
+  const namedAgents = await loadNamedAgents(process.cwd()).catch(() => undefined)
+  if (namedAgents !== undefined && namedAgents.size > 0) {
+    p.namedAgentResolver = namedAgents
+  }
+}
+
 /**
  * The entry function. Pure routing — every effectful concern (IO, exit) is
  * injectable via {@link MainDeps}. Production caller at the bottom of this
@@ -416,41 +493,7 @@ export const runMain = async (deps: MainDeps = {}): Promise<void> => {
 
   const dispatcher = await loadDispatcher(args.mode)
   const partial = toAssembleRequest(args)
-  // ADR-0455 jun-02 wire — load the local-env config at the async composition
-  // root and thread the resolved selection onto the partial. Default-OFF: no
-  // config / no selection ⇒ field stays absent ⇒ ambient env byte-identical.
-  const localEnvSelection = await resolveLocalEnvSelection(process.env, process.cwd())
-  if (localEnvSelection !== undefined) partial.localEnv = localEnvSelection
-  // ADR-0454 jun-02 wire — load command-hook bindings from settings.json#hooks at
-  // the async root, ONLY when opted in, and thread onto the partial. Default-OFF:
-  // knob unset ⇒ not loaded ⇒ no command hooks. The enabled-without-ack fail-fast
-  // throw happens later in buildBaseFromArgs (startup, never mid-turn).
-  if (gateOn(process.env, "QUANTA_COMMAND_HOOKS")) {
-    // ADR-0497 jun-7-misc 05 wire — the source of the bindings is gated on
-    // `runtimeConfig().centralConfig` inside `resolveCommandHookBindings`:
-    // knob OFF ⇒ the EXACT ADR-0454 legacy `loadCommandHookBindings(
-    // <cwd>/settings.json)` read (byte-identical, no disk-config / trust read);
-    // knob ON ⇒ the trust-gated central loader (an UNTRUSTED repo's hook
-    // commands are dropped before they can become live bindings).
-    partial.commandHookBindings = await resolveCommandHookBindings(process.cwd(), {
-      // Audit R1 #6 — TTY-guard at the WIRE (defense-in-depth): only arm the
-      // interactive prompt on a real terminal, so a headless / piped / CI boot
-      // never even constructs a readline (the prompt ALSO self-guards, but the
-      // wire-site gate means removing the inner check can't regress into a hang).
-      ...(process.stdin.isTTY && process.stdout.isTTY ? { confirmTrust: defaultTrustPrompt } : {}),
-    })
-  }
-  // Named-agent registry — load `.quanta/agents` (+ native dir) ONCE per session
-  // at the async root and thread the resolver onto the partial; `buildBaseFromArgs`
-  // lifts it onto `AgentConfig.namedAgentResolver` (read by the subagent runner per
-  // spawn). Default-OFF byte-identical: no agent dir ⇒ EMPTY registry ⇒ field stays
-  // absent ⇒ no named agent ever resolves. FAIL-OPEN: the loader already swallows an
-  // absent/unreadable dir, but we guard defensively so a registry-load fault can
-  // NEVER throw on the assembly path — a thrown loader yields an empty resolver.
-  const namedAgents = await loadNamedAgents(process.cwd()).catch(() => undefined)
-  if (namedAgents !== undefined && namedAgents.size > 0) {
-    partial.namedAgentResolver = namedAgents
-  }
+  await applyAsyncRootConfigSources(partial)
 
   // T01 (audit L5 H-2 / M-6): the composition root owns ONE real cancellation
   // controller and wires SIGINT to it exactly once — previously every preset

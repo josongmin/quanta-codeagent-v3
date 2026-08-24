@@ -15,6 +15,7 @@ import type { RuntimeAgentTurnAssembler, RuntimeAgentTurnDeps } from "@/sdk/runt
 import { fullFidelityEnabled, itemStreamEnabled } from "@/shared"
 import { automationUpdateTool, ToolRegistry } from "@/tool"
 import { deriveCapabilityManifest } from "../../capabilities"
+import { CAPABILITY_WIRES, foldCapabilityWires } from "../../capability-wire-registry"
 import { installCliMentionInjector } from "../mention-wire"
 import type {
   RuntimeBase,
@@ -50,7 +51,22 @@ export const wireRuntimePorts = (
   // (which swap the binding, not the object) don't leave a stale reference.
   env: Readonly<Record<string, string | undefined>> = process.env,
 ): RuntimeBase => {
-  const wired = sanitizeRuntimeBase(wireOptionalAgentPorts(base, env))
+  // Two composition paths bind an agent in this repo, and only ONE of them used
+  // to open the capability slots. `assembleAgentConfig` folds the capability-wire
+  // registry; the interactive CLI never calls it — it arrives HERE. So an
+  // operator who set `QUANTA_BROWSER_TOOL`, `QUANTA_APPSHOT`,
+  // `QUANTA_EDIT_REPAIR_LOOP`, `QUANTA_PROMPT_CACHE_STATUS`, `QUANTA_PASSIVE_VCS`
+  // or the side-agent gate got the capability headless and NOTHING in the CLI,
+  // with no error to explain it. Measured slot-by-slot under identical env.
+  //
+  // Folding the SAME registry here makes the two paths agree by construction
+  // rather than by two lists someone has to keep in sync. Every wire is env-gated
+  // and caller-override-safe, so with the gates unset this is a no-op and the
+  // bound config is byte-identical (the composition slot-registry fingerprint
+  // pins that).
+  const capable = { ...wireOptionalAgentPorts(base, env) } as unknown as AgentConfig
+  foldCapabilityWires(CAPABILITY_WIRES, capable, env)
+  const wired = sanitizeRuntimeBase(capable)
   const withBgShellRegistry =
     wired.bgShellRegistry === undefined
       ? sanitizeRuntimeBase({ ...wired, bgShellRegistry: getBashBgRegistry() })

@@ -29,6 +29,7 @@ import {
   TaskRegistry,
 } from "../../src/subagent"
 import type { Tool, ToolContext, ToolEvent } from "../../src/tool"
+import { present } from "../_helpers/expect-present"
 
 const ctx = (): ToolContext =>
   ({ cwd: "/tmp", signal: new AbortController().signal }) as ToolContext
@@ -95,8 +96,9 @@ describe("ADR-0041 — enable6Tools:true (COEXIST)", () => {
   test("isReadOnly / isConcurrencySafe semantics per tool", () => {
     const { tools } = createSubagent6Tools({})
     const byName = new Map(tools.map((t) => [t.name, t]))
-    const ro = (n: string): boolean => byName.get(n)!.isReadOnly()
-    const cs = (n: string): boolean => byName.get(n)!.isConcurrencySafe(undefined as never)
+    const ro = (n: string): boolean => present(byName.get(n), "byName.get(n)").isReadOnly()
+    const cs = (n: string): boolean =>
+      present(byName.get(n), "byName.get(n)").isConcurrencySafe(undefined as never)
 
     // exec_command: shell side-effects ⇒ mutating, serialized.
     expect(ro("exec_command")).toBe(false)
@@ -125,7 +127,10 @@ describe("ADR-0041 — maxConcurrent behavior-live through Tool.execute", () => 
     const runner: SubagentRunner = () => new Promise<SubagentResult>(() => {})
     const reg = new TaskRegistry()
     const { tools } = createSubagent6Tools({ runner, registry: reg, maxConcurrent: 1 })
-    const spawn = tools.find((t) => t.name === "spawn_agent")!
+    const spawn = present(
+      tools.find((t) => t.name === "spawn_agent"),
+      "spawn",
+    )
 
     const first = resultEvent(await drive(spawn, { prompt: "child A" }))
     expect(first.ok).toBe(true)
@@ -145,7 +150,10 @@ describe("ADR-0041 — maxConcurrent behavior-live through Tool.execute", () => 
     const runner: SubagentRunner = () => new Promise<SubagentResult>(() => {})
     const reg = new TaskRegistry()
     const { tools } = createSubagent6Tools({ runner, registry: reg })
-    const spawn = tools.find((t) => t.name === "spawn_agent")!
+    const spawn = present(
+      tools.find((t) => t.name === "spawn_agent"),
+      "spawn",
+    )
     await drive(spawn, { prompt: "a" })
     await drive(spawn, { prompt: "b" })
     await drive(spawn, { prompt: "c" })
@@ -163,11 +171,20 @@ describe("ADR-0041 — waitTimeoutPolicy clamp behavior-live", () => {
       // Degenerate-low ceiling: even a huge requested timeout is clamped to 5ms.
       waitTimeoutPolicy: { minMs: 1, maxMs: 5, defaultMs: 5 },
     })
-    const spawn = tools.find((t) => t.name === "spawn_agent")!
-    const wait = tools.find((t) => t.name === "wait_agent")!
+    const spawn = present(
+      tools.find((t) => t.name === "spawn_agent"),
+      "spawn",
+    )
+    const wait = present(
+      tools.find((t) => t.name === "wait_agent"),
+      "wait",
+    )
 
     const sp = resultEvent(await drive(spawn, { prompt: "never settles" }))
-    const agentId = sp.output.match(/agentId: (\S+)/)![1] as string
+    const agentId = present(
+      sp.output.match(/agentId: (\S+)/),
+      "sp.output.match(/agentId: (\\S+)/)",
+    )[1] as string
 
     // Request a 10-minute wait; the policy clamps to 5ms ⇒ timeout, NOT a hang.
     const w = resultEvent(await drive(wait, { agentId, timeoutMs: 600_000 }))
@@ -180,22 +197,28 @@ describe("ADR-0041 — waitTimeoutPolicy clamp behavior-live", () => {
 
 describe("ADR-0041 — shared TaskRegistry across spawn/wait + trio", () => {
   test("6-tool spawn + wait observe the SAME registry the trio uses", async () => {
-    let release!: (r: SubagentResult) => void
-    const gate = new Promise<SubagentResult>((res) => {
-      release = res
-    })
+    const { promise: gate, resolve: release } = Promise.withResolvers<SubagentResult>()
     const runner: SubagentRunner = () => gate
-    const block = buildSubagentBlock(cfg({ enable6Tools: true }))!
+    const block = present(buildSubagentBlock(cfg({ enable6Tools: true })), "block")
     const reg = block.taskRegistry
 
     // Replace the trio's runner indirection: spawn through the 6-tool path,
     // then observe via the SAME registry the block exposes.
     const set = createSubagent6Tools({ runner, registry: reg })
-    const spawn = set.tools.find((t) => t.name === "spawn_agent")!
-    const wait = set.tools.find((t) => t.name === "wait_agent")!
+    const spawn = present(
+      set.tools.find((t) => t.name === "spawn_agent"),
+      "spawn",
+    )
+    const wait = present(
+      set.tools.find((t) => t.name === "wait_agent"),
+      "wait",
+    )
 
     const sp = resultEvent(await drive(spawn, { prompt: "shared" }))
-    const agentId = sp.output.match(/agentId: (\S+)/)![1] as string
+    const agentId = present(
+      sp.output.match(/agentId: (\S+)/),
+      "sp.output.match(/agentId: (\\S+)/)",
+    )[1] as string
     // The task is visible in the SAME registry the block's trio shares.
     expect(reg.get(agentId)?.status).toBe("running")
 
@@ -207,19 +230,25 @@ describe("ADR-0041 — shared TaskRegistry across spawn/wait + trio", () => {
   })
 
   test("spawn via 6-tool, observe via trio's task_output (same registry)", async () => {
-    let release!: (r: SubagentResult) => void
-    const gate = new Promise<SubagentResult>((res) => {
-      release = res
-    })
+    const { promise: gate, resolve: release } = Promise.withResolvers<SubagentResult>()
     const runner: SubagentRunner = () => gate
-    const block = buildSubagentBlock(cfg({ enable6Tools: true }))!
+    const block = present(buildSubagentBlock(cfg({ enable6Tools: true })), "block")
     const reg = block.taskRegistry
     const set = createSubagent6Tools({ runner, registry: reg })
-    const spawn = set.tools.find((t) => t.name === "spawn_agent")!
-    const taskOutput = block.extraTools.find((t) => t.name === "task_output")!
+    const spawn = present(
+      set.tools.find((t) => t.name === "spawn_agent"),
+      "spawn",
+    )
+    const taskOutput = present(
+      block.extraTools.find((t) => t.name === "task_output"),
+      "taskOutput",
+    )
 
     const sp = resultEvent(await drive(spawn, { prompt: "x" }))
-    const agentId = sp.output.match(/agentId: (\S+)/)![1] as string
+    const agentId = present(
+      sp.output.match(/agentId: (\S+)/),
+      "sp.output.match(/agentId: (\\S+)/)",
+    )[1] as string
 
     release(settledResult({ finalText: "via trio", turns: 1 }))
     const out = resultEvent(
@@ -233,7 +262,10 @@ describe("ADR-0041 — shared TaskRegistry across spawn/wait + trio", () => {
 describe("ADR-0041 — exec_command + write_stdin + cleanup (PTY teardown)", () => {
   test("exec_command runs a one-shot command through the assembled tool", async () => {
     const { tools, cleanup } = createSubagent6Tools({})
-    const exec = tools.find((t) => t.name === "exec_command")!
+    const exec = present(
+      tools.find((t) => t.name === "exec_command"),
+      "exec",
+    )
     const ev = resultEvent(
       await drive(exec, { command: "echo hello-6tool", cwd: "/tmp", timeoutMs: 5000 }),
     )
@@ -246,7 +278,10 @@ describe("ADR-0041 — exec_command + write_stdin + cleanup (PTY teardown)", () 
   test("cleanup kills a PTY-retained child (exec_command pty:true)", async () => {
     const ptyTable = new PtyTable()
     const { tools, cleanup } = createSubagent6Tools({ ptyTable })
-    const exec = tools.find((t) => t.name === "exec_command")!
+    const exec = present(
+      tools.find((t) => t.name === "exec_command"),
+      "exec",
+    )
 
     // A long-lived command launched with pty:true is retained in the table.
     const ev = resultEvent(
@@ -261,7 +296,10 @@ describe("ADR-0041 — exec_command + write_stdin + cleanup (PTY teardown)", () 
 
   test("write_stdin to an unknown pid ⇒ structured error via the tool", async () => {
     const { tools } = createSubagent6Tools({})
-    const write = tools.find((t) => t.name === "write_stdin")!
+    const write = present(
+      tools.find((t) => t.name === "write_stdin"),
+      "write",
+    )
     const ev = resultEvent(await drive(write, { pid: 999999, data: "x" }))
     expect(ev.ok).toBe(false)
     expect(ev.output).toContain("No live PTY")
@@ -271,8 +309,11 @@ describe("ADR-0041 — exec_command + write_stdin + cleanup (PTY teardown)", () 
 describe("ADR-0041 — block cleanup tears down 6-tool PTY children", () => {
   test("buildSubagentBlock.cleanup() kills PTY children when 6-tool enabled", async () => {
     const runner: SubagentRunner = async (_req: SubagentRequest) => settledResult()
-    const block = buildSubagentBlock(cfg({ enable6Tools: true }))!
-    const exec = block.extraTools.find((t) => t.name === "exec_command")!
+    const block = present(buildSubagentBlock(cfg({ enable6Tools: true })), "block")
+    const exec = present(
+      block.extraTools.find((t) => t.name === "exec_command"),
+      "exec",
+    )
 
     const ev = resultEvent(
       await drive(exec, { command: "sleep 30", cwd: "/tmp", timeoutMs: 60_000, pty: true }),
@@ -305,9 +346,10 @@ describe("spawn_agent 6-tool — ctx-plumbed per-child controls (e2e)", () => {
       return settledResult()
     }
     const reg = new TaskRegistry()
-    const spawn = createSubagent6Tools({ runner, registry: reg }).tools.find(
-      (t) => t.name === "spawn_agent",
-    )!
+    const spawn = present(
+      createSubagent6Tools({ runner, registry: reg }).tools.find((t) => t.name === "spawn_agent"),
+      "spawn",
+    )
     const c = {
       cwd: "/workspace",
       signal: new AbortController().signal,
@@ -337,9 +379,10 @@ describe("spawn_agent 6-tool — ctx-plumbed per-child controls (e2e)", () => {
   test("continue_from is lineage-gated through the real tool path (ctx.agentLabel)", async () => {
     const reg = new TaskRegistry()
     const runner: SubagentRunner = async () => settledResult({ finalText: "A-out" })
-    const spawn = createSubagent6Tools({ runner, registry: reg }).tools.find(
-      (t) => t.name === "spawn_agent",
-    )!
+    const spawn = present(
+      createSubagent6Tools({ runner, registry: reg }).tools.find((t) => t.name === "spawn_agent"),
+      "spawn",
+    )
     const asLeader = (label: string): ToolContext =>
       ({ cwd: "/w", signal: new AbortController().signal, agentLabel: label }) as ToolContext
 

@@ -24,6 +24,7 @@ import { buildIdentityReminderText, shouldSpliceIdentityReminder } from "@/agent
 import type { AgentMode } from "@/agent/prompt"
 import { defaultModeVariantRegistry, type SystemPromptVariantRegistry } from "@/agent/system-prompt"
 import { createWorkingMemory } from "@/memory"
+import { present } from "../_helpers/expect-present"
 
 const cfgWith = (block: NonNullable<AgentConfig["identityModeVariant"]> | undefined): AgentConfig =>
   ({
@@ -118,7 +119,7 @@ describe("ADR-0239 §C — identity per-turn reminder splice", () => {
       expect(shouldSpliceIdentityReminder(cfgWith(block), mode)).toBe(true)
       const text = buildIdentityReminderText(cfgWith(block), mode)
       expect(text).toBeDefined()
-      expect(text!.startsWith("<system-reminder>")).toBe(true)
+      expect(present(text, "reminder text").startsWith("<system-reminder>")).toBe(true)
     }
   })
 
@@ -137,8 +138,8 @@ describe("ADR-0239 §C — identity per-turn reminder splice", () => {
       registry: defaultModeVariantRegistry(),
     }
     const text = buildIdentityReminderText(cfgWith(block), "architect")
-    expect(text!.startsWith("<system-reminder>\n")).toBe(true)
-    expect(text!.endsWith("\n</system-reminder>")).toBe(true)
+    expect(present(text, "reminder text").startsWith("<system-reminder>\n")).toBe(true)
+    expect(present(text, "reminder text").endsWith("\n</system-reminder>")).toBe(true)
   })
 
   // ── §C9 ── reminder body matches the variant's identity lines ────────────

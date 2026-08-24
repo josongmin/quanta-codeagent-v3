@@ -22,6 +22,7 @@ import {
   sessionFilePath,
 } from "@/session"
 import { __resetRuntimeConfig } from "@/shared"
+import { nth, present } from "../_helpers/expect-present"
 
 /**
  * §13.2 CROWN JEWEL — crash-mid-turn → restart → detect + offer + resume.
@@ -180,7 +181,7 @@ describe("§13.2 crash-resume hellgate — crash mid-turn → restart → resume
     expect(detections.length).toBe(1)
     expect(detections[0]?.sessionId).toBe(SESSION_ID)
 
-    const offer = buildCrashResumeOffer(detections[0]!)
+    const offer = buildCrashResumeOffer(nth(detections, 0, "detections"))
     expect(offer.summary).toContain("interrupted mid-turn")
     expect(offer.resumeMessage).toContain("refactor the parser to support nested groups")
     expect(offer.resumeMessage).toContain("I extracted the tokenizer")
@@ -268,7 +269,7 @@ describe("§13.2 crash-resume hellgate — crash mid-turn → restart → resume
     const list = await listSessions({ includeArchived: true })
     const detections = await detectInterruptedSessions(list, { env: process.env })
     expect(detections.map((d) => d.sessionId)).toEqual(["late", "early"])
-    expect(buildCrashResumeOffer(detections[0]!).summary).toContain("second task")
+    expect(buildCrashResumeOffer(nth(detections, 0, "detections")).summary).toContain("second task")
   })
 
   test("ALBB-06: a SIGNAL-abort (Ctrl+C) capture propagates to SessionMeta.interruptedTurn", async () => {
@@ -310,7 +311,7 @@ describe("§13.2 crash-resume hellgate — crash mid-turn → restart → resume
     expect(buffer.peek()?.reason).toBe("signal_abort")
 
     // Persist the in-memory capture, then fresh-read it back off disk.
-    const captured = buffer.peek()!
+    const captured = present(buffer.peek(), "buffer.peek()")
     await markSessionInterrupted(
       SESSION_ID,
       {

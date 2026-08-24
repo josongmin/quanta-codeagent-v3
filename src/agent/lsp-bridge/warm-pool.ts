@@ -152,6 +152,32 @@ const readPyrightImportProbe = async (filePath: string): Promise<ImportProbeScan
  * Re-throws FATAL transport errors so the pool aborts the warm; transient
  * "still indexing" failures are swallowed (keep polling).
  */
+/**
+ * ONE readiness probe against a warming pyright: do definitions resolve at the import
+ * site yet?
+ *
+ * A unit because the three outcomes are a single decision the poll loop must not
+ * re-derive — resolved definitions mean the server is genuinely warm, a FATAL transport
+ * error must abort the whole warm rather than be polled through, and anything else is
+ * the server still indexing. Swallowing a fatal here would spin the loop for the entire
+ * budget against a dead session, which is the exact shape this split keeps impossible.
+ */
+const pyrightProbeResolves = async (
+  client: LspClient,
+  filePath: string,
+  probe: { line: number; character: number },
+  signal: AbortSignal | undefined,
+): Promise<boolean> => {
+  try {
+    const defs = await client.definition(filePath, probe, signal)
+    return defs !== null && defs.length > 0
+  } catch (e) {
+    if (isFatalSharedSessionError(e)) throw e
+    // transient (still indexing) → keep polling
+    return false
+  }
+}
+
 const ensurePyrightFileReady = async (
   client: LspClient,
   filePath: string,
@@ -183,13 +209,7 @@ const ensurePyrightFileReady = async (
   const deadline = Date.now() + budgetMs
   while (Date.now() < deadline) {
     if (signal?.aborted) throw new Error(`pyright warm-up aborted for ${filePath}`)
-    try {
-      const defs = await client.definition(filePath, probe, signal)
-      if (defs !== null && defs.length > 0) return true
-    } catch (e) {
-      if (isFatalSharedSessionError(e)) throw e
-      // transient (still indexing) → keep polling
-    }
+    if (await pyrightProbeResolves(client, filePath, probe, signal)) return true
     await sleep(retryMs, signal ?? NEVER_ABORTED)
   }
   logger.warn("lsp: pyright warm-up budget exhausted; keeping shared session alive", {

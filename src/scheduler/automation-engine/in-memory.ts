@@ -58,6 +58,78 @@ export interface InMemoryAutomationEngine extends AutomationEnginePort {
   readonly inbox: ReadonlyArray<InboxItem>
 }
 
+/** The per-automation config a row is created with and NEVER recomputes:
+ *  model routing, agent role, base branch, and the heartbeat/policy binding. */
+type ImmutableConfig = Pick<
+  EngineAutomation,
+  | "model"
+  | "modelFallbacks"
+  | "agentRole"
+  | "baseBranch"
+  | "kind"
+  | "targetThreadId"
+  | "inheritedPolicy"
+>
+
+/**
+ * Carry the immutable config across a row rewrite, omitting absent keys.
+ *
+ * A unit because "immutable" only holds if EVERY rewrite carries the whole set:
+ * `schedule`, `claim`, and the fire/finalize advance each rebuild the row from
+ * scratch, and one that forgot a field would silently strip an automation's
+ * routing or inherited policy. Stating the set once makes that impossible.
+ */
+const immutableConfig = (src: ImmutableConfig): ImmutableConfig => ({
+  ...(src.model !== undefined ? { model: src.model } : {}),
+  ...(src.modelFallbacks !== undefined ? { modelFallbacks: src.modelFallbacks } : {}),
+  ...(src.agentRole !== undefined ? { agentRole: src.agentRole } : {}),
+  ...(src.baseBranch !== undefined ? { baseBranch: src.baseBranch } : {}),
+  ...(src.kind !== undefined ? { kind: src.kind } : {}),
+  ...(src.targetThreadId !== undefined ? { targetThreadId: src.targetThreadId } : {}),
+  ...(src.inheritedPolicy !== undefined ? { inheritedPolicy: src.inheritedPolicy } : {}),
+})
+
+/** The prior-fire record a claim preserves — a claim changes who holds the row,
+ *  never what happened to it last time. Omits absent keys (exactOptional). */
+const runHistory = (
+  src: Pick<EngineAutomation, "lastRunAt" | "lastError">,
+): Pick<EngineAutomation, "lastRunAt" | "lastError"> => ({
+  ...(src.lastRunAt !== undefined ? { lastRunAt: src.lastRunAt } : {}),
+  ...(src.lastError !== undefined ? { lastError: src.lastError } : {}),
+})
+
+/**
+ * Keep whichever of the two rows sorts first by `nextRunAt ASC, id ASC`.
+ *
+ * A unit because that ordering IS the module's order discipline (see header):
+ * `next` and `claim` must pick the same row for the same table, and two inlined
+ * copies of the tie-break are exactly how that guarantee rots.
+ */
+const earlierDue = (
+  best: EngineAutomation | null,
+  candidate: EngineAutomation,
+): EngineAutomation => {
+  if (best === null) return candidate
+  if (candidate.nextRunAt < best.nextRunAt) return candidate
+  if (candidate.nextRunAt === best.nextRunAt && candidate.id < best.id) return candidate
+  return best
+}
+
+/**
+ * Whether a claimer may take this row right now.
+ *
+ * A unit because reclaim is the ONLY way a `running` row re-enters the pool:
+ * both arms — due-and-scheduled, and a claim gone stale past `reclaimBefore` —
+ * have to be stated together, or a crashed worker's row is either stranded
+ * forever or stolen while its claim is still fresh.
+ */
+const isClaimable = (r: EngineAutomation, now: number, claimOpts?: ClaimOpts): boolean =>
+  (r.status === "scheduled" && r.nextRunAt <= now) ||
+  (r.status === "running" &&
+    claimOpts?.reclaimBefore !== undefined &&
+    r.claimedAt !== undefined &&
+    r.claimedAt <= claimOpts.reclaimBefore)
+
 /** The backing tables and the id/sequence allocators. */
 const autoTables = (opts: InMemoryAutomationEngineOpts = {}) => {
   const rows = new Map<string, EngineAutomation>()
@@ -178,17 +250,9 @@ const autoAdvance = (ctx: ReturnType<typeof autoTables> & ReturnType<typeof auto
       ...(input.outcome === "errored" && input.errorMessage !== undefined
         ? { lastError: input.errorMessage }
         : {}),
-      // B2 — model/modelFallbacks are immutable per-automation fields; carry
-      // them across the fire so a fired/retrying row keeps its routing config.
-      ...(existing.model !== undefined ? { model: existing.model } : {}),
-      ...(existing.modelFallbacks !== undefined ? { modelFallbacks: existing.modelFallbacks } : {}),
-      ...(existing.agentRole !== undefined ? { agentRole: existing.agentRole } : {}),
-      ...(existing.baseBranch !== undefined ? { baseBranch: existing.baseBranch } : {}),
-      ...(existing.kind !== undefined ? { kind: existing.kind } : {}),
-      ...(existing.targetThreadId !== undefined ? { targetThreadId: existing.targetThreadId } : {}),
-      ...(existing.inheritedPolicy !== undefined
-        ? { inheritedPolicy: existing.inheritedPolicy }
-        : {}),
+      // B2 — carry the immutable routing/policy config across the fire so a
+      // fired/retrying row keeps it.
+      ...immutableConfig(existing),
       // claimToken/claimedAt cleared on finalize (omitted ⇒ absent).
     })
     rows.set(advanced.id, advanced)
@@ -227,13 +291,7 @@ const autoSchedule = (
         status: "scheduled",
         createdAt: input.createdAt,
         fireCount: 0,
-        ...(input.model !== undefined ? { model: input.model } : {}),
-        ...(input.modelFallbacks !== undefined ? { modelFallbacks: input.modelFallbacks } : {}),
-        ...(input.agentRole !== undefined ? { agentRole: input.agentRole } : {}),
-        ...(input.baseBranch !== undefined ? { baseBranch: input.baseBranch } : {}),
-        ...(input.kind !== undefined ? { kind: input.kind } : {}),
-        ...(input.targetThreadId !== undefined ? { targetThreadId: input.targetThreadId } : {}),
-        ...(input.inheritedPolicy !== undefined ? { inheritedPolicy: input.inheritedPolicy } : {}),
+        ...immutableConfig(input),
       })
       rows.set(row.id, row)
       return Promise.resolve({ ok: true, value: row })
@@ -279,12 +337,7 @@ const autoExecute = (
       for (const r of rows.values()) {
         if (r.status !== "scheduled") continue
         if (r.nextRunAt > now) continue
-        if (best === null) {
-          best = r
-          continue
-        }
-        if (r.nextRunAt < best.nextRunAt) best = r
-        else if (r.nextRunAt === best.nextRunAt && r.id < best.id) best = r
+        best = earlierDue(best, r)
       }
       return Promise.resolve({ ok: true, value: best })
     },
@@ -307,16 +360,8 @@ const autoExecute = (
       // `scheduled` row before it becomes `running`.
       let best: EngineAutomation | null = null
       for (const r of rows.values()) {
-        const claimable =
-          (r.status === "scheduled" && r.nextRunAt <= now) ||
-          (r.status === "running" &&
-            claimOpts?.reclaimBefore !== undefined &&
-            r.claimedAt !== undefined &&
-            r.claimedAt <= claimOpts.reclaimBefore)
-        if (!claimable) continue
-        if (best === null) best = r
-        else if (r.nextRunAt < best.nextRunAt) best = r
-        else if (r.nextRunAt === best.nextRunAt && r.id < best.id) best = r
+        if (!isClaimable(r, now, claimOpts)) continue
+        best = earlierDue(best, r)
       }
       if (best === null) return Promise.resolve({ ok: true, value: null })
       const claimToken = mintClaimToken(best.id, now, nextSeq())
@@ -329,15 +374,8 @@ const autoExecute = (
         status: "running",
         createdAt: best.createdAt,
         fireCount: best.fireCount,
-        ...(best.lastRunAt !== undefined ? { lastRunAt: best.lastRunAt } : {}),
-        ...(best.lastError !== undefined ? { lastError: best.lastError } : {}),
-        ...(best.model !== undefined ? { model: best.model } : {}),
-        ...(best.modelFallbacks !== undefined ? { modelFallbacks: best.modelFallbacks } : {}),
-        ...(best.agentRole !== undefined ? { agentRole: best.agentRole } : {}),
-        ...(best.baseBranch !== undefined ? { baseBranch: best.baseBranch } : {}),
-        ...(best.kind !== undefined ? { kind: best.kind } : {}),
-        ...(best.targetThreadId !== undefined ? { targetThreadId: best.targetThreadId } : {}),
-        ...(best.inheritedPolicy !== undefined ? { inheritedPolicy: best.inheritedPolicy } : {}),
+        ...runHistory(best),
+        ...immutableConfig(best),
         claimToken,
         claimedAt: now,
       })

@@ -582,52 +582,60 @@ export const liveLocalGradeRefusal = (namespace: string | undefined): string | u
       "or set QUANTA_SWEBENCH_NAMESPACE=starryzhang with the SWE-bench-Live fork installed."
     : undefined
 
-export const evaluateWithPythonSwebench = async (
+/**
+ * Either the four things a local grade needs — SWE-bench metadata, a non-empty
+ * prediction, a host the family permits grading on, and a python that can import
+ * `swebench` — or the not-graded result explaining which one is missing.
+ *
+ * A unit because every failure here produces the SAME shape (`gradingCompleted:false`
+ * with the reason in `log`), and the checks are strictly ordered cheapest-first: a
+ * missing `instance.swebench` must be reported without ever probing an interpreter.
+ * It returns the resolved interpreter and spawn seam so the check is load-bearing —
+ * the caller cannot reach the harness without having passed through it.
+ */
+const preflightLocalGrade = async (
   instance: Instance,
   prediction: string,
-  opts: PySwebenchOpts = {},
-): Promise<PySwebenchResult> => {
+  opts: PySwebenchOpts,
+): Promise<
+  | {
+      readonly ok: true
+      readonly meta: NonNullable<Instance["swebench"]>
+      readonly python: string
+      readonly spawn: Spawn
+    }
+  | { readonly ok: false; readonly result: PySwebenchResult }
+> => {
+  const refuse = (log: string) =>
+    ({ ok: false, result: { resolved: false, gradingCompleted: false, log } }) as const
   const meta = instance.swebench
-  if (!meta) {
-    return {
-      resolved: false,
-      gradingCompleted: false,
-      log: `instance ${instance.id} has no swebench metadata`,
-    }
-  }
-  if (prediction.trim() === "") {
-    return {
-      resolved: false,
-      gradingCompleted: false,
-      log: `empty prediction for ${meta.instanceId}`,
-    }
-  }
+  if (!meta) return refuse(`instance ${instance.id} has no swebench metadata`)
+  if (prediction.trim() === "") return refuse(`empty prediction for ${meta.instanceId}`)
   // jul-01 audit A2 — refuse a LOCAL grade the host cannot honestly perform, when
   // the family's profile supplies such a guard (today: SWE-bench-Live, whose host
   // stock `swebench` KeyErrors on Live repos and whose images are amd64). Fail-LOUD
   // with guidance instead of a cryptic KeyError. The full-remote/box path always
   // sets QUANTA_SWEBENCH_NAMESPACE, so it is NOT tripped.
   const refusal = opts.localGradeRefusal?.(process.env.QUANTA_SWEBENCH_NAMESPACE)
-  if (refusal !== undefined) {
-    return { resolved: false, gradingCompleted: false, log: refusal }
-  }
+  if (refusal !== undefined) return refuse(refusal)
 
   const spawn = opts.spawn ?? defaultSpawn
   if (!(await isPythonSwebenchAvailable(opts))) {
-    return {
-      resolved: false,
-      gradingCompleted: false,
-      log: "python swebench harness unavailable (import failed)",
-    }
+    return refuse("python swebench harness unavailable (import failed)")
   }
   const python = opts.probe ? pythonCandidates().at(0) : await resolvePython(spawn)
-  if (!python) {
-    return {
-      resolved: false,
-      gradingCompleted: false,
-      log: "no python interpreter could import swebench",
-    }
-  }
+  if (!python) return refuse("no python interpreter could import swebench")
+  return { ok: true, meta, python, spawn }
+}
+
+export const evaluateWithPythonSwebench = async (
+  instance: Instance,
+  prediction: string,
+  opts: PySwebenchOpts = {},
+): Promise<PySwebenchResult> => {
+  const pre = await preflightLocalGrade(instance, prediction, opts)
+  if (!pre.ok) return pre.result
+  const { meta, python, spawn } = pre
 
   const modelName = opts.modelName ?? "quanta"
   const runId = `quanta-${meta.instanceId}-${Date.now()}`

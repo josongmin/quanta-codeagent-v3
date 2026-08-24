@@ -248,29 +248,38 @@ export class IsolatedMcpClient {
     }
   }
 
-  async listTools(): Promise<McpToolDef[]> {
-    const host = this.ensureReady()
+  /** Walk `tools/list` to exhaustion. Its own method because paging a hostile
+   *  server needs TWO liveness bounds that have nothing to do with the tools
+   *  themselves — a page ceiling, and a seen-cursor set so a server that hands
+   *  back a cursor it already gave us fails closed instead of spinning forever.
+   *  Throws `IsolatedMcpError` on either; the caller maps transport failures. */
+  private async collectToolPages(host: PluginHost): Promise<McpToolDef[]> {
     const tools: McpToolDef[] = []
     let cursor: string | undefined
     const seenCursors = new Set<string>()
-    try {
-      for (let page = 0; page < MAX_TOOLS_LIST_PAGES; page += 1) {
-        const params = cursor === undefined ? {} : { cursor }
-        const res = (await host.call("tools/list", params)) as ToolsListResult
-        for (const t of res.tools ?? []) tools.push(mapTool(t))
-        const nextCursor = res.nextCursor
-        if (nextCursor === undefined || nextCursor === "") return tools
-        if (seenCursors.has(nextCursor)) {
-          throw new IsolatedMcpError(
-            `mcp server "${this.config.name}" tools/list returned a repeated cursor "${nextCursor}"`,
-          )
-        }
-        seenCursors.add(nextCursor)
-        cursor = nextCursor
+    for (let page = 0; page < MAX_TOOLS_LIST_PAGES; page += 1) {
+      const params = cursor === undefined ? {} : { cursor }
+      const res = (await host.call("tools/list", params)) as ToolsListResult
+      for (const t of res.tools ?? []) tools.push(mapTool(t))
+      const nextCursor = res.nextCursor
+      if (nextCursor === undefined || nextCursor === "") return tools
+      if (seenCursors.has(nextCursor)) {
+        throw new IsolatedMcpError(
+          `mcp server "${this.config.name}" tools/list returned a repeated cursor "${nextCursor}"`,
+        )
       }
-      throw new IsolatedMcpError(
-        `mcp server "${this.config.name}" tools/list exceeded ${MAX_TOOLS_LIST_PAGES} pages`,
-      )
+      seenCursors.add(nextCursor)
+      cursor = nextCursor
+    }
+    throw new IsolatedMcpError(
+      `mcp server "${this.config.name}" tools/list exceeded ${MAX_TOOLS_LIST_PAGES} pages`,
+    )
+  }
+
+  async listTools(): Promise<McpToolDef[]> {
+    const host = this.ensureReady()
+    try {
+      return await this.collectToolPages(host)
     } catch (e) {
       if (e instanceof IsolatedMcpError) throw e
       if (e instanceof PluginHostError) {

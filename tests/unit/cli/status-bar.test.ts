@@ -10,6 +10,7 @@
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import { installStatusBar } from "../../../src/apps/cli/status-bar"
+import { present } from "../../_helpers/expect-present"
 
 /** Strip CSI sequences (`ESC [ … final-byte`) AND DEC private cursor-state
  *  escapes (`ESC 7` / `ESC 8` = DECSC / DECRC, used by the status bar to
@@ -72,7 +73,7 @@ describe("status-bar paintRow visible-width invariant", () => {
     // " hello" + pad, color-off. The visible-width slice is everything
     // between the last CSI before "hello" and the next CSI after the pad.
     // Easier: strip CSI and count.
-    const visible = stripCsi(paint!)
+    const visible = stripCsi(present(paint, "paint frame"))
     // 80 cols — invariant says we never exceed it.
     expect(visible.length).toBeLessThanOrEqual(80)
     // And we should fully fill the row (so the dim band actually spans
@@ -86,7 +87,7 @@ describe("status-bar paintRow visible-width invariant", () => {
     bar.teardown()
     const paint = writes.find((w) => w.includes("xxxx"))
     expect(paint).toBeDefined()
-    const visible = stripCsi(paint!)
+    const visible = stripCsi(present(paint, "paint frame"))
     expect(visible.length).toBe(80)
     // 1 leading space + 79 'x' = 80. The 80th 'x' is sliced off.
     expect(visible).toBe(` ${"x".repeat(79)}`)
@@ -98,7 +99,7 @@ describe("status-bar paintRow visible-width invariant", () => {
     bar.teardown()
     const paint = writes.find((w) => w.includes("yyyy"))
     expect(paint).toBeDefined()
-    const visible = stripCsi(paint!)
+    const visible = stripCsi(present(paint, "paint frame"))
     expect(visible.length).toBe(80)
   })
 })

@@ -152,6 +152,8 @@ describe("HELL-PROJ — slash projector SSOT", () => {
       process.stdout.write = origOut
     }
     expect(out).toContain(`${cwd}/settings.json`)
+    // The negative arm names the AMBIENT cwd — under the sandboxed-cwd runner
+    // that is a throwaway dir, not the repo root.
     expect(out).not.toContain(`${process.cwd()}/settings.json`)
   })
 })

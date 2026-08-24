@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import { createBunWebSocketAdapter, type WebSocketCtor, type WebSocketLike } from "@/realtime"
+import { nth } from "../../_helpers/expect-present"
 
 /**
  * T07 hellgate — realtime close-path idempotency + sibling-listener isolation.
@@ -73,7 +74,7 @@ const openAdapter = async (): Promise<{
   const connectP = adapter.connect({ endpoint: "wss://x" })
   sockets[0]?.triggerOpen()
   await connectP
-  return { adapter, socket: sockets[0]! }
+  return { adapter, socket: nth(sockets, 0, "sockets") }
 }
 
 describe("T07 realtime close hellgate", () => {

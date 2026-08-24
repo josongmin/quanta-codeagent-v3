@@ -7,6 +7,7 @@ import {
   runIssueSmokeScript,
   seedFromIssueSmoke,
 } from "@/runner/batch/eval/selection-smoke"
+import { present } from "../_helpers/expect-present"
 
 // Phase 2b image backend (QUANTA_BENCH_REPRO_IMAGE_EXEC) is opt-in; clear it after
 // every test so a gated case can't leak into the default-OFF cases (pollution guard).
@@ -65,7 +66,7 @@ describe("prepareIssueSmokeSelectionPort (base-RED executed-authority gate)", ()
       deps,
     )
     expect(port).toBeDefined()
-    const smoke = port!
+    const smoke = present(port, "smoke selection port")
     // Candidate that fixes the base-red oracle ⇒ true (no veto).
     await expect(smoke(mkCandidate("+++ b/x.py\n+fix"))).resolves.toBe(true)
     // Candidate that leaves the proven base-red oracle red ⇒ false (executed veto).
@@ -225,7 +226,7 @@ describe("prepareIssueSmokeAux (auxiliary telemetry, no veto)", () => {
     }
     const aux = await prepareIssueSmokeAux(mkSmokeInstance(issue), "/tmp/base", 1000, deps)
     expect(aux).toBeDefined()
-    const probe = aux!
+    const probe = present(aux, "aux probe")
     // A candidate that BREAKS the public MWE: the legacy gate would have vetoed.
     const broke = await probe(mkCandidate("+++ b/x.py\n+break"))
     // The API returns AUX TELEMETRY, not a boolean the selector treats as a veto.
@@ -261,7 +262,7 @@ describe("prepareIssueSmokeAux (auxiliary telemetry, no veto)", () => {
     }
     const aux = await prepareIssueSmokeAux(mkSmokeInstance(issue), "/tmp/base", 1000, deps)
     expect(aux).toBeDefined()
-    const r = await aux!(mkCandidate("+++ b/x.py\n+anything"))
+    const r = await present(aux, "aux probe")(mkCandidate("+++ b/x.py\n+anything"))
     expect(r.baseGreen).toBe(false)
     // Legacy gate only ever vetoed on a base-GREEN MWE ⇒ never wouldReject here.
     expect(r.wouldReject).toBe(false)

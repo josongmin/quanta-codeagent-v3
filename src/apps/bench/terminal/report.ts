@@ -314,6 +314,32 @@ const classify = (
  * id at all — the one situation where no receipt can exist. It never returns a
  * synthesised trial.
  */
+/**
+ * The task this trial ran, resolved across the three places Harbor may record it.
+ *
+ * A unit because these are ONE identity with a precedence order: the config's task name
+ * wins, then the `task_id` package coordinate — usable only when BOTH org and name are
+ * present, so a half-filled record falls through rather than keying the report on
+ * "undefined/foo" — and finally the trial's own task_name. `taskRef` follows the same
+ * two sources in the same order, which is why it is resolved here and not separately.
+ */
+const resolveTrialTaskIdentity = (
+  raw: Record<string, unknown>,
+  config: Record<string, unknown> | undefined,
+  taskName: string,
+): { readonly taskId: string; readonly taskRef: string | undefined } => {
+  const configTask = asRecord(config?.task)
+  const taskIdRecord = asRecord(raw.task_id)
+  const packageTaskId =
+    asString(taskIdRecord?.org) !== undefined && asString(taskIdRecord?.name) !== undefined
+      ? `${String(taskIdRecord?.org)}/${String(taskIdRecord?.name)}`
+      : undefined
+  return {
+    taskId: asString(configTask?.name) ?? packageTaskId ?? taskName,
+    taskRef: asString(configTask?.ref) ?? asString(taskIdRecord?.ref),
+  }
+}
+
 export const parseHarborTrialResult = (
   file: HarborTrialFile,
 ): TerminalTrialRecord | TerminalTrialDefect => {
@@ -328,14 +354,7 @@ export const parseHarborTrialResult = (
   if (taskName === undefined) return defect(`trial ${trialId} has no task_name`)
 
   const config = asRecord(raw.config)
-  const configTask = asRecord(config?.task)
-  const taskIdRecord = asRecord(raw.task_id)
-  const packageTaskId =
-    asString(taskIdRecord?.org) !== undefined && asString(taskIdRecord?.name) !== undefined
-      ? `${String(taskIdRecord?.org)}/${String(taskIdRecord?.name)}`
-      : undefined
-  const taskId = asString(configTask?.name) ?? packageTaskId ?? taskName
-  const taskRef = asString(configTask?.ref) ?? asString(taskIdRecord?.ref)
+  const { taskId, taskRef } = resolveTrialTaskIdentity(raw, config, taskName)
 
   const { reward, malformed } = extractPrimaryReward(raw)
   const exception = asRecord(raw.exception_info)
