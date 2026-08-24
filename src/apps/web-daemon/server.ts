@@ -293,6 +293,37 @@ const webObjectiveSnapshot = (
 ): (() => PersistedObjectiveSnapshot | undefined) | undefined =>
   buildObjectiveSnapshotProvider((runtime as { objectiveAuthority?: unknown }).objectiveAuthority)
 
+/** P1 Phase 2 — the swap-on-attach closure (module-scope to keep `startWebDaemon`
+ *  under the god-function ceiling). Load the opened thread's lossless SavedSession,
+ *  replace the live transcript, repoint persistence, and (RFC-03 C2) restore its
+ *  durable objective into the SAME session-stable authority the persist snapshot
+ *  encodes from (`runtime.objectiveAuthority`, duck-read). Absent authority (TOOLS
+ *  off) ⇒ restore no-op (byte-identical); restore fires only on the hydrated
+ *  success path (see thread-hydrate). Undefined when persistence is off (no thread
+ *  store ⇒ nothing was ever saved). */
+const buildOnAttachThread = (deps: {
+  readonly threadStore: ReturnType<typeof setupThreadPersistence>["threadStore"]
+  readonly sharedSession: RuntimeSession
+  readonly transcriptPersist: ReturnType<typeof attachTranscriptPersistence>
+  readonly runtime: unknown
+}): ((threadId: string) => Promise<void>) | undefined =>
+  deps.threadStore !== null
+    ? async (threadId: string): Promise<void> => {
+        await hydrateThreadIntoLiveSession(threadId, {
+          loadThread: async (id) => await loadSessionById(id),
+          replaceTranscript: async (messages) => {
+            await deps.sharedSession.transcript.replace(messages)
+          },
+          setActiveThreadId: (id) => deps.transcriptPersist.setActiveThreadId(id),
+          restoreObjective: (snapshot) =>
+            restoreObjectiveSnapshotInto(
+              (deps.runtime as { objectiveAuthority?: unknown }).objectiveAuthority,
+              snapshot,
+            ),
+        })
+      }
+    : undefined
+
 export const startWebDaemon = async (config: WebDaemonServerConfig): Promise<WebDaemonHandle> => {
   const runtime = await config.runtimeFactory()
   // ONE shared session for the whole daemon lifetime. New WS connections
@@ -350,31 +381,15 @@ export const startWebDaemon = async (config: WebDaemonServerConfig): Promise<Web
     objectiveSnapshot: webObjectiveSnapshot(runtime),
   })
   let transcriptPersistUnsub: (() => void) | null = transcriptPersist.unsub
-  // P1 Phase 2 — swap-on-attach closure: load the opened thread's lossless
-  // SavedSession, replace the live transcript, repoint persistence. Only when
-  // persistence is on (there is a thread store to have saved anything).
-  const onAttachThread =
-    threadStore !== null
-      ? async (threadId: string): Promise<void> => {
-          await hydrateThreadIntoLiveSession(threadId, {
-            loadThread: async (id) => await loadSessionById(id),
-            replaceTranscript: async (messages) => {
-              await sharedSession.transcript.replace(messages)
-            },
-            setActiveThreadId: (id) => transcriptPersist.setActiveThreadId(id),
-            // RFC-03 C2 (web parity) — restore the reopened thread's durable goal
-            // into the SAME session-stable authority the persist snapshot encodes
-            // from (`runtime.objectiveAuthority`, duck-read like `webObjectiveSnapshot`).
-            // Absent authority (TOOLS off) ⇒ no-op (byte-identical). Only fires on
-            // the hydrated success path (see thread-hydrate).
-            restoreObjective: (snapshot) =>
-              restoreObjectiveSnapshotInto(
-                (runtime as { objectiveAuthority?: unknown }).objectiveAuthority,
-                snapshot,
-              ),
-          })
-        }
-      : undefined
+  // P1 Phase 2 — swap-on-attach closure (extracted to buildOnAttachThread to keep
+  // this function under the god ceiling): load the opened thread, replace the live
+  // transcript, repoint persistence, restore the durable objective.
+  const onAttachThread = buildOnAttachThread({
+    threadStore,
+    sharedSession,
+    transcriptPersist,
+    runtime,
+  })
   const readoutSources: WebReadoutSources = {
     ...(facadeReadoutSources ?? {}),
     cost: costAggregator.totals,
