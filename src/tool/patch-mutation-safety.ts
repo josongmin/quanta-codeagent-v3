@@ -8,6 +8,7 @@
  */
 
 import type { Patch, PatchFileSystemPort } from "@/patch/types"
+import { errMessage } from "@/shared"
 import { sha256Hex } from "@/storage"
 import { recordFreshBaseline } from "./_shared/fresh-hash"
 import { guardWrite, type ReadFileState } from "./stale-read-guard"
@@ -85,9 +86,6 @@ const staleCheckFailed = (
   },
 })
 
-/** Narrow an unknown thrown value to a one-line reason for the model. */
-const reasonOf = (err: unknown): string => (err instanceof Error ? err.message : String(err))
-
 /**
  * ADR-0548 — the target's CURRENT whole-file digest for the content-authority
  * comparison, or `undefined` when no digest can decide the verdict (nothing was
@@ -120,7 +118,7 @@ const currentTargetDigest = async (
   } catch (err) {
     // A failed read is not evidence the target is unchanged. Same fail-closed
     // shape the `statTarget` failure already uses — never a new crash path.
-    return { ok: false, why: reasonOf(err) }
+    return { ok: false, why: errMessage(err) }
   }
 }
 
@@ -144,7 +142,7 @@ export const guardStalePatchTargets = async (
     } catch (err) {
       // A failed stat is not evidence that the target is absent. Deny before
       // mutation and preserve the model-facing no-throw ToolResult boundary.
-      return staleCheckFailed(toolName, op.path, reasonOf(err))
+      return staleCheckFailed(toolName, op.path, errMessage(err))
     }
     if (!stat.exists) continue
     // ADR-0548 — CONTENT is the authority; the mtime is a hint. Without the
