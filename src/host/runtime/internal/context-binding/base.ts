@@ -14,8 +14,9 @@ import { getBashBgRegistry } from "@/runtime/bash-bg-registry"
 import type { RuntimeAgentTurnAssembler, RuntimeAgentTurnDeps } from "@/sdk/runtime/base"
 import { fullFidelityEnabled, itemStreamEnabled } from "@/shared"
 import { automationUpdateTool, ToolRegistry } from "@/tool"
+import { CAPABILITY_WIRES } from "../../agent-config-assembler"
 import { deriveCapabilityManifest } from "../../capabilities"
-import { CAPABILITY_WIRES, foldCapabilityWires } from "../../capability-wire-registry"
+import { foldCapabilityWires } from "../../capability-wire-registry"
 import { installCliMentionInjector } from "../mention-wire"
 import type {
   RuntimeBase,

@@ -464,18 +464,6 @@ const parseAssemblerPositiveInt = (raw: string | undefined): number | undefined 
   return Number.isInteger(n) && n > 0 ? n : undefined
 }
 
-/** Open the optional agent-capability slots by folding {@link CAPABILITY_WIRES}
- *  in a single ordered loop (each entry env-gated, caller-override-safe, no-op
- *  when absent). `config` (the derived runtime-config) is computed ONCE and
- *  threaded via the context — byte-identical to the prior per-call arity. */
-/** Open the optional agent-capability slots by folding {@link CAPABILITY_WIRES}
- *  in a single ordered loop. Kept as a thin local alias so this module's callers
- *  read the same as before; the registry owns the fold and the reason there are
- *  TWO callers (see `capability-wire-registry.ts#foldCapabilityWires`). */
-const wireOptionalCapabilitySlots = (cfg: AgentConfig, env: AssemblerEnv): void => {
-  foldCapabilityWires(CAPABILITY_WIRES, cfg, env)
-}
-
 /** Parse a USD cost cap (`QUANTA_BUDGET_LEDGER_*_USD`) from the env bag: a
  *  positive, finite dollar amount (fractional allowed, e.g. `5.50`), else
  *  `undefined`. No magic default — the cap is operator-supplied (measure-first /
@@ -919,7 +907,7 @@ export const assembleAgentConfig = (req: AssembleRequest, env: AssemblerEnv): Ag
   // objective / mailbox / web_search / background-subagent). Each is env-gated +
   // caller-override-safe + byte-identical when its gate/resource is absent (see
   // the per-helper docs); the single call keeps this fn under the complexity cap.
-  wireOptionalCapabilitySlots(cfg, env)
+  foldCapabilityWires(CAPABILITY_WIRES, cfg, env)
   // RFC-03 H1 — LATE-BIND the ONE gated objective authority (built just now by
   // `maybeWireObjective` under `QUANTA_OBJECTIVE_TOOLS`) onto the observability
   // approval-state-machine so it attributes approval pauses to the SAME authority
