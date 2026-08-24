@@ -41,6 +41,11 @@
  *         file must never be able to forge harness speech.
  *  F1a-6  Fail-open — an unreadable rule source must never break session
  *         start; the turn still runs, just without rules.
+ *  F1a-7  EXACTLY ONCE — the rules land on the per-turn wire (system +
+ *         messages) exactly one time, never twice.
+ *  F1a-8  DIGEST AGREEMENT — the body that reached the wire is byte-identical
+ *         to the body the bootstrap snapshot resolved (sha256 equality), so
+ *         the wire cannot be carrying a different/re-read/reflowed rendering.
  */
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
@@ -48,10 +53,11 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import type { AgentConfig } from "@/agent"
-import { runAgent } from "@/agent"
+import { renderRepoRulesBlock, runAgent } from "@/agent"
 import { bootstrapSession, isSessionBootstrapError } from "@/host/bootstrap"
 import { buildBaseFromBootstrap } from "@/host/runtime/internal/context-binding/base"
 import type { LLMPort, Message, StreamEvent, StreamInput } from "@/llm"
+import { sha256Hex } from "@/storage"
 import { defaultTools, ToolRegistry } from "@/tool"
 import {
   makeFakeBootstrapDeps,
@@ -61,13 +67,23 @@ import {
 const SENTINEL = "F1A-CLI-RULE-SENTINEL-4c1e-DO-NOT-DELETE"
 const CLAUDE_SENTINEL = "F1A-CLI-CLAUDE-SENTINEL-9b2a-DO-NOT-DELETE"
 
-/** Captures the system prompt of the FIRST stream() call, then completes the
- *  turn so `runAgent` returns cleanly. */
+/** Captures the system prompt AND the messages of the FIRST stream() call, then
+ *  completes the turn so `runAgent` returns cleanly.
+ *
+ *  `capturedMessages` exists for F1a-7: "injected exactly once" is only a real
+ *  claim if BOTH halves of the wire are counted. `repo-rules` is renderable from
+ *  two places in the prompt layer — the cached `project_md` system section
+ *  (`prompt.ts`) and the per-turn dynamic reminder atom (`prompt-reminders.ts`) —
+ *  so a system-only capture could never see a double-injection. */
 class CapturingLLM implements LLMPort {
   capturedSystem: unknown = "__uncalled__"
+  capturedMessages: unknown = undefined
   readonly model = "capture"
   async *stream(input: StreamInput): AsyncIterable<StreamEvent> {
-    if (this.capturedSystem === "__uncalled__") this.capturedSystem = input.system ?? null
+    if (this.capturedSystem === "__uncalled__") {
+      this.capturedSystem = input.system ?? null
+      this.capturedMessages = input.messages
+    }
     yield { type: "text_delta", delta: "ok" }
     yield { type: "message_stop", stop_reason: "end_turn" }
   }
@@ -85,6 +101,35 @@ const systemText = (captured: unknown): string => {
       .join("\n")
   }
   return ""
+}
+
+/** Separator used to join the wire fragments into one searchable string. It is
+ *  not a substring of any fragment, so joining can never manufacture a match
+ *  that straddles two fragments. */
+const WIRE_SEP = "\n␞-WIRE-FRAGMENT-BOUNDARY-␞\n"
+
+/** Deep-collect every string leaf of a value. Used on `StreamInput.messages` so
+ *  a rule body is counted wherever it rides — a plain text block, a tool result,
+ *  a nested `<system-reminder>` — rather than only where we happened to expect
+ *  it. Exhaustive-by-construction: it walks arrays and objects generically. */
+const deepStrings = (value: unknown, out: string[] = []): string[] => {
+  if (typeof value === "string") out.push(value)
+  else if (Array.isArray(value)) for (const item of value) deepStrings(item, out)
+  else if (value !== null && typeof value === "object")
+    for (const item of Object.values(value)) deepStrings(item, out)
+  return out
+}
+
+/** Non-overlapping occurrence count of `needle` in `haystack`. */
+const countOccurrences = (haystack: string, needle: string): number => {
+  let count = 0
+  let from = 0
+  for (;;) {
+    const at = haystack.indexOf(needle, from)
+    if (at < 0) return count
+    count += 1
+    from = at + needle.length
+  }
 }
 
 const userText = (text: string): Message => ({ role: "user", content: [{ type: "text", text }] })
@@ -120,7 +165,16 @@ describe("F1a — shipping CLI repo-rules reach the model", () => {
    *  the config from `boot.repoRules` directly, so deleting the bootstrap->base
    *  threading left every test GREEN while the shipping per-turn config carried
    *  nothing. Driving the real builder is what makes the wire claim honest. */
-  const wireSystemFor = async (): Promise<string> => {
+  const wireFor = async (): Promise<{
+    /** Flattened `StreamInput.system` only. */
+    system: string
+    /** system + EVERY string leaf of `StreamInput.messages`, joined. The whole
+     *  per-turn payload the model was called with. */
+    wire: string
+    /** The bootstrap result the same turn was built from — so a test can compare
+     *  the snapshot the CLI resolved against what actually reached the wire. */
+    boot: Awaited<ReturnType<typeof boot>>
+  }> => {
     const llm = new CapturingLLM()
     const boot0 = await boot(llm)
     const base = buildBaseFromBootstrap({
@@ -138,8 +192,15 @@ describe("F1a — shipping CLI repo-rules reach the model", () => {
       signal: new AbortController().signal,
     } as unknown as AgentConfig
     await runAgent(cfg)
-    return systemText(llm.capturedSystem)
+    const system = systemText(llm.capturedSystem)
+    return {
+      system,
+      wire: [system, ...deepStrings(llm.capturedMessages)].join(WIRE_SEP),
+      boot: boot0,
+    }
   }
+
+  const wireSystemFor = async (): Promise<string> => (await wireFor()).system
 
   test("F1a-1 an AGENTS.md sentinel reaches the LIVE system prompt", async () => {
     writeFileSync(join(cwd, "AGENTS.md"), `# Rules\n${SENTINEL}\n`, "utf8")
@@ -267,5 +328,65 @@ describe("F1a — shipping CLI repo-rules reach the model", () => {
     mkdirSync(join(cwd, "AGENTS.md"))
     const text = await wireSystemFor()
     expect(text.length).toBeGreaterThan(0)
+  })
+
+  test("F1a-7 EXACTLY ONCE — the rules ride the wire one time, not twice", async () => {
+    writeFileSync(join(cwd, "AGENTS.md"), `# Rules\n${SENTINEL}\n`, "utf8")
+    const { wire } = await wireFor()
+    const occurrences = countOccurrences(wire, SENTINEL)
+    // REGRESSION THIS CATCHES: `repo-rules` is renderable from TWO places in the
+    // prompt layer — the cached `project_md` system section (`prompt.ts`) and the
+    // per-turn dynamic reminder atom (`prompt-reminders.ts`). Threading the
+    // bootstrap snapshot into both would duplicate every rule byte on EVERY turn
+    // (straight token cost, plus cache-prefix churn), and every existing
+    // `toContain` assertion in this file would stay green through it. Counting
+    // pins the UPPER bound that containment cannot: exactly one, no more.
+    // The count is embedded in the compared string so a failure prints it.
+    expect(`AGENTS.md sentinel occurrences on the per-turn wire: ${occurrences}`).toBe(
+      "AGENTS.md sentinel occurrences on the per-turn wire: 1",
+    )
+  })
+
+  test("F1a-8 DIGEST AGREEMENT — the wire's rule body matches the snapshot's", async () => {
+    // Multi-line body with structure: a sentinel-containment assert passes while
+    // the REST of the file is dropped, reordered, re-wrapped, or truncated. The
+    // digest is taken over the whole rendered block, so any such loss trips it.
+    writeFileSync(
+      join(cwd, "AGENTS.md"),
+      `# Rules\n${SENTINEL}\n- never force-push\n- prefer bun\n\n## Style\n- no emoji\n`,
+      "utf8",
+    )
+    const { wire, boot: boot0 } = await wireFor()
+    if (boot0.repoRules === undefined) throw new Error("bootstrap must resolve repo rules")
+
+    // The snapshot's rendered form, produced by the SAME `renderRepoRulesBlock`
+    // the prompt layer calls — so this compares "what bootstrap resolved" against
+    // "what the model received", not one hand-built string against another.
+    const expectedBlock = renderRepoRulesBlock(boot0.repoRules)
+    const header = expectedBlock.slice(0, expectedBlock.indexOf("\n"))
+    const at = wire.indexOf(header)
+    // Located first, so a MISSING block fails as "block absent" rather than as an
+    // opaque hash mismatch against the digest of the empty string.
+    expect(at >= 0 ? "rendered block header found on wire" : "rendered block header ABSENT").toBe(
+      "rendered block header found on wire",
+    )
+    const observedBlock = at < 0 ? "" : wire.slice(at, at + expectedBlock.length)
+
+    // HONESTY NOTE (per the packet's "digest가 일치" clause): the wire carries NO
+    // digest of its own — nothing in the payload is a hash — so a literal
+    // "their digest === our digest" comparison is impossible here, and inventing
+    // one would be faking it. The strongest honest equivalent is byte identity
+    // expressed as a digest: hash the snapshot's rendered block, hash exactly
+    // that many bytes of the wire starting at the block header, and require the
+    // two to agree. They can only agree if every byte the bootstrap resolved
+    // reached the model unaltered. (Strength-equivalent to asserting the wire
+    // contains the whole block; the digest form is what keeps a failure legible
+    // — two 64-char hashes instead of a multi-KB string diff.)
+    //
+    // REGRESSION THIS CATCHES: the wire re-deriving rules independently of the
+    // session snapshot (e.g. a per-turn re-read of disk, a different candidate
+    // or layer ordering, or one path truncating where the other does not). The
+    // sentinel asserts would survive all of those; this does not.
+    expect(sha256Hex(observedBlock)).toBe(sha256Hex(expectedBlock))
   })
 })
