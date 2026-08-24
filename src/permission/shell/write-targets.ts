@@ -68,24 +68,32 @@ const flagSet = (args: readonly ShellWord[]): Set<string> => {
  *  own head and operands are what the rules below see. This is the single fix
  *  for the whole "complete miss" class. Returns `null` when the payload cannot
  *  be named. */
+/** How many leading arguments belong to the VEHICLE rather than its payload:
+ *  its own flags, `VAR=value` prefixes, and (for `timeout`/`nice`) a bare
+ *  duration. `null` when an unresolved word makes the boundary unknowable. */
+const vehiclePrefixLength = (vehicle: string, args: readonly ShellWord[]): number | null => {
+  const takesNumber = vehicle === "timeout" || vehicle === "nice" || vehicle === "ionice"
+  let i = 0
+  while (i < args.length) {
+    const a = args[i] as ShellWord
+    if (!a.resolved) return null
+    const own =
+      a.text.startsWith("-") ||
+      /^[A-Za-z_][A-Za-z0-9_]*=/.test(a.text) ||
+      (takesNumber && /^[0-9]+(\.[0-9]+)?[smhd]?$/.test(a.text))
+    if (!own) break
+    i++
+  }
+  return i
+}
+
 const payloadOf = (cmd: ShellCommandIr): ShellCommandIr | null => {
   let current = cmd
   for (let depth = 0; depth < 4; depth++) {
     const head = current.head
     if (head === null || !head.resolved || !VEHICLE_HEADS.has(head.text)) return current
-    const vehicle = head.text
-    const takesNumber = vehicle === "timeout" || vehicle === "nice" || vehicle === "ionice"
-    let i = 0
-    while (i < current.args.length) {
-      const a = current.args[i] as ShellWord
-      if (!a.resolved) return null
-      const own =
-        a.text.startsWith("-") ||
-        /^[A-Za-z_][A-Za-z0-9_]*=/.test(a.text) ||
-        (takesNumber && /^[0-9]+(\.[0-9]+)?[smhd]?$/.test(a.text))
-      if (!own) break
-      i++
-    }
+    const i = vehiclePrefixLength(head.text, current.args)
+    if (i === null) return null
     const next = current.args[i]
     if (next === undefined) return current
     if (!next.resolved) return null
@@ -105,61 +113,80 @@ const ddTarget = (args: readonly ShellWord[]): string | null => {
   return null
 }
 
-/** The write targets of ONE already-vehicle-stripped command. */
-const targetsOfCommand = (cmd: ShellCommandIr): string[] => {
-  const out: string[] = []
-  // Redirects are a write regardless of the program (`: > /etc/passwd`). The IR
-  // already excluded fd-dups (`2>&1`) by keeping only file targets.
-  for (const r of cmd.redirects) if (r.resolved) out.push(r.text)
-
-  const head = cmd.head
-  if (head === null || !head.resolved) return out
-  const name = head.text.split("/").pop() ?? head.text
-  const ops = operands(cmd.args)
-
-  if (name === "tee") {
-    for (const o of ops) if (o.resolved) out.push(o.text)
-    return out
-  }
-  if (name === "sed") {
-    const flags = flagSet(cmd.args)
-    if (!flags.has("-i") && !flags.has("--in-place")) return out
-    // `sed -i <script> <file>...` — every operand after the script is a file.
-    // Reading operands (not "the last token") is what a trailing redirect can
-    // no longer displace.
-    for (const o of ops.slice(1)) if (o.resolved) out.push(o.text)
-    return out
-  }
-  if (name === "cp" || name === "mv") {
-    const text = ops.filter((o) => o.resolved).map((o) => o.text)
-    // GNU target-directory forms name the DESTINATION explicitly; the remaining
-    // operands are sources (reads).
-    const tdEq = cmd.args.find((a) => a.resolved && a.text.startsWith("--target-directory="))
-    if (tdEq !== undefined) {
-      out.push(tdEq.text.slice("--target-directory=".length))
-      return out
-    }
-    const tIdx = cmd.args.findIndex((a) => a.resolved && a.text === "-t")
-    const tVal = tIdx >= 0 ? cmd.args[tIdx + 1] : undefined
-    if (tVal?.resolved === true) {
-      out.push(tVal.text)
-      return out
-    }
-    // Classic `SRC… DEST`: the last operand is the destination.
-    const dest = text[text.length - 1]
-    if (text.length >= 2 && dest !== undefined) out.push(dest)
-    return out
-  }
-  if (name === "dd") {
-    const of = ddTarget(cmd.args)
-    if (of !== null) out.push(of)
-    return out
-  }
-  return out
+/** `sed -i <script> <file>…` — every operand AFTER the script is an in-place
+ *  edit target. Reading operands (not "the last token") is what a trailing
+ *  redirect can no longer displace. */
+const sedTargets = (cmd: ShellCommandIr, ops: readonly ShellWord[]): string[] => {
+  const flags = flagSet(cmd.args)
+  if (!flags.has("-i") && !flags.has("--in-place")) return []
+  return ops
+    .slice(1)
+    .filter((o) => o.resolved)
+    .map((o) => o.text)
 }
 
-const isCd = (cmd: ShellCommandIr): boolean =>
-  cmd.head?.resolved === true && cmd.head.text === "cd"
+/** `cp`/`mv` destination. The GNU target-directory forms name the DESTINATION
+ *  explicitly and the remaining operands are sources (reads); the classic form
+ *  puts the destination last. */
+const copyMoveTargets = (cmd: ShellCommandIr, ops: readonly ShellWord[]): string[] => {
+  const tdEq = cmd.args.find((a) => a.resolved && a.text.startsWith("--target-directory="))
+  if (tdEq !== undefined) return [tdEq.text.slice("--target-directory=".length)]
+  const tIdx = cmd.args.findIndex((a) => a.resolved && a.text === "-t")
+  const tVal = tIdx >= 0 ? cmd.args[tIdx + 1] : undefined
+  if (tVal?.resolved === true) return [tVal.text]
+  const text = ops.filter((o) => o.resolved).map((o) => o.text)
+  const dest = text[text.length - 1]
+  return text.length >= 2 && dest !== undefined ? [dest] : []
+}
+
+/** Per-head write rules. A head with no entry writes nothing by itself — any
+ *  write it performs is expressed as a redirect, which is read separately. */
+const HEAD_TARGETS: ReadonlyMap<
+  string,
+  (cmd: ShellCommandIr, ops: readonly ShellWord[]) => string[]
+> = new Map([
+  ["tee", (_c, ops) => ops.filter((o) => o.resolved).map((o) => o.text)],
+  ["sed", sedTargets],
+  ["cp", copyMoveTargets],
+  ["mv", copyMoveTargets],
+  [
+    "dd",
+    (cmd) => {
+      const of = ddTarget(cmd.args)
+      return of === null ? [] : [of]
+    },
+  ],
+])
+
+/** The write targets of ONE already-vehicle-stripped command. */
+const targetsOfCommand = (cmd: ShellCommandIr): string[] => {
+  // A redirect is a write regardless of the program (`: > /etc/passwd`).
+  const out = cmd.redirects.filter((r) => r.resolved).map((r) => r.text)
+  const head = cmd.head
+  if (head === null || !head.resolved) return out
+  const rule = HEAD_TARGETS.get(head.text.split("/").pop() ?? head.text)
+  if (rule === undefined) return out
+  return [...out, ...rule(cmd, operands(cmd.args))]
+}
+
+/** Place one target against the effective cwd. A caller-relative answer is a
+ *  real answer, not a failure: it is what the pre-IR extractor produced too, and
+ *  the caller resolves it against its own cwd. */
+const resolveTarget = (t: string, cwd: EffectiveCwd): ShellWriteTarget => {
+  if (t.startsWith("/"))
+    return { path: normalizePosix(t), absolute: true, operand: t, cwdMoved: false }
+  if (cwd.kind === "abs") {
+    return {
+      path: normalizePosix(`${cwd.path}/${t}`),
+      absolute: true,
+      operand: t,
+      cwdMoved: true,
+    }
+  }
+  return { path: t, absolute: false, operand: t, cwdMoved: false }
+}
+
+const isCd = (cmd: ShellCommandIr): boolean => cmd.head?.resolved === true && cmd.head.text === "cd"
 
 /**
  * Every write target of `command`, with each relative target resolved against
@@ -188,25 +215,7 @@ export const shellWriteTargets = (command: string): readonly ShellWriteTarget[] 
     }
     const cmd = payloadOf(raw)
     if (cmd === null) continue
-    for (const t of targetsOfCommand(cmd)) {
-      const moved = cwd.kind === "abs"
-      if (t.startsWith("/")) {
-        out.push({ path: normalizePosix(t), absolute: true, operand: t, cwdMoved: false })
-        continue
-      }
-      if (cwd.kind === "abs") {
-        out.push({
-          path: normalizePosix(`${cwd.path}/${t}`),
-          absolute: true,
-          operand: t,
-          cwdMoved: moved,
-        })
-        continue
-      }
-      // caller-relative (or an unknown cwd, where the caller's own resolution is
-      // the only honest answer — it is what the pre-IR extractor did too).
-      out.push({ path: t, absolute: false, operand: t, cwdMoved: false })
-    }
+    for (const t of targetsOfCommand(cmd)) out.push(resolveTarget(t, cwd))
   }
   return out
 }

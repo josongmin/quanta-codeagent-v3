@@ -214,6 +214,52 @@ interface WalkState {
   nextPipeline: number
 }
 
+/** Redirect targets declared on a `redirected_statement`, as words.
+ *
+ *  Whether a redirect names a FILE or a DESCRIPTOR is decided by the OPERAND,
+ *  not the operator: `>&1` dups (operand is a `number`) while `>&out.log` sends
+ *  BOTH streams to a file (operand is a `word`). An operator-level skip
+ *  therefore silently dropped the second — a real write, missed by the old
+ *  regexes too — so the target-type allowlist is the only check, and it gets
+ *  both right. */
+const redirectTargetWords = (kids: readonly ShellNode[]): ShellWord[] => {
+  const targets: ShellWord[] = []
+  for (const c of kids) {
+    if (!REDIRECT_TYPES.has(c.type)) continue
+    for (const t of children(c)) {
+      if (!REDIRECT_TARGET_TYPES.has(t.type)) continue
+      targets.push(toWord(t))
+    }
+  }
+  return targets
+}
+
+/** `file_redirect` is a SIBLING of the command, not a child, so lowering the
+ *  `command` node alone left `redirects` structurally EMPTY for every command in
+ *  the tree — the field looked wired and never carried anything. Collect the
+ *  targets here and attach them to the LAST command the wrapped subtree emits,
+ *  which is where bash binds them (`cd /etc && echo x > motd` redirects `echo`,
+ *  not `cd`). */
+const walkRedirected = (
+  node: ShellNode,
+  out: ShellCommandIr[],
+  st: WalkState,
+  pipeline: number | null,
+  fnName: string | null,
+): void => {
+  const kids = children(node)
+  const before = out.length
+  for (const c of kids) {
+    if (REDIRECT_TYPES.has(c.type)) continue
+    walk(c, out, st, pipeline, fnName)
+  }
+  const targets = redirectTargetWords(kids)
+  const lastIdx = out.length - 1
+  if (targets.length === 0 || lastIdx < before) return
+  const last = out[lastIdx] as ShellCommandIr
+  out[lastIdx] = { ...last, redirects: [...last.redirects, ...targets] }
+}
+
 /** Node types this walker handles specially, in the order it checks them. */
 const walkSpecial = (
   node: ShellNode,
@@ -229,37 +275,7 @@ const walkSpecial = (
     return true
   }
   if (node.type === "redirected_statement") {
-    // `file_redirect` is a SIBLING of the command, not a child, so lowering the
-    // `command` node alone left `redirects` structurally EMPTY for every command
-    // in the tree — the field looked wired and never carried anything. Collect
-    // the targets here and attach them to the LAST command the wrapped subtree
-    // emits, which is where bash binds them (`cd /etc && echo x > motd`
-    // redirects `echo`, not `cd`).
-    const kids = children(node)
-    const before = out.length
-    for (const c of kids) {
-      if (REDIRECT_TYPES.has(c.type)) continue
-      walk(c, out, st, pipeline, fnName)
-    }
-    const targets: ShellWord[] = []
-    for (const c of kids) {
-      if (!REDIRECT_TYPES.has(c.type)) continue
-      // Whether a redirect names a FILE or a DESCRIPTOR is decided by the
-      // OPERAND, not the operator: `>&1` dups (operand is a `number`) while
-      // `>&out.log` sends BOTH streams to a file (operand is a `word`). An
-      // operator-level skip therefore silently dropped the second — a real
-      // write, missed by the old regexes too — so the target-type allowlist is
-      // the only check, and it gets both right.
-      for (const t of children(c)) {
-        if (!REDIRECT_TARGET_TYPES.has(t.type)) continue
-        targets.push(toWord(t))
-      }
-    }
-    const lastIdx = out.length - 1
-    if (targets.length > 0 && lastIdx >= before) {
-      const last = out[lastIdx] as ShellCommandIr
-      out[lastIdx] = { ...last, redirects: [...last.redirects, ...targets] }
-    }
+    walkRedirected(node, out, st, pipeline, fnName)
     return true
   }
   if (node.type === "function_definition") {
