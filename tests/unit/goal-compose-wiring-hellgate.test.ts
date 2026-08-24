@@ -115,6 +115,21 @@ describe("compose-passthrough · PASS_THROUGH_COMPOSE_KEYS ∋ objective (observ
     expect(objectiveOf(binding.patch({ objective: a } as never).snapshot)).toBe(a)
     expect(objectiveOf(binding.patch({ objective: b } as never).snapshot)).toBe(b) // … distinct outputs
   })
+
+  // MEMBERSHIP GUARD (the load-bearing leg the patch tests above CANNOT cover):
+  // `binding.patch` spreads EVERY key, so it surfaces `objective` regardless of
+  // whether the compose seam still routes it. The ONLY place `compose.objective`
+  // becomes a `patch` is `applyRuntimeFacadeComposeOptions`, which iterates
+  // `PASS_THROUGH_COMPOSE_KEYS`. Drop "objective" from that list and the whole
+  // chain above goes inert (the LLM tools mint a FRESH store, breaking goal-complete
+  // sync) while every patch test stays GREEN. The constant is exported for exactly
+  // this runtime contract assertion (see its export comment). Same pattern as
+  // agent-mode-live-parity-hellgate.test.ts. RED-on-injection: remove "objective"
+  // from PASS_THROUGH_COMPOSE_KEYS ⇒ this fails, the patch tests do not.
+  test("HELL-GOAL-passthrough-membership: PASS_THROUGH_COMPOSE_KEYS still routes compose.objective (the seam that makes the patch fire)", async () => {
+    const { PASS_THROUGH_COMPOSE_KEYS } = await import("@/sdk/runtime/context")
+    expect([...PASS_THROUGH_COMPOSE_KEYS]).toContain("objective")
+  })
 })
 
 /* ================================================================== */

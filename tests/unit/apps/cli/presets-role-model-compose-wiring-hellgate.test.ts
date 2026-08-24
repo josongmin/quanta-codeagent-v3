@@ -133,6 +133,19 @@ describe("compose-passthrough · PASS_THROUGH_COMPOSE_KEYS ∋ roleModelResolver
     expect(resolverOf(binding.patch({ roleModelResolver: a } as never).snapshot)).toBe(a)
     expect(resolverOf(binding.patch({ roleModelResolver: b } as never).snapshot)).toBe(b)
   })
+
+  // MEMBERSHIP GUARD (the leg the patch tests above CANNOT cover): `binding.patch`
+  // spreads EVERY key, so it surfaces `roleModelResolver` whether or not the compose
+  // seam still routes it. The only place `compose.roleModelResolver` becomes a
+  // `patch` is `applyRuntimeFacadeComposeOptions`, iterating PASS_THROUGH_COMPOSE_KEYS.
+  // Drop "roleModelResolver" from that list and preset role-model routing through the
+  // facade dies while every patch test stays GREEN. The constant is exported for this
+  // runtime contract (same pattern as agent-mode-live-parity-hellgate.test.ts).
+  // RED-on-injection: remove "roleModelResolver" ⇒ this fails, the patch tests do not.
+  test("HELL-PRESET-passthrough-membership: PASS_THROUGH_COMPOSE_KEYS still routes compose.roleModelResolver", async () => {
+    const { PASS_THROUGH_COMPOSE_KEYS } = await import("@/sdk/runtime/context")
+    expect([...PASS_THROUGH_COMPOSE_KEYS]).toContain("roleModelResolver")
+  })
 })
 
 /* ================================================================== */
