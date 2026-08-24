@@ -58,6 +58,42 @@ const resolveBoxHome = async (ssh: BoxSession["ssh"]): Promise<string> => {
   return home
 }
 
+/**
+ * PMX-04 — RE-PROVE the box is free of the answer key, before THIS chunk's agent
+ * phase.
+ *
+ * The agent-phase bootstrap carries `absenceProbe`, and it is executed when a box
+ * is provisioned and when a warm box is attached — but a pool worker holds one
+ * live session across many chunks, so chunks 2..N started their agent phase with
+ * nothing re-checking that the previous chunk's teardown actually worked.
+ *
+ * The teardown is bound to the grade call and runs on every in-process exit, and
+ * a failing teardown throws (the pool then terminates the box). So the uncovered
+ * case is narrow and exact: a teardown that exits 0 WITHOUT having removed
+ * everything. That is precisely the case the probe exists to catch as a second
+ * gate — and at the chunk boundary that gate was missing.
+ *
+ * It runs the AGENT phase, so the executor's own cross-check applies: a
+ * gold-bearing command in this phase is refused before a single ssh. Re-proving
+ * absence can therefore never materialize the thing it is checking for.
+ *
+ * A family with no declared bootstrap issues nothing — not one round trip.
+ */
+export const proveAnswerKeyAbsentForAgent = async (input: {
+  readonly ssh: BoxSession["ssh"]
+  readonly log: (m: string) => void
+  readonly family: DatasetFamily
+  readonly bootstrap: FamilyRemoteBootstrap | undefined
+}): Promise<void> => {
+  if (input.bootstrap === undefined) return
+  await executeFamilyRemoteBootstrap({
+    bootstrap: input.bootstrap,
+    phase: "agent",
+    ssh: input.ssh,
+    log: input.log,
+  })
+}
+
 export interface FamilyBoxGradeInput {
   readonly ssh: BoxSession["ssh"]
   readonly log: (m: string) => void
@@ -190,6 +226,20 @@ export const runFamilyBoxGrade = async (
         )
       }
       artifact = read.stdout
+      // Remove the on-box copy now that it is in hand. It is a per-instance
+      // oracle at a predictable path, and the run-scoped scrub only ever clears
+      // the CURRENT chunk's paths — it cannot reach an earlier chunk's, so a
+      // later chunk's unsandboxed agent would otherwise share a box with it.
+      // Best-effort: the grade itself already succeeded, and failing the run over
+      // a cleanup would discard a real result. A leftover is caught by the next
+      // chunk's absence probe on the paths that carry the answer key itself.
+      const swept = await input.ssh(`rm -f ${input.paths.passRate}`)
+      if (swept.code !== 0) {
+        input.log(
+          `[full-remote] ⚠️ ${input.family}: could not remove the on-box grade document at ` +
+            `${input.paths.passRate} (code ${swept.code}) — it stays readable to a later chunk's agent.`,
+        )
+      }
     },
   })
   return artifact

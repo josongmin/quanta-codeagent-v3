@@ -83,10 +83,19 @@ export const bucketsFromGradedInstances = (
     errored: [] as string[],
     emptyPatch: [] as string[],
   }
+  const assigned = assignedInstanceIds === undefined ? undefined : new Set(assignedInstanceIds)
   const reported = new Set<string>()
   for (const g of graded) {
     reported.add(g.instanceId)
-    out[LEGACY_BUCKET_BY_STATE[g.state]].push(g.instanceId)
+    // A row for an instance this chunk did NOT ask for is evidence of a
+    // manifest/corpus disagreement, so it is reported rather than dropped — but
+    // it can never be counted as a resolution the campaign asked for, which
+    // would widen the very set coverage is measured against.
+    const bucket =
+      assigned !== undefined && !assigned.has(g.instanceId)
+        ? "errored"
+        : LEGACY_BUCKET_BY_STATE[g.state]
+    out[bucket].push(g.instanceId)
   }
 
   // RECONCILE against the assigned set. The pinned evaluator iterates the

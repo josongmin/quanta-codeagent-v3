@@ -44,13 +44,27 @@ import { resolveDatasetFamilyProfile } from "../profiles/registry"
 import type { SpawnFn, SpawnResult } from "./backend"
 import { assertRemoteAccessTokenFreshEnough, stripToAccessToken } from "./box-session/auth"
 import {
+  collectRunDiagnostics,
+  fetchChunkArtifacts,
+  fullRemoteArtifactDir,
+  saveLocalArtifact,
+} from "./box-session/chunk-artifacts"
+import {
   buildChunkScrubCommand,
   closureDiagnosticsPathFor,
   runExitPathFor,
   trajectoriesDirFor,
 } from "./box-session/chunk-scrub"
+
+// Re-exported so every importer of the original module surface stays unchanged.
+export { collectRunDiagnostics, fullRemoteArtifactDir }
+
 import { runBenchDetachedPoll } from "./box-session/detached-poll"
-import { parseFamilyBoxGradeVerdicts, runFamilyBoxGrade } from "./box-session/family-box-grade"
+import {
+  parseFamilyBoxGradeVerdicts,
+  proveAnswerKeyAbsentForAgent,
+  runFamilyBoxGrade,
+} from "./box-session/family-box-grade"
 import { probePyrightGrounding, remoteLspLaunchReceipt } from "./box-session/pyright-grounding"
 import { BENCH_SSH_SAFE_OPTS, openOtelReverseTunnel, shq } from "./box-session/shell"
 import {
@@ -84,11 +98,6 @@ import { bucketsFromGradedInstances } from "./verdict-buckets"
  *  silently destroys the only post-mortem signal (2026-06-19: lost the patches
  *  needed to RCA a grading false-negative). Lives under benchHome() like the
  *  rest of bench's persistent output. */
-export const fullRemoteArtifactDir = (): string => {
-  const dir = join(benchHome(), "full-remote")
-  mkdirSync(dir, { recursive: true })
-  return dir
-}
 
 /** Charset a runId / artifact suffix is allowed to contain. The suffix is the
  *  ONLY caller-supplied value that flows UNQUOTED into remote ssh commands —
@@ -498,223 +507,6 @@ const runChunkBench = async (args: {
   return remoteRun.code
 }
 
-const fetchRemoteFile = async (ssh: BoxSession["ssh"], remotePath: string): Promise<SpawnResult> =>
-  await ssh(`cat ${remotePath} 2>/dev/null`)
-
-const fetchRemoteCommand = async (ssh: BoxSession["ssh"], command: string): Promise<SpawnResult> =>
-  await ssh(command)
-
-const saveLocalArtifact = (
-  localPath: string,
-  content: string,
-  log: (msg: string) => void,
-  label: string,
-): string | undefined => {
-  if (content.trim() === "") return undefined
-  try {
-    writeFileSync(localPath, content)
-    log(`${label}: ${localPath}`)
-    return localPath
-  } catch {
-    return undefined
-  }
-}
-
-const fetchOptionalArtifact = async (args: {
-  ssh: BoxSession["ssh"]
-  remotePath: string
-  localPath: string
-  log: (msg: string) => void
-  label: string
-}): Promise<string | undefined> => {
-  try {
-    const fetched = await fetchRemoteFile(args.ssh, args.remotePath)
-    if (fetched.code !== 0) return undefined
-    return saveLocalArtifact(args.localPath, fetched.stdout, args.log, args.label)
-  } catch {
-    return undefined
-  }
-}
-
-const fetchOptionalCommandArtifact = async (args: {
-  ssh: BoxSession["ssh"]
-  command: string
-  localPath: string
-  log: (msg: string) => void
-  label: string
-}): Promise<string | undefined> => {
-  try {
-    const fetched = await fetchRemoteCommand(args.ssh, args.command)
-    if (fetched.code !== 0 || fetched.stdout.length === 0) return undefined
-    return saveLocalArtifact(args.localPath, fetched.stdout, args.log, args.label)
-  } catch {
-    return undefined
-  }
-}
-
-/**
- * Fetch the box's PER-INSTANCE trajectory cassettes (one FILE per instance run,
- * SWE-agent shape) + their `.meta.json` sidecars, and extract them into a
- * per-box subdir under the local full-remote artifact dir:
- *   `<artifactDir>/trajectories/<suffix>/<ts>-<instanceId>.jsonl`
- *
- * One `tar | base64` round-trip (mirrors the observe archive), then a local
- * `base64 -d | tar -x`. Best-effort: any failure (no dir, empty run, no local
- * tar) logs nothing fatal and leaves the run untouched. The per-box subdir keeps
- * two boxes that re-ran the same instance from colliding, and the viewer's
- * folder scan turns each extracted file into one session.
- */
-const fetchTrajectoryFiles = async (args: {
-  ssh: BoxSession["ssh"]
-  paths: ChunkPaths
-  artifactSuffix: string
-  log: (msg: string) => void
-}): Promise<void> => {
-  const trajDir = trajectoriesDirFor(args.paths)
-  const b64Path = join(fullRemoteArtifactDir(), `trajectories-${args.artifactSuffix}.tar.b64`)
-  const saved = await fetchOptionalCommandArtifact({
-    ssh: args.ssh,
-    // Only the .jsonl cassettes + .meta.json sidecars; skip if the dir is absent
-    // or empty so `fetchOptionalCommandArtifact` treats it as "nothing to fetch".
-    command: `if [ -d ${trajDir} ] && [ -n "$(ls -A ${trajDir} 2>/dev/null)" ]; then tar -C ${trajDir} -cf - . | base64 -w0; fi`,
-    localPath: b64Path,
-    log: args.log,
-    label: "[full-remote] trajectory cassettes archived",
-  })
-  if (saved === undefined) return
-  // Extract locally into a per-box subdir. Best-effort: never let a missing
-  // local `tar`/`base64` or a corrupt archive crash the post-run fetch.
-  try {
-    const dest = join(fullRemoteArtifactDir(), "trajectories", args.artifactSuffix)
-    mkdirSync(dest, { recursive: true })
-    execFileSync("bash", ["-c", `base64 -d < ${shq(b64Path)} | tar -x -C ${shq(dest)}`], {
-      stdio: "ignore",
-    })
-    // Extract succeeded ⇒ the per-instance .jsonl files are the artifact; drop the
-    // now-redundant archive. (On failure we keep it as the fallback.)
-    rmSync(b64Path, { force: true })
-    args.log(`[full-remote] trajectory cassettes extracted: ${dest}`)
-  } catch {
-    // leave the .tar.b64 in place as the fallback artifact
-  }
-}
-
-const fetchChunkArtifacts = async (args: {
-  ssh: BoxSession["ssh"]
-  paths: ChunkPaths
-  artifactSuffix: string
-  recordTrajectory: boolean
-  log: (msg: string) => void
-}): Promise<{ reportText: string; reportPath?: string }> => {
-  const fetchedReport = await fetchRemoteFile(args.ssh, args.paths.report)
-  await fetchOptionalArtifact({
-    ssh: args.ssh,
-    remotePath: args.paths.preds,
-    localPath: join(fullRemoteArtifactDir(), `preds-${args.artifactSuffix}.jsonl`),
-    log: args.log,
-    label: "[full-remote] predictions saved",
-  })
-  // ALWAYS pull the operational run.log back before the box is terminated. It
-  // holds the only on-box diagnostics — LSP server-exit WARNs (crash/OOM),
-  // throttle/429 markers, warm-up exhaustion — and the box is destroyed at
-  // end-of-run, so a death NOT fetched here is a death investigated by live
-  // ssh-babysitting (or lost entirely). Not gated on `recordTrajectory`: this is
-  // the cheap, always-useful failure-forensics artifact, not the heavy cassette.
-  await fetchOptionalArtifact({
-    ssh: args.ssh,
-    remotePath: args.paths.runLog,
-    localPath: join(fullRemoteArtifactDir(), `runlog-${args.artifactSuffix}.log`),
-    log: args.log,
-    label: "[full-remote] run.log saved",
-  })
-  await fetchOptionalCommandArtifact({
-    ssh: args.ssh,
-    command: `if [ -d ${args.paths.observeDir} ]; then tar -C ${args.paths.observeDir} -cf - . | base64 -w0; fi`,
-    localPath: join(fullRemoteArtifactDir(), `observe-${args.artifactSuffix}.tar.b64`),
-    log: args.log,
-    label: "[full-remote] observe archive saved",
-  })
-  await fetchOptionalArtifact({
-    ssh: args.ssh,
-    remotePath: closureDiagnosticsPathFor(args.paths),
-    localPath: join(fullRemoteArtifactDir(), `closure-${args.artifactSuffix}.json`),
-    log: args.log,
-    label: "[full-remote] closure diagnostics saved",
-  })
-  if (args.recordTrajectory) {
-    await fetchTrajectoryFiles({
-      ssh: args.ssh,
-      paths: args.paths,
-      artifactSuffix: args.artifactSuffix,
-      log: args.log,
-    })
-  }
-  const reportPath = saveLocalArtifact(
-    join(fullRemoteArtifactDir(), `report-${args.artifactSuffix}.json`),
-    fetchedReport.stdout,
-    args.log,
-    "[full-remote] report saved",
-  )
-  if (reportPath !== undefined) {
-    // Canonical SSOT mirror — same sink as the local batch's writeReport, so
-    // full-remote per-box reports also collect in one fixed place.
-    await mirrorReportToSsot(reportPath, fetchedReport.stdout)
-    return {
-      reportText: fetchedReport.stdout,
-      reportPath,
-    }
-  }
-  return {
-    reportText: fetchedReport.stdout,
-  }
-}
-
-export const collectRunDiagnostics = async (args: {
-  ssh: BoxSession["ssh"]
-  runLogPath: string
-  latestLogLine: string | undefined
-  remoteRunCode: number
-  emptyVerdicts: boolean
-  log: (msg: string) => void
-}): Promise<{ lastLogLine?: string; rateLimited: boolean }> => {
-  const tail = await args.ssh(`tail -60 ${args.runLogPath} 2>/dev/null`)
-  // #8: the rate-limit signal drives ALL worker backoff. Reading only the last 60
-  // lines makes a 429 storm that happened during patch-gen invisible once grading
-  // output scrolls past it → no backoff → the next chunk hammers a still-throttled
-  // login. Scan the FULL log for throttle markers; the tail is kept ONLY for the
-  // human-facing status line. The TS `detectRateLimit` regex stays authoritative —
-  // the remote grep merely hauls candidate lines out of the whole file so they
-  // survive into the window we re-validate.
-  const throttleScan = await args.ssh(
-    `grep -aiE 'generation_error|too many requests|rate[ _-]?limit|(http|status)[ /:]*429' ${args.runLogPath} 2>/dev/null | head -20`,
-  )
-  const lastLogLine = normalizeStatusText(
-    tail.stdout
-      .split("\n")
-      .map((line) => line.trim())
-      .filter((line) => line !== "")
-      .at(-1) ??
-      args.latestLogLine ??
-      "",
-  )
-  const rateLimited = detectRateLimit(tail.stdout) || detectRateLimit(throttleScan.stdout)
-  if (args.emptyVerdicts) {
-    args.log(
-      `[full-remote] ⚠️ no verdicts in report (run exit ${args.remoteRunCode}). Box run.log tail:`,
-    )
-    args.log(tail.stdout || "(run.log empty)")
-  }
-  if (rateLimited) {
-    args.log(
-      "[full-remote] ⚠️ rate-limit signal (generation_error / 429) in run log — caller should back off.",
-    )
-  }
-  return {
-    ...(lastLogLine !== "" ? { lastLogLine } : {}),
-    rateLimited,
-  }
-}
-
 const executeGradeChunk = async (args: {
   session: BoxSession
   params: GradeChunkParams
@@ -745,6 +537,17 @@ const executeGradeChunk = async (args: {
     host,
     targetPath: args.paths.dataset,
   })
+  // PMX-04 — RE-PROVE the box carries no answer key before THIS chunk's agent
+  // runs. The agent-phase bootstrap (which owns the absence probe) is executed at
+  // provision and at warm attach; a pool worker runs many chunks through ONE live
+  // session, so without this chunks 2..N trusted the previous chunk's teardown
+  // instead of checking it.
+  await proveAnswerKeyAbsentForAgent({
+    ssh,
+    log,
+    family: args.params.datasetFamily,
+    bootstrap: args.params.remoteBootstrap,
+  })
   args.state.finalExitCode = await runChunkBench({
     ssh,
     aws: args.session.aws.bind(args.session),
@@ -767,6 +570,20 @@ const executeGradeChunk = async (args: {
     bootstrap: args.params.remoteBootstrap,
     paths: args.paths,
   })
+
+  // PERSIST the grade. For a box-grading family this document IS the result —
+  // the report fetched below was written by a patch-gen-only pass. The on-box
+  // copy is swept as soon as it is read, and the box is destroyed at end of run,
+  // so without this a ProMax grade left no replayable trace at all: no argv, no
+  // hash, no per-instance verdicts, only a terminal summary line.
+  if (boxGradeText !== undefined) {
+    saveLocalArtifact(
+      join(fullRemoteArtifactDir(), `passrate-${args.artifactSuffix}.json`),
+      boxGradeText,
+      log,
+      "[full-remote] on-box grade document saved",
+    )
+  }
 
   await args.snapshots.publish("fetching", {
     ...(args.state.finalExitCode !== undefined ? { lastExitCode: args.state.finalExitCode } : {}),

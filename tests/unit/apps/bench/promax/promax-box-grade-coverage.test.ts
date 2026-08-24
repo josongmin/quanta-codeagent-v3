@@ -74,9 +74,10 @@ describe("assigned-set reconciliation on the on-box grade", () => {
     expect(v.unresolved).toEqual([])
   })
 
-  test("a row for an UNASSIGNED instance is still reported, not silently dropped", () => {
-    // It should not happen — but discarding it would hide a manifest/corpus
-    // disagreement, and the id is real evidence.
+  test("a row for an UNASSIGNED instance is REPORTED but quarantined", () => {
+    // Discarding it would hide a manifest/corpus disagreement, and the id is real
+    // evidence — but counting it as a resolution would widen the very set that
+    // coverage is measured against, so it is reported as an error instead.
     const v = bucketsFromGradedInstances(
       [
         { instanceId: "repo__a-1", state: "resolved" },
@@ -84,7 +85,8 @@ describe("assigned-set reconciliation on the on-box grade", () => {
       ],
       ASSIGNED,
     )
-    expect(v.resolved).toContain("repo__z-9")
+    expect(v.resolved).toEqual(["repo__a-1"])
+    expect(v.errored).toContain("repo__z-9")
   })
 
   test("PAIRED CONTROL: with NO assigned set given, behaviour is exactly as before", () => {

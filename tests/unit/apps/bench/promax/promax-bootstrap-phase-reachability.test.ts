@@ -423,7 +423,17 @@ describe("TODAY'S STATE — the lane is LIVE", () => {
       productionCallSites()
         .map((c) => `${c.file}:${c.phase}`)
         .sort(),
-    ).toEqual([`${EXPECTED_CALLER}:agent`, `${EXPECTED_GRADER_CALLER}:grader`].sort())
+    ).toEqual(
+      [
+        `${EXPECTED_CALLER}:agent`,
+        // PMX-04 — the grade module ALSO drives the AGENT phase, once per chunk,
+        // to re-prove the box is free of the answer key before that chunk's agent
+        // runs. The provision-time and warm-attach probes cover only the first
+        // chunk on a box; a pool worker runs many through one live session.
+        `${EXPECTED_GRADER_CALLER}:agent`,
+        `${EXPECTED_GRADER_CALLER}:grader`,
+      ].sort(),
+    )
     expect([...productionExecutedBootstrapPhases()].sort()).toEqual(["agent", "grader"])
     expect(familyBootstrapPhaseIsExecutedInProduction("grader")).toBe(true)
     // `bound-to` resolves through its host: the teardown has no call site of its
