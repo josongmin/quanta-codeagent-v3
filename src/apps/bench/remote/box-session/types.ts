@@ -203,6 +203,15 @@ export interface ChunkPaths {
    * refuses as `stale_output_present`.
    */
   readonly passRate: string
+  /**
+   * PMX-04 — where a family that grades in its own grader phase writes the
+   * predictions CONVERTED into its grader's format (ProMax: a JSON array).
+   *
+   * A separate file from `preds` on purpose: `preds` is the run's own artifact
+   * and is fetched as evidence, and rewriting it in place would destroy the
+   * bytes the agent actually produced.
+   */
+  readonly boxGradePredictions: string
 }
 
 // NOTE on `~` vs `$HOME`: every path below is interpolated UNQUOTED into the
@@ -219,6 +228,7 @@ export const DEFAULT_CHUNK_PATHS: ChunkPaths = {
   observeDir: "~/observe",
   trajectory: "$HOME/quanta/bench-trajectory.jsonl",
   passRate: "~/pass-rate.json",
+  boxGradePredictions: "~/preds.grader.json",
 }
 
 /** Parameters for one patch-gen+grading chunk on an already-provisioned box. */

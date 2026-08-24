@@ -396,7 +396,17 @@ export const buildBenchCommand = (params: GradeChunkParams, paths: ChunkPaths): 
     // Live publishes prebuilt images under `starryzhang`, not `swebench` — derive the
     // namespace from the dataset (parallel to the grading-shim pip-spec). A forwarded
     // QUANTA_SWEBENCH_NAMESPACE (operator override) still comes after and last-wins.
-    `QUANTA_SWEBENCH_NAMESPACE=${shq(profile.harnessSpec({ datasetName: process.env.QUANTA_SWEBENCH_DATASET_NAME ?? "" }).namespace)} QUANTA_SWEBENCH_MAX_WORKERS=4 QUANTA_BENCH_CONCURRENCY=${params.concurrency} ` +
+    // PMX-04 — the swebench image NAMESPACE belongs to the swebench harness. A
+    // family that grades in its own grader phase never uses that harness, so it
+    // is not asked for one: `harnessSpec` REFUSES for such a family, and that
+    // refusal is load-bearing (returning the stock spec would make its box
+    // byte-indistinguishable from a Verified one in the harness axis). Calling it
+    // here anyway made the refusal fire once per chunk — i.e. AFTER the box was
+    // already provisioned and paid for.
+    (profile.boxGrade === undefined
+      ? `QUANTA_SWEBENCH_NAMESPACE=${shq(profile.harnessSpec({ datasetName: process.env.QUANTA_SWEBENCH_DATASET_NAME ?? "" }).namespace)} `
+      : "") +
+    `QUANTA_SWEBENCH_MAX_WORKERS=4 QUANTA_BENCH_CONCURRENCY=${params.concurrency} ` +
     onBoxEnvPrefix +
     params.forwardedBenchEnv +
     trajectoryRecordEnv +

@@ -146,6 +146,7 @@ export const chunkBoxPaths = (runId: string): ChunkPaths => ({
   observeDir: `~/runs/${runId}/observe`,
   trajectory: `$HOME/runs/${runId}/trajectory.jsonl`,
   passRate: `~/runs/${runId}/pass-rate.json`,
+  boxGradePredictions: `~/runs/${runId}/preds.grader.json`,
 })
 
 /** Did this chunk's grade produce ANY verdict? An all-empty result means the box

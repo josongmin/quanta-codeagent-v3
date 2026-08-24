@@ -398,6 +398,21 @@ export interface DatasetFamilyProfile {
    */
   readonly boxGrade?: (input: BoxGradeInput) => string
   /**
+   * layer 3d′ — PMX-04. Convert the box's predictions into the format THIS
+   * family's grader reads, returning the text to write.
+   *
+   * The bench writes predictions as JSONL for every family
+   * (`rows.map(JSON.stringify).join("\n")`). A family whose grader reads
+   * something else must say so here rather than have `remote/**` know any
+   * format: ProMax's pinned evaluator does `json.load`, so it needs a JSON
+   * ARRAY, and handing it the JSONL produces either a parse error or — for a
+   * single row — a dict whose VALUES are read as entries, yielding zero jobs.
+   *
+   * `undefined` ⇒ the raw predictions file is graded as written, byte-identical
+   * for every family that has no such need.
+   */
+  readonly prepareBoxGradePredictions?: (predictionsText: string) => string
+  /**
    * layer 3e — PMX-04. Read the fetched grade artifact into per-instance official
    * states, for a family whose verdicts do NOT come from the bench report.
    *

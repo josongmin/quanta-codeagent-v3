@@ -48,6 +48,7 @@ import { readFileSync } from "node:fs"
 import { errMessage } from "@/shared"
 import { buildProMaxBoxGradeCommand } from "../harness/promax/box-grade"
 import { projectProMaxGradedInstances } from "../harness/promax/chunk-verdicts"
+import { serializeProMaxPredictions } from "../harness/promax/invocation"
 import { ProMaxSampleError, selectProMaxSampleIds } from "../promax/corpus"
 import { PROMAX_V1_SNAPSHOT } from "../promax/provenance/frozen-snapshot"
 import {
@@ -247,6 +248,53 @@ export const PROMAX_PROFILE: DatasetFamilyProfile = {
   // patch-gen-only pass, in which every instance is an explicit "harness not
   // wired" infra error by construction. It reports official STATES; the remote
   // layer decides how those land in its four legacy arrays.
+  // layer 3d′ — PMX-04. The box writes JSONL; the pinned evaluator does
+  // `json.load` and needs ProMax's JSON ARRAY. Routing the conversion through
+  // the family's OWN serializer is what matters here — it is not a reformat:
+  // `serializeProMaxPredictions` carries the duplicate-id and blank-id refusals
+  // (a duplicate row is what lets the strongest-bucket precedence promote
+  // whichever copy said `success`), and the explicit two-field projection that
+  // keeps a gold-bearing `patch` field out of the file the evaluator reads. Both
+  // were reachable only from the local gate until this existed.
+  prepareBoxGradePredictions: (text) => {
+    const rows = text
+      .split("\n")
+      .map((line) => line.trim())
+      .filter((line) => line !== "")
+      .map((line, i) => {
+        let row: { instance_id?: unknown; model_patch?: unknown }
+        try {
+          row = JSON.parse(line) as { instance_id?: unknown; model_patch?: unknown }
+        } catch (e) {
+          throw new Error(
+            `bench: dataset-family=promax — on-box predictions line ${i + 1} is not JSON: ${errMessage(e)}`,
+          )
+        }
+        if (typeof row.instance_id !== "string" || row.instance_id.trim() === "") {
+          throw new Error(
+            `bench: dataset-family=promax — on-box predictions line ${i + 1} has no usable instance_id`,
+          )
+        }
+        // An ABSENT patch is a malformed row; an EMPTY one is a real outcome and
+        // must reach the evaluator as a model miss rather than be guessed away.
+        if (typeof row.model_patch !== "string") {
+          throw new Error(
+            `bench: dataset-family=promax — on-box predictions line ${i + 1} ` +
+              `(${row.instance_id}) has no model_patch string`,
+          )
+        }
+        return { instanceId: row.instance_id, modelPatch: row.model_patch }
+      })
+    const serialized = serializeProMaxPredictions(rows)
+    if (!serialized.ok) {
+      throw new Error(
+        `bench: dataset-family=promax — REFUSING to grade the box's predictions: ` +
+          serialized.failures.map((f) => `[${f.code}] ${f.message}`).join("; "),
+      )
+    }
+    return serialized.json
+  },
+
   parseBoxGradeVerdicts: projectProMaxGradedInstances,
 
   // layer 4 — preflight. REAL and fail-closed, and it runs BEFORE a box is

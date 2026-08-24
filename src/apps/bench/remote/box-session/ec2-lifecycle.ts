@@ -80,11 +80,17 @@ export const buildSwebenchShim = (pipSpec: string): string =>
  *  what any family name means. The ABSENT-selector default (the launch config's
  *  field is optional) comes from its ONE owner, `datasetFamilyOrDefault`
  *  (re-audit R4) — never a private literal here. */
-const wantedSwebenchPipSpec = (family: DatasetFamily | undefined): string =>
-  resolveDatasetFamilyProfile(datasetFamilyOrDefault(family)).harnessSpec({
+const wantedSwebenchPipSpec = (family: DatasetFamily | undefined): string | undefined => {
+  // PMX-04 — a family that grades in its own grader phase has no swebench shim to
+  // self-heal, and `harnessSpec` refuses for it. `undefined` ⇒ the caller skips
+  // the check rather than throwing on a warm-box reuse.
+  const profile = resolveDatasetFamilyProfile(datasetFamilyOrDefault(family))
+  if (profile.boxGrade !== undefined) return undefined
+  return profile.harnessSpec({
     datasetName: process.env.QUANTA_SWEBENCH_DATASET_NAME ?? "",
     pipSpecOverride: process.env.QUANTA_SWEBENCH_PIP_SPEC,
   }).pipSpec
+}
 
 /** Self-heal the grading shim on a REUSED warm box. `isBootstrapped` only checks the shim
  *  FILE EXISTS, not its content — so a box first bootstrapped for Verified (`swebench`) and
@@ -96,6 +102,11 @@ export const ensureBoxSwebenchShimCurrent = async (
   family: DatasetFamily | undefined,
 ): Promise<void> => {
   const want = wantedSwebenchPipSpec(family)
+  // PMX-04 — a family that grades with its own pinned evaluator has no swebench
+  // shim to keep current. Returning early is not a skipped guard: there is no
+  // shim on the box for it, and asking `harnessSpec` for one would throw on a
+  // warm-box reuse that is otherwise fine.
+  if (want === undefined) return
   const marker = `--from ${shq(want)} `
   const cur = await session.ssh("cat ~/swebench-python 2>/dev/null || true")
   if (cur.stdout.includes(marker)) return // shim already targets the wanted spec
@@ -463,6 +474,22 @@ const bootstrapBox = async (session: BoxSession, cfg: FullRemoteConfig): Promise
   // are operator knobs on a different axis, not the family authority.)
   // aug-22 HIGH-4: the pip-spec comes from the family PROFILE's `harnessSpec`
   // port, and the ABSENT-selector default from its ONE owner (re-audit R4).
+  // PMX-04 — the swebench grading shim is the SWEBENCH harness. A family that
+  // grades in its own grader phase (ProMax: its pinned evaluator) never uses it,
+  // and `harnessSpec` REFUSES for such a family — deliberately, since returning
+  // the stock spec would make its box byte-indistinguishable from a Verified one.
+  // Asking for it here made that refusal fire immediately AFTER `RunInstances`:
+  // the run paid for a box and then died building a shim it would never use.
+  if (
+    resolveDatasetFamilyProfile(datasetFamilyOrDefault(cfg.swebenchDatasetFamily)).boxGrade !==
+    undefined
+  ) {
+    log(
+      "[full-remote] dataset-family grades with its own pinned evaluator — SKIPPING the swebench " +
+        "grading shim + uvx warm (neither is its grader).",
+    )
+    return
+  }
   const swebenchPipSpec = resolveDatasetFamilyProfile(
     datasetFamilyOrDefault(cfg.swebenchDatasetFamily),
   ).harnessSpec({

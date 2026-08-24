@@ -42,6 +42,9 @@ const ONBOX_DIGESTS: ReadonlyArray<readonly [string, string]> = [
 const promaxBootstrap = () =>
   familyRemoteBootstrap(resolveBenchRunConfig({ argvFamily: "promax", env: {} }))
 
+/** What the bench actually writes: JSONL, one prediction per line. */
+const PREDS_JSONL = `${JSON.stringify({ instance_id: "aws__s2n-tls-5464", model_patch: "PATCH" })}\n`
+
 const PASS_RATE = JSON.stringify([
   {
     instance_id: "aws__s2n-tls-5464",
@@ -74,6 +77,11 @@ const recorder = (opts: { gradeFails?: boolean } = {}): Rec => {
         return hit === undefined
           ? { code: 1, stdout: "", stderr: "no such file" }
           : { code: 0, stdout: `${hit[1]}  ${suffix_of(cmd)}`, stderr: "" }
+      }
+      // TWO different `cat`s now: the predictions probe (JSONL, as the bench
+      // writes it) and the pass-rate read (the evaluator's document).
+      if (cmd.startsWith("cat ") && cmd.includes(DEFAULT_CHUNK_PATHS.preds)) {
+        return { code: 0, stdout: PREDS_JSONL, stderr: "" }
       }
       if (cmd.startsWith("cat ")) return { code: 0, stdout: PASS_RATE, stderr: "" }
       if (cmd.includes("test_run.py")) {
@@ -150,7 +158,7 @@ describe("a ProMax chunk grades inside the window", () => {
     // the chunk's `~/…` forms are resolved to REAL absolute paths: a quoted `~`
     // expands to nothing, and the evaluator would read an empty predictions file
     // and grade every instance as a miss.
-    expect(grade).toContain("/home/ubuntu/preds.jsonl")
+    expect(grade).toContain("/home/ubuntu/preds.grader.json")
     expect(grade).toContain("/home/ubuntu/pass-rate.json")
     expect(grade).not.toContain("~/")
   })

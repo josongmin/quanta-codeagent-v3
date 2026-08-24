@@ -98,7 +98,10 @@ describe("no predictions ⇒ no answer key on the box", () => {
   })
 
   test("PAIRED CONTROL: a NON-empty predictions file does materialize and grade", async () => {
-    const r = recorder(JSON.stringify([{ instance_id: "aws__s2n-tls-5464", model_patch: "x" }]))
+    // JSONL, which is what the bench writes — not the array the evaluator reads.
+    const r = recorder(
+      `${JSON.stringify({ instance_id: "aws__s2n-tls-5464", model_patch: "x" })}\n`,
+    )
     await runFamilyBoxGrade({
       ssh: r.ssh,
       log: () => {},

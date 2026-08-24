@@ -131,8 +131,34 @@ export const runFamilyBoxGrade = async (
   }
 
   const home = await resolveBoxHome(input.ssh)
+
+  // CONVERT the predictions into the format this family's grader reads, if it
+  // says it needs one. The bench writes JSONL for every family; ProMax's pinned
+  // evaluator does `json.load` and needs a JSON array, and handing it the JSONL
+  // yields a parse error — or, for a single row, a dict whose VALUES are read as
+  // entries and therefore zero jobs.
+  //
+  // Written to its own path rather than over `preds`: that file is the run's own
+  // artifact and is fetched as evidence, so rewriting it would destroy the bytes
+  // the agent actually produced.
+  const prepare = profile.prepareBoxGradePredictions
+  let gradedPredictionsPath = input.paths.preds
+  if (prepare !== undefined) {
+    const converted = prepare(preds.stdout)
+    const wrote = await input.ssh(
+      `cat > ${input.paths.boxGradePredictions} <<'QUANTA_PROMAX_PREDS_EOF'\n${converted}\nQUANTA_PROMAX_PREDS_EOF`,
+    )
+    if (wrote.code !== 0) {
+      throw new Error(
+        `[full-remote] ${input.family}: could not write the converted predictions to ` +
+          `${input.paths.boxGradePredictions} (code ${wrote.code}): ${wrote.stderr || wrote.stdout}`,
+      )
+    }
+    gradedPredictionsPath = input.paths.boxGradePredictions
+  }
+
   const command = boxGrade({
-    predictionsPath: absolutizeOnBox(input.paths.preds, home),
+    predictionsPath: absolutizeOnBox(gradedPredictionsPath, home),
     outputPath: absolutizeOnBox(input.paths.passRate, home),
   })
 

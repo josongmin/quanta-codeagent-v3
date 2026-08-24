@@ -71,6 +71,10 @@ export const CHUNK_PATH_SCRUB_POLICY: Readonly<Record<keyof ChunkPaths, ChunkPat
   // evaluator writes it only on success, so a run that dies early would be
   // graded against the previous run's numbers.
   passRate: "file",
+  // PMX-04 — the converted predictions a box-grading family hands its evaluator.
+  // Scrubbed like every other derived artifact so a leftover cannot be graded as
+  // this run's submission.
+  boxGradePredictions: "file",
 }
 
 /** The bench writes its exit code beside its log. */
