@@ -151,11 +151,21 @@ export const fourSectionPreset = (input: FourSectionInput): PromptSection[] => {
 /** Validation verdict for {@link validateSectionsCacheBudget}. */
 export type CacheBudgetVerdict = { ok: true } | { ok: false; cachedCount: number; limit: number }
 
-/** Validate that a section list does not exceed Anthropic's cache_control cap.
- *  Fail-soft by contract: callers SHOULD warn in dev mode and still send the
- *  request — the provider will surface the real error if it actually rejects.
+/** Pure predicate: does a section list exceed Anthropic's `cache_control` cap?
  *  Counting honors explicit `cache:false` (uncached sections do not consume a
- *  breakpoint). */
+ *  breakpoint).
+ *
+ *  ADR-0542 — this is a DIAGNOSTIC, not the enforcement point, and it has no
+ *  production caller by design. `fourSectionPreset` emits at most
+ *  {@link MAX_CACHE_BREAKPOINTS} cached sections, so applied to preset output
+ *  the verdict is a constant `{ok:true}`; `src/agent/prompt.ts` used to call it
+ *  and discard the result, which is exactly as much as an always-true check can
+ *  do. The real budget is enforced on the ASSEMBLED request by
+ *  `capSystemCacheMarkers` (`src/llm/anthropic-messages-codec.ts`), which counts
+ *  markers AFTER the conversation breakpoint is reserved — a strictly tighter
+ *  denominator than this function's — and repairs the request rather than
+ *  reporting on it. Kept exported because tests use it to state the section-count
+ *  invariant directly. */
 export const validateSectionsCacheBudget = (
   sections: readonly PromptSection[],
 ): CacheBudgetVerdict => {

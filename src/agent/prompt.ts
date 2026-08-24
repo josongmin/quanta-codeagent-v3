@@ -50,7 +50,6 @@ import {
   buildSectionedSystemBlocks,
   fourSectionPreset,
   type PromptSection,
-  validateSectionsCacheBudget,
 } from "./prompt-sections"
 import { applyPromptStyle, type PromptStyle } from "./prompt-style"
 import { type RepoRules, renderRepoRulesBlock } from "./repo-rules"
@@ -699,9 +698,18 @@ const buildSystemSections = (
       : {}),
     ...(input.userAppend !== undefined ? { userAppend: defang(input.userAppend) } : {}),
   })
-  // Fail-soft cache-budget check (unchanged): the preset cannot exceed 4 by
-  // construction; kept so future growth surfaces in dev, not at the API.
-  validateSectionsCacheBudget(sections)
+  // NO section-level cache-budget check here, deliberately (ADR-0542).
+  // `fourSectionPreset` pushes at most four cached sections, so the verdict at
+  // this point was a CONSTANT `{ok:true}` — the call that used to sit here
+  // could not signal for any input, and consuming it would only have added an
+  // unreachable branch (this module is pure; it has no logger). The budget is
+  // enforced one layer down on the ASSEMBLED request, by `capSystemCacheMarkers`
+  // in `src/llm/anthropic-messages-codec.ts`: it counts markers against
+  // `MAX_ANTHROPIC_CACHE_MARKERS` AFTER `cacheConversationPrefix` has reserved
+  // the conversation breakpoint, so the live system budget is 3 — strictly
+  // tighter than the 4 a section-level check could ever have caught. It also
+  // REPAIRS (drops trailing markers, keeps every block's text) instead of
+  // merely reporting.
   return sections
 }
 

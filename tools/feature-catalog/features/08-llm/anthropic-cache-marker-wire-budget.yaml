@@ -30,8 +30,9 @@ purpose: |
   - `buildAnthropicMessagesRequest` then ALWAYS adds one more marker via
     `cacheConversationPrefix` (the trailing conversation breakpoint), which no budget
     accounts for. 4 cached sections therefore produce 5 markers on the wire.
-  - `src/agent/prompt.ts` calls `validateSectionsCacheBudget(sections)` and THROWS THE
-    RESULT AWAY, so even the partial check it does perform cannot warn.
+  - `src/agent/prompt.ts` called `validateSectionsCacheBudget(sections)` and THREW THE
+    RESULT AWAY, so even the partial check it did perform could not warn. (That call was
+    deleted in the 2026-08-24 follow-up pass — see notes.)
 
   Reachability was measured honestly rather than assumed: `userAppend` currently has NO
   producer in the loop, so the live preset tops out at 3 cached sections
@@ -68,12 +69,14 @@ evidence:
   code:
     - src/llm/anthropic-messages-codec.ts
     - src/agent/prompt-sections.ts
+    - src/agent/prompt.ts
   adrs:
     - docs/decisions/0542-anthropic-cache-marker-wire-budget.md
   tests:
     unit:
       - tests/unit/llm/anthropic-cache-marker-budget-hellgate.test.ts
       - tests/unit/anthropic-cache.test.ts
+      - tests/unit/agent/prompt-cache-budget-callsite-hellgate.test.ts
     integration: []
     contract: []
 knobs: []
@@ -83,7 +86,30 @@ notes: |
   knob to expose. `MAX_ANTHROPIC_CACHE_MARKERS` is exported from the codec as the single
   named authority.
 
-  KNOWN RESIDUAL (outside this lane's write set, recorded for the integration lane):
-  `src/agent/prompt.ts` still discards the `validateSectionsCacheBudget` verdict. The wire
-  cap now makes that check non-load-bearing for correctness, but as written it is a
-  silent no-op whose comment claims it "surfaces in dev".
+  RESIDUAL CLOSED (2026-08-24 follow-up pass) — the discarded
+  `validateSectionsCacheBudget` call in `src/agent/prompt.ts` was DELETED, not made to
+  warn. Two measurements decided it:
+
+  - The verdict there was a CONSTANT. `fourSectionPreset` pushes at most four cached
+    sections from four named slots (no loop, no caller-extensible list), so the predicate
+    returned `{ok:true}` for every reachable input — verified exhaustively over all 2^4
+    presence combinations (16/16), and by temporarily replacing the discarded call with a
+    `throw` on `!ok` and running the whole prompt/agent/cache surface: 2253 tests, 0
+    failures, the false arm never fired. A `logger.warn` there would have been an
+    unreachable branch in a module that is pure and imports no logger.
+  - The wire cap SUBSUMES it strictly. The section check permitted 4 cached sections; the
+    wire permits `MAX_ANTHROPIC_CACHE_MARKERS - reserved`, and `cacheConversationPrefix`
+    reserves one every real turn, so the live system budget is 3. Measured end-to-end with
+    `fourSectionPreset` mutated to emit a fifth cached section and NO section-level check
+    present: the assembled request carried 4 markers with all 5 blocks intact — repaired,
+    not merely reported.
+
+  `validateSectionsCacheBudget` is KEPT and re-documented as a pure diagnostic with no
+  production caller (tests use it to state the section-count invariant directly).
+  `tests/unit/agent/prompt-cache-budget-callsite-hellgate.test.ts` pins the constancy, a
+  drift guard on the four section names, and the wire subsumption + paired control.
+
+  FOLLOW-UP (not taken here): `capSystemCacheMarkers` drops markers SILENTLY. Correct for
+  availability — a degraded cache beats a 400 — but a live turn sits at exactly the cap
+  today, so the first real drop is an invisible cache regression. A dev-visible signal
+  belongs at the wire, where the drop happens and is reachable.
