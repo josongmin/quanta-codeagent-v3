@@ -107,15 +107,6 @@ const refuse = (what: string, why: string): never => {
   )
 }
 
-/** The ON-BOX refusal, spelled once and shared by the admission gate and the
- *  bootstrap port so the two can never drift into disagreeing about the lane. */
-const refuseOnBoxBootstrap = (): never =>
-  refuse(
-    "the on-box ProMax bootstrap",
-    `The frozen bundle is not in git and must not be downloaded on demand (PMX-00). ` +
-      `Provision it out of band and point ${PROMAX_BUNDLE_ROOT_ENV} at the verified root.`,
-  )
-
 export const PROMAX_PROFILE: DatasetFamilyProfile = {
   family: "promax",
   // Distinct from `pro` BY CONSTRUCTION; the registry refuses a duplicate key.

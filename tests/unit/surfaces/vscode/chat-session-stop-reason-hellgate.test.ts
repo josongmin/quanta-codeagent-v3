@@ -32,7 +32,7 @@ import {
 } from "@surfaces/vscode/chat-session-adapter"
 import { CHAT_SESSION_STATUS } from "@surfaces/vscode/status"
 import type { SessionTransportMessage } from "@/ipc/session"
-import type { SessionEvent, SessionSnapshotLite } from "@/protocol/session"
+import type { SessionEvent } from "@/protocol/session"
 
 const completedEvent = (
   outcomeReason: string,

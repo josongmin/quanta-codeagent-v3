@@ -21,8 +21,8 @@ import type { HookPromptInject } from "../hooks"
 import {
   applyCollaborationModeTransition,
   isMutatingMode,
-  resolveLiveAgentMode,
   resolveCollaborationMode,
+  resolveLiveAgentMode,
 } from "../mode"
 import type { PlanLifecycleConfig } from "../types"
 import type { PendingPlanEntry } from "./types"

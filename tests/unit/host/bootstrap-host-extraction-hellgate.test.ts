@@ -47,7 +47,6 @@ import {
   isSessionBootstrapError,
   type SessionBootstrapDeps,
   SessionBootstrapError,
-  type SessionRuntimeConfigShape,
 } from "@/host/bootstrap"
 import type { LLMPort } from "@/llm"
 import {
