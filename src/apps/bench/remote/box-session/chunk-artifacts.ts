@@ -18,6 +18,8 @@ import { mkdirSync, rmSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { mirrorReportToSsot } from "@/runner/batch/report"
 import { benchHome } from "../../corpus"
+import type { DatasetFamily } from "../../dataset-family-token"
+import { resolveDatasetFamilyProfile } from "../../profiles/registry"
 import type { SpawnResult } from "../backend"
 import { closureDiagnosticsPathFor, trajectoriesDirFor } from "./chunk-scrub"
 import { shq } from "./shell"
@@ -137,6 +139,8 @@ const fetchTrajectoryFiles = async (args: {
 
 export const fetchChunkArtifacts = async (args: {
   ssh: BoxSession["ssh"]
+  /** decides whether this report belongs on the SSOT; see `shouldMirrorReportToSsot`. */
+  datasetFamily: DatasetFamily
   paths: ChunkPaths
   artifactSuffix: string
   recordTrajectory: boolean
@@ -193,8 +197,17 @@ export const fetchChunkArtifacts = async (args: {
   )
   if (reportPath !== undefined) {
     // Canonical SSOT mirror — same sink as the local batch's writeReport, so
-    // full-remote per-box reports also collect in one fixed place.
-    await mirrorReportToSsot(reportPath, fetchedReport.stdout)
+    // full-remote per-box reports also collect in one fixed place. Skipped for a
+    // family whose report is a patch-gen-only pass; see the predicate.
+    if (shouldMirrorReportToSsot(args.datasetFamily)) {
+      await mirrorReportToSsot(reportPath, fetchedReport.stdout)
+    } else {
+      args.log(
+        "[full-remote] report NOT mirrored to the results SSOT — this family grades in its own " +
+          "grader phase, so this report is a patch-gen-only pass and its verdicts are not the " +
+          "run's result. The grade document and its receipt are saved instead.",
+      )
+    }
     return {
       reportText: fetchedReport.stdout,
       reportPath,
@@ -204,6 +217,25 @@ export const fetchChunkArtifacts = async (args: {
     reportText: fetchedReport.stdout,
   }
 }
+
+/**
+ * Does this family's bench report belong on the canonical leaderboard SSOT?
+ *
+ * For a family that grades in its OWN grader phase the report is a
+ * PATCH-GEN-ONLY pass: the grading shim is off, so every instance in it is an
+ * explicit "harness not wired" infra error by construction and its verdicts are
+ * discarded (that is what `parseBoxGradeVerdicts` exists for). Mirroring it
+ * created a campaign row whose every instance is a measurement hole.
+ *
+ * Keyed on the PORT, never on a family name — packet invariant 10 — so a future
+ * on-box-grading family inherits this without editing transport.
+ *
+ * The report is still SAVED locally: it is real forensics for the agent phase.
+ * It just stops claiming to be a result, when the result is the pass-rate
+ * document and the grade receipt saved beside it.
+ */
+export const shouldMirrorReportToSsot = (family: DatasetFamily): boolean =>
+  resolveDatasetFamilyProfile(family).boxGrade === undefined
 
 export const collectRunDiagnostics = async (args: {
   ssh: BoxSession["ssh"]

@@ -595,6 +595,7 @@ const executeGradeChunk = async (args: {
   log(`[full-remote] run finished (exit ${args.state.finalExitCode}); fetching report…`)
   const fetched = await fetchChunkArtifacts({
     ssh,
+    datasetFamily: args.params.datasetFamily,
     paths: args.paths,
     artifactSuffix: args.artifactSuffix,
     recordTrajectory: args.params.recordTrajectory,

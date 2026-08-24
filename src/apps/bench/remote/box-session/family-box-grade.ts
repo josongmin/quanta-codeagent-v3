@@ -168,6 +168,31 @@ export const runFamilyBoxGrade = async (
   // That is also what the invocation builder demands, and rightly: a
   // cwd-relative path cannot be replayed from a receipt. This is the one place
   // that knows the box's home, so it is the one place that can honour both.
+  // IS THE AGENT GONE? Asked BEFORE the answer key is materialized.
+  //
+  // The bench is launched detached and the completion probe accepts EITHER
+  // `run.exit` or a fallback — "the report parses and preds is non-empty". On
+  // that fallback the wrapper never wrote `run.exit`, so the bench's state is
+  // unknown: the artifacts merely LOOK finished. Every abnormal exit already
+  // throws and skips the grade, so the hole is exactly the benign-looking case.
+  //
+  // The whole gold boundary rests on the agent and the answer key never
+  // coexisting. The agent phase proves the key is absent before it starts;
+  // nothing proved the AGENT was gone before the key arrived.
+  //
+  // The probe matches the literal command the box was told to run, not a guess
+  // at process names. `pgrep` exits non-zero when nothing matches, which is the
+  // answer we want.
+  const stillRunning = await input.ssh("pgrep -f 'apps/bench/cli.ts run' >/dev/null && echo ALIVE")
+  if (stillRunning.stdout.trim() === "ALIVE") {
+    throw new Error(
+      `[full-remote] ${input.family}: the bench process is STILL RUNNING on the box — REFUSING to ` +
+        "materialize the answer key beside a live agent. The run was reported complete by the " +
+        "artifact fallback (report parses + predictions non-empty) rather than by `run.exit`, so " +
+        "its process state was never established.",
+    )
+  }
+
   // IS THERE ANYTHING TO GRADE? Asked BEFORE the answer key is materialized.
   //
   // `runChunkBench` RETURNS its exit code rather than throwing, so a patch-gen
