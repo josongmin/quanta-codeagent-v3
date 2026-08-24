@@ -180,7 +180,12 @@ describe("jul-13 fresh-hash CROSS-TOOL chain survives the DEFAULT-ON mtime guard
     )
     const advertised = w.output?.match(FRESH_RE)?.[1]
 
-    // External writer touches the file to a definitively-later mtime.
+    // External writer CHANGES the file and leaves a definitively-later mtime.
+    // The mtime alone is no longer an external-write signal — content is the
+    // stale-read authority, so identical bytes under a newer mtime pass by
+    // design. `n = 1` is kept so the edit below still matches and the refusal
+    // is the guard rather than a failed search.
+    writeFileSync(path, "m = 2\nn = 1\nCLOBBERED = 1\n", "utf8")
     const future = new Date(Date.now() + 60_000)
     utimesSync(path, future, future)
 
@@ -190,7 +195,8 @@ describe("jul-13 fresh-hash CROSS-TOOL chain survives the DEFAULT-ON mtime guard
       prodCtx(state),
     )
     expect(e.ok).toBe(false)
-    expect((e.failure as { reason?: string } | undefined)?.reason).toBe("stale_read")
-    expect(readFileSync(path, "utf8")).toBe("m = 2\nn = 1\n") // edit rejected
+    expect(e.failure?.mode).toBe("stale_precondition")
+    // No lost update: the external writer's bytes are still there.
+    expect(readFileSync(path, "utf8")).toBe("m = 2\nn = 1\nCLOBBERED = 1\n")
   })
 })

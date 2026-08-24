@@ -227,8 +227,13 @@ describe("jul-13 notebook_edit × edit-fresh-hash baseline refresh — PRODUCTIO
     // Refresh landed: baseline == post-commit on-disk mtime.
     expect(state.recordedMtime(path)).toBe(statSync(path).mtimeMs)
 
-    // EXTERNAL clobber: force the mtime clearly AFTER what the notebook write
-    // recorded (deterministic — not dependent on fs mtime granularity).
+    // EXTERNAL clobber: a real out-of-band writer changes the notebook's CONTENT
+    // (an added cell source), then forces the mtime clearly after what the
+    // notebook write recorded. Touching the mtime alone no longer models an
+    // external write: content is the stale-read authority now, and identical
+    // bytes under a newer mtime are deliberately NOT a stale read.
+    const clobbered = readFileSync(path, "utf8").replace("x = 2", "x = 2\\nz = 9")
+    writeFileSync(path, clobbered, "utf8")
     const future = new Date(Date.now() + 60_000)
     utimesSync(path, future, future)
     expect(statSync(path).mtimeMs).toBeGreaterThan(state.recordedMtime(path) as number)
@@ -238,9 +243,10 @@ describe("jul-13 notebook_edit × edit-fresh-hash baseline refresh — PRODUCTIO
     expect(r2.ok).toBe(false)
     expect(r2.failure?.mode).toBe("rejected")
     expect((r2.failure as { reason?: string } | undefined)?.reason).toBe("stale_read")
-    // The rejected edit never landed — the notebook's edited bytes are intact.
+    // The rejected edit never landed, and the out-of-band writer's bytes survive.
     expect(readFileSync(path, "utf8")).toContain("x = 2")
     expect(readFileSync(path, "utf8")).not.toContain("x = 3")
+    expect(readFileSync(path, "utf8")).toContain("z = 9")
   })
 
   test("5. NOTEBOOK→NOTEBOOK chain: two sequential cell edits (no re-read between) both survive the DEFAULT-ON guard", async () => {

@@ -255,15 +255,22 @@ describe("edit-fresh-hash CHAIN survives the REAL runAgent loop (default-ON)", (
   //     touch the file's mtime FORWARD (external write) before edit-2 — so edit-2
   //     SHOULD be vetoed `stale_read`. This proves the guard is genuinely LIVE and
   //     checking a real baseline (not inert) in the loop.
-  // The chooser omits expected_hash so the ONLY gate edit-2 faces is the mtime
-  // guard (isolating it from the hash precondition).
-  test("mtime-guard is LIVE: an external mtime-forward between edits vetoes edit-2 (stale_read)", async () => {
+  // The chooser omits expected_hash so the ONLY gate edit-2 faces is the
+  // stale-read guard (isolating it from the hash precondition).
+  test("stale-read guard is LIVE: an external CLOBBER between edits vetoes edit-2", async () => {
     await withFreshHash(undefined, async () => {
       const rfs = new ReadFileState()
       // A model that, before emitting turn-2's edit, mutates the file OUT OF BAND
       // and advances its mtime past the baseline edit-1's refresh recorded — a real
       // external modification. The chained edit carries NO expected_hash so the
-      // mtime guard is the SOLE arbiter (isolating the guard from the hash gate).
+      // stale-read guard is the SOLE arbiter (isolating it from the hash gate).
+      //
+      // The out-of-band write must CHANGE the bytes. It used to rewrite the file
+      // with its own current contents and only move the mtime, which modelled an
+      // external writer while the guard keyed on mtime; content is the authority
+      // now, so a byte-identical rewrite is deliberately not a stale read and the
+      // old form was pinning the retired mechanism. Appending is enough, and it
+      // leaves edit-2's search text intact so the veto below cannot be a miss.
       const llm = new ChainingEditLLM(
         file,
         FIRST,
@@ -271,19 +278,21 @@ describe("edit-fresh-hash CHAIN survives the REAL runAgent loop (default-ON)", (
         () => undefined,
         () => {
           const cur = readFileSync(file, "utf8")
-          writeFileSync(file, cur)
+          writeFileSync(file, `${cur}\n// CLOBBERED-OUT-OF-BAND\n`)
           const future = Date.now() / 1000 + 60
           utimesSync(file, future, future)
         },
       )
       await runAgent(baseCfg({ llm, readFileState: rfs }))
 
-      // Edit-1 landed; edit-2 was VETOED by the live mtime guard (external write
-      // advanced mtime past the refreshed baseline) — proving the guard is LIVE and
-      // checking a REAL baseline in the loop, not inert.
+      // Edit-1 landed; edit-2 was VETOED by the live stale-read guard (the
+      // external write changed the file after the refreshed baseline) — proving
+      // the guard is LIVE and checking a REAL baseline in the loop, not inert.
       const onDisk = readFileSync(file, "utf8")
       expect(onDisk).toContain("ALPHA-1")
       expect(onDisk).not.toContain("BETA-2")
+      // And no lost update: the out-of-band writer's bytes survived.
+      expect(onDisk).toContain("CLOBBERED-OUT-OF-BAND")
       const secondResult = toolResultTexts(llm.inputs.at(-1)).at(-1) ?? ""
       expect(secondResult).toMatch(/modified on disk after you last read it/i)
     })

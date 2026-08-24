@@ -702,6 +702,8 @@ const RULES: readonly Rule[] = [
         "God-module split of agent/admissibility-gate.ts — the `opts.store ?? getDefaultPermissionStore()` transitional fallback relocated verbatim into the composition-adjacent gates cluster (called by dispatch). Same posture + remove-when-fully-wired note as agent/admissibility-gate.ts.",
       "apps/cli/repl.ts":
         "CLI composition root — `loadPermissionStore` is EXACTLY where the rule says the singleton should be wired (`src/apps/**`); the store is then injected downstream via AgentConfig.",
+      "apps/web-daemon/runtime-factory.ts":
+        "Web-daemon composition root — the structural twin of apps/cli/repl.ts above, and the file's own docstring says so: `loadDefaultPermissionStore` is `getDefaultPermissionStore().load()` fail-soft to `undefined`, wired at boot and injected downstream, so CLI and web share one durable posture file. This is the sanctioned `src/apps/**` position the rule names; the allowlist is per-FILE rather than a glob, so a second composition root has to be admitted explicitly.",
     },
   },
   {

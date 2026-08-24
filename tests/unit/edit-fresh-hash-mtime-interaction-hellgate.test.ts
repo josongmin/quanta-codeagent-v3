@@ -167,8 +167,18 @@ describe("jul-13 edit-fresh-hash × DEFAULT-ON mtime guard — PRODUCTION TRUTH 
     expect(r1.ok).toBe(true)
     const advertised = r1.output?.match(FRESH_RE)?.[1]
 
-    // EXTERNAL clobber: force the file's mtime to clearly AFTER what the edit
-    // recorded (deterministic — not dependent on fs mtime granularity).
+    // EXTERNAL clobber: a real out-of-band writer — the file's CONTENT changes,
+    // and its mtime is then forced clearly after what the edit recorded
+    // (deterministic — not dependent on fs mtime granularity).
+    //
+    // This used to touch the mtime ALONE, as a cheap stand-in for an external
+    // write. That stand-in stopped being equivalent when the stale-read
+    // authority moved from mtime to CONTENT: an mtime that advanced over
+    // identical bytes is now — deliberately — not a stale read, so the old
+    // simulation asserted the retired mechanism rather than the property.
+    // `y = 1` is left intact so edit #2 still MATCHES: the refusal below is the
+    // guard, not a failed search.
+    writeFileSync(path, "let x = 2\nlet y = 1\nlet CLOBBERED = 1", "utf8")
     const future = new Date(Date.now() + 60_000)
     utimesSync(path, future, future)
     expect(statSync(path).mtimeMs).toBeGreaterThan(state.recordedMtime(path) as number)
@@ -177,12 +187,12 @@ describe("jul-13 edit-fresh-hash × DEFAULT-ON mtime guard — PRODUCTION TRUTH 
       { path, old_string: "y = 1", new_string: "y = 2", expected_hash: advertised },
       ctx,
     )
-    // Guard still fires on the external change — the fix did not disable TOCTOU.
+    // Refused, and the out-of-band writer's bytes SURVIVE — no lost update.
+    // That is the property; which of the two gates catches it is an
+    // implementation detail, and here the hash precondition is first.
     expect(r2.ok).toBe(false)
-    expect(r2.failure?.mode).toBe("rejected")
-    expect((r2.failure as { reason?: string } | undefined)?.reason).toBe("stale_read")
-    // The rejected edit #2 never landed.
-    expect(readFileSync(path, "utf8")).toBe("let x = 2\nlet y = 1")
+    expect(r2.failure?.mode).toBe("stale_precondition")
+    expect(readFileSync(path, "utf8")).toBe("let x = 2\nlet y = 1\nlet CLOBBERED = 1")
   })
 
   test("5. ISOLATION: with the guard OFF (readFileState unwired) the chain also succeeds — the fix targets the guard interaction only", async () => {
