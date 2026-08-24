@@ -4,12 +4,17 @@ import type { StatusBar } from "../../../../src/apps/cli/status-bar"
 import type { TurnIndicator } from "../../../../src/apps/cli/turn-indicator"
 import type { TurnSummaryCollector } from "../../../../src/apps/cli/turn-summary"
 
-// Spec scenario coverage: 5 representative paths the prior inline `turn`
-// closure produced output for. Each test compares the stderr WRITE SEQUENCE
-// of runOneTurn against the SAME sequence the legacy inline implementation
-// would have produced, asserting NO drift. The legacy reference is encoded
-// inline as the expected array (extracted by reading repl.ts:1335-1428 in
-// git history).
+// HONEST SCOPE (relabelled): the post-refactor `runOneTurn` routes ALL output
+// through injected sinks (status bar / indicator / summary collector), so it
+// writes NOTHING to raw `process.stderr` itself. These 5 scenarios (the paths
+// the prior inline `turn` closure covered) therefore assert `writes === []` —
+// i.e. the runner does not bypass its sinks and write to stderr directly — while
+// separately asserting the SINK received the expected message (e.g. `errMessages
+// === ["aborted"]`). This catches a regression that writes to stderr directly
+// (bypassing sinks); it does NOT compare byte content against a legacy reference
+// array and CANNOT detect a sink emitting wrong bytes — that is the sinks' own
+// tests' job. The "byte-identity baseline" name is retained for continuity but
+// the guarantee is "runner is stderr-silent; sinks own output", not a byte diff.
 
 // === stderr capture harness ===================================================
 
