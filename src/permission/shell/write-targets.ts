@@ -32,7 +32,8 @@ import type { ShellCommandIr, ShellWord } from "./ir"
 import { lowerShellTree } from "./ir"
 import { parseShell } from "./parser"
 import { applyCd, CALLER_CWD, type EffectiveCwd, normalizePosix, UNKNOWN_CWD } from "./path-effect"
-import { expandFlagCluster, VEHICLE_HEADS } from "./rules"
+import { expandFlagCluster } from "./rules"
+import { stripVehicleHeads } from "./vehicle"
 
 /** One resolved write target. `cwdRelative` means "somewhere under the caller's
  *  own directory" — the caller resolves it against its real cwd. */
@@ -68,39 +69,6 @@ const flagSet = (args: readonly ShellWord[]): Set<string> => {
  *  own head and operands are what the rules below see. This is the single fix
  *  for the whole "complete miss" class. Returns `null` when the payload cannot
  *  be named. */
-/** How many leading arguments belong to the VEHICLE rather than its payload:
- *  its own flags, `VAR=value` prefixes, and (for `timeout`/`nice`) a bare
- *  duration. `null` when an unresolved word makes the boundary unknowable. */
-const vehiclePrefixLength = (vehicle: string, args: readonly ShellWord[]): number | null => {
-  const takesNumber = vehicle === "timeout" || vehicle === "nice" || vehicle === "ionice"
-  let i = 0
-  while (i < args.length) {
-    const a = args[i] as ShellWord
-    if (!a.resolved) return null
-    const own =
-      a.text.startsWith("-") ||
-      /^[A-Za-z_][A-Za-z0-9_]*=/.test(a.text) ||
-      (takesNumber && /^[0-9]+(\.[0-9]+)?[smhd]?$/.test(a.text))
-    if (!own) break
-    i++
-  }
-  return i
-}
-
-const payloadOf = (cmd: ShellCommandIr): ShellCommandIr | null => {
-  let current = cmd
-  for (let depth = 0; depth < 4; depth++) {
-    const head = current.head
-    if (head === null || !head.resolved || !VEHICLE_HEADS.has(head.text)) return current
-    const i = vehiclePrefixLength(head.text, current.args)
-    if (i === null) return null
-    const next = current.args[i]
-    if (next === undefined) return current
-    if (!next.resolved) return null
-    current = { ...current, head: next, args: current.args.slice(i + 1) }
-  }
-  return current
-}
 
 /** `dd … of=FILE` — the operand is a `key=value`, so it is neither a flag nor a
  *  plain operand and needs its own read. */
@@ -213,7 +181,7 @@ export const shellWriteTargets = (command: string): readonly ShellWriteTarget[] 
             : UNKNOWN_CWD
       continue
     }
-    const cmd = payloadOf(raw)
+    const cmd = stripVehicleHeads(raw)
     if (cmd === null) continue
     for (const t of targetsOfCommand(cmd)) out.push(resolveTarget(t, cwd))
   }

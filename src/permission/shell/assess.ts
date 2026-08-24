@@ -39,8 +39,8 @@ import {
   SECRET_READ_HEADS,
   SHELL_HEADS,
   STDIN_OPERAND_HEADS,
-  VEHICLE_HEADS,
 } from "./rules"
+import { stripVehicleHeads } from "./vehicle"
 
 /** Verdict for a command line.
  *
@@ -307,56 +307,6 @@ const assessSimple = (cmd: ShellCommandIr): ShellAssessment | null => {
  * command dispatch
  * ------------------------------------------------------------------------- */
 
-/** Strip vehicle heads until a real program is reached.
- *
- *  Only the vehicle's OWN LEADING flags and `VAR=value` prefixes are dropped —
- *  a first cut filtered flags out of the whole argument list, which silently ate
- *  the payload's `-rf` and turned `sudo rm -rf /` into a harmless-looking
- *  `rm /`. Stopping at the first non-flag word is what keeps the payload
- *  intact.
- *
- *  Returns `null` when the payload cannot be determined. */
-/** How many leading arguments belong to the VEHICLE rather than to its payload:
- *  the vehicle's own flags, `VAR=value` prefixes, and (for `timeout`/`nice`) a
- *  bare duration operand. Returns `null` when an unresolved word makes the
- *  boundary unknowable. */
-const vehiclePrefixLength = (vehicle: string, args: readonly ShellWord[]): number | null => {
-  const takesNumericOperand = vehicle === "timeout" || vehicle === "nice" || vehicle === "ionice"
-  let j = 0
-  while (j < args.length) {
-    const a = args[j] as ShellWord
-    if (!a.resolved) return null
-    const own =
-      a.text.startsWith("-") ||
-      /^[A-Za-z_][A-Za-z0-9_]*=/.test(a.text) ||
-      (takesNumericOperand && /^[0-9]+(\.[0-9]+)?[smhd]?$/.test(a.text))
-    if (!own) break
-    j++
-  }
-  return j
-}
-
-const stripVehicles = (cmd: ShellCommandIr): ShellCommandIr | null => {
-  let current = cmd
-  for (let i = 0; i < MAX_DEPTH; i++) {
-    const head = current.head
-    if (head === null || !head.resolved || !VEHICLE_HEADS.has(head.text)) return current
-    const j = vehiclePrefixLength(head.text, current.args)
-    if (j === null) return null
-    const nextHead = current.args[j]
-    if (nextHead === undefined) return current
-    if (!nextHead.resolved) return null
-    current = {
-      head: nextHead,
-      args: current.args.slice(j + 1),
-      redirects: current.redirects,
-      pipeline: current.pipeline,
-      selfRecursiveFunction: current.selfRecursiveFunction,
-    }
-  }
-  return current
-}
-
 const headName = (cmd: ShellCommandIr): string | null => {
   const h = cmd.head
   if (h === null || !h.resolved) return null
@@ -408,7 +358,7 @@ const assessByHead = (name: string, cmd: ShellCommandIr, ctx: Ctx): ShellAssessm
 
 const assessCommand = (raw: ShellCommandIr, ctx: Ctx): ShellAssessment => {
   const rawHead = raw.head?.resolved === true ? (raw.head.text.split("/").pop() ?? null) : null
-  const cmd = stripVehicles(raw)
+  const cmd = stripVehicleHeads(raw)
   if (cmd === null) return unknown("a vehicle's payload is not statically resolvable")
   const head = cmd.head
   if (head === null) return safe()
