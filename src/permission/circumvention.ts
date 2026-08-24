@@ -30,9 +30,9 @@
  * here (not in `@/rules`) to keep `@/rules` from depending on `@/permission`.
  */
 
-import { shellWriteTargets } from "./shell"
 import type { AutoModeOverlay } from "./classifier"
 import { DENIAL_LIMITS } from "./classifier"
+import { shellWriteTargets } from "./shell"
 
 /** Provenance layer of a rule, mirrored from `@/rules`'s `RuleLayer` (inlined
  *  to keep this module a zero-cross-slice-import leaf; the literal union is the
