@@ -144,7 +144,9 @@ describe("a live agent process blocks the grader window", () => {
     const r = recorder({ agentAlive: false })
     await grade(r)
     const probe = r.issued.find((c) => c.includes("pgrep")) ?? ""
-    expect(probe).toContain("apps/bench/cli.ts")
+    // the bracket form — see the self-match test below. It still NAMES the bench
+    // command; it just cannot find the shell asking the question.
+    expect(probe).toContain("[a]pps/bench/cli.ts run")
   })
 })
 
@@ -175,5 +177,45 @@ describe("a FAILED probe is not an answer", () => {
     ).rejects.toThrow(/could not be established|unreachable|ssh/i)
     // and NOTHING gold-bearing was issued on a box we could not reach
     expect(issued.some((c) => c.includes("'git'"))).toBe(false)
+  })
+})
+
+describe("the probe cannot match ITSELF", () => {
+  test("🔴 the pattern is written so the probing shell's own command line does not match it", () => {
+    // A PRECAUTION, not a fix for something measured. `pgrep -f` matches full
+    // command lines and the probing shell carries the pattern in its own, so a
+    // literal pattern could in principle find the probe itself and answer ALIVE
+    // forever. A self-match was NOT reproducible on macOS, so it is not claimed
+    // as the cause of anything — but the bracket form costs nothing and removes
+    // the possibility: `[a]pps/…` matches the literal `apps/…` in another
+    // process, while this command line contains `[a]pps/…`, which it does not
+    // match. Verified separately that it still finds a real process.
+    const issued: string[] = []
+    const ssh = async (cmd: string) => {
+      issued.push(cmd)
+      if (cmd.includes("pgrep")) return { code: 1, stdout: "", stderr: "" }
+      return { code: 0, stdout: "", stderr: "" }
+    }
+    return runFamilyBoxGrade({
+      ssh,
+      log: () => {},
+      family: "promax",
+      bootstrap: promaxBootstrap(),
+      paths: DEFAULT_CHUNK_PATHS,
+      sleep: async () => {},
+    })
+      .catch(() => {})
+      .then(() => {
+        const probe = issued.find((c) => c.includes("pgrep")) ?? ""
+        expect(probe, "no probe was issued").not.toBe("")
+        // the regex, applied to the probe's OWN text, must not match it
+        const pattern = /\[a\]pps\/bench\/cli\.ts run/
+        expect(probe, "the probe does not use a self-excluding pattern").toMatch(pattern)
+        const asRegex = /apps\/bench\/cli\.ts run/
+        expect(
+          asRegex.test(probe),
+          "the probe's own command line still matches the pattern it searches for",
+        ).toBe(false)
+      })
   })
 })

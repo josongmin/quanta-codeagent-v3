@@ -94,12 +94,22 @@ export const proveAnswerKeyAbsentForAgent = async (input: {
   })
 }
 
-/** How long to let a finishing bench wrapper exit before giving up, and how
- *  often to ask. Sized to the observed gap — the wrapper writes `run.exit` right
- *  after the bench returns — with headroom, and it is a CEILING for a wedged
- *  process, not a target. */
-const AGENT_EXIT_GRACE_MS = 120_000
-const AGENT_EXIT_POLL_MS = 3_000
+/**
+ * How long to let a finishing bench run exit, and how often to ask.
+ *
+ * MEASURED, and the reason this is not 120s: on a real box all seven instances
+ * had FINISHED before the wait began, and the process was still alive more than
+ * two minutes later — the tail after the last instance (trace flush, sandbox
+ * teardown, artifact writes) is minutes, not milliseconds. A 120s ceiling turned
+ * a completed run into a refusal and threw the box away.
+ *
+ * It is a CEILING for a WEDGED process, not a target: a healthy run leaves as
+ * soon as its tail is done and never approaches this. Progress is logged so a
+ * waiting operator can tell it apart from a hang.
+ */
+const AGENT_EXIT_GRACE_MS = 600_000
+const AGENT_EXIT_POLL_MS = 5_000
+const AGENT_EXIT_LOG_EVERY_MS = 60_000
 
 /**
  * Wait for the bench process to leave the box, then let the caller proceed.
@@ -131,7 +141,14 @@ const awaitAgentExit = async (input: {
     //
     // So the probe must ANSWER, not merely fail to say ALIVE. ssh's own 255 is
     // the transport's signal; pgrep never exits 255.
-    const probe = await input.ssh("pgrep -f 'apps/bench/cli.ts run' >/dev/null && echo ALIVE")
+    // `[a]pps` is not a typo, and it is a PRECAUTION rather than a fix for
+    // something measured. `pgrep -f` matches full command lines, and the shell
+    // running this probe carries the pattern in its own; the bracket form makes
+    // the pattern differ, as TEXT, from what it matches, so the probe can never
+    // find itself. Verified locally that it still finds a real process carrying
+    // the bench command line — the property that matters — while a self-match was
+    // NOT reproducible on macOS, so it is not claimed as the cause of anything.
+    const probe = await input.ssh("pgrep -f '[a]pps/bench/cli.ts run' >/dev/null && echo ALIVE")
     if (probe.code === 255) {
       throw new Error(
         `[full-remote] ${input.family}: the box became unreachable while waiting for the bench ` +
@@ -149,10 +166,14 @@ const awaitAgentExit = async (input: {
           "established, and it has not since exited.",
       )
     }
-    if (waited === 0) {
+    // Log at the start and once a minute after: a silent wait is indistinguishable
+    // from a hang, and this one can legitimately run for minutes.
+    if (waited % AGENT_EXIT_LOG_EVERY_MS === 0) {
       input.log(
-        `[full-remote] ${input.family}: the bench wrapper is still finishing (it writes ` +
-          "`run.exit` last) — waiting for it to exit before the answer key is materialized…",
+        `[full-remote] ${input.family}: the bench run has not exited yet (${Math.round(waited / 1000)}s ` +
+          `of ${Math.round(AGENT_EXIT_GRACE_MS / 1000)}s) — its tail after the last instance ` +
+          "(trace flush, sandbox teardown, artifact writes) takes minutes. Waiting before the " +
+          "answer key is materialized…",
       )
     }
     await sleep(AGENT_EXIT_POLL_MS)
