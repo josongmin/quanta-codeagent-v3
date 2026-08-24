@@ -11,6 +11,8 @@
  *   - `mintSessionCollaborators`   (QUANTA_SUBAGENT / QUANTA_WORKFLOW / QUANTA_SKILLS
  *                                   / QUANTA_PLAN_STORE / QUANTA_MEMORY / QUANTA_WEB_CANVAS)
  *   - `mintLivePermissionCell`     (ungated — the ADR-0211 live mode cell)
+ *   - `resolveWebLivePosture`      (QUANTA_POSTURE_SELECTOR — the RFC-05 E4/E5
+ *                                   live posture: mode cell + control + guard)
  *   - `mintInboundPorts`           (QUANTA_WEB_AGENT_STATE / QUANTA_WEB_SUBAGENTS
  *                                   / QUANTA_CONTROL_REQUEST / QUANTA_ASK_USER)
  *
@@ -28,13 +30,16 @@ import {
   type ConversationActionSurface,
   createConversationActionSurface,
 } from "@/agent/conversation-action-surface"
+import type { QuestionAvailabilityReader } from "@/agent/dispatch-guard"
 import { type InboundMode, parseInboundMode } from "@/agent/inbound-mode"
 import { createInMemoryPlanStore, type PlanStore } from "@/agent/plan/state"
 import { FollowerCoControlDispatcher, isFollowerCoControlEnabled } from "@/agent/thread-follower"
 import { type ArtifactRegistry, createArtifactRegistry, monotonicIdFactory } from "@/artifact"
+import { buildLivePostureRuntime } from "@/host/bootstrap/live-posture-runtime"
 import { type ArtifactPreviewResolver, createArtifactPreviewResolver } from "@/host/runtime"
 import type { PersistentStorePort } from "@/memory"
 import type { PermissionContext } from "@/permission"
+import type { PostureControl } from "@/permission/posture/control"
 import {
   buildMemoryForSession,
   buildSkillsConfigCore,
@@ -224,6 +229,47 @@ export const mintLivePermissionCell = (): PermissionContext => {
     set mode(next) {
       permMode = next
     },
+  }
+}
+
+/** The web session's live-posture slice: the `permission` mode accessor plus the
+ *  RFC-05 E4 front-door control + E5 question guard when the posture selector is
+ *  ON. Gate OFF ⇒ only the mode cell (`postureControl`/`questionGuard` absent) ⇒
+ *  the config base omits both ⇒ the host `session.posture.set` falls back to the
+ *  mode-only compat write (byte-identical legacy web behavior). */
+export interface WebLivePosture {
+  readonly permission: PermissionContext
+  readonly postureControl?: PostureControl | undefined
+  readonly questionGuard?: QuestionAvailabilityReader | undefined
+}
+
+/**
+ * RFC-05 E4/E5 — resolve the web daemon's live posture. The CLI + `serve --stdio`
+ * doors thread `postureControl` + `questionGuard` through `bootstrap-session.ts`
+ * so a wire `session.posture.set` applies the FULL lossless patch (sandboxPolicy /
+ * askOutsidePlan / approvalPolicy / reviewer). The WebSocket daemon BYPASSES
+ * bootstrap, so it reuses the SAME `buildLivePostureRuntime` seam here (ONE
+ * authority; no second posture authority, no re-implementation) — the
+ * `permission` mode accessor is that authority's E3 adapter, so the control's
+ * mutations and the control-request/`session.permission.set` mode writes converge
+ * on ONE authority the next turn's gate + the E5 guard read.
+ *
+ * GATED on `QUANTA_POSTURE_SELECTOR` (registration parity with the CLI `/posture`
+ * selector): OFF ⇒ the legacy in-memory mode cell only (byte-identical). E3
+ * durable restart-resume is NOT wired here (the daemon has no resolved per-session
+ * id at config-base build — `ensureSessionId` mints it late inside the runtime
+ * binding), so the live posture is in-memory only; durable web-posture resume is a
+ * follow-up (parity with the objective per-connection Phase-2 park).
+ */
+export const resolveWebLivePosture = (env: Record<string, string | undefined>): WebLivePosture => {
+  if (!gateOn(env, "QUANTA_POSTURE_SELECTOR")) {
+    return { permission: mintLivePermissionCell() }
+  }
+  const live = buildLivePostureRuntime("default")
+  return {
+    permission: live.permission,
+    postureControl: live.postureControl,
+    questionGuard: live.questionGuard,
   }
 }
 

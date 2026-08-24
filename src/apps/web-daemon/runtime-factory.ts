@@ -51,9 +51,9 @@ import {
 import { buildReadoutSources } from "./runtime-factory/readout-sources"
 import {
   mintInboundPorts,
-  mintLivePermissionCell,
   mintSessionCollaborators,
   resolveArtifactSlots,
+  resolveWebLivePosture,
 } from "./runtime-factory/session-collaborators"
 import { wireSessionObservability } from "./runtime-factory/session-observability"
 
@@ -95,8 +95,13 @@ export const buildProductionRuntimeFactory = (): (() => Promise<ObservableRuntim
   return async (): Promise<ObservableRuntimeFacade> => {
     const cwd = process.cwd()
     const abort = new AbortController()
-    // ADR-0211/web — live permission cell (see {@link mintLivePermissionCell}).
-    const permission = mintLivePermissionCell()
+    // ADR-0211/web + RFC-05 E4/E5 — the live-posture slice. The `permission` mode
+    // accessor is ALWAYS present (ADR-0211 live cell); under QUANTA_POSTURE_SELECTOR
+    // it is the E3 adapter over the SAME authority the E4 `postureControl` +
+    // E5 `questionGuard` mutate/read, so a wire `session.posture.set` applies the
+    // FULL patch (not the silent mode-only drop). Gate OFF ⇒ mode cell only ⇒
+    // control/guard undefined (byte-identical). See {@link resolveWebLivePosture}.
+    const { permission, postureControl, questionGuard } = resolveWebLivePosture(env)
     // UUX-1-11 — the loop/readout collaborator bundle (subagent registry, plan
     // store, memory store, prompt-usage holder). See {@link mintSessionCollaborators}.
     const { taskRegistry, subagent, skills, planStore, memoryStore, usageHolder, canvasUsage } =
@@ -164,6 +169,12 @@ export const buildProductionRuntimeFactory = (): (() => Promise<ObservableRuntim
       controlRequest,
       follower,
       observability,
+      // RFC-05 E4/E5 — thread the front-door control + question guard onto the
+      // config base so the host `session.posture.set` projection applies the FULL
+      // lossless patch through the SAME live authority the gate reads (absent when
+      // the selector is off ⇒ omitted ⇒ mode-only compat, byte-identical).
+      postureControl,
+      questionGuard,
     })
     const turnAssembler = buildInteractiveTurnAssembler()
     const { runtime } = await createRuntimeFromAgentConfigBase({

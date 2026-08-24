@@ -16,6 +16,7 @@
  */
 
 import { buildSystemPrompt, type HookBus } from "@/agent"
+import type { QuestionAvailabilityReader } from "@/agent/dispatch-guard"
 import type { ObservabilityWireHandle } from "@/agent/observability-wire"
 import type { PlanStore } from "@/agent/plan/state"
 import { loadRepoRules } from "@/agent/repo-rules"
@@ -24,6 +25,7 @@ import { promptSurfaceProfileForRunMode, resolveCliDefaultEnvPosture } from "@/a
 import type { ArtifactRegistry } from "@/artifact"
 import type { LLMPort } from "@/llm"
 import type { PermissionContext } from "@/permission"
+import type { PostureControl } from "@/permission/posture/control"
 import type { buildSkillsConfigCore, buildSubagentConfigCore } from "@/runner/assemble"
 import type { RuntimeAgentConfigBase } from "@/sdk/runtime"
 import { errMessage, gateOn, logger } from "@/shared"
@@ -80,6 +82,8 @@ export const buildAgentConfigBase = async ({
   controlRequest,
   follower,
   observability,
+  postureControl,
+  questionGuard,
 }: {
   readonly env: Record<string, string | undefined>
   readonly llm: LLMPort
@@ -103,6 +107,13 @@ export const buildAgentConfigBase = async ({
     readonly handle: ObservabilityWireHandle
     readonly bus: HookBus | undefined
   }
+  // RFC-05 E4 — the surface-owned posture FRONT-DOOR control; present ⇒ the host
+  // `session.posture.set` applies the FULL lossless patch through the SAME live
+  // authority the gate reads. Absent ⇒ mode-only compat (byte-identical).
+  readonly postureControl?: PostureControl | undefined
+  // RFC-05 E5 — the live `request_user_input` availability reader over that SAME
+  // authority's bound `askOutsidePlan`. Absent ⇒ question available by default.
+  readonly questionGuard?: QuestionAvailabilityReader | undefined
 }): Promise<RuntimeAgentConfigBase> => {
   const webEnvPosture = resolveCliDefaultEnvPosture(env)
   // WS4 R7/R8 — the web/Tauri surface runs on the user's OWN cwd
@@ -211,6 +222,16 @@ export const buildAgentConfigBase = async ({
     // in-repo surfaces; the web bundle lives out-of-repo), so this is a
     // truth-fix, not a behavior change.
     sessionTransport: "websocket",
+    // RFC-05 E4 — lift the posture front-door control onto the base so the host
+    // `session.posture.set` projection (`applyHostPostureMutation`) applies the
+    // FULL lossless patch through the SAME live authority the next turn's gate
+    // reads. Absent (selector off) ⇒ omitted ⇒ the mode-only compat fallback
+    // (byte-identical legacy web behavior; NO silent rich-field drop).
+    ...(postureControl !== undefined ? { postureControl } : {}),
+    // RFC-05 E5 — lift the live `request_user_input` guard onto the base so the
+    // spec projection + dispatch consult read the SAME authority's askOutsidePlan
+    // (a `/posture ask off` reaches the next turn). Absent ⇒ available by default.
+    ...(questionGuard !== undefined ? { questionGuard } : {}),
     ...observabilitySlots(observability),
   }
   return base
