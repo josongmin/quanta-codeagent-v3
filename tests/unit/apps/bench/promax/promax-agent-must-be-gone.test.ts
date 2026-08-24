@@ -147,3 +147,33 @@ describe("a live agent process blocks the grader window", () => {
     expect(probe).toContain("apps/bench/cli.ts")
   })
 })
+
+describe("a FAILED probe is not an answer", () => {
+  test("🔴 ssh failing during the wait must NOT read as `the agent exited`", async () => {
+    // MEASURED: the second canary box was spot-reclaimed WHILE the guard was
+    // waiting. `pgrep … && echo ALIVE` over a dead box returns empty stdout and a
+    // non-zero exit — identical, to a `stdout !== "ALIVE"` test, to "nothing
+    // matched". So a dying box read as a clean agent exit, and the next thing the
+    // code would do is materialize the answer key on it.
+    const issued: string[] = []
+    const ssh = async (cmd: string) => {
+      issued.push(cmd)
+      if (cmd.includes("pgrep")) {
+        return { code: 255, stdout: "", stderr: "ssh: connect to host: Connection refused" }
+      }
+      return { code: 0, stdout: "", stderr: "" }
+    }
+    await expect(
+      runFamilyBoxGrade({
+        ssh,
+        log: () => {},
+        family: "promax",
+        bootstrap: promaxBootstrap(),
+        paths: DEFAULT_CHUNK_PATHS,
+        sleep: async () => {},
+      }),
+    ).rejects.toThrow(/could not be established|unreachable|ssh/i)
+    // and NOTHING gold-bearing was issued on a box we could not reach
+    expect(issued.some((c) => c.includes("'git'"))).toBe(false)
+  })
+})

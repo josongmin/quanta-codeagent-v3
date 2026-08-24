@@ -122,7 +122,23 @@ const awaitAgentExit = async (input: {
   const deadline = AGENT_EXIT_GRACE_MS
   let waited = 0
   for (;;) {
+    // `pgrep … && echo ALIVE` prints ALIVE (exit 0) when the agent is up, and
+    // nothing (exit 1) when it is gone. A TRANSPORT failure — ssh 255 on a box
+    // being reclaimed — also prints nothing, and a bare `stdout !== "ALIVE"` test
+    // read that as a clean agent exit. MEASURED: the second canary box was
+    // spot-reclaimed mid-wait, and the next step would have been to materialize
+    // the answer key on a box we could no longer reach.
+    //
+    // So the probe must ANSWER, not merely fail to say ALIVE. ssh's own 255 is
+    // the transport's signal; pgrep never exits 255.
     const probe = await input.ssh("pgrep -f 'apps/bench/cli.ts run' >/dev/null && echo ALIVE")
+    if (probe.code === 255) {
+      throw new Error(
+        `[full-remote] ${input.family}: the box became unreachable while waiting for the bench ` +
+          "process to exit, so whether an agent is still running there could not be established. " +
+          `REFUSING to materialize the answer key on it. (${probe.stderr.trim() || "ssh exit 255"})`,
+      )
+    }
     if (probe.stdout.trim() !== "ALIVE") return
     if (waited >= deadline) {
       throw new Error(
