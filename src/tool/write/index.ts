@@ -182,7 +182,7 @@ export const makeWriteTool = (fs: FileSystemPort = defaultFileSystemPort): Tool<
         // stale-read guard baseline to the just-written mtime AND advertise the
         // post-write sha256 so the model can chain an edit to this file without a
         // re-read. Both gated by ctx.editFreshHash ⇒ byte-identical when off.
-        await refreshStaleReadBaseline(fs, ctx, { path: input.path, base: ctx.cwd })
+        await refreshStaleReadBaseline(fs, ctx, { path: input.path, base: ctx.cwd }, input.content)
         const bytes = Buffer.byteLength(input.content, "utf8")
         yield {
           type: "result",

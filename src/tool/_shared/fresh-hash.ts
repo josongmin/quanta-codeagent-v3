@@ -53,9 +53,26 @@ export const recordFreshBaseline = (
   ctx: Pick<EditToolContext, "editFreshHash" | "readFileState">,
   resolvedPath: string,
   mtimeMs: number,
+  // The POST-mutation file content, when the caller has it in hand.
+  //
+  // Load-bearing since the freshness authority became the CONTENT DIGEST rather
+  // than the mtime: refreshing only the mtime leaves the digest pinned to what
+  // the agent READ, so the next mutation compares the file it just wrote against
+  // the pre-write content and is vetoed `stale_read` by its OWN write.
+  //
+  // Measured on the shipped tools before this: `read f` -> `edit` (ok) ->
+  // `edit` (BLOCKED, stale_read). Every second consecutive edit to a file
+  // without an intervening re-read failed. `state.ts` already documented that
+  // the digest is "populated ONLY by a full-file read AND by a successful
+  // self-mutation" — this is the second half, which was never implemented.
+  //
+  // Omitted ⇒ mtime-only refresh exactly as before, for callers that do not
+  // hold the bytes (byte-identical).
+  content?: string,
 ): void => {
   if (ctx.editFreshHash !== true || ctx.readFileState === undefined) return
   ctx.readFileState.record(resolvedPath, mtimeMs)
+  if (content !== undefined) ctx.readFileState.recordContent(resolvedPath, sha256Hex(content))
 }
 
 /** Single-file convenience over {@link recordFreshBaseline}: stat the just-written
@@ -66,11 +83,15 @@ export const refreshStaleReadBaseline = async (
   fs: FileSystemPort,
   ctx: EditToolContext,
   target: { readonly path: string; readonly base: string },
+  // The bytes just written. Every single-file mutator already holds them (it
+  // just produced them), so passing them costs no IO and keeps the CONTENT
+  // baseline in step with the mtime one.
+  content?: string,
 ): Promise<void> => {
   if (ctx.editFreshHash !== true || ctx.readFileState === undefined) return
   try {
     const committed = await fs.statFile(target.path, target.base)
-    recordFreshBaseline(ctx, committed.path, committed.mtimeMs)
+    recordFreshBaseline(ctx, committed.path, committed.mtimeMs, content)
   } catch {
     // Post-commit best-effort: leave the pre-mutation baseline on a stat failure.
   }

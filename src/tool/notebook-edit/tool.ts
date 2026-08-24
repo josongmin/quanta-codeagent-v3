@@ -167,7 +167,7 @@ export const makeNotebookEditTool = (fs: FileSystemPort = defaultFileSystemPort)
     // byte-identical when off). No fresh-hash EMISSION: notebook_edit is cell-op
     // based and does not consume `expected_hash`, so the single-flat-file chain
     // contract does not apply (refresh-only, like apply_patch).
-    await refreshStaleReadBaseline(fs, ctx, { path: input.path, base: ctx.cwd })
+    await refreshStaleReadBaseline(fs, ctx, { path: input.path, base: ctx.cwd }, edited.json)
     yield {
       type: "result",
       result: { ok: true, output: `notebook_edit: ${edited.summary} in ${input.path}` },

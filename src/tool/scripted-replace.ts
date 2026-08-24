@@ -412,7 +412,7 @@ export const makeScriptedReplaceTool = (
       // guard baseline to the just-written mtime AND advertise the post-write
       // sha256 so the model can chain an edit to this file without a re-read.
       // Both gated by ctx.editFreshHash ⇒ byte-identical when off.
-      await refreshStaleReadBaseline(fs, ctx, target)
+      await refreshStaleReadBaseline(fs, ctx, target, r.next)
       yield {
         type: "result",
         result: {

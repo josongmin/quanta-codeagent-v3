@@ -620,7 +620,7 @@ export const makeEditTool = (fs: FileSystemPort = defaultFileSystemPort): Tool<I
       // (2) append the post-edit sha256 so the model chains the next edit's
       // `expected_hash` without a re-read (fixes the measured ~41% self-inflicted
       // staleness). Both gated by ctx.editFreshHash ⇒ byte-identical when off.
-      await refreshStaleReadBaseline(fs, ctx, target)
+      await refreshStaleReadBaseline(fs, ctx, target, planned.next)
       yield {
         type: "result",
         result: {
