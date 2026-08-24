@@ -1,9 +1,10 @@
-# The repo-root fixture leak: what is known, and what four methods failed to find
+# The repo-root fixture leak: what is known, and what five methods failed to find
 
 **Status: UNRESOLVED source. Detection is in place; the writer is not identified.**
 
 This records an investigation that did not reach its goal, so the next person
-does not repeat the four approaches that already failed.
+does not repeat the five approaches that already failed — including the one an
+earlier draft of this very document recommended.
 
 ## The symptom
 
@@ -64,8 +65,8 @@ contains. The aug-23 incident was three gates red at once with nothing wrong in
    uses `import { open, rename } from "node:fs/promises"` — ESM named bindings,
    resolved at module load. Patching the *namespace object* returned by
    `require("node:fs/promises")` does not affect a module that imported the
-   bindings directly. Any future hook has to intercept at the module-resolution
-   layer (a `Bun.plugin` `onLoad` rewrite) rather than by assignment.
+   bindings directly. The obvious remedy — intercept at the module-resolution
+   layer instead — was tried and is refused by Bun; see the retraction below.
 2. **Correlating appearance time with test output.** `bun test` buffers per file
    and prints headers only for files with output, so a timestamped stdout stream
    has nothing to correlate a wall-clock hit against.
@@ -75,7 +76,9 @@ contains. The aug-23 incident was three gates red at once with nothing wrong in
    swallowed, or it never reaches a syscall this decoy can catch. (The decoy does
    produce one unrelated failure — `src/x.ts` as a directory breaks the arch scan
    that reads every `src/**/*.ts`.)
-4. **Shard bisection.** Both halves are clean; the interaction spans them.
+4. **Shard bisection.** Both halves are clean. Read as "the interaction spans
+   them" at the time; the intermittency measured below means it is equally
+   consistent with the leak simply not firing on those two runs.
 
 ## What IS in place
 
@@ -86,10 +89,54 @@ a command and fails on anything the run created. It is wired into CI's `unit`,
 byte counts and content previews — which is how the three files above were
 identified. Detection is solved; attribution is not.
 
-## Suggested next step
+## Frequency (measured aug-25)
 
-The remaining untried lever is a `Bun.plugin` `onLoad` transform in the preload
-that rewrites `node:fs` / `node:fs/promises` imports to a recording shim, which
-is the only interception point that survives ESM named binding. Failing that,
-bisect by *pairs* of directories rather than by shard, since the interaction is
-what has to be reproduced, not any single file.
+INTERMITTENT, not deterministic. Across six full-suite runs where the paths were
+free and observable, three leaked and three did not — including a clean
+`bun run test:pollution` (37,908 tests, "0 created by the run"). Both `--shard`
+halves were clean, which is consistent with either "the interaction spans them"
+or "it simply did not fire that run".
+
+This matters for method: a delta-debugging bisect over the file list cannot
+converge cheaply, because a clean result on a candidate set is not evidence of
+absence. Any bisect would need N repetitions per candidate to reach useful
+confidence, multiplying an already-4-minute step.
+
+## The suggested next step, RETRACTED
+
+An earlier version of this document proposed intercepting `node:fs` through a
+`Bun.plugin` `onLoad` rewrite, on the reasoning that it is the only hook that
+survives ESM named binding. **That does not work.** Bun refuses it outright:
+
+```
+error: module() cannot be used to override builtin module "node:fs/promises"
+```
+
+So there is no supported way to intercept the writes from inside the test
+process. Recorded rather than quietly dropped, because the retracted idea was
+the plausible-looking one.
+
+## What DOES work, and is the better shape anyway
+
+Measured: the suite runs correctly from a FOREIGN working directory. A slice of
+583 tests across 37 files passes with `cwd` set to a throwaway directory, given
+the two `bunfig.toml` preloads passed explicitly (`--preload tests/preload-clean-source-js.ts
+--preload tests/setup.ts`), and leaves that directory empty.
+
+That reframes the problem. Attribution is hard; CONTAINMENT is easy, and it is
+what actually costs us:
+
+  - A relative-path write lands in the sandbox, so the repo can no longer be
+    poisoned and `typecheck` / `lint` / `lint:debt` can no longer go red from a
+    file no commit contains.
+  - Anything that appears in the sandbox is attributable to the run BY
+    CONSTRUCTION — nothing else on the machine uses that directory — which turns
+    the pollution guard's known "another process may have created it" caveat
+    into a non-issue.
+  - `storage.test.ts`'s `expect(await fileExists("rel.txt")).toBe(false)` stops
+    being self-poisoning, because the cwd starts empty on every run.
+
+The blocker is bounded and measurable: 95 of 3,311 test files reference
+`process.cwd()`. Each is either a test that should have been cwd-independent
+anyway (repo-root scans belong on `import.meta.dir`) or one whose assertion
+gets STRONGER under a sandbox. That migration is the real next step.
