@@ -5,7 +5,6 @@
 // sibling surface.
 export type { AssembleRequestPartial } from "./agent-arg-builder"
 export {
-  assembleMemoryAuto,
   buildBaseFromArgs,
   buildProfileDefinitionRegistry,
   installCommandHooksIntoBase,

@@ -37,13 +37,7 @@ import { type LLMPort, pickProvider, tryCreateLLM } from "@/llm"
 import { type CapabilityNegotiator, defaultNegotiator, fullNegotiator } from "@/mcp"
 import { metrics } from "@/observability"
 import { buildAutorunEligibility } from "@/permission"
-import {
-  buildRetrievalStackCore,
-  buildSearchPipelineFromEnv,
-  parseEnvFlag,
-  type RetrievalStack,
-  wireInteractiveKnobs,
-} from "@/runner/assemble"
+import { buildSearchPipelineFromEnv, wireInteractiveKnobs } from "@/runner/assemble"
 import type { Surface } from "@/runner/knobs"
 import {
   type LocalEnvSelection,
@@ -52,7 +46,7 @@ import {
   selectEnvironment,
 } from "@/runtime"
 import { type AutomationEngineSlot, assembleAutomation } from "@/scheduler/runtime-wire"
-import { errMessage, gateOn, logger } from "@/shared"
+import { gateOn, logger } from "@/shared"
 import type { AgentEvent, StreamPort } from "@/stream"
 import { installCommandHooksIntoBase } from "./agent-arg-builder/command-hooks-wire"
 import {
@@ -121,19 +115,6 @@ const resolveIdentityFromEnv = (env: NodeJS.ProcessEnv): readonly string[] | und
   return identityForToken(raw)
 }
 
-/** Resolve the retrieval-stack opt-in flag from the composition-root env view.
- *  Single canonical knob — `QUANTA_RETRIEVAL_HYBRID="1"` enables; any other
- *  value (incl. absent / `"0"` / `"true"` — explicit "1" only) ⇒ disabled.
- *  Strict-equals to "1" so a typo like "true" is treated as off (loud
- *  silent-default avoidance: the operator either set the canonical value or
- *  they did not).
- *
- *  ENV-touchpoint discipline: this is the ONLY retrieval-related env read in
- *  the entire codebase. `@/runner/assemble/retrieval.ts` is env-free; the
- *  surface (this file) projects ENV → typed input. */
-const isRetrievalHybridEnabled = (env: NodeJS.ProcessEnv): boolean =>
-  gateOn(env, "QUANTA_RETRIEVAL_HYBRID")
-
 /** ADR-0196 — pick the MCP capability negotiator from env. `QUANTA_MCP_CAPS=full`
  *  swaps to {@link fullNegotiator} which advertises `{tools, elicitation, tasks}`.
  *  Any other value (including absent) yields the byte-identical `{}` default.
@@ -191,73 +172,6 @@ export const resolveLocalEnvSelection = async (
     return undefined
   }
   return selectEnvironment(loaded.result.config, env.QUANTA_LOCAL_ENV)
-}
-
-/**
- * ADR-0281 + ADR-0282 + ADR-0413 — composition-root wire for the memory
- * auto-trigger + cross-session inject slices.
- *
- * Reads three env knobs and produces a small typed config object the
- * host plugs into its session-start / session-end hooks:
- *
- *   - `QUANTA_MEMORY_AUTO`        — ADR-0413: default ON. Falsey set
- *                                   `0 / off / no / false` (case-insensitive,
- *                                   trim via `parseEnvFlag`) ⇒ disabled
- *                                   (returns `null`). Any other value
- *                                   (incl. absent / "on" / "1" / "true")
- *                                   ⇒ enabled.
- *   - `QUANTA_MEMORY_THRESHOLD`   — promote threshold (default 0.7).
- *                                   Invalid number ⇒ default.
- *   - `QUANTA_MEMORY_MIN_USAGE`   — minimum usageCount gate (default 1).
- *                                   Invalid int ⇒ default.
- *
- * Default-ON (ADR-0413): a fresh install with no env knobs gets the
- * cross-session memory slice. The legacy default-OFF behavior is
- * reachable via `QUANTA_MEMORY_AUTO=off`. The function is PURE w.r.t.
- * its input env view; no `process.env` reads. The single canonical
- * resolver lives at `src/runner/assemble/memory-factory.ts` —
- * `buildMemoryForSession`; this surface wrapper exists for HELL-MAT-22
- * legacy lock-in plus a typed-shape mirror surfaces can reach without
- * pulling the whole memory factory into their compile graph.
- */
-export const assembleMemoryAuto = (
-  env: NodeJS.ProcessEnv,
-): {
-  readonly enabled: true
-  readonly policy: { readonly promoteThreshold: number; readonly minUsageCount: number }
-} | null => {
-  if (!parseEnvFlag(env.QUANTA_MEMORY_AUTO, /* defaultOn */ true)) return null
-  const rawT = env.QUANTA_MEMORY_THRESHOLD
-  const rawU = env.QUANTA_MEMORY_MIN_USAGE
-  const parsedT = rawT === undefined ? 0.7 : Number(rawT)
-  const parsedU = rawU === undefined ? 1 : Number(rawU)
-  const promoteThreshold = Number.isFinite(parsedT) ? parsedT : 0.7
-  const minUsageCount = Number.isFinite(parsedU) && parsedU >= 0 ? Math.floor(parsedU) : 1
-  return {
-    enabled: true,
-    policy: { promoteThreshold, minUsageCount },
-  }
-}
-
-/** Build the retrieval stack at the composition root. Default-OFF: when the
- *  env knob is absent or not exactly "1", returns `undefined` and every
- *  legacy caller is byte-identical (no allocation, no registry).
- *
- *  Returns `undefined` on builder failure (e.g. an unknown reranker kind
- *  surfaces as a `RetrievalError`); we LOG and continue rather than crashing
- *  the surface entry — the loop is fully functional without the stack, and
- *  blocking startup on a misconfigured optional knob is wrong. */
-const buildRetrievalStackFromEnv = (env: NodeJS.ProcessEnv): RetrievalStack | undefined => {
-  if (!isRetrievalHybridEnabled(env)) return undefined
-  try {
-    return buildRetrievalStackCore({ enabled: true })
-  } catch (e) {
-    logger.warn(
-      `retrieval-stack disabled (build failed): ${errMessage(e)}. ` +
-        `set QUANTA_RETRIEVAL_HYBRID=1 with a registered reranker to re-enable.`,
-    )
-    return undefined
-  }
 }
 
 /** ADR-0236 — derive the identity-mode-variant registry + the system prompt
@@ -683,7 +597,6 @@ const resolveBaseSlotState = (
     slotCtx: {
       p,
       networkProxySlot,
-      retrievalStack: buildRetrievalStackFromEnv(env),
       // The SAME wire the caller built (registry + disposer + pipeline share it).
       searchWire,
       identityModeVariant,

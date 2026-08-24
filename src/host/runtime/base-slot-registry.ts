@@ -47,7 +47,6 @@ export interface BaseSlotContext {
   readonly p: import("./agent-arg-builder").AssembleRequestPartial
   /** Spread-ready egress-proxy slot (`{}` when off) — already resolved. */
   readonly networkProxySlot: { networkProxy?: NonNullable<Base["networkProxy"]> }
-  readonly retrievalStack: NonNullable<Base["retrievalStack"]> | undefined
   /** The search wire (`null` when off); only its `.pipeline` is projected. */
   readonly searchWire: { pipeline: NonNullable<Base["searchPipeline"]> } | null
   readonly identityModeVariant: NonNullable<Base["identityModeVariant"]> | undefined
@@ -100,35 +99,33 @@ export type BaseSlotResolver = (ctx: BaseSlotContext) => Partial<Base>
 export const BASE_SLOT_RESOLVERS: readonly BaseSlotResolver[] = [
   // 1. ADR-0428 — socket-level egress proxy (spread-ready `{}` when off).
   (ctx) => ctx.networkProxySlot,
-  // 2. ADR-0159 — retrieval stack (opt-in QUANTA_RETRIEVAL_HYBRID).
-  (ctx) => (ctx.retrievalStack !== undefined ? { retrievalStack: ctx.retrievalStack } : {}),
-  // 3. ADR-0277/0278 — helper-only search pipeline slot (present iff a wire).
+  // 2. ADR-0277/0278 — helper-only search pipeline slot (present iff a wire).
   (ctx) => (ctx.searchWire !== null ? { searchPipeline: ctx.searchWire.pipeline } : {}),
-  // 4-7. ADR-0236 — composition-root mega-wire slots (default-OFF; `!== undefined`).
+  // 3-6. ADR-0236 — composition-root mega-wire slots (default-OFF; `!== undefined`).
   (ctx) =>
     ctx.identityModeVariant !== undefined ? { identityModeVariant: ctx.identityModeVariant } : {},
   (ctx) => (ctx.stickyModelStore !== undefined ? { stickyModelStore: ctx.stickyModelStore } : {}),
   (ctx) => (ctx.toolProfile !== undefined ? { toolProfile: ctx.toolProfile } : {}),
   (ctx) => (ctx.focusChain !== undefined ? { focusChain: ctx.focusChain } : {}),
-  // 8-9. ADR-0452 / RFC jun-17 — prewarm + lsp-prewarm (spread-ready).
+  // 7-8. ADR-0452 / RFC jun-17 — prewarm + lsp-prewarm (spread-ready).
   (ctx) => ctx.prewarmSlot,
   (ctx) => ctx.lspPrewarmSlot,
-  // 10-11. ADR-0455 / named-agent — partial-carried slots (spread-ready).
+  // 9-10. ADR-0455 / named-agent — partial-carried slots (spread-ready).
   (ctx) => ctx.localEnvSlot,
   (ctx) => ctx.namedAgentResolverSlot,
-  // 12. ADR-0279 — automation engine (default-OFF; `!== null`).
+  // 11. ADR-0279 — automation engine (default-OFF; `!== null`).
   (ctx) => (ctx.automationSlot !== null ? { automationEngine: ctx.automationSlot } : {}),
-  // 13. ADR-0404 + ADR-0415 — observability slots (spread-ready `{}` when off).
+  // 12. ADR-0404 + ADR-0415 — observability slots (spread-ready `{}` when off).
   (ctx) => ctx.observabilitySlots,
-  // 14. Track A2 — named-permission-profile manager (spread-ready).
+  // 13. Track A2 — named-permission-profile manager (spread-ready).
   (ctx) => ctx.permissionProfileSlot,
-  // 15. CLUSTER D #5 — shared PatternGrantStore (spread-ready).
+  // 14. CLUSTER D #5 — shared PatternGrantStore (spread-ready).
   (ctx) => ctx.permissionPatternStoreSlot,
-  // 16. file_history_rewind — capture sink (spread-ready).
+  // 15. file_history_rewind — capture sink (spread-ready).
   (ctx) => ctx.fileHistorySinkSlot,
-  // 17. A2 — shared artifact registry (default-OFF; `!== undefined`).
+  // 16. A2 — shared artifact registry (default-OFF; `!== undefined`).
   (ctx) => (ctx.artifactRegistry !== undefined ? { artifactRegistry: ctx.artifactRegistry } : {}),
-  // 18. A2 — read-only preview resolver (default-OFF; `!== undefined`).
+  // 17. A2 — read-only preview resolver (default-OFF; `!== undefined`).
   (ctx) =>
     ctx.artifactPreviewResolver !== undefined
       ? { artifactPreviewResolver: ctx.artifactPreviewResolver }

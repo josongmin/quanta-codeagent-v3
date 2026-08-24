@@ -254,7 +254,7 @@ export const HOST: readonly KnobInventoryEntry[] = [
     group: "memory",
     home: "runtime-config",
     describe: "Cross-session memory auto-promotion (default ON).",
-    readSite: "host/runtime/agent-arg-builder.ts",
+    readSite: "memory/auto-trigger/wire.ts",
   },
   {
     envKey: "QUANTA_MEMORY_THRESHOLD",
@@ -263,7 +263,7 @@ export const HOST: readonly KnobInventoryEntry[] = [
     group: "memory",
     home: "runtime-config",
     describe: "Memory promote threshold (0-1).",
-    readSite: "host/runtime/agent-arg-builder.ts",
+    readSite: "memory/auto-trigger/wire.ts",
   },
   {
     envKey: "QUANTA_MEMORY_MIN_USAGE",
@@ -272,7 +272,7 @@ export const HOST: readonly KnobInventoryEntry[] = [
     group: "memory",
     home: "runtime-config",
     describe: "Min usageCount to promote.",
-    readSite: "host/runtime/agent-arg-builder.ts",
+    readSite: "memory/auto-trigger/wire.ts",
   },
   {
     envKey: "QUANTA_MEMORY_WRITE_GUARD_PCT",
@@ -443,15 +443,6 @@ export const HOST: readonly KnobInventoryEntry[] = [
     describe:
       "MCP tool hot-reload (RFC04-2/3) — a NON-supervised server's tools/list_changed republishes the turn capability snapshot at the NEXT turn boundary (single-flight+dirty, last-known-good on malformed relist, no mid-turn swap). Default-OFF ⇒ no observer/controller/ref, session builds the snapshot from the registry as today (byte-identical).",
     readSite: "host/mcp-composition.ts",
-  },
-  {
-    envKey: "QUANTA_RETRIEVAL_HYBRID",
-    kind: "bool",
-    default: false,
-    group: "search",
-    home: "runtime-config",
-    describe: "Hybrid semantic retrieval stack gate.",
-    readSite: "host/runtime/agent-arg-builder.ts",
   },
   {
     envKey: "QUANTA_SUBAGENT_BG",

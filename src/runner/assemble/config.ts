@@ -78,12 +78,6 @@ export interface SessionDeps {
    *  (byte-identical default-OFF — the loop's plan-hydrate/persist helpers
    *  no-op when `planStore` is undefined). */
   planStore?: AgentConfig["planStore"]
-  /** ADR-0159 retrieval-stack wire — built by `buildRetrievalStackCore`.
-   *  Absent ⇒ omitted from AgentConfig entirely (byte-identical default-OFF:
-   *  consumers' bridge functions return identity behavior when the slot is
-   *  undefined). The agent loop itself NEVER reads this slot — only the
-   *  bridge consumer (`rankWithRetrievalStack`) does. */
-  retrievalStack?: AgentConfig["retrievalStack"]
   /** Helper-only search pipeline slot paired with any surface-registered
    *  `search_codebase` facade. Absent ⇒ omitted from AgentConfig entirely. */
   searchPipeline?: AgentConfig["searchPipeline"]
@@ -300,7 +294,6 @@ const buildCapabilityAndObservabilitySpreads = (d: SessionDeps): Partial<AgentCo
   ...(d.compactionBreakerConfig ? { compactionBreaker: d.compactionBreakerConfig } : {}),
   ...(d.verifyGuardConfig ? { verifyGuard: d.verifyGuardConfig } : {}),
   ...(d.admissibility !== undefined ? { admissibility: d.admissibility } : {}),
-  ...(d.retrievalStack !== undefined ? { retrievalStack: d.retrievalStack } : {}),
   ...(d.searchPipeline !== undefined ? { searchPipeline: d.searchPipeline } : {}),
   ...(d.shellSnapshot !== undefined ? { shellSnapshot: d.shellSnapshot } : {}),
   ...(d.sessionEffort !== undefined ? { sessionEffort: d.sessionEffort } : {}),

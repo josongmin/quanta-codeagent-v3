@@ -88,52 +88,6 @@ mentionInjector :: fn
 compactionEventEmit :: fn"
 `;
 
-exports[`composition slot-registry — byte-identical hellgate fingerprint stable — retrieval hybrid: retrieval hybrid :: base 1`] = `
-"KEYS[14]: llm,registry,stream,promptSurfaceProfile,permission,messages,system,cwd,maxTurns,signal,retrievalStack,searchPipeline,stickyModelStore,readFileState
-llm :: obj{model=str:"gpt-5.6-terra",provider=str:"chatgpt-oauth",surfaceId=str:"openai-responses",transportId=str:"chatgpt-oauth",authMode=str:"ChatGPT subscription",env=<ambient-env-bag>,fetchImpl=fn,nowMs=fn,maxTokens=undefined,streamTimeoutMs=obj{firstChunkMs=num,idleMs=num},serviceTier=undefined,reasoningEffort=undefined,reasoningSummary=bool:false,reasoningSummaryDetail=undefined,reasoningVerbosity=undefined,reasoningCarryover=bool:false,reasoningCarryoverStore=undefined,debugOAuth=bool:false,memTokenFallback=undefined}
-registry :: obj{tools=obj{},origin=undefined}
-stream :: obj{emit=fn}
-promptSurfaceProfile :: obj{envPosture=str:"frozen",promptPack=str:"interactive",verifyStrategy=str:"none"}
-permission :: obj{mode=str:"acceptEdits"}
-messages :: arr[]
-system :: str[20762]
-cwd :: str:<cwd>
-maxTurns :: num
-signal :: obj{}
-retrievalStack :: obj{registry=obj{byKind=obj{}},defaultReranker=obj{kind=str:"identity",rerank=fn}}
-searchPipeline :: obj{search=fn}
-stickyModelStore :: obj{store=obj{get=fn,set=fn,load=fn}}
-readFileState :: obj{mtimes=obj{},rangeHashes=undefined,contentDigests=undefined,rangeDedupCap=num}"
-`;
-
-exports[`composition slot-registry — byte-identical hellgate fingerprint stable — retrieval hybrid: retrieval hybrid :: assembled 1`] = `
-"KEYS[24]: llm,registry,stream,promptSurfaceProfile,permission,messages,system,cwd,maxTurns,signal,retrievalStack,searchPipeline,stickyModelStore,readFileState,modePolicy,budgetMeter,lspDiagnosticsHookEnabled,secretCheckToolEnabled,bgShellRegistry,contentCaptureEnabled,activeSkillCursor,contextEventsForTurn,mentionInjector,compactionEventEmit
-llm :: obj{model=str:"gpt-5.6-terra",provider=str:"chatgpt-oauth",surfaceId=str:"openai-responses",transportId=str:"chatgpt-oauth",authMode=str:"ChatGPT subscription",env=<ambient-env-bag>,fetchImpl=fn,nowMs=fn,maxTokens=undefined,streamTimeoutMs=obj{firstChunkMs=num,idleMs=num},serviceTier=undefined,reasoningEffort=undefined,reasoningSummary=bool:false,reasoningSummaryDetail=undefined,reasoningVerbosity=undefined,reasoningCarryover=bool:false,reasoningCarryoverStore=undefined,debugOAuth=bool:false,memTokenFallback=undefined}
-registry :: obj{tools=obj{},origin=undefined}
-stream :: obj{emit=fn}
-promptSurfaceProfile :: obj{envPosture=str:"frozen",promptPack=str:"interactive",verifyStrategy=str:"none"}
-permission :: obj{mode=str:"acceptEdits"}
-messages :: arr[]
-system :: str[20762]
-cwd :: str:<cwd>
-maxTurns :: num
-signal :: obj{}
-retrievalStack :: obj{registry=obj{byKind=obj{}},defaultReranker=obj{kind=str:"identity",rerank=fn}}
-searchPipeline :: obj{search=fn}
-stickyModelStore :: obj{store=obj{get=fn,set=fn,load=fn}}
-readFileState :: obj{mtimes=obj{},rangeHashes=undefined,contentDigests=undefined,rangeDedupCap=num}
-modePolicy :: obj{mode=str:"interactive",permission=obj{kind=str:"reviewer-backed"},termination=obj{kind=str:"user-stop"},sandbox=obj{kind=str:"user-cwd"},output=obj{kind=str:"stdout-chat"},externalDeps=obj{kind=str:"host"},toolSurface=obj{kind=str:"full"},promptPack=obj{kind=str:"assistant"},memory=obj{kind=str:"persistent"},observation=obj{kind=str:"stream-only"},network=obj{kind=str:"open"},gitWrite=obj{kind=str:"free"},secrets=obj{kind=str:"host-env"}}
-budgetMeter :: obj{dials=obj{maxTurns=num,maxRetries=num,maxConsecutiveFailures=num},caps=obj{},exhaustion=str:"stop",clock=fn,startedAtMs=num,turns=num,modelCalls=num,toolCalls=num,shellCommands=num,testRuns=num,inputTokens=num,outputTokens=num,reasoningTokens=num,filesChanged=num,patchBytes=num,retries=num,consecutiveFailures=num,costUsdAccum=num,costUsdThisTurn=num,providerRateLimitRemainingPct=undefined}
-lspDiagnosticsHookEnabled :: bool:false
-secretCheckToolEnabled :: bool:false
-bgShellRegistry :: obj{register=fn,adopt=fn,get=fn,awaitHandle=fn,kill=fn,listOwned=fn,killOwned=fn,killAll=fn,size=fn,oldestId=fn}
-contentCaptureEnabled :: bool:false
-activeSkillCursor :: obj{ids=arr[]}
-contextEventsForTurn :: fn
-mentionInjector :: fn
-compactionEventEmit :: fn"
-`;
-
 exports[`composition slot-registry — byte-identical hellgate fingerprint stable — mcp caps full: mcp caps full :: base 1`] = `
 "KEYS[13]: llm,registry,stream,promptSurfaceProfile,permission,messages,system,cwd,maxTurns,signal,searchPipeline,stickyModelStore,readFileState
 llm :: obj{model=str:"gpt-5.6-terra",provider=str:"chatgpt-oauth",surfaceId=str:"openai-responses",transportId=str:"chatgpt-oauth",authMode=str:"ChatGPT subscription",env=<ambient-env-bag>,fetchImpl=fn,nowMs=fn,maxTokens=undefined,streamTimeoutMs=obj{firstChunkMs=num,idleMs=num},serviceTier=undefined,reasoningEffort=undefined,reasoningSummary=bool:false,reasoningSummaryDetail=undefined,reasoningVerbosity=undefined,reasoningCarryover=bool:false,reasoningCarryoverStore=undefined,debugOAuth=bool:false,memTokenFallback=undefined}

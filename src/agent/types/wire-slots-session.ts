@@ -14,7 +14,6 @@ import type { LLMPort, ResponsesContinuationStore } from "@/llm"
 import type { LlmProvider } from "@/llm/providers"
 import type { CodeActionPort, FormatPort, RenameApplyPort, SignatureHelpPort } from "@/lsp"
 import type { ObjectivePort } from "@/objective"
-import type { CommitEmbedder, EmbeddingPort, RerankPort, RerankRegistry } from "@/retrieval"
 import type { OsSandbox } from "@/runtime/os-sandbox"
 import type { RedactionConfig } from "@/security"
 import type { AppshotArtifactSink, AppshotSlot } from "@/tool"
@@ -476,29 +475,6 @@ export interface WireSlotsSessionConfig {
     readonly format?: FormatPort
     readonly signatureHelp?: SignatureHelpPort
     readonly renameApply?: RenameApplyPort
-  }
-  /**
-   * ADR-0159 retrieval-stack slot (composition-root wire). When set,
-   * consumers downstream of the loop (memory recall via
-   * `rankWithRetrievalStack`) may route their candidate lists through
-   * the 3-stage retrieval funnel (BM25 → embedding → reranker).
-   *
-   * Default-OFF: absent ⇒ the loop is byte-identical for every legacy
-   * caller (no consumer constructs the stack itself; the bridge functions
-   * return identity behavior when this slot is undefined). The slot is
-   * caller-side composition only — the agent loop NEVER reads it directly.
-   *
-   * The concrete builder lives at
-   * `@/runner/assemble/retrieval.ts#buildRetrievalStackCore`. `RerankRegistry`
-   * + `RerankPort` are owned by `@/retrieval` (leaf primitive slice — every
-   * other slice may reach IN; the slice may NOT reach out, see ADR-0159
-   * biome fence). Importing them here is the conventional direction.
-   */
-  retrievalStack?: {
-    readonly registry: RerankRegistry
-    readonly defaultReranker: RerankPort
-    readonly embedding?: EmbeddingPort
-    readonly commitEmbedder?: CommitEmbedder
   }
   /**
    * ADR-0278 search-pipeline slot (composition-root wire). Sibling of

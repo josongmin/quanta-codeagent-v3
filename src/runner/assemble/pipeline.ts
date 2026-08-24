@@ -7,7 +7,7 @@
  * it needs from `@/retrieval/{lexical,semantic,reranker,cache,batching}`
  * and ADAPTS their slice ports to the pipeline's INLINE DUCK-TYPED ports.
  *
- * Wire discipline (mirrors `buildRetrievalStackFromEnv` in `./index.ts`):
+ * Wire discipline (mirrors the other env→slot builders in `host/runtime/agent-arg-builder.ts`):
  *   - DEFAULT-OFF: absent / unknown / `"none"` ⇒ `null`. The caller spreads
  *     conditionally so `AgentConfig.searchPipeline` stays OMITTED under
  *     `exactOptionalPropertyTypes`.

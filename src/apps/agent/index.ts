@@ -85,7 +85,6 @@ setTerminalIo({
 })
 
 export {
-  assembleMemoryAuto,
   buildProfileDefinitionRegistry,
   installCommandHooksIntoBase,
   PERMISSION_PROFILE_SESSION_THREAD,

@@ -5,7 +5,6 @@ export interface RuntimeAgentConfigAugments {
   systemSource?: unknown
   followUpQueue?: unknown
   planStore?: unknown
-  retrievalStack?: unknown
   searchPipeline?: unknown
   memoryConsolidator?: unknown
   sessionCtx?: unknown

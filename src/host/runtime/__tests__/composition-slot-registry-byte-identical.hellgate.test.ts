@@ -151,7 +151,6 @@ const DRIVEN = [
   "QUANTA_PROVIDER",
   "QUANTA_IDENTITY",
   "QUANTA_IDENTITY_MODE",
-  "QUANTA_RETRIEVAL_HYBRID",
   "QUANTA_MCP_CAPS",
   "QUANTA_AUTOMATION",
   "QUANTA_AUTORUN_POLICY",
@@ -259,7 +258,6 @@ const MATRIX: ReadonlyArray<{
   { name: "all-off default", gates: {} },
   // ── each major feature-gate on individually (env side) ──
   { name: "identity env", gates: { QUANTA_IDENTITY: "1" } },
-  { name: "retrieval hybrid", gates: { QUANTA_RETRIEVAL_HYBRID: "1" } },
   { name: "mcp caps full", gates: { QUANTA_MCP_CAPS: "full" } },
   { name: "automation on", gates: { QUANTA_AUTOMATION: "on" } },
   { name: "sandbox", gates: { QUANTA_SANDBOX: "workspace-write" } },

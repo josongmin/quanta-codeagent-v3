@@ -25,10 +25,13 @@
 
 ADR-0277 ships the indexer slice; ADR-0265 ships the pipeline
 composer. Neither is wired to the agent loop. The pre-existing
-`AgentConfig.retrievalStack` slot (ADR-0159) is read by memory
-recall and the localize tool — not by a tool the model can call to
-ask "where in the codebase is X?". The result is dead-code-shaped
-infrastructure: the model has no way to invoke semantic search.
+`AgentConfig.retrievalStack` slot (ADR-0159) was, at the time this
+ADR was written, believed to be read by memory recall and the
+localize tool. *Correction (2026-08-25, ADR-0553): it was read by
+nothing — written at the host root, consumed nowhere, and deleted.*
+Either way it was not a tool the model could call to ask "where in
+the codebase is X?". The result is dead-code-shaped infrastructure:
+the model has no way to invoke semantic search.
 
 We need a single closed-port wire that:
 
@@ -98,8 +101,9 @@ searchPipeline?: SearchPipeline
 
 Read by no slice today — it is published purely so future tools and
 the dispatch seam can detect a wired pipeline without re-reading
-env. (ADR-0265 left a `retrievalStack` slot for reranker-only use;
-this slot is the pipeline-as-a-whole sibling.) Default-OFF discipline
+env. (ADR-0159 left a `retrievalStack` slot for reranker-only use;
+this slot was its pipeline-as-a-whole sibling. *The `retrievalStack`
+slot was deleted 2026-08-25 — ADR-0553.*) Default-OFF discipline
 is the same: when unset, every legacy caller is byte-identical.
 
 ## Slice fence

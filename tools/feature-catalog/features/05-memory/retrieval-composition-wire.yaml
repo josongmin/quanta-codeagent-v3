@@ -1,108 +1,59 @@
 id: retrieval-composition-wire
-title: Retrieval-stack composition-root wire — buildRetrievalStackCore + memory/localize bridges + AgentConfig slot (ADR-0159 wire)
+title: Retrieval-stack composition-root wire — RETIRED (memory/localize bridges + AgentConfig.retrievalStack slot + QUANTA_RETRIEVAL_HYBRID deleted, ADR-0553)
 section: 5
 subsystem: retrieval SOTA stack — composition wire (ADR-0159)
 order: 96
-maturity: L4
-status: stable
-ui_surfaces: [cli]
+maturity: L1
+status: deprecated
+lifecycle_stage: removed
+sunset_date: "2026-08-25"
+ui_surfaces: [none]
 monitoring: n-a
-modes: [interactive, headless, batch, ci-bot, ide, daemon]
-configurable: integrated
+modes: []
+configurable: none
 owners: ["@songmin", "team-memory"]
-labels: ["surface:core", "adr:0159", "wire"]
-depends_on:
-  - retrieval-rerank-registry
-  - retrieval-hybrid-query
-  - retrieval-commit-embedder
-  - retrieval-multi-vendor-embedding
+labels: ["surface:core", "adr:0159", "adr:0553", "retired"]
+depends_on: []
 surface_integration:
-  cli: full
+  cli: na
   web: na
   method: audited
-  verified: "2026-06-09"
+  verified: "2026-08-25"
   evidence:
-    cli: "runs in the interactive CLI — 6/7 evidence file(s) reachable from src/apps/cli/index.ts import graph"
-    web: "pure composition-root wire (env-gated stack assembly + memory/localize bridges); affects recall ranking under the hood, no user-visible affordance on any surface"
+    cli: "deleted — the bridge (`rankWithRetrievalStack`), the `AgentConfig.retrievalStack` slot, the host `QUANTA_RETRIEVAL_HYBRID` gate and both hellgate suites are gone (ADR-0553); tests/unit/retrieval-bridge-deleted-ratchet.test.ts keeps them gone"
+    web: "never reached the web surface; nothing to remove"
 purpose: |
-  Composition-root wire for the ADR-0159 retrieval stack. The 5 retrieval
-  axes (rerank registry / chunk-bucket / commit-embedder / multi-vendor
-  embedding / hybrid-query funnel) landed as primitives — until this wire,
-  ZERO invocations existed from src/runner/ or src/apps/ (dead code).
+  RETIRED 2026-08-25 (ADR-0553). This entry is kept as the tombstone so the
+  catalog history stays honest; it no longer describes shipped behavior.
 
-  This feature adds:
-    1. `buildRetrievalStackCore({enabled, embedding?, gitLog?, tierClassifier?,
-       defaultReranker?, bm25Alpha?, commitCacheMax?})` — surface-agnostic
-       assembler returning a `RetrievalStack` (registry + defaultReranker +
-       optional embedding / commitEmbedder). DEFAULT-OFF: absent / enabled
-       !== true ⇒ undefined.
-    2. `rankWithRetrievalStack(candidates, query, now, stack?)` — memory↔
-       retrieval bridge. Stack absent ⇒ rankEntries verbatim (byte-
-       identical). Stack present ⇒ two-stage (memory weighted-sum +
-       reranker over the ranked list).
-    3. `runLocalizeHybrid({query, type, bm25Source, embeddingSource?,
-       stack?, limit?})` — localize↔retrieval bridge. Stack absent ⇒
-       identity pass-through. Stack present ⇒ 3-stage funnel
-       (BM25/embedding/hybrid+RRF) + final reranker.
-    4. `AgentConfig.retrievalStack` slot — surface attaches built stack;
-       consumers read it back through DI. Loop NEVER reads the slot
-       (caller-side composition only).
-    5. `apps/agent/index.ts` env knob — `QUANTA_RETRIEVAL_HYBRID="1"`
-       (strict-equals "1") triggers `buildRetrievalStackCore({enabled:
-       true})` at the surface entry; every mode runner inherits the stack
-       via `AssembleRequest.base.retrievalStack`.
+  What it was: the ADR-0159 "composition-root wire" — `buildRetrievalStackCore`
+  (still present in `src/runner/assemble/retrieval.ts`, consumer-less),
+  `rankWithRetrievalStack` (memory↔retrieval bridge), `runLocalizeHybrid`
+  (localize bridge, already deleted jul-3 D2), an `AgentConfig.retrievalStack`
+  slot, and the host-root `QUANTA_RETRIEVAL_HYBRID="1"` env gate.
 
-  Slice fence respected: `@/runner` → `@/retrieval` is the conventional
-  direction; bridges live under `@/runner/assemble/retrieval-*-bridge.ts`
-  because `@/memory` and `@/tool` are forbidden from reaching
-  `@/retrieval` per RFC §3.1.
+  Why it was deleted instead of wired: the slot was WRITTEN at the host root
+  and READ by nobody; the bridge had zero non-test callers; and even when
+  called it could not change a recall result — memory's `rankEntries` clips
+  to `query.limit` BEFORE the bridge's rerank stage, and the stock stack's
+  default reranker is `identity` (measured relevant-in-top-5: 1 → 1).
 evidence:
   code:
     - src/runner/assemble/retrieval.ts
-    - src/runner/assemble/retrieval-memory-bridge.ts
-    - src/runner/assemble/config.ts
-    - src/runner/assemble/index.ts
-    - src/apps/agent/index.ts
-    - src/agent/types.ts
-  adrs: ["docs/decisions/0159-retrieval-sota-stack.md"]
+  adrs:
+    - "docs/decisions/0159-retrieval-sota-stack.md"
+    - "docs/decisions/0553-delete-retrieval-memory-bridge.md"
   tests:
     unit:
-      - tests/unit/retrieval-composition-wire-hellgate.test.ts
-    integration:
-      - tests/integration/retrieval-composition-root.test.ts
+      - tests/unit/retrieval-bridge-deleted-ratchet.test.ts
+    integration: []
     contract: []
-knobs:
-  - name: QUANTA_RETRIEVAL_HYBRID
-    default: 'undefined'
-    purpose: 'single composition-root env knob, strict-equals "1"; any other value (incl. "0" / "true" / unset) ⇒ stack OFF'
-  - name: RetrievalAssembleInput.defaultReranker
-    default: 'undefined'
-    purpose: 'promote `identity` (default) / `bm25-secondary` / `score-fusion-rrf` (or `tier-aware` when classifier supplied)'
-  - name: RetrievalAssembleInput.tierClassifier
-    default: 'undefined'
-    purpose: 'when present, registers the tier-aware reranker'
-  - name: RetrievalAssembleInput.embedding
-    default: 'undefined'
-    purpose: 'when both present, wires CommitEmbedder'
-  - name: RetrievalAssembleInput.bm25Alpha
-    default: '0.5'
-    purpose: 'first-stage / second-stage blend [0,1]'
-  - name: RetrievalAssembleInput.commitCacheMax
-    default: '1024'
-    purpose: 'LRU cap on commit-embedder cache'
+knobs: []
 deliberate_hold: null
 notes: |
-  Default-OFF discipline (RFC §1.2): every legacy caller is byte-
-  identical when the env knob is absent. The slot is omitted entirely
-  from AgentConfig (respects exactOptionalPropertyTypes). Bridge functions
-  return identity behavior when `stack` is undefined.
-
-  Loud silent-default avoidance: env value strict-equals "1" — a typo
-  like "true" / "yes" / "1 " is treated as off rather than silently
-  enabling. The builder also throws RetrievalError when promoting an
-  unregistered reranker kind (e.g. `tier-aware` without a classifier)
-  — caller asked for a strategy by name and is told so loudly.
-
-  Cohere/Gemini/xAI/Moonshot/NVIDIA/zai embedding adapters remain type-
-  level stubs (per ADR-0159 negative invariant). Runtime wiring for any
-  of them is a one-file substitution — this wire is vendor-agnostic.
+  Retired, not held: there is no promotion path for this entry. A future
+  BM25-over-memory feature is a NEW catalog entry and must (per ADR-0553)
+  rerank BEFORE its clip, promote a non-identity default reranker, and keep
+  the RFC §3.1 fence (`@/memory` may not import `@/retrieval` — bridge from
+  `@/runner`). The `buildRetrievalStackCore` assembler remains exported from
+  `@/runner/assemble` for such a consumer; it is dead until one appears.

@@ -203,6 +203,17 @@ Returns `RetrievalCandidate[]`. Pure — no I/O of its own; the sources are inje
 
 ## Composition-root wire (2026-05-25 follow-up — Phases A-F)
 
+> **Superseded in part (2026-08-25, ADR-0553): the memory bridge was deleted.**
+> `rankWithRetrievalStack`, the `AgentConfig.retrievalStack` slot, the
+> `QUANTA_RETRIEVAL_HYBRID` host gate and both wire test suites named below
+> are gone. Audit found the slot was written and never read, the bridge had
+> zero non-test callers, and — because memory's `rankEntries` clips to
+> `query.limit` before the bridge's rerank stage and the default reranker is
+> `identity` — the wire could not change a recall result even when enabled
+> (measured relevant-in-top-5 1 → 1). The localize bridge (`runLocalizeHybrid`)
+> had already been deleted under the jul-3 plan (D2). `buildRetrievalStackCore`
+> remains as the assembler. The section below is kept as written for history.
+
 The primitives shipped without a composition-root wire — `grep -rE
 "runHybridQuery|RerankRegistry|HybridQueryInput|from \"@/retrieval\"" src/runner/ src/apps/`
 returned ZERO hits, meaning the slice was dead code from the agent loop's

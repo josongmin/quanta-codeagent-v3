@@ -33,15 +33,14 @@
  *     (biome rule). This file lives here so apps reach `@/runner` for the
  *     assembler, not the other way around.
  *
- * Wire trajectory (consumer plumbing, in follow-up files):
- *   1. `@/memory/ranking.ts` — opt-in `rankWithRetrievalStack(...)` adapter
- *      that converts `MemoryEntry[]` ↔ {@link RetrievalCandidate} and routes
- *      through {@link runHybridQuery}. Default cosine+lexical path stays the
- *      sole consumer when no stack is provided (byte-identical).
- *   2. `@/tool/localize/index.ts` — opt-in seam that wraps BM25 hits as
- *      {@link RetrievalCandidate} and runs them through the stack's final
- *      reranker (score-fusion-rrf default). Default BM25-only path stays
- *      the sole consumer when no stack is provided (byte-identical).
+ * Consumers: none in-tree today. The ADR-0159 memory↔retrieval bridge and the
+ * localize bridge (both formerly under `@/runner/assemble/`) were DELETED —
+ * ADR-0553 records why (unread `AgentConfig` slot + memory's `rankEntries`
+ * clips BEFORE any rerank stage + `identity` default reranker ⇒ measured
+ * no-op). This builder stays as the surface-agnostic assembler for
+ * `@/retrieval`; a future consumer must rerank BEFORE its own clip and pick a
+ * non-identity default, and `@/memory` may still NOT import `@/retrieval`
+ * (RFC §3.1 fence) — bridge from `@/runner`, not from the memory slice.
  */
 import {
   type CommitEmbedder,
@@ -88,8 +87,9 @@ const BUILTIN_RERANKERS: readonly RerankerKind[] = [
  * `tierClassifier` ⇒ tier-aware reranker registered).
  */
 export interface RetrievalAssembleInput {
-  /** Master opt-in. Surface maps `QUANTA_RETRIEVAL_HYBRID === "1"` (or its
-   *  per-front equivalent) onto this boolean. Absent / false ⇒ no stack. */
+  /** Master opt-in. The surface maps its own typed input onto this boolean.
+   *  Absent / false ⇒ no stack. (The former host env gate for this flag was
+   *  deleted together with the memory bridge — ADR-0553.) */
   enabled?: boolean
   /** Default reranker kind promoted by the operator. Must be one of the
    *  registered kinds (`identity` always available; `bm25-secondary` and
