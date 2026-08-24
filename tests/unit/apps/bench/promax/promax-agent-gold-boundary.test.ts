@@ -20,8 +20,8 @@
  * gold-bearing teardown, and no production caller executes either — so admitting
  * a box would leave the key on it for the next chunk's agent phase.)
  */
-import { describe, expect, test } from "bun:test"
-import { mkdtempSync, writeFileSync } from "node:fs"
+import { afterAll, describe, expect, test } from "bun:test"
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { loadFamilyCorpusRowsOrThrow } from "@/apps/bench/profiles/corpus-read"
@@ -50,8 +50,17 @@ const goldBearingRow = (id: string) => ({
   test_patch: "--- a/t\n+++ b/t\n@@ -1 +1 @@\n-c\n+d\n",
 })
 
+/** Every temp dir this file makes, removed at the end. Without it each run left
+ *  two `promax-lane-*` dirs behind; enough of them degrade `ls /tmp` badly enough
+ *  to time out unrelated tests. */
+const TEMP_DIRS: string[] = []
+afterAll(() => {
+  for (const dir of TEMP_DIRS) rmSync(dir, { recursive: true, force: true })
+})
+
 const writeCorpus = (rows: readonly Record<string, unknown>[]): string => {
   const dir = mkdtempSync(join(tmpdir(), "promax-lane-"))
+  TEMP_DIRS.push(dir)
   const path = join(dir, "instances.json")
   writeFileSync(path, JSON.stringify(rows))
   return path

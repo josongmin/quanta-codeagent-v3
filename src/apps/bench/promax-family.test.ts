@@ -476,6 +476,13 @@ describe("PMX-01 — the promax remote bootstrap specification is fail-closed", 
     }
     await setupBoxForFamily({ family: "promax", ssh, log: () => {} })
     expect(seen, "promax's setupBox must issue NO ssh of its own").toEqual([])
+    // …and the provisioning it declines to do really is DECLARED elsewhere, so
+    // the empty list above means "delegated", not "nothing provisions this box".
+    const declared = resolveDatasetFamilyProfile("promax").remoteBootstrap
+    expect(
+      declared,
+      "promax declares no remoteBootstrap — then nothing provisions it",
+    ).toBeDefined()
     // PAIRED CONTROL: verified is still a silent no-op, pro still clones Scale.
     const verifiedSeen: string[] = []
     await setupBoxForFamily({
@@ -592,6 +599,20 @@ describe("PMX-01 — promax preflight refuses a mislabeled or gold-bearing datas
         family: "promax",
       }),
     ).not.toThrow()
+    // …and the checks REALLY RAN. `not.toThrow()` alone is satisfied by a
+    // preflight that does nothing, which is how the name's second half came to be
+    // asserted nowhere. The same callee, on the same surface, must still refuse a
+    // gold-bearing row — proving this pre-provisioning gate is live, not absent.
+    const leaky = writeJsonl("gold-for-lane.jsonl", [
+      { ...sound(), patch: "GOLD", test_patch: "GOLD-TEST" },
+    ])
+    expect(() =>
+      assertDatasetGradeableForFamily({
+        datasetPath: leaky,
+        surface: "full-remote",
+        family: "promax",
+      }),
+    ).toThrow()
     // PAIRED: pro's own corpus rule still fires on the same file, and
     // verified/live still pass — no global gate was armed.
     expect(() =>

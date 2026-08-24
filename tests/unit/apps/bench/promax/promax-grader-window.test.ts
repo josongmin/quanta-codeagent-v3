@@ -146,7 +146,7 @@ describe("whileMaterialized — the grading seam between materialize and teardow
     expect(logs.join(" ")).toMatch(/TEARDOWN also failed|answer-key/i)
   })
 
-  test("PAIRED CONTROL: no callback ⇒ byte-identical to before (materialize, teardown)", async () => {
+  test("PAIRED CONTROL: no callback ⇒ byte-identical — the WHOLE issued list, not just a teardown", async () => {
     const r = recorder()
     await executeFamilyRemoteBootstrap({
       bootstrap,
@@ -154,7 +154,13 @@ describe("whileMaterialized — the grading seam between materialize and teardow
       ssh: r.ssh,
       log: () => {},
     })
-    expect(ranTeardown(r.issued)).toBe(true)
+    // Asserting only "a teardown happened somewhere" let an EXTRA command be
+    // added to the no-callback path without turning this red. The list is the
+    // claim: exactly the grader command, then exactly the teardown.
+    expect(r.issued).toEqual([
+      "'git' 'clone' 'upstream'",
+      "'rm' '-rf' '/opt/quanta/promax/upstream'",
+    ])
   })
 
   test("PAIRED CONTROL: the callback is IGNORED for a non-grader phase", async () => {

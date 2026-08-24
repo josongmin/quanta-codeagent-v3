@@ -139,8 +139,15 @@ describe("a ProMax chunk grades inside the window", () => {
     // THE property: the artifact is read while the checkout still exists, so this
     // does not rely on the evaluator's output surviving the teardown.
     expect(teardownAt).toBeGreaterThan(readAt)
-    // …and something was materialized before the grade ran
-    expect(gradeAt).toBeGreaterThan(0)
+    // …and the MATERIALIZE commands really ran first. `gradeAt > 0` was not
+    // enough: the `$HOME` probe is always issued first, so an empty grader phase
+    // (no checkout, no hash verification, no venv) satisfied it silently.
+    const clonedAt = r.issued.findIndex((c) => c.includes("'git'"))
+    const verifiedAt = r.issued.findIndex((c) => c.includes("sha256sum"))
+    expect(clonedAt, "the pinned checkout was never created").toBeGreaterThan(-1)
+    expect(verifiedAt, "the pinned files were never hash-verified").toBeGreaterThan(-1)
+    expect(gradeAt).toBeGreaterThan(clonedAt)
+    expect(gradeAt).toBeGreaterThan(verifiedAt)
   })
 
   test("the grade command names the pinned evaluator and the chunk's predictions", async () => {

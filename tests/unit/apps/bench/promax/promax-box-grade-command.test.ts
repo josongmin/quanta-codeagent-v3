@@ -79,9 +79,17 @@ describe("the on-box grade runs entirely inside the materialized window", () => 
     const i = r.argv.indexOf("--workers")
     expect(i).toBeGreaterThan(-1)
     expect(r.argv[i + 1]).toBe("1")
-    // concurrent grading false-negatives correct patches (jun-19) — the input
-    // type must not offer a way to raise it
-    expect(Object.keys(base)).not.toContain("workers")
+    // concurrent grading false-negatives correct patches (jun-19), so the value
+    // is a measurement property. Asserting `Object.keys(base)` proved nothing —
+    // `base` is this file's own fixture. The claim is about the PRODUCTION
+    // builder: a caller that smuggles a `workers` field must not move the pin.
+    const smuggled = buildProMaxBoxGradeCommand({
+      ...base,
+      workers: 8,
+    } as unknown as Parameters<typeof buildProMaxBoxGradeCommand>[0])
+    expect(smuggled.ok).toBe(true)
+    if (!smuggled.ok) return
+    expect(smuggled.argv[smuggled.argv.indexOf("--workers") + 1]).toBe("1")
   })
 
   test("the predictions the AGENT produced are what gets graded", () => {
@@ -103,7 +111,15 @@ describe("fail-closed on anything that could not be replayed or could break out"
   test("the rendered COMMAND is shell-quoted, so a metachar in a path cannot break out", () => {
     const evil = "/tmp/out; rm -rf /"
     const r = built({ outputPath: evil })
-    // it may refuse OR quote — what it must never do is emit the path unquoted
+    // NO ESCAPE HATCH. `if (!r.ok) return` here meant a future tightening of path
+    // validation would turn this injection guard green-and-dead: the body would
+    // stop running and the expect count would silently drop. If the builder ever
+    // refuses this input, this test must be rewritten deliberately, not skipped
+    // by itself.
+    expect(
+      r.ok,
+      "the builder refused the input — rewrite this test rather than letting it self-skip",
+    ).toBe(true)
     if (!r.ok) return
     // the whole token, metachars and all, sits inside one single-quoted string
     expect(r.command).toContain(`'${evil}'`)
