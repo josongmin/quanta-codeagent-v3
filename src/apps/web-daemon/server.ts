@@ -315,10 +315,16 @@ const buildOnAttachThread = (deps: {
             await deps.sharedSession.transcript.replace(messages)
           },
           setActiveThreadId: (id) => deps.transcriptPersist.setActiveThreadId(id),
+          // Re-key the persisted goal onto the LIVE session's objective read key
+          // (`sharedSession.sessionId` === base.sessionId === config.sessionId ===
+          // the tools' ctx.ownerId). The daemon mints a fresh per-boot session id,
+          // so the snapshot's saving-boot key never matches the reopening read key —
+          // without this re-key the restore is inert (goal orphaned under the old id).
           restoreObjective: (snapshot) =>
             restoreObjectiveSnapshotInto(
               (deps.runtime as { objectiveAuthority?: unknown }).objectiveAuthority,
               snapshot,
+              deps.sharedSession.sessionId,
             ),
         })
       }

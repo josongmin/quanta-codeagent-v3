@@ -111,20 +111,39 @@ export const buildObjectiveSnapshotProvider = (
  * `authority` is the base's slice-opaque `ObjectivePort` slot (`runtime.objectiveAuthority`).
  * ABSENT (`QUANTA_OBJECTIVE_TOOLS` off ⇒ no authority) or an ABSENT snapshot (a
  * thread that never had an objective — `SavedSession.objective` is optional) ⇒ a
- * no-op (byte-identical default-OFF; no empty-goal fabrication). Each decoded
- * per-thread domain is planted VERBATIM with its exact revision via the authority's
- * `restoreDomain` seam — UNLESS the live authority already holds that thread (a
- * same-thread reopen / an already-active thread), in which case it is SKIPPED so a
- * live goal is never clobbered by an older disk snapshot. Malformed/forged
+ * no-op (byte-identical default-OFF; no empty-goal fabrication). Malformed/forged
  * completions fail-closed inside `decodeObjectiveSnapshot` (unchanged).
+ *
+ * RE-KEY (`liveKey`) — the load-bearing web-daemon fix: the web daemon reads its
+ * objective under `config.sessionId` === `base.sessionId`, a FRESH per-boot
+ * `crypto.randomUUID()` (the daemon builds one session with no id, so `ensureSessionId`
+ * mints a new one each restart). The persisted snapshot is keyed by the SAVING
+ * boot's id, which can NEVER equal the reopening boot's read key — so planting the
+ * domain under its own persisted threadId is inert (the model reads a different
+ * key). When `liveKey` is supplied, the persisted goal is re-keyed onto it (the
+ * reopening session's live objective read key, `sharedSession.sessionId`) so the
+ * reopened turns actually see the goal. The web daemon holds exactly ONE per-session
+ * objective domain (keyed by that single session id), so the snapshot carries one
+ * domain to re-key; no-clobber still guards a live goal on `liveKey`. Without
+ * `liveKey` (non-web callers) each domain is planted VERBATIM under its own thread,
+ * skipping any thread already live.
  */
 export const restoreObjectiveSnapshotInto = (
   authority: unknown,
   snapshot: PersistedObjectiveSnapshot | undefined,
+  liveKey?: string,
 ): void => {
   if (authority === undefined || authority === null || snapshot === undefined) return
   const auth = asObjectiveAuthority(authority as ObjectivePort)
-  for (const domain of decodeObjectiveSnapshot(snapshot)) {
+  const domains = decodeObjectiveSnapshot(snapshot)
+  if (liveKey !== undefined && liveKey !== "") {
+    // Web daemon: re-key the (single) persisted domain onto the live read key so
+    // the reopening boot's turns read it. No-clobber a goal already live on liveKey.
+    if (auth.readDomain(liveKey).state !== null) return
+    for (const domain of domains) auth.restoreDomain({ ...domain, threadId: liveKey })
+    return
+  }
+  for (const domain of domains) {
     // No-clobber: never overwrite a thread the live session already holds.
     if (auth.readDomain(domain.threadId).state !== null) continue
     auth.restoreDomain(domain)

@@ -1,37 +1,42 @@
 /**
  * ★ HELLGATE — RFC-03 C2 (web parity, REOPEN leg): reopening a persisted web
- * thread RESTORES its durable objective into the LIVE, session-stable authority.
+ * thread RESTORES its durable objective into the LIVE, session-stable authority,
+ * RE-KEYED onto the reopening boot's read key.
  *
  * THE GAP (pre-fix): the SAVE leg works — a completed web turn persists the goal
- * into `SavedSession.objective` (decoupled-persistence hellgate). But REOPEN did
- * NOT: `hydrateThreadIntoLiveSession` → `attachSessionToLive` `transcript.replace`d
- * the messages and DROPPED the loaded `SavedSession.objective`, so the reopened
- * session's authority (`runtime.objectiveAuthority`) was EMPTY even though the goal
- * sat on disk. The CLI restores at construction (`resolveGatedObjectiveAuthority
- * ({restoreFrom})`); web mints its ONE authority BEFORE any thread id is known, so
- * it must restore at HYDRATE time.
+ * into `SavedSession.objective`. But REOPEN did NOT restore it. Worse, a first
+ * "fix" that planted the snapshot VERBATIM under its persisted threadId was INERT:
+ * the web daemon reads its objective under `config.sessionId` === `base.sessionId`,
+ * a FRESH `crypto.randomUUID()` minted EACH daemon boot (one session, no id). The
+ * snapshot is keyed by the SAVING boot's id, which can NEVER equal the reopening
+ * boot's read key — so a verbatim plant lands under a key no live turn ever reads
+ * (goal orphaned; the reopened thread still shows empty). This is the exact
+ * per-boot-random-key mismatch two adversarial audits caught.
  *
- * THE FIX: `hydrateThreadIntoLiveSession` surfaces the loaded objective snapshot
- * and, ONLY on the `hydrated` success path, calls `restoreObjective` — wired in the
- * server to `restoreObjectiveSnapshotInto(runtime.objectiveAuthority, snapshot)`,
- * which decodes each persisted thread and plants it VERBATIM (exact revision) via
- * the authority's `restoreDomain` seam, skipping any thread already live.
+ * THE FIX: `restoreObjectiveSnapshotInto(authority, snapshot, liveKey)` RE-KEYS the
+ * (single) persisted web domain onto `liveKey` — the reopening session's live
+ * objective read key (`sharedSession.sessionId` === base.sessionId === the tools'
+ * ctx.ownerId), wired in the server's `onAttachThread`. So a goal saved under the
+ * OLD boot id becomes readable under the NEW boot id. No-clobber still guards a
+ * goal already live on `liveKey`; mid-turn refusal restores nothing.
  *
- * RED-on-injection (captured, [R]): run the identical reopen with `restoreObjective`
- * OMITTED (the pre-fix wiring) ⇒ the authority stays EMPTY (the goal is lost). The
- * fixed path ([P1]) restores it. The controls ([C*]) stay green either way.
+ * KEY DISCIPLINE (what the pre-fix test masked by using ONE literal for all roles):
+ *   SAVING_KEY  — the objective domain key at SAVE time (saving boot's session id).
+ *   LIVE_KEY    — the objective domain key at REOPEN time (a DIFFERENT boot's id).
+ *   THREAD      — the persisted THREAD id being reopened (stable across boots).
+ * In production SAVING_KEY ≠ LIVE_KEY ≠ THREAD; the tests below keep them distinct
+ * so a verbatim (non-re-keyed) plant is provably invisible under LIVE_KEY.
  *
  * Invariants proven:
- *   [P1] reopen a thread that had a goal ⇒ `authority.get(threadId)` returns the
- *        goal with the RIGHT revision + criteria (RED on unfixed: null/empty).
- *   [R]  omit the restore call ⇒ reopen leaves the authority empty (captured RED).
- *   [C1] TOOLS off ⇒ no authority ⇒ restore is a byte-identical no-op (no throw).
- *   [C2] a thread that NEVER had an objective ⇒ nothing restored (no empty-goal
- *        fabrication; `SavedSession.objective` absent).
- *   [C3] mid-turn refusal ⇒ NO restore (the restore hook never fires — parity with
- *        the transcript guard).
- *   [C4] no-clobber: reopening a thread ALREADY live in the authority keeps the
- *        LIVE goal (the older disk snapshot never overwrites it).
+ *   [P1] reopen ⇒ the goal (+ right revision/criteria) is readable under LIVE_KEY,
+ *        NOT under the persisted SAVING_KEY (RED on unfixed: null under LIVE_KEY).
+ *   [R1] omit the restore call ⇒ authority empty (the original drop).
+ *   [R2] restore WITHOUT the re-key (verbatim plant) ⇒ goal lands under SAVING_KEY,
+ *        invisible under LIVE_KEY — the exact inert-seam the audits caught.
+ *   [C1] TOOLS off ⇒ no authority ⇒ no-op (no throw).
+ *   [C2] a thread that NEVER had an objective ⇒ nothing restored.
+ *   [C3] mid-turn refusal ⇒ NO restore.
+ *   [C4] no-clobber: a goal already live on LIVE_KEY is kept (older disk ignored).
  */
 
 import { describe, expect, test } from "bun:test"
@@ -54,6 +59,11 @@ import {
   saveSessionById,
 } from "@/session"
 
+// THREE distinct keys — see KEY DISCIPLINE above. The saving/reopening objective
+// domain keys are per-boot random UUIDs in production (base.sessionId); the thread
+// id is the stable persisted identity being reopened.
+const SAVING_KEY = "saving-boot-session-id"
+const LIVE_KEY = "reopening-boot-session-id"
 const THREAD = "thread-1"
 const GOAL = "restore the durable goal on reopen"
 const msgs: Message[] = [{ role: "user", content: [{ type: "text", text: "hi" }] } as never]
@@ -89,13 +99,17 @@ const persist = async (
   )
 }
 
-/** Drive the REAL reopen path: load the persisted thread, replace the transcript,
- *  repoint persistence, and (when `restore` is true) wire the objective restore to
- *  the live authority — precisely the server's `onAttachThread` closure. */
+/**
+ * Drive the REAL reopen path exactly as the server's `onAttachThread` closure does:
+ * load the persisted thread, replace the transcript, repoint persistence, and
+ * (when `restore`) restore the objective — RE-KEYED onto `liveKey` (the value the
+ * server passes as `sharedSession.sessionId`). `rekey:false` reproduces the inert
+ * pre-fix verbatim plant.
+ */
 const reopen = async (
   root: SessionRootProvider,
   liveAuthority: ObjectivePort | undefined,
-  opts: { restore: boolean; midTurn?: boolean },
+  opts: { restore: boolean; rekey?: boolean; midTurn?: boolean },
 ) =>
   hydrateThreadIntoLiveSession(THREAD, {
     loadThread: async (id) => await loadSessionById(id, root),
@@ -104,55 +118,83 @@ const reopen = async (
     },
     setActiveThreadId: () => undefined,
     ...(opts.restore
-      ? { restoreObjective: (snap) => restoreObjectiveSnapshotInto(liveAuthority, snap) }
+      ? {
+          restoreObjective: (snap) =>
+            restoreObjectiveSnapshotInto(
+              liveAuthority,
+              snap,
+              opts.rekey === false ? undefined : LIVE_KEY,
+            ),
+        }
       : {}),
   })
 
-describe("HELLGATE RFC-03 C2 (web parity) — reopen restores the durable objective", () => {
-  test("[P1] reopen a thread that had a goal ⇒ live authority.get(threadId) returns the goal + right revision/criteria", async () => {
+/** Save a goal under SAVING_KEY (≠ LIVE_KEY) and persist it under THREAD. */
+const seedDisk = async (root: SessionRootProvider, goal: string, withStatusBump = false) => {
+  const saver = mintAuthority({ QUANTA_OBJECTIVE_TOOLS: "1" })
+  expect(saver).toBeDefined()
+  saver?.set(SAVING_KEY, { goal, successCriteria: ["tests pass"] }) // rev 1
+  if (withStatusBump) saver?.updateStatus(SAVING_KEY, "paused") // rev 2
+  const snapshot = encodeObjectiveSnapshot(saver as ObjectivePort)
+  // The snapshot is keyed by SAVING_KEY — NOT the live key, NOT the thread id.
+  expect(snapshot.threads[0]?.threadId).toBe(SAVING_KEY)
+  await persist(root, snapshot)
+  return snapshot
+}
+
+describe("HELLGATE RFC-03 C2 (web parity) — reopen re-keys the durable objective onto the live read key", () => {
+  test("[P1] reopen ⇒ goal + revision/criteria readable under LIVE_KEY, not the persisted SAVING_KEY", async () => {
     const dir = mkdtempSync(join(tmpdir(), "web-obj-reopen-"))
     const root: SessionRootProvider = { resolve: async () => dir }
     try {
-      // SAVE leg: a session set a goal + criterion + a status bump (revision 2).
-      const saver = mintAuthority({ QUANTA_OBJECTIVE_TOOLS: "1" })
-      expect(saver).toBeDefined()
-      saver?.set(THREAD, { goal: GOAL, successCriteria: ["tests pass"] }) // rev 1
-      saver?.updateStatus(THREAD, "paused") // rev 2
-      const snapshot = encodeObjectiveSnapshot(saver as ObjectivePort)
-      expect(snapshot.threads[0]?.revision).toBe(2)
-      await persist(root, snapshot)
+      const snap = await seedDisk(root, GOAL, true)
+      expect(snap.threads[0]?.revision).toBe(2)
 
-      // REOPEN leg: a FRESH session-stable authority that has never seen THREAD.
       const live = mintAuthority({ QUANTA_OBJECTIVE_TOOLS: "1" })
-      expect(live?.get(THREAD)).toBeNull() // RED baseline: empty before restore
+      expect(live?.get(LIVE_KEY)).toBeNull() // RED baseline: empty before restore
 
-      const outcome = await reopen(root, live, { restore: true })
+      const outcome = await reopen(root, live, { restore: true, rekey: true })
       expect(outcome).toEqual({ kind: "hydrated", threadId: THREAD, count: 1 })
 
-      // THE FIX — goal, criteria, AND exact revision are back on the live authority.
-      const restored = live?.get(THREAD)
+      // THE FIX — the goal is re-keyed onto the LIVE read key the model reads under.
+      const restored = live?.get(LIVE_KEY)
       expect(restored?.goal).toBe(GOAL)
       expect(restored?.successCriteria.map((c) => c.text)).toEqual(["tests pass"])
-      expect(asObjectiveAuthority(live as ObjectivePort).readDomain(THREAD).revision).toBe(2)
+      expect(asObjectiveAuthority(live as ObjectivePort).readDomain(LIVE_KEY).revision).toBe(2)
+      // And NOT orphaned under the persisted saving-boot key.
+      expect(live?.get(SAVING_KEY)).toBeNull()
     } finally {
       rmSync(dir, { recursive: true, force: true })
     }
   })
 
-  test("[R] RED-on-injection: omit the restore call ⇒ reopen leaves the authority EMPTY (captured pre-fix behavior)", async () => {
-    const dir = mkdtempSync(join(tmpdir(), "web-obj-reopen-red-"))
+  test("[R1] RED-on-injection: omit the restore call ⇒ reopen leaves the authority EMPTY", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "web-obj-reopen-r1-"))
     const root: SessionRootProvider = { resolve: async () => dir }
     try {
-      const saver = mintAuthority({ QUANTA_OBJECTIVE_TOOLS: "1" })
-      saver?.set(THREAD, { goal: GOAL })
-      await persist(root, encodeObjectiveSnapshot(saver as ObjectivePort))
-
+      await seedDisk(root, GOAL)
       const live = mintAuthority({ QUANTA_OBJECTIVE_TOOLS: "1" })
-      // The pre-fix wiring: hydrate WITHOUT the restore hook. Transcript still swaps.
       const outcome = await reopen(root, live, { restore: false })
       expect(outcome).toEqual({ kind: "hydrated", threadId: THREAD, count: 1 })
-      // The goal is on disk but the live authority is still empty — the exact gap.
-      expect(live?.get(THREAD)).toBeNull()
+      expect(live?.get(LIVE_KEY)).toBeNull()
+      expect(live?.get(SAVING_KEY)).toBeNull()
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  test("[R2] RED-on-injection: restore WITHOUT re-key (verbatim plant) ⇒ goal orphaned under SAVING_KEY, invisible under LIVE_KEY (the inert seam the audits caught)", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "web-obj-reopen-r2-"))
+    const root: SessionRootProvider = { resolve: async () => dir }
+    try {
+      await seedDisk(root, GOAL)
+      const live = mintAuthority({ QUANTA_OBJECTIVE_TOOLS: "1" })
+      // The pre-fix verbatim behavior: plant under the snapshot's own key.
+      await reopen(root, live, { restore: true, rekey: false })
+      // The exact production bug: the model (reading LIVE_KEY) sees NOTHING …
+      expect(live?.get(LIVE_KEY)).toBeNull()
+      // … while the goal sits orphaned under the saving-boot key no turn reads.
+      expect(live?.get(SAVING_KEY)?.goal).toBe(GOAL)
     } finally {
       rmSync(dir, { recursive: true, force: true })
     }
@@ -162,20 +204,12 @@ describe("HELLGATE RFC-03 C2 (web parity) — reopen restores the durable object
     const dir = mkdtempSync(join(tmpdir(), "web-obj-reopen-off-"))
     const root: SessionRootProvider = { resolve: async () => dir }
     try {
-      // Persist a snapshot (a session that ran with TOOLS on earlier).
-      const saver = mintAuthority({ QUANTA_OBJECTIVE_TOOLS: "1" })
-      saver?.set(THREAD, { goal: GOAL })
-      await persist(root, encodeObjectiveSnapshot(saver as ObjectivePort))
-
-      // Reopen under TOOLS OFF ⇒ no live authority at all.
-      const live = mintAuthority({})
+      const snap = await seedDisk(root, GOAL)
+      const live = mintAuthority({}) // TOOLS off ⇒ undefined
       expect(live).toBeUndefined()
-      const outcome = await reopen(root, live, { restore: true })
+      const outcome = await reopen(root, live, { restore: true, rekey: true })
       expect(outcome).toEqual({ kind: "hydrated", threadId: THREAD, count: 1 })
-      // Nothing to restore into; the direct call is a no-op too.
-      expect(() =>
-        restoreObjectiveSnapshotInto(undefined, encodeObjectiveSnapshot(saver as ObjectivePort)),
-      ).not.toThrow()
+      expect(() => restoreObjectiveSnapshotInto(undefined, snap, LIVE_KEY)).not.toThrow()
     } finally {
       rmSync(dir, { recursive: true, force: true })
     }
@@ -187,9 +221,9 @@ describe("HELLGATE RFC-03 C2 (web parity) — reopen restores the durable object
     try {
       await persist(root, undefined) // SavedSession with NO objective
       const live = mintAuthority({ QUANTA_OBJECTIVE_TOOLS: "1" })
-      const outcome = await reopen(root, live, { restore: true })
+      const outcome = await reopen(root, live, { restore: true, rekey: true })
       expect(outcome).toEqual({ kind: "hydrated", threadId: THREAD, count: 1 })
-      expect(live?.get(THREAD)).toBeNull() // no fabricated empty goal
+      expect(live?.get(LIVE_KEY)).toBeNull()
     } finally {
       rmSync(dir, { recursive: true, force: true })
     }
@@ -199,35 +233,25 @@ describe("HELLGATE RFC-03 C2 (web parity) — reopen restores the durable object
     const dir = mkdtempSync(join(tmpdir(), "web-obj-reopen-mid-"))
     const root: SessionRootProvider = { resolve: async () => dir }
     try {
-      const saver = mintAuthority({ QUANTA_OBJECTIVE_TOOLS: "1" })
-      saver?.set(THREAD, { goal: GOAL })
-      await persist(root, encodeObjectiveSnapshot(saver as ObjectivePort))
-
+      await seedDisk(root, GOAL)
       const live = mintAuthority({ QUANTA_OBJECTIVE_TOOLS: "1" })
-      const outcome = await reopen(root, live, { restore: true, midTurn: true })
+      const outcome = await reopen(root, live, { restore: true, rekey: true, midTurn: true })
       expect(outcome).toEqual({ kind: "refused-mid-turn", threadId: THREAD })
-      expect(live?.get(THREAD)).toBeNull() // parity with the transcript guard
+      expect(live?.get(LIVE_KEY)).toBeNull()
     } finally {
       rmSync(dir, { recursive: true, force: true })
     }
   })
 
-  test("[C4] no-clobber: reopening a thread ALREADY live keeps the live goal (older disk snapshot ignored)", async () => {
+  test("[C4] no-clobber: a goal already live on LIVE_KEY is kept (older disk snapshot ignored)", async () => {
     const dir = mkdtempSync(join(tmpdir(), "web-obj-reopen-clobber-"))
     const root: SessionRootProvider = { resolve: async () => dir }
     try {
-      // On disk: an OLD goal.
-      const saver = mintAuthority({ QUANTA_OBJECTIVE_TOOLS: "1" })
-      saver?.set(THREAD, { goal: "OLD disk goal" })
-      await persist(root, encodeObjectiveSnapshot(saver as ObjectivePort))
-
-      // Live: the SAME thread already carries a NEWER goal.
+      await seedDisk(root, "OLD disk goal")
       const live = mintAuthority({ QUANTA_OBJECTIVE_TOOLS: "1" })
-      live?.set(THREAD, { goal: "NEW live goal" })
-
-      await reopen(root, live, { restore: true })
-      // The live goal is untouched — the older snapshot never clobbered it.
-      expect(live?.get(THREAD)?.goal).toBe("NEW live goal")
+      live?.set(LIVE_KEY, { goal: "NEW live goal" }) // already live on the read key
+      await reopen(root, live, { restore: true, rekey: true })
+      expect(live?.get(LIVE_KEY)?.goal).toBe("NEW live goal")
     } finally {
       rmSync(dir, { recursive: true, force: true })
     }
