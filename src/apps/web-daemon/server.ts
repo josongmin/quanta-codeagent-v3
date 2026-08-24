@@ -293,6 +293,22 @@ const webObjectiveSnapshot = (
 ): (() => PersistedObjectiveSnapshot | undefined) | undefined =>
   buildObjectiveSnapshotProvider((runtime as { objectiveAuthority?: unknown }).objectiveAuthority)
 
+/** Bind the observability objective pane to the LIVE session key. The emitter reads
+ *  `objective.get(threadId)`; without a threadId it defaults to "default", but the
+ *  tools/authority key the objective by config.sessionId === base.sessionId ===
+ *  sharedSession.sessionId — so the pane showed an EMPTY goal. Setting the emitter
+ *  threadId to the live key (the SAME key the reopen restore re-keys onto) makes the
+ *  pane reflect the live + reopened goal. Gate OFF ⇒ observabilityPorts undefined ⇒
+ *  config returned unchanged (byte-identical). Module-scope to keep startWebDaemon
+ *  under the god ceiling. */
+export const bindObjectivePaneThread = (
+  config: WebDaemonServerConfig,
+  sessionId: string,
+): WebDaemonServerConfig =>
+  config.observabilityPorts !== undefined
+    ? { ...config, observabilityPorts: { ...config.observabilityPorts, threadId: sessionId } }
+    : config
+
 /** P1 Phase 2 — the swap-on-attach closure (module-scope to keep `startWebDaemon`
  *  under the god-function ceiling). Load the opened thread's lossless SavedSession,
  *  replace the live transcript, repoint persistence, and (RFC-03 C2) restore its
@@ -402,7 +418,7 @@ export const startWebDaemon = async (config: WebDaemonServerConfig): Promise<Web
   }
 
   const { server, boundPort, boundHost } = buildDaemonListener({
-    config,
+    config: bindObjectivePaneThread(config, sharedSession.sessionId),
     registry,
     startedAt,
     threadStore,
