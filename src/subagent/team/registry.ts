@@ -62,10 +62,7 @@ const maySeedMember = (
   m: string,
   caller: string | undefined,
 ): boolean =>
-  caller === undefined ||
-  m === caller ||
-  !teamByAgent.has(m) ||
-  teamByAgent.get(m) === teamId
+  caller === undefined || m === caller || !teamByAgent.has(m) || teamByAgent.get(m) === teamId
 
 /** Seed `members` into `teamId`, skipping anyone {@link maySeedMember} refuses.
  *  A unit because it is the ONE place membership is granted in bulk, and the

@@ -257,7 +257,7 @@ type FieldRules<T> = {
 
 /** The plain "read this key and coerce it" reader, which is all but one field needs. */
 const field =
-  <V,>(key: string, coerce: (v: unknown) => V | undefined) =>
+  <V>(key: string, coerce: (v: unknown) => V | undefined) =>
   (raw: Record<string, unknown>): V | undefined =>
     coerce(raw[key])
 

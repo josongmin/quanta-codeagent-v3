@@ -57,6 +57,32 @@ const resolveMessage = (
   return { ok: true, value: message }
 }
 
+/**
+ * ADR-0220 — announce a completed commit on the host directive channel.
+ *
+ * A unit because BOTH of its failure paths are deliberately absorbed: a failed
+ * `rev-parse` degrades the sha to `""`, and a throwing host channel is
+ * swallowed. The commit has already landed by the time this runs, so nothing
+ * here may poison the tool result — one place to state that, one place to audit
+ * it.
+ */
+const emitCommitDirective = async (
+  emitter: NonNullable<GitCommitToolOpts["gitDirectiveEmitter"]>,
+  runner: GitRunner,
+  ctx: CoreToolContext,
+  message: string,
+): Promise<void> => {
+  let sha = ""
+  const shaOut = await mutate(runner, ["rev-parse", "HEAD"], ctx.cwd, "git rev-parse", ctx.signal)
+  if (shaOut.kind === "ok") sha = shaOut.stdout.trim()
+  try {
+    emitter.emit({ kind: "commit", sha, message })
+  } catch {
+    // Emit failures NEVER poison the tool result (host channel may be
+    // unavailable; commit already succeeded). Swallow per ADR-0220.
+  }
+}
+
 export const gitCommitTool = (
   runner: GitRunner,
   opts: GitCommitToolOpts = {},
@@ -112,23 +138,7 @@ export const gitCommitTool = (
     // never poisons the result). Default-OFF: no emitter ⇒ no rev-parse,
     // no allocation, byte-identical legacy.
     const emitter = opts.gitDirectiveEmitter
-    if (emitter !== undefined) {
-      let sha = ""
-      const shaOut = await mutate(
-        runner,
-        ["rev-parse", "HEAD"],
-        ctx.cwd,
-        "git rev-parse",
-        ctx.signal,
-      )
-      if (shaOut.kind === "ok") sha = shaOut.stdout.trim()
-      try {
-        emitter.emit({ kind: "commit", sha, message: finalMessage })
-      } catch {
-        // Emit failures NEVER poison the tool result (host channel may be
-        // unavailable; commit already succeeded). Swallow per ADR-0220.
-      }
-    }
+    if (emitter !== undefined) await emitCommitDirective(emitter, runner, ctx, finalMessage)
 
     yield {
       type: "result",

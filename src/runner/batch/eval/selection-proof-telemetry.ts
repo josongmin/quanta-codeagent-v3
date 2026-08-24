@@ -210,6 +210,46 @@ const summarizeProof = (result: SelectionResult): SelectionProofSummary | undefi
   }
 }
 
+/** The family-attribution block of a candidate's telemetry: which family the
+ *  candidate was attributed to, the evidence behind that attribution, and what
+ *  the family still leaves uncovered.
+ *
+ *  A unit because coverage is only computable FROM the attribution — a candidate
+ *  with no `familyId` has no owner files to compare against, so the missing-
+ *  coverage list is empty by construction rather than by measurement. Grouping
+ *  them keeps that dependency in one place; the individual fields keep their own
+ *  absent-stays-absent rule (a `familyReason` recorded without a resolved
+ *  `familyId` still surfaces, as before). Emitted in the same key order as the
+ *  inline form so the serialized telemetry is byte-identical. */
+const candidateFamilyTelemetry = (
+  candidate: ScoredEntry["candidate"],
+): Partial<CandidateTelemetry> => {
+  const coverageMissing =
+    candidate.familyId === undefined
+      ? []
+      : candidateFamilyCoverageMissing(
+          {
+            familyId: candidate.familyId,
+            ownerFiles: candidate.familyOwnerFiles ?? [],
+          },
+          candidate.files,
+        )
+  return {
+    ...(candidate.familyId !== undefined ? { familyId: candidate.familyId } : {}),
+    ...(candidate.familyReason !== undefined ? { familyReason: candidate.familyReason } : {}),
+    ...(candidate.familyOwnerFiles !== undefined
+      ? { familyOwnerFiles: candidate.familyOwnerFiles }
+      : {}),
+    ...(candidate.familySourceEvidence !== undefined
+      ? { familySourceEvidence: candidate.familySourceEvidence }
+      : {}),
+    ...(coverageMissing.length === 0 ? {} : { familyCoverageMissing: coverageMissing }),
+    ...(candidate.familyCoverageRepair !== undefined
+      ? { familyCoverageRepair: candidate.familyCoverageRepair }
+      : {}),
+  }
+}
+
 const selectionCandidateTelemetryOf = (s: ScoredEntry): CandidateTelemetry => {
   const publicRegression =
     s.candidate.publicRegressionReceipt?.state ??
@@ -217,16 +257,6 @@ const selectionCandidateTelemetryOf = (s: ScoredEntry): CandidateTelemetry => {
   const reproConsensus =
     s.candidate.reproConsensusReceipt?.state ??
     reproConsensusStateOf({ resolved: s.resolvedKofN, receipt: undefined })
-  const familyCoverage =
-    s.candidate.familyId === undefined
-      ? []
-      : candidateFamilyCoverageMissing(
-          {
-            familyId: s.candidate.familyId,
-            ownerFiles: s.candidate.familyOwnerFiles ?? [],
-          },
-          s.candidate.files,
-        )
   return {
     id: s.candidate.id,
     files: s.candidate.files,
@@ -238,18 +268,7 @@ const selectionCandidateTelemetryOf = (s: ScoredEntry): CandidateTelemetry => {
     reasons: s.verdict.reasons,
     ...(s.candidate.sandboxPath !== undefined ? { sandboxPath: s.candidate.sandboxPath } : {}),
     ...(s.candidate.captureClass !== undefined ? { captureClass: s.candidate.captureClass } : {}),
-    ...(s.candidate.familyId !== undefined ? { familyId: s.candidate.familyId } : {}),
-    ...(s.candidate.familyReason !== undefined ? { familyReason: s.candidate.familyReason } : {}),
-    ...(s.candidate.familyOwnerFiles !== undefined
-      ? { familyOwnerFiles: s.candidate.familyOwnerFiles }
-      : {}),
-    ...(s.candidate.familySourceEvidence !== undefined
-      ? { familySourceEvidence: s.candidate.familySourceEvidence }
-      : {}),
-    ...(familyCoverage.length === 0 ? {} : { familyCoverageMissing: familyCoverage }),
-    ...(s.candidate.familyCoverageRepair !== undefined
-      ? { familyCoverageRepair: s.candidate.familyCoverageRepair }
-      : {}),
+    ...candidateFamilyTelemetry(s.candidate),
     requiredContractsSatisfied: s.requiredContractsSatisfied,
     contractsSatisfied: s.contractsSatisfied,
     ...(s.candidate.mweReceipt !== undefined ? { mwe: s.candidate.mweReceipt.state } : {}),

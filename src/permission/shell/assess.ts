@@ -445,8 +445,8 @@ const assessPipeHop = (
   consumer: string,
   ctx: Ctx,
 ): ShellAssessment =>
-  assessExfilPipe(prod, producer, consumer) ??
   assessExecutedPipe(prod, producer, consumer, ctx) ??
+  assessExfilPipe(prod, producer, consumer) ??
   safe()
 
 /** Group the flat command list back into its pipelines. */

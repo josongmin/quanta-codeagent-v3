@@ -625,21 +625,49 @@ const classifyBadRequest = (e: unknown): LLMErrorKind => {
   return "bad_request"
 }
 
-const classify = (status: number | undefined, e: unknown, _msg: string): LLMErrorKind => {
-  if (isAbortError(e)) return "aborted"
-  if (status === 529) return "overloaded"
-  if (status === 429) return "rate_limit"
-  if (status === 401 || status === 403) return "auth"
-  if (status === 404) return "not_found"
-  if (status === 400 || status === 422) return classifyBadRequest(e)
-  if (status !== undefined && status >= 500 && status < 600) return "server_error"
-  if (status !== undefined) return "unknown"
-  // No status — last-resort transport detection via Node's `code` field.
-  // This branch DOES NOT match on message text (the bug class we're killing).
+/**
+ * HTTP statuses that map to a kind on the status ALONE.
+ *
+ * A table rather than an if-chain because each row is a fact, not a rule with an
+ * argument — and because the two statuses that are NOT facts (400/422, which
+ * need a look at the body) then stand out below instead of hiding among their
+ * neighbours.
+ */
+const STATUS_KIND: Readonly<Record<number, LLMErrorKind>> = {
+  401: "auth",
+  403: "auth",
+  404: "not_found",
+  429: "rate_limit",
+  529: "overloaded",
+}
+
+/**
+ * Last-resort transport detection from Node's `errno` `code`, consulted ONLY
+ * when the error carries no HTTP status at all.
+ *
+ * Deliberately never looks at message text. Re-deriving meaning from a message
+ * the boundary already captured is the exact bug class this classifier exists
+ * to kill (see the convention note at the top of this file), so the rule lives
+ * in its own named function where an addition has to be a deliberate one.
+ */
+const transportKind = (e: unknown): LLMErrorKind => {
   if (typeof e === "object" && e !== null) {
     const errnoCode = (e as { code?: unknown }).code
     if (typeof errnoCode === "string" && NETWORK_CODES.has(errnoCode)) return "network"
   }
+  return "unknown"
+}
+
+const classify = (status: number | undefined, e: unknown, _msg: string): LLMErrorKind => {
+  // An abort outranks every status: the request may well have come back 500
+  // while the turn was already cancelling, and reporting that as a server fault
+  // would make the retry layer chase a failure the caller asked for.
+  if (isAbortError(e)) return "aborted"
+  if (status === undefined) return transportKind(e)
+  const exact = STATUS_KIND[status]
+  if (exact !== undefined) return exact
+  if (status === 400 || status === 422) return classifyBadRequest(e)
+  if (status >= 500 && status < 600) return "server_error"
   return "unknown"
 }
 

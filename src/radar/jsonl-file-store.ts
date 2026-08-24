@@ -67,6 +67,19 @@ const isBugFixMetadata = (v: unknown): v is BugFixProposalMetadata => {
   )
 }
 
+/**
+ * Whether a raw card's bug-fix metadata is coherent with its kind.
+ *
+ * A unit because these are two rules that only mean something together: a
+ * `bug-fix` card MUST carry the metadata, and ANY card that carries it must
+ * carry a well-formed one. Together they say a non-bug-fix card may omit the
+ * block but may never fake it.
+ */
+const hasCoherentBugFixMetadata = (r: Record<string, unknown>): boolean => {
+  if (r.kind === "bug-fix" && !isBugFixMetadata(r.bugFix)) return false
+  return r.bugFix === undefined || isBugFixMetadata(r.bugFix)
+}
+
 const isRadarCard = (v: unknown): v is RadarCard => {
   if (typeof v !== "object" || v === null) return false
   const r = v as Record<string, unknown>
@@ -78,9 +91,7 @@ const isRadarCard = (v: unknown): v is RadarCard => {
   if (typeof r.createdAtMs !== "number") return false
   if (!isCardStatus(r.status)) return false
   if (typeof r.engagementCount !== "number") return false
-  if (r.kind === "bug-fix" && !isBugFixMetadata(r.bugFix)) return false
-  if (r.bugFix !== undefined && !isBugFixMetadata(r.bugFix)) return false
-  return true
+  return hasCoherentBugFixMetadata(r)
 }
 
 type Op =
@@ -115,6 +126,11 @@ export class JsonlFileRadarStore implements RadarStore {
   private replayIdsPtr = 0
   /** When true, public-API mutators do NOT append to disk. */
   private replaying = true
+  /** Host-supplied id minter, consulted only AFTER the replay ids drain. */
+  private readonly userMint: (() => string) | undefined
+  /** Ids minted after replay drained — offset past `replayIds.length` so a
+   *  post-replay id can never collide with a replayed one. */
+  private postReplayCounter = 0
 
   constructor(opts: JsonlFileRadarStoreOpts) {
     this.filePath = opts.filePath
@@ -126,24 +142,10 @@ export class JsonlFileRadarStore implements RadarStore {
     const { ops, recordedIds } = this.preScan()
     this.replayIds = recordedIds
 
-    const userMint = opts.mintId
-    let postReplayCounter = 0
-    const replayThenUserMint = (): string => {
-      if (this.replayIds && this.replayIdsPtr < this.replayIds.length) {
-        const id = this.replayIds[this.replayIdsPtr]
-        this.replayIdsPtr += 1
-        return id ?? ""
-      }
-      if (userMint) return userMint()
-      // Default deterministic counter, scoped to this store. Counts up
-      // independently of `replayIdsPtr` so post-replay ids never collide
-      // with one another.
-      postReplayCounter += 1
-      return `radar-card-${this.replayIds ? this.replayIds.length + postReplayCounter : postReplayCounter}`
-    }
+    this.userMint = opts.mintId
 
     this.inner = new InMemoryRadarStore(
-      omitUndef({ cap: opts.cap, mintId: replayThenUserMint }) as {
+      omitUndef({ cap: opts.cap, mintId: (): string => this.nextCardId() }) as {
         cap?: number
         mintId?: () => string
       },
@@ -164,25 +166,61 @@ export class JsonlFileRadarStore implements RadarStore {
     // Replay through the public API (which short-circuits append while
     // `this.replaying === true`).
     for (const op of ops) {
-      if (op.op === "propose") {
-        this.proposeCard({
-          kind: op.card.kind,
-          title: op.card.title,
-          description: op.card.description,
-          ...(op.card.sessionId !== undefined ? { sessionId: op.card.sessionId } : {}),
-          createdAtMs: op.card.createdAtMs,
-          ...(op.card.bugFix !== undefined ? { bugFix: op.card.bugFix } : {}),
-        })
-      } else if (op.op === "setStatus") {
-        this.setStatus(op.id, op.status)
-      } else if (op.op === "recordEngagement") {
-        this.recordEngagement(op.id)
-      }
+      this.replayOp(op)
     }
 
     // Replay drained — switch to live mode.
     this.replaying = false
     this.replayIds = null
+  }
+
+  /**
+   * Mint the next card id.
+   *
+   * A unit because the ORDER here is the hydration contract: the recorded ids
+   * are replayed in propose-order first — that is what makes post-hydration
+   * state byte-identical to pre-crash — and only once they drain does the host
+   * minter (or the store-scoped counter) take over.
+   */
+  private nextCardId(): string {
+    if (this.replayIds && this.replayIdsPtr < this.replayIds.length) {
+      const id = this.replayIds[this.replayIdsPtr]
+      this.replayIdsPtr += 1
+      return id ?? ""
+    }
+    if (this.userMint) return this.userMint()
+    // Default deterministic counter, scoped to this store. Counts up
+    // independently of `replayIdsPtr` so post-replay ids never collide
+    // with one another.
+    this.postReplayCounter += 1
+    const drained = this.replayIds
+    return `radar-card-${drained ? drained.length + this.postReplayCounter : this.postReplayCounter}`
+  }
+
+  /**
+   * Re-apply one recorded op through the PUBLIC mutators.
+   *
+   * A unit because replay deliberately goes through the same API a live caller
+   * uses — that is what makes the hydrated state provably the state those ops
+   * produced — with `this.replaying` suppressing the re-append. Keeping the
+   * op → mutator mapping in one place is what stops a newly-added op kind from
+   * silently replaying as a no-op.
+   */
+  private replayOp(op: Op): void {
+    if (op.op === "propose") {
+      this.proposeCard({
+        kind: op.card.kind,
+        title: op.card.title,
+        description: op.card.description,
+        ...(op.card.sessionId !== undefined ? { sessionId: op.card.sessionId } : {}),
+        createdAtMs: op.card.createdAtMs,
+        ...(op.card.bugFix !== undefined ? { bugFix: op.card.bugFix } : {}),
+      })
+    } else if (op.op === "setStatus") {
+      this.setStatus(op.id, op.status)
+    } else if (op.op === "recordEngagement") {
+      this.recordEngagement(op.id)
+    }
   }
 
   private preScan(): { ops: Op[]; recordedIds: string[] } {

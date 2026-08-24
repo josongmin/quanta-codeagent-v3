@@ -240,6 +240,33 @@ const siblingJsPenalty = (file: string, tsStems: Set<string>): number => {
   return stem !== undefined && tsStems.has(stem) ? JS_SIBLING_PENALTY : 0
 }
 
+/** One ranked hit: the raw hit, the frame tier that weighted it, and its final score. */
+type RankedHit = { h: Hit; tier: ReturnType<typeof classifyFrame>; score: number }
+
+/**
+ * The output lines for ONE file: its path, then one indented row per hit under it.
+ *
+ * A unit because a row's shape is a single decision — verbose carries the score and
+ * tier, plain does not — applied uniformly to every hit under that heading, and the
+ * snippet cap belongs with it so no one row can run wider than its siblings.
+ */
+const renderFileRows = (
+  file: string,
+  entries: readonly RankedHit[],
+  verbose: boolean,
+): string[] => {
+  const out: string[] = [file]
+  for (const { h, score, tier } of entries) {
+    const snippet = h.text.length > SNIPPET_CAP ? `${h.text.slice(0, SNIPPET_CAP)}…` : h.text
+    out.push(
+      verbose
+        ? `  ${file}:${h.line}  [score=${score.toFixed(2)} tier=${tier}]  ${snippet}`
+        : `  ${file}:${h.line}  ${snippet}`,
+    )
+  }
+  return out
+}
+
 /** Render ranked hits grouped by file, in score order, capped at `max`. */
 const render = (
   hits: Hit[],
@@ -277,17 +304,7 @@ const render = (
   }
 
   const out: string[] = []
-  for (const [file, entries] of byFile) {
-    out.push(file)
-    for (const { h, score, tier } of entries) {
-      const snippet = h.text.length > SNIPPET_CAP ? `${h.text.slice(0, SNIPPET_CAP)}…` : h.text
-      if (verbose) {
-        out.push(`  ${file}:${h.line}  [score=${score.toFixed(2)} tier=${tier}]  ${snippet}`)
-      } else {
-        out.push(`  ${file}:${h.line}  ${snippet}`)
-      }
-    }
-  }
+  for (const [file, entries] of byFile) out.push(...renderFileRows(file, entries, verbose))
   if (omitted > 0) {
     out.push(
       `… (${omitted} lower-ranked candidate${omitted === 1 ? "" : "s"} omitted — raise max_results, or some were down-ranked as vendored/sibling; add a path filter to surface them)`,

@@ -204,6 +204,47 @@ export const extBreakdown = (files: string[]): string => {
   return top3.map(([e, n]) => `${e}=${n}`).join(" ")
 }
 
+/**
+ * Charge a too-deep path to the nearest ancestor AT `maxDepth`.
+ *
+ * The rollup key is the ancestor, not the file, so every path below the cap
+ * collapses onto one counter — which is what keeps a deep vendored tree from
+ * expanding the map it was capped to bound.
+ */
+const rollUpTooDeep = (deepRollup: Map<string, number>, rel: string, maxDepth: number): void => {
+  const ancestor = rel.split("/").slice(0, maxDepth).join("/")
+  deepRollup.set(ancestor, (deepRollup.get(ancestor) ?? 0) + 1)
+}
+
+/** File a path under its directory. A path with no `/` belongs to `"."` — the
+ *  root bucket the renderer emits without a prefix. */
+const placeInDir = (byDir: Map<string, string[]>, rel: string): void => {
+  const slash = rel.lastIndexOf("/")
+  const dir = slash === -1 ? "." : rel.slice(0, slash)
+  const base = slash === -1 ? rel : rel.slice(slash + 1)
+  const bucket = byDir.get(dir) ?? []
+  bucket.push(base)
+  byDir.set(dir, bucket)
+}
+
+/**
+ * The EXACT set `render()` will emit, in the order it will emit it — dirs by
+ * `byteCompare`, files by `byteCompare` within each dir.
+ *
+ * Kept as one function because the ordering is the contract: a caller that
+ * re-sorts this list differently from the renderer produces a summary whose
+ * "files" field disagrees with the tree drawn above it.
+ */
+const renderOrder = (byDir: ReadonlyMap<string, readonly string[]>): string[] => {
+  const out: string[] = []
+  for (const dir of [...byDir.keys()].sort((a, b) => byteCompare(a, b))) {
+    for (const base of [...(byDir.get(dir) ?? [])].sort((a, b) => byteCompare(a, b))) {
+      out.push(dir === "." ? base : `${dir}/${base}`)
+    }
+  }
+  return out
+}
+
 /** Pure aggregate of a flat `rg --files` list into a depth-/file-capped tree
  *  structure. Exported so the env-context repo-map adapter (RFC jun-6 §4.3) can
  *  reuse the same bounded core the tool uses — same "reuse the pure helper,
@@ -219,35 +260,21 @@ export const aggregate = (files: string[], maxDepth: number, maxFiles: number): 
       truncated = true
       break
     }
-    const d = depthOf(rel)
-    const slash = rel.lastIndexOf("/")
-    const dir = slash === -1 ? "." : rel.slice(0, slash)
-    const base = slash === -1 ? rel : rel.slice(slash + 1)
-    if (d > maxDepth) {
-      // Roll up into the nearest ancestor at maxDepth.
-      const segs = rel.split("/")
-      const ancestor = segs.slice(0, maxDepth).join("/")
-      deepRollup.set(ancestor, (deepRollup.get(ancestor) ?? 0) + 1)
+    if (depthOf(rel) > maxDepth) {
+      rollUpTooDeep(deepRollup, rel, maxDepth)
       continue
     }
-    const bucket = byDir.get(dir) ?? []
-    bucket.push(base)
-    byDir.set(dir, bucket)
+    placeInDir(byDir, rel)
     total += 1
   }
 
-  // Build renderedFiles: the exact set render() will emit, in render order
-  // (dirs sorted by byteCompare, files sorted within each dir).
-  const sortedDirs = [...byDir.keys()].sort((a, b) => byteCompare(a, b))
-  const renderedFiles: string[] = []
-  for (const dir of sortedDirs) {
-    const sorted = [...(byDir.get(dir) ?? [])].sort((a, b) => byteCompare(a, b))
-    for (const base of sorted) {
-      renderedFiles.push(dir === "." ? base : `${dir}/${base}`)
-    }
+  return {
+    byDir,
+    deepRollup,
+    total,
+    truncated,
+    renderedFiles: renderOrder(byDir),
   }
-
-  return { byDir, deepRollup, total, truncated, renderedFiles }
 }
 
 /** First declaration / docstring / comment line per file is a cheap "purpose"

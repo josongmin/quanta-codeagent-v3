@@ -14,10 +14,7 @@ import {
 } from "./execution-contract"
 import { groundingHarnessFingerprint } from "./harness"
 import { type LoadGroundingCasesOpts, loadGroundingCases } from "./loader"
-import {
-  type GroundingNormalizationResult,
-  normalizeGroundingDecision,
-} from "./normalizer"
+import { type GroundingNormalizationResult, normalizeGroundingDecision } from "./normalizer"
 import {
   type GroundingPreflightResult,
   type GroundingProbeResult,

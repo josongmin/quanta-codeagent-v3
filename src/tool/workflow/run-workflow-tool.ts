@@ -55,6 +55,28 @@ const summarize = (spec: WorkflowSpec, result: Awaited<ReturnType<typeof runWork
   return [header, ...outcomes.map(summarizeStep)].join("\n")
 }
 
+/**
+ * The engine options for one run: every host-wired capability, present only
+ * when the composition root actually supplied it.
+ *
+ * A unit because the whole block obeys ONE rule — an unwired capability must be
+ * OMITTED rather than passed as `undefined` (exactOptionalPropertyTypes), so
+ * the engine applies its own default and an activity-less run stays
+ * byte-identical to the pre-spine baseline.
+ */
+const runWorkflowOptions = (
+  deps: RunWorkflowToolDeps,
+  ctx: CoreToolContext,
+  act: ReturnType<typeof createWorkflowSink> | undefined,
+): Parameters<typeof runWorkflow>[1] => ({
+  agentRun: deps.agentRun,
+  ...(deps.concurrency !== undefined ? { concurrency: deps.concurrency } : {}),
+  ...(deps.maxAgents !== undefined ? { maxAgents: deps.maxAgents } : {}),
+  ...(deps.budget !== undefined ? { budget: deps.budget } : {}),
+  ...(act !== undefined ? { sink: { emit: (e) => act.emit(e) } } : {}),
+  ...(ctx.signal !== undefined ? { signal: ctx.signal } : {}),
+})
+
 export const createRunWorkflowTool = (deps: RunWorkflowToolDeps): Tool<WorkflowSpec> =>
   defineTool<WorkflowSpec>({
     name: "run_workflow",
@@ -92,14 +114,10 @@ export const createRunWorkflowTool = (deps: RunWorkflowToolDeps): Tool<WorkflowS
               label: parsed.data.phases[0]?.name ?? "workflow",
             })
           : undefined
-      const result = await runWorkflow(compileWorkflowSpec(parsed.data), {
-        agentRun: deps.agentRun,
-        ...(deps.concurrency !== undefined ? { concurrency: deps.concurrency } : {}),
-        ...(deps.maxAgents !== undefined ? { maxAgents: deps.maxAgents } : {}),
-        ...(deps.budget !== undefined ? { budget: deps.budget } : {}),
-        ...(act !== undefined ? { sink: { emit: (e) => act.emit(e) } } : {}),
-        ...(ctx.signal !== undefined ? { signal: ctx.signal } : {}),
-      })
+      const result = await runWorkflow(
+        compileWorkflowSpec(parsed.data),
+        runWorkflowOptions(deps, ctx, act),
+      )
       act?.close(result.ok)
       yield { type: "result", result: { ok: result.ok, output: summarize(parsed.data, result) } }
     },

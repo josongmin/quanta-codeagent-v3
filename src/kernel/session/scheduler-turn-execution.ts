@@ -1,9 +1,5 @@
 import type { SessionEvent, TurnRunCommand } from "@/protocol/session"
-import type {
-  KernelDispatchContext,
-  SessionHostTurnEvent,
-  SessionHostTurnResult,
-} from "./ports"
+import type { KernelDispatchContext, SessionHostTurnEvent, SessionHostTurnResult } from "./ports"
 import { reduceSessionCommand } from "./reducer"
 import {
   appendEvents,

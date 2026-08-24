@@ -201,11 +201,7 @@ type BuiltTodos =
 
 /** Materialise the todo records with generated ids. `newIds` is the INDEX-ALIGNED id list the
  *  phase binding below resolves `todoIndexes` against. A colliding `idGen` ⇒ `duplicate_id`. */
-const buildTodos = (
-  inputs: readonly NewTodo[],
-  now: number,
-  idGen: () => string,
-): BuiltTodos => {
+const buildTodos = (inputs: readonly NewTodo[], now: number, idGen: () => string): BuiltTodos => {
   const todos: Record<string, TodoItem> = {}
   const newIds: string[] = []
   for (let i = 0; i < inputs.length; i += 1) {

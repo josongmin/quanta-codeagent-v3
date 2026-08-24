@@ -235,6 +235,27 @@ const persistOwnership = async (
 }
 
 /**
+ * Whether an existing ownership record still BLOCKS a fresh transition.
+ *
+ * A unit because "one owner per thread" only holds for NON-terminal states: a
+ * `removed` / `failed` / `quarantined` record has already released the thread
+ * and may be superseded. The closed terminal set is stated once, here.
+ */
+const ownershipBlocksTransition = (existing: WorkspaceOwnership): boolean =>
+  existing.state !== "removed" && existing.state !== "failed" && existing.state !== "quarantined"
+
+/**
+ * The operator-facing detail for a failed git effect.
+ *
+ * A unit because both failure sites — target resolution and the create itself —
+ * must report the SAME shape: a typed {@link WorktreeForkError} contributes its
+ * own `detail` when it has one, so the caller sees the fork's diagnosis rather
+ * than a generic message.
+ */
+const forkFailureDetail = (e: unknown): string =>
+  e instanceof WorktreeForkError ? (e.detail ?? e.message) : errMessage(e)
+
+/**
  * Begin + complete a current-thread worktree transition as a durable
  * transaction. Persists the `creating` intent BEFORE the git effect, then
  * publishes `ready` (with the new cwd) on success or `failed` (with cleanup)
@@ -256,12 +277,7 @@ export const transitionThreadToWorktree = async (
   // create (no duplicate ownership/branch). A terminal record (removed/failed/
   // quarantined) may be superseded by a fresh transition.
   const existing = saved.meta.workspaceOwnership
-  if (
-    existing !== undefined &&
-    existing.state !== "removed" &&
-    existing.state !== "failed" &&
-    existing.state !== "quarantined"
-  ) {
+  if (existing !== undefined && ownershipBlocksTransition(existing)) {
     return { kind: "rejected", reason: `thread already owns a worktree (${existing.state})` }
   }
 
@@ -282,7 +298,7 @@ export const transitionThreadToWorktree = async (
   try {
     target = worktreeTargetIdentity(req.ownershipId, req.repoRoot, req.branch)
   } catch (e) {
-    const detail = e instanceof WorktreeForkError ? (e.detail ?? e.message) : errMessage(e)
+    const detail = forkFailureDetail(e)
     return { kind: "failed", errorCode: ERR_GIT, detail }
   }
   const intent = makeWorkspaceCreateIntent({
@@ -336,7 +352,7 @@ export const transitionThreadToWorktree = async (
     // RFC02-5 — the effect FAILED; emit the single terminal `failed` transition
     // (after the effect settled, never before).
     emitActivitySettle(activity, req.ownershipId, "failed", failAt)
-    const detail = e instanceof WorktreeForkError ? (e.detail ?? e.message) : errMessage(e)
+    const detail = forkFailureDetail(e)
     return { kind: "failed", errorCode: ERR_GIT, detail }
   }
 

@@ -164,6 +164,15 @@ const tokenize = (cmd: string): string[] => {
   const out: string[] = []
   let buf = ""
   let quote: '"' | "'" | null = null
+  // Emit the pending token and clear the buffer. A no-op on an empty buffer, which is
+  // what keeps a run of whitespace — and a trailing separator — from producing empty
+  // tokens; both the separator branch and the end-of-input tail need exactly this.
+  const flush = (): void => {
+    if (buf.length > 0) {
+      out.push(buf)
+      buf = ""
+    }
+  }
   for (const c of trimmed) {
     if (quote) {
       if (c === quote) {
@@ -178,15 +187,12 @@ const tokenize = (cmd: string): string[] => {
       continue
     }
     if (/\s/.test(c)) {
-      if (buf.length > 0) {
-        out.push(buf)
-        buf = ""
-      }
+      flush()
       continue
     }
     buf += c
   }
-  if (buf.length > 0) out.push(buf)
+  flush()
   return out
 }
 

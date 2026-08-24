@@ -111,9 +111,7 @@ const decodeLeakageCheckIds = (raw: unknown, problems: string[]): string[] => {
   if (!Array.isArray(raw)) {
     problems.push("`leakageChecks` must be an array of enabled leakage-check ids")
   }
-  const ids = (Array.isArray(raw) ? raw : []).filter(
-    (id): id is string => typeof id === "string",
-  )
+  const ids = (Array.isArray(raw) ? raw : []).filter((id): id is string => typeof id === "string")
   const known = new Set<string>(PROMAX_LEAKAGE_CHECK_IDS)
   for (const id of ids) {
     if (!known.has(id)) problems.push(`\`leakageChecks\` names unknown check "${id}"`)

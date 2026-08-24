@@ -296,6 +296,54 @@ const staleReplaceGuard = async (
   }
 }
 
+/** Everything `scripted_replace` does BEFORE the atomic commit window opens:
+ *  the existence pre-check, the pure planning pass, and the two pre-commit
+ *  denies (ADR-0474 stale-read guard, then the per-turn exfil write budget).
+ *  A unit because they share one invariant — a deny HERE is never a partial
+ *  write, so all of them must resolve while the file is still untouched — and
+ *  because the ORDER is load-bearing: planning must precede the guards (the
+ *  guards report on a target we have already decided to rewrite) and the
+ *  budget is checked last, immediately before the commit. Returns the terminal
+ *  result to yield, or the planned replacement to commit — never both. */
+const planScriptedReplace = async (
+  fs: FileSystemPort,
+  ctx: EditToolContext,
+  input: Input,
+  target: { readonly path: string; readonly base: string },
+): Promise<
+  | { readonly deny: ToolResult; readonly plan?: undefined }
+  | { readonly deny?: undefined; readonly plan: ApplyOutcome & { next: string } }
+> => {
+  // Pre-check existence so the error message is descriptive rather than
+  // surfacing the raw `File not found` from readFile.
+  if (!(await fs.fileExists(target.path, target.base))) {
+    return {
+      deny: {
+        ok: false,
+        output: `File not found: ${input.file}`,
+        failure: { mode: "not_found", path: input.file },
+      },
+    }
+  }
+  const source = await fs.readFile(target.path, target.base)
+  const r = applyScriptedReplace(source, input)
+  if (!r.ok || r.next === undefined) {
+    // Map the pure-core discriminant to a typed failure (see
+    // `replaceFailureResult`); `output` is unchanged (byte-identical).
+    return { deny: replaceFailureResult(r) }
+  }
+  // ADR-0474 stale-read-guard — AFTER planning, BEFORE the commit (a deny
+  // is never a partial write). Unwired guard ⇒ `null` ⇒ byte-identical.
+  const staleDeny = await staleReplaceGuard(fs, ctx, target)
+  if (staleDeny) return { deny: staleDeny }
+  // Per-turn exfil write budget: this is the same pre-commit position as
+  // write/edit. A denied replacement has completed all read/planning work
+  // but must never enter the atomic commit window.
+  const budgetDeny = writeBudgetDeny(ctx)
+  if (budgetDeny) return { deny: budgetDeny }
+  return { plan: { ...r, next: r.next } }
+}
+
 /** ATOMIC commit (ADR-0398 / LANE 1 parity with `edit`/`write`) — route the
  *  scripted_replace commit through the port's crash-safe `writeFileAtomic`
  *  (temp+fsync+rename, mode-preserving) whenever the port provides it, falling
@@ -369,42 +417,12 @@ export const makeScriptedReplaceTool = (
     // worktree ⇒ `{ path: input.file, base: ctx.cwd }` (byte-identical legacy).
     const target = resolveEditBase(input.file, ctx.cwd, ctx.activeWorktree)
     try {
-      // Pre-check existence so the error message is descriptive rather than
-      // surfacing the raw `File not found` from readFile.
-      if (!(await fs.fileExists(target.path, target.base))) {
-        yield {
-          type: "result",
-          result: {
-            ok: false,
-            output: `File not found: ${input.file}`,
-            failure: { mode: "not_found", path: input.file },
-          },
-        }
+      const planned = await planScriptedReplace(fs, ctx, input, target)
+      if (planned.deny !== undefined) {
+        yield { type: "result", result: planned.deny }
         return
       }
-      const source = await fs.readFile(target.path, target.base)
-      const r = applyScriptedReplace(source, input)
-      if (!r.ok || r.next === undefined) {
-        // Map the pure-core discriminant to a typed failure (see
-        // `replaceFailureResult`); `output` is unchanged (byte-identical).
-        yield { type: "result", result: replaceFailureResult(r) }
-        return
-      }
-      // ADR-0474 stale-read-guard — AFTER planning, BEFORE the commit (a deny
-      // is never a partial write). Unwired guard ⇒ `null` ⇒ byte-identical.
-      const staleDeny = await staleReplaceGuard(fs, ctx, target)
-      if (staleDeny) {
-        yield { type: "result", result: staleDeny }
-        return
-      }
-      // Per-turn exfil write budget: this is the same pre-commit position as
-      // write/edit. A denied replacement has completed all read/planning work
-      // but must never enter the atomic commit window.
-      const budgetDeny = writeBudgetDeny(ctx)
-      if (budgetDeny) {
-        yield { type: "result", result: budgetDeny }
-        return
-      }
+      const r = planned.plan
       // ADR-0398 ATOMIC commit — temp+fsync+rename via the port (crash-safe,
       // mode-preserving), inside the OPTIONAL critical section.
       await commitReplace(fs, ctx, target, r.next)

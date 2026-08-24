@@ -121,7 +121,13 @@ const renderOverview = (run: ParsedRun, args: Args): void => {
     if (line !== undefined) emit(line)
   }
   for (const [id, attempts] of selectInstances(run, args.instance)) {
-    emit(overviewRow(s?.instances?.find((i) => i.id === id), id, attempts.length))
+    emit(
+      overviewRow(
+        s?.instances?.find((i) => i.id === id),
+        id,
+        attempts.length,
+      ),
+    )
   }
   const skipped = skippedTotal(run)
   if (skipped > 0) emit(`note: skipped ${skipped} unparseable/foreign line(s)`)

@@ -158,6 +158,29 @@ export interface EnvReader {
   get(name: string): string | undefined
 }
 
+/** The dispatch options a FIRED automation carries onto the agent loop.
+ *
+ *  A unit because every entry obeys one rule for one reason: omitted-when-absent,
+ *  so an unbound, modelless, non-heartbeat automation dispatches BYTE-IDENTICALLY
+ *  to the pre-B2 / pre-RFC11-2 fire (the caller then drops the whole object when
+ *  it has no keys). The heartbeat pair is the part worth naming — a heartbeat
+ *  contributes its target thread and inherited policy only when BOTH are
+ *  present, never one without the other, because routing onto an existing thread
+ *  without re-applying its policy would silently widen that thread's permissions. */
+const buildDispatchOpts = (
+  a: Parameters<AutomationHandler>[0],
+  override: string | undefined,
+): NonNullable<Parameters<AgentLoopPort["enqueueUserMessage"]>[1]> => ({
+  ...(a.kind === "heartbeat" && a.targetThreadId !== undefined && a.inheritedPolicy !== undefined
+    ? { targetThreadId: a.targetThreadId, inheritedPolicy: a.inheritedPolicy }
+    : {}),
+  ...(override !== undefined ? { modelOverride: override } : {}),
+  // RFC11-2 — the fired run ADOPTS the bound role + carries the base it was
+  // forked from. Omitted when unbound (byte-identical dispatch).
+  ...(a.agentRole !== undefined ? { agentRole: a.agentRole } : {}),
+  ...(a.baseBranch !== undefined ? { baseBranch: a.baseBranch } : {}),
+})
+
 /**
  * Construct the automation slot from env + deps. Returns `null` when
  * disabled OR when env is malformed (logged + null).
@@ -216,18 +239,7 @@ export const assembleAutomation = (
       ...(deps.worktreeFork !== undefined ? { worktreeFork: deps.worktreeFork } : {}),
       ...(deps.worktreeRepoRoot !== undefined ? { worktreeRepoRoot: deps.worktreeRepoRoot } : {}),
     })
-    const heartbeat =
-      a.kind === "heartbeat" && a.targetThreadId !== undefined && a.inheritedPolicy !== undefined
-        ? { targetThreadId: a.targetThreadId, inheritedPolicy: a.inheritedPolicy }
-        : {}
-    const dispatchOpts = {
-      ...heartbeat,
-      ...(override !== undefined ? { modelOverride: override } : {}),
-      // RFC11-2 — the fired run ADOPTS the bound role + carries the base it was
-      // forked from. Omitted when unbound (byte-identical dispatch).
-      ...(a.agentRole !== undefined ? { agentRole: a.agentRole } : {}),
-      ...(a.baseBranch !== undefined ? { baseBranch: a.baseBranch } : {}),
-    }
+    const dispatchOpts = buildDispatchOpts(a, override)
     await deps.agentLoop.enqueueUserMessage(
       a.prompt,
       Object.keys(dispatchOpts).length > 0 ? dispatchOpts : undefined,

@@ -142,6 +142,53 @@ export const buildDecisionResponse = (
 })
 
 /**
+ * Whether `msg` is a leader-authored response to THIS outstanding request.
+ *
+ * A unit because it IS the load-bearing invariant of the whole seam: a worker
+ * cannot self-grant, so the kind, a non-empty EXPECTED correlation id, an exact
+ * correlation match, and — when a leader is pinned — leader authorship must ALL
+ * hold before a single byte of the body is read.
+ */
+const isAuthenticDecisionResponse = (
+  msg: BrokerMessage,
+  expectedCorrelationId: string,
+  leaderId: string | undefined,
+): boolean => {
+  if (msg === null || typeof msg !== "object") return false
+  if (msg.kind !== "response") return false
+  if (!isNonEmptyString(expectedCorrelationId)) return false
+  if (msg.correlationId !== expectedCorrelationId) return false
+  if (isNonEmptyString(leaderId) && msg.from !== leaderId) return false
+  return true
+}
+
+/**
+ * Decode an already-authenticated response body into the decision it grants.
+ *
+ * A unit because both arms are VALIDATION, not passthrough: an approval's scope
+ * must be one of the closed vocabulary, so a forged literal is dropped and the
+ * grant never widens beyond the enum; a denial's steer must be a non-empty
+ * string, so a worker never sees a forged object. Anything else yields
+ * `undefined` and the worker stays blocked.
+ */
+const decodeDecisionBody = (obj: Record<string, unknown>): EscalationDecision | undefined => {
+  if (obj.approved === true) {
+    const scope = obj.scope
+    return scope === "once" || scope === "session" || scope === "session_prefix"
+      ? { approved: true, scope }
+      : { approved: true }
+  }
+  if (obj.approved === false) {
+    const reason = isString(obj.reason) ? obj.reason : ""
+    const steer = obj.steer
+    return isNonEmptyString(steer)
+      ? { approved: false, reason, steer }
+      : { approved: false, reason }
+  }
+  return undefined
+}
+
+/**
  * Worker-side applier — the ONLY path by which a worker accepts a wider
  * permission. Returns the {@link EscalationDecision} ONLY when:
  *   1. `msg.kind === "response"` (a `request`/`broadcast` is rejected — a worker
@@ -162,32 +209,10 @@ export const applyDecisionResponse = (
   opts?: { leaderId?: string },
 ): EscalationDecision | undefined => {
   try {
-    if (msg === null || typeof msg !== "object") return undefined
-    if (msg.kind !== "response") return undefined
-    if (!isNonEmptyString(expectedCorrelationId)) return undefined
-    if (msg.correlationId !== expectedCorrelationId) return undefined
-    const leaderId = opts?.leaderId
-    if (isNonEmptyString(leaderId) && msg.from !== leaderId) return undefined
+    if (!isAuthenticDecisionResponse(msg, expectedCorrelationId, opts?.leaderId)) return undefined
     const obj = parseJsonObject(msg.body)
     if (obj === undefined) return undefined
-    if (obj.approved === true) {
-      // WS-A — validate the scope against the closed vocabulary; a forged /
-      // garbage literal is DROPPED (the grant never widens beyond the enum).
-      const scope = obj.scope
-      return scope === "once" || scope === "session" || scope === "session_prefix"
-        ? { approved: true, scope }
-        : { approved: true }
-    }
-    if (obj.approved === false) {
-      const reason = isString(obj.reason) ? obj.reason : ""
-      // WS-A — a steer must be a non-empty string; anything else is dropped
-      // (validation, not passthrough — a worker never sees a forged object).
-      const steer = obj.steer
-      return isNonEmptyString(steer)
-        ? { approved: false, reason, steer }
-        : { approved: false, reason }
-    }
-    return undefined
+    return decodeDecisionBody(obj)
   } catch (e) {
     logger.warn(`broker.applyDecisionResponse: ${errMessage(e)}`)
     return undefined

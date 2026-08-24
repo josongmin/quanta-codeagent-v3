@@ -109,27 +109,69 @@ const expandObject = async (
   const out: DapVariable[] = []
   for (const p of props) {
     if (budget.remaining <= 0 || out.length >= MAX_CHILDREN_PER_VAR) break
-    const po = asObj(p)
-    // Data properties only — skip accessors (getters: no `value`) and __proto__.
-    if (!("value" in po) || po.value === undefined) continue
-    if (str(po.name) === "__proto__") continue
-    const ro = asObj(po.value)
-    budget.remaining--
-    const childId = str(ro.objectId)
-    const type = typeOf(ro)
-    // Expand nested objects (objectId present) one+ level deeper.
-    const children =
-      childId.length > 0 && (str(ro.type) === "object" || str(ro.type) === "function")
-        ? await expandObject(getProps, childId, depth + 1, budget, visited, signal)
-        : []
-    out.push({
-      name: str(po.name, "?"),
-      value: renderValue(ro),
-      ...(type !== "" ? { type } : {}),
-      ...(children.length > 0 ? { children } : {}),
-    })
+    const rendered = await expandProperty(getProps, p, depth, budget, visited, signal)
+    if (rendered !== null) out.push(rendered)
   }
   return out
+}
+
+/**
+ * Render ONE own property as a {@link DapVariable}, or `null` when it is not a
+ * property we show.
+ *
+ * A unit because it owns the property FILTER together with the budget spend:
+ * accessors (no `value`) and `__proto__` are skipped BEFORE `budget.remaining`
+ * is decremented, so a skipped property never costs a slot a real one could
+ * have used.
+ */
+const expandProperty = async (
+  getProps: (objectId: string) => Promise<unknown[]>,
+  p: unknown,
+  depth: number,
+  budget: VarBudget,
+  visited: Set<string>,
+  signal?: AbortSignal,
+): Promise<DapVariable | null> => {
+  const po = asObj(p)
+  // Data properties only — skip accessors (getters: no `value`) and __proto__.
+  if (!("value" in po) || po.value === undefined) return null
+  if (str(po.name) === "__proto__") return null
+  const ro = asObj(po.value)
+  budget.remaining--
+  const childId = str(ro.objectId)
+  const type = typeOf(ro)
+  // Expand nested objects (objectId present) one+ level deeper.
+  const children =
+    childId.length > 0 && (str(ro.type) === "object" || str(ro.type) === "function")
+      ? await expandObject(getProps, childId, depth + 1, budget, visited, signal)
+      : []
+  return {
+    name: str(po.name, "?"),
+    value: renderValue(ro),
+    ...(type !== "" ? { type } : {}),
+    ...(children.length > 0 ? { children } : {}),
+  }
+}
+
+/**
+ * Whether this `Debugger.paused` event is the stop we armed for.
+ *
+ * A unit because telling OUR stop from an unrelated one (an entry break, a
+ * stray `debugger` statement) is the resume loop's whole job: reading it wrong
+ * either resumes straight past the breakpoint or reports someone else's pause
+ * as ours. An exception stop only counts when the caller asked for one.
+ */
+const isTargetStop = (
+  body: Record<string, unknown>,
+  spec: CdpInspectSpec,
+  bpId: string,
+): boolean => {
+  const hit = asArr(body.hitBreakpoints).map((h) => str(h))
+  const isExceptionStop =
+    spec.pauseOnExceptions !== undefined &&
+    spec.pauseOnExceptions !== "none" &&
+    str(body.reason) === "exception"
+  return (bpId.length > 0 && hit.includes(bpId)) || isExceptionStop
 }
 
 /** Arm/resume loop result: either an early {@link Inspection} the caller must
@@ -179,12 +221,7 @@ const resolvePausedBody = async (
       }
     }
     const body = asObj(ev)
-    const hit = asArr(body.hitBreakpoints).map((h) => str(h))
-    const isExceptionStop =
-      spec.pauseOnExceptions !== undefined &&
-      spec.pauseOnExceptions !== "none" &&
-      str(body.reason) === "exception"
-    if ((bpId.length > 0 && hit.includes(bpId)) || isExceptionStop) {
+    if (isTargetStop(body, spec, bpId)) {
       pausedBody = body
       break
     }
@@ -200,6 +237,40 @@ const resolvePausedBody = async (
     }
   }
   return { kind: "paused", body: pausedBody }
+}
+
+/**
+ * Split ONE frame's CDP scope chain into the buckets a reader expects.
+ *
+ * A unit because the merge IS the presentation decision: CDP reports `block`
+ * and `catch` bindings separately from `local`, but a human reading a frame
+ * thinks of all three as "the locals". Stating the three-way merge and the
+ * closure separation together is what keeps them from drifting apart. An empty
+ * bucket is omitted rather than rendered as an empty scope.
+ */
+const splitFrameScopes = async (
+  fo: Record<string, unknown>,
+  getProps: (objectId: string) => Promise<unknown[]>,
+  budget: VarBudget,
+  visited: Set<string>,
+  signal?: AbortSignal,
+): Promise<ScopeVars[]> => {
+  const localVars: DapVariable[] = []
+  const closureVars: DapVariable[] = []
+  for (const sc of asArr(fo.scopeChain)) {
+    const so = asObj(sc)
+    const kind = str(so.type)
+    const objectId = str(asObj(so.object).objectId)
+    if (objectId.length === 0) continue
+    if (kind === "local" || kind === "block" || kind === "catch")
+      localVars.push(...(await expandObject(getProps, objectId, 1, budget, visited, signal)))
+    else if (kind === "closure")
+      closureVars.push(...(await expandObject(getProps, objectId, 1, budget, visited, signal)))
+  }
+  const scopes: ScopeVars[] = []
+  if (localVars.length > 0) scopes.push({ scope: "Locals", vars: localVars })
+  if (closureVars.length > 0) scopes.push({ scope: "Closure", vars: closureVars })
+  return scopes
 }
 
 /**
@@ -222,24 +293,7 @@ const captureFrameScopes = async (
     const fo = asObj(callFrames[i])
     const loc = asObj(fo.location)
     const url = str(fo.url)
-    // Merge local/block/catch CDP scopes into one "Locals" bucket (CDP splits
-    // the loop/block bindings out; the headline wants them together); keep
-    // closures as a separate "Closure" scope.
-    const localVars: DapVariable[] = []
-    const closureVars: DapVariable[] = []
-    for (const sc of asArr(fo.scopeChain)) {
-      const so = asObj(sc)
-      const kind = str(so.type)
-      const objectId = str(asObj(so.object).objectId)
-      if (objectId.length === 0) continue
-      if (kind === "local" || kind === "block" || kind === "catch")
-        localVars.push(...(await expandObject(getProps, objectId, 1, budget, visited, signal)))
-      else if (kind === "closure")
-        closureVars.push(...(await expandObject(getProps, objectId, 1, budget, visited, signal)))
-    }
-    const scopes: ScopeVars[] = []
-    if (localVars.length > 0) scopes.push({ scope: "Locals", vars: localVars })
-    if (closureVars.length > 0) scopes.push({ scope: "Closure", vars: closureVars })
+    const scopes = await splitFrameScopes(fo, getProps, budget, visited, signal)
     frames.push({
       frame: str(fo.functionName, "(anonymous)") || "(anonymous)",
       line: num(loc.lineNumber) + 1,

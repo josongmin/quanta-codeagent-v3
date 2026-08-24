@@ -700,13 +700,7 @@ const forwardedExporterOverrides = (
 ): Partial<
   Pick<
     OtelExporterOpts,
-    | "fetch"
-    | "headers"
-    | "getHeaders"
-    | "now"
-    | "setIntervalImpl"
-    | "clearIntervalImpl"
-    | "warn"
+    "fetch" | "headers" | "getHeaders" | "now" | "setIntervalImpl" | "clearIntervalImpl" | "warn"
   >
 > => ({
   ...(overrides?.fetch !== undefined ? { fetch: overrides.fetch } : {}),

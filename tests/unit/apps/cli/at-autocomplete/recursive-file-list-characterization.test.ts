@@ -314,9 +314,11 @@ describe("C. buildIndexViaWalk — unreadable entries", () => {
 
   test("C2 — a mode-000 FILE is still indexed (the lister never opens it)", async () => {
     if (isRoot) return
-    expect(await indexOrder(
-      createRecursiveFileLister({ fileRoot: root, maxResults: 1000, fileSource: walkSource }),
-    )).toContain("mode000.ts")
+    expect(
+      await indexOrder(
+        createRecursiveFileLister({ fileRoot: root, maxResults: 1000, fileSource: walkSource }),
+      ),
+    ).toContain("mode000.ts")
   })
 })
 
@@ -488,9 +490,9 @@ describe("E. query closure — key selection, cap, projection", () => {
 
   test("E8 — maxFiles is truncated toward zero; non-positive / non-finite falls back to the default", async () => {
     const files = ["a1.ts", "d/a2.ts", "d/e/a3.ts"]
-    expect((await from(files, { maxFiles: 1.9, maxResults: 100 })("a")).map((c) => c.label)).toEqual(
-      ["a1.ts"],
-    )
+    expect(
+      (await from(files, { maxFiles: 1.9, maxResults: 100 })("a")).map((c) => c.label),
+    ).toEqual(["a1.ts"])
     for (const bad of [0, -1, Number.NaN]) {
       expect(
         (await from(files, { maxFiles: bad, maxResults: 100 })("a")).map((c) => c.label),

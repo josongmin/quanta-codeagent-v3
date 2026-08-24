@@ -505,7 +505,9 @@ export const auditProMaxSourceOwners = (
 
   for (const file of files) {
     const lines = file.text.split("\n")
-    lines.forEach((raw, index) => collectLineHits(file.path, raw, index, hits, ownerCounts))
+    lines.forEach((raw, index) => {
+      collectLineHits(file.path, raw, index, hits, ownerCounts)
+    })
     hits.push(...collectFileHits(file))
   }
 

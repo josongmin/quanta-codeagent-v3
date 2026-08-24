@@ -77,6 +77,30 @@ const readLockBirth = async (lockPath: string): Promise<number | null> => {
   }
 }
 
+/** Verdict on a lock we could not create: old enough to steal, still held by a live
+ *  peer, or gone from under us between the failed create and the probe. */
+type HeldLockVerdict = "stale" | "held" | "vanished"
+
+/**
+ * Decide whether a lock held by someone else may be broken.
+ *
+ * A unit because "how old is this lock" has TWO readings that must resolve to one
+ * verdict: the JSON body's timestamp when it parses, and the file's mtime when it does
+ * not — a partially-written or legacy lock still has to age out rather than wedge the
+ * file forever. `vanished` is the third outcome and is not an error: the holder
+ * released between our EEXIST and our probe, so the create is simply retried.
+ */
+const classifyHeldLock = async (lockPath: string, now: () => number): Promise<HeldLockVerdict> => {
+  const birth = await readLockBirth(lockPath)
+  if (birth !== null) return now() - birth > LOCK_STALE_MS ? "stale" : "held"
+  try {
+    const st = await stat(lockPath)
+    return now() - st.mtimeMs > LOCK_STALE_MS ? "stale" : "held"
+  } catch {
+    return "vanished"
+  }
+}
+
 /** Acquire the lock or return false if we timed out (caller then proceeds
  *  best-effort — non-durability never blocks the in-memory authority).
  *  `now` is injected so stale-lock STEALING is deterministically testable; the
@@ -98,23 +122,10 @@ export const acquireLock = async (
       if ((e as NodeJS.ErrnoException).code !== "EEXIST") return false
     }
     // Lock held by a peer. Break it if it is stale (holder likely died).
-    const birth = await readLockBirth(lockPath)
-    const ageKnown = birth !== null
-    let stale = false
-    if (ageKnown) {
-      stale = now() - birth > LOCK_STALE_MS
-    } else {
-      // Unreadable lock body — fall back to mtime so a partially-written or
-      // legacy lock can still be reclaimed once it ages out.
-      try {
-        const st = await stat(lockPath)
-        stale = now() - st.mtimeMs > LOCK_STALE_MS
-      } catch {
-        // Lock vanished between EEXIST and stat — retry the create immediately.
-        continue
-      }
-    }
-    if (stale) {
+    const verdict = await classifyHeldLock(lockPath, now)
+    // Lock vanished between EEXIST and the probe — retry the create immediately.
+    if (verdict === "vanished") continue
+    if (verdict === "stale") {
       // Steal: unlink the stale lock (atomic enough — a double-unlink is a
       // harmless ENOENT) and retry the create. Use the tmpSuffix only to keep
       // the linter happy that each instance is distinguishable in traces.

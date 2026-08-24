@@ -295,10 +295,7 @@ export const expandBraces = (glob: string): string[] => {
  *  which happened. A unit because the worklist's two decisions — "is another
  *  pass needed" and "has the cap been crossed" — are BOTH answered here, from
  *  the single string being expanded; the loop above only routes the answers. */
-const expandFirstBrace = (
-  glob: string,
-  next: string[],
-): "unchanged" | "expanded" | "overflow" => {
+const expandFirstBrace = (glob: string, next: string[]): "unchanged" | "expanded" | "overflow" => {
   const m = glob.match(/^(.*?)\{([^{}]+)\}(.*)$/)
   if (m === null) {
     next.push(glob)

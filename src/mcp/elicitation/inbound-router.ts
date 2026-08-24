@@ -33,6 +33,7 @@
  *  correct than the pre-Track-C silent drop.
  */
 
+import type { z } from "zod"
 import type { ElicitationPrompter, ElicitationResult } from "./port"
 import {
   booleanRequestSchema,
@@ -167,6 +168,23 @@ const handleSpecCreate = async (
   return promptForProperty(prompter, single.name, single.prop, message, signal)
 }
 
+/**
+ * Validate `params` against `schema`, then hand the typed request to `prompt`.
+ *
+ * A unit because one rule has to hold for EVERY internal sub-method: a request
+ * that fails its schema declines and never reaches the prompter. TICKET-22's
+ * http/https refinement on `promptUrl` is only load-bearing because no case can
+ * skip this step, so the step lives in exactly one place.
+ */
+const promptChecked = async <T>(
+  schema: z.ZodType<T>,
+  params: Record<string, unknown>,
+  prompt: (req: T) => Promise<ElicitationResult<unknown>>,
+): Promise<ElicitationResponse> => {
+  const parsed = schema.safeParse(params)
+  return parsed.success ? toResponse(await prompt(parsed.data), null) : DECLINE
+}
+
 /** Route an internal `elicitation/<method>` request onto the prompter. The
  *  `<method>` segment names the port method; `params` is the typed request. */
 const handleInternal = async (
@@ -177,49 +195,29 @@ const handleInternal = async (
 ): Promise<ElicitationResponse> => {
   const sub = method.slice(INTERNAL_PREFIX.length)
   switch (sub) {
-    case "promptString": {
-      const req = stringRequestSchema.safeParse(params)
-      return req.success ? toResponse(await prompter.promptString(req.data, signal), null) : DECLINE
-    }
-    case "promptNumber": {
-      const req = numberRequestSchema.safeParse(params)
-      return req.success ? toResponse(await prompter.promptNumber(req.data, signal), null) : DECLINE
-    }
-    case "promptInteger": {
-      const req = integerRequestSchema.safeParse(params)
-      return req.success
-        ? toResponse(await prompter.promptInteger(req.data, signal), null)
-        : DECLINE
-    }
-    case "promptBoolean": {
-      const req = booleanRequestSchema.safeParse(params)
-      return req.success
-        ? toResponse(await prompter.promptBoolean(req.data, signal), null)
-        : DECLINE
-    }
-    case "promptEnum": {
-      const req = enumRequestSchema.safeParse(params)
-      return req.success ? toResponse(await prompter.promptEnum(req.data, signal), null) : DECLINE
-    }
-    case "promptMultiEnum": {
-      const req = multiSelectEnumRequestSchema.safeParse(params)
-      return req.success
-        ? toResponse(await prompter.promptMultiEnum(req.data, signal), null)
-        : DECLINE
-    }
-    case "promptSingleEnum": {
-      const req = singleSelectEnumRequestSchema.safeParse(params)
-      return req.success
-        ? toResponse(await prompter.promptSingleEnum(req.data, signal), null)
-        : DECLINE
-    }
-    case "promptUrl": {
+    case "promptString":
+      return promptChecked(stringRequestSchema, params, (r) => prompter.promptString(r, signal))
+    case "promptNumber":
+      return promptChecked(numberRequestSchema, params, (r) => prompter.promptNumber(r, signal))
+    case "promptInteger":
+      return promptChecked(integerRequestSchema, params, (r) => prompter.promptInteger(r, signal))
+    case "promptBoolean":
+      return promptChecked(booleanRequestSchema, params, (r) => prompter.promptBoolean(r, signal))
+    case "promptEnum":
+      return promptChecked(enumRequestSchema, params, (r) => prompter.promptEnum(r, signal))
+    case "promptMultiEnum":
+      return promptChecked(multiSelectEnumRequestSchema, params, (r) =>
+        prompter.promptMultiEnum(r, signal),
+      )
+    case "promptSingleEnum":
+      return promptChecked(singleSelectEnumRequestSchema, params, (r) =>
+        prompter.promptSingleEnum(r, signal),
+      )
+    case "promptUrl":
       // TICKET-22 — SECURITY: the schema's http/https refinement rejects
       // file:/javascript:/data: here, so a malformed url declines BEFORE the
       // prompter (and thus before any opener) is ever reached.
-      const req = urlRequestSchema.safeParse(params)
-      return req.success ? toResponse(await prompter.promptUrl(req.data, signal), null) : DECLINE
-    }
+      return promptChecked(urlRequestSchema, params, (r) => prompter.promptUrl(r, signal))
     default:
       // Unknown internal sub-method → decline (well-defined, not dropped).
       return DECLINE

@@ -306,6 +306,36 @@ const buildSubagentRequest = (
   return req
 }
 
+/** T04 — resolve `continue_from` against the per-registry owners ledger. Its
+ *  own unit because the ledger answers THREE things and only one of them is
+ *  text: a foreign lineage is a DENIAL (returned, so the caller can fail the
+ *  spawn before minting anything — a cross-lineage refusal must leave no side
+ *  effects), a missing/evicted task simply carries no prior attempt, and an
+ *  owned task hands back its transcript. An absent `continue_from` is the
+ *  no-op third case. Exactly one of the two fields is set. */
+const resolveContinueFrom = (
+  continueFrom: string | undefined,
+  deps: SpawnAgentDeps,
+  lineage: string,
+): { readonly denied?: SpawnAgentOutput; readonly priorAttempt?: string } => {
+  if (continueFrom === undefined) return {}
+  const loaded = loadContinueFromForOwner(
+    deps.registry,
+    ownersForRegistry(deps.registry),
+    continueFrom,
+    lineage,
+  )
+  if (loaded.kind === "not_owner") {
+    return {
+      denied: errSpawn(
+        `Cannot continue from ${continueFrom}: it belongs to a different agent lineage (ownership denied).`,
+        "ownership_denied",
+      ),
+    }
+  }
+  return loaded.kind === "ok" ? { priorAttempt: loaded.text } : {}
+}
+
 /** Spawn a child subagent through the injected runner. Returns the registry
  *  task id which `wait_agent` / `close_agent` / `send_input` reference. The
  *  caller MUST stash the returned ownerToken to authorize a later close. */
@@ -367,22 +397,9 @@ export const handleSpawnAgent = async (
   // Use the SAME root sentinel as the `agent` tool so an unlabeled root agent's
   // tasks are continue_from-able across BOTH tools (no false ownership denial).
   const lineage = deps.requesterLineage ?? ROOT_LINEAGE
-  let priorAttempt: string | undefined
-  if (input.continue_from !== undefined) {
-    const loaded = loadContinueFromForOwner(
-      deps.registry,
-      ownersForRegistry(deps.registry),
-      input.continue_from,
-      lineage,
-    )
-    if (loaded.kind === "not_owner") {
-      return errSpawn(
-        `Cannot continue from ${input.continue_from}: it belongs to a different agent lineage (ownership denied).`,
-        "ownership_denied",
-      )
-    }
-    if (loaded.kind === "ok") priorAttempt = loaded.text
-  }
+  const resumed = resolveContinueFrom(input.continue_from, deps, lineage)
+  if (resumed.denied !== undefined) return resumed.denied
+  const priorAttempt = resumed.priorAttempt
 
   const taskId = deps.registry.newId()
   const { abort, ownerToken } = deps.registry.register({

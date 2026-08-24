@@ -236,6 +236,54 @@ const emptyRun: BatchRunResult = {
   summary: { total: 0, ok: 0, failed: 0, cancelled: 0, durationMs: 0 },
 }
 
+/** Validate `spawn_batch`'s input and load its item list — or the ONE terminal
+ *  event to emit instead of running.
+ *
+ *  A unit because every way this batch declines to run ends identically: emit a
+ *  single terminal event and spawn ZERO workers. That covers malformed input, an
+ *  unreadable or ambiguous item source, a batch over the hard cap, and the empty
+ *  list (which is a SUCCESS — `ok:true`, total 0 — not an error). Returning the
+ *  event rather than yielding it keeps every `yield` inside the generator, so no
+ *  decline path can drift into emitting a mid-run progress event. */
+const prepareBatchRun = async (
+  input: SpawnBatchInput,
+  deps: SubagentBatchDeps,
+): Promise<{ args: SpawnBatchInput; items: readonly BatchItem[] } | { halt: ToolEvent }> => {
+  const parsed = spawnBatchInputSchema.safeParse(input)
+  if (!parsed.success) return { halt: errResult(`invalid input: ${parsed.error.message}`) }
+  const args = parsed.data
+
+  // Load items (inline XOR file). NO-THROW.
+  const loaded = await loadItems(
+    {
+      ...(args.items !== undefined ? { items: args.items as BatchItem[] } : {}),
+      ...(args.items_path !== undefined ? { items_path: args.items_path } : {}),
+    },
+    deps.readFile,
+  )
+  if (!loaded.ok) return { halt: errResult(loaded.error) }
+
+  // Hard item cap — spawn 0 workers if exceeded.
+  if (loaded.items.length > deps.maxItems) {
+    return {
+      halt: errResult(
+        `batch size ${loaded.items.length} exceeds cap ${deps.maxItems} — refusing to spawn.`,
+      ),
+    }
+  }
+
+  // Empty list ⇒ ok:true, total 0, zero spawns.
+  if (loaded.items.length === 0) {
+    return {
+      halt: {
+        type: "result",
+        result: { ok: true, output: renderOutput(emptyRun), structured: emptyRun },
+      },
+    }
+  }
+  return { args, items: loaded.items }
+}
+
 /**
  * Build the `spawn_batch` tool against injected deps. Mirrors the `subagent-bg`
  * builder posture: a single factory taking the closed deps bundle.
@@ -256,42 +304,12 @@ export const spawnBatchTool = (deps: SubagentBatchDeps): Tool<SpawnBatchInput> =
   hitlTier: () => "pre-approval-ok",
 
   async *execute(input: SpawnBatchInput, ctx: CoreToolContext): AsyncIterable<ToolEvent> {
-    const parsed = spawnBatchInputSchema.safeParse(input)
-    if (!parsed.success) {
-      yield errResult(`invalid input: ${parsed.error.message}`)
+    const prepared = await prepareBatchRun(input, deps)
+    if ("halt" in prepared) {
+      yield prepared.halt
       return
     }
-    const args = parsed.data
-
-    // Load items (inline XOR file). NO-THROW.
-    const loaded = await loadItems(
-      {
-        ...(args.items !== undefined ? { items: args.items as BatchItem[] } : {}),
-        ...(args.items_path !== undefined ? { items_path: args.items_path } : {}),
-      },
-      deps.readFile,
-    )
-    if (!loaded.ok) {
-      yield errResult(loaded.error)
-      return
-    }
-
-    // Hard item cap — spawn 0 workers if exceeded.
-    if (loaded.items.length > deps.maxItems) {
-      yield errResult(
-        `batch size ${loaded.items.length} exceeds cap ${deps.maxItems} — refusing to spawn.`,
-      )
-      return
-    }
-
-    // Empty list ⇒ ok:true, total 0, zero spawns.
-    if (loaded.items.length === 0) {
-      yield {
-        type: "result",
-        result: { ok: true, output: renderOutput(emptyRun), structured: emptyRun },
-      }
-      return
-    }
+    const { args, items } = prepared
 
     // Fan-out banner (parity with the parallel-spawn UI): announce the N workers
     // — repo + per-worker glyph/id/task — BEFORE the pool runs so the operator
@@ -299,7 +317,7 @@ export const spawnBatchTool = (deps: SubagentBatchDeps): Tool<SpawnBatchInput> =
     yield {
       type: "progress",
       message: renderSpawnBanner(
-        loaded.items,
+        items,
         ctx.cwd,
         args.id_field !== undefined ? args.id_field : undefined,
       ),
@@ -308,7 +326,7 @@ export const spawnBatchTool = (deps: SubagentBatchDeps): Tool<SpawnBatchInput> =
     // Stream progress through a queue the async runBatch fills as items settle.
     const progressQueue: string[] = []
     const run = await runBatch(
-      toRunArgs(args, loaded.items),
+      toRunArgs(args, items),
       {
         ...deps,
         onProgress: (done, total, failed) => {

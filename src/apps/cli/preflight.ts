@@ -139,7 +139,10 @@ const readEditTarget = async (
   filePath: string,
   resolve: (p: string) => string,
   reader: (p: string) => Promise<string>,
-): Promise<{ readonly source: string; readonly warning?: undefined } | { readonly source?: undefined; readonly warning: string }> => {
+): Promise<
+  | { readonly source: string; readonly warning?: undefined }
+  | { readonly source?: undefined; readonly warning: string }
+> => {
   try {
     return { source: await reader(resolve(filePath)) }
   } catch (e) {

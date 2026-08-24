@@ -281,7 +281,9 @@ const assertPairEquivalent = (
     !raw.history.some(hasStructuredHistoryMetadata) ||
     !summary.history.some(hasStructuredHistoryMetadata)
   ) {
-    throw new Error(`grounding pair ${pairId} must expose structured history metadata on both sides`)
+    throw new Error(
+      `grounding pair ${pairId} must expose structured history metadata on both sides`,
+    )
   }
   if (stableJson(pairContract(raw)) !== stableJson(pairContract(summary))) {
     throw new Error(`grounding pair ${pairId} raw/summary contract mismatch`)

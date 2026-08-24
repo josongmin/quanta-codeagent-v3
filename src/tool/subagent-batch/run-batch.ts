@@ -18,6 +18,7 @@ import type {
   BatchDagNode,
   BatchItemResult,
   BatchRunResult,
+  BatchSubagentRequest,
   BatchSubagentRunner,
   BatchTimeoutPolicy,
   SubagentBatchDeps,
@@ -126,6 +127,34 @@ class Semaphore {
   }
 }
 
+/** Build ONE worker's spawn request from the batch-wide per-worker controls.
+ *
+ *  A unit because every control here obeys the same conditional-spread rule, and
+ *  that rule is the compatibility guarantee: an UNSET control contributes no key
+ *  at all, so a batch that configures none produces a request byte-identical to
+ *  the plain `{ prompt, depth, signal }` shape the runner accepted before these
+ *  controls existed. One forgotten `!== undefined` here would send `isolation:
+ *  undefined` to every child. */
+const buildChildRequest = (
+  prompt: string,
+  depth: number,
+  signal: AbortSignal,
+  maxTurns: number | undefined,
+  childOptions: ChildSpawnOptions | undefined,
+): BatchSubagentRequest => ({
+  prompt,
+  depth,
+  signal,
+  ...(maxTurns !== undefined ? { budget: { maxTurns } } : {}),
+  // Batch-wide per-worker controls (parity with spawn_agent). Each is honored by
+  // the runner; conditional-spread keeps the unset path identical.
+  ...(childOptions?.isolation !== undefined ? { isolation: childOptions.isolation } : {}),
+  ...(childOptions?.taskKind !== undefined ? { taskKind: childOptions.taskKind } : {}),
+  ...(childOptions?.resultShape !== undefined ? { resultShape: childOptions.resultShape } : {}),
+  ...(childOptions?.effort !== undefined ? { effort: childOptions.effort } : {}),
+  ...(childOptions?.model !== undefined ? { model: childOptions.model } : {}),
+})
+
 /** Race a child run against a per-item timeout and the batch abort signal.
  *  The per-item AbortController is fired on timeout/cancellation so the child
  *  unwinds. The single timer is always cleared. Returns the terminal outcome. */
@@ -161,19 +190,7 @@ const runOneItem = async (
   })
 
   try {
-    const req = {
-      prompt,
-      depth,
-      signal: ac.signal,
-      ...(maxTurns !== undefined ? { budget: { maxTurns } } : {}),
-      // Batch-wide per-worker controls (parity with spawn_agent). Each is
-      // honored by the runner; conditional-spread keeps the unset path identical.
-      ...(childOptions?.isolation !== undefined ? { isolation: childOptions.isolation } : {}),
-      ...(childOptions?.taskKind !== undefined ? { taskKind: childOptions.taskKind } : {}),
-      ...(childOptions?.resultShape !== undefined ? { resultShape: childOptions.resultShape } : {}),
-      ...(childOptions?.effort !== undefined ? { effort: childOptions.effort } : {}),
-      ...(childOptions?.model !== undefined ? { model: childOptions.model } : {}),
-    }
+    const req = buildChildRequest(prompt, depth, ac.signal, maxTurns, childOptions)
     const winner = await Promise.race([
       runner(req).then((r) => ({ tag: "done" as const, r })),
       timeout.then(() => ({ tag: "timeout" as const })),

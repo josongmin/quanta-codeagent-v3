@@ -132,14 +132,20 @@ const tryStatusRoutes = (url: URL, req: Request, deps: FetchHandlerDeps): RouteR
 }
 
 /**
- * The knob catalog body served to the web settings UI, grouped and redacted.
+ * ADR-0503 P3 — `GET /api/knobs`, the unified knob catalog the web settings UI
+ * reads. Mutation stays the closed-allowlist `POST /config`.
  *
- * A unit because the redaction is the point: `webSafeKnobValue` must be applied
- * to EVERY value on the way out (CUSTOM string knobs carry paths, credential-
- * helper commands, and policy JSON), so the projection lives in exactly one
- * place rather than being re-derived per group. (security re-audit jun-7.)
+ * A unit because the REDACTION is the point and must stay visible beside the
+ * route: `webSafeKnobValue` is applied to EVERY value on the way out (CUSTOM
+ * string knobs carry paths, credential-helper commands, and policy JSON), so
+ * the projection lives in one place rather than being re-derived per group.
+ * Secrets are absent from the inventory by construction. (security re-audit
+ * jun-7; static-locked by `api-knobs-no-leak-hellgate`.)
  */
-const knobCatalogResponse = (): Response => {
+const tryKnobsRoute = (url: URL, req: Request, requireAuth: RequireAuth): RouteResult => {
+  if (url.pathname !== "/api/knobs" || req.method !== "GET") return undefined
+  const denied = requireAuth(url, req)
+  if (denied !== null) return denied
   const catalog = buildWebKnobCatalog()
   const current = resolveCatalogValues(catalog, process.env)
   const grouped = [...catalogByGroup(catalog).entries()].map(([group, knobs]) => ({
@@ -288,14 +294,8 @@ const tryReadRoutes = (
     }
     return jsonResponse(200, { threads: threadStore.listThreads() })
   }
-  // ADR-0503 P3 — unified knob catalog for the web settings UI (read-only;
-  // mutation stays the closed-allowlist POST /config). Secrets are absent
-  // from the inventory by construction, so nothing here leaks credentials.
-  if (url.pathname === "/api/knobs" && req.method === "GET") {
-    const denied = requireAuth(url, req)
-    if (denied !== null) return denied
-    return knobCatalogResponse()
-  }
+  const knobs = tryKnobsRoute(url, req, requireAuth)
+  if (knobs !== undefined) return knobs
   // OUT-OF-BAND read-only readouts (jun-9 ticket 05 + UUX-1-11 sources).
   // `GET /readout/:name` reads the live session snapshot (lease-free — no WS
   // single-writer contention, so it works WHILE the agent is mid-turn, exactly
@@ -355,6 +355,25 @@ const tryResolveArtifact = async (
   })
 }
 
+/**
+ * Dispatch one already-authenticated `/auth/*` sub-route.
+ *
+ * A unit because the closed list IS the surface: anything under `/auth/` that
+ * is not named here gets a 404, so a new OAuth verb has to be added in one
+ * visible place rather than falling through to the static SPA.
+ */
+const dispatchAuthRoute = (url: URL, req: Request, authRoutes: AuthRouteHandlers): RouteResult => {
+  if (url.pathname === "/auth/login" && req.method === "POST") return authRoutes.login()
+  // UUX-4-13 — login-attempt completion readback for the frontend's bounded
+  // poll (login success/failure used to be logger-only).
+  if (url.pathname === "/auth/login/status" && req.method === "GET") {
+    return authRoutes.loginStatus(url)
+  }
+  if (url.pathname === "/auth/logout" && req.method === "POST") return authRoutes.logout()
+  if (url.pathname === "/auth/status" && req.method === "GET") return authRoutes.status()
+  return jsonResponse(404, { error: "unknown_auth_route", path: url.pathname })
+}
+
 /** Authenticated mutation/OAuth routes — `POST /config` + the `/auth/*` ChatGPT
  *  OAuth login/logout/whoami wrappers. Same bearer auth as WS upgrade. */
 const tryMutationRoutes = (
@@ -378,15 +397,7 @@ const tryMutationRoutes = (
   if (url.pathname.startsWith("/auth/") && (req.method === "POST" || req.method === "GET")) {
     const denied = requireAuth(url, req)
     if (denied !== null) return denied
-    if (url.pathname === "/auth/login" && req.method === "POST") return authRoutes.login()
-    // UUX-4-13 — login-attempt completion readback for the frontend's bounded
-    // poll (login success/failure used to be logger-only).
-    if (url.pathname === "/auth/login/status" && req.method === "GET") {
-      return authRoutes.loginStatus(url)
-    }
-    if (url.pathname === "/auth/logout" && req.method === "POST") return authRoutes.logout()
-    if (url.pathname === "/auth/status" && req.method === "GET") return authRoutes.status()
-    return jsonResponse(404, { error: "unknown_auth_route", path: url.pathname })
+    return dispatchAuthRoute(url, req, authRoutes)
   }
   return undefined
 }
@@ -420,6 +431,41 @@ const makeTryUpgrade = (config: WebDaemonServerConfig) => {
   }
 }
 
+/**
+ * Everything that is not a JSON route: hand a WebSocket request to the
+ * upgrader, otherwise serve the built SPA, otherwise 404.
+ *
+ * A unit because this is the daemon's ONE fallthrough, and its order is
+ * load-bearing — an upgrade request must never reach the static server (it
+ * would be answered with HTML instead of a 101), and a non-GET must never reach
+ * it at all.
+ */
+const serveUpgradeOrStatic = (
+  req: Request,
+  srv: Server<WSData>,
+  pathname: string,
+  tryUpgrade: (req: Request, server: Server<WSData>) => Response | undefined,
+): Response => {
+  if (req.headers.get("upgrade")?.toLowerCase() === "websocket") {
+    const resp = tryUpgrade(req, srv)
+    if (resp !== undefined) return resp
+    // Upgrade succeeded — Bun consumed the request.
+    return new Response(null, { status: 101 })
+  }
+  // Static SPA serve — every other GET tries to resolve against the
+  // built frontend dist (Vite output). Lets the daemon double as the
+  // web host so a phone / sibling laptop can hit
+  // `http://<LAN-IP>:<port>/` and load the same UI Tauri renders
+  // locally. `QUANTA_WEB_DIST` overrides the dist path; absent ⇒
+  // try the in-repo default + give up with 404 so dev-mode (Vite-only)
+  // stays usable as before.
+  if (req.method === "GET") {
+    const staticResp = serveStaticSpa(pathname)
+    if (staticResp !== null) return staticResp
+  }
+  return new Response("not found", { status: 404 })
+}
+
 export const buildFetchHandler = (deps: FetchHandlerDeps): FetchHandler => {
   const { config } = deps
   const requireAuth = makeRequireAuth(config)
@@ -439,23 +485,6 @@ export const buildFetchHandler = (deps: FetchHandlerDeps): FetchHandler => {
     if (read !== undefined) return read
     const mutation = tryMutationRoutes(url, req, requireAuth, authRoutes)
     if (mutation !== undefined) return mutation
-    if (req.headers.get("upgrade")?.toLowerCase() === "websocket") {
-      const resp = tryUpgrade(req, srv)
-      if (resp !== undefined) return resp
-      // Upgrade succeeded — Bun consumed the request.
-      return new Response(null, { status: 101 })
-    }
-    // Static SPA serve — every other GET tries to resolve against the
-    // built frontend dist (Vite output). Lets the daemon double as the
-    // web host so a phone / sibling laptop can hit
-    // `http://<LAN-IP>:<port>/` and load the same UI Tauri renders
-    // locally. `QUANTA_WEB_DIST` overrides the dist path; absent ⇒
-    // try the in-repo default + give up with 404 so dev-mode (Vite-only)
-    // stays usable as before.
-    if (req.method === "GET") {
-      const staticResp = serveStaticSpa(url.pathname)
-      if (staticResp !== null) return staticResp
-    }
-    return new Response("not found", { status: 404 })
+    return serveUpgradeOrStatic(req, srv, url.pathname, tryUpgrade)
   }
 }

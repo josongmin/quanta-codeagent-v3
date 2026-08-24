@@ -848,6 +848,31 @@ const destLabel = (projectDir: string, type: MigrationItemType): string => {
 }
 
 /**
+ * Persist ONE converted item, turning any throw into a typed warning.
+ *
+ * A unit because the module's NEVER-throws contract is exactly this boundary:
+ * one item's failure must become a warning attributed to that item's
+ * destination, not an abort that silently loses every item after it. The
+ * `code` preference on the caught error keeps `EACCES`-style diagnostics
+ * legible instead of a stringified stack.
+ */
+const persistItemGuarded = async (
+  item: Extract<ConvertedItem, { ok: true }>,
+  input: PersistConvertedInput,
+  sync: ConfigWriteSync,
+): Promise<WriteOutcome> => {
+  try {
+    return await persistOne(item, input.projectDir, input.homeDir, sync, input.skillStage)
+  } catch (err) {
+    const detail = (err as { code?: string }).code ?? errMessage(err)
+    return {
+      wrote: false,
+      warnings: [writeWarning(destLabel(input.projectDir, item.type), detail)],
+    }
+  }
+}
+
+/**
  * Persist converted competitor config into quanta's live config locations.
  * Default-OFF (`enabled:false`) ⇒ byte-identical no-op. Throttled when the
  * `sourceKey` is already recorded. NEVER throws — a single item's failure is a
@@ -872,20 +897,9 @@ export const persistConvertedItems = async (
   const writtenTypes: MigrationItemType[] = []
   for (const item of input.converted) {
     if (!item.ok) continue
-    try {
-      const outcome = await persistOne(
-        item,
-        input.projectDir,
-        input.homeDir,
-        sync,
-        input.skillStage,
-      )
-      warnings.push(...outcome.warnings)
-      if (outcome.wrote) writtenTypes.push(item.type)
-    } catch (err) {
-      const detail = (err as { code?: string }).code ?? errMessage(err)
-      warnings.push(writeWarning(destLabel(input.projectDir, item.type), detail))
-    }
+    const outcome = await persistItemGuarded(item, input, sync)
+    warnings.push(...outcome.warnings)
+    if (outcome.wrote) writtenTypes.push(item.type)
   }
 
   const persisted = writtenTypes.length > 0
