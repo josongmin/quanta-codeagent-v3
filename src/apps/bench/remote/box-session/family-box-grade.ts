@@ -23,6 +23,7 @@
  * No `family === "promax"` branch: which families do this is decided by whether
  * their profile declares `boxGrade`, per packet invariant 10.
  */
+import { abortableSleep } from "@/shared"
 import type { DatasetFamily } from "../../dataset-family-token"
 import { resolveDatasetFamilyProfile } from "../../profiles/registry"
 import type { FamilyBoxGradeVerdicts, FamilyRemoteBootstrap } from "../../profiles/types"
@@ -128,7 +129,12 @@ const awaitAgentExit = async (input: {
   readonly family: DatasetFamily
   readonly sleep?: (ms: number) => Promise<void>
 }): Promise<void> => {
-  const sleep = input.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)))
+  // The shared timer-clearing sleep, never a raw `new Promise(setTimeout)`: that
+  // form leaks its timer and keeps waiting the full 5 s after a cancellation, so
+  // the silent-failure ratchet caps how many exist. `abortableSleep` clears the
+  // timer on every path and becomes abort-aware for free if this slice ever
+  // gains a signal (it has none today — `BoxSession` carries no `AbortSignal`).
+  const sleep = input.sleep ?? ((ms: number) => abortableSleep(ms))
   const deadline = AGENT_EXIT_GRACE_MS
   let waited = 0
   for (;;) {
