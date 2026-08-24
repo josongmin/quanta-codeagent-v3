@@ -263,18 +263,26 @@ export interface ToolStreamingInput<I = unknown> {
 /**
  * RFC-06 F3 — OPTIONAL dynamic-spec arm. A tool whose advertised {@link ToolSpec}
  * is NOT frozen at construction implements `getSpec()`, which the registry
- * dereferences ON EVERY MODEL REQUEST (see `ToolRegistry.specs`). The `Skill`
- * tool uses this so its "Available skills:" description tracks the LIVE runtime
- * authority — a skill disabled after tool construction disappears from the model
- * spec surface on the NEXT request, with no rebuilt registry.
+ * dereferences ON EVERY MODEL REQUEST (see `ToolRegistry.specs`). Two live uses:
+ *   - RFC-06 F3 (`Skill`): the "Available skills:" description tracks the LIVE
+ *     runtime authority — a skill disabled after tool construction disappears
+ *     from the model spec surface on the NEXT request, with no rebuilt registry.
+ *   - RFC-05 E5b (`request_user_input`): the arm returns `undefined` to HIDE the
+ *     tool while the live question-posture DENIES it, and the static spec while
+ *     the posture ADMITS it — so the model-visible spec tracks the SAME live
+ *     reader the pre-dispatch consult resolves through, per request. A session
+ *     that STARTED in a denying posture reappears the moment the posture admits.
  *
  * Contract:
  *   - ABSENT (the common case — every static tool) ⇒ the registry advertises the
  *     tool's static `{name, description, inputSchema}` exactly as today
  *     (byte-identical). This is a `Partial` arm on {@link Tool}, so absence is
  *     the default by construction.
- *   - PRESENT but returns `undefined` ⇒ same fallback to the static fields (a
- *     dynamic tool that has nothing new to say this request pays nothing).
+ *   - PRESENT but returns `undefined` ⇒ the tool is HIDDEN from THIS request's
+ *     spec list (posture-driven visibility). This is DISTINCT from the absent-arm
+ *     static fallback above: a dynamic tool that wishes to advertise its static
+ *     shape returns a `ToolSpec`, never `undefined`. (The `Skill` tool always
+ *     returns a `ToolSpec`, so it is never hidden.)
  *   - PRESENT and returns a `ToolSpec` ⇒ the registry advertises THAT spec for
  *     this request. The returned `name` MUST equal the tool's `name` (the
  *     registry keys dispatch by the static name; a dynamic spec only refreshes
@@ -285,8 +293,9 @@ export interface ToolStreamingInput<I = unknown> {
  * once per model request. It owns no mutation of the runtime authority.
  */
 export interface ToolDynamicSpec {
-  /** The tool's CURRENT provider-facing spec, or `undefined` to use the static
-   *  `{name, description, inputSchema}` fields (byte-identical fallback).
+  /** The tool's CURRENT provider-facing spec, or `undefined` to HIDE the tool
+   *  from this request's spec list (the RFC-05 E5b posture-driven hide — the
+   *  registry drops it entirely, it does NOT fall back to the static fields).
    *  Dereferenced by `ToolRegistry.specs()` on every model request. */
   getSpec(): ToolSpec | undefined
 }

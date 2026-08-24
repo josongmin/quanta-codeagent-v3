@@ -26,19 +26,37 @@ import { resolveCollaborationMode } from "../mode"
 import type { AgentConfig } from "../types"
 
 /** Build the user-input tool when EITHER the legacy `userInputPort` OR the
- *  attention `questionBroker` (RFC-01 A3) is wired, AND the RFC-05 E5 question
- *  posture ADMITS it for this turn's collaboration mode.
+ *  attention `questionBroker` (RFC-01 A3) is wired. Registration no longer
+ *  depends on the question posture — the tool is ALWAYS on the registry when a
+ *  producer is wired, and the LIVE posture drives its model-SPEC visibility
+ *  per request via the tool's `getSpec` arm (RFC-05 E5b).
  *
- *  RFC-05 E5 — model-SPEC projection: `questionAvailability(config.questionGuard,
- *  resolveCollaborationMode(config))` is the SAME reader/predicate the
- *  pre-dispatch consult (`consultQuestionAvailability`) resolves through, so the
- *  spec and the dispatch admission can never diverge. Default-OFF: no
- *  `questionGuard` bound ⇒ available (byte-identical — the tool is present
- *  whenever a producer is wired, exactly as before E5). */
+ *  RFC-05 E5b — model-SPEC projection is now PER REQUEST, not frozen at build.
+ *  Before E5b this builder ran ONCE at session build and returned `undefined`
+ *  when the posture denied — freezing the model's spec at that instant. Two
+ *  failure modes followed: (a) FALSE-INVISIBLE — a session that STARTED in a
+ *  denying posture hid the tool PERMANENTLY, even on a later plan-mode turn the
+ *  live posture would admit; (b) false-visible — a spec built while admitting
+ *  stayed visible after a later deny. E5b closes both by giving the tool a
+ *  `getSpec` arm that consults the SAME `questionAvailability(config.questionGuard,
+ *  resolveCollaborationMode(config))` predicate the pre-dispatch consult
+ *  (`consultQuestionAvailability`) resolves through — evaluated by
+ *  `ToolRegistry.specs()` on EVERY model request, so spec-visibility and
+ *  dispatch-admission can never diverge.
+ *
+ *  Default-OFF: no `questionGuard` bound ⇒ NO `getSpec` arm is threaded, so the
+ *  tool is a plain static tool whose spec bytes + prompt-cache are byte-identical
+ *  to the pre-E5 surface — present whenever a producer is wired, exactly as
+ *  before. The dispatch consult stays the enforcement backstop unchanged. */
 export const buildUserInputBlock = (config: AgentConfig): Tool | undefined => {
   if (config.userInputPort === undefined && config.questionBroker === undefined) return undefined
-  if (!questionAvailability(config.questionGuard, resolveCollaborationMode(config)).available) {
-    return undefined
-  }
-  return requestUserInputTool() as Tool
+  const guard = config.questionGuard
+  // Default-OFF byte-identity: no guard ⇒ plain static tool (no dynamic arm).
+  if (guard === undefined) return requestUserInputTool() as Tool
+  // Guard wired ⇒ thread the LIVE availability predicate into the tool's
+  // `getSpec`; both `guard.askOutsidePlan()` and `resolveCollaborationMode(config)`
+  // are re-read on each `getSpec()` call, so the answer tracks the current posture.
+  return requestUserInputTool({
+    available: () => questionAvailability(guard, resolveCollaborationMode(config)).available,
+  }) as Tool
 }

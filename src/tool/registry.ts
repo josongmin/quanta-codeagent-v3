@@ -65,24 +65,38 @@ export class ToolRegistry {
 
   /** Schemas advertised to the model. Called ON EVERY MODEL REQUEST (the loop
    *  re-derives the visible spec list per turn), so a tool that implements the
-   *  optional {@link ToolDynamicSpec.getSpec} arm (RFC-06 F3 — the `Skill` tool)
-   *  gets its CURRENT spec re-read here every request; a stale skill disabled
-   *  after construction leaves the model surface on the next call.
+   *  optional {@link ToolDynamicSpec.getSpec} arm gets its CURRENT spec re-read
+   *  here every request:
+   *    - RFC-06 F3 (`Skill`): a stale skill disabled after construction leaves
+   *      the Skill tool's advertised description on the next call.
+   *    - RFC-05 E5b (`request_user_input`): the tool's live question-posture
+   *      availability drives whether it appears in the spec at all — a getSpec
+   *      that returns `undefined` HIDES the tool from THIS request's spec list
+   *      (see the {@link ToolDynamicSpec.getSpec} contract), so a session that
+   *      started in a denying posture reappears the moment the live posture
+   *      admits it, with no rebuilt registry.
    *
-   *  Static-tool compatibility: a tool WITHOUT `getSpec` (every built-in), OR
-   *  one whose `getSpec()` returns `undefined`, is advertised from its static
-   *  `{name, description, inputSchema}` fields exactly as before — byte-identical
-   *  output, so the gate-OFF (no dynamic tools) spec list is unchanged. */
+   *  Static-tool compatibility: a tool WITHOUT `getSpec` (every built-in) is
+   *  advertised from its static `{name, description, inputSchema}` fields exactly
+   *  as before — byte-identical output, so the gate-OFF (no dynamic tools) spec
+   *  list is unchanged. A `getSpec` that returns `undefined` DROPS its tool (the
+   *  posture-driven hide), distinct from the absent-arm static fallback above. */
   specs(): ToolSpec[] {
-    return [...this.tools.values()].map((t) => {
-      const dynamic = t.getSpec?.()
-      if (dynamic !== undefined) return dynamic
-      return {
+    const out: ToolSpec[] = []
+    for (const t of this.tools.values()) {
+      if (t.getSpec !== undefined) {
+        const dynamic = t.getSpec()
+        // PRESENT-but-`undefined` ⇒ the dynamic tool hides itself this request.
+        if (dynamic !== undefined) out.push(dynamic)
+        continue
+      }
+      out.push({
         name: t.name,
         description: t.description,
         input_schema: zodToJsonSchema(t.inputSchema),
-      }
-    })
+      })
+    }
+    return out
   }
 
   /** Concrete tool instances in stable registry order. Callers that need to

@@ -9,9 +9,16 @@
  *     called. Red-on-injection: without the consult (the pre-E5 path) the stale
  *     handle dispatches and the port fires → this test is RED.
  *  2. SPEC/DISPATCH PARITY TABLE: across the (askOutsidePlan × turnMode) matrix,
- *     the model-spec projection (`buildUserInputBlock` present?) and the dispatch
- *     admission (`consultQuestionAvailability` null?) must AGREE cell-for-cell —
- *     they cannot diverge because they resolve through the SAME reader.
+ *     the model-spec projection (E5b: the tool present in `registry.specs()` via
+ *     its per-request `getSpec`) and the dispatch admission
+ *     (`consultQuestionAvailability` null?) must AGREE cell-for-cell — they cannot
+ *     diverge because they resolve through the SAME reader.
+ *
+ *  E5b (spec-staleness close): the model spec is LIVE per request via the tool's
+ *  `getSpec` arm, not FROZEN at session build. The tool is now ALWAYS registered
+ *  when a producer is wired; the live posture decides visibility per `specs()`
+ *  read — closing both the false-visible (admit-then-deny) and the far worse
+ *  false-INVISIBLE (a session that STARTS denying is hidden permanently) gaps.
  *  3. UNKNOWN plan-mode context ⇒ RESTRICTIVE (fail-safe deny), never permissive.
  *  4. GATE-OFF byte-identity: no `questionGuard` bound ⇒ tool present in spec AND
  *     dispatched (current-behavior default: question available).
@@ -39,7 +46,7 @@ import {
   ALL_QUESTION_DENY_REASONS,
   canRequestUserInput,
 } from "@/permission/posture/question-policy"
-import { requestUserInputTool, ToolRegistry, type UserInputOutcome } from "@/tool"
+import { requestUserInputTool, type Tool, ToolRegistry, type UserInputOutcome } from "@/tool"
 
 const REQUEST_USER_INPUT = "request_user_input"
 
@@ -138,16 +145,111 @@ describe("E5 — spec/dispatch PARITY table (one reader, both sites)", () => {
         { questionGuard: reader(c.askOutsidePlan), collaborationMode: c.collab },
         calls,
       )
-      // (a) model-spec projection: is the tool visible?
-      const specVisible = buildUserInputBlock(config) !== undefined
+      // (a) model-spec projection — E5b: PER REQUEST via getSpec, not registration.
+      //     The block ALWAYS registers the tool when a producer is wired; the
+      //     live posture decides whether it appears in `registry.specs()`.
+      const tool = buildUserInputBlock(config)
+      expect(tool).not.toBeUndefined()
+      const specVisible = new ToolRegistry([tool as Tool])
+        .specs()
+        .some((s) => s.name === REQUEST_USER_INPUT)
       // (b) pre-dispatch admission: does the consult admit (null)?
       const dispatchAdmitted = consultQuestionAvailability(uiCall(), config) === null
-      // PARITY: the two sites agree cell-for-cell.
+      // PARITY: the two sites agree cell-for-cell (ONE reader drives both).
       expect(specVisible).toBe(dispatchAdmitted)
       // …and both match the expected availability.
       expect(specVisible).toBe(c.expectAvailable)
     })
   }
+})
+
+/** A reader whose `askOutsidePlan` can be flipped AFTER the tool is built, to
+ *  prove the model-spec projection tracks the LIVE posture per request (not a
+ *  build-time snapshot). */
+const mutableReader = (
+  initial: boolean,
+): { reader: QuestionAvailabilityReader; set: (v: boolean) => void } => {
+  let v = initial
+  return { reader: { askOutsidePlan: () => v }, set: (n) => (v = n) }
+}
+
+const specHas = (registry: ToolRegistry): boolean =>
+  registry.specs().some((s) => s.name === REQUEST_USER_INPUT)
+
+describe("E5b — the model spec is LIVE per request (getSpec), not FROZEN at build", () => {
+  test("RED→GREEN false-visible: a posture flip to DENY hides the tool WITHOUT a rebuild", () => {
+    const calls: string[] = []
+    const m = mutableReader(true) // admits at build
+    const config = cfg({ questionGuard: m.reader, collaborationMode: "default" }, calls)
+    const tool = buildUserInputBlock(config)
+    expect(tool).not.toBeUndefined()
+    // The registry is built ONCE (session build); specs() is re-read per request.
+    const registry = new ToolRegistry([tool as Tool])
+    expect(specHas(registry)).toBe(true) // admitting ⇒ visible
+    m.set(false) // LIVE posture flips to deny — NO rebuild
+    // Pre-E5b (no getSpec) the spec was frozen ⇒ still visible (RED). E5b ⇒ hidden.
+    expect(specHas(registry)).toBe(false)
+  })
+
+  test("RED→GREEN false-INVISIBLE: a session that STARTS denying reappears when the posture later admits (no rebuild)", () => {
+    const calls: string[] = []
+    const m = mutableReader(false) // DENIES at build (outside plan)
+    const config = cfg({ questionGuard: m.reader, collaborationMode: "default" }, calls)
+    const tool = buildUserInputBlock(config)
+    // E5b: REGISTERED despite the denying start. Pre-E5b `buildUserInputBlock`
+    // returned `undefined` here → the tool was hidden PERMANENTLY (this assert RED).
+    expect(tool).not.toBeUndefined()
+    const registry = new ToolRegistry([tool as Tool])
+    expect(specHas(registry)).toBe(false) // denying start ⇒ hidden this request
+    m.set(true) // operator later admits questions — NO rebuild
+    expect(specHas(registry)).toBe(true) // same registry ⇒ tool REAPPEARS live
+  })
+
+  test("the collab-mode leg is ALSO live: outside-plan DENY hidden, a later PLAN turn reveals it", () => {
+    const calls: string[] = []
+    // Deny knob + outside plan ⇒ hidden; the mode is the OTHER live input.
+    const config = cfg({ questionGuard: reader(false), collaborationMode: "default" }, calls)
+    const tool = buildUserInputBlock(config)
+    expect(tool).not.toBeUndefined()
+    const registry = new ToolRegistry([tool as Tool])
+    expect(specHas(registry)).toBe(false)
+    // The turn transitions INTO plan mode (live). getSpec re-reads
+    // resolveCollaborationMode(config), so a mid-session mode flip is honored.
+    ;(config as { collaborationMode?: string }).collaborationMode = "plan"
+    expect(specHas(registry)).toBe(true) // plan always admits the ask tool
+  })
+
+  test("red-on-injection: DROP the getSpec arm (static tool) ⇒ the spec goes STALE — always visible under DENY", () => {
+    // A tool built WITHOUT the availability arm has NO getSpec → static spec →
+    // ALWAYS present, so it can never track a denying posture (the pre-E5b bug).
+    const staticTool = requestUserInputTool()
+    expect(staticTool.getSpec).toBeUndefined()
+    expect(specHas(new ToolRegistry([staticTool]))).toBe(true)
+    // The SAME tool WITH a denying availability arm IS hidden — proving the arm
+    // (not anything else) is what drives the live hide.
+    const guarded = requestUserInputTool({ available: () => false })
+    expect(specHas(new ToolRegistry([guarded]))).toBe(false)
+  })
+
+  test("default-OFF byte-identity: no questionGuard ⇒ NO getSpec + spec bytes identical to the static tool", () => {
+    const calls: string[] = []
+    // No questionGuard bound — the default-OFF surface.
+    const offTool = buildUserInputBlock(cfg({ collaborationMode: "default" }, calls))
+    expect(offTool).not.toBeUndefined()
+    expect((offTool as Tool).getSpec).toBeUndefined() // no dynamic arm at all
+    const offSpec = JSON.stringify(new ToolRegistry([offTool as Tool]).specs())
+    const staticSpec = JSON.stringify(new ToolRegistry([requestUserInputTool()]).specs())
+    expect(offSpec).toBe(staticSpec) // byte-identical prompt-cache surface
+  })
+
+  test("byte-identity under ADMIT: the getSpec spec equals the static spec byte-for-byte (only visibility differs)", () => {
+    // When the guard ADMITS, the dynamic spec must not perturb bytes/ordering.
+    const admitSpec = JSON.stringify(
+      new ToolRegistry([requestUserInputTool({ available: () => true })]).specs(),
+    )
+    const staticSpec = JSON.stringify(new ToolRegistry([requestUserInputTool()]).specs())
+    expect(admitSpec).toBe(staticSpec)
+  })
 })
 
 describe("E5 — unknown plan-mode context resolves RESTRICTIVE (fail-safe deny)", () => {
