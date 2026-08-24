@@ -9,14 +9,16 @@
  *  canonical number is 0413 — matched by the feature catalog `adrs: [413]`.)
  *
  * Single canonical entry point that projects an env view + per-session
- * override into the three memory slots a surface needs to wire:
+ * override into the memory slots a surface needs to wire:
  *
  *   1. `store`         — `PersistentStorePort` (Sqlite | InMemory | undefined)
  *   2. `config`        — `AgentConfig["memory"]` tuning block
- *   3. `autoTrigger`   — `TriggerPolicy` for the auto-trigger / cross-session-
- *                        inject slice (ADR-0281 / ADR-0282)
  *
- * Before this ADR, each of those three slots was env-default-OFF, resolved
+ * (A third slot, `autoTrigger`, mirrored the `QUANTA_MEMORY_AUTO` gate and the
+ * cross-session-inject promotion policy; no host consumed it and it went with
+ * ADR-0556. The gate is read at `@/memory/auto-trigger` by the session wire.)
+ *
+ * Before this ADR, each of those slots was env-default-OFF, resolved
  * in three different call sites (cli internal, agent index, retrieval gate).
  * The result was that an operator who installed the agent fresh got "no
  * memory learning" until they set three env knobs — defeating the SOTA goal
@@ -38,14 +40,16 @@
  *   - `env.QUANTA_MEMORY` ∈ {0, false, off, no} ⇒ same `{}`
  *   - either path is equivalent to the legacy default-OFF behavior of
  *     `buildStore() === undefined` + `buildMemoryConfig(undefined) ===
- *     undefined` + `assembleMemoryAuto() === null` (collapsed at the
- *     factory boundary so callers only need one knob).
+ *     undefined` (collapsed at the factory boundary so callers only need
+ *     one knob). The session-end auto-trigger gate (`QUANTA_MEMORY_AUTO`)
+ *     is read by `@/memory/auto-trigger` at its own wire site; this factory
+ *     used to mirror it into an `autoTrigger` slot nobody consumed
+ *     (removed with ADR-0556).
  */
 
 import { homedir } from "node:os"
 import type { AgentConfig } from "@/agent"
 import { InMemoryStore, type PersistentStorePort } from "@/memory"
-import { assembleMemoryAuto } from "@/memory/auto-trigger"
 import { resolveStorePath, type StorePathResolution } from "@/memory/store-path"
 import {
   parseMemoryLineCitations,
@@ -61,18 +65,6 @@ import { buildStoreCore } from "./store"
 /* public types                                                        */
 /* ------------------------------------------------------------------ */
 
-/** Trigger policy mirror of `@/memory/auto-trigger`'s `TriggerPolicy`. The
- *  SHAPE is re-declared so callers of this factory never import the trigger
- *  slice for a type; the VALUES are resolved by delegating to that slice's
- *  `assembleMemoryAuto` (ADR-0555 — one env→policy projection, not two copies
- *  that can drift). */
-export interface MemoryAutoTriggerPolicy {
-  /** Phase-2 promote threshold (default 0.7). */
-  readonly promoteThreshold: number
-  /** Minimum usageCount gate (default 1). */
-  readonly minUsageCount: number
-}
-
 /** The two store kinds the factory can resolve. `"sqlite"` is the on-disk
  *  `SqliteStore` (ADR-0557: the DEFAULT, home-scoped); `"memory"` is the
  *  VOLATILE `InMemoryStore` (explicit `QUANTA_MEMORY=memory`, or the attributed
@@ -85,7 +77,6 @@ export type MemoryStoreKind = "memory" | "sqlite"
 export interface MemorySessionSlot {
   readonly store?: PersistentStorePort
   readonly config?: AgentConfig["memory"]
-  readonly autoTrigger?: MemoryAutoTriggerPolicy
   /** ADR-0555 — the RESOLVED kind of `store` (never the raw env token, which
    *  the CLI seeds as `"1"`). Present iff `store` is present, so a surface can
    *  tell the operator the truth (`kind=memory (volatile)`) instead of echoing
@@ -97,16 +88,13 @@ export interface MemorySessionSlot {
 
 /** Per-session override surface. Bench / replay sets `storeDisabled:true`
  *  for byte-identical determinism. Callers can also force a specific
- *  recall-limit or auto-trigger policy independent of env (used by tests
- *  that don't want to mutate `process.env`). */
+ *  recall-limit independent of env (used by tests that don't want to
+ *  mutate `process.env`). */
 export interface MemorySessionOverride {
   /** Hard OFF — env is fully ignored. The escape hatch for bench/replay. */
   readonly storeDisabled?: boolean
   /** Recall-limit override (wins over `QUANTA_MEMORY_RECALL_LIMIT`). */
   readonly recallLimit?: number
-  /** Auto-trigger policy override (wins over env-derived policy). Pass
-   *  `null` to FORCE auto-trigger OFF even when env enables it. */
-  readonly autoTrigger?: MemoryAutoTriggerPolicy | null
   /** Override the sqlite path. Wins over `QUANTA_MEMORY_PATH`. */
   readonly storePath?: string
   /** ADR-0557 — home directory the default `~/.quanta/memory/memory.sqlite`
@@ -195,19 +183,6 @@ const openStoreWithFallback = (
   }
 }
 
-/** Resolve the auto-trigger policy from env. Default-ON unless the
- *  operator explicitly opts out. ADR-0555: this DELEGATES to the trigger
- *  slice's own `assembleMemoryAuto` (the env truth-table lives there once —
- *  `QUANTA_MEMORY_AUTO` / `_THRESHOLD` / `_MIN_USAGE`, invalid ⇒ default);
- *  this file used to carry a verbatim copy that could drift. `null` from the
- *  slice ⇒ `undefined` here (slot omitted). */
-const resolveAutoTrigger = (env: NodeJS.ProcessEnv): MemoryAutoTriggerPolicy | undefined => {
-  const auto = assembleMemoryAuto(env)
-  if (auto === null) return undefined
-  const { promoteThreshold, minUsageCount } = auto.policy
-  return { promoteThreshold, minUsageCount }
-}
-
 /**
  * Resolve the memory tuning config from env + store. This is the SINGLE
  * source of truth for the env → `MemoryConfigAssembleInput` projection
@@ -274,7 +249,7 @@ export const resolveMemoryConfigFromEnv = (
 /* ------------------------------------------------------------------ */
 
 /**
- * Resolve the three memory slots for one session.
+ * Resolve the memory slots (store + config) for one session.
  *
  * - `override.storeDisabled === true` ⇒ `{}` (bench/replay byte-identical).
  * - Otherwise: env is consulted with default-ON semantics. The legacy
@@ -293,10 +268,8 @@ export const buildMemoryForSession = (
   if (override?.storeDisabled === true) return {}
   const kind = resolveStoreKind(env.QUANTA_MEMORY)
   // Single-knob escape hatch: `QUANTA_MEMORY=off` (kind===undefined) cascades
-  // to ALL slots OFF. The auto-trigger has no store to write to, so a
-  // surviving auto-trigger would be a no-op anyway; the cascade keeps the
-  // "one knob = legacy off" contract intact (mirrors the storeDisabled
-  // hard path above).
+  // to ALL slots OFF — the "one knob = legacy off" contract (mirrors the
+  // storeDisabled hard path above).
   if (kind === undefined) return {}
   const notice = override?.onStoreNotice ?? ((line: string) => logger.warn(line))
   const resolved = resolveSessionStorePath(env, override)
@@ -306,14 +279,9 @@ export const buildMemoryForSession = (
   const opened = openStoreWithFallback(kind, resolved.path, notice)
   const store = opened.store
   const config = resolveMemoryConfigFromEnv(env, store, override)
-  // Auto-trigger: override wins; null forces off (ADR-0413 veto arm), undefined
-  // falls through to env. The env path is default-ON.
-  const autoTrigger =
-    override?.autoTrigger === null ? undefined : (override?.autoTrigger ?? resolveAutoTrigger(env))
   return {
     ...(store !== undefined ? { store, kind: opened.kind } : {}),
     ...(store !== undefined && opened.kind === "sqlite" ? { storePath: resolved.path } : {}),
     ...(config !== undefined ? { config } : {}),
-    ...(autoTrigger !== undefined ? { autoTrigger } : {}),
   }
 }

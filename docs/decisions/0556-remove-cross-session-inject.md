@@ -40,7 +40,7 @@ Re-pointed, not removed:
 
 - **H16 auto-dream** (`buildCrossSessionDreamTrigger`) now takes `stage1Store: Pick<Stage1StorePort, "fetchSince">` and reads every Phase-1 row with `fetchSince(null)`; a local `renderDreamInput` (oldest-first, empty summaries dropped, 8 KiB greedy cap) builds the summarizer's user text. It no longer depends on the dead `selectedForPhase2 && usageCount ≥ 1` filter, so with `QUANTA_AUTO_DREAM=1` it can actually consolidate. Default-OFF is unchanged. Its three host-binding hellgates swap their fakes from a `list()` shape to a `fetchSince()` shape; the trigger-core tests are untouched.
 
-Kept as constants, pending another lane:
+Removed in the follow-up commit once the ADR-0555/0557 lane released `memory-factory.ts` (originally kept as constants because that lane was in flight):
 
 - `TriggerPolicy` / `DEFAULT_TRIGGER_POLICY` (`memory/auto-trigger/types.ts`) and `MemoryAutoSlot.policy` keep their shape because `src/runner/assemble/memory-factory.ts` (ADR-0555, another lane in flight at the time of this change) destructures them into its own `autoTrigger` slot. Nothing in `src/` reads the two fields any more; `assembleMemoryAuto` always returns the constant. The fields and `memory-factory.ts#resolveAutoTrigger` + `MemoryAutoTriggerPolicy` + the `autoTrigger` slot should be deleted together (their only consumers are `tests/unit/memory-factory-hellgate.test.ts` and `tests/integration/memory-default-on-e2e-hellgate.test.ts`). `AgentConfig.memoryConsolidator.promotionPolicy` (`agent/types/memory-config.ts`) is dead for the same reason and goes with them.
 

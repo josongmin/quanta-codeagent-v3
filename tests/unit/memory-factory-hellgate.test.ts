@@ -16,9 +16,7 @@
  *     forces it on (hardest escape hatch; bench/replay one-knob)
  *   - override.recallLimit wins over env; invalid override.recallLimit
  *     falls back to env; non-finite env falls back to undefined
- *   - override.autoTrigger=customPolicy WINS over env-derived policy
- *   - override.autoTrigger=null FORCES auto-trigger off even when env=on
- *   - QUANTA_MEMORY_THRESHOLD / MIN_USAGE invalid ⇒ defaults (no throw)
+ *   - QUANTA_MEMORY_AUTO and the deleted promotion knobs do not shape the slot (ADR-0556)
  *   - factory does NOT mutate the input env object or process.env
  *   - deterministic shape (calling twice with same input ⇒ same shape)
  *   - byte-identical legacy: QUANTA_MEMORY=off matches storeDisabled=true
@@ -32,7 +30,7 @@ import { existsSync, mkdtempSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { InMemoryStore, SqliteStore } from "@/memory"
-import { buildMemoryForSession, type MemoryAutoTriggerPolicy } from "@/runner/assemble"
+import { buildMemoryForSession } from "@/runner/assemble"
 
 /** Minimal env helper — typed as ProcessEnv via cast for clarity. */
 const env = (e: Record<string, string | undefined> = {}): NodeJS.ProcessEnv =>
@@ -64,7 +62,7 @@ const withTmpHome = (run: (home: string) => ReturnType<typeof buildMemoryForSess
 describe("buildMemoryForSession — default-ON contract", () => {
   // ADR-0557: the unset default WAS the volatile InMemoryStore ("never writes
   // to disk"); it is now the DURABLE sqlite store under the injected home.
-  test("env unset ⇒ all three slots present (store=DURABLE SqliteStore under <home>/.quanta/memory, config truthy, autoTrigger default policy)", () => {
+  test("env unset ⇒ both slots present (store=DURABLE SqliteStore under <home>/.quanta/memory, config truthy)", () => {
     withTmpHome((home) => {
       const slot = buildMemoryForSession(env({}), { homeDir: home, cwd: home })
       expect(slot.store).toBeInstanceOf(SqliteStore)
@@ -73,7 +71,6 @@ describe("buildMemoryForSession — default-ON contract", () => {
       expect(existsSync(join(home, ".quanta", "memory", "memory.sqlite"))).toBe(true)
       expect(typeof slot.store?.recall).toBe("function")
       expect(slot.config).toBeDefined()
-      expect(slot.autoTrigger).toEqual({ promoteThreshold: 0.7, minUsageCount: 1 })
       return slot
     })
   })
@@ -82,7 +79,6 @@ describe("buildMemoryForSession — default-ON contract", () => {
     const slot = buildMemoryForSession(env({ QUANTA_MEMORY: "memory" }))
     expect(slot.store).toBeInstanceOf(InMemoryStore)
     expect(slot.config).toBeDefined()
-    expect(slot.autoTrigger).toBeDefined()
   })
 
   test.each([
@@ -125,12 +121,11 @@ describe("buildMemoryForSession — falsey QUANTA_MEMORY collapses entire bundle
     "OFF",
     " no ",
     "False",
-  ])("QUANTA_MEMORY=%p ⇒ {} (store, config, autoTrigger all omitted)", (raw) => {
+  ])("QUANTA_MEMORY=%p ⇒ {} (store and config both omitted)", (raw) => {
     const slot = buildMemoryForSession(env({ QUANTA_MEMORY: raw }))
     expect(slot).toEqual({})
     expect(slot.store).toBeUndefined()
     expect(slot.config).toBeUndefined()
-    expect(slot.autoTrigger).toBeUndefined()
   })
 
   test("byte-identical legacy: QUANTA_MEMORY=off matches override.storeDisabled=true", () => {
@@ -253,19 +248,27 @@ describe("buildMemoryForSession — distill / consolidate / selfEdit env opt-out
   })
 })
 
-describe("buildMemoryForSession — auto-trigger semantics", () => {
-  test("QUANTA_MEMORY_AUTO=off ⇒ autoTrigger undefined (store/config still on)", () => {
+describe("buildMemoryForSession — the session-end auto gate is NOT a factory slot (ADR-0556)", () => {
+  // The factory used to mirror `QUANTA_MEMORY_AUTO` (+ the deleted promotion
+  // knobs) into an `autoTrigger` slot no host consumed. The gate lives at
+  // `@/memory/auto-trigger` and is read by the session-memory-auto wire; the
+  // factory's shape must be independent of it in BOTH directions.
+  test.each([
+    "off",
+    "on",
+    undefined,
+  ])("QUANTA_MEMORY_AUTO=%p ⇒ store + config unchanged, no extra keys", (raw) => {
     withTmpSqlite((p) => {
-      const slot = buildMemoryForSession(env({ QUANTA_MEMORY_PATH: p, QUANTA_MEMORY_AUTO: "off" }))
+      const slot = buildMemoryForSession(
+        env({ QUANTA_MEMORY_PATH: p, ...(raw !== undefined ? { QUANTA_MEMORY_AUTO: raw } : {}) }),
+      )
       expect(slot.store).toBeDefined()
       expect(slot.config).toBeDefined()
-      expect(slot.autoTrigger).toBeUndefined()
+      expect(Object.keys(slot).sort()).toEqual(["config", "kind", "store", "storePath"])
     })
   })
 
-  // ADR-0556: the promotion knobs were deleted with the cross-session inject
-  // slice; the policy is now a fixed default until the vestigial slot goes too.
-  test("QUANTA_MEMORY_THRESHOLD/MIN_USAGE are inert after ADR-0556 ⇒ default policy", () => {
+  test("the deleted promotion knobs are inert on the factory shape", () => {
     withTmpSqlite((p) => {
       const slot = buildMemoryForSession(
         env({
@@ -274,50 +277,7 @@ describe("buildMemoryForSession — auto-trigger semantics", () => {
           QUANTA_MEMORY_MIN_USAGE: "3",
         }),
       )
-      expect(slot.autoTrigger).toEqual({ promoteThreshold: 0.7, minUsageCount: 1 })
-    })
-  })
-
-  test("invalid QUANTA_MEMORY_THRESHOLD ⇒ defaults; no throw", () => {
-    withTmpSqlite((p) => {
-      const slot = buildMemoryForSession(
-        env({ QUANTA_MEMORY_PATH: p, QUANTA_MEMORY_THRESHOLD: "garbage" }),
-      )
-      expect(slot.autoTrigger?.promoteThreshold).toBe(0.7)
-    })
-  })
-
-  test("negative QUANTA_MEMORY_MIN_USAGE ⇒ default; no throw", () => {
-    withTmpSqlite((p) => {
-      const slot = buildMemoryForSession(
-        env({ QUANTA_MEMORY_PATH: p, QUANTA_MEMORY_MIN_USAGE: "-5" }),
-      )
-      expect(slot.autoTrigger?.minUsageCount).toBe(1)
-    })
-  })
-
-  test("override.autoTrigger custom policy wins over env", () => {
-    const custom: MemoryAutoTriggerPolicy = { promoteThreshold: 0.9, minUsageCount: 7 }
-    withTmpSqlite((p) => {
-      const slot = buildMemoryForSession(
-        env({
-          QUANTA_MEMORY_PATH: p,
-          QUANTA_MEMORY_THRESHOLD: "0.5",
-          QUANTA_MEMORY_MIN_USAGE: "3",
-        }),
-        { autoTrigger: custom },
-      )
-      expect(slot.autoTrigger).toEqual(custom)
-    })
-  })
-
-  test("override.autoTrigger=null FORCES off even when env=on (DI hard veto)", () => {
-    withTmpSqlite((p) => {
-      const slot = buildMemoryForSession(env({ QUANTA_MEMORY_PATH: p, QUANTA_MEMORY_AUTO: "on" }), {
-        autoTrigger: null,
-      })
-      expect(slot.store).toBeDefined()
-      expect(slot.autoTrigger).toBeUndefined()
+      expect(Object.keys(slot).sort()).toEqual(["config", "kind", "store", "storePath"])
     })
   })
 })

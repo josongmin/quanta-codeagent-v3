@@ -35,8 +35,8 @@
  *      skipped ⇒ the LLM sees the SAME messages as a legacy no-memory run.
  *   7. bench determinism:     override.storeDisabled=true ⇒ two runs over the
  *      same env produce identical (store-free) config + identical LLM inputs.
- *   8. auto-trigger gate:     QUANTA_MEMORY_AUTO=off ⇒ autoTrigger omitted while
- *      store stays ON (the gate is orthogonal to the store slot).
+ *   8. auto gate orthogonal: QUANTA_MEMORY_AUTO=off leaves the factory shape
+ *      untouched (store stays ON; the gate is read elsewhere — ADR-0556).
  */
 import { describe, expect, test } from "bun:test"
 import { existsSync, mkdtempSync, readdirSync, rmSync } from "node:fs"
@@ -202,7 +202,6 @@ describe("ADR-0414 e2e — default-ON real flow (factory store roundtrip)", () =
     try {
       expect(slot.store).toBeInstanceOf(SqliteStore)
       expect(slot.config).toBeDefined()
-      expect(slot.autoTrigger).toEqual({ promoteThreshold: 0.7, minUsageCount: 1 })
 
       const store = slot.store
       if (!store) throw new Error("default-ON must yield a store")
@@ -491,12 +490,12 @@ describe("ADR-0414 e2e — bench/replay determinism (override.storeDisabled)", (
 /* ================================================================== */
 
 describe("ADR-0414 e2e — auto-trigger gate is orthogonal to the store", () => {
-  test("QUANTA_MEMORY_AUTO=off ⇒ autoTrigger omitted while store stays ON", () => {
+  test("QUANTA_MEMORY_AUTO=off ⇒ store stays ON and the factory shape has no auto slot (ADR-0556)", () => {
     // ADR-0557: the store under test is the durable default (temp home).
     const { slot, cleanup } = buildDefault(env({ QUANTA_MEMORY_AUTO: "off" }), "auto-off")
     expect(slot.store).toBeInstanceOf(SqliteStore)
     expect(slot.config).toBeDefined()
-    expect(slot.autoTrigger).toBeUndefined()
+    expect(Object.keys(slot).sort()).toEqual(["config", "kind", "store", "storePath"])
     cleanup()
   })
 

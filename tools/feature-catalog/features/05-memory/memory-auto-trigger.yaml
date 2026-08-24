@@ -35,7 +35,6 @@ purpose: |
 evidence:
   code:
     - src/memory/auto-trigger/index.ts
-    - src/memory/auto-trigger/types.ts
     - src/memory/auto-trigger/wire.ts
     - src/agent/memory-consolidator-hook.ts
     - src/runner/session-memory-auto.ts

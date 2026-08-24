@@ -253,7 +253,8 @@ export const HOST: readonly KnobInventoryEntry[] = [
     default: true,
     group: "memory",
     home: "runtime-config",
-    describe: "Cross-session memory auto-promotion (default ON).",
+    describe:
+      "Session-end memory distillation + Phase-2 consolidation gate (default ON; ADR-0413).",
     readSite: "memory/auto-trigger/wire.ts",
   },
   {

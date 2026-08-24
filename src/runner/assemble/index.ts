@@ -53,7 +53,6 @@ export {
 } from "./memory"
 export {
   buildMemoryForSession,
-  type MemoryAutoTriggerPolicy,
   type MemorySessionOverride,
   type MemorySessionSlot,
   resolveMemoryConfigFromEnv,

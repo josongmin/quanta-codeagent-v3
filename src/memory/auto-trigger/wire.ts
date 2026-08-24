@@ -19,11 +19,10 @@
  *                                   "1" / "true") ⇒ enabled.
  *
  * ADR-0556 removed the two promotion knobs (`QUANTA_MEMORY_` threshold /
- * min-usage): the promotion gate they tuned fed a session-start injector that
- * selected nothing in practice, and the gate itself is gone from the
- * session-end consolidator. The returned `policy` is the constant
- * {@link DEFAULT_TRIGGER_POLICY} (kept only for `memory-factory.ts`, see
- * `./types.ts`).
+ * min-usage) and, with them, the `policy` this slot used to carry: the
+ * promotion gate they tuned fed a session-start injector that selected
+ * nothing in practice, and the gate itself is gone from the session-end
+ * consolidator. The slot is now the bare gate verdict.
  *
  * Default-ON (ADR-0413): a fresh install with no env knobs gets session-end
  * distillation + Phase-2 consolidation automatically. The legacy default-OFF
@@ -32,13 +31,10 @@
  */
 
 import { parseEnvFlag } from "@/shared"
-import { DEFAULT_TRIGGER_POLICY, type TriggerPolicy } from "./types"
 
 /** Return shape of {@link assembleMemoryAuto}. `null` ⇒ disabled. */
 export interface MemoryAutoSlot {
   readonly enabled: true
-  /** Constant since ADR-0556 — see `./types.ts`. */
-  readonly policy: TriggerPolicy
 }
 
 /** Project an env view to a `MemoryAutoSlot` or `null`. ADR-0413: default ON. */
@@ -46,5 +42,5 @@ export const assembleMemoryAuto = (
   env: Readonly<Record<string, string | undefined>>,
 ): MemoryAutoSlot | null => {
   if (!parseEnvFlag(env.QUANTA_MEMORY_AUTO, /* defaultOn */ true)) return null
-  return { enabled: true, policy: DEFAULT_TRIGGER_POLICY }
+  return { enabled: true }
 }

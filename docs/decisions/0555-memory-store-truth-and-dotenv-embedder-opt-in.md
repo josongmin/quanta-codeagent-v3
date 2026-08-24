@@ -35,7 +35,7 @@ Reproduced in this repo: `embed=on` came from this repository's own gitignored `
 2. The banner takes `MemoryStoreKind`, not `string`. It prints for the default/unset case, and renders the volatile kind as `kind=memory (volatile)`. The narrowing is the point: a caller can no longer pass a raw env value (two callers outside the original slice — `scripts/reactor-watch.ts` and the CLI fakes — were fixed to pass a resolved kind rather than widening the type back).
 3. `/memory stats` prints one line: `Store: in-memory (volatile — not kept across restarts; set QUANTA_MEMORY=sqlite to persist)` or `Store: sqlite (<path>)`. The kind is threaded (`Tooling.memoryKind` → `SessionSetupResult` → `MemorySlashState.kind`); when a surface does not thread it, the slash derives it from the store **instance's class**, which is the same truth and cannot disagree.
 4. The factory doc now says what is true: this store writes nothing and is gone at exit; systems B/C write under `~/.quanta/memory/` regardless.
-5. The factory's private `resolveAutoTrigger` copy now delegates to `@/memory/auto-trigger`'s `assembleMemoryAuto` (one env→policy projection), preserving the ADR-0413 `override.autoTrigger === null` veto arm.
+5. The factory's private `resolveAutoTrigger` copy now delegates to `@/memory/auto-trigger`'s `assembleMemoryAuto` (one env→policy projection), preserving the ADR-0413 `override.autoTrigger === null` veto arm. _(Superseded: the `autoTrigger` slot and `resolveAutoTrigger` were deleted with the ADR-0556 follow-up — no host consumed the slot.)_
 
 ### Egress (M5)
 

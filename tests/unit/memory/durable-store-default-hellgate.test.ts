@@ -253,7 +253,7 @@ describe("D6 — a store-open failure never kills the session", () => {
       expect(notices).toHaveLength(1)
       expect(notices[0]).toContain(expectedDefault())
       expect(notices[0]).toMatch(/volatile/i)
-      // The config + autoTrigger slots still compose (the session is intact).
+      // The config slot still composes (the session is intact).
       expect(slot?.config).toBeDefined()
     },
   )

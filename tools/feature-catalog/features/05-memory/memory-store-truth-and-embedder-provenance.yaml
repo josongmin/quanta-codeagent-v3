@@ -44,7 +44,7 @@ purpose: |
   Real-env keys are byte-identical to before.
 evidence:
   code:
-    - src/runner/assemble/memory-factory.ts   # kind/storePath on the slot; resolveAutoTrigger delegates to assembleMemoryAuto
+    - src/runner/assemble/memory-factory.ts   # kind/storePath on the slot (the autoTrigger mirror was removed with ADR-0556)
     - src/runner/assemble/store.ts            # EmbedderProvenance + resolveEmbedderProvenance + the provenance gate in buildEmbedderCore
     - src/runner/assemble/tooling.ts          # renderMemoryBanner (MemoryStoreKind label, provenance suffix); Tooling.memoryKind/memoryStorePath
     - src/apps/cli/memory-compose.ts          # CLI buildStore/buildEmbedder/buildMemoryConfig + memoryEmbedProvenance (split from internal.ts)
