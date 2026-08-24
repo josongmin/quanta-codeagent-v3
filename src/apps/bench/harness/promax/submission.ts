@@ -62,7 +62,11 @@ export type ProMaxSubmission =
   | { readonly kind: "model"; readonly patches: readonly ProMaxSubmittedPatch[] }
 
 export interface ProMaxSubmissionFailure {
-  readonly code: "assigned_set_empty" | "patch_absent_for_assigned" | "patch_not_assigned"
+  readonly code:
+    | "assigned_set_empty"
+    | "patch_absent_for_assigned"
+    | "patch_not_assigned"
+    | "patch_duplicated"
   readonly message: string
 }
 
@@ -115,10 +119,34 @@ export const buildProMaxSubmission = (
   }
 
   const byId = new Map<string, ProMaxSubmittedPatch>()
-  for (const p of submission.patches) byId.set(p.instanceId, p)
+  const duplicated: string[] = []
+  for (const p of submission.patches) {
+    // `byId.set` alone kept the LAST patch and discarded the first, with no
+    // failure and no record of which one was graded. Concatenate two shard
+    // prediction files, or export a best-of-N run, and the gate scored an
+    // arbitrarily chosen patch per instance while reporting a clean coverage.
+    //
+    // Refusing beats de-duplicating: the caller knows which patch it meant, and
+    // picking one for them is exactly how the record was lost. Identical bytes
+    // are refused too — two shards claiming one instance is still malformed, and
+    // accepting it teaches that duplicates are fine.
+    if (byId.has(p.instanceId)) duplicated.push(p.instanceId)
+    else byId.set(p.instanceId, p)
+  }
 
   const assignedSet = new Set(assigned)
   const failures: ProMaxSubmissionFailure[] = []
+
+  if (duplicated.length > 0) {
+    const unique = [...new Set(duplicated)]
+    failures.push({
+      code: "patch_duplicated",
+      message:
+        `${unique.length} instance(s) were submitted more than once: ${nameIds(unique)}. ` +
+        "REFUSING — keeping one and discarding the rest would grade an arbitrarily chosen " +
+        "patch and leave no record of which produced the number.",
+    })
+  }
 
   const absent = assigned.filter((id) => !byId.has(id))
   if (absent.length > 0) {

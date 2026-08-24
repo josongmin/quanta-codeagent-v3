@@ -75,7 +75,9 @@ describe("no predictions ⇒ no answer key on the box", () => {
       bootstrap: promaxBootstrap(),
       paths: DEFAULT_CHUNK_PATHS,
     })
-    expect(out).toBe("")
+    // `undefined`, not "": there is no grade to report at all, and an empty
+    // artifact would read as "the evaluator ran and said nothing".
+    expect(out).toBeUndefined()
     expect(materializedGold(r.issued), "the answer key was cloned with nothing to grade").toBe(
       false,
     )
@@ -92,7 +94,7 @@ describe("no predictions ⇒ no answer key on the box", () => {
         bootstrap: promaxBootstrap(),
         paths: DEFAULT_CHUNK_PATHS,
       })
-      expect(out, `preds=${JSON.stringify(empty)}`).toBe("")
+      expect(out, `preds=${JSON.stringify(empty)}`).toBeUndefined()
       expect(materializedGold(r.issued), `preds=${JSON.stringify(empty)}`).toBe(false)
     }
   })

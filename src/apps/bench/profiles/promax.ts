@@ -45,7 +45,10 @@
  */
 
 import { readFileSync } from "node:fs"
+import { serializeOfficialGradeReceipt } from "@/runner/batch/eval/official-grade"
 import { errMessage } from "@/shared"
+import { PROMAX_EVALUATOR_ID, PROMAX_EVALUATOR_RELATIVE_PATH } from "../harness/promax"
+import { buildProMaxOfficialGradeReceipt } from "../harness/promax/adapter"
 import { buildProMaxBoxGradeCommand } from "../harness/promax/box-grade"
 import { projectProMaxGradedInstances } from "../harness/promax/chunk-verdicts"
 import { serializeProMaxPredictions } from "../harness/promax/invocation"
@@ -231,7 +234,7 @@ export const PROMAX_PROFILE: DatasetFamilyProfile = {
           built.failures.map((f) => `[${f.code}] ${f.message}`).join("; "),
       )
     }
-    return built.command
+    return { command: built.command, argv: built.argv, cwd: built.cwd }
   },
 
   // layer 3e — PMX-04. The chunk's verdicts come from the evaluator's own
@@ -287,6 +290,42 @@ export const PROMAX_PROFILE: DatasetFamilyProfile = {
   },
 
   parseBoxGradeVerdicts: projectProMaxGradedInstances,
+
+  // layer 3f — PMX-04. The grade's REPLAYABLE record. Without it a ProMax run's
+  // only trace was a terminal summary line: no argv, no hash, no per-instance
+  // verdicts — and the receipt layer's `evaluatorSha256` guard, which exists so a
+  // receipt names the bytes that produced its verdicts, applied to a shape this
+  // path never produced.
+  //
+  // Composed from the SAME builder the local gate uses, so the two cannot drift
+  // into describing the same evaluator differently.
+  buildBoxGradeReceipt: (input) => {
+    const built = buildProMaxOfficialGradeReceipt({
+      assignedInstanceIds: input.assignedInstanceIds,
+      evaluator: {
+        evaluatorId: PROMAX_EVALUATOR_ID,
+        upstreamCommit: PINNED,
+        evaluatorPath: `${PROMAX_ONBOX_CHECKOUT_ROOT}/${PROMAX_EVALUATOR_RELATIVE_PATH}`,
+        evaluatorSha256: input.evaluatorSha256,
+        cwd: input.cwd,
+        argv: input.argv,
+      },
+      run: {
+        exitCode: input.exitCode,
+        stdout: input.stdout,
+        stderr: input.stderr,
+        outputJsonText: input.artifactText,
+        outputPath: input.artifactPath,
+      },
+    } as Parameters<typeof buildProMaxOfficialGradeReceipt>[0])
+    if (!built.ok) {
+      throw new Error(
+        "bench: dataset-family=promax — the on-box grade produced no valid receipt: " +
+          built.failures.map((f) => `[${f.code}] ${f.message}`).join("; "),
+      )
+    }
+    return serializeOfficialGradeReceipt(built.receipt)
+  },
 
   // layer 4 — preflight. REAL and fail-closed, and it runs BEFORE a box is
   // provisioned on both the full-remote and pool roots.

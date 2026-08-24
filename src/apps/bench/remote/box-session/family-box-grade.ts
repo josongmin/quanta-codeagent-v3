@@ -114,9 +114,35 @@ export interface FamilyBoxGradeInput {
  * outside the checkout) but would depend on that staying true — and the file the
  * teardown is allowed to delete is exactly the kind of thing a later change moves.
  */
+/**
+ * What a completed on-box grade OBSERVED, as a receipt needs it.
+ *
+ * `argv` and `cwd` come from the family's own command builder rather than from
+ * splitting the rendered shell string: a receipt has to name the invocation that
+ * produced its verdicts, and re-deriving argv from quoting would be a guess.
+ *
+ * `evaluatorSha256` is the family's frozen pin — and it is only reported because
+ * the grader phase HASH-VERIFIED it on the box moments earlier, refusing the
+ * whole bootstrap on a mismatch. Reporting it without that check would be a
+ * receipt citing a guard that never ran.
+ */
+export interface FamilyBoxGradeObservation {
+  readonly argv: readonly string[]
+  readonly cwd: string
+  readonly exitCode: number
+  readonly stdout: string
+  readonly stderr: string
+  readonly evaluatorSha256: string
+}
+
+export interface FamilyBoxGradeResult {
+  readonly artifactText: string
+  readonly observation: FamilyBoxGradeObservation
+}
+
 export const runFamilyBoxGrade = async (
   input: FamilyBoxGradeInput,
-): Promise<string | undefined> => {
+): Promise<FamilyBoxGradeResult | undefined> => {
   const profile = resolveDatasetFamilyProfile(input.family)
   const boxGrade = profile.boxGrade
   if (boxGrade === undefined) return undefined
@@ -131,6 +157,7 @@ export const runFamilyBoxGrade = async (
         "needs were never materialized. REFUSING rather than running a grade that cannot work.",
     )
   }
+  const bootstrap = input.bootstrap
 
   // Chunk paths are `~/…` / `$HOME/…` because they are interpolated UNQUOTED
   // into the bench command, where the shell expands them. This command quotes
@@ -163,7 +190,7 @@ export const runFamilyBoxGrade = async (
         "SKIPPING the on-box grade. The answer key is not materialized for a grade that would " +
         "have nothing to score; every assigned instance is reported as an infra error.",
     )
-    return ""
+    return undefined
   }
 
   const home = await resolveBoxHome(input.ssh)
@@ -193,12 +220,13 @@ export const runFamilyBoxGrade = async (
     gradedPredictionsPath = input.paths.boxGradePredictions
   }
 
-  const command = boxGrade({
+  const invocation = boxGrade({
     predictionsPath: absolutizeOnBox(gradedPredictionsPath, home),
     outputPath: absolutizeOnBox(input.paths.passRate, home),
   })
 
   let artifact = ""
+  let observation: FamilyBoxGradeObservation | undefined
   input.log(
     `[full-remote] ${input.family}: grading on box with its own pinned evaluator ` +
       "(inside the grader window; the answer key is torn down straight after)…",
@@ -209,7 +237,17 @@ export const runFamilyBoxGrade = async (
     ssh: input.ssh,
     log: input.log,
     whileMaterialized: async () => {
-      const graded = await input.ssh(command)
+      const graded = await input.ssh(invocation.command)
+      observation = {
+        argv: invocation.argv,
+        cwd: invocation.cwd,
+        exitCode: graded.code,
+        stdout: graded.stdout,
+        stderr: graded.stderr,
+        // The grader phase refused unless the box reported this digest for the
+        // evaluator, so it is an OBSERVED identity, not a hopeful constant.
+        evaluatorSha256: verifiedEvaluatorSha256(bootstrap),
+      }
       if (graded.code !== 0) {
         throw new Error(
           `[full-remote] ${input.family} on-box grade failed (code ${graded.code}): ` +
@@ -242,7 +280,34 @@ export const runFamilyBoxGrade = async (
       }
     },
   })
-  return artifact
+  if (observation === undefined) {
+    throw new Error(
+      `[full-remote] ${input.family}: the grade completed without recording its own invocation — ` +
+        "refusing to report a result whose receipt could not name what produced it.",
+    )
+  }
+  return { artifactText: artifact, observation }
+}
+
+/**
+ * The evaluator digest the family's GRADER phase declared and the box confirmed.
+ *
+ * Read off the declared plan rather than re-hashed here: the executor already
+ * compared it against the box's own `sha256sum` output and refused the bootstrap
+ * on a mismatch, so this is the value that was proven — and it cannot drift from
+ * the one that was checked, because it is the same field.
+ */
+const verifiedEvaluatorSha256 = (bootstrap: FamilyRemoteBootstrap): string => {
+  for (const command of bootstrap.commands) {
+    const expectation = command.verifies
+    if (expectation !== undefined && expectation.path.endsWith("test_run.py")) {
+      return expectation.sha256
+    }
+  }
+  throw new Error(
+    "[full-remote] the family's grader phase declares no evaluator digest to verify — a grade " +
+      "whose receipt cannot name the bytes that produced it is not evidence.",
+  )
 }
 
 /**

@@ -44,13 +44,17 @@ import type { FamilyBootstrapCommand, FamilyRemoteBootstrap } from "./types"
  * `goldBearing: true` in `harness/promax/evaluator-bootstrap.ts`, and the
  * executor refuses to run a gold-bearing command in the agent phase.
  *
- * 🔴 AND TODAY, MORE BLUNTLY THAN THAT: none of this plan executes on any lane.
- * ProMax's `admitBox` refuses every box (PMX-04), and NO production caller runs
- * the `grader` phase at all, so the checkout below is never created and its
- * teardown never runs. The plan is a specification that a dry-run prints, not a
- * sequence a box has performed. `profiles/bootstrap-phase-wiring.ts` owns that
- * statement as checked data, and surfaces it on the dry-run plan so an operator
- * is not left inferring liveness from the plan's existence.
+ * 🔴 AND TODAY THIS PLAN EXECUTES. ProMax admits boxes, `family-box-setup.ts`
+ * runs the agent phase, and `box-session/family-box-grade.ts` runs the grader
+ * phase and the teardown bound to it around the on-box grade. The checkout below
+ * IS created on a real box, and the teardown below IS what removes it.
+ *
+ * This paragraph said the exact opposite — "none of this plan executes on any
+ * lane … the checkout below is never created" — which was true until PMX-04
+ * wired the grade. It is called out rather than quietly swapped because that is
+ * the dangerous direction of a stale comment: it tells an operator no answer key
+ * ever lands on a box, at the moment one does.
+ * `profiles/bootstrap-phase-wiring.ts` owns the claim as checked data.
  *
  * {@link PROMAX_ONBOX_ROOT} is the CAMPAIGN root: the agent phase creates it
  * EMPTY (so the disk gate has a real mount to measure) and nothing is in it

@@ -129,7 +129,7 @@ describe("a ProMax chunk grades inside the window", () => {
       bootstrap: promaxBootstrap(),
       paths: DEFAULT_CHUNK_PATHS,
     })
-    expect(out).toBe(PASS_RATE)
+    expect(out?.artifactText).toBe(PASS_RATE)
 
     const gradeAt = r.issued.findIndex(isGrade)
     const readAt = r.issued.findIndex(isRead)

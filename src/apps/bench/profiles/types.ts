@@ -264,6 +264,20 @@ export interface FamilyAdmissionInput {
   readonly log: (m: string) => void
 }
 
+/**
+ * What a family's on-box grade actually is: the shell string to run, and the
+ * ARGV and CWD behind it.
+ *
+ * The argv is not decoration. A grade's receipt has to name the command that
+ * produced its verdicts, and re-deriving argv by splitting the shell string
+ * would be a guess at the quoting rather than a record of the invocation.
+ */
+export interface BoxGradeCommand {
+  readonly command: string
+  readonly argv: readonly string[]
+  readonly cwd: string
+}
+
 /** Input to a family's on-box grade command builder (PMX-04). */
 export interface BoxGradeInput {
   /** on-box path of the predictions the AGENT phase produced. */
@@ -396,7 +410,7 @@ export interface DatasetFamilyProfile {
    * `whileMaterialized` seam, so the teardown that removes the key covers it —
    * including when it throws.
    */
-  readonly boxGrade?: (input: BoxGradeInput) => string
+  readonly boxGrade?: (input: BoxGradeInput) => BoxGradeCommand
   /**
    * layer 3d′ — PMX-04. Convert the box's predictions into the format THIS
    * family's grader reads, returning the text to write.
@@ -422,6 +436,26 @@ export interface DatasetFamilyProfile {
    * would report a total infra failure for a chunk that graded fine.
    */
   readonly parseBoxGradeVerdicts?: (artifactText: string) => FamilyBoxGradeVerdicts
+  /**
+   * layer 3f — PMX-04. Build this family's OFFICIAL GRADE RECEIPT from what the
+   * on-box grade observed, returning the JSON to persist.
+   *
+   * A box grade's only other trace is a terminal summary line. The receipt is
+   * what makes it replayable: which evaluator bytes, which argv, which cwd, what
+   * the process said, and the artifact's own digest. `undefined` ⇒ this family
+   * produces no receipt, and the grade is recorded as counts alone.
+   */
+  readonly buildBoxGradeReceipt?: (input: {
+    readonly assignedInstanceIds: readonly string[]
+    readonly artifactText: string
+    readonly artifactPath: string
+    readonly argv: readonly string[]
+    readonly cwd: string
+    readonly exitCode: number
+    readonly stdout: string
+    readonly stderr: string
+    readonly evaluatorSha256: string
+  }) => string
   /** layer 4 — preflight: Pro ⇒ fail-closed Scale-column shape check; else no-op.
    *  Throws RemoteDatasetPreflightError on a malformed Pro dataset. */
   readonly preflight: (input: PreflightInput) => void

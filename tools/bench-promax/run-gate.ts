@@ -225,7 +225,7 @@ export const readModelPatches = (predictionsPath: string): readonly ProMaxSubmit
         "are an array of {instance_id, model_patch}, not the JSONL other families use",
     )
   }
-  return parsed.map((row, i) => {
+  const rows = parsed.map((row, i) => {
     const r = row as { instance_id?: unknown; model_patch?: unknown }
     if (typeof r.instance_id !== "string" || r.instance_id.trim() === "") {
       throw new Error(`prediction row ${i} has no usable instance_id`)
@@ -239,6 +239,24 @@ export const readModelPatches = (predictionsPath: string): readonly ProMaxSubmit
     }
     return { instanceId: r.instance_id, modelPatch: r.model_patch }
   })
+  // Caught HERE as well as downstream: the operator's mistake is in the file
+  // they passed, so that is where the message is useful. Silently keeping one
+  // copy would grade an arbitrarily chosen patch and lose which one produced the
+  // number — the shape a concatenated shard file or a best-of-N export takes.
+  const seen = new Set<string>()
+  const duplicated = new Set<string>()
+  for (const row of rows) {
+    if (seen.has(row.instanceId)) duplicated.add(row.instanceId)
+    seen.add(row.instanceId)
+  }
+  if (duplicated.size > 0) {
+    throw new Error(
+      `predictions document at ${predictionsPath} names ${duplicated.size} instance(s) more ` +
+        `than once: ${[...duplicated].join(", ")}. REFUSING — grading one arbitrarily chosen ` +
+        "copy would leave no record of which patch produced the result.",
+    )
+  }
+  return rows
 }
 
 /**

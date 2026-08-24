@@ -92,12 +92,17 @@ export const setupBoxForFamily = async (args: FamilyBoxSetupInput): Promise<void
   // 2. The declared AGENT-phase bootstrap. Gold-bearing commands are grader
   //    phase and are refused here by the executor's cross-check.
   //
-  //    🔴 This is the ONLY non-test call site of `executeFamilyRemoteBootstrap`
-  //    in the whole tree, and it hardcodes the AGENT phase. The GRADER phase —
-  //    and therefore the teardown bound to it — has no production caller at all
-  //    (PMX-04 owns the remote ProMax grade transport). Recorded as checked data
-  //    in `profiles/bootstrap-phase-wiring.ts`; do not read the executor's
-  //    lifecycle clauses as a live defence until that table says `executed`.
+  //    This is one of TWO non-test call sites of `executeFamilyRemoteBootstrap`,
+  //    and it hardcodes the AGENT phase. The other is
+  //    `box-session/family-box-grade.ts`, which drives the GRADER phase (and the
+  //    teardown bound to it) around the on-box grade, plus the agent phase once
+  //    per chunk to re-prove the box is clean.
+  //
+  //    This comment said the grader phase had no production caller at all. That
+  //    was true until PMX-04 wired the grade, and is recorded here because the
+  //    lie is the dangerous direction: it tells an operator no answer key ever
+  //    lands on a box. `profiles/bootstrap-phase-wiring.ts` owns the claim as
+  //    checked data — read it, not this prose.
   await executeFamilyRemoteBootstrap({
     bootstrap: args.bootstrap,
     phase: "agent",

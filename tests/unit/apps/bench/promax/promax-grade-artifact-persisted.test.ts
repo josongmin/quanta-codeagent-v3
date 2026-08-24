@@ -80,7 +80,7 @@ describe("the grade artifact", () => {
       bootstrap: promaxBootstrap(),
       paths: DEFAULT_CHUNK_PATHS,
     })
-    expect(out).toBe(PASS_RATE)
+    expect(out?.artifactText).toBe(PASS_RATE)
   })
 
   test("🔴 the on-box copy is REMOVED after it is read", async () => {
@@ -115,7 +115,7 @@ describe("the grade artifact", () => {
     )
     expect(readAt).toBeGreaterThan(-1)
     expect(rmAt).toBeGreaterThan(readAt)
-    expect(out).toBe(PASS_RATE) // and the content survived the removal
+    expect(out?.artifactText).toBe(PASS_RATE) // and the content survived the removal
   })
 
   test("PAIRED CONTROL: an inline-grading family issues no such removal", async () => {

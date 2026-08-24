@@ -548,7 +548,7 @@ const executeGradeChunk = async (args: {
   // finished PATCH-GEN ONLY, with the answer key absent. Grading happens now,
   // inside the grader window, and the teardown bound to the same executor call
   // removes the key afterwards — including when the grade throws.
-  const boxGradeText = await runFamilyBoxGrade({
+  const boxGrade = await runFamilyBoxGrade({
     ssh,
     log,
     family: args.params.datasetFamily,
@@ -561,13 +561,32 @@ const executeGradeChunk = async (args: {
   // copy is swept as soon as it is read, and the box is destroyed at end of run,
   // so without this a ProMax grade left no replayable trace at all: no argv, no
   // hash, no per-instance verdicts, only a terminal summary line.
-  if (boxGradeText !== undefined) {
+  if (boxGrade !== undefined) {
+    const artifactPath = join(fullRemoteArtifactDir(), `passrate-${args.artifactSuffix}.json`)
     saveLocalArtifact(
-      join(fullRemoteArtifactDir(), `passrate-${args.artifactSuffix}.json`),
-      boxGradeText,
+      artifactPath,
+      boxGrade.artifactText,
       log,
       "[full-remote] on-box grade document saved",
     )
+    // …and the RECEIPT beside it. The document says what the verdicts were; the
+    // receipt says which evaluator bytes, which argv and which cwd produced them.
+    // Without it the grade is a number with no provenance, and the receipt
+    // layer's own identity guards apply to a shape nothing on this path emits.
+    const buildReceipt = resolveDatasetFamilyProfile(args.params.datasetFamily).buildBoxGradeReceipt
+    if (buildReceipt !== undefined) {
+      saveLocalArtifact(
+        join(fullRemoteArtifactDir(), `grade-receipt-${args.artifactSuffix}.json`),
+        buildReceipt({
+          assignedInstanceIds: args.params.instanceIds ?? [],
+          artifactText: boxGrade.artifactText,
+          artifactPath,
+          ...boxGrade.observation,
+        }),
+        log,
+        "[full-remote] on-box grade receipt saved",
+      )
+    }
   }
 
   await args.snapshots.publish("fetching", {
@@ -584,7 +603,7 @@ const executeGradeChunk = async (args: {
   // Verdicts come from the family's OWN grade artifact when it has one; the
   // bench report of a patch-gen-only pass is all-infra by construction.
   const parsed: GradeChunkVerdicts =
-    boxGradeText === undefined
+    boxGrade === undefined
       ? parseVerdicts(fetched.reportText)
       : // The family reports official STATES; `verdict-buckets` owns how those
         // land in the four legacy arrays, and RECONCILES them against the chunk's
@@ -592,7 +611,7 @@ const executeGradeChunk = async (args: {
         // infra error rather than silently leaving the denominator. This module
         // still classifies nothing.
         bucketsFromGradedInstances(
-          parseFamilyBoxGradeVerdicts(args.params.datasetFamily, boxGradeText),
+          parseFamilyBoxGradeVerdicts(args.params.datasetFamily, boxGrade.artifactText),
           args.params.instanceIds,
         )
   const reportStatus = classifyReportText(fetched.reportText)

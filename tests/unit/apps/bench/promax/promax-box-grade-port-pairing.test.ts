@@ -47,7 +47,7 @@ describe("the box-grade ports are registered as a PAIR", () => {
         ...DATASET_FAMILY_PROFILES.verified,
         family: "pmx-halfport-probe" as DatasetFamily,
         reportPartitionKey: "pmx-halfport-probe",
-        boxGrade: () => "echo grade",
+        boxGrade: () => ({ command: "echo grade", argv: ["echo", "grade"], cwd: "/" }),
       } as Parameters<typeof registerDatasetFamilyProfile>[0]),
     ).toThrow(/parseBoxGradeVerdicts/)
   })
@@ -59,7 +59,7 @@ describe("the box-grade ports are registered as a PAIR", () => {
         ...DATASET_FAMILY_PROFILES.verified,
         family: "pmx-halfport-why" as DatasetFamily,
         reportPartitionKey: "pmx-halfport-why",
-        boxGrade: () => "echo grade",
+        boxGrade: () => ({ command: "echo grade", argv: ["echo", "grade"], cwd: "/" }),
       } as Parameters<typeof registerDatasetFamilyProfile>[0])
     } catch (e) {
       message = (e as Error).message
@@ -74,7 +74,7 @@ describe("the box-grade ports are registered as a PAIR", () => {
     withProfile(
       "pmx-bothports-probe",
       {
-        boxGrade: () => "echo grade",
+        boxGrade: () => ({ command: "echo grade", argv: ["echo", "grade"], cwd: "/" }),
         parseBoxGradeVerdicts: () => [],
       },
       () => {
