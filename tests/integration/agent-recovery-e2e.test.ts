@@ -370,11 +370,18 @@ describe("recovery e2e — hell cases: budget exhaustion per recovery kind", () 
     expect(backoffs).toBe(3)
   }, 30_000)
 
-  test("hc-output: 4 max_tokens (budget=3) → 4th `proceed`s and completes, NOT error", async () => {
-    // The output-continues budget is 3. The 4th max_tokens does NOT hard-fail
-    // (the decideOnAssembled fall-through is `proceed` → `completed` for a
-    // text-only turn). Pin this completes-not-errors invariant: a regression
-    // that hard-failed on output exhaustion would break here.
+  test("hc-output: 4 max_tokens (budget=3) → 4th is a NON-success terminal (§17 packet T)", async () => {
+    // This used to pin the OPPOSITE — "the 4th proceeds and completes, NOT
+    // error" — and §17 packet T deliberately reversed it: sealing a
+    // still-truncated turn via `{do:"proceed"}` reported a mid-sentence answer
+    // as SUCCESS, with the visible marker as its only trace, and a caller
+    // branching on `outcome.reason` (the subagent runner's
+    // `ok: reason === "completed"`, a bench harness, `/status`) cannot read a
+    // string buried in assistant text.
+    //
+    // It now joins the family the sibling test below already pins: truncation
+    // is "the model was cut off mid-answer" and belongs with MALFORMED_TOOL_USE
+    // and EMPTY_TURN_EXHAUSTED rather than being folded into a success.
     const llm = new ScriptedLLM([
       ev(text("p1", "max_tokens")),
       ev(text("p2", "max_tokens")),
@@ -382,10 +389,14 @@ describe("recovery e2e — hell cases: budget exhaustion per recovery kind", () 
       ev(text("p4-final-after-budget", "max_tokens")),
     ])
     const out = await withTimeout(runAgent(cfg({ llm, maxTurns: 1 })), 20_000, "hc-output-exhaust")
-    expect(out.reason).toBe("completed")
-    expect(out.turns).toBe(1)
-    // 4 LLM calls (3 within-budget continues + 1 post-exhaustion turn that
-    // falls through to proceed). No 5th.
+    // TEETH: pre-packet-T this was `completed` (success).
+    expect(out.reason).toBe("error")
+    expect(out.reason).not.toBe("completed")
+    // 0, not 1: the turn is sealed as a terminal rather than counted as a
+    // completed one — the same shape the malformed-exhaustion sibling produces.
+    expect(out.turns).toBe(0)
+    // Still 4 LLM calls — 3 within-budget continues plus the post-exhaustion
+    // turn. The change is how that 4th turn is SEALED, not how many happen.
     expect(llm.calls).toBe(4)
   }, 30_000)
 

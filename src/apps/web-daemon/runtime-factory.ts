@@ -75,6 +75,121 @@ export const buildInteractiveTurnAssembler = (req: InteractiveTurnAssemblerReque
   buildSharedInteractiveTurnAssembler(req, process.env as AssemblerEnv)
 
 /**
+ * Everything the production runtime needs BEFORE the agent config is assembled:
+ * the abort scope, the live posture, the session registries and skills, the
+ * objective authority and observability, the canvas/artifact slots, the
+ * agent-state ports and the daemon's MCP surface.
+ *
+ * Extracted from the factory's returned closure, which `191ce3051` took past the
+ * 150-line god-function ceiling. The bag is returned rather than typed by hand —
+ * 29 values with types spread across a dozen modules — so the caller destructures
+ * it and the rest of the closure keeps using the same bare names it always did.
+ */
+const assembleWebRuntimeParts = async (
+  env: Record<string, string | undefined>,
+  // NonNullable: the factory returns early when `tryCreateLLM` yields null, so the
+  // closure this was extracted from only ever saw a live port — and that narrowing
+  // cannot cross a function boundary.
+  llm: NonNullable<ReturnType<typeof tryCreateLLM>>,
+) => {
+  const cwd = process.cwd()
+  const abort = new AbortController()
+  // ADR-0211/web + RFC-05 E4/E5 — the live-posture slice. The `permission` mode
+  // accessor is ALWAYS present (ADR-0211 live cell); under QUANTA_POSTURE_SELECTOR
+  // it is the E3 adapter over the SAME authority the E4 `postureControl` +
+  // E5 `questionGuard` mutate/read, so a wire `session.posture.set` applies the
+  // FULL patch (not the silent mode-only drop). Gate OFF ⇒ mode cell only ⇒
+  // control/guard undefined (byte-identical). See {@link resolveWebLivePosture}.
+  const { permission, postureControl, questionGuard } = resolveWebLivePosture(env)
+  // UUX-1-11 — the loop/readout collaborator bundle (subagent registry, plan
+  // store, memory store, prompt-usage holder). See {@link mintSessionCollaborators}.
+  const { taskRegistry, subagent, skills, planStore, memoryStore, usageHolder, canvasUsage } =
+    mintSessionCollaborators(env)
+  // RFC-06 F4 — the ONE durable skill runtime authority for this web session.
+  // Threaded to the AGENT via `config.skills.authority` (buildSkillBlock reads
+  // it) AND to the `/skills` readout (its `active` projection) — so prompt,
+  // ToolSearch, invocation and the web panel converge on one authority. This is
+  // the SINGLE discovery owner; the old independent readout scan is gone.
+  const skillAuthority = await buildWebSkillAuthority(skills, env)
+  const skillsWithAuthority =
+    skills !== undefined && skillAuthority !== undefined
+      ? { ...skills, authority: skillAuthority }
+      : skills
+  // RFC-03 H1 (web parity fix) — mint THE ONE session-stable objective
+  // authority HERE, ONCE, INDEPENDENT of observability. `confirmationAvailable:
+  // false` (web has no `onConfirm`) ⇒ FAIL-CLOSED under QUANTA_PROPOSE_GOAL; the
+  // builder returns `undefined` when `QUANTA_OBJECTIVE_TOOLS` is off ⇒ no leak.
+  // The SAME instance is threaded onto `base.objective` (durable cross-turn goal)
+  // AND fed into the obs wire below for approval-attribution (single authority,
+  // no split-brain). Web durable objective restore is a documented Phase-2
+  // per-connection park ⇒ NO `restoreFrom` (mint fresh). This replaces the old
+  // mint that lived INSIDE `wireSessionObservability`, which left `base.objective`
+  // undefined whenever observability was OFF (cross-turn goal amnesia).
+  const objective = resolveGatedObjectiveAuthority(env, { confirmationAvailable: false })
+  // ADR-0415 — per-session observability wire. Gate OFF ⇒ noop handle +
+  // undefined bus ⇒ `observabilitySlots` returns `{}` (byte-identical legacy).
+  // Threading the live bus + promoted ports onto the session config makes the
+  // loop's dispatch emit onto the SAME bus attribution subscribed to, and the
+  // approval-gate wire read ONE unified model. The objective is INJECTED (the
+  // same instance threaded onto the base) so obs attribution and the base share
+  // ONE authority.
+  const observability = wireSessionObservability(env, cwd, objective)
+  // ADR-0440 wire-finish — tool-diff source. Gate OFF ⇒ undefined ⇒ no
+  // `onToolDiff` wired (no tool captures, byte-identical) + no facade port ⇒
+  // the server forwards no `tool.diff` frames.
+  const canvasToolDiff = gateOn(env, "QUANTA_WEB_CANVAS") ? createCanvasToolDiffSource() : undefined
+  // A2 — the artifact slice: canvas source (QUANTA_WEB_CANVAS) + the SHARED
+  // registry & preview resolver (QUANTA_ARTIFACT_STORE). Extracted so this
+  // factory closure stays under the god-FN cap. Gate OFF ⇒ all undefined
+  // (byte-identical). See {@link resolveArtifactSlots}.
+  const { canvasArtifact, artifactRegistry, artifactPreviewResolver } = resolveArtifactSlots(
+    env,
+    cwd,
+  )
+  // OUT-OF-BAND INBOUND port cluster (agent-state tap + user-input mirror +
+  // T02 follower + ADR-0496 control-request + gated ask_user). Each keeps its
+  // original gate; see {@link mintInboundPorts}.
+  const { agentState, subagentSource, userInput, follower, controlRequest, askUserTools } =
+    mintInboundPorts(env, permission)
+  // P4 (jul-11, UUX-4-14) — compose MCP from the surface-shared assembly
+  // (@/host/mcp-composition). No .mcp.json ⇒ empty (byte-identical). Bridged
+  // tools join the registry; clients stop on shutdown; the /mcp readout goes
+  // live. NEVER throws (a broken config never crashes daemon boot).
+  const { tools: mcpTools, clients: mcpClients, mcpAccessor } = await loadDaemonMcp(env, llm)
+  return {
+    cwd,
+    abort,
+    permission,
+    postureControl,
+    questionGuard,
+    taskRegistry,
+    subagent,
+    skills,
+    planStore,
+    memoryStore,
+    usageHolder,
+    canvasUsage,
+    skillAuthority,
+    skillsWithAuthority,
+    objective,
+    observability,
+    canvasToolDiff,
+    canvasArtifact,
+    artifactRegistry,
+    artifactPreviewResolver,
+    agentState,
+    subagentSource,
+    userInput,
+    follower,
+    controlRequest,
+    askUserTools,
+    mcpTools,
+    mcpClients,
+    mcpAccessor,
+  }
+}
+
+/**
  * Build a `runtimeFactory` suitable for `WebDaemonConfig`. The LLM port is
  * resolved ONCE at boot (env-driven provider pick); each invocation of the
  * returned factory mints a fresh {@link ObservableRuntimeFacade} (= fresh
@@ -94,72 +209,36 @@ export const buildProductionRuntimeFactory = (): (() => Promise<ObservableRuntim
   }
 
   return async (): Promise<ObservableRuntimeFacade> => {
-    const cwd = process.cwd()
-    const abort = new AbortController()
-    // ADR-0211/web + RFC-05 E4/E5 — the live-posture slice. The `permission` mode
-    // accessor is ALWAYS present (ADR-0211 live cell); under QUANTA_POSTURE_SELECTOR
-    // it is the E3 adapter over the SAME authority the E4 `postureControl` +
-    // E5 `questionGuard` mutate/read, so a wire `session.posture.set` applies the
-    // FULL patch (not the silent mode-only drop). Gate OFF ⇒ mode cell only ⇒
-    // control/guard undefined (byte-identical). See {@link resolveWebLivePosture}.
-    const { permission, postureControl, questionGuard } = resolveWebLivePosture(env)
-    // UUX-1-11 — the loop/readout collaborator bundle (subagent registry, plan
-    // store, memory store, prompt-usage holder). See {@link mintSessionCollaborators}.
-    const { taskRegistry, subagent, skills, planStore, memoryStore, usageHolder, canvasUsage } =
-      mintSessionCollaborators(env)
-    // RFC-06 F4 — the ONE durable skill runtime authority for this web session.
-    // Threaded to the AGENT via `config.skills.authority` (buildSkillBlock reads
-    // it) AND to the `/skills` readout (its `active` projection) — so prompt,
-    // ToolSearch, invocation and the web panel converge on one authority. This is
-    // the SINGLE discovery owner; the old independent readout scan is gone.
-    const skillAuthority = await buildWebSkillAuthority(skills, env)
-    const skillsWithAuthority =
-      skills !== undefined && skillAuthority !== undefined
-        ? { ...skills, authority: skillAuthority }
-        : skills
-    // RFC-03 H1 (web parity fix) — mint THE ONE session-stable objective
-    // authority HERE, ONCE, INDEPENDENT of observability. `confirmationAvailable:
-    // false` (web has no `onConfirm`) ⇒ FAIL-CLOSED under QUANTA_PROPOSE_GOAL; the
-    // builder returns `undefined` when `QUANTA_OBJECTIVE_TOOLS` is off ⇒ no leak.
-    // The SAME instance is threaded onto `base.objective` (durable cross-turn goal)
-    // AND fed into the obs wire below for approval-attribution (single authority,
-    // no split-brain). Web durable objective restore is a documented Phase-2
-    // per-connection park ⇒ NO `restoreFrom` (mint fresh). This replaces the old
-    // mint that lived INSIDE `wireSessionObservability`, which left `base.objective`
-    // undefined whenever observability was OFF (cross-turn goal amnesia).
-    const objective = resolveGatedObjectiveAuthority(env, { confirmationAvailable: false })
-    // ADR-0415 — per-session observability wire. Gate OFF ⇒ noop handle +
-    // undefined bus ⇒ `observabilitySlots` returns `{}` (byte-identical legacy).
-    // Threading the live bus + promoted ports onto the session config makes the
-    // loop's dispatch emit onto the SAME bus attribution subscribed to, and the
-    // approval-gate wire read ONE unified model. The objective is INJECTED (the
-    // same instance threaded onto the base) so obs attribution and the base share
-    // ONE authority.
-    const observability = wireSessionObservability(env, cwd, objective)
-    // ADR-0440 wire-finish — tool-diff source. Gate OFF ⇒ undefined ⇒ no
-    // `onToolDiff` wired (no tool captures, byte-identical) + no facade port ⇒
-    // the server forwards no `tool.diff` frames.
-    const canvasToolDiff = gateOn(env, "QUANTA_WEB_CANVAS")
-      ? createCanvasToolDiffSource()
-      : undefined
-    // A2 — the artifact slice: canvas source (QUANTA_WEB_CANVAS) + the SHARED
-    // registry & preview resolver (QUANTA_ARTIFACT_STORE). Extracted so this
-    // factory closure stays under the god-FN cap. Gate OFF ⇒ all undefined
-    // (byte-identical). See {@link resolveArtifactSlots}.
-    const { canvasArtifact, artifactRegistry, artifactPreviewResolver } = resolveArtifactSlots(
-      env,
+    const {
       cwd,
-    )
-    // OUT-OF-BAND INBOUND port cluster (agent-state tap + user-input mirror +
-    // T02 follower + ADR-0496 control-request + gated ask_user). Each keeps its
-    // original gate; see {@link mintInboundPorts}.
-    const { agentState, subagentSource, userInput, follower, controlRequest, askUserTools } =
-      mintInboundPorts(env, permission)
-    // P4 (jul-11, UUX-4-14) — compose MCP from the surface-shared assembly
-    // (@/host/mcp-composition). No .mcp.json ⇒ empty (byte-identical). Bridged
-    // tools join the registry; clients stop on shutdown; the /mcp readout goes
-    // live. NEVER throws (a broken config never crashes daemon boot).
-    const { tools: mcpTools, clients: mcpClients, mcpAccessor } = await loadDaemonMcp(env, llm)
+      abort,
+      permission,
+      postureControl,
+      questionGuard,
+      taskRegistry,
+      subagent,
+      planStore,
+      memoryStore,
+      usageHolder,
+      canvasUsage,
+      skillAuthority,
+      skillsWithAuthority,
+      objective,
+      observability,
+      canvasToolDiff,
+      canvasArtifact,
+      artifactRegistry,
+      artifactPreviewResolver,
+      agentState,
+      subagentSource,
+      userInput,
+      follower,
+      controlRequest,
+      askUserTools,
+      mcpTools,
+      mcpClients,
+      mcpAccessor,
+    } = await assembleWebRuntimeParts(env, llm)
     const base = await buildAgentConfigBase({
       env,
       llm,
