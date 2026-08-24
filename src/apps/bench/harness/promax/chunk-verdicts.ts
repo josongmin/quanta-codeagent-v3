@@ -52,5 +52,25 @@ export const projectProMaxGradedInstances = (artifactText: string): readonly Gra
     const outcome = classifyOfficialPair(row.golden.finalResult, row.model.finalResult)
     graded.push({ instanceId: row.instanceId, state: outcome.state })
   }
-  return graded
+
+  // A DUPLICATE row is evaluator schema drift, and drift must never manufacture a
+  // pass. Downstream, `resolved` is the STRONGEST bucket, so two rows for one
+  // instance — one `success`, one anything else — promoted it to resolved. Every
+  // copy is collapsed to `infra_invalid` instead: the instance stays in the
+  // denominator, and what is reported is the truth, which is that the grade for
+  // it cannot be read.
+  const counts = new Map<string, number>()
+  for (const g of graded) counts.set(g.instanceId, (counts.get(g.instanceId) ?? 0) + 1)
+  const emitted = new Set<string>()
+  const out: GradedInstance[] = []
+  for (const g of graded) {
+    if (emitted.has(g.instanceId)) continue // one row per instance, always
+    emitted.add(g.instanceId)
+    out.push(
+      (counts.get(g.instanceId) ?? 0) > 1
+        ? { instanceId: g.instanceId, state: "infra_invalid" }
+        : g,
+    )
+  }
+  return out
 }
