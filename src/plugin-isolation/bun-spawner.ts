@@ -179,7 +179,8 @@ export const createMessagePump = (
   }
 
   const materializeLine = (): Uint8Array => {
-    if (lineSegments.length === 1) return lineSegments[0]!
+    const [onlySegment] = lineSegments
+    if (lineSegments.length === 1 && onlySegment !== undefined) return onlySegment
     const out = new Uint8Array(lineBytes)
     let offset = 0
     for (const segment of lineSegments) {
@@ -414,12 +415,11 @@ const createSpawnWatchdog = (
 ): SpawnWatchdog => {
   let timer: ReturnType<typeof setTimeout> | undefined
   let onAbort: (() => void) | undefined
-  let resolve!: () => void
-  let reject!: (e: Error) => void
-  const firstLinePromise = new Promise<void>((res, rej) => {
-    resolve = res
-    reject = rej
-  })
+  // `withResolvers` hands back the promise and its settlers together, so the
+  // capture-from-the-executor dance — which forced `let resolve!: …` definite-
+  // assignment assertions, the one shape of assertion TS cannot check at all —
+  // is not needed to express it.
+  const { promise: firstLinePromise, resolve, reject } = Promise.withResolvers<void>()
   const cancel = (): void => {
     if (timer !== undefined) {
       clearTimeout(timer)

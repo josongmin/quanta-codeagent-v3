@@ -74,9 +74,13 @@ export const instrumentLlmProvider = (
       try {
         for await (const ev of provider.stream(input)) {
           if (firstEventAt === null) {
-            firstEventAt = now()
+            // Captured into a const before the closure: a `let` read from inside
+            // an arrow is `number | null` again no matter what the enclosing
+            // branch proved, which is the only reason this was asserted.
+            const at = now()
+            firstEventAt = at
             safe(metrics, () =>
-              metrics.observe(`${prefix}.stream.ttft_ms`, firstEventAt! - t0, {
+              metrics.observe(`${prefix}.stream.ttft_ms`, at - t0, {
                 provider: provLabel,
               }),
             )
@@ -147,9 +151,10 @@ export const instrumentSubagentScheduler = (
     },
     async await(id, optsArg) {
       const result = await scheduler.await(id, optsArg)
-      if (result !== null && result.endedAt !== undefined) {
+      const endedAt = result?.endedAt
+      if (result !== null && endedAt !== undefined) {
         safe(metrics, () =>
-          metrics.observe(`${prefix}.duration_ms`, result.endedAt! - result.startedAt, {
+          metrics.observe(`${prefix}.duration_ms`, endedAt - result.startedAt, {
             status: result.status,
           }),
         )

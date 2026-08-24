@@ -71,7 +71,14 @@ const observed = (max: number, n: number, gen: (i: number) => number): Row => {
   if (row === undefined || row.kind !== "histogram") {
     throw new Error("the histogram series is missing from the snapshot")
   }
-  return { p50: row.p50, p95: row.p95, p99: row.p99, count: row.count }
+  // The percentile fields are optional on `MetricSnapshot` because counters and
+  // gauges omit them. Demanding them here is part of the pin, not a formality:
+  // a histogram row that reports no percentiles is itself the regression.
+  const { p50, p95, p99, count } = row
+  if (p50 === undefined || p95 === undefined || p99 === undefined || count === undefined) {
+    throw new Error(`a histogram snapshot must carry count/p50/p95/p99: ${JSON.stringify(row)}`)
+  }
+  return { p50, p95, p99, count }
 }
 
 const rand = (max: number): Row => {

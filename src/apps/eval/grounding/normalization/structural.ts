@@ -14,11 +14,10 @@ const collectThreadCandidates = (groundingCase: GroundingCase): readonly string[
   ])
 
 const activeThreadFromStructuredHistory = (groundingCase: GroundingCase): string | null => {
-  for (let index = groundingCase.history.length - 1; index >= 0; index -= 1) {
-    const entry = groundingCase.history[index]!
-    if (entry.threadId !== undefined && entry.threadId !== null) return entry.threadId
-  }
-  return groundingCase.stateContract?.activeThreadId ?? null
+  const entry = groundingCase.history.findLast(
+    (candidate) => candidate.threadId !== undefined && candidate.threadId !== null,
+  )
+  return entry?.threadId ?? groundingCase.stateContract?.activeThreadId ?? null
 }
 
 const contextChangeReferents = (groundingCase: GroundingCase): readonly string[] =>
@@ -50,32 +49,25 @@ const collectReferentCandidates = (groundingCase: GroundingCase): readonly strin
   ])
 
 const latestStructuredReferentId = (groundingCase: GroundingCase): string | null => {
-  for (let index = groundingCase.history.length - 1; index >= 0; index -= 1) {
-    const entry = groundingCase.history[index]!
-    if (
-      entry.referentId !== undefined &&
-      entry.referentId !== null &&
-      !isGroundingFileId(entry.referentId)
-    ) {
-      return entry.referentId
-    }
-  }
-  return null
+  const entry = groundingCase.history.findLast(
+    (candidate) =>
+      candidate.referentId !== undefined &&
+      candidate.referentId !== null &&
+      !isGroundingFileId(candidate.referentId),
+  )
+  return entry?.referentId ?? null
 }
 
 const latestStructuredToolResult = (
   groundingCase: GroundingCase,
 ): { threadId: string | null; referentId: string | null; toolName?: string } | null => {
-  for (let index = groundingCase.history.length - 1; index >= 0; index -= 1) {
-    const entry = groundingCase.history[index]!
-    if (entry.kind !== "tool_result") continue
-    return {
-      threadId: entry.threadId ?? null,
-      referentId: entry.referentId ?? null,
-      ...(entry.toolName !== undefined ? { toolName: entry.toolName } : {}),
-    }
+  const entry = groundingCase.history.findLast((candidate) => candidate.kind === "tool_result")
+  if (entry === undefined) return null
+  return {
+    threadId: entry.threadId ?? null,
+    referentId: entry.referentId ?? null,
+    ...(entry.toolName !== undefined ? { toolName: entry.toolName } : {}),
   }
-  return null
 }
 
 const diffReasons = (before: GroundingDecision, after: GroundingDecision): readonly string[] => {

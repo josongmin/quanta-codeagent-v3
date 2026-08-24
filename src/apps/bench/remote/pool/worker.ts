@@ -726,10 +726,11 @@ export const resumeForwardEnvFor = (
   // Pinned contract: resume is per-instance (chunk-size=1). A multi-instance
   // chunk has no single resume key, so leave it on the fresh path.
   const ids = chunk.instanceIds
-  if (ids === undefined || ids.length !== 1) return ""
+  const onlyInstanceId = ids?.length === 1 ? ids.at(0) : undefined
+  if (onlyInstanceId === undefined) return ""
   const boxEnv = resumeReplayBoxEnv({
     campaignId: cfg.campaignId,
-    instanceId: ids[0]!,
+    instanceId: onlyInstanceId,
     bucket: cfg.bucket,
     ...(cfg.region !== undefined ? { region: cfg.region } : {}),
   })

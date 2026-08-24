@@ -153,7 +153,8 @@ const deriveActiveThreadId = (
       .map((entry) => entry.threadId)
       .filter((value): value is string => typeof value === "string" && value !== ""),
   )
-  if (threadIds.length === 1) return threadIds[0]!
+  const [onlyThreadId, ...otherThreadIds] = threadIds
+  if (onlyThreadId !== undefined && otherThreadIds.length === 0) return onlyThreadId
   return undefined
 }
 
@@ -284,16 +285,16 @@ export const buildGroundingReplayDraft = (
     })
   }
   const stateContract = deriveStateContract(opts, snapshot, history)
+  // `at()` returns the element or undefined, so the emptiness check and the
+  // reads are the same fact — where `events.length > 0` left both endpoint
+  // reads asserted.
+  const firstEvent = session.events.at(0)
+  const lastEvent = session.events.at(-1)
   const provenance: GroundingSourceProvenance = {
     kind: opts.sessionSnapshotPath === undefined ? "trajectory_freeze" : "session_freeze",
     sessionId: session.sessionId,
-    ...(session.events.length > 0
-      ? {
-          seqRange: [
-            session.events[0]!.seq,
-            session.events[session.events.length - 1]!.seq,
-          ] as const,
-        }
+    ...(firstEvent !== undefined && lastEvent !== undefined
+      ? { seqRange: [firstEvent.seq, lastEvent.seq] as const }
       : {}),
   }
   return validateReplayDraft({

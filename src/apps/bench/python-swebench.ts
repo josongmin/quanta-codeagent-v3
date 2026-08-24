@@ -620,7 +620,7 @@ export const evaluateWithPythonSwebench = async (
       log: "python swebench harness unavailable (import failed)",
     }
   }
-  const python = opts.probe ? pythonCandidates()[0]! : await resolvePython(spawn)
+  const python = opts.probe ? pythonCandidates().at(0) : await resolvePython(spawn)
   if (!python) {
     return {
       resolved: false,

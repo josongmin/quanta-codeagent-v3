@@ -44,8 +44,7 @@ export const maybePickSession = async (): Promise<void> => {
   }
 
   process.stderr.write("\x1b[2mRecent sessions:\x1b[0m\n")
-  for (let i = 0; i < sessions.length; i++) {
-    const s = sessions[i]!
+  for (const [i, s] of sessions.entries()) {
     const title = s.title.length > 44 ? `${s.title.slice(0, 41)}…` : s.title
     const age = relTime(s.lastTouched)
     process.stderr.write(
@@ -62,7 +61,10 @@ export const maybePickSession = async (): Promise<void> => {
 
   if (ans === "" || ans.toLowerCase() === "n") return
   const num = parseInt(ans, 10)
-  if (!Number.isNaN(num) && num >= 1 && num <= sessions.length) {
-    process.argv.push("--resume", sessions[num - 1]!.id)
-  }
+  // Range-check FIRST, then read: a number the user typed is not a proven index,
+  // and `at()` would happily answer `at(-1)` for a `0` input. `num >= 1` also
+  // subsumes the NaN case, so the bounds test is now what makes the read safe
+  // instead of being re-asserted at the read.
+  const picked = num >= 1 && num <= sessions.length ? sessions.at(num - 1) : undefined
+  if (picked !== undefined) process.argv.push("--resume", picked.id)
 }

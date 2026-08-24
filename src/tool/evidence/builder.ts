@@ -77,10 +77,10 @@ export const buildEvidence = async (
   opts: BuildEvidenceOptions = {},
 ): Promise<EvidencePacket> => {
   const patch_constraints = opts.patchConstraints ?? DEFAULT_CONSTRAINTS
-  const changed_files = await safe(
-    sources.changedFiles ? () => sources.changedFiles!(cwd) : undefined,
-    [],
-  )
+  // Bound before the closure — see the note on `lspStatic` below: narrowing a
+  // mutable property does not survive into an arrow body.
+  const changedFiles = sources.changedFiles
+  const changed_files = await safe(changedFiles ? () => changedFiles(cwd) : undefined, [])
 
   const tc = await safe(() => sources.detect(cwd), null)
   const empty: EvidencePacket = {
@@ -117,14 +117,20 @@ export const buildEvidence = async (
   // need an absolute path (a relative one silently fails to bind/hover).
   const absFile =
     top.file !== undefined ? (isAbsolute(top.file) ? top.file : resolve(cwd, top.file)) : undefined
+  // Bound to consts before the closures: narrowing a MUTABLE property
+  // (`sources.lspStatic !== undefined`, `top.line !== undefined`) does not
+  // survive into an arrow body, which is the only reason these reads carried
+  // non-null assertions. A const holds the narrowing, so the guard above is what
+  // proves the call is safe rather than an assertion restating it.
+  const lspStatic = sources.lspStatic
+  const runtime = sources.runtime
+  const topLine = top.line
   const staticEv =
-    absFile !== undefined && top.line !== undefined && sources.lspStatic !== undefined
-      ? await safe(() => sources.lspStatic!(absFile, top.line!, cwd, opts.signal), null)
+    absFile !== undefined && topLine !== undefined && lspStatic !== undefined
+      ? await safe(() => lspStatic(absFile, topLine, cwd, opts.signal), null)
       : null
   const runtimeEv =
-    sources.runtime !== undefined
-      ? await safe(() => sources.runtime!(failure, tc, cwd, opts.signal), null)
-      : null
+    runtime !== undefined ? await safe(() => runtime(failure, tc, cwd, opts.signal), null) : null
 
   return {
     language: tc.kind,

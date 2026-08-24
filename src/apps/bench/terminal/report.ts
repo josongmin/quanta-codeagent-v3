@@ -158,8 +158,13 @@ const extractPrimaryReward = (
   if (rewards === undefined) return { reward: null, malformed: false }
   const keys = Object.keys(rewards)
   if (keys.length === 0) return { reward: null, malformed: false }
+  const [onlyKey] = keys
   const picked =
-    "reward" in rewards ? rewards.reward : keys.length === 1 ? rewards[keys[0]!] : undefined
+    "reward" in rewards
+      ? rewards.reward
+      : keys.length === 1 && onlyKey !== undefined
+        ? rewards[onlyKey]
+        : undefined
   if (picked === undefined) {
     // Several named rewards and no `reward` key: harbor itself cannot name a
     // primary reward, so neither can we. Never guess one.

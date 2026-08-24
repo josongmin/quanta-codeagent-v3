@@ -141,7 +141,7 @@ const debugpyLaunch = (command: readonly string[], cwd: string): Record<string, 
 }
 
 const pythonRuntime = (
-  f: FailureEvidence,
+  f: LocatedFailure,
   tc: Toolchain,
   cwd: string,
   signal?: AbortSignal,
@@ -151,7 +151,7 @@ const pythonRuntime = (
   if (launch === null) return Promise.resolve(null)
   return runInspect(
     () => defaultDebugAdapterPort.spawn({ command: ["python3", "-m", "debugpy.adapter"], cwd }),
-    { adapterID: "python", launch, breakpoints: [{ file: absOf(f.file!, cwd), line: f.line! }] },
+    { adapterID: "python", launch, breakpoints: [{ file: absOf(f.file, cwd), line: f.line }] },
     signal,
   )
 }
@@ -224,7 +224,7 @@ const rustLldbInitCommands = (): readonly string[] => {
 }
 
 const rustRuntime = async (
-  f: FailureEvidence,
+  f: LocatedFailure,
   cwd: string,
   signal?: AbortSignal,
 ): Promise<RuntimeEvidence | null> => {
@@ -232,14 +232,14 @@ const rustRuntime = async (
   if (lldb === null) return null
   const exe = await cargoTestBinary(cwd, signal)
   if (exe === null) return null
-  const realFile = realpathOr(absOf(f.file!, cwd)) // cargo DWARF comp_dir is canonical
+  const realFile = realpathOr(absOf(f.file, cwd)) // cargo DWARF comp_dir is canonical
   const initCommands = rustLldbInitCommands()
   return runInspect(
     () => defaultDebugAdapterPort.spawn({ command: [...lldb], cwd }),
     {
       adapterID: "lldb",
       launch: { program: exe, ...(initCommands.length > 0 ? { initCommands } : {}) },
-      breakpoints: [{ file: realFile, line: f.line! }],
+      breakpoints: [{ file: realFile, line: f.line }],
     },
     signal,
   )
@@ -266,14 +266,14 @@ const compileCppDebug = (cxx: string, realFile: string): string | null => {
 }
 
 const cppRuntime = (
-  f: FailureEvidence,
+  f: LocatedFailure,
   cwd: string,
   signal?: AbortSignal,
 ): Promise<RuntimeEvidence | null> => {
   const lldb = resolveLldbDap()
   const cxx = resolveClangxx()
   if (lldb === null || cxx === null) return Promise.resolve(null)
-  const realFile = realpathOr(absOf(f.file!, cwd))
+  const realFile = realpathOr(absOf(f.file, cwd))
   const exe = compileCppDebug(cxx, realFile)
   if (exe === null) return Promise.resolve(null)
   return runInspect(
@@ -281,7 +281,7 @@ const cppRuntime = (
     {
       adapterID: "lldb",
       launch: { program: exe },
-      breakpoints: [{ file: realFile, line: f.line! }],
+      breakpoints: [{ file: realFile, line: f.line }],
     },
     signal,
   )
@@ -298,7 +298,7 @@ const resolveDlv = (): string | null => {
 }
 
 const goRuntime = (
-  f: FailureEvidence,
+  f: LocatedFailure,
   cwd: string,
   signal?: AbortSignal,
 ): Promise<RuntimeEvidence | null> => {
@@ -316,7 +316,7 @@ const goRuntime = (
     {
       adapterID: "go",
       launch: { request: "launch", mode: "test", program: cwd },
-      breakpoints: [{ file: realpathOr(absOf(f.file!, cwd)), line: f.line! }],
+      breakpoints: [{ file: realpathOr(absOf(f.file, cwd)), line: f.line }],
     },
     signal,
   )
@@ -334,7 +334,7 @@ const readPkgJson = (cwd: string): string | null => {
 }
 
 const nodeRuntime = async (
-  f: FailureEvidence,
+  f: LocatedFailure,
   cwd: string,
   signal?: AbortSignal,
 ): Promise<RuntimeEvidence | null> => {
@@ -345,7 +345,7 @@ const nodeRuntime = async (
   // single-process; vitest degrades (worker pool owns its own inspector). node
   // 23.6+ strips types, so simple .ts runs too.
   const runner = detectJsRunner(readPkgJson(cwd))
-  const realFile = realpathOr(absOf(f.file!, cwd))
+  const realFile = realpathOr(absOf(f.file, cwd))
   const argv = nodeInspectArgv(runner, node, realFile, 0) // probe shape; 0 replaced per-port below
   if (argv === null) return null // vitest — single-process inspect not supported yet
   let client: CdpClient | undefined
@@ -358,7 +358,7 @@ const nodeRuntime = async (
     client = new CdpClient(transport)
     const r = await inspectViaCdp(
       client,
-      { url: pathToFileURL(realFile).href, line: f.line! },
+      { url: pathToFileURL(realFile).href, line: f.line },
       { stopTimeoutMs: 20_000, ...(signal !== undefined ? { signal } : {}) },
     )
     return toRuntime(r)
@@ -378,7 +378,7 @@ const nodeRuntime = async (
 const RUNTIME_HANDLERS: Record<
   Toolchain["kind"],
   (
-    f: FailureEvidence,
+    f: LocatedFailure,
     tc: Toolchain,
     cwd: string,
     signal?: AbortSignal,
@@ -391,6 +391,25 @@ const RUNTIME_HANDLERS: Record<
   cpp: (f, _tc, cwd, signal) => cppRuntime(f, cwd, signal),
 }
 
+/**
+ * A failure the runtime port can actually act on.
+ *
+ * `file`/`line` are optional on {@link FailureEvidence} because a parser may
+ * fail to localize a failure — and {@link defaultRuntimePort} already refuses
+ * that case one frame above every handler. But the refusal did not reach the
+ * handlers as a TYPE, so each of the five restated it with `f.file` /
+ * `f.line` on the breakpoint it built: six assertions that re-asserted a
+ * guarantee already enforced, and that would have gone on compiling if the
+ * dispatcher's guard were ever deleted.
+ *
+ * Narrowing once, here, is what makes the guard load-bearing: remove it and the
+ * handlers stop type-checking.
+ */
+type LocatedFailure = FailureEvidence & { readonly file: string; readonly line: number }
+
+const isLocated = (f: FailureEvidence): f is LocatedFailure =>
+  f.file !== undefined && f.line !== undefined
+
 /** The default runtime source for the Evidence Packet Builder. Dispatches by
  *  toolchain (exhaustive); degrades to null when the failure isn't localizable
  *  or the toolchain/adapter is unavailable. */
@@ -400,6 +419,6 @@ export const defaultRuntimePort = async (
   cwd: string,
   signal?: AbortSignal,
 ): Promise<RuntimeEvidence | null> => {
-  if (failure.file === undefined || failure.line === undefined) return null
+  if (!isLocated(failure)) return null
   return RUNTIME_HANDLERS[toolchain.kind](failure, toolchain, cwd, signal)
 }

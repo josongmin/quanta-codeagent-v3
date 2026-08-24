@@ -159,14 +159,20 @@ export const computeClosureDiagnostics = (
     const gold = oracle ? new Set(oracle.goldFiles) : null
     const ownerHit = gold && f.patchFiles.length > 0 ? gold.has(f.patchFiles[0] as string) : null
     const firstEditOwnerMatch = gold && f.firstEditFile != null ? gold.has(f.firstEditFile) : null
+    // Guarded on `oracle`, not on `gold`: the two are equivalent (`gold` is
+    // non-null exactly when the oracle was found) but only the former narrows,
+    // which is why every read of `oracle.goldFiles` here used to be asserted.
     const goldCoverage =
-      gold !== null && f.patchFiles.length > 0 && oracle!.goldFiles.length > 0
-        ? overlapCount(f.patchFiles, gold) / oracle!.goldFiles.length
+      oracle !== undefined &&
+      gold !== null &&
+      f.patchFiles.length > 0 &&
+      oracle.goldFiles.length > 0
+        ? overlapCount(f.patchFiles, gold) / oracle.goldFiles.length
         : null
     const goldCoverageClass =
-      gold === null || f.patchFiles.length === 0
+      oracle === undefined || gold === null || f.patchFiles.length === 0
         ? null
-        : sameFileSet(f.patchFiles, oracle!.goldFiles)
+        : sameFileSet(f.patchFiles, oracle.goldFiles)
           ? "exact"
           : overlapCount(f.patchFiles, gold) > 0
             ? "partial"

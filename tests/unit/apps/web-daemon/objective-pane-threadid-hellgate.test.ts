@@ -19,7 +19,11 @@ import { bindObjectivePaneThread, type WebDaemonServerConfig } from "@/apps/web-
 
 const SESSION = "live-boot-session-id"
 const baseConfig = (over: Partial<WebDaemonServerConfig>): WebDaemonServerConfig =>
-  ({ runtimeFactory: async () => ({}) as never, sessionConfig: {}, ...over }) as WebDaemonServerConfig
+  ({
+    runtimeFactory: async () => ({}) as never,
+    sessionConfig: {},
+    ...over,
+  }) as WebDaemonServerConfig
 
 describe("web objective pane — emitter threadId is the live session key", () => {
   test("observabilityPorts present ⇒ threadId is bound to the session id (pane reads the live goal's key)", () => {

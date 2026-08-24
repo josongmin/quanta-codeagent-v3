@@ -229,6 +229,11 @@ const groundingRun = async (storeDir: string | undefined): Promise<number> => {
     return 1
   }
   const mode = argValue("--mode")
+  // Read once. The spread used to call `argValue("--case")` twice — once to test
+  // it, once to use it — and assert the second read non-null, which only holds
+  // because the reader is pure. A local makes the guard and the value the same
+  // fact instead of two hopefully-agreeing calls.
+  const caseId = argValue("--case")
   if (mode !== undefined && !GROUNDING_MODES.includes(mode as (typeof GROUNDING_MODES)[number])) {
     console.error(`eval grounding run: --mode must be one of ${GROUNDING_MODES.join(", ")}`)
     return 1
@@ -262,7 +267,7 @@ const groundingRun = async (storeDir: string | undefined): Promise<number> => {
     ...(corpus !== undefined ? { corpus: corpus as (typeof GROUNDING_CORPORA)[number] } : {}),
     ...(mode !== undefined ? { mode: mode as (typeof GROUNDING_MODES)[number] } : {}),
     ...(storeDir !== undefined ? { storeDir } : {}),
-    ...(argValue("--case") !== undefined ? { caseId: argValue("--case")! } : {}),
+    ...(caseId !== undefined ? { caseId } : {}),
     ...(limit !== undefined ? { limit } : {}),
     ...(concurrency !== undefined ? { concurrency } : {}),
   })

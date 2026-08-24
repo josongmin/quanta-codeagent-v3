@@ -89,16 +89,13 @@ const historyReferents = (groundingCase: GroundingCase): readonly string[] =>
   )
 
 const currentHistoryReferent = (groundingCase: GroundingCase): string | null => {
-  for (let index = groundingCase.history.length - 1; index >= 0; index -= 1) {
-    const entry = groundingCase.history[index]!
-    if (
-      entry.referentId !== undefined &&
-      entry.referentId !== null &&
-      !isGroundingFileId(entry.referentId)
-    ) {
-      return entry.referentId
-    }
-  }
+  const entry = groundingCase.history.findLast(
+    (candidate) =>
+      candidate.referentId !== undefined &&
+      candidate.referentId !== null &&
+      !isGroundingFileId(candidate.referentId),
+  )
+  if (entry?.referentId !== undefined && entry.referentId !== null) return entry.referentId
   const contextReferents = contextChangeReferents(groundingCase)
   if (contextReferents.length > 0) return contextReferents.at(-1) ?? null
   const memoryReferents = memoryContextReferents(groundingCase)

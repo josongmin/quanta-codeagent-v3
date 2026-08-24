@@ -102,7 +102,7 @@ const keyFromLsLine = (line: string): string | undefined => {
   // Columns: date time size key — split off exactly the first three fields,
   // keep the remainder intact (the key itself may contain spaces).
   const m = /^\S+\s+\S+\s+\S+\s+(.+)$/.exec(trimmed)
-  return m === null ? undefined : m[1]!
+  return m?.[1]
 }
 
 /** Stderr signatures that mean the object genuinely does not exist (≠ transport). */

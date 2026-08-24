@@ -164,8 +164,7 @@ const tokenize = (cmd: string): string[] => {
   const out: string[] = []
   let buf = ""
   let quote: '"' | "'" | null = null
-  for (let i = 0; i < trimmed.length; i++) {
-    const c = trimmed[i]!
+  for (const c of trimmed) {
     if (quote) {
       if (c === quote) {
         quote = null
@@ -277,8 +276,7 @@ export const classifyCommandShape = (cmd: string): SensitivityClass => {
   // `less ~/.aws/credentials`, `xxd ~/.netrc`, …).
   if (FILE_READERS.has(head) && tokens.length >= 2) {
     // Inspect EVERY non-flag arg — `cat -A ~/.env` should still flag.
-    for (let i = 1; i < tokens.length; i++) {
-      const arg = tokens[i]!
+    for (const arg of tokens.slice(1)) {
       if (arg.startsWith("-")) continue
       if (isSecretReaderPathArg(arg)) return "secret"
     }

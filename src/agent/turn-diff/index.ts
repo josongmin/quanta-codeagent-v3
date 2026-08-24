@@ -158,13 +158,18 @@ const EMPTY_STAT: Shortstat = { filesChanged: 0, insertions: 0, deletions: 0 }
  *  Any field can be absent (e.g. an insertion-only diff prints no deletions
  *  line). Returns zeros for absent fields. */
 const parseShortstat = (out: string): Shortstat => {
-  const filesMatch = /(\d+)\s+files?\s+changed/.exec(out)
-  const insertionsMatch = /(\d+)\s+insertions?\(\+\)/.exec(out)
-  const deletionsMatch = /(\d+)\s+deletions?\(-\)/.exec(out)
+  // One reader for all three fields: the count is group 1 of a pattern that
+  // requires it, and an absent field is already the documented zero — so the
+  // "no match" and "matched but somehow no group" paths collapse to the SAME
+  // answer, and neither needs an assertion to say so.
+  const count = (re: RegExp): number => {
+    const digits = re.exec(out)?.[1]
+    return digits === undefined ? 0 : Number.parseInt(digits, 10)
+  }
   return {
-    filesChanged: filesMatch ? Number.parseInt(filesMatch[1]!, 10) : 0,
-    insertions: insertionsMatch ? Number.parseInt(insertionsMatch[1]!, 10) : 0,
-    deletions: deletionsMatch ? Number.parseInt(deletionsMatch[1]!, 10) : 0,
+    filesChanged: count(/(\d+)\s+files?\s+changed/),
+    insertions: count(/(\d+)\s+insertions?\(\+\)/),
+    deletions: count(/(\d+)\s+deletions?\(-\)/),
   }
 }
 

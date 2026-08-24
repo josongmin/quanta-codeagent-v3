@@ -28,7 +28,9 @@ const seqOfKey = (key: string, fullKey: string): number | undefined => {
   const rest = fullKey.slice(prefix.length)
   const m = /^(\d+)\.json$/.exec(rest)
   if (m === null) return undefined
-  const n = Number.parseInt(m[1]!, 10)
+  // `parseInt("")` is NaN, which the `isFinite` guard below already rejects —
+  // the same answer the assertion's impossible branch would have crashed on.
+  const n = Number.parseInt(m[1] ?? "", 10)
   return Number.isFinite(n) ? n : undefined
 }
 

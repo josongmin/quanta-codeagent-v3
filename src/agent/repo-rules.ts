@@ -138,17 +138,20 @@ export const loadRepoRules = async (
     depth += 1
   }
 
-  if (collected.length === 0) return undefined
+  // Destructured rather than indexed: the emptiness check and the read of the
+  // cwd-closest layer become one fact, so `deepest` needs no assertion.
+  const [deepest] = collected
+  if (deepest === undefined) return undefined
 
   // collected is in cwd→root order (depth 0 first). For the rendered body we
   // want root→cwd so deeper layers appear LAST (LLM positional bias = deeper-
   // wins). The `layers` field exposes this same root→cwd ordering for callers
   // that want to inspect provenance.
   const ordered = [...collected].sort((a, b) => b.depth - a.depth)
-  const deepest = collected[0]! // cwd-closest layer (depth ascending; pos 0 = smallest depth = closest to cwd)
-
-  const body =
-    ordered.length === 1 ? ordered[0]!.body : ordered.map(renderLayerSection).join("\n\n")
+  // `deepest` (= collected[0], cwd-closest: depth ascending, pos 0 = smallest
+  // depth) IS the sole element when there is only one, so the single-layer body
+  // reads it directly instead of re-indexing the sorted copy.
+  const body = ordered.length === 1 ? deepest.body : ordered.map(renderLayerSection).join("\n\n")
 
   return {
     sourcePath: deepest.sourcePath,
