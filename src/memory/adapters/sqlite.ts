@@ -1,4 +1,6 @@
 import { Database } from "bun:sqlite"
+import { mkdirSync } from "node:fs"
+import { dirname } from "node:path"
 import { errMessage } from "@/shared"
 import type { PersistentStorePort } from "../ports"
 import { rankEntries } from "../ranking"
@@ -108,6 +110,13 @@ export class SqliteStore implements PersistentStorePort {
   constructor(path = ":memory:", opts: SqliteStoreOptions = {}) {
     if (opts.onCorruptEmbedding !== undefined) {
       this.onCorruptEmbedding = opts.onCorruptEmbedding
+    }
+    // ADR-0557: `bun:sqlite` does not create intermediate directories, and the
+    // default store now lives under `~/.quanta/memory/` which may not exist on
+    // a fresh machine. Create the parent (idempotent) before opening a FILE
+    // path; in-memory / temp / URI forms are left to sqlite.
+    if (path !== ":memory:" && path !== "" && !path.startsWith("file:")) {
+      mkdirSync(dirname(path), { recursive: true })
     }
     this.db = new Database(path)
     this.db.exec("PRAGMA journal_mode = WAL")

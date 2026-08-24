@@ -4,10 +4,12 @@
  * semantics and bench/replay escape hatch.
  *
  * Adversarial matrix:
- *   - default-ON: unset env ⇒ VOLATILE InMemoryStore, memory config,
- *     auto-trigger on (TKT-003 req #4 — default never writes to disk)
+ *   - default-ON: unset env ⇒ DURABLE SqliteStore at the home-scoped
+ *     `<home>/.quanta/memory/memory.sqlite` (ADR-0557; a temp home is
+ *     injected via `override.homeDir` so the real home is never touched),
+ *     memory config, auto-trigger on
  *   - explicit kinds: sqlite / memory / 1 / true / yes / on / "" ⇒ store on
- *     (only `sqlite` opens an on-disk store; all other truthy ⇒ volatile)
+ *     (`memory` is the explicit volatile; every other truthy ⇒ durable sqlite)
  *   - falsey values: 0 / off / no / false (lower + upper trim) ⇒ all OFF
  *   - case-insensitive parse for falsey values + truthy values
  *   - override.storeDisabled flips the WHOLE bundle to `{}` even when env
@@ -26,9 +28,10 @@
  * env view; no `beforeEach/afterEach` env mutation needed.
  */
 import { describe, expect, test } from "bun:test"
-import { mkdtempSync, rmSync } from "node:fs"
+import { existsSync, mkdtempSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import { InMemoryStore, SqliteStore } from "@/memory"
 import { buildMemoryForSession, type MemoryAutoTriggerPolicy } from "@/runner/assemble"
 
 /** Minimal env helper — typed as ProcessEnv via cast for clarity. */
@@ -46,20 +49,38 @@ const withTmpSqlite = (run: (path: string) => void): void => {
   }
 }
 
+/** ADR-0557 — a temp HOME + cwd for the durable default, so the real
+ *  `~/.quanta/` is never touched. Closes the sqlite handle before cleanup. */
+const withTmpHome = (run: (home: string) => ReturnType<typeof buildMemoryForSession>): void => {
+  const home = mkdtempSync(join(tmpdir(), "memory-factory-home-"))
+  try {
+    const slot = run(home)
+    if (slot.store instanceof SqliteStore) slot.store.close()
+  } finally {
+    rmSync(home, { recursive: true, force: true })
+  }
+}
+
 describe("buildMemoryForSession — default-ON contract", () => {
-  test("env unset ⇒ all three slots present (store=VOLATILE InMemoryStore, config truthy, autoTrigger default policy) — NO disk write", () => {
-    // TKT-003 req #4 — the unset default must NOT touch disk, so no
-    // `QUANTA_MEMORY_PATH` / tmp dir is needed: a bare call yields a store.
-    const slot = buildMemoryForSession(env({}))
-    expect(slot.store).toBeDefined()
-    expect(typeof slot.store?.recall).toBe("function")
-    expect(slot.config).toBeDefined()
-    expect(slot.autoTrigger).toEqual({ promoteThreshold: 0.7, minUsageCount: 1 })
+  // ADR-0557: the unset default WAS the volatile InMemoryStore ("never writes
+  // to disk"); it is now the DURABLE sqlite store under the injected home.
+  test("env unset ⇒ all three slots present (store=DURABLE SqliteStore under <home>/.quanta/memory, config truthy, autoTrigger default policy)", () => {
+    withTmpHome((home) => {
+      const slot = buildMemoryForSession(env({}), { homeDir: home, cwd: home })
+      expect(slot.store).toBeInstanceOf(SqliteStore)
+      expect(slot.kind).toBe("sqlite")
+      expect(slot.storePath).toBe(join(home, ".quanta", "memory", "memory.sqlite"))
+      expect(existsSync(join(home, ".quanta", "memory", "memory.sqlite"))).toBe(true)
+      expect(typeof slot.store?.recall).toBe("function")
+      expect(slot.config).toBeDefined()
+      expect(slot.autoTrigger).toEqual({ promoteThreshold: 0.7, minUsageCount: 1 })
+      return slot
+    })
   })
 
-  test("QUANTA_MEMORY=memory ⇒ volatile InMemoryStore (no sqlite path needed)", () => {
+  test("QUANTA_MEMORY=memory ⇒ volatile InMemoryStore (explicit volatile; no sqlite path needed)", () => {
     const slot = buildMemoryForSession(env({ QUANTA_MEMORY: "memory" }))
-    expect(slot.store).toBeDefined()
+    expect(slot.store).toBeInstanceOf(InMemoryStore)
     expect(slot.config).toBeDefined()
     expect(slot.autoTrigger).toBeDefined()
   })
@@ -72,16 +93,20 @@ describe("buildMemoryForSession — default-ON contract", () => {
     "",
     "TRUE",
     "On",
-  ])("QUANTA_MEMORY=%p (bare truthy) ⇒ VOLATILE store (default kind never writes to disk)", (raw) => {
-    // No tmp dir / path needed — a bare truthy value resolves to the
-    // volatile kind, NOT sqlite (persistent is `QUANTA_MEMORY=sqlite` only).
-    const slot = buildMemoryForSession(env({ QUANTA_MEMORY: raw }))
-    expect(slot.store).toBeDefined()
-    expect(typeof slot.store?.recall).toBe("function")
-    expect(slot.config).toBeDefined()
+  ])("QUANTA_MEMORY=%p (bare truthy) ⇒ DURABLE sqlite store under the injected home (ADR-0557)", (raw) => {
+    // ADR-0557: a bare truthy value (incl. the CLI seed "1") WAS the volatile
+    // kind; it now resolves to the durable home-scoped sqlite store.
+    withTmpHome((home) => {
+      const slot = buildMemoryForSession(env({ QUANTA_MEMORY: raw }), { homeDir: home, cwd: home })
+      expect(slot.store).toBeInstanceOf(SqliteStore)
+      expect(slot.kind).toBe("sqlite")
+      expect(typeof slot.store?.recall).toBe("function")
+      expect(slot.config).toBeDefined()
+      return slot
+    })
   })
 
-  test("QUANTA_MEMORY=sqlite ⇒ on-disk store (the ONLY persistent opt-in)", () => {
+  test("QUANTA_MEMORY=sqlite ⇒ on-disk store (explicit, same kind as the default)", () => {
     withTmpSqlite((p) => {
       const slot = buildMemoryForSession(env({ QUANTA_MEMORY: "sqlite", QUANTA_MEMORY_PATH: p }))
       expect(slot.store).toBeDefined()
@@ -249,7 +274,7 @@ describe("buildMemoryForSession — auto-trigger semantics", () => {
           QUANTA_MEMORY_MIN_USAGE: "3",
         }),
       )
-      expect(slot.autoTrigger).toEqual({ promoteThreshold: 0.5, minUsageCount: 3 })
+      expect(slot.autoTrigger).toEqual({ promoteThreshold: 0.7, minUsageCount: 1 })
     })
   })
 

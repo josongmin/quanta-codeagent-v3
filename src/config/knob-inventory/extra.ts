@@ -66,10 +66,11 @@ export const EXTRA: readonly KnobInventoryEntry[] = [
   {
     envKey: "QUANTA_MEMORY",
     kind: "enum",
-    default: "memory",
+    default: "sqlite",
     group: "memory",
     home: "runtime-config",
-    describe: "Long-term memory store kind (unset⇒memory; sqlite/off).",
+    describe:
+      "Long-term memory store kind (ADR-0557: unset⇒sqlite at ~/.quanta/memory/memory.sqlite; memory=volatile; off).",
     readSite: "runner/assemble/memory-factory.ts",
   },
   {

@@ -3,13 +3,15 @@
  *
  * Two lies this battery pins shut:
  *
- *  M4 (truth) — the CLI seeds `QUANTA_MEMORY=1`, which resolves to the VOLATILE
- *  `InMemoryStore`. Nothing told the operator: the banner printed `kind=1` (the
- *  raw env token) and was OMITTED entirely in the default/unset case; `/memory
- *  stats` never said the store evaporates at exit.
+ *  M4 (truth) — the CLI seeds `QUANTA_MEMORY=1`, which (pre-ADR-0557) resolved
+ *  to the VOLATILE `InMemoryStore`. Nothing told the operator: the banner
+ *  printed `kind=1` (the raw env token) and was OMITTED entirely in the
+ *  default/unset case; `/memory stats` never said the store evaporates at exit.
  *    T1 — `buildMemoryForSession(...)` reports the RESOLVED `kind`.
- *    T2 — the REAL `buildTooling` banner prints `kind=memory (volatile)` for BOTH
- *         the unset default AND the seeded `"1"` (never the raw token).
+ *    T2 — the REAL `buildTooling` banner prints the RESOLVED kind for BOTH the
+ *         unset default AND the seeded `"1"` (never the raw token). ADR-0557
+ *         made that resolved default `sqlite` (home-scoped); `HOME` is pointed
+ *         at a temp dir per case so the real `~/.quanta/` is never touched.
  *    T3 — `/memory stats` prints a `Store:` line that says `volatile`.
  *
  *  M5 (egress) — `loadEnvFiles` pulls `OPENAI_API_KEY` from a repo's `.env*` into
@@ -56,6 +58,8 @@ const DRIVEN = [
   "QUANTA_MEMORY_EMBED_MODEL",
   "QUANTA_SUBAGENT",
   "QUANTA_LOG_LEVEL",
+  // ADR-0557: the durable default resolves under `os.homedir()` (= $HOME).
+  "HOME",
 ] as const
 const saved: Record<string, string | undefined> = {}
 let tmp: string
@@ -83,6 +87,8 @@ beforeEach(() => {
   // realpath: macOS `/tmp` is a symlink and `process.cwd()` reports the resolved
   // path, so provenance (resolved against cwd) must be compared realpath-to-realpath.
   tmp = realpathSync(mkdtempSync(join(tmpdir(), "memory-truth-egress-")))
+  // ADR-0557: redirect the durable default's home to the temp dir.
+  process.env.HOME = tmp
 })
 
 afterEach(() => {
@@ -140,12 +146,23 @@ const captureCtx = (memory?: MemorySlashState): { ctx: SlashContext; out: () => 
 /* ------------------------------------------------------------------ */
 
 describe("T1 — buildMemoryForSession reports the resolved store kind", () => {
-  test("QUANTA_MEMORY=1 (the CLI seed) ⇒ kind === 'memory'", () => {
-    expect(buildMemoryForSession({ QUANTA_MEMORY: "1" } as NodeJS.ProcessEnv).kind).toBe("memory")
+  // ADR-0557: the seed / unset default resolved to "memory" (volatile) before;
+  // it is now the durable home-scoped "sqlite". The truth contract (resolved
+  // kind, never the raw token) is unchanged — only the resolved value moved.
+  // (A synthetic env carries no `HOME`, so the temp home is injected via the
+  // factory's `override.homeDir` seam — the real `~/.quanta/` is never opened.)
+  test("QUANTA_MEMORY=1 (the CLI seed) ⇒ kind === 'sqlite' (ADR-0557 durable default)", () => {
+    const slot = buildMemoryForSession({ QUANTA_MEMORY: "1" } as NodeJS.ProcessEnv, {
+      homeDir: tmp,
+      cwd: tmp,
+    })
+    expect(slot.kind).toBe("sqlite")
   })
 
-  test("unset (default-ON) ⇒ kind === 'memory'", () => {
-    expect(buildMemoryForSession({} as NodeJS.ProcessEnv).kind).toBe("memory")
+  test("unset (default-ON) ⇒ kind === 'sqlite' at <home>/.quanta/memory/memory.sqlite", () => {
+    const slot = buildMemoryForSession({} as NodeJS.ProcessEnv, { homeDir: tmp, cwd: tmp })
+    expect(slot.kind).toBe("sqlite")
+    expect(slot.storePath).toBe(join(tmp, ".quanta", "memory", "memory.sqlite"))
   })
 
   test("QUANTA_MEMORY=sqlite + path ⇒ kind === 'sqlite' AND the resolved path is carried", () => {
@@ -171,23 +188,36 @@ describe("T1 — buildMemoryForSession reports the resolved store kind", () => {
 /* ------------------------------------------------------------------ */
 
 describe("T2 — buildTooling banner tells the truth about the store kind", () => {
-  test("QUANTA_MEMORY unset (default-ON) ⇒ banner IS printed and says kind=memory (volatile)", () => {
+  // ADR-0557: these two cases said `kind=memory (volatile)`; the default is now
+  // the durable sqlite store, so the SAME banner path must print `kind=sqlite`
+  // and thread the home-scoped path. The volatile label is pinned by the
+  // explicit `QUANTA_MEMORY=memory` case below.
+  test("QUANTA_MEMORY unset (default-ON) ⇒ banner IS printed and says kind=sqlite (ADR-0557 durable default)", () => {
     const t = realTooling()
-    expect(t.store).toBeInstanceOf(InMemoryStore)
+    expect(t.store).toBeInstanceOf(SqliteStore)
     const line = bannerLine()
     expect(line).toBeDefined()
-    expect(line).toContain("kind=memory (volatile)")
+    expect(line).toContain("kind=sqlite")
+    expect(line).not.toContain("volatile")
     expect(line).toContain("embed=off")
-    expect(t.memoryKind).toBe("memory")
+    expect(t.memoryKind).toBe("sqlite")
+    expect(t.memoryStorePath).toBe(join(tmp, ".quanta", "memory", "memory.sqlite"))
   })
 
-  test("QUANTA_MEMORY=1 (the CLI seed) ⇒ kind=memory (volatile), NEVER the raw token kind=1", () => {
+  test("QUANTA_MEMORY=1 (the CLI seed) ⇒ kind=sqlite, NEVER the raw token kind=1", () => {
     process.env.QUANTA_MEMORY = "1"
     realTooling()
     const line = bannerLine()
     expect(line).toBeDefined()
-    expect(line).toContain("kind=memory (volatile)")
+    expect(line).toContain("kind=sqlite")
     expect(line).not.toContain("kind=1")
+  })
+
+  test("QUANTA_MEMORY=memory (explicit volatile) ⇒ kind=memory (volatile) still printed", () => {
+    process.env.QUANTA_MEMORY = "memory"
+    const t = realTooling()
+    expect(t.store).toBeInstanceOf(InMemoryStore)
+    expect(bannerLine()).toContain("kind=memory (volatile)")
   })
 
   test("QUANTA_MEMORY=sqlite ⇒ kind=sqlite (no volatile tag) and the path is threaded", () => {

@@ -1,5 +1,7 @@
+import { homedir } from "node:os"
 import { CachingEmbedder, OpenAIEmbedder } from "@/agent"
 import { type EmbedderPort, InMemoryStore, type PersistentStorePort, SqliteStore } from "@/memory"
+import { defaultDurableStorePath } from "@/memory/store-path"
 
 /**
  * Surface-agnostic store + embedder assembly. No env reads — the surface
@@ -13,17 +15,21 @@ import { type EmbedderPort, InMemoryStore, type PersistentStorePort, SqliteStore
 export interface StoreAssembleInput {
   /** `QUANTA_MEMORY` equivalent — `"sqlite" | "memory" | undefined`. */
   kind?: string | undefined
-  /** SqliteStore path. Ignored when `kind !== "sqlite"`. Defaults to
-   *  `.quanta/memory.sqlite` when omitted (same as prior CLI default). */
+  /** SqliteStore path. Ignored when `kind !== "sqlite"`. Defaults to the
+   *  ADR-0557 home-scoped `~/.quanta/memory/memory.sqlite` when omitted (the
+   *  factory always passes a resolved path; this fallback is for direct
+   *  callers, and is the ONLY place this slice touches `os.homedir()`). */
   path?: string | undefined
 }
 
-/** Build the long-term memory store. Default OFF so plain runs are unchanged:
- *  `kind="sqlite"` → on-disk SqliteStore; `kind="memory"` → volatile
- *  InMemoryStore; otherwise (incl. undefined) → no store. */
+/** Build the long-term memory store. `kind="sqlite"` → on-disk SqliteStore
+ *  (ADR-0557: the parent directory is created on open); `kind="memory"` →
+ *  volatile InMemoryStore; otherwise (incl. undefined) → no store. A sqlite
+ *  open failure THROWS here — the factory (`buildMemoryForSession`) owns the
+ *  attributed fallback to the volatile kind so the reported `kind` stays true. */
 export const buildStoreCore = (input: StoreAssembleInput): PersistentStorePort | undefined => {
   if (input.kind === "sqlite") {
-    return new SqliteStore(input.path ?? ".quanta/memory.sqlite")
+    return new SqliteStore(input.path ?? defaultDurableStorePath(homedir()))
   }
   if (input.kind === "memory") return new InMemoryStore()
   return undefined

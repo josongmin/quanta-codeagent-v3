@@ -42,15 +42,17 @@
  *     factory boundary so callers only need one knob).
  */
 
+import { homedir } from "node:os"
 import type { AgentConfig } from "@/agent"
-import type { PersistentStorePort } from "@/memory"
+import { InMemoryStore, type PersistentStorePort } from "@/memory"
 import { assembleMemoryAuto } from "@/memory/auto-trigger"
+import { resolveStorePath, type StorePathResolution } from "@/memory/store-path"
 import {
   parseMemoryLineCitations,
   parseMemoryThreadMode,
   parseMemoryWriteGuardPct,
 } from "@/runner/knobs/memory-mode-parse"
-import { gateDisabled, gateOn } from "@/shared"
+import { errMessage, gateDisabled, gateOn, logger } from "@/shared"
 import { parseEnvFlag } from "./env-flag"
 import { buildMemoryConfigCore, type MemoryConfigAssembleInput, parseRecallTiers } from "./memory"
 import { buildStoreCore } from "./store"
@@ -71,9 +73,10 @@ export interface MemoryAutoTriggerPolicy {
   readonly minUsageCount: number
 }
 
-/** The two store kinds the factory can resolve. `"memory"` is the VOLATILE
- *  `InMemoryStore` (default-ON, gone at process exit); `"sqlite"` is the
- *  on-disk `SqliteStore` (explicit `QUANTA_MEMORY=sqlite` opt-in). */
+/** The two store kinds the factory can resolve. `"sqlite"` is the on-disk
+ *  `SqliteStore` (ADR-0557: the DEFAULT, home-scoped); `"memory"` is the
+ *  VOLATILE `InMemoryStore` (explicit `QUANTA_MEMORY=memory`, or the attributed
+ *  fallback when the sqlite file cannot be opened). */
 export type MemoryStoreKind = "memory" | "sqlite"
 
 /** The resolved memory slots for one session. Every field is optional —
@@ -106,45 +109,90 @@ export interface MemorySessionOverride {
   readonly autoTrigger?: MemoryAutoTriggerPolicy | null
   /** Override the sqlite path. Wins over `QUANTA_MEMORY_PATH`. */
   readonly storePath?: string
+  /** ADR-0557 — home directory the default `~/.quanta/memory/memory.sqlite`
+   *  is resolved under. Defaults to `env.HOME`, then `os.homedir()`; tests
+   *  inject a temp dir so the real home is never touched. */
+  readonly homeDir?: string
+  /** ADR-0557 — working directory the LEGACY `<cwd>/.quanta/memory.sqlite`
+   *  is probed under. Defaults to `process.cwd()` (the exact directory the
+   *  pre-0557 relative default resolved against). */
+  readonly cwd?: string
+  /** ADR-0557 — attributed notice sink for the two store-level events
+   *  (legacy file honored / sqlite open failed ⇒ volatile fallback). Defaults
+   *  to `logger.warn`; never swallowed. */
+  readonly onStoreNotice?: (line: string) => void
 }
 
 /* ------------------------------------------------------------------ */
 /* internals                                                           */
 /* ------------------------------------------------------------------ */
 
-/** Default sqlite path when `QUANTA_MEMORY_PATH` / `override.storePath` are
- *  both absent — mirrors `buildStoreCore`'s own fallback so the `storePath`
- *  the slot REPORTS is the path the store actually opened. */
-const DEFAULT_SQLITE_PATH = ".quanta/memory.sqlite"
-
 /** Resolve the `kind` argument to `buildStoreCore` from the env value
  *  and the default-ON contract. Accepts the legacy literal kinds
- *  ("sqlite" / "memory") AND the new truthy/falsey set.
+ *  ("sqlite" / "memory") AND the truthy/falsey set.
  *
- *  SAFETY (TKT-003 req #4): the default-ON kind is the VOLATILE
- *  `InMemoryStore`, never the on-disk `SqliteStore`. A fresh run with no
- *  env knob (or a bare truthy `QUANTA_MEMORY=1`) learns in-process only:
- *  THIS store writes nothing to disk and is gone at process exit (its
- *  contents are NOT kept across restarts — ADR-0555 makes the surfaces say
- *  so). Note this is a property of the STORE, not of the launch: the
- *  session-memory (B) and consolidator (C) systems still write under
- *  `~/.quanta/memory/` by default regardless of this kind. Persistent
- *  cross-process memory for THIS store is an EXPLICIT opt-in: the operator
- *  must set `QUANTA_MEMORY=sqlite` (with an optional `QUANTA_MEMORY_PATH`).
- *  This keeps the default safe while still giving the model in-session
- *  recall + consolidation. */
+ *  ADR-0557: the default-ON kind is the DURABLE `SqliteStore` at the
+ *  home-scoped `~/.quanta/memory/memory.sqlite`. Before 0557 the default was
+ *  the volatile `InMemoryStore`, which — measured — persisted nothing across
+ *  launches (`persistSession` wrote into a Map that died with the process), so
+ *  "memory learning default-ON" learned nothing durable; and the only durable
+ *  path was a cwd-relative `.quanta/memory.sqlite` that crashed boot in any
+ *  repo without a `.quanta/` dir. The session-memory (B) and consolidator (C)
+ *  systems already wrote under `~/.quanta/memory/` on every launch, so the
+ *  home-scoped default adds no new disk location. The volatile kind stays
+ *  available as an EXPLICIT `QUANTA_MEMORY=memory`. */
 const resolveStoreKind = (raw: string | undefined): MemoryStoreKind | undefined => {
-  if (raw === undefined) return "memory"
+  if (raw === undefined) return "sqlite"
   const v = raw.trim().toLowerCase()
-  // Explicit kinds — pass through verbatim. `sqlite` is the ONLY way to opt
-  // into the on-disk store (persistent memory is opt-in, never default).
+  // Explicit kinds — pass through verbatim (`memory` is the explicit volatile).
   if (v === "sqlite" || v === "memory") return v
   // Falsey set — disable store entirely (legacy default-OFF escape hatch).
   if (v === "0" || v === "false" || v === "off" || v === "no") return undefined
-  // Truthy set (incl. empty string) — default to the VOLATILE kind so an
-  // operator who sets a bare `QUANTA_MEMORY=1` still gets no-disk memory.
-  if (parseEnvFlag(raw, /* defaultOn */ true)) return "memory"
+  // Truthy set (incl. empty string, incl. the CLI seed `"1"`) — durable.
+  if (parseEnvFlag(raw, /* defaultOn */ true)) return "sqlite"
   return undefined
+}
+
+/** ADR-0557 — resolve the sqlite path for one session: explicit
+ *  (`override.storePath` > `QUANTA_MEMORY_PATH`) > legacy cwd file (if it
+ *  exists) > home default. Home: `override.homeDir` > the env view's own
+ *  `HOME` (Node's `os.homedir()` semantics, and pure w.r.t. the injected env —
+ *  Bun caches `os.homedir()` at startup so a runtime `HOME` change would
+ *  otherwise be ignored) > `os.homedir()`. Cwd: `override.cwd` >
+ *  `process.cwd()` (the directory the pre-0557 relative default resolved
+ *  against). The result is reported on the slot for the sqlite kind so
+ *  surfaces name the file the store actually opened. */
+const resolveSessionStorePath = (
+  env: NodeJS.ProcessEnv,
+  override: MemorySessionOverride | undefined,
+): StorePathResolution => {
+  const envHome = env.HOME !== undefined && env.HOME !== "" ? env.HOME : undefined
+  return resolveStorePath({
+    homeDir: override?.homeDir ?? envHome ?? homedir(),
+    cwd: override?.cwd ?? process.cwd(),
+    explicitPath: override?.storePath ?? env.QUANTA_MEMORY_PATH,
+  })
+}
+
+/** ADR-0557 — open the store for a resolved kind, never letting a sqlite
+ *  open failure (read-only home, EACCES on mkdir, …) kill the session: the
+ *  failure is ATTRIBUTED through `notice` and the store falls back to the
+ *  volatile kind, so the `kind` the slot reports stays the truth (the banner
+ *  then honestly prints `kind=memory (volatile)`). */
+const openStoreWithFallback = (
+  kind: MemoryStoreKind,
+  storePath: string,
+  notice: (line: string) => void,
+): { store: PersistentStorePort | undefined; kind: MemoryStoreKind } => {
+  try {
+    return { store: buildStoreCore({ kind, path: storePath }), kind }
+  } catch (e) {
+    notice(
+      `memory store: could not open sqlite at ${storePath} (${errMessage(e)}); ` +
+        "falling back to the volatile in-memory store for this session (nothing will be kept across restarts)",
+    )
+    return { store: new InMemoryStore(), kind: "memory" }
+  }
 }
 
 /** Resolve the auto-trigger policy from env. Default-ON unless the
@@ -250,18 +298,21 @@ export const buildMemoryForSession = (
   // "one knob = legacy off" contract intact (mirrors the storeDisabled
   // hard path above).
   if (kind === undefined) return {}
-  // Resolved path (override > env > default) — reported on the slot for the
-  // sqlite kind so surfaces name the file the store actually opened.
-  const storePath = override?.storePath ?? env.QUANTA_MEMORY_PATH ?? DEFAULT_SQLITE_PATH
-  const store = buildStoreCore({ kind, path: storePath })
+  const notice = override?.onStoreNotice ?? ((line: string) => logger.warn(line))
+  const resolved = resolveSessionStorePath(env, override)
+  // The legacy branch is honest, not silent: one attributed line names both
+  // paths and the `mv` that migrates (only when the sqlite kind will open it).
+  if (kind === "sqlite" && resolved.legacyNotice !== undefined) notice(resolved.legacyNotice)
+  const opened = openStoreWithFallback(kind, resolved.path, notice)
+  const store = opened.store
   const config = resolveMemoryConfigFromEnv(env, store, override)
   // Auto-trigger: override wins; null forces off (ADR-0413 veto arm), undefined
   // falls through to env. The env path is default-ON.
   const autoTrigger =
     override?.autoTrigger === null ? undefined : (override?.autoTrigger ?? resolveAutoTrigger(env))
   return {
-    ...(store !== undefined ? { store, kind } : {}),
-    ...(store !== undefined && kind === "sqlite" ? { storePath } : {}),
+    ...(store !== undefined ? { store, kind: opened.kind } : {}),
+    ...(store !== undefined && opened.kind === "sqlite" ? { storePath: resolved.path } : {}),
     ...(config !== undefined ? { config } : {}),
     ...(autoTrigger !== undefined ? { autoTrigger } : {}),
   }

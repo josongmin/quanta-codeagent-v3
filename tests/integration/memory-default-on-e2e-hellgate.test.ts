@@ -4,9 +4,10 @@
  *
  * The factory unit test (`tests/unit/memory-factory-hellgate.test.ts`) proves
  * `buildMemoryForSession` resolves the right SLOTS. It does NOT prove the slots
- * actually FLOW into a runnable session, that the volatile default writes zero
- * bytes to disk, that the sqlite opt-in survives a reopen, or that the
- * bench/escape paths are byte-identical to the legacy no-memory loop.
+ * actually FLOW into a runnable session, that the durable default writes under
+ * HOME and nothing under the cwd (ADR-0557), that a sqlite store survives a
+ * reopen, or that the bench/escape paths are byte-identical to the legacy
+ * no-memory loop.
  *
  * This file seals those holes by exercising the production wire:
  *
@@ -16,8 +17,9 @@
  *         → runAgent(config)              ← loop.resolveMemoryContext → recallContext
  *
  * Adversarial focus:
- *   1. default-ON real flow:  env unset ⇒ volatile InMemoryStore + config, and
- *      a save→recall roundtrip on THAT store actually returns the entry.
+ *   1. default-ON real flow:  env unset ⇒ durable SqliteStore (ADR-0557, under
+ *      an injected temp home) + config, and a save→recall roundtrip on THAT
+ *      store actually returns the entry.
  *   2. CLI assembly e2e:      the default-ON store survives buildToolingCore →
  *      assembleConfig so `config.store` is the SAME instance the loop recalls.
  *   3. real runAgent recall:  a fact saved in "session 1" surfaces in the
@@ -25,8 +27,9 @@
  *      from the default-ON factory (NOT a hand-built store).
  *   4. sqlite opt-in:         QUANTA_MEMORY=sqlite + temp path writes a real
  *      on-disk file, persists, and a fresh factory call REOPENS + restores it.
- *   5. volatile no-disk:      env unset ⇒ no `.quanta/memory.sqlite` appears on
- *      the real filesystem (proven by running inside a temp cwd).
+ *   5. home-scoped, not cwd:  env unset ⇒ the store lands under
+ *      `<home>/.quanta/memory/` and NO `.quanta/memory.sqlite` appears in the
+ *      cwd (proven by running inside a temp cwd with a temp home — ADR-0557).
  *   6. escape byte-identical: QUANTA_MEMORY=off AND override.storeDisabled both
  *      collapse to `{}` ⇒ config has NO store ⇒ the loop's recall/persist are
  *      skipped ⇒ the LLM sees the SAME messages as a legacy no-memory run.
@@ -41,7 +44,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { runAgent } from "@/agent"
 import type { LLMPort, StreamEvent, StreamInput } from "@/llm"
-import { InMemoryStore, type MemoryEntry, SqliteStore } from "@/memory"
+import { type MemoryEntry, SqliteStore } from "@/memory"
 import { StructuredLogger } from "@/observability"
 import type { PermissionContext } from "@/permission"
 import { buildMemoryForSession, buildToolingCore, type Tooling } from "@/runner/assemble"
@@ -113,7 +116,7 @@ const toolingFromSlot = (
     lspNavTools: [],
     gitToolList: [],
     slog: silentSlog(),
-    memoryKindLabel: "memory",
+    memoryKindLabel: slot.kind ?? "memory",
     onMemoryReady: () => undefined,
   })
 
@@ -160,6 +163,26 @@ const mkTmp = (label: string): { dir: string; cleanup: () => void } => {
   return { dir, cleanup: () => rmSync(dir, { recursive: true, force: true }) }
 }
 
+/** ADR-0557 — the durable default resolves under HOME; every default-env
+ *  build in this file injects a temp home (+ the same dir as cwd) so the real
+ *  `~/.quanta/` is never touched. Returns the slot + a cleanup that closes the
+ *  sqlite handle and removes the dir. */
+const buildDefault = (
+  e: NodeJS.ProcessEnv,
+  label: string,
+): { slot: ReturnType<typeof buildMemoryForSession>; home: string; cleanup: () => void } => {
+  const { dir, cleanup } = mkTmp(label)
+  const slot = buildMemoryForSession(e, { homeDir: dir, cwd: dir })
+  return {
+    slot,
+    home: dir,
+    cleanup: () => {
+      if (slot.store instanceof SqliteStore) slot.store.close()
+      cleanup()
+    },
+  }
+}
+
 const entry = (over: Partial<MemoryEntry> & Pick<MemoryEntry, "id" | "text">): MemoryEntry => ({
   kind: "fact",
   tags: [],
@@ -172,18 +195,24 @@ const entry = (over: Partial<MemoryEntry> & Pick<MemoryEntry, "id" | "text">): M
 /* ================================================================== */
 
 describe("ADR-0414 e2e — default-ON real flow (factory store roundtrip)", () => {
-  test("env unset ⇒ volatile InMemoryStore + config; save→recall returns the entry", async () => {
-    const slot = buildMemoryForSession(env({}))
-    expect(slot.store).toBeInstanceOf(InMemoryStore)
-    expect(slot.config).toBeDefined()
-    expect(slot.autoTrigger).toEqual({ promoteThreshold: 0.7, minUsageCount: 1 })
+  // ADR-0557: the default store WAS the volatile InMemoryStore; it is now the
+  // durable SqliteStore under the injected home.
+  test("env unset ⇒ durable SqliteStore + config; save→recall returns the entry", async () => {
+    const { slot, cleanup } = buildDefault(env({}), "flow")
+    try {
+      expect(slot.store).toBeInstanceOf(SqliteStore)
+      expect(slot.config).toBeDefined()
+      expect(slot.autoTrigger).toEqual({ promoteThreshold: 0.7, minUsageCount: 1 })
 
-    const store = slot.store
-    if (!store) throw new Error("default-ON must yield a store")
-    await store.save(entry({ id: "m1", text: "user prefers tabs over spaces", tags: ["pref"] }))
-    const hits = await store.recall({ text: "tabs" })
-    expect(hits.length).toBe(1)
-    expect(hits[0]?.text).toBe("user prefers tabs over spaces")
+      const store = slot.store
+      if (!store) throw new Error("default-ON must yield a store")
+      await store.save(entry({ id: "m1", text: "user prefers tabs over spaces", tags: ["pref"] }))
+      const hits = await store.recall({ text: "tabs" })
+      expect(hits.length).toBe(1)
+      expect(hits[0]?.text).toBe("user prefers tabs over spaces")
+    } finally {
+      cleanup()
+    }
   })
 })
 
@@ -193,7 +222,7 @@ describe("ADR-0414 e2e — default-ON real flow (factory store roundtrip)", () =
 
 describe("ADR-0414 e2e — CLI assembly threads the default-ON store to config.store", () => {
   test("buildToolingCore → assembleConfig yields config.store === the factory store", () => {
-    const slot = buildMemoryForSession(env({}))
+    const { slot, cleanup } = buildDefault(env({}), "assemble") // ADR-0557 temp home
     const tooling = toolingFromSlot(slot)
     // Tooling carries the same store identity the factory minted.
     expect(tooling.store).toBe(slot.store)
@@ -207,13 +236,15 @@ describe("ADR-0414 e2e — CLI assembly threads the default-ON store to config.s
     expect(config.store).toBe(slot.store)
     expect(config.memory).toBe(slot.config)
     expect(config.sessionId).toBe("e2e-session")
+    cleanup()
   })
 
   test("memory_* self-edit tools register when the default-ON store exists", () => {
-    const slot = buildMemoryForSession(env({}))
+    const { slot, cleanup } = buildDefault(env({}), "tools") // ADR-0557 temp home
     const tooling = toolingFromSlot(slot)
     const names = tooling.registry.all().map((t) => t.name)
     expect(names.some((n) => n.startsWith("memory_"))).toBe(true)
+    cleanup()
   })
 })
 
@@ -224,7 +255,7 @@ describe("ADR-0414 e2e — CLI assembly threads the default-ON store to config.s
 describe("ADR-0414 e2e — recall reachable through real runAgent (default-ON store)", () => {
   test("fact saved via factory store surfaces in session-2 recalled tail", async () => {
     // The store comes from the PRODUCTION default-ON path, not a hand-built one.
-    const slot = buildMemoryForSession(env({}))
+    const { slot, cleanup: cleanupDefault } = buildDefault(env({}), "recall") // ADR-0557 temp home
     const store = slot.store
     if (!store) throw new Error("default-ON must yield a store")
 
@@ -250,6 +281,7 @@ describe("ADR-0414 e2e — recall reachable through real runAgent (default-ON st
     const tail = lastUserTailText(turnInput)
     expect(tail).toContain("<system-reminder>")
     expect(tail).toContain("the deploy key lives in vault/prod")
+    cleanupDefault()
   })
 })
 
@@ -289,44 +321,59 @@ describe("ADR-0414 e2e — sqlite is an explicit opt-in (on-disk persist + reope
 })
 
 /* ================================================================== */
-/* 5. volatile no-disk: env unset writes ZERO bytes to cwd             */
+/* 5. home-scoped, not cwd: env unset writes under HOME, ZERO bytes to cwd */
 /* ================================================================== */
 
-describe("ADR-0414 e2e — volatile default writes NOTHING to disk", () => {
-  test("env unset ⇒ no .quanta/memory.sqlite appears in a clean temp cwd", async () => {
+// ADR-0557: this section USED to pin "the volatile default writes NOTHING to
+// disk". The default is now the durable home-scoped sqlite store; what stays
+// pinned is the half that mattered for repo hygiene — nothing lands in the cwd.
+describe("ADR-0557 e2e — durable default writes under HOME, never into the cwd", () => {
+  test("env unset ⇒ store at <home>/.quanta/memory/memory.sqlite; no .quanta/ in the temp cwd", async () => {
     const { dir, cleanup } = mkTmp("nodisk")
+    const home = mkTmp("home")
     const prevCwd = process.cwd()
     try {
       process.chdir(dir)
-      const slot = buildMemoryForSession(env({}))
-      expect(slot.store).toBeInstanceOf(InMemoryStore)
-      // Drive a real write through the store — a volatile store must STILL
-      // not touch the fs even after a save.
-      await slot.store?.save(entry({ id: "v1", text: "volatile only" }))
+      const slot = buildMemoryForSession(env({}), { homeDir: home.dir, cwd: dir })
+      expect(slot.store).toBeInstanceOf(SqliteStore)
+      expect(slot.storePath).toBe(join(home.dir, ".quanta", "memory", "memory.sqlite"))
+      // Drive a real write through the store — the durable store writes
+      // under HOME, and STILL nothing under the cwd.
+      await slot.store?.save(entry({ id: "v1", text: "durable under home" }))
+      expect(existsSync(join(home.dir, ".quanta", "memory", "memory.sqlite"))).toBe(true)
 
       // No `.quanta` dir, no sqlite file anywhere in the temp cwd.
       const top = readdirSync(dir)
       expect(top).not.toContain(".quanta")
       expect(existsSync(join(dir, ".quanta", "memory.sqlite"))).toBe(false)
       expect(existsSync(join(dir, "memory.sqlite"))).toBe(false)
+      if (slot.store instanceof SqliteStore) slot.store.close()
     } finally {
       process.chdir(prevCwd)
       cleanup()
+      home.cleanup()
     }
   })
 
-  test("bare truthy QUANTA_MEMORY=1 is volatile too (no disk, no sqlite)", async () => {
+  test("bare truthy QUANTA_MEMORY=1 (the CLI seed) is durable too (under HOME, nothing in cwd)", async () => {
     const { dir, cleanup } = mkTmp("truthy")
+    const home = mkTmp("home")
     const prevCwd = process.cwd()
     try {
       process.chdir(dir)
-      const slot = buildMemoryForSession(env({ QUANTA_MEMORY: "1" }))
-      expect(slot.store).toBeInstanceOf(InMemoryStore)
-      await slot.store?.save(entry({ id: "t1", text: "truthy volatile" }))
+      const slot = buildMemoryForSession(env({ QUANTA_MEMORY: "1" }), {
+        homeDir: home.dir,
+        cwd: dir,
+      })
+      expect(slot.store).toBeInstanceOf(SqliteStore)
+      await slot.store?.save(entry({ id: "t1", text: "truthy durable" }))
       expect(existsSync(join(dir, ".quanta"))).toBe(false)
+      expect(existsSync(join(home.dir, ".quanta", "memory", "memory.sqlite"))).toBe(true)
+      if (slot.store instanceof SqliteStore) slot.store.close()
     } finally {
       process.chdir(prevCwd)
       cleanup()
+      home.cleanup()
     }
   })
 })
@@ -445,29 +492,32 @@ describe("ADR-0414 e2e — bench/replay determinism (override.storeDisabled)", (
 
 describe("ADR-0414 e2e — auto-trigger gate is orthogonal to the store", () => {
   test("QUANTA_MEMORY_AUTO=off ⇒ autoTrigger omitted while store stays ON", () => {
-    const slot = buildMemoryForSession(env({ QUANTA_MEMORY_AUTO: "off" }))
-    expect(slot.store).toBeInstanceOf(InMemoryStore)
+    // ADR-0557: the store under test is the durable default (temp home).
+    const { slot, cleanup } = buildDefault(env({ QUANTA_MEMORY_AUTO: "off" }), "auto-off")
+    expect(slot.store).toBeInstanceOf(SqliteStore)
     expect(slot.config).toBeDefined()
     expect(slot.autoTrigger).toBeUndefined()
+    cleanup()
   })
 
-  test("sqlite path with a NON-EXISTENT parent directory ⇒ deterministic THROW (bun:sqlite cannot create the file)", () => {
-    // CONTRACT (empirically pinned): `bun:sqlite`'s `new Database(path)` does
-    // NOT create intermediate directories — opening a db whose parent dir is
-    // absent fails with "unable to open database file". Neither `buildStoreCore`
-    // (store.ts) nor `buildMemoryForSession` wraps the constructor, so the
-    // factory THROWS deterministically on a missing-parent path. We pin that
-    // exact contract: a regression that started swallowing the error (and
-    // silently returning a store-less or partial bundle) OR that started
-    // auto-creating the parent dir would flip this assertion and be caught.
+  test("sqlite path with a NON-EXISTENT parent directory ⇒ the parent is CREATED and the store opens (ADR-0557)", () => {
+    // ADR-0557 flips the old pinned contract ("bun:sqlite cannot create the
+    // parent ⇒ deterministic THROW"): `SqliteStore` now mkdir -p's the parent
+    // before opening, because the default path lives under `~/.quanta/memory/`
+    // which need not exist on a fresh machine. A store that still threw here
+    // would crash session boot — that is the regression this now catches.
     const { dir, cleanup } = mkTmp("missing-parent")
     try {
       const nestedPath = join(dir, "does", "not", "exist", "memory.sqlite")
-      expect(() =>
-        buildMemoryForSession(env({ QUANTA_MEMORY: "sqlite", QUANTA_MEMORY_PATH: nestedPath })),
-      ).toThrow(/unable to open database file/)
-      // And the failed open left NO file behind (no partial side effect).
-      expect(existsSync(nestedPath)).toBe(false)
+      const slot = buildMemoryForSession(
+        env({ QUANTA_MEMORY: "sqlite", QUANTA_MEMORY_PATH: nestedPath }),
+        { homeDir: dir, cwd: dir },
+      )
+      expect(slot.store).toBeInstanceOf(SqliteStore)
+      expect(slot.kind).toBe("sqlite")
+      expect(slot.storePath).toBe(nestedPath)
+      expect(existsSync(nestedPath)).toBe(true)
+      if (slot.store instanceof SqliteStore) slot.store.close()
     } finally {
       cleanup()
     }

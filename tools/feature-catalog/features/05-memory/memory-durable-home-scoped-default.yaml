@@ -1,0 +1,80 @@
+id: memory-durable-home-scoped-default
+title: Durable home-scoped long-term memory store by DEFAULT (ADR-0557)
+section: 5
+subsystem: L2 memory bootstrap — default store kind + path resolution
+order: 557
+maturity: L4
+status: stable
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [interactive, headless, daemon]
+configurable: integrated
+owners: ["@songmin"]
+labels: ["surface:core", "tier:core", "default-on"]
+depends_on: [memory-learning-default-on, memory-store-truth-and-embedder-provenance, sqlite-persistent-store]
+config_refs:
+  env:
+    - QUANTA_MEMORY
+    - QUANTA_MEMORY_PATH
+surface_integration:
+  cli: full
+  web: partial
+  method: audited
+  verified: "2026-08-25"
+  evidence:
+    cli: "buildMemoryForSession(process.env) in src/apps/cli/internal.ts resolves unset / seeded QUANTA_MEMORY=1 to SqliteStore at ~/.quanta/memory/memory.sqlite; the real buildTooling banner prints kind=sqlite + the path (truth hellgate T2, HOME redirected to a temp dir)"
+    web: "src/apps/web-daemon/runtime-factory/session-collaborators.ts calls the same factory, so the daemon shares the home-scoped store (WAL multi-process); its banner/readout threading is unchanged by this slice"
+purpose: |
+  Before: the default-ON long-term store (unset / CLI-seeded QUANTA_MEMORY=1)
+  was the volatile InMemoryStore — measured: persistSession wrote into a Map
+  that died with the process, a second construction had all().length === 0,
+  so "memory learning default-ON" never kept anything across launches. The
+  only durable path, QUANTA_MEMORY=sqlite, opened a CWD-RELATIVE
+  .quanta/memory.sqlite whose parent was never created — bun:sqlite threw and
+  buildTooling was not wrapped, so session boot CRASHED in any repo without a
+  .quanta/ dir, and WAL mode dropped three files into the user's repo.
+  After (ADR-0557): unset / truthy ⇒ SqliteStore at the HOME-scoped
+  ~/.quanta/memory/memory.sqlite (the parent B/C already write); the parent
+  dir is created on open; QUANTA_MEMORY=memory is the explicit volatile;
+  =off/0/false/no disables; QUANTA_MEMORY_PATH / override.storePath still win.
+  Legacy compat is honest, not silent: an existing <cwd>/.quanta/memory.sqlite
+  keeps being used (never moved/copied) with ONE warn naming both paths and
+  the mv. A sqlite open failure (read-only home) never kills the session — one
+  attributed warn + fallback to InMemoryStore, and the slot's kind then truly
+  says memory (volatile). Path math + legacy detection are pure
+  (src/memory/store-path.ts, homeDir/cwd injected).
+evidence:
+  code:
+    - src/memory/store-path.ts                # defaultDurableStorePath / legacyCwdStorePath / resolveStorePath (pure)
+    - src/runner/assemble/memory-factory.ts   # resolveStoreKind default ⇒ sqlite; override.homeDir/cwd/onStoreNotice; legacy notice; openStoreWithFallback
+    - src/runner/assemble/store.ts            # buildStoreCore default path ⇒ home-scoped
+    - src/memory/adapters/sqlite.ts           # mkdirSync(dirname(path), {recursive:true}) before open
+  adrs: [557, 555, 413]
+  tests:
+    unit:
+      - tests/unit/memory/durable-store-default-hellgate.test.ts
+      - tests/unit/memory-factory-hellgate.test.ts
+      - tests/unit/apps/cli/memory-truth-and-egress-hellgate.test.ts
+    integration:
+      - tests/integration/memory-default-on-e2e-hellgate.test.ts
+    contract: []
+knobs:
+  - name: QUANTA_MEMORY
+    where: src/runner/assemble/memory-factory.ts
+    default: "1 (CLI seed) → sqlite at ~/.quanta/memory/memory.sqlite"
+    purpose: "Store kind. unset/1/true/on/yes ⇒ durable sqlite (home-scoped); memory ⇒ explicit volatile; 0/off/false/no ⇒ no store."
+  - name: QUANTA_MEMORY_PATH
+    where: src/runner/assemble/memory-factory.ts
+    default: "~/.quanta/memory/memory.sqlite (or the legacy <cwd>/.quanta/memory.sqlite when that file already exists)"
+    purpose: "Explicit sqlite path; wins over both the legacy cwd file and the home default."
+deliberate_hold: null
+notes: |
+  Alternative considered: Grok's per-workspace store dir
+  (~/.grok/memory/{slug}-{hash8}). Not adopted — MemoryEntry already carries
+  appliesTo.cwd / taskGroup routing meta and rankEntries has a routing term
+  (QUANTA_MEMORY_ROUTING), so ONE home-scoped store with per-entry cwd routing
+  is consistent with the existing design; a per-repo directory would split
+  recall across repos for no measured gain.
+  Follow-up (outside this slice's write set): src/config/knob-inventory/extra.ts
+  QUANTA_MEMORY entry still says default "memory" / "unset⇒memory" — the
+  readSite is truthful, the default string is stale.
