@@ -12,29 +12,26 @@
  * port below is written so that a fallback into another family's machinery is
  * impossible rather than merely unlikely.
  *
- * ## Why three of these ports REFUSE instead of returning a value
+ * ## Which ports REFUSE, and which are now LIVE
  *
- * PMX-01 makes ProMax *routable*. PMX-03 froze the evaluator adapter, and PMX-04
- * owns the live remote/Docker execution — neither is wired into a run yet. The
- * honest encoding of "routable but not yet executable" is a loud refusal at the
- * exact seam, not a plausible-looking value:
+ * PMX-04 wired the remote lane: `admitBox` admits, `setupBox` is a deliberate
+ * no-op (the declared bootstrap does the provisioning), preflight keeps only its
+ * corpus checks, and `boxGrade` / `parseBoxGradeVerdicts` grade the chunk ON THE
+ * BOX with the pinned evaluator. This section described all three as refusing
+ * until then.
  *
- *  - `gradeEvaluator` refuses, because the only alternatives are the official
- *    `swebench` harness (which would look ProMax ids up in SWE-bench Verified)
- *    and the ScaleAI Pro harness (invariant 1). "No caller may reach the
- *    Verified or Scale Pro grader by fallback" is the ticket's goal statement.
+ * Two ports still refuse, and both are load-bearing rather than placeholders:
+ *
+ *  - `gradeEvaluator` refuses LOCAL grading, because the only alternatives are
+ *    the official `swebench` harness (which would look ProMax ids up in SWE-bench
+ *    Verified) and the ScaleAI Pro harness (invariant 1). "No caller may reach
+ *    the Verified or Scale Pro grader by fallback" is the ticket's goal.
  *  - `harnessSpec` refuses, because the `swebench` pip package and the
  *    `swebench`/`starryzhang` image namespaces are not ProMax's grader at all.
  *    Returning the stock spec would make a ProMax box byte-indistinguishable
- *    from a Verified one in the harness axis — i.e. exactly the silent Verified
- *    route the DoD says an injected wrong family must not produce.
- *  - `setupBox` refuses, because the frozen bundle is intentionally NOT in git
- *    and PMX-00 forbids searching for or downloading one.
+ *    from a Verified one in the harness axis — exactly the silent Verified route
+ *    the DoD says an injected wrong family must not produce.
  *
- * These refusals are load-bearing, not placeholders: they are what make
- * "`--dataset-family promax` cannot silently produce a Verified/Pro result" true
- * TODAY, and PMX-04 replaces them with real behavior without any consumer
- * changing.
  *
  * ## What is REAL here
  *
@@ -106,6 +103,15 @@ const refuse = (what: string, why: string): never => {
       "share neither a grader nor a report partition.",
   )
 }
+
+/** The ON-BOX refusal, spelled once and shared by the admission gate and the
+ *  bootstrap port so the two can never drift into disagreeing about the lane. */
+const refuseOnBoxBootstrap = (): never =>
+  refuse(
+    "the on-box ProMax bootstrap",
+    `The frozen bundle is not in git and must not be downloaded on demand (PMX-00). ` +
+      `Provision it out of band and point ${PROMAX_BUNDLE_ROOT_ENV} at the verified root.`,
+  )
 
 export const PROMAX_PROFILE: DatasetFamilyProfile = {
   family: "promax",

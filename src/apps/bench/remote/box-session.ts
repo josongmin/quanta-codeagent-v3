@@ -775,9 +775,13 @@ const executeGradeChunk = async (args: {
     boxGradeText === undefined
       ? parseVerdicts(fetched.reportText)
       : // The family reports official STATES; `verdict-buckets` owns how those
-        // land in the four legacy arrays. This module still classifies nothing.
+        // land in the four legacy arrays, and RECONCILES them against the chunk's
+        // assigned ids so an instance the evaluator never reported on becomes an
+        // infra error rather than silently leaving the denominator. This module
+        // still classifies nothing.
         bucketsFromGradedInstances(
           parseFamilyBoxGradeVerdicts(args.params.datasetFamily, boxGradeText),
+          args.params.instanceIds,
         )
   const reportStatus = classifyReportText(fetched.reportText)
   if (reportStatus === "unparseable") {

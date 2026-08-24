@@ -199,6 +199,26 @@ export const registerDatasetFamilyProfile = (profile: DatasetFamilyProfile): (()
         "corpora/evaluators into one score.",
     )
   }
+  // PMX-04 — the two box-grade ports are ONE decision in two fields. A family
+  // that grades in its own grader phase writes a PATCH-GEN-ONLY bench report, in
+  // which every instance is an explicit "harness not wired" infra error by
+  // construction — so without the second port its verdicts have no honest source
+  // at all.
+  //
+  // Checked HERE because registration is the earliest reachable moment and costs
+  // nothing. Discovering it later means the box was already provisioned, the
+  // agent already ran, and the ANSWER KEY was already materialized before the
+  // refusal — the same "guard that fires after the spend" shape that made
+  // `admitBox` a separate port from `setupBox` in the first place.
+  if (profile.boxGrade !== undefined && profile.parseBoxGradeVerdicts === undefined) {
+    throw new Error(
+      `bench: dataset family "${profile.family}" declares \`boxGrade\` but no ` +
+        "`parseBoxGradeVerdicts`. REFUSING — a family that grades in its own grader phase runs " +
+        "patch-gen with its grading shim OFF, so its bench report records every instance as an " +
+        "infra error by construction and carries no verdict this run could read. Declare both " +
+        "ports, or neither.",
+    )
+  }
   REGISTRY.set(profile.family, profile)
   CLAIMED_PARTITIONS.set(profile.reportPartitionKey, profile.family)
   const dropToken = registerDatasetFamilyToken(profile.family)

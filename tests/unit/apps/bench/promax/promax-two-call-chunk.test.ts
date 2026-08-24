@@ -91,7 +91,10 @@ const suffix_of = (cmd: string): string => cmd.split("'").filter((s) => s.starts
 
 const isGrade = (c: string) => c.includes("test_run.py") && c.includes("--pred")
 const isTeardown = (c: string) => c.includes("'rm'")
-const isRead = (c: string) => c.startsWith("cat ")
+/** The PASS-RATE read specifically. `cat` is also used to probe the predictions
+ *  file before anything is materialized, so a bare `startsWith("cat ")` would
+ *  match that earlier probe and make the ordering assertion below read backwards. */
+const isRead = (c: string) => c.startsWith("cat ") && c.includes(DEFAULT_CHUNK_PATHS.passRate)
 
 describe("a family that grades INLINE is untouched", () => {
   test("verified issues no ssh at all and reports no artifact", async () => {

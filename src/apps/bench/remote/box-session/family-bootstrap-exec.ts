@@ -1,32 +1,33 @@
 /**
  * LEAF — EXECUTE a family's declared REMOTE BOOTSTRAP on a box, FOR ONE PHASE.
  *
- * ## 🔴 READ FIRST — WHICH of these clauses is LIVE today
+ * ## 🔴 READ FIRST — this lifecycle is LIVE
  *
- * Everything below is implemented, tested and fail-closed. Only part of it is
- * currently REACHED, and the distinction matters because a receipt must not cite
- * a guard that never runs:
+ * The answer-key lifecycle below is not a description of intent. It RUNS:
  *
- *   • the AGENT phase (its gold-bearing cross-check, and the absence probe it
- *     demands) HAS a production caller — `family-box-setup.ts`, which is the
- *     ONLY non-test call site of {@link executeFamilyRemoteBootstrap} and passes
- *     `phase: "agent"`. It is nonetheless reached by NO SHIPPED FAMILY today,
- *     because ProMax is the only family declaring a bootstrap and its `admitBox`
- *     refuses the lane (PMX-04);
- *   • the GRADER phase and the TEARDOWN bound to it have NO production caller AT
- *     ALL. Nothing under `src/` invokes this function with `phase: "grader"`.
+ *   • the AGENT phase (its gold-bearing cross-check and the absence probe it
+ *     demands) is executed by `family-box-setup.ts`;
+ *   • the GRADER phase and the TEARDOWN bound to it are executed by
+ *     `box-session/family-box-grade.ts`, which runs ProMax's own pinned
+ *     evaluator inside {@link FamilyBootstrapExecInput.whileMaterialized}.
  *
- * So the answer-key lifecycle described below is PRODUCTION-INERT, not a live
- * defence. That is safe rather than leaky — the grader phase is the only thing
- * that materializes gold, and a phase nobody executes materializes nothing — but
- * it is not what the previous version of this comment implied.
+ * So on a ProMax lane the pinned upstream checkout — which carries `patch` and
+ * `test_patch` for every row — really is created on a real box, and the teardown
+ * bound to that same call is really what removes it. Treat every clause here as
+ * load-bearing.
+ *
+ * This section previously said the opposite ("PRODUCTION-INERT … a phase nobody
+ * executes materializes nothing"), which was true when written and became false
+ * the moment the grader phase gained a caller. It is recorded here because the
+ * failure mode is symmetric with the one this module already guards: a receipt
+ * must not cite a guard that never runs, AND prose must not tell an operator that
+ * no answer key ever lands on a box while it does.
  *
  * The claim is DATA, not prose: `profiles/bootstrap-phase-wiring.ts` declares
  * which phases have production callers, {@link assertFamilyBootstrapPhaseWiringInSync}
  * re-checks it on this function's default path, the operator sees it on every
  * `--dry-run` plan, and `promax-bootstrap-phase-reachability.test.ts` refuses to
- * let a shipped family start ADMITTING boxes while its teardown is still
- * unreachable.
+ * let a shipped family admit boxes while its teardown is unreachable.
  *
  * PMX-04 split the question in two on purpose:
  *

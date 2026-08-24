@@ -8,28 +8,28 @@
  * executor call removes it, and the next chunk's AGENT phase proves the absence
  * before the agent runs. Every clause of it is real, tested, and fail-closed.
  *
- * It is also, TODAY, PRODUCTION-INERT — for two independent reasons an aug-22
- * adversarial audit established and this module records as DATA:
+ * It is also, TODAY, LIVE. Both halves have production callers:
  *
- *   1. `executeFamilyRemoteBootstrap` has exactly ONE non-test caller
- *      (`family-box-setup.ts`), and it hardcodes `phase: "agent"`. Nothing in
- *      `src/` ever executes the GRADER phase, so the teardown in that call's
- *      `finally` never runs on any lane.
- *   2. ProMax is the only family declaring a `remoteBootstrap`, and its
- *      `admitBox` unconditionally refuses (PMX-04 owns the live lane). So even
- *      the agent-phase absence probe — whose call site IS wired — is never
- *      reached by a shipped family.
+ *   1. the AGENT phase, from `family-box-setup.ts`;
+ *   2. the GRADER phase — and therefore the teardown bound to it — from
+ *      `box-session/family-box-grade.ts`, which runs ProMax's pinned evaluator
+ *      inside the window the grader phase opens.
  *
- * That is a SAFE state, not a leak: the grader phase is the only thing that puts
- * answer-key bytes on a box, and a phase nobody executes materializes nothing.
- * What it is NOT is a live defence, and the previous module docs read as though
- * it were. The honest encoding is this table plus the two things it feeds:
+ * ProMax admits boxes, so a shipped family really does reach all of it. This
+ * section said "PRODUCTION-INERT" until PMX-04 wired the grade. The table below
+ * is the authority and is checked against the real `src/` bytes — but prose that
+ * tells an operator no answer key ever lands on a box, while it does, is the same
+ * class of lie as a receipt citing a guard that never runs.
+ *
+ * The honest encoding is this table plus the two things it feeds:
  *
  *   • {@link assertFamilyBootstrapPhaseWiringInSync}, called on the DEFAULT path
  *     by the executor itself, so the table cannot rot into a lie in silence;
- *   • {@link familyBootstrapWiringPlanNotes}, which puts the inertness on the
- *     operator's `--dry-run` plan, so no campaign receipt can cite a teardown
- *     that does not run.
+ *   • {@link familyBootstrapWiringPlanNotes}, which puts any REMAINING inertness
+ *     on the operator's `--dry-run` plan, so no campaign receipt can cite a
+ *     teardown that does not run. With every phase wired it now emits nothing —
+ *     and a test drives it against an unwired table to prove it is not merely
+ *     dead.
  *
  * ## Why there is no runtime REFUSAL here
  *

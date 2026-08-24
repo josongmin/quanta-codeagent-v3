@@ -105,6 +105,31 @@ export const runFamilyBoxGrade = async (
   // That is also what the invocation builder demands, and rightly: a
   // cwd-relative path cannot be replayed from a receipt. This is the one place
   // that knows the box's home, so it is the one place that can honour both.
+  // IS THERE ANYTHING TO GRADE? Asked BEFORE the answer key is materialized.
+  //
+  // `runChunkBench` RETURNS its exit code rather than throwing, so a patch-gen
+  // pass that died still arrives here. Grading nothing would clone the pinned
+  // upstream onto the box, run the evaluator against an absent or empty
+  // predictions file, and tear it down again — cost and exposure for a grade that
+  // cannot say anything.
+  //
+  // The gate is deliberately NOT the exit code: a partially failed patch-gen
+  // still produced patches for the instances that finished, and those must be
+  // graded. "Are there predictions" is the question that actually decides it.
+  //
+  // Returning "" (rather than throwing) lets the assigned-set reconciliation turn
+  // this into an infra error for every assigned instance — the chunk reads as the
+  // total infra failure it was, instead of as a clean empty run.
+  const preds = await input.ssh(`cat ${input.paths.preds}`)
+  if (preds.code !== 0 || preds.stdout.trim() === "" || preds.stdout.trim() === "[]") {
+    input.log(
+      `[full-remote] ${input.family}: patch-gen produced no predictions at ${input.paths.preds} — ` +
+        "SKIPPING the on-box grade. The answer key is not materialized for a grade that would " +
+        "have nothing to score; every assigned instance is reported as an infra error.",
+    )
+    return ""
+  }
+
   const home = await resolveBoxHome(input.ssh)
   const command = boxGrade({
     predictionsPath: absolutizeOnBox(input.paths.preds, home),

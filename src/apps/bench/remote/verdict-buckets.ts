@@ -70,6 +70,7 @@ export interface GradedInstance {
  */
 export const bucketsFromGradedInstances = (
   graded: readonly GradedInstance[],
+  assignedInstanceIds?: readonly string[],
 ): {
   resolved: string[]
   unresolved: string[]
@@ -82,6 +83,30 @@ export const bucketsFromGradedInstances = (
     errored: [] as string[],
     emptyPatch: [] as string[],
   }
-  for (const g of graded) out[LEGACY_BUCKET_BY_STATE[g.state]].push(g.instanceId)
+  const reported = new Set<string>()
+  for (const g of graded) {
+    reported.add(g.instanceId)
+    out[LEGACY_BUCKET_BY_STATE[g.state]].push(g.instanceId)
+  }
+
+  // RECONCILE against the assigned set. The pinned evaluator iterates the
+  // PREDICTIONS and looks golden up by id, skipping an id it cannot find
+  // (`test_run.py`: `if golden_entry is None: continue`) — so an instance can be
+  // submitted and come back with no row at all. The same happens when the
+  // evaluator dies part-way, or when patch-gen produced no predictions.
+  //
+  // Without this, those instances would leave the chunk's accounting silently,
+  // shrinking the denominator so the survivors look like a larger share of a
+  // smaller set while the run still reads as clean. That is strictly worse than
+  // a reported failure.
+  //
+  // They are `errored`, never `unresolved`: "the evaluator produced no verdict"
+  // is a claim about the INFRASTRUCTURE, and filing it against the model would
+  // assert a measurement that never happened.
+  //
+  // Optional so every family that grades inline is byte-identical.
+  for (const id of assignedInstanceIds ?? []) {
+    if (!reported.has(id)) out.errored.push(id)
+  }
   return out
 }
