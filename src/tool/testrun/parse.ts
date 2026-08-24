@@ -6,6 +6,37 @@
  */
 import type { TestFailure, TestRunResult } from "./types"
 
+/**
+ * Total read of a capture group the pattern makes MANDATORY.
+ *
+ * `noUncheckedIndexedAccess` types `m[1]` as `string | undefined`, and every
+ * site below used `group(m, 1)` to dismiss that. The assertion was not merely noise:
+ * this module's contract, stated at the top of the file, is NEVER-throws — and
+ * `group(m, 1).trim()` throws a TypeError the moment the group is absent. So the
+ * assertion contradicted the one guarantee the parsers make, on exactly the
+ * malformed input they exist to survive.
+ *
+ * The fallback is unreachable while each group stays mandatory in its own
+ * pattern; it becomes reachable the moment someone wraps a group in `(...)?` or
+ * reorders one, which is the realistic way this breaks. `""` is the neutral
+ * value on that path: the optional fields are all emitted through
+ * `...(file ? { file } : {})` spreads that drop an empty string, and an empty
+ * `file` fails {@link isUserSource}, so a degraded parse yields a less-localized
+ * failure record rather than a crashed tool call.
+ */
+const group = (m: RegExpExecArray, i: number): string => m[i] ?? ""
+
+/**
+ * Total read of a line by index.
+ *
+ * Every call site is already bounded by `i < lines.length`, so the fallback
+ * cannot be reached today. It is the neutral value regardless: `""` satisfies
+ * neither `startsWith("---- ")` nor `trim().length > 0`, so an out-of-range read
+ * can only END a block scan, never extend one or misattribute a line to the
+ * wrong test.
+ */
+const lineAt = (lines: readonly string[], i: number): string => lines[i] ?? ""
+
 /** C++ via `ctest --output-on-failure`. ctest surfaces the underlying framework
  *  output; we localize from the two dominant shapes: libc `assert` (VERBATIM-
  *  pinned: `Assertion failed: (COND), function FN, file FILE, line N.`) and
@@ -21,8 +52,8 @@ export const parseCtest = (output: string): TestRunResult => {
     )
     if (am !== null)
       failed.push({
-        name: am[2]!.trim(),
-        file: am[3]!.trim(),
+        name: group(am, 2).trim(),
+        file: group(am, 3).trim(),
         line: Number(am[4]),
         message: `Assertion failed: (${am[1]})`,
       })
@@ -41,7 +72,7 @@ export const parseCtest = (output: string): TestRunResult => {
       const t = raw.trim()
       const lm = /^(.+?):(\d+): Failure$/.exec(t)
       if (lm !== null) {
-        pendingLocs.push({ file: lm[1]!, line: Number(lm[2]) })
+        pendingLocs.push({ file: group(lm, 1), line: Number(lm[2]) })
         continue
       }
       const em = /^(?:Expected|Actual|Value of|error:)\b.*$/.exec(t)
@@ -58,7 +89,7 @@ export const parseCtest = (output: string): TestRunResult => {
         const loc = pendingLocs[0]
         const msg = pendingMsgs[0]
         failed.push({
-          name: fm[1]!,
+          name: group(fm, 1),
           ...(loc ? { file: loc.file, line: loc.line } : {}),
           ...(msg ? { message: msg } : {}),
         })
@@ -120,7 +151,8 @@ export const parseGoJson = (stdout: string): TestRunResult => {
     // First output line of the form `   file.go:line: message`.
     for (const o of outputs.get(name) ?? []) {
       const m = /^\s*([\w./-]+\.go):(\d+):\s*(.*)$/.exec(o.replace(/\n$/, ""))
-      if (m !== null) return { name, file: m[1]!, line: Number(m[2]), message: m[3]!.trim() }
+      if (m !== null)
+        return { name, file: group(m, 1), line: Number(m[2]), message: group(m, 3).trim() }
     }
     return { name }
   })
@@ -143,7 +175,7 @@ export const parseCargo = (output: string): TestRunResult => {
   const failedNames: string[] = []
   for (const line of lines) {
     const m = /^test (\S+) \.\.\. FAILED$/.exec(line.trim())
-    if (m !== null) failedNames.push(m[1]!)
+    if (m !== null) failedNames.push(group(m, 1))
   }
   // SUM passed across ALL summary lines — cargo prints one per section (lib /
   // doctests / each integration test), so overwriting would drop earlier counts.
@@ -159,8 +191,8 @@ export const parseCargo = (output: string): TestRunResult => {
     let file: string | undefined
     let lineNo: number | undefined
     let message: string | undefined
-    for (let i = start + 1; i < lines.length && !lines[i]!.startsWith("---- "); i++) {
-      const pm = /panicked at ([^\s:]+(?::[^\s:]+)*?):(\d+):\d+:?/.exec(lines[i]!)
+    for (let i = start + 1; i < lines.length && !lineAt(lines, i).startsWith("---- "); i++) {
+      const pm = /panicked at ([^\s:]+(?::[^\s:]+)*?):(\d+):\d+:?/.exec(lineAt(lines, i))
       if (pm !== null) {
         file = pm[1]
         lineNo = Number(pm[2])
@@ -169,10 +201,12 @@ export const parseCargo = (output: string): TestRunResult => {
         const detail: string[] = []
         for (
           let k = i + 1;
-          k < lines.length && lines[k]!.trim().length > 0 && !lines[k]!.startsWith("---- ");
+          k < lines.length &&
+          lineAt(lines, k).trim().length > 0 &&
+          !lineAt(lines, k).startsWith("---- ");
           k++
         ) {
-          detail.push(lines[k]!.trim())
+          detail.push(lineAt(lines, k).trim())
           if (detail.length >= 4) break
         }
         message = detail.join(" ") || undefined
@@ -217,7 +251,7 @@ const extractNodeLoc = (line: string): { file: string; line: number } | null => 
   const vt = /❯\s+(?:file:\/\/)?([^\s():]+):(\d+):\d+/.exec(line)
   const m = v8 ?? vt
   if (m === null) return null
-  const file = m[1]!
+  const file = group(m, 1)
   return isUserSource(file) ? { file, line: Number(m[2]) } : null
 }
 
@@ -259,26 +293,26 @@ export const parseNodeTest = (output: string): TestRunResult => {
     // Each reporter shape is tried in priority order; the first match wins.
     const bun = /^\(fail\)\s+(.+?)(?:\s+\[[\d.]+\s*m?s\])?$/.exec(l)
     if (bun !== null) {
-      markAt(idx, bun[1]!) // bun
+      markAt(idx, group(bun, 1)) // bun
       return
     }
     const timed = /^[✖✗✕×]\s+(.+?)\s+\([\d.]+\s*ms\)$/.exec(l)
     if (timed !== null) {
-      markAt(idx, timed[1]!) // node:test / jest / vitest (timed: `✖ name (4 ms)`)
+      markAt(idx, group(timed, 1)) // node:test / jest / vitest (timed: `✖ name (4 ms)`)
       return
     }
     const tap = /^not ok \d+ - (.+)$/.exec(l)
     if (tap !== null) {
-      markAt(idx, tap[1]!) // TAP
+      markAt(idx, group(tap, 1)) // TAP
       return
     }
     const untimed = /^[✕×]\s+(.+)$/.exec(l)
     if (untimed !== null) {
-      markAt(idx, untimed[1]!) // jest/vitest without timing (✕ U+2715, NOT node:test's ✖)
+      markAt(idx, group(untimed, 1)) // jest/vitest without timing (✕ U+2715, NOT node:test's ✖)
       return
     }
     const jestBullet = /^●\s+(.+)$/.exec(l)
-    if (jestBullet !== null) markAt(idx, jestBullet[1]!) // jest DEFAULT reporter bullet (● U+25CF) — `● Suite › test`
+    if (jestBullet !== null) markAt(idx, group(jestBullet, 1)) // jest DEFAULT reporter bullet (● U+25CF) — `● Suite › test`
   })
   // mocha uses neither shape — it prints a `N failing` count + numbered `N) name`
   // entries (summary list first, then per-failure detail). Harvest exactly
@@ -289,8 +323,8 @@ export const parseNodeTest = (output: string): TestRunResult => {
     const failing = Number(/(\d+)\s+failing\b/.exec(output)?.[1] ?? "0")
     if (failing > 0) {
       for (let idx = 0; idx < lines.length && order.length < failing; idx++) {
-        const mm = /^\s*\d+\)\s+(.+?)\s*$/.exec(lines[idx]!)
-        if (mm !== null) markAt(idx, mm[1]!)
+        const mm = /^\s*\d+\)\s+(.+?)\s*$/.exec(lineAt(lines, idx))
+        if (mm !== null) markAt(idx, group(mm, 1))
       }
     }
   }
@@ -377,7 +411,7 @@ export const parsePytest = (output: string): TestRunResult => {
   const summary: { testid: string; message?: string }[] = []
   for (const l of lines) {
     const m = /^(?:FAILED|ERROR)\s+(\S+)(?:\s+-\s+(.*))?$/.exec(l.trim())
-    if (m !== null) summary.push({ testid: m[1]!, ...(m[2] ? { message: m[2].trim() } : {}) })
+    if (m !== null) summary.push({ testid: group(m, 1), ...(m[2] ? { message: m[2].trim() } : {}) })
   }
 
   // FAILURES + ERRORS blocks: header `___ name ___`; the LAST `FILE.py:LINE:`
@@ -417,7 +451,7 @@ export const parsePytest = (output: string): TestRunResult => {
     if (hm !== null) {
       flush()
       // Strip the ERRORS-section prefixes down to the bare test/file id.
-      const bare = hm[1]!
+      const bare = group(hm, 1)
         .replace(/^ERROR at (?:setup|teardown|call) of\s+/, "")
         .replace(/^ERROR collecting\s+/, "")
       curName = pytestNameKey(bare)
@@ -425,7 +459,7 @@ export const parsePytest = (output: string): TestRunResult => {
       continue
     }
     const fm = /^(.+\.py):(\d+):\s/.exec(raw)
-    if (fm !== null) cur = { file: fm[1]!, line: Number(fm[2]) }
+    if (fm !== null) cur = { file: group(fm, 1), line: Number(fm[2]) }
   }
   flush()
 
@@ -457,9 +491,9 @@ export const parsePythonUnittest = (output: string): TestRunResult => {
   // Failure/error blocks: `FAIL: name (...)` or `ERROR: name (...)`.
   const failed: TestFailure[] = []
   for (let i = 0; i < lines.length; i++) {
-    const hm = /^(?:FAIL|ERROR): (.+)$/.exec(lines[i]!.trim())
+    const hm = /^(?:FAIL|ERROR): (.+)$/.exec(lineAt(lines, i).trim())
     if (hm === null) continue
-    const name = hm[1]!.trim()
+    const name = group(hm, 1).trim()
     let file: string | undefined
     let lineNo: number | undefined
     let message: string | undefined
@@ -468,17 +502,19 @@ export const parsePythonUnittest = (output: string): TestRunResult => {
     for (
       let j = i + 1;
       j < lines.length &&
-      !/^={10,}$/.test(lines[j]!.trim()) &&
-      !/^Ran \d+ tests? in /.test(lines[j]!.trim());
+      !/^={10,}$/.test(lineAt(lines, j).trim()) &&
+      !/^Ran \d+ tests? in /.test(lineAt(lines, j).trim());
       j++
     ) {
-      const fm = /File "([^"]+)", line (\d+), in /.exec(lines[j]!)
+      const fm = /File "([^"]+)", line (\d+), in /.exec(lineAt(lines, j))
       if (fm !== null) {
         file = fm[1]
         lineNo = Number(fm[2])
       }
       // The exception line is a `SomeError: message` after the traceback.
-      const em = /^([A-Za-z_][\w.]*(?:Error|Exception|Failure)): (.*)$/.exec(lines[j]!.trim())
+      const em = /^([A-Za-z_][\w.]*(?:Error|Exception|Failure)): (.*)$/.exec(
+        lineAt(lines, j).trim(),
+      )
       if (em !== null) message = `${em[1]}: ${em[2]}`
     }
     failed.push({

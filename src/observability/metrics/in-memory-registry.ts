@@ -83,6 +83,32 @@ const DEFAULT_MAX_SERIES_PER_NAME = 1024
 
 type MarkerTuple = [number, number, number, number, number]
 
+/**
+ * The five P² marker slots, as LITERAL indices.
+ *
+ * `noUncheckedIndexedAccess` makes `tuple[i]` for a `let i: number` counter
+ * `number | undefined`, which is why the adjust step used to carry a non-null
+ * assertion on all ~30 of its reads — assertions that said nothing about the
+ * algorithm and would have silently survived an off-by-one. A literal-union
+ * index resolves to `number` on a tuple, so iterating these makes every read
+ * total by construction, with no runtime branch added to the hot path.
+ */
+type MarkerIndex = 0 | 1 | 2 | 3 | 4
+const MARKER_INDICES = [0, 1, 2, 3, 4] as const satisfies readonly MarkerIndex[]
+
+/**
+ * The three ADJUSTABLE markers, each paired with the two neighbours its
+ * parabolic update reads. Markers 0 and 4 are the running min/max and are moved
+ * only by a new extremum, never by the adjust step — so naming the participants
+ * (`prev`,`i`,`next`) also states that invariant, where `i - 1` / `i + 1` left
+ * the reader to rederive the loop bounds.
+ */
+const INTERIOR_MARKERS = [
+  [0, 1, 2],
+  [1, 2, 3],
+  [2, 3, 4],
+] as const satisfies readonly (readonly [MarkerIndex, MarkerIndex, MarkerIndex])[]
+
 /** Normalize a (possibly undefined) labels object to a frozen, sort-stable
  *  shape so the registry hashes and snapshot rows agree on the key. */
 const normLabels = (
@@ -255,33 +281,34 @@ const observeQuantileSketch = (state: P2Quantile, value: number): void => {
     bucket = 3
   }
 
-  for (let i = bucket + 1; i < positions.length; i += 1) positions[i]! += 1
-  for (let i = 0; i < desired.length; i += 1) desired[i]! += increments[i]!
+  for (const i of MARKER_INDICES) if (i > bucket) positions[i] += 1
+  for (const i of MARKER_INDICES) desired[i] += increments[i]
 
-  for (let i = 1; i <= 3; i += 1) {
-    const delta = desired[i]! - positions[i]!
-    const prevGap = positions[i - 1]! - positions[i]!
-    const nextGap = positions[i + 1]! - positions[i]!
+  for (const [prev, i, next] of INTERIOR_MARKERS) {
+    const delta = desired[i] - positions[i]
+    const prevGap = positions[prev] - positions[i]
+    const nextGap = positions[next] - positions[i]
     if (!((delta >= 1 && nextGap > 1) || (delta <= -1 && prevGap < -1))) continue
 
     const direction = delta > 0 ? 1 : -1
+    // The marker the linear fallback leans on: `i + direction`, named.
+    const toward = direction > 0 ? next : prev
     const parabolic =
-      heights[i]! +
-      (direction / (positions[i + 1]! - positions[i - 1]!)) *
-        (((positions[i]! - positions[i - 1]! + direction) * (heights[i + 1]! - heights[i]!)) /
-          (positions[i + 1]! - positions[i]!) +
-          ((positions[i + 1]! - positions[i]! - direction) * (heights[i]! - heights[i - 1]!)) /
-            (positions[i]! - positions[i - 1]!))
+      heights[i] +
+      (direction / (positions[next] - positions[prev])) *
+        (((positions[i] - positions[prev] + direction) * (heights[next] - heights[i])) /
+          (positions[next] - positions[i]) +
+          ((positions[next] - positions[i] - direction) * (heights[i] - heights[prev])) /
+            (positions[i] - positions[prev]))
 
-    if (parabolic > heights[i - 1]! && parabolic < heights[i + 1]!) {
+    if (parabolic > heights[prev] && parabolic < heights[next]) {
       heights[i] = parabolic
     } else {
       heights[i] =
-        heights[i]! +
-        (direction * (heights[i + direction]! - heights[i]!)) /
-          (positions[i + direction]! - positions[i]!)
+        heights[i] +
+        (direction * (heights[toward] - heights[i])) / (positions[toward] - positions[i])
     }
-    positions[i]! += direction
+    positions[i] += direction
   }
 }
 
