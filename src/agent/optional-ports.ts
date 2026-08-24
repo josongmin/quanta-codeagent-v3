@@ -27,6 +27,7 @@ import {
   type StreamPort,
 } from "@/stream"
 import { AgentMetaRegistry, TaskRegistry, TurnWakeRegistry } from "@/subagent"
+import { ReadFileState, staleReadGuardEnabled } from "@/tool/stale-read-guard"
 import type { CloseoutCritic, CloseoutCriticVerdict } from "./closeout-critic"
 import { buildCodeCellDispatchPort } from "./codemode-wire"
 import {
@@ -61,6 +62,29 @@ const QUANTA_CODE_MODE_ENV = "QUANTA_CODE_MODE"
  *  turns the feature on. */
 const QUANTA_CLOSEOUT_CRITIC_ENV = "QUANTA_CLOSEOUT_CRITIC"
 const CLOSEOUT_CRITIC_TRUTHY = new Set(["1", "on", "true"])
+/**
+ * ADR-0474 — mint the ONE per-session `ReadFileState` the stale-read guard
+ * needs, so `read` records what a later `write`/`edit`/`apply_patch` in the
+ * same session consults (TOCTOU clobber protection).
+ *
+ * This wire ALREADY existed, but only inside `assembleAgentConfig`'s
+ * capability registry — and the interactive CLI never calls that. It binds
+ * its runtime through `context-binding/base.ts`, which wires optional ports
+ * HERE and nowhere else, so a DEFAULT-ON safety control was inert in the
+ * shipped CLI: measured end-to-end through `~/.local/bin/quanta` in a PTY, a
+ * file that was read, then clobbered by `bash`, was then edited with no
+ * `stale_read` at all, and the edit tool saw `readFileState=undefined`.
+ *
+ * Same semantics as the assembler's copy, deliberately: enabled unless the
+ * operator sets the EXACT strict kill-switch (`QUANTA_STALE_READ_GUARD=off`),
+ * and caller-override-safe — a host that already minted one keeps it, so the
+ * two wiring paths cannot mint two states for one session.
+ */
+const wireReadFileState = <T extends OptionalPortBase>(base: T, env: OptionalPortEnv): T => {
+  if (!staleReadGuardEnabled(env) || base.readFileState !== undefined) return base
+  return { ...base, readFileState: new ReadFileState() } as T
+}
+
 /** T08 — model-refusal recovery gate + optional re-prompt override. */
 const QUANTA_REFUSAL_FALLBACK_ENV = "QUANTA_REFUSAL_FALLBACK"
 const QUANTA_REFUSAL_FALLBACK_PROMPT_ENV = "QUANTA_REFUSAL_FALLBACK_PROMPT"
@@ -216,7 +240,10 @@ export const wireOptionalAgentPorts = <T extends OptionalPortBase>(
   // both taps observe the SAME loop stream; default-OFF when `QUANTA_ITEM_STREAM`
   // is unset OR no `onAgentState` sink (byte-identical).
   return wireAgentStateTap(
-    wireItemStreamTap(wireItemLifecycleStream(wireCloseoutCritic(next, env), env), env),
+    wireItemStreamTap(
+      wireItemLifecycleStream(wireCloseoutCritic(wireReadFileState(next, env), env), env),
+      env,
+    ),
     env,
   )
 }
