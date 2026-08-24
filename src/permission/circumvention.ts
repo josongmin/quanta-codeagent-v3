@@ -30,6 +30,7 @@
  * here (not in `@/rules`) to keep `@/rules` from depending on `@/permission`.
  */
 
+import { shellWriteTargets } from "./shell"
 import type { AutoModeOverlay } from "./classifier"
 import { DENIAL_LIMITS } from "./classifier"
 
@@ -253,6 +254,31 @@ export const extractShellWritePaths = (command: string, cwd: string): readonly s
   for (const token of candidates) {
     const t = unquote(token.trim())
     if (isLiteralPathToken(t)) out.add(canonicalizeEffectPath(t, cwd))
+  }
+  // §17 packet B convergence — ADD what the one shell parse can see and the
+  // patterns above structurally cannot: a payload behind a vehicle head
+  // (`sudo cp evil /etc/passwd` matched NOTHING, because the `cp` pattern needs
+  // the segment to START with the program), a relative target under an earlier
+  // `cd` (reported against the caller's cwd — a confidently WRONG path, worse
+  // than a miss), and a `sed -i` operand displaced by a trailing redirect.
+  //
+  // ADDITIVE ON PURPOSE, and the regex set above is NOT deleted. This feeds two
+  // DENY authorities (circumvention, the ownership fence), so unlike the
+  // deny-widening hard-deny seam a parser that is not ready must not be able to
+  // REMOVE detection — that would stop the fence from fencing. The IR can only
+  // ever add; `null` (no parse) leaves the regex result untouched.
+  const parsed = shellWriteTargets(command)
+  if (parsed !== null) {
+    for (const t of parsed) {
+      if (!isLiteralPathToken(t.path)) continue
+      // When an earlier `cd` moved the working directory, the cwd-BLIND patterns
+      // above resolved this same operand against the CALLER's cwd and produced a
+      // path that was never written. Drop that answer: a deny authority holding
+      // a confidently wrong target is worse than holding none, because the fence
+      // then checks the wrong file and the real write goes unexamined.
+      if (t.cwdMoved) out.delete(canonicalizeEffectPath(t.operand, cwd))
+      out.add(canonicalizeEffectPath(t.path, cwd))
+    }
   }
   return [...out]
 }

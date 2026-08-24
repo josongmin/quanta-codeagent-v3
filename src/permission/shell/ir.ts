@@ -162,6 +162,22 @@ const NON_ARG_CHILD_TYPES = new Set(["command_name", "file_redirect", "heredoc_r
 
 const REDIRECT_TYPES = new Set(["file_redirect", "heredoc_redirect"])
 
+/** Redirect operand node types that can name a FILE. A positive ALLOWLIST, not
+ *  an operator denylist: an fd-dup (`2>&1`) lowers to
+ *  `file_descriptor "2" / >& / number "1"`, and a denylist that forgot `number`
+ *  let the descriptor `1` through as if it were a path — a fabricated write
+ *  effect in a deny authority, which is exactly the false positive the
+ *  false-negatives-over-false-positives posture forbids. */
+const REDIRECT_TARGET_TYPES: ReadonlySet<string> = new Set([
+  "word",
+  "string",
+  "raw_string",
+  "concatenation",
+  "expansion",
+  "simple_expansion",
+  "command_substitution",
+])
+
 const lowerCommand = (node: ShellNode, pipeline: number | null): ShellCommandIr => {
   let head: ShellWord | null = null
   const args: ShellWord[] = []
@@ -210,6 +226,40 @@ const walkSpecial = (
     const id = st.nextPipeline
     st.nextPipeline++
     for (const c of children(node)) walk(c, out, st, id, fnName)
+    return true
+  }
+  if (node.type === "redirected_statement") {
+    // `file_redirect` is a SIBLING of the command, not a child, so lowering the
+    // `command` node alone left `redirects` structurally EMPTY for every command
+    // in the tree — the field looked wired and never carried anything. Collect
+    // the targets here and attach them to the LAST command the wrapped subtree
+    // emits, which is where bash binds them (`cd /etc && echo x > motd`
+    // redirects `echo`, not `cd`).
+    const kids = children(node)
+    const before = out.length
+    for (const c of kids) {
+      if (REDIRECT_TYPES.has(c.type)) continue
+      walk(c, out, st, pipeline, fnName)
+    }
+    const targets: ShellWord[] = []
+    for (const c of kids) {
+      if (!REDIRECT_TYPES.has(c.type)) continue
+      // Whether a redirect names a FILE or a DESCRIPTOR is decided by the
+      // OPERAND, not the operator: `>&1` dups (operand is a `number`) while
+      // `>&out.log` sends BOTH streams to a file (operand is a `word`). An
+      // operator-level skip therefore silently dropped the second — a real
+      // write, missed by the old regexes too — so the target-type allowlist is
+      // the only check, and it gets both right.
+      for (const t of children(c)) {
+        if (!REDIRECT_TARGET_TYPES.has(t.type)) continue
+        targets.push(toWord(t))
+      }
+    }
+    const lastIdx = out.length - 1
+    if (targets.length > 0 && lastIdx >= before) {
+      const last = out[lastIdx] as ShellCommandIr
+      out[lastIdx] = { ...last, redirects: [...last.redirects, ...targets] }
+    }
     return true
   }
   if (node.type === "function_definition") {

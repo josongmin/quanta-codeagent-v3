@@ -13,6 +13,7 @@ export {
 } from "./assess"
 export type { ShellCommandIr, ShellScriptIr, ShellWord } from "./ir"
 export { EXPECTED_CONTAINER_NODE_TYPES, lowerShellTree } from "./ir"
+export { shellWriteTargets, type ShellWriteTarget } from "./write-targets"
 export {
   __resetShellEffectParserForTest,
   initShellEffectParser,
