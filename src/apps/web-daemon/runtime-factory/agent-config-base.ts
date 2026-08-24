@@ -15,7 +15,7 @@
  * is ONE-WAY — the parent imports this file.
  */
 
-import { buildSystemPrompt, type HookBus } from "@/agent"
+import { type AgentConfig, buildSystemPrompt, type HookBus } from "@/agent"
 import type { QuestionAvailabilityReader } from "@/agent/dispatch-guard"
 import type { ObservabilityWireHandle } from "@/agent/observability-wire"
 import type { PlanStore } from "@/agent/plan/state"
@@ -24,6 +24,7 @@ import { modeLoadsRepoRules } from "@/agent/run-mode"
 import { promptSurfaceProfileForRunMode, resolveCliDefaultEnvPosture } from "@/agent/system-prompt"
 import type { ArtifactRegistry } from "@/artifact"
 import type { LLMPort } from "@/llm"
+import type { ObjectivePort } from "@/objective"
 import type { PermissionContext } from "@/permission"
 import type { PostureControl } from "@/permission/posture/control"
 import type { buildSkillsConfigCore, buildSubagentConfigCore } from "@/runner/assemble"
@@ -54,6 +55,15 @@ export const buildDaemonToolRegistry = (
     ...extraTools,
   ])
 
+/** RFC-03 H1 (web parity fix) — presence-only projection of the session-stable
+ *  objective authority onto the config base. Extracted (mirrors
+ *  {@link observabilitySlots}) so the `buildAgentConfigBase` closure stays under
+ *  biome's cognitive-complexity cap. Absent (TOOLS gate off) ⇒ `{}` ⇒ the slot is
+ *  omitted (default-OFF byte-identical under `exactOptionalPropertyTypes`). */
+const objectiveSlot = (
+  objective: ObjectivePort | undefined,
+): Partial<Pick<AgentConfig, "objective">> => (objective !== undefined ? { objective } : {})
+
 /**
  * Assemble the {@link RuntimeAgentConfigBase} for a web-daemon session from the
  * per-session collaborators the factory just minted. Extracted from the factory
@@ -82,6 +92,7 @@ export const buildAgentConfigBase = async ({
   controlRequest,
   follower,
   observability,
+  objective,
   postureControl,
   questionGuard,
 }: {
@@ -107,6 +118,21 @@ export const buildAgentConfigBase = async ({
     readonly handle: ObservabilityWireHandle
     readonly bus: HookBus | undefined
   }
+  // RFC-03 H1 (web parity fix) — the session-stable objective authority, minted
+  // ONCE at the factory INDEPENDENT of the observability gate. Present (under
+  // `QUANTA_OBJECTIVE_TOOLS`) ⇒ threaded onto `base.objective` so the per-turn
+  // assembler's `maybeWireObjective` ADOPTS it (caller-override precedence) every
+  // turn instead of re-minting a fresh port ⇒ durable cross-turn goal AND a real
+  // out-of-band `session.objective.mutate` (`applyHostObjectiveMutation` reads
+  // `base.objective`). NOTE: the transcript `webObjectiveSnapshot` reads the
+  // FACADE's obs-gated `.objective` getter (`attachObservabilityPorts` ⇐
+  // `handle.objective`), NOT this base slot, so its durable-snapshot arm is only
+  // populated when observability is ALSO on — a pre-existing, separate concern
+  // (see the GAP note in the factory; the facade getter must stay obs-coupled or
+  // the emitter would leak objective frames with observability OFF). Absent (TOOLS
+  // gate off) ⇒ omitted ⇒ `base.objective` undefined (byte-identical legacy,
+  // whatever observability is).
+  readonly objective?: ObjectivePort | undefined
   // RFC-05 E4 — the surface-owned posture FRONT-DOOR control; present ⇒ the host
   // `session.posture.set` applies the FULL lossless patch through the SAME live
   // authority the gate reads. Absent ⇒ mode-only compat (byte-identical).
@@ -232,6 +258,14 @@ export const buildAgentConfigBase = async ({
     // spec projection + dispatch consult read the SAME authority's askOutsidePlan
     // (a `/posture ask off` reaches the next turn). Absent ⇒ available by default.
     ...(questionGuard !== undefined ? { questionGuard } : {}),
+    // RFC-03 H1 (web parity fix) — lift the SESSION-STABLE objective authority
+    // onto the base INDEPENDENT of observability. The per-turn assembler's
+    // `maybeWireObjective` sees a defined `cfg.objective` (caller-override) and
+    // ADOPTS it every turn (no per-turn re-mint ⇒ no cross-turn goal amnesia).
+    // When obs is ON this is the SAME instance the obs wire attributes against
+    // (single authority, no split-brain). Absent (TOOLS off) ⇒ omitted ⇒
+    // undefined (byte-identical legacy). Sourced here, NOT from `observabilitySlots`.
+    ...objectiveSlot(objective),
     ...observabilitySlots(observability),
   }
   return base

@@ -25,7 +25,7 @@ import {
   type ObservabilityWireHandle,
   wireObservability,
 } from "@/agent/observability-wire"
-import { resolveGatedObjectiveAuthority } from "@/host/runtime/objective-store-wire"
+import type { ObjectivePort } from "@/objective"
 import { gateOn } from "@/shared"
 
 /**
@@ -47,17 +47,22 @@ const toObservabilityHookBus = (bus: HookBus): ObservabilityHookBus => ({
  * closure under biome's cognitive-complexity cap as the spread count grows.
  * Pure: every field is presence-only (absent ⇒ slot omitted; default-OFF
  * byte-identical under `exactOptionalPropertyTypes`).
+ *
+ * RFC-03 H1 (web parity fix) — `objective` is NO LONGER sourced from the obs
+ * handle here. The session-stable objective authority is minted ONCE at the
+ * factory (`buildProductionRuntimeFactory`) and threaded directly onto
+ * `base.objective` via `buildAgentConfigBase`, INDEPENDENT of the observability
+ * gate (the same instance is fed INTO `wireSessionObservability` for attribution
+ * when obs is ON). Projecting it from the handle too would double-source the
+ * slot — so it is dropped from this projection to keep ONE source of truth.
  */
 export const observabilitySlots = (observability: {
   readonly handle: ObservabilityWireHandle
   readonly bus: HookBus | undefined
-}): Partial<
-  Pick<AgentConfig, "hooks" | "objective" | "runLedger" | "approvalStateMachine" | "shadowVerify">
-> => {
+}): Partial<Pick<AgentConfig, "hooks" | "runLedger" | "approvalStateMachine" | "shadowVerify">> => {
   const { handle, bus } = observability
   return {
     ...(bus !== undefined ? { hooks: bus } : {}),
-    ...(handle.objective !== undefined ? { objective: handle.objective } : {}),
     ...(handle.runLedger !== undefined ? { runLedger: handle.runLedger } : {}),
     ...(handle.approvalStateMachine !== undefined
       ? { approvalStateMachine: handle.approvalStateMachine }
@@ -73,18 +78,24 @@ export const observabilitySlots = (observability: {
  * ports together. Default-OFF byte-identical: `QUANTA_OBSERVABILITY !== "on"`
  * ⇒ `bus` is `undefined`, the wire is the shared noop handle, every port is
  * absent ⇒ the session config + facade are byte-identical to the legacy path.
+ *
+ * RFC-03 H1 (web parity fix) — the session-stable objective authority is now
+ * INJECTED (`objective` param), minted ONCE at the factory INDEPENDENT of this
+ * gate, so the SAME instance that lands on `base.objective` drives the obs
+ * approval-attribution here. This wire NO LONGER mints its own — that was the
+ * accidental coupling that left `base.objective` undefined whenever observability
+ * was OFF. Absent (TOOLS gate off) ⇒ `undefined` ⇒ obs attribution is
+ * objective-less (byte-identical to before this wire ever set an objective).
  */
 export const wireSessionObservability = (
   env: Record<string, string | undefined>,
   cwd: string,
+  objective: ObjectivePort | undefined,
 ): { readonly handle: ObservabilityWireHandle; readonly bus: HookBus | undefined } => {
   if (!gateOn(env, "QUANTA_OBSERVABILITY")) {
     return { handle: wireObservability(), bus: undefined }
   }
   const bus = new HookBus()
-  // RFC-03 H1 — the ONE GATED session-stable objective authority (no longer UNGATED);
-  // `confirmationAvailable:false` (web has no `onConfirm`) ⇒ FAIL-CLOSED, TOOLS off ⇒ no leak.
-  const objective = resolveGatedObjectiveAuthority(env, { confirmationAvailable: false })
   const handle = wireObservability({
     enabled: true,
     repoRoot: cwd,

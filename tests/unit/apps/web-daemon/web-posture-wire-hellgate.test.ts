@@ -81,7 +81,7 @@ const buildDaemonBase = async (
     userInput: undefined,
     controlRequest: undefined,
     follower: undefined,
-    observability: wireSessionObservability({}, CWD),
+    observability: wireSessionObservability({}, CWD, undefined),
     ...(live.postureControl !== undefined ? { postureControl: live.postureControl } : {}),
     ...(live.questionGuard !== undefined ? { questionGuard: live.questionGuard } : {}),
   })

@@ -36,6 +36,7 @@ import {
   buildInteractiveTurnAssembler as buildSharedInteractiveTurnAssembler,
   type InteractiveTurnAssemblerRequest,
 } from "@/host/runtime"
+import { resolveGatedObjectiveAuthority } from "@/host/runtime/objective-store-wire"
 import { pickProvider, tryCreateLLM } from "@/llm"
 import { createRuntimeFromAgentConfigBase } from "@/sdk/runtime"
 import { gateOn } from "@/shared"
@@ -116,12 +117,25 @@ export const buildProductionRuntimeFactory = (): (() => Promise<ObservableRuntim
       skills !== undefined && skillAuthority !== undefined
         ? { ...skills, authority: skillAuthority }
         : skills
+    // RFC-03 H1 (web parity fix) — mint THE ONE session-stable objective
+    // authority HERE, ONCE, INDEPENDENT of observability. `confirmationAvailable:
+    // false` (web has no `onConfirm`) ⇒ FAIL-CLOSED under QUANTA_PROPOSE_GOAL; the
+    // builder returns `undefined` when `QUANTA_OBJECTIVE_TOOLS` is off ⇒ no leak.
+    // The SAME instance is threaded onto `base.objective` (durable cross-turn goal)
+    // AND fed into the obs wire below for approval-attribution (single authority,
+    // no split-brain). Web durable objective restore is a documented Phase-2
+    // per-connection park ⇒ NO `restoreFrom` (mint fresh). This replaces the old
+    // mint that lived INSIDE `wireSessionObservability`, which left `base.objective`
+    // undefined whenever observability was OFF (cross-turn goal amnesia).
+    const objective = resolveGatedObjectiveAuthority(env, { confirmationAvailable: false })
     // ADR-0415 — per-session observability wire. Gate OFF ⇒ noop handle +
     // undefined bus ⇒ `observabilitySlots` returns `{}` (byte-identical legacy).
     // Threading the live bus + promoted ports onto the session config makes the
     // loop's dispatch emit onto the SAME bus attribution subscribed to, and the
-    // approval-gate wire read ONE unified model.
-    const observability = wireSessionObservability(env, cwd)
+    // approval-gate wire read ONE unified model. The objective is INJECTED (the
+    // same instance threaded onto the base) so obs attribution and the base share
+    // ONE authority.
+    const observability = wireSessionObservability(env, cwd, objective)
     // ADR-0440 wire-finish — tool-diff source. Gate OFF ⇒ undefined ⇒ no
     // `onToolDiff` wired (no tool captures, byte-identical) + no facade port ⇒
     // the server forwards no `tool.diff` frames.
@@ -169,6 +183,11 @@ export const buildProductionRuntimeFactory = (): (() => Promise<ObservableRuntim
       controlRequest,
       follower,
       observability,
+      // RFC-03 H1 (web parity fix) — the session-stable objective authority
+      // (minted once above) lands on `base.objective`, so every turn's assembler
+      // ADOPTS the SAME port (no per-turn re-mint ⇒ durable goal + live snapshot +
+      // a real out-of-band `session.objective.mutate`).
+      objective,
       // RFC-05 E4/E5 — thread the front-door control + question guard onto the
       // config base so the host `session.posture.set` projection applies the FULL
       // lossless patch through the SAME live authority the gate reads (absent when
