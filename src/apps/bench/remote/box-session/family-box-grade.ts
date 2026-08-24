@@ -114,6 +114,100 @@ export interface FamilyBoxGradeInput {
  * outside the checkout) but would depend on that staying true — and the file the
  * teardown is allowed to delete is exactly the kind of thing a later change moves.
  */
+/** PREFLIGHT 1 — refuse to materialize the answer key while the agent may still
+ *  be running. Split out of {@link runFamilyBoxGrade} so that function reads as
+ *  its four stages; the reasoning is unchanged and travels with it. */
+const assertNoLiveBenchProcess = async (input: FamilyBoxGradeInput): Promise<void> => {
+  // IS THE AGENT GONE? Asked BEFORE the answer key is materialized.
+  //
+  // The bench is launched detached and the completion probe accepts EITHER
+  // `run.exit` or a fallback — "the report parses and preds is non-empty". On
+  // that fallback the wrapper never wrote `run.exit`, so the bench's state is
+  // unknown: the artifacts merely LOOK finished. Every abnormal exit already
+  // throws and skips the grade, so the hole is exactly the benign-looking case.
+  //
+  // The whole gold boundary rests on the agent and the answer key never
+  // coexisting. The agent phase proves the key is absent before it starts;
+  // nothing proved the AGENT was gone before the key arrived.
+  //
+  // The probe matches the literal command the box was told to run, not a guess
+  // at process names. `pgrep` exits non-zero when nothing matches, which is the
+  // answer we want.
+  const stillRunning = await input.ssh("pgrep -f 'apps/bench/cli.ts run' >/dev/null && echo ALIVE")
+  if (stillRunning.stdout.trim() === "ALIVE") {
+    throw new Error(
+      `[full-remote] ${input.family}: the bench process is STILL RUNNING on the box — REFUSING to ` +
+        "materialize the answer key beside a live agent. The run was reported complete by the " +
+        "artifact fallback (report parses + predictions non-empty) rather than by `run.exit`, so " +
+        "its process state was never established.",
+    )
+  }
+}
+
+/** PREFLIGHT 2 — the predictions to grade, or `undefined` when there is nothing
+ *  to grade and the chunk must be reported as an infra failure instead. */
+const readGradablePredictions = async (input: FamilyBoxGradeInput): Promise<string | undefined> => {
+  // IS THERE ANYTHING TO GRADE? Asked BEFORE the answer key is materialized.
+  //
+  // `runChunkBench` RETURNS its exit code rather than throwing, so a patch-gen
+  // pass that died still arrives here. Grading nothing would clone the pinned
+  // upstream onto the box, run the evaluator against an absent or empty
+  // predictions file, and tear it down again — cost and exposure for a grade that
+  // cannot say anything.
+  //
+  // The gate is deliberately NOT the exit code: a partially failed patch-gen
+  // still produced patches for the instances that finished, and those must be
+  // graded. "Are there predictions" is the question that actually decides it.
+  //
+  // Returning "" (rather than throwing) lets the assigned-set reconciliation turn
+  // this into an infra error for every assigned instance — the chunk reads as the
+  // total infra failure it was, instead of as a clean empty run.
+  const preds = await input.ssh(`cat ${input.paths.preds}`)
+  if (preds.code !== 0 || preds.stdout.trim() === "" || preds.stdout.trim() === "[]") {
+    input.log(
+      `[full-remote] ${input.family}: patch-gen produced no predictions at ${input.paths.preds} — ` +
+        "SKIPPING the on-box grade. The answer key is not materialized for a grade that would " +
+        "have nothing to score; every assigned instance is reported as an infra error.",
+    )
+    return undefined
+  }
+
+  return preds.stdout
+}
+
+/** PREFLIGHT 3 — the on-box path whose bytes the family's grader will read. */
+const materializeGradedPredictions = async (
+  input: FamilyBoxGradeInput,
+  prepare: ((raw: string) => string) | undefined,
+  predictionsText: string,
+): Promise<string> => {
+  // CONVERT the predictions into the format this family's grader reads, if it
+  // says it needs one. The bench writes JSONL for every family; ProMax's pinned
+  // evaluator does `json.load` and needs a JSON array, and handing it the JSONL
+  // yields a parse error — or, for a single row, a dict whose VALUES are read as
+  // entries and therefore zero jobs.
+  //
+  // Written to its own path rather than over `preds`: that file is the run's own
+  // artifact and is fetched as evidence, so rewriting it would destroy the bytes
+  // the agent actually produced.
+  let gradedPredictionsPath = input.paths.preds
+  if (prepare !== undefined) {
+    const converted = prepare(predictionsText)
+    const wrote = await input.ssh(
+      `cat > ${input.paths.boxGradePredictions} <<'QUANTA_PROMAX_PREDS_EOF'\n${converted}\nQUANTA_PROMAX_PREDS_EOF`,
+    )
+    if (wrote.code !== 0) {
+      throw new Error(
+        `[full-remote] ${input.family}: could not write the converted predictions to ` +
+          `${input.paths.boxGradePredictions} (code ${wrote.code}): ${wrote.stderr || wrote.stdout}`,
+      )
+    }
+    gradedPredictionsPath = input.paths.boxGradePredictions
+  }
+
+  return gradedPredictionsPath
+}
+
 /**
  * What a completed on-box grade OBSERVED, as a receipt needs it.
  *
@@ -168,82 +262,18 @@ export const runFamilyBoxGrade = async (
   // That is also what the invocation builder demands, and rightly: a
   // cwd-relative path cannot be replayed from a receipt. This is the one place
   // that knows the box's home, so it is the one place that can honour both.
-  // IS THE AGENT GONE? Asked BEFORE the answer key is materialized.
-  //
-  // The bench is launched detached and the completion probe accepts EITHER
-  // `run.exit` or a fallback — "the report parses and preds is non-empty". On
-  // that fallback the wrapper never wrote `run.exit`, so the bench's state is
-  // unknown: the artifacts merely LOOK finished. Every abnormal exit already
-  // throws and skips the grade, so the hole is exactly the benign-looking case.
-  //
-  // The whole gold boundary rests on the agent and the answer key never
-  // coexisting. The agent phase proves the key is absent before it starts;
-  // nothing proved the AGENT was gone before the key arrived.
-  //
-  // The probe matches the literal command the box was told to run, not a guess
-  // at process names. `pgrep` exits non-zero when nothing matches, which is the
-  // answer we want.
-  const stillRunning = await input.ssh("pgrep -f 'apps/bench/cli.ts run' >/dev/null && echo ALIVE")
-  if (stillRunning.stdout.trim() === "ALIVE") {
-    throw new Error(
-      `[full-remote] ${input.family}: the bench process is STILL RUNNING on the box — REFUSING to ` +
-        "materialize the answer key beside a live agent. The run was reported complete by the " +
-        "artifact fallback (report parses + predictions non-empty) rather than by `run.exit`, so " +
-        "its process state was never established.",
-    )
-  }
+  await assertNoLiveBenchProcess(input)
 
-  // IS THERE ANYTHING TO GRADE? Asked BEFORE the answer key is materialized.
-  //
-  // `runChunkBench` RETURNS its exit code rather than throwing, so a patch-gen
-  // pass that died still arrives here. Grading nothing would clone the pinned
-  // upstream onto the box, run the evaluator against an absent or empty
-  // predictions file, and tear it down again — cost and exposure for a grade that
-  // cannot say anything.
-  //
-  // The gate is deliberately NOT the exit code: a partially failed patch-gen
-  // still produced patches for the instances that finished, and those must be
-  // graded. "Are there predictions" is the question that actually decides it.
-  //
-  // Returning "" (rather than throwing) lets the assigned-set reconciliation turn
-  // this into an infra error for every assigned instance — the chunk reads as the
-  // total infra failure it was, instead of as a clean empty run.
-  const preds = await input.ssh(`cat ${input.paths.preds}`)
-  if (preds.code !== 0 || preds.stdout.trim() === "" || preds.stdout.trim() === "[]") {
-    input.log(
-      `[full-remote] ${input.family}: patch-gen produced no predictions at ${input.paths.preds} — ` +
-        "SKIPPING the on-box grade. The answer key is not materialized for a grade that would " +
-        "have nothing to score; every assigned instance is reported as an infra error.",
-    )
-    return undefined
-  }
+  const predictionsText = await readGradablePredictions(input)
+  if (predictionsText === undefined) return undefined
 
   const home = await resolveBoxHome(input.ssh)
 
-  // CONVERT the predictions into the format this family's grader reads, if it
-  // says it needs one. The bench writes JSONL for every family; ProMax's pinned
-  // evaluator does `json.load` and needs a JSON array, and handing it the JSONL
-  // yields a parse error — or, for a single row, a dict whose VALUES are read as
-  // entries and therefore zero jobs.
-  //
-  // Written to its own path rather than over `preds`: that file is the run's own
-  // artifact and is fetched as evidence, so rewriting it would destroy the bytes
-  // the agent actually produced.
-  const prepare = profile.prepareBoxGradePredictions
-  let gradedPredictionsPath = input.paths.preds
-  if (prepare !== undefined) {
-    const converted = prepare(preds.stdout)
-    const wrote = await input.ssh(
-      `cat > ${input.paths.boxGradePredictions} <<'QUANTA_PROMAX_PREDS_EOF'\n${converted}\nQUANTA_PROMAX_PREDS_EOF`,
-    )
-    if (wrote.code !== 0) {
-      throw new Error(
-        `[full-remote] ${input.family}: could not write the converted predictions to ` +
-          `${input.paths.boxGradePredictions} (code ${wrote.code}): ${wrote.stderr || wrote.stdout}`,
-      )
-    }
-    gradedPredictionsPath = input.paths.boxGradePredictions
-  }
+  const gradedPredictionsPath = await materializeGradedPredictions(
+    input,
+    profile.prepareBoxGradePredictions,
+    predictionsText,
+  )
 
   const invocation = boxGrade({
     predictionsPath: absolutizeOnBox(gradedPredictionsPath, home),
