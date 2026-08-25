@@ -54,8 +54,8 @@ describe("parsing what the box answered", () => {
   test("🔴 KNOWN-ITEM FLOOR: a well-formed answer becomes per-instance records", () => {
     const out = parseProMaxImageProvenance(
       [
-        "a-1\tkey4127/refactor-dockerhub:a-1\tkey4127/refactor-dockerhub@sha256:" + "1".repeat(64),
-        "b-2\tkey4127/refactor-dockerhub:b-2\tkey4127/refactor-dockerhub@sha256:" + "2".repeat(64),
+        `a-1\tkey4127/refactor-dockerhub:a-1\tkey4127/refactor-dockerhub@sha256:${"1".repeat(64)}`,
+        `b-2\tkey4127/refactor-dockerhub:b-2\tkey4127/refactor-dockerhub@sha256:${"2".repeat(64)}`,
       ].join("\n"),
       ["a-1", "b-2"],
     )
