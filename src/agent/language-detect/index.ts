@@ -38,29 +38,43 @@ type Script =
   | "greek"
   | "latin"
 
+/** One inclusive code-point range and the script it belongs to. */
+type ScriptRange = readonly [lo: number, hi: number, script: Script]
+
+/**
+ * The script table. A TABLE rather than an if-chain because every entry is the
+ * identical predicate — `lo <= cp <= hi` — and the only thing that varied was
+ * the three constants. Ranges are DISJOINT, so order carries no meaning; they
+ * are listed grouped by script for readability.
+ */
+const SCRIPT_RANGES: readonly ScriptRange[] = [
+  // Hangul: syllables + Jamo + compatibility Jamo.
+  [0xac00, 0xd7a3, "hangul"],
+  [0x1100, 0x11ff, "hangul"],
+  [0x3130, 0x318f, "hangul"],
+  [0x3040, 0x309f, "hiragana"],
+  [0x30a0, 0x30ff, "katakana"],
+  // Han / CJK unified ideographs (+ extension A).
+  [0x4e00, 0x9fff, "han"],
+  [0x3400, 0x4dbf, "han"],
+  [0x0400, 0x04ff, "cyrillic"],
+  [0x0600, 0x06ff, "arabic"],
+  [0x0590, 0x05ff, "hebrew"],
+  [0x0e00, 0x0e7f, "thai"],
+  [0x0900, 0x097f, "devanagari"],
+  [0x0370, 0x03ff, "greek"],
+  // Latin: ASCII letters + Latin-1 supplement / extended letters (accented).
+  [0x41, 0x5a, "latin"],
+  [0x61, 0x7a, "latin"],
+  [0x00c0, 0x024f, "latin"],
+]
+
 /** Classify ONE code point to a tracked script, or null if not meaningful
  *  (whitespace / digit / punctuation / symbol / emoji / untracked). */
 const scriptOf = (cp: number): Script | null => {
-  // Hangul: syllables + Jamo + compatibility Jamo.
-  if (
-    (cp >= 0xac00 && cp <= 0xd7a3) ||
-    (cp >= 0x1100 && cp <= 0x11ff) ||
-    (cp >= 0x3130 && cp <= 0x318f)
-  )
-    return "hangul"
-  if (cp >= 0x3040 && cp <= 0x309f) return "hiragana"
-  if (cp >= 0x30a0 && cp <= 0x30ff) return "katakana"
-  // Han / CJK unified ideographs (+ extension A).
-  if ((cp >= 0x4e00 && cp <= 0x9fff) || (cp >= 0x3400 && cp <= 0x4dbf)) return "han"
-  if (cp >= 0x0400 && cp <= 0x04ff) return "cyrillic"
-  if (cp >= 0x0600 && cp <= 0x06ff) return "arabic"
-  if (cp >= 0x0590 && cp <= 0x05ff) return "hebrew"
-  if (cp >= 0x0e00 && cp <= 0x0e7f) return "thai"
-  if (cp >= 0x0900 && cp <= 0x097f) return "devanagari"
-  if (cp >= 0x0370 && cp <= 0x03ff) return "greek"
-  // Latin: ASCII letters + Latin-1 supplement / extended letters (accented).
-  if ((cp >= 0x41 && cp <= 0x5a) || (cp >= 0x61 && cp <= 0x7a) || (cp >= 0x00c0 && cp <= 0x024f))
-    return "latin"
+  for (const [lo, hi, script] of SCRIPT_RANGES) {
+    if (cp >= lo && cp <= hi) return script
+  }
   return null
 }
 

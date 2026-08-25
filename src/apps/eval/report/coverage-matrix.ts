@@ -108,6 +108,78 @@ const verdictFromRecord = (rec: EvalRecord): Verdict => {
 
 const emptyCell = (): MatrixCell => ({ verdict: "skipped", count: 0 })
 
+/** A fresh all-tier cell row. A unit because the six-key literal was spelled
+ *  out TWICE (new-usecase seed, and the taxonomy-walk default) — one table, one
+ *  place to add a tier. */
+const emptyRow = (): Record<EvalTier, MatrixCell> => ({
+  audit: emptyCell(),
+  synthetic: emptyCell(),
+  grounding: emptyCell(),
+  public: emptyCell(),
+  trajectory: emptyCell(),
+  compare: emptyCell(),
+})
+
+/** ADR-0087 — fold one record's token/cost usage into the running rollup.
+ *  A unit because it is the only mutation of `roll`, and its three-way payload
+ *  kind test was the largest single boolean sequence in the parent. Mutates
+ *  `roll` in place (rather than returning a new one) so the accumulation order
+ *  and float summation stay bit-for-bit what the inline version did. */
+const accumulateTokenCost = (roll: TokenCostRollup, p: EvalRecord["payload"]): void => {
+  if (p.kind !== "synthetic" && p.kind !== "grounding" && p.kind !== "public") return
+  if (p.tokens === undefined) return
+  roll.prompt += p.tokens.prompt
+  roll.completion += p.tokens.completion
+  roll.cacheRead += p.tokens.cacheRead ?? 0
+  if (typeof p.costUsd === "number") roll.costUsd += p.costUsd
+  roll.records += 1
+}
+
+/** Fold one record into its (usecase × tier) cell, seeding the row on first
+ *  sight. A unit because "find-or-create the row, then max-merge the verdict"
+ *  is a single lattice operation; inlined it added a nested `if` to a loop that
+ *  already carried the rollup. */
+const tallyRecord = (
+  byUsecase: Map<UseCaseId, Record<EvalTier, MatrixCell>>,
+  rec: EvalRecord,
+): void => {
+  const id = rec.usecase
+  let row = byUsecase.get(id)
+  if (row === undefined) {
+    row = emptyRow()
+    byUsecase.set(id, row)
+  }
+  const v = verdictFromRecord(rec)
+  const cell = row[rec.tier]
+  cell.count += 1
+  if (VERDICT_RANK[v] > VERDICT_RANK[cell.verdict]) cell.verdict = v
+}
+
+/** Project the tallied map onto the TAXONOMY skeleton, in taxonomy order.
+ *  A unit because it is a pure three-deep walk (major → mid → leaf) whose
+ *  nesting surcharge alone was worth ~6 points inside the parent, and it does
+ *  not touch the rollup at all. */
+const buildBlocks = (
+  byUsecase: Map<UseCaseId, Record<EvalTier, MatrixCell>>,
+): readonly MajorBlock[] => {
+  const blocks: MajorBlock[] = []
+  for (const maj of TAXONOMY) {
+    const rows: UseCaseRow[] = []
+    for (const m of maj.mids) {
+      for (const l of m.leaves) {
+        rows.push({ id: l.id, midLabel: m.label, cells: byUsecase.get(l.id) ?? emptyRow() })
+      }
+    }
+    blocks.push({
+      majorId: maj.id,
+      label: maj.label,
+      ...(maj.empiricalShare !== undefined ? { share: maj.empiricalShare } : {}),
+      rows,
+    })
+  }
+  return blocks
+}
+
 export const buildCoverageMatrix = (records: Iterable<EvalRecord>): CoverageMatrix => {
   const byUsecase = new Map<UseCaseId, Record<EvalTier, MatrixCell>>()
   let seen = 0
@@ -123,57 +195,8 @@ export const buildCoverageMatrix = (records: Iterable<EvalRecord>): CoverageMatr
   }
   for (const rec of records) {
     seen += 1
-    const p = rec.payload
-    if (
-      (p.kind === "synthetic" || p.kind === "grounding" || p.kind === "public") &&
-      p.tokens !== undefined
-    ) {
-      roll.prompt += p.tokens.prompt
-      roll.completion += p.tokens.completion
-      roll.cacheRead += p.tokens.cacheRead ?? 0
-      if (typeof p.costUsd === "number") roll.costUsd += p.costUsd
-      roll.records += 1
-    }
-    const id = rec.usecase
-    let row = byUsecase.get(id)
-    if (row === undefined) {
-      row = {
-        audit: emptyCell(),
-        synthetic: emptyCell(),
-        grounding: emptyCell(),
-        public: emptyCell(),
-        trajectory: emptyCell(),
-        compare: emptyCell(),
-      }
-      byUsecase.set(id, row)
-    }
-    const v = verdictFromRecord(rec)
-    const cell = row[rec.tier]
-    cell.count += 1
-    if (VERDICT_RANK[v] > VERDICT_RANK[cell.verdict]) cell.verdict = v
-  }
-  const blocks: MajorBlock[] = []
-  for (const maj of TAXONOMY) {
-    const rows: UseCaseRow[] = []
-    for (const m of maj.mids) {
-      for (const l of m.leaves) {
-        const cells = byUsecase.get(l.id) ?? {
-          audit: emptyCell(),
-          synthetic: emptyCell(),
-          grounding: emptyCell(),
-          public: emptyCell(),
-          trajectory: emptyCell(),
-          compare: emptyCell(),
-        }
-        rows.push({ id: l.id, midLabel: m.label, cells })
-      }
-    }
-    blocks.push({
-      majorId: maj.id,
-      label: maj.label,
-      ...(maj.empiricalShare !== undefined ? { share: maj.empiricalShare } : {}),
-      rows,
-    })
+    accumulateTokenCost(roll, rec.payload)
+    tallyRecord(byUsecase, rec)
   }
   // Mark unknown / unclassified (trajectory uses "unclassified" sentinel id).
   // We intentionally drop them from the matrix here — `report/trend` surfaces
@@ -182,7 +205,7 @@ export const buildCoverageMatrix = (records: Iterable<EvalRecord>): CoverageMatr
   void parseId
   void allLeaves
   return {
-    blocks,
+    blocks: buildBlocks(byUsecase),
     tiers: TIER_ORDER,
     recordsSeen: seen,
     ...(roll.records > 0 ? { tokenCost: roll } : {}),

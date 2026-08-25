@@ -60,6 +60,59 @@ const targetPathOf = (sectionHeader: string): string | undefined => {
   return m?.[1]
 }
 
+/** A `+`/`-` content line of a unified diff, with the marker stripped. Returns
+ *  null for file headers (`+++`/`---`), hunk headers and context lines — i.e.
+ *  everything that is not a CHANGE. */
+const changedContentOf = (
+  line: string,
+): { readonly isAdd: boolean; readonly content: string } | null => {
+  // skip file headers and hunk headers; only +/- content lines are "changes"
+  if (line.startsWith("+++") || line.startsWith("---")) return null
+  const isAdd = line.startsWith("+")
+  const isDel = line.startsWith("-")
+  if (!isAdd && !isDel) return null
+  return { isAdd, content: line.slice(1) }
+}
+
+/** The package sets a section's changed lines removed and added. */
+type PinDelta = {
+  readonly removed: ReadonlySet<string>
+  readonly added: ReadonlySet<string>
+  readonly changedLines: number
+}
+
+/**
+ * Scan a file-section's changed lines into a {@link PinDelta}, or `null` the
+ * moment a change proves the section is a REAL edit rather than env pinning.
+ *
+ * Its own unit because it is the only part that walks the diff; the purity
+ * verdict below is then pure set algebra over its result.
+ */
+const scanPinDelta = (sectionBody: string): PinDelta | null => {
+  const removed = new Set<string>()
+  const added = new Set<string>()
+  let changedLines = 0
+  for (const line of sectionBody.split("\n")) {
+    const change = changedContentOf(line)
+    if (change === null) continue
+    changedLines++
+    const pkg = requirementPackage(change.content)
+    if (pkg === null) return null // a non-requirement change ⇒ real edit ⇒ keep
+    // Every ADDED line must add an upper bound — the env-pin signature. An added
+    // line without one is a real edit (reorder / case-fix / loosened bound).
+    if (change.isAdd && !addsUpperBound(change.content)) return null
+    ;(change.isAdd ? added : removed).add(pkg)
+  }
+  return { removed, added, changedLines }
+}
+
+/** Set equality by membership (both directions follow from equal sizes). */
+const sameMembers = (a: ReadonlySet<string>, b: ReadonlySet<string>): boolean => {
+  if (a.size !== b.size) return false
+  for (const x of a) if (!b.has(x)) return false
+  return true
+}
+
 /**
  * True when a file-section is PURELY env dependency-pinning: every added/removed
  * line is a requirement string, and the set of removed packages == the set of
@@ -67,28 +120,10 @@ const targetPathOf = (sectionHeader: string): string | undefined => {
  * no code touched).
  */
 const isPureDependencyPinSection = (sectionBody: string): boolean => {
-  const removed = new Set<string>()
-  const added = new Set<string>()
-  let changedLines = 0
-  for (const line of sectionBody.split("\n")) {
-    // skip file headers and hunk headers; only +/- content lines are "changes"
-    if (line.startsWith("+++") || line.startsWith("---")) continue
-    const isAdd = line.startsWith("+")
-    const isDel = line.startsWith("-")
-    if (!isAdd && !isDel) continue
-    changedLines++
-    const content = line.slice(1)
-    const pkg = requirementPackage(content)
-    if (pkg === null) return false // a non-requirement change ⇒ real edit ⇒ keep
-    // Every ADDED line must add an upper bound — the env-pin signature. An added
-    // line without one is a real edit (reorder / case-fix / loosened bound).
-    if (isAdd && !addsUpperBound(content)) return false
-    ;(isAdd ? added : removed).add(pkg)
-  }
-  if (changedLines === 0 || removed.size === 0) return false
-  if (removed.size !== added.size) return false
-  for (const p of removed) if (!added.has(p)) return false
-  return true
+  const delta = scanPinDelta(sectionBody)
+  if (delta === null) return false
+  if (delta.changedLines === 0 || delta.removed.size === 0) return false
+  return sameMembers(delta.removed, delta.added)
 }
 
 /**

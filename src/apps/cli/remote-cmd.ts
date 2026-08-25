@@ -82,38 +82,71 @@ interface ParsedRunArgs {
   readonly workdir: string | undefined
 }
 
+/** Mutable accumulator for the three value-taking flags. Separate from the
+ *  frozen {@link ParsedRunArgs} so a flag handler can write one axis without
+ *  the parser threading three `let`s through every branch. */
+interface RunArgsAcc {
+  image?: string
+  timeoutMs?: number
+  workdir?: string
+}
+
+/** A flag handler: write `raw` into `acc`, or return the error string that
+ *  rejects it. Returning `undefined` means "accepted". */
+type RunFlagHandler = (acc: RunArgsAcc, raw: string) => string | undefined
+
+/**
+ * The value-taking flags, as a TABLE.
+ *
+ * ONE unit because all three flags share the identical three-step gate —
+ * "advance the cursor, demand a value, apply it" — and spelling that gate out
+ * per flag WAS this parser's cognitive-complexity score. Only the apply step
+ * differs, so only the apply step is tabulated.
+ *
+ * A `Map` (not a plain object) on purpose: an object literal resolves
+ * `toString` / `constructor` off `Object.prototype`, which would silently turn
+ * a task named `toString` into a flag lookup.
+ */
+const RUN_FLAGS: ReadonlyMap<string, RunFlagHandler> = new Map<string, RunFlagHandler>([
+  [
+    "--image",
+    (acc, raw) => {
+      acc.image = raw
+      return undefined
+    },
+  ],
+  [
+    "--timeout-ms",
+    (acc, raw) => {
+      const n = Number.parseInt(raw, 10)
+      if (!Number.isFinite(n) || n < 0) return `invalid --timeout-ms: ${raw}`
+      acc.timeoutMs = n
+      return undefined
+    },
+  ],
+  [
+    "--workdir",
+    (acc, raw) => {
+      acc.workdir = raw
+      return undefined
+    },
+  ],
+])
+
 const parseRunArgs = (
   argv: readonly string[],
 ): { ok: true; value: ParsedRunArgs } | { ok: false; error: string } => {
+  const acc: RunArgsAcc = {}
   let task: string | undefined
-  let image: string | undefined
-  let timeoutMs: number | undefined
-  let workdir: string | undefined
   for (let i = 0; i < argv.length; i += 1) {
     const tok = argv[i] ?? ""
-    if (tok === "--image") {
+    const handler = RUN_FLAGS.get(tok)
+    if (handler !== undefined) {
       i += 1
       const v = argv[i]
-      if (v === undefined) return { ok: false, error: "missing value for --image" }
-      image = v
-      continue
-    }
-    if (tok === "--timeout-ms") {
-      i += 1
-      const v = argv[i]
-      if (v === undefined) return { ok: false, error: "missing value for --timeout-ms" }
-      const n = Number.parseInt(v, 10)
-      if (!Number.isFinite(n) || n < 0) {
-        return { ok: false, error: `invalid --timeout-ms: ${v}` }
-      }
-      timeoutMs = n
-      continue
-    }
-    if (tok === "--workdir") {
-      i += 1
-      const v = argv[i]
-      if (v === undefined) return { ok: false, error: "missing value for --workdir" }
-      workdir = v
+      if (v === undefined) return { ok: false, error: `missing value for ${tok}` }
+      const rejected = handler(acc, v)
+      if (rejected !== undefined) return { ok: false, error: rejected }
       continue
     }
     if (tok.startsWith("--")) {
@@ -125,7 +158,10 @@ const parseRunArgs = (
     task = tok
   }
   if (task === undefined) return { ok: false, error: "missing <task>" }
-  return { ok: true, value: { task, image, timeoutMs, workdir } }
+  return {
+    ok: true,
+    value: { task, image: acc.image, timeoutMs: acc.timeoutMs, workdir: acc.workdir },
+  }
 }
 
 /* ------------------------------------------------------------------ */

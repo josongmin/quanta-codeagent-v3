@@ -587,6 +587,19 @@ type SurfacedSlots = Pick<
   ReplSlashCtx,
   "activityItems" | "projectsKb" | "mcpResources" | "browserNet" | "automation"
 >
+/**
+ * Presence-spread: `{ [key]: value }` when `value` is defined, else `{}`.
+ *
+ * ONE unit standing in for the ~45 `...(x !== undefined ? { k: x } : {})`
+ * ternaries the two projectors below used to spell out. Under
+ * `exactOptionalPropertyTypes` an unwired slot must be an ABSENT KEY (not a key
+ * holding `undefined`) — that is the whole rule, and repeating it per slot was
+ * the entirety of both functions' cognitive-complexity score. Spread order is
+ * preserved at the call sites, so key order in the built ctx is unchanged.
+ */
+const opt = <K extends string, V>(key: K, value: V | undefined): { [P in K]?: V } =>
+  value === undefined ? ({} as { [P in K]?: V }) : ({ [key]: value } as { [P in K]?: V })
+
 type SurfacedSlotsInput = { [K in keyof SurfacedSlots]?: SurfacedSlots[K] | undefined }
 const spreadSurfacedSlots = (s: SurfacedSlotsInput): Partial<SurfacedSlots> => ({
   ...(s.activityItems !== undefined ? { activityItems: s.activityItems } : {}),
@@ -635,86 +648,97 @@ export const buildReplSlashCtx = (args: BuildReplSlashCtxArgs): ReplSlashCtx => 
     radarPruneOlderThanMs,
   } = args
   const newSlots = buildNewSlotAdapters(args)
+  // The five slots whose VALUE is a closure over an optional port stay as
+  // whole-SLOT objects rather than `opt(key, fn)`: an arrow written as an
+  // object-property value inherits that key as its `Function.name`, and an
+  // arrow bound to a `const` through a ternary does not. Same one gate each,
+  // and the slot's identity is preserved exactly.
+  const costSlot = costPanel === undefined ? {} : { cost: () => costPanel.renderDetailed() }
+  const planSnapshotSlot =
+    planStore === undefined
+      ? {}
+      : { planSnapshot: (): import("@/agent/plan/types").Plan | null => planStore.current() }
+  const branchSearchSlot =
+    branchProgress === undefined ? {} : { branchSearch: () => branchProgress.snapshot() }
+  // Ticket 17 — `/agents` live fleet getter, read each invocation off the
+  // session registry. Absent registry ⇒ slot omitted ⇒ `/agents` "not wired".
+  const agentsSlot =
+    taskRegistry === undefined ? {} : { agents: () => taskRegistry.list().map(toAgentFleetRow) }
+  // RFC02-1 — `/ps` owner-scoped background-shell inventory. Wired ONLY when
+  // QUANTA_PROC_PANEL is on (same gate as the command registration). Reads the
+  // LIVE singleton registry each invocation, scoped to THIS session's owner
+  // (`sessionId`) via `listOwned`, and projects ONLY the redaction-safe fields
+  // (command/cwd/output are never read). Absent gate ⇒ slot omitted ⇒ `/ps`
+  // prints "not wired" (and is not even registered) — byte-identical when OFF.
+  const procShellsSlot = isProcPanelEnabled()
+    ? {
+        procShells: (): readonly ProcPanelRow[] =>
+          getBashBgRegistry()
+            .listOwned(sessionId)
+            .map((s) => ({
+              id: s.id,
+              status: s.status,
+              startedAt: s.startedAt,
+              exitCode: s.exitCode,
+            })),
+      }
+    : {}
   return {
-    ...(skillsCb !== undefined ? { skills: skillsCb } : {}),
-    ...(reloadSkillsCb !== undefined ? { reloadSkills: reloadSkillsCb } : {}),
+    ...opt("skills", skillsCb),
+    ...opt("reloadSkills", reloadSkillsCb),
     idle: idleMonitor,
-    ...(repoRules !== undefined ? { repoRules } : {}),
-    ...(imageQueue !== undefined ? { imageQueue } : {}),
-    ...(rewindState !== undefined ? { rewindSession: rewindState } : {}),
-    ...(mcpSurface !== undefined ? { mcp: mcpSurface } : {}),
-    ...(costPanel !== undefined ? { cost: () => costPanel.renderDetailed() } : {}),
-    ...(planStore !== undefined
-      ? { planSnapshot: (): import("@/agent/plan/types").Plan | null => planStore.current() }
-      : {}),
-    ...(branchProgress !== undefined ? { branchSearch: () => branchProgress.snapshot() } : {}),
+    ...opt("repoRules", repoRules),
+    ...opt("imageQueue", imageQueue),
+    ...opt("rewindSession", rewindState),
+    ...opt("mcp", mcpSurface),
+    ...costSlot,
+    ...planSnapshotSlot,
+    ...branchSearchSlot,
     history: { messages: getHistory },
     side: (): SideCmdSlashState => ({
       start: async ({ question, inherit, tools, maxTurns, signal }) =>
         await startSideConversation({
           question,
           signal,
-          ...(inherit !== undefined ? { inherit } : {}),
-          ...(tools !== undefined ? { tools } : {}),
-          ...(maxTurns !== undefined ? { maxTurns } : {}),
+          ...opt("inherit", inherit),
+          ...opt("tools", tools),
+          ...opt("maxTurns", maxTurns),
         }),
       isWired: isSideConversationWired,
       signal: abortSignal,
     }),
     // ADR-0239 — `/debug` runtime toggle. Absent ⇒ slash prints "not wired".
-    ...(debugHandle !== undefined ? { debug: debugHandle } : {}),
+    ...opt("debug", debugHandle),
     // ADR-0271 — `/why` meta-LLM reasoning query. Always wired in the
     // REPL surface (LLM + sessionId are required for the loop to start).
     why: { sessionId, llm, model },
     // Track I — `/inspect` active session wire. Absent ⇒ slash exits 1.
-    ...(inspect !== undefined ? { inspect } : {}),
+    ...opt("inspect", inspect),
     // Track R — `/replay` resolver+iterator. Absent ⇒ slash prints "not wired".
-    ...(replay !== undefined ? { replay } : {}),
+    ...opt("replay", replay),
     // Session-level reasoning-effort. Closes over the surface's EffortStore
     // (read on `/effort` no-arg) and pill (repainted on `/effort <level>`).
     effort,
     // #17 (C3) — `/brief` posture wire over the surface's BriefStore (the loop
     // reads the SAME cell via AgentConfig.sessionBrief). Presence-spread so an
     // absent slot omits `/brief` (byte-identical "not wired").
-    ...(brief !== undefined ? { brief } : {}),
+    ...opt("brief", brief),
     // Track D — `/context` live segmented usage. Absent upstream getter ⇒ slot
     // omitted (default-OFF byte-identical; `/context` keeps its fallback).
-    ...(contextUsage !== undefined ? { contextUsage } : {}),
-    // Ticket 17 — `/agents` live fleet getter, read each invocation off the
-    // session registry. Absent registry ⇒ slot omitted ⇒ `/agents` "not wired".
-    ...(taskRegistry !== undefined
-      ? { agents: () => taskRegistry.list().map(toAgentFleetRow) }
-      : {}),
+    ...opt("contextUsage", contextUsage),
+    ...agentsSlot,
     // RFC-01 A4 — `/attention` list/next/answer over the SAME broker + registry
     // A2 assembled. Absent slot ⇒ `/attention` "not wired" (byte-identical).
-    ...(attention !== undefined ? { attention } : {}),
+    ...opt("attention", attention),
     // RFC-06 F5 — `/skill` copy/reveal/enable/disable over the SAME live F1
     // authority + action ports. Absent slot ⇒ `/skill` "not wired"
     // (byte-identical when QUANTA_SKILL_ACTIONS is off).
-    ...(skillActions !== undefined ? { skillActions } : {}),
-    // RFC02-1 — `/ps` owner-scoped background-shell inventory. Wired ONLY when
-    // QUANTA_PROC_PANEL is on (same gate as the command registration). Reads the
-    // LIVE singleton registry each invocation, scoped to THIS session's owner
-    // (`sessionId`) via `listOwned`, and projects ONLY the redaction-safe fields
-    // (command/cwd/output are never read). Absent gate ⇒ slot omitted ⇒ `/ps`
-    // prints "not wired" (and is not even registered) — byte-identical when OFF.
-    ...(isProcPanelEnabled()
-      ? {
-          procShells: (): readonly ProcPanelRow[] =>
-            getBashBgRegistry()
-              .listOwned(sessionId)
-              .map((s) => ({
-                id: s.id,
-                status: s.status,
-                startedAt: s.startedAt,
-                exitCode: s.exitCode,
-              })),
-        }
-      : {}),
+    ...opt("skillActions", skillActions),
+    ...procShellsSlot,
     // ADR-0231 — `/radar` live store + prune cutoff. Absent store ⇒ slot
     // omitted ⇒ `/radar` "not wired" (default-OFF byte-identical).
-    ...(activityStore !== undefined ? { activityStore } : {}),
-    ...(itemStreamSink !== undefined ? { itemStreamSink } : {}),
+    ...opt("activityStore", activityStore),
+    ...opt("itemStreamSink", itemStreamSink),
     // jul-03 CLI-surfacing — S2/A3/B4/S1/B2 read-only slots (extracted helper so
     // this function stays under biome's cognitive-complexity budget; each is
     // presence-gated so an absent upstream port omits the ctx slot ⇒ the slash
@@ -726,8 +750,8 @@ export const buildReplSlashCtx = (args: BuildReplSlashCtxArgs): ReplSlashCtx => 
       browserNet,
       automation,
     }),
-    ...(radar !== undefined ? { radar } : {}),
-    ...(radarPruneOlderThanMs !== undefined ? { radarPruneOlderThanMs } : {}),
+    ...opt("radar", radar),
+    ...opt("radarPruneOlderThanMs", radarPruneOlderThanMs),
     // ADR-0291 — 8 new slots; each gated by presence so omitting an
     // upstream port produces a byte-identical "not wired" projection.
     ...spreadNewSlots(newSlots),
@@ -737,55 +761,53 @@ export const buildReplSlashCtx = (args: BuildReplSlashCtxArgs): ReplSlashCtx => 
 /** Project the pre-ADR-0291 slots. Extracted so each function stays under
  *  biome's cognitive-complexity ceiling. */
 const projectLegacySlots = (s: ReplSlashCtx): Record<string, unknown> => ({
-  ...(s.skills !== undefined ? { skills: s.skills } : {}),
-  ...(s.reloadSkills !== undefined ? { reloadSkills: s.reloadSkills } : {}),
-  ...(s.idle !== undefined ? { idle: s.idle } : {}),
-  ...(s.repoRules !== undefined ? { repoRules: s.repoRules } : {}),
+  ...opt("skills", s.skills),
+  ...opt("reloadSkills", s.reloadSkills),
+  ...opt("idle", s.idle),
+  ...opt("repoRules", s.repoRules),
   // #18 — expose the image queue on the contract ctx so `/paste` can enqueue a
   // clipboard image (the SAME instance `/image` mutates). Absent ⇒ slot omitted
   // ⇒ `/paste` degrades to the "save to disk + /image add" hint (byte-identical).
-  ...(s.imageQueue !== undefined ? { imageQueue: s.imageQueue } : {}),
-  ...(s.rewindSession !== undefined ? { rewindSession: s.rewindSession } : {}),
-  ...(s.mcp !== undefined ? { mcp: s.mcp } : {}),
-  ...(s.cost !== undefined ? { cost: s.cost } : {}),
-  ...(s.planSnapshot !== undefined ? { planSnapshot: s.planSnapshot } : {}),
-  ...(s.history !== undefined ? { history: s.history } : {}),
-  ...(s.branchSearch !== undefined ? { branchSearch: s.branchSearch } : {}),
+  ...opt("imageQueue", s.imageQueue),
+  ...opt("rewindSession", s.rewindSession),
+  ...opt("mcp", s.mcp),
+  ...opt("cost", s.cost),
+  ...opt("planSnapshot", s.planSnapshot),
+  ...opt("history", s.history),
+  ...opt("branchSearch", s.branchSearch),
   ...(s.side !== undefined ? { side: s.side() } : {}),
-  ...(s.debug !== undefined ? { debug: s.debug } : {}),
-  ...(s.why !== undefined ? { why: s.why } : {}),
-  ...(s.inspect !== undefined ? { inspect: s.inspect } : {}),
-  ...(s.replay !== undefined ? { replay: s.replay } : {}),
-  ...(s.effort !== undefined ? { effort: s.effort } : {}),
-  ...(s.brief !== undefined ? { brief: s.brief } : {}),
-  ...(s.contextUsage !== undefined ? { contextUsage: s.contextUsage } : {}),
-  ...(s.agents !== undefined ? { agents: s.agents } : {}),
+  ...opt("debug", s.debug),
+  ...opt("why", s.why),
+  ...opt("inspect", s.inspect),
+  ...opt("replay", s.replay),
+  ...opt("effort", s.effort),
+  ...opt("brief", s.brief),
+  ...opt("contextUsage", s.contextUsage),
+  ...opt("agents", s.agents),
   // RFC-06 F5 — `/skill` copy/reveal/enable/disable wire (SSOT projector so the
   // live REPL path carries it, not just the builder). Absent ⇒ "not wired".
-  ...(s.skillActions !== undefined ? { skillActions: s.skillActions } : {}),
-  ...(s.activityStore !== undefined ? { activityStore: s.activityStore } : {}),
-  ...(s.itemStreamSink !== undefined ? { itemStreamSink: s.itemStreamSink } : {}),
+  ...opt("skillActions", s.skillActions),
+  ...opt("activityStore", s.activityStore),
+  ...opt("itemStreamSink", s.itemStreamSink),
   // jul-03 CLI-surfacing — one presence-gated helper (shared with the builder).
   ...spreadSurfacedSlots(s),
-  ...(s.radar !== undefined ? { radar: s.radar } : {}),
-  ...(s.radarPruneOlderThanMs !== undefined
-    ? { radarPruneOlderThanMs: s.radarPruneOlderThanMs }
-    : {}),
+  ...opt("radar", s.radar),
+  ...opt("radarPruneOlderThanMs", s.radarPruneOlderThanMs),
 })
 
 /** Project the ADR-0291 slots. 1:1 spread; presence-gated for
  *  exactOptionalPropertyTypes. */
 const projectAdr0291Slots = (s: ReplSlashCtx): Record<string, unknown> => ({
-  ...(s.planEdit !== undefined ? { planEdit: s.planEdit } : {}),
-  ...(s.composerEdit !== undefined ? { composerEdit: s.composerEdit } : {}),
-  ...(s.forkSession !== undefined ? { forkSession: s.forkSession } : {}),
-  ...(s.perToolCheckpoint !== undefined ? { perToolCheckpoint: s.perToolCheckpoint } : {}),
-  ...(s.profile !== undefined ? { profile: s.profile } : {}),
-  ...(s.identity !== undefined ? { identity: s.identity } : {}),
-  ...(s.stickyModel !== undefined ? { stickyModel: s.stickyModel } : {}),
-  ...(s.focusChain !== undefined ? { focusChain: s.focusChain } : {}),
-  ...(s.textInbox !== undefined ? { textInbox: s.textInbox } : {}),
-  ...(s.hunkUndo !== undefined ? { hunkUndo: s.hunkUndo } : {}),
+  ...opt("planEdit", s.planEdit),
+  ...opt("composerEdit", s.composerEdit),
+  ...opt("forkSession", s.forkSession),
+  ...opt("perToolCheckpoint", s.perToolCheckpoint),
+  ...opt("profile", s.profile),
+  ...opt("identity", s.identity),
+  ...opt("stickyModel", s.stickyModel),
+  ...opt("focusChain", s.focusChain),
+  ...opt("textInbox", s.textInbox),
+  ...opt("hunkUndo", s.hunkUndo),
 })
 
 /** Map the surface-owned {@link ReplSlashCtx} into the contract shape that

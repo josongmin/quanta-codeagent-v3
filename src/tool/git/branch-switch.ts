@@ -16,7 +16,7 @@
  *  schema layer ([A-Za-z0-9._/+-], no leading '-', 64-char cap) so a malicious
  *  name cannot escape the argv we hand to `git`. */
 
-import type { GitDirectiveEmitter } from "../../agent/git-directives"
+import type { GitDirective, GitDirectiveEmitter } from "../../agent/git-directives"
 import type { CoreToolContext, Tool, ToolEvent } from "../types"
 import { mutate } from "./_shared"
 import {
@@ -178,6 +178,101 @@ const failResult = (output: string): ToolEvent => ({
   result: { ok: false, output },
 })
 
+/** Emit a directive without ever letting the emitter's failure reach the tool
+ *  result (ADR-0220). A unit because the identical `try { emit } catch {}` was
+ *  written twice, and because a swallowed throw is a rule worth naming once. */
+const safeEmit = (emitter: GitDirectiveEmitter, directive: GitDirective): void => {
+  try {
+    emitter.emit(directive)
+  } catch {
+    // never poison the tool result; see ADR-0220.
+  }
+}
+
+/** ADR-0220 wire for the commit-wip flow: resolve the new HEAD sha (best
+ *  effort — a failed `rev-parse` degrades to an empty sha, it does NOT fail the
+ *  switch) and emit the commit directive. A unit because "best-effort sha, then
+ *  swallow-safe emit" is one policy, not two statements. */
+const emitWipCommitDirective = async (
+  runner: GitRunner,
+  cwd: string,
+  signal: AbortSignal | undefined,
+  emitter: GitDirectiveEmitter,
+): Promise<void> => {
+  let sha = ""
+  const shaOut = await mutate(runner, ["rev-parse", "HEAD"], cwd, "git rev-parse", signal)
+  if (shaOut.kind === "ok") sha = shaOut.stdout.trim()
+  safeEmit(emitter, { kind: "commit", sha, message: "wip checkpoint (branch-switch)" })
+}
+
+/** What the pre-switch probe decided. `action === undefined` with `dirty:false`
+ *  is the ordinary clean-tree case; `dirty:true` with an action is the tree we
+ *  must clear first. (A dirty tree with NO action never reaches here — the
+ *  planner has already yielded the rejection.) */
+interface DirtyPlan {
+  readonly dirty: boolean
+  readonly action: GitDirtyAction | undefined
+}
+
+/** PHASE 1 — probe the tree and decide. Yields the status progress line and,
+ *  on either failure, the terminal failResult; returns `null` exactly when the
+ *  caller must stop. A unit because "probe, resolve, reject" is one decision
+ *  with one output, and keeping the two `return null` exits next to each other
+ *  is what makes the rejection contract readable. */
+async function* planDirtyTree(
+  runner: GitRunner,
+  ctx: CoreToolContext,
+  dirtyAction: GitDirtyAction | undefined,
+  autoWip: boolean | undefined,
+): AsyncGenerator<ToolEvent, DirtyPlan | null, void> {
+  yield { type: "progress", message: "git status --porcelain" }
+  const probe = await probeWorkingTree(runner, ctx.cwd, ctx.signal)
+  if (!probe.ok) {
+    yield failResult(probe.error)
+    return null
+  }
+  // Resolve the effective dirty action: explicit `dirtyAction` wins, else the
+  // legacy `autoWip` toggle. `undefined` ⇒ a dirty tree must be rejected.
+  const action = resolveDirtyAction(dirtyAction, autoWip)
+  if (probe.dirty && action === undefined) {
+    yield failResult(DIRTY_REJECTION)
+    return null
+  }
+  return { dirty: probe.dirty, action }
+}
+
+/** PHASE 2 — clear the dirty tree per the plan. No-op (returns `true`) for a
+ *  clean tree. Yields the per-action progress line and, on failure, the
+ *  terminal failResult; returns `false` exactly when the caller must stop.
+ *  A unit because the clearing flow and its ADR-0220 directive are one step:
+ *  the directive is only correct if the flow actually succeeded. */
+async function* clearDirtyTree(
+  plan: DirtyPlan,
+  runner: GitRunner,
+  ctx: CoreToolContext,
+  emitter: GitDirectiveEmitter | undefined,
+): AsyncGenerator<ToolEvent, boolean, void> {
+  const action = plan.action
+  if (!plan.dirty || action === undefined) return true
+  yield { type: "progress", message: PROGRESS[action] }
+  const cleared = await runDirtyFlow(action, runner, ctx.cwd, ctx.signal)
+  if (!cleared.ok) {
+    yield failResult(cleared.error)
+    return false
+  }
+  // ADR-0220 wire — only the commit-wip flow produces a recoverable commit
+  // to attribute. stash/discard have no closed directive kind, so they
+  // never emit. Byte-identical to the legacy autoWip emit.
+  if (emitter !== undefined && action === "commit-wip") {
+    await emitWipCommitDirective(runner, ctx.cwd, ctx.signal, emitter)
+  }
+  return true
+}
+
+/** The " (…)" suffix the result line carries when a dirty tree was cleared. */
+const dirtyNoteFor = (plan: DirtyPlan): string =>
+  plan.dirty && plan.action !== undefined ? RESULT_NOTE[plan.action] : ""
+
 export const gitBranchSwitchTool = (
   runner: GitRunner,
   opts: GitBranchSwitchToolOpts = {},
@@ -202,53 +297,12 @@ export const gitBranchSwitchTool = (
       return
     }
     const { branch, autoWip, dirtyAction, create } = parsed.data
-
-    yield { type: "progress", message: "git status --porcelain" }
-    const probe = await probeWorkingTree(runner, ctx.cwd, ctx.signal)
-    if (!probe.ok) {
-      yield failResult(probe.error)
-      return
-    }
-    const dirty = probe.dirty
-
-    // Resolve the effective dirty action: explicit `dirtyAction` wins, else the
-    // legacy `autoWip` toggle. `undefined` ⇒ a dirty tree must be rejected.
-    const action = resolveDirtyAction(dirtyAction, autoWip)
-
-    if (dirty && action === undefined) {
-      yield failResult(DIRTY_REJECTION)
-      return
-    }
-
     const emitter = opts.gitDirectiveEmitter
 
-    if (dirty && action !== undefined) {
-      yield { type: "progress", message: PROGRESS[action] }
-      const cleared = await runDirtyFlow(action, runner, ctx.cwd, ctx.signal)
-      if (!cleared.ok) {
-        yield failResult(cleared.error)
-        return
-      }
-      // ADR-0220 wire — only the commit-wip flow produces a recoverable commit
-      // to attribute. stash/discard have no closed directive kind, so they
-      // never emit. Byte-identical to the legacy autoWip emit.
-      if (emitter !== undefined && action === "commit-wip") {
-        let sha = ""
-        const shaOut = await mutate(
-          runner,
-          ["rev-parse", "HEAD"],
-          ctx.cwd,
-          "git rev-parse",
-          ctx.signal,
-        )
-        if (shaOut.kind === "ok") sha = shaOut.stdout.trim()
-        try {
-          emitter.emit({ kind: "commit", sha, message: "wip checkpoint (branch-switch)" })
-        } catch {
-          // never poison the tool result; see ADR-0220.
-        }
-      }
-    }
+    const plan = yield* planDirtyTree(runner, ctx, dirtyAction, autoWip)
+    if (plan === null) return
+    const cleared = yield* clearDirtyTree(plan, runner, ctx, emitter)
+    if (!cleared) return
 
     yield { type: "progress", message: `git switch ${branch}` }
     const sw = await runSwitch(runner, ctx.cwd, branch, create, ctx.signal)
@@ -260,18 +314,13 @@ export const gitBranchSwitchTool = (
     // ADR-0220 wire — only `create:true` emits a create-branch directive
     // (no closed-union kind exists for a plain checkout).
     if (emitter !== undefined && create === true) {
-      try {
-        emitter.emit({ kind: "create-branch", name: branch })
-      } catch {
-        // never poison the tool result; see ADR-0220.
-      }
+      safeEmit(emitter, { kind: "create-branch", name: branch })
     }
 
-    const dirtyNote = dirty && action !== undefined ? RESULT_NOTE[action] : ""
     const createNote = create ? " (created)" : ""
     yield {
       type: "result",
-      result: { ok: true, output: `switched to ${branch}${createNote}${dirtyNote}` },
+      result: { ok: true, output: `switched to ${branch}${createNote}${dirtyNoteFor(plan)}` },
     }
   },
 })

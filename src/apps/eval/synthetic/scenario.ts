@@ -52,18 +52,19 @@ export interface Scenario {
   maxTurns?: number
 }
 
-/** Tolerant loader: validates required fields, fills defaults, throws on shape error. */
-export const parseScenario = (raw: unknown): Scenario => {
-  if (typeof raw !== "object" || raw === null) {
-    throw new Error("scenario must be an object")
-  }
-  const r = raw as Record<string, unknown>
-  const schema = r.schema
-  if (schema !== SCENARIO_SCHEMA_VERSION) {
-    throw new Error(
-      `scenario schema mismatch: got ${String(schema)}, want ${SCENARIO_SCHEMA_VERSION}`,
-    )
-  }
+/** The five always-required fields, extracted and narrowed in ONE place.
+ *  A unit because the original spelled the check as a six-clause `||` chain
+ *  whose only job was to produce these five narrowed locals; the chain's
+ *  boolean-sequence surcharge was ~a third of the parent's score. */
+interface CoreFields {
+  id: string
+  usecase: UseCaseId
+  title: string
+  prompt: string
+  rubric: readonly unknown[]
+}
+
+const parseCoreFields = (r: Record<string, unknown>): CoreFields => {
   const id = r.id
   const usecase = r.usecase
   const title = r.title
@@ -79,39 +80,62 @@ export const parseScenario = (raw: unknown): Scenario => {
   ) {
     throw new Error("scenario missing required fields: id, usecase, title, prompt, rubric[]")
   }
-  // Validate optional `forbidden`/`maxTurns` strictly: a silently-dropped
-  // non-string in `forbidden` would defeat the safety net (e.g. model emits
-  // `[{pattern:"rm -rf"}]` → empty list → unguarded). `maxTurns` is the
-  // loop ceiling, so a NaN/negative/zero value would either crash runAgent or
-  // produce a zero-turn run scored as fail.
-  const forbiddenRaw = r.forbidden
-  let forbidden: readonly string[] | undefined
-  if (forbiddenRaw !== undefined) {
-    if (!Array.isArray(forbiddenRaw)) {
-      throw new Error("scenario.forbidden must be a string array when present")
-    }
-    for (const x of forbiddenRaw) {
-      if (typeof x !== "string") {
-        throw new Error(`scenario.forbidden contains non-string entry: ${JSON.stringify(x)}`)
-      }
-    }
-    forbidden = forbiddenRaw as readonly string[]
+  return { id, usecase, title, prompt, rubric }
+}
+
+/** Validate optional `forbidden` strictly: a silently-dropped non-string would
+ *  defeat the safety net (e.g. model emits `[{pattern:"rm -rf"}]` → empty list
+ *  → unguarded). A unit because it is a self-contained `unknown -> T|undefined`
+ *  narrowing that cannot be expressed as a `let` inside the parent without
+ *  losing definite-assignment clarity. */
+const parseForbidden = (raw: unknown): readonly string[] | undefined => {
+  if (raw === undefined) return undefined
+  if (!Array.isArray(raw)) {
+    throw new Error("scenario.forbidden must be a string array when present")
   }
-  const maxTurnsRaw = r.maxTurns
-  let maxTurns: number | undefined
-  if (maxTurnsRaw !== undefined) {
-    if (typeof maxTurnsRaw !== "number" || !Number.isInteger(maxTurnsRaw) || maxTurnsRaw < 1) {
-      throw new Error(`scenario.maxTurns must be a positive integer (got ${String(maxTurnsRaw)})`)
+  for (const x of raw) {
+    if (typeof x !== "string") {
+      throw new Error(`scenario.forbidden contains non-string entry: ${JSON.stringify(x)}`)
     }
-    maxTurns = maxTurnsRaw
   }
+  return raw as readonly string[]
+}
+
+/** Validate optional `maxTurns` strictly: it is the loop ceiling, so a
+ *  NaN/negative/zero value would either crash runAgent or produce a zero-turn
+ *  run scored as fail. Same `unknown -> T|undefined` shape as `parseForbidden`;
+ *  the two are siblings, not one generic helper, because their predicates and
+ *  messages share no structure worth abstracting. */
+const parseMaxTurns = (raw: unknown): number | undefined => {
+  if (raw === undefined) return undefined
+  if (typeof raw !== "number" || !Number.isInteger(raw) || raw < 1) {
+    throw new Error(`scenario.maxTurns must be a positive integer (got ${String(raw)})`)
+  }
+  return raw
+}
+
+/** Tolerant loader: validates required fields, fills defaults, throws on shape error. */
+export const parseScenario = (raw: unknown): Scenario => {
+  if (typeof raw !== "object" || raw === null) {
+    throw new Error("scenario must be an object")
+  }
+  const r = raw as Record<string, unknown>
+  const schema = r.schema
+  if (schema !== SCENARIO_SCHEMA_VERSION) {
+    throw new Error(
+      `scenario schema mismatch: got ${String(schema)}, want ${SCENARIO_SCHEMA_VERSION}`,
+    )
+  }
+  const core = parseCoreFields(r)
+  const forbidden = parseForbidden(r.forbidden)
+  const maxTurns = parseMaxTurns(r.maxTurns)
   const out: Scenario = {
     schema: SCENARIO_SCHEMA_VERSION,
-    id,
-    usecase,
-    title,
-    prompt,
-    rubric: rubric.map(parseRubric),
+    id: core.id,
+    usecase: core.usecase,
+    title: core.title,
+    prompt: core.prompt,
+    rubric: core.rubric.map(parseRubric),
     ...(Array.isArray(r.files) ? { files: r.files.map(parseFile) } : {}),
     ...(typeof r.setupCmd === "string" ? { setupCmd: r.setupCmd } : {}),
     ...(forbidden !== undefined ? { forbidden } : {}),

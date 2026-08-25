@@ -1,6 +1,13 @@
-import { abortReasonOf, err, errMessage, fetchWithDeadline, ok, type Result } from "@/shared"
+import { err, ok, type Result } from "@/shared"
 import type { AudioBlob } from "../voice/types"
-import { DEFAULT_STT_TIMEOUT_MS, type FetchLike } from "./deepgram-adapter"
+import {
+  DEFAULT_STT_TIMEOUT_MS,
+  type FetchLike,
+  sttInputError,
+  sttPost,
+  sttReadJson,
+  sttResponseError,
+} from "./deepgram-adapter"
 import type { SpeechToTextPort, TranscribeOpts } from "./port"
 import type { SttError, Transcript } from "./types"
 
@@ -14,10 +21,39 @@ export interface WhisperAdapterOpts {
   readonly model?: string
 }
 
-const mimeOk = (mime: string): boolean => mime === "audio/wav" || mime === "audio/mp3"
 const fileNameFor = (mime: string): string => (mime === "audio/mp3" ? "audio.mp3" : "audio.wav")
 
 const isObj = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null
+
+/** The multipart body Whisper wants. A unit so the request shape is stated in
+ *  one place instead of three `form.append` lines wedged mid-method. */
+const whisperForm = (blob: AudioBlob, model: string): FormData => {
+  const form = new FormData()
+  form.append("file", new Blob([blob.bytes], { type: blob.mime }), fileNameFor(blob.mime))
+  form.append("model", model)
+  form.append("response_format", "verbose_json")
+  return form
+}
+
+/** Whisper's `verbose_json` body → transcript, or the typed reason it is not
+ *  usable. A unit because it is the only provider-specific decoding step left
+ *  once the transport/status tables are shared; it is also pure, so it is the
+ *  part worth testing directly. */
+const whisperTranscript = (json: unknown): Result<Transcript, SttError> => {
+  if (!isObj(json)) {
+    return err({ kind: "no-transcription", degradeReason: "whisper returned non-object body" })
+  }
+  const text = typeof json.text === "string" ? json.text : ""
+  if (text.length === 0) {
+    return err({ kind: "no-transcription", degradeReason: "whisper returned empty text" })
+  }
+  const languageHint = typeof json.language === "string" ? json.language : undefined
+  return ok({
+    text,
+    confidence: 1.0,
+    ...(languageHint !== undefined ? { languageHint } : {}),
+  })
+}
 
 export const createWhisperAdapter = (opts: WhisperAdapterOpts): SpeechToTextPort => {
   const fetchFn: FetchLike = opts.fetchFn ?? ((input, init) => fetch(input, init))
@@ -28,83 +64,30 @@ export const createWhisperAdapter = (opts: WhisperAdapterOpts): SpeechToTextPort
       blob: AudioBlob,
       reqOpts?: TranscribeOpts,
     ): Promise<Result<Transcript, SttError>> {
-      if (!mimeOk(blob.mime)) {
-        return err({ kind: "unsupported-mime", mime: blob.mime })
-      }
-      if (blob.bytes.byteLength === 0) {
-        return err({ kind: "empty-audio" })
-      }
-      const form = new FormData()
-      form.append("file", new Blob([blob.bytes], { type: blob.mime }), fileNameFor(blob.mime))
-      form.append("model", model)
-      form.append("response_format", "verbose_json")
-
+      const bad = sttInputError(blob)
+      if (bad !== undefined) return err(bad)
       // T01 (audit L9 H4): deadline + caller signal via the shared primitive so
       // a hung Whisper connection degrades to a typed `timeout` / `aborted`.
       const timeoutMs = reqOpts?.timeoutMs ?? DEFAULT_STT_TIMEOUT_MS
-      let res: Response
-      try {
-        res = await fetchWithDeadline(endpoint, {
-          method: "POST",
-          headers: { Authorization: `Bearer ${opts.apiKey}` },
-          body: form,
-          timeoutMs,
-          ...(reqOpts?.signal !== undefined ? { signal: reqOpts.signal } : {}),
-          // body is a real `BodyInit` (FormData); bridge the primitive's
-          // carrier-agnostic `unknown` body to the adapter's `RequestInit` seam.
-          fetchFn: (input, init) => fetchFn(input, init as RequestInit),
-        })
-      } catch (e) {
-        const reason = abortReasonOf(e)
-        if (reason === "timeout") return err({ kind: "timeout", timeoutMs })
-        if (reason === "abort") return err({ kind: "aborted" })
-        return err({
-          kind: "network-error",
-          degradeReason: errMessage(e),
-        })
-      }
-      if (res.status === 401 || res.status === 403) {
-        return err({ kind: "auth-failed", status: res.status })
-      }
-      if (res.status === 429) {
-        return err({ kind: "rate-limited", status: 429 })
-      }
-      if (!res.ok) {
-        return err({
-          kind: "transcription-failed",
-          status: res.status,
-          degradeReason: `whisper returned ${res.status}`,
-        })
-      }
-      let json: unknown
-      try {
-        json = await res.json()
-      } catch (e) {
-        return err({
-          kind: "transcription-failed",
-          status: res.status,
-          degradeReason: `whisper JSON parse failed: ${errMessage(e)}`,
-        })
-      }
-      if (!isObj(json)) {
-        return err({
-          kind: "no-transcription",
-          degradeReason: "whisper returned non-object body",
-        })
-      }
-      const text = typeof json.text === "string" ? json.text : ""
-      if (text.length === 0) {
-        return err({
-          kind: "no-transcription",
-          degradeReason: "whisper returned empty text",
-        })
-      }
-      const languageHint = typeof json.language === "string" ? json.language : undefined
-      return ok({
-        text,
-        confidence: 1.0,
-        ...(languageHint !== undefined ? { languageHint } : {}),
+      const posted = await sttPost({
+        endpoint,
+        headers: { Authorization: `Bearer ${opts.apiKey}` },
+        body: whisperForm(blob, model),
+        timeoutMs,
+        ...(reqOpts?.signal !== undefined ? { signal: reqOpts.signal } : {}),
+        fetchFn,
       })
+      if (!posted.ok) return err(posted.error)
+      const res = posted.value
+      // Whisper reports no Retry-After, so its 429 stays the bare rate-limit error.
+      const httpErr = sttResponseError(res, "whisper", () => ({
+        kind: "rate-limited",
+        status: 429,
+      }))
+      if (httpErr !== undefined) return err(httpErr)
+      const body = await sttReadJson(res, "whisper")
+      if (!body.ok) return err(body.error)
+      return whisperTranscript(body.value)
     },
   }
 }

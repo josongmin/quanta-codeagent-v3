@@ -96,6 +96,112 @@ const emptyCounts = (): Record<Verdict, number> => ({
   skipped: 0,
 })
 
+/** Load one scenario file, converting a parse failure into a logged skip.
+ *  A unit because the parse try/catch was the outer of TWO stacked try/catches
+ *  inside the `for` body — biome charges the nesting, and the `continue` it
+ *  needed is what forced them to be stacked rather than sequential. */
+const loadScenarioOrWarn = (file: string): Scenario | undefined => {
+  try {
+    return loadScenarioFile(file)
+  } catch (e) {
+    logger.warn("eval.synthetic: scenario parse failed", { file, error: errMessage(e) })
+    return undefined
+  }
+}
+
+/** The `runScenario` option bag. A unit because it is nothing but the
+ *  `x !== undefined ? { x } : {}` spread cluster that `exactOptionalPropertyTypes`
+ *  forces on every optional passthrough; three of them in a row cost more than
+ *  the logic around them. */
+const buildRunOpts = (
+  opts: SyntheticRunOpts,
+  recordTo: string | undefined,
+): Parameters<typeof runScenario>[1] => ({
+  llm: opts.agent,
+  ...(opts.timeoutMs !== undefined ? { timeoutMs: opts.timeoutMs } : {}),
+  ...(recordTo !== undefined ? { recordTo } : {}),
+})
+
+/** The persisted synthetic payload for a scenario that actually ran.
+ *  Same reason as `buildRunOpts`: a run of optional-field spreads, not logic.
+ *  ADR-0087 — fill the additive token/cost fields when the run captured usage.
+ *  `costUsd` is dropped for null (unknown model) so the payload stays
+ *  byte-identical to the pre-feature path when there's no price. */
+const buildSyntheticPayload = (
+  scenario: Scenario,
+  run: RunResult,
+  judged: JudgeVerdict,
+  verdict: Verdict,
+) => ({
+  kind: "synthetic" as const,
+  scenarioId: scenario.id,
+  verdict,
+  score: judged.score,
+  rubric: judged.rubric,
+  toolsUsed: run.toolsUsed,
+  ...(run.forbiddenHit !== undefined ? { forbiddenHit: run.forbiddenHit } : {}),
+  durationMs: run.durationMs,
+  ...(run.tokens ? { tokens: run.tokens } : {}),
+  ...(typeof run.costUsd === "number" ? { costUsd: run.costUsd } : {}),
+})
+
+/** Run + judge + persist ONE already-parsed scenario, tallying into `counts`.
+ *  A unit because it is the inner try/catch of the loop: everything here is at
+ *  the same nesting depth and shares one failure policy (log, count `error`,
+ *  still persist a record so the matrix has a row).
+ *
+ *  `counts` is mutated in place rather than returned so the double-count on a
+ *  failing `store.append` (verdict counted, THEN `error` counted) is preserved
+ *  exactly as the pre-split loop behaved. */
+const runAndRecordScenario = async (
+  file: string,
+  scenario: Scenario,
+  ctx: {
+    opts: SyntheticRunOpts
+    store: ResultStore
+    runId: string
+    counts: Record<Verdict, number>
+    recordTo: string | undefined
+  },
+): Promise<void> => {
+  const { opts, store, runId, counts } = ctx
+  try {
+    const run = await runScenario(scenario, buildRunOpts(opts, ctx.recordTo))
+    const judged = await runJudge(
+      {
+        scenario,
+        assistantText: run.assistantText,
+        toolsUsed: run.toolsUsed,
+        turns: run.turns,
+        stopReason: run.stopReason,
+      },
+      { llm: opts.judge },
+    )
+    const v = verdictFor(run, judged)
+    counts[v] += 1
+    await store.append(runId, {
+      tier: "synthetic",
+      usecase: scenario.usecase,
+      payload: buildSyntheticPayload(scenario, run, judged, v),
+    })
+  } catch (e) {
+    logger.warn("eval.synthetic: scenario run failed", { file, error: errMessage(e) })
+    counts.error += 1
+    await store.append(runId, {
+      tier: "synthetic",
+      usecase: scenario.usecase,
+      payload: {
+        kind: "synthetic",
+        scenarioId: scenario.id,
+        verdict: "error",
+        rubric: [],
+        toolsUsed: [],
+        durationMs: 0,
+      },
+    })
+  }
+}
+
 /** Run all (or one usecase's) scenarios end-to-end. Returns a summary; full
  *  per-scenario records are in the store under `runId`. */
 export const runSynthetic = async (opts: SyntheticRunOpts): Promise<SyntheticSummary> => {
@@ -115,74 +221,15 @@ export const runSynthetic = async (opts: SyntheticRunOpts): Promise<SyntheticSum
   const trajectoryDir = join(opts.storeDir ?? DEFAULT_RUNS_DIR, runId)
   if (recordEnabled) mkdirSync(trajectoryDir, { recursive: true })
   for (const f of files) {
-    let scenario: Scenario
-    try {
-      scenario = loadScenarioFile(f)
-    } catch (e) {
-      logger.warn("eval.synthetic: scenario parse failed", {
-        file: f,
-        error: errMessage(e),
-      })
-      continue
-    }
-    try {
-      const recordTo = recordEnabled ? join(trajectoryDir, `${scenario.id}.jsonl`) : undefined
-      const runOpts = {
-        llm: opts.agent,
-        ...(opts.timeoutMs !== undefined ? { timeoutMs: opts.timeoutMs } : {}),
-        ...(recordTo !== undefined ? { recordTo } : {}),
-      }
-      const run = await runScenario(scenario, runOpts)
-      const verdict_ = await runJudge(
-        {
-          scenario,
-          assistantText: run.assistantText,
-          toolsUsed: run.toolsUsed,
-          turns: run.turns,
-          stopReason: run.stopReason,
-        },
-        { llm: opts.judge },
-      )
-      const v = verdictFor(run, verdict_)
-      counts[v] += 1
-      await store.append(runId, {
-        tier: "synthetic",
-        usecase: scenario.usecase,
-        payload: {
-          kind: "synthetic",
-          scenarioId: scenario.id,
-          verdict: v,
-          score: verdict_.score,
-          rubric: verdict_.rubric,
-          toolsUsed: run.toolsUsed,
-          ...(run.forbiddenHit !== undefined ? { forbiddenHit: run.forbiddenHit } : {}),
-          durationMs: run.durationMs,
-          // ADR-0087 — fill the additive token/cost fields when the run captured
-          // usage. `costUsd` is dropped for null (unknown model) so the payload
-          // stays byte-identical to the pre-feature path when there's no price.
-          ...(run.tokens ? { tokens: run.tokens } : {}),
-          ...(typeof run.costUsd === "number" ? { costUsd: run.costUsd } : {}),
-        },
-      })
-    } catch (e) {
-      logger.warn("eval.synthetic: scenario run failed", {
-        file: f,
-        error: errMessage(e),
-      })
-      counts.error += 1
-      await store.append(runId, {
-        tier: "synthetic",
-        usecase: scenario.usecase,
-        payload: {
-          kind: "synthetic",
-          scenarioId: scenario.id,
-          verdict: "error",
-          rubric: [],
-          toolsUsed: [],
-          durationMs: 0,
-        },
-      })
-    }
+    const scenario = loadScenarioOrWarn(f)
+    if (scenario === undefined) continue
+    await runAndRecordScenario(f, scenario, {
+      opts,
+      store,
+      runId,
+      counts,
+      recordTo: recordEnabled ? join(trajectoryDir, `${scenario.id}.jsonl`) : undefined,
+    })
   }
   const durationMs = Date.now() - start
   // ADR-0087 — run-level status + reproduction params. `params.model` is the

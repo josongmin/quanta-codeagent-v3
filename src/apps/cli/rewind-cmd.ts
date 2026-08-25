@@ -398,11 +398,19 @@ type ResolvedTarget =
       readonly dropTurns: number
     }
 
-/** Resolve `targetId` (exact / prefix) against the saved transcript and
- *  pre-count drops. Pulled out of the dispatch body so the cognitive-
- *  complexity budget on `run()` stays sane. Pure — no IO. */
-const resolveTarget = (saved: TranscriptView, targetId: string): ResolvedTarget => {
-  const messages = saved.messages
+/**
+ * Resolve `targetId` against the saved ids: an EXACT match wins outright, else
+ * a UNIQUE prefix match. Harness-authored reminder ids are never addressable.
+ *
+ * ONE unit because it owns id RESOLUTION only — the drop accounting below reads
+ * its answer and shares none of its guards. Pure — no IO.
+ */
+const findRewindTargetId = (
+  messages: TranscriptView["messages"],
+  targetId: string,
+):
+  | { readonly kind: "err"; readonly message: string }
+  | { readonly kind: "ok"; readonly fullId: string } => {
   let hit: string | undefined
   for (const m of messages) {
     const id = m.id
@@ -425,22 +433,40 @@ const resolveTarget = (saved: TranscriptView, targetId: string): ResolvedTarget 
   if (hit === undefined) {
     return { kind: "err", message: `message-id not found: ${targetId}` }
   }
-  const idx = messages.findIndex((m) => m.id === hit)
-  let dropMsgs = 0
+  return { kind: "ok", fullId: hit }
+}
+
+/**
+ * Count what a rewind to `fullId` drops: every message after it (`dropMsgs`),
+ * and — separately — only the turns the OPERATOR took (`dropTurns`).
+ *
+ * ONE unit because the two counts differ by exactly one rule: a harness
+ * reminder IS dropped (so it counts in `dropMsgs`) but must not inflate the
+ * "you will lose N turns" figure the destructive confirm shows. Pure — no IO.
+ */
+const countRewindDrops = (
+  messages: TranscriptView["messages"],
+  fullId: string,
+): { readonly dropMsgs: number; readonly dropTurns: number } => {
+  const idx = messages.findIndex((m) => m.id === fullId)
+  if (idx < 0) return { dropMsgs: 0, dropTurns: 0 }
+  const slice = messages.slice(idx + 1)
   let dropTurns = 0
-  if (idx >= 0) {
-    const slice = messages.slice(idx + 1)
-    dropMsgs = slice.length
-    /* Count only turns the OPERATOR took: a harness reminder is dropped (and is
-       counted in `dropMsgs`) but must not inflate the "you will lose N turns"
-       figure the destructive confirm shows. */
-    for (const m of slice) {
-      if (m.role !== "user") continue
-      if (typeof m.id === "string" && m.id.startsWith(SYNTHETIC_USER_MESSAGE_ID_PREFIX)) continue
-      dropTurns += 1
-    }
+  for (const m of slice) {
+    if (m.role !== "user") continue
+    if (typeof m.id === "string" && m.id.startsWith(SYNTHETIC_USER_MESSAGE_ID_PREFIX)) continue
+    dropTurns += 1
   }
-  return { kind: "ok", fullId: hit, dropMsgs, dropTurns }
+  return { dropMsgs: slice.length, dropTurns }
+}
+
+/** Resolve `targetId` (exact / prefix) against the saved transcript and
+ *  pre-count drops. Pulled out of the dispatch body so the cognitive-
+ *  complexity budget on `run()` stays sane. Pure — no IO. */
+const resolveTarget = (saved: TranscriptView, targetId: string): ResolvedTarget => {
+  const found = findRewindTargetId(saved.messages, targetId)
+  if (found.kind === "err") return found
+  return { kind: "ok", fullId: found.fullId, ...countRewindDrops(saved.messages, found.fullId) }
 }
 
 /** Test seam for {@link resolveTarget} (pure). Exported so the hellgate can

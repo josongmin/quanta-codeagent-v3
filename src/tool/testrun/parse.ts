@@ -37,15 +37,11 @@ const group = (m: RegExpExecArray, i: number): string => m[i] ?? ""
  */
 const lineAt = (lines: readonly string[], i: number): string => lines[i] ?? ""
 
-/** C++ via `ctest --output-on-failure`. ctest surfaces the underlying framework
- *  output; we localize from the two dominant shapes: libc `assert` (VERBATIM-
- *  pinned: `Assertion failed: (COND), function FN, file FILE, line N.`) and
- *  GoogleTest (`FILE:LINE: Failure` + `[  FAILED  ] Suite.Test`). NEVER-throws. */
-export const parseCtest = (output: string): TestRunResult => {
-  const lines = output.split("\n")
+/** libc `assert`, VERBATIM-pinned: `Assertion failed: (COND), function FN, file
+ *  FILE, line N.`. Its own unit because it is a self-contained per-line match —
+ *  one fully localized failure per line, no state carried between lines. */
+const ctestLibcAssertFailures = (lines: readonly string[]): TestFailure[] => {
   const failed: TestFailure[] = []
-
-  // libc assert (verbatim) — one failure per assert line, fully localized.
   for (const raw of lines) {
     const am = /^Assertion failed: \((.+)\), function (.+), file (.+), line (\d+)\.?$/.exec(
       raw.trim(),
@@ -58,113 +54,253 @@ export const parseCtest = (output: string): TestRunResult => {
         message: `Assertion failed: (${am[1]})`,
       })
   }
+  return failed
+}
 
-  // GoogleTest: a `[  FAILED  ] Suite.Test (N ms)` marker, preceded (in document
-  // order) by its `FILE:LINE: Failure` location(s) + assertion message(s). Bind
-  // each marker to the FIRST location/message that accumulated SINCE the prior
-  // marker, then reset — so a test with TWO failed assertions takes its own first
-  // site, and the NEXT test is never shifted onto the previous test's second
-  // location (the flat-index-zip bug).
-  if (failed.length === 0) {
-    let pendingLocs: { file: string; line: number }[] = []
-    let pendingMsgs: string[] = []
-    for (const raw of lines) {
-      const t = raw.trim()
-      const lm = /^(.+?):(\d+): Failure$/.exec(t)
-      if (lm !== null) {
-        pendingLocs.push({ file: group(lm, 1), line: Number(lm[2]) })
-        continue
-      }
-      const em = /^(?:Expected|Actual|Value of|error:)\b.*$/.exec(t)
-      if (em !== null) {
-        pendingMsgs.push(t)
-        continue
-      }
-      // ONLY the per-test result line carries `(N ms)` — the trailing summary
-      // block (`[ FAILED ] 1 test, listed below:` and a bare `[ FAILED ] Name`)
-      // has no timing, so requiring `(N ms)` excludes both (verbatim-confirmed
-      // against real gtest, which a simpler fixture had hidden).
-      const fm = /^\[\s*FAILED\s*\]\s+(.+?)\s+\(\d+\s*ms\)$/.exec(t)
-      if (fm !== null) {
-        const loc = pendingLocs[0]
-        const msg = pendingMsgs[0]
-        failed.push({
-          name: group(fm, 1),
-          ...(loc ? { file: loc.file, line: loc.line } : {}),
-          ...(msg ? { message: msg } : {}),
-        })
-        pendingLocs = []
-        pendingMsgs = []
-      }
+/** The three line shapes the GoogleTest scan reacts to. Split out so the scan
+ *  body below is a state machine over a CLASSIFIED line rather than three
+ *  nested regex branches — the nesting surcharge was most of the old score. */
+type GtestLine =
+  | { readonly kind: "loc"; readonly file: string; readonly line: number }
+  | { readonly kind: "msg"; readonly text: string }
+  | { readonly kind: "marker"; readonly name: string }
+  | null
+
+const classifyGtestLine = (raw: string): GtestLine => {
+  const t = raw.trim()
+  const lm = /^(.+?):(\d+): Failure$/.exec(t)
+  if (lm !== null) return { kind: "loc", file: group(lm, 1), line: Number(lm[2]) }
+  const em = /^(?:Expected|Actual|Value of|error:)\b.*$/.exec(t)
+  if (em !== null) return { kind: "msg", text: t }
+  // ONLY the per-test result line carries `(N ms)` — the trailing summary
+  // block (`[ FAILED ] 1 test, listed below:` and a bare `[ FAILED ] Name`)
+  // has no timing, so requiring `(N ms)` excludes both (verbatim-confirmed
+  // against real gtest, which a simpler fixture had hidden).
+  const fm = /^\[\s*FAILED\s*\]\s+(.+?)\s+\(\d+\s*ms\)$/.exec(t)
+  if (fm !== null) return { kind: "marker", name: group(fm, 1) }
+  return null
+}
+
+/**
+ * GoogleTest: a `[  FAILED  ] Suite.Test (N ms)` marker, preceded (in document
+ * order) by its `FILE:LINE: Failure` location(s) + assertion message(s). Bind
+ * each marker to the FIRST location/message that accumulated SINCE the prior
+ * marker, then reset — so a test with TWO failed assertions takes its own first
+ * site, and the NEXT test is never shifted onto the previous test's second
+ * location (the flat-index-zip bug).
+ */
+const ctestGoogleTestFailures = (lines: readonly string[]): TestFailure[] => {
+  const failed: TestFailure[] = []
+  let pendingLocs: { file: string; line: number }[] = []
+  let pendingMsgs: string[] = []
+  for (const raw of lines) {
+    const cl = classifyGtestLine(raw)
+    if (cl === null) continue
+    if (cl.kind === "loc") {
+      pendingLocs.push({ file: cl.file, line: cl.line })
+      continue
     }
+    if (cl.kind === "msg") {
+      pendingMsgs.push(cl.text)
+      continue
+    }
+    const loc = pendingLocs[0]
+    const msg = pendingMsgs[0]
+    failed.push({
+      name: cl.name,
+      ...(loc ? { file: loc.file, line: loc.line } : {}),
+      ...(msg ? { message: msg } : {}),
+    })
+    pendingLocs = []
+    pendingMsgs = []
   }
+  return failed
+}
+
+/** C++ via `ctest --output-on-failure`. ctest surfaces the underlying framework
+ *  output; we localize from the two dominant shapes: libc `assert` (VERBATIM-
+ *  pinned: `Assertion failed: (COND), function FN, file FILE, line N.`) and
+ *  GoogleTest (`FILE:LINE: Failure` + `[  FAILED  ] Suite.Test`). NEVER-throws. */
+export const parseCtest = (output: string): TestRunResult => {
+  const lines = output.split("\n")
+  // GoogleTest is a FALLBACK: only consulted when no libc assert was found, so a
+  // run that reports both does not double-count the same failure.
+  const libc = ctestLibcAssertFailures(lines)
+  const failed = libc.length === 0 ? ctestGoogleTestFailures(lines) : libc
 
   // Pass count: gtest `[  PASSED  ] N tests` or ctest `N% tests passed, M ... failed`.
-  let passed = 0
   const gp = /\[\s*PASSED\s*\]\s+(\d+)\s+tests?/.exec(output)
-  if (gp !== null) passed = Number(gp[1])
+  const passed = gp !== null ? Number(gp[1]) : 0
   return { runner: "ctest", passed, failed, ok: failed.length === 0 }
+}
+
+/** One `go test -json` event. Only the three fields this parser reads are
+ *  declared; go emits more and they are ignored. */
+type GoEvent = { Action?: string; Test?: string; Output?: string }
+
+/** Total line → event decode. Returns null for blank lines and non-JSON noise
+ *  (e.g. a build error printed before the JSON stream starts) — the NEVER-throws
+ *  contract means malformed input is skipped here, not propagated. */
+const parseGoEvent = (line: string): GoEvent | null => {
+  const t = line.trim()
+  if (t.length === 0) return null
+  try {
+    return JSON.parse(t) as GoEvent
+  } catch {
+    return null
+  }
+}
+
+/** Everything accumulated from one `go test -json` stream. A mutable record
+ *  rather than six locals so the per-event appliers below can be separate
+ *  units. */
+type GoScan = {
+  passed: number
+  readonly failedNames: string[]
+  readonly outputs: Map<string, string[]>
+  buildFailed: boolean
+  buildMsg: string | undefined
+  pkgFailed: boolean
+}
+
+/**
+ * Run-level signals, checked on EVERY event (build events carry no `Test`, and
+ * a package-level `fail` is exactly a `fail` with no `Test`). MUST surface,
+ * else a non-compiling suite reads as green.
+ */
+const applyGoRunSignals = (ev: GoEvent, st: GoScan): void => {
+  if (ev.Action === "build-fail") st.buildFailed = true
+  if (ev.Action === "build-output" && typeof ev.Output === "string" && /:\d+:\d+:/.test(ev.Output))
+    st.buildMsg = ev.Output.trim()
+  if (ev.Test === undefined && ev.Action === "fail") st.pkgFailed = true
+}
+
+/** Per-test verdict/output events. `test` is passed separately because the
+ *  caller has already proven `ev.Test` is defined — narrowing on a mutable
+ *  property does not survive into this call. */
+const applyGoTestEvent = (ev: GoEvent, test: string, st: GoScan): void => {
+  if (ev.Action === "pass") {
+    st.passed++
+    return
+  }
+  if (ev.Action === "fail") {
+    // dedupe (a flaky/retried test can emit fail twice)
+    if (!st.failedNames.includes(test)) st.failedNames.push(test)
+    return
+  }
+  if (ev.Action === "output" && typeof ev.Output === "string") {
+    const arr = st.outputs.get(test) ?? []
+    arr.push(ev.Output)
+    st.outputs.set(test, arr)
+  }
+}
+
+/** Single pass over the event stream. */
+const scanGoEvents = (stdout: string): GoScan => {
+  const st: GoScan = {
+    passed: 0,
+    failedNames: [],
+    outputs: new Map(),
+    buildFailed: false,
+    buildMsg: undefined,
+    pkgFailed: false,
+  }
+  for (const line of stdout.split("\n")) {
+    const ev = parseGoEvent(line)
+    if (ev === null) continue
+    applyGoRunSignals(ev, st)
+    const test = ev.Test
+    if (test === undefined) continue // not a per-test event
+    applyGoTestEvent(ev, test, st)
+  }
+  return st
+}
+
+/** Localize one failed go test from its collected output lines: the FIRST line
+ *  of the form `   file.go:line: message`. */
+const goFailure = (name: string, outputs: ReadonlyMap<string, string[]>): TestFailure => {
+  for (const o of outputs.get(name) ?? []) {
+    const m = /^\s*([\w./-]+\.go):(\d+):\s*(.*)$/.exec(o.replace(/\n$/, ""))
+    if (m !== null)
+      return { name, file: group(m, 1), line: Number(m[2]), message: group(m, 3).trim() }
+  }
+  return { name }
 }
 
 /** `go test -json`: newline-delimited JSON events. `Action:"pass"|"fail"` with a
  *  `Test` field are per-test verdicts; `Output` lines carry `file.go:line: msg`. */
 export const parseGoJson = (stdout: string): TestRunResult => {
-  let passed = 0
-  const failedNames: string[] = []
-  const outputs = new Map<string, string[]>() // test → output lines
-  let buildFailed = false
-  let buildMsg: string | undefined
-  let pkgFailed = false
-  for (const line of stdout.split("\n")) {
-    const t = line.trim()
-    if (t.length === 0) continue
-    let ev: { Action?: string; Test?: string; Output?: string }
-    try {
-      ev = JSON.parse(t)
-    } catch {
-      continue // non-JSON noise (e.g. a build error before the JSON stream)
-    }
-    // Build/compile failures (no Test) — a `build-fail` action or a package-level
-    // `fail`. MUST surface, else a non-compiling suite reads as green.
-    if (ev.Action === "build-fail") buildFailed = true
-    if (
-      ev.Action === "build-output" &&
-      typeof ev.Output === "string" &&
-      /:\d+:\d+:/.test(ev.Output)
-    )
-      buildMsg = ev.Output.trim()
-    if (ev.Test === undefined) {
-      if (ev.Action === "fail") pkgFailed = true
-      continue // not a per-test event
-    }
-    // dedupe (a flaky/retried test can emit fail twice)
-    if (ev.Action === "pass") passed++
-    else if (ev.Action === "fail") {
-      if (!failedNames.includes(ev.Test)) failedNames.push(ev.Test)
-    } else if (ev.Action === "output" && typeof ev.Output === "string") {
-      const arr = outputs.get(ev.Test) ?? []
-      arr.push(ev.Output)
-      outputs.set(ev.Test, arr)
-    }
-  }
-  const failed: TestFailure[] = failedNames.map((name) => {
-    // First output line of the form `   file.go:line: message`.
-    for (const o of outputs.get(name) ?? []) {
-      const m = /^\s*([\w./-]+\.go):(\d+):\s*(.*)$/.exec(o.replace(/\n$/, ""))
-      if (m !== null)
-        return { name, file: group(m, 1), line: Number(m[2]), message: group(m, 3).trim() }
-    }
-    return { name }
-  })
+  const st = scanGoEvents(stdout)
+  const failed: TestFailure[] = st.failedNames.map((name) => goFailure(name, st.outputs))
   // A build failure / package-level fail with no per-test failures is still a
   // FAILED run — synthesize an entry so it is never reported green.
-  if ((buildFailed || pkgFailed) && failed.length === 0) {
+  if ((st.buildFailed || st.pkgFailed) && failed.length === 0) {
     failed.push({
-      name: buildFailed ? "(build failed)" : "(package failed)",
-      ...(buildMsg ? { message: buildMsg } : {}),
+      name: st.buildFailed ? "(build failed)" : "(package failed)",
+      ...(st.buildMsg ? { message: st.buildMsg } : {}),
     })
   }
-  return { runner: "go", passed, failed, ok: failed.length === 0 }
+  return { runner: "go", passed: st.passed, failed, ok: failed.length === 0 }
+}
+
+/** Names from `test NAME ... FAILED` verdict lines. */
+const cargoFailedNames = (lines: readonly string[]): string[] => {
+  const names: string[] = []
+  for (const line of lines) {
+    const m = /^test (\S+) \.\.\. FAILED$/.exec(line.trim())
+    if (m !== null) names.push(group(m, 1))
+  }
+  return names
+}
+
+/** SUM passed across ALL summary lines — cargo prints one per section (lib /
+ *  doctests / each integration test), so overwriting would drop earlier counts. */
+const cargoPassedCount = (lines: readonly string[]): number => {
+  let passed = 0
+  for (const line of lines) {
+    const m = /(\d+) passed;/.exec(line)
+    if (m !== null) passed += Number(m[1])
+  }
+  return passed
+}
+
+/** Capture the panic message + a few following detail lines (e.g.
+ *  `assertion failed` + `left: 4` / `right: 5`) until a blank line, the next
+ *  `---- ` block header, or 4 lines — whichever comes first. Its own unit
+ *  because this inner scan was the entire nesting surcharge on `parseCargo`. */
+const cargoPanicDetail = (lines: readonly string[], from: number): string | undefined => {
+  const detail: string[] = []
+  for (
+    let k = from;
+    k < lines.length && lineAt(lines, k).trim().length > 0 && !lineAt(lines, k).startsWith("---- ");
+    k++
+  ) {
+    detail.push(lineAt(lines, k).trim())
+    if (detail.length >= 4) break
+  }
+  return detail.join(" ") || undefined
+}
+
+/** Per-failure panic location + message from the `---- NAME stdout ----` block.
+ *  Returns a bare `{ name }` when the block is absent or holds no panic line —
+ *  a less-localized failure record, never a throw. */
+const cargoFailure = (lines: readonly string[], name: string): TestFailure => {
+  const start = lines.findIndex((l) => l.trim() === `---- ${name} stdout ----`)
+  if (start === -1) return { name }
+  for (let i = start + 1; i < lines.length && !lineAt(lines, i).startsWith("---- "); i++) {
+    const pm = /panicked at ([^\s:]+(?::[^\s:]+)*?):(\d+):\d+:?/.exec(lineAt(lines, i))
+    if (pm === null) continue
+    const file = pm[1]
+    const lineNo = Number(pm[2])
+    const message = cargoPanicDetail(lines, i + 1)
+    return {
+      name,
+      ...(file ? { file } : {}),
+      ...(lineNo ? { line: lineNo } : {}),
+      ...(message ? { message } : {}),
+    }
+  }
+  return { name }
 }
 
 /** `cargo test` (libtest text): `test NAME ... ok|FAILED`, a per-failure
@@ -172,57 +308,10 @@ export const parseGoJson = (stdout: string): TestRunResult => {
  *  and a `test result: ...; N passed; M failed;` summary. */
 export const parseCargo = (output: string): TestRunResult => {
   const lines = output.split("\n")
-  const failedNames: string[] = []
-  for (const line of lines) {
-    const m = /^test (\S+) \.\.\. FAILED$/.exec(line.trim())
-    if (m !== null) failedNames.push(group(m, 1))
-  }
-  // SUM passed across ALL summary lines — cargo prints one per section (lib /
-  // doctests / each integration test), so overwriting would drop earlier counts.
-  let passed = 0
-  for (const line of lines) {
-    const m = /(\d+) passed;/.exec(line)
-    if (m !== null) passed += Number(m[1])
-  }
-  // Per-failure panic location + message from the `---- NAME stdout ----` block.
-  const failed: TestFailure[] = failedNames.map((name) => {
-    const start = lines.findIndex((l) => l.trim() === `---- ${name} stdout ----`)
-    if (start === -1) return { name }
-    let file: string | undefined
-    let lineNo: number | undefined
-    let message: string | undefined
-    for (let i = start + 1; i < lines.length && !lineAt(lines, i).startsWith("---- "); i++) {
-      const pm = /panicked at ([^\s:]+(?::[^\s:]+)*?):(\d+):\d+:?/.exec(lineAt(lines, i))
-      if (pm !== null) {
-        file = pm[1]
-        lineNo = Number(pm[2])
-        // Capture the panic message + a few following detail lines (e.g.
-        // `assertion failed` + `left: 4` / `right: 5`) until a blank line.
-        const detail: string[] = []
-        for (
-          let k = i + 1;
-          k < lines.length &&
-          lineAt(lines, k).trim().length > 0 &&
-          !lineAt(lines, k).startsWith("---- ");
-          k++
-        ) {
-          detail.push(lineAt(lines, k).trim())
-          if (detail.length >= 4) break
-        }
-        message = detail.join(" ") || undefined
-        break
-      }
-    }
-    return {
-      name,
-      ...(file ? { file } : {}),
-      ...(lineNo ? { line: lineNo } : {}),
-      ...(message ? { message } : {}),
-    }
-  })
+  const failed: TestFailure[] = cargoFailedNames(lines).map((name) => cargoFailure(lines, name))
   // ok when the summary says ok, or no failures were seen.
   const ok = failed.length === 0 && !/test result: FAILED/.test(output)
-  return { runner: "cargo", passed, failed, ok }
+  return { runner: "cargo", passed: cargoPassedCount(lines), failed, ok }
 }
 
 // ── Node / JS runners (bun test, node --test, jest, vitest, mocha) ───────────

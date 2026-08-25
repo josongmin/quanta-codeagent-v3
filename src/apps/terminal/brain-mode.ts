@@ -298,9 +298,49 @@ class CapturingStream implements StreamPort {
  *  report cassette (RFC 07). Pairs each tool_call with its tool_result; keeps assistant text turns.
  *  Truncates previews and caps the step count (keeps the TAIL — where finalize/regression happens).
  *  PURE + no-leak: reads only the model's own calls/results/text. */
+/** Bounded preview of a text field. Absent / empty ⇒ ABSENT (so the key is
+ *  omitted from the step, never present-and-empty). Module-level so the three
+ *  step shapes and the text buffer share ONE truncation rule. */
+const truncStep = (s: string | undefined): string | undefined =>
+  s === undefined || s === "" ? undefined : sliceWholeChars(s, TRAJECTORY_PREVIEW_MAX)
+
+/** The OBSERVATION half of a step: `{}` when the call produced no paired result
+ *  (still running / dropped), else `ok` plus the two presence-gated fields.
+ *  ONE unit because all three step shapes spread the SAME observation — it is
+ *  the part that does not depend on which tool was called. */
+const stepObservation = (res: Extract<AgentEvent, { type: "tool_result" }> | undefined) => {
+  if (res === undefined) return {}
+  const preview = truncStep(res.preview)
+  return {
+    ok: res.ok,
+    ...(res.exitCode !== undefined ? { exitCode: res.exitCode } : {}),
+    ...(preview !== undefined ? { preview } : {}),
+  }
+}
+
+/** The 3-way step shape for one `tool_call`: a container exec, a pty write, or
+ *  a plain tool. ONE unit because the three differ ONLY in WHICH input field
+ *  carries the command string — and it was the nesting surcharge of that
+ *  dispatch sitting two levels inside the event loop, not its length, that
+ *  carried most of `compactTrajectory`'s score. */
+const stepForCall = (
+  ev: Extract<AgentEvent, { type: "tool_call" }>,
+  obs: ReturnType<typeof stepObservation>,
+): TrajectoryStep => {
+  if (ev.name === "container_exec") {
+    const c = ((ev.input as { command?: unknown } | null)?.command ?? "") as string
+    return { kind: "exec", cmd: truncStep(c) ?? "", ...obs }
+  }
+  if (ev.name.startsWith("pty_")) {
+    const c = ((ev.input as { data?: unknown; command?: unknown } | null)?.data ??
+      (ev.input as { command?: unknown } | null)?.command ??
+      "") as string
+    return { kind: "pty", cmd: truncStep(String(c)) ?? "", ...obs }
+  }
+  return { kind: "tool", cmd: ev.name, ...obs }
+}
+
 export const compactTrajectory = (events: readonly AgentEvent[]): TrajectoryStep[] => {
-  const trunc = (s: string | undefined): string | undefined =>
-    s === undefined || s === "" ? undefined : sliceWholeChars(s, TRAJECTORY_PREVIEW_MAX)
   const resultById = new Map<string, Extract<AgentEvent, { type: "tool_result" }>>()
   for (const ev of events) if (ev.type === "tool_result") resultById.set(ev.id, ev)
   const steps: TrajectoryStep[] = []
@@ -309,7 +349,7 @@ export const compactTrajectory = (events: readonly AgentEvent[]): TrajectoryStep
   // commands — losing the intermediate "I verified it works" claims that fake-green RCA needs.
   let textBuf = ""
   const flushText = (): void => {
-    const t = trunc(textBuf)
+    const t = truncStep(textBuf)
     if (t !== undefined) steps.push({ kind: "text", text: t })
     textBuf = ""
   }
@@ -318,29 +358,9 @@ export const compactTrajectory = (events: readonly AgentEvent[]): TrajectoryStep
       textBuf += ev.delta
       continue
     }
-    if (ev.type === "tool_call") {
-      flushText() // the text preceding this call is its own step, in order
-      const res = resultById.get(ev.id)
-      const obs =
-        res !== undefined
-          ? {
-              ok: res.ok,
-              ...(res.exitCode !== undefined ? { exitCode: res.exitCode } : {}),
-              ...(trunc(res.preview) !== undefined ? { preview: trunc(res.preview) } : {}),
-            }
-          : {}
-      if (ev.name === "container_exec") {
-        const c = ((ev.input as { command?: unknown } | null)?.command ?? "") as string
-        steps.push({ kind: "exec", cmd: trunc(c) ?? "", ...obs })
-      } else if (ev.name.startsWith("pty_")) {
-        const c = ((ev.input as { data?: unknown; command?: unknown } | null)?.data ??
-          (ev.input as { command?: unknown } | null)?.command ??
-          "") as string
-        steps.push({ kind: "pty", cmd: trunc(String(c)) ?? "", ...obs })
-      } else {
-        steps.push({ kind: "tool", cmd: ev.name, ...obs })
-      }
-    }
+    if (ev.type !== "tool_call") continue
+    flushText() // the text preceding this call is its own step, in order
+    steps.push(stepForCall(ev, stepObservation(resultById.get(ev.id))))
   }
   flushText() // trailing reasoning after the last tool call (often the final "verified green" claim)
   return steps.length > TRAJECTORY_MAX_STEPS ? steps.slice(-TRAJECTORY_MAX_STEPS) : steps

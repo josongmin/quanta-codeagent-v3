@@ -56,6 +56,73 @@ interface ParseErr {
 }
 type ParseResult = ParseOk | ParseErr
 
+type ParsedValues = ReturnType<typeof parseArgs>["values"]
+
+/**
+ * Accept `raw` against a CLOSED enum.
+ *
+ * ONE unit because `--trust-scope` and `--event-source` are literally the same
+ * three-step gate ("absent/non-string ⇒ skip; not in the set ⇒ reject naming
+ * the set; else take it"), and spelling that gate out twice was a third of this
+ * parser's cognitive-complexity score. `ok:true, value:undefined` means
+ * "nothing supplied", NOT "accepted undefined".
+ */
+const acceptEnum = (
+  flag: string,
+  raw: unknown,
+  allowed: ReadonlySet<string>,
+):
+  | { readonly ok: true; readonly value: string | undefined }
+  | { readonly ok: false; readonly message: string } => {
+  if (typeof raw !== "string") return { ok: true, value: undefined }
+  if (!allowed.has(raw)) {
+    return { ok: false, message: `${flag} must be one of ${[...allowed].join(", ")}` }
+  }
+  return { ok: true, value: raw }
+}
+
+/** Collapse the repeatable `--trigger-phrase` into a frozen non-empty list, or
+ *  `undefined` when nothing usable was supplied. Its own unit because it is the
+ *  only MULTI-valued flag — the filter + emptiness rule belongs with it. */
+const collectTriggerPhrases = (raw: unknown): readonly string[] | undefined => {
+  if (!Array.isArray(raw) || raw.length === 0) return undefined
+  const phrases = raw.filter((p): p is string => typeof p === "string" && p.length > 0)
+  return phrases.length > 0 ? Object.freeze(phrases) : undefined
+}
+
+/**
+ * Project already-tokenized `node:util` values into {@link FromPrCmdArgs}.
+ *
+ * ONE unit — the whole "which flags survive into the args object, and in what
+ * key order" decision. Every field is presence-gated so an absent flag leaves
+ * the key ABSENT (not `undefined`), which the downstream defaults rely on.
+ */
+const buildFromPrArgs = (v: ParsedValues): ParseResult => {
+  const out: Record<string, unknown> = {}
+  if (typeof v.repo === "string" && v.repo.length > 0) out.repoSlug = v.repo
+  if (typeof v.pr === "string" && v.pr.length > 0) {
+    const n = Number.parseInt(v.pr, 10)
+    if (!Number.isFinite(n) || n <= 0)
+      return { kind: "err", message: `--pr must be a positive integer, got "${v.pr}"` }
+    out.prNumber = n
+  }
+  if (v["dry-run"] === true) out.dryRun = true
+  if (v["allow-bots"] === true) out.allowBots = true
+
+  const trustScope = acceptEnum("--trust-scope", v["trust-scope"], VALID_TRUST_SCOPES)
+  if (!trustScope.ok) return { kind: "err", message: trustScope.message }
+  if (trustScope.value !== undefined) out.trustScope = trustScope.value
+
+  const phrases = collectTriggerPhrases(v["trigger-phrase"])
+  if (phrases !== undefined) out.triggerPhrases = phrases
+
+  const eventSource = acceptEnum("--event-source", v["event-source"], VALID_EVENT_SOURCES)
+  if (!eventSource.ok) return { kind: "err", message: eventSource.message }
+  if (eventSource.value !== undefined) out.eventSource = eventSource.value
+
+  return { kind: "ok", args: out as FromPrCmdArgs, helpRequested: false }
+}
+
 const parseArgv = (argv: readonly string[]): ParseResult => {
   let parsed: ReturnType<typeof parseArgs>
   try {
@@ -81,43 +148,7 @@ const parseArgv = (argv: readonly string[]): ParseResult => {
   if (v.help === true) {
     return { kind: "ok", args: {}, helpRequested: true }
   }
-
-  const out: Record<string, unknown> = {}
-  if (typeof v.repo === "string" && v.repo.length > 0) out.repoSlug = v.repo
-  if (typeof v.pr === "string" && v.pr.length > 0) {
-    const n = Number.parseInt(v.pr, 10)
-    if (!Number.isFinite(n) || n <= 0)
-      return { kind: "err", message: `--pr must be a positive integer, got "${v.pr}"` }
-    out.prNumber = n
-  }
-  if (v["dry-run"] === true) out.dryRun = true
-  if (v["allow-bots"] === true) out.allowBots = true
-  if (typeof v["trust-scope"] === "string") {
-    if (!VALID_TRUST_SCOPES.has(v["trust-scope"])) {
-      return {
-        kind: "err",
-        message: `--trust-scope must be one of ${[...VALID_TRUST_SCOPES].join(", ")}`,
-      }
-    }
-    out.trustScope = v["trust-scope"]
-  }
-  if (Array.isArray(v["trigger-phrase"]) && v["trigger-phrase"].length > 0) {
-    const phrases = v["trigger-phrase"].filter(
-      (p): p is string => typeof p === "string" && p.length > 0,
-    )
-    if (phrases.length > 0) out.triggerPhrases = Object.freeze(phrases)
-  }
-  if (typeof v["event-source"] === "string") {
-    if (!VALID_EVENT_SOURCES.has(v["event-source"])) {
-      return {
-        kind: "err",
-        message: `--event-source must be one of ${[...VALID_EVENT_SOURCES].join(", ")}`,
-      }
-    }
-    out.eventSource = v["event-source"]
-  }
-
-  return { kind: "ok", args: out as FromPrCmdArgs, helpRequested: false }
+  return buildFromPrArgs(v)
 }
 
 /** Render one FromPrCmdEvent as a single JSON-Line so workflow logs grep cleanly. */

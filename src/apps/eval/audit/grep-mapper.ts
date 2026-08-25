@@ -133,9 +133,52 @@ const runGrep = (tool: GrepTool, token: string, roots: readonly string[]): GrepI
   return { files, status: r.status ?? 0, stderr: "" }
 }
 
-/** Score one usecase against the configured roots. */
-export const auditOne = (id: UseCaseId, cfg: AuditConfig): AuditFinding => {
-  const rule = cfg.rules[id]
+/** Union of every root class's hits for one rule, plus any grep failures.
+ *  `errors` non-empty is fatal for the finding — see `auditOne`. */
+interface RuleHits {
+  code: ReadonlySet<string>
+  test: ReadonlySet<string>
+  runbook: ReadonlySet<string>
+  errors: readonly string[]
+}
+
+/** Run every token of a rule against all three root classes and union the hits.
+ *  A unit because the parent's score was dominated by this loop: three
+ *  structurally identical grep+merge triples plus a nested status scan, all at
+ *  depth 2-3 inside `auditOne`. The three root classes are now ONE table walked
+ *  once, so adding a fourth class is a table row, not a fourth copy. */
+const collectRuleHits = (
+  tool: GrepTool,
+  tokens: readonly string[],
+  cfg: AuditConfig,
+): RuleHits => {
+  const code = new Set<string>()
+  const test = new Set<string>()
+  const runbook = new Set<string>()
+  const errors: string[] = []
+  const classes: readonly (readonly [Set<string>, readonly string[]])[] = [
+    [code, cfg.codeRoots],
+    [test, cfg.testRoots],
+    [runbook, cfg.runbookRoots],
+  ]
+  for (const t of tokens) {
+    for (const [sink, roots] of classes) {
+      const inv = runGrep(tool, t, roots)
+      for (const f of inv.files) sink.add(f)
+      // Both rg and grep return 1 when no match — that is NOT an error.
+      if (inv.status !== 0 && inv.status !== 1) {
+        errors.push(`token=${t} status=${inv.status} ${inv.stderr}`.trim())
+      }
+    }
+  }
+  return { code, test, runbook, errors }
+}
+
+/** The three findings that short-circuit before any grep runs, as one table of
+ *  (predicate → finding). A unit because each was an `if` whose whole body was
+ *  a literal `AuditFinding`; collapsing them keeps `auditOne` to "resolve, then
+ *  score". Returns null when the rule must actually be grepped. */
+const earlyFinding = (id: UseCaseId, rule: AuditRule | undefined): AuditFinding | null => {
   if (rule === undefined) {
     return { usecase: id, coverage: "tbd", evidence: [], note: "no rule registered" }
   }
@@ -147,6 +190,14 @@ export const auditOne = (id: UseCaseId, cfg: AuditConfig): AuditFinding => {
       ...(rule.note !== undefined ? { note: rule.note } : { note: "scoped out" }),
     }
   }
+  return null
+}
+
+/** Score one usecase against the configured roots. */
+export const auditOne = (id: UseCaseId, cfg: AuditConfig): AuditFinding => {
+  const rule = cfg.rules[id]
+  const early = earlyFinding(id, rule)
+  if (early !== null) return early
   const tool = resolveTool(cfg.rgBin)
   if (tool === null) {
     return {
@@ -156,42 +207,26 @@ export const auditOne = (id: UseCaseId, cfg: AuditConfig): AuditFinding => {
       note: "audit: neither rg nor grep available on PATH — install one to score this rule",
     }
   }
-  const codeHits = new Set<string>()
-  const testHits = new Set<string>()
-  const runbookHits = new Set<string>()
-  const errors: string[] = []
-  for (const t of rule.tokens) {
-    const code = runGrep(tool, t, cfg.codeRoots)
-    const test = runGrep(tool, t, cfg.testRoots)
-    const run = runGrep(tool, t, cfg.runbookRoots)
-    for (const f of code.files) codeHits.add(f)
-    for (const f of test.files) testHits.add(f)
-    for (const f of run.files) runbookHits.add(f)
-    for (const inv of [code, test, run]) {
-      if (inv.status !== 0 && inv.status !== 1) {
-        errors.push(`token=${t} status=${inv.status} ${inv.stderr}`.trim())
-      }
-    }
-  }
+  const hits = collectRuleHits(tool, rule?.tokens ?? [], cfg)
   // A grep error must NEVER be silently treated as "no hits": producing
   // `coverage:"tbd"` from real grep failures would let infra rot into the
   // audit baseline.
-  if (errors.length > 0) {
+  if (hits.errors.length > 0) {
     return {
       usecase: id,
       coverage: "tbd",
       evidence: [],
-      note: `audit: grep errored — ${errors.slice(0, 2).join("; ")}`,
+      note: `audit: grep errored — ${hits.errors.slice(0, 2).join("; ")}`,
     }
   }
-  const evidence = [...codeHits, ...testHits, ...runbookHits].sort()
-  const hasCode = codeHits.size > 0
-  const hasTest = testHits.size > 0
+  const evidence = [...hits.code, ...hits.test, ...hits.runbook].sort()
+  const hasCode = hits.code.size > 0
+  const hasTest = hits.test.size > 0
   const coverage: CoverageLevel = hasCode && hasTest ? "ok" : hasCode ? "partial" : "tbd"
   return {
     usecase: id,
     coverage,
     evidence,
-    ...(rule.note !== undefined ? { note: rule.note } : {}),
+    ...(rule?.note !== undefined ? { note: rule.note } : {}),
   }
 }

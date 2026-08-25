@@ -51,35 +51,53 @@ const llmDecisionOf = async (
   }
 }
 
+/**
+ * Fold the structural and LLM arms into one decision.
+ *
+ * `shadow` and the merging (`on`/`off`) modes previously spelled out two nearly
+ * identical object literals that differed in exactly two fields — `expand` and
+ * `reasons` — while repeating the same two optional-field spreads verbatim. One
+ * builder, two ternaries: shadow REPORTS the structural verdict and files the
+ * LLM's opinion under `shadow`; any other mode MERGES the two.
+ */
+const mergeRiskDecisions = (
+  structural: SelectionRiskGateDecision,
+  llm: SelectionRiskGateDecision,
+  llmMode: VerifySelectLlmRiskGateMode,
+): SelectionRiskGateDecision => {
+  const isShadow = llmMode === "shadow"
+  return {
+    expand: isShadow ? structural.expand : structural.expand || llm.expand,
+    reasons: isShadow ? structural.reasons : [...structural.reasons, ...llm.reasons],
+    ...(structural.patchBudget !== undefined ? { patchBudget: structural.patchBudget } : {}),
+    ...(llm.llmEvidencePacket !== undefined ? { llmEvidencePacket: llm.llmEvidencePacket } : {}),
+    ...(isShadow ? { shadow: { expand: llm.expand, reasons: llm.reasons } } : {}),
+  }
+}
+
+/**
+ * Decide one candidate. Hoisted out of the factory's returned closure: as an
+ * inner arrow every branch here paid a nesting surcharge, and none of it
+ * actually depends on being inside the factory — only on `args`.
+ */
+const evaluateSelectionRisk = async (
+  args: BuildSelectionRiskGateArgs,
+  candidate: Candidate,
+): Promise<SelectionRiskGateDecision> => {
+  const structural = structuralDecisionOf(args, candidate)
+  const llmMode = args.llmMode
+  if (llmMode === undefined) return structural
+  // `on` mode short-circuits: a structural expand is already decisive, so the
+  // LLM call is skipped entirely.
+  if (llmMode === "on" && structural.expand) return structural
+  const llm = await llmDecisionOf(args, candidate)
+  return mergeRiskDecisions(structural, llm, llmMode)
+}
+
 export const buildSelectionRiskGate = (
   args: BuildSelectionRiskGateArgs,
 ): ((candidate: Candidate) => Promise<SelectionRiskGateDecision>) | undefined => {
   if (!args.structural && args.llmMode === undefined) return undefined
-  return async (candidate: Candidate): Promise<SelectionRiskGateDecision> => {
-    const structural = structuralDecisionOf(args, candidate)
-    if (args.llmMode === undefined) return structural
-    if (args.llmMode === "on" && structural.expand) return structural
-    const llm = await llmDecisionOf(args, candidate)
-    return args.llmMode === "shadow"
-      ? {
-          expand: structural.expand,
-          reasons: structural.reasons,
-          ...(structural.patchBudget !== undefined ? { patchBudget: structural.patchBudget } : {}),
-          ...(llm.llmEvidencePacket !== undefined
-            ? { llmEvidencePacket: llm.llmEvidencePacket }
-            : {}),
-          shadow: {
-            expand: llm.expand,
-            reasons: llm.reasons,
-          },
-        }
-      : {
-          expand: structural.expand || llm.expand,
-          reasons: [...structural.reasons, ...llm.reasons],
-          ...(structural.patchBudget !== undefined ? { patchBudget: structural.patchBudget } : {}),
-          ...(llm.llmEvidencePacket !== undefined
-            ? { llmEvidencePacket: llm.llmEvidencePacket }
-            : {}),
-        }
-  }
+  return (candidate: Candidate): Promise<SelectionRiskGateDecision> =>
+    evaluateSelectionRisk(args, candidate)
 }

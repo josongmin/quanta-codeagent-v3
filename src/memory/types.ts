@@ -154,9 +154,57 @@ const clamp = (n: number, lo: number, hi: number): number =>
  * `updatedAt=createdAt`, `accessCount=0` (clamped ≥0, integer). An `embedding`
  * whose length ≠ {@link EMBED_DIM} is dropped.
  */
+/**
+ * Carry `value` onto `out` under `key`, or DELETE the key when the projector
+ * rejected the input (`undefined`).
+ *
+ * ONE unit because all five tolerant optional fields below share exactly this
+ * shape: `exactOptionalPropertyTypes` forbids assigning `undefined`, so
+ * "absent" must be spelled `delete`, and the `...e` spread may already have put
+ * a garbage value under the key. Spelling that out per-field was the bulk of
+ * `normalizeEntry`'s cognitive-complexity score.
+ */
+const carryOrDrop = (out: Record<string, unknown>, key: string, value: unknown): void => {
+  if (value === undefined) delete out[key]
+  else out[key] = value
+}
+
+/**
+ * The TABLE of tolerantly-carried optional fields: `[key, projector]`, applied
+ * in THIS order (the order is load-bearing — it fixes the key order of a
+ * normalized entry whose input lacked the field, since a fresh key is appended
+ * at assignment time).
+ *
+ * Each projector is total: it returns the accepted value, or `undefined` to
+ * mean "drop the field". A corrupt persisted row / malformed save must never
+ * throw or pollute scoring.
+ */
+const TOLERANT_FIELDS: ReadonlyArray<readonly [string, (e: MemoryEntry) => unknown]> = [
+  // Drop a wrong-length / absent embedding entirely.
+  ["embedding", (e) => (e.embedding?.length === EMBED_DIM ? e.embedding : undefined)],
+  // ADR-0554 — carry `lastDecayedAt` only when it is a finite number; a corrupt
+  // persisted value must degrade to "never decayed" (legacy semantics), not NaN.
+  ["lastDecayedAt", (e) => (Number.isFinite(e.lastDecayedAt) ? e.lastDecayedAt : undefined)],
+  // §10.6 routing meta — well-typed non-empty values only.
+  ["taskGroup", (e) => nonEmptyString(e.taskGroup)],
+  ["appliesTo", (e) => projectAppliesTo(e.appliesTo)],
+  ["reuseRule", (e) => nonEmptyString(e.reuseRule)],
+]
+
+/** Accept a non-empty string, else `undefined`. Shared by the two §10.6 string
+ *  fields so their acceptance rule cannot drift apart. */
+const nonEmptyString = (v: unknown): string | undefined =>
+  typeof v === "string" && v.length > 0 ? v : undefined
+
+/** Accept `{ cwd }` only when `cwd` is a non-empty string; a fresh object is
+ *  built so the normalized entry never aliases the caller's input. */
+const projectAppliesTo = (v: MemoryEntry["appliesTo"]): { cwd: string } | undefined => {
+  const cwd = typeof v === "object" && v !== null ? nonEmptyString(v.cwd) : undefined
+  return cwd === undefined ? undefined : { cwd }
+}
+
 export const normalizeEntry = (e: MemoryEntry): NormalizedEntry => {
   const createdAt = Number.isFinite(e.createdAt) ? e.createdAt : 0
-  const embedding = e.embedding && e.embedding.length === EMBED_DIM ? e.embedding : undefined
   const out: NormalizedEntry = {
     ...e,
     kind: MEMORY_KINDS.includes(e.kind) ? e.kind : "observation",
@@ -167,27 +215,8 @@ export const normalizeEntry = (e: MemoryEntry): NormalizedEntry => {
     updatedAt: Number.isFinite(e.updatedAt) ? (e.updatedAt as number) : createdAt,
     accessCount: Math.max(0, Math.floor(e.accessCount ?? 0)) || 0,
   }
-  // Drop a wrong-length / absent embedding entirely (exactOptionalPropertyTypes:
-  // an explicit `embedding: undefined` is not assignable to `embedding?:`).
-  if (embedding) out.embedding = embedding
-  else delete out.embedding
-  // ADR-0554 — carry `lastDecayedAt` only when it is a finite number; a corrupt
-  // persisted value must degrade to "never decayed" (legacy semantics), not NaN.
-  if (Number.isFinite(e.lastDecayedAt)) out.lastDecayedAt = e.lastDecayedAt as number
-  else delete out.lastDecayedAt
-  // §10.6 routing meta — tolerantly carry only well-typed values, drop garbage
-  // (a corrupt persisted row / malformed save must never throw or pollute
-  // scoring). Absent / wrong-typed ⇒ field stays absent (byte-identical).
-  if (typeof e.taskGroup === "string" && e.taskGroup.length > 0) out.taskGroup = e.taskGroup
-  else delete out.taskGroup
-  const cwd =
-    e.appliesTo && typeof e.appliesTo === "object" && typeof e.appliesTo.cwd === "string"
-      ? e.appliesTo.cwd
-      : undefined
-  if (cwd !== undefined && cwd.length > 0) out.appliesTo = { cwd }
-  else delete out.appliesTo
-  if (typeof e.reuseRule === "string" && e.reuseRule.length > 0) out.reuseRule = e.reuseRule
-  else delete out.reuseRule
+  const bag = out as unknown as Record<string, unknown>
+  for (const [key, project] of TOLERANT_FIELDS) carryOrDrop(bag, key, project(e))
   return out
 }
 

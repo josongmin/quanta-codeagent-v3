@@ -79,28 +79,20 @@ export const exceptionEntriesOf = (
   return raw.filter((entry): entry is ProMaxUpstreamException => isObject(entry))
 }
 
-/**
- * Structural validation of one manifest against the campaign that owns it.
- * Returns human problems; the gate decides which failure code they become.
- *
- * The parameter is TYPED but treated as untrusted: this is the boundary where a
- * document read off disk becomes a manifest, so the type is a claim the caller
- * makes, not a fact this function may rely on.
- */
-export const validateExceptionManifest = (args: {
-  readonly manifest: ProMaxExceptionManifest
-  readonly campaignId: string
-  readonly upstreamGitCommit: string
-  readonly requiredVersion: number
-}): readonly string[] => {
+/** The manifest HEADER contract: the three frozen identifiers plus the shape of
+ *  the entry list. A unit because these four checks all read the manifest as a
+ *  whole (never an entry) and must all run — none short-circuits another.
+ *  Problem ORDER is part of the contract and matches the original statement
+ *  order: entry-list shape, version, campaign, upstream commit. */
+const manifestHeaderProblems = (
+  manifest: ProMaxExceptionManifest,
+  args: {
+    readonly campaignId: string
+    readonly upstreamGitCommit: string
+    readonly requiredVersion: number
+  },
+): readonly string[] => {
   const problems: string[] = []
-  const { manifest } = args
-  if (!isObject(manifest)) {
-    return [
-      "the upstream-exception manifest is not a JSON object — an exception list that cannot be " +
-        "read excuses nothing, and every shortfall stays uncovered",
-    ]
-  }
   const rawEntries = (manifest as Record<string, unknown>).exceptions
   if (!Array.isArray(rawEntries)) {
     problems.push(
@@ -133,6 +125,66 @@ export const validateExceptionManifest = (args: {
       `the manifest was written against upstream ${manifest.upstream_git_commit}, not the campaign's ${args.upstreamGitCommit}`,
     )
   }
+  return problems
+}
+
+/** The evidence an exception entry must carry, as a TABLE. Each row was one
+ *  hand-written `if (blank(entry.x)) problems.push(…)` — six copies of the same
+ *  guard whose only difference is the field and the sentence. Keeping them as
+ *  data means a new required field is a row, not another branch. ORDER is the
+ *  contract (it is the order the problems are reported in). */
+const REQUIRED_ENTRY_EVIDENCE: ReadonlyArray<{
+  readonly read: (entry: ProMaxUpstreamException) => unknown
+  readonly problem: (id: string) => string
+}> = [
+  {
+    read: (e) => e.raw_receipt,
+    problem: (id) => `exception "${id}" carries no raw receipt — the evidence IS the exception`,
+  },
+  {
+    read: (e) => e.upstream_reference,
+    problem: (id) => `exception "${id}" cites no upstream issue/reference`,
+  },
+  { read: (e) => e.owner, problem: (id) => `exception "${id}" names no owner` },
+  { read: (e) => e.recorded_at, problem: (id) => `exception "${id}" has no recorded_at instant` },
+]
+
+/** Everything one (id-bearing) entry can be wrong about, in report order: the
+ *  blank-evidence table first, then the closed disposition set. A unit because
+ *  it is exactly "is this ONE exception reviewable?" — the duplicate-id check
+ *  deliberately stays with the caller, since it is a property of the LIST. */
+const entryEvidenceProblems = (entry: ProMaxUpstreamException, id: string): readonly string[] => {
+  const problems = REQUIRED_ENTRY_EVIDENCE.filter((rule) => blank(rule.read(entry))).map((rule) =>
+    rule.problem(id),
+  )
+  if (!Object.hasOwn(PROMAX_EXCEPTION_DISPOSITION_REASONS, entry.disposition)) {
+    problems.push(`exception "${id}" has unknown disposition "${String(entry.disposition)}"`)
+  }
+  return problems
+}
+
+/**
+ * Structural validation of one manifest against the campaign that owns it.
+ * Returns human problems; the gate decides which failure code they become.
+ *
+ * The parameter is TYPED but treated as untrusted: this is the boundary where a
+ * document read off disk becomes a manifest, so the type is a claim the caller
+ * makes, not a fact this function may rely on.
+ */
+export const validateExceptionManifest = (args: {
+  readonly manifest: ProMaxExceptionManifest
+  readonly campaignId: string
+  readonly upstreamGitCommit: string
+  readonly requiredVersion: number
+}): readonly string[] => {
+  const { manifest } = args
+  if (!isObject(manifest)) {
+    return [
+      "the upstream-exception manifest is not a JSON object — an exception list that cannot be " +
+        "read excuses nothing, and every shortfall stays uncovered",
+    ]
+  }
+  const problems: string[] = [...manifestHeaderProblems(manifest, args)]
   const seen = new Set<string>()
   for (const entry of exceptionEntriesOf(manifest)) {
     const id = entry.instance_id
@@ -142,17 +194,7 @@ export const validateExceptionManifest = (args: {
     }
     if (seen.has(id)) problems.push(`instance "${id}" is excepted more than once`)
     seen.add(id)
-    if (blank(entry.raw_receipt)) {
-      problems.push(`exception "${id}" carries no raw receipt — the evidence IS the exception`)
-    }
-    if (blank(entry.upstream_reference)) {
-      problems.push(`exception "${id}" cites no upstream issue/reference`)
-    }
-    if (blank(entry.owner)) problems.push(`exception "${id}" names no owner`)
-    if (blank(entry.recorded_at)) problems.push(`exception "${id}" has no recorded_at instant`)
-    if (!Object.hasOwn(PROMAX_EXCEPTION_DISPOSITION_REASONS, entry.disposition)) {
-      problems.push(`exception "${id}" has unknown disposition "${String(entry.disposition)}"`)
-    }
+    problems.push(...entryEvidenceProblems(entry, id))
   }
   return problems
 }

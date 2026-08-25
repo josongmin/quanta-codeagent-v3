@@ -30,6 +30,109 @@ export interface DeepgramAdapterOpts {
 
 const mimeOk = (mime: string): boolean => mime === "audio/wav" || mime === "audio/mp3"
 
+/** The two pre-flight rejections every STT adapter owes the caller before it
+ *  spends a network round-trip. One unit because both adapters must reject the
+ *  same inputs the same way — duplicating the pair is how they drift apart.
+ *  Returns `undefined` when the blob is acceptable. */
+export const sttInputError = (blob: AudioBlob): SttError | undefined => {
+  if (!mimeOk(blob.mime)) return { kind: "unsupported-mime", mime: blob.mime }
+  if (blob.bytes.byteLength === 0) return { kind: "empty-audio" }
+  return undefined
+}
+
+/** Cancellation/transport table: maps a throw out of {@link fetchWithDeadline}
+ *  onto the typed transport errors. One unit because the abort-reason mapping is
+ *  provider-independent — a deadline is a deadline. */
+export const sttTransportError = (e: unknown, timeoutMs: number): SttError => {
+  const reason = abortReasonOf(e)
+  if (reason === "timeout") return { kind: "timeout", timeoutMs }
+  if (reason === "abort") return { kind: "aborted" }
+  return { kind: "network-error", degradeReason: errMessage(e) }
+}
+
+/** Everything an STT adapter varies about its one POST. */
+export interface SttPostInit {
+  readonly endpoint: string
+  readonly headers: Record<string, string>
+  readonly body: unknown
+  readonly timeoutMs: number
+  readonly signal?: AbortSignal | undefined
+  readonly fetchFn: FetchLike
+}
+
+/** The deadline-wired POST both adapters make, with its catch already folded
+ *  into {@link sttTransportError}. A unit because the try/catch around
+ *  `fetchWithDeadline` is the same six lines in every adapter, and because
+ *  hoisting it out of the factory closure removes the nesting surcharge that
+ *  the transcribe methods were paying for it. */
+export const sttPost = async (init: SttPostInit): Promise<Result<Response, SttError>> => {
+  try {
+    return ok(
+      await fetchWithDeadline(init.endpoint, {
+        method: "POST",
+        headers: init.headers,
+        body: init.body,
+        timeoutMs: init.timeoutMs,
+        ...(init.signal !== undefined ? { signal: init.signal } : {}),
+        // The shared primitive types `body` as `unknown` (carrier-agnostic);
+        // the adapter's `FetchLike` seam takes `RequestInit`. The bodies we pass
+        // are real `BodyInit`s (Uint8Array / FormData), so the bridge cast is sound.
+        fetchFn: (input, i) => init.fetchFn(input, i as RequestInit),
+      }),
+    )
+  } catch (e) {
+    return err(sttTransportError(e, init.timeoutMs))
+  }
+}
+
+/** HTTP status table shared by the adapters. `rateLimited` stays a parameter
+ *  because only Deepgram surfaces a `Retry-After` hint — folding it in would
+ *  silently add a field to Whisper's error. Returns `undefined` for a usable
+ *  response. */
+export const sttResponseError = (
+  res: Response,
+  provider: string,
+  rateLimited: () => SttError,
+): SttError | undefined => {
+  if (res.status === 401 || res.status === 403) return { kind: "auth-failed", status: res.status }
+  if (res.status === 429) return rateLimited()
+  if (!res.ok) {
+    return {
+      kind: "transcription-failed",
+      status: res.status,
+      degradeReason: `${provider} returned ${res.status}`,
+    }
+  }
+  return undefined
+}
+
+/** Body read with its parse failure already typed. A unit for the same reason
+ *  as {@link sttPost}: an identical try/catch in both adapters, and one fewer
+ *  nested catch inside the factory closure. */
+export const sttReadJson = async (
+  res: Response,
+  provider: string,
+): Promise<Result<unknown, SttError>> => {
+  try {
+    return ok(await res.json())
+  } catch (e) {
+    return err({
+      kind: "transcription-failed",
+      status: res.status,
+      degradeReason: `${provider} JSON parse failed: ${errMessage(e)}`,
+    })
+  }
+}
+
+/** Deepgram's 429 payload: the `Retry-After` hint when the header parses,
+ *  the bare rate-limit error when it does not. */
+const deepgramRateLimited = (res: Response): SttError => {
+  const retry = parseRetryAfterMs((name) => res.headers.get(name))
+  return retry !== undefined
+    ? { kind: "rate-limited", status: 429, retryAfterMs: retry }
+    : { kind: "rate-limited", status: 429 }
+}
+
 interface DeepgramAlternative {
   readonly transcript?: unknown
   readonly confidence?: unknown
@@ -63,71 +166,28 @@ export const createDeepgramAdapter = (opts: DeepgramAdapterOpts): SpeechToTextPo
       blob: AudioBlob,
       reqOpts?: TranscribeOpts,
     ): Promise<Result<Transcript, SttError>> {
-      if (!mimeOk(blob.mime)) {
-        return err({ kind: "unsupported-mime", mime: blob.mime })
-      }
-      if (blob.bytes.byteLength === 0) {
-        return err({ kind: "empty-audio" })
-      }
+      const bad = sttInputError(blob)
+      if (bad !== undefined) return err(bad)
       // T01 (audit L9 H4): wire BOTH a deadline AND the caller signal into the
       // fetch via the shared primitive so a hung Deepgram connection cannot
       // block the caller forever. Cancellation maps to a typed `timeout` /
       // `aborted` SttError rather than a silent hang or generic network-error.
       const timeoutMs = reqOpts?.timeoutMs ?? DEFAULT_STT_TIMEOUT_MS
-      let res: Response
-      try {
-        res = await fetchWithDeadline(endpoint, {
-          method: "POST",
-          headers: {
-            Authorization: `Token ${opts.apiKey}`,
-            "Content-Type": blob.mime,
-          },
-          body: blob.bytes,
-          timeoutMs,
-          ...(reqOpts?.signal !== undefined ? { signal: reqOpts.signal } : {}),
-          // The shared primitive types `body` as `unknown` (carrier-agnostic);
-          // the adapter's `FetchLike` seam takes `RequestInit`. The body we pass
-          // is a real `BodyInit` (Uint8Array), so the bridge cast is sound.
-          fetchFn: (input, init) => fetchFn(input, init as RequestInit),
-        })
-      } catch (e) {
-        const reason = abortReasonOf(e)
-        if (reason === "timeout") return err({ kind: "timeout", timeoutMs })
-        if (reason === "abort") return err({ kind: "aborted" })
-        return err({
-          kind: "network-error",
-          degradeReason: errMessage(e),
-        })
-      }
-      if (res.status === 401 || res.status === 403) {
-        return err({ kind: "auth-failed", status: res.status })
-      }
-      if (res.status === 429) {
-        const retry = parseRetryAfterMs((name) => res.headers.get(name))
-        return err(
-          retry !== undefined
-            ? { kind: "rate-limited", status: 429, retryAfterMs: retry }
-            : { kind: "rate-limited", status: 429 },
-        )
-      }
-      if (!res.ok) {
-        return err({
-          kind: "transcription-failed",
-          status: res.status,
-          degradeReason: `deepgram returned ${res.status}`,
-        })
-      }
-      let json: unknown
-      try {
-        json = await res.json()
-      } catch (e) {
-        return err({
-          kind: "transcription-failed",
-          status: res.status,
-          degradeReason: `deepgram JSON parse failed: ${errMessage(e)}`,
-        })
-      }
-      const alt = extractAlt(json)
+      const posted = await sttPost({
+        endpoint,
+        headers: { Authorization: `Token ${opts.apiKey}`, "Content-Type": blob.mime },
+        body: blob.bytes,
+        timeoutMs,
+        ...(reqOpts?.signal !== undefined ? { signal: reqOpts.signal } : {}),
+        fetchFn,
+      })
+      if (!posted.ok) return err(posted.error)
+      const res = posted.value
+      const httpErr = sttResponseError(res, "deepgram", () => deepgramRateLimited(res))
+      if (httpErr !== undefined) return err(httpErr)
+      const body = await sttReadJson(res, "deepgram")
+      if (!body.ok) return err(body.error)
+      const alt = extractAlt(body.value)
       if (alt === null) {
         return err({
           kind: "no-transcription",

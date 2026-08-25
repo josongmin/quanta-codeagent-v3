@@ -368,60 +368,84 @@ const asDefinition = (p: PermissionProfile): ProfileDefinition => ({
 /* Managed ceiling                                                            */
 /* ------------------------------------------------------------------------- */
 
+/** One axis test: "does `result` reach BEYOND `ceiling` on this axis?" */
+type AxisBreachTest = (result: PermissionProfile, ceiling: PermissionProfile) => boolean
+
+/** allowHosts widening: when the ceiling is an allow-list it permits EXACTLY its
+ *  host set (absent ⇒ ∅). A result that is allow-list with ANY host outside that
+ *  set widens the ceiling's egress — even at the SAME mode rank. (A ceiling that
+ *  is allow-all imposes no host constraint; a deny-all ceiling already tripped
+ *  the mode check above for any non-deny-all result.) */
+const networkHostsWiden: AxisBreachTest = (result, ceiling) => {
+  if (ceiling.network.mode !== "allow-list" || result.network.mode !== "allow-list") return false
+  const permitted = new Set(ceiling.network.allowHosts ?? [])
+  return (result.network.allowHosts ?? []).some((h) => !permitted.has(h))
+}
+
+/** fileSystem.entries widening: both `restricted` and `managed` FS types are
+ *  allow-lists — the ceiling permits EXACTLY the paths/access its entries cover
+ *  (absent ⇒ ∅). A result holding ANY entry NOT covered by SOME ceiling entry
+ *  grants FS reach the ceiling never permitted, even at the SAME type rank.
+ *  Reuse `entryCoveredBy` in the result-entry-must-be-covered direction (same
+ *  semantics the merge uses for base→derived intersection). This is the
+ *  sibling of the network.allowHosts check above; without it `throw` mode
+ *  leaks a wider FS grant and `clamp` mode silently skips clampTo. */
+const fsEntriesWiden: AxisBreachTest = (result, ceiling) =>
+  result.fileSystem.entries.some(
+    (re) => !ceiling.fileSystem.entries.some((ce) => entryCoveredBy(re, ce)),
+  )
+
+/**
+ * The widening axes as an ordered TABLE, using the same ranks as the merge.
+ *
+ * ONE table because every entry answers the SAME question with a different
+ * comparison idiom (rank `>`, rank `<`, `false`-vs-`true`, set membership), and
+ * spelling twelve of those out in sequence WAS this check's whole
+ * cognitive-complexity score.
+ *
+ * The ORDER is part of the contract: {@link widerAxis} reports the FIRST axis
+ * that breaches, and several tests overlap (a mode-rank breach usually implies
+ * the host-set breach beneath it), so reordering changes which axis a caller
+ * is told about.
+ */
+const WIDENING_AXES: ReadonlyArray<readonly [string, AxisBreachTest]> = [
+  ["network.mode", (r, c) => NETWORK_RANK[r.network.mode] > NETWORK_RANK[c.network.mode]],
+  ["network.allowHosts", networkHostsWiden],
+  ["approval.mode", (r, c) => APPROVAL_RANK[r.approval.mode] < APPROVAL_RANK[c.approval.mode]],
+  [
+    "approval.promptUser",
+    (r, c) => r.approval.promptUser === false && c.approval.promptUser === true,
+  ],
+  ["fileSystem.type", (r, c) => FS_TYPE_RANK[r.fileSystem.type] < FS_TYPE_RANK[c.fileSystem.type]],
+  ["fileSystem.entries", fsEntriesWiden],
+  [
+    "sandbox.osSandbox",
+    (r, c) => osSandboxRank(r.sandbox.osSandbox) < osSandboxRank(c.sandbox.osSandbox),
+  ],
+  ["sandbox.readOnly", (r, c) => r.sandbox.readOnly === false && c.sandbox.readOnly === true],
+  [
+    "sandbox.workspaceWrite",
+    (r, c) => r.sandbox.workspaceWrite === true && c.sandbox.workspaceWrite === false,
+  ],
+  [
+    "sandbox.networkIsolated",
+    (r, c) => r.sandbox.networkIsolated === false && c.sandbox.networkIsolated === true,
+  ],
+  [
+    "control.managedBy",
+    (r, c) => managedByRank(r.control.managedBy) < managedByRank(c.control.managedBy),
+  ],
+  [
+    "control.auditRequired",
+    (r, c) => r.control.auditRequired === false && c.control.auditRequired === true,
+  ],
+]
+
 /** Per-axis "is `result` wider than `ceiling`?" — using the same ranks as the
  *  merge. Returns the first breached axis name, else undefined. */
 const widerAxis = (result: PermissionProfile, ceiling: PermissionProfile): string | undefined => {
-  if (NETWORK_RANK[result.network.mode] > NETWORK_RANK[ceiling.network.mode]) return "network.mode"
-  // allowHosts widening: when the ceiling is an allow-list it permits EXACTLY its
-  // host set (absent ⇒ ∅). A result that is allow-list with ANY host outside that
-  // set widens the ceiling's egress — even at the SAME mode rank. (A ceiling that
-  // is allow-all imposes no host constraint; a deny-all ceiling already tripped
-  // the mode check above for any non-deny-all result.)
-  if (ceiling.network.mode === "allow-list" && result.network.mode === "allow-list") {
-    const permitted = new Set(ceiling.network.allowHosts ?? [])
-    const resultHosts = result.network.allowHosts ?? []
-    if (resultHosts.some((h) => !permitted.has(h))) return "network.allowHosts"
-  }
-  if (APPROVAL_RANK[result.approval.mode] < APPROVAL_RANK[ceiling.approval.mode])
-    return "approval.mode"
-  if (result.approval.promptUser === false && ceiling.approval.promptUser === true) {
-    return "approval.promptUser"
-  }
-  if (FS_TYPE_RANK[result.fileSystem.type] < FS_TYPE_RANK[ceiling.fileSystem.type]) {
-    return "fileSystem.type"
-  }
-  // fileSystem.entries widening: both `restricted` and `managed` FS types are
-  // allow-lists — the ceiling permits EXACTLY the paths/access its entries cover
-  // (absent ⇒ ∅). A result holding ANY entry NOT covered by SOME ceiling entry
-  // grants FS reach the ceiling never permitted, even at the SAME type rank.
-  // Reuse `entryCoveredBy` in the result-entry-must-be-covered direction (same
-  // semantics the merge uses for base→derived intersection). This is the
-  // sibling of the network.allowHosts check above; without it `throw` mode
-  // leaks a wider FS grant and `clamp` mode silently skips clampTo.
-  if (
-    result.fileSystem.entries.some(
-      (re) => !ceiling.fileSystem.entries.some((ce) => entryCoveredBy(re, ce)),
-    )
-  ) {
-    return "fileSystem.entries"
-  }
-  if (osSandboxRank(result.sandbox.osSandbox) < osSandboxRank(ceiling.sandbox.osSandbox)) {
-    return "sandbox.osSandbox"
-  }
-  if (result.sandbox.readOnly === false && ceiling.sandbox.readOnly === true) {
-    return "sandbox.readOnly"
-  }
-  if (result.sandbox.workspaceWrite === true && ceiling.sandbox.workspaceWrite === false) {
-    return "sandbox.workspaceWrite"
-  }
-  if (result.sandbox.networkIsolated === false && ceiling.sandbox.networkIsolated === true) {
-    return "sandbox.networkIsolated"
-  }
-  if (managedByRank(result.control.managedBy) < managedByRank(ceiling.control.managedBy)) {
-    return "control.managedBy"
-  }
-  if (result.control.auditRequired === false && ceiling.control.auditRequired === true) {
-    return "control.auditRequired"
+  for (const [axis, breaches] of WIDENING_AXES) {
+    if (breaches(result, ceiling)) return axis
   }
   return undefined
 }

@@ -86,6 +86,30 @@ const utterancesToSegments = (
   return out.length > 0 ? out : undefined
 }
 
+/** One merge-ready word: its rendered text plus millisecond bounds, or
+ *  `undefined` when the word carries no usable text (non-object entry, or
+ *  neither `punctuated_word` nor `word` is a non-empty string).
+ *
+ *  ONE unit because the per-WORD coercions (which of the two text fields wins,
+ *  seconds→ms, missing timings ⇒ 0) are a different concern from the per-
+ *  SEGMENT merge below, and interleaving them was this function's score. */
+const projectDeepgramWord = (
+  w: unknown,
+): { readonly piece: string; readonly startMs: number; readonly endMs: number } | undefined => {
+  if (!isObj(w)) return undefined
+  const dw = w as DeepgramWord
+  const piece =
+    typeof dw.punctuated_word === "string"
+      ? dw.punctuated_word
+      : typeof dw.word === "string"
+        ? dw.word
+        : ""
+  if (piece.length === 0) return undefined
+  const start = typeof dw.start === "number" ? dw.start : 0
+  const end = typeof dw.end === "number" ? dw.end : 0
+  return { piece, startMs: Math.round(start * 1000), endMs: Math.round(end * 1000) }
+}
+
 const wordsToSegments = (
   alt: DeepgramAlternative,
 ): ReadonlyArray<{ text: string; startMs: number; endMs: number }> | undefined => {
@@ -95,26 +119,15 @@ const wordsToSegments = (
   const out: { text: string; startMs: number; endMs: number }[] = []
   let cur: { text: string; startMs: number; endMs: number } | undefined
   for (const w of alt.words) {
-    if (!isObj(w)) continue
-    const dw = w as DeepgramWord
-    const piece =
-      typeof dw.punctuated_word === "string"
-        ? dw.punctuated_word
-        : typeof dw.word === "string"
-          ? dw.word
-          : ""
-    const start = typeof dw.start === "number" ? dw.start : 0
-    const end = typeof dw.end === "number" ? dw.end : 0
-    if (piece.length === 0) continue
-    if (cur === undefined) {
-      cur = { text: piece, startMs: Math.round(start * 1000), endMs: Math.round(end * 1000) }
-    } else {
-      cur = {
-        text: `${cur.text} ${piece}`,
-        startMs: cur.startMs,
-        endMs: Math.round(end * 1000),
-      }
-    }
+    const p = projectDeepgramWord(w)
+    if (p === undefined) continue
+    // First usable word OPENS the segment (its start anchors it); every later
+    // word extends the text and pushes the end out. Same two-armed rule, one
+    // expression.
+    cur =
+      cur === undefined
+        ? { text: p.piece, startMs: p.startMs, endMs: p.endMs }
+        : { text: `${cur.text} ${p.piece}`, startMs: cur.startMs, endMs: p.endMs }
   }
   if (cur !== undefined) out.push(cur)
   return out.length > 0 ? out : undefined

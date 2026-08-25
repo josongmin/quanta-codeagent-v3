@@ -54,87 +54,129 @@ const basename = (p: string): string => {
  *      `~/.docker/config.json`, `~/.config/gh/hosts.yml`, `~/.kube/config`);
  *   5. tree matches (`~/.gnupg/**`).
  */
-export const classifyPath = (absolutePath: string, home: string): SensitivityClass => {
-  // aug-23 audit — ROOT A RELATIVE PATH BEFORE MATCHING. Every tree rule below
-  // is written as `p.includes("/.ssh/")` etc., which silently misses the
-  // relative form an agent actually types (`.ssh/id_rsa`, `.gnupg/secring`).
-  // The basename rules already worked relative; the tree rules did not, so the
-  // two halves of this classifier disagreed on the same file depending only on
-  // how it was spelled. Prefixing "/" makes a relative path match exactly as
-  // its resolved form would — it can only ADD matches, never remove one.
+/** Context a path rule matches against: the rooted path, its basename and
+ *  its lowercased extension. Computed ONCE so the ~25 rules below cannot
+ *  disagree about what they are looking at. */
+type PathFacts = { readonly p: string; readonly bn: string; readonly e: string }
+
+/** One secret-path rule. `why` is the ADR-0078 justification, carried in the
+ *  table so a rule can never drift away from its reason. */
+type PathRule = { readonly why: string; readonly match: (f: PathFacts) => boolean }
+
+/** Dotfile basenames that ALWAYS hold secrets, matched exactly. */
+const SECRET_DOTFILE_BASENAMES: ReadonlySet<string> = new Set([
+  ".env",
+  ".netrc",
+  ".pgpass",
+  ".python_history",
+  ".bash_history",
+  ".zsh_history",
+  ".dockercfg",
+  ".git-credentials",
+  ".npmrc",
+])
+
+/** Private-key / keystore extensions. */
+const SECRET_EXTENSIONS: ReadonlySet<string> = new Set([".pem", ".key", ".p12", ".pfx"])
+
+/** `~/.ssh/` entries that are public by design: `known_hosts`, any `*.pub`
+ *  public key, and `config` (host preferences). Kept as its own predicate
+ *  because it is an EXCLUSION — the only place in this table where matching
+ *  the tree does not imply secret. */
+const isSshPublicArtifact = (bn: string): boolean =>
+  bn === "known_hosts" || bn.endsWith(".pub") || bn === "config"
+
+/** `~/.ssh/` entries whose NAME shape is a private key. */
+const isSshPrivateKeyName = (bn: string): boolean =>
+  bn.startsWith("id_") ||
+  bn.endsWith("_rsa") ||
+  bn.endsWith("_dsa") ||
+  bn.endsWith("_ecdsa") ||
+  bn.endsWith("_ed25519")
+
+/**
+ * The ordered, CLOSED list of secret-path rules. This is a table rather than
+ * an if-chain because every entry is an independent predicate over the same
+ * {@link PathFacts} — there is no control flow between them, only "does any
+ * rule fire". Order is preserved from ADR-0078 for readability; the result is
+ * order-independent since every rule yields the same verdict.
+ */
+const SECRET_PATH_RULES: readonly PathRule[] = [
+  {
+    why: "dotfile basenames that always hold secrets (.env family, histories, credential stores)",
+    match: (f) => SECRET_DOTFILE_BASENAMES.has(f.bn) || f.bn.startsWith(".env."),
+  },
+  {
+    why: "private key / keystore extensions",
+    match: (f) => SECRET_EXTENSIONS.has(f.e),
+  },
+  {
+    why: "SSH private key shapes, excluding known_hosts / *.pub / config",
+    match: (f) => f.p.includes("/.ssh/") && !isSshPublicArtifact(f.bn) && isSshPrivateKeyName(f.bn),
+  },
+  {
+    why: "AWS shared credential + config files",
+    match: (f) => f.p.endsWith("/.aws/credentials") || f.p.endsWith("/.aws/config"),
+  },
+  {
+    why: "docker registry auth",
+    match: (f) => f.p.endsWith("/.docker/config.json"),
+  },
+  {
+    why: "gh CLI OAuth host store",
+    match: (f) => f.p.endsWith("/.config/gh/hosts.yml") || f.p.endsWith("/.config/gh/hosts.yaml"),
+  },
+  {
+    why: "kubeconfig (embedded client certs / tokens)",
+    match: (f) => f.p.endsWith("/.kube/config"),
+  },
+  {
+    why: "gcloud Application Default Credentials — holds a refresh token",
+    match: (f) => f.p.endsWith("/application_default_credentials.json"),
+  },
+  {
+    why: "quanta's and codex's OWN OAuth records — refresh tokens mint access tokens indefinitely",
+    match: (f) =>
+      f.p.includes("/.quanta/auth/") ||
+      f.p.includes("/.quanta/mcp-oauth/") ||
+      f.p.endsWith("/.codex/auth.json"),
+  },
+  {
+    why: "whole-tree key material: gnupg ring, pass store, AWS SSO token cache",
+    match: (f) =>
+      f.p.includes("/.gnupg/") ||
+      f.p.includes("/.password-store/") ||
+      f.p.includes("/.aws/sso/cache/"),
+  },
+]
+
+/** Non-secret home config / cache trees, which classify `"internal"`. */
+const isInternalHomeTree = (p: string): boolean =>
+  p.includes("/.config/") || p.includes("/.cache/") || p.includes("/.local/share/")
+
+/**
+ * Root a possibly-relative path and derive the facts every rule matches on.
+ *
+ * aug-23 audit — ROOT A RELATIVE PATH BEFORE MATCHING. Every tree rule is
+ * written as `p.includes("/.ssh/")` etc., which silently misses the relative
+ * form an agent actually types (`.ssh/id_rsa`, `.gnupg/secring`). The basename
+ * rules already worked relative; the tree rules did not, so the two halves of
+ * this classifier disagreed on the same file depending only on how it was
+ * spelled. Prefixing "/" makes a relative path match exactly as its resolved
+ * form would — it can only ADD matches, never remove one.
+ */
+const pathFacts = (absolutePath: string, home: string): PathFacts => {
   const expanded = expandHome(absolutePath, home)
   const p = expanded.startsWith("/") ? expanded : `/${expanded}`
-  const bn = basename(p)
-  const e = ext(p)
+  return { p, bn: basename(p), e: ext(p) }
+}
 
-  // 1. dotfile basenames that ALWAYS hold secrets.
-  if (
-    bn === ".env" ||
-    bn.startsWith(".env.") ||
-    bn === ".netrc" ||
-    bn === ".pgpass" ||
-    bn === ".python_history" ||
-    bn === ".bash_history" ||
-    bn === ".zsh_history"
-  ) {
-    return "secret"
+export const classifyPath = (absolutePath: string, home: string): SensitivityClass => {
+  const facts = pathFacts(absolutePath, home)
+  for (const rule of SECRET_PATH_RULES) {
+    if (rule.match(facts)) return "secret"
   }
-
-  // 2. extension matches — private key / keystore shapes.
-  if (e === ".pem" || e === ".key" || e === ".p12" || e === ".pfx") {
-    return "secret"
-  }
-
-  // 3. SSH private key shapes.
-  if (p.includes("/.ssh/")) {
-    if (bn === "known_hosts" || bn.endsWith(".pub") || bn === "config") {
-      // known_hosts is public by design; `.pub` is public-key; `config` is
-      // non-secret host preferences. Drop to default classification below.
-    } else if (
-      bn.startsWith("id_") ||
-      bn.endsWith("_rsa") ||
-      bn.endsWith("_dsa") ||
-      bn.endsWith("_ecdsa") ||
-      bn.endsWith("_ed25519")
-    ) {
-      return "secret"
-    }
-  }
-
-  // 4. specific secret-bearing config files.
-  if (p.endsWith("/.aws/credentials") || p.endsWith("/.aws/config")) return "secret"
-  if (p.endsWith("/.docker/config.json")) return "secret"
-  // Legacy docker auth file (`~/.dockercfg`) — base64 registry credentials.
-  if (bn === ".dockercfg") return "secret"
-  // git credential store — plaintext `https://user:pass@host` lines.
-  if (bn === ".git-credentials") return "secret"
-  if (p.endsWith("/.config/gh/hosts.yml") || p.endsWith("/.config/gh/hosts.yaml")) return "secret"
-  if (p.endsWith("/.kube/config")) return "secret"
-  // gcloud Application Default Credentials — holds a refresh token. Lives
-  // under ~/.config/gcloud so it would otherwise fall through to "internal".
-  if (p.endsWith("/application_default_credentials.json")) return "secret"
-  // aug-22 audit — OUR OWN token stores. This list protected every other
-  // tool's credentials (~/.aws, ~/.docker, ~/.kube, gh, gcloud) while quanta's
-  // and codex's own OAuth records classified as `public`, so `cat
-  // ~/.quanta/auth/chatgpt.json` was never whole-file redacted. The records
-  // hold a `refresh_token`, which mints access tokens indefinitely — strictly
-  // more valuable than the access token Layer-2 already masks.
-  if (p.includes("/.quanta/auth/")) return "secret"
-  if (p.includes("/.quanta/mcp-oauth/")) return "secret"
-  if (p.endsWith("/.codex/auth.json")) return "secret"
-  // npm registry auth (`//registry.npmjs.org/:_authToken=…`).
-  if (bn === ".npmrc") return "secret"
-
-  // 5. tree matches — anything under ~/.gnupg/ is a key ring.
-  if (p.includes("/.gnupg/")) return "secret"
-  if (p.includes("/.password-store/")) return "secret"
-  if (p.includes("/.aws/sso/cache/")) return "secret"
-
-  // Internal (non-secret) home config / cache.
-  if (p.includes("/.config/") || p.includes("/.cache/") || p.includes("/.local/share/")) {
-    return "internal"
-  }
-
+  if (isInternalHomeTree(facts.p)) return "internal"
   return "public"
 }
 
@@ -268,57 +310,75 @@ const isSecretReaderPathArg = (arg: string): boolean => {
   return false
 }
 
+/** One command-shape rule: given the tokenized command line (token 0 being
+ *  the head this rule is keyed by), does the shape print credentials? */
+type CommandShapeRule = (tokens: readonly string[]) => boolean
+
+/**
+ * Head-keyed table of credential-printing command shapes. A MAP rather than an
+ * if-chain because every entry is `head === X && <arg shape>` — the head test
+ * is pure dispatch and belongs in the lookup, leaving each rule to state only
+ * its arg shape. Closed set: an unlisted head can never classify `"secret"`
+ * through this path.
+ */
+const SECRET_COMMAND_RULES: ReadonlyMap<string, CommandShapeRule> = new Map<
+  string,
+  CommandShapeRule
+>([
+  // bare `printenv` / `env` with NO ARGS dumps the whole environment; WITH
+  // args it prints one var and is treated as public (the caller is the audit
+  // responsible).
+  ["printenv", (t) => t.length === 1],
+  ["env", (t) => t.length === 1],
+  // password-manager CLIs.
+  ["keychain", () => true],
+  ["pass", (t) => t.length >= 2],
+  ["op", (t) => t[1] === "read"],
+  // macOS keychain dump.
+  ["security", (t) => t[1] === "find-generic-password"],
+  // AWS CLI credential-printing shapes.
+  [
+    "aws",
+    (t) =>
+      (t[1] === "configure" && (t[2] === "list-profiles" || t[2] === "list")) ||
+      (t[1] === "sts" && t[2] === "get-caller-identity"),
+  ],
+  // gcloud auth token printers.
+  [
+    "gcloud",
+    (t) => t[1] === "auth" && (t[2] === "print-access-token" || t[2] === "print-identity-token"),
+  ],
+  // GitHub CLI token printers.
+  ["gh", (t) => t[1] === "auth" && (t[2] === "status" || t[2] === "token")],
+])
+
+/**
+ * Does a file-reading command line name a secret path? Inspects EVERY
+ * non-flag arg — `cat -A ~/.env` should still flag. Its own unit because the
+ * file-reader family is the one rule that scans arguments rather than
+ * matching fixed positions.
+ */
+const readsSecretPathArg = (tokens: readonly string[]): boolean => {
+  for (const arg of tokens.slice(1)) {
+    if (arg.startsWith("-")) continue
+    if (isSecretReaderPathArg(arg)) return true
+  }
+  return false
+}
+
 export const classifyCommandShape = (cmd: string): SensitivityClass => {
   const head = firstToken(cmd)
   if (head.length === 0) return "public"
   const tokens = tokenize(cmd)
 
-  // bare `printenv` / `env` with no args.
-  if ((head === "printenv" || head === "env") && tokens.length === 1) return "secret"
-
   // File-reading command (`cat` / pager / dumper) against a secret path.
   // Any of these prints raw file bytes to stdout, so a secret-classified
   // path argument leaks the same way `cat` does (`head ~/.ssh/id_rsa`,
   // `less ~/.aws/credentials`, `xxd ~/.netrc`, …).
-  if (FILE_READERS.has(head) && tokens.length >= 2) {
-    // Inspect EVERY non-flag arg — `cat -A ~/.env` should still flag.
-    for (const arg of tokens.slice(1)) {
-      if (arg.startsWith("-")) continue
-      if (isSecretReaderPathArg(arg)) return "secret"
-    }
-  }
+  if (FILE_READERS.has(head) && readsSecretPathArg(tokens)) return "secret"
 
-  // password-manager CLIs (single-token base or known sub-shapes).
-  if (head === "keychain") return "secret"
-  if (head === "pass" && tokens.length >= 2) return "secret"
-  if (head === "op" && tokens[1] === "read") return "secret"
-
-  // `security find-generic-password ...` (macOS keychain dump).
-  if (head === "security" && tokens[1] === "find-generic-password") return "secret"
-
-  // AWS CLI credential-printing shapes.
-  if (head === "aws") {
-    const t1 = tokens[1]
-    const t2 = tokens[2]
-    if (t1 === "configure" && (t2 === "list-profiles" || t2 === "list")) return "secret"
-    if (t1 === "sts" && t2 === "get-caller-identity") return "secret"
-  }
-
-  // gcloud auth token printers.
-  if (head === "gcloud") {
-    const t1 = tokens[1]
-    const t2 = tokens[2]
-    if (t1 === "auth" && (t2 === "print-access-token" || t2 === "print-identity-token")) {
-      return "secret"
-    }
-  }
-
-  // GitHub CLI token printers.
-  if (head === "gh" && tokens[1] === "auth" && (tokens[2] === "status" || tokens[2] === "token")) {
-    return "secret"
-  }
-
-  return "public"
+  const rule = SECRET_COMMAND_RULES.get(head)
+  return rule?.(tokens) === true ? "secret" : "public"
 }
 
 // Re-exported for tests that want to assert behavior on the helpers; the

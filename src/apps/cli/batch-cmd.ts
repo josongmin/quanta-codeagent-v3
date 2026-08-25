@@ -225,11 +225,19 @@ const FLAG_HANDLERS: Record<
   },
 }
 
-/** Pure argv parser for the `batch` subcommand. Returns `Err(reason)` on any
- *  propositional violation; the caller maps it to exit 64. NO I/O. */
-export const parseBatchArgs = (argv: readonly string[]): Result<ParsedBatchArgs, string> => {
-  const acc: ArgsAcc = { poolSize: DEFAULT_POOL_SIZE, maxAttempts: DEFAULT_MAX_ATTEMPTS }
-
+/**
+ * Fold every `<flag> <value>` pair in `argv` into `acc`.
+ *
+ * ONE unit because it owns the whole SCAN concern — cursor advance,
+ * unknown-flag rejection, missing-value rejection, per-flag apply — and none of
+ * the propositional requirements. Returns the rejecting `Err` on the first
+ * violation (propagated VERBATIM, so a handler's own rejection reaches the
+ * caller unchanged), or `undefined` when the whole argv was consumed.
+ */
+const scanBatchFlags = (
+  argv: readonly string[],
+  acc: ArgsAcc,
+): Result<ParsedBatchArgs, string> | undefined => {
   let i = 0
   while (i < argv.length) {
     const a = argv[i]
@@ -245,7 +253,18 @@ export const parseBatchArgs = (argv: readonly string[]): Result<ParsedBatchArgs,
     if (!applied.ok) return applied
     i += 2
   }
+  return undefined
+}
 
+/**
+ * Check the propositional requirements over a fully-scanned accumulator and
+ * project the frozen {@link ParsedBatchArgs}.
+ *
+ * ONE unit because the requirements are TWO disjoint proposition sets — the
+ * resume path and the submit path — that share no guard; keeping them next to
+ * each other (and away from the scan) is what makes the disjointness readable.
+ */
+const finalizeBatchArgs = (acc: ArgsAcc): Result<ParsedBatchArgs, string> => {
   // GAP7-5 resume: a `--resume <jobId>` run re-drives an EXISTING job from the
   // durable store, so it requires `--db` + `--out` (export) but NOT
   // `--in`/`--instruction` (the job + its rows already live in the db).
@@ -276,6 +295,15 @@ export const parseBatchArgs = (argv: readonly string[]): Result<ParsedBatchArgs,
     ...(acc.schema !== undefined ? { schema: acc.schema } : {}),
     ...(acc.db !== undefined ? { db: acc.db } : {}),
   })
+}
+
+/** Pure argv parser for the `batch` subcommand. Returns `Err(reason)` on any
+ *  propositional violation; the caller maps it to exit 64. NO I/O. */
+export const parseBatchArgs = (argv: readonly string[]): Result<ParsedBatchArgs, string> => {
+  const acc: ArgsAcc = { poolSize: DEFAULT_POOL_SIZE, maxAttempts: DEFAULT_MAX_ATTEMPTS }
+  const rejected = scanBatchFlags(argv, acc)
+  if (rejected !== undefined) return rejected
+  return finalizeBatchArgs(acc)
 }
 
 // `parseChildValue` + `buildRowDispatchAdapter` moved to

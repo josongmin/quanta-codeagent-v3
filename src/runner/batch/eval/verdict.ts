@@ -80,92 +80,112 @@ export const localTestCmdPassed = (
   return !explicitFailure && (result.exitCode === 0 || summaryPass)
 }
 
-export const verify = async (
+/** The refusal outcome for a swebench instance with no wired Python harness and
+ *  nothing safe to fall back to. Its own unit so the refusal TEXT — the thing an
+ *  operator reads when a whole run grades red — lives in exactly one place. */
+const swebenchHarnessRefusal = (instanceId: string): VerifyOutcome => ({
+  passed: false,
+  error:
+    "swebench instance requires the official Python harness — REFUSING to fake-grade via testCmd. Set QUANTA_SWEBENCH_PYTHON=1 with an importable swebench (QUANTA_SWEBENCH_PYTHON_BIN).",
+  command: `python -m swebench.harness.run_evaluation (${instanceId})`,
+  exitCode: 1,
+  failedTests: [],
+  logTail: "python swebench harness not wired — refused testCmd fake-grade",
+  reportPath: "",
+})
+
+/**
+ * When the Python harness is not wired, allow fallback to local testCmd ONLY
+ * when: (a) the instance has a real, non-trivial testCmd (not the production
+ * dataset's `testCmd:"true"` no-op), AND (b) the patch is non-empty.
+ * The `testCmd:"true"` sentinel is what the official SWE-bench dataset ships —
+ * falling through there would fake-pass every instance. An empty patch with a
+ * real testCmd would also produce misleading results (swebench F2P tests can
+ * pass on base). Both cases must refuse loudly.
+ */
+const mayFallBackToLocalTestCmd = (testCmd: string, patch: string): boolean => {
+  const isNoopTestCmd = testCmd.trim() === "true" || testCmd.trim() === ""
+  return !isNoopTestCmd && patch.trim() !== ""
+}
+
+/**
+ * Translate one official-harness result into a {@link VerifyOutcome}.
+ *
+ * REAL patch fail (`gradingCompleted:true + resolved:false`) → no `error`
+ * (clean `passed:false`, classifier falls to `completed_unresolved`).
+ * INFRA fail (`gradingCompleted:false`) → set `error` → `harness_error`.
+ * Without this distinction every patch fail is misnamed harness_error.
+ *
+ * A unit of its own because it is the pure mapping half of the harness path —
+ * everything conditional about the outcome shape (four optional-field spreads)
+ * is decided here, with no I/O in scope.
+ */
+const harnessOutcome = (r: PythonSwebenchResult, command: string): VerifyOutcome => {
+  const isInfraFailure = !r.resolved && !r.gradingCompleted
+  return {
+    passed: r.resolved,
+    ...(isInfraFailure ? { error: r.log.slice(0, 500) } : {}),
+    command,
+    exitCode: r.resolved ? 0 : 1,
+    failedTests: [],
+    logTail: r.log.slice(-2000),
+    reportPath: "",
+    // Authoritative apply-success bit — resolved implies applied even if the
+    // harness omitted the field; otherwise pass the report bit through so an
+    // apply-fail is not laundered into `applyStatus:"applied"` downstream.
+    ...(r.resolved || r.patchApplied !== undefined
+      ? { patchApplied: r.resolved || r.patchApplied === true }
+      : {}),
+    ...(r.breakdown !== undefined ? { breakdown: r.breakdown } : {}),
+  }
+}
+
+/** Grade via the official Python harness. `evaluate` and `instanceId` arrive as
+ *  parameters because narrowing `deps.pythonSwebench?.evaluate` / `instance.swebench`
+ *  does not survive into a callee. */
+const gradeWithHarness = async (
   instance: Instance,
   patch: string,
+  instanceId: string,
+  evaluate: PythonSwebenchEvaluate,
+  opts: unknown,
+  signal: AbortSignal | undefined,
+): Promise<VerifyOutcome> => {
+  // T01 (audit L5 H-5): forward the per-instance signal into the harness opts
+  // so `evaluateWithPythonSwebench` can race its retry sleep against abort.
+  // The `opts` is `unknown` at this seam (the harness module owns its shape);
+  // we merge the signal as a typed extra without disturbing the rest.
+  const baseOpts = (opts ?? {}) as Record<string, unknown>
+  const harnessOpts = signal !== undefined ? { ...baseOpts, signal } : baseOpts
+  const r = await evaluate(instance, patch, harnessOpts)
+  return harnessOutcome(r, `python -m swebench.harness.run_evaluation (${instanceId})`)
+}
+
+/**
+ * Empty-patch guard — when the agent produced no diff (LLM error, abort,
+ * empty completion) running the FAIL_TO_PASS tests on the UNPATCHED
+ * sandbox returns whatever the base commit produces. For swebench
+ * instances that's *supposed* to fail (F2P = fail-to-pass), but pytest
+ * `-k` substring matching can collect tests that pass on base too,
+ * yielding a false PASS. Fail-closed: empty patch ⇒ unresolved.
+ */
+const emptyPatchOutcome = (testCmd: string): VerifyOutcome => ({
+  passed: false,
+  error: "empty prediction (agent produced no patch)",
+  command: testCmd,
+  exitCode: 1,
+  failedTests: [],
+  logTail: "agent produced empty patch — testCmd skipped (fail-closed)",
+  reportPath: "",
+})
+
+/** Run the repo-local `testCmd` in the sandbox and classify its output. The
+ *  only path in this module that actually spawns a process. */
+const gradeWithLocalTestCmd = async (
+  instance: Instance,
   sandbox: string,
   deps: VerifyDeps,
 ): Promise<VerifyOutcome> => {
-  // A swebench instance MUST be graded by the official Python harness. There is
-  // NO testCmd fallback for it: the dataset sets `testCmd:"true"` (a no-op that
-  // exits 0), so falling through to the local testCmd path below would FAKE a
-  // PASS for every instance. Refuse loudly instead — a missing/unwired harness
-  // is an infra error (harness_error), never a silent green.
-  if (instance.swebench) {
-    const ps = deps.pythonSwebench
-    if (ps?.evaluate === undefined) {
-      // When the Python harness is not wired, allow fallback to local testCmd ONLY
-      // when: (a) the instance has a real, non-trivial testCmd (not the production
-      // dataset's `testCmd:"true"` no-op), AND (b) the patch is non-empty.
-      // The `testCmd:"true"` sentinel is what the official SWE-bench dataset ships —
-      // falling through there would fake-pass every instance. An empty patch with a
-      // real testCmd would also produce misleading results (swebench F2P tests can
-      // pass on base). Both cases must refuse loudly.
-      const isNoopTestCmd = instance.testCmd.trim() === "true" || instance.testCmd.trim() === ""
-      if (isNoopTestCmd || patch.trim() === "") {
-        return {
-          passed: false,
-          error:
-            "swebench instance requires the official Python harness — REFUSING to fake-grade via testCmd. Set QUANTA_SWEBENCH_PYTHON=1 with an importable swebench (QUANTA_SWEBENCH_PYTHON_BIN).",
-          command: `python -m swebench.harness.run_evaluation (${instance.swebench.instanceId})`,
-          exitCode: 1,
-          failedTests: [],
-          logTail: "python swebench harness not wired — refused testCmd fake-grade",
-          reportPath: "",
-        }
-      }
-      // Real testCmd + non-empty patch: fall through to the local testCmd path below.
-    } else {
-      const evaluate = ps.evaluate
-      // T01 (audit L5 H-5): forward the per-instance signal into the harness opts
-      // so `evaluateWithPythonSwebench` can race its retry sleep against abort.
-      // The `opts` is `unknown` at this seam (the harness module owns its shape);
-      // we merge the signal as a typed extra without disturbing the rest.
-      const baseOpts = (ps.opts ?? {}) as Record<string, unknown>
-      const harnessOpts =
-        deps.signal !== undefined ? { ...baseOpts, signal: deps.signal } : baseOpts
-      const r = await evaluate(instance, patch, harnessOpts)
-      const command = `python -m swebench.harness.run_evaluation (${instance.swebench.instanceId})`
-      // REAL patch fail (`gradingCompleted:true + resolved:false`) → no `error`
-      // (clean `passed:false`, classifier falls to `completed_unresolved`).
-      // INFRA fail (`gradingCompleted:false`) → set `error` → `harness_error`.
-      // Without this distinction every patch fail is misnamed harness_error.
-      const isInfraFailure = !r.resolved && !r.gradingCompleted
-      return {
-        passed: r.resolved,
-        ...(isInfraFailure ? { error: r.log.slice(0, 500) } : {}),
-        command,
-        exitCode: r.resolved ? 0 : 1,
-        failedTests: [],
-        logTail: r.log.slice(-2000),
-        reportPath: "",
-        // Authoritative apply-success bit — resolved implies applied even if the
-        // harness omitted the field; otherwise pass the report bit through so an
-        // apply-fail is not laundered into `applyStatus:"applied"` downstream.
-        ...(r.resolved || r.patchApplied !== undefined
-          ? { patchApplied: r.resolved || r.patchApplied === true }
-          : {}),
-        ...(r.breakdown !== undefined ? { breakdown: r.breakdown } : {}),
-      }
-    }
-  }
-  // Empty-patch guard — when the agent produced no diff (LLM error, abort,
-  // empty completion) running the FAIL_TO_PASS tests on the UNPATCHED
-  // sandbox returns whatever the base commit produces. For swebench
-  // instances that's *supposed* to fail (F2P = fail-to-pass), but pytest
-  // `-k` substring matching can collect tests that pass on base too,
-  // yielding a false PASS. Fail-closed: empty patch ⇒ unresolved.
-  if (patch.trim() === "") {
-    return {
-      passed: false,
-      error: "empty prediction (agent produced no patch)",
-      command: instance.testCmd,
-      exitCode: 1,
-      failedTests: [],
-      logTail: "agent produced empty patch — testCmd skipped (fail-closed)",
-      reportPath: "",
-    }
-  }
   const test = await exec(instance.testCmd, sandbox, deps.timeoutMs, {
     ...(instance.localEnv !== undefined ? { localEnv: instance.localEnv } : {}),
   })
@@ -178,13 +198,46 @@ export const verify = async (
   // can still emit a zero exit while reporting failed/error counts in their
   // summary, and grading must fail closed there.
   const combined = `${test.stdout}\n${test.stderr}`
-  const passed = localTestCmdPassed({ exitCode: test.code, logTail: combined })
   return {
-    passed,
+    passed: localTestCmdPassed({ exitCode: test.code, logTail: combined }),
     command: instance.testCmd,
     exitCode: test.code,
     failedTests: [],
     logTail: combined.slice(-2000),
     reportPath: "",
   }
+}
+
+export const verify = async (
+  instance: Instance,
+  patch: string,
+  sandbox: string,
+  deps: VerifyDeps,
+): Promise<VerifyOutcome> => {
+  // A swebench instance MUST be graded by the official Python harness. There is
+  // NO testCmd fallback for it: the dataset sets `testCmd:"true"` (a no-op that
+  // exits 0), so falling through to the local testCmd path below would FAKE a
+  // PASS for every instance. Refuse loudly instead — a missing/unwired harness
+  // is an infra error (harness_error), never a silent green.
+  const swebench = instance.swebench
+  if (swebench !== undefined) {
+    const ps = deps.pythonSwebench
+    const evaluate = ps?.evaluate
+    if (evaluate !== undefined) {
+      return await gradeWithHarness(
+        instance,
+        patch,
+        swebench.instanceId,
+        evaluate,
+        ps?.opts,
+        deps.signal,
+      )
+    }
+    if (!mayFallBackToLocalTestCmd(instance.testCmd, patch)) {
+      return swebenchHarnessRefusal(swebench.instanceId)
+    }
+    // Real testCmd + non-empty patch: fall through to the local testCmd path below.
+  }
+  if (patch.trim() === "") return emptyPatchOutcome(instance.testCmd)
+  return await gradeWithLocalTestCmd(instance, sandbox, deps)
 }
