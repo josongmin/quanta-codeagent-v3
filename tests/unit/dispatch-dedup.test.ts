@@ -1,8 +1,14 @@
 import { describe, expect, test } from "bun:test"
 import * as fs from "node:fs"
 import * as path from "node:path"
+import { z } from "zod"
+import type { AgentConfig } from "@/agent"
+import { dispatchTool } from "@/agent/dispatch"
 import { canonicalizeArgs, DEFAULT_DEDUP_GATE_CAPS, DedupGate } from "@/agent/dispatch-dedup"
+import type { PermissionContext } from "@/permission"
 import { __resetRuntimeConfig } from "@/shared"
+import type { Tool, ToolEvent } from "@/tool"
+import { ToolRegistry } from "@/tool"
 
 /** Tiny helper: record N calls of the same shape at given turns and return the
  *  verdicts in order (so an assertion can read off `[pass, pass, blocked]`). */
@@ -451,26 +457,112 @@ describe("DedupGate — synthetic result block (mirrors deny-style helper)", () 
   })
 })
 
-describe("DedupGate — anti-regression: dispatch.ts must call the gate before tool execution", () => {
-  test("dispatch.ts consults the dedup gate (via PRE_FLIGHT_CONSULTS) before the admissibility gate", () => {
-    // Regex over the ACTUAL dispatch.ts source. If a future refactor removes the
-    // dedup consult from the pre-flight table OR moves the table iteration AFTER
-    // the admissibility gate, this fails — protecting the structural invariant T3
-    // ships (dedup pre-flights before any permission/HITL/hook work).
-    const dispatchPath = path.resolve(__dirname, "../../src/agent/dispatch.ts")
-    const src = fs.readFileSync(dispatchPath, "utf8")
-    // Must import the preflight helper that owns the gate.
+/**
+ * ANTI-REGRESSION — the dedup gate pre-flights BEFORE any gate work.
+ *
+ * This block used to assert the invariant with three regexes over
+ * `dispatch.ts`'s SOURCE: that a `for (const consult of PRE_FLIGHT_CONSULTS)`
+ * loop existed, and that its source position preceded `runAdmissibilityGate(`.
+ *
+ * It broke without the invariant breaking. `4e742536b` replaced the explicit
+ * loop with `firstConsult(PRE_FLIGHT_CONSULTS, …)` and extracted the gate call
+ * into a helper defined EARLIER in the file — so the loop regex stopped
+ * matching, and the position comparison inverted even though execution order
+ * was untouched (the consult runs at the call site, the helper is merely
+ * declared above it). A source-position heuristic cannot tell code motion from
+ * behaviour change, and this is what that costs: a guard that reds on a
+ * refactor it should have ignored, and would stay green if someone moved the
+ * real call while leaving the text intact.
+ *
+ * So the ordering is now observed instead of read. `onConfirm` is the gate's
+ * own work: a dedup-blocked call must never reach it.
+ */
+describe("DedupGate — anti-regression: the gate pre-flights before any gate work", () => {
+  const bash = (): Tool => {
+    const tool: Tool = {
+      name: "bash",
+      description: "bash tool",
+      inputSchema: z.object({ command: z.string() }) as unknown as z.ZodType<unknown>,
+      isReadOnly: () => false,
+      // eslint-disable-next-line require-yield
+      run: async function* () {
+        yield { type: "stdout", text: "ok" } as unknown as ToolEvent
+      },
+    } as unknown as Tool
+    return tool
+  }
+
+  /** Dispatch the same call `n` times against one gate; report every preview
+   *  and how many times the gate's confirmation work was reached. */
+  const runSeries = async (
+    n: number,
+    opts: { readonly withGate: boolean },
+  ): Promise<{ previews: (string | undefined)[]; confirms: number }> => {
+    let confirms = 0
+    const tool = bash()
+    const config = {
+      cwd: "/repo",
+      signal: new AbortController().signal,
+      planMode: false,
+      permission: { mode: "ask" } as unknown as PermissionContext,
+      registry: new ToolRegistry([tool]),
+      // the gate counts a shape's occurrences ACROSS turns inside a window, so
+      // the turn has to advance like a real loop's does
+      run: { turn: 0 },
+      onConfirm: async () => {
+        confirms += 1
+        return false
+      },
+      ...(opts.withGate ? { dedupGate: new DedupGate() } : {}),
+    } as unknown as AgentConfig
+    const previews: (string | undefined)[] = []
+    for (let i = 0; i < n; i += 1) {
+      ;(config as unknown as { run: { turn: number } }).run.turn = i + 1
+      const out = await dispatchTool(
+        { type: "tool_use", id: `c${i}`, name: "bash", input: { command: "npm test" } },
+        config,
+        config.permission,
+      )
+      previews.push(out.preview)
+    }
+    return { previews, confirms }
+  }
+
+  test("🔴 a dedup-blocked call never reaches the gate's confirmation work", async () => {
+    const withGate = await runSeries(4, { withGate: true })
+    const blockedAt = withGate.previews.findIndex((p) => p?.startsWith("dedup-gate-"))
+    expect(
+      blockedAt,
+      "the dedup gate never fired — the fixture no longer trips it",
+    ).toBeGreaterThan(-1)
+    // Everything BEFORE the block reached the gate; the blocked call did not.
+    const confirmsAtBlock = withGate.confirms
+    const after = await runSeries(blockedAt, { withGate: true })
+    expect(
+      confirmsAtBlock,
+      "the blocked call still did gate work — the consult is no longer ahead of it",
+    ).toBe(after.confirms)
+  })
+
+  test("PAIRED CONTROL: without the gate the same repeats all reach the gate", async () => {
+    // Without this, "confirms did not grow" also passes when the gate work is
+    // unreachable for every call and the observable is simply dead.
+    const noGate = await runSeries(4, { withGate: false })
+    expect(noGate.previews.some((p) => p?.startsWith("dedup-gate-"))).toBe(false)
+    expect(noGate.confirms, "the confirmation observable is dead").toBe(4)
+  })
+
+  test("the consult stays wired into the ordered pre-flight table", () => {
+    // Cheap structural companion to the behavioural proof above: the table is
+    // the ORDER contract, and a consult silently dropped from it would leave
+    // the behaviour test above passing only until someone repeats this call
+    // shape. Deliberately does NOT assert source POSITION — that is the part
+    // that broke on a refactor which changed nothing.
+    const src = fs.readFileSync(path.resolve(__dirname, "../../src/agent/dispatch.ts"), "utf8")
     expect(/consultDedupGate[\s\S]*from\s+["']\.\/dispatch\/preflight-consults["']/.test(src)).toBe(
       true,
     )
-    // consultDedupGate must be a member of the ordered PRE_FLIGHT_CONSULTS table.
     const table = src.match(/PRE_FLIGHT_CONSULTS[\s\S]*?=\s*\[([\s\S]*?)\]/)
     expect(table?.[1]).toContain("consultDedupGate")
-    // That table must be iterated BEFORE the admissibility gate (line position).
-    const loopIdx = src.search(/for\s*\(const\s+consult\s+of\s+PRE_FLIGHT_CONSULTS\)/)
-    const admitIdx = src.search(/runAdmissibilityGate\s*\(/)
-    expect(loopIdx).toBeGreaterThan(0)
-    expect(admitIdx).toBeGreaterThan(0)
-    expect(loopIdx).toBeLessThan(admitIdx)
   })
 })
