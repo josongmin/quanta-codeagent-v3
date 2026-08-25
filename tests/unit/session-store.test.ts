@@ -3,6 +3,8 @@ import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import type { Message } from "@/llm"
+import { createObjectiveStore } from "@/objective"
+import { encodeObjectiveSnapshot } from "@/runner/assemble/session-authorities"
 import {
   appendEnvelope,
   appendRollbackIntent,
@@ -186,6 +188,35 @@ describe("session store", () => {
     const forked = await loadSessionById("custom-id")
     expect(forked?.meta.title).toBe("custom title")
     expect(forked?.meta.cwd).toBe("/elsewhere")
+  })
+
+  test("forkSession creates a paused objective generation without progress evidence", async () => {
+    const objective = createObjectiveStore()
+    const sourceObjective = objective.create("src-goal", {
+      goal: "ship",
+      successCriteria: ["tests pass"],
+      budget: { maxTurns: 5 },
+    })
+    objective.addBlocker("src-goal", { reason: "waiting", waitingOn: "user" })
+    await saveSessionById(mkMeta({ id: "src-goal" }), {
+      ...mkPayload(),
+      objective: encodeObjectiveSnapshot(objective),
+    })
+
+    await forkSession("src-goal", { newId: "fork-goal" })
+    const forked = await loadSessionById("fork-goal")
+    const thread = forked?.objective?.threads[0]
+    const body = thread !== undefined && "objective" in thread ? thread.objective : undefined
+    expect(thread?.threadId).toBe("fork-goal")
+    expect(body?.objectiveId).not.toBe(sourceObjective?.objectiveId)
+    expect(body?.status).toBe("paused")
+    expect(body?.explicitStatus).toBe("paused")
+    expect(body?.successCriteria[0]?.met).toBe(false)
+    expect(body?.successCriteria[0]?.completion).toBeUndefined()
+    expect(body?.blockers).toEqual([])
+    expect(body?.budget).toMatchObject({ maxTurns: 5, turnsUsed: 0, tokensUsed: 0 })
+    expect(body?.progressReceipts).toBeUndefined()
+    expect(body?.attempts).toEqual({ autonomousTurnsStarted: 0 })
   })
 
   test("forkSession deep-copies messages so the fork can be mutated independently", async () => {

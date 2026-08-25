@@ -33,13 +33,30 @@ export type AttachOutcome =
   | { readonly kind: "attached"; readonly sessionId: string; readonly messageCount: number }
   | { readonly kind: "unknown-session"; readonly sessionId: string }
   | { readonly kind: "refused-mid-turn"; readonly sessionId: string }
+  | { readonly kind: "invalid-attached-state"; readonly sessionId: string }
 
 export interface AttachSessionDeps {
   /** Disk readback (`loadSessionById`) — returns the lossless SavedSession
    *  fields the op needs. `undefined` ⇒ `unknown-session`. */
-  readonly loadSession: (
-    id: string,
-  ) => Promise<{ readonly meta: SessionMeta; readonly messages: readonly Message[] } | undefined>
+  readonly loadSession: (id: string) => Promise<
+    | {
+        readonly meta: SessionMeta
+        readonly messages: readonly Message[]
+        readonly objective?: import("./types").PersistedObjectiveSnapshot | undefined
+      }
+    | undefined
+  >
+  /** Cancel autonomous work before any attach eligibility check or disk read. */
+  readonly onAttachStart?: (() => void) | undefined
+  /** Validate and stage attached state without mutation. Null rejects before
+   * transcript/persistence changes; commit runs after both succeed. */
+  readonly prepareAttachedState?:
+    | ((saved: {
+        readonly meta: SessionMeta
+        readonly messages: readonly Message[]
+        readonly objective?: import("./types").PersistedObjectiveSnapshot | undefined
+      }) => { readonly commit: () => boolean } | null)
+    | undefined
   /** Kernel transcript swap (`session.transcript.replace` adapter). Throws an
    *  error whose message matches `/transcript_replace_unavailable/` mid-turn
    *  (mapped to `refused-mid-turn`). The catch block in `attachSessionToLive`
@@ -57,6 +74,9 @@ export interface AttachSessionDeps {
   /** Repoint future persistence at the attached session (in-place; surface owns
    *  the mechanism — CLI mirrors `meta`, web takes only `id`). */
   readonly setPersistTarget: (target: { readonly id: string; readonly meta: SessionMeta }) => void
+  /** Re-arm against the resulting live identity after every exit path. */
+  readonly onAttachSettled?: (() => void) | undefined
+  readonly onAttached?: (() => void) | undefined
 }
 
 /** @see module doc. Nothing live is touched until the transcript swap resolves. */
@@ -64,20 +84,31 @@ export const attachSessionToLive = async (
   sessionId: string,
   deps: AttachSessionDeps,
 ): Promise<AttachOutcome> => {
-  const saved = await deps.loadSession(sessionId)
-  if (saved === undefined) return { kind: "unknown-session", sessionId }
-
-  let history: readonly Message[]
+  deps.onAttachStart?.()
   try {
-    history = await deps.replaceTranscript(saved.messages)
-  } catch (error) {
-    if (/transcript_replace_unavailable/.test(errMessage(error))) {
-      return { kind: "refused-mid-turn", sessionId }
-    }
-    throw error
-  }
+    const saved = await deps.loadSession(sessionId)
+    if (saved === undefined) return { kind: "unknown-session", sessionId }
+    const attachedState = deps.prepareAttachedState?.(saved)
+    if (attachedState === null) return { kind: "invalid-attached-state", sessionId }
 
-  deps.onReplaced?.({ sessionId, history })
-  deps.setPersistTarget({ id: sessionId, meta: saved.meta })
-  return { kind: "attached", sessionId, messageCount: history.length }
+    let history: readonly Message[]
+    try {
+      history = await deps.replaceTranscript(saved.messages)
+    } catch (error) {
+      if (/transcript_replace_unavailable/.test(errMessage(error))) {
+        return { kind: "refused-mid-turn", sessionId }
+      }
+      throw error
+    }
+
+    deps.onReplaced?.({ sessionId, history })
+    deps.setPersistTarget({ id: sessionId, meta: saved.meta })
+    if (attachedState !== undefined && !attachedState.commit()) {
+      throw new Error("attached_state_commit_failed")
+    }
+    deps.onAttached?.()
+    return { kind: "attached", sessionId, messageCount: history.length }
+  } finally {
+    deps.onAttachSettled?.()
+  }
 }

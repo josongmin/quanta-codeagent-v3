@@ -24,6 +24,40 @@ const meta = (id: string): SessionMeta => ({
 })
 
 describe("HELLGATE P1 Phase 2 — swap live session onto a thread", () => {
+  test("cancel, validate, transcript, persist, objective, rearm order is fixed", async () => {
+    const order: string[] = []
+    const out = await hydrateThreadIntoLiveSession("t-order", {
+      loadThread: async () => ({ meta: meta("t-order"), messages: msgs }),
+      cancelGoalWake: () => order.push("cancel"),
+      prepareObjectiveAttach: () => {
+        order.push("validate")
+        return {
+          commit: () => {
+            order.push("objective")
+            return true
+          },
+        }
+      },
+      replaceTranscript: async () => void order.push("transcript"),
+      setActiveThreadId: () => void order.push("persist"),
+      rearmGoalWake: () => order.push("rearm"),
+    })
+    expect(out.kind).toBe("hydrated")
+    expect(order).toEqual(["cancel", "validate", "transcript", "persist", "objective", "rearm"])
+  })
+
+  test("invalid objective snapshot rejects before transcript or persistence mutation", async () => {
+    const effects: string[] = []
+    const out = await hydrateThreadIntoLiveSession("t-invalid", {
+      loadThread: async () => ({ meta: meta("t-invalid"), messages: msgs }),
+      prepareObjectiveAttach: () => null,
+      replaceTranscript: async () => void effects.push("transcript"),
+      setActiveThreadId: () => void effects.push("persist"),
+    })
+    expect(out).toEqual({ kind: "invalid-objective", threadId: "t-invalid" })
+    expect(effects).toEqual([])
+  })
+
   test("persisted thread: replaces transcript + repoints the persist id", async () => {
     const replaced: (readonly Message[])[] = []
     let active: string | null = null

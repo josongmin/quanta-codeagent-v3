@@ -101,7 +101,7 @@ export const buildObjectiveSnapshotProvider = (
 }
 
 /**
- * RFC-03 C2 (web parity) — restore a persisted objective snapshot INTO an already
+ * RFC-03 C2 (web parity) — FIRST-HYDRATE ONLY: restore a persisted objective snapshot INTO an already
  * live, session-stable authority at HYDRATE time (the DECODE mirror of
  * {@link buildObjectiveSnapshotProvider}'s encode). The web daemon mints ONE
  * objective authority per session, BEFORE any thread id is known, so it cannot use
@@ -124,7 +124,8 @@ export const buildObjectiveSnapshotProvider = (
  * reopening session's live objective read key, `sharedSession.sessionId`) so the
  * reopened turns actually see the goal. The web daemon holds exactly ONE per-session
  * objective domain (keyed by that single session id), so the snapshot carries one
- * domain to re-key; no-clobber still guards a live goal on `liveKey`. Without
+ * domain to re-key; no-clobber guards initial hydration. Explicit thread attach
+ * MUST use `prepareObjectiveSnapshotForAttach`, which replaces. Without
  * `liveKey` (non-web callers) each domain is planted VERBATIM under its own thread,
  * skipping any thread already live.
  */
@@ -147,6 +148,55 @@ export const restoreObjectiveSnapshotInto = (
     // No-clobber: never overwrite a thread the live session already holds.
     if (auth.readDomain(domain.threadId).state !== null) continue
     auth.restoreDomain(domain)
+  }
+}
+
+export interface PreparedObjectiveAttach {
+  readonly commit: () => boolean
+}
+
+export type PrepareObjectiveAttachResult =
+  | { readonly ok: true; readonly prepared: PreparedObjectiveAttach }
+  | { readonly ok: false; readonly reason: "invalid-objective-snapshot" }
+
+/** Validate an explicit attach snapshot without mutating the live authority.
+ * The returned commit replaces (including clears) the live key and therefore
+ * must only run after transcript replacement and persistence repoint succeed. */
+export const prepareObjectiveSnapshotForAttach = (
+  authority: unknown,
+  snapshot: PersistedObjectiveSnapshot | undefined,
+  liveKey: string,
+  previousLiveKey?: string,
+): PrepareObjectiveAttachResult => {
+  if (liveKey.length === 0) return { ok: false, reason: "invalid-objective-snapshot" }
+  if (snapshot !== undefined) {
+    const rawIds = snapshot.threads.map((thread) => thread.threadId)
+    if (rawIds.length > 1 || new Set(rawIds).size !== rawIds.length || rawIds.some((id) => !id)) {
+      return { ok: false, reason: "invalid-objective-snapshot" }
+    }
+  }
+  const domains = snapshot === undefined ? [] : decodeObjectiveSnapshot(snapshot)
+  if (
+    domains.length > 1 ||
+    (snapshot !== undefined && domains.length !== snapshot.threads.length)
+  ) {
+    return { ok: false, reason: "invalid-objective-snapshot" }
+  }
+  if (authority === undefined || authority === null) {
+    return { ok: true, prepared: { commit: () => true } }
+  }
+  const auth = asObjectiveAuthority(authority as ObjectivePort)
+  const persistedDomain = domains[0] ?? null
+  return {
+    ok: true,
+    prepared: {
+      commit: () =>
+        auth.replaceDomainForAttach({
+          liveThreadId: liveKey,
+          ...(previousLiveKey !== undefined ? { previousLiveThreadId: previousLiveKey } : {}),
+          persistedDomain,
+        }).ok,
+    },
   }
 }
 

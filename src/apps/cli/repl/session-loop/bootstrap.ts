@@ -300,6 +300,8 @@ export const bootstrapSessionLoop = async (
     registerSessionSwitch,
     replaceTranscript,
     idMeta,
+    objectiveStore: deps.objectiveStore,
+    goalWakeSlot: deps.goalWakeSlot,
     commitSwitch: ({ sessionId, history: switchHistory }) => {
       state.surfaceState = updateSessionState(state.surfaceState, {
         sessionId,
@@ -307,7 +309,6 @@ export const bootstrapSessionLoop = async (
       })
     },
   })
-
   // Audit R1 C-F1: attachPlaybookHandle() allocates a filesystem watcher that
   // can throw in the same init gap — guardInit drains on throw so the facade +
   // session don't leak.

@@ -24,8 +24,11 @@
  * anywhere earlier leaves EVERYTHING untouched (disk-vs-live honesty).
  */
 
+import { prepareObjectiveSnapshotForAttach } from "@/host/runtime/objective-store-wire"
 import type { Message } from "@/llm"
-import { attachSessionToLive, type SessionMeta } from "@/session"
+import type { ObjectivePort } from "@/objective"
+import { attachSessionToLive, type PersistedObjectiveSnapshot, type SessionMeta } from "@/session"
+import type { GoalWakeSignalSlot } from "../goal-wake-signal"
 
 /** Receipt the switch hands back to `/fork` so the printed copy states
  *  EXACTLY what the next persist will do (effect-receipt discipline). */
@@ -41,9 +44,14 @@ export interface SessionSwitchReceipt {
 
 export interface SessionSwitchDeps {
   /** Disk readback for the fork (`loadSessionById`). */
-  readonly loadSession: (
-    id: string,
-  ) => Promise<{ meta: SessionMeta; messages: readonly Message[] } | undefined>
+  readonly loadSession: (id: string) => Promise<
+    | {
+        meta: SessionMeta
+        messages: readonly Message[]
+        objective?: PersistedObjectiveSnapshot | undefined
+      }
+    | undefined
+  >
   /** Kernel transcript swap (`session.transcript.replace` adapter). Throws
    *  `transcript_replace_unavailable` mid-turn — propagated to the caller.
    *  Returns the history the kernel actually holds after the swap. */
@@ -54,6 +62,9 @@ export interface SessionSwitchDeps {
   /** Surface-state commit (`surfaceState = updateSessionState(...)`). Called
    *  ONLY after the kernel swap resolved. */
   readonly commit: (next: { sessionId: string; history: readonly Message[] }) => void
+  readonly currentSessionId?: (() => string | undefined) | undefined
+  readonly objectiveStore?: ObjectivePort | undefined
+  readonly goalWakeSlot?: GoalWakeSignalSlot | undefined
 }
 
 /** In-place mirror of `next` onto `target` — SAME object identity (the
@@ -82,8 +93,29 @@ export const performSessionSwitch = async (
   deps: SessionSwitchDeps,
   newSessionId: string,
 ): Promise<SessionSwitchReceipt> => {
+  const previousSessionId = deps.currentSessionId?.()
+  let attached = false
   const outcome = await attachSessionToLive(newSessionId, {
     loadSession: deps.loadSession,
+    onAttachStart: () => deps.goalWakeSlot?.current?.onActivity(),
+    prepareAttachedState:
+      deps.objectiveStore === undefined
+        ? undefined
+        : (saved) => {
+            const prepared = prepareObjectiveSnapshotForAttach(
+              deps.objectiveStore,
+              saved.objective,
+              newSessionId,
+              previousSessionId,
+            )
+            if (!prepared.ok) return null
+            return {
+              commit: () => {
+                const committed = prepared.prepared.commit()
+                return committed
+              },
+            }
+          },
     replaceTranscript: deps.replaceTranscript,
     onReplaced: ({ sessionId, history }) => deps.commit({ sessionId, history }),
     // In-place mirror onto the facade-aliased SessionMeta (the aliasing is the
@@ -91,12 +123,21 @@ export const performSessionSwitch = async (
     setPersistTarget: ({ meta }) => {
       if (deps.idMeta !== undefined) repointSessionMeta(deps.idMeta, meta)
     },
+    onAttached: () => {
+      attached = true
+    },
+    onAttachSettled: () => {
+      if (attached) deps.goalWakeSlot?.current?.onAttach?.(newSessionId)
+      else deps.goalWakeSlot?.current?.onGoalMutation()
+    },
   })
   switch (outcome.kind) {
     case "unknown-session":
       throw new Error(`session not found on disk: ${newSessionId}`)
     case "refused-mid-turn":
       throw new Error("transcript_replace_unavailable")
+    case "invalid-attached-state":
+      throw new Error("invalid_attached_objective")
     case "attached":
       if (deps.idMeta !== undefined) {
         return {

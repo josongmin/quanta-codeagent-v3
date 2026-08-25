@@ -119,6 +119,10 @@ export interface ObjectiveReadPort {
   readDomain(threadId: string): ObjectiveDomainSnapshot
 }
 
+export type AttachDomainReplaceResult =
+  | { readonly ok: true; readonly revision: number; readonly attachGeneration: number }
+  | { readonly ok: false; readonly reason: "invalid" }
+
 /**
  * The revisioned objective authority. Extends `ObjectivePort` so every legacy
  * caller (tools, approval-state-machine attribution, `/goal`, continuation,
@@ -144,6 +148,14 @@ export interface ObjectiveAuthority extends ObjectivePort, ObjectiveReadPort {
    * NO CAS check — it is a durable-resume load, not an undo.
    */
   restoreDomain(snapshot: ObjectiveDomainSnapshot): boolean
+  /** Atomically replace the live objective key when the user attaches another
+   * durable thread. This is distinct from first-hydrate restore: it clears the
+   * previous live domain and advances an ephemeral attach-generation fence. */
+  replaceDomainForAttach(input: {
+    readonly liveThreadId: string
+    readonly previousLiveThreadId?: string | undefined
+    readonly persistedDomain: ObjectiveDomainSnapshot | null
+  }): AttachDomainReplaceResult
   /** Append a validated bounded turn-evidence packet without changing objective
    *  revision. The packet's `objectiveId` must be the live generation. */
   recordProgressReceipt(threadId: string, receipt: ProgressReceipt): boolean

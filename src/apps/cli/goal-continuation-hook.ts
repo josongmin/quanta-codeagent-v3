@@ -44,6 +44,7 @@ export type GoalContinuationProbes = Omit<ContinuationDeps, "enabled" | "semapho
 export interface GoalWakeLifecycle {
   onGoalMutation(): void
   onInfrastructureUnavailable(objectiveRevision: number, observedAt: number): void
+  onAttach(threadId: string): void
   onActivity(): void
   onLocalInputSettled(): void
   onTurnSettled(): void
@@ -82,8 +83,10 @@ export const DEFAULT_GOAL_QUIET_MS = 15_000
  * again immediately before the existing continuation orchestrator enqueues.
  */
 export const startGoalWakeController = (opts: StartGoalWakeOpts): GoalWakeLifecycle | undefined => {
-  const threadId = opts.threadId
-  if (!opts.enabled || threadId === undefined || threadId.length === 0) return undefined
+  const initialThreadId = opts.threadId
+  if (!opts.enabled || initialThreadId === undefined || initialThreadId.length === 0)
+    return undefined
+  let threadId = initialThreadId
 
   const now = opts.now ?? Date.now
   const policy: GoalWakePolicy = opts.policy ?? {
@@ -170,7 +173,7 @@ export const startGoalWakeController = (opts: StartGoalWakeOpts): GoalWakeLifecy
           await opts.probes.resume(id)
         },
       }
-      const outcome = await runIdleContinuation(threadId, guardedDeps)
+      const outcome = await runIdleContinuation(attempt.threadId, guardedDeps)
       // A second guard can reject after the controller's fire-time decision.
       // Treat that as a rejected enqueue so the attempt reservation releases
       // rather than silently consuming a retry opportunity.
@@ -201,6 +204,15 @@ export const startGoalWakeController = (opts: StartGoalWakeOpts): GoalWakeLifecy
     onGoalMutation: resetForNextCheckpoint,
     onInfrastructureUnavailable: (objectiveRevision, observedAt) => {
       settlementHint = { infraUnavailableAtRevision: objectiveRevision, observedAt }
+      resetForNextCheckpoint()
+    },
+    onAttach: (nextThreadId) => {
+      if (nextThreadId.length === 0) return
+      const priorThreadId = threadId
+      controller.cancel()
+      controller.clearAttempts(priorThreadId)
+      threadId = nextThreadId
+      settlementHint = {}
       resetForNextCheckpoint()
     },
     onActivity: () => controller.onActivity(),

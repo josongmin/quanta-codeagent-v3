@@ -50,6 +50,9 @@ export interface ObjectiveThreadSnapshot {
 export interface ObjectiveDomainSnapshot {
   readonly threadId: string
   readonly revision: number
+  /** Ephemeral live-attach generation. It is not persistence identity; hosts
+   * increment it whenever a different durable thread replaces this live key. */
+  readonly attachGeneration?: number | undefined
   readonly state: ObjectiveThreadSnapshot | null
   /** Bounded durable evidence packets; never contains prompt/transcript text. */
   readonly progressReceipts?: readonly ProgressReceipt[]

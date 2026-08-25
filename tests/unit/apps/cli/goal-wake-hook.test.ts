@@ -121,6 +121,24 @@ describe("goal wake host binding", () => {
     expect(timer.delays()).toEqual([10, 300, 10])
   })
 
+  test("attach clears the old generation and arms the new thread once", () => {
+    const store = createObjectiveStore()
+    store.create(TID, { goal: "old" })
+    store.create("attached", { goal: "new" })
+    const timer = fakeTimeout()
+    const wake = startGoalWakeController({
+      enabled: true,
+      threadId: TID,
+      quietWindowMs: 10,
+      probes: probes(store, async () => undefined),
+      readDomain: (id) => asObjectiveAuthority(store).readDomain(id),
+      setTimeoutFn: timer.set,
+      clearTimeoutFn: timer.clear,
+    })
+    wake?.onAttach("attached")
+    expect(timer.delays()).toEqual([10, 10])
+  })
+
   test("an active authority objective wakes exactly once from the quiet-window edge", async () => {
     const store = createObjectiveStore()
     store.create(TID, { goal: "ship" })

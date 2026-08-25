@@ -18,7 +18,6 @@
  * queues, clocks and the actual enqueue path are injected by the host.
  */
 
-import { errMessage, logger } from "@/shared"
 import type { ObjectiveDomainSnapshot } from "./model"
 
 export type GoalWakeSkipReason =
@@ -36,6 +35,7 @@ export interface GoalWakeAttempt {
   readonly threadId: string
   readonly objectiveId: string
   readonly objectiveRevision: number
+  readonly attachGeneration: number
   /** A host-owned checkpoint counter; it changes whenever a new pursuit step
    * is eligible under the same objective revision. */
   readonly checkpointOrdinal: number
@@ -113,6 +113,8 @@ export interface GoalWakeController {
   onActivity(): void
   /** Cancel a pending timer; an already accepted enqueue is intentionally not revoked. */
   cancel(): void
+  /** Drop attempt claims for a detached live key before another thread replaces it. */
+  clearAttempts(threadId: string): void
   /** Permanent lifecycle stop. Idempotent; queued timer callbacks become no-ops. */
   stop(): void
 }
@@ -177,6 +179,9 @@ export const evaluateGoalWakeFire = (input: GoalWakeFireInput): GoalWakeDecision
   const revision = activeRevision(input.current)
   if (revision === null) return skip("goal-not-active")
   if (revision !== input.expected.objectiveRevision) return skip("revision-changed")
+  if ((input.current.attachGeneration ?? 0) !== input.expected.attachGeneration) {
+    return skip("revision-changed")
+  }
   if (!input.stillQuiescent) return skip("no-longer-quiescent")
   return { arm: true }
 }
@@ -185,19 +190,29 @@ const keyFor = (
   threadId: string,
   objectiveId: string,
   objectiveRevision: number,
+  attachGeneration: number,
   checkpointOrdinal: number,
-): string => JSON.stringify([threadId, objectiveId, objectiveRevision, checkpointOrdinal])
+): string =>
+  JSON.stringify([threadId, objectiveId, objectiveRevision, attachGeneration, checkpointOrdinal])
 
 const makeAttempt = (
   input: GoalWakeArm,
   objectiveId: string,
   objectiveRevision: number,
+  attachGeneration: number,
 ): GoalWakeAttempt => ({
   threadId: input.threadId,
   objectiveId,
   objectiveRevision,
+  attachGeneration,
   checkpointOrdinal: input.checkpointOrdinal,
-  attemptKey: keyFor(input.threadId, objectiveId, objectiveRevision, input.checkpointOrdinal),
+  attemptKey: keyFor(
+    input.threadId,
+    objectiveId,
+    objectiveRevision,
+    attachGeneration,
+    input.checkpointOrdinal,
+  ),
 })
 
 /**
@@ -262,6 +277,29 @@ export const createInMemoryGoalWakeAttemptRegistry = (): GoalWakeAttemptRegistry
   }
 }
 
+const readHostQuiescence = (deps: GoalWakeControllerDeps, threadId: string): boolean => {
+  try {
+    return deps.stillQuiescent(threadId) === true
+  } catch {
+    return false
+  }
+}
+
+const dispatchClaimedAttempt = (
+  deps: GoalWakeControllerDeps,
+  attempt: GoalWakeAttempt,
+  reservation: GoalWakeAttemptReservation,
+): void => {
+  try {
+    Promise.resolve(deps.enqueue(attempt)).then(
+      () => reservation.commit(),
+      () => reservation.release(),
+    )
+  } catch {
+    reservation.release()
+  }
+}
+
 /**
  * Build a single-timer controller. The constructor is intentionally effect-free:
  * nothing is read or scheduled until `arm`/`reset` is called.
@@ -323,34 +361,13 @@ export const createGoalWakeController = (deps: GoalWakeControllerDeps): GoalWake
     const resolvedDelay = deps.resolveDelayMs?.(current) ?? delayMs
     if (!Number.isFinite(resolvedDelay) || resolvedDelay <= 0) return undefined
     return {
-      attempt: makeAttempt(input, current.state.objective.objectiveId, revision),
+      attempt: makeAttempt(
+        input,
+        current.state.objective.objectiveId,
+        revision,
+        current.attachGeneration ?? 0,
+      ),
       delayMs: resolvedDelay,
-    }
-  }
-
-  const quiescentAtFire = (threadId: string): boolean => {
-    try {
-      return deps.stillQuiescent(threadId) === true
-    } catch (e) {
-      // `false` (= not quiescent = do not fire) stays the fail-SAFE answer. But a
-      // probe that throws every time silently means the wake never fires again,
-      // which is indistinguishable from a thread that is simply always busy.
-      logger.warn(`goal-wake-controller.quiescentAtFire(${threadId}): ${errMessage(e)}`)
-      return false
-    }
-  }
-
-  const dispatchClaimed = (
-    attempt: GoalWakeAttempt,
-    reservation: GoalWakeAttemptReservation,
-  ): void => {
-    try {
-      Promise.resolve(deps.enqueue(attempt)).then(
-        () => reservation.commit(),
-        () => reservation.release(),
-      )
-    } catch {
-      reservation.release()
     }
   }
 
@@ -362,7 +379,7 @@ export const createGoalWakeController = (deps: GoalWakeControllerDeps): GoalWake
       stopped,
       expected: attempt,
       current: readCurrent(attempt.threadId),
-      stillQuiescent: quiescentAtFire(attempt.threadId),
+      stillQuiescent: readHostQuiescence(deps, attempt.threadId),
     })
     if (!fire.arm) {
       if (fire.skipReason !== undefined) reportSkip(attempt, fire.skipReason)
@@ -373,7 +390,7 @@ export const createGoalWakeController = (deps: GoalWakeControllerDeps): GoalWake
       reportSkip(attempt, "attempt-already-claimed")
       return
     }
-    dispatchClaimed(attempt, reservation)
+    dispatchClaimedAttempt(deps, attempt, reservation)
   }
 
   const scheduleAttempt = (
@@ -413,6 +430,7 @@ export const createGoalWakeController = (deps: GoalWakeControllerDeps): GoalWake
       generation += 1
       clearPending()
     },
+    clearAttempts: (threadId): void => attempts.clearThread(threadId),
     stop: (): void => {
       if (stopped) return
       stopped = true

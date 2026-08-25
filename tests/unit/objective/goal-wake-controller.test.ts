@@ -92,8 +92,9 @@ describe("goal wake controller pure fences", () => {
       threadId: "thread-1",
       objectiveId: "objective:thread-1",
       objectiveRevision: 3,
+      attachGeneration: 0,
       checkpointOrdinal: 1,
-      attemptKey: '["thread-1","objective:thread-1",3,1]',
+      attemptKey: '["thread-1","objective:thread-1",3,0,1]',
     }
     expect(
       evaluateGoalWakeFire({
@@ -113,6 +114,15 @@ describe("goal wake controller pure fences", () => {
         stillQuiescent: false,
       }),
     ).toEqual({ arm: false, skipReason: "no-longer-quiescent" })
+    expect(
+      evaluateGoalWakeFire({
+        enabled: true,
+        stopped: false,
+        expected,
+        current: { ...domain(3), attachGeneration: 1 },
+        stillQuiescent: true,
+      }),
+    ).toEqual({ arm: false, skipReason: "revision-changed" })
   })
 })
 
@@ -154,12 +164,12 @@ describe("goal wake controller lifecycle", () => {
     expect(timer.scheduled()).toBe(2)
     expect(timer.cleared()).toBe(1)
     timer.fire()
-    expect(launched).toEqual(['["thread-1","obj-1",1,1]'])
+    expect(launched).toEqual(['["thread-1","obj-1",1,0,1]'])
     controller.onActivity()
     timer.fire()
     controller.stop()
     timer.fire()
-    expect(launched).toEqual(['["thread-1","obj-1",1,1]'])
+    expect(launched).toEqual(['["thread-1","obj-1",1,0,1]'])
   })
 
   test("a revision change or new input state drops the wake before enqueue", () => {
@@ -251,6 +261,7 @@ describe("goal wake controller lifecycle", () => {
           threadId: "thread-1",
           objectiveId: "objective-1",
           objectiveRevision: 1,
+          attachGeneration: 0,
           checkpointOrdinal: ordinal,
           attemptKey: `attempt-${ordinal}`,
         })
@@ -262,6 +273,7 @@ describe("goal wake controller lifecycle", () => {
         threadId: "thread-1",
         objectiveId: "objective-2",
         objectiveRevision: 2,
+        attachGeneration: 1,
         checkpointOrdinal: 0,
         attemptKey: "replacement",
       })

@@ -71,6 +71,7 @@ export interface InteractiveSetupArgs {
   readonly activeTurnRef: AgentConfig["activeTurnRef"]
   readonly activeIdentityModeState: IdentityModeCell | undefined
   readonly planQueueStore: import("@/agent/plan-queue").PlanQueueStore | undefined
+  readonly currentThreadId: () => string | undefined
   readonly enqueueWithHeartbeat: EnqueueWithHeartbeat
   readonly getLastTurnOutcome: () => LastTurnOutcome | undefined
   readonly getLastUserInputAt: () => number
@@ -104,6 +105,7 @@ export const wireInteractiveSetup = async (
     activeTurnRef,
     activeIdentityModeState,
     planQueueStore,
+    currentThreadId,
     enqueueWithHeartbeat,
     getLastTurnOutcome,
     setLastUserInputAt,
@@ -153,9 +155,10 @@ export const wireInteractiveSetup = async (
     textInbox,
     planQueueStore,
     activeIdentityModeState,
+    currentThreadId,
   })
 
-  armGoalPill({ setup, closeStack, objectiveStore })
+  armGoalPill({ setup, closeStack, objectiveStore, currentThreadId })
 
   // ADR-0468 — NDJSON live-introspection sink. Default-OFF: NullNdjsonSink
   // (no socket/file/alloc) unless QUANTA_NDJSON_INGEST_PORT / _FILE is set.
@@ -270,6 +273,7 @@ const armGoalWake = (args: {
   readonly textInbox: TextInbox | undefined
   readonly planQueueStore: import("@/agent/plan-queue").PlanQueueStore | undefined
   readonly activeIdentityModeState: IdentityModeCell | undefined
+  readonly currentThreadId: () => string | undefined
   readonly attachingOrClosing?: (() => boolean) | undefined
 }): void => {
   const {
@@ -283,6 +287,7 @@ const armGoalWake = (args: {
     textInbox,
     planQueueStore,
     activeIdentityModeState,
+    currentThreadId,
   } = args
   const quiescenceSnapshot = () => ({
     turnActive: activeTurnRef?.current.currentTurn !== null,
@@ -291,13 +296,13 @@ const armGoalWake = (args: {
     textPending: (textInbox?.size() ?? 0) > 0,
     imagePending: (imageQueue?.size() ?? 0) > 0,
     planPending:
-      setup.sessionId !== undefined && planQueueStore !== undefined
-        ? planQueueStore.peek(setup.sessionId).length > 0
+      currentThreadId() !== undefined && planQueueStore !== undefined
+        ? planQueueStore.peek(currentThreadId() as string).length > 0
         : false,
     followupPending:
-      setup.sessionId !== undefined
+      currentThreadId() !== undefined
         ? (setup.lifecycleFollowUpQueue?.sizeFor(
-            setup.sessionId as import("@/agent/follow-up-queue").ThreadId,
+            currentThreadId() as import("@/agent/follow-up-queue").ThreadId,
           ) ?? 0) > 0
         : false,
     approvalPending: (setup.midTurnApprovalChannel.pendingLabels?.().length ?? 0) > 0,
@@ -368,7 +373,7 @@ const armGoalWake = (args: {
               )
             },
             mailboxInputPending: () => quiescenceSnapshot().textPending,
-            isEphemeral: () => setup.sessionId === undefined,
+            isEphemeral: () => currentThreadId() === undefined,
             resume: async (tid) => {
               // SSOT pursuit discipline (anti-scope-shrink + verify-before-
               // complete + blocked-hysteresis), goal fenced as user data.
@@ -403,12 +408,14 @@ const armGoalPill = (args: {
   readonly setup: SessionSetupResult
   readonly closeStack: Array<CloseStackEntry>
   readonly objectiveStore: ObjectivePort | undefined
+  readonly currentThreadId: () => string | undefined
 }): void => {
-  const { setup, closeStack, objectiveStore } = args
+  const { setup, closeStack, objectiveStore, currentThreadId } = args
   if (objectiveStore === undefined) return
   let lastGoalPillKey = ""
   const refreshGoalPill = (): void => {
-    const active = setup.sessionId !== undefined ? objectiveStore.get(setup.sessionId) : null
+    const threadId = currentThreadId()
+    const active = threadId !== undefined ? objectiveStore.get(threadId) : null
     const view =
       active !== null && active.status === "active" && active.goal.length > 0
         ? { text: active.goal, elapsedMs: Date.now() - active.createdAt }

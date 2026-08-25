@@ -6,6 +6,7 @@ import { errMessage, logger, reconcileToolPairing } from "@/shared"
 import { fileExists, readFile, writeFile } from "@/storage"
 import type { SessionEnvelopeRecord } from "./envelope"
 import { appendSessionLine, encodeSessionLine } from "./envelope-encoder"
+import { cloneObjectiveForFork } from "./fork-objective"
 import { listSessions, removeFromIndex, upsertMeta } from "./index-store"
 import {
   archivedFilePath,
@@ -827,6 +828,7 @@ export const forkSession = async (
   // Bun supports structuredClone natively and it's faster + safer than the old
   // JSON.parse(JSON.stringify(...)) round-trip (no Date/Map loss surprises).
   const messagesCopy = structuredClone(source.messages)
+  const forkedObjective = cloneObjectiveForFork(source.objective, id, newId, now)
   // B4 follow-up (jun-04): a fork propagates whatever dangling pair the source
   // tail already carries (the live-turn closeout never sealed it, or a prior
   // rewind split it). Reconcile the cloned messages before writing so the
@@ -838,9 +840,9 @@ export const forkSession = async (
     reason: source.reason,
     turns: source.turns,
     messages: reconcileMessages(messagesCopy),
-    // RFC-03 C2 — a fork continues the source's goal, so carry the durable
-    // objective snapshot forward (absent ⇒ omitted ⇒ byte-identical).
-    ...(source.objective !== undefined ? { objective: source.objective } : {}),
+    // A fork is a new objective generation: preserve the declaration but never
+    // copy completion/progress/blockers or autonomous execution state.
+    ...(forkedObjective !== undefined ? { objective: forkedObjective } : {}),
   }
   await writeSessionFile(await resolveSessionFilePath(newId, provider), JSON.stringify(saved))
   await commitMetaAfterSnapshot(newMeta, provider)

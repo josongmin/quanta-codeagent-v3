@@ -20,6 +20,8 @@
  */
 import { describe, expect, test } from "bun:test"
 import type { Message } from "@/llm"
+import { asObjectiveAuthority, createObjectiveStore } from "@/objective"
+import { encodeObjectiveSnapshot } from "@/runner/assemble/session-authorities"
 import type { SessionMeta } from "@/session"
 import {
   performSessionSwitch,
@@ -144,6 +146,69 @@ describe("performSessionSwitch", () => {
     )
     expect(receipt.persistTarget).toBe("unchanged")
     expect(receipt.persistNote).toContain("--resume")
+  })
+
+  test("attach replaces objective generation and cancels/rearms wake around the crown", async () => {
+    const store = createObjectiveStore()
+    const authority = asObjectiveAuthority(store)
+    store.create("parent", { goal: "parent goal" })
+    const disk = createObjectiveStore()
+    disk.create("fork", { goal: "fork goal" })
+    const events: string[] = []
+    const goalWakeSlot = {
+      current: {
+        onActivity: () => events.push("cancel"),
+        onGoalMutation: () => events.push("rearm-parent"),
+        onLocalInputSettled: () => {},
+        onTurnSettled: () => {},
+        onAttach: (id: string) => events.push(`attach:${id}`),
+      },
+    }
+    await performSessionSwitch(
+      {
+        loadSession: async () => ({
+          meta: mkMeta("fork"),
+          messages: forkMsgs,
+          objective: encodeObjectiveSnapshot(disk),
+        }),
+        replaceTranscript: async (msgs) => msgs,
+        idMeta: mkMeta("parent"),
+        currentSessionId: () => "parent",
+        objectiveStore: store,
+        goalWakeSlot,
+        commit: () => {},
+      },
+      "fork",
+    )
+    expect(authority.readDomain("parent").state).toBeNull()
+    expect(authority.readDomain("fork").state?.objective.goal).toBe("fork goal")
+    expect(events).toEqual(["cancel", "attach:fork"])
+  })
+
+  test("mid-turn refusal leaves transcript-owned objective and persistence identity unchanged", async () => {
+    const store = createObjectiveStore()
+    store.create("parent", { goal: "parent goal" })
+    const idMeta = mkMeta("parent")
+    const commits: unknown[] = []
+    await expect(
+      performSessionSwitch(
+        {
+          loadSession: async () => ({ meta: mkMeta("fork"), messages: forkMsgs }),
+          replaceTranscript: async () => {
+            throw new Error("transcript_replace_unavailable")
+          },
+          idMeta,
+          currentSessionId: () => "parent",
+          objectiveStore: store,
+          commit: (value) => commits.push(value),
+        },
+        "fork",
+      ),
+    ).rejects.toThrow("transcript_replace_unavailable")
+    expect(store.get("parent")?.goal).toBe("parent goal")
+    expect(store.get("fork")).toBeNull()
+    expect(idMeta.id).toBe("parent")
+    expect(commits).toEqual([])
   })
 })
 

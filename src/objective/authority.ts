@@ -650,12 +650,14 @@ interface AuthoritySurfaceDeps {
   readonly core: ObjectiveCore
   readonly revisions: Map<string, number>
   readonly progress: Map<string, readonly ProgressReceipt[]>
+  readonly attachGenerations: Map<string, number>
   readonly revisionOf: (threadId: string) => number
   readonly readDomain: (threadId: string) => ObjectiveDomainSnapshot
   readonly prepare: ObjectiveAuthority["prepare"]
   readonly commit: ObjectiveAuthority["commit"]
   readonly restore: ObjectiveAuthority["restore"]
   readonly restoreDomain: ObjectiveAuthority["restoreDomain"]
+  readonly replaceDomainForAttach: ObjectiveAuthority["replaceDomainForAttach"]
   readonly system: (threadId: string, mutation: ObjectiveMutation) => Objective | null
 }
 
@@ -665,6 +667,7 @@ const createAuthoritySurface = (deps: AuthoritySurfaceDeps): ObjectiveAuthority 
   commit: deps.commit,
   restore: deps.restore,
   restoreDomain: deps.restoreDomain,
+  replaceDomainForAttach: deps.replaceDomainForAttach,
   knownThreadIds: () =>
     Object.freeze([
       ...new Set([...deps.revisions.keys(), ...deps.core.list().map((o) => o.threadId)]),
@@ -714,6 +717,7 @@ const createAuthoritySurface = (deps: AuthoritySurfaceDeps): ObjectiveAuthority 
     // previous thread's receipts are dropped (they belong to generations that no
     // longer exist here), never projected into a judge/renderer context.
     deps.progress.clear()
+    deps.attachGenerations.clear()
     for (const objective of deps.core.list()) deps.revisions.set(objective.threadId, 1)
   },
 })
@@ -729,6 +733,7 @@ const createObjectiveAuthorityWithCore = (
   const mintId = opts?.idFactory ?? defaultObjectiveIdFactory
   const revisions = new Map<string, number>()
   const progress = new Map<string, readonly ProgressReceipt[]>()
+  const attachGenerations = new Map<string, number>()
   const revisionOf = (threadId: string): number => revisions.get(threadId) ?? 0
   const bump = (threadId: string): number => {
     const next = revisionOf(threadId) + 1
@@ -742,6 +747,7 @@ const createObjectiveAuthorityWithCore = (
   const readDomain = (threadId: string): ObjectiveDomainSnapshot => ({
     threadId: isNonEmptyString(threadId) ? threadId : "",
     revision: revisionOf(threadId),
+    attachGeneration: attachGenerations.get(threadId) ?? 0,
     state: isNonEmptyString(threadId) ? core.snapshotThread(threadId) : null,
     progressReceipts: isNonEmptyString(threadId) ? (progress.get(threadId) ?? []) : [],
     ...contractOf(isNonEmptyString(threadId) ? core.get(threadId) : null),
@@ -841,16 +847,55 @@ const createObjectiveAuthorityWithCore = (
     )
     return true
   }
+  const replaceDomainForAttach: ObjectiveAuthority["replaceDomainForAttach"] = ({
+    liveThreadId,
+    previousLiveThreadId,
+    persistedDomain,
+  }) => {
+    if (
+      !isNonEmptyString(liveThreadId) ||
+      (persistedDomain !== null && persistedDomain.state === null)
+    ) {
+      return { ok: false, reason: "invalid" }
+    }
+    const restored = core.restoreThread(liveThreadId, persistedDomain?.state ?? null)
+    if (!restored && !(persistedDomain === null && core.get(liveThreadId) === null)) {
+      return { ok: false, reason: "invalid" }
+    }
+    const revision = Math.max(revisionOf(liveThreadId) + 1, persistedDomain?.revision ?? 0)
+    revisions.set(liveThreadId, revision)
+    if (persistedDomain === null) progress.delete(liveThreadId)
+    else {
+      progress.set(
+        liveThreadId,
+        receiptsForGeneration(core, liveThreadId, persistedDomain.progressReceipts),
+      )
+    }
+    const attachGeneration = (attachGenerations.get(liveThreadId) ?? 0) + 1
+    attachGenerations.set(liveThreadId, attachGeneration)
+    if (isNonEmptyString(previousLiveThreadId) && previousLiveThreadId !== liveThreadId) {
+      core.restoreThread(previousLiveThreadId, null)
+      revisions.set(previousLiveThreadId, revisionOf(previousLiveThreadId) + 1)
+      progress.delete(previousLiveThreadId)
+      attachGenerations.set(
+        previousLiveThreadId,
+        (attachGenerations.get(previousLiveThreadId) ?? 0) + 1,
+      )
+    }
+    return { ok: true, revision, attachGeneration }
+  }
   return createAuthoritySurface({
     core,
     revisions,
     progress,
+    attachGenerations,
     revisionOf,
     readDomain,
     prepare,
     commit,
     restore,
     restoreDomain,
+    replaceDomainForAttach,
     system,
   })
 }

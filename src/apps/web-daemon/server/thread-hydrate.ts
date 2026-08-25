@@ -45,13 +45,20 @@ export interface ThreadHydrateDeps {
    * transcript guard). Absent (TOOLS off / non-persisting daemon) ⇒ omitted ⇒ no
    * restore, byte-identical.
    */
-  readonly restoreObjective?: (snapshot: PersistedObjectiveSnapshot | undefined) => void
+  readonly prepareObjectiveAttach?:
+    | ((
+        snapshot: PersistedObjectiveSnapshot | undefined,
+      ) => { readonly commit: () => boolean } | null)
+    | undefined
+  readonly cancelGoalWake?: (() => void) | undefined
+  readonly rearmGoalWake?: (() => void) | undefined
 }
 
 export type ThreadHydrateOutcome =
   | { readonly kind: "hydrated"; readonly threadId: string; readonly count: number }
   | { readonly kind: "unknown-thread"; readonly threadId: string }
   | { readonly kind: "refused-mid-turn"; readonly threadId: string }
+  | { readonly kind: "invalid-objective"; readonly threadId: string }
 
 /**
  * Web adapter over the unified `attachSessionToLive` (WS-1). The crown ordering
@@ -69,6 +76,11 @@ export const hydrateThreadIntoLiveSession = async (
   const loaded = await deps.loadThread(threadId)
   const outcome = await attachSessionToLive(threadId, {
     loadSession: async () => loaded,
+    onAttachStart: deps.cancelGoalWake,
+    prepareAttachedState:
+      deps.prepareObjectiveAttach === undefined
+        ? undefined
+        : (saved) => deps.prepareObjectiveAttach?.(saved.objective) ?? null,
     replaceTranscript: async (messages) => {
       await deps.replaceTranscript(messages)
       return messages
@@ -76,17 +88,16 @@ export const hydrateThreadIntoLiveSession = async (
     // The daemon repoints by thread id only (the activeThreadId cell); the
     // core's `meta` is unused here (no per-connection SessionMeta identity).
     setPersistTarget: ({ id }) => deps.setActiveThreadId(id),
+    onAttachSettled: deps.rearmGoalWake,
   })
   switch (outcome.kind) {
     case "attached":
-      // Crown ordering: the durable objective is restored ONLY after the swap
-      // resolved + persistence repointed (mirrors the transcript). A mid-turn
-      // refusal / unknown thread never reaches here ⇒ NOTHING restored.
-      deps.restoreObjective?.(loaded?.objective)
       return { kind: "hydrated", threadId, count: outcome.messageCount }
     case "unknown-session":
       return { kind: "unknown-thread", threadId }
     case "refused-mid-turn":
       return { kind: "refused-mid-turn", threadId }
+    case "invalid-attached-state":
+      return { kind: "invalid-objective", threadId }
   }
 }

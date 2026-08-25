@@ -1,9 +1,11 @@
 import type { Message } from "@/llm"
+import type { ObjectivePort } from "@/objective"
 import { loadSessionById, type SessionMeta } from "@/session"
 import { errMessage, logger } from "@/shared"
 import type { PlaybookPlanQueueSink } from "@/skill/playbook"
 import type { ConvCheckpointWire } from "../conv-checkpoint-wire"
 import type { ExternalPromptQueue } from "../external-prompt-queue"
+import type { GoalWakeSignalSlot } from "../goal-wake-signal"
 import type { PlaybookTriggerSurfaceSeam } from "../playbook-trigger-surface-seam"
 import {
   maybeStartPlaybookTriggerWire,
@@ -47,6 +49,9 @@ export const installSessionSwitchWire = (args: {
   readonly replaceTranscript: (msgs: readonly Message[]) => Promise<readonly Message[]>
   readonly idMeta: SessionMeta | undefined
   readonly commitSwitch: (next: { sessionId: string; history: readonly Message[] }) => void
+  readonly currentSessionId?: (() => string | undefined) | undefined
+  readonly objectiveStore?: ObjectivePort | undefined
+  readonly goalWakeSlot?: GoalWakeSignalSlot | undefined
 }): void => {
   const { registerSessionSwitch, replaceTranscript, idMeta, commitSwitch } = args
   if (registerSessionSwitch === undefined) return
@@ -57,6 +62,9 @@ export const installSessionSwitchWire = (args: {
           loadSession: loadSessionById,
           replaceTranscript,
           idMeta,
+          currentSessionId: args.currentSessionId ?? (() => idMeta?.id),
+          objectiveStore: args.objectiveStore,
+          goalWakeSlot: args.goalWakeSlot,
           commit: ({ sessionId, history }) => {
             commitSwitch({ sessionId, history })
           },

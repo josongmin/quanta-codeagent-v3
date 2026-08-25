@@ -19,7 +19,7 @@ import type { FollowerCoControlDispatcher } from "@/agent/thread-follower"
 import type { ArtifactPreviewResolver } from "@/host/runtime"
 import {
   buildObjectiveSnapshotProvider,
-  restoreObjectiveSnapshotInto,
+  prepareObjectiveSnapshotForAttach,
 } from "@/host/runtime/objective-store-wire"
 import type { SupportedReadModels } from "@/protocol/session"
 import type { RuntimeSession } from "@/sdk/runtime"
@@ -336,12 +336,14 @@ const buildOnAttachThread = (deps: {
           // the tools' ctx.ownerId). The daemon mints a fresh per-boot session id,
           // so the snapshot's saving-boot key never matches the reopening read key —
           // without this re-key the restore is inert (goal orphaned under the old id).
-          restoreObjective: (snapshot) =>
-            restoreObjectiveSnapshotInto(
+          prepareObjectiveAttach: (snapshot) => {
+            const prepared = prepareObjectiveSnapshotForAttach(
               (deps.runtime as { objectiveAuthority?: unknown }).objectiveAuthority,
               snapshot,
               deps.sharedSession.sessionId,
-            ),
+            )
+            return prepared.ok ? prepared.prepared : null
+          },
         })
       }
     : undefined

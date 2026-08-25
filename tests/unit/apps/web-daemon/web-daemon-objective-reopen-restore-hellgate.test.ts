@@ -119,12 +119,16 @@ const reopen = async (
     setActiveThreadId: () => undefined,
     ...(opts.restore
       ? {
-          restoreObjective: (snap) =>
-            restoreObjectiveSnapshotInto(
-              liveAuthority,
-              snap,
-              opts.rekey === false ? undefined : LIVE_KEY,
-            ),
+          prepareObjectiveAttach: (snap) => ({
+            commit: () => {
+              restoreObjectiveSnapshotInto(
+                liveAuthority,
+                snap,
+                opts.rekey === false ? undefined : LIVE_KEY,
+              )
+              return true
+            },
+          }),
         }
       : {}),
   })

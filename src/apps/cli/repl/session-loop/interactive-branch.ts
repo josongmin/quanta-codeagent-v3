@@ -56,6 +56,7 @@ export const runInteractiveBranch = async (ctx: InteractiveBranchCtx): Promise<v
       activeTurnRef,
       activeIdentityModeState,
       planQueueStore,
+      currentThreadId: () => ctx.getSurfaceState().sessionId,
       enqueueWithHeartbeat,
       getLastTurnOutcome,
       getLastUserInputAt,
