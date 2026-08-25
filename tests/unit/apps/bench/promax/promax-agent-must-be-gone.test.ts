@@ -103,9 +103,13 @@ const materializedGold = (issued: readonly string[]): boolean =>
   issued.some((c) => c.includes("'git'"))
 
 describe("a live agent process blocks the grader window", () => {
-  test("🔴 the answer key is NOT materialized while the bench still runs", async () => {
+  test("🔴 a bench that will not die even when ENDED still blocks the window", async () => {
+    // `agentAlive: true` models a process that survives everything — the guard
+    // waits, ends it, re-probes, and only THEN refuses. A refusal that comes
+    // after an attempt to fix the situation is the honest one; refusing without
+    // trying is what threw away a completed run earlier.
     const r = recorder({ agentAlive: true })
-    await expect(grade(r)).rejects.toThrow(/still running|did not exit|agent/i)
+    await expect(grade(r)).rejects.toThrow(/survived being ended|cannot account for/i)
     expect(
       materializedGold(r.issued),
       "the answer key was cloned onto a box still running the agent",
@@ -217,5 +221,68 @@ describe("the probe cannot match ITSELF", () => {
           "the probe's own command line still matches the pattern it searches for",
         ).toBe(false)
       })
+  })
+})
+
+describe("a bench that FINISHED but will not exit is ended, not waited on forever", () => {
+  test("🔴 a process that never exits is TERMINATED, then re-verified gone", async () => {
+    // MEASURED on a real box, by ssh-ing in: the bench had written report.json
+    // and preds.jsonl and printed its final summary ("7/7 instances",
+    // "failures: grader_invalid=7", "$6.52"), yet PID 4826 was still `Rl` at
+    // 69.7% CPU with NO children and `run.exit` absent — twenty minutes in. It
+    // completes its work and then spins forever. That is the pre-existing bench
+    // hang the artifact fallback exists to work around, and it means waiting for
+    // an exit can never succeed.
+    //
+    // We own the box and the work is demonstrably done, so the honest move is to
+    // END it and then PROVE it is gone — "no agent is running" becomes true
+    // rather than assumed.
+    const issued: string[] = []
+    let killed = false
+    const ssh = async (cmd: string) => {
+      issued.push(cmd)
+      if (cmd.includes("pkill")) {
+        killed = true
+        return { code: 0, stdout: "", stderr: "" }
+      }
+      if (cmd.includes("pgrep")) {
+        return killed
+          ? { code: 1, stdout: "", stderr: "" }
+          : { code: 0, stdout: "ALIVE\n", stderr: "" }
+      }
+      if (cmd.includes("$HOME")) return { code: 0, stdout: "/home/ubuntu", stderr: "" }
+      if (cmd.includes("--version")) return { code: 0, stdout: "Python 3.11.14\n", stderr: "" }
+      if (cmd.includes("sha256sum")) {
+        const hit = DIGESTS.find(([s]) => cmd.includes(s))
+        return hit === undefined
+          ? { code: 1, stdout: "", stderr: "no such file" }
+          : { code: 0, stdout: `${hit[1]}  x`, stderr: "" }
+      }
+      if (cmd.startsWith("cat ") && cmd.includes(DEFAULT_CHUNK_PATHS.preds)) {
+        return { code: 0, stdout: PREDS, stderr: "" }
+      }
+      if (cmd.startsWith("cat ") && cmd.includes(DEFAULT_CHUNK_PATHS.passRate)) {
+        return { code: 0, stdout: PASS_RATE, stderr: "" }
+      }
+      return { code: 0, stdout: "", stderr: "" }
+    }
+    const out = await runFamilyBoxGrade({
+      ssh,
+      log: () => {},
+      family: "promax",
+      bootstrap: promaxBootstrap(),
+      paths: DEFAULT_CHUNK_PATHS,
+      sleep: async () => {},
+    })
+    expect(out?.artifactText).toBe(PASS_RATE)
+    // it really did terminate it …
+    expect(
+      issued.some((c) => c.includes("pkill")),
+      "the stuck bench was never ended",
+    ).toBe(true)
+    // … and re-verified before any gold-bearing command
+    const killAt = issued.findIndex((c) => c.includes("pkill"))
+    const cloneAt = issued.findIndex((c) => c.includes("'git'"))
+    expect(cloneAt).toBeGreaterThan(killAt)
   })
 })

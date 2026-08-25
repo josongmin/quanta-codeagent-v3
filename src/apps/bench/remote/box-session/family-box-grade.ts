@@ -137,6 +137,10 @@ const awaitAgentExit = async (input: {
   const sleep = input.sleep ?? ((ms: number) => abortableSleep(ms))
   const deadline = AGENT_EXIT_GRACE_MS
   let waited = 0
+  // Set once the stuck process has been ended. The loop then continues, so the
+  // NEXT probe still has to report it gone; a second failure to die is a genuine
+  // refusal rather than something we talk ourselves past.
+  let killed = false
   for (;;) {
     // `pgrep … && echo ALIVE` prints ALIVE (exit 0) when the agent is up, and
     // nothing (exit 1) when it is gone. A TRANSPORT failure — ssh 255 on a box
@@ -155,6 +159,12 @@ const awaitAgentExit = async (input: {
     // the bench command line — the property that matters — while a self-match was
     // NOT reproducible on macOS, so it is not claimed as the cause of anything.
     const probe = await input.ssh("pgrep -f '[a]pps/bench/cli.ts run' >/dev/null && echo ALIVE")
+    if (killed && probe.stdout.trim() === "ALIVE") {
+      throw new Error(
+        `[full-remote] ${input.family}: the bench process survived being ended — REFUSING to ` +
+          "materialize the answer key beside a process we cannot account for.",
+      )
+    }
     if (probe.code === 255) {
       throw new Error(
         `[full-remote] ${input.family}: the box became unreachable while waiting for the bench ` +
@@ -164,13 +174,33 @@ const awaitAgentExit = async (input: {
     }
     if (probe.stdout.trim() !== "ALIVE") return
     if (waited >= deadline) {
-      throw new Error(
-        `[full-remote] ${input.family}: the bench process is STILL RUNNING after ` +
-          `${Math.round(deadline / 1000)}s — REFUSING to materialize the answer key beside a live ` +
-          "agent. The run was reported complete by the artifact fallback (report parses + " +
-          "predictions non-empty) rather than by `run.exit`, so its process state was never " +
-          "established, and it has not since exited.",
+      // MEASURED by ssh-ing into a real box: the bench had written report.json
+      // and preds.jsonl and printed its final summary ("7/7 instances",
+      // "failures: grader_invalid=7"), yet the process was still `Rl` at ~70% CPU
+      // with NO children and `run.exit` absent, twenty minutes in. It finishes
+      // its work and then SPINS — which is the pre-existing hang the artifact
+      // fallback exists to work around, and it means waiting for an exit can
+      // never succeed.
+      //
+      // We own this box and its work is demonstrably done, so END it rather than
+      // refuse a completed run. Then RE-VERIFY: the loop continues, so the next
+      // probe has to actually report it gone before anything is materialized —
+      // "no agent is running" becomes true rather than assumed.
+      input.log(
+        `[full-remote] ${input.family}: the bench run finished its work but has not exited in ` +
+          `${Math.round(deadline / 1000)}s (a known post-completion hang — its report and ` +
+          "predictions are already written). Ending it, then re-checking before the answer key " +
+          "is materialized.",
       )
+      const ended = await input.ssh("pkill -f '[a]pps/bench/cli.ts run' ; true")
+      if (ended.code === 255) {
+        throw new Error(
+          `[full-remote] ${input.family}: the box became unreachable while ending the finished ` +
+            "bench process. REFUSING to materialize the answer key on it.",
+        )
+      }
+      killed = true
+      continue
     }
     // Log at the start and once a minute after: a silent wait is indistinguishable
     // from a hang, and this one can legitimately run for minutes.
