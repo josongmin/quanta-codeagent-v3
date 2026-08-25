@@ -5,6 +5,7 @@ import { selectRemoteRunner } from "@/remote"
 import { errMessage, logger, setTerminalIo } from "@/shared"
 import { CLI_SEEDED_GATE_NAMES } from "./cli-seeded-gates"
 import { loadEnvFiles } from "./dotenv"
+import { applyGoalPreset } from "./goal-preset"
 import { applyToolProfileFlag } from "./internal/argv"
 import { runRemoteCmd } from "./remote-cmd"
 import { runRepl, runSessionMain, runSlashMain, topLevelUsage } from "./repl"
@@ -27,6 +28,7 @@ setTerminalIo({
 })
 
 loadEnvFiles([".env.dev", ".env.local", ".env"])
+applyGoalPreset(process.env)
 
 // jun-03 — CLI-host default-ON for the absorbed feature gates. The SLICES stay
 // default-OFF by construction (their `=== "1"` gates + hellgate tests are

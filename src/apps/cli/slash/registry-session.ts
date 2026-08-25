@@ -27,6 +27,7 @@ import { sideCmd } from "../side-cmd"
 import type { SlashCommand } from "../slash-contract"
 import { whyCmd } from "../why-cmd"
 import { goalCmd } from "./goal-cmd"
+import { isGoalEnabled } from "./objective"
 import { presetsCmd } from "./presets-cmd"
 
 /** Track D — `/debug` runtime toggle. Pure handler in `../debug-cmd`; the
@@ -223,7 +224,7 @@ const resumeTurnCmd: SlashCommand = {
 /** Slot order matches the layered ordering. The historic slot of
  *  `/retry-with` (index 6 in the old BUILTINS) is intentionally NOT
  *  preserved — see ADR-0306 §"Slot ordering" for the rationale. */
-export const SESSION_SLASH_COMMANDS: readonly SlashCommand[] = [
+export const buildSessionSlashCommands = (): readonly SlashCommand[] => [
   retryWithCmd,
   sideCmd,
   debugCmd,
@@ -235,6 +236,8 @@ export const SESSION_SLASH_COMMANDS: readonly SlashCommand[] = [
   inboundCmd,
   resumeTurnCmd,
   hooksCmd,
-  goalCmd,
+  ...(isGoalEnabled() ? [goalCmd] : []),
   presetsCmd,
 ]
+
+export const SESSION_SLASH_COMMANDS: readonly SlashCommand[] = buildSessionSlashCommands()

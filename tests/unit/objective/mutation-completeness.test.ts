@@ -114,6 +114,21 @@ describe("C1 — every operation routes through the authority with a live effect
       expect(a.readDomain("t").revision).toBe(before + 1)
       expect(a.knownThreadIds()).toContain("t")
     },
+    amendBudget: (a) => {
+      const objectiveId = a.get("t")?.objectiveId
+      const result = a.commit(
+        a.prepare({
+          threadId: "t",
+          actor: "user",
+          mutation: { kind: "amendBudget", budget: { maxTokens: 99, maxTurns: 3 } },
+        }),
+        { admitted: true },
+      )
+      expect(result.ok).toBe(true)
+      expect(a.get("t")?.budget.maxTokens).toBe(99)
+      expect(a.get("t")?.budget.maxTurns).toBe(3)
+      expect(a.get("t")?.objectiveId).toBe(objectiveId)
+    },
     setExplicitStatus: (a) => {
       a.commit(
         a.prepare({
@@ -228,18 +243,6 @@ describe("C1 — every operation routes through the authority with a live effect
       )
       expect(res.ok).toBe(true)
       expect(a.get("t")?.successCriteria[0]?.met).toBe(true)
-    },
-    amendBudget: (a) => {
-      expect(a.get("t")?.budget.maxTurns).toBeUndefined()
-      a.commit(
-        a.prepare({
-          threadId: "t",
-          actor: "system",
-          mutation: { kind: "amendBudget", budget: { maxTurns: 9 } },
-        }),
-        { admitted: true },
-      )
-      expect(a.get("t")?.budget.maxTurns).toBe(9)
     },
     settleAttempt: (a) => {
       // GOAL-01: the HOST-measured settlement is the ONLY budget debit and the

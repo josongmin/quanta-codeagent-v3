@@ -1,98 +1,175 @@
-/**
- * `/goal` — set / show the active "pursuing" objective (Codex `/goal` parity).
- *
- *   /goal <objective>   → set the objective, mark it `active`. The idle
- *                         goal-continuation ticker (`goal-continuation-hook.ts`,
- *                         gated by `QUANTA_GOAL_ENFORCE`) then keeps resuming
- *                         work on it whenever the thread goes idle, until it is
- *                         completed / blocked / limited.
- *   /goal               → show the current objective + status.
- *   /goal clear         → drop the pursuit (delete the objective; revision tombstone).
- *
- * Present iff the surface wired the shared objective store (`ctx.goal`); absent
- * ⇒ prints the not-wired posture + exit 0 (default-OFF byte-identical). Setting
- * a goal is always allowed; whether it is AUTONOMOUSLY pursued depends on the
- * `QUANTA_GOAL_ENFORCE` gate that arms the ticker — without it, the objective is
- * still recorded and surfaced, just not auto-continued.
- */
+import type { SlashCommand, SlashContext } from "../slash-contract"
+import { renderGoalDomain } from "./goal-render"
+import { buildGoalControl } from "./objective"
 
-import { MAX_GOAL_CHARS } from "@/objective"
-import type { SlashCommand } from "../slash-contract"
+const MAX_GOAL_CHARS = 4000
+
+const fail = (ctx: SlashContext, message: string): number => {
+  ctx.err(`${message}\n`)
+  return 1
+}
+
+type MutationOutcome = ReturnType<NonNullable<SlashContext["objectiveEditor"]>["pause"]>
+type GoalControl = NonNullable<SlashContext["objectiveEditor"]>
+type GoalName = "/goal" | "/objective"
+
+const reportMutation = (ctx: SlashContext, label: string, outcome: MutationOutcome): number => {
+  if (outcome.kind === "ok") {
+    ctx.out(`${label}\n`)
+    return 0
+  }
+  return fail(
+    ctx,
+    outcome.kind === "stale"
+      ? `/goal: changed concurrently (rev ${outcome.domain.revision}); retry`
+      : `/goal: ${outcome.reason}`,
+  )
+}
+
+const parseBudget = (args: readonly string[]): { maxTokens?: number; maxTurns?: number } | null => {
+  const result: { maxTokens?: number; maxTurns?: number } = {}
+  for (const arg of args) {
+    const match = /^--max-(tokens|turns)=(\d+)$/.exec(arg)
+    if (match === null) return null
+    const value = Number(match[2])
+    if (!Number.isSafeInteger(value) || value < 0) return null
+    if (match[1] === "tokens") result.maxTokens = value
+    else result.maxTurns = value
+  }
+  return Object.keys(result).length === 0 ? null : result
+}
+
+const resumeLabel = (status: string): string => {
+  if (status === "active") return "Goal resumed."
+  if (status === "blocked") return "Cannot resume: clear blocker first."
+  if (status === "budget_limited") return "Cannot resume: increase budget or edit the goal."
+  if (status === "usage_limited") return "Cannot resume until the usage limit expires."
+  if (status === "completed") return "Cannot resume a completed goal; edit or create a new goal."
+  return "Goal remains paused."
+}
+
+const handleResume = (ctx: SlashContext, control: GoalControl): number => {
+  const outcome = control.resume()
+  const label = resumeLabel(outcome.domain.state?.objective.status ?? "paused")
+  if (outcome.kind !== "ok") return fail(ctx, label)
+  ctx.out(`${label}\n`)
+  return 0
+}
+
+const validateGoalText = (ctx: SlashContext, name: GoalName, text: string): number | null => {
+  if (text.length === 0) return fail(ctx, `${name} edit: requires <text>`)
+  return text.length > MAX_GOAL_CHARS
+    ? fail(ctx, `${name}: objective too long (${text.length} > ${MAX_GOAL_CHARS} chars)`)
+    : null
+}
+
+const handleEdit = (
+  args: readonly string[],
+  ctx: SlashContext,
+  name: GoalName,
+  control: GoalControl,
+): number => {
+  const text = args.slice(1).join(" ").trim()
+  const invalid = validateGoalText(ctx, name, text)
+  return invalid ?? reportMutation(ctx, "Goal replaced.", control.replace(text))
+}
+
+const handleCriterion = (
+  args: readonly string[],
+  ctx: SlashContext,
+  name: GoalName,
+  control: GoalControl,
+): number => {
+  const text = args.slice(2).join(" ").trim()
+  return args[1] !== "add" || text === ""
+    ? fail(ctx, `${name} criterion add: requires <description>`)
+    : reportMutation(ctx, "Criterion added.", control.addCriterion(text))
+}
+
+const handleCheck = (
+  args: readonly string[],
+  ctx: SlashContext,
+  name: GoalName,
+  control: GoalControl,
+): number => {
+  const separator = args.indexOf("--")
+  if (args[1] !== "add" || separator < 3 || separator === args.length - 1)
+    return fail(ctx, `${name} check add: expected <description> -- <argv...>`)
+  return reportMutation(
+    ctx,
+    "Check added.",
+    control.addCheck(args.slice(2, separator).join(" ").trim(), args.slice(separator + 1)),
+  )
+}
+
+const handleBudget = (
+  args: readonly string[],
+  ctx: SlashContext,
+  name: GoalName,
+  control: GoalControl,
+): number => {
+  const budget = parseBudget(args.slice(1))
+  return budget === null
+    ? fail(ctx, `${name} budget: expected --max-turns=N and/or --max-tokens=N`)
+    : reportMutation(ctx, "Goal budget updated.", control.setBudget(budget))
+}
+
+const handleCreate = (
+  args: readonly string[],
+  ctx: SlashContext,
+  name: GoalName,
+  control: GoalControl,
+): number => {
+  const text = args.join(" ").trim()
+  const invalid = validateGoalText(ctx, name, text)
+  if (invalid !== null) return invalid
+  if (control.read().state !== null)
+    return fail(ctx, `${name}: a goal already exists; use '${name} edit <text>'`)
+  return reportMutation(ctx, "Goal created.", control.create(text))
+}
+
+export const runGoalCommand = async (
+  args: readonly string[],
+  ctx: SlashContext,
+  invokedAs: GoalName = "/goal",
+): Promise<number> => {
+  const control =
+    ctx.objectiveEditor ??
+    (ctx.goal === undefined
+      ? undefined
+      : buildGoalControl(ctx.goal.port, ctx.goal.threadId, ctx.goal.onMutation))
+  if (control === undefined) return fail(ctx, `${invokedAs}: goal control unavailable`)
+  switch (args[0]) {
+    case undefined:
+    case "show":
+      ctx.out(renderGoalDomain(control.read(), ctx.now?.() ?? Date.now()))
+      return 0
+    case "pause":
+    case "stop":
+      return reportMutation(ctx, "Goal paused.", control.pause())
+    case "resume":
+      return handleResume(ctx, control)
+    case "clear":
+      return reportMutation(ctx, "Goal cleared.", control.clear())
+    case "edit":
+      return handleEdit(args, ctx, invokedAs, control)
+    case "criterion":
+      return handleCriterion(args, ctx, invokedAs, control)
+    case "check":
+      return handleCheck(args, ctx, invokedAs, control)
+    case "budget":
+      return handleBudget(args, ctx, invokedAs, control)
+    case "verify":
+      return reportMutation(ctx, "Goal verification applied.", await control.verify())
+    default:
+      return handleCreate(args, ctx, invokedAs, control)
+  }
+}
 
 export const goalCmd: SlashCommand = {
   name: "/goal",
   describe:
-    "Set or show the active pursuing objective (define measurable outcomes for best results)",
+    "Create or control the durable goal (show | edit | pause | resume | clear | criterion | check | budget | verify)",
   category: "session",
-
-  async run(args, ctx): Promise<number> {
-    const wired = ctx.goal
-    if (wired === undefined) {
-      ctx.out(
-        "/goal: not wired in this surface (objective store unavailable).\n" +
-          "  Boot with QUANTA_OBJECTIVE_TOOLS=1 to record goals, and\n" +
-          "  QUANTA_GOAL_ENFORCE=1 to have the agent keep pursuing them.\n",
-      )
-      return 0
-    }
-
-    const { port, threadId } = wired
-    const raw = args.join(" ").trim()
-
-    // /goal clear — stop pursuing.
-    if (raw === "clear" || raw === "stop") {
-      const existing = port.get(threadId)
-      if (existing === null) {
-        ctx.out("/goal: no active objective to clear.\n")
-        return 0
-      }
-      // GOAL-01 — clear is a real deletion (the thread keeps a revision tombstone).
-      port.clear(threadId)
-      wired.onMutation?.()
-      ctx.out("Goal cleared — the agent will stop auto-pursuing it.\n")
-      return 0
-    }
-
-    // /goal (no arg) — show current.
-    if (raw === "") {
-      const o = port.get(threadId)
-      if (o === null) {
-        ctx.out(
-          "No goal set. Usage: /goal <objective>  (define measurable outcomes for best results)\n",
-        )
-        return 0
-      }
-      const b = o.budget
-      const budgetLine =
-        b.maxTokens !== undefined ? `  budget: ${b.tokensUsed}/${b.maxTokens} tokens\n` : ""
-      ctx.out(`🎯 Pursuing goal: ${o.goal}\n  status: ${o.status}\n${budgetLine}`)
-      return 0
-    }
-
-    if (raw.length > MAX_GOAL_CHARS) {
-      ctx.out(`/goal: objective too long (${raw.length} > ${MAX_GOAL_CHARS} chars).\n`)
-      return 1
-    }
-
-    // /goal <objective> — set + activate. The ticker (if armed) picks it up on
-    // the next idle tick; the objective is recorded either way.
-    // GOAL-01 — a single generation mint: `create` when no goal is live,
-    // `replace` (fresh objectiveId, evidence reset) when one is. GOAL-05 makes
-    // the replace path require an explicit `/goal edit`.
-    const minted =
-      port.get(threadId) === null
-        ? port.create(threadId, { goal: raw })
-        : port.replace(threadId, { goal: raw })
-    if (minted === null) {
-      ctx.out("/goal: could not record the objective.\n")
-      return 1
-    }
-    wired.onMutation?.()
-    ctx.out(
-      `🎯 Pursuing goal set: ${raw}\n` +
-        "  The agent will keep working toward it whenever the session goes idle\n" +
-        "  (requires QUANTA_GOAL_ENFORCE=1; otherwise the goal is recorded only).\n",
-    )
-    return 0
-  },
+  run: (args, ctx) => runGoalCommand(args, ctx),
 }

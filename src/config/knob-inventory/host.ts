@@ -203,6 +203,16 @@ export const HOST: readonly KnobInventoryEntry[] = [
     readSite: "host/runtime/objective-store-wire.ts",
   },
   {
+    envKey: "QUANTA_GOAL",
+    kind: "bool",
+    default: false,
+    group: "host-gate",
+    home: "runtime-config",
+    describe:
+      "Public durable-goal preset; seeds objective tools, autonomous pursuit, and measured budget enforcement only when their internal gates are unset.",
+    readSite: "apps/cli/goal-preset.ts",
+  },
+  {
     envKey: "QUANTA_IDENTITY",
     kind: "bool",
     default: false,

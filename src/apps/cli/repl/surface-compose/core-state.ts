@@ -5,8 +5,13 @@ import { createInterruptedTurnBuffer } from "@/agent/interrupted-turn"
 import { createShadowVerify } from "@/agent/shadow-verify"
 import { createShadowVerifyAdapters } from "@/agent/shadow-verify-adapters"
 import { resolveGatedObjectiveAuthority } from "@/host/runtime/objective-store-wire"
+import {
+  createObjectiveCheckRunner,
+  createObjectiveVerificationCoordinator,
+  createWorkspaceEvidence,
+} from "@/host/runtime/objective-verifier-wire"
 import { createStickyPresetResolver, type StreamInput } from "@/llm"
-import { createObjectiveAttemptSlot } from "@/objective"
+import { createObjectiveAttemptSlot, createObjectiveCapabilities } from "@/objective"
 import type { RadarStore } from "@/radar"
 import { isApprovedDecision } from "@/runner/orchestrate"
 import type { RuntimeFacadeComposeOptions } from "@/sdk/runtime"
@@ -97,6 +102,16 @@ export const buildSurfaceCoreState = (
     confirmationAvailable: true,
     ...(setup.restoredObjective !== undefined ? { restoreFrom: setup.restoredObjective } : {}),
   })
+  const objectiveVerification =
+    objectiveStore === undefined
+      ? undefined
+      : createObjectiveVerificationCoordinator({
+          read: createObjectiveCapabilities(objectiveStore).read,
+          verifier: createObjectiveCapabilities(objectiveStore).verifier,
+          runner: createObjectiveCheckRunner(),
+          evidence: createWorkspaceEvidence(),
+          workspaceCwd: setup.cwd,
+        })
   // One session holder, produced for either consumer. The agent loop remains
   // the sole writer. Goal pursuit only needs it when both its continuation
   // gate and its objective authority are present; otherwise no active-turn
@@ -174,6 +189,7 @@ export const buildSurfaceCoreState = (
     // provenance. Absent (fresh / legacy / no-objective) ⇒ a fresh empty authority
     // (byte-identical legacy).
     objectiveStore,
+    objectiveVerification,
     presetResolver: createStickyPresetResolver(),
   }
 }

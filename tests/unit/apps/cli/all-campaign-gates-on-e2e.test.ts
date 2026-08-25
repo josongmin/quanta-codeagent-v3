@@ -107,6 +107,7 @@ const ALL_GATES: Record<string, string> = {
   QUANTA_SKILL_ACTIONS: "1",
   QUANTA_PROPOSE_GOAL: "1",
   QUANTA_OBJECTIVE_TOOLS: "1",
+  QUANTA_GOAL: "1",
 }
 const ALL_GATE_KEYS = Object.keys(ALL_GATES)
 

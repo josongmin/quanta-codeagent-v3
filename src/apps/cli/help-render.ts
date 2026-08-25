@@ -95,6 +95,11 @@ export interface EnvRow {
  *  (`help-env-catalog-drift-hellgate.test.ts`) can assert every row still
  *  maps to a live knob in `buildKnobCatalog()`. */
 export const ENV_TABLE: readonly EnvRow[] = [
+  {
+    key: "QUANTA_GOAL",
+    defaultLabel: "off",
+    describe: "Durable multi-turn goal preset ('1' to enable /goal)",
+  },
   { key: "QUANTA_LOG_LEVEL", defaultLabel: "info", describe: "debug|info|warn|error" },
   {
     key: "QUANTA_COMPACT_TOKENS",

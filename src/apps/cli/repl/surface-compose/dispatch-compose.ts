@@ -5,7 +5,7 @@ import type { MemorySlashState } from "../../memory-cmd"
 import type { PermissionInspectSlashState } from "../../permission-explain"
 import type { RetryWithSessionState } from "../../retry-with"
 import type { ConvCheckpointSlashState } from "../../rewind-conv-cmd"
-import { buildObjectiveSlashState, isObjectiveEditorEnabled } from "../../slash/objective"
+import { buildGoalControl, isGoalEnabled } from "../../slash/objective"
 import {
   buildPostureSlashState,
   isPostureSelectorEnabled,
@@ -151,13 +151,16 @@ export const buildSurfaceDispatchWire = (
     // Gated on QUANTA_PROPOSE_GOAL (registration parity) AND the objective
     // authority being present (QUANTA_OBJECTIVE_TOOLS) AND a session thread id;
     // absent ⇒ `/objective` prints "not wired" (default-OFF byte-identical).
-    ...(isObjectiveEditorEnabled() &&
+    ...(isGoalEnabled() &&
     core.objectiveStore !== undefined &&
     typeof setup.sessionId === "string" &&
     setup.sessionId.length > 0
       ? {
-          objectiveEditor: buildObjectiveSlashState(core.objectiveStore, setup.sessionId, () =>
-            core.goalWakeSlot?.current?.onGoalMutation(),
+          objectiveEditor: buildGoalControl(
+            core.objectiveStore,
+            setup.sessionId,
+            () => core.goalWakeSlot?.current?.onGoalMutation(),
+            core.objectiveVerification,
           ),
         }
       : {}),
