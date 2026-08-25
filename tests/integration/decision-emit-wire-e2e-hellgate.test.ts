@@ -228,7 +228,7 @@ describe("ADR-0269 Phase 3 wire — REPL fs-jail sink lifecycle", () => {
     // executed) because `setupSession` requires a fully-wired bootstrap +
     // an LLM port to construct; a runtime test would need to stub every
     // collaborator and would be brittle against unrelated boot churn.
-    const src = await Bun.file("src/apps/cli/repl/session-setup.ts").text()
+    const src = await readSrc("src/apps/cli/repl/session-setup.ts")
     // The DecisionEmitter source was refactored from `sessionDeps.decisionEmitter`
     // to the runtime composition root (`composeCliRuntimeContext` → a
     // `RuntimeContext` whose `decisionEmitter()` accessor yields the same

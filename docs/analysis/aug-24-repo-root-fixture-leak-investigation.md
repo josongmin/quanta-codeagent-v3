@@ -180,6 +180,43 @@ The blocker is bounded and measurable: 95 of 3,311 test files reference
 anyway (repo-root scans belong on `import.meta.dir`) or one whose assertion
 gets STRONGER under a sandbox. That migration is the real next step.
 
+## The cwd-dependence bucket, MEASURED and closed (aug-26)
+
+The "95 of 3,311 reference `process.cwd()`" figure above framed the migration as
+a 95-file job. It is not — that count includes tests that merely mention the
+symbol. Scanning instead for the shape that actually breaks (a repo-root-relative
+literal reaching a filesystem or shell entry point) finds **5 files in 3,362**,
+one of which is the ratchet's own worked examples.
+
+The other four, and what each turned out to be:
+
+| file | site | verdict |
+|---|---|---|
+| `cli-feature-gates-drift-hellgate` | `execSync("rg … src")` | already fixed with `{cwd: REPO_ROOT}` — the detector's first draft flagged the FIX |
+| `runtime-config-knobs-parity-hellgate` | `readFileSync("src/shared/runtime-config.ts")` | genuine; anchored |
+| `api-knobs-no-leak-hellgate` | `readFileSync("src/apps/web-daemon/…")` | genuine; anchored |
+| `decision-emit-wire-e2e-hellgate` | `Bun.file("src/apps/cli/repl/session-setup.ts")` | genuine; the file already had a `readSrc` helper and one line did not use it |
+
+All four now pass from a foreign working directory AND from the repo root
+(paired control), and the whole of `tests/unit/_arch` — 75 assertions — runs
+clean from a sandbox leaving it empty.
+
+**The latent vacuous-green count from this shape is zero.** Of the earlier nine,
+exactly one (`cli-feature-gates-drift`) inverted to green; the rest failed
+loudly. That is worth stating because it corrects the direction of the fear:
+this class is mostly NOISY, and the session's genuinely silent failures were in
+harnesses and tooling, not in guards.
+
+**The structural close is `tests/unit/_arch/repo-path-anchor-ratchet.test.ts`.**
+Two things about its design are worth carrying forward. Its detector is a precise
+allowlist of entry points rather than the more thorough inversion, because the
+inversion reports 147 files on this tree and 90-odd of them are synthetic
+fixtures — a ratchet that cries wolf gets its detector weakened, not its
+offenders fixed. And it cannot scan itself clean, since it must contain examples
+of the shape it forbids, so the self-exclusion is inverted into the anti-vacuity
+proof: the detector MUST flag that file, which is what shows the scan reached the
+real tree rather than only the synthetic strings in its own cases.
+
 ## Two blockers the migration will hit (measured aug-25)
 
 Retracing this investigation independently reproduced the leak once (with `src`
