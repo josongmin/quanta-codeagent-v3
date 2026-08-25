@@ -113,6 +113,50 @@ const AGENT_EXIT_POLL_MS = 5_000
 const AGENT_EXIT_LOG_EVERY_MS = 60_000
 
 /**
+ * What ONE liveness probe means.
+ *
+ * The three readings were spelled out inline and their ORDER is the contract:
+ * "it survived being ended" outranks "the box went away", which outranks "it is
+ * gone" — because a process we killed and that answered ALIVE anyway is the one
+ * case where continuing would materialize the answer key beside something we
+ * cannot account for, and that must be said even if the transport is also
+ * misbehaving. Stating the order once, here, is what stops a later edit from
+ * reshuffling it while the branches still read plausibly.
+ *
+ * `refuse` carries the full message so the caller is a `throw new Error(reason)`
+ * with no second copy of the wording.
+ */
+type ExitProbeVerdict =
+  | { readonly kind: "gone" }
+  | { readonly kind: "alive" }
+  | { readonly kind: "refuse"; readonly reason: string }
+
+const classifyExitProbe = (
+  probe: { readonly code: number; readonly stdout: string; readonly stderr: string },
+  killed: boolean,
+  family: DatasetFamily,
+): ExitProbeVerdict => {
+  if (killed && probe.stdout.trim() === "ALIVE") {
+    return {
+      kind: "refuse",
+      reason:
+        `[full-remote] ${family}: the bench process survived being ended — REFUSING to ` +
+        "materialize the answer key beside a process we cannot account for.",
+    }
+  }
+  if (probe.code === 255) {
+    return {
+      kind: "refuse",
+      reason:
+        `[full-remote] ${family}: the box became unreachable while waiting for the bench ` +
+        "process to exit, so whether an agent is still running there could not be established. " +
+        `REFUSING to materialize the answer key on it. (${probe.stderr.trim() || "ssh exit 255"})`,
+    }
+  }
+  return probe.stdout.trim() === "ALIVE" ? { kind: "alive" } : { kind: "gone" }
+}
+
+/**
  * Wait for the bench process to leave the box, then let the caller proceed.
  *
  * The completion probe accepts EITHER `run.exit` or a fallback ("the report
@@ -159,20 +203,9 @@ const awaitAgentExit = async (input: {
     // the bench command line — the property that matters — while a self-match was
     // NOT reproducible on macOS, so it is not claimed as the cause of anything.
     const probe = await input.ssh("pgrep -f '[a]pps/bench/cli.ts run' >/dev/null && echo ALIVE")
-    if (killed && probe.stdout.trim() === "ALIVE") {
-      throw new Error(
-        `[full-remote] ${input.family}: the bench process survived being ended — REFUSING to ` +
-          "materialize the answer key beside a process we cannot account for.",
-      )
-    }
-    if (probe.code === 255) {
-      throw new Error(
-        `[full-remote] ${input.family}: the box became unreachable while waiting for the bench ` +
-          "process to exit, so whether an agent is still running there could not be established. " +
-          `REFUSING to materialize the answer key on it. (${probe.stderr.trim() || "ssh exit 255"})`,
-      )
-    }
-    if (probe.stdout.trim() !== "ALIVE") return
+    const verdict = classifyExitProbe(probe, killed, input.family)
+    if (verdict.kind === "refuse") throw new Error(verdict.reason)
+    if (verdict.kind === "gone") return
     if (waited >= deadline) {
       // MEASURED by ssh-ing into a real box: the bench had written report.json
       // and preds.jsonl and printed its final summary ("7/7 instances",

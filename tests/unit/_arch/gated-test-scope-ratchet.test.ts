@@ -97,18 +97,29 @@ const OUT_OF_BAND: Readonly<Record<string, { readonly runner: string; readonly w
   },
 }
 
-/** Every directory under `tests/` that contains at least one `*.test.ts`. */
+/** Entries worth descending into: skip `node_modules` and dotted directories. */
+const isWalkable = (name: string): boolean => name !== "node_modules" && !name.startsWith(".")
+
+/** The key a directory is recorded under — `"."` for `tests/` itself. */
+const dirKey = (rel: string): string => (rel === "" ? "." : rel)
+
+/** Every directory under `tests/` that contains at least one `*.test.ts`.
+ *
+ *  The recursion is split from the per-entry decision on purpose: this file
+ *  ratchets cognitive complexity's own cousin, and an inline 4-branch loop body
+ *  inside a nested closure scored 19 against the cap of 15 — this test would
+ *  have been the thing that broke the ceiling it exists beside. */
+const walkTestDirs = (rel: string, found: Set<string>): void => {
+  for (const ent of readdirSync(join(REPO_ROOT, "tests", rel), { withFileTypes: true })) {
+    if (!isWalkable(ent.name)) continue
+    if (ent.isDirectory()) walkTestDirs(rel === "" ? ent.name : `${rel}/${ent.name}`, found)
+    else if (ent.name.endsWith(".test.ts")) found.add(dirKey(rel))
+  }
+}
+
 const testDirsUnderTests = (): readonly string[] => {
   const found = new Set<string>()
-  const walk = (rel: string): void => {
-    for (const ent of readdirSync(join(REPO_ROOT, "tests", rel), { withFileTypes: true })) {
-      if (ent.name === "node_modules" || ent.name.startsWith(".")) continue
-      const child = rel === "" ? ent.name : `${rel}/${ent.name}`
-      if (ent.isDirectory()) walk(child)
-      else if (ent.name.endsWith(".test.ts")) found.add(rel === "" ? "." : rel)
-    }
-  }
-  walk("")
+  walkTestDirs("", found)
   return [...found].sort()
 }
 

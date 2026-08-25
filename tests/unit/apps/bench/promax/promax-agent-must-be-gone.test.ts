@@ -239,32 +239,58 @@ describe("a bench that FINISHED but will not exit is ended, not waited on foreve
     // rather than assumed.
     const issued: string[] = []
     let killed = false
+    // The fake is a TABLE, matched in order, because the order is part of what
+    // it models: `pkill` must be recognized before `pgrep` (it sets the flag the
+    // liveness answer reads), and the two `cat` arms differ only by path. As an
+    // if-chain this scored 31 cognitive complexity — in a file that exists to
+    // pin a safety boundary, where the fake being hard to read is the last thing
+    // anyone wants.
+    const SSH_CASES: ReadonlyArray<{
+      readonly when: (cmd: string) => boolean
+      readonly reply: (cmd: string) => { code: number; stdout: string; stderr: string }
+    }> = [
+      {
+        when: (c) => c.includes("pkill"),
+        reply: () => {
+          killed = true
+          return { code: 0, stdout: "", stderr: "" }
+        },
+      },
+      {
+        // The stuck bench answers ALIVE until it is ended, then reports gone.
+        when: (c) => c.includes("pgrep"),
+        reply: () =>
+          killed ? { code: 1, stdout: "", stderr: "" } : { code: 0, stdout: "ALIVE\n", stderr: "" },
+      },
+      {
+        when: (c) => c.includes("$HOME"),
+        reply: () => ({ code: 0, stdout: "/home/ubuntu", stderr: "" }),
+      },
+      {
+        when: (c) => c.includes("--version"),
+        reply: () => ({ code: 0, stdout: "Python 3.11.14\n", stderr: "" }),
+      },
+      {
+        when: (c) => c.includes("sha256sum"),
+        reply: (c) => {
+          const hit = DIGESTS.find(([d]) => c.includes(d))
+          return hit === undefined
+            ? { code: 1, stdout: "", stderr: "no such file" }
+            : { code: 0, stdout: `${hit[1]}  x`, stderr: "" }
+        },
+      },
+      {
+        when: (c) => c.startsWith("cat ") && c.includes(DEFAULT_CHUNK_PATHS.preds),
+        reply: () => ({ code: 0, stdout: PREDS, stderr: "" }),
+      },
+      {
+        when: (c) => c.startsWith("cat ") && c.includes(DEFAULT_CHUNK_PATHS.passRate),
+        reply: () => ({ code: 0, stdout: PASS_RATE, stderr: "" }),
+      },
+    ]
     const ssh = async (cmd: string) => {
       issued.push(cmd)
-      if (cmd.includes("pkill")) {
-        killed = true
-        return { code: 0, stdout: "", stderr: "" }
-      }
-      if (cmd.includes("pgrep")) {
-        return killed
-          ? { code: 1, stdout: "", stderr: "" }
-          : { code: 0, stdout: "ALIVE\n", stderr: "" }
-      }
-      if (cmd.includes("$HOME")) return { code: 0, stdout: "/home/ubuntu", stderr: "" }
-      if (cmd.includes("--version")) return { code: 0, stdout: "Python 3.11.14\n", stderr: "" }
-      if (cmd.includes("sha256sum")) {
-        const hit = DIGESTS.find(([s]) => cmd.includes(s))
-        return hit === undefined
-          ? { code: 1, stdout: "", stderr: "no such file" }
-          : { code: 0, stdout: `${hit[1]}  x`, stderr: "" }
-      }
-      if (cmd.startsWith("cat ") && cmd.includes(DEFAULT_CHUNK_PATHS.preds)) {
-        return { code: 0, stdout: PREDS, stderr: "" }
-      }
-      if (cmd.startsWith("cat ") && cmd.includes(DEFAULT_CHUNK_PATHS.passRate)) {
-        return { code: 0, stdout: PASS_RATE, stderr: "" }
-      }
-      return { code: 0, stdout: "", stderr: "" }
+      return SSH_CASES.find((c) => c.when(cmd))?.reply(cmd) ?? { code: 0, stdout: "", stderr: "" }
     }
     const out = await runFamilyBoxGrade({
       ssh,
