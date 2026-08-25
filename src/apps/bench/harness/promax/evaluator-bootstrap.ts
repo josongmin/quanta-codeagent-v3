@@ -70,6 +70,7 @@ import {
   meetsPythonFloor,
 } from "../../profiles/python-version"
 import type { FamilyBootstrapCommand } from "../../profiles/types"
+import { shq } from "../../remote/box-session/shell"
 import { PROMAX_EVALUATOR_PYTHON_FLOOR } from "./evaluator-python"
 import { PROMAX_REQUIRED_ARCHITECTURE, PROMAX_REQUIRED_OS } from "./image-freeze"
 
@@ -328,7 +329,13 @@ const agentPhaseProbes = (spec: ProMaxEvaluatorBootstrapSpec): ProMaxBootstrapCo
       argv: [
         "sh",
         "-c",
-        `sudo mkdir -p ${spec.campaignRoot} && sudo chown "$(id -u):$(id -g)" ${spec.campaignRoot}`,
+        // shq-QUOTED, not merely validated. `requireAbsolute` checks the shape
+        // of the path; it is not a shell quoter, and inside an `sh -c` string an
+        // unquoted path is one space or `$` away from meaning something else.
+        // The two other `sh -c` steps here quote their interpolations; these two
+        // were the exception.
+        `sudo mkdir -p ${shq(spec.campaignRoot)} && ` +
+          `sudo chown "$(id -u):$(id -g)" ${shq(spec.campaignRoot)}`,
       ],
       purpose:
         "create the EMPTY campaign root, owned by the bench user, so the disk probe has a real mount to measure",
@@ -479,7 +486,7 @@ const graderPythonEnvAndTeardown = (
       // Via `sh -c` so `$HOME` expands: bootstrap argv is shq-QUOTED, so neither
       // `~` nor `$HOME` would expand on their own, and hardcoding `/home/ubuntu`
       // would bake in the AMI's user where nothing else does.
-      argv: ["sh", "-c", `"$HOME"/.local/bin/uv venv --python 3.11 ${spec.venvRoot}`],
+      argv: ["sh", "-c", `"$HOME"/.local/bin/uv venv --python 3.11 ${shq(spec.venvRoot)}`],
       purpose: "a DEDICATED interpreter for the pinned evaluator, isolated from the agent's",
     },
     {
