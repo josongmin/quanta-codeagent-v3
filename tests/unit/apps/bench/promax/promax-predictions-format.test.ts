@@ -27,6 +27,7 @@
  */
 import { describe, expect, test } from "bun:test"
 import { resolveDatasetFamilyProfile } from "@/apps/bench/profiles/registry"
+import { fakeBox, writtenGradedPredictions } from "./_fake-box"
 
 const jsonl = (rows: readonly Record<string, unknown>[]): string =>
   `${rows.map((r) => JSON.stringify(r)).join("\n")}\n`
@@ -99,5 +100,102 @@ describe("the box's JSONL predictions become ProMax's JSON array", () => {
 
   test("PAIRED CONTROL: an inline-grading family declares no such conversion", () => {
     expect(resolveDatasetFamilyProfile("verified").prepareBoxGradePredictions).toBeUndefined()
+  })
+})
+
+/**
+ * WIRING — the CONSUMER half. The port is not the behaviour.
+ *
+ * Everything above calls `prepareBoxGradePredictions` directly. MEASURED: with
+ * `materializeGradedPredictions` changed to write `predictionsText` instead of
+ * `prepare(predictionsText)` — i.e. handing the pinned evaluator exactly the
+ * JSONL this port exists to eliminate — all 916 tests in this directory stayed
+ * green. The port was proven; nothing proved the box ever received its output.
+ *
+ * That is the defect shape this campaign kept producing: a rail asserted at the
+ * place it is DEFINED rather than the place it is USED. So these read the bytes
+ * that actually reach the box.
+ */
+describe("WIRING — the box receives the CONVERTED predictions", () => {
+  const PASS_RATE = JSON.stringify([
+    {
+      instance_id: "aws__s2n-tls-5464",
+      language: "c",
+      passed: true,
+      model: { final_result: "success", raw_reason: "success", returncode: 0, script_exit_code: 0 },
+      golden: {
+        final_result: "success",
+        raw_reason: "success",
+        returncode: 0,
+        script_exit_code: 0,
+      },
+    },
+  ])
+  const PREDS_JSONL = jsonl([
+    { instance_id: "aws__s2n-tls-5464", model_patch: "PATCH-A" },
+    { instance_id: "dspy__dspy-8712", model_patch: "PATCH-B" },
+  ])
+
+  /** Drive the real grade and hand back every command the box was sent. */
+  const issuedCommands = async (family: "promax" | "verified"): Promise<readonly string[]> => {
+    const { familyRemoteBootstrap } = await import("@/apps/bench/profiles/bootstrap")
+    const { runFamilyBoxGrade } = await import("@/apps/bench/remote/box-session/family-box-grade")
+    const { DEFAULT_CHUNK_PATHS } = await import("@/apps/bench/remote/box-session/types")
+    const { resolveBenchRunConfig } = await import("@/apps/bench/run-config")
+    const box = fakeBox({
+      predictions: PREDS_JSONL,
+      passRate: PASS_RATE,
+      imageProvenance:
+        `aws__s2n-tls-5464\timg:a\timg@sha256:${"a".repeat(64)}\n` +
+        `dspy__dspy-8712\timg:b\timg@sha256:${"b".repeat(64)}\n`,
+    })
+    await runFamilyBoxGrade({
+      ssh: box.ssh,
+      log: () => {},
+      family,
+      bootstrap: familyRemoteBootstrap(resolveBenchRunConfig({ argvFamily: family, env: {} })),
+      paths: DEFAULT_CHUNK_PATHS,
+      assignedInstanceIds: ["aws__s2n-tls-5464", "dspy__dspy-8712"],
+      sleep: async () => {},
+    })
+    return box.issued
+  }
+
+  const writtenPredictions = writtenGradedPredictions
+
+  test("🔴 the bytes written to the box are a JSON ARRAY, not the bench's JSONL", async () => {
+    const issued = await issuedCommands("promax")
+    const written = writtenPredictions(issued)
+    expect(written, "the converted predictions were never written to the box").toBeDefined()
+    const parsed = JSON.parse(written ?? "") as unknown
+    expect(Array.isArray(parsed), "the evaluator was handed something that is not an array").toBe(
+      true,
+    )
+    expect(parsed).toEqual([
+      { instance_id: "aws__s2n-tls-5464", model_patch: "PATCH-A" },
+      { instance_id: "dspy__dspy-8712", model_patch: "PATCH-B" },
+    ])
+  })
+
+  test("🔴 …and it is NOT byte-identical to what the bench wrote", async () => {
+    // the assertion that actually kills the skip: a consumer that forwards
+    // `predictionsText` untouched still writes a file and still parses as JSON
+    // for a single row, so "a file was written" is not enough
+    const written = writtenPredictions(await issuedCommands("promax"))
+    expect(written).not.toBe(PREDS_JSONL.trim())
+  })
+
+  test("🔴 the grade command names the CONVERTED file, not the raw one", async () => {
+    const issued = await issuedCommands("promax")
+    const grade = issued.find((c) => c.includes("test_run.py") && c.includes("--pred")) ?? ""
+    expect(grade, "no grade command was issued").not.toBe("")
+    expect(grade).toContain("/home/ubuntu/preds.grader.json")
+    expect(grade, "the raw JSONL was handed to the pinned evaluator").not.toMatch(
+      /--pred\s+\S*preds\.jsonl/,
+    )
+  })
+
+  test("PAIRED CONTROL: a family with no conversion port writes no converted file", async () => {
+    expect(writtenPredictions(await issuedCommands("verified"))).toBeUndefined()
   })
 })
