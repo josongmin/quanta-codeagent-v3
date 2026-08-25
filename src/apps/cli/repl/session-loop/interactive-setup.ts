@@ -2,9 +2,8 @@ import type { AgentConfig } from "@/agent"
 import { startAutomationEngineTicker } from "@/agent/loop-helpers"
 import type { ObjectivePort } from "@/objective"
 import {
-  asObjectiveAuthority,
-  asObjectiveReadPort,
   buildPursuitContinuationPrompt,
+  createObjectiveCapabilities,
   DEFAULT_GOAL_WAKE_POLICY,
   startGoalWakeController,
 } from "@/objective"
@@ -309,8 +308,10 @@ const armGoalWake = (args: {
     attachingOrClosing: args.attachingOrClosing?.() ?? false,
   })
   const hostIsQuiescent = (): boolean => isQuiescent(quiescenceSnapshot())
+  const objectiveCapabilities =
+    objectiveStore === undefined ? undefined : createObjectiveCapabilities(objectiveStore)
   const goalWake =
-    objectiveStore !== undefined
+    objectiveStore !== undefined && objectiveCapabilities !== undefined
       ? startGoalWakeController({
           enabled: runtimeConfig().goalContinuationEnforce,
           threadId: setup.sessionId,
@@ -321,11 +322,11 @@ const armGoalWake = (args: {
             maxBackoffMs: runtimeConfig().goalMaxBackoffMs,
             maxAutonomousTurns: runtimeConfig().goalMaxAutonomousTurns,
           },
-          readDomain: (tid) => asObjectiveAuthority(objectiveStore).readDomain(tid),
-          authority: asObjectiveAuthority(objectiveStore),
+          readDomain: (tid) => objectiveCapabilities.read.readDomain(tid),
+          system: objectiveCapabilities.system,
           isQuiescent: hostIsQuiescent,
           resumeAttempt: async (tid, attempt) => {
-            const domain = asObjectiveReadPort(objectiveStore).readDomain(tid)
+            const domain = objectiveCapabilities.read.readDomain(tid)
             const criteria = domain.state?.objective.successCriteria ?? []
             const last = domain.progressReceipts?.at(-1)
             externalPromptQueue.push({

@@ -250,7 +250,12 @@ describe("R3 audit-M2/M3 — objective_set / objective_update input caps", () =>
     expect(
       objectiveUpdateSchema.safeParse({
         thread_id: "t",
-        op: { kind: "addBlocker", reason: "r", waiting_on: "tool" },
+        op: {
+          kind: "addBlocker",
+          reason: "r",
+          waiting_on: "tool",
+          dependency_target: { kind: "tool", ref: "remote" },
+        },
       }).success,
     ).toBe(true)
     expect(

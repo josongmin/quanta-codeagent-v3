@@ -16,7 +16,7 @@
  *   2. NO DOUBLE-COUNT: the host-settled token ledger (GOAL-01 `settleAttempt`,
  *      the replacement for the retired `recordUsage` self-report) is untouched
  *      by the 429 wire — `budget.tokensUsed` is unchanged.
- *   3. DEFAULT-OFF (gate unset, informational store): the SAME 429 causes NO
+ *   3. EXPLICIT OPT-OUT (`QUANTA_GOAL=0`, informational store): the SAME 429 causes NO
  *      objective mutation — `usageLimitedUntil` is never set, the status stays
  *      `active` throughout, byte-identical to today.
  *
@@ -78,6 +78,7 @@ const RETRY_AFTER_MS = 30_000
 
 beforeEach(() => __resetRuntimeConfig())
 afterEach(() => {
+  delete process.env.QUANTA_GOAL
   delete process.env.QUANTA_OBJECTIVE_BUDGET_ENFORCE
   __resetRuntimeConfig()
 })
@@ -142,9 +143,10 @@ describe("HELLGATE E2E [RFC-06 A4.3] — 429 retry-after ⇒ objective usage_lim
     expect(store.get(TID)?.status).toBe("active")
   })
 
-  test("DEFAULT-OFF (gate unset, informational store): 429 ⇒ NO objective mutation", async () => {
-    // Gate unset — the informational store never derives usage_limited AND the
+  test("QUANTA_GOAL=0 (informational store): 429 ⇒ NO objective mutation", async () => {
+    // Public opt-out — the informational store never derives usage_limited AND the
     // wire never calls markUsageLimited (byte-identical to today).
+    process.env.QUANTA_GOAL = "0"
     __resetRuntimeConfig()
 
     let clock = 2_000_000
@@ -165,7 +167,7 @@ describe("HELLGATE E2E [RFC-06 A4.3] — 429 retry-after ⇒ objective usage_lim
     )
     expect(out.reason).toBe("completed")
 
-    // CAPTURING-SINK PROOF: with the gate unset the wire returns BEFORE the port,
+    // CAPTURING-SINK PROOF: with the public opt-out the wire returns BEFORE the port,
     // so markUsageLimited was NEVER invoked (call count == 0) — byte-identical.
     expect(marks()).toBe(0)
 

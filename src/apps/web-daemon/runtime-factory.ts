@@ -41,7 +41,7 @@ import { pickProvider, tryCreateLLM } from "@/llm"
 import { applyGoalPreset } from "@/objective"
 import { getDefaultPermissionStore, type PermissionStore } from "@/permission"
 import { createRuntimeFromAgentConfigBase } from "@/sdk/runtime"
-import { errMessage, gateOn, logger } from "@/shared"
+import { errMessage, gateDisabled, gateOn, logger } from "@/shared"
 import { buildWebSkillAuthority } from "./authority-readouts"
 import { createCanvasToolDiffSource } from "./canvas-tool-diff-source"
 import { buildAgentConfigBase } from "./runtime-factory/agent-config-base"
@@ -241,7 +241,7 @@ const loadDefaultPermissionStore = async (): Promise<PermissionStore | undefined
  */
 export const buildProductionRuntimeFactory = (): (() => Promise<ObservableRuntimeFacade>) => {
   const env = process.env as Record<string, string | undefined>
-  applyGoalPreset(env, gateOn(env, "QUANTA_GOAL"))
+  applyGoalPreset(env, !gateDisabled(env, "QUANTA_GOAL"))
   const provider = pickProvider(env)
   const llm = tryCreateLLM(provider, {}, env)
   if (llm === null) {

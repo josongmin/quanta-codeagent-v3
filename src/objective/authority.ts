@@ -29,6 +29,7 @@
  */
 
 import { errMessage, logger } from "@/shared"
+import { objectiveCoreFromPort } from "./authority-core-adapter"
 import {
   applyBlockerMutation,
   clearObservationsAfterProgress,
@@ -286,7 +287,8 @@ const applyVerificationBatch = (
   if (typeof plan === "string") return refused(core, threadId, plan)
   const gainedProgress = plan.some(
     ({ criterionId, passed }) =>
-      passed && current.successCriteria.find((criterion) => criterion.id === criterionId)?.met !== true,
+      passed &&
+      current.successCriteria.find((criterion) => criterion.id === criterionId)?.met !== true,
   )
   let result: Objective | null = current
   for (const { criterionId, passed, exitCode } of plan) {
@@ -518,79 +520,7 @@ export const asObjectiveAuthority = (
 const wrapPortAsAuthority = (
   port: ObjectivePort,
   opts?: ObjectiveAuthorityOptions,
-): ObjectiveAuthority =>
-  createObjectiveAuthorityWithCore(isObjectiveCore(port) ? port : coreFromPort(port), opts)
-
-const isObjectiveCore = (port: ObjectivePort): port is ObjectiveCore =>
-  typeof (port as Partial<ObjectiveCore>).snapshotThread === "function" &&
-  typeof (port as Partial<ObjectiveCore>).restoreThread === "function" &&
-  typeof (port as Partial<ObjectiveCore>).observeBlocker === "function" &&
-  typeof (port as Partial<ObjectiveCore>).clearBlockerObservations === "function"
-
-/** Adapt a bare `ObjectivePort` to `ObjectiveCore` via the public surface so the
- *  authority protocol still works over a foreign port (test doubles). The port's
- *  methods are closure-bound (objective ports are object literals, not classes)
- *  so a spread preserves them; a partial double keeps whatever it defined. */
-const coreFromPort = (port: ObjectivePort): ObjectiveCore => ({
-  ...port,
-  snapshotThread(threadId) {
-    const o = port.get(threadId)
-    if (o === null) return null
-    return Object.freeze({
-      objective: o,
-      explicitStatus: o.status === "paused" ? ("paused" as const) : ("active" as const),
-    })
-  },
-  restoreThread(threadId, state) {
-    if (state === null) return port.clear(threadId)
-    const o = state.objective
-    const definition: GoalDefinition = {
-      goal: o.goal,
-      successCriteria: o.successCriteria.map((c) => c.text),
-    }
-    return (
-      (port.get(threadId) === null
-        ? port.create(threadId, definition)
-        : port.replace(threadId, definition)) !== null
-    )
-  },
-  getCriterion(threadId, criterionId) {
-    const c = port.get(threadId)?.successCriteria.find((x) => x.id === criterionId)
-    if (c === undefined) return null
-    return { kind: c.kind, met: c.met, checkId: c.kind === "checked" ? c.check.id : null }
-  },
-  applyManualCompletion(threadId, criterionId, met) {
-    return port.markCriterion(threadId, criterionId, met)
-  },
-  applyVerifierCompletion(threadId, criterionId, receipt) {
-    const c = port.get(threadId)?.successCriteria.find((x) => x.id === criterionId)
-    if (c === undefined || c.kind !== "checked" || receipt.checkId !== c.check.id) return null
-    if (receipt.verifierResult.passed !== true) return null
-    return port.markCriterion(threadId, criterionId, true)
-  },
-  applyUsage(threadId) {
-    // A bare foreign port has no usage substrate; report the unchanged objective.
-    return port.get(threadId)
-  },
-  resetCheckedCriterion(threadId) {
-    // A bare foreign port cannot un-complete a checked criterion; report unchanged.
-    return port.get(threadId)
-  },
-  startAttempt(threadId) {
-    // No attempt substrate on a bare foreign port; report unchanged.
-    return port.get(threadId)
-  },
-  clearStartedAttempt(threadId) {
-    return port.get(threadId)
-  },
-  observeBlocker() {
-    // A foreign public port cannot preserve attempt-attributed observations.
-    return null
-  },
-  clearBlockerObservations() {
-    return null
-  },
-})
+): ObjectiveAuthority => createObjectiveAuthorityWithCore(objectiveCoreFromPort(port), opts)
 
 /** RFC-03 C2 — restore-at-construction. Load each persisted per-thread domain
  *  snapshot verbatim into the core and restore its EXACT revision (NOT the
@@ -745,13 +675,27 @@ const createAuthoritySurface = (deps: AuthoritySurfaceDeps): ObjectiveAuthority 
   },
 })
 
-/** Factory variant that adopts an existing core (rather than minting one). */
-const createObjectiveAuthorityWithCore = (
+interface AuthorityRuntimeState {
+  readonly core: ObjectiveCore
+  readonly revisions: Map<string, number>
+  readonly progress: Map<string, readonly ProgressReceipt[]>
+  readonly attachGenerations: Map<string, number>
+  readonly revisionOf: (threadId: string) => number
+  readonly bump: (threadId: string) => number
+  readonly readDomain: (threadId: string) => ObjectiveDomainSnapshot
+  readonly route: (
+    threadId: string,
+    mutation: ObjectiveMutation,
+    actor: ObjectiveActor,
+  ) => ApplyOutcome
+  readonly system: (threadId: string, mutation: ObjectiveMutation) => Objective | null
+}
+
+/** Build the mutable authority state and its one mutation router. */
+const createAuthorityRuntimeState = (
   core: ObjectiveCore,
   opts?: ObjectiveAuthorityOptions,
-): ObjectiveAuthority => {
-  const gateOn = opts?.gateOn === true
-  const confirmationAvailable = opts?.confirmationAvailable !== false
+): AuthorityRuntimeState => {
   const nowFn = opts?.now ?? Date.now
   const mintId = opts?.idFactory ?? defaultObjectiveIdFactory
   const revisions = new Map<string, number>()
@@ -810,6 +754,33 @@ const createObjectiveAuthorityWithCore = (
     const outcome = route(threadId, mutation, "system")
     return outcome.applied || outcome.rejection === undefined ? outcome.result : null
   }
+  return {
+    core,
+    revisions,
+    progress,
+    attachGenerations,
+    revisionOf,
+    bump,
+    readDomain,
+    route,
+    system,
+  }
+}
+
+interface AuthorityMutationProtocol {
+  readonly prepare: ObjectiveAuthority["prepare"]
+  readonly commit: ObjectiveAuthority["commit"]
+  readonly restore: ObjectiveAuthority["restore"]
+}
+
+/** Bind CAS, actor policy and exact restore over the shared runtime state. */
+const createAuthorityMutationProtocol = (
+  state: AuthorityRuntimeState,
+  opts?: ObjectiveAuthorityOptions,
+): AuthorityMutationProtocol => {
+  const gateOn = opts?.gateOn === true
+  const confirmationAvailable = opts?.confirmationAvailable !== false
+  const { core, progress, revisionOf, bump, readDomain, route } = state
   const prepare = (command: ObjectiveMutationCommand): PreparedObjectiveMutation => {
     const threadId = isNonEmptyString(command.threadId) ? command.threadId : ""
     return {
@@ -859,6 +830,32 @@ const createObjectiveAuthorityWithCore = (
     bump(threadId)
     return { ok: true, revision: revisionOf(threadId), snapshot: readDomain(threadId) }
   }
+  return { prepare, commit, restore }
+}
+
+interface AuthorityDomainLifecycle {
+  readonly restoreDomain: ObjectiveAuthority["restoreDomain"]
+  readonly replaceDomainForAttach: ObjectiveAuthority["replaceDomainForAttach"]
+}
+
+const detachPreviousAttachedThread = (
+  state: AuthorityRuntimeState,
+  liveThreadId: string,
+  previousLiveThreadId: string | undefined,
+): void => {
+  if (!isNonEmptyString(previousLiveThreadId) || previousLiveThreadId === liveThreadId) return
+  state.core.restoreThread(previousLiveThreadId, null)
+  state.revisions.set(previousLiveThreadId, state.revisionOf(previousLiveThreadId) + 1)
+  state.progress.delete(previousLiveThreadId)
+  state.attachGenerations.set(
+    previousLiveThreadId,
+    (state.attachGenerations.get(previousLiveThreadId) ?? 0) + 1,
+  )
+}
+
+/** Durable-resume and attach replacement over one authority generation map. */
+const createAuthorityDomainLifecycle = (state: AuthorityRuntimeState): AuthorityDomainLifecycle => {
+  const { core, revisions, progress, attachGenerations, revisionOf } = state
   // RFC-03 C2 (web parity) — LIVE post-construction durable-resume load of ONE
   // per-thread snapshot. Plants the state verbatim (or a tombstone) and pins the
   // EXACT persisted revision; no bump, no CAS.
@@ -896,29 +893,32 @@ const createObjectiveAuthorityWithCore = (
     }
     const attachGeneration = (attachGenerations.get(liveThreadId) ?? 0) + 1
     attachGenerations.set(liveThreadId, attachGeneration)
-    if (isNonEmptyString(previousLiveThreadId) && previousLiveThreadId !== liveThreadId) {
-      core.restoreThread(previousLiveThreadId, null)
-      revisions.set(previousLiveThreadId, revisionOf(previousLiveThreadId) + 1)
-      progress.delete(previousLiveThreadId)
-      attachGenerations.set(
-        previousLiveThreadId,
-        (attachGenerations.get(previousLiveThreadId) ?? 0) + 1,
-      )
-    }
+    detachPreviousAttachedThread(state, liveThreadId, previousLiveThreadId)
     return { ok: true, revision, attachGeneration }
   }
+  return { restoreDomain, replaceDomainForAttach }
+}
+
+/** Factory variant that adopts an existing core (rather than minting one). */
+const createObjectiveAuthorityWithCore = (
+  core: ObjectiveCore,
+  opts?: ObjectiveAuthorityOptions,
+): ObjectiveAuthority => {
+  const state = createAuthorityRuntimeState(core, opts)
+  const protocol = createAuthorityMutationProtocol(state, opts)
+  const lifecycle = createAuthorityDomainLifecycle(state)
   return createAuthoritySurface({
-    core,
-    revisions,
-    progress,
-    attachGenerations,
-    revisionOf,
-    readDomain,
-    prepare,
-    commit,
-    restore,
-    restoreDomain,
-    replaceDomainForAttach,
-    system,
+    core: state.core,
+    revisions: state.revisions,
+    progress: state.progress,
+    attachGenerations: state.attachGenerations,
+    revisionOf: state.revisionOf,
+    readDomain: state.readDomain,
+    prepare: protocol.prepare,
+    commit: protocol.commit,
+    restore: protocol.restore,
+    restoreDomain: lifecycle.restoreDomain,
+    replaceDomainForAttach: lifecycle.replaceDomainForAttach,
+    system: state.system,
   })
 }

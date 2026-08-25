@@ -27,12 +27,13 @@ surface_integration:
   method: audited
   verified: "2026-08-26"
   evidence:
-    cli: "Real PTY boots the source or installed CLI, proves default-OFF command absence, goal create/show, autonomous queue execution, draft/background/foreground quiescence fences, and goal-only quiet-window behavior."
+    cli: "Real PTY boots the source or installed CLI, proves default-ON command discovery, explicit QUANTA_GOAL=0 opt-out, goal create/show, autonomous queue execution, draft/background/foreground quiescence fences, and goal-only quiet-window behavior."
     web: "Web-daemon composition submits a one-use, authority-validated goal-continuation capability through RuntimeSession.turn.submitGoalContinuation; an integration test proves concurrent user input stays outside the autonomous turn."
 purpose: |
-  Public `QUANTA_GOAL=1` enables the complete goal preset: objective tools,
-  budget enforcement, and bounded autonomous continuation. The preset remains
-  default OFF and does not override explicit internal settings.
+  The complete goal preset is enabled by default in CLI and web-daemon roots:
+  objective tools, budget enforcement, and bounded autonomous continuation.
+  `QUANTA_GOAL=0` is the public opt-out, and explicit internal settings are
+  never overwritten. No autonomous turn starts until a user creates a goal.
 
   Codex-parity behavior:
   - `/goal` creates, shows, edits, pauses, resumes, clears, and verifies one
@@ -69,7 +70,9 @@ evidence:
     - src/apps/cli/slash/goal-render.ts
     - src/apps/cli/repl/session-loop/interactive-setup.ts
     - src/apps/cli/repl/session-loop/session-switch.ts
+    - src/apps/cli/repl/runtime-context-compose.ts
     - src/apps/web-daemon/goal-wake-compose.ts
+    - src/runner/orchestrate/session-turn-driver.ts
     - src/sdk/runtime/session/turn-submit-authority.ts
   adrs: [394]
   tests:
@@ -77,7 +80,7 @@ evidence:
       - tests/unit/objective/goal-wake-controller.test.ts
       - tests/unit/objective/goal-wake-policy.test.ts
       - tests/unit/objective/blocker-observation.test.ts
-      - tests/unit/objective/settle-attempt.test.ts
+      - tests/unit/objective/attempt-lifecycle.test.ts
       - tests/unit/apps/cli/repl/session-switch-hellgate.test.ts
       - tests/unit/sdk/turn-submit-authority.test.ts
     integration:
@@ -89,20 +92,20 @@ evidence:
 knobs:
   - name: QUANTA_GOAL
     where: src/objective/goal-preset.ts
-    default: 'unset (OFF)'
-    purpose: Public opt-in preset for the full goal-control behavior; explicit internal overrides win.
+    default: 'true (ON)'
+    purpose: Default-ON public preset for full goal-control behavior; QUANTA_GOAL=0 disables it and explicit internal overrides win.
   - name: QUANTA_OBJECTIVE_TOOLS
     where: src/objective/goal-preset.ts
-    default: 'unset (OFF)'
-    purpose: Advanced internal gate for objective authority and tool exposure.
+    default: 'inherits QUANTA_GOAL (ON)'
+    purpose: Advanced internal gate for objective authority and tool exposure; an explicit value overrides the public preset.
   - name: QUANTA_GOAL_ENFORCE
     where: src/shared/runtime-config.ts
-    default: 'unset (OFF)'
-    purpose: Advanced internal gate for autonomous continuation.
+    default: 'inherits QUANTA_GOAL (ON)'
+    purpose: Advanced internal gate for autonomous continuation; an explicit value overrides the public preset.
   - name: QUANTA_OBJECTIVE_BUDGET_ENFORCE
     where: src/shared/runtime-config.ts
-    default: 'unset (OFF)'
-    purpose: Advanced internal gate for objective budget enforcement.
+    default: 'inherits QUANTA_GOAL (ON)'
+    purpose: Advanced internal gate for objective budget enforcement; an explicit value overrides the public preset.
   - name: QUANTA_GOAL_QUIET_MS
     where: src/shared/runtime-config.ts
     default: '15000'
@@ -115,20 +118,13 @@ knobs:
     where: src/shared/runtime-config.ts
     default: '20'
     purpose: Advanced hard cap when the objective has no lower explicit max-turns budget.
-deliberate_hold:
-  reason: |
-    Default-on promotion is held. Safety behavior is covered by deterministic
-    unit, integration, and PTY rails, but there is no live efficacy baseline or
-    production smoke receipt for long-horizon task completion.
-  promotion_path: |
-    Run a separate live smoke campaign, establish outcome/latency/cost
-    baselines, and require zero overlap, duplicate, stale execution, forged
-    checked completion, and unavailable-to-completed transitions before
-    considering a default change.
+deliberate_hold: null
 notes: |
   Evidence is intentionally limited to interactive CLI and web-daemon/IDE
   modes. Headless and batch are excluded because no front-door goal-pursuit E2E
   exists for those surfaces. Monitoring is partial: typed skip reasons and
   deterministic receipts exist, but production decision counters and live
-  efficacy measurement are not yet promotion-grade. The optional completion
-  judge remains shadow-only and cannot mutate objective state.
+  efficacy measurement remain an operational follow-up. Default-ON is bounded
+  by the user-created-goal precondition, explicit opt-out, quiescence fences,
+  revision/attach-generation checks, verifier evidence, backoff, and hard caps.
+  The optional completion judge remains shadow-only and cannot mutate objective state.

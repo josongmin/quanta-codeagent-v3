@@ -90,6 +90,10 @@ export interface RunSessionTurnArgs {
 
 const requireTurnPayload = (result: SessionDispatchResult): SessionTurnPayload => {
   if (result.turn === undefined) {
+    const failed = [...result.events].reverse().find((event) => event.type === "turn.failed")
+    if (failed?.type === "turn.failed") {
+      throw new Error(`runtime session turn failed: ${failed.message}`)
+    }
     throw new Error("runtime session turn completed without a turn payload")
   }
   return result.turn

@@ -1,6 +1,16 @@
 import type { ToolAction } from "@/permission"
-import { QuantaError } from "@/shared"
+import {
+  InvalidModeTransitionError,
+  PlanModeMutatingBlockedError,
+  UnknownToolError,
+} from "./mode-errors"
 import type { AgentMode } from "./prompt"
+
+export {
+  InvalidModeTransitionError,
+  PlanModeMutatingBlockedError,
+  UnknownToolError,
+} from "./mode-errors"
 
 /**
  * Mode policy (Codex `mode-and-plan-process-audit.md` absorption — Phase 3).
@@ -722,55 +732,6 @@ export const CALLER_WIRE_TOOL_NAMES = Object.freeze([
   "git_co_change",
   "ci_finding",
 ] as const)
-
-/** Thrown by {@link isMutatingTool} / {@link assertNotMutatingInPlanMode}
- *  when a tool name is not in the explicit table. Surfaces the missing tool
- *  name so the failing test points directly at the omission. */
-export class UnknownToolError extends QuantaError {
-  readonly toolName: string
-  constructor(toolName: string) {
-    super(
-      "unknown_tool",
-      `Tool "${toolName}" is not classified in the plan-mode mutating table. ` +
-        `Every registered tool must have an explicit entry in MUTATING_TOOL_TABLE ` +
-        `(src/agent/mode.ts) so plan-mode cannot silently allow new mutating tools.`,
-    )
-    this.toolName = toolName
-  }
-}
-
-/** Thrown by {@link assertNotMutatingInPlanMode} / dispatch-seam guard when
- *  a mutating tool is called in `plan` collaboration mode. Surfaces both the
- *  tool name and the mutating-kind so the LLM-facing deny message can be
- *  specific. */
-export class PlanModeMutatingBlockedError extends QuantaError {
-  readonly toolName: string
-  readonly mutatingKind: MutatingToolKind
-  constructor(toolName: string, mutatingKind: MutatingToolKind) {
-    super(
-      "plan_mode_mutating_blocked",
-      `Tool "${toolName}" (${mutatingKind}) is blocked in plan collaboration mode. ` +
-        `Exit plan mode first (for example via \`request_plan_exit\`), or switch via a developer ` +
-        `message (\`mode=default\`) to mutate.`,
-    )
-    this.toolName = toolName
-    this.mutatingKind = mutatingKind
-  }
-}
-
-/** Thrown by {@link applyDeveloperModeTransition} when a developer message
- *  carries a `mode=…` directive that is neither `plan` nor `default`. */
-export class InvalidModeTransitionError extends QuantaError {
-  readonly attempted: string
-  constructor(attempted: string) {
-    super(
-      "invalid_mode_transition",
-      `Invalid collaboration mode transition: "${attempted}". ` +
-        `Only mode=plan and mode=default are allowed via developer message.`,
-    )
-    this.attempted = attempted
-  }
-}
 
 /** Look up a tool's mutating classification. Returns `true` iff the tool is
  *  classified as mutating (any {@link MutatingToolKind}); `false` for

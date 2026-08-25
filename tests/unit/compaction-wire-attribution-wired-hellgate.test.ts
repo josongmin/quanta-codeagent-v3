@@ -224,6 +224,7 @@ describe("DOF-40 WIRE — attribution stamped + failure-routed through maybeComp
       run: { runId: "r", turn: 8 },
       // NO hooks — objective store only.
       objective: {
+        get: () => ({ status: "active" }),
         setNextActions: (_tid: string, actions: readonly string[]) => {
           calls.push([...actions])
         },

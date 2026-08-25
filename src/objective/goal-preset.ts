@@ -1,4 +1,4 @@
-/** Public opt-in preset. Explicit internal overrides always win. */
+/** Default-ON public preset. Explicit public opt-out and internal overrides win. */
 export const applyGoalPreset = (
   env: Record<string, string | undefined>,
   enabled: boolean,

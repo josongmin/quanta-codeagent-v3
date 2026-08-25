@@ -133,6 +133,36 @@ describe("driveSessionTurn — behavioral contract", () => {
     await expect(run).rejects.toThrow("runtime session turn completed without a turn payload")
   })
 
+  test("missing turn payload surfaces the authoritative turn.failed reason", async () => {
+    const rec: Recorder = { appends: [], responds: [] }
+    const run = driveSessionTurn({
+      env: {},
+      session: fakeSession(
+        [
+          {
+            revision: 2,
+            seq: 2,
+            events: [
+              {
+                type: "turn.failed",
+                eventId: "failed-1",
+                seq: 1,
+                revision: 2,
+                emittedAt: new Date(0).toISOString(),
+                message: "objective persistence refused",
+              },
+            ],
+          },
+        ],
+        rec,
+      ),
+      resolveApproval: async () => "approve",
+      text: "x",
+      turnSignal: new AbortController().signal,
+    })
+    await expect(run).rejects.toThrow("runtime session turn failed: objective persistence refused")
+  })
+
   test("beforeTurn host hook fires BEFORE append", async () => {
     const order: string[] = []
     await driveSessionTurn({

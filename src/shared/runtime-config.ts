@@ -38,7 +38,7 @@
  */
 
 import { tlsMitmAuthorized } from "@/runtime/network-proxy/mitm-gate"
-import { gateDisabledStrict, gateOn, gateOnStrict } from "./env-flag"
+import { gateDisabled, gateDisabledStrict, gateOn, gateOnStrict } from "./env-flag"
 import { knobOverrideCount, knobOverridesVersion, sessionSafeKnobOverrides } from "./knob-overrides"
 import {
   DEFAULT_CRITICAL_SECTION_MAX_MS,
@@ -219,9 +219,13 @@ const parseCapabilitySlice = (env: RuntimeConfigEnv): Partial<RuntimeConfig> => 
     // ADR-0512 — skill tool-scoping v2 (availability filter + escalation ask).
     // Default false ⇒ ADR-0011 dispatch-deny behavior (byte-identical).
     skillScopeV2: gateOn(env, "QUANTA_SKILL_SCOPE_V2"),
-    // H17 — idle goal-continuation + budget enforcement. Strict the `gateOn` truthy vocab (#24) opt-in;
-    // default false ⇒ objective stays informational-only (byte-identical).
-    goalContinuationEnforce: gateOn(env, "QUANTA_GOAL_ENFORCE"),
+    // Default-ON public goal preset. An explicit internal gate still wins;
+    // otherwise QUANTA_GOAL=0 is the public opt-out. Resolve here as well as at
+    // host roots so ESM import order cannot cache the pre-preset config.
+    goalContinuationEnforce:
+      env.QUANTA_GOAL_ENFORCE === undefined
+        ? !gateDisabled(env, "QUANTA_GOAL")
+        : gateOn(env, "QUANTA_GOAL_ENFORCE"),
     // Goal-pursuit quiet window only. This is deliberately independent of the
     // UI idle-suppression knobs; invalid/non-positive values retain the 15 s
     // catalog default instead of disabling continuation implicitly.
@@ -242,9 +246,13 @@ const parseCapabilitySlice = (env: RuntimeConfigEnv): Partial<RuntimeConfig> => 
     // H13 — opt-in (`gateOn` vocab; #24). Default false ⇒ no config-migration detect,
     // no prompt, no ledger (byte-identical startup).
     migrateConfig: gateOn(env, "QUANTA_MIGRATE_CONFIG"),
-    // H17 — opt-in (`gateOn` vocab; #24). Default false ⇒ objective budget stays
-    // informational (status never flips, idle-continuation byte-identical).
-    objectiveBudgetEnforce: gateOn(env, "QUANTA_OBJECTIVE_BUDGET_ENFORCE"),
+    // Default-ON public goal preset with an explicit internal override. Keeping
+    // the fallback beside continuation prevents split-brain between wakeups and
+    // the measured budget status they must obey.
+    objectiveBudgetEnforce:
+      env.QUANTA_OBJECTIVE_BUDGET_ENFORCE === undefined
+        ? !gateDisabled(env, "QUANTA_GOAL")
+        : gateOn(env, "QUANTA_OBJECTIVE_BUDGET_ENFORCE"),
     // Capability A — opt-in (`gateOn` vocab; #24). Default false ⇒ batch fan-out is
     // the existing flat parallel pool (byte-identical, no DAG ordering).
     teamDag: gateOn(env, "QUANTA_TEAM_DAG"),

@@ -94,9 +94,7 @@ export const cloneObjectiveForFork = (
                     ? { maxTokens: body.budget.maxTokens }
                     : {}),
                   tokensUsed: 0,
-                  ...(body.budget.maxTurns !== undefined
-                    ? { maxTurns: body.budget.maxTurns }
-                    : {}),
+                  ...(body.budget.maxTurns !== undefined ? { maxTurns: body.budget.maxTurns } : {}),
                   turnsUsed: 0,
                 },
                 blockers: [],

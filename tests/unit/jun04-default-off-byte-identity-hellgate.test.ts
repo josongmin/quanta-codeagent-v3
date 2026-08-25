@@ -36,6 +36,7 @@ const JUN04_KNOBS = [
   "QUANTA_MCP_ROOTS",
   "QUANTA_MCP_OAUTH",
   "QUANTA_REASONING_CARRYOVER",
+  "QUANTA_GOAL",
   "QUANTA_GOAL_ENFORCE",
   "QUANTA_OBJECTIVE_BUDGET_ENFORCE",
   "QUANTA_PASSIVE_VCS",
@@ -73,9 +74,7 @@ const EXPECT_FALSE_GATES: Record<string, (c: ReturnType<typeof runtimeConfig>) =
   imageGen: (c) => c.imageGen,
   officeAuthoring: (c) => c.officeAuthoring,
   reasoningCarryover: (c) => c.reasoningCarryover,
-  goalContinuationEnforce: (c) => c.goalContinuationEnforce,
   migrateConfig: (c) => c.migrateConfig,
-  objectiveBudgetEnforce: (c) => c.objectiveBudgetEnforce,
   autoDream: (c) => c.autoDream,
   teamDag: (c) => c.teamDag,
   teamBroker: (c) => c.teamBroker,
@@ -118,6 +117,18 @@ describe("jun-04 collective default-OFF — runtime-config gates", () => {
     }
     // LOUD: name every gate that is unexpectedly ON.
     expect(on).toEqual([])
+  })
+
+  test("promoted goal gates default ON and retain the public opt-out", () => {
+    const defaults = runtimeConfig()
+    expect(defaults.goalContinuationEnforce).toBe(true)
+    expect(defaults.objectiveBudgetEnforce).toBe(true)
+
+    process.env.QUANTA_GOAL = "0"
+    __resetRuntimeConfig()
+    const optedOut = runtimeConfig()
+    expect(optedOut.goalContinuationEnforce).toBe(false)
+    expect(optedOut.objectiveBudgetEnforce).toBe(false)
   })
 
   test("every H7 cloud-credential knob is undefined (no helper / refresh wired)", () => {

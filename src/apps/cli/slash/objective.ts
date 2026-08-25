@@ -2,13 +2,13 @@ import type {
   CriterionDeclaration,
   ObjectiveBudget,
   ObjectiveDomainSnapshot,
-  ObjectiveMutation,
   ObjectivePort,
   ObjectiveStatus,
   ObjectiveVerificationPort,
+  UserObjectiveMutation,
   VerificationOutcome,
 } from "@/objective"
-import { asObjectiveAuthority } from "@/objective"
+import { createObjectiveCapabilities } from "@/objective"
 import { readCliKnob } from "../cli-knobs-accessor"
 import type { SlashCommand } from "../slash-contract"
 import { runGoalCommand } from "./goal-cmd"
@@ -71,11 +71,10 @@ export const buildGoalControl = (
   verifier?: ObjectiveVerificationPort,
   onInfrastructureUnavailable?: (objectiveRevision: number, observedAt: number) => void,
 ): GoalControl => {
-  const authority = asObjectiveAuthority(port)
-  const read = (): ObjectiveDomainSnapshot => authority.readDomain(threadId)
-  const commit = (mutation: ObjectiveMutation): GoalControlOutcome => {
-    const prepared = authority.prepare({ threadId, actor: "user", mutation })
-    const result = authority.commit(prepared, { admitted: true })
+  const capabilities = createObjectiveCapabilities(port)
+  const read = (): ObjectiveDomainSnapshot => capabilities.read.readDomain(threadId)
+  const commit = (mutation: UserObjectiveMutation): GoalControlOutcome => {
+    const result = capabilities.user.commit(threadId, mutation)
     const domain = read()
     if (result.ok) {
       onMutation?.()
@@ -161,7 +160,7 @@ export interface ObjectiveEditView {
   readonly updatedAt: number
 }
 
-export const isGoalEnabled = (): boolean => readCliKnob("QUANTA_GOAL", "bool") ?? false
+export const isGoalEnabled = (): boolean => readCliKnob("QUANTA_GOAL", "bool") ?? true
 export const isObjectiveEditorEnabled = isGoalEnabled
 
 export const objectiveCmd: SlashCommand = {

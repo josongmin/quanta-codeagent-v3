@@ -97,8 +97,8 @@ export interface EnvRow {
 export const ENV_TABLE: readonly EnvRow[] = [
   {
     key: "QUANTA_GOAL",
-    defaultLabel: "off",
-    describe: "Durable multi-turn goal preset ('1' to enable /goal)",
+    defaultLabel: "on",
+    describe: "Durable multi-turn goal preset ('0' to disable /goal and pursuit)",
   },
   { key: "QUANTA_LOG_LEVEL", defaultLabel: "info", describe: "debug|info|warn|error" },
   {

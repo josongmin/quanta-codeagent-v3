@@ -3,11 +3,20 @@ import type { RuntimeConfigKnob } from "./types"
 export const KNOBS_B: readonly RuntimeConfigKnob[] = [
   // ── session / git / permission
   {
+    envKey: "QUANTA_GOAL",
+    kind: "bool",
+    default: true,
+    group: "session",
+    describe:
+      "Default-ON durable-goal preset. QUANTA_GOAL=0 opts out; explicit internal goal overrides take precedence.",
+  },
+  {
     envKey: "QUANTA_GOAL_ENFORCE",
     kind: "bool",
-    default: false,
+    default: true,
     group: "session",
-    describe: "Idle goal-continuation gate.",
+    describe:
+      "Idle goal-continuation override. Defaults ON through QUANTA_GOAL; an explicit value wins, and QUANTA_GOAL=0 opts out when this override is unset.",
   },
   {
     envKey: "QUANTA_GOAL_QUIET_MS",
@@ -49,10 +58,10 @@ export const KNOBS_B: readonly RuntimeConfigKnob[] = [
   {
     envKey: "QUANTA_OBJECTIVE_BUDGET_ENFORCE",
     kind: "bool",
-    default: false,
+    default: true,
     group: "session",
     describe:
-      "Thread-goal budget enforcement gate (RFC-03) — ON derives usage_limited/budget_limited status from the measured budget. CO-REQUISITE: requires QUANTA_OBJECTIVE_TOOLS on — without the objective authority this gate is a silent no-op. Unset ⇒ informational store, no enforcement (byte-identical).",
+      "Thread-goal budget enforcement override (RFC-03). Defaults ON through QUANTA_GOAL; an explicit value wins, and QUANTA_GOAL=0 opts out when this override is unset. Requires objective authority to have an effect.",
   },
   {
     envKey: "QUANTA_CAP_ENFORCE",

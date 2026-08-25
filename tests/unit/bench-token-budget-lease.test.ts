@@ -136,7 +136,10 @@ describe("patch-gen budget lease", () => {
         expect(state.limit).toBe(16)
         expect(state.inUse).toBe(16)
         expect(state.available).toBe(0)
-        expect(state.leases.map((lease) => lease.label)).toEqual(["first", "second"])
+        // Both acquisitions can share one millisecond; the production order
+        // then uses the random lease id as its deterministic tie-breaker.
+        // This case verifies membership and accounting, not display order.
+        expect(state.leases.map((lease) => lease.label).sort()).toEqual(["first", "second"])
       } finally {
         await second.release()
         await first.release()

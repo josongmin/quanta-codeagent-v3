@@ -466,11 +466,23 @@ describe("DedupGate — anti-regression: dispatch.ts must call the gate before t
     // consultDedupGate must be a member of the ordered PRE_FLIGHT_CONSULTS table.
     const table = src.match(/PRE_FLIGHT_CONSULTS[\s\S]*?=\s*\[([\s\S]*?)\]/)
     expect(table?.[1]).toContain("consultDedupGate")
-    // That table must be iterated BEFORE the admissibility gate (line position).
-    const loopIdx = src.search(/for\s*\(const\s+consult\s+of\s+PRE_FLIGHT_CONSULTS\)/)
-    const admitIdx = src.search(/runAdmissibilityGate\s*\(/)
-    expect(loopIdx).toBeGreaterThan(0)
-    expect(admitIdx).toBeGreaterThan(0)
-    expect(loopIdx).toBeLessThan(admitIdx)
+    // That table must be passed to the live first-wins iterator BEFORE the
+    // admissibility gate. Matching the call (not the bare table identifier)
+    // keeps this guard non-vacuous across helper extraction.
+    const preservesPreflightOrder = (source: string): boolean => {
+      const dispatchBody = source.slice(source.indexOf("const dispatchToolInner"))
+      const consultCall = dispatchBody.search(/firstConsult\s*\(\s*PRE_FLIGHT_CONSULTS\s*,/)
+      const admitCall = dispatchBody.search(/runPreExecuteGate\s*\(/)
+      return consultCall > 0 && admitCall > 0 && consultCall < admitCall
+    }
+    expect(preservesPreflightOrder(src)).toBe(true)
+
+    // Red-on-injection: deleting the live registry call must fail even though
+    // the import and PRE_FLIGHT_CONSULTS declaration remain in the source.
+    const withoutLiveConsult = src.replace(
+      /firstConsult\s*\(\s*PRE_FLIGHT_CONSULTS\s*,/,
+      "firstConsult([],",
+    )
+    expect(preservesPreflightOrder(withoutLiveConsult)).toBe(false)
   })
 })

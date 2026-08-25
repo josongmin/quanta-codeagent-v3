@@ -45,8 +45,8 @@ import {
   normalizeProgressReceipt,
 } from "@/objective"
 import type {
-  PersistedObjectiveBlocker,
   PersistedBlockerObservation,
+  PersistedObjectiveBlocker,
   PersistedObjectiveBodyV2,
   PersistedObjectiveCompletion,
   PersistedObjectiveCriterion,
@@ -121,9 +121,7 @@ const migrateThreadV1 = (t: PersistedObjectiveThread): PersistedObjectiveThreadV
     ...(t.usageLimitedUntil !== undefined ? { usageLimitedUntil: t.usageLimitedUntil } : {}),
     budget: t.budget,
     blockers: t.blockers,
-    ...(t.blockerObservations !== undefined
-      ? { blockerObservations: t.blockerObservations }
-      : {}),
+    ...(t.blockerObservations !== undefined ? { blockerObservations: t.blockerObservations } : {}),
     nextActions: t.nextActions,
     createdAt: t.createdAt,
     updatedAt: t.updatedAt,

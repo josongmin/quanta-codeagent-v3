@@ -434,10 +434,7 @@ const buildObjectiveSet = (ports: ObjectiveToolPorts): Tool<ObjectiveSetInput> =
 })
 
 /** Translate a validated `objective_update` op into the authority mutation. */
-const opToMutation = (
-  op: ObjectiveUpdateInput["op"],
-  ctx: ToolContext,
-): ModelObjectiveMutation => {
+const opToMutation = (op: ObjectiveUpdateInput["op"], ctx: ToolContext): ModelObjectiveMutation => {
   switch (op.kind) {
     case "addBlocker":
       return {

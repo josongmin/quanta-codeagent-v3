@@ -111,9 +111,16 @@ describe("F2 — both primary surfaces wire loadNamedAgents (source assertion)",
 
   test("interactive CLI/REPL loads loadNamedAgents(boot.cwd) and overlays the resolver", () => {
     const src = readFileSync(join(repoRoot, "src/apps/cli/repl/runtime-context-compose.ts"), "utf8")
-    // Uses the SESSION-resolved jailed cwd, not raw process.cwd().
-    expect(src).toContain("loadNamedAgents(boot.cwd)")
-    expect(src).toContain("namedAgentResolver")
+    const hasLiveResolverWire = (source: string): boolean =>
+      /loadNamedAgents\s*\(\s*cwd\s*\)/.test(source) &&
+      /loadNamedAgentResolver\s*\(\s*boot\.cwd\s*\)/.test(source)
+
+    // The helper owns loading; the live composition call must pass the
+    // session-resolved jailed cwd. Imports or comments alone cannot satisfy it.
+    expect(hasLiveResolverWire(src)).toBe(true)
+    expect(
+      hasLiveResolverWire(src.replace(/loadNamedAgentResolver\s*\(\s*boot\.cwd\s*\)/, "undefined")),
+    ).toBe(false)
   })
 
   test("host overlay → base lift exists (RuntimeBootstrapOverlay.namedAgentResolver)", () => {

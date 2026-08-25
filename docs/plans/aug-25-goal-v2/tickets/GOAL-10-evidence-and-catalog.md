@@ -4,13 +4,13 @@
 
 ## 목적
 "Codex /goal 동급 + Quanta 안전 확장"을 **구현이 아니라 실행 증거**로 주장한다. 각 티켓 E2E를 하나의 배터리로 묶고, feature catalog가 실제 front-door 증거만큼만 말하게 한다.
-이 티켓이 끝나기 전까지 보고 문구는 "CLI 구조/행위 GREEN, promotion 미완료"다. default OFF 유지.
+최종 promotion 결정은 default ON이며 `QUANTA_GOAL=0`을 명시적 opt-out으로 유지한다. 사용자가 goal을 생성하기 전에는 autonomous turn이 없다.
 
 ## 작업명세
 ### E2E 배터리 (기존 파일 확장, 새 fake 하네스 금지)
 **중복 방지**: 아래 목록은 GOAL-03/05/06/07/08/09가 각자 추가한 테스트의 **인덱스**다. 이 티켓은 (i) 누락된 항목만 추가, (ii) 각 항목의 mutant receipt, (iii) 배터리 1회 완주 receipt를 담당한다. 이미 있는 테스트를 다시 쓰지 않는다.
 - `tests/e2e-pty/cli-goal-pursuit-e2e.test.ts` — 필수 시나리오, 각 핵심에 red-on-injection 페어(주석으로 mutant 지정):
-  1. default OFF: `QUANTA_GOAL` 미설정 → `/goal` 미등록, wake 0.
+  1. default ON: `QUANTA_GOAL` 미설정 → `/goal` 등록, goal 생성 전 wake 0. `QUANTA_GOAL=0` → `/goal` 미등록.
   2. set → `/goal` 렌더(validation contract missing 표시).
   3. `check add` → `verify` → `1/1 verified` → 파일 touch → stale.
   4. autonomous multi-turn: cassette 2 turn, verifier pass → completed, 이후 wake 0.
@@ -27,7 +27,7 @@
   삭제/반전 시 반드시 RED여야 하는 코드: dequeue revision check · active-turn finally · authorizeMutation manual 분기 · settle-before-persist 순서 · progress attemptId dedup · blocker distinct-attempt · cooldown revision reset · fire-time quiescence 검사 · attach wake cancel 순서. 각 mutant를 `tools/dev/`의 기존 mutation 스크립트(있으면) 또는 수동 1회 적용→RED 확인→revert로 receipt 남김.
 - `tests/integration/goal-web-submit-daemon-e2e.test.ts`, `goal-attach-daemon-e2e.test.ts`(GOAL-07/08) — 배터리에 포함.
 - `tests/integration/objective-verifier-real-command-e2e.test.ts`(GOAL-03).
-- 컴파일 바이너리 parity: `bun run install:cli` 후 `~/.local/bin/quanta`로 PTY 2·3·7 재실행(자산/`git` PATH).
+- 컴파일 바이너리 parity: `bun run build` 후 `QUANTA_E2E_CLI_BIN=$PWD/dist/agent`로 동일 PTY 배터리 재실행. 전역 CLI는 덮어쓰지 않는다.
 
 ### catalog
 - `tools/feature-catalog/features/09-integration/objective-goal-continuation-live.yaml` — 실제 증거 기준으로 재작성: `Modes`는 PTY 통과 = `interactive`, web E2E 통과 = `+ide`(web-daemon), headless는 증거 없으면 제외.
@@ -62,9 +62,9 @@ git diff --cached --check
 각 명령의 요약 줄 + 최종 `git rev-parse HEAD`를 receipt로 남긴다. 하나라도 미실행이면 "완료" 보고 금지.
 
 ## Exit
-- 보고 문구: "CLI+web 행위 GREEN(배터리 N/N), default OFF, live 측정/promotion 미완료". `QUANTA_GOAL` default ON 전환은 smoke 배터리 결과 후 별도 결정.
+- 보고 문구: "CLI+web 행위 GREEN(배터리 N/N), default ON, 명시적 `QUANTA_GOAL=0` opt-out GREEN". 실제 자동 실행은 사용자가 `/goal`로 goal을 만든 뒤에만 가능하다.
 
 ## 실행 결과 (2026-08-26)
 - 구현 및 검증 receipt: [`../GOAL-10-RECEIPT.md`](../GOAL-10-RECEIPT.md)
-- 판정: CLI+web 행위 GREEN, `QUANTA_GOAL` default OFF 유지.
-- 미완료 경계: production live 측정과 default-ON promotion. 이 둘은 구현 완료로 간주하지 않는다.
+- 판정: 사용자의 명시적 promotion 결정에 따라 `QUANTA_GOAL` default ON. 내부 gate 명시값은 그대로 우선한다.
+- 미완료 경계: production live 효용/비용 측정은 운영 관측 과제이며 안전 rail 완료와 분리한다.

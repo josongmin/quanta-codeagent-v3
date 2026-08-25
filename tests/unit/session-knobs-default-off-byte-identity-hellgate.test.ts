@@ -51,9 +51,7 @@ const STRICT_ONE_KNOBS: ReadonlyArray<{
   { env: "QUANTA_IMAGE_GEN", read: (c) => c.imageGen },
   { env: "QUANTA_OFFICE_AUTHORING", read: (c) => c.officeAuthoring },
   { env: "QUANTA_REASONING_CARRYOVER", read: (c) => c.reasoningCarryover },
-  { env: "QUANTA_GOAL_ENFORCE", read: (c) => c.goalContinuationEnforce },
   { env: "QUANTA_MIGRATE_CONFIG", read: (c) => c.migrateConfig },
-  { env: "QUANTA_OBJECTIVE_BUDGET_ENFORCE", read: (c) => c.objectiveBudgetEnforce },
   { env: "QUANTA_AUTO_DREAM", read: (c) => c.autoDream },
   { env: "QUANTA_TEAM_DAG", read: (c) => c.teamDag },
   { env: "QUANTA_TEAM_BROKER", read: (c) => c.teamBroker },
@@ -107,6 +105,9 @@ const ENABLING_VALUES = ["1", "on", "true", "yes", "TRUE", "ON", "Yes", " 1 ", "
  *  ambient shell can't pre-enable a gate (and restore after). */
 const ALL_KNOBS = [
   ...STRICT_ONE_KNOBS.map((k) => k.env),
+  "QUANTA_GOAL",
+  "QUANTA_GOAL_ENFORCE",
+  "QUANTA_OBJECTIVE_BUDGET_ENFORCE",
   "QUANTA_SESSION_TRANSCRIPT_MAX_BYTES",
   "QUANTA_BRIEF",
 ] as const
@@ -142,6 +143,24 @@ describe("session-knobs default-OFF — canonical gate parse (no accidental-enab
     }
     // LOUD: name every gate that is unexpectedly ON at the bare default.
     expect(on).toEqual([])
+  })
+
+  test("promoted goal overrides use canonical tokens and preserve public opt-out", () => {
+    for (const bad of NON_ENABLING_VALUES) {
+      process.env.QUANTA_GOAL_ENFORCE = bad
+      process.env.QUANTA_OBJECTIVE_BUDGET_ENFORCE = bad
+      __resetRuntimeConfig()
+      const config = runtimeConfig()
+      expect(config.goalContinuationEnforce).toBe(false)
+      expect(config.objectiveBudgetEnforce).toBe(false)
+    }
+    delete process.env.QUANTA_GOAL_ENFORCE
+    delete process.env.QUANTA_OBJECTIVE_BUDGET_ENFORCE
+    process.env.QUANTA_GOAL = "0"
+    __resetRuntimeConfig()
+    const optedOut = runtimeConfig()
+    expect(optedOut.goalContinuationEnforce).toBe(false)
+    expect(optedOut.objectiveBudgetEnforce).toBe(false)
   })
 
   test("each opt-in knob stays false for EVERY falsy/garbage value", () => {

@@ -53,7 +53,7 @@ describe("ALBB-07 claim 3 — objectiveBudgetExhausted advisory fail-closed", ()
   })
 
   test("enforce OFF ⇒ short-circuits to false BEFORE touching the store (byte-identical)", () => {
-    delete process.env.QUANTA_OBJECTIVE_BUDGET_ENFORCE
+    process.env.QUANTA_OBJECTIVE_BUDGET_ENFORCE = "0"
     __resetRuntimeConfig()
     // Store would throw if consulted; the enforce-OFF guard returns false first.
     expect(objectiveBudgetExhausted(cfgWith(throwingObjective()), THREAD)).toBe(false)

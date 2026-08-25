@@ -4,7 +4,7 @@ import { defaultDelegationRunner } from "@/agent/delegation-runner"
 import { defaultFocusChainTracker, type FocusChainPort } from "@/agent/focus-chain"
 import type { ForkSessionPort } from "@/agent/fork-session"
 import { defaultCheckpointBaseWire } from "@/agent/fork-session-wire"
-import { defaultIdentityProvider, identityForToken } from "@/agent/identity"
+import { defaultIdentityProvider } from "@/agent/identity"
 import {
   fsBackedStickyModelStore,
   inMemoryStickyModelStore,
@@ -46,7 +46,7 @@ import {
   selectEnvironment,
 } from "@/runtime"
 import { type AutomationEngineSlot, assembleAutomation } from "@/scheduler/runtime-wire"
-import { gateOn, logger } from "@/shared"
+import { logger } from "@/shared"
 import type { AgentEvent, StreamPort } from "@/stream"
 import { installCommandHooksIntoBase } from "./agent-arg-builder/command-hooks-wire"
 import {
@@ -58,6 +58,7 @@ import {
   resolveFileHistorySlice,
   resolvePermissionPatternSlice,
 } from "./agent-arg-builder/gated-tool-ports"
+import { resolveIdentityFromEnv } from "./agent-arg-builder/identity-wire"
 import { resolveObservabilitySlots } from "./agent-arg-builder/observability-wire"
 import { resolvePermissionProfileWiring } from "./agent-arg-builder/permission-profile"
 import {
@@ -107,12 +108,6 @@ export class ProviderKeyMissingError extends Error {
     super(message)
     this.name = "ProviderKeyMissingError"
   }
-}
-
-const resolveIdentityFromEnv = (env: NodeJS.ProcessEnv): readonly string[] | undefined => {
-  if (!gateOn(env, "QUANTA_IDENTITY")) return undefined
-  const raw = env.QUANTA_IDENTITY_MODE ?? "default"
-  return identityForToken(raw)
 }
 
 /** ADR-0196 — pick the MCP capability negotiator from env. `QUANTA_MCP_CAPS=full`

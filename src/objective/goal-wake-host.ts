@@ -10,16 +10,17 @@
  * `@/objective` (`runIdleContinuation`); they were just never driven by a
  * real host lifecycle. This module is that edge-triggered driver.
  *
- * DEFAULT-OFF (byte-identical): `enabled: false` (or a missing `threadId`) makes
- * {@link startGoalWakeController} a no-op returning `undefined` — no timer
- * is armed, so a session that has not opted into `QUANTA_GOAL_ENFORCE` behaves
- * exactly as before.
+ * The composition roots enable this by default; `QUANTA_GOAL=0` is the public
+ * opt-out. `enabled: false`, a missing thread id, or a thread without an active
+ * objective makes {@link startGoalWakeController} inert, so default-on does not
+ * create autonomous work before the operator creates a goal.
  *
  * SLICE FENCE: imports ONLY the closed `@/objective` barrel
  * (`runIdleContinuation`, `ContinuationSemaphore`, and the `ContinuationDeps`
  * probe/`resume` shape). No `@/agent` core, no reactor internals.
  */
 
+import type { SystemObjectiveCommands } from "./capabilities"
 import { type ContinuationDeps, ContinuationSemaphore, runIdleContinuation } from "./continuation"
 import { createGoalWakeController, type GoalWakeAttempt } from "./goal-wake-controller"
 import {
@@ -29,7 +30,6 @@ import {
   type GoalWakeSettlementHint,
 } from "./goal-wake-policy"
 import type { ObjectiveDomainSnapshot } from "./model"
-import type { ObjectiveAuthority } from "./ports"
 
 /** The host-bound probes + resume sink (everything in `ContinuationDeps` except
  *  the pieces this driver owns: `enabled`, `semaphore`, `now`). */
@@ -56,8 +56,8 @@ export interface StartGoalWakeOpts {
   readonly probes: GoalContinuationProbes
   /** Revisioned projection from the same authority `/goal` mutates. */
   readonly readDomain: (threadId: string) => ObjectiveDomainSnapshot
-  /** Same authority as readDomain, used only to install the product default turn cap. */
-  readonly authority?: ObjectiveAuthority | undefined
+  /** Actor-fixed system capability used only to install the product default turn cap. */
+  readonly system?: SystemObjectiveCommands | undefined
   /** Goal-specific quiescence duration, independent of UI presence handling. */
   readonly quietWindowMs: number
   readonly policy?: GoalWakePolicy | undefined
@@ -92,28 +92,21 @@ export const startGoalWakeController = (opts: StartGoalWakeOpts): GoalWakeLifecy
     ...DEFAULT_GOAL_WAKE_POLICY,
     minQuietMs: opts.quietWindowMs,
   }
-  const authority = opts.authority
+  const system = opts.system
   const ensureDefaultTurnCap = (): void => {
-    if (authority === undefined) return
-    const domain = authority.readDomain(threadId)
+    if (system === undefined) return
+    const domain = opts.readDomain(threadId)
     const objective = domain.state?.objective
     if (objective === undefined || objective.budget.maxTurns !== undefined) return
-    authority.commit(
-      authority.prepare({
-        threadId,
-        actor: "system",
-        mutation: {
-          kind: "amendBudget",
-          budget: {
-            maxTurns: policy.maxAutonomousTurns,
-            ...(objective.budget.maxTokens !== undefined
-              ? { maxTokens: objective.budget.maxTokens }
-              : {}),
-          },
-        },
-      }),
-      { admitted: true },
-    )
+    system.commit(threadId, {
+      kind: "amendBudget",
+      budget: {
+        maxTurns: policy.maxAutonomousTurns,
+        ...(objective.budget.maxTokens !== undefined
+          ? { maxTokens: objective.budget.maxTokens }
+          : {}),
+      },
+    })
   }
   ensureDefaultTurnCap()
   const continuationDeps: ContinuationDeps = {

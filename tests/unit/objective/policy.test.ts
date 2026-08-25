@@ -234,12 +234,22 @@ describe("GOAL-02 — definition ownership and terminal state", () => {
     expect(reason(run(auth, "user", { kind: "setExplicitStatus", status: "paused" }))).toBe("ok")
   })
 
-  test("model may add a blocker and set next actions (pre-GOAL-09), never clear a committed blocker", () => {
+  test("model blocker observations require three attributed attempts and can never clear the committed blocker", () => {
     const auth = authority()
     seed(auth)
-    expect(reason(run(auth, "model", { kind: "addBlocker", reason: "r", waitingOn: "user" }))).toBe(
-      "ok",
-    )
+    for (const attemptId of ["a1", "a2", "a3"]) {
+      expect(
+        reason(
+          run(auth, "model", {
+            kind: "addBlocker",
+            reason: "r",
+            waitingOn: "user",
+            attemptId,
+            target: { kind: "user-input", ref: "operator" },
+          }),
+        ),
+      ).toBe("ok")
+    }
     const bid = auth.get("t")?.blockers[0]?.id ?? ""
     expect(reason(run(auth, "model", { kind: "clearBlocker", blockerId: bid }))).toBe(
       "actor-forbidden",

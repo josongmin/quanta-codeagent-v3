@@ -25,16 +25,16 @@ const names = (): string[] =>
   ].map((command) => command.name)
 
 describe("QUANTA_GOAL public gate", () => {
-  test("off removes both commands from discovery", () => {
+  test("unset exposes /goal and its deprecated /objective alias by default", () => {
     withGoalEnv(undefined, () => {
-      expect(names()).not.toContain("/goal")
-      expect(names()).not.toContain("/objective")
-    })
-  })
-  test("on exposes /goal and its deprecated /objective alias", () => {
-    withGoalEnv("1", () => {
       expect(names()).toContain("/goal")
       expect(names()).toContain("/objective")
+    })
+  })
+  test("explicit off removes both commands from discovery", () => {
+    withGoalEnv("0", () => {
+      expect(names()).not.toContain("/goal")
+      expect(names()).not.toContain("/objective")
     })
   })
   test("preset seeds only unset internal gates", () => {

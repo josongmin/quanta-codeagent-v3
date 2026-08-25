@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import {
   asObjectiveAuthority,
+  createObjectiveCapabilities,
   createObjectiveStore,
   type GoalContinuationProbes,
   type ObjectiveDomainSnapshot,
@@ -76,7 +77,7 @@ describe("goal wake host binding", () => {
       policy: { minQuietMs: 10, maxBackoffMs: 100, maxAutonomousTurns: 3, cooldownMs: 50 },
       probes: probes(store, async () => undefined),
       readDomain: (id) => authority.readDomain(id),
-      authority,
+      system: createObjectiveCapabilities(authority).system,
       setTimeoutFn: fakeTimeout().set,
     })
     expect(store.get(TID)?.budget.maxTurns).toBe(3)
@@ -89,7 +90,7 @@ describe("goal wake host binding", () => {
       policy: { minQuietMs: 10, maxBackoffMs: 100, maxAutonomousTurns: 3, cooldownMs: 50 },
       probes: probes(store, async () => undefined),
       readDomain: (id) => authority.readDomain(id),
-      authority,
+      system: createObjectiveCapabilities(authority).system,
       setTimeoutFn: fakeTimeout().set,
     })
     expect(store.get("explicit")?.budget.maxTurns).toBe(5)

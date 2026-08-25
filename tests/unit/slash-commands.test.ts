@@ -106,6 +106,7 @@ describe("BUILTINS table", () => {
       // the unit env leaves the knob unset ⇒ registered between /background and
       // /fork-checkpoint (its slot in buildSurfaceSlashCommands).
       "/init",
+      "/objective",
       "/fork-checkpoint",
       "/queue",
       "/web",
@@ -155,6 +156,7 @@ describe("BUILTINS table", () => {
       "/hooks",
       // `/goal` (autonomous goal-pursuit) is the session-layer tail
       // (registry-session.ts, after /hooks) — see goal-cmd.ts.
+      "/goal",
       // §9.6 — `/presets` opusplan-style sticky model-preset selector, the
       // session-layer tail after /goal (registry-session.ts) — see
       // slash/presets-cmd.ts. First consumer of the model-preset slice.

@@ -613,9 +613,9 @@ describe("aug-22 red-on-injection — one gate OFF ⇒ its live-marker RED (gate
  *  C. DEFAULT-OFF BYTE-IDENTITY — no campaign gate ⇒ every slot/command omitted.
  * ========================================================================== */
 
-describe("aug-22 default-OFF — all gates unset ⇒ every campaign slot + command omitted (byte-identical)", () => {
-  test("no gates ⇒ command table lacks /attention /objective /posture /skill", async () => {
-    await withGates({}, async () => {
+describe("aug-22 opt-outs — campaign slots and commands can still be omitted", () => {
+  test("QUANTA_GOAL=0 and other gates unset ⇒ command table lacks /attention /objective /posture /skill", async () => {
+    await withGates({ QUANTA_GOAL: "0" }, async () => {
       const names = commandNames()
       expect(names).not.toContain("/attention")
       expect(names).not.toContain("/objective")
@@ -624,8 +624,8 @@ describe("aug-22 default-OFF — all gates unset ⇒ every campaign slot + comma
     })
   })
 
-  test("no gates ⇒ composed surface omits every campaign slot", async () => {
-    await withGates({}, async (env) => {
+  test("QUANTA_GOAL=0 and other gates unset ⇒ composed surface omits every campaign slot", async () => {
+    await withGates({ QUANTA_GOAL: "0" }, async (env) => {
       const skills = await freshSkillAuthority()
       const { bundle, wires } = await composeAllOn(skills)
       expect(bundle.questionBroker).toBeUndefined()

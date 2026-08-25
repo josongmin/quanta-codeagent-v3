@@ -1,9 +1,10 @@
 import type { ActiveTurnRefHolder } from "@/agent/conversation-action-surface"
 import {
-  asObjectiveAuthority,
   buildPursuitContinuationPrompt,
+  createObjectiveCapabilities,
   DEFAULT_GOAL_WAKE_POLICY,
   type ObjectivePort,
+  type ObjectiveReadPort,
   startGoalWakeController,
 } from "@/objective"
 import type { SessionEvent, SessionSnapshotLite } from "@/protocol/session"
@@ -40,11 +41,11 @@ const projectSessionEvent = (view: LiveSessionView, event: SessionEvent): boolea
   return isTerminal(event)
 }
 
-const pursuitPrompt = (authority: ObjectivePort, threadId: string): string => {
-  const domain = asObjectiveAuthority(authority).readDomain(threadId)
+const pursuitPrompt = (read: ObjectiveReadPort, threadId: string): string => {
+  const domain = read.readDomain(threadId)
   const criteria = domain.state?.objective.successCriteria ?? []
   const last = domain.progressReceipts?.at(-1)
-  return buildPursuitContinuationPrompt(authority.get(threadId)?.goal, {
+  return buildPursuitContinuationPrompt(read.get(threadId)?.goal, {
     verifiedCriterionIds: criteria
       .filter(
         (criterion) =>
@@ -88,17 +89,18 @@ export const composeWebGoalWake = async (args: {
   if (!config.goalContinuationEnforce || authorityPort === undefined || submit === undefined) {
     return undefined
   }
-  const authority = asObjectiveAuthority(authorityPort)
+  const capabilities = createObjectiveCapabilities(authorityPort)
+  const { read, system } = capabilities
   const threadId = args.session.sessionId
   const view: LiveSessionView = { snapshot: await args.session.snapshot(), attaching: false }
-  let observedObjectiveRevision = authority.readDomain(threadId).revision
+  let observedObjectiveRevision = read.readDomain(threadId).revision
   let stopped = false
   let terminalPending = false
 
   const wake = startGoalWakeController({
     enabled: true,
     threadId,
-    authority,
+    system,
     quietWindowMs: config.goalQuietMs,
     policy: {
       ...DEFAULT_GOAL_WAKE_POLICY,
@@ -106,21 +108,21 @@ export const composeWebGoalWake = async (args: {
       maxBackoffMs: config.goalMaxBackoffMs,
       maxAutonomousTurns: config.goalMaxAutonomousTurns,
     },
-    readDomain: (id) => authority.readDomain(id),
+    readDomain: (id) => read.readDomain(id),
     isQuiescent: () => quiescent(view, args.runtime.activeTurnRef),
     ...(args.setTimeoutFn !== undefined ? { setTimeoutFn: args.setTimeoutFn } : {}),
     ...(args.clearTimeoutFn !== undefined ? { clearTimeoutFn: args.clearTimeoutFn } : {}),
     resumeAttempt: async (id, attempt) => {
       const sessionSnapshot = await args.session.snapshot()
-      const domain = authority.readDomain(id)
+      const domain = read.readDomain(id)
       const expectedAttachGeneration = domain.attachGeneration ?? 0
       await submit.call(args.session.turn, {
-        text: pursuitPrompt(authorityPort, id),
+        text: pursuitPrompt(read, id),
         expectedSessionRevision: sessionSnapshot.revision,
         objectiveId: attempt.objectiveId,
         objectiveRevision: attempt.objectiveRevision,
         validateCurrent: () => {
-          const current = authority.readDomain(id)
+          const current = read.readDomain(id)
           return (
             current.state?.objective.status === "active" &&
             current.state.objective.objectiveId === attempt.objectiveId &&
@@ -154,7 +156,7 @@ export const composeWebGoalWake = async (args: {
       terminalPending = true
       return
     }
-    const currentRevision = authority.readDomain(threadId).revision
+    const currentRevision = read.readDomain(threadId).revision
     if (currentRevision !== observedObjectiveRevision) {
       observedObjectiveRevision = currentRevision
       wake.onGoalMutation()
@@ -170,7 +172,7 @@ export const composeWebGoalWake = async (args: {
 
   const onAttachSettled = (): void => {
     view.attaching = false
-    observedObjectiveRevision = authority.readDomain(threadId).revision
+    observedObjectiveRevision = read.readDomain(threadId).revision
     wake.onAttach(threadId)
   }
   return {

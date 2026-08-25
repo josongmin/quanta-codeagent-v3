@@ -62,7 +62,7 @@ const fakeSession = (submit: NonNullable<RuntimeSession["turn"]["submitGoalConti
 }
 
 describe("web goal wake composition", () => {
-  test("default OFF installs no controller or subscription", async () => {
+  test("QUANTA_GOAL=0 installs no controller or subscription", async () => {
     const store = createObjectiveStore()
     store.create("web-goal", { goal: "ship" })
     const fake = fakeSession(async () => ({ revision: 0, seq: 0, events: [] }))
@@ -70,7 +70,7 @@ describe("web goal wake composition", () => {
       await composeWebGoalWake({
         session: fake.session,
         runtime: { objectiveAuthority: store },
-        env: {},
+        env: { QUANTA_GOAL: "0" },
       }),
     ).toBeUndefined()
     expect(fake.unsubscribed()).toBe(0)

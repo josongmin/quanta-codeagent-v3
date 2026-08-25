@@ -72,21 +72,11 @@
  *      reproducible across machines and matches typical billing windows.
  */
 
-import { MODEL_RATE_CARD, type ModelPrice } from "@/observability/pricing"
+import { DEFAULT_MODEL_PRICING, type ModelPricing } from "./budget-ledger-pricing"
+
+export { DEFAULT_MODEL_PRICING, type ModelPricing } from "./budget-ledger-pricing"
 
 const COMPACT_PREFIX_THRESHOLD = 1024
-
-/** Per-model pricing. All values in USD per 1 million tokens. */
-export interface ModelPricing {
-  /** Standard input tokens (per 1M). */
-  readonly inputPerM: number
-  /** Standard output tokens (per 1M). */
-  readonly outputPerM: number
-  /** Cached input tokens (Anthropic prompt caching read). Usually << inputPerM. */
-  readonly cacheReadPerM?: number
-  /** Cache-creation input tokens (one-time write). Usually slightly > inputPerM. */
-  readonly cacheWritePerM?: number
-}
 
 /** A single LLM completion's usage event. Caller forwards these from the
  *  stream's `usage` field as soon as the completion settles. */
@@ -213,35 +203,6 @@ export interface BudgetLedgerOpts {
    *  Tests pin it to assert deterministic day boundaries. Default `Date.now`. */
   readonly now?: () => number
 }
-
-/**
- * The ledger's per-model rate table, DERIVED from the pricing SSOT
- * (`@/observability` `MODEL_RATE_CARD`) so there is exactly ONE place model
- * prices live. The SSOT's `{inPerM,outPerM,cacheReadPerM,cacheWritePerM?}` maps
- * onto the ledger's `{inputPerM,outputPerM,cacheReadPerM?,cacheWritePerM?}`.
- * This fixed a real drift: the ledger previously hard-coded `gpt-5` at the stale
- * $10/$30 launch price (SSOT: $1.25/$10) and OMITTED the bench's primary models
- * `gpt-5.4`/`gpt-5.5`, so a wired ledger silently billed them at the sonnet
- * fallback. Null-prototype preserved so an unknown `model` key reads `undefined`.
- */
-const deriveLedgerPricing = (
-  card: Readonly<Record<string, ModelPrice>>,
-): Record<string, ModelPricing> => {
-  const out: Record<string, ModelPricing> = Object.create(null)
-  for (const [model, r] of Object.entries(card)) {
-    out[model] = {
-      inputPerM: r.inPerM,
-      outputPerM: r.outPerM,
-      cacheReadPerM: r.cacheReadPerM,
-      ...(r.cacheWritePerM !== undefined ? { cacheWritePerM: r.cacheWritePerM } : {}),
-    }
-  }
-  return out
-}
-
-export const DEFAULT_MODEL_PRICING: Readonly<Record<string, ModelPricing>> = Object.freeze(
-  deriveLedgerPricing(MODEL_RATE_CARD),
-)
 
 /** Pricing used when an event references an unknown model. Picked deliberately:
  *  sonnet is the safe middle ground (not the cheapest haiku that would under-

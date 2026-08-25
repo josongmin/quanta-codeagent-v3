@@ -82,20 +82,13 @@ describe.skipIf(!PTY_AVAILABLE)("CLI /goal (Pursuing goal) e2e (PTY)", () => {
   })
 
   const boot = async (): Promise<PtyCli> => {
-    // aug-23: `/goal` is gated behind QUANTA_OBJECTIVE_TOOLS as of 8a0dadfd5
-    // ("gate CLI + web-daemon objective authority"). The surface builder now
-    // leaves the objective store undefined without it, so the command prints
-    // its not-wired posture. This suite asserts the WIRED behaviour, so it must
-    // opt in — the harness passes a whitelisted env, so an ambient export does
-    // not reach the child. NOTE this suite is exactly what caught that
-    // regression: the unit hellgates stayed 14/14 green through it.
+    // The harness passes a whitelisted env, so omitting QUANTA_GOAL here proves
+    // the shipped default-ON root rather than inheriting an ambient export.
     const c = drivePtyCli({
       ...(cliCommand === undefined ? {} : { command: cliCommand }),
       cwd,
       env: {
         QUANTA_SESSIONS_DIR: sessionsDir,
-        QUANTA_GOAL: "1",
-        QUANTA_OBJECTIVE_TOOLS: "1",
       },
     })
     cli = c
@@ -112,7 +105,7 @@ describe.skipIf(!PTY_AVAILABLE)("CLI /goal (Pursuing goal) e2e (PTY)", () => {
     readonly cassette: string
     readonly idleMs: number
     readonly replayDelayMs?: number
-    /** Explicitly exercise the shipped default-OFF path with the same replay
+    /** Explicitly exercise the shipped opt-out path with the same replay
      * harness; absence must leave the continuation queue untouched. */
     readonly goalEnforce?: boolean
     readonly idleSuppress?: boolean
@@ -125,8 +118,7 @@ describe.skipIf(!PTY_AVAILABLE)("CLI /goal (Pursuing goal) e2e (PTY)", () => {
       cwd,
       env: {
         QUANTA_SESSIONS_DIR: sessionsDir,
-        QUANTA_OBJECTIVE_TOOLS: "1",
-        ...(args.goalEnforce === false ? {} : { QUANTA_GOAL: "1", QUANTA_GOAL_ENFORCE: "1" }),
+        ...(args.goalEnforce === false ? { QUANTA_GOAL: "0" } : {}),
         QUANTA_IDLE_MS: String(args.idleMs),
         QUANTA_GOAL_QUIET_MS: String(args.idleMs),
         ...(args.idleSuppress === false ? { QUANTA_IDLE_SUPPRESS: "0" } : {}),
@@ -204,7 +196,7 @@ describe.skipIf(!PTY_AVAILABLE)("CLI /goal (Pursuing goal) e2e (PTY)", () => {
   )
 
   test(
-    "QUANTA_GOAL default-OFF leaves /goal unregistered and the continuation queue untouched",
+    "QUANTA_GOAL=0 explicitly unregisters /goal and leaves the continuation queue untouched",
     async () => {
       const c = await bootWithGoalContinuation({
         cassette: `${replayEntry("MUST_NOT_RUN_WHEN_GOAL_ENFORCE_IS_OFF")}\n`,

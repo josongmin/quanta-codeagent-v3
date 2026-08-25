@@ -636,15 +636,19 @@ describe("objective tools — NO-THROW + output shape (ADR-0402)", () => {
 
   test("foreign port without observation provenance fails closed without bubbling", async () => {
     const tools = toolsOver(throwingPort())
-    const out = await drain(findTool(tools, "objective_update"), {
-      thread_id: "t",
-      op: {
-        kind: "addBlocker",
-        reason: "x",
-        waiting_on: "tool",
-        dependency_target: { kind: "tool", ref: "remote" },
+    const out = await drain(
+      findTool(tools, "objective_update"),
+      {
+        thread_id: "t",
+        op: {
+          kind: "addBlocker",
+          reason: "x",
+          waiting_on: "tool",
+          dependency_target: { kind: "tool", ref: "remote" },
+        },
       },
-    }, { ...ctx(), toolCallId: "call-1" })
+      { ...ctx(), toolCallId: "call-1" },
+    )
     expect(out.ok).toBe(false)
     expect(out.output.toLowerCase()).toContain("error")
   })

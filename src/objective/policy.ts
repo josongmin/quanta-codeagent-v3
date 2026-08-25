@@ -186,7 +186,12 @@ export const validationContractOf = (o: Pick<Objective, "successCriteria">): Val
 // ─────────────────────────────────────────────────────────────────────────────
 
 /** Derived states an explicit `active` may not override. */
-const NON_RESUMABLE = new Set<Objective["status"]>(["blocked", "budget_limited", "usage_limited"])
+const NON_RESUMABLE = new Set<Objective["status"]>([
+  "blocked",
+  "budget_limited",
+  "usage_limited",
+  "completed",
+])
 
 const BLOCKER_TARGET_KINDS: ReadonlySet<string> = new Set([
   "approval",

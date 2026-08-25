@@ -9,6 +9,7 @@ import {
 import type { ConversationCheckpointStore } from "@/agent/conversation-checkpoint"
 import { createClassifierBackedAutoReview } from "@/agent/reviewer-port"
 import type { SessionBootstrapResult } from "@/host/bootstrap"
+import { type AssemblerEnv, buildInteractiveTurnAssembler } from "@/host/runtime"
 import type { MentionLiveSources } from "@/host/runtime/internal/mention-source-deps"
 import { wireSecurityRailsForOverlay } from "@/host/runtime/security-rails-wire"
 import type { ResponsesContinuationStore } from "@/llm"
@@ -374,6 +375,59 @@ const hydrateTrustScope = async (
   return { registry, projectKey: cwd }
 }
 
+const wireCliAutoReview = (
+  boot: SessionBootstrapResult,
+  turnStream: StreamPort,
+  onConfirm: (action: ToolAction) => Promise<boolean | ConfirmDecision>,
+) => {
+  if (ladderAutoReviewEnabled()) {
+    setAutoApprovalReviewObserver({
+      observe: (event) => {
+        const who = event.reviewer === "guardian_subagent" ? "guardian" : "auto-review"
+        const what =
+          event.phase === "started"
+            ? "reviewing…"
+            : event.allowed
+              ? "approved (no prompt)"
+              : "denied"
+        turnStream.emit({
+          type: "tool_progress",
+          id: event.toolCallId ?? "",
+          name: event.tool,
+          message: `auto-reviewed by ${who}: ${what}`,
+        })
+      },
+    })
+  }
+  if (boot.permission.classify === undefined) return undefined
+  const userPort = createOnConfirmReviewerPort({ onConfirm })
+  return createClassifierBackedAutoReview({
+    classify: boot.permission.classify,
+    userReview: userPort.userReview,
+  })
+}
+
+const loadNamedAgentResolver = async (cwd: string) => {
+  const namedAgents = await loadNamedAgents(cwd).catch(() => undefined)
+  return namedAgents !== undefined && namedAgents.size > 0 ? namedAgents : undefined
+}
+
+const optionalRuntimeExecution = (
+  args: ComposeCliRuntimeContextArgs,
+  boot: SessionBootstrapResult,
+) => {
+  if (args.convStore === undefined && args.responsesStore === undefined) return {}
+  return {
+    execution: {
+      history: boot.history,
+      cwd: boot.cwd,
+      envSource: args.envSource ?? process.env,
+      ...(args.convStore !== undefined ? { convStore: args.convStore } : {}),
+      ...(args.responsesStore !== undefined ? { responsesStore: args.responsesStore } : {}),
+    },
+  }
+}
+
 export const composeCliRuntimeContext = async (
   args: ComposeCliRuntimeContextArgs,
 ): Promise<CliRuntimeContextBindings> => {
@@ -393,35 +447,13 @@ export const composeCliRuntimeContext = async (
   }
   const onConfirm = async (action: ToolAction): Promise<boolean | ConfirmDecision> =>
     await confirmSlot.current(action)
-  const autoReviewUserPort = createOnConfirmReviewerPort({ onConfirm })
-  const autoReview =
-    boot.permission.classify !== undefined
-      ? createClassifierBackedAutoReview({
-          classify: boot.permission.classify,
-          userReview: autoReviewUserPort.userReview,
-        })
-      : undefined
+  const autoReview = wireCliAutoReview(boot, turnStream, onConfirm)
   // T03 — when the agent reviewer is the chosen posture, surface each auto-review
   // as a `tool_progress` notice (keyed by the reviewed tool-call id) so the CLI
   // timeline + web card show "auto-reviewed by guardian: …" rather than the tool
   // silently running. Registered ONLY under the opt-in ⇒ default-OFF byte-identical
   // (no observer ⇒ the reviewer slice's emit is a no-op). The notice is best-effort:
   // `decisionEmitterFromStream`-style throw isolation lives in the sink itself.
-  if (ladderAutoReviewEnabled()) {
-    setAutoApprovalReviewObserver({
-      observe: (ev) => {
-        const who = ev.reviewer === "guardian_subagent" ? "guardian" : "auto-review"
-        const what =
-          ev.phase === "started" ? "reviewing…" : ev.allowed ? "approved (no prompt)" : "denied"
-        turnStream.emit({
-          type: "tool_progress",
-          id: ev.toolCallId ?? "",
-          name: ev.tool,
-          message: `auto-reviewed by ${who}: ${what}`,
-        })
-      },
-    })
-  }
   const permissionStore = await loadPermissionStore()
   // SECURITY RAILS — wire the write-budget + sandbox-escalation anti-exfil rails
   // onto this overlay path (see {@link wireSecurityOverlay}). Both knobs off ⇒
@@ -451,9 +483,7 @@ export const composeCliRuntimeContext = async (
   // named-agent resolution the headless `apps/agent` surface has. FAIL-OPEN +
   // default-OFF: a thrown loader ⇒ `undefined`; an empty registry (no agent dir)
   // ⇒ slot stays absent ⇒ no resolver set ⇒ byte-identical to today.
-  const namedAgents = await loadNamedAgents(boot.cwd).catch(() => undefined)
-  const namedAgentResolver =
-    namedAgents !== undefined && namedAgents.size > 0 ? namedAgents : undefined
+  const namedAgentResolver = await loadNamedAgentResolver(boot.cwd)
   // RFC-12-2 WIRING — build the host-only mention sources for `@mcp:` / `@thread:`
   // from the CLI's already-live MCP surface + session index (see
   // {@link buildMentionOwnerSources}). `@subagent:` rides `namedAgentResolver`.
@@ -465,6 +495,13 @@ export const composeCliRuntimeContext = async (
   // the edit-fence keeps absolute writes within — the slot NEVER widens it.
   const activeWorktreeSlot = mintActiveWorktreeSlot(args.envSource ?? process.env, boot.cwd)
   const runtimeContext = await composeRuntimeBootstrapContext({
+    // Use the same per-turn assembly authority as the web daemon. Besides
+    // preventing capability drift, this mints the measured BudgetMeter required
+    // before a default-ON autonomous goal attempt may reserve paid work.
+    turnAssembler: buildInteractiveTurnAssembler(
+      {},
+      (args.envSource ?? process.env) as AssemblerEnv,
+    ),
     ...buildBootstrapContextArgs({
       boot,
       turnStream,
@@ -484,17 +521,7 @@ export const composeCliRuntimeContext = async (
       ...(trustScope !== undefined ? { trustScope } : {}), // #20 durable
       ...securityOverlaySlots(securityRails),
     }),
-    ...(args.convStore !== undefined || args.responsesStore !== undefined
-      ? {
-          execution: {
-            history: boot.history,
-            cwd: boot.cwd,
-            envSource: args.envSource ?? process.env,
-            ...(args.convStore !== undefined ? { convStore: args.convStore } : {}),
-            ...(args.responsesStore !== undefined ? { responsesStore: args.responsesStore } : {}),
-          },
-        }
-      : {}),
+    ...optionalRuntimeExecution(args, boot),
     memoryAuto: {
       env: args.envSource ?? process.env,
       logWarn: (msg: string) => process.stderr.write(`[memory-auto] ${msg}\n`),
