@@ -89,7 +89,7 @@ evidence:
     - src/apps/cli/repl/session-loop/interactive-loop.ts
     - src/apps/cli/repl/session-loop/bootstrap.ts
     - src/apps/cli/repl/external-prompt-queue.ts
-    - src/apps/cli/repl/objective-progress.ts
+    - src/host/runtime/internal/context-binding/objective-settlement.ts
     - src/apps/cli/repl/goal-wake-signal.ts
     - src/apps/cli/repl/prompt-pipeline.ts
     - src/apps/cli/raw-line-reader/machine.ts
@@ -110,7 +110,7 @@ evidence:
       - tests/unit/apps/cli/t06-external-prompt-queue-hellgate.test.ts
       - tests/unit/agent/loop-throw-dispose-hellgate.test.ts
       - tests/unit/agent/objective-judge-observer.test.ts
-      - tests/unit/apps/cli/objective-progress.test.ts
+      - tests/unit/host/turn-runner-objective-settlement.test.ts
       - tests/unit/objective/progress-receipt.test.ts
       - tests/unit/objective/persistence-roundtrip.test.ts
     integration: []

@@ -18,7 +18,7 @@ import { recordTurnSnapshot } from "./wiring-installs"
 /** GOAL-04 — claim the host-owned attempt slot for a goal-attributed turn. The
  *  runtime takes the claim at turn start and settles it; a claim the turn never
  *  took (stale / not started) is released by the caller after the turn. */
-const claimGoalAttempt = (
+export const claimGoalAttempt = (
   slot: ObjectiveAttemptSlot | undefined,
   objectiveStore: InteractiveBranchCtx["objectiveStore"],
   prompt: ReturnType<typeof normalizeCliPromptInput>,

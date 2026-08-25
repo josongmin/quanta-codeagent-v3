@@ -9,7 +9,9 @@ import { describe, expect, test } from "bun:test"
 import { mkdtempSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import { z } from "zod"
 import { buildInteractiveTurnAssembler } from "@/host/runtime/agent-config-assembler"
+import { RuntimeApprovalRequiredError } from "@/host/runtime/internal/context-binding/approval-support"
 import {
   beginObjectiveAttempt,
   createTurnUsageAccumulator,
@@ -29,7 +31,7 @@ import {
 } from "@/objective"
 import { LLMError } from "@/shared"
 import type { AgentEvent, StreamPort } from "@/stream"
-import { ToolRegistry } from "@/tool"
+import { type Tool, ToolRegistry } from "@/tool"
 
 type Step =
   | { readonly kind: "events"; readonly events: StreamEvent[] }
@@ -246,6 +248,53 @@ describe("GOAL-04 — runRuntimeTurn attributed settlement", () => {
     expect(receipts[0]?.turnOutcome).toBe("error")
   })
 
+  test("an approval PAUSE (onConfirm throws) settles once as `awaiting_approval` and returns the approval request", async () => {
+    const mutating: Tool = {
+      name: "write_thing",
+      description: "mutates",
+      inputSchema: z.object({ path: z.string() }) as z.ZodType<unknown>,
+      isReadOnly: () => false,
+      isConcurrencySafe: () => false,
+      execute: async function* () {
+        yield { type: "result", result: { ok: true, output: "never runs" } } as never
+      },
+    }
+    const llm = new ScriptedLLM([
+      {
+        kind: "events",
+        events: [
+          { type: "tool_use_start", id: "t1", name: "write_thing" },
+          { type: "tool_use_end", id: "t1", input: { path: "a.txt" } },
+          { type: "usage", inputTokens: 5, outputTokens: 3, model: "scripted" } as never,
+          { type: "message_stop", stop_reason: "tool_use" },
+        ],
+      },
+    ])
+    const { authority, slot, run, claim } = setup({
+      llm,
+      registry: new ToolRegistry([mutating]),
+      permission: { mode: "default" },
+      onConfirm: async () => {
+        throw new RuntimeApprovalRequiredError({
+          approvalId: "ap-1",
+          reason: "write_thing needs approval",
+          requestedAt: "2026-08-26T00:00:00.000Z",
+        })
+      },
+    } as unknown as Partial<RuntimeBase>)
+    claim()
+    const result = await run()
+    expect(result.approvalRequest?.approvalId).toBe("ap-1")
+    expect(result.outcome.reason).toBe("awaiting_approval")
+    const o = authority.get("thread-1")
+    expect(o?.attempts.started).toBeUndefined()
+    expect(o?.budget.turnsUsed).toBe(1)
+    const receipts = authority.readDomain("thread-1").progressReceipts ?? []
+    expect(receipts).toHaveLength(1)
+    expect(receipts[0]?.turnOutcome).toBe("awaiting_approval")
+    expect(slot.status().kind).toBe("empty")
+  })
+
   test("terminal persistence failure AFTER settlement keeps the receipt and fail-stops the slot", async () => {
     const dir = mkdtempSync(join(tmpdir(), "goal04-persist-"))
     const notADir = join(dir, "file.txt")
@@ -298,6 +347,10 @@ describe("GOAL-04 — runRuntimeTurn attributed settlement", () => {
     expect(persisted).toBe(0)
     expect(authority.get("thread-1")?.budget.turnsUsed).toBe(0)
     expect(authority.get("thread-1")?.attempts.started).toBeUndefined()
+    // The slot is fail-stopped so a wake loop cannot spin on the same error.
+    expect(slot.status().kind).toBe("fail-stopped")
+    expect(slot.claim(attempt)).toBe(false)
+    slot.recover()
     // The explicit legacy opt-in (test adapters) still works.
     slot.claim(attempt)
     const legacy = await beginObjectiveAttempt({

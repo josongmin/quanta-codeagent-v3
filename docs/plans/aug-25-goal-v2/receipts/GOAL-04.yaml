@@ -1,0 +1,47 @@
+ticket: GOAL-04
+kind: implementation
+recordedAt: 2026-08-26T03:30:00Z
+testedSourceSha: working tree on top of bca6408fe (S = the commit this receipt is staged with)
+scope:
+  src: src/objective/attempt.ts (new: ObjectiveAttemptContext/State/Start, ObjectiveAttemptSlot claim/take/release/failStop/recover, provenance),
+       src/objective/{types,mutations,policy,authority,capabilities,index,store}.ts + core-store/{cell,completion-ops(startAttempt/clearStartedAttempt),rehydrate(rebuildAttempts),snapshot-ops,ctx}.ts (beginAttempt system-only reserve; settleAttempt must match the started attempt and never re-debits; abandonAttempt user/system; replace/clear under a started attempt = attempt-in-flight; snapshot v2 `attempts`),
+       src/objective/{progress-receipt,pursuit-prompt}.ts (closed outcome enum; attempt key removed from the prompt),
+       src/session/{types,store}.ts + src/runner/assemble/session-authorities/{restore,build-objective}.ts (attempts persisted / restored),
+       src/host/runtime/internal/context-binding/objective-settlement.ts (new: beginObjectiveAttempt / settleObjectiveAttempt / failStopAfterSettlement, SETTLEMENT_OUTCOME exhaustive Record, createTurnUsageAccumulator legacy opt-in),
+       src/host/runtime/internal/context-binding/{turn-runner(runAgentSettled, persistSettlementNow, persistTurnOrFailStop),types,base}.ts, src/host/runtime/objective-store-wire.ts (persistObjectiveSnapshotNow), src/sdk/runtime/context.ts (objectiveAttemptSlot),
+       src/apps/cli/repl/session-loop/{interactive-loop(claimGoalAttempt exported),interactive-setup,branch-context,session-loop}.ts, surface-compose/{core-state,runtime-compose}.ts; DELETED src/apps/cli/repl/objective-progress.ts (+ its test),
+       src/host/bootstrap/bootstrap-session/tooling-bundle.ts (BudgetMeter composed under QUANTA_GOAL_ENFORCE — rail 13),
+       GOAL-03 anti-regression leftovers: objective-verifier-wire.ts (GIT_EVIDENCE_TIMEOUT_MS), run-argv.ts (MAX_TIMEOUT_MS form + src-scan env allowlist), criteria/ports.ts, objective-judge-observer.ts (documented named consts)
+  tests: tests/unit/objective/attempt-lifecycle.test.ts (9), tests/unit/host/turn-runner-objective-settlement.test.ts (14), tests/unit/cli/goal-attempt-claim.test.ts (3); mutation-completeness effects for beginAttempt/abandonAttempt; 15 pre-existing Objective literals given `attempts`; pursuit-prompt test pins "no attempt key in prompt"; feature-catalog evidence repointed (objective-goal-continuation-live.yaml)
+rails:
+  - bun run typecheck / typecheck:tests / lint:debt ; exit 0 (prod complexity 36/36 after splitting settleAttempt + runRuntimeTurn)
+  - bun test <ticket verification set: attempt-lifecycle, progress-receipt, turn-runner-objective-settlement, tests/unit/agent, goal-continuation-live-e2e, objective-budget-enforce-e2e> ; 2023 pass / 0 fail
+  - bun test <126 objective/goal-related unit+integration files> ; 1528 pass / 2 fail — both pre-existing, not Goal-owned (god-code cohort 26>24 at HEAD==worktree by the ratchet's exact metric; src-scan magic-timeout in apps/bench/resume/store.ts:63 from e510389aa)
+  - bun test tests/unit/_arch tests/unit/god-code-ratchet.test.ts ; 72 / 1 (same cohort)
+  - bun run test:contract ; 7 / 0 ; bun fc validate ; 1067 features, all evidence resolved
+  - bun test tests/integration/{goal-continuation-live-e2e,objective-turn-context-consumer-e2e,objective-usage-limited-429-real-loop-e2e,objective-verifier-real-command-e2e,observability-wire-multi-emit-e2e,agent-state-observability-ws-daemon-e2e}.test.ts ; 25 / 0
+  - bun test tests/e2e-pty/cli-goal-pursuit-e2e.test.ts ; 9 / 0 (35s) — FIRST RUN RED (see groundTruth), green after the boot-meter fix
+groundTruth:
+  - PTY e2e red cause captured with temporary scratch-file instrumentation (restored byte-identical): every continuation threw "objective attempt requires a BudgetMeter (composition error)" — the REPL does not use the turn assembler, so cfg.budgetMeter was absent; the wake loop re-claimed 20x into the same error. Fix = compose the meter under QUANTA_GOAL_ENFORCE + fail-stop the slot on a composition error.
+  - After the fix, the real CLI continuation was ATTRIBUTED: attributed=true meter=true prov=autonomous-continuation; objective budget tokensUsed 2 / turnsUsed 1 (replay cassette 1+1), one settlement.
+  - Usage definition mirrors the loop's meter ticks (input + output; reasoning inside output per src/llm/openai-responses-wire-reasoning-usage.test.ts; cache tokens excluded on both sides).
+redOnInjection (17/17 RED, restore byte-identical; the M17 first form was VACUOUS after biome reformat and was re-targeted):
+  - M1  begin does not reserve the turn                      -> 14 RED
+  - M2  user-requested work bumps the autonomous counter     -> 2 RED
+  - M3  settle re-debits the turn                            -> 3 RED
+  - M4  settle accepts a different attempt than the started  -> 1 RED
+  - M5  begin ignores an in-flight attempt                   -> 2 RED
+  - M6  begin accepts a replayed attemptId                   -> 2 RED
+  - M7  model may abandon                                    -> 1 RED
+  - M8  replace/clear allowed under a started attempt        -> 1 RED
+  - M9  rehydrate drops the started attempt                  -> 1 RED
+  - M10 stale claim charged to the new generation            -> 1 RED
+  - M11 start-persist failure does not fail-stop             -> 1 RED
+  - M12 usage accumulator ignores input tokens               -> 1 RED
+  - M13 approval-pause / throw path not settled              -> 1 RED
+  - M14 terminal persist failure does not fail-stop          -> 1 RED
+  - M15 settlement skipped before persist                    -> 5 RED
+  - M16 CLI claim minted with user provenance                -> 1 RED
+  - M17 composition error does not fail-stop the slot        -> 1 RED
+ticketRedRails: 1,2,3,6,7,8,10,11(domain restore round-trip; process-restart e2e deferred to 06 wake path),12,13,14,15,16,17 covered; 4,5 (/goal verify no-charge, /goal work user-requested provenance) -> GOAL-05 facade; 9 (pause prevents re-arm) domain half covered, re-arm suppression -> GOAL-06
+deviations: README "GOAL-04 실행 기록" (renderTaskBudgetBlock reuse -> 05 renderer; approval-pause settlement persisted immediately only in id-mode; boot-meter wiring proven by the PTY e2e, no tooling-bundle fake unit)

@@ -174,6 +174,22 @@ const runAgentSettled = async (args: {
   return { kind: "outcome", outcome }
 }
 
+/** GOAL-04 — an approval PAUSE settled `awaiting_approval` but skips the turn
+ *  persistence below; make the settlement durable now (id-mode only). */
+const persistSettlementNow = async (
+  attributed: AttributedAttempt | undefined,
+  objective: unknown,
+  idMeta: SessionMeta | undefined,
+): Promise<void> => {
+  if (attributed === undefined || idMeta === undefined) return
+  try {
+    await persistObjectiveSnapshotNow(objective, idMeta.id)
+  } catch (error) {
+    failStopAfterSettlement(attributed, error)
+    throw error
+  }
+}
+
 /** GOAL-04 — a persistence failure AFTER settlement never refunds the start;
  *  the session is fail-stopped for further attributed turns (durable
  *  uncertainty is not silent). */
@@ -236,6 +252,7 @@ export const runRuntimeTurn = async (args: {
   })
   const ran = await runAgentSettled({ cfg, attributed })
   if (ran.kind === "approval") {
+    await persistSettlementNow(attributed, args.base.objective, args.idMeta)
     return {
       outcome: approvalPlaceholderOutcome(args.history),
       messages: [...args.history],

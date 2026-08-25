@@ -25,6 +25,7 @@ import {
 } from "@/agent/turn-registry-snapshot"
 import { createMcpToolReloadController } from "@/host/runtime/mcp-tool-reload"
 import type { StructuredLogger } from "@/observability"
+import { gateOn } from "@/shared"
 import type {
   BootstrapFeatures,
   SessionBootstrapDeps,
@@ -167,8 +168,16 @@ export const buildToolingBundle = (
   // dials so the loop's `checkExhausted` trips on overrun.
   const costDials = parseOperatorCostDials(runtime.env)
   const hasCostCap = Object.keys(costDials).length > 0
+  // GOAL-04 rail 13 — goal pursuit settles attributed attempts from the
+  // BudgetMeter before/after delta (the ONLY production usage source; stream
+  // usage events are never authoritative). Composing goal pursuit therefore
+  // composes the meter too; an attributed attempt without one is refused as a
+  // composition error at the turn boundary.
+  const goalPursuitActive = gateOn(runtime.env, "QUANTA_GOAL_ENFORCE")
   const budgetMeter =
-    writeGuardActive || hasCostCap ? new BudgetMeter({ dials: costDials }) : undefined
+    writeGuardActive || hasCostCap || goalPursuitActive
+      ? new BudgetMeter({ dials: costDials })
+      : undefined
 
   const tooling = deps.buildTooling(
     features.mcpTools,
