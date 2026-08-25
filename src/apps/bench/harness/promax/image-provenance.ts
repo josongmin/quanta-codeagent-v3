@@ -3,10 +3,8 @@
  *
  * Every ProMax verdict is decided inside a container built from a per-instance
  * image, so "which image" is as much a part of what produced the number as
- * "which evaluator". The grade receipt named the evaluator bytes, the argv and
- * the cwd, and said nothing about the images: the run scored against whatever
- * `docker pull` happened to fetch, with no record. Gate 2's evidence requires an
- * image freeze covering the assigned set with DIGEST pins.
+ * "which evaluator". Gate 2's evidence requires digest pins covering the assigned
+ * set.
  *
  * ## The names are read, not guessed
  *
@@ -16,22 +14,80 @@
  *
  * and the golden document lives IN the checkout — inside the grader window, and
  * already hash-verified by that phase. So this asks the same file the evaluator
- * asks, with the same fallback, rather than re-deriving a naming rule that could
- * drift away from it.
+ * asks, with the same fallback.
  *
  * ## A tag is not provenance
  *
- * `key4127/refactor-dockerhub:x` can point at different bytes tomorrow. The
- * RepoDigest is what pins the run, so an image the daemon cannot give a digest
- * for is a FAULT rather than a record — and so is an assigned instance the box
- * never reported on at all. Dropping either would leave a receipt that looks
- * complete while covering less than it claims.
+ * `repo:tag` can point at different bytes tomorrow. The RepoDigest is the pin, so
+ * an image the daemon cannot digest is a FAULT, and so is an assigned instance
+ * the box never reported on — either would leave a receipt that looks complete
+ * while covering less than it claims.
  *
- * PURE: builds a command and parses its output. Issues nothing.
+ * ## 🔴 Why the program is a FILE, not a `-c` string
+ *
+ * It used to be embedded with `JSON.stringify(pySource)`, as if that were shell
+ * quoting. It is not: the result is a DOUBLE-quoted shell string, and the
+ * newlines joining the source became the two-character escape `\n`, which bash
+ * passes through literally. Python then received one line and raised
+ * `SyntaxError: unexpected character after line continuation character` — while
+ * the pipeline still exited 0 with empty stdout, so every assigned instance
+ * faulted and every completed grade was discarded. It shipped through eight live
+ * runs because the tests asserted on the command STRING and never executed it.
+ *
+ * `JSON.stringify` also leaves `$` and backticks untouched, so the same line was
+ * an injection point for any instance id or path reaching it.
+ *
+ * So the program is shipped as a file over ssh stdin (the idiom this repo already
+ * uses for the swebench shim) and invoked with `shq`-quoted argv. Nothing
+ * interpolated is re-interpreted by a shell, and there is no embedded-quoting
+ * question left to get wrong.
+ *
+ * It also does the `docker image inspect` itself rather than piping into a bash
+ * `while IFS=$'\t' read` loop: that construct is bash-only and splits silently
+ * wrong under dash, which is what `sh -c` would give it.
+ *
+ * PURE: builds a program and a command, and parses output. Issues nothing.
  */
+import { shq } from "../../remote/box-session/shell"
 
 /** A well-formed OCI content digest, as `RepoDigests` reports it. */
 const REPO_DIGEST = /@sha256:[0-9a-f]{64}$/
+
+/** Where the program is written on the box. Under the campaign root, so the
+ *  chunk scrub and the campaign teardown both already cover the directory. */
+export const PROMAX_IMAGE_PROVENANCE_SCRIPT_PATH = "/opt/quanta/promax/image-provenance.py"
+
+/**
+ * The program, verbatim. Reads the checkout's golden, resolves each assigned
+ * instance's image name with the evaluator's own fallback, asks the daemon for
+ * its RepoDigest, and prints `<id>\t<name>\t<digest>` — an EMPTY third field when
+ * the daemon has no digest, so the parser can tell "no digest" from "never
+ * reported".
+ *
+ * Ids arrive as argv, never interpolated into source.
+ */
+export const PROMAX_IMAGE_PROVENANCE_SCRIPT = `import json, subprocess, sys
+
+golden_path, ids = sys.argv[1], sys.argv[2:]
+with open(golden_path, "r", encoding="utf-8") as fh:
+    g = json.load(fh)
+rows = g if isinstance(g, list) else list(g.values())
+by = {r.get("instance_id"): r for r in rows if isinstance(r, dict)}
+
+for instance_id in ids:
+    entry = by.get(instance_id) or {}
+    image = entry.get("image_name") or ("key4127/refactor-dockerhub:" + instance_id)
+    try:
+        out = subprocess.run(
+            ["docker", "image", "inspect", "--format",
+             "{{if .RepoDigests}}{{index .RepoDigests 0}}{{end}}", image],
+            capture_output=True, text=True, timeout=60,
+        )
+        digest = out.stdout.strip() if out.returncode == 0 else ""
+    except Exception:
+        digest = ""
+    print(instance_id + "\\t" + image + "\\t" + digest)
+`
 
 export interface ProMaxImageProvenanceRecord {
   readonly instanceId: string
@@ -46,44 +102,29 @@ export type ProMaxImageProvenanceResult =
   | { readonly ok: false; readonly faults: readonly string[] }
 
 /**
- * Build the one command that answers "which image, and at which digest" for every
- * assigned instance.
+ * The command that RUNS the already-uploaded program.
  *
- * One round trip rather than N: the grader window should be as short as it can
- * be, and a per-instance ssh would widen it for no gain.
- *
- * Emits `<instanceId>\t<imageName>\t<repoDigest>` per line. A missing digest
- * leaves the third field EMPTY rather than omitting the line, so the parser can
- * tell "no digest" from "never reported".
+ * Every interpolated value goes through `shq` — the repo's shell quoter, whose
+ * own doc names this hazard ("a preset/model/instance-id containing … `$(...)`,
+ * backtick"). An instance id is third-party data from the upstream corpus, so it
+ * is not trusted input.
  */
 export const buildProMaxImageProvenanceCommand = (input: {
   readonly checkoutRoot: string
   readonly venvPython: string
+  readonly scriptPath: string
   readonly instanceIds: readonly string[]
 }): string => {
   const checkout = input.checkoutRoot.replace(/\/+$/, "")
-  const ids = JSON.stringify([...input.instanceIds])
-  // The name resolution is a transcription of the pinned evaluator's own line,
-  // kept next to it so a reader can compare them.
-  const py = [
-    "import json,sys",
-    `g=json.load(open(${JSON.stringify(`${checkout}/data/swe-bench-promax.json`)}))`,
-    "rows=g if isinstance(g,list) else list(g.values())",
-    "by={r.get('instance_id'):r for r in rows if isinstance(r,dict)}",
-    `for i in ${ids}:`,
-    "    e=by.get(i) or {}",
-    "    print(i+'\\t'+(e.get('image_name') or ('key4127/refactor-dockerhub:'+i)))",
-  ].join("\n")
-  return (
-    `${input.venvPython} -c ${JSON.stringify(py)} | ` +
-    "while IFS=$'\\t' read -r id img; do " +
-    'printf "%s\\t%s\\t%s\\n" "$id" "$img" ' +
-    '"$(docker image inspect --format \'{{if .RepoDigests}}{{index .RepoDigests 0}}{{end}}\' "$img" 2>/dev/null)"; ' +
-    "done"
-  )
+  return [
+    shq(input.venvPython),
+    shq(input.scriptPath),
+    shq(`${checkout}/data/swe-bench-promax.json`),
+    ...input.instanceIds.map(shq),
+  ].join(" ")
 }
 
-/** Parse the command's output against the ASSIGNED set, fail-closed. */
+/** Parse the program's output against the ASSIGNED set, fail-closed. */
 export const parseProMaxImageProvenance = (
   stdout: string,
   assignedInstanceIds: readonly string[],

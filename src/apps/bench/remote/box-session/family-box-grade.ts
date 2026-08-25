@@ -28,6 +28,8 @@ import type { DatasetFamily } from "../../dataset-family-token"
 import {
   buildProMaxImageProvenanceCommand,
   parseProMaxImageProvenance,
+  PROMAX_IMAGE_PROVENANCE_SCRIPT,
+  PROMAX_IMAGE_PROVENANCE_SCRIPT_PATH,
 } from "../../harness/promax/image-provenance"
 import { resolveDatasetFamilyProfile } from "../../profiles/registry"
 import type { FamilyBoxGradeVerdicts, FamilyRemoteBootstrap } from "../../profiles/types"
@@ -332,6 +334,19 @@ const readGradablePredictions = async (input: FamilyBoxGradeInput): Promise<stri
   // this into an infra error for every assigned instance — the chunk reads as the
   // total infra failure it was, instead of as a clean empty run.
   const preds = await input.ssh(`cat ${input.paths.preds}`)
+  // A TRANSPORT failure is not an answer. `preds.code !== 0` used to fold ssh-255
+  // into "patch-gen produced no predictions", which skips the grade and files
+  // EVERY assigned instance as an infra error — so a dropped connection erased
+  // real patches. Run 3's log shows it: the box had logged
+  // `wrote /home/ubuntu/preds.jsonl (7 prediction(s))` eleven lines earlier.
+  // `cat` never exits 255; ssh's own signal is distinguishable for free.
+  if (preds.code === 255) {
+    throw new Error(
+      `[full-remote] ${input.family}: the box became unreachable while reading the predictions ` +
+        `at ${input.paths.preds}, so whether patch-gen produced any could not be established. ` +
+        `REFUSING to report them as absent. (${preds.stderr.trim() || "ssh exit 255"})`,
+    )
+  }
   if (preds.code !== 0 || preds.stdout.trim() === "" || preds.stdout.trim() === "[]") {
     input.log(
       `[full-remote] ${input.family}: patch-gen produced no predictions at ${input.paths.preds} — ` +
@@ -417,12 +432,46 @@ const captureImageProvenance = async (
 ): Promise<readonly { instanceId: string; imageName: string; repoDigest: string }[]> => {
   const assigned = input.assignedInstanceIds ?? []
   if (assigned.length === 0) return []
+  // UPLOAD the program over ssh stdin rather than embedding it in a command.
+  // The embedded form was quoted with `JSON.stringify`, which is not a shell
+  // quoter: the source arrived as one line with literal `\n` and Python raised a
+  // SyntaxError while the pipeline still exited 0. Shipping it as a file is the
+  // idiom this repo already uses for the swebench shim, and it leaves no
+  // embedded-quoting question to get wrong.
+  const wroteScript = await input.ssh(
+    `cat > ${PROMAX_IMAGE_PROVENANCE_SCRIPT_PATH}`,
+    PROMAX_IMAGE_PROVENANCE_SCRIPT,
+  )
+  if (wroteScript.code === 255) {
+    throw new Error(
+      `[full-remote] ${input.family}: the box became unreachable while uploading the ` +
+        "image-provenance program. REFUSING to report that as an image fault.",
+    )
+  }
+  if (wroteScript.code !== 0) {
+    throw new Error(
+      `[full-remote] ${input.family}: could not write the image-provenance program to ` +
+        `${PROMAX_IMAGE_PROVENANCE_SCRIPT_PATH} (code ${wroteScript.code}): ` +
+        `${wroteScript.stderr || wroteScript.stdout}`,
+    )
+  }
   const command = buildProMaxImageProvenanceCommand({
     checkoutRoot,
     venvPython: `${checkoutRoot.replace(/\/upstream$/, "")}/venv/bin/python`,
+    scriptPath: PROMAX_IMAGE_PROVENANCE_SCRIPT_PATH,
     instanceIds: assigned,
   })
   const answered = await input.ssh(command)
+  // Same rule as every other probe: a dropped connection is a NETWORK event, and
+  // reporting it as "the box reported no image for it at all" would misfile it —
+  // the sibling transport module warns about exactly this collapse.
+  if (answered.code === 255) {
+    throw new Error(
+      `[full-remote] ${input.family}: the box became unreachable while recording which images ` +
+        `the grade ran against. REFUSING to report that as an image fault. ` +
+        `(${answered.stderr.trim() || "ssh exit 255"})`,
+    )
+  }
   const parsed = parseProMaxImageProvenance(answered.stdout, assigned)
   if (!parsed.ok) {
     throw new Error(
@@ -497,6 +546,15 @@ export const runFamilyBoxGrade = async (
     log: input.log,
     whileMaterialized: async () => {
       const graded = await input.ssh(invocation.command)
+      // The GRADE's own verdict first. Capturing provenance ahead of this made a
+      // failed evaluator surface as an image fault — the wrong diagnosis for the
+      // wrong subsystem, in the message an operator reads first.
+      if (graded.code !== 0) {
+        throw new Error(
+          `[full-remote] ${input.family} on-box grade failed (code ${graded.code}): ` +
+            `${graded.stderr || graded.stdout}`,
+        )
+      }
       // WHICH IMAGES. Asked here, inside the window: the names live in the
       // checkout's golden, which the teardown is about to remove. A tag is not
       // provenance, so this asks the daemon that actually ran them for digests.
@@ -512,12 +570,6 @@ export const runFamilyBoxGrade = async (
         // The grader phase refused unless the box reported this digest for the
         // evaluator, so it is an OBSERVED identity, not a hopeful constant.
         evaluatorSha256: verifiedEvaluatorSha256(bootstrap),
-      }
-      if (graded.code !== 0) {
-        throw new Error(
-          `[full-remote] ${input.family} on-box grade failed (code ${graded.code}): ` +
-            `${graded.stderr || graded.stdout}`,
-        )
       }
       // Read it back HERE — still inside the window, still under this call's
       // teardown guarantee.

@@ -19,36 +19,15 @@
  * bytes tomorrow. The RepoDigest is what pins it.
  */
 import { describe, expect, test } from "bun:test"
-import {
-  buildProMaxImageProvenanceCommand,
-  parseProMaxImageProvenance,
-} from "@/apps/bench/harness/promax/image-provenance"
+import { parseProMaxImageProvenance } from "@/apps/bench/harness/promax/image-provenance"
 
 const CHECKOUT = "/opt/quanta/promax/upstream"
 
-describe("the command that asks the box which images it used", () => {
-  test("🔴 it reads the image names from the CHECKOUT's golden, not from a guess", () => {
-    const cmd = buildProMaxImageProvenanceCommand({
-      checkoutRoot: CHECKOUT,
-      venvPython: `${CHECKOUT}/../venv/bin/python`,
-      instanceIds: ["a-1", "b-2"],
-    })
-    expect(cmd).toContain(CHECKOUT)
-    // the same fallback the pinned evaluator uses, so the two can never disagree
-    expect(cmd).toContain("key4127/refactor-dockerhub:")
-    expect(cmd).toContain("image_name")
-  })
-
-  test("🔴 it asks for the DIGEST, not the tag", () => {
-    const cmd = buildProMaxImageProvenanceCommand({
-      checkoutRoot: CHECKOUT,
-      venvPython: `${CHECKOUT}/../venv/bin/python`,
-      instanceIds: ["a-1"],
-    })
-    expect(cmd).toMatch(/RepoDigests/)
-    expect(cmd).toContain("docker image inspect")
-  })
-})
+// The command's SHAPE is no longer asserted here. Asserting "the string contains
+// `docker image inspect`" is what let a Python SyntaxError ship through eight
+// live runs: the command was read, never run. `promax-image-provenance-executes.test.ts`
+// now runs the rendered command against a real shell with a stub docker, which is
+// the only assertion that could have caught it.
 
 describe("parsing what the box answered", () => {
   test("🔴 KNOWN-ITEM FLOOR: a well-formed answer becomes per-instance records", () => {
