@@ -125,11 +125,18 @@ export const renderFullRemoteOutcomeLine = (out: {
   errored?: readonly string[]
   missing: readonly string[]
   attempts: number
+  /** the run BROKE on a deterministic refusal rather than spending its
+   *  attempts, so the uncovered instances are not box loss. */
+  stoppedEarly?: boolean
 }): string => {
   const erroredCount = out.errored?.length ?? 0
   // Omitted entirely when zero, so a family with no errors reads exactly as before.
   const erroredNote = erroredCount > 0 ? ` | errored ${erroredCount}` : ""
-  const lostNote = out.missing.length > 0 ? ` | ⚠️ LOST ${out.missing.length} (box-loss)` : ""
+  // The CAUSE is only claimed when it is known. A run stopped by a deterministic
+  // refusal lands its uncovered instances here too, and calling that box-loss
+  // contradicts the log line printed immediately before it.
+  const lostCause = out.stoppedEarly === true ? "run stopped early" : "box-loss"
+  const lostNote = out.missing.length > 0 ? ` | ⚠️ LOST ${out.missing.length} (${lostCause})` : ""
   const attemptNote = out.attempts > 1 ? ` [${out.attempts} attempts]` : ""
   return `full-remote done — resolved ${out.resolved.length} | unresolved ${out.unresolved.length}${erroredNote}${lostNote}${attemptNote}`
 }
@@ -140,11 +147,15 @@ const logFullRemoteOutcome = (out: {
   errored?: string[]
   missing: string[]
   attempts: number
+  stoppedEarly?: boolean
 }): void => {
   logger.info(renderFullRemoteOutcomeLine(out))
   for (const id of out.resolved) logger.info(`  ✅ ${id}`)
-  for (const id of out.missing)
-    logger.info(`  ❓ LOST (never graded across ${out.attempts} attempts): ${id}`)
+  const why =
+    out.stoppedEarly === true
+      ? `never graded — the run stopped after ${out.attempts} attempt(s)`
+      : `never graded across ${out.attempts} attempts`
+  for (const id of out.missing) logger.info(`  ❓ LOST (${why}): ${id}`)
 }
 
 /** ADR-0536 §6 — full-remote mode (remote patch-gen + grading). Runs the AGENT

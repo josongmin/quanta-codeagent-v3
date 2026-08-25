@@ -100,6 +100,14 @@ export interface RelaunchOutcome {
   /** Why merging the attempts' receipts was refused, when it was. Surfaced
    *  rather than silently downgraded to "no receipt". */
   readonly officialGradeFailures?: readonly OfficialGradeReceiptFailure[]
+  /**
+   * The loop BROKE on a deterministic refusal instead of using its attempts.
+   *
+   * Without it every uncovered instance is reported as `box-loss`, one line
+   * after the log that just explained this was NOT box loss — see
+   * `promax-no-retry-on-deterministic`.
+   */
+  readonly stoppedEarly?: boolean
 }
 
 interface RelaunchAccumulator {
@@ -197,6 +205,7 @@ const relaunchOutcomeOf = (
   reportPaths: string[],
   attempts: number,
   coverage: RelaunchCoverage,
+  stoppedEarly: boolean,
 ): RelaunchOutcome => ({
   resolved: [...acc.resolved],
   unresolved: [...acc.unresolved],
@@ -205,6 +214,7 @@ const relaunchOutcomeOf = (
   reportPaths,
   attempts,
   missing: [...coverage.missing],
+  ...(stoppedEarly ? { stoppedEarly } : {}),
   ...(coverage.officialGrade !== undefined ? { officialGrade: coverage.officialGrade } : {}),
   ...(coverage.officialGradeFailures !== undefined
     ? { officialGradeFailures: coverage.officialGradeFailures }
@@ -224,14 +234,26 @@ const maybeLogRelaunchRetry = (args: {
   )
 }
 
+/**
+ * The tail line, counting attempts that actually RAN.
+ *
+ * It printed `args.total` — the CONFIGURED budget. A run stopped after one
+ * attempt by a deterministic refusal reported "exhausted 2 attempt(s)",
+ * describing a second box that was never launched.
+ */
 const maybeLogRelaunchExhausted = (args: {
   readonly onLog: ((m: string) => void) | undefined
+  readonly ran: number
   readonly total: number
   readonly remaining: readonly string[]
 }): void => {
   if (args.remaining.length === 0) return
+  const spent =
+    args.ran >= args.total
+      ? `exhausted ${args.total} attempt(s)`
+      : `stopped after ${args.ran} attempt(s) of ${args.total}`
   args.onLog?.(
-    `[full-remote] exhausted ${args.total} attempt(s); ${args.remaining.length} instance(s) still lost: ${args.remaining.join(", ")}`,
+    `[full-remote] ${spent}; ${args.remaining.length} instance(s) still lost: ${args.remaining.join(", ")}`,
   )
 }
 
@@ -258,6 +280,7 @@ export const runWithRelaunch = async (
   const total = Math.max(0, opts.maxRelaunch) + 1
   let remaining = [...opts.expected]
   let attempt = 0
+  let stoppedEarly = false
   while (remaining.length > 0 && attempt < total) {
     attempt += 1
     const { result, fatal } = await runRelaunchAttempt(makeBackend, remaining, attempt, opts.onLog)
@@ -266,7 +289,10 @@ export const runWithRelaunch = async (
     remaining = [...remainingRelaunchInstances(opts.expected, acc, receipts)]
     // BREAK rather than throw: a later attempt's permanent refusal must not
     // discard what an earlier one already measured.
-    if (fatal) break
+    if (fatal) {
+      stoppedEarly = true
+      break
+    }
     maybeLogRelaunchRetry({
       onLog: opts.onLog,
       remaining,
@@ -275,7 +301,7 @@ export const runWithRelaunch = async (
       total,
     })
   }
-  maybeLogRelaunchExhausted({ onLog: opts.onLog, total, remaining })
+  maybeLogRelaunchExhausted({ onLog: opts.onLog, ran: attempt, total, remaining })
   // PMX-03/04: `missing` is receipt-derived when the attempts carried receipts,
   // and the legacy subtraction otherwise. `remaining` is the loop's retry set,
   // which is the legacy answer.
@@ -293,7 +319,7 @@ export const runWithRelaunch = async (
         `campaign receipt: ${coverage.officialGradeFailures.map((f) => `${f.code}: ${f.message}`).join(" | ")}`,
     )
   }
-  return relaunchOutcomeOf(acc, reportPaths, attempt, coverage)
+  return relaunchOutcomeOf(acc, reportPaths, attempt, coverage, stoppedEarly)
 }
 
 /** Dry-run plan lines — printed instead of provisioning anything. */

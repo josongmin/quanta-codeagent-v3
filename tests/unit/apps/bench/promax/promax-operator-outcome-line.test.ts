@@ -69,13 +69,122 @@ describe("the full-remote outcome line", () => {
 })
 
 describe("WIRING — the merged outcome really carries `errored` to this line", () => {
-  test("🔴 RelaunchOutcome declares errored, so the main path cannot drop it", async () => {
-    // The line is only as good as what reaches it. `RelaunchOutcome` is what the
-    // instance-aware path hands `logFullRemoteOutcome`; if `errored` were not on
-    // it, the field above would be permanently undefined and the fix cosmetic.
-    const mod = await import("@/apps/bench/remote/full")
-    const shape: keyof import("@/apps/bench/remote/full").RelaunchOutcome = "errored"
-    expect(shape).toBe("errored")
-    expect(typeof mod.runWithRelaunch).toBe("function")
+  /**
+   * This block used to be
+   *
+   *     const shape: keyof RelaunchOutcome = "errored"
+   *     expect(shape).toBe("errored")
+   *
+   * which asserts nothing at RUNTIME — it is `"errored" === "errored"` — and
+   * `bun test` does not typecheck, so the type annotation carrying the whole
+   * claim was never evaluated by anything that ran. Deleting `errored` from the
+   * merged outcome left it green.
+   *
+   * So: run the REAL relaunch merge and put its REAL output through the line.
+   */
+  test("🔴 an attempt's errored instances survive the merge and reach the line", async () => {
+    const { runWithRelaunch } = await import("@/apps/bench/remote/full")
+    const out = await runWithRelaunch(
+      (ids) => ({
+        run: async () => ({
+          resolved: [],
+          unresolved: [],
+          errored: [...ids],
+          emptyPatch: [],
+          reportPaths: [],
+        }),
+      }),
+      { expected: ["a-1", "b-2", "c-3"], maxRelaunch: 0, onLog: () => {} },
+    )
+    expect(out.errored, "the merge dropped the errored instances").toEqual(["a-1", "b-2", "c-3"])
+    expect(renderFullRemoteOutcomeLine(out)).toMatch(/errored 3/)
+  })
+})
+
+/**
+ * THE FINAL LINE MUST NOT ASSERT A CAUSE IT DOES NOT KNOW.
+ *
+ * `⚠️ LOST N (box-loss)` and `❓ LOST (never graded across N attempts)` name
+ * spot reclaim as the cause of every uncovered instance. But
+ * `promax-no-retry-on-deterministic` exists precisely because a permanent
+ * CONFIGURATION refusal also lands there — and it prints one line after the log
+ * that just said this was NOT box loss.
+ */
+describe("the LOST note does not claim a cause it cannot know", () => {
+  test("🔴 a run stopped by a deterministic refusal is not labelled box-loss", async () => {
+    const { FamilyBootstrapError } = await import(
+      "@/apps/bench/remote/box-session/family-bootstrap-exec"
+    )
+    const { runWithRelaunch } = await import("@/apps/bench/remote/full")
+    const out = await runWithRelaunch(
+      () => ({
+        run: async () => {
+          throw new FamilyBootstrapError('bootstrap step "campaign-root" FAILED (exit 1)')
+        },
+      }),
+      { expected: ["a-1"], maxRelaunch: 1, onLog: () => {} },
+    )
+    const line = renderFullRemoteOutcomeLine(out)
+    expect(line, "a config refusal was reported as box loss").not.toMatch(/box-loss/)
+    expect(line, "the operator is told nothing about the missing instance").toMatch(/LOST 1/)
+  })
+
+  test("PAIRED CONTROL: a genuine box loss still says box-loss", () => {
+    const line = renderFullRemoteOutcomeLine({
+      resolved: [],
+      unresolved: [],
+      errored: [],
+      missing: ["x"],
+      attempts: 2,
+      stoppedEarly: false,
+    })
+    expect(line).toMatch(/LOST 1 \(box-loss\)/)
+  })
+})
+
+/**
+ * "EXHAUSTED N ATTEMPTS" MUST COUNT ATTEMPTS THAT RAN.
+ *
+ * The exhausted line printed the CONFIGURED total, not what happened. A run
+ * stopped after one attempt by a deterministic refusal reported "exhausted 2
+ * attempt(s)" — a second box that was never launched.
+ */
+describe("the exhausted line counts what actually ran", () => {
+  test("🔴 a run stopped after ONE attempt does not claim two", async () => {
+    const { FamilyBootstrapError } = await import(
+      "@/apps/bench/remote/box-session/family-bootstrap-exec"
+    )
+    const { runWithRelaunch } = await import("@/apps/bench/remote/full")
+    const logs: string[] = []
+    await runWithRelaunch(
+      () => ({
+        run: async () => {
+          throw new FamilyBootstrapError('bootstrap step "campaign-root" FAILED (exit 1)')
+        },
+      }),
+      { expected: ["a-1"], maxRelaunch: 1, onLog: (m) => logs.push(m) },
+    )
+    const exhausted = logs.find((l) => l.includes("attempt(s)")) ?? ""
+    expect(exhausted, "no exhausted line was printed at all").not.toBe("")
+    expect(exhausted, "it claimed a box that was never launched").not.toMatch(/exhausted 2/)
+    expect(exhausted).toMatch(/1 attempt\(s\)/)
+  })
+
+  test("PAIRED CONTROL: a run that really used every attempt says so", async () => {
+    const { runWithRelaunch } = await import("@/apps/bench/remote/full")
+    const logs: string[] = []
+    await runWithRelaunch(
+      () => ({
+        run: async () => ({
+          resolved: [],
+          unresolved: [],
+          errored: [],
+          emptyPatch: [],
+          reportPaths: [],
+        }),
+      }),
+      { expected: ["a-1"], maxRelaunch: 1, onLog: (m) => logs.push(m) },
+    )
+    expect(logs.find((l) => l.includes("attempt(s)")) ?? "").toMatch(/exhausted 2 attempt\(s\)/)
   })
 })
