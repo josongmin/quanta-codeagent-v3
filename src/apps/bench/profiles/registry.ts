@@ -42,7 +42,7 @@ const officialGradeEvaluator =
   ): FamilyGradeEvaluator =>
   (instance, patch, opts) =>
     evaluateWithPythonSwebench(instance, patch, {
-      ...(opts as Parameters<typeof evaluateWithPythonSwebench>[2]),
+      ...(opts ?? {}),
       datasetFamily: family,
       ...(localGradeRefusal !== undefined ? { localGradeRefusal } : {}),
     })
