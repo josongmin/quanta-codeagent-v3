@@ -40,6 +40,7 @@ export {
   type OfficialEvaluatorSummary,
   type OfficialGradeDisposition,
   type OfficialGradeEvaluatorMeta,
+  type OfficialGradeImageRef,
   type OfficialGradeReason,
   type OfficialGradeReceipt,
   type OfficialGradeReceiptAccepted,

@@ -24,6 +24,7 @@
  * left the remote-env and preflight ports with zero production consumers.
  */
 
+import type { OfficialGradeImageRef } from "@/runner/batch/eval/official-grade"
 import type { PythonSwebenchResult } from "@/runner/batch/eval/verdict"
 import type { DatasetFamily } from "../dataset-family-token"
 import type { ProSwebenchOpts } from "../pro-swebench"
@@ -455,6 +456,13 @@ export interface DatasetFamilyProfile {
     readonly stdout: string
     readonly stderr: string
     readonly evaluatorSha256: string
+    /**
+     * WHICH IMAGE each verdict ran inside. Optional at the PORT because a family
+     * may grade somewhere that has no images to pin; a family that CAPTURES them
+     * and drops them here is recording a number with no environment, which is
+     * precisely what this port exists to prevent.
+     */
+    readonly images?: readonly OfficialGradeImageRef[] | undefined
   }) => string
   /** layer 4 — preflight: Pro ⇒ fail-closed Scale-column shape check; else no-op.
    *  Throws RemoteDatasetPreflightError on a malformed Pro dataset. */

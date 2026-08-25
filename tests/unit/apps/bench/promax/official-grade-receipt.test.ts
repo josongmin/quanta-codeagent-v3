@@ -309,3 +309,85 @@ describe("official-grade receipt — legacy buckets are DERIVED, not a second tr
     expect(view.unresolved).not.toContain("i-5")
   })
 })
+
+/**
+ * WHICH IMAGE produced a verdict. A pass-rate document says an instance
+ * resolved; it does not say what it ran inside, and against a mutable tag two
+ * graders of identical evaluator bytes are not the same experiment.
+ *
+ * The pins were captured — and already had the power to FAIL a run — for a
+ * commit before they reached the receipt at all: the port declared no `images`
+ * field and an `as Parameters<…>` cast in the profile made the mismatch
+ * compile. So these tests assert the SERIALIZED document, never an in-memory
+ * value, and the anti-vacuity case below removes the carry to prove it binds.
+ */
+describe("image pins on the receipt", () => {
+  const DIGEST = `swebench/x@sha256:${"a".repeat(64)}`
+  const IMAGES = [{ instanceId: "a__b-1", imageName: "swebench/x:a__b-1", repoDigest: DIGEST }]
+  const withImages = (images: unknown): OfficialGradeReceiptResult =>
+    buildOfficialGradeReceipt({
+      assignedInstanceIds: ["a__b-1"],
+      dispositions: [dispo({ id: "a__b-1", state: "resolved", reason: "official_resolved" })],
+      evaluator: evaluatorMeta(),
+      images: images as never,
+    })
+
+  test("a valid pin survives into the SERIALIZED document", () => {
+    const json = serializeOfficialGradeReceipt(okReceipt(withImages(IMAGES)))
+    expect(json).toContain(DIGEST)
+    expect(JSON.parse(json).images).toEqual(IMAGES)
+  })
+
+  test("…and survives a serialize → parse ROUND TRIP", () => {
+    const json = serializeOfficialGradeReceipt(okReceipt(withImages(IMAGES)))
+    const back = parseOfficialGradeReceipt(JSON.parse(json))
+    expect(back.ok, "a receipt carrying valid pins failed to re-parse").toBe(true)
+    // a re-read receipt that dropped the pins would report provenance it no
+    // longer has the moment anything reads it back off disk
+    expect(okReceipt(back).images).toEqual(IMAGES)
+  })
+
+  test("PAIRED CONTROL: a grader that captured none is byte-identical to before", () => {
+    const json = serializeOfficialGradeReceipt(okReceipt(withImages(undefined)))
+    expect(Object.hasOwn(JSON.parse(json), "images")).toBe(false)
+    expect(json).toBe(
+      serializeOfficialGradeReceipt(
+        okReceipt(
+          build(
+            ["a__b-1"],
+            [dispo({ id: "a__b-1", state: "resolved", reason: "official_resolved" })],
+          ),
+        ),
+      ),
+    )
+  })
+
+  test.each([
+    [
+      "a bare tag, not a digest",
+      [{ instanceId: "a__b-1", imageName: "x", repoDigest: "x:latest" }],
+    ],
+    ["a truncated digest", [{ instanceId: "a__b-1", imageName: "x", repoDigest: "x@sha256:abc" }]],
+    [
+      "a non-hex digest",
+      [{ instanceId: "a__b-1", imageName: "x", repoDigest: `x@sha256:${"z".repeat(64)}` }],
+    ],
+    ["an empty digest", [{ instanceId: "a__b-1", imageName: "x", repoDigest: "" }]],
+    ["no instance to attribute it to", [{ instanceId: "", imageName: "x", repoDigest: DIGEST }]],
+    ["no image name", [{ instanceId: "a__b-1", imageName: "  ", repoDigest: DIGEST }]],
+    ["the same instance pinned twice", [IMAGES[0], IMAGES[0]]],
+  ])("REFUSES %s rather than recording unreplayable provenance", (_label, images) => {
+    const r = withImages(images)
+    expect(r.ok, "an unusable image pin was accepted onto the receipt").toBe(false)
+    if (r.ok) return
+    expect(r.failures.map((f) => f.code)).toContain("image_ref_invalid")
+  })
+
+  test("a refused pin refuses the WHOLE receipt — no partial provenance", () => {
+    const r = withImages([
+      IMAGES[0],
+      { instanceId: "a__b-2", imageName: "x", repoDigest: "x:latest" },
+    ])
+    expect(r.ok).toBe(false)
+  })
+})

@@ -154,7 +154,7 @@ describe("WIRING — the grade records which images it ran against", () => {
   test("🔴 the observation carries a DIGEST-pinned image per assigned instance", async () => {
     const DIGEST = `key4127/refactor-dockerhub@sha256:${"a".repeat(64)}`
     const withImages = async (cmd: string) => {
-      if (cmd.includes("docker image inspect")) {
+      if (cmd.includes("image-provenance.py")) {
         return {
           code: 0,
           stdout: `aws__s2n-tls-5464\tkey4127/refactor-dockerhub:aws__s2n-tls-5464\t${DIGEST}\n`,
@@ -178,7 +178,7 @@ describe("WIRING — the grade records which images it ran against", () => {
 
   test("🔴 a grade whose images cannot be pinned REFUSES rather than reporting a number", async () => {
     const noDigest = async (cmd: string) => {
-      if (cmd.includes("docker image inspect")) {
+      if (cmd.includes("image-provenance.py")) {
         return { code: 0, stdout: "aws__s2n-tls-5464\tsome:tag\t\n", stderr: "" }
       }
       return ssh(cmd)
@@ -199,5 +199,51 @@ describe("WIRING — the grade records which images it ran against", () => {
   test("PAIRED CONTROL: with no assigned set there is nothing to reconcile, and no capture", async () => {
     const out = await grade()
     expect(out?.observation.images).toEqual([])
+  })
+})
+
+describe("the images reach the RECEIPT, not just the observation", () => {
+  test("🔴 the serialized receipt names every image digest", async () => {
+    // Every image assertion in this file used to stop at
+    // `out.observation.images` — the in-memory value — under a heading claiming
+    // the grade RECORDS which images it ran against. It did not: the
+    // `buildBoxGradeReceipt` port had no `images` field, promax never read one,
+    // and an `as Parameters<…>` cast hid the mismatch. The digests were captured,
+    // used to FAIL runs, and dropped on the floor.
+    const { resolveDatasetFamilyProfile } = await import("@/apps/bench/profiles/registry")
+    const DIGEST = `key4127/refactor-dockerhub@sha256:${"c".repeat(64)}`
+    const withImages = async (cmd: string) => {
+      if (cmd.includes("image-provenance.py")) {
+        return {
+          code: 0,
+          stdout: `aws__s2n-tls-5464\tkey4127/refactor-dockerhub:aws__s2n-tls-5464\t${DIGEST}\n`,
+          stderr: "",
+        }
+      }
+      return ssh(cmd)
+    }
+    const out = await runFamilyBoxGrade({
+      ssh: withImages,
+      log: () => {},
+      family: "promax",
+      bootstrap: promaxBootstrap(),
+      paths: DEFAULT_CHUNK_PATHS,
+      assignedInstanceIds: ["aws__s2n-tls-5464"],
+      sleep: async () => {},
+    })
+    const build = resolveDatasetFamilyProfile("promax").buildBoxGradeReceipt
+    expect(build, "promax declares no receipt builder").toBeDefined()
+    expect(out, "the grade produced nothing").toBeDefined()
+    if (build === undefined || out === undefined) return
+
+    const json = build({
+      assignedInstanceIds: ["aws__s2n-tls-5464"],
+      artifactText: out.artifactText,
+      artifactPath: "/local/passrate.json",
+      ...out.observation,
+    })
+    // THE claim: the digest is IN the persisted document, not merely in memory.
+    expect(json, "the receipt cannot say which image produced its verdicts").toContain(DIGEST)
+    expect(json).toContain("aws__s2n-tls-5464")
   })
 })

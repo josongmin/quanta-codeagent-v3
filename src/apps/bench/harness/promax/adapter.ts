@@ -21,6 +21,7 @@ import type {
   OfficialEvaluatorSummary,
   OfficialGradeDisposition,
   OfficialGradeEvaluatorMeta,
+  OfficialGradeImageRef,
   OfficialGradeReason,
   OfficialGradeReceiptFailure,
   OfficialGradeReceiptResult,
@@ -56,6 +57,12 @@ export interface ProMaxGradeInput {
    * changes a state or reason — golden authority still decides.
    */
   readonly emptyPredictionInstanceIds?: readonly string[] | undefined
+  /**
+   * WHICH IMAGE each verdict ran inside, by repo digest. Optional: a grader that
+   * captured no provenance produces the same receipt it always did. Present ⇒
+   * the receipt layer refuses any pin that is not `repo@sha256:<64 hex>`.
+   */
+  readonly images?: readonly OfficialGradeImageRef[] | undefined
 }
 
 const summaryOf = (
@@ -164,6 +171,10 @@ export const buildProMaxOfficialGradeReceipt = (
     stderr: run.stderr,
     outputArtifact: artifact,
   }
+  // The image pins ride along on BOTH exits below. A grade that failed wholesale
+  // is exactly when "which image was this?" matters most, so the blanket-failure
+  // branch carries them too.
+  const images = input.images !== undefined ? { images: input.images } : {}
   const emptySet = new Set(input.emptyPredictionInstanceIds ?? [])
   const isEmpty = (id: string): boolean => emptySet.has(id)
 
@@ -174,6 +185,7 @@ export const buildProMaxOfficialGradeReceipt = (
   if (verdict.reason !== null) {
     const blanketReason = verdict.reason
     return buildOfficialGradeReceipt({
+      ...images,
       assignedInstanceIds: input.assignedInstanceIds,
       dispositions: input.assignedInstanceIds.map((id) =>
         disposition(
@@ -206,6 +218,7 @@ export const buildProMaxOfficialGradeReceipt = (
   }
 
   const built = buildOfficialGradeReceipt({
+    ...images,
     assignedInstanceIds: input.assignedInstanceIds,
     dispositions,
     evaluator,

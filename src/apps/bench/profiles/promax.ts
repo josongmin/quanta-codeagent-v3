@@ -317,7 +317,11 @@ export const PROMAX_PROFILE: DatasetFamilyProfile = {
         outputJsonText: input.artifactText,
         outputPath: input.artifactPath,
       },
-    } as Parameters<typeof buildProMaxOfficialGradeReceipt>[0])
+      // The digests the on-box provenance step captured. They already had the
+      // power to FAIL a run; until this line they never reached the document the
+      // run leaves behind, so a receipt could not say what it ran against.
+      ...(input.images !== undefined ? { images: input.images } : {}),
+    })
     if (!built.ok) {
       throw new Error(
         "bench: dataset-family=promax — the on-box grade produced no valid receipt: " +

@@ -13,6 +13,7 @@ import type {
   OfficialEvaluatorSummary,
   OfficialGradeDisposition,
   OfficialGradeEvaluatorMeta,
+  OfficialGradeImageRef,
   OfficialGradeReceipt,
   OfficialGradeReceiptFailure,
   OfficialGradeReceiptFailureCode,
@@ -31,6 +32,8 @@ export interface BuildOfficialGradeReceiptInput {
   readonly assignedInstanceIds: readonly string[]
   readonly dispositions: readonly OfficialGradeDisposition[]
   readonly evaluator: OfficialGradeEvaluatorMeta
+  /** Optional: omit and the receipt is byte-identical to before this existed. */
+  readonly images?: readonly OfficialGradeImageRef[]
 }
 
 const isBlank = (value: unknown): boolean => typeof value !== "string" || value.trim() === ""
@@ -193,6 +196,48 @@ const validateEvaluator = (
 }
 
 /**
+ * Image pins fail CLOSED. A blank id, a blank name, or a digest that is not a
+ * `repo@sha256:<64 hex>` reference is refused rather than recorded: a receipt
+ * that names an unusable pin is worse than one that names none, because it
+ * reads as provenance while being unreplayable.
+ */
+const IMAGE_DIGEST = /^[^\s@]+@sha256:[0-9a-f]{64}$/
+const checkImages = (
+  images: readonly OfficialGradeImageRef[] | undefined,
+): OfficialGradeReceiptFailure[] => {
+  if (images === undefined) return []
+  const failures: OfficialGradeReceiptFailure[] = []
+  const seen = new Set<string>()
+  for (const image of images) {
+    if (isBlank(image?.instanceId) || isBlank(image?.imageName)) {
+      failures.push({
+        code: "image_ref_invalid",
+        message: `image pin names no instance or no image: ${JSON.stringify(image)}`,
+      })
+      continue
+    }
+    if (typeof image.repoDigest !== "string" || !IMAGE_DIGEST.test(image.repoDigest)) {
+      failures.push({
+        code: "image_ref_invalid",
+        message:
+          `image pin for ${image.instanceId} is not a repo digest ` +
+          `(expected repo@sha256:<64 hex>): ${JSON.stringify(image.repoDigest)}`,
+      })
+      continue
+    }
+    if (seen.has(image.instanceId)) {
+      failures.push({
+        code: "image_ref_invalid",
+        message: `image pin for ${image.instanceId} is declared more than once`,
+      })
+      continue
+    }
+    seen.add(image.instanceId)
+  }
+  return failures
+}
+
+/**
  * Build a receipt or refuse it. Duplicate dispositions, an unknown state or
  * reason, a state/reason disagreement, a declared-but-wrong `gradingValid`, and
  * a disposition for an unassigned id all FAIL CLOSED.
@@ -200,7 +245,7 @@ const validateEvaluator = (
 export const buildOfficialGradeReceipt = (
   input: BuildOfficialGradeReceiptInput,
 ): OfficialGradeReceiptResult => {
-  const failures: OfficialGradeReceiptFailure[] = []
+  const failures: OfficialGradeReceiptFailure[] = [...checkImages(input.images)]
   const assigned: string[] = []
   const assignedSet = new Set<string>()
 
@@ -240,6 +285,8 @@ export const buildOfficialGradeReceipt = (
       assignedInstanceIds: Object.freeze([...assigned]),
       dispositionsByInstanceId: dispositions,
       evaluator: input.evaluator,
+      // validated above by `checkImages`; omitted when the grader captured none
+      ...(input.images !== undefined ? { images: Object.freeze([...input.images]) } : {}),
     }),
   }
 }
@@ -288,6 +335,7 @@ interface OfficialGradeReceiptDocument {
   readonly assignedInstanceIds: readonly string[]
   readonly dispositions: readonly OfficialGradeDisposition[]
   readonly evaluator: OfficialGradeEvaluatorMeta
+  readonly images?: readonly OfficialGradeImageRef[]
 }
 
 export const serializeOfficialGradeReceipt = (receipt: OfficialGradeReceipt): string => {
@@ -298,6 +346,9 @@ export const serializeOfficialGradeReceipt = (receipt: OfficialGradeReceipt): st
       .map((id) => receipt.dispositionsByInstanceId.get(id))
       .filter((d): d is OfficialGradeDisposition => d !== undefined),
     evaluator: receipt.evaluator,
+    // omitted entirely when absent, so a grader that captures no provenance
+    // still serializes to the pre-existing document shape
+    ...(receipt.images !== undefined ? { images: receipt.images } : {}),
   }
   return JSON.stringify(doc, null, 2)
 }
@@ -374,5 +425,10 @@ export const parseOfficialGradeReceipt = (value: unknown): OfficialGradeReceiptR
     assignedInstanceIds: doc.assignedInstanceIds as readonly string[],
     dispositions,
     evaluator: doc.evaluator as OfficialGradeEvaluatorMeta,
+    // round-trip: a serialized pin must survive parse, or a re-read receipt
+    // silently loses the provenance the original refused to grade without
+    ...(Array.isArray(doc.images)
+      ? { images: doc.images as readonly OfficialGradeImageRef[] }
+      : {}),
   })
 }

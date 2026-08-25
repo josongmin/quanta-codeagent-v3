@@ -195,6 +195,22 @@ export interface OfficialGradeEvaluatorMeta extends OfficialEvaluatorIdentity {
 }
 
 /**
+ * WHICH CONTAINER IMAGE produced a verdict, pinned by repo digest.
+ *
+ * A pass-rate document says an instance resolved; it does not say what it ran
+ * inside. Two graders of the same evaluator bytes against a mutable `:latest`
+ * tag are not the same experiment, and only the digest tells them apart. Kept
+ * per-instance because a chunk's instances each have their own image.
+ */
+export interface OfficialGradeImageRef {
+  readonly instanceId: string
+  /** the tag the evaluator resolved — readability, never the pin. */
+  readonly imageName: string
+  /** `repo@sha256:…` — the actual pin. */
+  readonly repoDigest: string
+}
+
+/**
  * The receipt. `assignedInstanceIds` is the DENOMINATOR of record: coverage is
  * computed against it, so a chunk that never came back cannot quietly shrink
  * the campaign.
@@ -203,6 +219,10 @@ export interface OfficialGradeReceipt {
   readonly assignedInstanceIds: readonly string[]
   readonly dispositionsByInstanceId: ReadonlyMap<string, OfficialGradeDisposition>
   readonly evaluator: OfficialGradeEvaluatorMeta
+  /** Absent ⇒ this grader captured no image provenance; the receipt is
+   *  byte-identical to one built before this field existed. Present ⇒ every
+   *  entry is a validated digest pin. */
+  readonly images?: readonly OfficialGradeImageRef[]
 }
 
 /** Closed classification of every way a receipt can be refused. */
@@ -221,6 +241,8 @@ export type OfficialGradeReceiptFailureCode =
   | "raw_artifact_missing"
   | "raw_artifact_invalid"
   | "evaluator_meta_invalid"
+  /** an image pin was declared but is not a usable `repo@sha256:…` reference. */
+  | "image_ref_invalid"
   | "receipt_unparseable"
 
 export interface OfficialGradeReceiptFailure {
