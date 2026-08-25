@@ -245,7 +245,13 @@ const scanBatchFlags = (
       i++
       continue
     }
-    const handler = FLAG_HANDLERS[a]
+    // `Object.hasOwn`, not a bare lookup: `FLAG_HANDLERS` is an object literal,
+    // so `FLAG_HANDLERS["toString"]` resolves off Object.prototype and the flag
+    // is accepted as a handler. Measured before the guard: `quanta batch
+    // toString x` returned the STRING "[object Undefined]" instead of a Result,
+    // and `quanta batch hasOwnProperty x` THREW. Every real flag is an own key,
+    // so the guard changes nothing else.
+    const handler = Object.hasOwn(FLAG_HANDLERS, a) ? FLAG_HANDLERS[a] : undefined
     if (handler === undefined) return err(`unknown flag '${a}'`)
     const v = takeValue(argv, i, a)
     if (!v.ok) return v
