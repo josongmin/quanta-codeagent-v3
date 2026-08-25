@@ -65,6 +65,7 @@ export const buildGoalControl = (
   threadId: string,
   onMutation?: () => void,
   verifier?: ObjectiveVerificationPort,
+  onInfrastructureUnavailable?: (objectiveRevision: number, observedAt: number) => void,
 ): GoalControl => {
   const authority = asObjectiveAuthority(port)
   const read = (): ObjectiveDomainSnapshot => authority.readDomain(threadId)
@@ -122,8 +123,11 @@ export const buildGoalControl = (
       ]),
     setBudget: (budget) => commit({ kind: "amendBudget", budget }),
     verify: async () => {
-      if (verifier === undefined)
+      if (verifier === undefined) {
+        const domain = read()
+        onInfrastructureUnavailable?.(domain.revision, Date.now())
         return { kind: "rejected", reason: "verifier-unavailable", domain: read() }
+      }
       const verification = await verifier.verify(threadId)
       const domain = read()
       return verification.kind === "verified"

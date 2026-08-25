@@ -145,6 +145,9 @@ const FIELD_OVERRIDES: Readonly<Record<string, FieldOverride>> = {
   // `undefined` (the no-fixed-default sentinel), so this resolves to
   // field-exists-only — a direct field map suffices.
   QUANTA_STATUS_LINE_CONFIG: { mode: "field", field: "statusLineConfig" },
+  // Production safety floor clamps every generic probe (largest is 9999) to the
+  // 15000 default, so reflection cannot observe the otherwise live field.
+  QUANTA_GOAL_QUIET_MS: { mode: "field", field: "goalQuietMs" },
 }
 
 // ---------------------------------------------------------------------------

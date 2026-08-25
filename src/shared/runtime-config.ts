@@ -225,7 +225,15 @@ const parseCapabilitySlice = (env: RuntimeConfigEnv): Partial<RuntimeConfig> => 
     // Goal-pursuit quiet window only. This is deliberately independent of the
     // UI idle-suppression knobs; invalid/non-positive values retain the 15 s
     // catalog default instead of disabling continuation implicitly.
-    goalQuietMs: parsePositiveInt(env.QUANTA_GOAL_QUIET_MS, "QUANTA_GOAL_QUIET_MS") ?? 15_000,
+    goalQuietMs: Math.max(
+      15_000,
+      parsePositiveInt(env.QUANTA_GOAL_QUIET_MS, "QUANTA_GOAL_QUIET_MS") ?? 15_000,
+    ),
+    goalMaxBackoffMs:
+      parsePositiveInt(env.QUANTA_GOAL_MAX_BACKOFF_MS, "QUANTA_GOAL_MAX_BACKOFF_MS") ?? 900_000,
+    goalMaxAutonomousTurns:
+      parsePositiveInt(env.QUANTA_GOAL_MAX_AUTONOMOUS_TURNS, "QUANTA_GOAL_MAX_AUTONOMOUS_TURNS") ??
+      20,
     // Objective completion review is deliberately an enum, not a truthy flag:
     // unknown values fail closed to OFF and therefore cannot spend an LLM call.
     // GOAL-02 — the judge is telemetry only (`shadow`); the retired `reject`

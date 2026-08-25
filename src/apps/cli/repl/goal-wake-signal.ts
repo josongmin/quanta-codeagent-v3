@@ -8,6 +8,7 @@
  */
 export interface GoalWakeSignal {
   onGoalMutation(): void
+  onInfrastructureUnavailable?(objectiveRevision: number, observedAt: number): void
   onActivity(): void
   /** A local line was handled without starting an agent turn (slash or blank).
    * It starts a fresh quiet window after the user-visible command completed. */

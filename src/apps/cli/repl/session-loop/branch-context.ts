@@ -75,5 +75,6 @@ export interface InteractiveBranchCtx extends LoopMutableRefs {
    * continuation only observes it to avoid enqueueing over a live body. */
   readonly activeTurnRef: AgentConfig["activeTurnRef"]
   readonly activeIdentityModeState: { get: () => string } | undefined
+  readonly planQueueStore: import("@/agent/plan-queue").PlanQueueStore | undefined
   readonly enqueueWithHeartbeat: ReturnType<typeof heartbeatEnqueueHandler>
 }

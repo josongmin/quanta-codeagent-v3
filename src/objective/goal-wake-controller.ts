@@ -34,6 +34,7 @@ export type GoalWakeSkipReason =
 
 export interface GoalWakeAttempt {
   readonly threadId: string
+  readonly objectiveId: string
   readonly objectiveRevision: number
   /** A host-owned checkpoint counter; it changes whenever a new pursuit step
    * is eligible under the same objective revision. */
@@ -52,6 +53,8 @@ export interface GoalWakeAttemptReservation {
 
 export interface GoalWakeAttemptRegistry {
   tryClaim(attempt: GoalWakeAttempt): GoalWakeAttemptReservation | null
+  clearThread(threadId: string): void
+  size(): number
 }
 
 export interface GoalWakeTimer {
@@ -85,6 +88,8 @@ export interface GoalWakeControllerDeps {
   readonly enabled: boolean
   /** Positive finite duration of a quiet period before a wake is considered. */
   readonly quietWindowMs: number
+  /** Optional dynamic delay derived from durable objective evidence. Undefined skips arming. */
+  readonly resolveDelayMs?: ((current: ObjectiveDomainSnapshot) => number | undefined) | undefined
   readonly timer: GoalWakeTimer
   /** Read-only authority projection. It must be the same owner used by /goal. */
   readonly readDomain: (threadId: string) => ObjectiveDomainSnapshot
@@ -132,6 +137,20 @@ const activeRevision = (snapshot: ObjectiveDomainSnapshot | null): number | null
   return snapshot.revision
 }
 
+const wakeableRevision = (snapshot: ObjectiveDomainSnapshot | null): number | null => {
+  const status = snapshot?.state?.objective.status
+  if (
+    snapshot === null ||
+    snapshot.state === null ||
+    (status !== "active" && status !== "usage_limited") ||
+    !Number.isSafeInteger(snapshot.revision) ||
+    snapshot.revision < 0
+  ) {
+    return null
+  }
+  return snapshot.revision
+}
+
 /** Pure arm decision. It deliberately has no timer, authority or host probes. */
 export const evaluateGoalWakeArm = (input: {
   readonly enabled: boolean
@@ -146,7 +165,7 @@ export const evaluateGoalWakeArm = (input: {
     return skip("invalid-thread")
   }
   if (input.current === null || input.current.state === null) return skip("no-goal")
-  if (activeRevision(input.current) === null) return skip("goal-not-active")
+  if (wakeableRevision(input.current) === null) return skip("goal-not-active")
   return { arm: true }
 }
 
@@ -162,14 +181,23 @@ export const evaluateGoalWakeFire = (input: GoalWakeFireInput): GoalWakeDecision
   return { arm: true }
 }
 
-const keyFor = (threadId: string, objectiveRevision: number, checkpointOrdinal: number): string =>
-  JSON.stringify([threadId, objectiveRevision, checkpointOrdinal])
+const keyFor = (
+  threadId: string,
+  objectiveId: string,
+  objectiveRevision: number,
+  checkpointOrdinal: number,
+): string => JSON.stringify([threadId, objectiveId, objectiveRevision, checkpointOrdinal])
 
-const makeAttempt = (input: GoalWakeArm, objectiveRevision: number): GoalWakeAttempt => ({
+const makeAttempt = (
+  input: GoalWakeArm,
+  objectiveId: string,
+  objectiveRevision: number,
+): GoalWakeAttempt => ({
   threadId: input.threadId,
+  objectiveId,
   objectiveRevision,
   checkpointOrdinal: input.checkpointOrdinal,
-  attemptKey: keyFor(input.threadId, objectiveRevision, input.checkpointOrdinal),
+  attemptKey: keyFor(input.threadId, objectiveId, objectiveRevision, input.checkpointOrdinal),
 })
 
 /**
@@ -179,27 +207,58 @@ const makeAttempt = (input: GoalWakeArm, objectiveRevision: number): GoalWakeAtt
  * one shared registry instead.
  */
 export const createInMemoryGoalWakeAttemptRegistry = (): GoalWakeAttemptRegistry => {
-  const claims = new Map<string, { committed: boolean }>()
+  const claims = new Map<
+    string,
+    { highestCommittedOrdinal: number; reservedOrdinals: Set<number> }
+  >()
+  const prefixFor = (threadId: string): string => `${threadId}\0`
+  const clearThread = (threadId: string): void => {
+    const prefix = prefixFor(threadId)
+    for (const key of claims.keys()) if (key.startsWith(prefix)) claims.delete(key)
+  }
   return {
     tryClaim: (attempt): GoalWakeAttemptReservation | null => {
-      if (claims.has(attempt.attemptKey)) return null
-      const claim = { committed: false }
-      claims.set(attempt.attemptKey, claim)
+      const key = `${attempt.threadId}\0${attempt.objectiveId}`
+      for (const existing of claims.keys()) {
+        if (existing.startsWith(prefixFor(attempt.threadId)) && existing !== key) {
+          claims.delete(existing)
+        }
+      }
+      const claim = claims.get(key) ?? {
+        highestCommittedOrdinal: -1,
+        reservedOrdinals: new Set<number>(),
+      }
+      claims.set(key, claim)
+      if (
+        attempt.checkpointOrdinal <= claim.highestCommittedOrdinal ||
+        claim.reservedOrdinals.has(attempt.checkpointOrdinal)
+      ) {
+        return null
+      }
+      claim.reservedOrdinals.add(attempt.checkpointOrdinal)
       let settled = false
       return {
         commit: (): void => {
           if (settled) return
           settled = true
-          claim.committed = true
+          claim.reservedOrdinals.delete(attempt.checkpointOrdinal)
+          claim.highestCommittedOrdinal = Math.max(
+            claim.highestCommittedOrdinal,
+            attempt.checkpointOrdinal,
+          )
         },
         release: (): void => {
           if (settled) return
           settled = true
-          // A stale release must never erase a newer claimant for the same key.
-          if (claims.get(attempt.attemptKey) === claim) claims.delete(attempt.attemptKey)
+          claim.reservedOrdinals.delete(attempt.checkpointOrdinal)
+          if (claim.highestCommittedOrdinal < 0 && claim.reservedOrdinals.size === 0) {
+            claims.delete(key)
+          }
         },
       }
     },
+    clearThread,
+    size: () => claims.size,
   }
 }
 
@@ -242,7 +301,9 @@ export const createGoalWakeController = (deps: GoalWakeControllerDeps): GoalWake
     }
   }
 
-  const captureAttempt = (input: GoalWakeArm): GoalWakeAttempt | undefined => {
+  const captureAttempt = (
+    input: GoalWakeArm,
+  ): { readonly attempt: GoalWakeAttempt; readonly delayMs: number } | undefined => {
     const current = readCurrent(input.threadId)
     const decision = evaluateGoalWakeArm({
       enabled: deps.enabled,
@@ -251,12 +312,20 @@ export const createGoalWakeController = (deps: GoalWakeControllerDeps): GoalWake
       checkpointOrdinal: input.checkpointOrdinal,
       current,
     })
-    if (!decision.arm) return undefined
-    const revision = activeRevision(current)
+    if (!decision.arm || current?.state === null || current === null) {
+      if (current?.state === null || current === null) attempts.clearThread(input.threadId)
+      return undefined
+    }
+    const revision = wakeableRevision(current)
     // `evaluateGoalWakeArm` proved this. Retaining this branch makes a future
     // change to that pure function fail safe rather than minting an invalid key.
     if (revision === null) return undefined
-    return makeAttempt(input, revision)
+    const resolvedDelay = deps.resolveDelayMs?.(current) ?? delayMs
+    if (!Number.isFinite(resolvedDelay) || resolvedDelay <= 0) return undefined
+    return {
+      attempt: makeAttempt(input, current.state.objective.objectiveId, revision),
+      delayMs: resolvedDelay,
+    }
   }
 
   const quiescentAtFire = (threadId: string): boolean => {
@@ -307,10 +376,13 @@ export const createGoalWakeController = (deps: GoalWakeControllerDeps): GoalWake
     dispatchClaimed(attempt, reservation)
   }
 
-  const scheduleAttempt = (attempt: GoalWakeAttempt): GoalWakeAttempt | undefined => {
+  const scheduleAttempt = (
+    attempt: GoalWakeAttempt,
+    scheduleDelayMs: number,
+  ): GoalWakeAttempt | undefined => {
     const callbackGeneration = ++generation
     try {
-      const handle = deps.timer.set(() => fireAttempt(attempt, callbackGeneration), delayMs)
+      const handle = deps.timer.set(() => fireAttempt(attempt, callbackGeneration), scheduleDelayMs)
       pending = handle
       if (typeof handle === "object" && handle !== null) handle.unref?.()
       return attempt
@@ -326,8 +398,8 @@ export const createGoalWakeController = (deps: GoalWakeControllerDeps): GoalWake
       generation += 1
       clearPending()
     }
-    const attempt = captureAttempt(input)
-    return attempt === undefined ? undefined : scheduleAttempt(attempt)
+    const captured = captureAttempt(input)
+    return captured === undefined ? undefined : scheduleAttempt(captured.attempt, captured.delayMs)
   }
 
   return {

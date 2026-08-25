@@ -90,9 +90,10 @@ describe("goal wake controller pure fences", () => {
   test("fire requires the exact armed revision and a fresh quiescence check", () => {
     const expected = {
       threadId: "thread-1",
+      objectiveId: "objective:thread-1",
       objectiveRevision: 3,
       checkpointOrdinal: 1,
-      attemptKey: '["thread-1",3,1]',
+      attemptKey: '["thread-1","objective:thread-1",3,1]',
     }
     expect(
       evaluateGoalWakeFire({
@@ -153,12 +154,12 @@ describe("goal wake controller lifecycle", () => {
     expect(timer.scheduled()).toBe(2)
     expect(timer.cleared()).toBe(1)
     timer.fire()
-    expect(launched).toEqual(['["thread-1",1,1]'])
+    expect(launched).toEqual(['["thread-1","obj-1",1,1]'])
     controller.onActivity()
     timer.fire()
     controller.stop()
     timer.fire()
-    expect(launched).toEqual(['["thread-1",1,1]'])
+    expect(launched).toEqual(['["thread-1","obj-1",1,1]'])
   })
 
   test("a revision change or new input state drops the wake before enqueue", () => {
@@ -240,5 +241,33 @@ describe("goal wake controller lifecycle", () => {
     controller.arm({ threadId: "thread-1", checkpointOrdinal: 0 })
     timer.fire()
     expect(launches).toBe(2)
+  })
+
+  test("claim storage stays O(active objective), including after 100k ordinals and replace", () => {
+    const registry = createInMemoryGoalWakeAttemptRegistry()
+    for (let ordinal = 0; ordinal < 100_000; ordinal += 1) {
+      registry
+        .tryClaim({
+          threadId: "thread-1",
+          objectiveId: "objective-1",
+          objectiveRevision: 1,
+          checkpointOrdinal: ordinal,
+          attemptKey: `attempt-${ordinal}`,
+        })
+        ?.commit()
+    }
+    expect(registry.size()).toBe(1)
+    registry
+      .tryClaim({
+        threadId: "thread-1",
+        objectiveId: "objective-2",
+        objectiveRevision: 2,
+        checkpointOrdinal: 0,
+        attemptKey: "replacement",
+      })
+      ?.commit()
+    expect(registry.size()).toBe(1)
+    registry.clearThread("thread-1")
+    expect(registry.size()).toBe(0)
   })
 })

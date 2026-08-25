@@ -1,7 +1,12 @@
 import type { AgentConfig } from "@/agent"
 import { startAutomationEngineTicker } from "@/agent/loop-helpers"
 import type { ObjectivePort } from "@/objective"
-import { asObjectiveReadPort, buildPursuitContinuationPrompt } from "@/objective"
+import {
+  asObjectiveAuthority,
+  asObjectiveReadPort,
+  buildPursuitContinuationPrompt,
+  DEFAULT_GOAL_WAKE_POLICY,
+} from "@/objective"
 import { buildAutorunEligibility } from "@/permission"
 import { injectSimulatedTurn, type LastTurnOutcome, REACTOR_ENV_FLAG } from "@/reactor"
 import { gateOnStrict, logger, runtimeConfig } from "@/shared"
@@ -13,6 +18,7 @@ import { startReactorWatchBridge } from "../../reactor-watch-bridge"
 import type { TextInbox } from "../../text-inbox"
 import { wireInboxBannerOntoSlot } from "../automation-banner"
 import type { ExternalPromptQueue } from "../external-prompt-queue"
+import { isQuiescent } from "../goal-quiescence"
 import type { GoalWakeSignalSlot } from "../goal-wake-signal"
 import type { heartbeatEnqueueHandler } from "../heartbeat-binder"
 import { maybeCreateNdjsonSinkWire } from "../ndjson-wire"
@@ -64,6 +70,7 @@ export interface InteractiveSetupArgs {
   readonly goalWakeSlot: GoalWakeSignalSlot | undefined
   readonly activeTurnRef: AgentConfig["activeTurnRef"]
   readonly activeIdentityModeState: IdentityModeCell | undefined
+  readonly planQueueStore: import("@/agent/plan-queue").PlanQueueStore | undefined
   readonly enqueueWithHeartbeat: EnqueueWithHeartbeat
   readonly getLastTurnOutcome: () => LastTurnOutcome | undefined
   readonly getLastUserInputAt: () => number
@@ -96,6 +103,7 @@ export const wireInteractiveSetup = async (
     goalWakeSlot,
     activeTurnRef,
     activeIdentityModeState,
+    planQueueStore,
     enqueueWithHeartbeat,
     getLastTurnOutcome,
     setLastUserInputAt,
@@ -141,7 +149,10 @@ export const wireInteractiveSetup = async (
     goalWakeSlot,
     activeTurnRef,
     externalPromptQueue,
+    imageQueue,
     textInbox,
+    planQueueStore,
+    activeIdentityModeState,
   })
 
   armGoalPill({ setup, closeStack, objectiveStore })
@@ -255,7 +266,11 @@ const armGoalWake = (args: {
   readonly goalWakeSlot: GoalWakeSignalSlot | undefined
   readonly activeTurnRef: AgentConfig["activeTurnRef"]
   readonly externalPromptQueue: ExternalPromptQueue
+  readonly imageQueue: ImageQueue | undefined
   readonly textInbox: TextInbox | undefined
+  readonly planQueueStore: import("@/agent/plan-queue").PlanQueueStore | undefined
+  readonly activeIdentityModeState: IdentityModeCell | undefined
+  readonly attachingOrClosing?: (() => boolean) | undefined
 }): void => {
   const {
     setup,
@@ -264,15 +279,46 @@ const armGoalWake = (args: {
     goalWakeSlot,
     activeTurnRef,
     externalPromptQueue,
+    imageQueue,
     textInbox,
+    planQueueStore,
+    activeIdentityModeState,
   } = args
+  const quiescenceSnapshot = () => ({
+    turnActive: activeTurnRef?.current.currentTurn !== null,
+    planModeActive: setup.planMode || activeIdentityModeState?.get() === "plan",
+    externalPromptPending: externalPromptQueue.size() > 0,
+    textPending: (textInbox?.size() ?? 0) > 0,
+    imagePending: (imageQueue?.size() ?? 0) > 0,
+    planPending:
+      setup.sessionId !== undefined && planQueueStore !== undefined
+        ? planQueueStore.peek(setup.sessionId).length > 0
+        : false,
+    followupPending:
+      setup.sessionId !== undefined
+        ? (setup.lifecycleFollowUpQueue?.sizeFor(
+            setup.sessionId as import("@/agent/follow-up-queue").ThreadId,
+          ) ?? 0) > 0
+        : false,
+    approvalPending: (setup.midTurnApprovalChannel.pendingLabels?.().length ?? 0) > 0,
+    attachingOrClosing: args.attachingOrClosing?.() ?? false,
+  })
+  const hostIsQuiescent = (): boolean => isQuiescent(quiescenceSnapshot())
   const goalWake =
     objectiveStore !== undefined
       ? startGoalWakeController({
           enabled: runtimeConfig().goalContinuationEnforce,
           threadId: setup.sessionId,
           quietWindowMs: resolveGoalQuietWindowMs(),
-          readDomain: (tid) => asObjectiveReadPort(objectiveStore).readDomain(tid),
+          policy: {
+            ...DEFAULT_GOAL_WAKE_POLICY,
+            minQuietMs: runtimeConfig().goalQuietMs,
+            maxBackoffMs: runtimeConfig().goalMaxBackoffMs,
+            maxAutonomousTurns: runtimeConfig().goalMaxAutonomousTurns,
+          },
+          readDomain: (tid) => asObjectiveAuthority(objectiveStore).readDomain(tid),
+          authority: asObjectiveAuthority(objectiveStore),
+          isQuiescent: hostIsQuiescent,
           resumeAttempt: async (tid, attempt) => {
             const domain = asObjectiveReadPort(objectiveStore).readDomain(tid)
             const criteria = domain.state?.objective.successCriteria ?? []
@@ -304,14 +350,24 @@ const armGoalWake = (args: {
             // monitor is a user-presence/suppression affordance and must not
             // disable continuation when QUANTA_IDLE_SUPPRESS=0.
             threadIdle: () => true,
-            planModeActive: () => setup.planMode,
+            planModeActive: () => quiescenceSnapshot().planModeActive,
             // The runtime agent loop owns this holder from body start until the
             // body actually settles. This deliberately remains true after Ctrl+B
             // detaches the REPL wrapper, so a continuation cannot queue over a
             // backgrounded live body.
-            turnActive: () => activeTurnRef?.current.currentTurn !== null,
-            queuedInputPending: () => externalPromptQueue.size() > 0,
-            mailboxInputPending: () => (textInbox?.size() ?? 0) > 0,
+            turnActive: () => quiescenceSnapshot().turnActive,
+            queuedInputPending: () => {
+              const snapshot = quiescenceSnapshot()
+              return (
+                snapshot.externalPromptPending ||
+                snapshot.imagePending ||
+                snapshot.planPending ||
+                snapshot.followupPending ||
+                snapshot.approvalPending ||
+                snapshot.attachingOrClosing
+              )
+            },
+            mailboxInputPending: () => quiescenceSnapshot().textPending,
             isEphemeral: () => setup.sessionId === undefined,
             resume: async (tid) => {
               // SSOT pursuit discipline (anti-scope-shrink + verify-before-

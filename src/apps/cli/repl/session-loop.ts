@@ -106,6 +106,7 @@ export const runSessionLoop = async (deps: RunSessionLoopDeps): Promise<void> =>
       | import("@/objective").ObjectiveAttemptSlot
       | undefined,
     activeIdentityModeState: boot.activeIdentityModeState,
+    planQueueStore: deps.planQueueStore,
     enqueueWithHeartbeat: boot.enqueueWithHeartbeat,
     getSurfaceState,
     setSurfaceState,

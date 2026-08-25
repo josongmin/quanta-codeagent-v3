@@ -243,6 +243,8 @@ export interface RuntimeConfig extends RuntimeConfigPaths {
   /** Goal-pursuit quiet window (`QUANTA_GOAL_QUIET_MS`). Default 15,000 ms.
    * Independent of UI idle suppression and live through `/knobs set`. */
   readonly goalQuietMs: number
+  readonly goalMaxBackoffMs: number
+  readonly goalMaxAutonomousTurns: number
   /** Objective-completion judge mode (`QUANTA_GOAL_JUDGE`). `off` preserves
    * legacy completion behavior; `shadow` observes a bounded judge verdict as
    * telemetry only. GOAL-02 retired `reject`: completion is a deterministic

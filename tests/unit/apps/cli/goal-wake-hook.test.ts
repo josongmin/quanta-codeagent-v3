@@ -46,6 +46,81 @@ const probes = (
 })
 
 describe("goal wake host binding", () => {
+  test("does not arm until the full host projection is quiescent", () => {
+    const store = createObjectiveStore()
+    store.create(TID, { goal: "ship" })
+    const timer = fakeTimeout()
+    let quiet = false
+    const wake = startGoalWakeController({
+      enabled: true,
+      threadId: TID,
+      quietWindowMs: 10,
+      probes: probes(store, async () => undefined),
+      readDomain: (id) => asObjectiveAuthority(store).readDomain(id),
+      isQuiescent: () => quiet,
+      setTimeoutFn: timer.set,
+      clearTimeoutFn: timer.clear,
+    })
+    expect(timer.delays()).toEqual([])
+    quiet = true
+    wake?.onTurnSettled()
+    expect(timer.delays()).toEqual([10])
+  })
+
+  test("installs the product turn cap but preserves an explicit objective cap", () => {
+    const store = createObjectiveStore()
+    const authority = asObjectiveAuthority(store)
+    store.create(TID, { goal: "ship" })
+    startGoalWakeController({
+      enabled: true,
+      threadId: TID,
+      quietWindowMs: 10,
+      policy: { minQuietMs: 10, maxBackoffMs: 100, maxAutonomousTurns: 3, cooldownMs: 50 },
+      probes: probes(store, async () => undefined),
+      readDomain: (id) => authority.readDomain(id),
+      authority,
+      setTimeoutFn: fakeTimeout().set,
+    })
+    expect(store.get(TID)?.budget.maxTurns).toBe(3)
+
+    store.create("explicit", { goal: "ship", budget: { maxTurns: 5 } })
+    startGoalWakeController({
+      enabled: true,
+      threadId: "explicit",
+      quietWindowMs: 10,
+      policy: { minQuietMs: 10, maxBackoffMs: 100, maxAutonomousTurns: 3, cooldownMs: 50 },
+      probes: probes(store, async () => undefined),
+      readDomain: (id) => authority.readDomain(id),
+      authority,
+      setTimeoutFn: fakeTimeout().set,
+    })
+    expect(store.get("explicit")?.budget.maxTurns).toBe(5)
+  })
+
+  test("same-revision infrastructure failure schedules only after cooldown", () => {
+    const store = createObjectiveStore()
+    store.create(TID, { goal: "ship" })
+    const timer = fakeTimeout()
+    let now = 1_000
+    const wake = startGoalWakeController({
+      enabled: true,
+      threadId: TID,
+      quietWindowMs: 10,
+      policy: { minQuietMs: 10, maxBackoffMs: 100, maxAutonomousTurns: 3, cooldownMs: 300 },
+      probes: probes(store, async () => undefined),
+      readDomain: (id) => asObjectiveAuthority(store).readDomain(id),
+      now: () => now,
+      setTimeoutFn: timer.set,
+      clearTimeoutFn: timer.clear,
+    })
+    wake?.onInfrastructureUnavailable(asObjectiveAuthority(store).readDomain(TID).revision, now)
+    expect(timer.delays()).toEqual([10, 300])
+    store.replace(TID, { goal: "ship after revision change" })
+    now += 1
+    wake?.onGoalMutation()
+    expect(timer.delays()).toEqual([10, 300, 10])
+  })
+
   test("an active authority objective wakes exactly once from the quiet-window edge", async () => {
     const store = createObjectiveStore()
     store.create(TID, { goal: "ship" })

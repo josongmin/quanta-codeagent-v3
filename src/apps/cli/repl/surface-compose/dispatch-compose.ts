@@ -161,6 +161,8 @@ export const buildSurfaceDispatchWire = (
             setup.sessionId,
             () => core.goalWakeSlot?.current?.onGoalMutation(),
             core.objectiveVerification,
+            (revision, observedAt) =>
+              core.goalWakeSlot?.current?.onInfrastructureUnavailable?.(revision, observedAt),
           ),
         }
       : {}),
