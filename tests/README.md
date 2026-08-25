@@ -14,6 +14,9 @@ entry point — read it before adding tests.
 | smoke | `tests/smoke/` | 26 | replay (Tier-0) + live (Tier-1) | `smoke` / `smoke:live` | ~seconds (replay) |
 | eval | `src/apps/bench/` | n/a | non-deterministic (real LLM) | nightly / `eval` label, non-blocking | minutes–hours |
 | meta | `tests/meta/` | 1 | filesystem-only (hellgate) | every push/PR (bundled with `test:unit`) | sub-second |
+| adversarial | `tests/adversarial/` | 2 | full (in-proc) | every push/PR (bundled with `test:unit`) | ~3 s |
+| measurement | `tests/measurement/` | 1 | full (in-proc) | every push/PR (bundled with `test:unit`) | sub-second |
+| retrieval-eval | `tests/eval/` | 6 | non-deterministic (LIVE provider APIs, polite-skip without keys) | `eval:retrieval` only — never on a gate, it spends money | seconds |
 
 ### `tests/integration/agent-loop-bugbash/` (ALBB-24 proof rail)
 
@@ -26,6 +29,18 @@ structural). Each `describe` embeds its ALBB id; see the namespace's own
 index. Bug-bash CI slice:
 `bun test tests/integration/agent-loop-bugbash tests/unit/agent/albb-*`.
 
+### Which directories a gate actually reaches
+
+The table above is a claim, and claims rot. `tests/unit/_arch/gated-test-scope-ratchet.test.ts`
+derives the gated roots from `package.json` and fails when a directory of
+`*.test.ts` is reachable by NO script — which is not hypothetical: `tests/meta/`,
+`tests/adversarial/`, `tests/measurement/` and all six of `tests/eval/` were in
+exactly that state on 2026-08-25, while this file, `bunfig.toml` and the feature
+catalog all asserted that the meta hellgate ran at CI time. A directory that is
+deliberately off the per-push gate must name its runner in that ratchet's
+`OUT_OF_BAND` table, and the ratchet checks the script both EXISTS and still
+mentions the directory.
+
 ### Artifact-purge policy
 
 Only TypeScript source is authoritative. Any `.test.js` under `tests/` or
@@ -36,7 +51,11 @@ first, silently testing stale production code. Enforcement is two-layer:
 
 1. Every test script (`test`, `test:unit`, `test:fast`, …) is prefixed with
    `bun run test:clean-js`, which removes test artifacts and source mirrors
-   before the run. `bun test <path>` is covered by the earlier
+   before the run. It deletes EVERY `.js` under `tests/` (not just `*.test.js`):
+   `tests/**/*.js` is gitignored, so nothing tracked is at risk, and the narrower
+   rule had left 35 stale mirrors in place — including
+   `tests/eval/retrieval/_helpers.js`, whose `.ts` source had since diverged and
+   which the extensionless `./_helpers` import would have resolved to FIRST. `bun test <path>` is covered by the earlier
    `preload-clean-source-js.ts` preload. Manual cleanup: `bun run test:clean-js`.
 2. `tests/meta/no-test-js-artifacts-hellgate.test.ts` walks the test tree and
    fails CI if any `.test.js` survives.

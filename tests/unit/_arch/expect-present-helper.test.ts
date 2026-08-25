@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 
-import { nth, present } from "./expect-present"
+import { nth, present } from "../../_helpers/expect-present"
 
 /**
  * The helper exists for its failure MESSAGE, so the message is what this pins.

@@ -1,0 +1,183 @@
+/**
+ * Ratchet — a `*.test.ts` that no gate runs is not a test, it is a comment.
+ *
+ * `bun test tests/unit tests/integration` (and `test:ci`, which adds
+ * `tests/contract`) is what every gate, every contributor and every agent
+ * actually runs. A test file outside those three roots executes only if some
+ * OTHER script names its directory. Nothing enforces that, and the failure is
+ * silent in the worst way: the file exists, it is tracked, it typechecks, it
+ * reads like a guarantee — and it has never once been executed.
+ *
+ * This was not hypothetical when the ratchet was written. Two live examples:
+ *
+ *   - `tests/meta/no-test-js-artifacts-hellgate.test.ts` guards against stale
+ *     `.test.js` emit (a real 2026-05-25 incident: 520 orphan files causing
+ *     double execution). `bunfig.toml` states in a comment that it "asserts this
+ *     at CI time". No script and no workflow names `tests/meta`. The comment was
+ *     describing a guarantee that did not exist.
+ *   - `tests/_helpers/expect-present.test.ts` pinned the failure MESSAGES of the
+ *     two helpers that ~100 test files now read their values through — the whole
+ *     justification for retiring 593 non-null assertions — from a directory no
+ *     glob covers. Moved into `tests/unit/_arch/` in the same commit as this
+ *     ratchet.
+ *
+ * ## What is pinned
+ *
+ * Not "every test must live under the gated roots" — several directories are
+ * deliberately outside, with their own runner and their own reasons (a PTY
+ * harness that needs a real terminal, live-API embedder evals, an
+ * hours-long smoke battery). Those are listed with the runner that reaches
+ * them, so the list doubles as the answer to "how do I run this file".
+ *
+ * What must not happen is a NEW directory of test files appearing with no runner
+ * at all — which is how both examples above came to be. So the allowlist is by
+ * DIRECTORY and it is closed: an unlisted one fails.
+ */
+
+import { describe, expect, test } from "bun:test"
+import { readdirSync, readFileSync } from "node:fs"
+import { join } from "node:path"
+
+const REPO_ROOT = join(import.meta.dir, "..", "..", "..")
+
+const scripts = (): Readonly<Record<string, string>> => {
+  const pkg = JSON.parse(readFileSync(join(REPO_ROOT, "package.json"), "utf8")) as {
+    scripts?: Record<string, string>
+  }
+  return pkg.scripts ?? {}
+}
+
+/**
+ * The `tests/<dir>` roots the PER-PUSH gates actually point `bun test` at.
+ *
+ * DERIVED from `package.json` rather than restated here. Restating them is the
+ * very drift this file exists to catch: `bunfig.toml`, `tests/README.md` and
+ * the feature catalog all asserted that `tests/meta/` runs at CI time while no
+ * script named it, and each of those three was a hand-written copy of a fact
+ * nobody rechecked.
+ */
+export const gatedRoots = (allScripts: Readonly<Record<string, string>>): readonly string[] => {
+  const gates = ["test", "test:unit", "test:integration", "test:ci"]
+  const roots = new Set<string>()
+  for (const g of gates) {
+    for (const m of (allScripts[g] ?? "").matchAll(/\bbun test ([^&|]*)/g)) {
+      for (const tok of (m[1] ?? "").split(/\s+/)) {
+        const dir = /^tests\/([A-Za-z0-9_-]+)/.exec(tok)?.[1]
+        if (dir !== undefined) roots.add(dir)
+      }
+    }
+  }
+  return [...roots].sort()
+}
+
+/** True when SOME script mentions the directory — i.e. a human can run it at all. */
+export const reachableByAnyScript = (
+  dir: string,
+  allScripts: Readonly<Record<string, string>>,
+): boolean => Object.values(allScripts).some((cmd) => cmd.includes(`tests/${dir}`))
+
+/**
+ * Directories of `*.test.ts` that live OUTSIDE the per-push gates on purpose,
+ * each with the runner that executes them. An entry is a promise that the named
+ * script exists AND mentions the directory — both checked below, so a
+ * justification cannot rot into a comment the way the three above did.
+ */
+const OUT_OF_BAND: Readonly<Record<string, { readonly runner: string; readonly why: string }>> = {
+  "e2e-pty": {
+    runner: "e2e:pty",
+    why: "raw-mode interactive CLI e2e — needs a real pty (FFI openpty), which the normal runner cannot provide.",
+  },
+  smoke: {
+    runner: "smoke",
+    why: "the smoke battery drives a real agent loop with recorded tool/LLM replay; deliberately off the per-commit path.",
+  },
+  eval: {
+    runner: "eval:retrieval",
+    why: "retrieval embedder/reranker evals hit LIVE provider APIs and cost money; run deliberately, never on a gate.",
+  },
+}
+
+/** Every directory under `tests/` that contains at least one `*.test.ts`. */
+const testDirsUnderTests = (): readonly string[] => {
+  const found = new Set<string>()
+  const walk = (rel: string): void => {
+    for (const ent of readdirSync(join(REPO_ROOT, "tests", rel), { withFileTypes: true })) {
+      if (ent.name === "node_modules" || ent.name.startsWith(".")) continue
+      const child = rel === "" ? ent.name : `${rel}/${ent.name}`
+      if (ent.isDirectory()) walk(child)
+      else if (ent.name.endsWith(".test.ts")) found.add(rel === "" ? "." : rel)
+    }
+  }
+  walk("")
+  return [...found].sort()
+}
+
+const topSegment = (rel: string): string => (rel === "." ? "." : (rel.split("/")[0] as string))
+
+describe("gated test scope", () => {
+  const dirs = testDirsUnderTests()
+
+  test("anti-vacuity: the walk finds the real test tree", () => {
+    // If this ever went small, every assertion below would pass for free.
+    expect(dirs.length).toBeGreaterThan(50)
+    expect(dirs.some((d) => d.startsWith("unit"))).toBe(true)
+    expect(dirs.some((d) => d.startsWith("integration"))).toBe(true)
+  })
+
+  const all = scripts()
+  const gated = gatedRoots(all)
+
+  test("the gate globs are readable from package.json at all", () => {
+    // If this regexed to nothing, every directory would look ungated and the
+    // next assertion would fail for the wrong reason.
+    expect(gated).toContain("unit")
+    expect(gated).toContain("integration")
+  })
+
+  test("every test directory is either GATED or has a declared runner", () => {
+    const orphans = [...new Set(dirs.map(topSegment))]
+      .filter((seg) => !gated.includes(seg))
+      .filter((seg) => OUT_OF_BAND[seg] === undefined)
+      .sort()
+    expect(
+      orphans,
+      orphans.length === 0
+        ? ""
+        : `these hold *.test.ts that NO gate runs — add them to the gate globs in package.json (currently ${gated.join(
+            ", ",
+          )}) or add an OUT_OF_BAND entry naming the runner that does:\n  ${orphans
+            .map((o) => `tests/${o}/`)
+            .join("\n  ")}`,
+    ).toEqual([])
+  })
+
+  test("every out-of-band runner exists AND actually reaches its directory", () => {
+    // The half that rots: an entry claims a runner, the script is renamed or
+    // repointed, and the justification becomes as false as the bunfig comment
+    // that prompted this ratchet. Existence alone is not enough — the script
+    // must still mention the directory.
+    expect(Object.keys(all).length).toBeGreaterThan(10) // the read is real
+    for (const [dir, { runner }] of Object.entries(OUT_OF_BAND)) {
+      expect(
+        all[runner],
+        `tests/${dir}/ claims runner \`${runner}\`, which does not exist`,
+      ).toBeDefined()
+      expect(
+        reachableByAnyScript(dir, all),
+        `no script mentions tests/${dir}/ — it is unreachable however it is labelled`,
+      ).toBe(true)
+    }
+  })
+
+  test("no out-of-band entry is stale — each directory still exists and holds tests", () => {
+    // One-directional the other way: an entry that no longer matches anything is
+    // a permission nobody needs, and it would silently re-admit the directory if
+    // it ever came back for a different reason.
+    const segments = new Set(dirs.map(topSegment))
+    for (const dir of Object.keys(OUT_OF_BAND)) {
+      expect(segments.has(dir), `OUT_OF_BAND lists tests/${dir}/, which has no *.test.ts`).toBe(
+        true,
+      )
+    }
+  })
+})
