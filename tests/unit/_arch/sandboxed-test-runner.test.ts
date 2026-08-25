@@ -29,6 +29,9 @@ import { join } from "node:path"
 import {
   assertPreloadsMatchBunfig,
   batches,
+  expandTestFiles,
+  parseArgs,
+  parseConcurrentBunTests,
   parseUntracked,
   walkRelative,
 } from "@/../tools/dev/sandboxed-test"
@@ -65,6 +68,51 @@ describe("sandboxed-test runner", () => {
     })
   })
 
+  describe("argv parsing", () => {
+    // A real bug, not a hypothetical: `--batch`'s value sits at `batchIdx + 1`,
+    // and with the flag ABSENT `batchIdx` is -1, so `batchIdx + 1` is 0 — the
+    // FIRST path argument was silently dropped and the run fell back to the
+    // `tests/unit` default while reporting as though it had run the slice asked
+    // for. Every single-target invocation was measuring the wrong set.
+    test("🔴 a lone path is kept (it used to be dropped)", () => {
+      expect(parseArgs(["tests/unit/retrieval"])).toEqual({
+        batchCount: 1,
+        targets: ["tests/unit/retrieval"],
+      })
+    })
+
+    test("several paths with no flag are all kept", () => {
+      expect(parseArgs(["a", "b", "c"]).targets).toEqual(["a", "b", "c"])
+    })
+
+    test("--batch consumes exactly its value, wherever it sits", () => {
+      expect(parseArgs(["--batch", "8", "tests/unit"])).toEqual({
+        batchCount: 8,
+        targets: ["tests/unit"],
+      })
+      expect(parseArgs(["tests/unit", "--batch", "4"])).toEqual({
+        batchCount: 4,
+        targets: ["tests/unit"],
+      })
+    })
+
+    test("a path that happens to look like the batch value is NOT eaten", () => {
+      // `--batch 2` then a path literally named "2" would be ambiguous; the
+      // value is taken positionally, so only the index after the flag is spent.
+      expect(parseArgs(["--batch", "2", "2"]).targets).toEqual(["2"])
+    })
+
+    test("a non-numeric or non-positive --batch is refused, not silently 1", () => {
+      for (const bad of ["x", "0", "-1", "1.5"]) {
+        expect(() => parseArgs(["--batch", bad, "tests/unit"]), bad).toThrow(/positive integer/)
+      }
+    })
+
+    test("no arguments means no targets — the caller supplies the default", () => {
+      expect(parseArgs([])).toEqual({ batchCount: 1, targets: [] })
+    })
+  })
+
   describe("batch localization", () => {
     test("splits into contiguous batches that reassemble to the input", () => {
       const xs = Array.from({ length: 10 }, (_, i) => i)
@@ -89,6 +137,38 @@ describe("sandboxed-test runner", () => {
 
     test("an empty input stays empty rather than becoming one empty batch to run", () => {
       expect(batches([], 4)).toEqual([[]])
+    })
+  })
+
+  describe("exact test-file expansion", () => {
+    test("mirrors Bun discovery and refuses explicit non-test files", () => {
+      const dir = mkdtempSync(join(tmpdir(), "sbx-expand-"))
+      try {
+        mkdirSync(join(dir, ".scratch"), { recursive: true })
+        writeFileSync(join(dir, "real.test.ts"), "test('real', () => {})")
+        writeFileSync(join(dir, "helper.ts"), "export {}")
+        writeFileSync(join(dir, ".scratch", "hidden.test.ts"), "test('hidden', () => {})")
+        expect(expandTestFiles([dir])).toEqual([join(dir, "real.test.ts")])
+        expect(expandTestFiles([join(dir, "helper.ts")])).toEqual([])
+      } finally {
+        rmSync(dir, { recursive: true, force: true })
+      }
+    })
+  })
+
+  describe("concurrent Bun test sampling", () => {
+    test("accepts real bun test commands and ignores text matches in wrappers", () => {
+      const sample = [
+        "101 bun test tests/unit/a.test.ts",
+        "102 /opt/homebrew/bin/bun test tests/unit/b.test.ts",
+        "103 rg bun test",
+        "104 /bin/zsh -c echo bun test",
+        "105 bun run tools/dev/sandboxed-test.ts",
+      ].join("\n")
+      expect(parseConcurrentBunTests(sample)).toEqual([
+        "101 bun test tests/unit/a.test.ts",
+        "102 /opt/homebrew/bin/bun test tests/unit/b.test.ts",
+      ])
     })
   })
 

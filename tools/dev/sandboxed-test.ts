@@ -75,6 +75,14 @@ import { fileURLToPath } from "node:url"
 
 const repoRoot = dirname(dirname(dirname(fileURLToPath(import.meta.url))))
 
+const writeStdout = (message: string): void => {
+  process.stdout.write(`${message}\n`)
+}
+
+const writeStderr = (message: string): void => {
+  process.stderr.write(`${message}\n`)
+}
+
 /** The preloads `bunfig.toml` applies when the suite runs from the repo root.
  *  Duplicated here because a foreign CWD cannot resolve them; kept honest by
  *  {@link assertPreloadsMatchBunfig}. */
@@ -169,6 +177,46 @@ const describePath = (root: string, rel: string): string => {
   return `${rel}  (${size} bytes)  ${preview === "" ? "<empty>" : `"${preview}"`}`
 }
 
+/**
+ * Other `bun test` processes running against this checkout right now.
+ *
+ * The sandbox makes anything in the SANDBOX attributable with no caveat, but the
+ * repo-side check has no such property: a second run with a normal cwd writes
+ * into the same repo root, and this run would blame itself. That is not
+ * hypothetical — the first full sandboxed run reported two paths as a
+ * containment breach while a concurrent `bun test tests/unit src` was live, and
+ * the file timestamps landed inside its window.
+ *
+ * Process sampling is best-effort by design: it can miss (a run that starts and ends
+ * between the two samples) and can over-report (an unrelated `bun test` in a
+ * different checkout). It exists to stop the report ASSERTING a mechanism it
+ * cannot know, not to be authoritative.
+ */
+export const parseConcurrentBunTests = (psText: string): readonly string[] =>
+  psText
+    .split("\n")
+    .map((l) => l.trim())
+    .filter((line) => {
+      const match = /^\d+\s+(.+)$/.exec(line)
+      if (match === null) return false
+      const command = match[1] ?? ""
+      // Match the executable command, not a shell/rg argument that merely
+      // contains the words "bun test". Both `bun test` and `/path/to/bun test`
+      // are admitted.
+      return /(?:^|\/)bun\s+test(?:\s|$)/.test(command) && !command.includes("sandboxed-test")
+    })
+
+const concurrentBunTests = (): readonly string[] => {
+  // macOS `pgrep -af` can print only PIDs despite `-a`; `ps` is the portable
+  // source of the full command line on both macOS and Linux.
+  const proc = Bun.spawnSync(["ps", "-axo", "pid=,command="], {
+    stdout: "pipe",
+    stderr: "ignore",
+  })
+  if (proc.exitCode !== 0) return ["process sampling unavailable"]
+  return parseConcurrentBunTests(proc.stdout.toString())
+}
+
 const repoUntracked = (): ReadonlySet<string> => {
   const proc = Bun.spawnSync(["git", "status", "--porcelain=v1", "-uall", "-z"], {
     cwd: repoRoot,
@@ -183,6 +231,29 @@ const repoUntracked = (): ReadonlySet<string> => {
   return parseUntracked(proc.stdout.toString())
 }
 
+/**
+ * Split argv into the batch count and the requested paths.
+ *
+ * Exported because the flag/positional split had a real bug that no run would
+ * surface: `--batch`'s VALUE sits at `batchIdx + 1`, and with the flag ABSENT
+ * `batchIdx` is `-1`, so `batchIdx + 1` is `0` — dropping the FIRST path
+ * argument. `sandboxed-test.ts tests/unit/retrieval` therefore fell back to the
+ * `tests/unit` default and ran the whole suite while reporting as though it had
+ * run the slice asked for. A wrong-but-plausible scope is exactly the failure
+ * this tool exists to prevent elsewhere, so the parsing is pinned.
+ */
+export const parseArgs = (
+  argv: readonly string[],
+): { readonly batchCount: number; readonly targets: readonly string[] } => {
+  const batchIdx = argv.indexOf("--batch")
+  const batchCount = batchIdx === -1 ? 1 : Number(argv[batchIdx + 1] ?? "1")
+  if (batchIdx !== -1 && (!Number.isInteger(batchCount) || batchCount < 1)) {
+    throw new Error("sandboxed-test: --batch needs a positive integer")
+  }
+  const valueIdx = batchIdx === -1 ? -1 : batchIdx + 1
+  return { batchCount, targets: argv.filter((a, i) => a !== "--batch" && i !== valueIdx) }
+}
+
 /** Split `xs` into `n` contiguous batches, dropping empties. */
 export const batches = <T>(xs: readonly T[], n: number): readonly (readonly T[])[] => {
   if (n <= 1 || xs.length === 0) return [xs]
@@ -193,11 +264,17 @@ export const batches = <T>(xs: readonly T[], n: number): readonly (readonly T[])
 }
 
 /** Every `*.test.ts` under the given roots — the unit of batching. */
-const expandTestFiles = (roots: readonly string[]): readonly string[] => {
+export const expandTestFiles = (roots: readonly string[]): readonly string[] => {
   const { readdirSync } = require("node:fs") as typeof import("node:fs")
   const out: string[] = []
   const walk = (dir: string): void => {
     for (const ent of readdirSync(dir, { withFileTypes: true })) {
+      // Skip dot-directories and node_modules to MIRROR bun's own discovery.
+      // Without this the expansion finds files bun will never match, hands them
+      // over as filters, and bun answers a non-matching filter by running a much
+      // larger set — the exact silent-broadening the caller's guard exists to
+      // refuse. Matching bun here closes the hole instead of documenting it.
+      if (ent.name === "node_modules" || ent.name.startsWith(".")) continue
       const abs = join(dir, ent.name)
       if (ent.isDirectory()) walk(abs)
       else if (abs.endsWith(".test.ts")) out.push(abs)
@@ -205,7 +282,7 @@ const expandTestFiles = (roots: readonly string[]): readonly string[] => {
   }
   for (const r of roots) {
     if (statSync(r).isDirectory()) walk(r)
-    else out.push(r)
+    else if (r.endsWith(".test.ts")) out.push(r)
   }
   return out.sort()
 }
@@ -213,13 +290,7 @@ const expandTestFiles = (roots: readonly string[]): readonly string[] => {
 if (import.meta.main) {
   assertPreloadsMatchBunfig(readFileSync(join(repoRoot, "bunfig.toml"), "utf8"))
 
-  const argv = process.argv.slice(2)
-  const batchIdx = argv.indexOf("--batch")
-  const batchCount = batchIdx === -1 ? 1 : Number(argv[batchIdx + 1] ?? "1")
-  if (batchIdx !== -1 && (!Number.isInteger(batchCount) || batchCount < 1)) {
-    throw new Error("sandboxed-test: --batch needs a positive integer")
-  }
-  const targets = argv.filter((a, i) => a !== "--batch" && i !== batchIdx + 1)
+  const { batchCount, targets } = parseArgs(process.argv.slice(2))
   const testPaths = (targets.length > 0 ? targets : ["tests/unit"]).map((p) =>
     p.startsWith("/") ? p : join(repoRoot, p),
   )
@@ -227,9 +298,29 @@ if (import.meta.main) {
     if (!existsSync(p)) throw new Error(`sandboxed-test: no such test path: ${p}`)
   }
 
-  const groups = batchCount === 1 ? [testPaths] : batches(expandTestFiles(testPaths), batchCount)
+  // Expand to real files ALWAYS, not only for --batch. `bun test <arg>` treats an
+  // argument as a FILTER unless it resolves to something bun discovered, and a
+  // filter that matches nothing does NOT fail — bun runs a much larger set
+  // instead. A "clean sandbox" verdict over a set nobody asked for is the worst
+  // outcome this tool can produce, so the expansion is checked, not trusted.
+  // (Observed: `sandboxed-test.ts tools/dev` ran for ten minutes over the whole
+  // suite and would have reported it clean.)
+  //
+  // The expansion mirrors bun's discovery (see `expandTestFiles`), so a path
+  // that only holds tests under a dot-directory expands to nothing and is
+  // refused here rather than silently becoming a whole-suite run.
+  const files = expandTestFiles(testPaths)
+  if (files.length === 0) {
+    throw new Error(
+      `sandboxed-test: the requested paths contain no *.test.ts:\n  ${testPaths.join("\n  ")}\n` +
+        "Refusing rather than handing bun a filter that matches nothing — it would " +
+        "silently run a DIFFERENT, much larger set and this tool would report it clean.",
+    )
+  }
+  const groups = batchCount === 1 ? [files] : batches(files, batchCount)
   const preloadArgs = PRELOADS.flatMap((p) => ["--preload", join(repoRoot, p)])
   const before = repoUntracked()
+  const othersAtStart = concurrentBunTests()
 
   let worstExit = 0
   const guilty: Array<{
@@ -241,7 +332,7 @@ if (import.meta.main) {
   for (const [i, group] of groups.entries()) {
     const sandbox = mkdtempSync(join(tmpdir(), "quanta-test-cwd-"))
     if (groups.length > 1)
-      console.log(`\n── sandbox batch ${i + 1}/${groups.length} (${group.length} file(s)) ──`)
+      writeStdout(`\n── sandbox batch ${i + 1}/${groups.length} (${group.length} file(s)) ──`)
     const run = Bun.spawnSync(["bun", "test", ...preloadArgs, ...group], {
       cwd: sandbox,
       stdout: "inherit",
@@ -251,7 +342,7 @@ if (import.meta.main) {
     if ((run.exitCode ?? 1) !== 0) worstExit = run.exitCode ?? 1
     const strays = walkRelative(sandbox)
     if (strays.length > 0) {
-      console.error(
+      writeStderr(
         `\nSANDBOX ARTIFACTS (batch ${i + 1}/${groups.length}) — the run wrote ${strays.length} path(s) into its working directory:\n` +
           strays.map((p) => `  ${describePath(sandbox, p)}`).join("\n"),
       )
@@ -261,10 +352,11 @@ if (import.meta.main) {
   }
 
   const after = repoUntracked()
+  const others = [...new Set([...othersAtStart, ...concurrentBunTests()])]
   const leakedIntoRepo = [...after].filter((p) => !before.has(p)).sort()
 
   if (guilty.length > 0) {
-    console.error(
+    writeStderr(
       "\nThese are attributable to THIS run with no caveat: nothing else on the machine\n" +
         "knows those directories. Each is a test writing to a bare relative path — which,\n" +
         "run the normal way, lands in the REPO ROOT instead. Fix the test to write under a\n" +
@@ -273,7 +365,7 @@ if (import.meta.main) {
     if (groups.length > 1) {
       for (const g of guilty) {
         const narrower = Math.max(2, Math.floor(g.files.length / 8))
-        console.error(
+        writeStderr(
           `\nTo narrow batch ${g.batch} further, re-run just its files with more batches:\n` +
             `  bun run tools/dev/sandboxed-test.ts --batch ${narrower} \\\n` +
             g.files
@@ -286,19 +378,28 @@ if (import.meta.main) {
         )
       }
     } else {
-      console.error("\nRe-run with `--batch 8` to localize which slice of the suite produced it.")
+      writeStderr("\nRe-run with `--batch 8` to localize which slice of the suite produced it.")
     }
   }
   if (leakedIntoRepo.length > 0) {
-    console.error(
-      `\nCONTAINMENT BREACH — ${leakedIntoRepo.length} path(s) reached the REPO despite the sandbox:\n` +
+    writeStderr(
+      `\nPATHS REACHED THE REPO — ${leakedIntoRepo.length}, despite the sandbox:\n` +
         leakedIntoRepo.map((p) => `  ${describePath(repoRoot, p)}`).join("\n") +
-        "\n\nA sandboxed cwd only redirects RELATIVE paths. These were written through an\n" +
-        "absolute repo path, so they need fixing at the source.",
+        (others.length > 0
+          ? "\n\nATTRIBUTION IS AMBIGUOUS: other `bun test` process(es) were running\n" +
+            "against this checkout during this run —\n" +
+            `${others.map((o) => `  ${o}`).join("\n")}\n` +
+            "A run with a normal cwd writes into this same repo root, so these paths\n" +
+            "may be theirs. Re-run when the checkout is quiet before concluding\n" +
+            "anything about the mechanism."
+          : "\n\nNo other `bun test` was detected against this checkout, so this run is the\n" +
+            "likely writer. A sandboxed cwd only redirects RELATIVE paths, which points at\n" +
+            "an absolute repo path at the source — but process sampling can miss a short-lived run,\n" +
+            "so confirm on a second quiet run before acting on that reading."),
     )
   }
   if (guilty.length === 0 && leakedIntoRepo.length === 0) {
-    console.log(
+    writeStdout(
       `sandboxed-test: clean — ${groups.length} sandbox(es) empty, ${before.size} untracked repo path(s) before and after.`,
     )
   }
