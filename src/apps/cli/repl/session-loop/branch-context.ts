@@ -9,6 +9,7 @@ import type { BackgroundTurnPortal } from "../background-turn-portal"
 import type { ConvCheckpointWire } from "../conv-checkpoint-wire"
 import type { ConversationActionSurface } from "../conversation-action-surface"
 import type { ExternalPromptQueue } from "../external-prompt-queue"
+import type { GoalWakeSignalSlot } from "../goal-wake-signal"
 import type { heartbeatEnqueueHandler } from "../heartbeat-binder"
 import type { ComposePromptPipelineDeps, DispatchSlash } from "../prompt-pipeline"
 import type { SessionSetupResult } from "../session-setup"
@@ -67,6 +68,10 @@ export interface InteractiveBranchCtx extends LoopMutableRefs {
   readonly ux: ComposePromptPipelineDeps["ux"]
   readonly contextWarning: (() => string) | undefined
   readonly objectiveStore: ObjectivePort | undefined
+  readonly goalWakeSlot: GoalWakeSignalSlot | undefined
+  /** Shared runtime turn holder. The agent loop is its sole writer; goal
+   * continuation only observes it to avoid enqueueing over a live body. */
+  readonly activeTurnRef: AgentConfig["activeTurnRef"]
   readonly activeIdentityModeState: { get: () => string } | undefined
   readonly enqueueWithHeartbeat: ReturnType<typeof heartbeatEnqueueHandler>
 }

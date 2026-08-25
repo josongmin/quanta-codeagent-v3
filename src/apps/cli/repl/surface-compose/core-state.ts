@@ -20,7 +20,8 @@ import {
 import { createBrowserNetHolder } from "../../slash/browser-net-cmd"
 import type { SlashContext } from "../../slash-commands"
 import { BG_TURN_ENV_GATE, createBackgroundTurnPortal } from "../background-turn-portal"
-import { createConversationActionSurface } from "../conversation-action-surface"
+import { createConversationActionSurface, createTurnActivity } from "../conversation-action-surface"
+import { createGoalWakeSignalSlot } from "../goal-wake-signal"
 import { buildPerToolCheckpointWire } from "../per-tool-checkpoint-wire"
 import type { SessionSetupResult } from "../session-setup"
 import { isEnvTruthy } from "./kb-slot"
@@ -62,6 +63,11 @@ const buildPreCompactHook = (
   }
 }
 
+const goalPursuitEnabled = (
+  env: NodeJS.ProcessEnv,
+  objectiveStore: ReturnType<typeof resolveGatedObjectiveAuthority>,
+): boolean => gateOn(env, "QUANTA_GOAL_ENFORCE") && objectiveStore !== undefined
+
 export const buildSurfaceCoreState = (
   setup: SessionSetupResult,
   env: NodeJS.ProcessEnv,
@@ -86,9 +92,22 @@ export const buildSurfaceCoreState = (
   const shadowVerify = isEnvTruthy(env.QUANTA_SHADOW_VERIFY)
     ? createShadowVerify(createShadowVerifyAdapters(setup.cwd))
     : undefined
-  const conversationActions = isEnvTruthy(env.QUANTA_CONVERSATION_ACTIONS)
-    ? createConversationActionSurface()
-    : undefined
+  const objectiveStore = resolveGatedObjectiveAuthority(env, {
+    confirmationAvailable: true,
+    ...(setup.restoredObjective !== undefined ? { restoreFrom: setup.restoredObjective } : {}),
+  })
+  // One session holder, produced for either consumer. The agent loop remains
+  // the sole writer. Goal pursuit only needs it when both its continuation
+  // gate and its objective authority are present; otherwise no active-turn
+  // state is allocated on the default path.
+  const goalPursuit = goalPursuitEnabled(env, objectiveStore)
+  const turnActivityRequired = isEnvTruthy(env.QUANTA_CONVERSATION_ACTIONS) || goalPursuit
+  const turnActivity = turnActivityRequired ? createTurnActivity() : undefined
+  const goalWakeSlot = goalPursuit ? createGoalWakeSignalSlot() : undefined
+  const conversationActions =
+    isEnvTruthy(env.QUANTA_CONVERSATION_ACTIONS) && turnActivity !== undefined
+      ? createConversationActionSurface(turnActivity.activeTurnRef)
+      : undefined
   const interruptedTurnBuffer =
     conversationActions === undefined ? undefined : createInterruptedTurnBuffer()
   const inboundMode: { current: InboundMode } = {
@@ -125,6 +144,8 @@ export const buildSurfaceCoreState = (
     shadowVerify,
     onPreCompact: buildPreCompactHook(setup, env),
     conversationActions,
+    turnActivity,
+    goalWakeSlot,
     interruptedTurnBuffer,
     inboundMode,
     backgroundPortal,
@@ -147,10 +168,7 @@ export const buildSurfaceCoreState = (
     // so the reopened authority reconstructs the goal / criterion-ids / revision /
     // provenance. Absent (fresh / legacy / no-objective) ⇒ a fresh empty authority
     // (byte-identical legacy).
-    objectiveStore: resolveGatedObjectiveAuthority(env, {
-      confirmationAvailable: true,
-      ...(setup.restoredObjective !== undefined ? { restoreFrom: setup.restoredObjective } : {}),
-    }),
+    objectiveStore,
     presetResolver: createStickyPresetResolver(),
   }
 }

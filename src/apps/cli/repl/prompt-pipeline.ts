@@ -108,6 +108,9 @@ export interface ComposePromptPipelineDeps {
    *  reactor/scheduler wakes). Lets the host keep the quiet-window anchor
    *  authoritative without conflating self-wake with human input. */
   readonly onLocalPromptAccepted?: () => void
+  /** Fires for every non-null LOCAL line before slash dispatch. This includes
+   * surface commands, so recent user activity can cancel an autonomous wake. */
+  readonly onLocalInput?: () => void
   /** Narrow test seam for local input classification. Undefined keeps the
    *  raw-line-reader runtime path byte-identical. */
   readonly readPromptLine?: PromptLineReader
@@ -168,9 +171,11 @@ const classifyReplLine = async (
   dispatchSlash: DispatchSlash,
   ux: PromptPipelineUxOpts | undefined,
   readPromptLine: PromptLineReader,
+  onLocalInput: (() => void) | undefined,
 ): Promise<string | null | undefined> => {
   const input = await readPromptLine(signal, ux)
   if (input === null) return null
+  onLocalInput?.()
   if (input === "/exit" || input === "/quit") return null
   const handled = input === "" || (await dispatchSlash(input))
   if (handled) {
@@ -191,6 +196,7 @@ const buildCliPromptSource = (
   externalPromptQueue: ExternalPromptQueue | undefined,
   ux: PromptPipelineUxOpts | undefined,
   onLocalPromptAccepted: (() => void) | undefined,
+  onLocalInput: (() => void) | undefined,
   readPromptLine: PromptLineReader,
 ): CliPromptSource => ({
   next: async (signal) => {
@@ -203,6 +209,7 @@ const buildCliPromptSource = (
         externalPromptQueue,
         ux,
         onLocalPromptAccepted,
+        onLocalInput,
         readPromptLine,
       })
       if (next === undefined) continue
@@ -247,6 +254,7 @@ const readNextPrompt = async (args: {
   readonly externalPromptQueue: ExternalPromptQueue | undefined
   readonly ux: PromptPipelineUxOpts | undefined
   readonly onLocalPromptAccepted: (() => void) | undefined
+  readonly onLocalInput: (() => void) | undefined
   readonly readPromptLine: PromptLineReader
 }): Promise<CliPromptInput | null | undefined> => {
   const {
@@ -257,10 +265,11 @@ const readNextPrompt = async (args: {
     externalPromptQueue,
     ux,
     onLocalPromptAccepted,
+    onLocalInput,
     readPromptLine,
   } = args
   if (externalPromptQueue === undefined) {
-    const next = await classifyReplLine(signal, dispatchSlash, ux, readPromptLine)
+    const next = await classifyReplLine(signal, dispatchSlash, ux, readPromptLine, onLocalInput)
     if (typeof next !== "string") return next
     onLocalPromptAccepted?.()
     return localPayload(next, imageQueue, textInbox)
@@ -279,6 +288,7 @@ const readNextPrompt = async (args: {
         dispatchSlash,
         ux,
         readPromptLine,
+        onLocalInput,
       ).then((value) => ({
         source: "local" as const,
         value,
@@ -377,6 +387,7 @@ export const composePromptPipeline = (deps: ComposePromptPipelineDeps): CliPromp
     deps.externalPromptQueue,
     deps.ux,
     deps.onLocalPromptAccepted,
+    deps.onLocalInput,
     deps.readPromptLine ?? defaultPromptLineReader,
   )
   return wrapPromptSourceWithIdleGate({

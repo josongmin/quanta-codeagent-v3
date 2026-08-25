@@ -58,6 +58,25 @@ export {
   UNSUPPORTED_CHECK_EXECUTION,
   unsupportedCheckExecutionPort,
 } from "./criteria/verifier"
+export type {
+  GoalWakeArm,
+  GoalWakeAttempt,
+  GoalWakeAttemptRegistry,
+  GoalWakeAttemptReservation,
+  GoalWakeController,
+  GoalWakeControllerDeps,
+  GoalWakeDecision,
+  GoalWakeFireInput,
+  GoalWakeSkipReason,
+  GoalWakeTimer,
+  GoalWakeTimerHandle,
+} from "./goal-wake-controller"
+export {
+  createGoalWakeController,
+  createInMemoryGoalWakeAttemptRegistry,
+  evaluateGoalWakeArm,
+  evaluateGoalWakeFire,
+} from "./goal-wake-controller"
 export type { ObjectiveDomainSnapshot, ObjectiveThreadSnapshot } from "./model"
 export type { ObjectiveActor, ObjectiveMutation, ObjectiveOperationKind } from "./mutations"
 export {

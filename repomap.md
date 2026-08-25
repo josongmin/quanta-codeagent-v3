@@ -28,6 +28,7 @@ At a high level, the repo combines:
 - `tsconfig*.json` — TypeScript configs
 - `bunfig.toml` — Bun/test configuration
 - `AGENTS.md` — repo-local agent rules
+- `docs/ARCHITECTURE.md` — slice fence, ports/adapters, slice-boundary SSOT pointer (49 library slices under fence as of 2026-08-25)
 
 ## Main source map
 

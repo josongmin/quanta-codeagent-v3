@@ -320,6 +320,8 @@ export interface SlashContext {
     | {
         readonly port: import("@/objective").ObjectivePort
         readonly threadId: string
+        /** Surface event hook; it never mutates the objective. */
+        readonly onMutation?: () => void
       }
     | undefined
   /** §9.6 — `/presets` opusplan-style sticky model-preset wire. The SAME live

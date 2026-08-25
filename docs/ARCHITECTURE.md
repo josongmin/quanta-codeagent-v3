@@ -58,10 +58,24 @@ Each registered slice declares a `denyImports` list; **anything not denied is pe
 
 Two shared deny constants are reused across slices:
 
-- **`PEER_LIBRARY_DENY`** — the peer Layer-0/1 library set: `@/agent, @/tool, @/mcp, @/rules, @/migration, @/session, @/subagent, @/skill, @/observability, @/llm, @/memory, @/storage, @/permission, @/lsp, @/stream` (the self-prefix is dropped per slice).
+- **`PEER_LIBRARY_DENY`** — the peer Layer-0/1 library set: `@/agent, @/tool, @/mcp, @/rules, @/migration, @/session, @/subagent, @/skill, @/observability, @/llm, @/memory, @/storage, @/permission, @/lsp, @/stream, @/objective` (the self-prefix is dropped per slice).
 - **`LAYER2_DENY`** — the Layer-2 composition/surface set no lower slice may up-import: `@/runner, @/host, @/ipc, @/apps`.
 
-**Slices registered in the SSOT but NOT shown in the §1 table above** (with their actual deny rules — mirror of `slice-boundary-configs.ts`, do not edit here without editing there):
+**Coverage snapshot (2026-08-25):** every library slice under `src/` — all **49** top-level directories except the `apps/` composition root — has a `SLICE_BOUNDARY_CONFIGS` entry **and** a wired `tests/unit/<slice>-slice-boundary.test.ts` entrypoint. `tests/unit/slice-boundary-config-parity.test.ts` enforces 1:1 config↔entrypoint parity (a config without a live `registerSliceBoundarySuite(getSliceBoundaryConfig(...))` call is inert and fails CI). `src/apps/**` is not a slice config target; it is the composition root. Do not duplicate deny-list prose here — edit `slice-boundary-configs.ts` and let the scanner be the contract.
+
+**Deny-rule families** (detail + carve-outs live only in the SSOT):
+
+| Family | Pattern | Slices |
+|---|---|---|
+| Pure leaf | `PEER_LIBRARY_DENY` + `LAYER2_DENY`, usually `requireSliceBarrel: true` | See grouped row below + `git`, `browser`, `scheduler`, `stream`, `objective`, `patch`, `reactor`, `plugin-isolation` (each may have `envAllowFiles` in SSOT) |
+| Hub / bridge | Custom `denyImports` + reviewed `allowImports` | `agent`, `tool`, `llm`, `memory`, `permission`, `mcp`, `skill`, `session`, `subagent`, `storage`, `observability`, `rules`, `security`, `auth`, `runner`, `ipc` |
+| Worker composition root | `PEER` + `LAYER2` + explicit `allowImports` on child wire-up files | `side-agent` |
+| Surface isolation only | `surfaceIsolationOnly: true` — apps import fence, no peer deny | `host`, `sdk`, `kernel` |
+| Barrel follow-up | Registered fence, `requireSliceBarrel` omitted until `index.ts` lands | `protocol`, `integrations`, `runner` |
+
+**Pure-leaf slices with the canonical `PEER+L2` deny** (grouped — individual `envAllowFiles` / `allowImports` are in the SSOT, not here): `@/activity`, `@/artifact`, `@/attention`, `@/capability`, `@/codemode`, `@/config`, `@/connectors`, `@/media`, `@/radar`, `@/realtime`, `@/remote`, `@/retrieval`, `@/runtime`, `@/ui`, `@/voice`, `@/workflow`.
+
+**Slices registered in the SSOT but NOT shown in the §1 allowlist-shaped table above** (hub/bridge rows — mirror of `slice-boundary-configs.ts`, do not edit here without editing there):
 
 | Slice | Enforced deny rule (from `SLICE_BOUNDARY_CONFIGS`) |
 |---|---|
@@ -71,7 +85,9 @@ Two shared deny constants are reused across slices:
 | `@/scheduler` | `PEER_LIBRARY_DENY` + `LAYER2_DENY` (pure leaf; only `@/shared`) |
 | `@/stream` | `PEER_LIBRARY_DENY` + `LAYER2_DENY` (leaf; only `@/shared`) |
 | `@/reactor` | `PEER_LIBRARY_DENY` + `LAYER2_DENY`; carve-out: `import type { AgentOutcome } from "@/agent"` (type-only, allowed) |
-| `@/side-agent` | `PEER_LIBRARY_DENY` + `LAYER2_DENY`; `allowImports`: `@/agent/side-agent-runner`, `@/agent/subagent-runner`, `@/llm`, `@/llm/replay`, `@/tool` (worker composition-root carve-out) |
+| `@/side-agent` | `PEER_LIBRARY_DENY` + `LAYER2_DENY`; `allowImports`: `@/agent/side-agent-runner`, `@/agent/subagent-runner`, `@/agent/spawn-depth`, `@/llm`, `@/llm/replay`, `@/tool` (worker composition-root carve-out on `worker-charter-runner.ts`) |
+| `@/objective` | `PEER_LIBRARY_DENY` + `LAYER2_DENY` (pure leaf domain; ADR-0394) |
+| `@/plugin-isolation` | `PEER_LIBRARY_DENY` + `LAYER2_DENY`; `envAllowFiles`: `bun-spawner.ts` |
 | `@/patch` | `PEER_LIBRARY_DENY` (pure leaf; OTel binding lives in the `apply_patch` tool root) |
 | `@/security` | `PEER_LIBRARY_DENY` + `@/auth` |
 | `@/rules` | `PEER_LIBRARY_DENY` + `@/auth` |
@@ -89,8 +105,12 @@ Two shared deny constants are reused across slices:
 | `@/runner` | `@/rules, @/patch, @/migration` |
 | `@/ipc` | `@/rules, @/patch, @/migration` |
 | `@/host`, `@/sdk`, `@/kernel` | `surfaceIsolationOnly` — no import-deny; only the "must not import `apps/**`" fence |
+| `@/integrations` | `PEER_LIBRARY_DENY` + `LAYER2_DENY`; `allowImports`: `@/storage` (delivery-persist-fs adapter); no barrel yet |
+| `@/migration` | `PEER_LIBRARY_DENY` + `LAYER2_DENY`; `allowImports`: `@/agent/glob-rules`, `@/agent/repo-rules`, `@/skill/frontmatter` |
+| `@/protocol` | `PEER_LIBRARY_DENY` + `LAYER2_DENY`; no barrel yet |
+| `@/shared` | `PEER_LIBRARY_DENY` + `LAYER2_DENY`; `envAllowFiles`: `env-files.ts`, `runtime-config.ts` (kernel env primitives) |
 
-**Not (yet) in the SSOT:** several `src/` slices have **no** `SLICE_BOUNDARY_CONFIGS` entry, so this scanner suite enforces **no** import-deny for them today — e.g. `activity`, `codemode`, `retrieval`, `workflow`, `runtime`, `radar`, `realtime`, `remote`, `media`, `voice`, `ui`, `protocol`, `connectors`, `integrations`, `plugin-isolation`, `capability`, `artifact`, `config`, `migration`. Adding a boundary config for one of these is the mechanism to bring it under the fence (see §6). This list is descriptive of the SSOT's current coverage, not a statement that those slices have no layering intent.
+**Bringing a new slice under the fence:** add an entry to `SLICE_BOUNDARY_CONFIGS` and a paired `tests/unit/<slice>-slice-boundary.test.ts` that calls `registerSliceBoundarySuite(getSliceBoundaryConfig("<slice>"))`. Seed GREEN against current code; parity test fails on inert configs. See §6.
 
 ---
 
@@ -249,6 +269,8 @@ Current rules:
 
 **...agent mode** — add `src/apps/agent/mode-presets/<name>.ts` exporting the runner. The dispatch in `src/apps/agent/index.ts` is dynamic-import — no central switch to edit.
 
+**...slice boundary** — add `src/<slice>/` only after the fence exists: (1) append a config to `tests/unit/_arch/slice-boundary-configs.ts` (`denyImports`, optional `allowImports` / `envAllowFiles`, `requireSliceBarrel`); (2) add `tests/unit/<slice>-slice-boundary.test.ts` wiring `registerSliceBoundarySuite(getSliceBoundaryConfig("<slice>"))`; (3) run `bun test tests/unit/slice-boundary-config-parity.test.ts tests/unit/<slice>-slice-boundary.test.ts`. Pure leaves usually take `[...PEER_LIBRARY_DENY, ...LAYER2_DENY]`. Document every carve-out in-line in the config — not in this doc.
+
 **...port** — define the interface in `<slice>/ports.ts` (or `<slice>/types.ts`). Ship at least **two** impls (a real adapter + a `null*` fake) unless you document the YAGNI exception. If only one impl exists, justify it by testability/inversion in a comment; otherwise the port is ceremony and will eventually be removed.
 
 ---
@@ -305,3 +327,5 @@ Current rules:
 - `tests/unit/src-no-sketchy-code.test.ts` — ratchet definitions
 - `tests/unit/invariant-default-tools-wired.test.ts` — `buildDefaultTools` usage invariant
 - `tests/unit/invariant-session-roundtrip.test.ts` — `ContentBlock` round-trip exhaustiveness
+- `tests/unit/_arch/slice-boundary-configs.ts` — slice-boundary deny-list SSOT
+- `tests/unit/slice-boundary-config-parity.test.ts` — config↔entrypoint parity guard

@@ -1,18 +1,20 @@
 import type { AgentConfig } from "@/agent"
 import { startAutomationEngineTicker } from "@/agent/loop-helpers"
 import type { ObjectivePort } from "@/objective"
-import { buildPursuitContinuationPrompt } from "@/objective"
+import { asObjectiveAuthority, buildPursuitContinuationPrompt } from "@/objective"
 import { buildAutorunEligibility } from "@/permission"
 import { injectSimulatedTurn, type LastTurnOutcome, REACTOR_ENV_FLAG } from "@/reactor"
 import { gateOnStrict, logger, runtimeConfig } from "@/shared"
 import { readCliKnob } from "../../cli-knobs-accessor"
-import { startGoalContinuationTicker } from "../../goal-continuation-hook"
+import { startGoalWakeController } from "../../goal-continuation-hook"
+import { DEFAULT_IDLE_MS } from "../../idle-monitor"
 import type { ImageQueue } from "../../image-queue"
 import type { NotificationPort } from "../../notify"
 import { startReactorWatchBridge } from "../../reactor-watch-bridge"
 import type { TextInbox } from "../../text-inbox"
 import { wireInboxBannerOntoSlot } from "../automation-banner"
 import type { ExternalPromptQueue } from "../external-prompt-queue"
+import type { GoalWakeSignalSlot } from "../goal-wake-signal"
 import type { heartbeatEnqueueHandler } from "../heartbeat-binder"
 import { maybeCreateNdjsonSinkWire } from "../ndjson-wire"
 import {
@@ -60,6 +62,8 @@ export interface InteractiveSetupArgs {
   readonly notifyCwdBasename: string | undefined
   readonly contextWarning: (() => string) | undefined
   readonly objectiveStore: ObjectivePort | undefined
+  readonly goalWakeSlot: GoalWakeSignalSlot | undefined
+  readonly activeTurnRef: AgentConfig["activeTurnRef"]
   readonly activeIdentityModeState: IdentityModeCell | undefined
   readonly enqueueWithHeartbeat: EnqueueWithHeartbeat
   readonly getLastTurnOutcome: () => LastTurnOutcome | undefined
@@ -68,7 +72,7 @@ export interface InteractiveSetupArgs {
 }
 
 /** Build every interactive-only wire (automation ticker + banner, the prompt
- *  pipeline, the reactor bridge, the goal-continuation ticker + `/goal` chip
+ *  pipeline, the reactor bridge, the goal-continuation wake controller + `/goal` chip
  *  timer, the NDJSON sink, the prompt-suggestion adapter). Each resource that
  *  needs teardown registers on the passed close stack IMMEDIATELY after
  *  construction, exactly as the inline body did (L5 H-7 ordering preserved).
@@ -90,6 +94,8 @@ export const wireInteractiveSetup = async (
     notifyCwdBasename,
     contextWarning,
     objectiveStore,
+    goalWakeSlot,
+    activeTurnRef,
     activeIdentityModeState,
     enqueueWithHeartbeat,
     getLastTurnOutcome,
@@ -110,6 +116,7 @@ export const wireInteractiveSetup = async (
     onLocalPromptAccepted: () => {
       setLastUserInputAt(Date.now())
     },
+    onLocalInput: () => goalWakeSlot?.current?.onActivity(),
     rejectCounter: setup.rejectCounter,
     statusBar: setup.statusBar,
     ...(ux !== undefined ? { ux } : {}),
@@ -126,10 +133,12 @@ export const wireInteractiveSetup = async (
     getLastUserInputAt: args.getLastUserInputAt,
   })
 
-  armGoalTicker({
+  armGoalWake({
     setup,
     closeStack,
     objectiveStore,
+    goalWakeSlot,
+    activeTurnRef,
     externalPromptQueue,
     textInbox,
     enqueueWithHeartbeat,
@@ -235,14 +244,16 @@ const startReactorBridge = async (args: {
   }
 }
 
-/** Codex "Pursuing goal" — arm the idle goal-continuation ticker over the
- *  shared objective store. On each idle tick with an `active` goal, `resume`
- *  enqueues a turn carrying the goal text. Gated by QUANTA_GOAL_ENFORCE ⇒ OFF
- *  arms no timer (byte-identical). */
-const armGoalTicker = (args: {
+/** Codex "Pursuing goal" — arm the edge-triggered goal wake controller over
+ *  the shared objective store. A verified quiet window after an active-goal
+ *  mutation or a settled turn can enqueue exactly one continuation. Gated by
+ *  QUANTA_GOAL_ENFORCE ⇒ OFF arms no timer (byte-identical). */
+const armGoalWake = (args: {
   readonly setup: SessionSetupResult
   readonly closeStack: Array<CloseStackEntry>
   readonly objectiveStore: ObjectivePort | undefined
+  readonly goalWakeSlot: GoalWakeSignalSlot | undefined
+  readonly activeTurnRef: AgentConfig["activeTurnRef"]
   readonly externalPromptQueue: ExternalPromptQueue
   readonly textInbox: TextInbox | undefined
   readonly enqueueWithHeartbeat: EnqueueWithHeartbeat
@@ -251,20 +262,28 @@ const armGoalTicker = (args: {
     setup,
     closeStack,
     objectiveStore,
+    goalWakeSlot,
+    activeTurnRef,
     externalPromptQueue,
     textInbox,
     enqueueWithHeartbeat,
   } = args
-  const goalTicker =
+  const goalWake =
     objectiveStore !== undefined
-      ? startGoalContinuationTicker({
+      ? startGoalWakeController({
           enabled: runtimeConfig().goalContinuationEnforce,
           threadId: setup.sessionId,
+          quietWindowMs: setup.idleMonitor.thresholdMs ?? DEFAULT_IDLE_MS,
+          readDomain: (tid) => asObjectiveAuthority(objectiveStore).readDomain(tid),
           probes: {
             objective: objectiveStore,
             threadIdle: () => setup.idleMonitor.isIdle(),
             planModeActive: () => setup.planMode,
-            turnActive: () => false,
+            // The runtime agent loop owns this holder from body start until the
+            // body actually settles. This deliberately remains true after Ctrl+B
+            // detaches the REPL wrapper, so a continuation cannot queue over a
+            // backgrounded live body.
+            turnActive: () => activeTurnRef?.current.currentTurn !== null,
             queuedInputPending: () => externalPromptQueue.size() > 0,
             mailboxInputPending: () => (textInbox?.size() ?? 0) > 0,
             isEphemeral: () => setup.sessionId === undefined,
@@ -279,8 +298,15 @@ const armGoalTicker = (args: {
           },
         })
       : undefined
-  if (goalTicker !== undefined) {
-    closeStack.push({ label: "goalTicker.stop", dispose: () => goalTicker.stop() })
+  if (goalWake !== undefined) {
+    if (goalWakeSlot !== undefined) goalWakeSlot.current = goalWake
+    closeStack.push({
+      label: "goalWake.stop",
+      dispose: () => {
+        if (goalWakeSlot?.current === goalWake) goalWakeSlot.current = undefined
+        goalWake.stop()
+      },
+    })
   }
 }
 

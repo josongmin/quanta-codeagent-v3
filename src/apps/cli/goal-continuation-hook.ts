@@ -21,7 +21,12 @@
  * probe/`resume` shape). No `@/agent` core, no reactor internals.
  */
 
-import { type ContinuationDeps, ContinuationSemaphore, runIdleContinuation } from "@/objective"
+import {
+  type ContinuationDeps,
+  ContinuationSemaphore,
+  createGoalWakeController,
+  runIdleContinuation,
+} from "@/objective"
 
 /** The host-bound probes + resume sink (everything in `ContinuationDeps` except
  *  the pieces this driver owns: `enabled`, `semaphore`, `now`). */
@@ -50,7 +55,92 @@ export interface GoalContinuationTicker {
   stop(): void
 }
 
+/**
+ * Event-facing lifecycle for the edge-triggered controller. The interactive
+ * host relays only real events (goal mutation, local activity, turn
+ * settlement); this object owns neither objective state nor queue state.
+ */
+export interface GoalWakeLifecycle {
+  onGoalMutation(): void
+  onActivity(): void
+  onTurnSettled(): void
+  stop(): void
+}
+
+export interface StartGoalWakeOpts {
+  readonly enabled: boolean
+  readonly threadId: string | undefined
+  readonly probes: GoalContinuationProbes
+  /** Revisioned projection from the same authority `/goal` mutates. */
+  readonly readDomain: (threadId: string) => import("@/objective").ObjectiveDomainSnapshot
+  /** The same user-presence quiet threshold the host exposes in its UI. */
+  readonly quietWindowMs: number
+  readonly setTimeoutFn?: (fn: () => void, ms: number) => ReturnType<typeof setTimeout>
+  readonly clearTimeoutFn?: (handle: ReturnType<typeof setTimeout>) => void
+}
+
 const DEFAULT_INTERVAL_MS = 15_000
+
+/**
+ * Build the event-driven successor to {@link startGoalContinuationTicker}.
+ *
+ * The legacy ticker remains exported for compatibility and its independent
+ * regression rails. New interactive wiring uses this controller: one timer is
+ * armed from concrete goal/turn edges, then revision + quiescence are checked
+ * again immediately before the existing continuation orchestrator enqueues.
+ */
+export const startGoalWakeController = (opts: StartGoalWakeOpts): GoalWakeLifecycle | undefined => {
+  const threadId = opts.threadId
+  if (!opts.enabled || threadId === undefined || threadId.length === 0) return undefined
+
+  const continuationDeps: ContinuationDeps = {
+    ...opts.probes,
+    enabled: true,
+    semaphore: new ContinuationSemaphore(),
+    now: () => Date.now(),
+  }
+  const setFn = opts.setTimeoutFn ?? ((fn, ms) => setTimeout(fn, ms))
+  const clearFn = opts.clearTimeoutFn ?? ((handle) => clearTimeout(handle))
+  let checkpointOrdinal = 0
+
+  const controller = createGoalWakeController({
+    enabled: true,
+    quietWindowMs: opts.quietWindowMs,
+    timer: {
+      set: (fn, ms) => setFn(fn, ms),
+      clear: (handle) => clearFn(handle as ReturnType<typeof setTimeout>),
+    },
+    readDomain: opts.readDomain,
+    // The controller rechecks the SAME host guards before claiming an attempt;
+    // runIdleContinuation repeats them at enqueue time to close the last race.
+    stillQuiescent: (id) =>
+      continuationDeps.threadIdle(id) &&
+      !continuationDeps.planModeActive(id) &&
+      !continuationDeps.turnActive(id) &&
+      !continuationDeps.queuedInputPending(id) &&
+      !continuationDeps.mailboxInputPending(id) &&
+      !continuationDeps.isEphemeral(id),
+    enqueue: async () => {
+      await runIdleContinuation(threadId, continuationDeps)
+    },
+  })
+
+  const resetForNextCheckpoint = (): void => {
+    const ordinal = checkpointOrdinal
+    checkpointOrdinal += 1
+    controller.reset({ threadId, checkpointOrdinal: ordinal })
+  }
+
+  // A resumed session may already carry an active goal before the first user
+  // action, so it needs one initial quiet-window arm.
+  resetForNextCheckpoint()
+  return {
+    onGoalMutation: resetForNextCheckpoint,
+    onActivity: () => controller.onActivity(),
+    onTurnSettled: resetForNextCheckpoint,
+    stop: () => controller.stop(),
+  }
+}
 
 /**
  * Arm the idle-poll that drives goal continuation. Returns `undefined` when the

@@ -78,6 +78,9 @@ import {
   instanceIdSchema,
   modelLanesSchema,
   resumeIamProfileSchema,
+  resumeKmsKeyArnSchema,
+  resumeMaxRetentionDaysSchema,
+  resumePrincipalArnSchema,
   resumeS3BucketSchema,
   resumeSchema,
 } from "./bench-gap-2"
@@ -120,7 +123,7 @@ import {
 } from "./bench-repro"
 
 /**
- * ALL 88 bench knob schemas, IN THE EXACT ORDER their entries appear in
+ * ALL bench knob schemas, IN THE EXACT ORDER their entries appear in
  * src/config/knob-inventory/bench.ts (envKey order). Do NOT reorder.
  */
 export const ALL_BENCH_SCHEMAS: readonly AnyKnobSchema[] = [
@@ -209,6 +212,9 @@ export const ALL_BENCH_SCHEMAS: readonly AnyKnobSchema[] = [
   benchExposeDatasetVerifierSchema, // QUANTA_BENCH_EXPOSE_DATASET_VERIFIER
   resumeSchema, // QUANTA_BENCH_RESUME
   resumeS3BucketSchema, // QUANTA_BENCH_RESUME_S3_BUCKET
+  resumeKmsKeyArnSchema, // QUANTA_BENCH_RESUME_KMS_KEY_ARN
+  resumePrincipalArnSchema, // QUANTA_BENCH_RESUME_PRINCIPAL_ARN
+  resumeMaxRetentionDaysSchema, // QUANTA_BENCH_RESUME_MAX_RETENTION_DAYS
   campaignIdSchema, // QUANTA_BENCH_CAMPAIGN_ID
   resumeIamProfileSchema, // QUANTA_BENCH_RESUME_IAM_PROFILE
   instanceIdSchema, // QUANTA_BENCH_INSTANCE_ID

@@ -87,6 +87,7 @@ export interface ObjectiveSlashState {
 export const buildObjectiveSlashState = (
   port: ObjectivePort,
   threadId: string,
+  onMutation?: () => void,
 ): ObjectiveSlashState => {
   const authority = asObjectiveAuthority(port)
   const view = (): ObjectiveEditView | null => {
@@ -106,6 +107,7 @@ export const buildObjectiveSlashState = (
     const prepared = authority.prepare({ threadId, actor: "user", mutation })
     const res = authority.commit(prepared, { admitted: true })
     if (res.ok) {
+      onMutation?.()
       const o = authority.get(threadId)
       return {
         kind: "ok",

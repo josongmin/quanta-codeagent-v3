@@ -1,5 +1,5 @@
 id: objective-goal-continuation-live
-title: /goal pursuing-loop LIVE — idle goal-continuation ticker wired end-to-end in the CLI (jul-13)
+title: /goal pursuing-loop LIVE — revision-fenced quiet-window continuation wired end-to-end in the CLI (aug-25)
 section: 9
 subsystem: Objective substrate (ADR-0394) — idle-continuation half (Codex core/src/goals.rs parity)
 order: 97
@@ -18,8 +18,8 @@ surface_integration:
   method: audited
   verified: "2026-07-13"
   evidence:
-    cli: "runs in the interactive CLI — surface-compose mints ONE objective store and binds it to the `/goal` slash slot (ctx.goal, src/apps/cli/repl/surface-compose.ts:913, persistent session only) AND to startGoalContinuationTicker beside the reactor bridge (src/apps/cli/repl/session-loop.ts); the `/goal` command (src/apps/cli/slash/goal-cmd.ts) sets/reads the active objective; the goal chip renders while a goal is active (status-pills.ts, QUANTA_PILL_GOAL default-ON). Live proven by tests/e2e-pty/cli-goal-pursuit-e2e.test.ts (real CLI boot + PTY). Arming the ticker is gated by QUANTA_GOAL_ENFORCE (OFF ⇒ no timer ⇒ byte-identical)."
-    web: "CLI-only. The web/Tauri surface has no `/goal` slash slot and does not arm the continuation ticker (session-loop is a CLI-repl concern); the objective itself reaches the web ObjectiveCard via the objective substrate, but the pursuing-loop wiring is not present on that surface."
+    cli: "runs in the interactive CLI — surface-compose mints ONE objective authority and binds it to the `/goal` slash slot plus a shared live-turn holder. `startGoalWakeController` arms one quiet-window timer only from a goal mutation, restored active objective, or settled turn; at fire it rereads the same authority revision and all host quiescence guards before the existing continuation machine may enqueue. Local input cancels the pending wake, and a Ctrl+B body remains active until it really settles. Live proven by tests/e2e-pty/cli-goal-pursuit-e2e.test.ts: real CLI boot + PTY + replayed external queue reaches an actual agent turn, plus a foreground-settlement rail. QUANTA_GOAL_ENFORCE OFF allocates neither holder nor wake timer."
+    web: "CLI-only. The web/Tauri surface has no `/goal` slash slot and does not install the CLI wake controller; the objective itself reaches the web ObjectiveCard via the objective substrate, but pursuing-loop scheduling is not present on that surface."
 purpose: |
   Promotes the previously-DEAD idle goal-continuation machine
   (`src/objective/continuation.ts`: `runIdleContinuation` /
@@ -36,24 +36,26 @@ purpose: |
      (b) the session loop, so the command the user types and the loop that
      pursues it read/write one SSOT.
 
-  2. TICKER ARM — `session-loop` calls `startGoalContinuationTicker` over that
-     store next to the reactor bridge. Each idle tick with an ACTIVE goal
-     enqueues a continuation turn carrying the goal text + a
-     verify-before-complete instruction (the completion-discipline SSOT), so
-     the agent keeps pursuing the objective while idle until it is
-     completed / paused / budget-limited. Gated by QUANTA_GOAL_ENFORCE: OFF
-     arms NO timer and returns `undefined` ⇒ byte-identical to a session that
-     never opted in.
+  2. QUIET-WINDOW WAKE — `session-loop` calls `startGoalWakeController` over
+     that authority next to the reactor bridge. A goal mutation, restored
+     active goal, or real turn settlement starts ONE quiet-window timer; local
+     input cancels it. At fire the controller requires the exact captured
+     objective revision and fresh host quiescence, then delegates to
+     `runIdleContinuation`, which repeats the queue/turn/plan guards at the
+     enqueue boundary. The continuation carries the goal text + a
+     verify-before-complete instruction. Gated by QUANTA_GOAL_ENFORCE: OFF
+     creates no wake controller or live-turn holder ⇒ byte-identical to a
+     session that never opted in.
 
   3. COMMAND + CHIP — `/goal <objective>` records the active goal (or shows it
      with no args); the status-bar goal chip renders only while a goal is
      active (QUANTA_PILL_GOAL default-ON, so no idle clutter). The objective store
      is minted for the CLI surface; `QUANTA_GOAL_ENFORCE=1` controls only whether
-     the idle continuation ticker pursues the recorded goal.
+     the quiet-window controller pursues the recorded goal.
 
   Sibling to objective-budget-enforce: that entry gates the BUDGET half
   (`budget_limited` status suppresses continuation when a cap is exhausted);
-  this entry wires the CONTINUATION half (the idle ticker that re-issues the
+  this entry wires the CONTINUATION half (the revision-fenced wake that re-issues the
   goal). Together they are the two live readers the objective substrate was
   built for. Slice fence: additive wiring in `src/apps/cli/repl/**`
   (surface-compose / session-loop / dispatch) + `src/apps/cli/{goal-continuation-hook,slash/goal-cmd,status-pills}.ts`;
@@ -61,12 +63,14 @@ purpose: |
 evidence:
   code:
     - src/objective/continuation.ts
+    - src/objective/goal-wake-controller.ts
     - src/objective/pursuit-prompt.ts
     - src/apps/cli/goal-continuation-hook.ts
     - src/apps/cli/slash/goal-cmd.ts
     - src/apps/cli/repl/surface-compose.ts
-    - src/apps/cli/repl/surface-compose/dispatch.ts
-    - src/apps/cli/repl/session-loop.ts
+    - src/apps/cli/repl/session-loop/interactive-setup.ts
+    - src/apps/cli/repl/session-loop/interactive-loop.ts
+    - src/apps/cli/repl/goal-wake-signal.ts
     - src/apps/cli/repl/session-loop-options.ts
     - src/apps/cli/status-pills.ts
     - src/shared/runtime-config.ts
@@ -85,11 +89,12 @@ knobs:
     where: src/shared/runtime-config.ts
     default: 'unset (OFF)'
     purpose: |
-      `gateOn` opt-in → `goalContinuationEnforce`. OFF ⇒ startGoalContinuationTicker
-      arms NO timer and returns undefined ⇒ a session that never opted in is
-      byte-identical (the objective is recorded but never auto-pursued). ON ⇒
-      each idle tick with an active goal enqueues a continuation turn until the
-      goal is completed / paused / budget-limited.
+      `gateOn` opt-in → `goalContinuationEnforce`. OFF ⇒ the production wake
+      controller is not constructed and no timer is armed ⇒ a session that never opted in
+      is byte-identical (the objective is recorded but never auto-pursued). ON ⇒
+      a fresh quiet window after a goal mutation or settled turn can enqueue one
+      revision-fenced continuation until the goal is completed / paused /
+      budget-limited.
   - name: QUANTA_PILL_GOAL
     where: src/apps/cli/status-pills.ts
     default: 'unset (ON)'
@@ -99,21 +104,28 @@ knobs:
       QUANTA_PILL_GOAL=0. Declared in src/apps/cli/cli-knobs.ts (status-ui).
 deliberate_hold: null
 notes: |
+  aug-25 replaces the polling host trigger with an event-driven, revision-fenced
+  quiet-window controller. The wake controller is not a second objective store:
+  it reads the authority `/goal` mutates, cancels on all local prompt lines,
+  shares the true runtime live-turn holder, and rechecks authority plus host
+  quiescence before enqueue. Its attempt reservation prevents duplicate
+  enqueue; failed enqueue releases the claim for an explicit later retry.
+
   jul-13 (Codex multi_agent / goal-pursuit parity). This is the "Promotion for
   the continuation half" that objective-budget-enforce's notes flagged as
   future work — `runIdleContinuation` / `ContinuationSemaphore` now have their
   first production caller (`src/apps/cli/goal-continuation-hook.ts`) and
   `goalContinuationEnforce` has its first reader.
 
-  Hellgate coverage: goal-pursuit-chain-hellgate pins set → active → ticker →
-  resume through prod objects except the host boundary (red-on-injection at
-  each cut point: command→store, ticker gate, store→resume read);
-  goal-continuation-ticker-hellgate pins the QUANTA_GOAL_ENFORCE OFF⇒no-timer /
-  ON⇒idle-tick arming; goal-pursuit-prompt-hellgate pins the continuation turn
-  carries the goal text + verify-before-complete instruction;
+  Hellgate coverage: goal-pursuit-chain-hellgate retains set → active → legacy
+  ticker → resume primitive coverage; goal-wake-controller adds default-OFF,
+  generation, revision, quiescence, dedup, and retry fences; goal-wake-hook
+  proves the host binding; goal-pursuit-prompt-hellgate pins the continuation
+  turn carries the goal text + verify-before-complete instruction;
   status-pills-goal-chip-hellgate pins the chip render/hide; the PTY e2e
   (cli-goal-pursuit-e2e) boots the REAL CLI and drives `/goal` so the surface
-  mint+share+dispatch is proven live (not a stub).
+  mint+share+edge wake+external queue+actual agent turn is proven live (not a
+  stub); its foreground rail proves re-arm happens only after body settlement.
 
   `/goal` registration: listed in BUILTINS via SESSION_SLASH_COMMANDS
   (category "session"), describe present. It is deliberately NOT in the

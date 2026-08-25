@@ -17,6 +17,7 @@ import type { ContextUsageHolder } from "../context-usage-snapshot"
 import type { ConvCheckpointWire } from "../conv-checkpoint-wire"
 import type { ConversationActionSurface } from "../conversation-action-surface"
 import type { ComposerHandle } from "../ctx-adapters/composer-edit-adapter"
+import type { GoalWakeSignalSlot } from "../goal-wake-signal"
 import type { PlaybookTriggerSurfaceSeam } from "../playbook-trigger-surface-seam"
 import type { SessionSwitchWire } from "../session-switch-wire"
 import type { ReplSlashCtx } from "../slash-surface"
@@ -46,6 +47,8 @@ export interface ReplSurfaceWires {
    *  tools, the `objective_set` SSOT `cli: "opt-in"` default). Gated by
    *  `QUANTA_PROPOSE_GOAL` when present. */
   readonly objectiveStore: ObjectivePort | undefined
+  /** Session-local event bridge for the edge-triggered goal wake controller. */
+  readonly goalWakeSlot?: GoalWakeSignalSlot
   readonly setPlanQueueSendNow: (
     fn: ((inj: SendNowInjection) => { ok: true } | { ok: false; reason: string }) | undefined,
   ) => void

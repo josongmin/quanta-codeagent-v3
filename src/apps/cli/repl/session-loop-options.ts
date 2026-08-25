@@ -235,6 +235,7 @@ export const buildSessionLoopOptions = async (deps: {
     // under QUANTA_OBJECTIVE_TOOLS; absent ⇒ slot omitted ⇒ no ticker
     // (exactOptionalPropertyTypes; the loop's own `objectiveStore` is optional).
     ...(wires.objectiveStore !== undefined ? { objectiveStore: wires.objectiveStore } : {}),
+    ...(wires.goalWakeSlot === undefined ? {} : { goalWakeSlot: wires.goalWakeSlot }),
     // #8 last-mile (jun-6) — the stdin source for the in-turn reader (host-
     // injected; default-OFF unless the capture knob is set). Spread by-presence.
     ...(deps.inTurnStdin !== undefined ? { inTurnStdin: deps.inTurnStdin } : {}),

@@ -109,6 +109,11 @@ commit time.
    `eventsOf()`. Unit tests re-export the same harness via
    [tests/unit/_harness.ts](./unit/_harness.ts) — do **not** redefine these
    doubles in your test file.
+5. Slice-boundary guards: `tests/unit/_arch/slice-boundary-configs.ts` (SSOT) +
+   `tests/unit/<slice>-slice-boundary.test.ts` (49 library slices, excluding
+   `apps/`). Adding a slice requires a config entry and a wired entrypoint;
+   `slice-boundary-config-parity.test.ts` fails on inert configs. See
+   [docs/ARCHITECTURE.md](../docs/ARCHITECTURE.md) §1.1 and §6.
 
 ## Writing a new hellgate test
 

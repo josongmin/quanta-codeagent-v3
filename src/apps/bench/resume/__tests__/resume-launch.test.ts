@@ -21,13 +21,24 @@
 import { describe, expect, test } from "bun:test"
 import { readFileSync } from "node:fs"
 import type { RemoteBackend } from "@/shared/remote-store"
-import { type ResumeReceipt, segmentStore } from "@/shared/remote-store"
+import { type ResumeReceipt, type ResumeSecurityReceipt, segmentStore } from "@/shared/remote-store"
 import { nth, present } from "../../../../../tests/_helpers/expect-present"
 import { prepareResume } from "../resume-launch"
 import type { ResumeStore } from "../store"
 
 const CAMPAIGN = "camp-X"
 const INSTANCE = "django__django-11138"
+const SECURITY: ResumeSecurityReceipt = {
+  schema: "quanta.resume-security.v1",
+  bucket: "my-bucket",
+  keyPrefix: `${CAMPAIGN}/${INSTANCE}`,
+  kmsKeyArn: "arn:aws:kms:us-east-1:123:key/k",
+  principalArn: "arn:aws:iam::123:role/resume",
+  retentionDays: 7,
+  prefixLeastPrivilege: true,
+  publicAccessBlocked: true,
+  verifiedAt: "2026-08-25T00:00:00Z",
+}
 
 /** Map-backed fake backend that COUNTS gets so we can prove S3 is never touched
  *  on the default-off path. `get` honors the not-found contract (undefined). */
@@ -61,6 +72,7 @@ const receipt = (over: Partial<ResumeReceipt> = {}): ResumeReceipt => ({
   latestSeq: 1,
   degraded: false,
   updatedAt: "2026-06-27T00:00:00Z",
+  security: SECURITY,
   ...over,
 })
 
@@ -88,6 +100,7 @@ const seededStore = async (args: {
     replayStore: {} as ResumeStore["replayStore"],
     writeReceipt: async () => {},
     readReceipt: async () => rcpt,
+    securityReceipt: async () => SECURITY,
   }
   return { store, backend }
 }
@@ -96,6 +109,9 @@ const RESUME_ON_ENV = {
   QUANTA_BENCH_RESUME: "on",
   QUANTA_BENCH_RESUME_S3_BUCKET: "my-bucket",
   QUANTA_BENCH_CAMPAIGN_ID: CAMPAIGN,
+  QUANTA_BENCH_RESUME_KMS_KEY_ARN: SECURITY.kmsKeyArn,
+  QUANTA_BENCH_RESUME_PRINCIPAL_ARN: SECURITY.principalArn,
+  QUANTA_BENCH_RESUME_MAX_RETENTION_DAYS: "7",
 } as const
 
 describe("prepareResume — DEFAULT-OFF byte-identical guard", () => {
@@ -206,6 +222,9 @@ describe("wiring-proof — worker resumeForwardEnvFor (relaunch forward prefix)"
     const prefix = resumeForwardEnvFor(singleInstanceChunk, RESUME_ON_ENV)
     expect(prefix).toContain("QUANTA_BENCH_RESUME=")
     expect(prefix).toContain("QUANTA_BENCH_RESUME_S3_BUCKET=")
+    expect(prefix).toContain("QUANTA_BENCH_RESUME_KMS_KEY_ARN=")
+    expect(prefix).toContain("QUANTA_BENCH_RESUME_PRINCIPAL_ARN=")
+    expect(prefix).toContain("QUANTA_BENCH_RESUME_MAX_RETENTION_DAYS=")
     expect(prefix).toContain(`QUANTA_BENCH_INSTANCE_ID=`)
     expect(prefix).toContain("django__django-11138")
     // The worker forwards KNOBS, NOT a local cassette path (box downloads it).
@@ -243,12 +262,18 @@ describe("wiring-proof — relaunch env after a LOST instance", () => {
       campaignId: CAMPAIGN,
       instanceId: INSTANCE,
       bucket: "my-bucket",
+      kmsKeyArn: SECURITY.kmsKeyArn,
+      principalArn: SECURITY.principalArn,
+      maxRetentionDays: 7,
       region: "us-east-1",
     })
     expect(boxEnv.QUANTA_BENCH_RESUME).toBe("on")
     expect(boxEnv.QUANTA_BENCH_RESUME_S3_BUCKET).toBe("my-bucket")
     expect(boxEnv.QUANTA_BENCH_CAMPAIGN_ID).toBe(CAMPAIGN)
     expect(boxEnv.QUANTA_BENCH_INSTANCE_ID).toBe(INSTANCE)
+    expect(boxEnv.QUANTA_BENCH_RESUME_KMS_KEY_ARN).toBe(SECURITY.kmsKeyArn)
+    expect(boxEnv.QUANTA_BENCH_RESUME_PRINCIPAL_ARN).toBe(SECURITY.principalArn)
+    expect(boxEnv.QUANTA_BENCH_RESUME_MAX_RETENTION_DAYS).toBe("7")
     // The box-side prepareResume sets REPLAY_TRAJECTORY itself after download, so
     // the box also needs the on-miss policy to diverge live after the cassette.
     expect(boxEnv.QUANTA_BENCH_REPLAY_ON_MISS).toBe("record-and-passthrough")

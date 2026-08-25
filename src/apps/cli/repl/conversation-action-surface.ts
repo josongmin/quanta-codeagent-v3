@@ -8,6 +8,10 @@
  * surface`) so every existing CLI importer + hellgate stays byte-identical.
  */
 export {
+  type ActiveTurnRefHolder,
   type ConversationActionSurface,
+  createActiveTurnRef,
   createConversationActionSurface,
+  createTurnActivity,
+  type TurnActivity,
 } from "@/agent/conversation-action-surface"

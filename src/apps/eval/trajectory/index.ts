@@ -12,5 +12,10 @@ export {
 export { type DiffSummary, diffStreams, projectStream } from "./diff"
 export { type FreezeOpts, type FreezeResult, freezeFixture } from "./freeze"
 export { EVAL_META_SCHEMA, type EvalMeta, metaPathFor, readMeta, writeMeta } from "./meta"
+export {
+  exportRedactedCassette,
+  type RedactedExportReceipt,
+  type RedactedExportResult,
+} from "./redacted-export"
 export { type ReplayOpts, type ReplayResult, replayFixture } from "./replay"
 export { listSessions, loadSession, producersOf, type SessionView } from "./source"

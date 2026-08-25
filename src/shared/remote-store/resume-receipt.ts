@@ -10,6 +10,18 @@
  */
 import type { RemoteBackend } from "./backend"
 
+export interface ResumeSecurityReceipt {
+  schema: "quanta.resume-security.v1"
+  bucket: string
+  keyPrefix: string
+  kmsKeyArn: string
+  principalArn: string
+  retentionDays: number
+  prefixLeastPrivilege: true
+  publicAccessBlocked: true
+  verifiedAt: string
+}
+
 export interface ResumeReceipt {
   /** Authoritative resume key, e.g. `<campaign-id>/<instance-id>`. */
   key: string
@@ -22,6 +34,8 @@ export interface ResumeReceipt {
   /** True ⇒ an upload was lost ⇒ NOT resume-eligible (fail-closed). */
   degraded: boolean
   updatedAt: string
+  /** Live AWS policy/KMS/lifecycle attestation for this exact prefix. */
+  security?: ResumeSecurityReceipt
   /** Free-form correlation (runId / attempt / iid …). */
   meta?: Record<string, unknown>
 }
@@ -95,3 +109,17 @@ export const isResumeEligible = (receipt: unknown): boolean => {
   if (!isValidReceipt(receipt)) return false
   return receipt.degraded === false
 }
+
+export const sameResumeSecurity = (
+  actual: ResumeSecurityReceipt | undefined,
+  expected: ResumeSecurityReceipt,
+): boolean =>
+  actual !== undefined &&
+  actual.schema === expected.schema &&
+  actual.bucket === expected.bucket &&
+  actual.keyPrefix === expected.keyPrefix &&
+  actual.kmsKeyArn === expected.kmsKeyArn &&
+  actual.principalArn === expected.principalArn &&
+  actual.retentionDays === expected.retentionDays &&
+  actual.prefixLeastPrivilege === true &&
+  actual.publicAccessBlocked === true

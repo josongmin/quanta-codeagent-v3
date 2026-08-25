@@ -48,6 +48,7 @@ export const goalCmd: SlashCommand = {
         return 0
       }
       port.updateStatus(threadId, "paused")
+      wired.onMutation?.()
       ctx.out("Goal paused — the agent will stop auto-pursuing it.\n")
       return 0
     }
@@ -77,6 +78,7 @@ export const goalCmd: SlashCommand = {
     // the next idle tick; the objective is recorded either way.
     port.set(threadId, { goal: raw })
     port.updateStatus(threadId, "active")
+    wired.onMutation?.()
     ctx.out(
       `🎯 Pursuing goal set: ${raw}\n` +
         "  The agent will keep working toward it whenever the session goes idle\n" +

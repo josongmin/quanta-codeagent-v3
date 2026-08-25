@@ -732,6 +732,9 @@ export const resumeForwardEnvFor = (
     campaignId: cfg.campaignId,
     instanceId: onlyInstanceId,
     bucket: cfg.bucket,
+    kmsKeyArn: cfg.kmsKeyArn,
+    principalArn: cfg.principalArn,
+    maxRetentionDays: cfg.maxRetentionDays,
     ...(cfg.region !== undefined ? { region: cfg.region } : {}),
   })
   // Route through the SAME forwarder the box command uses so the resume knobs are

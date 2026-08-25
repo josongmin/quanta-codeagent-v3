@@ -41,8 +41,31 @@ import type { AgentConfig } from "./types"
 /** The active-turn-state holder shape the loop owns. Derived from
  *  `AgentConfig` so the surface never deep-imports `@/agent/steering`
  *  (`ActiveTurnState` is not on the `@/agent` barrel). */
-type ActiveTurnRefHolder = NonNullable<AgentConfig["activeTurnRef"]>
+/**
+ * Session-scoped live-turn holder. The agent loop is its sole writer; surfaces
+ * construct it and consume it read-only. It deliberately lives beside the
+ * conversation-action surface because that was its original consumer, but a
+ * goal-continuation controller may use the same holder without enabling the
+ * action queue.
+ */
+export type ActiveTurnRefHolder = NonNullable<AgentConfig["activeTurnRef"]>
 type ActiveTurnState = ActiveTurnRefHolder["current"]
+
+/** Construct the initial no-live-turn snapshot for one session. */
+export const createActiveTurnRef = (): ActiveTurnRefHolder => ({
+  current: { currentTurn: null, isInterrupted: false } satisfies ActiveTurnState,
+})
+
+/**
+ * Shared session activity owner. It contains no queue or control policy: the
+ * agent loop exclusively writes `activeTurnRef.current`, while surfaces only
+ * hand the same holder to their readers and to `AgentConfig`.
+ */
+export interface TurnActivity {
+  readonly activeTurnRef: ActiveTurnRefHolder
+}
+
+export const createTurnActivity = (): TurnActivity => ({ activeTurnRef: createActiveTurnRef() })
 
 /** The surface-owned bundle. `port` + `activeTurnRef` are handed to
  *  `AgentConfig` (via `runtimeFacadeCompose`); the `push*` methods are the
@@ -78,7 +101,9 @@ export interface ConversationActionSurface {
 /** Construct a fresh per-session control surface. Pure — no I/O, no env reads.
  *  The caller (surface-compose / the daemon runtime factory) gates construction
  *  on the opt-in env knob. */
-export const createConversationActionSurface = (): ConversationActionSurface => {
+export const createConversationActionSurface = (
+  activeTurnRef: ActiveTurnRefHolder = createActiveTurnRef(),
+): ConversationActionSurface => {
   // FIFO queue. `next()` shifts the head; `push*` appends. The loop drives the
   // cadence (one `next()` per turn), so no locking is needed — JS is single-
   // threaded and the loop + slash dispatch never interleave a single `next()`.
@@ -87,10 +112,6 @@ export const createConversationActionSurface = (): ConversationActionSurface => 
   // The loop overwrites `.current` on the first turn boundary; this initial
   // snapshot is the "no active turn" state (identical to the loop's own
   // `finishAgentSession` reset shape).
-  const activeTurnRef: ActiveTurnRefHolder = {
-    current: { currentTurn: null, isInterrupted: false } satisfies ActiveTurnState,
-  }
-
   const port: ConversationActionPort = {
     next(): ConversationAction | undefined {
       // At-most-once: shift removes the head so the SAME action is never

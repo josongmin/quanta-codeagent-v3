@@ -51,6 +51,12 @@ freely but cannot be imported from outside their own slice.
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the slice fence and
 ports/adapters contract.
 
+Machine-enforced deny-lists live in `tests/unit/_arch/slice-boundary-configs.ts`
+(`SLICE_BOUNDARY_CONFIGS`); every `src/<slice>/` library slice (49 total,
+excluding `apps/`) must have a paired `tests/unit/<slice>-slice-boundary.test.ts`
+entrypoint. `slice-boundary-config-parity.test.ts` enforces config↔entrypoint
+parity — inert configs fail CI.
+
 ## Code quality — SE metrics (god-code is a ratchet, fix on sight)
 
 A `bun test tests/unit/god-code-ratchet.test.ts` ratchet (source: `tools/god-code/detect.ts`,

@@ -53,6 +53,7 @@ export const composeSurfaceWires = (
     setSideConversationStart: mutable.setSideConversationStart,
     planQueueStore: mutable.planQueueStore,
     objectiveStore: core.objectiveStore,
+    ...(core.goalWakeSlot === undefined ? {} : { goalWakeSlot: core.goalWakeSlot }),
     setPlanQueueSendNow: mutable.setPlanQueueSendNow,
     setAutomationSlash: mutable.setAutomationSlash,
     ...(core.conversationActions === undefined

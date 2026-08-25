@@ -50,4 +50,26 @@ describe("REPL surface composer — live composition root", () => {
     expect(wires.slashCtx.composerEdit).toBeDefined()
     expect(wires.slashCtx.textInbox).toBe(wires.textInbox)
   })
+
+  test("goal pursuit alone wires one live-turn holder without the conversation-action queue", () => {
+    const { wires } = compose({ QUANTA_OBJECTIVE_TOOLS: "1", QUANTA_GOAL_ENFORCE: "1" })
+    expect(wires.runtimeFacadeCompose.activeTurnRef).toBeDefined()
+    expect(wires.runtimeFacadeCompose.conversationActionPort).toBeUndefined()
+  })
+
+  test("conversation actions and goal pursuit share exactly one live-turn holder", () => {
+    const { wires } = compose({
+      QUANTA_CONVERSATION_ACTIONS: "1",
+      QUANTA_OBJECTIVE_TOOLS: "1",
+      QUANTA_GOAL_ENFORCE: "1",
+    })
+    expect(wires.conversationActions).toBeDefined()
+    expect(wires.runtimeFacadeCompose.activeTurnRef).toBe(wires.conversationActions?.activeTurnRef)
+    expect(wires.runtimeFacadeCompose.conversationActionPort).toBe(wires.conversationActions?.port)
+  })
+
+  test("default-off surface does not allocate a live-turn holder", () => {
+    const { wires } = compose()
+    expect(wires.runtimeFacadeCompose.activeTurnRef).toBeUndefined()
+  })
 })

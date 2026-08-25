@@ -138,7 +138,7 @@ export const resumeSchema: KnobSchema<true> = {
   kind: "bool",
   default: undefined,
   describe:
-    "Bench: enable spot-resume: stream per-turn cassette to S3 + replay on a fresh box after reclaim. Default-OFF (gateOn) ⇒ byte-identical (no S3 touch). Requires QUANTA_BENCH_RESUME_S3_BUCKET; enabled-but-no-bucket is treated as off (fail-closed).",
+    "Bench: enable spot-resume. Default-OFF. Activation requires bucket, KMS key ARN, principal ARN, and retention ceiling; partial config is inert and the live AWS preflight is fail-closed.",
   readSite: "apps/bench/resume/config.ts",
   surfaces: BENCH,
   parse: parseGateOn,
@@ -155,6 +155,42 @@ export const resumeS3BucketSchema: KnobSchema<string> = {
   readSite: "apps/bench/resume/config.ts",
   surfaces: BENCH,
   parse: parseTrimmedString,
+}
+
+export const resumeKmsKeyArnSchema: KnobSchema<string> = {
+  id: "resume-kms-key-arn",
+  envKey: "QUANTA_BENCH_RESUME_KMS_KEY_ARN",
+  kind: "string",
+  default: undefined,
+  describe:
+    "Customer-managed KMS key ARN required for remote resume. The live preflight verifies bucket default encryption and every cassette PUT pins this key.",
+  readSite: "apps/bench/resume/config.ts",
+  surfaces: BENCH,
+  parse: parseTrimmedString,
+}
+
+export const resumePrincipalArnSchema: KnobSchema<string> = {
+  id: "resume-principal-arn",
+  envKey: "QUANTA_BENCH_RESUME_PRINCIPAL_ARN",
+  kind: "string",
+  default: undefined,
+  describe:
+    "IAM role/user ARN used by live policy simulation. Resume activates only when required S3/KMS access is allowed inside the exact prefix and denied outside it.",
+  readSite: "apps/bench/resume/config.ts",
+  surfaces: BENCH,
+  parse: parseTrimmedString,
+}
+
+export const resumeMaxRetentionDaysSchema: KnobSchema<number> = {
+  id: "resume-max-retention-days",
+  envKey: "QUANTA_BENCH_RESUME_MAX_RETENTION_DAYS",
+  kind: "int",
+  default: undefined,
+  describe:
+    "Maximum accepted S3 lifecycle retention for raw resume cassettes. Missing/invalid or a longer bucket lifecycle keeps resume inactive/fail-closed.",
+  readSite: "apps/bench/resume/config.ts",
+  surfaces: BENCH,
+  parse: parsePositiveInt,
 }
 
 /* ── campaign-id (QUANTA_BENCH_CAMPAIGN_ID) — string ───────────────────────── */

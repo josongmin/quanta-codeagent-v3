@@ -17,8 +17,8 @@
  *   expose-dataset-verifier (70): no registry knob (read in driver.ts).
  *   full-remote-ami (66), full-remote-instance-type (67), full-remote-ondemand
  *   (68), full-remote-ready-polls (69), resume (71), resume-s3-bucket (72),
- *   campaign-id (73), resume-iam-profile (74), instance-id (75): no registry
- *   knob (read in apps/bench/...).
+ *   campaign-id, resume-iam-profile, instance-id, and the resume KMS/principal/
+ *   retention security inputs: no registry knob (read in apps/bench/...).
  *   must-pass (65): surfaces ⇒ deriveHome "runner-knobs" ≠ inventory "bench".
  * Already covered by sibling files (SKIPPED): selector-mode (52), repo-map (63).
  */

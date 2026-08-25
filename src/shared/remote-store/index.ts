@@ -7,8 +7,16 @@ export type { RemoteBackend } from "./backend"
 export {
   isResumeEligible,
   type ResumeReceipt,
+  type ResumeSecurityReceipt,
   readReceipt,
+  sameResumeSecurity,
   writeReceipt,
 } from "./resume-receipt"
-export { type RunAwsResult, type S3BackendOptions, s3Backend } from "./s3-backend"
+export {
+  makeDefaultRunAws,
+  type RunAws,
+  type RunAwsResult,
+  type S3BackendOptions,
+  s3Backend,
+} from "./s3-backend"
 export { type SegmentStore, segmentStore } from "./segment-store"

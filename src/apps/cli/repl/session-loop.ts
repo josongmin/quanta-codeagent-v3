@@ -100,6 +100,8 @@ export const runSessionLoop = async (deps: RunSessionLoopDeps): Promise<void> =>
     ux: deps.ux,
     contextWarning: deps.contextWarning,
     objectiveStore: deps.objectiveStore,
+    goalWakeSlot: deps.goalWakeSlot,
+    activeTurnRef: deps.runtimeFacadeCompose?.activeTurnRef,
     activeIdentityModeState: boot.activeIdentityModeState,
     enqueueWithHeartbeat: boot.enqueueWithHeartbeat,
     getSurfaceState,

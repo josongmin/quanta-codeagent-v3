@@ -789,6 +789,7 @@ describe("session-loop — type contract shape lock (compile-time)", () => {
       contextWarning: true,
       planQueueStore: true,
       objectiveStore: true,
+      goalWakeSlot: true,
       inTurnStdin: true,
       conversationActions: true,
       inboundMode: true,

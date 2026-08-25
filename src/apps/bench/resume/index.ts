@@ -7,7 +7,7 @@
  *   - `resolveResumeConfig` / `ResumeConfig` / `resumeActive` — DEFAULT-OFF gate.
  *   - `resumeStore`             — composed durable store for one key.
  */
-export type { ResumeConfig } from "./config"
+export type { ActiveResumeConfig, ResumeConfig } from "./config"
 export { resolveResumeConfig, resumeActive } from "./config"
 export { resumeKey } from "./identity"
 export type { ResumeStore, ResumeStoreConfig } from "./store"

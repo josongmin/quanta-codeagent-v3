@@ -221,11 +221,13 @@ describe("prompt-pipeline / composePromptPipeline — shape", () => {
   test("local slash input is dispatched and the pipeline keeps reading until user text arrives", async () => {
     const lines = ["/help", "typed after slash"]
     const dispatchSlash = mock(async (input: string) => input === "/help")
+    const onLocalInput = mock(() => undefined)
     const pipe = composePromptPipeline({
       dispatchSlash,
       idleMonitor: stubIdle(),
       rejectCounter: stubRejects(false),
       statusBar: stubStatusBar(),
+      onLocalInput,
       readPromptLine: async () => lines.shift() ?? null,
     })
     const { result, writes } = await withCapturedStderr(() =>
@@ -235,6 +237,7 @@ describe("prompt-pipeline / composePromptPipeline — shape", () => {
     expect(dispatchSlash).toHaveBeenCalledTimes(2)
     expect(dispatchSlash).toHaveBeenNthCalledWith(1, "/help")
     expect(dispatchSlash).toHaveBeenNthCalledWith(2, "typed after slash")
+    expect(onLocalInput).toHaveBeenCalledTimes(2)
     expect(writes).toContain("\n")
   })
 

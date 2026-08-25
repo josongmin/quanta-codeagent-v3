@@ -53,6 +53,7 @@ import { jsonlReplayStore, recordingLlmPort, replayLlmPort, s3ReplayStore } from
 import {
   isResumeEligible,
   type RemoteBackend,
+  type ResumeSecurityReceipt,
   readReceipt,
   segmentStore,
   writeReceipt,
@@ -157,12 +158,26 @@ const drain = async (it: AsyncIterable<StreamEvent>): Promise<StreamEvent[]> => 
 const CAMPAIGN = "spot-resume-e2e"
 const INSTANCE = "django__django-12345"
 const KEY = resumeKey({ campaignId: CAMPAIGN, instanceId: INSTANCE })
+const SECURITY: ResumeSecurityReceipt = {
+  schema: "quanta.resume-security.v1",
+  bucket: "fake-bucket",
+  keyPrefix: KEY,
+  kmsKeyArn: "arn:aws:kms:us-east-1:123:key/k",
+  principalArn: "arn:aws:iam::123:role/resume",
+  retentionDays: 7,
+  prefixLeastPrivilege: true,
+  publicAccessBlocked: true,
+  verifiedAt: "2026-08-25T00:00:00Z",
+}
 
 const activeEnv = (): Record<string, string | undefined> => ({
   QUANTA_BENCH_RESUME: "on",
   QUANTA_BENCH_RESUME_S3_BUCKET: "fake-bucket",
   QUANTA_BENCH_CAMPAIGN_ID: CAMPAIGN,
   QUANTA_BENCH_INSTANCE_ID: INSTANCE,
+  QUANTA_BENCH_RESUME_KMS_KEY_ARN: SECURITY.kmsKeyArn,
+  QUANTA_BENCH_RESUME_PRINCIPAL_ARN: SECURITY.principalArn,
+  QUANTA_BENCH_RESUME_MAX_RETENTION_DAYS: "7",
 })
 
 const tmpDirs: string[] = []
@@ -204,6 +219,7 @@ describe("bench spot-resume KEYSTONE e2e (record → durable → reclaim → res
       campaignId: CAMPAIGN,
       instanceId: INSTANCE,
       writeReceipt: (r) => writeReceipt(backend, KEY, r),
+      securityReceipt: async () => SECURITY,
     })
 
     const recordingPort = recordingLlmPort({ inner: stubLlm(), store: recordStore })
@@ -269,6 +285,7 @@ describe("bench spot-resume KEYSTONE e2e (record → durable → reclaim → res
         replayStore: replay,
         writeReceipt: (r) => writeReceipt(reclaimedBackend, key, r),
         readReceipt: () => readReceipt(reclaimedBackend, key),
+        securityReceipt: async () => SECURITY,
       }
     }
     void resumeStore // referenced for documentation parity; real composition above
@@ -344,6 +361,7 @@ describe("bench spot-resume KEYSTONE e2e (record → durable → reclaim → res
       campaignId: CAMPAIGN,
       instanceId: INSTANCE,
       writeReceipt: (r) => writeReceipt(backend, KEY, r),
+      securityReceipt: async () => SECURITY,
     })
     await drain(recordingLlmPort({ inner: stubLlm(), store }).stream(req("turn-1")))
 
@@ -361,6 +379,7 @@ describe("bench spot-resume KEYSTONE e2e (record → durable → reclaim → res
         replayStore: s3ReplayStore({ store: segs }),
         writeReceipt: (r) => writeReceipt(backend, key, r),
         readReceipt: () => readReceipt(backend, key),
+        securityReceipt: async () => SECURITY,
       }
     }
 

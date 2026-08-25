@@ -247,6 +247,9 @@ describe("maybeTeeResumeRecording — DEFAULT-OFF + fail-closed gates", () => {
     const out = maybeTeeResumeRecording(llm, {
       QUANTA_BENCH_RESUME: "1",
       QUANTA_BENCH_RESUME_S3_BUCKET: "b",
+      QUANTA_BENCH_RESUME_KMS_KEY_ARN: "arn:aws:kms:us-east-1:123:key/k",
+      QUANTA_BENCH_RESUME_PRINCIPAL_ARN: "arn:aws:iam::123:role/resume",
+      QUANTA_BENCH_RESUME_MAX_RETENTION_DAYS: "7",
       QUANTA_BENCH_INSTANCE_ID: "iid-1",
       // inject a runAws so no real aws cli is touched
       // (recorder builds resumeStore which threads runAws through env? — see below)

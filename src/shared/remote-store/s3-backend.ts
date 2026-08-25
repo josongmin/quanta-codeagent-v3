@@ -22,7 +22,7 @@ export interface RunAwsResult {
   readonly stderr?: string
 }
 
-type RunAws = (args: readonly string[], stdin?: string) => Promise<RunAwsResult>
+export type RunAws = (args: readonly string[], stdin?: string) => Promise<RunAwsResult>
 
 export interface S3BackendOptions {
   readonly bucket: string
@@ -46,6 +46,8 @@ export interface S3BackendOptions {
    * bucket, not silently weaken every producer.
    */
   readonly sse?: string
+  /** Required by SSE-KMS callers to pin writes to one customer-managed key. */
+  readonly sseKmsKeyId?: string
 }
 
 /** SSE-S3. Universally available, needs no key configuration, and is what a
@@ -61,7 +63,7 @@ const DEFAULT_AWS_TIMEOUT_MS = 60_000
  * and enforces a timeout: a hung `aws` is killed and the call throws rather than
  * blocking the resume/load path forever. Mirrors `src/apps/bench/remote/ec2.ts`.
  */
-const makeDefaultRunAws =
+export const makeDefaultRunAws =
   (timeoutMs: number): RunAws =>
   async (args, stdin) => {
     const proc = Bun.spawn(["aws", ...args], {
@@ -113,12 +115,17 @@ export const s3Backend = (opts: S3BackendOptions): RemoteBackend => {
   const regionArgs: readonly string[] = opts.region !== undefined ? ["--region", opts.region] : []
   const uri = (path: string): string => `s3://${opts.bucket}/${path}`
   const sseArgs: readonly string[] = ["--sse", opts.sse ?? DEFAULT_SSE]
+  const kmsArgs: readonly string[] =
+    opts.sseKmsKeyId !== undefined ? ["--sse-kms-key-id", opts.sseKmsKeyId] : []
 
   return {
     async put(path, body) {
       // `--sse` on the WRITE only; reads need no flag (S3 decrypts SSE-S3
       // transparently), which is why `get` is asserted to stay unchanged.
-      const res = await runAws([...regionArgs, "s3", "cp", "-", uri(path), ...sseArgs], body)
+      const res = await runAws(
+        [...regionArgs, "s3", "cp", "-", uri(path), ...sseArgs, ...kmsArgs],
+        body,
+      )
       if (res.exitCode !== 0) {
         // A swallowed PUT failure silently loses durability — throw so the
         // producer can mark the run degraded (fail-closed).

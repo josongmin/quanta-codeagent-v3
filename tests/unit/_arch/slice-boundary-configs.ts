@@ -525,15 +525,12 @@ export const SLICE_BOUNDARY_CONFIGS: Record<string, SliceBoundaryConfig> = {
   },
 
   // ────────────────────────────────────────────────────────────────────────
-  // S4b — previously-UNREGISTERED slices. Each had NO per-slice boundary config
-  // (no console/env/deny/surface battery). Every config below is SEEDED GREEN
-  // against current code: the leaf slices carry the canonical
-  // `[...PEER_LIBRARY_DENY, ...LAYER2_DENY]` deny-list (mirror of @/git /
-  // @/browser / @/scheduler / @/stream), with `envAllowFiles` carve-outs for the
-  // exact leaf names that legitimately resolve env AT CALL TIME (verified by the
-  // scanner probe — no surface / stdio / alt-runtime / node-surface / console
-  // violations exist in any of these today). Two peer-crossing edges are
-  // declared as reviewed `allowImports` carve-outs rather than silently dropped.
+  // S4b (2026-08) — slices that previously had NO per-slice boundary config.
+  // Each config below was SEEDED GREEN against current code at registration.
+  // New slices follow the same pattern: append here + add paired entrypoint test.
+  // Leaf slices use `[...PEER_LIBRARY_DENY, ...LAYER2_DENY]` with `envAllowFiles`
+  // carve-outs for leaves that legitimately resolve env AT CALL TIME. Peer-crossing
+  // edges are declared as reviewed `allowImports` rather than silently dropped.
   // Slices WITHOUT an `index.ts` barrel (integrations, protocol) omit
   // `requireSliceBarrel` so the config stays GREEN; adding those barrels is a
   // noted follow-up.
@@ -541,6 +538,15 @@ export const SLICE_BOUNDARY_CONFIGS: Record<string, SliceBoundaryConfig> = {
 
   activity: {
     slice: "activity",
+    denyImports: [...PEER_LIBRARY_DENY, ...LAYER2_DENY],
+    requireSliceBarrel: true,
+  },
+  // `@/attention` (RFC-01) is a pure leaf: the attention-navigation resolver
+  // (`nextNeedingAttention`) imports only `@/shared`. The A3 bridge in
+  // `@/agent/attention` derives snapshots and calls into this slice; runner/apps
+  // wire the broker. Full peer + Layer-2 deny locks the leaf.
+  attention: {
+    slice: "attention",
     denyImports: [...PEER_LIBRARY_DENY, ...LAYER2_DENY],
     requireSliceBarrel: true,
   },

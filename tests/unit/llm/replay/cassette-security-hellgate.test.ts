@@ -135,6 +135,25 @@ describe("R-5 — the remote PUT asks for encryption at rest explicitly", () => 
     expect(put).toContain("--sse")
   })
 
+  test("resume callers can pin SSE-KMS to an exact customer-managed key", async () => {
+    const { s3Backend } = await import("@/shared/remote-store/s3-backend")
+    const calls: string[][] = []
+    const keyArn = "arn:aws:kms:us-east-1:123:key/key-id"
+    const backend = s3Backend({
+      bucket: "b",
+      sse: "aws:kms",
+      sseKmsKeyId: keyArn,
+      runAws: async (args: readonly string[]) => {
+        calls.push([...args])
+        return { exitCode: 0, stdout: "", stderr: "" }
+      },
+    })
+    await backend.put("campaign/instance/events/000001.json", "body")
+    expect(calls[0]).toContain("aws:kms")
+    expect(calls[0]).toContain("--sse-kms-key-id")
+    expect(calls[0]).toContain(keyArn)
+  })
+
   test("PAIRED CONTROL — `get` is unchanged (no flag added to reads)", async () => {
     const { s3Backend } = await import("@/shared/remote-store/s3-backend")
     const calls: string[][] = []

@@ -34,7 +34,7 @@ import { mkdtempSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { errMessage } from "@/shared"
-import { isResumeEligible } from "@/shared/remote-store"
+import { isResumeEligible, sameResumeSecurity } from "@/shared/remote-store"
 import { resolveResumeConfig, resumeActive } from "./config"
 import { resumeKey } from "./identity"
 import { type ResumeStore, resumeStore } from "./store"
@@ -57,7 +57,16 @@ export interface PrepareResumeOpts {
   /** Diagnostic sink (default console.error) — explains WHY a resume was skipped. */
   readonly log?: (msg: string) => void
   /** Test seam: override the durable store factory (default = real S3 store). */
-  readonly makeStore?: (cfg: { bucket: string; region?: string }, key: string) => ResumeStore
+  readonly makeStore?: (
+    cfg: {
+      bucket: string
+      region?: string
+      kmsKeyArn: string
+      principalArn: string
+      maxRetentionDays: number
+    },
+    key: string,
+  ) => ResumeStore
   /** Test seam: directory the materialized cassette is written under. */
   readonly workDir?: string
 }
@@ -82,12 +91,20 @@ export const prepareResume = async (
   const key = resumeKey({ campaignId: cfg.campaignId, instanceId })
   try {
     const store = (opts.makeStore ?? defaultMakeStore)(
-      { bucket: cfg.bucket, ...(cfg.region !== undefined ? { region: cfg.region } : {}) },
+      {
+        bucket: cfg.bucket,
+        kmsKeyArn: cfg.kmsKeyArn,
+        principalArn: cfg.principalArn,
+        maxRetentionDays: cfg.maxRetentionDays,
+        ...(cfg.region !== undefined ? { region: cfg.region } : {}),
+      },
       key,
     )
+    const currentSecurity = await store.securityReceipt()
+    if (currentSecurity === undefined) throw new Error("resume security attestation missing")
     const receipt = await store.readReceipt()
     // FAIL-CLOSED gate: absent / degraded / malformed ⇒ NOT eligible ⇒ fresh.
-    if (!isResumeEligible(receipt)) {
+    if (!isResumeEligible(receipt) || !sameResumeSecurity(receipt?.security, currentSecurity)) {
       log(
         `[resume] ${key}: no eligible cassette (${receipt === undefined ? "receipt absent" : receipt.degraded ? "receipt degraded" : "receipt malformed"}) — fresh run`,
       )
@@ -114,9 +131,26 @@ export const prepareResume = async (
   }
 }
 
-const defaultMakeStore = (cfg: { bucket: string; region?: string }, key: string): ResumeStore =>
+const defaultMakeStore = (
+  cfg: {
+    bucket: string
+    region?: string
+    kmsKeyArn: string
+    principalArn: string
+    maxRetentionDays: number
+  },
+  key: string,
+): ResumeStore =>
   resumeStore(
-    { bucket: cfg.bucket, ...(cfg.region !== undefined ? { region: cfg.region } : {}) },
+    {
+      bucket: cfg.bucket,
+      security: {
+        kmsKeyArn: cfg.kmsKeyArn,
+        principalArn: cfg.principalArn,
+        maxRetentionDays: cfg.maxRetentionDays,
+      },
+      ...(cfg.region !== undefined ? { region: cfg.region } : {}),
+    },
     key,
   )
 
@@ -133,7 +167,17 @@ const sanitizeFile = (key: string): string => key.replace(/[^A-Za-z0-9._-]+/g, "
  * `undefined` (no resume) ⇒ `{}` so the fresh requeue path is byte-identical.
  */
 export const resumeReplayBoxEnv = (
-  resume: { campaignId: string; instanceId: string; bucket: string; region?: string } | undefined,
+  resume:
+    | {
+        campaignId: string
+        instanceId: string
+        bucket: string
+        kmsKeyArn: string
+        principalArn: string
+        maxRetentionDays: number
+        region?: string
+      }
+    | undefined,
 ): Record<string, string> => {
   if (resume === undefined) return {}
   return {
@@ -141,6 +185,9 @@ export const resumeReplayBoxEnv = (
     QUANTA_BENCH_RESUME_S3_BUCKET: resume.bucket,
     QUANTA_BENCH_CAMPAIGN_ID: resume.campaignId,
     QUANTA_BENCH_INSTANCE_ID: resume.instanceId,
+    QUANTA_BENCH_RESUME_KMS_KEY_ARN: resume.kmsKeyArn,
+    QUANTA_BENCH_RESUME_PRINCIPAL_ARN: resume.principalArn,
+    QUANTA_BENCH_RESUME_MAX_RETENTION_DAYS: String(resume.maxRetentionDays),
     QUANTA_BENCH_REPLAY_ON_MISS: "record-and-passthrough",
     ...(resume.region !== undefined ? { AWS_REGION: resume.region } : {}),
   }

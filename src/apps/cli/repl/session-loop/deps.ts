@@ -7,6 +7,7 @@ import type {
 } from "@/sdk/runtime"
 import type { ConvCheckpointWire } from "../conv-checkpoint-wire"
 import type { ConversationActionSurface } from "../conversation-action-surface"
+import type { GoalWakeSignalSlot } from "../goal-wake-signal"
 import type { InTurnReaderStdin } from "../in-turn-reader"
 import type { PlaybookTriggerSurfaceSeam } from "../playbook-trigger-surface-seam"
 import type { DispatchSlash } from "../prompt-pipeline"
@@ -144,6 +145,8 @@ export interface RunSessionLoopDeps {
    *  goal-continuation ticker over it, gated by `QUANTA_GOAL_ENFORCE`. Absent ⇒
    *  no ticker (default-OFF byte-identical). */
   readonly objectiveStore?: import("@/objective").ObjectivePort
+  /** Session-local goal wake event bridge. Present only with enforced pursuit. */
+  readonly goalWakeSlot?: GoalWakeSignalSlot
   /** #8 last-mile (jun-6) — the live stdin source for the CONCURRENT in-turn
    *  keystroke reader (closed-port DI; the host binds `process.stdin`, tests bind
    *  a fake). Only consumed when the mid-turn-capture wire is PRESENT

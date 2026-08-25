@@ -1,5 +1,5 @@
 id: cassette-artifact-access-policy
-title: "Replay cassettes are owner-only on disk and explicitly encrypted in S3 (access policy, never scrubbed)"
+title: "Replay cassettes are owner-only; remote resume is KMS/prefix/retention-attested; sharing uses a separate redacted export"
 section: 9
 subsystem: Security — replay artifact access policy
 order: 410
@@ -32,29 +32,53 @@ purpose: |
   the agent ever touched. The remote half had the same shape: `aws s3 cp - s3://…` with
   no `--sse`, so encryption at rest was whatever the bucket happened to default to.
 
-  The fix is ACCESS POLICY on the artifact as it is: dir `0700`, file `0600`, and an
-  explicit `--sse` (default `AES256`, overridable to `aws:kms`) on every PUT.
+  The local fix is ACCESS POLICY on the artifact as it is: dir `0700` and file `0600`.
+  Remote resume has a stricter activation contract: a customer-managed KMS key ARN,
+  IAM principal ARN, and maximum retention are required. Before the first remote I/O,
+  a live AWS preflight verifies bucket SSE-KMS/key pinning, all four public-access
+  blocks, an enabled lifecycle expiry within the maximum, required S3/KMS access
+  inside the exact resume prefix, and denial outside it. Every PUT also sends
+  `--sse aws:kms --sse-kms-key-id <arn>`. The resulting attestation is embedded in
+  the resume receipt and must match the current preflight before replay is eligible.
 
   The `mode` argument applies only when a file is CREATED, so the mode is re-asserted
   with `chmod` after each write — a permissions fix that only covered fresh files would
   leave every recording made before this landed world-readable forever.
 
-  DELIBERATELY NOT REDACTION. Scrubbing the recorded bytes would destroy replay
+  The canonical cassette is DELIBERATELY NOT REDACTED. Scrubbing those bytes would destroy replay
   reproducibility — the entire point of a cassette — and would move the content hash,
-  silently retiring every cassette already on disk. A redacted EXPORT is a separate
-  concern with its own output.
+  silently retiring every cassette already on disk. `eval trajectory redact` creates a
+  separate owner-only, explicitly non-replayable sharing artifact using the existing
+  `shared.redactValue` authority. A provenance receipt binds byte-exact source and
+  export SHA-256 digests without modifying the source.
 evidence:
   code:
     - src/llm/replay/jsonl-store.ts
     - src/shared/remote-store/s3-backend.ts
+    - src/apps/bench/resume/security.ts
+    - src/apps/bench/resume/store.ts
+    - src/apps/bench/resume/resume-launch.ts
+    - src/apps/eval/trajectory/redacted-export.ts
   adrs:
     - docs/decisions/0551-cassette-is-a-secrets-bearing-artifact.md
   tests:
     unit:
       - tests/unit/llm/replay/cassette-security-hellgate.test.ts
-    integration: []
+      - src/apps/bench/resume/__tests__/security.test.ts
+      - tests/unit/eval-trajectory-redacted-export.test.ts
+    integration:
+      - tests/integration/bench-resume-e2e.test.ts
     contract: []
-knobs: []
+knobs:
+  - name: QUANTA_BENCH_RESUME_KMS_KEY_ARN
+    env: QUANTA_BENCH_RESUME_KMS_KEY_ARN
+    default: unset
+  - name: QUANTA_BENCH_RESUME_PRINCIPAL_ARN
+    env: QUANTA_BENCH_RESUME_PRINCIPAL_ARN
+    default: unset
+  - name: QUANTA_BENCH_RESUME_MAX_RETENTION_DAYS
+    env: QUANTA_BENCH_RESUME_MAX_RETENTION_DAYS
+    default: unset
 deliberate_hold: null
 notes: |
   The hellgate asserts the OPPOSITE of a scrub: the secret is still in the file, the
@@ -64,8 +88,9 @@ notes: |
   The rewrite path (`truncate` / curation) is asserted not to widen the mode, because it
   goes through `writeFile` rather than `appendFile`.
 
-  Reads need no flag (S3 decrypts SSE-S3 transparently), which is why `get` is asserted
-  to stay UNCHANGED — a paired control against blanket-flagging every aws call.
+  Generic S3 users retain the AES256 floor. The resume store is the stricter consumer:
+  it pins SSE-KMS and gates put/get/list behind one cached live attestation. Missing or
+  failed security configuration makes `resumeActive=false` or the I/O fail closed.
 
   Windows has no POSIX mode; `chmod` is a no-op there, so this is a POSIX-only guarantee
   — which matches where the store is actually used (bench boxes, CI runners, developer

@@ -50,8 +50,8 @@ const actionOptions = (core: SurfaceCoreState): Partial<RuntimeFacadeComposeOpti
     ? {}
     : {
         conversationActionPort: core.conversationActions.port,
-        activeTurnRef: core.conversationActions.activeTurnRef,
       }),
+  ...(core.turnActivity === undefined ? {} : { activeTurnRef: core.turnActivity.activeTurnRef }),
   ...(core.interruptedTurnBuffer === undefined
     ? {}
     : { interruptedTurnBuffer: core.interruptedTurnBuffer }),

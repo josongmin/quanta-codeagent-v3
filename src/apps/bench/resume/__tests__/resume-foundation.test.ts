@@ -89,10 +89,13 @@ describe("resolveResumeConfig — DEFAULT-OFF + resolution", () => {
 })
 
 describe("resumeActive — fail-CLOSED activation predicate", () => {
-  test("enabled + bucket ⇒ active (narrows bucket to string)", () => {
+  test("enabled + complete security config ⇒ active (narrows required fields)", () => {
     const c = resolveResumeConfig({
       QUANTA_BENCH_RESUME: "1",
       QUANTA_BENCH_RESUME_S3_BUCKET: "b",
+      QUANTA_BENCH_RESUME_KMS_KEY_ARN: "arn:aws:kms:us-east-1:123:key/k",
+      QUANTA_BENCH_RESUME_PRINCIPAL_ARN: "arn:aws:iam::123:role/resume",
+      QUANTA_BENCH_RESUME_MAX_RETENTION_DAYS: "7",
     })
     expect(resumeActive(c)).toBe(true)
     if (resumeActive(c)) {
@@ -100,6 +103,17 @@ describe("resumeActive — fail-CLOSED activation predicate", () => {
       const s: string = c.bucket
       expect(s).toBe("b")
     }
+  })
+
+  test("enabled + bucket but missing security config ⇒ NOT active", () => {
+    expect(
+      resumeActive(
+        resolveResumeConfig({
+          QUANTA_BENCH_RESUME: "1",
+          QUANTA_BENCH_RESUME_S3_BUCKET: "b",
+        }),
+      ),
+    ).toBe(false)
   })
 
   test("enabled but NO bucket ⇒ NOT active (fail-closed, never invent a bucket)", () => {

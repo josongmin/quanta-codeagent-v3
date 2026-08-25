@@ -90,7 +90,12 @@ import { buildReport } from "./report"
 import { ResultStore } from "./storage"
 import { generateScenarios, runSynthetic } from "./synthetic"
 import { classifyQuery } from "./taxonomy"
-import { classifyTrajectories, freezeFixture, replayFixture } from "./trajectory"
+import {
+  classifyTrajectories,
+  exportRedactedCassette,
+  freezeFixture,
+  replayFixture,
+} from "./trajectory"
 import type { UseCaseId } from "./types"
 
 setTerminalIo({
@@ -749,6 +754,20 @@ const cmdTrajectoryFreeze = async (): Promise<number> => {
   return 0
 }
 
+const cmdTrajectoryRedact = (): number => {
+  const source = argValue("--source")
+  const out = argValue("--out")
+  if (source === undefined || out === undefined) {
+    process.stderr.write("eval trajectory redact: --source <jsonl> and --out <jsonl> required\n")
+    return 1
+  }
+  const result = exportRedactedCassette({ sourcePath: source, outputPath: out })
+  process.stdout.write(
+    `redacted ${result.outputPath}\n  receipt ${result.receiptPath}\n  source-sha256 ${result.receipt.source.sha256}\n  output-sha256 ${result.receipt.output.sha256}\n`,
+  )
+  return 0
+}
+
 const cmdTrajectory = async (): Promise<number> => {
   const sub = argv[1]
   switch (sub) {
@@ -758,8 +777,10 @@ const cmdTrajectory = async (): Promise<number> => {
       return cmdTrajectoryReplay()
     case "freeze":
       return cmdTrajectoryFreeze()
+    case "redact":
+      return cmdTrajectoryRedact()
     default:
-      console.error("eval trajectory: subcommand must be one of: classify, replay, freeze")
+      console.error("eval trajectory: subcommand must be one of: classify, replay, freeze, redact")
       return 1
   }
 }
@@ -885,6 +906,8 @@ const HELP = `quanta eval — verification harness (Tier 0..5)
   trajectory replay --fixture <jsonl>        Tier 4 re-execute a fixture + diff
   trajectory freeze --source <jsonl> --usecase ID [--prompt TEXT]
                                              Tier 4 promote a session to fixture
+  trajectory redact --source <jsonl> --out <jsonl>
+                                             owner-only redacted sharing export + provenance receipt
   compare --scenario ID --usecase ID [--agents quanta,claude-code,...]
                                              Tier 5 head-to-head + pairwise judge
   report                                     render aggregate matrix

@@ -305,6 +305,8 @@ const SUCCESS_TONE_IS_COMPLETED =
 export const buildPromptPipelineNotifyDeps = (args: {
   readonly notify: import("../../notify").NotificationPort | undefined
   readonly notifyCwdBasename: string | undefined
+  /** Invoked only after the detached live body actually settles. */
+  readonly onSettled?: () => void
   readonly contextWarning: (() => string) | undefined
 }): {
   notify?: import("../../notify").NotificationPort
@@ -379,6 +381,8 @@ export const handleMovedToBackground = <R>(args: {
   readonly promptText: string
   readonly notify: import("../../notify").NotificationPort | undefined
   readonly notifyCwdBasename: string | undefined
+  /** Invoked only after the detached live body actually settles. */
+  readonly onSettled?: () => void
   readonly write: (s: string) => void
   readonly handle: { readonly body: Promise<R>; readonly turnAbort: AbortController }
 }): void => {
@@ -409,7 +413,16 @@ export const handleMovedToBackground = <R>(args: {
       ok,
       cwdBasename: `${args.notifyCwdBasename ?? ""} · background task ${taskId} done`,
     })
-  args.handle.body.then(() => fireDone(true)).catch(() => fireDone(false))
+  args.handle.body.then(
+    () => {
+      fireDone(true)
+      args.onSettled?.()
+    },
+    () => {
+      fireDone(false)
+      args.onSettled?.()
+    },
+  )
 }
 
 /** WS-H / UUX-3-12 — REPL-exit honesty: enumerate STILL-RUNNING background

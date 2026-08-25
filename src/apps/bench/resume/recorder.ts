@@ -31,7 +31,7 @@ import {
 } from "@/llm/replay"
 import type { StreamInput } from "@/llm/types"
 import { benchHome, benchRunId } from "@/runner/batch/corpus/paths"
-import type { ResumeReceipt } from "@/shared/remote-store"
+import type { ResumeReceipt, ResumeSecurityReceipt } from "@/shared/remote-store"
 import { resumeHashRequest } from "./canonicalize"
 import { resolveResumeConfig, resumeActive } from "./config"
 import { resumeKey } from "./identity"
@@ -87,6 +87,8 @@ export interface TeeResumeReplayStoreOpts {
   readonly instanceId: string
   /** Persist a receipt (bound to a backend+key by the caller). */
   writeReceipt(r: ResumeReceipt): Promise<void>
+  /** Cached live AWS policy/KMS/lifecycle attestation from the gated backend. */
+  securityReceipt?(): Promise<ResumeSecurityReceipt>
 }
 
 /**
@@ -132,6 +134,7 @@ export const teeResumeReplayStore = (opts: TeeResumeReplayStoreOpts): ReplayStor
       await tee.append(record) // primary awaited; secondary best-effort (may markDegraded)
       count++
       if (!degraded) {
+        const security = await opts.securityReceipt?.()
         await safeWriteReceipt({
           key: opts.key,
           campaignId: opts.campaignId,
@@ -139,6 +142,7 @@ export const teeResumeReplayStore = (opts: TeeResumeReplayStoreOpts): ReplayStor
           latestSeq: count,
           degraded: false,
           updatedAt: new Date().toISOString(),
+          ...(security !== undefined ? { security } : {}),
         })
       }
     },
@@ -153,7 +157,8 @@ export const teeResumeReplayStore = (opts: TeeResumeReplayStoreOpts): ReplayStor
  * Wrap `llm` so each recorded interaction is tee'd to the durable resume store,
  * OR return `llm` UNCHANGED (byte-identical) when resume is not active.
  *
- * Active ⇔ `resumeActive(resolveResumeConfig(env))` AND a non-empty
+ * Active ⇔ `resumeActive(resolveResumeConfig(env))` (complete remote-security
+ * configuration) AND a non-empty
  * `QUANTA_BENCH_INSTANCE_ID` (the box launch sets it). If the instanceId is
  * absent while resume is enabled, we LOG and treat resume-write as OFF — we
  * never GUESS the instance id (fail-closed).
@@ -186,6 +191,11 @@ export const maybeTeeResumeRecording = (
       bucket: cfg.bucket,
       ...(cfg.region !== undefined ? { region: cfg.region } : {}),
       hashRequest: resumeHashRequest,
+      security: {
+        kmsKeyArn: cfg.kmsKeyArn,
+        principalArn: cfg.principalArn,
+        maxRetentionDays: cfg.maxRetentionDays,
+      },
     },
     key,
   )
@@ -205,6 +215,11 @@ export const maybeTeeResumeRecording = (
     campaignId: cfg.campaignId,
     instanceId,
     writeReceipt: resume.writeReceipt,
+    securityReceipt: async () => {
+      const receipt = await resume.securityReceipt()
+      if (receipt === undefined) throw new Error("resume security attestation missing")
+      return receipt
+    },
   })
 
   // Stamp the record `id` with the SAME canonicalizing hash (policy "exact",

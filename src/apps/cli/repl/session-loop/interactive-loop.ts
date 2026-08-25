@@ -32,6 +32,7 @@ export const runInteractiveLoop = async (
     convCheckpointWire,
     notify,
     notifyCwdBasename,
+    goalWakeSlot,
     backgroundPortal,
     inboundMode,
     conversationActions,
@@ -102,6 +103,7 @@ export const runInteractiveLoop = async (
                     promptText: prompt.text,
                     notify,
                     notifyCwdBasename,
+                    onSettled: () => goalWakeSlot?.current?.onTurnSettled(),
                     write: (s) => process.stderr.write(s),
                     handle,
                   }),
@@ -140,6 +142,10 @@ export const runInteractiveLoop = async (
     // does NOT fold a backgrounded turn into surface `history` (the SDK
     // session is SSOT — documented limitation, not a bug).
     if (out.backgrounded === true) continue
+    // A foreground body is now settled. Re-arm only from this concrete edge;
+    // the controller will capture the current objective revision and wait for a
+    // fresh quiet window before it can enqueue again.
+    goalWakeSlot?.current?.onTurnSettled()
     process.stderr.write("\n")
     // ALBB-18 (1) — label fidelity: an Esc-Esc / turn-abort is the SAME
     // terminal reason (`"aborted"`) the happy path routes through the SSOT

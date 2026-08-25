@@ -85,6 +85,23 @@ export const buildRetryState = (input: {
   }
 }
 
+type GoalSlashSlot = NonNullable<Parameters<typeof buildSurfaceDispatch>[0]["goal"]>
+
+const buildGoalSlashSlot = (
+  setup: SessionSetupResult,
+  core: SurfaceCoreState,
+): GoalSlashSlot | undefined => {
+  if (core.objectiveStore === undefined) return undefined
+  if (typeof setup.sessionId !== "string" || setup.sessionId.length === 0) return undefined
+  return {
+    port: core.objectiveStore,
+    threadId: setup.sessionId,
+    ...(core.goalWakeSlot === undefined
+      ? {}
+      : { onMutation: () => core.goalWakeSlot?.current?.onGoalMutation() }),
+  }
+}
+
 export const buildSurfaceDispatchWire = (
   setup: SessionSetupResult,
   state: SurfaceState,
@@ -105,6 +122,7 @@ export const buildSurfaceDispatchWire = (
   const permissionInspect = permissionInspectSlot(setup)
   const memory = memorySlot(setup)
   const dream = dreamSlot(setup)
+  const goal = buildGoalSlashSlot(setup, core)
   const retry = () =>
     buildRetryState({
       streamInput: core.lastStreamInput(),
@@ -128,11 +146,7 @@ export const buildSurfaceDispatchWire = (
     // RFC-03 H1 — the `/goal` wire needs the surface's objective authority; it is
     // present only under `QUANTA_OBJECTIVE_TOOLS`. Absent ⇒ slot omitted ⇒ `/goal`
     // prints its not-wired posture (`goal-cmd`), exit 0.
-    ...(core.objectiveStore !== undefined &&
-    typeof setup.sessionId === "string" &&
-    setup.sessionId.length > 0
-      ? { goal: { port: core.objectiveStore, threadId: setup.sessionId } }
-      : {}),
+    ...(goal === undefined ? {} : { goal }),
     // RFC-03 C3 — the CAS-guarded `/objective` editor wire over the SAME store.
     // Gated on QUANTA_PROPOSE_GOAL (registration parity) AND the objective
     // authority being present (QUANTA_OBJECTIVE_TOOLS) AND a session thread id;
@@ -141,7 +155,11 @@ export const buildSurfaceDispatchWire = (
     core.objectiveStore !== undefined &&
     typeof setup.sessionId === "string" &&
     setup.sessionId.length > 0
-      ? { objectiveEditor: buildObjectiveSlashState(core.objectiveStore, setup.sessionId) }
+      ? {
+          objectiveEditor: buildObjectiveSlashState(core.objectiveStore, setup.sessionId, () =>
+            core.goalWakeSlot?.current?.onGoalMutation(),
+          ),
+        }
       : {}),
     // RFC-05 E4 — the `/posture` selector wire over the SAME live posture control
     // the host mutates. Gated on QUANTA_POSTURE_SELECTOR (registration parity with
