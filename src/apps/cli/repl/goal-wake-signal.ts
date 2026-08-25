@@ -6,6 +6,8 @@
  * state and never decides eligibility; it merely relays real lifecycle edges
  * to the controller installed by the session loop.
  */
+import type { CliPromptInput } from "./prompt-types"
+
 export interface GoalWakeSignal {
   onGoalMutation(): void
   onActivity(): void
@@ -17,6 +19,10 @@ export interface GoalWakeSignal {
 
 export interface GoalWakeSignalSlot {
   current: GoalWakeSignal | undefined
+  /** GOAL-05A — late-bound by the session loop once the external prompt queue
+   *  exists: `/goal work` pushes ONE foreground prompt carrying host-minted
+   *  `user-requested-goal-work` provenance through it. Absent ⇒ not wired. */
+  enqueueWork?: ((input: CliPromptInput) => void) | undefined
 }
 
 export const createGoalWakeSignalSlot = (): GoalWakeSignalSlot => ({ current: undefined })

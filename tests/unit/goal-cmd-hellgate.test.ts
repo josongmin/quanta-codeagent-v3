@@ -28,6 +28,7 @@
  */
 
 import { describe, expect, test } from "bun:test"
+import { buildGoalControl } from "@/apps/cli/goal/goal-control"
 import { goalCmd } from "@/apps/cli/slash/goal-cmd"
 import type { SlashContext } from "@/apps/cli/slash-contract"
 // GOAL-01: the ceiling is the DOMAIN's exported `MAX_GOAL_CHARS` (the command
@@ -41,9 +42,9 @@ const TID = "thread-goal-cmd"
  *  objective slot. `out` appends to `buf` for real render observation. */
 const ctxWired = (port: ObjectivePort, buf: string[], threadId = TID): SlashContext => ({
   out: (s) => buf.push(s),
-  err: () => {},
+  err: (s) => buf.push(s),
   cwd: "/tmp",
-  goal: { port, threadId },
+  goal: { control: buildGoalControl({ port, threadId }) },
 })
 
 /** The SAME minimal ctx but WITHOUT the goal slot — the not-wired posture. This
@@ -156,15 +157,15 @@ describe("/goal (no arg) — show path", () => {
     expect(out).toContain("250/1000 tokens")
   })
 
-  test("with NO budget → the tokens line is absent (not '/undefined')", async () => {
+  test("with NO budget → usage renders without a cap (never '/undefined')", async () => {
     const port = createObjectiveStore()
     await goalCmd.run(["no", "budget"], ctxWired(port, []))
     const buf: string[] = []
     await goalCmd.run([], ctxWired(port, buf))
     const out = text(buf)
-    // Red-on-injection: if the budgetLine were emitted unconditionally it would
-    // render "undefined" — pin its absence.
-    expect(out).not.toContain("tokens")
+    // GOAL-05A: the report always carries usage; an absent cap renders bare.
+    expect(out).toContain("0 tokens")
+    expect(out).not.toContain("/undefined")
     expect(out).not.toContain("undefined")
   })
 
@@ -203,7 +204,7 @@ describe("/goal clear|stop — clear path", () => {
     expect(text(buf).toLowerCase()).not.toContain("paused")
   })
 
-  test("'stop' is an alias for clear → objective deleted (readback null)", async () => {
+  test("'stop' is a PAUSE alias (GOAL-05A) → objective kept, status paused (never a deletion)", async () => {
     const port = createObjectiveStore()
     await goalCmd.run(["another", "goal"], ctxWired(port, []))
 
@@ -211,9 +212,10 @@ describe("/goal clear|stop — clear path", () => {
     const code = await goalCmd.run(["stop"], ctxWired(port, buf))
 
     expect(code).toBe(0)
-    // GOAL-01: REVERSED — deletion, not a pause.
-    expect(port.get(TID)).toBeNull()
-    expect(text(buf).toLowerCase()).toContain("cleared")
+    expect(port.get(TID)?.goal).toBe("another goal")
+    expect(port.get(TID)?.status).toBe("paused")
+    expect(text(buf).toLowerCase()).toContain("paused")
+    expect(text(buf).toLowerCase()).not.toContain("cleared")
   })
 
   test("'clear' with NO active goal → graceful 'no active objective', exit 0", async () => {
@@ -224,9 +226,10 @@ describe("/goal clear|stop — clear path", () => {
     // Readback confirms nothing was created as a side effect.
     expect(port.get(TID)).toBeNull()
     const out = text(buf).toLowerCase()
-    expect(out).toContain("no active objective")
-    // Must NOT claim it paused something.
+    expect(out).toContain("no goal set")
+    // Must NOT claim it paused or cleared something.
     expect(out).not.toContain("stop auto-pursuing")
+    expect(out).not.toContain("cleared")
   })
 
   test("a cleared thread accepts a fresh goal (create after the tombstone)", async () => {
@@ -304,19 +307,18 @@ describe("/goal — max-chars boundary", () => {
 
     const code = await goalCmd.run([over], ctxWired(port, buf))
     expect(code).toBe(1)
-    expect(text(buf)).toContain("too long")
+    // GOAL-05A rail 15: the DOMAIN refuses (`goal-too-long`), identically to model/web.
+    expect(text(buf)).toContain("ceiling")
     // Fresh readback: the over-limit goal was NOT recorded.
     expect(port.get(TID)).toBeNull()
   })
 
-  test("the too-long message reports the actual length and the cap", async () => {
+  test("the too-long message names the domain cap", async () => {
     const port = createObjectiveStore()
     const buf: string[] = []
     const over = "y".repeat(MAX_GOAL_CHARS + 5)
     await goalCmd.run([over], ctxWired(port, buf))
-    const out = text(buf)
-    expect(out).toContain(String(MAX_GOAL_CHARS + 5))
-    expect(out).toContain(String(MAX_GOAL_CHARS))
+    expect(text(buf)).toContain(String(MAX_GOAL_CHARS))
   })
 
   test("well under the limit → accepted (exit 0)", async () => {
@@ -358,8 +360,8 @@ describe("/goal — exact return codes", () => {
 // ─────────────────────────────────────────────────────────────────────────────
 // 7. IDEMPOTENT / REPLACE
 // ─────────────────────────────────────────────────────────────────────────────
-describe("/goal — set replaces prior goal", () => {
-  test("a second set replaces the first (readback the new goal)", async () => {
+describe("/goal — create twice preserves the id and points at edit (GOAL-05A rail 1)", () => {
+  test("a second set is REFUSED by the authority (objective-exists); the first goal + id survive", async () => {
     const port = createObjectiveStore()
     await goalCmd.run(["first", "objective"], ctxWired(port, []))
     expect(port.get(TID)?.goal).toBe("first objective") // precondition
@@ -367,21 +369,20 @@ describe("/goal — set replaces prior goal", () => {
 
     const buf: string[] = []
     const code = await goalCmd.run(["second", "objective"], ctxWired(port, buf))
-    expect(code).toBe(0)
-    // Replaced, not appended or ignored.
-    expect(port.get(TID)?.goal).toBe("second objective")
-    expect(port.get(TID)?.status).toBe("active")
-    // GOAL-01: a second `/goal` is a `replace` — a FRESH generation id.
-    expect(port.get(TID)?.objectiveId).not.toBe(firstId)
-    // list() has exactly one objective for this thread — not two.
+    expect(code).toBe(1)
+    expect(text(buf)).toContain("/goal edit")
+    expect(port.get(TID)?.goal).toBe("first objective")
+    expect(port.get(TID)?.objectiveId).toBe(firstId)
     expect(port.list().filter((o) => o.threadId === TID)).toHaveLength(1)
   })
 
-  test("re-setting the SAME text keeps one objective, active — but mints a NEW generation", async () => {
+  test("`/goal edit <text>` is the replace path — a FRESH generation id, one objective", async () => {
     const port = createObjectiveStore()
     await goalCmd.run(["same"], ctxWired(port, []))
     const firstId = port.get(TID)?.objectiveId
-    await goalCmd.run(["same"], ctxWired(port, []))
+    const buf: string[] = []
+    const code = await goalCmd.run(["edit", "same"], ctxWired(port, buf))
+    expect(code).toBe(0)
     expect(port.get(TID)?.goal).toBe("same")
     expect(port.get(TID)?.status).toBe("active")
     expect(port.list().filter((o) => o.threadId === TID)).toHaveLength(1)

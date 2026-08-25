@@ -14,6 +14,7 @@
 
 import { randomUUID } from "node:crypto"
 import type { ObjectiveAttemptState, StartedObjectiveAttempt } from "../attempt"
+import { clampBudgetLimit } from "../budget-limits"
 import {
   type CheckSpec,
   type CompletionReceipt,
@@ -323,8 +324,8 @@ export const cellFromDefinition = (
   provenance: CellProvenance,
   t: number,
 ): Cell => {
-  const maxTokens = finiteNonNegInt(definition.budget?.maxTokens)
-  const maxTurns = finiteNonNegInt(definition.budget?.maxTurns)
+  // GOAL-05A — caps are clamped to the product ceiling on every path.
+  const { maxTokens, maxTurns } = clampBudgetLimit(definition.budget ?? {})
   return {
     threadId,
     objectiveId: provenance.objectiveId,

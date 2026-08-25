@@ -318,10 +318,10 @@ export interface SlashContext {
    *  posture + exit 0 (default-OFF byte-identical). */
   readonly goal?:
     | {
-        readonly port: import("@/objective").ObjectivePort
-        readonly threadId: string
-        /** Surface event hook; it never mutates the objective. */
-        readonly onMutation?: () => void
+        /** GOAL-05A — the ONE CLI adapter over the authority / read / verifier
+         *  ports (`buildGoalControl`); `/goal` and the deprecated `/objective`
+         *  alias drive this same instance. */
+        readonly control: import("./goal/goal-control").GoalControl
       }
     | undefined
   /** §9.6 — `/presets` opusplan-style sticky model-preset wire. The SAME live
@@ -351,15 +351,6 @@ export interface SlashContext {
    *  (parity with `/agents`). `/attention` itself is only REGISTERED behind the
    *  same gate (help catalog byte-identical when OFF). */
   readonly attention?: import("./slash/attention-cmd").AttentionSlashState | undefined
-  /** RFC-03 C3 `/objective` — the live CAS-guarded objective editor wire (show /
-   *  edit / pause / resume / clear). A thin projection over the objective
-   *  AUTHORITY (built by {@link import("./slash/objective").buildObjectiveSlashState}
-   *  over the SAME store `/goal` + the LLM `objective_*` tools share). Present iff
-   *  `QUANTA_PROPOSE_GOAL` is on AND the surface wired the objective store; absent
-   *  ⇒ `/objective` prints "not wired" + exit 0 (parity with `/attention`).
-   *  `/objective` itself is only REGISTERED behind the same gate (help catalog
-   *  byte-identical when OFF). */
-  readonly objectiveEditor?: import("./slash/objective").ObjectiveSlashState | undefined
   /** RFC-05 E4 — the CAS-guarded `/posture` selector wire over the SAME live
    *  posture authority the per-turn gate reads (a `/posture` mutation changes the
    *  next turn). Present iff `QUANTA_POSTURE_SELECTOR` is on AND the surface wired

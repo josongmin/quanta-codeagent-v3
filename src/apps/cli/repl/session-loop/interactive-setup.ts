@@ -324,11 +324,19 @@ const armGoalWake = (args: {
         })
       : undefined
   if (goalWake !== undefined) {
-    if (goalWakeSlot !== undefined) goalWakeSlot.current = goalWake
+    if (goalWakeSlot !== undefined) {
+      goalWakeSlot.current = goalWake
+      // GOAL-05A — `/goal work` pushes ONE foreground prompt (user-requested
+      // provenance) through the same external queue the wake controller uses.
+      goalWakeSlot.enqueueWork = (input) => externalPromptQueue.push(input)
+    }
     closeStack.push({
       label: "goalWake.stop",
       dispose: () => {
-        if (goalWakeSlot?.current === goalWake) goalWakeSlot.current = undefined
+        if (goalWakeSlot?.current === goalWake) {
+          goalWakeSlot.current = undefined
+          goalWakeSlot.enqueueWork = undefined
+        }
         goalWake.stop()
       },
     })

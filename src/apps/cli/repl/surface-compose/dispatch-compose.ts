@@ -1,11 +1,17 @@
+import {
+  createObjectiveCheckRunner,
+  createObjectiveVerificationCoordinator,
+  createWorkspaceEvidence,
+} from "@/host/runtime/objective-verifier-wire"
 import type { Message, ModelCandidate, StreamEvent, StreamInput } from "@/llm"
+import { createObjectiveCapabilities } from "@/objective"
 import type { AgentEvent } from "@/stream"
 import type { DreamSlashState } from "../../dream-cmd"
+import { buildGoalControl } from "../../goal/goal-control"
 import type { MemorySlashState } from "../../memory-cmd"
 import type { PermissionInspectSlashState } from "../../permission-explain"
 import type { RetryWithSessionState } from "../../retry-with"
 import type { ConvCheckpointSlashState } from "../../rewind-conv-cmd"
-import { buildObjectiveSlashState, isObjectiveEditorEnabled } from "../../slash/objective"
 import {
   buildPostureSlashState,
   isPostureSelectorEnabled,
@@ -93,12 +99,35 @@ const buildGoalSlashSlot = (
 ): GoalSlashSlot | undefined => {
   if (core.objectiveStore === undefined) return undefined
   if (typeof setup.sessionId !== "string" || setup.sessionId.length === 0) return undefined
+  const port = core.objectiveStore
+  // GOAL-05A — ONE control instance over the authority + the production
+  // verifier (same runner/evidence composition the per-turn wire uses) + the
+  // late-bound `/goal work` sink the session loop installs on the wake slot.
+  const caps = createObjectiveCapabilities(port)
+  const verifier = createObjectiveVerificationCoordinator({
+    read: caps.read,
+    verifier: caps.verifier,
+    runner: createObjectiveCheckRunner(),
+    evidence: createWorkspaceEvidence(),
+    workspaceCwd: setup.cwd,
+  })
+  const goalWakeSlot = core.goalWakeSlot
   return {
-    port: core.objectiveStore,
-    threadId: setup.sessionId,
-    ...(core.goalWakeSlot === undefined
-      ? {}
-      : { onMutation: () => core.goalWakeSlot?.current?.onGoalMutation() }),
+    control: buildGoalControl({
+      port,
+      threadId: setup.sessionId,
+      verifier,
+      ...(goalWakeSlot === undefined
+        ? {}
+        : {
+            onMutation: () => goalWakeSlot.current?.onGoalMutation(),
+            enqueueWork: (input) => {
+              const sink = goalWakeSlot.enqueueWork
+              if (sink === undefined) throw new Error("/goal work: prompt queue not yet bound")
+              sink(input)
+            },
+          }),
+    }),
   }
 }
 
@@ -147,20 +176,6 @@ export const buildSurfaceDispatchWire = (
     // present only under `QUANTA_OBJECTIVE_TOOLS`. Absent ⇒ slot omitted ⇒ `/goal`
     // prints its not-wired posture (`goal-cmd`), exit 0.
     ...(goal === undefined ? {} : { goal }),
-    // RFC-03 C3 — the CAS-guarded `/objective` editor wire over the SAME store.
-    // Gated on QUANTA_PROPOSE_GOAL (registration parity) AND the objective
-    // authority being present (QUANTA_OBJECTIVE_TOOLS) AND a session thread id;
-    // absent ⇒ `/objective` prints "not wired" (default-OFF byte-identical).
-    ...(isObjectiveEditorEnabled() &&
-    core.objectiveStore !== undefined &&
-    typeof setup.sessionId === "string" &&
-    setup.sessionId.length > 0
-      ? {
-          objectiveEditor: buildObjectiveSlashState(core.objectiveStore, setup.sessionId, () =>
-            core.goalWakeSlot?.current?.onGoalMutation(),
-          ),
-        }
-      : {}),
     // RFC-05 E4 — the `/posture` selector wire over the SAME live posture control
     // the host mutates. Gated on QUANTA_POSTURE_SELECTOR (registration parity with
     // `/objective`); absent ⇒ `/posture` prints "not wired" (default-OFF byte-identical).

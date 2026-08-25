@@ -8,16 +8,11 @@
  * store never chooses an id or an actor on its own).
  */
 
+import { clampBudgetLimit } from "../budget-limits"
 import { normalizeGoalText } from "../identity"
 import type { ObjectiveCore } from "../store"
 import type { Objective } from "../types"
-import {
-  type CellProvenance,
-  cellFromDefinition,
-  finiteNonNegInt,
-  isNonEmptyString,
-  toObjective,
-} from "./cell"
+import { type CellProvenance, cellFromDefinition, isNonEmptyString, toObjective } from "./cell"
 import type { ObjectiveStoreCtx } from "./ctx"
 
 export const objectiveOps = (
@@ -100,8 +95,9 @@ export const objectiveOps = (
       return mutate(threadId, (cell) => {
         // A present cap replaces; `undefined` leaves the cap untouched; a
         // non-finite/negative cap is ignored. `*Used` are never touched here.
-        const maxTokens = finiteNonNegInt(budget.maxTokens)
-        const maxTurns = finiteNonNegInt(budget.maxTurns)
+        // GOAL-05A — same-ID amendment: clamp to the product ceiling, never
+        // touch `*Used`; the derived status re-evaluates against the new caps.
+        const { maxTokens, maxTurns } = clampBudgetLimit(budget)
         if (maxTokens !== undefined) cell.maxTokens = maxTokens
         if (maxTurns !== undefined) cell.maxTurns = maxTurns
       })

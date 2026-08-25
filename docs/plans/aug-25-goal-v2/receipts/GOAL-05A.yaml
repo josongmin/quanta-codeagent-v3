@@ -1,0 +1,33 @@
+ticket: GOAL-05A
+kind: implementation
+recordedAt: 2026-08-26T05:10:00Z
+testedSourceSha: working tree on top of fa71870db (S = the commit this receipt is staged with)
+scope:
+  src: src/apps/cli/goal/{goal-args (pure parser; MAX_CHECK_ARGV_ITEMS/ITEM_CHARS, DEFAULT_CHECK_TIMEOUT_MS = verifier ceiling), goal-control (buildGoalControl: one user-capability commit per command, fresh re-read report, full-replacement definition edits, edit clears the contract unless --keep-contract, verify via the verifier port, work enqueues one user-requested-provenance prompt), goal-render (GoalReport projection + renderer; no attempt key / raw id)}.ts,
+       src/apps/cli/slash/goal-cmd.ts (parse-only; GOAL_REJECTION_MESSAGE Record<CommitRejection>), src/apps/cli/slash/objective.ts (deprecated alias → same control; translateObjectiveArgs; registration gate unchanged),
+       src/apps/cli/slash-contract.ts (ctx.goal = { control }; objectiveEditor slot removed), surface-compose/{dispatch,dispatch-compose}.ts (one control + production verifier coordinator per surface), session-loop/{interactive-setup (goalWakeSlot.enqueueWork late-bound), interactive-loop (claim provenance from the meta)}.ts, repl/{goal-wake-signal,prompt-types}.ts,
+       src/objective/{budget-limits (new: PRODUCT_BUDGET_CEILING, clampBudgetLimit), index, policy (amendBudget on completed → terminal-objective, all actors)}.ts + core-store/{cell,objective-ops}.ts (clamp on create/replace/amend)
+  tests: tests/unit/cli/{goal-args (6), goal-render (6), goal-control.hellgate (12), objective-frontdoor.hellgate (10, rewritten for the alias contract)}.test.ts, tests/unit/objective/budget-amendment.test.ts (4), goal-attempt-claim (+1 user provenance); tests/unit/goal-cmd-hellgate.test.ts (7 expectations moved: stop=pause, create-twice refused, domain too-long message, report text), goal-pursuit-chain ctx
+rails:
+  - bun run typecheck / typecheck:tests / lint:debt ; exit 0 (prod complexity 36/36 after splitting parseCheckHead and control.run)
+  - bun test tests/unit/cli tests/unit/apps/cli tests/unit/objective tests/unit/host + goal-* hellgates ; 3523 pass / 0 fail (before the two mutant-closing tests; goal set re-run 40 / 0 after)
+  - bun test tests/e2e-pty/cli-goal-pursuit-e2e.test.ts ; 9 / 0 (36s)
+  - bun test tests/unit/_arch tests/unit/god-code-ratchet.test.ts tests/unit/src-no-sketchy-code.test.ts tests/unit/eval-no-sketchy-code.test.ts ; 79 / 2 — both pre-existing (cohort 26>24; apps/bench/resume/store.ts:63)
+  - bun fc validate ; all evidence resolved ; bun run test:contract ; 7 / 0
+redOnInjection (14/14 RED after two test additions; restore byte-identical):
+  - M1  check `--` separator not required                      -> 1 RED
+  - M2  --timeout-ms ceiling ignored                            -> 1 RED
+  - M3  stop aliased to clear                                   -> 2 RED
+  - M4  edit keeps the contract by default                      -> 1 RED
+  - M5  check-remove/edit ignore the check id                   -> SURVIVED (single-check tests) → two-check test added → 1 RED
+  - M6  /goal work minted with autonomous provenance            -> 1 RED
+  - M7  onMutation fired on a refusal                           -> 1 RED
+  - M8  renderer leaks the attempt key                          -> 2 RED
+  - M9  verified count trusts `met` instead of the receipt      -> SURVIVED (unreachable via the authority) → synthetic-snapshot test added → 1 RED
+  - M10 completed objective accepts a budget amendment          -> 2 RED
+  - M11 product ceiling clamp removed                           -> 3 RED
+  - M12 /objective alias drops the edit verb                    -> 3 RED
+  - M13 rejected result exits 0                                 -> 4 RED
+  - M14 CLI claim ignores the meta provenance                   -> 1 RED
+ticketRedRails: 1,2,3,4,5,6,7,8,9,10,11,15 covered; 16 (per-attempt checkpoint report emission after settlement) — the report data model is the one the host will project; the emission hook itself is not wired in 05A (recorded for 06/10); 12,13,14 are GOAL-05B
+deviations: README "GOAL-05A 실행 기록" (one-word /goal stays a create; /goal work requires the composed pursuit surface; renderTaskBudgetBlock reuse deferred with rationale; PTY scenario split across the existing 9-case suite and 05B)

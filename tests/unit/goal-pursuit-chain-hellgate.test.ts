@@ -19,6 +19,7 @@
  */
 
 import { describe, expect, test } from "bun:test"
+import { buildGoalControl } from "@/apps/cli/goal/goal-control"
 import {
   type GoalContinuationProbes,
   startGoalContinuationTicker,
@@ -36,7 +37,7 @@ const ctxWith = (port: ObjectivePort, out: (s: string) => void): SlashContext =>
   out,
   err: () => {},
   cwd: "/tmp",
-  goal: { port, threadId: TID },
+  goal: { control: buildGoalControl({ port, threadId: TID }) },
 })
 
 /** Idle probes that all pass, plus a `resume` that captures the enqueued turn's

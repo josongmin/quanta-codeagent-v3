@@ -1,7 +1,7 @@
 ticket: GOAL-04
 kind: implementation
 recordedAt: 2026-08-26T03:30:00Z
-testedSourceSha: working tree on top of bca6408fe (S = the commit this receipt is staged with)
+testedSourceSha: working tree on top of e55dbc0e8 (a concurrent sweep commit that captured the in-flight GOAL-04 files mid-state); completion commit fa71870db (S = the commit this receipt is staged with)
 scope:
   src: src/objective/attempt.ts (new: ObjectiveAttemptContext/State/Start, ObjectiveAttemptSlot claim/take/release/failStop/recover, provenance),
        src/objective/{types,mutations,policy,authority,capabilities,index,store}.ts + core-store/{cell,completion-ops(startAttempt/clearStartedAttempt),rehydrate(rebuildAttempts),snapshot-ops,ctx}.ts (beginAttempt system-only reserve; settleAttempt must match the started attempt and never re-debits; abandonAttempt user/system; replace/clear under a started attempt = attempt-in-flight; snapshot v2 `attempts`),

@@ -46,6 +46,28 @@ describe("GOAL-04 — CLI goal attempt claim", () => {
     expect(slot.status().kind).toBe("empty")
   })
 
+  test("user-requested goal work (/goal work) claims with USER provenance; plain continuation stays autonomous", () => {
+    const authority = createObjectiveAuthority({ now: () => 1 })
+    authority.create("t", { goal: "g", successCriteria: ["c"] })
+    const slot = createObjectiveAttemptSlot()
+    const work = normalizeCliPromptInput({
+      text: "do the thing",
+      goalContinuation: {
+        threadId: "t",
+        objectiveRevision: 1,
+        attemptKey: "user-work:1",
+        provenance: "user-requested-goal-work",
+      },
+    })
+    expect(claimGoalAttempt(slot, authority, work)).toBe(true)
+    const status = slot.status()
+    expect(status.kind).toBe("claimed")
+    if (status.kind === "claimed") {
+      expect(status.attempt.provenance).toBe("user-requested-goal-work")
+      expect(status.attempt.attemptId).toBe("user-work:1")
+    }
+  })
+
   test("a second continuation while a claim is outstanding is refused (single occupancy)", () => {
     const authority = createObjectiveAuthority({ now: () => 1 })
     authority.create("t", { goal: "g", successCriteria: ["c"] })

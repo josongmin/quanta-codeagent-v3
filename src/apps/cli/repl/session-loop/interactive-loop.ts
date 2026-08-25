@@ -33,7 +33,7 @@ export const claimGoalAttempt = (
     objectiveId,
     startedRevision: domain.revision,
     attemptId: meta.attemptKey,
-    provenance: "autonomous-continuation",
+    provenance: meta.provenance ?? "autonomous-continuation",
     executionMode: "foreground",
   })
 }

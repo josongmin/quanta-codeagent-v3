@@ -209,6 +209,9 @@ const transitionRejection = (
     return "attempt-in-flight"
   }
   if (o === undefined) return null
+  // GOAL-05A — a completed objective accepts no budget amendment from ANY
+  // actor: create/edit a new generation instead.
+  if (mutation.kind === "amendBudget" && o.status === "completed") return "terminal-objective"
   if (
     mutation.kind === "setExplicitStatus" &&
     mutation.status === "active" &&

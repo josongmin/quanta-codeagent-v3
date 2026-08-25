@@ -1,108 +1,132 @@
 /**
- * RFC-03 C3 — `/objective` CLI front-door hellgate (REAL CAS editor receipt).
+ * ★ HELLGATE — `/objective` is a DEPRECATED ALIAS of `/goal` (GOAL-05A).
  *
- * Drives the REAL production rail: the REAL objective AUTHORITY (the same
- * instance the `objective_*` tools + `/goal` share), the REAL
- * `buildObjectiveSlashState` wire, and the REAL `/objective` command.
- *
- * Pins:
- *  1. REGISTRATION GATE (OFF byte-identical) — `/objective` is registered ONLY
- *     under `QUANTA_PROPOSE_GOAL` (red-on-injection: drop the guard ⇒ the OFF
- *     command table gains `/objective`).
- *  2. edit → the goal + revision advance; a "revision request" (edit) is a NEW
- *     prepare cycle.
- *  3. SIMULTANEOUS CLI edit + model tool at ONE revision ⇒ exactly one commits,
- *     the other is `stale` (CAS), and the loser never clobbers the winner.
- *  4. REPLACE-GUARD: a bare `/objective <text>` over an active goal refuses.
+ *   - registration stays behind `QUANTA_PROPOSE_GOAL` (default-OFF byte-identical);
+ *   - every `/objective` verb emits the SAME authority command as its `/goal`
+ *     counterpart (rail 11: deep-equal mutations, one commit each) through the
+ *     ONE control instance on `ctx.goal`;
+ *   - the CAS race pinned by RFC-03 C3 still holds: a CLI edit that commits
+ *     first leaves a model candidate prepared at the old revision `stale`.
  */
 
-import { describe, expect, test } from "bun:test"
-import { attentionCmd } from "@/apps/cli/slash/attention-cmd"
-import { buildObjectiveSlashState, objectiveCmd } from "@/apps/cli/slash/objective"
+import { afterEach, describe, expect, test } from "bun:test"
+import { buildGoalControl } from "@/apps/cli/goal/goal-control"
+import { goalCmd } from "@/apps/cli/slash/goal-cmd"
+import { objectiveCmd, translateObjectiveArgs } from "@/apps/cli/slash/objective"
+import { SESSION_SLASH_COMMANDS } from "@/apps/cli/slash/registry-session"
 import { buildSurfaceSlashCommands } from "@/apps/cli/slash/registry-surface"
 import type { SlashCommand, SlashContext } from "@/apps/cli/slash-contract"
-import { createObjectiveAuthority } from "@/objective"
+import {
+  asObjectiveAuthority,
+  createObjectiveAuthority,
+  type ObjectiveAuthority,
+  type ObjectiveMutation,
+} from "@/objective"
 
-const withEnv = <T>(key: string, val: string | undefined, fn: () => T): T => {
-  const prev = process.env[key]
-  if (val === undefined) delete process.env[key]
-  else process.env[key] = val
-  try {
-    return fn()
-  } finally {
-    if (prev === undefined) delete process.env[key]
-    else process.env[key] = prev
-  }
-}
+const ORIGINAL = process.env.QUANTA_PROPOSE_GOAL
+afterEach(() => {
+  if (ORIGINAL === undefined) delete process.env.QUANTA_PROPOSE_GOAL
+  else process.env.QUANTA_PROPOSE_GOAL = ORIGINAL
+})
 
 const names = (): string[] =>
   buildSurfaceSlashCommands((): readonly SlashCommand[] => []).map((c) => c.name)
+const sessionNames = (): string[] => SESSION_SLASH_COMMANDS.map((c) => c.name)
 
-const capture = () => {
-  const out: string[] = []
-  const err: string[] = []
-  const ctx = (state: SlashContext["objectiveEditor"]): SlashContext =>
-    ({
-      out: (s) => out.push(s),
-      err: (s) => err.push(s),
-      cwd: "/tmp",
-      now: () => 1_000_000,
-      objectiveEditor: state,
-    }) as SlashContext
-  return { out, err, ctx }
+/** An authority whose commits are recorded (duck-typed spread wrapper). */
+const spiedAuthority = () => {
+  const raw = asObjectiveAuthority(createObjectiveAuthority({ now: () => 1 }))
+  const mutations: ObjectiveMutation[] = []
+  const spied: ObjectiveAuthority = {
+    ...raw,
+    commit: (prepared, approval) => {
+      mutations.push(prepared.command.mutation)
+      return raw.commit(prepared, approval)
+    },
+  }
+  return { raw, spied, mutations }
 }
+
+const ctxFor = (port: ObjectiveAuthority, out: string[] = []): SlashContext => ({
+  out: (s) => out.push(s),
+  err: (s) => out.push(s),
+  cwd: "/tmp",
+  goal: { control: buildGoalControl({ port, threadId: "t" }) },
+})
 
 describe("RFC-03 C3 — /objective registration gate (OFF byte-identical)", () => {
   test("QUANTA_PROPOSE_GOAL unset ⇒ /objective is NOT registered", () => {
-    withEnv("QUANTA_PROPOSE_GOAL", undefined, () => {
-      expect(names()).not.toContain("/objective")
-    })
+    delete process.env.QUANTA_PROPOSE_GOAL
+    expect(names()).not.toContain("/objective")
   })
   test("QUANTA_PROPOSE_GOAL=1 ⇒ /objective IS registered (red-on-injection anchor)", () => {
-    withEnv("QUANTA_PROPOSE_GOAL", "1", () => {
-      expect(names()).toContain("/objective")
-    })
+    process.env.QUANTA_PROPOSE_GOAL = "1"
+    expect(names()).toContain("/objective")
   })
-  // anchor `attentionCmd` import so an unrelated refactor cannot silently drop
-  // the sibling gated-command precedent this mirrors.
-  test("sibling gated command still exists", () => {
-    expect(attentionCmd.name).toBe("/attention")
+  test("/goal lives in the session registry regardless (the alias never owns discovery)", () => {
+    delete process.env.QUANTA_PROPOSE_GOAL
+    expect(sessionNames()).toContain("/goal")
+    expect(names()).not.toContain("/goal")
   })
 })
 
-describe("RFC-03 C3 — /objective CAS editor", () => {
+describe("GOAL-05A — /objective is a deprecated alias of /goal", () => {
+  test("argv translation onto the /goal grammar", () => {
+    expect(translateObjectiveArgs([])).toEqual([])
+    expect(translateObjectiveArgs(["show"])).toEqual([])
+    expect(translateObjectiveArgs(["edit", "a", "b"])).toEqual(["edit", "a", "b"])
+    expect(translateObjectiveArgs(["pause"])).toEqual(["pause"])
+    expect(translateObjectiveArgs(["resume"])).toEqual(["resume"])
+    expect(translateObjectiveArgs(["clear"])).toEqual(["clear"])
+    expect(translateObjectiveArgs(["some", "goal"])).toEqual(["some", "goal"])
+  })
+
   test("not wired ⇒ prints not-wired + exit 0", async () => {
-    const { out, ctx } = capture()
-    const code = await objectiveCmd.run([], ctx(undefined))
+    const out: string[] = []
+    const code = await objectiveCmd.run(["edit", "x"], {
+      out: (s) => out.push(s),
+      err: (s) => out.push(s),
+      cwd: "/tmp",
+    })
     expect(code).toBe(0)
     expect(out.join("")).toContain("not wired")
   })
 
-  test("edit sets the goal and advances the revision (fresh prepare cycle)", async () => {
-    const auth = createObjectiveAuthority({})
-    const state = buildObjectiveSlashState(auth, "t")
-    const { out, ctx } = capture()
-    const code = await objectiveCmd.run(["edit", "ship", "the", "release"], ctx(state))
-    expect(code).toBe(0)
-    expect(auth.get("t")?.goal).toBe("ship the release")
-    expect(auth.readDomain("t").revision).toBe(1)
-    expect(out.join("")).toContain("rev 1")
+  test("rail 11 — /objective and /goal emit DEEP-EQUAL authority commands, one commit each", async () => {
+    const scripts: { objective: string[]; goal: string[] }[] = [
+      { objective: ["edit", "cli-goal"], goal: ["edit", "cli-goal"] },
+      { objective: ["pause"], goal: ["pause"] },
+      { objective: ["resume"], goal: ["resume"] },
+      { objective: ["clear"], goal: ["clear"] },
+    ]
+    for (const script of scripts) {
+      const a = spiedAuthority()
+      const b = spiedAuthority()
+      a.raw.create("t", { goal: "seed" })
+      b.raw.create("t", { goal: "seed" })
+      const codeA = await objectiveCmd.run(script.objective, ctxFor(a.spied))
+      const codeB = await goalCmd.run(script.goal, ctxFor(b.spied))
+      expect(codeA).toBe(codeB)
+      expect(a.mutations).toHaveLength(1)
+      expect(a.mutations).toEqual(b.mutations)
+      expect(a.raw.readDomain("t").revision).toBe(b.raw.readDomain("t").revision)
+    }
   })
 
-  test("pause/resume flip the explicit status through the authority", async () => {
-    const auth = createObjectiveAuthority({})
-    const state = buildObjectiveSlashState(auth, "t")
-    const { ctx } = capture()
-    await objectiveCmd.run(["edit", "goal"], ctx(state))
-    await objectiveCmd.run(["pause"], ctx(state))
-    expect(auth.get("t")?.status).toBe("paused")
-    await objectiveCmd.run(["resume"], ctx(state))
-    expect(auth.get("t")?.status).toBe("active")
+  test("the alias prints a deprecation notice and the same fresh report", async () => {
+    const { raw, spied } = spiedAuthority()
+    raw.create("t", { goal: "seed" })
+    const out: string[] = []
+    const code = await objectiveCmd.run([], ctxFor(spied, out))
+    expect(code).toBe(0)
+    const text = out.join("")
+    expect(text).toContain("deprecated")
+    expect(text).toContain("Pursuing goal: seed")
+    expect(text).toContain("rev ")
   })
 
   test("SIMULTANEOUS CLI edit + model tool at one revision ⇒ exactly one commits, the other stale", async () => {
     const auth = createObjectiveAuthority({})
-    // seed so both surfaces read the same revision N
     auth.commit(
       auth.prepare({
         threadId: "t",
@@ -112,20 +136,15 @@ describe("RFC-03 C3 — /objective CAS editor", () => {
       { admitted: true },
     )
     const revN = auth.readDomain("t").revision
-    // the MODEL prepares at N (e.g. holds a prepared candidate across an approval)
     const modelPrepared = auth.prepare({
       threadId: "t",
       actor: "system",
       mutation: { kind: "replace", definition: { goal: "model-goal" } },
     })
     expect(modelPrepared.expectedRevision).toBe(revN)
-    // meanwhile the CLI edit commits first (fresh prepare cycle at N ⇒ N+1)
-    const state = buildObjectiveSlashState(auth, "t")
-    const { ctx } = capture()
-    const code = await objectiveCmd.run(["edit", "cli-goal"], ctx(state))
+    const code = await objectiveCmd.run(["edit", "cli-goal"], ctxFor(auth))
     expect(code).toBe(0)
     expect(auth.get("t")?.goal).toBe("cli-goal")
-    // the model's post-approval commit at the OLD revision is stale — no clobber
     const modelCommit = auth.commit(modelPrepared, { admitted: true })
     expect(modelCommit.ok).toBe(false)
     if (!modelCommit.ok) expect(modelCommit.reason).toBe("stale")
@@ -133,24 +152,22 @@ describe("RFC-03 C3 — /objective CAS editor", () => {
     expect(auth.readDomain("t").revision).toBe(revN + 1)
   })
 
-  test("REPLACE-GUARD: a bare /objective <text> over an active goal refuses", async () => {
-    const auth = createObjectiveAuthority({})
-    const state = buildObjectiveSlashState(auth, "t")
-    const { err, ctx } = capture()
-    await objectiveCmd.run(["edit", "existing goal"], ctx(state))
-    const code = await objectiveCmd.run(["brand", "new", "goal"], ctx(state))
+  test("a bare /objective <text> over an active goal is the authority's objective-exists refusal (no clobber)", async () => {
+    const { raw, spied } = spiedAuthority()
+    raw.create("t", { goal: "seed" })
+    const out: string[] = []
+    const code = await objectiveCmd.run(["brand", "new"], ctxFor(spied, out))
     expect(code).toBe(1)
-    expect(err.join("")).toContain("already set")
-    // the active goal is NOT silently overwritten
-    expect(auth.get("t")?.goal).toBe("existing goal")
+    expect(out.join("")).toContain("/goal edit")
+    expect(raw.get("t")?.goal).toBe("seed")
   })
 
-  test("a status verb with no objective yet reports no-objective (not a silent create)", async () => {
-    const auth = createObjectiveAuthority({})
-    const state = buildObjectiveSlashState(auth, "t")
-    const { err, ctx } = capture()
-    const code = await objectiveCmd.run(["pause"], ctx(state))
-    expect(code).toBe(1)
-    expect(err.join("")).toContain("no objective set")
+  test("a status verb with no objective yet reports no goal (not a silent create)", async () => {
+    const { raw, spied } = spiedAuthority()
+    const out: string[] = []
+    const code = await objectiveCmd.run(["pause"], ctxFor(spied, out))
+    expect(code).toBe(0)
+    expect(out.join("")).toContain("No goal set")
+    expect(raw.get("t")).toBeNull()
   })
 })
