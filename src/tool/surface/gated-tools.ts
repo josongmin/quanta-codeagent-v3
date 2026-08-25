@@ -149,7 +149,10 @@ export const GATED_TOOLS: readonly ToolSurfaceEntry[] = [
   },
   {
     name: "objective_set",
-    group: ["objective_get", "objective_update"],
+    // GOAL-03 — `objective_verify` (run the stored checks; no argv from the
+    // model) rides the same slot; it registers only when the host also wired
+    // `objectiveVerifier` (composed after the objective authority).
+    group: ["objective_get", "objective_update", "objective_verify"],
     origin: "@/agent/tier1/objective",
     gate: { kind: "config-slot", slot: "objective", env: "QUANTA_OBJECTIVE_TOOLS" },
     default: { cli: "opt-in" },

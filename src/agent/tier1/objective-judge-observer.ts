@@ -18,6 +18,7 @@
 import { createHash } from "node:crypto"
 import { type LLMPort, type StreamInput, validateAgainstResponseSchema } from "@/llm"
 import type { ObjectiveReadPort } from "@/objective"
+import { errMessage, logger } from "@/shared"
 
 const JUDGE_REASON_CODES = [
   "criterion-unmet",
@@ -269,7 +270,16 @@ const judge = async (
   timeoutMs: number,
 ): Promise<ObjectiveJudgeDecision | undefined> => {
   const controller = new AbortController()
-  const task = collectJudgeDecision(llm, projection, controller).catch(() => undefined)
+  // Attributed degradation (no promise-swallow form): a provider throw is an
+  // `unavailable` observation, logged once with its message.
+  const task = (async (): Promise<ObjectiveJudgeDecision | undefined> => {
+    try {
+      return await collectJudgeDecision(llm, projection, controller)
+    } catch (e) {
+      logger.warn(`objective.judge.observer: ${errMessage(e)}`)
+      return undefined
+    }
+  })()
   let timer: ReturnType<typeof setTimeout> | undefined
   try {
     return await Promise.race([

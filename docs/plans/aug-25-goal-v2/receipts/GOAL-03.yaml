@@ -1,0 +1,29 @@
+ticket: GOAL-03
+kind: implementation
+recordedAt: 2026-08-26T00:40:00Z
+testedSourceSha: working tree on top of 11f7738deea64ddfab7ca20aa526c9c86e15aa01 (S = the commit this receipt is staged with)
+scope:
+  src: src/objective/criteria/ports.ts (new: runner/evidence/batch/outcome ports, checkPassed, caps),
+       src/objective/{mutations,policy,authority,index,capabilities,store}.ts + core-store/completion-ops.ts (applyVerificationBatch / invalidateVerification, verifier-only; passed recomputed; all-or-nothing plan; resetCheckedCriterion),
+       src/runtime/run-argv.ts (new; env scrub + snapshot restore + per-call wrap + sandbox slot + honest status + bounded kill/timeout) — src/runtime/shell.ts delegates (881 -> 737 lines),
+       src/host/runtime/objective-verifier-wire.ts (new: check runner, git/non-git workspace evidence with precheck, coordinator verify/reconcile, maybeWireObjectiveVerifier, maybeWireObjectiveJudgeObserver),
+       src/host/runtime/{capability-wire-registry,agent-config-assembler}.ts (objectiveVerifier + objectiveJudgeObserver wires after objective), src/agent/types/wire-slots-session.ts (slots),
+       src/agent/tier1/objective.ts + src/tool/objective/index.ts (objective_verify: no argv from the model), src/tool/surface/gated-tools.ts (manifest group), src/agent/tier1/objective-judge-observer.ts (attributed failure path)
+  tests: new verification-batch / run-argv / host verifier-wire (13) / integration real-command e2e (4); mutation-completeness 2 kinds; manifest + all-gates A4 + arch env exemption updated
+rails:
+  - bun run typecheck / typecheck:tests / lint:debt ; exit 0 (prod complexity 36/36 after splitting verify/reconcile/applyVerificationBatch)
+  - bun test <objective/goal/agent/cli/kernel/protocol/web/host/runtime/shell/session/shared unit set> ; 7440 pass / 0 fail (43s)
+  - bun test tests/unit/god-code-ratchet.test.ts tests/unit/_arch ; 72 pass / 1 fail — pre-existing cohort ratchet (not Goal-owned)
+  - bun run test:contract ; 7 / 0
+  - bun test tests/integration/{goal-continuation-live-e2e,objective-turn-context-consumer-e2e,objective-usage-limited-429-real-loop-e2e,objective-verifier-real-command-e2e,observability-wire-multi-emit-e2e,agent-state-observability-ws-daemon-e2e}.test.ts ; 25 / 0
+  - bun test tests/e2e-pty/cli-goal-pursuit-e2e.test.ts ; 9 / 0 (40s)
+  - bun fc validate ; exit 0
+redOnInjection:
+  - M1 checkPassed ignores timeout                        -> verification-batch 1 RED
+  - M2 batch objectiveId binding removed (plan)           -> verification-batch 1 RED
+  - M3 coordinator skips the after-digest comparison      -> verifier-wire + real-command e2e 2 RED
+  - M4 reconcile never invalidates                        -> verifier-wire + real-command e2e 2 RED
+  - M5 batch actor gate removed in the handler            -> GREEN by design (policy table is the first guard; handler check is the second)
+  - restore: byte-identical; first run of the script after the complexity refactor was VACUOUS (targets no longer matched) and was caught by comparing with the pre-refactor RED counts — script re-targeted, RED re-proven
+ticketRedRails: 1,2,3,5,6,7,8,9,10,11,12(partial: runtime env guard exemption + paired shell test),14 covered; 4 (source write blocked BEFORE damage) not applicable under the workspace-write posture — drift yields stale-source + zero receipts (README decision); 13 (outside-workspace read / network / fan-out / temp caps) deferred — sandbox profile enforcement stays the installed slot's contract (read-only opt-in), not re-tested here; 15 (HITL weaker diagnostic) not implemented (no receipt path exists outside the runner)
+deviations: README "GOAL-03 실행 기록"

@@ -137,9 +137,17 @@ describe("tool-surface manifest — GATED factories match the manifest two-way",
 
   test("objective tools === manifest objective_set group", () => {
     // GOAL-02: the trio is built over the actor-fixed model capability + read port.
+    // GOAL-03: `objective_verify` joins the group only when the host wired a verifier.
     const caps = createObjectiveCapabilities(createObjectiveStore())
-    expect(names(objectiveTools({ model: caps.model, read: caps.read }))).toEqual(
+    const verify = {
+      verify: async () => ({ kind: "no-checks" as const }),
+      reconcile: async () => ({ kind: "no-objective" as const }),
+    }
+    expect(names(objectiveTools({ model: caps.model, read: caps.read, verify }))).toEqual(
       groupNames("objective_set"),
+    )
+    expect(names(objectiveTools({ model: caps.model, read: caps.read }))).toEqual(
+      groupNames("objective_set").filter((n) => n !== "objective_verify"),
     )
   })
 

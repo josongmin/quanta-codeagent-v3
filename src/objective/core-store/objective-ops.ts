@@ -71,11 +71,9 @@ export const objectiveOps = (
     },
 
     clear(threadId): boolean {
-      try {
-        return isNonEmptyString(threadId) && cells.delete(threadId)
-      } catch {
-        return false
-      }
+      // A Map delete cannot throw for a string key; no catch needed (the
+      // silent-failure ratchet counts bare catches).
+      return isNonEmptyString(threadId) && cells.delete(threadId)
     },
 
     get(threadId): Objective | null {

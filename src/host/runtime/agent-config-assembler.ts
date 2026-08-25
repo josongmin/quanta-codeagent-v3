@@ -110,6 +110,10 @@ import { buildCapabilityWires, foldCapabilityWires } from "./capability-wire-reg
 import { buildAppPluginMentionDeps } from "./internal/mention-app-plugin-deps"
 import { buildMentionSymbolDeps } from "./internal/mention-symbol-deps"
 import { maybeWireObjective } from "./objective-store-wire"
+import {
+  maybeWireObjectiveJudgeObserver,
+  maybeWireObjectiveVerifier,
+} from "./objective-verifier-wire"
 import { maybeWirePeerMessageSurface } from "./peer-message-sink-wire"
 import { maybeWirePeerTeamMessaging } from "./peer-team-wire"
 import { maybeWirePiiRedaction } from "./pii-redaction-wire"
@@ -831,6 +835,8 @@ export const CAPABILITY_WIRES = buildCapabilityWires({
   maybeWireBrowser,
   maybeWireAppshot,
   maybeWireObjective,
+  maybeWireObjectiveVerifier,
+  maybeWireObjectiveJudgeObserver,
   maybeWireMailbox,
   maybeWirePeerMessageSurface,
   maybeWireWebSearch,

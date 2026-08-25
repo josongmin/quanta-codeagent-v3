@@ -48,7 +48,7 @@ export type ContinuationObjectiveMutation = Extract<
 /** The verifier's only mutation. */
 export type VerifierObjectiveMutation = Extract<
   ObjectiveMutation,
-  { kind: "markCriterionVerified" }
+  { kind: "markCriterionVerified" | "applyVerificationBatch" | "invalidateVerification" }
 >
 
 export interface CommitOptions {

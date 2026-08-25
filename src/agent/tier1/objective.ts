@@ -29,5 +29,9 @@ export const buildObjectiveBlock = (config: AgentConfig): Tool[] => {
   const port = config.objective
   if (port === undefined) return []
   const capabilities = createObjectiveCapabilities(port)
-  return objectiveTools({ model: capabilities.model, read: capabilities.read })
+  return objectiveTools({
+    model: capabilities.model,
+    read: capabilities.read,
+    ...(config.objectiveVerifier !== undefined ? { verify: config.objectiveVerifier } : {}),
+  })
 }

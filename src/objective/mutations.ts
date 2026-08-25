@@ -23,6 +23,7 @@
  */
 
 import type { VerifierCompletionReceipt } from "./criteria/model"
+import type { VerificationBatch, VerificationInvalidationReason } from "./criteria/ports"
 import type { ObjectiveDomainSnapshot } from "./model"
 import type { ProgressTurnOutcome } from "./progress-receipt"
 import type {
@@ -76,6 +77,18 @@ export type ObjectiveMutation =
    *  with the batch commit. */
   | { kind: "markCriterionVerified"; criterionId: string; receipt: VerifierCompletionReceipt }
   | { kind: "amendBudget"; budget: ObjectiveBudgetLimit }
+  /** GOAL-03 — the verifier's batch commit: every checked criterion's run result
+   *  for ONE stable source digest. The authority recomputes `passed`. */
+  | { kind: "applyVerificationBatch"; batch: VerificationBatch }
+  /** GOAL-03 — verifier-only invalidation: named checks lose their completion
+   *  (source drift, cancelled/unavailable run). Never removes a definition. */
+  | {
+      kind: "invalidateVerification"
+      objectiveId: string
+      checkIds: readonly string[]
+      reason: VerificationInvalidationReason
+      observedSourceDigest?: string | undefined
+    }
   | { kind: "settleAttempt"; settlement: ObjectiveAttemptSettlement }
   | { kind: "markUsageLimited"; untilEpochMs: number }
   | { kind: "restore"; snapshot: ObjectiveDomainSnapshot }
@@ -98,6 +111,8 @@ export const OBJECTIVE_OPERATION_KINDS = [
   "markCriterion",
   "markCriterionVerified",
   "amendBudget",
+  "applyVerificationBatch",
+  "invalidateVerification",
   "settleAttempt",
   "markUsageLimited",
   "restore",

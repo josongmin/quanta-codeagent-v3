@@ -94,6 +94,20 @@ export const MUTATION_POLICY: MutationPolicyTable = {
   ),
   addBlocker: row("allow", "allow", "allow", ACTOR_FORBIDDEN, "allow"),
   clearBlocker: row("allow", ACTOR_FORBIDDEN, ACTOR_FORBIDDEN, ACTOR_FORBIDDEN, "allow"),
+  applyVerificationBatch: row(
+    ACTOR_FORBIDDEN,
+    ACTOR_FORBIDDEN,
+    ACTOR_FORBIDDEN,
+    "allow",
+    ACTOR_FORBIDDEN,
+  ),
+  invalidateVerification: row(
+    ACTOR_FORBIDDEN,
+    ACTOR_FORBIDDEN,
+    ACTOR_FORBIDDEN,
+    "allow",
+    ACTOR_FORBIDDEN,
+  ),
   settleAttempt: row(ACTOR_FORBIDDEN, ACTOR_FORBIDDEN, ACTOR_FORBIDDEN, ACTOR_FORBIDDEN, "allow"),
   markUsageLimited: row(
     ACTOR_FORBIDDEN,

@@ -32,6 +32,7 @@ import { errMessage, logger } from "@/shared"
 import type { CellProvenance } from "./core-store/cell"
 import type { ManualCompletionReceipt } from "./criteria/model"
 import { isVerifierReceipt } from "./criteria/model"
+import { checkPassed, MAX_CHECKS_PER_BATCH, type VerificationBatch } from "./criteria/ports"
 import { defaultObjectiveIdFactory, MAX_GOAL_CHARS, normalizeGoalText } from "./identity"
 import type { ObjectiveDomainSnapshot, ValidationContract } from "./model"
 import {
@@ -213,6 +214,61 @@ const settleAttempt = (
   return { applied: true, result }
 }
 
+/** GOAL-03 — validate a whole batch against the live objective BEFORE anything
+ *  is touched (all-or-nothing). Returns the per-criterion pass plan or a code. */
+const planVerificationBatch = (
+  current: Objective,
+  batch: VerificationBatch,
+  revision: number,
+): { criterionId: string; passed: boolean; exitCode: number | null }[] | CommitRejection => {
+  if (batch === null || typeof batch !== "object" || !Array.isArray(batch.results)) return "invalid"
+  if (batch.objectiveId !== current.objectiveId) return "objective-mismatch"
+  if (batch.expectedRevision !== revision) return "stale"
+  if (!isNonEmptyString(batch.sourceDigest) || batch.results.length > MAX_CHECKS_PER_BATCH) {
+    return "invalid"
+  }
+  const plan: { criterionId: string; passed: boolean; exitCode: number | null }[] = []
+  for (const r of batch.results) {
+    const c = current.successCriteria.find((x) => x.id === r.criterionId)
+    if (c === undefined || c.kind !== "checked" || c.check.id !== r.checkId) return "invalid"
+    plan.push({ criterionId: c.id, passed: checkPassed(c.check, r), exitCode: r.exitCode })
+  }
+  return plan
+}
+
+/** GOAL-03 — the verifier's batch commit. The authority re-validates EVERY
+ *  identity (generation, revision, criterion, check) and RECOMPUTES `passed`
+ *  from the immutable `successExitCodes`; a supplied verdict is never trusted. */
+const applyVerificationBatch = (
+  core: ObjectiveCore,
+  threadId: string,
+  batch: VerificationBatch,
+  ctx: MutationContext,
+): ApplyOutcome => {
+  if (ctx.actor !== "verifier") return refused(core, threadId, "actor-forbidden")
+  const current = core.get(threadId)
+  if (current === null) return refused(core, threadId, "objective-missing")
+  const plan = planVerificationBatch(current, batch, ctx.revision)
+  if (typeof plan === "string") return refused(core, threadId, plan)
+  let result: Objective | null = current
+  for (const { criterionId, passed, exitCode } of plan) {
+    const c = current.successCriteria.find((x) => x.id === criterionId)
+    if (c === undefined || c.kind !== "checked") continue
+    result = passed
+      ? (core.applyVerifierCompletion(threadId, criterionId, {
+          source: "verifier",
+          objectiveId: current.objectiveId,
+          checkId: c.check.id,
+          objectiveRevision: ctx.revision,
+          sourceDigest: batch.sourceDigest,
+          verifierResult: { exitCode: exitCode ?? -1, passed: true },
+          verifiedAt: Number.isFinite(batch.verifiedAt) ? batch.verifiedAt : ctx.now,
+        }) ?? result)
+      : (core.resetCheckedCriterion(threadId, criterionId) ?? result)
+  }
+  return { applied: true, result }
+}
+
 const DISPATCH: DispatchTable = {
   create: mintGeneration,
   replace: mintGeneration,
@@ -267,6 +323,25 @@ const DISPATCH: DispatchTable = {
     return result !== null ? { applied: true, result } : refused(core, threadId, "invalid")
   },
   amendBudget: (core, threadId, m) => applied(core.amendBudget(threadId, m.budget)),
+  applyVerificationBatch: (core, threadId, m, ctx) =>
+    applyVerificationBatch(core, threadId, m.batch, ctx),
+  invalidateVerification: (core, threadId, m, ctx) => {
+    if (ctx.actor !== "verifier") return refused(core, threadId, "actor-forbidden")
+    const current = core.get(threadId)
+    if (current === null) return refused(core, threadId, "objective-missing")
+    if (m.objectiveId !== current.objectiveId) return refused(core, threadId, "objective-mismatch")
+    const wanted = new Set(m.checkIds)
+    let result: Objective | null = current
+    let touched = false
+    for (const c of current.successCriteria) {
+      if (c.kind === "checked" && wanted.has(c.check.id) && c.met) {
+        result = core.resetCheckedCriterion(threadId, c.id) ?? result
+        touched = true
+      }
+    }
+    // Nothing to invalidate is a no-op (no revision bump), not a refusal.
+    return { applied: touched, result }
+  },
   settleAttempt: (core, threadId, m, ctx) => settleAttempt(core, threadId, m.settlement, ctx),
   markUsageLimited: (core, threadId, m) => applied(core.markUsageLimited(threadId, m.untilEpochMs)),
   restore: (core, threadId, m) => {
@@ -413,6 +488,10 @@ const coreFromPort = (port: ObjectivePort): ObjectiveCore => ({
   },
   applyUsage(threadId) {
     // A bare foreign port has no usage substrate; report the unchanged objective.
+    return port.get(threadId)
+  },
+  resetCheckedCriterion(threadId) {
+    // A bare foreign port cannot un-complete a checked criterion; report unchanged.
     return port.get(threadId)
   },
 })

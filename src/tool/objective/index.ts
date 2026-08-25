@@ -36,6 +36,7 @@ import type {
   ObjectiveCommands,
   ObjectiveReadPort,
   ObjectiveStatus,
+  ObjectiveVerificationPort,
   WaitingOn,
 } from "@/objective"
 import { errMessage } from "@/shared"
@@ -47,6 +48,8 @@ import type { ObjectiveApprovalRequest, Tool, ToolContext, ToolEvent, ToolResult
 export interface ObjectiveToolPorts {
   readonly model: ObjectiveCommands<ModelObjectiveMutation>
   readonly read: ObjectiveReadPort
+  /** GOAL-03 — the host verifier; absent ⇒ `objective_verify` is not registered. */
+  readonly verify?: ObjectiveVerificationPort | undefined
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -517,5 +520,68 @@ export const objectiveTools = (ports: ObjectiveToolPorts): Tool[] => {
     buildObjectiveSet(ports) as Tool,
     buildObjectiveUpdate(ports) as Tool,
     buildObjectiveGet(ports) as Tool,
+    ...(ports.verify !== undefined ? [buildObjectiveVerify(ports, ports.verify) as Tool] : []),
   ]
 }
+
+export const objectiveVerifySchema = z.object({
+  thread_id: z.string().optional().describe("Deprecated and ignored"),
+  criterion_ids: z
+    .array(z.string().min(1).max(MAX_LIST_ITEM_CHARS))
+    .max(MAX_LIST_ITEMS)
+    .optional()
+    .describe("Optional subset of CHECKED criterion ids to run; default all checked criteria"),
+})
+export type ObjectiveVerifyInput = z.infer<typeof objectiveVerifySchema>
+
+/** GOAL-03 — the model's verification REQUEST. It carries no argv: the host runs
+ *  the objective's stored immutable checks and commits the verifier batch; the
+ *  model only learns the typed outcome. */
+const buildObjectiveVerify = (
+  ports: ObjectiveToolPorts,
+  verify: ObjectiveVerificationPort,
+): Tool<ObjectiveVerifyInput> => ({
+  name: "objective_verify",
+  description:
+    "Run the objective's stored machine checks (CHECKED criteria) against the current " +
+    "workspace and record the verifier receipts. You cannot supply commands here; only " +
+    "the checks declared on the objective run. Returns the typed outcome " +
+    "(verified with pass/fail counts, stale-source, no-checks, ...).",
+  inputSchema: objectiveVerifySchema,
+  isReadOnly: () => false,
+  isConcurrencySafe: () => false,
+  hitlTier: () => "pre-approval-ok",
+  async *execute(input, ctx: ToolContext): AsyncIterable<ToolEvent> {
+    const parsed = objectiveVerifySchema.safeParse(input)
+    if (!parsed.success) {
+      yield { type: "result", result: errResult(`invalid input: ${parsed.error.message}`) }
+      return
+    }
+    const threadId = boundThreadId(ctx)
+    if (threadId === null) {
+      yield { type: "result", result: errResult(NO_SESSION_THREAD) }
+      return
+    }
+    try {
+      const outcome = await verify.verify(threadId, parsed.data.criterion_ids, ctx.signal)
+      const objective = ports.read.get(threadId)
+      if (outcome.kind !== "verified" || objective === null) {
+        const reason = "reason" in outcome ? ` (${outcome.reason})` : ""
+        yield {
+          type: "result",
+          result: errResult(`objective verification: ${outcome.kind}${reason}`),
+        }
+        return
+      }
+      yield {
+        type: "result",
+        result: {
+          ok: true,
+          output: `verified: passed=${outcome.passed} failed=${outcome.failed} rev=${outcome.revision}\n${renderObjective(objective)}`,
+        },
+      }
+    } catch (e) {
+      yield { type: "result", result: errResult(`objective_verify error: ${errMessage(e)}`) }
+    }
+  },
+})

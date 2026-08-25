@@ -52,6 +52,11 @@ export const buildCapabilityWires = (helpers: {
   readonly maybeWireBrowser: (cfg: AgentConfig, env: CapabilityWireContext["env"]) => void
   readonly maybeWireAppshot: (cfg: AgentConfig, env: CapabilityWireContext["env"]) => void
   readonly maybeWireObjective: (cfg: AgentConfig, env: CapabilityWireContext["env"]) => void
+  readonly maybeWireObjectiveVerifier: (cfg: AgentConfig) => void
+  readonly maybeWireObjectiveJudgeObserver: (
+    cfg: AgentConfig,
+    config: CapabilityWireContext["config"],
+  ) => void
   readonly maybeWireMailbox: (cfg: AgentConfig, env: CapabilityWireContext["env"]) => void
   readonly maybeWirePeerMessageSurface: (
     cfg: AgentConfig,
@@ -87,6 +92,18 @@ export const buildCapabilityWires = (helpers: {
       apply: (c, x) => helpers.maybeWireAppshot(c, x.env),
     },
     { name: "objective", dependsOn: [], apply: (c, x) => helpers.maybeWireObjective(c, x.env) },
+    // GOAL-03 — AFTER objective: composes the verifier over the freshly-wired
+    // `cfg.objective` + session cwd; no-op when no objective authority exists.
+    {
+      name: "objectiveVerifier",
+      dependsOn: ["objective"],
+      apply: (c) => helpers.maybeWireObjectiveVerifier(c),
+    },
+    {
+      name: "objectiveJudgeObserver",
+      dependsOn: ["objective"],
+      apply: (c, x) => helpers.maybeWireObjectiveJudgeObserver(c, x.config),
+    },
     { name: "mailbox", dependsOn: [], apply: (c, x) => helpers.maybeWireMailbox(c, x.env) },
     // jul-15 W2 — decorate the mailbox with the peer-message SURFACE notifier
     // BEFORE side-agent (so daemon findings surface) and BEFORE the team wrap (so

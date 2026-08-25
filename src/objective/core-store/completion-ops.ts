@@ -16,7 +16,10 @@ import type { ObjectiveStoreCtx } from "./ctx"
 
 export const completionOps = (
   ctx: ObjectiveStoreCtx,
-): Pick<ObjectiveCore, "applyManualCompletion" | "applyVerifierCompletion" | "applyUsage"> => {
+): Pick<
+  ObjectiveCore,
+  "applyManualCompletion" | "applyVerifierCompletion" | "resetCheckedCriterion" | "applyUsage"
+> => {
   const { cells, mutate } = ctx
   return {
     applyManualCompletion(threadId, criterionId, met, receipt): Objective | null {
@@ -51,6 +54,19 @@ export const completionOps = (
         live.criteria = live.criteria.map((x) =>
           x.id === criterionId ? { ...x, met: true, completion: receipt } : x,
         )
+      })
+    },
+
+    resetCheckedCriterion(threadId, criterionId): Objective | null {
+      const c = cells.get(threadId)?.criteria.find((x) => x.id === criterionId)
+      if (c === undefined || c.kind !== "checked") return null
+      return mutate(threadId, (cell) => {
+        cell.criteria = cell.criteria.map((x) => {
+          if (x.id !== criterionId) return x
+          const next: CritCell = { ...x, met: false }
+          delete next.completion
+          return next
+        })
       })
     },
 

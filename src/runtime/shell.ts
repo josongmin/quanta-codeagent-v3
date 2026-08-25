@@ -1,13 +1,10 @@
 import type { Subprocess } from "bun"
 import { type BoundedBuffer, createBoundedBuffer } from "./bounded-buffer"
 import { escalatingKill, withSpawnedChild } from "./guarded-spawn"
-import { applyLocalEnv } from "./local-env"
-import { withProxyEnv } from "./network-proxy"
 import { defaultPpidWalkKiller } from "./process-tree"
-import { DEFAULT_ENV_ALLOWLIST, SandboxUnavailableError, scrubEnv } from "./sandbox"
-import { asScrubbedEnv, bunScrubbedSpawner, type ScrubbedEnv } from "./scrubbed-spawn"
+import { resolveShellEnv, wrapSandboxArgv } from "./run-argv"
+import { bunScrubbedSpawner } from "./scrubbed-spawn"
 import { buildBaseShellArgv, discoverShells, resolveWinShellMode } from "./shell-argv"
-import { getShellSandbox } from "./shell-sandbox-holder"
 import type { RunShellEvent, ShellOptions, ShellResult } from "./types"
 
 const DEFAULT_TIMEOUT_MS = 120_000
@@ -52,68 +49,7 @@ const FOREGROUND_TREE_KILLER = defaultPpidWalkKiller()
  * Default-OFF: absent `onSandboxStatus` ⇒ the status is not even computed and
  * the spawn path is byte-identical to the pre-T08 code.
  */
-export type ShellSandboxStatus =
-  | { readonly applied: true }
-  | { readonly applied: false; readonly reason: string }
-
-/** Local structural extension of {@link ShellOptions} carrying the T08
- *  degraded-sandbox observer. Declared here (not in `@/runtime` `types.ts`) so
- *  the wire stays in the single owning file; `runShell` reads it off the
- *  options bag structurally. */
-type ShellOptionsWithSandboxStatus = ShellOptions & {
-  /** OPTIONAL honesty hook — invoked exactly once, BEFORE spawn, with the
-   *  typed {@link ShellSandboxStatus} for this call. Absent ⇒ no status
-   *  computed (byte-identical legacy). MUST NOT throw; a throwing observer is
-   *  the caller's bug and is not guarded here. */
-  onSandboxStatus?: (status: ShellSandboxStatus) => void
-}
-
-/** Fold a single wrap layer's `(sandboxApplied, degradeReason?)` outcome into
- *  the running status. First degradation reason wins; a later applied layer
- *  cannot un-degrade an earlier honest degradation. Pure. */
-const foldSandboxStatus = (
-  prior: ShellSandboxStatus,
-  layer: { readonly sandboxApplied: boolean; readonly degradeReason?: string | undefined },
-): ShellSandboxStatus => {
-  // Once degraded, stay degraded (don't let a no-op later layer claim applied).
-  if (!prior.applied) return prior
-  if (layer.degradeReason !== undefined) {
-    return { applied: false, reason: layer.degradeReason }
-  }
-  if (layer.sandboxApplied) return { applied: true }
-  return prior
-}
-
-/** Explicit restrictive CLI profiles are an enforcement contract, not a
- * best-effort preference. The installed slot is the existing wire authority;
- * a missing or partial wrapper must stop before `Bun.spawn` can run an
- * unsandboxed shell. */
-const requiresFullSandboxEnforcement = (profile: string): boolean =>
-  profile === "read-only" || profile === "workspace-write"
-
-/**
- * Throw when a profile that PROMISES enforcement did not actually get it.
- *
- * A unit because "enforced" is one predicate over two independent shapes of failure —
- * the wrapper reporting it was never applied, and the wrapper reporting a degrade
- * reason — and an explicit restrictive profile must stop the spawn on either. Read
- * apart, a degraded-but-applied wrap passes as enforcement and an unsandboxed shell
- * reaches `Bun.spawn`.
- */
-const assertSandboxEnforced = (
-  profile: string,
-  wrapped: { readonly sandboxApplied: boolean; readonly degradeReason?: string | undefined },
-): void => {
-  if (
-    requiresFullSandboxEnforcement(profile) &&
-    (!wrapped.sandboxApplied || wrapped.degradeReason !== undefined)
-  ) {
-    throw new SandboxUnavailableError(
-      `QUANTA_SANDBOX=${profile} cannot be enforced: ` +
-        (wrapped.degradeReason ?? "sandbox wrapper was not applied"),
-    )
-  }
-}
+export type { ShellSandboxStatus } from "./run-argv"
 
 /**
  * Build the argv that will actually be spawned: base shell argv → snapshot
@@ -157,55 +93,10 @@ const resolveShellArgv = async (
       result: { stdout: "", stderr: argvDecision.reason, exitCode: 127, timedOut: false },
     }
   }
-  const baseArgv: ReadonlyArray<string> = argvDecision.argv
-  // Restore before sandbox wrapping. Sandbox adapters prepend their own
-  // executable, so restoring afterward cannot find the `*sh -c` command.
-  const snap = options.shellSnapshot
-  const restoredArgv = snap !== undefined ? snap.restore(snap.handle, baseArgv).argv : [...baseArgv]
-  const perCallWrap = options.perCallWrap
-  // T08 (audit L8 M2) — track whether ANY wrap layer actually sandboxed the
-  // spawn vs degraded to passthrough, so an `onSandboxStatus` observer learns
-  // the honest verdict. Seed `applied:false/no-sandbox-installed`: with no
-  // per-call wrap and no installed slot the spawn is unsandboxed, and that is
-  // the truth the caller must be told (not a silent "looks fine").
-  const onSandboxStatus = (options as ShellOptionsWithSandboxStatus).onSandboxStatus
-  // Seed neutral-applied; flip to degraded if a layer degrades. If NO wrap
-  // layer runs at all the spawn is unsandboxed — reported as such below.
-  let sandboxStatus: ShellSandboxStatus = { applied: true }
-  let anyWrapLayerRan = false
-
-  let perCallArgv: string[]
-  if (perCallWrap !== undefined) {
-    const wrapped = await perCallWrap(restoredArgv, cwd)
-    perCallArgv = wrapped.argv
-    anyWrapLayerRan = true
-    if (onSandboxStatus !== undefined) sandboxStatus = foldSandboxStatus(sandboxStatus, wrapped)
-  } else {
-    perCallArgv = restoredArgv
-  }
-
-  const slot = getShellSandbox()
-  let sandboxedArgv: string[]
-  if (slot !== undefined) {
-    const wrapped = await slot.wrap(perCallArgv, cwd)
-    assertSandboxEnforced(slot.policy.profile, wrapped)
-    sandboxedArgv = wrapped.argv
-    anyWrapLayerRan = true
-    if (onSandboxStatus !== undefined) sandboxStatus = foldSandboxStatus(sandboxStatus, wrapped)
-  } else {
-    sandboxedArgv = perCallArgv
-  }
-
-  // Emit the honest sandbox verdict exactly once, before spawn. No wrap layer
-  // ran ⇒ the spawn is unsandboxed (`no-sandbox-installed`). Anti-leak: every
-  // reason is an opaque tag (the wrap's `degradeReason` or the no-sandbox
-  // sentinel), never a profile body.
-  if (onSandboxStatus !== undefined) {
-    onSandboxStatus(
-      anyWrapLayerRan ? sandboxStatus : { applied: false, reason: "no-sandbox-installed" },
-    )
-  }
-  return { kind: "ok", argv: sandboxedArgv }
+  // GOAL-03 — snapshot restore → per-call wrap → sandbox slot (+ the honest
+  // sandbox verdict) live in the shared argv core so the verifier composes the
+  // identical layers for an exact argv.
+  return { kind: "ok", argv: [...(await wrapSandboxArgv(argvDecision.argv, options, cwd))] }
 }
 
 /**
@@ -325,43 +216,6 @@ const collectStreamed = async (
       return { stdout, stderr, exitCode, timedOut: timedOut() }
     },
   )
-}
-
-/**
- * The child's environment, composed in the order the security model requires:
- * scrub (or an explicit `inheritEnv` opt-out) → local `.env` overlay under the
- * allowlist → egress-proxy variables → brand at the scrubber chokepoint.
- *
- * The branding is what makes an env leak a `tsc` error rather than a review
- * question: the spawn routes through the typed `spawnScrubbed` boundary, which
- * only accepts a `ScrubbedEnv`.
- *
- * Extracted from {@link runShell} (god-function burndown); every step and its
- * byte-identical absent-path is unchanged.
- */
-const resolveShellEnv = (options: ShellOptions): ScrubbedEnv => {
-  const baseEnv =
-    options.inheritEnv === true ? (process.env as Record<string, string | undefined>) : scrubEnv()
-  // ADR-0455 — DECLARED local-environment overlay. Compose the selected env's
-  // vars / PATH-prepends ON TOP of the scrubbed base, GOVERNED BY the same
-  // allowlist that scrubbed it (a declared var whose name is not allowlisted is
-  // dropped; `pathPrepend` is prepended to the surviving PATH). Absent / empty
-  // selection ⇒ `applyLocalEnv` returns the SAME `baseEnv` reference
-  // (byte-identical legacy). Applied BEFORE the proxy injection so an operator
-  // proxy still wins for the proxy keys. NOTE: when `inheritEnv:true` the base
-  // is the FULL parent env; the allowlist still governs which DECLARED names
-  // overlay (the inherit decision is orthogonal to the declared overlay).
-  const localEnvBase = applyLocalEnv(baseEnv, options.localEnv, DEFAULT_ENV_ALLOWLIST)
-  // ADR-0428 — socket-level egress proxy. When the caller threads a bound proxy
-  // address via `options.proxyEnv`, inject `HTTP_PROXY`/`HTTPS_PROXY`/`NO_PROXY`
-  // so the child's OWN sockets are funneled through the loopback egress proxy,
-  // closing the subprocess egress bypass. Absent (or `address` undefined) ⇒
-  // `withProxyEnv` returns the SAME `baseEnv` reference — byte-identical legacy.
-  // S1 — brand the composed env at the scrubber chokepoint; the spawn below
-  // routes through the typed `spawnScrubbed` boundary so an env leak is a tsc
-  // error (the `inheritEnv:true` opt-out is still rooted here, explicit).
-  const env = asScrubbedEnv(withProxyEnv(localEnvBase, options.proxyEnv ?? {}))
-  return env
 }
 
 /** Run a command through the system shell. Captures stdout/stderr, never

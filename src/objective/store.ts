@@ -84,6 +84,9 @@ export interface ObjectiveCore extends ObjectivePort {
     criterionId: string,
     receipt: VerifierCompletionReceipt,
   ): Objective | null
+  /** GOAL-03 — drop a CHECKED criterion's completion (verifier invalidation or a
+   *  failing re-run). Refuses (⇒ `null`) a manual/missing criterion. */
+  resetCheckedCriterion(threadId: string, criterionId: string): Objective | null
   /** GOAL-01 — apply HOST-measured usage (driven only by `settleAttempt`). */
   applyUsage(threadId: string, used: { tokens?: number; turns?: number }): Objective | null
 }

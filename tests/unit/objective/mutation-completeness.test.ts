@@ -273,6 +273,127 @@ describe("C1 — every operation routes through the authority with a live effect
       expect(a.get("t")?.budget.turnsUsed).toBe(1)
       expect(a.readDomain("t").progressReceipts).toHaveLength(1)
     },
+    applyVerificationBatch: (a) => {
+      // GOAL-03: the verifier's batch is the ONLY way a checked criterion completes.
+      a.commit(
+        a.prepare({
+          threadId: "t",
+          actor: "user",
+          mutation: {
+            kind: "replace",
+            definition: {
+              goal: "checked",
+              criteria: [
+                {
+                  text: "tests pass",
+                  check: { kind: "command", argv: ["x"], timeoutMs: 1, successExitCodes: [0] },
+                },
+              ],
+            },
+          },
+        }),
+        { admitted: true },
+      )
+      const c = a.get("t")?.successCriteria[0]
+      const res = a.commit(
+        a.prepare({
+          threadId: "t",
+          actor: "verifier",
+          mutation: {
+            kind: "applyVerificationBatch",
+            batch: {
+              objectiveId: a.get("t")?.objectiveId ?? "",
+              expectedRevision: a.readDomain("t").revision,
+              sourceDigest: "sha256:src",
+              verifiedAt: 1,
+              results: [
+                {
+                  criterionId: c?.id ?? "",
+                  checkId: c?.kind === "checked" ? c.check.id : "",
+                  exitCode: 0,
+                  timedOut: false,
+                  durationMs: 1,
+                  stdoutDigest: "sha256:o",
+                  stderrDigest: "sha256:e",
+                },
+              ],
+            },
+          },
+        }),
+        { admitted: true },
+      )
+      expect(res.ok).toBe(true)
+      expect(a.get("t")?.successCriteria[0]?.met).toBe(true)
+      expect(a.get("t")?.status).toBe("completed")
+    },
+    invalidateVerification: (a) => {
+      // GOAL-03: verifier-only invalidation drops a checked completion.
+      a.commit(
+        a.prepare({
+          threadId: "t",
+          actor: "user",
+          mutation: {
+            kind: "replace",
+            definition: {
+              goal: "checked",
+              criteria: [
+                {
+                  text: "tests pass",
+                  check: { kind: "command", argv: ["x"], timeoutMs: 1, successExitCodes: [0] },
+                },
+              ],
+            },
+          },
+        }),
+        { admitted: true },
+      )
+      const c = a.get("t")?.successCriteria[0]
+      const checkId = c?.kind === "checked" ? c.check.id : ""
+      a.commit(
+        a.prepare({
+          threadId: "t",
+          actor: "verifier",
+          mutation: {
+            kind: "applyVerificationBatch",
+            batch: {
+              objectiveId: a.get("t")?.objectiveId ?? "",
+              expectedRevision: a.readDomain("t").revision,
+              sourceDigest: "sha256:src",
+              verifiedAt: 1,
+              results: [
+                {
+                  criterionId: c?.id ?? "",
+                  checkId,
+                  exitCode: 0,
+                  timedOut: false,
+                  durationMs: 1,
+                  stdoutDigest: "sha256:o",
+                  stderrDigest: "sha256:e",
+                },
+              ],
+            },
+          },
+        }),
+        { admitted: true },
+      )
+      expect(a.get("t")?.successCriteria[0]?.met).toBe(true)
+      const res = a.commit(
+        a.prepare({
+          threadId: "t",
+          actor: "verifier",
+          mutation: {
+            kind: "invalidateVerification",
+            objectiveId: a.get("t")?.objectiveId ?? "",
+            checkIds: [checkId],
+            reason: "stale-source",
+          },
+        }),
+        { admitted: true },
+      )
+      expect(res.ok).toBe(true)
+      expect(a.get("t")?.successCriteria[0]?.met).toBe(false)
+      expect(a.get("t")?.status).toBe("active")
+    },
     markUsageLimited: (a) => {
       // enforce store surfaces the derived status; here we assert the window is
       // recorded (revision advanced by the op even under the informational store).

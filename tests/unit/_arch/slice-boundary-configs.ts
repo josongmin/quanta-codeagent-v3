@@ -670,7 +670,9 @@ export const SLICE_BOUNDARY_CONFIGS: Record<string, SliceBoundaryConfig> = {
     // `sandbox.ts`, `shell-argv.ts`, `shell.ts` resolve shell/sandbox posture
     // from env at call time. `env.ts` basename also covers the clean
     // `network-proxy/env.ts` (no env read) — safe.
-    envAllowFiles: ["env.ts", "sandbox.ts", "shell-argv.ts", "shell.ts"],
+    // GOAL-03: `run-argv.ts` holds the env-scrub composition extracted from
+    // `shell.ts` (the same `inheritEnv:true` opt-out, one chokepoint).
+    envAllowFiles: ["env.ts", "sandbox.ts", "shell-argv.ts", "shell.ts", "run-argv.ts"],
     requireSliceBarrel: true,
   },
   shared: {

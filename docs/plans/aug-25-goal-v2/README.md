@@ -153,6 +153,10 @@ GOAL-00 current-head baseline + owner freeze
 - commit 순서: CAS → policy. 경쟁에서 진 writer는 `stale`(재읽기), 현재 writer만 정책 verdict를 본다. 세대 전제조건(`objective-exists`/`objective-missing`)은 정책에 있어 gate-on 승인 프롬프트 전에 거부된다(프롬프트 후 거부 UX 결함 제거).
 - 마이그레이션 영향: 레거시 v1 스냅샷의 model-attested manual receipt는 `met:true`를 유지하되 status는 `active`(신뢰 증거 아님) — 의도된 하향.
 
+## GOAL-03 실행 기록 (2026-08-26)
+- 랜딩 범위: `src/objective/criteria/ports.ts`(runner/evidence/batch/outcome 포트 + `checkPassed`), mutation `applyVerificationBatch`/`invalidateVerification`(verifier only; authority가 passed 재계산, 세대·revision·check id 전량 재검증, all-or-nothing), core `resetCheckedCriterion`, `src/runtime/run-argv.ts`(shell.ts에서 env scrub·snapshot restore·per-call wrap·sandbox slot·honest status를 추출, shell.ts 881→737; `runShell`은 같은 레이어를 소비), `src/host/runtime/objective-verifier-wire.ts`(runner=runArgv+digest only, git/non-git manifest digest+precheck, coordinator verify/reconcile, CAS 재시도 2회, `maybeWireObjectiveVerifier`), AgentConfig `objectiveVerifier` 슬롯 + capability wire `objectiveVerifier`(objective 뒤), 모델 도구 `objective_verify`(argv 없음), 매니페스트 group 등록.
+- 티켓과 다른 점: `markCriterionVerified`(단건 verifier 경로)는 forgery hellgate가 고정하고 있어 유지(배치와 동일 검증 규칙; 둘 다 verifier 전용). posture는 README 결정대로 workspace-write+digest 불변(소스를 바꾸는 check는 stale-source·receipt 0 — "write blocked before damage"는 아님). `/goal check add`/`/goal verify` CLI는 05. 모델 검증 요청의 attempt당 1회 제한은 attempt identity가 04에 있어 04에서. HITL 약한 진단 경로는 미구현(runner 외 receipt 경로 자체가 없음).
+
 ## 결정 기록 (구현 전에 고정, 티켓 내 재결정 금지)
 - verifier 실행 posture는 **workspace-write + before/after source digest 불변 검증**이다. read-only source mount는 `bun test`(.cache/tsbuildinfo)·pytest(`__pycache__`)·cargo(`target/`) 같은 실용 check를 전부 fail-closed로 만들어 verifier를 무용하게 하므로 기본이 아니다. digest가 변하면 stale-source, receipt 0. network deny·outside-workspace read deny·resource cap은 유지. 더 엄격한 read-only 프로필은 opt-in.
 - receipt rail은 `git worktree add <scratch> S`에서 실행해도 된다(동시 세션이 main에 커밋하므로 S와 rail 사이 tree 불변 조건은 worktree로 충족). receipt에 worktree 경로/`git rev-parse HEAD`를 기록.

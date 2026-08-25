@@ -402,7 +402,14 @@ describe("aug-22 ALL-GATES-ON — the whole campaign assembles live, no gate int
       )
       expect(cfg.objective).toBeDefined()
       const toolNames = buildObjectiveBlock(cfg).map((t) => t.name)
-      expect(toolNames).toEqual(["objective_set", "objective_update", "objective_get"])
+      // GOAL-03: the host verifier is composed after the objective authority, so
+      // the model also gets `objective_verify` (runs the stored checks; no argv).
+      expect(toolNames).toEqual([
+        "objective_set",
+        "objective_update",
+        "objective_get",
+        "objective_verify",
+      ])
     })
   })
 

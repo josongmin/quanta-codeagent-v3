@@ -13,7 +13,7 @@
 import type { LLMPort, ResponsesContinuationStore } from "@/llm"
 import type { LlmProvider } from "@/llm/providers"
 import type { CodeActionPort, FormatPort, RenameApplyPort, SignatureHelpPort } from "@/lsp"
-import type { ObjectivePort } from "@/objective"
+import type { ObjectivePort, ObjectiveVerificationPort } from "@/objective"
 import type { OsSandbox } from "@/runtime/os-sandbox"
 import type { RedactionConfig } from "@/security"
 import type { AppshotArtifactSink, AppshotSlot } from "@/tool"
@@ -34,6 +34,7 @@ import type { IdeContextProvider } from "../ide-context"
 import type { RunLedgerPort } from "../run-ledger"
 import type { ModePolicy } from "../run-mode"
 import type { Submission } from "../submission"
+import type { ObjectiveJudgeObserverPort } from "../tier1/objective-judge-observer"
 
 export interface WireSlotsSessionConfig {
   /**
@@ -390,6 +391,21 @@ export interface WireSlotsSessionConfig {
    * can read this slot directly.
    */
   readonly objective?: ObjectivePort
+  /**
+   * GOAL-03 — host-wired objective VERIFIER (runs the stored immutable checks
+   * of the live objective between two workspace-evidence captures and commits
+   * one verifier batch). Present ⇒ `objective_verify` is registered next to the
+   * objective tools; absent ⇒ no tool (default-OFF byte-identical). The host
+   * composes it from the session cwd; the model never supplies argv.
+   */
+  readonly objectiveVerifier?: ObjectiveVerificationPort
+  /**
+   * GOAL-02/03 — the shadow judge OBSERVER (telemetry only; no admission power).
+   * Present iff `QUANTA_GOAL_JUDGE=shadow` and an objective authority is wired.
+   * GOAL-04 registers it with the session task lifecycle at settlement; until
+   * then nothing invokes it in production.
+   */
+  readonly objectiveJudgeObserver?: ObjectiveJudgeObserverPort
   /**
    * G1 (RFC jun-6-appgen-appshot) — host-wired appshot verify-loop slot. When
    * set, the per-session `buildAppshotBlock` (tier1) exposes `appshot_verify`

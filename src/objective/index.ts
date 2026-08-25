@@ -59,6 +59,27 @@ export {
   normalizeCheckDeclaration,
 } from "./criteria/model"
 export type {
+  CheckRunInput,
+  CheckRunResult,
+  ObjectiveCheckRunner,
+  ObjectiveVerificationPort,
+  ReconcileOutcome,
+  VerificationBatch,
+  VerificationBatchResult,
+  VerificationInvalidationReason,
+  VerificationOutcome,
+  WorkspaceEvidence,
+  WorkspaceEvidenceFailure,
+  WorkspaceEvidencePort,
+} from "./criteria/ports"
+export {
+  checkPassed,
+  isEvidenceFailure,
+  MAX_BATCH_DEADLINE_MS,
+  MAX_CHECK_TIMEOUT_MS,
+  MAX_CHECKS_PER_BATCH,
+} from "./criteria/ports"
+export type {
   CheckExecutionContext,
   CheckExecutionPort,
   VerifierCompletionInput,
