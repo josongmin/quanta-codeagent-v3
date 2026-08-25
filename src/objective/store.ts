@@ -33,7 +33,7 @@ import type {
 } from "./criteria/model"
 import { defaultObjectiveIdFactory, type ObjectiveIdFactory } from "./identity"
 import type { ObjectiveThreadSnapshot } from "./model"
-import type { GoalDefinition, Objective, ObjectivePort } from "./types"
+import type { GoalDefinition, Objective, ObjectivePort, WaitingOn } from "./types"
 
 /**
  * RFC-03 C1 — the store's per-thread snapshot/restore surface, consumed by the
@@ -94,6 +94,18 @@ export interface ObjectiveCore extends ObjectivePort {
   startAttempt(threadId: string, started: StartedObjectiveAttempt): Objective | null
   /** GOAL-04 — clear the started attempt (settled or abandoned). */
   clearStartedAttempt(threadId: string): Objective | null
+  /** Record one host-attributed dependency observation, promoting only after
+   * three distinct attempts report the same dependency. */
+  observeBlocker(
+    threadId: string,
+    observation: {
+      readonly dependencyRef: string
+      readonly reason: string
+      readonly waitingOn: WaitingOn
+      readonly attemptId: string
+    },
+  ): Objective | null
+  clearBlockerObservations(threadId: string): Objective | null
 }
 
 /** RFC-03 C1 — the raw in-memory objective CORE. The public `createObjectiveStore`

@@ -49,6 +49,7 @@ const domain = (input?: {
         ...(input?.maxTurns !== undefined ? { maxTurns: input.maxTurns } : {}),
       },
       blockers: [],
+      blockerObservations: [],
       nextActions: [],
       attempts: { autonomousTurnsStarted: 0 },
       createdAt: 1,

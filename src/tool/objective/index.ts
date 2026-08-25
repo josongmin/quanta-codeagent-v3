@@ -158,6 +158,10 @@ export const objectiveUpdateSchema = z.object({
       kind: z.literal("addBlocker"),
       reason: z.string().min(1).max(MAX_REASON_CHARS),
       waiting_on: z.enum(WAITING_ENUM),
+      dependency_target: z.object({
+        kind: z.enum(["approval", "external", "user-input", "tool"]),
+        ref: z.string().min(1).max(MAX_LIST_ITEM_CHARS),
+      }),
     }),
     z.object({
       kind: z.literal("nextActions"),
@@ -215,6 +219,9 @@ const renderObjective = (o: Objective): string => {
     for (const b of o.blockers) {
       lines.push(`  - [${b.id}] (waiting_on=${b.waitingOn}) ${b.reason}`)
     }
+  }
+  for (const observation of o.blockerObservations) {
+    lines.push(`observing: ${observation.waitingOn} ${observation.distinctAttemptIds.length}/3`)
   }
   if (o.successCriteria.length > 0) {
     lines.push("criteria:")
@@ -427,10 +434,21 @@ const buildObjectiveSet = (ports: ObjectiveToolPorts): Tool<ObjectiveSetInput> =
 })
 
 /** Translate a validated `objective_update` op into the authority mutation. */
-const opToMutation = (op: ObjectiveUpdateInput["op"]): ModelObjectiveMutation => {
+const opToMutation = (
+  op: ObjectiveUpdateInput["op"],
+  ctx: ToolContext,
+): ModelObjectiveMutation => {
   switch (op.kind) {
     case "addBlocker":
-      return { kind: "addBlocker", reason: op.reason, waitingOn: op.waiting_on }
+      return {
+        kind: "addBlocker",
+        reason: op.reason,
+        waitingOn: op.waiting_on,
+        target: op.dependency_target,
+        ...(ctx.turnId !== undefined || ctx.toolCallId !== undefined
+          ? { attemptId: ctx.turnId ?? ctx.toolCallId }
+          : {}),
+      }
     case "nextActions":
       return { kind: "setNextActions", actions: op.actions }
   }
@@ -440,7 +458,7 @@ const buildObjectiveUpdate = (ports: ObjectiveToolPorts): Tool<ObjectiveUpdateIn
   name: "objective_update",
   description:
     "Partially mutate the per-thread Objective. `op.kind` selects: " +
-    "addBlocker (reason + waiting_on=user|tool|network|child_agent) / " +
+    "addBlocker (reason + waiting_on + typed dependency_target; three distinct attempts required) / " +
     "nextActions (list of strings). Status, criterion completion and usage are " +
     "OWNED BY THE HOST: completion is derived from user attestations and verifier " +
     "receipts, never from a model update. Returns the NEW objective state.",
@@ -462,7 +480,7 @@ const buildObjectiveUpdate = (ports: ObjectiveToolPorts): Tool<ObjectiveUpdateIn
     try {
       yield {
         type: "result",
-        result: await routeModelMutation(ports, threadId, opToMutation(parsed.data.op), ctx),
+        result: await routeModelMutation(ports, threadId, opToMutation(parsed.data.op, ctx), ctx),
       }
     } catch (e) {
       yield { type: "result", result: errResult(`objective_update error: ${errMessage(e)}`) }

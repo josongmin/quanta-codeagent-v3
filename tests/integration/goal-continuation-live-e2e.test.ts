@@ -2,10 +2,12 @@ import { describe, expect, test } from "bun:test"
 import { runAgent } from "@/agent"
 import type { LLMPort, StreamEvent, StreamInput } from "@/llm"
 import {
+  asObjectiveAuthority,
   buildPursuitContinuationPrompt,
   type ContinuationDeps,
   ContinuationSemaphore,
   createObjectiveStore,
+  type ObjectiveAuthority,
   type ObjectivePort,
   runIdleContinuation,
 } from "@/objective"
@@ -292,5 +294,89 @@ describe("objective-goal-continuation-live — runIdleContinuation decision logi
     expect(tick.skipReason).toBe("goal-not-active")
     expect(llm.calls).toBe(0)
     expect(launches.length).toBe(0)
+  })
+
+  test("verified progress clears two blocker observations; recurrence restarts at one of three", () => {
+    const store = createObjectiveStore()
+    store.create(TID, {
+      goal: "ship with verified checks",
+      criteria: [
+        {
+          text: "first check",
+          check: {
+            kind: "command",
+            argv: ["check-one"],
+            timeoutMs: 1_000,
+            successExitCodes: [0],
+          },
+        },
+        {
+          text: "second check",
+          check: {
+            kind: "command",
+            argv: ["check-two"],
+            timeoutMs: 1_000,
+            successExitCodes: [0],
+          },
+        },
+      ],
+    })
+    const authority = asObjectiveAuthority(store) as ObjectiveAuthority
+    const commitObservation = (attemptId: string) =>
+      authority.commit(
+        authority.prepare({
+          threadId: TID,
+          actor: "model",
+          mutation: {
+            kind: "addBlocker",
+            reason: "approval pending",
+            waitingOn: "user",
+            target: { kind: "approval", ref: "deploy" },
+            attemptId,
+          },
+        }),
+        { admitted: true },
+      )
+
+    expect(commitObservation("attempt-1").ok).toBe(true)
+    expect(commitObservation("attempt-2").ok).toBe(true)
+    expect(store.get(TID)?.blockerObservations[0]?.distinctAttemptIds).toHaveLength(2)
+
+    const domain = authority.readDomain(TID)
+    const checked = domain.state?.objective.successCriteria.filter(
+      (criterion) => criterion.kind === "checked",
+    )
+    if (checked === undefined || checked.length !== 2) throw new Error("checked criteria missing")
+    const verified = authority.commit(
+      authority.prepare({
+        threadId: TID,
+        actor: "verifier",
+        mutation: {
+          kind: "applyVerificationBatch",
+          batch: {
+            objectiveId: domain.state?.objective.objectiveId ?? "",
+            expectedRevision: domain.revision,
+            sourceDigest: "sha256:live",
+            verifiedAt: 1,
+            results: checked.map((criterion, index) => ({
+              criterionId: criterion.id,
+              checkId: criterion.kind === "checked" ? criterion.check.id : "",
+              exitCode: index,
+              timedOut: false,
+              durationMs: 1,
+              stdoutDigest: `sha256:stdout-${index}`,
+              stderrDigest: `sha256:stderr-${index}`,
+            })),
+          },
+        },
+      }),
+      { admitted: true },
+    )
+    expect(verified.ok).toBe(true)
+    expect(store.get(TID)?.status).toBe("active")
+    expect(store.get(TID)?.blockerObservations).toEqual([])
+
+    expect(commitObservation("attempt-3").ok).toBe(true)
+    expect(store.get(TID)?.blockerObservations[0]?.distinctAttemptIds).toEqual(["attempt-3"])
   })
 })

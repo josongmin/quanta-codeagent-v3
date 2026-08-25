@@ -45,6 +45,13 @@ const makeBlocker = (i: number) => ({
   waitingOn: "user" as const,
   since: 1_000_000 + i,
 })
+const makeObservation = (i: number) => ({
+  observationId: `o-${i}`,
+  dependencyRef: `["user","approval","dependency-${i}"]`,
+  waitingOn: "user" as const,
+  distinctAttemptIds: [`attempt-${i}`],
+  lastObservedAt: 2_000_000 + i,
+})
 
 describe("R4 audit-M — objective snapshot reapply caps", () => {
   test("(1) hostile 1000-criterion snapshot rebuilds to ≤ 256 silently", () => {
@@ -60,6 +67,7 @@ describe("R4 audit-M — objective snapshot reapply caps", () => {
         status: "active" as const,
         budget: { tokensUsed: 0, turnsUsed: 0 },
         blockers: [],
+        blockerObservations: [],
         nextActions: [],
         createdAt: 1,
         updatedAt: 2,
@@ -84,6 +92,7 @@ describe("R4 audit-M — objective snapshot reapply caps", () => {
         status: "blocked" as const,
         budget: { tokensUsed: 0, turnsUsed: 0 },
         blockers: Array.from({ length: 1000 }, (_, i) => makeBlocker(i)),
+        blockerObservations: [],
         nextActions: [],
         createdAt: 1,
         updatedAt: 2,
@@ -110,6 +119,7 @@ describe("R4 audit-M — objective snapshot reapply caps", () => {
         status: "active" as const,
         budget: { tokensUsed: 100, turnsUsed: 5 },
         blockers: Array.from({ length: 30 }, (_, i) => makeBlocker(i)),
+        blockerObservations: [],
         nextActions: ["next"],
         createdAt: 100,
         updatedAt: 200,
@@ -139,6 +149,7 @@ describe("R4 audit-M — objective snapshot reapply caps", () => {
         status: "active" as const,
         budget: { tokensUsed: 0, turnsUsed: 0 },
         blockers: Array.from({ length: 64 }, (_, i) => makeBlocker(i)),
+        blockerObservations: [],
         nextActions: [],
         createdAt: 1,
         updatedAt: 2,
@@ -167,6 +178,7 @@ describe("R4 audit-M — objective snapshot reapply caps", () => {
           status: "blocked" as const,
           budget: { tokensUsed: 0, turnsUsed: 0 },
           blockers: Array.from({ length: 1000 }, (_, i) => makeBlocker(i)),
+          blockerObservations: [],
           nextActions: [],
           createdAt: 1,
           updatedAt: 2,
@@ -178,5 +190,29 @@ describe("R4 audit-M — objective snapshot reapply caps", () => {
     store.addBlocker("t5", { reason: "extra", waitingOn: "user" })
     const after = store.get("t5")?.blockers.length
     expect(after).toBe(64) // still 64 — the 65th is silently dropped
+  })
+
+  test("(6) hostile blocker observations are capped at eight on rebuild", () => {
+    const store = createObjectiveStore()
+    store.fromSnapshot({
+      objectives: [
+        {
+          objectiveId: "objective:t6",
+          createdBy: "system",
+          threadId: "t6",
+          goal: "g",
+          successCriteria: [],
+          status: "active",
+          budget: { tokensUsed: 0, turnsUsed: 0 },
+          blockers: [],
+          blockerObservations: Array.from({ length: 1_000 }, (_, i) => makeObservation(i)),
+          nextActions: [],
+          attempts: { autonomousTurnsStarted: 0 },
+          createdAt: 1,
+          updatedAt: 2,
+        },
+      ],
+    })
+    expect(store.get("t6")?.blockerObservations).toHaveLength(8)
   })
 })

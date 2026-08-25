@@ -19,8 +19,9 @@ describe("goal-pursuit prompt SSOT", () => {
     // don't-complete-on-stop / budget
     expect(d).toContain("do not")
     expect(d).toContain("budget")
-    // blocked-hysteresis
-    expect(d).toContain("consecutive continuation turns")
+    // blocker promotion is runtime authority, not prompt-only hysteresis
+    expect(d).toContain("the host decides")
+    expect(d).toContain("dependency observations")
   })
 
   test("a goal is fenced as user data, not higher-priority instructions", () => {

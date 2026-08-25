@@ -7,18 +7,9 @@ import {
 } from "@/kernel/session"
 import type { SessionCommand } from "@/protocol/session"
 import { SessionProtocolValidationError, SessionRevisionConflictError } from "@/protocol/session"
+import { capabilitiesFor } from "../support/session-fixtures"
 
-const manifest = {
-  approvals: "operator" as const,
-  tools: true,
-  memory: false,
-  artifacts: false,
-  subagents: false,
-  automation: false,
-  shellSnapshot: false,
-  transport: "inproc" as const,
-  serverAutoContinues: false,
-}
+const manifest = capabilitiesFor({ approvals: "operator", transport: "inproc" })
 const clock = { now: () => new Date("2026-08-25T00:00:00.000Z") }
 const provenance = {
   kind: "goal-continuation" as const,

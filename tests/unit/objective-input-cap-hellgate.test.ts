@@ -81,13 +81,23 @@ describe("R3 audit-M2/M3 — objective_set / objective_update input caps", () =>
     expect(
       objectiveUpdateSchema.safeParse({
         thread_id: "t",
-        op: { kind: "addBlocker", reason: repeat(8000), waiting_on: "user" },
+        op: {
+          kind: "addBlocker",
+          reason: repeat(8000),
+          waiting_on: "user",
+          dependency_target: { kind: "approval", ref: "deploy" },
+        },
       }).success,
     ).toBe(true)
     expect(
       objectiveUpdateSchema.safeParse({
         thread_id: "t",
-        op: { kind: "addBlocker", reason: repeat(8001), waiting_on: "user" },
+        op: {
+          kind: "addBlocker",
+          reason: repeat(8001),
+          waiting_on: "user",
+          dependency_target: { kind: "approval", ref: "deploy" },
+        },
       }).success,
     ).toBe(false)
   })
@@ -96,7 +106,12 @@ describe("R3 audit-M2/M3 — objective_set / objective_update input caps", () =>
     expect(
       objectiveUpdateSchema.safeParse({
         thread_id: "t",
-        op: { kind: "addBlocker", reason: "", waiting_on: "user" },
+        op: {
+          kind: "addBlocker",
+          reason: "",
+          waiting_on: "user",
+          dependency_target: { kind: "approval", ref: "deploy" },
+        },
       }).success,
     ).toBe(false)
   })

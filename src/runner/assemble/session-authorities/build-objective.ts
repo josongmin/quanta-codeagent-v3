@@ -172,6 +172,17 @@ const encodeThread = (dom: ObjectiveDomainSnapshot): PersistedObjectiveThreadV2 
       waitingOn: b.waitingOn,
       since: b.since,
     })),
+    ...(obj.blockerObservations.length > 0
+      ? {
+          blockerObservations: obj.blockerObservations.map((observation) => ({
+            observationId: observation.observationId,
+            dependencyRef: observation.dependencyRef,
+            waitingOn: observation.waitingOn,
+            distinctAttemptIds: [...observation.distinctAttemptIds],
+            lastObservedAt: observation.lastObservedAt,
+          })),
+        }
+      : {}),
     nextActions: [...obj.nextActions],
     attempts: {
       autonomousTurnsStarted: obj.attempts.autonomousTurnsStarted,

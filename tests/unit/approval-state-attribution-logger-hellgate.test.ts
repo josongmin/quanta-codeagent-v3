@@ -72,6 +72,7 @@ const stubObjective = (threadId: string, blockerId: string): Objective => ({
   status: "blocked",
   budget: { tokensUsed: 0, turnsUsed: 0 },
   blockers: Object.freeze([{ id: blockerId, reason: "stub", waitingOn: "user", since: 1 }]),
+  blockerObservations: Object.freeze([]),
   nextActions: Object.freeze([]),
   createdAt: 1,
   updatedAt: 1,

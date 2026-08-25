@@ -25,6 +25,7 @@ import { completionSatisfied } from "../policy"
 import type { ObjectiveActor, ObjectiveMigrationSource } from "../provenance"
 import type {
   Blocker,
+  BlockerObservation,
   ExplicitObjectiveStatus,
   GoalDefinition,
   Objective,
@@ -59,6 +60,7 @@ export interface Cell {
   goal: string
   criteria: CritCell[]
   blockers: Blocker[]
+  blockerObservations: BlockerObservation[]
   nextActions: string[]
   explicitStatus: ExplicitObjectiveStatus
   /** H17 — epoch-ms until which a transient external usage/rate limit applies.
@@ -192,6 +194,14 @@ export const toObjective = (cell: Cell, enforce: boolean, now: number): Objectiv
     status: deriveStatus(cell, enforce, now),
     budget: buildBudget(cell),
     blockers: Object.freeze(cell.blockers.map((b) => Object.freeze({ ...b }))),
+    blockerObservations: Object.freeze(
+      cell.blockerObservations.map((observation) =>
+        Object.freeze({
+          ...observation,
+          distinctAttemptIds: Object.freeze([...observation.distinctAttemptIds]),
+        }),
+      ),
+    ),
     nextActions: Object.freeze([...cell.nextActions]),
     attempts: buildAttempts(cell),
     createdAt: cell.createdAt,
@@ -229,6 +239,7 @@ export const toSnapshotObjective = (cell: Cell, enforce: boolean, now: number): 
  *  exists purely to bound pathological growth. */
 export const MAX_CRITERIA_PER_OBJECTIVE = 256
 export const MAX_BLOCKERS_PER_OBJECTIVE = 64
+export const MAX_BLOCKER_OBSERVATIONS = 8
 
 /** RFC-03 C4 — mint a fresh MANUAL criterion cell (not met, no completion). */
 export const manualCrit = (text: string): CritCell => ({
@@ -335,6 +346,7 @@ export const cellFromDefinition = (
       definition.criteria ?? undefined,
     ),
     blockers: [],
+    blockerObservations: [],
     nextActions: [],
     explicitStatus: "active",
     ...(maxTokens !== undefined ? { maxTokens } : {}),

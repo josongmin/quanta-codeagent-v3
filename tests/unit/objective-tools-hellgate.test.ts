@@ -457,11 +457,27 @@ describe("objective tools — op variant round-trip (ADR-0402)", () => {
     expect(second?.successCriteria.map((c) => c.met)).toEqual([true, false])
   })
 
-  test("addBlocker op routes to addBlocker (status derives to 'blocked')", async () => {
+  test("addBlocker promotes only after three distinct host-attributed attempts", async () => {
     const { port, tools } = await seed()
-    const out = await drain(findTool(tools, "objective_update"), {
+    const input = {
       thread_id: "t",
-      op: { kind: "addBlocker", reason: "needs key", waiting_on: "user" },
+      op: {
+        kind: "addBlocker" as const,
+        reason: "needs key",
+        waiting_on: "user" as const,
+        dependency_target: { kind: "approval" as const, ref: "deploy-key" },
+      },
+    }
+    expect(
+      (await drain(findTool(tools, "objective_update"), input, { ...ctx(), turnId: "turn-1" })).ok,
+    ).toBe(true)
+    expect(port.get("t")?.status).toBe("active")
+    expect(
+      (await drain(findTool(tools, "objective_update"), input, { ...ctx(), turnId: "turn-2" })).ok,
+    ).toBe(true)
+    const out = await drain(findTool(tools, "objective_update"), input, {
+      ...ctx(),
+      turnId: "turn-3",
     })
     expect(out.ok).toBe(true)
     const o = port.get("t")
@@ -618,12 +634,17 @@ describe("objective tools — NO-THROW + output shape (ADR-0402)", () => {
     expect(out.output.toLowerCase()).toContain("error")
   })
 
-  test("throwing port.addBlocker (via update) ⇒ ok:false (never bubbles)", async () => {
+  test("foreign port without observation provenance fails closed without bubbling", async () => {
     const tools = toolsOver(throwingPort())
     const out = await drain(findTool(tools, "objective_update"), {
       thread_id: "t",
-      op: { kind: "addBlocker", reason: "x", waiting_on: "tool" },
-    })
+      op: {
+        kind: "addBlocker",
+        reason: "x",
+        waiting_on: "tool",
+        dependency_target: { kind: "tool", ref: "remote" },
+      },
+    }, { ...ctx(), toolCallId: "call-1" })
     expect(out.ok).toBe(false)
     expect(out.output.toLowerCase()).toContain("error")
   })

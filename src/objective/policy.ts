@@ -188,6 +188,24 @@ export const validationContractOf = (o: Pick<Objective, "successCriteria">): Val
 /** Derived states an explicit `active` may not override. */
 const NON_RESUMABLE = new Set<Objective["status"]>(["blocked", "budget_limited", "usage_limited"])
 
+const BLOCKER_TARGET_KINDS: ReadonlySet<string> = new Set([
+  "approval",
+  "external",
+  "user-input",
+  "tool",
+])
+
+const validObservedBlocker = (
+  mutation: Extract<ObjectiveMutation, { kind: "addBlocker" }>,
+): boolean =>
+  typeof mutation.attemptId === "string" &&
+  mutation.attemptId.length > 0 &&
+  mutation.attemptId.length <= 512 &&
+  mutation.target !== undefined &&
+  BLOCKER_TARGET_KINDS.has(mutation.target.kind) &&
+  mutation.target.ref.trim().length > 0 &&
+  mutation.target.ref.length <= 2_000
+
 const transitionRejection = (
   prior: ObjectiveDomainSnapshot,
   mutation: ObjectiveMutation,
@@ -240,6 +258,13 @@ export const authorizeMutation = (
     prior.state?.objective.status === "completed"
   ) {
     return { verdict: "deny", reason: "terminal-objective" }
+  }
+  if (
+    command.mutation.kind === "addBlocker" &&
+    (command.actor === "model" || command.actor === "continuation") &&
+    !validObservedBlocker(command.mutation)
+  ) {
+    return { verdict: "deny", reason: "invalid" }
   }
   const transition = transitionRejection(prior, command.mutation)
   if (transition !== null) return { verdict: "deny", reason: transition }

@@ -12,8 +12,8 @@
  *     progress, memory, or a plausible final answer.
  *   - don't-complete-on-stop: never declare done merely because you are stopping
  *     or a budget is nearly exhausted.
- *   - blocked-hysteresis: only treat the goal as blocked after the SAME blocker
- *     recurs across several consecutive continuation turns.
+ *   - blocker authority: the host, not prompt interpretation, decides when a
+ *     repeated dependency is promoted to a blocker.
  *
  * Pure/total — no I/O, no clock. The goal text is caller-supplied data and is
  * clearly fenced as the task to pursue, not as higher-priority instructions
@@ -29,8 +29,8 @@ export const GOAL_PURSUIT_DISCIPLINE =
   "actual current state, requirement by requirement — do not rely on intent, partial " +
   "progress, memory of earlier work, or a plausible final answer as proof. Do NOT " +
   "declare the goal complete merely because you are stopping or a budget is nearly " +
-  "exhausted. Only treat the goal as blocked if the SAME blocker has recurred across " +
-  "several consecutive continuation turns."
+  "exhausted. The host decides whether repeated dependency observations promote " +
+  "the objective to blocked; do not self-declare that lifecycle transition."
 
 /** Safe, bounded projection of durable progress — no transcript or tool text. */
 export interface GoalPursuitCheckpoint {

@@ -158,6 +158,8 @@ export type {
   ValidationContract,
 } from "./model"
 export type {
+  BlockerDependencyTarget,
+  BlockerDependencyTargetKind,
   ObjectiveActor,
   ObjectiveAttemptSettlement,
   ObjectiveMutation,
@@ -212,6 +214,7 @@ export {
 export type { ObjectiveCore } from "./store"
 export type {
   Blocker,
+  BlockerObservation,
   CheckedCriterion,
   ExplicitObjectiveStatus,
   GoalDefinition,

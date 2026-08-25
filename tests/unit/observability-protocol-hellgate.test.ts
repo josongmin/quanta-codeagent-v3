@@ -47,6 +47,7 @@ const makeObjective = (over: Partial<Objective> = {}): Objective => ({
   status: "active",
   budget: { tokensUsed: 0, turnsUsed: 0 },
   blockers: [],
+  blockerObservations: [],
   nextActions: [],
   createdAt: 1,
   updatedAt: 1,

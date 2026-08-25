@@ -174,6 +174,7 @@ export type {
 } from "./store-health"
 export { buildRecoveryGuidance, checkSessionStoreHealth } from "./store-health"
 export type {
+  PersistedBlockerObservation,
   PersistedInterruptedTurn,
   PersistedObjectiveBlocker,
   PersistedObjectiveBodyV2,

@@ -29,6 +29,11 @@
  */
 
 import { errMessage, logger } from "@/shared"
+import {
+  applyBlockerMutation,
+  clearObservationsAfterProgress,
+  settlementGainedProgress,
+} from "./blocker-observation"
 import type { CellProvenance } from "./core-store/cell"
 import type { ManualCompletionReceipt } from "./criteria/model"
 import { isVerifierReceipt } from "./criteria/model"
@@ -231,12 +236,14 @@ const settleAttempt = (
   // GOAL-04 — the turn was already reserved at `beginAttempt`, so settlement
   // never re-debits it; a legacy (unreserved) settlement still debits one turn.
   const started = current.attempts.started
+  const gainedProgress = settlementGainedProgress(current, settlement)
   const usage = core.applyUsage(threadId, {
     tokens: settlement.tokensUsed,
     turns: started === undefined && settlement.turnsUsed === 1 ? 1 : 0,
   })
   if (usage === null) return refused(core, threadId, "invalid")
-  const result = started === undefined ? usage : (core.clearStartedAttempt(threadId) ?? usage)
+  const settled = started === undefined ? usage : (core.clearStartedAttempt(threadId) ?? usage)
+  const result = clearObservationsAfterProgress(core, threadId, settled, gainedProgress)
   ctx.evidence.append(receipt)
   return { applied: true, result }
 }
@@ -277,6 +284,10 @@ const applyVerificationBatch = (
   if (current === null) return refused(core, threadId, "objective-missing")
   const plan = planVerificationBatch(current, batch, ctx.revision)
   if (typeof plan === "string") return refused(core, threadId, plan)
+  const gainedProgress = plan.some(
+    ({ criterionId, passed }) =>
+      passed && current.successCriteria.find((criterion) => criterion.id === criterionId)?.met !== true,
+  )
   let result: Objective | null = current
   for (const { criterionId, passed, exitCode } of plan) {
     const c = current.successCriteria.find((x) => x.id === criterionId)
@@ -293,7 +304,10 @@ const applyVerificationBatch = (
         }) ?? result)
       : (core.resetCheckedCriterion(threadId, criterionId) ?? result)
   }
-  return { applied: true, result }
+  return {
+    applied: true,
+    result: clearObservationsAfterProgress(core, threadId, result, gainedProgress),
+  }
 }
 
 const DISPATCH: DispatchTable = {
@@ -307,8 +321,8 @@ const DISPATCH: DispatchTable = {
     m.status === "active" || m.status === "paused"
       ? applied(core.setExplicitStatus(threadId, m.status))
       : refused(core, threadId, "invalid"),
-  addBlocker: (core, threadId, m) =>
-    applied(core.addBlocker(threadId, { reason: m.reason, waitingOn: m.waitingOn })),
+  addBlocker: (core, threadId, m, ctx) =>
+    applied(applyBlockerMutation(core, threadId, m, ctx.actor)),
   clearBlocker: (core, threadId, m) => applied(core.clearBlocker(threadId, m.blockerId)),
   setNextActions: (core, threadId, m) => applied(core.setNextActions(threadId, m.actions)),
   // RFC-03 C4 — the MANUAL/provenance completion path. A CHECKED criterion is
@@ -509,7 +523,9 @@ const wrapPortAsAuthority = (
 
 const isObjectiveCore = (port: ObjectivePort): port is ObjectiveCore =>
   typeof (port as Partial<ObjectiveCore>).snapshotThread === "function" &&
-  typeof (port as Partial<ObjectiveCore>).restoreThread === "function"
+  typeof (port as Partial<ObjectiveCore>).restoreThread === "function" &&
+  typeof (port as Partial<ObjectiveCore>).observeBlocker === "function" &&
+  typeof (port as Partial<ObjectiveCore>).clearBlockerObservations === "function"
 
 /** Adapt a bare `ObjectivePort` to `ObjectiveCore` via the public surface so the
  *  authority protocol still works over a foreign port (test doubles). The port's
@@ -566,6 +582,13 @@ const coreFromPort = (port: ObjectivePort): ObjectiveCore => ({
   },
   clearStartedAttempt(threadId) {
     return port.get(threadId)
+  },
+  observeBlocker() {
+    // A foreign public port cannot preserve attempt-attributed observations.
+    return null
+  },
+  clearBlockerObservations() {
+    return null
   },
 })
 

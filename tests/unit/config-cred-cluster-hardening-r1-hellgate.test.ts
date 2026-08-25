@@ -676,6 +676,7 @@ describe("H17 — budget at the EXACT cap and continuation re-read", () => {
           status,
           budget: { tokensUsed: 0, turnsUsed: 0 },
           blockers: [],
+          blockerObservations: [],
           nextActions: [],
           createdAt: 0,
           updatedAt: 0,

@@ -10,14 +10,65 @@ import { randomUUID } from "node:crypto"
 import { errMessage, logger } from "@/shared"
 import type { ObjectiveCore } from "../store"
 import type { Objective, WaitingOn } from "../types"
-import { type CritCell, isNonEmptyString, MAX_BLOCKERS_PER_OBJECTIVE } from "./cell"
+import {
+  type Cell,
+  type CritCell,
+  isNonEmptyString,
+  MAX_BLOCKER_OBSERVATIONS,
+  MAX_BLOCKERS_PER_OBJECTIVE,
+} from "./cell"
 import type { ObjectiveStoreCtx } from "./ctx"
+
+type ObservationInput = Parameters<ObjectiveCore["observeBlocker"]>[1]
+
+const promoteObservedBlocker = (cell: Cell, observation: ObservationInput, now: number): void => {
+  if (cell.blockers.length >= MAX_BLOCKERS_PER_OBJECTIVE) return
+  cell.blockers.push({
+    id: randomUUID(),
+    reason: observation.reason,
+    waitingOn: observation.waitingOn,
+    since: now,
+  })
+}
+
+const recordDistinctObservation = (
+  cell: Cell,
+  observation: ObservationInput,
+  now: number,
+): void => {
+  const existingIndex = cell.blockerObservations.findIndex(
+    (candidate) => candidate.dependencyRef === observation.dependencyRef,
+  )
+  const existing = existingIndex < 0 ? undefined : cell.blockerObservations[existingIndex]
+  const attempts = [...(existing?.distinctAttemptIds ?? []), observation.attemptId].slice(-3)
+  if (existingIndex >= 0) cell.blockerObservations.splice(existingIndex, 1)
+  if (attempts.length >= 3) {
+    promoteObservedBlocker(cell, observation, now)
+    return
+  }
+  cell.blockerObservations.push({
+    observationId: existing?.observationId ?? randomUUID(),
+    dependencyRef: observation.dependencyRef,
+    waitingOn: observation.waitingOn,
+    distinctAttemptIds: attempts,
+    lastObservedAt: now,
+  })
+  if (cell.blockerObservations.length > MAX_BLOCKER_OBSERVATIONS) {
+    cell.blockerObservations.shift()
+  }
+}
 
 export const criteriaOps = (
   ctx: ObjectiveStoreCtx,
 ): Pick<
   ObjectiveCore,
-  "addBlocker" | "clearBlocker" | "setNextActions" | "markCriterion" | "getCriterion"
+  | "addBlocker"
+  | "observeBlocker"
+  | "clearBlocker"
+  | "clearBlockerObservations"
+  | "setNextActions"
+  | "markCriterion"
+  | "getCriterion"
 > => {
   const { cells, clockNow, mutate } = ctx
   return {
@@ -44,9 +95,35 @@ export const criteriaOps = (
       })
     },
 
+    observeBlocker(threadId, observation): Objective | null {
+      const cell = cells.get(threadId)
+      if (
+        cell === undefined ||
+        !isNonEmptyString(observation.dependencyRef) ||
+        !isNonEmptyString(observation.attemptId)
+      ) {
+        return null
+      }
+      const prior = cell.blockerObservations.find(
+        (candidate) => candidate.dependencyRef === observation.dependencyRef,
+      )
+      if (prior?.distinctAttemptIds.includes(observation.attemptId) === true) return null
+      return mutate(threadId, (current) =>
+        recordDistinctObservation(current, observation, clockNow()),
+      )
+    },
+
     clearBlocker(threadId, blockerId): Objective | null {
       return mutate(threadId, (cell) => {
         cell.blockers = cell.blockers.filter((b) => b.id !== blockerId)
+      })
+    },
+
+    clearBlockerObservations(threadId): Objective | null {
+      const cell = cells.get(threadId)
+      if (cell === undefined || cell.blockerObservations.length === 0) return null
+      return mutate(threadId, (current) => {
+        current.blockerObservations = []
       })
     },
 

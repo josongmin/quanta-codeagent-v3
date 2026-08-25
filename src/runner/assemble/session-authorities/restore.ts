@@ -25,6 +25,7 @@
 
 import type {
   Blocker,
+  BlockerObservation,
   CompletionReceipt,
   Objective,
   ObjectiveActor,
@@ -45,6 +46,7 @@ import {
 } from "@/objective"
 import type {
   PersistedObjectiveBlocker,
+  PersistedBlockerObservation,
   PersistedObjectiveBodyV2,
   PersistedObjectiveCompletion,
   PersistedObjectiveCriterion,
@@ -119,6 +121,9 @@ const migrateThreadV1 = (t: PersistedObjectiveThread): PersistedObjectiveThreadV
     ...(t.usageLimitedUntil !== undefined ? { usageLimitedUntil: t.usageLimitedUntil } : {}),
     budget: t.budget,
     blockers: t.blockers,
+    ...(t.blockerObservations !== undefined
+      ? { blockerObservations: t.blockerObservations }
+      : {}),
     nextActions: t.nextActions,
     createdAt: t.createdAt,
     updatedAt: t.updatedAt,
@@ -277,6 +282,14 @@ const toBlocker = (b: PersistedObjectiveBlocker): Blocker => ({
   since: b.since,
 })
 
+const toBlockerObservation = (item: PersistedBlockerObservation): BlockerObservation => ({
+  observationId: item.observationId,
+  dependencyRef: item.dependencyRef,
+  waitingOn: toWaitingOn(item.waitingOn),
+  distinctAttemptIds: [...new Set(item.distinctAttemptIds)].slice(0, 2),
+  lastObservedAt: item.lastObservedAt,
+})
+
 /** Reconstruct the full public `Objective` from a persisted v2 body. Every field
  *  round-trips verbatim; ids are NEVER re-minted (they carry from the DTO). */
 const toObjective = (threadId: string, body: PersistedObjectiveBodyV2): Objective => {
@@ -296,6 +309,7 @@ const toObjective = (threadId: string, body: PersistedObjectiveBodyV2): Objectiv
     status: toStatus(body.status, body.explicitStatus),
     budget,
     blockers: body.blockers.map(toBlocker),
+    blockerObservations: (body.blockerObservations ?? []).map(toBlockerObservation),
     nextActions: [...body.nextActions],
     attempts: {
       autonomousTurnsStarted: body.attempts?.autonomousTurnsStarted ?? 0,

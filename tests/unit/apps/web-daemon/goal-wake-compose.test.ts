@@ -3,18 +3,9 @@ import { composeWebGoalWake } from "@/apps/web-daemon/goal-wake-compose"
 import { asObjectiveAuthority, createObjectiveStore } from "@/objective"
 import type { SessionEvent, SessionSnapshotLite } from "@/protocol/session"
 import type { RuntimeSession } from "@/sdk/runtime"
+import { capabilitiesFor } from "../../../support/session-fixtures"
 
-const manifest = {
-  approvals: "operator" as const,
-  tools: true,
-  memory: false,
-  artifacts: false,
-  subagents: false,
-  automation: false,
-  shellSnapshot: false,
-  transport: "websocket" as const,
-  serverAutoContinues: false,
-}
+const manifest = capabilitiesFor({ approvals: "operator", transport: "websocket" })
 
 const snapshot = (): SessionSnapshotLite => ({
   sessionId: "web-goal",

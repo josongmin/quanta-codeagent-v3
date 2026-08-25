@@ -335,6 +335,14 @@ export interface PersistedObjectiveBlocker {
   readonly since: number
 }
 
+export interface PersistedBlockerObservation {
+  readonly observationId: string
+  readonly dependencyRef: string
+  readonly waitingOn: string
+  readonly distinctAttemptIds: readonly string[]
+  readonly lastObservedAt: number
+}
+
 /** Persisted budget envelope (mirrors `@/objective` `ObjectiveBudget`). */
 export interface PersistedObjectiveBudget {
   readonly maxTokens?: number
@@ -388,6 +396,8 @@ export interface PersistedObjectiveThread {
   readonly usageLimitedUntil?: number
   readonly budget: PersistedObjectiveBudget
   readonly blockers: readonly PersistedObjectiveBlocker[]
+  /** Absent in legacy snapshots; decoded as an empty observation set. */
+  readonly blockerObservations?: readonly PersistedBlockerObservation[]
   readonly nextActions: readonly string[]
   readonly createdAt: number
   readonly updatedAt: number
@@ -414,6 +424,8 @@ export interface PersistedObjectiveBodyV2 {
   readonly usageLimitedUntil?: number
   readonly budget: PersistedObjectiveBudget
   readonly blockers: readonly PersistedObjectiveBlocker[]
+  /** Pending repeated-blocker evidence. Absent on older v2 snapshots. */
+  readonly blockerObservations?: readonly PersistedBlockerObservation[]
   readonly nextActions: readonly string[]
   /** GOAL-04 — attributed attempt accounting. Absent on a v1 record. */
   readonly attempts?: {

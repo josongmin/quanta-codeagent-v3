@@ -28,12 +28,13 @@ import {
 import { isObjectiveIdLike, legacyObjectiveId } from "../identity"
 import type { ExplicitStatus, ObjectiveThreadSnapshot } from "../model"
 import { isObjectiveActor, type ObjectiveActor } from "../provenance"
-import type { Blocker, ObjectiveBudget } from "../types"
+import type { Blocker, BlockerObservation, ObjectiveBudget, WaitingOn } from "../types"
 import {
   type Cell,
   type CritCell,
   finiteNonNegInt,
   isNonEmptyString,
+  MAX_BLOCKER_OBSERVATIONS,
   MAX_BLOCKERS_PER_OBJECTIVE,
   MAX_CRITERIA_PER_OBJECTIVE,
   type SnapshotObjective,
@@ -125,6 +126,7 @@ export const cellFromThreadSnapshot = (
       waitingOn: b.waitingOn,
       since: finiteOrZero(b.since),
     })),
+    blockerObservations: rebuildBlockerObservations(o.blockerObservations),
     nextActions: Array.isArray(o.nextActions)
       ? o.nextActions.filter((a): a is string => typeof a === "string")
       : [],
@@ -275,6 +277,48 @@ const rebuildBlockers = (raw: unknown): Blocker[] => {
   return out
 }
 
+const normalizeWaitingOn = (value: unknown): WaitingOn | null =>
+  value === "user" || value === "tool" || value === "network" || value === "child_agent"
+    ? value
+    : null
+
+const rebuildBlockerObservations = (raw: unknown): BlockerObservation[] => {
+  if (!Array.isArray(raw)) return []
+  const out: BlockerObservation[] = []
+  for (const item of raw) {
+    if (out.length >= MAX_BLOCKER_OBSERVATIONS) break
+    if (item === null || typeof item !== "object") continue
+    const candidate = item as Partial<BlockerObservation>
+    const waitingOn = normalizeWaitingOn(candidate.waitingOn)
+    if (
+      !isNonEmptyString(candidate.dependencyRef) ||
+      candidate.dependencyRef.length > 2_100 ||
+      waitingOn === null ||
+      !Array.isArray(candidate.distinctAttemptIds)
+    ) {
+      continue
+    }
+    const attempts = [
+      ...new Set(
+        candidate.distinctAttemptIds.filter(
+          (attempt): attempt is string => isNonEmptyString(attempt) && attempt.length <= 512,
+        ),
+      ),
+    ].slice(0, 2)
+    if (attempts.length === 0) continue
+    out.push({
+      observationId: isNonEmptyString(candidate.observationId)
+        ? candidate.observationId
+        : randomUUID(),
+      dependencyRef: candidate.dependencyRef,
+      waitingOn,
+      distinctAttemptIds: attempts,
+      lastObservedAt: finiteOrZero(candidate.lastObservedAt),
+    })
+  }
+  return out
+}
+
 /**
  * Recover the persisted EXPLICIT intent from a snapshot entry.
  *
@@ -299,6 +343,7 @@ export function cellFromObjective(o: unknown): Cell | null {
     goal: typeof rec.goal === "string" ? rec.goal : "",
     criteria: rebuildCriteria(rec.successCriteria, identity.objectiveId),
     blockers: rebuildBlockers(rec.blockers),
+    blockerObservations: rebuildBlockerObservations(rec.blockerObservations),
     nextActions: Array.isArray(rec.nextActions)
       ? rec.nextActions.filter((a): a is string => typeof a === "string")
       : [],

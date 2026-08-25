@@ -111,6 +111,15 @@ export interface Blocker {
   readonly since: number // epoch ms
 }
 
+/** Host-owned evidence that the same dependency prevented progress in distinct attempts. */
+export interface BlockerObservation {
+  readonly observationId: string
+  readonly dependencyRef: string
+  readonly waitingOn: WaitingOn
+  readonly distinctAttemptIds: readonly string[]
+  readonly lastObservedAt: number
+}
+
 /** Budget envelope. `max*` are optional caps; `*Used` are running totals. */
 export interface ObjectiveBudget {
   readonly maxTokens?: number
@@ -153,6 +162,7 @@ export interface Objective {
   readonly status: ObjectiveStatus
   readonly budget: ObjectiveBudget
   readonly blockers: readonly Blocker[]
+  readonly blockerObservations: readonly BlockerObservation[]
   readonly nextActions: readonly string[]
   /** GOAL-04 — attributed attempt accounting (durable start + hard-cap counter). */
   readonly attempts: ObjectiveAttemptState

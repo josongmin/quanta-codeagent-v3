@@ -38,6 +38,13 @@ export type { CriterionDeclaration } from "./criteria/model"
 export type { ObjectiveActor } from "./provenance"
 export { isObjectiveActor, OBJECTIVE_ACTORS } from "./provenance"
 
+export type BlockerDependencyTargetKind = "approval" | "external" | "user-input" | "tool"
+
+export interface BlockerDependencyTarget {
+  readonly kind: BlockerDependencyTargetKind
+  readonly ref: string
+}
+
 /**
  * GOAL-01 — the HOST-measured terminal settlement of one attributed attempt.
  * The authority (system actor only) debits the budget exactly once, computes
@@ -67,7 +74,14 @@ export type ObjectiveMutation =
   | { kind: "replace"; definition: GoalDefinition }
   | { kind: "clear" }
   | { kind: "setExplicitStatus"; status: ExplicitObjectiveStatus }
-  | { kind: "addBlocker"; reason: string; waitingOn: WaitingOn }
+  | {
+      kind: "addBlocker"
+      reason: string
+      waitingOn: WaitingOn
+      /** Host-stamped attempt identity for autonomous/model observations. */
+      attemptId?: string | undefined
+      readonly target?: BlockerDependencyTarget | undefined
+    }
   | { kind: "clearBlocker"; blockerId: string }
   | { kind: "setNextActions"; actions: readonly string[] }
   | { kind: "markCriterion"; criterionId: string; met: boolean }

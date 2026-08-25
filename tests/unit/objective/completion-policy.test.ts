@@ -80,6 +80,7 @@ const objective = (criteria: readonly SuccessCriterion[], blockers = 0): Objecti
     waitingOn: "user" as const,
     since: 1,
   })),
+  blockerObservations: [],
   nextActions: [],
   createdAt: 1,
   updatedAt: 1,

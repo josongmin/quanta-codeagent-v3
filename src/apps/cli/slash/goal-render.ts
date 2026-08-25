@@ -44,7 +44,7 @@ export const renderGoalDomain = (domain: ObjectiveDomainSnapshot, now = Date.now
     `🎯 Goal: ${objective.goal}\n` +
     `status: ${objective.status} · rev ${domain.revision} · id ${short(objective.objectiveId)}\n` +
     `validation: ${validation}\n` +
-    `remaining: ${remaining.length === 0 ? "none" : remaining.join(", ")}   next: ${objective.nextActions[0] ?? "none"}   blocked: ${objective.blockers[0]?.waitingOn ?? "none"}\n` +
+    `remaining: ${remaining.length === 0 ? "none" : remaining.join(", ")}   next: ${objective.nextActions[0] ?? "none"}   blocked: ${objective.blockers[0]?.waitingOn ?? "none"}${objective.blockerObservations[0] === undefined ? "" : ` (observing ${objective.blockerObservations[0].distinctAttemptIds.length}/3)`}\n` +
     `budget: ${budget.turnsUsed}/${budget.maxTurns ?? "∞"} turns · ${budget.tokensUsed}/${budget.maxTokens ?? "∞"} tokens` +
     (last === undefined
       ? "   last attempt: none\n"

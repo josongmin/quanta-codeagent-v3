@@ -296,6 +296,13 @@ const persistedObjectiveBlockerSchema = z.object({
   waitingOn: z.string(),
   since: z.number().finite(),
 })
+const persistedBlockerObservationSchema = z.object({
+  observationId: z.string().min(1),
+  dependencyRef: z.string().min(1).max(2_100),
+  waitingOn: z.enum(["user", "tool", "network", "child_agent"]),
+  distinctAttemptIds: z.array(z.string().min(1).max(512)).min(1).max(2),
+  lastObservedAt: z.number().finite().nonnegative(),
+})
 const persistedObjectiveBudgetSchema = z.object({
   maxTokens: z.number().finite().optional(),
   tokensUsed: z.number().finite(),
@@ -340,6 +347,7 @@ const persistedObjectiveThreadSchema = z.object({
   usageLimitedUntil: z.number().finite().optional(),
   budget: persistedObjectiveBudgetSchema,
   blockers: z.array(persistedObjectiveBlockerSchema),
+  blockerObservations: z.array(persistedBlockerObservationSchema).max(8).optional(),
   nextActions: z.array(z.string()),
   createdAt: z.number().finite(),
   updatedAt: z.number().finite(),

@@ -3,18 +3,9 @@ import { composeWebGoalWake } from "@/apps/web-daemon/goal-wake-compose"
 import type { SessionHost } from "@/kernel/session"
 import { createObjectiveStore } from "@/objective"
 import { createRuntime, type RuntimeSession } from "@/sdk/runtime"
+import { capabilitiesFor } from "../support/session-fixtures"
 
-const manifest = {
-  approvals: "operator" as const,
-  tools: true,
-  memory: false,
-  artifacts: false,
-  subagents: false,
-  automation: false,
-  shellSnapshot: false,
-  transport: "websocket" as const,
-  serverAutoContinues: false,
-}
+const manifest = capabilitiesFor({ approvals: "operator", transport: "websocket" })
 
 const deferred = <T>() => {
   let resolve!: (value: T) => void
