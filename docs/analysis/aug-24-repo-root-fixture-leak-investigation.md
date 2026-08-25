@@ -1,10 +1,49 @@
-# The repo-root fixture leak: what is known, and what five methods failed to find
+# The repo-root fixture leak: SOLVED (aug-25) — and what five methods missed
 
 **Status: UNRESOLVED source. Detection is in place; the writer is not identified.**
 
 This records an investigation that did not reach its goal, so the next person
 does not repeat the five approaches that already failed — including the one an
 earlier draft of this very document recommended.
+
+
+## THE ANSWER (aug-25)
+
+`src/session/store-rename-fold-lock.test.ts` and
+`src/session/store-save-lock-toctou.test.ts`. Each installs a process-global
+`mock.module("@/storage/service", …)` whose wrappers accept only the first two
+parameters:
+
+```ts
+const patchedWriteFile = async (p: string, body: string) => { …; return realWriteFile(p, body) }
+```
+
+`mock.module` is process-global and `mock.restore()` does not undo it, so once
+either file has run, every later `writeFile(path, content, baseDir)` in that
+process loses its third argument, `resolvePath` takes its
+`baseDir || process.cwd()` branch, and the relative name lands in the repo root.
+`patchedReadFile` had the same defect (silently reading from the cwd).
+
+This retires two conclusions above:
+
+- **It is not intermittent — it is SCOPE-dependent.** The patchers live under
+  `src/`, so `bun test tests/unit` can never fire it and `bun test tests/unit src`
+  fires it every time the two files run before the victims. The "3 of 6 runs"
+  figure mixed both scopes.
+- **The failed methods were at the wrong LAYER, not defeated by the bug.**
+  Methods 1 and 3 instrumented `node:fs`; this write never touches it
+  (`storage.writeFile` → `resolvePath` → `Bun.write`). Methods 2 and 4 attacked
+  scheduling, which was never the variable.
+
+**What found it, in one run:** a temporary probe inside the repo's OWN
+chokepoint, `resolvePath`, appending a stack to a file whenever
+`!baseDir && !isAbsolute(path)`. Every storage write funnels through it, source
+edits are immune to the ESM-binding problem that defeated method 1, and a FILE
+sink survives the TUI redraws that erase stdout. If a leak like this recurs, go
+to the chokepoint the code already has before reaching for a runtime hook.
+
+The containment work below is still worth doing — it makes the class impossible
+rather than this instance fixed — but it is no longer blocking.
 
 ## The symptom
 
