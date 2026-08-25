@@ -233,6 +233,125 @@ const blobRelPath = (uri: string): { ok: true; rel: string } | { ok: false; reas
   return { ok: true, rel: `mcp-blobs/${segments.join("/")}` }
 }
 
+/** The one shape a blob refusal takes. Seven `return \`[binary block …]\`` lines
+ *  were seven copies of this template; as one helper the prefix can never drift
+ *  between refusal reasons (the model matches on it). */
+const blobRefusal = (b: ResourceBlock, mime: string, why: string): string =>
+  `[binary block ${b.uri}${mime} — ${why}]`
+
+/** Resolve the jailed destination for a blob, or the refusal line explaining why
+ *  there isn't one. A unit because the `mcp-blobs/` confinement, the NUL screen
+ *  and the `resolveJailed` chokepoint are ONE containment decision in three
+ *  steps — an escape past any of them is the same class of bug. */
+const jailedBlobPath = (
+  b: ResourceBlock,
+  mime: string,
+  cwd: string,
+): { ok: true; path: string } | { ok: false; line: string } => {
+  const derived = blobRelPath(b.uri)
+  if (!derived.ok) return { ok: false, line: blobRefusal(b, mime, `refused: ${derived.reason}`) }
+  try {
+    // NUL screening (mirrors image_gen loadReference) — a NUL makes the write
+    // syscall throw below; refuse with a typed line instead.
+    if (derived.rel.includes("\0")) {
+      throw new FsJailError("mcp blob: NUL byte in resource uri path is not allowed")
+    }
+    return { ok: true, path: resolveJailed(derived.rel, cwd) as string }
+  } catch (e) {
+    if (e instanceof FsJailError) {
+      return { ok: false, line: blobRefusal(b, mime, `jail escape refused: ${e.message}`) }
+    }
+    return { ok: false, line: blobRefusal(b, mime, `path resolve failed: ${errMessage(e)}`) }
+  }
+}
+
+/** Decode one blob block to bytes, or the refusal line. A unit because "is this
+ *  worth writing at all?" (decodable, non-empty, under the cap) is decided
+ *  before any filesystem question is asked. */
+const decodeBlobBytes = (
+  b: ResourceBlock,
+  mime: string,
+): { ok: true; bytes: Buffer } | { ok: false; line: string } => {
+  let bytes: Buffer
+  try {
+    bytes = Buffer.from(b.blob as string, "base64")
+  } catch (e) {
+    // Defensive: `Buffer.from(_, "base64")` drops invalid characters rather
+    // than throwing, so this arm is not reachable through today's runtime —
+    // it stays because the decode is a boundary and a future codec may throw.
+    return { ok: false, line: blobRefusal(b, mime, `base64 decode failed: ${errMessage(e)}`) }
+  }
+  if (bytes.length === 0) {
+    return { ok: false, line: blobRefusal(b, mime, "empty after base64 decode, not written") }
+  }
+  if (bytes.length > BLOB_MAX_BYTES) {
+    return {
+      ok: false,
+      line: blobRefusal(
+        b,
+        mime,
+        `${bytes.length} bytes exceeds ${BLOB_MAX_BYTES} cap, not written`,
+      ),
+    }
+  }
+  return { ok: true, bytes }
+}
+
+/** Write one decoded blob, or the refusal line.
+ *
+ *  HELLAUDIT (R2): the bytes are ATTACKER-controlled, so NEVER overwrite an
+ *  existing file (a hostile server could clobber a prior blob or a user file
+ *  placed under mcp-blobs/). Refuse on collision — the model can rename + retry.
+ *  Mirrors image_gen's non-overwrite discipline (there: versioned siblings;
+ *  here: hard refusal, since we do not want to spray N attacker copies).
+ *
+ *  A unit because the existence probe and the write are one transaction: the
+ *  probe only means anything immediately before the write it guards. */
+const writeBlobBytes = async (
+  b: ResourceBlock,
+  mime: string,
+  jailed: string,
+  bytes: Buffer,
+  writePort: ImageWritePort,
+): Promise<string> => {
+  let exists: boolean
+  try {
+    exists = await writePort.exists(jailed)
+  } catch (e) {
+    return blobRefusal(b, mime, `existence probe failed: ${errMessage(e)}`)
+  }
+  if (exists) {
+    return blobRefusal(
+      b,
+      mime,
+      `target ${jailed} already exists; refusing to overwrite untrusted blob`,
+    )
+  }
+  try {
+    await writePort.writeBytes(jailed, new Uint8Array(bytes))
+  } catch (e) {
+    return blobRefusal(b, mime, `write failed: ${errMessage(e)}`)
+  }
+  return `# ${b.uri}${mime}\nblobSavedTo:${jailed} (${bytes.length} bytes)`
+}
+
+/** Save ONE blob block, returning the line the model sees. Hoisted to module
+ *  scope (it used to be a `function` declaration nested inside the renderer's
+ *  loop body) so its guards are not paying the enclosing function's nesting
+ *  surcharge, and so each stage above is independently reachable. */
+const saveBlob = async (
+  b: ResourceBlock,
+  mime: string,
+  cwd: string,
+  writePort: ImageWritePort,
+): Promise<string> => {
+  const decoded = decodeBlobBytes(b, mime)
+  if (!decoded.ok) return decoded.line
+  const jailed = jailedBlobPath(b, mime, cwd)
+  if (!jailed.ok) return jailed.line
+  return writeBlobBytes(b, mime, jailed.path, decoded.bytes, writePort)
+}
+
 /** Render `resources/read` content blocks, SAVING blob blocks to disk.
  *
  *  Text blocks render inline (capped, header-tagged) exactly as
@@ -258,65 +377,12 @@ export const renderResourceContentSavingBlobs = async (
     if (typeof b.text === "string") {
       parts.push(`# ${b.uri}${mime}\n${b.text}`)
     } else if (typeof b.blob === "string") {
-      parts.push(await saveBlob(b, mime))
+      parts.push(await saveBlob(b, mime, cwd, writePort))
     } else {
       parts.push(`[empty block ${b.uri}${mime} — no text or blob]`)
     }
   }
   return truncate(parts.join("\n\n"))
-
-  async function saveBlob(b: ResourceBlock, mime: string): Promise<string> {
-    let bytes: Buffer
-    try {
-      bytes = Buffer.from(b.blob as string, "base64")
-    } catch (e) {
-      return `[binary block ${b.uri}${mime} — base64 decode failed: ${errMessage(e)}]`
-    }
-    if (bytes.length === 0) {
-      return `[binary block ${b.uri}${mime} — empty after base64 decode, not written]`
-    }
-    if (bytes.length > BLOB_MAX_BYTES) {
-      return `[binary block ${b.uri}${mime} — ${bytes.length} bytes exceeds ${BLOB_MAX_BYTES} cap, not written]`
-    }
-    const derived = blobRelPath(b.uri)
-    if (!derived.ok) {
-      return `[binary block ${b.uri}${mime} — refused: ${derived.reason}]`
-    }
-    let jailed: string
-    try {
-      // NUL screening (mirrors image_gen loadReference) — a NUL makes the write
-      // syscall throw below; refuse with a typed line instead.
-      if (derived.rel.includes("\0")) {
-        throw new FsJailError("mcp blob: NUL byte in resource uri path is not allowed")
-      }
-      jailed = resolveJailed(derived.rel, cwd) as string
-    } catch (e) {
-      if (e instanceof FsJailError) {
-        return `[binary block ${b.uri}${mime} — jail escape refused: ${e.message}]`
-      }
-      return `[binary block ${b.uri}${mime} — path resolve failed: ${errMessage(e)}]`
-    }
-    // HELLAUDIT (R2): the bytes are ATTACKER-controlled, so NEVER overwrite an
-    // existing file (a hostile server could clobber a prior blob or a user file
-    // placed under mcp-blobs/). Refuse on collision — the model can rename + retry.
-    // Mirrors image_gen's non-overwrite discipline (there: versioned siblings;
-    // here: hard refusal, since we do not want to spray N attacker copies).
-    let exists: boolean
-    try {
-      exists = await writePort.exists(jailed)
-    } catch (e) {
-      return `[binary block ${b.uri}${mime} — existence probe failed: ${errMessage(e)}]`
-    }
-    if (exists) {
-      return `[binary block ${b.uri}${mime} — target ${jailed} already exists; refusing to overwrite untrusted blob]`
-    }
-    try {
-      await writePort.writeBytes(jailed, new Uint8Array(bytes))
-    } catch (e) {
-      return `[binary block ${b.uri}${mime} — write failed: ${errMessage(e)}]`
-    }
-    return `# ${b.uri}${mime}\nblobSavedTo:${jailed} (${bytes.length} bytes)`
-  }
 }
 
 // --- prompts ---------------------------------------------------------------

@@ -85,6 +85,80 @@ const writePreCommitDeny = async (
 ): Promise<ToolResult | null> =>
   (await staleWriteGuard(fs, ctx, path, existed)) ?? writeBudgetDeny(ctx)
 
+/** Best-effort pre-write read for the ADR-0440 tool-diff sink. A unit because
+ *  "the read failing must never block the write" is a RULE, and a rule that
+ *  lives inside a `try` nested three levels down is easy to lose. A fresh or
+ *  locked file yields the empty string, which is also a new file's "before". */
+const readBeforeBytes = async (
+  fs: FileSystemPort,
+  ctx: EditToolContext,
+  path: string,
+): Promise<string> => {
+  try {
+    return await fs.readFile(path, ctx.cwd)
+  } catch {
+    return ""
+  }
+}
+
+/** Map a thrown {@link FsJailError} onto the typed permission failure. Returns
+ *  `undefined` for anything else, which the caller RETHROWS — the jail is the
+ *  only error class this tool converts into a result. */
+const jailDeniedResult = (e: unknown, path: string): ToolResult | undefined =>
+  e instanceof FsJailError
+    ? {
+        ok: false,
+        output: e.message,
+        failure: { mode: "permission_denied", path, isReadonly: false },
+      }
+    : undefined
+
+/** The commit sequence, from existence check to the success line. A unit
+ *  because everything in it happens in a fixed ORDER around ONE commit: denies
+ *  strictly before `commitWrite`, capture/history/baseline strictly after, and
+ *  the caller only has to know that a thrown jail error means nothing was
+ *  written. Returns the deny result unchanged when a pre-commit guard fires. */
+const applyWrite = async (
+  fs: FileSystemPort,
+  ctx: EditToolContext,
+  input: Input,
+): Promise<ToolResult> => {
+  // Resolve relative paths against the session cwd, not process.cwd().
+  // The jail check fires inside fileExists()/writeFile() BEFORE any bytes
+  // are written, so a denied path is NEVER a partial write.
+  const existed = await fs.fileExists(input.path, ctx.cwd)
+  // ADR-0474 stale-read-guard + jun-6 exfil-rail (a) per-turn write-budget,
+  // both AFTER the existence check and BEFORE the commit (a deny is never a
+  // partial write). Default-OFF ⇒ `null` ⇒ byte-identical.
+  const preCommitDeny = await writePreCommitDeny(fs, ctx, input.path, existed)
+  if (preCommitDeny) return preCommitDeny
+  // ADR-0440 — capture the pre-write bytes ONLY when the tool-diff sink is
+  // wired AND this call is correlated (gate ON). Gate OFF ⇒ both undefined
+  // ⇒ NO extra read, byte-identical legacy path. A new file's "before" is
+  // the empty string.
+  const captureDiff = ctx.toolDiff !== undefined && ctx.toolCallId !== undefined
+  const before = captureDiff && existed ? await readBeforeBytes(fs, ctx, input.path) : ""
+  // jun-6 tool-interrupt-behavior — commit inside the OPTIONAL critical
+  // section so an in-flight ESC cannot tear a half-written file (no-op
+  // when the seam is unwired; byte-identical legacy path).
+  await commitWrite(fs, ctx, input.path, input.content)
+  if (captureDiff) captureToolDiff(ctx, before, input.content, input.path)
+  // file_history_rewind — record the NEW bytes as a per-file version so
+  // the model can later restore THIS exact state. No-op when the sink is
+  // unwired (gate OFF ⇒ ctx.fileHistory absent ⇒ byte-identical).
+  captureFileHistory(ctx, input.path, input.content)
+  // jul-13 edit-fresh-hash (shared with edit/scripted_replace): refresh the
+  // stale-read guard baseline to the just-written mtime AND advertise the
+  // post-write sha256 so the model can chain an edit to this file without a
+  // re-read. Both gated by ctx.editFreshHash ⇒ byte-identical when off.
+  await refreshStaleReadBaseline(fs, ctx, { path: input.path, base: ctx.cwd }, input.content)
+  const bytes = Buffer.byteLength(input.content, "utf8")
+  return {
+    ok: true,
+    output: `${existed ? "Overwrote" : "Created"} ${input.path} (${bytes} bytes)${freshHashNote(ctx, input.content)}`,
+  }
+}
+
 const schema = z.object({
   path: z.string().describe("File path (absolute or relative to cwd)"),
   content: z.string().describe("Full file content to write"),
@@ -142,68 +216,12 @@ export const makeWriteTool = (fs: FileSystemPort = defaultFileSystemPort): Tool<
         yield staticDeny
         return
       }
-      // Resolve relative paths against the session cwd, not process.cwd().
-      // The jail check fires inside fileExists()/writeFile() BEFORE any bytes
-      // are written, so a denied path is NEVER a partial write.
       try {
-        const existed = await fs.fileExists(input.path, ctx.cwd)
-        // ADR-0474 stale-read-guard + jun-6 exfil-rail (a) per-turn write-budget,
-        // both AFTER the existence check and BEFORE the commit (a deny is never a
-        // partial write). Default-OFF ⇒ `null` ⇒ byte-identical.
-        const preCommitDeny = await writePreCommitDeny(fs, ctx, input.path, existed)
-        if (preCommitDeny) {
-          yield { type: "result", result: preCommitDeny }
-          return
-        }
-        // ADR-0440 — capture the pre-write bytes ONLY when the tool-diff sink is
-        // wired AND this call is correlated (gate ON). Gate OFF ⇒ both undefined
-        // ⇒ NO extra read, byte-identical legacy path. A new file's "before" is
-        // the empty string. The read failing must never block the write, so it is
-        // best-effort (a fresh/locked file just yields an empty before).
-        const captureDiff = ctx.toolDiff !== undefined && ctx.toolCallId !== undefined
-        let before = ""
-        if (captureDiff && existed) {
-          try {
-            before = await fs.readFile(input.path, ctx.cwd)
-          } catch {
-            before = ""
-          }
-        }
-        // jun-6 tool-interrupt-behavior — commit inside the OPTIONAL critical
-        // section so an in-flight ESC cannot tear a half-written file (no-op
-        // when the seam is unwired; byte-identical legacy path).
-        await commitWrite(fs, ctx, input.path, input.content)
-        if (captureDiff) captureToolDiff(ctx, before, input.content, input.path)
-        // file_history_rewind — record the NEW bytes as a per-file version so
-        // the model can later restore THIS exact state. No-op when the sink is
-        // unwired (gate OFF ⇒ ctx.fileHistory absent ⇒ byte-identical).
-        captureFileHistory(ctx, input.path, input.content)
-        // jul-13 edit-fresh-hash (shared with edit/scripted_replace): refresh the
-        // stale-read guard baseline to the just-written mtime AND advertise the
-        // post-write sha256 so the model can chain an edit to this file without a
-        // re-read. Both gated by ctx.editFreshHash ⇒ byte-identical when off.
-        await refreshStaleReadBaseline(fs, ctx, { path: input.path, base: ctx.cwd }, input.content)
-        const bytes = Buffer.byteLength(input.content, "utf8")
-        yield {
-          type: "result",
-          result: {
-            ok: true,
-            output: `${existed ? "Overwrote" : "Created"} ${input.path} (${bytes} bytes)${freshHashNote(ctx, input.content)}`,
-          },
-        }
+        yield { type: "result", result: await applyWrite(fs, ctx, input) }
       } catch (e) {
-        if (e instanceof FsJailError) {
-          yield {
-            type: "result",
-            result: {
-              ok: false,
-              output: e.message,
-              failure: { mode: "permission_denied", path: input.path, isReadonly: false },
-            },
-          }
-          return
-        }
-        throw e
+        const denied = jailDeniedResult(e, input.path)
+        if (denied === undefined) throw e
+        yield { type: "result", result: denied }
       }
     },
   })

@@ -280,6 +280,47 @@ export class FallbackLLM implements LLMPort {
     }
   }
 
+  /** Decide what a failed attempt means, and emit the counter that goes with
+   *  that decision. `true` ⇒ the chain is over and the caller rethrows.
+   *
+   *  A unit because the decision and its telemetry must never disagree: an
+   *  `exhausted` counter without a rethrow (or a rethrow without one) is a lie
+   *  in a dashboard, and keeping them in one place is what stops them drifting. */
+  private rethrowsChain(e: unknown, isLast: boolean): boolean {
+    if (!isLast) return !this.isFallbackTrigger(e)
+    // All providers exhausted (final one threw) — emit a terminal
+    // counter so dashboards can alert on "fallback chain failed
+    // entirely". `last_kind` is the kind of the FINAL provider's
+    // error (the one being rethrown), structurally extracted.
+    this.emit(FALLBACK_METRIC_NAMES.exhausted, { last_kind: this.kindOf(e) })
+    return true
+  }
+
+  /** Report a swap that IS being taken, on both seams at once: the `triggered`
+   *  counter and the RFC02-3 structural route transition.
+   *
+   *  A unit because the two sinks carry the SAME four facts (from, to, kind,
+   *  post-yield) and must always fire together — a transition without a counter
+   *  (or the reverse) makes the two views of the chain disagree. `post_yield`
+   *  distinguishes a transparent pre-yield swap from a tombstone-bearing
+   *  mid-stream one (the latter is more disruptive). */
+  private reportSwap(e: unknown, from: LLMPort, to: LLMPort | undefined, postYield: boolean): void {
+    const kind = this.kindOf(e)
+    const fromModel = from.model ?? "unknown"
+    const toModel = to?.model ?? "unknown"
+    this.emit(FALLBACK_METRIC_NAMES.triggered, {
+      kind,
+      from: fromModel,
+      to: toModel,
+      post_yield: postYield ? "true" : "false",
+    })
+    // RFC02-3 (A8) — report the structural route transition. Same seam as
+    // the `triggered` metric: fires ONCE per swap, after the fall-over is
+    // decided. The runner adapter converts this to a `model_route_changed`
+    // AgentEvent (byte-identical when no callback wired).
+    this.emitTransition({ fromModel, toModel, kind, postYield })
+  }
+
   async *stream(input: StreamInput): AsyncIterable<StreamEvent> {
     // True once a PRIOR provider yielded ≥1 event before failing this turn.
     // When true, the next provider's output is preceded by a `stream_reset`
@@ -287,12 +328,10 @@ export class FallbackLLM implements LLMPort {
     // false is fully transparent.
     let priorPartial = false
 
-    let lastErrorKind = "unknown"
     for (let i = 0; i < this.providers.length; i++) {
       throwIfAborted(this.signal)
       const provider = this.providers[i]
       if (!provider) continue
-      const isLast = i === this.providers.length - 1
       // Per-attempt counter — labelled with model id (when known) + slot
       // index. The primary is index=0; a swap is observable as an
       // attempt with index > 0.
@@ -306,36 +345,8 @@ export class FallbackLLM implements LLMPort {
         yield* this.streamProvider(provider, input, priorPartial, yielded)
         return
       } catch (e) {
-        if (isLast || !this.isFallbackTrigger(e)) {
-          if (isLast) {
-            // All providers exhausted (final one threw) — emit a terminal
-            // counter so dashboards can alert on "fallback chain failed
-            // entirely". `last_kind` is the kind of the FINAL provider's
-            // error (the one being rethrown), structurally extracted.
-            lastErrorKind = this.kindOf(e)
-            this.emit(FALLBACK_METRIC_NAMES.exhausted, { last_kind: lastErrorKind })
-          }
-          throw e
-        }
-        // Fallback IS being taken — emit the swap counter. `from` is the
-        // dying provider, `to` is the next slot. `post_yield` distinguishes
-        // a transparent pre-yield swap (false) from a tombstone-bearing
-        // mid-stream swap (true) — the latter is more disruptive.
-        const next = this.providers[i + 1]
-        const swapKind = this.kindOf(e)
-        const fromModel = provider.model ?? "unknown"
-        const toModel = next?.model ?? "unknown"
-        this.emit(FALLBACK_METRIC_NAMES.triggered, {
-          kind: swapKind,
-          from: fromModel,
-          to: toModel,
-          post_yield: yielded.value ? "true" : "false",
-        })
-        // RFC02-3 (A8) — report the structural route transition. Same seam as
-        // the `triggered` metric: fires ONCE per swap, after the fall-over is
-        // decided. The runner adapter converts this to a `model_route_changed`
-        // AgentEvent (byte-identical when no callback wired).
-        this.emitTransition({ fromModel, toModel, kind: swapKind, postYield: yielded.value })
+        if (this.rethrowsChain(e, i === this.providers.length - 1)) throw e
+        this.reportSwap(e, provider, this.providers[i + 1], yielded.value)
         // If this provider streamed anything before failing, the next
         // provider must tombstone it. (Pre-yield failures stay transparent.)
         if (yielded.value) priorPartial = true

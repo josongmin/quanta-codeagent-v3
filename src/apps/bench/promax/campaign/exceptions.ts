@@ -85,7 +85,12 @@ export const exceptionEntriesOf = (
  *  Problem ORDER is part of the contract and matches the original statement
  *  order: entry-list shape, version, campaign, upstream commit. */
 const manifestHeaderProblems = (
-  manifest: ProMaxExceptionManifest,
+  // The INTERSECTION the caller's `isObject` guard already produces, not the
+  // declared interface. This function validates a manifest read off disk, so it
+  // must be able to look at `exceptions` as an unknown — and casting the
+  // interface to `Record<string, unknown>` does not typecheck (no index
+  // signature), which is what the cast here was working around.
+  manifest: ProMaxExceptionManifest & Record<string, unknown>,
   args: {
     readonly campaignId: string
     readonly upstreamGitCommit: string
@@ -93,7 +98,7 @@ const manifestHeaderProblems = (
   },
 ): readonly string[] => {
   const problems: string[] = []
-  const rawEntries = (manifest as Record<string, unknown>).exceptions
+  const rawEntries: unknown = manifest.exceptions
   if (!Array.isArray(rawEntries)) {
     problems.push(
       "`exceptions` must be an ARRAY of versioned exception entries — a manifest with no readable " +

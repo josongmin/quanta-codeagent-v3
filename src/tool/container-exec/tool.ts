@@ -25,7 +25,7 @@ import { z } from "zod"
 import { errMessage, sliceTailWholeChars, sliceWholeChars } from "@/shared"
 import { neutralizeTerminalOutput } from "../terminal-sanitize"
 import type { Tool, ToolEvent, ToolResult } from "../types"
-import type { ContainerExec } from "./port"
+import type { ContainerExec, ContainerExecResult } from "./port"
 
 /** Per-STREAM head+tail cap. Each of stdout/stderr gets its own budget so a stdout FLOOD can
  *  never evict stderr (where the diagnostic the agent needs usually lives) from the window —
@@ -95,6 +95,84 @@ const one = (result: ToolResult): AsyncIterable<ToolEvent> => ({
   },
 })
 
+/** Classify ONE completed exec into the tool result. PURE and module-level —
+ *  it used to sit three closures deep (factory → execute → async iterator) and
+ *  paid a nesting surcharge on every branch. `timeoutMs` is the CALLER's value
+ *  (absent ⇒ the transport's own backstop fired). */
+const execResultFrom = (
+  r: ContainerExecResult,
+  command: string,
+  timeoutMs?: number,
+): ToolResult => {
+  // exit + both streams always render (renderStream emits `(empty)` for an empty/null
+  // stream — the agent sees "no stderr" explicitly rather than an ambiguous omission).
+  const body = [
+    `exit: ${r.code}`,
+    renderStream("stdout", r.stdout),
+    renderStream("stderr", r.stderr),
+  ].join("\n")
+  // RFC-0002 §5.2 evidence: carry the exit code (and the B1 `timedOut` marker) on the
+  // TYPED seam (`ToolResult.evidence`) — dispatch flattens it onto the enriched
+  // `tool_result` AgentEvent, which is what the verify-gate/OC1 inspectors and the report
+  // cassette read. Text-only exit (`output`) left them blind: every run looked
+  // exitCode-less, so a crash (exit 2) was indistinguishable from a clean run (jul-3 RCA).
+  const evidence = {
+    exitCode: r.code,
+    executedCommand: command,
+    ...(r.stderr ? { stderr: r.stderr } : {}),
+    ...(r.timedOut === true ? { timedOut: true } : {}),
+  }
+  if (r.timedOut !== true) {
+    // A non-zero exit is NOT a tool failure — it's a real, useful observation the agent
+    // reasons over (the command ran). Surface it as ok:true with the exit code visible.
+    return { ok: true, output: body, evidence }
+  }
+  // B1: a DEADLINE expiry is a typed TOOL FAILURE (the command did NOT complete — its
+  // exit code is a kill sentinel, not a completion signal). `failure.mode:"timeout"`
+  // lets the model branch per R-FAILURE-MODE (raise timeout_ms / background+poll /
+  // narrow the command) instead of regex-reading the body. Partial output still renders
+  // so a hung build is recoverable from what it printed before the deadline.
+  // The deadline may be the caller's `timeout_ms` OR the transport's own backstop (the
+  // standalone docker path keeps a 60s wall-clock even with no `timeout_ms`), so the
+  // message must not interpolate a possibly-undefined value.
+  const deadlineLabel =
+    timeoutMs !== undefined ? `after ${timeoutMs}ms` : "at the transport's default deadline"
+  return {
+    ok: false,
+    output: `command timed out ${deadlineLabel} (the container-side process may still be running)\n${body}`,
+    failure: {
+      mode: "timeout",
+      ...(timeoutMs !== undefined ? { timeoutMs } : {}),
+    },
+    evidence,
+  }
+}
+
+/** One exec round-trip, with a transport THROW mapped to a typed backend error.
+ *  A unit because a transport that blew up has no exit code at all — it cannot
+ *  go through {@link execResultFrom}'s table. */
+const runExec = async (
+  port: ContainerExec,
+  command: string,
+  signal: AbortSignal,
+  timeoutMs?: number,
+): Promise<ToolResult> => {
+  try {
+    // Signal threaded to the transport: a well-behaved transport aborts the in-flight
+    // command (and may surface partial output + a code). No host-side race wrapper here —
+    // it would leak a per-call abort listener on the long-lived turn signal AND discard the
+    // transport's partial output. The pre-start guard + threaded signal matches the pty path.
+    return execResultFrom(await port.exec(command, signal, timeoutMs), command, timeoutMs)
+  } catch (e) {
+    const msg = errMessage(e)
+    return {
+      ok: false,
+      output: `container_exec backend error: ${msg}`,
+      failure: { mode: "error", modelVisibleError: msg },
+    }
+  }
+}
+
 /** The `container_exec` tool bound to a {@link ContainerExec} transport. */
 export const containerExecTool = (port: ContainerExec): Tool<ContainerExecInput> => ({
   name: "container_exec",
@@ -112,71 +190,10 @@ export const containerExecTool = (port: ContainerExec): Tool<ContainerExecInput>
     const parsed = schema.safeParse(input)
     if (!parsed.success) return one({ ok: false, output: `invalid input: ${parsed.error.message}` })
     if (ctx.signal.aborted) return one({ ok: false, output: "aborted before start" })
+    const { command, timeout_ms: timeoutMs } = parsed.data
     return {
       async *[Symbol.asyncIterator]() {
-        let result: ToolResult
-        try {
-          // Signal threaded to the transport: a well-behaved transport aborts the in-flight
-          // command (and may surface partial output + a code). No host-side race wrapper here —
-          // it would leak a per-call abort listener on the long-lived turn signal AND discard the
-          // transport's partial output. The pre-start guard + threaded signal matches the pty path.
-          const r = await port.exec(parsed.data.command, ctx.signal, parsed.data.timeout_ms)
-          // exit + both streams always render (renderStream emits `(empty)` for an empty/null
-          // stream — the agent sees "no stderr" explicitly rather than an ambiguous omission).
-          const body = [
-            `exit: ${r.code}`,
-            renderStream("stdout", r.stdout),
-            renderStream("stderr", r.stderr),
-          ].join("\n")
-          // RFC-0002 §5.2 evidence: carry the exit code (and the B1 `timedOut` marker) on the
-          // TYPED seam (`ToolResult.evidence`) — dispatch flattens it onto the enriched
-          // `tool_result` AgentEvent, which is what the verify-gate/OC1 inspectors and the report
-          // cassette read. Text-only exit (`output`) left them blind: every run looked
-          // exitCode-less, so a crash (exit 2) was indistinguishable from a clean run (jul-3 RCA).
-          const evidence = {
-            exitCode: r.code,
-            executedCommand: parsed.data.command,
-            ...(r.stderr ? { stderr: r.stderr } : {}),
-            ...(r.timedOut === true ? { timedOut: true } : {}),
-          }
-          if (r.timedOut === true) {
-            // B1: a DEADLINE expiry is a typed TOOL FAILURE (the command did NOT complete — its
-            // exit code is a kill sentinel, not a completion signal). `failure.mode:"timeout"`
-            // lets the model branch per R-FAILURE-MODE (raise timeout_ms / background+poll /
-            // narrow the command) instead of regex-reading the body. Partial output still renders
-            // so a hung build is recoverable from what it printed before the deadline.
-            // The deadline may be the caller's `timeout_ms` OR the transport's own backstop (the
-            // standalone docker path keeps a 60s wall-clock even with no `timeout_ms`), so the
-            // message must not interpolate a possibly-undefined value.
-            const deadlineLabel =
-              parsed.data.timeout_ms !== undefined
-                ? `after ${parsed.data.timeout_ms}ms`
-                : "at the transport's default deadline"
-            result = {
-              ok: false,
-              output: `command timed out ${deadlineLabel} (the container-side process may still be running)\n${body}`,
-              failure: {
-                mode: "timeout",
-                ...(parsed.data.timeout_ms !== undefined
-                  ? { timeoutMs: parsed.data.timeout_ms }
-                  : {}),
-              },
-              evidence,
-            }
-          } else {
-            // A non-zero exit is NOT a tool failure — it's a real, useful observation the agent
-            // reasons over (the command ran). Surface it as ok:true with the exit code visible.
-            result = { ok: true, output: body, evidence }
-          }
-        } catch (e) {
-          const msg = errMessage(e)
-          result = {
-            ok: false,
-            output: `container_exec backend error: ${msg}`,
-            failure: { mode: "error", modelVisibleError: msg },
-          }
-        }
-        yield { type: "result", result }
+        yield { type: "result", result: await runExec(port, command, ctx.signal, timeoutMs) }
       },
     }
   },

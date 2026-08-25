@@ -93,6 +93,66 @@ const JSON_FIELDS_VIEW = "url,number"
  * Pure construction — no IO at build time. Each `poll()` runs ONE `gh`
  * subprocess (checks) plus, on first sighting, ONE more for the PR url.
  */
+/** One `gh pr checks` poll, reduced to the rows that are COMPLETED and NOT yet
+ *  in the watermark. Every "we don't know" outcome — spawn failure, non-zero
+ *  exit, unparseable JSON, a mid-flight abort — collapses to `[]`, because
+ *  ADR-0132 says a `gh` we cannot read is NOT a completion signal (it is a
+ *  "we don't know" signal). A unit because that collapse is the whole contract:
+ *  one place decides what counts as evidence of completion.
+ *
+ *  Read-only w.r.t. `seen` — the watermark is advanced by the caller, and only
+ *  after the trigger is actually going to be emitted. */
+const newlyCompletedChecks = async (
+  opts: CiTriggerOpts,
+  seen: SeenRunsStore,
+  signal: AbortSignal | undefined,
+): Promise<ReadonlyArray<{ row: GhCheckRow; runId: string }>> => {
+  const checksRes = await safeRun(
+    opts.ghCliPort,
+    ["pr", "checks", opts.prRef, "--json", JSON_FIELDS_CHECKS],
+    opts.repoCwd,
+    signal,
+  )
+  if (checksRes === undefined) return [] // network failure / spawn failure
+  if (checksRes.exitCode !== 0) return [] // gh signaled "I don't know"
+  if (signal?.aborted) return []
+
+  const rows = safeJsonArray<GhCheckRow>(checksRes.stdout)
+  if (rows === undefined) return []
+
+  // Build a stable run-id from the row tuple so dedup is deterministic
+  // and content-addressed (no run.id field in `gh pr checks` JSON; the
+  // link is the de-facto unique identifier per completed run).
+  const completed: Array<{ row: GhCheckRow; runId: string }> = []
+  for (const row of rows) {
+    if ((row.status ?? "").toUpperCase() !== "COMPLETED") continue
+    const runId = stableRunId(row)
+    if (seen.has(runId)) continue
+    completed.push({ row, runId })
+  }
+  return completed
+}
+
+/** The emitted trigger value. A unit because the frozen shape IS the contract
+ *  with the reactor (frozen so a consumer cannot mutate an evidence anchor),
+ *  and it should be readable without the polling logic around it. */
+const ciCompletionTrigger = (
+  prRef: string,
+  url: string,
+  // `ClockPort.now()` returns epoch ms. Typed as the port returns it rather than
+  // as `string`: the original interpolated it straight into the message, so the
+  // type never surfaced, and declaring it `string` here compiled only until the
+  // call site was written.
+  at: number,
+  rows: readonly GhCheckRow[],
+): ProactiveTrigger =>
+  Object.freeze({
+    reason: "ci_completion" as const,
+    evidence: Object.freeze({ kind: "url" as const, value: url }),
+    simulatedMessage: `CI completed on PR ${prRef}: ${summarizeRollup(rows)} (at ${at})`,
+    abortSignal: new AbortController().signal,
+  })
+
 export const createCiTriggerSource = (opts: CiTriggerOpts): TriggerSourcePort => {
   const seen: SeenRunsStore = opts.seenRunsStore ?? createInMemorySeenRuns()
   let cachedUrl: string | undefined
@@ -119,44 +179,22 @@ export const createCiTriggerSource = (opts: CiTriggerOpts): TriggerSourcePort =>
       const signal = pollOpts?.signal
       if (signal?.aborted) return []
 
-      const checksRes = await safeRun(
-        opts.ghCliPort,
-        ["pr", "checks", opts.prRef, "--json", JSON_FIELDS_CHECKS],
-        opts.repoCwd,
-        signal,
-      )
-      if (checksRes === undefined) return [] // network failure / spawn failure
-      if (checksRes.exitCode !== 0) return [] // gh signaled "I don't know"
-      if (signal?.aborted) return []
-
-      const rows = safeJsonArray<GhCheckRow>(checksRes.stdout)
-      if (rows === undefined || rows.length === 0) return []
-
-      // Build a stable run-id from the row tuple so dedup is deterministic
-      // and content-addressed (no run.id field in `gh pr checks` JSON; the
-      // link is the de-facto unique identifier per completed run).
-      const completed: Array<{ row: GhCheckRow; runId: string }> = []
-      for (const row of rows) {
-        if ((row.status ?? "").toUpperCase() !== "COMPLETED") continue
-        const runId = stableRunId(row)
-        if (seen.has(runId)) continue
-        completed.push({ row, runId })
-      }
+      const completed = await newlyCompletedChecks(opts, seen, signal)
       if (completed.length === 0) return []
 
       const url = (await fetchPrUrl(signal)) ?? `gh://pr/${opts.prRef}`
       if (signal?.aborted) return []
+      // Watermark advances ONLY here — after we know a trigger is being emitted.
       for (const item of completed) seen.add(item.runId)
       const at = opts.clockPort.now()
-      const summary = summarizeRollup(completed.map((item) => item.row))
 
       return [
-        Object.freeze({
-          reason: "ci_completion" as const,
-          evidence: Object.freeze({ kind: "url" as const, value: url }),
-          simulatedMessage: `CI completed on PR ${opts.prRef}: ${summary} (at ${at})`,
-          abortSignal: new AbortController().signal,
-        }),
+        ciCompletionTrigger(
+          opts.prRef,
+          url,
+          at,
+          completed.map((item) => item.row),
+        ),
       ]
     },
   }

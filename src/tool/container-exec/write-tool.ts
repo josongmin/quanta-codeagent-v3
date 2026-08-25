@@ -28,7 +28,7 @@
 import { z } from "zod"
 import { errMessage } from "@/shared"
 import type { Tool, ToolEvent, ToolResult } from "../types"
-import type { ContainerExec } from "./port"
+import type { ContainerExec, ContainerExecResult } from "./port"
 
 /** Per-call raw-content cap (bytes, pre-base64). 512 KiB raw ≈ 683 KiB b64 — comfortably inside a
  *  JSON line / `ARG_MAX`, large enough that real deliverables land in 1-2 calls. Over-cap is a
@@ -77,6 +77,86 @@ const commandForScreen = (input: unknown): string => {
   return buildWriteCommand(parsed.data.path, b64, parsed.data.append === true)
 }
 
+/** What the result classifier needs to know about the call that produced `r`. */
+interface WriteCallFacts {
+  readonly command: string
+  readonly path: string
+  readonly contentBytes: number
+  readonly append: boolean
+}
+
+/** Classify ONE completed exec into the tool result. PURE and module-level: it
+ *  is the whole decision table for "did the write land?", and it was previously
+ *  buried three closures deep (factory → execute → async iterator), paying a
+ *  nesting surcharge for every branch. The ORDER is the contract — a deadline
+ *  kill outranks the exit code, which outranks the byte-count readback. */
+const writeResultFrom = (r: ContainerExecResult, facts: WriteCallFacts): ToolResult => {
+  if (r.timedOut === true) {
+    return {
+      ok: false,
+      output: `write timed out before completing (deadline kill) — the file state is UNKNOWN; re-check before relying on it`,
+      failure: { mode: "timeout" },
+      evidence: { exitCode: r.code, executedCommand: facts.command, timedOut: true },
+    }
+  }
+  if (r.code !== 0) {
+    const stderr = (r.stderr ?? "").trim()
+    return {
+      ok: false,
+      output: `write failed (exit ${r.code})${stderr ? `\nstderr:\n${stderr.slice(0, 2000)}` : ""}`,
+      failure: { mode: "error", modelVisibleError: `write failed with exit ${r.code}` },
+      evidence: {
+        exitCode: r.code,
+        executedCommand: facts.command,
+        ...(stderr ? { stderr } : {}),
+      },
+    }
+  }
+  if (facts.append) {
+    return {
+      ok: true,
+      output: `appended ${facts.contentBytes} bytes to ${facts.path}`,
+      evidence: { exitCode: r.code, executedCommand: facts.command },
+    }
+  }
+  // Fresh-readback integrity: the in-container `wc -c` total must equal the intended
+  // byte length — catches silent truncation (full disk / quota / decode failure).
+  const written = Number.parseInt((r.stdout ?? "").trim(), 10)
+  if (!Number.isFinite(written) || written !== facts.contentBytes) {
+    return {
+      ok: false,
+      output: `write INCOMPLETE: expected ${facts.contentBytes} bytes, container reports ${Number.isFinite(written) ? written : "unreadable"} — do not trust the file; re-write it`,
+      failure: { mode: "error", modelVisibleError: "written byte count mismatch" },
+      evidence: { exitCode: r.code, executedCommand: facts.command },
+    }
+  }
+  return {
+    ok: true,
+    output: `wrote ${facts.contentBytes} bytes to ${facts.path} (byte count verified in-container)`,
+    evidence: { exitCode: r.code, executedCommand: facts.command },
+  }
+}
+
+/** One exec round-trip, with a transport THROW mapped to a typed backend error.
+ *  A unit because "the transport blew up" is a different failure class from
+ *  every branch in {@link writeResultFrom} — it never has an exit code. */
+const runWrite = async (
+  port: ContainerExec,
+  signal: AbortSignal,
+  facts: WriteCallFacts,
+): Promise<ToolResult> => {
+  try {
+    return writeResultFrom(await port.exec(facts.command, signal), facts)
+  } catch (e) {
+    const msg = errMessage(e)
+    return {
+      ok: false,
+      output: `container_write_file backend error: ${msg}`,
+      failure: { mode: "error", modelVisibleError: msg },
+    }
+  }
+}
+
 /** The `container_write_file` tool bound to a {@link ContainerExec} transport. */
 export const containerWriteFileTool = (port: ContainerExec): Tool<ContainerWriteFileInput> => ({
   name: "container_write_file",
@@ -115,65 +195,15 @@ export const containerWriteFileTool = (port: ContainerExec): Tool<ContainerWrite
     }
     if (ctx.signal.aborted) return one({ ok: false, output: "aborted before start" })
     const b64 = Buffer.from(content, "utf8").toString("base64")
-    const command = buildWriteCommand(path, b64, append)
+    const facts: WriteCallFacts = {
+      command: buildWriteCommand(path, b64, append),
+      path,
+      contentBytes,
+      append,
+    }
     return {
       async *[Symbol.asyncIterator]() {
-        let result: ToolResult
-        try {
-          const r = await port.exec(command, ctx.signal)
-          if (r.timedOut === true) {
-            result = {
-              ok: false,
-              output: `write timed out before completing (deadline kill) — the file state is UNKNOWN; re-check before relying on it`,
-              failure: { mode: "timeout" },
-              evidence: { exitCode: r.code, executedCommand: command, timedOut: true },
-            }
-          } else if (r.code !== 0) {
-            const stderr = (r.stderr ?? "").trim()
-            result = {
-              ok: false,
-              output: `write failed (exit ${r.code})${stderr ? `\nstderr:\n${stderr.slice(0, 2000)}` : ""}`,
-              failure: { mode: "error", modelVisibleError: `write failed with exit ${r.code}` },
-              evidence: {
-                exitCode: r.code,
-                executedCommand: command,
-                ...(stderr ? { stderr } : {}),
-              },
-            }
-          } else if (!append) {
-            // Fresh-readback integrity: the in-container `wc -c` total must equal the intended
-            // byte length — catches silent truncation (full disk / quota / decode failure).
-            const written = Number.parseInt((r.stdout ?? "").trim(), 10)
-            if (!Number.isFinite(written) || written !== contentBytes) {
-              result = {
-                ok: false,
-                output: `write INCOMPLETE: expected ${contentBytes} bytes, container reports ${Number.isFinite(written) ? written : "unreadable"} — do not trust the file; re-write it`,
-                failure: { mode: "error", modelVisibleError: "written byte count mismatch" },
-                evidence: { exitCode: r.code, executedCommand: command },
-              }
-            } else {
-              result = {
-                ok: true,
-                output: `wrote ${contentBytes} bytes to ${path} (byte count verified in-container)`,
-                evidence: { exitCode: r.code, executedCommand: command },
-              }
-            }
-          } else {
-            result = {
-              ok: true,
-              output: `appended ${contentBytes} bytes to ${path}`,
-              evidence: { exitCode: r.code, executedCommand: command },
-            }
-          }
-        } catch (e) {
-          const msg = errMessage(e)
-          result = {
-            ok: false,
-            output: `container_write_file backend error: ${msg}`,
-            failure: { mode: "error", modelVisibleError: msg },
-          }
-        }
-        yield { type: "result", result }
+        yield { type: "result", result: await runWrite(port, ctx.signal, facts) }
       },
     }
   },

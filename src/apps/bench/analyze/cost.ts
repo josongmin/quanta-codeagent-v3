@@ -87,6 +87,46 @@ const deepSumTokens = (v: unknown, acc: { input: number; output: number }): void
   }
 }
 
+/** Wall-clock span accumulator, widened as `ts` stamps are seen. Mutable and
+ *  seeded with the infinities so "no stamp seen" stays distinguishable from
+ *  "a zero-length span" — `Number.isFinite` is the test for that. */
+interface TsSpan {
+  min: number
+  max: number
+}
+
+/** Fold ONE attempt file into the token accumulator and the wall-clock span.
+ *  A unit because the attempt file is the failure boundary: a half-written or
+ *  unreadable line must cost us that line (or that file), never the whole
+ *  instance. The per-line `JSON.parse` guard stays INSIDE so a malformed line
+ *  skips only itself — hoisting it would change which lines survive. */
+const scanAttemptFile = (
+  path: string,
+  acc: { input: number; output: number },
+  span: TsSpan,
+): void => {
+  for (const line of readFileSync(path, "utf8").split("\n")) {
+    if (line.trim() === "") continue
+    let ev: unknown
+    try {
+      ev = JSON.parse(line)
+    } catch {
+      continue
+    }
+    deepSumTokens(ev, acc)
+    const ts = num((ev as { ts?: unknown }).ts)
+    if (ts > 0) {
+      span.min = Math.min(span.min, ts)
+      span.max = Math.max(span.max, ts)
+    }
+  }
+}
+
+/** The zero reading — returned whenever the observe directory has nothing to
+ *  say about this instance. Explicitly NOT an error: absent telemetry is a
+ *  known state that `costSummaryFromReport` reports honestly. */
+const NO_OBSERVE_READING = { input: 0, output: 0, wallClockMs: 0 } as const
+
 /** Backfill tokens + wall-clock for one instance from its observe JSONL.
  *  Best-of-N runs emit one file PER attempt (`<instanceId>.0.jsonl`,
  *  `<instanceId>.1.jsonl`, …); sum tokens across ALL of them and span the
@@ -96,42 +136,27 @@ const fromObserve = (
   observeDir: string,
   instanceId: string,
 ): { input: number; output: number; wallClockMs: number } => {
-  if (!existsSync(observeDir)) return { input: 0, output: 0, wallClockMs: 0 }
+  if (!existsSync(observeDir)) return { ...NO_OBSERVE_READING }
   let files: string[]
   try {
     files = readdirSync(observeDir).filter(
       (f) => f.startsWith(`${instanceId}.`) && f.endsWith(".jsonl"),
     )
   } catch {
-    return { input: 0, output: 0, wallClockMs: 0 }
+    return { ...NO_OBSERVE_READING }
   }
-  if (files.length === 0) return { input: 0, output: 0, wallClockMs: 0 }
+  if (files.length === 0) return { ...NO_OBSERVE_READING }
   const acc = { input: 0, output: 0 }
-  let minTs = Number.POSITIVE_INFINITY
-  let maxTs = Number.NEGATIVE_INFINITY
+  const span: TsSpan = { min: Number.POSITIVE_INFINITY, max: Number.NEGATIVE_INFINITY }
   for (const file of files) {
     try {
-      for (const line of readFileSync(join(observeDir, file), "utf8").split("\n")) {
-        if (line.trim() === "") continue
-        let ev: unknown
-        try {
-          ev = JSON.parse(line)
-        } catch {
-          continue
-        }
-        deepSumTokens(ev, acc)
-        const ts = num((ev as { ts?: unknown }).ts)
-        if (ts > 0) {
-          minTs = Math.min(minTs, ts)
-          maxTs = Math.max(maxTs, ts)
-        }
-      }
+      scanAttemptFile(join(observeDir, file), acc, span)
     } catch {
       // skip an unreadable attempt file rather than dropping the whole instance
     }
   }
   const wallClockMs =
-    Number.isFinite(minTs) && Number.isFinite(maxTs) ? Math.max(0, maxTs - minTs) : 0
+    Number.isFinite(span.min) && Number.isFinite(span.max) ? Math.max(0, span.max - span.min) : 0
   return { input: acc.input, output: acc.output, wallClockMs }
 }
 

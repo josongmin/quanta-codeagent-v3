@@ -160,6 +160,157 @@ export const remoteInstanceLogDir = (runId: string, model: string, id: string): 
 
 const delay = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms))
 
+/** Everything the stage helpers need to reach the box. Bundled because the
+ *  four of them travel together through every stage; passing them one at a time
+ *  is how a stage ends up reading the enclosing closure instead of its args. */
+interface RemoteConn {
+  readonly spawn: SpawnFn
+  readonly flags: readonly string[]
+  readonly host: string
+}
+
+/** STAGE 1+2 — one upload. A unit because the three `scp … ; if (code) throw`
+ *  blocks were the SAME four lines with a different label; the label is now the
+ *  only thing a caller varies, so a new transfer cannot forget the guard. */
+const scpOrThrow = async (
+  conn: RemoteConn,
+  from: string,
+  to: string,
+  what: string,
+): Promise<void> => {
+  const out = await conn.spawn("scp", [...conn.flags, from, to])
+  if (out.code !== 0) {
+    throw new Error(`[ssh-backend] ${what} failed (code ${out.code}): ${out.stderr}`)
+  }
+}
+
+/** STAGE 3 — start `run_evaluation` on the box under nohup.
+ *  A unit because the family/namespace resolution and the script it produces
+ *  are one decision: the script is only correct for the harness spec that
+ *  resolved it. */
+const startRemoteEvaluation = async (
+  conn: RemoteConn,
+  opts: GradeOptions,
+  maxWorkers: number,
+): Promise<void> => {
+  // Family-aware harness fork + image namespace (RFC jun-29): a `live` grade
+  // must install the SWE-bench-Live fork + pull `starryzhang` images, else the
+  // stock `swebench` harness KeyErrors on Live repos. Reuses the SAME SSOT
+  // resolvers as the full-remote box path; operator env overrides still win.
+  // aug-22 HIGH-4: the harness build comes from the family PROFILE's
+  // `harnessSpec` port (the same port the full-remote box path uses), so this
+  // grade-only path cannot drift from it and knows no family names itself.
+  // The ABSENT-selector default comes from its ONE owner (`datasetFamilyOrDefault`,
+  // re-audit R4), not a private literal here — this layer knows no family names.
+  const { pipSpec: fromSpec, namespace } = resolveDatasetFamilyProfile(
+    datasetFamilyOrDefault(opts.family),
+  ).harnessSpec({
+    datasetName: opts.datasetPath,
+    pipSpecOverride: process.env.QUANTA_SWEBENCH_PIP_SPEC,
+    namespaceOverride: process.env.QUANTA_SWEBENCH_NAMESPACE,
+  })
+  // Function replacer (not a string): a string replacement would interpret
+  // `$` sequences in run_id (`$&`, `$1`, …) as patterns and corrupt the id.
+  const script = buildRemoteGradeScript(maxWorkers, fromSpec, namespace).replace(
+    "RUNID",
+    () => opts.runId,
+  )
+  const run = await conn.spawn("ssh", [...conn.flags, conn.host, "bash", "-s"], { input: script })
+  if (run.code !== 0) {
+    throw new Error(
+      `[ssh-backend] remote run_evaluation start failed (code ${run.code}): ${run.stderr}`,
+    )
+  }
+}
+
+/** STAGE 4 — poll until the report file exists on the box, or give up.
+ *  A unit because the loop and its exhaustion message are one contract: the
+ *  message quotes the very budget the loop spent. */
+const waitForRemoteReport = async (
+  conn: RemoteConn,
+  reportName: string,
+  budget: { readonly maxPolls: number; readonly pollIntervalMs: number },
+  sleep: (ms: number) => Promise<void>,
+): Promise<void> => {
+  for (let i = 0; i < budget.maxPolls; i++) {
+    const check = await conn.spawn("ssh", [
+      ...conn.flags,
+      conn.host,
+      `test -f ~/${reportName} && echo READY || echo WAIT`,
+    ])
+    if (check.stdout.includes("READY")) return
+    await sleep(budget.pollIntervalMs)
+  }
+  throw new Error(
+    `[ssh-backend] report ~/${reportName} did not appear after ${budget.maxPolls} polls (~${(budget.maxPolls * budget.pollIntervalMs) / 60000}m)`,
+  )
+}
+
+/** STAGE 5 — read + parse the retrieved report. A unit so the "not valid json"
+ *  message has exactly one origin and the `let parsed` definite-assignment
+ *  dance disappears with it. */
+const readRetrievedReport = async (
+  reportPath: string,
+): Promise<ReturnType<typeof parseSwebenchReport>> => {
+  try {
+    return parseSwebenchReport(JSON.parse(await readFile(reportPath, "utf8")))
+  } catch (err) {
+    throw new Error(
+      `[ssh-backend] retrieved report ${reportPath} was not valid json: ${errMessage(err)}`,
+    )
+  }
+}
+
+/** STAGE 6 — observability: for ERROR instances, pull each one's remote swebench
+ *  log dir back to `<outDir>/error-logs/<id>/`. This is the only ground-truth
+ *  for WHY an instance errored (env/build/collection), and a manual ssh to the
+ *  box is often blocked or the box is gone.
+ *
+ *  A unit because it is the one stage that is entirely BEST-EFFORT: every step
+ *  inside swallows its failure, and the whole stage returns `undefined` rather
+ *  than failing a grade whose report already parsed. Returns the directory it
+ *  actually populated, or `undefined` when it did nothing. */
+const fetchErrorLogs = async (
+  conn: RemoteConn,
+  args: {
+    readonly outDir: string
+    readonly runId: string
+    readonly model: string
+    readonly erroredIds: readonly string[]
+  },
+): Promise<string | undefined> => {
+  if (args.erroredIds.length === 0) return undefined
+  const errorLogDir = join(args.outDir, "error-logs")
+  try {
+    mkdirSync(errorLogDir, { recursive: true })
+  } catch {
+    // a mkdir failure (perms) shouldn't sink the grade; skip the fetch.
+    return undefined
+  }
+  // Cap the serial fetches: a slice that errored >MAX is a systemic break,
+  // not per-instance debugging fodder (the count is still in the tally).
+  for (const id of args.erroredIds.slice(0, MAX_ERROR_LOG_FETCH)) {
+    const dest = join(errorLogDir, id)
+    try {
+      // `scp -r` nests the source UNDER an existing dest (→ <id>/<id>) on a
+      // re-grade into the same outDir; clear the dest first so the logs land
+      // at <id>/ directly. force:true ⇒ a missing dest is a no-op.
+      rmSync(dest, { recursive: true, force: true })
+      await conn.spawn("scp", [
+        ...conn.flags,
+        "-r",
+        `${conn.host}:${remoteInstanceLogDir(args.runId, args.model, id)}`,
+        dest,
+      ])
+      // non-zero code is tolerated (log dir may not exist for a crash
+      // that never reached the per-instance stage) — best-effort.
+    } catch {
+      // even a thrown spawn (reaped child) or rmSync must not break the outcome.
+    }
+  }
+  return errorLogDir
+}
+
 export const createSshBackend = (cfg: SshBackendConfig): GradeBackend => {
   const spawn = cfg.spawn ?? defaultSpawn
   const sleep = cfg.sleep ?? delay
@@ -172,127 +323,24 @@ export const createSshBackend = (cfg: SshBackendConfig): GradeBackend => {
   const grade = async (predictionsPath: string, opts: GradeOptions): Promise<GradeOutcome> => {
     const maxWorkers = opts.maxWorkers ?? cfg.maxWorkers ?? DEFAULT_MAX_WORKERS
     const reportName = `${model}.${opts.runId}.json`
-    const flags = sshFlags(cfg.keyPath)
+    const conn: RemoteConn = { spawn, flags: sshFlags(cfg.keyPath), host: cfg.host }
 
-    // 1) scp predictions → ~/preds.jsonl
-    const up1 = await spawn("scp", [...flags, predictionsPath, `${cfg.host}:~/preds.jsonl`])
-    if (up1.code !== 0) {
-      throw new Error(`[ssh-backend] scp predictions failed (code ${up1.code}): ${up1.stderr}`)
-    }
+    await scpOrThrow(conn, predictionsPath, `${cfg.host}:~/preds.jsonl`, "scp predictions")
+    await scpOrThrow(conn, opts.datasetPath, `${cfg.host}:~/instances.jsonl`, "scp dataset")
+    await startRemoteEvaluation(conn, opts, maxWorkers)
+    await waitForRemoteReport(conn, reportName, { maxPolls, pollIntervalMs }, sleep)
 
-    // 2) scp dataset → ~/instances.jsonl
-    const up2 = await spawn("scp", [...flags, opts.datasetPath, `${cfg.host}:~/instances.jsonl`])
-    if (up2.code !== 0) {
-      throw new Error(`[ssh-backend] scp dataset failed (code ${up2.code}): ${up2.stderr}`)
-    }
-
-    // 3) ssh run_evaluation (nohup background). The run_id is substituted into
-    //    the streamed script (the script body is piped to `bash -s` via stdin).
-    // Function replacer (not a string): a string replacement would interpret
-    // `$` sequences in run_id (`$&`, `$1`, …) as patterns and corrupt the id.
-    // Family-aware harness fork + image namespace (RFC jun-29): a `live` grade
-    // must install the SWE-bench-Live fork + pull `starryzhang` images, else the
-    // stock `swebench` harness KeyErrors on Live repos. Reuses the SAME SSOT
-    // resolvers as the full-remote box path; operator env overrides still win.
-    // aug-22 HIGH-4: the harness build comes from the family PROFILE's
-    // `harnessSpec` port (the same port the full-remote box path uses), so this
-    // grade-only path cannot drift from it and knows no family names itself.
-    // The ABSENT-selector default comes from its ONE owner (`datasetFamilyOrDefault`,
-    // re-audit R4), not a private literal here — this layer knows no family names.
-    const { pipSpec: fromSpec, namespace } = resolveDatasetFamilyProfile(
-      datasetFamilyOrDefault(opts.family),
-    ).harnessSpec({
-      datasetName: opts.datasetPath,
-      pipSpecOverride: process.env.QUANTA_SWEBENCH_PIP_SPEC,
-      namespaceOverride: process.env.QUANTA_SWEBENCH_NAMESPACE,
-    })
-    const script = buildRemoteGradeScript(maxWorkers, fromSpec, namespace).replace(
-      "RUNID",
-      () => opts.runId,
-    )
-    const run = await spawn("ssh", [...flags, cfg.host, "bash", "-s"], { input: script })
-    if (run.code !== 0) {
-      throw new Error(
-        `[ssh-backend] remote run_evaluation start failed (code ${run.code}): ${run.stderr}`,
-      )
-    }
-
-    // 4) poll until the report file exists on the box.
-    let ready = false
-    for (let i = 0; i < maxPolls; i++) {
-      const check = await spawn("ssh", [
-        ...flags,
-        cfg.host,
-        `test -f ~/${reportName} && echo READY || echo WAIT`,
-      ])
-      if (check.stdout.includes("READY")) {
-        ready = true
-        break
-      }
-      await sleep(pollIntervalMs)
-    }
-    if (!ready) {
-      throw new Error(
-        `[ssh-backend] report ~/${reportName} did not appear after ${maxPolls} polls (~${(maxPolls * pollIntervalMs) / 60000}m)`,
-      )
-    }
-
-    // 5) scp report back → outDir, parse.
     const outDir = opts.outDir ?? mkdtempSync(join(tmpdir(), "quanta-bench-grade-"))
     const reportPath = join(outDir, reportName)
-    const down = await spawn("scp", [...flags, `${cfg.host}:~/${reportName}`, reportPath])
-    if (down.code !== 0) {
-      throw new Error(`[ssh-backend] scp report back failed (code ${down.code}): ${down.stderr}`)
-    }
+    await scpOrThrow(conn, `${cfg.host}:~/${reportName}`, reportPath, "scp report back")
+    const parsed = await readRetrievedReport(reportPath)
 
-    let parsed: ReturnType<typeof parseSwebenchReport>
-    try {
-      parsed = parseSwebenchReport(JSON.parse(await readFile(reportPath, "utf8")))
-    } catch (err) {
-      throw new Error(
-        `[ssh-backend] retrieved report ${reportPath} was not valid json: ${errMessage(err)}`,
-      )
-    }
-
-    // 6) observability: for ERROR instances, pull each one's remote swebench log
-    //    dir back to `<outDir>/error-logs/<id>/`. This is the only ground-truth
-    //    for WHY an instance errored (env/build/collection), and a manual ssh to
-    //    the box is often blocked or the box is gone. Best-effort: a missing log
-    //    or a failed scp must NOT fail the grade — the report already parsed.
-    let errorLogDir: string | undefined
-    if (parsed.errored.length > 0) {
-      errorLogDir = join(outDir, "error-logs")
-      try {
-        mkdirSync(errorLogDir, { recursive: true })
-      } catch {
-        // a mkdir failure (perms) shouldn't sink the grade; skip the fetch.
-        errorLogDir = undefined
-      }
-      if (errorLogDir !== undefined) {
-        // Cap the serial fetches: a slice that errored >MAX is a systemic break,
-        // not per-instance debugging fodder (the count is still in the tally).
-        for (const id of parsed.errored.slice(0, MAX_ERROR_LOG_FETCH)) {
-          const dest = join(errorLogDir, id)
-          try {
-            // `scp -r` nests the source UNDER an existing dest (→ <id>/<id>) on a
-            // re-grade into the same outDir; clear the dest first so the logs land
-            // at <id>/ directly. force:true ⇒ a missing dest is a no-op.
-            rmSync(dest, { recursive: true, force: true })
-            await spawn("scp", [
-              ...flags,
-              "-r",
-              `${cfg.host}:${remoteInstanceLogDir(opts.runId, model, id)}`,
-              dest,
-            ])
-            // non-zero code is tolerated (log dir may not exist for a crash
-            // that never reached the per-instance stage) — best-effort.
-          } catch {
-            // even a thrown spawn (reaped child) or rmSync must not break the outcome.
-          }
-        }
-      }
-    }
-
+    const errorLogDir = await fetchErrorLogs(conn, {
+      outDir,
+      runId: opts.runId,
+      model,
+      erroredIds: parsed.errored,
+    })
     return { reportPath, ...parsed, ...(errorLogDir !== undefined ? { errorLogDir } : {}) }
   }
 

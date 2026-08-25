@@ -65,6 +65,77 @@ const strField = (
   return value as string
 }
 
+/** Decode `languageQuotas`. A unit because "the object exists" and "every value
+ *  is a non-negative integer" are one contract — a quota map with one bad count
+ *  is not a partially-usable quota map. */
+const decodeLanguageQuotas = (
+  record: Record<string, unknown>,
+  surface: string,
+  where: string,
+): Record<string, number> => {
+  const quotas = record.languageQuotas
+  if (!isRecord(quotas)) refuse(surface, `${where} has no "languageQuotas" object.`)
+  const languageQuotas: Record<string, number> = {}
+  for (const [language, count] of Object.entries(quotas as Record<string, unknown>)) {
+    if (typeof count !== "number" || !Number.isInteger(count) || count < 0) {
+      refuse(surface, `${where} quota for "${language}" is not a non-negative integer.`)
+    }
+    languageQuotas[language] = count as number
+  }
+  return languageQuotas
+}
+
+/** Decode `instanceIds`. A unit for the same reason as the quota map: the
+ *  array-shape guard and the per-element guard are one "is this a usable id
+ *  list?" question, and the ORDER of the returned list is the manifest's own. */
+const decodeInstanceIds = (
+  record: Record<string, unknown>,
+  surface: string,
+  where: string,
+): string[] => {
+  const ids = record.instanceIds
+  if (!Array.isArray(ids) || ids.length === 0) {
+    refuse(surface, `${where} has no non-empty "instanceIds" array.`)
+  }
+  const instanceIds: string[] = []
+  for (const id of ids as unknown[]) {
+    if (typeof id !== "string" || id.trim() === "") {
+      refuse(surface, `${where} contains a non-string instance id (${JSON.stringify(id)}).`)
+    }
+    instanceIds.push(id as string)
+  }
+  return instanceIds
+}
+
+/** Decode `parentSubsetSha256` — the one nullable field, so it gets its own
+ *  guard rather than sharing {@link strField}'s "must be a non-blank string". */
+const decodeParentSubsetSha256 = (
+  record: Record<string, unknown>,
+  surface: string,
+  where: string,
+): string | null => {
+  const parent = record.parentSubsetSha256
+  if (parent !== null && typeof parent !== "string") {
+    refuse(surface, `${where} "parentSubsetSha256" must be a string or null.`)
+  }
+  return (parent ?? null) as string | null
+}
+
+/** Re-hash the decoded manifest through the WRITER'S OWN recipe
+ *  ({@link proMaxSampleManifestDigest}), not a second copy of it, so a manifest
+ *  can never verify here and fail at the campaign-freeze boundary. */
+const verifySelfDigest = (manifest: ProMaxSampleManifest, surface: string, where: string): void => {
+  const recomputed = proMaxSampleManifestDigest(manifest)
+  if (recomputed !== manifest.sha256) {
+    refuse(
+      surface,
+      `${where} does not match its own sha256 (declared ${manifest.sha256}, recomputed ${recomputed}). ` +
+        "REFUSING a hand-edited sample manifest — regenerate it with " +
+        "`tools/bench-promax/prepare-corpus.ts --samples-out`.",
+    )
+  }
+}
+
 /**
  * Decode + SELF-VERIFY one manifest. Returns the typed manifest, or throws
  * {@link ProMaxSampleError}. The digest check is what makes every later
@@ -86,62 +157,27 @@ export const parseProMaxSampleManifest = (args: {
   if (!isRecord(parsed)) refuse(surface, `${where} is not a JSON object.`)
   const record = parsed as Record<string, unknown>
 
+  // FIELD ORDER IS THE CONTRACT: `refuse` throws, so whichever field is decoded
+  // first is the problem the operator is told about. These five string fields
+  // are read before the structured ones, exactly as the original did.
   const name = strField(record, "name", surface, where)
   const algorithmVersion = strField(record, "algorithmVersion", surface, where)
   const datasetRevision = strField(record, "datasetRevision", surface, where)
   const seed = strField(record, "seed", surface, where)
   const sha256 = strField(record, "sha256", surface, where)
 
-  const quotas = record.languageQuotas
-  if (!isRecord(quotas)) refuse(surface, `${where} has no "languageQuotas" object.`)
-  const languageQuotas: Record<string, number> = {}
-  for (const [language, count] of Object.entries(quotas as Record<string, unknown>)) {
-    if (typeof count !== "number" || !Number.isInteger(count) || count < 0) {
-      refuse(surface, `${where} quota for "${language}" is not a non-negative integer.`)
-    }
-    languageQuotas[language] = count as number
-  }
-
-  const ids = record.instanceIds
-  if (!Array.isArray(ids) || ids.length === 0) {
-    refuse(surface, `${where} has no non-empty "instanceIds" array.`)
-  }
-  const instanceIds: string[] = []
-  for (const id of ids as unknown[]) {
-    if (typeof id !== "string" || id.trim() === "") {
-      refuse(surface, `${where} contains a non-string instance id (${JSON.stringify(id)}).`)
-    }
-    instanceIds.push(id as string)
-  }
-
-  const parent = record.parentSubsetSha256
-  if (parent !== null && typeof parent !== "string") {
-    refuse(surface, `${where} "parentSubsetSha256" must be a string or null.`)
-  }
-  const parentSubsetSha256 = (parent ?? null) as string | null
-
   const manifest: ProMaxSampleManifest = {
     name,
     algorithmVersion,
     datasetRevision,
     seed,
-    languageQuotas,
-    instanceIds,
-    parentSubsetSha256,
+    languageQuotas: decodeLanguageQuotas(record, surface, where),
+    instanceIds: decodeInstanceIds(record, surface, where),
+    parentSubsetSha256: decodeParentSubsetSha256(record, surface, where),
     sha256,
   }
-  // 1 — SELF-DIGEST. Recomputed through the WRITER'S OWN recipe
-  // ({@link proMaxSampleManifestDigest}), not a second copy of it, so a manifest
-  // can never verify here and fail at the campaign-freeze boundary.
-  const recomputed = proMaxSampleManifestDigest(manifest)
-  if (recomputed !== sha256) {
-    refuse(
-      surface,
-      `${where} does not match its own sha256 (declared ${sha256}, recomputed ${recomputed}). ` +
-        "REFUSING a hand-edited sample manifest — regenerate it with " +
-        "`tools/bench-promax/prepare-corpus.ts --samples-out`.",
-    )
-  }
+  // 1 — SELF-DIGEST.
+  verifySelfDigest(manifest, surface, where)
   return manifest
 }
 

@@ -124,6 +124,73 @@ const err = (output: string): ToolEvent => ({
   result: { ok: false, output, failure: { mode: "error", modelVisibleError: output } },
 })
 
+/** What ACTUALLY happened during a packet build. The builder degrades an
+ *  undetected toolchain to an empty packet by contract, so the packet alone
+ *  cannot tell green from never-ran — only the source closures can, and they
+ *  record it here. Mutable and passed by reference for exactly that reason. */
+interface EvidenceRunTrace {
+  detected: Toolchain | null
+  suiteRan: boolean
+}
+
+/** Wire the packet's sources, recording detection + an actual suite run into
+ *  `trace`. A unit because the same-slice sources and the two OPTIONAL
+ *  cross-slice ports are one wiring decision — which sections the packet can
+ *  even contain — and because it is where every `includeX` toggle is read. */
+const buildEvidenceSources = (args: {
+  readonly deps: EvidenceToolDeps
+  readonly input: Input
+  readonly fs: FileSystemPort
+  readonly testPort: TestRunPort
+  readonly signal: AbortSignal | undefined
+  readonly trace: EvidenceRunTrace
+}): EvidenceSources => ({
+  detect: async (c) => {
+    const detected = await detectToolchain(c, {
+      fileExists: (name) => args.fs.fileExists(name, c),
+      canRun: (cmd) => commandRunsOk(cmd, c), // prefer pytest over unittest when installed
+    })
+    args.trace.detected = detected
+    return detected
+  },
+  runTests: async (tc, c) => {
+    const result = await runToolchain(tc, c, args.testPort, args.signal) // NEVER throws (faults ⇒ synthesized failure)
+    args.trace.suiteRan = true
+    return result
+  },
+  changedFiles: args.deps.changedFiles ?? gitChangedFiles,
+  // static (LSP): wired unless the caller opted out. Host-injected port.
+  ...(args.input.includeStatic !== false && args.deps.lspStatic !== undefined
+    ? { lspStatic: args.deps.lspStatic }
+    : {}),
+  // runtime (DAP): default ON (python/debugpy + rust/lldb, in-slice),
+  // degrades to null when the toolchain/adapter is absent. Opt OUT with
+  // includeRuntime:false to skip the expensive extra debugger run.
+  ...(args.input.includeRuntime !== false
+    ? { runtime: args.deps.runtime ?? defaultRuntimePort }
+    : {}),
+})
+
+/** The anti-false-green gate (jun-10 silent-failure audit #5): `ok:true` must
+ *  be reachable ONLY when the suite actually executed. Returns the refusal text
+ *  when it did not, else `undefined`. A unit because the two refusals are one
+ *  rule — "nothing ran is not green evidence" — stated for two different
+ *  reasons, and they must stay in this order (an undetected toolchain explains
+ *  the missing run, so it is the more useful message). */
+const nothingRanRefusal = (trace: EvidenceRunTrace): string | undefined => {
+  if (trace.detected === null) {
+    return (
+      "collect_evidence: no recognized test toolchain (looked for Cargo.toml / go.mod / pyproject.toml / setup.py / package.json) — " +
+      "nothing was run, so there is no green evidence. Pass `cwd` pointing at a project root with one of those markers, " +
+      "or use run_tests with an explicit `command`."
+    )
+  }
+  if (!trace.suiteRan) {
+    return "collect_evidence: the test suite never ran — refusing to report a green result."
+  }
+  return undefined
+}
+
 export const makeCollectEvidenceTool = (deps: EvidenceToolDeps = {}): Tool<Input> => {
   const fs = deps.fs ?? defaultFileSystemPort
   const testPort = deps.testPort ?? defaultTestRunPort
@@ -145,37 +212,8 @@ export const makeCollectEvidenceTool = (deps: EvidenceToolDeps = {}): Tool<Input
         return
       }
       const cwd = input.cwd ?? ctx.cwd
-      // Silent-failure guard (jun-10 audit #5): `ok:true` must be reachable
-      // ONLY when the suite actually executed. The builder degrades an
-      // undetected toolchain to an empty packet (failure:null) by contract —
-      // fine for the PACKET, but reporting that as a green RESULT is a
-      // deterministic false green on a tool invoked because a test fails.
-      // Track detection + an actual run through the wired sources.
-      let detected: Toolchain | null = null
-      let suiteRan = false
-      const sources: EvidenceSources = {
-        detect: async (c) => {
-          detected = await detectToolchain(c, {
-            fileExists: (name) => fs.fileExists(name, c),
-            canRun: (cmd) => commandRunsOk(cmd, c), // prefer pytest over unittest when installed
-          })
-          return detected
-        },
-        runTests: async (tc, c) => {
-          const result = await runToolchain(tc, c, testPort, ctx.signal) // NEVER throws (faults ⇒ synthesized failure)
-          suiteRan = true
-          return result
-        },
-        changedFiles: deps.changedFiles ?? gitChangedFiles,
-        // static (LSP): wired unless the caller opted out. Host-injected port.
-        ...(input.includeStatic !== false && deps.lspStatic !== undefined
-          ? { lspStatic: deps.lspStatic }
-          : {}),
-        // runtime (DAP): default ON (python/debugpy + rust/lldb, in-slice),
-        // degrades to null when the toolchain/adapter is absent. Opt OUT with
-        // includeRuntime:false to skip the expensive extra debugger run.
-        ...(input.includeRuntime !== false ? { runtime: deps.runtime ?? defaultRuntimePort } : {}),
-      }
+      const trace: EvidenceRunTrace = { detected: null, suiteRan: false }
+      const sources = buildEvidenceSources({ deps, input, fs, testPort, signal: ctx.signal, trace })
       const pkt = await buildEvidence(cwd, sources, {
         patchConstraints: {
           public_api_change_allowed: input.publicApiChangeAllowed ?? false,
@@ -183,18 +221,9 @@ export const makeCollectEvidenceTool = (deps: EvidenceToolDeps = {}): Tool<Input
         },
         ...(ctx.signal !== undefined ? { signal: ctx.signal } : {}),
       })
-      // Nothing-actually-ran ⇒ explicit error, mirroring run_tests' shape:
-      // an empty packet from an UNDETECTED toolchain is NOT green evidence.
-      if (detected === null) {
-        yield err(
-          "collect_evidence: no recognized test toolchain (looked for Cargo.toml / go.mod / pyproject.toml / setup.py / package.json) — " +
-            "nothing was run, so there is no green evidence. Pass `cwd` pointing at a project root with one of those markers, " +
-            "or use run_tests with an explicit `command`.",
-        )
-        return
-      }
-      if (!suiteRan) {
-        yield err("collect_evidence: the test suite never ran — refusing to report a green result.")
+      const refusal = nothingRanRefusal(trace)
+      if (refusal !== undefined) {
+        yield err(refusal)
         return
       }
       // ok mirrors run_tests: a green suite ⇒ ok:true; a suite with a failure ⇒

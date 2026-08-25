@@ -405,16 +405,68 @@ const spendTrip = (state: VerifyGuardState, cap: number): boolean => {
  * model to EITHER answer in text how it already verified OR run a test — a
  * `{kind:"any"}` force would mechanically ban that text answer.
  */
+/** The verdict shape, named once. `allow()` stays a FACTORY (not a shared
+ *  singleton) so every arm keeps returning a fresh object, exactly as the
+ *  inline `return { block: false }` statements did. */
+type VerifyVerdict = { block: boolean; text?: string }
+const allow = (): VerifyVerdict => ({ block: false })
+
+/** STICKY-RED arm (opt-in; superset of the latest-only must-pass check).
+ *
+ *  Anchor at the FIRST edit, not the last: a red since work began stays
+ *  unresolved across intervening edits until the SAME command is re-run green
+ *  (an edit is a hypothesis, not proof). Closes the escape where the model
+ *  edits an unrelated file after a regression red to drop it from the
+ *  last-edit window, then finishes on a narrow green.
+ *
+ *  A unit because the anchor choice, the unresolved-red search and the message
+ *  it produces are one policy — the message quotes the very command the search
+ *  found, and separating them invites the two drifting apart. */
+const stickyRedVerdict = (
+  history: readonly GuardHistoryEntry[],
+  exactCommands: readonly string[] | undefined,
+  state: VerifyGuardState,
+  cap: number,
+): VerifyVerdict => {
+  const firstMut = findFirstMutating(history)
+  const unresolved = findUnresolvedFailingVerify(history, firstMut, exactCommands)
+  if (unresolved === undefined || !spendTrip(state, cap)) return allow()
+  const marker = verifyOutputFailureMarkerId(unresolved.output ?? "") ?? undefined
+  // Show the CANONICAL command (env/cd wrapper stripped) — the meaningful
+  // command the model must re-run, matching the identity key it is judged on.
+  const command =
+    unresolved.name === "bash" ? canonicalizeBashVerify(unresolved.arg ?? "") : undefined
+  return { block: true, text: stickyRedForceMessage(command, marker) }
+}
+
+/** MUST-PASS arm: presence satisfied, but the latest verify failed.
+ *  Conservative: unknown outcome (ok absent + output absent) ⇒ no block.
+ *  A unit for the same reason as {@link stickyRedVerdict} — the marker in the
+ *  message is read off the very entry the check fired on. */
+const mustPassVerdict = (
+  lastVerify: GuardHistoryEntry,
+  state: VerifyGuardState,
+  cap: number,
+): VerifyVerdict => {
+  if (!isVerifyFailing(lastVerify) || !spendTrip(state, cap)) return allow()
+  // Thread the matched failure marker (when the OUTPUT regex is what fired)
+  // into the EVIDENTIAL message so the model sees WHY the output looked like
+  // a failure. When the reading came from the dispatch `ok:false` flag there
+  // is no stdout marker ⇒ `undefined` ⇒ the marker-less back-compat phrasing.
+  const marker = verifyOutputFailureMarkerId(lastVerify.output ?? "") ?? undefined
+  return { block: true, text: verifyPassForceMessage(marker) }
+}
+
 export const decideVerifyGuard = (args: {
   history: readonly GuardHistoryEntry[]
   cfg: VerifyGuardConfig | undefined
   state: VerifyGuardState
 }): { block: boolean; text?: string } => {
   const { history, cfg, state } = args
-  if (cfg === undefined) return { block: false }
+  if (cfg === undefined) return allow()
 
   const lastMut = findLastMutating(history)
-  if (lastMut === -1) return { block: false }
+  if (lastMut === -1) return allow()
 
   const exactCommands = ownVerifyGuardField(cfg, "exactCommands")
   const lastVerify = findLastVerifyAfter(history, lastMut, exactCommands)
@@ -424,39 +476,12 @@ export const decideVerifyGuard = (args: {
 
   // Presence branch: no verify after the latest edit.
   if (lastVerify === undefined) {
-    return spendTrip(state, cap) ? { block: true, text: VERIFY_FORCE_MESSAGE } : { block: false }
+    return spendTrip(state, cap) ? { block: true, text: VERIFY_FORCE_MESSAGE } : allow()
   }
-  // Sticky-red branch (opt-in; superset of the latest-only must-pass check):
-  // an unresolved failing verify — a command whose LATEST run after the edit
-  // failed — blocks even if a different command was run green afterwards. Only
-  // re-running that same command green clears it.
-  if (mustPass && stickyRed) {
-    // Anchor at the FIRST edit, not the last: a red since work began stays
-    // unresolved across intervening edits until the SAME command is re-run
-    // green (an edit is a hypothesis, not proof). Closes the escape where the
-    // model edits an unrelated file after a regression red to drop it from the
-    // last-edit window, then finishes on a narrow green.
-    const firstMut = findFirstMutating(history)
-    const unresolved = findUnresolvedFailingVerify(history, firstMut, exactCommands)
-    if (unresolved !== undefined && spendTrip(state, cap)) {
-      const marker = verifyOutputFailureMarkerId(unresolved.output ?? "") ?? undefined
-      // Show the CANONICAL command (env/cd wrapper stripped) — the meaningful
-      // command the model must re-run, matching the identity key it is judged on.
-      const command =
-        unresolved.name === "bash" ? canonicalizeBashVerify(unresolved.arg ?? "") : undefined
-      return { block: true, text: stickyRedForceMessage(command, marker) }
-    }
-    return { block: false }
-  }
-  // Must-pass branch: presence satisfied, but the latest verify failed.
-  // Conservative: unknown outcome (ok absent + output absent) ⇒ no block.
-  if (mustPass && isVerifyFailing(lastVerify) && spendTrip(state, cap)) {
-    // Thread the matched failure marker (when the OUTPUT regex is what fired)
-    // into the EVIDENTIAL message so the model sees WHY the output looked like
-    // a failure. When the reading came from the dispatch `ok:false` flag there
-    // is no stdout marker ⇒ `undefined` ⇒ the marker-less back-compat phrasing.
-    const marker = verifyOutputFailureMarkerId(lastVerify.output ?? "") ?? undefined
-    return { block: true, text: verifyPassForceMessage(marker) }
-  }
-  return { block: false }
+  // Sticky-red branch: an unresolved failing verify — a command whose LATEST
+  // run after the edit failed — blocks even if a DIFFERENT command was run
+  // green afterwards. Only re-running that same command green clears it.
+  if (mustPass && stickyRed) return stickyRedVerdict(history, exactCommands, state, cap)
+  if (mustPass) return mustPassVerdict(lastVerify, state, cap)
+  return allow()
 }

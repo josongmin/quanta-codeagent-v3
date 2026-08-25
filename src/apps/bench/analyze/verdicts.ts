@@ -281,60 +281,102 @@ const reportTotalsFromOurReport = (args: {
   }
 }
 
+/** The four per-row PROOF/CONTRACT telemetry flags, as a TABLE. Each row was
+ *  one hand-written `if (row.x === true) set.add(id)` inside a shared loop —
+ *  four copies of the same guard whose only difference is the predicate and the
+ *  destination set. As data, a fifth flag is a row, not another branch.
+ *  `infraBlocked` keeps its two-way predicate because the legacy `envPrepFailed`
+ *  boolean and the newer `proofState` enum name the same condition. */
+const PROOF_FLAG_RULES: Readonly<Record<ProofFlagKey, (row: Record<string, unknown>) => boolean>> =
+  {
+    proofMissing: (row) => row.proofRequiredMissing === true,
+    infraBlocked: (row) => row.envPrepFailed === true || row.proofState === "infra_blocked",
+    contractOnlyBlocked: (row) => row.contractOnlyBlocked === true,
+    contractOnlySubmitted: (row) => row.contractOnlySubmitted === true,
+  }
+
+type ProofFlagKey =
+  | "proofMissing"
+  | "infraBlocked"
+  | "contractOnlyBlocked"
+  | "contractOnlySubmitted"
+
+const PROOF_FLAG_KEYS = Object.keys(PROOF_FLAG_RULES) as readonly ProofFlagKey[]
+
+/** Bucket every canonical row by the proof flags it carries. A unit because the
+ *  four sets are read together (they are the four proof-telemetry counters) and
+ *  are produced by ONE pass over the rows. */
+const collectProofFlagSets = (
+  rows: readonly CanonicalPerInstanceRow[],
+): Record<ProofFlagKey, Set<string>> => {
+  const sets: Record<ProofFlagKey, Set<string>> = {
+    proofMissing: new Set<string>(),
+    infraBlocked: new Set<string>(),
+    contractOnlyBlocked: new Set<string>(),
+    contractOnlySubmitted: new Set<string>(),
+  }
+  for (const { id, row } of rows) {
+    for (const key of PROOF_FLAG_KEYS) {
+      if (PROOF_FLAG_RULES[key](row)) sets[key].add(id)
+    }
+  }
+  return sets
+}
+
+/** Bucket every canonical row by its verdict, plus the re-runnable subset of
+ *  `errored`. A unit because the six verdict sets partition the SAME rows —
+ *  the if/else-if ladder they replaced was a hand-written exhaustive dispatch
+ *  over {@link VerdictStatus}, and a `Record<VerdictStatus, …>` is that same
+ *  dispatch as data (a new verdict then fails to compile instead of silently
+ *  landing in the `else` bucket). */
+const collectVerdictSets = (
+  rows: readonly CanonicalPerInstanceRow[],
+): { byVerdict: Record<VerdictStatus, Set<string>>; reRunnable: Set<string> } => {
+  const byVerdict: Record<VerdictStatus, Set<string>> = {
+    resolved: new Set<string>(),
+    localStructural: new Set<string>(),
+    researchContaminated: new Set<string>(),
+    unresolved: new Set<string>(),
+    errored: new Set<string>(),
+    emptyPatch: new Set<string>(),
+  }
+  const reRunnable = new Set<string>()
+  for (const { id, verdict, row } of rows) {
+    byVerdict[verdict].add(id)
+    if (verdict !== "errored") continue
+    const t = rowTermination(row)
+    if (t !== undefined && RE_RUNNABLE_TERMINATIONS.has(t)) reRunnable.add(id)
+  }
+  return { byVerdict, reRunnable }
+}
+
 const fromOurReport = (
   report: Record<string, unknown>,
   perInstance: readonly unknown[],
 ): RunVerdicts => {
   const canonicalRows = canonicalPerInstanceRows(perInstance)
-  const canonicalTelemetryRows = canonicalRows.map(({ row }) => row)
-  const proofMissing = new Set<string>()
-  const infraBlocked = new Set<string>()
-  const contractOnlyBlocked = new Set<string>()
-  const contractOnlySubmitted = new Set<string>()
-  for (const { id, row } of canonicalRows) {
-    if (row.proofRequiredMissing === true) proofMissing.add(id)
-    if (row.envPrepFailed === true || row.proofState === "infra_blocked") infraBlocked.add(id)
-    if (row.contractOnlyBlocked === true) contractOnlyBlocked.add(id)
-    if (row.contractOnlySubmitted === true) contractOnlySubmitted.add(id)
-  }
-  const resolved = new Set<string>()
-  const localStructural = new Set<string>()
-  const researchContaminated = new Set<string>()
-  const unresolved = new Set<string>()
-  const errored = new Set<string>()
-  const emptyPatch = new Set<string>()
-  const reRunnable = new Set<string>()
-  for (const { id, verdict, row } of canonicalRows) {
-    if (verdict === "resolved") resolved.add(id)
-    else if (verdict === "localStructural") localStructural.add(id)
-    else if (verdict === "researchContaminated") researchContaminated.add(id)
-    else if (verdict === "unresolved") unresolved.add(id)
-    else if (verdict === "errored") {
-      errored.add(id)
-      const t = rowTermination(row)
-      if (t !== undefined && RE_RUNNABLE_TERMINATIONS.has(t)) reRunnable.add(id)
-    } else emptyPatch.add(id)
-  }
+  const flags = collectProofFlagSets(canonicalRows)
+  const { byVerdict, reRunnable } = collectVerdictSets(canonicalRows)
   const reportTotals = reportTotalsFromOurReport({
     report,
-    perInstance: canonicalTelemetryRows,
+    perInstance: canonicalRows.map(({ row }) => row),
     telemetryPresenceRows: perInstance,
-    proofMissingCount: proofMissing.size,
-    infraBlockedCount: infraBlocked.size,
-    contractOnlyBlockedCount: contractOnlyBlocked.size,
-    contractOnlySubmittedCount: contractOnlySubmitted.size,
+    proofMissingCount: flags.proofMissing.size,
+    infraBlockedCount: flags.infraBlocked.size,
+    contractOnlyBlockedCount: flags.contractOnlyBlocked.size,
+    contractOnlySubmittedCount: flags.contractOnlySubmitted.size,
   })
   return {
-    resolved,
-    localStructural,
-    researchContaminated,
-    proofMissing,
-    infraBlocked,
-    contractOnlyBlocked,
-    contractOnlySubmitted,
-    unresolved,
-    errored,
-    emptyPatch,
+    resolved: byVerdict.resolved,
+    localStructural: byVerdict.localStructural,
+    researchContaminated: byVerdict.researchContaminated,
+    proofMissing: flags.proofMissing,
+    infraBlocked: flags.infraBlocked,
+    contractOnlyBlocked: flags.contractOnlyBlocked,
+    contractOnlySubmitted: flags.contractOnlySubmitted,
+    unresolved: byVerdict.unresolved,
+    errored: byVerdict.errored,
+    emptyPatch: byVerdict.emptyPatch,
     reRunnable,
     reportTotals,
   }
