@@ -35,6 +35,7 @@
 
 import { join } from "node:path"
 import { foldGroundingReceipts } from "@/shared"
+import type { DatasetFamily } from "../dataset-family-token"
 import { presetRequiresLiveLspGrounding } from "../preset"
 import { resolveDatasetFamilyProfile } from "../profiles/registry"
 import type { SpawnFn } from "./backend"
@@ -492,6 +493,55 @@ const runChunkBench = async (args: {
   return remoteRun.code
 }
 
+/**
+ * PERSIST the grade and its receipt. For a box-grading family this document IS
+ * the result — the report fetched afterwards was written by a patch-gen-only
+ * pass. The on-box copy is swept as soon as it is read and the box is destroyed
+ * at end of run, so without this a ProMax grade leaves no replayable trace at
+ * all: no argv, no hash, no per-instance verdicts, only a terminal summary line.
+ *
+ * EXPORTED because it is the LAST HOP. Everything upstream of it — the port,
+ * the adapter, the receipt layer — is covered, and none of that says the bytes
+ * reach a file. Inlined in `executeGradeChunk` it was reachable only by driving
+ * a whole ssh session, so nothing tested it, and the receipt spent a commit
+ * silently dropping the image digests it claimed to record.
+ *
+ * @returns the paths written, so a caller (and a test) can see what landed.
+ */
+export const persistBoxGradeArtifacts = (input: {
+  readonly datasetFamily: DatasetFamily
+  readonly artifactSuffix: string
+  readonly assignedInstanceIds: readonly string[]
+  readonly boxGrade: NonNullable<Awaited<ReturnType<typeof runFamilyBoxGrade>>>
+  readonly log: (m: string) => void
+}): { readonly artifactPath: string | undefined; readonly receiptPath: string | undefined } => {
+  const artifactPath = join(fullRemoteArtifactDir(), `passrate-${input.artifactSuffix}.json`)
+  saveLocalArtifact(
+    artifactPath,
+    input.boxGrade.artifactText,
+    input.log,
+    "[full-remote] on-box grade document saved",
+  )
+  // …and the RECEIPT beside it. The document says what the verdicts were; the
+  // receipt says which evaluator bytes, which argv and which cwd produced them.
+  // Without it the grade is a number with no provenance, and the receipt layer's
+  // own identity guards apply to a shape nothing on this path emits.
+  const buildReceipt = resolveDatasetFamilyProfile(input.datasetFamily).buildBoxGradeReceipt
+  if (buildReceipt === undefined) return { artifactPath, receiptPath: undefined }
+  const receiptPath = saveLocalArtifact(
+    join(fullRemoteArtifactDir(), `grade-receipt-${input.artifactSuffix}.json`),
+    buildReceipt({
+      assignedInstanceIds: input.assignedInstanceIds,
+      artifactText: input.boxGrade.artifactText,
+      artifactPath,
+      ...input.boxGrade.observation,
+    }),
+    input.log,
+    "[full-remote] on-box grade receipt saved",
+  )
+  return { artifactPath, receiptPath }
+}
+
 const executeGradeChunk = async (args: {
   session: BoxSession
   params: GradeChunkParams
@@ -565,31 +615,13 @@ const executeGradeChunk = async (args: {
   // so without this a ProMax grade left no replayable trace at all: no argv, no
   // hash, no per-instance verdicts, only a terminal summary line.
   if (boxGrade !== undefined) {
-    const artifactPath = join(fullRemoteArtifactDir(), `passrate-${args.artifactSuffix}.json`)
-    saveLocalArtifact(
-      artifactPath,
-      boxGrade.artifactText,
+    persistBoxGradeArtifacts({
+      datasetFamily: args.params.datasetFamily,
+      artifactSuffix: args.artifactSuffix,
+      assignedInstanceIds: args.params.instanceIds ?? [],
+      boxGrade,
       log,
-      "[full-remote] on-box grade document saved",
-    )
-    // …and the RECEIPT beside it. The document says what the verdicts were; the
-    // receipt says which evaluator bytes, which argv and which cwd produced them.
-    // Without it the grade is a number with no provenance, and the receipt
-    // layer's own identity guards apply to a shape nothing on this path emits.
-    const buildReceipt = resolveDatasetFamilyProfile(args.params.datasetFamily).buildBoxGradeReceipt
-    if (buildReceipt !== undefined) {
-      saveLocalArtifact(
-        join(fullRemoteArtifactDir(), `grade-receipt-${args.artifactSuffix}.json`),
-        buildReceipt({
-          assignedInstanceIds: args.params.instanceIds ?? [],
-          artifactText: boxGrade.artifactText,
-          artifactPath,
-          ...boxGrade.observation,
-        }),
-        log,
-        "[full-remote] on-box grade receipt saved",
-      )
-    }
+    })
   }
 
   await args.snapshots.publish("fetching", {
