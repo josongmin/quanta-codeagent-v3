@@ -1,6 +1,7 @@
 import { homedir } from "node:os"
 import { z } from "zod"
 import { classifyPath } from "@/security"
+import { errMessage, logger } from "@/shared"
 import { defaultFileSystemPort, type FileSystemPort, FsJailError } from "@/storage"
 import { globWriteGuardEvent, writeBudgetDeny } from "../_shared/exfil-rail-guards"
 import { freshHashNote, refreshStaleReadBaseline } from "../_shared/fresh-hash"
@@ -96,7 +97,12 @@ const readBeforeBytes = async (
 ): Promise<string> => {
   try {
     return await fs.readFile(path, ctx.cwd)
-  } catch {
+  } catch (e) {
+    // The empty string stays the answer — a fresh file's "before" IS empty and
+    // the write must not be blocked by a failed read. But collapsing both cases
+    // to `""` silently means a LOCKED or unreadable file produces a diff that
+    // claims the whole file is new. Attribute it; the flow is unchanged.
+    logger.warn(`write.readBeforeBytes(${path}): ${errMessage(e)}`)
     return ""
   }
 }

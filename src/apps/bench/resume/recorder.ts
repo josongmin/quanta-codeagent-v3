@@ -20,6 +20,7 @@
  * then refuses it). Reads (`match`/`load`/`reset`) go to the PRIMARY (local)
  * store only — the durable mirror is write-only on this path.
  */
+
 import { join } from "node:path"
 import type { LLMPort } from "@/llm"
 import {
@@ -31,6 +32,7 @@ import {
 } from "@/llm/replay"
 import type { StreamInput } from "@/llm/types"
 import { benchHome, benchRunId } from "@/runner/batch/corpus/paths"
+import { errMessage, logger } from "@/shared"
 import type { ResumeReceipt, ResumeSecurityReceipt } from "@/shared/remote-store"
 import { resumeHashRequest } from "./canonicalize"
 import { resolveResumeConfig, resumeActive } from "./config"
@@ -114,9 +116,12 @@ export const teeResumeReplayStore = (opts: TeeResumeReplayStoreOpts): ReplayStor
     try {
       await opts.writeReceipt(receipt)
       return true
-    } catch {
+    } catch (e) {
       // Receipt persistence is itself best-effort durability — a failed receipt
-      // PUT must never surface as a run failure.
+      // PUT must never surface as a run failure. The REASON still has to travel:
+      // without it a run with no receipts is indistinguishable from a run that
+      // never tried to write one.
+      logger.warn(`bench.resume.recorder.writeReceipt: ${errMessage(e)}`)
       return false
     }
   }
@@ -133,7 +138,10 @@ export const teeResumeReplayStore = (opts: TeeResumeReplayStoreOpts): ReplayStor
       if (!Number.isSafeInteger(initial) || (initial as number) < 0)
         throw new Error("invalid count")
       count = initial as number
-    } catch {
+    } catch (e) {
+      // `markDegraded` says THAT the count is untrusted; it never says why, so a
+      // provider fault and a malformed count read identically downstream.
+      logger.warn(`bench.resume.recorder.initialCount: ${errMessage(e)}`)
       markDegraded()
     }
   }

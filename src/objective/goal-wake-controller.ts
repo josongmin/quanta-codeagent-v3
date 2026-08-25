@@ -18,6 +18,7 @@
  * queues, clocks and the actual enqueue path are injected by the host.
  */
 
+import { errMessage, logger } from "@/shared"
 import type { ObjectiveDomainSnapshot } from "./model"
 
 export type GoalWakeSkipReason =
@@ -261,7 +262,11 @@ export const createGoalWakeController = (deps: GoalWakeControllerDeps): GoalWake
   const quiescentAtFire = (threadId: string): boolean => {
     try {
       return deps.stillQuiescent(threadId) === true
-    } catch {
+    } catch (e) {
+      // `false` (= not quiescent = do not fire) stays the fail-SAFE answer. But a
+      // probe that throws every time silently means the wake never fires again,
+      // which is indistinguishable from a thread that is simply always busy.
+      logger.warn(`goal-wake-controller.quiescentAtFire(${threadId}): ${errMessage(e)}`)
       return false
     }
   }

@@ -17,6 +17,7 @@ import { execFileSync } from "node:child_process"
 import { mkdirSync, rmSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { mirrorReportToSsot } from "@/runner/batch/report"
+import { errMessage } from "@/shared"
 import { benchHome } from "../../corpus"
 import type { DatasetFamily } from "../../dataset-family-token"
 import { resolveDatasetFamilyProfile } from "../../profiles/registry"
@@ -53,7 +54,11 @@ export const saveLocalArtifact = (
     writeFileSync(localPath, content)
     log(`${label}: ${localPath}`)
     return localPath
-  } catch {
+  } catch (e) {
+    // Fail-soft as before — an artifact is evidence, not the run — but SAY so.
+    // A silently missing artifact reads as "the box produced nothing", which is
+    // a different diagnosis from "the local write failed".
+    log(`${label}: could NOT write ${localPath} (${errMessage(e)})`)
     return undefined
   }
 }
@@ -69,7 +74,8 @@ const fetchOptionalArtifact = async (args: {
     const fetched = await fetchRemoteFile(args.ssh, args.remotePath)
     if (fetched.code !== 0) return undefined
     return saveLocalArtifact(args.localPath, fetched.stdout, args.log, args.label)
-  } catch {
+  } catch (e) {
+    args.log(`${args.label}: fetch failed for ${args.remotePath} (${errMessage(e)})`)
     return undefined
   }
 }
@@ -85,7 +91,8 @@ const fetchOptionalCommandArtifact = async (args: {
     const fetched = await fetchRemoteCommand(args.ssh, args.command)
     if (fetched.code !== 0 || fetched.stdout.length === 0) return undefined
     return saveLocalArtifact(args.localPath, fetched.stdout, args.log, args.label)
-  } catch {
+  } catch (e) {
+    args.log(`${args.label}: command artifact failed (${errMessage(e)})`)
     return undefined
   }
 }
@@ -132,8 +139,12 @@ const fetchTrajectoryFiles = async (args: {
     // now-redundant archive. (On failure we keep it as the fallback.)
     rmSync(b64Path, { force: true })
     args.log(`[full-remote] trajectory cassettes extracted: ${dest}`)
-  } catch {
-    // leave the .tar.b64 in place as the fallback artifact
+  } catch (e) {
+    // Fallback is unchanged (the .tar.b64 stays in place); name the reason so a
+    // run that ships the archive instead of the cassettes is explainable.
+    args.log(
+      `[full-remote] trajectory cassette extraction failed (${errMessage(e)}); keeping the archive`,
+    )
   }
 }
 

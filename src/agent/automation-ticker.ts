@@ -1,4 +1,5 @@
 import { type TickOutcome, tickScheduler } from "@/scheduler/automation-engine"
+import { errMessage, logger } from "@/shared"
 import type { AgentConfig } from "./types"
 
 /**
@@ -77,8 +78,11 @@ export const startAutomationEngineTicker = (
         if (onTick !== undefined) {
           try {
             onTick(outcome)
-          } catch {
-            // observer throw absorbed — timer keeps ticking
+          } catch (e) {
+            // Observer throw absorbed — the timer must keep ticking. But an
+            // observer that throws EVERY tick would otherwise be invisible
+            // forever, so the reason travels even though the flow does not change.
+            logger.warn(`automation-ticker.onTick observer: ${errMessage(e)}`)
           }
         }
       })

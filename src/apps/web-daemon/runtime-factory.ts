@@ -40,7 +40,7 @@ import { resolveGatedObjectiveAuthority } from "@/host/runtime/objective-store-w
 import { pickProvider, tryCreateLLM } from "@/llm"
 import { getDefaultPermissionStore, type PermissionStore } from "@/permission"
 import { createRuntimeFromAgentConfigBase } from "@/sdk/runtime"
-import { gateOn } from "@/shared"
+import { errMessage, gateOn, logger } from "@/shared"
 import { buildWebSkillAuthority } from "./authority-readouts"
 import { createCanvasToolDiffSource } from "./canvas-tool-diff-source"
 import { buildAgentConfigBase } from "./runtime-factory/agent-config-base"
@@ -213,7 +213,11 @@ const loadDefaultPermissionStore = async (): Promise<PermissionStore | undefined
     const store = getDefaultPermissionStore()
     await store.load()
     return store
-  } catch {
+  } catch (e) {
+    // Fail-soft is the DESIGN (a corrupt store must not stop daemon boot), but
+    // silence is not: the operator's durable posture just vanished and every
+    // approval falls back to the in-memory seed. Say which, and why.
+    logger.warn(`web-daemon.loadDefaultPermissionStore: ${errMessage(e)}`)
     return undefined
   }
 }

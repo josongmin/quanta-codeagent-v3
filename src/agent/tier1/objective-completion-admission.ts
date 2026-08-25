@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto"
 import { type LLMPort, type StreamInput, validateAgainstResponseSchema } from "@/llm"
 import type { ObjectiveAuthority } from "@/objective"
+import { errMessage, logger } from "@/shared"
 import type { ObjectiveCompletionAdmission } from "@/tool/objective"
 
 export type ObjectiveJudgeMode = "shadow" | "reject"
@@ -273,7 +274,14 @@ const judge = async (
   timeoutMs: number,
 ): Promise<ObjectiveJudgeDecision | undefined> => {
   const controller = new AbortController()
-  const task = collectJudgeDecision(llm, projection, controller).catch(() => undefined)
+  const task = collectJudgeDecision(llm, projection, controller).catch((e) => {
+    // A judge that FAILED and a judge that returned nothing are different facts:
+    // the first is an outage, the second is a verdict. Degrading to `undefined`
+    // is still right (admission must not hang on the judge), but unattributed it
+    // makes an outage read as a clean "no decision".
+    logger.warn(`objective-completion-admission.judge: ${errMessage(e)}`)
+    return undefined
+  })
   let timer: ReturnType<typeof setTimeout> | undefined
   try {
     return await Promise.race([
