@@ -70,7 +70,7 @@ const GONE: Reply = { code: 1, stdout: "", stderr: "" }
 
 /** The box's canned answers to everything that is NOT the liveness dance. */
 const staticReply = (cmd: string): Reply | undefined => {
-  if (cmd.includes("$HOME")) return ok("/home/ubuntu")
+  if (cmd.includes('printf %s "$HOME"')) return ok("/home/ubuntu")
   if (cmd.includes("--version")) return ok("Python 3.11.14\n")
   if (cmd.includes("sha256sum")) {
     const hit = DIGESTS.find(([s]) => cmd.includes(s))

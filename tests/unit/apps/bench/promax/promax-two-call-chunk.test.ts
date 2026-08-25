@@ -66,7 +66,7 @@ const recorder = (opts: { gradeFails?: boolean } = {}): Rec => {
     issued,
     ssh: async (cmd: string) => {
       issued.push(cmd)
-      if (cmd.includes("$HOME")) return { code: 0, stdout: "/home/ubuntu", stderr: "" }
+      if (cmd.includes('printf %s "$HOME"')) return { code: 0, stdout: "/home/ubuntu", stderr: "" }
       // the grader phase proves its interpreter clears the PEP 604 floor before
       // anything is graded — another real rail this fixture met head-on
       if (cmd.includes("--version")) {
@@ -199,5 +199,48 @@ describe("a ProMax chunk grades inside the window", () => {
     ).rejects.toThrow(/never materialized|NO declared bootstrap/i)
     // refused BEFORE any command reached the box
     expect(r.issued).toEqual([])
+  })
+})
+
+/**
+ * THE VENV STEP IS ISSUED, AND IS DISTINGUISHABLE FROM THE $HOME PROBE.
+ *
+ * Every fixture in this directory answered `cmd.includes("$HOME")` with the
+ * box's home directory — which also matched the `"$HOME"/.local/bin/uv venv …`
+ * step. The venv command was therefore answered by the probe branch, exit 0,
+ * in every test: a grader phase that stopped building its interpreter
+ * environment entirely would not have reddened a single one of them.
+ */
+describe("the grader phase builds its own interpreter environment", () => {
+  test("🔴 the uv venv step reaches the box as its own command", async () => {
+    const r = recorder()
+    await runFamilyBoxGrade({
+      ssh: r.ssh,
+      log: () => {},
+      family: "promax",
+      bootstrap: promaxBootstrap(),
+      paths: DEFAULT_CHUNK_PATHS,
+    })
+    const venv = r.issued.filter((c) => c.includes("uv") && c.includes("venv"))
+    expect(venv.length, "the grader phase never created its venv").toBeGreaterThan(0)
+    // …and it names the python the evaluator is pinned to, not whatever is first
+    // on PATH: `python3 -m venv` inherits the version that ran it.
+    expect(venv.join("\n")).toContain("--python 3.11")
+  })
+
+  test("the $HOME probe and the venv step are DIFFERENT commands", async () => {
+    const r = recorder()
+    await runFamilyBoxGrade({
+      ssh: r.ssh,
+      log: () => {},
+      family: "promax",
+      bootstrap: promaxBootstrap(),
+      paths: DEFAULT_CHUNK_PATHS,
+    })
+    const probe = r.issued.filter((c) => c.includes('printf %s "$HOME"'))
+    const venv = r.issued.filter((c) => c.includes("uv") && c.includes("venv"))
+    expect(probe.length).toBeGreaterThan(0)
+    expect(venv.length).toBeGreaterThan(0)
+    expect(probe.some((c) => venv.includes(c))).toBe(false)
   })
 })

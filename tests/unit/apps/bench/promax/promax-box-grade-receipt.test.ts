@@ -45,7 +45,7 @@ const PASS_RATE = JSON.stringify([
 const PREDS = `${JSON.stringify({ instance_id: "aws__s2n-tls-5464", model_patch: "P" })}\n`
 
 const ssh = async (cmd: string) => {
-  if (cmd.includes("$HOME")) return { code: 0, stdout: "/home/ubuntu", stderr: "" }
+  if (cmd.includes('printf %s "$HOME"')) return { code: 0, stdout: "/home/ubuntu", stderr: "" }
   if (cmd.includes("--version")) return { code: 0, stdout: "Python 3.11.14\n", stderr: "" }
   if (cmd.includes("sha256sum")) {
     const hit = DIGESTS.find(([s]) => cmd.includes(s))

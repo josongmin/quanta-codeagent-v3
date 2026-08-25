@@ -22,8 +22,8 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import {
   buildProMaxImageProvenanceCommand,
-  parseProMaxImageProvenance,
   PROMAX_IMAGE_PROVENANCE_SCRIPT,
+  parseProMaxImageProvenance,
 } from "@/apps/bench/harness/promax/image-provenance"
 
 const DIGEST = `key4127/refactor-dockerhub@sha256:${"a".repeat(64)}`

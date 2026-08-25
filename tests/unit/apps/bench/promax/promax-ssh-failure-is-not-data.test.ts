@@ -51,7 +51,7 @@ const boxThatDropsAt = (dropOn: string) => async (cmd: string) => {
     return { code: 255, stdout: "", stderr: "ssh: connect to host: Connection refused" }
   }
   if (cmd.includes("pgrep")) return { code: 1, stdout: "", stderr: "" }
-  if (cmd.includes("$HOME")) return { code: 0, stdout: "/home/ubuntu", stderr: "" }
+  if (cmd.includes('printf %s "$HOME"')) return { code: 0, stdout: "/home/ubuntu", stderr: "" }
   if (cmd.includes("--version")) return { code: 0, stdout: "Python 3.11.14\n", stderr: "" }
   if (cmd.includes("sha256sum")) {
     const hit = DIGESTS.find(([s]) => cmd.includes(s))
