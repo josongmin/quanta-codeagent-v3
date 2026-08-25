@@ -66,6 +66,9 @@ const ANSI_RE = new RegExp(`${String.fromCharCode(27)}[[0-9;?]*[ -/]*[@-~]`, "g"
 export const stripAnsi = (s: string): string => s.replace(ANSI_RE, "")
 
 export interface DrivePtyOpts {
+  /** Executable argv. Defaults to the source CLI; set this to the installed
+   *  launcher to prove packaged/front-door parity without duplicating tests. */
+  readonly command?: readonly [string, ...string[]]
   readonly args?: readonly string[]
   /** Extra env on top of the isolated base (PATH/TERM + temp HOME + dummy provider). */
   readonly env?: Record<string, string>
@@ -124,7 +127,8 @@ export const drivePtyCli = (opts: DrivePtyOpts = {}): PtyCli => {
     opts.useRealHome === true
       ? (process.env.HOME ?? "/tmp")
       : mkdtempSync(join(tmpdir(), "e2e-pty-home-"))
-  const child = Bun.spawn(["bun", CLI_ENTRY, ...(opts.args ?? [])], {
+  const command = opts.command ?? (["bun", CLI_ENTRY] as const)
+  const child = Bun.spawn([...command, ...(opts.args ?? [])], {
     cwd,
     env: {
       PATH: process.env.PATH ?? "/usr/bin:/bin",
@@ -168,8 +172,10 @@ export const drivePtyCli = (opts: DrivePtyOpts = {}): PtyCli => {
     send: (data) => {
       try {
         writeSync(masterFd, data)
-      } catch {
-        // child may have exited
+      } catch (error) {
+        // A silent write failure makes a missing command indistinguishable from
+        // a product timeout. Only tolerate it after the child has actually exited.
+        if (child.exitCode === null) throw error
       }
     },
     output: () => buf,

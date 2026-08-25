@@ -280,7 +280,7 @@ export const createInMemoryGoalWakeAttemptRegistry = (): GoalWakeAttemptRegistry
 const readHostQuiescence = (deps: GoalWakeControllerDeps, threadId: string): boolean => {
   try {
     return deps.stillQuiescent(threadId) === true
-  } catch {
+  } catch (_error) {
     return false
   }
 }
@@ -295,7 +295,7 @@ const dispatchClaimedAttempt = (
       () => reservation.commit(),
       () => reservation.release(),
     )
-  } catch {
+  } catch (_error) {
     reservation.release()
   }
 }
@@ -315,7 +315,7 @@ export const createGoalWakeController = (deps: GoalWakeControllerDeps): GoalWake
   const reportSkip = (attempt: GoalWakeAttempt, reason: GoalWakeSkipReason): void => {
     try {
       deps.onSkip?.(attempt, reason)
-    } catch {
+    } catch (_error) {
       // Observability is not an authority and cannot destabilize scheduling.
     }
   }
@@ -326,7 +326,7 @@ export const createGoalWakeController = (deps: GoalWakeControllerDeps): GoalWake
     pending = undefined
     try {
       deps.timer.clear(handle)
-    } catch {
+    } catch (_error) {
       // Generation fencing below still makes an uncleared callback inert.
     }
   }
@@ -334,7 +334,7 @@ export const createGoalWakeController = (deps: GoalWakeControllerDeps): GoalWake
   const readCurrent = (threadId: string): ObjectiveDomainSnapshot | null => {
     try {
       return deps.readDomain(threadId)
-    } catch {
+    } catch (_error) {
       return null
     }
   }
@@ -403,7 +403,7 @@ export const createGoalWakeController = (deps: GoalWakeControllerDeps): GoalWake
       pending = handle
       if (typeof handle === "object" && handle !== null) handle.unref?.()
       return attempt
-    } catch {
+    } catch (_error) {
       return undefined
     }
   }

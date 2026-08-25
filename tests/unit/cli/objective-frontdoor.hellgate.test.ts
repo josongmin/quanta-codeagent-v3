@@ -39,7 +39,7 @@ describe("QUANTA_GOAL public gate", () => {
   })
   test("preset seeds only unset internal gates", () => {
     const env: NodeJS.ProcessEnv = { QUANTA_GOAL: "1", QUANTA_GOAL_ENFORCE: "0" }
-    applyGoalPreset(env)
+    applyGoalPreset(env, true)
     expect(env.QUANTA_OBJECTIVE_TOOLS).toBe("1")
     expect(env.QUANTA_OBJECTIVE_BUDGET_ENFORCE).toBe("1")
     expect(env.QUANTA_GOAL_ENFORCE).toBe("0")

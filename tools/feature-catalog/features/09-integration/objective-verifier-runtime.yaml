@@ -1,0 +1,69 @@
+id: objective-verifier-runtime
+title: Current-source objective verifier runtime
+section: 9
+subsystem: Objective substrate (ADR-0394)
+order: 96
+maturity: L3
+status: new
+ui_surfaces: [cli, web]
+monitoring: partial
+modes: [interactive, ide]
+configurable: integrated
+owners: ["@songmin"]
+labels: ["surface:core", "verification"]
+depends_on: [objective-first-class, objective-tools]
+config_refs:
+  env: [QUANTA_GOAL, QUANTA_OBJECTIVE_TOOLS]
+surface_integration:
+  cli: full
+  web: full
+  method: audited
+  verified: "2026-08-26"
+  evidence:
+    cli: "The CLI goal facade attaches the verifier and exposes `/goal verify`; the objective tool uses the same port."
+    web: "The shared runtime objective authority attaches the same verifier port used by web-daemon sessions and objective tools."
+purpose: |
+  Executes every checked success criterion as token-preserving argv in the
+  workspace cwd with a bounded timeout and an isolated environment. Captures a
+  deterministic Git-worktree source digest before and after the batch, hashes
+  stdout/stderr instead of retaining output text, and atomically applies the
+  result only when objective identity, revision, check identity, and source
+  digest are still current.
+
+  A missing Git validation contract, source mutation during verification,
+  timeout, non-zero exit, duplicate attempt, or revision race cannot produce a
+  checked-completion receipt. A later source change marks the prior completion
+  stale and returns the objective to active when read against current evidence.
+evidence:
+  code:
+    - src/host/runtime/objective-verifier-wire.ts
+    - src/host/runtime/objective-store-wire.ts
+    - src/runtime/shell.ts
+    - src/objective/authority.ts
+    - src/objective/criteria/model.ts
+    - src/objective/core-store/completion-ops.ts
+    - src/apps/cli/slash/objective.ts
+  adrs: [394]
+  tests:
+    unit:
+      - tests/unit/host/objective-verifier-wire.test.ts
+      - tests/unit/objective/checked-completion-forgery-m8-hellgate.test.ts
+      - tests/unit/runtime/run-argv.test.ts
+    integration:
+      - tests/integration/objective-verifier-real-command-e2e.test.ts
+    contract: []
+knobs:
+  - name: QUANTA_GOAL
+    where: src/objective/goal-preset.ts
+    default: 'unset (OFF)'
+    purpose: Public preset that exposes the verifier through goal control.
+  - name: QUANTA_OBJECTIVE_TOOLS
+    where: src/host/runtime/objective-store-wire.ts
+    default: 'unset (OFF)'
+    purpose: Advanced authority/tool gate required for verifier attachment.
+deliberate_hold: null
+notes: |
+  The verifier is deterministic authority, not an LLM judge. It records only
+  exit/timing metadata and hashes; command output text is not persisted in the
+  objective. Monitoring remains partial because production decision counters
+  are not yet a promotion-grade telemetry pipeline.

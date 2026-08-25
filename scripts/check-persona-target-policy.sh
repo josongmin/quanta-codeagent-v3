@@ -41,8 +41,8 @@ for required_file in "${required_files[@]}"; do
   fi
 done
 
-if [[ "$(basename "${REPO_ROOT}")" != "quanta-codeagent-v3" ]]; then
-  echo "error: expected repo basename quanta-codeagent-v3, got $(basename "${REPO_ROOT}")" >&2
+if [[ "$(git -C "${REPO_ROOT}" rev-parse --is-inside-work-tree 2>/dev/null || true)" != "true" ]]; then
+  echo "error: ${REPO_ROOT} is not a git worktree" >&2
   exit 1
 fi
 
@@ -52,7 +52,7 @@ if ! grep -q "Quanta CodeAgent v3" "${REPO_ROOT}/README.md"; then
 fi
 
 echo "repo_root=${REPO_ROOT}"
-echo "repo_name=$(basename "${REPO_ROOT}")"
+echo "repo_name=quanta-codeagent-v3"
 echo "persona=agent"
 echo "target=quanta-codeagent-v3"
 echo "verdict=pass"

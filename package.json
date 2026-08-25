@@ -1,6 +1,6 @@
 {
   "name": "quanta-codeagent",
-  "version": "1.0.027",
+  "version": "1.0.029",
   "type": "module",
   "exports": {
     "./sdk": {

@@ -175,6 +175,8 @@ const PROBE_VALUES = [
   "opaque-tunnel",
   "background",
   "prompt",
+  "shadow",
+  "15001",
 ]
 
 /** Drive the seam to learn, per knob: which RuntimeConfig field it controls and
@@ -262,6 +264,30 @@ interface AllowlistEntry {
 }
 
 const NON_FALSY_DEFAULT_ALLOWLIST: Readonly<Record<string, AllowlistEntry>> = {
+  QUANTA_GOAL_JUDGE: {
+    field: "goalJudgeMode",
+    expectedDefault: "off",
+    reason:
+      "shadow-only completion-review selector; 'off' allocates no judge and is the fail-closed default",
+  },
+  QUANTA_GOAL_QUIET_MS: {
+    field: "goalQuietMs",
+    expectedDefault: 15000,
+    reason:
+      "numeric safety floor for an already-enabled goal controller; inert while QUANTA_GOAL_ENFORCE is off",
+  },
+  QUANTA_GOAL_MAX_BACKOFF_MS: {
+    field: "goalMaxBackoffMs",
+    expectedDefault: 900000,
+    reason:
+      "numeric retry-policy ceiling; inert while the default-off goal controller is not constructed",
+  },
+  QUANTA_GOAL_MAX_AUTONOMOUS_TURNS: {
+    field: "goalMaxAutonomousTurns",
+    expectedDefault: 20,
+    reason:
+      "numeric safety hard cap; inert while the default-off goal controller is not constructed",
+  },
   // The ONE genuinely default-ON knob. A `.ipynb` read is BROKEN without it
   // (dumps raw nbformat JSON + base64 image blobs), so the SAFE default is the
   // fixed render; off-value is `0`/`false`/`off` ⇒ source-only. (runtime-config

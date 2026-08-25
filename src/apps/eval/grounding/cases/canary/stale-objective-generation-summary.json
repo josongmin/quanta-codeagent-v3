@@ -1,0 +1,36 @@
+{
+  "schema": 2,
+  "id": "stale-objective-generation-summary",
+  "usecase": "persistent-context.conversation-state.thread-grounding",
+  "history": [
+    {
+      "role": "assistant",
+      "kind": "summary",
+      "threadId": "goal_generation_b",
+      "referentId": "goal_generation_b",
+      "mentionedThreadIds": ["goal_generation_a"],
+      "policyMarkers": ["replacement-generation"],
+      "text": "Conversation summary: goal_generation_b owns the active replacement objective. goal_generation_a is an archived stale generation and must not be resumed."
+    }
+  ],
+  "targetUtterance": "그 목표 계속해.",
+  "gold": {
+    "activeThreadId": "goal_generation_b",
+    "referentId": "goal_generation_b",
+    "intent": "execute_change",
+    "scope": "current_workstream",
+    "shouldClarify": false,
+    "confidence": "high"
+  },
+  "bucket": "summary_equivalence",
+  "severity": "critical",
+  "stateContract": {
+    "activeThreadId": "goal_generation_b",
+    "visibleThreadIds": ["goal_generation_a", "goal_generation_b"],
+    "pausedThreadIds": ["goal_generation_a"],
+    "policyMarkers": ["replacement-generation"]
+  },
+  "candidateThreadIds": ["goal_generation_a", "goal_generation_b"],
+  "pairId": "pair-stale-objective-generation",
+  "pairRole": "summary"
+}

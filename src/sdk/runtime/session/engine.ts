@@ -94,7 +94,7 @@ export const ensureTransportBridge = (
       const run = box.transportDispatchQueue.then(async () => {
         await dispatch(deps, command)
       })
-      box.transportDispatchQueue = run.catch(() => undefined)
+      box.transportDispatchQueue = run.catch((_error) => undefined)
       await run
     },
     // L5 H-3: transport errors and rejected commands were silently dropped —

@@ -23,6 +23,9 @@ import { drivePtyCli, PTY_AVAILABLE, type PtyCli } from "./pty-harness"
 // converts it to `\n`, which raw-line-reader intentionally ignores.
 const BOOT = "ask before every edit"
 const T = 60_000
+const INSTALLED_CLI = process.env.QUANTA_E2E_CLI_BIN
+const cliCommand =
+  INSTALLED_CLI === undefined ? undefined : ([INSTALLED_CLI] as readonly [string, ...string[]])
 
 const replayEntry = (
   marker: string,
@@ -42,6 +45,22 @@ const sleep = async (ms: number): Promise<void> => {
   await new Promise<void>((resolve) => setTimeout(resolve, ms))
 }
 
+/** Drive the raw editor as real keystrokes. A whole command in one PTY write can
+ * outrun slash-palette state transitions and turn this into a chunking test. */
+const typeText = async (cli: PtyCli, text: string): Promise<void> => {
+  for (const [index, character] of [...text].entries()) {
+    cli.send(character)
+    // `/` opens the async slash palette; wait for its key handler before typing
+    // the filter text, otherwise a large feature set can legitimately drop it.
+    await sleep(index === 0 && character === "/" ? 500 : 20)
+  }
+}
+
+const submitLine = async (cli: PtyCli, line: string): Promise<void> => {
+  await typeText(cli, line)
+  cli.send("\r")
+}
+
 describe.skipIf(!PTY_AVAILABLE)("CLI /goal (Pursuing goal) e2e (PTY)", () => {
   let sessionsDir: string
   let cwd: string
@@ -51,8 +70,12 @@ describe.skipIf(!PTY_AVAILABLE)("CLI /goal (Pursuing goal) e2e (PTY)", () => {
     sessionsDir = mkdtempSync(join(tmpdir(), "e2e-goal-sessions-")) // empty ⇒ no resume picker
     cwd = mkdtempSync(join(tmpdir(), "e2e-goal-cwd-"))
   })
-  afterEach(() => {
-    cli?.kill()
+  afterEach(async () => {
+    const current = cli
+    current?.kill()
+    if (current !== undefined) {
+      await Promise.race([current.exited, sleep(2_000)])
+    }
     cli = undefined
     rmSync(sessionsDir, { recursive: true, force: true })
     rmSync(cwd, { recursive: true, force: true })
@@ -67,11 +90,19 @@ describe.skipIf(!PTY_AVAILABLE)("CLI /goal (Pursuing goal) e2e (PTY)", () => {
     // not reach the child. NOTE this suite is exactly what caught that
     // regression: the unit hellgates stayed 14/14 green through it.
     const c = drivePtyCli({
+      ...(cliCommand === undefined ? {} : { command: cliCommand }),
       cwd,
-      env: { QUANTA_SESSIONS_DIR: sessionsDir, QUANTA_OBJECTIVE_TOOLS: "1" },
+      env: {
+        QUANTA_SESSIONS_DIR: sessionsDir,
+        QUANTA_GOAL: "1",
+        QUANTA_OBJECTIVE_TOOLS: "1",
+      },
     })
     cli = c
     await c.waitFor(BOOT, T)
+    // The prompt is painted immediately before raw-mode input is fully ready.
+    // Let that transition settle so a fast next test cannot lose its first CR.
+    await sleep(50)
     return c
   }
 
@@ -90,11 +121,12 @@ describe.skipIf(!PTY_AVAILABLE)("CLI /goal (Pursuing goal) e2e (PTY)", () => {
     const cassettePath = join(cwd, "goal-continuation.jsonl")
     writeFileSync(cassettePath, args.cassette)
     const c = drivePtyCli({
+      ...(cliCommand === undefined ? {} : { command: cliCommand }),
       cwd,
       env: {
         QUANTA_SESSIONS_DIR: sessionsDir,
         QUANTA_OBJECTIVE_TOOLS: "1",
-        ...(args.goalEnforce === false ? {} : { QUANTA_GOAL_ENFORCE: "1" }),
+        ...(args.goalEnforce === false ? {} : { QUANTA_GOAL: "1", QUANTA_GOAL_ENFORCE: "1" }),
         QUANTA_IDLE_MS: String(args.idleMs),
         QUANTA_GOAL_QUIET_MS: String(args.idleMs),
         ...(args.idleSuppress === false ? { QUANTA_IDLE_SUPPRESS: "0" } : {}),
@@ -110,6 +142,7 @@ describe.skipIf(!PTY_AVAILABLE)("CLI /goal (Pursuing goal) e2e (PTY)", () => {
     })
     cli = c
     await c.waitFor(BOOT, 15_000)
+    await sleep(50)
     return c
   }
 
@@ -117,7 +150,8 @@ describe.skipIf(!PTY_AVAILABLE)("CLI /goal (Pursuing goal) e2e (PTY)", () => {
     "/help lists /goal — the command is registered at the surface",
     async () => {
       const c = await boot()
-      c.send("/help\r")
+      expect(c.screen()).not.toContain("/goal")
+      await submitLine(c, "/help")
       await c.waitFor("/goal", T)
       expect(c.screen()).toContain("/goal")
     },
@@ -128,12 +162,12 @@ describe.skipIf(!PTY_AVAILABLE)("CLI /goal (Pursuing goal) e2e (PTY)", () => {
     "/goal <objective> records an active pursuing goal in the live CLI",
     async () => {
       const c = await boot()
-      c.send("/goal ship the pursuit feature\r")
+      await submitLine(c, "/goal ship the pursuit feature")
       // The surface minted the store and populated ctx.goal ⇒ the command sets
       // it (NOT the "not wired" degrade path).
-      const screen = await c.waitFor(/Pursuing goal set|not wired/, T)
-      expect(screen).toContain("Pursuing goal set")
-      expect(screen).not.toContain("not wired")
+      const screen = await c.waitFor(/Goal created|goal control unavailable/, 10_000)
+      expect(screen).toContain("Goal created")
+      expect(screen).not.toContain("goal control unavailable")
     },
     T,
   )
@@ -142,10 +176,10 @@ describe.skipIf(!PTY_AVAILABLE)("CLI /goal (Pursuing goal) e2e (PTY)", () => {
     "the goal persists in the surface store — /goal echoes it back as active",
     async () => {
       const c = await boot()
-      c.send("/goal measure twice cut once\r")
-      await c.waitFor("Pursuing goal set", T)
-      c.send("/goal\r")
-      await c.waitFor("Pursuing goal: measure twice cut once", T)
+      await submitLine(c, "/goal measure twice cut once")
+      await c.waitFor("Goal created", T)
+      await submitLine(c, "/goal")
+      await c.waitFor("Goal: measure twice cut once", T)
       expect(c.screen()).toContain("active")
     },
     T,
@@ -159,26 +193,27 @@ describe.skipIf(!PTY_AVAILABLE)("CLI /goal (Pursuing goal) e2e (PTY)", () => {
       // prompt loop, rather than a user keystroke or an inline test stand-in.
       const c = await bootWithGoalContinuation({
         cassette: `${replayEntry("GOAL_AUTONOMOUS_CONTINUATION")}\n`,
-        idleMs: 50,
+        idleMs: 15_000,
       })
-      c.send("/goal continue through the real REPL queue\r")
-      await c.waitFor("Pursuing goal set", T)
-      await c.waitFor("GOAL_AUTONOMOUS_CONTINUATION", 8_000)
+      await submitLine(c, "/goal continue through the real REPL queue")
+      await c.waitFor("Goal created", T)
+      await c.waitFor("GOAL_AUTONOMOUS_CONTINUATION", 20_000)
       expect(c.screen()).toContain("GOAL_AUTONOMOUS_CONTINUATION")
     },
     T,
   )
 
   test(
-    "QUANTA_GOAL_ENFORCE default-OFF leaves the real CLI continuation queue untouched",
+    "QUANTA_GOAL default-OFF leaves /goal unregistered and the continuation queue untouched",
     async () => {
       const c = await bootWithGoalContinuation({
         cassette: `${replayEntry("MUST_NOT_RUN_WHEN_GOAL_ENFORCE_IS_OFF")}\n`,
-        idleMs: 50,
+        idleMs: 15_000,
         goalEnforce: false,
       })
-      c.send("/goal default-off must not autonomously invoke the replay\r")
-      await c.waitFor("Pursuing goal set", T)
+      c.send("/")
+      await sleep(700)
+      expect(c.screen()).not.toContain("/goal")
       // This waits across several would-be quiet windows. A source-only gate
       // test cannot establish this: the replay marker is reachable only if the
       // shipped resume sink has pushed through the external prompt queue.
@@ -196,9 +231,9 @@ describe.skipIf(!PTY_AVAILABLE)("CLI /goal (Pursuing goal) e2e (PTY)", () => {
         idleMs: 50,
         idleSuppress: false,
       })
-      c.send("/goal pursue even with UI idle suppression disabled\r")
-      await c.waitFor("Pursuing goal set", T)
-      await c.waitFor("GOAL_QUIET_IS_NOT_UI_IDLE", 8_000)
+      await submitLine(c, "/goal pursue even with UI idle suppression disabled")
+      await c.waitFor("Goal created", T)
+      await c.waitFor("GOAL_QUIET_IS_NOT_UI_IDLE", 20_000)
       expect(c.screen()).toContain("GOAL_QUIET_IS_NOT_UI_IDLE")
     },
     T,
@@ -209,15 +244,15 @@ describe.skipIf(!PTY_AVAILABLE)("CLI /goal (Pursuing goal) e2e (PTY)", () => {
     async () => {
       const c = await bootWithGoalContinuation({
         cassette: `${replayEntry("MUST_NOT_ABORT_PARTIAL_DRAFT")}\n`,
-        idleMs: 2_000,
+        idleMs: 15_000,
       })
-      c.send("/goal preserve an operator draft\r")
-      await c.waitFor(/Pursuing goal set[\s\S]*ask before every edit/, 8_000)
+      await submitLine(c, "/goal preserve an operator draft")
+      await c.waitFor(/Goal created[\s\S]*ask before every edit/, 10_000)
       // Deliberately omit Enter. The raw key edge must cancel the goal timer;
       // waiting beyond the full quiet window proves the queued continuation
       // cannot win the prompt race and abort this draft.
-      c.send("unfinished operator draft")
-      await sleep(2_300)
+      await typeText(c, "unfinished operator draft")
+      await sleep(15_500)
       expect(c.screen()).not.toContain("MUST_NOT_ABORT_PARTIAL_DRAFT")
     },
     T,
@@ -240,12 +275,12 @@ describe.skipIf(!PTY_AVAILABLE)("CLI /goal (Pursuing goal) e2e (PTY)", () => {
         { type: "text_delta", delta: " FOREGROUND_TURN_SETTLED" },
       ])}\n${replayEntry("_STALE_CONTINUATION_AFTER_FOREGROUND")}\n`
       const c = await bootWithGoalContinuation({ cassette, idleMs: 15_000, replayDelayMs: 200 })
-      c.send("/goal do not overlap a foreground agent turn\r")
+      await submitLine(c, "/goal do not overlap a foreground agent turn")
       // Raw mode is restored only after slash dispatch returns to the next
       // prompt. Without this edge, a cooked `\r` can be discarded and turn this
       // into a vacuous autonomous-continuation test.
-      await c.waitFor(/Pursuing goal set[\s\S]*ask before every edit/, 10_000)
-      c.send("start the foreground turn\r")
+      await c.waitFor(/Goal created[\s\S]*ask before every edit/, 10_000)
+      await submitLine(c, "start the foreground turn")
       await c.waitFor("FOREGROUND_TURN_STARTED", 10_000)
       await c.waitFor("FOREGROUND_TURN_SETTLED", 10_000)
 
@@ -274,13 +309,13 @@ describe.skipIf(!PTY_AVAILABLE)("CLI /goal (Pursuing goal) e2e (PTY)", () => {
         cassette,
         // Keep the initial slash-to-foreground interval comfortably below the
         // quiet window; the body then supplies the long blocked interval.
-        idleMs: 5_000,
+        idleMs: 15_000,
         replayDelayMs: 150,
         backgroundTurn: true,
       })
-      c.send("/goal wait for detached work to settle\r")
-      await c.waitFor(/Pursuing goal set[\s\S]*ask before every edit/, 10_000)
-      c.send("start a turn that will move to the background\r")
+      await submitLine(c, "/goal wait for detached work to settle")
+      await c.waitFor(/Goal created[\s\S]*ask before every edit/, 10_000)
+      await submitLine(c, "start a turn that will move to the background")
       // The first replay delta can be painted underneath the terminal spinner,
       // so use a short real body-start interval rather than a fragile rendered
       // text sentinel before sending the raw Ctrl+B byte.
@@ -290,7 +325,7 @@ describe.skipIf(!PTY_AVAILABLE)("CLI /goal (Pursuing goal) e2e (PTY)", () => {
 
       await sleep(1_000)
       expect(c.screen()).not.toContain("BG_GOAL_CONTINUATION_AFTER_SETTLE")
-      await c.waitFor("BG_GOAL_CONTINUATION_AFTER_SETTLE", 15_000)
+      await c.waitFor("BG_GOAL_CONTINUATION_AFTER_SETTLE", 22_000)
     },
     T,
   )

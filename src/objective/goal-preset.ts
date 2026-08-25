@@ -1,6 +1,9 @@
 /** Public opt-in preset. Explicit internal overrides always win. */
-export const applyGoalPreset = (env: Record<string, string | undefined>): void => {
-  if (env.QUANTA_GOAL !== "1") return
+export const applyGoalPreset = (
+  env: Record<string, string | undefined>,
+  enabled: boolean,
+): void => {
+  if (!enabled) return
   for (const key of [
     "QUANTA_OBJECTIVE_TOOLS",
     "QUANTA_GOAL_ENFORCE",

@@ -241,7 +241,7 @@ const loadDefaultPermissionStore = async (): Promise<PermissionStore | undefined
  */
 export const buildProductionRuntimeFactory = (): (() => Promise<ObservableRuntimeFacade>) => {
   const env = process.env as Record<string, string | undefined>
-  applyGoalPreset(env)
+  applyGoalPreset(env, gateOn(env, "QUANTA_GOAL"))
   const provider = pickProvider(env)
   const llm = tryCreateLLM(provider, {}, env)
   if (llm === null) {

@@ -57,10 +57,13 @@ export interface ResumeStore {
   securityReceipt(): Promise<ResumeSecurityReceipt | undefined>
 }
 
+// Remote receipt reads are operator-facing and must not hang a resume forever.
+const DEFAULT_AWS_COMMAND_TIMEOUT_MS = 60_000
+
 export const resumeStore = (cfg: ResumeStoreConfig, key: string): ResumeStore => {
   // exactOptionalPropertyTypes: pass region/runAws only when present so the
   // shape matches `S3BackendOptions`'s optional fields (no explicit undefined).
-  const runAws = cfg.runAws ?? makeDefaultRunAws(60_000)
+  const runAws = cfg.runAws ?? makeDefaultRunAws(DEFAULT_AWS_COMMAND_TIMEOUT_MS)
   const rawBackend = s3Backend({
     bucket: cfg.bucket,
     ...(cfg.region !== undefined ? { region: cfg.region } : {}),

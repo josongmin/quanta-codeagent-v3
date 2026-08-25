@@ -56,7 +56,7 @@ export const createTurnSubmitAuthority = (): {
       }
       try {
         return capability.validateCurrent() === true
-      } catch {
+      } catch (_error) {
         return false
       }
     },

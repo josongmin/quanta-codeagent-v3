@@ -187,7 +187,7 @@ export const startGoalWakeController = (opts: StartGoalWakeOpts): GoalWakeLifecy
         controller.cancel()
         return
       }
-    } catch {
+    } catch (_error) {
       controller.cancel()
       return
     }

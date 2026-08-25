@@ -1,0 +1,50 @@
+{
+  "schema": 2,
+  "id": "stale-objective-generation-raw",
+  "usecase": "persistent-context.conversation-state.thread-grounding",
+  "history": [
+    {
+      "role": "assistant",
+      "kind": "message",
+      "threadId": "goal_generation_a",
+      "referentId": "goal_generation_a",
+      "mentionedThreadIds": ["goal_generation_a", "goal_generation_b"],
+      "text": "The archived goal_generation_a thread was cleared after its old objective completed."
+    },
+    {
+      "role": "user",
+      "kind": "directive",
+      "threadId": "goal_generation_b",
+      "text": "Continue only the replacement objective in goal_generation_b."
+    },
+    {
+      "role": "assistant",
+      "kind": "message",
+      "threadId": "goal_generation_b",
+      "referentId": "goal_generation_b",
+      "mentionedThreadIds": ["goal_generation_a", "goal_generation_b"],
+      "policyMarkers": ["replacement-generation"],
+      "text": "goal_generation_b is now the active replacement objective; the prior generation is paused and stale."
+    }
+  ],
+  "targetUtterance": "그 목표 계속해.",
+  "gold": {
+    "activeThreadId": "goal_generation_b",
+    "referentId": "goal_generation_b",
+    "intent": "execute_change",
+    "scope": "current_workstream",
+    "shouldClarify": false,
+    "confidence": "high"
+  },
+  "bucket": "stale_context_trap",
+  "severity": "critical",
+  "stateContract": {
+    "activeThreadId": "goal_generation_b",
+    "visibleThreadIds": ["goal_generation_a", "goal_generation_b"],
+    "pausedThreadIds": ["goal_generation_a"],
+    "policyMarkers": ["replacement-generation"]
+  },
+  "candidateThreadIds": ["goal_generation_a", "goal_generation_b"],
+  "pairId": "pair-stale-objective-generation",
+  "pairRole": "raw"
+}

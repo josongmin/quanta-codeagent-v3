@@ -3,7 +3,7 @@ import { AgentArgsError } from "@/host/runtime"
 import { applyGoalPreset } from "@/objective"
 import { installOtelSpanExportFromEnv } from "@/observability/otel-span-export"
 import { selectRemoteRunner } from "@/remote"
-import { errMessage, logger, setTerminalIo } from "@/shared"
+import { errMessage, gateOn, logger, setTerminalIo } from "@/shared"
 import { CLI_SEEDED_GATE_NAMES } from "./cli-seeded-gates"
 import { loadEnvFiles } from "./dotenv"
 import { applyToolProfileFlag } from "./internal/argv"
@@ -28,7 +28,7 @@ setTerminalIo({
 })
 
 loadEnvFiles([".env.dev", ".env.local", ".env"])
-applyGoalPreset(process.env)
+applyGoalPreset(process.env, gateOn(process.env, "QUANTA_GOAL"))
 
 // jun-03 — CLI-host default-ON for the absorbed feature gates. The SLICES stay
 // default-OFF by construction (their `=== "1"` gates + hellgate tests are
