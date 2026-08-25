@@ -91,3 +91,91 @@ describe("capability wires — assembler path vs CLI path", () => {
     expect(opened).toEqual(["readFileState"])
   })
 })
+
+/**
+ * The parity test above proves the CLI's binding path opens the same slots the
+ * assembler does. It cannot prove a THIRD path does — and a third path is
+ * exactly how this defect was born: someone bound a runtime without folding the
+ * registry, every unit test kept passing, and the product lost a DEFAULT-ON
+ * safety control.
+ *
+ * So this half pins the seam itself. `createRuntimeContextBinding` is the one
+ * function that turns a base into the object the loop dispatches tools through,
+ * so every call to it must hand over a base that went through
+ * `wireRuntimePorts` (which folds the registry) — or be listed here with a
+ * reason. Source-level on purpose: a new binding path is a new CALL, and no
+ * runtime assertion sees a call that a future author has not written yet.
+ *
+ * KNOWN LIMITS, stated so nobody reads more assurance into this than it gives:
+ *
+ *   - It watches ONE seam. A future path that builds an `AgentConfig` and hands
+ *     it to the loop without `createRuntimeContextBinding` is invisible here.
+ *     The parity test above is the behavioural half and has the same bound.
+ *   - A base wired earlier and passed by variable reads as UNWIRED, so it fails
+ *     until someone justifies it. That direction is deliberate: a false alarm
+ *     costs a comment, a missed one costs a silent capability loss.
+ *   - The allowlist is text, so a genuinely unwired call could be silenced by
+ *     pasting an allowlisted fragment into it. Every allowlist has this floor;
+ *     the entry has to carry a reason, which is what review reads.
+ */
+describe("capability wires — no binding path may skip the fold", () => {
+  const BIND_FILE = "src/host/runtime/internal/context-binding.ts"
+
+  /** Call sites that legitimately pass an ALREADY-wired base. The key is the
+   *  distinguishing source fragment of the `base:` expression. */
+  const REBIND_ALLOWLIST: Record<string, string> = {
+    "...normalizedState.base":
+      "Re-bind of an already-normalized base during a control-op patch: the slots were opened when that state was first bound, and re-wiring would mint a SECOND ReadFileState for one session (the child-local-state bug in reverse).",
+  }
+
+  /** Index of the `}` closing the `{` at `open`, or -1 when unbalanced. */
+  const closingBrace = (src: string, open: number): number => {
+    let depth = 0
+    for (let i = open; i < src.length; i++) {
+      const ch = src[i]
+      if (ch === "{") depth++
+      else if (ch === "}" && --depth === 0) return i
+    }
+    return -1
+  }
+
+  /** The argument object of each `createRuntimeContextBinding({...})` call,
+   *  delimited by BRACE MATCHING rather than by a fixed character window — a
+   *  window is a magic number that silently starts lying the moment a call is
+   *  reformatted or a longer expression is passed. */
+  const bindCallArgs = (src: string): readonly string[] => {
+    const out: string[] = []
+    const needle = "createRuntimeContextBinding({"
+    let from = 0
+    for (;;) {
+      const at = src.indexOf(needle, from)
+      if (at === -1) break
+      const end = closingBrace(src, at + needle.length - 1)
+      // An unbalanced literal means the scan lost the thread; surface it rather
+      // than silently skipping a call site (which would read as "all wired").
+      expect(end).toBeGreaterThan(at)
+      out.push(src.slice(at, end + 1))
+      from = end
+    }
+    return out
+  }
+
+  test("R1 the fold reaches BOTH sanctioned entry points", async () => {
+    const asm = await Bun.file("src/host/runtime/agent-config-assembler.ts").text()
+    const cli = await Bun.file("src/host/runtime/internal/context-binding/base.ts").text()
+    expect(asm).toContain("foldCapabilityWires(")
+    expect(cli).toContain("foldCapabilityWires(")
+  })
+
+  test("R2 every createRuntimeContextBinding call wires its base (or is justified)", async () => {
+    const src = await Bun.file(BIND_FILE).text()
+    const calls = bindCallArgs(src)
+    expect(calls.length).toBeGreaterThan(0)
+    const unwired = calls.filter((c) => {
+      if (c.includes("wireRuntimePorts(")) return false
+      return !Object.keys(REBIND_ALLOWLIST).some((k) => c.includes(k))
+    })
+    // Reported as the offending source window so a failure names WHICH call.
+    expect(unwired).toEqual([])
+  })
+})

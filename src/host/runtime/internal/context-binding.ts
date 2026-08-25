@@ -587,8 +587,15 @@ export const createRuntimeContextBindingFromBootstrap = async (
   }
 
   if (args.overlay?.admissibilityBuilder !== undefined) {
+    // Wired like the real binding below. This preview exists only to
+    // materialize a reviewer for the admissibility builder, but that reviewer
+    // dispatches tools, and an UNWIRED base hands it a config with no capability
+    // slots — no stale-read guard, no diagnostics, none of it — while the
+    // session's own runtime has them. Wiring is override-safe and idempotent, so
+    // the final binding is unchanged: `base` itself is left unwired here and is
+    // wired once, below, after the admissibility overlay is folded in.
     const preview = createRuntimeContextBinding({
-      base,
+      base: wireRuntimePorts(base),
       ...(args.turnAssembler !== undefined ? { turnAssembler: args.turnAssembler } : {}),
     })
     const admissibility = await args.overlay.admissibilityBuilder({
