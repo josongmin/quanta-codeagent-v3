@@ -58,7 +58,20 @@ describe("runner verify-select and patch-budget driver parity", () => {
   })
 
   test("both drivers keep terminal and late-failure phase stopReason wiring", () => {
-    expect(DRIVER_SRC).toContain('phase.stopReason === "max_turns" && phase.patch.trim() === ""')
+    // The runner core still handles "the agent stopped with nothing to grade".
+    // This was pinned as the single line `phase.stopReason === "max_turns" &&
+    // phase.patch.trim() === ""`; that line has been refactored into ONE shared
+    // precondition plus a switch over the five stop reasons, which is a strictly
+    // better shape — it makes it impossible to add a stop reason that forgets
+    // the empty-patch guard, and that guard is the invariant the line was
+    // protecting. So the pin follows the invariant, and now covers all five
+    // reasons rather than only `max_turns`.
+    expect(DRIVER_SRC).toContain('if (phase.patch.trim() !== "") return undefined')
+    for (const reason of ["max_turns", "error", "refusal", "aborted", "budget_exhausted"]) {
+      expect(DRIVER_SRC, `stop reason ${reason} lost its empty-patch handling`).toContain(
+        `case "${reason}":`,
+      )
+    }
     expect(APP_DRIVER_SRC).toContain("maybeValidateTerminalResult({")
     expect(DRIVER_SRC).toContain("latePhaseFailureResultOf({")
     expect(APP_DRIVER_SRC).toContain("latePhaseFailureResultOf({")
