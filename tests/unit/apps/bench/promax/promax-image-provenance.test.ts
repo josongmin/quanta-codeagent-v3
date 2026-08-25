@@ -21,8 +21,6 @@
 import { describe, expect, test } from "bun:test"
 import { parseProMaxImageProvenance } from "@/apps/bench/harness/promax/image-provenance"
 
-const CHECKOUT = "/opt/quanta/promax/upstream"
-
 // The command's SHAPE is no longer asserted here. Asserting "the string contains
 // `docker image inspect`" is what let a Python SyntaxError ship through eight
 // live runs: the command was read, never run. `promax-image-provenance-executes.test.ts`
