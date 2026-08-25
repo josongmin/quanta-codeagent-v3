@@ -51,6 +51,10 @@ export const GOAL_REJECTION_MESSAGE: Record<CommitRejection, string> = {
     "the goal has no criteria or checks yet — add one with `/goal criterion add` or `/goal check add`",
   "attempt-in-flight":
     "an attributed attempt is still running — wait for it to settle (or pause first)",
+  "hard-cap-exhausted":
+    "the product autonomous attempt cap (20) for this goal is exhausted — create a new goal generation",
+  "budget-exhausted":
+    "the goal's turn budget is exhausted — amend it with `/goal budget --max-turns=N`",
   invalid: "the change could not be applied",
 }
 

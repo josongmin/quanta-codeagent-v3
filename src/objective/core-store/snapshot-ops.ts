@@ -53,7 +53,7 @@ export const snapshotOps = (
         const cell = cells.get(threadId)
         if (cell === undefined) return null
         return Object.freeze({
-          objective: toObjective(cell, enforce, clockNow()),
+          objective: toObjective(cell, enforce, clockNow(), ctx.productAutonomousTurnCap),
           explicitStatus: cell.explicitStatus,
           ...(cell.usageLimitedUntil !== undefined
             ? { usageLimitedUntil: cell.usageLimitedUntil }

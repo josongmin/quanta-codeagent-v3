@@ -286,6 +286,8 @@ const COMMIT_ERROR_MESSAGE: Record<CommitRejection, string> = {
   "validation-contract-missing":
     "the objective has no success criteria or checks to complete against",
   "attempt-in-flight": "an attributed attempt is still running; wait for it to settle",
+  "hard-cap-exhausted": "the product autonomous attempt cap for this goal is exhausted",
+  "budget-exhausted": "the goal's turn budget is exhausted",
   invalid: "objective mutation could not be applied (no objective set for this thread)",
 }
 

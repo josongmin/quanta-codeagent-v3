@@ -121,6 +121,27 @@ export {
   evaluateGoalWakeArm,
   evaluateGoalWakeFire,
 } from "./goal-wake-controller"
+export type {
+  AutonomousAllowance,
+  AutonomousAllowanceInput,
+  BudgetLimitSource,
+  GoalWakeDelay,
+  GoalWakeDelayReason,
+  GoalWakeEligibility,
+  GoalWakeIneligibleReason,
+  GoalWakeSignal,
+} from "./goal-wake-policy"
+export {
+  autonomousAllowance,
+  clampGoalQuietMs,
+  computeGoalWakeDelay,
+  deriveWakeSignal,
+  evaluateWakeEligibility,
+  GOAL_PRODUCT_AUTONOMOUS_TURN_CAP,
+  GOAL_WAKE_MAX_BACKOFF_MS,
+  GOAL_WAKE_MIN_QUIET_MS,
+  resolveProductAutonomousTurnCap,
+} from "./goal-wake-policy"
 // GOAL-01 — generation identity + the domain-owned goal-text ceiling.
 export type { ObjectiveIdFactory } from "./identity"
 export {
