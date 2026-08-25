@@ -23,7 +23,7 @@
  */
 
 import { describe, expect, test } from "bun:test"
-import { deriveVerificationScope } from "../../tools/dev/verify-scope"
+import { deriveVerificationScope, specifiersOfText } from "../../tools/dev/verify-scope"
 
 describe("verify-scope — derived from the change, not from intuition", () => {
   test("H1 case 3: a transitive-only dependent is found (no textual mention exists)", () => {
@@ -50,8 +50,12 @@ describe("verify-scope — derived from the change, not from intuition", () => {
     // module has to come back far smaller than the suite, or the tool is just a
     // slower way of saying "run everything".
     const leaf = deriveVerificationScope(["src/apps/bench/remote/box-session/chunk-artifacts.ts"])
+    // Compared against a CENTRAL module rather than against a fraction I picked:
+    // a ratio would be a magic number, and the claim that matters is relative —
+    // reach must track how widely a module is actually depended on.
+    const central = deriveVerificationScope(["src/storage/service.ts"])
     expect(leaf.totalTestFiles).toBeGreaterThan(1000)
-    expect(leaf.tests.length).toBeLessThan(leaf.totalTestFiles / 4)
+    expect(leaf.tests.length).toBeLessThan(central.tests.length)
   })
 
   test("H5 the scope is a strict SUBSET even for a central module", () => {
@@ -66,5 +70,23 @@ describe("verify-scope — derived from the change, not from intuition", () => {
     const scope = deriveVerificationScope(["src/does/not/exist.ts"])
     expect(scope.tests).toEqual([])
     expect(scope.globals.length).toBeGreaterThan(0)
+  })
+})
+
+describe("verify-scope — mock.module is a dependency edge", () => {
+  // Asserted on the EXTRACTOR, not through the graph. The first version of this
+  // test went through `deriveVerificationScope` and was VACUOUS: deleting the
+  // rule left it green, because every mock-only target in this repo is also
+  // reachable by an ordinary import. Injection caught that; the lesson is that a
+  // rule which currently changes no end-to-end answer can only be pinned at the
+  // unit it actually changes.
+  test('H7 `mock.module("@/x")` yields @/x with no import statement present', () => {
+    const specs = specifiersOfText('mock.module("@/agent", () => ({ a: 1 }))\n')
+    expect(specs).toContain("@/agent")
+  })
+
+  test("H8 ordinary imports still come through (the rule is additive)", () => {
+    const specs = specifiersOfText('import { x } from "@/shared"\nawait import("./local")\n')
+    expect(specs).toEqual(expect.arrayContaining(["@/shared", "./local"]))
   })
 })

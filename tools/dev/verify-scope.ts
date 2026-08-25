@@ -100,19 +100,38 @@ const allSourceFiles = (): string[] => {
  *  unreadable to the resolver below. */
 const SPEC_RE = /(?:from|import)\s*\(?\s*["']([^"']+)["']/g
 
+/** `mock.module("@/x", …)` is a DEPENDENCY even when the file never imports the
+ *  module — the test replaces it process-globally. Treated as first-class here
+ *  because that exact relationship produced this session's worst defect: two
+ *  tests mock-replaced `@/storage/service` with wrappers that dropped an
+ *  argument, and every later write in the process lost it. Measured on this repo
+ *  every mock-only target happens to be reachable by some other import too, so
+ *  today this edge changes no answer — which is precisely why it belongs in the
+ *  code and not in luck. */
+const MOCK_MODULE_RE = /mock\.module\(\s*["']([^"']+)["']/g
+
+/** Every module specifier in `text`. Exported so the EXTRACTION rule can be
+ *  tested on its own: asserting it through the whole graph is vacuous, because
+ *  a file that mock-replaces a module almost always imports something that
+ *  reaches it anyway — measured, and it made the first version of that test pass
+ *  with the rule removed. */
+export const specifiersOfText = (text: string): string[] => {
+  const out: string[] = []
+  for (const re of [SPEC_RE, MOCK_MODULE_RE]) {
+    for (const m of text.matchAll(re)) {
+      const spec = m[1]
+      if (spec !== undefined) out.push(spec)
+    }
+  }
+  return out
+}
+
 const specifiersOf = (rel: string): string[] => {
-  let text: string
   try {
-    text = readFileSync(join(REPO_ROOT, rel), "utf8")
+    return specifiersOfText(readFileSync(join(REPO_ROOT, rel), "utf8"))
   } catch {
     return []
   }
-  const out: string[] = []
-  for (const m of text.matchAll(SPEC_RE)) {
-    const spec = m[1]
-    if (spec !== undefined) out.push(spec)
-  }
-  return out
 }
 
 const CANDIDATE_SUFFIXES = ["", ".ts", ".tsx", "/index.ts", "/index.tsx"] as const
