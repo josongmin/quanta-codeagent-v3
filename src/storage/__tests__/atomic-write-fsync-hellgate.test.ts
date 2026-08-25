@@ -23,7 +23,7 @@
  * this barrier, so the proof covers them by construction.
  */
 
-import { describe, expect, test } from "bun:test"
+import { afterAll, describe, expect, test } from "bun:test"
 import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -135,7 +135,11 @@ describe("atomic-write-fsync-crash-window-hellgate", () => {
   })
 })
 
-process.on("exit", () => {
+// `afterAll`, NOT `process.on("exit")`. Bun's test runner does not fire an
+// exit hook for a test file, so that form never ran and every fixture dir it
+// created stayed on disk — enough of them to make `ls /tmp` slow enough to
+// time other tests out.
+afterAll(() => {
   for (const d of tmps) {
     try {
       rmSync(d, { recursive: true, force: true })

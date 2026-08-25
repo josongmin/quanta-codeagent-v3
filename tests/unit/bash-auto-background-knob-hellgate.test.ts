@@ -24,7 +24,7 @@
  *     detach deadline when no per-call `timeout_ms` is given.
  */
 
-import { afterEach, describe, expect, test } from "bun:test"
+import { afterAll, afterEach, describe, expect, test } from "bun:test"
 import { mkdtempSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -36,7 +36,11 @@ import { bashTool } from "@/tool/bash"
 const POSIX = process.platform !== "win32"
 const dir = mkdtempSync(join(tmpdir(), "bash-autobg-knob-"))
 
-process.on("exit", () => {
+// `afterAll`, NOT `process.on("exit")`. Bun's test runner does not fire an
+// exit hook for a test file, so that form never ran and every fixture dir it
+// created stayed on disk — enough of them to make `ls /tmp` slow enough to
+// time other tests out.
+afterAll(() => {
   try {
     rmSync(dir, { recursive: true, force: true })
   } catch {

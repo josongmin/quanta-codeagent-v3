@@ -20,7 +20,7 @@
  *      (proves config was applied — no half-init)
  */
 
-import { describe, expect, test } from "bun:test"
+import { afterAll, describe, expect, test } from "bun:test"
 import { mkdtempSync, readFileSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -71,7 +71,11 @@ describe("shadow-init-marker-atomic-hellgate", () => {
 })
 
 // Best-effort cleanup of tmp dirs.
-process.on("exit", () => {
+// `afterAll`, NOT `process.on("exit")`. Bun's test runner does not fire an
+// exit hook for a test file, so that form never ran and every fixture dir it
+// created stayed on disk — enough of them to make `ls /tmp` slow enough to
+// time other tests out.
+afterAll(() => {
   for (const d of tmps) {
     try {
       rmSync(d, { recursive: true, force: true })

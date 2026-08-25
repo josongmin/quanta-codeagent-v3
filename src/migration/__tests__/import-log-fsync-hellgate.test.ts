@@ -18,7 +18,7 @@
  *   4. real default barrier round-trips an append to disk (regression)
  */
 
-import { describe, expect, test } from "bun:test"
+import { afterAll, describe, expect, test } from "bun:test"
 import { mkdtempSync, readdirSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -120,7 +120,11 @@ describe("import-log-append-fsync-crash-window-hellgate", () => {
   })
 })
 
-process.on("exit", () => {
+// `afterAll`, NOT `process.on("exit")`. Bun's test runner does not fire an
+// exit hook for a test file, so that form never ran and every fixture dir it
+// created stayed on disk — enough of them to make `ls /tmp` slow enough to
+// time other tests out.
+afterAll(() => {
   for (const d of tmps) {
     try {
       rmSync(d, { recursive: true, force: true })

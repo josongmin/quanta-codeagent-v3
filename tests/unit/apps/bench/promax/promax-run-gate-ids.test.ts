@@ -17,7 +17,7 @@
  * operator separately invokes `campaign-gates.ts`. A number that reads as a pass
  * on its own must not depend on someone remembering a second command.
  */
-import { describe, expect, test } from "bun:test"
+import { afterAll, describe, expect, test } from "bun:test"
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -90,11 +90,13 @@ describe("a narrowed run says so in its own output", () => {
   })
 })
 
-if (typeof process !== "undefined") {
-  process.on("exit", () => {
-    for (const dir of TEMP) rmSync(dir, { recursive: true, force: true })
-  })
-}
+// `afterAll`, NOT `process.on("exit")`. Bun's test runner does not fire an
+// exit hook for a test file, so that form never ran and every fixture dir it
+// created stayed on disk — enough of them to make `ls /tmp` slow enough to
+// time other tests out.
+afterAll(() => {
+  for (const dir of TEMP) rmSync(dir, { recursive: true, force: true })
+})
 
 describe("WIRING — the narrowing note reaches the operator's actual output", () => {
   test("🔴 a narrowed run's rendered output carries the note", async () => {
