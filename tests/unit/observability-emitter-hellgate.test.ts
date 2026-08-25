@@ -146,7 +146,7 @@ describe("emitter — snapshot semantics", () => {
     const ledger = createRunLedger()
     ledger.start({ id: "r1", kind: "shell", owner: "t", title: "ls" })
     const objective = createObjectiveStore()
-    objective.set("default", { goal: "go" })
+    objective.create("default", { goal: "go" })
     const approvalSM = createApprovalStateMachine()
     approvalSM.request({
       threadId: "default",
@@ -266,7 +266,7 @@ describe("emitter — delta diffing", () => {
     const sink = sinkOf()
     const timer = timerOf()
     const objective = createObjectiveStore()
-    objective.set("default", { goal: "first" })
+    objective.create("default", { goal: "first" })
     const h = createObservabilityEmitter({ ws: sink, objective, timer })
     h.tick() // snapshot
     sink.reset()
@@ -335,7 +335,7 @@ describe("emitter — coalescing", () => {
     const ledger = createRunLedger()
     ledger.start({ id: "r1", kind: "shell", owner: "t", title: "ls" })
     const objective = createObjectiveStore()
-    objective.set("default", { goal: "go" })
+    objective.create("default", { goal: "go" })
     const h = createObservabilityEmitter({
       ws: sink,
       runLedger: ledger,
@@ -406,7 +406,7 @@ describe("emitter — hostile ports", () => {
     const sink = sinkOf()
     const timer = timerOf()
     const objective = createObjectiveStore()
-    objective.set("default", { goal: "go" })
+    objective.create("default", { goal: "go" })
     const real = objective
     let allowGet = true
     const hostile: typeof objective = {

@@ -78,7 +78,7 @@ GOAL-00 current-head baseline + owner freeze
 - 완료 rail(티켓별 Proof rails + 아래 공통):
   ```
   bun run typecheck && bun run typecheck:tests
-  bun run tools/dev/run-biome.ts check --write <touched paths>   # repo-wide lint:fix 금지
+  node_modules/.bin/biome check --write <touched paths>   # run-biome.ts 래퍼는 path 인자를 무시하고 repo 전체를 --write 함(collateral) — 절대 사용 금지
   bun run lint:debt
   bun test tests/unit/god-code-ratchet.test.ts tests/unit/_arch
   bun test tests/unit/objective tests/unit/objective-*.test.ts tests/unit/goal-*.test.ts tests/unit/apps/cli
@@ -139,6 +139,13 @@ GOAL-00 current-head baseline + owner freeze
 | shadow judge lifecycle | 02(경계: telemetry-only, 상태 불변) | 04(`ObjectiveJudgeObserverPort` 세션 task lifecycle 배선) | 04 전까지 production shadow 호출 비활성 |
 | `sessionEpoch` | 07 | 07 | 04/06은 `when available`로만 참조 |
 | GOAL-09 producer 인벤토리 | 09 선행 | 09 | network retry evidence 레지스트리는 현재 없음(openai adapter 내부 retry뿐) — 09 착수 시 producer 존재 확인 후 없는 것은 scope-out 기록 |
+
+## GOAL-01 실행 기록 (2026-08-25)
+- 랜딩 범위: objectiveId/createdBy/migrationSource, `create|replace|clear|setExplicitStatus|amendBudget|settleAttempt`(+기존), explicit `active|paused`, 세대 경계에서 evidence 전량 삭제, receipt의 objectiveId 바인딩, tombstone revision, 세션 스냅샷 v2(+v1 로드/1회 마이그레이션, 4000자 초과 거부), `knownThreadIds`, `ObjectiveReadPort` 타입, authority-boundary ratchet(allowlist 10 파일, 02가 축소).
+- 소유권 표와 다른 점(기록): `settleAttempt`의 authority 측 정산(usage debit + receipt)은 01에서 구현했다 — `recordUsage` 제거 후 budget_limited 파생/테스트가 살아 있으려면 유일한 usage feeder가 필요했기 때문. 04는 durable `beginAttempt` + runtime 배선을 추가한다. actor-fixed capability 객체(`ModelObjectiveCommands` 등)는 02에서 정책표와 함께 도입(01은 read port 타입 + ratchet까지).
+- port 표면 규칙: 타입된 rejection(objective-exists 등)은 `null`, rejection 없는 no-op(unknown criterion id)은 기존 objective 반환(기존 계약 유지).
+- `objective_set` 도구: objective가 있으면 `replace`(새 세대). `/goal <text>`도 동일(05가 `edit` 강제로 바꿈).
+- 도구 하자: `tools/dev/run-biome.ts check --write <paths>`는 path 인자를 무시하고 repo 전체를 --write 한다(collateral 위험). 티켓 rail은 `node_modules/.bin/biome check --write <paths>`로 교체됨.
 
 ## 결정 기록 (구현 전에 고정, 티켓 내 재결정 금지)
 - verifier 실행 posture는 **workspace-write + before/after source digest 불변 검증**이다. read-only source mount는 `bun test`(.cache/tsbuildinfo)·pytest(`__pycache__`)·cargo(`target/`) 같은 실용 check를 전부 fail-closed로 만들어 verifier를 무용하게 하므로 기본이 아니다. digest가 변하면 stale-source, receipt 0. network deny·outside-workspace read deny·resource cap은 유지. 더 엄격한 read-only 프로필은 opt-in.

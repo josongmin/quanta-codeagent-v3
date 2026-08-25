@@ -49,7 +49,7 @@ describe("session.objective.mutate — kernel dispatch", () => {
     })
     const cmd = buildObjectiveMutate(
       { sessionId: "s1", clock },
-      { kind: "set", goal: "g" },
+      { kind: "create", definition: { goal: "g" } },
       undefined,
     )
     const result = await dispatchSessionCommand(state, cmd, {
@@ -63,7 +63,7 @@ describe("session.objective.mutate — kernel dispatch", () => {
     expect(result.state.revision).toBe(state.revision + 1)
     // routed to the host with the mutation
     expect(seen.length).toBe(1)
-    expect(seen[0]?.mutation).toEqual({ kind: "set", goal: "g" })
+    expect(seen[0]?.mutation).toEqual({ kind: "create", definition: { goal: "g" } })
   })
 
   test("scheduler forwards expectedRevision as the CAS target", async () => {
@@ -81,7 +81,7 @@ describe("session.objective.mutate — kernel dispatch", () => {
     })
     const cmd = buildObjectiveMutate(
       { sessionId: "s1", clock },
-      { kind: "set", goal: "g" },
+      { kind: "create", definition: { goal: "g" } },
       {
         expectedObjectiveRevision: 7,
       },
@@ -102,7 +102,7 @@ describe("session.objective.mutate — kernel dispatch", () => {
     })
     const cmd = buildObjectiveMutate(
       { sessionId: "s1", clock },
-      { kind: "set", goal: "g" },
+      { kind: "create", definition: { goal: "g" } },
       undefined,
     )
     const result = await dispatchSessionCommand(state, cmd, {

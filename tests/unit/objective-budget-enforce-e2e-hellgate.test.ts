@@ -19,6 +19,11 @@
  *   3. Knob ON but budget UNDER the cap ⇒ continuation still fires (the gate
  *      only suppresses the EXHAUSTED case).
  *
+ * GOAL-01: usage is HOST-measured (`settleAttempt`, system actor); the retired
+ * `recordUsage` self-report is gone. The pre-run ledger is seeded through
+ * `settleUsage` on the REAL authority (the spy is a bare port double, so the
+ * settlement must target the inner store).
+ *
  * Harness mirrors `tests/unit/loop-reactive-compaction-emit-hellgate.test.ts`
  * (the canonical reactive-compaction driver): a scripted PTL throw → summary →
  * final-answer script forces exactly one reactive compaction per run.
@@ -36,6 +41,7 @@ import { __resetDefaultPermissionStore, type PermissionContext } from "@/permiss
 import { __resetRuntimeConfig, LLMError } from "@/shared"
 import type { AgentEvent, StreamPort } from "@/stream"
 import { defaultTools, ToolRegistry } from "@/tool"
+import { settleUsage } from "./objective/v2-helpers"
 
 // ─── House fakes (mirror loop-reactive-compaction-emit-hellgate) ──────────
 
@@ -70,9 +76,13 @@ class SpyObjectivePort implements ObjectivePort {
   setNextActionsCalls = 0
   lastNextActions: readonly string[] | undefined
   constructor(private readonly inner: ObjectivePort) {}
-  set: ObjectivePort["set"] = (t, i) => this.inner.set(t, i)
+  create: ObjectivePort["create"] = (t, d) => this.inner.create(t, d)
+  replace: ObjectivePort["replace"] = (t, d) => this.inner.replace(t, d)
+  clear: ObjectivePort["clear"] = (t) => this.inner.clear(t)
   get: ObjectivePort["get"] = (t) => this.inner.get(t)
-  updateStatus: ObjectivePort["updateStatus"] = (t, s) => this.inner.updateStatus(t, s)
+  setExplicitStatus: ObjectivePort["setExplicitStatus"] = (t, s) =>
+    this.inner.setExplicitStatus(t, s)
+  amendBudget: ObjectivePort["amendBudget"] = (t, b) => this.inner.amendBudget(t, b)
   addBlocker: ObjectivePort["addBlocker"] = (t, b) => this.inner.addBlocker(t, b)
   clearBlocker: ObjectivePort["clearBlocker"] = (t, b) => this.inner.clearBlocker(t, b)
   setNextActions: ObjectivePort["setNextActions"] = (t, a) => {
@@ -81,7 +91,6 @@ class SpyObjectivePort implements ObjectivePort {
     return this.inner.setNextActions(t, a)
   }
   markCriterion: ObjectivePort["markCriterion"] = (t, c, m) => this.inner.markCriterion(t, c, m)
-  recordUsage: ObjectivePort["recordUsage"] = (t, u) => this.inner.recordUsage(t, u)
   markUsageLimited: ObjectivePort["markUsageLimited"] = (t, until) =>
     this.inner.markUsageLimited(t, until)
   list: ObjectivePort["list"] = () => this.inner.list()
@@ -177,9 +186,10 @@ afterEach(() => {
 describe("E2E [H17] — budget enforcement gates the idle-continuation", () => {
   test("(1) knob ON + budget exhausted ⇒ continuation SUPPRESSED + budget_limited", async () => {
     setEnforce(true)
-    const port = new SpyObjectivePort(createObjectiveStore({ enforceBudget: true }))
-    port.set(TID, { goal: "do the work", budget: { maxTokens: 100 } })
-    port.recordUsage(TID, { tokens: 200 }) // exhaust BEFORE the run
+    const inner = createObjectiveStore({ enforceBudget: true })
+    const port = new SpyObjectivePort(inner)
+    port.create(TID, { goal: "do the work", budget: { maxTokens: 100 } })
+    settleUsage(inner, TID, { tokens: 200 }) // host-settled: exhaust BEFORE the run
     const pre = port.get(TID) as Objective
     expect(pre.status).toBe("budget_limited") // store derived it
 
@@ -207,9 +217,11 @@ describe("E2E [H17] — budget enforcement gates the idle-continuation", () => {
     setEnforce(false)
     // Even an enforcing store stays informational at the loop gate when the
     // knob is OFF — but to model "today" precisely we use a default store.
-    const port = new SpyObjectivePort(createObjectiveStore())
-    port.set(TID, { goal: "do the work", budget: { maxTokens: 100 } })
-    port.recordUsage(TID, { tokens: 200 }) // "over" the informational cap
+    const inner = createObjectiveStore()
+    const port = new SpyObjectivePort(inner)
+    port.create(TID, { goal: "do the work", budget: { maxTokens: 100 } })
+    settleUsage(inner, TID, { tokens: 200 }) // "over" the informational cap
+    expect(port.get(TID)?.budget.tokensUsed).toBe(200)
     expect(port.get(TID)?.status).toBe("active") // never limited (knob OFF)
 
     const out = await withTimeout(
@@ -233,9 +245,11 @@ describe("E2E [H17] — budget enforcement gates the idle-continuation", () => {
 
   test("(3) knob ON but UNDER the cap ⇒ continuation still fires", async () => {
     setEnforce(true)
-    const port = new SpyObjectivePort(createObjectiveStore({ enforceBudget: true }))
-    port.set(TID, { goal: "do the work", budget: { maxTokens: 10_000 } })
-    port.recordUsage(TID, { tokens: 50 }) // well under the cap
+    const inner = createObjectiveStore({ enforceBudget: true })
+    const port = new SpyObjectivePort(inner)
+    port.create(TID, { goal: "do the work", budget: { maxTokens: 10_000 } })
+    settleUsage(inner, TID, { tokens: 50 }) // well under the cap
+    expect(port.get(TID)?.budget.tokensUsed).toBe(50)
     expect(port.get(TID)?.status).toBe("active")
 
     const out = await withTimeout(

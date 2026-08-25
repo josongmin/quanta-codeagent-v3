@@ -197,7 +197,11 @@ const askViaTool = (ctx: ToolContext, prompt: string): Promise<ToolEvent> => {
 }
 
 const modelSet = (goal: string) =>
-  ({ threadId: "t-cli", actor: "model", mutation: { kind: "set", goal } }) as const
+  ({
+    threadId: "t-cli",
+    actor: "model",
+    mutation: { kind: "create", definition: { goal } },
+  }) as const
 
 /** A `SessionBootstrapResult` double carrying the campaign bootstrap seams —
  *  the SAME fields the live `bootstrap-session` forwards from its authority
@@ -490,7 +494,7 @@ describe("aug-22 ALL-GATES-ON — the whole campaign assembles live, no gate int
       // Objective restoreFrom accepted by the gated authority (round-trip ids).
       const save = resolveGatedObjectiveAuthority(env, { confirmationAvailable: true })
       expect(save).toBeDefined()
-      save?.set("thr-1", { goal: "ship", successCriteria: ["compiles"] })
+      save?.create("thr-1", { goal: "ship", successCriteria: ["compiles"] })
       const snapshot = encodeObjectiveSnapshot(save as ObjectivePort)
       const reopened = resolveGatedObjectiveAuthority(env, {
         confirmationAvailable: true,

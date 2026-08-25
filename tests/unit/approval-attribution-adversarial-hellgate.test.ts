@@ -82,7 +82,7 @@ describe("A1 id collision — repeat request() preserves the original attributio
   test("second request(sameId) returns the EXISTING record; no second blocker/ledger entry", () => {
     const objective = createObjectiveStore()
     const ledger = createRunLedger()
-    objective.set("session-x", { goal: "safe" })
+    objective.create("session-x", { goal: "safe" })
     const asm = createApprovalStateMachine({ now: stepClock(), objective, ledger })
 
     const first = asm.request(REQ("dup-1"))
@@ -194,7 +194,7 @@ describe("A3 cross-terminal ordering — first terminal wins, later ones are no-
 describe("A4 concurrent settle/cancel/expire — exactly one wins, blocker cleared once", () => {
   test("Promise.all of settle+cancel+expire ⇒ one terminal status; blocker cleared exactly once", async () => {
     const objective = createObjectiveStore()
-    objective.set("session-x", { goal: "safe" })
+    objective.create("session-x", { goal: "safe" })
     const asm = createApprovalStateMachine({ now: stepClock(), objective })
     asm.request(REQ("cc-1"))
     expect(objective.get("session-x")?.blockers).toHaveLength(1)

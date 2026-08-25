@@ -4,6 +4,9 @@
  * A completion is recorded as a RECEIPT (who completed it, how, when), never as
  * a bare boolean, so `deriveStatus` can distinguish a manually-asserted
  * completion from a verifier-proven one.
+ *
+ * GOAL-01: usage is applied ONLY by the authority's `settleAttempt` handler
+ * (`applyUsage`) — there is no self-reported `recordUsage` on the port.
  */
 
 import type { ObjectiveCore } from "../store"
@@ -13,7 +16,7 @@ import type { ObjectiveStoreCtx } from "./ctx"
 
 export const completionOps = (
   ctx: ObjectiveStoreCtx,
-): Pick<ObjectiveCore, "applyManualCompletion" | "applyVerifierCompletion" | "recordUsage"> => {
+): Pick<ObjectiveCore, "applyManualCompletion" | "applyVerifierCompletion" | "applyUsage"> => {
   const { cells, mutate } = ctx
   return {
     applyManualCompletion(threadId, criterionId, met, receipt): Objective | null {
@@ -34,20 +37,24 @@ export const completionOps = (
 
     applyVerifierCompletion(threadId, criterionId, receipt): Objective | null {
       // The VERIFIER-ONLY path. Completes a CHECKED criterion ⇔ its declared
-      // `check.id` matches the receipt's `checkId` and the result passed. Refuses
-      // (⇒ null) a manual/missing criterion or an id/verdict mismatch.
-      const c = cells.get(threadId)?.criteria.find((x) => x.id === criterionId)
-      if (c === undefined || c.kind !== "checked" || c.check === undefined) return null
+      // `check.id` matches the receipt's `checkId`, the receipt binds the live
+      // generation, and the result passed. Refuses (⇒ null) otherwise.
+      const cell = cells.get(threadId)
+      const c = cell?.criteria.find((x) => x.id === criterionId)
+      if (cell === undefined || c === undefined || c.kind !== "checked" || c.check === undefined) {
+        return null
+      }
       if (receipt.checkId !== c.check.id) return null
+      if (receipt.objectiveId !== cell.objectiveId) return null
       if (receipt.verifierResult.passed !== true) return null
-      return mutate(threadId, (cell) => {
-        cell.criteria = cell.criteria.map((x) =>
+      return mutate(threadId, (live) => {
+        live.criteria = live.criteria.map((x) =>
           x.id === criterionId ? { ...x, met: true, completion: receipt } : x,
         )
       })
     },
 
-    recordUsage(threadId, used): Objective | null {
+    applyUsage(threadId, used): Objective | null {
       return mutate(threadId, (cell) => {
         const dTokens = finiteNonNegInt(used?.tokens)
         const dTurns = finiteNonNegInt(used?.turns)

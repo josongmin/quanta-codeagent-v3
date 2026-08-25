@@ -66,6 +66,8 @@ describe("R5 audit-H4 — objective rebuild truncation observability", () => {
       objectives: [
         {
           threadId: "t1",
+          objectiveId: "obj-t1",
+          createdBy: "system" as const,
           goal: "g",
           successCriteria: Array.from({ length: 1000 }, (_, i) => makeCriterion(i)),
           status: "active" as const,
@@ -96,6 +98,8 @@ describe("R5 audit-H4 — objective rebuild truncation observability", () => {
       objectives: [
         {
           threadId: "t2",
+          objectiveId: "obj-t2",
+          createdBy: "system" as const,
           goal: "g",
           successCriteria: [],
           status: "blocked" as const,
@@ -121,6 +125,8 @@ describe("R5 audit-H4 — objective rebuild truncation observability", () => {
       objectives: [
         {
           threadId: "t3",
+          objectiveId: "obj-t3",
+          createdBy: "system" as const,
           goal: "g",
           successCriteria: Array.from({ length: 200 }, (_, i) => makeCriterion(i)),
           status: "active" as const,
@@ -145,6 +151,8 @@ describe("R5 audit-H4 — objective rebuild truncation observability", () => {
       objectives: [
         {
           threadId: "t4",
+          objectiveId: "obj-t4",
+          createdBy: "system" as const,
           goal: "g",
           successCriteria: Array.from({ length: 256 }, (_, i) => makeCriterion(i)),
           status: "active" as const,

@@ -10,6 +10,7 @@ import {
   runIdleContinuation,
 } from "@/objective"
 import { defaultTools, ToolRegistry } from "@/tool"
+import { seedObjective } from "../unit/objective/v2-helpers"
 import { cfg, RecordingStream, text, toolUse, withTimeout } from "./_harness"
 
 /**
@@ -151,8 +152,11 @@ describe("objective-goal-continuation-live — runIdleContinuation decision logi
     // A goal with ONE success criterion — the store derives `completed` ONLY
     // once the criterion is marked met, so "the turn finished" is NOT itself
     // completion (the anti-scope-shrink discipline made concrete).
-    const obj = store.set(TID, { goal: "ship the migration", successCriteria: ["migrated"] })
-    store.updateStatus(TID, "active")
+    const obj = seedObjective(store, TID, {
+      goal: "ship the migration",
+      successCriteria: ["migrated"],
+    })
+    store.setExplicitStatus(TID, "active")
     expect(store.get(TID)?.status).toBe("active")
     const criterionId = obj.successCriteria[0]?.id ?? ""
 
@@ -232,8 +236,8 @@ describe("objective-goal-continuation-live — runIdleContinuation decision logi
     // goal drives ZERO passes. If the "re-drive" assertions matched on something
     // always-true, this control would ALSO drive a pass and fail.
     const store = createObjectiveStore()
-    store.set(TID, { goal: "ship the migration", successCriteria: ["migrated"] })
-    store.updateStatus(TID, "active")
+    seedObjective(store, TID, { goal: "ship the migration", successCriteria: ["migrated"] })
+    store.setExplicitStatus(TID, "active")
     expect(store.get(TID)?.status).toBe("active")
 
     const llm = new PursuitLLM([], text("must not run — gate is off"))
@@ -252,14 +256,16 @@ describe("objective-goal-continuation-live — runIdleContinuation decision logi
     expect(launches.length).toBe(0) // resume was never invoked
   })
 
-  test("a PAUSED goal (/goal clear) ⇒ no continuation pass (manual suspend suppresses pursuit)", async () => {
+  test("a PAUSED goal (/objective pause) ⇒ no continuation pass (manual suspend suppresses pursuit)", async () => {
     // Codex: a paused goal does NOT auto-resume on idle. Prove the OFF-by-status
     // path through the real orchestrator drives zero passes even when the gate
     // itself is ON — the skip reason is the STATUS, not the feature gate.
+    // GOAL-01: `/goal clear` now DELETES the objective (⇒ `no-goal`); the paused
+    // posture is reached via the explicit `paused` intent (`/objective pause`).
     const store = createObjectiveStore()
-    store.set(TID, { goal: "ship the migration", successCriteria: ["migrated"] })
-    store.updateStatus(TID, "active")
-    store.updateStatus(TID, "paused")
+    seedObjective(store, TID, { goal: "ship the migration", successCriteria: ["migrated"] })
+    store.setExplicitStatus(TID, "active")
+    store.setExplicitStatus(TID, "paused")
     expect(store.get(TID)?.status).toBe("paused")
 
     const llm = new PursuitLLM([], text("must not run — goal is paused"))

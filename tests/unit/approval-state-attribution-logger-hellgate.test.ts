@@ -63,8 +63,10 @@ const stepClock = (start = 1000, step = 10) => {
  *  must hand back so the store can extract `blockerId` and later try to
  *  clear it (and trip the swap'd catch). */
 const stubObjective = (threadId: string, blockerId: string): Objective => ({
+  objectiveId: "obj-stub",
   threadId,
   goal: "stub",
+  createdBy: "system",
   successCriteria: Object.freeze([]),
   status: "blocked",
   budget: { tokensUsed: 0, turnsUsed: 0 },
@@ -93,16 +95,18 @@ const stubRunEntry = (id: string, owner: string): RunEntry => ({
 const objectiveWithThrowingClear = (): ObjectivePort => {
   const obj = stubObjective("thread-A", "blk-1")
   return {
-    set: () => obj,
+    create: () => obj,
+    replace: () => obj,
+    clear: () => true,
     get: () => obj,
-    updateStatus: () => obj,
+    setExplicitStatus: () => obj,
+    amendBudget: () => obj,
     addBlocker: () => obj,
     clearBlocker: () => {
       throw new Error("clear-boom")
     },
     setNextActions: () => obj,
     markCriterion: () => obj,
-    recordUsage: () => obj,
     markUsageLimited: () => obj,
     list: () => Object.freeze([obj]),
     toSnapshot: () => ({ objectives: Object.freeze([obj]) }),

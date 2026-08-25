@@ -1,13 +1,12 @@
 /**
  * ADR-0394 — Objective slice barrel.
  *
- * The ONLY allowed import path for the objective model + store. This wave is
- * MODEL ONLY: importing this barrel allocates nothing and mutates no process
- * state until a host calls `createObjectiveStore()`. It is NOT yet wired into
- * the agent loop, dispatch, features, prompt, or any tool.
+ * The ONLY allowed import path for the objective model + authority. Importing
+ * this barrel allocates nothing and mutates no process state until a host
+ * calls `createObjectiveStore()` / `createObjectiveAuthority()`.
  */
 
-// RFC-03 C1 — the public store constructor now returns the revisioned authority
+// RFC-03 C1 — the public store constructor returns the revisioned authority
 // (typed as `ObjectivePort`); the richer protocol is recovered via
 // `asObjectiveAuthority`. There is no un-revisioned store constructor exported.
 export {
@@ -77,9 +76,26 @@ export {
   evaluateGoalWakeArm,
   evaluateGoalWakeFire,
 } from "./goal-wake-controller"
-export type { ObjectiveDomainSnapshot, ObjectiveThreadSnapshot } from "./model"
-export type { ObjectiveActor, ObjectiveMutation, ObjectiveOperationKind } from "./mutations"
+// GOAL-01 — generation identity + the domain-owned goal-text ceiling.
+export type { ObjectiveIdFactory } from "./identity"
 export {
+  defaultObjectiveIdFactory,
+  isObjectiveIdLike,
+  LEGACY_OBJECTIVE_ID_PREFIX,
+  legacyObjectiveId,
+  MAX_GOAL_CHARS,
+  normalizeGoalText,
+} from "./identity"
+export type { ExplicitStatus, ObjectiveDomainSnapshot, ObjectiveThreadSnapshot } from "./model"
+export type {
+  ObjectiveActor,
+  ObjectiveAttemptSettlement,
+  ObjectiveMutation,
+  ObjectiveOperationKind,
+} from "./mutations"
+export {
+  GENERATION_MUTATION_KINDS,
+  isGenerationMutationKind,
   isObjectiveActor,
   isObjectiveOperationKind,
   OBJECTIVE_ACTORS,
@@ -92,16 +108,20 @@ export type {
   ObjectiveAuthority,
   ObjectiveAuthorityOptions,
   ObjectiveMutationCommand,
+  ObjectiveReadPort,
   PreparedObjectiveMutation,
 } from "./ports"
 export type { ProgressReceipt, ProgressTurnOutcome } from "./progress-receipt"
 export {
   appendProgressReceipt,
+  isProgressTurnOutcome,
   MAX_PROGRESS_RECEIPTS,
   MAX_PROGRESS_REF_LENGTH,
   MAX_PROGRESS_REFS,
   normalizeProgressReceipt,
+  verifierReceiptRef,
 } from "./progress-receipt"
+export type { ObjectiveMigrationSource } from "./provenance"
 export {
   buildPursuitContinuationPrompt,
   GOAL_PURSUIT_DISCIPLINE,
@@ -111,9 +131,12 @@ export type { ObjectiveCore } from "./store"
 export type {
   Blocker,
   CheckedCriterion,
+  ExplicitObjectiveStatus,
+  GoalDefinition,
   ManualCriterion,
   Objective,
   ObjectiveBudget,
+  ObjectiveBudgetLimit,
   ObjectivePort,
   ObjectiveSnapshot,
   ObjectiveStatus,

@@ -229,7 +229,7 @@ describe("ADR-0406 wireObservability — full wire", () => {
       return
     }
     // Set an objective so addBlocker has a target.
-    obj.set("T1", { goal: "Ship the wire" })
+    obj.create("T1", { goal: "Ship the wire" })
     const req = asm.request({
       threadId: "T1",
       kind: "permission",
@@ -262,7 +262,7 @@ describe("ADR-0406 wireObservability — full wire", () => {
       expect(obj).toBeDefined()
       return
     }
-    obj.set("T2", { goal: "g" })
+    obj.create("T2", { goal: "g" })
     const snap = obj.get("T2")
     expect(snap).not.toBeNull()
     // Const-clock keeps timestamps at exactly 9999

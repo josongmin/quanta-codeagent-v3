@@ -32,19 +32,23 @@ describe("session.objective.mutate — protocol arm", () => {
   })
 
   test("builder mints a well-formed command with the closed mutation", () => {
-    const cmd = buildObjectiveMutate(deps, { kind: "set", goal: "ship it" }, undefined)
+    const cmd = buildObjectiveMutate(
+      deps,
+      { kind: "create", definition: { goal: "ship it" } },
+      undefined,
+    )
     expect(cmd.type).toBe("session.objective.mutate")
     expect(cmd.sessionId).toBe("sess-1")
     expect(cmd.commandId).toMatch(UUID_RE)
     expect(cmd.issuedAt).toBe("2026-08-22T00:00:00.000Z")
-    expect(cmd.mutation).toEqual({ kind: "set", goal: "ship it" })
+    expect(cmd.mutation).toEqual({ kind: "create", definition: { goal: "ship it" } })
     expect("expectedRevision" in cmd).toBe(false)
   })
 
   test("builder threads an explicit expectedObjectiveRevision CAS target (distinct from the envelope revision)", () => {
     const cmd = buildObjectiveMutate(
       deps,
-      { kind: "updateStatus", status: "paused" },
+      { kind: "setExplicitStatus", status: "paused" },
       {
         expectedObjectiveRevision: 4,
       },
@@ -57,7 +61,7 @@ describe("session.objective.mutate — protocol arm", () => {
   test("codec round-trips the command", () => {
     const cmd = buildObjectiveMutate(
       deps,
-      { kind: "set", goal: "g" },
+      { kind: "create", definition: { goal: "g" } },
       {
         expectedObjectiveRevision: 2,
       },

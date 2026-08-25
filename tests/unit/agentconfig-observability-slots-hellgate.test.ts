@@ -47,7 +47,7 @@ describe("ADR-0414 AgentConfig observability slots", () => {
     const objective = createObjectiveStore()
     const ledger = createRunLedger()
     const asm = createApprovalStateMachine({ objective, ledger })
-    objective.set("t1", { goal: "ship feature" })
+    objective.create("t1", { goal: "ship feature" })
     const cfg: Pick<AgentConfig, "objective" | "runLedger" | "approvalStateMachine"> = {
       objective,
       runLedger: ledger,

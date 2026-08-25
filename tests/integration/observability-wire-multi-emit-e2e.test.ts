@@ -184,7 +184,7 @@ describe("TKT-0415 §1 — multi-emit e2e: session_start + post_tool_use ×N + p
     // 6) objective.addBlocker through the facade getter ⇒ same store the
     //    wire created. A second read through `handle.objective` MUST see the
     //    same blocker (the facade isn't a copy — it's a getter).
-    facade.objective?.set("t-multi", { goal: "ship feature", successCriteria: ["typecheck"] })
+    facade.objective?.create("t-multi", { goal: "ship feature", successCriteria: ["typecheck"] })
     const after = facade.objective?.addBlocker("t-multi", {
       reason: "awaiting review",
       waitingOn: "user",

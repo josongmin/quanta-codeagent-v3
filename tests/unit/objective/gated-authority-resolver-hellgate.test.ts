@@ -19,7 +19,11 @@ import { resolveGatedObjectiveAuthority } from "@/host/runtime/objective-store-w
 import { asObjectiveAuthority, type ObjectivePort } from "@/objective"
 
 const modelSet = () =>
-  ({ threadId: "t", actor: "model", mutation: { kind: "set", goal: "g" } }) as const
+  ({
+    threadId: "t",
+    actor: "model",
+    mutation: { kind: "create", definition: { goal: "g" } },
+  }) as const
 const auth = (port: ObjectivePort) => asObjectiveAuthority(port)
 
 describe("resolveGatedObjectiveAuthority — gate matrix (SSOT for CLI + web + assembler)", () => {

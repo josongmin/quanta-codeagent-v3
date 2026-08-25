@@ -4,23 +4,37 @@
  * refactor cannot loosen the caps without tripping this hellgate.
  *
  * Production constants (`src/tool/objective/index.ts`):
- *   - goal             min(1).max(8000)
+ *   - goal             min(1).max(MAX_GOAL_CHARS = 4000) — GOAL-01: the ceiling
+ *                      is DOMAIN-owned (`@/objective`), no longer the tool's 8000
  *   - success_criteria array(string.max(2000)).max(256)
  *   - reason (blocker) min(1).max(8000)
  *   - actions          array(string.max(2000)).max(256)
  *   - max_tokens/turns int().nonnegative().finite()
+ *   - status op        enum(active|paused) — GOAL-01: `completed` is derived, never settable
+ *   - recordUsage op   REMOVED — GOAL-01: usage is host-settled, never self-reported
  */
 
 import { describe, expect, test } from "bun:test"
+import { MAX_GOAL_CHARS } from "@/objective"
 import { objectiveSetSchema, objectiveUpdateSchema } from "@/tool/objective"
 
 const repeat = (n: number): string => "a".repeat(n)
 
 describe("R3 audit-M2/M3 — objective_set / objective_update input caps", () => {
   // ── (1) goal length boundary ───────────────────────────────────────────────
-  test("(1) goal length 8000 PASSES; 8001 REJECTS", () => {
-    expect(objectiveSetSchema.safeParse({ thread_id: "t", goal: repeat(8000) }).success).toBe(true)
-    expect(objectiveSetSchema.safeParse({ thread_id: "t", goal: repeat(8001) }).success).toBe(false)
+  // GOAL-01: the cap moved from the tool's 8000 to the domain's MAX_GOAL_CHARS
+  // (4000). Pin BOTH the symbolic boundary and the literal so a domain-side
+  // loosening cannot hide behind the import.
+  test("(1) goal length MAX_GOAL_CHARS (4000) PASSES; +1 REJECTS", () => {
+    expect(MAX_GOAL_CHARS).toBe(4000)
+    expect(
+      objectiveSetSchema.safeParse({ thread_id: "t", goal: repeat(MAX_GOAL_CHARS) }).success,
+    ).toBe(true)
+    expect(
+      objectiveSetSchema.safeParse({ thread_id: "t", goal: repeat(MAX_GOAL_CHARS + 1) }).success,
+    ).toBe(false)
+    // The old 8000 ceiling is no longer accepted.
+    expect(objectiveSetSchema.safeParse({ thread_id: "t", goal: repeat(8000) }).success).toBe(false)
   })
 
   // ── (2) success_criteria item + array caps ─────────────────────────────────
@@ -144,7 +158,18 @@ describe("R3 audit-M2/M3 — objective_set / objective_update input caps", () =>
     ).toBe(true)
   })
 
-  test("(5c) recordUsage.tokens / turns reject NaN / negative / float", () => {
+  // GOAL-01 (REVERSED): this case used to pin the numeric tightening of the
+  // `recordUsage` op. The op is REMOVED (usage is host-settled), so the schema
+  // now rejects it OUTRIGHT — including a perfectly well-formed payload. The
+  // hostile numerics stay in the loop so a future re-introduction of the op
+  // cannot sneak past on the "bad" values alone.
+  test("(5c) recordUsage op is rejected outright (well-formed AND hostile numerics)", () => {
+    expect(
+      objectiveUpdateSchema.safeParse({
+        thread_id: "t",
+        op: { kind: "recordUsage", tokens: 1, turns: 1 },
+      }).success,
+    ).toBe(false)
     for (const bad of [Number.NaN, -1, 1.5]) {
       expect(
         objectiveUpdateSchema.safeParse({
@@ -157,6 +182,23 @@ describe("R3 audit-M2/M3 — objective_set / objective_update input caps", () =>
           thread_id: "t",
           op: { kind: "recordUsage", turns: bad },
         }).success,
+      ).toBe(false)
+    }
+  })
+
+  // GOAL-01: the explicit status intent is `active | paused` ONLY; `completed`
+  // and the derived limit states are never settable through the tool.
+  test("(6) status op accepts active|paused and rejects completed + derived states", () => {
+    for (const ok of ["active", "paused"]) {
+      expect(
+        objectiveUpdateSchema.safeParse({ thread_id: "t", op: { kind: "status", status: ok } })
+          .success,
+      ).toBe(true)
+    }
+    for (const bad of ["completed", "blocked", "usage_limited", "budget_limited", ""]) {
+      expect(
+        objectiveUpdateSchema.safeParse({ thread_id: "t", op: { kind: "status", status: bad } })
+          .success,
       ).toBe(false)
     }
   })

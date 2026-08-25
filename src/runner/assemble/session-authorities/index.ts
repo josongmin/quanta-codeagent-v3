@@ -45,7 +45,7 @@ export {
 // the three consistent projections at one unified revision.
 export type { BuildSkillRuntimeAuthorityInput } from "./build-skills"
 export { buildSkillRuntimeAuthority } from "./build-skills"
-export { decodeObjectiveSnapshot } from "./restore"
+export { decodeObjectiveSnapshot, normalizeObjectiveSnapshot } from "./restore"
 export type {
   AttentionReader,
   BuildSessionAuthoritiesInput,

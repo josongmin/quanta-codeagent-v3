@@ -188,7 +188,7 @@ describe("DOF-40 approval attribution gap — fail-closed surfacing", () => {
       ledger,
       onUnattributed: sink.onUnattributed,
     })
-    objective.set("session-x", { goal: "finish safely" })
+    objective.create("session-x", { goal: "finish safely" })
     const gate = createApprovalGate({ approvalSM: asm })
 
     const req: ApprovalGateRequest = {

@@ -133,8 +133,8 @@ const reopen = async (
 const seedDisk = async (root: SessionRootProvider, goal: string, withStatusBump = false) => {
   const saver = mintAuthority({ QUANTA_OBJECTIVE_TOOLS: "1" })
   expect(saver).toBeDefined()
-  saver?.set(SAVING_KEY, { goal, successCriteria: ["tests pass"] }) // rev 1
-  if (withStatusBump) saver?.updateStatus(SAVING_KEY, "paused") // rev 2
+  saver?.create(SAVING_KEY, { goal, successCriteria: ["tests pass"] }) // rev 1
+  if (withStatusBump) saver?.setExplicitStatus(SAVING_KEY, "paused") // rev 2
   const snapshot = encodeObjectiveSnapshot(saver as ObjectivePort)
   // The snapshot is keyed by SAVING_KEY — NOT the live key, NOT the thread id.
   expect(snapshot.threads[0]?.threadId).toBe(SAVING_KEY)
@@ -249,7 +249,7 @@ describe("HELLGATE RFC-03 C2 (web parity) — reopen re-keys the durable objecti
     try {
       await seedDisk(root, "OLD disk goal")
       const live = mintAuthority({ QUANTA_OBJECTIVE_TOOLS: "1" })
-      live?.set(LIVE_KEY, { goal: "NEW live goal" }) // already live on the read key
+      live?.create(LIVE_KEY, { goal: "NEW live goal" }) // already live on the read key
       await reopen(root, live, { restore: true, rekey: true })
       expect(live?.get(LIVE_KEY)?.goal).toBe("NEW live goal")
     } finally {

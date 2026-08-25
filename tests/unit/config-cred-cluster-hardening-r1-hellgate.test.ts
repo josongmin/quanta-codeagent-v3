@@ -54,6 +54,7 @@ import type {
 import { mergeProfileLayers } from "@/permission/profile-layer-merge"
 import { LLMError } from "@/shared"
 import { present } from "../_helpers/expect-present"
+import { settleTurns, settleUsage } from "./objective/v2-helpers"
 
 /* ════════════════════════════════════════════════════════════════════════ */
 /* B2 — config-provenance: LIVE merge wiring drops repo widens per-pillar     */
@@ -634,24 +635,24 @@ describe("H17 — budget at the EXACT cap and continuation re-read", () => {
   test("budget EXACTLY at the cap (tokensUsed === maxTokens) ⇒ budget_limited (>= not >)", () => {
     const t = 1_000
     const store = createObjectiveStore({ now: () => t, enforceBudget: true })
-    store.set(TID, { goal: "g", budget: { maxTokens: 10 } })
-    store.recordUsage(TID, { tokens: 10 }) // exactly at the cap
+    store.create(TID, { goal: "g", budget: { maxTokens: 10 } })
+    settleUsage(store, TID, { tokens: 10 }) // exactly at the cap
     expect(store.get(TID)?.status).toBe("budget_limited")
   })
 
   test("one token BELOW the cap ⇒ still active (boundary on the safe side)", () => {
     const t = 1_000
     const store = createObjectiveStore({ now: () => t, enforceBudget: true })
-    store.set(TID, { goal: "g", budget: { maxTokens: 10 } })
-    store.recordUsage(TID, { tokens: 9 })
+    store.create(TID, { goal: "g", budget: { maxTokens: 10 } })
+    settleUsage(store, TID, { tokens: 9 })
     expect(store.get(TID)?.status).toBe("active")
   })
 
   test("turns cap at EXACTLY the cap ⇒ budget_limited", () => {
     const t = 1_000
     const store = createObjectiveStore({ now: () => t, enforceBudget: true })
-    store.set(TID, { goal: "g", budget: { maxTurns: 3 } })
-    store.recordUsage(TID, { turns: 3 })
+    store.create(TID, { goal: "g", budget: { maxTurns: 3 } })
+    settleTurns(store, TID, 3)
     expect(store.get(TID)?.status).toBe("budget_limited")
   })
 
@@ -666,8 +667,10 @@ describe("H17 — budget at the EXACT cap and continuation re-read", () => {
         const status = statuses[Math.min(reads, statuses.length - 1)] as ObjectiveStatus
         reads += 1
         return {
+          objectiveId: "obj-h17",
           threadId: TID,
           goal: "g",
+          createdBy: "system",
           successCriteria: [],
           status,
           budget: { tokensUsed: 0, turnsUsed: 0 },
@@ -706,8 +709,8 @@ describe("H17 — budget at the EXACT cap and continuation re-read", () => {
   test("DEFAULT-OFF: enforceBudget:false ⇒ AT-cap goal stays active (budget purely informational)", () => {
     const t = 1_000
     const store = createObjectiveStore({ now: () => t, enforceBudget: false })
-    store.set(TID, { goal: "g", budget: { maxTokens: 10 } })
-    store.recordUsage(TID, { tokens: 50 }) // way over — but no enforcement
+    store.create(TID, { goal: "g", budget: { maxTokens: 10 } })
+    settleUsage(store, TID, { tokens: 50 }) // way over — but no enforcement
     expect(store.get(TID)?.status).toBe("active")
   })
 })

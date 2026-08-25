@@ -69,7 +69,7 @@ describe("C2b — objective is threaded into the REAL loop's per-turn messages",
 
   test("live authority + sessionId ⇒ '## Current objective' + goal land in the model's messages", async () => {
     const objective = createObjectiveStore()
-    objective.set(THREAD, { goal: GOAL })
+    objective.create(THREAD, { goal: GOAL })
     const seen = await runOneTurn({ objective, sessionId: THREAD })
     // The loop actually ran a turn (non-vacuous — the model was called).
     expect(seen.length).toBeGreaterThan(0)
@@ -81,7 +81,7 @@ describe("C2b — objective is threaded into the REAL loop's per-turn messages",
 
   test("PAIRED CONTROL (no sessionId): SAME goal on the authority ⇒ NO block (the wire is gated, not unconditional)", async () => {
     const objective = createObjectiveStore()
-    objective.set(THREAD, { goal: GOAL })
+    objective.create(THREAD, { goal: GOAL })
     // sessionId omitted ⇒ resolveObjectiveThunk returns undefined ⇒ thread skipped.
     const seen = await runOneTurn({ objective })
     expect(seen.length).toBeGreaterThan(0)

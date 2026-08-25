@@ -104,7 +104,11 @@ describe("RFC-03 C3 — /objective CAS editor", () => {
     const auth = createObjectiveAuthority({})
     // seed so both surfaces read the same revision N
     auth.commit(
-      auth.prepare({ threadId: "t", actor: "system", mutation: { kind: "set", goal: "seed" } }),
+      auth.prepare({
+        threadId: "t",
+        actor: "system",
+        mutation: { kind: "create", definition: { goal: "seed" } },
+      }),
       { admitted: true },
     )
     const revN = auth.readDomain("t").revision
@@ -112,7 +116,7 @@ describe("RFC-03 C3 — /objective CAS editor", () => {
     const modelPrepared = auth.prepare({
       threadId: "t",
       actor: "system",
-      mutation: { kind: "set", goal: "model-goal" },
+      mutation: { kind: "replace", definition: { goal: "model-goal" } },
     })
     expect(modelPrepared.expectedRevision).toBe(revN)
     // meanwhile the CLI edit commits first (fresh prepare cycle at N ⇒ N+1)

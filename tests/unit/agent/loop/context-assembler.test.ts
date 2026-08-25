@@ -74,13 +74,13 @@ describe("context-assembler #12 turnContextMutator observability", () => {
 describe("C2b — loop wires the LIVE objective-visibility thunk (gated like objective_*)", () => {
   test("config.objective + sessionId ⇒ a LIVE thunk reading the SAME authority", () => {
     const port = createObjectiveStore()
-    port.set("SESS", { goal: "close the visibility gap" })
+    port.create("SESS", { goal: "close the visibility gap" })
     const thunk = resolveObjectiveThunk(baseConfig({ objective: port, sessionId: "SESS" }))
     expect(thunk).toBeDefined()
     expect(thunk?.()).toEqual({ goal: "close the visibility gap", status: "active" })
     // LIVE: a pause on the authority is reflected on the NEXT thunk read (not a
     // construction-time snapshot).
-    port.updateStatus("SESS", "paused")
+    port.setExplicitStatus("SESS", "paused")
     expect(thunk?.()?.status).toBe("paused")
   })
 
@@ -90,7 +90,7 @@ describe("C2b — loop wires the LIVE objective-visibility thunk (gated like obj
 
   test("gated: no sessionId ⇒ NO thunk (thread identity must be session-bound)", () => {
     const port = createObjectiveStore()
-    port.set("SESS", { goal: "orphaned" })
+    port.create("SESS", { goal: "orphaned" })
     expect(resolveObjectiveThunk(baseConfig({ objective: port }))).toBeUndefined()
   })
 

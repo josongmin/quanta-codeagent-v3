@@ -58,7 +58,7 @@ const GOAL = "Structurally close the C2b model-visibility gap for objectives"
 describe("C2b — active objective is visible in the per-turn reminder", () => {
   test("an active goal APPEARS (goal + status) in the dynamic reminder", () => {
     const port = createObjectiveStore()
-    port.set(THREAD, { goal: GOAL })
+    port.create(THREAD, { goal: GOAL })
     const tail = dynamicTail(buildTurnContext(base({ objective: liveThunk(port) })))
     expect(tail).toContain("## Current objective")
     expect(tail).toContain(GOAL)
@@ -68,7 +68,7 @@ describe("C2b — active objective is visible in the per-turn reminder", () => {
   test("RED-guard: WITHOUT the objective thunk the SAME goal is INVISIBLE (the pre-fix state)", () => {
     // The gap this whole feature closes: the goal lives only in the authority.
     const port = createObjectiveStore()
-    port.set(THREAD, { goal: GOAL })
+    port.create(THREAD, { goal: GOAL })
     const tail = dynamicTail(buildTurnContext(base())) // no objective thunk wired
     expect(tail).not.toContain("## Current objective")
     expect(tail).not.toContain(GOAL)
@@ -76,13 +76,13 @@ describe("C2b — active objective is visible in the per-turn reminder", () => {
 
   test("LIVE per-turn read: a pause on the authority between builds changes the rendered status", () => {
     const port = createObjectiveStore()
-    port.set(THREAD, { goal: GOAL })
+    port.create(THREAD, { goal: GOAL })
     const input = base({ objective: liveThunk(port) })
     const before = dynamicTail(buildTurnContext(input))
     expect(before).toContain("status: active")
     // Same input object — only the AUTHORITY changed. A construction-time snapshot
     // would be frozen at "active"; a live per-turn read tracks the edit.
-    port.updateStatus(THREAD, "paused")
+    port.setExplicitStatus(THREAD, "paused")
     const after = dynamicTail(buildTurnContext(input))
     expect(after).toContain("status: paused")
     expect(after).not.toBe(before)
@@ -90,10 +90,12 @@ describe("C2b — active objective is visible in the per-turn reminder", () => {
 
   test("LIVE per-turn read: an edited goal is reflected on the next build", () => {
     const port = createObjectiveStore()
-    port.set(THREAD, { goal: GOAL })
+    port.create(THREAD, { goal: GOAL })
     const input = base({ objective: liveThunk(port) })
     expect(dynamicTail(buildTurnContext(input))).toContain(GOAL)
-    port.set(THREAD, { goal: "A totally different objective now" })
+    // GOAL-01: a second definition on a live thread is an explicit `replace`
+    // (fresh generation); `create` would refuse with `objective-exists`.
+    port.replace(THREAD, { goal: "A totally different objective now" })
     const after = dynamicTail(buildTurnContext(input))
     expect(after).toContain("A totally different objective now")
     expect(after).not.toContain(GOAL)
@@ -102,7 +104,7 @@ describe("C2b — active objective is visible in the per-turn reminder", () => {
   test("RESTORED goal: a fresh authority carrying the goal renders it (resume no longer invisible)", () => {
     // Mirrors durable-resume: a NEW authority instance already holds the goal.
     const restored = createObjectiveStore()
-    restored.set(THREAD, { goal: "Restored objective after --resume" })
+    restored.create(THREAD, { goal: "Restored objective after --resume" })
     const tail = dynamicTail(buildTurnContext(base({ objective: liveThunk(restored) })))
     expect(tail).toContain("## Current objective")
     expect(tail).toContain("Restored objective after --resume")
@@ -110,7 +112,7 @@ describe("C2b — active objective is visible in the per-turn reminder", () => {
 
   test("CONCISE: only goal + status — NOT criteria / blockers / nextActions", () => {
     const port = createObjectiveStore()
-    port.set(THREAD, {
+    port.create(THREAD, {
       goal: GOAL,
       successCriteria: ["CRITERION_WITNESS_SHOULD_NOT_APPEAR"],
     })
@@ -129,7 +131,7 @@ describe("C2b — gated + absence-gated ⇒ byte-identical dynamic tail", () => 
   test("no objective thunk (authority absent) ⇒ tail byte-identical to today", () => {
     const withNothing = dynamicTail(buildTurnContext(base()))
     const port = createObjectiveStore()
-    port.set(THREAD, { goal: GOAL })
+    port.create(THREAD, { goal: GOAL })
     const withGoal = dynamicTail(buildTurnContext(base({ objective: liveThunk(port) })))
     // Sanity: the block genuinely CHANGED the prompt when wired.
     expect(withGoal).not.toBe(withNothing)

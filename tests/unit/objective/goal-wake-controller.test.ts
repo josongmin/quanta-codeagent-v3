@@ -17,8 +17,10 @@ const domain = (
   state: {
     explicitStatus: status,
     objective: {
+      objectiveId: "obj-1",
       threadId: "thread-1",
       goal: "ship",
+      createdBy: "system",
       successCriteria: [],
       status,
       budget: { tokensUsed: 0, turnsUsed: 0 },

@@ -40,7 +40,11 @@ const compose = (env: NodeJS.ProcessEnv = {}) => {
 
 const authorityOf = (port: ObjectivePort) => asObjectiveAuthority(port)
 const modelSet = (goal: string) =>
-  ({ threadId: "t-cli", actor: "model", mutation: { kind: "set", goal } }) as const
+  ({
+    threadId: "t-cli",
+    actor: "model",
+    mutation: { kind: "create", definition: { goal } },
+  }) as const
 
 describe("RFC-03 H1 — interactive CLI objective authority is GATED (HITL bypass closed)", () => {
   test("[CLI-H1-1] OBJECTIVE_TOOLS+PROPOSE_GOAL ⇒ a model objective set is APPROVAL-GATED (no silent commit)", () => {

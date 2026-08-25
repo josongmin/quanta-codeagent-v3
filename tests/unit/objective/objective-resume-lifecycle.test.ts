@@ -33,6 +33,7 @@ import { encodeObjectiveSnapshot } from "@/runner/assemble/session-authorities"
 import { persistTurn, resolveResume } from "@/runner/orchestrate"
 import { loadSessionById, type SessionMeta, saveSessionById } from "@/session"
 import { __resetRuntimeConfig } from "@/shared"
+import { seedObjective, settleUsage } from "./v2-helpers"
 
 const slog = (): StructuredLogger => new StructuredLogger({ level: "info", sink: () => {} })
 
@@ -74,16 +75,19 @@ describe("RFC-03 C2 — objective durable-resume LIFECYCLE (real production wire
     expect(authority).toBeDefined()
     if (authority === undefined) return
 
-    authority.set("thr-1", {
+    authority.create("thr-1", {
       goal: "ship the feature",
       successCriteria: ["compiles", "tests pass"],
     })
-    authority.updateStatus("thr-1", "paused") // EXPLICIT provenance (must not default to active)
-    authority.recordUsage("thr-1", { tokens: 10 }) // bump the per-thread revision
+    authority.setExplicitStatus("thr-1", "paused") // EXPLICIT provenance (must not default to active)
+    // GOAL-01: usage is HOST-settled — bumps the per-thread revision like any mutation.
+    settleUsage(authority, "thr-1", { tokens: 10 })
     authority.setNextActions("thr-1", ["wire it", "test it"])
 
     const critIds = authority.get("thr-1")?.successCriteria.map((c) => c.id) ?? []
     expect(critIds).toHaveLength(2)
+    const objectiveId = authority.get("thr-1")?.objectiveId ?? ""
+    expect(objectiveId).not.toBe("")
     // The snapshot the turn-runner encodes from the live authority.
     const expectedSnapshot = encodeObjectiveSnapshot(authority)
 
@@ -122,8 +126,9 @@ describe("RFC-03 C2 — objective durable-resume LIFECYCLE (real production wire
     if (reopened === undefined) return
     const after = reopened.get("thr-1")
 
-    // ids preserved EXACTLY (never re-minted).
+    // ids preserved EXACTLY (never re-minted) — the GOAL-01 generation id included.
     expect(after?.successCriteria.map((c) => c.id)).toEqual(critIds)
+    expect(after?.objectiveId).toBe(objectiveId)
     // provenance preserved (explicit paused, not defaulted to active).
     expect(after?.status).toBe("paused")
     // goal + next actions survive.
@@ -194,7 +199,7 @@ describe("RFC-03 C2 — objective durable-resume LIFECYCLE (real production wire
   test("forged checked-completion stays FAIL-CLOSED across the real save→reopen→restore", async () => {
     const authority = resolveGatedObjectiveAuthority(OBJ_ENV, { confirmationAvailable: true })
     if (authority === undefined) return
-    const set = authority.set("forge", {
+    const set = seedObjective(authority, "forge", {
       goal: "guarded",
       criteria: [
         {
@@ -219,7 +224,8 @@ describe("RFC-03 C2 — objective durable-resume LIFECYCLE (real production wire
     // verifier receipt (a hand-edited session).
     const path = join(dir, "s-forge.json")
     const raw = JSON.parse(await Bun.file(path).text())
-    const crit = raw.objective.threads[0].successCriteria[0]
+    // GOAL-01: the v2 envelope nests the body under `objective`.
+    const crit = raw.objective.threads[0].objective.successCriteria[0]
     crit.met = true
     delete crit.completion
     await Bun.write(path, JSON.stringify(raw))

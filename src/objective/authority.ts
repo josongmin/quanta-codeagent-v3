@@ -1,10 +1,10 @@
 /**
- * RFC-03 C1 — the revisioned objective mutation AUTHORITY.
+ * RFC-03 C1 / GOAL-01 — the revisioned objective mutation AUTHORITY.
  *
  * The single writer of the objective domain. It wraps the raw core store
  * (`./store`) and adds:
  *
- *   - a per-thread monotonic REVISION,
+ *   - a per-thread monotonic REVISION (kept as a TOMBSTONE after `clear`),
  *   - the closed `ObjectiveMutation` union routed through ONE exhaustive dispatch
  *     table (adding a variant without a handler fails compile; deleting a live
  *     handler makes the mutation-completeness ratchet RED),
@@ -13,17 +13,15 @@
  *     `stale` (and never clobbers the winner),
  *   - `restore(prior, expectedRevision)` for EXACT undo under CAS,
  *   - ACTOR/THREAD binding: thread identity and actor come from the CALLER, never
- *     model input (RFC-03 §8), and a MODEL actor may NOT complete a criterion —
- *     the authority owns completion.
+ *     model input (RFC-03 §8); a MODEL actor may NOT complete a criterion,
+ *   - GENERATION identity: `create`/`replace` mint an `objectiveId` and bind
+ *     `createdBy`; every evidence family is dropped when a generation starts or
+ *     ends, and a receipt bound to another generation is refused,
+ *   - HOST-measured usage: `settleAttempt` (system actor only) is the sole
+ *     budget debit and progress-receipt producer.
  *
- * The legacy `ObjectivePort` surface is preserved so EVERY existing caller
- * (objective tools, approval-state-machine attribution, `/goal`, continuation,
- * usage-limit wire) routes through the authority unchanged — no direct store
- * call remains. Those surface mutators commit as a trusted `system` actor.
- *
- * GATE-OFF (`gateOn:false`, the default) is byte-identical to the historical
- * store: model mutations commit without approval, a model may self-mark criteria,
- * and the revision is invisible to the public `Objective` projection.
+ * The `ObjectivePort` surface is the SYSTEM-actor capability every existing
+ * caller routes through — no direct store call remains.
  *
  * SLICE FENCE: imports ONLY sibling modules + is a pure leaf (no `@/agent` etc.).
  *
@@ -31,10 +29,18 @@
  */
 
 import { errMessage, logger } from "@/shared"
+import type { CellProvenance } from "./core-store/cell"
 import type { ManualCompletionReceipt } from "./criteria/model"
 import { isVerifierReceipt } from "./criteria/model"
+import { defaultObjectiveIdFactory, MAX_GOAL_CHARS, normalizeGoalText } from "./identity"
 import type { ObjectiveDomainSnapshot } from "./model"
-import type { ObjectiveActor, ObjectiveMutation, ObjectiveOperationKind } from "./mutations"
+import {
+  isGenerationMutationKind,
+  type ObjectiveActor,
+  type ObjectiveAttemptSettlement,
+  type ObjectiveMutation,
+  type ObjectiveOperationKind,
+} from "./mutations"
 import type {
   ApprovalReceipt,
   CommitRejection,
@@ -49,28 +55,35 @@ import {
   MAX_PROGRESS_RECEIPTS,
   normalizeProgressReceipt,
   type ProgressReceipt,
+  verifierReceiptRef,
 } from "./progress-receipt"
 import { createObjectiveCoreStore, type ObjectiveCore } from "./store"
-import type { Objective, ObjectivePort } from "./types"
+import type { GoalDefinition, Objective, ObjectivePort } from "./types"
 
 const isNonEmptyString = (v: unknown): v is string => typeof v === "string" && v.length > 0
 
+/** Per-thread evidence view a handler may read/append (bound by `route`). */
+interface EvidenceContext {
+  readonly receipts: readonly ProgressReceipt[]
+  readonly append: (receipt: ProgressReceipt) => void
+}
+
 /** RFC-03 C4 — provenance context threaded into every mutation handler: the
- *  BOUND actor, the current (pre-apply) revision, and the clock reading. Handlers
- *  that record completion evidence (markCriterion / markCriterionVerified) mint
- *  receipts from this — never from the mutation payload. */
+ *  BOUND actor, the current (pre-apply) revision, the clock reading, the id
+ *  minter and the thread's evidence view. Handlers that record completion
+ *  evidence mint receipts from this — never from the mutation payload. */
 interface MutationContext {
   readonly actor: ObjectiveActor
   readonly revision: number
   readonly now: number
+  readonly mintId: () => string
+  readonly evidence: EvidenceContext
 }
 
 /** Outcome of applying one mutation to the core. `applied:false` ⇒ the op did
- *  not take effect (unknown thread for a non-`set` op, malformed input, or a
- *  policy refusal) so the revision must NOT advance; `result` is the core's
- *  byte-identical return. `rejection` (RFC-03 C4) carries the precise refusal
- *  reason a structural guard produced (e.g. `checked-verifier-only`); absent ⇒
- *  the commit defaults to `invalid`. */
+ *  not take effect so the revision must NOT advance; `result` is the core's
+ *  byte-identical return. `rejection` carries the precise refusal reason a
+ *  structural guard produced; absent ⇒ the commit defaults to `invalid`. */
 interface ApplyOutcome {
   readonly applied: boolean
   readonly result: Objective | null
@@ -91,46 +104,137 @@ type DispatchTable = { [K in ObjectiveOperationKind]: HandlerFor<K> }
 
 const applied = (result: Objective | null): ApplyOutcome => ({ applied: result !== null, result })
 
+const refused = (
+  core: ObjectiveCore,
+  threadId: string,
+  rejection: CommitRejection,
+): ApplyOutcome => ({
+  applied: false,
+  result: core.get(threadId),
+  rejection,
+})
+
+/** GOAL-01 — the domain-owned goal-text check shared by create/replace. */
+const definitionRejection = (definition: GoalDefinition): CommitRejection | null => {
+  if (definition === null || typeof definition !== "object") return "invalid"
+  if (typeof definition.goal === "string" && definition.goal.length > MAX_GOAL_CHARS) {
+    return "goal-too-long"
+  }
+  return normalizeGoalText(definition.goal) === null ? "invalid" : null
+}
+
+const mintGeneration = (
+  core: ObjectiveCore,
+  threadId: string,
+  m: Extract<ObjectiveMutation, { kind: "create" | "replace" }>,
+  ctx: MutationContext,
+): ApplyOutcome => {
+  const rejection = definitionRejection(m.definition)
+  if (rejection !== null) return refused(core, threadId, rejection)
+  const exists = core.get(threadId) !== null
+  if (m.kind === "create" && exists) return refused(core, threadId, "objective-exists")
+  if (m.kind === "replace" && !exists) return refused(core, threadId, "objective-missing")
+  const provenance: CellProvenance = { objectiveId: ctx.mintId(), createdBy: ctx.actor }
+  const result =
+    m.kind === "create"
+      ? core.create(threadId, m.definition, provenance)
+      : core.replace(threadId, m.definition, provenance)
+  return result === null ? refused(core, threadId, "invalid") : { applied: true, result }
+}
+
+const settleAttempt = (
+  core: ObjectiveCore,
+  threadId: string,
+  settlement: ObjectiveAttemptSettlement,
+  ctx: MutationContext,
+): ApplyOutcome => {
+  if (ctx.actor !== "system") return refused(core, threadId, "actor-forbidden")
+  const current = core.get(threadId)
+  if (current === null) return refused(core, threadId, "objective-missing")
+  if (
+    settlement === null ||
+    typeof settlement !== "object" ||
+    !isNonEmptyString(settlement.attemptId)
+  ) {
+    return refused(core, threadId, "invalid")
+  }
+  if (settlement.objectiveId !== current.objectiveId) {
+    return refused(core, threadId, "objective-mismatch")
+  }
+  if (ctx.evidence.receipts.some((r) => r.attemptKey === settlement.attemptId)) {
+    return refused(core, threadId, "attempt-replayed")
+  }
+  const before = new Set(settlement.criterionIdsBefore ?? [])
+  const refsBefore = new Set(settlement.verifierReceiptIdsBefore ?? [])
+  const receipt = normalizeProgressReceipt({
+    objectiveId: current.objectiveId,
+    attemptKey: settlement.attemptId,
+    objectiveRevisionBefore: Math.min(
+      Number.isSafeInteger(settlement.startedRevision) ? settlement.startedRevision : ctx.revision,
+      ctx.revision + 1,
+    ),
+    // `route` bumps exactly once after a successful apply.
+    objectiveRevisionAfter: ctx.revision + 1,
+    turnOutcome: settlement.outcome,
+    criterionTransitions: current.successCriteria
+      .filter((c) => c.met && !before.has(c.id))
+      .map((c) => c.id),
+    verifierReceiptRefs: current.successCriteria
+      .flatMap((c) =>
+        c.kind === "checked" && c.completion !== undefined && c.completion.verifierResult.passed
+          ? [
+              verifierReceiptRef({
+                criterionId: c.id,
+                checkId: c.completion.checkId,
+                objectiveRevision: c.completion.objectiveRevision,
+              }),
+            ]
+          : [],
+      )
+      .filter((ref) => !refsBefore.has(ref)),
+    ...(settlement.sourceDigest !== undefined ? { sourceDigest: settlement.sourceDigest } : {}),
+    remainingCriterionIds: current.successCriteria.filter((c) => !c.met).map((c) => c.id),
+    recordedAt: settlement.recordedAt,
+  })
+  if (receipt === null) return refused(core, threadId, "invalid")
+  const result = core.applyUsage(threadId, {
+    tokens: settlement.tokensUsed,
+    turns: settlement.turnsUsed === 1 ? 1 : 0,
+  })
+  if (result === null) return refused(core, threadId, "invalid")
+  ctx.evidence.append(receipt)
+  return { applied: true, result }
+}
+
 const DISPATCH: DispatchTable = {
-  set: (core, threadId, m) => {
-    const init: {
-      goal: string
-      successCriteria?: readonly string[]
-      criteria?: NonNullable<(typeof m)["criteria"]>
-      budget?: { maxTokens?: number; maxTurns?: number }
-    } = { goal: m.goal }
-    if (m.successCriteria !== undefined) init.successCriteria = m.successCriteria
-    if (m.criteria !== undefined) init.criteria = m.criteria
-    if (m.budget !== undefined) {
-      const budget: { maxTokens?: number; maxTurns?: number } = {}
-      if (m.budget.maxTokens !== undefined) budget.maxTokens = m.budget.maxTokens
-      if (m.budget.maxTurns !== undefined) budget.maxTurns = m.budget.maxTurns
-      if (Object.keys(budget).length > 0) init.budget = budget
-    }
-    const result = core.set(threadId, init)
-    // `set` creates unconditionally for a valid thread id; a malformed id returns
-    // the synthetic contract objective WITHOUT storing (so it did not "apply").
-    return { applied: isNonEmptyString(threadId), result }
-  },
-  updateStatus: (core, threadId, m) => applied(core.updateStatus(threadId, m.status)),
+  create: mintGeneration,
+  replace: mintGeneration,
+  clear: (core, threadId) =>
+    core.get(threadId) === null
+      ? refused(core, threadId, "objective-missing")
+      : { applied: core.clear(threadId), result: null },
+  setExplicitStatus: (core, threadId, m) =>
+    m.status === "active" || m.status === "paused"
+      ? applied(core.setExplicitStatus(threadId, m.status))
+      : refused(core, threadId, "invalid"),
   addBlocker: (core, threadId, m) =>
     applied(core.addBlocker(threadId, { reason: m.reason, waitingOn: m.waitingOn })),
   clearBlocker: (core, threadId, m) => applied(core.clearBlocker(threadId, m.blockerId)),
   setNextActions: (core, threadId, m) => applied(core.setNextActions(threadId, m.actions)),
   // RFC-03 C4 — the MANUAL/provenance completion path. A CHECKED criterion is
   // verifier-only (structural, gate-independent) ⇒ refused; a MANUAL criterion
-  // is completed with an AUTHORITY-minted receipt (actor + revision + clock from
-  // ctx — never the payload). A missing criterion ⇒ invalid (no bump).
+  // is completed with an AUTHORITY-minted receipt (actor + generation + revision
+  // + clock from ctx — never the payload). A missing criterion ⇒ invalid.
   markCriterion: (core, threadId, m, ctx) => {
+    const current = core.get(threadId)
     const c = core.getCriterion(threadId, m.criterionId)
-    if (c === null) return { applied: false, result: core.get(threadId) }
-    if (c.kind === "checked") {
-      return { applied: false, result: core.get(threadId), rejection: "checked-verifier-only" }
-    }
+    if (current === null || c === null) return { applied: false, result: current }
+    if (c.kind === "checked") return refused(core, threadId, "checked-verifier-only")
     const receipt: ManualCompletionReceipt | null =
       m.met === true
         ? {
             source: "manual",
+            objectiveId: current.objectiveId,
             actor: ctx.actor,
             objectiveRevision: ctx.revision,
             verifiedAt: ctx.now,
@@ -140,34 +244,23 @@ const DISPATCH: DispatchTable = {
   },
   // RFC-03 C4 — the VERIFIER-ONLY checked completion. Admitted ONLY for a
   // `verifier` actor against a CHECKED criterion whose declared `check.id`
-  // matches the receipt, at the current revision, with a well-formed PASSING
-  // result. No tool input schema produces this kind (forgery stop-rule) and the
-  // receipt is re-validated here regardless.
+  // matches the receipt, for the LIVE generation, at the current revision, with
+  // a well-formed PASSING result. No tool input schema produces this kind.
   markCriterionVerified: (core, threadId, m, ctx) => {
-    if (ctx.actor !== "verifier") {
-      return { applied: false, result: core.get(threadId), rejection: "forbidden-completion" }
-    }
+    if (ctx.actor !== "verifier") return refused(core, threadId, "forbidden-completion")
+    const current = core.get(threadId)
     const c = core.getCriterion(threadId, m.criterionId)
-    if (c === null || c.kind !== "checked") {
-      return { applied: false, result: core.get(threadId), rejection: "invalid" }
-    }
-    if (!isVerifierReceipt(m.receipt)) {
-      return { applied: false, result: core.get(threadId), rejection: "invalid" }
-    }
-    if (m.receipt.objectiveRevision !== ctx.revision) {
-      return { applied: false, result: core.get(threadId), rejection: "stale" }
-    }
+    if (current === null || c === null || c.kind !== "checked")
+      return refused(core, threadId, "invalid")
+    if (!isVerifierReceipt(m.receipt)) return refused(core, threadId, "invalid")
+    if (m.receipt.objectiveId !== current.objectiveId)
+      return refused(core, threadId, "objective-mismatch")
+    if (m.receipt.objectiveRevision !== ctx.revision) return refused(core, threadId, "stale")
     const result = core.applyVerifierCompletion(threadId, m.criterionId, m.receipt)
-    return result !== null
-      ? { applied: true, result }
-      : { applied: false, result: core.get(threadId), rejection: "invalid" }
+    return result !== null ? { applied: true, result } : refused(core, threadId, "invalid")
   },
-  recordUsage: (core, threadId, m) => {
-    const used: { tokens?: number; turns?: number } = {}
-    if (m.tokens !== undefined) used.tokens = m.tokens
-    if (m.turns !== undefined) used.turns = m.turns
-    return applied(core.recordUsage(threadId, used))
-  },
+  amendBudget: (core, threadId, m) => applied(core.amendBudget(threadId, m.budget)),
+  settleAttempt: (core, threadId, m, ctx) => settleAttempt(core, threadId, m.settlement, ctx),
   markUsageLimited: (core, threadId, m) => applied(core.markUsageLimited(threadId, m.untilEpochMs)),
   restore: (core, threadId, m) => {
     const ok = core.restoreThread(threadId, m.snapshot.state)
@@ -186,9 +279,16 @@ const applyMutation = (
   threadId: string,
   m: ObjectiveMutation,
   ctx: MutationContext,
-): ApplyOutcome => (DISPATCH[m.kind] as HandlerFor<typeof m.kind>)(core, threadId, m as never, ctx)
+): ApplyOutcome => {
+  const handler = DISPATCH[m?.kind as ObjectiveOperationKind] as
+    | HandlerFor<ObjectiveOperationKind>
+    | undefined
+  if (handler === undefined) return refused(core, threadId, "invalid")
+  return handler(core, threadId, m as never, ctx)
+}
 
-/** Policy classification of a bound command against the gate posture. */
+/** Policy classification of a bound command against the gate posture.
+ *  (GOAL-02 replaces this with the exhaustive actor × mutation table.) */
 interface Policy {
   readonly approvalRequired: boolean
   /** A model actor attempting to COMPLETE a criterion — always refused. */
@@ -206,8 +306,7 @@ const classify = (command: ObjectiveMutationCommand, gateOn: boolean): Policy =>
 }
 
 /** Resolve the policy verdict into a commit rejection reason, or `null` when the
- *  mutation may proceed to the CAS check. Extracted so `commit` stays under the
- *  cognitive-complexity cap (one linear gate, then CAS + apply). */
+ *  mutation may proceed to the CAS check. */
 const policyRejection = (
   policy: Policy,
   approval: ApprovalReceipt,
@@ -224,6 +323,7 @@ export const createObjectiveAuthority = (opts?: ObjectiveAuthorityOptions): Obje
   createObjectiveAuthorityWithCore(
     createObjectiveCoreStore({
       ...(opts?.now !== undefined ? { now: opts.now } : {}),
+      ...(opts?.idFactory !== undefined ? { idFactory: opts.idFactory } : {}),
       ...(opts?.enforceBudget !== undefined ? { enforceBudget: opts.enforceBudget } : {}),
     }),
     opts,
@@ -231,19 +331,19 @@ export const createObjectiveAuthority = (opts?: ObjectiveAuthorityOptions): Obje
 
 /**
  * PUBLIC objective store constructor — now an authority. Returned typed as the
- * legacy `ObjectivePort` so every existing production consumer
- * (`host/runtime/objective-store-wire`, CLI `core-state`, agent
- * `observability-wire`) gets the revisioned authority WITHOUT a call-site change:
- * their mutations route through CAS and the actor is `system`. The richer
- * `ObjectiveAuthority` surface is recovered by the tool composition root via
- * {@link asObjectiveAuthority}.
+ * `ObjectivePort` (system capability) so every existing production consumer
+ * gets the revisioned authority WITHOUT a call-site change: their mutations
+ * route through CAS and the actor is `system`. The richer `ObjectiveAuthority`
+ * surface is recovered by the composition root via {@link asObjectiveAuthority}.
  */
 export const createObjectiveStore = (opts?: {
   now?: () => number
+  idFactory?: () => string
   enforceBudget?: boolean
 }): ObjectivePort =>
   createObjectiveAuthority({
     ...(opts?.now !== undefined ? { now: opts.now } : {}),
+    ...(opts?.idFactory !== undefined ? { idFactory: opts.idFactory } : {}),
     ...(opts?.enforceBudget !== undefined ? { enforceBudget: opts.enforceBudget } : {}),
   })
 
@@ -267,11 +367,6 @@ export const asObjectiveAuthority = (
   return wrapPortAsAuthority(port, opts)
 }
 
-/** Wrap a plain `ObjectivePort` (a non-authority double) in the authority
- *  protocol over that exact port, so tool composition can bind actor policy even
- *  when the host supplied a bespoke port. The wrapped port is the core; its own
- *  per-thread snapshot/restore is synthesized from `to/fromSnapshot` when the
- *  port does not implement {@link ObjectiveCore}. */
 const wrapPortAsAuthority = (
   port: ObjectivePort,
   opts?: ObjectiveAuthorityOptions,
@@ -282,51 +377,39 @@ const isObjectiveCore = (port: ObjectivePort): port is ObjectiveCore =>
   typeof (port as Partial<ObjectiveCore>).snapshotThread === "function" &&
   typeof (port as Partial<ObjectiveCore>).restoreThread === "function"
 
-/** Adapt a bare `ObjectivePort` to `ObjectiveCore` via the whole-store codec so
- *  the authority's exact-restore still works over a foreign port. The port's
+/** Adapt a bare `ObjectivePort` to `ObjectiveCore` via the public surface so the
+ *  authority protocol still works over a foreign port (test doubles). The port's
  *  methods are closure-bound (objective ports are object literals, not classes)
- *  so a spread preserves them; a partial test double keeps whatever it defined
- *  (a missing method throws only if actually invoked, caught by the caller). */
+ *  so a spread preserves them; a partial double keeps whatever it defined. */
 const coreFromPort = (port: ObjectivePort): ObjectiveCore => ({
   ...port,
   snapshotThread(threadId) {
     const o = port.get(threadId)
     if (o === null) return null
-    const explicit =
-      o.status === "paused" ? "paused" : o.status === "completed" ? "completed" : "active"
     return Object.freeze({
       objective: o,
-      explicitStatus: explicit as "active" | "paused" | "completed",
+      explicitStatus: o.status === "paused" ? ("paused" as const) : ("active" as const),
     })
   },
   restoreThread(threadId, state) {
-    if (state === null) {
-      // A foreign port cannot delete a single thread through the public surface;
-      // approximate by clearing the goal to an empty objective.
-      port.set(threadId, { goal: "" })
-      return true
-    }
+    if (state === null) return port.clear(threadId)
     const o = state.objective
-    port.set(threadId, {
+    const definition: GoalDefinition = {
       goal: o.goal,
       successCriteria: o.successCriteria.map((c) => c.text),
-    })
-    return true
+    }
+    return (
+      (port.get(threadId) === null
+        ? port.create(threadId, definition)
+        : port.replace(threadId, definition)) !== null
+    )
   },
-  // RFC-03 C4 — a bare foreign port has no criterion-kind substrate; synthesize
-  // the read + completion surface from its public `get`/`markCriterion` so the
-  // authority protocol stays total (production always uses the real core).
   getCriterion(threadId, criterionId) {
     const c = port.get(threadId)?.successCriteria.find((x) => x.id === criterionId)
     if (c === undefined) return null
-    return {
-      kind: c.kind,
-      met: c.met,
-      checkId: c.kind === "checked" ? c.check.id : null,
-    }
+    return { kind: c.kind, met: c.met, checkId: c.kind === "checked" ? c.check.id : null }
   },
   applyManualCompletion(threadId, criterionId, met) {
-    // No receipt substrate on a bare port; fall back to the plain flip.
     return port.markCriterion(threadId, criterionId, met)
   },
   applyVerifierCompletion(threadId, criterionId, receipt) {
@@ -335,25 +418,42 @@ const coreFromPort = (port: ObjectivePort): ObjectiveCore => ({
     if (receipt.verifierResult.passed !== true) return null
     return port.markCriterion(threadId, criterionId, true)
   },
+  applyUsage(threadId) {
+    // A bare foreign port has no usage substrate; report the unchanged objective.
+    return port.get(threadId)
+  },
 })
 
 /** RFC-03 C2 — restore-at-construction. Load each persisted per-thread domain
  *  snapshot verbatim into the core and restore its EXACT revision (NOT the
- *  `fromSnapshot` reset-to-1). Skips malformed / stateless / empty-thread entries
- *  so a hostile/partial snapshot never plants a half thread. Module-level so it
- *  keeps {@link createObjectiveAuthorityWithCore} under the complexity cap. */
+ *  `fromSnapshot` reset-to-1). A `state: null` entry with a positive revision is
+ *  a TOMBSTONE: only the revision is planted. Malformed entries are skipped. */
 const hydrateDomains = (
   core: ObjectiveCore,
   revisions: Map<string, number>,
   domains: readonly ObjectiveDomainSnapshot[] | undefined,
 ): void => {
   if (domains === undefined) return
-  for (const dom of domains) {
-    const threadId = isNonEmptyString(dom?.threadId) ? dom.threadId : ""
-    if (threadId === "" || dom.state === null) continue
-    if (!core.restoreThread(threadId, dom.state)) continue
-    revisions.set(threadId, Number.isFinite(dom.revision) && dom.revision >= 0 ? dom.revision : 1)
+  for (const dom of domains) plantDomain(core, revisions, dom)
+}
+
+const plantDomain = (
+  core: ObjectiveCore,
+  revisions: Map<string, number>,
+  dom: ObjectiveDomainSnapshot,
+): boolean => {
+  const threadId = isNonEmptyString(dom?.threadId) ? dom.threadId : ""
+  if (threadId === "") return false
+  const revision = Number.isFinite(dom.revision) && dom.revision >= 0 ? dom.revision : 1
+  if (dom.state === null) {
+    if (revision <= 0) return false
+    core.clear(threadId)
+    revisions.set(threadId, revision)
+    return true
   }
+  if (!core.restoreThread(threadId, dom.state)) return false
+  revisions.set(threadId, revision)
+  return true
 }
 
 const normalizeProgressReceipts = (
@@ -366,13 +466,27 @@ const normalizeProgressReceipts = (
       .slice(-MAX_PROGRESS_RECEIPTS),
   )
 
+/** GOAL-01 — only receipts bound to the live generation survive a hydrate. */
+const receiptsForGeneration = (
+  core: ObjectiveCore,
+  threadId: string,
+  receipts: readonly ProgressReceipt[] | undefined,
+): readonly ProgressReceipt[] => {
+  const live = core.get(threadId)?.objectiveId
+  return Object.freeze(normalizeProgressReceipts(receipts).filter((r) => r.objectiveId === live))
+}
+
 const hydrateProgressReceipts = (
+  core: ObjectiveCore,
   progress: Map<string, readonly ProgressReceipt[]>,
   domains: readonly ObjectiveDomainSnapshot[] | undefined,
 ): void => {
   for (const domain of domains ?? []) {
     if (isNonEmptyString(domain.threadId) && domain.progressReceipts !== undefined) {
-      progress.set(domain.threadId, normalizeProgressReceipts(domain.progressReceipts))
+      progress.set(
+        domain.threadId,
+        receiptsForGeneration(core, domain.threadId, domain.progressReceipts),
+      )
     }
   }
 }
@@ -406,26 +520,34 @@ const createAuthoritySurface = (deps: AuthoritySurfaceDeps): ObjectiveAuthority 
   commit: deps.commit,
   restore: deps.restore,
   restoreDomain: deps.restoreDomain,
+  knownThreadIds: () =>
+    Object.freeze([
+      ...new Set([...deps.revisions.keys(), ...deps.core.list().map((o) => o.threadId)]),
+    ]),
   recordProgressReceipt: (threadId, receipt): boolean => {
-    if (!isNonEmptyString(threadId) || deps.core.get(threadId) === null) return false
+    if (!isNonEmptyString(threadId)) return false
+    const live = deps.core.get(threadId)
+    if (live === null) return false
     const normalized = normalizeProgressReceipt(receipt)
     if (normalized === null) return false
+    if (normalized.objectiveId !== live.objectiveId) return false
     if (normalized.objectiveRevisionAfter !== deps.revisionOf(threadId)) return false
     const existing = deps.progress.get(threadId) ?? []
     if (existing.some((item) => item.attemptKey === normalized.attemptKey)) return false
     deps.progress.set(threadId, appendProgressReceipt(existing, normalized))
     return true
   },
-  set: (threadId, init) =>
-    (deps.system(threadId, {
-      kind: "set",
-      goal: init?.goal,
-      ...(init?.successCriteria !== undefined ? { successCriteria: init.successCriteria } : {}),
-      ...(init?.criteria !== undefined ? { criteria: init.criteria } : {}),
-      ...(init?.budget !== undefined ? { budget: init.budget } : {}),
-    }) ?? deps.core.get(threadId)) as Objective,
+  create: (threadId, definition) => deps.system(threadId, { kind: "create", definition }),
+  replace: (threadId, definition) => deps.system(threadId, { kind: "replace", definition }),
+  clear: (threadId) => {
+    const had = deps.core.get(threadId) !== null
+    deps.system(threadId, { kind: "clear" })
+    return had && deps.core.get(threadId) === null
+  },
   get: (threadId) => deps.core.get(threadId),
-  updateStatus: (threadId, status) => deps.system(threadId, { kind: "updateStatus", status }),
+  setExplicitStatus: (threadId, status) =>
+    deps.system(threadId, { kind: "setExplicitStatus", status }),
+  amendBudget: (threadId, budget) => deps.system(threadId, { kind: "amendBudget", budget }),
   addBlocker: (threadId, blocker) =>
     deps.system(threadId, {
       kind: "addBlocker",
@@ -436,12 +558,6 @@ const createAuthoritySurface = (deps: AuthoritySurfaceDeps): ObjectiveAuthority 
   setNextActions: (threadId, actions) => deps.system(threadId, { kind: "setNextActions", actions }),
   markCriterion: (threadId, criterionId, met) =>
     deps.system(threadId, { kind: "markCriterion", criterionId, met }),
-  recordUsage: (threadId, used) =>
-    deps.system(threadId, {
-      kind: "recordUsage",
-      ...(used?.tokens !== undefined ? { tokens: used.tokens } : {}),
-      ...(used?.turns !== undefined ? { turns: used.turns } : {}),
-    }),
   markUsageLimited: (threadId, untilEpochMs) =>
     deps.system(threadId, { kind: "markUsageLimited", untilEpochMs }),
   list: () => deps.core.list(),
@@ -449,6 +565,10 @@ const createAuthoritySurface = (deps: AuthoritySurfaceDeps): ObjectiveAuthority 
   fromSnapshot: (snap) => {
     deps.core.fromSnapshot(snap)
     deps.revisions.clear()
+    // GOAL-01 — a whole-store replacement carries NO evidence forward: every
+    // previous thread's receipts are dropped (they belong to generations that no
+    // longer exist here), never projected into a judge/renderer context.
+    deps.progress.clear()
     for (const objective of deps.core.list()) deps.revisions.set(objective.threadId, 1)
   },
 })
@@ -461,6 +581,7 @@ const createObjectiveAuthorityWithCore = (
   const gateOn = opts?.gateOn === true
   const confirmationAvailable = opts?.confirmationAvailable !== false
   const nowFn = opts?.now ?? Date.now
+  const mintId = opts?.idFactory ?? defaultObjectiveIdFactory
   const revisions = new Map<string, number>()
   const progress = new Map<string, readonly ProgressReceipt[]>()
   const revisionOf = (threadId: string): number => revisions.get(threadId) ?? 0
@@ -470,10 +591,9 @@ const createObjectiveAuthorityWithCore = (
     return next
   }
   // RFC-03 C2 — restore-at-construction (durable resume): load each persisted
-  // per-thread snapshot verbatim + its EXACT revision (extracted to keep this
-  // factory under the cognitive-complexity cap).
+  // per-thread snapshot verbatim + its EXACT revision (tombstones included).
   hydrateDomains(core, revisions, opts?.restoreDomains)
-  hydrateProgressReceipts(progress, opts?.restoreDomains)
+  hydrateProgressReceipts(core, progress, opts?.restoreDomains)
   const readDomain = (threadId: string): ObjectiveDomainSnapshot => ({
     threadId: isNonEmptyString(threadId) ? threadId : "",
     revision: revisionOf(threadId),
@@ -485,19 +605,36 @@ const createObjectiveAuthorityWithCore = (
     mutation: ObjectiveMutation,
     actor: ObjectiveActor,
   ): ApplyOutcome => {
-    const ctx: MutationContext = { actor, revision: revisionOf(threadId), now: safeClockNow(nowFn) }
+    const evidence: EvidenceContext = {
+      receipts: progress.get(threadId) ?? [],
+      append: (receipt) =>
+        progress.set(threadId, appendProgressReceipt(progress.get(threadId) ?? [], receipt)),
+    }
+    const ctx: MutationContext = {
+      actor,
+      revision: revisionOf(threadId),
+      now: safeClockNow(nowFn),
+      mintId,
+      evidence,
+    }
     const outcome = applyMutation(core, threadId, mutation, ctx)
     if (outcome.applied) {
-      // A replacement starts a new objective identity even if the thread id is
-      // reused; old evidence must never be projected into its judge context.
-      if (mutation.kind === "set") progress.delete(threadId)
+      // A generation boundary (create / replace / clear) drops every evidence
+      // family: old receipts must never be projected into a new goal's context.
+      if (isGenerationMutationKind(mutation.kind)) progress.delete(threadId)
       bump(threadId)
     }
     return outcome
   }
-  // Legacy `ObjectivePort` surface commits as a trusted `system` actor.
-  const system = (threadId: string, mutation: ObjectiveMutation): Objective | null =>
-    route(threadId, mutation, "system").result
+  // The `ObjectivePort` surface commits as a trusted `system` actor. A REFUSED
+  // mutation (a typed rejection) reports `null` — never the untouched current
+  // objective, which would read as success. A plain no-op with no rejection
+  // (e.g. marking an unknown criterion id) still returns the unchanged objective,
+  // the historical port contract.
+  const system = (threadId: string, mutation: ObjectiveMutation): Objective | null => {
+    const outcome = route(threadId, mutation, "system")
+    return outcome.applied || outcome.rejection === undefined ? outcome.result : null
+  }
   const prepare = (command: ObjectiveMutationCommand): PreparedObjectiveMutation => {
     const threadId = isNonEmptyString(command.threadId) ? command.threadId : ""
     return {
@@ -520,9 +657,6 @@ const createObjectiveAuthorityWithCore = (
     }
     const outcome = route(threadId, command.mutation, command.actor)
     if (!outcome.applied) {
-      // Surface the structural refusal reason a handler produced (e.g. a checked
-      // criterion is verifier-only / a non-verifier tried the verified path);
-      // default to `invalid` for a plain no-op (unknown thread / missing target).
       return { ok: false, reason: outcome.rejection ?? "invalid", currentRevision: current }
     }
     return { ok: true, revision: revisionOf(threadId), snapshot: readDomain(threadId) }
@@ -537,24 +671,19 @@ const createObjectiveAuthorityWithCore = (
       return { ok: false, reason: "invalid", currentRevision: current }
     }
     if (previous.progressReceipts === undefined) progress.delete(threadId)
-    else progress.set(threadId, normalizeProgressReceipts(previous.progressReceipts))
+    else progress.set(threadId, receiptsForGeneration(core, threadId, previous.progressReceipts))
     bump(threadId)
     return { ok: true, revision: revisionOf(threadId), snapshot: readDomain(threadId) }
   }
   // RFC-03 C2 (web parity) — LIVE post-construction durable-resume load of ONE
-  // per-thread snapshot. Plants the state verbatim and pins the EXACT persisted
-  // revision (identical to the per-thread body of `hydrateDomains`), so a reopened
-  // web thread recovers its goal/criteria/revision without the +1 bump `restore`
-  // would apply. Skips a malformed / stateless snapshot (nothing planted).
+  // per-thread snapshot. Plants the state verbatim (or a tombstone) and pins the
+  // EXACT persisted revision; no bump, no CAS.
   const restoreDomain = (snapshot: ObjectiveDomainSnapshot): boolean => {
-    const threadId = isNonEmptyString(snapshot?.threadId) ? snapshot.threadId : ""
-    if (threadId === "" || snapshot.state === null) return false
-    if (!core.restoreThread(threadId, snapshot.state)) return false
-    revisions.set(
-      threadId,
-      Number.isFinite(snapshot.revision) && snapshot.revision >= 0 ? snapshot.revision : 1,
+    if (!plantDomain(core, revisions, snapshot)) return false
+    progress.set(
+      snapshot.threadId,
+      receiptsForGeneration(core, snapshot.threadId, snapshot.progressReceipts),
     )
-    progress.set(threadId, normalizeProgressReceipts(snapshot.progressReceipts))
     return true
   }
   return createAuthoritySurface({

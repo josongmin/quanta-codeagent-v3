@@ -5,10 +5,10 @@
  * proof it IS done (the EVIDENCE / receipt):
  *
  *   - a `manual` criterion is completed by an explicit ACTOR attestation
- *     (advisory — a model/user says so; not machine-proof); and
+ *     (advisory — a user/system says so; not machine-proof); and
  *   - a `checked` criterion declares an IMMUTABLE {@link CheckSpec} and can be
  *     completed ONLY by a verifier receipt carrying the check identity, the
- *     objective revision, a source digest and the verifier result.
+ *     objective generation + revision, a source digest and the verifier result.
  *
  * The forgery invariant (RFC-03 §8 stop rule) lives in the TYPES: a
  * {@link VerifierCompletionReceipt} has no constructor reachable from a
@@ -17,12 +17,15 @@
  * The check `id` and `cwdPolicy` are domain-minted at creation, so a receipt can
  * only reference an id the domain issued.
  *
- * SLICE FENCE: imports ONLY the sibling `../mutations` actor type. Pure data.
+ * GOAL-01: every receipt carries the `objectiveId` generation it was minted
+ * against; the authority refuses a receipt whose generation is not live.
+ *
+ * SLICE FENCE: imports ONLY the sibling provenance type. Pure data.
  *
  * exactOptionalPropertyTypes: optional fields are typed `x?: T | undefined`.
  */
 
-import type { ObjectiveActor } from "../mutations"
+import type { ObjectiveActor } from "../provenance"
 
 /** Which family a success criterion belongs to. */
 export type CriterionKind = "manual" | "checked"
@@ -43,8 +46,8 @@ export interface CheckSpecDeclaration {
 /**
  * The IMMUTABLE stored check spec: the declaration plus the domain-minted `id`
  * and the fixed `cwdPolicy`. Once a checked criterion is created its `check`
- * never mutates (no mutation touches it; a re-`set` mints a fresh criterion with
- * a fresh id). Stored frozen.
+ * never mutates (no mutation touches it; a `replace` mints a fresh criterion
+ * with a fresh id). Stored frozen.
  */
 export interface CheckSpec extends CheckSpecDeclaration {
   /** Domain-minted identity — a verifier receipt MUST match this exactly. */
@@ -54,7 +57,7 @@ export interface CheckSpec extends CheckSpecDeclaration {
 }
 
 /**
- * RFC-03 C4 — a declared success criterion in a `set` payload. A bare string is
+ * RFC-03 C4 — a declared success criterion in a definition. A bare string is
  * still accepted elsewhere (⇒ a manual criterion); this object form may carry a
  * `check` declaration (⇒ a checked, verifier-only criterion). The check
  * `id`/`cwdPolicy` are domain-minted, never part of the declaration.
@@ -73,12 +76,15 @@ export interface VerifierResult {
 
 /**
  * Evidence that a MANUAL criterion was completed: an explicit actor attestation
- * bound to the objective revision at attestation time. Advisory (a model/user
- * asserting completion), never machine-proof. Minted by the AUTHORITY (which
- * holds the bound actor + revision + clock) — never from a model/tool payload.
+ * bound to the objective generation + revision at attestation time. Advisory (a
+ * user/system asserting completion), never machine-proof. Minted by the
+ * AUTHORITY (which holds the bound actor + revision + clock) — never from a
+ * model/tool payload.
  */
 export interface ManualCompletionReceipt {
   readonly source: "manual"
+  /** The objective generation this attestation was recorded against. */
+  readonly objectiveId: string
   /** The bound actor that attested completion (from the session, not model input). */
   readonly actor: ObjectiveActor
   /** The objective revision this attestation was recorded against. */
@@ -90,11 +96,14 @@ export interface ManualCompletionReceipt {
 /**
  * Evidence that a CHECKED criterion was completed: the ONLY thing that can flip a
  * checked criterion to met. Every field is REQUIRED (RFC-03 §receipt): the check
- * identity that ran, the objective revision it was verified against, the source
- * digest of the workspace at verification time, and the verifier result.
+ * identity that ran, the objective generation + revision it was verified
+ * against, the source digest of the workspace at verification time, and the
+ * verifier result.
  */
 export interface VerifierCompletionReceipt {
   readonly source: "verifier"
+  /** The objective generation this result was verified against. */
+  readonly objectiveId: string
   /** Identity of the {@link CheckSpec} that produced this result. */
   readonly checkId: string
   /** The objective revision this result was verified against (CAS-bound). */
@@ -111,6 +120,8 @@ export interface VerifierCompletionReceipt {
  *  receipt; a `checked` criterion carries a verifier receipt. */
 export type CompletionReceipt = ManualCompletionReceipt | VerifierCompletionReceipt
 
+const isNonEmptyString = (v: unknown): v is string => typeof v === "string" && v.length > 0
+
 /** True iff a value is a well-formed {@link VerifierCompletionReceipt}. Used by
  *  the authority to reject a malformed/forged receipt before it can complete a
  *  checked criterion. Every required field is checked (no placeholder). */
@@ -119,12 +130,11 @@ export const isVerifierReceipt = (v: unknown): v is VerifierCompletionReceipt =>
   const r = v as Partial<VerifierCompletionReceipt>
   return (
     r.source === "verifier" &&
-    typeof r.checkId === "string" &&
-    r.checkId.length > 0 &&
+    isNonEmptyString(r.objectiveId) &&
+    isNonEmptyString(r.checkId) &&
     typeof r.objectiveRevision === "number" &&
     Number.isFinite(r.objectiveRevision) &&
-    typeof r.sourceDigest === "string" &&
-    r.sourceDigest.length > 0 &&
+    isNonEmptyString(r.sourceDigest) &&
     r.verifierResult !== undefined &&
     r.verifierResult !== null &&
     typeof r.verifierResult.exitCode === "number" &&
@@ -140,8 +150,8 @@ export const isManualReceipt = (v: unknown): v is ManualCompletionReceipt => {
   const r = v as Partial<ManualCompletionReceipt>
   return (
     r.source === "manual" &&
-    typeof r.actor === "string" &&
-    r.actor.length > 0 &&
+    isNonEmptyString(r.objectiveId) &&
+    isNonEmptyString(r.actor) &&
     typeof r.objectiveRevision === "number" &&
     Number.isFinite(r.objectiveRevision) &&
     typeof r.verifiedAt === "number" &&

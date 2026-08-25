@@ -13,8 +13,9 @@
  *      `usage_limited` until `now + retryAfterMs`; advancing the injected clock
  *      PAST that epoch re-derives the status back to `active` (auto-reset, no
  *      sticky flag). The 429-turn still recovers (backoff → re-stream → done).
- *   2. NO DOUBLE-COUNT: the self-report token accounting (`recordUsage`) is
- *      untouched by the 429 wire — `budget.tokensUsed` is unchanged.
+ *   2. NO DOUBLE-COUNT: the host-settled token ledger (GOAL-01 `settleAttempt`,
+ *      the replacement for the retired `recordUsage` self-report) is untouched
+ *      by the 429 wire — `budget.tokensUsed` is unchanged.
  *   3. DEFAULT-OFF (gate unset, informational store): the SAME 429 causes NO
  *      objective mutation — `usageLimitedUntil` is never set, the status stays
  *      `active` throughout, byte-identical to today.
@@ -29,6 +30,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import { runAgent } from "@/agent"
 import { createObjectiveStore, type ObjectivePort } from "@/objective"
 import { __resetRuntimeConfig, LLMError } from "@/shared"
+import { settleUsage } from "../unit/objective/v2-helpers"
 import { cfg, ev, ScriptedLLM, text, thr, withTimeout } from "./_harness"
 
 /** Wrap a store counting `markUsageLimited` invocations — the capturing-sink for
@@ -38,14 +40,16 @@ const countingStore = (inner: ObjectivePort): { store: ObjectivePort; marks: () 
   let marks = 0
   const store: ObjectivePort = {
     ...inner,
-    set: inner.set.bind(inner),
+    create: inner.create.bind(inner),
+    replace: inner.replace.bind(inner),
+    clear: inner.clear.bind(inner),
     get: inner.get.bind(inner),
-    updateStatus: inner.updateStatus.bind(inner),
+    setExplicitStatus: inner.setExplicitStatus.bind(inner),
+    amendBudget: inner.amendBudget.bind(inner),
     addBlocker: inner.addBlocker.bind(inner),
     clearBlocker: inner.clearBlocker.bind(inner),
     setNextActions: inner.setNextActions.bind(inner),
     markCriterion: inner.markCriterion.bind(inner),
-    recordUsage: inner.recordUsage.bind(inner),
     list: inner.list.bind(inner),
     toSnapshot: inner.toSnapshot.bind(inner),
     fromSnapshot: inner.fromSnapshot.bind(inner),
@@ -89,12 +93,12 @@ describe("HELLGATE E2E [RFC-06 A4.3] — 429 retry-after ⇒ objective usage_lim
     // the ACTUAL epoch the wire wrote and drive `clock` RELATIVE to it — no
     // divergence, no real sleep.
     let clock = Date.now()
-    const { store, marks } = countingStore(
-      createObjectiveStore({ now: () => clock, enforceBudget: true }),
-    )
-    store.set(TID, { goal: "ship the feature", budget: { maxTokens: 1_000 } })
-    // Self-report accounting BEFORE the 429 — must survive untouched.
-    store.recordUsage(TID, { tokens: 42 })
+    const inner = createObjectiveStore({ now: () => clock, enforceBudget: true })
+    const { store, marks } = countingStore(inner)
+    store.create(TID, { goal: "ship the feature", budget: { maxTokens: 1_000 } })
+    // Host-settled accounting BEFORE the 429 — must survive untouched.
+    settleUsage(inner, TID, { tokens: 42 })
+    expect(store.get(TID)?.budget.tokensUsed).toBe(42)
     expect(store.get(TID)?.status).toBe("active")
 
     // Turn 1 throws a 429 (same-turn backoff), then the re-stream succeeds.
@@ -125,7 +129,7 @@ describe("HELLGATE E2E [RFC-06 A4.3] — 429 retry-after ⇒ objective usage_lim
     expect(epoch as number).toBeGreaterThan(clock)
 
     // (2) NO DOUBLE-COUNT: the 429 wire touched ONLY the usage window, not the
-    //     self-report token ledger.
+    //     host-settled token ledger.
     expect(store.get(TID)?.budget.tokensUsed).toBe(42)
 
     // Just BEFORE the epoch it is still usage_limited (non-vacuous boundary).
@@ -144,9 +148,10 @@ describe("HELLGATE E2E [RFC-06 A4.3] — 429 retry-after ⇒ objective usage_lim
     __resetRuntimeConfig()
 
     let clock = 2_000_000
-    const { store, marks } = countingStore(createObjectiveStore({ now: () => clock }))
-    store.set(TID, { goal: "ship", budget: { maxTokens: 1_000 } })
-    store.recordUsage(TID, { tokens: 7 })
+    const inner = createObjectiveStore({ now: () => clock })
+    const { store, marks } = countingStore(inner)
+    store.create(TID, { goal: "ship", budget: { maxTokens: 1_000 } })
+    settleUsage(inner, TID, { tokens: 7 })
 
     // Capture the pre-run snapshot including the private usage window (via the
     // serializable snapshot — `usageLimitedUntil` surfaces there when set).
@@ -188,9 +193,9 @@ describe("HELLGATE E2E [RFC-06 A4.3] — 429 retry-after ⇒ objective usage_lim
     const { store, marks } = countingStore(
       createObjectiveStore({ now: () => clock, enforceBudget: true }),
     )
-    store.set(TID, { goal: "ship" })
+    store.create(TID, { goal: "ship" })
     // Explicitly PAUSE the goal (user suspended it) BEFORE the 429.
-    store.updateStatus(TID, "paused")
+    store.setExplicitStatus(TID, "paused")
     expect(store.get(TID)?.status).toBe("paused")
 
     const llm = new ScriptedLLM([thr(rateLimit429(RETRY_AFTER_MS)), ev(text("done"))])

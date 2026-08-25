@@ -197,7 +197,7 @@ describe("maybeWireObjective · caller-override + fresh-mint + gate preservation
     expect(minted).toBeDefined()
     // Not any sentinel we own — a freshly-minted store. Prove it's a live store
     // (has the ObjectivePort surface) AND distinct from an unrelated fresh one.
-    expect(typeof minted?.set).toBe("function")
+    expect(typeof minted?.create).toBe("function")
     expect(minted).not.toBe(createObjectiveStore())
   })
 
@@ -248,7 +248,7 @@ describe("shared-store semantics · a mutation via cfg.objective is visible on t
     expect(shared).toBe(sentinel)
 
     const thread = "t-goal-1"
-    shared?.set(thread, { goal: "close the wiring gap", successCriteria: ["tests green"] })
+    shared?.create(thread, { goal: "close the wiring gap", successCriteria: ["tests green"] })
     // Mutate through the tools' handle …
     shared?.markCriterion(thread, shared.get(thread)?.successCriteria?.[0]?.id ?? "c0", true)
     // … and observe it on the surface's OWN handle (same instance).

@@ -1,6 +1,6 @@
 /**
- * RFC-03 C2 — the SINGLE production objective-authority builder + the persistence
- * ENCODE adapter.
+ * RFC-03 C2 / GOAL-01 — the SINGLE production objective-authority builder + the
+ * persistence ENCODE adapter (v2).
  *
  * This is THE one place production code constructs the per-session objective
  * authority (mirrors RFC-04 D4's `ActivityStore` single-owner pattern). Every
@@ -15,12 +15,11 @@
  * plain JSON {@link PersistedObjectiveSnapshot}, and the encode/decode ADAPTER
  * lives here.
  *
- * Fixed restore order: session identity → SAVED OBJECTIVE (`restoreFrom`) →
- * policy binding (`gateOn`/`confirmationAvailable`) → AUTHORITY CONSTRUCTION.
- * `restoreFrom` is decoded (`./restore`) into ordered per-thread domain
- * snapshots handed to the authority's `restoreDomains` construction seam, so a
- * fresh runtime rebuilds a byte-equivalent snapshot (ids / revision / provenance
- * preserved). Absent ⇒ a fresh empty authority (byte-identical legacy).
+ * Fixed restore order: session identity → SAVED OBJECTIVE (`restoreFrom`, v1 or
+ * v2 — v1 is migrated once in `./restore`) → policy binding → AUTHORITY
+ * CONSTRUCTION. Encoding is ALWAYS v2 and includes cleared-thread TOMBSTONES
+ * (`objective: null` + revision) so a stale pre-clear command stays fenced after
+ * a reopen.
  *
  * exactOptionalPropertyTypes: optional fields are OMITTED when absent.
  */
@@ -28,35 +27,40 @@
 import {
   asObjectiveAuthority,
   createObjectiveAuthority,
+  type ObjectiveDomainSnapshot,
+  type ObjectiveIdFactory,
   type ObjectivePort,
   type SuccessCriterion,
 } from "@/objective"
 import {
   OBJECTIVE_SNAPSHOT_VERSION,
+  type PersistedObjectiveBodyV2,
   type PersistedObjectiveCompletion,
   type PersistedObjectiveCriterion,
   type PersistedObjectiveSnapshot,
-  type PersistedObjectiveThread,
+  type PersistedObjectiveSnapshotV2,
+  type PersistedObjectiveThreadV2,
 } from "@/session"
 import { decodeObjectiveSnapshot } from "./restore"
 
 /** Inputs to {@link buildObjectiveAuthority}. All optional — the default is a
- *  fresh, gate-OFF, informational authority (byte-identical to the legacy
- *  `createObjectiveStore()`). */
+ *  fresh, gate-OFF, informational authority. */
 export interface BuildObjectiveAuthorityInput {
   /** Injected clock seam (default `Date.now`). */
   readonly now?: () => number
+  /** GOAL-01 — objective generation id minter (default `crypto.randomUUID`). */
+  readonly idFactory?: ObjectiveIdFactory
   /** H17 budget/usage derivation — forwarded from `QUANTA_OBJECTIVE_BUDGET_ENFORCE`
    *  by the surface that owns that gate. */
   readonly enforceBudget?: boolean
-  /** RFC-03 `QUANTA_PROPOSE_GOAL` posture (default OFF ⇒ byte-identical legacy). */
+  /** RFC-03 `QUANTA_PROPOSE_GOAL` posture (default OFF). */
   readonly gateOn?: boolean
   /** Whether the surface can raise an approval dialog (fail-closed under the
    *  gate when false). */
   readonly confirmationAvailable?: boolean
-  /** RFC-03 C2 — durable resume: a previously persisted objective snapshot to
-   *  restore at construction (ids / revision / provenance preserved). Absent ⇒
-   *  a fresh empty authority. */
+  /** RFC-03 C2 — durable resume: a previously persisted objective snapshot (v1
+   *  or v2) to restore at construction (ids / revision / provenance preserved).
+   *  Absent ⇒ a fresh empty authority. */
   readonly restoreFrom?: PersistedObjectiveSnapshot | undefined
 }
 
@@ -64,12 +68,14 @@ export interface BuildObjectiveAuthorityInput {
  * Construct THE per-session objective authority (typed as `ObjectivePort` — the
  * surface every consumer binds; the richer `ObjectiveAuthority` protocol is
  * recovered via `asObjectiveAuthority`). When `restoreFrom` is supplied, its
- * threads are decoded and restored verbatim as part of construction (fixed
- * restore order). This is the one production objective constructor owner.
+ * threads are decoded (migrated when v1) and restored verbatim as part of
+ * construction (fixed restore order). This is the one production objective
+ * constructor owner.
  */
 export const buildObjectiveAuthority = (input: BuildObjectiveAuthorityInput = {}): ObjectivePort =>
   createObjectiveAuthority({
     ...(input.now !== undefined ? { now: input.now } : {}),
+    ...(input.idFactory !== undefined ? { idFactory: input.idFactory } : {}),
     ...(input.enforceBudget !== undefined ? { enforceBudget: input.enforceBudget } : {}),
     ...(input.gateOn !== undefined ? { gateOn: input.gateOn } : {}),
     ...(input.confirmationAvailable !== undefined
@@ -80,18 +86,10 @@ export const buildObjectiveAuthority = (input: BuildObjectiveAuthorityInput = {}
       : {}),
   })
 
-/**
- * ENCODE the live objective authority into the durable session DTO: every live
- * thread's full state + its per-thread `revision` (read via the authority's
- * `readDomain` protocol) + its persisted explicit-status intent (provenance).
- * The result is plain JSON — the session store persists it as-is. Threads with
- * no state (e.g. a bare port double that lists nothing) are dropped. The thread
- * order is the port's list order (deterministic).
- */
 /** RFC-03 C4 — encode ONE domain criterion into its persisted DTO. `kind` is
  *  OMITTED for a plain manual criterion (byte-identical to the pre-C4
  *  `{ id, text, met }`); a CHECKED criterion carries its immutable `check`;
- *  `completion` evidence rides along when present. */
+ *  `completion` evidence (with its generation binding) rides along when present. */
 const encodeCriterion = (c: SuccessCriterion): PersistedObjectiveCriterion => {
   const completion: PersistedObjectiveCompletion | undefined =
     c.completion === undefined
@@ -99,6 +97,7 @@ const encodeCriterion = (c: SuccessCriterion): PersistedObjectiveCriterion => {
       : c.completion.source === "verifier"
         ? {
             source: "verifier",
+            objectiveId: c.completion.objectiveId,
             checkId: c.completion.checkId,
             objectiveRevision: c.completion.objectiveRevision,
             sourceDigest: c.completion.sourceDigest,
@@ -110,6 +109,7 @@ const encodeCriterion = (c: SuccessCriterion): PersistedObjectiveCriterion => {
           }
         : {
             source: "manual",
+            objectiveId: c.completion.objectiveId,
             actor: c.completion.actor,
             objectiveRevision: c.completion.objectiveRevision,
             verifiedAt: c.completion.verifiedAt,
@@ -139,43 +139,63 @@ const encodeCriterion = (c: SuccessCriterion): PersistedObjectiveCriterion => {
   }
 }
 
-export const encodeObjectiveSnapshot = (port: ObjectivePort): PersistedObjectiveSnapshot => {
+/** Encode ONE per-thread domain snapshot into its v2 envelope. A thread whose
+ *  state is null with a positive revision is a TOMBSTONE; a null state at
+ *  revision 0 was never an objective and is skipped. */
+const encodeThread = (dom: ObjectiveDomainSnapshot): PersistedObjectiveThreadV2 | null => {
+  if (dom.state === null) {
+    return dom.revision > 0
+      ? { threadId: dom.threadId, revision: dom.revision, objective: null }
+      : null
+  }
+  const obj = dom.state.objective
+  const body: PersistedObjectiveBodyV2 = {
+    objectiveId: obj.objectiveId,
+    createdBy: obj.createdBy,
+    ...(obj.migrationSource !== undefined ? { migrationSource: obj.migrationSource } : {}),
+    goal: obj.goal,
+    successCriteria: obj.successCriteria.map(encodeCriterion),
+    status: obj.status,
+    explicitStatus: dom.state.explicitStatus,
+    ...(dom.state.usageLimitedUntil !== undefined
+      ? { usageLimitedUntil: dom.state.usageLimitedUntil }
+      : {}),
+    budget: {
+      tokensUsed: obj.budget.tokensUsed,
+      turnsUsed: obj.budget.turnsUsed,
+      ...(obj.budget.maxTokens !== undefined ? { maxTokens: obj.budget.maxTokens } : {}),
+      ...(obj.budget.maxTurns !== undefined ? { maxTurns: obj.budget.maxTurns } : {}),
+    },
+    blockers: obj.blockers.map((b) => ({
+      id: b.id,
+      reason: b.reason,
+      waitingOn: b.waitingOn,
+      since: b.since,
+    })),
+    nextActions: [...obj.nextActions],
+    createdAt: obj.createdAt,
+    updatedAt: obj.updatedAt,
+    ...(dom.progressReceipts !== undefined && dom.progressReceipts.length > 0
+      ? { progressReceipts: dom.progressReceipts }
+      : {}),
+  }
+  return { threadId: dom.threadId, revision: dom.revision, objective: body }
+}
+
+/**
+ * ENCODE the live objective authority into the durable session DTO (v2): every
+ * known thread's full state + its per-thread `revision` + provenance, and every
+ * cleared thread's tombstone. The result is plain JSON — the session store
+ * persists it as-is. The thread order is the authority's known-thread order
+ * (deterministic: revision-map insertion order, then any live objective the
+ * map does not yet know).
+ */
+export const encodeObjectiveSnapshot = (port: ObjectivePort): PersistedObjectiveSnapshotV2 => {
   const authority = asObjectiveAuthority(port)
-  const threads: PersistedObjectiveThread[] = []
-  for (const o of port.list()) {
-    const dom = authority.readDomain(o.threadId)
-    if (dom.state === null) continue
-    const state = dom.state
-    const obj = state.objective
-    threads.push({
-      threadId: obj.threadId,
-      revision: dom.revision,
-      goal: obj.goal,
-      successCriteria: obj.successCriteria.map(encodeCriterion),
-      status: obj.status,
-      explicitStatus: state.explicitStatus,
-      ...(state.usageLimitedUntil !== undefined
-        ? { usageLimitedUntil: state.usageLimitedUntil }
-        : {}),
-      budget: {
-        tokensUsed: obj.budget.tokensUsed,
-        turnsUsed: obj.budget.turnsUsed,
-        ...(obj.budget.maxTokens !== undefined ? { maxTokens: obj.budget.maxTokens } : {}),
-        ...(obj.budget.maxTurns !== undefined ? { maxTurns: obj.budget.maxTurns } : {}),
-      },
-      blockers: obj.blockers.map((b) => ({
-        id: b.id,
-        reason: b.reason,
-        waitingOn: b.waitingOn,
-        since: b.since,
-      })),
-      nextActions: [...obj.nextActions],
-      createdAt: obj.createdAt,
-      updatedAt: obj.updatedAt,
-      ...(dom.progressReceipts !== undefined && dom.progressReceipts.length > 0
-        ? { progressReceipts: dom.progressReceipts }
-        : {}),
-    })
+  const threads: PersistedObjectiveThreadV2[] = []
+  for (const threadId of authority.knownThreadIds()) {
+    const encoded = encodeThread(authority.readDomain(threadId))
+    if (encoded !== null) threads.push(encoded)
   }
   return { version: OBJECTIVE_SNAPSHOT_VERSION, threads }
 }

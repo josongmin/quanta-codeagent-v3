@@ -8,8 +8,10 @@ import {
   normalizeProgressReceipt,
   type ProgressReceipt,
 } from "@/objective"
+import { objectiveIdOf } from "./v2-helpers"
 
 const receipt = (over: Partial<ProgressReceipt> = {}): ProgressReceipt => ({
+  objectiveId: "obj-1",
   attemptKey: "attempt-1",
   objectiveRevisionBefore: 1,
   objectiveRevisionAfter: 1,
@@ -31,6 +33,9 @@ describe("objective progress receipt boundary", () => {
     expect(
       normalizeProgressReceipt(receipt({ attemptKey: "x".repeat(MAX_PROGRESS_REF_LENGTH + 1) })),
     ).toBeNull()
+    // GOAL-01: a receipt is bound to a generation — no objectiveId ⇒ malformed.
+    expect(normalizeProgressReceipt({ ...receipt(), objectiveId: "" })).toBeNull()
+    expect(normalizeProgressReceipt({ ...receipt(), objectiveId: undefined })).toBeNull()
   })
 
   test("caps reference counts and drops oversized reference elements", () => {
@@ -48,12 +53,14 @@ describe("objective progress receipt boundary", () => {
 
   test("rejects stale append revisions and retains only the newest bounded window", () => {
     const authority = asObjectiveAuthority(createObjectiveAuthority())
-    authority.set("t", { goal: "ship" })
+    authority.create("t", { goal: "ship" })
+    const objectiveId = objectiveIdOf(authority, "t")
     const revision = authority.readDomain("t").revision
     expect(
       authority.recordProgressReceipt(
         "t",
         receipt({
+          objectiveId,
           objectiveRevisionBefore: revision - 1,
           objectiveRevisionAfter: revision - 1,
         }),
@@ -64,6 +71,7 @@ describe("objective progress receipt boundary", () => {
         authority.recordProgressReceipt(
           "t",
           receipt({
+            objectiveId,
             attemptKey: `attempt-${i}`,
             objectiveRevisionBefore: revision,
             objectiveRevisionAfter: revision,
@@ -79,9 +87,10 @@ describe("objective progress receipt boundary", () => {
 
   test("rejects a duplicate attempt key without consuming the bounded window", () => {
     const authority = createObjectiveAuthority()
-    authority.set("t", { goal: "ship" })
+    authority.create("t", { goal: "ship" })
     const revision = authority.readDomain("t").revision
     const first = receipt({
+      objectiveId: objectiveIdOf(authority, "t"),
       attemptKey: "same-attempt",
       objectiveRevisionBefore: revision,
       objectiveRevisionAfter: revision,
@@ -89,5 +98,48 @@ describe("objective progress receipt boundary", () => {
     expect(authority.recordProgressReceipt("t", first)).toBe(true)
     expect(authority.recordProgressReceipt("t", { ...first, recordedAt: 2 })).toBe(false)
     expect(authority.readDomain("t").progressReceipts).toHaveLength(1)
+  })
+
+  test("GOAL-01: a receipt bound to a generation that is not live is rejected", () => {
+    const authority = createObjectiveAuthority()
+    authority.create("t", { goal: "ship" })
+    const stale = objectiveIdOf(authority, "t")
+    // A foreign generation id never attaches.
+    expect(
+      authority.recordProgressReceipt(
+        "t",
+        receipt({
+          objectiveId: "some-other-objective",
+          objectiveRevisionBefore: authority.readDomain("t").revision,
+          objectiveRevisionAfter: authority.readDomain("t").revision,
+        }),
+      ),
+    ).toBe(false)
+    // After a `replace` the previous generation's id is stale on this thread.
+    authority.replace("t", { goal: "ship v2" })
+    expect(objectiveIdOf(authority, "t")).not.toBe(stale)
+    const revision = authority.readDomain("t").revision
+    expect(
+      authority.recordProgressReceipt(
+        "t",
+        receipt({
+          objectiveId: stale,
+          objectiveRevisionBefore: revision,
+          objectiveRevisionAfter: revision,
+        }),
+      ),
+    ).toBe(false)
+    expect(authority.readDomain("t").progressReceipts ?? []).toHaveLength(0)
+    // The live generation still records.
+    expect(
+      authority.recordProgressReceipt(
+        "t",
+        receipt({
+          objectiveId: objectiveIdOf(authority, "t"),
+          objectiveRevisionBefore: revision,
+          objectiveRevisionAfter: revision,
+        }),
+      ),
+    ).toBe(true)
   })
 })

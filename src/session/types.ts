@@ -269,7 +269,10 @@ export interface RollbackOperationRecord {
 /** Current wire version for a persisted objective snapshot. Bumped only on a
  *  shape change; the loader fail-closes on any other value so a forward-
  *  incompatible record can never be half-read (mirrors the rollback records). */
-export const OBJECTIVE_SNAPSHOT_VERSION = 1 as const
+export const OBJECTIVE_SNAPSHOT_VERSION = 2 as const
+/** The pre-GOAL-01 wire version, still LOADABLE (migrated once by the
+ *  runner/assemble adapter into the v2 authority shape; never written back). */
+export const OBJECTIVE_SNAPSHOT_VERSION_V1 = 1 as const
 
 /** RFC-03 C4 — a persisted immutable check spec (mirrors `@/objective`
  *  `CheckSpec`). The `id` survives verbatim so a verifier receipt keeps binding
@@ -289,12 +292,16 @@ export interface PersistedObjectiveCheckSpec {
 export type PersistedObjectiveCompletion =
   | {
       readonly source: "manual"
+      /** GOAL-01 — the objective generation the receipt binds to. Absent on a v1
+       *  record (the migration binds it to the migrated generation). */
+      readonly objectiveId?: string
       readonly actor: string
       readonly objectiveRevision: number
       readonly verifiedAt: number
     }
   | {
       readonly source: "verifier"
+      readonly objectiveId?: string
       readonly checkId: string
       readonly objectiveRevision: number
       readonly sourceDigest: string
@@ -338,6 +345,8 @@ export interface PersistedObjectiveBudget {
 
 /** Bounded, digest/reference-only objective turn checkpoint. */
 export interface PersistedProgressReceipt {
+  /** GOAL-01 — generation binding. Absent on a v1 record. */
+  readonly objectiveId?: string
   readonly attemptKey: string
   readonly objectiveRevisionBefore: number
   readonly objectiveRevisionAfter: number
@@ -377,13 +386,52 @@ export interface PersistedObjectiveThread {
   readonly progressReceipts?: readonly PersistedProgressReceipt[]
 }
 
-/** The durable objective snapshot persisted on a {@link SavedSession}: every
- *  live thread's full state + revision + provenance. Plain data — the session
- *  slice never imports the objective domain to produce/consume it. */
-export interface PersistedObjectiveSnapshot {
-  readonly version: typeof OBJECTIVE_SNAPSHOT_VERSION
+/** The v1 (pre-GOAL-01) durable objective snapshot. Still loadable; migrated
+ *  once by the runner/assemble adapter. */
+export interface PersistedObjectiveSnapshotV1 {
+  readonly version: typeof OBJECTIVE_SNAPSHOT_VERSION_V1
   readonly threads: readonly PersistedObjectiveThread[]
 }
+
+/** GOAL-01 — the v2 per-thread objective BODY: the generation identity +
+ *  provenance + the full state. `explicitStatus` is `active | paused` only. */
+export interface PersistedObjectiveBodyV2 {
+  readonly objectiveId: string
+  readonly createdBy: string
+  readonly migrationSource?: "legacy-v1"
+  readonly goal: string
+  readonly successCriteria: readonly PersistedObjectiveCriterion[]
+  readonly status: string
+  readonly explicitStatus: "active" | "paused"
+  readonly usageLimitedUntil?: number
+  readonly budget: PersistedObjectiveBudget
+  readonly blockers: readonly PersistedObjectiveBlocker[]
+  readonly nextActions: readonly string[]
+  readonly createdAt: number
+  readonly updatedAt: number
+  readonly progressReceipts?: readonly PersistedProgressReceipt[]
+}
+
+/** GOAL-01 — a v2 thread envelope. `objective: null` is a TOMBSTONE: the thread
+ *  had an objective that was cleared; its `revision` keeps fencing stale
+ *  pre-clear commands after a restart. */
+export interface PersistedObjectiveThreadV2 {
+  readonly threadId: string
+  readonly revision: number
+  readonly objective: PersistedObjectiveBodyV2 | null
+}
+
+export interface PersistedObjectiveSnapshotV2 {
+  readonly version: typeof OBJECTIVE_SNAPSHOT_VERSION
+  readonly threads: readonly PersistedObjectiveThreadV2[]
+}
+
+/** The durable objective snapshot persisted on a {@link SavedSession}: every
+ *  known thread's full state + revision + provenance. Plain data — the session
+ *  slice never imports the objective domain to produce/consume it. The loader
+ *  preserves the RAW version (v1 or v2); normalization happens at the
+ *  runner/assemble adapter, never inside the session store. */
+export type PersistedObjectiveSnapshot = PersistedObjectiveSnapshotV1 | PersistedObjectiveSnapshotV2
 
 export interface SavedSession {
   version: typeof SESSION_VERSION

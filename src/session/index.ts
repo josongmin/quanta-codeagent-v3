@@ -176,12 +176,17 @@ export { buildRecoveryGuidance, checkSessionStoreHealth } from "./store-health"
 export type {
   PersistedInterruptedTurn,
   PersistedObjectiveBlocker,
+  PersistedObjectiveBodyV2,
   PersistedObjectiveBudget,
   PersistedObjectiveCheckSpec,
   PersistedObjectiveCompletion,
   PersistedObjectiveCriterion,
   PersistedObjectiveSnapshot,
+  PersistedObjectiveSnapshotV1,
+  PersistedObjectiveSnapshotV2,
   PersistedObjectiveThread,
+  PersistedObjectiveThreadV2,
+  PersistedProgressReceipt,
   RollbackCheckpointRecord,
   RollbackOperationRecord,
   RollbackOperationState,
@@ -193,6 +198,7 @@ export type {
 } from "./types"
 export {
   OBJECTIVE_SNAPSHOT_VERSION,
+  OBJECTIVE_SNAPSHOT_VERSION_V1,
   ROLLBACK_RECORD_VERSION,
   SESSION_VERSION,
   WORKSPACE_OWNERSHIP_VERSION,

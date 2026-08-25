@@ -52,6 +52,8 @@ describe("R4 audit-M — objective snapshot reapply caps", () => {
     const objectives = [
       {
         threadId: "t1",
+        objectiveId: "obj-t1",
+        createdBy: "system" as const,
         goal: "g",
         successCriteria: Array.from({ length: 1000 }, (_, i) => makeCriterion(i)),
         status: "active" as const,
@@ -73,6 +75,8 @@ describe("R4 audit-M — objective snapshot reapply caps", () => {
     const objectives = [
       {
         threadId: "t2",
+        objectiveId: "obj-t2",
+        createdBy: "system" as const,
         goal: "g",
         successCriteria: [],
         status: "blocked" as const,
@@ -96,6 +100,8 @@ describe("R4 audit-M — objective snapshot reapply caps", () => {
     const objectives = [
       {
         threadId: "t3",
+        objectiveId: "obj-t3",
+        createdBy: "system" as const,
         goal: "g",
         successCriteria: Array.from({ length: 200 }, (_, i) => makeCriterion(i)),
         status: "active" as const,
@@ -110,6 +116,11 @@ describe("R4 audit-M — objective snapshot reapply caps", () => {
     const got = store.get("t3")
     expect(got?.successCriteria.length).toBe(200)
     expect(got?.blockers.length).toBe(30)
+    // GOAL-01: a snapshot that already carries its generation identity keeps
+    // it verbatim (no legacy re-tagging on the healthy path).
+    expect(got?.objectiveId).toBe("obj-t3")
+    expect(got?.createdBy).toBe("system")
+    expect(got?.migrationSource).toBeUndefined()
   })
 
   test("(4) cap-boundary snapshot (256 / 64) accepted in full", () => {
@@ -117,6 +128,8 @@ describe("R4 audit-M — objective snapshot reapply caps", () => {
     const objectives = [
       {
         threadId: "t4",
+        objectiveId: "obj-t4",
+        createdBy: "system" as const,
         goal: "g",
         successCriteria: Array.from({ length: 256 }, (_, i) => makeCriterion(i)),
         status: "active" as const,
@@ -142,6 +155,8 @@ describe("R4 audit-M — objective snapshot reapply caps", () => {
       objectives: [
         {
           threadId: "t5",
+          objectiveId: "obj-t5",
+          createdBy: "system" as const,
           goal: "g",
           successCriteria: [],
           status: "blocked" as const,

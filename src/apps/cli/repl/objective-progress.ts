@@ -18,7 +18,12 @@ export const beginObjectiveProgress = (
   threadId: string | undefined,
   prompt: CliPromptInput,
 ):
-  | { readonly threadId: string; readonly revision: number; readonly metIds: readonly string[] }
+  | {
+      readonly threadId: string
+      readonly objectiveId: string
+      readonly revision: number
+      readonly metIds: readonly string[]
+    }
   | undefined => {
   const meta = typeof prompt === "string" ? undefined : prompt.goalContinuation
   if (objective === undefined) return undefined
@@ -29,6 +34,7 @@ export const beginObjectiveProgress = (
   if (before.state?.objective.status !== "active") return undefined
   return {
     threadId: targetThreadId,
+    objectiveId: before.state.objective.objectiveId,
     revision: before.revision,
     metIds: before.state.objective.successCriteria.filter((c) => c.met).map((c) => c.id),
   }
@@ -47,6 +53,8 @@ export const finishObjectiveProgress = (args: {
   const authority = asObjectiveAuthority(objective)
   const after = authority.readDomain(started.threadId)
   if (after.state === null) return undefined
+  // GOAL-01 — a receipt never crosses a generation boundary.
+  if (after.state.objective.objectiveId !== started.objectiveId) return undefined
   const met = new Set(started.metIds)
   const criteria = after.state.objective.successCriteria
   const verifierReceipts = criteria.flatMap((criterion) =>
@@ -59,6 +67,7 @@ export const finishObjectiveProgress = (args: {
   const sourceDigests = [...new Set(verifierReceipts.map(({ receipt }) => receipt.sourceDigest))]
   const continuation = typeof prompt === "string" ? undefined : prompt.goalContinuation
   const receipt: ProgressReceipt = {
+    objectiveId: started.objectiveId,
     attemptKey:
       continuation?.attemptKey ??
       `foreground:${started.threadId}:${started.revision}:${Date.now()}`,

@@ -1,33 +1,80 @@
 /**
- * ADR-0394 objective store — the core lifecycle: create/read an objective,
- * set its explicit status, record a usage limit, list every thread.
+ * ADR-0394 objective store — the core lifecycle: create / replace / clear an
+ * objective generation, set its explicit status, amend its budget caps, record
+ * a usage limit, list every thread.
+ *
+ * GOAL-01: `create` refuses a live thread, `replace` refuses an empty one, and
+ * both mint a FRESH generation from the provenance the authority binds (the
+ * store never chooses an id or an actor on its own).
  */
 
+import { normalizeGoalText } from "../identity"
 import type { ObjectiveCore } from "../store"
 import type { Objective } from "../types"
-import { cellFromInit, emptyCell, isNonEmptyString, toObjective } from "./cell"
+import {
+  type CellProvenance,
+  cellFromDefinition,
+  finiteNonNegInt,
+  isNonEmptyString,
+  toObjective,
+} from "./cell"
 import type { ObjectiveStoreCtx } from "./ctx"
 
 export const objectiveOps = (
   ctx: ObjectiveStoreCtx,
-): Pick<ObjectiveCore, "set" | "get" | "updateStatus" | "markUsageLimited" | "list"> => {
-  const { cells, enforce, clockNow, mutate } = ctx
+): Pick<
+  ObjectiveCore,
+  | "create"
+  | "replace"
+  | "clear"
+  | "get"
+  | "setExplicitStatus"
+  | "amendBudget"
+  | "markUsageLimited"
+  | "list"
+> => {
+  const { cells, enforce, clockNow, idFactory, mutate } = ctx
+
+  const mint = (
+    threadId: string,
+    definition: Parameters<ObjectiveCore["create"]>[1],
+    provenance: CellProvenance | undefined,
+  ): Objective | null => {
+    try {
+      if (!isNonEmptyString(threadId) || definition === null || typeof definition !== "object") {
+        return null
+      }
+      if (normalizeGoalText(definition.goal) === null) return null
+      const t = clockNow()
+      const cell = cellFromDefinition(
+        threadId,
+        definition,
+        provenance ?? { objectiveId: idFactory(), createdBy: "system" },
+        t,
+      )
+      cells.set(threadId, cell)
+      return toObjective(cell, enforce, t)
+    } catch {
+      return null
+    }
+  }
+
   return {
-    set(threadId, init): Objective {
+    create(threadId, definition, provenance): Objective | null {
+      if (isNonEmptyString(threadId) && cells.has(threadId)) return null
+      return mint(threadId, definition, provenance)
+    },
+
+    replace(threadId, definition, provenance): Objective | null {
+      if (!isNonEmptyString(threadId) || !cells.has(threadId)) return null
+      return mint(threadId, definition, provenance)
+    },
+
+    clear(threadId): boolean {
       try {
-        // Malformed input still returns a non-null Objective (port contract):
-        // degrade to a synthetic empty cell rather than throwing.
-        if (!isNonEmptyString(threadId) || init === null || typeof init !== "object") {
-          const t = clockNow()
-          return toObjective(emptyCell(threadId, t), enforce, t)
-        }
-        const t = clockNow()
-        const cell = cellFromInit(threadId, init, t)
-        cells.set(threadId, cell)
-        return toObjective(cell, enforce, t)
+        return isNonEmptyString(threadId) && cells.delete(threadId)
       } catch {
-        const t = Date.now()
-        return toObjective(emptyCell(threadId, t), enforce, t)
+        return false
       }
     },
 
@@ -41,15 +88,24 @@ export const objectiveOps = (
       }
     },
 
-    updateStatus(threadId, status): Objective | null {
+    setExplicitStatus(threadId, status): Objective | null {
+      // GOAL-01 — only the two explicit intents exist. Anything else (a forged
+      // "completed", a derived limit state) is refused: `null`, no bump.
+      if (status !== "active" && status !== "paused") return null
       return mutate(threadId, (cell) => {
-        // Only "active" / "paused" / "completed" are explicit intents. The other
-        // three values (`blocked` / `usage_limited` / `budget_limited`) are
-        // DERIVED (from blockers / usage window / budget) and cannot be set
-        // directly — passing one is a silent no-op (the port is NO-THROW).
-        if (status === "active" || status === "paused" || status === "completed") {
-          cell.explicitStatus = status
-        }
+        cell.explicitStatus = status
+      })
+    },
+
+    amendBudget(threadId, budget): Objective | null {
+      if (budget === null || typeof budget !== "object") return null
+      return mutate(threadId, (cell) => {
+        // A present cap replaces; `undefined` leaves the cap untouched; a
+        // non-finite/negative cap is ignored. `*Used` are never touched here.
+        const maxTokens = finiteNonNegInt(budget.maxTokens)
+        const maxTurns = finiteNonNegInt(budget.maxTurns)
+        if (maxTokens !== undefined) cell.maxTokens = maxTokens
+        if (maxTurns !== undefined) cell.maxTurns = maxTurns
       })
     },
 

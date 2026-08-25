@@ -7,7 +7,7 @@
  *     → the idle ticker picks it up on the next idle tick        (real ticker
  *       + real `runIdleContinuation`)
  *     → `resume` enqueues a turn carrying the goal text          (observed sink)
- *     → `/goal clear` pauses it → the ticker stops pursuing.
+ *     → `/goal clear` DELETES it (GOAL-01) → the ticker stops pursuing.
  *
  * Everything except the host boundary (the enqueue sink + the idle/turn probes)
  * is the REAL production object. This is the strongest verification available
@@ -26,6 +26,7 @@ import {
 import { goalCmd } from "@/apps/cli/slash/goal-cmd"
 import type { SlashContext } from "@/apps/cli/slash-contract"
 import { createObjectiveStore, type ObjectivePort } from "@/objective"
+import { seedObjective } from "./objective/v2-helpers"
 
 const TID = "thread-e2e"
 
@@ -130,14 +131,16 @@ describe("Pursuing-goal chain — /goal → store → ticker → resume", () => 
     await timer.tick()
     expect(enqueued.length).toBe(1) // pursued once
 
-    // user pauses the pursuit
+    // user clears the pursuit
     const out: string[] = []
     await goalCmd.run(
       ["clear"],
       ctxWith(store, (s) => out.push(s)),
     )
-    expect(out.join("")).toContain("paused")
-    expect(store.get(TID)?.status).toBe("paused")
+    // GOAL-01: REVERSED — `/goal clear` deletes the objective (was: paused).
+    // The ticker's next read finds NO goal, so the pursuit stops.
+    expect(out.join("")).toContain("cleared")
+    expect(store.get(TID)).toBeNull()
 
     await timer.tick()
     await timer.tick()
@@ -169,8 +172,11 @@ describe("Pursuing-goal chain — /goal → store → ticker → resume", () => 
     // the agent (via objective_update on the shared store) marks it done — needs
     // a met success criterion for the store to derive "completed".
     const withCriterion = createObjectiveStore()
-    withCriterion.set(TID, { goal: "finish the migration", successCriteria: ["migrated"] })
-    withCriterion.updateStatus(TID, "active")
+    seedObjective(withCriterion, TID, {
+      goal: "finish the migration",
+      successCriteria: ["migrated"],
+    })
+    withCriterion.setExplicitStatus(TID, "active")
     const enq2: string[] = []
     const timer2 = fakeTimer()
     startGoalContinuationTicker({

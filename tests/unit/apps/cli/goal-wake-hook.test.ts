@@ -48,7 +48,7 @@ const probes = (
 describe("goal wake host binding", () => {
   test("an active authority objective wakes exactly once from the quiet-window edge", async () => {
     const store = createObjectiveStore()
-    store.set(TID, { goal: "ship" })
+    store.create(TID, { goal: "ship" })
     const timer = fakeTimeout()
     const resumed: string[] = []
     startGoalWakeController({
@@ -71,7 +71,7 @@ describe("goal wake host binding", () => {
 
   test("activity cancels the pending wake; a later settled edge starts a new checkpoint", async () => {
     const store = createObjectiveStore()
-    store.set(TID, { goal: "ship" })
+    store.create(TID, { goal: "ship" })
     const timer = fakeTimeout()
     const resumed: string[] = []
     const wake = startGoalWakeController({
@@ -99,7 +99,7 @@ describe("goal wake host binding", () => {
 
   test("a handled local command restores pursuit after a fresh quiet window", async () => {
     const store = createObjectiveStore()
-    store.set(TID, { goal: "ship" })
+    store.create(TID, { goal: "ship" })
     const timer = fakeTimeout()
     const resumed: string[] = []
     const wake = startGoalWakeController({
@@ -124,7 +124,7 @@ describe("goal wake host binding", () => {
 
   test("active-to-active revision drift between fire and queue hand-off is rejected then retryable", async () => {
     const store = createObjectiveStore()
-    store.set(TID, { goal: "ship" })
+    store.create(TID, { goal: "ship" })
     const timer = fakeTimeout()
     const queued: string[] = []
     let mutateOnNextProbe = true
@@ -139,7 +139,7 @@ describe("goal wake host binding", () => {
             mutateOnNextProbe = false
             // Same active status but a NEW authority revision: this is exactly
             // the old-prompt race the queue hand-off fence must reject.
-            store.updateStatus(TID, "active")
+            store.setExplicitStatus(TID, "active")
           }
           return true
         },
@@ -165,7 +165,7 @@ describe("goal wake host binding", () => {
 
   test("a detached live body blocks wake until its actual settlement edge", async () => {
     const store = createObjectiveStore()
-    store.set(TID, { goal: "ship" })
+    store.create(TID, { goal: "ship" })
     const timer = fakeTimeout()
     const resumed: string[] = []
     let bodyLive = true

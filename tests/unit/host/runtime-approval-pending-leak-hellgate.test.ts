@@ -103,7 +103,7 @@ describe("runtime approval pending lifecycle", () => {
     const objective = createObjectiveStore()
     const ledger = createRunLedger()
     const approvalStateMachine = createApprovalStateMachine({ objective, ledger })
-    objective.set("session-approval", { goal: "finish safely" })
+    objective.create("session-approval", { goal: "finish safely" })
     const { ctrl, slot } = makeCtrl(approvalStateMachine)
     const gate = createApprovalGate({ approvalSM: approvalStateMachine })
     let id = ""

@@ -82,13 +82,15 @@ const buildProductionShapedFacade = (
 
 const goalOf = (
   snapshot: ReturnType<NonNullable<ReturnType<typeof webObjectiveSnapshot>>> | undefined,
-): string | undefined => snapshot?.threads[0]?.goal
+): string | undefined =>
+  // GOAL-01: a live encode is the v2 envelope (`threads[i].objective`); v1 is load-only.
+  snapshot?.version === 2 ? snapshot.threads[0]?.objective?.goal : undefined
 
 describe("HELLGATE RFC-03 C2 (web parity) — durable objective snapshot is observability-decoupled", () => {
   test("[P1] TOOLS on, OBSERVABILITY OFF ⇒ webObjectiveSnapshot encodes the live goal (RED on unfixed: undefined)", () => {
     const { facade, objective } = buildProductionShapedFacade({ QUANTA_OBJECTIVE_TOOLS: "1" })
     expect(objective).toBeDefined()
-    objective?.set("thread-1", { goal: "ship the decoupled snapshot" })
+    objective?.create("thread-1", { goal: "ship the decoupled snapshot" })
     // The obs-gated getter is undefined (obs OFF) — the OLD read would return no
     // provider. The fix reads the persistence field instead.
     expect((facade as { objective?: unknown }).objective).toBeUndefined()
@@ -109,7 +111,7 @@ describe("HELLGATE RFC-03 C2 (web parity) — durable objective snapshot is obse
     const root = mkdtempSync(join(tmpdir(), "web-obj-persist-"))
     try {
       const { facade, objective } = buildProductionShapedFacade({ QUANTA_OBJECTIVE_TOOLS: "1" })
-      objective?.set("thread-1", { goal: "durably remembered goal" })
+      objective?.create("thread-1", { goal: "durably remembered goal" })
 
       // A minimal RuntimeSession exposing the persistence wire's read seams,
       // mirroring the transcript-persist hellgate's fakeSession.
@@ -145,7 +147,11 @@ describe("HELLGATE RFC-03 C2 (web parity) — durable objective snapshot is obse
       const saved = await loadSessionById("web-obj-1", { resolve: async () => root })
       expect(saved).toBeDefined()
       // The durable objective survived even though observability was OFF.
-      expect(saved?.objective?.threads[0]?.goal).toBe("durably remembered goal")
+      // GOAL-01: the persisted snapshot is the v2 envelope (`threads[i].objective`).
+      expect(saved?.objective?.version).toBe(2)
+      const persisted =
+        saved?.objective?.version === 2 ? saved.objective.threads[0]?.objective : undefined
+      expect(persisted?.goal).toBe("durably remembered goal")
       wire.unsub()
     } finally {
       rmSync(root, { recursive: true, force: true })

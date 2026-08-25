@@ -20,6 +20,7 @@ import { rollbackCheckpointRecordSchema, rollbackOperationRecordSchema } from ".
 import type { SessionRootProvider } from "./root-port"
 import {
   OBJECTIVE_SNAPSHOT_VERSION,
+  OBJECTIVE_SNAPSHOT_VERSION_V1,
   type SavedSession,
   type SavePayload,
   SESSION_VERSION,
@@ -265,12 +266,14 @@ const persistedObjectiveCheckSpecSchema = z.object({
 const persistedObjectiveCompletionSchema = z.discriminatedUnion("source", [
   z.object({
     source: z.literal("manual"),
+    objectiveId: z.string().min(1).optional(),
     actor: z.string().min(1),
     objectiveRevision: z.number().finite(),
     verifiedAt: z.number().finite(),
   }),
   z.object({
     source: z.literal("verifier"),
+    objectiveId: z.string().min(1).optional(),
     checkId: z.string().min(1),
     objectiveRevision: z.number().finite(),
     sourceDigest: z.string().min(1),
@@ -306,6 +309,7 @@ const MAX_PERSISTED_PROGRESS_REFS = 32
 const MAX_PERSISTED_PROGRESS_REF_LENGTH = 512
 const progressRefSchema = z.string().min(1).max(MAX_PERSISTED_PROGRESS_REF_LENGTH)
 const persistedProgressReceiptSchema = z.object({
+  objectiveId: progressRefSchema.optional(),
   attemptKey: progressRefSchema,
   objectiveRevisionBefore: z.number().int().nonnegative(),
   objectiveRevisionAfter: z.number().int().nonnegative(),
@@ -334,10 +338,44 @@ const persistedObjectiveThreadSchema = z.object({
     .max(MAX_PERSISTED_PROGRESS_RECEIPTS)
     .optional(),
 })
-const objectiveSnapshotSchema = z.object({
-  version: z.literal(OBJECTIVE_SNAPSHOT_VERSION),
-  threads: z.array(persistedObjectiveThreadSchema),
+// GOAL-01 — the v2 thread envelope: generation identity + provenance in the
+// body, `objective: null` as a cleared-thread TOMBSTONE that keeps its revision.
+const persistedObjectiveBodyV2Schema = z.object({
+  objectiveId: z.string().min(1).max(256),
+  createdBy: z.string().min(1),
+  migrationSource: z.literal("legacy-v1").optional(),
+  goal: z.string(),
+  successCriteria: z.array(persistedObjectiveCriterionSchema),
+  status: z.string(),
+  explicitStatus: z.enum(["active", "paused"]),
+  usageLimitedUntil: z.number().finite().optional(),
+  budget: persistedObjectiveBudgetSchema,
+  blockers: z.array(persistedObjectiveBlockerSchema),
+  nextActions: z.array(z.string()),
+  createdAt: z.number().finite(),
+  updatedAt: z.number().finite(),
+  progressReceipts: z
+    .array(persistedProgressReceiptSchema)
+    .max(MAX_PERSISTED_PROGRESS_RECEIPTS)
+    .optional(),
 })
+const persistedObjectiveThreadV2Schema = z.object({
+  threadId: z.string().min(1),
+  revision: z.number().int().nonnegative(),
+  objective: persistedObjectiveBodyV2Schema.nullable(),
+})
+// Both versions are LOADABLE (the raw version is preserved; the runner/assemble
+// adapter migrates v1 -> v2 once). Any OTHER version fail-closes the whole load.
+const objectiveSnapshotSchema = z.discriminatedUnion("version", [
+  z.object({
+    version: z.literal(OBJECTIVE_SNAPSHOT_VERSION_V1),
+    threads: z.array(persistedObjectiveThreadSchema),
+  }),
+  z.object({
+    version: z.literal(OBJECTIVE_SNAPSHOT_VERSION),
+    threads: z.array(persistedObjectiveThreadV2Schema),
+  }),
+])
 const savedSessionSchema = z.object({
   version: z.literal(SESSION_VERSION),
   meta: sessionMetaSchema,

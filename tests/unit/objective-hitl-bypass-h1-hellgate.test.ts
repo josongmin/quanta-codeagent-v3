@@ -73,7 +73,7 @@ describe("RFC-03 H1 — observability must not mint an ungated objective authori
     const prepared = authority.prepare({
       threadId,
       actor: "model",
-      mutation: { kind: "set", goal: "autonomous pwn goal" },
+      mutation: { kind: "create", definition: { goal: "autonomous pwn goal" } },
     })
     // GATED: a model mutation REQUIRES an admitted approval.
     expect(prepared.approvalRequired).toBe(true)
@@ -94,7 +94,7 @@ describe("RFC-03 H1 — observability must not mint an ungated objective authori
     expect(asm).toBeDefined()
     const threadId = base.sessionId ?? "s1"
     // Seed an objective through the tools' authority surface (system actor).
-    objective?.set(threadId, { goal: "ship", successCriteria: ["compiles"] })
+    objective?.create(threadId, { goal: "ship", successCriteria: ["compiles"] })
     // The ASM records an approval PAUSE on THIS thread — its attribution
     // (`addBlocker`) must land on the SAME objective instance (bind-once
     // late-bind), proving there are not two divergent authorities.

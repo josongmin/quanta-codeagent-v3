@@ -15,7 +15,7 @@
  *       system/verifier actor may complete. Gate-OFF stays byte-identical (model
  *       self-mark still works).
  *
- *   (c) exact restore — a surface-local `set` cannot exact-restore a prior
+ *   (c) exact restore — a surface-local `replace` cannot exact-restore a prior
  *       objective (it re-mints criterion ids and drops `met`). The authority's
  *       `restore(prior, expectedRevision)` must restore ids / met / status /
  *       blockers / nextActions EXACTLY, and CAS-reject a stale restore so an undo
@@ -38,7 +38,7 @@ const seed = (
     auth.prepare({
       threadId,
       actor: "system",
-      mutation: { kind: "set", goal: "g", successCriteria: criteria },
+      mutation: { kind: "create", definition: { goal: "g", successCriteria: criteria } },
     }),
     { admitted: true },
   )
@@ -61,7 +61,7 @@ describe("C1 (a) — CAS revision conflict", () => {
   test("DEFECT WITNESS: the raw store lets two writers at the same state both succeed", () => {
     // Documents today's behavior: no revision, last write silently wins.
     const store = createObjectiveStore()
-    store.set("t", { goal: "g" })
+    store.create("t", { goal: "g" })
     const a = store.setNextActions("t", ["A"])
     const b = store.setNextActions("t", ["B"])
     expect(a).not.toBeNull()
@@ -121,7 +121,7 @@ describe("C1 (a) — CAS revision conflict", () => {
 describe("C1 (b) — criterion completion authority", () => {
   test("DEFECT WITNESS: today a model self-mark auto-completes the objective", () => {
     const store = createObjectiveStore()
-    store.set("t", { goal: "g", successCriteria: ["done"] })
+    store.create("t", { goal: "g", successCriteria: ["done"] })
     const cid = store.get("t")?.successCriteria[0]?.id ?? ""
     store.markCriterion("t", cid, true)
     expect(store.get("t")?.status).toBe("completed") // self-completion, no gate
@@ -208,13 +208,16 @@ describe("C1 (b) — criterion completion authority", () => {
 // ─────────────────────────────────────────────────────────────────────────────
 
 describe("C1 (c) — exact restore", () => {
-  test("DEFECT WITNESS: a surface-local `set` re-mints ids and drops met", () => {
+  test("DEFECT WITNESS: a surface-local `replace` re-mints ids and drops met", () => {
     const store = createObjectiveStore()
-    store.set("t", { goal: "g", successCriteria: ["done"] })
+    store.create("t", { goal: "g", successCriteria: ["done"] })
     const before = store.get("t")?.successCriteria[0]
     store.markCriterion("t", before?.id ?? "", true)
-    // "restore" by re-setting the same text: ids differ, met is lost.
-    store.set("t", { goal: "g", successCriteria: ["done"] })
+    // "restore" by re-declaring the same text: ids differ, met is lost
+    // (GOAL-01: `replace` also mints a NEW objectiveId — a fresh generation).
+    const oldObjectiveId = store.get("t")?.objectiveId
+    store.replace("t", { goal: "g", successCriteria: ["done"] })
+    expect(store.get("t")?.objectiveId).not.toBe(oldObjectiveId)
     const after = store.get("t")?.successCriteria[0]
     expect(after?.id).not.toBe(before?.id)
     expect(after?.met).toBe(false)
@@ -269,7 +272,7 @@ describe("C1 — actor/thread binding + gate-OFF delegation", () => {
       auth.prepare({
         threadId: "session-bound",
         actor: "model",
-        mutation: { kind: "set", goal: "g" },
+        mutation: { kind: "create", definition: { goal: "g" } },
       }),
       { admitted: true },
     )
@@ -280,8 +283,8 @@ describe("C1 — actor/thread binding + gate-OFF delegation", () => {
   test("gate OFF: ObjectivePort surface behaves like the raw store", () => {
     const auth = createObjectiveAuthority({})
     const store = createObjectiveStore()
-    auth.set("t", { goal: "g", successCriteria: ["x"] })
-    store.set("t", { goal: "g", successCriteria: ["x"] })
+    auth.create("t", { goal: "g", successCriteria: ["x"] })
+    store.create("t", { goal: "g", successCriteria: ["x"] })
     const ao = auth.get("t")
     const so = store.get("t")
     expect(ao?.goal).toBe(so?.goal)
@@ -289,12 +292,12 @@ describe("C1 — actor/thread binding + gate-OFF delegation", () => {
     expect(ao?.successCriteria.length).toBe(so?.successCriteria.length)
   })
 
-  test("gate ON: a model-originated set requires approval; unadmitted is refused", () => {
+  test("gate ON: a model-originated create requires approval; unadmitted is refused", () => {
     const auth = createObjectiveAuthority({ gateOn: true })
     const prepared = auth.prepare({
       threadId: "t",
       actor: "model",
-      mutation: { kind: "set", goal: "g" },
+      mutation: { kind: "create", definition: { goal: "g" } },
     })
     expect(prepared.approvalRequired).toBe(true)
     const denied = auth.commit(prepared, { admitted: false })
@@ -302,7 +305,11 @@ describe("C1 — actor/thread binding + gate-OFF delegation", () => {
     if (denied.ok === false) expect(denied.reason).toBe("approval-required")
     expect(auth.get("t")).toBeNull() // nothing committed before admission
     const ok = auth.commit(
-      auth.prepare({ threadId: "t", actor: "model", mutation: { kind: "set", goal: "g" } }),
+      auth.prepare({
+        threadId: "t",
+        actor: "model",
+        mutation: { kind: "create", definition: { goal: "g" } },
+      }),
       { admitted: true },
     )
     expect(ok.ok).toBe(true)
@@ -313,7 +320,7 @@ describe("C1 — actor/thread binding + gate-OFF delegation", () => {
     const prepared = auth.prepare({
       threadId: "t",
       actor: "system",
-      mutation: { kind: "set", goal: "g" },
+      mutation: { kind: "create", definition: { goal: "g" } },
     })
     expect(prepared.approvalRequired).toBe(false)
     expect(auth.commit(prepared, { admitted: false }).ok).toBe(true)

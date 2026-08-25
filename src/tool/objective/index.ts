@@ -27,8 +27,10 @@
 
 import { z } from "zod"
 import type {
+  CommitRejection,
   CommitResult,
   CriterionDeclaration,
+  GoalDefinition,
   Objective,
   ObjectiveAuthority,
   ObjectiveMutation,
@@ -87,7 +89,10 @@ export type _ObjectiveEnumDriftGuard =
 // covers ~2k tokens, the practical free-form ceiling; 2000 chars per list
 // item + 256 items per array bound the worst-case payload at ~512KB which
 // stays under any LLM tool-call ceiling.
-const MAX_GOAL_CHARS = 8000
+// GOAL-01 — the goal-text ceiling is DOMAIN-owned (`MAX_GOAL_CHARS` in `@/objective`);
+// this slice may not value-import the domain, so it mirrors the number and a
+// parity test pins the two together.
+const MAX_GOAL_CHARS = 4000
 const MAX_REASON_CHARS = 8000
 const MAX_LIST_ITEM_CHARS = 2000
 const MAX_LIST_ITEMS = 256
@@ -142,7 +147,9 @@ export const objectiveUpdateSchema = z.object({
   op: z.discriminatedUnion("kind", [
     z.object({
       kind: z.literal("status"),
-      status: z.enum(STATUS_ENUM),
+      // GOAL-01 — only the two EXPLICIT intents are settable; `completed` and the
+      // limit states are DERIVED (blockers / evidence / budget / usage window).
+      status: z.enum(["active", "paused"]),
     }),
     z.object({
       kind: z.literal("addBlocker"),
@@ -161,11 +168,6 @@ export const objectiveUpdateSchema = z.object({
       kind: z.literal("markCriterion"),
       criterion_id: z.string().min(1).max(MAX_LIST_ITEM_CHARS),
       met: z.boolean(),
-    }),
-    z.object({
-      kind: z.literal("recordUsage"),
-      tokens: z.number().int().nonnegative().finite().optional(),
-      turns: z.number().int().nonnegative().finite().optional(),
     }),
   ]),
 })
@@ -263,24 +265,38 @@ const boundThreadId = (ctx: ToolContext): string | null => {
 const NO_SESSION_THREAD =
   "objective tools require a session-bound thread (no ctx.ownerId); refusing model-supplied identity"
 
-/** Map a non-`ok` commit to a model-facing message (heuristic-free, one per
- *  closed rejection reason). */
-const commitError = (res: Extract<CommitResult, { ok: false }>): string => {
-  switch (res.reason) {
-    case "stale":
-      return "objective changed since read (stale revision) — re-read and retry"
-    case "approval-required":
-      return "objective mutation requires approval (denied or not yet granted)"
-    case "approval-unavailable":
-      return "objective mutation requires approval but no confirmation surface is available"
-    case "forbidden-completion":
-      return "a criterion cannot be self-completed by the model; only a verifier may mark it met"
-    case "checked-verifier-only":
-      return "this is a CHECKED criterion — it can be marked met only by a verifier, never by an update"
-    case "invalid":
-      return "objective mutation could not be applied (no objective set for this thread)"
-  }
+/** Model-facing message per closed rejection reason (heuristic-free, exhaustive:
+ *  adding a `CommitRejection` member without a message fails compile). */
+const COMMIT_ERROR_MESSAGE: Record<CommitRejection, string> = {
+  stale: "objective changed since read (stale revision) — re-read and retry",
+  "approval-required": "objective mutation requires approval (denied or not yet granted)",
+  "approval-unavailable":
+    "objective mutation requires approval but no confirmation surface is available",
+  "forbidden-completion":
+    "a criterion cannot be self-completed by the model; only a verifier may mark it met",
+  "checked-verifier-only":
+    "this is a CHECKED criterion — it can be marked met only by a verifier, never by an update",
+  "objective-exists":
+    "an objective already exists for this thread — use objective_update, or ask the user to edit the goal",
+  "objective-missing": "no objective set for this thread",
+  "objective-mismatch":
+    "evidence belongs to a previous objective generation — re-read the objective",
+  "attempt-replayed": "this attempt was already settled",
+  "goal-too-long": "goal text exceeds the 4000-character ceiling",
+  "actor-forbidden": "this mutation is not available to the model",
+  "invalid-transition": "that status change is not allowed from the objective's current state",
+  "terminal-objective": "the objective is completed; it can no longer be mutated by the model",
+  "definition-change-forbidden":
+    "the goal definition is user-owned and cannot be changed autonomously",
+  "manual-attestation-required": "a manual criterion can only be completed by the user",
+  "validation-contract-missing":
+    "the objective has no success criteria or checks to complete against",
+  "attempt-in-flight": "an attributed attempt is still running; wait for it to settle",
+  invalid: "objective mutation could not be applied (no objective set for this thread)",
 }
+
+const commitError = (res: Extract<CommitResult, { ok: false }>): string =>
+  COMMIT_ERROR_MESSAGE[res.reason]
 
 /** Render a successful commit into the tool result, or a typed error. */
 const commitResult = (res: CommitResult): ToolResult => {
@@ -312,15 +328,15 @@ const clipGoal = (goal: string): string => (goal.length > 160 ? `${goal.slice(0,
 
 /** RFC-03 C3 — build the operator-facing proposal from the closed mutation. */
 const buildApprovalRequest = (mutation: ObjectiveMutation): ObjectiveApprovalRequest => {
-  if (mutation.kind === "set") {
+  if (mutation.kind === "create" || mutation.kind === "replace") {
     return {
-      operation: "set",
-      goal: mutation.goal,
-      summary: `Set goal: ${clipGoal(mutation.goal)}`,
+      operation: mutation.kind,
+      goal: mutation.definition.goal,
+      summary: `${mutation.kind === "create" ? "Set" : "Replace"} goal: ${clipGoal(mutation.definition.goal)}`,
     }
   }
-  if (mutation.kind === "updateStatus") {
-    return { operation: "updateStatus", summary: `Set objective status: ${mutation.status}` }
+  if (mutation.kind === "setExplicitStatus") {
+    return { operation: "setExplicitStatus", summary: `Set objective status: ${mutation.status}` }
   }
   return { operation: mutation.kind, summary: `Objective ${mutation.kind}` }
 }
@@ -348,20 +364,11 @@ const routeModelMutation = async (
   ctx: ToolContext,
   completionAdmission?: ObjectiveCompletionAdmission,
 ): Promise<ToolResult> => {
-  let completionExpectedRevision: number | undefined
-  if (
-    mutation.kind === "updateStatus" &&
-    mutation.status === "completed" &&
-    completionAdmission !== undefined
-  ) {
-    const admission = await completionAdmission.admit({ authority, threadId })
-    if (!admission.admitted)
-      return errResult(
-        `objective completion not admitted${admission.reasonCode === undefined ? "" : ` (${admission.reasonCode})`}`,
-      )
-    completionExpectedRevision = admission.expectedRevision
-  }
-  const prepared = prepareModelMutation(authority, threadId, mutation, completionExpectedRevision)
+  // GOAL-01 — there is no explicit `completed` any more (completion is derived
+  // from evidence by the authority), so the LLM-judge admission has no trigger
+  // here; GOAL-02 retires the port entirely (shadow telemetry only).
+  void completionAdmission
+  const prepared = prepareModelMutation(authority, threadId, mutation, undefined)
   if (!prepared.approvalRequired) {
     // Gate OFF (or a trusted non-model actor upstream): the admitted flag is
     // inert; the authority commits exactly as before.
@@ -403,6 +410,32 @@ const toCriterionDeclaration = (entry: CriterionEntry): CriterionDeclaration => 
   }
 }
 
+/** GOAL-01 — map the validated `objective_set` payload to a domain definition. */
+const toGoalDefinition = (data: ObjectiveSetInput): GoalDefinition => {
+  const budget: { maxTokens?: number; maxTurns?: number } = {}
+  if (data.budget?.max_tokens !== undefined) budget.maxTokens = data.budget.max_tokens
+  if (data.budget?.max_turns !== undefined) budget.maxTurns = data.budget.max_turns
+  return {
+    goal: data.goal,
+    ...(data.success_criteria !== undefined
+      ? { criteria: data.success_criteria.map(toCriterionDeclaration) }
+      : {}),
+    ...(Object.keys(budget).length > 0 ? { budget } : {}),
+  }
+}
+
+/** GOAL-01 — `create` when no objective is live, `replace` (a fresh generation;
+ *  every evidence family resets) when one is. GOAL-02's policy table decides
+ *  which actors may do either. */
+const generationMutation = (
+  authority: ObjectiveAuthority,
+  threadId: string,
+  definition: GoalDefinition,
+): ObjectiveMutation =>
+  authority.get(threadId) === null
+    ? { kind: "create", definition }
+    : { kind: "replace", definition }
+
 const buildObjectiveSet = (authority: ObjectiveAuthority): Tool<ObjectiveSetInput> => ({
   name: "objective_set",
   description:
@@ -426,16 +459,7 @@ const buildObjectiveSet = (authority: ObjectiveAuthority): Tool<ObjectiveSetInpu
       return
     }
     try {
-      const mutation: ObjectiveMutation = { kind: "set", goal: parsed.data.goal }
-      if (parsed.data.success_criteria !== undefined) {
-        mutation.criteria = parsed.data.success_criteria.map(toCriterionDeclaration)
-      }
-      const budget: { maxTokens?: number; maxTurns?: number } = {}
-      if (parsed.data.budget?.max_tokens !== undefined)
-        budget.maxTokens = parsed.data.budget.max_tokens
-      if (parsed.data.budget?.max_turns !== undefined)
-        budget.maxTurns = parsed.data.budget.max_turns
-      if (Object.keys(budget).length > 0) mutation.budget = budget
+      const mutation = generationMutation(authority, threadId, toGoalDefinition(parsed.data))
       yield { type: "result", result: await routeModelMutation(authority, threadId, mutation, ctx) }
     } catch (e) {
       yield { type: "result", result: errResult(`objective_set error: ${errMessage(e)}`) }
@@ -447,7 +471,7 @@ const buildObjectiveSet = (authority: ObjectiveAuthority): Tool<ObjectiveSetInpu
 const opToMutation = (op: ObjectiveUpdateInput["op"]): ObjectiveMutation => {
   switch (op.kind) {
     case "status":
-      return { kind: "updateStatus", status: op.status }
+      return { kind: "setExplicitStatus", status: op.status }
     case "addBlocker":
       return { kind: "addBlocker", reason: op.reason, waitingOn: op.waiting_on }
     case "clearBlocker":
@@ -456,12 +480,6 @@ const opToMutation = (op: ObjectiveUpdateInput["op"]): ObjectiveMutation => {
       return { kind: "setNextActions", actions: op.actions }
     case "markCriterion":
       return { kind: "markCriterion", criterionId: op.criterion_id, met: op.met }
-    case "recordUsage": {
-      const m: ObjectiveMutation = { kind: "recordUsage" }
-      if (op.tokens !== undefined) m.tokens = op.tokens
-      if (op.turns !== undefined) m.turns = op.turns
-      return m
-    }
   }
 }
 
@@ -472,10 +490,10 @@ const buildObjectiveUpdate = (
   name: "objective_update",
   description:
     "Partially mutate the per-thread Objective. `op.kind` selects: " +
-    "status (active|paused|completed — the limit states blocked/usage_limited/budget_limited are DERIVED, not settable) / " +
+    "status (active|paused — completed and the limit states blocked/usage_limited/budget_limited are DERIVED from evidence/budget, never settable) / " +
     "addBlocker (reason + waiting_on=user|tool|network|child_agent) / " +
     "clearBlocker (blocker_id) / nextActions (list of strings) / " +
-    "markCriterion (criterion_id, met) / recordUsage (tokens? + turns?). " +
+    "markCriterion (criterion_id, met). Usage is measured by the host, never self-reported. " +
     "Returns the NEW objective state after the mutation.",
   inputSchema: objectiveUpdateSchema,
   isReadOnly: () => false,

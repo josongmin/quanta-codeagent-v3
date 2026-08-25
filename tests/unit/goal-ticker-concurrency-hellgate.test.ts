@@ -53,8 +53,8 @@ const passingProbes = (
 /** A store with a single ACTIVE goal on `TID` — the launch-eligible baseline. */
 const activeStore = (): ReturnType<typeof createObjectiveStore> => {
   const store = createObjectiveStore()
-  store.set(TID, { goal: "ship the feature" })
-  store.updateStatus(TID, "active")
+  store.create(TID, { goal: "ship the feature" })
+  store.setExplicitStatus(TID, "active")
   return store
 }
 

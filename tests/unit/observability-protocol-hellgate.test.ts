@@ -38,8 +38,10 @@ const makeRun = (over: Partial<RunEntry> = {}): RunEntry => ({
 })
 
 const makeObjective = (over: Partial<Objective> = {}): Objective => ({
+  objectiveId: "obj-a",
   threadId: "thread-a",
   goal: "ship it",
+  createdBy: "system",
   successCriteria: [],
   status: "active",
   budget: { tokensUsed: 0, turnsUsed: 0 },

@@ -7,7 +7,7 @@
  *                         work on it whenever the thread goes idle, until it is
  *                         completed / blocked / limited.
  *   /goal               → show the current objective + status.
- *   /goal clear         → drop the pursuit (mark `paused`).
+ *   /goal clear         → drop the pursuit (delete the objective; revision tombstone).
  *
  * Present iff the surface wired the shared objective store (`ctx.goal`); absent
  * ⇒ prints the not-wired posture + exit 0 (default-OFF byte-identical). Setting
@@ -16,9 +16,8 @@
  * still recorded and surfaced, just not auto-continued.
  */
 
+import { MAX_GOAL_CHARS } from "@/objective"
 import type { SlashCommand } from "../slash-contract"
-
-const MAX_GOAL_CHARS = 4000
 
 export const goalCmd: SlashCommand = {
   name: "/goal",
@@ -47,9 +46,10 @@ export const goalCmd: SlashCommand = {
         ctx.out("/goal: no active objective to clear.\n")
         return 0
       }
-      port.updateStatus(threadId, "paused")
+      // GOAL-01 — clear is a real deletion (the thread keeps a revision tombstone).
+      port.clear(threadId)
       wired.onMutation?.()
-      ctx.out("Goal paused — the agent will stop auto-pursuing it.\n")
+      ctx.out("Goal cleared — the agent will stop auto-pursuing it.\n")
       return 0
     }
 
@@ -76,8 +76,17 @@ export const goalCmd: SlashCommand = {
 
     // /goal <objective> — set + activate. The ticker (if armed) picks it up on
     // the next idle tick; the objective is recorded either way.
-    port.set(threadId, { goal: raw })
-    port.updateStatus(threadId, "active")
+    // GOAL-01 — a single generation mint: `create` when no goal is live,
+    // `replace` (fresh objectiveId, evidence reset) when one is. GOAL-05 makes
+    // the replace path require an explicit `/goal edit`.
+    const minted =
+      port.get(threadId) === null
+        ? port.create(threadId, { goal: raw })
+        : port.replace(threadId, { goal: raw })
+    if (minted === null) {
+      ctx.out("/goal: could not record the objective.\n")
+      return 1
+    }
     wired.onMutation?.()
     ctx.out(
       `🎯 Pursuing goal set: ${raw}\n` +

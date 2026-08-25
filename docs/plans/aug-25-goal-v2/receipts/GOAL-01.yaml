@@ -1,0 +1,30 @@
+ticket: GOAL-01
+kind: implementation
+recordedAt: 2026-08-25T14:50:00Z
+testedSourceSha: (working tree on top of 29ee36e259ede91f96287a766b4b6c10902f753f; source commit S is the commit this receipt is staged with)
+originMain: b4f1b5286 at execution start; concurrent committers advanced main during the ticket (4e742536b -> 29ee36e25); no Goal-owned path was touched by them
+scope:
+  src: src/objective/** (provenance.ts, identity.ts new; types/mutations/model/ports/authority/index/progress-receipt/criteria/{model,verifier}/core-store/*/store rewritten),
+       src/runner/assemble/session-authorities/{restore,build-objective,index}.ts (v2 codec + v1 migration),
+       src/session/{types,store,index}.ts (PersistedObjectiveSnapshot v1|v2 DTO + zod),
+       src/tool/objective/index.ts, src/apps/cli/slash/{goal-cmd,objective}.ts, src/apps/cli/repl/objective-progress.ts (compile-minimal consumers)
+  tests: 4 new (tests/unit/objective/{domain-v2,identity,snapshot-migration,authority-boundary-ratchet}.test.ts + v2-helpers.ts), 59 migrated (6 parallel agents, disjoint files; every reversed assertion carries a `// GOAL-01` comment)
+rails:
+  - bun run typecheck                 ; exit 0
+  - bun run typecheck:tests           ; exit 0 (23.6s)
+  - bun run lint:debt                 ; exit 0 (prod complexity 36/36 after extracting objective_set helpers; noUnusedImports cleared)
+  - bun test <objective/goal/cli/kernel/protocol/web/approval/session unit set> ; 3134 pass / 0 fail (17s)
+  - bun test tests/unit/god-code-ratchet.test.ts tests/unit/_arch ; 72 pass / 1 fail — pre-existing cohort ratchet (25 > 24, not Goal-owned; see GOAL-00.yaml)
+  - bun run test:contract             ; 7 pass / 0 fail
+  - bun test tests/integration/{goal-continuation-live-e2e,objective-turn-context-consumer-e2e,objective-usage-limited-429-real-loop-e2e,observability-wire-multi-emit-e2e,agent-state-observability-ws-daemon-e2e}.test.ts ; 21 pass / 0 fail
+  - bun test tests/e2e-pty/cli-goal-pursuit-e2e.test.ts ; 9 pass / 0 fail (37s)
+redOnInjection:
+  - M1 generation boundary keeps evidence (progress.delete removed)        -> domain-v2 2 RED
+  - M2 receipt objectiveId binding removed (recordProgressReceipt)          -> domain-v2 + progress-receipt 2 RED
+  - M3 settle replay check removed                                          -> domain-v2 1 RED
+  - M4 legacy explicit completed carried forward in migration               -> GREEN by design (v2 type forbids it AND rehydrate discards it — second guard)
+  - M5 tombstone revision not planted (plantDomain null branch)             -> snapshot-migration 1 RED
+  - restore: byte-identical (diff -q against pre-mutant copies)
+ticketRedRails: 1-13 covered (1,2,3,4,8,10,12 domain-v2 + objective-hellgate; 5,7 identity + snapshot-migration; 6 snapshot-migration/snapshot-intent; 9,11 authority-boundary-ratchet + domain-v2 actor test; 13 mutation-completeness + snapshot-version zod union)
+deviations: see README "GOAL-01 실행 기록" (settleAttempt authority-side settlement implemented here; actor-fixed capability objects deferred to GOAL-02; port surface refusal->null rule; run-biome.ts wrapper hazard)
+notRun: bun test tests/unit tests/integration --parallel=1 (full suite; GOAL-10), bun run lint (repo-wide), bun fc * (no catalog change in this ticket)

@@ -239,7 +239,7 @@ describe("ADR-0403 approval-state-machine — attribution WITH objective + ledge
   const seed = () => {
     const objective: ObjectivePort = createObjectiveStore({ now: stepClock(0, 1) })
     const ledger: RunLedgerPort = createRunLedger({ now: stepClock(0, 1) })
-    objective.set("thread-A", { goal: "ship feature" })
+    objective.create("thread-A", { goal: "ship feature" })
     const asm = createApprovalStateMachine({
       now: stepClock(2000, 1),
       objective,
@@ -326,7 +326,7 @@ describe("ADR-0403 approval-state-machine — attribution WITHOUT optional ports
 
   it("only objective supplied ⇒ blockerId set, runEntryId absent", () => {
     const objective = createObjectiveStore({ now: stepClock() })
-    objective.set("thread-A", { goal: "x" })
+    objective.create("thread-A", { goal: "x" })
     const asm = createApprovalStateMachine({ now: stepClock(), objective })
     const r = ask(asm, { threadId: "thread-A" })
     expect(r.blockerId).toBeDefined()
@@ -351,14 +351,23 @@ describe("ADR-0403 approval-state-machine — hostile attribution fakes do NOT p
    *  a valid value — used to prove the approval state survives a misbehaving
    *  attribution port. */
   const hostileObjective = (): ObjectivePort => ({
-    set: () => {
-      throw new Error("set boom")
+    create: () => {
+      throw new Error("create boom")
+    },
+    replace: () => {
+      throw new Error("replace boom")
+    },
+    clear: () => {
+      throw new Error("clear boom")
     },
     get: () => {
       throw new Error("get boom")
     },
-    updateStatus: () => {
-      throw new Error("updateStatus boom")
+    setExplicitStatus: () => {
+      throw new Error("setExplicitStatus boom")
+    },
+    amendBudget: () => {
+      throw new Error("amendBudget boom")
     },
     addBlocker: () => {
       throw new Error("addBlocker boom")
@@ -371,9 +380,6 @@ describe("ADR-0403 approval-state-machine — hostile attribution fakes do NOT p
     },
     markCriterion: () => {
       throw new Error("markCriterion boom")
-    },
-    recordUsage: () => {
-      throw new Error("recordUsage boom")
     },
     markUsageLimited: () => {
       throw new Error("markUsageLimited boom")

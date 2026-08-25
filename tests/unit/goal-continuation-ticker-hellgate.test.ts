@@ -63,8 +63,8 @@ const fakeTimer = (): {
 describe("goal-continuation ticker — DEFAULT-OFF byte-identical", () => {
   test("enabled:false arms no timer and never resumes", async () => {
     const store = createObjectiveStore()
-    store.set(TID, { goal: "ship the feature" })
-    store.updateStatus(TID, "active")
+    store.create(TID, { goal: "ship the feature" })
+    store.setExplicitStatus(TID, "active")
     let resumes = 0
     const timer = fakeTimer()
 
@@ -97,8 +97,8 @@ describe("goal-continuation ticker — DEFAULT-OFF byte-identical", () => {
 describe("goal-continuation ticker — pursues an active goal", () => {
   test("a tick with an active goal + idle thread resumes it", async () => {
     const store = createObjectiveStore()
-    store.set(TID, { goal: "ship the feature" })
-    store.updateStatus(TID, "active")
+    store.create(TID, { goal: "ship the feature" })
+    store.setExplicitStatus(TID, "active")
 
     const resumed: string[] = []
     const timer = fakeTimer()
@@ -136,8 +136,8 @@ describe("goal-continuation ticker — pursues an active goal", () => {
 
   test("goal not active (paused) ⇒ tick does not resume", async () => {
     const store = createObjectiveStore()
-    store.set(TID, { goal: "ship" })
-    store.updateStatus(TID, "paused")
+    store.create(TID, { goal: "ship" })
+    store.setExplicitStatus(TID, "paused")
     let resumes = 0
     const timer = fakeTimer()
     startGoalContinuationTicker({
@@ -155,8 +155,8 @@ describe("goal-continuation ticker — pursues an active goal", () => {
 
   test("non-idle thread ⇒ tick does not resume (user is working)", async () => {
     const store = createObjectiveStore()
-    store.set(TID, { goal: "ship" })
-    store.updateStatus(TID, "active")
+    store.create(TID, { goal: "ship" })
+    store.setExplicitStatus(TID, "active")
     let resumes = 0
     const timer = fakeTimer()
     startGoalContinuationTicker({
@@ -177,8 +177,8 @@ describe("goal-continuation ticker — pursues an active goal", () => {
 
   test("stop() is idempotent and clears the timer", () => {
     const store = createObjectiveStore()
-    store.set(TID, { goal: "ship" })
-    store.updateStatus(TID, "active")
+    store.create(TID, { goal: "ship" })
+    store.setExplicitStatus(TID, "active")
     const timer = fakeTimer()
     const ticker = startGoalContinuationTicker({
       enabled: true,

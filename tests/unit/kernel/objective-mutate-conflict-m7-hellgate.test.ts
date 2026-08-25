@@ -53,11 +53,11 @@ describe("M7 · A — applyHostObjectiveMutation surfaces the CAS/policy refusal
   test("[A1] a STALE-revision mutate returns a typed stale_revision (not a swallowed success)", () => {
     const authority = buildObjectiveAuthority()
     // Seed the objective so the thread's revision advances to 1.
-    authority.set("s1", { goal: "ship" })
+    authority.create("s1", { goal: "ship" })
     // A wire mutate that expected the PRE-set revision 0 is now stale.
     const outcome = applyHostObjectiveMutation(
       { objective: authority, sessionId: "s1" },
-      { mutation: { kind: "updateStatus", status: "paused" }, expectedRevision: 0 },
+      { mutation: { kind: "setExplicitStatus", status: "paused" }, expectedRevision: 0 },
     )
     expect(outcome.ok).toBe(false)
     if (outcome.ok) throw new Error("unreachable")
@@ -68,17 +68,19 @@ describe("M7 · A — applyHostObjectiveMutation surfaces the CAS/policy refusal
 
   test("[A2] a fresh commit at the current revision still returns ok (no false negative)", () => {
     const authority = buildObjectiveAuthority()
-    authority.set("s1", { goal: "ship" }) // revision → 1
+    authority.create("s1", { goal: "ship" }) // revision → 1
     const outcome = applyHostObjectiveMutation(
       { objective: authority, sessionId: "s1" },
-      { mutation: { kind: "updateStatus", status: "paused" }, expectedRevision: 1 },
+      { mutation: { kind: "setExplicitStatus", status: "paused" }, expectedRevision: 1 },
     )
     expect(outcome.ok).toBe(true)
     expect(authority.get("s1")?.status).toBe("paused")
   })
 
   test("[A3] absent authority ⇒ benign ok (byte-identical no-op echo)", () => {
-    expect(applyHostObjectiveMutation({}, { mutation: { kind: "set", goal: "g" } })).toEqual({
+    expect(
+      applyHostObjectiveMutation({}, { mutation: { kind: "create", definition: { goal: "g" } } }),
+    ).toEqual({
       ok: true,
     })
   })
@@ -92,7 +94,7 @@ describe("M7 · B — the kernel scheduler throws on a stale objective mutate", 
     })
     const cmd = buildObjectiveMutate(
       { sessionId: "s1", clock },
-      { kind: "set", goal: "g" },
+      { kind: "create", definition: { goal: "g" } },
       {
         expectedObjectiveRevision: 0,
       },
@@ -108,14 +110,14 @@ describe("M7 · B — the kernel scheduler throws on a stale objective mutate", 
 
   test("[B2] end-to-end: a REAL stale authority mutate CONFLICTS (no success echo, no clobber)", async () => {
     const authority = buildObjectiveAuthority()
-    authority.set("s1", { goal: "ship" }) // revision → 1
+    authority.create("s1", { goal: "ship" }) // revision → 1
     const host = baseHost({
       mutateObjective: (a) =>
         applyHostObjectiveMutation({ objective: authority, sessionId: "s1" }, a),
     })
     const cmd = buildObjectiveMutate(
       { sessionId: "s1", clock },
-      { kind: "updateStatus", status: "paused" },
+      { kind: "setExplicitStatus", status: "paused" },
       { expectedObjectiveRevision: 0 }, // stale
     )
     await expect(
@@ -133,7 +135,7 @@ describe("M7 · B — the kernel scheduler throws on a stale objective mutate", 
     const host = baseHost({ mutateObjective: () => ({ ok: true }) })
     const cmd = buildObjectiveMutate(
       { sessionId: "s1", clock },
-      { kind: "set", goal: "g" },
+      { kind: "create", definition: { goal: "g" } },
       undefined,
     )
     const result = await dispatchSessionCommand(freshState(), cmd, {

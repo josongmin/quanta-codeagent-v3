@@ -1,56 +1,70 @@
 /**
- * RFC-03 C1 — the CLOSED objective mutation union.
+ * RFC-03 C1 / GOAL-01 — the CLOSED objective mutation union.
  *
  * Every write to the objective domain is one of these typed variants. The
  * authority (`./authority`) is the ONLY writer and dispatches on `kind`; a
  * `Record<ObjectiveOperationKind, …>` dispatch table makes adding a variant to
  * this union without routing it a COMPILE error, and the two-way guard below
- * (mirroring the `src/tool/objective/index.ts` STATUS_ENUM pattern) makes the
- * runtime floor exact — so the mutation-completeness ratchet
+ * (mirroring the `src/tool/objective/index.ts` enum pattern) makes the runtime
+ * floor exact — so the mutation-completeness ratchet
  * (`tests/unit/objective/mutation-completeness.test.ts`) fires if any operation
  * stops flowing through the authority.
  *
- * SLICE FENCE: imports ONLY sibling `./types` + `./model`. Pure data.
+ * GOAL-01 removed `set` (⇒ `create` | `replace`), `updateStatus` (⇒
+ * `setExplicitStatus`, `active | paused` only) and `recordUsage` (⇒
+ * `settleAttempt`, HOST-measured). Kinds owned by later tickets
+ * (`applyVerificationBatch` / `invalidateVerification` — GOAL-03;
+ * `beginAttempt` — GOAL-04; `observeBlocker` — GOAL-09) are added by their
+ * owners: the exhaustive tables make each addition a compile-checked change.
+ *
+ * SLICE FENCE: imports ONLY sibling modules. Pure data.
  *
  * exactOptionalPropertyTypes: optional fields are typed `x?: T | undefined`.
  */
 
-import type { CriterionDeclaration, VerifierCompletionReceipt } from "./criteria/model"
+import type { VerifierCompletionReceipt } from "./criteria/model"
 import type { ObjectiveDomainSnapshot } from "./model"
-import type { ObjectiveStatus, WaitingOn } from "./types"
+import type { ProgressTurnOutcome } from "./progress-receipt"
+import type {
+  ExplicitObjectiveStatus,
+  GoalDefinition,
+  ObjectiveBudgetLimit,
+  WaitingOn,
+} from "./types"
 
 export type { CriterionDeclaration } from "./criteria/model"
+export type { ObjectiveActor } from "./provenance"
+export { isObjectiveActor, OBJECTIVE_ACTORS } from "./provenance"
 
 /**
- * WHO originated a mutation. Bound by the CALLER/session — NEVER read from model
- * input (RFC-03 §8 stop rule). `model` is the only actor whose completion and
- * set/replace are gated; `user`/`system`/`continuation` are trusted callers and
- * `verifier` is the sole actor permitted to complete a criterion.
+ * GOAL-01 — the HOST-measured terminal settlement of one attributed attempt.
+ * The authority (system actor only) debits the budget exactly once, computes
+ * the criterion / verifier deltas from ITS OWN state (the `*Before` identity
+ * sets are what the host captured when the attempt started) and appends one
+ * bounded progress receipt. `attemptId` is the host's turn identity; a replay
+ * is rejected. `objectiveId` binds the settlement to the generation it ran
+ * against; a settlement for an older generation is rejected.
  */
-export type ObjectiveActor = "model" | "user" | "system" | "verifier" | "continuation"
+export interface ObjectiveAttemptSettlement {
+  readonly objectiveId: string
+  readonly attemptId: string
+  readonly startedRevision: number
+  readonly tokensUsed: number
+  readonly turnsUsed: 0 | 1
+  readonly outcome: ProgressTurnOutcome
+  readonly executionMode: "foreground" | "background"
+  readonly criterionIdsBefore: readonly string[]
+  readonly verifierReceiptIdsBefore: readonly string[]
+  readonly sourceDigest?: string | undefined
+  readonly recordedAt: number
+}
 
-export const OBJECTIVE_ACTORS = [
-  "model",
-  "user",
-  "system",
-  "verifier",
-  "continuation",
-] as const satisfies readonly ObjectiveActor[]
-
-/** The closed mutation union. Each variant maps 1:1 to a `ObjectivePort`
- *  mutator (plus `restore`, the authority-owned exact undo). */
+/** The closed mutation union. */
 export type ObjectiveMutation =
-  | {
-      kind: "set"
-      goal: string
-      successCriteria?: readonly string[] | undefined
-      /** RFC-03 C4 — rich criterion declarations (manual or checked). When
-       *  present it is the criterion source (a checked declaration carries a
-       *  `check`); `successCriteria` remains the string-only back-compat path. */
-      criteria?: readonly CriterionDeclaration[] | undefined
-      budget?: { maxTokens?: number | undefined; maxTurns?: number | undefined } | undefined
-    }
-  | { kind: "updateStatus"; status: ObjectiveStatus }
+  | { kind: "create"; definition: GoalDefinition }
+  | { kind: "replace"; definition: GoalDefinition }
+  | { kind: "clear" }
+  | { kind: "setExplicitStatus"; status: ExplicitObjectiveStatus }
   | { kind: "addBlocker"; reason: string; waitingOn: WaitingOn }
   | { kind: "clearBlocker"; blockerId: string }
   | { kind: "setNextActions"; actions: readonly string[] }
@@ -58,9 +72,11 @@ export type ObjectiveMutation =
   /** RFC-03 C4 — the VERIFIER-ONLY checked-criterion completion. Carries the
    *  full verifier receipt; the authority admits it ONLY for a `verifier` actor
    *  against a `checked` criterion whose `check.id` matches the receipt. No tool
-   *  input schema maps to this kind (forgery stop-rule). */
+   *  input schema maps to this kind (forgery stop-rule). GOAL-03 replaces it
+   *  with the batch commit. */
   | { kind: "markCriterionVerified"; criterionId: string; receipt: VerifierCompletionReceipt }
-  | { kind: "recordUsage"; tokens?: number | undefined; turns?: number | undefined }
+  | { kind: "amendBudget"; budget: ObjectiveBudgetLimit }
+  | { kind: "settleAttempt"; settlement: ObjectiveAttemptSettlement }
   | { kind: "markUsageLimited"; untilEpochMs: number }
   | { kind: "restore"; snapshot: ObjectiveDomainSnapshot }
 
@@ -72,14 +88,17 @@ export type ObjectiveOperationKind = ObjectiveMutation["kind"]
  * without listing it here fails compile). Non-zero floor pins the ratchet.
  */
 export const OBJECTIVE_OPERATION_KINDS = [
-  "set",
-  "updateStatus",
+  "create",
+  "replace",
+  "clear",
+  "setExplicitStatus",
   "addBlocker",
   "clearBlocker",
   "setNextActions",
   "markCriterion",
   "markCriterionVerified",
-  "recordUsage",
+  "amendBudget",
+  "settleAttempt",
   "markUsageLimited",
   "restore",
 ] as const satisfies readonly ObjectiveOperationKind[]
@@ -97,8 +116,13 @@ const OPERATION_KIND_SET: ReadonlySet<string> = new Set(OBJECTIVE_OPERATION_KIND
 export const isObjectiveOperationKind = (v: unknown): v is ObjectiveOperationKind =>
   typeof v === "string" && OPERATION_KIND_SET.has(v)
 
-const ACTOR_SET: ReadonlySet<string> = new Set(OBJECTIVE_ACTORS)
+/** The mutations that START a new objective generation (or end one). The
+ *  authority drops every evidence family for the thread when one applies. */
+export const GENERATION_MUTATION_KINDS = [
+  "create",
+  "replace",
+  "clear",
+] as const satisfies readonly ObjectiveOperationKind[]
 
-/** Runtime membership predicate for the closed actor union. */
-export const isObjectiveActor = (v: unknown): v is ObjectiveActor =>
-  typeof v === "string" && ACTOR_SET.has(v)
+export const isGenerationMutationKind = (kind: ObjectiveOperationKind): boolean =>
+  (GENERATION_MUTATION_KINDS as readonly string[]).includes(kind)

@@ -147,17 +147,24 @@ describe("objective tools — wire hellgate (ADR-0402)", () => {
 // ─────────────────────────────────────────────────────────────────────────────
 
 describe("objective tools — schema validation hellgate (ADR-0402)", () => {
-  test("reject-mode judge emits sanitized objective telemetry through the decision port", async () => {
+  // GOAL-01 (REVERSED): there is no explicit `completed` intent any more —
+  // completion is DERIVED from criteria evidence. The `status:"completed"` op is
+  // rejected at the zod boundary, so the reject-mode judge is NEVER consulted and
+  // NO decision event is emitted. The protective intent (criterion text never
+  // leaks through the decision port) is kept: nothing is emitted at all.
+  test("reject-mode judge is NOT triggered by the retired explicit-completed op (schema rejection, no telemetry)", async () => {
     const prior = process.env.QUANTA_GOAL_JUDGE
     process.env.QUANTA_GOAL_JUDGE = "reject"
     __resetRuntimeConfig()
     try {
       const port = createObjectiveStore()
-      port.set("t", { goal: "never-leak-this-criterion", criteria: [{ text: "manual proof" }] })
+      port.create("t", { goal: "never-leak-this-criterion", criteria: [{ text: "manual proof" }] })
       const emitted: DecisionEvent[] = []
+      let judgeCalls = 0
       const llm: LLMPort = {
         model: "judge-model",
         async *stream() {
+          judgeCalls += 1
           yield {
             type: "text_delta",
             delta:
@@ -176,15 +183,12 @@ describe("objective tools — schema validation hellgate (ADR-0402)", () => {
         thread_id: "t",
         op: { kind: "status", status: "completed" },
       })
-      expect(out.ok).toBe(true)
-      expect(emitted).toHaveLength(1)
-      expect(emitted[0]).toMatchObject({
-        kind: "objective",
-        outcome: "allow",
-        reason: "objective-judge:abstain",
-        metadata: { mode: "reject", reasonCodes: ["insufficient-evidence"], model: "judge-model" },
-      })
+      expect(out.ok).toBe(false)
+      expect(out.output).toContain("invalid input")
+      expect(judgeCalls).toBe(0)
+      expect(emitted).toHaveLength(0)
       expect(JSON.stringify(emitted)).not.toContain("never-leak-this-criterion")
+      expect(port.get("t")?.status).toBe("active")
     } finally {
       if (prior === undefined) delete process.env.QUANTA_GOAL_JUDGE
       else process.env.QUANTA_GOAL_JUDGE = prior
@@ -192,25 +196,39 @@ describe("objective tools — schema validation hellgate (ADR-0402)", () => {
     }
   })
 
-  test("completion admission rejects before the authority commit", async () => {
+  // GOAL-01 (REVERSED): the completion-admission port has no trigger in the tool
+  // any more (no explicit completed). A blocking admission is never consulted;
+  // the op fails at the schema and the objective is untouched.
+  test("completion admission is never consulted: the explicit-completed op is a schema rejection", async () => {
     const port = createObjectiveStore()
-    port.set("t", { goal: "g" })
+    port.create("t", { goal: "g" })
+    let admitCalls = 0
     const tools = objectiveTools(asObjectiveAuthority(port), {
-      admit: async () => ({ admitted: false, reasonCode: "judge-block", expectedRevision: 1 }),
+      admit: async () => {
+        admitCalls += 1
+        return { admitted: false, reasonCode: "judge-block", expectedRevision: 1 }
+      },
     })
     const out = await drain(findTool(tools, "objective_update"), {
       thread_id: "t",
       op: { kind: "status", status: "completed" },
     })
     expect(out.ok).toBe(false)
-    expect(out.output).toContain("judge-block")
+    expect(out.output).toContain("invalid input")
+    expect(out.output).not.toContain("judge-block")
+    expect(admitCalls).toBe(0)
     expect(port.get("t")?.status).toBe("active")
   })
 
-  test("completion admission revision is bound into the authority CAS", async () => {
+  // GOAL-01 (REVERSED): with no admission trigger there is no admission revision
+  // to bind into the CAS. The concurrent-edit side effect the admission used to
+  // inject can no longer happen through this path: the store stays at its seeded
+  // revision and status.
+  test("completion admission revision is no longer bound into the CAS (no admission path exists)", async () => {
     const port = createObjectiveStore()
-    port.set("t", { goal: "g" })
+    port.create("t", { goal: "g" })
     const authority = asObjectiveAuthority(port)
+    const revisionBefore = authority.readDomain("t").revision
     const tools = objectiveTools(authority, {
       admit: async ({ threadId }) => {
         const expectedRevision = authority.readDomain(threadId).revision
@@ -223,8 +241,11 @@ describe("objective tools — schema validation hellgate (ADR-0402)", () => {
       op: { kind: "status", status: "completed" },
     })
     expect(out.ok).toBe(false)
-    expect(out.output).toContain("stale")
-    expect(port.get("t")?.status).toBe("blocked")
+    expect(out.output).toContain("invalid input")
+    expect(out.output).not.toContain("stale")
+    expect(authority.readDomain("t").revision).toBe(revisionBefore)
+    expect(port.get("t")?.status).toBe("active")
+    expect(port.get("t")?.blockers).toEqual([])
   })
 
   test("objective_set requires non-empty goal", async () => {
@@ -244,7 +265,7 @@ describe("objective tools — schema validation hellgate (ADR-0402)", () => {
 
   test("objective_update rejects unknown op kind", async () => {
     const port = createObjectiveStore()
-    port.set("t", { goal: "g" })
+    port.create("t", { goal: "g" })
     const tools = objectiveTools(asObjectiveAuthority(port))
     const out = await drain(findTool(tools, "objective_update"), {
       thread_id: "t",
@@ -255,7 +276,7 @@ describe("objective tools — schema validation hellgate (ADR-0402)", () => {
 
   test("objective_update rejects bad enum (waiting_on)", async () => {
     const port = createObjectiveStore()
-    port.set("t", { goal: "g" })
+    port.create("t", { goal: "g" })
     const tools = objectiveTools(asObjectiveAuthority(port))
     const out = await drain(findTool(tools, "objective_update"), {
       thread_id: "t",
@@ -266,7 +287,7 @@ describe("objective tools — schema validation hellgate (ADR-0402)", () => {
 
   test("objective_update rejects bad status enum", async () => {
     const port = createObjectiveStore()
-    port.set("t", { goal: "g" })
+    port.create("t", { goal: "g" })
     const tools = objectiveTools(asObjectiveAuthority(port))
     const out = await drain(findTool(tools, "objective_update"), {
       thread_id: "t",
@@ -299,14 +320,53 @@ describe("objective tools — op variant round-trip (ADR-0402)", () => {
     return { port, tools }
   }
 
-  test("status op routes to updateStatus", async () => {
+  test("status op routes to setExplicitStatus (paused ⇒ paused; active ⇒ active)", async () => {
+    const { port, tools } = await seed()
+    const paused = await drain(findTool(tools, "objective_update"), {
+      thread_id: "t",
+      op: { kind: "status", status: "paused" },
+    })
+    expect(paused.ok).toBe(true)
+    expect(port.get("t")?.status).toBe("paused")
+    const active = await drain(findTool(tools, "objective_update"), {
+      thread_id: "t",
+      op: { kind: "status", status: "active" },
+    })
+    expect(active.ok).toBe(true)
+    expect(port.get("t")?.status).toBe("active")
+  })
+
+  // GOAL-01 (REVERSED): this test used to prove `status:"completed"` routed to
+  // `updateStatus` and flipped the objective to completed. Completed is DERIVED
+  // only now; the explicit op is rejected by the schema and the store is untouched.
+  test("status op REJECTS the retired explicit 'completed' (derived-only status)", async () => {
     const { port, tools } = await seed()
     const out = await drain(findTool(tools, "objective_update"), {
       thread_id: "t",
       op: { kind: "status", status: "completed" },
     })
+    expect(out.ok).toBe(false)
+    expect(out.output).toContain("invalid input")
+    expect(port.get("t")?.status).toBe("active")
+  })
+
+  test("objective_set on a live objective REPLACES it (fresh objectiveId, evidence reset)", async () => {
+    const { port, tools } = await seed()
+    const first = port.get("t")
+    if (first === null) throw new Error("seed missing")
+    const cid = first.successCriteria[0]?.id ?? ""
+    port.markCriterion("t", cid, true)
+    expect(port.get("t")?.successCriteria[0]?.met).toBe(true)
+    const out = await drain(findTool(tools, "objective_set"), {
+      thread_id: "t",
+      goal: "a replaced goal",
+      success_criteria: ["fresh criterion"],
+    })
     expect(out.ok).toBe(true)
-    expect(port.get("t")?.status).toBe("completed")
+    const second = port.get("t")
+    expect(second?.goal).toBe("a replaced goal")
+    expect(second?.objectiveId).not.toBe(first.objectiveId)
+    expect(second?.successCriteria.map((c) => c.met)).toEqual([false])
   })
 
   test("addBlocker op routes to addBlocker (status derives to 'blocked')", async () => {
@@ -354,25 +414,31 @@ describe("objective tools — op variant round-trip (ADR-0402)", () => {
     expect(port.get("t")?.successCriteria[0]?.met).toBe(true)
   })
 
-  test("recordUsage op routes to recordUsage", async () => {
+  // GOAL-01 (REVERSED): usage is HOST-measured (`settleAttempt`), never self-
+  // reported by the model. The `recordUsage` op is gone from the schema: it is
+  // rejected as invalid input and the budget counters are untouched.
+  test("recordUsage op is REJECTED (usage is host-measured, never self-reported)", async () => {
     const { port, tools } = await seed()
     const out = await drain(findTool(tools, "objective_update"), {
       thread_id: "t",
       op: { kind: "recordUsage", tokens: 100, turns: 2 },
     })
-    expect(out.ok).toBe(true)
+    expect(out.ok).toBe(false)
+    expect(out.output).toContain("invalid input")
     const o = port.get("t")
-    expect(o?.budget.tokensUsed).toBe(100)
-    expect(o?.budget.turnsUsed).toBe(2)
+    expect(o?.budget.tokensUsed).toBe(0)
+    expect(o?.budget.turnsUsed).toBe(0)
   })
 
-  test("recordUsage accepts tokens-only", async () => {
+  test("recordUsage tokens-only is REJECTED too (no partial self-report path)", async () => {
     const { port, tools } = await seed()
-    await drain(findTool(tools, "objective_update"), {
+    const out = await drain(findTool(tools, "objective_update"), {
       thread_id: "t",
       op: { kind: "recordUsage", tokens: 50 },
     })
-    expect(port.get("t")?.budget.tokensUsed).toBe(50)
+    expect(out.ok).toBe(false)
+    expect(out.output).toContain("invalid input")
+    expect(port.get("t")?.budget.tokensUsed).toBe(0)
   })
 })
 
@@ -384,13 +450,25 @@ describe("objective tools — NO-THROW + output shape (ADR-0402)", () => {
   /** A hostile port — every method throws. The tool must NEVER bubble it. */
   const throwingPort = (): ObjectivePort =>
     ({
-      set() {
+      create() {
+        throw new Error("boom")
+      },
+      replace() {
+        throw new Error("boom")
+      },
+      clear() {
         throw new Error("boom")
       },
       get() {
         throw new Error("boom")
       },
-      updateStatus() {
+      setExplicitStatus() {
+        throw new Error("boom")
+      },
+      amendBudget() {
+        throw new Error("boom")
+      },
+      markUsageLimited() {
         throw new Error("boom")
       },
       addBlocker() {
@@ -405,9 +483,6 @@ describe("objective tools — NO-THROW + output shape (ADR-0402)", () => {
       markCriterion() {
         throw new Error("boom")
       },
-      recordUsage() {
-        throw new Error("boom")
-      },
       list() {
         throw new Error("boom")
       },
@@ -419,7 +494,7 @@ describe("objective tools — NO-THROW + output shape (ADR-0402)", () => {
       },
     }) as unknown as ObjectivePort
 
-  test("throwing port.set ⇒ ok:false (never bubbles)", async () => {
+  test("throwing port.create ⇒ ok:false (never bubbles)", async () => {
     const tools = objectiveTools(asObjectiveAuthority(throwingPort()))
     const out = await drain(findTool(tools, "objective_set"), { thread_id: "t", goal: "g" })
     expect(out.ok).toBe(false)
@@ -467,7 +542,7 @@ describe("objective tools — NO-THROW + output shape (ADR-0402)", () => {
 
   test("objective_get output contains goal + status + blockers count + nextActions", async () => {
     const port = createObjectiveStore()
-    port.set("t", { goal: "the goal" })
+    port.create("t", { goal: "the goal" })
     port.addBlocker("t", { reason: "waiting", waitingOn: "user" })
     port.setNextActions("t", ["do A", "do B"])
     const tools = objectiveTools(asObjectiveAuthority(port))
@@ -483,7 +558,7 @@ describe("objective tools — NO-THROW + output shape (ADR-0402)", () => {
 
   test("objective_update returns the NEW state in the output (echo)", async () => {
     const port = createObjectiveStore()
-    port.set("t", { goal: "g" })
+    port.create("t", { goal: "g" })
     const tools = objectiveTools(asObjectiveAuthority(port))
     const out = await drain(findTool(tools, "objective_update"), {
       thread_id: "t",

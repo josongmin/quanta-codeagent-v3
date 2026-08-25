@@ -1,18 +1,24 @@
 /**
- * RFC-03 C2 — objective persistence DECODE adapter (session JSON → authority
- * domain snapshots).
+ * RFC-03 C2 / GOAL-01 — objective persistence DECODE adapter (session JSON →
+ * authority domain snapshots) + the ONE v1 → v2 migration.
  *
  * `runner/assemble` is the Layer-2 composition seam: it MAY import BOTH the
  * `@/session` DTO (plain JSON data) and the `@/objective` domain types, so it is
  * the correct home for the pure data adapter that maps between them. The
  * `@/session` slice itself never imports `@/objective` (its `denyImports` forbid
- * it) — it only stores/loads the JSON DTO.
+ * it) — it only stores/loads the JSON DTO, preserving the RAW version.
  *
- * This module is a PURE data adapter: no store construction, no behavior. It
- * decodes a persisted objective snapshot into the ordered per-thread
- * {@link ObjectiveDomainSnapshot}s the authority consumes at construction
- * (`ObjectiveAuthorityOptions.restoreDomains`). The order is the persisted
- * thread order — a DETERMINISTIC, fixed restore order.
+ * Migration (v1 → v2, applied ONCE here, never inside the authority):
+ *   - `objectiveId` = deterministic legacy id over (threadId, goal, createdAt);
+ *   - `createdBy: "system"`, `migrationSource: "legacy-v1"`;
+ *   - a legacy explicit `"completed"` is DISCARDED (⇒ `active`; completion
+ *     re-derives from receipts);
+ *   - completion / progress receipts inherit the migrated `objectiveId`;
+ *   - a goal over the domain ceiling is REFUSED (the thread is dropped with a
+ *     warning) — the ceiling is enforced identically at every boundary.
+ *
+ * This module is a PURE data adapter: no store construction, no behavior. The
+ * output order is the persisted thread order — a DETERMINISTIC restore order.
  *
  * exactOptionalPropertyTypes: optional fields are OMITTED when absent.
  */
@@ -29,14 +35,26 @@ import type {
   SuccessCriterion,
   WaitingOn,
 } from "@/objective"
-import { isObjectiveActor, normalizeCheckDeclaration, normalizeProgressReceipt } from "@/objective"
+import {
+  isObjectiveActor,
+  legacyObjectiveId,
+  MAX_GOAL_CHARS,
+  normalizeCheckDeclaration,
+  normalizeProgressReceipt,
+} from "@/objective"
 import type {
   PersistedObjectiveBlocker,
+  PersistedObjectiveBodyV2,
   PersistedObjectiveCompletion,
   PersistedObjectiveCriterion,
   PersistedObjectiveSnapshot,
+  PersistedObjectiveSnapshotV2,
   PersistedObjectiveThread,
+  PersistedObjectiveThreadV2,
+  PersistedProgressReceipt,
 } from "@/session"
+import { OBJECTIVE_SNAPSHOT_VERSION } from "@/session"
+import { logger } from "@/shared"
 
 const OBJECTIVE_STATUSES: ReadonlySet<string> = new Set<ObjectiveStatus>([
   "active",
@@ -54,6 +72,89 @@ const WAITING_ON: ReadonlySet<string> = new Set<WaitingOn>([
   "child_agent",
 ])
 
+// ─────────────────────────────────────────────────────────────────────────────
+// v1 → v2 migration (pure)
+// ─────────────────────────────────────────────────────────────────────────────
+
+const bindCompletion = (
+  c: PersistedObjectiveCompletion | undefined,
+  objectiveId: string,
+): PersistedObjectiveCompletion | undefined =>
+  c === undefined ? undefined : { ...c, objectiveId: c.objectiveId ?? objectiveId }
+
+const bindReceipt = (
+  r: PersistedProgressReceipt,
+  objectiveId: string,
+): PersistedProgressReceipt => ({
+  ...r,
+  objectiveId: r.objectiveId ?? objectiveId,
+})
+
+/** Migrate ONE v1 thread; `null` when it must be refused (goal over the ceiling). */
+const migrateThreadV1 = (t: PersistedObjectiveThread): PersistedObjectiveThreadV2 | null => {
+  if (t.goal.length > MAX_GOAL_CHARS) {
+    logger.warn(
+      `objective.migrate.refuse: thread=${t.threadId} goal=${t.goal.length} chars exceeds ${MAX_GOAL_CHARS}`,
+    )
+    return null
+  }
+  const objectiveId = legacyObjectiveId({
+    threadId: t.threadId,
+    goal: t.goal,
+    createdAt: t.createdAt,
+  })
+  const body: PersistedObjectiveBodyV2 = {
+    objectiveId,
+    createdBy: "system",
+    migrationSource: "legacy-v1",
+    goal: t.goal,
+    successCriteria: t.successCriteria.map((c) => {
+      const completion = bindCompletion(c.completion, objectiveId)
+      return { ...c, ...(completion !== undefined ? { completion } : {}) }
+    }),
+    status: t.status,
+    // GOAL-01 — a legacy explicit `completed` is never carried forward.
+    explicitStatus: t.explicitStatus === "paused" ? "paused" : "active",
+    ...(t.usageLimitedUntil !== undefined ? { usageLimitedUntil: t.usageLimitedUntil } : {}),
+    budget: t.budget,
+    blockers: t.blockers,
+    nextActions: t.nextActions,
+    createdAt: t.createdAt,
+    updatedAt: t.updatedAt,
+    ...(t.progressReceipts !== undefined
+      ? { progressReceipts: t.progressReceipts.map((r) => bindReceipt(r, objectiveId)) }
+      : {}),
+  }
+  return { threadId: t.threadId, revision: t.revision, objective: body }
+}
+
+/**
+ * Normalize ANY loadable persisted snapshot to the v2 shape. v2 passes through
+ * untouched (idempotent); v1 migrates once. Threads with an empty `threadId`
+ * are dropped (never a live thread).
+ */
+export const normalizeObjectiveSnapshot = (
+  snapshot: PersistedObjectiveSnapshot,
+): PersistedObjectiveSnapshotV2 => {
+  if (snapshot.version === OBJECTIVE_SNAPSHOT_VERSION) {
+    return {
+      version: OBJECTIVE_SNAPSHOT_VERSION,
+      threads: snapshot.threads.filter((t) => t.threadId.length > 0),
+    }
+  }
+  const threads: PersistedObjectiveThreadV2[] = []
+  for (const t of snapshot.threads) {
+    if (t.threadId.length === 0) continue
+    const migrated = migrateThreadV1(t)
+    if (migrated !== null) threads.push(migrated)
+  }
+  return { version: OBJECTIVE_SNAPSHOT_VERSION, threads }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// v2 → domain decode (pure)
+// ─────────────────────────────────────────────────────────────────────────────
+
 /** Coerce a persisted status string into the closed `ObjectiveStatus` union.
  *  The derived status is RE-DERIVED by the store on restore (from explicit
  *  intent + criteria + blockers), so this is only the advisory projection value;
@@ -64,12 +165,18 @@ const toStatus = (raw: string, explicit: ObjectiveStatus): ObjectiveStatus =>
 const toWaitingOn = (raw: string): WaitingOn => (WAITING_ON.has(raw) ? (raw as WaitingOn) : "user")
 
 /** RFC-03 C4 — decode a persisted completion receipt into the domain evidence
- *  union. The manual `actor` string is coerced to the closed `ObjectiveActor`
- *  (unknown ⇒ `system`); a malformed receipt is dropped upstream by the caller. */
-const toCompletion = (raw: PersistedObjectiveCompletion): CompletionReceipt => {
+ *  union, binding it to the thread's generation when the record predates the
+ *  field. The manual `actor` string is coerced to the closed `ObjectiveActor`
+ *  (unknown ⇒ `system`). */
+const toCompletion = (
+  raw: PersistedObjectiveCompletion,
+  objectiveId: string,
+): CompletionReceipt => {
+  const boundId = raw.objectiveId ?? objectiveId
   if (raw.source === "verifier") {
     return {
       source: "verifier",
+      objectiveId: boundId,
       checkId: raw.checkId,
       objectiveRevision: raw.objectiveRevision,
       sourceDigest: raw.sourceDigest,
@@ -80,6 +187,7 @@ const toCompletion = (raw: PersistedObjectiveCompletion): CompletionReceipt => {
   const actor: ObjectiveActor = isObjectiveActor(raw.actor) ? raw.actor : "system"
   return {
     source: "manual",
+    objectiveId: boundId,
     actor,
     objectiveRevision: raw.objectiveRevision,
     verifiedAt: raw.verifiedAt,
@@ -88,24 +196,24 @@ const toCompletion = (raw: PersistedObjectiveCompletion): CompletionReceipt => {
 
 /** RFC-03 C4 + M8 — decode a CHECKED criterion. The `met` flag is FAIL-CLOSED:
  *  a checked criterion is met ONLY when it carries a valid VERIFIER receipt that
- *  BINDS this check (`checkId === check.id`) AND passed — the exact invariant the
- *  store's `applyVerifierCompletion` enforces on the live path. A `met:true` with
- *  an absent/mismatched/failed receipt (a hand-edited / forged session file) is
- *  downgraded to the un-completed checked state (met:false, no completion), never
- *  admitted as a real completion without its verifier receipt. */
+ *  BINDS this check (`checkId === check.id`), this generation, AND passed. A
+ *  `met:true` with an absent/mismatched/failed receipt (a hand-edited / forged
+ *  session file) is downgraded to the un-completed checked state. */
 const toCheckedCriterion = (
   c: PersistedObjectiveCriterion,
   checkId: string,
   decl: { argv: readonly string[]; timeoutMs: number; successExitCodes: readonly number[] },
+  objectiveId: string,
 ): SuccessCriterion => {
   const receipt =
     c.completion !== undefined && c.completion.source === "verifier"
-      ? toCompletion(c.completion)
+      ? toCompletion(c.completion, objectiveId)
       : undefined
   const bound =
     receipt !== undefined &&
     receipt.source === "verifier" &&
     receipt.checkId === checkId &&
+    receipt.objectiveId === objectiveId &&
     receipt.verifierResult.passed === true
   const met = c.met === true && bound
   return {
@@ -121,35 +229,35 @@ const toCheckedCriterion = (
       timeoutMs: decl.timeoutMs,
       successExitCodes: [...decl.successExitCodes],
     },
-    // Attach the receipt only when it actually completes the criterion (met);
-    // a bound-but-unmet or absent receipt leaves the checked criterion evidence-free.
     ...(met && receipt !== undefined ? { completion: receipt } : {}),
   }
 }
 
 /** RFC-03 C4 — decode a MANUAL criterion (legacy migration + explicit manual).
- *  A manual receipt rides along when present; `met` is the persisted flag (manual
- *  completion carries no verifier invariant — the store mints its own receipt). */
-const toManualCriterion = (c: PersistedObjectiveCriterion): SuccessCriterion => {
+ *  A manual receipt rides along when present and bound to this generation. */
+const toManualCriterion = (
+  c: PersistedObjectiveCriterion,
+  objectiveId: string,
+): SuccessCriterion => {
   const completion =
     c.completion !== undefined && c.completion.source === "manual"
-      ? toCompletion(c.completion)
+      ? toCompletion(c.completion, objectiveId)
       : undefined
   return {
     kind: "manual",
     id: c.id,
     text: c.text,
     met: c.met,
-    ...(completion !== undefined && completion.source === "manual" ? { completion } : {}),
+    ...(completion !== undefined &&
+    completion.source === "manual" &&
+    completion.objectiveId === objectiveId
+      ? { completion }
+      : {}),
   }
 }
 
-/** RFC-03 C4 — decode a persisted criterion into the domain manual/checked union.
- *  A record with `kind:"checked"` + a well-formed, id-bearing check ⇒ checked
- *  (check id preserved verbatim so a verifier receipt keeps binding); anything
- *  else ⇒ manual (legacy migration; a malformed/absent check downgrades rather
- *  than crashing the restore, mirroring the store's defensive `rebuildCheck`). */
-const toCriterion = (c: PersistedObjectiveCriterion): SuccessCriterion => {
+/** RFC-03 C4 — decode a persisted criterion into the domain manual/checked union. */
+const toCriterion = (c: PersistedObjectiveCriterion, objectiveId: string): SuccessCriterion => {
   const decl =
     c.kind === "checked" && c.check !== undefined ? normalizeCheckDeclaration(c.check) : null
   const checkId =
@@ -157,8 +265,8 @@ const toCriterion = (c: PersistedObjectiveCriterion): SuccessCriterion => {
       ? c.check.id
       : null
   return decl !== null && checkId !== null
-    ? toCheckedCriterion(c, checkId, decl)
-    : toManualCriterion(c)
+    ? toCheckedCriterion(c, checkId, decl, objectiveId)
+    : toManualCriterion(c, objectiveId)
 }
 
 const toBlocker = (b: PersistedObjectiveBlocker): Blocker => ({
@@ -168,44 +276,51 @@ const toBlocker = (b: PersistedObjectiveBlocker): Blocker => ({
   since: b.since,
 })
 
-/** Reconstruct the full public `Objective` from a persisted thread. Every field
+/** Reconstruct the full public `Objective` from a persisted v2 body. Every field
  *  round-trips verbatim; ids are NEVER re-minted (they carry from the DTO). */
-const toObjective = (t: PersistedObjectiveThread): Objective => {
+const toObjective = (threadId: string, body: PersistedObjectiveBodyV2): Objective => {
   const budget: ObjectiveBudget = {
-    tokensUsed: t.budget.tokensUsed,
-    turnsUsed: t.budget.turnsUsed,
-    ...(t.budget.maxTokens !== undefined ? { maxTokens: t.budget.maxTokens } : {}),
-    ...(t.budget.maxTurns !== undefined ? { maxTurns: t.budget.maxTurns } : {}),
+    tokensUsed: body.budget.tokensUsed,
+    turnsUsed: body.budget.turnsUsed,
+    ...(body.budget.maxTokens !== undefined ? { maxTokens: body.budget.maxTokens } : {}),
+    ...(body.budget.maxTurns !== undefined ? { maxTurns: body.budget.maxTurns } : {}),
   }
   return {
-    threadId: t.threadId,
-    goal: t.goal,
-    successCriteria: t.successCriteria.map(toCriterion),
-    status: toStatus(t.status, t.explicitStatus),
+    objectiveId: body.objectiveId,
+    threadId,
+    goal: body.goal,
+    createdBy: isObjectiveActor(body.createdBy) ? body.createdBy : "system",
+    ...(body.migrationSource === "legacy-v1" ? { migrationSource: "legacy-v1" as const } : {}),
+    successCriteria: body.successCriteria.map((c) => toCriterion(c, body.objectiveId)),
+    status: toStatus(body.status, body.explicitStatus),
     budget,
-    blockers: t.blockers.map(toBlocker),
-    nextActions: [...t.nextActions],
-    createdAt: t.createdAt,
-    updatedAt: t.updatedAt,
+    blockers: body.blockers.map(toBlocker),
+    nextActions: [...body.nextActions],
+    createdAt: body.createdAt,
+    updatedAt: body.updatedAt,
   }
 }
 
-/** Decode ONE persisted thread into a per-thread domain snapshot (state +
- *  revision) the authority restores verbatim. */
-const toDomainSnapshot = (t: PersistedObjectiveThread): ObjectiveDomainSnapshot => {
+/** Decode ONE v2 thread into a per-thread domain snapshot (state + revision).
+ *  A `null` body is a tombstone: revision only. */
+const toDomainSnapshot = (t: PersistedObjectiveThreadV2): ObjectiveDomainSnapshot => {
+  if (t.objective === null) return { threadId: t.threadId, revision: t.revision, state: null }
+  const body = t.objective
   const state: ObjectiveThreadSnapshot = {
-    objective: toObjective(t),
-    explicitStatus: t.explicitStatus,
-    ...(t.usageLimitedUntil !== undefined ? { usageLimitedUntil: t.usageLimitedUntil } : {}),
+    objective: toObjective(t.threadId, body),
+    explicitStatus: body.explicitStatus,
+    ...(body.usageLimitedUntil !== undefined ? { usageLimitedUntil: body.usageLimitedUntil } : {}),
   }
   return {
     threadId: t.threadId,
     revision: t.revision,
     state,
-    ...(t.progressReceipts !== undefined
+    ...(body.progressReceipts !== undefined
       ? {
-          progressReceipts: t.progressReceipts
-            .map(normalizeProgressReceipt)
+          progressReceipts: body.progressReceipts
+            .map((r) =>
+              normalizeProgressReceipt({ ...r, objectiveId: r.objectiveId ?? body.objectiveId }),
+            )
             .filter((r) => r !== null),
         }
       : {}),
@@ -213,12 +328,12 @@ const toDomainSnapshot = (t: PersistedObjectiveThread): ObjectiveDomainSnapshot 
 }
 
 /**
- * Decode a persisted objective snapshot into the ordered per-thread domain
- * snapshots the authority consumes at construction. Threads with an empty
- * `threadId` are dropped (never a live thread). The output order is the
- * persisted order — a fixed, deterministic restore order.
+ * Decode a persisted objective snapshot (v1 OR v2) into the ordered per-thread
+ * domain snapshots the authority consumes at construction. v1 is migrated once
+ * (see {@link normalizeObjectiveSnapshot}). The output order is the persisted
+ * order — a fixed, deterministic restore order.
  */
 export const decodeObjectiveSnapshot = (
   snapshot: PersistedObjectiveSnapshot,
 ): readonly ObjectiveDomainSnapshot[] =>
-  snapshot.threads.filter((t) => t.threadId.length > 0).map(toDomainSnapshot)
+  normalizeObjectiveSnapshot(snapshot).threads.map(toDomainSnapshot)

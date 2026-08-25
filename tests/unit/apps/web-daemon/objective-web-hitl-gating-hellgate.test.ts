@@ -37,7 +37,11 @@ import { asObjectiveAuthority, type ObjectivePort } from "@/objective"
 
 const CWD = "/tmp/web-h1"
 const modelSet = (goal: string) =>
-  ({ threadId: "t-web", actor: "model", mutation: { kind: "set", goal } }) as const
+  ({
+    threadId: "t-web",
+    actor: "model",
+    mutation: { kind: "create", definition: { goal } },
+  }) as const
 
 /** Mint the session-stable objective EXACTLY as the factory does (web has no
  *  `onConfirm` ⇒ `confirmationAvailable:false`), then inject it into the obs wire

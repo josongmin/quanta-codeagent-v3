@@ -8,18 +8,21 @@
  * `ObjectiveThreadSnapshot` (the full serializable per-thread state, sourced
  * from the store's snapshot codec) alongside a monotonic `revision`.
  *
+ * GOAL-01: `completed` is NEVER an explicit intent — only `active | paused`.
+ * A thread whose objective was CLEARED keeps its revision as a TOMBSTONE
+ * (`state: null`, `revision > 0`) so a stale pre-clear command is CAS-rejected
+ * even after a restart.
+ *
  * SLICE FENCE: imports ONLY sibling `./types`. Pure data.
  *
  * exactOptionalPropertyTypes: optional fields are typed `x?: T | undefined`.
  */
 
 import type { ProgressReceipt } from "./progress-receipt"
-import type { Objective } from "./types"
+import type { ExplicitObjectiveStatus, Objective } from "./types"
 
-/** The caller's last EXPLICIT status intent — the only status source on restore
- *  (mirrors the store's internal `explicitStatus` so the derived status is
- *  reconstructed, never conflated with auto-derived completion). */
-export type ExplicitStatus = "active" | "paused" | "completed"
+/** The caller's last EXPLICIT status intent — the only status source on restore. */
+export type ExplicitStatus = ExplicitObjectiveStatus
 
 /**
  * The FULL serializable state of one thread's objective — the public projection
@@ -37,8 +40,9 @@ export interface ObjectiveThreadSnapshot {
 
 /**
  * A per-thread domain snapshot with its revision. `state === null` ⇒ the thread
- * has no objective (either never set, or the snapshot predates one). `prepare`
- * returns this as the immutable prior; `restore` consumes it under CAS.
+ * has no objective (never set, cleared — a tombstone when `revision > 0` — or
+ * the snapshot predates one). `prepare` returns this as the immutable prior;
+ * `restore` consumes it under CAS.
  */
 export interface ObjectiveDomainSnapshot {
   readonly threadId: string

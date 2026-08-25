@@ -81,6 +81,9 @@ const makeResumeSpy = (): {
  *  `objective.get` returns a minimal active objective for any thread. */
 const makeDeps = (over: Partial<ContinuationDeps> = {}): ContinuationDeps => {
   const activeObjective = (threadId: string) => ({
+    // GOAL-01: every objective carries its authority-minted generation id + creator.
+    objectiveId: `obj-${threadId}`,
+    createdBy: "system" as const,
     threadId,
     goal: "g",
     successCriteria: [],
@@ -641,7 +644,7 @@ describe("runIdleContinuation — real store, real resume side-effect", () => {
     // goal. Proves the end-to-end wire: scan read → guards → acquire → re-read →
     // resume. RED if resume (line 278) is not called or called with wrong arg.
     const store = createObjectiveStore()
-    store.set("thread-A", { goal: "ship it" })
+    store.create("thread-A", { goal: "ship it" })
     expect(store.get("thread-A")?.status).toBe("active") // pre-condition
 
     const spy = makeResumeSpy()
@@ -657,8 +660,8 @@ describe("runIdleContinuation — real store, real resume side-effect", () => {
     // Paired control against the case above: only the store status differs.
     // RED if the scan-status guard doesn't read the real store status.
     const store = createObjectiveStore()
-    store.set("thread-B", { goal: "later" })
-    store.updateStatus("thread-B", "paused")
+    store.create("thread-B", { goal: "later" })
+    store.setExplicitStatus("thread-B", "paused")
     expect(store.get("thread-B")?.status).toBe("paused")
 
     const spy = makeResumeSpy()
@@ -673,7 +676,7 @@ describe("runIdleContinuation — real store, real resume side-effect", () => {
   test("real store with NO goal for the thread → no-goal, resume NOT called", async () => {
     // Store exists but the thread has no objective → get() null → no-goal.
     const store = createObjectiveStore()
-    store.set("other-thread", { goal: "unrelated" })
+    store.create("other-thread", { goal: "unrelated" })
     expect(store.get("thread-C")).toBeNull()
 
     const spy = makeResumeSpy()
@@ -691,6 +694,8 @@ describe("runIdleContinuation — real store, real resume side-effect", () => {
     // RED if runIdleContinuation reuses the scan status instead of re-reading
     // (line 267) — it would launch.
     const active = {
+      objectiveId: "obj-thread-D",
+      createdBy: "system" as const,
       threadId: "thread-D",
       goal: "g",
       successCriteria: [],

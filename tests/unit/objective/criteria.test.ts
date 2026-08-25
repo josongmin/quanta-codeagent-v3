@@ -54,9 +54,8 @@ const seedChecked = (
       threadId: "t",
       actor: "system",
       mutation: {
-        kind: "set",
-        goal: "g",
-        criteria: [{ text: "tests pass", check: CHECK }],
+        kind: "create",
+        definition: { goal: "g", criteria: [{ text: "tests pass", check: CHECK }] },
       },
     }),
     { admitted: true },
@@ -175,7 +174,7 @@ describe("C4 — manual criteria keep explicit completion with provenance", () =
       auth.prepare({
         threadId: "t",
         actor: "system",
-        mutation: { kind: "set", goal: "g", successCriteria: ["do the thing"] },
+        mutation: { kind: "create", definition: { goal: "g", successCriteria: ["do the thing"] } },
       }),
       { admitted: true },
     )
@@ -198,7 +197,7 @@ describe("C4 — manual criteria keep explicit completion with provenance", () =
 
   test("unmarking a manual criterion clears its completion receipt", () => {
     const auth = createObjectiveAuthority({}) as ObjectiveAuthority
-    auth.set("t", { goal: "g", successCriteria: ["x"] })
+    auth.create("t", { goal: "g", successCriteria: ["x"] })
     const cid = auth.get("t")?.successCriteria[0]?.id ?? ""
     auth.markCriterion("t", cid, true)
     expect(auth.get("t")?.successCriteria[0]?.completion).toBeDefined()
@@ -241,9 +240,11 @@ describe("C4 (b) — completion provenance + check spec survive a real save→re
         threadId: "thr",
         actor: "system",
         mutation: {
-          kind: "set",
-          goal: "ship",
-          criteria: [{ text: "manual step" }, { text: "tests pass", check: CHECK }],
+          kind: "create",
+          definition: {
+            goal: "ship",
+            criteria: [{ text: "manual step" }, { text: "tests pass", check: CHECK }],
+          },
         },
       }),
       { admitted: true },
@@ -303,6 +304,7 @@ describe("C4 adversarial — no forged/placeholder receipt can complete a checke
           criterionId: cid,
           receipt: {
             source: "verifier",
+            objectiveId: auth.get("t")?.objectiveId ?? "",
             checkId,
             objectiveRevision: auth.readDomain("t").revision,
             sourceDigest: "sha256:abc",
@@ -347,6 +349,7 @@ describe("C4 adversarial — no forged/placeholder receipt can complete a checke
           criterionId: cid,
           receipt: {
             source: "verifier",
+            objectiveId: auth.get("t")?.objectiveId ?? "",
             checkId,
             objectiveRevision: 999, // does not match current
             sourceDigest: "sha256:abc",
@@ -364,7 +367,7 @@ describe("C4 adversarial — no forged/placeholder receipt can complete a checke
   test("even the RAW store cannot complete a checked criterion via markCriterion", async () => {
     const { createObjectiveStore } = await import("@/objective")
     const store = createObjectiveStore()
-    store.set("t", {
+    store.create("t", {
       goal: "g",
       criteria: [{ text: "tests", check: CHECK }],
     })
@@ -450,11 +453,14 @@ describe("C4 — CheckSpec immutability + unsupported execution seam", () => {
     }).toThrow()
   })
 
-  test("re-declaring via a fresh set does NOT mutate a prior check in place (new id)", () => {
+  test("re-declaring via a fresh replace does NOT mutate a prior check in place (new id)", () => {
     const { auth } = seedChecked()
     const before = auth.get("t")?.successCriteria[0]
     const beforeId = before?.kind === "checked" ? before.check.id : ""
-    auth.set("t", { goal: "g2", criteria: [{ text: "again", check: CHECK }] })
+    const beforeObjectiveId = auth.get("t")?.objectiveId
+    // GOAL-01: `replace` is the explicit overwrite — a fresh generation id too.
+    auth.replace("t", { goal: "g2", criteria: [{ text: "again", check: CHECK }] })
+    expect(auth.get("t")?.objectiveId).not.toBe(beforeObjectiveId)
     const after = auth.get("t")?.successCriteria[0]
     const afterId = after?.kind === "checked" ? after.check.id : ""
     expect(afterId).not.toBe("")

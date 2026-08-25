@@ -23,6 +23,7 @@ import {
 } from "@/runner/assemble/session-authorities"
 import { loadSessionById, type SessionMeta, saveSessionById } from "@/session"
 import { __resetRuntimeConfig } from "@/shared"
+import { objectiveIdOf, seedObjective, settleUsage } from "./v2-helpers"
 
 const mkMeta = (id: string): SessionMeta => ({
   id,
@@ -55,15 +56,16 @@ describe("RFC-03 C2 — objective persistence roundtrip", () => {
   test("save→close→reopen preserves objective ids / revision / provenance (byte-equivalent)", async () => {
     // A FROZEN clock so createdAt/updatedAt are deterministic across the restore.
     const auth = buildObjectiveAuthority({ now: () => 4_242 })
-    auth.set("thr-1", { goal: "ship the feature", successCriteria: ["compiles", "tests pass"] })
+    auth.create("thr-1", { goal: "ship the feature", successCriteria: ["compiles", "tests pass"] })
     // Provenance: an EXPLICIT paused intent (must survive, not default to active).
-    auth.updateStatus("thr-1", "paused")
+    auth.setExplicitStatus("thr-1", "paused")
     // Bump the per-thread revision a few times through real mutations.
-    auth.recordUsage("thr-1", { tokens: 10 })
+    // GOAL-01: usage is HOST-settled (`settleAttempt`), never self-reported.
+    settleUsage(auth, "thr-1", { tokens: 10 })
     auth.markCriterion("thr-1", "does-not-exist", true) // no-op id ⇒ does not bump
     auth.setNextActions("thr-1", ["wire it", "test it"])
     // A second thread to prove multi-thread fidelity.
-    auth.set("thr-2", { goal: "second goal" })
+    auth.create("thr-2", { goal: "second goal" })
 
     const before = auth.get("thr-1")
     expect(before?.status).toBe("paused")
@@ -88,8 +90,10 @@ describe("RFC-03 C2 — objective persistence roundtrip", () => {
     const fresh = buildObjectiveAuthority({ now: () => 9_999, restoreFrom: reopened?.objective })
     const after = fresh.get("thr-1")
 
-    // ids preserved EXACTLY (not re-minted).
+    // ids preserved EXACTLY (not re-minted) — the GOAL-01 generation id included.
     expect(after?.successCriteria.map((c) => c.id)).toEqual(critIds)
+    expect(after?.objectiveId).toBe(before?.objectiveId ?? "")
+    expect(after?.createdBy).toBe("system")
     // provenance preserved (explicit paused, not defaulted to active).
     expect(after?.status).toBe("paused")
     // next actions / goal / timestamps preserved.
@@ -107,10 +111,11 @@ describe("RFC-03 C2 — objective persistence roundtrip", () => {
 
   test("bounded ProgressReceipt evidence persists without changing objective revision", async () => {
     const auth = asObjectiveAuthority(buildObjectiveAuthority())
-    auth.set("receipt", { goal: "prove it", successCriteria: ["checked"] })
+    auth.create("receipt", { goal: "prove it", successCriteria: ["checked"] })
     const before = auth.readDomain("receipt").revision
     expect(
       auth.recordProgressReceipt("receipt", {
+        objectiveId: objectiveIdOf(auth, "receipt"),
         attemptKey: '["receipt",1,0]',
         objectiveRevisionBefore: before,
         objectiveRevisionAfter: before,
@@ -134,11 +139,11 @@ describe("RFC-03 C2 — objective persistence roundtrip", () => {
   test("restore preserves a COMPLETED objective (met criteria) + a BLOCKED one (byte-equivalent)", async () => {
     const auth = buildObjectiveAuthority({ now: () => 100 })
     // thread A: all criteria met ⇒ derived `completed`.
-    const a = auth.set("done", { goal: "finish", successCriteria: ["only"] })
+    const a = seedObjective(auth, "done", { goal: "finish", successCriteria: ["only"] })
     auth.markCriterion("done", a.successCriteria[0]?.id ?? "", true)
     expect(auth.get("done")?.status).toBe("completed")
     // thread B: a live blocker ⇒ derived `blocked` (wins over explicit intent).
-    auth.set("stuck", { goal: "unblock" })
+    auth.create("stuck", { goal: "unblock" })
     auth.addBlocker("stuck", { reason: "waiting on user", waitingOn: "user" })
     expect(auth.get("stuck")?.status).toBe("blocked")
 
@@ -163,14 +168,14 @@ describe("RFC-03 C2 — objective persistence roundtrip", () => {
 
   test("usage window + budget caps survive a save→reopen under an enforcing authority", async () => {
     const auth = buildObjectiveAuthority({ now: () => 500, enforceBudget: true })
-    auth.set("lim", { goal: "cap", budget: { maxTokens: 100, maxTurns: 5 } })
-    auth.recordUsage("lim", { tokens: 40 })
+    auth.create("lim", { goal: "cap", budget: { maxTokens: 100, maxTurns: 5 } })
+    settleUsage(auth, "lim", { tokens: 40 })
     auth.markUsageLimited("lim", 9_000)
     expect(auth.get("lim")?.status).toBe("usage_limited")
 
     const snapshot = encodeObjectiveSnapshot(auth)
     // The transient window rides the DTO.
-    expect(snapshot.threads[0]?.usageLimitedUntil).toBe(9_000)
+    expect(snapshot.threads[0]?.objective?.usageLimitedUntil).toBe(9_000)
     await saveSessionById(mkMeta("s-3"), {
       reason: "x",
       turns: 1,
@@ -208,7 +213,7 @@ describe("RFC-03 C2 — objective persistence roundtrip", () => {
 
   test("an omitting save PRESERVES an existing objective snapshot on disk (no wipe)", async () => {
     const auth = buildObjectiveAuthority({ now: () => 1 })
-    auth.set("keep", { goal: "persist me" })
+    auth.create("keep", { goal: "persist me" })
     const snapshot = encodeObjectiveSnapshot(auth)
     await saveSessionById(mkMeta("pres"), {
       reason: "x",
@@ -224,7 +229,7 @@ describe("RFC-03 C2 — objective persistence roundtrip", () => {
 
   test("an UNKNOWN objective-snapshot version fail-closes the WHOLE session load", async () => {
     const auth = buildObjectiveAuthority({ now: () => 1 })
-    auth.set("t", { goal: "g" })
+    auth.create("t", { goal: "g" })
     const snapshot = encodeObjectiveSnapshot(auth)
     await saveSessionById(mkMeta("bad"), {
       reason: "x",
@@ -239,5 +244,36 @@ describe("RFC-03 C2 — objective persistence roundtrip", () => {
     await Bun.write(path, JSON.stringify(raw))
     // The strict decoder refuses the whole file (never partially applied).
     expect(await loadSessionById("bad")).toBeUndefined()
+  })
+
+  test("GOAL-01: a CLEARED thread persists as a v2 tombstone (revision kept, objective null)", async () => {
+    const auth = asObjectiveAuthority(buildObjectiveAuthority({ now: () => 1 }))
+    auth.create("gone", { goal: "will be cleared" })
+    auth.setNextActions("gone", ["x"])
+    expect(auth.clear("gone")).toBe(true)
+    const revision = auth.readDomain("gone").revision
+    expect(revision).toBeGreaterThan(0)
+
+    const snapshot = encodeObjectiveSnapshot(auth)
+    expect(snapshot.version).toBe(2)
+    expect(snapshot.threads).toEqual([{ threadId: "gone", revision, objective: null }])
+    await saveSessionById(mkMeta("tomb"), {
+      reason: "x",
+      turns: 1,
+      messages: [],
+      objective: snapshot,
+    })
+    const reopened = await loadSessionById("tomb")
+    expect(reopened?.objective).toEqual(snapshot)
+
+    // The tombstone fences a stale pre-clear command after the reopen: the
+    // thread is known, has NO objective, and its revision is the persisted one.
+    const fresh = asObjectiveAuthority(
+      buildObjectiveAuthority({ restoreFrom: reopened?.objective }),
+    )
+    expect(fresh.get("gone")).toBeNull()
+    expect(fresh.knownThreadIds()).toContain("gone")
+    expect(fresh.readDomain("gone").revision).toBe(revision)
+    expect(encodeObjectiveSnapshot(fresh)).toEqual(snapshot)
   })
 })

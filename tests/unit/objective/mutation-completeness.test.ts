@@ -16,6 +16,11 @@
  *
  * Together they forbid a silent regression to a direct store call: a mutation
  * that stops flowing through the authority loses its effect here.
+ *
+ * GOAL-01: the union is `create | replace | clear | setExplicitStatus |
+ * addBlocker | clearBlocker | setNextActions | markCriterion |
+ * markCriterionVerified | amendBudget | settleAttempt | markUsageLimited |
+ * restore` (`set` / `updateStatus` / `recordUsage` are gone).
  */
 
 import { describe, expect, test } from "bun:test"
@@ -25,10 +30,11 @@ import {
   OBJECTIVE_OPERATION_KINDS,
   objectiveMutationDispatchKeys,
 } from "@/objective"
+import { nextAttemptId } from "./v2-helpers"
 
 describe("C1 — closed operation union floor", () => {
   test("the operation-kind floor is non-zero and unique", () => {
-    expect(OBJECTIVE_OPERATION_KINDS.length).toBeGreaterThanOrEqual(9)
+    expect(OBJECTIVE_OPERATION_KINDS.length).toBeGreaterThanOrEqual(13)
     expect(new Set(OBJECTIVE_OPERATION_KINDS).size).toBe(OBJECTIVE_OPERATION_KINDS.length)
   })
 
@@ -38,9 +44,13 @@ describe("C1 — closed operation union floor", () => {
     )
   })
 
-  test("the kind predicate is a two-way guard (rejects a non-kind)", () => {
+  test("the kind predicate is a two-way guard (rejects a non-kind AND the retired kinds)", () => {
     for (const k of OBJECTIVE_OPERATION_KINDS) expect(isObjectiveOperationKind(k)).toBe(true)
     expect(isObjectiveOperationKind("wizardry")).toBe(false)
+    // GOAL-01: the retired v1 kinds are NOT operations any more.
+    expect(isObjectiveOperationKind("set")).toBe(false)
+    expect(isObjectiveOperationKind("updateStatus")).toBe(false)
+    expect(isObjectiveOperationKind("recordUsage")).toBe(false)
   })
 })
 
@@ -51,7 +61,7 @@ describe("C1 — every operation routes through the authority with a live effect
       a.prepare({
         threadId: "t",
         actor: "system",
-        mutation: { kind: "set", goal: "seed", successCriteria: ["c1"] },
+        mutation: { kind: "create", definition: { goal: "seed", successCriteria: ["c1"] } },
       }),
       { admitted: true },
     )
@@ -61,19 +71,55 @@ describe("C1 — every operation routes through the authority with a live effect
   // Each entry: run the op through the authority, assert an effect that ONLY that
   // op produces. Deleting the op's dispatch handler makes its assertion RED.
   const effects: Record<string, (a: ReturnType<typeof createObjectiveAuthority>) => void> = {
-    set: (a) => {
-      a.commit(
-        a.prepare({ threadId: "t", actor: "system", mutation: { kind: "set", goal: "replaced" } }),
+    create: (a) => {
+      // A SECOND thread — the seed thread already has an objective (`create`
+      // there is `objective-exists`), so the live effect is a fresh generation.
+      expect(a.get("fresh")).toBeNull()
+      const res = a.commit(
+        a.prepare({
+          threadId: "fresh",
+          actor: "system",
+          mutation: { kind: "create", definition: { goal: "created" } },
+        }),
         { admitted: true },
       )
-      expect(a.get("t")?.goal).toBe("replaced")
+      expect(res.ok).toBe(true)
+      expect(a.get("fresh")?.goal).toBe("created")
+      expect(a.get("fresh")?.objectiveId).not.toBe("")
+      expect(a.get("fresh")?.createdBy).toBe("system")
     },
-    updateStatus: (a) => {
+    replace: (a) => {
+      const before = a.get("t")?.objectiveId ?? ""
       a.commit(
         a.prepare({
           threadId: "t",
           actor: "system",
-          mutation: { kind: "updateStatus", status: "paused" },
+          mutation: { kind: "replace", definition: { goal: "replaced" } },
+        }),
+        { admitted: true },
+      )
+      expect(a.get("t")?.goal).toBe("replaced")
+      // GOAL-01: a replace mints a NEW generation id.
+      expect(a.get("t")?.objectiveId).not.toBe(before)
+    },
+    clear: (a) => {
+      const before = a.readDomain("t").revision
+      const res = a.commit(
+        a.prepare({ threadId: "t", actor: "system", mutation: { kind: "clear" } }),
+        { admitted: true },
+      )
+      expect(res.ok).toBe(true)
+      // GOAL-01: real deletion + a revision tombstone on the thread.
+      expect(a.get("t")).toBeNull()
+      expect(a.readDomain("t").revision).toBe(before + 1)
+      expect(a.knownThreadIds()).toContain("t")
+    },
+    setExplicitStatus: (a) => {
+      a.commit(
+        a.prepare({
+          threadId: "t",
+          actor: "system",
+          mutation: { kind: "setExplicitStatus", status: "paused" },
         }),
         { admitted: true },
       )
@@ -142,14 +188,16 @@ describe("C1 — every operation routes through the authority with a live effect
           threadId: "t",
           actor: "system",
           mutation: {
-            kind: "set",
-            goal: "checked",
-            criteria: [
-              {
-                text: "tests pass",
-                check: { kind: "command", argv: ["x"], timeoutMs: 1, successExitCodes: [0] },
-              },
-            ],
+            kind: "replace",
+            definition: {
+              goal: "checked",
+              criteria: [
+                {
+                  text: "tests pass",
+                  check: { kind: "command", argv: ["x"], timeoutMs: 1, successExitCodes: [0] },
+                },
+              ],
+            },
           },
         }),
         { admitted: true },
@@ -167,6 +215,7 @@ describe("C1 — every operation routes through the authority with a live effect
             criterionId: cid,
             receipt: {
               source: "verifier",
+              objectiveId: a.get("t")?.objectiveId ?? "",
               checkId,
               objectiveRevision: rev,
               sourceDigest: "sha256:d",
@@ -180,12 +229,49 @@ describe("C1 — every operation routes through the authority with a live effect
       expect(res.ok).toBe(true)
       expect(a.get("t")?.successCriteria[0]?.met).toBe(true)
     },
-    recordUsage: (a) => {
+    amendBudget: (a) => {
+      expect(a.get("t")?.budget.maxTurns).toBeUndefined()
       a.commit(
-        a.prepare({ threadId: "t", actor: "system", mutation: { kind: "recordUsage", tokens: 7 } }),
+        a.prepare({
+          threadId: "t",
+          actor: "system",
+          mutation: { kind: "amendBudget", budget: { maxTurns: 9 } },
+        }),
         { admitted: true },
       )
+      expect(a.get("t")?.budget.maxTurns).toBe(9)
+    },
+    settleAttempt: (a) => {
+      // GOAL-01: the HOST-measured settlement is the ONLY budget debit and the
+      // only progress-receipt producer.
+      const dom = a.readDomain("t")
+      expect(dom.progressReceipts ?? []).toHaveLength(0)
+      const res = a.commit(
+        a.prepare({
+          threadId: "t",
+          actor: "system",
+          mutation: {
+            kind: "settleAttempt",
+            settlement: {
+              objectiveId: dom.state?.objective.objectiveId ?? "",
+              attemptId: nextAttemptId(),
+              startedRevision: dom.revision,
+              tokensUsed: 7,
+              turnsUsed: 1,
+              outcome: "completed",
+              executionMode: "foreground",
+              criterionIdsBefore: [],
+              verifierReceiptIdsBefore: [],
+              recordedAt: 1,
+            },
+          },
+        }),
+        { admitted: true },
+      )
+      expect(res.ok).toBe(true)
       expect(a.get("t")?.budget.tokensUsed).toBe(7)
+      expect(a.get("t")?.budget.turnsUsed).toBe(1)
+      expect(a.readDomain("t").progressReceipts).toHaveLength(1)
     },
     markUsageLimited: (a) => {
       // enforce store surfaces the derived status; here we assert the window is

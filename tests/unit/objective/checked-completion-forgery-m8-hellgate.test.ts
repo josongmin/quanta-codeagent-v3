@@ -179,3 +179,141 @@ describe("M8 · fromSnapshot — core-store rebuild is fail-closed for checked m
     expect(auth.get("t1")?.successCriteria[0]?.met).toBe(true)
   })
 })
+
+// ── GOAL-01: a verifier receipt is bound to the objective GENERATION ─────────
+// The check id alone is no longer enough to be well-formed: the receipt must
+// name the LIVE `objectiveId`. A receipt minted against a previous generation
+// (pre-`replace`) or any other id is refused `objective-mismatch` — live AND on
+// the restore seam.
+describe("GOAL-01 · a verifier receipt for the right check but the wrong generation is refused", () => {
+  const CHECK_DECL = {
+    kind: "command" as const,
+    argv: ["pytest", "-q"],
+    timeoutMs: 30_000,
+    successExitCodes: [0],
+  }
+
+  const seedChecked = () => {
+    const auth = createObjectiveAuthority({ now: () => 5 })
+    auth.create("t", { goal: "guarded", criteria: [{ text: "tests pass", check: CHECK_DECL }] })
+    const c = auth.get("t")?.successCriteria[0]
+    return {
+      auth,
+      cid: c?.id ?? "",
+      checkId: c?.kind === "checked" ? c.check.id : "",
+      objectiveId: auth.get("t")?.objectiveId ?? "",
+    }
+  }
+
+  const verify = (
+    auth: ReturnType<typeof createObjectiveAuthority>,
+    cid: string,
+    receipt: Record<string, unknown>,
+  ) =>
+    auth.commit(
+      auth.prepare({
+        threadId: "t",
+        actor: "verifier",
+        mutation: {
+          kind: "markCriterionVerified",
+          criterionId: cid,
+          receipt: receipt as never,
+        },
+      }),
+      { admitted: true },
+    )
+
+  test("[8] LIVE: right checkId + OTHER objectiveId ⇒ objective-mismatch, criterion stays unmet", () => {
+    const { auth, cid, checkId } = seedChecked()
+    const res = verify(
+      auth,
+      cid,
+      verifierReceipt({
+        checkId,
+        objectiveId: "some-other-objective",
+        objectiveRevision: auth.readDomain("t").revision,
+      }),
+    )
+    expect(res.ok).toBe(false)
+    expect(res.ok === false ? res.reason : "").toBe("objective-mismatch")
+    expect(auth.get("t")?.successCriteria[0]?.met).toBe(false)
+  })
+
+  test("[9] LIVE: a receipt from the PREVIOUS generation (pre-replace) ⇒ objective-mismatch", () => {
+    const { auth, objectiveId: staleId } = seedChecked()
+    // The definition is replaced: a fresh generation + fresh criterion/check ids.
+    auth.replace("t", { goal: "guarded v2", criteria: [{ text: "tests pass", check: CHECK_DECL }] })
+    const c = auth.get("t")?.successCriteria[0]
+    const cid = c?.id ?? ""
+    const checkId = c?.kind === "checked" ? c.check.id : ""
+    expect(auth.get("t")?.objectiveId).not.toBe(staleId)
+    const res = verify(
+      auth,
+      cid,
+      verifierReceipt({
+        checkId,
+        objectiveId: staleId,
+        objectiveRevision: auth.readDomain("t").revision,
+      }),
+    )
+    expect(res.ok).toBe(false)
+    expect(res.ok === false ? res.reason : "").toBe("objective-mismatch")
+    expect(auth.get("t")?.successCriteria[0]?.met).toBe(false)
+    // Paired control: the SAME receipt with the live id is admitted (non-vacuous).
+    const ok = verify(
+      auth,
+      cid,
+      verifierReceipt({
+        checkId,
+        objectiveId: auth.get("t")?.objectiveId ?? "",
+        objectiveRevision: auth.readDomain("t").revision,
+      }),
+    )
+    expect(ok.ok).toBe(true)
+    expect(auth.get("t")?.successCriteria[0]?.met).toBe(true)
+  })
+
+  test("[10] RESTORE (v2): checked met:true whose receipt names ANOTHER objectiveId ⇒ met:FALSE", () => {
+    const body = (completion: unknown) => ({
+      version: 2 as const,
+      threads: [
+        {
+          threadId: "t1",
+          revision: 1,
+          objective: {
+            objectiveId: "gen-live",
+            createdBy: "system",
+            goal: "ship",
+            successCriteria: [
+              {
+                id: "c1",
+                text: "tests pass",
+                met: true,
+                kind: "checked" as const,
+                check: CHECK,
+                completion: completion as never,
+              },
+            ],
+            status: "active",
+            explicitStatus: "active" as const,
+            budget: { tokensUsed: 0, turnsUsed: 0 },
+            blockers: [],
+            nextActions: [],
+            createdAt: 0,
+            updatedAt: 0,
+          },
+        },
+      ],
+    })
+    const forged = buildObjectiveAuthority({
+      restoreFrom: body(verifierReceipt({ objectiveId: "gen-stale" })),
+    })
+    expect(critOf(forged)?.met).toBe(false)
+    expect(critOf(forged)?.completion).toBeUndefined()
+    // Paired control: the live generation's receipt restores met:true.
+    const genuine = buildObjectiveAuthority({
+      restoreFrom: body(verifierReceipt({ objectiveId: "gen-live" })),
+    })
+    expect(critOf(genuine)?.met).toBe(true)
+  })
+})

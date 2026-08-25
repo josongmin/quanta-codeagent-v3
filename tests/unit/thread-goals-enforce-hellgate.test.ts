@@ -10,8 +10,9 @@
  *   active | paused | usage_limited | budget_limited | completed | blocked
  *
  * NEW states:
- *   - `paused`        — EXPLICIT caller intent (like active/completed). A
- *                       paused goal does NOT auto-resume on idle.
+ *   - `paused`        — EXPLICIT caller intent (like active). A paused goal
+ *                       does NOT auto-resume on idle. (GOAL-01: `completed` is
+ *                       NOT an explicit intent any more — it is derived only.)
  *   - `usage_limited` — DERIVED transient limit that AUTO-RESETS. Unlike
  *                       `budget_limited` (the goal's own hard cap), this models
  *                       an external usage/rate window: while `now <
@@ -25,6 +26,9 @@
  *   3. enforce ∧ budget exhausted (>= cap)       ⇒ budget_limited
  *   4. all criteria met (>=1)                    ⇒ completed
  *   5. else                                      ⇒ explicit (active|paused)
+ *
+ * GOAL-01: the budget ledger is HOST-measured (`settleAttempt`); the retired
+ * `recordUsage` self-report is replaced by `settleUsage` below.
  *
  * IDLE CONTINUATION — `evaluateContinuation` is a PURE decision: when a thread
  * is idle with an `active` goal it returns `launch`; otherwise one of the
@@ -43,6 +47,7 @@ import {
   type GoalContinuationInput,
 } from "@/objective/continuation"
 import { nth, present } from "../_helpers/expect-present"
+import { settleUsage } from "./objective/v2-helpers"
 
 const TID = "thread-h17"
 
@@ -57,17 +62,17 @@ describe("HELLGATE [H17] — 6-state status machine", () => {
   test("budget exceeded ⇒ budget_limited (hard-stop)", () => {
     const t = 1_000
     const store = enforcingStore(() => t)
-    store.set(TID, { goal: "g", budget: { maxTokens: 100 } })
-    store.recordUsage(TID, { tokens: 99 })
+    store.create(TID, { goal: "g", budget: { maxTokens: 100 } })
+    settleUsage(store, TID, { tokens: 99 })
     expect(store.get(TID)?.status).toBe("active")
-    store.recordUsage(TID, { tokens: 1 }) // exactly hits the cap
+    settleUsage(store, TID, { tokens: 1 }) // exactly hits the cap
     expect(store.get(TID)?.status).toBe("budget_limited")
   })
 
   test("usage_limited window ⇒ usage_limited; window reset ⇒ back to active", () => {
     let t = 1_000
     const store = enforcingStore(() => t)
-    store.set(TID, { goal: "g" })
+    store.create(TID, { goal: "g" })
     // host marks a transient usage limit until t=5000
     const limited = store.markUsageLimited(TID, 5_000)
     expect(limited?.status).toBe("usage_limited")
@@ -82,21 +87,21 @@ describe("HELLGATE [H17] — 6-state status machine", () => {
   test("paused is an EXPLICIT intent — survives until cleared, no auto-resume eligibility", () => {
     let t = 1_000
     const store = enforcingStore(() => t)
-    store.set(TID, { goal: "g" })
+    store.create(TID, { goal: "g" })
     expect(store.get(TID)?.status).toBe("active")
-    store.updateStatus(TID, "paused")
+    store.setExplicitStatus(TID, "paused")
     expect(store.get(TID)?.status).toBe("paused")
     t = 9_999_999
     expect(store.get(TID)?.status).toBe("paused")
-    store.updateStatus(TID, "active")
+    store.setExplicitStatus(TID, "active")
     expect(store.get(TID)?.status).toBe("active")
   })
 
   test("priority — blockers outrank usage_limited outranks budget_limited outranks completed", () => {
     const t = 1_000
     const store = enforcingStore(() => t)
-    store.set(TID, { goal: "g", successCriteria: ["c"], budget: { maxTokens: 1 } })
-    store.recordUsage(TID, { tokens: 1 }) // exhausted
+    store.create(TID, { goal: "g", successCriteria: ["c"], budget: { maxTokens: 1 } })
+    settleUsage(store, TID, { tokens: 1 }) // exhausted
     store.markCriterion(
       TID,
       nth(
@@ -119,8 +124,9 @@ describe("HELLGATE [H17] — 6-state status machine", () => {
   test("DEFAULT-OFF byte-identical — informational store never produces new derived states", () => {
     let t = 1_000
     const store = createObjectiveStore({ now: () => t }) // enforceBudget defaults false
-    store.set(TID, { goal: "g", budget: { maxTokens: 1 } })
-    store.recordUsage(TID, { tokens: 100 }) // way over
+    store.create(TID, { goal: "g", budget: { maxTokens: 1 } })
+    settleUsage(store, TID, { tokens: 100 }) // way over
+    expect(store.get(TID)?.budget.tokensUsed).toBe(100)
     store.markUsageLimited(TID, 5_000) // no-op under informational store
     expect(store.get(TID)?.status).toBe("active")
     t = 1 // even inside the would-be window

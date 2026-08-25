@@ -105,7 +105,7 @@ describe("approval-gate-wire (ADR-0407)", () => {
     const objective = createObjectiveStore()
     const ledger = createRunLedger()
     const sm = createApprovalStateMachine({ objective, ledger })
-    objective.set("thread-1", { goal: "ship the change" })
+    objective.create("thread-1", { goal: "ship the change" })
     const gate = createApprovalGate({ approvalSM: sm })
     const kernelApprovalId = "kernel-approval-42"
     const deferred = Object.assign(new Error("approval deferred to kernel"), {

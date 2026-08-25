@@ -22,7 +22,7 @@
  *   - `/objective edit <text>`   replace the goal text (fresh prepare cycle)
  *   - `/objective pause`         pause pursuit (`updateStatus paused`)
  *   - `/objective resume`        resume pursuit (`updateStatus active`)
- *   - `/objective clear`         drop pursuit (`updateStatus paused`)
+ *   - `/objective clear`         drop pursuit (delete the objective; revision tombstone)
  *   - `/objective <text>`        REPLACE-GUARD: prints "run /objective edit <text>"
  *                                instead of silently overwriting an active goal
  *
@@ -74,7 +74,7 @@ export interface ObjectiveSlashState {
   edit(goal: string): ObjectiveEditOutcome
   /** Set an explicit status intent (`active` resume / `paused` pause). */
   setStatus(status: "active" | "paused"): ObjectiveEditOutcome
-  /** Drop pursuit (`updateStatus paused`) — parity with `/goal clear`. */
+  /** Drop pursuit (delete the objective) — parity with `/goal clear`. */
   clear(): ObjectiveEditOutcome
 }
 
@@ -121,15 +121,19 @@ export const buildObjectiveSlashState = (
   }
   return {
     read: view,
-    edit: (goal) => commit({ kind: "set", goal }),
+    // GOAL-01 — `create` when no goal is live, `replace` (fresh generation,
+    // evidence reset) when one is; explicit status is `active | paused` only;
+    // clear is a real deletion (revision tombstone), not a pause.
+    edit: (goal) =>
+      authority.get(threadId) === null
+        ? commit({ kind: "create", definition: { goal } })
+        : commit({ kind: "replace", definition: { goal } }),
     setStatus: (status) =>
       authority.get(threadId) === null
         ? { kind: "no-objective" }
-        : commit({ kind: "updateStatus", status }),
+        : commit({ kind: "setExplicitStatus", status }),
     clear: () =>
-      authority.get(threadId) === null
-        ? { kind: "no-objective" }
-        : commit({ kind: "updateStatus", status: "paused" }),
+      authority.get(threadId) === null ? { kind: "no-objective" } : commit({ kind: "clear" }),
   }
 }
 
@@ -247,11 +251,7 @@ export const objectiveCmd: SlashCommand = {
       )
     }
     if (sub === "clear") {
-      return reportOutcome(
-        ctx,
-        state.clear(),
-        () => `${successReceipt("Goal cleared (paused).")}\n`,
-      )
+      return reportOutcome(ctx, state.clear(), () => `${successReceipt("Goal cleared.")}\n`)
     }
     // REPLACE-GUARD: bare `/objective <text>` never silently overwrites.
     const view = state.read()

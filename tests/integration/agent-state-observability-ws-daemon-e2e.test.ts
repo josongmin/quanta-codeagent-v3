@@ -151,7 +151,7 @@ const buildLivePorts = (
   const objective = createObjectiveStore()
   // Seed state BEFORE the first connection so the snapshot is non-empty.
   ledger.start({ id: "run-1", kind: "exec", owner: THREAD, title: "build the thing" })
-  objective.set(LIVE_SESSION_KEY, {
+  objective.create(LIVE_SESSION_KEY, {
     goal: "ship W4",
     successCriteria: ["frames reach the client"],
   })

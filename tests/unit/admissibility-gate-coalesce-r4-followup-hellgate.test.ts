@@ -411,7 +411,7 @@ describe("ROUND-4 admissibility — concurrent reviewer coalescing per actionKey
     const objective = createObjectiveStore()
     const ledger = createRunLedger()
     const approvalStateMachine = createApprovalStateMachine({ objective, ledger })
-    objective.set("sess-1", { goal: "complete safely" })
+    objective.create("sess-1", { goal: "complete safely" })
     const reviewer = mkDeferredReviewer("user_approved")
     const input = { command: "git status" }
     const wave = { ...waveOf(reviewer, undefined), approvalStateMachine }

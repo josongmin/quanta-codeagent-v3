@@ -12,13 +12,13 @@
  *
  * a model/tool payload can NEVER mint a placeholder receipt (RFC-03 §8 stop
  * rule). The receipt is additionally re-validated inside the authority against
- * the declared check identity, the objective revision, and the pass verdict.
+ * the declared check identity, the objective generation + revision, and the pass
+ * verdict.
  *
  * The EXECUTION port ({@link CheckExecutionPort}) — which would actually run a
- * check to PRODUCE a {@link VerifierResult} — is C5 (PARKED): it is a
- * typed-but-UNSUPPORTED seam here. The default {@link unsupportedCheckExecutionPort}
- * rejects every call. C4 owns only the verifier TRANSITION (given a result), not
- * process execution.
+ * check to PRODUCE a {@link VerifierResult} — is C5 (PARKED until GOAL-03): it is
+ * a typed-but-UNSUPPORTED seam here. The default {@link unsupportedCheckExecutionPort}
+ * rejects every call.
  *
  * SLICE FENCE: imports ONLY sibling objective modules. Pure leaf.
  *
@@ -37,9 +37,8 @@ export interface CheckExecutionContext {
 
 /**
  * The execution seam that would RUN a {@link CheckSpec} and return its result.
- * C5 (PARKED): no production implementation exists in C4. A future non-shell
- * `RuntimeProcessPort` reusing the runtime sandbox/HITL/timeout path will supply
- * one; until then the default is {@link unsupportedCheckExecutionPort}.
+ * C5 (PARKED): no production implementation exists in C4. GOAL-03 supplies the
+ * read-only argv runner; until then the default is {@link unsupportedCheckExecutionPort}.
  */
 export interface CheckExecutionPort {
   execute(spec: CheckSpec, ctx: CheckExecutionContext): Promise<VerifierResult>
@@ -75,10 +74,11 @@ export interface VerifierCompletionPort {
 
 /**
  * Build a {@link VerifierCompletionPort} over an objective {@link ObjectiveAuthority}.
- * It mints the receipt (source digest + result + objective revision + clock) and
- * commits it as a `verifier`-actor `markCriterionVerified` mutation under CAS.
- * The authority re-validates the receipt (check id / revision / pass verdict), so
- * a mismatched or non-passing result is refused (`ok:false`) and never completes.
+ * It mints the receipt (source digest + result + objective generation/revision +
+ * clock) and commits it as a `verifier`-actor `markCriterionVerified` mutation
+ * under CAS. The authority re-validates the receipt (check id / generation /
+ * revision / pass verdict), so a mismatched or non-passing result is refused
+ * (`ok:false`) and never completes.
  */
 export const createVerifierCompletion = (
   authority: ObjectiveAuthority,
@@ -87,9 +87,11 @@ export const createVerifierCompletion = (
   const now = opts?.now ?? Date.now
   return {
     complete(input) {
-      const revision = input.expectedRevision ?? authority.readDomain(input.threadId).revision
+      const domain = authority.readDomain(input.threadId)
+      const revision = input.expectedRevision ?? domain.revision
       const receipt: VerifierCompletionReceipt = {
         source: "verifier",
+        objectiveId: domain.state?.objective.objectiveId ?? "",
         checkId: input.checkId,
         objectiveRevision: revision,
         sourceDigest: input.sourceDigest,

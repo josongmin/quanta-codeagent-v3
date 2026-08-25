@@ -6,13 +6,10 @@
  * I/O — a cell in, a value out — which is why it can be shared by the store's
  * operation groups without any of them reaching back into the factory.
  *
- * Moved out of `../store.ts` (god-function burndown). It had to move DOWN
- * rather than be exported in place: the operation groups import these helpers,
- * and `store.ts` imports the groups, so leaving them there would be a cycle.
- *
  * The derivation rule is unchanged — status is never stored as the source of
  * truth; the caller's last EXPLICIT value is persisted and the public status is
- * derived on every read/write.
+ * derived on every read/write. GOAL-01: the explicit intent is `active | paused`
+ * only; `completed` is derived from met criteria (with evidence) and nothing else.
  */
 
 import { randomUUID } from "node:crypto"
@@ -23,8 +20,11 @@ import {
   type CriterionKind,
   normalizeCheckDeclaration,
 } from "../criteria/model"
+import type { ObjectiveActor, ObjectiveMigrationSource } from "../provenance"
 import type {
   Blocker,
+  ExplicitObjectiveStatus,
+  GoalDefinition,
   Objective,
   ObjectiveBudget,
   ObjectiveStatus,
@@ -47,14 +47,18 @@ export interface CritCell {
 }
 
 /** Internal mutable cell. `explicitStatus` is the caller's last non-derived
- *  intent ("active" | "completed"); the public status is always DERIVED. */
+ *  intent ("active" | "paused"); the public status is always DERIVED. */
 export interface Cell {
   threadId: string
+  /** GOAL-01 — authority-issued generation identity. */
+  objectiveId: string
+  createdBy: ObjectiveActor
+  migrationSource?: ObjectiveMigrationSource
   goal: string
   criteria: CritCell[]
   blockers: Blocker[]
   nextActions: string[]
-  explicitStatus: "active" | "paused" | "completed"
+  explicitStatus: ExplicitObjectiveStatus
   /** H17 — epoch-ms until which a transient external usage/rate limit applies.
    *  `undefined` ⇒ no window. Derives `usage_limited` while `now < this` AND the
    *  store enforces; auto-clears (re-derives) once the clock passes it. */
@@ -155,8 +159,11 @@ export const buildBudget = (cell: Cell): ObjectiveBudget => {
  *  ever observe a status that contradicts blockers/criteria/budget/usage. */
 export const toObjective = (cell: Cell, enforce: boolean, now: number): Objective =>
   Object.freeze({
+    objectiveId: cell.objectiveId,
     threadId: cell.threadId,
     goal: cell.goal,
+    createdBy: cell.createdBy,
+    ...(cell.migrationSource !== undefined ? { migrationSource: cell.migrationSource } : {}),
     successCriteria: Object.freeze(cell.criteria.map(toCriterion)),
     status: deriveStatus(cell, enforce, now),
     budget: buildBudget(cell),
@@ -167,26 +174,15 @@ export const toObjective = (cell: Cell, enforce: boolean, now: number): Objectiv
   })
 
 /**
- * SERDE fix — persist INTENT, not derivation.
+ * SERDE — persist INTENT, not derivation.
  *
  * The public `Objective.status` is a DERIVED value (blockers/criteria win over
- * the caller's explicit intent). A snapshot that stored only that derived
- * `status` and restored `explicitStatus` from it would conflate auto-derived
- * completion ("all criteria met") with an explicit `updateStatus("completed")`.
- * After such a round-trip, unmarking a criterion would NOT revert to "active"
- * because the restored explicit intent had been silently upgraded to
- * "completed" — breaking the re-derivation invariant pinned by
- * objective-hellgate.test.ts:185.
- *
- * The cure is to serialize the underlying `explicitStatus` alongside the
- * derived view. `Objective` is a structural interface, so a snapshot entry that
- * carries one extra `explicitStatus` field is still assignable to it; the field
- * is read back verbatim on restore (never inferred from `status`). This keeps
- * the persist LOSSLESS — intent survives the round-trip — and keeps status
- * derivation a pure function of `explicitStatus + criteria + blockers`. */
+ * the caller's explicit intent). The snapshot serializes the underlying
+ * `explicitStatus` alongside the derived view; the field is read back verbatim
+ * on restore (never inferred from `status`). */
 export interface SnapshotObjective extends Objective {
   /** The caller's last EXPLICIT intent — the ONLY status source on restore. */
-  readonly explicitStatus: "active" | "paused" | "completed"
+  readonly explicitStatus: ExplicitObjectiveStatus
   /** H17 — the transient usage window expiry (epoch ms), persisted so a
    *  usage_limited goal stays limited across a snapshot round-trip until its
    *  window naturally elapses. Omitted when no window is set. */
@@ -195,17 +191,9 @@ export interface SnapshotObjective extends Objective {
 
 export const toSnapshotObjective = (cell: Cell, enforce: boolean, now: number): SnapshotObjective =>
   Object.freeze({
-    threadId: cell.threadId,
-    goal: cell.goal,
-    successCriteria: Object.freeze(cell.criteria.map(toCriterion)),
-    status: deriveStatus(cell, enforce, now),
+    ...toObjective(cell, enforce, now),
     explicitStatus: cell.explicitStatus,
     ...(cell.usageLimitedUntil !== undefined ? { usageLimitedUntil: cell.usageLimitedUntil } : {}),
-    budget: buildBudget(cell),
-    blockers: Object.freeze(cell.blockers.map((b) => Object.freeze({ ...b }))),
-    nextActions: Object.freeze([...cell.nextActions]),
-    createdAt: cell.createdAt,
-    updatedAt: cell.updatedAt,
   })
 
 /** Audit R2 (F3) defensive caps. The agent populates its own threads, so the
@@ -297,38 +285,30 @@ export const sanitizeCriteria = (
   return out
 }
 
-/** A blank cell stamped at `t` — used when `set` receives malformed input but
- *  must still return a non-null `Objective` (the port contract). */
-export const emptyCell = (threadId: string, t: number): Cell => ({
-  threadId: isNonEmptyString(threadId) ? threadId : "",
-  goal: "",
-  criteria: [],
-  blockers: [],
-  nextActions: [],
-  explicitStatus: "active",
-  tokensUsed: 0,
-  turnsUsed: 0,
-  createdAt: t,
-  updatedAt: t,
-})
+/** GOAL-01 — the provenance the authority binds when minting a generation. */
+export interface CellProvenance {
+  readonly objectiveId: string
+  readonly createdBy: ObjectiveActor
+}
 
-/** Build a fresh cell from a well-formed `set` init payload. */
-export const cellFromInit = (
+/** Build a fresh cell from an already-normalized definition + bound provenance. */
+export const cellFromDefinition = (
   threadId: string,
-  init: {
-    goal: string
-    successCriteria?: readonly string[]
-    criteria?: readonly CriterionDeclaration[]
-    budget?: { maxTokens?: number; maxTurns?: number }
-  },
+  definition: GoalDefinition,
+  provenance: CellProvenance,
   t: number,
 ): Cell => {
-  const maxTokens = finiteNonNegInt(init.budget?.maxTokens)
-  const maxTurns = finiteNonNegInt(init.budget?.maxTurns)
+  const maxTokens = finiteNonNegInt(definition.budget?.maxTokens)
+  const maxTurns = finiteNonNegInt(definition.budget?.maxTurns)
   return {
     threadId,
-    goal: typeof init.goal === "string" ? init.goal : "",
-    criteria: sanitizeCriteria(init.successCriteria, init.criteria),
+    objectiveId: provenance.objectiveId,
+    createdBy: provenance.createdBy,
+    goal: typeof definition.goal === "string" ? definition.goal : "",
+    criteria: sanitizeCriteria(
+      definition.successCriteria ?? undefined,
+      definition.criteria ?? undefined,
+    ),
     blockers: [],
     nextActions: [],
     explicitStatus: "active",

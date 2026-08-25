@@ -66,7 +66,7 @@ describe("C3 — QUANTA_PROPOSE_GOAL wires the authority gate", () => {
     const prepared = auth.prepare({
       threadId: "t",
       actor: "model",
-      mutation: { kind: "set", goal: "g" },
+      mutation: { kind: "create", definition: { goal: "g" } },
     })
     expect(prepared.approvalRequired).toBe(true)
   })
@@ -78,7 +78,7 @@ describe("C3 — QUANTA_PROPOSE_GOAL wires the authority gate", () => {
     const prepared = auth.prepare({
       threadId: "t",
       actor: "model",
-      mutation: { kind: "set", goal: "g" },
+      mutation: { kind: "create", definition: { goal: "g" } },
     })
     expect(prepared.approvalRequired).toBe(false)
   })
@@ -88,7 +88,11 @@ describe("C3 — QUANTA_PROPOSE_GOAL wires the authority gate", () => {
     maybeWireObjective(cfg, { QUANTA_OBJECTIVE_TOOLS: "1", QUANTA_PROPOSE_GOAL: "1" })
     const auth = asObjectiveAuthority(cfg.objective as ObjectivePort)
     const res = auth.commit(
-      auth.prepare({ threadId: "t", actor: "model", mutation: { kind: "set", goal: "g" } }),
+      auth.prepare({
+        threadId: "t",
+        actor: "model",
+        mutation: { kind: "create", definition: { goal: "g" } },
+      }),
       { admitted: true }, // even a fabricated receipt cannot bypass a fail-closed surface
     )
     expect(res.ok).toBe(false)
@@ -116,7 +120,8 @@ describe("C3 — objective_set under the gate awaits approval", () => {
     )
     expect(res.ok).toBe(false)
     expect(calls.length).toBe(1)
-    expect(calls[0]?.operation).toBe("set")
+    // GOAL-01: a thread with no objective proposes a `create` (an existing one ⇒ `replace`).
+    expect(calls[0]?.operation).toBe("create")
     expect(calls[0]?.goal).toBe("ship the feature")
     expect(auth.get("t")).toBeNull() // denial = no-op
   })
@@ -170,7 +175,11 @@ describe("C3 — objective_set under the gate awaits approval", () => {
     const auth = createObjectiveAuthority({ gateOn: true })
     // seed an objective so a concurrent edit has something to bump
     auth.commit(
-      auth.prepare({ threadId: "t", actor: "system", mutation: { kind: "set", goal: "seed" } }),
+      auth.prepare({
+        threadId: "t",
+        actor: "system",
+        mutation: { kind: "create", definition: { goal: "seed" } },
+      }),
       { admitted: true },
     )
     const revBefore = auth.readDomain("t").revision
@@ -184,7 +193,7 @@ describe("C3 — objective_set under the gate awaits approval", () => {
           const p = auth.prepare({
             threadId: "t",
             actor: "user",
-            mutation: { kind: "set", goal: "cli-goal" },
+            mutation: { kind: "replace", definition: { goal: "cli-goal" } },
           })
           const cli = auth.commit(p, { admitted: true })
           expect(cli.ok).toBe(true)
@@ -206,7 +215,7 @@ describe("C3 — objective_set under the gate awaits approval", () => {
       auth.prepare({
         threadId: "t",
         actor: "system",
-        mutation: { kind: "set", goal: "g", successCriteria: ["done"] },
+        mutation: { kind: "create", definition: { goal: "g", successCriteria: ["done"] } },
       }),
       { admitted: true },
     )

@@ -16,8 +16,9 @@
  *               the stored goal string mismatches → red.
  *   - show:     cut the `Pursuing goal:` render or the budget line → substring
  *               assert red. Return non-zero → code assert red.
- *   - clear:    flip `updateStatus("paused")` → readback status stays "active"
- *               → red. Return the wrong branch for "no active objective" → red.
+ *   - clear:    GOAL-01 — clear is a real DELETION: cut `port.clear` → the
+ *               readback stays non-null → red. Return the wrong branch for "no
+ *               active objective" → red.
  *   - not-wired: any throw / non-zero code / missing "not wired" → red. The
  *               PAIRED CONTROL (§9) runs the identical args WITH the slot and
  *               proves the slot presence is the ONLY discriminator.
@@ -29,23 +30,12 @@
 import { describe, expect, test } from "bun:test"
 import { goalCmd } from "@/apps/cli/slash/goal-cmd"
 import type { SlashContext } from "@/apps/cli/slash-contract"
-import { createObjectiveStore, type ObjectivePort } from "@/objective"
+// GOAL-01: the ceiling is the DOMAIN's exported `MAX_GOAL_CHARS` (the command
+// imports the same constant), so the boundary tests track the SUT's real limit.
+import { createObjectiveStore, MAX_GOAL_CHARS, type ObjectivePort } from "@/objective"
+import { settleUsage } from "./objective/v2-helpers"
 
 const TID = "thread-goal-cmd"
-
-/** Read `MAX_GOAL_CHARS` from the target file so the boundary tests track the
- *  SUT's real limit rather than a hard-coded copy that could silently drift.
- *  (The constant is not exported; the file is tiny and this is a leaf-crate
- *  static read, so we parse it once at load time.) */
-const MAX_GOAL_CHARS: number = (() => {
-  const src = require("node:fs").readFileSync(
-    require("node:path").join(import.meta.dir, "../../src/apps/cli/slash/goal-cmd.ts"),
-    "utf8",
-  ) as string
-  const m = src.match(/const\s+MAX_GOAL_CHARS\s*=\s*(\d+)/)
-  if (!m) throw new Error("could not read MAX_GOAL_CHARS from goal-cmd.ts")
-  return Number(m[1])
-})()
 
 /** A minimal SlashContext carrying only what `/goal` reads: out/err + the shared
  *  objective slot. `out` appends to `buf` for real render observation. */
@@ -151,9 +141,10 @@ describe("/goal (no arg) — show path", () => {
     // Seed directly through the store with a maxTokens cap + used tokens so the
     // show path's `budgetLine` branch is exercised. The command has no budget
     // arg; the budget arrives via the LLM `objective_*` tools in production.
-    port.set(TID, { goal: "budgeted goal", budget: { maxTokens: 1000 } })
-    port.updateStatus(TID, "active")
-    port.recordUsage(TID, { tokens: 250 })
+    // GOAL-01: usage is HOST-settled (no self-reported `recordUsage`).
+    port.create(TID, { goal: "budgeted goal", budget: { maxTokens: 1000 } })
+    port.setExplicitStatus(TID, "active")
+    settleUsage(port, TID, { tokens: 250 })
 
     const buf: string[] = []
     const code = await goalCmd.run([], ctxWired(port, buf))
@@ -195,7 +186,7 @@ describe("/goal (no arg) — show path", () => {
 // 3. CLEAR path
 // ─────────────────────────────────────────────────────────────────────────────
 describe("/goal clear|stop — clear path", () => {
-  test("'clear' on an active goal → status becomes paused (readback)", async () => {
+  test("'clear' on an active goal → the objective is DELETED (readback null)", async () => {
     const port = createObjectiveStore()
     await goalCmd.run(["some", "goal"], ctxWired(port, []))
     expect(port.get(TID)?.status).toBe("active") // precondition
@@ -204,14 +195,15 @@ describe("/goal clear|stop — clear path", () => {
     const code = await goalCmd.run(["clear"], ctxWired(port, buf))
 
     expect(code).toBe(0)
-    // Fresh readback: the explicit status flipped to paused.
-    expect(port.get(TID)?.status).toBe("paused")
-    // The goal text itself is NOT wiped — only paused.
-    expect(port.get(TID)?.goal).toBe("some goal")
-    expect(text(buf).toLowerCase()).toContain("paused")
+    // GOAL-01: REVERSED — clear used to pause and keep the goal text; it is now
+    // a real deletion. Fresh readback: nothing is live on the thread.
+    expect(port.get(TID)).toBeNull()
+    expect(port.list().filter((o) => o.threadId === TID)).toHaveLength(0)
+    expect(text(buf).toLowerCase()).toContain("cleared")
+    expect(text(buf).toLowerCase()).not.toContain("paused")
   })
 
-  test("'stop' is an alias for clear → status paused (readback)", async () => {
+  test("'stop' is an alias for clear → objective deleted (readback null)", async () => {
     const port = createObjectiveStore()
     await goalCmd.run(["another", "goal"], ctxWired(port, []))
 
@@ -219,8 +211,9 @@ describe("/goal clear|stop — clear path", () => {
     const code = await goalCmd.run(["stop"], ctxWired(port, buf))
 
     expect(code).toBe(0)
-    expect(port.get(TID)?.status).toBe("paused")
-    expect(text(buf).toLowerCase()).toContain("paused")
+    // GOAL-01: REVERSED — deletion, not a pause.
+    expect(port.get(TID)).toBeNull()
+    expect(text(buf).toLowerCase()).toContain("cleared")
   })
 
   test("'clear' with NO active goal → graceful 'no active objective', exit 0", async () => {
@@ -236,18 +229,23 @@ describe("/goal clear|stop — clear path", () => {
     expect(out).not.toContain("stop auto-pursuing")
   })
 
-  test("a paused goal can be re-activated by setting it again (readback)", async () => {
+  test("a cleared thread accepts a fresh goal (create after the tombstone)", async () => {
     const port = createObjectiveStore()
     await goalCmd.run(["goal", "one"], ctxWired(port, []))
+    const firstId = port.get(TID)?.objectiveId
     await goalCmd.run(["clear"], ctxWired(port, []))
-    expect(port.get(TID)?.status).toBe("paused") // precondition
+    // GOAL-01: REVERSED — the thread is EMPTY after clear (was: paused).
+    expect(port.get(TID)).toBeNull() // precondition
 
     const buf: string[] = []
     const code = await goalCmd.run(["goal", "two"], ctxWired(port, buf))
     expect(code).toBe(0)
-    // Re-set flips it back to active AND replaces the text.
+    // A NEW generation is minted on the tombstoned thread: active, new text,
+    // and a DIFFERENT objectiveId from the cleared one.
     expect(port.get(TID)?.status).toBe("active")
     expect(port.get(TID)?.goal).toBe("goal two")
+    expect(port.get(TID)?.objectiveId).toBeDefined()
+    expect(port.get(TID)?.objectiveId).not.toBe(firstId)
   })
 })
 
@@ -365,6 +363,7 @@ describe("/goal — set replaces prior goal", () => {
     const port = createObjectiveStore()
     await goalCmd.run(["first", "objective"], ctxWired(port, []))
     expect(port.get(TID)?.goal).toBe("first objective") // precondition
+    const firstId = port.get(TID)?.objectiveId
 
     const buf: string[] = []
     const code = await goalCmd.run(["second", "objective"], ctxWired(port, buf))
@@ -372,17 +371,22 @@ describe("/goal — set replaces prior goal", () => {
     // Replaced, not appended or ignored.
     expect(port.get(TID)?.goal).toBe("second objective")
     expect(port.get(TID)?.status).toBe("active")
+    // GOAL-01: a second `/goal` is a `replace` — a FRESH generation id.
+    expect(port.get(TID)?.objectiveId).not.toBe(firstId)
     // list() has exactly one objective for this thread — not two.
     expect(port.list().filter((o) => o.threadId === TID)).toHaveLength(1)
   })
 
-  test("re-setting the SAME text is idempotent (still one objective, active)", async () => {
+  test("re-setting the SAME text keeps one objective, active — but mints a NEW generation", async () => {
     const port = createObjectiveStore()
     await goalCmd.run(["same"], ctxWired(port, []))
+    const firstId = port.get(TID)?.objectiveId
     await goalCmd.run(["same"], ctxWired(port, []))
     expect(port.get(TID)?.goal).toBe("same")
     expect(port.get(TID)?.status).toBe("active")
     expect(port.list().filter((o) => o.threadId === TID)).toHaveLength(1)
+    // GOAL-01: not idempotent at the identity level — `replace` always mints.
+    expect(port.get(TID)?.objectiveId).not.toBe(firstId)
   })
 })
 
@@ -451,14 +455,15 @@ describe("/goal — paired control (wired vs not-wired on identical args)", () =
     expect(text(bareBuf)).not.toContain("Pursuing goal set")
   })
 
-  test("clear: with slot → pauses; without slot → not wired (no store to touch)", async () => {
+  test("clear: with slot → deletes; without slot → not wired (no store to touch)", async () => {
     const port = createObjectiveStore()
     await goalCmd.run(["x"], ctxWired(port, []))
 
     const wiredBuf: string[] = []
     await goalCmd.run(["clear"], ctxWired(port, wiredBuf))
-    expect(port.get(TID)?.status).toBe("paused")
-    expect(text(wiredBuf).toLowerCase()).toContain("paused")
+    // GOAL-01: REVERSED — clear deletes (was: paused).
+    expect(port.get(TID)).toBeNull()
+    expect(text(wiredBuf).toLowerCase()).toContain("cleared")
 
     const bareBuf: string[] = []
     await goalCmd.run(["clear"], ctxBare(bareBuf))
@@ -480,8 +485,10 @@ describe("/goal — thread isolation", () => {
 
     // Clearing A does not touch B.
     await goalCmd.run(["clear"], ctxWired(port, [], "thread-A"))
-    expect(port.get("thread-A")?.status).toBe("paused")
+    // GOAL-01: REVERSED — A is deleted (was: paused); B is untouched.
+    expect(port.get("thread-A")).toBeNull()
     expect(port.get("thread-B")?.status).toBe("active")
+    expect(port.get("thread-B")?.goal).toBe("goal for B")
   })
 
   test("show on thread-B reads B's goal, not A's", async () => {
