@@ -144,6 +144,25 @@ describe("s3ReplayStore — load order + byte fidelity", () => {
     expect(be.putCount()).toBe(3)
     expect(new Set(be.puts.map((p) => p.path)).size).toBe(3)
   })
+
+  it("fails closed on a non-contiguous zero-based segment log", async () => {
+    const be = fakeBackend()
+    const ss = segmentStore(be, "cassette/hole")
+    await ss.putSegment(0, JSON.stringify(recordFor("a", "A")))
+    await ss.putSegment(2, JSON.stringify(recordFor("c", "C")))
+    const store = s3ReplayStore({ store: ss })
+    await expect(store.load()).rejects.toThrow(/expected contiguous segment 1/)
+  })
+
+  it("never overwrites an occupied malformed segment when appending", async () => {
+    const be = fakeBackend()
+    const ss = segmentStore(be, "cassette/malformed")
+    await ss.putSegment(0, "not-json")
+    const store = s3ReplayStore({ store: ss })
+    await store.append(recordFor("next", "N"))
+    expect(await ss.getSegment(0)).toBe("not-json")
+    expect(await ss.getSegment(1)).toContain('"next"')
+  })
 })
 
 describe("s3ReplayStore — match() parity with jsonlReplayStore", () => {

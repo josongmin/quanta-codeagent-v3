@@ -644,7 +644,7 @@ export type AgentEvent =
       type: "decision"
       turn: number
       /** Which gate produced the decision. */
-      kind: "permission" | "rule" | "hook" | "cap" | "jail" | "budget"
+      kind: "permission" | "rule" | "hook" | "cap" | "jail" | "budget" | "objective"
       /** 3-state outcome. */
       outcome: "allow" | "deny" | "ask"
       /** Short human-readable reason (non-empty by convention). */

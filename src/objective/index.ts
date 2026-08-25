@@ -94,7 +94,19 @@ export type {
   ObjectiveMutationCommand,
   PreparedObjectiveMutation,
 } from "./ports"
-export { buildPursuitContinuationPrompt, GOAL_PURSUIT_DISCIPLINE } from "./pursuit-prompt"
+export type { ProgressReceipt, ProgressTurnOutcome } from "./progress-receipt"
+export {
+  appendProgressReceipt,
+  MAX_PROGRESS_RECEIPTS,
+  MAX_PROGRESS_REF_LENGTH,
+  MAX_PROGRESS_REFS,
+  normalizeProgressReceipt,
+} from "./progress-receipt"
+export {
+  buildPursuitContinuationPrompt,
+  GOAL_PURSUIT_DISCIPLINE,
+  type GoalPursuitCheckpoint,
+} from "./pursuit-prompt"
 export type { ObjectiveCore } from "./store"
 export type {
   Blocker,

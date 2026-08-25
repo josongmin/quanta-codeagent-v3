@@ -21,7 +21,11 @@ import type { State } from "./types"
 /** The subset of `ReadLineOptions` the machine reads. Structural (an
  *  intersection of every consumer's view) to avoid a cycle back to the
  *  concrete `ReadLineOptions`. */
-type MachineOpts = KeymapOpts & ReaderRuntime["opts"] & RenderContext["opts"]
+type MachineOpts = KeymapOpts &
+  ReaderRuntime["opts"] &
+  RenderContext["opts"] & {
+    readonly onActivity?: () => void
+  }
 
 interface MachineStdin extends RuntimeStdin {
   readonly isRaw?: boolean
@@ -174,6 +178,11 @@ export const createReaderMachine = (deps: MachineDeps): ReaderMachine => {
   }
   const onKey = (str: string | undefined, key: KeyEvent | undefined): void => {
     if (settled.value) return
+    try {
+      opts.onActivity?.()
+    } catch {
+      // Activity observation must never make terminal input unusable.
+    }
     dispatchKey(makeKeyContext(keyContextBase, str, key))
   }
 

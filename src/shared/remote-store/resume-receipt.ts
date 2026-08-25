@@ -11,13 +11,19 @@
 import type { RemoteBackend } from "./backend"
 
 export interface ResumeSecurityReceipt {
-  schema: "quanta.resume-security.v1"
+  schema: "quanta.resume-security.v2"
   bucket: string
   keyPrefix: string
   kmsKeyArn: string
   principalArn: string
   retentionDays: number
-  prefixLeastPrivilege: true
+  /** Live IAM simulation admitted the configured prefix and rejected a
+   * representative sibling prefix. This is a scoped capability probe, not a
+   * universal proof of every effective AWS policy. */
+  iamScopeProbePassed: true
+  /** The application wrapper rejects every put/get/list path outside
+   * `keyPrefix` before invoking the remote backend. */
+  applicationPrefixEnforced: true
   publicAccessBlocked: true
   verifiedAt: string
 }
@@ -29,7 +35,8 @@ export interface ResumeReceipt {
   campaignId: string
   /** Instance (iid) this receipt belongs to. */
   instanceId: string
-  /** Highest segment seq durably written. */
+  /** Durable segment count and exclusive next sequence number. A healthy
+   * receipt therefore binds the exact sequence `0..latestSeq-1`. */
   latestSeq: number
   /** True ⇒ an upload was lost ⇒ NOT resume-eligible (fail-closed). */
   degraded: boolean
@@ -42,6 +49,24 @@ export interface ResumeReceipt {
 
 /** Non-empty string field guard. */
 const isNonEmptyString = (v: unknown): v is string => typeof v === "string" && v.length > 0
+
+export const isValidResumeSecurityReceipt = (value: unknown): value is ResumeSecurityReceipt => {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return false
+  const receipt = value as Record<string, unknown>
+  return (
+    receipt.schema === "quanta.resume-security.v2" &&
+    isNonEmptyString(receipt.bucket) &&
+    isNonEmptyString(receipt.keyPrefix) &&
+    isNonEmptyString(receipt.kmsKeyArn) &&
+    isNonEmptyString(receipt.principalArn) &&
+    Number.isSafeInteger(receipt.retentionDays) &&
+    (receipt.retentionDays as number) > 0 &&
+    receipt.iamScopeProbePassed === true &&
+    receipt.applicationPrefixEnforced === true &&
+    receipt.publicAccessBlocked === true &&
+    isNonEmptyString(receipt.verifiedAt)
+  )
+}
 
 /**
  * Strict structural validator: `true` ONLY for a well-formed receipt object —
@@ -60,6 +85,12 @@ export const isValidReceipt = (x: unknown): x is ResumeReceipt => {
   if (!isNonEmptyString(r.campaignId)) return false
   if (!isNonEmptyString(r.instanceId)) return false
   if (!isNonEmptyString(r.updatedAt)) return false
+  if (r.security !== undefined && !isValidResumeSecurityReceipt(r.security)) return false
+  if (
+    r.meta !== undefined &&
+    (r.meta === null || typeof r.meta !== "object" || Array.isArray(r.meta))
+  )
+    return false
   return true
 }
 
@@ -105,21 +136,19 @@ export const readReceipt = async (
  * Accepts `unknown` (not just a typed `ResumeReceipt`) so a blind-cast caller
  * cannot smuggle a degraded/malformed object past the gate.
  */
-export const isResumeEligible = (receipt: unknown): boolean => {
+export const isResumeEligible = (receipt: unknown): receipt is ResumeReceipt => {
   if (!isValidReceipt(receipt)) return false
   return receipt.degraded === false
 }
 
-export const sameResumeSecurity = (
-  actual: ResumeSecurityReceipt | undefined,
-  expected: ResumeSecurityReceipt,
-): boolean =>
-  actual !== undefined &&
+export const sameResumeSecurity = (actual: unknown, expected: ResumeSecurityReceipt): boolean =>
+  isValidResumeSecurityReceipt(actual) &&
   actual.schema === expected.schema &&
   actual.bucket === expected.bucket &&
   actual.keyPrefix === expected.keyPrefix &&
   actual.kmsKeyArn === expected.kmsKeyArn &&
   actual.principalArn === expected.principalArn &&
   actual.retentionDays === expected.retentionDays &&
-  actual.prefixLeastPrivilege === true &&
+  actual.iamScopeProbePassed === true &&
+  actual.applicationPrefixEnforced === true &&
   actual.publicAccessBlocked === true

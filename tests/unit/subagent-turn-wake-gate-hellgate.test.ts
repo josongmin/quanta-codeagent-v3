@@ -107,6 +107,17 @@ const followupDeps = (
  *  loop's continuation settle before we assert. */
 const tick = (): Promise<void> => new Promise((r) => setTimeout(r, 0))
 
+/** Wait on the observable contract instead of guessing that two event-loop
+ * turns are enough for a cold real-agent composition. The deadline is only a
+ * deadlock backstop; readiness is the verdict. */
+const waitUntil = async (predicate: () => boolean, timeoutMs = 20_000): Promise<void> => {
+  const deadline = Date.now() + timeoutMs
+  while (!predicate()) {
+    if (Date.now() >= deadline) throw new Error("timed out waiting for child turn readiness")
+    await tick()
+  }
+}
+
 // ─── 1. GATE units ───────────────────────────────────────────────────────────
 
 describe("SubagentTurnGate — idle vs busy", () => {
@@ -246,8 +257,7 @@ describe("end-to-end — followup_task wakes a real runAgent child loop", () => 
     const childP = runner(baseReq({ taskId: "child-A", signal: ctrl.signal }))
 
     // Let the child run its first turn and PARK on the gate (idle).
-    await tick()
-    await tick()
+    await waitUntil(() => llm.calls === 1 && wake.has("child-A"))
     expect(llm.calls).toBe(1)
     expect(wake.has("child-A")).toBe(true)
 
@@ -265,8 +275,7 @@ describe("end-to-end — followup_task wakes a real runAgent child loop", () => 
     if (out.kind === "success") expect(out.triggered).toBe(true) // woke
 
     // The wake unparked the loop ⇒ a SECOND turn actually runs.
-    await tick()
-    await tick()
+    await waitUntil(() => llm.calls === 2)
     expect(llm.calls).toBe(2)
 
     // End the loop: abort ⇒ the next park settles ⇒ runAgent resolves.
@@ -275,7 +284,7 @@ describe("end-to-end — followup_task wakes a real runAgent child loop", () => 
     expect(result.turns).toBeGreaterThanOrEqual(2)
     // Post-completion the waker is gone (disposed in finally).
     expect(wake.has("child-A")).toBe(false)
-  })
+  }, 30_000)
 
   test("busy child: wake-before-park is 'queued' and that turn runs next", async () => {
     // Drive the GATE directly against the loop semantics: a wake that arrives

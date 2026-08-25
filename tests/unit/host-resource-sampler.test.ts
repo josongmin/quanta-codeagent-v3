@@ -73,13 +73,23 @@ describe("startHostResourceSampler", () => {
     ]
     let i = 0
     const lines: Array<{ level: string; msg: string }> = []
+    let resolveWarn: (() => void) | undefined
+    const warned = new Promise<void>((resolve) => {
+      resolveWarn = resolve
+    })
     const h = startHostResourceSampler({
       intervalMs: 5,
       sampler: async () => snaps[Math.min(i++, snaps.length - 1)] ?? null,
-      log: (level, msg) => lines.push({ level, msg }),
+      log: (level, msg) => {
+        lines.push({ level, msg })
+        if (level === "warn") resolveWarn?.()
+      },
     })
-    await wait(60)
-    h.stop()
+    try {
+      await warned
+    } finally {
+      h.stop()
+    }
     expect(lines.some((l) => l.level === "info" && l.msg.includes("procs=250"))).toBe(true)
     const warn = lines.find((l) => l.level === "warn")
     expect(warn?.msg).toContain("WARN")

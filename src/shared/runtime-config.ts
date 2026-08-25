@@ -222,6 +222,16 @@ const parseCapabilitySlice = (env: RuntimeConfigEnv): Partial<RuntimeConfig> => 
     // H17 — idle goal-continuation + budget enforcement. Strict the `gateOn` truthy vocab (#24) opt-in;
     // default false ⇒ objective stays informational-only (byte-identical).
     goalContinuationEnforce: gateOn(env, "QUANTA_GOAL_ENFORCE"),
+    // Goal-pursuit quiet window only. This is deliberately independent of the
+    // UI idle-suppression knobs; invalid/non-positive values retain the 15 s
+    // catalog default instead of disabling continuation implicitly.
+    goalQuietMs: parsePositiveInt(env.QUANTA_GOAL_QUIET_MS, "QUANTA_GOAL_QUIET_MS") ?? 15_000,
+    // Objective completion review is deliberately an enum, not a truthy flag:
+    // unknown values fail closed to OFF and therefore cannot spend an LLM call.
+    goalJudgeMode:
+      env.QUANTA_GOAL_JUDGE === "shadow" || env.QUANTA_GOAL_JUDGE === "reject"
+        ? env.QUANTA_GOAL_JUDGE
+        : "off",
     // H13 — opt-in (`gateOn` vocab; #24). Default false ⇒ no config-migration detect,
     // no prompt, no ledger (byte-identical startup).
     migrateConfig: gateOn(env, "QUANTA_MIGRATE_CONFIG"),

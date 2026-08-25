@@ -1,7 +1,9 @@
 import { describe, expect, test } from "bun:test"
 import { createHash } from "node:crypto"
 import {
+  chmodSync,
   lstatSync,
+  mkdirSync,
   mkdtempSync,
   readFileSync,
   rmSync,
@@ -39,6 +41,24 @@ describe("trajectory redacted export", () => {
       expect(result.receipt.replayable).toBe(false)
       expect(statSync(out).mode & 0o077).toBe(0)
       expect(statSync(result.receiptPath).mode & 0o077).toBe(0)
+      expect(statSync(join(dir, "share")).mode & 0o077).toBe(0)
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  test("refuses a provenance path that would overwrite the canonical cassette", () => {
+    const dir = mkdtempSync(join(tmpdir(), "redacted-export-receipt-collision-"))
+    try {
+      const out = join(dir, "share.jsonl")
+      const source = `${out}.provenance.json`
+      const raw = `${JSON.stringify({ apiKey: "sk-live-123456789" })}\n`
+      writeFileSync(source, raw)
+
+      expect(() => exportRedactedCassette({ sourcePath: source, outputPath: out })).toThrow(
+        /provenance path must differ/,
+      )
+      expect(readFileSync(source, "utf8")).toBe(raw)
     } finally {
       rmSync(dir, { recursive: true, force: true })
     }
@@ -74,6 +94,44 @@ describe("trajectory redacted export", () => {
       expect(readFileSync(source, "utf8")).toBe(raw)
       expect(lstatSync(out).isSymbolicLink()).toBe(false)
       expect(readFileSync(out, "utf8")).not.toContain("sk-live-123456789")
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  test("refuses a source symlink whose target is the output destination", () => {
+    const dir = mkdtempSync(join(tmpdir(), "redacted-export-reverse-link-"))
+    try {
+      const out = join(dir, "share.jsonl")
+      const source = join(dir, "canonical-link.jsonl")
+      const raw = `${JSON.stringify({ apiKey: "sk-live-123456789" })}\n`
+      writeFileSync(out, raw)
+      symlinkSync(out, source)
+
+      expect(() => exportRedactedCassette({ sourcePath: source, outputPath: out })).toThrow(
+        /aliases the canonical cassette/,
+      )
+      expect(readFileSync(out, "utf8")).toBe(raw)
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  test("does not chmod a pre-existing arbitrary output parent", () => {
+    const dir = mkdtempSync(join(tmpdir(), "redacted-export-parent-mode-"))
+    try {
+      const source = join(dir, "canonical.jsonl")
+      const share = join(dir, "share")
+      writeFileSync(source, `${JSON.stringify({ text: "safe" })}\n`)
+      mkdirSync(share, { mode: 0o755 })
+      chmodSync(share, 0o755)
+
+      const result = exportRedactedCassette({
+        sourcePath: source,
+        outputPath: join(share, "out.jsonl"),
+      })
+      expect(statSync(share).mode & 0o777).toBe(0o755)
+      expect(statSync(result.outputPath).mode & 0o077).toBe(0)
     } finally {
       rmSync(dir, { recursive: true, force: true })
     }

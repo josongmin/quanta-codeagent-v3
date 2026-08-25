@@ -15,6 +15,7 @@ import { afterEach, describe, expect, test } from "bun:test"
 import { mkdir, readFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import type { RecordedInteraction, ReplayStore } from "@/llm/replay"
 import { applyBenchTrajectoryMode, patchRunMeta, resetMetaPathRegistry } from "./trajectory"
 
 // ── helpers ─────────────────────────────────────────────────────────────────
@@ -161,5 +162,48 @@ describe("applyBenchTrajectoryMode — per-instance cassette", () => {
     const rec = JSON.parse(lines[0] ?? "{}")
     // the stamp the viewer keys sessions on
     expect(rec.metadata.instanceId).toBe(instanceId)
+  })
+
+  test("production record composition writes through the resume store when active", async () => {
+    const records: RecordedInteraction[] = []
+    const durableStore: ReplayStore = {
+      async append(record) {
+        records.push(record)
+      },
+      async match() {
+        return null
+      },
+      async load() {
+        return records
+      },
+      async save(next) {
+        records.splice(0, records.length, ...next)
+      },
+      reset() {},
+    }
+    const requestedPaths: string[] = []
+    const port = applyBenchTrajectoryMode(
+      streamingFakeLlm as unknown as Parameters<typeof applyBenchTrajectoryMode>[0],
+      { kind: "record", path: "/unused/base.jsonl" },
+      { provider: "openai", model: "gpt-test" },
+      { instanceId: "django__django-123" },
+      {
+        resumeStoreFor(path) {
+          requestedPaths.push(path)
+          return durableStore
+        },
+      },
+    )
+
+    for await (const _ of port.stream({
+      messages: [{ role: "user", content: "resume me" }],
+    } as unknown as Parameters<typeof port.stream>[0])) {
+      // drain
+    }
+
+    expect(requestedPaths).toHaveLength(1)
+    expect(requestedPaths[0]).toContain("django__django-123")
+    expect(records).toHaveLength(1)
+    expect(records[0]?.metadata?.instanceId).toBe("django__django-123")
   })
 })

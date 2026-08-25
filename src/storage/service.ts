@@ -56,7 +56,7 @@ const jailDisabled = (): boolean => runtimeConfig().fsJailDisabled
 type FsJailDecisionEvent = {
   readonly type: "decision"
   readonly turn: number
-  readonly kind: "permission" | "rule" | "hook" | "cap" | "jail" | "budget"
+  readonly kind: "permission" | "rule" | "hook" | "cap" | "jail" | "budget" | "objective"
   readonly outcome: "allow" | "deny" | "ask"
   readonly reason: string
   readonly toolCallId?: string

@@ -10,6 +10,22 @@ export const KNOBS_B: readonly RuntimeConfigKnob[] = [
     describe: "Idle goal-continuation gate.",
   },
   {
+    envKey: "QUANTA_GOAL_QUIET_MS",
+    kind: "int",
+    default: 15000,
+    group: "session",
+    describe:
+      "Goal-pursuit quiet window in milliseconds. Independent of QUANTA_IDLE_MS, which controls only UI user-idle suppression.",
+  },
+  {
+    envKey: "QUANTA_GOAL_JUDGE",
+    kind: "enum",
+    default: "off",
+    group: "session",
+    describe:
+      "Objective completion judge mode: off (no judge), shadow (observe), reject (block explicit judge verdicts).",
+  },
+  {
     envKey: "QUANTA_MIGRATE_CONFIG",
     kind: "bool",
     default: false,

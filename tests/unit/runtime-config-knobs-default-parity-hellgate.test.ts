@@ -84,6 +84,8 @@ const PROBE_VALUES = [
   "opaque-tunnel",
   "background",
   "prompt",
+  "shadow",
+  "reject",
 ]
 
 /** Drive the seam to learn, per knob: which RuntimeConfig field it controls and

@@ -1,5 +1,7 @@
 import type { RemoteBackend, ResumeSecurityReceipt, RunAws } from "@/shared/remote-store"
 
+export type ResumeSecurityAttestation = Omit<ResumeSecurityReceipt, "applicationPrefixEnforced">
+
 export interface ResumeSecurityConfig {
   readonly bucket: string
   readonly keyPrefix: string
@@ -74,14 +76,23 @@ const assertPublicAccessBlocked = (doc: Record<string, unknown>): void => {
   }
 }
 
-const lifecyclePrefix = (rule: Record<string, unknown>): string => {
-  if (typeof rule.Prefix === "string") return rule.Prefix
-  const filter = rule.Filter
-  if (filter !== null && typeof filter === "object") {
-    const prefix = (filter as Record<string, unknown>).Prefix
-    if (typeof prefix === "string") return prefix
+const lifecycleCoversKeyPrefix = (rule: Record<string, unknown>, keyPrefix: string): boolean => {
+  // Legacy lifecycle shape. If present, it is the complete filter.
+  if (Object.hasOwn(rule, "Prefix")) {
+    return typeof rule.Prefix === "string" && keyPrefix.startsWith(rule.Prefix)
   }
-  return ""
+  const filter = rule.Filter
+  if (filter === undefined) return true
+  if (filter === null || typeof filter !== "object" || Array.isArray(filter)) return false
+  const object = filter as Record<string, unknown>
+  const keys = Object.keys(object)
+  if (keys.length === 0) return true
+  // A tag, object-size predicate, or And filter may exclude the actual resume
+  // objects. The producer does not apply matching tags and cannot prove object
+  // sizes, so only a plain prefix filter is admissible.
+  return (
+    keys.length === 1 && typeof object.Prefix === "string" && keyPrefix.startsWith(object.Prefix)
+  )
 }
 
 const assertLifecycle = (
@@ -95,8 +106,7 @@ const assertLifecycle = (
     if (raw === null || typeof raw !== "object") continue
     const rule = raw as Record<string, unknown>
     if (rule.Status !== "Enabled") continue
-    const prefix = lifecyclePrefix(rule)
-    if (!keyPrefix.startsWith(prefix)) continue
+    if (!lifecycleCoversKeyPrefix(rule, keyPrefix)) continue
     const expiration = rule.Expiration
     if (expiration === null || typeof expiration !== "object") continue
     const days = (expiration as Record<string, unknown>).Days
@@ -107,6 +117,28 @@ const assertLifecycle = (
   throw new Error(
     `[resume-security] no enabled lifecycle rule expires ${keyPrefix} within ${maxRetentionDays} days`,
   )
+}
+
+const callerMatchesPrincipal = (callerArn: string, principalArn: string): boolean => {
+  if (callerArn === principalArn) return true
+  const principal = /^arn:([^:]+):iam::(\d{12}):role\/(.+)$/.exec(principalArn)
+  const caller = /^arn:([^:]+):sts::(\d{12}):assumed-role\/(.+)\/[^/]+$/.exec(callerArn)
+  return (
+    principal !== null &&
+    caller !== null &&
+    principal[1] === caller[1] &&
+    principal[2] === caller[2] &&
+    principal[3] === caller[3]
+  )
+}
+
+const assertCallerIdentity = (doc: Record<string, unknown>, principalArn: string): void => {
+  const callerArn = doc.Arn
+  if (typeof callerArn !== "string" || !callerMatchesPrincipal(callerArn, principalArn)) {
+    throw new Error(
+      `[resume-security] active AWS caller ${String(callerArn)} does not match configured principal ${principalArn}`,
+    )
+  }
 }
 
 const simulate = async (
@@ -138,8 +170,15 @@ export const attestResumeSecurity = async (
   cfg: ResumeSecurityConfig,
   runAws: RunAws,
   now: () => Date = () => new Date(),
-): Promise<ResumeSecurityReceipt> => {
+): Promise<ResumeSecurityAttestation> => {
   const regionArgs = cfg.region !== undefined ? ["--region", cfg.region] : []
+  const caller = await runJson(runAws, regionArgs, "caller identity", [
+    "sts",
+    "get-caller-identity",
+    "--output",
+    "json",
+  ])
+  assertCallerIdentity(caller, cfg.principalArn)
   const encryption = await runJson(runAws, regionArgs, "bucket encryption", [
     "s3api",
     "get-bucket-encryption",
@@ -216,13 +255,13 @@ export const attestResumeSecurity = async (
   }
 
   return {
-    schema: "quanta.resume-security.v1",
+    schema: "quanta.resume-security.v2",
     bucket: cfg.bucket,
     keyPrefix: cfg.keyPrefix,
     kmsKeyArn: cfg.kmsKeyArn,
     principalArn: cfg.principalArn,
     retentionDays,
-    prefixLeastPrivilege: true,
+    iamScopeProbePassed: true,
     publicAccessBlocked: true,
     verifiedAt: now().toISOString(),
   }
@@ -231,18 +270,28 @@ export const attestResumeSecurity = async (
 /** Gate every remote operation behind one cached live attestation. */
 export const attestedBackend = (
   backend: RemoteBackend,
-  ensure: () => Promise<ResumeSecurityReceipt>,
-): RemoteBackend => ({
-  async put(path, body) {
-    await ensure()
-    await backend.put(path, body)
-  },
-  async get(path) {
-    await ensure()
-    return backend.get(path)
-  },
-  async list(prefix) {
-    await ensure()
-    return backend.list(prefix)
-  },
-})
+  ensure: () => Promise<ResumeSecurityAttestation>,
+): RemoteBackend => {
+  const authorize = async (path: string, allowPrefixRoot: boolean): Promise<void> => {
+    const receipt = await ensure()
+    const prefix = receipt.keyPrefix.endsWith("/") ? receipt.keyPrefix : `${receipt.keyPrefix}/`
+    const atPrefixRoot = path === receipt.keyPrefix
+    if ((!allowPrefixRoot && atPrefixRoot) || (!atPrefixRoot && !path.startsWith(prefix))) {
+      throw new Error(`[resume-security] remote path is outside attested prefix: ${path}`)
+    }
+  }
+  return {
+    async put(path, body) {
+      await authorize(path, false)
+      await backend.put(path, body)
+    },
+    async get(path) {
+      await authorize(path, false)
+      return backend.get(path)
+    },
+    async list(prefix) {
+      await authorize(prefix, true)
+      return backend.list(prefix)
+    },
+  }
+}

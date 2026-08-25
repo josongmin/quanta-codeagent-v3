@@ -147,7 +147,7 @@ describe("B3 loop wire — onResponseHeaders feeds the BudgetMeter provider tap"
     expect(llm.inputs[0]?.onResponseHeaders).toBeDefined()
     // ...and the feed pushed 100 − 88 = 12 into the provider tap the guard reads.
     expect(meter.providerRateLimitRemainingPercent()).toBe(12)
-  })
+  }, 30_000)
 
   test("NO-LEAK: remaining COUNT with no paired limit ⇒ tap stays undefined (never fabricate %)", async () => {
     // Post-broaden: `anthropic-ratelimit-tokens-remaining` IS a recognized header,

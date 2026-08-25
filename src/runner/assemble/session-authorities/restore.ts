@@ -29,7 +29,7 @@ import type {
   SuccessCriterion,
   WaitingOn,
 } from "@/objective"
-import { isObjectiveActor, normalizeCheckDeclaration } from "@/objective"
+import { isObjectiveActor, normalizeCheckDeclaration, normalizeProgressReceipt } from "@/objective"
 import type {
   PersistedObjectiveBlocker,
   PersistedObjectiveCompletion,
@@ -198,7 +198,18 @@ const toDomainSnapshot = (t: PersistedObjectiveThread): ObjectiveDomainSnapshot 
     explicitStatus: t.explicitStatus,
     ...(t.usageLimitedUntil !== undefined ? { usageLimitedUntil: t.usageLimitedUntil } : {}),
   }
-  return { threadId: t.threadId, revision: t.revision, state }
+  return {
+    threadId: t.threadId,
+    revision: t.revision,
+    state,
+    ...(t.progressReceipts !== undefined
+      ? {
+          progressReceipts: t.progressReceipts
+            .map(normalizeProgressReceipt)
+            .filter((r) => r !== null),
+        }
+      : {}),
+  }
 }
 
 /**

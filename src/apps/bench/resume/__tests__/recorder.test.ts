@@ -203,6 +203,77 @@ describe("teeResumeReplayStore — receipt latestSeq + degraded-once", () => {
     await expect(store.append(rec("a"))).resolves.toBeUndefined()
     expect(primary.appended.length).toBe(1)
   })
+
+  test("a failed degraded receipt write retries until the fail-closed marker lands", async () => {
+    const primary = fakeStore()
+    const secondary = fakeStore({ appendThrows: true })
+    const receipts: ResumeReceipt[] = []
+    let writes = 0
+    const store = teeResumeReplayStore({
+      primary,
+      secondary,
+      ...receiptBase,
+      writeReceipt: async (receipt) => {
+        writes++
+        if (writes === 1) throw new Error("first receipt put failed")
+        receipts.push(receipt)
+      },
+    })
+    await expect(store.append(rec("a"))).resolves.toBeUndefined()
+    await expect(store.append(rec("b"))).resolves.toBeUndefined()
+    expect(writes).toBe(2)
+    expect(receipts).toHaveLength(1)
+    expect(receipts[0]?.degraded).toBe(true)
+    expect(receipts[0]?.latestSeq).toBe(2)
+  })
+
+  test("security receipt failure degrades durability without failing the live append", async () => {
+    const receipts: ResumeReceipt[] = []
+    const store = teeResumeReplayStore({
+      primary: fakeStore(),
+      secondary: fakeStore(),
+      ...receiptBase,
+      securityReceipt: async () => Promise.reject(new Error("attestation unavailable")),
+      writeReceipt: async (receipt) => {
+        receipts.push(receipt)
+      },
+    })
+    await expect(store.append(rec("a"))).resolves.toBeUndefined()
+    expect(receipts).toHaveLength(1)
+    expect(receipts[0]?.degraded).toBe(true)
+  })
+
+  test("a reopened durable log continues receipt counts from its existing segment count", async () => {
+    const receipts: ResumeReceipt[] = []
+    const store = teeResumeReplayStore({
+      primary: fakeStore(),
+      secondary: fakeStore(),
+      ...receiptBase,
+      initialCount: async () => 3,
+      writeReceipt: async (receipt) => {
+        receipts.push(receipt)
+      },
+    })
+    await store.append(rec("four"))
+    expect(receipts[0]?.degraded).toBe(false)
+    expect(receipts[0]?.latestSeq).toBe(4)
+  })
+
+  test("save always degrades resume eligibility because stale S3 tails cannot be deleted", async () => {
+    const receipts: ResumeReceipt[] = []
+    const store = teeResumeReplayStore({
+      primary: fakeStore(),
+      secondary: fakeStore(),
+      ...receiptBase,
+      writeReceipt: async (receipt) => {
+        receipts.push(receipt)
+      },
+    })
+    await store.save([rec("curated")])
+    expect(receipts).toHaveLength(1)
+    expect(receipts[0]?.degraded).toBe(true)
+    expect(receipts[0]?.latestSeq).toBe(1)
+  })
 })
 
 // ── maybeTeeResumeRecording ──────────────────────────────────────────────────

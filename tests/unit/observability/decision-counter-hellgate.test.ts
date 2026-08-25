@@ -17,7 +17,7 @@
  *   HELL-DC-14: cardinality invariant — `toolCallId`, `ruleId`, `hookName`,
  *               `reason`, `metadata` are NEVER passed as counter labels. The
  *               recorded label set is exactly `{kind, outcome}` — no extras.
- *   HELL-DC-15: `cap` / `jail` / `budget` kinds (the other half of the closed
+ *   HELL-DC-15: `cap` / `jail` / `budget` / `objective` kinds (the rest of the closed
  *               taxonomy) also produce well-formed counter names — every
  *               kind in the closed union is supported, none routed to a
  *               fallback bucket.
@@ -40,7 +40,7 @@ import type { AgentEvent } from "@/stream"
 // belong to the published taxonomy.
 // ────────────────────────────────────────────────────────────────────────────
 
-type DecisionKind = "permission" | "rule" | "hook" | "cap" | "jail" | "budget"
+type DecisionKind = "permission" | "rule" | "hook" | "cap" | "jail" | "budget" | "objective"
 type DecisionOutcome = "allow" | "deny" | "ask"
 
 const decisionEvent = (
@@ -263,12 +263,13 @@ describe("decision-counter-sink (ADR-0270)", () => {
   // ──────────────────────────────────────────────────────────────────────────
   // HELL-DC-15 — every member of the closed `kind` union is supported.
   // ──────────────────────────────────────────────────────────────────────────
-  test("HELL-DC-15: cap/jail/budget kinds also produce canonical counter names", () => {
+  test("HELL-DC-15: cap/jail/budget/objective kinds produce canonical counter names", () => {
     const registry = defaultMetricsRegistry()
     const sink = createDecisionCounterSink({ metrics: registry })
     sink.emit(decisionEvent("cap", "deny"))
     sink.emit(decisionEvent("jail", "deny"))
     sink.emit(decisionEvent("budget", "allow"))
+    sink.emit(decisionEvent("objective", "ask"))
     const names = registry
       .snapshot()
       .map((r) => r.name)
@@ -277,6 +278,7 @@ describe("decision-counter-sink (ADR-0270)", () => {
       "quanta.gate.budget.allow.total",
       "quanta.gate.cap.deny.total",
       "quanta.gate.jail.deny.total",
+      "quanta.gate.objective.ask.total",
     ])
   })
 

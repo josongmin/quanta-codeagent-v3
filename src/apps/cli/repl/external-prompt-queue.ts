@@ -4,11 +4,34 @@
  * ADR-0303 thin-surface relocation: the generic, abort-aware out-of-band prompt
  * FIFO now lives below `src/apps/**` in `@/runner/orchestrate` (it is reusable
  * runtime semantics with zero terminal coupling — any interactive surface needs
- * the same waiter race logic). The CLI keeps only this one-line binding of the
- * generic queue to its own `CliPromptInput` element type, so every call site
- * (`new ExternalPromptQueue()`, `.push(text)`, `.next(signal)`) is unchanged.
+ * the same waiter race logic). The CLI keeps the element binding plus a tiny
+ * ingress notification seam; the generic waiter/race logic remains below
+ * `src/apps/**`.
  */
 import { ExternalPromptQueue as GenericExternalPromptQueue } from "@/runner/orchestrate"
 import type { CliPromptInput } from "./prompt-types"
 
-export class ExternalPromptQueue extends GenericExternalPromptQueue<CliPromptInput> {}
+/** Surface-only notification for a newly accepted external prompt. It is
+ * synchronous so a goal quiet wake is invalidated before the prompt-source
+ * race can begin an overlapping agent body. */
+export interface ExternalPromptQueueOpts {
+  readonly onPush?: () => void
+}
+
+export class ExternalPromptQueue extends GenericExternalPromptQueue<CliPromptInput> {
+  readonly #onPush: (() => void) | undefined
+
+  constructor(opts: ExternalPromptQueueOpts = {}) {
+    super()
+    this.#onPush = opts.onPush
+  }
+
+  override push(prompt: CliPromptInput): void {
+    try {
+      this.#onPush?.()
+    } catch {
+      // Notification is advisory only; it must never drop an external prompt.
+    }
+    super.push(prompt)
+  }
+}

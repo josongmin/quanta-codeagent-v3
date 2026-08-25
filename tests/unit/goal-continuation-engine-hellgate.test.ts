@@ -531,25 +531,26 @@ describe("runIdleContinuation — NO-THROW degradation contract", () => {
     expect(spy.calls).toEqual([])
   })
 
-  test("throwing plan/turn/queue/mailbox/ephemeral probes → no crash, no launch", async () => {
-    // Each throwing probe is normalized to false by `probe` (line 205). false
-    // for plan/turn/queue/mailbox/ephemeral means those guards PASS — so with
-    // all else passing this actually LAUNCHES. That proves the throw was
-    // swallowed AND normalized (not merely caught by the outer try). RED if
-    // `probe` drops its catch (outer catch → launched:false).
-    const spy = makeResumeSpy()
-    const deps = makeDeps({
-      planModeActive: boom,
-      turnActive: boom,
-      queuedInputPending: boom,
-      mailboxInputPending: boom,
-      isEphemeral: boom,
-      resume: spy.resume,
+  const throwingBlockingProbes: ReadonlyArray<{
+    readonly name: string
+    readonly reason: ContinuationSkipReason
+    readonly override: Partial<ContinuationDeps>
+  }> = [
+    { name: "plan", reason: "plan-mode-active", override: { planModeActive: boom } },
+    { name: "turn", reason: "turn-active", override: { turnActive: boom } },
+    { name: "queue", reason: "queued-input", override: { queuedInputPending: boom } },
+    { name: "mailbox", reason: "mailbox-input", override: { mailboxInputPending: boom } },
+    { name: "ephemeral", reason: "ephemeral-thread", override: { isEphemeral: boom } },
+  ]
+
+  for (const { name, reason, override } of throwingBlockingProbes) {
+    test(`throwing ${name} probe fails closed as ${reason}`, async () => {
+      const spy = makeResumeSpy()
+      const r = await runIdleContinuation("t1", makeDeps({ ...override, resume: spy.resume }))
+      expect(r).toEqual({ launched: false, skipReason: reason })
+      expect(spy.calls).toEqual([])
     })
-    const r = await runIdleContinuation("t1", deps)
-    expect(r.launched).toBe(true)
-    expect(spy.calls).toEqual(["t1"])
-  })
+  }
 
   test("throwing resume → {launched:false}, never throws", async () => {
     // resume throws inside the inner try; outer catch → {launched:false}.

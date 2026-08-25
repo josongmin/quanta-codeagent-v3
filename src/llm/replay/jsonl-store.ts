@@ -165,6 +165,9 @@ export function jsonlReplayStore(opts: JsonlReplayStoreOpts): ReplayStore {
   }
 
   async function ensureDir(): Promise<void> {
+    // Never chmod an existing arbitrary parent: callers may place a cassette
+    // directly in a repository root or /tmp. Newly created managed parents get
+    // 0700; the cassette file itself is re-asserted to 0600 after every write.
     await mkdir(dirname(opts.path), { recursive: true, mode: CASSETTE_DIR_MODE })
   }
 

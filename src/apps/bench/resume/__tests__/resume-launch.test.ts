@@ -19,7 +19,17 @@
  *     of those keys (identical to the pre-existing fresh path).
  */
 import { describe, expect, test } from "bun:test"
-import { readFileSync } from "node:fs"
+import {
+  chmodSync,
+  lstatSync,
+  mkdtempSync,
+  readFileSync,
+  statSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 import type { RemoteBackend } from "@/shared/remote-store"
 import { type ResumeReceipt, type ResumeSecurityReceipt, segmentStore } from "@/shared/remote-store"
 import { nth, present } from "../../../../../tests/_helpers/expect-present"
@@ -29,13 +39,14 @@ import type { ResumeStore } from "../store"
 const CAMPAIGN = "camp-X"
 const INSTANCE = "django__django-11138"
 const SECURITY: ResumeSecurityReceipt = {
-  schema: "quanta.resume-security.v1",
+  schema: "quanta.resume-security.v2",
   bucket: "my-bucket",
   keyPrefix: `${CAMPAIGN}/${INSTANCE}`,
   kmsKeyArn: "arn:aws:kms:us-east-1:123:key/k",
   principalArn: "arn:aws:iam::123:role/resume",
   retentionDays: 7,
-  prefixLeastPrivilege: true,
+  iamScopeProbePassed: true,
+  applicationPrefixEnforced: true,
   publicAccessBlocked: true,
   verifiedAt: "2026-08-25T00:00:00Z",
 }
@@ -88,7 +99,7 @@ const seededStore = async (args: {
   const segs = segmentStore(backend, key)
   const segments = args.segments ?? []
   for (let i = 0; i < segments.length; i++) {
-    await segs.putSegment(i + 1, nth(segments, i, "segments"))
+    await segs.putSegment(i, nth(segments, i, "segments"))
   }
   const rcpt = args.receipt
   const store: ResumeStore = {
@@ -143,7 +154,10 @@ describe("prepareResume — DEFAULT-OFF byte-identical guard", () => {
 describe("prepareResume — eligible ⇒ materialize cassette + replay env", () => {
   test("eligible receipt + segments ⇒ replayEnv has both keys + file == concat()", async () => {
     const segments = ['{"seq":1,"turn":"a"}', '{"seq":2,"turn":"b"}']
-    const { store, backend } = await seededStore({ segments, receipt: receipt() })
+    const { store, backend } = await seededStore({
+      segments,
+      receipt: receipt({ latestSeq: segments.length }),
+    })
     const expectedConcat = await segmentStore(backend, `${CAMPAIGN}/${INSTANCE}`).concat()
 
     const out = await prepareResume(RESUME_ON_ENV, INSTANCE, { makeStore: () => store })
@@ -156,7 +170,44 @@ describe("prepareResume — eligible ⇒ materialize cassette + replay env", () 
     expect(onDisk).toBe(expectedConcat)
     expect(onDisk).toContain('"turn":"a"')
     expect(onDisk).toContain('"turn":"b"')
+    if (process.platform !== "win32") {
+      expect(statSync(prepared.localCassettePath).mode & 0o777).toBe(0o600)
+    }
   })
+
+  test("re-asserts owner-only mode on an existing materialized path", async () => {
+    const { store } = await seededStore({ segments: ["x"], receipt: receipt() })
+    const workDir = mkdtempSync(join(tmpdir(), "resume-mode-"))
+    const path = join(workDir, `${CAMPAIGN}_${INSTANCE}.jsonl`)
+    writeFileSync(path, "old", { mode: 0o666 })
+    chmodSync(path, 0o666)
+    const out = await prepareResume(RESUME_ON_ENV, INSTANCE, {
+      makeStore: () => store,
+      workDir,
+    })
+    expect(out?.localCassettePath).toBe(path)
+    if (process.platform !== "win32") expect(statSync(path).mode & 0o777).toBe(0o600)
+  })
+
+  test.skipIf(process.platform === "win32")(
+    "replaces a destination symlink without modifying its target",
+    async () => {
+      const { store } = await seededStore({ segments: ["cassette"], receipt: receipt() })
+      const workDir = mkdtempSync(join(tmpdir(), "resume-link-"))
+      const target = join(workDir, "must-survive.txt")
+      const path = join(workDir, `${CAMPAIGN}_${INSTANCE}.jsonl`)
+      writeFileSync(target, "original")
+      symlinkSync(target, path)
+      const out = await prepareResume(RESUME_ON_ENV, INSTANCE, {
+        makeStore: () => store,
+        workDir,
+      })
+      expect(out?.localCassettePath).toBe(path)
+      expect(lstatSync(path).isSymbolicLink()).toBe(false)
+      expect(readFileSync(path, "utf8")).toBe("cassette")
+      expect(readFileSync(target, "utf8")).toBe("original")
+    },
+  )
 
   test("passes the correct resumeKey (campaign/instance) to the store factory", async () => {
     const { store } = await seededStore({ segments: ["x"], receipt: receipt() })
@@ -185,11 +236,35 @@ describe("prepareResume — FAIL-CLOSED (broken cassette ⇒ fresh, never partia
     expect(await prepareResume(RESUME_ON_ENV, INSTANCE, { makeStore: () => store })).toBeUndefined()
   })
 
+  test("receipt identity must match the requested campaign, instance, and key", async () => {
+    for (const mismatch of [
+      { key: "other/instance" },
+      { campaignId: "other" },
+      { instanceId: "other" },
+    ]) {
+      const { store } = await seededStore({
+        segments: ["x"],
+        receipt: receipt(mismatch),
+      })
+      expect(
+        await prepareResume(RESUME_ON_ENV, INSTANCE, { makeStore: () => store }),
+      ).toBeUndefined()
+    }
+  })
+
   test("concat() throws (corrupt log) ⇒ undefined — NOT a partial replay", async () => {
     const { store } = await seededStore({
       segments: ["x"],
       receipt: receipt(),
       concatThrows: true,
+    })
+    expect(await prepareResume(RESUME_ON_ENV, INSTANCE, { makeStore: () => store })).toBeUndefined()
+  })
+
+  test("receipt high-water mark must equal a contiguous zero-based segment log", async () => {
+    const { store } = await seededStore({
+      segments: ["only-one"],
+      receipt: receipt({ latestSeq: 2 }),
     })
     expect(await prepareResume(RESUME_ON_ENV, INSTANCE, { makeStore: () => store })).toBeUndefined()
   })

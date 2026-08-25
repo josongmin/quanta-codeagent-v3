@@ -92,7 +92,7 @@ const toolResult = (
 
 const decision = (
   turn_id: string,
-  gate: "permission" | "rule" | "hook" | "cap" | "jail" | "budget",
+  gate: "permission" | "rule" | "hook" | "cap" | "jail" | "budget" | "objective",
   outcome: "allow" | "deny" | "ask",
   decision_reason: string,
   toolCallId: string,

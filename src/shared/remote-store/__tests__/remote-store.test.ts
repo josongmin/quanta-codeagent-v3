@@ -3,6 +3,7 @@ import { nth } from "../../../../tests/_helpers/expect-present"
 import type { RemoteBackend } from "../backend"
 import {
   isResumeEligible,
+  isValidResumeSecurityReceipt,
   type ResumeReceipt,
   type RunAwsResult,
   readReceipt,
@@ -100,6 +101,23 @@ describe("segment-store", () => {
     const be = fakeBackend()
     const ss = segmentStore(be, "camp/inst")
     expect(await ss.concat()).toBe("")
+  })
+
+  it("receipt-bound concat requires exactly contiguous zero-based segments", async () => {
+    const be = fakeBackend()
+    const ss = segmentStore(be, "camp/inst")
+    await ss.putSegment(0, "zero")
+    await ss.putSegment(2, "two")
+    await expect(ss.concat(3)).rejects.toThrow(/expected 3 contiguous segments, found 2/)
+    await expect(ss.concat(2)).rejects.toThrow(/expected contiguous segment 1/)
+  })
+
+  it("receipt-bound concat rejects a stale tail beyond the receipt high-water mark", async () => {
+    const be = fakeBackend()
+    const ss = segmentStore(be, "camp/inst")
+    await ss.putSegment(0, "zero")
+    await ss.putSegment(1, "one")
+    await expect(ss.concat(1)).rejects.toThrow(/expected 1 contiguous segments, found 2/)
   })
 
   it("FIX4: concat THROWS when a LISTED segment vanished (hole = corruption, not benign)", async () => {
@@ -270,6 +288,26 @@ describe("resume-receipt", () => {
     expect(isResumeEligible(sample)).toBe(true)
   })
 
+  it("rejects malformed optional security and meta envelopes", () => {
+    expect(isResumeEligible({ ...sample, security: null })).toBe(false)
+    expect(isResumeEligible({ ...sample, meta: [] })).toBe(false)
+    expect(isValidResumeSecurityReceipt(null)).toBe(false)
+    expect(
+      isValidResumeSecurityReceipt({
+        schema: "quanta.resume-security.v2",
+        bucket: "bucket",
+        keyPrefix: "camp/inst",
+        kmsKeyArn: "kms",
+        principalArn: "principal",
+        retentionDays: 0,
+        iamScopeProbePassed: true,
+        applicationPrefixEnforced: true,
+        publicAccessBlocked: true,
+        verifiedAt: "now",
+      }),
+    ).toBe(false)
+  })
+
   it('FIX1: readReceipt of a {"degraded":"false"} blob (mistyped) ⇒ undefined', async () => {
     const be = fakeBackend()
     const blob: RemoteBackend = {
@@ -313,6 +351,37 @@ describe("s3-backend", () => {
         calls.push({ args, ...(stdin !== undefined ? { stdin } : {}) })
         return responses[i++] ?? { stdout: "", exitCode: 0 }
       },
+    }
+  }
+
+  const objectKey = (args: readonly string[], offset: number): string =>
+    nth(args, args.indexOf("cp") + offset, "args").replace("s3://bkt/", "")
+
+  const readObject = (objects: Map<string, string>, key: string): RunAwsResult => {
+    const body = objects.get(key)
+    if (body === undefined) return { stdout: "", stderr: "NoSuchKey", exitCode: 1 }
+    return { stdout: body, exitCode: 0 }
+  }
+
+  const inMemoryRunAws = (
+    objects: Map<string, string>,
+  ): ((args: readonly string[], stdin?: string) => Promise<RunAwsResult>) => {
+    return async (args, stdin) => {
+      const cp = args.indexOf("cp")
+      if (cp >= 0) {
+        if (args.at(-1) === "-") return readObject(objects, objectKey(args, 1))
+        if (args[cp + 1] === "-") {
+          objects.set(objectKey(args, 2), stdin ?? "")
+          return { stdout: "", exitCode: 0 }
+        }
+      }
+      const ls = args.indexOf("ls")
+      if (ls < 0) return { stdout: "", exitCode: 0 }
+      const prefix = nth(args, ls + 1, "args").replace("s3://bkt/", "")
+      const lines = [...objects.keys()]
+        .filter((key) => key.startsWith(prefix))
+        .map((key) => `2026-06-27 08:00:00  10 ${key}`)
+      return { stdout: lines.join("\n"), exitCode: 0 }
     }
   }
 
@@ -422,42 +491,18 @@ describe("s3-backend", () => {
     expect(keys[0]).toContain("has space")
   })
 
-  it("list returns [] on non-zero exit", async () => {
-    const { runAws } = recordingRunAws([{ stdout: "boom", exitCode: 255 }])
+  it("list THROWS on transport/auth failure instead of fabricating an empty prefix", async () => {
+    const { runAws } = recordingRunAws([
+      { stdout: "", stderr: "Unable to locate credentials", exitCode: 255 },
+    ])
     const be = s3Backend({ bucket: "bkt", runAws })
-    expect(await be.list("camp/")).toEqual([])
+    await expect(be.list("camp/")).rejects.toThrow(/Unable to locate credentials/)
   })
 
   it("segment-store composes over the s3 backend end-to-end (keys land in S3 namespace)", async () => {
     // Stateful fake aws: cp - (put) writes, ls --recursive lists, cp <src> - reads.
     const objects = new Map<string, string>()
-    const runAws = async (
-      args: readonly string[],
-      stdin?: string,
-    ): Promise<{ stdout: string; exitCode: number }> => {
-      const a = [...args]
-      if (a.includes("cp") && a[a.length - 1] === "-") {
-        // get: cp s3://... -
-        const src = nth(a, a.indexOf("cp") + 1, "a").replace("s3://bkt/", "")
-        const body = objects.get(src)
-        return body === undefined ? { stdout: "", exitCode: 1 } : { stdout: body, exitCode: 0 }
-      }
-      if (a.includes("cp") && a[a.indexOf("cp") + 1] === "-") {
-        // put: cp - s3://...
-        const dest = nth(a, a.indexOf("cp") + 2, "a").replace("s3://bkt/", "")
-        objects.set(dest, stdin ?? "")
-        return { stdout: "", exitCode: 0 }
-      }
-      if (a.includes("ls")) {
-        const prefix = nth(a, a.indexOf("ls") + 1, "a").replace("s3://bkt/", "")
-        const lines = [...objects.keys()]
-          .filter((k) => k.startsWith(prefix))
-          .map((k) => `2026-06-27 08:00:00  10 ${k}`)
-        return { stdout: lines.join("\n"), exitCode: 0 }
-      }
-      return { stdout: "", exitCode: 0 }
-    }
-    const be = s3Backend({ bucket: "bkt", runAws })
+    const be = s3Backend({ bucket: "bkt", runAws: inMemoryRunAws(objects) })
     const ss = segmentStore(be, "camp/inst")
     await ss.putSegment(2, "B")
     await ss.putSegment(1, "A")

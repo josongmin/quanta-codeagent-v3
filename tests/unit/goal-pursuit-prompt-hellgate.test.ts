@@ -47,4 +47,16 @@ describe("goal-pursuit prompt SSOT", () => {
     expect(p).toContain("ship it")
     expect(p).not.toContain("  ship it  ")
   })
+
+  test("checkpoint projection contains only criterion IDs and terminal metadata", () => {
+    const p = buildPursuitContinuationPrompt("ship", {
+      verifiedCriterionIds: ["build"],
+      remainingCriterionIds: ["e2e"],
+      lastAttemptKey: "attempt-1",
+      lastTurnOutcome: "completed",
+    })
+    expect(p).toContain("Verified criterion IDs: build")
+    expect(p).toContain("Remaining criterion IDs: e2e")
+    expect(p).toContain("Last attempt: attempt-1 (completed)")
+  })
 })

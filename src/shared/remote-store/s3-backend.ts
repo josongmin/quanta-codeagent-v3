@@ -147,7 +147,15 @@ export const s3Backend = (opts: S3BackendOptions): RemoteBackend => {
     },
     async list(prefix) {
       const res = await runAws([...regionArgs, "s3", "ls", uri(prefix), "--recursive"])
-      if (res.exitCode !== 0) return []
+      // `aws s3 ls` exits 0 with empty stdout for a genuine empty prefix. A
+      // non-zero exit is therefore transport/auth failure, not "no objects".
+      // Returning [] here would let an eligible receipt materialize an empty
+      // or truncated replay cassette after a failed LIST.
+      if (res.exitCode !== 0) {
+        throw new Error(
+          `[s3-backend] list ${prefix} failed (exit ${res.exitCode}): ${res.stderr ?? ""}`,
+        )
+      }
       const keys: string[] = []
       for (const line of res.stdout.split("\n")) {
         const k = keyFromLsLine(line)

@@ -64,7 +64,11 @@ export function s3ReplayStore(opts: S3ReplayStoreOpts): ReplayStore {
 
   async function ensureLoaded(): Promise<RecordedInteraction[]> {
     if (cached !== null) return cached
-    const joined = await opts.store.concat()
+    // This adapter owns a zero-based append log. Bind concat's second LIST to
+    // the first observed count so a leading/interior hole or concurrent stale
+    // tail cannot be compacted into a different sequence identity.
+    const expectedCount = (await opts.store.listSegments()).length
+    const joined = await opts.store.concat(expectedCount)
     const out: RecordedInteraction[] = []
     if (joined.length > 0) {
       for (const line of joined.split("\n")) {
@@ -77,9 +81,10 @@ export function s3ReplayStore(opts: S3ReplayStoreOpts): ReplayStore {
       }
     }
     cached = out
-    // Resume after the last present segment. `concat()` drops absent holes, so
-    // length of parsed records is the safe high-water mark for the next seq.
-    nextSeq = out.length
+    // Malformed records remain occupied durable segments even when omitted
+    // from the match cache. Resume after the segment count, not parsed count,
+    // so a later append never overwrites malformed evidence in place.
+    nextSeq = expectedCount
     return cached
   }
 

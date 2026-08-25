@@ -2,7 +2,7 @@
  * Debug/developer-mode `decision` AgentEvent hellgate (Track A, 2026-05-25).
  *
  * Pins the contract for the new gate-decision event:
- *   - 6 kinds × 3 outcomes = 18 union constructions compile + are recognised
+ *   - 7 kinds × 3 outcomes = 21 union constructions compile + are recognised
  *     at runtime.
  *   - turn ≥ 0 + reason non-empty invariants hold for the canonical fixture
  *     and the optional fields stay optional (absence is legal).
@@ -31,7 +31,7 @@ import type { AgentEvent } from "@/stream"
 const TURN_ID = "turn-42"
 const TS = "2026-05-25T12:00:00.000Z"
 
-const KINDS = ["permission", "rule", "hook", "cap", "jail", "budget"] as const
+const KINDS = ["permission", "rule", "hook", "cap", "jail", "budget", "objective"] as const
 const OUTCOMES = ["allow", "deny", "ask"] as const
 
 type GateKind = (typeof KINDS)[number]
@@ -68,7 +68,7 @@ const decisionRecord = (
 
 // ── 1. union admits all 18 (kind × outcome) variants ────────────────────
 
-describe("AgentEvent.decision union admits 18 variants (6 kind × 3 outcome)", () => {
+describe("AgentEvent.decision union admits 21 variants (7 kind × 3 outcome)", () => {
   for (const k of KINDS) {
     for (const o of OUTCOMES) {
       test(`kind=${k} outcome=${o} envelope round-trip is byte-identical + decodes back to the original (kind,outcome)`, () => {

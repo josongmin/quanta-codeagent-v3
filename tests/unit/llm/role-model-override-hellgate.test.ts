@@ -19,7 +19,7 @@
  *   HELL-RM-10 — listOverrides() snapshot is frozen
  *   HELL-RM-11 — concurrent setOverride safe (last-write-wins)
  *   HELL-RM-12 — resolve is pure (no IO, deterministic, no clock)
- *   HELL-RM-13 — 1000 resolve perf sanity (sub-100ms)
+ *   HELL-RM-13 — large resolve batch remains exact
  *   HELL-RM-14 — ADR-0212 sticky compose: sticky as defaultModel preserved
  *   HELL-RM-15 — clearOverride(role) → default fallback restored
  */
@@ -168,22 +168,24 @@ describe("role-based model override hellgate (ADR-0256)", () => {
     expect(r.listOverrides()).toEqual({ executor: "model-X" })
   })
 
-  test("HELL-RM-13 — 1000 resolve calls complete in under 100ms (perf sanity)", () => {
+  test("HELL-RM-13 — a large resolve batch remains exact", () => {
     const r = defaultRoleModelResolver()
     r.setOverride("plan-writer", "model-A")
     r.setOverride("executor", "model-B")
     r.setOverride("reviewer", "model-C")
     const roles: readonly Role[] = ["plan-writer", "executor", "reviewer", "explorer"]
-    const start = performance.now()
-    for (let i = 0; i < 1000; i++) {
+    const counts = new Map<string, number>()
+    for (let i = 0; i < 100_000; i++) {
       const role = roles[i % roles.length] as Role
-      r.resolve(role, "default")
+      const resolved = r.resolve(role, "default")
+      counts.set(resolved, (counts.get(resolved) ?? 0) + 1)
     }
-    const elapsedMs = performance.now() - start
-    // Generous bound — Map.get on a 3-entry map is O(1); the bound is
-    // sized to catch a regression where someone accidentally introduces
-    // Array.find or string parsing on the hot path.
-    expect(elapsedMs).toBeLessThan(100)
+    expect(Object.fromEntries(counts)).toEqual({
+      "model-A": 25_000,
+      "model-B": 25_000,
+      "model-C": 25_000,
+      default: 25_000,
+    })
   })
 
   test("HELL-RM-14 — ADR-0212 sticky compose: sticky modelId as defaultModel is preserved", () => {

@@ -86,6 +86,7 @@ describe("isTransientWorktreeLockError — transient-only matcher", () => {
       "fatal: '/repo/.git/worktrees/agent-x/locked' is already locked",
       "error: cannot lock ref 'refs/heads/foo'",
       "Unable to create '/repo/.git/worktrees/abc/HEAD.lock': File exists",
+      "fatal: failed to read .git/worktrees/abc/commondir: Undefined error: 0",
     ]) {
       expect(isTransientWorktreeLockError(s)).toBe(true)
     }

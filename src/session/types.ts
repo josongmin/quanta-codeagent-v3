@@ -336,6 +336,19 @@ export interface PersistedObjectiveBudget {
   readonly turnsUsed: number
 }
 
+/** Bounded, digest/reference-only objective turn checkpoint. */
+export interface PersistedProgressReceipt {
+  readonly attemptKey: string
+  readonly objectiveRevisionBefore: number
+  readonly objectiveRevisionAfter: number
+  readonly turnOutcome: "completed" | "aborted" | "error" | "backgrounded"
+  readonly criterionTransitions: readonly string[]
+  readonly verifierReceiptRefs: readonly string[]
+  readonly sourceDigest?: string
+  readonly remainingCriterionIds: readonly string[]
+  readonly recordedAt: number
+}
+
 /** The full serializable state of ONE thread's objective + its per-thread
  *  authority revision + the persisted EXPLICIT status intent (provenance). The
  *  derived public `status` is stored for readability, but the authoritative
@@ -361,6 +374,7 @@ export interface PersistedObjectiveThread {
   readonly nextActions: readonly string[]
   readonly createdAt: number
   readonly updatedAt: number
+  readonly progressReceipts?: readonly PersistedProgressReceipt[]
 }
 
 /** The durable objective snapshot persisted on a {@link SavedSession}: every

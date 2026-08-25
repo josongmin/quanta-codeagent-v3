@@ -13,6 +13,7 @@
  * exactOptionalPropertyTypes: optional fields are typed `x?: T | undefined`.
  */
 
+import type { ProgressReceipt } from "./progress-receipt"
 import type { Objective } from "./types"
 
 /** The caller's last EXPLICIT status intent — the only status source on restore
@@ -43,4 +44,6 @@ export interface ObjectiveDomainSnapshot {
   readonly threadId: string
   readonly revision: number
   readonly state: ObjectiveThreadSnapshot | null
+  /** Bounded durable evidence packets; never contains prompt/transcript text. */
+  readonly progressReceipts?: readonly ProgressReceipt[]
 }

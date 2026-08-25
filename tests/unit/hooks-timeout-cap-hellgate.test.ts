@@ -30,6 +30,8 @@ const noEnvTimeout = (): void => {
   __resetRuntimeConfig()
 }
 
+const neverSettles = (): Promise<never> => new Promise(() => {})
+
 beforeEach(noEnvTimeout)
 afterEach(noEnvTimeout)
 
@@ -54,8 +56,9 @@ describe("S5 hook hardening — per-handler timeout", () => {
     bus.on(
       "turn_start",
       async () => {
-        // Sleep longer than the timeout — the bus must NOT wait for us.
-        await new Promise((r) => setTimeout(r, 200))
+        // A permanently pending handler makes the timeout itself the only way
+        // emit can settle; no scheduler-sensitive wall-clock comparison needed.
+        await neverSettles()
         return { promptHook: { injectAfterSystem: "late" } }
       },
       { timeoutMs: 50 },
@@ -63,12 +66,7 @@ describe("S5 hook hardening — per-handler timeout", () => {
     bus.on("turn_start", () => {
       secondRan = true
     })
-    const t0 = Date.now()
     const result = await bus.emit({ type: "turn_start", turn: 1 })
-    const elapsed = Date.now() - t0
-    // First handler timed out (50ms cap, slept 200) — must come back fast,
-    // well under the 200ms it WOULD have taken to wait.
-    expect(elapsed).toBeLessThan(180)
     expect(secondRan).toBe(true)
     // Timed-out handler's late return was DROPPED — its promptHook is not
     // reflected in the result.
@@ -94,14 +92,14 @@ describe("S5 hook hardening — per-handler timeout", () => {
     bus.on(
       "turn_start",
       async () => {
-        await new Promise((r) => setTimeout(r, 100))
+        await neverSettles()
       },
       { timeoutMs: 20 },
     )
     bus.on(
       "turn_start",
       async () => {
-        await new Promise((r) => setTimeout(r, 100))
+        await neverSettles()
       },
       { timeoutMs: 20 },
     )
@@ -134,11 +132,9 @@ describe("S5 hook hardening — per-handler timeout", () => {
     __resetRuntimeConfig()
     const bus = new HookBus()
     bus.on("turn_start", async () => {
-      await new Promise((r) => setTimeout(r, 200))
+      await neverSettles()
     })
-    const t0 = Date.now()
     const result = await bus.emit({ type: "turn_start", turn: 1 })
-    expect(Date.now() - t0).toBeLessThan(180)
     expect(result.timeoutCount).toBe(1)
   })
 
@@ -202,7 +198,7 @@ describe("S5 hook hardening — per-handler timeout", () => {
     bus.on(
       "pre_tool_use",
       async () => {
-        await new Promise((r) => setTimeout(r, 100))
+        await neverSettles()
       },
       { timeoutMs: 20 },
     )

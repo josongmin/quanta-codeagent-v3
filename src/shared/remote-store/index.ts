@@ -6,6 +6,7 @@
 export type { RemoteBackend } from "./backend"
 export {
   isResumeEligible,
+  isValidResumeSecurityReceipt,
   type ResumeReceipt,
   type ResumeSecurityReceipt,
   readReceipt,

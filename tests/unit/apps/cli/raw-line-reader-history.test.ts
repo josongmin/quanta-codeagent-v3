@@ -58,6 +58,20 @@ describe("raw-line-reader — history navigation", () => {
     expect(out).toBe("hi")
   })
 
+  test("raw key activity is observable before Enter submits the draft", async () => {
+    let activity = 0
+    const p = readLine({
+      prompt: "› ",
+      onActivity: () => {
+        activity++
+      },
+    })
+    await sendKeys(mock.stdin, "draft")
+    expect(activity).toBeGreaterThanOrEqual(5)
+    await sendKeys(mock.stdin, "\r")
+    expect(await p).toBe("draft")
+  })
+
   test("↑ recalls the most recent history entry; Enter submits it", async () => {
     const history = __createSeededHistoryForTest(["echo one", "echo two"])
     const p = readLine({ prompt: "› ", history })

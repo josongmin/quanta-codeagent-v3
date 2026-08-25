@@ -23,7 +23,7 @@
 import { readFile, writeFile } from "node:fs/promises"
 import { dirname, join, resolve } from "node:path"
 import type { LLMPort } from "@/llm"
-import type { MatchPolicy } from "@/llm/replay"
+import type { MatchPolicy, ReplayStore } from "@/llm/replay"
 import { jsonlReplayStore, type OnMissPolicy, recordingLlmPort, replayLlmPort } from "@/llm/replay"
 import type { StreamInput } from "@/llm/types"
 import { getActiveTraceRef, getSpanSink } from "@/observability"
@@ -31,7 +31,7 @@ import { benchHome, benchRunId } from "@/runner/batch/corpus/paths"
 import { isFalsyToken } from "@/shared"
 import { resumeHashRequest } from "./resume/canonicalize"
 import { resolveResumeConfig, resumeActive } from "./resume/config"
-import { maybeTeeResumeRecording } from "./resume/recorder"
+import { maybeResumeReplayStore, maybeTeeResumeRecording } from "./resume/recorder"
 import { debugSink, isTrajectoryDebugEnabled } from "./trajectory-debug-sink"
 
 /**
@@ -226,6 +226,19 @@ export const maybeReplayTrajectory = (llm: LLMPort): LLMPort => {
   // DEFAULT (resume off) path omits `hashRequest` ⇒ `defaultHashRequest`,
   // byte-identical to the prior behavior.
   const resumeOn = resumeActive(resolveResumeConfig(process.env))
+  const resumeReplayStore =
+    mode.onMiss === "record-and-passthrough"
+      ? maybeResumeReplayStore(process.env, mode.path, mode.limit)
+      : undefined
+  if (resumeReplayStore !== undefined) {
+    return replayLlmPort({
+      store: resumeReplayStore,
+      onMiss: mode.onMiss,
+      fallback: llm,
+      ...(llm.provider !== undefined ? { provider: llm.provider } : {}),
+      ...(llm.model !== undefined ? { model: llm.model } : {}),
+    })
+  }
   return replayTrajectoryPort({
     path: mode.path,
     onMiss: mode.onMiss,
@@ -289,11 +302,41 @@ const buildRunMeta = (
  *  meta with verdict/editTrace data without re-deriving the timestamped path. */
 const metaPathRegistry = new Map<string, string>()
 
+interface BenchTrajectoryCompositionDeps {
+  /** Test seam for the production record/replay store composition. */
+  resumeStoreFor?(path: string, limit?: number): ReplayStore | undefined
+}
+
+const resumeStoreFactory = (
+  deps: BenchTrajectoryCompositionDeps | undefined,
+): NonNullable<BenchTrajectoryCompositionDeps["resumeStoreFor"]> =>
+  deps?.resumeStoreFor ??
+  ((candidatePath: string, limit?: number) =>
+    maybeResumeReplayStore(process.env, candidatePath, limit))
+
+const productionRecordStore = (
+  path: string,
+  deps: BenchTrajectoryCompositionDeps | undefined,
+): ReplayStore => resumeStoreFactory(deps)(path) ?? jsonlReplayStore({ path })
+
+const productionReplayStore = (
+  mode: Extract<BenchTrajectoryMode, { kind: "replay" }>,
+  deps: BenchTrajectoryCompositionDeps | undefined,
+): ReplayStore => {
+  const localStore = jsonlReplayStore({
+    path: mode.path,
+    ...(mode.limit !== undefined ? { limit: mode.limit } : {}),
+  })
+  if (mode.onMiss !== "record-and-passthrough") return localStore
+  return resumeStoreFactory(deps)(mode.path, mode.limit) ?? localStore
+}
+
 export const applyBenchTrajectoryMode = (
   llm: LLMPort,
   mode: BenchTrajectoryMode,
   identity: { provider: string; model: string },
   ctx?: { instanceId?: string; runId?: string; attempt?: number },
+  deps?: BenchTrajectoryCompositionDeps,
 ): LLMPort => {
   if (mode.kind === "off") return llm
   if (mode.kind === "record") {
@@ -308,9 +351,14 @@ export const applyBenchTrajectoryMode = (
       // Fire-and-forget: meta write failure must never crash the bench run.
       writeFile(metaPath, JSON.stringify(meta, null, 2), "utf8").catch(() => {})
     }
+    // This is the production bench composition root (`run-main` calls this
+    // function). Initial resume-enabled runs must write through the same
+    // local+durable store as resumed replay misses; wiring only the legacy
+    // `maybeRecordTrajectory` helper leaves the actual remote run local-only.
+    const store = productionRecordStore(path, deps)
     return recordingLlmPort({
       inner: llm,
-      store: jsonlReplayStore({ path }),
+      store,
       ...(ctx !== undefined ? { callCtx: ctx } : {}),
       // C4: active-span provider (same seam as callCtx) so each recorded turn
       // joins the trace tree on `{traceId,spanId}`. Metadata-only, replay-neutral.
@@ -324,10 +372,9 @@ export const applyBenchTrajectoryMode = (
       ...(isTrajectoryDebugEnabled() ? { debugDrain: () => debugSink.drain() } : {}),
     })
   }
-  return replayTrajectoryPort({
-    path: mode.path,
+  return replayLlmPort({
+    store: productionReplayStore(mode, deps),
     onMiss: mode.onMiss,
-    ...(mode.limit !== undefined ? { limit: mode.limit } : {}),
     ...(mode.onMiss === "throw" ? {} : { fallback: llm }),
     provider: identity.provider,
     model: identity.model,

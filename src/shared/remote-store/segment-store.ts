@@ -41,8 +41,28 @@ export interface SegmentStore {
   listSegments(): Promise<number[]>
   /** The body for `seq`, or undefined if absent. */
   getSegment(seq: number): Promise<string | undefined>
-  /** All segment bodies, ascending by seq, newline-joined; each body verbatim. */
-  concat(): Promise<string>
+  /** All segment bodies, ascending by seq, newline-joined; each body verbatim.
+   * When `expectedCount` is supplied, the immutable log must contain exactly
+   * the contiguous sequence `0..expectedCount-1` before any body is returned. */
+  concat(expectedCount?: number): Promise<string>
+}
+
+const assertExpectedSequence = (seqs: readonly number[], expectedCount: number): void => {
+  if (!Number.isSafeInteger(expectedCount) || expectedCount < 0) {
+    throw new Error(`[segment-store] invalid expected segment count: ${expectedCount}`)
+  }
+  if (seqs.length !== expectedCount) {
+    throw new Error(
+      `[segment-store] expected ${expectedCount} contiguous segments, found ${seqs.length}`,
+    )
+  }
+  for (let i = 0; i < expectedCount; i++) {
+    if (seqs[i] !== i) {
+      throw new Error(
+        `[segment-store] expected contiguous segment ${i}, found ${String(seqs[i])} — log is corrupt`,
+      )
+    }
+  }
 }
 
 export const segmentStore = (backend: RemoteBackend, key: string): SegmentStore => {
@@ -65,8 +85,9 @@ export const segmentStore = (backend: RemoteBackend, key: string): SegmentStore 
     },
     listSegments,
     getSegment,
-    async concat() {
+    async concat(expectedCount) {
       const seqs = await listSegments()
+      if (expectedCount !== undefined) assertExpectedSequence(seqs, expectedCount)
       const bodies = await Promise.all(seqs.map((s) => getSegment(s)))
       // A segment that was LISTED but whose get returns undefined did NOT
       // genuinely 404 (the backend `get` now reserves undefined for a real

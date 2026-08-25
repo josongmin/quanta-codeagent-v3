@@ -30,7 +30,8 @@
  * how the recorded cassette becomes the box's `QUANTA_BENCH_REPLAY_TRAJECTORY`
  * without forwarding any local file.
  */
-import { mkdtempSync, writeFileSync } from "node:fs"
+import { randomUUID } from "node:crypto"
+import { chmodSync, mkdtempSync, renameSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { errMessage } from "@/shared"
@@ -71,6 +72,18 @@ export interface PrepareResumeOpts {
   readonly workDir?: string
 }
 
+const writeOwnerOnlyCassette = (path: string, body: string): void => {
+  const temporary = `${path}.tmp-${process.pid}-${randomUUID()}`
+  try {
+    writeFileSync(temporary, body, { encoding: "utf8", mode: 0o600, flag: "wx" })
+    chmodSync(temporary, 0o600)
+    // Rename replaces a destination symlink instead of following it.
+    renameSync(temporary, path)
+  } finally {
+    rmSync(temporary, { force: true })
+  }
+}
+
 /**
  * Decide + materialize a resume for one instance. Returns undefined (⇒ FRESH
  * run) when resume is OFF, the cassette is not eligible, or ANY read/concat
@@ -104,7 +117,15 @@ export const prepareResume = async (
     if (currentSecurity === undefined) throw new Error("resume security attestation missing")
     const receipt = await store.readReceipt()
     // FAIL-CLOSED gate: absent / degraded / malformed ⇒ NOT eligible ⇒ fresh.
-    if (!isResumeEligible(receipt) || !sameResumeSecurity(receipt?.security, currentSecurity)) {
+    const identityMatches =
+      receipt?.key === key &&
+      receipt.campaignId === cfg.campaignId &&
+      receipt.instanceId === instanceId
+    if (
+      !isResumeEligible(receipt) ||
+      !identityMatches ||
+      !sameResumeSecurity(receipt.security, currentSecurity)
+    ) {
       log(
         `[resume] ${key}: no eligible cassette (${receipt === undefined ? "receipt absent" : receipt.degraded ? "receipt degraded" : "receipt malformed"}) — fresh run`,
       )
@@ -112,10 +133,13 @@ export const prepareResume = async (
     }
     // Concatenate the durable segment log. `concat()` itself fails LOUDLY on a
     // listed-but-unreadable segment (corruption) — caught below ⇒ fresh run.
-    const cassette = await store.segments.concat()
+    // Bind the receipt's durable high-water mark to the immutable objects.
+    // Plain concat cannot detect an object that disappeared BEFORE list, nor
+    // an extra stale tail; the expected count makes either shape fail closed.
+    const cassette = await store.segments.concat(receipt.latestSeq)
     const dir = opts.workDir ?? mkdtempSync(join(tmpdir(), "bench-resume-"))
     const localCassettePath = join(dir, `${sanitizeFile(key)}.jsonl`)
-    writeFileSync(localCassettePath, cassette)
+    writeOwnerOnlyCassette(localCassettePath, cassette)
     log(`[resume] ${key}: replaying ${cassette.length}B recorded cassette → ${localCassettePath}`)
     return {
       localCassettePath,

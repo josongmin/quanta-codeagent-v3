@@ -4,7 +4,7 @@ import type { ImageQueue } from "../image-queue"
 import type { KeybindingMap } from "../keybindings/types"
 import type { NotificationPort } from "../notify"
 import type { PromptHistory } from "../prompt-history"
-import { AbortError, readLine } from "../raw-line-reader"
+import { AbortError, type ReadLineOptions, readLine } from "../raw-line-reader"
 import type { ExternalEditorPort } from "../raw-line-reader-editor"
 import { DEFAULT_THRESHOLD, type RejectCounter } from "../reject-counter"
 import { idleBanner, rejectExitBanner } from "../repl-banners"
@@ -68,7 +68,33 @@ export interface PromptPipelineUxOpts {
 type PromptLineReader = (
   signal: AbortSignal | undefined,
   ux: PromptPipelineUxOpts | undefined,
+  onActivity: (() => void) | undefined,
 ) => Promise<string | null>
+
+const promptLineOptions = (
+  signal: AbortSignal | undefined,
+  ux: PromptPipelineUxOpts | undefined,
+  onActivity: (() => void) | undefined,
+): ReadLineOptions => ({
+  prompt: "› ",
+  ...(onActivity !== undefined ? { onActivity } : {}),
+  completer: (line) => slashCompleter(line)[0],
+  describe: describeSlashCommand,
+  ...(signal !== undefined ? { signal } : {}),
+  ...(ux?.promptHistory !== undefined ? { history: ux.promptHistory } : {}),
+  ...(ux?.multiline === true ? { multiline: true } : {}),
+  ...(ux?.atProvider !== undefined ? { atProvider: ux.atProvider } : {}),
+  ...(ux?.modeMeta !== undefined ? { meta: ux.modeMeta } : {}),
+  ...(ux?.onCycleMode !== undefined ? { onCycleMode: ux.onCycleMode } : {}),
+  ...(ux?.onCycleEffort !== undefined ? { onCycleEffort: ux.onCycleEffort } : {}),
+  ...(ux?.onFocusNextAttention !== undefined
+    ? { onFocusNextAttention: ux.onFocusNextAttention }
+    : {}),
+  ...(ux?.openEditor !== undefined ? { openEditor: ux.openEditor } : {}),
+  ...(ux?.keybindings !== undefined ? { keybindings: ux.keybindings } : {}),
+  ...(ux?.pasteBurst !== undefined ? { pasteBurst: ux.pasteBurst } : {}),
+  ...(ux?.bracketedPaste === true ? { bracketedPaste: true } : {}),
+})
 
 /** Dependencies for {@link composePromptPipeline}. Every dep is EXPLICIT so
  *  the pipeline owns ZERO closure captures over the surface state — the
@@ -111,6 +137,13 @@ export interface ComposePromptPipelineDeps {
   /** Fires for every non-null LOCAL line before slash dispatch. This includes
    * surface commands, so recent user activity can cancel an autonomous wake. */
   readonly onLocalInput?: () => void
+  /** Fires on every raw local keypress, before line submission. This is
+   * stronger than `onLocalInput` and prevents an autonomous queue winner from
+   * aborting a human draft that has not reached Enter yet. */
+  readonly onLocalActivity?: () => void
+  /** Fires after a local blank/slash line was handled without starting an
+   * agent turn. The caller may begin a fresh autonomous quiet window here. */
+  readonly onLocalInputSettled?: () => void
   /** Narrow test seam for local input classification. Undefined keeps the
    *  raw-line-reader runtime path byte-identical. */
   readonly readPromptLine?: PromptLineReader
@@ -135,27 +168,10 @@ export interface ComposePromptPipelineDeps {
 const defaultPromptLineReader: PromptLineReader = async (
   signal: AbortSignal | undefined,
   ux?: PromptPipelineUxOpts,
+  onActivity?: () => void,
 ): Promise<string | null> => {
   try {
-    const raw = await readLine({
-      prompt: "› ",
-      completer: (line) => slashCompleter(line)[0],
-      describe: describeSlashCommand,
-      ...(signal !== undefined ? { signal } : {}),
-      ...(ux?.promptHistory !== undefined ? { history: ux.promptHistory } : {}),
-      ...(ux?.multiline === true ? { multiline: true } : {}),
-      ...(ux?.atProvider !== undefined ? { atProvider: ux.atProvider } : {}),
-      ...(ux?.modeMeta !== undefined ? { meta: ux.modeMeta } : {}),
-      ...(ux?.onCycleMode !== undefined ? { onCycleMode: ux.onCycleMode } : {}),
-      ...(ux?.onCycleEffort !== undefined ? { onCycleEffort: ux.onCycleEffort } : {}),
-      ...(ux?.onFocusNextAttention !== undefined
-        ? { onFocusNextAttention: ux.onFocusNextAttention }
-        : {}),
-      ...(ux?.openEditor !== undefined ? { openEditor: ux.openEditor } : {}),
-      ...(ux?.keybindings !== undefined ? { keybindings: ux.keybindings } : {}),
-      ...(ux?.pasteBurst !== undefined ? { pasteBurst: ux.pasteBurst } : {}),
-      ...(ux?.bracketedPaste === true ? { bracketedPaste: true } : {}),
-    })
+    const raw = await readLine(promptLineOptions(signal, ux, onActivity))
     return raw.trim()
   } catch (e) {
     if (e instanceof AbortError) return null
@@ -172,14 +188,17 @@ const classifyReplLine = async (
   ux: PromptPipelineUxOpts | undefined,
   readPromptLine: PromptLineReader,
   onLocalInput: (() => void) | undefined,
+  onLocalInputSettled: (() => void) | undefined,
+  onLocalActivity: (() => void) | undefined,
 ): Promise<string | null | undefined> => {
-  const input = await readPromptLine(signal, ux)
+  const input = await readPromptLine(signal, ux, onLocalActivity)
   if (input === null) return null
   onLocalInput?.()
   if (input === "/exit" || input === "/quit") return null
   const handled = input === "" || (await dispatchSlash(input))
   if (handled) {
     process.stderr.write("\n")
+    onLocalInputSettled?.()
     return undefined
   }
   return input
@@ -197,6 +216,8 @@ const buildCliPromptSource = (
   ux: PromptPipelineUxOpts | undefined,
   onLocalPromptAccepted: (() => void) | undefined,
   onLocalInput: (() => void) | undefined,
+  onLocalInputSettled: (() => void) | undefined,
+  onLocalActivity: (() => void) | undefined,
   readPromptLine: PromptLineReader,
 ): CliPromptSource => ({
   next: async (signal) => {
@@ -210,6 +231,8 @@ const buildCliPromptSource = (
         ux,
         onLocalPromptAccepted,
         onLocalInput,
+        onLocalInputSettled,
+        onLocalActivity,
         readPromptLine,
       })
       if (next === undefined) continue
@@ -255,6 +278,8 @@ const readNextPrompt = async (args: {
   readonly ux: PromptPipelineUxOpts | undefined
   readonly onLocalPromptAccepted: (() => void) | undefined
   readonly onLocalInput: (() => void) | undefined
+  readonly onLocalInputSettled: (() => void) | undefined
+  readonly onLocalActivity: (() => void) | undefined
   readonly readPromptLine: PromptLineReader
 }): Promise<CliPromptInput | null | undefined> => {
   const {
@@ -266,10 +291,20 @@ const readNextPrompt = async (args: {
     ux,
     onLocalPromptAccepted,
     onLocalInput,
+    onLocalInputSettled,
+    onLocalActivity,
     readPromptLine,
   } = args
   if (externalPromptQueue === undefined) {
-    const next = await classifyReplLine(signal, dispatchSlash, ux, readPromptLine, onLocalInput)
+    const next = await classifyReplLine(
+      signal,
+      dispatchSlash,
+      ux,
+      readPromptLine,
+      onLocalInput,
+      onLocalInputSettled,
+      onLocalActivity,
+    )
     if (typeof next !== "string") return next
     onLocalPromptAccepted?.()
     return localPayload(next, imageQueue, textInbox)
@@ -289,6 +324,8 @@ const readNextPrompt = async (args: {
         ux,
         readPromptLine,
         onLocalInput,
+        onLocalInputSettled,
+        onLocalActivity,
       ).then((value) => ({
         source: "local" as const,
         value,
@@ -357,10 +394,6 @@ const wrapPromptSourceWithIdleGate = (args: {
       process.stderr.write("(snoozed — input declined; type /resume to wake)\n")
       return undefined
     }
-    idle.markActive()
-    // RFC-09 (A) — a prompt was accepted ⇒ reset the idle notify latch so the
-    // NEXT idle wait notifies again. Absent ⇒ no-op.
-    notify?.markActive()
     return next
   }
   return {
@@ -380,6 +413,20 @@ const wrapPromptSourceWithIdleGate = (args: {
  *  Single entry point — the host passes the constructed pipeline straight
  *  to the runtime-sdk backed session loop without further wrapping. */
 export const composePromptPipeline = (deps: ComposePromptPipelineDeps): CliPromptSource => {
+  // The UI idle clock represents human presence, not queued work. Mark it from
+  // local key/line edges only; autonomous prompts must not postpone UI idle.
+  const markLocalActivity = (): void => {
+    deps.idleMonitor.markActive()
+    deps.notify?.markActive()
+  }
+  const onLocalActivity = (): void => {
+    markLocalActivity()
+    deps.onLocalActivity?.()
+  }
+  const onLocalInput = (): void => {
+    markLocalActivity()
+    deps.onLocalInput?.()
+  }
   const inner = buildCliPromptSource(
     deps.dispatchSlash,
     deps.imageQueue,
@@ -387,7 +434,9 @@ export const composePromptPipeline = (deps: ComposePromptPipelineDeps): CliPromp
     deps.externalPromptQueue,
     deps.ux,
     deps.onLocalPromptAccepted,
-    deps.onLocalInput,
+    onLocalInput,
+    deps.onLocalInputSettled,
+    onLocalActivity,
     deps.readPromptLine ?? defaultPromptLineReader,
   )
   return wrapPromptSourceWithIdleGate({

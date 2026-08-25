@@ -33,15 +33,13 @@
  * the resume sink — byte-identical to today's informational objective (no
  * continuation ever launches).
  *
- * LIVE WIRING (jul-13 "Pursuing goal" landing): this module is NO LONGER dead.
- * `runIdleContinuation` is driven by the host binding
- * `apps/cli/goal-continuation-hook.ts` (`startGoalContinuationTicker`, which
- * calls `void runIdleContinuation(threadId, deps)` at ~L93 on each idle tick
- * with host-bound probes + a `resume` sink). The `QUANTA_GOAL_ENFORCE` →
- * `goalContinuationEnforce` knob IS read: `apps/cli/repl/session-loop.ts` (~L780)
- * passes `enabled: runtimeConfig().goalContinuationEnforce` when arming the
- * ticker. A ratchet pins the binding
- * (`tests/unit/goal-continuation-wiring-ratchet.test.ts`).
+ * LIVE WIRING: this module is NO LONGER dead. `runIdleContinuation` is driven
+ * by the host binding `apps/cli/goal-continuation-hook.ts`: an event-driven
+ * quiet-window controller invokes it only after a fresh authority revision and
+ * host quiescence check. The `QUANTA_GOAL_ENFORCE` →
+ * `goalContinuationEnforce` knob gates construction at the interactive
+ * composition root. A real PTY continuation E2E, rather than a source-text
+ * ratchet, proves the shipped queue → agent-turn path.
  * Separately, the budget-suppression path `objectiveBudgetExhausted` in
  * `@/agent/loop/emit-helpers` (reads the DERIVED `budget_limited` status) is a
  * DIFFERENT machine and still lives — the two are unrelated.
@@ -210,10 +208,10 @@ const probe = (fn: (id: string) => boolean, id: string): boolean => {
   try {
     return fn(id) === true
   } catch {
-    // A throwing probe is treated as the SAFE (continuation-blocking) value for
-    // its guard: idle=false, everything-pending=true. We encode that at the
-    // call sites; this helper only normalizes the boolean.
-    return false
+    // These are all BLOCKING predicates (plan/turn/queue/mailbox/ephemeral).
+    // Unknown host state must suppress an autonomous wake, never be normalized
+    // to "nothing pending" and launch through a failed safety probe.
+    return true
   }
 }
 

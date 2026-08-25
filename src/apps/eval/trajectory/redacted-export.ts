@@ -1,6 +1,15 @@
 import { createHash, randomUUID } from "node:crypto"
-import { chmodSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs"
-import { dirname, resolve } from "node:path"
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  realpathSync,
+  renameSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs"
+import { basename, dirname, join, resolve } from "node:path"
 import { redactValue } from "@/shared"
 
 const OWNER_DIR_MODE = 0o700
@@ -33,6 +42,18 @@ export interface RedactedExportResult {
 
 const sha256 = (body: string): string => createHash("sha256").update(body).digest("hex")
 
+/** Resolve symlinked ancestors without following the destination leaf. Rename
+ * replaces that leaf, so this is the path whose bytes would actually change. */
+const canonicalDestination = (path: string): string => {
+  const suffix: string[] = [basename(path)]
+  let parent = dirname(path)
+  while (!existsSync(parent)) {
+    suffix.unshift(basename(parent))
+    parent = dirname(parent)
+  }
+  return join(realpathSync(parent), ...suffix)
+}
+
 /** Atomic replace: a pre-existing symlink is replaced, never followed. */
 const writeOwnerOnly = (path: string, body: string): void => {
   const temporary = `${path}.tmp-${process.pid}-${randomUUID()}`
@@ -61,6 +82,17 @@ export const exportRedactedCassette = (args: {
   if (sourcePath === outputPath) {
     throw new Error("redacted export output must differ from the canonical cassette")
   }
+  const receiptPath = `${outputPath}.provenance.json`
+  if (sourcePath === receiptPath) {
+    throw new Error("redacted export provenance path must differ from the canonical cassette")
+  }
+  const canonicalSource = realpathSync(sourcePath)
+  if (
+    canonicalSource === canonicalDestination(outputPath) ||
+    canonicalSource === canonicalDestination(receiptPath)
+  ) {
+    throw new Error("redacted export destination aliases the canonical cassette")
+  }
 
   const source = readFileSync(sourcePath, "utf8")
   const rows: unknown[] = []
@@ -76,7 +108,6 @@ export const exportRedactedCassette = (args: {
 
   const output = rows.map((row) => JSON.stringify(redactValue(row))).join("\n")
   const outputBody = output === "" ? "" : `${output}\n`
-  const receiptPath = `${outputPath}.provenance.json`
   const receipt: RedactedExportReceipt = {
     schema: "quanta.redacted-cassette-export.v1",
     artifactKind: "redacted-diagnostic-export",
@@ -96,7 +127,8 @@ export const exportRedactedCassette = (args: {
     createdAt: (args.now?.() ?? new Date()).toISOString(),
   }
 
-  mkdirSync(dirname(outputPath), { recursive: true, mode: OWNER_DIR_MODE })
+  const outputDirectory = dirname(outputPath)
+  mkdirSync(outputDirectory, { recursive: true, mode: OWNER_DIR_MODE })
   writeOwnerOnly(outputPath, outputBody)
   writeOwnerOnly(receiptPath, `${JSON.stringify(receipt, null, 2)}\n`)
   return { outputPath, receiptPath, receipt }

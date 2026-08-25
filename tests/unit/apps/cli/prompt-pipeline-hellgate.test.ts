@@ -185,15 +185,37 @@ describe("prompt-pipeline / composePromptPipeline — shape", () => {
   test("externalPromptQueue preloaded — returns the external prompt without requiring local input", async () => {
     const queue = new ExternalPromptQueue()
     queue.push("wake from reactor")
+    const markActive = mock(() => undefined)
     const pipe = composePromptPipeline({
       dispatchSlash: async () => false,
       externalPromptQueue: queue,
-      idleMonitor: stubIdle(),
+      idleMonitor: stubIdle({ markActive }),
       rejectCounter: stubRejects(false),
       statusBar: stubStatusBar(),
     })
     const result = await pipe.next(new AbortController().signal)
     expect(result).toBe("wake from reactor")
+    expect(markActive).not.toHaveBeenCalled()
+  })
+
+  test("a raw local key edge is forwarded before the draft line is accepted", async () => {
+    const onLocalActivity = mock(() => undefined)
+    const markActive = mock(() => undefined)
+    const pipe = composePromptPipeline({
+      dispatchSlash: async () => false,
+      idleMonitor: stubIdle({ markActive }),
+      rejectCounter: stubRejects(false),
+      statusBar: stubStatusBar(),
+      onLocalActivity,
+      readPromptLine: async (_signal, _ux, onActivity) => {
+        onActivity?.()
+        return "draft submitted"
+      },
+    })
+
+    expect(await pipe.next(new AbortController().signal)).toBe("draft submitted")
+    expect(onLocalActivity).toHaveBeenCalledTimes(1)
+    expect(markActive).toHaveBeenCalled()
   })
 
   test("local blank input is skipped and the next typed user input is returned", async () => {
@@ -222,12 +244,14 @@ describe("prompt-pipeline / composePromptPipeline — shape", () => {
     const lines = ["/help", "typed after slash"]
     const dispatchSlash = mock(async (input: string) => input === "/help")
     const onLocalInput = mock(() => undefined)
+    const onLocalInputSettled = mock(() => undefined)
     const pipe = composePromptPipeline({
       dispatchSlash,
       idleMonitor: stubIdle(),
       rejectCounter: stubRejects(false),
       statusBar: stubStatusBar(),
       onLocalInput,
+      onLocalInputSettled,
       readPromptLine: async () => lines.shift() ?? null,
     })
     const { result, writes } = await withCapturedStderr(() =>
@@ -238,6 +262,7 @@ describe("prompt-pipeline / composePromptPipeline — shape", () => {
     expect(dispatchSlash).toHaveBeenNthCalledWith(1, "/help")
     expect(dispatchSlash).toHaveBeenNthCalledWith(2, "typed after slash")
     expect(onLocalInput).toHaveBeenCalledTimes(2)
+    expect(onLocalInputSettled).toHaveBeenCalledTimes(1)
     expect(writes).toContain("\n")
   })
 

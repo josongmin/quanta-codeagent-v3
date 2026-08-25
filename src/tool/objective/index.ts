@@ -38,6 +38,15 @@ import type {
 import { errMessage } from "@/shared"
 import type { ObjectiveApprovalRequest, Tool, ToolContext, ToolEvent, ToolResult } from "../types"
 
+export interface ObjectiveCompletionAdmission {
+  admit(input: { readonly authority: ObjectiveAuthority; readonly threadId: string }): Promise<{
+    readonly admitted: boolean
+    readonly reasonCode?: string
+    /** Revision whose evidence was admitted; bound into the mutation CAS. */
+    readonly expectedRevision: number
+  }>
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // SCHEMAS
 // ─────────────────────────────────────────────────────────────────────────────
@@ -285,6 +294,19 @@ const commitResult = (res: CommitResult): ToolResult => {
 const NO_CONFIRM_SURFACE =
   "objective proposal requires approval but no confirmation surface is available (fail-closed)"
 
+const prepareModelMutation = (
+  authority: ObjectiveAuthority,
+  threadId: string,
+  mutation: ObjectiveMutation,
+  expectedRevision: number | undefined,
+) =>
+  authority.prepare({
+    threadId,
+    actor: "model",
+    mutation,
+    ...(expectedRevision !== undefined ? { expectedRevision } : {}),
+  })
+
 /** Clip a proposed goal for the one-line approval dialog. */
 const clipGoal = (goal: string): string => (goal.length > 160 ? `${goal.slice(0, 157)}…` : goal)
 
@@ -324,8 +346,22 @@ const routeModelMutation = async (
   threadId: string,
   mutation: ObjectiveMutation,
   ctx: ToolContext,
+  completionAdmission?: ObjectiveCompletionAdmission,
 ): Promise<ToolResult> => {
-  const prepared = authority.prepare({ threadId, actor: "model", mutation })
+  let completionExpectedRevision: number | undefined
+  if (
+    mutation.kind === "updateStatus" &&
+    mutation.status === "completed" &&
+    completionAdmission !== undefined
+  ) {
+    const admission = await completionAdmission.admit({ authority, threadId })
+    if (!admission.admitted)
+      return errResult(
+        `objective completion not admitted${admission.reasonCode === undefined ? "" : ` (${admission.reasonCode})`}`,
+      )
+    completionExpectedRevision = admission.expectedRevision
+  }
+  const prepared = prepareModelMutation(authority, threadId, mutation, completionExpectedRevision)
   if (!prepared.approvalRequired) {
     // Gate OFF (or a trusted non-model actor upstream): the admitted flag is
     // inert; the authority commits exactly as before.
@@ -429,7 +465,10 @@ const opToMutation = (op: ObjectiveUpdateInput["op"]): ObjectiveMutation => {
   }
 }
 
-const buildObjectiveUpdate = (authority: ObjectiveAuthority): Tool<ObjectiveUpdateInput> => ({
+const buildObjectiveUpdate = (
+  authority: ObjectiveAuthority,
+  completionAdmission?: ObjectiveCompletionAdmission,
+): Tool<ObjectiveUpdateInput> => ({
   name: "objective_update",
   description:
     "Partially mutate the per-thread Objective. `op.kind` selects: " +
@@ -456,7 +495,13 @@ const buildObjectiveUpdate = (authority: ObjectiveAuthority): Tool<ObjectiveUpda
     try {
       yield {
         type: "result",
-        result: await routeModelMutation(authority, threadId, opToMutation(parsed.data.op), ctx),
+        result: await routeModelMutation(
+          authority,
+          threadId,
+          opToMutation(parsed.data.op),
+          ctx,
+          completionAdmission,
+        ),
       }
     } catch (e) {
       yield { type: "result", result: errResult(`objective_update error: ${errMessage(e)}`) }
@@ -509,10 +554,13 @@ const buildObjectiveGet = (authority: ObjectiveAuthority): Tool<ObjectiveGetInpu
  *  import of `@/objective` from any of them fires"). So the BRIDGE composes it:
  *  production via `buildObjectiveBlock` (`@/agent/tier1/objective.ts`), tests by
  *  wrapping their double themselves. */
-export const objectiveTools = (authority: ObjectiveAuthority): Tool[] => {
+export const objectiveTools = (
+  authority: ObjectiveAuthority,
+  completionAdmission?: ObjectiveCompletionAdmission,
+): Tool[] => {
   return [
     buildObjectiveSet(authority) as Tool,
-    buildObjectiveUpdate(authority) as Tool,
+    buildObjectiveUpdate(authority, completionAdmission) as Tool,
     buildObjectiveGet(authority) as Tool,
   ]
 }

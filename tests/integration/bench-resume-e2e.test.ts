@@ -159,13 +159,14 @@ const CAMPAIGN = "spot-resume-e2e"
 const INSTANCE = "django__django-12345"
 const KEY = resumeKey({ campaignId: CAMPAIGN, instanceId: INSTANCE })
 const SECURITY: ResumeSecurityReceipt = {
-  schema: "quanta.resume-security.v1",
+  schema: "quanta.resume-security.v2",
   bucket: "fake-bucket",
   keyPrefix: KEY,
   kmsKeyArn: "arn:aws:kms:us-east-1:123:key/k",
   principalArn: "arn:aws:iam::123:role/resume",
   retentionDays: 7,
-  prefixLeastPrivilege: true,
+  iamScopeProbePassed: true,
+  applicationPrefixEnforced: true,
   publicAccessBlocked: true,
   verifiedAt: "2026-08-25T00:00:00Z",
 }
@@ -311,8 +312,19 @@ describe("bench spot-resume KEYSTONE e2e (record → durable → reclaim → res
     // fallback, per record-and-passthrough. Re-issue the SAME recorded requests.
     const live = countingLlm()
     const cassetteStore = jsonlReplayStore({ path: prepared.localCassettePath })
+    const resumedSegments = segmentStore(reclaimedBackend, KEY)
+    const resumedStore = teeResumeReplayStore({
+      primary: cassetteStore,
+      secondary: s3ReplayStore({ store: resumedSegments }),
+      key: KEY,
+      campaignId: CAMPAIGN,
+      instanceId: INSTANCE,
+      initialCount: async () => (await resumedSegments.listSegments()).length,
+      writeReceipt: (next) => writeReceipt(reclaimedBackend, KEY, next),
+      securityReceipt: async () => SECURITY,
+    })
     const replayPort = replayLlmPort({
-      store: cassetteStore,
+      store: resumedStore,
       onMiss: "record-and-passthrough",
       fallback: live.port,
     })
@@ -344,6 +356,10 @@ describe("bench spot-resume KEYSTONE e2e (record → durable → reclaim → res
     // record-and-passthrough also EXTENDS the cassette: the new turn was recorded.
     const afterLoad = await cassetteStore.load()
     expect(afterLoad).toHaveLength(4)
+    expect((await resumedSegments.listSegments()).length).toBe(4)
+    expect((await readReceipt(reclaimedBackend, KEY))?.latestSeq).toBe(4)
+    expect((await readReceipt(reclaimedBackend, KEY))?.degraded).toBe(false)
+    expect((await resumedSegments.concat(4)).split("\n")).toHaveLength(4)
   })
 
   it("NEGATIVE control: a DEGRADED receipt ⇒ prepareResume returns undefined ⇒ a FRESH run (no replay)", async () => {

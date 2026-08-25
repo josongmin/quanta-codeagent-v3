@@ -20,9 +20,11 @@ describe("test:ci admission gate", () => {
   })
 
   test("gives spawned catalog and subprocess rails a realistic CI timeout", () => {
-    const script = packageJson.scripts?.["test:ci"]
-    expect(script).toContain("--timeout=15000")
-    expect(script).toContain("--parallel=1")
+    for (const name of ["test:ci", "test:shard"]) {
+      const script = packageJson.scripts?.[name]
+      expect(script, name).toContain("--timeout=15000")
+      expect(script, name).toContain("--parallel=1")
+    }
   })
 
   test("serializes every shared-process test entrypoint", () => {

@@ -13,6 +13,10 @@ import type { CompleterFn, DescribeFn } from "./types"
 
 export interface ReadLineOptions {
   readonly prompt: string
+  /** Optional host activity edge. Fired on every raw keypress before dispatch,
+   * so an autonomous producer can yield while the operator is still drafting
+   * a line rather than waiting for Enter. */
+  readonly onActivity?: () => void
   readonly completer?: CompleterFn
   /** Optional description resolver — passed each candidate string in the
    *  filtered list. Returning a string shows it as the dim right-column

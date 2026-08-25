@@ -36,7 +36,7 @@
  */
 
 import { describe, expect, test } from "bun:test"
-import { mkdtempSync, rmSync, statSync } from "node:fs"
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, statSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { jsonlReplayStore } from "@/llm/replay/jsonl-store"
@@ -67,6 +67,21 @@ describe("R — a cassette is owner-only on disk", () => {
       // Spelled out, because "is it 0600" is the whole point:
       expect(statSync(path).mode & 0o077).toBe(0)
       expect(statSync(dir).mode & 0o077).toBe(0)
+    } finally {
+      rmSync(base, { recursive: true, force: true })
+    }
+  })
+
+  test("R-2b a pre-existing arbitrary parent is not chmodded; the file remains owner-only", async () => {
+    const base = mkdtempSync(join(tmpdir(), "cassette-sec-existing-dir-"))
+    try {
+      const dir = join(base, "cassettes")
+      mkdirSync(dir, { mode: 0o755 })
+      chmodSync(dir, 0o755)
+      const path = join(dir, "run.jsonl")
+      await jsonlReplayStore({ path }).append(record())
+
+      expect({ dir: mode(dir), file: mode(path) }).toEqual({ dir: "755", file: "600" })
     } finally {
       rmSync(base, { recursive: true, force: true })
     }

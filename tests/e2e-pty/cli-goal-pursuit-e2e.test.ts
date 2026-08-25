@@ -81,6 +81,11 @@ describe.skipIf(!PTY_AVAILABLE)("CLI /goal (Pursuing goal) e2e (PTY)", () => {
     readonly cassette: string
     readonly idleMs: number
     readonly replayDelayMs?: number
+    /** Explicitly exercise the shipped default-OFF path with the same replay
+     * harness; absence must leave the continuation queue untouched. */
+    readonly goalEnforce?: boolean
+    readonly idleSuppress?: boolean
+    readonly backgroundTurn?: boolean
   }): Promise<PtyCli> => {
     const cassettePath = join(cwd, "goal-continuation.jsonl")
     writeFileSync(cassettePath, args.cassette)
@@ -89,8 +94,11 @@ describe.skipIf(!PTY_AVAILABLE)("CLI /goal (Pursuing goal) e2e (PTY)", () => {
       env: {
         QUANTA_SESSIONS_DIR: sessionsDir,
         QUANTA_OBJECTIVE_TOOLS: "1",
-        QUANTA_GOAL_ENFORCE: "1",
+        ...(args.goalEnforce === false ? {} : { QUANTA_GOAL_ENFORCE: "1" }),
         QUANTA_IDLE_MS: String(args.idleMs),
+        QUANTA_GOAL_QUIET_MS: String(args.idleMs),
+        ...(args.idleSuppress === false ? { QUANTA_IDLE_SUPPRESS: "0" } : {}),
+        ...(args.backgroundTurn === true ? { QUANTA_BG_TURN: "1" } : {}),
         QUANTA_LLM_REPLAY: cassettePath,
         ...(args.replayDelayMs === undefined
           ? {}
@@ -162,6 +170,60 @@ describe.skipIf(!PTY_AVAILABLE)("CLI /goal (Pursuing goal) e2e (PTY)", () => {
   )
 
   test(
+    "QUANTA_GOAL_ENFORCE default-OFF leaves the real CLI continuation queue untouched",
+    async () => {
+      const c = await bootWithGoalContinuation({
+        cassette: `${replayEntry("MUST_NOT_RUN_WHEN_GOAL_ENFORCE_IS_OFF")}\n`,
+        idleMs: 50,
+        goalEnforce: false,
+      })
+      c.send("/goal default-off must not autonomously invoke the replay\r")
+      await c.waitFor("Pursuing goal set", T)
+      // This waits across several would-be quiet windows. A source-only gate
+      // test cannot establish this: the replay marker is reachable only if the
+      // shipped resume sink has pushed through the external prompt queue.
+      await sleep(300)
+      expect(c.screen()).not.toContain("MUST_NOT_RUN_WHEN_GOAL_ENFORCE_IS_OFF")
+    },
+    T,
+  )
+
+  test(
+    "goal continuation uses its own quiet window when UI idle suppression is disabled",
+    async () => {
+      const c = await bootWithGoalContinuation({
+        cassette: `${replayEntry("GOAL_QUIET_IS_NOT_UI_IDLE")}\n`,
+        idleMs: 50,
+        idleSuppress: false,
+      })
+      c.send("/goal pursue even with UI idle suppression disabled\r")
+      await c.waitFor("Pursuing goal set", T)
+      await c.waitFor("GOAL_QUIET_IS_NOT_UI_IDLE", 8_000)
+      expect(c.screen()).toContain("GOAL_QUIET_IS_NOT_UI_IDLE")
+    },
+    T,
+  )
+
+  test(
+    "a partially typed local draft cancels autonomous continuation before Enter",
+    async () => {
+      const c = await bootWithGoalContinuation({
+        cassette: `${replayEntry("MUST_NOT_ABORT_PARTIAL_DRAFT")}\n`,
+        idleMs: 2_000,
+      })
+      c.send("/goal preserve an operator draft\r")
+      await c.waitFor(/Pursuing goal set[\s\S]*ask before every edit/, 8_000)
+      // Deliberately omit Enter. The raw key edge must cancel the goal timer;
+      // waiting beyond the full quiet window proves the queued continuation
+      // cannot win the prompt race and abort this draft.
+      c.send("unfinished operator draft")
+      await sleep(2_300)
+      expect(c.screen()).not.toContain("MUST_NOT_ABORT_PARTIAL_DRAFT")
+    },
+    T,
+  )
+
+  test(
     "foreground turn re-arms continuation only after a fresh post-settlement quiet window",
     async () => {
       // A local prompt cancels the goal-mutation arm. The foreground prompt is
@@ -193,6 +255,42 @@ describe.skipIf(!PTY_AVAILABLE)("CLI /goal (Pursuing goal) e2e (PTY)", () => {
       await sleep(500)
       expect(c.screen()).not.toContain("STALE_CONTINUATION_AFTER_FOREGROUND")
       await c.waitFor("STALE_CONTINUATION_AFTER_FOREGROUND", 20_000)
+    },
+    T,
+  )
+
+  test(
+    "Ctrl+B keeps an active goal continuation blocked until the detached live body settles",
+    async () => {
+      // The foreground body remains live for roughly two seconds after Ctrl+B.
+      // A continuation marker during that interval means the wake guard was tied
+      // to the REPL wrapper rather than the shared agent body lifecycle.
+      const longForeground = Array.from({ length: 13 }, (_, i) => ({
+        type: "text_delta",
+        delta: ` background-${i}`,
+      }))
+      const cassette = `${replayEntry("BG_GOAL_FOREGROUND_STARTED", longForeground)}\n${replayEntry("_BG_GOAL_CONTINUATION_AFTER_SETTLE")}\n`
+      const c = await bootWithGoalContinuation({
+        cassette,
+        // Keep the initial slash-to-foreground interval comfortably below the
+        // quiet window; the body then supplies the long blocked interval.
+        idleMs: 5_000,
+        replayDelayMs: 150,
+        backgroundTurn: true,
+      })
+      c.send("/goal wait for detached work to settle\r")
+      await c.waitFor(/Pursuing goal set[\s\S]*ask before every edit/, 10_000)
+      c.send("start a turn that will move to the background\r")
+      // The first replay delta can be painted underneath the terminal spinner,
+      // so use a short real body-start interval rather than a fragile rendered
+      // text sentinel before sending the raw Ctrl+B byte.
+      await sleep(500)
+      c.send("\x02")
+      await c.waitFor("moved to background", 10_000)
+
+      await sleep(1_000)
+      expect(c.screen()).not.toContain("BG_GOAL_CONTINUATION_AFTER_SETTLE")
+      await c.waitFor("BG_GOAL_CONTINUATION_AFTER_SETTLE", 15_000)
     },
     T,
   )

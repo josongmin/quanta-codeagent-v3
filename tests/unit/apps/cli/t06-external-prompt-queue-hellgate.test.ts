@@ -34,12 +34,13 @@ describe("T06 / external prompt queue — thin-surface ownership (ADR-0303)", ()
     expect(generic).not.toContain('from "./prompt-types"')
   })
 
-  test("OWN-2: the CLI file is a thin alias, not a re-implementation", () => {
+  test("OWN-2: the CLI file is a thin binding, not a re-implementation", () => {
     const surface = readFileSync(
       join(REPO_ROOT, "src/apps/cli/repl/external-prompt-queue.ts"),
       "utf8",
     )
     expect(surface).toContain("extends GenericExternalPromptQueue<CliPromptInput>")
+    expect(surface).toContain("onPush")
     // the waiter race logic must NOT be re-implemented in the surface
     expect(surface).not.toContain("removeEventListener")
     expect(surface).not.toContain("#waiters")
@@ -94,5 +95,24 @@ describe("T06 / external prompt queue", () => {
     // No leaked waiter: a later push must queue, not silently vanish.
     q.push(prompt("x"))
     expect(q.size()).toBe(1)
+  })
+
+  test("QUEUE-6: every external ingress notifies before a waiter receives it", async () => {
+    const events: string[] = []
+    const q = new ExternalPromptQueue({ onPush: () => events.push("push") })
+    const pending = q.next()
+    q.push(prompt("wake"))
+    expect(events).toEqual(["push"])
+    expect(await pending).toBe("wake")
+  })
+
+  test("QUEUE-7: a notification fault cannot drop an external prompt", async () => {
+    const q = new ExternalPromptQueue({
+      onPush: () => {
+        throw new Error("observer failed")
+      },
+    })
+    q.push(prompt("still-delivered"))
+    expect(await q.next()).toBe("still-delivered")
   })
 })

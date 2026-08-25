@@ -16,6 +16,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import { mkdtempSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import { asObjectiveAuthority } from "@/objective"
 import {
   buildObjectiveAuthority,
   encodeObjectiveSnapshot,
@@ -101,6 +102,32 @@ describe("RFC-03 C2 — objective persistence roundtrip", () => {
 
     // REVISION preserved EXACTLY: re-encoding the restored authority reproduces
     // the identical snapshot (revision is part of the DTO).
+    expect(encodeObjectiveSnapshot(fresh)).toEqual(snapshot)
+  })
+
+  test("bounded ProgressReceipt evidence persists without changing objective revision", async () => {
+    const auth = asObjectiveAuthority(buildObjectiveAuthority())
+    auth.set("receipt", { goal: "prove it", successCriteria: ["checked"] })
+    const before = auth.readDomain("receipt").revision
+    expect(
+      auth.recordProgressReceipt("receipt", {
+        attemptKey: '["receipt",1,0]',
+        objectiveRevisionBefore: before,
+        objectiveRevisionAfter: before,
+        turnOutcome: "completed",
+        criterionTransitions: [],
+        verifierReceiptRefs: ["receipt:check"],
+        sourceDigest: "sha256:abc",
+        remainingCriterionIds: [auth.get("receipt")?.successCriteria[0]?.id ?? "missing"],
+        recordedAt: 123,
+      }),
+    ).toBe(true)
+    expect(auth.readDomain("receipt").revision).toBe(before)
+    const snapshot = encodeObjectiveSnapshot(auth)
+    const fresh = asObjectiveAuthority(buildObjectiveAuthority({ restoreFrom: snapshot }))
+    expect(fresh.readDomain("receipt").progressReceipts).toEqual(
+      auth.readDomain("receipt").progressReceipts,
+    )
     expect(encodeObjectiveSnapshot(fresh)).toEqual(snapshot)
   })
 

@@ -121,6 +121,16 @@ export const runAgentInner = async (config: AgentConfig): Promise<AgentOutcome> 
     }
     return await runAgentTurnLoop(ctx)
   } finally {
+    // `ctx.finish` normally clears this holder. An uncaught loop error skips
+    // that normal terminal path, but the agent body has still settled: leaving
+    // a live turn here would permanently block every consumer that uses the
+    // shared activity truth (goal wake, steering, followers).
+    if (ctx.cfg.activeTurnRef !== undefined) {
+      ctx.cfg.activeTurnRef.current = {
+        currentTurn: null,
+        isInterrupted: ctx.cfg.activeTurnRef.current.isInterrupted,
+      }
+    }
     await diagnosticsHook?.dispose()
     // D12 — run the resource-DISPOSE teardown on BOTH the normal-completion AND
     // the throw paths. A mid-turn uncaught throw (e.g. a `SessionApprovalRequired`

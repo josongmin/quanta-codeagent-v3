@@ -44,6 +44,12 @@ import type {
   ObjectiveMutationCommand,
   PreparedObjectiveMutation,
 } from "./ports"
+import {
+  appendProgressReceipt,
+  MAX_PROGRESS_RECEIPTS,
+  normalizeProgressReceipt,
+  type ProgressReceipt,
+} from "./progress-receipt"
 import { createObjectiveCoreStore, type ObjectiveCore } from "./store"
 import type { Objective, ObjectivePort } from "./types"
 
@@ -350,6 +356,103 @@ const hydrateDomains = (
   }
 }
 
+const normalizeProgressReceipts = (
+  receipts: readonly ProgressReceipt[] | undefined,
+): readonly ProgressReceipt[] =>
+  Object.freeze(
+    (receipts ?? [])
+      .map(normalizeProgressReceipt)
+      .filter((receipt): receipt is ProgressReceipt => receipt !== null)
+      .slice(-MAX_PROGRESS_RECEIPTS),
+  )
+
+const hydrateProgressReceipts = (
+  progress: Map<string, readonly ProgressReceipt[]>,
+  domains: readonly ObjectiveDomainSnapshot[] | undefined,
+): void => {
+  for (const domain of domains ?? []) {
+    if (isNonEmptyString(domain.threadId) && domain.progressReceipts !== undefined) {
+      progress.set(domain.threadId, normalizeProgressReceipts(domain.progressReceipts))
+    }
+  }
+}
+
+const safeClockNow = (now: () => number): number => {
+  try {
+    const value = now()
+    return Number.isFinite(value) ? value : Date.now()
+  } catch (e) {
+    logger.warn(`objective.authority.clockNow: ${errMessage(e)}`)
+    return Date.now()
+  }
+}
+
+interface AuthoritySurfaceDeps {
+  readonly core: ObjectiveCore
+  readonly revisions: Map<string, number>
+  readonly progress: Map<string, readonly ProgressReceipt[]>
+  readonly revisionOf: (threadId: string) => number
+  readonly readDomain: (threadId: string) => ObjectiveDomainSnapshot
+  readonly prepare: ObjectiveAuthority["prepare"]
+  readonly commit: ObjectiveAuthority["commit"]
+  readonly restore: ObjectiveAuthority["restore"]
+  readonly restoreDomain: ObjectiveAuthority["restoreDomain"]
+  readonly system: (threadId: string, mutation: ObjectiveMutation) => Objective | null
+}
+
+const createAuthoritySurface = (deps: AuthoritySurfaceDeps): ObjectiveAuthority => ({
+  readDomain: deps.readDomain,
+  prepare: deps.prepare,
+  commit: deps.commit,
+  restore: deps.restore,
+  restoreDomain: deps.restoreDomain,
+  recordProgressReceipt: (threadId, receipt): boolean => {
+    if (!isNonEmptyString(threadId) || deps.core.get(threadId) === null) return false
+    const normalized = normalizeProgressReceipt(receipt)
+    if (normalized === null) return false
+    if (normalized.objectiveRevisionAfter !== deps.revisionOf(threadId)) return false
+    const existing = deps.progress.get(threadId) ?? []
+    if (existing.some((item) => item.attemptKey === normalized.attemptKey)) return false
+    deps.progress.set(threadId, appendProgressReceipt(existing, normalized))
+    return true
+  },
+  set: (threadId, init) =>
+    (deps.system(threadId, {
+      kind: "set",
+      goal: init?.goal,
+      ...(init?.successCriteria !== undefined ? { successCriteria: init.successCriteria } : {}),
+      ...(init?.criteria !== undefined ? { criteria: init.criteria } : {}),
+      ...(init?.budget !== undefined ? { budget: init.budget } : {}),
+    }) ?? deps.core.get(threadId)) as Objective,
+  get: (threadId) => deps.core.get(threadId),
+  updateStatus: (threadId, status) => deps.system(threadId, { kind: "updateStatus", status }),
+  addBlocker: (threadId, blocker) =>
+    deps.system(threadId, {
+      kind: "addBlocker",
+      reason: blocker?.reason,
+      waitingOn: blocker?.waitingOn,
+    }),
+  clearBlocker: (threadId, blockerId) => deps.system(threadId, { kind: "clearBlocker", blockerId }),
+  setNextActions: (threadId, actions) => deps.system(threadId, { kind: "setNextActions", actions }),
+  markCriterion: (threadId, criterionId, met) =>
+    deps.system(threadId, { kind: "markCriterion", criterionId, met }),
+  recordUsage: (threadId, used) =>
+    deps.system(threadId, {
+      kind: "recordUsage",
+      ...(used?.tokens !== undefined ? { tokens: used.tokens } : {}),
+      ...(used?.turns !== undefined ? { turns: used.turns } : {}),
+    }),
+  markUsageLimited: (threadId, untilEpochMs) =>
+    deps.system(threadId, { kind: "markUsageLimited", untilEpochMs }),
+  list: () => deps.core.list(),
+  toSnapshot: () => deps.core.toSnapshot(),
+  fromSnapshot: (snap) => {
+    deps.core.fromSnapshot(snap)
+    deps.revisions.clear()
+    for (const objective of deps.core.list()) deps.revisions.set(objective.threadId, 1)
+  },
+})
+
 /** Factory variant that adopts an existing core (rather than minting one). */
 const createObjectiveAuthorityWithCore = (
   core: ObjectiveCore,
@@ -358,19 +461,8 @@ const createObjectiveAuthorityWithCore = (
   const gateOn = opts?.gateOn === true
   const confirmationAvailable = opts?.confirmationAvailable !== false
   const nowFn = opts?.now ?? Date.now
-  const clockNow = (): number => {
-    try {
-      const t = nowFn()
-      return Number.isFinite(t) ? t : Date.now()
-    } catch (e) {
-      // Same fallback, but attributed: an injected clock that THROWS is a host
-      // wiring fault, and swallowing it made every timestamp silently drift to
-      // wall time with no trace of which seam broke.
-      logger.warn(`objective.authority.clockNow: ${errMessage(e)}`)
-      return Date.now()
-    }
-  }
   const revisions = new Map<string, number>()
+  const progress = new Map<string, readonly ProgressReceipt[]>()
   const revisionOf = (threadId: string): number => revisions.get(threadId) ?? 0
   const bump = (threadId: string): number => {
     const next = revisionOf(threadId) + 1
@@ -381,19 +473,26 @@ const createObjectiveAuthorityWithCore = (
   // per-thread snapshot verbatim + its EXACT revision (extracted to keep this
   // factory under the cognitive-complexity cap).
   hydrateDomains(core, revisions, opts?.restoreDomains)
+  hydrateProgressReceipts(progress, opts?.restoreDomains)
   const readDomain = (threadId: string): ObjectiveDomainSnapshot => ({
     threadId: isNonEmptyString(threadId) ? threadId : "",
     revision: revisionOf(threadId),
     state: isNonEmptyString(threadId) ? core.snapshotThread(threadId) : null,
+    progressReceipts: isNonEmptyString(threadId) ? (progress.get(threadId) ?? []) : [],
   })
   const route = (
     threadId: string,
     mutation: ObjectiveMutation,
     actor: ObjectiveActor,
   ): ApplyOutcome => {
-    const ctx: MutationContext = { actor, revision: revisionOf(threadId), now: clockNow() }
+    const ctx: MutationContext = { actor, revision: revisionOf(threadId), now: safeClockNow(nowFn) }
     const outcome = applyMutation(core, threadId, mutation, ctx)
-    if (outcome.applied) bump(threadId)
+    if (outcome.applied) {
+      // A replacement starts a new objective identity even if the thread id is
+      // reused; old evidence must never be projected into its judge context.
+      if (mutation.kind === "set") progress.delete(threadId)
+      bump(threadId)
+    }
     return outcome
   }
   // Legacy `ObjectivePort` surface commits as a trusted `system` actor.
@@ -437,6 +536,8 @@ const createObjectiveAuthorityWithCore = (
     if (!core.restoreThread(threadId, previous.state)) {
       return { ok: false, reason: "invalid", currentRevision: current }
     }
+    if (previous.progressReceipts === undefined) progress.delete(threadId)
+    else progress.set(threadId, normalizeProgressReceipts(previous.progressReceipts))
     bump(threadId)
     return { ok: true, revision: revisionOf(threadId), snapshot: readDomain(threadId) }
   }
@@ -453,48 +554,19 @@ const createObjectiveAuthorityWithCore = (
       threadId,
       Number.isFinite(snapshot.revision) && snapshot.revision >= 0 ? snapshot.revision : 1,
     )
+    progress.set(threadId, normalizeProgressReceipts(snapshot.progressReceipts))
     return true
   }
-  return {
+  return createAuthoritySurface({
+    core,
+    revisions,
+    progress,
+    revisionOf,
     readDomain,
     prepare,
     commit,
     restore,
     restoreDomain,
-    set: (threadId, init) =>
-      (system(threadId, {
-        kind: "set",
-        goal: init?.goal,
-        ...(init?.successCriteria !== undefined ? { successCriteria: init.successCriteria } : {}),
-        ...(init?.criteria !== undefined ? { criteria: init.criteria } : {}),
-        ...(init?.budget !== undefined ? { budget: init.budget } : {}),
-      }) ?? core.get(threadId)) as Objective,
-    get: (threadId) => core.get(threadId),
-    updateStatus: (threadId, status) => system(threadId, { kind: "updateStatus", status }),
-    addBlocker: (threadId, blocker) =>
-      system(threadId, {
-        kind: "addBlocker",
-        reason: blocker?.reason,
-        waitingOn: blocker?.waitingOn,
-      }),
-    clearBlocker: (threadId, blockerId) => system(threadId, { kind: "clearBlocker", blockerId }),
-    setNextActions: (threadId, actions) => system(threadId, { kind: "setNextActions", actions }),
-    markCriterion: (threadId, criterionId, met) =>
-      system(threadId, { kind: "markCriterion", criterionId, met }),
-    recordUsage: (threadId, used) =>
-      system(threadId, {
-        kind: "recordUsage",
-        ...(used?.tokens !== undefined ? { tokens: used.tokens } : {}),
-        ...(used?.turns !== undefined ? { turns: used.turns } : {}),
-      }),
-    markUsageLimited: (threadId, untilEpochMs) =>
-      system(threadId, { kind: "markUsageLimited", untilEpochMs }),
-    list: () => core.list(),
-    toSnapshot: () => core.toSnapshot(),
-    fromSnapshot: (snap) => {
-      core.fromSnapshot(snap)
-      revisions.clear()
-      for (const o of core.list()) revisions.set(o.threadId, 1)
-    },
-  }
+    system,
+  })
 }

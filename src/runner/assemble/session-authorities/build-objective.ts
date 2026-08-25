@@ -172,6 +172,9 @@ export const encodeObjectiveSnapshot = (port: ObjectivePort): PersistedObjective
       nextActions: [...obj.nextActions],
       createdAt: obj.createdAt,
       updatedAt: obj.updatedAt,
+      ...(dom.progressReceipts !== undefined && dom.progressReceipts.length > 0
+        ? { progressReceipts: dom.progressReceipts }
+        : {}),
     })
   }
   return { version: OBJECTIVE_SNAPSHOT_VERSION, threads }

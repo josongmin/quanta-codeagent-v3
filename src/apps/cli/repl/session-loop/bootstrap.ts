@@ -63,7 +63,12 @@ const buildPromptPlumbing = (deps: RunSessionLoopDeps, state: LoopStateHolder) =
   const { setup } = deps
   const { runtimeContext } = setup
 
-  const externalPromptQueue = new ExternalPromptQueue()
+  const externalPromptQueue = new ExternalPromptQueue({
+    // Independent ingress wins over a pending goal continuation. A real queued
+    // prompt starts a turn whose settlement re-arms the quiet wake; otherwise
+    // it remains visible to the controller's queued-input guard.
+    onPush: () => deps.goalWakeSlot?.current?.onActivity(),
+  })
   // ADR-0528 L2 (auto-reinject) — seed prompts BEFORE the interactive loop's
   // prompt-source race begins. One-shot never reads the queue (host only seeds
   // interactive). Empty/absent ⇒ no push (byte-identical).

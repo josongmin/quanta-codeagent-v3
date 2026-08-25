@@ -378,7 +378,15 @@ export const EventCustomSchema = z
 /* CALLER scrubs secrets — see DecisionEvent doc).                     */
 /* ------------------------------------------------------------------ */
 
-export const DecisionGateSchema = z.enum(["permission", "rule", "hook", "cap", "jail", "budget"])
+export const DecisionGateSchema = z.enum([
+  "permission",
+  "rule",
+  "hook",
+  "cap",
+  "jail",
+  "budget",
+  "objective",
+])
 export const DecisionOutcomeSchema = z.enum(["allow", "deny", "ask"])
 
 export const EventDecisionSchema = z

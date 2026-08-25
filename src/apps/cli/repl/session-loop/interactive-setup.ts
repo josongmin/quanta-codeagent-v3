@@ -7,7 +7,6 @@ import { injectSimulatedTurn, type LastTurnOutcome, REACTOR_ENV_FLAG } from "@/r
 import { gateOnStrict, logger, runtimeConfig } from "@/shared"
 import { readCliKnob } from "../../cli-knobs-accessor"
 import { startGoalWakeController } from "../../goal-continuation-hook"
-import { DEFAULT_IDLE_MS } from "../../idle-monitor"
 import type { ImageQueue } from "../../image-queue"
 import type { NotificationPort } from "../../notify"
 import { startReactorWatchBridge } from "../../reactor-watch-bridge"
@@ -117,6 +116,8 @@ export const wireInteractiveSetup = async (
       setLastUserInputAt(Date.now())
     },
     onLocalInput: () => goalWakeSlot?.current?.onActivity(),
+    onLocalActivity: () => goalWakeSlot?.current?.onActivity(),
+    onLocalInputSettled: () => goalWakeSlot?.current?.onLocalInputSettled(),
     rejectCounter: setup.rejectCounter,
     statusBar: setup.statusBar,
     ...(ux !== undefined ? { ux } : {}),
@@ -141,7 +142,6 @@ export const wireInteractiveSetup = async (
     activeTurnRef,
     externalPromptQueue,
     textInbox,
-    enqueueWithHeartbeat,
   })
 
   armGoalPill({ setup, closeStack, objectiveStore })
@@ -256,7 +256,6 @@ const armGoalWake = (args: {
   readonly activeTurnRef: AgentConfig["activeTurnRef"]
   readonly externalPromptQueue: ExternalPromptQueue
   readonly textInbox: TextInbox | undefined
-  readonly enqueueWithHeartbeat: EnqueueWithHeartbeat
 }): void => {
   const {
     setup,
@@ -266,18 +265,47 @@ const armGoalWake = (args: {
     activeTurnRef,
     externalPromptQueue,
     textInbox,
-    enqueueWithHeartbeat,
   } = args
   const goalWake =
     objectiveStore !== undefined
       ? startGoalWakeController({
           enabled: runtimeConfig().goalContinuationEnforce,
           threadId: setup.sessionId,
-          quietWindowMs: setup.idleMonitor.thresholdMs ?? DEFAULT_IDLE_MS,
+          quietWindowMs: resolveGoalQuietWindowMs(),
           readDomain: (tid) => asObjectiveAuthority(objectiveStore).readDomain(tid),
+          resumeAttempt: async (tid, attempt) => {
+            const domain = asObjectiveAuthority(objectiveStore).readDomain(tid)
+            const criteria = domain.state?.objective.successCriteria ?? []
+            const last = domain.progressReceipts?.at(-1)
+            externalPromptQueue.push({
+              text: buildPursuitContinuationPrompt(objectiveStore.get(tid)?.goal, {
+                verifiedCriterionIds: criteria
+                  .filter(
+                    (c) =>
+                      c.kind === "checked" &&
+                      c.met &&
+                      c.completion?.source === "verifier" &&
+                      c.completion.verifierResult.passed,
+                  )
+                  .map((c) => c.id),
+                remainingCriterionIds: criteria.filter((c) => !c.met).map((c) => c.id),
+                ...(last !== undefined
+                  ? { lastAttemptKey: last.attemptKey, lastTurnOutcome: last.turnOutcome }
+                  : {}),
+              }),
+              goalContinuation: {
+                threadId: attempt.threadId,
+                objectiveRevision: attempt.objectiveRevision,
+                attemptKey: attempt.attemptKey,
+              },
+            })
+          },
           probes: {
             objective: objectiveStore,
-            threadIdle: () => setup.idleMonitor.isIdle(),
+            // Goal pursuit has its own edge-triggered quiet timer. The UI idle
+            // monitor is a user-presence/suppression affordance and must not
+            // disable continuation when QUANTA_IDLE_SUPPRESS=0.
+            threadIdle: () => true,
             planModeActive: () => setup.planMode,
             // The runtime agent loop owns this holder from body start until the
             // body actually settles. This deliberately remains true after Ctrl+B
@@ -290,9 +318,8 @@ const armGoalWake = (args: {
             resume: async (tid) => {
               // SSOT pursuit discipline (anti-scope-shrink + verify-before-
               // complete + blocked-hysteresis), goal fenced as user data.
-              await enqueueWithHeartbeat(
+              externalPromptQueue.push(
                 buildPursuitContinuationPrompt(objectiveStore.get(tid)?.goal),
-                {},
               )
             },
           },
@@ -308,6 +335,10 @@ const armGoalWake = (args: {
       },
     })
   }
+}
+
+const resolveGoalQuietWindowMs = (): number => {
+  return runtimeConfig().goalQuietMs
 }
 
 /** `/goal` chip — keep the "🎯 <objective> · <elapsed>" status pill in sync

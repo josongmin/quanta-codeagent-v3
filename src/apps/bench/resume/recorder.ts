@@ -89,6 +89,8 @@ export interface TeeResumeReplayStoreOpts {
   writeReceipt(r: ResumeReceipt): Promise<void>
   /** Cached live AWS policy/KMS/lifecycle attestation from the gated backend. */
   securityReceipt?(): Promise<ResumeSecurityReceipt>
+  /** Existing durable zero-based segment count when reopening a resume key. */
+  initialCount?(): Promise<number>
 }
 
 /**
@@ -96,28 +98,49 @@ export interface TeeResumeReplayStoreOpts {
  * fail-closed receipt.
  *
  * - On every HEALTHY append, write a receipt `{latestSeq:<count>, degraded:false}`.
- * - On the FIRST secondary error, write ONE degraded receipt `{degraded:true}`
- *   and SUPPRESS all further receipt writes (the run stays degraded; we don't
- *   thrash the receipt or accidentally un-degrade it).
+ * - On the FIRST secondary/security error, persist a degraded receipt and never
+ *   write a healthy receipt again. A failed degraded-receipt PUT is retried on
+ *   later appends until it lands, preventing an older healthy receipt from
+ *   remaining the durable authority indefinitely.
  * - A receipt-write failure is itself best-effort — it must never kill the run.
  */
 export const teeResumeReplayStore = (opts: TeeResumeReplayStoreOpts): ReplayStore => {
   let degraded = false
+  let degradedReceiptPersisted = false
   let count = 0
+  let countInitialized = opts.initialCount === undefined
 
-  const safeWriteReceipt = async (receipt: ResumeReceipt): Promise<void> => {
+  const safeWriteReceipt = async (receipt: ResumeReceipt): Promise<boolean> => {
     try {
       await opts.writeReceipt(receipt)
+      return true
     } catch {
       // Receipt persistence is itself best-effort durability — a failed receipt
-      // PUT must never surface as a run failure. The next healthy append retries.
+      // PUT must never surface as a run failure.
+      return false
     }
   }
 
   const markDegraded = (): void => {
-    if (degraded) return // first error only; subsequent writes suppressed
     degraded = true
-    void safeWriteReceipt({
+  }
+
+  const initializeCount = async (): Promise<void> => {
+    if (countInitialized) return
+    countInitialized = true
+    try {
+      const initial = await opts.initialCount?.()
+      if (!Number.isSafeInteger(initial) || (initial as number) < 0)
+        throw new Error("invalid count")
+      count = initial as number
+    } catch {
+      markDegraded()
+    }
+  }
+
+  const persistDegraded = async (): Promise<void> => {
+    if (degradedReceiptPersisted) return
+    degradedReceiptPersisted = await safeWriteReceipt({
       key: opts.key,
       campaignId: opts.campaignId,
       instanceId: opts.instanceId,
@@ -131,24 +154,39 @@ export const teeResumeReplayStore = (opts: TeeResumeReplayStoreOpts): ReplayStor
 
   return {
     async append(record: RecordedInteraction): Promise<void> {
+      await initializeCount()
       await tee.append(record) // primary awaited; secondary best-effort (may markDegraded)
       count++
+      let security: ResumeSecurityReceipt | undefined
       if (!degraded) {
-        const security = await opts.securityReceipt?.()
-        await safeWriteReceipt({
-          key: opts.key,
-          campaignId: opts.campaignId,
-          instanceId: opts.instanceId,
-          latestSeq: count,
-          degraded: false,
-          updatedAt: new Date().toISOString(),
-          ...(security !== undefined ? { security } : {}),
-        })
+        try {
+          security = await opts.securityReceipt?.()
+        } catch {
+          markDegraded()
+        }
       }
+      if (degraded) return persistDegraded()
+      await safeWriteReceipt({
+        key: opts.key,
+        campaignId: opts.campaignId,
+        instanceId: opts.instanceId,
+        latestSeq: count,
+        degraded: false,
+        updatedAt: new Date().toISOString(),
+        ...(security !== undefined ? { security } : {}),
+      })
     },
     match: tee.match,
     load: tee.load,
-    save: tee.save,
+    async save(records): Promise<void> {
+      await tee.save(records)
+      count = records.length
+      countInitialized = true
+      // S3 save cannot delete a stale tail on shrink and bypasses append receipt
+      // sequencing. Make the resume key ineligible rather than claim continuity.
+      markDegraded()
+      await persistDegraded()
+    },
     reset: tee.reset,
   }
 }
@@ -173,12 +211,31 @@ export const maybeTeeResumeRecording = (
   env: Record<string, string | undefined>,
   localTrajectoryPath?: string,
 ): LLMPort => {
+  const store = maybeResumeReplayStore(env, localTrajectoryPath)
+  if (store === undefined) return llm
+
+  // Stamp the record `id` with the SAME canonicalizing hash (policy "exact",
+  // recordingLlmPort's default policy) so a cassette's id field is canonical too.
+  return recordingLlmPort({
+    inner: llm,
+    store,
+    hashRequest: (req) => resumeHashRequest(req, "exact"),
+  })
+}
+
+/** Build the one shared local+durable store used by both fresh recording and
+ * resume replay expansion. Undefined preserves the default-off path exactly. */
+export const maybeResumeReplayStore = (
+  env: Record<string, string | undefined>,
+  localTrajectoryPath?: string,
+  limit?: number,
+): ReplayStore | undefined => {
   const cfg = resolveResumeConfig(env)
-  if (!resumeActive(cfg)) return llm
+  if (!resumeActive(cfg)) return undefined
 
   const instanceId = env.QUANTA_BENCH_INSTANCE_ID
   if (instanceId === undefined || instanceId === "") {
-    return llm
+    return undefined
   }
 
   const key = resumeKey({ campaignId: cfg.campaignId, instanceId })
@@ -206,6 +263,8 @@ export const maybeTeeResumeRecording = (
   // when the caller omits it.
   const primary = jsonlReplayStore({
     path: localTrajectoryPath ?? join(benchHome(), "runs", benchRunId(), "trajectory.jsonl"),
+    hashRequest: resumeHashRequest,
+    ...(limit !== undefined ? { limit } : {}),
   })
 
   const store = teeResumeReplayStore({
@@ -220,15 +279,7 @@ export const maybeTeeResumeRecording = (
       if (receipt === undefined) throw new Error("resume security attestation missing")
       return receipt
     },
+    initialCount: async () => (await resume.segments.listSegments()).length,
   })
-
-  // Stamp the record `id` with the SAME canonicalizing hash (policy "exact",
-  // recordingLlmPort's default policy) so a cassette's id field is canonical too.
-  // Not load-bearing for matching — `match` rehashes candidates with the
-  // store-side `hashRequest` — but keeps the persisted id consistent.
-  return recordingLlmPort({
-    inner: llm,
-    store,
-    hashRequest: (req) => resumeHashRequest(req, "exact"),
-  })
+  return store
 }

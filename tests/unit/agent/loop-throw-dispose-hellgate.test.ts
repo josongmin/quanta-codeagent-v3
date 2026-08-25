@@ -127,6 +127,12 @@ describe("D12 — uncaught turn-loop throw still disposes session resources", ()
       sessionId: "d12-throw-dispose",
       sideAgentDaemons: daemons,
       bgShellRegistry: bgRegistry,
+      activeTurnRef: {
+        current: {
+          currentTurn: { kind: "main", turnId: "d12-active-turn" },
+          isInterrupted: false,
+        },
+      },
     } as unknown as AgentConfig
 
     // The uncaught approval throw must propagate OUT of runAgent (it skips
@@ -138,6 +144,7 @@ describe("D12 — uncaught turn-loop throw still disposes session resources", ()
       thrown = e
     }
     expect(thrown).toBeInstanceOf(FakeApprovalRequired)
+    expect(config.activeTurnRef?.current.currentTurn).toBeNull()
 
     // ── Fresh readback on the DISPOSE invariants, despite the throw:
     // (1) the daemon wake interval was CLEARED and the daemon is terminal.

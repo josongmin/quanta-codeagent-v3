@@ -24,13 +24,55 @@
  */
 
 import { asObjectiveAuthority } from "@/objective"
+import { runtimeConfig } from "@/shared"
+import { safeEmitDecision } from "@/stream"
 import type { Tool } from "@/tool"
 import { objectiveTools } from "@/tool/objective"
 import type { AgentConfig } from "../types"
+import {
+  createObjectiveCompletionAdmission,
+  type ObjectiveJudgeTelemetry,
+} from "./objective-completion-admission"
+
+const emitJudgeTelemetry = (
+  config: AgentConfig,
+  mode: "shadow" | "reject",
+  telemetry: ObjectiveJudgeTelemetry,
+): void => {
+  safeEmitDecision(config.decisionEmitter, {
+    type: "decision",
+    turn: config.run?.turn ?? 0,
+    kind: "objective",
+    outcome:
+      telemetry.outcome === "unavailable"
+        ? "ask"
+        : telemetry.outcome === "block"
+          ? "deny"
+          : "allow",
+    reason: `objective-judge:${telemetry.outcome}`,
+    metadata: {
+      mode,
+      evidenceDigest: telemetry.evidenceDigest,
+      ...(telemetry.outcome === "unavailable" ? {} : { reasonCodes: telemetry.reasonCodes }),
+      ...(config.llm.model !== undefined ? { model: config.llm.model } : {}),
+    },
+  })
+}
 
 /** Build the objective tool trio when `config.objective` is wired. */
 export const buildObjectiveBlock = (config: AgentConfig): Tool[] => {
   const port = config.objective
   if (port === undefined) return []
-  return objectiveTools(asObjectiveAuthority(port))
+  const mode = runtimeConfig().goalJudgeMode
+  // OFF intentionally passes no admission port: the legacy tool route is
+  // untouched and no evaluator state or LLM request is allocated.
+  const admission =
+    mode === "off"
+      ? undefined
+      : createObjectiveCompletionAdmission({
+          mode,
+          llm: config.llm,
+          onDecision: (telemetry) => emitJudgeTelemetry(config, mode, telemetry),
+        })
+  return objectiveTools(asObjectiveAuthority(port), admission)
 }

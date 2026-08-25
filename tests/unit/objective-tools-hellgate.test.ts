@@ -29,7 +29,8 @@ import type { AgentConfig, FeaturesConfig } from "@/agent/types"
 import type { LLMPort } from "@/llm"
 import { asObjectiveAuthority, createObjectiveStore, type ObjectivePort } from "@/objective"
 import type { PermissionContext } from "@/permission"
-import type { StreamPort } from "@/stream"
+import { __resetRuntimeConfig } from "@/shared"
+import type { DecisionEvent, StreamPort } from "@/stream"
 import { defaultTools, type Tool, type ToolContext, ToolRegistry } from "@/tool"
 import { objectiveTools } from "@/tool/objective"
 
@@ -146,6 +147,86 @@ describe("objective tools — wire hellgate (ADR-0402)", () => {
 // ─────────────────────────────────────────────────────────────────────────────
 
 describe("objective tools — schema validation hellgate (ADR-0402)", () => {
+  test("reject-mode judge emits sanitized objective telemetry through the decision port", async () => {
+    const prior = process.env.QUANTA_GOAL_JUDGE
+    process.env.QUANTA_GOAL_JUDGE = "reject"
+    __resetRuntimeConfig()
+    try {
+      const port = createObjectiveStore()
+      port.set("t", { goal: "never-leak-this-criterion", criteria: [{ text: "manual proof" }] })
+      const emitted: DecisionEvent[] = []
+      const llm: LLMPort = {
+        model: "judge-model",
+        async *stream() {
+          yield {
+            type: "text_delta",
+            delta:
+              '{"decision":"abstain","unmetCriterionIds":[],"evidenceRefs":[],"reasonCodes":["insufficient-evidence"]}',
+          }
+        },
+      }
+      const tools = buildObjectiveBlock(
+        baseCfg({
+          objective: port,
+          llm,
+          decisionEmitter: { emit: (event) => emitted.push(event) },
+        }),
+      )
+      const out = await drain(findTool(tools, "objective_update"), {
+        thread_id: "t",
+        op: { kind: "status", status: "completed" },
+      })
+      expect(out.ok).toBe(true)
+      expect(emitted).toHaveLength(1)
+      expect(emitted[0]).toMatchObject({
+        kind: "objective",
+        outcome: "allow",
+        reason: "objective-judge:abstain",
+        metadata: { mode: "reject", reasonCodes: ["insufficient-evidence"], model: "judge-model" },
+      })
+      expect(JSON.stringify(emitted)).not.toContain("never-leak-this-criterion")
+    } finally {
+      if (prior === undefined) delete process.env.QUANTA_GOAL_JUDGE
+      else process.env.QUANTA_GOAL_JUDGE = prior
+      __resetRuntimeConfig()
+    }
+  })
+
+  test("completion admission rejects before the authority commit", async () => {
+    const port = createObjectiveStore()
+    port.set("t", { goal: "g" })
+    const tools = objectiveTools(asObjectiveAuthority(port), {
+      admit: async () => ({ admitted: false, reasonCode: "judge-block", expectedRevision: 1 }),
+    })
+    const out = await drain(findTool(tools, "objective_update"), {
+      thread_id: "t",
+      op: { kind: "status", status: "completed" },
+    })
+    expect(out.ok).toBe(false)
+    expect(out.output).toContain("judge-block")
+    expect(port.get("t")?.status).toBe("active")
+  })
+
+  test("completion admission revision is bound into the authority CAS", async () => {
+    const port = createObjectiveStore()
+    port.set("t", { goal: "g" })
+    const authority = asObjectiveAuthority(port)
+    const tools = objectiveTools(authority, {
+      admit: async ({ threadId }) => {
+        const expectedRevision = authority.readDomain(threadId).revision
+        authority.addBlocker(threadId, { reason: "concurrent", waitingOn: "tool" })
+        return { admitted: true, expectedRevision }
+      },
+    })
+    const out = await drain(findTool(tools, "objective_update"), {
+      thread_id: "t",
+      op: { kind: "status", status: "completed" },
+    })
+    expect(out.ok).toBe(false)
+    expect(out.output).toContain("stale")
+    expect(port.get("t")?.status).toBe("blocked")
+  })
+
   test("objective_set requires non-empty goal", async () => {
     const port = createObjectiveStore()
     const tools = objectiveTools(asObjectiveAuthority(port))

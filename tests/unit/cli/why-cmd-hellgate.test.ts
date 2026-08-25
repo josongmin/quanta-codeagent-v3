@@ -68,7 +68,7 @@ const toolInvoke = (
 
 const decision = (
   turn_id: string,
-  gate: "permission" | "rule" | "hook" | "cap" | "jail" | "budget",
+  gate: "permission" | "rule" | "hook" | "cap" | "jail" | "budget" | "objective",
   outcome: "allow" | "deny" | "ask",
   reason: string,
   toolCallId: string,

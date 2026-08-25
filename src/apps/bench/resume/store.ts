@@ -25,7 +25,7 @@ import {
   segmentStore,
   writeReceipt,
 } from "@/shared/remote-store"
-import { attestedBackend, attestResumeSecurity } from "./security"
+import { attestedBackend, attestResumeSecurity, type ResumeSecurityAttestation } from "./security"
 
 export interface ResumeStoreConfig {
   readonly bucket: string
@@ -67,12 +67,12 @@ export const resumeStore = (cfg: ResumeStoreConfig, key: string): ResumeStore =>
     runAws,
     ...(cfg.security !== undefined ? { sse: "aws:kms", sseKmsKeyId: cfg.security.kmsKeyArn } : {}),
   })
-  let securityPromise: Promise<ResumeSecurityReceipt> | undefined
-  const ensureSecurity = (): Promise<ResumeSecurityReceipt> => {
+  let attestationPromise: Promise<ResumeSecurityAttestation> | undefined
+  const ensureAttestation = (): Promise<ResumeSecurityAttestation> => {
     if (cfg.security === undefined) {
       return Promise.reject(new Error("resume security configuration is required"))
     }
-    securityPromise ??= attestResumeSecurity(
+    attestationPromise ??= attestResumeSecurity(
       {
         bucket: cfg.bucket,
         keyPrefix: key,
@@ -83,10 +83,21 @@ export const resumeStore = (cfg: ResumeStoreConfig, key: string): ResumeStore =>
       },
       runAws,
     )
+    return attestationPromise
+  }
+  let securityPromise: Promise<ResumeSecurityReceipt> | undefined
+  const ensureSecurity = (): Promise<ResumeSecurityReceipt> => {
+    securityPromise ??= ensureAttestation().then((attestation) => ({
+      ...attestation,
+      // This claim is minted only here, at the composition root that installs
+      // `attestedBackend`; the AWS preflight alone cannot prove application
+      // path enforcement.
+      applicationPrefixEnforced: true,
+    }))
     return securityPromise
   }
   const backend =
-    cfg.security !== undefined ? attestedBackend(rawBackend, ensureSecurity) : rawBackend
+    cfg.security !== undefined ? attestedBackend(rawBackend, ensureAttestation) : rawBackend
   const segments = segmentStore(backend, key)
   const replayStore = s3ReplayStore({
     store: segments,

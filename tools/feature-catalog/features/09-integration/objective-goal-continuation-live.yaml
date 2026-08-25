@@ -16,9 +16,9 @@ surface_integration:
   cli: full
   web: missing
   method: audited
-  verified: "2026-07-13"
+  verified: "2026-08-25"
   evidence:
-    cli: "runs in the interactive CLI — surface-compose mints ONE objective authority and binds it to the `/goal` slash slot plus a shared live-turn holder. `startGoalWakeController` arms one quiet-window timer only from a goal mutation, restored active objective, or settled turn; at fire it rereads the same authority revision and all host quiescence guards before the existing continuation machine may enqueue. Local input cancels the pending wake, and a Ctrl+B body remains active until it really settles. Live proven by tests/e2e-pty/cli-goal-pursuit-e2e.test.ts: real CLI boot + PTY + replayed external queue reaches an actual agent turn, plus a foreground-settlement rail. QUANTA_GOAL_ENFORCE OFF allocates neither holder nor wake timer."
+    cli: "runs in the interactive CLI — surface-compose mints ONE objective authority and binds it to the `/goal` slash slot plus a shared live-turn holder. `startGoalWakeController` arms one goal-only quiet-window timer from a goal mutation, restored active objective, handled local command, or settled turn; at fire it rereads the same authority revision and all host quiescence guards before enqueue. Raw key activity cancels a pending wake before Enter, queued metadata is revision-checked again at dequeue, and the live-turn holder clears on both success and throw. Live proven by tests/e2e-pty/cli-goal-pursuit-e2e.test.ts: real CLI boot + PTY + replayed external queue reaches an actual agent turn, default-OFF and UI-idle-independent controls, partial-draft exclusion, plus a foreground-settlement rail. QUANTA_GOAL_ENFORCE OFF allocates neither holder nor wake timer."
     web: "CLI-only. The web/Tauri surface has no `/goal` slash slot and does not install the CLI wake controller; the objective itself reaches the web ObjectiveCard via the objective substrate, but pursuing-loop scheduling is not present on that surface."
 purpose: |
   Promotes the previously-DEAD idle goal-continuation machine
@@ -38,11 +38,13 @@ purpose: |
 
   2. QUIET-WINDOW WAKE — `session-loop` calls `startGoalWakeController` over
      that authority next to the reactor bridge. A goal mutation, restored
-     active goal, or real turn settlement starts ONE quiet-window timer; local
-     input cancels it. At fire the controller requires the exact captured
+     active goal, handled local command, or real turn settlement starts ONE
+     goal-only quiet-window timer; local key activity cancels it before Enter.
+     At fire the controller requires the exact captured
      objective revision and fresh host quiescence, then delegates to
      `runIdleContinuation`, which repeats the queue/turn/plan guards at the
-     enqueue boundary. The continuation carries the goal text + a
+     enqueue boundary. The queued continuation carries revision metadata and
+     is checked again at dequeue before an agent body starts. It carries the goal text + a
      verify-before-complete instruction. Gated by QUANTA_GOAL_ENFORCE: OFF
      creates no wake controller or live-turn holder ⇒ byte-identical to a
      session that never opted in.
@@ -53,25 +55,46 @@ purpose: |
      is minted for the CLI surface; `QUANTA_GOAL_ENFORCE=1` controls only whether
      the quiet-window controller pursues the recorded goal.
 
+  4. BOUNDED PROGRESS + COMPLETION EVIDENCE — each accepted turn captures the
+     exact session thread/revision and appends one text-free, size-bounded
+     receipt after settlement. Delayed receipts are rejected unless their
+     after-revision still equals the live authority revision; replacement and
+     restore normalize the bounded window. The next continuation receives only
+     verifier-backed criterion IDs, remaining IDs, and last-attempt metadata.
+     With `QUANTA_GOAL_JUDGE=shadow|reject`, an explicit model completion is
+     deterministically admitted when the current objective is already
+     blocker-free and derived complete from checked, passing verifier receipts;
+     manual/mixed criteria go through the bounded judge. `off` is intentionally
+     legacy-compatible and makes no judge request.
+
   Sibling to objective-budget-enforce: that entry gates the BUDGET half
   (`budget_limited` status suppresses continuation when a cap is exhausted);
   this entry wires the CONTINUATION half (the revision-fenced wake that re-issues the
   goal). Together they are the two live readers the objective substrate was
   built for. Slice fence: additive wiring in `src/apps/cli/repl/**`
-  (surface-compose / session-loop / dispatch) + `src/apps/cli/{goal-continuation-hook,slash/goal-cmd,status-pills}.ts`;
-  the pure machine in `src/objective/**` is unchanged (only now driven).
+  (surface-compose / session-loop / dispatch) +
+  `src/apps/cli/{goal-continuation-hook,slash/goal-cmd,status-pills}.ts` and the
+  existing ObjectiveAuthority persistence adapter; no second goal store exists.
 evidence:
   code:
     - src/objective/continuation.ts
     - src/objective/goal-wake-controller.ts
     - src/objective/pursuit-prompt.ts
+    - src/objective/progress-receipt.ts
+    - src/agent/tier1/objective-completion-admission.ts
     - src/apps/cli/goal-continuation-hook.ts
     - src/apps/cli/slash/goal-cmd.ts
     - src/apps/cli/repl/surface-compose.ts
     - src/apps/cli/repl/session-loop/interactive-setup.ts
     - src/apps/cli/repl/session-loop/interactive-loop.ts
+    - src/apps/cli/repl/session-loop/bootstrap.ts
+    - src/apps/cli/repl/external-prompt-queue.ts
+    - src/apps/cli/repl/objective-progress.ts
     - src/apps/cli/repl/goal-wake-signal.ts
+    - src/apps/cli/repl/prompt-pipeline.ts
+    - src/apps/cli/raw-line-reader/machine.ts
     - src/apps/cli/repl/session-loop-options.ts
+    - src/agent/loop/entry.ts
     - src/apps/cli/status-pills.ts
     - src/shared/runtime-config.ts
   adrs: [394]
@@ -81,6 +104,15 @@ evidence:
       - tests/unit/goal-continuation-ticker-hellgate.test.ts
       - tests/unit/goal-pursuit-prompt-hellgate.test.ts
       - tests/unit/status-pills-goal-chip-hellgate.test.ts
+      - tests/unit/apps/cli/goal-wake-hook.test.ts
+      - tests/unit/apps/cli/prompt-pipeline-hellgate.test.ts
+      - tests/unit/apps/cli/raw-line-reader-history.test.ts
+      - tests/unit/apps/cli/t06-external-prompt-queue-hellgate.test.ts
+      - tests/unit/agent/loop-throw-dispose-hellgate.test.ts
+      - tests/unit/agent/objective-completion-admission.test.ts
+      - tests/unit/apps/cli/objective-progress.test.ts
+      - tests/unit/objective/progress-receipt.test.ts
+      - tests/unit/objective/persistence-roundtrip.test.ts
     integration: []
     contract:
       - tests/e2e-pty/cli-goal-pursuit-e2e.test.ts
@@ -95,6 +127,22 @@ knobs:
       a fresh quiet window after a goal mutation or settled turn can enqueue one
       revision-fenced continuation until the goal is completed / paused /
       budget-limited.
+  - name: QUANTA_GOAL_QUIET_MS
+    where: src/shared/runtime-config-knobs/knobs-b.ts
+    default: '15000'
+    purpose: |
+      Quiet period for goal pursuit only. It is deliberately independent of
+      QUANTA_IDLE_MS and QUANTA_IDLE_SUPPRESS, which remain user-presence/UI
+      controls; disabling UI idle suppression must not disable an active goal.
+  - name: QUANTA_GOAL_JUDGE
+    where: src/agent/tier1/objective-completion-admission.ts
+    default: 'off'
+    purpose: |
+      Completion-review policy. `off` preserves legacy objective completion and
+      allocates no judge. `shadow` requests a bounded structured verdict but
+      always admits; `reject` blocks only a schema-verified `block` verdict.
+      Judge timeout, malformed output, and its three-failure circuit breaker
+      yield `abstain` behavior rather than an availability-based rejection.
   - name: QUANTA_PILL_GOAL
     where: src/apps/cli/status-pills.ts
     default: 'unset (ON)'
@@ -106,10 +154,40 @@ deliberate_hold: null
 notes: |
   aug-25 replaces the polling host trigger with an event-driven, revision-fenced
   quiet-window controller. The wake controller is not a second objective store:
-  it reads the authority `/goal` mutates, cancels on all local prompt lines,
-  shares the true runtime live-turn holder, and rechecks authority plus host
-  quiescence before enqueue. Its attempt reservation prevents duplicate
-  enqueue; failed enqueue releases the claim for an explicit later retry.
+  it reads the authority `/goal` mutates, cancels on raw local keys as well as
+  submitted lines, shares the true runtime live-turn holder, and rechecks
+  authority plus host quiescence before enqueue. Revision metadata survives the
+  external queue and is checked again at dequeue. The live-turn holder clears in
+  the agent entry `finally`, including uncaught loop errors. Its attempt
+  reservation prevents duplicate enqueue; failed enqueue releases the claim for
+  an explicit later retry. Turn progress receipts are bounded to 16 packets and
+  32 short refs per list, survive the existing session objective snapshot, and
+  are rejected on a stale live revision rather than being attached to a newer
+  objective state; duplicate attempt keys are idempotently rejected rather than
+  consuming the bounded evidence window.
+  Host quiescence is fail-closed at both controller fire and core launch:
+  throwing idle probes read as not-idle, while throwing plan/turn/queue/mailbox/
+  ephemeral probes read as blocking rather than silently launching a wake.
+
+  Completion review is agent-owned: no LLM dependency enters `@/objective` or
+  `@/tool`. The optional judge receives a 32KB, delimited objective/receipt
+  projection — never criterion prose, transcript, or tool-output text — and is
+  constrained to 16KB of `{block|abstain}` JSON. A block is admitted only when
+  every cited criterion is currently unmet and every supplied evidence ref is
+  present in the projection. Timeout aborts the provider stream; cache keys use
+  SHA-256, expired entries refresh, and the failure circuit retries after cooldown.
+  All passing checked verifier receipts take the
+      deterministic path and bypass the judge. In shadow mode the verdict is
+      observation only; reject blocks only a real `block`, while malformed,
+      timed-out, or circuit-open calls fail open.
+      When the existing developer decision emitter is wired, each actual judge
+      result emits `kind:"objective"` with only policy mode, model, SHA-256
+      evidence digest, and closed-taxonomy reason codes; no criterion text,
+      transcript, source digest, or evidence references enter telemetry.
+      Every admission result carries the exact objective revision it judged;
+      `objective_update(status=completed)` binds that revision into the
+      authority's existing mutation CAS, so a concurrent objective change during
+      deterministic or model judgment is rejected as stale before completion.
 
   jul-13 (Codex multi_agent / goal-pursuit parity). This is the "Promotion for
   the continuation half" that objective-budget-enforce's notes flagged as
@@ -125,7 +203,8 @@ notes: |
   status-pills-goal-chip-hellgate pins the chip render/hide; the PTY e2e
   (cli-goal-pursuit-e2e) boots the REAL CLI and drives `/goal` so the surface
   mint+share+edge wake+external queue+actual agent turn is proven live (not a
-  stub); its foreground rail proves re-arm happens only after body settlement.
+  stub); its controls prove default-OFF, UI-idle independence, partial-draft
+  exclusion, and re-arm only after foreground body settlement.
 
   `/goal` registration: listed in BUILTINS via SESSION_SLASH_COMMANDS
   (category "session"), describe present. It is deliberately NOT in the

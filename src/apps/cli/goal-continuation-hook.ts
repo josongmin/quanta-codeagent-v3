@@ -25,6 +25,7 @@ import {
   type ContinuationDeps,
   ContinuationSemaphore,
   createGoalWakeController,
+  type GoalWakeAttempt,
   runIdleContinuation,
 } from "@/objective"
 
@@ -63,6 +64,7 @@ export interface GoalContinuationTicker {
 export interface GoalWakeLifecycle {
   onGoalMutation(): void
   onActivity(): void
+  onLocalInputSettled(): void
   onTurnSettled(): void
   stop(): void
 }
@@ -73,11 +75,18 @@ export interface StartGoalWakeOpts {
   readonly probes: GoalContinuationProbes
   /** Revisioned projection from the same authority `/goal` mutates. */
   readonly readDomain: (threadId: string) => import("@/objective").ObjectiveDomainSnapshot
-  /** The same user-presence quiet threshold the host exposes in its UI. */
+  /** Goal-specific quiescence duration, independent of UI presence handling. */
   readonly quietWindowMs: number
+  /** Optional typed queue hand-off. The CLI uses this to retain the captured
+   * revision through dequeue; legacy hosts may keep the plain resume sink. */
+  readonly resumeAttempt?: (threadId: string, attempt: GoalWakeAttempt) => Promise<void>
   readonly setTimeoutFn?: (fn: () => void, ms: number) => ReturnType<typeof setTimeout>
   readonly clearTimeoutFn?: (handle: ReturnType<typeof setTimeout>) => void
 }
+
+/** Goal pursuit's own quiet period. It is intentionally independent of the
+ * UI idle-suppression window (`QUANTA_IDLE_MS`). */
+export const DEFAULT_GOAL_QUIET_MS = 15_000
 
 const DEFAULT_INTERVAL_MS = 15_000
 
@@ -120,8 +129,34 @@ export const startGoalWakeController = (opts: StartGoalWakeOpts): GoalWakeLifecy
       !continuationDeps.queuedInputPending(id) &&
       !continuationDeps.mailboxInputPending(id) &&
       !continuationDeps.isEphemeral(id),
-    enqueue: async () => {
-      await runIdleContinuation(threadId, continuationDeps)
+    enqueue: async (attempt) => {
+      const guardedDeps: ContinuationDeps = {
+        ...continuationDeps,
+        resume: async (id) => {
+          // `runIdleContinuation` rechecks goal status. This additional exact
+          // revision fence closes active→active edits between timer fire and
+          // queue hand-off; the CLI keeps the same metadata to recheck at
+          // dequeue immediately before the agent body starts.
+          const current = opts.readDomain(id)
+          if (
+            current.state === null ||
+            current.state.objective.status !== "active" ||
+            current.revision !== attempt.objectiveRevision
+          ) {
+            throw new Error("goal wake became stale before queue hand-off")
+          }
+          if (opts.resumeAttempt !== undefined) {
+            await opts.resumeAttempt(id, attempt)
+            return
+          }
+          await opts.probes.resume(id)
+        },
+      }
+      const outcome = await runIdleContinuation(threadId, guardedDeps)
+      // A second guard can reject after the controller's fire-time decision.
+      // Treat that as a rejected enqueue so the attempt reservation releases
+      // rather than silently consuming a retry opportunity.
+      if (!outcome.launched) throw new Error(`goal wake not launched: ${outcome.skipReason}`)
     },
   })
 
@@ -137,6 +172,7 @@ export const startGoalWakeController = (opts: StartGoalWakeOpts): GoalWakeLifecy
   return {
     onGoalMutation: resetForNextCheckpoint,
     onActivity: () => controller.onActivity(),
+    onLocalInputSettled: resetForNextCheckpoint,
     onTurnSettled: resetForNextCheckpoint,
     stop: () => controller.stop(),
   }

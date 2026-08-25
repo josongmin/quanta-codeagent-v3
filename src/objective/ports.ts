@@ -22,6 +22,7 @@
 
 import type { ObjectiveDomainSnapshot } from "./model"
 import type { ObjectiveActor, ObjectiveMutation } from "./mutations"
+import type { ProgressReceipt } from "./progress-receipt"
 import type { ObjectivePort } from "./types"
 
 /**
@@ -111,6 +112,8 @@ export interface ObjectiveAuthority extends ObjectivePort {
    * `restore` there is NO CAS check — it is a durable-resume load, not an undo.
    */
   restoreDomain(snapshot: ObjectiveDomainSnapshot): boolean
+  /** Append a validated bounded turn-evidence packet without changing objective revision. */
+  recordProgressReceipt(threadId: string, receipt: ProgressReceipt): boolean
 }
 
 /**

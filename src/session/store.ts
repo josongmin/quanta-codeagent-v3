@@ -298,6 +298,24 @@ const persistedObjectiveBudgetSchema = z.object({
   maxTurns: z.number().finite().optional(),
   turnsUsed: z.number().finite(),
 })
+// Mirrors the objective-domain receipt bounds without importing that sibling
+// slice across the session fence. Decode fails closed before a hostile session
+// can inflate the in-memory objective authority.
+const MAX_PERSISTED_PROGRESS_RECEIPTS = 16
+const MAX_PERSISTED_PROGRESS_REFS = 32
+const MAX_PERSISTED_PROGRESS_REF_LENGTH = 512
+const progressRefSchema = z.string().min(1).max(MAX_PERSISTED_PROGRESS_REF_LENGTH)
+const persistedProgressReceiptSchema = z.object({
+  attemptKey: progressRefSchema,
+  objectiveRevisionBefore: z.number().int().nonnegative(),
+  objectiveRevisionAfter: z.number().int().nonnegative(),
+  turnOutcome: z.enum(["completed", "aborted", "error", "backgrounded"]),
+  criterionTransitions: z.array(progressRefSchema).max(MAX_PERSISTED_PROGRESS_REFS),
+  verifierReceiptRefs: z.array(progressRefSchema).max(MAX_PERSISTED_PROGRESS_REFS),
+  sourceDigest: progressRefSchema.optional(),
+  remainingCriterionIds: z.array(progressRefSchema).max(MAX_PERSISTED_PROGRESS_REFS),
+  recordedAt: z.number().finite().nonnegative(),
+})
 const persistedObjectiveThreadSchema = z.object({
   threadId: z.string().min(1),
   revision: z.number().int().nonnegative(),
@@ -311,6 +329,10 @@ const persistedObjectiveThreadSchema = z.object({
   nextActions: z.array(z.string()),
   createdAt: z.number().finite(),
   updatedAt: z.number().finite(),
+  progressReceipts: z
+    .array(persistedProgressReceiptSchema)
+    .max(MAX_PERSISTED_PROGRESS_RECEIPTS)
+    .optional(),
 })
 const objectiveSnapshotSchema = z.object({
   version: z.literal(OBJECTIVE_SNAPSHOT_VERSION),

@@ -60,14 +60,15 @@ export const MAX_WORKTREE_LOCK_RETRIES = 5
 export const WORKTREE_LOCK_BACKOFF_MS = 50
 
 /** True only for TRANSIENT git LOCK-contention failures — a concurrent
- *  `git worktree add` / index write briefly held a repo lock. These are the
+ *  `git worktree add` / index write briefly held a repo lock or was publishing
+ *  the worktree admin directory. These are the
  *  ONLY failures we retry; any other non-zero exit (bad ref, branch exists for
  *  a different worktree, disk full, …) is a real error and must fail
  *  immediately, NOT be retried. Matches the stderr/stdout git emits for the
  *  lock race: `index.lock`, `worktrees/<name>/locked`, "already locked",
  *  "Unable to create '...lock'". */
 export const isTransientWorktreeLockError = (stderr: string): boolean =>
-  /index\.lock|worktrees?\/[^\s]*\/locked|already locked|unable to create.*\.lock|cannot lock ref/i.test(
+  /index\.lock|worktrees?\/[^\s]*\/locked|already locked|unable to create.*\.lock|cannot lock ref|failed to read .*\.git\/worktrees\/[^/\s]+\/commondir/i.test(
     stderr,
   )
 

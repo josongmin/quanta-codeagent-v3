@@ -54,7 +54,7 @@ import type { MetricsRegistry } from "./port"
 
 /** Closed `kind` taxonomy — mirrors the `decision` arm of `AgentEvent` in
  *  `@/stream/types.ts`. Keep in lock-step: a new kind there MUST extend here. */
-type DecisionKind = "permission" | "rule" | "hook" | "cap" | "jail" | "budget"
+type DecisionKind = "permission" | "rule" | "hook" | "cap" | "jail" | "budget" | "objective"
 
 /** Closed `outcome` taxonomy — mirrors the same `decision` arm. */
 type DecisionOutcome = "allow" | "deny" | "ask"
