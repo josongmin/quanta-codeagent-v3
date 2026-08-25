@@ -1,60 +1,113 @@
-# GOAL-04 — turn settlement: 실제 usage 정산, receipt-before-persist, outcome SSOT
+# GOAL-04 — Attributed turn settlement and durable outcome ordering
 
-**Priority:** P0 · **Depends on:** GOAL-03 · **크기:** 40+ tool-use, main-direct
+**Priority:** P0 · **Depends on:** GOAL-03 · **Owner:** runtime turn transaction
 
-## 목적
-objective budget을 모델 자기보고가 아니라 host가 측정한 실제 token/turn으로 정산하고, progress receipt를 persistTurn **앞**에서
-authority에 commit해 "완료 turn 직후 종료해도 마지막 receipt가 있는" 상태를 만든다. outcome 분류는 기존 stop taxonomy를 재사용한다.
+**Receipt:** docs/plans/aug-25-goal-v2/receipts/GOAL-04.yaml
 
-## 작업명세
-### 파일
-- `src/host/runtime/internal/context-binding/turn-runner.ts` (`runRuntimeTurn`)
-  - 인자 `objectiveAttempt?: { threadId; objectiveId; objectiveRevision; attemptId; source: "goal-continuation" | "foreground" }`.
-  - 순서: `runAgent` → (GOAL-03) 소스 digest 재비교 → `settleAttempt` commit → `buildObjectiveSnapshotProvider`로 **정산 후** snapshot → `persistTurn`.
-  - persist 실패: `authority.restore(prior, settledRevision)`(CAS) → 실패면 `decision-counter` critical + throw(세션 계속 진행 금지).
-- `src/objective/core-store/*` `settleAttempt` 핸들러(GOAL-01에서 타입만):
-  ```ts
-  interface ObjectiveAttemptSettlement {
-    objectiveId: string; attemptId: string; startedRevision: number
-    tokensUsed: number; turnsUsed: 1; outcome: ProgressTurnOutcome; executionMode: "foreground" | "background"
-    criterionIdsBefore: readonly string[]; verifierReceiptIdsBefore: readonly string[]; recordedAt: number }
-  ```
-  authority: objectiveId 일치, attemptId 중복 거절, budget tokens/turns 증가(1회), transition/verifier delta 계산, `appendProgressReceipt`, revision +1. actor `system`만.
-- usage 측정: `args.base.budgetMeter`(`context-binding/base.ts:339`) `snapshot()` before/after delta. meter 부재 시 agent 이벤트 accumulator fallback(테스트/legacy만). goal enabled면 meter 필수 — composition invariant(`goal-compose-wiring-hellgate`).
-  **선행 측정**: OpenAI/Anthropic 어댑터의 usage 이벤트에서 reasoning token이 output에 포함되는지 cassette 1개씩 확인 후 합산식 고정(이중합산 금지).
-- outcome: `src/agent/stop-category.ts:522 stopCategoryForReason` 재사용. `ProgressTurnOutcome`을 `completed | aborted | refusal | budget_exhausted | usage_limited | awaiting_approval | max_turns | error`로 확장. `executionMode` 분리.
-- `src/apps/cli/repl/objective-progress.ts` — `finishObjectiveProgress` 삭제(runtime으로 이동). `beginObjectiveProgress`는 `objectiveAttempt` 생성기로 축소:
-  attemptId = `activeTurnRef.current.currentTurn.turnId`(continuation은 queued attemptKey), 시간은 injected clock. `Date.now()` 0회.
-- `src/apps/cli/repl/session-loop/interactive-loop.ts` — 199-216·267의 finish 호출 제거; bg/fg 모두 runtime이 정산. `objectiveAttempt`를 dispatch 인자로 전달.
-- foreground 일반 질문: settlement는 항상 commit하되(비용은 objective 비용) receipt는 `criterionTransitions`·`verifierReceiptRefs`가 비고 outcome이 completed면 **생략**(retry/hysteresis attempt 카운트에 안 들어감). 기준을 코드 주석 SSOT로.
-- 하드캡은 **GOAL-06 소유**(knob 정의·`budget_limited` 파생·RED 모두). 이 티켓은 `turnsUsed` 정확 카운트만 보장한다.
-- 기존 task budget 프롬프트 연결: `src/agent/budget/task-budget.ts:89 renderTaskBudgetBlock`에 objective budget(tokens/turns used/max)을 입력으로 합쳐 **한 블록**으로 렌더. 두 번째 budget renderer 금지.
-- `src/objective/pursuit-prompt.ts:39,60` — 내부 `lastAttemptKey`를 모델에 노출하지 않음(제거). `lastTurnOutcome`·verified/remaining ID만 유지. `goal-pursuit-prompt-hellgate.test.ts` 갱신.
+## Purpose
 
-## RED
-`tests/unit/objective/progress-receipt.test.ts`, `persistence-roundtrip.test.ts`, 신규 `tests/unit/objective/settle-attempt.test.ts`, `tests/unit/host/turn-runner-objective-settlement.test.ts`, `tests/unit/apps/cli/objective-progress.test.ts` 축소
-1. 모델이 usage 도구를 0회 호출해도 turn 후 `budget.tokensUsed > 0`, `turnsUsed === 1`.
-2. 같은 attemptId로 두 번 settle → 두 번째 거절, revision 불변.
-3. objectiveId 불일치(turn 중 edit) → settle 거절, 새 objective의 receipt 0.
-4. persistTurn이 throw → authority가 settle 전 revision으로 복귀, receipt 없음.
-5. persist된 snapshot(`SavePayload.objectiveSnapshot`)에 **그 turn의 receipt가 포함**됨(before: 미포함).
-6. verifierReceiptIdsBefore에 있던 receipt는 `verifierReceiptRefs`에 없음(delta만).
-7. attemptId가 wall-clock에 의존하지 않음(clock 두 값으로 동일 key).
-8. 일반 foreground 질문(objective delta 0, completed) → receipt 미생성, 비용은 증가.
-9. outcome 매핑: StopReason 전값 → ProgressTurnOutcome `Record` + drift-guard.
-10. backgrounded turn → `executionMode:"background"` receipt 1개(fg 경로 0개).
-11. 프롬프트 스냅샷에 `attemptKey`/`foreground:` 문자열 0(red-on-injection: 노출 복원 mutant에서 RED).
-12. `renderTaskBudgetBlock` 출력에 objective budget 포함, 별도 렌더 함수 export 0(arch grep).
-13. red-on-injection: settle→persist 순서를 뒤집은 mutant에서 테스트 5 RED.
+Charge only explicitly attributed goal work, durably reserve an attempt before paid execution, settle every terminal path once, and persist enough uncertainty state to prevent crash/restart replay.
+
+## Attribution contract
+
+Runtime input carries:
+
+    objectiveAttempt?: {
+      threadId: string
+      objectiveId: string
+      startedRevision: number
+      attemptId: string
+      provenance: "autonomous-continuation" | "user-requested-goal-work"
+      executionMode: "foreground" | "background"
+    }
+
+- Ordinary foreground chat has no objectiveAttempt, incurs no objective tokens/turns, and writes no progress receipt.
+- /goal verify is verifier work, not an agent turn; it consumes verifier resource limits but no model-turn budget. Only the explicit /goal work front door (and its typed web equivalent) may mint user-requested-goal-work; plain chat is never classified heuristically.
+- Autonomous wake turns use autonomous-continuation.
+- Objective budget turnsUsed counts durable starts from both attributed provenance classes. A separate autonomousTurnsStarted count increments only autonomous-continuation; GOAL-06 product cap reads that count.
+- startedRevision is audit evidence, not an equality CAS: legitimate in-turn mutations may advance revision.
+- Settlement is bound to objectiveId, attemptId, and the active turn claim. GOAL-07 adds sessionEpoch to the claim.
+- If pause happens during the turn, cost is still recorded for the same objective but no re-arm occurs. GOAL-02 rejects replace/clear while the durable attempt is unsettled.
+
+## Two-phase atomic state owner
+
+Refactor authority dispatch so beginAttempt and settleAttempt receive combined ObjectiveAuthorityState containing core, attempts, and progress. Do not commit budget, attempt state, and receipt through separate public writers.
+
+beginAttempt binds objectiveId, attemptId, provenance, ordinal, claim, revision, and sessionEpoch when available. It reserves one objective turn, increments autonomousTurnsStarted only for autonomous provenance, records status started, and advances revision exactly once. Persist this start through the existing session snapshot/journal before invoking a paid provider.
+
+Settlement contains actual token delta, normalized stop outcome, criterion/verifier IDs before the turn, completion deltas, and injected-clock time. Authority:
+
+1. Rejects duplicate attemptId or mismatched objective/claim.
+2. Requires a matching durable started attempt and never debits the turn twice.
+3. Applies measured token usage and terminal status exactly once.
+4. Computes criterion/verifier deltas from authority state.
+5. Appends one progress receipt for the attributed terminal attempt.
+6. Advances revision once.
+
+## Runtime order
+
+In runRuntimeTurn:
+
+1. Validate the host claim, commit beginAttempt, and durably persist started before provider execution.
+2. Snapshot BudgetMeter and pre-turn evidence.
+3. Run the agent inside a terminal-normalization boundary; throw, abort, refusal, approval wait, and provider errors become typed outcomes.
+4. Reconcile verifier freshness. Reconcile throw/CAS contention becomes typed unavailable/freshness-unresolved and never skips settlement.
+5. In one finally-style terminal path, commit settleAttempt exactly once.
+6. Build and persist the post-settlement turn/session snapshot.
+7. Emit checkpoint projection; only then may wake evaluate again.
+
+Move this logic to a focused objective-settlement helper so turn-runner and shell-adjacent files do not breach god-function/module ratchets.
+
+## Usage and failure rules
+
+- BudgetMeter before/after delta is authoritative. Goal composition fails at boot if it is absent.
+- Event accumulation is test/legacy compatibility only and cannot enforce a production objective budget.
+- Pin OpenAI and Anthropic cassette expectations for input, output, cached, and reasoning token accounting; avoid double-counting reasoning tokens.
+- Reuse renderTaskBudgetBlock for task + objective budget. No second budget prompt/render owner.
+- A persisted started attempt is never rolled back or refunded after provider execution may have begun. If terminal persistence fails, leave the attempt started/settlement_uncertain, durably mark the session fail-stopped when possible, and reject further turns.
+- On restore, orphaned started/settlement_uncertain attempts consume their turn/autonomous slot, are never automatically replayed, and suppress re-arm until recovery marks them abandoned or an operator starts a new objective generation.
+- Never claim transcript/tool/file side effects were rolled back.
+- Shadow judge, if enabled, is registered in the session task lifecycle, metered separately, timed out, canceled, and awaited on disposal.
+
+## RED rails
+
+1. Ordinary foreground question leaves objective tokens, turns, and receipts unchanged.
+2. Attributed foreground goal work and autonomous continuation each charge exactly once.
+3. Attributed foreground goal work does not increment the autonomous hard-cap count.
+4. /goal verify charges no agent turn and obeys verifier resource budget.
+5. Plain goal-related chat remains unattributed; /goal work mints user-requested provenance.
+6. Provider is not called until started attempt persistence succeeds.
+7. Same attemptId begin/settle replay rejects without a second debit.
+8. Replace/clear during a started attempt rejects with attempt-in-flight; after cancellation/settlement, edit cannot inherit its receipt.
+9. Pause during a turn records cost but prevents re-arm.
+10. Agent throw, abort, approval wait, and reconcile failure all settle/persist one typed outcome.
+11. Crash after start persist, during provider call, or after response-before-settle leaves a non-replayable slot after restart.
+12. Terminal persist failure does not refund the start; restart stays fail-stopped/uncertain.
+13. Missing production BudgetMeter fails composition.
+14. Verifier deltas include only IDs created during this attempt.
+15. Every StopReason maps exhaustively to one ProgressTurnOutcome.
+16. Prompt contains no raw attempt key or internal claim.
+17. Moving begin persistence after provider or settlement after terminal persistence makes dedicated mutants red.
 
 ## E2E
-- `tests/integration/goal-continuation-live-e2e.test.ts`: continuation 1회 후 세션 kill → 재기동 → `/goal`이 `last attempt`와 `budget: 1/N turns` 표시.
-- PTY: `/goal budget --max-turns=2` → 2회 wake 후 `budget_limited`, 3번째 wake 0(quiet 3배 대기).
-- `tests/integration/objective-budget-enforce-e2e-hellgate.test.ts` 갱신(모델 recordUsage 기반 → 실측 기반).
 
-## Proof rails
-GOAL-03 rail + `bun test tests/unit/host tests/integration/objective-budget-enforce-e2e-hellgate.test.ts tests/integration/objective-usage-limited-429-real-loop-e2e.test.ts`.
+- Autonomous attempt at each crash point, process restart: started slot remains consumed and agent body is not replayed.
+- Unrelated chat while goal active: no objective budget movement.
+- User-requested goal work: budget moves once and receipt provenance is foreground.
+- Terminal persist failure: next input and restart auto-rearm are rejected by durable uncertain/fatal state.
 
-## 함정
-- `objective-usage-limit-wire.ts`(429→usage_limited)는 별도 기계 — settlement가 이걸 덮어쓰지 않게 `markUsageLimited`는 그대로 system actor 유지.
-- `turn-runner.ts`는 217줄, god-fn 150 라쳇: 정산은 `objective-settlement.ts` helper로.
+## Verification
+
+    bun test tests/unit/objective/attempt-lifecycle.test.ts tests/unit/objective/progress-receipt.test.ts
+    bun test tests/unit/host/turn-runner-objective-settlement.test.ts tests/unit/agent
+    bun test tests/integration/goal-continuation-live-e2e.test.ts
+    bun test tests/unit/objective-budget-enforce-e2e-hellgate.test.ts
+    bun run typecheck
+    bun run lint:debt
+
+## Stop conditions
+
+- Budget/attempt/progress require independently writable public stores.
+- Production enforcement uses inferred/self-reported usage.
+- A paid attempt can execute before its durable start or be refunded after uncertainty.
+- A generic foreground turn is charged merely because a goal exists.

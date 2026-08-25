@@ -1,65 +1,103 @@
-# GOAL-03 — verifier runtime: argv runner, source digest, batch commit
+# GOAL-03 — Read-only verifier runtime and source-evidence reconciliation
 
-**Priority:** P0 · **Depends on:** GOAL-02 · **크기:** 40+ tool-use, main-direct
+**Priority:** P0 · **Depends on:** GOAL-02 · **Owner:** verifier host adapter
 
-## 목적
-checked criterion을 실제로 실행·검증하는 production 경로를 만든다(현재 `unsupportedCheckExecutionPort`, C5 PARKED).
-passed는 실행기가 exit code로 계산하고, receipt는 verifier capability만 발급하며, 소스가 바뀌면 verified가 stale로 돌아간다.
+**Receipt:** docs/plans/aug-25-goal-v2/receipts/GOAL-03.yaml
 
-## 작업명세
-### 파일
-- 신규 `src/objective/criteria/ports.ts` (objective slice — runtime/tool import 금지, `objective-slice-boundary.test.ts`가 잡음)
-  ```ts
-  export interface ObjectiveCheckRunner {
-    run(input: { argv: readonly string[]; cwd: string; timeoutMs: number; signal?: AbortSignal }): Promise<{
-      exitCode: number | null; timedOut: boolean; stdoutDigest: string; stderrDigest: string; durationMs: number }>
-  }
-  export interface WorkspaceEvidencePort { capture(cwd: string): Promise<{ sourceDigest: string; capturedAt: number }> }
-  export interface VerificationBatch {
-    objectiveId: string; expectedRevision: number; sourceDigest: string
-    results: readonly { criterionId: string; checkId: string; exitCode: number | null; timedOut: boolean; durationMs: number }[]
-  }
-  ```
-- `src/runtime/shell.ts` — `runShell(command)`은 `["bash","-lc",cmd]`를 만든다. **문자열 join 금지.** 공통부(env scrub `resolveShellEnv`, sandbox slot wrap `getShellSandbox()`, perCallWrap, timeout/kill, 출력 accumulator)를
-  `runArgv(argv: readonly string[], options)`로 추출하고 `runShell`은 `runArgv(["bash","-lc",command], …)`를 호출(byte-identical 유지 — 기존 shell 테스트가 paired control).
-- 신규 `src/host/runtime/objective-verifier-wire.ts`
-  - `createObjectiveCheckRunner({ workspaceCwd })`: `runArgv([...check.argv], { cwd: workspaceCwd, timeoutMs: min(check.timeoutMs, MAX_CHECK_TIMEOUT_MS=10min), inheritEnv: false })`.
-    stdout/stderr 원문은 저장하지 않고 sha256 digest + byte 길이만. cwd는 입력에서 받지 않고 session workspace로 고정.
-  - `createWorkspaceEvidence()`: git repo면 `git rev-parse HEAD` + `git ls-files -co --exclude-standard -z` + 각 path의 mode/symlink target/content sha256을 canonical manifest로 해시.
-    비-git이면 `validation-contract-missing`과 동일 취급으로 verifier 거부(디렉터리 전체 해시는 하지 않음 — 크기 폭발).
-  - `runVerification(authority, threadId)`: before digest → 모든 checked criteria 순차 실행 → after digest → 불일치면 `{kind:"stale-source"}` 반환(receipt 없음) → 일치면 `applyVerificationBatch` **단일 commit**(actor `verifier`).
-- `src/objective/criteria/verifier.ts` — `createVerifierCompletion` export 제거(내부화). `unsupportedCheckExecutionPort` 삭제.
-- `src/objective/core-store/completion-ops.ts` — `applyVerificationBatch` 핸들러: objectiveId·expectedRevision·criterionId/checkId 일치, `passed = check.successExitCodes.includes(exitCode) && !timedOut` 를 **authority가 재계산**(batch의 passed 필드 신뢰 안 함 — batch에 passed 필드 자체를 두지 않음), 모든 required checked criteria receipt가 같은 sourceDigest에 묶임.
-- stale-on-change: `Objective`에 `verifiedSourceDigest?: string`; `readDomain`이 host가 주입한 `currentSourceDigest`와 다르면 파생 status에서 checked criteria를 `met:false(stale)`로 투영. 완료 직전(설정 `settleAttempt`/CLI `verify`)에 재비교.
-- 조립: `src/runner/assemble/session-authorities/build-objective.ts`에 verifier wire 주입(`QUANTA_GOAL`/`OBJECTIVE_TOOLS` gate 하), web `runtime-factory.ts` 동일.
-- 모델 검증 요청: `objective_update {kind:"requestVerification"}` op 추가 → tool은 argv를 받지 않고 host `runVerification(authority, threadId)`만 호출(결과는 tool result로 verified/failed/stale-source 요약). 정책표(GOAL-02)에 `requestVerification` 행 추가 — drift-guard가 강제. 같은 turn 내 2회 이상은 두 번째부터 `already-verified-this-attempt`.
-- 모델 제안 check: `objective_set` criteria `check:{kind:"command", argv,…}`는 gateOn 승인 후 정의에 immutable 저장. 저장된 check만 verifier가 실행(모델 argv 즉시 실행 경로 없음).
+## Purpose
 
-### 규칙
-- sandbox escalation 필요 시 기존 HITL(`sandbox-escalation-wire.ts`) 경로. verifier는 escalation을 자동 승인하지 않는다.
-- stdout/stderr 원문은 objective snapshot·receipt·telemetry 어디에도 저장 금지(digest+길이).
+Execute only immutable stored checks, derive pass/fail from process results, and prevent stale or source-modifying verification from completing a goal.
 
-## RED
-신규 `tests/unit/objective/verification-batch.test.ts`, `tests/unit/host/objective-verifier-wire.test.ts`, `tests/unit/runtime/run-argv.test.ts`; 기존 `checked-completion-forgery-m8-hellgate.test.ts` 확장
-1. exit 1(successExitCodes [0]) 결과를 담은 batch → criterion met:false; batch에 `passed:true`를 끼워 넣어도(타입 우회) 무시.
-2. batch.objectiveId ≠ current → 거절, revision 불변.
-3. expectedRevision 불일치 → `stale`.
-4. before/after sourceDigest 불일치 → receipt 0, 반환 `stale-source`.
-5. 검증 후 파일 1개 수정 → `readDomain` 파생에서 해당 criteria stale, status completed 아님.
-6. actor=model/user의 `applyVerificationBatch` → deny(정책표).
-7. `runArgv(["bash","-lc","x"])` 와 기존 `runShell("x")`의 spawn argv/env가 byte-identical(paired control).
-8. argv에 공백/quote/`;` 포함 인자가 그대로 단일 argv 요소로 전달(join 안 함).
-9. timeout → `timedOut:true`, passed false, 프로세스 kill 확인.
-10. objective slice boundary: `criteria/ports.ts`가 `@/runtime`·`@/tool` import 시 arch RED.
+## Port and owner split
+
+- src/objective/criteria/ports.ts defines ObjectiveCheckRunner, WorkspaceEvidencePort, VerificationBatch, and result types. It imports no runtime/tool slice.
+- New src/runtime/run-argv.ts is the common argv-level composition core extracted from existing guarded-spawn.ts, scrubbed-spawn.ts, process-tree.ts, and os-sandbox helpers. It does not duplicate their policy.
+- Existing src/runtime/shell.ts delegates to runArgv(["bash","-lc",command]) and retains paired behavior. Extracting is mandatory because shell.ts is near the 900-line cohort ceiling.
+- New src/host/runtime/objective-verifier-wire.ts owns workspace resolution, evidence capture, check scheduling, and authority commit.
+- src/objective/core-store/completion-ops.ts validates and applies a batch. It does not execute processes or inspect the filesystem.
+
+## Read-only execution contract
+
+- cwd is the session-owned workspace, never model/check input.
+- argv is passed as exact elements; no join, shell interpolation, or implicit shell.
+- inheritEnv is false; allow only the existing scrubbed environment contract.
+- Readable roots are limited to the workspace plus an explicit immutable runtime/toolchain dependency allowlist. Home, credential, socket, and unrelated filesystem reads are denied.
+- Network is denied by default.
+- Default posture is workspace-write with before/after source-digest invariance (README 결정 기록). A check may write build/test caches inside the workspace; if the canonical manifest digest changes, the batch yields zero receipts and stale-source. Read-only mount is an opt-in stricter profile, never the only path. Temp/cache/output writes outside the workspace are limited to an isolated verifier directory with byte/file-count caps.
+- Apply wall-clock, CPU, memory, process/fan-out, open-file, output-byte, temp-byte, and batch limits through existing runtime sandbox/process owners.
+- If the platform cannot enforce the read-only boundary, verification fails closed as sandbox-unavailable.
+- A check that changes the canonical manifest (tracked/untracked non-ignored files), escapes via symlink/parent traversal outside the workspace, or requests sandbox escalation emits no completion receipt. Ignored paths (`.gitignore`d caches) are outside the manifest by construction.
+- There is no unsandboxed verifier fallback. HITL may run an explicitly described weaker diagnostic, but a weaker posture can never mint a trusted completion receipt; receipt posture is recorded and authority admits only the strict verifier profile.
+
+## Evidence contract
+
+For Git workspaces, hash a versioned canonical stream containing:
+
+- HEAD identity
+- tracked and untracked non-ignored paths from NUL-delimited Git output
+- path length/path bytes, file mode, object kind, symlink target, content digest, and content length
+- check-definition digest and verifier/runner version
+
+For non-Git workspaces, WorkspaceEvidencePort builds the same bounded manifest over the configured workspace root with explicit ignore rules. It has maximum file-count and byte-count limits; overflow is source-unavailable. It must not silently reuse validation-contract-missing.
+
+Verification result/receipt stores exit code, timeout flag, duration, stdout/stderr digest and byte length, source digest, check digest, runner version, and capture time. Raw output is never persisted.
+
+## Coordinator
+
+ObjectiveVerificationCoordinator has verify(threadId, criterionIds?) and reconcile(threadId):
+
+1. Read objective and capture before digest.
+2. Select immutable stored checked criteria only.
+3. Run sequentially with MAX_CHECKS_PER_BATCH=32, per-check timeout <= 10 minutes, and overall batch deadline <= 15 minutes.
+4. Capture after digest.
+5. On digest mismatch, source write attempt, cancellation, cap, or unavailable sandbox/evidence: emit no passing receipts and use VerifierCommitPort to invalidate the exact objectiveId + check/receipt identities observed.
+6. On stable evidence, submit one applyVerificationBatch commit with objectiveId and expectedRevision.
+7. Authority recomputes passed from timeout, exit code, and immutable successExitCodes. Any supplied passed field is ignored/rejected.
+8. Invalidation uses expected revision and bounded reread/retry. If a concurrent mutation keeps winning, return freshness-unresolved; status/wake/final persistence fail closed until a later reconcile succeeds.
+
+reconcile runs a cheap precheck first (HEAD identity + `git status --porcelain -z` digest); only when the precheck differs from the last full manifest's precheck does it rehash the full manifest.
+
+Do not project current source state from synchronous readDomain. Reconcile at explicit host boundaries: before /goal status or verify, before wake eligibility, after restore, and before final settlement persistence. The cached snapshot may say verification-unknown; it may not claim freshness without reconciliation.
+
+Model requestVerification is a tool action that invokes the coordinator. It is not an ObjectiveMutation policy row. The host allows one verification request per attributed attempt and returns already-verified-this-attempt thereafter.
+
+## RED rails
+
+1. Forged passed:true with exit 1 cannot mark a criterion met.
+2. Wrong objectiveId/checkId/criterionId or stale revision rejects the whole batch.
+3. Before/after source digest mismatch yields zero passing receipts and stale state.
+4. A source write attempt is blocked before damage; source bytes remain unchanged.
+5. Editing one file after success becomes stale at the next reconcile and removes completed projection.
+6. User/model applyVerificationBatch is denied.
+7. runShell and runArgv paired shell invocation have identical argv/env/sandbox behavior.
+8. Spaces, quotes, semicolons, and Unicode remain one argv element.
+9. Timeout/abort kills the process group and cannot leave a child running.
+10. Git symlink/untracked/mode changes alter digest deterministically.
+11. Non-Git manifest is deterministic; cap overflow returns source-unavailable.
+12. A missing real runArgv call, empty manifest scan, or removed read-only wrapper turns its static/runtime guard red.
+13. Outside-workspace credential read, network connect, process fan-out, and temp-volume exhaustion fail with zero trusted receipts.
+14. Revision changes between after-digest and invalidation commit trigger reread/retry; repeated contention yields freshness-unresolved and wake 0.
+15. A HITL weaker diagnostic cannot be accepted as verifier completion evidence.
 
 ## E2E
-- `tests/integration/objective-verifier-real-command-e2e.test.ts`(신규, LLM 없음): 임시 git repo에 `/goal` + check `["bun","-e","process.exit(0)"]` → verify → completed;
-  check `exit 1` → active; check `sleep 100` timeout → active; verify 도중 파일 수정 → stale-source.
-- PTY: `/goal check add "tests pass" -- bun test tests/unit/objective/progress-receipt.test.ts` → `/goal verify` → `validation: 1/1 verified` → 파일 touch → `/goal`에 `stale` 표시.
 
-## Proof rails
-GOAL-02 rail + `bun test tests/unit/runtime tests/unit/objective-slice-boundary.test.ts tests/integration/objective-verifier-real-command-e2e.test.ts`.
+- Real Git workspace: exit 0 completes; exit 1 remains active; timeout remains active.
+- Concurrent source edit returns stale-source and no receipt.
+- Source-modifying command is denied and source tree is byte-identical.
+- Non-Git workspace verifies under bounds and fails closed over bounds.
+- PTY uses /goal check add ... -- argv, /goal verify, then source modification and /goal stale rendering.
 
-## 함정
-- `git ls-files` manifest는 대형 repo에서 수 초 — digest는 turn 경계에서 1회만, criterion마다 반복 금지.
-- 컴파일 바이너리(`~/.local/bin/quanta`)에서 `git`이 PATH에 없을 수 있음 → `bun run install:cli` 후 PTY에서 확인.
+## Verification
+
+    bun test tests/unit/runtime tests/unit/objective tests/unit/host/objective-verifier-wire.test.ts
+    bun test tests/unit/objective-slice-boundary.test.ts tests/unit/_arch
+    bun test tests/integration/objective-verifier-real-command-e2e.test.ts
+    bun run typecheck
+    bun run lint:debt
+
+## Stop conditions
+
+- Verification needs a writable source tree or an unsandboxed fallback.
+- Freshness is asserted from an old synchronous snapshot.
+- A non-Git directory is unboundedly traversed.
+- Raw process output enters session/objective persistence.

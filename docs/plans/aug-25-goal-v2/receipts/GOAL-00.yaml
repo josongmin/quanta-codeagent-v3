@@ -1,0 +1,27 @@
+ticket: GOAL-00R
+kind: baseline
+recordedAt: 2026-08-25T14:10:00Z
+executionStart:
+  head: b4f1b5286daeb0cd1c30d8b8c0db47ef0131c25c
+  originMain: b4f1b5286daeb0cd1c30d8b8c0db47ef0131c25c
+  ahead: 0
+  index: empty
+  dirtyUnrelated: 57 paths (user/other-session owned; not staged, not touched)
+  dirtyGoalOwned: docs/plans/aug-25-goal-v2/** (plan docs only)
+railHead: 4e742536ba5fcf23de5e74fe0796a601664594ae   # HEAD advanced by another session during the rail run (concurrent committer); no Goal source was touched
+rails:
+  - cmd: bun run typecheck            ; exit: 0 ; dur: 16s ; note: "typecheck target=src passed"
+  - cmd: bun run typecheck:tests      ; exit: 0 ; dur: 37s
+  - cmd: bun run lint:debt            ; exit: 0 ; dur: 24s
+  - cmd: bun test tests/unit/god-code-ratchet.test.ts tests/unit/_arch ; exit: 1 ; dur: 4s ; result: "72 pass / 1 fail"
+    preExisting: "god-code ratchet > the 900-999 approaching cohort does not grow: 25 modules in band (ceiling 24). Not Goal-owned (run-main.ts 999, agent-config-assembler.ts 989, compaction.ts 984, tool/index.ts 974, session-ops/index.ts 973, pool/worker.ts 963, gated-tools.ts 962, knob-inventory/extra.ts 961). Goal tickets must not add a 26th; shell.ts (881) stays below 900 via runArgv extraction (GOAL-03)."
+  - cmd: bun test <goal unit set: tests/unit/objective + objective-*/goal-* + apps/cli goal/objective + agent/objective-completion-admission> ; exit: 0 ; result: "345 pass / 0 fail"
+  - cmd: bun run test:contract        ; exit: 0 ; result: "7 pass / 0 fail"
+  - cmd: bun test tests/integration/{goal-continuation-live-e2e,objective-turn-context-consumer-e2e,objective-usage-limited-429-real-loop-e2e}.test.ts ; exit: 0 ; result: "9 pass / 0 fail"
+  - cmd: bun test tests/e2e-pty/cli-goal-pursuit-e2e.test.ts ; exit: 0 ; result: "9 pass / 0 fail (x2: 37.4s, 35.8s)"
+    note: "The 8/1 order-dependent red recorded at plan time did not reproduce at HEAD; no cassette repair performed (non-reproducing => recorded, not waived)."
+notRun:
+  - bun test tests/unit tests/integration --parallel=1   # full suite; run at GOAL-10 final rail (concurrent bun test hazard)
+  - bun run lint                                          # repo-wide; lint:debt ran
+  - bun fc validate / bun fc diff                         # GOAL-00R touches no catalog
+decisionsFrozen: see README.md "결정 기록" (verifier posture = workspace-write + digest invariance; receipt rail may run in a git worktree at S; reconcile precheck)

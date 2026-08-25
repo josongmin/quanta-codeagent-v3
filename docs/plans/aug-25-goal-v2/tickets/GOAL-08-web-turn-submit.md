@@ -1,45 +1,100 @@
-# GOAL-08 — web: 원자적 `turn.submit`, goal scheduler lifecycle
+# GOAL-08 — Atomic turn.submit, admission port, and web goal controls
 
-**Priority:** P1 · **Depends on:** GOAL-07 · **크기:** 40+ tool-use, main-direct (protocol + kernel + daemon)
+**Priority:** P1 · **Depends on:** GOAL-05A and GOAL-07 · **Owner:** session protocol/kernel plus web composition
 
-## 목적
-웹/앱에서 goal continuation을 사용자 입력과 섞이지 않게 실행한다. `input.append` + `turn.run` 두 command 사이에 사용자 command가 끼어들 수 있으므로,
-한 dispatch lease 안에서 검사·append·run을 원자적으로 수행하는 `turn.submit`을 추가하고, 웹 daemon에 CLI와 같은 wake controller를 조립한다.
+**Receipt:** docs/plans/aug-25-goal-v2/receipts/GOAL-08.yaml
 
-## 작업명세
-### 파일
-- `src/protocol/session/commands.ts`
-  ```ts
-  export interface TurnSubmitCommand extends SessionCommandEnvelope<"turn.submit"> {
-    readonly text: string; readonly images?: readonly ImageBlock[]
-    readonly expectedSessionRevision: number
-    readonly provenance: { kind: "goal-continuation"; objectiveId: string; objectiveRevision: number; attemptId: string }
-  }
-  ```
-  command 목록(197-206)·codec·builder에 등록. `SESSION_COMMAND_TYPES` drift-guard 테스트 갱신.
-- `src/kernel/session/reducer.ts` / `scheduler.ts` — `turn.submit` 핸들러: session revision 일치 → idle(turn 없음) → approval pending 없음 → draft empty → host objective authority에 provenance 검증(objectiveId/revision 일치, attemptId 미사용) → append → run. 하나라도 실패면 typed reject, 상태 불변.
-  외부 client가 보낸 `turn.submit`은 provenance 재검증에서 거절되므로 위조 불가(authority가 attemptId를 발급한 것만 통과 — GOAL-06 registry reservation 재사용).
-- 신규 `src/apps/web-daemon/goal-wake-compose.ts` — `startGoalWakeController` 재사용(hook을 CLI 전용 경로에서 `src/objective` 인접 공용으로 이동하면 slice fence 확인). enqueue = `sharedSession.dispatch(turn.submit)`. `sharedSession` 생성 후 compose, attach 성공 시 cancel/re-arm(GOAL-07), daemon close 전 `stop()`. `serve-stdio`는 제외.
-- `activeTurnRef`: `goal enabled || follower enabled`이면 `createTurnActivity()` 1회(`conversation-action-surface.ts:68`), 두 기능이 같은 ref 공유.
-- web `objective-pane`: GOAL-05 renderer의 데이터 모델 재사용(문자열 렌더는 web 자체).
+## Purpose
 
-## RED
-`tests/unit/protocol/session-commands*.test.ts`, `tests/unit/kernel/session/*scheduler*.test.ts`, 신규 `tests/unit/kernel/session/turn-submit.test.ts`, `tests/unit/apps/web-daemon/goal-wake-compose.test.ts`
-1. `turn.submit` 처리 중 `input.append`(user)가 큐에 들어와도 goal prompt와 사용자 텍스트가 한 turn input에 섞이지 않음(두 turn 또는 submit 거절).
-2. approval pending 상태 submit → reject, transcript 불변.
-3. `expectedSessionRevision` 불일치 → reject.
-4. provenance objectiveRevision ≠ authority → reject; attemptId 재사용 → reject.
-5. daemon close 후 timer/subscription 0(fake timer로 pending 0 assert).
-6. attach 후 이전 thread revision의 queued submit → reject.
-7. goal OFF면 `turn.submit` 핸들러는 등록돼 있어도 wake compose 0, `activeTurnRef` follower 조건과 동일.
-8. `input.append`+`turn.run` 분리 호출로 continuation을 보내는 경로가 코드에 없음(grep ratchet 대신 compose 함수 단일 진입 테스트).
+Submit a continuation atomically under the existing session command lease, prove it owns a host-issued wake reservation, and expose complete daemon/web goal control without mixing user and autonomous input.
+
+## Protocol command
+
+Additive turn.submit reuses the existing SessionCommandEnvelope expectedRevision field; no second session-revision field is introduced.
+
+Autonomous payload contains only an opaque host claim reference plus the normal envelope. It does not accept client text or images.
+
+The reservation stores immutable server-generated prompt bytes/digest and host provenance: objectiveId/revision, attemptId/ordinal, sessionEpoch, activityEpoch, and kind. validateAndConsume returns that bound prompt/provenance to the kernel. A general client-authored atomic submit, if later needed, is a separate command/authorization contract.
+
+Register it in the command union, codec, builder, type list, and exhaustive reducer tests. Existing input.append and turn.run semantics remain unchanged.
+
+Add a separate authenticated session.objective.work command for explicit user goal work. It carries user text/images plus session/objective expected revisions, binds actor/provenance at the host, persists GOAL-04 beginAttempt, and atomically appends/runs under the dispatch lease. It cannot carry autonomous provenance or a reservation.
+
+## Admission port
+
+Define a GoalContinuationAdmissionPort at the kernel/host boundary:
+
+- reserve is owned by GOAL-06 controller.
+- validateAndConsume checks current objective, revision, session/activity epoch, ordinal, unused reservation, and bound payload digest.
+- release handles typed pre-run rejection/cancel.
+- commit/settlement closes the accepted claim.
+
+Kernel receives this port; it must not import the wake registry. When goal mode/admission is absent, goal-continuation submit is rejected even if the payload is syntactically valid. External clients cannot mint a valid reservation.
+
+## Atomic handler
+
+Under one dispatch lease:
+
+1. Validate envelope expectedRevision.
+2. Require idle turn, no approval, no pending attach/close, and empty draft.
+3. Validate and consume admission, retrieving immutable host prompt/provenance.
+4. Commit GOAL-04 beginAttempt persistence, then append the bound input and start the turn atomically. No paid body runs if start persistence fails.
+5. On failure before run, leave transcript unchanged and release reservation.
+6. Settlement/finally closes or releases the claim exactly once.
+
+## Web/daemon composition
+
+- Compose the shared GOAL-06 controller after sharedSession creation.
+- Controller enqueues turn.submit, not split append/run.
+- CLI/follower and goal features share one activeTurnRef.
+- Attach success cancels/rearms through GOAL-07; daemon close awaits stop/disposal.
+- Restored active goals reconcile evidence and auto-rearm after daemon restart.
+- serve-stdio is explicitly outside scheduler scope until it gains a lifecycle owner; document/capability-test this exclusion.
+- If a goal-attributed web turn ends awaiting approval, persist its objective/epoch provenance with the pending approval. Approval resolution revalidates current state and mints a fresh linked reservation/attempt, then uses turn.submit. It never emits a bare turn.run; stale/changed goals do not auto-resume.
+
+## Web controls
+
+Use the existing session.objective.mutate protocol for create/edit/pause/resume/clear, manual criterion complete/reopen, check/criterion changes, and budget amendment. Add typed host commands for verification and explicit goal.work; verification is not a domain mutation, and goal.work is the only user turn that mints user-requested-goal-work provenance.
+
+The objective pane exposes the GOAL-05 data model, including validation, stale evidence, requested/effective budget, blocker, and next wake reason. Web is a daemon surface, not proof of IDE integration.
+
+## RED rails
+
+1. Concurrent user input and goal submit become separate turns or typed rejection, never one mixed input.
+2. Approval/draft/active turn/attach rejects with transcript unchanged.
+3. Existing expectedRevision mismatch rejects.
+4. Wrong objective revision, epoch, ordinal, or reservation rejects before agent body.
+5. Reused reservation rejects.
+6. Valid reservation with substituted text/image or a client-authored image rejects; kernel runs only the bound host prompt.
+7. Goal off/admission absent rejects forged continuation.
+8. Pre-run rejection releases reservation; accepted begin/settlement closes it once.
+9. Attach makes old-epoch queued submit stale.
+10. Daemon close leaves zero timers/subscriptions/claims.
+11. Restored eligible goal rearms once; paused/blocked/completed/contract-missing does not.
+12. All web mutations hit the same user-fixed authority capability, 4000-char limit, and reread renderer.
+13. Approval resume mints a fresh linked claim; bare turn.run, changed objective, or old epoch executes zero bodies.
+14. A static structural test proves controller calls turn.submit and has an anti-vacuum/injected split-call failure.
+15. session.objective.work mints user-requested provenance; plain input.append/turn.run cannot self-assert it.
 
 ## E2E
-- `tests/integration/goal-web-submit-daemon-e2e.test.ts`(신규, 기존 `*-daemon-e2e` 하네스): WS client로 `/goal` 설정 → replay cassette continuation 1회 → 사용자 메시지 동시 전송 → transcript에 두 turn이 분리 · approval 대기 중 continuation 미실행 · daemon teardown 후 프로세스 timer 0.
 
-## Proof rails
-GOAL-07 rail + `bun test tests/unit/protocol tests/unit/kernel tests/integration/goal-web-submit-daemon-e2e.test.ts`.
+- WebSocket/API creates a goal through session objective command, scheduler runs one replay continuation, concurrent user message stays separate.
+- Approval pending suppresses unrelated wake; approval resolution resumes through a fresh goal claim without losing accounting.
+- Attach/restart rejects old epoch and rearms eligible current goal.
+- Web criterion/check/budget/verify/pause/resume/clear controls round-trip.
 
-## 함정
-- 프로토콜 codec은 web client(Tauri/embedded)와 버전 공유 — 신규 command는 additive, 기존 `turn.run` 의미 불변.
-- `session.turn.submit`은 CLI에도 쓸 수 있지만 이 티켓은 web만; CLI 큐 경로 교체는 non-goal.
+## Verification
+
+    bun test tests/unit/protocol tests/unit/kernel src/kernel/session/__tests__
+    bun test tests/unit/apps/web-daemon/goal-wake-compose.test.ts tests/unit/apps/web-daemon
+    bun test tests/integration/goal-web-submit-daemon-e2e.test.ts
+    bun run test:contract
+    bun run typecheck
+    bun run lint:debt
+
+## Stop conditions
+
+- Kernel imports the concrete wake registry.
+- A continuation can use split append/run.
+- A client can self-issue valid provenance.
+- Daemon teardown or attach leaves an owned timer/claim behind.

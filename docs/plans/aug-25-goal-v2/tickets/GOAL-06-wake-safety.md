@@ -1,58 +1,110 @@
-# GOAL-06 — wake safety: ticker 제거, quiescence projection, backoff, hard cap, bounded registry
+# GOAL-06 — Bounded event-driven wake controller and hard product cap
 
-**Priority:** P0 · **Depends on:** GOAL-04 (settlement outcome이 backoff 입력) · **크기:** 40+ tool-use, main-direct
+**Priority:** P0 · **Depends on:** GOAL-04 · **Owner:** goal wake controller/policy
 
-## 목적
-autonomous wake를 bounded로 만든다: judge/verifier 장애·no-progress·error에서 15초 hot loop가 아니라 backoff/cooldown,
-사용자 입력·plan mode·approval·queue pending이면 절대 fire 안 함, budget 없이도 제품 hard cap, registry 크기 O(active objective).
+**Receipt:** docs/plans/aug-25-goal-v2/receipts/GOAL-06.yaml
 
-## 작업명세
-### 파일
-- `src/apps/cli/goal-continuation-hook.ts`
-  - `startGoalContinuationTicker`(191-216, setInterval) 및 `DEFAULT_INTERVAL_MS`/`setIntervalFn`/`clearIntervalFn` 삭제. `goal-continuation-ticker-hellgate.test.ts`·`goal-ticker-concurrency-hellgate.test.ts`는 controller 대상으로 이전 또는 삭제(무엇을 대체 보장하는지 명시).
-  - quiescence projection(신규 `src/apps/cli/repl/goal-quiescence.ts`, pure):
-    ```ts
-    interface GoalQuiescenceSnapshot { turnActive; planModeActive; externalPromptPending; textPending; imagePending; planPending; followupPending; approvalPending; attachingOrClosing }
-    export const isQuiescent = (s: GoalQuiescenceSnapshot): boolean
-    ```
-    입력은 기존 store 읽기: `activeTurnRef`, 라이브 identity mode(`interactive-setup.ts:309`의 `setup.planMode` 정적 → `activeIdentityModeState.get()==="plan"` OR), `external-prompt-queue`, text/image/plan 큐, lifecycle follow-up, pending approval(`mid-turn-approval-channel`), attach/close 플래그. 새 store 없음.
-    arm 시점과 fire 직전 **두 번** 검사(`evaluateGoalWakeFire` 입력에 projection 추가).
-- `src/objective/goal-wake-controller.ts`
-  - 신규 pure `computeGoalWakeDelay(domain, policy, lastSettlement, now): { delayMs } | { skip: reason }`:
-    progress(transition/verifier delta>0) → `minQuietMs` · 성공 no-progress → `min(minQuiet·2^n, maxBackoffMs)` · error/refusal → capped backoff ·
-    `usage_limited` → `untilEpochMs - now` 1회 · `budget_limited|completed|blocked|paused` → skip · verifier/judge infra unavailable(같은 revision) → `cooldownMs` · 사용자 활동 → n 리셋 + full quiet.
-    n(consecutive no-progress)은 `progressReceipts` 꼬리에서 계산(별도 카운터 저장 없음).
-  - registry: `claims: Map<string,…>`(181) → `Map<`${threadId}:${objectiveId}`, { highestCommittedOrdinal: number; reserved?: number }>`; objectiveId 변경/clear/attach 시 entry 삭제.
-  - `evaluateGoalWakeFire`에 `quiescent: boolean` 입력 추가.
-- knob SSOT: `src/shared/runtime-config-knobs/knobs-b.ts` — `QUANTA_GOAL_QUIET_MS` 하한 clamp `GOAL_QUIET_MIN_MS=15_000`(테스트는 `allowUnsafeQuiet` 옵션이 아니라 injected policy로 짧게), `QUANTA_GOAL_MAX_BACKOFF_MS`(default 900_000), `QUANTA_GOAL_MAX_AUTONOMOUS_TURNS`(default 20; objective budget 있으면 그것이 우선, 없으면 이 cap). 세 값 정의는 `src/objective/goal-wake-policy.ts` 한 곳에서 export, hook·runtime-config·catalog가 참조.
-- `src/apps/cli/repl/session-loop/interactive-setup.ts` — `planModeActive` 라이브화, projection 조립.
-- GOAL-00에서 격리한 PTY 순서의존 red의 구조 원인이 여기 있으면 여기서 수정.
+## Purpose
 
-## RED
-`tests/unit/objective/goal-wake-controller.test.ts`, `tests/unit/apps/cli/goal-wake-hook.test.ts`, 신규 `tests/unit/objective/goal-wake-policy.test.ts`, `tests/unit/apps/cli/goal-quiescence.test.ts`
-1. no-progress 10회 연속 → fire 간격이 15s,30s,60s,…(fake timer), 고정 15s면 RED.
-2. judge/verifier unavailable 후 같은 revision → cooldown 동안 arm 0; revision 변경(사용자 edit) → 즉시 base quiet로 리셋.
-3. `maxAutonomousTurns=3`, budget 없음 → 3회 후 wake 0, status `budget_limited`.
-4. objective budget `maxTurns=5`가 있으면 cap 3보다 우선(5회).
-5. plan mode 라이브 진입(정적 setup.planMode=false) → fire 0.
-6. approval pending / text queue pending / attaching → fire 0, 해소 후 1회.
-7. `QUANTA_GOAL_QUIET_MS=1` → 파싱 결과 15_000(+경고 1줄).
-8. 100_000 attempt(ordinal) 후 registry size === active objective 수.
-9. clear/replace → 해당 registry entry 삭제.
-10. `startGoalContinuationTicker` import → 컴파일 에러(삭제 증명).
-11. agent body throw → `activeTurnRef.current` 정리(finally), 이후 wake가 `turnActive`로 영구 차단되지 않음.
-12. continuation 자신의 enqueue(queue push)가 자기 attempt claim을 취소하지 않음(기존 `goal-wake-hook.test.ts:125` 확장).
-13. queued continuation 이후 local input 도착 → dequeue 시 drop, agent body 0회.
-14. UI idle suppression(`QUANTA_IDLE_SUPPRESS=0`)과 goal quiet 독립 — 기존 PTY 유지(GOAL-00에서 순서의존 red 해소 전제).
-15. red-on-injection: `computeGoalWakeDelay`의 backoff 분기를 `minQuietMs`로 고정한 mutant에서 1 RED; fire-time projection 검사를 제거한 mutant에서 5·6 RED.
+Replace interval polling with one owned timer, require live quiescence at arm and fire, back off on no progress/failure, and make autonomous execution bounded even when user budget is absent or oversized.
+
+## Controller contract
+
+- Remove startGoalContinuationTicker, interval constants, and interval injection.
+- goal-quiescence.ts projects existing live stores only: turn, plan mode, external prompt, text/image/plan queues, follow-up, approval, attach/close.
+- Check quiescence both before arming and immediately before enqueue.
+- One timer per active thread/objective. Timer, subscriptions, and claims are disposed on clear, replace, attach, close, and fatal session state.
+- Consecutive no-progress count is derived from attributed progress receipts; do not create a second durable counter.
+- A controller-local monotonic activityEpoch/lastUserActivity observes raw input and existing queues. Reservation/queued work captures it; dequeue rejects a changed epoch without consuming or deleting the user's draft.
+- User activity resets backoff and requires a full quiet period.
+- Usage-limit schedules one timer at the persisted expiry and re-arms correctly after restart.
+
+computeGoalWakeDelay returns a typed delay or skip reason:
+
+- progress -> base quiet
+- success/no progress -> exponential backoff capped at max
+- error/refusal/infrastructure unavailable -> capped cooldown/backoff
+- usage-limited -> exact remaining expiry
+- validation-contract-missing, paused, blocked, completed, budget-limited, fatal, freshness-unresolved, non-quiescent -> skip
+
+Fire order is fixed: timer fires -> await GOAL-03 reconcile (cheap precheck first) -> reread objective/revision/activityEpoch/quiescence/caps (+ sessionEpoch once GOAL-07 exists; until then the claim carries no epoch) -> reserve -> enqueue. Reconcile mutation/unavailable never leaves an old reservation; it cools down or rearms from the fresh state.
+
+## Hard-cap rule
+
+    userRemaining =
+      max(0, (userConfiguredMaxTurns ?? Infinity) - objectiveBudgetTurnsUsed)
+    productRemaining =
+      max(0, productHardCap - autonomousTurnsStarted)
+    autonomousWakeAllowed = min(userRemaining, productRemaining) > 0
+
+- Product default is 20 and cannot be raised by user/session config.
+- If user max is 5 and product cap 3, effective cap is 3. The previous plan's budget-overrides-product behavior is forbidden.
+- Objective budget turnsUsed includes attributed user goal work and autonomous work. Product hard-cap usage is the GOAL-04 durable autonomousTurnsStarted counter.
+- Controller checks caps before reservation; authority beginAttempt atomically rechecks and consumes the slot before provider execution. No N+1 enqueue or crash refund.
+- On cap exhaustion, authority derives budget_limited with source user-budget or product-hard-cap; renderer shows requested limit, both counters, and limiting source.
+- A same-ID budget amendment can recover user-budget exhaustion when userRemaining becomes positive. It never resets productRemaining. Pause/resume also cannot reset either counter.
+- Token budget and usage-limit remain independent stop boundaries.
+
+## Policy/config owner
+
+goal-wake-policy.ts owns defaults and clamps:
+
+- minimum public quiet: 15 seconds
+- maximum backoff: 15 minutes
+- product autonomous turn cap: 20
+
+Runtime config, knob inventory, renderer, controller, and catalog import/reflect these definitions. No NODE_ENV bypass, hidden dev flag, or public unsafe override.
+
+## Claim registry
+
+Use one bounded entry per threadId + objectiveId with highest committed ordinal and at most one reservation. Delete it on clear/replace/attach. A reservation is released on typed rejection/cancel and committed only by an accepted submit/settlement lifecycle.
+
+## RED rails
+
+1. No-progress sequence produces 15s, 30s, 60s ... under a fake clock.
+2. Same-revision verifier/agent infrastructure failure stays in cooldown; user revision change resets to base quiet. Shadow judge never participates in wake.
+3. No user budget: product cap N gives exactly N autonomous attempts and then budget_limited.
+4. User max 5/product cap 3 gives exactly 3, not 5.
+5. User max 2/product cap 20 gives exactly 2; one attributed foreground goal turn leaves only one autonomous user-budget turn but consumes zero product-cap turns.
+6. Live plan mode, approval, draft, queued input, active turn, attach, or close prevents fire.
+7. Quiet value below 15 seconds clamps and emits one bounded warning.
+8. 100k ordinal churn leaves registry size equal to active objectives.
+9. Clear/replace/attach/dispose leaves no claim/timer.
+10. Agent throw clears active-turn and reservation in finally.
+11. Continuation enqueue does not self-cancel; later raw input changes activityEpoch and makes dequeue drop only the continuation, preserving the user draft.
+12. Budget amendment recovers user-limit exhaustion but cannot recover an exhausted product cap.
+13. Hard-cap precheck and post-settlement check each fail a dedicated mutant.
+14. Deleting the fire-time quiescence check makes the race test red.
+15. UI idle suppression and goal quiet remain independent.
+16. Missing validation contract produces wake 0 and renderer guidance instead of consuming the product cap.
+17. Reconcile revision change/unavailable causes reread/cooldown with zero stale reservation.
+
+## Timing tests
+
+- Unit/in-process integration uses injected clock/timer through controller construction.
+- PTY uses production clamp. It asserts the typed scheduling decision or performs at most one real 15-second cycle; it never injects 200ms policy or a test-only runtime knob.
+- Existing interval-disposal hellgates are rewritten to assert owned controller timer/subscription disposal, preserving the safety invariant.
+- Existing PTY cases that pass `QUANTA_GOAL_QUIET_MS` below the clamp (idle-drives-continuation, own-quiet-window, partial-draft, foreground-rearm, Ctrl+B) are rewritten in this ticket: assert the typed `goal-wake armed delay=` scheduling decision from the decision counter/NDJSON instead of waiting for a fire, and keep at most ONE real 15 s cycle in the whole file. Budget the PTY file at <= 90 s wall clock.
 
 ## E2E
-- PTY(quiet는 injected policy로 200ms): (a) cassette 3연속 error → 3 fire 간격이 증가(타임스탬프 diff), (b) `/goal budget --max-turns=2` 후 wake 정확히 2, (c) 부분 draft 입력 중 wake 0(기존 테스트 유지), (d) `Ctrl+B` bg turn 중 wake 0(기존), (e) `/goal edit` 후 cooldown 무시하고 base quiet로 1회.
-- `tests/integration/goal-continuation-live-e2e.test.ts`: verifier unavailable(비-git cwd) → cooldown, 같은 revision 재fire 0.
 
-## Proof rails
-GOAL-04 rail + `bun test tests/unit/goal-*.test.ts tests/unit/objective/goal-wake-controller.test.ts tests/e2e-pty/cli-goal-pursuit-e2e.test.ts`.
+- Budget max 2 produces exactly two autonomous attempts and no third.
+- Partial draft/background turn/plan mode/approval suppresses wake.
+- Restart during usage-limit restores one expiry timer.
+- Verifier unavailable causes cooldown with no hot loop.
 
-## 함정
-- `tests/unit/agent/loop-throw-dispose-hellgate.test.ts:83`("mid-turn throw clears the daemon wake interval")는 legacy ticker interval을 관측함 — ticker 삭제 시 이 테스트를 controller timer 정리로 **대체**(삭제 금지, 보장 내용 유지).
-- PTY는 quiet clamp 때문에 env로 50ms를 못 준다 → 테스트 전용 `QUANTA_GOAL_POLICY_JSON` 같은 override는 만들지 말고, PTY 하네스가 `--dev-goal-policy` 같은 hidden flag 없이 동작하도록 clamp를 `NODE_ENV==="test"`로 우회하는 것도 금지. 권장: clamp는 runtime-config에, PTY는 15초 대기 대신 **wake 스케줄 로그 라인**(`decision-counter` "goal-wake armed delay=…")을 assert.
+## Verification
+
+    bun test tests/unit/objective/goal-wake-controller.test.ts tests/unit/objective/goal-wake-policy.test.ts
+    bun test tests/unit/apps/cli/goal-wake-hook.test.ts tests/unit/apps/cli/goal-quiescence.test.ts
+    bun test tests/integration/goal-continuation-live-e2e.test.ts
+    bun test tests/e2e-pty/cli-goal-pursuit-e2e.test.ts
+    bun run typecheck
+    bun run lint:debt
+
+## Stop conditions
+
+- Any interval polling remains reachable.
+- User configuration can exceed the product cap.
+- A timer/claim can outlive its objective or session.
+- PTY requires a production safety bypass.
