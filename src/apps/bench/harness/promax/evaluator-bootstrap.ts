@@ -288,7 +288,19 @@ const agentPhaseProbes = (spec: ProMaxEvaluatorBootstrapSpec): ProMaxBootstrapCo
       step: "grader-container-absence",
       phase: "agent",
       goldBearing: false,
-      argv: ["sh", "-c", 'test -z "$(docker ps -aq --filter name=^m_ --filter name=^g_)"'],
+      // `out=$(…) || exit 1`, NOT `test -z "$(…)"`. A command substitution captures
+      // only stdout, so a MISSING docker or a wedged daemon produced an empty
+      // string and `test -z ""` SUCCEEDED. Measured on a real shell: docker
+      // absent → exit 0; daemon unreachable → exit 0; containers present → 1.
+      // The probe reported "clean" in the exact scenario its own purpose names
+      // ("killed mid-run, or against a wedged daemon") — and it runs BEFORE
+      // `docker-ready`, so readiness is not even established yet. Same class as
+      // the pgrep probe fixed earlier: a failed probe is not an answer.
+      argv: [
+        "sh",
+        "-c",
+        'out=$(docker ps -aq --filter name=^m_ --filter name=^g_) || exit 1; test -z "$out"',
+      ],
       purpose:
         "REFUSE to start the agent phase while the pinned evaluator's own grader containers " +
         "survive — a `g_*` container had the GOLDEN patch and the test patch copied into it, " +
