@@ -5,8 +5,12 @@
  */
 
 import { describe, expect, test } from "bun:test"
+import { createGoalWakeSignalSlot } from "@/apps/cli/repl/goal-wake-signal"
 import { normalizeCliPromptInput } from "@/apps/cli/repl/prompt-types"
-import { claimGoalAttempt } from "@/apps/cli/repl/session-loop/interactive-loop"
+import {
+  claimGoalAttempt,
+  isStaleGoalContinuation,
+} from "@/apps/cli/repl/session-loop/interactive-loop"
 import { createObjectiveAttemptSlot, createObjectiveAuthority } from "@/objective"
 
 const continuation = (threadId = "t") =>
@@ -74,5 +78,41 @@ describe("GOAL-04 — CLI goal attempt claim", () => {
     const slot = createObjectiveAttemptSlot()
     expect(claimGoalAttempt(slot, authority, continuation())).toBe(true)
     expect(claimGoalAttempt(slot, authority, continuation())).toBe(false)
+  })
+
+  test("GOAL-06 rail 11 — a queued continuation is dropped at dequeue when the raw-input epoch moved (only the continuation)", () => {
+    const authority = createObjectiveAuthority({ now: () => 1 })
+    authority.create("t", { goal: "g", successCriteria: ["c"] })
+    const slot = createGoalWakeSignalSlot()
+    let epoch = 3
+    slot.current = {
+      onGoalMutation: () => {},
+      onActivity: () => {},
+      onLocalInputSettled: () => {},
+      onTurnSettled: () => {},
+      status: () => ({ kind: "idle" }),
+      activityEpoch: () => epoch,
+    }
+    const revision = authority.readDomain("t").revision
+    const queued = normalizeCliPromptInput({
+      text: "continue",
+      goalContinuation: {
+        threadId: "t",
+        objectiveRevision: revision,
+        attemptKey: "k",
+        activityEpoch: 3,
+      },
+    })
+    expect(isStaleGoalContinuation(queued, authority, slot)).toBe(false)
+    epoch = 4 // the user typed after the arm
+    expect(isStaleGoalContinuation(queued, authority, slot)).toBe(true)
+    // plain user input is never a continuation and is never dropped
+    expect(isStaleGoalContinuation(normalizeCliPromptInput("hello"), authority, slot)).toBe(false)
+    // a legacy meta without an epoch falls back to the revision/status rule
+    const legacy = normalizeCliPromptInput({
+      text: "continue",
+      goalContinuation: { threadId: "t", objectiveRevision: revision, attemptKey: "k2" },
+    })
+    expect(isStaleGoalContinuation(legacy, authority, slot)).toBe(false)
   })
 })

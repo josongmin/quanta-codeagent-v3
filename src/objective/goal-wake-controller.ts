@@ -1,57 +1,93 @@
 /**
- * Edge-triggered, per-session controller for a goal continuation wake.
+ * GOAL-06 — bounded, EVENT-DRIVEN goal wake controller (no interval polling).
  *
- * This is deliberately NOT another objective store or continuation policy.
- * The ObjectiveAuthority remains the source of truth for a goal and its
- * revision. A host calls `arm` when a qualifying edge occurs (goal change,
- * turn settlement, or a quiet transition), calls `reset` for fresh activity,
- * and calls `cancel`/`stop` on lifecycle changes. At most one quiet-window
- * timer exists for a controller at a time.
+ * One owned timer per thread/objective. `arm`/`reset` capture an attempt from
+ * the READ-PORT snapshot (eligibility fences from `goal-wake-policy`), derive
+ * the typed delay from the attributed receipts (quiet / backoff / cooldown /
+ * usage-limit) and schedule exactly one timer. When it fires the controller
+ *   1. awaits the optional `reconcile` (source freshness) — a reconcile that
+ *      moved the objective re-arms from the fresh state, an unavailable one
+ *      re-arms in cooldown; neither leaves a stale reservation;
+ *   2. rereads the objective and re-checks: same objective + revision, same
+ *      activity epoch (raw user input since the arm drops the fire and never
+ *      touches the user's draft), live quiescence (typed busy reason);
+ *   3. reserves the attempt in the bounded claim registry (one entry per
+ *      thread+objective, ≤1 reservation, committed only by an accepted
+ *      enqueue) and hands it to `enqueue`.
+ * Every decision is typed (`onDecision`) and the current state is readable
+ * through `status()` so the renderer can say "wake: armed in 15s (quiet)".
  *
- * At timer fire, the controller re-reads the authority snapshot, checks the
- * exact revision captured at arm time, re-checks the host's quiescence probe,
- * then atomically claims the attempt before asking the host to enqueue. This
- * makes a queued callback after cancel harmless and prevents stale or duplicate
- * continuation enqueue without making this module an owner of objective state.
- *
- * SLICE FENCE: imports only an objective sibling type. Session activity,
- * queues, clocks and the actual enqueue path are injected by the host.
+ * Slice fence: sibling modules only.
  */
 
 import { errMessage, logger } from "@/shared"
+import type { ReconcileOutcome } from "./criteria/ports"
+import {
+  clampGoalQuietMs,
+  computeGoalWakeDelay,
+  deriveWakeSignal,
+  evaluateWakeEligibility,
+  type GoalWakeDelayReason,
+  type GoalWakeIneligibleReason,
+} from "./goal-wake-policy"
 import type { ObjectiveDomainSnapshot } from "./model"
+
+// ── types ────────────────────────────────────────────────────────────────────
+
+/** Why the surface is not quiescent (projected from LIVE stores by the host). */
+export type GoalBusyReason =
+  | "not-idle"
+  | "turn-active"
+  | "plan-mode"
+  | "approval-pending"
+  | "queued-input"
+  | "mailbox-input"
+  | "draft-pending"
+  | "background-turn"
+  | "session-switching"
+  | "closing"
+  | "ephemeral"
+
+export type GoalQuiescence =
+  | { readonly quiescent: true }
+  | { readonly quiescent: false; readonly reason: GoalBusyReason }
 
 export type GoalWakeSkipReason =
   | "disabled"
   | "stopped"
   | "invalid-thread"
-  | "no-goal"
-  | "goal-not-active"
+  | GoalWakeIneligibleReason
+  | "attempt-slot-blocked"
   | "authority-unavailable"
   | "revision-changed"
+  | "objective-changed"
+  | "activity-epoch-changed"
   | "no-longer-quiescent"
+  | "reconcile-unavailable"
   | "attempt-already-claimed"
 
 export interface GoalWakeAttempt {
   readonly threadId: string
+  readonly objectiveId: string
   readonly objectiveRevision: number
-  /** A host-owned checkpoint counter; it changes whenever a new pursuit step
-   * is eligible under the same objective revision. */
   readonly checkpointOrdinal: number
-  /** Collision-free stable encoding of the three fields above. */
+  /** The controller-local activity epoch captured at arm time. */
+  readonly activityEpoch: number
   readonly attemptKey: string
 }
 
-/** A reservation prevents two controllers from enqueueing the same attempt.
- * `commit` makes the reservation durable for the registry lifetime; `release`
- * permits a retry when the enqueue sink reports failure. Both are idempotent. */
 export interface GoalWakeAttemptReservation {
   commit(): void
   release(): void
 }
 
+/** Bounded claim registry: one entry per thread+objective holding the highest
+ *  committed ordinal and at most one live reservation. */
 export interface GoalWakeAttemptRegistry {
   tryClaim(attempt: GoalWakeAttempt): GoalWakeAttemptReservation | null
+  /** Drop the thread's entry (clear / replace / attach / dispose). */
+  forget(threadId: string): void
+  size(): number
 }
 
 export interface GoalWakeTimer {
@@ -59,7 +95,6 @@ export interface GoalWakeTimer {
   clear(handle: GoalWakeTimerHandle): void
 }
 
-/** Kept opaque so browser, Bun, Node and deterministic tests can bind it. */
 export type GoalWakeTimerHandle = { readonly unref?: () => void } | number
 
 export interface GoalWakeArm {
@@ -70,207 +105,394 @@ export interface GoalWakeArm {
 export interface GoalWakeDecision {
   readonly arm: boolean
   readonly skipReason?: GoalWakeSkipReason
+  readonly busyReason?: GoalBusyReason
 }
+
+export type GoalWakeDecisionEvent =
+  | {
+      readonly kind: "armed"
+      readonly attemptKey: string
+      readonly delayMs: number
+      readonly reason: GoalWakeDelayReason
+    }
+  | {
+      readonly kind: "skipped"
+      readonly reason: GoalWakeSkipReason
+      readonly busyReason?: GoalBusyReason
+      readonly attemptKey?: string
+    }
+  | { readonly kind: "fired"; readonly attemptKey: string }
+  | { readonly kind: "quiet-clamped"; readonly requestedMs: number; readonly quietMs: number }
+
+export type GoalWakeStatus =
+  | {
+      readonly kind: "armed"
+      readonly delayMs: number
+      readonly reason: GoalWakeDelayReason
+      readonly fireAt: number
+    }
+  | {
+      readonly kind: "idle"
+      readonly skipReason?: GoalWakeSkipReason
+      readonly busyReason?: GoalBusyReason
+    }
+  | { readonly kind: "stopped" }
 
 export interface GoalWakeFireInput {
   readonly enabled: boolean
   readonly stopped: boolean
   readonly expected: GoalWakeAttempt
   readonly current: ObjectiveDomainSnapshot | null
-  readonly stillQuiescent: boolean
+  readonly activityEpoch: number
+  readonly quiescence: GoalQuiescence
 }
 
 export interface GoalWakeControllerDeps {
-  /** Default-OFF gate. When false, `arm` reads no authority state and arms no timer. */
   readonly enabled: boolean
-  /** Positive finite duration of a quiet period before a wake is considered. */
-  readonly quietWindowMs: number
+  /** Configured quiet window; clamped to the public minimum (one clamp event). */
+  readonly baseQuietMs: number
   readonly timer: GoalWakeTimer
-  /** Read-only authority projection. It must be the same owner used by /goal. */
+  readonly now?: (() => number) | undefined
   readonly readDomain: (threadId: string) => ObjectiveDomainSnapshot
-  /** Re-read at fire time to close input/turn/queue races. Throwing blocks wake. */
-  readonly stillQuiescent: (threadId: string) => boolean
-  /** Usually session-local; a shared implementation also deduplicates surfaces. */
+  readonly quiescence: (threadId: string) => GoalQuiescence
+  /** GOAL-04 — a fail-stopped attempt slot refuses further attributed turns. */
+  readonly attemptSlotBlocked?: (() => boolean) | undefined
+  /** A LOWER product cap (tests); never raises the product value. */
+  readonly productCap?: number | undefined
   readonly attempts?: GoalWakeAttemptRegistry | undefined
-  /** The real host enqueue/wake sink. A resolved result means enqueue accepted. */
+  /** GOAL-03 — source-freshness reconcile awaited BEFORE the fire-time reread. */
+  readonly reconcile?: ((threadId: string) => Promise<ReconcileOutcome>) | undefined
   readonly enqueue: (attempt: GoalWakeAttempt) => void | Promise<void>
-  /** Optional observability seam. It must not throw out of the controller. */
-  readonly onSkip?: ((attempt: GoalWakeAttempt, reason: GoalWakeSkipReason) => void) | undefined
+  readonly onDecision?: ((event: GoalWakeDecisionEvent) => void) | undefined
 }
 
 export interface GoalWakeController {
-  /** Arm only when no timer is pending; returns the captured attempt if armed. */
   arm(input: GoalWakeArm): GoalWakeAttempt | undefined
-  /** Cancel any pending timer and begin a fresh quiet window. */
   reset(input: GoalWakeArm): GoalWakeAttempt | undefined
-  /** Record foreground/external activity. The host re-arms only after a later
-   * settled/quiescent edge, so activity can never cause an autonomous wake. */
+  /** Raw user activity: bumps the epoch and drops any pending wake. */
   onActivity(): void
-  /** Cancel a pending timer; an already accepted enqueue is intentionally not revoked. */
   cancel(): void
-  /** Permanent lifecycle stop. Idempotent; queued timer callbacks become no-ops. */
   stop(): void
+  /** The last recorded decision (armed / idle+reason / stopped). */
+  status(): GoalWakeStatus
+  /** The LIVE decision: an armed timer as is, else the fences evaluated NOW
+   *  (eligibility, attempt slot, quiescence) without scheduling anything. */
+  explain(threadId: string): GoalWakeStatus
+  activityEpoch(): number
 }
 
-const skip = (reason: GoalWakeSkipReason): GoalWakeDecision => ({ arm: false, skipReason: reason })
+// ── pure fences ──────────────────────────────────────────────────────────────
+
+const skip = (reason: GoalWakeSkipReason, busyReason?: GoalBusyReason): GoalWakeDecision => ({
+  arm: false,
+  skipReason: reason,
+  ...(busyReason !== undefined ? { busyReason } : {}),
+})
 
 const isValidThreadId = (threadId: string): boolean => threadId.length > 0
-
 const isValidCheckpointOrdinal = (ordinal: number): boolean =>
   Number.isSafeInteger(ordinal) && ordinal >= 0
 
-const activeRevision = (snapshot: ObjectiveDomainSnapshot | null): number | null => {
-  if (
-    snapshot === null ||
-    snapshot.state === null ||
-    snapshot.state.objective.status !== "active" ||
-    !Number.isSafeInteger(snapshot.revision) ||
-    snapshot.revision < 0
-  ) {
-    return null
-  }
-  return snapshot.revision
-}
-
-/** Pure arm decision. It deliberately has no timer, authority or host probes. */
 export const evaluateGoalWakeArm = (input: {
   readonly enabled: boolean
   readonly stopped: boolean
   readonly threadId: string
   readonly checkpointOrdinal: number
   readonly current: ObjectiveDomainSnapshot | null
+  readonly productCap?: number | undefined
 }): GoalWakeDecision => {
   if (!input.enabled) return skip("disabled")
   if (input.stopped) return skip("stopped")
   if (!isValidThreadId(input.threadId) || !isValidCheckpointOrdinal(input.checkpointOrdinal)) {
     return skip("invalid-thread")
   }
-  if (input.current === null || input.current.state === null) return skip("no-goal")
-  if (activeRevision(input.current) === null) return skip("goal-not-active")
+  const eligibility = evaluateWakeEligibility(input.current, input.productCap)
+  if (!eligibility.eligible) return skip(eligibility.reason)
   return { arm: true }
 }
 
-/** Pure fire-time fence. The controller claims only after this returns `arm:true`. */
 export const evaluateGoalWakeFire = (input: GoalWakeFireInput): GoalWakeDecision => {
   if (!input.enabled) return skip("disabled")
   if (input.stopped) return skip("stopped")
   if (input.current === null || input.current.state === null) return skip("no-goal")
-  const revision = activeRevision(input.current)
-  if (revision === null) return skip("goal-not-active")
-  if (revision !== input.expected.objectiveRevision) return skip("revision-changed")
-  if (!input.stillQuiescent) return skip("no-longer-quiescent")
+  const o = input.current.state.objective
+  if (o.objectiveId !== input.expected.objectiveId) return skip("objective-changed")
+  if (input.current.revision !== input.expected.objectiveRevision) return skip("revision-changed")
+  if (o.status !== "active") return skip("goal-not-active")
+  if (input.activityEpoch !== input.expected.activityEpoch) return skip("activity-epoch-changed")
+  if (!input.quiescence.quiescent) return skip("no-longer-quiescent", input.quiescence.reason)
   return { arm: true }
 }
 
-const keyFor = (threadId: string, objectiveRevision: number, checkpointOrdinal: number): string =>
-  JSON.stringify([threadId, objectiveRevision, checkpointOrdinal])
+// ── claim registry ───────────────────────────────────────────────────────────
 
-const makeAttempt = (input: GoalWakeArm, objectiveRevision: number): GoalWakeAttempt => ({
-  threadId: input.threadId,
-  objectiveRevision,
-  checkpointOrdinal: input.checkpointOrdinal,
-  attemptKey: keyFor(input.threadId, objectiveRevision, input.checkpointOrdinal),
-})
+const keyFor = (attempt: GoalWakeAttempt): string =>
+  JSON.stringify([
+    attempt.threadId,
+    attempt.objectiveId,
+    attempt.objectiveRevision,
+    attempt.checkpointOrdinal,
+  ])
 
-/**
- * A small, ephemeral registry for one host/session. It is not objective state
- * and deliberately has no persistence: a restart re-evaluates the authority
- * revision before it may enqueue. Hosts with multiple wake surfaces may inject
- * one shared registry instead.
- */
+interface RegistryEntry {
+  objectiveId: string
+  highestCommittedOrdinal: number
+  reserved: { readonly attemptKey: string } | undefined
+}
+
 export const createInMemoryGoalWakeAttemptRegistry = (): GoalWakeAttemptRegistry => {
-  const claims = new Map<string, { committed: boolean }>()
+  const entries = new Map<string, RegistryEntry>()
   return {
     tryClaim: (attempt): GoalWakeAttemptReservation | null => {
-      if (claims.has(attempt.attemptKey)) return null
-      const claim = { committed: false }
-      claims.set(attempt.attemptKey, claim)
+      let entry = entries.get(attempt.threadId)
+      if (entry === undefined || entry.objectiveId !== attempt.objectiveId) {
+        entry = {
+          objectiveId: attempt.objectiveId,
+          highestCommittedOrdinal: -1,
+          reserved: undefined,
+        }
+        entries.set(attempt.threadId, entry)
+      }
+      if (attempt.checkpointOrdinal <= entry.highestCommittedOrdinal) return null
+      if (entry.reserved !== undefined) return null
+      const claim = { attemptKey: attempt.attemptKey }
+      entry.reserved = claim
+      const live = entry
       let settled = false
       return {
         commit: (): void => {
           if (settled) return
           settled = true
-          claim.committed = true
+          if (live.reserved === claim) live.reserved = undefined
+          live.highestCommittedOrdinal = Math.max(
+            live.highestCommittedOrdinal,
+            attempt.checkpointOrdinal,
+          )
         },
         release: (): void => {
           if (settled) return
           settled = true
-          // A stale release must never erase a newer claimant for the same key.
-          if (claims.get(attempt.attemptKey) === claim) claims.delete(attempt.attemptKey)
+          if (live.reserved === claim) live.reserved = undefined
         },
       }
     },
+    forget: (threadId): void => {
+      entries.delete(threadId)
+    },
+    size: (): number => entries.size,
   }
 }
 
-/**
- * Build a single-timer controller. The constructor is intentionally effect-free:
- * nothing is read or scheduled until `arm`/`reset` is called.
- */
-export const createGoalWakeController = (deps: GoalWakeControllerDeps): GoalWakeController => {
-  const attempts = deps.attempts ?? createInMemoryGoalWakeAttemptRegistry()
-  const delayMs =
-    Number.isFinite(deps.quietWindowMs) && deps.quietWindowMs > 0 ? deps.quietWindowMs : 1
-  let stopped = false
-  let generation = 0
-  let pending: GoalWakeTimerHandle | undefined
+// ── controller ───────────────────────────────────────────────────────────────
 
-  const reportSkip = (attempt: GoalWakeAttempt, reason: GoalWakeSkipReason): void => {
+interface WakeState {
+  clampReported: boolean
+  stopped: boolean
+  generation: number
+  epoch: number
+  pending: GoalWakeTimerHandle | undefined
+  status: GoalWakeStatus
+}
+
+interface WakeCtx {
+  readonly deps: GoalWakeControllerDeps
+  readonly attempts: GoalWakeAttemptRegistry
+  readonly now: () => number
+  readonly quiet: ReturnType<typeof clampGoalQuietMs>
+  readonly s: WakeState
+}
+
+type Captured = {
+  readonly attempt: GoalWakeAttempt
+  readonly delayMs: number
+  readonly reason: GoalWakeDelayReason
+}
+type DelayOverride = { readonly delayMs: number; readonly reason: GoalWakeDelayReason }
+
+/** No-throw guards over the injected ports + the typed decision sink. */
+const makeGuards = (ctx: WakeCtx) => {
+  const { deps, s } = ctx
+  const emit = (event: GoalWakeDecisionEvent): void => {
     try {
-      deps.onSkip?.(attempt, reason)
-    } catch {
-      // Observability is not an authority and cannot destabilize scheduling.
+      deps.onDecision?.(event)
+    } catch (e) {
+      logger.warn(`goal-wake-controller.onDecision: ${errMessage(e)}`)
     }
   }
-
+  const reportSkip = (decision: GoalWakeDecision, attemptKey?: string): void => {
+    const reason = decision.skipReason ?? "authority-unavailable"
+    const busy = decision.busyReason !== undefined ? { busyReason: decision.busyReason } : {}
+    s.status = { kind: "idle", skipReason: reason, ...busy }
+    emit({ kind: "skipped", reason, ...busy, ...(attemptKey !== undefined ? { attemptKey } : {}) })
+  }
   const clearPending = (): void => {
-    if (pending === undefined) return
-    const handle = pending
-    pending = undefined
+    if (s.pending === undefined) return
+    const handle = s.pending
+    s.pending = undefined
     try {
       deps.timer.clear(handle)
-    } catch {
-      // Generation fencing below still makes an uncleared callback inert.
+    } catch (e) {
+      logger.warn(`goal-wake-controller.clear: ${errMessage(e)}`)
     }
   }
-
   const readCurrent = (threadId: string): ObjectiveDomainSnapshot | null => {
     try {
       return deps.readDomain(threadId)
-    } catch {
+    } catch (e) {
+      logger.warn(`goal-wake-controller.readDomain(${threadId}): ${errMessage(e)}`)
       return null
     }
   }
+  const quiescenceOf = (threadId: string): GoalQuiescence => {
+    try {
+      return deps.quiescence(threadId)
+    } catch (e) {
+      logger.warn(`goal-wake-controller.quiescence(${threadId}): ${errMessage(e)}`)
+      return { quiescent: false, reason: "not-idle" }
+    }
+  }
+  const slotBlocked = (): boolean => {
+    try {
+      return deps.attemptSlotBlocked?.() === true
+    } catch {
+      return true
+    }
+  }
+  return { emit, reportSkip, clearPending, readCurrent, quiescenceOf, slotBlocked }
+}
+type Guards = ReturnType<typeof makeGuards>
 
-  const captureAttempt = (input: GoalWakeArm): GoalWakeAttempt | undefined => {
-    const current = readCurrent(input.threadId)
+/** Arm-time fences (eligibility → attempt slot → quiescence) as a typed status. */
+const explainNow = (ctx: WakeCtx, g: Guards, threadId: string): GoalWakeStatus => {
+  const { deps, s } = ctx
+  const decision = evaluateGoalWakeArm({
+    enabled: deps.enabled,
+    stopped: s.stopped,
+    threadId,
+    checkpointOrdinal: 0,
+    current: g.readCurrent(threadId),
+    productCap: deps.productCap,
+  })
+  if (!decision.arm) {
+    return { kind: "idle", skipReason: decision.skipReason ?? "authority-unavailable" }
+  }
+  if (g.slotBlocked()) return { kind: "idle", skipReason: "attempt-slot-blocked" }
+  const quiescence = g.quiescenceOf(threadId)
+  if (!quiescence.quiescent) {
+    return { kind: "idle", skipReason: "no-longer-quiescent", busyReason: quiescence.reason }
+  }
+  return { kind: "idle" }
+}
+
+/** Arm path: capture (fences + typed delay) and schedule the one owned timer. */
+const makeArmPath = (
+  ctx: WakeCtx,
+  g: Guards,
+  fireRef: { current: (attempt: GoalWakeAttempt, generation: number) => Promise<void> },
+) => {
+  const { deps, s, now, quiet } = ctx
+  const captureAttempt = (input: GoalWakeArm, override?: DelayOverride): Captured | undefined => {
+    const current = g.readCurrent(input.threadId)
     const decision = evaluateGoalWakeArm({
       enabled: deps.enabled,
-      stopped,
+      stopped: s.stopped,
       threadId: input.threadId,
       checkpointOrdinal: input.checkpointOrdinal,
       current,
+      productCap: deps.productCap,
     })
-    if (!decision.arm) return undefined
-    const revision = activeRevision(current)
-    // `evaluateGoalWakeArm` proved this. Retaining this branch makes a future
-    // change to that pure function fail safe rather than minting an invalid key.
-    if (revision === null) return undefined
-    return makeAttempt(input, revision)
-  }
-
-  const quiescentAtFire = (threadId: string): boolean => {
-    try {
-      return deps.stillQuiescent(threadId) === true
-    } catch (e) {
-      // `false` (= not quiescent = do not fire) stays the fail-SAFE answer. But a
-      // probe that throws every time silently means the wake never fires again,
-      // which is indistinguishable from a thread that is simply always busy.
-      logger.warn(`goal-wake-controller.quiescentAtFire(${threadId}): ${errMessage(e)}`)
-      return false
+    if (!decision.arm || current === null || current.state === null) {
+      g.reportSkip(decision)
+      return undefined
     }
+    if (g.slotBlocked()) {
+      g.reportSkip(skip("attempt-slot-blocked"))
+      return undefined
+    }
+    const quiescence = g.quiescenceOf(input.threadId)
+    if (!quiescence.quiescent) {
+      g.reportSkip(skip("no-longer-quiescent", quiescence.reason))
+      return undefined
+    }
+    const bare: GoalWakeAttempt = {
+      threadId: input.threadId,
+      objectiveId: current.state.objective.objectiveId,
+      objectiveRevision: current.revision,
+      checkpointOrdinal: input.checkpointOrdinal,
+      activityEpoch: s.epoch,
+      attemptKey: "",
+    }
+    const derived =
+      override ??
+      computeGoalWakeDelay({
+        baseQuietMs: quiet.quietMs,
+        ...deriveWakeSignal(current.progressReceipts),
+        usageLimitedUntil: current.state.usageLimitedUntil,
+        now: now(),
+      })
+    return { attempt: { ...bare, attemptKey: keyFor(bare) }, ...derived }
   }
+  const scheduleAttempt = (captured: Captured): GoalWakeAttempt | undefined => {
+    const callbackGeneration = ++s.generation
+    try {
+      const handle = deps.timer.set(
+        () => void fireRef.current(captured.attempt, callbackGeneration),
+        captured.delayMs,
+      )
+      s.pending = handle
+      if (typeof handle === "object" && handle !== null) handle.unref?.()
+    } catch (e) {
+      logger.warn(`goal-wake-controller.timer.set: ${errMessage(e)}`)
+      return undefined
+    }
+    s.status = {
+      kind: "armed",
+      delayMs: captured.delayMs,
+      reason: captured.reason,
+      fireAt: now() + captured.delayMs,
+    }
+    g.emit({
+      kind: "armed",
+      attemptKey: captured.attempt.attemptKey,
+      delayMs: captured.delayMs,
+      reason: captured.reason,
+    })
+    return captured.attempt
+  }
+  /** Re-arm from the FRESH state after a fire-time skip (never a hot loop:
+   *  a cooldown override applies when the source could not be reconciled). */
+  const rearm = (attempt: GoalWakeAttempt, override?: DelayOverride): void => {
+    if (s.stopped) return
+    const captured = captureAttempt(
+      { threadId: attempt.threadId, checkpointOrdinal: attempt.checkpointOrdinal + 1 },
+      override,
+    )
+    if (captured !== undefined) scheduleAttempt(captured)
+  }
+  const armInternal = (input: GoalWakeArm, replace: boolean): GoalWakeAttempt | undefined => {
+    if (!deps.enabled) {
+      s.status = { kind: "idle", skipReason: "disabled" }
+      return undefined // default-OFF never reads a port
+    }
+    if (s.stopped) return undefined
+    if (s.pending !== undefined && !replace) return undefined
+    if (quiet.clamped && !s.clampReported) {
+      s.clampReported = true
+      g.emit({ kind: "quiet-clamped", requestedMs: deps.baseQuietMs, quietMs: quiet.quietMs })
+    }
+    if (replace) {
+      s.generation += 1
+      g.clearPending()
+    }
+    const captured = captureAttempt(input)
+    return captured === undefined ? undefined : scheduleAttempt(captured)
+  }
+  return { rearm, armInternal }
+}
 
+/** Fire path: reconcile → reread fences → bounded claim → enqueue. */
+const makeFirePath = (ctx: WakeCtx, g: Guards, arm: ReturnType<typeof makeArmPath>) => {
+  const { deps, s, now, quiet, attempts } = ctx
   const dispatchClaimed = (
     attempt: GoalWakeAttempt,
     reservation: GoalWakeAttemptReservation,
@@ -284,68 +506,132 @@ export const createGoalWakeController = (deps: GoalWakeControllerDeps): GoalWake
       reservation.release()
     }
   }
-
-  const fireAttempt = (attempt: GoalWakeAttempt, callbackGeneration: number): void => {
-    if (callbackGeneration !== generation || stopped) return
-    pending = undefined
+  const reconcileFirst = async (attempt: GoalWakeAttempt): Promise<"proceed" | "cooldown"> => {
+    if (deps.reconcile === undefined) return "proceed"
+    try {
+      const outcome = await deps.reconcile(attempt.threadId)
+      return outcome.kind === "fresh" ||
+        outcome.kind === "invalidated" ||
+        outcome.kind === "no-objective"
+        ? "proceed"
+        : "cooldown"
+    } catch (e) {
+      logger.warn(`goal-wake-controller.reconcile(${attempt.threadId}): ${errMessage(e)}`)
+      return "cooldown"
+    }
+  }
+  /** A stale callback (generation moved on) is dropped; when raw input moved
+   *  the epoch since the arm, say so (typed) instead of vanishing. */
+  const staleCallback = (attempt: GoalWakeAttempt, callbackGeneration: number): boolean => {
+    if (s.stopped) return true
+    if (callbackGeneration === s.generation) return false
+    if (attempt.activityEpoch !== s.epoch) {
+      g.reportSkip(skip("activity-epoch-changed"), attempt.attemptKey)
+    }
+    return true
+  }
+  const cooldownAfterReconcile = (attempt: GoalWakeAttempt): void => {
+    g.reportSkip(skip("reconcile-unavailable"), attempt.attemptKey)
+    const cooldown = computeGoalWakeDelay({
+      baseQuietMs: quiet.quietMs,
+      signal: "failure",
+      streak: Math.max(
+        1,
+        deriveWakeSignal(g.readCurrent(attempt.threadId)?.progressReceipts).streak,
+      ),
+      now: now(),
+    })
+    arm.rearm(attempt, { delayMs: cooldown.delayMs, reason: "cooldown" })
+  }
+  const fireAfterReconcile = (attempt: GoalWakeAttempt): void => {
     const fire = evaluateGoalWakeFire({
       enabled: deps.enabled,
-      stopped,
+      stopped: s.stopped,
       expected: attempt,
-      current: readCurrent(attempt.threadId),
-      stillQuiescent: quiescentAtFire(attempt.threadId),
+      current: g.readCurrent(attempt.threadId),
+      activityEpoch: s.epoch,
+      quiescence: g.quiescenceOf(attempt.threadId),
     })
     if (!fire.arm) {
-      if (fire.skipReason !== undefined) reportSkip(attempt, fire.skipReason)
+      g.reportSkip(fire, attempt.attemptKey)
+      // A reconcile that moved the objective (revision changed) re-arms from
+      // the fresh state; raw input or a busy surface waits for its own edge.
+      if (fire.skipReason === "revision-changed" && deps.reconcile !== undefined) arm.rearm(attempt)
       return
     }
     const reservation = attempts.tryClaim(attempt)
     if (reservation === null) {
-      reportSkip(attempt, "attempt-already-claimed")
+      g.reportSkip(skip("attempt-already-claimed"), attempt.attemptKey)
       return
     }
+    s.status = { kind: "idle" }
+    g.emit({ kind: "fired", attemptKey: attempt.attemptKey })
     dispatchClaimed(attempt, reservation)
   }
-
-  const scheduleAttempt = (attempt: GoalWakeAttempt): GoalWakeAttempt | undefined => {
-    const callbackGeneration = ++generation
-    try {
-      const handle = deps.timer.set(() => fireAttempt(attempt, callbackGeneration), delayMs)
-      pending = handle
-      if (typeof handle === "object" && handle !== null) handle.unref?.()
-      return attempt
-    } catch {
-      return undefined
+  const fireAttempt = async (
+    attempt: GoalWakeAttempt,
+    callbackGeneration: number,
+  ): Promise<void> => {
+    if (staleCallback(attempt, callbackGeneration)) return
+    s.pending = undefined
+    const reconciled = await reconcileFirst(attempt)
+    if (staleCallback(attempt, callbackGeneration)) return
+    if (reconciled === "cooldown") {
+      cooldownAfterReconcile(attempt)
+      return
     }
+    fireAfterReconcile(attempt)
   }
+  return { fireAttempt }
+}
 
-  const armInternal = (input: GoalWakeArm, replace: boolean): GoalWakeAttempt | undefined => {
-    if (!deps.enabled || stopped) return undefined // default-OFF never reads a port
-    if (pending !== undefined && !replace) return undefined
-    if (replace) {
-      generation += 1
-      clearPending()
-    }
-    const attempt = captureAttempt(input)
-    return attempt === undefined ? undefined : scheduleAttempt(attempt)
+export const createGoalWakeController = (deps: GoalWakeControllerDeps): GoalWakeController => {
+  const ctx: WakeCtx = {
+    deps,
+    attempts: deps.attempts ?? createInMemoryGoalWakeAttemptRegistry(),
+    now: deps.now ?? Date.now,
+    quiet: clampGoalQuietMs(deps.baseQuietMs),
+    s: {
+      clampReported: false,
+      stopped: false,
+      generation: 0,
+      epoch: 0,
+      pending: undefined,
+      status: { kind: "idle" },
+    },
   }
-
+  const { s } = ctx
+  const g = makeGuards(ctx)
+  const fireRef = { current: async (_a: GoalWakeAttempt, _g: number): Promise<void> => {} }
+  const arm = makeArmPath(ctx, g, fireRef)
+  fireRef.current = makeFirePath(ctx, g, arm).fireAttempt
+  const dropPending = (): void => {
+    s.generation += 1
+    g.clearPending()
+    if (s.status.kind === "armed") s.status = { kind: "idle" }
+  }
   return {
-    arm: (input): GoalWakeAttempt | undefined => armInternal(input, false),
-    reset: (input): GoalWakeAttempt | undefined => armInternal(input, true),
+    arm: (input): GoalWakeAttempt | undefined => arm.armInternal(input, false),
+    reset: (input): GoalWakeAttempt | undefined => arm.armInternal(input, true),
     onActivity: (): void => {
-      generation += 1
-      clearPending()
+      s.epoch += 1
+      dropPending()
     },
-    cancel: (): void => {
-      generation += 1
-      clearPending()
-    },
+    cancel: dropPending,
     stop: (): void => {
-      if (stopped) return
-      stopped = true
-      generation += 1
-      clearPending()
+      if (s.stopped) return
+      s.stopped = true
+      s.generation += 1
+      g.clearPending()
+      s.status = { kind: "stopped" }
     },
+    status: (): GoalWakeStatus => s.status,
+    explain: (threadId): GoalWakeStatus => {
+      if (s.stopped) return { kind: "stopped" }
+      if (s.status.kind === "armed" && s.pending !== undefined) return s.status
+      if (!deps.enabled) return { kind: "idle", skipReason: "disabled" }
+      return explainNow(ctx, g, threadId)
+    },
+    activityEpoch: (): number => s.epoch,
   }
 }

@@ -16,6 +16,7 @@
 
 import {
   criterionSatisfied,
+  type GoalWakeStatus,
   type ObjectiveDomainSnapshot,
   type ObjectiveStatus,
   type ProgressTurnOutcome,
@@ -57,6 +58,8 @@ export interface GoalReport {
   }
   readonly lastAttempt?: { readonly outcome: ProgressTurnOutcome; readonly ageMs: number }
   readonly checkpoint: { readonly receipts: number; readonly sourceDigest: "present" | "absent" }
+  /** GOAL-06 — the wake controller's typed scheduling decision (absent ⇒ no controller). */
+  readonly wake?: GoalWakeStatus
 }
 
 /** Operator-facing short form of the authority-minted id (never the raw id). */
@@ -67,6 +70,7 @@ const age = (now: number, at: number): number => Math.max(0, now - at)
 export const buildGoalReport = (
   domain: ObjectiveDomainSnapshot,
   now: number,
+  wake?: GoalWakeStatus,
 ): GoalReport | null => {
   const state = domain.state
   if (state === null) return null
@@ -122,7 +126,21 @@ export const buildGoalReport = (
       receipts: receipts.length,
       sourceDigest: last?.sourceDigest !== undefined ? "present" : "absent",
     },
+    ...(wake !== undefined ? { wake } : {}),
   }
+}
+
+/** One line for the wake decision (typed; the PTY suite asserts this text). */
+export const formatWakeStatus = (wake: GoalWakeStatus | undefined): string => {
+  if (wake === undefined)
+    return "wake: not composed (QUANTA_GOAL_ENFORCE=1 arms autonomous pursuit)"
+  if (wake.kind === "stopped") return "wake: stopped"
+  if (wake.kind === "armed") return `wake: armed in ${formatAge(wake.delayMs)} (${wake.reason})`
+  const why =
+    wake.skipReason === undefined
+      ? ""
+      : ` (${wake.skipReason}${wake.busyReason === undefined ? "" : `: ${wake.busyReason}`})`
+  return `wake: idle${why}`
 }
 
 // ── text renderer ────────────────────────────────────────────────────────────
@@ -190,6 +208,7 @@ export const renderGoalReport = (report: GoalReport | null): string => {
     listBlock("blocked", blockerRows) +
     budgetLine(r.budget) +
     lastLine +
-    `  checkpoint: ${r.checkpoint.receipts} receipt(s) · source digest ${r.checkpoint.sourceDigest}\n`
+    `  checkpoint: ${r.checkpoint.receipts} receipt(s) · source digest ${r.checkpoint.sourceDigest}\n` +
+    `  ${formatWakeStatus(r.wake)}\n`
   )
 }

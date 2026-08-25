@@ -25,6 +25,7 @@ import {
   type CriterionDeclaration,
   createObjectiveCapabilities,
   type GoalDefinition,
+  type GoalWakeStatus,
   type Objective,
   type ObjectiveBudgetLimit,
   type ObjectiveCapabilities,
@@ -68,6 +69,8 @@ export interface GoalControlDeps {
   /** `/goal work` sink — the session's external prompt queue. Absent ⇒ not wired. */
   readonly enqueueWork?: ((input: CliPromptInput) => void) | undefined
   readonly workAttemptId?: (() => string) | undefined
+  /** GOAL-06 — the wake controller's typed scheduling decision for the report. */
+  readonly wakeStatus?: (() => GoalWakeStatus | undefined) | undefined
   readonly now?: (() => number) | undefined
 }
 
@@ -157,7 +160,8 @@ export const buildGoalControl = (deps: GoalControlDeps): GoalControl => {
   const caps: ObjectiveCapabilities = createObjectiveCapabilities(deps.port)
   const now = deps.now ?? Date.now
   const { threadId } = deps
-  const read = (): GoalReport | null => buildGoalReport(caps.read.readDomain(threadId), now())
+  const read = (): GoalReport | null =>
+    buildGoalReport(caps.read.readDomain(threadId), now(), deps.wakeStatus?.())
   const live = (): Objective | null => caps.read.get(threadId)
 
   /** The single commit of a command, always followed by a FRESH re-read. */

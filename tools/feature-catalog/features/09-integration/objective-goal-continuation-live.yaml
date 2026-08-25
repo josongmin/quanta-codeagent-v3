@@ -101,7 +101,7 @@ evidence:
   tests:
     unit:
       - tests/unit/goal-pursuit-chain-hellgate.test.ts
-      - tests/unit/goal-continuation-ticker-hellgate.test.ts
+      - tests/unit/apps/cli/goal-wake-hook.test.ts
       - tests/unit/goal-pursuit-prompt-hellgate.test.ts
       - tests/unit/status-pills-goal-chip-hellgate.test.ts
       - tests/unit/apps/cli/goal-wake-hook.test.ts

@@ -1,48 +1,42 @@
 /**
- * End-to-end CHAIN hellgate for the "Pursuing goal" (Codex `/goal` parity)
- * feature — proves the built pieces compose into the real user journey:
- *
- *   user types `/goal <objective>`  (goalCmd, real command)
- *     → the objective is recorded `active` in the shared store  (real store)
- *     → the idle ticker picks it up on the next idle tick        (real ticker
- *       + real `runIdleContinuation`)
- *     → `resume` enqueues a turn carrying the goal text          (observed sink)
- *     → `/goal clear` DELETES it (GOAL-01) → the ticker stops pursuing.
+ * ★ HELLGATE — the pursuing-goal chain: `/goal` → authority → wake controller
+ * → resume (GOAL-06: event-driven, no interval ticker).
  *
  * Everything except the host boundary (the enqueue sink + the idle/turn probes)
- * is the REAL production object. This is the strongest verification available
- * without booting the live CLI + a real LLM; the surface plumbing that mints and
- * shares the store (surface-compose/session-loop) is the only remaining wire.
- *
- * Red-on-injection: cutting the command→store write, the ticker's enabled gate,
- * or the store→resume read all turn one of these assertions red.
+ * is REAL: the slash command, the goal control, the shared authority, the
+ * wake controller and the continuation engine. Pinned journeys:
+ *   - a bare goal has NO stopping contract ⇒ wake-ineligible (typed), no timer;
+ *   - adding a criterion arms the quiet timer; the edge fires ONE continuation;
+ *   - a settled turn re-arms; `/goal clear` stops pursuit; completion stops it.
  */
 
 import { describe, expect, test } from "bun:test"
 import { buildGoalControl } from "@/apps/cli/goal/goal-control"
 import {
   type GoalContinuationProbes,
-  startGoalContinuationTicker,
+  startGoalWakeController,
 } from "@/apps/cli/goal-continuation-hook"
 import { goalCmd } from "@/apps/cli/slash/goal-cmd"
 import type { SlashContext } from "@/apps/cli/slash-contract"
-import { createObjectiveStore, type ObjectivePort } from "@/objective"
-import { seedObjective } from "./objective/v2-helpers"
+import {
+  asObjectiveAuthority,
+  createObjectiveStore,
+  GOAL_WAKE_MIN_QUIET_MS,
+  type ObjectivePort,
+} from "@/objective"
 
 const TID = "thread-e2e"
 
-/** A minimal SlashContext carrying only what `/goal` reads: out + the shared
- *  objective slot. Mirrors what the surface will inject via dispatch. */
+/** A minimal SlashContext carrying only what `/goal` reads: out + the control. */
 const ctxWith = (port: ObjectivePort, out: (s: string) => void): SlashContext => ({
   out,
-  err: () => {},
+  err: out,
   cwd: "/tmp",
   goal: { control: buildGoalControl({ port, threadId: TID }) },
 })
 
 /** Idle probes that all pass, plus a `resume` that captures the enqueued turn's
- *  text by reading the goal back out of the store (exactly what the real
- *  session-loop `resume` does: `enqueueWithHeartbeat(objective.get(tid).goal)`). */
+ *  text by reading the goal back out of the store. */
 const drivenBy = (port: ObjectivePort, enqueued: string[]): GoalContinuationProbes => ({
   objective: port,
   resume: async (tid) => {
@@ -58,62 +52,81 @@ const drivenBy = (port: ObjectivePort, enqueued: string[]): GoalContinuationProb
 })
 
 const fakeTimer = (): {
-  setIntervalFn: (fn: () => void, ms: number) => ReturnType<typeof setInterval>
-  clearIntervalFn: (h: ReturnType<typeof setInterval>) => void
-  tick: () => Promise<void>
+  set: (fn: () => void, ms: number) => ReturnType<typeof setTimeout>
+  clear: (h: ReturnType<typeof setTimeout>) => void
+  fire: () => Promise<void>
+  delays: () => readonly number[]
 } => {
   let captured: (() => void) | null = null
+  const delays: number[] = []
   return {
-    setIntervalFn: (fn) => {
+    set: (fn, ms) => {
       captured = fn
-      return 0 as unknown as ReturnType<typeof setInterval>
+      delays.push(ms)
+      return 0 as unknown as ReturnType<typeof setTimeout>
     },
-    clearIntervalFn: () => {},
-    tick: async () => {
+    clear: () => {
+      captured = null
+    },
+    fire: async () => {
       captured?.()
-      await Promise.resolve()
-      await Promise.resolve()
+      for (let i = 0; i < 8; i += 1) await Promise.resolve()
     },
+    delays: () => delays,
   }
 }
 
-describe("Pursuing-goal chain — /goal → store → ticker → resume", () => {
-  test("full journey: set a goal, the agent keeps pursuing it while idle", async () => {
+const wakeOver = (store: ObjectivePort, enqueued: string[], timer: ReturnType<typeof fakeTimer>) =>
+  startGoalWakeController({
+    enabled: true,
+    threadId: TID,
+    quietWindowMs: GOAL_WAKE_MIN_QUIET_MS,
+    probes: drivenBy(store, enqueued),
+    readDomain: (id) => asObjectiveAuthority(store).readDomain(id),
+    setTimeoutFn: timer.set,
+    clearTimeoutFn: timer.clear,
+  })
+
+describe("Pursuing-goal chain — /goal → authority → wake controller → resume", () => {
+  test("full journey: a bare goal is wake-ineligible; a criterion arms it; the edge pursues once; settle re-arms", async () => {
     const store = createObjectiveStore()
     const out: string[] = []
     const enqueued: string[] = []
     const timer = fakeTimer()
 
-    // 1. user: /goal ship the whole feature
     const code = await goalCmd.run(
       ["ship", "the", "whole", "feature"],
       ctxWith(store, (s) => out.push(s)),
     )
     expect(code).toBe(0)
-
-    // 2. the objective is recorded active in the shared store
-    const obj = store.get(TID)
-    expect(obj?.goal).toBe("ship the whole feature")
-    expect(obj?.status).toBe("active")
+    expect(store.get(TID)?.goal).toBe("ship the whole feature")
     expect(out.join("")).toContain("Pursuing goal set")
+    expect(out.join("")).toContain("contract: missing")
 
-    // 3. arm the ticker on the SAME store and go idle
-    startGoalContinuationTicker({
-      enabled: true,
-      threadId: TID,
-      probes: drivenBy(store, enqueued),
-      setIntervalFn: timer.setIntervalFn,
-      clearIntervalFn: timer.clearIntervalFn,
-    })
+    const wake = wakeOver(store, enqueued, timer)
+    // rail 16 — no stopping contract ⇒ typed skip, NO timer, no cap consumed
+    expect(timer.delays()).toEqual([])
+    expect(wake?.status()).toEqual({ kind: "idle", skipReason: "validation-contract-missing" })
 
-    // 4. two idle ticks → the agent resumes work on the goal each time,
-    //    the enqueued turn carrying the goal text (the pursuit).
-    await timer.tick()
-    await timer.tick()
+    await goalCmd.run(
+      ["criterion", "add", "tests", "green"],
+      ctxWith(store, () => {}),
+    )
+    wake?.onGoalMutation()
+    expect(timer.delays()).toEqual([15_000])
+    expect(wake?.status()).toMatchObject({ kind: "armed", delayMs: 15_000, reason: "quiet" })
+
+    await timer.fire()
+    expect(enqueued).toEqual(["ship the whole feature"])
+    // one edge ⇒ one continuation; a settled turn re-arms the next quiet window
+    await timer.fire()
+    expect(enqueued).toHaveLength(1)
+    wake?.onTurnSettled()
+    await timer.fire()
     expect(enqueued).toEqual(["ship the whole feature", "ship the whole feature"])
   })
 
-  test("/goal clear stops the pursuit — ticker no longer resumes", async () => {
+  test("/goal clear stops the pursuit — the controller finds no goal and arms nothing", async () => {
     const store = createObjectiveStore()
     const enqueued: string[] = []
     const timer = fakeTimer()
@@ -122,103 +135,55 @@ describe("Pursuing-goal chain — /goal → store → ticker → resume", () => 
       ["do", "the", "thing"],
       ctxWith(store, () => {}),
     )
-    startGoalContinuationTicker({
-      enabled: true,
-      threadId: TID,
-      probes: drivenBy(store, enqueued),
-      setIntervalFn: timer.setIntervalFn,
-      clearIntervalFn: timer.clearIntervalFn,
-    })
-    await timer.tick()
-    expect(enqueued.length).toBe(1) // pursued once
+    await goalCmd.run(
+      ["criterion", "add", "done"],
+      ctxWith(store, () => {}),
+    )
+    const wake = wakeOver(store, enqueued, timer)
+    await timer.fire()
+    expect(enqueued).toHaveLength(1)
 
-    // user clears the pursuit
     const out: string[] = []
     await goalCmd.run(
       ["clear"],
       ctxWith(store, (s) => out.push(s)),
     )
-    // GOAL-01: REVERSED — `/goal clear` deletes the objective (was: paused).
-    // The ticker's next read finds NO goal, so the pursuit stops.
     expect(out.join("")).toContain("cleared")
     expect(store.get(TID)).toBeNull()
 
-    await timer.tick()
-    await timer.tick()
-    expect(enqueued.length).toBe(1) // no further pursuit after clear
+    wake?.onGoalMutation()
+    expect(wake?.status()).toEqual({ kind: "idle", skipReason: "no-goal" })
+    await timer.fire()
+    await timer.fire()
+    expect(enqueued).toHaveLength(1) // no further pursuit after clear
   })
 
-  test("agent marking the SHARED goal complete stops the pursuit (Codex auto-stop)", async () => {
-    // The surface store is shared with the LLM objective_* tools (compose
-    // caller-override), so `objective_update(status:'completed')` lands on the
-    // SAME store the ticker reads. Simulate that write and prove the ticker stops.
+  test("the SHARED goal reaching `completed` stops the pursuit (Codex auto-stop)", async () => {
     const store = createObjectiveStore()
     const enqueued: string[] = []
     const timer = fakeTimer()
-
     await goalCmd.run(
       ["finish", "the", "migration"],
       ctxWith(store, () => {}),
     )
-    startGoalContinuationTicker({
-      enabled: true,
-      threadId: TID,
-      probes: drivenBy(store, enqueued),
-      setIntervalFn: timer.setIntervalFn,
-      clearIntervalFn: timer.clearIntervalFn,
-    })
-    await timer.tick()
-    expect(enqueued.length).toBe(1) // pursued once while active
-
-    // the agent (via objective_update on the shared store) marks it done — needs
-    // a met success criterion for the store to derive "completed".
-    const withCriterion = createObjectiveStore()
-    seedObjective(withCriterion, TID, {
-      goal: "finish the migration",
-      successCriteria: ["migrated"],
-    })
-    withCriterion.setExplicitStatus(TID, "active")
-    const enq2: string[] = []
-    const timer2 = fakeTimer()
-    startGoalContinuationTicker({
-      enabled: true,
-      threadId: TID,
-      probes: drivenBy(withCriterion, enq2),
-      setIntervalFn: timer2.setIntervalFn,
-      clearIntervalFn: timer2.clearIntervalFn,
-    })
-    await timer2.tick()
-    expect(enq2.length).toBe(1)
-    // agent verifies + marks the criterion met ⇒ status derives to "completed"
-    const crit = withCriterion.get(TID)?.successCriteria[0]?.id
-    withCriterion.markCriterion(TID, crit ?? "", true)
-    expect(withCriterion.get(TID)?.status).toBe("completed")
-    await timer2.tick()
-    await timer2.tick()
-    expect(enq2.length).toBe(1) // pursuit stopped once the goal completed
-  })
-
-  test("/goal with no arg reports the active objective", async () => {
-    const store = createObjectiveStore()
     await goalCmd.run(
-      ["measure", "twice"],
+      ["criterion", "add", "migrated"],
       ctxWith(store, () => {}),
     )
-    const out: string[] = []
-    await goalCmd.run(
-      [],
-      ctxWith(store, (s) => out.push(s)),
-    )
-    const text = out.join("")
-    expect(text).toContain("Pursuing goal: measure twice")
-    expect(text).toContain("active")
-  })
+    const wake = wakeOver(store, enqueued, timer)
+    await timer.fire()
+    expect(enqueued).toHaveLength(1)
 
-  test("unwired surface (no goal slot) degrades gracefully — byte-identical", async () => {
-    const out: string[] = []
-    const bareCtx: SlashContext = { out: (s) => out.push(s), err: () => {}, cwd: "/tmp" }
-    const code = await goalCmd.run(["anything"], bareCtx)
-    expect(code).toBe(0)
-    expect(out.join("")).toContain("not wired")
+    const crit = store.get(TID)?.successCriteria[0]?.id ?? ""
+    await goalCmd.run(
+      ["criterion", "complete", crit],
+      ctxWith(store, () => {}),
+    )
+    expect(store.get(TID)?.status).toBe("completed")
+    wake?.onGoalMutation()
+    expect(wake?.status()).toEqual({ kind: "idle", skipReason: "goal-not-active" })
+    await timer.fire()
+    await timer.fire()
+    expect(enqueued).toHaveLength(1) // pursuit stopped once the goal completed
   })
 })

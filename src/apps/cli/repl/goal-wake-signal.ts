@@ -6,6 +6,7 @@
  * state and never decides eligibility; it merely relays real lifecycle edges
  * to the controller installed by the session loop.
  */
+import type { GoalWakeStatus, ReconcileOutcome } from "@/objective"
 import type { CliPromptInput } from "./prompt-types"
 
 export interface GoalWakeSignal {
@@ -15,6 +16,11 @@ export interface GoalWakeSignal {
    * It starts a fresh quiet window after the user-visible command completed. */
   onLocalInputSettled(): void
   onTurnSettled(): void
+  /** GOAL-06 — typed scheduling decision the `/goal` report renders. */
+  status(): GoalWakeStatus
+  /** GOAL-06 — raw-input epoch; a queued continuation is dropped at dequeue
+   *  when it no longer matches (the user's draft is never touched). */
+  activityEpoch(): number
 }
 
 export interface GoalWakeSignalSlot {
@@ -23,6 +29,9 @@ export interface GoalWakeSignalSlot {
    *  exists: `/goal work` pushes ONE foreground prompt carrying host-minted
    *  `user-requested-goal-work` provenance through it. Absent ⇒ not wired. */
   enqueueWork?: ((input: CliPromptInput) => void) | undefined
+  /** GOAL-06 — late-bound by the surface composer: the verifier's source
+   *  reconcile the controller awaits BEFORE every fire-time reread. */
+  reconcile?: ((threadId: string) => Promise<ReconcileOutcome>) | undefined
 }
 
 export const createGoalWakeSignalSlot = (): GoalWakeSignalSlot => ({ current: undefined })

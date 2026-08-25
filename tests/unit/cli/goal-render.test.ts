@@ -162,6 +162,34 @@ describe("GOAL-05A — goal report (read-port projection)", () => {
     expect(text).toMatch(/\/goal criterion add|\/goal check add/)
   })
 
+  test("GOAL-06 — the wake decision is rendered typed (armed delay + reason / idle skip reason / not composed)", () => {
+    const { authority } = seeded()
+    const domain = authority.readDomain("t")
+    expect(renderGoalReport(buildGoalReport(domain, NOW))).toContain("wake: not composed")
+    expect(
+      renderGoalReport(
+        buildGoalReport(domain, NOW, {
+          kind: "armed",
+          delayMs: 15_000,
+          reason: "quiet",
+          fireAt: NOW + 15_000,
+        }),
+      ),
+    ).toContain("wake: armed in 15s (quiet)")
+    expect(
+      renderGoalReport(
+        buildGoalReport(domain, NOW, {
+          kind: "idle",
+          skipReason: "no-longer-quiescent",
+          busyReason: "approval-pending",
+        }),
+      ),
+    ).toContain("wake: idle (no-longer-quiescent: approval-pending)")
+    expect(renderGoalReport(buildGoalReport(domain, NOW, { kind: "stopped" }))).toContain(
+      "wake: stopped",
+    )
+  })
+
   test("null report renders the no-goal hint", () => {
     expect(renderGoalReport(null)).toContain("No goal set")
   })

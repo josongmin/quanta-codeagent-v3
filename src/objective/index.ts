@@ -103,6 +103,8 @@ export {
   unsupportedCheckExecutionPort,
 } from "./criteria/verifier"
 export type {
+  GoalBusyReason,
+  GoalQuiescence,
   GoalWakeArm,
   GoalWakeAttempt,
   GoalWakeAttemptRegistry,
@@ -110,8 +112,10 @@ export type {
   GoalWakeController,
   GoalWakeControllerDeps,
   GoalWakeDecision,
+  GoalWakeDecisionEvent,
   GoalWakeFireInput,
   GoalWakeSkipReason,
+  GoalWakeStatus,
   GoalWakeTimer,
   GoalWakeTimerHandle,
 } from "./goal-wake-controller"

@@ -112,11 +112,15 @@ const buildGoalSlashSlot = (
     workspaceCwd: setup.cwd,
   })
   const goalWakeSlot = core.goalWakeSlot
+  // GOAL-06 — the wake controller awaits this SAME verifier's reconcile before
+  // every fire-time reread (late-bound: the controller starts in the loop).
+  if (goalWakeSlot !== undefined) goalWakeSlot.reconcile = (id) => verifier.reconcile(id)
   return {
     control: buildGoalControl({
       port,
       threadId: setup.sessionId,
       verifier,
+      wakeStatus: () => goalWakeSlot?.current?.status(),
       ...(goalWakeSlot === undefined
         ? {}
         : {

@@ -12,6 +12,10 @@ export interface GoalContinuationPromptMeta {
    *  autonomous continuation (the wake controller); `/goal work` mints
    *  `user-requested-goal-work` (charges the turn, not the autonomous cap). */
   readonly provenance?: ObjectiveAttemptProvenance
+  /** GOAL-06 — the wake controller's raw-input epoch captured at arm time. A
+   *  continuation whose epoch no longer matches at dequeue is dropped (only the
+   *  continuation — the user's draft is never touched). */
+  readonly activityEpoch?: number
 }
 
 export type CliPromptInput =

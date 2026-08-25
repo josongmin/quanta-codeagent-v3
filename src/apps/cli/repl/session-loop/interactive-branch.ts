@@ -58,6 +58,8 @@ export const runInteractiveBranch = async (ctx: InteractiveBranchCtx): Promise<v
       getLastTurnOutcome,
       getLastUserInputAt,
       setLastUserInputAt,
+      objectiveAttemptSlot: ctx.objectiveAttemptSlot,
+      backgroundPortal,
     })
     await runInteractiveLoop(ctx, wiring)
     // Print resume link after clean /exit so the user can continue later.

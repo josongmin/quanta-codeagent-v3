@@ -1,6 +1,6 @@
 import type { AgentConfig } from "@/agent"
 import { startAutomationEngineTicker } from "@/agent/loop-helpers"
-import type { ObjectivePort } from "@/objective"
+import type { GoalWakeDecisionEvent, ObjectiveAttemptSlot, ObjectivePort } from "@/objective"
 import { asObjectiveReadPort, buildPursuitContinuationPrompt } from "@/objective"
 import { buildAutorunEligibility } from "@/permission"
 import { injectSimulatedTurn, type LastTurnOutcome, REACTOR_ENV_FLAG } from "@/reactor"
@@ -12,6 +12,7 @@ import type { NotificationPort } from "../../notify"
 import { startReactorWatchBridge } from "../../reactor-watch-bridge"
 import type { TextInbox } from "../../text-inbox"
 import { wireInboxBannerOntoSlot } from "../automation-banner"
+import type { BackgroundTurnPortal } from "../background-turn-portal"
 import type { ExternalPromptQueue } from "../external-prompt-queue"
 import type { GoalWakeSignalSlot } from "../goal-wake-signal"
 import type { heartbeatEnqueueHandler } from "../heartbeat-binder"
@@ -68,6 +69,10 @@ export interface InteractiveSetupArgs {
   readonly getLastTurnOutcome: () => LastTurnOutcome | undefined
   readonly getLastUserInputAt: () => number
   readonly setLastUserInputAt: (at: number) => void
+  /** GOAL-06 — the GOAL-04 attempt slot (a fail-stopped slot blocks the wake). */
+  readonly objectiveAttemptSlot?: ObjectiveAttemptSlot | undefined
+  /** GOAL-06 — a live detached (Ctrl+B) body blocks the wake with a typed reason. */
+  readonly backgroundPortal?: BackgroundTurnPortal | undefined
 }
 
 /** Build every interactive-only wire (automation ticker + banner, the prompt
@@ -142,6 +147,8 @@ export const wireInteractiveSetup = async (
     activeTurnRef,
     externalPromptQueue,
     textInbox,
+    objectiveAttemptSlot: args.objectiveAttemptSlot,
+    backgroundPortal: args.backgroundPortal,
   })
 
   armGoalPill({ setup, closeStack, objectiveStore })
@@ -256,6 +263,8 @@ const armGoalWake = (args: {
   readonly activeTurnRef: AgentConfig["activeTurnRef"]
   readonly externalPromptQueue: ExternalPromptQueue
   readonly textInbox: TextInbox | undefined
+  readonly objectiveAttemptSlot: ObjectiveAttemptSlot | undefined
+  readonly backgroundPortal: BackgroundTurnPortal | undefined
 }): void => {
   const {
     setup,
@@ -265,6 +274,8 @@ const armGoalWake = (args: {
     activeTurnRef,
     externalPromptQueue,
     textInbox,
+    objectiveAttemptSlot,
+    backgroundPortal,
   } = args
   const goalWake =
     objectiveStore !== undefined
@@ -295,8 +306,22 @@ const armGoalWake = (args: {
                 threadId: attempt.threadId,
                 objectiveRevision: attempt.objectiveRevision,
                 attemptKey: attempt.attemptKey,
+                activityEpoch: attempt.activityEpoch,
               },
             })
+          },
+          // GOAL-06 — typed quiescence extras over LIVE stores + the attempt slot
+          // + the verifier reconcile the surface composer bound on the slot.
+          quiescence: {
+            backgroundTurnActive: () =>
+              backgroundPortal?.list().some((entry) => entry.state === "running") === true,
+          },
+          attemptSlotBlocked: () => objectiveAttemptSlot?.status().kind === "fail-stopped",
+          ...(goalWakeSlot?.reconcile !== undefined
+            ? { verifier: { reconcile: goalWakeSlot.reconcile } }
+            : {}),
+          onDecision: (event) => {
+            logger.info(`goal-wake ${describeWakeDecision(event)}`)
           },
           probes: {
             objective: objectiveStore,
@@ -340,6 +365,20 @@ const armGoalWake = (args: {
         goalWake.stop()
       },
     })
+  }
+}
+
+/** Bounded one-line description of a wake decision (log + PTY assertion). */
+const describeWakeDecision = (event: GoalWakeDecisionEvent): string => {
+  switch (event.kind) {
+    case "armed":
+      return `armed delay=${event.delayMs}ms reason=${event.reason}`
+    case "skipped":
+      return `skipped reason=${event.reason}${event.busyReason === undefined ? "" : ` busy=${event.busyReason}`}`
+    case "fired":
+      return "fired"
+    case "quiet-clamped":
+      return `quiet clamped requested=${event.requestedMs}ms using=${event.quietMs}ms`
   }
 }
 
