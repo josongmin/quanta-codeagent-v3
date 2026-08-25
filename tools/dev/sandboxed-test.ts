@@ -231,6 +231,20 @@ const repoUntracked = (): ReadonlySet<string> => {
   return parseUntracked(proc.stdout.toString())
 }
 
+/** Bun test flags that take NO separate value, so forwarding them cannot swallow
+ *  a path. Anything else must arrive as `--flag=value`; see {@link parseArgs}. */
+const VALUELESS_BUN_FLAGS: ReadonlySet<string> = new Set([
+  "--bail",
+  "--coverage",
+  "--only",
+  "--todo",
+  "--silent",
+  "--watch",
+  "--update-snapshots",
+  "-u",
+  "--rerun-each",
+])
+
 /**
  * Split argv into the batch count and the requested paths.
  *
@@ -244,14 +258,48 @@ const repoUntracked = (): ReadonlySet<string> => {
  */
 export const parseArgs = (
   argv: readonly string[],
-): { readonly batchCount: number; readonly targets: readonly string[] } => {
+): {
+  readonly batchCount: number
+  readonly targets: readonly string[]
+  readonly bunFlags: readonly string[]
+} => {
   const batchIdx = argv.indexOf("--batch")
   const batchCount = batchIdx === -1 ? 1 : Number(argv[batchIdx + 1] ?? "1")
   if (batchIdx !== -1 && (!Number.isInteger(batchCount) || batchCount < 1)) {
     throw new Error("sandboxed-test: --batch needs a positive integer")
   }
   const valueIdx = batchIdx === -1 ? -1 : batchIdx + 1
-  return { batchCount, targets: argv.filter((a, i) => a !== "--batch" && i !== valueIdx) }
+  const rest = argv.filter((a, i) => a !== "--batch" && i !== valueIdx)
+
+  // Anything else beginning with `-` is BUN's, not ours, and is forwarded
+  // verbatim. Treating it as a path is not cosmetic: every default script
+  // (`test`, `test:unit`, `test:fast`, `test:shard`) passes `--parallel=1`, and
+  // this suite behaves materially differently in parallel — a parallel sweep of
+  // `tests/unit src` produced ~74 failures that ALL passed in isolation, pure
+  // shared-`mock.module`/env/cwd artifacts. A runner that dropped the flag would
+  // turn the serial suite parallel while reporting normally.
+  //
+  // But a flag whose VALUE is a separate argument (`-t <pattern>`) cannot be
+  // forwarded by shape alone: the value looks exactly like a path, and reading
+  // it as one would run a different set — the precise failure this tool exists
+  // to prevent. Rather than model bun's whole flag arity (which would drift on
+  // every bun release), only the SELF-CONTAINED `--flag=value` form is accepted
+  // and everything else is refused with the fix in the message.
+  const flags = rest.filter((a) => a.startsWith("-"))
+  const ambiguous = flags.filter((f) => !f.includes("=") && !VALUELESS_BUN_FLAGS.has(f))
+  if (ambiguous.length > 0) {
+    throw new Error(
+      `sandboxed-test: cannot tell whether these consume the next argument: ${ambiguous.join(", ")}\n` +
+        "Pass them in the self-contained form instead (`-t=pat`, `--timeout=5000`). A flag that " +
+        "takes a SEPARATE value is indistinguishable from a path here, and guessing would run a " +
+        "different set of tests than you asked for.",
+    )
+  }
+  return {
+    batchCount,
+    targets: rest.filter((a) => !a.startsWith("-")),
+    bunFlags: flags,
+  }
 }
 
 /** Split `xs` into `n` contiguous batches, dropping empties. */
@@ -290,7 +338,7 @@ export const expandTestFiles = (roots: readonly string[]): readonly string[] => 
 if (import.meta.main) {
   assertPreloadsMatchBunfig(readFileSync(join(repoRoot, "bunfig.toml"), "utf8"))
 
-  const { batchCount, targets } = parseArgs(process.argv.slice(2))
+  const { batchCount, targets, bunFlags } = parseArgs(process.argv.slice(2))
   const testPaths = (targets.length > 0 ? targets : ["tests/unit"]).map((p) =>
     p.startsWith("/") ? p : join(repoRoot, p),
   )
@@ -333,7 +381,7 @@ if (import.meta.main) {
     const sandbox = mkdtempSync(join(tmpdir(), "quanta-test-cwd-"))
     if (groups.length > 1)
       writeStdout(`\n── sandbox batch ${i + 1}/${groups.length} (${group.length} file(s)) ──`)
-    const run = Bun.spawnSync(["bun", "test", ...preloadArgs, ...group], {
+    const run = Bun.spawnSync(["bun", "test", ...preloadArgs, ...bunFlags, ...group], {
       cwd: sandbox,
       stdout: "inherit",
       stderr: "inherit",

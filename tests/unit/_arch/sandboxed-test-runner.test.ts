@@ -78,6 +78,7 @@ describe("sandboxed-test runner", () => {
       expect(parseArgs(["tests/unit/retrieval"])).toEqual({
         batchCount: 1,
         targets: ["tests/unit/retrieval"],
+        bunFlags: [],
       })
     })
 
@@ -89,10 +90,12 @@ describe("sandboxed-test runner", () => {
       expect(parseArgs(["--batch", "8", "tests/unit"])).toEqual({
         batchCount: 8,
         targets: ["tests/unit"],
+        bunFlags: [],
       })
       expect(parseArgs(["tests/unit", "--batch", "4"])).toEqual({
         batchCount: 4,
         targets: ["tests/unit"],
+        bunFlags: [],
       })
     })
 
@@ -108,8 +111,46 @@ describe("sandboxed-test runner", () => {
       }
     })
 
+    test("🔴 bun's own flags are FORWARDED, not read as paths", () => {
+      // Not cosmetic: every default script passes `--parallel=1`, and this suite
+      // behaves differently in parallel — a parallel sweep produced ~74 failures
+      // that all passed in isolation. A runner that dropped the flag would turn
+      // the serial suite parallel while reporting normally.
+      expect(parseArgs(["--parallel=1", "tests/unit"])).toEqual({
+        batchCount: 1,
+        targets: ["tests/unit"],
+        bunFlags: ["--parallel=1"],
+      })
+    })
+
+    test("flags, --batch and paths coexist in any order", () => {
+      expect(parseArgs(["--parallel=1", "--batch", "4", "tests/unit", "--timeout=9000"])).toEqual({
+        batchCount: 4,
+        targets: ["tests/unit"],
+        bunFlags: ["--parallel=1", "--timeout=9000"],
+      })
+    })
+
+    test("🔴 a flag whose value is a SEPARATE argument is refused, never guessed", () => {
+      // `-t x` means "filter by name x"; `x` looks exactly like a path. Reading
+      // it as one would run a different set — this tool's whole failure mode.
+      // Modelling bun's per-flag arity would drift on every bun release, so the
+      // self-contained form is required and the message says so.
+      expect(() => parseArgs(["-t", "some pattern", "tests/unit"])).toThrow(/self-contained/)
+      expect(() => parseArgs(["--timeout", "5000", "tests/unit"])).toThrow(/-t=pat/)
+    })
+
+    test("value-less flags forward without the `=` form", () => {
+      // `--coverage` consumes nothing, so it cannot swallow a path.
+      expect(parseArgs(["--coverage", "tests/unit"])).toEqual({
+        batchCount: 1,
+        targets: ["tests/unit"],
+        bunFlags: ["--coverage"],
+      })
+    })
+
     test("no arguments means no targets — the caller supplies the default", () => {
-      expect(parseArgs([])).toEqual({ batchCount: 1, targets: [] })
+      expect(parseArgs([])).toEqual({ batchCount: 1, targets: [], bunFlags: [] })
     })
   })
 
