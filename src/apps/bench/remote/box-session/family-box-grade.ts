@@ -27,9 +27,9 @@ import { abortableSleep } from "@/shared"
 import type { DatasetFamily } from "../../dataset-family-token"
 import {
   buildProMaxImageProvenanceCommand,
-  parseProMaxImageProvenance,
   PROMAX_IMAGE_PROVENANCE_SCRIPT,
   PROMAX_IMAGE_PROVENANCE_SCRIPT_PATH,
+  parseProMaxImageProvenance,
 } from "../../harness/promax/image-provenance"
 import { resolveDatasetFamilyProfile } from "../../profiles/registry"
 import type { FamilyBoxGradeVerdicts, FamilyRemoteBootstrap } from "../../profiles/types"
@@ -123,6 +123,15 @@ export const proveAnswerKeyAbsentForAgent = async (input: {
 const AGENT_EXIT_GRACE_MS = 60_000
 const AGENT_EXIT_POLL_MS = 5_000
 const AGENT_EXIT_LOG_EVERY_MS = 30_000
+/**
+ * How long a signalled process is given to actually die.
+ *
+ * Ending a process is not instant. The kill path used to `continue` straight
+ * into the next probe, so a process that would have died a moment later
+ * answered ALIVE once and a run whose report and predictions were already
+ * written got refused as "survived being ended".
+ */
+const AGENT_KILL_SETTLE_MS = 15_000
 
 /**
  * What ONE liveness probe means.
@@ -143,12 +152,19 @@ type ExitProbeVerdict =
   | { readonly kind: "alive" }
   | { readonly kind: "refuse"; readonly reason: string }
 
+/**
+ * Where the kill LADDER stands. "survived being ended" may only be claimed from
+ * `exhausted` — after SIGTERM, a settle window, SIGKILL, and a second settle
+ * window. Anything earlier is a process that has not been given time to die.
+ */
+type KillStage = "none" | "settling" | "exhausted"
+
 const classifyExitProbe = (
   probe: { readonly code: number; readonly stdout: string; readonly stderr: string },
-  killed: boolean,
+  kill: KillStage,
   family: DatasetFamily,
 ): ExitProbeVerdict => {
-  if (killed && probe.stdout.trim() === "ALIVE") {
+  if (kill === "exhausted" && probe.stdout.trim() === "ALIVE") {
     return {
       kind: "refuse",
       reason:
@@ -166,6 +182,67 @@ const classifyExitProbe = (
     }
   }
   return probe.stdout.trim() === "ALIVE" ? { kind: "alive" } : { kind: "gone" }
+}
+
+/**
+ * Signal the bench process, and REFUSE if the signal itself could not be sent.
+ *
+ * NOT `pkill … ; true`. That discarded pkill's own status, so a box without
+ * `pkill` (exit 127, nothing signalled) still counted as "we ended it" and the
+ * next probe refused the run as "survived being ended" — a diagnosis naming the
+ * wrong subsystem entirely. pkill exits 1 when nothing MATCHED, which here means
+ * the process died on its own between the probe and the signal: not an error.
+ */
+const signalAgent = async (
+  input: { readonly ssh: BoxSession["ssh"]; readonly family: DatasetFamily },
+  force: boolean,
+): Promise<void> => {
+  const ended = await input.ssh(`pkill ${force ? "-9 " : ""}-f '[a]pps/bench/cli.ts run'`)
+  if (ended.code === 255) {
+    throw new Error(
+      `[full-remote] ${input.family}: the box became unreachable while ending the finished ` +
+        "bench process. REFUSING to materialize the answer key on it.",
+    )
+  }
+  if (ended.code !== 0 && ended.code !== 1) {
+    throw new Error(
+      `[full-remote] ${input.family}: could not end the finished bench process — \`pkill\` ` +
+        `itself failed (code ${ended.code}: ` +
+        `${ended.stderr.trim() || ended.stdout.trim() || "no output"}). REFUSING to materialize ` +
+        "the answer key beside a process we did not signal.",
+    )
+  }
+}
+
+/** Where the kill ladder stands between probes. */
+interface KillLadder {
+  readonly kill: KillStage
+  readonly sentSigkill: boolean
+  readonly settledFor: number
+}
+
+/**
+ * Advance ONE settle tick. Splitting this out of the wait loop keeps the loop
+ * readable and puts the ladder's only state transition in one place: settle,
+ * escalate once, and only then declare the ladder spent.
+ */
+const advanceKillLadder = async (
+  input: {
+    readonly ssh: BoxSession["ssh"]
+    readonly log: (m: string) => void
+    readonly family: DatasetFamily
+  },
+  state: KillLadder,
+): Promise<KillLadder> => {
+  const settledFor = state.settledFor + AGENT_EXIT_POLL_MS
+  if (settledFor < AGENT_KILL_SETTLE_MS) return { ...state, settledFor }
+  if (state.sentSigkill) return { ...state, kill: "exhausted", settledFor }
+  input.log(
+    `[full-remote] ${input.family}: the bench process ignored SIGTERM for ` +
+      `${Math.round(AGENT_KILL_SETTLE_MS / 1000)}s; escalating to SIGKILL.`,
+  )
+  await signalAgent(input, true)
+  return { kill: "settling", sentSigkill: true, settledFor: 0 }
 }
 
 /**
@@ -193,10 +270,12 @@ const awaitAgentExit = async (input: {
   const sleep = input.sleep ?? ((ms: number) => abortableSleep(ms))
   const deadline = AGENT_EXIT_GRACE_MS
   let waited = 0
-  // Set once the stuck process has been ended. The loop then continues, so the
-  // NEXT probe still has to report it gone; a second failure to die is a genuine
-  // refusal rather than something we talk ourselves past.
-  let killed = false
+  // Where the kill ladder stands, and how long the CURRENT rung has been
+  // settling. The loop continues after each signal, so the process still has to
+  // be observed gone; what changed is that it is given time to go.
+  let kill: KillStage = "none"
+  let sentSigkill = false
+  let settledFor = 0
   for (;;) {
     // `pgrep … && echo ALIVE` prints ALIVE (exit 0) when the agent is up, and
     // nothing (exit 1) when it is gone. A TRANSPORT failure — ssh 255 on a box
@@ -215,10 +294,13 @@ const awaitAgentExit = async (input: {
     // the bench command line — the property that matters — while a self-match was
     // NOT reproducible on macOS, so it is not claimed as the cause of anything.
     const probe = await input.ssh("pgrep -f '[a]pps/bench/cli.ts run' >/dev/null && echo ALIVE")
-    const verdict = classifyExitProbe(probe, killed, input.family)
+    const verdict = classifyExitProbe(probe, kill, input.family)
     if (verdict.kind === "refuse") throw new Error(verdict.reason)
     if (verdict.kind === "gone") return
-    if (waited >= deadline) {
+    // THE KILL LADDER. `waited >= deadline` fires ONCE, because `kill` leaves
+    // "none" the moment a signal is sent; reusing the deadline as the condition
+    // for every rung re-signalled forever and never reached the settle window.
+    if (kill === "none" && waited >= deadline) {
       // MEASURED by ssh-ing into a real box: the bench had written report.json
       // and preds.jsonl and printed its final summary ("7/7 instances",
       // "failures: grader_invalid=7"), yet the process was still `Rl` at ~70% CPU
@@ -228,7 +310,7 @@ const awaitAgentExit = async (input: {
       // never succeed.
       //
       // We own this box and its work is demonstrably done, so END it rather than
-      // refuse a completed run. Then RE-VERIFY: the loop continues, so the next
+      // refuse a completed run. Then RE-VERIFY: the loop continues, so a later
       // probe has to actually report it gone before anything is materialized —
       // "no agent is running" becomes true rather than assumed.
       input.log(
@@ -237,24 +319,33 @@ const awaitAgentExit = async (input: {
           "predictions are already written). Ending it, then re-checking before the answer key " +
           "is materialized.",
       )
-      const ended = await input.ssh("pkill -f '[a]pps/bench/cli.ts run' ; true")
-      if (ended.code === 255) {
-        throw new Error(
-          `[full-remote] ${input.family}: the box became unreachable while ending the finished ` +
-            "bench process. REFUSING to materialize the answer key on it.",
-        )
-      }
-      killed = true
+      await signalAgent(input, false)
+      kill = "settling"
+      settledFor = 0
+      await sleep(AGENT_EXIT_POLL_MS)
       continue
     }
-    // Log at the start and once a minute after: a silent wait is indistinguishable
-    // from a hang, and this one can legitimately run for minutes.
+    // A signalled process gets a BOUNDED window to actually die. Only when the
+    // whole ladder — SIGTERM, settle, SIGKILL, settle — is spent does a probe
+    // answering ALIVE mean "survived being ended".
+    if (kill === "settling") {
+      ;({ kill, sentSigkill, settledFor } = await advanceKillLadder(input, {
+        kill,
+        sentSigkill,
+        settledFor,
+      }))
+      await sleep(AGENT_EXIT_POLL_MS)
+      continue
+    }
+    // Log at the start and every AGENT_EXIT_LOG_EVERY_MS after: a silent wait is
+    // indistinguishable from a hang.
     if (waited % AGENT_EXIT_LOG_EVERY_MS === 0) {
       input.log(
         `[full-remote] ${input.family}: the bench run has not exited yet (${Math.round(waited / 1000)}s ` +
-          `of ${Math.round(AGENT_EXIT_GRACE_MS / 1000)}s) — its tail after the last instance ` +
-          "(trace flush, sandbox teardown, artifact writes) takes minutes. Waiting before the " +
-          "answer key is materialized…",
+          `of ${Math.round(AGENT_EXIT_GRACE_MS / 1000)}s). Its tail — trace flush, sandbox ` +
+          "teardown, artifact writes — normally finishes well inside this budget; past it the " +
+          "process is ended rather than waited on. Waiting before the answer key is " +
+          "materialized…",
       )
     }
     await sleep(AGENT_EXIT_POLL_MS)

@@ -51,38 +51,73 @@ const PASS_RATE = JSON.stringify([
  * `aliveForProbes` ⇒ alive for the first N probes, then gone — the REAL shape,
  * because the wrapper writes `run.exit` LAST and so outlives the artifacts.
  */
-const recorder = (opts: { agentAlive?: boolean; aliveForProbes?: number } = {}) => {
+interface RecorderOpts {
+  agentAlive?: boolean
+  aliveForProbes?: number
+  /** probes the process stays ALIVE after SIGTERM before dying — a real process
+   *  does not vanish the instant `pkill` returns. */
+  diesAfterTermProbes?: number
+  /** the process ignores SIGTERM entirely and only SIGKILL ends it. */
+  ignoresTerm?: boolean
+  /** `pkill` is not on the box at all: exit 127, nothing killed. */
+  pkillMissing?: boolean
+}
+
+type Reply = { code: number; stdout: string; stderr: string }
+const ok = (stdout = ""): Reply => ({ code: 0, stdout, stderr: "" })
+const ALIVE = ok("ALIVE\n")
+const GONE: Reply = { code: 1, stdout: "", stderr: "" }
+
+/** The box's canned answers to everything that is NOT the liveness dance. */
+const staticReply = (cmd: string): Reply | undefined => {
+  if (cmd.includes("$HOME")) return ok("/home/ubuntu")
+  if (cmd.includes("--version")) return ok("Python 3.11.14\n")
+  if (cmd.includes("sha256sum")) {
+    const hit = DIGESTS.find(([s]) => cmd.includes(s))
+    return hit === undefined ? { code: 1, stdout: "", stderr: "no such file" } : ok(`${hit[1]}  x`)
+  }
+  if (cmd.startsWith("cat ") && cmd.includes(DEFAULT_CHUNK_PATHS.preds)) return ok(PREDS)
+  if (cmd.startsWith("cat ") && cmd.includes(DEFAULT_CHUNK_PATHS.passRate)) return ok(PASS_RATE)
+  return undefined
+}
+
+const recorder = (opts: RecorderOpts = {}) => {
   const issued: string[] = []
   let probes = 0
+  let termedAtProbe: number | null = null
+  let killed9 = false
+
+  /** Models the REAL command: `pgrep -f … >/dev/null && echo ALIVE`. When
+   *  nothing matches, the `&&` short-circuits — empty stdout, non-zero exit. */
+  const liveness = (): Reply => {
+    probes += 1
+    // `agentAlive` is the TRULY unkillable process: it outlives every signal,
+    // which is the case the refusal exists for.
+    if (opts.agentAlive === true) return ALIVE
+    if (killed9) return GONE
+    if (termedAtProbe !== null && opts.ignoresTerm !== true) {
+      return probes - termedAtProbe > (opts.diesAfterTermProbes ?? 0) ? GONE : ALIVE
+    }
+    return probes <= (opts.aliveForProbes ?? 0) ? ALIVE : GONE
+  }
+
+  const signal = (cmd: string): Reply => {
+    if (opts.pkillMissing === true) {
+      return { code: 127, stdout: "", stderr: "pkill: command not found" }
+    }
+    if (cmd.includes("-9")) killed9 = true
+    else if (termedAtProbe === null) termedAtProbe = probes
+    return ok()
+  }
+
   return {
     issued,
     probeCount: () => probes,
-    ssh: async (cmd: string) => {
+    ssh: async (cmd: string): Promise<Reply> => {
       issued.push(cmd)
-      if (cmd.includes("pgrep")) {
-        // Models the REAL command: `pgrep -f … >/dev/null && echo ALIVE`. When
-        // nothing matches, the `&&` short-circuits — empty stdout, non-zero exit.
-        probes += 1
-        const alive = opts.agentAlive === true || probes <= (opts.aliveForProbes ?? 0)
-        return alive
-          ? { code: 0, stdout: "ALIVE\n", stderr: "" }
-          : { code: 1, stdout: "", stderr: "" }
-      }
-      if (cmd.includes("$HOME")) return { code: 0, stdout: "/home/ubuntu", stderr: "" }
-      if (cmd.includes("--version")) return { code: 0, stdout: "Python 3.11.14\n", stderr: "" }
-      if (cmd.includes("sha256sum")) {
-        const hit = DIGESTS.find(([s]) => cmd.includes(s))
-        return hit === undefined
-          ? { code: 1, stdout: "", stderr: "no such file" }
-          : { code: 0, stdout: `${hit[1]}  x`, stderr: "" }
-      }
-      if (cmd.startsWith("cat ") && cmd.includes(DEFAULT_CHUNK_PATHS.preds)) {
-        return { code: 0, stdout: PREDS, stderr: "" }
-      }
-      if (cmd.startsWith("cat ") && cmd.includes(DEFAULT_CHUNK_PATHS.passRate)) {
-        return { code: 0, stdout: PASS_RATE, stderr: "" }
-      }
-      return { code: 0, stdout: "", stderr: "" }
+      if (cmd.includes("pkill")) return signal(cmd)
+      if (cmd.includes("pgrep")) return liveness()
+      return staticReply(cmd) ?? ok()
     },
   }
 }
@@ -310,5 +345,58 @@ describe("a bench that FINISHED but will not exit is ended, not waited on foreve
     const killAt = issued.findIndex((c) => c.includes("pkill"))
     const cloneAt = issued.findIndex((c) => c.includes("'git'"))
     expect(cloneAt).toBeGreaterThan(killAt)
+  })
+})
+
+/**
+ * ENDING A PROCESS IS NOT INSTANT, and `pkill` is not guaranteed to work.
+ *
+ * The kill path used to be `pkill … ; true` followed immediately by `continue`:
+ * the very next probe decided the verdict, with zero grace. A process that
+ * would have died 200ms later answered ALIVE once and the run — whose report
+ * and predictions were already written — was refused as "survived being ended".
+ * And `; true` discarded `pkill`'s own status, so a box without `pkill` (exit
+ * 127, nothing signalled) produced that same refusal under a diagnosis naming
+ * the wrong subsystem.
+ */
+describe("ending the finished bench process", () => {
+  test("🔴 a process that dies a moment after SIGTERM is NOT called a survivor", async () => {
+    // alive through the grace, then TERMed, then alive for two more probes
+    const r = recorder({ aliveForProbes: 999, diesAfterTermProbes: 2 })
+    await grade(r)
+    expect(materializedGold(r.issued), "a normally-terminating process blocked the grade").toBe(
+      true,
+    )
+    // …and it was not SIGKILLed on the way. Without this the settle window is
+    // unpinned: setting it to zero escalates instantly, the SIGKILL kills the
+    // process, and "it was not called a survivor" passes for the wrong reason.
+    expect(
+      r.issued.some((c) => c.includes("pkill") && c.includes("-9")),
+      "a process that was dying normally was SIGKILLed anyway",
+    ).toBe(false)
+  })
+
+  test("🔴 a process that IGNORES SIGTERM is escalated to SIGKILL before being refused", async () => {
+    const r = recorder({ aliveForProbes: 999, ignoresTerm: true })
+    await grade(r)
+    const kills = r.issued.filter((c) => c.includes("pkill"))
+    expect(
+      kills.some((c) => c.includes("-9")),
+      "SIGTERM was never escalated",
+    ).toBe(true)
+    expect(materializedGold(r.issued)).toBe(true)
+  })
+
+  test("🔴 a box with no `pkill` says so, instead of blaming the process", async () => {
+    const r = recorder({ agentAlive: true, pkillMissing: true })
+    await expect(grade(r)).rejects.toThrow(/could not (be )?end|pkill|command not found/i)
+    expect(materializedGold(r.issued), "the answer key was materialized anyway").toBe(false)
+  })
+
+  test("PAIRED CONTROL: a truly unkillable process is still refused", async () => {
+    // survives SIGTERM *and* SIGKILL — the case the refusal exists for
+    const r = recorder({ agentAlive: true })
+    await expect(grade(r)).rejects.toThrow(/survived being ended/i)
+    expect(materializedGold(r.issued)).toBe(false)
   })
 })
