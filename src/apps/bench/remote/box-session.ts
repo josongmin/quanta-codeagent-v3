@@ -554,6 +554,9 @@ const executeGradeChunk = async (args: {
     family: args.params.datasetFamily,
     bootstrap: args.params.remoteBootstrap,
     paths: args.paths,
+    ...(args.params.instanceIds !== undefined
+      ? { assignedInstanceIds: args.params.instanceIds }
+      : {}),
   })
 
   // PERSIST the grade. For a box-grading family this document IS the result —

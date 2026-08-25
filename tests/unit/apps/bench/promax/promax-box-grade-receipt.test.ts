@@ -149,3 +149,55 @@ describe("WIRING — the family really builds a receipt from that observation", 
     expect(json).toContain("test_run.py")
   })
 })
+
+describe("WIRING — the grade records which images it ran against", () => {
+  test("🔴 the observation carries a DIGEST-pinned image per assigned instance", async () => {
+    const DIGEST = `key4127/refactor-dockerhub@sha256:${"a".repeat(64)}`
+    const withImages = async (cmd: string) => {
+      if (cmd.includes("docker image inspect")) {
+        return {
+          code: 0,
+          stdout: `aws__s2n-tls-5464\tkey4127/refactor-dockerhub:aws__s2n-tls-5464\t${DIGEST}\n`,
+          stderr: "",
+        }
+      }
+      return ssh(cmd)
+    }
+    const out = await runFamilyBoxGrade({
+      ssh: withImages,
+      log: () => {},
+      family: "promax",
+      bootstrap: promaxBootstrap(),
+      paths: DEFAULT_CHUNK_PATHS,
+      assignedInstanceIds: ["aws__s2n-tls-5464"],
+      sleep: async () => {},
+    })
+    expect(out?.observation.images).toHaveLength(1)
+    expect(out?.observation.images[0]?.repoDigest).toBe(DIGEST)
+  })
+
+  test("🔴 a grade whose images cannot be pinned REFUSES rather than reporting a number", async () => {
+    const noDigest = async (cmd: string) => {
+      if (cmd.includes("docker image inspect")) {
+        return { code: 0, stdout: "aws__s2n-tls-5464\tsome:tag\t\n", stderr: "" }
+      }
+      return ssh(cmd)
+    }
+    await expect(
+      runFamilyBoxGrade({
+        ssh: noDigest,
+        log: () => {},
+        family: "promax",
+        bootstrap: promaxBootstrap(),
+        paths: DEFAULT_CHUNK_PATHS,
+        assignedInstanceIds: ["aws__s2n-tls-5464"],
+        sleep: async () => {},
+      }),
+    ).rejects.toThrow(/cannot be pinned|NO digest/i)
+  })
+
+  test("PAIRED CONTROL: with no assigned set there is nothing to reconcile, and no capture", async () => {
+    const out = await grade()
+    expect(out?.observation.images).toEqual([])
+  })
+})

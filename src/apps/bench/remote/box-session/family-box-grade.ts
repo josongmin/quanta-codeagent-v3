@@ -25,6 +25,10 @@
  */
 import { abortableSleep } from "@/shared"
 import type { DatasetFamily } from "../../dataset-family-token"
+import {
+  buildProMaxImageProvenanceCommand,
+  parseProMaxImageProvenance,
+} from "../../harness/promax/image-provenance"
 import { resolveDatasetFamilyProfile } from "../../profiles/registry"
 import type { FamilyBoxGradeVerdicts, FamilyRemoteBootstrap } from "../../profiles/types"
 import { executeFamilyRemoteBootstrap } from "./family-bootstrap-exec"
@@ -96,21 +100,27 @@ export const proveAnswerKeyAbsentForAgent = async (input: {
 }
 
 /**
- * How long to let a finishing bench run exit, and how often to ask.
+ * How long to let a finishing bench run exit before ENDING it, and how often to
+ * ask.
  *
- * MEASURED, and the reason this is not 120s: on a real box all seven instances
- * had FINISHED before the wait began, and the process was still alive more than
- * two minutes later — the tail after the last instance (trace flush, sandbox
- * teardown, artifact writes) is minutes, not milliseconds. A 120s ceiling turned
- * a completed run into a refusal and threw the box away.
+ * MEASURED across runs: by the time control reaches here the run's own artifacts
+ * — report.json and preds.jsonl — are already on the box, because that is the
+ * very condition the detached poll used to declare it complete. So the work is
+ * done and this is only about the process.
  *
- * It is a CEILING for a WEDGED process, not a target: a healthy run leaves as
- * soon as its tail is done and never approaches this. Progress is logged so a
- * waiting operator can tell it apart from a hang.
+ * Two outcomes were both observed on real boxes: it exits on its own within
+ * seconds, or it finishes its work and then spins at ~70% CPU indefinitely with
+ * `run.exit` never landing (confirmed by ssh: PID alive 20 minutes, no children,
+ * artifacts written, final summary printed). A long grace helps neither — the
+ * first needs seconds, the second never comes back — so it is 60s, after which
+ * the process is ended and re-verified rather than waited on.
+ *
+ * It was 600s. That cost ten minutes of paid box time per run to reach the same
+ * decision.
  */
-const AGENT_EXIT_GRACE_MS = 600_000
+const AGENT_EXIT_GRACE_MS = 60_000
 const AGENT_EXIT_POLL_MS = 5_000
-const AGENT_EXIT_LOG_EVERY_MS = 60_000
+const AGENT_EXIT_LOG_EVERY_MS = 30_000
 
 /**
  * What ONE liveness probe means.
@@ -256,6 +266,9 @@ export interface FamilyBoxGradeInput {
   readonly family: DatasetFamily
   readonly bootstrap: FamilyRemoteBootstrap | undefined
   readonly paths: ChunkPaths
+  /** the chunk's assigned instance ids — the set image provenance is reconciled
+   *  against. Absent ⇒ no capture (nothing to reconcile). */
+  readonly assignedInstanceIds?: readonly string[]
   /** test seam for the agent-exit wait; real runs use `setTimeout`. */
   readonly sleep?: (ms: number) => Promise<void>
 }
@@ -383,6 +396,41 @@ export interface FamilyBoxGradeObservation {
   readonly stdout: string
   readonly stderr: string
   readonly evaluatorSha256: string
+  /**
+   * Which image each assigned instance was graded against, pinned by DIGEST.
+   *
+   * Captured INSIDE the window — the names come from the checkout's own golden,
+   * which only exists there. Empty when the family declares no capture; a
+   * capture that FAULTS fails the grade rather than shipping a receipt that
+   * cannot say what it ran against.
+   */
+  readonly images: readonly { instanceId: string; imageName: string; repoDigest: string }[]
+}
+
+/**
+ * Ask the box which images the grade ran against, and refuse a grade that cannot
+ * say. A family with no assigned ids to reconcile against reports none.
+ */
+const captureImageProvenance = async (
+  input: FamilyBoxGradeInput,
+  checkoutRoot: string,
+): Promise<readonly { instanceId: string; imageName: string; repoDigest: string }[]> => {
+  const assigned = input.assignedInstanceIds ?? []
+  if (assigned.length === 0) return []
+  const command = buildProMaxImageProvenanceCommand({
+    checkoutRoot,
+    venvPython: `${checkoutRoot.replace(/\/upstream$/, "")}/venv/bin/python`,
+    instanceIds: assigned,
+  })
+  const answered = await input.ssh(command)
+  const parsed = parseProMaxImageProvenance(answered.stdout, assigned)
+  if (!parsed.ok) {
+    throw new Error(
+      `[full-remote] ${input.family}: could not record which images the grade ran against — ` +
+        `REFUSING to report a result whose images cannot be pinned. ${parsed.faults.join("; ")}`,
+    )
+  }
+  return parsed.images
 }
 
 export interface FamilyBoxGradeResult {
@@ -449,7 +497,13 @@ export const runFamilyBoxGrade = async (
     log: input.log,
     whileMaterialized: async () => {
       const graded = await input.ssh(invocation.command)
+      // WHICH IMAGES. Asked here, inside the window: the names live in the
+      // checkout's golden, which the teardown is about to remove. A tag is not
+      // provenance, so this asks the daemon that actually ran them for digests.
+      const provenance = await captureImageProvenance(input, invocation.cwd)
+
       observation = {
+        images: provenance,
         argv: invocation.argv,
         cwd: invocation.cwd,
         exitCode: graded.code,
