@@ -20,9 +20,13 @@
  */
 
 import { describe, expect, test } from "bun:test"
+import { join } from "node:path"
 import type { AgentConfig } from "@/agent"
 import { CAPABILITY_WIRES } from "@/host/runtime/agent-config-assembler"
 import { foldCapabilityWires } from "@/host/runtime/capability-wire-registry"
+
+const REPO_ROOT = join(import.meta.dir, "..", "..")
+
 import { wireRuntimePorts } from "@/host/runtime/internal/context-binding/base"
 
 /** Every capability gate ON, so the registry actually opens slots — a guard run
@@ -50,7 +54,7 @@ const baseConfig = () =>
   ({
     llm: { model: "m", stream: async function* () {} },
     signal: new AbortController().signal,
-    cwd: process.cwd(),
+    cwd: REPO_ROOT,
     sessionId: "parity-probe",
   }) as unknown as AgentConfig
 
@@ -119,7 +123,7 @@ describe("capability wires — assembler path vs CLI path", () => {
  *     the entry has to carry a reason, which is what review reads.
  */
 describe("capability wires — no binding path may skip the fold", () => {
-  const BIND_FILE = "src/host/runtime/internal/context-binding.ts"
+  const BIND_FILE = join(REPO_ROOT, "src/host/runtime/internal/context-binding.ts")
 
   /** Call sites that legitimately pass an ALREADY-wired base. The key is the
    *  distinguishing source fragment of the `base:` expression. */
@@ -161,8 +165,10 @@ describe("capability wires — no binding path may skip the fold", () => {
   }
 
   test("R1 the fold reaches BOTH sanctioned entry points", async () => {
-    const asm = await Bun.file("src/host/runtime/agent-config-assembler.ts").text()
-    const cli = await Bun.file("src/host/runtime/internal/context-binding/base.ts").text()
+    const asm = await Bun.file(join(REPO_ROOT, "src/host/runtime/agent-config-assembler.ts")).text()
+    const cli = await Bun.file(
+      join(REPO_ROOT, "src/host/runtime/internal/context-binding/base.ts"),
+    ).text()
     expect(asm).toContain("foldCapabilityWires(")
     expect(cli).toContain("foldCapabilityWires(")
   })

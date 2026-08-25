@@ -105,7 +105,7 @@ const isExcludedFromCliScan = (path: string): boolean =>
  *  `src/apps/cli/`, with its first file:line (for the failure message). */
 const scanCliReadSites = (): Map<string, string> => {
   const reads = new Map<string, string>()
-  for (const file of walk("src/apps/cli")) {
+  for (const file of walk(join(import.meta.dir, "..", "..", "..", "src/apps/cli"))) {
     if (isExcludedFromCliScan(file)) continue
     const rel = file.replace(/^.*\/quanta-codeagent-v3\//, "")
     const lines = readFileSync(file, "utf8").split("\n")

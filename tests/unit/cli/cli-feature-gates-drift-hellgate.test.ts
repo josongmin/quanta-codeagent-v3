@@ -23,6 +23,7 @@
 
 import { describe, expect, test } from "bun:test"
 import { execSync } from "node:child_process"
+import { join } from "node:path"
 import { CLI_FEATURE_GATE_NAMES } from "@/apps/cli/cli-feature-gates"
 
 const GATES = CLI_FEATURE_GATE_NAMES
@@ -32,11 +33,16 @@ const GATES = CLI_FEATURE_GATE_NAMES
  *  via `gateOn(env,"X")` / `parseEnvFlag(env.X)` / `env["X"]` /
  *  `runtimeConfig().<field>` — all of which contain the literal `QUANTA_X`
  *  somewhere in the consuming source. */
+const REPO_ROOT = join(import.meta.dir, "..", "..", "..")
+
 const isConsumedSomewhere = (knob: string): boolean => {
   try {
     const out = execSync(
       `rg -l --fixed-strings ${knob} src --type ts -g '!apps/cli/index.ts' -g '!apps/cli/cli-feature-gates.ts'`,
-      { encoding: "utf8" },
+      // Anchored on this file, not on the ambient cwd: `rg … src` resolves
+      // relative to wherever the runner happens to be, so under a sandboxed
+      // working directory it matched nothing and every gate read as unconsumed.
+      { encoding: "utf8", cwd: REPO_ROOT },
     )
     return out.trim().length > 0
   } catch {

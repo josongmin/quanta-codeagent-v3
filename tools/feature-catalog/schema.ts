@@ -630,7 +630,11 @@ export function validateInvariants(features: readonly LoadedFeature[]): Invarian
  * ordering). Throws on first cross-feature violation.
  */
 export async function loadFeaturesStrict(
-  dir = "tools/feature-catalog/features",
+  // Anchored on THIS file, not on the ambient cwd. The old default,
+  // `"tools/feature-catalog/features"`, silently resolved to nothing whenever the
+  // caller ran from anywhere but the repo root — and "no features loaded" reads
+  // as a clean catalog to every consumer, so the failure was invisible.
+  dir = join(import.meta.dir, "features"),
 ): Promise<LoadedFeature[]> {
   const loaded = await loadFeatures(dir)
   const seen = new Map<string, string>()

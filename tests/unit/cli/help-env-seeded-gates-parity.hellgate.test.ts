@@ -26,6 +26,7 @@
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import { readFileSync } from "node:fs"
+import { join } from "node:path"
 import { CLI_FEATURE_GATES } from "@/apps/cli/cli-feature-gates"
 import { CLI_SEEDED_GATES } from "@/apps/cli/cli-seeded-gates"
 import { renderHelp } from "@/apps/cli/help-render"
@@ -83,7 +84,10 @@ describe("CLI_FEATURE_GATES ⟷ /help env-table parity", () => {
 
 describe("seed loop consumes the canonical union (no parallel list)", () => {
   test("index.ts imports cli-seeded-gates and has no inline gate array", () => {
-    const src = readFileSync("src/apps/cli/index.ts", "utf8")
+    const src = readFileSync(
+      join(import.meta.dir, "..", "..", "..", "src/apps/cli/index.ts"),
+      "utf8",
+    )
     expect(src).toContain("./cli-seeded-gates")
     expect(src).toContain("CLI_SEEDED_GATE_NAMES")
     // The old inline literal must be gone — otherwise two lists drift.
