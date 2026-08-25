@@ -19,6 +19,7 @@
  */
 import { describe, expect, test } from "bun:test"
 import { familyRemoteBootstrap } from "@/apps/bench/profiles/bootstrap"
+import type { FamilyRemoteBootstrap } from "@/apps/bench/profiles/types"
 import { PROMAX_V1_SNAPSHOT } from "@/apps/bench/promax/provenance/frozen-snapshot"
 import { runFamilyBoxGrade } from "@/apps/bench/remote/box-session/family-box-grade"
 import { DEFAULT_CHUNK_PATHS } from "@/apps/bench/remote/box-session/types"
@@ -120,7 +121,6 @@ describe("WIRING — the family really builds a receipt from that observation", 
     const { parseOfficialGradeReceipt } = await import("@/runner/batch/eval/official-grade")
     const out = await grade()
     const build = resolveDatasetFamilyProfile("promax").buildBoxGradeReceipt
-    expect(build, "promax declares no buildBoxGradeReceipt — the grade has no record").toBeDefined()
     if (build === undefined || out === undefined) return
 
     const json = build({
@@ -137,7 +137,10 @@ describe("WIRING — the family really builds a receipt from that observation", 
     const { resolveDatasetFamilyProfile } = await import("@/apps/bench/profiles/registry")
     const out = await grade()
     const build = resolveDatasetFamilyProfile("promax").buildBoxGradeReceipt
-    if (build === undefined || out === undefined) return
+    // NOT `if (… === undefined) return`. That is the shape where a family losing
+    // its receipt port makes the assertions below disappear and the test PASS.
+    if (build === undefined) throw new Error("promax declares no buildBoxGradeReceipt")
+    if (out === undefined) throw new Error("the on-box grade produced no observation")
     const json = build({
       assignedInstanceIds: ["aws__s2n-tls-5464"],
       artifactText: out.artifactText,
@@ -232,9 +235,10 @@ describe("the images reach the RECEIPT, not just the observation", () => {
       sleep: async () => {},
     })
     const build = resolveDatasetFamilyProfile("promax").buildBoxGradeReceipt
-    expect(build, "promax declares no receipt builder").toBeDefined()
-    expect(out, "the grade produced nothing").toBeDefined()
-    if (build === undefined || out === undefined) return
+    // NOT `if (… === undefined) return`. That is the shape where a family losing
+    // its receipt port makes the assertions below disappear and the test PASS.
+    if (build === undefined) throw new Error("promax declares no buildBoxGradeReceipt")
+    if (out === undefined) throw new Error("the on-box grade produced no observation")
 
     const json = build({
       assignedInstanceIds: ["aws__s2n-tls-5464"],
@@ -245,5 +249,101 @@ describe("the images reach the RECEIPT, not just the observation", () => {
     // THE claim: the digest is IN the persisted document, not merely in memory.
     expect(json, "the receipt cannot say which image produced its verdicts").toContain(DIGEST)
     expect(json).toContain("aws__s2n-tls-5464")
+  })
+})
+
+/**
+ * WHOSE DIGEST IS ON THE RECEIPT.
+ *
+ * The existing assertion compares the receipt against
+ * `PROMAX_V1_SNAPSHOT.evaluator_sha256` — but the bootstrap's declared
+ * expectation is built from that same constant, so the assertion holds equally
+ * well if the profile hardcoded the snapshot and never read the plan at all.
+ *
+ * These drive a bootstrap whose declared digest is NOT the snapshot value, so
+ * the only way the receipt can name it is by reading what was verified.
+ */
+describe("the receipt's evaluator digest is READ, not assumed", () => {
+  const OTHER = "b".repeat(64)
+
+  /** promax always declares one; a missing plan is a bug, not a test skip. */
+  const realBootstrap = (): FamilyRemoteBootstrap => {
+    const b = promaxBootstrap()
+    if (b === undefined) throw new Error("promax declares no remote bootstrap")
+    return b
+  }
+
+  const retargeted = (): FamilyRemoteBootstrap => {
+    const real = realBootstrap()
+    return {
+      ...real,
+      commands: real.commands.map((c) =>
+        c.verifies?.path.endsWith("test_run.py") === true
+          ? { ...c, verifies: { ...c.verifies, sha256: OTHER } }
+          : c,
+      ),
+    }
+  }
+
+  const gradeWith = (bootstrap: ReturnType<typeof promaxBootstrap>) =>
+    runFamilyBoxGrade({
+      ssh: async (cmd: string) => {
+        if (cmd.includes("sha256sum") && cmd.includes("test_run.py")) {
+          // the box confirms whatever THIS plan declared
+          return { code: 0, stdout: `${OTHER}  x`, stderr: "" }
+        }
+        if (cmd.includes("image-provenance.py")) {
+          return {
+            code: 0,
+            stdout: `aws__s2n-tls-5464\timg:aws__s2n-tls-5464\timg@sha256:${"d".repeat(64)}\n`,
+            stderr: "",
+          }
+        }
+        return ssh(cmd)
+      },
+      log: () => {},
+      family: "promax",
+      bootstrap,
+      paths: DEFAULT_CHUNK_PATHS,
+      assignedInstanceIds: ["aws__s2n-tls-5464"],
+      sleep: async () => {},
+    })
+
+  test("🔴 the receipt names the digest the PLAN declared and the box confirmed", async () => {
+    const { resolveDatasetFamilyProfile } = await import("@/apps/bench/profiles/registry")
+    const out = await gradeWith(retargeted())
+    const build = resolveDatasetFamilyProfile("promax").buildBoxGradeReceipt
+    if (build === undefined) throw new Error("promax declares no buildBoxGradeReceipt")
+    if (out === undefined) throw new Error("the on-box grade produced no observation")
+    const json = build({
+      assignedInstanceIds: ["aws__s2n-tls-5464"],
+      artifactText: out.artifactText,
+      artifactPath: "/local/passrate.json",
+      ...out.observation,
+    })
+    expect(json, "the receipt named a digest nobody verified").toContain(OTHER)
+    expect(
+      json,
+      "the receipt named the frozen constant instead of the verified plan",
+    ).not.toContain(PROMAX_V1_SNAPSHOT.evaluator_sha256)
+  })
+
+  test("🔴 a grader phase declaring NO evaluator digest is REFUSED, not graded", async () => {
+    const real = realBootstrap()
+    // OMIT `verifies` rather than setting it to `undefined`: the field is
+    // optional, and a plan that "declares a verification of nothing" is not the
+    // shape under test — a plan that declares none is.
+    const blind: FamilyRemoteBootstrap = {
+      ...real,
+      commands: real.commands.map((c) => {
+        if (c.verifies?.path.endsWith("test_run.py") !== true) return c
+        const { verifies: _dropped, ...rest } = c
+        return rest
+      }),
+    }
+    // the refusal branch of `verifiedEvaluatorSha256` had no test at all: a plan
+    // that verifies nothing would have produced a receipt naming "" as the bytes
+    // that produced the verdicts.
+    await expect(gradeWith(blind)).rejects.toThrow(/declares no evaluator digest/i)
   })
 })
