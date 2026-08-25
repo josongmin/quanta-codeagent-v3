@@ -211,17 +211,6 @@ export { enforceJail }
  * `QUANTA_FS_JAIL=off` opts out (read once at startup via `runtimeConfig`).
  */
 export const resolvePath = (path: string, baseDir?: string): string => {
-  // TEMP PROBE (QRESOLVE_PROBE) — records the caller whenever a RELATIVE path
-  // resolves with no baseDir, i.e. the `|| process.cwd()` fallback fires.
-  if (process.env.QRESOLVE_PROBE !== undefined && !baseDir && !path.startsWith("/")) {
-    try {
-      const stack = (new Error().stack ?? "").split("\n").slice(2, 7).join(" | ")
-      require("node:fs").appendFileSync(
-        process.env.QRESOLVE_PROBE,
-        `PATH=${path} :: ${stack}\n`,
-      )
-    } catch {}
-  }
   const abs = resolve(baseDir || process.cwd(), path)
   if (baseDir !== undefined && baseDir !== "") return enforceJail(path, baseDir, abs)
   return abs

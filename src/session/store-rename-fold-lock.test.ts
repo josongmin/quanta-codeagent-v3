@@ -60,18 +60,18 @@ test("R4 fix — renameSession under withSessionSaveLock: a coordinator rollback
   const hitOnce = { value: false }
   const order: string[] = []
 
-  const patchedReadFile = async (p: string): Promise<string> => {
+  const patchedReadFile = async (p: string, baseDir?: string): Promise<string> => {
     if (armed.value && !hitOnce.value && p.endsWith("sess-rn.json")) {
       hitOnce.value = true
-      const bytes = await realReadFile(p) // T-of-Check
+      const bytes = await realReadFile(p, baseDir) // T-of-Check
       order.push("rename-read-parked")
       await barrier
       order.push("rename-read-released")
       return bytes // rename proceeds with STALE snapshot (no fold visible)
     }
-    return realReadFile(p)
+    return realReadFile(p, baseDir)
   }
-  const patchedWriteFile = async (p: string, body: string): Promise<void> => {
+  const patchedWriteFile = async (p: string, body: string, baseDir?: string): Promise<void> => {
     if (p.includes("sess-rn.json.tmp")) {
       const ops = (() => {
         try {
@@ -84,7 +84,7 @@ test("R4 fix — renameSession under withSessionSaveLock: a coordinator rollback
       })()
       order.push(`write:[${ops.join(",")}]`)
     }
-    return realWriteFile(p, body)
+    return realWriteFile(p, body, baseDir)
   }
   mock.module("@/storage/service", () => ({
     ...service,

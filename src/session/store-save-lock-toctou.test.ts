@@ -54,7 +54,7 @@ test("store per-session save lock: a coordinator fold is NOT clobbered by a conc
   })
 
   const order: string[] = []
-  const patchedReadFile = async (p: string): Promise<string> => {
+  const patchedReadFile = async (p: string, baseDir?: string): Promise<string> => {
     // Gate only the FIRST session-file read that happens while the barrier is
     // armed (this is the omitting-save's readExistingRollback). Everything else
     // — including the coordinator's own load — passes straight through.
@@ -65,17 +65,17 @@ test("store per-session save lock: a coordinator fold is NOT clobbered by a conc
     // the genuine time-of-check-to-time-of-use gap.
     if (barrierArmed.value && !barrierHitOnce.value && p.endsWith("sess-toctou.json")) {
       barrierHitOnce.value = true
-      const bytesAtCheck = await realReadFile(p)
+      const bytesAtCheck = await realReadFile(p, baseDir)
       order.push("omitting-read-parked")
       await barrier
       order.push("omitting-read-released")
       return bytesAtCheck
     }
-    return realReadFile(p)
+    return realReadFile(p, baseDir)
   }
 
   const realWriteFile = service.writeFile
-  const patchedWriteFile = async (p: string, body: string): Promise<void> => {
+  const patchedWriteFile = async (p: string, body: string, baseDir?: string): Promise<void> => {
     // Session writes go to a per-writer `.tmp.<pid>.<rand>` then rename. Record
     // when the tmp for the target session is written to establish write order.
     if (p.includes("sess-toctou.json.tmp")) {
@@ -90,7 +90,7 @@ test("store per-session save lock: a coordinator fold is NOT clobbered by a conc
       })()
       order.push(`write:[${ops.join(",")}]`)
     }
-    return realWriteFile(p, body)
+    return realWriteFile(p, body, baseDir)
   }
 
   mock.module("@/storage/service", () => ({
