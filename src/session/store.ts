@@ -313,7 +313,16 @@ const persistedProgressReceiptSchema = z.object({
   attemptKey: progressRefSchema,
   objectiveRevisionBefore: z.number().int().nonnegative(),
   objectiveRevisionAfter: z.number().int().nonnegative(),
-  turnOutcome: z.enum(["completed", "aborted", "error", "backgrounded"]),
+  turnOutcome: z.enum([
+    "completed",
+    "max_turns",
+    "aborted",
+    "error",
+    "budget_exhausted",
+    "refusal",
+    "awaiting_approval",
+    "backgrounded",
+  ]),
   criterionTransitions: z.array(progressRefSchema).max(MAX_PERSISTED_PROGRESS_REFS),
   verifierReceiptRefs: z.array(progressRefSchema).max(MAX_PERSISTED_PROGRESS_REFS),
   sourceDigest: progressRefSchema.optional(),
@@ -352,6 +361,20 @@ const persistedObjectiveBodyV2Schema = z.object({
   budget: persistedObjectiveBudgetSchema,
   blockers: z.array(persistedObjectiveBlockerSchema),
   nextActions: z.array(z.string()),
+  attempts: z
+    .object({
+      autonomousTurnsStarted: z.number().int().nonnegative(),
+      started: z
+        .object({
+          attemptId: z.string().min(1),
+          provenance: z.string().min(1),
+          executionMode: z.enum(["foreground", "background"]),
+          startedRevision: z.number().int().nonnegative(),
+          startedAt: z.number().finite(),
+        })
+        .optional(),
+    })
+    .optional(),
   createdAt: z.number().finite(),
   updatedAt: z.number().finite(),
   progressReceipts: z

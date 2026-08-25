@@ -27,6 +27,7 @@ import {
   RemoteError,
   type RemoteHandle,
   type RemoteLogsOpts,
+  type RemoteMount,
   type RemoteSpec,
   type RemoteStatus,
   type RemoteStatusKind,
@@ -72,38 +73,58 @@ export interface DockerAdapterOpts {
 /* Argv composition (pure)                                             */
 /* ------------------------------------------------------------------ */
 
+/** The env → argv translation, as its own unit because it is the only part of
+ *  argv composition that is not a straight field-to-flag mapping: it has THREE
+ *  outcomes per entry (delete-flag / hoisted-and-dropped / normal) plus a
+ *  whole-map postscript. `QUANTA_REMOTE_NETWORK="none"` is deliberately
+ *  double-read — dropped from the `-e` stream AND, only for the exact value
+ *  `"none"`, re-emitted as a real `--network=none` — so any other value (or a
+ *  `null`, which takes the delete branch first) still reaches the container as
+ *  a plain env var. The `--network=none` flag is appended AFTER all `-e`
+ *  flags regardless of where the key sits in the map. */
+const composeEnvArgv = (env: Readonly<Record<string, string | null>>): readonly string[] => {
+  const out: string[] = []
+  for (const [k, v] of Object.entries(env)) {
+    if (v === null) {
+      // `-e KEY` (no value) deletes an inherited env var.
+      out.push("-e", k)
+      continue
+    }
+    // Network flag is hoisted out of env into a real `--network=none`.
+    if (k === "QUANTA_REMOTE_NETWORK" && v === "none") continue
+    out.push("-e", `${k}=${v}`)
+  }
+  if (env.QUANTA_REMOTE_NETWORK === "none") {
+    out.push("--network=none")
+  }
+  return out
+}
+
+/** Mounts → `-v src:tgt[:ro]`. Its own unit purely to keep the readonly
+ *  ternary out of the composer's nesting; `readonly` is compared to the
+ *  literal `true`, NOT coerced, so a truthy non-boolean stays read-write. */
+const composeMountArgv = (mounts: readonly RemoteMount[]): readonly string[] => {
+  const out: string[] = []
+  for (const m of mounts) {
+    out.push("-v", m.readonly === true ? `${m.source}:${m.target}:ro` : `${m.source}:${m.target}`)
+  }
+  return out
+}
+
 /** Compose `docker run` argv from a spec + handle name.
  *
  *  Network policy: when `--network=none` is requested via
  *  `RemoteSpec.env.QUANTA_REMOTE_NETWORK = "none"` we inject `--network=none`.
- *  Otherwise the default docker network is used. */
+ *  Otherwise the default docker network is used.
+ *
+ *  Flag ORDER is contractual (docker parses options before the image operand):
+ *  base → env → mounts → workdir → image → cmd. */
 export const composeDockerRunArgv = (spec: RemoteSpec, name: string): readonly string[] => {
   const argv: string[] = ["docker", "run", "-d", "--name", name]
-
-  // env flags — `-e KEY` (no value) deletes inherited env vars.
-  if (spec.env !== undefined && spec.env !== null) {
-    for (const [k, v] of Object.entries(spec.env)) {
-      if (v === null) {
-        argv.push("-e", k)
-        continue
-      }
-      // Network flag is hoisted out of env into a real `--network=none`.
-      if (k === "QUANTA_REMOTE_NETWORK" && v === "none") continue
-      argv.push("-e", `${k}=${v}`)
-    }
-    if (spec.env.QUANTA_REMOTE_NETWORK === "none") {
-      argv.push("--network=none")
-    }
-  }
-
-  // mounts
-  if (spec.mounts !== undefined) {
-    for (const m of spec.mounts) {
-      const flag = m.readonly === true ? `${m.source}:${m.target}:ro` : `${m.source}:${m.target}`
-      argv.push("-v", flag)
-    }
-  }
-
+  // The `!== null` guard is defensive: the declared type is `| undefined`, but
+  // a JSON-sourced spec can carry a literal `null`.
+  if (spec.env !== undefined && spec.env !== null) argv.push(...composeEnvArgv(spec.env))
+  if (spec.mounts !== undefined) argv.push(...composeMountArgv(spec.mounts))
   if (spec.workdir !== undefined) argv.push("-w", spec.workdir)
   argv.push(spec.image, ...spec.cmd)
   return argv

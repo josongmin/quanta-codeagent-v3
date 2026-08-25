@@ -36,7 +36,7 @@ export const GOAL_PURSUIT_DISCIPLINE =
 export interface GoalPursuitCheckpoint {
   readonly verifiedCriterionIds: readonly string[]
   readonly remainingCriterionIds: readonly string[]
-  readonly lastAttemptKey?: string
+  /** The last attributed attempt's typed outcome (never its internal key). */
   readonly lastTurnOutcome?: string
 }
 
@@ -57,7 +57,7 @@ export const buildPursuitContinuationPrompt = (
   const progress =
     checkpoint === undefined
       ? ""
-      : `\n\nVerified criterion IDs: ${checkpoint.verifiedCriterionIds.join(", ") || "none"}. Remaining criterion IDs: ${checkpoint.remainingCriterionIds.join(", ") || "none"}.${checkpoint.lastAttemptKey === undefined ? "" : ` Last attempt: ${checkpoint.lastAttemptKey}${checkpoint.lastTurnOutcome === undefined ? "" : ` (${checkpoint.lastTurnOutcome})`}.`}`
+      : `\n\nVerified criterion IDs: ${checkpoint.verifiedCriterionIds.join(", ") || "none"}. Remaining criterion IDs: ${checkpoint.remainingCriterionIds.join(", ") || "none"}.${checkpoint.lastTurnOutcome === undefined ? "" : ` Last attempt outcome: ${checkpoint.lastTurnOutcome}.`}`
   if (trimmed.length === 0) return `${GOAL_PURSUIT_DISCIPLINE} ${objective}${progress}`
   // The goal is fenced as data (task to pursue), not as higher-priority text.
   return `${GOAL_PURSUIT_DISCIPLINE}\n\n${objective}${progress}`

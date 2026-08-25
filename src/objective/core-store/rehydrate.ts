@@ -16,6 +16,7 @@
 
 import { randomUUID } from "node:crypto"
 import { logger } from "@/shared"
+import { isObjectiveAttemptProvenance, type StartedObjectiveAttempt } from "../attempt"
 import {
   type CheckSpec,
   type CompletionReceipt,
@@ -39,6 +40,34 @@ import {
 } from "./cell"
 
 const finiteOrZero = (v: unknown): number => (typeof v === "number" && Number.isFinite(v) ? v : 0)
+
+/** GOAL-04 — rebuild the attempt accounting; a malformed started record is dropped. */
+const rebuildAttempts = (
+  raw: unknown,
+): { autonomousTurnsStarted: number; startedAttempt?: StartedObjectiveAttempt } => {
+  const rec = (raw ?? {}) as { autonomousTurnsStarted?: unknown; started?: unknown }
+  const started = rec.started as Partial<StartedObjectiveAttempt> | undefined
+  const validStarted =
+    started !== undefined &&
+    started !== null &&
+    isNonEmptyString(started.attemptId) &&
+    isObjectiveAttemptProvenance(started.provenance) &&
+    (started.executionMode === "foreground" || started.executionMode === "background")
+  return {
+    autonomousTurnsStarted: finiteNonNegInt(rec.autonomousTurnsStarted) ?? 0,
+    ...(validStarted
+      ? {
+          startedAttempt: {
+            attemptId: started.attemptId as string,
+            provenance: started.provenance as StartedObjectiveAttempt["provenance"],
+            executionMode: started.executionMode as "foreground" | "background",
+            startedRevision: finiteNonNegInt(started.startedRevision) ?? 0,
+            startedAt: finiteOrZero(started.startedAt),
+          },
+        }
+      : {}),
+  }
+}
 
 /** GOAL-01 — resolve the generation identity + provenance of a raw record. */
 const identityOf = (
@@ -109,6 +138,7 @@ export const cellFromThreadSnapshot = (
     tokensUsed: finiteNonNegInt(o.budget?.tokensUsed) ?? 0,
     ...(maxTurns !== undefined ? { maxTurns } : {}),
     turnsUsed: finiteNonNegInt(o.budget?.turnsUsed) ?? 0,
+    ...rebuildAttempts((o as { attempts?: unknown }).attempts),
     createdAt: finiteOrZero(o.createdAt),
     updatedAt: finiteOrZero(o.updatedAt),
   }
@@ -282,6 +312,7 @@ export function cellFromObjective(o: unknown): Cell | null {
     tokensUsed: finiteNonNegInt(budget.tokensUsed) ?? 0,
     ...(maxTurns !== undefined ? { maxTurns } : {}),
     turnsUsed: finiteNonNegInt(budget.turnsUsed) ?? 0,
+    ...rebuildAttempts((rec as { attempts?: unknown }).attempts),
     createdAt: finiteOrZero(rec.createdAt),
     updatedAt: finiteOrZero(rec.updatedAt),
   }

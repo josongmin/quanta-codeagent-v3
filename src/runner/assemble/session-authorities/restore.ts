@@ -37,6 +37,7 @@ import type {
 } from "@/objective"
 import {
   isObjectiveActor,
+  isObjectiveAttemptProvenance,
   legacyObjectiveId,
   MAX_GOAL_CHARS,
   normalizeCheckDeclaration,
@@ -296,6 +297,21 @@ const toObjective = (threadId: string, body: PersistedObjectiveBodyV2): Objectiv
     budget,
     blockers: body.blockers.map(toBlocker),
     nextActions: [...body.nextActions],
+    attempts: {
+      autonomousTurnsStarted: body.attempts?.autonomousTurnsStarted ?? 0,
+      ...(body.attempts?.started !== undefined &&
+      isObjectiveAttemptProvenance(body.attempts.started.provenance)
+        ? {
+            started: {
+              attemptId: body.attempts.started.attemptId,
+              provenance: body.attempts.started.provenance,
+              executionMode: body.attempts.started.executionMode,
+              startedRevision: body.attempts.started.startedRevision,
+              startedAt: body.attempts.started.startedAt,
+            },
+          }
+        : {}),
+    },
     createdAt: body.createdAt,
     updatedAt: body.updatedAt,
   }

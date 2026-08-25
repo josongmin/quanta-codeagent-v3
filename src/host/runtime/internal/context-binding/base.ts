@@ -550,6 +550,7 @@ const buildOptionalSnapshotFields = (
   ...whenDefined("gitObservability", base.gitObservability),
   ...whenDefined("conversationActionPort", base.conversationActionPort),
   ...whenDefined("activeTurnRef", base.activeTurnRef),
+  ...whenDefined("objectiveAttemptSlot", base.objectiveAttemptSlot),
   ...whenDefined("shadowVerify", base.shadowVerify),
   ...whenDefined("radar", base.radar),
   ...whenDefined("dreamTrigger", base.dreamTrigger),

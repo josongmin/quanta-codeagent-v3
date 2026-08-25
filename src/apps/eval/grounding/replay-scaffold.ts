@@ -100,6 +100,40 @@ const toPolicyMarkers = (
   return out.size === 0 ? undefined : [...out].sort()
 }
 
+/** `TrajectoryEvent.data` is untyped JSON, so every field read needs the same
+ *  "string, else fall back" coercion. One helper instead of five inline
+ *  ternaries each paying the collector loop's nesting surcharge. */
+const dataString = (data: Record<string, unknown>, key: string, fallback: string): string => {
+  const value = data[key]
+  return typeof value === "string" ? value : fallback
+}
+
+/** Projects one `tool_result` event payload into a history entry. Its own unit
+ *  because it is the only branch of the collector that reads four separate
+ *  `data` fields, and because its empty-tail behaviour is a quirk worth
+ *  stating: when BOTH tails are blank the filtered array is empty, so `tail`
+ *  is `undefined`, `tail !== ""` is still TRUE, and the rendered text ends in
+ *  the literal `": undefined"`. Recorded fixtures contain that string, so it
+ *  is preserved verbatim rather than "fixed" here. */
+const toToolResultEntry = (data: Record<string, unknown>): GroundingHistoryEntry => {
+  const toolName = dataString(data, "name", "unknown_tool")
+  const ok = data.ok === true
+  const tail = [
+    dataString(data, "stdoutTail", "").trim(),
+    dataString(data, "stderrTail", "").trim(),
+  ].filter((value) => value !== "")[0]
+  return {
+    role: "assistant",
+    kind: "tool_result",
+    toolName,
+    text: `Tool ${toolName} ${ok ? "ok" : "error"}${tail !== "" ? `: ${tail}` : ""}`,
+  }
+}
+
+/** Walks the trajectory once, keeping ONE piece of state: the assistant text
+ *  accumulated since the last boundary. `turn_start` and `tool_result` are
+ *  both boundaries — they flush the buffer before doing their own work — so
+ *  the flush lives in a closure rather than being spelled at three sites. */
 const collectAssistantHistory = (events: readonly TrajectoryEvent[]): GroundingHistoryEntry[] => {
   const out: GroundingHistoryEntry[] = []
   let assistantText = ""
@@ -111,26 +145,12 @@ const collectAssistantHistory = (events: readonly TrajectoryEvent[]): GroundingH
   for (const event of events) {
     if (event.kind === "turn_start") flushAssistantText()
     if (event.kind === "assistant_text") {
-      const delta = typeof event.data.delta === "string" ? event.data.delta : ""
-      assistantText += delta
+      assistantText += dataString(event.data, "delta", "")
       continue
     }
     if (event.kind !== "tool_result") continue
     flushAssistantText()
-    const toolName =
-      typeof event.data.name === "string" ? (event.data.name as string) : "unknown_tool"
-    const ok = event.data.ok === true
-    const stdoutTail =
-      typeof event.data.stdoutTail === "string" ? (event.data.stdoutTail as string) : ""
-    const stderrTail =
-      typeof event.data.stderrTail === "string" ? (event.data.stderrTail as string) : ""
-    const tail = [stdoutTail.trim(), stderrTail.trim()].filter((value) => value !== "")[0]
-    out.push({
-      role: "assistant",
-      kind: "tool_result",
-      toolName,
-      text: `Tool ${toolName} ${ok ? "ok" : "error"}${tail !== "" ? `: ${tail}` : ""}`,
-    })
+    out.push(toToolResultEntry(event.data))
   }
   flushAssistantText()
   return out

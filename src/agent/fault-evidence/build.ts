@@ -74,6 +74,79 @@ const strongestTier = (sources: readonly FaultCandidateSource[]): number => {
 
 export type { FaultEvidenceInput, FaultEvidencePacket } from "./types"
 
+/** Merge ONE provenance stream into a file's candidate. NO additive arithmetic:
+ *  the only persisted numeric is the EXTERNALLY-SUPPLIED stage-1 rank score
+ *  (carried by MAX, never summed), used solely as a parameter-free tie-break
+ *  *within* a tier. Provenance streams without an external score (issue-file /
+ *  owner-resolve / static-witness) contribute a tier, not a magnitude.
+ *
+ *  Hoisted out of {@link buildFaultEvidencePacket} — it was a closure over
+ *  `byFile`, so its whole branch tree was charged to the enclosing function on
+ *  top of a nesting surcharge. The map is now an explicit parameter, which also
+ *  makes the "no additive blend" invariant testable in isolation. */
+const mergeSource = (
+  byFile: Map<string, FaultCandidate>,
+  file: string,
+  source: FaultCandidateSource,
+  externalScore?: number,
+): void => {
+  if (!file) return
+  const cur = byFile.get(file)
+  if (cur === undefined) {
+    byFile.set(file, { file, score: externalScore ?? 0, sources: [source], symbols: [] })
+    return
+  }
+  if (!cur.sources.includes(source)) cur.sources.push(source)
+  if (externalScore !== undefined && externalScore > cur.score) cur.score = externalScore
+}
+
+/** Attach resolved symbol names (bounded, names only) to their ALREADY-PRESENT
+ *  owner file. Its own unit because it is a strictly second pass: a record whose
+ *  file never entered `byFile` (e.g. an empty path) contributes no symbol, and
+ *  a falsy `forSymbol` is skipped. Never creates a candidate. */
+const attachSymbols = (
+  byFile: Map<string, FaultCandidate>,
+  records: readonly { file: string; forSymbol?: string }[],
+): void => {
+  for (const r of records) {
+    const c = byFile.get(r.file)
+    if (c && r.forSymbol && !c.symbols.includes(r.forSymbol)) c.symbols.push(r.forSymbol)
+  }
+}
+
+/** Fold every provenance stream into one file → candidate map, in the FIXED
+ *  stream order stage1 → issue-file → owner-resolve → static-witness. That
+ *  order is behaviour: it fixes each candidate's `sources` array order and the
+ *  map's insertion order, which is the input to the stable sort below.
+ *  Symbol attachment runs after ALL merges so a symbol can land on a file that
+ *  a later stream introduced. */
+const collectCandidates = (input: FaultEvidenceInput): Map<string, FaultCandidate> => {
+  const byFile = new Map<string, FaultCandidate>()
+  for (const f of input.stage1Files ?? []) mergeSource(byFile, f.file, "stage1", f.score)
+  for (const f of input.issueFiles ?? []) mergeSource(byFile, f, "issue-file")
+  for (const o of input.ownerResolved ?? []) mergeSource(byFile, o.file, "owner-resolve")
+  // SCAFF-03: typed-relation witness owners carry the `static-witness` source as
+  // advisory structural evidence. Generic `{ file, forSymbol? }` records — the
+  // bench adapter already digested the witness IR, so this stays bench-agnostic.
+  for (const w of input.witnessOwners ?? []) mergeSource(byFile, w.file, "static-witness")
+  attachSymbols(byFile, input.ownerResolved ?? [])
+  attachSymbols(byFile, input.witnessOwners ?? [])
+  return byFile
+}
+
+/** PARAMETER-FREE ranking: lexicographic by (1) strongest provenance tier,
+ *  then (2) the external stage-1 rank score as an in-tier tie-break (NOT an
+ *  additive blend — a file present in several sets sorts by its strongest tier,
+ *  never by a sum), then (3) a stable path tie-break. Two weak signals can
+ *  never out-rank one strong signal: tier dominates the comparison. */
+const rankCandidates = (byFile: ReadonlyMap<string, FaultCandidate>): FaultCandidate[] =>
+  [...byFile.values()].sort(
+    (a, b) =>
+      strongestTier(a.sources) - strongestTier(b.sources) ||
+      b.score - a.score ||
+      byteCompare(a.file, b.file),
+  )
+
 export const buildFaultEvidencePacket = (input: FaultEvidenceInput): FaultEvidencePacket => {
   const maxCandidates = input.maxCandidates ?? DEFAULT_MAX_CANDIDATES
   const maxSymbols = input.maxSymbols ?? DEFAULT_MAX_SYMBOLS
@@ -81,59 +154,10 @@ export const buildFaultEvidencePacket = (input: FaultEvidenceInput): FaultEviden
   const allSymbols = extractSymbols(input.issueText)
   const issueSymbols = allSymbols.slice(0, maxSymbols)
 
-  const byFile = new Map<string, FaultCandidate>()
-  // Merge a provenance stream into a file's candidate. NO additive arithmetic:
-  // the only persisted numeric is the EXTERNALLY-SUPPLIED stage-1 rank score
-  // (carried by MAX, never summed), used solely as a parameter-free tie-break
-  // *within* a tier. Provenance streams without an external score (issue-file /
-  // owner-resolve / static-witness) contribute a tier, not a magnitude.
-  const mergeSource = (
-    file: string,
-    source: FaultCandidateSource,
-    externalScore?: number,
-  ): void => {
-    if (!file) return
-    const cur = byFile.get(file)
-    if (cur) {
-      if (!cur.sources.includes(source)) cur.sources.push(source)
-      if (externalScore !== undefined && externalScore > cur.score) cur.score = externalScore
-    } else {
-      byFile.set(file, { file, score: externalScore ?? 0, sources: [source], symbols: [] })
-    }
-  }
-
-  for (const f of input.stage1Files ?? []) mergeSource(f.file, "stage1", f.score)
-  for (const f of input.issueFiles ?? []) mergeSource(f, "issue-file")
-  for (const o of input.ownerResolved ?? []) mergeSource(o.file, "owner-resolve")
-  // SCAFF-03: typed-relation witness owners carry the `static-witness` source as
-  // advisory structural evidence. Generic `{ file, forSymbol? }` records — the
-  // bench adapter already digested the witness IR, so this stays bench-agnostic.
-  for (const w of input.witnessOwners ?? []) mergeSource(w.file, "static-witness")
-  // attach resolved symbol names (bounded, names only) to their owner file
-  for (const o of input.ownerResolved ?? []) {
-    const c = byFile.get(o.file)
-    if (c && o.forSymbol && !c.symbols.includes(o.forSymbol)) c.symbols.push(o.forSymbol)
-  }
-  for (const w of input.witnessOwners ?? []) {
-    const c = byFile.get(w.file)
-    if (c && w.forSymbol && !c.symbols.includes(w.forSymbol)) c.symbols.push(w.forSymbol)
-  }
-
-  // PARAMETER-FREE ranking: lexicographic by (1) strongest provenance tier,
-  // then (2) the external stage-1 rank score as an in-tier tie-break (NOT an
-  // additive blend — a file present in several sets sorts by its strongest tier,
-  // never by a sum), then (3) a stable path tie-break. Two weak signals can
-  // never out-rank one strong signal: tier dominates the comparison.
-  const ranked = [...byFile.values()].sort(
-    (a, b) =>
-      strongestTier(a.sources) - strongestTier(b.sources) ||
-      b.score - a.score ||
-      byteCompare(a.file, b.file),
-  )
-  const candidates = ranked.slice(0, maxCandidates)
+  const ranked = rankCandidates(collectCandidates(input))
 
   return {
-    candidates,
+    candidates: ranked.slice(0, maxCandidates),
     issueSymbols,
     truncated: ranked.length > maxCandidates || allSymbols.length > maxSymbols,
     // partial when a blind input stream was absent: no stage-1 ranking, or LSP

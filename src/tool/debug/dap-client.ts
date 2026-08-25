@@ -12,6 +12,7 @@
  *     reserved for a genuinely dead transport (disposed / closed).
  */
 import { DapFrameDecoder, encodeDapMessage } from "./dap-codec"
+import { addHandler, armWaiter, fanOutEvent } from "./event-fanout"
 
 /** Byte carrier between the client and a debug adapter. */
 export interface DapTransport {
@@ -31,6 +32,25 @@ export interface DapResponse {
 }
 
 type EventHandler = (body: unknown) => void
+
+/** Project a raw DAP response frame onto the client-facing {@link DapResponse}.
+ *
+ *  These three conditional spreads WERE the bulk of `ingest`'s complexity: at
+ *  their old home (`for` > `if` > `if` > object literal) each ternary was
+ *  charged at nesting depth 3; hoisted to a top-level projection they cost one
+ *  point each. Behaviour is unchanged and deliberately literal-minded:
+ *  `success === true` (a missing or non-boolean `success` is a FAILED response,
+ *  never a truthy one), and an explicit `null` `command`/`message`/`body` is NOT
+ *  `undefined`, so it is carried through rather than dropped. */
+const toDapResponse = (raw: unknown): DapResponse => {
+  const full = raw as DapResponse
+  return {
+    success: full.success === true,
+    ...(full.command !== undefined ? { command: full.command } : {}),
+    ...(full.message !== undefined ? { message: full.message } : {}),
+    ...(full.body !== undefined ? { body: full.body } : {}),
+  }
+}
 
 export class DapClient {
   private seq = 1
@@ -63,20 +83,13 @@ export class DapClient {
 
   /** Subscribe to a DAP event (`stopped`, `output`, `terminated`, …). */
   onEvent(event: string, handler: EventHandler): void {
-    let set = this.handlers.get(event)
-    if (set === undefined) {
-      set = new Set()
-      this.handlers.set(event, set)
-    }
-    set.add(handler)
+    addHandler(this.handlers, event, handler)
   }
 
   /** Resolve once, on the NEXT occurrence of `event`. */
   waitForEvent(event: string): Promise<unknown> {
     return new Promise((resolve) => {
-      const arr = this.waiters.get(event) ?? []
-      arr.push(resolve)
-      this.waiters.set(event, arr)
+      armWaiter(this.waiters, event, resolve)
     })
   }
 
@@ -96,37 +109,31 @@ export class DapClient {
     }
   }
 
+  /** Correlate ONE response frame with the request waiting on it. An unknown or
+   *  already-settled `request_seq` is a deliberate NO-OP (adapters do re-answer
+   *  and answer out of order). The pending entry is removed BEFORE the resolver
+   *  runs, so a resolver that re-enters can never observe a half-settled map. */
+  private settleResponse(requestSeq: number, raw: unknown): void {
+    const resolve = this.pending.get(requestSeq)
+    if (resolve === undefined) return
+    this.pending.delete(requestSeq)
+    resolve(toDapResponse(raw))
+  }
+
+  /** The read loop, now only a ROUTER: decode the byte stream into whole frames
+   *  and send each down exactly one of the two paths (response correlation /
+   *  event fan-out). The `continue` is load-bearing — a `type:"response"` frame
+   *  whose `request_seq` is missing or non-numeric falls through to the event
+   *  test (and fails it), which is the pre-existing behaviour. */
   private ingest(chunk: string | Buffer): void {
     for (const raw of this.decoder.push(chunk)) {
       const msg = raw as { type?: string; request_seq?: number; event?: string; body?: unknown }
       if (msg.type === "response" && typeof msg.request_seq === "number") {
-        const resolve = this.pending.get(msg.request_seq)
-        if (resolve !== undefined) {
-          this.pending.delete(msg.request_seq)
-          const full = raw as DapResponse
-          resolve({
-            success: full.success === true,
-            ...(full.command !== undefined ? { command: full.command } : {}),
-            ...(full.message !== undefined ? { message: full.message } : {}),
-            ...(full.body !== undefined ? { body: full.body } : {}),
-          })
-        }
+        this.settleResponse(msg.request_seq, raw)
         continue
       }
-      if (msg.type === "event" && typeof msg.event === "string") {
-        for (const h of this.handlers.get(msg.event) ?? []) {
-          try {
-            h(msg.body)
-          } catch {
-            // A buggy subscriber must not break the read loop.
-          }
-        }
-        const arr = this.waiters.get(msg.event)
-        if (arr !== undefined && arr.length > 0) {
-          this.waiters.delete(msg.event)
-          for (const resolve of arr) resolve(msg.body)
-        }
-      }
+      if (msg.type === "event" && typeof msg.event === "string")
+        fanOutEvent(this.handlers, this.waiters, msg.event, msg.body)
     }
   }
 }

@@ -108,6 +108,8 @@ export const MUTATION_POLICY: MutationPolicyTable = {
     "allow",
     ACTOR_FORBIDDEN,
   ),
+  beginAttempt: row(ACTOR_FORBIDDEN, ACTOR_FORBIDDEN, ACTOR_FORBIDDEN, ACTOR_FORBIDDEN, "allow"),
+  abandonAttempt: row("allow", ACTOR_FORBIDDEN, ACTOR_FORBIDDEN, ACTOR_FORBIDDEN, "allow"),
   settleAttempt: row(ACTOR_FORBIDDEN, ACTOR_FORBIDDEN, ACTOR_FORBIDDEN, ACTOR_FORBIDDEN, "allow"),
   markUsageLimited: row(
     ACTOR_FORBIDDEN,
@@ -197,6 +199,14 @@ const transitionRejection = (
   if (mutation.kind === "create" && o !== undefined) return "objective-exists"
   if ((mutation.kind === "replace" || mutation.kind === "clear") && o === undefined) {
     return "objective-missing"
+  }
+  // GOAL-04 — a durable started attempt owns the accounting; the definition
+  // cannot be replaced/cleared under it (pause/cancel/abandon first).
+  if (
+    (mutation.kind === "replace" || mutation.kind === "clear") &&
+    o?.attempts.started !== undefined
+  ) {
+    return "attempt-in-flight"
   }
   if (o === undefined) return null
   if (

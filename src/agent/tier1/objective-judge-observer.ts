@@ -61,7 +61,9 @@ export interface ObjectiveJudgeObserverPort {
 const MAX_EVIDENCE_BYTES = 32 * 1024
 const MAX_JUDGE_OUTPUT_BYTES = 16 * 1024
 const MAX_CACHE_ENTRIES = 64
-const CACHE_TTL_MS = 5 * 60_000
+/** Judge-verdict cache TTL: 5 minutes (300_000 ms) — telemetry-only, so a
+ *  slightly stale verdict is acceptable; bounds repeated model calls per turn. */
+const CACHE_TTL_MS = 300_000
 const DEFAULT_TIMEOUT_MS = 10_000
 const MAX_TIMEOUT_MS = 60_000
 const CIRCUIT_FAILURE_LIMIT = 3

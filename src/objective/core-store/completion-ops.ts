@@ -18,7 +18,12 @@ export const completionOps = (
   ctx: ObjectiveStoreCtx,
 ): Pick<
   ObjectiveCore,
-  "applyManualCompletion" | "applyVerifierCompletion" | "resetCheckedCriterion" | "applyUsage"
+  | "applyManualCompletion"
+  | "applyVerifierCompletion"
+  | "resetCheckedCriterion"
+  | "applyUsage"
+  | "startAttempt"
+  | "clearStartedAttempt"
 > => {
   const { cells, mutate } = ctx
   return {
@@ -67,6 +72,20 @@ export const completionOps = (
           delete next.completion
           return next
         })
+      })
+    },
+
+    startAttempt(threadId, started): Objective | null {
+      return mutate(threadId, (cell) => {
+        cell.startedAttempt = { ...started }
+        cell.turnsUsed += 1
+        if (started.provenance === "autonomous-continuation") cell.autonomousTurnsStarted += 1
+      })
+    },
+
+    clearStartedAttempt(threadId): Objective | null {
+      return mutate(threadId, (cell) => {
+        delete cell.startedAttempt
       })
     },
 

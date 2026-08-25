@@ -95,22 +95,14 @@ const isPersistedStatus = (s: unknown): s is PersistedHandle["status"] =>
   s === "interrupted" ||
   s === "resumed"
 
-/** Reconstruct a {@link PersistedHandle} from a parsed JSON object, OMITTING
- *  absent optional fields (exactOptionalPropertyTypes). Returns `undefined`
- *  on shape mismatch; the caller treats that as a parse failure. */
-const parseHandle = (raw: unknown): PersistedHandle | undefined => {
-  if (typeof raw !== "object" || raw === null) return undefined
-  const r = raw as Partial<PersistedHandle>
-  if (typeof r.id !== "string") return undefined
-  if (typeof r.startedAt !== "number") return undefined
-  if (typeof r.turns !== "number") return undefined
-  if (typeof r.outputSummary !== "string") return undefined
-  if (!isPersistedStatus(r.status)) return undefined
-  if (typeof r.spec !== "object" || r.spec === null) return undefined
-  const specPart = r.spec as Partial<PersistedHandle["spec"]>
+/** The `spec` sub-record, rebuilt with only-present optional fields. Its own
+ *  unit because it is a SECOND, independently-failing shape gate nested inside
+ *  the handle gate: `task` is required, every other field is dropped rather
+ *  than rejected when its type is wrong. Returns `undefined` on mismatch. */
+const parseSpec = (raw: unknown): PersistedHandle["spec"] | undefined => {
+  const specPart = raw as Partial<PersistedHandle["spec"]>
   if (typeof specPart.task !== "string") return undefined
-  // Reconstruct spec with only-present optional fields.
-  const spec: PersistedHandle["spec"] = {
+  return {
     task: specPart.task,
     ...(typeof specPart.modelOverride === "string"
       ? { modelOverride: specPart.modelOverride }
@@ -121,6 +113,27 @@ const parseHandle = (raw: unknown): PersistedHandle | undefined => {
       ? { metadata: specPart.metadata }
       : {}),
   }
+}
+
+/** The REQUIRED half of {@link PersistedHandle} — the six fields whose absence
+ *  or wrong type makes the whole record unparseable. */
+type PersistedHandleCore = Pick<
+  PersistedHandle,
+  "id" | "spec" | "status" | "startedAt" | "turns" | "outputSummary"
+>
+
+/** Gate + rebuild the REQUIRED fields. A unit distinct from the optional tail
+ *  because the two halves have opposite failure policies: any miss here
+ *  REJECTS the record, whereas a miss in the tail merely OMITS one key. */
+const parseCore = (r: Partial<PersistedHandle>): PersistedHandleCore | undefined => {
+  if (typeof r.id !== "string") return undefined
+  if (typeof r.startedAt !== "number") return undefined
+  if (typeof r.turns !== "number") return undefined
+  if (typeof r.outputSummary !== "string") return undefined
+  if (!isPersistedStatus(r.status)) return undefined
+  if (typeof r.spec !== "object" || r.spec === null) return undefined
+  const spec = parseSpec(r.spec)
+  if (spec === undefined) return undefined
   return {
     id: r.id,
     spec,
@@ -128,6 +141,29 @@ const parseHandle = (raw: unknown): PersistedHandle | undefined => {
     startedAt: r.startedAt,
     turns: r.turns,
     outputSummary: r.outputSummary,
+  }
+}
+
+/** Reconstruct a {@link PersistedHandle} from a parsed JSON object, OMITTING
+ *  absent optional fields (exactOptionalPropertyTypes). Returns `undefined`
+ *  on shape mismatch; the caller treats that as a parse failure.
+ *
+ *  What stays here is exactly the OPTIONAL tail — each field is independently
+ *  kept-or-dropped, never a reason to reject. Key order below is preserved
+ *  verbatim: `save()` re-serializes with `JSON.stringify`, so the order is
+ *  observable in the on-disk JSONL line. */
+const parseHandle = (raw: unknown): PersistedHandle | undefined => {
+  if (typeof raw !== "object" || raw === null) return undefined
+  const r = raw as Partial<PersistedHandle>
+  const core = parseCore(r)
+  if (core === undefined) return undefined
+  return {
+    id: core.id,
+    spec: core.spec,
+    status: core.status,
+    startedAt: core.startedAt,
+    turns: core.turns,
+    outputSummary: core.outputSummary,
     ...(typeof r.endedAt === "number" ? { endedAt: r.endedAt } : {}),
     ...(typeof r.outputDetail === "string" ? { outputDetail: r.outputDetail } : {}),
     ...(typeof r.errorMessage === "string" ? { errorMessage: r.errorMessage } : {}),
@@ -209,6 +245,88 @@ const readLatestHandle = async (path: string): Promise<PersistedHandle | null> =
 }
 
 /* ------------------------------------------------------------------ */
+/* workspace-scan helpers (shared by list + prune)                      */
+/* ------------------------------------------------------------------ */
+
+/** `readdir` with the workspace-scan policy: a MISSING directory means "no
+ *  handles yet", not a failure, so ENOENT ⇒ `undefined`; anything else is a
+ *  real disk problem and becomes `io-failed`. `label` carries each caller's
+ *  original message prefix verbatim so error strings are unchanged. */
+const readdirOrAbsent = async (dir: string, label: string): Promise<string[] | undefined> => {
+  try {
+    return await readdir(dir)
+  } catch (e: unknown) {
+    if ((e as { code?: string } | null)?.code === "ENOENT") return undefined
+    throw new PersistenceError("io-failed", `${label}: ${errMessage(e)}`)
+  }
+}
+
+/** Latest snapshot for one handle file under the SCAN policy, where the two
+ *  "nothing usable here" outcomes are indistinguishable to both callers:
+ *  an EMPTY file (`readLatestHandle` ⇒ null) and a CORRUPT last line
+ *  (`parse-failed`) both mean "skip this file and keep scanning". `io-failed`
+ *  still bubbles so a real disk problem aborts the scan. */
+const readLatestOrSkip = async (path: string): Promise<PersistedHandle | undefined> => {
+  try {
+    return (await readLatestHandle(path)) ?? undefined
+  } catch (e: unknown) {
+    // PARSE failure on one file ⇒ skip + continue (NOT abort the scan).
+    if (e instanceof PersistenceError && e.code === "parse-failed") return undefined
+    throw e
+  }
+}
+
+/** All parseable handles in one workspace dir, newest first. */
+const scanWorkspace = async (wsDir: string): Promise<PersistedHandle[]> => {
+  const files = await readdirOrAbsent(wsDir, "list readdir")
+  if (files === undefined) return []
+  const handles: PersistedHandle[] = []
+  for (const f of files) {
+    if (!f.endsWith(".jsonl")) continue
+    const h = await readLatestOrSkip(join(wsDir, f))
+    if (h !== undefined) handles.push(h)
+  }
+  // Newest first.
+  handles.sort((a, b) => b.startedAt - a.startedAt)
+  return handles
+}
+
+/** Delete one pruned file, mapping any failure to the prune-specific
+ *  `io-failed` message. Separate unit so the scan loop stays flat. */
+const removePruned = async (path: string): Promise<void> => {
+  try {
+    await rm(path, { force: true })
+  } catch (e: unknown) {
+    throw new PersistenceError("io-failed", `prune rm ${path}: ${errMessage(e)}`)
+  }
+}
+
+/** Delete terminal handles whose end time is strictly before `cutoff`.
+ *
+ *  The comparison is deliberately `endedAt < cutoff` rather than its negation:
+ *  `endedAt` comes from untrusted JSON and can be NaN, for which BOTH `<` and
+ *  `>=` are false — an inverted `continue` guard would flip a NaN record from
+ *  never-pruned to always-pruned. */
+const sweepWorkspace = async (wsDir: string, cutoff: number): Promise<number> => {
+  const files = await readdirOrAbsent(wsDir, "prune readdir")
+  if (files === undefined) return 0
+  let removed = 0
+  for (const f of files) {
+    if (!f.endsWith(".jsonl")) continue
+    const path = join(wsDir, f)
+    const h = await readLatestOrSkip(path)
+    if (h === undefined) continue
+    if (h.status === "running") continue // never prune live handles
+    const endedAt = h.endedAt ?? h.startedAt
+    if (endedAt < cutoff) {
+      await removePruned(path)
+      removed += 1
+    }
+  }
+  return removed
+}
+
+/* ------------------------------------------------------------------ */
 /* factory                                                             */
 /* ------------------------------------------------------------------ */
 
@@ -259,31 +377,7 @@ export const defaultJsonlSchedulerStore = (opts?: JsonlStoreOpts): PersistentSch
     },
 
     async list(workspace) {
-      const wsDir = workspaceDir(baseDir, hasher, workspace)
-      let files: string[]
-      try {
-        files = await readdir(wsDir)
-      } catch (e: unknown) {
-        if ((e as { code?: string } | null)?.code === "ENOENT") return []
-        throw new PersistenceError("io-failed", `list readdir: ${errMessage(e)}`)
-      }
-      const handles: PersistedHandle[] = []
-      for (const f of files) {
-        if (!f.endsWith(".jsonl")) continue
-        const path = join(wsDir, f)
-        try {
-          const h = await readLatestHandle(path)
-          if (h !== null) handles.push(h)
-        } catch (e: unknown) {
-          // PARSE failure on one file ⇒ skip + continue (NOT abort the list).
-          // io-failed bubbles so the caller sees disk problems.
-          if (e instanceof PersistenceError && e.code === "parse-failed") continue
-          throw e
-        }
-      }
-      // Newest first.
-      handles.sort((a, b) => b.startedAt - a.startedAt)
-      return handles
+      return await scanWorkspace(workspaceDir(baseDir, hasher, workspace))
     },
 
     async delete(id) {
@@ -299,39 +393,10 @@ export const defaultJsonlSchedulerStore = (opts?: JsonlStoreOpts): PersistentSch
 
     async prune(workspace, maxAgeMs) {
       const wsDir = workspaceDir(baseDir, hasher, workspace)
+      // Clock is read BEFORE the directory scan, as before — a slow scan must
+      // not move the cutoff under itself.
       const cutoff = Date.now() - Math.max(0, maxAgeMs)
-      let files: string[]
-      try {
-        files = await readdir(wsDir)
-      } catch (e: unknown) {
-        if ((e as { code?: string } | null)?.code === "ENOENT") return 0
-        throw new PersistenceError("io-failed", `prune readdir: ${errMessage(e)}`)
-      }
-      let removed = 0
-      for (const f of files) {
-        if (!f.endsWith(".jsonl")) continue
-        const path = join(wsDir, f)
-        let h: PersistedHandle | null
-        try {
-          h = await readLatestHandle(path)
-        } catch (e: unknown) {
-          // Garbage file — skip; do NOT count toward removed.
-          if (e instanceof PersistenceError && e.code === "parse-failed") continue
-          throw e
-        }
-        if (h === null) continue
-        if (h.status === "running") continue // never prune live handles
-        const endedAt = h.endedAt ?? h.startedAt
-        if (endedAt < cutoff) {
-          try {
-            await rm(path, { force: true })
-            removed += 1
-          } catch (e: unknown) {
-            throw new PersistenceError("io-failed", `prune rm ${path}: ${errMessage(e)}`)
-          }
-        }
-      }
-      return removed
+      return await sweepWorkspace(wsDir, cutoff)
     },
   }
 }

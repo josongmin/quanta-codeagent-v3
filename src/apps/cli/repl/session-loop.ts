@@ -102,6 +102,9 @@ export const runSessionLoop = async (deps: RunSessionLoopDeps): Promise<void> =>
     objectiveStore: deps.objectiveStore,
     goalWakeSlot: deps.goalWakeSlot,
     activeTurnRef: deps.runtimeFacadeCompose?.activeTurnRef,
+    objectiveAttemptSlot: deps.runtimeFacadeCompose?.objectiveAttemptSlot as
+      | import("@/objective").ObjectiveAttemptSlot
+      | undefined,
     activeIdentityModeState: boot.activeIdentityModeState,
     enqueueWithHeartbeat: boot.enqueueWithHeartbeat,
     getSurfaceState,

@@ -149,6 +149,8 @@ const RULES: readonly Rule[] = [
         "ENV PROPAGATION — the Python prepare_images subprocess inherits parent env (Docker socket, PATH, HOME for conda).",
       "apps/bench/harness/images.ts":
         "ENV PROPAGATION — Bun.spawn `docker images` inherits parent env (DOCKER_HOST, PATH); not a feature-flag read.",
+      "runtime/run-argv.ts":
+        "ENV PROPAGATION — exact-argv core extracted verbatim from runtime/shell.ts (GOAL-03): `inheritEnv:true` lets the spawned child see the parent's env directly; the default path is the same scrubEnv seam. Not a feature read.",
       "runtime/shell.ts":
         "ENV PROPAGATION — `inheritEnv:true` lets the spawned child see the parent's env directly (used by bench/agent shells); not a feature read.",
       "runtime/sandbox.ts":

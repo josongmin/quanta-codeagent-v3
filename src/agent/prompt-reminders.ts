@@ -193,6 +193,32 @@ export const resolveDirectiveConfig = (): DirectiveConfig => {
   }
 }
 
+/** The ONE presence guard the dynamic-atom resolver needs: absent-or-empty ⇒
+ *  `undefined` (the assembler skips the block), otherwise the text.
+ *
+ *  A unit because `contentByKey` spelled this same "is there anything to say?"
+ *  test six different ways across its arms — `!== undefined && .length > 0`,
+ *  `?.trim()` then a length check, `.length > 0 ? render : undefined` — and
+ *  those repeated guards, not the switch, were its whole score. */
+const nonEmptyText = (s: string | undefined): string | undefined =>
+  s !== undefined && s.length > 0 ? s : undefined
+
+/** Render an optional value, or `undefined` when it is absent. Sibling of
+ *  `nonEmptyText` for the arms whose emptiness test is "is the field there",
+ *  not "is the string non-empty". */
+const renderIfPresent = <T>(
+  value: T | undefined,
+  render: (value: T) => string | undefined,
+): string | undefined => (value === undefined ? undefined : render(value))
+
+/** Render an optional LIST, or `undefined` when it is absent or empty.
+ *  Sibling of `renderIfPresent`; kept separate because "present but empty" is
+ *  a skip for lists and a render for scalars. */
+const renderIfAny = <T>(
+  values: readonly T[] | undefined,
+  render: (values: readonly T[]) => string | undefined,
+): string | undefined => (values !== undefined && values.length > 0 ? render(values) : undefined)
+
 /**
  * ADR-0538 §KEY-TRANSFORM (dynamic atoms) — the `contentByKey` RESOLVER. Maps a
  * dynamic reminder atom's stable `contentKey` to its per-turn wire text via the
@@ -211,39 +237,30 @@ export const contentByKey = (
       return todayDateLine(input.now)
     case "cwd":
       return `Working directory: ${input.cwd}`
-    case "directives": {
-      const directives = selectActiveDirectives(input.directiveConfig ?? resolveDirectiveConfig())
-      return directives.length > 0 ? directives : undefined
-    }
+    case "directives":
+      return nonEmptyText(selectActiveDirectives(input.directiveConfig ?? resolveDirectiveConfig()))
     case "language-hint":
-      return input.languageHint !== undefined && input.languageHint.length > 0
-        ? input.languageHint
-        : undefined
+      return nonEmptyText(input.languageHint)
     case "env-block":
       return renderEnvBlock(input.env)
     case "repo-rules":
-      return input.repoRules !== undefined ? renderRepoRulesBlock(input.repoRules) : undefined
+      return renderIfPresent(input.repoRules, renderRepoRulesBlock)
     case "glob-rules":
-      return selectedGlobRules.length > 0 ? renderGlobRulesBlock([...selectedGlobRules]) : undefined
+      return renderIfAny(selectedGlobRules, (rules) => renderGlobRulesBlock([...rules]))
     case "active-skills":
-      return input.activeSkills !== undefined && input.activeSkills.length > 0
-        ? renderActiveSkillsBlock(input.activeSkills)
-        : undefined
+      return renderIfAny(input.activeSkills, renderActiveSkillsBlock)
     case "objective":
       // C2b — LIVE per-turn read of the session objective authority (thunk).
       return renderObjectiveBlock(input.objective?.())
     case "working-state":
-      return input.workingState !== undefined
-        ? renderWorkingStateBlock(input.workingState)
-        : undefined
-    case "memory-context": {
-      const memory = input.memoryContext?.trim()
-      return memory !== undefined && memory.length > 0 ? memory : undefined
-    }
-    case "hook-context-tail": {
-      const afterSystem = collectHookPromptSide(input.hookPromptInjects, "injectAfterSystem")
-      return afterSystem !== undefined ? `## Hook context\n${afterSystem}` : undefined
-    }
+      return renderIfPresent(input.workingState, renderWorkingStateBlock)
+    case "memory-context":
+      return nonEmptyText(input.memoryContext?.trim())
+    case "hook-context-tail":
+      return renderIfPresent(
+        collectHookPromptSide(input.hookPromptInjects, "injectAfterSystem"),
+        (afterSystem) => `## Hook context\n${afterSystem}`,
+      )
     case "task-budget":
       return renderTaskBudgetBlock(input.taskBudget)
     default:

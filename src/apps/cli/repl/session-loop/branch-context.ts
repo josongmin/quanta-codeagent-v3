@@ -1,6 +1,6 @@
 import type { AgentConfig } from "@/agent"
 import type { InboundMode } from "@/agent/inbound-mode"
-import type { ObjectivePort } from "@/objective"
+import type { ObjectiveAttemptSlot, ObjectivePort } from "@/objective"
 import type { LastTurnOutcome } from "@/reactor"
 import type { ImageQueue } from "../../image-queue"
 import type { NotificationPort } from "../../notify"
@@ -68,6 +68,8 @@ export interface InteractiveBranchCtx extends LoopMutableRefs {
   readonly ux: ComposePromptPipelineDeps["ux"]
   readonly contextWarning: (() => string) | undefined
   readonly objectiveStore: ObjectivePort | undefined
+  /** GOAL-04 — host-owned attributed-attempt slot (present iff goal pursuit is composed). */
+  readonly objectiveAttemptSlot?: ObjectiveAttemptSlot | undefined
   readonly goalWakeSlot: GoalWakeSignalSlot | undefined
   /** Shared runtime turn holder. The agent loop is its sole writer; goal
    * continuation only observes it to avoid enqueueing over a live body. */

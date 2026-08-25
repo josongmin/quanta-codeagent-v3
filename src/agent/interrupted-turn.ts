@@ -53,6 +53,39 @@ const textOf = (m: Message): string =>
     .map((b) => b.text)
     .join("")
 
+/** Every `tool_use_id` that a message at or after index `from` ANSWERS with a
+ *  `tool_result`. Its own unit because it is a full forward re-scan that used
+ *  to sit INSIDE the reverse scan below — two nested loop levels whose surcharge
+ *  taxed every branch under them. Scanning only from `from` is load-bearing: a
+ *  result can only close a call that came BEFORE it, so an earlier
+ *  `tool_result` must never be read as answering a later `tool_use`. */
+const answeredToolUseIds = (
+  messages: ReadonlyArray<Message>,
+  from: number,
+): ReadonlySet<string> => {
+  const answered = new Set<string>()
+  for (let j = from; j < messages.length; j++) {
+    const later = messages[j]
+    if (later === undefined) continue
+    for (const b of later.content) {
+      if (b.type === "tool_result") answered.add(b.tool_use_id)
+    }
+  }
+  return answered
+}
+
+/** The `tool_use` blocks on ONE message that nothing later answered — ids and
+ *  names ONLY. Its own unit because this is the SECRET-SAFETY boundary: the
+ *  single place a `tool_use` block is projected, and the projection deliberately
+ *  drops `input` (the tool args). */
+const unansweredToolUses = (m: Message, answered: ReadonlySet<string>): InFlightToolRef[] => {
+  const tools: InFlightToolRef[] = []
+  for (const b of m.content) {
+    if (b.type === "tool_use" && !answered.has(b.id)) tools.push({ id: b.id, name: b.name })
+  }
+  return tools
+}
+
 /** Extract the in-flight `tool_use` refs (id + name ONLY — no `input`/args) from
  *  the LAST assistant message in the turn. Empty when the turn ended on text or
  *  a non-assistant message.
@@ -65,26 +98,16 @@ const textOf = (m: Message): string =>
  *  landed side-effecting call. A completed tool is excluded; the genuine
  *  mid-tool-call case (tool_use with no result) is byte-identical to before.
  *
+ *  This function is now only the REVERSE SCAN — "find the last assistant
+ *  message" — with the two inner scans hoisted above.
+ *
  *  Pure; NEVER reads the tool args (secret-safe). */
 const extractInFlightTools = (messages: ReadonlyArray<Message>): InFlightToolRef[] => {
   for (let i = messages.length - 1; i >= 0; i--) {
     const m = messages[i]
     if (m === undefined || m.role !== "assistant") continue
-    // Collect every tool_use_id that a subsequent tool_result answers. Scan only
-    // messages AFTER this assistant turn — a result can only close a prior call.
-    const answered = new Set<string>()
-    for (let j = i + 1; j < messages.length; j++) {
-      const later = messages[j]
-      if (later === undefined) continue
-      for (const b of later.content) {
-        if (b.type === "tool_result") answered.add(b.tool_use_id)
-      }
-    }
-    const tools: InFlightToolRef[] = []
-    for (const b of m.content) {
-      if (b.type === "tool_use" && !answered.has(b.id)) tools.push({ id: b.id, name: b.name })
-    }
-    return tools
+    // Only messages AFTER this assistant turn can close its calls.
+    return unansweredToolUses(m, answeredToolUseIds(messages, i + 1))
   }
   return []
 }

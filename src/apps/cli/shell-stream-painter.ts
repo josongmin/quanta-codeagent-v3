@@ -49,6 +49,95 @@ const detectColor = (): boolean => {
   return Boolean((process.stderr as { isTTY?: boolean }).isTTY)
 }
 
+/**
+ * Everything one painter instance carries. Bundled so the paint arms can live
+ * at MODULE level: in the original they sat inside the returned arrow inside
+ * the factory arrow, and that two-deep nesting surcharge — not the arm count —
+ * was most of the painter's cognitive-complexity score.
+ */
+interface PainterCtx {
+  readonly write: (s: string) => void
+  readonly dim: (s: string) => string
+  readonly redDim: (s: string) => string
+  readonly labelTag: string
+  /** Stateful, one per painter instance: a UTF-8 multibyte sequence split
+   *  across chunks only reassembles if the SAME decoder sees both halves. */
+  readonly decStdout: TextDecoder
+  readonly decStderr: TextDecoder
+}
+
+/**
+ * Final flush of both decoders. ONE unit because it is the shared tail of the
+ * two TERMINAL arms (`exit` and `detached`): an empty `decode()` with
+ * `stream: false` emits any trailing partial, and the decoders are not reused
+ * afterwards. Spelling it out twice was a duplicated branch tail.
+ */
+const flushDecoderTails = (c: PainterCtx): void => {
+  const tailOut = c.decStdout.decode()
+  const tailErr = c.decStderr.decode()
+  if (tailOut.length > 0) c.write(tailOut)
+  if (tailErr.length > 0) c.write(c.redDim(tailErr))
+}
+
+/**
+ * The `detached` arm. WS-H / UUX-6-05 — an INTENTIONAL background handoff is
+ * NOT an abort: paint it honestly. Terminal-event parity with `exit`: flush any
+ * pending partial multibyte tails first (the decoders end here — the registry
+ * owns the post-detach stream). Its own unit because it is the only arm with a
+ * sub-branch of its own.
+ */
+const paintDetached = (
+  c: PainterCtx,
+  event: Extract<ShellExecEvent, { kind: "detached" }>,
+): void => {
+  flushDecoderTails(c)
+  if (event.reason === "consent_timeout") {
+    // UUX-6-20 (D-5) — the 60s default stays but is ANNOUNCED explicitly.
+    const waited =
+      event.consentWaitMs !== undefined ? ` in ${Math.round(event.consentWaitMs / 1000)}s` : ""
+    c.write(c.dim(`${c.labelTag}[shell] no answer${waited} — defaulted to background\n`))
+    c.write(c.dim(`${c.labelTag}[shell] moved to background (consent timeout)\n`))
+    return
+  }
+  c.write(c.dim(`${c.labelTag}[shell] moved to background\n`))
+}
+
+/** Paint ONE event. Exhaustive over {@link ShellExecEvent} — a new variant
+ *  becomes a compile error at the `never` assignment per ADR-0081. */
+const paintShellEvent = (c: PainterCtx, event: ShellExecEvent): void => {
+  switch (event.kind) {
+    case "start":
+      c.write(c.dim(`${c.labelTag}[shell] $ ${event.command}\n`))
+      return
+    case "stdout":
+      c.write(c.decStdout.decode(event.chunk, { stream: true }))
+      return
+    case "stderr":
+      c.write(c.redDim(c.decStderr.decode(event.chunk, { stream: true })))
+      return
+    case "exit": {
+      flushDecoderTails(c)
+      const sig = event.signal !== null ? ` signal=${event.signal}` : ""
+      c.write(c.dim(`${c.labelTag}[shell] exit code=${event.code ?? "null"}${sig}\n`))
+      return
+    }
+    case "aborted":
+      c.write(c.dim(`${c.labelTag}[shell] aborted (${event.reason})\n`))
+      return
+    case "detached":
+      paintDetached(c, event)
+      return
+    default: {
+      // Exhaustive switch — a new ShellExecEvent variant becomes a compile
+      // error at the `never` assignment per ADR-0081. We do NOT `return` the
+      // value (biome `useExhaustiveDependencies` style: a void function must
+      // not return a value).
+      const _exhaustive: never = event
+      void _exhaustive
+    }
+  }
+}
+
 /** Build the painter observer. The shared `TextDecoder` per observer
  *  preserves split-multibyte semantics across chunks; one decoder per painter
  *  instance (stateful). Returns a closure satisfying {@link ShellExecObserver}. */
@@ -57,69 +146,15 @@ export const buildShellStreamPainter = (
 ): ShellExecObserver => {
   const write = opts.write ?? ((s: string) => process.stderr.write(s))
   const color = opts.color ?? detectColor()
-  const dim = (s: string): string => (color ? `${DIM}${s}${RESET}` : s)
-  const redDim = (s: string): string => (color ? `${RED}${DIM}${s}${RESET}` : s)
-  const labelTag = opts.label !== undefined ? `[${opts.label}] ` : ""
-  // `stream: true` so a UTF-8 multibyte sequence split across chunks decodes
-  // correctly on subsequent calls. One decoder per painter instance.
-  const decStdout = new TextDecoder("utf-8")
-  const decStderr = new TextDecoder("utf-8")
-
-  return (event: ShellExecEvent): void => {
-    switch (event.kind) {
-      case "start":
-        write(dim(`${labelTag}[shell] $ ${event.command}\n`))
-        return
-      case "stdout":
-        write(decStdout.decode(event.chunk, { stream: true }))
-        return
-      case "stderr":
-        write(redDim(decStderr.decode(event.chunk, { stream: true })))
-        return
-      case "exit": {
-        // Final flush — pass an empty buffer with `stream: false` so any
-        // trailing partial gets emitted; the decoders are not reused after.
-        const tailOut = decStdout.decode()
-        const tailErr = decStderr.decode()
-        if (tailOut.length > 0) write(tailOut)
-        if (tailErr.length > 0) write(redDim(tailErr))
-        const sig = event.signal !== null ? ` signal=${event.signal}` : ""
-        write(dim(`${labelTag}[shell] exit code=${event.code ?? "null"}${sig}\n`))
-        return
-      }
-      case "aborted":
-        write(dim(`${labelTag}[shell] aborted (${event.reason})\n`))
-        return
-      case "detached": {
-        // WS-H / UUX-6-05 — an INTENTIONAL background handoff is NOT an abort:
-        // paint it honestly. Terminal-event parity with `exit`: flush any
-        // pending partial multibyte tails first (the decoders end here — the
-        // registry owns the post-detach stream).
-        const tailOut = decStdout.decode()
-        const tailErr = decStderr.decode()
-        if (tailOut.length > 0) write(tailOut)
-        if (tailErr.length > 0) write(redDim(tailErr))
-        if (event.reason === "consent_timeout") {
-          // UUX-6-20 (D-5) — the 60s default stays but is ANNOUNCED explicitly.
-          const waited =
-            event.consentWaitMs !== undefined
-              ? ` in ${Math.round(event.consentWaitMs / 1000)}s`
-              : ""
-          write(dim(`${labelTag}[shell] no answer${waited} — defaulted to background\n`))
-          write(dim(`${labelTag}[shell] moved to background (consent timeout)\n`))
-          return
-        }
-        write(dim(`${labelTag}[shell] moved to background\n`))
-        return
-      }
-      default: {
-        // Exhaustive switch — a new ShellExecEvent variant becomes a compile
-        // error at the `never` assignment per ADR-0081. We do NOT `return` the
-        // value (biome `useExhaustiveDependencies` style: a void function must
-        // not return a value).
-        const _exhaustive: never = event
-        void _exhaustive
-      }
-    }
+  const ctx: PainterCtx = {
+    write,
+    dim: (s: string): string => (color ? `${DIM}${s}${RESET}` : s),
+    redDim: (s: string): string => (color ? `${RED}${DIM}${s}${RESET}` : s),
+    labelTag: opts.label !== undefined ? `[${opts.label}] ` : "",
+    // `stream: true` so a UTF-8 multibyte sequence split across chunks decodes
+    // correctly on subsequent calls. One decoder per painter instance.
+    decStdout: new TextDecoder("utf-8"),
+    decStderr: new TextDecoder("utf-8"),
   }
+  return (event: ShellExecEvent): void => paintShellEvent(ctx, event)
 }

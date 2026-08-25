@@ -211,19 +211,143 @@ const armBreakpoints = async (
   return { anyRequested, anyVerified, allResponded }
 }
 
+/** Every post-stop query goes through ONE timeout-guarded request function, so
+ *  the helpers below cannot accidentally issue an UNGUARDED await (adapters
+ *  differ in what they answer while stopped — lldb-dap does not respond to
+ *  `terminate` at a breakpoint — and an unguarded await hangs the tool forever). */
+type TimedRequest = (command: string, args?: unknown) => Promise<DapResponse>
+
+/** The `{ source }` key, present only when the adapter gave a string path. Its
+ *  own unit because the stack list and the per-frame locals list built the SAME
+ *  conditional spread from the SAME `frame.source.path`, twice. */
+const sourceSpread = (fo: Record<string, unknown>): { source?: string } => {
+  const src = asObj(fo.source).path
+  return typeof src === "string" ? { source: src } : {}
+}
+
+/** The scopes (Locals/Arguments/…) of ONE frame, each expanded into a bounded
+ *  variable tree. A scope with a non-positive `variablesReference` is not
+ *  expandable (DAP's "no children" encoding) and an EMPTY scope is dropped
+ *  rather than rendered as noise. `budget`/`visited` are the caller's, shared
+ *  across every frame, which is the whole point of passing them in. */
+const captureScopes = async (
+  timed: TimedRequest,
+  frameId: number,
+  budget: VarBudget,
+  visited: Set<number>,
+  signal: AbortSignal | undefined,
+): Promise<ScopeVars[]> => {
+  const scopesRes = await timed("scopes", { frameId })
+  const scopes: ScopeVars[] = []
+  for (const sc of asArr(asObj(scopesRes.body).scopes)) {
+    const so = asObj(sc)
+    const ref = num(so.variablesReference)
+    if (ref <= 0) continue
+    const vars = await expandVariables(timed, ref, 1, budget, visited, signal)
+    if (vars.length > 0) scopes.push({ scope: str(so.name, "scope"), vars })
+  }
+  return scopes
+}
+
+/**
+ * Scopes+locals for the TOP K frames (not just the stop frame) under ONE shared
+ * node budget + visited-ref set, so deep callers contribute context but a huge
+ * object graph cannot blow the packet. `frames[0]` = the stop frame.
+ *
+ * Its own unit because it owns that shared mutable state (the budget and the
+ * visited set exist only for the duration of this loop) and because it is the
+ * only phase that can be CUT SHORT: a cancelled turn stops capturing further
+ * frames immediately and returns what it has, rather than waiting out
+ * per-query timeouts × frames.
+ */
+const captureFrameLocals = async (
+  timed: TimedRequest,
+  rawFrames: readonly unknown[],
+  aborted: () => boolean,
+  signal: AbortSignal | undefined,
+): Promise<FrameScopes[]> => {
+  const budget: VarBudget = { remaining: MAX_TOTAL_VARS }
+  const visited = new Set<number>()
+  const frames: FrameScopes[] = []
+  const framesToCapture = Math.min(rawFrames.length, MAX_FRAMES_WITH_LOCALS)
+  for (let i = 0; i < framesToCapture; i++) {
+    if (aborted()) break
+    const fo = asObj(rawFrames[i])
+    const scopes = await captureScopes(timed, num(fo.id, 0), budget, visited, signal)
+    frames.push({
+      frame: str(fo.name, "?"),
+      line: num(fo.line),
+      ...sourceSpread(fo),
+      scopes,
+    })
+  }
+  return frames
+}
+
+/** The optional `evaluate` in the TOP frame. Both "no expression asked for" and
+ *  "the adapter refused" collapse to `undefined` — a unit so the caller holds
+ *  neither the opt-in gate nor the failure branch. */
+const captureEvaluated = async (
+  timed: TimedRequest,
+  expression: string | undefined,
+  topFrameId: number,
+): Promise<{ expression: string; result: string } | undefined> => {
+  if (expression === undefined || expression.length === 0) return undefined
+  const evRes = await timed("evaluate", { expression, frameId: topFrameId, context: "repl" })
+  if (!evRes.success) return undefined
+  return { expression, result: str(asObj(evRes.body).result, "") }
+}
+
+/** Concurrency dump: the live threads (dlv maps goroutines onto DAP threads).
+ *  Best-effort + bounded; empty when the adapter does not answer. */
+const captureThreads = async (
+  timed: TimedRequest,
+): Promise<{ readonly id: number; readonly name: string }[]> => {
+  const thRes = await timed("threads")
+  return asArr(asObj(thRes.body).threads)
+    .slice(0, MAX_THREADS)
+    .map((t) => ({ id: num(asObj(t).id), name: str(asObj(t).name, "?") }))
+}
+
+/** The throw's type+message when we stopped ON an exception (break-on-throw).
+ *  Three outcomes in one unit because they are one decision: adapters that
+ *  support `exceptionInfo` answer it; those that do not leave the `text` on the
+ *  stopped event as the only id we have; and if even that is empty there is
+ *  nothing to report. */
+const captureException = async (
+  timed: TimedRequest,
+  threadId: number,
+  reason: string,
+  stoppedBody: unknown,
+): Promise<{ id: string; description: string } | undefined> => {
+  if (reason !== "exception") return undefined
+  const exRes = await timed("exceptionInfo", { threadId })
+  if (exRes.success) {
+    const eb = asObj(exRes.body)
+    return {
+      id: str(eb.exceptionId, str(asObj(stoppedBody).text, "exception")),
+      description: str(eb.description),
+    }
+  }
+  const text = str(asObj(stoppedBody).text)
+  return text.length > 0 ? { id: text, description: "" } : undefined
+}
+
 /**
  * Everything read AT the stop: stack trace, per-frame scopes/locals, an optional
  * evaluate, the live thread list, and (when we stopped on a throw) the exception
  * detail.
  *
- * Every query here is TIMEOUT-GUARDED for one reason discovered the hard way:
+ * Now only the CHOREOGRAPHY: the five queries above are independent of one
+ * another but their ORDER is part of the contract (stackTrace first because
+ * every later query needs a frame id; `evaluate` before `threads` before
+ * `exceptionInfo`), so they stay a straight line here while each phase's own
+ * branching lives in its own unit.
+ *
+ * Every query is TIMEOUT-GUARDED for one reason discovered the hard way:
  * adapters differ in what they answer while stopped — lldb-dap does not respond
  * to `terminate` at a breakpoint — so an unguarded await hangs the tool forever.
  * A timed request degrades to a failure response instead.
- *
- * Locals are captured for the top K frames under ONE shared node budget and
- * visited-ref set, so deep callers contribute context but a huge object graph
- * cannot blow the packet.
  *
  * Extracted from {@link inspectViaDap} (god-function burndown).
  */
@@ -249,12 +373,8 @@ const captureAtStop = async (
   readonly exception: { id: string; description: string } | undefined
 }> => {
   const { stopTimeoutMs, threadId, reason, aborted, signal } = ctx
-  // Post-stop QUERIES must each be timeout-guarded: adapters differ in what
-  // they answer while stopped (e.g. lldb-dap does NOT respond to `terminate`
-  // at a breakpoint — an unguarded await would hang the tool forever). A timed
-  // request degrades to a failure response instead of hanging.
   const queryTimeoutMs = Math.min(stopTimeoutMs, 15_000)
-  const timed = (command: string, args?: unknown): Promise<DapResponse> =>
+  const timed: TimedRequest = (command, args) =>
     withTimeout<DapResponse>(client.request(command, args), queryTimeoutMs, {
       success: false,
       message: `${command} timed out`,
@@ -264,80 +384,14 @@ const captureAtStop = async (
   const rawFrames = asArr(asObj(stRes.body).stackFrames)
   const stack = rawFrames.map((f): StackFrameInfo => {
     const fo = asObj(f)
-    const src = asObj(fo.source).path
-    return {
-      name: str(fo.name, "?"),
-      line: num(fo.line),
-      ...(typeof src === "string" ? { source: src } : {}),
-    }
+    return { name: str(fo.name, "?"), line: num(fo.line), ...sourceSpread(fo) }
   })
 
-  // Capture scopes+locals for the TOP K frames (not just the stop frame) under
-  // ONE shared node budget + visited-ref set, so deep callers contribute
-  // context but a huge graph can't blow the packet. `frames[0]` = stop frame.
-  const budget: VarBudget = { remaining: MAX_TOTAL_VARS }
-  const visited = new Set<number>()
-  const frames: FrameScopes[] = []
-  const framesToCapture = Math.min(rawFrames.length, MAX_FRAMES_WITH_LOCALS)
-  for (let i = 0; i < framesToCapture; i++) {
-    // A cancelled turn stops capturing further frames immediately (we return
-    // whatever we have) rather than waiting out per-query timeouts × frames.
-    if (aborted()) break
-    const fo = asObj(rawFrames[i])
-    const frameId = num(fo.id, 0)
-    const scopesRes = await timed("scopes", { frameId })
-    const scopes: ScopeVars[] = []
-    for (const sc of asArr(asObj(scopesRes.body).scopes)) {
-      const so = asObj(sc)
-      const ref = num(so.variablesReference)
-      if (ref <= 0) continue
-      const vars = await expandVariables(timed, ref, 1, budget, visited, signal)
-      if (vars.length > 0) scopes.push({ scope: str(so.name, "scope"), vars })
-    }
-    const src = asObj(fo.source).path
-    frames.push({
-      frame: str(fo.name, "?"),
-      line: num(fo.line),
-      ...(typeof src === "string" ? { source: src } : {}),
-      scopes,
-    })
-  }
+  const frames = await captureFrameLocals(timed, rawFrames, aborted, signal)
   const topFrameId = num(asObj(rawFrames[0]).id, 0)
-
-  let evaluated: { expression: string; result: string } | undefined
-  if (spec.evaluate !== undefined && spec.evaluate.length > 0) {
-    const evRes = await timed("evaluate", {
-      expression: spec.evaluate,
-      frameId: topFrameId,
-      context: "repl",
-    })
-    if (evRes.success)
-      evaluated = { expression: spec.evaluate, result: str(asObj(evRes.body).result, "") }
-  }
-
-  // Concurrency dump: list the live threads (dlv maps goroutines onto DAP
-  // threads). Best-effort + bounded; absent when the adapter doesn't answer.
-  const thRes = await timed("threads")
-  const threads = asArr(asObj(thRes.body).threads)
-    .slice(0, MAX_THREADS)
-    .map((t) => ({ id: num(asObj(t).id), name: str(asObj(t).name, "?") }))
-
-  // If we stopped ON an exception, pull its type+message (break-on-throw). The
-  // `text` on the stopped event is a fallback id when exceptionInfo is absent.
-  let exception: { id: string; description: string } | undefined
-  if (reason === "exception") {
-    const exRes = await timed("exceptionInfo", { threadId })
-    if (exRes.success) {
-      const eb = asObj(exRes.body)
-      exception = {
-        id: str(eb.exceptionId, str(asObj(stopped.body).text, "exception")),
-        description: str(eb.description),
-      }
-    } else {
-      const text = str(asObj(stopped.body).text)
-      if (text.length > 0) exception = { id: text, description: "" }
-    }
-  }
+  const evaluated = await captureEvaluated(timed, spec.evaluate, topFrameId)
+  const threads = await captureThreads(timed)
+  const exception = await captureException(timed, threadId, reason, stopped.body)
   return { stack, frames, evaluated, threads, exception }
 }
 
@@ -347,7 +401,7 @@ const captureAtStop = async (
  *  call is timeout-guarded by the caller's `timed`, so a wedged adapter degrades
  *  rather than hanging. */
 const expandVariables = async (
-  timed: (command: string, args?: unknown) => Promise<DapResponse>,
+  timed: TimedRequest,
   ref: number,
   depth: number,
   budget: VarBudget,

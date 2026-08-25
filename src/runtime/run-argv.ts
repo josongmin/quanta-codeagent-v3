@@ -153,7 +153,9 @@ export interface RunArgvResult {
   readonly durationMs: number
 }
 
-const MAX_TIMEOUT_MS = 24 * 60 * 60_000
+/** Hard ceiling on a caller-supplied timeout: one day (24h * 3_600_000 ms) —
+ *  a check that needs longer is not a verification check. */
+const MAX_TIMEOUT_MS = 24 * 3_600_000
 const TREE_KILLER = defaultPpidWalkKiller()
 
 const readAll = async (stream: ReadableStream<Uint8Array> | null): Promise<Uint8Array> =>

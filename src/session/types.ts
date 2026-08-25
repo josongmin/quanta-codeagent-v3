@@ -350,7 +350,15 @@ export interface PersistedProgressReceipt {
   readonly attemptKey: string
   readonly objectiveRevisionBefore: number
   readonly objectiveRevisionAfter: number
-  readonly turnOutcome: "completed" | "aborted" | "error" | "backgrounded"
+  readonly turnOutcome:
+    | "completed"
+    | "max_turns"
+    | "aborted"
+    | "error"
+    | "budget_exhausted"
+    | "refusal"
+    | "awaiting_approval"
+    | "backgrounded"
   readonly criterionTransitions: readonly string[]
   readonly verifierReceiptRefs: readonly string[]
   readonly sourceDigest?: string
@@ -407,6 +415,17 @@ export interface PersistedObjectiveBodyV2 {
   readonly budget: PersistedObjectiveBudget
   readonly blockers: readonly PersistedObjectiveBlocker[]
   readonly nextActions: readonly string[]
+  /** GOAL-04 — attributed attempt accounting. Absent on a v1 record. */
+  readonly attempts?: {
+    readonly autonomousTurnsStarted: number
+    readonly started?: {
+      readonly attemptId: string
+      readonly provenance: string
+      readonly executionMode: "foreground" | "background"
+      readonly startedRevision: number
+      readonly startedAt: number
+    }
+  }
   readonly createdAt: number
   readonly updatedAt: number
   readonly progressReceipts?: readonly PersistedProgressReceipt[]

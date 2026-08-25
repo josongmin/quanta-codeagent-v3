@@ -19,6 +19,7 @@
  * exactOptional: budget `max*` keys are OMITTED when absent.
  */
 
+import type { StartedObjectiveAttempt } from "./attempt"
 import { type Cell, type CellProvenance, isNonEmptyString, toObjective } from "./core-store/cell"
 import { completionOps } from "./core-store/completion-ops"
 import { criteriaOps } from "./core-store/criteria-ops"
@@ -89,6 +90,10 @@ export interface ObjectiveCore extends ObjectivePort {
   resetCheckedCriterion(threadId: string, criterionId: string): Objective | null
   /** GOAL-01 — apply HOST-measured usage (driven only by `settleAttempt`). */
   applyUsage(threadId: string, used: { tokens?: number; turns?: number }): Objective | null
+  /** GOAL-04 — record the durable started attempt (+ the autonomous counter). */
+  startAttempt(threadId: string, started: StartedObjectiveAttempt): Objective | null
+  /** GOAL-04 — clear the started attempt (settled or abandoned). */
+  clearStartedAttempt(threadId: string): Objective | null
 }
 
 /** RFC-03 C1 — the raw in-memory objective CORE. The public `createObjectiveStore`

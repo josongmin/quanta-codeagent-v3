@@ -173,6 +173,10 @@ const encodeThread = (dom: ObjectiveDomainSnapshot): PersistedObjectiveThreadV2 
       since: b.since,
     })),
     nextActions: [...obj.nextActions],
+    attempts: {
+      autonomousTurnsStarted: obj.attempts.autonomousTurnsStarted,
+      ...(obj.attempts.started !== undefined ? { started: { ...obj.attempts.started } } : {}),
+    },
     createdAt: obj.createdAt,
     updatedAt: obj.updatedAt,
     ...(dom.progressReceipts !== undefined && dom.progressReceipts.length > 0

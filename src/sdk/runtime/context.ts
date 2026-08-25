@@ -84,6 +84,10 @@ export interface RuntimeFacadeComposeOptions {
   /** ADR-0071 — the `{ current: ActiveTurnState }` holder the loop overwrites
    *  each turn boundary. Required companion of `conversationActionPort`. */
   readonly activeTurnRef?: AgentConfig["activeTurnRef"]
+  /** GOAL-04 — the host-owned attributed-attempt slot the surface claims right
+   *  before a goal-attributed turn and the runtime takes at turn start. Slice-
+   *  opaque here (`unknown`) — the runtime narrows it. Absent ⇒ no attribution. */
+  readonly objectiveAttemptSlot?: unknown
   /** ADR-0400 shadow-verify port. When set, the loop registers the
    *  `shadow_verify` LLM tool (CLI parity with the web surface). */
   readonly shadowVerify?: AgentConfig["shadowVerify"]
@@ -249,6 +253,7 @@ export const PASS_THROUGH_COMPOSE_KEYS = [
   "gitObservability",
   "conversationActionPort",
   "activeTurnRef",
+  "objectiveAttemptSlot",
   "radar",
   "browserNet",
   "objective",

@@ -70,6 +70,7 @@ const objective = (criteria: readonly SuccessCriterion[], blockers = 0): Objecti
   threadId: "t",
   goal: "g",
   createdBy: "user",
+  attempts: { autonomousTurnsStarted: 0 },
   successCriteria: criteria,
   status: "active",
   budget: { tokensUsed: 0, turnsUsed: 0 },

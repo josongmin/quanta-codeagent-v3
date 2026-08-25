@@ -6,6 +6,17 @@
  * calls `createObjectiveStore()` / `createObjectiveAuthority()`.
  */
 
+// GOAL-04 — attributed attempts (host-minted, two-phase durable accounting).
+export type {
+  ObjectiveAttemptContext,
+  ObjectiveAttemptProvenance,
+  ObjectiveAttemptSlot,
+  ObjectiveAttemptSlotStatus,
+  ObjectiveAttemptStart,
+  ObjectiveAttemptState,
+  StartedObjectiveAttempt,
+} from "./attempt"
+export { createObjectiveAttemptSlot, isObjectiveAttemptProvenance } from "./attempt"
 // RFC-03 C1 — the public store constructor returns the revisioned authority
 // (typed as `ObjectivePort`); the richer protocol is recovered via
 // `asObjectiveAuthority`. There is no un-revisioned store constructor exported.
@@ -168,6 +179,7 @@ export {
   MAX_PROGRESS_REF_LENGTH,
   MAX_PROGRESS_REFS,
   normalizeProgressReceipt,
+  PROGRESS_TURN_OUTCOMES,
   verifierReceiptRef,
 } from "./progress-receipt"
 export type { ObjectiveMigrationSource } from "./provenance"

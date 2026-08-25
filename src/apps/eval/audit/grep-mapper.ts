@@ -147,11 +147,7 @@ interface RuleHits {
  *  structurally identical grep+merge triples plus a nested status scan, all at
  *  depth 2-3 inside `auditOne`. The three root classes are now ONE table walked
  *  once, so adding a fourth class is a table row, not a fourth copy. */
-const collectRuleHits = (
-  tool: GrepTool,
-  tokens: readonly string[],
-  cfg: AuditConfig,
-): RuleHits => {
+const collectRuleHits = (tool: GrepTool, tokens: readonly string[], cfg: AuditConfig): RuleHits => {
   const code = new Set<string>()
   const test = new Set<string>()
   const runbook = new Set<string>()

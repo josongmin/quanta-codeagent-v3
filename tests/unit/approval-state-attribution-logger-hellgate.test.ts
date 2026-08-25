@@ -67,6 +67,7 @@ const stubObjective = (threadId: string, blockerId: string): Objective => ({
   threadId,
   goal: "stub",
   createdBy: "system",
+  attempts: { autonomousTurnsStarted: 0 },
   successCriteria: Object.freeze([]),
   status: "blocked",
   budget: { tokensUsed: 0, turnsUsed: 0 },

@@ -6,6 +6,7 @@ import { createShadowVerify } from "@/agent/shadow-verify"
 import { createShadowVerifyAdapters } from "@/agent/shadow-verify-adapters"
 import { resolveGatedObjectiveAuthority } from "@/host/runtime/objective-store-wire"
 import { createStickyPresetResolver, type StreamInput } from "@/llm"
+import { createObjectiveAttemptSlot } from "@/objective"
 import type { RadarStore } from "@/radar"
 import { isApprovedDecision } from "@/runner/orchestrate"
 import type { RuntimeFacadeComposeOptions } from "@/sdk/runtime"
@@ -103,6 +104,9 @@ export const buildSurfaceCoreState = (
   const goalPursuit = goalPursuitEnabled(env, objectiveStore)
   const turnActivityRequired = isEnvTruthy(env.QUANTA_CONVERSATION_ACTIONS) || goalPursuit
   const turnActivity = turnActivityRequired ? createTurnActivity() : undefined
+  // GOAL-04 — the host-owned attributed-attempt slot exists only when goal
+  // pursuit is composed (the wake controller claims it before each attributed turn).
+  const objectiveAttemptSlot = goalPursuit ? createObjectiveAttemptSlot() : undefined
   const goalWakeSlot = goalPursuit ? createGoalWakeSignalSlot() : undefined
   const conversationActions =
     isEnvTruthy(env.QUANTA_CONVERSATION_ACTIONS) && turnActivity !== undefined
@@ -145,6 +149,7 @@ export const buildSurfaceCoreState = (
     onPreCompact: buildPreCompactHook(setup, env),
     conversationActions,
     turnActivity,
+    objectiveAttemptSlot,
     goalWakeSlot,
     interruptedTurnBuffer,
     inboundMode,

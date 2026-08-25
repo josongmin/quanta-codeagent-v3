@@ -25,47 +25,64 @@ const decodeGitPathToken = (token: string): string | null => {
   return startsQuoted ? unquoteGitPath(token) : token
 }
 
+/** Byte(s) a single-character C escape stands for. Hoisted to module scope:
+ *  as a nested arrow inside `unquoteGitPath` its seven-arm switch was charged
+ *  at nesting depth 1, which was the single largest contributor to that
+ *  function's score. It is a pure table and has no reason to close over
+ *  anything. */
+const escapedByteOf = (esc: string): number[] => {
+  switch (esc) {
+    case "a":
+      return [0x07]
+    case "b":
+      return [0x08]
+    case "f":
+      return [0x0c]
+    case "n":
+      return [0x0a]
+    case "r":
+      return [0x0d]
+    case "t":
+      return [0x09]
+    case "v":
+      return [0x0b]
+    default:
+      return [...Buffer.from(esc, "utf8")]
+  }
+}
+
+const OCTAL_DIGIT = /[0-7]/
+
+/** Read the 1-to-3 digit octal escape run starting at `body[i]` (the digit
+ *  AFTER the backslash), or null when it is not an octal escape. A unit
+ *  because "how long is this run" and "what byte does it denote" were spelled
+ *  as three stacked `?:`-over-regex-test expressions inside the scan loop,
+ *  where each test was charged at loop-nesting depth. */
+const readOctalEscape = (body: string, i: number): { byte: number; length: number } | null => {
+  const a = body[i]
+  if (a === undefined || !OCTAL_DIGIT.test(a)) return null
+  const b = body[i + 1]
+  const c = body[i + 2]
+  const octal = `${a}${OCTAL_DIGIT.test(b ?? "") ? b : ""}${OCTAL_DIGIT.test(c ?? "") ? c : ""}`
+  return { byte: Number.parseInt(octal, 8), length: octal.length }
+}
+
 const unquoteGitPath = (path: string): string => {
   if (!(path.startsWith('"') && path.endsWith('"') && path.length >= 2)) return path
   const body = path.slice(1, -1)
   const bytes: number[] = []
-  const pushText = (text: string): void => {
-    bytes.push(...Buffer.from(text, "utf8"))
-  }
-  const escapedByteOf = (esc: string): number[] => {
-    switch (esc) {
-      case "a":
-        return [0x07]
-      case "b":
-        return [0x08]
-      case "f":
-        return [0x0c]
-      case "n":
-        return [0x0a]
-      case "r":
-        return [0x0d]
-      case "t":
-        return [0x09]
-      case "v":
-        return [0x0b]
-      default:
-        return [...Buffer.from(esc, "utf8")]
-    }
-  }
   for (let i = 0; i < body.length; i += 1) {
     const ch = body[i]
     if (ch === undefined) break
     if (ch !== "\\") {
-      pushText(ch)
+      bytes.push(...Buffer.from(ch, "utf8"))
       continue
     }
     const a = body[i + 1]
     if (a === undefined) break
-    if (/[0-7]/.test(a)) {
-      const b = body[i + 2]
-      const c = body[i + 3]
-      const octal = `${a}${/[0-7]/.test(b ?? "") ? b : ""}${/[0-7]/.test(c ?? "") ? c : ""}`
-      bytes.push(Number.parseInt(octal, 8))
+    const octal = readOctalEscape(body, i + 1)
+    if (octal !== null) {
+      bytes.push(octal.byte)
       i += octal.length
       continue
     }

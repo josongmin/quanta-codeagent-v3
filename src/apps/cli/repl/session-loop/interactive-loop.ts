@@ -1,8 +1,7 @@
 import type { AgentOutcome } from "@/agent"
 import type { Message } from "@/llm"
-import { asObjectiveReadPort } from "@/objective"
+import { asObjectiveReadPort, type ObjectiveAttemptSlot } from "@/objective"
 import { lastTurnOutcomeFromAgentOutcome } from "@/reactor"
-import { beginObjectiveProgress, finishObjectiveProgress } from "../objective-progress"
 import { normalizeCliPromptInput } from "../prompt-types"
 import { updateSessionState } from "../session-state"
 import { type RunOneTurnResult, runOneTurn } from "../turn-runner"
@@ -16,22 +15,26 @@ import {
 } from "./turn-helpers"
 import { recordTurnSnapshot } from "./wiring-installs"
 
-const emitObjectiveProgress = (
-  ndjson: InteractiveWiring["ndjson"],
-  receipt: ReturnType<typeof finishObjectiveProgress>,
-): void => {
-  if (receipt === undefined) return
-  ndjson.sink.emit({
-    type: "objective.progress",
-    ts: receipt.recordedAt,
-    attemptKey: receipt.attemptKey,
-    revisionBefore: receipt.objectiveRevisionBefore,
-    revisionAfter: receipt.objectiveRevisionAfter,
-    outcome: receipt.turnOutcome,
-    criterionTransitions: receipt.criterionTransitions,
-    verifierReceiptRefs: receipt.verifierReceiptRefs,
-    ...(receipt.sourceDigest !== undefined ? { sourceDigest: receipt.sourceDigest } : {}),
-    remainingCriterionIds: receipt.remainingCriterionIds,
+/** GOAL-04 — claim the host-owned attempt slot for a goal-attributed turn. The
+ *  runtime takes the claim at turn start and settles it; a claim the turn never
+ *  took (stale / not started) is released by the caller after the turn. */
+const claimGoalAttempt = (
+  slot: ObjectiveAttemptSlot | undefined,
+  objectiveStore: InteractiveBranchCtx["objectiveStore"],
+  prompt: ReturnType<typeof normalizeCliPromptInput>,
+): boolean => {
+  const meta = prompt.goalContinuation
+  if (slot === undefined || meta === undefined || objectiveStore === undefined) return false
+  const domain = asObjectiveReadPort(objectiveStore).readDomain(meta.threadId)
+  const objectiveId = domain.state?.objective.objectiveId
+  if (objectiveId === undefined) return false
+  return slot.claim({
+    threadId: meta.threadId,
+    objectiveId,
+    startedRevision: domain.revision,
+    attemptId: meta.attemptKey,
+    provenance: "autonomous-continuation",
+    executionMode: "foreground",
   })
 }
 
@@ -66,14 +69,6 @@ const writeBackgroundHint = (args: {
   }
 }
 
-const settledProgressOutcomeReason = (out: {
-  readonly turnAborted: boolean
-  readonly result: { readonly outcomeReason?: AgentOutcome["reason"] } | undefined
-}): AgentOutcome["reason"] | undefined => {
-  if (out.turnAborted) return "aborted"
-  return out.result?.outcomeReason
-}
-
 type InteractiveTurnResult = {
   readonly messages: readonly Message[]
   readonly outcomeReason?: AgentOutcome["reason"]
@@ -83,20 +78,13 @@ const settleForegroundTurn = async (args: {
   readonly ctx: InteractiveBranchCtx
   readonly wiring: InteractiveWiring
   readonly prompt: ReturnType<typeof normalizeCliPromptInput>
-  readonly objectiveProgress: ReturnType<typeof beginObjectiveProgress>
   readonly out: RunOneTurnResult<InteractiveTurnResult>
 }): Promise<void> => {
-  const { ctx, wiring, prompt, objectiveProgress, out } = args
-  const outcomeReason = settledProgressOutcomeReason(out)
-  emitObjectiveProgress(
-    wiring.ndjson,
-    finishObjectiveProgress({
-      objective: ctx.objectiveStore,
-      prompt,
-      started: objectiveProgress,
-      ...(outcomeReason !== undefined ? { outcomeReason } : {}),
-    }),
-  )
+  const { ctx, wiring, out } = args
+  // GOAL-04 — settlement is runtime-owned (before persistence); the surface only
+  // releases a claim the turn never consumed so a stale claim cannot leak into
+  // the next attributed turn.
+  ctx.objectiveAttemptSlot?.release()
   ctx.goalWakeSlot?.current?.onTurnSettled()
   process.stderr.write("\n")
   if (out.turnAborted) {
@@ -128,6 +116,7 @@ export const runInteractiveLoop = async (
     externalPromptQueue,
     convCheckpointWire,
     objectiveStore,
+    objectiveAttemptSlot,
     notify,
     notifyCwdBasename,
     goalWakeSlot,
@@ -151,7 +140,7 @@ export const runInteractiveLoop = async (
       goalWakeSlot?.current?.onGoalMutation()
       continue
     }
-    const objectiveProgress = beginObjectiveProgress(objectiveStore, setup.sessionId, prompt)
+    claimGoalAttempt(objectiveAttemptSlot, objectiveStore, prompt)
     // Ticket 18 (V1) — discoverable turn-start hint. Painted ONLY when the
     // Ctrl+B detach is actually wired for THIS turn (portal present + WEAVE
     // guard satisfied) so the affordance never advertises a no-op key.
@@ -194,29 +183,11 @@ export const runInteractiveLoop = async (
                 onMovedToBackground: (handle) => {
                   // The REPL wrapper returns immediately after Ctrl+B, but the
                   // body promise is still the authority for outcome evidence.
+                  // GOAL-04 — the runtime settles the attributed attempt inside the
+                  // body; the surface only drops an unconsumed claim once it settles.
                   handle.body.then(
-                    (result) =>
-                      emitObjectiveProgress(
-                        ndjson,
-                        finishObjectiveProgress({
-                          objective: objectiveStore,
-                          prompt,
-                          started: objectiveProgress,
-                          ...(result.outcomeReason !== undefined
-                            ? { outcomeReason: result.outcomeReason }
-                            : {}),
-                        }),
-                      ),
-                    () =>
-                      emitObjectiveProgress(
-                        ndjson,
-                        finishObjectiveProgress({
-                          objective: objectiveStore,
-                          prompt,
-                          started: objectiveProgress,
-                          outcomeReason: "error",
-                        }),
-                      ),
+                    () => objectiveAttemptSlot?.release(),
+                    () => objectiveAttemptSlot?.release(),
                   )
                   handleMovedToBackground({
                     portal: backgroundPortal,
@@ -264,6 +235,6 @@ export const runInteractiveLoop = async (
     // does NOT fold a backgrounded turn into surface `history` (the SDK
     // session is SSOT — documented limitation, not a bug).
     if (out.backgrounded === true) continue
-    await settleForegroundTurn({ ctx, wiring, prompt, objectiveProgress, out })
+    await settleForegroundTurn({ ctx, wiring, prompt, out })
   }
 }

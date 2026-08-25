@@ -12,6 +12,7 @@
  * NEVER rejects on a CDP `error` reply — that is a normal protocol outcome the
  * driver inspects; rejection is reserved for a disposed/closed transport.
  */
+import { addHandler, armWaiter, fanOutEvent } from "./event-fanout"
 
 /** Byte carrier between the client and a CDP endpoint (one JSON string per
  *  WebSocket message). */
@@ -28,6 +29,35 @@ export interface CdpResponse {
 }
 
 type EventHandler = (params: unknown) => void
+
+/** One decoded CDP frame, before it is known to be a reply or an event. */
+interface CdpFrame {
+  id?: unknown
+  method?: unknown
+  params?: unknown
+  result?: unknown
+  error?: { message?: unknown }
+}
+
+/** Project a decoded reply frame onto the client-facing {@link CdpResponse}.
+ *
+ *  These two conditional spreads (one of them with a NESTED ternary) were the
+ *  bulk of `ingest`'s complexity: inside `if` > `if` > object literal they were
+ *  charged at depth 3 and 4; at top level they cost one point each. Behaviour is
+ *  preserved EXACTLY, including the sharp edge: `error: null` is not
+ *  `undefined`, so the gate opens and `msg.error.message` throws — the throw
+ *  escapes `ingest` (and the transport's onData callback) with the pending entry
+ *  ALREADY deleted. Pinned by the differential, deliberately not "fixed" here. */
+const toCdpResponse = (msg: CdpFrame): CdpResponse => ({
+  ...(msg.result !== undefined ? { result: msg.result } : {}),
+  ...(msg.error !== undefined
+    ? {
+        error: {
+          message: typeof msg.error.message === "string" ? msg.error.message : "cdp error",
+        },
+      }
+    : {}),
+})
 
 export class CdpClient {
   private seq = 0
@@ -54,20 +84,13 @@ export class CdpClient {
   /** Resolve once, on the NEXT occurrence of `method` (a CDP event). */
   waitForEvent(method: string): Promise<unknown> {
     return new Promise((resolve) => {
-      const arr = this.waiters.get(method) ?? []
-      arr.push(resolve)
-      this.waiters.set(method, arr)
+      armWaiter(this.waiters, method, resolve)
     })
   }
 
   /** Persistent subscription to a CDP event (stays until dispose). */
   onEvent(method: string, handler: EventHandler): void {
-    let set = this.handlers.get(method)
-    if (set === undefined) {
-      set = new Set()
-      this.handlers.set(method, set)
-    }
-    set.add(handler)
+    addHandler(this.handlers, method, handler)
   }
 
   dispose(): void {
@@ -83,48 +106,32 @@ export class CdpClient {
     }
   }
 
+  /** Correlate ONE reply frame with the command waiting on it. An unknown or
+   *  already-settled `id` is a deliberate NO-OP. The pending entry is removed
+   *  BEFORE the response is built, which is why a malformed `error` payload
+   *  leaves the awaiter permanently unsettled (see {@link toCdpResponse}). */
+  private settleReply(id: number, msg: CdpFrame): void {
+    const resolve = this.pending.get(id)
+    if (resolve === undefined) return
+    this.pending.delete(id)
+    resolve(toCdpResponse(msg))
+  }
+
+  /** The read loop, now only a ROUTER: parse one WS message and send it down
+   *  exactly one of the two paths. An `id`-bearing frame NEVER reaches the event
+   *  fan-out even when it also carries a `method` (pre-existing behaviour). */
   private ingest(raw: string): void {
-    let msg: {
-      id?: unknown
-      method?: unknown
-      params?: unknown
-      result?: unknown
-      error?: { message?: unknown }
-    }
+    let msg: CdpFrame
     try {
       msg = JSON.parse(raw)
     } catch {
       return // malformed frame — ignore, never throw
     }
     if (typeof msg.id === "number") {
-      const resolve = this.pending.get(msg.id)
-      if (resolve !== undefined) {
-        this.pending.delete(msg.id)
-        resolve({
-          ...(msg.result !== undefined ? { result: msg.result } : {}),
-          ...(msg.error !== undefined
-            ? {
-                error: {
-                  message: typeof msg.error.message === "string" ? msg.error.message : "cdp error",
-                },
-              }
-            : {}),
-        })
-      }
+      this.settleReply(msg.id, msg)
       return
     }
     if (typeof msg.method !== "string") return
-    for (const h of this.handlers.get(msg.method) ?? []) {
-      try {
-        h(msg.params)
-      } catch {
-        // a buggy subscriber must not break the read loop
-      }
-    }
-    const arr = this.waiters.get(msg.method)
-    if (arr !== undefined && arr.length > 0) {
-      this.waiters.delete(msg.method)
-      for (const resolve of arr) resolve(msg.params)
-    }
+    fanOutEvent(this.handlers, this.waiters, msg.method, msg.params)
   }
 }

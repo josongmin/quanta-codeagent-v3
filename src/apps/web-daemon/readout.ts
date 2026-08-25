@@ -408,43 +408,68 @@ const renderMcp = (rows: readonly McpServerRow[]): string => {
     .join("\n")
 }
 
+/** One row of the dispatch table below: given the composed accessor bundle,
+ *  render this readout's body — or `undefined` when its accessor is ABSENT, in
+ *  which case the caller falls through to the pure renderer's honest
+ *  missing-source copy. Returning a promise is allowed (and only the genuinely
+ *  async accessors do), so the sync rows stay sync exactly as they were. */
+type LiveReadoutRow = (sources: WebReadoutSources) => string | Promise<string> | undefined
+
+/** `render(await value)` as one expression, so an ASYNC accessor can live in
+ *  the table without making its row an `async` arrow — an `async` row would
+ *  turn the ABSENT case (`undefined`) into a promise too, adding a microtask
+ *  the original `break` never paid. */
+const mapAwaited = async <T>(value: Promise<T>, render: (v: T) => string): Promise<string> =>
+  render(await value)
+
+/**
+ * The source-backed dispatch TABLE.
+ *
+ * This replaces an eight-arm `switch` in which every arm spelled the SAME two
+ * steps — "is the accessor composed? if not `break`; else render its value" —
+ * and every repetition paid an `if` nested inside a `switch` inside a `try`.
+ * One row per name kills the repetition; the `Record` over
+ * {@link SOURCE_BACKED_READOUTS} makes the correspondence EXHAUSTIVE, so a name
+ * added to that list without a row here is a TYPE error rather than a silently
+ * unserved readout.
+ */
+const LIVE_READOUTS: Readonly<Record<(typeof SOURCE_BACKED_READOUTS)[number], LiveReadoutRow>> = {
+  agents: (s) =>
+    s.agents === undefined ? undefined : renderAgents(s.agents(), s.now?.() ?? Date.now()),
+  plan: (s) => (s.plan === undefined ? undefined : renderPlan(s.plan())),
+  skills: (s) => (s.skills === undefined ? undefined : mapAwaited(s.skills(), renderSkillsRows)),
+  memory: (s) => (s.memory === undefined ? undefined : mapAwaited(s.memory(), renderMemory)),
+  cost: (s) => (s.cost === undefined ? undefined : renderCost(s.cost())),
+  context: (s) => (s.context === undefined ? undefined : renderContext(s.context())),
+  doctor: (s) => (s.doctor === undefined ? undefined : mapAwaited(s.doctor(), renderDoctor)),
+  mcp: (s) => (s.mcp === undefined ? undefined : renderMcp(s.mcp())),
+}
+
+/** Narrow an arbitrary readout name onto the table. A unit because it is the
+ *  one place the `string` → known-name cast is justified: the membership test
+ *  and the index use the SAME list. */
+const lookupLiveReadout = (n: string): LiveReadoutRow | undefined =>
+  (SOURCE_BACKED_READOUTS as readonly string[]).includes(n)
+    ? LIVE_READOUTS[n as (typeof SOURCE_BACKED_READOUTS)[number]]
+    : undefined
+
 export const resolveReadout = async (
   name: string,
   snapshot: SessionSnapshotLite,
   sources: WebReadoutSources,
 ): Promise<ReadoutResult> => {
   const n = name.trim().toLowerCase()
-  try {
-    switch (n) {
-      case "agents":
-        if (sources.agents === undefined) break
-        return served(n, renderAgents(sources.agents(), sources.now?.() ?? Date.now()))
-      case "plan":
-        if (sources.plan === undefined) break
-        return served(n, renderPlan(sources.plan()))
-      case "skills":
-        if (sources.skills === undefined) break
-        return served(n, renderSkillsRows(await sources.skills()))
-      case "memory":
-        if (sources.memory === undefined) break
-        return served(n, renderMemory(await sources.memory()))
-      case "cost":
-        if (sources.cost === undefined) break
-        return served(n, renderCost(sources.cost()))
-      case "context":
-        if (sources.context === undefined) break
-        return served(n, renderContext(sources.context()))
-      case "doctor":
-        if (sources.doctor === undefined) break
-        return served(n, renderDoctor(await sources.doctor()))
-      case "mcp":
-        if (sources.mcp === undefined) break
-        return served(n, renderMcp(sources.mcp()))
-      default:
-        break
+  const live = lookupLiveReadout(n)
+  if (live !== undefined) {
+    try {
+      const body = live(sources)
+      // Only await what is actually a promise — a sync row must not gain a
+      // microtask the original `switch` arm did not have.
+      const output = body instanceof Promise ? await body : body
+      if (output !== undefined) return served(n, output)
+    } catch (error) {
+      return sourceFailed(n, error)
     }
-  } catch (error) {
-    return sourceFailed(n, error)
   }
   // Source absent / snapshot-served / skipped / unknown — the pure renderer
   // already answers all of those totally.

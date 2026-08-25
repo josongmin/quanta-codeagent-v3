@@ -52,6 +52,9 @@ const actionOptions = (core: SurfaceCoreState): Partial<RuntimeFacadeComposeOpti
         conversationActionPort: core.conversationActions.port,
       }),
   ...(core.turnActivity === undefined ? {} : { activeTurnRef: core.turnActivity.activeTurnRef }),
+  ...(core.objectiveAttemptSlot === undefined
+    ? {}
+    : { objectiveAttemptSlot: core.objectiveAttemptSlot }),
   ...(core.interruptedTurnBuffer === undefined
     ? {}
     : { interruptedTurnBuffer: core.interruptedTurnBuffer }),

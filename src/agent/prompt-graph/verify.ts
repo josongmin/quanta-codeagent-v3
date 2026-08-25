@@ -201,16 +201,16 @@ export interface ManifestParityView {
  * `firedAtomIds` (the DYNAMIC notice channel it reports) is exactly the reminder
  * channel's notice atoms.
  */
-export const verifyRuleGraph = (
-  atoms: readonly InstructionAtom[],
-  reachableContexts: readonly PromptContext[],
-  manifest?: ManifestParityView,
-): readonly GraphViolation[] => {
+/**
+ * ADR-0538 (7) — NO-HIDDEN-ASSUMPTION lint, STATIC per-atom.
+ *
+ * ONE unit because it is the whole keyword-table pass: an atom whose text
+ * asserts a context premise must declare the matching matcher facet, or the
+ * premise renders where an axis abolished it. BEST-EFFORT (see
+ * {@link ASSUMPTION_TABLE}) — a lint, not a proof. Pure.
+ */
+const checkHiddenAssumptions = (atoms: readonly InstructionAtom[]): GraphViolation[] => {
   const violations: GraphViolation[] = []
-  const byVariant = new Map<string, InstructionAtom>()
-  for (const a of atoms) byVariant.set(a.variantId, a)
-
-  // ── (7) No-hidden-assumption lint — static, per-atom (context-independent). ──
   for (const a of atoms) {
     const text = textOf(a)
     for (const rule of ASSUMPTION_TABLE) {
@@ -224,36 +224,21 @@ export const verifyRuleGraph = (
       }
     }
   }
+  return violations
+}
 
-  // (1) Conflict-freedom + (2) supersede-soundness over every reachable ctx,
-  // plus the coverage bookkeeping (3) consumes (which variants ever fire) --
-  // extracted to checkPerContext (this per-ctx sweep was the bulk of the fn).
-  const { violations: perContextViolations, everFired } = checkPerContext(
-    atoms,
-    reachableContexts,
-    byVariant,
-  )
-  violations.push(...perContextViolations)
-
-  // ── (2b) Supersede/conflict/requires EDGE INTEGRITY — extracted helper. ──
-  violations.push(...checkEdgeIntegrity(atoms, byVariant))
-
-  // ── (3) Coverage — every declared variant fires in ≥1 reachable ctx. ──
-  for (const a of atoms) {
-    if (!everFired.has(a.variantId)) {
-      violations.push({
-        kind: "coverage",
-        message: `variant ${a.variantId} never fires in any reachable ctx (dead/inert rule)`,
-        variantIds: [a.variantId],
-      })
-    }
-  }
-
-  // ── (5) Static/dynamic separation + (6) authority placement — STATIC per-atom
-  //        (context-independent). A per-turn-natured atom (matcher references a
-  //        presence facet) may NOT ride a cached `system.*` channel; a
-  //        repo/skill/user/working-state authority atom may NOT ride
-  //        `system.base`. ──
+/**
+ * ADR-0538 (5)+(6) — STATIC/DYNAMIC SEPARATION and AUTHORITY PLACEMENT, both
+ * STATIC per-atom (context-independent).
+ *
+ * ONE unit because both answer the same question — "may this atom ride the
+ * channel it declares?" — over the same single pass: a per-turn-natured atom
+ * (matcher references a presence facet) may NOT ride a cached `system.*`
+ * channel, and a repo/skill/user/working-state authority atom may NOT ride
+ * `system.base`. Pure.
+ */
+const checkChannelPlacement = (atoms: readonly InstructionAtom[]): GraphViolation[] => {
+  const violations: GraphViolation[] = []
   for (const a of atoms) {
     if (isSystemChannel(a.channel) && a.when !== undefined) {
       const leaked = PER_TURN_FACETS.filter((f) => a.when?.[f] !== undefined)
@@ -273,10 +258,20 @@ export const verifyRuleGraph = (
       })
     }
   }
+  return violations
+}
 
-  // ── (8) Manifest completeness — STATIC per-atom. Every atom must carry a
-  //        non-empty variantId so every rendered text span is traceable; a
-  //        blank/duplicate id would make the fired-atom manifest ambiguous. ──
+/**
+ * ADR-0538 (8) — MANIFEST COMPLETENESS, STATIC per-atom. Every atom must carry
+ * a non-empty, UNIQUE variantId so every rendered text span is traceable; a
+ * blank/duplicate id would make the fired-atom manifest ambiguous.
+ *
+ * ONE unit because both violations are facts about the SAME id-uniqueness
+ * bookkeeping, and the `seen` set only makes sense while that pass owns it.
+ * Pure. Order within an atom is blank-then-duplicate (both can fire).
+ */
+const checkVariantIdIntegrity = (atoms: readonly InstructionAtom[]): GraphViolation[] => {
+  const violations: GraphViolation[] = []
   const seenVariantIds = new Set<string>()
   for (const a of atoms) {
     if (a.variantId.length === 0) {
@@ -295,6 +290,69 @@ export const verifyRuleGraph = (
     }
     seenVariantIds.add(a.variantId)
   }
+  return violations
+}
+
+/**
+ * ADR-0538 (3) — COVERAGE: every declared variant must fire in ≥1 reachable
+ * ctx. Reads the `everFired` set {@link checkPerContext} accumulated, so it is
+ * a projection of that sweep rather than a pass of its own. Pure.
+ */
+const checkCoverage = (
+  atoms: readonly InstructionAtom[],
+  everFired: ReadonlySet<string>,
+): GraphViolation[] => {
+  const violations: GraphViolation[] = []
+  for (const a of atoms) {
+    if (!everFired.has(a.variantId)) {
+      violations.push({
+        kind: "coverage",
+        message: `variant ${a.variantId} never fires in any reachable ctx (dead/inert rule)`,
+        variantIds: [a.variantId],
+      })
+    }
+  }
+  return violations
+}
+
+export const verifyRuleGraph = (
+  atoms: readonly InstructionAtom[],
+  reachableContexts: readonly PromptContext[],
+  manifest?: ManifestParityView,
+): readonly GraphViolation[] => {
+  const violations: GraphViolation[] = []
+  const byVariant = new Map<string, InstructionAtom>()
+  for (const a of atoms) byVariant.set(a.variantId, a)
+
+  // The verifier is a PIPELINE of independent checks appended in a fixed order —
+  // callers (the hellgate) assert on the concatenated list, so the order below
+  // is part of the contract. Each check is its own unit; this function owns the
+  // ORDER and the two pieces of shared bookkeeping (`byVariant`, `everFired`).
+
+  // ── (7) No-hidden-assumption lint — static, per-atom (context-independent). ──
+  violations.push(...checkHiddenAssumptions(atoms))
+
+  // (1) Conflict-freedom + (2) supersede-soundness over every reachable ctx,
+  // plus the coverage bookkeeping (3) consumes (which variants ever fire) --
+  // extracted to checkPerContext (this per-ctx sweep was the bulk of the fn).
+  const { violations: perContextViolations, everFired } = checkPerContext(
+    atoms,
+    reachableContexts,
+    byVariant,
+  )
+  violations.push(...perContextViolations)
+
+  // ── (2b) Supersede/conflict/requires EDGE INTEGRITY — extracted helper. ──
+  violations.push(...checkEdgeIntegrity(atoms, byVariant))
+
+  // ── (3) Coverage — every declared variant fires in ≥1 reachable ctx. ──
+  violations.push(...checkCoverage(atoms, everFired))
+
+  // ── (5) Static/dynamic separation + (6) authority placement — STATIC per-atom. ──
+  violations.push(...checkChannelPlacement(atoms))
+
+  // ── (8) Manifest completeness — non-empty + unique variantIds. ──
+  violations.push(...checkVariantIdIntegrity(atoms))
 
   // ── (8b/Phase-3) Dynamic-content placement — extracted helper. ──
   violations.push(...checkDynamicContentPlacement(atoms))

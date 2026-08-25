@@ -135,44 +135,85 @@ const RULES: Rule[] = [
   },
 ]
 
-/** Parse `output` into deduped failure frames, first-rule-wins on framework
- *  tag for a given `file:line` key, then RANK so the most-likely edit location
- *  surfaces first: user-code frames before test frames before vendored frames
- *  (stable within each tier to preserve discovery/stack order). The cap is
- *  applied AFTER ranking so a flood of `node_modules` frames can never push the
- *  real user-code frame past `maxResults` (R-Phase8 #1). Exported pure. */
-export const parseTestFailure = (output: string, maxResults: number): FailureFrame[] => {
-  const byKey = new Map<string, FailureFrame>()
+/** Frames keyed by `file:line`, plus the discovery order of each key.
+ *  Two maps rather than one record because `order` must survive into the
+ *  comparator while `byKey`'s values are mutated in place during enrichment. */
+interface FrameIndex {
+  readonly byKey: Map<string, FailureFrame>
+  readonly order: Map<string, number>
+}
+
+/** Fold one regex match into the index. Returns true when a NEW key was
+ *  recorded (the caller advances the discovery counter only then).
+ *
+ *  A unit because it is the whole body of a `while` nested inside a `for`:
+ *  every guard in it was charged at nesting depth 3-4, and the three-clause
+ *  validity gate plus the has/enrich fork is the entire per-match policy —
+ *  "first rule wins the tag, later rules may only fill an empty message". */
+const ingestMatch = (
+  idx: FrameIndex,
+  rule: (typeof RULES)[number],
+  m: RegExpExecArray,
+  discovery: number,
+): boolean => {
+  const mapped = rule.map(m)
+  if (!mapped || !Number.isFinite(mapped.line) || !looksLikeFile(mapped.file)) return false
+  const key = `${mapped.file}:${mapped.line}`
+  const cur = idx.byKey.get(key)
+  if (cur === undefined) {
+    idx.byKey.set(key, {
+      ...mapped,
+      framework: rule.framework,
+      tier: classifyFrame(mapped.file),
+    })
+    idx.order.set(key, discovery)
+    return true
+  }
+  // Enrich an existing frame's empty message without changing its tag.
+  if (mapped.message && cur.message === "") cur.message = mapped.message
+  return false
+}
+
+/** Run every rule over `output` in table order, building the frame index.
+ *  A unit because it owns the stateful bit that must NOT be reordered: each
+ *  rule's `lastIndex` reset, and the single monotonic discovery counter shared
+ *  across all rules (which is what makes "first rule wins" observable in the
+ *  final ordering). */
+const scanRules = (output: string): FrameIndex => {
+  const idx: FrameIndex = { byKey: new Map(), order: new Map() }
   let discovery = 0
-  const order = new Map<string, number>()
   for (const rule of RULES) {
     rule.re.lastIndex = 0
     let m: RegExpExecArray | null = rule.re.exec(output)
     while (m !== null) {
-      const mapped = rule.map(m)
-      if (mapped && Number.isFinite(mapped.line) && looksLikeFile(mapped.file)) {
-        const key = `${mapped.file}:${mapped.line}`
-        if (!byKey.has(key)) {
-          byKey.set(key, { ...mapped, framework: rule.framework, tier: classifyFrame(mapped.file) })
-          order.set(key, discovery++)
-        } else if (mapped.message) {
-          // Enrich an existing frame's empty message without changing its tag.
-          const cur = byKey.get(key) as FailureFrame
-          if (cur.message === "") cur.message = mapped.message
-        }
-      }
+      if (ingestMatch(idx, rule, m, discovery)) discovery += 1
       m = rule.re.exec(output)
     }
   }
+  return idx
+}
+
+/** RANK so the most-likely edit location surfaces first: user-code frames
+ *  before test frames before vendored frames, stable within each tier by
+ *  discovery order. A unit because the comparator is a pure total order over
+ *  the index and has nothing to do with scanning. The cap is applied AFTER
+ *  ranking so a flood of `node_modules` frames can never push the real
+ *  user-code frame past `maxResults` (R-Phase8 #1). */
+const rankFrames = (idx: FrameIndex, maxResults: number): FailureFrame[] => {
   const keyOf = (f: FailureFrame): string => `${f.file}:${f.line}`
-  return [...byKey.values()]
+  return [...idx.byKey.values()]
     .sort((a, b) => {
       const t = TIER_RANK[a.tier] - TIER_RANK[b.tier]
       if (t !== 0) return t
-      return (order.get(keyOf(a)) ?? 0) - (order.get(keyOf(b)) ?? 0)
+      return (idx.order.get(keyOf(a)) ?? 0) - (idx.order.get(keyOf(b)) ?? 0)
     })
     .slice(0, maxResults)
 }
+
+/** Parse `output` into deduped failure frames, first-rule-wins on framework
+ *  tag for a given `file:line` key, then ranked and capped. Exported pure. */
+export const parseTestFailure = (output: string, maxResults: number): FailureFrame[] =>
+  rankFrames(scanRules(output), maxResults)
 
 const render = (frames: FailureFrame[]): string => {
   if (frames.length === 0) return "(no file:line locations found in output)"

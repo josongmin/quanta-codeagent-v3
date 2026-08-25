@@ -293,6 +293,67 @@ const countCliKnobs = (all: ReadonlyMap<string, AnyKnob>): number => {
 
 /* ─── /knobs set <id>=<val> ─────────────────────────────────────────── */
 
+/**
+ * The CATALOG backend of `/knobs set`: a knob addressed by envKey
+ * (cli / inventory / runtime-config) rather than by @/runner registry id.
+ *
+ * Returns the exit code, or `undefined` to mean "not a catalog knob either" so
+ * the caller can emit the unknown-knob diagnostic. ONE unit because the three
+ * gates below (kind validation, enum membership, security-boundary refusal) are
+ * all facts about the CATALOG path; in the original they sat nested two levels
+ * inside `doSet` and carried the nesting surcharge that dominated its score.
+ */
+const setCatalogKnob = (id: string, raw: string, ctx: SlashContext): number | undefined => {
+  const cat = buildKnobCatalog().get(id)
+  if (cat === undefined) return undefined
+  // Validate raw against kind (parity with the runner path's fail-fast —
+  // don't silently store a garbage numeric that the reader will drop).
+  if ((cat.kind === "int" || cat.kind === "float") && !Number.isFinite(Number(raw.trim() || "x"))) {
+    ctx.err(`/knobs set: ${id} expects ${cat.kind}, got: ${JSON.stringify(raw)}\n`)
+    return 1
+  }
+  const allowed = cat.kind === "enum" ? knobEnumValues(id) : undefined
+  if (allowed !== undefined && !allowed.includes(raw)) {
+    ctx.err(
+      `/knobs set: ${id} must be one of {${allowed.join(", ")}}, got: ${JSON.stringify(raw)}\n`,
+    )
+    return 1
+  }
+  if (!setCliKnobOverride(id, raw)) {
+    ctx.err(
+      `/knobs set: ${id} is a security-boundary knob — set it via env / managed config only, not a session override.\n`,
+    )
+    return 1
+  }
+  ctx.out(`/knobs: ${id} = ${raw} (session override; live this session)\n`)
+  return 0
+}
+
+/**
+ * The REGISTRY backend of `/knobs set`: an @/runner knob addressed by id.
+ * ONE unit because it owns the throw→stderr conversion and the
+ * not-hot-toggleable warning, neither of which the catalog path has.
+ */
+const setRegistryKnob = (
+  id: string,
+  raw: string,
+  wire: KnobsSurfaceWire,
+  ctx: SlashContext,
+): number => {
+  let warning: string | undefined
+  try {
+    warning = wire.setOverride(id, raw)
+  } catch (e) {
+    ctx.err(`/knobs set: ${errMessage(e)}\n`)
+    return 1
+  }
+  ctx.out(`/knobs: ${id} = ${raw} (session override)\n`)
+  if (warning !== undefined) {
+    ctx.out(`  warning: ${warning}\n`)
+  }
+  return 0
+}
+
 const doSet = (args: readonly string[], wire: KnobsSurfaceWire, ctx: SlashContext): number => {
   if (args.length !== 1) {
     ctx.err("/knobs set: expected exactly one argument of form `<id>=<val>`\n")
@@ -306,53 +367,14 @@ const doSet = (args: readonly string[], wire: KnobsSurfaceWire, ctx: SlashContex
   }
   const id = pair.slice(0, eq)
   const raw = pair.slice(eq + 1)
-  const knob = allKnobs().get(id)
-  if (knob === undefined) {
-    // Not an @/runner knob (id-keyed). It may be a catalog knob addressed by
-    // envKey (cli/inventory/runtime-config) — route to the CLI accessor's
-    // session bag so reads via readCliKnob (ADR-0503 P4) pick it up live.
-    const cat = buildKnobCatalog().get(id)
-    if (cat !== undefined) {
-      // Validate raw against kind (parity with the runner path's fail-fast —
-      // don't silently store a garbage numeric that the reader will drop).
-      if (
-        (cat.kind === "int" || cat.kind === "float") &&
-        !Number.isFinite(Number(raw.trim() || "x"))
-      ) {
-        ctx.err(`/knobs set: ${id} expects ${cat.kind}, got: ${JSON.stringify(raw)}\n`)
-        return 1
-      }
-      const allowed = cat.kind === "enum" ? knobEnumValues(id) : undefined
-      if (allowed !== undefined && !allowed.includes(raw)) {
-        ctx.err(
-          `/knobs set: ${id} must be one of {${allowed.join(", ")}}, got: ${JSON.stringify(raw)}\n`,
-        )
-        return 1
-      }
-      if (!setCliKnobOverride(id, raw)) {
-        ctx.err(
-          `/knobs set: ${id} is a security-boundary knob — set it via env / managed config only, not a session override.\n`,
-        )
-        return 1
-      }
-      ctx.out(`/knobs: ${id} = ${raw} (session override; live this session)\n`)
-      return 0
-    }
-    ctx.err(`/knobs set: unknown knob: ${id}\n`)
-    return 1
-  }
-  let warning: string | undefined
-  try {
-    warning = wire.setOverride(id, raw)
-  } catch (e) {
-    ctx.err(`/knobs set: ${errMessage(e)}\n`)
-    return 1
-  }
-  ctx.out(`/knobs: ${id} = ${raw} (session override)\n`)
-  if (warning !== undefined) {
-    ctx.out(`  warning: ${warning}\n`)
-  }
-  return 0
+  if (allKnobs().get(id) !== undefined) return setRegistryKnob(id, raw, wire, ctx)
+  // Not an @/runner knob (id-keyed). It may be a catalog knob addressed by
+  // envKey (cli/inventory/runtime-config) — route to the CLI accessor's
+  // session bag so reads via readCliKnob (ADR-0503 P4) pick it up live.
+  const catalogCode = setCatalogKnob(id, raw, ctx)
+  if (catalogCode !== undefined) return catalogCode
+  ctx.err(`/knobs set: unknown knob: ${id}\n`)
+  return 1
 }
 
 /* ─── /knobs reset <id> ─────────────────────────────────────────────── */

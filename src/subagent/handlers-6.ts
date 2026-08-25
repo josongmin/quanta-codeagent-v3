@@ -230,10 +230,79 @@ interface SpawnAgentDeps {
  *  only RUNNING records count against the cap (settled tasks free a slot). */
 const countRunning = (registry: TaskRegistry): number => registry.pendingIds().length
 
+/** One optional passthrough: copy the field when it is set, OMIT the key
+ *  entirely when it is not. The original spelled
+ *  `...(input.x !== undefined ? { y: input.x } : {})` THIRTEEN times — one rule,
+ *  thirteen chances to mistype the guard. Generic over `keyof SubagentRequest`
+ *  so BOTH the destination key name and the value's type are still checked at
+ *  every call site (a `[from, to]` string table would have checked neither).
+ *  Key-ABSENCE, not `key: undefined`, is the contract (`exactOptionalPropertyTypes`). */
+const optField = <K extends keyof SubagentRequest>(
+  key: K,
+  value: SubagentRequest[K] | undefined,
+): Partial<Pick<SubagentRequest, K>> =>
+  value === undefined ? {} : ({ [key]: value } as Pick<SubagentRequest, K>)
+
+/** Per-child budget from the optional turn/token caps (parity with the
+ *  foreground `agent` tool). Its own unit because the block is CONDITIONALLY
+ *  PRESENT as a whole — built only when at least one cap is set — which is a
+ *  different rule from the per-field passthroughs above. Mirrors
+ *  `agent-tool.ts`'s `buildBudget`. */
+const buildSpawnBudget = (input: SpawnAgentInput): SubagentRequest["budget"] => {
+  if (input.max_turns === undefined && input.max_tokens === undefined) return undefined
+  return {
+    ...(input.max_turns !== undefined ? { maxTurns: input.max_turns } : {}),
+    ...(input.max_tokens !== undefined ? { maxTokens: input.max_tokens } : {}),
+  }
+}
+
+/** `checkpoint` ⇒ tell the child to write interim findings to a parent-readable
+ *  path. Its own unit because the answer is a THREE-input conjunction, not a
+ *  passthrough: skipped under `isolation:"worktree"` (parent cannot read inside
+ *  a throwaway worktree) and when no cwd was injected (nowhere to point it). */
+const resolveCheckpointPath = (
+  input: SpawnAgentInput,
+  deps: SpawnAgentDeps,
+  taskId: string,
+): string | undefined => {
+  const cwd = deps.cwd
+  if (input.checkpoint !== true || input.isolation === "worktree" || cwd === undefined) {
+    return undefined
+  }
+  return buildCheckpointPath(cwd, taskId)
+}
+
+/** ALBB-16 #2 + C5059-04 — compose the fork_turns inherited-context preamble onto
+ *  the child's seed prompt, mirroring the trio `agent` tool's `applyForkPromptIfNeeded`.
+ *  `fork_turns` is a first-class field on `SpawnAgentInputSchema` (C5059-04), so it
+ *  is read directly off the parsed input. Absent ⇒ "none" ⇒ the composer is identity.
+ *  No `deps.forkPrompt` ⇒ raw prompt (byte-identical legacy path). Its own unit
+ *  because the injected composer must be bound to a `const` before it is called
+ *  (a property narrowing does not survive into the call position). */
+const composeForkedPrompt = (input: SpawnAgentInput, deps: SpawnAgentDeps): string => {
+  const compose = deps.forkPrompt
+  if (compose === undefined) return input.prompt
+  return compose(input.prompt, input.fork_turns ?? "none")
+}
+
+/** jul-7 audit (Fix-C completeness): derive the tool allowlist from `task_kind` when no
+ *  explicit `tool_filter` is given — PARITY with the trio `agent` tool. Without this a
+ *  `task_kind:"read"` 6-tool spawn left `toolFilter` undefined ⇒ the child inherited the FULL
+ *  parent registry + every feature tool (spawn_agent/team_*). Explicit `tool_filter` wins;
+ *  both absent ⇒ undefined ⇒ unrestricted (byte-identical). Its own unit because it is
+ *  the one field with a FALLBACK, not a plain copy. */
+const resolveEffectiveToolFilter = (input: SpawnAgentInput): string[] | undefined =>
+  input.tool_filter ??
+  (input.task_kind !== undefined ? deriveToolFilter(input.task_kind) : undefined)
+
 /** Assemble the {@link SubagentRequest} handed to the runner from the parsed
  *  spawn input + the freshly-minted task id / abort controller / resolved
  *  child depth + prior-attempt text. Pure builder extracted from
- *  {@link handleSpawnAgent} (god-function split); behaviour-preserving. */
+ *  {@link handleSpawnAgent} (god-function split); behaviour-preserving.
+ *
+ *  Reads as a MANIFEST: four derived fields (each with a real rule, above),
+ *  then the parity passthroughs — the runner already honors each
+ *  (buildChildConfig / buildSeedPrompt) and an unset field stays absent. */
 const buildSubagentRequest = (
   input: SpawnAgentInput,
   deps: SpawnAgentDeps,
@@ -242,66 +311,26 @@ const buildSubagentRequest = (
   childDepth: number,
   priorAttempt: string | undefined,
 ): SubagentRequest => {
-  // Per-child budget from the optional turn/token caps (parity with the
-  // foreground `agent` tool). Built only when at least one is set.
-  const budget =
-    input.max_turns !== undefined || input.max_tokens !== undefined
-      ? {
-          ...(input.max_turns !== undefined ? { maxTurns: input.max_turns } : {}),
-          ...(input.max_tokens !== undefined ? { maxTokens: input.max_tokens } : {}),
-        }
-      : undefined
-
-  // `checkpoint` ⇒ tell the child to write interim findings to a parent-readable
-  // path. Skipped under `isolation:"worktree"` (parent cannot read inside a
-  // throwaway worktree) and when no cwd was injected (nowhere to point it).
-  const checkpointPath =
-    input.checkpoint === true && input.isolation !== "worktree" && deps.cwd !== undefined
-      ? buildCheckpointPath(deps.cwd, taskId)
-      : undefined
-
-  // ALBB-16 #2 + C5059-04 — compose the fork_turns inherited-context preamble onto
-  // the child's seed prompt, mirroring the trio `agent` tool's `applyForkPromptIfNeeded`.
-  // `fork_turns` is now a first-class field on `SpawnAgentInputSchema` (C5059-04), so it
-  // is read directly off the parsed input. Absent ⇒ "none" ⇒ the composer is identity.
-  // No `deps.forkPrompt` ⇒ raw prompt (byte-identical legacy path).
-  const forkSpec = input.fork_turns ?? "none"
-  const forkedPrompt =
-    deps.forkPrompt !== undefined ? deps.forkPrompt(input.prompt, forkSpec) : input.prompt
-
-  // jul-7 audit (Fix-C completeness): derive the tool allowlist from `task_kind` when no
-  // explicit `tool_filter` is given — PARITY with the trio `agent` tool. Without this a
-  // `task_kind:"read"` 6-tool spawn left `toolFilter` undefined ⇒ the child inherited the FULL
-  // parent registry + every feature tool (spawn_agent/team_*). Explicit `tool_filter` wins;
-  // both absent ⇒ undefined ⇒ unrestricted (byte-identical).
-  const effectiveToolFilter =
-    input.tool_filter ??
-    (input.task_kind !== undefined ? deriveToolFilter(input.task_kind) : undefined)
-
   const req: SubagentRequest = {
-    prompt: forkedPrompt,
+    prompt: composeForkedPrompt(input, deps),
     depth: childDepth,
     signal: abort.signal,
     // ADR-0437 follow-up — thread the registry task id so the runner can
     // register a per-child turn waker under the SAME id `followup_task` uses.
     taskId,
-    ...(input.agent_type !== undefined ? { agentType: input.agent_type } : {}),
-    ...(effectiveToolFilter !== undefined ? { toolFilter: effectiveToolFilter } : {}),
-    // Parity passthroughs — the runner already honors each (buildChildConfig /
-    // buildSeedPrompt). Conditional-spread so an unset field is byte-identical.
-    ...(input.isolation !== undefined ? { isolation: input.isolation } : {}),
-    ...(input.owned_surfaces !== undefined ? { ownedSurfaces: input.owned_surfaces } : {}),
-    ...(input.forbidden_surfaces !== undefined
-      ? { forbiddenSurfaces: input.forbidden_surfaces }
-      : {}),
-    ...(input.task_kind !== undefined ? { taskKind: input.task_kind } : {}),
-    ...(input.result_shape !== undefined ? { resultShape: input.result_shape } : {}),
-    ...(input.model !== undefined ? { model: input.model } : {}),
-    ...(input.role !== undefined ? { role: input.role } : {}),
-    ...(input.effort !== undefined ? { effort: input.effort } : {}),
-    ...(budget !== undefined ? { budget } : {}),
-    ...(priorAttempt !== undefined ? { priorAttempt } : {}),
-    ...(checkpointPath !== undefined ? { checkpointPath } : {}),
+    ...optField("agentType", input.agent_type),
+    ...optField("toolFilter", resolveEffectiveToolFilter(input)),
+    ...optField("isolation", input.isolation),
+    ...optField("ownedSurfaces", input.owned_surfaces),
+    ...optField("forbiddenSurfaces", input.forbidden_surfaces),
+    ...optField("taskKind", input.task_kind),
+    ...optField("resultShape", input.result_shape),
+    ...optField("model", input.model),
+    ...optField("role", input.role),
+    ...optField("effort", input.effort),
+    ...optField("budget", buildSpawnBudget(input)),
+    ...optField("priorAttempt", priorAttempt),
+    ...optField("checkpointPath", resolveCheckpointPath(input, deps, taskId)),
   }
   return req
 }

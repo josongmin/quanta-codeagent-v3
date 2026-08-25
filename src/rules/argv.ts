@@ -29,6 +29,110 @@
 /** Quote / escape state used by {@link tokenizeArgv}. */
 type QuoteState = "none" | "single" | "double"
 
+/** Mutable scanner accumulator for {@link tokenizeArgv}. Its own type because
+ *  the four scan variables move together — every state step reads and writes
+ *  the same four, so passing them as one record keeps each step a real unit
+ *  instead of a five-argument tuple shuffle. `hasToken` distinguishes `""`
+ *  (an empty QUOTED token) from "no token started yet". */
+interface Scan {
+  readonly tokens: string[]
+  current: string
+  hasToken: boolean
+  state: QuoteState
+}
+
+/** End the current token, if one was started. Its own unit because "started"
+ *  is the `hasToken` flag, not `current.length` — an empty quoted token
+ *  (`''`) must still be pushed. */
+const flushToken = (s: Scan): void => {
+  if (s.hasToken) {
+    s.tokens.push(s.current)
+    s.current = ""
+    s.hasToken = false
+  }
+}
+
+/** Append one literal char and mark a token as started. Spelled once here
+ *  because the original repeated this exact pair in SEVEN places, and every
+ *  repetition was a place the flag could be forgotten. */
+const emit = (s: Scan, ch: string): void => {
+  s.current += ch
+  s.hasToken = true
+}
+
+/** The backslash rule, shared VERBATIM by the double-quoted and unquoted
+ *  states (the original spelled it twice): the next char is taken literally,
+ *  and a trailing backslash with no escape target is itself literal.
+ *  Returns the number of EXTRA input chars consumed (1 when a target was
+ *  eaten) so the caller advances the cursor identically in both states. */
+const stepEscape = (s: Scan, next: string | undefined): number => {
+  if (next === undefined) {
+    emit(s, "\\")
+    return 0
+  }
+  emit(s, next)
+  return 1
+}
+
+/** Inside `'single quotes'`: only the closing quote is special — backslash is
+ *  literal. */
+const stepSingle = (s: Scan, ch: string): number => {
+  if (ch === "'") s.state = "none"
+  else emit(s, ch)
+  return 0
+}
+
+/** Inside `"double quotes"`: the closing quote ends the group, backslash
+ *  escapes, everything else is literal. */
+const stepDouble = (s: Scan, ch: string, next: string | undefined): number => {
+  if (ch === '"') {
+    s.state = "none"
+    return 0
+  }
+  if (ch === "\\") return stepEscape(s, next)
+  emit(s, ch)
+  return 0
+}
+
+/** Unquoted whitespace — the ONLY token separator. */
+const isArgvSpace = (ch: string): boolean => ch === " " || ch === "\t" || ch === "\n" || ch === "\r"
+
+/** Opening quote char → the state it enters. A TABLE rather than a second
+ *  if/else pair, so adding a quote flavour is a row, not a branch. A `Map`
+ *  (not an object literal) so a lookup can never hit `Object.prototype`. */
+const OPENS_QUOTE: ReadonlyMap<string, QuoteState> = new Map([
+  ["'", "single"],
+  ['"', "double"],
+])
+
+/** Outside quotes: whitespace separates, a quote opens a group (and STARTS a
+ *  token, so `''` yields an empty token), backslash escapes, else literal. */
+const stepUnquoted = (s: Scan, ch: string, next: string | undefined): number => {
+  if (isArgvSpace(ch)) {
+    flushToken(s)
+    return 0
+  }
+  const opened = OPENS_QUOTE.get(ch)
+  if (opened !== undefined) {
+    s.state = opened
+    s.hasToken = true
+    return 0
+  }
+  if (ch === "\\") return stepEscape(s, next)
+  emit(s, ch)
+  return 0
+}
+
+/** State → step function. The dispatch table IS the state machine; the scan
+ *  loop below is then a pure cursor. */
+const SCAN_STEP: Readonly<
+  Record<QuoteState, (s: Scan, ch: string, next: string | undefined) => number>
+> = {
+  single: (s, ch) => stepSingle(s, ch),
+  double: stepDouble,
+  none: stepUnquoted,
+}
+
 /**
  * Split a shell command STRING into its argv token vector. POSIX-ish word
  * splitting (a deliberately small, auditable subset):
@@ -47,84 +151,16 @@ type QuoteState = "none" | "single" | "double"
 export const tokenizeArgv = (command: unknown): readonly string[] => {
   if (typeof command !== "string" || command.length === 0) return []
 
-  const tokens: string[] = []
-  let current = ""
-  let hasToken = false // distinguishes "" (empty quoted token) from "no token"
-  let state: QuoteState = "none"
-
-  const flush = (): void => {
-    if (hasToken) {
-      tokens.push(current)
-      current = ""
-      hasToken = false
-    }
-  }
-
+  const s: Scan = { tokens: [], current: "", hasToken: false, state: "none" }
   for (let i = 0; i < command.length; i++) {
-    const ch = command[i] ?? ""
-    if (state === "single") {
-      if (ch === "'") {
-        state = "none"
-      } else {
-        current += ch
-        hasToken = true
-      }
-      continue
-    }
-    if (state === "double") {
-      if (ch === '"') {
-        state = "none"
-      } else if (ch === "\\") {
-        // Backslash escapes the next char inside double quotes.
-        const next = command[i + 1]
-        if (next === undefined) {
-          current += "\\"
-          hasToken = true
-        } else {
-          current += next
-          hasToken = true
-          i++
-        }
-      } else {
-        current += ch
-        hasToken = true
-      }
-      continue
-    }
-    // state === "none"
-    if (ch === " " || ch === "\t" || ch === "\n" || ch === "\r") {
-      flush()
-      continue
-    }
-    if (ch === "'") {
-      state = "single"
-      hasToken = true
-      continue
-    }
-    if (ch === '"') {
-      state = "double"
-      hasToken = true
-      continue
-    }
-    if (ch === "\\") {
-      const next = command[i + 1]
-      if (next === undefined) {
-        // Trailing backslash with no escape target: literal.
-        current += "\\"
-        hasToken = true
-      } else {
-        current += next
-        hasToken = true
-        i++
-      }
-      continue
-    }
-    current += ch
-    hasToken = true
+    // Read the step BEFORE the state can change: the char is handled by the
+    // state we were in on entry, exactly as the original's top-of-loop checks.
+    const step = SCAN_STEP[s.state]
+    i += step(s, command[i] ?? "", command[i + 1])
   }
   // Unterminated quote / final token: flush whatever we accumulated.
-  flush()
-  return tokens
+  flushToken(s)
+  return s.tokens
 }
 
 /**
@@ -143,43 +179,65 @@ export const tokenizeArgv = (command: unknown): readonly string[] => {
  * downgraded to a byte-prefix rule.
  */
 export const parseArgvArrayLiteral = (body: string): readonly string[] | null => {
-  const trimmed = body.trim()
-  if (trimmed.length < 2) return null
-  if (!trimmed.startsWith("[") || !trimmed.endsWith("]")) return null
-  const inner = trimmed.slice(1, -1).trim()
-  if (inner.length === 0) return null // empty array
+  const inner = unwrapArrayBrackets(body)
+  if (inner === null) return null
 
   const tokens: string[] = []
   let i = 0
   while (i < inner.length) {
-    // Skip leading whitespace before a token.
-    while (i < inner.length && isSpace(inner[i] ?? "")) i++
+    i = skipSpaces(inner, i)
     if (i >= inner.length) break
-    const ch = inner[i] ?? ""
-    let token: string
-    if (ch === '"' || ch === "'") {
-      const parsed = readQuoted(inner, i, ch)
-      if (parsed === null) return null // unterminated quote
-      token = parsed.value
-      i = parsed.next
-    } else {
-      const parsed = readBare(inner, i)
-      token = parsed.value
-      i = parsed.next
-    }
-    if (token.length === 0) return null
-    tokens.push(token)
-    // Skip whitespace, then require a comma or end.
-    while (i < inner.length && isSpace(inner[i] ?? "")) i++
-    if (i < inner.length) {
-      if (inner[i] !== ",") return null // malformed separator
-      i++ // consume comma
-      // A trailing comma (`[a,]`) leaves only whitespace ⇒ caught as empty token.
-      const rest = inner.slice(i).trim()
-      if (rest.length === 0) return null
-    }
+    const tok = readArrayToken(inner, i)
+    if (tok === null) return null // unterminated quote / empty token
+    tokens.push(tok.value)
+    const afterSep = readSeparator(inner, tok.next)
+    if (afterSep === null) return null // malformed separator / trailing comma
+    i = afterSep
   }
   return tokens.length > 0 ? tokens : null
+}
+
+/** Strip the `[` … `]` shell. Its own unit because these are the SHAPE
+ *  rejections (not bracket-delimited, unterminated, empty array) — hoisting
+ *  them out leaves the loop above as pure token scanning. `null` == reject. */
+const unwrapArrayBrackets = (body: string): string | null => {
+  const trimmed = body.trim()
+  if (trimmed.length < 2) return null
+  if (!trimmed.startsWith("[") || !trimmed.endsWith("]")) return null
+  const inner = trimmed.slice(1, -1).trim()
+  return inner.length === 0 ? null : inner // empty array
+}
+
+/** Advance past a run of spaces. The original spelled this inner `while`
+ *  TWICE inside the outer loop, paying a nesting surcharge each time. */
+const skipSpaces = (s: string, from: number): number => {
+  let i = from
+  while (i < s.length && isSpace(s[i] ?? "")) i++
+  return i
+}
+
+/** Read ONE token at `start` — quoted or bare — plus the index just past it.
+ *  `null` == reject. The two rejection reasons (unterminated quote, empty
+ *  token) collapse into one unit because the caller treats them identically:
+ *  a malformed array is never quietly downgraded. */
+const readArrayToken = (s: string, start: number): { value: string; next: number } | null => {
+  const ch = s[start] ?? ""
+  const parsed = ch === '"' || ch === "'" ? readQuoted(s, start, ch) : readBare(s, start)
+  if (parsed === null) return null
+  return parsed.value.length === 0 ? null : parsed
+}
+
+/** After a token: consume trailing spaces, then require a comma or
+ *  end-of-input. Returns the next scan index, or `null` when the separator is
+ *  malformed or the comma is trailing (`[a,]`). Its own unit because it is the
+ *  only place `,` means anything. */
+const readSeparator = (s: string, from: number): number | null => {
+  const i = skipSpaces(s, from)
+  if (i >= s.length) return i
+  if (s[i] !== ",") return null // malformed separator
+  const next = i + 1 // consume comma
+  // A trailing comma (`[a,]`) leaves only whitespace ⇒ rejected here.
+  return s.slice(next).trim().length === 0 ? null : next
 }
 
 const isSpace = (c: string): boolean => c === " " || c === "\t"

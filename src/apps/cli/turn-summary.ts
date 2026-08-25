@@ -138,80 +138,126 @@ export const isTurnSummaryVerbose = (env: NodeJS.ProcessEnv): boolean => {
   return v === "1" || v === "true" || v === "on" || v === "yes"
 }
 
-export const createTurnSummary = (opts: TurnSummaryOptions = {}): TurnSummaryCollector => {
-  const enabled = opts.enabled !== false
-  const maxMemoryRows = Math.max(0, opts.maxMemoryRows ?? 3)
-  const verbose = opts.verbose === true
-  let signals = freshSignals()
+/**
+ * The mutable cell the consumer folds events into. A CELL (not two closure
+ * `let`s) so the reducers below can live at module level instead of nested two
+ * arrows deep inside the factory — that nesting surcharge, not the arm count,
+ * was most of the consumer's cognitive-complexity score.
+ */
+interface TurnConsumeState {
+  signals: TurnSignals
   /** Tracks the most-recent `recovery:{reason:"compact"}` detail. When the
    *  subsequent `context_compacted` event fires (loop emits them as a pair),
    *  we tag the compaction with that detail (`"proactive"` ⇒ proactive,
    *  anything else / absent ⇒ PTL). The pairing is reset every consumption. */
-  let pendingCompactDetail: string | undefined
+  pendingCompactDetail: string | undefined
+}
+
+/** `recovery` arm: bump the per-reason tally, and note the two reasons that
+ *  have a SECOND meaning (verify-guard trip / the compaction pairing latch). */
+const applyRecovery = (
+  state: TurnConsumeState,
+  event: Extract<AgentEvent, { type: "recovery" }>,
+): void => {
+  const prev = state.signals.recoveryByReason.get(event.reason) ?? 0
+  state.signals.recoveryByReason.set(event.reason, prev + 1)
+  if (event.reason === "unverified") state.signals.verifyGuardTrips += 1
+  if (event.reason === "compact") state.pendingCompactDetail = event.detail
+}
+
+/** `context_compacted` arm: close the pairing latch set by the preceding
+ *  `recovery` and append the tagged mark. Its own unit because it is the only
+ *  arm that CONSUMES cross-event state. */
+const applyCompaction = (
+  state: TurnConsumeState,
+  event: Extract<AgentEvent, { type: "context_compacted" }>,
+): void => {
+  const kind: "proactive" | "ptl" = state.pendingCompactDetail === "proactive" ? "proactive" : "ptl"
+  state.signals = {
+    ...state.signals,
+    compactions: [...state.signals.compactions, { kind, tokens: event.tokens }],
+  }
+  state.pendingCompactDetail = undefined
+}
+
+/** `llm_continuation` arm: three counters keyed off (phase, mode) and, for the
+ *  retry pair, the rejection reason. Its own unit because it is the only arm
+ *  with a two-axis dispatch. */
+const applyContinuation = (
+  signals: TurnSignals,
+  event: Extract<AgentEvent, { type: "llm_continuation" }>,
+): void => {
+  if (event.phase === "prepare" && event.mode === "resume") {
+    signals.continuation.resumed += 1
+  }
+  if (event.phase === "retry" && event.mode === "full_retry") {
+    signals.continuation.retried += 1
+    if (event.reason === "resume_rejected") signals.continuation.disabled += 1
+  }
+}
+
+/**
+ * Fold ONE agent event into `state`. Module-level (not a factory closure) so
+ * every arm sits at nesting depth 1, and so the arms are individually testable.
+ * Total + forward-compatible: an unrecognised event is ignored.
+ */
+const consumeTurnEvent = (state: TurnConsumeState, event: AgentEvent): void => {
+  switch (event.type) {
+    case "tool_call":
+      state.signals.toolCalls += 1
+      return
+    case "tool_result":
+      if (event.ok) state.signals.toolApproved += 1
+      else state.signals.toolDenied += 1
+      return
+    case "recovery":
+      applyRecovery(state, event)
+      return
+    case "context_compacted":
+      applyCompaction(state, event)
+      return
+    case "usage":
+      state.signals.usage = {
+        inputTokens: event.inputTokens,
+        outputTokens: event.outputTokens,
+      }
+      return
+    case "llm_continuation":
+      applyContinuation(state.signals, event)
+      return
+    default:
+      // Closed-union exhaustiveness: any other event is ignored. We do NOT
+      // assert `never` here — the union is large and additive, and the
+      // summary collector must remain forward-compatible (a future event
+      // type SHOULD NOT crash the panel).
+      return
+  }
+}
+
+export const createTurnSummary = (opts: TurnSummaryOptions = {}): TurnSummaryCollector => {
+  const enabled = opts.enabled !== false
+  const maxMemoryRows = Math.max(0, opts.maxMemoryRows ?? 3)
+  const verbose = opts.verbose === true
+  const state: TurnConsumeState = { signals: freshSignals(), pendingCompactDetail: undefined }
 
   const consume = (event: AgentEvent): void => {
     if (!enabled) return
-    switch (event.type) {
-      case "tool_call":
-        signals.toolCalls += 1
-        return
-      case "tool_result":
-        if (event.ok) signals.toolApproved += 1
-        else signals.toolDenied += 1
-        return
-      case "recovery": {
-        const prev = signals.recoveryByReason.get(event.reason) ?? 0
-        signals.recoveryByReason.set(event.reason, prev + 1)
-        if (event.reason === "unverified") signals.verifyGuardTrips += 1
-        if (event.reason === "compact") pendingCompactDetail = event.detail
-        return
-      }
-      case "context_compacted": {
-        const kind: "proactive" | "ptl" = pendingCompactDetail === "proactive" ? "proactive" : "ptl"
-        signals = {
-          ...signals,
-          compactions: [...signals.compactions, { kind, tokens: event.tokens }],
-        }
-        pendingCompactDetail = undefined
-        return
-      }
-      case "usage":
-        signals.usage = {
-          inputTokens: event.inputTokens,
-          outputTokens: event.outputTokens,
-        }
-        return
-      case "llm_continuation":
-        if (event.phase === "prepare" && event.mode === "resume") {
-          signals.continuation.resumed += 1
-        }
-        if (event.phase === "retry" && event.mode === "full_retry") {
-          signals.continuation.retried += 1
-          if (event.reason === "resume_rejected") signals.continuation.disabled += 1
-        }
-        return
-      default:
-        // Closed-union exhaustiveness: any other event is ignored. We do NOT
-        // assert `never` here — the union is large and additive, and the
-        // summary collector must remain forward-compatible (a future event
-        // type SHOULD NOT crash the panel).
-        return
-    }
+    consumeTurnEvent(state, event)
   }
 
   return {
     onEvent: consume,
     render: (outcome) =>
       enabled
-        ? renderSummary(signals, outcome, {
+        ? renderSummary(state.signals, outcome, {
             maxMemoryRows,
             verbose,
             ...(opts.turnNumber !== undefined ? { turnNumber: opts.turnNumber } : {}),
           })
         : "",
     reset: () => {
-      signals = freshSignals()
-      pendingCompactDetail = undefined
+      state.signals = freshSignals()
+      state.pendingCompactDetail = undefined
     },
     asStreamPort: () => ({
       emit: (event): void => {

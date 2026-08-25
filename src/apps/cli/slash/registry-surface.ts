@@ -331,6 +331,113 @@ const activityCmd: SlashCommand = {
   },
 }
 
+/** What `/agents` argv resolves to. `inspectId` set ⇒ the drill-in view wins
+ *  over the fleet view (that precedence is decided by the caller, not here). */
+interface AgentsArgs {
+  readonly format: "table" | "json" | "tree"
+  readonly all: boolean
+  readonly maxDepth: number | undefined
+  readonly inspectId: string | undefined
+}
+
+/** Mutable accumulator the flag handlers write into. */
+interface AgentsAcc {
+  format: "table" | "json" | "tree"
+  all: boolean
+  maxDepth: number | undefined
+  inspectId: string | undefined
+}
+
+/** A value-taking flag: consume `raw` (the NEXT token, possibly absent) into
+ *  `acc`, or return the rejection message. `undefined` means accepted. */
+type AgentsFlagHandler = (acc: AgentsAcc, raw: string | undefined) => string | undefined
+
+/**
+ * The value-taking `/agents` flags, as a TABLE.
+ *
+ * ONE table because all three share the identical three-step gate — "consume
+ * the next token, validate it, reject naming what was allowed" — and spelling
+ * that gate out as an `else if` chain two levels deep inside an async command
+ * method WAS this parser's cognitive-complexity score. Only the validate step
+ * differs, so only the validate step is tabulated.
+ *
+ * A `Map` (not an object literal) so a bare `/agents toString` stays a task id
+ * rather than resolving a handler off `Object.prototype`.
+ */
+const AGENTS_VALUE_FLAGS: ReadonlyMap<string, AgentsFlagHandler> = new Map<
+  string,
+  AgentsFlagHandler
+>([
+  [
+    "--format",
+    (acc, v) => {
+      if (v !== "table" && v !== "json" && v !== "tree") {
+        return `/agents: --format must be table|json|tree (got ${v ?? "<nothing>"})\n`
+      }
+      acc.format = v
+      return undefined
+    },
+  ],
+  [
+    "--depth",
+    (acc, v) => {
+      const n = Number(v)
+      if (v === undefined || !Number.isInteger(n) || n < 0) {
+        return `/agents: --depth must be a non-negative integer (got ${v ?? "<nothing>"})\n`
+      }
+      acc.maxDepth = n
+      // `--depth` is a tree-only filter; default to the tree view for it.
+      if (acc.format === "table") acc.format = "tree"
+      return undefined
+    },
+  ],
+  [
+    "inspect",
+    (acc, v) => {
+      acc.inspectId = v
+      return undefined
+    },
+  ],
+])
+
+/**
+ * Pure argv parser for `/agents`. Returns the rejection message instead of
+ * writing it, so the parse is testable without a SlashContext. Precedence is
+ * unchanged: `--all`, then the value-flag table, then a bare token (a task id),
+ * then rejection.
+ */
+const parseAgentsArgs = (
+  args: readonly string[],
+):
+  | { readonly ok: true; readonly value: AgentsArgs }
+  | { readonly ok: false; readonly message: string } => {
+  const acc: AgentsAcc = { format: "table", all: false, maxDepth: undefined, inspectId: undefined }
+  for (let i = 0; i < args.length; i++) {
+    const a = args[i]
+    if (a === "--all") {
+      acc.all = true
+      continue
+    }
+    const handler = a === undefined ? undefined : AGENTS_VALUE_FLAGS.get(a)
+    if (handler !== undefined) {
+      const rejected = handler(acc, args[i + 1])
+      i += 1
+      if (rejected !== undefined) return { ok: false, message: rejected }
+      continue
+    }
+    // Bare `/agents <id>` — drill into a single task.
+    if (a !== undefined && !a.startsWith("--")) {
+      acc.inspectId = a
+      continue
+    }
+    return {
+      ok: false,
+      message: `/agents: unknown argument '${a}' (try --format <table|json|tree>, --all, --depth <N>, or inspect <id>)\n`,
+    }
+  }
+  return { ok: true, value: acc }
+}
+
 const agentsCmd: SlashCommand = {
   name: "/agents",
   describe:
@@ -341,46 +448,12 @@ const agentsCmd: SlashCommand = {
       ctx.out("/agents: not wired in this surface\n")
       return 0
     }
-    let format: "table" | "json" | "tree" = "table"
-    let all = false
-    let maxDepth: number | undefined
-    let inspectId: string | undefined
-    for (let i = 0; i < args.length; i++) {
-      const a = args[i]
-      if (a === "--all") {
-        all = true
-      } else if (a === "--format") {
-        const v = args[i + 1]
-        i += 1
-        if (v !== "table" && v !== "json" && v !== "tree") {
-          ctx.err(`/agents: --format must be table|json|tree (got ${v ?? "<nothing>"})\n`)
-          return 1
-        }
-        format = v
-      } else if (a === "--depth") {
-        const v = args[i + 1]
-        i += 1
-        const n = Number(v)
-        if (v === undefined || !Number.isInteger(n) || n < 0) {
-          ctx.err(`/agents: --depth must be a non-negative integer (got ${v ?? "<nothing>"})\n`)
-          return 1
-        }
-        maxDepth = n
-        // `--depth` is a tree-only filter; default to the tree view for it.
-        if (format === "table") format = "tree"
-      } else if (a === "inspect") {
-        inspectId = args[i + 1]
-        i += 1
-      } else if (a !== undefined && !a.startsWith("--")) {
-        // Bare `/agents <id>` — drill into a single task.
-        inspectId = a
-      } else {
-        ctx.err(
-          `/agents: unknown argument '${a}' (try --format <table|json|tree>, --all, --depth <N>, or inspect <id>)\n`,
-        )
-        return 1
-      }
+    const parsed = parseAgentsArgs(args)
+    if (!parsed.ok) {
+      ctx.err(parsed.message)
+      return 1
     }
+    const { format, all, maxDepth, inspectId } = parsed.value
     const now = ctx.now?.() ?? Date.now()
     if (inspectId !== undefined) {
       ctx.out(`${renderAgentInspect(ctx.agents(), inspectId, { now })}\n`)
@@ -437,6 +510,50 @@ const psCmd: SlashCommand = {
  *                         (default 24h) by `createdAtMs`.
  *  Absent slot ⇒ "not wired in this surface" + exit 0 (default-OFF
  *  byte-identical, parity with `/agents`). */
+/**
+ * The three card-targeting `/radar` subcommands (`adopt` / `dismiss` /
+ * `engage`) share one gate, spelled out three times in the original: require a
+ * card id, run the store op, map an `Err` to stderr + exit 1. ONE unit — the
+ * arms differ only in WHICH op runs and what the success line says.
+ */
+const runRadarCardOp = <T>(
+  sub: string,
+  args: readonly string[],
+  ctx: SlashContext,
+  op: (
+    id: string,
+  ) => { readonly ok: true; readonly value: T } | { readonly ok: false; readonly error: unknown },
+  successLine: (id: string, value: T) => string,
+): number => {
+  const id = args[1]
+  if (id === undefined) {
+    ctx.err(`/radar: ${sub} requires a card id (try '/radar list')\n`)
+    return 1
+  }
+  const r = op(id)
+  if (!r.ok) {
+    ctx.err(`/radar: ${sub} failed for '${id}': ${r.error}\n`)
+    return 1
+  }
+  ctx.out(successLine(id, r.value))
+  return 0
+}
+
+/** The `list` view — its own unit because it is the only arm that renders a
+ *  COLLECTION (and the only one with an "empty" presentation). */
+const renderRadarList = (radar: NonNullable<SlashContext["radar"]>, ctx: SlashContext): number => {
+  const active = radar.listActive()
+  if (active.length === 0) {
+    ctx.out("/radar: no active cards\n")
+    return 0
+  }
+  const lines = active.map(
+    (c) => `  [${c.id}] (${c.kind}) ${c.title} — engaged ${c.engagementCount}×`,
+  )
+  ctx.out(`Radar — ${active.length} active card(s):\n${lines.join("\n")}\n`)
+  return 0
+}
+
 export const radarCmd: SlashCommand = {
   name: "/radar",
   describe:
@@ -449,46 +566,25 @@ export const radarCmd: SlashCommand = {
       return 0
     }
     const sub = args[0] ?? "list"
-    if (sub === "list") {
-      const active = radar.listActive()
-      if (active.length === 0) {
-        ctx.out("/radar: no active cards\n")
-        return 0
-      }
-      const lines = active.map(
-        (c) => `  [${c.id}] (${c.kind}) ${c.title} — engaged ${c.engagementCount}×`,
-      )
-      ctx.out(`Radar — ${active.length} active card(s):\n${lines.join("\n")}\n`)
-      return 0
-    }
+    if (sub === "list") return renderRadarList(radar, ctx)
     if (sub === "adopt" || sub === "dismiss") {
-      const id = args[1]
-      if (id === undefined) {
-        ctx.err(`/radar: ${sub} requires a card id (try '/radar list')\n`)
-        return 1
-      }
       const status = sub === "adopt" ? "adopted" : "dismissed"
-      const r = radar.setStatus(id, status)
-      if (!r.ok) {
-        ctx.err(`/radar: ${sub} failed for '${id}': ${r.error}\n`)
-        return 1
-      }
-      ctx.out(`/radar: card '${id}' ${status}\n`)
-      return 0
+      return runRadarCardOp(
+        sub,
+        args,
+        ctx,
+        (id) => radar.setStatus(id, status),
+        (id) => `/radar: card '${id}' ${status}\n`,
+      )
     }
     if (sub === "engage") {
-      const id = args[1]
-      if (id === undefined) {
-        ctx.err(`/radar: engage requires a card id (try '/radar list')\n`)
-        return 1
-      }
-      const r = radar.recordEngagement(id)
-      if (!r.ok) {
-        ctx.err(`/radar: engage failed for '${id}': ${r.error}\n`)
-        return 1
-      }
-      ctx.out(`/radar: card '${id}' engaged (count ${r.value.engagementCount})\n`)
-      return 0
+      return runRadarCardOp(
+        "engage",
+        args,
+        ctx,
+        (id) => radar.recordEngagement(id),
+        (id, card) => `/radar: card '${id}' engaged (count ${card.engagementCount})\n`,
+      )
     }
     if (sub === "prune") {
       const now = ctx.now?.() ?? Date.now()

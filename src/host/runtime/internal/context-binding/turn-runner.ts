@@ -1,5 +1,8 @@
-import { type AgentConfig, type AgentOutcome, runAgent } from "@/agent"
-import { buildObjectiveSnapshotProvider } from "@/host/runtime/objective-store-wire"
+import { type AgentConfig, type AgentOutcome, runAgent, type StopReason } from "@/agent"
+import {
+  buildObjectiveSnapshotProvider,
+  persistObjectiveSnapshotNow,
+} from "@/host/runtime/objective-store-wire"
 import type { SessionHostTurnEvent } from "@/kernel/session"
 import type { ContentBlock, ImageBlock, Message } from "@/llm"
 import type { ArtifactRef, PendingApprovalView } from "@/protocol/session"
@@ -12,6 +15,12 @@ import { drainNewArtifacts } from "../../artifact-drain"
 import { toSessionHostTurnEvent } from "../session-host-turn-event-bridge"
 import { approvalPlaceholderOutcome, isRuntimeApprovalRequiredError } from "./approval-support"
 import { buildAgentConfigFromBase, buildAgentConfigFromBaseInput, getSessionId } from "./base"
+import {
+  type AttributedAttempt,
+  beginObjectiveAttempt,
+  failStopAfterSettlement,
+  settleObjectiveAttempt,
+} from "./objective-settlement"
 import { buildRewindCaptureHook } from "./rewind-capture-wire"
 import type { RuntimeBase } from "./types"
 
@@ -121,6 +130,65 @@ export const toSessionHostTurnResult = (result: RuntimeTurnResult) =>
         ...(result.artifacts !== undefined ? { artifacts: result.artifacts } : {}),
       }
 
+type SettledRun =
+  | { readonly kind: "outcome"; readonly outcome: AgentOutcome }
+  | { readonly kind: "approval"; readonly approval: PendingApprovalView }
+
+/** GOAL-04 — run the agent body and settle the attributed attempt (if any)
+ *  exactly once on EVERY terminal path: normal outcome, approval pause
+ *  (`awaiting_approval`) or a throw (`error`, re-thrown after settlement). */
+const runAgentSettled = async (args: {
+  readonly cfg: AgentConfig
+  readonly attributed: AttributedAttempt | undefined
+}): Promise<SettledRun> => {
+  const { cfg, attributed } = args
+  const stream: AgentConfig["stream"] =
+    attributed === undefined
+      ? cfg.stream
+      : {
+          emit(event: AgentEvent): void {
+            attributed.usage.observe(event)
+            cfg.stream.emit(event)
+          },
+        }
+  const settle = (outcome: AgentOutcome | { readonly reason: StopReason }): Promise<void> =>
+    attributed === undefined
+      ? Promise.resolve()
+      : settleObjectiveAttempt({
+          attributed,
+          outcome,
+          budgetMeter: cfg.budgetMeter,
+          verifier: cfg.objectiveVerifier,
+          judge: cfg.objectiveJudgeObserver,
+        })
+  let outcome: AgentOutcome
+  try {
+    outcome = await runAgent({ ...cfg, stream })
+  } catch (error) {
+    const approval = isRuntimeApprovalRequiredError(error)
+    await settle({ reason: approval ? "awaiting_approval" : "error" })
+    if (approval) return { kind: "approval", approval: error.approval }
+    throw error
+  }
+  await settle(outcome)
+  return { kind: "outcome", outcome }
+}
+
+/** GOAL-04 — a persistence failure AFTER settlement never refunds the start;
+ *  the session is fail-stopped for further attributed turns (durable
+ *  uncertainty is not silent). */
+const persistTurnOrFailStop = async (
+  attributed: AttributedAttempt | undefined,
+  input: Parameters<typeof persistTurn>[0],
+): Promise<void> => {
+  try {
+    await persistTurn(input)
+  } catch (error) {
+    if (attributed !== undefined) failStopAfterSettlement(attributed, error)
+    throw error
+  }
+}
+
 export const runRuntimeTurn = async (args: {
   readonly base: RuntimeBase
   readonly turnAssembler?: RuntimeAgentTurnAssembler
@@ -142,34 +210,50 @@ export const runRuntimeTurn = async (args: {
     ...(args.base.itemStream === true ? { itemStream: true } : {}),
     ...(args.base.fullFidelity === true ? { fullFidelity: true } : {}),
   })
+  // GOAL-04 — attributed attempt (host claim); ordinary chat has none.
+  const cfg = buildAgentConfigFromBase(
+    buildAgentConfigFromBaseInput({
+      base: { ...args.base, stream: turnStream.stream },
+      messages: [
+        ...args.history,
+        {
+          role: "user",
+          content: [{ type: "text", text: args.prompt }, ...(args.images ?? [])] as ContentBlock[],
+        } as Message,
+      ],
+      signal: args.signal,
+      turnAssembler: args.turnAssembler,
+    }),
+  )
+  const attributed = await beginObjectiveAttempt({
+    objective: args.base.objective,
+    objectiveAttemptSlot: args.base.objectiveAttemptSlot,
+    budgetMeter: cfg.budgetMeter,
+    persistStart:
+      args.idMeta !== undefined
+        ? () => persistObjectiveSnapshotNow(args.base.objective, args.idMeta?.id)
+        : undefined,
+  })
+  const ran = await runAgentSettled({ cfg, attributed })
+  if (ran.kind === "approval") {
+    return {
+      outcome: approvalPlaceholderOutcome(args.history),
+      messages: [...args.history],
+      approvalRequest: ran.approval,
+    }
+  }
+  const outcome = ran.outcome
   try {
-    const content: ContentBlock[] = [{ type: "text", text: args.prompt }, ...(args.images ?? [])]
-    const next = [...args.history, { role: "user", content } as Message]
-    const outcome = await runAgent(
-      buildAgentConfigFromBase(
-        buildAgentConfigFromBaseInput({
-          base: {
-            ...args.base,
-            stream: turnStream.stream,
-          },
-          messages: next,
-          signal: args.signal,
-          turnAssembler: args.turnAssembler,
-        }),
-      ),
-    )
     const messages = outcome.messages
     const errorMessage = turnStream.getLastErrorMessage()
     // RFC-01 A2 — build the OPTIONAL post-turn rewind-checkpoint feeder. Returns
     // undefined (⇒ persistTurn byte-identical) unless QUANTA_REWIND_CAPTURE is set
     // AND a granular checkpoint registry is wired. Best-effort / non-throwing.
     const captureCheckpoint = buildRewindCaptureHook(args.base)
-    // RFC-03 C2 — supply the lazy objective-snapshot provider so the id-mode
-    // auto-save persists the live goal authority (ids / revision / provenance).
-    // ABSENT (no objective authority on the base) ⇒ undefined ⇒ persistTurn omits
-    // the field ⇒ byte-identical (the store preserves any on-disk snapshot).
+    // RFC-03 C2 / GOAL-04 — the lazy objective-snapshot provider now runs AFTER
+    // settlement, so the persisted goal carries this attempt's receipt.
     const objectiveSnapshot = buildObjectiveSnapshotProvider(args.base.objective)
-    await persistTurn({
+    await persistTurnOrFailStop(attributed, {
       state: args.state,
       idMeta: args.idMeta,
       sessionId: getSessionId(args.base),

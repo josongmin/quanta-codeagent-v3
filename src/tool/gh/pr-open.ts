@@ -29,7 +29,7 @@ import { z } from "zod"
 import type { LLMPort } from "../../llm"
 import { errMessage } from "../../shared"
 import { publishGitDirective } from "../git/_directive-publish"
-import { composePrText } from "../git/compose"
+import { type ComposePrOutcome, composePrText } from "../git/compose"
 import type { GitRunner } from "../git/types"
 import type { CoreToolContext, Tool, ToolEvent } from "../types"
 import type { GhPrCreateToolOpts } from "./index"
@@ -190,6 +190,83 @@ const publishCreatePr = (url: string, isDraft: boolean, opts: GhPrCreateToolOpts
   publishGitDirective({ kind: "create-pr", url, isDraft }, publishOpts)
 }
 
+/** Steps 1+2 as ONE unit: resolve the gh branch NAMES, then author the prose
+ *  over the corresponding git revision range.
+ *
+ *  A unit because `execute` is an async GENERATOR whose whole score was the
+ *  same failure gate — "run a step; on failure yield `err(...)` and return" —
+ *  spelled SIX times, each with a bespoke message tail. These two steps share
+ *  one output channel (the collected `progress` messages must be emitted
+ *  whether or not authoring succeeded), so they collapse into a single
+ *  discriminated outcome the generator drains once.
+ *
+ *  `messages` is returned rather than yielded so this stays a plain async
+ *  function: a generator helper would change the parent's yield ordering. It
+ *  is `[]` on the branch-resolution failure path, which is exactly what the
+ *  pre-split code emitted there (it returned before the array was populated). */
+type PreparedPr =
+  | { readonly ok: false; readonly messages: readonly ToolEvent[]; readonly output: string }
+  | {
+      readonly ok: true
+      readonly messages: readonly ToolEvent[]
+      readonly baseBranch: string
+      readonly headBranch: string
+      readonly composed: Extract<ComposePrOutcome, { ok: true }>
+    }
+
+const preparePr = async (
+  data: PrOpenInput,
+  gitRunner: GitRunner,
+  authorLLM: LLMPort,
+  ctx: CoreToolContext,
+): Promise<PreparedPr> => {
+  const branches = await resolveBranches(data, gitRunner, ctx)
+  if (!branches.ok) return { ok: false, messages: [], output: branches.output }
+  const { base: baseBranch, head: headBranch } = branches
+  const messages: ToolEvent[] = []
+  const hint = data.hint
+  const composed = await composePrText(
+    gitRunner,
+    authorLLM,
+    { base: `origin/${baseBranch}`, head: headBranch, ...(hint !== undefined ? { hint } : {}) },
+    ctx,
+    (message) => messages.push({ type: "progress", message }),
+  )
+  if (!composed.ok) {
+    return {
+      ok: false,
+      messages,
+      output:
+        composed.reason === "empty"
+          ? `gh_pr_open: no changes in origin/${baseBranch}...${headBranch} — nothing to open a PR for.`
+          : composed.output,
+    }
+  }
+  return { ok: true, messages, baseBranch, headBranch, composed }
+}
+
+/** Step 4 — the push precondition, as a message-or-null.
+ *  A unit because it was TWO of the six failure gates (git-failed vs legit
+ *  negative) whose only difference is a long remediation string; the caller
+ *  cares about one bit ("may I proceed?"), so the branch pair belongs here. */
+const pushPreconditionError = async (
+  gitRunner: GitRunner,
+  headBranch: string,
+  ctx: CoreToolContext,
+): Promise<string | null> => {
+  const probe = await headOnOrigin(gitRunner, headBranch, ctx)
+  if (probe.outcome === "git-failed") {
+    return `could not run git (${probe.detail}) — could not verify origin/${headBranch}`
+  }
+  if (probe.outcome === "negative") {
+    return (
+      `head branch '${headBranch}' is not on origin — push it first:\n  git push -u origin ${headBranch}\n` +
+      "(if you already pushed, run `git fetch origin` so the local ref exists)"
+    )
+  }
+  return null
+}
+
 export const ghPrOpenTool = (
   ghRunner: GhRunner = defaultGhRunner,
   gitRunner: GitRunner,
@@ -219,34 +296,18 @@ export const ghPrOpenTool = (
       yield err(`invalid input: ${parsed.error.message}`)
       return
     }
-    const { hint, draft, dryRun } = parsed.data
+    const { draft, dryRun } = parsed.data
+    const isDraft = draft === true
 
-    // 1. resolve branch NAMES for gh (distinct from the author's revision range)
-    const branches = await resolveBranches(parsed.data, gitRunner, ctx)
-    if (!branches.ok) {
-      yield err(branches.output)
+    // 1 + 2. resolve branch NAMES for gh, then author the prose from the diff
+    // range (gh branch names → git revisions).
+    const prep = await preparePr(parsed.data, gitRunner, authorLLM, ctx)
+    for (const m of prep.messages) yield m
+    if (!prep.ok) {
+      yield err(prep.output)
       return
     }
-    const { base: baseBranch, head: headBranch } = branches
-
-    // 2. author the prose from the diff range (gh branch names → git revisions)
-    const messages: ToolEvent[] = []
-    const composed = await composePrText(
-      gitRunner,
-      authorLLM,
-      { base: `origin/${baseBranch}`, head: headBranch, ...(hint !== undefined ? { hint } : {}) },
-      ctx,
-      (message) => messages.push({ type: "progress", message }),
-    )
-    for (const m of messages) yield m
-    if (!composed.ok) {
-      const output =
-        composed.reason === "empty"
-          ? `gh_pr_open: no changes in origin/${baseBranch}...${headBranch} — nothing to open a PR for.`
-          : composed.output
-      yield err(output)
-      return
-    }
+    const { baseBranch, headBranch, composed } = prep
 
     // 3. dry-run — preview the prose, open nothing
     if (dryRun === true) {
@@ -256,16 +317,9 @@ export const ghPrOpenTool = (
     }
 
     // 4. push precondition (best-effort)
-    const originProbe = await headOnOrigin(gitRunner, headBranch, ctx)
-    if (originProbe.outcome === "git-failed") {
-      yield err(`could not run git (${originProbe.detail}) — could not verify origin/${headBranch}`)
-      return
-    }
-    if (originProbe.outcome === "negative") {
-      yield err(
-        `head branch '${headBranch}' is not on origin — push it first:\n  git push -u origin ${headBranch}\n` +
-          "(if you already pushed, run `git fetch origin` so the local ref exists)",
-      )
+    const pushError = await pushPreconditionError(gitRunner, headBranch, ctx)
+    if (pushError !== null) {
+      yield err(pushError)
       return
     }
 
@@ -278,7 +332,7 @@ export const ghPrOpenTool = (
         body: composed.body,
         base: baseBranch,
         head: headBranch,
-        draft: draft === true,
+        draft: isDraft,
       },
       ctx,
     )
@@ -288,7 +342,7 @@ export const ghPrOpenTool = (
     }
 
     // 6. success-only directive publish (mirrors gh_pr_create, ADR-0241)
-    publishCreatePr(opened.url, draft === true, opts)
+    publishCreatePr(opened.url, isDraft, opts)
     yield { type: "result", result: { ok: true, output: opened.url } }
   },
 })

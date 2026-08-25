@@ -23,6 +23,7 @@
  * exactOptional: optional fields are OMITTED when absent (never `: undefined`).
  */
 
+import type { ObjectiveAttemptState } from "./attempt"
 import type {
   CheckSpec,
   CriterionDeclaration,
@@ -153,6 +154,8 @@ export interface Objective {
   readonly budget: ObjectiveBudget
   readonly blockers: readonly Blocker[]
   readonly nextActions: readonly string[]
+  /** GOAL-04 — attributed attempt accounting (durable start + hard-cap counter). */
+  readonly attempts: ObjectiveAttemptState
   readonly createdAt: number
   readonly updatedAt: number
 }

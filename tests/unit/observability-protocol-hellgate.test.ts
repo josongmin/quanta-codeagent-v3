@@ -42,6 +42,7 @@ const makeObjective = (over: Partial<Objective> = {}): Objective => ({
   threadId: "thread-a",
   goal: "ship it",
   createdBy: "system",
+  attempts: { autonomousTurnsStarted: 0 },
   successCriteria: [],
   status: "active",
   budget: { tokensUsed: 0, turnsUsed: 0 },

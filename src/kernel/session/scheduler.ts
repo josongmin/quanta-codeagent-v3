@@ -70,6 +70,159 @@ const rewriteStateUpdatedEvent = (event: SessionEvent, state: KernelSessionState
       }
     : event
 
+/** Run the HOST-side effect a command carries, if it carries one, and say
+ *  whether the kernel state must then be re-read from the host.
+ *
+ *  One unit because "which host method does this command drive" is one
+ *  question with one answer per arm, and because every arm shares the same
+ *  typed-negative contract: a rejected projection THROWS here, BEFORE the
+ *  caller appends any success echo — a stale/policy-rejected mutation must
+ *  never surface as a silent `session.state.updated`.
+ *
+ *  `"reconcile"` vs `"none"` is the real axis: identity / tool-profile /
+ *  posture mutate KERNEL-mirrored state, so the caller must re-project from
+ *  `host.describe()`. The objective and skill domains are HOST-owned — the
+ *  reducer's session revision echo is already the whole story, so a reconcile
+ *  there would be a no-op re-read. */
+const runHostProjection = async (
+  ctx: KernelDispatchContext,
+  command: SessionCommand,
+): Promise<"reconcile" | "none"> => {
+  switch (command.type) {
+    case "session.identity.set":
+      await ctx.host.setIdentityMode?.(command.mode)
+      return "reconcile"
+    case "session.tool_profile.set":
+      await ctx.host.setToolProfile?.(command.profile)
+      return "reconcile"
+    case "session.permission.set":
+    case "session.posture.set":
+      // RFC-05 E4 — route the posture front door + the permission.set adapter
+      // through the single host projection; a negative outcome THROWS a typed
+      // error BEFORE any success echo is appended (never a silent success).
+      await applyPostureCommand(ctx, command)
+      return "reconcile"
+    case "session.objective.mutate":
+      // RFC-03 C3/M7 — apply the objective mutation to the host authority (actor
+      // `user`, CAS on `expectedRevision`) through the single projection; a
+      // stale/policy-rejected outcome THROWS a typed conflict BEFORE any success
+      // echo is appended (never a silent success). The objective domain is
+      // host-owned, so on `ok` there is no kernel-state reconcile — the reducer
+      // already emitted the session revision echo.
+      await applyObjectiveCommand(ctx, command)
+      return "none"
+    case "session.skill.set_enabled":
+      await applySkillCommand(ctx, command) // RFC-06 F5 — CAS via host; typed-throw on negative
+      return "none"
+    default:
+      return "none"
+  }
+}
+
+/** The host projection PLUS its state/echo consequence. Separate from
+ *  {@link runHostProjection} because the reconcile tail was spelled three
+ *  times — once per reconciling arm — and three copies of "re-describe, then
+ *  rewrite every state echo at the new revision" is exactly the kind of
+ *  duplication where one copy silently drifts. */
+const applyHostProjection = async (
+  ctx: KernelDispatchContext,
+  command: SessionCommand,
+  state: KernelSessionState,
+  events: readonly SessionEvent[],
+): Promise<{ readonly state: KernelSessionState; readonly events: SessionEvent[] }> => {
+  const effect = await runHostProjection(ctx, command)
+  if (effect === "none") return { state, events: [...events] }
+  const reconciled = reconcileSessionPostureState(state, ctx.host.describe())
+  return {
+    state: reconciled,
+    events: events.map((event) => rewriteStateUpdatedEvent(event, reconciled)),
+  }
+}
+
+/** Persist + notify, and on failure UN-register the turn controller this
+ *  dispatch pre-registered.
+ *
+ *  A unit because the compensation is the whole point: the controller is
+ *  registered BEFORE this await (Audit R2 H1 — so a `turn.cancel` dispatched
+ *  during the persistence window reaches a LIVE target via the lease-free
+ *  fast-path instead of contending on the lease this dispatch holds), which
+ *  means a persistence failure would otherwise leak a stale registry entry.
+ *  The identity check (`get(...) === controller`) is load-bearing: if some
+ *  other dispatch has since replaced the entry, this one must NOT delete it. */
+const commitOrDropController = async (
+  ctx: KernelDispatchContext,
+  sessionId: string,
+  state: KernelSessionState,
+  events: readonly SessionEvent[],
+  controller: AbortController | undefined,
+): Promise<void> => {
+  try {
+    await appendEvents(ctx.eventLog, events)
+    await notifyCommitted(ctx, { state, events })
+  } catch (e) {
+    // Persistence failed before runTurn could adopt the controller — drop it
+    // so the pre-registration doesn't leak a stale entry.
+    if (controller !== undefined && activeTurnControllers.get(sessionId) === controller) {
+      activeTurnControllers.delete(sessionId)
+    }
+    throw e
+  }
+}
+
+/** Per-command-type routing of the ALREADY-committed dispatch: what each
+ *  command hands back once its events are durable. A unit because it is the
+ *  one part of dispatch that runs AFTER the commit point — everything above it
+ *  may still throw and un-commit, nothing here may. */
+const routeDispatchResult = async (args: {
+  readonly state: KernelSessionState
+  readonly command: SessionCommand
+  readonly ctx: KernelDispatchContext
+  readonly reduced: ReturnType<typeof reduceSessionCommand>
+  readonly events: SessionEvent[]
+  readonly turnController: AbortController | undefined
+}): Promise<KernelDispatchResult> => {
+  const { state, command, ctx, reduced, events, turnController } = args
+  switch (command.type) {
+    case "session.identity.set":
+    case "session.tool_profile.set":
+    case "session.permission.set":
+    case "session.posture.set":
+    case "session.skill.set_enabled":
+      return { state, events }
+    case "session.transcript.replace":
+      return {
+        state,
+        events,
+        transcriptMessages: [...command.messages],
+      }
+    case "approval.respond":
+      await ctx.host.resolveApproval?.({
+        approvalId: command.approvalId,
+        decision: command.decision,
+        // ADR-0512 P3 — forward the escalation's once/session scope + steer so
+        // the host lease carries the operator's rich decision. Both absent on a
+        // normal approval ⇒ byte-identical grant.
+        ...(command.scope !== undefined ? { scope: command.scope } : {}),
+        ...(command.steer !== undefined ? { steer: command.steer } : {}),
+        // T05 — forward the web/SDK operator's per-hunk choice so the host can
+        // apply only the accepted subset. Absent ⇒ whole-call, byte-identical.
+        ...(command.selectedHunks !== undefined ? { selectedHunks: command.selectedHunks } : {}),
+      })
+      return { state, events }
+    case "turn.run":
+      return await runTurn({
+        state,
+        command,
+        ctx,
+        reduced,
+        events,
+        ...(turnController !== undefined ? { turnController } : {}),
+      })
+    default:
+      return { state, events }
+  }
+}
+
 export const dispatchSessionCommand = async (
   state: KernelSessionState,
   command: SessionCommand,
@@ -113,40 +266,16 @@ export const dispatchSessionCommand = async (
       return await settlePreAbortedTurnRun({ state, command, ctx, emittedAt })
     }
     const reduced = reduceSessionCommand(state, command, emittedAt)
-    let immediateEvents = [...reduced.events]
-    let nextState: KernelSessionState = {
-      ...reduced.state,
-      seq: state.seq + immediateEvents.length,
-    }
-    if (command.type === "session.identity.set") {
-      await ctx.host.setIdentityMode?.(command.mode)
-      nextState = reconcileSessionPostureState(nextState, ctx.host.describe())
-      immediateEvents = immediateEvents.map((event) => rewriteStateUpdatedEvent(event, nextState))
-    } else if (command.type === "session.tool_profile.set") {
-      await ctx.host.setToolProfile?.(command.profile)
-      nextState = reconcileSessionPostureState(nextState, ctx.host.describe())
-      immediateEvents = immediateEvents.map((event) => rewriteStateUpdatedEvent(event, nextState))
-    } else if (
-      command.type === "session.permission.set" ||
-      command.type === "session.posture.set"
-    ) {
-      // RFC-05 E4 — route the posture front door + the permission.set adapter
-      // through the single host projection; a negative outcome THROWS a typed
-      // error BEFORE any success echo is appended (never a silent success).
-      await applyPostureCommand(ctx, command)
-      nextState = reconcileSessionPostureState(nextState, ctx.host.describe())
-      immediateEvents = immediateEvents.map((event) => rewriteStateUpdatedEvent(event, nextState))
-    } else if (command.type === "session.objective.mutate") {
-      // RFC-03 C3/M7 — apply the objective mutation to the host authority (actor
-      // `user`, CAS on `expectedRevision`) through the single projection; a
-      // stale/policy-rejected outcome THROWS a typed conflict BEFORE any success
-      // echo is appended (never a silent success). The objective domain is
-      // host-owned, so on `ok` there is no kernel-state reconcile — the reducer
-      // already emitted the session revision echo.
-      await applyObjectiveCommand(ctx, command)
-    } else if (command.type === "session.skill.set_enabled") {
-      await applySkillCommand(ctx, command) // RFC-06 F5 — CAS via host; typed-throw on negative
-    }
+    // `reduced.events` is read BEFORE `reduced.state`: an unrecognised command
+    // type makes the reducer return nothing, and the resulting TypeError names
+    // the field the original read first.
+    const immediateEvents = [...reduced.events]
+    const projected = await applyHostProjection(
+      ctx,
+      command,
+      { ...reduced.state, seq: state.seq + immediateEvents.length },
+      immediateEvents,
+    )
     // Audit R2 H1: register the turn-owned cancel controller BEFORE the awaited
     // event-log persistence so a turn.cancel dispatched during that window —
     // which cannot acquire the held single-writer lease — reaches a LIVE target
@@ -157,60 +286,20 @@ export const dispatchSessionCommand = async (
       preRegisteredController = new AbortController()
       activeTurnControllers.set(state.sessionId, preRegisteredController)
     }
-    try {
-      await appendEvents(ctx.eventLog, immediateEvents)
-      await notifyCommitted(ctx, { state: nextState, events: immediateEvents })
-    } catch (e) {
-      // Persistence failed before runTurn could adopt the controller — drop it
-      // so the pre-registration doesn't leak a stale entry.
-      if (
-        preRegisteredController !== undefined &&
-        activeTurnControllers.get(state.sessionId) === preRegisteredController
-      ) {
-        activeTurnControllers.delete(state.sessionId)
-      }
-      throw e
-    }
-    switch (command.type) {
-      case "session.identity.set":
-      case "session.tool_profile.set":
-      case "session.permission.set":
-      case "session.posture.set":
-      case "session.skill.set_enabled":
-        return { state: nextState, events: immediateEvents }
-      case "session.transcript.replace":
-        return {
-          state: nextState,
-          events: immediateEvents,
-          transcriptMessages: [...command.messages],
-        }
-      case "approval.respond":
-        await ctx.host.resolveApproval?.({
-          approvalId: command.approvalId,
-          decision: command.decision,
-          // ADR-0512 P3 — forward the escalation's once/session scope + steer so
-          // the host lease carries the operator's rich decision. Both absent on a
-          // normal approval ⇒ byte-identical grant.
-          ...(command.scope !== undefined ? { scope: command.scope } : {}),
-          ...(command.steer !== undefined ? { steer: command.steer } : {}),
-          // T05 — forward the web/SDK operator's per-hunk choice so the host can
-          // apply only the accepted subset. Absent ⇒ whole-call, byte-identical.
-          ...(command.selectedHunks !== undefined ? { selectedHunks: command.selectedHunks } : {}),
-        })
-        return { state: nextState, events: immediateEvents }
-      case "turn.run":
-        return await runTurn({
-          state: nextState,
-          command,
-          ctx,
-          reduced,
-          events: immediateEvents,
-          ...(preRegisteredController !== undefined
-            ? { turnController: preRegisteredController }
-            : {}),
-        })
-      default:
-        return { state: nextState, events: immediateEvents }
-    }
+    await commitOrDropController(
+      ctx,
+      state.sessionId,
+      projected.state,
+      projected.events,
+      preRegisteredController,
+    )
+    return await routeDispatchResult({
+      state: projected.state,
+      command,
+      ctx,
+      reduced,
+      events: projected.events,
+      turnController: preRegisteredController,
+    })
   })
 }

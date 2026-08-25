@@ -120,8 +120,13 @@ const DEFAULT_IGNORE: readonly string[] = [".git", "node_modules", ".cache", "di
 const MANIFEST_VERSION = "quanta-workspace-manifest-v1"
 const PRECHECK_VERSION = "quanta-workspace-precheck-v1"
 
+/** Upper bound for one `git` evidence call (status/diff digest). A workspace
+ *  whose git cannot answer within a minute is reported as `unavailable`
+ *  evidence rather than stalling settlement. */
+const GIT_EVIDENCE_TIMEOUT_MS = 60_000
+
 const defaultGit: GitRunner = async (args, cwd) => {
-  const res = await runArgv(["git", ...args], { cwd, timeoutMs: 60_000 })
+  const res = await runArgv(["git", ...args], { cwd, timeoutMs: GIT_EVIDENCE_TIMEOUT_MS })
   return { exitCode: res.exitCode, stdout: res.stdout }
 }
 

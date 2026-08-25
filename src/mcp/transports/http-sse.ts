@@ -74,6 +74,50 @@ export const takeSseBlocks = (
   return { blocks, rest, dropped }
 }
 
+/** The sentinel `Promise.race` resolves with when the owning signal aborts.
+ *  Module-level (the original minted a fresh `Symbol` per pump): identity is
+ *  only ever compared inside one pump call, and nothing else in the process can
+ *  produce this value, so one shared sentinel is equivalent. */
+const SSE_ABORTED = Symbol("aborted")
+
+/**
+ * Arm the abort race for one SSE pump.
+ *
+ * A unit because this is pure PLUMBING with a shape all its own — a promise
+ * that resolves the moment the owning signal aborts, raced against
+ * `reader.read()` so the drain loop exits PROMPTLY on `close()` even when
+ * `reader.cancel()` does not unblock an already-pending `read()` (a real hazard
+ * with some SSE bodies/proxies that would otherwise wedge `close()`, which
+ * awaits the pump, forever — audit L9 H12). With NO signal the wait is a
+ * promise that never settles, so the race degenerates to plain `read()`.
+ *
+ * `onAbort` is returned as well because the caller's `finally` passes it to
+ * `removeEventListener` — note the listener actually REGISTERED is the inner
+ * `fire`, so that removal is a no-op. Preserved verbatim: `{ once: true }`
+ * already makes the listener self-removing, and "fixing" the removal here
+ * would be a behaviour change smuggled into a decomposition.
+ */
+const armSseAbort = (
+  reader: Pick<ReadableStreamDefaultReader<Uint8Array>, "cancel">,
+  signal: AbortSignal | undefined,
+): { readonly abortWait: Promise<typeof SSE_ABORTED>; readonly onAbort: () => void } => {
+  const onAbort = (): void => {
+    void reader.cancel(signal?.reason).catch(() => undefined)
+  }
+  if (signal === undefined) {
+    return { abortWait: new Promise<typeof SSE_ABORTED>(() => {}), onAbort }
+  }
+  const abortWait = new Promise<typeof SSE_ABORTED>((resolve) => {
+    const fire = (): void => {
+      onAbort()
+      resolve(SSE_ABORTED)
+    }
+    if (signal.aborted) fire()
+    else signal.addEventListener("abort", fire, { once: true })
+  })
+  return { abortWait, onAbort }
+}
+
 const SESSION_HEADER = "mcp-session-id"
 
 /** Minimal fetch shape so the transport can be driven without a network in
@@ -589,66 +633,27 @@ export class HttpSseMcpTransport implements McpTransport {
     // a clean end and let the caller decide whether that violates its contract.
     if (body === null) return { outcome: "ended" }
     const reader = body.getReader()
+    const { abortWait, onAbort } = armSseAbort(reader, signal)
     let buffer = ""
     // True once an over-cap block was dropped — the trailing flush below must
     // not treat the resynced remainder as a complete final event.
     let resynced = false
-    // Resolves the moment the owning signal aborts. We race it against
-    // reader.read() so the drain loop exits PROMPTLY on close() even when
-    // reader.cancel() does not unblock an already-pending read() — a real
-    // hazard with some SSE bodies/proxies that would otherwise wedge close()
-    // (which awaits this pump) forever (audit L9 H12).
-    const ABORTED = Symbol("aborted")
-    const onAbort = (): void => {
-      void reader.cancel(signal?.reason).catch(() => undefined)
-    }
-    let abortWait: Promise<typeof ABORTED> = new Promise(() => {})
-    if (signal !== undefined) {
-      abortWait = new Promise<typeof ABORTED>((resolve) => {
-        const fire = (): void => {
-          onAbort()
-          resolve(ABORTED)
-        }
-        if (signal.aborted) fire()
-        else signal.addEventListener("abort", fire, { once: true })
-      })
-    }
     let outcome: "ended" | "aborted" = "ended"
     try {
       for (;;) {
         const next = await Promise.race([reader.read(), abortWait])
-        if (next === ABORTED) {
+        if (next === SSE_ABORTED) {
           outcome = "aborted"
           break
         }
         const { value, done } = next
         if (done) break
-        if (value !== undefined) buffer += this.decoder.decode(value, { stream: true })
-        const over = buffer.length > MAX_SSE_BUFFER_BYTES
-        const taken = takeSseBlocks(buffer)
-        if (over) {
-          logger.warn(
-            `mcp/sse: dropping over-cap event buffer {"bytes":${buffer.length},"cap":${MAX_SSE_BUFFER_BYTES}}`,
-          )
-        }
+        const taken = this.absorbSseChunk(buffer, value)
         buffer = taken.rest
         if (taken.dropped) resynced = true
-        for (const block of taken.blocks) {
-          const parsed = sseDataFromBlock(block)
-          if (parsed.id !== null) this.lastEventId = parsed.id // §1.2 resume cursor
-          if (parsed.data !== null) this.decodeAndEmit(parsed.data)
-        }
+        this.emitSseBlocks(taken.blocks)
       }
-      // Flush a trailing event with no terminating blank line (back-compat: some
-      // servers omit the final `\n\n`). Audit R1#4 + R2#2 — advance the cursor
-      // from this block ONLY when every line is COMPLETE (buffer ends with `\n`):
-      // a complete-but-not-blank-terminated event's id is real (else a reconnect
-      // RE-replays the just-delivered event = duplicate), but a stream cut
-      // MID-line (`id: ab…`) must NOT record a truncated id.
-      const trailingComplete = !resynced && buffer.endsWith("\n")
-      const parsed = sseDataFromBlock(buffer)
-      if (trailingComplete && parsed.id !== null) this.lastEventId = parsed.id
-      if (parsed.data !== null) this.decodeAndEmit(parsed.data)
+      this.flushTrailingSseEvent(buffer, resynced)
       return { outcome }
     } catch (e) {
       // Audit jun-10 #4 — classify, don't swallow: an abort-driven rejection
@@ -660,6 +665,59 @@ export class HttpSseMcpTransport implements McpTransport {
       if (signal !== undefined) signal.removeEventListener("abort", onAbort)
       reader.releaseLock?.()
     }
+  }
+
+  /** Fold one raw chunk into the accumulator and split off whatever complete
+   *  `\n\n`-terminated blocks it completed.
+   *
+   *  A unit because it is the buffer's ENTIRE story for one read: decode,
+   *  measure against the cap, split, and warn once if the cap was blown. The
+   *  cap check must run on the GROWN buffer and BEFORE the split (the split is
+   *  what discards the over-cap prefix), which is exactly the ordering an
+   *  inline version kept getting re-derived from. */
+  private absorbSseChunk(
+    buffer: string,
+    value: Uint8Array | undefined,
+  ): { readonly blocks: readonly string[]; readonly rest: string; readonly dropped: boolean } {
+    const grown =
+      value === undefined ? buffer : buffer + this.decoder.decode(value, { stream: true })
+    const over = grown.length > MAX_SSE_BUFFER_BYTES
+    const taken = takeSseBlocks(grown)
+    if (over) {
+      logger.warn(
+        `mcp/sse: dropping over-cap event buffer {"bytes":${grown.length},"cap":${MAX_SSE_BUFFER_BYTES}}`,
+      )
+    }
+    return taken
+  }
+
+  /** Advance the §1.2 resume cursor and emit the payload for each COMPLETE
+   *  event block, in order. A unit because "what one complete block does" is
+   *  the same two-step for every block and was the innermost loop of the pump —
+   *  the deepest nesting in the function. */
+  private emitSseBlocks(blocks: readonly string[]): void {
+    for (const block of blocks) {
+      const parsed = sseDataFromBlock(block)
+      if (parsed.id !== null) this.lastEventId = parsed.id // §1.2 resume cursor
+      if (parsed.data !== null) this.decodeAndEmit(parsed.data)
+    }
+  }
+
+  /** Flush a trailing event with no terminating blank line (back-compat: some
+   *  servers omit the final `\n\n`).
+   *
+   *  A unit because its cursor rule is DIFFERENT from the in-loop one and that
+   *  difference is the whole point (audit R1#4 + R2#2): advance the cursor from
+   *  this block ONLY when every line is COMPLETE (the buffer ends with `\n`)
+   *  and nothing was resynced away. A complete-but-not-blank-terminated event's
+   *  id is real — dropping it makes a reconnect RE-replay the just-delivered
+   *  event — but a stream cut MID-line (`id: ab…`) must NOT record a truncated
+   *  id. The payload, by contrast, is emitted on the same terms as any block. */
+  private flushTrailingSseEvent(buffer: string, resynced: boolean): void {
+    const trailingComplete = !resynced && buffer.endsWith("\n")
+    const parsed = sseDataFromBlock(buffer)
+    if (trailingComplete && parsed.id !== null) this.lastEventId = parsed.id
+    if (parsed.data !== null) this.decodeAndEmit(parsed.data)
   }
 
   /** Parse one JSON-RPC line and emit it. A response or notification that

@@ -289,9 +289,7 @@ const armGoalWake = (args: {
                   )
                   .map((c) => c.id),
                 remainingCriterionIds: criteria.filter((c) => !c.met).map((c) => c.id),
-                ...(last !== undefined
-                  ? { lastAttemptKey: last.attemptKey, lastTurnOutcome: last.turnOutcome }
-                  : {}),
+                ...(last !== undefined ? { lastTurnOutcome: last.turnOutcome } : {}),
               }),
               goalContinuation: {
                 threadId: attempt.threadId,

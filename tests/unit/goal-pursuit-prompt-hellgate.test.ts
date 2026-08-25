@@ -52,11 +52,12 @@ describe("goal-pursuit prompt SSOT", () => {
     const p = buildPursuitContinuationPrompt("ship", {
       verifiedCriterionIds: ["build"],
       remainingCriterionIds: ["e2e"],
-      lastAttemptKey: "attempt-1",
       lastTurnOutcome: "completed",
     })
     expect(p).toContain("Verified criterion IDs: build")
     expect(p).toContain("Remaining criterion IDs: e2e")
-    expect(p).toContain("Last attempt: attempt-1 (completed)")
+    expect(p).toContain("Last attempt outcome: completed")
+    // GOAL-04: the attempt key is host accounting, never prompt material.
+    expect(p).not.toContain("attempt-1")
   })
 })

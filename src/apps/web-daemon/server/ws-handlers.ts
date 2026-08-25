@@ -156,6 +156,108 @@ export const consumeControlRequestFrame = (
   return true
 }
 
+/**
+ * QUANTA_WEB_AGENT_STATE — peek + CONSUME an out-of-band `planInputAnswer`.
+ * Returns `true` when the frame WAS an answer (⇒ do NOT forward it to the
+ * bridge), else `false`. Gate OFF ⇒ `userInputPorts` absent ⇒ the resolve is a
+ * no-op but the frame is STILL consumed — exactly as the inline version did.
+ * A unit because it is one consume decision; the enclosing handler only needs
+ * the boolean.
+ */
+const consumePlanInputAnswerFrame = (
+  config: Pick<WebDaemonServerConfig, "userInputPorts">,
+  raw: string,
+): boolean => {
+  const answer = peekPlanInputAnswer(raw)
+  if (answer === null) return false
+  config.userInputPorts?.handle.resolve(
+    answer.promptId,
+    answer.decision === "answer"
+      ? { decision: "answer", text: answer.text }
+      : { decision: "cancelled" },
+  )
+  return true
+}
+
+/**
+ * T02 — peek + CONSUME a `followerVerb` frame (steer / interrupt /
+ * set-queue-mode / command-approval-decision) from a 2nd client. Returns `true`
+ * when the frame was a well-formed verb (⇒ do NOT forward it), else `false`.
+ * Gate OFF ⇒ `followerCoControl` absent ⇒ always `false` and the frame reaches
+ * the bridge (byte-identical).
+ *
+ * A unit because this is where the message handler's DEEPEST nesting lived: a
+ * gate, then a peek, then a two-arm route — three levels below an already
+ * double-nested arrow. The two arms are NOT interchangeable: an approval
+ * decision rides the TIMEOUT coordinator (deadline/stale + the resolver's live
+ * HARD_DENY re-check), never the FIRE path.
+ */
+const consumeFollowerVerbFrame = (
+  config: Pick<WebDaemonServerConfig, "followerCoControl">,
+  followerApproval: FollowerApprovalCoordinator | undefined,
+  raw: string,
+): boolean => {
+  const coControl = config.followerCoControl
+  if (coControl === undefined) return false
+  const verb = peekFollowerVerb(raw)
+  if (verb === null) return false
+  if (verb.kind === "command-approval-decision") {
+    followerApproval?.relay(verb.approvalId, verb.decision, verb.steer)
+  } else {
+    coControl.dispatch(verb)
+  }
+  return true
+}
+
+/**
+ * The whole INBOUND TEXT-FRAME pipeline: every connection-layer consumer that
+ * gets a look at a string frame BEFORE the session bridge does, in the ONE
+ * order that matters. Returns `true` when some consumer took the frame (⇒ the
+ * bridge never sees it), `false` when it must fall through to the adapter.
+ *
+ * A unit because the `message` handler was paying a nesting surcharge on every
+ * line of this: an arrow (`buildWebSocketHandlers`) → an object literal → the
+ * `message` arrow → a `typeof raw === "string"` wrapper — four levels before
+ * the first real decision. Hoisting the pipeline to module scope prices each
+ * gate at its true cost of one.
+ *
+ * ORDER IS THE CONTRACT and is preserved exactly:
+ *   1. heartbeat — answered with a `pong` and consumed, so the bridge's 5-kind
+ *      contract never sees a keepalive.
+ *   2. `connect` — re-applies the surface subscription and then FALLS THROUGH
+ *      (the bridge still needs the connect frame); it is the only non-consuming
+ *      step here.
+ *   3. `planInputAnswer` / `controlRequest` / `followerVerb` — each is peeked
+ *      and CONSUMED (none is a `SessionCommand`; none reaches the kernel
+ *      reducer). They are mutually exclusive on the envelope's `kind`.
+ */
+const consumeInboundTextFrame = (
+  ws: ServerWebSocket<WSData>,
+  raw: string,
+  config: WebDaemonServerConfig,
+  followerApproval: FollowerApprovalCoordinator | undefined,
+): boolean => {
+  const decoded = tryDecodeSessionTransportMessage(raw)
+  // A heartbeat is consumed here (pong reply / terminal) so the bridge never
+  // sees it — its 5-kind contract is unchanged.
+  if (replyToHeartbeat(ws, decoded)) return true
+  if (decoded?.kind === "connect") {
+    applySurfaceSubscription(ws, config, decoded.surfaceSubscription)
+  }
+  // QUANTA_WEB_AGENT_STATE — the OUT-OF-BAND INBOUND answer frame (mirror of
+  // the agent-state OUTBOUND channel). Peeked BEFORE the session bridge: it
+  // resolves a paused agent's `request_user_input` prompt.
+  if (consumePlanInputAnswerFrame(config, raw)) return true
+  // QUANTA_CONTROL_REQUEST (ADR-0496 A1) — set_model / set_permission_mode /
+  // set_thinking / get_context_usage, enqueued onto the live session's
+  // control-request port so the turn loop's `pollControlRequests` applies it.
+  if (consumeControlRequestFrame(config.controlRequestPorts, raw)) return true
+  // T02 — a follower verb from a 2nd client, routed to the co-control
+  // dispatcher (approvals ride approval.respond via the coordinator).
+  if (consumeFollowerVerbFrame(config, followerApproval, raw)) return true
+  return false
+}
+
 export interface WsHandlerDeps {
   readonly config: WebDaemonServerConfig
   readonly registry: SessionRegistry
@@ -218,67 +320,14 @@ export const buildWebSocketHandlers = (deps: WsHandlerDeps): WsHandlers => {
       }
     },
     message(ws: ServerWebSocket<WSData>, raw) {
-      // App-level keepalive: a client `heartbeat` ping is answered with a
-      // `pong` BEFORE the frame reaches the session bridge. Heartbeats are
-      // connection-level (no handshake / session state), so we short-circuit
-      // them here — the bridge never sees them and its 5-kind contract is
-      // unchanged. Any non-heartbeat frame (and any binary/undecodable
-      // frame) falls through to the adapter exactly as before.
-      if (typeof raw === "string") {
-        const decoded = tryDecodeSessionTransportMessage(raw)
-        // A heartbeat is consumed here (pong reply / terminal) so the bridge
-        // never sees it — its 5-kind contract is unchanged. Any non-heartbeat
-        // frame falls through to the adapter exactly as before.
-        if (replyToHeartbeat(ws, decoded)) return
-        if (decoded?.kind === "connect") {
-          applySurfaceSubscription(ws, config, decoded.surfaceSubscription)
-        }
-        // QUANTA_WEB_AGENT_STATE — the OUT-OF-BAND INBOUND answer frame
-        // (mirror of the agent-state OUTBOUND channel). Peek BEFORE the
-        // session bridge: a `planInputAnswer` resolves a paused agent's
-        // `request_user_input` prompt and is CONSUMED here (NOT a
-        // `SessionCommand`, never reaches the kernel reducer). Gate OFF ⇒
-        // `userInputPorts` absent ⇒ the resolve is a no-op (and the tool was
-        // never registered, byte-identical). A frame that is not an answer
-        // falls through to the adapter exactly as before.
-        const answer = peekPlanInputAnswer(raw)
-        if (answer !== null) {
-          config.userInputPorts?.handle.resolve(
-            answer.promptId,
-            answer.decision === "answer"
-              ? { decision: "answer", text: answer.text }
-              : { decision: "cancelled" },
-          )
-          return
-        }
-        // QUANTA_CONTROL_REQUEST (ADR-0496 A1) — a `controlRequest` frame
-        // (set_model / set_permission_mode / set_thinking / get_context_usage)
-        // is CONSUMED here (NOT a SessionCommand, never reaches the kernel
-        // reducer): enqueue it onto the live session's control-request port so
-        // the turn loop's `pollControlRequests` drains + applies it (the
-        // load-bearing `set_permission_mode` lands on the live gate). Gate OFF ⇒
-        // `controlRequestPorts` absent ⇒ the frame falls through to the bridge
-        // (and the drain slot is unwired, byte-identical). Extracted to a helper
-        // so this handler stays under the cognitive-complexity cap.
-        if (consumeControlRequestFrame(config.controlRequestPorts, raw)) return
-        // T02 — a `followerVerb` frame (steer/interrupt/set-queue-mode) from a
-        // 2nd client is CONSUMED here (NOT a SessionCommand): route it to the
-        // co-control dispatcher whose sinks drive the live conversation-action
-        // surface. Gate OFF ⇒ `followerCoControl` absent ⇒ the frame falls
-        // through to the bridge (byte-identical). Approvals ride approval.respond.
-        if (config.followerCoControl !== undefined) {
-          const verb = peekFollowerVerb(raw)
-          if (verb !== null) {
-            if (verb.kind === "command-approval-decision") {
-              // Approval decisions ride the TIMEOUT coordinator (deadline/stale
-              // + the resolver's live HARD_DENY re-check), NOT the FIRE path.
-              followerApproval?.relay(verb.approvalId, verb.decision, verb.steer)
-            } else {
-              config.followerCoControl.dispatch(verb)
-            }
-            return
-          }
-        }
+      // App-level keepalive + the other connection-layer consumers get a look
+      // at a TEXT frame before the session bridge does; a binary/undecodable
+      // frame (and any frame no consumer took) falls through to the adapter
+      // exactly as before. The pipeline lives at module scope so its gates are
+      // not priced through three enclosing arrows — see
+      // `consumeInboundTextFrame` for the order contract.
+      if (typeof raw === "string" && consumeInboundTextFrame(ws, raw, config, followerApproval)) {
+        return
       }
       ws.data.adapter?.pushMessage(raw)
     },

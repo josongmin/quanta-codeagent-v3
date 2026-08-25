@@ -137,5 +137,9 @@ export interface ObjectiveVerificationPort {
 }
 
 export const MAX_CHECKS_PER_BATCH = 32
-export const MAX_CHECK_TIMEOUT_MS = 10 * 60_000
-export const MAX_BATCH_DEADLINE_MS = 15 * 60_000
+/** Per-check wall-clock ceiling: 10 minutes (600_000 ms) — the longest a single
+ *  verifier command (a test suite) may run before it is an `unavailable` result. */
+export const MAX_CHECK_TIMEOUT_MS = 600_000
+/** Whole-batch deadline: 15 minutes (900_000 ms) — bounds the reconcile/verify
+ *  round so settlement can never wait on an unbounded verifier. */
+export const MAX_BATCH_DEADLINE_MS = 900_000

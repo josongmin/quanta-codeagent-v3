@@ -68,6 +68,79 @@ export const makeRunId = (
   return `${stamp}-${tier}-${rand()}`
 }
 
+/** `readFileSync` under this store's read contract: an unreadable run file is
+ *  WARNED about and then treated as empty, never fatal. Returns the text
+ *  instead of assigning through a caller-side `let` — an uninitialised `let`
+ *  cannot cross a function boundary without losing definite-assignment. */
+const readStoreFile = (path: string, file: string): string | null => {
+  try {
+    return readFileSync(path, "utf8")
+  } catch (e) {
+    logger.warn("eval.store: read failed", {
+      file,
+      error: errMessage(e),
+    })
+    return null
+  }
+}
+
+/** What one JSONL line turned out to be.
+ *  - `record`: passed every gate, safe to yield.
+ *  - `schema_mismatch`: handed BACK to the caller undecided, because that
+ *    warning fires once per file rather than once per line — the only piece
+ *    of cross-line state in the whole read path.
+ *  - `skip`: rejected; the reason was already logged here, or the line was a
+ *    deliberate silent skip (the terminal `run_summary` line). */
+type LineOutcome =
+  | { readonly kind: "record"; readonly record: EvalRecord }
+  | { readonly kind: "schema_mismatch"; readonly sawSchema: unknown }
+  | { readonly kind: "skip" }
+
+/** The "Read validation contract" from this file's header, as one unit: parse,
+ *  then six gates in a fixed order, each with its own observable drop reason.
+ *  Extracted from `readFile` so the gates sit at nesting depth 0 instead of
+ *  paying the line loop's surcharge, and so the contract reads top-to-bottom
+ *  without generator plumbing in the way. Gate ORDER is load-bearing:
+ *  schema before `run_summary` before envelope before payload. */
+const classifyRecordLine = (file: string, line: string): LineOutcome => {
+  let obj: {
+    schema?: unknown
+    tier?: unknown
+    kind?: unknown
+    payload?: unknown
+    usecase?: unknown
+  }
+  try {
+    obj = JSON.parse(line)
+  } catch (e) {
+    logger.warn("eval.store: skip malformed line", {
+      file,
+      linePreview: line.slice(0, 120),
+      error: errMessage(e),
+    })
+    return { kind: "skip" }
+  }
+  if (obj.schema !== SCHEMA_VERSION) return { kind: "schema_mismatch", sawSchema: obj.schema }
+  if (obj.kind === "run_summary") return { kind: "skip" }
+  if (typeof obj.tier !== "string" || typeof obj.usecase !== "string") {
+    logger.warn("eval.store: skip line missing envelope fields", { file })
+    return { kind: "skip" }
+  }
+  if (typeof obj.payload !== "object" || obj.payload === null) {
+    logger.warn("eval.store: skip line with missing/non-object payload", { file })
+    return { kind: "skip" }
+  }
+  const payloadKind = (obj.payload as { kind?: unknown }).kind
+  if (typeof payloadKind !== "string" || !isKnownPayloadKind(payloadKind)) {
+    logger.warn("eval.store: skip line with unknown payload kind", {
+      file,
+      kind: payloadKind,
+    })
+    return { kind: "skip" }
+  }
+  return { kind: "record", record: obj as EvalRecord }
+}
+
 export class ResultStore {
   private readonly dir: string
   private readonly now: () => number
@@ -159,66 +232,25 @@ export class ResultStore {
   }
 
   private *readFile(file: string): Generator<EvalRecord> {
-    const path = join(this.dir, file)
-    let text: string
-    try {
-      text = readFileSync(path, "utf8")
-    } catch (e) {
-      logger.warn("eval.store: read failed", {
-        file,
-        error: errMessage(e),
-      })
-      return
-    }
+    const text = readStoreFile(join(this.dir, file), file)
+    if (text === null) return
+    // The mismatched-schema warning is per FILE, not per line — a whole run
+    // file written by an older build would otherwise emit one warn per record.
     let schemaMismatchSeen = false
     for (const line of text.split("\n")) {
       if (line === "") continue
-      let obj: {
-        schema?: unknown
-        tier?: unknown
-        kind?: unknown
-        payload?: unknown
-        usecase?: unknown
-      }
-      try {
-        obj = JSON.parse(line)
-      } catch (e) {
-        logger.warn("eval.store: skip malformed line", {
-          file,
-          linePreview: line.slice(0, 120),
-          error: errMessage(e),
-        })
+      const outcome = classifyRecordLine(file, line)
+      if (outcome.kind === "record") {
+        yield outcome.record
         continue
       }
-      if (obj.schema !== SCHEMA_VERSION) {
-        if (!schemaMismatchSeen) {
-          schemaMismatchSeen = true
-          logger.warn("eval.store: skipping records with mismatched schema", {
-            file,
-            sawSchema: obj.schema,
-            wantSchema: SCHEMA_VERSION,
-          })
-        }
-        continue
-      }
-      if (obj.kind === "run_summary") continue
-      if (typeof obj.tier !== "string" || typeof obj.usecase !== "string") {
-        logger.warn("eval.store: skip line missing envelope fields", { file })
-        continue
-      }
-      if (typeof obj.payload !== "object" || obj.payload === null) {
-        logger.warn("eval.store: skip line with missing/non-object payload", { file })
-        continue
-      }
-      const payloadKind = (obj.payload as { kind?: unknown }).kind
-      if (typeof payloadKind !== "string" || !isKnownPayloadKind(payloadKind)) {
-        logger.warn("eval.store: skip line with unknown payload kind", {
-          file,
-          kind: payloadKind,
-        })
-        continue
-      }
-      yield obj as EvalRecord
+      if (outcome.kind !== "schema_mismatch" || schemaMismatchSeen) continue
+      schemaMismatchSeen = true
+      logger.warn("eval.store: skipping records with mismatched schema", {
+        file,
+        sawSchema: outcome.sawSchema,
+        wantSchema: SCHEMA_VERSION,
+      })
     }
   }
 

@@ -13,6 +13,7 @@
  */
 
 import { randomUUID } from "node:crypto"
+import type { ObjectiveAttemptState, StartedObjectiveAttempt } from "../attempt"
 import {
   type CheckSpec,
   type CompletionReceipt,
@@ -68,9 +69,20 @@ export interface Cell {
   tokensUsed: number
   maxTurns?: number
   turnsUsed: number
+  /** GOAL-04 — durable attempt accounting. */
+  autonomousTurnsStarted: number
+  startedAttempt?: StartedObjectiveAttempt
   createdAt: number
   updatedAt: number
 }
+
+export const buildAttempts = (cell: Cell): ObjectiveAttemptState =>
+  Object.freeze({
+    autonomousTurnsStarted: cell.autonomousTurnsStarted,
+    ...(cell.startedAttempt !== undefined
+      ? { started: Object.freeze({ ...cell.startedAttempt }) }
+      : {}),
+  })
 
 export const isNonEmptyString = (v: unknown): v is string => typeof v === "string" && v.length > 0
 
@@ -181,6 +193,7 @@ export const toObjective = (cell: Cell, enforce: boolean, now: number): Objectiv
     budget: buildBudget(cell),
     blockers: Object.freeze(cell.blockers.map((b) => Object.freeze({ ...b }))),
     nextActions: Object.freeze([...cell.nextActions]),
+    attempts: buildAttempts(cell),
     createdAt: cell.createdAt,
     updatedAt: cell.updatedAt,
   })
@@ -328,6 +341,7 @@ export const cellFromDefinition = (
     tokensUsed: 0,
     ...(maxTurns !== undefined ? { maxTurns } : {}),
     turnsUsed: 0,
+    autonomousTurnsStarted: 0,
     createdAt: t,
     updatedAt: t,
   }

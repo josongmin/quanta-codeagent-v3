@@ -394,6 +394,57 @@ describe("C1 — every operation routes through the authority with a live effect
       expect(a.get("t")?.successCriteria[0]?.met).toBe(false)
       expect(a.get("t")?.status).toBe("active")
     },
+    beginAttempt: (a) => {
+      // GOAL-04: the durable reservation debits the turn (and the autonomous
+      // hard-cap counter) BEFORE any provider call.
+      const res = a.commit(
+        a.prepare({
+          threadId: "t",
+          actor: "system",
+          mutation: {
+            kind: "beginAttempt",
+            attempt: {
+              objectiveId: a.get("t")?.objectiveId ?? "",
+              attemptId: "attempt-begin",
+              provenance: "autonomous-continuation",
+              executionMode: "foreground",
+              startedRevision: a.readDomain("t").revision,
+            },
+          },
+        }),
+        { admitted: true },
+      )
+      expect(res.ok).toBe(true)
+      expect(a.get("t")?.attempts.started?.attemptId).toBe("attempt-begin")
+      expect(a.get("t")?.attempts.autonomousTurnsStarted).toBe(1)
+      expect(a.get("t")?.budget.turnsUsed).toBe(1)
+    },
+    abandonAttempt: (a) => {
+      a.commit(
+        a.prepare({
+          threadId: "t",
+          actor: "system",
+          mutation: {
+            kind: "beginAttempt",
+            attempt: {
+              objectiveId: a.get("t")?.objectiveId ?? "",
+              attemptId: "attempt-orphan",
+              provenance: "user-requested-goal-work",
+              executionMode: "foreground",
+              startedRevision: a.readDomain("t").revision,
+            },
+          },
+        }),
+        { admitted: true },
+      )
+      expect(a.get("t")?.attempts.started).toBeDefined()
+      const res = a.commit(
+        a.prepare({ threadId: "t", actor: "user", mutation: { kind: "abandonAttempt" } }),
+        { admitted: true },
+      )
+      expect(res.ok).toBe(true)
+      expect(a.get("t")?.attempts.started).toBeUndefined()
+    },
     markUsageLimited: (a) => {
       // enforce store surfaces the derived status; here we assert the window is
       // recorded (revision advanced by the op even under the informational store).

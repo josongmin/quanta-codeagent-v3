@@ -84,6 +84,7 @@ const makeDeps = (over: Partial<ContinuationDeps> = {}): ContinuationDeps => {
     // GOAL-01: every objective carries its authority-minted generation id + creator.
     objectiveId: `obj-${threadId}`,
     createdBy: "system" as const,
+    attempts: { autonomousTurnsStarted: 0 },
     threadId,
     goal: "g",
     successCriteria: [],
@@ -696,6 +697,7 @@ describe("runIdleContinuation — real store, real resume side-effect", () => {
     const active = {
       objectiveId: "obj-thread-D",
       createdBy: "system" as const,
+      attempts: { autonomousTurnsStarted: 0 },
       threadId: "thread-D",
       goal: "g",
       successCriteria: [],

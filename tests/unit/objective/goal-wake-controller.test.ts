@@ -21,6 +21,7 @@ const domain = (
       threadId: "thread-1",
       goal: "ship",
       createdBy: "system",
+      attempts: { autonomousTurnsStarted: 0 },
       successCriteria: [],
       status,
       budget: { tokensUsed: 0, turnsUsed: 0 },

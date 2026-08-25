@@ -7,7 +7,17 @@ export const MAX_PROGRESS_RECEIPTS = 16
 export const MAX_PROGRESS_REFS = 32
 export const MAX_PROGRESS_REF_LENGTH = 512
 
-export type ProgressTurnOutcome = "completed" | "aborted" | "error" | "backgrounded"
+/** GOAL-04 — the closed settlement outcome (maps 1:1 from the agent StopReason
+ *  taxonomy; `backgrounded` is retained for legacy receipts). */
+export type ProgressTurnOutcome =
+  | "completed"
+  | "max_turns"
+  | "aborted"
+  | "error"
+  | "budget_exhausted"
+  | "refusal"
+  | "awaiting_approval"
+  | "backgrounded"
 
 export interface ProgressReceipt {
   readonly objectiveId: string
@@ -22,12 +32,18 @@ export interface ProgressReceipt {
   readonly recordedAt: number
 }
 
-const OUTCOMES: ReadonlySet<string> = new Set<ProgressTurnOutcome>([
+export const PROGRESS_TURN_OUTCOMES = [
   "completed",
+  "max_turns",
   "aborted",
   "error",
+  "budget_exhausted",
+  "refusal",
+  "awaiting_approval",
   "backgrounded",
-])
+] as const satisfies readonly ProgressTurnOutcome[]
+
+const OUTCOMES: ReadonlySet<string> = new Set<string>(PROGRESS_TURN_OUTCOMES)
 
 export const isProgressTurnOutcome = (v: unknown): v is ProgressTurnOutcome =>
   typeof v === "string" && OUTCOMES.has(v)

@@ -78,6 +78,8 @@ export type RuntimeBase = RuntimeAgentConfigBase & {
    *  as caller-override (LLM `objective_*` tools share the /goal + ticker store).
    *  Duck-typed `unknown` (no cycle into the agent slice). Absent ⇒ assembler
    *  mints its own. */
+  /** GOAL-04 — host-owned attributed-attempt slot (slice-opaque; the runtime narrows it). */
+  objectiveAttemptSlot?: unknown
   objective?: unknown
   /** §9.6 `/presets` — surface-owned role→model resolver threaded DOWN from the
    *  CLI compose seam (mirrors `objective`). Carried on the base so
@@ -163,6 +165,8 @@ export interface RuntimeContextSnapshot {
   readonly gitObservability?: AgentConfig["gitObservability"]
   readonly conversationActionPort?: AgentConfig["conversationActionPort"]
   readonly activeTurnRef?: AgentConfig["activeTurnRef"]
+  /** GOAL-04 — host-owned attributed-attempt slot (slice-opaque). */
+  readonly objectiveAttemptSlot?: unknown
   readonly shadowVerify?: AgentConfig["shadowVerify"]
   /** ADR-0231 (wire phase) — radar proposal-queue producer block, folded onto
    *  the built `AgentConfig.radar` so the loop samples at each COMPLETED turn. */
@@ -230,6 +234,7 @@ export type RuntimeContextPatch = Partial<
     | "gitObservability"
     | "conversationActionPort"
     | "activeTurnRef"
+    | "objectiveAttemptSlot"
     | "shadowVerify"
     | "radar"
     | "browserNet"

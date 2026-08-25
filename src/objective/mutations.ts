@@ -22,6 +22,7 @@
  * exactOptionalPropertyTypes: optional fields are typed `x?: T | undefined`.
  */
 
+import type { ObjectiveAttemptStart } from "./attempt"
 import type { VerifierCompletionReceipt } from "./criteria/model"
 import type { VerificationBatch, VerificationInvalidationReason } from "./criteria/ports"
 import type { ObjectiveDomainSnapshot } from "./model"
@@ -89,7 +90,11 @@ export type ObjectiveMutation =
       reason: VerificationInvalidationReason
       observedSourceDigest?: string | undefined
     }
+  /** GOAL-04 — durable reservation BEFORE the paid provider call (system only). */
+  | { kind: "beginAttempt"; attempt: ObjectiveAttemptStart }
   | { kind: "settleAttempt"; settlement: ObjectiveAttemptSettlement }
+  /** GOAL-04 — operator recovery of an orphaned started attempt (user/system). */
+  | { kind: "abandonAttempt"; attemptId?: string | undefined }
   | { kind: "markUsageLimited"; untilEpochMs: number }
   | { kind: "restore"; snapshot: ObjectiveDomainSnapshot }
 
@@ -113,7 +118,9 @@ export const OBJECTIVE_OPERATION_KINDS = [
   "amendBudget",
   "applyVerificationBatch",
   "invalidateVerification",
+  "beginAttempt",
   "settleAttempt",
+  "abandonAttempt",
   "markUsageLimited",
   "restore",
 ] as const satisfies readonly ObjectiveOperationKind[]

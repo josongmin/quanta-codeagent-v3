@@ -150,31 +150,52 @@ const mintGeneration = (
   return result === null ? refused(core, threadId, "invalid") : { applied: true, result }
 }
 
-const settleAttempt = (
-  core: ObjectiveCore,
-  threadId: string,
+/** GOAL-04 — every reason a settlement is refused, in check order. */
+const settlementRejection = (
+  current: Objective,
   settlement: ObjectiveAttemptSettlement,
   ctx: MutationContext,
-): ApplyOutcome => {
-  if (ctx.actor !== "system") return refused(core, threadId, "actor-forbidden")
-  const current = core.get(threadId)
-  if (current === null) return refused(core, threadId, "objective-missing")
+): CommitRejection | undefined => {
   if (
     settlement === null ||
     typeof settlement !== "object" ||
     !isNonEmptyString(settlement.attemptId)
   ) {
-    return refused(core, threadId, "invalid")
+    return "invalid"
   }
-  if (settlement.objectiveId !== current.objectiveId) {
-    return refused(core, threadId, "objective-mismatch")
-  }
+  if (settlement.objectiveId !== current.objectiveId) return "objective-mismatch"
   if (ctx.evidence.receipts.some((r) => r.attemptKey === settlement.attemptId)) {
-    return refused(core, threadId, "attempt-replayed")
+    return "attempt-replayed"
   }
+  // A durable started attempt must be the one being settled.
+  const started = current.attempts.started
+  if (started !== undefined && started.attemptId !== settlement.attemptId) {
+    return "attempt-in-flight"
+  }
+  return undefined
+}
+
+const passingVerifierRefs = (current: Objective): readonly string[] =>
+  current.successCriteria.flatMap((c) =>
+    c.kind === "checked" && c.completion !== undefined && c.completion.verifierResult.passed
+      ? [
+          verifierReceiptRef({
+            criterionId: c.id,
+            checkId: c.completion.checkId,
+            objectiveRevision: c.completion.objectiveRevision,
+          }),
+        ]
+      : [],
+  )
+
+const buildSettlementReceipt = (
+  current: Objective,
+  settlement: ObjectiveAttemptSettlement,
+  ctx: MutationContext,
+): ProgressReceipt | null => {
   const before = new Set(settlement.criterionIdsBefore ?? [])
   const refsBefore = new Set(settlement.verifierReceiptIdsBefore ?? [])
-  const receipt = normalizeProgressReceipt({
+  return normalizeProgressReceipt({
     objectiveId: current.objectiveId,
     attemptKey: settlement.attemptId,
     objectiveRevisionBefore: Math.min(
@@ -187,29 +208,35 @@ const settleAttempt = (
     criterionTransitions: current.successCriteria
       .filter((c) => c.met && !before.has(c.id))
       .map((c) => c.id),
-    verifierReceiptRefs: current.successCriteria
-      .flatMap((c) =>
-        c.kind === "checked" && c.completion !== undefined && c.completion.verifierResult.passed
-          ? [
-              verifierReceiptRef({
-                criterionId: c.id,
-                checkId: c.completion.checkId,
-                objectiveRevision: c.completion.objectiveRevision,
-              }),
-            ]
-          : [],
-      )
-      .filter((ref) => !refsBefore.has(ref)),
+    verifierReceiptRefs: passingVerifierRefs(current).filter((ref) => !refsBefore.has(ref)),
     ...(settlement.sourceDigest !== undefined ? { sourceDigest: settlement.sourceDigest } : {}),
     remainingCriterionIds: current.successCriteria.filter((c) => !c.met).map((c) => c.id),
     recordedAt: settlement.recordedAt,
   })
+}
+
+const settleAttempt = (
+  core: ObjectiveCore,
+  threadId: string,
+  settlement: ObjectiveAttemptSettlement,
+  ctx: MutationContext,
+): ApplyOutcome => {
+  if (ctx.actor !== "system") return refused(core, threadId, "actor-forbidden")
+  const current = core.get(threadId)
+  if (current === null) return refused(core, threadId, "objective-missing")
+  const rejection = settlementRejection(current, settlement, ctx)
+  if (rejection !== undefined) return refused(core, threadId, rejection)
+  const receipt = buildSettlementReceipt(current, settlement, ctx)
   if (receipt === null) return refused(core, threadId, "invalid")
-  const result = core.applyUsage(threadId, {
+  // GOAL-04 — the turn was already reserved at `beginAttempt`, so settlement
+  // never re-debits it; a legacy (unreserved) settlement still debits one turn.
+  const started = current.attempts.started
+  const usage = core.applyUsage(threadId, {
     tokens: settlement.tokensUsed,
-    turns: settlement.turnsUsed === 1 ? 1 : 0,
+    turns: started === undefined && settlement.turnsUsed === 1 ? 1 : 0,
   })
-  if (result === null) return refused(core, threadId, "invalid")
+  if (usage === null) return refused(core, threadId, "invalid")
+  const result = started === undefined ? usage : (core.clearStartedAttempt(threadId) ?? usage)
   ctx.evidence.append(receipt)
   return { applied: true, result }
 }
@@ -323,6 +350,45 @@ const DISPATCH: DispatchTable = {
     return result !== null ? { applied: true, result } : refused(core, threadId, "invalid")
   },
   amendBudget: (core, threadId, m) => applied(core.amendBudget(threadId, m.budget)),
+  beginAttempt: (core, threadId, m, ctx) => {
+    if (ctx.actor !== "system") return refused(core, threadId, "actor-forbidden")
+    const current = core.get(threadId)
+    if (current === null) return refused(core, threadId, "objective-missing")
+    if (
+      m.attempt === null ||
+      typeof m.attempt !== "object" ||
+      !isNonEmptyString(m.attempt.attemptId)
+    ) {
+      return refused(core, threadId, "invalid")
+    }
+    if (m.attempt.objectiveId !== current.objectiveId)
+      return refused(core, threadId, "objective-mismatch")
+    if (current.attempts.started !== undefined) return refused(core, threadId, "attempt-in-flight")
+    if (ctx.evidence.receipts.some((r) => r.attemptKey === m.attempt.attemptId)) {
+      return refused(core, threadId, "attempt-replayed")
+    }
+    return applied(
+      core.startAttempt(threadId, {
+        attemptId: m.attempt.attemptId,
+        provenance: m.attempt.provenance,
+        executionMode: m.attempt.executionMode,
+        startedRevision: Number.isSafeInteger(m.attempt.startedRevision)
+          ? m.attempt.startedRevision
+          : ctx.revision,
+        startedAt: ctx.now,
+      }),
+    )
+  },
+  abandonAttempt: (core, threadId, m) => {
+    const current = core.get(threadId)
+    if (current === null) return refused(core, threadId, "objective-missing")
+    const started = current.attempts.started
+    if (started === undefined) return { applied: false, result: current }
+    if (m.attemptId !== undefined && m.attemptId !== started.attemptId) {
+      return refused(core, threadId, "attempt-replayed")
+    }
+    return applied(core.clearStartedAttempt(threadId))
+  },
   applyVerificationBatch: (core, threadId, m, ctx) =>
     applyVerificationBatch(core, threadId, m.batch, ctx),
   invalidateVerification: (core, threadId, m, ctx) => {
@@ -492,6 +558,13 @@ const coreFromPort = (port: ObjectivePort): ObjectiveCore => ({
   },
   resetCheckedCriterion(threadId) {
     // A bare foreign port cannot un-complete a checked criterion; report unchanged.
+    return port.get(threadId)
+  },
+  startAttempt(threadId) {
+    // No attempt substrate on a bare foreign port; report unchanged.
+    return port.get(threadId)
+  },
+  clearStartedAttempt(threadId) {
     return port.get(threadId)
   },
 })

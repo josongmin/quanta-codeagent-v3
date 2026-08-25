@@ -106,24 +106,32 @@ const resolveScenario = (root: string, usecase: UseCaseId, scenarioId: string): 
   }
 }
 
-export const runCompare = async (opts: CompareRunOpts): Promise<CompareSummary> => {
-  const start = Date.now()
-  const store = new ResultStore({
-    ...(opts.storeDir !== undefined ? { dir: opts.storeDir } : {}),
-    ...(opts.now !== undefined ? { now: opts.now } : {}),
-  })
-  const runId = makeRunId("compare", opts.now)
-  const root = opts.scenariosRoot ?? DEFAULT_ROOT
-  const scenario = resolveScenario(root, opts.usecase, opts.scenarioId)
-  if (scenario === null) {
-    throw new Error(`compare: scenario not found: ${root}/${opts.usecase}/${opts.scenarioId}.json`)
-  }
-  // Build & probe adapters in declaration order. Unknown names THROW (caught
-  // by the CLI / programmatic caller) — silent skip is the bug we're fixing.
+/** `exactOptionalPropertyTypes` forbids handing `{ dir: undefined }` to the
+ *  store, so the two test-injection knobs must be conditionally SPREAD rather
+ *  than assigned. Hoisted out of the pipeline so `new ResultStore(...)` reads
+ *  as one step instead of two ternaries. */
+const storeOptsFrom = (opts: CompareRunOpts): { dir?: string; now?: () => number } => ({
+  ...(opts.storeDir !== undefined ? { dir: opts.storeDir } : {}),
+  ...(opts.now !== undefined ? { now: opts.now } : {}),
+})
+
+/** Build every named adapter IN DECLARATION ORDER and probe it. A unit
+ *  because this is the single place that turns the caller's string list into
+ *  the two lists the rest of the run needs — the ones that ran, and the ones
+ *  that refused with a reason. Unknown names THROW here (silent skip was the
+ *  bug); `available()` is awaited serially so probes cannot interleave their
+ *  spawns. */
+const probeAdapters = async (
+  agents: readonly string[],
+  quantaLlm: LLMPort,
+): Promise<{
+  adapters: readonly AgentAdapter[]
+  skipped: readonly { agent: string; reason: string }[]
+}> => {
   const adapters: AgentAdapter[] = []
   const skipped: { agent: string; reason: string }[] = []
-  for (const name of opts.agents) {
-    const built = buildAdapter(name, opts.quantaLlm)
+  for (const name of agents) {
+    const built = buildAdapter(name, quantaLlm)
     const probe = await built.available()
     if (!probe.ok) {
       skipped.push({ agent: name, reason: probe.reason ?? "unavailable" })
@@ -131,6 +139,47 @@ export const runCompare = async (opts: CompareRunOpts): Promise<CompareSummary> 
     }
     adapters.push(built)
   }
+  return { adapters, skipped }
+}
+
+/** Every unordered pair `(i, j)` with `i < j`, in index order — the matchup
+ *  list. A unit because the index double-loop plus the `undefined` guard was
+ *  pure `noUncheckedIndexedAccess` ceremony that had nothing to do with
+ *  scoring; the guard is KEPT verbatim so a sparse `runs` array still skips
+ *  rather than judging a hole. */
+const pairsOf = <T>(items: readonly T[]): readonly (readonly [T, T])[] => {
+  const out: (readonly [T, T])[] = []
+  for (let i = 0; i < items.length; i++) {
+    for (let j = i + 1; j < items.length; j++) {
+      const a = items[i]
+      const b = items[j]
+      if (a === undefined || b === undefined) continue
+      out.push([a, b])
+    }
+  }
+  return out
+}
+
+/** Which counter one pairwise verdict bumps. Its own unit so the ORDER of the
+ *  three-way test is stated once: a parse failure is an INFRA error and is
+ *  tested FIRST — counting it as `partial` (the tie bucket) would silently
+ *  pollute the success-rate report with provider outages. */
+const verdictBucket = (verdict: PairwiseVerdict): "pass" | "partial" | "error" => {
+  if (verdict.parseFailed) return "error"
+  if (verdict.winnerIndex === -1) return "partial"
+  return "pass"
+}
+
+export const runCompare = async (opts: CompareRunOpts): Promise<CompareSummary> => {
+  const start = Date.now()
+  const store = new ResultStore(storeOptsFrom(opts))
+  const runId = makeRunId("compare", opts.now)
+  const root = opts.scenariosRoot ?? DEFAULT_ROOT
+  const scenario = resolveScenario(root, opts.usecase, opts.scenarioId)
+  if (scenario === null) {
+    throw new Error(`compare: scenario not found: ${root}/${opts.usecase}/${opts.scenarioId}.json`)
+  }
+  const { adapters, skipped } = await probeAdapters(opts.agents, opts.quantaLlm)
   // Run each adapter on the scenario IN PARALLEL — each writes into its own
   // throwaway sandbox so they cannot collide. `runOne` never throws.
   const runs: CompareRunResult[] = await Promise.all(adapters.map((a) => a.runOne(scenario)))
@@ -143,36 +192,26 @@ export const runCompare = async (opts: CompareRunOpts): Promise<CompareSummary> 
     error: 0,
     skipped: skipped.length,
   }
-  for (let i = 0; i < runs.length; i++) {
-    for (let j = i + 1; j < runs.length; j++) {
-      const a = runs[i]
-      const b = runs[j]
-      if (a === undefined || b === undefined) continue
-      const verdict = await pairwiseJudge(scenario, a, b, { llm: opts.judgeLlm })
-      matchups.push({
-        a: a.agent,
-        b: b.agent,
-        winnerIndex: verdict.winnerIndex,
-        note: verdict.note,
-      })
-      // Pairwise judge can now FAIL to parse (infra error) — that is NOT a
-      // tie, it's an error verdict. Counting parse-fail as "partial" would
-      // pollute the success-rate report.
-      if (verdict.parseFailed) counts.error += 1
-      else if (verdict.winnerIndex === -1) counts.partial += 1
-      else counts.pass += 1
-      await store.append(runId, {
-        tier: "compare",
-        usecase: opts.usecase,
-        payload: {
-          kind: "compare",
-          scenarioId: scenario.id,
-          agents: [a.agent, b.agent],
-          winner: verdict.winnerIndex,
-          ...(verdict.note !== "" ? { note: verdict.note } : {}),
-        },
-      })
-    }
+  for (const [a, b] of pairsOf(runs)) {
+    const verdict = await pairwiseJudge(scenario, a, b, { llm: opts.judgeLlm })
+    matchups.push({
+      a: a.agent,
+      b: b.agent,
+      winnerIndex: verdict.winnerIndex,
+      note: verdict.note,
+    })
+    counts[verdictBucket(verdict)] += 1
+    await store.append(runId, {
+      tier: "compare",
+      usecase: opts.usecase,
+      payload: {
+        kind: "compare",
+        scenarioId: scenario.id,
+        agents: [a.agent, b.agent],
+        winner: verdict.winnerIndex,
+        ...(verdict.note !== "" ? { note: verdict.note } : {}),
+      },
+    })
   }
   const durationMs = Date.now() - start
   await store.finish({

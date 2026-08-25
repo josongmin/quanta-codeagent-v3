@@ -30,6 +30,7 @@ export type UserObjectiveMutation = Extract<
       | "clearBlocker"
       | "setNextActions"
       | "markCriterion"
+      | "abandonAttempt"
   }
 >
 

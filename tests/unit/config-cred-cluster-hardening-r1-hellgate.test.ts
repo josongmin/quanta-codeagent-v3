@@ -671,6 +671,7 @@ describe("H17 — budget at the EXACT cap and continuation re-read", () => {
           threadId: TID,
           goal: "g",
           createdBy: "system",
+          attempts: { autonomousTurnsStarted: 0 },
           successCriteria: [],
           status,
           budget: { tokensUsed: 0, turnsUsed: 0 },

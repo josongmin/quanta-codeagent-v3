@@ -19,7 +19,7 @@ import {
   decodeObjectiveSnapshot,
   encodeObjectiveSnapshot,
 } from "@/runner/assemble/session-authorities"
-import type { PersistedObjectiveSnapshot } from "@/session"
+import { type PersistedObjectiveSnapshot, updateSessionAtomic } from "@/session"
 import { gateOn } from "@/shared"
 
 /** Minimal env view — same record shape the assembler threads everywhere. */
@@ -148,6 +148,28 @@ export const restoreObjectiveSnapshotInto = (
     if (auth.readDomain(domain.threadId).state !== null) continue
     auth.restoreDomain(domain)
   }
+}
+
+/**
+ * GOAL-04 — persist the live objective snapshot ALONE (no transcript change),
+ * used to make a `beginAttempt` reservation durable BEFORE the paid provider
+ * call. Id-mode only: without a persisted session there is nothing durable to
+ * write (the caller treats "no id" as no persistence requirement).
+ */
+export const persistObjectiveSnapshotNow = async (
+  objective: unknown,
+  sessionId: string | undefined,
+): Promise<void> => {
+  const provider = buildObjectiveSnapshotProvider(objective)
+  if (provider === undefined || sessionId === undefined) return
+  const snapshot = provider()
+  if (snapshot === undefined) return
+  const written = await updateSessionAtomic(sessionId, (saved) => ({
+    ...saved,
+    objective: snapshot,
+  }))
+  if (!written)
+    throw new Error(`session ${sessionId} is not persisted; objective start not durable`)
 }
 
 /**
