@@ -42,6 +42,21 @@ describe("the evaluator's venv is created by something that works on the box", (
     expect(venvStep()?.argv.join(" ") ?? "").toMatch(/uv venv/)
   })
 
+  test("🔴 it names uv by ABSOLUTE path — a bootstrap ssh has no login PATH", () => {
+    // MEASURED: `uv venv …` failed with `bash: line 1: uv: command not found`
+    // (exit 127). cloud-init installs uv to ~/.local/bin, and a bootstrap command
+    // runs over a NON-LOGIN ssh, which does not have that on PATH. Every other
+    // uv/pyright call in this repo already spells the absolute path for the same
+    // reason (`$HOME/.local/bin/uvx`, `~/.local/bin/uv tool install`); this one
+    // relied on PATH and was the only one that did.
+    const joined = venvStep()?.argv.join(" ") ?? ""
+    expect(joined).toContain(".local/bin/uv")
+    // …and it does NOT invoke a bare `uv` that only a login shell would resolve
+    expect(joined).not.toMatch(/(^|\s)uv\s+venv/)
+    // `$HOME` is expanded by a shell rather than hardcoded to the AMI's user
+    expect(joined).toContain("$HOME")
+  })
+
   test("🔴 the interpreter is PINNED above the PEP 604 floor, not inherited", () => {
     const argv = venvStep()?.argv.join(" ") ?? ""
     expect(argv).toMatch(/--python\s+3\.(1[1-9]|[2-9]\d)/)

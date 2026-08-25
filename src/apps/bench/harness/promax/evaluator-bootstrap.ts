@@ -457,7 +457,17 @@ const graderPythonEnvAndTeardown = (
       // Nothing is installed into it: the pinned evaluator imports only stdlib
       // (os, json, uuid, tempfile, subprocess, re, argparse, shlex,
       // concurrent.futures), so a bare interpreter IS the requirement.
-      argv: ["uv", "venv", "--python", "3.11", spec.venvRoot],
+      // `$HOME/.local/bin/uv`, not a bare `uv`. MEASURED: the bare form failed
+      // with `bash: line 1: uv: command not found` (exit 127) — cloud-init
+      // installs uv to ~/.local/bin and a bootstrap command runs over a NON-LOGIN
+      // ssh, which has no such PATH. Every other uv/pyright call in this repo
+      // already spells it out (`$HOME/.local/bin/uvx`, `~/.local/bin/uv tool
+      // install`); this was the one place that relied on PATH.
+      //
+      // Via `sh -c` so `$HOME` expands: bootstrap argv is shq-QUOTED, so neither
+      // `~` nor `$HOME` would expand on their own, and hardcoding `/home/ubuntu`
+      // would bake in the AMI's user where nothing else does.
+      argv: ["sh", "-c", `"$HOME"/.local/bin/uv venv --python 3.11 ${spec.venvRoot}`],
       purpose: "a DEDICATED interpreter for the pinned evaluator, isolated from the agent's",
     },
     {
