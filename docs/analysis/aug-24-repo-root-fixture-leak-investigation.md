@@ -140,3 +140,36 @@ The blocker is bounded and measurable: 95 of 3,311 test files reference
 `process.cwd()`. Each is either a test that should have been cwd-independent
 anyway (repo-root scans belong on `import.meta.dir`) or one whose assertion
 gets STRONGER under a sandbox. That migration is the real next step.
+
+## Two blockers the migration will hit (measured aug-25)
+
+Retracing this investigation independently reproduced the leak once (with `src`
+in the run scope) and then failed to attribute it — by delta-debugging over the
+file list, which is the method this document already predicts cannot converge.
+Recording that as a NEGATIVE result so the next person does not spend the run:
+two halves clean and one full-set reproduction is exactly the intermittency
+signature above, not evidence that the trigger spans the halves.
+
+What the retrace did add is two concrete obstacles to "make the sandbox the
+default", neither of which is visible until you try it:
+
+1. **The runner drops bun's flags.** `sandboxed-test.ts` treats every argument
+   except `--batch N` as a TEST PATH, so `bun run tools/dev/sandboxed-test.ts
+   --parallel=1 …` dies with `no such test path: …/--parallel=1`. Every default
+   script (`test`, `test:unit`, `test:fast`, `test:shard`) passes `--parallel=1`,
+   and this suite is materially different when run in parallel — a parallel
+   sweep of `tests/unit src` produced ~74 failures that were all artifacts of
+   shared `mock.module` / env / cwd state, every one of which passed in
+   isolation. So the runner needs flag forwarding BEFORE it can back a default
+   script; wiring it as-is would silently turn the serial suite parallel.
+
+2. **Some cwd-dependent tests fail loudly, not subtly.** Under the sandbox,
+   `tests/unit/tool-surface-manifest-hellgate.test.ts` fails because its
+   `scanRegisteredToolNames` shells out to `grep` against repo-relative paths
+   (`grep: src/agent/budget-tool.ts: No such file or directory`). That is a
+   worked example of the "95 of 3,311" bucket, and it is the shape the doc
+   predicts: a repo-root scan that should be anchored on `import.meta.dir`.
+
+Neither changes the conclusion — containment is still the right direction — but
+the migration is two steps, not one: teach the runner to forward flags, then
+move the cwd-dependent tests.
