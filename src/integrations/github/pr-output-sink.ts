@@ -219,29 +219,107 @@ const clampWithMarker = (body: string, marker: string, maxBytes: number): string
  *  a Tier-2 edge case in ADR-0313 §pagination. */
 const COMMENT_LIST_MAX_PAGES = 10
 
+/** Minimal shape of ONE row in any of the four GH listings we scan. Every
+ *  field is optional: the JSON is untrusted API output, not a typed contract. */
+interface GhListRow {
+  id?: number
+  body?: string
+  html_url?: string
+}
+
+/** Build the `<prefix><key> -->` needle. One copy — every scanner used to
+ *  spell it inline. */
+const markerNeedle = (prefix: string, key: IdempotencyKey): string =>
+  `${prefix}${key}${IDEMPOTENCY_MARKER_SUFFIX}`
+
+/**
+ * Fetch ONE page of a GH listing. `undefined` means "no usable page" — spawn
+ * failure, non-zero exit, or non-array JSON, all of which terminate a walk
+ * identically. A unit because it is the only part of the walk that touches the
+ * gh CLI, so the walker below holds pure loop/termination logic.
+ */
+const fetchListPage = async (
+  opts: PrOutputSinkOpts,
+  path: string,
+  signal: AbortSignal | undefined,
+): Promise<readonly GhListRow[] | undefined> => {
+  const res = await safeRun(opts.ghCliPort, ["api", path], opts.repoCwd, signal)
+  if (res === undefined || res.exitCode !== 0) return undefined
+  return safeJsonArray<GhListRow>(res.stdout)
+}
+
+/**
+ * Apply `onMarked` to every row of ONE page that carries `needle` in its body.
+ *
+ * A unit because the three row guards — usable id, string body, marker present
+ * — were spelled IDENTICALLY in all four scanners; this is now the single copy.
+ * Returns the first defined value `onMarked` produces (which stops the scan);
+ * `undefined` from `onMarked` means "keep going" (the collect-all caller).
+ * `id`/`body` are handed over as narrowed PARAMETERS because property
+ * narrowing on a mutable field does not survive into a callee.
+ */
+const scanPageForMarker = <T>(
+  rows: readonly GhListRow[],
+  needle: string,
+  onMarked: (id: number, body: string, row: GhListRow) => T | undefined,
+): T | undefined => {
+  for (const row of rows) {
+    if (typeof row.id !== "number" || row.id <= 0) continue
+    if (typeof row.body !== "string") continue
+    if (!row.body.includes(needle)) continue
+    const hit = onMarked(row.id, row.body, row)
+    if (hit !== undefined) return hit
+  }
+  return undefined
+}
+
+/**
+ * Walk a paginated GH listing page by page, feeding every marker-carrying row
+ * to `onMarked`, and stop at the first value it returns.
+ *
+ * A unit because all four scanners shared one termination contract, byte for
+ * byte: aborted signal ⇒ stop, unusable page ⇒ stop, a page shorter than
+ * `per_page=100` ⇒ that was the last page, and never more than
+ * {@link COMMENT_LIST_MAX_PAGES} pages. Only the URL and the row projection
+ * differed, so those are the two parameters. (An EMPTY page terminates via the
+ * short-page rule, exactly as the old explicit `rows.length === 0` guard did.)
+ */
+const walkMarkedRows = async <T>(
+  opts: PrOutputSinkOpts,
+  pathFor: (page: number) => string,
+  needle: string,
+  signal: AbortSignal | undefined,
+  onMarked: (id: number, body: string, row: GhListRow) => T | undefined,
+): Promise<T | undefined> => {
+  for (let page = 1; page <= COMMENT_LIST_MAX_PAGES; page++) {
+    if (signal?.aborted === true) return undefined
+    const rows = await fetchListPage(opts, pathFor(page), signal)
+    if (rows === undefined) return undefined
+    const hit = scanPageForMarker(rows, needle, onMarked)
+    if (hit !== undefined) return hit
+    if (rows.length < 100) return undefined
+  }
+  return undefined
+}
+
+/** `html_url` normalised to `undefined` when absent OR empty — the shape a
+ *  REVIEW match reports (an empty string is not a usable link). */
+const usableHtmlUrl = (row: GhListRow): string | undefined =>
+  typeof row.html_url === "string" && row.html_url.length > 0 ? row.html_url : undefined
+
 const findExistingComment = async (
   opts: PrOutputSinkOpts,
   key: IdempotencyKey,
   prefix: string,
   signal: AbortSignal | undefined,
-): Promise<ExistingComment | undefined> => {
-  const needle = `${prefix}${key}${IDEMPOTENCY_MARKER_SUFFIX}`
-  for (let page = 1; page <= COMMENT_LIST_MAX_PAGES; page++) {
-    if (signal?.aborted === true) return undefined
-    const path = `repos/${opts.repoSlug}/issues/${opts.prNumber}/comments?per_page=100&page=${page}`
-    const res = await safeRun(opts.ghCliPort, ["api", path], opts.repoCwd, signal)
-    if (res === undefined || res.exitCode !== 0) return undefined
-    const rows = safeJsonArray<{ id?: number; body?: string }>(res.stdout)
-    if (rows === undefined || rows.length === 0) return undefined
-    for (const row of rows) {
-      if (typeof row.id !== "number" || row.id <= 0) continue
-      if (typeof row.body !== "string") continue
-      if (row.body.includes(needle)) return { id: row.id, body: row.body }
-    }
-    if (rows.length < 100) return undefined // last page (fewer than per_page rows)
-  }
-  return undefined
-}
+): Promise<ExistingComment | undefined> =>
+  await walkMarkedRows(
+    opts,
+    (page) => `repos/${opts.repoSlug}/issues/${opts.prNumber}/comments?per_page=100&page=${page}`,
+    markerNeedle(prefix, key),
+    signal,
+    (id, body) => ({ id, body }),
+  )
 
 /** Find a prior REVIEW carrying our marker (audit L9 H10). Reviews are paged
  *  at `/pulls/<n>/reviews`; we match the marker inside `body`. Returns the
@@ -252,29 +330,14 @@ const findExistingReview = async (
   key: IdempotencyKey,
   prefix: string,
   signal: AbortSignal | undefined,
-): Promise<MarkerMatchedComment | undefined> => {
-  const needle = `${prefix}${key}${IDEMPOTENCY_MARKER_SUFFIX}`
-  for (let page = 1; page <= COMMENT_LIST_MAX_PAGES; page++) {
-    if (signal?.aborted === true) return undefined
-    const path = `repos/${opts.repoSlug}/pulls/${opts.prNumber}/reviews?per_page=100&page=${page}`
-    const res = await safeRun(opts.ghCliPort, ["api", path], opts.repoCwd, signal)
-    if (res === undefined || res.exitCode !== 0) return undefined
-    const rows = safeJsonArray<{ id?: number; body?: string; html_url?: string }>(res.stdout)
-    if (rows === undefined || rows.length === 0) return undefined
-    for (const row of rows) {
-      if (typeof row.id !== "number" || row.id <= 0) continue
-      if (typeof row.body !== "string") continue
-      if (!row.body.includes(needle)) continue
-      return Object.freeze({
-        id: row.id,
-        htmlUrl:
-          typeof row.html_url === "string" && row.html_url.length > 0 ? row.html_url : undefined,
-      })
-    }
-    if (rows.length < 100) return undefined
-  }
-  return undefined
-}
+): Promise<MarkerMatchedComment | undefined> =>
+  await walkMarkedRows(
+    opts,
+    (page) => `repos/${opts.repoSlug}/pulls/${opts.prNumber}/reviews?per_page=100&page=${page}`,
+    markerNeedle(prefix, key),
+    signal,
+    (id, _body, row) => Object.freeze({ id, htmlUrl: usableHtmlUrl(row) }),
+  )
 
 /** Find a prior inline REVIEW COMMENT carrying our marker (audit L9 H10).
  *  Inline comments live at `/pulls/<n>/comments` and support PATCH, so the
@@ -284,24 +347,14 @@ const findExistingReviewComment = async (
   key: IdempotencyKey,
   prefix: string,
   signal: AbortSignal | undefined,
-): Promise<ExistingComment | undefined> => {
-  const needle = `${prefix}${key}${IDEMPOTENCY_MARKER_SUFFIX}`
-  for (let page = 1; page <= COMMENT_LIST_MAX_PAGES; page++) {
-    if (signal?.aborted === true) return undefined
-    const path = `repos/${opts.repoSlug}/pulls/${opts.prNumber}/comments?per_page=100&page=${page}`
-    const res = await safeRun(opts.ghCliPort, ["api", path], opts.repoCwd, signal)
-    if (res === undefined || res.exitCode !== 0) return undefined
-    const rows = safeJsonArray<{ id?: number; body?: string }>(res.stdout)
-    if (rows === undefined || rows.length === 0) return undefined
-    for (const row of rows) {
-      if (typeof row.id !== "number" || row.id <= 0) continue
-      if (typeof row.body !== "string") continue
-      if (row.body.includes(needle)) return { id: row.id, body: row.body }
-    }
-    if (rows.length < 100) return undefined
-  }
-  return undefined
-}
+): Promise<ExistingComment | undefined> =>
+  await walkMarkedRows(
+    opts,
+    (page) => `repos/${opts.repoSlug}/pulls/${opts.prNumber}/comments?per_page=100&page=${page}`,
+    markerNeedle(prefix, key),
+    signal,
+    (id, body) => ({ id, body }),
+  )
 
 /** PATCH an existing inline review comment by id (audit L9 H10). Distinct path
  *  from issue comments: `/pulls/comments/<id>` not `/issues/comments/<id>`. */
@@ -527,28 +580,27 @@ const findAllCommentsWithMarker = async (
   prefix: string,
   signal: AbortSignal | undefined,
 ): Promise<readonly MarkerMatchedComment[]> => {
-  const needle = `${prefix}${key}${IDEMPOTENCY_MARKER_SUFFIX}`
   const out: MarkerMatchedComment[] = []
-  for (let page = 1; page <= COMMENT_LIST_MAX_PAGES; page++) {
-    if (signal?.aborted === true) return out
-    const path = `repos/${opts.repoSlug}/issues/${opts.prNumber}/comments?per_page=100&page=${page}`
-    const res = await safeRun(opts.ghCliPort, ["api", path], opts.repoCwd, signal)
-    if (res === undefined || res.exitCode !== 0) return out
-    const rows = safeJsonArray<{ id?: number; body?: string; html_url?: string }>(res.stdout)
-    if (rows === undefined || rows.length === 0) return out
-    for (const row of rows) {
-      if (typeof row.id !== "number" || row.id <= 0) continue
-      if (typeof row.body !== "string") continue
-      if (!row.body.includes(needle)) continue
+  // Collect-all: `onMarked` never returns a value, so the walk runs to
+  // exhaustion. Partial results survive an abort / mid-walk listing failure —
+  // the accumulator lives out here, exactly as the old inline loop's did.
+  // NOTE: unlike a REVIEW match, an EMPTY `html_url` is kept verbatim here
+  // (the loser-elimination path does its own emptiness check).
+  await walkMarkedRows<never>(
+    opts,
+    (page) => `repos/${opts.repoSlug}/issues/${opts.prNumber}/comments?per_page=100&page=${page}`,
+    markerNeedle(prefix, key),
+    signal,
+    (id, _body, row) => {
       out.push(
         Object.freeze({
-          id: row.id,
+          id,
           htmlUrl: typeof row.html_url === "string" ? row.html_url : undefined,
         }),
       )
-    }
-    if (rows.length < 100) return out
-  }
+      return undefined
+    },
+  )
   return out
 }
 

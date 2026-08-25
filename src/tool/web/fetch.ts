@@ -162,11 +162,131 @@ const isBinaryContentType = (ct: string): boolean => {
   return false
 }
 
+/** The STRUCTURAL minimum the pump needs from a body reader.
+ *
+ *  Deliberately not a named DOM/Bun type: `ReadableStreamReadResult` is not in
+ *  this project's lib set, `res.body?.getReader()` infers as
+ *  `ReadableStreamDefaultReader<any>`, and Bun's reader carries extra members
+ *  (`readMany`) that make the nominal spellings mutually unassignable. The
+ *  shape below is exactly what is used and accepts every one of them. */
+type BodyReader = { read(): Promise<BodyReadResult> }
+type BodyReadResult = { done?: boolean; value?: BodyChunk }
+type BodyChunk = Uint8Array
+
+/** What one capped pump pass produced. `chunks`/`total` stay unconcatenated so
+ *  the caller can allocate the final buffer exactly once, AFTER cleanup. */
+type CappedPump =
+  | {
+      readonly kind: "ok"
+      readonly chunks: BodyChunk[]
+      readonly total: number
+      readonly truncated: boolean
+    }
+  | { readonly kind: "aborted" }
+
+/**
+ * One `read()`, wrapped in the abort re-checks that must surround it.
+ *
+ * Returns `null` meaning "the signal fired — stop and report aborted". A
+ * rethrow is a REAL stream error and must NOT be laundered into an abort.
+ *
+ * Its own unit because the abort question is asked THREE times around a single
+ * `await` — before it, in its catch, and after it resumes — and each ask has a
+ * different reason: not-yet-started, failed-because-cancelled, and
+ * raced-while-suspended. Inline they were indistinguishable guards at three
+ * nesting depths.
+ */
+const readStepOrAbort = async (
+  reader: BodyReader,
+  signal: AbortSignal,
+  isAborted: () => boolean,
+): Promise<BodyReadResult | null> => {
+  if (isAborted()) return null
+  let step: BodyReadResult
+  try {
+    step = await reader.read()
+  } catch (e) {
+    if (isAborted() || signal.aborted) return null
+    throw e
+  }
+  if (isAborted() || signal.aborted) return null
+  return step
+}
+
+/** Append one chunk under the byte cap, clipping it when it would overflow.
+ *  `full: true` means the cap was reached and the caller must stop. */
+const appendCapped = (
+  chunks: BodyChunk[],
+  total: number,
+  maxBytes: number,
+  value: BodyChunk,
+): { readonly total: number; readonly full: boolean } => {
+  const remaining = maxBytes - total
+  if (value.byteLength > remaining) {
+    chunks.push(value.subarray(0, remaining))
+    return { total: total + remaining, full: true }
+  }
+  chunks.push(value)
+  return { total: total + value.byteLength, full: false }
+}
+
+/**
+ * Pull chunks off `reader` until the stream ends or `maxBytes` is reached.
+ *
+ * Its own unit because it is the ALGORITHM, while its caller is a resource
+ * protocol (add listener → pump → remove listener + cancel).
+ *
+ * `isAborted` is an ACCESSOR rather than a boolean because the flag is flipped
+ * by the caller's abort listener while this loop is suspended on `read()` — a
+ * by-value boolean would be a snapshot taken before the abort ever happened.
+ */
+const pumpCappedBody = async (
+  reader: BodyReader,
+  maxBytes: number,
+  signal: AbortSignal,
+  isAborted: () => boolean,
+): Promise<CappedPump> => {
+  const chunks: BodyChunk[] = []
+  let total = 0
+  let truncated = false
+  while (true) {
+    const step = await readStepOrAbort(reader, signal, isAborted)
+    if (step === null) return { kind: "aborted" }
+    const { done, value } = step
+    if (done) break
+    if (value === undefined) continue
+    const appended = appendCapped(chunks, total, maxBytes, value)
+    total = appended.total
+    if (appended.full) {
+      truncated = true
+      break
+    }
+  }
+  return { kind: "ok", chunks, total, truncated }
+}
+
+/** Concatenate accumulated chunks into a single `Uint8Array`. A unit so the
+ *  one-allocation-at-the-end property is visible and testable on its own. */
+const concatChunks = (chunks: readonly BodyChunk[], total: number): Uint8Array => {
+  const out = new Uint8Array(total)
+  let offset = 0
+  for (const c of chunks) {
+    out.set(c, offset)
+    offset += c.byteLength
+  }
+  return out
+}
+
 /** Stream the response body with a hard byte cap. Returns the accumulated
  *  bytes (truncated at `maxBytes`) and a `truncated` flag for the caller to
  *  surface in `output`, or `kind:"aborted"` when `signal` fires mid-read.
  *  Abort is a failure, not a successful truncated response. We use the
- *  response's reader so we don't buffer the whole body just to chop the tail. */
+ *  response's reader so we don't buffer the whole body just to chop the tail.
+ *
+ *  This function owns only the RESOURCE PROTOCOL: install the abort listener,
+ *  run the pump, and guarantee the listener is removed and the reader cancelled
+ *  on every exit path. The concatenation deliberately happens AFTER that
+ *  cleanup, exactly as before the split. */
 const readCappedBody = async (
   res: Response,
   maxBytes: number,
@@ -177,9 +297,6 @@ const readCappedBody = async (
     // Body-less response (HEAD-like) — return empty.
     return { kind: "ok", bytes: new Uint8Array(0), truncated: false }
   }
-  const chunks: Uint8Array[] = []
-  let total = 0
-  let truncated = false
   let aborted = signal.aborted
   const onAbort = (): void => {
     aborted = true
@@ -188,30 +305,11 @@ const readCappedBody = async (
     })
   }
   if (!aborted) signal.addEventListener("abort", onAbort, { once: true })
+  let pumped: CappedPump
   try {
-    if (aborted) return { kind: "aborted" }
-    while (true) {
-      if (aborted) return { kind: "aborted" }
-      try {
-        const step = await reader.read()
-        if (aborted || signal.aborted) return { kind: "aborted" }
-        const { done, value } = step
-        if (done) break
-        if (value === undefined) continue
-        const remaining = maxBytes - total
-        if (value.byteLength > remaining) {
-          chunks.push(value.subarray(0, remaining))
-          total += remaining
-          truncated = true
-          break
-        }
-        chunks.push(value)
-        total += value.byteLength
-      } catch (e) {
-        if (aborted || signal.aborted) return { kind: "aborted" }
-        throw e
-      }
-    }
+    pumped = aborted
+      ? { kind: "aborted" }
+      : await pumpCappedBody(reader, maxBytes, signal, () => aborted)
   } finally {
     signal.removeEventListener("abort", onAbort)
     try {
@@ -220,14 +318,12 @@ const readCappedBody = async (
       // best-effort
     }
   }
-  // Concatenate chunks into a single Uint8Array.
-  const out = new Uint8Array(total)
-  let offset = 0
-  for (const c of chunks) {
-    out.set(c, offset)
-    offset += c.byteLength
+  if (pumped.kind === "aborted") return { kind: "aborted" }
+  return {
+    kind: "ok",
+    bytes: concatChunks(pumped.chunks, pumped.total),
+    truncated: pumped.truncated,
   }
-  return { kind: "ok", bytes: out, truncated }
 }
 
 /** Truncate output to `WEB_FETCH_MAX_OUTPUT`, with a suffix the model can

@@ -379,6 +379,104 @@ const buildRepoMapEnv = async (
   return repoMap === undefined ? {} : { env: { repoMap } }
 }
 
+/** Session-SCOPED prompt fields — set once when the session is composed and
+ *  read unchanged every turn.
+ *
+ *  UNIT because these three share one lifetime and one owner (`AgentConfig`,
+ *  fixed at composition): none of them can change between turn 3 and turn 4,
+ *  so grouping them separates "what this SESSION is" from the per-turn state
+ *  assembled around it. Presence-gated exactly as before ⇒ an absent field is
+ *  OMITTED, never `undefined` (`exactOptionalPropertyTypes`), so the prompt
+ *  stays byte-identical. Emitted in the SAME order as the inline spreads. */
+const sessionScopedInputFields = (config: AgentConfig) => ({
+  ...(config.sessionCtx !== undefined ? { sessionCtx: config.sessionCtx } : {}),
+  ...(config.memorySummaryMd !== undefined ? { memorySummaryMd: config.memorySummaryMd } : {}),
+  ...(config.mode !== undefined ? { mode: config.mode } : {}),
+})
+
+/** The instruction-RULE fields (CLAUDE.md-style repo rules + path-glob rules).
+ *
+ *  UNIT because `globRules` is ONE source with TWO projections — `.rules` and
+ *  `.changedPaths` land under different prompt keys and are independently
+ *  present — so the two guards must be read off the same object in the same
+ *  breath. Keeping them next to `repoRules` keeps every "rules the model must
+ *  obey" field in one reviewable place. */
+const repoRuleInputFields = (config: AgentConfig) => ({
+  ...(config.repoRules !== undefined ? { repoRules: config.repoRules } : {}),
+  ...(config.globRules !== undefined ? { globRules: config.globRules.rules } : {}),
+  ...(config.globRules?.changedPaths !== undefined
+    ? { changedPaths: config.globRules.changedPaths }
+    : {}),
+})
+
+/** Per-TURN state fields: what is live for THIS turn only.
+ *
+ *  UNIT because all three are computed by the caller for this turn and then
+ *  discarded — the LIVE skill set (post plugin-augmentation), the working-state
+ *  snapshot, and the hook injects drained for this turn. `hookPromptInjects`
+ *  additionally requires a NON-EMPTY array (an empty one must omit the key, not
+ *  emit `[]`), which is why the guard is a two-part test rather than a presence
+ *  check. */
+const perTurnInputFields = (args: {
+  readonly augmentedSkills:
+    | { name: string; description: string; rawDependencies?: unknown }[]
+    | undefined
+  readonly wsSnapshot: ReturnType<WorkingStateSession["snapshot"]> | undefined
+  readonly hookPromptInjects: readonly HookPromptInject[] | undefined
+}) => ({
+  ...(args.augmentedSkills !== undefined ? { activeSkills: args.augmentedSkills } : {}),
+  ...(args.wsSnapshot !== undefined ? { workingState: args.wsSnapshot } : {}),
+  ...(args.hookPromptInjects !== undefined && args.hookPromptInjects.length > 0
+    ? { hookPromptInjects: args.hookPromptInjects }
+    : {}),
+})
+
+/** Provider prompt-CACHE fields.
+ *
+ *  UNIT because the payload and its cache KEY are one indivisible pair — a
+ *  prompt cached under a stale key is worse than no cache at all — so the two
+ *  guards belong side by side where a reviewer sees both or neither. */
+const promptCacheInputFields = (config: AgentConfig) => ({
+  ...(config.systemPromptCache !== undefined
+    ? { systemPromptCache: config.systemPromptCache }
+    : {}),
+  ...(config.systemPromptCacheKey !== undefined
+    ? { systemPromptCacheKey: config.systemPromptCacheKey }
+    : {}),
+})
+
+/** The per-turn DYNAMIC tail: the blocks `prompt.ts` splices after the static
+ *  system prefix, each independently gated and each byte-identically ABSENT
+ *  when its knob is off.
+ *
+ *  UNIT because they share one property that the session-scoped fields do NOT:
+ *  every one of them is recomputed per turn from a LIVE authority (the context-
+ *  event queue, the mention injector, the task ledger, the objective port, the
+ *  brief accessor), so they are the fields whose presence can flip mid-session.
+ *  Two of them gate on `length > 0` rather than presence — an empty list must
+ *  omit the key so the tail stays byte-identical. All five are ORTHOGONAL (they
+ *  compose freely) and emitted in the original order. */
+const dynamicTailInputFields = (args: {
+  readonly config: AgentConfig
+  readonly contextEvents: ReturnType<typeof resolveContextEventsForTurn>
+  readonly mentionMessages: readonly Message[]
+  readonly taskBudgetForTurn: TaskBudget | undefined
+  readonly objectiveThunk: ReturnType<typeof resolveObjectiveThunk>
+}) => ({
+  ...(args.contextEvents.length > 0 ? { contextChangeEvents: args.contextEvents } : {}),
+  ...(args.mentionMessages.length > 0 ? { mentionInjectionMessages: args.mentionMessages } : {}),
+  ...(args.taskBudgetForTurn !== undefined ? { taskBudget: args.taskBudgetForTurn } : {}),
+  // C2b — LIVE per-turn objective-visibility thunk. Gated like the objective_*
+  // tools (config.objective + sessionId). Absent ⇒ omitted ⇒ byte-identical;
+  // no goal for the thread ⇒ the thunk returns undefined ⇒ no block.
+  ...(args.objectiveThunk !== undefined ? { objective: args.objectiveThunk } : {}),
+  // #17 (C3) — brief-mode posture. Read the session accessor once per turn so a
+  // mid-session `/brief on` (or a `set_brief` control-op) splices BRIEF_NOTICE
+  // into the per-turn DYNAMIC tail (prompt.ts). Absent/false ⇒ omitted ⇒
+  // byte-identical default-OFF. ORTHOGONAL to effort/language (all compose).
+  ...(args.config.sessionBrief?.() === true ? { brief: true as const } : {}),
+})
+
 export const prepareTurnContext = async (
   args: PrepareTurnContextArgs,
 ): Promise<{
@@ -475,38 +573,18 @@ export const prepareTurnContext = async (
       ? { promptSurfaceProfile: config.promptSurfaceProfile }
       : {}),
     activeLevers: resolvePromptActiveLevers(config),
-    ...(config.sessionCtx !== undefined ? { sessionCtx: config.sessionCtx } : {}),
-    ...(config.memorySummaryMd !== undefined ? { memorySummaryMd: config.memorySummaryMd } : {}),
-    ...(config.mode !== undefined ? { mode: config.mode } : {}),
+    ...sessionScopedInputFields(config),
     ...(memoryContext !== undefined ? { memoryContext } : {}),
-    ...(config.repoRules !== undefined ? { repoRules: config.repoRules } : {}),
-    ...(config.globRules !== undefined ? { globRules: config.globRules.rules } : {}),
-    ...(config.globRules?.changedPaths !== undefined
-      ? { changedPaths: config.globRules.changedPaths }
-      : {}),
-    ...(augmentedSkills !== undefined ? { activeSkills: augmentedSkills } : {}),
-    ...(wsSnapshot !== undefined ? { workingState: wsSnapshot } : {}),
-    ...(hookPromptInjects !== undefined && hookPromptInjects.length > 0
-      ? { hookPromptInjects }
-      : {}),
-    ...(config.systemPromptCache !== undefined
-      ? { systemPromptCache: config.systemPromptCache }
-      : {}),
-    ...(config.systemPromptCacheKey !== undefined
-      ? { systemPromptCacheKey: config.systemPromptCacheKey }
-      : {}),
-    ...(contextEvents.length > 0 ? { contextChangeEvents: contextEvents } : {}),
-    ...(mentionMessages.length > 0 ? { mentionInjectionMessages: mentionMessages } : {}),
-    ...(taskBudgetForTurn !== undefined ? { taskBudget: taskBudgetForTurn } : {}),
-    // C2b — LIVE per-turn objective-visibility thunk. Gated like the objective_*
-    // tools (config.objective + sessionId). Absent ⇒ omitted ⇒ byte-identical;
-    // no goal for the thread ⇒ the thunk returns undefined ⇒ no block.
-    ...(objectiveThunk !== undefined ? { objective: objectiveThunk } : {}),
-    // #17 (C3) — brief-mode posture. Read the session accessor once per turn so a
-    // mid-session `/brief on` (or a `set_brief` control-op) splices BRIEF_NOTICE
-    // into the per-turn DYNAMIC tail (prompt.ts). Absent/false ⇒ omitted ⇒
-    // byte-identical default-OFF. ORTHOGONAL to effort/language (all compose).
-    ...(config.sessionBrief?.() === true ? { brief: true } : {}),
+    ...repoRuleInputFields(config),
+    ...perTurnInputFields({ augmentedSkills, wsSnapshot, hookPromptInjects }),
+    ...promptCacheInputFields(config),
+    ...dynamicTailInputFields({
+      config,
+      contextEvents,
+      mentionMessages,
+      taskBudgetForTurn,
+      objectiveThunk,
+    }),
     untrustedEnvelope: runtimeConfig().untrustedEnvelope,
   }
   // Trajectory fork-experiment seam (AgentConfig.turnContextMutator). DEFAULT-OFF:

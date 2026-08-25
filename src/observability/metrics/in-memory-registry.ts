@@ -249,10 +249,90 @@ const initializeQuantileSketch = (state: P2Quantile): void => {
   state.seed = []
 }
 
+/**
+ * Locate which of the four inter-marker buckets `value` falls in, EXTENDING the
+ * running min/max markers when it falls outside them. Its own unit because the
+ * six-armed ladder was pure classification — the only mutation it performs is
+ * the extremum clamp the P² paper folds into the same step.
+ */
+const locateBucketClampingExtremes = (heights: MarkerTuple, value: number): number => {
+  if (value < heights[0]) {
+    heights[0] = value
+    return 0
+  }
+  if (value < heights[1]) return 0
+  if (value < heights[2]) return 1
+  if (value < heights[3]) return 2
+  if (value <= heights[4]) return 3
+  heights[4] = value
+  return 3
+}
+
+/**
+ * The P² move condition for marker `i`: its desired position is at least a full
+ * step away AND there is room to move without colliding with the neighbour in
+ * that direction. Named because the four-term predicate is the algorithm's
+ * actual invariant, not incidental control flow.
+ */
+const markerNeedsAdjust = (delta: number, prevGap: number, nextGap: number): boolean =>
+  (delta >= 1 && nextGap > 1) || (delta <= -1 && prevGap < -1)
+
+/**
+ * Move marker `i` one step toward its desired position, using the piecewise-
+ * parabolic prediction when it stays strictly between its neighbours' heights
+ * and the linear fallback otherwise (the P² paper's step 3b).
+ */
+const adjustInteriorMarker = (
+  heights: MarkerTuple,
+  positions: MarkerTuple,
+  prev: MarkerIndex,
+  i: MarkerIndex,
+  next: MarkerIndex,
+  delta: number,
+): void => {
+  const direction = delta > 0 ? 1 : -1
+  // The marker the linear fallback leans on: `i + direction`, named.
+  const toward = direction > 0 ? next : prev
+  const parabolic =
+    heights[i] +
+    (direction / (positions[next] - positions[prev])) *
+      (((positions[i] - positions[prev] + direction) * (heights[next] - heights[i])) /
+        (positions[next] - positions[i]) +
+        ((positions[next] - positions[i] - direction) * (heights[i] - heights[prev])) /
+          (positions[i] - positions[prev]))
+
+  heights[i] =
+    parabolic > heights[prev] && parabolic < heights[next]
+      ? parabolic
+      : heights[i] +
+        (direction * (heights[toward] - heights[i])) / (positions[toward] - positions[i])
+  positions[i] += direction
+}
+
+/** Run the adjust step across all three interior markers. */
+const adjustInteriorMarkers = (
+  heights: MarkerTuple,
+  positions: MarkerTuple,
+  desired: MarkerTuple,
+): void => {
+  for (const [prev, i, next] of INTERIOR_MARKERS) {
+    const delta = desired[i] - positions[i]
+    const prevGap = positions[prev] - positions[i]
+    const nextGap = positions[next] - positions[i]
+    if (!markerNeedsAdjust(delta, prevGap, nextGap)) continue
+    adjustInteriorMarker(heights, positions, prev, i, next, delta)
+  }
+}
+
+/** Accumulate into the pre-initialization seed, initializing once it is full. */
+const seedQuantileSketch = (state: P2Quantile, value: number): void => {
+  state.seed.push(value)
+  if (state.seed.length === MIN_P2_SEED_SIZE) initializeQuantileSketch(state)
+}
+
 const observeQuantileSketch = (state: P2Quantile, value: number): void => {
   if (!state.initialized) {
-    state.seed.push(value)
-    if (state.seed.length === MIN_P2_SEED_SIZE) initializeQuantileSketch(state)
+    seedQuantileSketch(state, value)
     return
   }
 
@@ -264,52 +344,10 @@ const observeQuantileSketch = (state: P2Quantile, value: number): void => {
     return
   }
 
-  let bucket = 0
-  if (value < heights[0]) {
-    heights[0] = value
-    bucket = 0
-  } else if (value < heights[1]) {
-    bucket = 0
-  } else if (value < heights[2]) {
-    bucket = 1
-  } else if (value < heights[3]) {
-    bucket = 2
-  } else if (value <= heights[4]) {
-    bucket = 3
-  } else {
-    heights[4] = value
-    bucket = 3
-  }
-
+  const bucket = locateBucketClampingExtremes(heights, value)
   for (const i of MARKER_INDICES) if (i > bucket) positions[i] += 1
   for (const i of MARKER_INDICES) desired[i] += increments[i]
-
-  for (const [prev, i, next] of INTERIOR_MARKERS) {
-    const delta = desired[i] - positions[i]
-    const prevGap = positions[prev] - positions[i]
-    const nextGap = positions[next] - positions[i]
-    if (!((delta >= 1 && nextGap > 1) || (delta <= -1 && prevGap < -1))) continue
-
-    const direction = delta > 0 ? 1 : -1
-    // The marker the linear fallback leans on: `i + direction`, named.
-    const toward = direction > 0 ? next : prev
-    const parabolic =
-      heights[i] +
-      (direction / (positions[next] - positions[prev])) *
-        (((positions[i] - positions[prev] + direction) * (heights[next] - heights[i])) /
-          (positions[next] - positions[i]) +
-          ((positions[next] - positions[i] - direction) * (heights[i] - heights[prev])) /
-            (positions[i] - positions[prev]))
-
-    if (parabolic > heights[prev] && parabolic < heights[next]) {
-      heights[i] = parabolic
-    } else {
-      heights[i] =
-        heights[i] +
-        (direction * (heights[toward] - heights[i])) / (positions[toward] - positions[i])
-    }
-    positions[i] += direction
-  }
+  adjustInteriorMarkers(heights, positions, desired)
 }
 
 const readQuantileSketch = (state: P2Quantile): number => {

@@ -49,6 +49,61 @@ export interface LlmInstrumentOpts {
  *   <prefix>.stream.failures.total   counter   labels: provider, code
  *   <prefix>.stream.duration_ms      histogram labels: provider, stop_reason
  */
+/** The wrapped stream's stable label set. Computed once per WRAP (not per
+ *  call) — `model` is normalized here so every emission agrees on it. */
+type LlmStreamLabels = { readonly provider: string; readonly model: string }
+
+/** `stop_reason` off a `message_stop` event, normalized to a non-empty string. */
+const stopReasonOf = (ev: { stop_reason?: unknown }): string =>
+  typeof ev.stop_reason === "string" && ev.stop_reason.length > 0 ? ev.stop_reason : "unknown"
+
+/** Error `code` when the thrown value carries a string one, else `"unknown"`. */
+const errorCodeOf = (e: unknown): string =>
+  e instanceof Error && "code" in e && typeof e.code === "string" ? e.code : "unknown"
+
+/**
+ * The four metric emissions of one wrapped stream, bound to that call's labels
+ * and clock.
+ *
+ * Grouped into a record because inline they were four `safe(metrics, () => …)`
+ * arrows nested INSIDE the async generator — each arrow body sitting two
+ * function levels deep, which is where most of this function's score came from.
+ * Out here each one is a flat, separately readable emission and the generator
+ * body reads as the algorithm: start, first event, stop reason, failure, done.
+ */
+type LlmStreamMetrics = {
+  readonly firstEvent: (at: number) => void
+  readonly failed: (e: unknown) => void
+  readonly finished: (stopReason: string) => void
+}
+
+const llmStreamMetrics = (
+  metrics: MetricsRegistry,
+  prefix: string,
+  labels: LlmStreamLabels,
+  now: () => number,
+  t0: number,
+): LlmStreamMetrics => ({
+  firstEvent: (at) =>
+    safe(metrics, () =>
+      metrics.observe(`${prefix}.stream.ttft_ms`, at - t0, { provider: labels.provider }),
+    ),
+  failed: (e) =>
+    safe(metrics, () =>
+      metrics.increment(`${prefix}.stream.failures.total`, 1, {
+        provider: labels.provider,
+        code: errorCodeOf(e),
+      }),
+    ),
+  finished: (stopReason) =>
+    safe(metrics, () =>
+      metrics.observe(`${prefix}.stream.duration_ms`, now() - t0, {
+        provider: labels.provider,
+        stop_reason: stopReason,
+      }),
+    ),
+})
+
 export const instrumentLlmProvider = (
   provider: LlmProvider,
   metrics: MetricsRegistry,
@@ -56,19 +111,27 @@ export const instrumentLlmProvider = (
 ): LlmProvider => {
   const prefix = opts?.namePrefix ?? "llm.provider"
   const now = opts?.now ?? (() => performance.now())
-  const provLabel = provider.providerId
-  const modelLabel =
-    typeof provider.model === "string" && provider.model.trim().length > 0
-      ? provider.model
-      : "unknown"
+  const labels: LlmStreamLabels = {
+    provider: provider.providerId,
+    model:
+      typeof provider.model === "string" && provider.model.trim().length > 0
+        ? provider.model
+        : "unknown",
+  }
 
   return {
     ...provider,
     async *stream(input: StreamInput): AsyncIterable<StreamEvent> {
+      // Emitted BEFORE `t0` is read, so the clock is consulted in the same order
+      // as before this was factored out.
       safe(metrics, () =>
-        metrics.increment(`${prefix}.stream.total`, 1, { provider: provLabel, model: modelLabel }),
+        metrics.increment(`${prefix}.stream.total`, 1, {
+          provider: labels.provider,
+          model: labels.model,
+        }),
       )
       const t0 = now()
+      const emit = llmStreamMetrics(metrics, prefix, labels, now, t0)
       let firstEventAt: number | null = null
       let stopReason = "unknown"
       try {
@@ -79,35 +142,17 @@ export const instrumentLlmProvider = (
             // branch proved, which is the only reason this was asserted.
             const at = now()
             firstEventAt = at
-            safe(metrics, () =>
-              metrics.observe(`${prefix}.stream.ttft_ms`, at - t0, {
-                provider: provLabel,
-              }),
-            )
+            emit.firstEvent(at)
           }
-          if (ev.type === "message_stop") {
-            stopReason =
-              typeof ev.stop_reason === "string" && ev.stop_reason.length > 0
-                ? ev.stop_reason
-                : "unknown"
-          }
+          if (ev.type === "message_stop") stopReason = stopReasonOf(ev)
           yield ev
         }
       } catch (e) {
         stopReason = "error"
-        const code =
-          e instanceof Error && "code" in e && typeof e.code === "string" ? e.code : "unknown"
-        safe(metrics, () =>
-          metrics.increment(`${prefix}.stream.failures.total`, 1, { provider: provLabel, code }),
-        )
+        emit.failed(e)
         throw e
       } finally {
-        safe(metrics, () =>
-          metrics.observe(`${prefix}.stream.duration_ms`, now() - t0, {
-            provider: provLabel,
-            stop_reason: stopReason,
-          }),
-        )
+        emit.finished(stopReason)
       }
     },
   }

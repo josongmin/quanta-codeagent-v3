@@ -16,6 +16,7 @@ import type {
   CancellationOutcome,
   CancellationSignal,
   CleanupHandler,
+  PartialResult,
 } from "./types"
 
 export interface DefaultControllerOpts {
@@ -36,6 +37,59 @@ export interface DefaultControllerOpts {
 }
 
 const DEFAULT_PARALLELISM = 4
+
+/** Render ONE rejected cleanup handler as its `cleanupErrors` line.
+ *
+ *  UNIT because both of its conditionals are pure SHAPE normalisation — an
+ *  `Error` reason contributes `.message`, anything else `String(...)`; a
+ *  handler slot that somehow has no entry contributes `<unknown>` — and
+ *  neither has anything to do with wave scheduling. At module scope the
+ *  formatting also stops paying the three-deep nesting surcharge it used to
+ *  carry inside the wave/settled/rejected loops. */
+const describeCleanupFailure = (handler: CleanupHandler | undefined, reason: unknown): string => {
+  // Plane-clean (header): inline the canonical errMessage body
+  // (byte-identical to `src/shared/errors.ts` `errMessage`). The
+  // pre-existing `typeof r === "string" ? r : String(r)` chain was
+  // redundant — `String(str) === str` for any string `str`.
+  const msg = reason instanceof Error ? reason.message : String(reason)
+  const name = handler !== undefined ? handler.name : "<unknown>"
+  return `${name}: ${msg}`
+}
+
+/** Run every registered cleanup handler and return the failure lines in
+ *  registration order.
+ *
+ *  UNIT because this IS the scheduling policy the ADR documents, and the
+ *  `finalize` around it is only latch bookkeeping (idempotency cache, the
+ *  synthesized-cause safety net, outcome assembly). Bounded parallel: chunk
+ *  handlers into waves of `parallelism`. Within a wave we use
+ *  Promise.allSettled so one slow / throwing handler does not block sibling
+ *  progress; across waves we preserve registration order, so dependent
+ *  handlers (registered later) see prior waves already settled. This is the
+ *  trade-off the ADR documents.
+ *
+ *  Takes an already-snapshotted handler list: the caller owns the decision to
+ *  freeze registrations before the first await. */
+const runCleanupWaves = async (
+  snapshot: readonly CleanupHandler[],
+  parallelism: number,
+  cause: CancellationCause,
+  partial: PartialResult | null,
+): Promise<string[]> => {
+  const errors: string[] = []
+  for (let i = 0; i < snapshot.length; i += parallelism) {
+    const wave = snapshot.slice(i, i + parallelism)
+    const settled = await Promise.allSettled(wave.map((h) => h.cleanup(cause, partial)))
+    for (let j = 0; j < settled.length; j++) {
+      const s = settled[j]
+      if (s !== undefined && s.status === "rejected") {
+        const r: unknown = s.reason
+        errors.push(describeCleanupFailure(wave[j], r))
+      }
+    }
+  }
+  return errors
+}
 
 /** Build a fresh {@link CancellationController}. Each call returns a new
  *  controller with its own private state — there is no global / singleton. */
@@ -137,32 +191,11 @@ export const createCancellationController = (
       const finalCause = cause as CancellationCause
       const finalAt = abortedAt as number
 
+      // Freeze the registration list BEFORE the first await, so a handler that
+      // registers (or deregisters) from inside another handler cannot mutate
+      // the wave plan mid-flight.
       const snapshot = handlers.slice()
-      const errors: string[] = []
-
-      // Bounded parallel: chunk handlers into waves of `parallelism`. Within
-      // a wave we use Promise.allSettled so one slow / throwing handler does
-      // not block sibling progress; across waves we preserve registration
-      // order, so dependent handlers (registered later) see prior waves
-      // already settled. This is the trade-off the ADR documents.
-      for (let i = 0; i < snapshot.length; i += parallelism) {
-        const wave = snapshot.slice(i, i + parallelism)
-        const settled = await Promise.allSettled(wave.map((h) => h.cleanup(finalCause, partial)))
-        for (let j = 0; j < settled.length; j++) {
-          const s = settled[j]
-          if (s !== undefined && s.status === "rejected") {
-            const r: unknown = s.reason
-            // Plane-clean (header): inline the canonical errMessage body
-            // (byte-identical to `src/shared/errors.ts` `errMessage`). The
-            // pre-existing `typeof r === "string" ? r : String(r)` chain was
-            // redundant — `String(str) === str` for any string `str`.
-            const msg = r instanceof Error ? r.message : String(r)
-            const h = wave[j]
-            const name = h !== undefined ? h.name : "<unknown>"
-            errors.push(`${name}: ${msg}`)
-          }
-        }
-      }
+      const errors = await runCleanupWaves(snapshot, parallelism, finalCause, partial)
 
       const outcome: CancellationOutcome = {
         cause: finalCause,

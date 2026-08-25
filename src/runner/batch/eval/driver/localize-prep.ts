@@ -421,6 +421,127 @@ const resolveIssueHintRepoCandidates = (
  *
  *  This function never throws — every failure path lands on a regex
  *  fallback (or `""` when regex also returns empty). */
+/** The regex route: extract the hint, and — only when it actually named files —
+ *  resolve them against the repo tree so the observer sees REAL candidates.
+ *
+ *  WHY THIS IS A UNIT: `prepareIssueHint`'s cost was never its length. It is a
+ *  three-mode dispatcher, and its two fallback closures were declared INLINE,
+ *  so every guard inside them paid a nesting surcharge for sitting in a nested
+ *  arrow. This one is reached from THREE distinct routes (empty statement,
+ *  localizer threw, localizer returned nothing) — it was always a unit; it just
+ *  was not spelled as one. Hoisted to module scope, its two guards cost their
+ *  face value.
+ *
+ *  `onCandidates` is taken as a PARAMETER rather than read off `deps` inside,
+ *  so the narrowing survives the call boundary. */
+const regexIssueHintFallback = async (
+  problemStatement: string,
+  extractOpts: { readonly withExpectedActual: boolean },
+  readFileTree: () => Promise<string[]>,
+  onCandidates: ((files: readonly string[]) => void) | undefined,
+): Promise<string> => {
+  const hint = extractIssueHint(problemStatement, extractOpts)
+  if (hint.files.length > 0) {
+    const repoFiles = await readFileTree().catch(() => [])
+    const resolved = resolveIssueHintRepoCandidates(hint.files, repoFiles)
+    if (resolved.length > 0) onCandidates?.(resolved)
+  }
+  return composeIssueHint(hint)
+}
+
+/** Build the ONCE-ONLY repo file-tree reader.
+ *
+ *  WHY THIS IS A UNIT: the memo (`repoFilesPromise`) exists purely so the tree
+ *  is enumerated at most once per attempt no matter which of the three readers
+ *  asks for it. Wrapping the mutable cell in a factory keeps `let`'s
+ *  definite-assignment analysis with the code that owns it, and lets the reader
+ *  be passed to the hoisted helpers as a plain function. */
+const memoizedFileTree = (fileTree: () => Promise<string[]>): (() => Promise<string[]>) => {
+  let repoFilesPromise: Promise<string[]> | undefined
+  return async (): Promise<string[]> => {
+    repoFilesPromise ??= fileTree()
+    return repoFilesPromise
+  }
+}
+
+/** Race the localizer against the soft timeout, always clearing the timer.
+ *
+ *  WHY THIS IS A UNIT: timer creation, the race, and the `finally` cleanup are
+ *  one indivisible resource protocol — splitting them anywhere else leaks a
+ *  `setTimeout`. Returns `undefined` for "the localizer THREW" so the caller
+ *  keeps ownership of the fallback decision (the timeout arm is NOT a throw: it
+ *  resolves to an empty result, which routes through the empty-files branch
+ *  exactly as before). */
+const raceLocalizeWithTimeout = async (
+  problemStatement: string,
+  readFileTree: () => Promise<string[]>,
+  deps: PrepareIssueHintDeps,
+): Promise<AgentlessLocalizeResult | undefined> => {
+  const localize = deps.localize ?? agentlessLocalize
+  const timeoutMs = deps.timeoutMs ?? DEFAULT_PREPARE_TIMEOUT_MS
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const timeoutP = new Promise<AgentlessLocalizeResult>((resolve) => {
+    timer = setTimeout(() => resolve({ files: [], rationales: [], rawResponse: "" }), timeoutMs)
+  })
+  try {
+    return await Promise.race([
+      localize(problemStatement, {
+        llm: deps.llm,
+        fileTree: readFileTree,
+        ...(deps.localizeBudget ?? {}),
+      }),
+      timeoutP,
+    ])
+  } catch {
+    // localize threw (the function itself catches; this is belt-and-braces)
+    return undefined
+  } finally {
+    if (timer !== undefined) clearTimeout(timer)
+  }
+}
+
+/** F1 trace payload for one localize pass.
+ *
+ *  WHY THIS IS A UNIT: it is four independent "absent ⇒ safe default" reads of
+ *  the SAME optional `result.tree`, i.e. one decision ("what did the tree look
+ *  like?") spelled four times. `result.tree` is absent only on the timeout path
+ *  (the injected timeout result carries no tree); when absent we still report
+ *  the ranked count with a zeroed tree so the trace is never silently omitted. */
+type LocalizeTraceData = Parameters<NonNullable<PrepareIssueHintDeps["onLocalize"]>>[0]
+
+const localizeTraceOf = (result: AgentlessLocalizeResult): LocalizeTraceData => ({
+  treeFileCount: result.tree?.fileCount ?? 0,
+  truncated: result.tree?.truncated ?? false,
+  ...(result.tree?.truncatedChars !== undefined
+    ? { truncatedChars: result.tree.truncatedChars }
+    : {}),
+  rankedCandidateCount: result.files.length,
+})
+
+/** The observation providers for this pass.
+ *
+ *  agentless (LLM localizer) seeds owners from the issue; LSP-enrich
+ *  (default-ON, graceful no-op without a server) refines them to symbols +
+ *  contracts. lsp-prefetch outranks agentless in DEFAULT_SOURCE_AUTHORITY, so a
+ *  confirmed symbol owner wins.
+ *
+ *  WHY THIS IS A UNIT: the LSP provider rides ONLY when BOTH knobs are on. With
+ *  render OFF the hint MUST reproduce the legacy agentless `## Issue Hints`
+ *  BYTE-IDENTICALLY — letting LSP symbol-owners leak into the legacy render
+ *  would silently change the "off" output (jul-6 hellgate G3). Naming the rule
+ *  once is what keeps that two-knob conjunction from being restated. */
+const observationProvidersFor = (
+  result: AgentlessLocalizeResult,
+  sandbox: string,
+  deps: PrepareIssueHintDeps,
+) => {
+  const providers = [agentlessProvider(result)]
+  if (deps.renderObservations !== false && deps.lspPrefetch !== false) {
+    providers.push(lspEnrichProvider(result.files, sandbox))
+  }
+  return providers
+}
+
 export const prepareIssueHint = async (
   instance: Instance,
   sandbox: string,
@@ -435,65 +556,27 @@ export const prepareIssueHint = async (
     return composeIssueHint(extractIssueHint(problemStatement, extractOpts))
   }
   // mode === "agentless"
-  const fileTree = deps.fileTree ?? (async () => enumerateRepoSources(sandbox))
-  let repoFilesPromise: Promise<string[]> | undefined
-  const readFileTree = async (): Promise<string[]> => {
-    repoFilesPromise ??= fileTree()
-    return repoFilesPromise
-  }
-  const regexFallback = async (): Promise<string> => {
-    const hint = extractIssueHint(problemStatement, extractOpts)
-    if (hint.files.length > 0) {
-      const repoFiles = await readFileTree().catch(() => [])
-      const resolved = resolveIssueHintRepoCandidates(hint.files, repoFiles)
-      if (resolved.length > 0) deps.onCandidates?.(resolved)
-    }
-    return composeIssueHint(hint)
-  }
+  const readFileTree = memoizedFileTree(
+    deps.fileTree ?? (async () => enumerateRepoSources(sandbox)),
+  )
+  // Every failure route below lands here — the worst case of agentless mode is
+  // still a non-degenerate regex hint.
+  const fallback = (): Promise<string> =>
+    regexIssueHintFallback(problemStatement, extractOpts, readFileTree, deps.onCandidates)
   // Empty problem statement ⇒ regex also yields "" ⇒ byte-identical.
   if (typeof problemStatement !== "string" || problemStatement.length === 0) {
-    return regexFallback()
+    return fallback()
   }
-  const localize = deps.localize ?? agentlessLocalize
-  const timeoutMs = deps.timeoutMs ?? DEFAULT_PREPARE_TIMEOUT_MS
-  let timer: ReturnType<typeof setTimeout> | undefined
-  const timeoutP = new Promise<AgentlessLocalizeResult>((resolve) => {
-    timer = setTimeout(() => resolve({ files: [], rationales: [], rawResponse: "" }), timeoutMs)
-  })
-  let result: AgentlessLocalizeResult
-  try {
-    result = await Promise.race([
-      localize(problemStatement, {
-        llm: deps.llm,
-        fileTree: readFileTree,
-        ...(deps.localizeBudget ?? {}),
-      }),
-      timeoutP,
-    ])
-  } catch {
-    // localize threw (the function itself catches; this is belt-and-braces)
-    return regexFallback()
-  } finally {
-    if (timer !== undefined) clearTimeout(timer)
-  }
+  const result = await raceLocalizeWithTimeout(problemStatement, readFileTree, deps)
+  if (result === undefined) return fallback()
   // F1 — emit the file-tree build + localize outcome BEFORE the empty-files
   // fallback branches, so the trace fires even when localize gave up (the case
-  // most likely to be a truncation-dropped gold file). `result.tree` is absent
-  // only on the timeout path (the injected timeout result has no tree); when
-  // absent we still report the ranked count with a zeroed tree so the trace is
-  // never silently omitted.
-  deps.onLocalize?.({
-    treeFileCount: result.tree?.fileCount ?? 0,
-    truncated: result.tree?.truncated ?? false,
-    ...(result.tree?.truncatedChars !== undefined
-      ? { truncatedChars: result.tree.truncatedChars }
-      : {}),
-    rankedCandidateCount: result.files.length,
-  })
+  // most likely to be a truncation-dropped gold file).
+  deps.onLocalize?.(localizeTraceOf(result))
   if (result.files.length === 0) {
     // Localize gave up — fall back to regex so the bench still gets SOME
     // hint when an issue body contains explicit paths.
-    return regexFallback()
+    return fallback()
   }
   // T-201: surface the ranked candidates to the observer (no-op when unset) so a
   // FaultEvidencePacket can be built from THIS localization pass — never a second
@@ -504,19 +587,8 @@ export const prepareIssueHint = async (
   // to `composeAgentlessHint(result)` (S3 proven). ON ⇒ the `<quanta_observations>`
   // render (routing-hint framing + anti_signals). agentlessProvider ignores ctx, so
   // the bundle — and thus the OFF byte-identity — is independent of the ctx passed.
-  // agentless (LLM localizer) seeds owners from the issue; LSP-enrich (default-ON,
-  // graceful no-op without a server) refines them to symbols + contracts. lsp-prefetch
-  // outranks agentless in DEFAULT_SOURCE_AUTHORITY, so a confirmed symbol owner wins.
-  const providers = [agentlessProvider(result)]
-  // LSP-enrich only contributes when the kernel render is ON. With render OFF the
-  // hint MUST reproduce the legacy agentless `## Issue Hints` BYTE-IDENTICALLY —
-  // letting LSP symbol-owners leak into the legacy render would silently change the
-  // "off" output (jul-6 hellgate G3). So both knobs must be on for LSP to ride.
-  if (deps.renderObservations !== false && deps.lspPrefetch !== false) {
-    providers.push(lspEnrichProvider(result.files, sandbox))
-  }
   const bundle = await gatherObservations(
-    providers,
+    observationProvidersFor(result, sandbox, deps),
     { cwd: sandbox, issueText: problemStatement, repoFiles: await readFileTree().catch(() => []) },
     { authority: DEFAULT_SOURCE_AUTHORITY },
   )

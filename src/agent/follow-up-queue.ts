@@ -178,6 +178,79 @@ const assertFollowUp = (value: unknown): FollowUp => {
   }
 }
 
+/** Validated shell of a snapshot: the two fields every restore path needs
+ *  before it may look at anything else.
+ *
+ *  UNIT because the envelope checks are ORDER-SENSITIVE (record → version →
+ *  threads-array): each guard's message is a documented contract and a caller
+ *  that reordered them would change which error a malformed snapshot reports.
+ *  Keeping them in one function makes that order a single readable sequence
+ *  instead of three guards interleaved with restore bookkeeping. */
+interface SnapshotEnvelope {
+  readonly version: 1 | 2
+  readonly record: Record<string, unknown>
+  readonly threads: readonly unknown[]
+}
+
+/** Parse + validate the snapshot envelope. Throws with the SAME message, in
+ *  the SAME order, as the pre-extraction inline guards. */
+const parseSnapshotEnvelope = (snapshot: unknown): SnapshotEnvelope => {
+  if (!isRecord(snapshot)) {
+    throw new Error("Unsupported FollowUpQueueSnapshot version: undefined")
+  }
+  const version = snapshot.version
+  if (version !== 1 && version !== 2) {
+    throw new Error(`Unsupported FollowUpQueueSnapshot version: ${String(version)}`)
+  }
+  if (!Array.isArray(snapshot.threads)) {
+    throw new Error("Malformed FollowUpQueueSnapshot threads")
+  }
+  return { version, record: snapshot, threads: snapshot.threads }
+}
+
+/** The cap a version-2 snapshot carries. UNIT because "v2 persists its own
+ *  ceiling, v1 does not" is a versioning rule that belongs with the envelope,
+ *  not with the per-thread trim loop. Called ONLY on the v2 arm, so the
+ *  `maxPerThread` type guard still runs strictly after the threads-array
+ *  guard — the original evaluation order. */
+const readSnapshotCap = (record: Record<string, unknown>): number => {
+  if (typeof record.maxPerThread !== "number") {
+    throw new Error("Malformed FollowUpQueueSnapshot maxPerThread")
+  }
+  return normalizeMaxPerThread(record.maxPerThread)
+}
+
+/** One restored thread: its id, the entries that survived the cap trim, and
+ *  the highest seq seen among ALL of its entries (pre-trim — a trimmed-away
+ *  entry still advances the id counter so a post-restore enqueue can never
+ *  collide with an id that was once issued).
+ *
+ *  UNIT because the per-thread work is a self-contained parse: three shape
+ *  guards that all report the same "thread" message, an entry-validation loop,
+ *  and a tail-keeping trim. The queue-level loop only needs the RESULT of
+ *  that parse, so nothing about the map/seq bookkeeping belongs inside it. */
+interface ParsedSnapshotThread {
+  readonly threadId: string
+  readonly kept: readonly FollowUp[]
+  readonly maxSeq: number
+}
+
+const parseSnapshotThread = (t: unknown, cap: number): ParsedSnapshotThread => {
+  if (!isRecord(t)) throw new Error("Malformed FollowUpQueueSnapshot thread")
+  if (typeof t.threadId !== "string") throw new Error("Malformed FollowUpQueueSnapshot thread")
+  if (!Array.isArray(t.entries)) throw new Error("Malformed FollowUpQueueSnapshot thread")
+  const validated: FollowUp[] = []
+  let maxSeq = -1
+  for (const raw of t.entries) {
+    const e = assertFollowUp(raw)
+    validated.push(e)
+    const seq = parseSeq(e.id)
+    if (seq > maxSeq) maxSeq = seq
+  }
+  const kept = validated.length > cap ? validated.slice(validated.length - cap) : validated
+  return { threadId: t.threadId, kept, maxSeq }
+}
+
 /** Per-thread FIFO queue + multi-thread isolation. In-memory; persistence
  *  is via {@link toSnapshot}/{@link fromSnapshot}. */
 export class FollowUpQueue {
@@ -307,45 +380,17 @@ export class FollowUpQueue {
    *  it. Version 2 snapshots carry the cap explicitly and become the queue's
    *  new hard ceiling. */
   restoreFromSnapshot(snapshot: unknown): void {
-    if (!isRecord(snapshot)) {
-      throw new Error("Unsupported FollowUpQueueSnapshot version: undefined")
-    }
-    const version = snapshot.version
-    if (version !== 1 && version !== 2) {
-      throw new Error(`Unsupported FollowUpQueueSnapshot version: ${String(version)}`)
-    }
-    if (!Array.isArray(snapshot.threads)) {
-      throw new Error("Malformed FollowUpQueueSnapshot threads")
-    }
+    const envelope = parseSnapshotEnvelope(snapshot)
     const nextMaxPerThread =
-      version === 2
-        ? (() => {
-            if (typeof snapshot.maxPerThread !== "number") {
-              throw new Error("Malformed FollowUpQueueSnapshot maxPerThread")
-            }
-            return normalizeMaxPerThread(snapshot.maxPerThread)
-          })()
-        : this.maxPerThread
+      envelope.version === 2 ? readSnapshotCap(envelope.record) : this.maxPerThread
     const nextMap = new Map<ThreadId, ThreadQueueState>()
     let maxSeq = -1
-    for (const t of snapshot.threads) {
-      if (!isRecord(t)) throw new Error("Malformed FollowUpQueueSnapshot thread")
-      if (typeof t.threadId !== "string") throw new Error("Malformed FollowUpQueueSnapshot thread")
-      if (!Array.isArray(t.entries)) throw new Error("Malformed FollowUpQueueSnapshot thread")
-      const validated: FollowUp[] = []
-      for (const raw of t.entries) {
-        const e = assertFollowUp(raw)
-        validated.push(e)
-        const seq = parseSeq(e.id)
-        if (seq > maxSeq) maxSeq = seq
-      }
-      const kept =
-        validated.length > nextMaxPerThread
-          ? validated.slice(validated.length - nextMaxPerThread)
-          : validated
-      if (kept.length === 0) continue
-      nextMap.set(t.threadId as ThreadId, {
-        entries: kept,
+    for (const t of envelope.threads) {
+      const parsed = parseSnapshotThread(t, nextMaxPerThread)
+      if (parsed.maxSeq > maxSeq) maxSeq = parsed.maxSeq
+      if (parsed.kept.length === 0) continue
+      nextMap.set(parsed.threadId as ThreadId, {
+        entries: [...parsed.kept],
         head: 0,
       })
     }

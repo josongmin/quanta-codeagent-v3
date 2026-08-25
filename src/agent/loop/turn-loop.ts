@@ -16,7 +16,7 @@ import {
 import { classifyTurnAbort } from "./turn-gate"
 import { prepareTurnIteration } from "./turn-iteration"
 import { resolveTurnLoopOutcome, shouldParkOnGate } from "./turn-outcome"
-import type { RunAgentContext, TurnResult } from "./types"
+import type { RunAgentContext, TurnLoopResolution, TurnResult } from "./types"
 
 /** Classify a throw out of `runTurn` into the observability labels the finally
  *  block flushes. An approval-required PAUSE (HITL hand-off) is deliberately
@@ -194,6 +194,122 @@ const runTurnEpilogue = async (
   }
 }
 
+/** A stop verdict from either condition registry (`{reason, turns, stopCategory}`). */
+type TurnStop = NonNullable<Awaited<ReturnType<(typeof DEFAULT_PRE_TURN_STOP_CONDITIONS)[number]>>>
+
+/**
+ * H3 (OCP): the FIRST pre-turn stop condition that fires — admission control,
+ * evaluated before a model call is issued. Today: L2 cost pre-flight.
+ *
+ * UNIT because the registry walk IS the extension point: add a pre-turn stop
+ * concern by registering it in `DEFAULT_PRE_TURN_STOP_CONDITIONS`, never by
+ * editing the loop. First-non-undefined wins and the remaining conditions are
+ * NOT evaluated — a short-circuit the loop must not be free to re-order.
+ */
+const firstPreTurnStop = async (
+  ctx: RunAgentContext,
+  turn: number,
+): Promise<TurnStop | undefined> => {
+  for (const condition of DEFAULT_PRE_TURN_STOP_CONDITIONS) {
+    const stop = await condition(ctx, turn)
+    if (stop !== undefined) return stop
+  }
+  return undefined
+}
+
+/**
+ * H3 (OCP): the FIRST post-continue stop condition that fires — evaluated
+ * AFTER a turn resolves to continue (neither park nor finish), before the next
+ * iteration. Today: L4 cross-run ledger hard breach + dedup no-progress.
+ *
+ * UNIT for the same reason as {@link firstPreTurnStop}, and SYNCHRONOUS on
+ * purpose: these conditions are pure ledger reads, and making the walk `async`
+ * would insert a microtask turn between the turn's resolution and the next
+ * iteration that the pre-extraction loop did not have.
+ */
+const firstPostContinueStop = (ctx: RunAgentContext, turn: number): TurnStop | undefined => {
+  for (const condition of DEFAULT_POST_CONTINUE_STOP_CONDITIONS) {
+    const stop = condition(ctx, turn)
+    if (stop !== undefined) return stop
+  }
+  return undefined
+}
+
+/** The four arguments of one `ctx.finish(...)` call, captured so the decision
+ *  (WHICH finish) is separable from the act (calling it). */
+interface FinishCall {
+  readonly reason: Parameters<RunAgentContext["finish"]>[0]
+  readonly turns: number
+  readonly stopCategory: Parameters<RunAgentContext["finish"]>[2]
+  readonly refusal: Parameters<RunAgentContext["finish"]>[3]
+}
+
+/** What the loop must do once `resolveTurnLoopOutcome` has settled the turn:
+ *  end the run, take another turn immediately, or fall through to the
+ *  post-continue stop conditions. */
+type TurnDirective =
+  | { readonly kind: "finish"; readonly finish: FinishCall }
+  | { readonly kind: "retry" }
+  | { readonly kind: "proceed" }
+
+const RETRY_DIRECTIVE: TurnDirective = { kind: "retry" }
+const PROCEED_DIRECTIVE: TurnDirective = { kind: "proceed" }
+
+/**
+ * Map a settled {@link TurnLoopResolution} onto the loop's next move.
+ *
+ * UNIT because `park` and `finish` are the SAME decision wearing two hats —
+ * "may the subagent gate keep this run alive?" — and both answer it by awaiting
+ * the gate and then choosing between another turn and a terminal finish. Held
+ * apart they duplicated the gate/turn-budget reasoning in two nested branch
+ * tails; held together the two arms read as one table:
+ *
+ *   park   + gate says not-settled  ⇒ retry (keep waiting on the next turn)
+ *   park   + gate settled/absent    ⇒ finish as a SYSTEM interrupt
+ *   finish + gate parks + turns left⇒ retry (a wake reopened the run)
+ *   finish + otherwise              ⇒ finish with the resolution's own verdict
+ *   continue                        ⇒ proceed to the post-continue conditions
+ *
+ * The `turn < maxTurns` guard on the third row is load-bearing: a wake on the
+ * LAST allowed turn must not overwrite a clean terminal completion with the
+ * outer-loop `max_turns` fallback.
+ */
+const resolveTurnDirective = async (
+  ctx: RunAgentContext,
+  resolution: TurnLoopResolution,
+  turn: number,
+): Promise<TurnDirective> => {
+  if (resolution.kind === "park") {
+    const gate = ctx.cfg.subagentTurnGate
+    if (gate !== undefined && (await gate.wait(ctx.cfg.signal)) !== "settle") return RETRY_DIRECTIVE
+    const f = parkSettleFinish(resolution.turns)
+    return {
+      kind: "finish",
+      finish: {
+        reason: f.reason,
+        turns: f.turns,
+        stopCategory: f.stopCategory,
+        refusal: undefined,
+      },
+    }
+  }
+  if (resolution.kind === "finish") {
+    if (await shouldParkOnGate(ctx, resolution)) {
+      if (turn < ctx.cfg.maxTurns) return RETRY_DIRECTIVE
+    }
+    return {
+      kind: "finish",
+      finish: {
+        reason: resolution.reason,
+        turns: resolution.turns,
+        stopCategory: resolution.stopCategory,
+        refusal: resolution.refusal,
+      },
+    }
+  }
+  return PROCEED_DIRECTIVE
+}
+
 export const runAgentTurnLoop = async (ctx: RunAgentContext): Promise<AgentOutcome> => {
   for (let turn = 1; turn <= ctx.cfg.maxTurns; turn++) {
     const turnReady = await prepareTurnIteration({
@@ -211,12 +327,9 @@ export const runAgentTurnLoop = async (ctx: RunAgentContext): Promise<AgentOutco
     if (turnReady === "aborted") {
       return ctx.finish("aborted", turn - 1, interruptedCategory("user"))
     }
-    // H3 (OCP): PRE-TURN stop conditions (admission control) — a registry the loop iterates instead
-    // of an inline switch. Today: L2 cost pre-flight. Add a pre-turn stop concern by registering it
-    // in `DEFAULT_PRE_TURN_STOP_CONDITIONS`, not by editing this loop.
-    for (const condition of DEFAULT_PRE_TURN_STOP_CONDITIONS) {
-      const stop = await condition(ctx, turn)
-      if (stop !== undefined) return ctx.finish(stop.reason, stop.turns, stop.stopCategory)
+    const preTurnStop = await firstPreTurnStop(ctx, turn)
+    if (preTurnStop !== undefined) {
+      return ctx.finish(preTurnStop.reason, preTurnStop.turns, preTurnStop.stopCategory)
     }
     const { result } = await executeTurnWithObservability({ ctx, turn })
     const resolution = await resolveTurnLoopOutcome({
@@ -231,31 +344,19 @@ export const runAgentTurnLoop = async (ctx: RunAgentContext): Promise<AgentOutco
       pendingPlanEntryRef: ctx.pendingPlanEntryRef,
       hookPromptPending: ctx.hookPromptPending,
     })
-    if (resolution.kind === "park") {
-      const gate = ctx.cfg.subagentTurnGate
-      if (gate !== undefined && (await gate.wait(ctx.cfg.signal)) !== "settle") continue
-      const f = parkSettleFinish(resolution.turns)
-      return ctx.finish(f.reason, f.turns, f.stopCategory)
+    const directive = await resolveTurnDirective(ctx, resolution, turn)
+    if (directive.kind === "finish") {
+      const f = directive.finish
+      return ctx.finish(f.reason, f.turns, f.stopCategory, f.refusal)
     }
-    if (resolution.kind === "finish") {
-      if (await shouldParkOnGate(ctx, resolution)) {
-        // A wake on the LAST allowed turn must not overwrite a clean terminal
-        // completion with the outer-loop `max_turns` fallback.
-        if (turn < ctx.cfg.maxTurns) continue
-      }
+    if (directive.kind === "retry") continue
+    const postContinueStop = firstPostContinueStop(ctx, turn)
+    if (postContinueStop !== undefined) {
       return ctx.finish(
-        resolution.reason,
-        resolution.turns,
-        resolution.stopCategory,
-        resolution.refusal,
+        postContinueStop.reason,
+        postContinueStop.turns,
+        postContinueStop.stopCategory,
       )
-    }
-    // H3 (OCP): POST-CONTINUE stop conditions — evaluated AFTER the turn resolves to continue
-    // (neither park nor finish), before the next iteration. Today: L4 cross-run ledger hard breach.
-    // Register a post-continue stop concern in `DEFAULT_POST_CONTINUE_STOP_CONDITIONS`, not here.
-    for (const condition of DEFAULT_POST_CONTINUE_STOP_CONDITIONS) {
-      const stop = condition(ctx, turn)
-      if (stop !== undefined) return ctx.finish(stop.reason, stop.turns, stop.stopCategory)
     }
   }
   return ctx.finish("max_turns", ctx.cfg.maxTurns, completedCategory("max_turns"))

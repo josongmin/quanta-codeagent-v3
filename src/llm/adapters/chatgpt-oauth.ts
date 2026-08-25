@@ -41,6 +41,7 @@ import type { LLMPort } from "../ports"
 import { resolveDeliverableReasoningEffort } from "../reasoning-effort"
 import {
   defaultResponsesReasoningCarryoverStore,
+  type PrepareResponsesContinuationRequestArgs,
   prepareResponsesContinuationRequest,
   type ResponsesReasoningCarryoverStore,
   responsesStatusToKind,
@@ -125,49 +126,72 @@ export interface ChatGPTOAuthConfig extends AdapterStreamTimeoutConfig {
  *  passes the check here is guaranteed valid through the wire call. */
 const TOKEN_REFRESH_SKEW_MS = 60_000
 
+/** The typed shape a refresh failure collapses to. Named (was an inline
+ *  literal) so the three helpers below can all declare it. */
+interface RefreshFailureShape {
+  kind: LLMErrorKind
+  statusCode?: number
+  retryAfterMs?: number
+  errorCode?: string
+}
+
+/** The `auth` shape — the ONLY one carrying `errorCode`. A unit because the
+ *  conditional `errorCode` spread is what made the classifier's auth arm three
+ *  branches deep. Threads the OAuth `error` code so the token-purge predicate
+ *  can fire on an explicit `invalid_grant` even when the issuer returned it at
+ *  400 (RFC 6749 §5.2 allows 400) — D6: a revoked bundle must be deleted, not
+ *  re-refreshed forever, regardless of the status code it arrived on. */
+const refreshAuthShape = (e: TokenExchangeError): RefreshFailureShape => ({
+  kind: "auth",
+  statusCode: e.statusCode,
+  ...(e.errorCode !== undefined ? { errorCode: e.errorCode } : {}),
+})
+
+/** The `rate_limit` shape — the ONLY one carrying `retryAfterMs` (the
+ *  server-instructed delay parsed at the token endpoint, ADR-0208). */
+const refreshRateLimitShape = (e: TokenExchangeError): RefreshFailureShape => ({
+  kind: "rate_limit",
+  statusCode: e.statusCode,
+  ...(e.retryAfterMs !== undefined ? { retryAfterMs: e.retryAfterMs } : {}),
+})
+
+/**
+ * status → kind for every TokenExchangeError status that carries NO extra
+ * detail field. A separate unit (and a flat first-match table) because these
+ * four rules were an if/else chain interleaved with the two detail-bearing
+ * arms above, which is what pushed the classifier past the complexity cap.
+ *
+ *  - 5xx  → transient server_error.
+ *  - 400 / 422 → bad_request.
+ *  - 403 (D8) → an auth problem (account suspended, scope/grant revoked, but
+ *    NOT `invalid_grant` — that arm is taken earlier): route it to the
+ *    "run /login" advice + purge path rather than the catch-all `unknown`,
+ *    which gave no remediation hint and left the dead bundle on disk.
+ *  - anything else, INCLUDING statusCode 0 (response-shape failure on a
+ *    malformed 2xx body) → `unknown`. NOT a revocation: never re-classify as
+ *    fatal auth.
+ */
+const plainRefreshKind = (status: number): LLMErrorKind => {
+  if (status >= 500 && status < 600) return "server_error"
+  if (status === 400 || status === 422) return "bad_request"
+  if (status === 403) return "auth"
+  return "unknown"
+}
+
 /** Jun-10 silent-failure audit #15 — classify a token-REFRESH failure into a
  *  typed LLMError shape by branching on the TYPED statusCode, never the
  *  message. `invalid_grant`/401 is the ONLY re-auth ("run /login") trigger
  *  (RFC 6749 §5.2: `invalid_grant` = the refresh token is revoked/expired);
  *  everything else keeps its transient kind so the retry/fallback policy can
  *  route it instead of fatally killing the turn with a false "run /login". */
-const classifyRefreshFailure = (
-  e: unknown,
-): { kind: LLMErrorKind; statusCode?: number; retryAfterMs?: number; errorCode?: string } => {
-  if (e instanceof TokenExchangeError) {
-    const status = e.statusCode
-    if (status === 401 || e.errorCode === "invalid_grant") {
-      // Thread the OAuth `error` code so the token-purge predicate can fire on
-      // an explicit `invalid_grant` even when the issuer returned it at 400
-      // (RFC 6749 §5.2 allows 400) — D6: a revoked bundle must be deleted, not
-      // re-refreshed forever, regardless of the status code it arrived on.
-      return {
-        kind: "auth",
-        statusCode: status,
-        ...(e.errorCode !== undefined ? { errorCode: e.errorCode } : {}),
-      }
-    }
-    if (status === 429) {
-      return {
-        kind: "rate_limit",
-        statusCode: status,
-        ...(e.retryAfterMs !== undefined ? { retryAfterMs: e.retryAfterMs } : {}),
-      }
-    }
-    if (status >= 500 && status < 600) return { kind: "server_error", statusCode: status }
-    if (status === 400 || status === 422) return { kind: "bad_request", statusCode: status }
-    // D8 — a 403 at the token endpoint (account suspended, scope/grant revoked,
-    // non-`invalid_grant`) is an auth problem: route it to the "run /login"
-    // advice + purge path rather than the catch-all `unknown` (which gave no
-    // remediation hint and left the dead bundle on disk).
-    if (status === 403) return { kind: "auth", statusCode: status }
-    // statusCode 0 = response-shape failure (malformed 2xx body) and any other
-    // unmapped status: NOT a revocation — never re-classify as fatal auth.
-    return { kind: "unknown", statusCode: status }
-  }
+const classifyRefreshFailure = (e: unknown): RefreshFailureShape => {
   // Non-HTTP failure: the fetch itself threw (DNS/socket) or the post-refresh
   // disk persist failed — transient, retry-eligible, never a re-auth trigger.
-  return { kind: "network" }
+  if (!(e instanceof TokenExchangeError)) return { kind: "network" }
+  const status = e.statusCode
+  if (status === 401 || e.errorCode === "invalid_grant") return refreshAuthShape(e)
+  if (status === 429) return refreshRateLimitShape(e)
+  return { kind: plainRefreshKind(status), statusCode: status }
 }
 
 export class ChatGPTOAuthAdapter implements LLMPort {
@@ -420,6 +444,88 @@ export class ChatGPTOAuthAdapter implements LLMPort {
       : {}
   }
 
+  /** The six env-derived body knobs, each present ONLY when the composition
+   *  root configured it (absent ⇒ byte-identical wire body). A unit because it
+   *  was SIX `...(x !== undefined ? { k: x } : {})` spreads written inline in
+   *  the `prepare` call — one shape, one place, and `stream` stops paying the
+   *  per-ternary nesting surcharge for every one of them. */
+  private bodyKnobs(): Pick<
+    PrepareResponsesContinuationRequestArgs,
+    | "maxOutputTokens"
+    | "serviceTier"
+    | "reasoningEffort"
+    | "reasoningSummary"
+    | "reasoningSummaryDetail"
+    | "reasoningVerbosity"
+  > {
+    return {
+      ...(this.maxTokens !== undefined ? { maxOutputTokens: this.maxTokens } : {}),
+      ...(this.serviceTier !== undefined ? { serviceTier: this.serviceTier } : {}),
+      ...(this.reasoningEffort !== undefined ? { reasoningEffort: this.reasoningEffort } : {}),
+      ...(this.reasoningSummary ? { reasoningSummary: true } : {}),
+      ...(this.reasoningSummaryDetail !== undefined
+        ? { reasoningSummaryDetail: this.reasoningSummaryDetail }
+        : {}),
+      ...(this.reasoningVerbosity !== undefined
+        ? { reasoningVerbosity: this.reasoningVerbosity }
+        : {}),
+    }
+  }
+
+  /** Wire headers for the `/responses` POST. A unit because `chatgpt-account-id`
+   *  is the ONLY conditional in an otherwise fixed header block. */
+  private static wireHeaders(
+    token: TokenRecord,
+    cfg: ReturnType<typeof resolveOAuthConfig>,
+  ): Record<string, string> {
+    const headers: Record<string, string> = {
+      "content-type": "application/json",
+      accept: "text/event-stream",
+      authorization: `Bearer ${token.access_token}`,
+      "oai-product-sku": cfg.sku,
+      originator: cfg.originator,
+    }
+    if (token.account_id !== undefined) {
+      headers["chatgpt-account-id"] = token.account_id
+    }
+    return headers
+  }
+
+  /** `QUANTA_DEBUG_OAUTH` body dump (long `data:` URLs elided). A unit because
+   *  the `JSON.stringify` replacer is a NESTED arrow with its own compound
+   *  condition — inside `stream` it was charged at generator-body depth. */
+  private logPreparedBody(body: unknown): void {
+    if (!this.debugOAuth) return
+    const debugJson = JSON.stringify(body, (_k, v) => {
+      if (typeof v === "string" && v.startsWith("data:") && v.length > 80) {
+        return `${v.slice(0, 60)}…[${v.length} chars]`
+      }
+      return v
+    })
+    logger.debug(`[oauth body] ${debugJson}`)
+  }
+
+  /** Purge the dead bundle and build the typed replacement error. A unit
+   *  because it is the entire "server invalidated us" remediation: the purge
+   *  side effect and the message describing its outcome are one decision, and
+   *  hoisting it keeps two more ternaries out of `stream`'s catch. */
+  private async invalidatedAuthError(error: unknown): Promise<LLMError> {
+    const purged = await this.purgeQuantaTokenBestEffort()
+    const hint = purged
+      ? "Local token deleted — run /login to sign in again."
+      : "Token is managed externally (e.g. Codex CLI) — sign out and back in there."
+    const status = error instanceof LLMError ? error.statusCode : undefined
+    return new LLMError(
+      `ChatGPT-OAuth token invalidated by server${status !== undefined ? ` (${status})` : ""}. ${hint}`,
+      {
+        kind: "auth",
+        provider: "chatgpt-oauth",
+        cause: error,
+        ...(status !== undefined ? { statusCode: status } : {}),
+      },
+    )
+  }
+
   async *stream(input: StreamInput): AsyncIterable<StreamEvent> {
     try {
       const token = await this.ensureFreshToken()
@@ -440,18 +546,12 @@ export class ChatGPTOAuthAdapter implements LLMPort {
         )
       }
       const continuationStore = input.responsesContinuation?.store
+      // Bound ONCE: the same fragment is spread into both the prepare call and
+      // the stream call, so the narrowing lives in one `const`.
+      const continuation = continuationStore !== undefined ? { continuationStore } : {}
 
       const url = `${baseURL}${RESPONSES_PATH}`
-      const headers: Record<string, string> = {
-        "content-type": "application/json",
-        accept: "text/event-stream",
-        authorization: `Bearer ${token.access_token}`,
-        "oai-product-sku": cfg.sku,
-        originator: cfg.originator,
-      }
-      if (token.account_id !== undefined) {
-        headers["chatgpt-account-id"] = token.account_id
-      }
+      const headers = ChatGPTOAuthAdapter.wireHeaders(token, cfg)
 
       // H15 — carry-over flag+store only when the gate is on (off ⇒ byte-identical).
       const carryover = this.carryoverOpts()
@@ -459,29 +559,12 @@ export class ChatGPTOAuthAdapter implements LLMPort {
         input,
         model: effectiveModel,
         transportId: "chatgpt-oauth",
-        ...(this.maxTokens !== undefined ? { maxOutputTokens: this.maxTokens } : {}),
-        ...(this.serviceTier !== undefined ? { serviceTier: this.serviceTier } : {}),
-        ...(this.reasoningEffort !== undefined ? { reasoningEffort: this.reasoningEffort } : {}),
-        ...(this.reasoningSummary ? { reasoningSummary: true } : {}),
-        ...(this.reasoningSummaryDetail !== undefined
-          ? { reasoningSummaryDetail: this.reasoningSummaryDetail }
-          : {}),
-        ...(this.reasoningVerbosity !== undefined
-          ? { reasoningVerbosity: this.reasoningVerbosity }
-          : {}),
-        ...(continuationStore !== undefined ? { continuationStore } : {}),
+        ...this.bodyKnobs(),
+        ...continuation,
         ...carryover,
       })
 
-      if (this.debugOAuth) {
-        const debugJson = JSON.stringify(prepared.body, (_k, v) => {
-          if (typeof v === "string" && v.startsWith("data:") && v.length > 80) {
-            return `${v.slice(0, 60)}…[${v.length} chars]`
-          }
-          return v
-        })
-        logger.debug(`[oauth body] ${debugJson}`)
-      }
+      this.logPreparedBody(prepared.body)
 
       yield* streamResponsesSurface({
         provider: "chatgpt-oauth",
@@ -493,7 +576,7 @@ export class ChatGPTOAuthAdapter implements LLMPort {
         url,
         headers,
         timeoutMs: this.streamTimeoutMs,
-        ...(continuationStore !== undefined ? { continuationStore } : {}),
+        ...continuation,
         ...carryover,
         disableResumeOnStatuses: new Set([400, 422]),
       })
@@ -506,23 +589,57 @@ export class ChatGPTOAuthAdapter implements LLMPort {
       // router falls through to whatever else is configured (BYOK key,
       // anthropic, etc.) instead of looping on a dead token (D6).
       if (ChatGPTOAuthAdapter.isInvalidatedAuthError(error)) {
-        const purged = await this.purgeQuantaTokenBestEffort()
-        const hint = purged
-          ? "Local token deleted — run /login to sign in again."
-          : "Token is managed externally (e.g. Codex CLI) — sign out and back in there."
-        const status = error instanceof LLMError ? error.statusCode : undefined
-        throw new LLMError(
-          `ChatGPT-OAuth token invalidated by server${status !== undefined ? ` (${status})` : ""}. ${hint}`,
-          {
-            kind: "auth",
-            provider: "chatgpt-oauth",
-            cause: error,
-            ...(status !== undefined ? { statusCode: status } : {}),
-          },
-        )
+        throw await this.invalidatedAuthError(error)
       }
       throw error
     }
+  }
+}
+
+/** One usable catalog entry, before the priority sort. */
+interface CatalogRow {
+  readonly model: string
+  readonly priority: number
+  readonly is_default?: boolean
+}
+
+/** Pick the row array out of the three response envelopes we have observed:
+ *  a bare array, `{models:[…]}` (live chatgpt.com), `{data:[…]}` (OpenAI
+ *  style). A unit because it was a 3-deep nested ternary — the same decision
+ *  reads as a first-match list. */
+const pickCatalogList = (raw: unknown): readonly unknown[] => {
+  if (Array.isArray(raw)) return raw
+  if (isObject(raw) && Array.isArray(raw.models)) return raw.models
+  if (isObject(raw) && Array.isArray(raw.data)) return raw.data
+  return []
+}
+
+/** The wire model name. `slug` is what the live response carries; `model` /
+ *  `id` are accepted for forward-compat with Codex's older `ModelPreset`
+ *  typing. `null` ⇒ the entry names no model and is unusable. A unit for the
+ *  same reason as {@link pickCatalogList}: it was a 3-deep nested ternary. */
+const pickCatalogSlug = (item: Record<string, unknown>): string | null => {
+  if (typeof item.slug === "string") return item.slug
+  if (typeof item.model === "string") return item.model
+  if (typeof item.id === "string") return item.id
+  return null
+}
+
+/** One raw catalog entry → sortable row, or `undefined` when unusable. A unit
+ *  because it holds ALL the per-entry rejection rules in one place: not an
+ *  object, hidden by `visibility` (anything other than the string `"list"`
+ *  when `visibility` IS a string), or no slug. A missing/non-numeric
+ *  `priority` sorts last. */
+const toCatalogRow = (item: unknown): CatalogRow | undefined => {
+  if (!isObject(item)) return undefined
+  if (typeof item.visibility === "string" && item.visibility !== "list") return undefined
+  const slug = pickCatalogSlug(item)
+  if (slug === null) return undefined
+  const priority = typeof item.priority === "number" ? item.priority : Number.MAX_SAFE_INTEGER
+  return {
+    model: slug,
+    priority,
+    ...(item.is_default === true ? { is_default: true } : {}),
   }
 }
 
@@ -552,32 +669,10 @@ export class ChatGPTOAuthAdapter implements LLMPort {
 const extractCatalogModels = (
   raw: unknown,
 ): readonly { readonly model: string; readonly is_default?: boolean }[] => {
-  const list = Array.isArray(raw)
-    ? raw
-    : isObject(raw) && Array.isArray(raw.models)
-      ? raw.models
-      : isObject(raw) && Array.isArray(raw.data)
-        ? raw.data
-        : []
-  const rows: { model: string; priority: number; is_default?: boolean }[] = []
-  for (const item of list) {
-    if (!isObject(item)) continue
-    if (typeof item.visibility === "string" && item.visibility !== "list") continue
-    const slug =
-      typeof item.slug === "string"
-        ? item.slug
-        : typeof item.model === "string"
-          ? item.model
-          : typeof item.id === "string"
-            ? item.id
-            : null
-    if (slug === null) continue
-    const priority = typeof item.priority === "number" ? item.priority : Number.MAX_SAFE_INTEGER
-    rows.push({
-      model: slug,
-      priority,
-      ...(item.is_default === true ? { is_default: true } : {}),
-    })
+  const rows: CatalogRow[] = []
+  for (const item of pickCatalogList(raw)) {
+    const row = toCatalogRow(item)
+    if (row !== undefined) rows.push(row)
   }
   rows.sort((a, b) => a.priority - b.priority)
   return rows.map(({ model, is_default }) =>

@@ -75,6 +75,69 @@ export interface AdaptiveControllerArgs<P> {
   readonly limits?: AdaptiveLimits
 }
 
+/** What one router round-trip produced: either a finished run, or the
+ *  non-terminal action to execute next. */
+type AdaptiveRoute =
+  | { readonly kind: "done"; readonly result: AdaptiveRunResult }
+  | {
+      readonly kind: "execute"
+      readonly action: AdaptiveAction
+      readonly decision: AdaptiveDecision
+    }
+
+/**
+ * One router round-trip plus the three FAIL-CLOSED gates on its output: an
+ * unparseable decision, a caller-declared illegal action, and a terminal action.
+ *
+ * Its own unit because each gate returns a DIFFERENTLY SHAPED
+ * {@link AdaptiveRunResult}, and inline every one of them sat inside the
+ * `while(true)` and paid its nesting surcharge — which was most of the loop's
+ * score. `steps` is threaded through (not copied) so a returned result carries
+ * the same live array the original returned.
+ */
+const routeAdaptiveStep = async <P>(
+  args: AdaptiveControllerArgs<P>,
+  packet: P,
+  steps: AdaptiveAction[],
+): Promise<AdaptiveRoute> => {
+  const citableIds = args.citableIds(packet)
+  const raw = await args.router({ packet, citableIds })
+  const parsed = parseAdaptiveDecision(raw, citableIds)
+  // FAIL-CLOSED: invalid output never submits — escalate for a human/typed stop.
+  if (!parsed.ok) {
+    return {
+      kind: "done",
+      result: { outcome: "escalate_needs_human", reason: parsed.reason, steps },
+    }
+  }
+  const illegalReason = args.validateDecision?.(packet, parsed.decision)
+  if (illegalReason !== undefined) {
+    return {
+      kind: "done",
+      result: {
+        outcome: "escalate_needs_human",
+        reason: `illegal_action:${illegalReason}`,
+        steps,
+      },
+    }
+  }
+
+  const { action } = parsed.decision
+  if (isTerminalAction(action)) {
+    const reason = terminalStopReason(action)
+    return {
+      kind: "done",
+      result: {
+        outcome: action === "accept_thin" ? "finalize" : "stop",
+        ...(reason !== undefined ? { reason } : {}),
+        steps,
+        finalDecision: parsed.decision,
+      },
+    }
+  }
+  return { kind: "execute", action, decision: parsed.decision }
+}
+
 /**
  * Drive the bounded adaptive loop. Terminates on: a terminal action
  * (`accept_thin` → finalize, `stop_infra_or_budget` → stop), a `finalize_after`
@@ -94,30 +157,9 @@ export const runAdaptiveEscalation = async <P>(
     if (steps.length >= limits.maxTotalSteps)
       return { outcome: "stop", reason: "max_steps_exhausted", steps }
 
-    const citableIds = args.citableIds(packet)
-    const raw = await args.router({ packet, citableIds })
-    const parsed = parseAdaptiveDecision(raw, citableIds)
-    // FAIL-CLOSED: invalid output never submits — escalate for a human/typed stop.
-    if (!parsed.ok) return { outcome: "escalate_needs_human", reason: parsed.reason, steps }
-    const illegalReason = args.validateDecision?.(packet, parsed.decision)
-    if (illegalReason !== undefined) {
-      return {
-        outcome: "escalate_needs_human",
-        reason: `illegal_action:${illegalReason}`,
-        steps,
-      }
-    }
-
-    const { action } = parsed.decision
-    if (isTerminalAction(action)) {
-      const reason = terminalStopReason(action)
-      return {
-        outcome: action === "accept_thin" ? "finalize" : "stop",
-        ...(reason !== undefined ? { reason } : {}),
-        steps,
-        finalDecision: parsed.decision,
-      }
-    }
+    const routed = await routeAdaptiveStep(args, packet, steps)
+    if (routed.kind === "done") return routed.result
+    const { action } = routed
 
     const admission = admitNextStep(steps, action, limits)
     if (!admission.admit) return { outcome: "stop", reason: admission.stopReason, steps }
@@ -130,7 +172,7 @@ export const runAdaptiveEscalation = async <P>(
     steps.push(action)
 
     if (classifyAction(action) === "finalize_after")
-      return { outcome: "finalize", steps, finalDecision: parsed.decision }
+      return { outcome: "finalize", steps, finalDecision: routed.decision }
 
     // reroute: rebuild evidence and route again (bounded by the caps above).
     packet = nextPacket

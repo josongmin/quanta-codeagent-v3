@@ -411,6 +411,159 @@ type PostAdmissibilityConsult = (
 
 const POST_ADMISSIBILITY_CONSULTS: readonly PostAdmissibilityConsult[] = [consultOwnership]
 
+/**
+ * Walk a consult registry in order and return the FIRST non-null
+ * short-circuit, or `null` when every consult admitted the call.
+ *
+ * UNIT because dispatch has THREE consult registries (pre-admissibility,
+ * pre-flight, post-admissibility) whose walks were three byte-identical
+ * `for … if (short) return short` copies differing only in the arguments each
+ * consult takes. The generic `run` callback carries that difference, so the
+ * FIRST-WINS + do-not-evaluate-the-rest contract — the part that is actually
+ * security-relevant, since a later consult must never override an earlier
+ * deny — is stated exactly once.
+ */
+const firstConsult = <T>(
+  consults: readonly T[],
+  run: (consult: T) => DispatchResult | null,
+): DispatchResult | null => {
+  for (const consult of consults) {
+    const short = run(consult)
+    if (short) return short
+  }
+  return null
+}
+
+/** The SSOT pre-execute gate's outcome: either it short-circuited the call, or
+ *  it admitted it — possibly with a `pre_tool_use` hook rewrite of the args. */
+type AdmissibilityOutcome =
+  | { readonly kind: "short"; readonly result: DispatchResult }
+  | { readonly kind: "admit"; readonly rewritten: { readonly value: unknown } | undefined }
+
+/**
+ * Run the SSOT pre-execute gate (see admissibility-gate.ts for the canonical
+ * order) and report BOTH of its channels.
+ *
+ * UNIT because the gate has a RETURN channel (a deny) and a CALLBACK channel
+ * (`onInputMutation`, the Cursor `updated_input` parity rewrite), and the two
+ * have to be read together: a rewrite captured off a call the gate then denied
+ * must never reach `execute`. Folding both into one discriminated outcome makes
+ * that impossible to get wrong, and removes the mutable `let rewritten` the
+ * caller previously had to keep alive across the await. The wrapper object
+ * (`{ value }`) lets a hook legitimately rewrite to a falsy value.
+ *
+ * Default-OFF: no hooks (or no rewrite) ⇒ `rewritten` stays undefined and the
+ * executed call is byte-identical to the pre-hook path.
+ */
+const runPreExecuteGate = async (
+  call: ToolUseBlock,
+  config: AgentConfig,
+  permission: PermissionContext,
+  action: Parameters<typeof runAdmissibilityGate>[3],
+  autoClassifier: AutoModeClassifier | undefined,
+): Promise<AdmissibilityOutcome> => {
+  let rewritten: { value: unknown } | undefined
+  const gated = await runAdmissibilityGate(call, config, permission, action, autoClassifier, {
+    ...(config.admissibility ?? {}),
+    // ALBB-11 (ADR-0407) — the approval-state-machine is a cross-cutting
+    // observability port wired onto TOP-LEVEL `config` (observability-wire.ts),
+    // NOT the `admissibility` sub-bundle. Thread it into the gate opts at this
+    // single seam so reviewer escalations attribute `request`/`settle` to the
+    // Objective / Run Ledger. Presence-gated ⇒ absent (default-OFF /
+    // `QUANTA_OBSERVABILITY` off) is byte-identical legacy.
+    ...(config.approvalStateMachine !== undefined
+      ? { approvalStateMachine: config.approvalStateMachine }
+      : {}),
+    onInputMutation: (next) => {
+      rewritten = { value: next }
+    },
+  })
+  if (gated) return { kind: "short", result: gated }
+  return { kind: "admit", rewritten }
+}
+
+/**
+ * Build the tool-execution context for the (possibly rewritten) call, together
+ * with the interrupt router that must be disposed after execute.
+ *
+ * UNIT because the router and the context are one resource with two halves:
+ * the router is created ONLY to be threaded into `ctx.interrupt`, and the
+ * caller needs the handle back for exactly one reason — to `dispose()` it in a
+ * `finally`. Returning them as a pair makes "you built it, you must release it"
+ * a single hand-off instead of two loose locals.
+ *
+ * jun-6 (RFC jun-6-tool-interrupt-behavior) — for a `block` tool with the knob
+ * ON, run over a derived suppressible signal + a critical-section seam so the
+ * tool's atomic FS-write window finishes whole before a withheld ESC lands.
+ * ABSENT (knob off / `cancel` tool) ⇒ ctx threads the raw signal, no seam
+ * (byte-identical).
+ */
+const buildInterruptAwareContext = (
+  config: AgentConfig,
+  effectiveCall: ToolUseBlock,
+  collabMode: ReturnType<typeof resolveCollaborationMode>,
+  workingState: WorkingStateHandle | undefined,
+): {
+  readonly ctx: ToolContext
+  readonly interruptHandle: ReturnType<typeof maybeBuildInterruptRouter>
+} => {
+  const interruptHandle = maybeBuildInterruptRouter(config, effectiveCall.name)
+  const ctx = buildToolContext({
+    config,
+    workingState,
+    collabMode,
+    toolCallId: effectiveCall.id,
+    ...(interruptHandle !== undefined
+      ? {
+          interrupt: {
+            signal: interruptHandle.signal,
+            criticalSection: interruptHandle.router.seam,
+          },
+        }
+      : {}),
+  })
+  return { ctx, interruptHandle }
+}
+
+/**
+ * The POST-execute chain: observe the failure for the effort classifier, then
+ * layer the two system-reminder steers onto the result and fire the post hooks.
+ *
+ * UNIT because every step here transforms an ALREADY-PRODUCED result and none
+ * of them can change WHETHER the tool ran — the opposite of the gate chain
+ * above it. They also compose in a fixed order that matters: the cap reminder
+ * is prepended first (ADR-0062 rule #3, so the model reads the enforcement hint
+ * alongside the tool output), the repro-doubt steer second (jun-20, reusing the
+ * same system-reminder framing), and the hooks last so a `post_tool_use`
+ * consumer sees the FINAL text the model will read.
+ */
+const finalizeDispatchResult = async (args: {
+  readonly out: DispatchResult
+  readonly config: AgentConfig
+  readonly effectiveCall: ToolUseBlock
+  readonly capReminder: string | undefined
+  readonly shellCommand: string | null
+}): Promise<DispatchResult> => {
+  const { config, effectiveCall, capReminder } = args
+  observeEffortClassifierToolFailure(config.effortClassifier, effectiveCall.name, args.out)
+  // When a reminder was generated, prepend it as a `<system-reminder>` block in
+  // the tool result output so the model reads the enforcement hint alongside
+  // the tool output.
+  const cappedOut = capReminder !== undefined ? prependCapReminder(args.out, capReminder) : args.out
+  // repro-doubt: advance the stuck counter + (once per streak) prepend the
+  // doubt steer. Default-OFF byte-identical when the knob is unset.
+  const finalOut = applyReproDoubtSteer(
+    cappedOut,
+    config,
+    effectiveCall.name,
+    args.shellCommand ?? undefined,
+  )
+  if (config.hooks) {
+    await emitPostToolUseHooks(config, effectiveCall, finalOut)
+  }
+  return finalOut
+}
+
 /** Span-free dispatch body (extracted so the outer wrap keeps a single control
  *  flow). Reads as a linear spine: unknown-tool guard → plan-mode seam → uniform
  *  pre-flight consults → action build → admissibility gate → ownership consult →
@@ -434,17 +587,15 @@ const dispatchToolInner = async (
   // Plan-mode seam consulted BEFORE the dedup/admissibility gates (dispatch-time,
   // stateless — a `default`⇒`plan` transition only affects later calls).
   const collab = resolveCollaborationMode(config)
-  for (const consult of PRE_ADMISSIBILITY_CONSULTS) {
-    const short = consult(call, config, collab)
-    if (short) return short
-  }
+  const preAdmissibilityShort = firstConsult(PRE_ADMISSIBILITY_CONSULTS, (consult) =>
+    consult(call, config, collab),
+  )
+  if (preAdmissibilityShort) return preAdmissibilityShort
 
   // Uniform pre-flights (dedup, localize-phase, test-scope, dispatch-guard) —
   // consulted in order, first non-null short-circuits before any gate work.
-  for (const consult of PRE_FLIGHT_CONSULTS) {
-    const short = consult(call, config)
-    if (short) return short
-  }
+  const preFlightShort = firstConsult(PRE_FLIGHT_CONSULTS, (consult) => consult(call, config))
+  if (preFlightShort) return preFlightShort
 
   // S16: populate `shellCommand` from the registry so the permission policy
   // applies HARD_DENY uniformly to ANY tool that exposes a shell-command
@@ -457,60 +608,26 @@ const dispatchToolInner = async (
     ...(shellCommand !== null ? { shellCommand } : {}),
   }
 
-  // SSOT pre-execute gate (see admissibility-gate.ts for the canonical order).
-  // A `pre_tool_use` hook may rewrite the tool args (Cursor `updated_input`
-  // parity). The gate runs that hook on its admit path and surfaces the rewrite
-  // through `onInputMutation`; we capture it here and execute the MUTATED input.
-  // Default-OFF: no hooks (or no rewrite) ⇒ `rewritten` stays undefined and the
-  // executed call is byte-identical to the pre-hook path. The wrapper object
-  // (`{ value }`) lets a hook legitimately rewrite to a falsy value.
-  let rewritten: { value: unknown } | undefined
-  const gated = await runAdmissibilityGate(call, config, permission, action, autoClassifier, {
-    ...(config.admissibility ?? {}),
-    // ALBB-11 (ADR-0407) — the approval-state-machine is a cross-cutting
-    // observability port wired onto TOP-LEVEL `config` (observability-wire.ts),
-    // NOT the `admissibility` sub-bundle. Thread it into the gate opts at this
-    // single seam so reviewer escalations attribute `request`/`settle` to the
-    // Objective / Run Ledger. Presence-gated ⇒ absent (default-OFF /
-    // `QUANTA_OBSERVABILITY` off) is byte-identical legacy.
-    ...(config.approvalStateMachine !== undefined
-      ? { approvalStateMachine: config.approvalStateMachine }
-      : {}),
-    onInputMutation: (next) => {
-      rewritten = { value: next }
-    },
-  })
-  if (gated) return gated
-  for (const consult of POST_ADMISSIBILITY_CONSULTS) {
-    const short = consult(call, config, shellCommand, action.isReadOnly)
-    if (short) return short
-  }
+  const admission = await runPreExecuteGate(call, config, permission, action, autoClassifier)
+  if (admission.kind === "short") return admission.result
+  const postAdmissibilityShort = firstConsult(POST_ADMISSIBILITY_CONSULTS, (consult) =>
+    consult(call, config, shellCommand, action.isReadOnly),
+  )
+  if (postAdmissibilityShort) return postAdmissibilityShort
   // SECURITY: the rewrite is applied AFTER the permission / HARD_DENY gates ran
   // on the original input. A hook is operator-authored local code at the trust
   // level of the permission config itself, so this is intentional (the model
   // and untrusted content cannot reach it). See hooks.ts `emit` security note.
+  const rewritten = admission.rewritten
   const effectiveCall: ToolUseBlock = rewritten ? { ...call, input: rewritten.value } : call
-  // jun-6 (RFC jun-6-tool-interrupt-behavior) — for a `block` tool with the knob
-  // ON, run over a derived suppressible signal + a critical-section seam so the
-  // tool's atomic FS-write window finishes whole before a withheld ESC lands.
-  // ABSENT (knob off / `cancel` tool) ⇒ ctx threads the raw signal, no seam
-  // (byte-identical). The router is disposed in the `finally` below so the
-  // upstream listener + any armed watchdog are always released.
-  const interruptHandle = maybeBuildInterruptRouter(config, effectiveCall.name)
-  const ctx = buildToolContext({
+  // The router is disposed in the `finally` below so the upstream listener + any
+  // armed watchdog are always released.
+  const { ctx, interruptHandle } = buildInterruptAwareContext(
     config,
+    effectiveCall,
+    collab,
     workingState,
-    collabMode: collab,
-    toolCallId: effectiveCall.id,
-    ...(interruptHandle !== undefined
-      ? {
-          interrupt: {
-            signal: interruptHandle.signal,
-            criticalSection: interruptHandle.router.seam,
-          },
-        }
-      : {}),
-  })
+  )
   // ADR-0062 rule #3 — cap-as-instruction enforcement (DEFAULT-OFF).
   // Before executing the tool, check whether the model IGNORED the last
   // nextAction hint for this (toolName, targetPath) pair. When ignored, emit
@@ -533,23 +650,7 @@ const dispatchToolInner = async (
     // whether execute settled or threw. Idempotent + no-op when absent.
     interruptHandle?.router.dispose()
   }
-  observeEffortClassifierToolFailure(config.effortClassifier, effectiveCall.name, out)
-  // When a reminder was generated, prepend it as a `<system-reminder>` block
-  // in the tool result output so the model reads the enforcement hint alongside
-  // the tool output. `prependCapReminder` is extracted to keep complexity low.
-  const cappedOut = capReminder !== undefined ? prependCapReminder(out, capReminder) : out
-  // repro-doubt: advance the stuck counter + (once per streak) prepend the
-  // doubt steer. Default-OFF byte-identical when the knob is unset.
-  const finalOut = applyReproDoubtSteer(
-    cappedOut,
-    config,
-    effectiveCall.name,
-    shellCommand ?? undefined,
-  )
-  if (config.hooks) {
-    await emitPostToolUseHooks(config, effectiveCall, finalOut)
-  }
-  return finalOut
+  return finalizeDispatchResult({ out, config, effectiveCall, capReminder, shellCommand })
 }
 
 /** ADR-0133 — fire `post_tool_use` (always) + `post_tool_use_failure` (only

@@ -61,6 +61,52 @@ const trimHead = (s: string, target: number): string => {
   return `${s.slice(0, room)}\n… <${dropped} bytes truncated>`
 }
 
+/** The `Command:` + optional `Exit code:` tail. THREE of the four gate variants
+ *  ended with these exact two lines, each respelling the same conditional
+ *  `Exit code` spread — one unit, spelled once. */
+const gateCommandLines = (commandText: string, exitCode: number | undefined): string[] => [
+  `Command: ${commandText}`,
+  ...(exitCode !== undefined ? [`Exit code: ${exitCode}`] : []),
+]
+
+/** How the primary rail names itself in the lead sentence when the command text
+ *  is withheld (the visible command cannot say it). */
+const primaryRailKindLabel = (kind: BuildRepairContextArgs["validationStepKind"]): string =>
+  kind === "owner-test" ? "OWNER TEST" : kind === "module-smoke" ? "MODULE SMOKE" : "PRIMARY RAIL"
+
+/** The primary-rail gate, whose command text may be intentionally withheld from
+ *  the model. Its own unit because it is the ONLY variant with a sub-branch. */
+const primaryRailGateLines = (
+  kind: BuildRepairContextArgs["validationStepKind"],
+  cmdWithheld: boolean,
+  cmd: string,
+  exitCode: number | undefined,
+): string[] =>
+  cmdWithheld
+    ? [
+        `The loop clears only on the ${primaryRailKindLabel(kind)} primary rail below; a different green command does not count.`,
+        ...gateCommandLines("(withheld: hidden verification selector)", exitCode),
+      ]
+    : [
+        "The loop clears only on the PRIMARY RAIL command below; a different green command does not count.",
+        ...gateCommandLines(cmd, exitCode),
+      ]
+
+/** Lead sentence for the two sources that gate on a command the AGENT chose.
+ *  A table because the arms differed by exactly this string. */
+const GATE_LEAD: Partial<Record<NonNullable<BuildRepairContextArgs["validationSource"]>, string>> =
+  {
+    verify_cmd: "The loop is gating on your last verification command from the previous round.",
+    repro: "The loop is gating on your reproduction script from the previous round.",
+  }
+
+/** The `none` source has no command at all, so it renders instruction rather
+ *  than evidence. */
+const NO_GATE_LINES: readonly string[] = [
+  "No verification command or reproduction script was captured from the previous round, so the validator had no runnable check.",
+  "Before you stop next round, run a concrete verification command and leave it in the transcript.",
+]
+
 const renderValidationGate = (args: {
   source: BuildRepairContextArgs["validationSource"]
   kind: BuildRepairContextArgs["validationStepKind"]
@@ -73,46 +119,14 @@ const renderValidationGate = (args: {
     args.cmd === undefined || args.cmd === ""
       ? "(missing command)"
       : trimHead(args.cmd, args.maxCmdBytes)
-  switch (args.source) {
-    case "primary_rail":
-      if (args.cmdWithheld) {
-        const kindLabel =
-          args.kind === "owner-test"
-            ? "OWNER TEST"
-            : args.kind === "module-smoke"
-              ? "MODULE SMOKE"
-              : "PRIMARY RAIL"
-        return [
-          `The loop clears only on the ${kindLabel} primary rail below; a different green command does not count.`,
-          "Command: (withheld: hidden verification selector)",
-          ...(args.exitCode !== undefined ? [`Exit code: ${args.exitCode}`] : []),
-        ]
-      }
-      return [
-        "The loop clears only on the PRIMARY RAIL command below; a different green command does not count.",
-        `Command: ${cmd}`,
-        ...(args.exitCode !== undefined ? [`Exit code: ${args.exitCode}`] : []),
-      ]
-    case "verify_cmd":
-      return [
-        "The loop is gating on your last verification command from the previous round.",
-        `Command: ${cmd}`,
-        ...(args.exitCode !== undefined ? [`Exit code: ${args.exitCode}`] : []),
-      ]
-    case "repro":
-      return [
-        "The loop is gating on your reproduction script from the previous round.",
-        `Command: ${cmd}`,
-        ...(args.exitCode !== undefined ? [`Exit code: ${args.exitCode}`] : []),
-      ]
-    case "none":
-      return [
-        "No verification command or reproduction script was captured from the previous round, so the validator had no runnable check.",
-        "Before you stop next round, run a concrete verification command and leave it in the transcript.",
-      ]
-    default:
-      return []
-  }
+  if (args.source === "primary_rail")
+    return primaryRailGateLines(args.kind, args.cmdWithheld, cmd, args.exitCode)
+  if (args.source === "none") return [...NO_GATE_LINES]
+  const lead = args.source === undefined ? undefined : GATE_LEAD[args.source]
+  // An unrecognized source renders NOTHING — the caller drops the whole section
+  // rather than emitting a header with no body.
+  if (lead === undefined) return []
+  return [lead, ...gateCommandLines(cmd, args.exitCode)]
 }
 
 export const buildRepairContext = (args: BuildRepairContextArgs): string => {

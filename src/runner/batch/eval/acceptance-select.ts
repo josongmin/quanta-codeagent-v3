@@ -171,65 +171,99 @@ const safeRegression = async (
   }
 }
 
-export const selectByAcceptance = async (
+/** Build one scored row. Its own unit because it is pure projection: six
+ *  optional fields forwarded through `...(x !== undefined ? {x} : {})` spreads,
+ *  which under `exactOptionalPropertyTypes` cannot be collapsed into a plain
+ *  copy — and which contributed a third of the orchestrator's score. */
+const scoreRow = (
+  candidate: AcceptanceCandidate,
+  index: number,
+  reproPass: boolean,
+  regressionFailures: number,
+): AcceptanceScored => ({
+  index,
+  patch: candidate.patch,
+  patchKey: candidate.patchKey,
+  ...(candidate.structuralPriority !== undefined
+    ? { structuralPriority: candidate.structuralPriority }
+    : {}),
+  reproPass,
+  regressionFailures,
+  ...(candidate.verifyCmd !== undefined ? { verifyCmd: candidate.verifyCmd } : {}),
+  ...(candidate.failureOutput !== undefined ? { failureOutput: candidate.failureOutput } : {}),
+  ...(candidate.actionSummary !== undefined ? { actionSummary: candidate.actionSummary } : {}),
+  ...(candidate.locationFocus !== undefined ? { locationFocus: candidate.locationFocus } : {}),
+})
+
+/** Score every candidate ONCE, in input order. Sequential await keeps it
+ *  deterministic; a batching oracle port may parallelise internally. */
+const scoreAll = async (
   candidates: readonly AcceptanceCandidate[],
   oracles: AcceptanceOracles,
-  llmRerank?: AcceptanceLlmRerank,
-): Promise<AcceptanceResult> => {
+): Promise<AcceptanceScored[]> => {
   const scored: AcceptanceScored[] = []
   let index = 0
   for (const candidate of candidates) {
     const reproPass = await safeRepro(oracles.runRepro, candidate)
     const regressionFailures = await safeRegression(oracles.runRegression, candidate)
-    scored.push({
-      index,
-      patch: candidate.patch,
-      patchKey: candidate.patchKey,
-      ...(candidate.structuralPriority !== undefined
-        ? { structuralPriority: candidate.structuralPriority }
-        : {}),
-      reproPass,
-      regressionFailures,
-      ...(candidate.verifyCmd !== undefined ? { verifyCmd: candidate.verifyCmd } : {}),
-      ...(candidate.failureOutput !== undefined ? { failureOutput: candidate.failureOutput } : {}),
-      ...(candidate.actionSummary !== undefined ? { actionSummary: candidate.actionSummary } : {}),
-      ...(candidate.locationFocus !== undefined ? { locationFocus: candidate.locationFocus } : {}),
-    })
+    scored.push(scoreRow(candidate, index, reproPass, regressionFailures))
     index += 1
   }
+  return scored
+}
+
+/**
+ * Optional LLM soft-rerank over the ADMISSIBLE survivors only (never-veto). Runs
+ * only with ≥2 admissible candidates (a single survivor has nothing to choose).
+ * FAIL-OPEN: a null / out-of-set / thrown result keeps the deterministic winner,
+ * which is what `null` from this unit means — "no override".
+ *
+ * Hoisted out of the orchestrator because inline it was four levels of nesting
+ * (gate → count gate → try/catch → membership gate), and every one of those
+ * levels was paid for by the statements below it.
+ */
+const llmRerankOverride = async (
+  scored: readonly AcceptanceScored[],
+  opts: { readonly regression: boolean; readonly reproduction: boolean },
+  selected: RerankResult,
+  llmRerank: AcceptanceLlmRerank,
+): Promise<AcceptanceResult | null> => {
+  if (selected.tier === "none") return null
+  const admissibleIds = selectAdmissible(scored, opts).ids
+  if (admissibleIds.length < 2) return null
+  const admissible = admissibleIds.map((i) => scored[i] as AcceptanceScored)
+  const admissibleSet = new Set(admissibleIds)
+  let chosen: number | null = null
+  try {
+    chosen = await llmRerank(admissible)
+  } catch {
+    chosen = null
+  }
+  if (chosen === null || !admissibleSet.has(chosen)) return null
+  const winner = scored[chosen] as AcceptanceScored
+  // `votes` reports the chosen patch's OWN vote count (candidates sharing its
+  // patchKey), not the deterministic winner's — so the result stays honest
+  // about what was submitted. `llmChosenIndex` flags that the LLM overrode.
+  const votes = scored.filter((s) => s.patchKey === winner.patchKey).length
+  return {
+    selected: { patch: winner.patch, tier: selected.tier, votes },
+    scored,
+    llmChosenIndex: chosen,
+  }
+}
+
+export const selectByAcceptance = async (
+  candidates: readonly AcceptanceCandidate[],
+  oracles: AcceptanceOracles,
+  llmRerank?: AcceptanceLlmRerank,
+): Promise<AcceptanceResult> => {
+  const scored = await scoreAll(candidates, oracles)
   const opts = {
     regression: oracles.runRegression !== undefined,
     reproduction: oracles.runRepro !== undefined,
   }
   const selected = rerankSelect(scored, opts)
-
-  // Optional LLM soft-rerank over the ADMISSIBLE survivors only (never-veto). Runs
-  // only with ≥2 admissible candidates (a single survivor has nothing to choose).
-  // FAIL-OPEN: a null / out-of-set / thrown result keeps the deterministic winner.
-  if (llmRerank !== undefined && selected.tier !== "none") {
-    const admissibleIds = selectAdmissible(scored, opts).ids
-    if (admissibleIds.length >= 2) {
-      const admissible = admissibleIds.map((i) => scored[i] as AcceptanceScored)
-      const admissibleSet = new Set(admissibleIds)
-      let chosen: number | null = null
-      try {
-        chosen = await llmRerank(admissible)
-      } catch {
-        chosen = null
-      }
-      if (chosen !== null && admissibleSet.has(chosen)) {
-        const winner = scored[chosen] as AcceptanceScored
-        // `votes` reports the chosen patch's OWN vote count (candidates sharing its
-        // patchKey), not the deterministic winner's — so the result stays honest
-        // about what was submitted. `llmChosenIndex` flags that the LLM overrode.
-        const votes = scored.filter((s) => s.patchKey === winner.patchKey).length
-        return {
-          selected: { patch: winner.patch, tier: selected.tier, votes },
-          scored,
-          llmChosenIndex: chosen,
-        }
-      }
-    }
-  }
-  return { selected, scored }
+  if (llmRerank === undefined) return { selected, scored }
+  const overridden = await llmRerankOverride(scored, opts, selected, llmRerank)
+  return overridden ?? { selected, scored }
 }

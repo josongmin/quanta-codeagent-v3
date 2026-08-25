@@ -20,7 +20,7 @@
 import { createHash } from "node:crypto"
 import { appendFile, chmod, mkdir, readFile, writeFile } from "node:fs/promises"
 import { dirname } from "node:path"
-import type { Message, StreamInput } from "../types"
+import type { ContentBlock, Message, StreamInput } from "../types"
 import type { MatchPolicy, RecordedInteraction, ReplayMatchOpts, ReplayStore } from "./types"
 
 /**
@@ -94,17 +94,40 @@ function extractMessagesPayload(messages: ReadonlyArray<Message>): unknown {
   return messages.map((m) => ({ role: m.role, content: m.content }))
 }
 
+/**
+ * One content block → its fuzzy-hash token.
+ *
+ * A unit because it is a per-VARIANT projection over a closed union, and it was
+ * spelled as a six-arm `else if` chain nested two loops deep — every arm paying
+ * the nesting surcharge. As an exhaustive `switch` with NO `default`, adding a
+ * seventh {@link ContentBlock} variant makes this function's inferred return
+ * type `string | undefined` and breaks the declared `string` — a COMPILE error
+ * at exactly the place that must decide how the new variant hashes, instead of
+ * the old chain's silent "contributes nothing" fall-through.
+ */
+function fuzzyBlockToken(block: ContentBlock): string {
+  switch (block.type) {
+    case "text":
+      return normalizeText(block.text)
+    case "tool_use":
+      return `tool_use:${block.name}`
+    case "tool_result":
+      return `tool_result:${normalizeText(block.content)}`
+    case "thinking":
+      return `thinking:${normalizeText(block.thinking)}`
+    case "image":
+      return `image:${block.mediaType}`
+    case "document":
+      return `doc:${block.mediaType}`
+  }
+}
+
 function extractFuzzyPayload(messages: ReadonlyArray<Message>): string {
   const out: string[] = []
   for (const m of messages) {
     out.push(m.role, ":")
     for (const block of m.content) {
-      if (block.type === "text") out.push(normalizeText(block.text))
-      else if (block.type === "tool_use") out.push(`tool_use:${block.name}`)
-      else if (block.type === "tool_result") out.push(`tool_result:${normalizeText(block.content)}`)
-      else if (block.type === "thinking") out.push(`thinking:${normalizeText(block.thinking)}`)
-      else if (block.type === "image") out.push(`image:${block.mediaType}`)
-      else if (block.type === "document") out.push(`doc:${block.mediaType}`)
+      out.push(fuzzyBlockToken(block))
     }
     out.push("|")
   }

@@ -140,6 +140,133 @@ const sameFileSet = (patchFiles: readonly string[], goldFiles: readonly string[]
   return patchFiles.every((file) => gold.has(file))
 }
 
+/** Fraction of gold files the agent touched. Null when there is no oracle, no
+ *  patch, or an empty gold set — never an invented 0. */
+const goldCoverageOf = (
+  patchFiles: readonly string[],
+  oracle: ClosureOracle | undefined,
+): number | null => {
+  if (oracle === undefined || patchFiles.length === 0 || oracle.goldFiles.length === 0) return null
+  return overlapCount(patchFiles, new Set(oracle.goldFiles)) / oracle.goldFiles.length
+}
+
+/** Coarse coverage verdict. Its own unit next to {@link goldCoverageOf} because
+ *  the two answer the same question at different resolutions and previously
+ *  restated the identical `no oracle / no patch` guard in two different shapes
+ *  (a 4-term `&&` and a 3-term `||`), which is how they could drift apart. */
+const goldCoverageClassOf = (
+  patchFiles: readonly string[],
+  oracle: ClosureOracle | undefined,
+): "exact" | "partial" | "disjoint" | null => {
+  if (oracle === undefined || patchFiles.length === 0) return null
+  if (sameFileSet(patchFiles, oracle.goldFiles)) return "exact"
+  return overlapCount(patchFiles, new Set(oracle.goldFiles)) > 0 ? "partial" : "disjoint"
+}
+
+/** One per-instance diagnostic row. `oracle` is passed in (rather than looked up)
+ *  so this stays a pure projection of (fact, oracle) with no map in scope. */
+const perInstanceRecord = (
+  f: ClosureRunFact,
+  oracle: ClosureOracle | undefined,
+): ClosurePerInstance => {
+  const gold = oracle ? new Set(oracle.goldFiles) : null
+  return {
+    instanceId: f.instanceId,
+    class: classify(f),
+    ownerHit: gold && f.patchFiles.length > 0 ? gold.has(f.patchFiles[0] as string) : null,
+    firstEditOwnerMatch: gold && f.firstEditFile != null ? gold.has(f.firstEditFile) : null,
+    goldCoverage: goldCoverageOf(f.patchFiles, oracle),
+    goldCoverageClass: goldCoverageClassOf(f.patchFiles, oracle),
+    resolved: f.resolved,
+    overBudget: f.overBudget ?? null,
+    newDef: f.newDef ?? null,
+    crossFile: f.crossFile ?? null,
+  }
+}
+
+/**
+ * The metric family that JOINS facts against the oracle. Split from the plain
+ * per-field means below because only these need a denominator restricted to
+ * instances that HAVE an oracle — the restriction is stated once here per
+ * denominator instead of being re-derived inside each metric's `.map`.
+ */
+const oracleJoinedMetrics = (
+  facts: ReadonlyArray<ClosureRunFact>,
+  oracleMap: ReadonlyMap<string, ClosureOracle>,
+): Record<string, ClosureMetric> => {
+  const goldSetOf = (id: string): Set<string> | null => {
+    const o = oracleMap.get(id)
+    return o ? new Set(o.goldFiles) : null
+  }
+  // Owner recall over patch-bearing instances that have an oracle.
+  const owned = facts.filter((f) => f.patchFiles.length > 0 && oracleMap.has(f.instanceId))
+  const multiFileOwned = owned.filter(
+    (f) => (oracleMap.get(f.instanceId)?.goldFiles.length ?? 0) > 1,
+  )
+  const firstEditDenom = facts.filter((f) => f.firstEditFile != null && oracleMap.has(f.instanceId))
+  const recallAt = (k: number): ClosureMetric =>
+    metricOf(
+      owned.map((f) => {
+        const gold = goldSetOf(f.instanceId) as Set<string>
+        return f.patchFiles.slice(0, k).some((p) => gold.has(p))
+      }),
+    )
+  /** Gold-overlap count for an OWNED fact (its oracle is known to exist). */
+  const ownedOverlap = (f: ClosureRunFact): number => {
+    const oracle = oracleMap.get(f.instanceId) as ClosureOracle
+    return overlapCount(f.patchFiles, new Set(oracle.goldFiles))
+  }
+  const goldLen = (f: ClosureRunFact): number =>
+    (oracleMap.get(f.instanceId) as ClosureOracle).goldFiles.length
+
+  return {
+    "owner_recall@1": recallAt(1),
+    "owner_recall@3": recallAt(3),
+    gold_coverage_rate: metricOf(
+      owned.map((f) => goldCoverageOf(f.patchFiles, oracleMap.get(f.instanceId))),
+    ),
+    exact_file_set_match_rate: metricOf(
+      owned.map((f) =>
+        sameFileSet(f.patchFiles, (oracleMap.get(f.instanceId) as ClosureOracle).goldFiles),
+      ),
+    ),
+    multi_file_full_coverage_rate: metricOf(
+      multiFileOwned.map((f) => ownedOverlap(f) === goldLen(f)),
+    ),
+    multi_file_partial_overlap_rate: metricOf(
+      multiFileOwned.map((f) => {
+        const overlap = ownedOverlap(f)
+        return overlap > 0 && overlap < goldLen(f)
+      }),
+    ),
+    multi_file_disjoint_rate: metricOf(multiFileOwned.map((f) => ownedOverlap(f) === 0)),
+    first_edit_owner_match: metricOf(
+      firstEditDenom.map((f) =>
+        (goldSetOf(f.instanceId) as Set<string>).has(f.firstEditFile as string),
+      ),
+    ),
+  }
+}
+
+/**
+ * jun-30 SOTA++ acceptance tier DISTRIBUTION — each rate's denominator (n) is
+ * the runs whose selection routed through the rerank ladder (acceptanceTier !=
+ * null); legacy validator-rank runs map to null ⇒ excluded. `all_patches`
+ * dominance ⇒ the oracle gave no real selection signal (thin-oracle inert).
+ */
+const acceptanceTierMetrics = (
+  facts: ReadonlyArray<ClosureRunFact>,
+): Record<string, ClosureMetric> =>
+  Object.fromEntries(
+    (["repro_and_regression", "regression_only", "all_patches", "none"] as const).map(
+      (tier) =>
+        [
+          `acceptance_tier_${tier}_rate`,
+          metricOf(facts.map((f) => (f.acceptanceTier == null ? null : f.acceptanceTier === tier))),
+        ] as const,
+    ),
+  )
+
 /**
  * Pure compute over (run facts, eval oracle). Deterministic, fs/env-free.
  * `oracleMap` keyed by instanceId; instances without an oracle entry are
@@ -149,63 +276,11 @@ export const computeClosureDiagnostics = (
   facts: ReadonlyArray<ClosureRunFact>,
   oracleMap: ReadonlyMap<string, ClosureOracle>,
 ): ClosureDiagnostics => {
-  const goldSetOf = (id: string): Set<string> | null => {
-    const o = oracleMap.get(id)
-    return o ? new Set(o.goldFiles) : null
-  }
-
-  const perInstance: ClosurePerInstance[] = facts.map((f) => {
-    const oracle = oracleMap.get(f.instanceId)
-    const gold = oracle ? new Set(oracle.goldFiles) : null
-    const ownerHit = gold && f.patchFiles.length > 0 ? gold.has(f.patchFiles[0] as string) : null
-    const firstEditOwnerMatch = gold && f.firstEditFile != null ? gold.has(f.firstEditFile) : null
-    // Guarded on `oracle`, not on `gold`: the two are equivalent (`gold` is
-    // non-null exactly when the oracle was found) but only the former narrows,
-    // which is why every read of `oracle.goldFiles` here used to be asserted.
-    const goldCoverage =
-      oracle !== undefined &&
-      gold !== null &&
-      f.patchFiles.length > 0 &&
-      oracle.goldFiles.length > 0
-        ? overlapCount(f.patchFiles, gold) / oracle.goldFiles.length
-        : null
-    const goldCoverageClass =
-      oracle === undefined || gold === null || f.patchFiles.length === 0
-        ? null
-        : sameFileSet(f.patchFiles, oracle.goldFiles)
-          ? "exact"
-          : overlapCount(f.patchFiles, gold) > 0
-            ? "partial"
-            : "disjoint"
-    return {
-      instanceId: f.instanceId,
-      class: classify(f),
-      ownerHit,
-      firstEditOwnerMatch,
-      goldCoverage,
-      goldCoverageClass,
-      resolved: f.resolved,
-      overBudget: f.overBudget ?? null,
-      newDef: f.newDef ?? null,
-      crossFile: f.crossFile ?? null,
-    }
-  })
-
-  // Owner recall over patch-bearing instances that have an oracle.
-  const owned = facts.filter((f) => f.patchFiles.length > 0 && oracleMap.has(f.instanceId))
-  const multiFileOwned = owned.filter(
-    (f) => (oracleMap.get(f.instanceId)?.goldFiles.length ?? 0) > 1,
+  const perInstance: ClosurePerInstance[] = facts.map((f) =>
+    perInstanceRecord(f, oracleMap.get(f.instanceId)),
   )
-  const recallAt = (k: number): ClosureMetric =>
-    metricOf(
-      owned.map((f) => {
-        const gold = goldSetOf(f.instanceId) as Set<string>
-        return f.patchFiles.slice(0, k).some((p) => gold.has(p))
-      }),
-    )
 
   const patchBearing = facts.filter((f) => f.patchFiles.length > 0)
-  const firstEditDenom = facts.filter((f) => f.firstEditFile != null && oracleMap.has(f.instanceId))
   // F6 — #10914-class churn: among runs that HAD a reproduced (base-RED) repro,
   // the fraction that still ended unresolved. A raw rate, NOT a thresholded
   // judgement — execution feedback was present yet the miss survived (the signal
@@ -213,44 +288,7 @@ export const computeClosureDiagnostics = (
   const reproRedDenom = facts.filter((f) => f.reproReproduced === true && f.resolved !== null)
 
   const metrics: Record<string, ClosureMetric> = {
-    "owner_recall@1": recallAt(1),
-    "owner_recall@3": recallAt(3),
-    gold_coverage_rate: metricOf(
-      owned.map((f) => {
-        const oracle = oracleMap.get(f.instanceId)
-        if (oracle === undefined || oracle.goldFiles.length === 0) return null
-        return overlapCount(f.patchFiles, new Set(oracle.goldFiles)) / oracle.goldFiles.length
-      }),
-    ),
-    exact_file_set_match_rate: metricOf(
-      owned.map((f) =>
-        sameFileSet(f.patchFiles, (oracleMap.get(f.instanceId) as ClosureOracle).goldFiles),
-      ),
-    ),
-    multi_file_full_coverage_rate: metricOf(
-      multiFileOwned.map((f) => {
-        const oracle = oracleMap.get(f.instanceId) as ClosureOracle
-        return overlapCount(f.patchFiles, new Set(oracle.goldFiles)) === oracle.goldFiles.length
-      }),
-    ),
-    multi_file_partial_overlap_rate: metricOf(
-      multiFileOwned.map((f) => {
-        const oracle = oracleMap.get(f.instanceId) as ClosureOracle
-        const overlap = overlapCount(f.patchFiles, new Set(oracle.goldFiles))
-        return overlap > 0 && overlap < oracle.goldFiles.length
-      }),
-    ),
-    multi_file_disjoint_rate: metricOf(
-      multiFileOwned.map((f) => {
-        const oracle = oracleMap.get(f.instanceId) as ClosureOracle
-        return overlapCount(f.patchFiles, new Set(oracle.goldFiles)) === 0
-      }),
-    ),
-    first_edit_owner_match: metricOf(
-      firstEditDenom.map((f) =>
-        (goldSetOf(f.instanceId) as Set<string>).has(f.firstEditFile as string),
-      ),
-    ),
+    ...oracleJoinedMetrics(facts, oracleMap),
     stray_file_rate: metricOf(patchBearing.map((f) => f.strayFiles.length > 0)),
     admission_blocked_rate: metricOf(perInstance.map((p) => p.class === "admission_blocked")),
     no_patch_exhausted_rate: metricOf(perInstance.map((p) => p.class === "no_patch_exhausted")),
@@ -271,21 +309,7 @@ export const computeClosureDiagnostics = (
     verify_rounds_per_run: metricOf(facts.map((f) => f.verifyRounds)),
     synth_repro_base_red_rate: metricOf(facts.map((f) => f.synthReproBaseRed)),
     out_of_scope_file_rate: metricOf(facts.map((f) => f.outOfScopeFiles)),
-    // jun-30 SOTA++ acceptance tier DISTRIBUTION — each rate's denominator (n) is
-    // the runs whose selection routed through the rerank ladder (acceptanceTier !=
-    // null); legacy validator-rank runs map to null ⇒ excluded. `all_patches`
-    // dominance ⇒ the oracle gave no real selection signal (thin-oracle inert).
-    ...Object.fromEntries(
-      (["repro_and_regression", "regression_only", "all_patches", "none"] as const).map(
-        (tier) =>
-          [
-            `acceptance_tier_${tier}_rate`,
-            metricOf(
-              facts.map((f) => (f.acceptanceTier == null ? null : f.acceptanceTier === tier)),
-            ),
-          ] as const,
-      ),
-    ),
+    ...acceptanceTierMetrics(facts),
   }
 
   return { total: facts.length, metrics, perInstance }

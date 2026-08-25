@@ -264,6 +264,29 @@ const verificationOwnerCandidatesOf = (args: {
     ...args.stage1Files.map((file) => file.file),
   ])
 
+/** `xs` when it is present AND non-empty, else `undefined` — for closure inputs
+ *  an empty list means the same thing as no list at all.
+ *
+ *  WHY THIS IS A UNIT: that one rule was spelled THREE times inside
+ *  {@link buildClosureAttemptState}'s argument literal, in two different
+ *  dialects (`a && a.length > 0` for `witnessOwners`, `a !== undefined &&
+ *  a.length > 0` for the other two). Naming it once removes the drift risk and
+ *  leaves each call site as a plain presence test. */
+const nonEmptyOrUndefined = <T>(xs: readonly T[] | undefined): readonly T[] | undefined =>
+  xs !== undefined && xs.length > 0 ? xs : undefined
+
+/**
+ * Assemble the closure-session inputs for this attempt (or `undefined` for a
+ * non-swebench instance, which has no closure plan).
+ *
+ * WHY IT IS SHAPED THIS WAY: the complexity here was never the field count — it
+ * was that the whole argument literal sat inside a single
+ * `swebench === undefined ? undefined : ...` TERNARY, so all eight conditional
+ * spreads were at nesting depth 1 and each cost DOUBLE. Turning that ternary
+ * into an early return is the entire structural fix: the same eight gates, none
+ * of the surcharge. The three list gates then route through
+ * {@link nonEmptyOrUndefined} so "present and non-empty" is stated once.
+ */
 const buildClosureAttemptState = (args: {
   readonly instance: Instance
   readonly posture: BenchPosture
@@ -275,49 +298,46 @@ const buildClosureAttemptState = (args: {
   readonly ownerNearPrimaryBaseValidatedRed?: boolean
   readonly touchedModuleSmoke?: readonly string[]
   readonly moduleSmokePrimaryBaseValidatedRed?: boolean
-}): ClosureSessionState | undefined =>
-  args.instance.swebench === undefined
-    ? undefined
-    : buildClosureSession({
-        problemStatement: args.instance.problemStatement,
-        stage1Files: args.stage1Files,
-        ...(args.ownerResolved !== undefined ? { ownerResolved: args.ownerResolved } : {}),
-        ...(args.witnessOwners && args.witnessOwners.length > 0
-          ? { witnessOwners: args.witnessOwners }
-          : {}),
-        ...(args.reproTest?.installed === true && args.reproTest.reproducedCount > 0
-          ? {
-              reproScript: {
-                cmd: reproValidationCmdForInstance(args.instance, args.reproTest.path),
-                pytestReportPath: pytestReportPathFor(args.reproTest.path),
-                baseValidatedRed: true,
-              },
-            }
-          : {}),
-        ...(args.ownerNearTests !== undefined && args.ownerNearTests.length > 0
-          ? { ownerNearTests: args.ownerNearTests }
-          : {}),
-        ...(args.ownerNearPrimaryBaseValidatedRed === true
-          ? { ownerNearPrimaryBaseValidatedRed: true }
-          : {}),
-        ...(args.touchedModuleSmoke !== undefined && args.touchedModuleSmoke.length > 0
-          ? { touchedModuleSmoke: args.touchedModuleSmoke }
-          : {}),
-        ...(args.moduleSmokePrimaryBaseValidatedRed === true
-          ? { moduleSmokePrimaryBaseValidatedRed: true }
-          : {}),
-        posture: {
-          lspNav: args.posture.lspNav,
-          primaryRail: args.posture.primaryRail,
-          faultEvidence: args.posture.faultEvidence,
-        },
-        // T-OWN-12 activation: clean presets use rule-based AUTHORITATIVE owner
-        // admission (public issue-named owners only), bypassing the additive
-        // heuristic score/lead-gap. Structural static-witness evidence stays
-        // advisory. Research mode passes false ⇒ legacy admission is byte-identical
-        // (closure-session applies the clean rule only on `true`).
-        ownerClean: args.posture.selectorMode === "clean",
-      })
+}): ClosureSessionState | undefined => {
+  if (args.instance.swebench === undefined) return undefined
+  const witnessOwners = nonEmptyOrUndefined(args.witnessOwners)
+  const ownerNearTests = nonEmptyOrUndefined(args.ownerNearTests)
+  const touchedModuleSmoke = nonEmptyOrUndefined(args.touchedModuleSmoke)
+  return buildClosureSession({
+    problemStatement: args.instance.problemStatement,
+    stage1Files: args.stage1Files,
+    ...(args.ownerResolved !== undefined ? { ownerResolved: args.ownerResolved } : {}),
+    ...(witnessOwners !== undefined ? { witnessOwners } : {}),
+    ...(args.reproTest?.installed === true && args.reproTest.reproducedCount > 0
+      ? {
+          reproScript: {
+            cmd: reproValidationCmdForInstance(args.instance, args.reproTest.path),
+            pytestReportPath: pytestReportPathFor(args.reproTest.path),
+            baseValidatedRed: true,
+          },
+        }
+      : {}),
+    ...(ownerNearTests !== undefined ? { ownerNearTests } : {}),
+    ...(args.ownerNearPrimaryBaseValidatedRed === true
+      ? { ownerNearPrimaryBaseValidatedRed: true }
+      : {}),
+    ...(touchedModuleSmoke !== undefined ? { touchedModuleSmoke } : {}),
+    ...(args.moduleSmokePrimaryBaseValidatedRed === true
+      ? { moduleSmokePrimaryBaseValidatedRed: true }
+      : {}),
+    posture: {
+      lspNav: args.posture.lspNav,
+      primaryRail: args.posture.primaryRail,
+      faultEvidence: args.posture.faultEvidence,
+    },
+    // T-OWN-12 activation: clean presets use rule-based AUTHORITATIVE owner
+    // admission (public issue-named owners only), bypassing the additive
+    // heuristic score/lead-gap. Structural static-witness evidence stays
+    // advisory. Research mode passes false ⇒ legacy admission is byte-identical
+    // (closure-session applies the clean rule only on `true`).
+    ownerClean: args.posture.selectorMode === "clean",
+  })
+}
 
 const resolveRepairState = (args: {
   readonly deps: RunInstanceDeps
@@ -378,6 +398,71 @@ const mergeForwardLocalizeStage1Files = (
   return stage1Files
 }
 
+/**
+ * Is the closure-planning half of attempt prep active for this instance?
+ *
+ * WHY THIS IS A UNIT: this exact two-part gate — a swebench instance AND a
+ * posture that asked for either a verification plan or the primary rail — was
+ * spelled THREE times verbatim inside {@link prepareAttemptContext}, guarding
+ * `ownerNearTests`, `moduleSmoke` and `existingTestExpectations`. Three
+ * spellings of one rule is three chances to drift, and it accounted for nine of
+ * the function's cognitive points on its own (each site: a ternary + two
+ * boolean sequences). Named once, each site becomes a plain flag test — and the
+ * three consumers are now guaranteed to move together, which matters: T2's
+ * expectation extractor is deliberately gated to the SAME condition as
+ * `ownerNearTests` so the fallback never injects expectations into an instance
+ * that has no closure plan.
+ */
+const closurePlanningEnabled = (instance: Instance, posture: BenchPosture): boolean =>
+  instance.swebench !== undefined && (posture.verificationPlan || posture.primaryRail)
+
+/** SCAFF-03: digest typed-relation static witnesses into structural owner
+ *  candidate files. These stay advisory in clean owner admission; they seed
+ *  localization / repair evidence and owner-near test discovery, but they do
+ *  NOT by themselves admit a clean owner or mint required contracts.
+ *
+ *  WHY A UNIT: a non-swebench instance has no witnesses at all, so the whole
+ *  AST-witness build hangs off one presence gate — an early return, not a
+ *  ternary wrapped around a four-argument call. */
+const buildWitnessOwners = (
+  instance: Instance,
+  sandbox: string,
+  stage1Files: readonly { file: string; score: number }[],
+  ownerResolved: readonly OwnerSibling[] | undefined,
+): readonly { file: string; forSymbol?: string }[] => {
+  if (instance.swebench === undefined) return []
+  return witnessStructuralOwnerCandidates(
+    buildAstStaticWitnesses({
+      problemStatement: instance.problemStatement,
+      ownerCandidates: stage1Files.map((f) => f.file),
+      ...(ownerResolved !== undefined ? { ownerResolved } : {}),
+      readSource: (rel) => readSandboxSource(sandbox, rel),
+    }),
+  )
+}
+
+/** OPC-07 intake packet inputs. WHY A UNIT: three independent "forward it only
+ *  when this pass actually produced it" spreads over the SAME two sources
+ *  (the closure bundle and the repro telemetry) — one concern, and it kept the
+ *  caller paying for three conditional spreads inline. */
+const buildIntakeEvidence = (
+  problemStatement: string,
+  localizeCandidates: readonly string[],
+  reproTest: BenchReproTestTelemetry | undefined,
+  closureSession: ClosureSessionState | undefined,
+) =>
+  buildIntakeLlmEvidencePacket({
+    problemStatement,
+    localizeCandidates,
+    ...(closureSession?.bundle.evidence !== undefined
+      ? { faultEvidence: closureSession.bundle.evidence }
+      : {}),
+    ...(closureSession?.bundle.plan !== undefined
+      ? { verificationPlan: closureSession.bundle.plan }
+      : {}),
+    ...(reproTest !== undefined ? { reproTest } : {}),
+  })
+
 export const prepareAttemptContext = async (
   instance: Instance,
   sandbox: string,
@@ -431,21 +516,11 @@ export const prepareAttemptContext = async (
     sandbox,
     signal,
   })
-  // SCAFF-03: digest typed-relation static witnesses into structural owner
-  // candidate files. These stay advisory in clean owner admission; they seed
-  // localization / repair evidence and owner-near test discovery, but they do
-  // NOT by themselves admit a clean owner or mint required contracts.
-  const witnessOwners =
-    instance.swebench === undefined
-      ? []
-      : witnessStructuralOwnerCandidates(
-          buildAstStaticWitnesses({
-            problemStatement: instance.problemStatement,
-            ownerCandidates: stage1Files.map((f) => f.file),
-            ...(ownerResolved !== undefined ? { ownerResolved } : {}),
-            readSource: (rel) => readSandboxSource(sandbox, rel),
-          }),
-        )
+  const witnessOwners = buildWitnessOwners(instance, sandbox, stage1Files, ownerResolved)
+  // ONE gate for the whole closure-planning half of prep — see
+  // {@link closurePlanningEnabled}. Read from `hintRepro.posture` (the posture
+  // the hint/repro step may have refined), never the raw `posture`.
+  const planningEnabled = closurePlanningEnabled(instance, hintRepro.posture)
   // Structural fallback: even when no synthesized repro validated red, the
   // closure plan should still be able to name PUBLIC repo tests near the best
   // owner candidates. These commands guide verification / repair planning only;
@@ -455,28 +530,24 @@ export const prepareAttemptContext = async (
     ownerResolved,
     stage1Files,
   })
-  const ownerNearTestPlan: VerificationOwnerTestsPlan =
-    instance.swebench === undefined ||
-    !(hintRepro.posture.verificationPlan || hintRepro.posture.primaryRail)
-      ? { commands: [], testPaths: [], baseGreenTestPaths: [], primaryBaseState: "unavailable" }
-      : await discoverVerificationOwnerTestsPlan({
-          instance,
-          sandbox,
-          timeoutMs: deps.timeoutMs,
-          ownerCandidates,
-        })
+  const ownerNearTestPlan: VerificationOwnerTestsPlan = !planningEnabled
+    ? { commands: [], testPaths: [], baseGreenTestPaths: [], primaryBaseState: "unavailable" }
+    : await discoverVerificationOwnerTestsPlan({
+        instance,
+        sandbox,
+        timeoutMs: deps.timeoutMs,
+        ownerCandidates,
+      })
   const ownerNearTests = ownerNearTestPlan.commands
   const ownerNearRegressionSet = ownerNearTestPlan.baseGreenTestPaths
   const ownerNearPrimaryBaseValidatedRed = ownerNearTestPlan.primaryBaseState === "red"
-  const moduleSmokePlan: VerificationModuleSmokePlan =
-    instance.swebench === undefined ||
-    !(hintRepro.posture.verificationPlan || hintRepro.posture.primaryRail)
-      ? { commands: [], primaryBaseState: "unavailable" }
-      : await discoverVerificationModuleSmokePlan({
-          instance,
-          sandbox,
-          timeoutMs: deps.timeoutMs,
-        })
+  const moduleSmokePlan: VerificationModuleSmokePlan = !planningEnabled
+    ? { commands: [], primaryBaseState: "unavailable" }
+    : await discoverVerificationModuleSmokePlan({
+        instance,
+        sandbox,
+        timeoutMs: deps.timeoutMs,
+      })
   const touchedModuleSmoke = moduleSmokePlan.commands
   const moduleSmokePrimaryBaseValidatedRed = moduleSmokePlan.primaryBaseState === "red"
   // T2 — command-derived test paths take precedence; when empty, the extractor
@@ -484,16 +555,14 @@ export const prepareAttemptContext = async (
   // owner modules (only files that exist are read). Gated to the SAME condition
   // as `ownerNearTests` (swebench + verification-plan/primary-rail), so the
   // fallback never injects expectations into instances that have no closure plan.
-  const existingTestExpectations =
-    instance.swebench === undefined ||
-    !(hintRepro.posture.verificationPlan || hintRepro.posture.primaryRail)
-      ? []
-      : await extractVerificationOwnerTestExpectations({
-          sandbox,
-          ownerNearTests,
-          localizedOwnerFiles: ownerCandidates,
-          issueSymbols: extractIssueHint(instance.problemStatement).symbols,
-        })
+  const existingTestExpectations = !planningEnabled
+    ? []
+    : await extractVerificationOwnerTestExpectations({
+        sandbox,
+        ownerNearTests,
+        localizedOwnerFiles: ownerCandidates,
+        issueSymbols: extractIssueHint(instance.problemStatement).symbols,
+      })
   const closureSession = buildClosureAttemptState({
     instance,
     posture: hintRepro.posture,
@@ -506,17 +575,12 @@ export const prepareAttemptContext = async (
     ...(touchedModuleSmoke.length > 0 ? { touchedModuleSmoke } : {}),
     ...(moduleSmokePrimaryBaseValidatedRed ? { moduleSmokePrimaryBaseValidatedRed } : {}),
   })
-  const intakeLlmEvidence = buildIntakeLlmEvidencePacket({
-    problemStatement: instance.problemStatement,
-    localizeCandidates: hintRepro.localizeCandidates,
-    ...(closureSession?.bundle.evidence !== undefined
-      ? { faultEvidence: closureSession.bundle.evidence }
-      : {}),
-    ...(closureSession?.bundle.plan !== undefined
-      ? { verificationPlan: closureSession.bundle.plan }
-      : {}),
-    ...(hintRepro.reproTest !== undefined ? { reproTest: hintRepro.reproTest } : {}),
-  })
+  const intakeLlmEvidence = buildIntakeEvidence(
+    instance.problemStatement,
+    hintRepro.localizeCandidates,
+    hintRepro.reproTest,
+    closureSession,
+  )
   return {
     ...hintRepro,
     state,

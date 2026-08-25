@@ -217,6 +217,59 @@ const stripEphemeralRequest = (input: StreamInput): StreamInput => {
   return rest
 }
 
+/** Every optional field of a committed turn's metadata.
+ *
+ *  MODULE scope (not a closure inside the stream impl) on purpose: a nested
+ *  function definition is itself a nesting level, so the nine conditional
+ *  spreads below each cost DOUBLE when written inside `recordingStreamImpl`.
+ *  Hoisting them out is what puts the commit path under the cap; every input is
+ *  an explicit parameter so nothing is captured.
+ *
+ *  All nine fields are REPLAY-NEUTRAL: metadata is never hashed, so the
+ *  cassette key is unchanged and an absent field is byte-identical to
+ *  pre-feature output. */
+interface CommitMetadataParams {
+  readonly opts: RecordingLlmOpts
+  readonly input: StreamInput
+  readonly startedAt: number
+  readonly durationMs: number
+  readonly partial: boolean
+  readonly writeError: Error | null
+  readonly traceRef: { traceId: string; spanId: string; parentSpanId?: string } | undefined
+  readonly traceContextMissing: boolean
+  readonly debug: Record<string, unknown> | undefined
+}
+
+function commitMetadata(p: CommitMetadataParams): RecordedInteraction["metadata"] {
+  const { opts, input, partial, writeError } = p
+  return {
+    recordedAt: p.startedAt,
+    model: opts.inner.model ?? "unknown",
+    durationMs: p.durationMs,
+    ...(partial ? { partial: true } : {}),
+    ...(partial && writeError !== null ? { error: writeError.message } : {}),
+    ...(opts.callCtx?.instanceId !== undefined ? { instanceId: opts.callCtx.instanceId } : {}),
+    ...(opts.callCtx?.runId !== undefined ? { runId: opts.callCtx.runId } : {}),
+    ...(opts.callCtx?.attempt !== undefined ? { attempt: opts.callCtx.attempt } : {}),
+    // Per-call parallel-lane label (replay-neutral; see StreamInput.recordingLane).
+    ...(input.recordingLane !== undefined ? { lane: input.recordingLane } : {}),
+    // C4: active OTel span identity (replay-neutral; joins the trace tree).
+    ...traceMeta(p.traceRef),
+    // ADR-0539 rule 5: expected-but-missing trace context DEFECT marker
+    // (replay-neutral — metadata is never hashed, so the cassette key is
+    // unchanged). Absent on the off/never-expected path ⇒ byte-identical.
+    ...(p.traceContextMissing
+      ? {
+          observabilityDegraded: {
+            component: "recordingLlmPort",
+            reason: "missing_trace_context",
+          },
+        }
+      : {}),
+    ...(p.debug !== undefined ? { debug: p.debug } : {}),
+  }
+}
+
 interface RecordingStreamCtx {
   readonly opts: RecordingLlmOpts
   readonly now: () => number
@@ -254,55 +307,45 @@ function recordingStreamImpl(
   // hash that includes time can do so; the default hash ignores it.
   let writeError: Error | null = null
 
-  async function commit(partial: boolean): Promise<void> {
-    const durationMs = now() - startedAt
-    let id: string
+  /** The record id, with a degenerate-but-stable fallback so a hash failure
+   *  never aborts the append. A unit because it is the only try/catch in the
+   *  commit path and its fallback (SHA-256 of start-time + event count) is a
+   *  self-contained rule: a content-free constant would collide on every miss.
+   *  Declared here (not module scope) so it closes over nothing — every input
+   *  is a parameter. */
+  function commitId(capturedLen: number): string {
     try {
-      id = hashFn(input)
+      return hashFn(input)
     } catch (e) {
-      // Hash failures collapse to a degenerate-but-stable fallback id so
-      // append never aborts. Using a content-free constant would collide
-      // every miss; SHA-256 of stringified input length+timestamp is
-      // best-effort uniqueness.
       logger.warn("recording-llm: request hash failed; using fallback id", { error: errMessage(e) })
-      id = createHash("sha256")
-        .update(`fallback:${startedAt}:${captured.length}`)
+      return createHash("sha256")
+        .update(`fallback:${startedAt}:${capturedLen}`)
         .digest("hex")
         .slice(0, 16)
     }
-    const model = opts.inner.model ?? "unknown"
-    // Drain debug slices (metadata-only, replay-neutral).
+  }
+
+  async function commit(partial: boolean): Promise<void> {
+    const durationMs = now() - startedAt
+    const id = commitId(captured.length)
+    // Drain debug slices (metadata-only, replay-neutral). Drained AFTER the id
+    // so a hash-failure warn still precedes the drain, as it always did.
     const debug = safeDrain(opts.debugDrain)
     const baseRecord: RecordedInteraction = {
       id,
       request: stripEphemeralRequest(input),
       events: captured.slice(),
-      metadata: {
-        recordedAt: startedAt,
-        model,
+      metadata: commitMetadata({
+        opts,
+        input,
+        startedAt,
         durationMs,
-        ...(partial ? { partial: true } : {}),
-        ...(partial && writeError !== null ? { error: writeError.message } : {}),
-        ...(opts.callCtx?.instanceId !== undefined ? { instanceId: opts.callCtx.instanceId } : {}),
-        ...(opts.callCtx?.runId !== undefined ? { runId: opts.callCtx.runId } : {}),
-        ...(opts.callCtx?.attempt !== undefined ? { attempt: opts.callCtx.attempt } : {}),
-        // Per-call parallel-lane label (replay-neutral; see StreamInput.recordingLane).
-        ...(input.recordingLane !== undefined ? { lane: input.recordingLane } : {}),
-        // C4: active OTel span identity (replay-neutral; joins the trace tree).
-        ...traceMeta(traceRef),
-        // ADR-0539 rule 5: expected-but-missing trace context DEFECT marker
-        // (replay-neutral — metadata is never hashed, so the cassette key is
-        // unchanged). Absent on the off/never-expected path ⇒ byte-identical.
-        ...(traceContextMissing
-          ? {
-              observabilityDegraded: {
-                component: "recordingLlmPort",
-                reason: "missing_trace_context",
-              },
-            }
-          : {}),
-        ...(debug !== undefined ? { debug } : {}),
-      },
+        partial,
+        writeError,
+        traceRef,
+        traceContextMissing,
+        debug,
+      }),
     }
     // ADR-0539 rule 5: warn ONCE per port (systemic ⇒ no per-turn spam) —
     // the durable, greppable operator signal that OTel correlation is broken.

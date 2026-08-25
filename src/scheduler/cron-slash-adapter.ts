@@ -28,6 +28,7 @@ import type { AgentRole } from "@/subagent/role"
 import type { AutomationEnginePort, InboxItem, ScheduleInput } from "./automation-engine/port"
 import { computeNextFire } from "./next-fire"
 import { parseRRule, serializeRRule } from "./rrule-parser"
+import type { RRule } from "./types"
 
 /** RFC11-2 — the closed agent-role token set the scheduler accepts as a binding.
  *  These are the EXACT values of the EXISTING `@/subagent/role` `AgentRole`
@@ -113,6 +114,97 @@ const readInbox = (engine: AutomationEnginePort): readonly InboxItem[] => {
   return dux ?? []
 }
 
+/**
+ * THE display-row projection: engine row -> `/cron` row (canonical RRULE
+ * string + the two optional bindings).
+ *
+ * WHY THIS IS A UNIT: `list` and `create`'s success tail built the SAME six
+ * fields with the SAME pair of conditional spreads — two near-identical branch
+ * tails. Unified here, so the two surfaces are structurally incapable of
+ * drifting, and `create` stops paying for four conditional spreads (each of
+ * which cost DOUBLE inside the nested factory closure).
+ */
+const toCronRow = (a: {
+  readonly id: string
+  readonly title: string
+  readonly rule: RRule
+  readonly nextRunAt: number
+  readonly prompt: string
+  readonly agentRole?: string
+  readonly baseBranch?: string
+}): CronRow => ({
+  id: a.id,
+  title: a.title,
+  // Re-serialize the stored parsed rule back to a canonical RRULE string.
+  rule: serializeRRule(a.rule),
+  nextRunAt: a.nextRunAt,
+  prompt: a.prompt,
+  ...(a.agentRole !== undefined ? { agentRole: a.agentRole } : {}),
+  ...(a.baseBranch !== undefined ? { baseBranch: a.baseBranch } : {}),
+})
+
+/** Outcome of {@link planCronCreate}: either the typed refusal `create` returns
+ *  verbatim, or the validated pieces of the row it is now cleared to persist. */
+type CronCreatePlan =
+  | { readonly ok: false; readonly message: string }
+  | {
+      readonly ok: true
+      readonly title: string
+      readonly rule: RRule
+      readonly firstFire: number
+      readonly createdAt: number
+    }
+
+/**
+ * The four-gate admission chain a `create` must clear BEFORE the engine is
+ * touched: non-empty title -> known agent-role -> parseable RRULE -> a rule
+ * that can actually fire.
+ *
+ * WHY THIS IS A UNIT: these four are one concern — "is this request
+ * admissible?" — and every one of them is a typed refusal, never a throw. They
+ * were spelled inline inside the nested `create` closure, where each guard paid
+ * a nesting surcharge; at module scope they cost their face value. Keeping them
+ * in ONE function also pins the ORDER, which is observable: an unknown
+ * `agent_role` is refused BEFORE any RRULE work, and `now()` is read only after
+ * both cheap gates pass.
+ *
+ * Takes `now` rather than reading a clock: the single `now()` call is the
+ * `createdAt` AND the next-fire anchor, exactly as before.
+ */
+const planCronCreate = (
+  title: string,
+  rule: string,
+  bind: CronBindOpts | undefined,
+  now: () => number,
+): CronCreatePlan => {
+  const trimmedTitle = title.trim()
+  if (trimmedTitle.length === 0) return { ok: false, message: "title is required" }
+  // RFC11-2 — validate the OPTIONAL agent-role binding against the REUSED
+  // registry BEFORE any RRULE work so an unknown role is refused (typed,
+  // never persisted) rather than silently dropped. An absent binding skips
+  // this entirely (byte-identical). `baseBranch` is a free-form git ref —
+  // sanitized/validated by the RFC-06 worktree owner at fire time.
+  if (bind?.agentRole !== undefined && !isKnownAgentRole(bind.agentRole)) {
+    return { ok: false, message: `unknown agent_role '${bind.agentRole}'` }
+  }
+  // PARSE the RRULE — an invalid rule yields a typed refusal, never a throw.
+  const parsed = parseRRule(rule)
+  if (!parsed.ok) {
+    return { ok: false, message: `invalid RRULE — ${parsed.message}` }
+  }
+  // Strip the `ok` discriminant off the parse result to recover the bare RRule.
+  const { ok: _ok, ...rrule } = parsed
+  const createdAt = now()
+  // First fire from the SAME pure evaluator the ticker uses (fireCount 0). A
+  // rule that can never fire (e.g. UNTIL already past) yields "never" ⇒ refuse
+  // rather than schedule a dead row.
+  const firstFire = computeNextFire(rrule, createdAt, 0)
+  if (firstFire === "never") {
+    return { ok: false, message: "RRULE never fires (UNTIL past or COUNT 0)" }
+  }
+  return { ok: true, title: trimmedTitle, rule: rrule, firstFire, createdAt }
+}
+
 /** Build the `/cron` adapter over a live {@link AutomationEnginePort}. */
 export const createCronSlashAdapter = (deps: CronSlashAdapterDeps): CronSlashState => {
   const now = deps.now ?? (() => Date.now())
@@ -121,16 +213,7 @@ export const createCronSlashAdapter = (deps: CronSlashAdapterDeps): CronSlashSta
   const list = async (): Promise<readonly CronRow[]> => {
     const r = await deps.engine.list()
     if (!r.ok) return []
-    return r.value.map((a) => ({
-      id: a.id,
-      title: a.title,
-      // Re-serialize the stored parsed rule back to a canonical RRULE string.
-      rule: serializeRRule(a.rule),
-      nextRunAt: a.nextRunAt,
-      prompt: a.prompt,
-      ...(a.agentRole !== undefined ? { agentRole: a.agentRole } : {}),
-      ...(a.baseBranch !== undefined ? { baseBranch: a.baseBranch } : {}),
-    }))
+    return r.value.map(toCronRow)
   }
 
   const create = async (
@@ -139,38 +222,15 @@ export const createCronSlashAdapter = (deps: CronSlashAdapterDeps): CronSlashSta
     prompt: string,
     bind?: CronBindOpts,
   ): Promise<CronCreateResult> => {
-    const trimmedTitle = title.trim()
-    if (trimmedTitle.length === 0) return { ok: false, message: "title is required" }
-    // RFC11-2 — validate the OPTIONAL agent-role binding against the REUSED
-    // registry BEFORE any RRULE work so an unknown role is refused (typed,
-    // never persisted) rather than silently dropped. An absent binding skips
-    // this entirely (byte-identical). `baseBranch` is a free-form git ref —
-    // sanitized/validated by the RFC-06 worktree owner at fire time.
-    if (bind?.agentRole !== undefined && !isKnownAgentRole(bind.agentRole)) {
-      return { ok: false, message: `unknown agent_role '${bind.agentRole}'` }
-    }
-    // PARSE the RRULE — an invalid rule yields a typed refusal, never a throw.
-    const parsed = parseRRule(rule)
-    if (!parsed.ok) {
-      return { ok: false, message: `invalid RRULE — ${parsed.message}` }
-    }
-    // Strip the `ok` discriminant off the parse result to recover the bare RRule.
-    const { ok: _ok, ...rrule } = parsed
-    const createdAt = now()
-    // First fire from the SAME pure evaluator the ticker uses (fireCount 0). A
-    // rule that can never fire (e.g. UNTIL already past) yields "never" ⇒ refuse
-    // rather than schedule a dead row.
-    const first = computeNextFire(rrule, createdAt, 0)
-    if (first === "never") {
-      return { ok: false, message: "RRULE never fires (UNTIL past or COUNT 0)" }
-    }
+    const plan = planCronCreate(title, rule, bind, now)
+    if (!plan.ok) return plan
     const input: ScheduleInput = {
       id: idGen(),
-      title: trimmedTitle,
-      rule: rrule,
+      title: plan.title,
+      rule: plan.rule,
       prompt,
-      nextRunAt: first,
-      createdAt,
+      nextRunAt: plan.firstFire,
+      createdAt: plan.createdAt,
       // RFC11-2 — thread the OPTIONAL role/base bindings onto the engine input.
       // exactOptional: keys are OMITTED when absent so a bindless schedule is a
       // byte-identical row.
@@ -179,18 +239,7 @@ export const createCronSlashAdapter = (deps: CronSlashAdapterDeps): CronSlashSta
     }
     const res = await deps.engine.schedule(input)
     if (!res.ok) return { ok: false, message: `${res.code}: ${res.message}` }
-    return {
-      ok: true,
-      row: {
-        id: res.value.id,
-        title: res.value.title,
-        rule: serializeRRule(res.value.rule),
-        nextRunAt: res.value.nextRunAt,
-        prompt: res.value.prompt,
-        ...(res.value.agentRole !== undefined ? { agentRole: res.value.agentRole } : {}),
-        ...(res.value.baseBranch !== undefined ? { baseBranch: res.value.baseBranch } : {}),
-      },
-    }
+    return { ok: true, row: toCronRow(res.value) }
   }
 
   const inbox = async (): Promise<readonly CronInboxRow[]> => {

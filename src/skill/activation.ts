@@ -46,6 +46,63 @@ const tokenize = (glob: string): GlobTok[] => {
   return toks
 }
 
+/** Does the fixed-width token `tok` match position `j` of `s`? `lit` wants that
+ *  exact character; `one` (`?`) wants any character that is not a path
+ *  separator. Both fail past the end of the string. Split out of the consume
+ *  loop so the loop is a plain "advance while it matches" and the per-kind rule
+ *  lives in one expression. */
+const fixedTokenMatches = (
+  tok: { k: "lit"; c: string } | { k: "one" },
+  s: string,
+  L: number,
+  j: number,
+): boolean => (tok.k === "lit" ? j < L && s[j] === tok.c : j < L && s[j] !== "/")
+
+/** Sentinel returned by {@link skipFixedTokens} when a `lit`/`?` token failed
+ *  to match. Distinct from every packed cursor, which is always >= 0. */
+const FIXED_TOKEN_MISMATCH = -1
+
+/**
+ * Consume the maximal run of FIXED-WIDTH tokens (`lit`, `one`) starting at
+ * token `ti` / position `si`.
+ *
+ * WHY THIS IS A UNIT: `step`'s cost was never its length — it was a three-way
+ * token-kind dispatch living inside a `while`, inside a function that is itself
+ * nested inside `matchFull`, so each of its six guards paid a +2/+3 NESTING
+ * surcharge (21 total). Only the fixed-width half of that dispatch needs the
+ * loop — that loop exists solely for the R2 stack fix (iterate literals instead
+ * of recursing once per character, which blew Node's ~7K-frame default on a
+ * 4000-char literal-only glob). The variable-width half is a flat two-case
+ * tail. Hoisting the loop to MODULE scope puts it at nesting 0 and leaves
+ * `step` as that tail — the same code, none of the surcharge.
+ *
+ * CONTRACT: returns the cursor packed as `i * (L + 1) + j` — where `i` is the
+ * first non-fixed-width token index (or `tokens.length`) and `j` the matching
+ * string position — or {@link FIXED_TOKEN_MISMATCH} when a literal / `?` did
+ * not match. Packed rather than returned as an object because this runs once
+ * per memoized (token, position) cell and must not allocate. `L` is passed in
+ * rather than read from `s` so the packing base is the caller's, by
+ * construction identical.
+ */
+const skipFixedTokens = (
+  tokens: GlobTok[],
+  s: string,
+  L: number,
+  ti: number,
+  si: number,
+): number => {
+  let i = ti
+  let j = si
+  while (i < tokens.length) {
+    const tok = tokens[i] as GlobTok
+    if (tok.k !== "lit" && tok.k !== "one") break
+    if (!fixedTokenMatches(tok, s, L, j)) return FIXED_TOKEN_MISMATCH
+    i++
+    j++
+  }
+  return i * (L + 1) + j
+}
+
 /** Does `tokens` match the WHOLE of `s` (both ends anchored)? Memoized DP:
  *  `memo[ti*(L+1)+si]` ∈ {0 unknown, 1 true, 2 false}. Recursion depth is
  *  bounded by the token count (each `go` either resolves or steps to `ti+1`),
@@ -69,26 +126,10 @@ const matchFull = (tokens: GlobTok[], s: string): boolean => {
     }
   }
   function step(ti: number, si: number): boolean {
-    // ITERATIVELY consume any run of lit/one tokens before recursing. R2 fix:
-    // a tail-recursive `go(ti+1, si+1)` per literal grew the call stack one
-    // frame per character, so a 4000-char literal-only glob (within the cap)
-    // could throw RangeError on Node's ~7K-frame default. The iterative skip
-    // bounds recursion depth by the number of seg/any tokens instead, which
-    // is far smaller than total token count for realistic globs.
-    let i = ti
-    let j = si
-    while (i < T) {
-      const tok = tokens[i] as GlobTok
-      if (tok.k === "lit") {
-        if (j >= L || s[j] !== tok.c) return false
-        i++
-        j++
-      } else if (tok.k === "one") {
-        if (j >= L || s[j] === "/") return false
-        i++
-        j++
-      } else break
-    }
+    const packed = skipFixedTokens(tokens, s, L, ti, si)
+    if (packed === FIXED_TOKEN_MISMATCH) return false
+    const i = Math.floor(packed / (L + 1))
+    const j = packed % (L + 1)
     if (i === T) return j === L
     const tok = tokens[i] as GlobTok
     if (tok.k === "seg") return star(i, j, false)

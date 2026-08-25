@@ -31,6 +31,7 @@ import {
 import {
   type LlmEvidencePacketStage,
   type LlmEvidenceRevisionByStage,
+  type LlmEvidenceSummary,
   llmEvidencePacketCounts,
   summarizeLlmEvidenceArtifacts,
 } from "./eval/llm-evidence-packet"
@@ -383,11 +384,114 @@ export interface RunHealthSummary {
  *  after this change) from "registry was empty for this run" (legitimate
  *  pre-knob baseline). */
 /**
+ * Drop every `undefined`-valued key from a "candidate fields" record.
+ *
+ * WHY THIS IS A UNIT: the per-instance projector's complexity was never its
+ * length — it was ONE guard, `...(x !== undefined ? { k: x } : {})`, spelled
+ * ~30 times inside a single object literal. Each spelling cost a cognitive
+ * point; together they were the whole 36. This helper is that guard, written
+ * once, so the projector can instead present its fields as a flat TABLE where a
+ * field opts out by evaluating to `undefined`.
+ *
+ * CONTRACT: key insertion order is preserved (plain string keys ⇒ `Object.keys`
+ * is insertion-ordered), so the emitted `report.json` keeps its exact legacy key
+ * order — which is what "byte-identical report" means for ~4000 live artifacts.
+ * A key whose value is `undefined` is OMITTED, never emitted as `null`.
+ */
+type DefinedOnly<T> = { [K in keyof T]?: Exclude<T[K], undefined> }
+
+const definedOnly = <T extends Record<string, unknown>>(fields: T): DefinedOnly<T> => {
+  const out: Record<string, unknown> = {}
+  for (const key of Object.keys(fields)) {
+    const value = fields[key]
+    if (value !== undefined) out[key] = value
+  }
+  return out as DefinedOnly<T>
+}
+
+/** The proof-summary projection: five always-emitted fields wrapped around
+ *  three optional ones. WHY A UNIT: in the inline form every one of those inner
+ *  guards paid a NESTING surcharge for sitting inside the outer
+ *  `proofSummary !== undefined ?` ternary. Hoisting it to an early-return
+ *  function flattens the nesting to zero and keeps the emitted key order
+ *  (fixed → optional → fixed) verbatim. */
+type ProofFields = Partial<
+  Pick<
+    PerInstanceReport,
+    | "proofState"
+    | "proofSource"
+    | "proofRequiredMissing"
+    | "contractOnlySubmitted"
+    | "contractOnlyBlocked"
+    | "publicMweState"
+    | "publicRegressionState"
+    | "reproConsensusState"
+    | "repairOnlyCandidates"
+    | "submittedCandidateProof"
+  >
+>
+
+const proofFieldsOf = (summary: SelectionProofSummary | undefined): ProofFields => {
+  if (summary === undefined) return {}
+  return {
+    proofState: summary.proofState,
+    proofSource: summary.proofSource,
+    proofRequiredMissing: summary.proofRequiredMissing,
+    contractOnlySubmitted: summary.contractOnlySubmitted,
+    contractOnlyBlocked: summary.contractOnlyBlocked,
+    ...definedOnly({
+      publicMweState: summary.publicMweState,
+      publicRegressionState: summary.publicRegressionState,
+      reproConsensusState: summary.reproConsensusState,
+    }),
+    repairOnlyCandidates: summary.repairOnlyCandidates,
+    submittedCandidateProof: summary.submittedCandidateProof,
+  }
+}
+
+/** The LLM-evidence coverage triple. WHY A UNIT: same shape as
+ *  {@link proofFieldsOf} — one presence gate that fans out to three keys, so it
+ *  belongs behind one early return rather than a nested conditional spread. */
+type LlmEvidenceSummaryFields = Partial<
+  Pick<PerInstanceReport, "llmEvidenceStages" | "llmEvidenceRevision" | "llmEvidenceMissingKinds">
+>
+
+const llmEvidenceSummaryFieldsOf = (
+  summary: LlmEvidenceSummary | undefined,
+): LlmEvidenceSummaryFields => {
+  if (summary === undefined) return {}
+  return {
+    llmEvidenceStages: summary.stages,
+    llmEvidenceRevision: summary.revisionByStage,
+    llmEvidenceMissingKinds: summary.missingKinds,
+  }
+}
+
+/** jun-29 — DERIVED, observe-only: the agent-side canonical oracle cleared the
+ *  repair gate but the OFFICIAL harness graded unresolved (agent repro weaker
+ *  than the held-out test). Computed from already-graded fields ONLY; never
+ *  consulted by repair selection (no answer-key leak). WHY A UNIT: it is the one
+ *  field in the table whose presence is a three-term conjunction rather than a
+ *  plain `!== undefined`, so naming it keeps the table uniform.
+ *  Returns `undefined` (⇒ key omitted) rather than `false`, exactly as the
+ *  legacy conditional spread did. */
+const oracleGapFalseGreenOf = (r: InstanceResult): true | undefined =>
+  r.repairValidationDecision?.authority === "canonical-sidecar" &&
+  r.repairValidationDecision?.issueResolved === true &&
+  r.gradeBreakdown?.resolved === false
+    ? true
+    : undefined
+
+/**
  * Project one graded {@link InstanceResult} (+ its {@link FailureClassification})
- * onto its {@link PerInstanceReport} JSON entry. Extracted verbatim from the
- * `buildReport` `perInstance.map` callback so that closure stays under the
- * god-function line cap — pure, behaviour-identical, every conditional-spread
- * keeps its byte-identical-legacy posture.
+ * onto its {@link PerInstanceReport} JSON entry.
+ *
+ * Reads as a TABLE: four always-present identity fields, then four ordered
+ * groups of conditional fields. The three groups routed through
+ * {@link definedOnly} opt a key out by evaluating to `undefined`; the two
+ * fan-out groups ({@link proofFieldsOf}, {@link llmEvidenceSummaryFieldsOf})
+ * each emit several keys behind one presence gate. Spread ORDER is the emitted
+ * key order and is byte-identical to the legacy literal.
  */
 const buildPerInstanceReportEntry = (
   r: InstanceResult,
@@ -403,80 +507,46 @@ const buildPerInstanceReportEntry = (
     passed: r.passed,
     turns: r.turns,
     patchBytes,
-    ...(r.patch.trim() !== ""
-      ? {
-          modelPatchDigest: createHash("sha256").update(r.patch, "utf8").digest("hex"),
-        }
-      : {}),
-    ...(touchedFiles.length > 0 ? { touchedFiles } : {}),
-    ...(r.error !== undefined ? { error: r.error } : {}),
-    ...(r.reproArtifactPath !== undefined ? { reproArtifactPath: r.reproArtifactPath } : {}),
-    // Cost-analysis SSOT: forward the observed token usage + wall-clock so
-    // `report.json` carries what `cost.ts` reads (Gap 1). Both are omitted
-    // when observability did not capture them ⇒ byte-identical legacy shape.
-    ...(r.usage !== undefined ? { usage: r.usage } : {}),
-    ...(r.durationMs !== undefined ? { durationMs: r.durationMs } : {}),
-    ...(c.termination !== "passed" ? { failure: c } : {}),
-    ...(r.budget !== undefined ? { budget: r.budget } : {}),
-    ...(r.reproTest !== undefined ? { reproTest: r.reproTest } : {}),
-    ...(r.reproVoteOutcomes !== undefined ? { reproVoteOutcomes: r.reproVoteOutcomes } : {}),
-    ...(r.repairValidationDecision !== undefined
-      ? { repairValidationDecision: r.repairValidationDecision }
-      : {}),
-    ...(r.gradeBreakdown !== undefined ? { gradeBreakdown: r.gradeBreakdown } : {}),
-    // jun-29 — forward the repair-loop diagnostics that were typed but dropped.
-    ...(r.verifyRounds !== undefined ? { verifyRounds: r.verifyRounds } : {}),
-    ...(r.primaryFalseGreen !== undefined ? { primaryFalseGreen: r.primaryFalseGreen } : {}),
-    ...(r.primaryFalseRed !== undefined ? { primaryFalseRed: r.primaryFalseRed } : {}),
-    // jun-30 SOTA++ — preserve the acceptance rerank tier for synthesis-arm A/B.
-    ...(r.acceptanceTier !== undefined ? { acceptanceTier: r.acceptanceTier } : {}),
-    // jun-29 — DERIVED, observe-only: the agent-side canonical oracle cleared
-    // the repair gate but the OFFICIAL harness graded unresolved (agent repro
-    // weaker than the held-out test). Computed from already-graded fields ONLY;
-    // never consulted by repair selection (no answer-key leak).
-    ...(r.repairValidationDecision?.authority === "canonical-sidecar" &&
-    r.repairValidationDecision?.issueResolved === true &&
-    r.gradeBreakdown?.resolved === false
-      ? { oracleGapFalseGreen: true }
-      : {}),
-    ...(r.reproOracleCalibration !== undefined
-      ? { reproOracleCalibration: r.reproOracleCalibration }
-      : {}),
-    ...(r.selectionTelemetry !== undefined ? { selectionTelemetry: r.selectionTelemetry } : {}),
-    ...(proofSummary !== undefined
-      ? {
-          proofState: proofSummary.proofState,
-          proofSource: proofSummary.proofSource,
-          proofRequiredMissing: proofSummary.proofRequiredMissing,
-          contractOnlySubmitted: proofSummary.contractOnlySubmitted,
-          contractOnlyBlocked: proofSummary.contractOnlyBlocked,
-          ...(proofSummary.publicMweState !== undefined
-            ? { publicMweState: proofSummary.publicMweState }
-            : {}),
-          ...(proofSummary.publicRegressionState !== undefined
-            ? { publicRegressionState: proofSummary.publicRegressionState }
-            : {}),
-          ...(proofSummary.reproConsensusState !== undefined
-            ? { reproConsensusState: proofSummary.reproConsensusState }
-            : {}),
-          repairOnlyCandidates: proofSummary.repairOnlyCandidates,
-          submittedCandidateProof: proofSummary.submittedCandidateProof,
-        }
-      : {}),
-    ...(r.verdict === "env_prep_failed" ? { envPrepFailed: true } : {}),
-    ...(r.goldResolved !== undefined ? { goldResolved: r.goldResolved } : {}),
-    ...(r.scoreLabel !== undefined ? { scoreLabel: r.scoreLabel } : {}),
-    ...(r.scoreEvidence !== undefined ? { scoreEvidence: r.scoreEvidence } : {}),
-    ...(r.ownerWidening !== undefined ? { ownerWidening: r.ownerWidening } : {}),
-    ...(r.submissionReview !== undefined ? { submissionReview: r.submissionReview } : {}),
-    ...(r.llmEvidence !== undefined ? { llmEvidence: r.llmEvidence } : {}),
-    ...(llmEvidenceSummary !== undefined
-      ? {
-          llmEvidenceStages: llmEvidenceSummary.stages,
-          llmEvidenceRevision: llmEvidenceSummary.revisionByStage,
-          llmEvidenceMissingKinds: llmEvidenceSummary.missingKinds,
-        }
-      : {}),
+    ...definedOnly({
+      modelPatchDigest:
+        r.patch.trim() !== ""
+          ? createHash("sha256").update(r.patch, "utf8").digest("hex")
+          : undefined,
+      touchedFiles: touchedFiles.length > 0 ? touchedFiles : undefined,
+      error: r.error,
+      reproArtifactPath: r.reproArtifactPath,
+      // Cost-analysis SSOT: forward the observed token usage + wall-clock so
+      // `report.json` carries what `cost.ts` reads (Gap 1). Both are omitted
+      // when observability did not capture them ⇒ byte-identical legacy shape.
+      usage: r.usage,
+      durationMs: r.durationMs,
+      failure: c.termination !== "passed" ? c : undefined,
+      budget: r.budget,
+      reproTest: r.reproTest,
+      reproVoteOutcomes: r.reproVoteOutcomes,
+      repairValidationDecision: r.repairValidationDecision,
+      gradeBreakdown: r.gradeBreakdown,
+      // jun-29 — forward the repair-loop diagnostics that were typed but dropped.
+      verifyRounds: r.verifyRounds,
+      primaryFalseGreen: r.primaryFalseGreen,
+      primaryFalseRed: r.primaryFalseRed,
+      // jun-30 SOTA++ — preserve the acceptance rerank tier for synthesis-arm A/B.
+      acceptanceTier: r.acceptanceTier,
+      oracleGapFalseGreen: oracleGapFalseGreenOf(r),
+      reproOracleCalibration: r.reproOracleCalibration,
+      selectionTelemetry: r.selectionTelemetry,
+    }),
+    ...proofFieldsOf(proofSummary),
+    ...definedOnly({
+      envPrepFailed: r.verdict === "env_prep_failed" ? true : undefined,
+      goldResolved: r.goldResolved,
+      scoreLabel: r.scoreLabel,
+      scoreEvidence: r.scoreEvidence,
+      ownerWidening: r.ownerWidening,
+      submissionReview: r.submissionReview,
+      llmEvidence: r.llmEvidence,
+    }),
+    ...llmEvidenceSummaryFieldsOf(llmEvidenceSummary),
   }
 }
 

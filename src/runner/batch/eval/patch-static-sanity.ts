@@ -380,6 +380,86 @@ const UNDEFINED_DIFF_PAYLOAD_FILE = ".quanta-undefined-diff.json"
  * (advisory), so it can never erase a real veto from the other probes nor invent
  * one. A new file (git-show fails for SOME but not all files) is handled by an
  * empty before-image, which is correct (its names are net-new). */
+/** What one collection pass over the edited .py files produced. `anyBefore`
+ *  records whether ANY git before-image was readable — the signal that separates
+ *  "all-new files" from "the git baseline is broken". */
+type DiffEntryScan = { readonly entries: DiffEntry[]; readonly anyBefore: boolean }
+
+/**
+ * Read the (before, after) pair for every edited `.py` file.
+ *
+ * Its own unit because each of its three skip conditions is a FAIL-OPEN
+ * decision with its own justification, and inline every one of them sat inside
+ * the file loop and paid its nesting surcharge.
+ */
+const collectDiffEntries = async (
+  cwd: string,
+  pyFiles: readonly string[],
+  fileMeta: ReadonlyMap<string, DiffFileMeta> | undefined,
+  timeoutMs: number,
+): Promise<DiffEntryScan> => {
+  const entries: DiffEntry[] = []
+  let anyBefore = false
+  for (const rel of pyFiles) {
+    const meta = fileMeta?.get(rel)
+    // Rename target ⇒ its pre-image lives at the OLD path.
+    const beforePath = meta?.renamedFrom ?? rel
+    const before = await gitShowBefore(cwd, beforePath, timeoutMs)
+    if (before !== undefined) anyBefore = true
+    // Missing before-image: only treat as net-new-eligible (empty before) when the
+    // diff CONFIRMS this is a genuinely new file. For a rename/modify whose before
+    // we could not read, FAIL-OPEN (skip the file) rather than false-veto every
+    // name in it. When no patch was supplied we keep the legacy empty-before
+    // behavior (callers without rename context).
+    if (before === undefined && fileMeta !== undefined && meta?.isNew !== true) {
+      continue
+    }
+    let after: string
+    try {
+      after = await readFile(join(cwd, rel), "utf8")
+    } catch {
+      // After-file unreadable (deleted by the patch / path error) ⇒ nothing to
+      // analyze for this file.
+      continue
+    }
+    entries.push({ rel, before: before ?? "", after })
+  }
+  return { entries, anyBefore }
+}
+
+/**
+ * Hand the collected (before, after) pairs to the python F821 backend through a
+ * temp payload file, and always remove the payload afterwards.
+ *
+ * A unit of its own because it owns the payload file's LIFETIME: every exit
+ * path — write failure, spawn failure, non-zero exit, success — must leave the
+ * sandbox clean, which is only checkable when the write and the `finally` sit
+ * in one function. Returns `null` (fail-open) for every backend problem.
+ */
+const runUndefinedNameBackend = async (
+  cwd: string,
+  entries: readonly DiffEntry[],
+  timeoutMs: number,
+): Promise<string[] | null> => {
+  const payloadPath = join(cwd, UNDEFINED_DIFF_PAYLOAD_FILE)
+  try {
+    await writeFile(payloadPath, JSON.stringify(entries), "utf8")
+  } catch {
+    return null
+  }
+  try {
+    const result = await execArgv(
+      ["python3", "-c", PYTHON_UNDEFINED_NAME_DIFF_SCRIPT, UNDEFINED_DIFF_PAYLOAD_FILE],
+      cwd,
+      timeoutMs,
+    ).catch(() => null)
+    if (result === null || result.code !== 0) return null
+    return parsePatchStaticSanityStdout(result.stdout)
+  } finally {
+    await rm(payloadPath, { force: true }).catch(() => {})
+  }
+}
+
 export const probeUndefinedNameDiff = async (args: {
   readonly cwd: string
   readonly files: readonly string[]
@@ -401,32 +481,12 @@ export const probeUndefinedNameDiff = async (args: {
   if (isGit === null || isGit.code !== 0) return null
 
   const fileMeta = args.patch !== undefined ? parseDiffFileMeta(args.patch) : undefined
-  const entries: DiffEntry[] = []
-  let anyBefore = false
-  for (const rel of pyFiles) {
-    const meta = fileMeta?.get(rel)
-    // Rename target ⇒ its pre-image lives at the OLD path.
-    const beforePath = meta?.renamedFrom ?? rel
-    const before = await gitShowBefore(args.cwd, beforePath, args.timeoutMs)
-    if (before !== undefined) anyBefore = true
-    // Missing before-image: only treat as net-new-eligible (empty before) when the
-    // diff CONFIRMS this is a genuinely new file. For a rename/modify whose before
-    // we could not read, FAIL-OPEN (skip the file) rather than false-veto every
-    // name in it. When no patch was supplied we keep the legacy empty-before
-    // behavior (callers without rename context).
-    if (before === undefined && fileMeta !== undefined && meta?.isNew !== true) {
-      continue
-    }
-    let after: string
-    try {
-      after = await readFile(join(args.cwd, rel), "utf8")
-    } catch {
-      // After-file unreadable (deleted by the patch / path error) ⇒ nothing to
-      // analyze for this file.
-      continue
-    }
-    entries.push({ rel, before: before ?? "", after })
-  }
+  const { entries, anyBefore } = await collectDiffEntries(
+    args.cwd,
+    pyFiles,
+    fileMeta,
+    args.timeoutMs,
+  )
   // If NO file yielded a before-image, the git tree is unusable as a baseline
   // (every show failed) — but only treat that as ambiguous when there is more
   // than the new-file case. We cannot distinguish "all brand-new files" from
@@ -436,23 +496,7 @@ export const probeUndefinedNameDiff = async (args: {
   if (entries.length === 0) return []
   if (!anyBefore) return null
 
-  const payloadPath = join(args.cwd, UNDEFINED_DIFF_PAYLOAD_FILE)
-  try {
-    await writeFile(payloadPath, JSON.stringify(entries), "utf8")
-  } catch {
-    return null
-  }
-  try {
-    const result = await execArgv(
-      ["python3", "-c", PYTHON_UNDEFINED_NAME_DIFF_SCRIPT, UNDEFINED_DIFF_PAYLOAD_FILE],
-      args.cwd,
-      args.timeoutMs,
-    ).catch(() => null)
-    if (result === null || result.code !== 0) return null
-    return parsePatchStaticSanityStdout(result.stdout)
-  } finally {
-    await rm(payloadPath, { force: true }).catch(() => {})
-  }
+  return await runUndefinedNameBackend(args.cwd, entries, args.timeoutMs)
 }
 
 /**

@@ -75,6 +75,146 @@ async function probeAstGrep(cwd: string): Promise<string | undefined> {
   return probePromise
 }
 
+/** The one terminal answer an ast-grep invocation produces. */
+type AstGrepResult = { readonly ok: boolean; readonly output: string }
+
+/**
+ * Resolve the optional `path` against the workspace fs-jail.
+ *
+ * B1 fix: validate the path against the workspace fs-jail before use. Without
+ * this check, `path: "/etc/passwd"` would escape the workspace via the ast-grep
+ * subprocess, reading an arbitrary file on the host.
+ *
+ * Its own unit because it is the only gate whose refusal is a SECURITY answer
+ * rather than a tool failure — and because a non-jail error must still
+ * propagate (it is a bug, not a refusal), which is easy to lose in a rewrite.
+ */
+const jailSearchPath = (
+  input: Input,
+  ctx: CoreToolContext,
+): { readonly jailedPath: string | undefined } | { readonly refusal: string } => {
+  if (input.path === undefined) return { jailedPath: undefined }
+  try {
+    return { jailedPath: resolveJailed(input.path, ctx.cwd) }
+  } catch (e) {
+    if (e instanceof FsJailError) return { refusal: e.message }
+    throw e
+  }
+}
+
+/** Build the ast-grep argv string. A unit so the exact flag set (and its ORDER)
+ *  is readable in one place — every flag here is version-sensitive. */
+const astGrepCommand = (input: Input, jailedPath: string | undefined): string => {
+  const parts: string[] = ["ast-grep", "run", "--pattern", sq(input.pattern)]
+  if (input.language !== undefined) {
+    parts.push("--lang", sq(input.language))
+  }
+  // B7 fix: cap output at source to avoid buffering millions of JSON matches.
+  // NOTE: ast-grep `sg run` has no per-result count flag (unlike ripgrep).
+  // Clap CLIs error on unrecognised arguments (exit 2), so any unknown flag
+  // would break every invocation on all installed versions. The stdout-slice
+  // guard below (MAX_STDOUT_BYTES) is the correct OOM defence — it truncates
+  // the raw string before JSON.parse and reports a clear error on truncation.
+  parts.push("--json")
+  if (jailedPath !== undefined) {
+    parts.push(sq(jailedPath))
+  }
+  return parts.join(" ")
+}
+
+type AstGrepMatch = { file: string; range: { start: { line: number } }; text: string }
+
+/**
+ * Render the match list. Split out because it is the only PURE part of the
+ * pipeline — everything above it is a gate over an external process.
+ */
+const formatMatches = (matches: readonly AstGrepMatch[], truncated: boolean): string => {
+  const shown = matches.slice(0, MAX_MATCHES)
+  const lines = shown.map((m) => {
+    const line = m.range?.start?.line ?? 0
+    // B4 fix: ast-grep can match multi-line constructs (e.g. entire function
+    // bodies). m.text may contain embedded '\n' or '\r\n' characters. After
+    // .trim(), those internal newlines remain, breaking the file:line:
+    // one-per-line contract when lines.join('\n') is called. Replace internal
+    // newlines (CRLF or LF) with a visible marker so each match stays on
+    // exactly one output line. Use \r?\n to strip the \r before replacing the
+    // \n, preventing a stray \r from corrupting ANSI terminal output.
+    const text = (m.text ?? "").replace(/\r?\n/g, "↵").trim()
+    return `${m.file}:${line + 1}: ${text}`
+  })
+
+  const more =
+    matches.length > MAX_MATCHES ? `\n... ${matches.length - MAX_MATCHES} more matches` : ""
+
+  let output = lines.join("\n") + more
+  if (truncated) {
+    output += "\n(warning: output was truncated at 2 MB — result may be incomplete)"
+  }
+  return output
+}
+
+/**
+ * Interpret one completed ast-grep run.
+ *
+ * A unit because it is a LADDER of five mutually exclusive terminal readings of
+ * the same shell result — timeout, hard error, no output, unparseable output,
+ * non-array output — and inline each rung sat inside the async generator and
+ * paid its nesting surcharge on top of its own `yield`/`return` pair.
+ */
+const readAstGrepRun = (r: {
+  timedOut: boolean
+  exitCode: number
+  stdout: string
+  stderr: string
+}): AstGrepResult => {
+  if (r.timedOut) return { ok: false, output: "ast-grep timed out after 30s" }
+
+  // ast-grep exits 0 on matches, 1 on no matches, >1 on error.
+  // When there are no matches stdout is empty or "[]".
+  if (r.exitCode > 1) {
+    return { ok: false, output: r.stderr.trim() || `ast-grep failed (exit ${r.exitCode})` }
+  }
+
+  // B7 fix: cap the raw stdout string before JSON.parse to bound RAM usage.
+  // This stdout-slice is the sole OOM guard (no per-result count CLI flag in
+  // ast-grep). Truncated JSON will fail to parse; the catch block below
+  // reports ok:false with a clear error rather than crashing the process.
+  const truncated = r.stdout.length > MAX_STDOUT_BYTES
+  const rawStdout = truncated ? r.stdout.slice(0, MAX_STDOUT_BYTES) : r.stdout
+  const stdout = rawStdout.trim()
+
+  if (!stdout || stdout === "[]") return { ok: true, output: "(no matches)" }
+
+  let matches: AstGrepMatch[]
+  try {
+    matches = JSON.parse(stdout)
+  } catch (_e) {
+    return { ok: false, output: `ast-grep returned non-JSON output: ${stdout.slice(0, 200)}` }
+  }
+
+  if (!Array.isArray(matches) || matches.length === 0) return { ok: true, output: "(no matches)" }
+
+  return { ok: true, output: formatMatches(matches, truncated) }
+}
+
+/** The whole search, start to finish, as ONE value. Keeping it out of the
+ *  generator is what collapses seven `yield`/`return` pairs into a single
+ *  `yield` at the call site. */
+const runAstGrep = async (input: Input, ctx: CoreToolContext): Promise<AstGrepResult> => {
+  const probeError = await probeAstGrep(ctx.cwd)
+  if (probeError !== undefined) return { ok: false, output: probeError }
+
+  const jail = jailSearchPath(input, ctx)
+  if ("refusal" in jail) return { ok: false, output: jail.refusal }
+
+  const r = await runShell(astGrepCommand(input, jail.jailedPath), {
+    cwd: ctx.cwd,
+    signal: ctx.signal,
+    timeoutMs: SEARCH_TIMEOUT_MS,
+  })
+  return readAstGrepRun(r)
+}
+
 export const astGrepTool = defineTool<Input>({
   name: "ast_grep",
   description:
@@ -88,119 +228,6 @@ export const astGrepTool = defineTool<Input>({
 
   async *execute(input: Input, ctx: CoreToolContext): AsyncIterable<ToolEvent> {
     yield { type: "progress", message: `ast-grep: searching for pattern ${input.pattern}…` }
-
-    const probeError = await probeAstGrep(ctx.cwd)
-    if (probeError !== undefined) {
-      yield { type: "result", result: { ok: false, output: probeError } }
-      return
-    }
-
-    // B1 fix: validate the path against the workspace fs-jail before use.
-    // Without this check, `path: "/etc/passwd"` would escape the workspace
-    // via the ast-grep subprocess, reading an arbitrary file on the host.
-    let jailedPath: string | undefined
-    if (input.path !== undefined) {
-      try {
-        jailedPath = resolveJailed(input.path, ctx.cwd)
-      } catch (e) {
-        if (e instanceof FsJailError) {
-          yield { type: "result", result: { ok: false, output: e.message } }
-          return
-        }
-        throw e
-      }
-    }
-
-    const parts: string[] = ["ast-grep", "run", "--pattern", sq(input.pattern)]
-    if (input.language !== undefined) {
-      parts.push("--lang", sq(input.language))
-    }
-    // B7 fix: cap output at source to avoid buffering millions of JSON matches.
-    // NOTE: ast-grep `sg run` has no per-result count flag (unlike ripgrep).
-    // Clap CLIs error on unrecognised arguments (exit 2), so any unknown flag
-    // would break every invocation on all installed versions. The stdout-slice
-    // guard below (MAX_STDOUT_BYTES) is the correct OOM defence — it truncates
-    // the raw string before JSON.parse and reports a clear error on truncation.
-    parts.push("--json")
-    if (jailedPath !== undefined) {
-      parts.push(sq(jailedPath))
-    }
-
-    const r = await runShell(parts.join(" "), {
-      cwd: ctx.cwd,
-      signal: ctx.signal,
-      timeoutMs: SEARCH_TIMEOUT_MS,
-    })
-
-    if (r.timedOut) {
-      yield { type: "result", result: { ok: false, output: "ast-grep timed out after 30s" } }
-      return
-    }
-
-    // ast-grep exits 0 on matches, 1 on no matches, >1 on error.
-    // When there are no matches stdout is empty or "[]".
-    if (r.exitCode > 1) {
-      yield {
-        type: "result",
-        result: {
-          ok: false,
-          output: r.stderr.trim() || `ast-grep failed (exit ${r.exitCode})`,
-        },
-      }
-      return
-    }
-
-    // B7 fix: cap the raw stdout string before JSON.parse to bound RAM usage.
-    // This stdout-slice is the sole OOM guard (no per-result count CLI flag in
-    // ast-grep). Truncated JSON will fail to parse; the catch block below
-    // reports ok:false with a clear error rather than crashing the process.
-    const truncated = r.stdout.length > MAX_STDOUT_BYTES
-    const rawStdout = truncated ? r.stdout.slice(0, MAX_STDOUT_BYTES) : r.stdout
-    const stdout = rawStdout.trim()
-
-    if (!stdout || stdout === "[]") {
-      yield { type: "result", result: { ok: true, output: "(no matches)" } }
-      return
-    }
-
-    let matches: Array<{ file: string; range: { start: { line: number } }; text: string }>
-    try {
-      matches = JSON.parse(stdout)
-    } catch (_e) {
-      yield {
-        type: "result",
-        result: { ok: false, output: `ast-grep returned non-JSON output: ${stdout.slice(0, 200)}` },
-      }
-      return
-    }
-
-    if (!Array.isArray(matches) || matches.length === 0) {
-      yield { type: "result", result: { ok: true, output: "(no matches)" } }
-      return
-    }
-
-    const shown = matches.slice(0, MAX_MATCHES)
-    const lines = shown.map((m) => {
-      const line = m.range?.start?.line ?? 0
-      // B4 fix: ast-grep can match multi-line constructs (e.g. entire function
-      // bodies). m.text may contain embedded '\n' or '\r\n' characters. After
-      // .trim(), those internal newlines remain, breaking the file:line:
-      // one-per-line contract when lines.join('\n') is called. Replace internal
-      // newlines (CRLF or LF) with a visible marker so each match stays on
-      // exactly one output line. Use \r?\n to strip the \r before replacing the
-      // \n, preventing a stray \r from corrupting ANSI terminal output.
-      const text = (m.text ?? "").replace(/\r?\n/g, "↵").trim()
-      return `${m.file}:${line + 1}: ${text}`
-    })
-
-    const more =
-      matches.length > MAX_MATCHES ? `\n... ${matches.length - MAX_MATCHES} more matches` : ""
-
-    let output = lines.join("\n") + more
-    if (truncated) {
-      output += "\n(warning: output was truncated at 2 MB — result may be incomplete)"
-    }
-
-    yield { type: "result", result: { ok: true, output } }
+    yield { type: "result", result: await runAstGrep(input, ctx) }
   },
 })
