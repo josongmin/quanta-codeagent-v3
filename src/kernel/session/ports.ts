@@ -3,6 +3,7 @@ import type { ImageBlock, Message } from "@/llm"
 import type {
   ArtifactRef,
   CapabilityManifest,
+  GoalContinuationProvenance,
   ObjectiveCommandOutcome,
   PendingApprovalView,
   PostureCommandOutcome,
@@ -326,6 +327,10 @@ export interface KernelDispatchContext {
   readonly clock: KernelClock
   readonly eventLog: KernelEventLogPort
   readonly host: SessionHost
+  /** Host-only one-use capability verifier for `turn.submit`. An untrusted
+   * transport cannot successfully submit without a capability issued by the
+   * owning RuntimeSession. */
+  readonly consumeTurnSubmitProvenance?: (provenance: GoalContinuationProvenance) => boolean
   readonly signal?: AbortSignal
   readonly onCommitted?: (args: KernelCommittedEvents) => Promise<void> | void
 }

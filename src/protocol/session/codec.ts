@@ -165,6 +165,21 @@ export const decodeSessionCommand = (raw: string): SessionCommand => {
   if (envelope.payload.type === "turn.run") {
     assertOptionalString(envelope.payload, "command", "causedByApprovalId")
   }
+  if (envelope.payload.type === "turn.submit") {
+    assertString(envelope.payload, "command", "text")
+    assertFiniteNumber(envelope.payload, "command", "expectedSessionRevision")
+    assertObjectField(envelope.payload, "command", "provenance")
+    const provenance = envelope.payload.provenance as Record<string, unknown>
+    if (provenance.kind !== "goal-continuation") {
+      throw new SessionProtocolValidationError("bad_command_provenance_kind")
+    }
+    assertString(provenance, "provenance", "objectiveId")
+    assertFiniteNumber(provenance, "provenance", "objectiveRevision")
+    assertString(provenance, "provenance", "attemptId")
+    if ("images" in envelope.payload && !Array.isArray(envelope.payload.images)) {
+      throw new SessionProtocolValidationError("bad_command_images_type")
+    }
+  }
   // RFC-03 C3 — the objective mutation payload carries a closed
   // {@link ObjectiveMutation}. The codec is a LEAF (no `@/objective` value
   // import): it asserts wire-shape sanity — `mutation` is a plain object with a

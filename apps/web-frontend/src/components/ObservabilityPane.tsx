@@ -112,6 +112,22 @@ const DiffsSection = memo(
 /* Objective                                                           */
 /* ------------------------------------------------------------------ */
 
+const objectiveValidation = (objective: Objective): string => {
+  if (objective.successCriteria.length === 0) return "Validation contract missing"
+  const met = objective.successCriteria.filter((criterion) => criterion.met).length
+  const contract = objective.successCriteria.some((criterion) => criterion.kind === "checked")
+    ? "checked"
+    : "manual-only"
+  return `${met}/${objective.successCriteria.length} verified · ${contract}`
+}
+
+const objectiveRemaining = (objective: Objective): string => {
+  const ids = objective.successCriteria
+    .filter((criterion) => !criterion.met)
+    .map((criterion) => criterion.id)
+  return ids.length === 0 ? "none" : ids.join(", ")
+}
+
 const ObjectiveCard = memo(({ objective }: { objective: Objective | null }): JSX.Element => {
   if (objective === null) {
     return (
@@ -128,6 +144,26 @@ const ObjectiveCard = memo(({ objective }: { objective: Objective | null }): JSX
         <ObjectiveStatusBadge status={objective.status} />
       </header>
       <p className="mt-1.5 break-words text-sm text-ink">{objective.goal}</p>
+      <dl className="mt-2 grid gap-1 text-xs text-ink-secondary">
+        <div>
+          <dt className="inline text-ink-tertiary">Validation: </dt>
+          <dd className="inline">{objectiveValidation(objective)}</dd>
+        </div>
+        <div>
+          <dt className="inline text-ink-tertiary">Remaining: </dt>
+          <dd className="inline break-all">{objectiveRemaining(objective)}</dd>
+        </div>
+        <div>
+          <dt className="inline text-ink-tertiary">Budget: </dt>
+          <dd className="inline">
+            {objective.budget.turnsUsed}/{objective.budget.maxTurns ?? "∞"} turns ·{" "}
+            {objective.budget.tokensUsed}/{objective.budget.maxTokens ?? "∞"} tokens
+          </dd>
+        </div>
+        {objective.verificationState === "stale" ? (
+          <div className="text-warn">Verified source is stale</div>
+        ) : null}
+      </dl>
       {objective.blockers.length > 0 ? (
         <div className="mt-2.5">
           <h4 className="text-[10px] font-semibold uppercase tracking-wide text-err">Blockers</h4>

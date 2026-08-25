@@ -33,7 +33,7 @@ describe("session.skill.set_enabled — protocol arm", () => {
     // Exactly one new arm — the command-type tuple length grew by one over the
     // pre-F5 ten (approval/input/identity/objective/permission/posture/
     // transcript/tool_profile/turn.cancel/turn.run).
-    expect(SESSION_COMMAND_TYPES.length).toBe(11)
+    expect(SESSION_COMMAND_TYPES.length).toBe(12)
   })
 
   test("builder mints a well-formed disable command (no CAS target)", () => {

@@ -1,12 +1,10 @@
 import { describe, expect, test } from "bun:test"
 import {
-  type GoalContinuationProbes,
-  startGoalWakeController,
-} from "@/apps/cli/goal-continuation-hook"
-import {
   asObjectiveAuthority,
   createObjectiveStore,
+  type GoalContinuationProbes,
   type ObjectiveDomainSnapshot,
+  startGoalWakeController,
 } from "@/objective"
 
 const TID = "goal-wake-hook-thread"

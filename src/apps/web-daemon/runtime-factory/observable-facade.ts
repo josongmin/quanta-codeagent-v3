@@ -14,6 +14,7 @@
  */
 
 import type { ApprovalStateMachinePort } from "@/agent/approval-state-machine"
+import type { ActiveTurnRefHolder } from "@/agent/conversation-action-surface"
 import type { ObservabilityWireHandle } from "@/agent/observability-wire"
 import type { RunLedgerPort } from "@/agent/run-ledger"
 import type { ShadowVerifyPort } from "@/agent/shadow-verify"
@@ -139,6 +140,8 @@ export interface ObservableRuntimeFacade extends RuntimeFacade {
    * is not wired either, byte-identical). Approvals ride `approval.respond`.
    */
   readonly followerCoControl?: FollowerCoControlDispatcher
+  /** Shared loop-owned activity ref used by follower control and goal wakes. */
+  readonly activeTurnRef?: ActiveTurnRefHolder
   /**
    * UUX-1-11 — narrow READ-ONLY accessor bundle for `GET /readout/:name`.
    * Threads the SAME live sources the session runs on (subagent TaskRegistry /

@@ -84,6 +84,29 @@ describe("@/protocol/session codec", () => {
     expect(() => decodeSessionCommand(raw)).toThrow(SessionProtocolValidationError)
   })
 
+  test("round-trips turn.submit and rejects malformed provenance", () => {
+    const command = {
+      sessionId: "s1",
+      commandId: "submit-1",
+      issuedAt: "2026-05-26T00:00:06.000Z",
+      type: "turn.submit" as const,
+      text: "continue",
+      expectedSessionRevision: 4,
+      provenance: {
+        kind: "goal-continuation" as const,
+        objectiveId: "goal-1",
+        objectiveRevision: 2,
+        attemptId: "secret",
+      },
+    }
+    expect(decodeSessionCommand(encodeSessionCommand(command))).toEqual(command)
+    const malformed = JSON.parse(encodeSessionCommand(command))
+    malformed.payload.provenance.objectiveRevision = "2"
+    expect(() => decodeSessionCommand(JSON.stringify(malformed))).toThrow(
+      SessionProtocolValidationError,
+    )
+  })
+
   test("round-trips transcript replace commands", () => {
     const raw = encodeSessionCommand({
       sessionId: "s1",

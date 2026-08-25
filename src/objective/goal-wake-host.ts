@@ -20,17 +20,16 @@
  * probe/`resume` shape). No `@/agent` core, no reactor internals.
  */
 
+import { type ContinuationDeps, ContinuationSemaphore, runIdleContinuation } from "./continuation"
+import { createGoalWakeController, type GoalWakeAttempt } from "./goal-wake-controller"
 import {
-  type ContinuationDeps,
-  ContinuationSemaphore,
   computeGoalWakeDelay,
-  createGoalWakeController,
   DEFAULT_GOAL_WAKE_POLICY,
-  type GoalWakeAttempt,
   type GoalWakePolicy,
-  type ObjectiveAuthority,
-  runIdleContinuation,
-} from "@/objective"
+  type GoalWakeSettlementHint,
+} from "./goal-wake-policy"
+import type { ObjectiveDomainSnapshot } from "./model"
+import type { ObjectiveAuthority } from "./ports"
 
 /** The host-bound probes + resume sink (everything in `ContinuationDeps` except
  *  the pieces this driver owns: `enabled`, `semaphore`, `now`). */
@@ -56,7 +55,7 @@ export interface StartGoalWakeOpts {
   readonly threadId: string | undefined
   readonly probes: GoalContinuationProbes
   /** Revisioned projection from the same authority `/goal` mutates. */
-  readonly readDomain: (threadId: string) => import("@/objective").ObjectiveDomainSnapshot
+  readonly readDomain: (threadId: string) => ObjectiveDomainSnapshot
   /** Same authority as readDomain, used only to install the product default turn cap. */
   readonly authority?: ObjectiveAuthority | undefined
   /** Goal-specific quiescence duration, independent of UI presence handling. */
@@ -126,7 +125,7 @@ export const startGoalWakeController = (opts: StartGoalWakeOpts): GoalWakeLifecy
   const setFn = opts.setTimeoutFn ?? ((fn, ms) => setTimeout(fn, ms))
   const clearFn = opts.clearTimeoutFn ?? ((handle) => clearTimeout(handle))
   let checkpointOrdinal = 0
-  let settlementHint: import("@/objective").GoalWakeSettlementHint = {}
+  let settlementHint: GoalWakeSettlementHint = {}
 
   const controller = createGoalWakeController({
     enabled: true,

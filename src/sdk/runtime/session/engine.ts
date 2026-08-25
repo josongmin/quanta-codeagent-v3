@@ -57,6 +57,9 @@ export interface SessionEngineDeps {
   readonly subscriptions: SessionSubscriptionHub
   readonly hostSession: SessionHost
   readonly kernel: Pick<KernelDispatchContext, "clock" | "eventLog">
+  readonly consumeTurnSubmitProvenance?: NonNullable<
+    KernelDispatchContext["consumeTurnSubmitProvenance"]
+  >
 }
 
 export const ensureTransportBridge = (
@@ -220,6 +223,9 @@ export const dispatch = async (
     const result = await dispatchSessionCommand(box.state, command, {
       ...deps.kernel,
       host: deps.hostSession,
+      ...(deps.consumeTurnSubmitProvenance !== undefined
+        ? { consumeTurnSubmitProvenance: deps.consumeTurnSubmitProvenance }
+        : {}),
       ...(options.signal !== undefined ? { signal: options.signal } : {}),
       onCommitted: async ({ state: committedState, events }) => {
         committedEventCount += await publishCommittedEvents(deps, committedState, events)

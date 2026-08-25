@@ -17,6 +17,7 @@ import type {
   SessionTranscriptReplaceCommand,
   TurnCancelCommand,
   TurnRunCommand,
+  TurnSubmitCommand,
 } from "@/protocol/session"
 
 export type { RuntimeAgentConfigBase, RuntimeAgentTurnAssembler } from "./base"
@@ -88,6 +89,17 @@ export interface RuntimeSession {
       meta?: Partial<Omit<TurnRunCommand, "sessionId" | "type">>,
       options?: SessionDispatchOptions,
     ): Promise<SessionDispatchResult>
+    /** Host-only atomic goal continuation. This method mints the one-use wire
+     * capability; raw transport clients can send `turn.submit` but cannot pass
+     * the kernel verifier. */
+    submitGoalContinuation?(input: {
+      readonly text: string
+      readonly images?: TurnSubmitCommand["images"]
+      readonly expectedSessionRevision: number
+      readonly objectiveId: string
+      readonly objectiveRevision: number
+      readonly validateCurrent: () => boolean
+    }): Promise<SessionDispatchResult>
     /** S1 (jul-16 ticket 01, S0-2 ruling) — the ONE sanctioned additive
      *  RuntimeSession surface change: `TurnCancelCommand` has been in the
      *  protocol's 8-command union (and handled by the kernel scheduler) all

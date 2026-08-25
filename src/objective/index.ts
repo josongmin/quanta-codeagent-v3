@@ -101,6 +101,7 @@ export {
   UNSUPPORTED_CHECK_EXECUTION,
   unsupportedCheckExecutionPort,
 } from "./criteria/verifier"
+export { applyGoalPreset } from "./goal-preset"
 export type {
   GoalWakeArm,
   GoalWakeAttempt,
@@ -120,6 +121,12 @@ export {
   evaluateGoalWakeArm,
   evaluateGoalWakeFire,
 } from "./goal-wake-controller"
+export type {
+  GoalContinuationProbes,
+  GoalWakeLifecycle,
+  StartGoalWakeOpts,
+} from "./goal-wake-host"
+export { DEFAULT_GOAL_QUIET_MS, startGoalWakeController } from "./goal-wake-host"
 export type {
   GoalWakeDelayDecision,
   GoalWakeDelaySkip,

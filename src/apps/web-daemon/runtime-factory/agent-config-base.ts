@@ -16,6 +16,7 @@
  */
 
 import { type AgentConfig, buildSystemPrompt, type HookBus } from "@/agent"
+import type { ActiveTurnRefHolder } from "@/agent/conversation-action-surface"
 import type { QuestionAvailabilityReader } from "@/agent/dispatch-guard"
 import type { ObservabilityWireHandle } from "@/agent/observability-wire"
 import type { PlanStore } from "@/agent/plan/state"
@@ -64,6 +65,11 @@ const objectiveSlot = (
   objective: ObjectivePort | undefined,
 ): Partial<Pick<AgentConfig, "objective">> => (objective !== undefined ? { objective } : {})
 
+const turnActivitySlot = (
+  activeTurnRef: ActiveTurnRefHolder | undefined,
+): Partial<Pick<AgentConfig, "activeTurnRef">> =>
+  activeTurnRef !== undefined ? { activeTurnRef } : {}
+
 /**
  * Assemble the {@link RuntimeAgentConfigBase} for a web-daemon session from the
  * per-session collaborators the factory just minted. Extracted from the factory
@@ -91,6 +97,7 @@ export const buildAgentConfigBase = async ({
   userInput,
   controlRequest,
   follower,
+  activeTurnRef,
   observability,
   objective,
   postureControl,
@@ -114,6 +121,7 @@ export const buildAgentConfigBase = async ({
   readonly userInput: WebUserInputPortHandle | undefined
   readonly controlRequest: WebControlRequestPortHandle | undefined
   readonly follower: ReturnType<typeof buildFollowerCoControlSlot>
+  readonly activeTurnRef?: ActiveTurnRefHolder | undefined
   readonly observability: {
     readonly handle: ObservabilityWireHandle
     readonly bus: HookBus | undefined
@@ -223,12 +231,8 @@ export const buildAgentConfigBase = async ({
       : {}),
     // T02 — wire the conversation-action port + active-turn ref so a web
     // follower's steer lands as a mid-turn injection (the loop polls the port).
-    ...(follower !== undefined
-      ? {
-          conversationActionPort: follower.surface.port,
-          activeTurnRef: follower.surface.activeTurnRef,
-        }
-      : {}),
+    ...(follower !== undefined ? { conversationActionPort: follower.surface.port } : {}),
+    ...turnActivitySlot(activeTurnRef),
     // ADR-0540 W1-B — declare the `server-auto-continues` capability marker iff
     // the daemon actually owns the continuation (the SAME gate arms the
     // `setupApprovalContinuation` re-issue in `server.ts`). Clients that see the

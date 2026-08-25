@@ -212,6 +212,20 @@ export interface TurnRunCommand extends SessionCommandEnvelope<"turn.run"> {
   readonly causedByApprovalId?: string
 }
 
+export interface GoalContinuationProvenance {
+  readonly kind: "goal-continuation"
+  readonly objectiveId: string
+  readonly objectiveRevision: number
+  readonly attemptId: string
+}
+
+export interface TurnSubmitCommand extends SessionCommandEnvelope<"turn.submit"> {
+  readonly text: string
+  readonly images?: readonly ImageBlock[]
+  readonly expectedSessionRevision: number
+  readonly provenance: GoalContinuationProvenance
+}
+
 export interface TurnCancelCommand extends SessionCommandEnvelope<"turn.cancel"> {}
 
 export interface SessionIdentitySetCommand extends SessionCommandEnvelope<"session.identity.set"> {
@@ -267,11 +281,14 @@ export const SESSION_COMMAND_TYPES = [
     "session.tool_profile.set",
     "turn.cancel",
     "turn.run",
+    "turn.submit",
 ] as const
+
+export type TurnExecutionCommand = TurnRunCommand | TurnSubmitCommand
 
 export type PostureCommandScope = "current" | "default"
 
-export type SessionCommand = InputAppendCommand | TurnRunCommand | TurnCancelCommand | SessionIdentitySetCommand | SessionTranscriptReplaceCommand | SessionToolProfileSetCommand | SessionPermissionSetCommand | SessionPostureSetCommand | SessionObjectiveMutateCommand | SessionSkillSetEnabledCommand | ApprovalRespondCommand
+export type SessionCommand = InputAppendCommand | TurnRunCommand | TurnSubmitCommand | TurnCancelCommand | SessionIdentitySetCommand | SessionTranscriptReplaceCommand | SessionToolProfileSetCommand | SessionPermissionSetCommand | SessionPostureSetCommand | SessionObjectiveMutateCommand | SessionSkillSetEnabledCommand | ApprovalRespondCommand
 
 export type SessionCommandType = (typeof SESSION_COMMAND_TYPES)[number]
 

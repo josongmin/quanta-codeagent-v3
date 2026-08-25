@@ -1,4 +1,8 @@
-import type { SessionCommand, SessionEvent } from "@/protocol/session"
+import {
+  type SessionCommand,
+  type SessionEvent,
+  SessionProtocolValidationError,
+} from "@/protocol/session"
 import { applyObjectiveCommand } from "./objective-command"
 import type { KernelDispatchContext, SessionHostDescription } from "./ports"
 import { applyPostureCommand } from "./posture-command"
@@ -69,6 +73,16 @@ const rewriteStateUpdatedEvent = (event: SessionEvent, state: KernelSessionState
         state: toSessionStateView(state),
       }
     : event
+
+const validateTurnSubmitProvenance = (
+  command: SessionCommand,
+  ctx: KernelDispatchContext,
+): void => {
+  if (command.type !== "turn.submit") return
+  if (ctx.consumeTurnSubmitProvenance?.(command.provenance) !== true) {
+    throw new SessionProtocolValidationError("invalid_turn_submit_provenance")
+  }
+}
 
 /** Run the HOST-side effect a command carries, if it carries one, and say
  *  whether the kernel state must then be re-read from the host.
@@ -210,6 +224,7 @@ const routeDispatchResult = async (args: {
       })
       return { state, events }
     case "turn.run":
+    case "turn.submit":
       return await runTurn({
         state,
         command,
@@ -266,6 +281,7 @@ export const dispatchSessionCommand = async (
       return await settlePreAbortedTurnRun({ state, command, ctx, emittedAt })
     }
     const reduced = reduceSessionCommand(state, command, emittedAt)
+    validateTurnSubmitProvenance(command, ctx)
     // `reduced.events` is read BEFORE `reduced.state`: an unrecognised command
     // type makes the reducer return nothing, and the resulting TypeError names
     // the field the original read first.
@@ -282,7 +298,7 @@ export const dispatchSessionCommand = async (
     // via the fast-path instead of contending on the lease (which throws
     // lease-held while the turn proceeds uncancelled).
     let preRegisteredController: AbortController | undefined
-    if (command.type === "turn.run") {
+    if (command.type === "turn.run" || command.type === "turn.submit") {
       preRegisteredController = new AbortController()
       activeTurnControllers.set(state.sessionId, preRegisteredController)
     }

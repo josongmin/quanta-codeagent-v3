@@ -13,6 +13,7 @@ import {
   buildInputAppend,
   buildTurnCancel,
   buildTurnRun,
+  buildTurnSubmit,
   type CommandBuildDeps,
   continuationCommandIdForApproval,
   isSessionCommandType,
@@ -73,6 +74,38 @@ describe("protocol session builders (hoisted SSOT)", () => {
       commandId: "cancel-7",
       issuedAt: "2026-01-01T00:00:00.000Z",
       expectedRevision: 4,
+    })
+  })
+
+  test("buildTurnSubmit preserves the complete atomic prompt and provenance", () => {
+    expect(
+      buildTurnSubmit(
+        fixedDeps,
+        {
+          text: "continue",
+          expectedSessionRevision: 7,
+          provenance: {
+            kind: "goal-continuation",
+            objectiveId: "goal-1",
+            objectiveRevision: 3,
+            attemptId: "attempt-secret",
+          },
+        },
+        { commandId: "submit-1" },
+      ),
+    ).toEqual({
+      sessionId: "builder-session",
+      type: "turn.submit",
+      text: "continue",
+      expectedSessionRevision: 7,
+      provenance: {
+        kind: "goal-continuation",
+        objectiveId: "goal-1",
+        objectiveRevision: 3,
+        attemptId: "attempt-secret",
+      },
+      commandId: "submit-1",
+      issuedAt: "2026-07-16T12:00:00.000Z",
     })
   })
 

@@ -34,7 +34,7 @@
  * continuation ever launches).
  *
  * LIVE WIRING: this module is NO LONGER dead. `runIdleContinuation` is driven
- * by the host binding `apps/cli/goal-continuation-hook.ts`: an event-driven
+ * by the shared host binding `@/objective/goal-wake-host`: an event-driven
  * quiet-window controller invokes it only after a fresh authority revision and
  * host quiescence check. The `QUANTA_GOAL_ENFORCE` →
  * `goalContinuationEnforce` knob gates construction at the interactive
@@ -47,7 +47,7 @@
  * SLICE FENCE: imports ONLY `./types` (the closed `ObjectivePort` +
  * `ObjectiveStatus`). Nothing from `@/agent` core, `@/reactor`, `@/apps`. The
  * host binds the probes/resume at the idle-monitor / reactor seam
- * (goal-continuation-hook).
+ * (goal-wake-host).
  */
 
 import type { ObjectivePort, ObjectiveStatus } from "./types"

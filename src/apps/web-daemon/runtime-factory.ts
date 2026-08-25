@@ -38,6 +38,7 @@ import {
 } from "@/host/runtime"
 import { resolveGatedObjectiveAuthority } from "@/host/runtime/objective-store-wire"
 import { pickProvider, tryCreateLLM } from "@/llm"
+import { applyGoalPreset } from "@/objective"
 import { getDefaultPermissionStore, type PermissionStore } from "@/permission"
 import { createRuntimeFromAgentConfigBase } from "@/sdk/runtime"
 import { errMessage, gateOn, logger } from "@/shared"
@@ -161,8 +162,15 @@ const assembleWebRuntimeParts = async (
   // OUT-OF-BAND INBOUND port cluster (agent-state tap + user-input mirror +
   // T02 follower + ADR-0496 control-request + gated ask_user). Each keeps its
   // original gate; see {@link mintInboundPorts}.
-  const { agentState, subagentSource, userInput, follower, controlRequest, askUserTools } =
-    mintInboundPorts(env, permission)
+  const {
+    agentState,
+    subagentSource,
+    userInput,
+    follower,
+    activeTurnRef,
+    controlRequest,
+    askUserTools,
+  } = mintInboundPorts(env, permission)
   // P4 (jul-11, UUX-4-14) — compose MCP from the surface-shared assembly
   // (@/host/mcp-composition). No .mcp.json ⇒ empty (byte-identical). Bridged
   // tools join the registry; clients stop on shutdown; the /mcp readout goes
@@ -193,6 +201,7 @@ const assembleWebRuntimeParts = async (
     subagentSource,
     userInput,
     follower,
+    activeTurnRef,
     controlRequest,
     askUserTools,
     mcpTools,
@@ -232,6 +241,7 @@ const loadDefaultPermissionStore = async (): Promise<PermissionStore | undefined
  */
 export const buildProductionRuntimeFactory = (): (() => Promise<ObservableRuntimeFacade>) => {
   const env = process.env as Record<string, string | undefined>
+  applyGoalPreset(env)
   const provider = pickProvider(env)
   const llm = tryCreateLLM(provider, {}, env)
   if (llm === null) {
@@ -266,6 +276,7 @@ export const buildProductionRuntimeFactory = (): (() => Promise<ObservableRuntim
       subagentSource,
       userInput,
       follower,
+      activeTurnRef,
       controlRequest,
       askUserTools,
       mcpTools,
@@ -294,6 +305,7 @@ export const buildProductionRuntimeFactory = (): (() => Promise<ObservableRuntim
       userInput,
       controlRequest,
       follower,
+      activeTurnRef,
       observability,
       // RFC-03 H1 (web parity fix) — the session-stable objective authority
       // (minted once above) lands on `base.objective`, so every turn's assembler
@@ -358,6 +370,7 @@ export const buildProductionRuntimeFactory = (): (() => Promise<ObservableRuntim
       // enqueue target (byte-identical).
       ...(controlRequest !== undefined ? { controlRequest } : {}),
       ...(follower !== undefined ? { followerCoControl: follower.dispatcher } : {}),
+      activeTurnRef,
       // UUX-1-11 — read-only readout accessor bundle over the SAME live
       // collaborators wired above (fleet registry / plan store / skills config /
       // durable memory store / usage holder). The server threads it into the

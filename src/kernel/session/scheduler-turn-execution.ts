@@ -1,4 +1,4 @@
-import type { SessionEvent, TurnRunCommand } from "@/protocol/session"
+import type { SessionEvent, TurnExecutionCommand } from "@/protocol/session"
 import type { KernelDispatchContext, SessionHostTurnEvent, SessionHostTurnResult } from "./ports"
 import { reduceSessionCommand } from "./reducer"
 import {
@@ -79,7 +79,7 @@ const composeTurnSignal = (
 
 const emitTurnStreamEvent = async (args: {
   readonly state: KernelSessionState
-  readonly command: TurnRunCommand
+  readonly command: TurnExecutionCommand
   readonly ctx: KernelDispatchContext
   readonly event: SessionHostTurnEvent
 }): Promise<{
@@ -109,7 +109,7 @@ const emitTurnStreamEvent = async (args: {
  */
 const settleReturnedTurn = async (args: {
   readonly state: KernelSessionState
-  readonly command: TurnRunCommand
+  readonly command: TurnExecutionCommand
   readonly ctx: KernelDispatchContext
   readonly result: SessionHostTurnResult
   readonly events: readonly SessionEvent[]
@@ -143,7 +143,7 @@ const settleReturnedTurn = async (args: {
 
 export const runTurn = async (args: {
   readonly state: KernelSessionState
-  readonly command: TurnRunCommand
+  readonly command: TurnExecutionCommand
   readonly ctx: KernelDispatchContext
   readonly reduced: ReturnType<typeof reduceSessionCommand>
   readonly events: readonly SessionEvent[]
@@ -278,7 +278,7 @@ export const runTurn = async (args: {
  *  the event log never diverges from the returned state. */
 export const settlePreAbortedTurnRun = async (args: {
   readonly state: KernelSessionState
-  readonly command: TurnRunCommand
+  readonly command: TurnExecutionCommand
   readonly ctx: KernelDispatchContext
   readonly emittedAt: string
 }): Promise<KernelDispatchResult> => {

@@ -12,7 +12,7 @@
 
 import { renderToStaticMarkup } from "react-dom/server"
 import { describe, expect, it } from "vitest"
-import type { ApprovalRequest, RunEntry } from "../types/protocol"
+import type { ApprovalRequest, Objective, RunEntry } from "../types/protocol"
 import type { ObservabilityState } from "../ws/observability-hooks"
 import { ObservabilityPane } from "./ObservabilityPane"
 
@@ -76,5 +76,39 @@ describe("ObservabilityPane — honest approvals (UUX-2-08)", () => {
   it("keeps the quiet empty card when nothing is pending", () => {
     const html = renderToStaticMarkup(<ObservabilityPane state={emptyState} />)
     expect(html).toContain("No approvals waiting.")
+  })
+})
+
+describe("ObservabilityPane — goal authority projection", () => {
+  it("renders validation, remaining criteria, budget, and stale evidence", () => {
+    const objective: Objective = {
+      objectiveId: "goal-1",
+      createdBy: "user",
+      threadId: "thread-1",
+      goal: "ship safely",
+      successCriteria: [
+        { kind: "checked", id: "tests", text: "tests pass", met: false },
+        {
+          kind: "manual",
+          id: "docs",
+          text: "docs updated",
+          met: true,
+          completion: { source: "manual" },
+        },
+      ],
+      status: "active",
+      budget: { turnsUsed: 2, maxTurns: 5, tokensUsed: 100, maxTokens: 500 },
+      blockers: [],
+      nextActions: [],
+      verificationState: "stale",
+      createdAt: 1,
+      updatedAt: 2,
+    }
+    const html = renderToStaticMarkup(<ObservabilityPane state={{ ...emptyState, objective }} />)
+    expect(html).toContain("1/2 verified · checked")
+    expect(html).toContain("Remaining:")
+    expect(html).toContain("tests")
+    expect(html).toContain("2/5 turns")
+    expect(html).toContain("Verified source is stale")
   })
 })

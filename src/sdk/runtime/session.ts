@@ -15,6 +15,7 @@ import {
   buildTranscriptReplace,
   buildTurnCancel,
   buildTurnRun,
+  buildTurnSubmit,
   type CommandBuildDeps,
   SessionClosedError,
 } from "@/protocol/session"
@@ -25,6 +26,7 @@ import {
   type SessionEngineDeps,
   type SessionRuntimeState,
 } from "./session/engine"
+import { createTurnSubmitAuthority } from "./session/turn-submit-authority"
 import { SessionSubscriptionHub } from "./subscription"
 import type { RuntimeSession } from "./types"
 
@@ -47,6 +49,7 @@ interface CreateRuntimeSessionArgs {
 export const createRuntimeSession = (args: CreateRuntimeSessionArgs): RuntimeSession => {
   const hostDescription = args.hostSession.describe()
   const subscriptions = new SessionSubscriptionHub()
+  const turnSubmitAuthority = createTurnSubmitAuthority()
   // W4-b seq-continuity seam (ADR-0540 W2 item 0). A DURABLE event log exposes
   // `tip()` — the max seq already persisted for this session. Resume issuance
   // FROM that tip (the kernel mints every event as `state.seq + n`), so
@@ -90,6 +93,7 @@ export const createRuntimeSession = (args: CreateRuntimeSessionArgs): RuntimeSes
     subscriptions,
     hostSession: args.hostSession,
     kernel: args.kernel,
+    consumeTurnSubmitProvenance: turnSubmitAuthority.consume,
   }
 
   // Pure command-builders (protocol-slice SSOT, `@/protocol/session/builders`)
@@ -113,6 +117,7 @@ export const createRuntimeSession = (args: CreateRuntimeSessionArgs): RuntimeSes
       try {
         await closeSession(engine)
       } finally {
+        turnSubmitAuthority.clear()
         durableLog?.close()
       }
     },
@@ -122,6 +127,28 @@ export const createRuntimeSession = (args: CreateRuntimeSessionArgs): RuntimeSes
     },
     turn: {
       run: async (meta, options) => dispatch(engine, buildTurnRun(commandDeps, meta), options),
+      submitGoalContinuation: async (input) => {
+        const capability = turnSubmitAuthority.issue({
+          objectiveId: input.objectiveId,
+          objectiveRevision: input.objectiveRevision,
+          validateCurrent: input.validateCurrent,
+        })
+        try {
+          return await dispatch(
+            engine,
+            buildTurnSubmit(commandDeps, {
+              text: input.text,
+              ...(input.images !== undefined ? { images: input.images } : {}),
+              expectedSessionRevision: input.expectedSessionRevision,
+              provenance: capability.provenance,
+            }),
+            { enqueue: true },
+          )
+        } catch (error) {
+          capability.revoke()
+          throw error
+        }
+      },
       // S1 (jul-16 ticket 01, S0-2 ruling) — the ONE sanctioned RuntimeSession
       // surface addition: `turn.cancel` existed in the protocol's command union
       // (and the kernel reducer/scheduler) all along, but had no typed verb —

@@ -210,7 +210,7 @@ export const HOST: readonly KnobInventoryEntry[] = [
     home: "runtime-config",
     describe:
       "Public durable-goal preset; seeds objective tools, autonomous pursuit, and measured budget enforcement only when their internal gates are unset.",
-    readSite: "apps/cli/goal-preset.ts",
+    readSite: "objective/goal-preset.ts",
   },
   {
     envKey: "QUANTA_IDENTITY",

@@ -5,7 +5,7 @@ import type {
   ArtifactRef,
   SessionEvent,
   StopCategoryWire,
-  TurnRunCommand,
+  TurnExecutionCommand,
 } from "@/protocol/session"
 import { SessionProtocolValidationError, UNKNOWN_OUTCOME_REASON } from "@/protocol/session"
 import { isAbort } from "@/shared/abortable"
@@ -101,7 +101,7 @@ export interface KernelDispatchResult {
 
 const approvalEventsForTurn = (args: {
   readonly state: KernelSessionState
-  readonly command: TurnRunCommand
+  readonly command: TurnExecutionCommand
   readonly approval: NonNullable<SessionHostTurnResult["approvalRequest"]>
   readonly ctx: KernelDispatchContext
 }): readonly SessionEvent[] => [
@@ -127,7 +127,7 @@ const approvalEventsForTurn = (args: {
 
 export const onApprovalRequested = async (args: {
   readonly state: KernelSessionState
-  readonly command: TurnRunCommand
+  readonly command: TurnExecutionCommand
   readonly result: SessionHostTurnResult
   readonly ctx: KernelDispatchContext
   readonly events: readonly SessionEvent[]
@@ -161,7 +161,7 @@ export const onApprovalRequested = async (args: {
 
 const completionEventsForTurn = (args: {
   readonly state: KernelSessionState
-  readonly command: TurnRunCommand
+  readonly command: TurnExecutionCommand
   readonly artifacts: readonly ArtifactRef[]
   readonly ctx: KernelDispatchContext
 }): readonly SessionEvent[] => {
@@ -209,7 +209,7 @@ const completionEventsForTurn = (args: {
 
 export const onTurnCompleted = async (args: {
   readonly state: KernelSessionState
-  readonly command: TurnRunCommand
+  readonly command: TurnExecutionCommand
   readonly result: SessionHostTurnResult
   readonly ctx: KernelDispatchContext
   readonly events: readonly SessionEvent[]
@@ -301,7 +301,7 @@ export const classifyTerminal = (args: {
  *  throw path; `message` falls back to a stable "turn aborted" label. */
 export const onTurnAborted = async (args: {
   readonly state: KernelSessionState
-  readonly command: TurnRunCommand
+  readonly command: TurnExecutionCommand
   readonly error?: unknown
   /** ALBB-04 P2 — present ONLY on the cooperative RETURN-abort path (host
    *  RETURNED `outcome.reason === "aborted"` WITH accumulated messages, e.g. a
@@ -374,7 +374,7 @@ export const onTurnAborted = async (args: {
 
 export const onTurnFailed = async (args: {
   readonly state: KernelSessionState
-  readonly command: TurnRunCommand
+  readonly command: TurnExecutionCommand
   readonly error: unknown
   readonly ctx: KernelDispatchContext
   readonly events: readonly SessionEvent[]
@@ -414,7 +414,7 @@ export const onTurnFailed = async (args: {
 
 export const onTurnErrored = async (args: {
   readonly state: KernelSessionState
-  readonly command: TurnRunCommand
+  readonly command: TurnExecutionCommand
   readonly result: SessionHostTurnResult
   readonly ctx: KernelDispatchContext
   readonly events: readonly SessionEvent[]

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest"
+import { computeHasObservabilityData } from "./App"
 import type { ContextUsageMessage } from "./types/protocol"
 import type { ObservabilityState } from "./ws/observability-hooks"
-import { computeHasObservabilityData } from "./App"
 
 /**
  * Auto-hide gate for the observability sidebar. The load-bearing invariant the
@@ -57,6 +57,8 @@ describe("computeHasObservabilityData (sidebar auto-hide gate)", () => {
     const state: ObservabilityState = {
       ...emptyObservability,
       objective: {
+        objectiveId: "goal-1",
+        createdBy: "user",
         threadId: "t1",
         goal: "ship",
         successCriteria: [],

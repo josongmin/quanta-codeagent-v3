@@ -11,6 +11,7 @@ export {
   buildTranscriptReplace,
   buildTurnCancel,
   buildTurnRun,
+  buildTurnSubmit,
   commandMeta,
   continuationCommandIdForApproval,
 } from "./builders"
@@ -26,6 +27,7 @@ export {
 } from "./codec"
 export type {
   ApprovalRespondCommand,
+  GoalContinuationProvenance,
   InputAppendCommand,
   PostureCommandScope,
   SessionCommand,
@@ -39,7 +41,9 @@ export type {
   SessionToolProfileSetCommand,
   SessionTranscriptReplaceCommand,
   TurnCancelCommand,
+  TurnExecutionCommand,
   TurnRunCommand,
+  TurnSubmitCommand,
 } from "./commands"
 export {
   isPostureCommandScope,

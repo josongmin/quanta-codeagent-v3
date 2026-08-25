@@ -25,6 +25,7 @@ import type { SupportedReadModels } from "@/protocol/session"
 import type { RuntimeSession } from "@/sdk/runtime"
 import { loadSessionById, type PersistedObjectiveSnapshot } from "@/session"
 import { errMessage, logger } from "@/shared"
+import { composeWebGoalWake, type WebGoalWakeHandle } from "./goal-wake-compose"
 import type { CostReadoutTotals, WebReadoutSources } from "./readout"
 import { setupApprovalContinuation } from "./server/approval-continuation"
 import { type CanvasArtifactFeed, setupCanvasArtifactBridge } from "./server/canvas-artifact-bridge"
@@ -322,6 +323,7 @@ const buildOnAttachThread = (deps: {
   readonly sharedSession: RuntimeSession
   readonly transcriptPersist: ReturnType<typeof attachTranscriptPersistence>
   readonly runtime: unknown
+  readonly goalWake?: WebGoalWakeHandle | undefined
 }): ((threadId: string) => Promise<void>) | undefined =>
   deps.threadStore !== null
     ? async (threadId: string): Promise<void> => {
@@ -344,6 +346,8 @@ const buildOnAttachThread = (deps: {
             )
             return prepared.ok ? prepared.prepared : null
           },
+          cancelGoalWake: deps.goalWake?.onAttachStart,
+          rearmGoalWake: deps.goalWake?.onAttachSettled,
         })
       }
     : undefined
@@ -354,6 +358,11 @@ export const startWebDaemon = async (config: WebDaemonServerConfig): Promise<Web
   // join the same session instead of minting a fresh one — see the
   // `buildRegisteredSession` comment above.
   const sharedSession = await runtime.createSession(config.sessionConfig)
+  const goalWake = await composeWebGoalWake({
+    session: sharedSession,
+    runtime: runtime as Parameters<typeof composeWebGoalWake>[0]["runtime"],
+    env: process.env,
+  })
   const registry = createSessionRegistry()
   const startedAt = performance.now()
 
@@ -413,6 +422,7 @@ export const startWebDaemon = async (config: WebDaemonServerConfig): Promise<Web
     sharedSession,
     transcriptPersist,
     runtime,
+    ...(goalWake !== undefined ? { goalWake } : {}),
   })
   const readoutSources: WebReadoutSources = {
     ...(facadeReadoutSources ?? {}),
@@ -447,6 +457,7 @@ export const startWebDaemon = async (config: WebDaemonServerConfig): Promise<Web
       // for the client to ack on a socket we already removed handlers
       // from. Force-stopping first delivers the close frame from Bun
       // BEFORE we tear down our adapter state.
+      goalWake?.stop()
       await server.stop(true)
       await registry.closeAll()
       if (unsubPersist !== null) {

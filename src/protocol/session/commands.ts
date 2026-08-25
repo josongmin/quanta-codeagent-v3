@@ -38,6 +38,28 @@ export interface TurnRunCommand extends SessionCommandEnvelope<"turn.run"> {
   readonly causedByApprovalId?: string
 }
 
+/** Host-issued, single-use provenance for an autonomous goal continuation.
+ * The wire client may carry this value but cannot mint a valid `attemptId`;
+ * the runtime validates and consumes the capability under the session lease. */
+export interface GoalContinuationProvenance {
+  readonly kind: "goal-continuation"
+  readonly objectiveId: string
+  readonly objectiveRevision: number
+  readonly attemptId: string
+}
+
+/** Atomically admit a complete goal prompt and start its turn. Unlike the
+ * legacy `input.append` + `turn.run` pair, no command can interleave between
+ * the empty-draft checks and the turn start. */
+export interface TurnSubmitCommand extends SessionCommandEnvelope<"turn.submit"> {
+  readonly text: string
+  readonly images?: readonly ImageBlock[]
+  readonly expectedSessionRevision: number
+  readonly provenance: GoalContinuationProvenance
+}
+
+export type TurnExecutionCommand = TurnRunCommand | TurnSubmitCommand
+
 export interface TurnCancelCommand extends SessionCommandEnvelope<"turn.cancel"> {}
 
 export interface SessionIdentitySetCommand extends SessionCommandEnvelope<"session.identity.set"> {
@@ -182,6 +204,7 @@ export interface ApprovalRespondCommand extends SessionCommandEnvelope<"approval
 export type SessionCommand =
   | InputAppendCommand
   | TurnRunCommand
+  | TurnSubmitCommand
   | TurnCancelCommand
   | SessionIdentitySetCommand
   | SessionTranscriptReplaceCommand
@@ -204,6 +227,7 @@ export const SESSION_COMMAND_TYPES = [
   "session.tool_profile.set",
   "turn.cancel",
   "turn.run",
+  "turn.submit",
 ] as const
 
 export type SessionCommandType = (typeof SESSION_COMMAND_TYPES)[number]

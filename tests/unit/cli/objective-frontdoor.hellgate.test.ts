@@ -1,11 +1,10 @@
 import { describe, expect, test } from "bun:test"
-import { applyGoalPreset } from "@/apps/cli/goal-preset"
 import { goalCmd } from "@/apps/cli/slash/goal-cmd"
 import { buildGoalControl, objectiveCmd } from "@/apps/cli/slash/objective"
 import { buildSessionSlashCommands } from "@/apps/cli/slash/registry-session"
 import { buildSurfaceSlashCommands } from "@/apps/cli/slash/registry-surface"
 import type { SlashCommand, SlashContext } from "@/apps/cli/slash-contract"
-import { createObjectiveAuthority } from "@/objective"
+import { applyGoalPreset, createObjectiveAuthority } from "@/objective"
 
 const withGoalEnv = <T>(value: string | undefined, fn: () => T): T => {
   const prior = process.env.QUANTA_GOAL

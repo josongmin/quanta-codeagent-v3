@@ -25,6 +25,7 @@ import type {
   SessionTranscriptReplaceCommand,
   TurnCancelCommand,
   TurnRunCommand,
+  TurnSubmitCommand,
 } from "./commands"
 
 /** Structural clock the builders stamp `issuedAt` from. Deliberately defined
@@ -96,6 +97,20 @@ export const buildTurnRun = (
   ...(meta?.causedByApprovalId !== undefined
     ? { causedByApprovalId: meta.causedByApprovalId }
     : {}),
+})
+
+export const buildTurnSubmit = (
+  deps: CommandBuildDeps,
+  input: Omit<TurnSubmitCommand, "sessionId" | "type" | "commandId" | "issuedAt">,
+  meta?: Partial<Pick<TurnSubmitCommand, "commandId" | "issuedAt">>,
+): TurnSubmitCommand => ({
+  sessionId: deps.sessionId,
+  type: "turn.submit",
+  text: input.text,
+  ...(input.images !== undefined && input.images.length > 0 ? { images: [...input.images] } : {}),
+  expectedSessionRevision: input.expectedSessionRevision,
+  provenance: { ...input.provenance },
+  ...commandMeta(deps, meta),
 })
 
 /** S1 — `turn.cancel` builder. The command has existed in the protocol's

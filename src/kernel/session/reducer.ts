@@ -395,14 +395,13 @@ const handleTurnCancel = (
 
 /** `turn.run` — extracted from the reducer switch so each command owns one
  *  function. `Extract` restores the narrowing the switch used to provide. */
-const handleTurnRun = (
+const startTurn = (
   state: KernelSessionState,
-  command: Extract<SessionCommand, { type: "turn.run" }>,
+  command: Extract<SessionCommand, { type: "turn.run" | "turn.submit" }>,
   emittedAt: string,
+  prompt: string,
+  images: readonly ImageBlock[],
 ): ReducerResult => {
-  if (!hasDraftTurnInput(state)) {
-    throw new SessionProtocolValidationError("empty_turn_input")
-  }
   const nextState = withRevision({
     ...state,
     status: "running",
@@ -413,8 +412,8 @@ const handleTurnRun = (
     hostAction: {
       kind: "run_turn",
       history: [...state.messages],
-      prompt: state.draftInput,
-      images: state.draftImages,
+      prompt,
+      images,
     },
     events: [
       {
@@ -424,8 +423,8 @@ const handleTurnRun = (
         emittedAt,
         causedByCommandId: command.commandId,
         type: "turn.started",
-        prompt: state.draftInput,
-        ...(state.draftImages.length > 0 ? { images: state.draftImages } : {}),
+        prompt,
+        ...(images.length > 0 ? { images } : {}),
       },
       {
         eventId: crypto.randomUUID(),
@@ -438,6 +437,40 @@ const handleTurnRun = (
       },
     ],
   }
+}
+
+const handleTurnRun = (
+  state: KernelSessionState,
+  command: Extract<SessionCommand, { type: "turn.run" }>,
+  emittedAt: string,
+): ReducerResult => {
+  if (!hasDraftTurnInput(state)) {
+    throw new SessionProtocolValidationError("empty_turn_input")
+  }
+  return startTurn(state, command, emittedAt, state.draftInput, state.draftImages)
+}
+
+const handleTurnSubmit = (
+  state: KernelSessionState,
+  command: Extract<SessionCommand, { type: "turn.submit" }>,
+  emittedAt: string,
+): ReducerResult => {
+  if (command.expectedSessionRevision !== state.revision) {
+    throw new SessionRevisionConflictError(command.expectedSessionRevision, state.revision)
+  }
+  if (state.pendingApproval !== null) {
+    throw new SessionProtocolValidationError("turn_submit_approval_pending")
+  }
+  if (state.status !== "idle") {
+    throw new SessionProtocolValidationError("turn_submit_not_idle")
+  }
+  if (hasDraftTurnInput(state)) {
+    throw new SessionProtocolValidationError("turn_submit_draft_not_empty")
+  }
+  if (command.text.trim().length === 0 && (command.images?.length ?? 0) === 0) {
+    throw new SessionProtocolValidationError("empty_turn_input")
+  }
+  return startTurn(state, command, emittedAt, command.text, command.images ?? [])
 }
 
 export const reduceSessionCommand = (
@@ -475,5 +508,7 @@ export const reduceSessionCommand = (
       return handleTurnCancel(state, command, emittedAt)
     case "turn.run":
       return handleTurnRun(state, command, emittedAt)
+    case "turn.submit":
+      return handleTurnSubmit(state, command, emittedAt)
   }
 }

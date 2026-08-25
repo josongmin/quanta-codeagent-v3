@@ -29,8 +29,10 @@
 
 import { isControlRequestEnabled } from "@/agent/control-request"
 import {
+  type ActiveTurnRefHolder,
   type ConversationActionSurface,
   createConversationActionSurface,
+  createTurnActivity,
 } from "@/agent/conversation-action-surface"
 import type { QuestionAvailabilityReader } from "@/agent/dispatch-guard"
 import { type InboundMode, parseInboundMode } from "@/agent/inbound-mode"
@@ -82,9 +84,10 @@ import { createWebUserInputPort, type WebUserInputPortHandle } from "../web-user
  */
 export const buildFollowerCoControlSlot = (
   env: Record<string, string | undefined>,
+  activeTurnRef?: ActiveTurnRefHolder,
 ): { surface: ConversationActionSurface; dispatcher: FollowerCoControlDispatcher } | undefined => {
   if (!isFollowerCoControlEnabled(env)) return undefined
-  const surface = createConversationActionSurface()
+  const surface = createConversationActionSurface(activeTurnRef)
   const inbound: { current: InboundMode } = {
     current: parseInboundMode(env.QUANTA_INBOUND_MODE) ?? "queue",
   }
@@ -340,6 +343,7 @@ export const mintInboundPorts = (
   readonly subagentSource: SubagentSourceHandle | undefined
   readonly userInput: WebUserInputPortHandle | undefined
   readonly follower: ReturnType<typeof buildFollowerCoControlSlot>
+  readonly activeTurnRef: ActiveTurnRefHolder | undefined
   readonly controlRequest: WebControlRequestPortHandle | undefined
   readonly askUserTools: Tool[]
 } => {
@@ -352,7 +356,9 @@ export const mintInboundPorts = (
     agentState !== undefined
       ? createWebUserInputPort({ capture: (ev) => agentState.sink.capture(ev) })
       : undefined
-  const follower = buildFollowerCoControlSlot(env)
+  const needsTurnActivity = gateOn(env, "QUANTA_GOAL_ENFORCE") || isFollowerCoControlEnabled(env)
+  const activeTurnRef = needsTurnActivity ? createTurnActivity().activeTurnRef : undefined
+  const follower = buildFollowerCoControlSlot(env, activeTurnRef)
   const controlRequest = isControlRequestEnabled(env)
     ? createWebControlRequestPort({ permission })
     : undefined
@@ -360,5 +366,13 @@ export const mintInboundPorts = (
     gateOn(env, "QUANTA_ASK_USER") && userInput !== undefined
       ? [askUserTool(createWebAskUserPort(userInput.port)) as Tool]
       : []
-  return { agentState, subagentSource, userInput, follower, controlRequest, askUserTools }
+  return {
+    agentState,
+    subagentSource,
+    userInput,
+    follower,
+    activeTurnRef,
+    controlRequest,
+    askUserTools,
+  }
 }

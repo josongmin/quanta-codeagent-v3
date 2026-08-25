@@ -147,12 +147,20 @@ export interface RunEntry {
   readonly error?: string
 }
 
-export type ObjectiveStatus = "active" | "blocked" | "completed"
+export type ObjectiveStatus =
+  | "active"
+  | "paused"
+  | "usage_limited"
+  | "budget_limited"
+  | "blocked"
+  | "completed"
 
 export interface SuccessCriterion {
+  readonly kind: "manual" | "checked"
   readonly id: string
   readonly text: string
   readonly met: boolean
+  readonly completion?: { readonly source: "manual" | "verifier" }
 }
 
 export interface Blocker {
@@ -170,6 +178,10 @@ export interface ObjectiveBudget {
 }
 
 export interface Objective {
+  readonly objectiveId: string
+  readonly createdBy: "user" | "model" | "system" | "continuation"
+  readonly verifiedSourceDigest?: string
+  readonly verificationState?: "current" | "stale"
   readonly threadId: string
   readonly goal: string
   readonly successCriteria: readonly SuccessCriterion[]

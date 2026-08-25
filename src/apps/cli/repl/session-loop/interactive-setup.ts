@@ -6,12 +6,12 @@ import {
   asObjectiveReadPort,
   buildPursuitContinuationPrompt,
   DEFAULT_GOAL_WAKE_POLICY,
+  startGoalWakeController,
 } from "@/objective"
 import { buildAutorunEligibility } from "@/permission"
 import { injectSimulatedTurn, type LastTurnOutcome, REACTOR_ENV_FLAG } from "@/reactor"
 import { gateOnStrict, logger, runtimeConfig } from "@/shared"
 import { readCliKnob } from "../../cli-knobs-accessor"
-import { startGoalWakeController } from "../../goal-continuation-hook"
 import type { ImageQueue } from "../../image-queue"
 import type { NotificationPort } from "../../notify"
 import { startReactorWatchBridge } from "../../reactor-watch-bridge"
