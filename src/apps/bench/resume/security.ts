@@ -1,3 +1,4 @@
+import { errMessage } from "@/shared"
 import type { RemoteBackend, ResumeSecurityReceipt, RunAws } from "@/shared/remote-store"
 
 export type ResumeSecurityAttestation = Omit<ResumeSecurityReceipt, "applicationPrefixEnforced">
@@ -17,7 +18,7 @@ const parseJson = (label: string, raw: string): Record<string, unknown> => {
     if (parsed === null || typeof parsed !== "object") throw new Error("expected object")
     return parsed as Record<string, unknown>
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error)
+    const message = errMessage(error)
     throw new Error(`[resume-security] ${label}: invalid JSON (${message})`)
   }
 }

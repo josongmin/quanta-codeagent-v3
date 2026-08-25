@@ -10,7 +10,7 @@ import {
   writeFileSync,
 } from "node:fs"
 import { basename, dirname, join, resolve } from "node:path"
-import { redactValue } from "@/shared"
+import { errMessage, redactValue } from "@/shared"
 
 const OWNER_DIR_MODE = 0o700
 const OWNER_FILE_MODE = 0o600
@@ -101,7 +101,7 @@ export const exportRedactedCassette = (args: {
     try {
       rows.push(JSON.parse(line))
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error)
+      const message = errMessage(error)
       throw new Error(`invalid cassette JSONL at line ${index + 1}: ${message}`)
     }
   }
