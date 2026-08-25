@@ -244,9 +244,10 @@ export interface RuntimeConfig extends RuntimeConfigPaths {
    * Independent of UI idle suppression and live through `/knobs set`. */
   readonly goalQuietMs: number
   /** Objective-completion judge mode (`QUANTA_GOAL_JUDGE`). `off` preserves
-   * legacy completion behavior; `shadow` observes a bounded judge verdict;
-   * `reject` refuses only an explicit judge block. */
-  readonly goalJudgeMode: "off" | "shadow" | "reject"
+   * legacy completion behavior; `shadow` observes a bounded judge verdict as
+   * telemetry only. GOAL-02 retired `reject`: completion is a deterministic
+   * projection of trusted evidence (`@/objective` policy), never an LLM verdict. */
+  readonly goalJudgeMode: "off" | "shadow"
   /** Capability A — multi-agent task dependency DAG gate (`QUANTA_TEAM_DAG`).
    *  Opt-in (`gateOn` vocab `1`/`on`/`true`/`yes`; #24). Default false ⇒ `spawn_batch` fan-out is the
    *  EXISTING flat parallel pool (no dependency ordering) — byte-identical. When

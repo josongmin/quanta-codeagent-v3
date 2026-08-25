@@ -31,22 +31,22 @@ import type {
   CommitResult,
   CriterionDeclaration,
   GoalDefinition,
+  ModelObjectiveMutation,
   Objective,
-  ObjectiveAuthority,
-  ObjectiveMutation,
+  ObjectiveCommands,
+  ObjectiveReadPort,
   ObjectiveStatus,
   WaitingOn,
 } from "@/objective"
 import { errMessage } from "@/shared"
 import type { ObjectiveApprovalRequest, Tool, ToolContext, ToolEvent, ToolResult } from "../types"
 
-export interface ObjectiveCompletionAdmission {
-  admit(input: { readonly authority: ObjectiveAuthority; readonly threadId: string }): Promise<{
-    readonly admitted: boolean
-    readonly reasonCode?: string
-    /** Revision whose evidence was admitted; bound into the mutation CAS. */
-    readonly expectedRevision: number
-  }>
+/** GOAL-02 — what the composition root hands this slice: the MODEL-actor
+ *  command capability (definition minting is a gated proposal; status,
+ *  criterion completion and usage are host-owned) plus the read port. */
+export interface ObjectiveToolPorts {
+  readonly model: ObjectiveCommands<ModelObjectiveMutation>
+  readonly read: ObjectiveReadPort
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -121,7 +121,13 @@ const criterionEntrySchema = z.union([
 ])
 
 export const objectiveSetSchema = z.object({
-  thread_id: z.string().min(1).describe("Thread/conversation id this objective belongs to"),
+  // GOAL-02 — deprecated and IGNORED: the thread is host-bound (`ctx.ownerId`).
+  thread_id: z
+    .string()
+    .optional()
+    .describe(
+      "Deprecated and ignored — the objective thread is bound by the session, not this argument",
+    ),
   goal: z.string().min(1).max(MAX_GOAL_CHARS).describe("The current objective in 1-2 sentences"),
   success_criteria: z
     .array(criterionEntrySchema)
@@ -143,38 +149,23 @@ export const objectiveSetSchema = z.object({
 export type ObjectiveSetInput = z.infer<typeof objectiveSetSchema>
 
 export const objectiveUpdateSchema = z.object({
-  thread_id: z.string().min(1),
+  thread_id: z.string().optional().describe("Deprecated and ignored"),
   op: z.discriminatedUnion("kind", [
-    z.object({
-      kind: z.literal("status"),
-      // GOAL-01 — only the two EXPLICIT intents are settable; `completed` and the
-      // limit states are DERIVED (blockers / evidence / budget / usage window).
-      status: z.enum(["active", "paused"]),
-    }),
     z.object({
       kind: z.literal("addBlocker"),
       reason: z.string().min(1).max(MAX_REASON_CHARS),
       waiting_on: z.enum(WAITING_ENUM),
     }),
     z.object({
-      kind: z.literal("clearBlocker"),
-      blocker_id: z.string().min(1).max(MAX_LIST_ITEM_CHARS),
-    }),
-    z.object({
       kind: z.literal("nextActions"),
       actions: z.array(z.string().max(MAX_LIST_ITEM_CHARS)).max(MAX_LIST_ITEMS),
-    }),
-    z.object({
-      kind: z.literal("markCriterion"),
-      criterion_id: z.string().min(1).max(MAX_LIST_ITEM_CHARS),
-      met: z.boolean(),
     }),
   ]),
 })
 export type ObjectiveUpdateInput = z.infer<typeof objectiveUpdateSchema>
 
 export const objectiveGetSchema = z.object({
-  thread_id: z.string().min(1),
+  thread_id: z.string().optional().describe("Deprecated and ignored"),
 })
 export type ObjectiveGetInput = z.infer<typeof objectiveGetSchema>
 
@@ -310,72 +301,44 @@ const commitResult = (res: CommitResult): ToolResult => {
 const NO_CONFIRM_SURFACE =
   "objective proposal requires approval but no confirmation surface is available (fail-closed)"
 
-const prepareModelMutation = (
-  authority: ObjectiveAuthority,
-  threadId: string,
-  mutation: ObjectiveMutation,
-  expectedRevision: number | undefined,
-) =>
-  authority.prepare({
-    threadId,
-    actor: "model",
-    mutation,
-    ...(expectedRevision !== undefined ? { expectedRevision } : {}),
-  })
-
 /** Clip a proposed goal for the one-line approval dialog. */
 const clipGoal = (goal: string): string => (goal.length > 160 ? `${goal.slice(0, 157)}…` : goal)
 
 /** RFC-03 C3 — build the operator-facing proposal from the closed mutation. */
-const buildApprovalRequest = (mutation: ObjectiveMutation): ObjectiveApprovalRequest => {
-  if (mutation.kind === "create" || mutation.kind === "replace") {
+const buildApprovalRequest = (mutation: ModelObjectiveMutation): ObjectiveApprovalRequest => {
+  if (mutation.kind === "create") {
     return {
-      operation: mutation.kind,
+      operation: "create",
       goal: mutation.definition.goal,
-      summary: `${mutation.kind === "create" ? "Set" : "Replace"} goal: ${clipGoal(mutation.definition.goal)}`,
+      summary: `Set goal: ${clipGoal(mutation.definition.goal)}`,
     }
-  }
-  if (mutation.kind === "setExplicitStatus") {
-    return { operation: "setExplicitStatus", summary: `Set objective status: ${mutation.status}` }
   }
   return { operation: mutation.kind, summary: `Objective ${mutation.kind}` }
 }
 
 /**
- * RFC-03 C3 — prepare + (gated) approve + commit ONE model-actor mutation.
+ * RFC-03 C3 / GOAL-02 — prepare + (gated) approve + commit ONE model-actor
+ * mutation through the actor-fixed capability.
  *
- *   - GATE OFF (`approvalRequired:false`): commit immediately with the inert
- *     admitted flag — byte-identical legacy (`ctx.requestObjectiveApproval` is
- *     NEVER consulted).
- *   - GATE ON: the authority (SSOT) is first PROBED with an un-admitted commit —
- *     a pure no-op, since policy is checked before CAS and before any store
- *     effect — to surface a structural rejection an approval could never cure
- *     (`forbidden-completion` / `approval-unavailable`) WITHOUT prompting. For a
+ *   - `approvalRequired:false`: commit immediately (the policy table already
+ *     admitted or refused it — a refusal surfaces as a typed message).
+ *   - `approvalRequired:true` (a gated definition proposal): the capability is
+ *     first PROBED with an un-admitted commit — a pure no-op — to surface a
+ *     structural rejection an approval could never cure WITHOUT prompting. For a
  *     genuine proposal the EXISTING confirm port is awaited BETWEEN `prepare` and
- *     `commit` (RFC-03 §8: no store lock is held across the wait — `prepare`
- *     returned an immutable candidate). On DENY nothing commits (no-op); on
- *     APPROVE the commit re-checks CAS against the prepared revision, so a
- *     concurrent edit during the wait yields `stale` instead of clobbering.
+ *     `commit` (no store lock across the wait). On DENY nothing commits; on
+ *     APPROVE the commit re-checks CAS, so a concurrent edit yields `stale`.
  */
 const routeModelMutation = async (
-  authority: ObjectiveAuthority,
+  ports: ObjectiveToolPorts,
   threadId: string,
-  mutation: ObjectiveMutation,
+  mutation: ModelObjectiveMutation,
   ctx: ToolContext,
-  completionAdmission?: ObjectiveCompletionAdmission,
 ): Promise<ToolResult> => {
-  // GOAL-01 — there is no explicit `completed` any more (completion is derived
-  // from evidence by the authority), so the LLM-judge admission has no trigger
-  // here; GOAL-02 retires the port entirely (shadow telemetry only).
-  void completionAdmission
-  const prepared = prepareModelMutation(authority, threadId, mutation, undefined)
-  if (!prepared.approvalRequired) {
-    // Gate OFF (or a trusted non-model actor upstream): the admitted flag is
-    // inert; the authority commits exactly as before.
-    return commitResult(authority.commit(prepared, { admitted: true }))
-  }
+  const prepared = ports.model.prepare(threadId, mutation)
+  if (!prepared.approvalRequired) return commitResult(prepared.commit({ admitted: true }))
   // Probe for a rejection that approval cannot cure (no store effect, no prompt).
-  const probe = authority.commit(prepared, { admitted: false })
+  const probe = prepared.commit({ admitted: false })
   if (!probe.ok && probe.reason !== "approval-required") return commitResult(probe)
   const requester = ctx.requestObjectiveApproval
   if (requester === undefined) return errResult(NO_CONFIRM_SURFACE)
@@ -384,7 +347,7 @@ const routeModelMutation = async (
     const suffix = decision.note !== undefined && decision.note !== "" ? ` — ${decision.note}` : ""
     return errResult(`objective proposal declined by operator${suffix}`)
   }
-  return commitResult(authority.commit(prepared, { admitted: true }))
+  return commitResult(prepared.commit({ admitted: true }))
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -424,22 +387,10 @@ const toGoalDefinition = (data: ObjectiveSetInput): GoalDefinition => {
   }
 }
 
-/** GOAL-01 — `create` when no objective is live, `replace` (a fresh generation;
- *  every evidence family resets) when one is. GOAL-02's policy table decides
- *  which actors may do either. */
-const generationMutation = (
-  authority: ObjectiveAuthority,
-  threadId: string,
-  definition: GoalDefinition,
-): ObjectiveMutation =>
-  authority.get(threadId) === null
-    ? { kind: "create", definition }
-    : { kind: "replace", definition }
-
-const buildObjectiveSet = (authority: ObjectiveAuthority): Tool<ObjectiveSetInput> => ({
+const buildObjectiveSet = (ports: ObjectiveToolPorts): Tool<ObjectiveSetInput> => ({
   name: "objective_set",
   description:
-    "Set or replace the per-thread Objective: goal (1-2 sentences), optional " +
+    "PROPOSE the per-thread Objective (the operator approves it): goal (1-2 sentences), optional " +
     "success_criteria (testable list), optional budget (max_tokens/max_turns). " +
     "Use at the START of work to declare what you are doing and what 'done' " +
     "means. Returns the new objective state (goal/status/blockers/nextActions).",
@@ -459,8 +410,13 @@ const buildObjectiveSet = (authority: ObjectiveAuthority): Tool<ObjectiveSetInpu
       return
     }
     try {
-      const mutation = generationMutation(authority, threadId, toGoalDefinition(parsed.data))
-      yield { type: "result", result: await routeModelMutation(authority, threadId, mutation, ctx) }
+      // GOAL-02 — the model may only PROPOSE a new objective; a live one is the
+      // user's to edit (the policy answers `objective-exists`).
+      const mutation: ModelObjectiveMutation = {
+        kind: "create",
+        definition: toGoalDefinition(parsed.data),
+      }
+      yield { type: "result", result: await routeModelMutation(ports, threadId, mutation, ctx) }
     } catch (e) {
       yield { type: "result", result: errResult(`objective_set error: ${errMessage(e)}`) }
     }
@@ -468,33 +424,23 @@ const buildObjectiveSet = (authority: ObjectiveAuthority): Tool<ObjectiveSetInpu
 })
 
 /** Translate a validated `objective_update` op into the authority mutation. */
-const opToMutation = (op: ObjectiveUpdateInput["op"]): ObjectiveMutation => {
+const opToMutation = (op: ObjectiveUpdateInput["op"]): ModelObjectiveMutation => {
   switch (op.kind) {
-    case "status":
-      return { kind: "setExplicitStatus", status: op.status }
     case "addBlocker":
       return { kind: "addBlocker", reason: op.reason, waitingOn: op.waiting_on }
-    case "clearBlocker":
-      return { kind: "clearBlocker", blockerId: op.blocker_id }
     case "nextActions":
       return { kind: "setNextActions", actions: op.actions }
-    case "markCriterion":
-      return { kind: "markCriterion", criterionId: op.criterion_id, met: op.met }
   }
 }
 
-const buildObjectiveUpdate = (
-  authority: ObjectiveAuthority,
-  completionAdmission?: ObjectiveCompletionAdmission,
-): Tool<ObjectiveUpdateInput> => ({
+const buildObjectiveUpdate = (ports: ObjectiveToolPorts): Tool<ObjectiveUpdateInput> => ({
   name: "objective_update",
   description:
     "Partially mutate the per-thread Objective. `op.kind` selects: " +
-    "status (active|paused — completed and the limit states blocked/usage_limited/budget_limited are DERIVED from evidence/budget, never settable) / " +
     "addBlocker (reason + waiting_on=user|tool|network|child_agent) / " +
-    "clearBlocker (blocker_id) / nextActions (list of strings) / " +
-    "markCriterion (criterion_id, met). Usage is measured by the host, never self-reported. " +
-    "Returns the NEW objective state after the mutation.",
+    "nextActions (list of strings). Status, criterion completion and usage are " +
+    "OWNED BY THE HOST: completion is derived from user attestations and verifier " +
+    "receipts, never from a model update. Returns the NEW objective state.",
   inputSchema: objectiveUpdateSchema,
   isReadOnly: () => false,
   isConcurrencySafe: () => false,
@@ -513,13 +459,7 @@ const buildObjectiveUpdate = (
     try {
       yield {
         type: "result",
-        result: await routeModelMutation(
-          authority,
-          threadId,
-          opToMutation(parsed.data.op),
-          ctx,
-          completionAdmission,
-        ),
+        result: await routeModelMutation(ports, threadId, opToMutation(parsed.data.op), ctx),
       }
     } catch (e) {
       yield { type: "result", result: errResult(`objective_update error: ${errMessage(e)}`) }
@@ -527,7 +467,7 @@ const buildObjectiveUpdate = (
   },
 })
 
-const buildObjectiveGet = (authority: ObjectiveAuthority): Tool<ObjectiveGetInput> => ({
+const buildObjectiveGet = (ports: ObjectiveToolPorts): Tool<ObjectiveGetInput> => ({
   name: "objective_get",
   description:
     "Read the current per-thread Objective. Returns goal/status/blockers/" +
@@ -549,7 +489,7 @@ const buildObjectiveGet = (authority: ObjectiveAuthority): Tool<ObjectiveGetInpu
       return
     }
     try {
-      const o = authority.get(threadId)
+      const o = ports.read.get(threadId)
       if (o === null) {
         yield { type: "result", result: errResult(`no objective set for thread ${threadId}`) }
         return
@@ -572,13 +512,10 @@ const buildObjectiveGet = (authority: ObjectiveAuthority): Tool<ObjectiveGetInpu
  *  import of `@/objective` from any of them fires"). So the BRIDGE composes it:
  *  production via `buildObjectiveBlock` (`@/agent/tier1/objective.ts`), tests by
  *  wrapping their double themselves. */
-export const objectiveTools = (
-  authority: ObjectiveAuthority,
-  completionAdmission?: ObjectiveCompletionAdmission,
-): Tool[] => {
+export const objectiveTools = (ports: ObjectiveToolPorts): Tool[] => {
   return [
-    buildObjectiveSet(authority) as Tool,
-    buildObjectiveUpdate(authority, completionAdmission) as Tool,
-    buildObjectiveGet(authority) as Tool,
+    buildObjectiveSet(ports) as Tool,
+    buildObjectiveUpdate(ports) as Tool,
+    buildObjectiveGet(ports) as Tool,
   ]
 }

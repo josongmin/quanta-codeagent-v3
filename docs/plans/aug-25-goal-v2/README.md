@@ -147,6 +147,12 @@ GOAL-00 current-head baseline + owner freeze
 - `objective_set` 도구: objective가 있으면 `replace`(새 세대). `/goal <text>`도 동일(05가 `edit` 강제로 바꿈).
 - 도구 하자: `tools/dev/run-biome.ts check --write <paths>`는 path 인자를 무시하고 repo 전체를 --write 한다(collateral 위험). 티켓 rail은 `node_modules/.bin/biome check --write <paths>`로 교체됨.
 
+## GOAL-02 실행 기록 (2026-08-25)
+- 랜딩 범위: `src/objective/policy.ts`(actor×mutation `MUTATION_POLICY` + 모듈 로드 drift-guard `assertMutationPolicyComplete` + `authorizeMutation` + `completionSatisfied`/`criterionSatisfied`/`validationContractOf` + 전이표), authority가 `classify`를 버리고 정책표를 소비, `deriveStatus`가 신뢰 증거(user/system manual receipt, bound passing verifier receipt)로만 completed 파생, `readDomain.validationContract`, `src/objective/capabilities.ts`(`createObjectiveCapabilities` → read/user/model/continuation/verifier/system, `asObjectiveReadPort`), 모델 도구 축소(`objective_set`=create 제안만, `objective_update`=addBlocker|nextActions만, `thread_id` deprecated/ignored), judge `reject` 제거+`objective-judge-observer.ts`(telemetry-only, 프로덕션 호출은 04 lifecycle까지 비활성), boundary ratchet allowlist 10→4.
+- 티켓과 다른 점: 모델 `clearBlocker` op는 스키마에서 제거(정책이 어차피 거부 — 스키마와 정책 불일치를 두지 않음). RED 12(`attempt-in-flight`: durable started attempt 중 replace/clear 거부)는 attempt 저장이 04에 있으므로 04에서 RED 고정. shadow observer의 production 배선은 04.
+- commit 순서: CAS → policy. 경쟁에서 진 writer는 `stale`(재읽기), 현재 writer만 정책 verdict를 본다. 세대 전제조건(`objective-exists`/`objective-missing`)은 정책에 있어 gate-on 승인 프롬프트 전에 거부된다(프롬프트 후 거부 UX 결함 제거).
+- 마이그레이션 영향: 레거시 v1 스냅샷의 model-attested manual receipt는 `met:true`를 유지하되 status는 `active`(신뢰 증거 아님) — 의도된 하향.
+
 ## 결정 기록 (구현 전에 고정, 티켓 내 재결정 금지)
 - verifier 실행 posture는 **workspace-write + before/after source digest 불변 검증**이다. read-only source mount는 `bun test`(.cache/tsbuildinfo)·pytest(`__pycache__`)·cargo(`target/`) 같은 실용 check를 전부 fail-closed로 만들어 verifier를 무용하게 하므로 기본이 아니다. digest가 변하면 stale-source, receipt 0. network deny·outside-workspace read deny·resource cap은 유지. 더 엄격한 read-only 프로필은 opt-in.
 - receipt rail은 `git worktree add <scratch> S`에서 실행해도 된다(동시 세션이 main에 커밋하므로 S와 rail 사이 tree 불변 조건은 worktree로 충족). receipt에 worktree 경로/`git rev-parse HEAD`를 기록.

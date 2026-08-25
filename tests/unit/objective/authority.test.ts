@@ -10,10 +10,12 @@
  *       the other gets a `stale` rejection and does NOT overwrite the winner.
  *
  *   (b) criterion completion authority — the MODEL can self-complete a criterion
- *       TODAY (`markCriterion(met:true)` → derivation auto-completes). Under the
- *       propose gate the authority must REFUSE a model-actor completion; only a
- *       system/verifier actor may complete. Gate-OFF stays byte-identical (model
- *       self-mark still works).
+ *       TODAY (`markCriterion(met:true)` → derivation auto-completes). The
+ *       authority must REFUSE a model-actor completion; only a user/system actor
+ *       may attest a manual criterion. GOAL-02: this holds REGARDLESS of the
+ *       propose gate (the gate-OFF "model self-mark" legacy is gone), a model may
+ *       not UNmark either, and a verifier attests only CHECKED criteria via
+ *       `markCriterionVerified` — never a manual one.
  *
  *   (c) exact restore — a surface-local `replace` cannot exact-restore a prior
  *       objective (it re-mints criterion ids and drops `met`). The authority's
@@ -127,7 +129,7 @@ describe("C1 (b) — criterion completion authority", () => {
     expect(store.get("t")?.status).toBe("completed") // self-completion, no gate
   })
 
-  test("gate ON: a MODEL markCriterion(met:true) is refused (forbidden-completion)", () => {
+  test("gate ON: a MODEL markCriterion(met:true) is refused (manual-attestation-required)", () => {
     const auth = createObjectiveAuthority({ gateOn: true })
     seed(auth, "t", ["done"])
     const cid = auth.get("t")?.successCriteria[0]?.id ?? ""
@@ -140,12 +142,34 @@ describe("C1 (b) — criterion completion authority", () => {
       { admitted: true },
     )
     expect(res.ok).toBe(false)
-    if (res.ok === false) expect(res.reason).toBe("forbidden-completion")
+    // GOAL-02: the ONE policy table answers `manual-attestation-required` for a
+    // model self-mark (the old gate-coupled `forbidden-completion` is gone).
+    if (res.ok === false) expect(res.reason).toBe("manual-attestation-required")
     expect(auth.get("t")?.successCriteria[0]?.met).toBe(false)
     expect(auth.get("t")?.status).not.toBe("completed")
   })
 
-  test("gate ON: a VERIFIER/system actor CAN complete a criterion", () => {
+  // GOAL-02 (REVERSED): a VERIFIER used to be able to attest a MANUAL criterion.
+  // Now only a user/system actor may; the verifier owns CHECKED completion via
+  // `markCriterionVerified` exclusively.
+  test("gate ON: a USER/system actor CAN complete a manual criterion; a VERIFIER cannot", () => {
+    for (const actor of ["user", "system"] as const) {
+      const auth = createObjectiveAuthority({ gateOn: true })
+      seed(auth, "t", ["done"])
+      const cid = auth.get("t")?.successCriteria[0]?.id ?? ""
+      const res = auth.commit(
+        auth.prepare({
+          threadId: "t",
+          actor,
+          mutation: { kind: "markCriterion", criterionId: cid, met: true },
+        }),
+        { admitted: true },
+      )
+      expect(res.ok).toBe(true)
+      expect(auth.get("t")?.status).toBe("completed")
+      const receipt = auth.get("t")?.successCriteria[0]?.completion
+      expect(receipt?.source === "manual" ? receipt.actor : "").toBe(actor)
+    }
     const auth = createObjectiveAuthority({ gateOn: true })
     seed(auth, "t", ["done"])
     const cid = auth.get("t")?.successCriteria[0]?.id ?? ""
@@ -157,14 +181,21 @@ describe("C1 (b) — criterion completion authority", () => {
       }),
       { admitted: true },
     )
-    expect(res.ok).toBe(true)
-    expect(auth.get("t")?.status).toBe("completed")
+    expect(res.ok).toBe(false)
+    if (res.ok === false) expect(res.reason).toBe("manual-attestation-required")
+    expect(auth.get("t")?.successCriteria[0]?.met).toBe(false)
+    expect(auth.get("t")?.status).toBe("active")
   })
 
-  test("gate OFF: model self-mark still completes (byte-identical legacy)", () => {
+  // GOAL-02 (REVERSED): the gate-OFF "model self-mark completes (byte-identical
+  // legacy)" behavior is GONE for good — the policy is gate-independent for
+  // markCriterion. The paired control (a user mark on the same objective) proves
+  // the refusal is the actor, not the objective.
+  test("gate OFF: a model self-mark is refused too (manual-attestation-required); a user mark completes", () => {
     const auth = createObjectiveAuthority({ gateOn: false })
     seed(auth, "t", ["done"])
     const cid = auth.get("t")?.successCriteria[0]?.id ?? ""
+    const revBefore = auth.readDomain("t").revision
     const res = auth.commit(
       auth.prepare({
         threadId: "t",
@@ -173,23 +204,41 @@ describe("C1 (b) — criterion completion authority", () => {
       }),
       { admitted: true },
     )
-    expect(res.ok).toBe(true)
-    expect(auth.get("t")?.status).toBe("completed")
-  })
-
-  test("gate ON: model may still UNmark (met:false) — only completion is owned", () => {
-    const auth = createObjectiveAuthority({ gateOn: true })
-    seed(auth, "t", ["done"])
-    const cid = auth.get("t")?.successCriteria[0]?.id ?? ""
-    // verifier completes, then model unmarks (allowed — not a completion)
-    auth.commit(
+    expect(res.ok).toBe(false)
+    if (res.ok === false) expect(res.reason).toBe("manual-attestation-required")
+    expect(auth.get("t")?.successCriteria[0]?.met).toBe(false)
+    expect(auth.get("t")?.status).toBe("active")
+    // a refusal never advances the revision
+    expect(auth.readDomain("t").revision).toBe(revBefore)
+    const ok = auth.commit(
       auth.prepare({
         threadId: "t",
-        actor: "verifier",
+        actor: "user",
         mutation: { kind: "markCriterion", criterionId: cid, met: true },
       }),
       { admitted: true },
     )
+    expect(ok.ok).toBe(true)
+    expect(auth.get("t")?.status).toBe("completed")
+  })
+
+  // GOAL-02 (REVERSED): a model used to be allowed to UNmark (met:false). Now
+  // markCriterion is user/system-only in BOTH directions; a user may still
+  // reopen a completed objective by unmarking.
+  test("gate ON: a model may NOT unmark (met:false) either — a user reopens", () => {
+    const auth = createObjectiveAuthority({ gateOn: true })
+    seed(auth, "t", ["done"])
+    const cid = auth.get("t")?.successCriteria[0]?.id ?? ""
+    // user completes, then the model tries to unmark (refused)
+    auth.commit(
+      auth.prepare({
+        threadId: "t",
+        actor: "user",
+        mutation: { kind: "markCriterion", criterionId: cid, met: true },
+      }),
+      { admitted: true },
+    )
+    expect(auth.get("t")?.status).toBe("completed")
     const res = auth.commit(
       auth.prepare({
         threadId: "t",
@@ -198,8 +247,59 @@ describe("C1 (b) — criterion completion authority", () => {
       }),
       { admitted: true },
     )
-    expect(res.ok).toBe(true)
+    expect(res.ok).toBe(false)
+    if (res.ok === false) expect(res.reason).toBe("manual-attestation-required")
+    expect(auth.get("t")?.successCriteria[0]?.met).toBe(true)
+    expect(auth.get("t")?.status).toBe("completed")
+    // paired control: the user CAN reopen (terminal applies to model/continuation only)
+    const reopened = auth.commit(
+      auth.prepare({
+        threadId: "t",
+        actor: "user",
+        mutation: { kind: "markCriterion", criterionId: cid, met: false },
+      }),
+      { admitted: true },
+    )
+    expect(reopened.ok).toBe(true)
     expect(auth.get("t")?.successCriteria[0]?.met).toBe(false)
+    expect(auth.get("t")?.status).toBe("active")
+  })
+
+  test("a COMPLETED objective is terminal for the model (terminal-objective) but not for the user", () => {
+    const auth = createObjectiveAuthority({ gateOn: false })
+    seed(auth, "t", ["done"])
+    const cid = auth.get("t")?.successCriteria[0]?.id ?? ""
+    auth.commit(
+      auth.prepare({
+        threadId: "t",
+        actor: "user",
+        mutation: { kind: "markCriterion", criterionId: cid, met: true },
+      }),
+      { admitted: true },
+    )
+    expect(auth.get("t")?.status).toBe("completed")
+    // an otherwise-allowed model mutation is refused as terminal
+    const res = auth.commit(
+      auth.prepare({
+        threadId: "t",
+        actor: "model",
+        mutation: { kind: "setNextActions", actions: ["more"] },
+      }),
+      { admitted: true },
+    )
+    expect(res.ok).toBe(false)
+    if (res.ok === false) expect(res.reason).toBe("terminal-objective")
+    expect(auth.get("t")?.nextActions).toEqual([])
+    const user = auth.commit(
+      auth.prepare({
+        threadId: "t",
+        actor: "user",
+        mutation: { kind: "setNextActions", actions: ["more"] },
+      }),
+      { admitted: true },
+    )
+    expect(user.ok).toBe(true)
+    expect(auth.get("t")?.nextActions).toEqual(["more"])
   })
 })
 
@@ -267,8 +367,10 @@ describe("C1 (c) — exact restore", () => {
 
 describe("C1 — actor/thread binding + gate-OFF delegation", () => {
   test("the command's bound threadId is authoritative (not any model field)", () => {
-    const auth = createObjectiveAuthority({})
-    auth.commit(
+    // GOAL-02: a model create is an approval proposal ONLY under the gate; with
+    // the gate off it is `actor-forbidden`, so the binding proof runs gate-on.
+    const auth = createObjectiveAuthority({ gateOn: true })
+    const res = auth.commit(
       auth.prepare({
         threadId: "session-bound",
         actor: "model",
@@ -276,8 +378,37 @@ describe("C1 — actor/thread binding + gate-OFF delegation", () => {
       }),
       { admitted: true },
     )
+    expect(res.ok).toBe(true)
     expect(auth.get("session-bound")?.goal).toBe("g")
+    expect(auth.get("session-bound")?.createdBy).toBe("model")
     expect(auth.get("other")).toBeNull()
+  })
+
+  // GOAL-02 (REVERSED): the gate-OFF model create used to commit directly. A
+  // model may never mint a definition without an admitted operator approval, so
+  // with the gate OFF the policy answers `actor-forbidden` and nothing is minted.
+  test("gate OFF: a model-originated create is actor-forbidden (nothing minted)", () => {
+    const auth = createObjectiveAuthority({ gateOn: false })
+    const prepared = auth.prepare({
+      threadId: "t",
+      actor: "model",
+      mutation: { kind: "create", definition: { goal: "g" } },
+    })
+    expect(prepared.approvalRequired).toBe(false)
+    const res = auth.commit(prepared, { admitted: true })
+    expect(res.ok).toBe(false)
+    if (res.ok === false) expect(res.reason).toBe("actor-forbidden")
+    expect(auth.get("t")).toBeNull()
+    expect(auth.readDomain("t").revision).toBe(0)
+    // paired control: a USER create on the same authority commits without approval.
+    const user = auth.prepare({
+      threadId: "t",
+      actor: "user",
+      mutation: { kind: "create", definition: { goal: "g" } },
+    })
+    expect(user.approvalRequired).toBe(false)
+    expect(auth.commit(user, { admitted: false }).ok).toBe(true)
+    expect(auth.get("t")?.createdBy).toBe("user")
   })
 
   test("gate OFF: ObjectivePort surface behaves like the raw store", () => {

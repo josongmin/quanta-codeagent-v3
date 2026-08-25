@@ -33,8 +33,8 @@
  * prints "not wired" + exit 0 (parity with `/agents`).
  */
 
-import type { ObjectivePort, ObjectiveStatus } from "@/objective"
-import { asObjectiveAuthority } from "@/objective"
+import type { ObjectivePort, ObjectiveStatus, UserObjectiveMutation } from "@/objective"
+import { createObjectiveCapabilities } from "@/objective"
 import { readCliKnob } from "../cli-knobs-accessor"
 import type { SlashCommand, SlashContext } from "../slash-contract"
 import { successReceipt } from "./render-helpers"
@@ -89,26 +89,24 @@ export const buildObjectiveSlashState = (
   threadId: string,
   onMutation?: () => void,
 ): ObjectiveSlashState => {
-  const authority = asObjectiveAuthority(port)
+  const caps = createObjectiveCapabilities(port)
   const view = (): ObjectiveEditView | null => {
-    const o = authority.get(threadId)
+    const o = caps.read.get(threadId)
     if (o === null) return null
     return {
       goal: o.goal,
       status: o.status,
-      revision: authority.readDomain(threadId).revision,
+      revision: caps.read.readDomain(threadId).revision,
       updatedAt: o.updatedAt,
     }
   }
-  const commit = (
-    mutation: Parameters<typeof authority.prepare>[0]["mutation"],
-  ): ObjectiveEditOutcome => {
-    // FRESH prepare cycle at the CURRENT revision (a stale peer edit races here).
-    const prepared = authority.prepare({ threadId, actor: "user", mutation })
-    const res = authority.commit(prepared, { admitted: true })
+  const commit = (mutation: UserObjectiveMutation): ObjectiveEditOutcome => {
+    // FRESH commit at the CURRENT revision through the USER capability (a stale
+    // peer edit races here; the authority's policy table owns every verdict).
+    const res = caps.user.commit(threadId, mutation)
     if (res.ok) {
       onMutation?.()
-      const o = authority.get(threadId)
+      const o = caps.read.get(threadId)
       return {
         kind: "ok",
         revision: res.revision,
@@ -125,15 +123,15 @@ export const buildObjectiveSlashState = (
     // evidence reset) when one is; explicit status is `active | paused` only;
     // clear is a real deletion (revision tombstone), not a pause.
     edit: (goal) =>
-      authority.get(threadId) === null
+      caps.read.get(threadId) === null
         ? commit({ kind: "create", definition: { goal } })
         : commit({ kind: "replace", definition: { goal } }),
     setStatus: (status) =>
-      authority.get(threadId) === null
+      caps.read.get(threadId) === null
         ? { kind: "no-objective" }
         : commit({ kind: "setExplicitStatus", status }),
     clear: () =>
-      authority.get(threadId) === null ? { kind: "no-objective" } : commit({ kind: "clear" }),
+      caps.read.get(threadId) === null ? { kind: "no-objective" } : commit({ kind: "clear" }),
   }
 }
 

@@ -134,9 +134,12 @@ describe("GOAL-01 — v1 -> v2 snapshot migration", () => {
     expect(o?.createdBy).toBe("system")
     expect(o?.migrationSource).toBe("legacy-v1")
     expect(fresh.readDomain("thr-1").revision).toBe(7)
-    // Explicit `completed` is discarded; completion re-derives from the receipt.
+    // Explicit `completed` is discarded. GOAL-02: the migrated receipt was
+    // attested by the MODEL, which is not trusted evidence — the criterion keeps
+    // `met`, but the status re-derives to `active`, never `completed`.
     expect(fresh.readDomain("thr-1").state?.explicitStatus).toBe("active")
-    expect(o?.status).toBe("completed")
+    expect(o?.successCriteria[0]?.met).toBe(true)
+    expect(o?.status).toBe("active")
     expect(o?.successCriteria[0]?.completion?.objectiveId).toBe(expectedId)
     expect(fresh.readDomain("thr-1").progressReceipts?.[0]?.objectiveId).toBe(expectedId)
     // Zero-criteria explicit completion cannot be manufactured in v2.
@@ -144,6 +147,29 @@ describe("GOAL-01 — v1 -> v2 snapshot migration", () => {
     // Loading the same file twice yields the same id (deterministic).
     const again = asObjectiveAuthority(buildObjectiveAuthority({ restoreFrom: loaded?.objective }))
     expect(again.get("thr-1")?.objectiveId).toBe(expectedId)
+  })
+
+  test("paired control: a v1 manual receipt attested by the USER migrates as completed", () => {
+    const snap = v1Snapshot()
+    const first = snap.threads[0]
+    if (first === undefined) throw new Error("fixture has no thread")
+    const trusted = {
+      ...snap,
+      threads: [
+        {
+          ...first,
+          successCriteria: first.successCriteria.map((c) =>
+            c.completion?.source === "manual"
+              ? { ...c, completion: { ...c.completion, actor: "user" } }
+              : c,
+          ),
+        },
+      ],
+    }
+    const fresh = asObjectiveAuthority(
+      buildObjectiveAuthority({ restoreFrom: trusted as PersistedObjectiveSnapshotV1 }),
+    )
+    expect(fresh.get("thr-1")?.status).toBe("completed")
   })
 
   test("v2 round-trip preserves id / creator / definition / progress / revision and a null tombstone", async () => {

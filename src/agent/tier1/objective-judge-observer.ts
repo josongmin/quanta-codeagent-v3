@@ -1,10 +1,23 @@
+/**
+ * GOAL-02 — the objective-completion JUDGE as a shadow OBSERVER.
+ *
+ * The LLM judge has NO admission power: completion is a deterministic
+ * projection of trusted evidence (`@/objective` policy). What remains is a
+ * bounded, sanitized evaluation that emits TELEMETRY only — `block` / `abstain`
+ * / `unavailable` — for offline calibration. It cannot mutate state, add
+ * blockers, deny completion, or affect wake decisions.
+ *
+ * Production invocation is DISABLED until GOAL-04 registers an
+ * `ObjectiveJudgeObserverPort` with the session task lifecycle (own budget,
+ * timeout, cancellation, awaited disposal). Unit evaluation is allowed.
+ *
+ * Raw transcript, tool output, criterion prose and caller-supplied digests are
+ * never part of the judge input (the projection is ids/flags/refs only).
+ */
+
 import { createHash } from "node:crypto"
 import { type LLMPort, type StreamInput, validateAgainstResponseSchema } from "@/llm"
-import type { ObjectiveAuthority } from "@/objective"
-import { errMessage, logger } from "@/shared"
-import type { ObjectiveCompletionAdmission } from "@/tool/objective"
-
-export type ObjectiveJudgeMode = "shadow" | "reject"
+import type { ObjectiveReadPort } from "@/objective"
 
 const JUDGE_REASON_CODES = [
   "criterion-unmet",
@@ -29,12 +42,19 @@ export type ObjectiveJudgeTelemetry =
       readonly reasonCodes: readonly ObjectiveJudgeReasonCode[]
     }
 
-export interface ObjectiveCompletionAdmissionOptions {
-  readonly mode: ObjectiveJudgeMode
+export interface ObjectiveJudgeObserverOptions {
   readonly llm: LLMPort
   readonly timeoutMs?: number
   readonly now?: () => number
   readonly onDecision?: (telemetry: ObjectiveJudgeTelemetry) => void
+}
+
+/** The observer port GOAL-04 registers with the session task lifecycle. */
+export interface ObjectiveJudgeObserverPort {
+  evaluate(input: {
+    readonly read: ObjectiveReadPort
+    readonly threadId: string
+  }): Promise<ObjectiveJudgeTelemetry>
 }
 
 const MAX_EVIDENCE_BYTES = 32 * 1024
@@ -45,7 +65,10 @@ const DEFAULT_TIMEOUT_MS = 10_000
 const MAX_TIMEOUT_MS = 60_000
 const CIRCUIT_FAILURE_LIMIT = 3
 const CIRCUIT_COOLDOWN_MS = 60_000
-const POLICY_VERSION = "objective-completion-v1"
+const POLICY_VERSION = "objective-judge-observer-v2"
+// A structured-output schema name, NOT a tool name (the tool-surface manifest
+// scan keys on `name: "..."` literals under src/agent/tier1).
+const RESPONSE_FORMAT_NAME = "objective_completion_judgment"
 
 const JUDGE_SCHEMA = {
   type: "object",
@@ -93,13 +116,11 @@ const parseDecision = (raw: string): ObjectiveJudgeDecision | undefined => {
   }
 }
 
-const stableDigest = (text: string): string => {
-  return `sha256:${createHash("sha256").update(text).digest("hex")}`
-}
+const stableDigest = (text: string): string =>
+  `sha256:${createHash("sha256").update(text).digest("hex")}`
 
 interface EvidenceProjection {
   readonly revision: number
-  readonly deterministicallyComplete: boolean
   readonly serialized: string
   readonly unmetCriterionIds: ReadonlySet<string>
   readonly evidenceRefs: ReadonlySet<string>
@@ -132,26 +153,10 @@ const cacheDecision = (
   cache.set(key, { decision, expiresAt })
 }
 
-type ObjectiveDomain = ReturnType<ObjectiveAuthority["readDomain"]>
+type ObjectiveDomain = ReturnType<ObjectiveReadPort["readDomain"]>
 
-const allCheckedAndVerified = (domain: ObjectiveDomain): boolean => {
-  const objective = domain.state?.objective
-  return (
-    objective !== undefined &&
-    objective.status === "completed" &&
-    objective.blockers.length === 0 &&
-    objective.successCriteria.length > 0 &&
-    objective.successCriteria.every(
-      (criterion) =>
-        criterion.kind === "checked" &&
-        criterion.met &&
-        criterion.completion?.source === "verifier" &&
-        criterion.completion.checkId === criterion.check.id &&
-        criterion.completion.verifierResult.passed,
-    )
-  )
-}
-
+/** Project the domain to ids / flags / refs only — never prose, never a
+ *  caller-supplied digest. Oversize ⇒ `undefined` (never truncated JSON). */
 const evidenceProjection = (domain: ObjectiveDomain): EvidenceProjection | undefined => {
   if (domain.state === null) return undefined
   const objective = domain.state.objective
@@ -165,6 +170,7 @@ const evidenceProjection = (domain: ObjectiveDomain): EvidenceProjection | undef
   const projection = JSON.stringify({
     objectiveRevision: domain.revision,
     status: objective.status,
+    validationContract: domain.validationContract ?? "missing",
     blockers: objective.blockers.map((blocker) => ({
       id: blocker.id,
       waitingOn: blocker.waitingOn,
@@ -189,17 +195,8 @@ const evidenceProjection = (domain: ObjectiveDomain): EvidenceProjection | undef
       remainingCriterionIds: receipt.remainingCriterionIds,
     })),
   })
-  // Never pass truncated JSON to the judge. The persisted inputs are already
-  // bounded; an unexpectedly large projection is an unavailable judge, not a
-  // license to silently drop the tail that may contain contrary evidence.
   return Buffer.byteLength(projection, "utf8") <= MAX_EVIDENCE_BYTES
-    ? {
-        revision: domain.revision,
-        deterministicallyComplete: allCheckedAndVerified(domain),
-        serialized: projection,
-        unmetCriterionIds,
-        evidenceRefs,
-      }
+    ? { revision: domain.revision, serialized: projection, unmetCriterionIds, evidenceRefs }
     : undefined
 }
 
@@ -217,7 +214,7 @@ const judgeInput = (projection: string, signal: AbortSignal): StreamInput => ({
   signal,
   responseFormat: {
     type: "json_schema",
-    name: "objective_completion_judgment",
+    name: RESPONSE_FORMAT_NAME,
     schema: JUDGE_SCHEMA,
     strict: true,
   },
@@ -249,8 +246,6 @@ const collectJudgeDecision = async (
         forcedToolInput = undefined
         break
       case "tool_use_end":
-        // StreamEvent intentionally carries no tool name. The responseFormat
-        // request is the authority for the provider's single forced output.
         forcedToolInput = event.input
         break
       case "text_delta":
@@ -274,14 +269,7 @@ const judge = async (
   timeoutMs: number,
 ): Promise<ObjectiveJudgeDecision | undefined> => {
   const controller = new AbortController()
-  const task = collectJudgeDecision(llm, projection, controller).catch((e) => {
-    // A judge that FAILED and a judge that returned nothing are different facts:
-    // the first is an outage, the second is a verdict. Degrading to `undefined`
-    // is still right (admission must not hang on the judge), but unattributed it
-    // makes an outage read as a clean "no decision".
-    logger.warn(`objective-completion-admission.judge: ${errMessage(e)}`)
-    return undefined
-  })
+  const task = collectJudgeDecision(llm, projection, controller).catch(() => undefined)
   let timer: ReturnType<typeof setTimeout> | undefined
   try {
     return await Promise.race([
@@ -310,10 +298,10 @@ const semanticallyValidDecision = (
   )
 }
 
-/** Agent-owned admission bridge. The tool/domain remain LLM-free. */
-export const createObjectiveCompletionAdmission = (
-  options: ObjectiveCompletionAdmissionOptions,
-): ObjectiveCompletionAdmission => {
+/** Build the shadow observer. It returns telemetry and never touches state. */
+export const createObjectiveJudgeObserver = (
+  options: ObjectiveJudgeObserverOptions,
+): ObjectiveJudgeObserverPort => {
   const now = options.now ?? Date.now
   const requestedTimeout = options.timeoutMs ?? DEFAULT_TIMEOUT_MS
   const timeoutMs =
@@ -323,31 +311,19 @@ export const createObjectiveCompletionAdmission = (
   const cache = new Map<string, CachedDecision>()
   let consecutiveFailures = 0
   let circuitOpenUntil = 0
-  const notify = (telemetry: ObjectiveJudgeTelemetry): void => {
+  const emit = (telemetry: ObjectiveJudgeTelemetry): ObjectiveJudgeTelemetry => {
     try {
       options.onDecision?.(telemetry)
     } catch {
-      // Observability cannot change admission behavior.
+      // Observability cannot change the observer's result.
     }
+    return telemetry
   }
-  const unavailable = (
-    expectedRevision: number,
-    evidenceDigest: string,
-  ): {
-    readonly admitted: true
-    readonly reasonCode: string
-    readonly expectedRevision: number
-  } => {
-    notify({ outcome: "unavailable", evidenceDigest })
-    return { admitted: true, reasonCode: "judge-unavailable", expectedRevision }
-  }
-  const judgeProjection = async (
+  const unavailable = (evidenceDigest: string): ObjectiveJudgeTelemetry =>
+    emit({ outcome: "unavailable", evidenceDigest })
+  const evaluateProjection = async (
     projection: EvidenceProjection,
-  ): Promise<{
-    readonly admitted: boolean
-    readonly reasonCode?: string
-    readonly expectedRevision: number
-  }> => {
+  ): Promise<ObjectiveJudgeTelemetry> => {
     const evidenceDigest = stableDigest(projection.serialized)
     const key = [
       projection.revision,
@@ -359,62 +335,27 @@ export const createObjectiveCompletionAdmission = (
     const decision = cached ?? (await judge(options.llm, projection.serialized, timeoutMs))
     if (decision === undefined || !semanticallyValidDecision(decision, projection)) {
       consecutiveFailures += 1
-      if (consecutiveFailures >= CIRCUIT_FAILURE_LIMIT) {
+      if (consecutiveFailures >= CIRCUIT_FAILURE_LIMIT)
         circuitOpenUntil = now() + CIRCUIT_COOLDOWN_MS
-      }
-      return unavailable(projection.revision, evidenceDigest)
+      return unavailable(evidenceDigest)
     }
     consecutiveFailures = 0
     circuitOpenUntil = 0
-    if (cached === undefined) {
-      cacheDecision(cache, key, decision, now() + CACHE_TTL_MS)
-    }
-    notify({
-      outcome: decision.decision,
-      evidenceDigest,
-      reasonCodes: decision.reasonCodes,
-    })
-    return options.mode === "reject" && decision.decision === "block"
-      ? {
-          admitted: false,
-          reasonCode: "judge-block",
-          expectedRevision: projection.revision,
-        }
-      : { admitted: true, expectedRevision: projection.revision }
+    if (cached === undefined) cacheDecision(cache, key, decision, now() + CACHE_TTL_MS)
+    return emit({ outcome: decision.decision, evidenceDigest, reasonCodes: decision.reasonCodes })
   }
   return {
-    admit: async ({ authority, threadId }) => {
-      const domain = authority.readDomain(threadId)
+    evaluate: async ({ read, threadId }) => {
+      const domain = read.readDomain(threadId)
       const projection = evidenceProjection(domain)
-      if (projection === undefined) {
-        return unavailable(domain.revision, stableDigest("unavailable"))
-      }
-      if (projection.deterministicallyComplete) {
-        return { admitted: true, expectedRevision: projection.revision }
-      }
+      if (projection === undefined) return unavailable(stableDigest("unavailable"))
       const currentTime = now()
-      if (currentTime < circuitOpenUntil) {
-        return unavailable(projection.revision, stableDigest(projection.serialized))
-      }
+      if (currentTime < circuitOpenUntil) return unavailable(stableDigest(projection.serialized))
       if (circuitOpenUntil !== 0) {
         circuitOpenUntil = 0
         consecutiveFailures = 0
       }
-      return judgeProjection(projection)
+      return evaluateProjection(projection)
     },
   }
-}
-
-/** Pure deterministic branch used before any judge call and by focused rails. */
-export const deterministicCompletionAdmission: ObjectiveCompletionAdmission = {
-  admit: async ({ authority, threadId }) => {
-    const domain = authority.readDomain(threadId)
-    return allCheckedAndVerified(domain)
-      ? { admitted: true, expectedRevision: domain.revision }
-      : {
-          admitted: false,
-          reasonCode: "manual-proposal-required",
-          expectedRevision: domain.revision,
-        }
-  },
 }

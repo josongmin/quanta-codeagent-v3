@@ -1,5 +1,6 @@
 import {
-  asObjectiveAuthority,
+  asObjectiveReadPort,
+  createObjectiveCapabilities,
   type ObjectivePort,
   type ProgressReceipt,
   type ProgressTurnOutcome,
@@ -30,7 +31,7 @@ export const beginObjectiveProgress = (
   if (meta !== undefined && threadId !== undefined && meta.threadId !== threadId) return undefined
   const targetThreadId = meta?.threadId ?? threadId
   if (targetThreadId === undefined) return undefined
-  const before = asObjectiveAuthority(objective).readDomain(targetThreadId)
+  const before = asObjectiveReadPort(objective).readDomain(targetThreadId)
   if (before.state?.objective.status !== "active") return undefined
   return {
     threadId: targetThreadId,
@@ -50,8 +51,8 @@ export const finishObjectiveProgress = (args: {
 }): ProgressReceipt | undefined => {
   const { objective, prompt, started } = args
   if (objective === undefined || started === undefined) return undefined
-  const authority = asObjectiveAuthority(objective)
-  const after = authority.readDomain(started.threadId)
+  const caps = createObjectiveCapabilities(objective)
+  const after = caps.read.readDomain(started.threadId)
   if (after.state === null) return undefined
   // GOAL-01 — a receipt never crosses a generation boundary.
   if (after.state.objective.objectiveId !== started.objectiveId) return undefined
@@ -83,5 +84,5 @@ export const finishObjectiveProgress = (args: {
     remainingCriterionIds: criteria.filter((c) => !c.met).map((c) => c.id),
     recordedAt: Date.now(),
   }
-  return authority.recordProgressReceipt(started.threadId, receipt) ? receipt : undefined
+  return caps.system.recordProgressReceipt(started.threadId, receipt) ? receipt : undefined
 }

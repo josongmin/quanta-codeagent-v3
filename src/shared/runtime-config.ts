@@ -228,10 +228,9 @@ const parseCapabilitySlice = (env: RuntimeConfigEnv): Partial<RuntimeConfig> => 
     goalQuietMs: parsePositiveInt(env.QUANTA_GOAL_QUIET_MS, "QUANTA_GOAL_QUIET_MS") ?? 15_000,
     // Objective completion review is deliberately an enum, not a truthy flag:
     // unknown values fail closed to OFF and therefore cannot spend an LLM call.
-    goalJudgeMode:
-      env.QUANTA_GOAL_JUDGE === "shadow" || env.QUANTA_GOAL_JUDGE === "reject"
-        ? env.QUANTA_GOAL_JUDGE
-        : "off",
+    // GOAL-02 — the judge is telemetry only (`shadow`); the retired `reject`
+    // value parses to `off` (an LLM verdict has no admission power any more).
+    goalJudgeMode: env.QUANTA_GOAL_JUDGE === "shadow" ? "shadow" : "off",
     // H13 — opt-in (`gateOn` vocab; #24). Default false ⇒ no config-migration detect,
     // no prompt, no ledger (byte-identical startup).
     migrateConfig: gateOn(env, "QUANTA_MIGRATE_CONFIG"),

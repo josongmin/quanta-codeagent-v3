@@ -1,6 +1,6 @@
 import type { AgentOutcome } from "@/agent"
 import type { Message } from "@/llm"
-import { asObjectiveAuthority } from "@/objective"
+import { asObjectiveReadPort } from "@/objective"
 import { lastTurnOutcomeFromAgentOutcome } from "@/reactor"
 import { beginObjectiveProgress, finishObjectiveProgress } from "../objective-progress"
 import { normalizeCliPromptInput } from "../prompt-types"
@@ -42,7 +42,7 @@ const isStaleGoalContinuation = (
   const meta = prompt.goalContinuation
   if (meta === undefined) return false
   if (objectiveStore === undefined) return true
-  const domain = asObjectiveAuthority(objectiveStore).readDomain(meta.threadId)
+  const domain = asObjectiveReadPort(objectiveStore).readDomain(meta.threadId)
   return (
     domain.state === null ||
     domain.state.objective.status !== "active" ||

@@ -116,9 +116,8 @@ describe("HELLGATE [ADR-0394] — create/get round-trip", () => {
   })
 
   // Documented contract (`ObjectivePort.create`, src/objective/types.ts): "null
-  // when one already exists on the thread". The authority's system surface
-  // currently projects a REFUSED outcome as the live objective instead of null
-  // (`route(...).result` — see the migration report). Kept RED on purpose.
+  // when one already exists on the thread". GOAL-02: the system surface now
+  // projects a REFUSED outcome as `null` (this used to be kept RED on purpose).
   test("create on a thread that already has an objective returns null (port contract)", () => {
     const store = freshStore()
     expect(store.create(TID, { goal: "first" })).not.toBeNull()
@@ -499,8 +498,8 @@ describe("HELLGATE [ADR-0394] — NO-THROW on malformed / hostile input", () => 
   })
 
   // Documented contract (`ObjectivePort.replace`, src/objective/types.ts): "null
-  // when … the definition is malformed". Same refused-outcome projection gap as
-  // the `create` case above. Kept RED on purpose.
+  // when … the definition is malformed". Same refused-outcome projection as the
+  // `create` case above — GREEN since GOAL-02 (used to be kept RED on purpose).
   test("replace with an over-cap goal returns null (port contract)", () => {
     const store = freshStore()
     seedObjective(store, "at", { goal: "ok" })

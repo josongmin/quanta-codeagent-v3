@@ -8,25 +8,43 @@
  *   (approve) APPROVAL COMMITS EXACTLY ONCE via CAS.
  *   (fail-closed) missing confirm surface under the gate ⇒ refused, never a
  *       bypass.
- *   (gate-OFF) the confirm port is NEVER consulted and the set commits
- *       byte-identically to the legacy path.
+ *   (gate-OFF) the confirm port is NEVER consulted — GOAL-02: and the model
+ *       `create` is REFUSED outright (`actor-forbidden`); a model may never
+ *       mint a definition without an admitted operator approval.
  *   (b) LOCK RELEASED DURING THE WAIT — a concurrent edit performed WHILE the
  *       approval is pending is applied, and the model's post-approval commit is
  *       rejected `stale` (exactly one winner; no clobber).
  *
  * Also pins the host-wire gate: `QUANTA_PROPOSE_GOAL=1` actually flips the
  * authority to gated (the RED baseline: today it does not).
+ *
+ * GOAL-02: the tools are built over the actor-fixed MODEL capability
+ * (`createObjectiveCapabilities(port).model` + `.read`), never the raw
+ * authority; `prepared.approvalRequired` is true ONLY for a model `create`
+ * under the gate.
  */
 
 import { describe, expect, test } from "bun:test"
 import type { AgentConfig } from "@/agent"
 import { maybeWireObjective } from "@/host/runtime/objective-store-wire"
-import { asObjectiveAuthority, createObjectiveAuthority, type ObjectivePort } from "@/objective"
+import {
+  asObjectiveAuthority,
+  createObjectiveAuthority,
+  createObjectiveCapabilities,
+  type ObjectivePort,
+} from "@/objective"
 import type { ObjectiveApprovalRequest, Tool, ToolContext } from "@/tool"
 import { objectiveTools } from "@/tool/objective"
 
-const findSet = (auth: ReturnType<typeof createObjectiveAuthority>): Tool => {
-  const t = objectiveTools(auth).find((x) => x.name === "objective_set")
+// GOAL-02: build the trio the way the composition root does — over the
+// actor-fixed model capability + the read port.
+const toolsOver = (port: ObjectivePort): Tool[] => {
+  const caps = createObjectiveCapabilities(port)
+  return objectiveTools({ model: caps.model, read: caps.read })
+}
+
+const findSet = (port: ObjectivePort): Tool => {
+  const t = toolsOver(port).find((x) => x.name === "objective_set")
   if (t === undefined) throw new Error("objective_set not found")
   return t
 }
@@ -71,7 +89,11 @@ describe("C3 — QUANTA_PROPOSE_GOAL wires the authority gate", () => {
     expect(prepared.approvalRequired).toBe(true)
   })
 
-  test("gate OFF ⇒ byte-identical legacy (no approval requirement)", () => {
+  // GOAL-02 (REVERSED): gate OFF used to be "byte-identical legacy" — the model
+  // `create` committed with no approval requirement. Now the ONE policy table
+  // resolves the gate-OFF model `create` to `actor-forbidden`: nothing to
+  // approve (`approvalRequired:false`) because the commit is REFUSED outright.
+  test("gate OFF ⇒ no approval requirement because the model create is REFUSED (actor-forbidden)", () => {
     const cfg = {} as AgentConfig & { objective?: ObjectivePort }
     maybeWireObjective(cfg, { QUANTA_OBJECTIVE_TOOLS: "1" })
     const auth = asObjectiveAuthority(cfg.objective as ObjectivePort)
@@ -81,6 +103,10 @@ describe("C3 — QUANTA_PROPOSE_GOAL wires the authority gate", () => {
       mutation: { kind: "create", definition: { goal: "g" } },
     })
     expect(prepared.approvalRequired).toBe(false)
+    const res = auth.commit(prepared, { admitted: true })
+    expect(res.ok).toBe(false)
+    if (!res.ok) expect(res.reason).toBe("actor-forbidden")
+    expect(auth.get("t")).toBeNull()
   })
 
   test("gate ON but NO confirm authority ⇒ fail-closed (confirmationAvailable false)", () => {
@@ -97,6 +123,31 @@ describe("C3 — QUANTA_PROPOSE_GOAL wires the authority gate", () => {
     )
     expect(res.ok).toBe(false)
     if (!res.ok) expect(res.reason).toBe("approval-unavailable")
+  })
+
+  // GOAL-02: `approvalRequired` is true ONLY for the model `create` under the
+  // gate — the model's other allowed mutations and every other actor's `create`
+  // never raise a proposal.
+  test("gate ON ⇒ approvalRequired is true ONLY for a model create", () => {
+    const auth = createObjectiveAuthority({ gateOn: true })
+    const caps = createObjectiveCapabilities(auth)
+    expect(
+      caps.model.prepare("t", { kind: "create", definition: { goal: "g" } }).approvalRequired,
+    ).toBe(true)
+    expect(
+      caps.user.prepare("t", { kind: "create", definition: { goal: "g" } }).approvalRequired,
+    ).toBe(false)
+    expect(
+      caps.system.prepare("t", { kind: "create", definition: { goal: "g" } }).approvalRequired,
+    ).toBe(false)
+    expect(caps.system.commit("t", { kind: "create", definition: { goal: "g" } }).ok).toBe(true)
+    expect(
+      caps.model.prepare("t", { kind: "setNextActions", actions: ["a"] }).approvalRequired,
+    ).toBe(false)
+    expect(
+      caps.model.prepare("t", { kind: "addBlocker", reason: "r", waitingOn: "user" })
+        .approvalRequired,
+    ).toBe(false)
   })
 })
 
@@ -120,7 +171,7 @@ describe("C3 — objective_set under the gate awaits approval", () => {
     )
     expect(res.ok).toBe(false)
     expect(calls.length).toBe(1)
-    // GOAL-01: a thread with no objective proposes a `create` (an existing one ⇒ `replace`).
+    // GOAL-02: the model ALWAYS proposes a `create` (a live objective ⇒ `objective-exists`).
     expect(calls[0]?.operation).toBe("create")
     expect(calls[0]?.goal).toBe("ship the feature")
     expect(auth.get("t")).toBeNull() // denial = no-op
@@ -153,7 +204,10 @@ describe("C3 — objective_set under the gate awaits approval", () => {
     expect(auth.get("t")).toBeNull()
   })
 
-  test("(gate-OFF) the confirm port is NEVER consulted and the set commits", async () => {
+  // GOAL-02 (REVERSED): gate OFF used to commit the set byte-identically to the
+  // legacy path. A gate-OFF model `create` is now `actor-forbidden`: the confirm
+  // port is still NEVER consulted, but the set is REFUSED and nothing lands.
+  test("(gate-OFF) the confirm port is NEVER consulted and the set is REFUSED (actor-forbidden)", async () => {
     const auth = createObjectiveAuthority({ gateOn: false })
     let consulted = false
     const res = await drain(
@@ -166,23 +220,21 @@ describe("C3 — objective_set under the gate awaits approval", () => {
         },
       }),
     )
-    expect(res.ok).toBe(true)
+    expect(res.ok).toBe(false)
+    expect(res.output).toBe("this mutation is not available to the model")
     expect(consulted).toBe(false)
-    expect(auth.get("t")?.goal).toBe("g")
+    expect(auth.get("t")).toBeNull()
   })
 
+  // GOAL-02: the model only ever proposes a `create`, so the race is staged on
+  // an EMPTY thread — the concurrent operator edit during the wait is a user
+  // `create`. The model's post-approval commit was prepared at revision 0 and
+  // the CAS (checked before the domain's `objective-exists`) rejects it `stale`.
   test("(b) LOCK RELEASED during the wait — a concurrent edit wins, the model commit is stale", async () => {
     const auth = createObjectiveAuthority({ gateOn: true })
-    // seed an objective so a concurrent edit has something to bump
-    auth.commit(
-      auth.prepare({
-        threadId: "t",
-        actor: "system",
-        mutation: { kind: "create", definition: { goal: "seed" } },
-      }),
-      { admitted: true },
-    )
+    const user = createObjectiveCapabilities(auth).user
     const revBefore = auth.readDomain("t").revision
+    expect(revBefore).toBe(0)
     const res = await drain(
       findSet(auth),
       { thread_id: "t", goal: "model-goal" },
@@ -190,12 +242,7 @@ describe("C3 — objective_set under the gate awaits approval", () => {
         requestObjectiveApproval: async () => {
           // WHILE the approval is pending, a concurrent user/CLI edit commits.
           // If the tool held the store lock across the await this could not run.
-          const p = auth.prepare({
-            threadId: "t",
-            actor: "user",
-            mutation: { kind: "replace", definition: { goal: "cli-goal" } },
-          })
-          const cli = auth.commit(p, { admitted: true })
+          const cli = user.commit("t", { kind: "create", definition: { goal: "cli-goal" } })
           expect(cli.ok).toBe(true)
           return { admitted: true }
         },
@@ -209,32 +256,54 @@ describe("C3 — objective_set under the gate awaits approval", () => {
     expect(auth.readDomain("t").revision).toBe(revBefore + 1)
   })
 
-  test("a model self-completion is refused WITHOUT prompting (forbidden-completion)", async () => {
-    const auth = createObjectiveAuthority({ gateOn: true })
-    auth.commit(
-      auth.prepare({
-        threadId: "t",
-        actor: "system",
-        mutation: { kind: "create", definition: { goal: "g", successCriteria: ["done"] } },
-      }),
-      { admitted: true },
-    )
-    const cid = auth.get("t")?.successCriteria[0]?.id ?? ""
-    const update = objectiveTools(auth).find((x) => x.name === "objective_update")
-    if (update === undefined) throw new Error("objective_update not found")
-    let consulted = false
-    const res = await drain(
-      update,
-      { thread_id: "t", op: { kind: "markCriterion", criterion_id: cid, met: true } },
-      ctxWith({
-        requestObjectiveApproval: async () => {
-          consulted = true
-          return { admitted: true }
-        },
-      }),
-    )
-    expect(res.ok).toBe(false)
-    expect(consulted).toBe(false) // structurally forbidden — never prompts
-    expect(auth.get("t")?.successCriteria[0]?.met).toBe(false)
+  // GOAL-02 (REVERSED): the model self-completion used to reach the authority
+  // and be refused `forbidden-completion`. `markCriterion` is no longer a model
+  // op at all — the tool rejects it at the zod boundary ("invalid input"), still
+  // without prompting, and the criterion stays unmet. The policy-level backstop
+  // is pinned too: a model `markCriterion` pushed through the raw authority is
+  // `manual-attestation-required` regardless of the gate.
+  test("a model self-completion is refused WITHOUT prompting (schema; policy = manual-attestation-required)", async () => {
+    for (const gateOn of [true, false]) {
+      const auth = createObjectiveAuthority({ gateOn })
+      auth.commit(
+        auth.prepare({
+          threadId: "t",
+          actor: "system",
+          mutation: { kind: "create", definition: { goal: "g", successCriteria: ["done"] } },
+        }),
+        { admitted: true },
+      )
+      const cid = auth.get("t")?.successCriteria[0]?.id ?? ""
+      const update = toolsOver(auth).find((x) => x.name === "objective_update")
+      if (update === undefined) throw new Error("objective_update not found")
+      let consulted = false
+      const res = await drain(
+        update,
+        { thread_id: "t", op: { kind: "markCriterion", criterion_id: cid, met: true } },
+        ctxWith({
+          requestObjectiveApproval: async () => {
+            consulted = true
+            return { admitted: true }
+          },
+        }),
+      )
+      expect(res.ok).toBe(false)
+      expect(res.output).toContain("invalid input")
+      expect(consulted).toBe(false) // structurally forbidden — never prompts
+      expect(auth.get("t")?.successCriteria[0]?.met).toBe(false)
+      // Policy backstop: the raw authority refuses a model attestation outright.
+      const raw = auth.commit(
+        auth.prepare({
+          threadId: "t",
+          actor: "model",
+          mutation: { kind: "markCriterion", criterionId: cid, met: true },
+        }),
+        { admitted: true },
+      )
+      expect(raw.ok).toBe(false)
+      if (!raw.ok) expect(raw.reason).toBe("manual-attestation-required")
+      expect(auth.get("t")?.successCriteria[0]?.met).toBe(false)
+      expect(auth.get("t")?.status).toBe("active")
+    }
   })
 })

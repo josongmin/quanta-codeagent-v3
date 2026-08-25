@@ -208,13 +208,28 @@ describe("objective-goal-continuation-live — runIdleContinuation decision logi
     expect(firstPassText).toContain("ship the migration")
     expect(firstPassText).toContain("verify completion against the")
 
-    // Phase B — the agent now VERIFIES + marks the criterion met via the REAL
-    // `objective_update` tool (registered through `buildObjectiveBlock`, NOT a
-    // manual push) on the SHARED store during a pass. The store derives `completed`.
+    // Phase B — GOAL-02 (REVERSED): the agent TRIES to mark the criterion met
+    // via the REAL `objective_update` tool (registered through
+    // `buildObjectiveBlock`, NOT a manual push) on the SHARED store during a
+    // pass. Model completion is host-owned now: the op is absent from the tool
+    // schema (zod rejects it), the store stays `active`, and the continuation
+    // keeps launching — a plausible-but-unattested "done" cannot stop pursuit.
     const depsB = makeContinuationDeps({ store, llm: markGoalMet, launches })
     const tickMet = await withTimeout(runIdleContinuation(TID, depsB), 10_000, "goal-live-tick-met")
     expect(tickMet.launched).toBe(true)
     expect(markGoalMet.calls).toBeGreaterThanOrEqual(1)
+    expect(store.get(TID)?.successCriteria[0]?.met).toBe(false) // model attestation refused
+    expect(store.get(TID)?.status).toBe("active")
+    const tickStillActive = await withTimeout(
+      runIdleContinuation(TID, depsB),
+      10_000,
+      "goal-live-tick-still-active",
+    )
+    expect(tickStillActive.launched).toBe(true) // still pursuing — no false stop
+
+    // Only a TRUSTED attestation (the user/system surface) completes the goal;
+    // the store derives `completed` from that receipt, not from a model claim.
+    expect(store.markCriterion(TID, criterionId, true)).not.toBeNull()
     expect(store.get(TID)?.status).toBe("completed") // goal is now MET
 
     // Phase C — the goal is `completed`. `runIdleContinuation` MUST refuse to

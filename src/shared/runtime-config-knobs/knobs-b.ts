@@ -23,7 +23,7 @@ export const KNOBS_B: readonly RuntimeConfigKnob[] = [
     default: "off",
     group: "session",
     describe:
-      "Objective completion judge mode: off (no judge), shadow (observe), reject (block explicit judge verdicts).",
+      "Objective completion judge mode: off (no judge) or shadow (telemetry-only verdict; never admits or denies completion). `reject` is retired and parses to off.",
   },
   {
     envKey: "QUANTA_MIGRATE_CONFIG",

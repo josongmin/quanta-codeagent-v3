@@ -1,7 +1,7 @@
 import type { AgentConfig } from "@/agent"
 import { startAutomationEngineTicker } from "@/agent/loop-helpers"
 import type { ObjectivePort } from "@/objective"
-import { asObjectiveAuthority, buildPursuitContinuationPrompt } from "@/objective"
+import { asObjectiveReadPort, buildPursuitContinuationPrompt } from "@/objective"
 import { buildAutorunEligibility } from "@/permission"
 import { injectSimulatedTurn, type LastTurnOutcome, REACTOR_ENV_FLAG } from "@/reactor"
 import { gateOnStrict, logger, runtimeConfig } from "@/shared"
@@ -272,9 +272,9 @@ const armGoalWake = (args: {
           enabled: runtimeConfig().goalContinuationEnforce,
           threadId: setup.sessionId,
           quietWindowMs: resolveGoalQuietWindowMs(),
-          readDomain: (tid) => asObjectiveAuthority(objectiveStore).readDomain(tid),
+          readDomain: (tid) => asObjectiveReadPort(objectiveStore).readDomain(tid),
           resumeAttempt: async (tid, attempt) => {
-            const domain = asObjectiveAuthority(objectiveStore).readDomain(tid)
+            const domain = asObjectiveReadPort(objectiveStore).readDomain(tid)
             const criteria = domain.state?.objective.successCriteria ?? []
             const last = domain.progressReceipts?.at(-1)
             externalPromptQueue.push({

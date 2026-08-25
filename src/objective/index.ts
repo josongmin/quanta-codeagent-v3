@@ -17,6 +17,18 @@ export {
   objectiveMutationDispatchKeys,
 } from "./authority"
 export type {
+  CommitOptions,
+  ContinuationObjectiveMutation,
+  ModelObjectiveMutation,
+  ObjectiveCapabilities,
+  ObjectiveCommands,
+  PreparedCommand,
+  SystemObjectiveCommands,
+  UserObjectiveMutation,
+  VerifierObjectiveMutation,
+} from "./capabilities"
+export { asObjectiveReadPort, createObjectiveCapabilities } from "./capabilities"
+export type {
   ContinuationDecision,
   ContinuationDeps,
   ContinuationPermit,
@@ -86,7 +98,12 @@ export {
   MAX_GOAL_CHARS,
   normalizeGoalText,
 } from "./identity"
-export type { ExplicitStatus, ObjectiveDomainSnapshot, ObjectiveThreadSnapshot } from "./model"
+export type {
+  ExplicitStatus,
+  ObjectiveDomainSnapshot,
+  ObjectiveThreadSnapshot,
+  ValidationContract,
+} from "./model"
 export type {
   ObjectiveActor,
   ObjectiveAttemptSettlement,
@@ -101,6 +118,17 @@ export {
   OBJECTIVE_ACTORS,
   OBJECTIVE_OPERATION_KINDS,
 } from "./mutations"
+// GOAL-02 — the ONE policy (actor × mutation table, completion contract,
+// transitions) and the actor-fixed capabilities composition mints over it.
+export type { MutationPolicyTable, MutationVerdict } from "./policy"
+export {
+  assertMutationPolicyComplete,
+  authorizeMutation,
+  completionSatisfied,
+  criterionSatisfied,
+  MUTATION_POLICY,
+  validationContractOf,
+} from "./policy"
 export type {
   ApprovalReceipt,
   CommitRejection,

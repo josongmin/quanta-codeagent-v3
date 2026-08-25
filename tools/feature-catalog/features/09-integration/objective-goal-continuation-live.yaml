@@ -81,7 +81,7 @@ evidence:
     - src/objective/goal-wake-controller.ts
     - src/objective/pursuit-prompt.ts
     - src/objective/progress-receipt.ts
-    - src/agent/tier1/objective-completion-admission.ts
+    - src/agent/tier1/objective-judge-observer.ts
     - src/apps/cli/goal-continuation-hook.ts
     - src/apps/cli/slash/goal-cmd.ts
     - src/apps/cli/repl/surface-compose.ts
@@ -109,7 +109,7 @@ evidence:
       - tests/unit/apps/cli/raw-line-reader-history.test.ts
       - tests/unit/apps/cli/t06-external-prompt-queue-hellgate.test.ts
       - tests/unit/agent/loop-throw-dispose-hellgate.test.ts
-      - tests/unit/agent/objective-completion-admission.test.ts
+      - tests/unit/agent/objective-judge-observer.test.ts
       - tests/unit/apps/cli/objective-progress.test.ts
       - tests/unit/objective/progress-receipt.test.ts
       - tests/unit/objective/persistence-roundtrip.test.ts
@@ -135,14 +135,17 @@ knobs:
       QUANTA_IDLE_MS and QUANTA_IDLE_SUPPRESS, which remain user-presence/UI
       controls; disabling UI idle suppression must not disable an active goal.
   - name: QUANTA_GOAL_JUDGE
-    where: src/agent/tier1/objective-completion-admission.ts
+    where: src/agent/tier1/objective-judge-observer.ts
     default: 'off'
     purpose: |
-      Completion-review policy. `off` preserves legacy objective completion and
-      allocates no judge. `shadow` requests a bounded structured verdict but
-      always admits; `reject` blocks only a schema-verified `block` verdict.
-      Judge timeout, malformed output, and its three-failure circuit breaker
-      yield `abstain` behavior rather than an availability-based rejection.
+      Completion-review policy (GOAL-02). `off` allocates no judge. `shadow`
+      builds a bounded, sanitized judge OBSERVER whose verdict is telemetry
+      only — it never admits or denies completion. Completion itself is a
+      deterministic projection of trusted evidence (user/system attestation
+      for manual criteria, bound passing verifier receipts for checked ones)
+      owned by the objective policy table. The former `reject` value is retired
+      and parses to `off`. Production observer invocation waits for the
+      GOAL-04 session task lifecycle.
   - name: QUANTA_PILL_GOAL
     where: src/apps/cli/status-pills.ts
     default: 'unset (ON)'

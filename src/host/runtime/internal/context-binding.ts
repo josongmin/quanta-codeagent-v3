@@ -7,10 +7,11 @@ import type {
   SessionHostSideConversationResult,
 } from "@/kernel/session"
 import {
-  asObjectiveAuthority,
+  createObjectiveCapabilities,
   isObjectiveOperationKind,
   type ObjectiveMutation,
   type ObjectivePort,
+  type UserObjectiveMutation,
 } from "@/objective"
 import { isPermissionMode } from "@/permission"
 import type { PostureControl } from "@/permission/posture/control"
@@ -230,14 +231,11 @@ export const applyHostObjectiveMutation = (
   // benign no-op: the reducer still echoes the session revision (byte-identical
   // legacy). It is NOT a conflict, so report `ok`.
   if (port === undefined || threadId === undefined || parsed === null) return { ok: true }
-  const authority = asObjectiveAuthority(port as ObjectivePort)
-  const prepared = authority.prepare({
-    threadId,
-    actor: "user",
-    mutation: parsed,
-    ...(args.expectedRevision !== undefined ? { expectedRevision: args.expectedRevision } : {}),
-  })
-  const res = authority.commit(prepared, { admitted: true })
+  // GOAL-02 — the wire binds actor USER through the actor-fixed capability; a
+  // hostile payload naming another actor's kind is refused by the policy table.
+  const caps = createObjectiveCapabilities(port as ObjectivePort)
+  const expectedRevision = args.expectedRevision ?? caps.read.readDomain(threadId).revision
+  const res = caps.user.commit(threadId, parsed as UserObjectiveMutation, { expectedRevision })
   if (res.ok) return { ok: true }
   // RFC-03 M7 — surface the CAS/policy refusal instead of swallowing it. A stale
   // revision is a typed conflict (the scheduler raises it); every other refusal
@@ -247,7 +245,7 @@ export const applyHostObjectiveMutation = (
     return {
       ok: false,
       kind: "stale_revision",
-      expected: prepared.expectedRevision,
+      expected: expectedRevision,
       actual: res.currentRevision,
     }
   }

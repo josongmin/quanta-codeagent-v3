@@ -87,12 +87,23 @@ describe("C4 (a) — a checked criterion is verifier-only (model cannot self-mar
       { admitted: true },
     )
     expect(res.ok).toBe(false)
-    expect(res.ok === false ? res.reason : "").toBe("checked-verifier-only")
+    // GOAL-02: the policy table refuses a model markCriterion BEFORE the
+    // structural checked-only guard runs, so the code is the actor's
+    // `manual-attestation-required` (the checked guard still answers for the
+    // actors the table admits — see the next case).
+    expect(res.ok === false ? res.reason : "").toBe("manual-attestation-required")
     // the criterion stays NOT met — no self-completion leaked through.
     expect(auth.get("t")?.successCriteria[0]?.met).toBe(false)
   })
 
-  test("even a SYSTEM/continuation markCriterion cannot complete a checked criterion", () => {
+  test("even a SYSTEM/user/continuation markCriterion cannot complete a checked criterion", () => {
+    // GOAL-02: user/system pass the policy and hit the STRUCTURAL guard
+    // (`checked-verifier-only`); continuation is refused by the table first.
+    const expected = {
+      system: "checked-verifier-only",
+      user: "checked-verifier-only",
+      continuation: "manual-attestation-required",
+    } as const
     for (const actor of ["system", "continuation", "user"] as const) {
       const { auth, cid } = seedChecked()
       const res = auth.commit(
@@ -104,6 +115,7 @@ describe("C4 (a) — a checked criterion is verifier-only (model cannot self-mar
         { admitted: true },
       )
       expect(res.ok).toBe(false)
+      expect(res.ok === false ? res.reason : "").toBe(expected[actor])
       expect(auth.get("t")?.successCriteria[0]?.met).toBe(false)
     }
   })
@@ -168,7 +180,12 @@ describe("C4 (a) — a checked criterion is verifier-only (model cannot self-mar
 })
 
 describe("C4 — manual criteria keep explicit completion with provenance", () => {
-  test("a manual criterion CAN be marked met by the model and carries a manual receipt", () => {
+  // GOAL-02 (REVERSED): this used to prove the MODEL can mark a manual criterion
+  // met (carrying a `model`-attested receipt). Manual attestation is now
+  // user/system-only; the model is refused `manual-attestation-required` and no
+  // receipt is minted. The USER mark is the paired control and carries the
+  // authority-minted receipt with the bound actor.
+  test("a manual criterion can NOT be marked met by the model; a USER mark carries a manual receipt", () => {
     const auth = createObjectiveAuthority({ now: () => 42 }) as ObjectiveAuthority
     auth.commit(
       auth.prepare({
@@ -179,10 +196,23 @@ describe("C4 — manual criteria keep explicit completion with provenance", () =
       { admitted: true },
     )
     const cid = auth.get("t")?.successCriteria[0]?.id ?? ""
-    const res = auth.commit(
+    const denied = auth.commit(
       auth.prepare({
         threadId: "t",
         actor: "model",
+        mutation: { kind: "markCriterion", criterionId: cid, met: true },
+      }),
+      { admitted: true },
+    )
+    expect(denied.ok).toBe(false)
+    expect(denied.ok === false ? denied.reason : "").toBe("manual-attestation-required")
+    expect(auth.get("t")?.successCriteria[0]?.met).toBe(false)
+    expect(auth.get("t")?.successCriteria[0]?.completion).toBeUndefined()
+
+    const res = auth.commit(
+      auth.prepare({
+        threadId: "t",
+        actor: "user",
         mutation: { kind: "markCriterion", criterionId: cid, met: true },
       }),
       { admitted: true },
@@ -192,7 +222,10 @@ describe("C4 — manual criteria keep explicit completion with provenance", () =
     expect(c?.kind).toBe("manual")
     expect(c?.met).toBe(true)
     expect(c?.completion?.source).toBe("manual")
-    expect(c?.completion?.source === "manual" ? c.completion.actor : "").toBe("model")
+    expect(c?.completion?.source === "manual" ? c.completion.actor : "").toBe("user")
+    expect(c?.completion?.objectiveId).toBe(auth.get("t")?.objectiveId ?? "")
+    expect(c?.completion?.verifiedAt).toBe(42)
+    expect(auth.get("t")?.status).toBe("completed")
   })
 
   test("unmarking a manual criterion clears its completion receipt", () => {
@@ -250,7 +283,7 @@ describe("C4 (b) — completion provenance + check spec survive a real save→re
       { admitted: true },
     )
     const manualId = auth.get("thr")?.successCriteria[0]?.id ?? ""
-    auth.markCriterion("thr", manualId, true) // model-attested manual completion
+    auth.markCriterion("thr", manualId, true) // system-attested (port surface) manual completion
     const checked = auth.get("thr")?.successCriteria[1]
     const checkId = checked?.kind === "checked" ? checked.check.id : ""
     createVerifierCompletion(auth, { now: () => 500 }).complete({
@@ -316,7 +349,9 @@ describe("C4 adversarial — no forged/placeholder receipt can complete a checke
       { admitted: true },
     )
     expect(res.ok).toBe(false)
-    expect(res.ok === false ? res.reason : "").toBe("forbidden-completion")
+    // GOAL-02: `markCriterionVerified` is verifier-only in the policy table —
+    // every other actor is `actor-forbidden` (was `forbidden-completion`).
+    expect(res.ok === false ? res.reason : "").toBe("actor-forbidden")
     expect(auth.get("t")?.successCriteria[0]?.met).toBe(false)
   })
 
@@ -378,29 +413,36 @@ describe("C4 adversarial — no forged/placeholder receipt can complete a checke
 })
 
 describe("C4 adversarial — decoder is exhaustive + migration-safe", () => {
-  test("a LEGACY criterion (no kind) decodes as MANUAL and stays model-completable", () => {
-    const legacy = {
-      version: 1 as const,
-      threads: [
-        {
-          threadId: "t",
-          revision: 1,
-          goal: "g",
-          successCriteria: [{ id: "c1", text: "legacy", met: false }],
-          status: "active",
-          explicitStatus: "active" as const,
-          budget: { tokensUsed: 0, turnsUsed: 0 },
-          blockers: [],
-          nextActions: [],
-          createdAt: 1,
-          updatedAt: 1,
-        },
-      ],
-    }
-    const auth = buildObjectiveAuthority({ restoreFrom: legacy }) as unknown as ObjectiveAuthority
+  /** A v1 (pre-GOAL-01) persisted thread with ONE legacy manual criterion. */
+  const legacyThread = (criterion: Record<string, unknown>) => ({
+    version: 1 as const,
+    threads: [
+      {
+        threadId: "t",
+        revision: 1,
+        goal: "g",
+        successCriteria: [criterion as never],
+        status: "active",
+        explicitStatus: "active" as const,
+        budget: { tokensUsed: 0, turnsUsed: 0 },
+        blockers: [],
+        nextActions: [],
+        createdAt: 1,
+        updatedAt: 1,
+      },
+    ],
+  })
+
+  // GOAL-02 (REVERSED): a legacy manual criterion used to "stay
+  // model-completable". Manual attestation is user/system-only now — the model
+  // is refused; the USER completes it (paired control).
+  test("a LEGACY criterion (no kind) decodes as MANUAL; the model may not complete it, the user may", () => {
+    const auth = buildObjectiveAuthority({
+      restoreFrom: legacyThread({ id: "c1", text: "legacy", met: false }),
+    }) as unknown as ObjectiveAuthority
     const c = auth.get("t")?.successCriteria[0]
     expect(c?.kind).toBe("manual")
-    const res = auth.commit(
+    const denied = auth.commit(
       auth.prepare({
         threadId: "t",
         actor: "model",
@@ -408,8 +450,51 @@ describe("C4 adversarial — decoder is exhaustive + migration-safe", () => {
       }),
       { admitted: true },
     )
+    expect(denied.ok).toBe(false)
+    expect(denied.ok === false ? denied.reason : "").toBe("manual-attestation-required")
+    expect(auth.get("t")?.successCriteria[0]?.met).toBe(false)
+    const res = auth.commit(
+      auth.prepare({
+        threadId: "t",
+        actor: "user",
+        mutation: { kind: "markCriterion", criterionId: "c1", met: true },
+      }),
+      { admitted: true },
+    )
     expect(res.ok).toBe(true)
     expect(auth.get("t")?.successCriteria[0]?.met).toBe(true)
+    expect(auth.get("t")?.status).toBe("completed")
+  })
+
+  // GOAL-02: COMPLETION is a projection of TRUSTED evidence only. A legacy
+  // manual criterion "completed by the model" (a v1 receipt attested by
+  // `model`) decodes with `met:true` and keeps its receipt, but the status does
+  // NOT derive `completed`. The SAME receipt attested by `user` does.
+  test("a LEGACY manual criterion with a MODEL-attested receipt is met but INERT for completion; a USER receipt completes", () => {
+    const withActor = (actor: string) =>
+      buildObjectiveAuthority({
+        restoreFrom: legacyThread({
+          id: "c1",
+          text: "legacy",
+          met: true,
+          completion: { source: "manual", actor, objectiveRevision: 1, verifiedAt: 1 },
+        }),
+      }) as unknown as ObjectiveAuthority
+
+    const untrusted = withActor("model")
+    const c = untrusted.get("t")?.successCriteria[0]
+    expect(c?.kind).toBe("manual")
+    expect(c?.met).toBe(true)
+    expect(c?.completion?.source === "manual" ? c.completion.actor : "").toBe("model")
+    // the migrated receipt is bound to the migrated generation…
+    expect(c?.completion?.objectiveId).toBe(untrusted.get("t")?.objectiveId ?? "")
+    // …yet the objective is NOT completed: the evidence is untrusted.
+    expect(untrusted.get("t")?.status).toBe("active")
+    expect(untrusted.readDomain("t").validationContract).toBe("manual-only")
+
+    const trusted = withActor("user")
+    expect(trusted.get("t")?.successCriteria[0]?.met).toBe(true)
+    expect(trusted.get("t")?.status).toBe("completed")
   })
 
   test("a checked criterion with an UNRECOVERABLE check downgrades to manual (fail-safe)", () => {

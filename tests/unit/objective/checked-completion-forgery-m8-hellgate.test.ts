@@ -141,6 +141,10 @@ describe("M8 · restoreFrom — forged checked completion is fail-closed", () =>
     const c = critOf(auth)
     expect(c?.kind).toBe("manual")
     expect(c?.met).toBe(true)
+    // GOAL-02: `met` survives, but with NO trusted attestation the objective
+    // does not derive `completed` (completion is a projection of trusted evidence).
+    expect(c?.completion).toBeUndefined()
+    expect(auth.get("t1")?.status).toBe("active")
   })
 })
 

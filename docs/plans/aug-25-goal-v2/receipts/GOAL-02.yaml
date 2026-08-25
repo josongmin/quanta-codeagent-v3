@@ -1,0 +1,31 @@
+ticket: GOAL-02
+kind: implementation
+recordedAt: 2026-08-25T15:20:00Z
+testedSourceSha: working tree on top of 1ba3dec197d7099d94913923154fb79bf72d48bc (S = the commit this receipt is staged with)
+scope:
+  src: src/objective/policy.ts (new: MUTATION_POLICY + assertMutationPolicyComplete + authorizeMutation + completionSatisfied/criterionSatisfied/validationContractOf + transition table), src/objective/capabilities.ts (new: createObjectiveCapabilities / asObjectiveReadPort),
+       src/objective/{authority,model,index,core-store/cell}.ts (policy wired; CAS before policy; validationContract; trusted-evidence derivation),
+       src/tool/objective/index.ts (ObjectiveToolPorts; objective_set=create proposal only; objective_update=addBlocker|nextActions; thread_id ignored; COMMIT_ERROR_MESSAGE),
+       src/agent/tier1/{objective,objective-judge-observer}.ts (objective-completion-admission.ts DELETED; observer telemetry-only, no production invocation until GOAL-04),
+       src/apps/cli/slash/objective.ts, src/host/runtime/internal/context-binding.ts, src/apps/cli/repl/{objective-progress,session-loop/interactive-loop,session-loop/interactive-setup}.ts (capabilities / read port),
+       src/shared/runtime-config{,/types}.ts, src/shared/runtime-config-knobs/knobs-b.ts (QUANTA_GOAL_JUDGE off|shadow; reject -> off)
+  tests: new policy.test.ts / completion-policy.test.ts / capabilities.test.ts / objective-judge-observer.test.ts; boundary ratchet allowlist 10 -> 4; 10 migrated by 2 agents; goal-continuation-live-e2e reversed (model attestation cannot stop pursuit)
+  catalog: objective-goal-continuation-live.yaml (judge wording, evidence paths)
+rails:
+  - bun run typecheck / typecheck:tests / lint:debt ; exit 0
+  - bun test <objective/goal/agent/cli/kernel/protocol/web/approval/host/session/shared unit set> ; 7124 pass / 0 fail (45s)
+  - bun test tests/unit/god-code-ratchet.test.ts tests/unit/_arch ; 71 pass / 2 fail — (a) pre-existing cohort ratchet (25>24, not Goal-owned); (b) capability-literal-ratchet ENOENT on the DELETED admission test (git ls-files lists it until the deletion is committed) — expected GREEN at S, re-run recorded below
+  - bun run test:contract ; 7 / 0
+  - bun test tests/integration/{goal-continuation-live-e2e,objective-turn-context-consumer-e2e,objective-usage-limited-429-real-loop-e2e,observability-wire-multi-emit-e2e,agent-state-observability-ws-daemon-e2e}.test.ts ; 21 / 0
+  - bun test tests/e2e-pty/cli-goal-pursuit-e2e.test.ts ; 9 / 0 (36s)
+  - bun fc validate ; all evidence resolved (after evidence path update); bun fc build ; md unchanged
+redOnInjection:
+  - M1 model manual completion allowed in the table          -> policy 3 RED
+  - M2 trusted-attestor check removed                         -> completion-policy+policy 2 RED
+  - M3 terminal-objective check removed                       -> policy 1 RED
+  - M4 invalid-transition guard removed                       -> policy 1 RED
+  - M5 gate-off model create allowed                          -> policy+capabilities 1 RED
+  - M6 authority ignores the policy verdict                   -> policy+capabilities 10 RED
+  - restore: byte-identical
+ticketRedRails: 1-11 covered (policy.test.ts / completion-policy / capabilities / observer / tool hellgates); 12 (attempt-in-flight) deferred to GOAL-04 (durable attempt store lands there)
+deviations: README "GOAL-02 실행 기록"

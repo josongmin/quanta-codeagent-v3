@@ -33,7 +33,7 @@ import type { CellProvenance } from "./core-store/cell"
 import type { ManualCompletionReceipt } from "./criteria/model"
 import { isVerifierReceipt } from "./criteria/model"
 import { defaultObjectiveIdFactory, MAX_GOAL_CHARS, normalizeGoalText } from "./identity"
-import type { ObjectiveDomainSnapshot } from "./model"
+import type { ObjectiveDomainSnapshot, ValidationContract } from "./model"
 import {
   isGenerationMutationKind,
   type ObjectiveActor,
@@ -41,6 +41,7 @@ import {
   type ObjectiveMutation,
   type ObjectiveOperationKind,
 } from "./mutations"
+import { authorizeMutation, validationContractOf } from "./policy"
 import type {
   ApprovalReceipt,
   CommitRejection,
@@ -61,6 +62,12 @@ import { createObjectiveCoreStore, type ObjectiveCore } from "./store"
 import type { GoalDefinition, Objective, ObjectivePort } from "./types"
 
 const isNonEmptyString = (v: unknown): v is string => typeof v === "string" && v.length > 0
+
+/** GOAL-02 — the derived stopping-contract field of a domain snapshot. */
+const contractOf = (
+  o: Objective | null,
+): { readonly validationContract: ValidationContract } | Record<never, never> =>
+  o === null ? {} : { validationContract: validationContractOf(o) }
 
 /** Per-thread evidence view a handler may read/append (bound by `route`). */
 interface EvidenceContext {
@@ -287,34 +294,20 @@ const applyMutation = (
   return handler(core, threadId, m as never, ctx)
 }
 
-/** Policy classification of a bound command against the gate posture.
- *  (GOAL-02 replaces this with the exhaustive actor × mutation table.) */
-interface Policy {
-  readonly approvalRequired: boolean
-  /** A model actor attempting to COMPLETE a criterion — always refused. */
-  readonly forbiddenCompletion: boolean
-}
-
-const classify = (command: ObjectiveMutationCommand, gateOn: boolean): Policy => {
-  if (!gateOn || command.actor !== "model") {
-    return { approvalRequired: false, forbiddenCompletion: false }
-  }
-  // Gate ON + model actor: every model mutation is mediated; completion is owned.
-  const forbiddenCompletion =
-    command.mutation.kind === "markCriterion" && command.mutation.met === true
-  return { approvalRequired: true, forbiddenCompletion }
-}
-
-/** Resolve the policy verdict into a commit rejection reason, or `null` when the
- *  mutation may proceed to the CAS check. */
+/** GOAL-02 — resolve the policy verdict for a bound command into a commit
+ *  rejection (or `null` to proceed to CAS). `approval` needs an admitted receipt
+ *  AND a confirmation-capable surface (fail-closed, never a bypass). */
 const policyRejection = (
-  policy: Policy,
+  prior: ObjectiveDomainSnapshot,
+  command: ObjectiveMutationCommand,
   approval: ApprovalReceipt,
+  gateOn: boolean,
   confirmationAvailable: boolean,
-): "forbidden-completion" | "approval-unavailable" | "approval-required" | null => {
-  if (policy.forbiddenCompletion) return "forbidden-completion" // authority owns completion
-  if (!policy.approvalRequired) return null
-  if (!confirmationAvailable) return "approval-unavailable" // fail-closed, no bypass
+): CommitRejection | null => {
+  const verdict = authorizeMutation(prior, command, gateOn)
+  if (verdict.verdict === "deny") return verdict.reason
+  if (verdict.verdict === "allow") return null
+  if (!confirmationAvailable) return "approval-unavailable"
   if (approval.admitted !== true) return "approval-required"
   return null
 }
@@ -599,6 +592,7 @@ const createObjectiveAuthorityWithCore = (
     revision: revisionOf(threadId),
     state: isNonEmptyString(threadId) ? core.snapshotThread(threadId) : null,
     progressReceipts: isNonEmptyString(threadId) ? (progress.get(threadId) ?? []) : [],
+    ...contractOf(isNonEmptyString(threadId) ? core.get(threadId) : null),
   })
   const route = (
     threadId: string,
@@ -641,7 +635,8 @@ const createObjectiveAuthorityWithCore = (
       command,
       expectedRevision: command.expectedRevision ?? revisionOf(threadId),
       prior: readDomain(threadId),
-      approvalRequired: classify(command, gateOn).approvalRequired,
+      approvalRequired:
+        authorizeMutation(readDomain(threadId), command, gateOn).verdict === "approval",
     }
   }
   const commit = (prepared: PreparedObjectiveMutation, approval: ApprovalReceipt): CommitResult => {
@@ -649,12 +644,20 @@ const createObjectiveAuthorityWithCore = (
     const threadId = isNonEmptyString(command.threadId) ? command.threadId : ""
     if (threadId === "") return { ok: false, reason: "invalid", currentRevision: 0 }
     const current = revisionOf(threadId)
-    const rejected = policyRejection(classify(command, gateOn), approval, confirmationAvailable)
-    if (rejected !== null) return { ok: false, reason: rejected, currentRevision: current }
     // CAS — the domain must still be at the prepared revision.
     if (current !== prepared.expectedRevision) {
       return { ok: false, reason: "stale", currentRevision: current }
     }
+    // GOAL-02 — policy runs AFTER CAS: a writer that lost the race sees `stale`
+    // (it must re-read), a current writer sees the policy verdict.
+    const rejected = policyRejection(
+      readDomain(threadId),
+      command,
+      approval,
+      gateOn,
+      confirmationAvailable,
+    )
+    if (rejected !== null) return { ok: false, reason: rejected, currentRevision: current }
     const outcome = route(threadId, command.mutation, command.actor)
     if (!outcome.applied) {
       return { ok: false, reason: outcome.rejection ?? "invalid", currentRevision: current }

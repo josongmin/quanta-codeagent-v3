@@ -20,6 +20,7 @@ import {
   type CriterionKind,
   normalizeCheckDeclaration,
 } from "../criteria/model"
+import { completionSatisfied } from "../policy"
 import type { ObjectiveActor, ObjectiveMigrationSource } from "../provenance"
 import type {
   Blocker,
@@ -113,7 +114,18 @@ export const deriveStatus = (cell: Cell, enforce: boolean, now: number): Objecti
   if (cell.blockers.length > 0) return "blocked"
   if (enforce && usageWindowActive(cell, now)) return "usage_limited"
   if (enforce && budgetExhausted(cell)) return "budget_limited"
-  if (cell.criteria.length > 0 && cell.criteria.every((c) => c.met)) return "completed"
+  // GOAL-02 — completion is a projection of TRUSTED evidence (user/system
+  // attestation for a manual criterion, a bound passing verifier receipt for a
+  // checked one), never of the bare `met` flag.
+  if (
+    completionSatisfied({
+      objectiveId: cell.objectiveId,
+      successCriteria: cell.criteria.map(toCriterion),
+      blockers: cell.blockers,
+    })
+  ) {
+    return "completed"
+  }
   return cell.explicitStatus
 }
 

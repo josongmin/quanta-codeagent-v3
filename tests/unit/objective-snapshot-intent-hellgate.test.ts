@@ -144,8 +144,10 @@ describe("HELLGATE [ADR-0394] — snapshot persists intent, not derivation", () 
 
   test("legacy snapshot WITHOUT explicitStatus does not fabricate explicit completion", () => {
     // A hostile / pre-fix payload carries only the derived status. The restore
-    // must NOT infer explicit intent from it: derived "completed" with met
-    // criteria stays completed, but unmarking still reverts to active.
+    // must NOT infer explicit intent from it.
+    // GOAL-02 (REVERSED): a bare `met:true` with NO completion receipt used to
+    // re-derive "completed". Completion is now a projection of TRUSTED evidence
+    // only — the flag survives but the persisted "completed" is NOT honored.
     const legacy = legacyRecord({
       successCriteria: [{ id: "c1", text: "x", met: true }],
       status: "completed", // derived only — no explicitStatus field
@@ -153,8 +155,43 @@ describe("HELLGATE [ADR-0394] — snapshot persists intent, not derivation", () 
 
     const store = freshStore(99)
     store.fromSnapshot(legacy)
-    expect(store.get(TID)?.status).toBe("completed")
+    expect(store.get(TID)?.successCriteria[0]?.met).toBe(true)
+    expect(store.get(TID)?.status).toBe("active")
     expect(store.markCriterion(TID, "c1", false)?.status).toBe("active")
+    expect(store.get(TID)?.successCriteria[0]?.met).toBe(false)
+  })
+
+  // GOAL-02: the paired control for the case above — the SAME legacy record with
+  // a manual receipt. A `model`-attested receipt (a v1 self-mark) is INERT for
+  // completion; a `user`-attested one re-derives "completed", and unmarking
+  // still reverts to "active" (derived, never explicit).
+  test("a legacy MODEL-attested manual receipt is inert; a USER-attested one re-derives 'completed'", () => {
+    const withActor = (actor: string): ObjectiveSnapshot =>
+      legacyRecord({
+        successCriteria: [
+          {
+            id: "c1",
+            text: "x",
+            met: true,
+            // pre-GOAL-01 receipt: no objectiveId — the migration binds it.
+            completion: { source: "manual", actor, objectiveRevision: 1, verifiedAt: 1 },
+          },
+        ],
+        status: "completed",
+      })
+
+    const untrusted = freshStore(99)
+    untrusted.fromSnapshot(withActor("model"))
+    const c = untrusted.get(TID)?.successCriteria[0]
+    expect(c?.met).toBe(true)
+    expect(c?.completion?.source === "manual" ? c.completion.actor : "").toBe("model")
+    expect(c?.completion?.objectiveId).toBe(untrusted.get(TID)?.objectiveId ?? "")
+    expect(untrusted.get(TID)?.status).toBe("active")
+
+    const trusted = freshStore(99)
+    trusted.fromSnapshot(withActor("user"))
+    expect(trusted.get(TID)?.status).toBe("completed")
+    expect(trusted.markCriterion(TID, "c1", false)?.status).toBe("active")
   })
 
   test("snapshot stays byte-stable through JSON with the explicit field present", () => {

@@ -30,19 +30,13 @@ const RAW_PROTOCOL = /asObjectiveAuthority\(|\.prepare\(\{/
 /** Files that legitimately hold the raw protocol today (GOAL-01 baseline).
  *  Repo-relative, POSIX separators. Shrink only. */
 const ALLOWED: ReadonlySet<string> = new Set<string>([
-  // library home (authority.ts DEFINES the protocol; it never calls it)
+  // library home (authority.ts DEFINES the protocol; capabilities.ts is the
+  // ONE composition seam that recovers it and binds actors)
+  "src/objective/capabilities.ts",
   "src/objective/criteria/verifier.ts",
-  // composition roots / bridges
+  // persistence adapters need the authority-only surface (knownThreadIds / restoreDomain)
   "src/runner/assemble/session-authorities/build-objective.ts",
   "src/host/runtime/objective-store-wire.ts",
-  "src/host/runtime/internal/context-binding.ts",
-  "src/agent/tier1/objective.ts",
-  "src/tool/objective/index.ts",
-  // CLI surface (GOAL-05 collapses these onto one GoalControl capability)
-  "src/apps/cli/slash/objective.ts",
-  "src/apps/cli/repl/objective-progress.ts",
-  "src/apps/cli/repl/session-loop/interactive-loop.ts",
-  "src/apps/cli/repl/session-loop/interactive-setup.ts",
 ])
 
 const posix = (p: string): string => p.split(/[\\/]/).join("/")
@@ -112,7 +106,7 @@ describe("GOAL-01 — objective authority boundary ratchet", () => {
   test("every allowlisted file still holds a real call (anti-vacuum floor)", () => {
     const { stale } = scan(realFiles(), ALLOWED)
     expect(stale).toEqual([])
-    expect(ALLOWED.size).toBeGreaterThanOrEqual(5)
+    expect(ALLOWED.size).toBeGreaterThanOrEqual(3)
   })
 
   test("red-on-injection: a synthetic consumer reaching for the protocol is NAMED", () => {

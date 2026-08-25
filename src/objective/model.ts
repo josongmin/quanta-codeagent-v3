@@ -21,6 +21,9 @@
 import type { ProgressReceipt } from "./progress-receipt"
 import type { ExplicitObjectiveStatus, Objective } from "./types"
 
+/** GOAL-02 — what kind of stopping contract an objective declares. */
+export type ValidationContract = "missing" | "manual-only" | "checked"
+
 /** The caller's last EXPLICIT status intent — the only status source on restore. */
 export type ExplicitStatus = ExplicitObjectiveStatus
 
@@ -50,4 +53,6 @@ export interface ObjectiveDomainSnapshot {
   readonly state: ObjectiveThreadSnapshot | null
   /** Bounded durable evidence packets; never contains prompt/transcript text. */
   readonly progressReceipts?: readonly ProgressReceipt[]
+  /** GOAL-02 — derived from the live criteria; absent when `state` is null. */
+  readonly validationContract?: ValidationContract
 }

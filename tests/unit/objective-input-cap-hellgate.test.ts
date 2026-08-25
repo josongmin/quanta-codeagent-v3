@@ -10,13 +10,17 @@
  *   - reason (blocker) min(1).max(8000)
  *   - actions          array(string.max(2000)).max(256)
  *   - max_tokens/turns int().nonnegative().finite()
- *   - status op        enum(active|paused) — GOAL-01: `completed` is derived, never settable
+ *   - status op        REMOVED — GOAL-02: status is host-owned (GOAL-01 had
+ *                      narrowed it to active|paused; `completed` is derived)
  *   - recordUsage op   REMOVED — GOAL-01: usage is host-settled, never self-reported
+ *   - markCriterion /  REMOVED — GOAL-02: completion is user attestation +
+ *     clearBlocker op  verifier receipts; only addBlocker + nextActions remain
+ *   - thread_id        OPTIONAL and ignored — GOAL-02: the thread is session-bound
  */
 
 import { describe, expect, test } from "bun:test"
 import { MAX_GOAL_CHARS } from "@/objective"
-import { objectiveSetSchema, objectiveUpdateSchema } from "@/tool/objective"
+import { objectiveGetSchema, objectiveSetSchema, objectiveUpdateSchema } from "@/tool/objective"
 
 const repeat = (n: number): string => "a".repeat(n)
 
@@ -186,20 +190,69 @@ describe("R3 audit-M2/M3 — objective_set / objective_update input caps", () =>
     }
   })
 
-  // GOAL-01: the explicit status intent is `active | paused` ONLY; `completed`
-  // and the derived limit states are never settable through the tool.
-  test("(6) status op accepts active|paused and rejects completed + derived states", () => {
-    for (const ok of ["active", "paused"]) {
+  // GOAL-02 (REVERSED): GOAL-01 had narrowed the explicit status intent to
+  // `active | paused`. Status is HOST-owned now — the `status` op is REMOVED
+  // from the model schema, so the formerly-accepted values are rejected exactly
+  // like `completed` and the derived limit states.
+  test("(6) status op is rejected outright (active|paused AND completed + derived states)", () => {
+    for (const status of [
+      "active",
+      "paused",
+      "completed",
+      "blocked",
+      "usage_limited",
+      "budget_limited",
+      "",
+    ]) {
       expect(
-        objectiveUpdateSchema.safeParse({ thread_id: "t", op: { kind: "status", status: ok } })
-          .success,
-      ).toBe(true)
-    }
-    for (const bad of ["completed", "blocked", "usage_limited", "budget_limited", ""]) {
-      expect(
-        objectiveUpdateSchema.safeParse({ thread_id: "t", op: { kind: "status", status: bad } })
-          .success,
+        objectiveUpdateSchema.safeParse({ thread_id: "t", op: { kind: "status", status } }).success,
       ).toBe(false)
     }
+  })
+
+  // GOAL-02: criterion completion and blocker clearing are not model ops —
+  // well-formed payloads are rejected at the schema; only addBlocker and
+  // nextActions survive as the model's update surface.
+  test("(7) markCriterion + clearBlocker ops are rejected outright; addBlocker + nextActions remain", () => {
+    expect(
+      objectiveUpdateSchema.safeParse({
+        thread_id: "t",
+        op: { kind: "markCriterion", criterion_id: "c1", met: true },
+      }).success,
+    ).toBe(false)
+    expect(
+      objectiveUpdateSchema.safeParse({
+        thread_id: "t",
+        op: { kind: "markCriterion", criterion_id: "c1", met: false },
+      }).success,
+    ).toBe(false)
+    expect(
+      objectiveUpdateSchema.safeParse({
+        thread_id: "t",
+        op: { kind: "clearBlocker", blocker_id: "b1" },
+      }).success,
+    ).toBe(false)
+    expect(
+      objectiveUpdateSchema.safeParse({
+        thread_id: "t",
+        op: { kind: "addBlocker", reason: "r", waiting_on: "tool" },
+      }).success,
+    ).toBe(true)
+    expect(
+      objectiveUpdateSchema.safeParse({ thread_id: "t", op: { kind: "nextActions", actions: [] } })
+        .success,
+    ).toBe(true)
+  })
+
+  // GOAL-02: `thread_id` is deprecated and IGNORED — the thread is bound by the
+  // session (`ctx.ownerId`), so its absence is not a validation failure on any
+  // of the three tools. (The fail-closed session binding is pinned in
+  // objective-tools-hellgate.)
+  test("(8) thread_id is optional on objective_set / objective_update / objective_get", () => {
+    expect(objectiveSetSchema.safeParse({ goal: "g" }).success).toBe(true)
+    expect(
+      objectiveUpdateSchema.safeParse({ op: { kind: "nextActions", actions: ["a"] } }).success,
+    ).toBe(true)
+    expect(objectiveGetSchema.safeParse({}).success).toBe(true)
   })
 })

@@ -16,7 +16,7 @@ import { execSync } from "node:child_process"
 import { join } from "node:path"
 import { createSubagentMailbox } from "@/agent/subagent-mailbox"
 import { buildEnterPlanBlock, buildPlanExitBlock } from "@/agent/tier1"
-import { asObjectiveAuthority, createObjectiveStore } from "@/objective"
+import { createObjectiveCapabilities, createObjectiveStore } from "@/objective"
 import { createIntrospectTools, createSubagent6Tools, TaskRegistry } from "@/subagent"
 import {
   ALL_MANIFEST_TOOL_NAMES,
@@ -136,7 +136,9 @@ describe("tool-surface manifest — GATED factories match the manifest two-way",
   })
 
   test("objective tools === manifest objective_set group", () => {
-    expect(names(objectiveTools(asObjectiveAuthority(createObjectiveStore())))).toEqual(
+    // GOAL-02: the trio is built over the actor-fixed model capability + read port.
+    const caps = createObjectiveCapabilities(createObjectiveStore())
+    expect(names(objectiveTools({ model: caps.model, read: caps.read }))).toEqual(
       groupNames("objective_set"),
     )
   })
