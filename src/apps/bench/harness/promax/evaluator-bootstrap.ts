@@ -443,7 +443,21 @@ const graderPythonEnvAndTeardown = (
       step: "python-env",
       phase: "grader",
       goldBearing: false,
-      argv: [spec.systemPython, "-m", "venv", spec.venvRoot],
+      // MEASURED on a real box: `python3 -m venv` fails on Ubuntu with "the
+      // virtual environment was not created successfully because ensurepip is
+      // not available", because the distro ships `python3` without it. So the
+      // grader phase could never build its interpreter — on any box, every time.
+      //
+      // `uv` is already there (cloud-init installs bun+uv), so this adds no
+      // provisioning, and it creates the environment without ensurepip.
+      // `--python 3.11` PINS an interpreter above the evaluator's PEP 604 floor
+      // instead of inheriting whatever `python3` happens to be — which is exactly
+      // the remedy the floor's own refusal message recommends.
+      //
+      // Nothing is installed into it: the pinned evaluator imports only stdlib
+      // (os, json, uuid, tempfile, subprocess, re, argparse, shlex,
+      // concurrent.futures), so a bare interpreter IS the requirement.
+      argv: ["uv", "venv", "--python", "3.11", spec.venvRoot],
       purpose: "a DEDICATED interpreter for the pinned evaluator, isolated from the agent's",
     },
     {
