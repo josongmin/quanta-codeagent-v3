@@ -14,8 +14,9 @@
  * and a file that needs something different overrides by NAME rather than by
  * writing another `includes` chain.
  */
-import type { SpawnResult } from "@/apps/bench/remote/backend"
+
 import { PROMAX_V1_SNAPSHOT } from "@/apps/bench/promax/provenance/frozen-snapshot"
+import type { SpawnResult } from "@/apps/bench/remote/backend"
 import { DEFAULT_CHUNK_PATHS } from "@/apps/bench/remote/box-session/types"
 
 export type Reply = { code: number; stdout: string; stderr: string }
@@ -55,25 +56,49 @@ export interface FakeBox {
  * from the predictions `cat` — both distinctions were absent before, and both
  * hid a real command from every assertion in the suite.
  */
-const respond = (cmd: string, opts: FakeBoxOpts): Reply => {
-  const override = opts.override?.(cmd)
-  if (override !== undefined) return override
-  if (cmd.includes('printf %s "$HOME"')) return ok("/home/ubuntu")
-  if (cmd.includes("--version")) return ok("Python 3.11.14\n")
-  if (cmd.includes("sha256sum")) {
-    const hit = PINNED_DIGESTS.find(([suffix]) => cmd.includes(suffix))
-    return hit === undefined ? fail(1, "no such file") : ok(`${hit[1]}  x`)
-  }
-  if (cmd.includes("image-provenance.py")) return ok(opts.imageProvenance ?? "")
-  if (cmd.startsWith("cat ") && cmd.includes(DEFAULT_CHUNK_PATHS.preds)) {
-    return ok(opts.predictions ?? "")
-  }
-  if (cmd.startsWith("cat ") && cmd.includes(DEFAULT_CHUNK_PATHS.passRate)) {
-    return ok(opts.passRate ?? "")
-  }
-  if (cmd.includes("test_run.py") && cmd.includes("--pred")) return opts.grade ?? ok()
-  return ok()
-}
+/**
+ * A TABLE, matched in order, not an if-chain.
+ *
+ * Each row matches the ONE command it models. `printf %s "$HOME"` rather than
+ * `$HOME`, and the pass-rate `cat` distinguished from the predictions `cat` —
+ * both distinctions were absent before, and both hid a real command from every
+ * assertion in the suite.
+ */
+const CASES: ReadonlyArray<{
+  readonly when: (cmd: string) => boolean
+  readonly reply: (cmd: string, opts: FakeBoxOpts) => Reply
+}> = [
+  { when: (c) => c.includes('printf %s "$HOME"'), reply: () => ok("/home/ubuntu") },
+  { when: (c) => c.includes("--version"), reply: () => ok("Python 3.11.14\n") },
+  {
+    when: (c) => c.includes("sha256sum"),
+    reply: (c) => {
+      const hit = PINNED_DIGESTS.find(([suffix]) => c.includes(suffix))
+      return hit === undefined ? fail(1, "no such file") : ok(`${hit[1]}  x`)
+    },
+  },
+  {
+    when: (c) => c.includes("image-provenance.py"),
+    reply: (_c, o) => ok(o.imageProvenance ?? ""),
+  },
+  {
+    when: (c) => c.startsWith("cat ") && c.includes(DEFAULT_CHUNK_PATHS.preds),
+    reply: (_c, o) => ok(o.predictions ?? ""),
+  },
+  {
+    when: (c) => c.startsWith("cat ") && c.includes(DEFAULT_CHUNK_PATHS.passRate),
+    reply: (_c, o) => ok(o.passRate ?? ""),
+  },
+  {
+    when: (c) => c.includes("test_run.py") && c.includes("--pred"),
+    reply: (_c, o) => o.grade ?? ok(),
+  },
+]
+
+const respond = (cmd: string, opts: FakeBoxOpts): Reply =>
+  opts.override?.(cmd) ?? CASES.find((c) => c.when(cmd))?.reply(cmd, opts) ?? ok()
+
+export const cannedReply = (cmd: string, opts: FakeBoxOpts = {}): Reply => respond(cmd, opts)
 
 export const fakeBox = (opts: FakeBoxOpts = {}): FakeBox => {
   const issued: string[] = []

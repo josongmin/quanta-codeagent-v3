@@ -293,6 +293,9 @@ describe("gold-teardown — the answer key is really removed", () => {
 const BUILTIN_BACKED = new Set(["gold-absence"])
 
 describe("PROPERTY — every declared argv round-trips through a real shell", () => {
+  // Spawns one real shell per declared command. Alone that is well under a
+  // second; sharing a machine with the rest of this directory it is not, and the
+  // 5s default made it flake. The budget is stated rather than the work reduced.
   test("🔴 no token is split, globbed, or expanded on the way to the process", async () => {
     const sb = sandbox()
     const plain = sb.plan.filter((c) => c.argv[0] !== "sh" && !BUILTIN_BACKED.has(c.step))
@@ -309,7 +312,7 @@ describe("PROPERTY — every declared argv round-trips through a real shell", ()
         ...step.argv.slice(1),
       ])
     }
-  })
+  }, 30_000)
 })
 
 describe("PROPERTY — a hostile campaign root is carried as DATA by every step", () => {
@@ -326,7 +329,7 @@ describe("PROPERTY — a hostile campaign root is carried as DATA by every step"
       await sb.run(step)
       expect(existsSync(canary), `step "${step.step}" executed the path's name`).toBe(false)
     }
-  })
+  }, 30_000)
 
   test("🔴 the steps that CREATE paths create them under the literal hostile name", async () => {
     // the paired control: "nothing was executed" also passes when nothing ran at
@@ -337,7 +340,7 @@ describe("PROPERTY — a hostile campaign root is carried as DATA by every step"
     expect((await sb.runStep("campaign-root")).code).toBe(0)
     expect(existsSync(sb.campaignRoot), "the quoted hostile path was not created").toBe(true)
     expect(existsSync(join(sb.root, "PWNED"))).toBe(false)
-  })
+  }, 30_000)
 })
 
 /**

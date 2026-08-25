@@ -20,19 +20,13 @@
  */
 import { describe, expect, test } from "bun:test"
 import { familyRemoteBootstrap } from "@/apps/bench/profiles/bootstrap"
-import { PROMAX_V1_SNAPSHOT } from "@/apps/bench/promax/provenance/frozen-snapshot"
 import { runFamilyBoxGrade } from "@/apps/bench/remote/box-session/family-box-grade"
 import { DEFAULT_CHUNK_PATHS } from "@/apps/bench/remote/box-session/types"
 import { resolveBenchRunConfig } from "@/apps/bench/run-config"
+import { fakeBox } from "./_fake-box"
 
 const promaxBootstrap = () =>
   familyRemoteBootstrap(resolveBenchRunConfig({ argvFamily: "promax", env: {} }))
-
-const DIGESTS: ReadonlyArray<readonly [string, string]> = [
-  ["data/swe-bench-promax.json", PROMAX_V1_SNAPSHOT.dataset_sha256],
-  ["data/eval.json", PROMAX_V1_SNAPSHOT.eval_sha256],
-  ["src/evaluation/test_run.py", PROMAX_V1_SNAPSHOT.evaluator_sha256],
-]
 
 const PASS_RATE = JSON.stringify([
   {
@@ -45,30 +39,7 @@ const PASS_RATE = JSON.stringify([
 ])
 const PREDS_JSONL = `${JSON.stringify({ instance_id: "aws__s2n-tls-5464", model_patch: "P" })}\n`
 
-const recorder = () => {
-  const issued: string[] = []
-  return {
-    issued,
-    ssh: async (cmd: string) => {
-      issued.push(cmd)
-      if (cmd.includes('printf %s "$HOME"')) return { code: 0, stdout: "/home/ubuntu", stderr: "" }
-      if (cmd.includes("--version")) return { code: 0, stdout: "Python 3.11.14\n", stderr: "" }
-      if (cmd.includes("sha256sum")) {
-        const hit = DIGESTS.find(([s]) => cmd.includes(s))
-        return hit === undefined
-          ? { code: 1, stdout: "", stderr: "no such file" }
-          : { code: 0, stdout: `${hit[1]}  x`, stderr: "" }
-      }
-      if (cmd.startsWith("cat ") && cmd.includes(DEFAULT_CHUNK_PATHS.preds)) {
-        return { code: 0, stdout: PREDS_JSONL, stderr: "" }
-      }
-      if (cmd.startsWith("cat ") && cmd.includes(DEFAULT_CHUNK_PATHS.passRate)) {
-        return { code: 0, stdout: PASS_RATE, stderr: "" }
-      }
-      return { code: 0, stdout: "", stderr: "" }
-    },
-  }
-}
+const recorder = () => fakeBox({ predictions: PREDS_JSONL, passRate: PASS_RATE })
 
 describe("the grade artifact", () => {
   test("KNOWN-ITEM FLOOR: it is returned to the caller, so it can be persisted", async () => {

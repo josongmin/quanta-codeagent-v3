@@ -21,19 +21,15 @@
  */
 import { describe, expect, test } from "bun:test"
 import { familyRemoteBootstrap } from "@/apps/bench/profiles/bootstrap"
-import { PROMAX_V1_SNAPSHOT } from "@/apps/bench/promax/provenance/frozen-snapshot"
 import { runFamilyBoxGrade } from "@/apps/bench/remote/box-session/family-box-grade"
 import { DEFAULT_CHUNK_PATHS } from "@/apps/bench/remote/box-session/types"
 import { resolveBenchRunConfig } from "@/apps/bench/run-config"
+import type { Reply } from "./_fake-box"
+import { fail, fakeBox } from "./_fake-box"
 
 const bootstrap = () =>
   familyRemoteBootstrap(resolveBenchRunConfig({ argvFamily: "promax", env: {} }))
 
-const DIGESTS: ReadonlyArray<readonly [string, string]> = [
-  ["data/swe-bench-promax.json", PROMAX_V1_SNAPSHOT.dataset_sha256],
-  ["data/eval.json", PROMAX_V1_SNAPSHOT.eval_sha256],
-  ["src/evaluation/test_run.py", PROMAX_V1_SNAPSHOT.evaluator_sha256],
-]
 const PREDS = `${JSON.stringify({ instance_id: "a-1", model_patch: "P" })}\n`
 const PASS_RATE = JSON.stringify([
   {
@@ -45,35 +41,24 @@ const PASS_RATE = JSON.stringify([
   },
 ])
 
-/** `dropOn` names the command substring at which the box becomes unreachable. */
-const boxThatDropsAt = (dropOn: string) => async (cmd: string) => {
-  if (cmd.includes(dropOn)) {
-    return { code: 255, stdout: "", stderr: "ssh: connect to host: Connection refused" }
-  }
-  if (cmd.includes("pgrep")) return { code: 1, stdout: "", stderr: "" }
-  if (cmd.includes('printf %s "$HOME"')) return { code: 0, stdout: "/home/ubuntu", stderr: "" }
-  if (cmd.includes("--version")) return { code: 0, stdout: "Python 3.11.14\n", stderr: "" }
-  if (cmd.includes("sha256sum")) {
-    const hit = DIGESTS.find(([s]) => cmd.includes(s))
-    return hit === undefined
-      ? { code: 1, stdout: "", stderr: "no such file" }
-      : { code: 0, stdout: `${hit[1]}  x`, stderr: "" }
-  }
-  if (cmd.startsWith("cat ") && cmd.includes(DEFAULT_CHUNK_PATHS.preds)) {
-    return { code: 0, stdout: PREDS, stderr: "" }
-  }
-  if (cmd.startsWith("cat ") && cmd.includes(DEFAULT_CHUNK_PATHS.passRate)) {
-    return { code: 0, stdout: PASS_RATE, stderr: "" }
-  }
-  if (cmd.includes("image-provenance.py")) {
-    return {
-      code: 0,
-      stdout: `a-1\tkey4127/refactor-dockerhub:a-1\tkey4127/refactor-dockerhub@sha256:${"a".repeat(64)}\n`,
-      stderr: "",
-    }
-  }
-  return { code: 0, stdout: "", stderr: "" }
-}
+/**
+ * `dropOn` names the command substring at which the box becomes unreachable.
+ * Everything else is the shared fake box: the two behaviours this file is about
+ * — the drop, and an agent that is already gone — are the only overrides.
+ */
+const boxThatDropsAt =
+  (dropOn: string) =>
+  async (cmd: string): Promise<Reply> =>
+    await fakeBox({
+      predictions: PREDS,
+      passRate: PASS_RATE,
+      imageProvenance: `a-1\tkey4127/refactor-dockerhub:a-1\tkey4127/refactor-dockerhub@sha256:${"a".repeat(64)}\n`,
+      override: (c) => {
+        if (c.includes(dropOn)) return fail(255, "ssh: connect to host: Connection refused")
+        if (c.includes("pgrep")) return fail(1)
+        return undefined
+      },
+    }).ssh(cmd)
 
 const grade = (ssh: (cmd: string) => Promise<{ code: number; stdout: string; stderr: string }>) =>
   runFamilyBoxGrade({

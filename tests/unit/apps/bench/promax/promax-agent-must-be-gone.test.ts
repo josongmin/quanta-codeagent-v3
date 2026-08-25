@@ -21,19 +21,15 @@
  */
 import { describe, expect, test } from "bun:test"
 import { familyRemoteBootstrap } from "@/apps/bench/profiles/bootstrap"
-import { PROMAX_V1_SNAPSHOT } from "@/apps/bench/promax/provenance/frozen-snapshot"
 import { runFamilyBoxGrade } from "@/apps/bench/remote/box-session/family-box-grade"
 import { DEFAULT_CHUNK_PATHS } from "@/apps/bench/remote/box-session/types"
 import { resolveBenchRunConfig } from "@/apps/bench/run-config"
+import type { Reply } from "./_fake-box"
+import { cannedReply } from "./_fake-box"
 
 const promaxBootstrap = () =>
   familyRemoteBootstrap(resolveBenchRunConfig({ argvFamily: "promax", env: {} }))
 
-const DIGESTS: ReadonlyArray<readonly [string, string]> = [
-  ["data/swe-bench-promax.json", PROMAX_V1_SNAPSHOT.dataset_sha256],
-  ["data/eval.json", PROMAX_V1_SNAPSHOT.eval_sha256],
-  ["src/evaluation/test_run.py", PROMAX_V1_SNAPSHOT.evaluator_sha256],
-]
 const PREDS = `${JSON.stringify({ instance_id: "aws__s2n-tls-5464", model_patch: "P" })}\n`
 const PASS_RATE = JSON.stringify([
   {
@@ -63,23 +59,18 @@ interface RecorderOpts {
   pkillMissing?: boolean
 }
 
-type Reply = { code: number; stdout: string; stderr: string }
 const ok = (stdout = ""): Reply => ({ code: 0, stdout, stderr: "" })
 const ALIVE = ok("ALIVE\n")
 const GONE: Reply = { code: 1, stdout: "", stderr: "" }
 
-/** The box's canned answers to everything that is NOT the liveness dance. */
-const staticReply = (cmd: string): Reply | undefined => {
-  if (cmd.includes('printf %s "$HOME"')) return ok("/home/ubuntu")
-  if (cmd.includes("--version")) return ok("Python 3.11.14\n")
-  if (cmd.includes("sha256sum")) {
-    const hit = DIGESTS.find(([s]) => cmd.includes(s))
-    return hit === undefined ? { code: 1, stdout: "", stderr: "no such file" } : ok(`${hit[1]}  x`)
-  }
-  if (cmd.startsWith("cat ") && cmd.includes(DEFAULT_CHUNK_PATHS.preds)) return ok(PREDS)
-  if (cmd.startsWith("cat ") && cmd.includes(DEFAULT_CHUNK_PATHS.passRate)) return ok(PASS_RATE)
-  return undefined
-}
+/**
+ * Everything that is NOT the liveness dance comes from the shared fake box; the
+ * liveness/kill state machine below is what this file is actually about.
+ */
+const staticReply = (cmd: string): Reply | undefined =>
+  cmd.includes("pgrep") || cmd.includes("pkill")
+    ? undefined
+    : cannedReply(cmd, { predictions: PREDS, passRate: PASS_RATE })
 
 const recorder = (opts: RecorderOpts = {}) => {
   const issued: string[] = []
@@ -274,58 +265,24 @@ describe("a bench that FINISHED but will not exit is ended, not waited on foreve
     // rather than assumed.
     const issued: string[] = []
     let killed = false
-    // The fake is a TABLE, matched in order, because the order is part of what
-    // it models: `pkill` must be recognized before `pgrep` (it sets the flag the
-    // liveness answer reads), and the two `cat` arms differ only by path. As an
-    // if-chain this scored 31 cognitive complexity — in a file that exists to
-    // pin a safety boundary, where the fake being hard to read is the last thing
-    // anyone wants.
-    const SSH_CASES: ReadonlyArray<{
-      readonly when: (cmd: string) => boolean
-      readonly reply: (cmd: string) => { code: number; stdout: string; stderr: string }
-    }> = [
-      {
-        when: (c) => c.includes("pkill"),
-        reply: () => {
-          killed = true
-          return { code: 0, stdout: "", stderr: "" }
-        },
-      },
-      {
-        // The stuck bench answers ALIVE until it is ended, then reports gone.
-        when: (c) => c.includes("pgrep"),
-        reply: () =>
-          killed ? { code: 1, stdout: "", stderr: "" } : { code: 0, stdout: "ALIVE\n", stderr: "" },
-      },
-      {
-        when: (c) => c.includes("$HOME"),
-        reply: () => ({ code: 0, stdout: "/home/ubuntu", stderr: "" }),
-      },
-      {
-        when: (c) => c.includes("--version"),
-        reply: () => ({ code: 0, stdout: "Python 3.11.14\n", stderr: "" }),
-      },
-      {
-        when: (c) => c.includes("sha256sum"),
-        reply: (c) => {
-          const hit = DIGESTS.find(([d]) => c.includes(d))
-          return hit === undefined
-            ? { code: 1, stdout: "", stderr: "no such file" }
-            : { code: 0, stdout: `${hit[1]}  x`, stderr: "" }
-        },
-      },
-      {
-        when: (c) => c.startsWith("cat ") && c.includes(DEFAULT_CHUNK_PATHS.preds),
-        reply: () => ({ code: 0, stdout: PREDS, stderr: "" }),
-      },
-      {
-        when: (c) => c.startsWith("cat ") && c.includes(DEFAULT_CHUNK_PATHS.passRate),
-        reply: () => ({ code: 0, stdout: PASS_RATE, stderr: "" }),
-      },
-    ]
+    // Only the two commands this test is ABOUT are modelled here; everything
+    // else defers to the shared fake box. The order still matters — `pkill` must
+    // be recognized before `pgrep`, because it sets the flag the liveness answer
+    // reads — and two branches make that visible instead of burying it in an
+    // eleven-arm chain.
     const ssh = async (cmd: string) => {
       issued.push(cmd)
-      return SSH_CASES.find((c) => c.when(cmd))?.reply(cmd) ?? { code: 0, stdout: "", stderr: "" }
+      if (cmd.includes("pkill")) {
+        killed = true
+        return { code: 0, stdout: "", stderr: "" }
+      }
+      // The stuck bench answers ALIVE until it is ended, then reports gone.
+      if (cmd.includes("pgrep")) {
+        return killed
+          ? { code: 1, stdout: "", stderr: "" }
+          : { code: 0, stdout: "ALIVE\n", stderr: "" }
+      }
+      return cannedReply(cmd, { predictions: PREDS, passRate: PASS_RATE })
     }
     const out = await runFamilyBoxGrade({
       ssh,

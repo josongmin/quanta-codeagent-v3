@@ -24,15 +24,11 @@ import { PROMAX_V1_SNAPSHOT } from "@/apps/bench/promax/provenance/frozen-snapsh
 import { runFamilyBoxGrade } from "@/apps/bench/remote/box-session/family-box-grade"
 import { DEFAULT_CHUNK_PATHS } from "@/apps/bench/remote/box-session/types"
 import { resolveBenchRunConfig } from "@/apps/bench/run-config"
+import { fakeBox } from "./_fake-box"
 
 const promaxBootstrap = () =>
   familyRemoteBootstrap(resolveBenchRunConfig({ argvFamily: "promax", env: {} }))
 
-const DIGESTS: ReadonlyArray<readonly [string, string]> = [
-  ["data/swe-bench-promax.json", PROMAX_V1_SNAPSHOT.dataset_sha256],
-  ["data/eval.json", PROMAX_V1_SNAPSHOT.eval_sha256],
-  ["src/evaluation/test_run.py", PROMAX_V1_SNAPSHOT.evaluator_sha256],
-]
 const PASS_RATE = JSON.stringify([
   {
     instance_id: "aws__s2n-tls-5464",
@@ -44,24 +40,12 @@ const PASS_RATE = JSON.stringify([
 ])
 const PREDS = `${JSON.stringify({ instance_id: "aws__s2n-tls-5464", model_patch: "P" })}\n`
 
-const ssh = async (cmd: string) => {
-  if (cmd.includes('printf %s "$HOME"')) return { code: 0, stdout: "/home/ubuntu", stderr: "" }
-  if (cmd.includes("--version")) return { code: 0, stdout: "Python 3.11.14\n", stderr: "" }
-  if (cmd.includes("sha256sum")) {
-    const hit = DIGESTS.find(([s]) => cmd.includes(s))
-    return hit === undefined
-      ? { code: 1, stdout: "", stderr: "no such file" }
-      : { code: 0, stdout: `${hit[1]}  x`, stderr: "" }
-  }
-  if (cmd.startsWith("cat ") && cmd.includes(DEFAULT_CHUNK_PATHS.preds)) {
-    return { code: 0, stdout: PREDS, stderr: "" }
-  }
-  if (cmd.startsWith("cat ") && cmd.includes(DEFAULT_CHUNK_PATHS.passRate)) {
-    return { code: 0, stdout: PASS_RATE, stderr: "" }
-  }
-  if (cmd.includes("test_run.py")) return { code: 0, stdout: "EVAL-STDOUT", stderr: "EVAL-STDERR" }
-  return { code: 0, stdout: "", stderr: "" }
-}
+/** The evaluator's own streams are what this file's receipt assertions read. */
+const ssh = fakeBox({
+  predictions: PREDS,
+  passRate: PASS_RATE,
+  grade: { code: 0, stdout: "EVAL-STDOUT", stderr: "EVAL-STDERR" },
+}).ssh
 
 const grade = () =>
   runFamilyBoxGrade({

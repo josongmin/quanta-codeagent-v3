@@ -24,20 +24,10 @@
  */
 import { describe, expect, test } from "bun:test"
 import { familyRemoteBootstrap } from "@/apps/bench/profiles/bootstrap"
-import { PROMAX_V1_SNAPSHOT } from "@/apps/bench/promax/provenance/frozen-snapshot"
 import { runFamilyBoxGrade } from "@/apps/bench/remote/box-session/family-box-grade"
 import { DEFAULT_CHUNK_PATHS } from "@/apps/bench/remote/box-session/types"
 import { resolveBenchRunConfig } from "@/apps/bench/run-config"
-
-/** The grader phase hash-verifies each pinned file before anything is graded —
- *  a rail this fixture ran into the honest way. A fake box that answers with
- *  nothing makes the bootstrap refuse, which is correct: an UNVERIFIED upstream
- *  file may not be graded against. So the fake answers with the FROZEN digests. */
-const ONBOX_DIGESTS: ReadonlyArray<readonly [string, string]> = [
-  ["data/swe-bench-promax.json", PROMAX_V1_SNAPSHOT.dataset_sha256],
-  ["data/eval.json", PROMAX_V1_SNAPSHOT.eval_sha256],
-  ["src/evaluation/test_run.py", PROMAX_V1_SNAPSHOT.evaluator_sha256],
-]
+import { fail, fakeBox } from "./_fake-box"
 
 const promaxBootstrap = () =>
   familyRemoteBootstrap(resolveBenchRunConfig({ argvFamily: "promax", env: {} }))
@@ -55,47 +45,16 @@ const PASS_RATE = JSON.stringify([
   },
 ])
 
-interface Rec {
-  readonly issued: string[]
-  readonly ssh: (cmd: string) => Promise<{ code: number; stdout: string; stderr: string }>
-}
-
-const recorder = (opts: { gradeFails?: boolean } = {}): Rec => {
-  const issued: string[] = []
-  return {
-    issued,
-    ssh: async (cmd: string) => {
-      issued.push(cmd)
-      if (cmd.includes('printf %s "$HOME"')) return { code: 0, stdout: "/home/ubuntu", stderr: "" }
-      // the grader phase proves its interpreter clears the PEP 604 floor before
-      // anything is graded — another real rail this fixture met head-on
-      if (cmd.includes("--version")) {
-        return { code: 0, stdout: "Python 3.11.14\n", stderr: "" }
-      }
-      if (cmd.includes("sha256sum")) {
-        const hit = ONBOX_DIGESTS.find(([suffix]) => cmd.includes(suffix))
-        return hit === undefined
-          ? { code: 1, stdout: "", stderr: "no such file" }
-          : { code: 0, stdout: `${hit[1]}  ${suffix_of(cmd)}`, stderr: "" }
-      }
-      // TWO different `cat`s now: the predictions probe (JSONL, as the bench
-      // writes it) and the pass-rate read (the evaluator's document).
-      if (cmd.startsWith("cat ") && cmd.includes(DEFAULT_CHUNK_PATHS.preds)) {
-        return { code: 0, stdout: PREDS_JSONL, stderr: "" }
-      }
-      if (cmd.startsWith("cat ")) return { code: 0, stdout: PASS_RATE, stderr: "" }
-      if (cmd.includes("test_run.py")) {
-        return opts.gradeFails
-          ? { code: 3, stdout: "", stderr: "evaluator exploded" }
-          : { code: 0, stdout: "", stderr: "" }
-      }
-      return { code: 0, stdout: "", stderr: "" }
-    },
-  }
-}
-
-/** the path token the sha256sum line echoes back, as the real tool prints it */
-const suffix_of = (cmd: string): string => cmd.split("'").filter((s) => s.startsWith("/"))[0] ?? ""
+/**
+ * The only behaviour this file needs beyond the shared fake box is a grade that
+ * FAILS, so the teardown-on-failure property has something to fail on.
+ */
+const recorder = (opts: { gradeFails?: boolean } = {}) =>
+  fakeBox({
+    predictions: PREDS_JSONL,
+    passRate: PASS_RATE,
+    ...(opts.gradeFails === true ? { grade: fail(3, "evaluator exploded") } : {}),
+  })
 
 const isGrade = (c: string) => c.includes("test_run.py") && c.includes("--pred")
 const isTeardown = (c: string) => c.includes("'rm'")
