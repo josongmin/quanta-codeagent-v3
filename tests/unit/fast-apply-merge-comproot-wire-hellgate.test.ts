@@ -81,6 +81,34 @@ const makeBase = (sink: { ctx?: ToolContext }): AgentConfig =>
   }) as unknown as AgentConfig
 
 /** Drive the env snapshot → reset the cached runtimeConfig → run the comp-root. */
+/**
+ * The keys `wireOptionalAgentPorts` ADDED, which is what "byte-identical
+ * default-OFF" now means here.
+ *
+ * These five cases pinned reference identity (`expect(wired).toBe(base)`) —
+ * true while EVERY gate in that function was default-OFF. `82324412f` made one
+ * of them default-ON: the stale-read guard's per-session `ReadFileState`, which
+ * had been minted only inside `assembleAgentConfig` while the interactive CLI
+ * binds through `context-binding/base.ts` and wires optional ports here — so a
+ * DEFAULT-ON TOCTOU control was inert in the shipped binary, measured
+ * end-to-end in a PTY. Fixing that necessarily reallocates the config.
+ *
+ * So the assertion follows the invariant rather than the mechanism, and stays
+ * exact: the merge port must be absent, and NOTHING may appear except the one
+ * key that gate is allowed to add. A second default-ON gate sneaking into this
+ * function still fails here, which is what reference identity was really
+ * guarding.
+ */
+const addedKeys = (base: AgentConfig, wired: AgentConfig): readonly string[] => {
+  const had = new Set(Object.keys(base))
+  return Object.keys(wired)
+    .filter((k) => !had.has(k))
+    .sort()
+}
+
+/** The only key a default-OFF wire may add — see {@link addedKeys}. */
+const DEFAULT_ON_KEYS = ["readFileState"] as const
+
 const wireWith = (env: Record<string, string | undefined>, base: AgentConfig): AgentConfig => {
   const prev: Record<string, string | undefined> = {}
   for (const k of ["QUANTA_FAST_APPLY_MERGE", "QUANTA_FAST_APPLY_MODEL"]) {
@@ -172,9 +200,10 @@ describe("jun-7-misc 06 fast-apply MERGE composition-root WIRE hellgate", () => 
     const base = makeBase(sink)
     const wired = wireWith({}, base)
     expect(wired.fastApplyMerge).toBeUndefined()
-    // Byte-identity: with every gate OFF the comp-root returns the SAME object
-    // reference — no spread, no new key, zero allocation on the default path.
-    expect(wired).toBe(base)
+    // Default-OFF: the merge gate contributes NOTHING. The only key the wire may
+    // add is the one default-ON control (see `addedKeys`); a second one appearing
+    // here fails, which is what the old reference-identity check protected.
+    expect(addedKeys(base, wired)).toEqual([...DEFAULT_ON_KEYS])
     expect("fastApplyMerge" in wired).toBe(false)
   })
 
@@ -186,7 +215,7 @@ describe("jun-7-misc 06 fast-apply MERGE composition-root WIRE hellgate", () => 
     // (and must not fall through to the chat model).
     const wired = wireWith({ QUANTA_FAST_APPLY_MERGE: "1" }, base)
     expect(wired.fastApplyMerge).toBeUndefined()
-    expect(wired).toBe(base)
+    expect(addedKeys(base, wired)).toEqual([...DEFAULT_ON_KEYS])
   })
 
   test("WIRE-06 ON-gate but EMPTY apply model ⇒ no port", () => {
@@ -194,7 +223,7 @@ describe("jun-7-misc 06 fast-apply MERGE composition-root WIRE hellgate", () => 
     const base = makeBase(sink)
     const wired = wireWith({ QUANTA_FAST_APPLY_MERGE: "1", QUANTA_FAST_APPLY_MODEL: "" }, base)
     expect(wired.fastApplyMerge).toBeUndefined()
-    expect(wired).toBe(base)
+    expect(addedKeys(base, wired)).toEqual([...DEFAULT_ON_KEYS])
   })
 
   // ───────────────────────────────────────────────────────────────────────────
@@ -208,7 +237,7 @@ describe("jun-7-misc 06 fast-apply MERGE composition-root WIRE hellgate", () => 
       base,
     )
     expect(wired.fastApplyMerge).toBeUndefined()
-    expect(wired).toBe(base)
+    expect(addedKeys(base, wired)).toEqual([...DEFAULT_ON_KEYS])
   })
 
   test("WIRE-08 STRICT: QUANTA_FAST_APPLY_MERGE=true (loose) stays OFF — no port", () => {
@@ -219,7 +248,7 @@ describe("jun-7-misc 06 fast-apply MERGE composition-root WIRE hellgate", () => 
       base,
     )
     expect(wired.fastApplyMerge).toBeUndefined()
-    expect(wired).toBe(base)
+    expect(addedKeys(base, wired)).toEqual([...DEFAULT_ON_KEYS])
   })
 
   // ───────────────────────────────────────────────────────────────────────────
