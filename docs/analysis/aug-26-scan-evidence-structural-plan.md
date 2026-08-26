@@ -174,6 +174,52 @@ Actions billing failures from 2026-07-12 with every sampled job at `steps=0`. Ev
 gate named here is enforced only by local runs. That is the argument for A and C
 being early and for the withdrawn default-flip staying withdrawn.
 
+## Execution log (rev 2, 2026-08-27)
+
+Landed, each with a hellgate that was RED first and a red-on-injection proof.
+
+**A — the fc vacuous-green** (`2845e206c`). The rule became "a relative path is
+REFUSED", which a caller cannot override because passing the bad value is what
+throws. Three states that used to collapse into `[]` are now distinct. Two more
+layers were the same shape and only appeared once the first was fixed:
+`const ROOT = process.cwd()` resolved every evidence path (the silent 0 became
+9,593 errors), and `adrExists()` read a cwd-relative `docs/decisions` behind
+`catch { return false }` (726 more). All four commands are now byte-identical
+from the repo root and a foreign cwd.
+
+Anchoring `lint` exposed debt it had never been able to see: **32 orphan Accepted
+ADRs**, grandfathered by NAME (18 numbers) so the list can only shrink. And
+`feature-catalog-evidence-existence-hellgate` injected its fixture through `cwd`
+— once the tool stopped trusting the cwd, its dangling case failed and its clean
+case kept passing while silently measuring the real 1,068-feature catalog. Now
+`--repo-root <abs>`, with the COUNT pinned so "my fixture resolved" is
+distinguishable from "some catalog resolved".
+
+**B — detector reach** (`ffd98858e`). Nine shapes added; NONE had a live
+offender, and that is stated rather than dressed up. The widening exposed one
+thing not on the list: the shared `stripComments` treats the `/**/` inside a glob
+STRING as a block comment, so `globSync("src/**/*.ts")` became `globSync("src*.ts")`
+— which had silently disarmed the `Glob` entry point since the file was written.
+
+**F — the lint ratchet's own reach** (`5b3de0e6b`). The gap was real and worse
+than stated: `.html` carried 23 diagnostics including **2 at error severity**,
+which `bun run lint` itself was blind to. All 23 were genuine and fixed, so the
+ceiling file is untouched and prod stayed 36/36.
+
+**C — containment** (`b61dc90d7`, `1ae82a1e1`, `05b8668f6`). The runner's own
+summary reads identically whether it contained a write or never ran one, so the
+hellgate asserts both sides. The parity harness reported **507 cwd-dependent
+files** on its first run and every one was the harness: an `indexOf` -1 dropping
+the first root (the second time that off-by-one has shipped here), and relative
+roots killing every sandbox arm before bun printed a counter. Both pinned.
+
+**Two defects were found in work landed EARLIER in this same effort**, which is
+the most useful thing the execution produced: the anchor ratchet was itself
+vacuous (a comment between `execSync(` and its string, and a capture truncating
+at an inner quote) while a live offender sat in `tool-surface-manifest-hellgate`;
+and the parity harness reproduced a bug its own sibling tool had already been
+fixed for. Neither was found by review — both by running against ground truth.
+
 ## How a phase may claim done
 
 A hellgate that was RED first, a red-on-injection proof that the new guard fires,
