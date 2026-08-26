@@ -106,5 +106,9 @@ describe("temp-dir cleanup is registered with the test runner", () => {
     expect(detect('/* not process.on("exit") */\nprocess.on("exit", cleanup)')).toBe(true)
     // …and a string literal containing comment punctuation is NOT a comment
     expect(stripComments('const pattern = "/*"\nconst other = "*/"\n')).toContain("pattern")
+    // a REGEX CLASS holding comment punctuation is not a comment either
+    expect(stripComments("const re = /[/*]/\nconst keep = 1\nconst re2 = /[*/]/\n")).toContain(
+      "keep",
+    )
   })
 })
