@@ -1,0 +1,205 @@
+/**
+ * HELLGATE — the ratchet's universe must be at least as wide as biome's.
+ *
+ * `bun run lint` and `bun run lint:debt` do not hand biome a directory. They
+ * hand it an explicit file list built by `collectBiomeTargets`, which enumerates
+ * by EXTENSION. Anything that list omits is not "clean"; it was never looked at.
+ * Both surfaces then report a confident number over a universe smaller than the
+ * linter's, which is the exact defect this repo keeps finding in its own scans.
+ *
+ * MEASURED, 2026-08-27, before this file existed:
+ *
+ *   collectBiomeTargets(repo)                          7171 files, 0 of them .html
+ *   biome check src   (its own traversal)              names src/apps/bench/trace-viewer.html
+ *                                                      with 23 diagnostics across 8 rules —
+ *                                                      2 of them ERROR severity, which
+ *                                                      `bun run lint` exits non-zero on —
+ *                                                      and cognitive complexity 35, tied for
+ *                                                      the highest single score in src/
+ *
+ * So `noExcessiveCognitiveComplexity prod=36/36` was not 36 of 36. It was 36 of
+ * 37, with the joint-worst site outside the count, and two lint ERRORS sitting
+ * green. Complexity could have been added to that file forever.
+ *
+ * ## Why the property is phrased as containment, not as a file count
+ *
+ * The two universes are not meant to be equal. `collectBiomeTargets` deliberately
+ * drops things biome would otherwise process (a `.js` twin of an authoritative
+ * `.ts`, `*.from-worktree` leftovers), and `biome.json` deliberately drops things
+ * the enumerator lists (`**\/*.d.ts`, `tests/smoke/fixtures`). A count comparison
+ * would have to encode every one of those and would go red on each new one.
+ *
+ * The property that actually matters is one-directional:
+ *
+ *     { files biome lints }  ⊆  { files the ratchet enumerates }
+ *
+ * and it is checked COMPLETELY, not sampled: every file under the source roots
+ * that the enumerator rejects is handed back to biome, and biome must agree it
+ * is not lintable. Ground truth comes from the shipped binary — `Checked N
+ * file(s)` — not from a hand-written list of extensions, because a hand-written
+ * list is the thing that broke.
+ */
+
+import { describe, expect, test } from "bun:test"
+import { mkdtempSync, readdirSync, readFileSync, rmSync, statSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join, relative } from "node:path"
+
+import { collectBiomeTargets, shouldIncludeBiomeTarget } from "../../tools/dev/biome-targets"
+
+const REPO_ROOT = join(import.meta.dir, "..", "..")
+const BIOME_BIN = join(REPO_ROOT, "node_modules/.bin/biome")
+const ROOTS = ["src", "tests"] as const
+
+const allFilesUnder = (relDir: string, out: string[]): string[] => {
+  let entries: string[]
+  try {
+    entries = readdirSync(join(REPO_ROOT, relDir))
+  } catch {
+    return out
+  }
+  for (const name of entries) {
+    const abs = join(REPO_ROOT, relDir, name)
+    let s: ReturnType<typeof statSync>
+    try {
+      s = statSync(abs)
+    } catch {
+      continue
+    }
+    const rel = relative(REPO_ROOT, abs).replaceAll("\\", "/")
+    if (s.isDirectory()) allFilesUnder(rel, out)
+    else if (s.isFile()) out.push(rel)
+  }
+  return out
+}
+
+const CHECKED_RE = /Checked (\d+) files?/
+
+/**
+ * How many of `paths` the SHIPPED biome binary considers lintable.
+ *
+ * `null` means the answer could not be read — a crashed binary, a changed
+ * summary line — and every caller treats that as a failure rather than as zero.
+ * A silent 0 here would make this whole file vacuous, which is the failure mode
+ * it exists to catch.
+ */
+const biomeChecks = (paths: readonly string[]): number | null => {
+  if (paths.length === 0) return 0
+  let total = 0
+  for (let i = 0; i < paths.length; i += 400) {
+    const run = Bun.spawnSync({
+      cmd: [BIOME_BIN, "check", "--max-diagnostics=1", ...paths.slice(i, i + 400)],
+      cwd: REPO_ROOT,
+    })
+    const text = `${new TextDecoder().decode(run.stdout)}${new TextDecoder().decode(run.stderr)}`
+    const m = CHECKED_RE.exec(text)
+    if (m?.[1] === undefined) return null
+    total += Number(m[1])
+  }
+  return total
+}
+
+type BiomeDiagnostic = { readonly location?: { readonly path?: unknown } }
+
+/** Repo-relative path of a diagnostic; `""` when biome reported none. */
+const relPathOf = (d: BiomeDiagnostic): string => {
+  const p = d.location?.path
+  const raw =
+    typeof p === "string"
+      ? p
+      : p && typeof p === "object" && "file" in p
+        ? String((p as { file: unknown }).file)
+        : ""
+  if (raw === "") return ""
+  const rel = raw.startsWith(`${REPO_ROOT}/`) ? raw.slice(REPO_ROOT.length + 1) : raw
+  return rel.replaceAll("\\", "/")
+}
+
+/**
+ * Every diagnostic biome raises when it walks the source roots ITSELF, rather
+ * than being handed a file list. This is the ground truth the ratchet's own scan
+ * is compared against; a missing report throws instead of yielding an empty
+ * array, because an empty array here reads exactly like a pass.
+ */
+const biomeDiagnosticsOverRoots = (): readonly BiomeDiagnostic[] => {
+  const dir = mkdtempSync(join(tmpdir(), "lint-reach-"))
+  const reportPath = join(dir, "report.json")
+  try {
+    const run = Bun.spawnSync({
+      cmd: [
+        BIOME_BIN,
+        "check",
+        "--reporter=json",
+        `--reporter-file=${reportPath}`,
+        "--max-diagnostics=100000",
+        ...ROOTS,
+      ],
+      cwd: REPO_ROOT,
+      stdout: "ignore",
+      stderr: "pipe",
+    })
+    let raw: string
+    try {
+      raw = readFileSync(reportPath, "utf8")
+    } catch {
+      const stderr = new TextDecoder().decode(run.stderr)
+      throw new Error(`biome produced no JSON report (exit ${run.exitCode}): ${stderr}`)
+    }
+    const parsed = JSON.parse(raw) as { diagnostics?: readonly BiomeDiagnostic[] }
+    if (!Array.isArray(parsed.diagnostics)) {
+      throw new Error("biome JSON report has no `diagnostics` array — reporter shape drifted")
+    }
+    return parsed.diagnostics
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+}
+
+describe("lint-debt reach — the ratchet must enumerate everything biome lints", () => {
+  const files = ROOTS.flatMap((r) => allFilesUnder(r, []))
+  const rejected = files.filter((f) => !shouldIncludeBiomeTarget(REPO_ROOT, f))
+  const targets = collectBiomeTargets(REPO_ROOT)
+
+  test("the probe is non-degenerate (it can say yes as well as no)", () => {
+    // Paired control. If `biomeChecks` returned 0 for everything — wrong flag,
+    // wrong cwd, drifted summary line — the containment test below would pass
+    // while measuring nothing at all.
+    const known = targets.filter((t) => t.endsWith(".ts")).slice(0, 3)
+    expect(known.length).toBe(3)
+    expect(biomeChecks(known)).toBe(3)
+    expect(biomeChecks(["README.md"])).toBe(0)
+  })
+
+  test("every file the enumerator REJECTS is one biome also refuses to lint", () => {
+    // Anti-vacuity: there must be a real population on both sides, or "0 of 0"
+    // would read as a pass.
+    expect(files.length).toBeGreaterThan(1000)
+    expect(targets.length).toBeGreaterThan(1000)
+    expect(rejected.length).toBeGreaterThan(10)
+
+    const checked = biomeChecks(rejected)
+    if (checked === 0) return
+    // Name the offenders rather than reporting a bare number — the fix is a
+    // change to the enumerator's extension set, and the fixer needs the paths.
+    const offenders = rejected.filter((f) => biomeChecks([f]) !== 0)
+    expect({ checked, offenders }).toEqual({ checked: 0, offenders: [] })
+  }, 300_000)
+
+  /**
+   * The same property stated over DIAGNOSTICS instead of files: a diagnostic
+   * biome raises inside the source roots must land on a file the ratchet counts.
+   * Weaker than the containment test above — it goes quiet as soon as the
+   * unenumerated file happens to be clean — but it is the form the ceiling
+   * actually consumes, so it is pinned in that form too.
+   */
+  test("every diagnostic biome raises under src/ and tests/ lands on an enumerated file", () => {
+    const diagnostics = biomeDiagnosticsOverRoots()
+    expect(diagnostics.length).toBeGreaterThan(0) // anti-vacuity
+
+    const enumerated = new Set(targets)
+    const unseen = diagnostics
+      .map((d) => relPathOf(d))
+      .filter((rel) => rel !== "" && !enumerated.has(rel))
+    expect([...new Set(unseen)].sort()).toEqual([])
+  }, 300_000)
+})

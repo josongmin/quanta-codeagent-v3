@@ -15,7 +15,7 @@
  *   parseResourceSpansFull(capturedBody)              ← the REAL sink parser
  *     → toFullSpan FOLDS the resource `quanta.run.id` onto every span's `.attrs`
  *   applyRunFilter(spans, runId)                      ← FAITHFUL PORT of the
- *        trace-viewer.html `?run=<id>` filter (:181) → selects ONLY that run
+ *        trace-viewer.html `?run=<id>` filter (:183) → selects ONLY that run
  *
  * Every arrow above is production code exercised here (the ONLY test double is
  * the injected `fetch`, so it is hermetic — no live network, no real timers).
@@ -86,7 +86,7 @@ afterEach(() => {
 })
 
 // ── FAITHFUL PORT of the trace-viewer.html `?run=<id>` filter ────────────────
-// trace-viewer.html:181 `applyRunFilter`:
+// trace-viewer.html:183 `applyRunFilter`:
 //   function applyRunFilter(spans){
 //     if(!runFilter) return spans;
 //     return spans.filter(s => String(s.attrs && s.attrs["quanta.run.id"] || "") === runFilter);
@@ -100,7 +100,7 @@ const applyRunFilter = (
   runFilter: string | undefined,
 ): FullSpan[] => {
   if (!runFilter) return [...spans]
-  // Faithful to trace-viewer.html:181 — coerce the folded run-id attr to a string
+  // Faithful to trace-viewer.html:183 — coerce the folded run-id attr to a string
   // (missing/empty ⇒ "") and keep only exact matches. (`s.attrs?.[k]` is the
   // lint-clean form of the HTML's `s.attrs && s.attrs[k]`; identical semantics.)
   return spans.filter((s) => String(s.attrs?.[QUANTA_ATTRS.run.id] || "") === runFilter)

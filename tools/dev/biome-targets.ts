@@ -3,12 +3,57 @@ import { join, relative, resolve } from "node:path"
 
 const SOURCE_ROOTS = ["src", "tests"] as const
 const JS_LIKE_RE = /\.(?:[cm]?js|jsx)$/i
-const BIOME_EXT_RE = /\.(?:[cm]?js|jsx|ts|tsx|json|jsonc)$/i
+
+/**
+ * Every extension the SHIPPED biome binary will lint in this repo.
+ *
+ * This list is not a guess and not "the ones we happen to have". It was probed
+ * against `node_modules/.bin/biome check <file>` — the binary reports `Checked 1
+ * file` for a type it handles and `Checked 0 files` for one it does not — and it
+ * is held to that by `tests/unit/lint-debt-ratchet-reach.test.ts`, which hands
+ * biome every file this enumerator REJECTS and requires biome to reject it too.
+ *
+ * WHY IT IS SPELLED OUT RATHER THAN INFERRED. `bun run lint` and `bun run
+ * lint:debt` do not point biome at a directory; they hand it this explicit list.
+ * An extension missing here is not linted and not counted, and neither surface
+ * says so — it reports a clean number over a smaller universe. That happened:
+ * `.html` was absent, so `src/apps/bench/trace-viewer.html` carried two lint
+ * ERRORS and the joint-highest cognitive-complexity score in `src/` while
+ * `lint` was green and the debt ceiling read `prod=36/36`.
+ *
+ * Extensions biome does NOT handle (`.md`, `.yaml`, `.toml`, `.scss`, …) are
+ * deliberately absent: listing them would hand biome paths it silently skips,
+ * which buys nothing and hides the distinction this list exists to make.
+ */
+const BIOME_EXTENSIONS = [
+  // JavaScript / TypeScript family
+  "js",
+  "cjs",
+  "mjs",
+  "jsx",
+  "ts",
+  "cts",
+  "mts",
+  "tsx",
+  // data
+  "json",
+  "jsonc",
+  // biome also parses these, and lints the scripts embedded in them
+  "css",
+  "graphql",
+  "gql",
+  "html",
+  "vue",
+  "svelte",
+  "astro",
+  "grit",
+] as const
+
+const BIOME_EXT_RE = new RegExp(`\\.(?:${BIOME_EXTENSIONS.join("|")})$`, "i")
 
 const normalizeRel = (rel: string): string => rel.replaceAll("\\", "/")
 
-const stripKnownExtension = (rel: string): string =>
-  rel.replace(/\.(?:[cm]?js|jsx|ts|tsx|json|jsonc)$/i, "")
+const stripKnownExtension = (rel: string): string => rel.replace(BIOME_EXT_RE, "")
 
 const hasTypeScriptTwin = (absPath: string): boolean => {
   const stem = absPath.replace(/\.(?:[cm]?js|jsx)$/i, "")
