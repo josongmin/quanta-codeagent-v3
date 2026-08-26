@@ -56,37 +56,49 @@ const testFiles = (dir: string, into: string[] = []): string[] => {
  * deleted everything up to the next `*` + `/`, which silently removed real code
  * from the scan. A tiny scanner is the honest way; regex cannot see quoting.
  */
+/** How far a quoted run starting at `i` extends, past any backslash escapes. */
+const endOfQuote = (src: string, start: number): number => {
+  const quote = src[start]
+  let i = start + 1
+  while (i < src.length) {
+    if (src[i] === "\\") {
+      i += 2
+      continue
+    }
+    if (src[i] === quote) return i + 1
+    i += 1
+  }
+  return i
+}
+
+/** How far a comment starting at `i` extends. `-1` when `i` starts no comment. */
+const endOfComment = (src: string, i: number): number => {
+  if (src[i] !== "/") return -1
+  if (src[i + 1] === "/") {
+    const nl = src.indexOf("\n", i)
+    return nl === -1 ? src.length : nl
+  }
+  if (src[i + 1] === "*") {
+    const close = src.indexOf("*/", i + 2)
+    return close === -1 ? src.length : close + 2
+  }
+  return -1
+}
+
 const stripComments = (src: string): string => {
   let out = ""
   let i = 0
-  let quote: string | null = null
   while (i < src.length) {
     const c = src[i] as string
-    if (quote !== null) {
-      out += c
-      if (c === "\\") {
-        out += src[i + 1] ?? ""
-        i += 2
-        continue
-      }
-      if (c === quote) quote = null
-      i += 1
-      continue
-    }
     if (c === '"' || c === "'" || c === "`") {
-      quote = c
-      out += c
-      i += 1
+      const end = endOfQuote(src, i)
+      out += src.slice(i, end)
+      i = end
       continue
     }
-    if (c === "/" && src[i + 1] === "/") {
-      while (i < src.length && src[i] !== "\n") i += 1
-      continue
-    }
-    if (c === "/" && src[i + 1] === "*") {
-      i += 2
-      while (i < src.length && !(src[i] === "*" && src[i + 1] === "/")) i += 1
-      i += 2
+    const commentEnd = endOfComment(src, i)
+    if (commentEnd !== -1) {
+      i = commentEnd
       continue
     }
     out += c
