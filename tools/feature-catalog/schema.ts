@@ -6,9 +6,10 @@
  */
 import type { Dirent } from "node:fs"
 import { readdir, readFile } from "node:fs/promises"
-import { join, relative } from "node:path"
+import { isAbsolute, join, relative } from "node:path"
 import { parseDocument } from "yaml"
 import { z } from "zod"
+import { FEATURES_DIR } from "./paths"
 import { parseYaml } from "./yaml"
 
 export const Maturity = z.enum(["L1", "L2", "L3", "L4", "L5"])
@@ -429,15 +430,36 @@ export const SECTION_SLUGS: Readonly<Record<number, string>> = Object.freeze({
   10: "app",
 })
 
-/** Recursively gather *.yaml files under `dir`, sorted by relative path. */
+/**
+ * Recursively gather *.yaml files under `dir`, sorted by relative path.
+ *
+ * Distinguishes three states the previous version collapsed into `[]`:
+ * a relative path (the cwd is not an answer), an absent directory (a missing
+ * catalog is never a clean one), and an empty directory (the only case where an
+ * empty result is a real finding). The ENOENT→`[]` branch it used to have is what
+ * let `validate --strict` report `0 feature(s), all evidence resolved` with
+ * exit 0 from a foreign working directory.
+ */
 async function gatherYamlFiles(dir: string): Promise<string[]> {
+  if (!isAbsolute(dir)) {
+    throw new Error(
+      `feature catalog: "${dir}" is relative — pass an absolute path. A repo path built ` +
+        `from the ambient cwd resolves to nothing outside the repo root, and an empty ` +
+        `catalog is indistinguishable from a clean one. Use the anchored constants in ` +
+        `tools/feature-catalog/paths.ts.`,
+    )
+  }
   const out: string[] = []
   let entries: Dirent[]
   try {
     entries = (await readdir(dir, { withFileTypes: true })) as Dirent[]
   } catch (err) {
     const code = (err as NodeJS.ErrnoException).code
-    if (code === "ENOENT") return []
+    if (code === "ENOENT") {
+      throw new Error(
+        `feature catalog: directory not found: ${dir} — a missing catalog is not an empty one.`,
+      )
+    }
     throw err
   }
   for (const ent of entries) {
@@ -475,9 +497,7 @@ function assertStandardYaml(text: string, path: string): void {
  * Load + validate all features under `dir`. Throws on first parse/zod error
  * with a clear message including the source path.
  */
-export async function loadFeatures(
-  dir = "tools/feature-catalog/features",
-): Promise<LoadedFeature[]> {
+export async function loadFeatures(dir: string = FEATURES_DIR): Promise<LoadedFeature[]> {
   const files = await gatherYamlFiles(dir)
   const loaded: LoadedFeature[] = []
   for (const path of files) {
@@ -629,13 +649,7 @@ export function validateInvariants(features: readonly LoadedFeature[]): Invarian
  * Load + cross-feature validation (unique id, valid section, deterministic
  * ordering). Throws on first cross-feature violation.
  */
-export async function loadFeaturesStrict(
-  // Anchored on THIS file, not on the ambient cwd. The old default,
-  // `"tools/feature-catalog/features"`, silently resolved to nothing whenever the
-  // caller ran from anywhere but the repo root — and "no features loaded" reads
-  // as a clean catalog to every consumer, so the failure was invisible.
-  dir = join(import.meta.dir, "features"),
-): Promise<LoadedFeature[]> {
+export async function loadFeaturesStrict(dir: string = FEATURES_DIR): Promise<LoadedFeature[]> {
   const loaded = await loadFeatures(dir)
   const seen = new Map<string, string>()
   for (const { feature, path } of loaded) {

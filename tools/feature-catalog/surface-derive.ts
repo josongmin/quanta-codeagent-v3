@@ -38,7 +38,9 @@ import { computeReachability } from "./reachability"
 import { loadFeatures } from "./schema"
 
 const REPO_ROOT = resolve(import.meta.dir, "..", "..")
-const FEATURES_DIR = "tools/feature-catalog/features"
+
+import { FEATURES_DIR } from "./paths"
+
 const CLI_ENTRY = "src/apps/cli/index.ts"
 const WEB_ENTRY = "src/apps/web-daemon/index.ts"
 const VERIFIED = "2026-06-09"
@@ -176,7 +178,10 @@ export const deriveSurfaceIntegration = async (
   const loaded = await loadFeatures(FEATURES_DIR)
   const byPath = new Map(loaded.map((l) => [resolve(REPO_ROOT, l.path), l.feature]))
 
-  const files = await gatherYaml(join(REPO_ROOT, FEATURES_DIR))
+  // FEATURES_DIR is absolute (see ./paths). Joining it onto REPO_ROOT again
+  // produced `<repo>/Users/...` and an ENOENT — the anchored value must be used
+  // as-is, not treated as repo-relative the way the old literal was.
+  const files = await gatherYaml(FEATURES_DIR)
   const rows: DerivedRow[] = []
 
   for (const file of files) {

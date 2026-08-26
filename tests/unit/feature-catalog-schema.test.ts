@@ -204,9 +204,22 @@ describe("loadFeatures / loadFeaturesStrict — filesystem", () => {
     if (tmp) await rm(tmp, { recursive: true, force: true })
   })
 
-  test("loadFeatures returns empty array when dir absent", async () => {
-    const got = await loadFeatures(join(tmp, "missing"))
-    expect(got).toEqual([])
+  // Replaces `loadFeatures returns empty array when dir absent`, which pinned the
+  // defect as correct. Collapsing "the catalog is missing" into `[]` is what made
+  // `fc validate --strict` report `0 feature(s), all evidence resolved` and exit 0
+  // from any working directory but the repo root. The three states are now
+  // distinct, and the full contract lives in
+  // `tests/unit/feature-catalog-cwd-anchor-hellgate.test.ts`.
+  test("🔴 loadFeatures THROWS when the dir is absent — a missing catalog is not an empty one", async () => {
+    await expect(loadFeatures(join(tmp, "missing"))).rejects.toThrow(/not found/i)
+  })
+
+  test("loadFeatures returns [] for a dir that exists and is empty", async () => {
+    // The other half: without this, "throw on everything" would also pass, and
+    // that is a different way of not knowing.
+    const empty = join(tmp, "empty")
+    await mkdir(empty, { recursive: true })
+    expect(await loadFeatures(empty)).toEqual([])
   })
 
   test("loadFeatures parses one yaml file", async () => {

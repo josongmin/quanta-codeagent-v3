@@ -1,4 +1,5 @@
 #!/usr/bin/env bun
+
 // biome-ignore-all lint/suspicious/noConsole: CLI tool — plain console.log/console.error is the intended IO surface.
 /**
  * tools/pm/check.ts — enforce the Definition of Done (see ./README.md).
@@ -12,10 +13,9 @@
  * this drops straight into CI / a pre-push hook.
  */
 
+import { FEATURES_DIR } from "../feature-catalog/paths"
 import { loadFeaturesStrict } from "../feature-catalog/schema"
 import { checkFeatureDoD, type DoDCheck, type DoDResult } from "./definition-of-done"
-
-const FEATURES_DIR = "tools/feature-catalog/features"
 
 const GREEN = "\x1b[32m"
 const RED = "\x1b[31m"

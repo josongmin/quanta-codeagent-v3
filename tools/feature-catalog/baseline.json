@@ -31,8 +31,27 @@
   },
   "fc": {
     "empty_stubs_max": 0,
-    "orphan_adrs_grandfathered": [],
-    "updated_at": "2026-06-03T05:00:21.322Z",
+    "orphan_adrs_grandfathered": [
+      155,
+      158,
+      159,
+      160,
+      161,
+      162,
+      163,
+      166,
+      170,
+      173,
+      174,
+      175,
+      184,
+      186,
+      190,
+      191,
+      193,
+      277
+    ],
+    "updated_at": "2026-08-27T00:00:00.000Z",
     "l3_reachability_grandfathered": []
   }
 }

@@ -202,8 +202,22 @@ describe("fc validate --strict — exit-code contract (anti silent-pass)", () =>
     )
   }
 
-  const runValidate = (cwd: string) =>
-    spawnSync(process.execPath, [CLI, "validate", "--strict"], { cwd, encoding: "utf8" })
+  /**
+   * Point the CLI at a fixture tree EXPLICITLY, not through the ambient cwd.
+   *
+   * This used to pass `{ cwd: dir }` and rely on the tool resolving its catalog
+   * from the working directory — the very defect that let `fc validate --strict`
+   * report "0 feature(s), all evidence resolved" and exit 0 from anywhere but the
+   * repo root. When the tool was anchored, the fixture became unreachable: the
+   * dangling case failed, and the clean case kept passing while silently
+   * measuring the REAL 1,068-feature catalog instead of its own one-feature
+   * fixture. `--repo-root` takes an ABSOLUTE path, so the injection is explicit
+   * and cannot reintroduce cwd dependence.
+   */
+  const runValidate = (root: string) =>
+    spawnSync(process.execPath, [CLI, "validate", "--strict", "--repo-root", root], {
+      encoding: "utf8",
+    })
 
   test("dangling evidence ⇒ exit 1 (NOT a silent 0)", async () => {
     const dir = await mkdtemp(join(tmpdir(), "fc-exit-dangling-"))
@@ -226,6 +240,11 @@ describe("fc validate --strict — exit-code contract (anti silent-pass)", () =>
       const out = runValidate(dir)
       expect(out.status).toBe(0)
       expect(out.stdout).toContain("all evidence resolved")
+      // Anti-vacuity, and not hypothetical: with cwd injection this assertion
+      // passed against the real catalog after the fixture stopped being reachable.
+      // Pinning the COUNT is what distinguishes "my fixture resolved" from
+      // "some catalog somewhere resolved".
+      expect(out.stdout).toContain("1 feature(s)")
     } finally {
       await rm(dir, { recursive: true, force: true })
     }

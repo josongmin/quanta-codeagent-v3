@@ -18,7 +18,7 @@
  * No logger — plain console.log/console.error.
  */
 import { access, mkdir, readdir, readFile, writeFile } from "node:fs/promises"
-import { dirname, join, relative, resolve } from "node:path"
+import { dirname, isAbsolute, join, relative, resolve } from "node:path"
 import {
   type AdrRecord,
   type AuditReport,
@@ -57,10 +57,47 @@ import {
 } from "./test-audit"
 import { parseYaml, stringifyYaml } from "./yaml"
 
-const ROOT = process.cwd()
-const FEATURES_DIR = "tools/feature-catalog/features"
-const PROSE_DIR = "tools/feature-catalog/prose"
-const BASELINE = "tools/feature-catalog/baseline.json"
+// The repo root, anchored on THIS file rather than on the ambient cwd.
+//
+// Every evidence path in the catalog is repo-relative (`src/…`), and this is what
+// resolves them. As `process.cwd()` it produced two different silent failures at
+// once: from the repo root everything resolved, and from anywhere else nothing
+// did — which combined with the equally cwd-relative catalog directory to make
+// `validate` report "0 feature(s), all evidence resolved" and exit 0. Anchoring
+// the catalog alone turned that into 9,593 errors; anchoring the evidence root
+// too is what makes the two runs identical.
+/**
+ * `--repo-root <abs>` points the whole tool at another tree.
+ *
+ * The escape hatch that replaces cwd injection. `feature-catalog-evidence-existence-hellgate`
+ * built a fixture catalog in a temp dir and ran the CLI with `cwd` set to it; once
+ * the tool stopped trusting the cwd, that fixture became unreachable and its
+ * companion assertion silently started measuring the REAL catalog instead — a test
+ * that passed for the wrong reason. An explicit absolute root keeps the fixture
+ * reachable without letting the ambient cwd decide anything.
+ */
+const resolveRepoRoot = (): string => {
+  const i = process.argv.indexOf("--repo-root")
+  if (i === -1) return ANCHORED_ROOT
+  const v = process.argv[i + 1]
+  if (v === undefined || !isAbsolute(v)) {
+    throw new Error(`--repo-root requires an ABSOLUTE path (got ${v ?? "nothing"})`)
+  }
+  return v
+}
+
+const ROOT = resolveRepoRoot()
+const {
+  featuresDir: FEATURES_DIR,
+  proseDir: PROSE_DIR,
+  baselinePath: BASELINE,
+} = catalogPathsFor(ROOT)
+
+// Anchored on the catalog module itself — see tools/feature-catalog/paths.ts.
+// The literals these replaced resolved to nothing outside the repo root, and
+// every command read that as a clean catalog.
+import { REPO_ROOT as ANCHORED_ROOT, catalogPathsFor } from "./paths"
+
 const OUTPUT_MD = "docs/10.feature-catalog.md"
 
 function usage(): never {
@@ -320,7 +357,7 @@ async function collectSrcFiles(root = "src"): Promise<string[]> {
 }
 
 /** Read all ADRs from docs/decisions/ and parse their status fields. */
-async function collectAdrs(dir = "docs/decisions"): Promise<AdrRecord[]> {
+async function collectAdrs(dir: string = resolve(ROOT, "docs/decisions")): Promise<AdrRecord[]> {
   let entries: string[]
   try {
     entries = await readdir(resolve(ROOT, dir))
@@ -344,7 +381,7 @@ async function buildAuditReport(): Promise<AuditReport> {
   const [features, srcFiles, adrs] = await Promise.all([
     loadFeaturesStrict(FEATURES_DIR),
     collectSrcFiles("src"),
-    collectAdrs("docs/decisions"),
+    collectAdrs(resolve(ROOT, "docs/decisions")),
   ])
   return runAudit({ features, srcFiles, adrs })
 }
@@ -798,13 +835,25 @@ async function pathExists(p: string): Promise<boolean> {
 
 async function adrExists(padded: string): Promise<boolean> {
   // docs/decisions/NNNN-*.md — check by listing.
-  const dir = "docs/decisions"
+  //
+  // Two defects lived here at once. The directory was cwd-relative, so from any
+  // working directory but the repo root the listing failed; and the `catch`
+  // returned `false`, which reports "could not read the decisions directory" as
+  // "that ADR does not exist". Together they turned every evidence reference into
+  // a missing-ADR error — 726 of them — while the repo was untouched.
+  //
+  // Anchored on ROOT, and an unreadable decisions directory now THROWS: a
+  // catalogue check that cannot reach the decisions has no verdict to give.
+  const dir = resolve(ROOT, "docs/decisions")
   let entries: string[]
   try {
     const { readdir } = await import("node:fs/promises")
     entries = await readdir(dir)
-  } catch {
-    return false
+  } catch (err) {
+    throw new Error(
+      `feature catalog: cannot read ${dir} — an unreachable decisions directory is ` +
+        `not an absent ADR. (${err instanceof Error ? err.message : String(err)})`,
+    )
   }
   return entries.some((e) => e.startsWith(`${padded}-`) && e.endsWith(".md"))
 }
@@ -1379,7 +1428,11 @@ async function cmdSurfaceApply(argv: string[]): Promise<void> {
 }
 
 async function main(): Promise<void> {
-  const argv = process.argv.slice(2)
+  // `--repo-root <abs>` is consumed at module load (see resolveRepoRoot) and is
+  // stripped here so per-command arg validators never see it as an unknown flag.
+  const raw = process.argv.slice(2)
+  const rootAt = raw.indexOf("--repo-root")
+  const argv = rootAt === -1 ? raw : raw.filter((_, i) => i !== rootAt && i !== rootAt + 1)
   const cmd = argv[0]
   const rest = argv.slice(1)
   switch (cmd) {
