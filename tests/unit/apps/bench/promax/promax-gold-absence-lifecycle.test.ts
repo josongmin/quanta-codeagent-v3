@@ -117,27 +117,39 @@ class FakeBox {
     return false
   }
 
+  /**
+   * The `test !` family, in the order the shell script relies on.
+   *
+   * Split out of `run` verbatim (complexity 22 → under the ceiling); the ORDER is
+   * load-bearing and the comments below say why, so the three branches move
+   * together rather than being interleaved with the filesystem verbs. Returns
+   * `null` when the command is not a `test !`, so `run`'s fall-through is
+   * unchanged.
+   */
+  private runTestNot(verb: string, argv: readonly string[]): SpawnResult | null {
+    if (verb !== "test !") return null
+    // `test ! -d P -o -r P` — "if it exists it must be READABLE". This box has
+    // no permission model, so every path it knows is readable: exit 0. Matched
+    // BEFORE the absence gate, because a bare `verb === "test !"` read it as an
+    // absence check on the CAMPAIGN root and refused every bootstrap.
+    if (argv.includes("-o") && (argv.includes("-x") || argv.includes("-r"))) return ok()
+    // `test ! -L X` — "X is not a symlink". This box has no symlinks, so it is
+    // always true. Falling through to the absence branch below read it as
+    // "X does not exist" and refused every bootstrap on the campaign root.
+    if (argv[2] === "-L") return ok()
+    // `test ! -e X [-a ! -L X]` — exit 1 when X EXISTS. This is the whole
+    // absence gate; the `-L` half refuses a symlink standing in for the tree,
+    // which this box models as ordinary existence.
+    return { code: this.exists(argv[3] ?? "") ? 1 : 0, stdout: "", stderr: "" }
+  }
+
   run(rendered: string): SpawnResult {
     assertNoSpend(rendered)
     this.commands.push(rendered)
     const argv = unquote(rendered)
     const verb = argv.slice(0, 2).join(" ")
-    // `test ! -d P -o -r P` — "if it exists it must be READABLE". This box has
-    // no permission model, so every path it knows is readable: exit 0. Matched
-    // BEFORE the absence gate, because a bare `verb === "test !"` read it as an
-    // absence check on the CAMPAIGN root and refused every bootstrap.
-    if (verb === "test !" && argv.includes("-o") && (argv.includes("-x") || argv.includes("-r"))) {
-      return ok()
-    }
-    // `test ! -L X` — "X is not a symlink". This box has no symlinks, so it is
-    // always true. Falling through to the absence branch below read it as
-    // "X does not exist" and refused every bootstrap on the campaign root.
-    if (verb === "test !" && argv[2] === "-L") return ok()
-    // `test ! -e X [-a ! -L X]` — exit 1 when X EXISTS. This is the whole
-    // absence gate; the `-L` half refuses a symlink standing in for the tree,
-    // which this box models as ordinary existence.
-    if (verb === "test !")
-      return { code: this.exists(argv[3] ?? "") ? 1 : 0, stdout: "", stderr: "" }
+    const testNot = this.runTestNot(verb, argv)
+    if (testNot !== null) return testNot
     if (verb === "mkdir -p") return this.mkdir(argv[2] ?? "")
     // `mkdir <x>` WITHOUT `-p` — the atomic create. It fails when the path is
     // already occupied, which is what makes it a refusal rather than a probe.
