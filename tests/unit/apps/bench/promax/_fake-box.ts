@@ -68,6 +68,12 @@ const CASES: ReadonlyArray<{
   readonly when: (cmd: string) => boolean
   readonly reply: (cmd: string, opts: FakeBoxOpts) => Reply
 }> = [
+  // The liveness probe, modelled explicitly. `pgrep … && echo ALIVE` exits 1
+  // with NO output when the agent is gone — the default here, since these
+  // fixtures grade after patch-gen. Leaving it to the catch-all `ok()` produced
+  // exit 0 with empty stdout, a shape the real command cannot emit, and the
+  // classifier now (correctly) refuses it.
+  { when: (c) => c.includes("pgrep"), reply: () => fail(1) },
   { when: (c) => c.includes('printf %s "$HOME"'), reply: () => ok("/home/ubuntu") },
   { when: (c) => c.includes("--version"), reply: () => ok("Python 3.11.14\n") },
   {

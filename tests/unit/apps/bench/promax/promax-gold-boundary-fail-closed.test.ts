@@ -18,7 +18,13 @@ import {
   buildProMaxBootstrapSpec,
 } from "@/apps/bench/harness/promax/evaluator-bootstrap"
 import { parseProMaxImageProvenance } from "@/apps/bench/harness/promax/image-provenance"
+import { familyRemoteBootstrap } from "@/apps/bench/profiles/bootstrap"
 import { renderBootstrapCommand } from "@/apps/bench/remote/box-session/family-bootstrap-exec"
+import { runFamilyBoxGrade } from "@/apps/bench/remote/box-session/family-box-grade"
+import { DEFAULT_CHUNK_PATHS } from "@/apps/bench/remote/box-session/types"
+import { resolveBenchRunConfig } from "@/apps/bench/run-config"
+import type { Reply } from "./_fake-box"
+import { fakeBox } from "./_fake-box"
 
 const temps: string[] = []
 const sandbox = (): { root: string; campaign: string; checkout: string } => {
@@ -151,6 +157,128 @@ describe("image provenance cannot be forged from the golden file", () => {
       expect(r.images).toEqual([
         { instanceId: "a-1", imageName: "repo/img:a-1", repoDigest: D("a") },
       ])
+  })
+})
+
+/**
+ * A PROBE THAT COULD NOT RUN IS NOT AN ANSWER — the liveness half.
+ *
+ * `pgrep -f … >/dev/null && echo ALIVE` prints ALIVE (0) when the agent is up
+ * and nothing (1) when it is gone. Every OTHER exit — 127 when pgrep is not
+ * installed, 2 or 3 when it fails — also prints nothing, and the classifier
+ * special-cased only ssh's 255. So a broken probe read as "the agent is gone"
+ * and the answer key was materialized beside a process nobody had accounted for.
+ *
+ * The same file already refuses `pkill` exit 127, and the grader-container
+ * probe was rewritten for exactly this rule. This is the one the boundary rests
+ * on, and it was the one left open.
+ */
+describe("the liveness probe fails closed", () => {
+  const bootstrap = () =>
+    familyRemoteBootstrap(resolveBenchRunConfig({ argvFamily: "promax", env: {} }))
+
+  const gradeWithProbe = async (probe: Reply): Promise<{ issued: string[]; error?: string }> => {
+    const issued: string[] = []
+    const box = fakeBox({
+      predictions: `${JSON.stringify({ instance_id: "a-1", model_patch: "P" })}\n`,
+      passRate: JSON.stringify([
+        {
+          instance_id: "a-1",
+          language: "c",
+          passed: true,
+          model: {
+            final_result: "success",
+            raw_reason: "success",
+            returncode: 0,
+            script_exit_code: 0,
+          },
+          golden: {
+            final_result: "success",
+            raw_reason: "success",
+            returncode: 0,
+            script_exit_code: 0,
+          },
+        },
+      ]),
+      imageProvenance: `a-1\timg:a-1\timg@sha256:${"a".repeat(64)}\n`,
+    })
+    let error: string | undefined
+    try {
+      await runFamilyBoxGrade({
+        ssh: async (cmd: string) => {
+          issued.push(cmd)
+          return cmd.includes("pgrep") ? probe : await box.ssh(cmd)
+        },
+        log: () => {},
+        family: "promax",
+        bootstrap: bootstrap(),
+        paths: DEFAULT_CHUNK_PATHS,
+        assignedInstanceIds: ["a-1"],
+        sleep: async () => {},
+      })
+    } catch (e) {
+      error = e instanceof Error ? e.message : String(e)
+    }
+    return error === undefined ? { issued } : { issued, error }
+  }
+
+  const materializedGold = (issued: readonly string[]): boolean =>
+    issued.some((c) => c.includes("'git'") && c.includes("init"))
+
+  test.each([
+    ["pgrep is not installed", 127],
+    ["pgrep failed with a usage error", 2],
+    ["pgrep could not read the process table", 3],
+  ])("🔴 %s ⇒ REFUSE, not 'the agent is gone'", async (_label, code) => {
+    const out = await gradeWithProbe({ code, stdout: "", stderr: "" })
+    expect(out.error, `exit ${code} was read as a clean agent exit`).toBeDefined()
+    expect(materializedGold(out.issued), "the answer key was materialized anyway").toBe(false)
+  })
+
+  test("PAIRED CONTROL: a genuine miss (exit 1, no output) still means gone", async () => {
+    const out = await gradeWithProbe({ code: 1, stdout: "", stderr: "" })
+    expect(out.error).toBeUndefined()
+    expect(materializedGold(out.issued), "a clean box never got its checkout").toBe(true)
+  })
+})
+
+/**
+ * …and the provenance half. A program that could not RUN is not "the box
+ * reported no image": that misfiles a completed, paid grade as an image fault,
+ * which is the exact shape the quoting fix removed one cause of.
+ */
+describe("a provenance run that could not execute is not an image fault", () => {
+  test.each([
+    ["the interpreter is missing", 127],
+    ["the program raised", 1],
+  ])("🔴 %s ⇒ the error names the program, not the images", async (_label, code) => {
+    const box = fakeBox({
+      predictions: `${JSON.stringify({ instance_id: "a-1", model_patch: "P" })}\n`,
+      passRate: "[]",
+      override: (cmd) =>
+        cmd.includes("image-provenance.py") && !cmd.startsWith("cat >")
+          ? { code, stdout: "", stderr: "Traceback…" }
+          : undefined,
+    })
+    let message = ""
+    try {
+      await runFamilyBoxGrade({
+        ssh: box.ssh,
+        log: () => {},
+        family: "promax",
+        bootstrap: familyRemoteBootstrap(resolveBenchRunConfig({ argvFamily: "promax", env: {} })),
+        paths: DEFAULT_CHUNK_PATHS,
+        assignedInstanceIds: ["a-1"],
+        sleep: async () => {},
+      })
+    } catch (e) {
+      message = e instanceof Error ? e.message : String(e)
+    }
+    expect(message, "the run did not refuse at all").not.toBe("")
+    expect(message, "a failed program was reported as 'the box reported no image'").not.toMatch(
+      /reported no image for it at all/,
+    )
+    expect(message).toMatch(new RegExp(`${code}|provenance program`))
   })
 })
 

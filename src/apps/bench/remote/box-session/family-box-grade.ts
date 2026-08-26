@@ -181,7 +181,23 @@ const classifyExitProbe = (
         `REFUSING to materialize the answer key on it. (${probe.stderr.trim() || "ssh exit 255"})`,
     }
   }
-  return probe.stdout.trim() === "ALIVE" ? { kind: "alive" } : { kind: "gone" }
+  if (probe.stdout.trim() === "ALIVE") return { kind: "alive" }
+  // `pgrep … >/dev/null && echo ALIVE` exits 0 with ALIVE when the agent is up
+  // and 1 with nothing when it is gone. EVERY other exit — 127 when pgrep is not
+  // installed, 2 or 3 when it fails — also prints nothing, and reading that as
+  // "gone" materializes the answer key beside a process nobody accounted for.
+  // The negative has to be an ANSWER, not merely the absence of one; this file
+  // already applies that rule to `pkill`'s 127 and the grader-container probe.
+  if (probe.code !== 1) {
+    return {
+      kind: "refuse",
+      reason:
+        `[full-remote] ${family}: the liveness probe could not run (exit ${probe.code}` +
+        `${probe.stderr.trim() === "" ? "" : `: ${probe.stderr.trim()}`}), so whether an agent ` +
+        "is still running could not be established. REFUSING to materialize the answer key on it.",
+    }
+  }
+  return { kind: "gone" }
 }
 
 /**
@@ -561,6 +577,17 @@ const captureImageProvenance = async (
       `[full-remote] ${input.family}: the box became unreachable while recording which images ` +
         `the grade ran against. REFUSING to report that as an image fault. ` +
         `(${answered.stderr.trim() || "ssh exit 255"})`,
+    )
+  }
+  // A program that could not RUN is not "the box reported no image". Reading a
+  // non-zero exit's empty stdout as data misfiles a completed, paid grade as an
+  // image fault — the same collapse the quoting fix removed one cause of, left
+  // standing in its structural form.
+  if (answered.code !== 0) {
+    throw new Error(
+      `[full-remote] ${input.family}: the image-provenance program failed on the box ` +
+        `(exit ${answered.code}): ${answered.stderr.trim() || answered.stdout.trim() || "no output"}. ` +
+        "REFUSING to report that as an image fault — the grade itself already succeeded.",
     )
   }
   const parsed = parseProMaxImageProvenance(answered.stdout, assigned)

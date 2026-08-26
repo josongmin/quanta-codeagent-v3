@@ -136,7 +136,22 @@ const createRelaunchAccumulator = (): RelaunchAccumulator => ({
  * reported as "7/7 instance(s) lost (spot reclaim / ssh-255)", and bought a
  * second box to hit the identical refusal.
  */
-const isDeterministicFailure = (err: unknown): boolean => err instanceof FamilyBootstrapError
+/**
+ * Is this a refusal a fresh box would repeat verbatim?
+ *
+ * Walks the CAUSE CHAIN. `finalizeFullRemoteRun` combines a failed run with a
+ * failed cleanup into one wrapper, so testing only the outer class meant a
+ * throttled lease release could turn a permanent configuration refusal back
+ * into "box loss" — a second box bought to learn the same thing, reported under
+ * a cause nobody established.
+ */
+const isDeterministicFailure = (err: unknown): boolean => {
+  for (let cur: unknown = err, depth = 0; cur !== undefined && cur !== null && depth < 8; depth++) {
+    if (cur instanceof FamilyBootstrapError) return true
+    cur = cur instanceof Error ? cur.cause : undefined
+  }
+  return false
+}
 
 const runRelaunchAttempt = async (
   makeBackend: (instanceIds: readonly string[]) => { run: () => Promise<FullRemoteResult> },
@@ -466,16 +481,24 @@ const releaseFullRemoteResources = async (args: {
   return cleanupErr
 }
 
-const finalizeFullRemoteRun = (args: {
+/**
+ * Collapse a run's outcome into one value — EXPORTED so the cause-preservation
+ * claim below is testable without provisioning a box.
+ */
+export const finalizeFullRemoteRun = (args: {
   readonly result: FullRemoteResult | undefined
   readonly primaryErr: unknown
   readonly cleanupErr: unknown
 }): FullRemoteResult => {
   if (args.primaryErr !== undefined) {
     if (args.cleanupErr !== undefined) {
+      // `cause` carries the PRIMARY error, not decoration: the retry decision
+      // classifies on it, and a wrapper that drops it converts a permanent
+      // refusal into a box-loss retry.
       throw new Error(
         `[full-remote] run failed and cleanup failed: primary=${errMessage(args.primaryErr)}; ` +
           `cleanup=${errMessage(args.cleanupErr)}`,
+        { cause: args.primaryErr },
       )
     }
     throw args.primaryErr

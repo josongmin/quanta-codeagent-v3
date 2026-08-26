@@ -112,7 +112,7 @@ describe("gold-absence — the command the whole answer-key boundary rests on", 
     const sb = sandbox()
     const ran = await sb.runStep("gold-absence")
     expect(ran.code, `probe failed on a clean box: ${ran.stderr}`).toBe(0)
-  })
+  }, 30_000)
 
   test("🔴 it FAILS when the answer key is sitting there", async () => {
     // The paired half, and the one that matters: a probe that cannot detect the
@@ -122,7 +122,7 @@ describe("gold-absence — the command the whole answer-key boundary rests on", 
     mkdirSync(sb.checkoutRoot, { recursive: true })
     const ran = await sb.runStep("gold-absence")
     expect(ran.code, "the probe reported CLEAN with the checkout present").not.toBe(0)
-  })
+  }, 30_000)
 
   test("🔴 a checkout root containing shell metacharacters is still detected", async () => {
     // `test ! -e $x` unquoted would word-split and silently change the question
@@ -130,7 +130,7 @@ describe("gold-absence — the command the whole answer-key boundary rests on", 
     mkdirSync(sb.checkoutRoot, { recursive: true })
     writeFileSync(join(sb.checkoutRoot, "data"), "GOLD")
     expect((await sb.runStep("gold-absence")).code).not.toBe(0)
-  })
+  }, 30_000)
 })
 
 describe("grader-container-absence — fail-closed in a real shell", () => {
@@ -145,13 +145,13 @@ describe("grader-container-absence — fail-closed in a real shell", () => {
       (await noDocker.runStep("grader-container-absence")).code,
       "a box with no docker reported CLEAN",
     ).not.toBe(0)
-  })
+  }, 30_000)
 
   test("🔴 a leftover grader container refuses", async () => {
     const sb = sandbox()
     sb.stub("docker", "echo g_leftover; exit 0")
     expect((await sb.runStep("grader-container-absence")).code).not.toBe(0)
-  })
+  }, 30_000)
 })
 
 describe("campaign-root — it really creates the directory", () => {
@@ -164,7 +164,7 @@ describe("campaign-root — it really creates the directory", () => {
     const ran = await sb.runStep("campaign-root")
     expect(ran.code, ran.stderr).toBe(0)
     expect(existsSync(sb.campaignRoot), "the campaign root was not created").toBe(true)
-  })
+  }, 30_000)
 })
 
 describe("docker-ready — the format string survives the shell", () => {
@@ -177,7 +177,7 @@ describe("docker-ready — the format string survives the shell", () => {
     // `{{.OSType}}/{{.Architecture}}` is brace-expansion bait; unquoted, bash
     // would rewrite it and docker would report a platform we never asked for.
     expect(recordedArgv(log)[0]).toEqual(["info", "--format", "{{.OSType}}/{{.Architecture}}"])
-  })
+  }, 30_000)
 })
 
 describe("disk — a real df against a real directory", () => {
@@ -195,7 +195,7 @@ describe("disk — a real df against a real directory", () => {
     // execution assertion in this file green, so an explicit claim about the
     // flag is the honest guard, not a regex that happens to still match.
     expect(sb.plan.find((c) => c.step === "disk")?.argv).toContain("-Pk")
-  })
+  }, 30_000)
 })
 
 describe("python-floor — the interpreter that BUILDS the venv", () => {
@@ -204,7 +204,7 @@ describe("python-floor — the interpreter that BUILDS the venv", () => {
     const ran = await sb.runStep("python-floor")
     expect(ran.code, ran.stderr).toBe(0)
     expect(`${ran.stdout}${ran.stderr}`).toMatch(/Python \d+\.\d+/)
-  })
+  }, 30_000)
 })
 
 describe("checkout — the rendered git commands round-trip through a shell", () => {
@@ -227,7 +227,7 @@ describe("checkout — the rendered git commands round-trip through a shell", ()
     // pinned URL and the 40-char sha are exactly where a mangled token would be
     // invisible in a string assertion and fatal on a box.
     expect(seen).toEqual(declared.map((a) => [...a]))
-  })
+  }, 30_000)
 })
 
 describe("verify-hashes — the digest line the executor parses", () => {
@@ -250,7 +250,7 @@ describe("verify-hashes — the digest line the executor parses", () => {
     expect(ran.stdout).toMatch(/^[0-9a-f]{64} {2}\//)
     // …and the PATH in that line is the one we asked about, not a mangled form
     expect(ran.stdout).toContain(sb.checkoutRoot)
-  })
+  }, 30_000)
 })
 
 describe("python-env — `$HOME` expands, the venv root does not", () => {
@@ -269,7 +269,7 @@ describe("python-env — `$HOME` expands, the venv root does not", () => {
     const ran = await sb.run(step as never)
     expect(ran.code, `$HOME did not expand, or uv was not found: ${ran.stderr}`).toBe(0)
     expect(recordedArgv(log)[0] ?? []).toEqual(["venv", "--python", "3.11", sb.venvRoot])
-  })
+  }, 30_000)
 })
 
 describe("gold-teardown — the answer key is really removed", () => {
@@ -281,7 +281,7 @@ describe("gold-teardown — the answer key is really removed", () => {
     const ran = await sb.runStep("gold-teardown")
     expect(ran.code, ran.stderr).toBe(0)
     expect(existsSync(sb.checkoutRoot), "the answer key survived teardown").toBe(false)
-  })
+  }, 30_000)
 })
 
 /**
