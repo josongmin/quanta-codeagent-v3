@@ -27,6 +27,7 @@ import { describe, expect, test } from "bun:test"
 
 import {
   armsDiffer,
+  classify,
   parseCounters,
   parseParityArgs,
   shardOf,
@@ -38,6 +39,16 @@ describe("cwd-parity harness", () => {
       expect(parseParityArgs(["tests/unit/_arch"])).toEqual({
         shardSpec: undefined,
         roots: ["tests/unit/_arch"],
+      })
+    })
+
+    test("🔴 --shard=N/M (bun's own documented form) is honoured", () => {
+      // Matching only the exact `--shard` token dropped the equals form as an
+      // unknown flag and ran the FULL set while reporting as sharded — the same
+      // silently-broadens-scope class as the off-by-one above.
+      expect(parseParityArgs(["--shard=1/8", "tests/unit"])).toEqual({
+        shardSpec: "1/8",
+        roots: ["tests/unit"],
       })
     })
 
@@ -62,6 +73,19 @@ describe("cwd-parity harness", () => {
   })
 
   describe("counters", () => {
+    test("🔴 the LAST counter line wins — an earlier one must not mask the tail", () => {
+      // Real failure, found by audit: `exec` returns the FIRST match, so any
+      // counter-shaped line in the body — a test that prints one, a nested
+      // `bun test` — masked the real result. Truth here is 0 pass / 1 fail; the
+      // old parser answered `{ok: true, pass: 1, fail: 0}` and the comparison
+      // then reported no difference at all.
+      expect(parseCounters("noise\n 1 pass\n 0 fail\nmore\n 0 pass\n 1 fail\n")).toEqual({
+        ok: false,
+        pass: 0,
+        fail: 1,
+      })
+    })
+
     test("🔴 an arm that never ran is -1, NOT a clean zero", () => {
       // The distinction the 507-finding run needed and did not have: bun failing
       // to open the file prints no counter line, and treating that as `0 fail`
@@ -92,9 +116,46 @@ describe("cwd-parity harness", () => {
     })
 
     test("a differing pass count alone does not count — skips drift", () => {
-      // Only the OUTCOME is compared. Pinning pass counts would make every
+      // Only the OUTCOME is compared. Pinning raw pass counts would make every
       // conditionally-skipped test look cwd-dependent.
       expect(armsDiffer({ ok: true, pass: 4, fail: 0 }, { ok: true, pass: 5, fail: 0 })).toBe(false)
+    })
+
+    test("🔴 a file that could not LOAD in one arm differs, even with a failing test", () => {
+      // The previous version of this file pinned the OPPOSITE as intended
+      // behaviour, and an adversarial audit caught it. bun folds an unhandled
+      // module-scope error into `1 fail`, so a file that loads and fails one test
+      // (`1p/1f`) was indistinguishable from one that never loaded at all
+      // (`0p/1f`) — a silent false negative on the severest cwd defect there is.
+      expect(armsDiffer({ ok: false, pass: 1, fail: 1 }, { ok: false, pass: 0, fail: 1 })).toBe(
+        true,
+      )
+    })
+  })
+
+  describe("verdict", () => {
+    const OK = { ok: true, pass: 4, fail: 0 } as const
+    const BAD = { ok: false, pass: 0, fail: 1 } as const
+
+    test("no difference in either pair is not a finding", () => {
+      expect(classify(OK, OK, OK, OK)).toBeNull()
+    })
+
+    test("a difference that does not reproduce is FLAKY, not a finding", () => {
+      expect(classify(OK, BAD, OK, OK)).toBe("flaky")
+    })
+
+    test("🔴 the SAME arm must fail both times — a side switch is coincidence", () => {
+      // The audit's sharpest case. An alternating fixture with zero cwd
+      // involvement differs in both pairs, and the old verdict called that
+      // reproduction. It is not: the failing arm swapped sides.
+      expect(classify(OK, BAD, BAD, OK)).toBe("flaky")
+      expect(classify(OK, BAD, OK, BAD)).toBe("cwd-dependent")
+    })
+
+    test("both arms failing both times is broken, not cwd-dependent", () => {
+      const BOTH = { ok: false, pass: 3, fail: 1 } as const
+      expect(classify(BAD, BOTH, BAD, BOTH)).toBe("broken-both")
     })
   })
 

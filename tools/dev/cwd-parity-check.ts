@@ -45,6 +45,9 @@ import { assertPreloadsMatchBunfig, expandTestFiles } from "./sandboxed-test"
 const REPO_ROOT = join(import.meta.dir, "..", "..")
 const PRELOADS = ["tests/preload-clean-source-js.ts", "tests/setup.ts"] as const
 
+/** Generous — the slowest real file here is ~12s cold — but finite. */
+const ARM_TIMEOUT_MS = 120_000
+
 export type ArmResult = { readonly ok: boolean; readonly pass: number; readonly fail: number }
 
 /**
@@ -56,17 +59,35 @@ export type ArmResult = { readonly ok: boolean; readonly pass: number; readonly 
  * arm. `ok` therefore requires a counter line to have been present at all.
  */
 export const parseCounters = (output: string): ArmResult => {
-  const pass = Number(/^\s*(\d+)\s+pass\s*$/m.exec(output)?.[1] ?? "-1")
-  const fail = Number(/^\s*(\d+)\s+fail\s*$/m.exec(output)?.[1] ?? "-1")
+  // The LAST counter line, not the first. `exec` returns the first match, so any
+  // earlier counter-shaped line in the body — a test that prints one, an inner
+  // `bun test` — masked the real tail. Measured on a hand-built arm whose truth
+  // was `0 pass / 1 fail`: the parser returned `{ok:true, pass:1, fail:0}`, and
+  // `armsDiffer` then reported no difference. A false NEGATIVE on exactly the
+  // class this instrument exists to catch.
+  const last = (re: RegExp): string | undefined => [...output.matchAll(re)].at(-1)?.[1]
+  const pass = Number(last(/^\s*(\d+)\s+pass\s*$/gm) ?? "-1")
+  const fail = Number(last(/^\s*(\d+)\s+fail\s*$/gm) ?? "-1")
   if (pass < 0 && fail < 0) return { ok: false, pass: -1, fail: -1 }
   const p = Math.max(pass, 0)
   const f = Math.max(fail, 0)
   return { ok: f === 0 && p > 0, pass: p, fail: f }
 }
 
-/** True when the two arms disagree about the outcome. Counts may drift on skips. */
+/**
+ * True when the two arms disagree about the outcome.
+ *
+ * The pass count is compared through `ran`, not directly. Comparing `ok` and
+ * `fail` alone let a file that could not LOAD in one arm pass unnoticed whenever
+ * it also had a failing test: bun folds an unhandled module-scope error into
+ * `1 fail`, so `{pass:1, fail:1}` and `{pass:0, fail:1}` looked identical.
+ * Comparing raw pass counts instead would make every conditionally-skipped test
+ * look cwd-dependent, so what is compared is whether ANY test ran at all — which
+ * is the load failure, without the skip noise.
+ */
+const ran = (r: ArmResult): boolean => r.pass > 0
 export const armsDiffer = (a: ArmResult, b: ArmResult): boolean =>
-  a.ok !== b.ok || a.fail !== b.fail
+  a.ok !== b.ok || a.fail !== b.fail || ran(a) !== ran(b)
 
 /** `1/8` → files whose index mod 8 is 0. Shape mirrors bun's own `--shard`. */
 export const shardOf = <T>(xs: readonly T[], spec: string | undefined): readonly T[] => {
@@ -91,10 +112,15 @@ export const shardOf = <T>(xs: readonly T[], spec: string | undefined): readonly
 export const parseParityArgs = (
   argv: readonly string[],
 ): { readonly shardSpec: string | undefined; readonly roots: readonly string[] } => {
+  // `--shard=1/8` as well as `--shard 1/8`. The equals form is what `bun test
+  // --help` documents, and matching only the exact token meant it was dropped as
+  // an unknown flag and the run silently went UNSHARDED — the same
+  // silently-broadens-scope class as the off-by-one this function exists to fix.
+  const inline = argv.find((a) => a.startsWith("--shard="))
   const shardAt = argv.indexOf("--shard")
   const valueAt = shardAt === -1 ? -1 : shardAt + 1
   return {
-    shardSpec: shardAt === -1 ? undefined : argv[shardAt + 1],
+    shardSpec: inline?.slice("--shard=".length) ?? (shardAt === -1 ? undefined : argv[shardAt + 1]),
     roots: argv.filter((a, i) => !a.startsWith("--") && i !== valueAt),
   }
 }
@@ -105,14 +131,40 @@ const runArm = (file: string, cwd: string): ArmResult => {
     cwd,
     stdout: "pipe",
     stderr: "pipe",
-    env: { ...process.env, FORCE_COLOR: "0" },
+    // PWD is overridden, not inherited: bun's per-test timeout does not cover a
+    // module-scope hang, and a stale PWD pointing at the repo root is a second
+    // way for the sandbox arm to resolve as if it were the root arm.
+    env: { ...process.env, FORCE_COLOR: "0", PWD: cwd },
+    // A cwd-dependent HANG is the most severe form of what this measures and was
+    // the one form it could not report: with no timeout the harness waited
+    // forever, produced no verdict, and the interrupt skipped the `finally` that
+    // removes the sandbox.
+    timeout: ARM_TIMEOUT_MS,
   })
   return parseCounters(`${proc.stdout.toString()}${proc.stderr.toString()}`)
 }
 
 type Verdict = "cwd-dependent" | "flaky" | "broken-both"
 
-const classify = (
+/**
+ * Which arm failed, or neither.
+ *
+ * The verdict needs the SIDE, not just the fact of a difference. Without it an
+ * alternating fixture — failing on invocations 0 and 3, with zero cwd
+ * involvement — reproduces "a difference" in both pairs and was reported
+ * cwd-dependent while the failing arm SWITCHED SIDES between them. Measured on a
+ * coinflip fixture over 20 runs: 15% cwd-dependent, 30% flaky, 55% clean, where
+ * the arithmetic says 25/25/50 — i.e. a quarter of pure coincidences were being
+ * reported as findings.
+ */
+const failingSide = (root: ArmResult, sbx: ArmResult): "root" | "sandbox" | "both" | "neither" => {
+  if (!root.ok && !sbx.ok) return "both"
+  if (!root.ok) return "root"
+  if (!sbx.ok) return "sandbox"
+  return "neither"
+}
+
+export const classify = (
   root: ArmResult,
   sbx: ArmResult,
   root2: ArmResult,
@@ -122,7 +174,13 @@ const classify = (
   const second = armsDiffer(root2, sbx2)
   if (!first && !second) return null
   if (first !== second) return "flaky"
-  if (!root.ok && !sbx.ok) return "broken-both"
+  if (!first && !second) return null
+  // Both pairs differ. It only reproduces if the SAME side failed both times —
+  // otherwise the two differences are unrelated events.
+  const a = failingSide(root, sbx)
+  const b = failingSide(root2, sbx2)
+  if (a !== b) return "flaky"
+  if (a === "both") return "broken-both"
   return "cwd-dependent"
 }
 
