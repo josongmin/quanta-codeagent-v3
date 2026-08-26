@@ -51,9 +51,16 @@ function* walk(dir: string): Generator<string> {
   }
 }
 
-const scanRawGates = (): { total: number; byFile: Record<string, number> } => {
+/** Anchored on THIS file — `walk("src")` resolved against the ambient cwd.
+ *  Found by the paired control: 6 pass at the repo root, 5 pass / 1 fail from a
+ *  foreign working directory. */
+const REPO_ROOT = join(import.meta.dir, "..", "..")
+
+const scanRawGates = (): { total: number; byFile: Record<string, number>; files: number } => {
   const byFile: Record<string, number> = {}
-  for (const file of walk("src")) {
+  let files = 0
+  for (const file of walk(join(REPO_ROOT, "src"))) {
+    files++
     if (file.endsWith("shared/env-flag.ts")) continue // the SSOT lives here
     let n = 0
     for (const line of readFileSync(file, "utf8").split("\n")) {
@@ -63,7 +70,7 @@ const scanRawGates = (): { total: number; byFile: Record<string, number> } => {
     if (n > 0) byFile[file.replace(/^src\//, "")] = n
   }
   const total = Object.values(byFile).reduce((a, b) => a + b, 0)
-  return { total, byFile }
+  return { total, byFile, files }
 }
 
 /** The frozen ceiling. The jun-7 burn-down drove ALL scattered raw gate
@@ -112,7 +119,15 @@ describe("gate-vocabulary SSOT — canonical readers exist", () => {
 
 describe("gate-vocabulary ratchet — raw comparisons only ever decrease", () => {
   test(`raw QUANTA gate comparisons in src/ stay <= ${RAW_GATE_CEILING} (burn-down)`, () => {
-    const { total, byFile } = scanRawGates()
+    const { total, byFile, files } = scanRawGates()
+    // Anti-vacuity, and here it is the ONLY possible one. The ceiling is ZERO —
+    // the jun-7 burn-down drove every raw gate comparison out — so `total` cannot
+    // distinguish "clean" from "the walk read nothing": both are 0. The count of
+    // files actually READ is the only signal that separates them.
+    expect(
+      files,
+      "the walk read no source files — a ceiling of 0 passes over nothing",
+    ).toBeGreaterThan(2500)
     if (total > RAW_GATE_CEILING) {
       const offenders = Object.entries(byFile)
         .sort((a, b) => b[1] - a[1])

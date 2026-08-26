@@ -77,18 +77,31 @@ const scanFileDangerZone = (file: string, now: number): DangerHit[] => {
   return hits
 }
 
-const scanDangerZone = (now: number): DangerHit[] => {
+/** Anchored on THIS file — `walk("tests")` resolved against the ambient cwd.
+ *  Found by the paired control in `tools/dev/cwd-parity-check.ts`: 3 pass at the
+ *  repo root, 2 pass / 1 fail from a foreign working directory. */
+const REPO_ROOT = join(import.meta.dir, "..", "..")
+
+const scanDangerZone = (now: number): { hits: DangerHit[]; files: number } => {
   const hits: DangerHit[] = []
-  for (const file of walk("tests")) {
+  let files = 0
+  for (const file of walk(join(REPO_ROOT, "tests"))) {
     if (file.endsWith(SELF)) continue
+    files++
     hits.push(...scanFileDangerZone(file, now))
   }
-  return hits
+  return { hits, files }
 }
 
 describe("no time-bomb auth fixtures (regression guard)", () => {
   test(`every test 'expires_at' is far-future (>=${FAR_FUTURE_YEAR}) or already past — never a latent time-bomb`, () => {
-    const hits = scanDangerZone(Date.now())
+    const { hits, files } = scanDangerZone(Date.now())
+    // Anti-vacuity. The verdict is `hits.length === 0`, so a walk that reads
+    // NOTHING produces the same green as a clean tree — "no time bombs" and
+    // "I never looked" are the same value without this.
+    expect(files, "the walk read no test files — the assertion below is vacuous").toBeGreaterThan(
+      2000,
+    )
     if (hits.length > 0) {
       const detail = hits.map((h) => `  ${h.file}:${h.line}  expires_at:"${h.date}"`).join("\n")
       throw new Error(
