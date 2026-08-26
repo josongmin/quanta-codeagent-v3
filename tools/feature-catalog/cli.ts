@@ -340,8 +340,16 @@ async function collectSrcFiles(root = "src"): Promise<string[]> {
       entries = (await readdir(resolve(ROOT, dir), {
         withFileTypes: true,
       })) as unknown as import("node:fs").Dirent[]
-    } catch {
-      return
+    } catch (err) {
+      // `catch { return }` here silently shrank the corpus behind `orphanSrcFiles`:
+      // one unreadable subdirectory and every file under it counts as "referenced
+      // by a feature" because it was never seen at all.
+      throw new Error(
+        `feature catalog: cannot read ${resolve(ROOT, dir)} — an unreadable source ` +
+          `directory silently shrinks the orphan-source scan. (${
+            err instanceof Error ? err.message : String(err)
+          })`,
+      )
     }
     for (const e of entries) {
       const p = join(dir, e.name)
@@ -361,8 +369,21 @@ async function collectAdrs(dir: string = resolve(ROOT, "docs/decisions")): Promi
   let entries: string[]
   try {
     entries = await readdir(resolve(ROOT, dir))
-  } catch {
-    return []
+  } catch (err) {
+    // The sibling of `adrExists`, and it was missed when that one was fixed —
+    // same file, same directory, same collapse. `catch { return [] }` reports
+    // "the decisions directory could not be read" as "there are no ADRs", and
+    // `runAudit` then derives `orphanAdrs: 0` from it, so `fc lint` prints
+    // `ok — orphan Accepted ADRs=0`. Measured before the change: the real
+    // directory yields 572 records, an unreadable one yielded 0 and did not
+    // throw.
+    throw new Error(
+      `feature catalog: cannot read ${resolve(ROOT, dir)} — an unreachable decisions ` +
+        `directory is not an empty one; every downstream orphan verdict would be ` +
+        `derived from a scan that never happened. (${
+          err instanceof Error ? err.message : String(err)
+        })`,
+    )
   }
   const out: AdrRecord[] = []
   for (const name of entries) {
@@ -646,8 +667,16 @@ async function readDependsOn(path: string): Promise<string[]> {
   try {
     const text = await readFile(path, "utf8")
     raw = parseYaml(text)
-  } catch {
-    return []
+  } catch (err) {
+    // A file that cannot be read or parsed is NOT a feature with no dependencies.
+    // Collapsing the two made the dependency graph lose edges silently, and the
+    // reachability BFS that walks it then reported a smaller graph as a clean one.
+    throw new Error(
+      `feature catalog: cannot read dependencies from ${path} — an unreadable feature ` +
+        `is not a feature without dependencies. (${
+          err instanceof Error ? err.message : String(err)
+        })`,
+    )
   }
   if (!raw || typeof raw !== "object") return []
   const value = (raw as Record<string, unknown>).depends_on
