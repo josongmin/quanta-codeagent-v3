@@ -23,12 +23,24 @@ const ROOTS = ["src", "tests", "tools"] as const
  *  pattern-matched so a second one cannot slip in behind it. */
 const SELF = "tests/unit/test-fixtures-do-not-leak-tmp.test.ts"
 
+/** Under `tests/`, or a test file / `__tests__` module anywhere else. */
+const isTestAdjacent = (full: string): boolean =>
+  full.startsWith("tests/") || full.endsWith(".test.ts") || full.includes("/__tests__/")
+
 const testFiles = (dir: string, into: string[] = []): string[] => {
   for (const entry of readdirSync(dir)) {
     if (entry === "node_modules" || entry.startsWith(".")) continue
     const full = join(dir, entry)
     if (statSync(full).isDirectory()) testFiles(full, into)
-    else if (full.endsWith(".test.ts")) into.push(full)
+    // NOT just `*.test.ts`: the helper modules beside the tests are where the
+    // temp dirs are actually created — `_bootstrap-exec-harness.ts` owns every
+    // sandbox in the promax suite — and an exit hook planted there leaked 34
+    // directories with this guard green.
+    //
+    // But PRODUCTION code is out of scope: a real Node process does fire its
+    // exit hooks, so `src/apps/cli/**` using one is correct. Test-adjacent means
+    // anything under `tests/`, plus `*.test.ts` and `__tests__/**` elsewhere.
+    else if (full.endsWith(".ts") && isTestAdjacent(full)) into.push(full)
   }
   return into
 }
@@ -38,10 +50,59 @@ const testFiles = (dir: string, into: string[] = []): string[] => {
  * WHY in a comment that names it, and this very file discusses it in prose — a
  * raw text scan flagged all ten of them.
  */
-const stripComments = (src: string): string =>
-  src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/[^\n]*/g, "$1")
+/**
+ * Strip comments WITHOUT eating string literals. The naive form — two regexes
+ * over the raw text — treated `"/*"` inside a string as a comment opener and
+ * deleted everything up to the next `*` + `/`, which silently removed real code
+ * from the scan. A tiny scanner is the honest way; regex cannot see quoting.
+ */
+const stripComments = (src: string): string => {
+  let out = ""
+  let i = 0
+  let quote: string | null = null
+  while (i < src.length) {
+    const c = src[i] as string
+    if (quote !== null) {
+      out += c
+      if (c === "\\") {
+        out += src[i + 1] ?? ""
+        i += 2
+        continue
+      }
+      if (c === quote) quote = null
+      i += 1
+      continue
+    }
+    if (c === '"' || c === "'" || c === "`") {
+      quote = c
+      out += c
+      i += 1
+      continue
+    }
+    if (c === "/" && src[i + 1] === "/") {
+      while (i < src.length && src[i] !== "\n") i += 1
+      continue
+    }
+    if (c === "/" && src[i + 1] === "*") {
+      i += 2
+      while (i < src.length && !(src[i] === "*" && src[i + 1] === "/")) i += 1
+      i += 2
+      continue
+    }
+    out += c
+    i += 1
+  }
+  return out
+}
 
-const EXIT_HOOK = /process\.on\(\s*["']exit["']/
+/**
+ * Every way to register the hook, not just the spelling we happened to use.
+ * `process.once("exit")` has identical never-fires semantics, and so do
+ * `addListener` / `prependListener`; an audit planted each and the guard stayed
+ * green.
+ */
+const EXIT_HOOK =
+  /process\s*(\.\s*(on|once|addListener|prependListener|prependOnceListener)|\[\s*["'](on|once|addListener)["']\s*\])\s*\(\s*["`']exit["`']/
 
 describe("temp-dir cleanup is registered with the test runner", () => {
   test('no test file relies on `process.on("exit")`, which bun test never fires', () => {
@@ -58,6 +119,8 @@ describe("temp-dir cleanup is registered with the test runner", () => {
     // without this the guard passes just as well when the walk finds nothing
     const all = ROOTS.flatMap((root) => testFiles(root))
     expect(all.length).toBeGreaterThan(500)
+    // the helper modules are in scope too — that is where the temp dirs live
+    expect(all).toContain("tests/unit/apps/bench/promax/_bootstrap-exec-harness.ts")
     expect(all).toContain(SELF)
   })
 
@@ -65,10 +128,15 @@ describe("temp-dir cleanup is registered with the test runner", () => {
     const detect = (src: string) => EXIT_HOOK.test(stripComments(src))
     expect(detect('process.on("exit", () => rmSync(d))')).toBe(true)
     expect(detect("process.on('exit', cleanup)")).toBe(true)
+    expect(detect('process.once("exit", cleanup)')).toBe(true)
+    expect(detect('process.addListener("exit", cleanup)')).toBe(true)
+    expect(detect('process["on"]("exit", cleanup)')).toBe(true)
     expect(detect("afterAll(() => rmSync(d))")).toBe(false)
     // …and the comment-stripping does not become a blanket amnesty: a line that
     // merely FOLLOWS a comment is still code.
     expect(detect('// use afterAll, not process.on("exit")')).toBe(false)
     expect(detect('/* not process.on("exit") */\nprocess.on("exit", cleanup)')).toBe(true)
+    // …and a string literal containing comment punctuation is NOT a comment
+    expect(stripComments('const pattern = "/*"\nconst other = "*/"\n')).toContain("pattern")
   })
 })

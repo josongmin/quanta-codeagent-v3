@@ -94,6 +94,24 @@ describe("every declared bootstrap step is classified", () => {
     ).toEqual([])
   })
 
+  test("🔴 an exemption must state its price", () => {
+    // An empty string satisfied `Record<string, string>`, so a step could be
+    // moved out of EXECUTED — including `gold-absence`, the most safety-critical
+    // one — and its scenarios deleted, with every test still green.
+    for (const [step, reason] of Object.entries(NOT_EXECUTABLE)) {
+      expect(reason.trim().length, `"${step}" is exempted with no reason given`).toBeGreaterThan(20)
+    }
+  })
+
+  test("🔴 the steps the gold boundary rests on may NEVER be exempted", () => {
+    // A one-line edit to a table must not be able to retire the answer-key
+    // probe or its teardown from execution coverage.
+    for (const step of ["gold-absence", "gold-teardown", "checkout"]) {
+      expect(Object.keys(NOT_EXECUTABLE), `${step} was exempted`).not.toContain(step)
+      expect(EXECUTED as readonly string[], `${step} lost its coverage`).toContain(step)
+    }
+  })
+
   test("the classification does not name steps the plan no longer declares", () => {
     // a stale entry is how an allowlist quietly becomes a blanket amnesty
     const declared = new Set(declaredStepNames())
@@ -329,6 +347,28 @@ describe("PROPERTY — every declared argv round-trips through a real shell", ()
   }, 30_000)
 })
 
+describe("PROPERTY — every `sh -c` step's script survives the outer shell intact", () => {
+  test("🔴 the script reaches `sh` as ONE argument, byte-for-byte", async () => {
+    // The argv round-trip above skips `sh -c` steps, and `sh -c` is the shape of
+    // two of the three historical defects this file's header lists — so they had
+    // ZERO coverage of the property that matters most for them: the script is a
+    // single argument the OUTER shell does not touch. A stub `sh` records what
+    // it was actually handed.
+    const sb = sandbox()
+    const shSteps = sb.plan.filter((c) => c.argv[0] === "sh")
+    expect(shSteps.length, "no `sh -c` steps — the plan shape drifted").toBeGreaterThanOrEqual(2)
+    for (const [i, step] of shSteps.entries()) {
+      const log = join(sb.root, `sh-argv-${i}.txt`)
+      argvRecorder(sb, "sh", log)
+      const ran = await sb.run(step)
+      expect(ran.code, `${step.step}: ${ran.stderr}`).toBe(0)
+      expect(recordedArgv(log)[0], `${step.step}'s script was mangled`).toEqual([
+        ...step.argv.slice(1),
+      ])
+    }
+  }, 30_000)
+})
+
 describe("PROPERTY — a hostile campaign root is carried as DATA by every step", () => {
   test("🔴 no step lets the path's NAME execute a command", async () => {
     const sb = sandbox({ hostilePaths: true })
@@ -364,13 +404,24 @@ describe("PROPERTY — a hostile campaign root is carried as DATA by every step"
  * `Bun.spawn`, so a step named here that no scenario ran cannot pass.
  */
 describe("the coverage claim is backed by actual shell executions", () => {
-  test("🔴 every step listed as EXECUTED really had a shell spawned for it", () => {
+  test("every step listed as EXECUTED really had a shell spawned for it", () => {
+    // HONEST SCOPE, corrected after an audit: this cannot fail while the
+    // plan-wide properties exist, because they spawn every declared command
+    // themselves — `LEDGER ⊇ plan` by construction, and the stale-entry test
+    // already forbids listing a step outside the plan. It is kept as the
+    // check that survives if those properties are ever narrowed, not as
+    // evidence that any behavioural scenario exists. What pins the SCENARIOS is
+    // red-on-injection, recorded in EXECUTED's own comment.
     const ledger = executedStepNames()
-    const unproven = EXECUTED.filter((s) => !ledger.has(s))
-    expect(unproven, "listed as executed, but no shell ever ran it").toEqual([])
+    expect(EXECUTED.filter((s) => !ledger.has(s))).toEqual([])
   })
 
-  test("ANTI-VACUITY: the ledger is non-trivially populated", () => {
-    expect(executedStepNames().size).toBeGreaterThanOrEqual(EXECUTED.length)
+  test("ANTI-VACUITY: a shell really ran for every command the plan declares", () => {
+    // stated against the PLAN rather than against EXECUTED, which the
+    // classification test already forces to cover the plan
+    const declared = new Set(declaredStepNames())
+    for (const step of declared) {
+      expect(executedStepNames().has(step), `no shell ever ran for "${step}"`).toBe(true)
+    }
   })
 })

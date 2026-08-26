@@ -32,9 +32,12 @@
 import { describe, expect, test } from "bun:test"
 import { readdirSync, readFileSync, statSync } from "node:fs"
 import { dirname, join, resolve } from "node:path"
+import { fileURLToPath } from "node:url"
 
+// `fileURLToPath`, not `.pathname` — the latter stays percent-encoded, so the
+// guard crashed with ENOENT on any checkout whose path contains a space.
 const PORT_DIR = resolve(
-  dirname(new URL(import.meta.url).pathname),
+  dirname(fileURLToPath(import.meta.url)),
   "../../../../../src/apps/bench/profiles",
 )
 
@@ -46,7 +49,17 @@ const PORT_DIR = resolve(
  * the detector covers both. (`as any` alone left a `readonly sneak: any` in
  * `types.ts` undetected; measured.)
  */
-const SUPPRESSION = /\bas\s+(Parameters<|ReturnType<|any\b|never\b|unknown\s+as\b)|:\s*any\b|<any>/
+const SUPPRESSION =
+  /\bas\s+(Parameters<|ReturnType<|any\b|never\b|unknown\s+as\b)|:\s*any\b|<[^>]*\bany\b[^>]*>|\bany\s*\[\]|=\s*any\b/
+
+/**
+ * `tsc`'s OWN suppression directives live in COMMENTS, so they are matched
+ * before comments are stripped. Missing them meant the guard ignored the only
+ * mechanism that actually switches the compiler off: a `@ts-expect-error` on a
+ * port call compiled a field the contract does not declare, with
+ * `bun run typecheck` green.
+ */
+const TS_DIRECTIVE = /@ts-(ignore|expect-error|nocheck)\b/
 
 /** Comments are not code — the files here explain the rule in prose. */
 const stripComments = (src: string): string =>
@@ -64,7 +77,10 @@ const sources = (dir: string, into: string[] = []): string[] => {
 describe("the dataset-family port contract is checked, not asserted", () => {
   test("🔴 no file in src/apps/bench/profiles suppresses its own types", () => {
     const offenders = sources(PORT_DIR)
-      .filter((f) => SUPPRESSION.test(stripComments(readFileSync(f, "utf8"))))
+      .filter((f) => {
+        const src = readFileSync(f, "utf8")
+        return TS_DIRECTIVE.test(src) || SUPPRESSION.test(stripComments(src))
+      })
       .map((f) => f.slice(PORT_DIR.length + 1))
     expect(
       offenders,
@@ -90,6 +106,9 @@ describe("the dataset-family port contract is checked, not asserted", () => {
     expect(hit("const r = parsed as unknown as Receipt")).toBe(true)
     // …and it does not fire on ordinary narrowing or on prose
     expect(hit("readonly sneak: any")).toBe(true)
+    expect(hit("type Loose = any")).toBe(true)
+    expect(hit("readonly xs: readonly any[]")).toBe(true)
+    expect(hit("const m: Record<string, any> = {}")).toBe(true)
     expect(hit("const f = x as FamilyBoxGradeVerdicts")).toBe(false)
     expect(hit("// never write `as Parameters<typeof f>[0]` here")).toBe(false)
   })
