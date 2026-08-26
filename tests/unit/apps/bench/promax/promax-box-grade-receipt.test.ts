@@ -105,7 +105,10 @@ describe("WIRING — the family really builds a receipt from that observation", 
     const { parseOfficialGradeReceipt } = await import("@/runner/batch/eval/official-grade")
     const out = await grade()
     const build = resolveDatasetFamilyProfile("promax").buildBoxGradeReceipt
-    if (build === undefined || out === undefined) return
+    // NOT an early return: that shape makes the assertions below disappear, and
+    // it is the one this file's own comments reject twice elsewhere.
+    if (build === undefined) throw new Error("promax declares no buildBoxGradeReceipt")
+    if (out === undefined) throw new Error("the on-box grade produced no observation")
 
     const json = build({
       assignedInstanceIds: ["aws__s2n-tls-5464"],

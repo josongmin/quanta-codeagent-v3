@@ -80,16 +80,37 @@ describe("a dropped connection is reported as a dropped connection", () => {
     )
   })
 
-  test("🔴 the IMAGE capture: ssh-255 must not read as `no image for it at all`", async () => {
+  test("🔴 the SCRIPT UPLOAD: ssh-255 must not read as an image fault", async () => {
+    // `cat > …/image-provenance.py` — the upload, distinguished from the run
+    // below. Dropping on the shared substring matched BOTH, so the upload threw
+    // first and the capture branch was never reached: deleting both ssh-255
+    // guards left the suite green.
     let msg = ""
     try {
-      await grade(boxThatDropsAt("image-provenance.py"))
+      await grade(boxThatDropsAt("cat > /opt/quanta/promax/image-provenance.py"))
     } catch (e) {
       msg = (e as Error).message
     }
-    expect(msg).toMatch(/unreachable|could not be established|ssh/i)
-    // …and it must NOT be dressed up as an image problem
+    expect(msg).toMatch(/uploading the image-provenance program/i)
     expect(msg).not.toMatch(/reported no image for it at all/)
+  })
+
+  test("🔴 the IMAGE CAPTURE: ssh-255 must not read as `no image for it at all`", async () => {
+    // Drop on the RUN. Its fingerprint is the shq-QUOTED script path: the
+    // upload writes the same path unquoted (`cat > …`), and the venv
+    // interpreter alone also matches the bootstrap's `--version` probe.
+    let msg = ""
+    try {
+      await grade(boxThatDropsAt("'/opt/quanta/promax/image-provenance.py'"))
+    } catch (e) {
+      msg = (e as Error).message
+    }
+    // wording the fixture does not supply: its own stderr is "Connection
+    // refused", which the generic non-zero error echoes verbatim, so matching
+    // /ssh/i passed on ANY error path that surfaced stderr.
+    expect(msg).toMatch(/became unreachable while recording which images/i)
+    expect(msg).not.toMatch(/reported no image for it at all/)
+    expect(msg).not.toMatch(/program failed on the box/)
   })
 
   test("PAIRED CONTROL: a reachable box still grades normally", async () => {

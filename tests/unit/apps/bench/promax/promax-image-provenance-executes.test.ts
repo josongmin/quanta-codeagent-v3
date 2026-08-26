@@ -125,7 +125,10 @@ describe("the rendered command actually runs", () => {
   })
 
   test("a daemon that cannot digest an image yields a FAULT, not a silent pass", async () => {
-    const s = sandbox({ golden: [{ instance_id: "a-1" }], dockerPrints: "", dockerExit: 1 })
+    // `dockerPrints: DIGEST` with a FAILING exit — the pairing that isolates the
+    // exit-code check. With an empty print the fault came from the empty digest
+    // instead, so the program could ignore `returncode` entirely and stay green.
+    const s = sandbox({ golden: [{ instance_id: "a-1" }], dockerPrints: DIGEST, dockerExit: 1 })
     try {
       const parsed = parseProMaxImageProvenance((await run(s, ["a-1"])).stdout, ["a-1"])
       expect(parsed.ok).toBe(false)

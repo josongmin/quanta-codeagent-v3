@@ -28,7 +28,7 @@ describe("the full-remote outcome line", () => {
       missing: [],
       attempts: 1,
     })
-    expect(line).toMatch(/errored 3/)
+    expect(line).toBe("full-remote done — resolved 2 | unresolved 1 | errored 3")
   })
 
   test("🔴 the line lets an operator recover the DENOMINATOR", () => {
@@ -40,19 +40,26 @@ describe("the full-remote outcome line", () => {
       missing: ["g"],
       attempts: 1,
     })
-    for (const n of ["2", "1", "3"]) expect(line).toContain(n)
-    expect(line).toMatch(/LOST 1/)
+    // EXACT, and with every count DISTINCT. Substring checks plus a paired
+    // control whose two counts were both 1 left the line permutation-blind:
+    // swapping resolved and unresolved in the renderer kept every assertion in
+    // this file green, in a file whose whole subject is the line not
+    // misreporting the run.
+    expect(line).toBe(
+      "full-remote done — resolved 2 | unresolved 1 | errored 3 | ⚠️ LOST 1 (box-loss)",
+    )
   })
 
   test("PAIRED CONTROL: with no errors the line is unchanged from before", () => {
+    // distinct counts, so the assertion is not symmetric under a swap
     const line = renderFullRemoteOutcomeLine({
-      resolved: ["a"],
-      unresolved: ["b"],
+      resolved: ["a", "b"],
+      unresolved: ["c"],
       errored: [],
       missing: [],
       attempts: 1,
     })
-    expect(line).toBe("full-remote done — resolved 1 | unresolved 1")
+    expect(line).toBe("full-remote done — resolved 2 | unresolved 1")
   })
 
   test("attempts and box-loss still surface", () => {
