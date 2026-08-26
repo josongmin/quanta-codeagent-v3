@@ -6,6 +6,7 @@ import {
   toSessionSnapshotLite,
 } from "@/kernel/session"
 import type { Message } from "@/llm"
+import type { GoalContinuationProvenance, TurnSubmitCommand } from "@/protocol/session"
 import {
   buildApprovalRespond,
   buildIdentitySet,
@@ -18,6 +19,7 @@ import {
   buildTurnSubmit,
   type CommandBuildDeps,
   SessionClosedError,
+  SessionProtocolValidationError,
 } from "@/protocol/session"
 import {
   attachSessionTransport,
@@ -28,7 +30,7 @@ import {
 } from "./session/engine"
 import { createTurnSubmitAuthority } from "./session/turn-submit-authority"
 import { SessionSubscriptionHub } from "./subscription"
-import type { RuntimeSession } from "./types"
+import type { RuntimeSession, SessionDispatchResult } from "./types"
 
 interface CreateRuntimeSessionArgs {
   readonly hostSession: SessionHost
@@ -45,6 +47,68 @@ interface CreateRuntimeSessionArgs {
    *  the SOLE durable transcript authority. */
   readonly rehydratedMessages?: readonly Message[]
 }
+
+/** GOAL-08 — the ONE attributed goal-turn path: mint the one-use wire
+ *  capability, claim the host's attempt slot BEFORE dispatch (so the host
+ *  turn-runner begins/settles the attempt), release the claim on a typed
+ *  pre-run refusal. `user-requested-goal-work` charges the user turn budget
+ *  only; the autonomous kind consumes the product hard-cap counter. */
+const buildAttributedGoalTurnSubmitter =
+  (deps: {
+    readonly sessionId: string
+    readonly hostSession: SessionHost
+    readonly turnSubmitAuthority: ReturnType<typeof createTurnSubmitAuthority>
+    readonly engine: SessionEngineDeps
+    readonly commandDeps: CommandBuildDeps
+  }) =>
+  async (
+    input: {
+      readonly text: string
+      readonly images?: TurnSubmitCommand["images"]
+      readonly expectedSessionRevision: number
+      readonly objectiveId: string
+      readonly objectiveRevision: number
+      readonly validateCurrent: () => boolean
+    },
+    kind: GoalContinuationProvenance["kind"],
+  ): Promise<SessionDispatchResult> => {
+    const capability = deps.turnSubmitAuthority.issue({
+      objectiveId: input.objectiveId,
+      objectiveRevision: input.objectiveRevision,
+      validateCurrent: input.validateCurrent,
+      kind,
+    })
+    const claimed =
+      deps.hostSession.claimGoalAttempt?.({
+        threadId: deps.sessionId,
+        objectiveId: input.objectiveId,
+        startedRevision: input.objectiveRevision,
+        attemptId: capability.provenance.attemptId,
+        provenance:
+          kind === "goal-continuation" ? "autonomous-continuation" : "user-requested-goal-work",
+        executionMode: kind === "goal-continuation" ? "background" : "foreground",
+      }) === true
+    if (!claimed) {
+      capability.revoke()
+      throw new SessionProtocolValidationError("goal_attempt_claim_refused")
+    }
+    try {
+      return await dispatch(
+        deps.engine,
+        buildTurnSubmit(deps.commandDeps, {
+          text: input.text,
+          ...(input.images !== undefined ? { images: input.images } : {}),
+          expectedSessionRevision: input.expectedSessionRevision,
+          provenance: capability.provenance,
+        }),
+        { enqueue: true },
+      )
+    } catch (error) {
+      capability.revoke()
+      deps.hostSession.releaseGoalAttempt?.()
+      throw error
+    }
+  }
 
 export const createRuntimeSession = (args: CreateRuntimeSessionArgs): RuntimeSession => {
   const hostDescription = args.hostSession.describe()
@@ -101,6 +165,14 @@ export const createRuntimeSession = (args: CreateRuntimeSessionArgs): RuntimeSes
   // delegate. The kernel clock satisfies the protocol's structural clock type.
   const commandDeps: CommandBuildDeps = { sessionId, clock: args.kernel.clock }
 
+  const submitAttributedGoalTurn = buildAttributedGoalTurnSubmitter({
+    sessionId,
+    hostSession: args.hostSession,
+    turnSubmitAuthority,
+    engine,
+    commandDeps,
+  })
+
   return {
     sessionId,
     dispatch: (command, options) => dispatch(engine, command, options),
@@ -127,28 +199,8 @@ export const createRuntimeSession = (args: CreateRuntimeSessionArgs): RuntimeSes
     },
     turn: {
       run: async (meta, options) => dispatch(engine, buildTurnRun(commandDeps, meta), options),
-      submitGoalContinuation: async (input) => {
-        const capability = turnSubmitAuthority.issue({
-          objectiveId: input.objectiveId,
-          objectiveRevision: input.objectiveRevision,
-          validateCurrent: input.validateCurrent,
-        })
-        try {
-          return await dispatch(
-            engine,
-            buildTurnSubmit(commandDeps, {
-              text: input.text,
-              ...(input.images !== undefined ? { images: input.images } : {}),
-              expectedSessionRevision: input.expectedSessionRevision,
-              provenance: capability.provenance,
-            }),
-            { enqueue: true },
-          )
-        } catch (error) {
-          capability.revoke()
-          throw error
-        }
-      },
+      submitGoalContinuation: async (input) => submitAttributedGoalTurn(input, "goal-continuation"),
+      submitGoalWork: async (input) => submitAttributedGoalTurn(input, "user-requested-goal-work"),
       // S1 (jul-16 ticket 01, S0-2 ruling) — the ONE sanctioned RuntimeSession
       // surface addition: `turn.cancel` existed in the protocol's command union
       // (and the kernel reducer/scheduler) all along, but had no typed verb —

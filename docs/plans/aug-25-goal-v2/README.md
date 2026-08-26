@@ -134,6 +134,7 @@ GOAL-00 index split + staged landing
 - 07/08/09 셀프어딧: 티켓 verification 명령 전부 GREEN(07: 621/0, 08: 712/0, 09: 73/0, contract 10/0). 뮤턴트 7개 중 2개 생존 → 전용 테스트 추가 후 RED(07 attach-generation 펜스, 08 approval-pending 전용 가드). receipts/GOAL-07~09.yaml.
 - 결정: `QUANTA_GOAL` default ON은 GOAL-10 promotion의 결과로 확정(계획서 "GOAL-10 전까지 OFF"와 정합). 티켓05 함정 문구·README 보고규칙에 병기.
 - 남은 non-Goal red(내 것 아님): lint:debt(`tools/feature-catalog/*` complexity, `tests/unit/apps/bench/promax/zz-adv-r1-*` console), typecheck:tests의 `tests/unit/zz-audit-r2-probe.test.ts`(미추적, bench 작업).
+- 2026-08-27 (round 2, "다 제대로 해결"): GOAL-07 rail 13 / GOAL-08 rails 14·15 / GOAL-09 rails 11·12 closed with mutants (receipts updated). Probe found a real GOAL-08 defect — web/SDK goal turns were never attributed (no slot claim, no slot on the daemon base) — fixed via the SessionHost claim seam + daemon slot + sdk claim-before-dispatch; `submitGoalWork` / `/goal work` mint `user-requested-goal-work`; `session.objective.work` wire command deferred (reason in GOAL-08.yaml). 11/11 mutants RED (two pins added after survivors). Protocol bundle regenerated (`bun run build:protocol`).
 
 ## 결정 기록
 - judge `reject` 모드 제거(shadow만). 원문은 "reject 유지 시 unavailable=거부"도 허용했으나 완료권이 authority로 가면 judge에 판정권이 없음.

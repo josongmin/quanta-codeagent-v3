@@ -48,6 +48,7 @@ import {
   sanitizeRuntimeBase,
   wireRuntimePorts,
 } from "./context-binding/base"
+import { isObjectiveAttemptSlot } from "./context-binding/objective-settlement"
 import { startSideConversation } from "./context-binding/side-conversation"
 import {
   buildRuntimeTurnArgs,
@@ -439,6 +440,16 @@ const createRuntimeSessionHost = (args: {
         emittedArtifactIds,
         turnArgs,
       })
+    },
+    // GOAL-08 — attribution seam for every surface: the surface claims the
+    // base's attempt slot before it dispatches a goal turn; the turn-runner
+    // takes the claim (beginAttempt) and settles it.
+    claimGoalAttempt: (attempt) =>
+      isObjectiveAttemptSlot(base.objectiveAttemptSlot)
+        ? base.objectiveAttemptSlot.claim(attempt)
+        : false,
+    releaseGoalAttempt: () => {
+      if (isObjectiveAttemptSlot(base.objectiveAttemptSlot)) base.objectiveAttemptSlot.release()
     },
     resolveApproval: async ({ approvalId, decision, scope, steer, selectedHunks }) => {
       // ADR-0512 P3 — forward the escalation's once/session scope + corrective

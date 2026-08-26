@@ -213,7 +213,7 @@ export interface TurnRunCommand extends SessionCommandEnvelope<"turn.run"> {
 }
 
 export interface GoalContinuationProvenance {
-  readonly kind: "goal-continuation"
+  readonly kind: "goal-continuation" | "user-requested-goal-work"
   readonly objectiveId: string
   readonly objectiveRevision: number
   readonly attemptId: string

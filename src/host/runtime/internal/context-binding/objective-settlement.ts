@@ -81,7 +81,7 @@ export interface AttributedAttempt {
   readonly usage: TurnUsageAccumulator
 }
 
-const isSlot = (v: unknown): v is ObjectiveAttemptSlot =>
+export const isObjectiveAttemptSlot = (v: unknown): v is ObjectiveAttemptSlot =>
   typeof v === "object" &&
   v !== null &&
   typeof (v as ObjectiveAttemptSlot).take === "function" &&
@@ -111,7 +111,7 @@ export interface BeginObjectiveAttemptDeps {
 export const beginObjectiveAttempt = async (
   deps: BeginObjectiveAttemptDeps,
 ): Promise<AttributedAttempt | undefined> => {
-  if (!isSlot(deps.objectiveAttemptSlot)) return undefined
+  if (!isObjectiveAttemptSlot(deps.objectiveAttemptSlot)) return undefined
   const slot = deps.objectiveAttemptSlot
   const attempt = slot.take()
   if (attempt === undefined) return undefined

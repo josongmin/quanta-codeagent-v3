@@ -42,7 +42,10 @@ export interface TurnRunCommand extends SessionCommandEnvelope<"turn.run"> {
  * The wire client may carry this value but cannot mint a valid `attemptId`;
  * the runtime validates and consumes the capability under the session lease. */
 export interface GoalContinuationProvenance {
-  readonly kind: "goal-continuation"
+  /** `goal-continuation` = the autonomous wake; `user-requested-goal-work` =
+   *  an explicit operator goal turn (charges the user turn budget, never the
+   *  autonomous hard cap). Both are HOST-minted capabilities. */
+  readonly kind: "goal-continuation" | "user-requested-goal-work"
   readonly objectiveId: string
   readonly objectiveRevision: number
   readonly attemptId: string

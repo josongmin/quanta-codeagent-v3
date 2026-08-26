@@ -51,6 +51,10 @@ const parseEnvelope = (
 /** Assert a required field is a string; throw on absence or wrong type. A
  *  mistyped scalar (e.g. a numeric `commandId`) silently breaks the
  *  string-keyed dedup/replay maps downstream, so we fail closed here. */
+/** The closed set of HOST-minted goal provenance kinds a `turn.submit` may carry. */
+const isGoalProvenanceKind = (value: unknown): boolean =>
+  value === "goal-continuation" || value === "user-requested-goal-work"
+
 const assertString = (value: Record<string, unknown>, kind: string, key: string): void => {
   if (!(key in value)) throw new SessionProtocolValidationError(`missing_${kind}_${key}`)
   if (typeof value[key] !== "string") {
@@ -170,7 +174,7 @@ export const decodeSessionCommand = (raw: string): SessionCommand => {
     assertFiniteNumber(envelope.payload, "command", "expectedSessionRevision")
     assertObjectField(envelope.payload, "command", "provenance")
     const provenance = envelope.payload.provenance as Record<string, unknown>
-    if (provenance.kind !== "goal-continuation") {
+    if (!isGoalProvenanceKind(provenance.kind)) {
       throw new SessionProtocolValidationError("bad_command_provenance_kind")
     }
     assertString(provenance, "provenance", "objectiveId")

@@ -324,6 +324,9 @@ export interface SlashContext {
         readonly onMutation?: () => void
         /** GOAL-06 — the wake controller's typed scheduling decision (report line). */
         readonly wakeStatus?: () => import("@/objective").GoalWakeStatus | undefined
+        /** GOAL-08 rail 15 — `/goal work`: enqueue ONE foreground turn carrying
+         *  host-minted `user-requested-goal-work` provenance. `false` ⇒ not wired. */
+        readonly enqueueWork?: (instruction: string) => boolean
       }
     | undefined
   /** §9.6 — `/presets` opusplan-style sticky model-preset wire. The SAME live

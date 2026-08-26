@@ -101,3 +101,34 @@ describe("/goal v2 authority facade", () => {
     expect(h.err.join("")).toContain("verifier-unavailable")
   })
 })
+
+describe("/goal work — GOAL-08 rail 15 (user-requested provenance)", () => {
+  test("wired + active goal ⇒ exactly one enqueue with the instruction; exit 0", async () => {
+    const h = harness()
+    await goalCmd.run(["ship"], h.ctx)
+    const queued: string[] = []
+    const ctx: SlashContext = {
+      ...h.ctx,
+      goal: {
+        port: h.authority,
+        threadId: "thread",
+        enqueueWork: (instruction) => queued.push(instruction) === 1,
+      },
+    }
+    expect(await goalCmd.run(["work", "fix", "the", "flake"], ctx)).toBe(0)
+    expect(queued).toEqual(["fix the flake"])
+    expect(h.out.join("")).toContain("user-requested goal provenance")
+  })
+  test("not wired ⇒ typed failure; missing instruction ⇒ exit 1; inactive goal ⇒ exit 1", async () => {
+    const h = harness()
+    await goalCmd.run(["ship"], h.ctx)
+    expect(await goalCmd.run(["work", "x"], h.ctx)).toBe(1)
+    expect(h.err.join("")).toContain("not wired")
+    const ctx: SlashContext = {
+      ...h.ctx,
+      goal: { port: h.authority, threadId: "thread", enqueueWork: () => false },
+    }
+    expect(await goalCmd.run(["work"], ctx)).toBe(1)
+    expect(await goalCmd.run(["work", "x"], ctx)).toBe(1)
+  })
+})

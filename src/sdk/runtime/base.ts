@@ -100,6 +100,14 @@ export interface RuntimeAgentConfigAugments {
    *  `"inproc" | "stdio" | "websocket"` — the `CapabilityManifest.transport`
    *  union. */
   sessionTransport?: "inproc" | "stdio" | "websocket"
+  /** GOAL-08 — the host-owned attributed-attempt slot (`ObjectiveAttemptSlot`)
+   *  the daemon composition root hands in next to `objective`. The session
+   *  host claims it right before a goal-attributed `turn.submit` dispatch and
+   *  the turn-runner takes it at turn start (begin → settle). Slice-opaque
+   *  here (`unknown`) — the host narrows via `isObjectiveAttemptSlot`.
+   *  Absent ⇒ goal turns on this surface are NOT attributed (rail 2 refuses
+   *  them via `goal_attempt_claim_refused`). */
+  objectiveAttemptSlot?: unknown
 }
 
 export type RuntimeAgentConfigBase = Omit<AgentConfig, "modePolicy" | "budgetMeter"> &

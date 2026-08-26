@@ -86,6 +86,21 @@ const handleCriterion = (
     : reportMutation(ctx, "Criterion added.", control.addCriterion(text))
 }
 
+/** GOAL-08 rail 15 — `/goal work <instruction>`: ONE foreground turn with
+ *  host-minted user-requested provenance (charges the user turn budget, never
+ *  the autonomous hard cap). Plain chat never receives this provenance. */
+const handleWork = (args: readonly string[], ctx: SlashContext, name: GoalName): number => {
+  const instruction = args.slice(1).join(" ").trim()
+  if (instruction === "") return fail(ctx, `${name} work: requires <instruction>`)
+  const enqueue = ctx.goal?.enqueueWork
+  if (enqueue === undefined) {
+    return fail(ctx, `${name} work: not wired in this surface (goal pursuit is not composed)`)
+  }
+  if (!enqueue(instruction)) return fail(ctx, `${name} work: the goal is not active`)
+  ctx.out("Goal work queued — one foreground turn with user-requested goal provenance.\n")
+  return 0
+}
+
 const handleCheck = (
   args: readonly string[],
   ctx: SlashContext,
@@ -161,6 +176,8 @@ export const runGoalCommand = async (
       return handleBudget(args, ctx, invokedAs, control)
     case "verify":
       return reportMutation(ctx, "Goal verification applied.", await control.verify())
+    case "work":
+      return handleWork(args, ctx, invokedAs)
     default:
       return handleCreate(args, ctx, invokedAs, control)
   }

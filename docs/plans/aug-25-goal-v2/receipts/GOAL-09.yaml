@@ -10,4 +10,7 @@ redOnInjection:
   - G09-M1 model/continuation addBlocker bypasses observation (direct blocker) -> 6 RED
   - G09-M2 a replayed attemptId counts as a new distinct attempt -> 1 RED
   - G09-M3 verified progress no longer clears transient observations -> 2 RED
-ticketRedRails: 1,2,5,6,7,8,9,10 covered by the shipped tests and the three mutants above; 3/4 (confirmed approval / user request blocks immediately) covered by the direct-blocker path for user/system actors; 11 (ninth observation evicts deterministically) and 12 (every producer has a wiring test) NOT independently re-proven here — recorded as open gaps for the next round.
+  - G09-M4 (round 2) criteria-ops eviction `shift()` removed -> 1 RED (blocker-observation.test.ts "capped at eight and evicts the oldest": rail 11)
+  - G09-M5 (round 2) tool `addBlocker` drops `attemptId` (src/tool/objective/index.ts, the ONLY model-side producer) -> 1 RED (objective-tools-hellgate "promotes only after three distinct host-attributed attempts", real registry entry: rail 12)
+ticketRedRails: 1,2,5,6,7,8,9,10 covered by the shipped tests and the mutants above; 3/4 covered by the direct-blocker path for user/system actors; 11 and 12 closed in round 2 (producers: the objective tool via the registry — the only model-facing one; user/system actors add blockers directly and are covered by authority.test.ts).
+round2: 2026-08-27 — all ticket rails covered; no open gap.

@@ -25,7 +25,11 @@ import { modeLoadsRepoRules } from "@/agent/run-mode"
 import { promptSurfaceProfileForRunMode, resolveCliDefaultEnvPosture } from "@/agent/system-prompt"
 import type { ArtifactRegistry } from "@/artifact"
 import type { LLMPort } from "@/llm"
-import type { ObjectivePort } from "@/objective"
+import {
+  createObjectiveAttemptSlot,
+  type ObjectiveAttemptSlot,
+  type ObjectivePort,
+} from "@/objective"
 import type { PermissionContext } from "@/permission"
 import type { PostureControl } from "@/permission/posture/control"
 import type { buildSkillsConfigCore, buildSubagentConfigCore } from "@/runner/assemble"
@@ -63,7 +67,13 @@ export const buildDaemonToolRegistry = (
  *  omitted (default-OFF byte-identical under `exactOptionalPropertyTypes`). */
 const objectiveSlot = (
   objective: ObjectivePort | undefined,
-): Partial<Pick<AgentConfig, "objective">> => (objective !== undefined ? { objective } : {})
+): Partial<Pick<AgentConfig, "objective">> & { objectiveAttemptSlot?: ObjectiveAttemptSlot } =>
+  objective !== undefined
+    ? // GOAL-08 — the host-owned attributed-attempt slot the session host
+      // claims before a goal turn; without it a web goal turn is unattributed
+      // (no budget, no receipt, no hard-cap consumption).
+      { objective, objectiveAttemptSlot: createObjectiveAttemptSlot() }
+    : {}
 
 const turnActivitySlot = (
   activeTurnRef: ActiveTurnRefHolder | undefined,

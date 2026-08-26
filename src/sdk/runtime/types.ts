@@ -100,6 +100,17 @@ export interface RuntimeSession {
       readonly objectiveRevision: number
       readonly validateCurrent: () => boolean
     }): Promise<SessionDispatchResult>
+    /** GOAL-08 rail 15 — explicit USER goal work: the only turn that mints
+     *  `user-requested-goal-work` provenance (charges the user turn budget,
+     *  never the autonomous hard cap). Host-only; raw clients cannot mint it. */
+    submitGoalWork?(input: {
+      readonly text: string
+      readonly images?: TurnSubmitCommand["images"]
+      readonly expectedSessionRevision: number
+      readonly objectiveId: string
+      readonly objectiveRevision: number
+      readonly validateCurrent: () => boolean
+    }): Promise<SessionDispatchResult>
     /** S1 (jul-16 ticket 01, S0-2 ruling) — the ONE sanctioned additive
      *  RuntimeSession surface change: `TurnCancelCommand` has been in the
      *  protocol's 8-command union (and handled by the kernel scheduler) all

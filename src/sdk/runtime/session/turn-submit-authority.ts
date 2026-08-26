@@ -4,6 +4,8 @@ export interface GoalContinuationCapabilityInput {
   readonly objectiveId: string
   readonly objectiveRevision: number
   readonly validateCurrent: () => boolean
+  /** Default `goal-continuation` (autonomous). */
+  readonly kind?: GoalContinuationProvenance["kind"] | undefined
 }
 
 export interface IssuedGoalContinuationCapability {
@@ -34,7 +36,7 @@ export const createTurnSubmitAuthority = (): {
       issued.set(attemptId, input)
       return {
         provenance: {
-          kind: "goal-continuation",
+          kind: input.kind ?? "goal-continuation",
           objectiveId: input.objectiveId,
           objectiveRevision: input.objectiveRevision,
           attemptId,

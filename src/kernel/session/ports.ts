@@ -226,8 +226,26 @@ export interface SessionHostSideConversationResult {
   readonly toolsAvailable: number
 }
 
+/** GOAL-08 — the host-owned attributed-attempt claim a goal turn carries
+ *  (structural mirror of `@/objective` ObjectiveAttemptContext; the kernel
+ *  slice never imports the objective value module). */
+export interface GoalAttemptClaim {
+  readonly threadId: string
+  readonly objectiveId: string
+  readonly startedRevision: number
+  readonly attemptId: string
+  readonly provenance: "autonomous-continuation" | "user-requested-goal-work"
+  readonly executionMode: "foreground" | "background"
+}
+
 export interface SessionHost {
   describe(): SessionHostDescription
+  /** GOAL-08 — claim the attributed-attempt slot BEFORE a goal turn is
+   *  dispatched so the host turn-runner settles it (budget, receipts, hard-cap
+   *  counter). Absent / false ⇒ the surface must not run the goal turn. */
+  claimGoalAttempt?(attempt: GoalAttemptClaim): boolean
+  /** Release a claim the dispatch never consumed (typed pre-run refusal). */
+  releaseGoalAttempt?(): void
   runTurn(args: {
     readonly history: readonly Message[]
     readonly prompt: string

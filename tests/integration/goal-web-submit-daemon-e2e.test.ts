@@ -20,6 +20,7 @@ describe("goal web submit daemon integration", () => {
     const hostStarted = deferred<string>()
     const releaseHost = deferred<void>()
     const prompts: string[] = []
+    const claims: { provenance: string; objectiveId: string }[] = []
     const host: SessionHost = {
       describe: () => ({
         sessionId: "goal-web-e2e",
@@ -37,6 +38,10 @@ describe("goal web submit daemon integration", () => {
             { role: "assistant", content: [{ type: "text", text: "checkpoint" }] },
           ],
         }
+      },
+      claimGoalAttempt: (attempt) => {
+        claims.push(attempt)
+        return true
       },
       close: async () => undefined,
     }
@@ -70,6 +75,13 @@ describe("goal web submit daemon integration", () => {
     await userAppend
 
     expect(prompts).toEqual([autonomousPrompt])
+    // GOAL-08 — the autonomous submit is ATTRIBUTED: the host's attempt slot was
+    // claimed with autonomous provenance before the turn ran.
+    expect(claims).toHaveLength(1)
+    expect(claims[0]).toMatchObject({
+      provenance: "autonomous-continuation",
+      objectiveId: objective.get(session.sessionId)?.objectiveId ?? "",
+    })
     expect(autonomousPrompt).toContain("finish the daemon goal")
     expect(autonomousPrompt).not.toContain("independent user input")
     expect((await session.snapshot()).state.draftInput).toBe("independent user input")

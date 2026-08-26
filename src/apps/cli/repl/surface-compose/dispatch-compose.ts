@@ -1,4 +1,5 @@
 import type { Message, ModelCandidate, StreamEvent, StreamInput } from "@/llm"
+import { createObjectiveCapabilities } from "@/objective"
 import type { AgentEvent } from "@/stream"
 import type { DreamSlashState } from "../../dream-cmd"
 import type { MemorySlashState } from "../../memory-cmd"
@@ -87,7 +88,9 @@ export const buildRetryState = (input: {
 
 type GoalSlashSlot = NonNullable<Parameters<typeof buildSurfaceDispatch>[0]["goal"]>
 
-const buildGoalSlashSlot = (
+/** Exported for the GOAL-08 rail-15 wiring proof: `/goal work` must mint
+ *  `user-requested-goal-work` provenance (user turn budget, never the cap). */
+export const buildGoalSlashSlot = (
   setup: SessionSetupResult,
   core: SurfaceCoreState,
 ): GoalSlashSlot | undefined => {
@@ -101,6 +104,29 @@ const buildGoalSlashSlot = (
       : {
           onMutation: () => core.goalWakeSlot?.current?.onGoalMutation(),
           wakeStatus: () => core.goalWakeSlot?.current?.status?.(),
+          enqueueWork: (instruction) => {
+            const slot = core.goalWakeSlot
+            const sink = slot?.enqueueWork
+            const store = core.objectiveStore
+            if (slot === undefined || sink === undefined || store === undefined) return false
+            const domain = createObjectiveCapabilities(store).read.readDomain(
+              setup.sessionId as string,
+            )
+            if (domain.state === null || domain.state.objective.status !== "active") return false
+            sink({
+              text: instruction,
+              goalContinuation: {
+                threadId: setup.sessionId as string,
+                objectiveRevision: domain.revision,
+                attemptKey: `user-work:${crypto.randomUUID()}`,
+                provenance: "user-requested-goal-work",
+                ...(slot.current?.activityEpoch !== undefined
+                  ? { activityEpoch: slot.current.activityEpoch() }
+                  : {}),
+              },
+            })
+            return true
+          },
         }),
   }
 }

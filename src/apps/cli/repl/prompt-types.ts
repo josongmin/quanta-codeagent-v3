@@ -9,6 +9,8 @@ export interface GoalContinuationPromptMeta {
   readonly attemptKey: string
   /** GOAL-06 rail 11 — the wake controller's raw-input epoch at arm time. */
   readonly activityEpoch?: number
+  /** GOAL-08 rail 15 — host-minted provenance; absent ⇒ autonomous continuation. */
+  readonly provenance?: "autonomous-continuation" | "user-requested-goal-work"
 }
 
 export type CliPromptInput =

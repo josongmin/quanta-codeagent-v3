@@ -111,4 +111,29 @@ describe("HELLGATE WS-1 — attachSessionToLive shared crown op", () => {
     if (persistTarget.id === undefined) throw new Error("persist target was not repointed")
     expect(persistTarget.id).toBe("s-web")
   })
+
+  test("GOAL-07 rail 13 — the wake cancel edge (onAttachStart) fires BEFORE the transcript is replaced, and onAttachSettled after every owner moved", async () => {
+    const order: string[] = []
+    const outcome = await attachSessionToLive("B", {
+      loadSession: async (id) => ({ meta: meta(id), messages: msgs }),
+      onAttachStart: () => order.push("wake-cancel"),
+      replaceTranscript: async (m) => {
+        order.push("transcript")
+        return m
+      },
+      onReplaced: () => order.push("replaced"),
+      setPersistTarget: () => order.push("persist-target"),
+      onAttached: () => order.push("attached"),
+      onAttachSettled: () => order.push("settled"),
+    })
+    expect(outcome.kind).toBe("attached")
+    expect(order).toEqual([
+      "wake-cancel",
+      "transcript",
+      "replaced",
+      "persist-target",
+      "attached",
+      "settled",
+    ])
+  })
 })
