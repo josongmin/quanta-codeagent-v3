@@ -9,13 +9,15 @@
  * observer itself only needs cache-specific pricing.
  *
  * Pricing source: Anthropic public model pricing (`anthropic.com/pricing`)
- * snapshot 2026-05. Per-million-token rates in USD:
+ * snapshot 2026-05, plus OpenAI's GPT-5.6 Terra model page captured
+ * 2026-08-26. Per-million-token rates in USD:
  *
  *   model              | input  | output | cache_create | cache_read
  *   -------------------|--------|--------|--------------|-----------
  *   claude-opus-4-7    | $15.00 | $75.00 | $18.75 (1.25×) | $1.50 (0.10×)
  *   claude-sonnet-4-6  |  $3.00 | $15.00 |  $3.75 (1.25×) | $0.30 (0.10×)
  *   claude-haiku-4-5   |  $1.00 |  $5.00 |  $1.25 (1.25×) | $0.10 (0.10×)
+ *   gpt-5.6-terra      |  $2.00 | $12.00 |  $2.50 (1.25×) | $0.20 (0.10×)
  *
  * The cache_create × 1.25 and cache_read × 0.10 multipliers are Anthropic's
  * documented constants — every Claude model in this table follows them. A
@@ -70,6 +72,12 @@ export const DEFAULT_PROMPT_CACHE_PRICING: Readonly<Record<string, PromptCachePr
       outputPerM: 5,
       cacheCreationPerM: 1.25,
       cacheReadPerM: 0.1,
+    }),
+    "gpt-5.6-terra": Object.freeze({
+      inputPerM: 2,
+      outputPerM: 12,
+      cacheCreationPerM: 2.5,
+      cacheReadPerM: 0.2,
     }),
   })
 

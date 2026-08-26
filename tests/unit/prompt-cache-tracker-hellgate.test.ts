@@ -176,6 +176,19 @@ describe("ADR-0182 — prompt-cache tracker math (A)", () => {
     expect(DEFAULT_PROMPT_CACHE_PRICING[FALLBACK_PRICING_MODEL]).toBeDefined()
   })
 
+  test("[6.a] gpt-5.6-terra uses its own current cache rates, not sonnet fallback", () => {
+    const pricing = DEFAULT_PROMPT_CACHE_PRICING["gpt-5.6-terra"]
+    expect(pricing).toEqual({
+      inputPerM: 2,
+      outputPerM: 12,
+      cacheCreationPerM: 2.5,
+      cacheReadPerM: 0.2,
+    })
+    const o = defaultPromptCacheObserver()
+    o.record(evt({ model: "gpt-5.6-terra", cacheReadTokens: 1_000_000 }))
+    expect(o.snapshot().costSavingsUsd).toBeCloseTo(1.8, 6)
+  })
+
   test("[7] zero-token event → cost=0, no NaN, no Infinity, no negative", () => {
     const o = defaultPromptCacheObserver()
     o.record(evt({}))

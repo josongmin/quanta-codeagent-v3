@@ -317,7 +317,7 @@ describe("render — hotspots ordered by duration; cost stamps pricingVersion", 
     writeFileSync(f, toJsonl(events))
     const run = loadRun(f)
     const out = renderCost(run.instances)
-    expect(out).toContain("pricingVersion=pricing.v2")
+    expect(out).toContain("pricingVersion=pricing.v3")
     expect(out).toContain("n/a") // unknown model ⇒ null ⇒ n/a, not a crash
   })
 
@@ -430,7 +430,7 @@ describe("probe CLI — end-to-end over a synthetic run dir", () => {
       }>
       warnings: string[]
     }
-    expect(parsed.cost.pricingVersion).toBe("pricing.v2")
+    expect(parsed.cost.pricingVersion).toBe("pricing.v3")
     expect(parsed.instances[0]?.instanceId).toBe("inst-1")
     const hyp = parsed.instances[0]?.triage_hypothesis
     expect(hyp).toBeDefined()
@@ -464,6 +464,6 @@ describe("probe CLI — end-to-end over a synthetic run dir", () => {
     expect(slow.out).toContain("tool bash")
     const cost = await capture([dir, "--cost"])
     expect(cost.code).toBe(0)
-    expect(cost.out).toContain("pricing.v2")
+    expect(cost.out).toContain("pricing.v3")
   })
 })

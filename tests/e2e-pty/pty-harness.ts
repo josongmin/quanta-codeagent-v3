@@ -60,10 +60,15 @@ export const PTY_AVAILABLE = openpty !== undefined
 
 const CLI_ENTRY = new URL("../../src/apps/cli/index.ts", import.meta.url).pathname
 
-// Strip CSI / SGR / cursor sequences so assertions read the visible text (built
-// from a string so the literal ESC byte never appears in source).
-const ANSI_RE = new RegExp(`${String.fromCharCode(27)}[[0-9;?]*[ -/]*[@-~]`, "g")
-export const stripAnsi = (s: string): string => s.replace(ANSI_RE, "")
+// Strip CSI / SGR / cursor sequences so assertions read the visible text.
+// CSI MUST escape the literal `[`; the old pattern started a character class
+// there, so DEC restore followed by a printable byte (`ESC8G`) was misparsed as
+// one escape sequence and consumed the first assistant character. DEC save /
+// restore are two-byte sequences and therefore handled independently.
+const ESC = String.fromCharCode(27)
+const CSI_RE = new RegExp(`${ESC}\\[[0-9;?]*[ -/]*[@-~]`, "g")
+const DEC_CURSOR_RE = new RegExp(`${ESC}[78]`, "g")
+export const stripAnsi = (s: string): string => s.replace(CSI_RE, "").replace(DEC_CURSOR_RE, "")
 
 export interface DrivePtyOpts {
   /** Executable argv. Defaults to the source CLI; set this to the installed
@@ -204,7 +209,7 @@ export const drivePtyCli = (opts: DrivePtyOpts = {}): PtyCli => {
         await sleep(25)
       }
       throw new Error(
-        `waitFor timed out (${timeoutMs}ms) for ${String(pattern)}\n--- screen ---\n${stripAnsi(buf).slice(-1500)}`,
+        `waitFor timed out (${timeoutMs}ms) for ${String(pattern)}\n--- screen ---\n${stripAnsi(buf).slice(-1500)}\n--- raw ---\n${JSON.stringify(buf.slice(-1500))}`,
       )
     },
   }

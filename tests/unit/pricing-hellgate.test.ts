@@ -49,6 +49,7 @@ describe("G3 pinned price table (exact cost at 1M in / 1M out)", () => {
     // gpt-5 family — CONFIRMED vs OpenAI pricing page 2026-06-26. gpt-5.4 is the
     // bench default model; an accidental half-price edit (the original estimate
     // bug: 1.25/10) goes red here.
+    ["gpt-5.6-terra", 2, 12],
     ["gpt-5.4", 2.5, 15],
     ["gpt-5.5", 5, 30],
     ["gpt-5", 1.25, 10],
@@ -63,7 +64,7 @@ describe("G3 pinned price table (exact cost at 1M in / 1M out)", () => {
   }
 
   test("PRICING_VERSION is the pinned table key", () => {
-    expect(PRICING_VERSION).toBe("pricing.v2")
+    expect(PRICING_VERSION).toBe("pricing.v3")
   })
 })
 
@@ -71,7 +72,7 @@ describe("G3 pinned price table (exact cost at 1M in / 1M out)", () => {
 /* 2. cache_read posture (documented: input rate, NO discount)         */
 /* ------------------------------------------------------------------ */
 
-describe("G3 cache_read pricing (pricing.v2: provider-aware, discounted)", () => {
+describe("G3 cache_read pricing (provider-aware, discounted)", () => {
   test("OpenAI: cached portion carved out of prompt_tokens at the cache rate", () => {
     // gpt-4o: in $2.5/1M, cached $1.25/1M (0.5×), out $10/1M.
     // prompt_tokens (1M) ALREADY includes the 1M cache_read, so cache is NOT
@@ -88,6 +89,8 @@ describe("G3 cache_read pricing (pricing.v2: provider-aware, discounted)", () =>
   })
 
   test("gpt-5 family cache-read is the 0.1× family rate (not gpt-4o's 0.5×)", () => {
+    // gpt-5.6-terra: in $2/M, cached $0.20/M after the 2026-07-30 cut.
+    expect(costUsd("gpt-5.6-terra", 1_000_000, 0, 1_000_000)).toBe(0.2)
     // gpt-5.4: in $2.5/1M, cached $0.25/1M (0.1×). A fully-cached 1M prompt prices
     // entirely at the discounted cache rate — pinned with a hard literal.
     expect(costUsd("gpt-5.4", 1_000_000, 0, 1_000_000)).toBe(0.25)

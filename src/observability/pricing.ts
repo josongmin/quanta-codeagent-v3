@@ -5,7 +5,7 @@
  * so prices can be re-derived after table drift. Unknown model ⇒ `null`
  * (not an error) — cost is best-effort evidence, never authoritative.
  */
-export const PRICING_VERSION = "pricing.v2" as const
+export const PRICING_VERSION = "pricing.v3" as const
 
 /**
  * Provider determines how the reported `inputTokens` (prompt) usage field
@@ -59,7 +59,7 @@ export interface ModelPrice {
 }
 
 /**
- * Public list prices, $/1M tokens. Sources (captured 2026-05-19):
+ * Public list prices, $/1M tokens. Sources (captured 2026-05-19 unless noted):
  * - OpenAI pricing page (openai.com/api/pricing):
  *     gpt-4o        $2.50 in / $10.00 out / $1.25 cached  (0.5×)
  *     gpt-4o-mini   $0.15 in / $0.60  out / $0.075 cached (0.5×)
@@ -90,11 +90,15 @@ const TABLE: Readonly<Record<string, ModelPrice>> = Object.assign(
     "claude-haiku-4-5": { inPerM: 1, outPerM: 5, cacheReadPerM: 0.1, cacheWritePerM: 1.25 },
     // ── gpt-5 family. CONFIRMED against OpenAI's API pricing page (captured
     // 2026-06-26: developers.openai.com/api/docs/pricing). The bench's primary
-    // models (`--model` default `gpt-5.4`; lanes gpt-5.4/gpt-5.5) are priced from
+    // models (`--model` default `gpt-5.6-terra`; lanes gpt-5.4/gpt-5.5) are priced from
     // this single SSOT. cache-read is the documented 0.1× input rate for this
     // family (NOT gpt-4o's 0.5×). gpt-5 / gpt-5-mini are legacy GPT-5 launch
     // prices (absent from the current page); their cache-read follows the 0.1×
     // family rate. Truly-unknown models (e.g. lane alias `gpt-5-2`) stay `null`.
+    // OpenAI model page captured 2026-08-26, after the 2026-07-30 price cut:
+    // $2 input / $0.20 cached input / $12 output. GPT-5.6+ cache writes are
+    // explicitly billed at 1.25× uncached input = $2.50/M.
+    "gpt-5.6-terra": { inPerM: 2, outPerM: 12, cacheReadPerM: 0.2, cacheWritePerM: 2.5 },
     "gpt-5.5": { inPerM: 5, outPerM: 30, cacheReadPerM: 0.5 },
     "gpt-5.4": { inPerM: 2.5, outPerM: 15, cacheReadPerM: 0.25 },
     "gpt-5.4-mini": { inPerM: 0.75, outPerM: 4.5, cacheReadPerM: 0.075 },

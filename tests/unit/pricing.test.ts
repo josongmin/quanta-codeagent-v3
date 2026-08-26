@@ -5,7 +5,8 @@ describe("PRICING_VERSION", () => {
   test("is the versioned price-table key", () => {
     // Bumped v1 → v2 with the provider-aware cache-read fix: the table now
     // carries per-model cacheReadPerM and OpenAI no longer double-counts cache.
-    expect(PRICING_VERSION).toBe("pricing.v2")
+    // Bumped v2 → v3 when gpt-5.6-terra gained an exact post-cut rate card.
+    expect(PRICING_VERSION).toBe("pricing.v3")
   })
 })
 
@@ -34,6 +35,11 @@ describe("costUsd", () => {
   test("gpt-4o-mini hand-computed value", () => {
     // $0.15 / 1M input, $0.60 / 1M output → 0.15 + 0.60 = 0.75
     expect(costUsd("gpt-4o-mini", 1_000_000, 1_000_000)).toBe(0.75)
+  })
+
+  test("gpt-5.6-terra uses the current post-cut public rates", () => {
+    // 2026-07-30 public rate: $2/M input + $12/M output.
+    expect(costUsd("gpt-5.6-terra", 1_000_000, 1_000_000)).toBe(14)
   })
 
   test("claude-opus-4-7 hand-computed value", () => {

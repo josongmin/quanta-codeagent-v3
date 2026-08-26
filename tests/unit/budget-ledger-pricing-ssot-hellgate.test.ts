@@ -17,6 +17,7 @@ import { costUsd } from "@/observability"
 
 describe("HELLGATE L4a — ledger pricing derives from the @/observability SSOT", () => {
   test("bench primary models are PRESENT (no silent sonnet fallback)", () => {
+    expect(DEFAULT_MODEL_PRICING["gpt-5.6-terra"]).toBeDefined()
     expect(DEFAULT_MODEL_PRICING["gpt-5.4"]).toBeDefined()
     expect(DEFAULT_MODEL_PRICING["gpt-5.5"]).toBeDefined()
   })
@@ -29,7 +30,13 @@ describe("HELLGATE L4a — ledger pricing derives from the @/observability SSOT"
   test("ledger total cost == costUsd for SSOT models (input+output, no cache)", () => {
     // RecordResult.cost is the TOTAL USD (a number). With no cache tokens the
     // ledger's additive model and costUsd agree exactly (nothing to carve out).
-    for (const model of ["gpt-5.4", "gpt-5.5", "claude-opus-4-7", "claude-haiku-4-5"]) {
+    for (const model of [
+      "gpt-5.6-terra",
+      "gpt-5.4",
+      "gpt-5.5",
+      "claude-opus-4-7",
+      "claude-haiku-4-5",
+    ]) {
       const ledger = defaultBudgetLedger()
       const { cost } = ledger.record({
         model,
