@@ -28,6 +28,8 @@ export type GoalWakeSkipReason =
   | "goal-not-active"
   | "authority-unavailable"
   | "revision-changed"
+  /** GOAL-06 rail 11 — raw user input moved the activity epoch since the arm. */
+  | "activity-epoch-changed"
   | "no-longer-quiescent"
   | "attempt-already-claimed"
 
@@ -39,7 +41,11 @@ export interface GoalWakeAttempt {
   /** A host-owned checkpoint counter; it changes whenever a new pursuit step
    * is eligible under the same objective revision. */
   readonly checkpointOrdinal: number
-  /** Collision-free stable encoding of the three fields above. */
+  /** GOAL-06 rail 11 — the controller-local raw-input epoch captured at arm
+   *  time; a fire or a dequeue that sees a different epoch drops the attempt
+   *  (only the continuation — the user's draft is never touched). */
+  readonly activityEpoch: number
+  /** Collision-free stable encoding of the identity fields above. */
   readonly attemptKey: string
 }
 
@@ -80,6 +86,8 @@ export interface GoalWakeFireInput {
   readonly stopped: boolean
   readonly expected: GoalWakeAttempt
   readonly current: ObjectiveDomainSnapshot | null
+  /** The controller's CURRENT epoch (compared with `expected.activityEpoch`). */
+  readonly activityEpoch: number
   readonly stillQuiescent: boolean
 }
 
@@ -117,6 +125,8 @@ export interface GoalWakeController {
   clearAttempts(threadId: string): void
   /** Permanent lifecycle stop. Idempotent; queued timer callbacks become no-ops. */
   stop(): void
+  /** GOAL-06 rail 11 — monotonic raw-input epoch (bumped by `onActivity`). */
+  activityEpoch(): number
 }
 
 const skip = (reason: GoalWakeSkipReason): GoalWakeDecision => ({ arm: false, skipReason: reason })
@@ -182,6 +192,7 @@ export const evaluateGoalWakeFire = (input: GoalWakeFireInput): GoalWakeDecision
   if ((input.current.attachGeneration ?? 0) !== input.expected.attachGeneration) {
     return skip("revision-changed")
   }
+  if (input.activityEpoch !== input.expected.activityEpoch) return skip("activity-epoch-changed")
   if (!input.stillQuiescent) return skip("no-longer-quiescent")
   return { arm: true }
 }
@@ -200,12 +211,14 @@ const makeAttempt = (
   objectiveId: string,
   objectiveRevision: number,
   attachGeneration: number,
+  activityEpoch: number,
 ): GoalWakeAttempt => ({
   threadId: input.threadId,
   objectiveId,
   objectiveRevision,
   attachGeneration,
   checkpointOrdinal: input.checkpointOrdinal,
+  activityEpoch,
   attemptKey: keyFor(
     input.threadId,
     objectiveId,
@@ -310,6 +323,7 @@ export const createGoalWakeController = (deps: GoalWakeControllerDeps): GoalWake
     Number.isFinite(deps.quietWindowMs) && deps.quietWindowMs > 0 ? deps.quietWindowMs : 1
   let stopped = false
   let generation = 0
+  let epoch = 0
   let pending: GoalWakeTimerHandle | undefined
 
   const reportSkip = (attempt: GoalWakeAttempt, reason: GoalWakeSkipReason): void => {
@@ -371,19 +385,27 @@ export const createGoalWakeController = (deps: GoalWakeControllerDeps): GoalWake
         current.state.objective.objectiveId,
         revision,
         current.attachGeneration ?? 0,
+        epoch,
       ),
       delayMs: resolvedDelay,
     }
   }
 
   const fireAttempt = (attempt: GoalWakeAttempt, callbackGeneration: number): void => {
-    if (callbackGeneration !== generation || stopped) return
+    if (stopped) return
+    if (callbackGeneration !== generation) {
+      // A stale callback (the arm was replaced or cancelled). When raw input
+      // moved the epoch since the arm, say so typed instead of vanishing.
+      if (attempt.activityEpoch !== epoch) reportSkip(attempt, "activity-epoch-changed")
+      return
+    }
     pending = undefined
     const fire = evaluateGoalWakeFire({
       enabled: deps.enabled,
       stopped,
       expected: attempt,
       current: readCurrent(attempt.threadId),
+      activityEpoch: epoch,
       stillQuiescent: readHostQuiescence(deps, attempt.threadId),
     })
     if (!fire.arm) {
@@ -428,6 +450,7 @@ export const createGoalWakeController = (deps: GoalWakeControllerDeps): GoalWake
     arm: (input): GoalWakeAttempt | undefined => armInternal(input, false),
     reset: (input): GoalWakeAttempt | undefined => armInternal(input, true),
     onActivity: (): void => {
+      epoch += 1
       generation += 1
       clearPending()
     },
@@ -442,5 +465,6 @@ export const createGoalWakeController = (deps: GoalWakeControllerDeps): GoalWake
       generation += 1
       clearPending()
     },
+    activityEpoch: (): number => epoch,
   }
 }

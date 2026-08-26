@@ -347,6 +347,7 @@ const armGoalWake = (args: {
                 threadId: attempt.threadId,
                 objectiveRevision: attempt.objectiveRevision,
                 attemptKey: attempt.attemptKey,
+                activityEpoch: attempt.activityEpoch,
               },
             })
           },

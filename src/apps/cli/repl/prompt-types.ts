@@ -7,6 +7,8 @@ export interface GoalContinuationPromptMeta {
   readonly threadId: string
   readonly objectiveRevision: number
   readonly attemptKey: string
+  /** GOAL-06 rail 11 — the wake controller's raw-input epoch at arm time. */
+  readonly activityEpoch?: number
 }
 
 export type CliPromptInput =

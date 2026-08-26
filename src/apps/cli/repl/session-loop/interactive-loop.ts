@@ -42,10 +42,21 @@ export const isStaleGoalContinuation = (
   prompt: ReturnType<typeof normalizeCliPromptInput>,
   objectiveStore: InteractiveBranchCtx["objectiveStore"],
   liveThreadId: string | undefined,
+  goalWakeSlot?: InteractiveBranchCtx["goalWakeSlot"],
 ): boolean => {
   const meta = prompt.goalContinuation
   if (meta === undefined) return false
   if (liveThreadId === undefined || meta.threadId !== liveThreadId) return true
+  // GOAL-06 rail 11 — raw user input since the arm moved the controller's
+  // epoch: drop ONLY this continuation (the user's draft is untouched).
+  const liveEpoch = goalWakeSlot?.current?.activityEpoch?.()
+  if (
+    meta.activityEpoch !== undefined &&
+    liveEpoch !== undefined &&
+    liveEpoch !== meta.activityEpoch
+  ) {
+    return true
+  }
   if (objectiveStore === undefined) return true
   const domain = asObjectiveReadPort(objectiveStore).readDomain(meta.threadId)
   return (
@@ -135,7 +146,9 @@ export const runInteractiveLoop = async (
     const next = await promptSource.next(abort.signal)
     if (next === null) break
     const prompt = normalizeCliPromptInput(next)
-    if (isStaleGoalContinuation(prompt, objectiveStore, getSurfaceState().sessionId)) {
+    if (
+      isStaleGoalContinuation(prompt, objectiveStore, getSurfaceState().sessionId, goalWakeSlot)
+    ) {
       // A queued continuation is data, not proof. Drop an old revision before
       // it can start an agent body, then let the current authority state arm a
       // fresh quiet-window attempt if it remains active.

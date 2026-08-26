@@ -15,6 +15,9 @@ export interface GoalWakeSignal {
    * It starts a fresh quiet window after the user-visible command completed. */
   onLocalInputSettled(): void
   onTurnSettled(): void
+  /** GOAL-06 rail 11 — raw-input epoch; a queued continuation whose captured
+   *  epoch no longer matches is dropped at dequeue (the draft is untouched). */
+  activityEpoch?(): number
 }
 
 export interface GoalWakeSignalSlot {

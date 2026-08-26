@@ -95,6 +95,7 @@ describe("goal wake controller pure fences", () => {
       objectiveRevision: 3,
       attachGeneration: 0,
       checkpointOrdinal: 1,
+      activityEpoch: 0,
       attemptKey: '["thread-1","objective:thread-1",3,0,1]',
     }
     expect(
@@ -103,6 +104,7 @@ describe("goal wake controller pure fences", () => {
         stopped: false,
         expected,
         current: domain(4),
+        activityEpoch: 0,
         stillQuiescent: true,
       }),
     ).toEqual({ arm: false, skipReason: "revision-changed" })
@@ -112,6 +114,7 @@ describe("goal wake controller pure fences", () => {
         stopped: false,
         expected,
         current: domain(3),
+        activityEpoch: 0,
         stillQuiescent: false,
       }),
     ).toEqual({ arm: false, skipReason: "no-longer-quiescent" })
@@ -121,6 +124,7 @@ describe("goal wake controller pure fences", () => {
         stopped: false,
         expected,
         current: { ...domain(3), attachGeneration: 1 },
+        activityEpoch: 0,
         stillQuiescent: true,
       }),
     ).toEqual({ arm: false, skipReason: "revision-changed" })
@@ -264,6 +268,7 @@ describe("goal wake controller lifecycle", () => {
           objectiveRevision: 1,
           attachGeneration: 0,
           checkpointOrdinal: ordinal,
+          activityEpoch: 0,
           attemptKey: `attempt-${ordinal}`,
         })
         ?.commit()
@@ -276,11 +281,73 @@ describe("goal wake controller lifecycle", () => {
         objectiveRevision: 2,
         attachGeneration: 1,
         checkpointOrdinal: 0,
+        activityEpoch: 0,
         attemptKey: "replacement",
       })
       ?.commit()
     expect(registry.size()).toBe(1)
     registry.clearThread("thread-1")
     expect(registry.size()).toBe(0)
+  })
+
+  test("rail 11 — raw activity between arm and fire moves the epoch; a stale fire is dropped TYPED and the attempt carries the epoch", () => {
+    const timer = fakeTimer()
+    const skips: string[] = []
+    const launched: number[] = []
+    const controller = createGoalWakeController({
+      enabled: true,
+      quietWindowMs: 15_000,
+      timer,
+      readDomain: () => domain(1),
+      stillQuiescent: () => true,
+      enqueue: (attempt) => {
+        launched.push(attempt.activityEpoch)
+      },
+      onSkip: (_, reason) => skips.push(reason),
+    })
+    expect(controller.activityEpoch()).toBe(0)
+    const armed = controller.arm({ threadId: "thread-1", checkpointOrdinal: 0 })
+    expect(armed?.activityEpoch).toBe(0)
+    controller.onActivity()
+    expect(controller.activityEpoch()).toBe(1)
+    // a timer implementation that cannot cancel in flight still fires the stale callback
+    timer.fire()
+    expect(launched).toEqual([])
+    expect(skips).toEqual(["activity-epoch-changed"])
+    controller.reset({ threadId: "thread-1", checkpointOrdinal: 1 })
+    timer.fire()
+    expect(launched).toEqual([1])
+  })
+
+  test("rail 11 — the fire fence rejects an attempt whose epoch no longer matches", () => {
+    const expected = {
+      threadId: "thread-1",
+      objectiveId: "obj-1",
+      objectiveRevision: 1,
+      attachGeneration: 0,
+      checkpointOrdinal: 0,
+      activityEpoch: 2,
+      attemptKey: "k",
+    }
+    expect(
+      evaluateGoalWakeFire({
+        enabled: true,
+        stopped: false,
+        expected,
+        current: domain(1),
+        activityEpoch: 3,
+        stillQuiescent: true,
+      }),
+    ).toEqual({ arm: false, skipReason: "activity-epoch-changed" })
+    expect(
+      evaluateGoalWakeFire({
+        enabled: true,
+        stopped: false,
+        expected,
+        current: domain(1),
+        activityEpoch: 2,
+        stillQuiescent: true,
+      }),
+    ).toEqual({ arm: true })
   })
 })

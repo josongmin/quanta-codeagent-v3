@@ -50,6 +50,8 @@ export interface GoalWakeLifecycle {
   onLocalInputSettled(): void
   onTurnSettled(): void
   stop(): void
+  /** GOAL-06 rail 11 — the controller's raw-input epoch (carried on every attempt). */
+  activityEpoch(): number
 }
 
 export interface StartGoalWakeOpts {
@@ -209,5 +211,6 @@ export const startGoalWakeController = (opts: StartGoalWakeOpts): GoalWakeLifecy
     onLocalInputSettled: resetForNextCheckpoint,
     onTurnSettled: resetForNextCheckpoint,
     stop: () => controller.stop(),
+    activityEpoch: () => controller.activityEpoch(),
   }
 }

@@ -335,4 +335,32 @@ describe("goal wake host binding", () => {
     await Promise.resolve()
     expect(resumed).toEqual([TID])
   })
+
+  test("rail 11 — the lifecycle exposes the activity epoch and the enqueued attempt carries it", async () => {
+    const store = createObjectiveStore()
+    store.create(TID, { goal: "ship", successCriteria: ["c"] })
+    const timer = fakeTimeout()
+    const epochs: number[] = []
+    const wake = startGoalWakeController({
+      enabled: true,
+      threadId: TID,
+      quietWindowMs: 15_000,
+      probes: probes(store, async () => undefined),
+      readDomain: (id) => asObjectiveAuthority(store).readDomain(id),
+      resumeAttempt: async (_id, attempt) => {
+        epochs.push(attempt.activityEpoch)
+      },
+      setTimeoutFn: timer.set,
+      clearTimeoutFn: timer.clear,
+    })
+    expect(wake?.activityEpoch()).toBe(0)
+    wake?.onActivity()
+    wake?.onActivity()
+    expect(wake?.activityEpoch()).toBe(2)
+    wake?.onTurnSettled()
+    timer.fire()
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(epochs).toEqual([2])
+  })
 })
