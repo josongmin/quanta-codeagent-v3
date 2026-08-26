@@ -175,9 +175,14 @@ describe("no-raw-process.env-knob ratchet (ADR-0503 P4)", () => {
     expect(files, "the walk read no source files — the ceiling below is vacuous").toBeGreaterThan(
       2500,
     )
-    expect(total, "raw-env reads collapsed to near zero — verify, then TIGHTEN").toBeGreaterThan(
-      CEILING / 2,
-    )
+    // A `total > CEILING / 2` floor was tried here and REMOVED after audit. The
+    // burn-down contract documented above lowers the ceiling to each new floor,
+    // so `CEILING := total` makes the assertion `total > total / 2` — true for
+    // every total ≥ 1, i.e. nothing. Its only live effect was the opposite of the
+    // intent: burn 45 → 24 without touching the ceiling and the suite goes red on
+    // real progress, and the terminal state (total 0) fails for every ceiling.
+    // The `files` floor above already covers the whole stated threat — a walk
+    // that read nothing — and it is a measurement rather than a policy number.
     expect(total).toBeLessThanOrEqual(CEILING)
   }, 15_000)
 

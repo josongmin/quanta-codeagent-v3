@@ -112,8 +112,63 @@ const keyForToken = (tok: string): string | undefined => {
  * script named it, and each of those three was a hand-written copy of a fact
  * nobody rechecked.
  */
+/**
+ * Every positional a gate hands to `bun test`, verbatim.
+ *
+ * Separate from `gatedRoots` because the two answer different questions.
+ * `gatedRoots` normalises a token to the directory KEY it covers, which is what
+ * the allowlist needs — but it also means the ratchet never looks at what the
+ * token actually selects. An audit drove exactly that: mutating a gate to
+ * `./src/zzz-nonexistent/` left the ratchet GREEN, because `zzz-nonexistent`
+ * still normalises to `src`. And `bun test` exits 0 whenever ANY positional
+ * matches, so a root selecting zero files is silent on both sides.
+ */
+/**
+ * How many test files a gate positional actually selects.
+ *
+ * Mirrors bun's semantics rather than treating the token as a directory: a
+ * positional is a SUBSTRING FILTER over absolute paths, which is why `src/` and
+ * `./src/` select different sets (`src/` also sweeps
+ * `apps/web-frontend/src/`). Comparing on the absolute path with the leading
+ * `./` stripped reproduces that, and it is the only way the count means what the
+ * gate will really run.
+ */
+export const countTestFilesUnder = (token: string): number => {
+  const needle = token.replace(/^\.\//, "")
+  let n = 0
+  const walk = (dir: string): void => {
+    for (const ent of readdirSync(dir, { withFileTypes: true })) {
+      if (ent.name === "node_modules" || ent.name.startsWith(".")) continue
+      const abs = join(dir, ent.name)
+      if (ent.isDirectory()) walk(abs)
+      else if (
+        (abs.endsWith(".test.ts") || abs.endsWith(".test.tsx")) &&
+        abs.slice(REPO_ROOT.length + 1).includes(needle)
+      ) {
+        n++
+      }
+    }
+  }
+  walk(REPO_ROOT)
+  return n
+}
+
+export const gateTokens = (allScripts: Readonly<Record<string, string>>): readonly string[] => {
+  const gates = ["test", "test:unit", "test:integration", "test:ci", "test:shard"]
+  const out = new Set<string>()
+  for (const g of gates) {
+    for (const m of (allScripts[g] ?? "").matchAll(/\bbun test ([^&|]*)/g)) {
+      for (const tok of (m[1] ?? "").split(/\s+/)) {
+        if (tok.length > 0 && !tok.startsWith("-")) out.add(tok)
+      }
+    }
+  }
+  return [...out].sort()
+}
+
 export const gatedRoots = (allScripts: Readonly<Record<string, string>>): readonly string[] => {
-  const gates = ["test", "test:unit", "test:integration", "test:ci"]
+  // `test:shard` carries the same roots and nothing kept it in this list.
+  const gates = ["test", "test:unit", "test:integration", "test:ci", "test:shard"]
   const roots = new Set<string>()
   for (const g of gates) {
     for (const m of (allScripts[g] ?? "").matchAll(/\bbun test ([^&|]*)/g)) {
@@ -263,6 +318,27 @@ describe("gated test scope", () => {
         `no script mentions ${path} — it is unreachable however it is labelled`,
       ).toBe(true)
     }
+  })
+
+  test("🔴 every gate positional selects at least one real test file", () => {
+    // The hole this closes: the ratchet verified that a token APPEARS in
+    // package.json, never that it EXECUTES anything. Mutating `./src/` to
+    // `./src/zzz-nonexistent/` kept it green, and `bun test` exits 0 as long as
+    // some other positional matched — so a gate silently covering nothing is
+    // invisible from both directions.
+    const tokens = gateTokens(scripts())
+    expect(
+      tokens.length,
+      "no gate positionals parsed — the check below is vacuous",
+    ).toBeGreaterThan(4)
+    const empty = tokens.filter((t) => countTestFilesUnder(t) === 0).sort()
+    expect(
+      empty,
+      empty.length === 0
+        ? ""
+        : "these gate positionals match NO test file — the gate runs them and reports success " +
+            "over nothing. Fix the path in package.json.",
+    ).toEqual([])
   })
 
   test("no out-of-band entry is stale — each directory still exists and holds tests", () => {
