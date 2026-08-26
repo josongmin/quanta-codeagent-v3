@@ -263,6 +263,12 @@ describe("tool-surface manifest — FULL-universe completeness (the guard that w
       // but leaf tool factories that get composed at the runner level). Extend the
       // scan so these tools cannot silently escape the two-way drift guard.
       "grep -rhoE 'name: \"[a-z_]+\"' src/tool src/subagent src/agent/tier1 src/agent/budget-tool.ts src/agent/memory-tools.ts src/skill/skill-creator.ts",
+      // Anchored on this file, not on the ambient cwd. Without it the paths above
+      // resolve against wherever the runner was launched: from a foreign working
+      // directory grep reported `No such file or directory` and 3 of this file's
+      // 36 assertions failed. A completeness scan that cannot reach its sources
+      // cannot tell "no orphan tools" from "I never looked".
+      { cwd: join(import.meta.dir, "..", "..") },
     ).toString()
     const re = /name: "([a-z_]+)"/g
     const found = new Set<string>()

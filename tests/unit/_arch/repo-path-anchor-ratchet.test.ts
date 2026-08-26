@@ -55,6 +55,8 @@ import { describe, expect, test } from "bun:test"
 import { readdirSync, readFileSync } from "node:fs"
 import { join } from "node:path"
 
+import { stripComments } from "./slice-boundary-scanner"
+
 const REPO_ROOT = join(import.meta.dir, "..", "..", "..")
 
 /**
@@ -75,8 +77,18 @@ const REPO_ROOT = join(import.meta.dir, "..", "..", "..")
 const FS_ENTRY_POINTS =
   /\b(readFileSync|readdirSync|existsSync|statSync|lstatSync|readFile|readdir|stat|createReadStream|Bun\.file|Glob)\s*\(\s*(?:\[\s*)?["'`]([^"'`\n]+)["'`]/g
 
-/** Shell-outs hide the path inside the command string rather than as the argument. */
-const SHELL_ENTRY_POINTS = /\b(execSync|spawnSync|Bun\.spawnSync|Bun\.spawn)\s*\(\s*[`"']([^`"']*)/g
+/**
+ * Shell-outs hide the path inside the command string rather than as the argument.
+ *
+ * The delimiter is back-referenced so the capture runs to the CLOSING quote of the
+ * same kind. An earlier `[^`"']*` stopped at the first quote of ANY kind, so
+ * `execSync("grep -rhoE 'name: …' src/tool …")` captured only `grep -rhoE ` and
+ * everything that mattered sat past the inner `'`. That is how the flagship
+ * offender — `tool-surface-manifest-hellgate`, 3 failures under a foreign cwd —
+ * stayed invisible while this ratchet reported the tree clean.
+ */
+const SHELL_ENTRY_POINTS =
+  /\b(execSync|spawnSync|Bun\.spawnSync|Bun\.spawn)\s*\(\s*(["'`])((?:\\.|(?!\2)[\s\S])*?)\2/g
 
 const REPO_RELATIVE_ARG = /^(src|tests|tools|docs|scripts)(\/|$)/
 const REPO_RELATIVE_IN_COMMAND = /(^|\s)(src|tests|tools|docs|scripts)(\/|\s|$)/
@@ -97,14 +109,25 @@ const templatePlaceholder = (name: string): string => ["$", "{", name, "}"].join
  * This is why the assertion below is a ceiling with an explicit admit-list and
  * not a claim of totality.
  */
-export const cwdRelativeRepoReads = (source: string): readonly string[] => {
+export const cwdRelativeRepoReads = (rawSource: string): readonly string[] => {
+  // Comments are removed FIRST, and that is not cosmetic. The detector's first
+  // version anchored the path literal to the call with `\s*`, which a comment
+  // between the two breaks. `tool-surface-manifest-hellgate.test.ts` puts NINE
+  // lines of comment between `execSync(` and its `grep … src/tool …` string, so
+  // the detector reported the whole tree clean while that file failed 3/36 under
+  // a foreign cwd — the ratchet committing the exact defect it forbids.
+  //
+  // `stripComments` is the one in `slice-boundary-scanner.ts`, reused rather than
+  // rewritten: this ratchet's own subject is what happens when 40 authors each
+  // hand-roll the same primitive.
+  const source = stripComments(rawSource)
   const out: string[] = []
   for (const m of source.matchAll(FS_ENTRY_POINTS)) {
     const arg = m[2] ?? ""
     if (REPO_RELATIVE_ARG.test(arg)) out.push(`${m[1]}("${arg}")`)
   }
   for (const m of source.matchAll(SHELL_ENTRY_POINTS)) {
-    const cmd = m[2] ?? ""
+    const cmd = m[3] ?? ""
     if (!REPO_RELATIVE_IN_COMMAND.test(cmd)) continue
     // An explicit `cwd:` IS an anchor — `execSync("rg … src", {cwd: REPO_ROOT})`
     // is the fixed form of this very defect, and flagging it would ask the author
@@ -239,7 +262,10 @@ describe("repo-path anchoring", () => {
       // …but a DISTANT `cwd:` belonging to some other call does not vouch for it.
       expect(
         cwdRelativeRepoReads(
-          `execSync(\`rg -l x src\`)\n${"// pad\n".repeat(40)}spawnSync(a, { cwd: R })`,
+          // Padding must NOT be comments: the detector strips those first, which
+          // would pull the distant `cwd:` back inside the 200-character window and
+          // make this case pass for the wrong reason.
+          `execSync(\`rg -l x src\`)\n${"const pad = 1\n".repeat(20)}spawnSync(a, { cwd: R })`,
         ),
       ).toHaveLength(1)
     })
