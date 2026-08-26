@@ -21,8 +21,12 @@
  * — `...(opts ?? {})` typechecks — which is the more dangerous kind: a cast that
  * is load-bearing for nothing still silently absorbs the next real drift.
  *
- * SCOPE, deliberately narrow. This is not a repo-wide ban. Nine of these casts
- * live in `src/`, and most are union-dispatch narrowing (`dispatch-6.ts` hands a
+ * SCOPE, deliberately narrow. This is not a repo-wide ban. An earlier version of
+ * this comment said "nine of these casts live in src/" — MEASURED with this
+ * file's own detector, it is 258 of 3319 non-test files, and the commit that
+ * claimed to have corrected the figure never edited this paragraph. The
+ * rationale survives the real number, but only because of what those sites ARE:
+ * most are union-dispatch narrowing (`dispatch-6.ts` hands a
  * union member to its handler) where the alternative is a discriminated-union
  * rewrite and the cast is honest. Banning those would be papering over a real
  * distinction to make a number look better. The port directory is different:
@@ -33,6 +37,7 @@ import { describe, expect, test } from "bun:test"
 import { readdirSync, readFileSync, statSync } from "node:fs"
 import { dirname, join, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
+import { stripComments } from "../../../_shared/strip-comments"
 
 // `fileURLToPath`, not `.pathname` — the latter stays percent-encoded, so the
 // guard crashed with ENOENT on any checkout whose path contains a space.
@@ -60,10 +65,6 @@ const SUPPRESSION =
  * `bun run typecheck` green.
  */
 const TS_DIRECTIVE = /@ts-(ignore|expect-error|nocheck)\b/
-
-/** Comments are not code — the files here explain the rule in prose. */
-const stripComments = (src: string): string =>
-  src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/[^\n]*/g, "$1")
 
 const sources = (dir: string, into: string[] = []): string[] => {
   for (const entry of readdirSync(dir)) {

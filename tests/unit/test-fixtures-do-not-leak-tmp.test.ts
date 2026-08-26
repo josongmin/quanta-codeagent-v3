@@ -15,6 +15,7 @@
 import { describe, expect, test } from "bun:test"
 import { readdirSync, readFileSync, statSync } from "node:fs"
 import { join } from "node:path"
+import { stripComments } from "./_shared/strip-comments"
 
 const ROOTS = ["src", "tests", "tools"] as const
 
@@ -56,56 +57,6 @@ const testFiles = (dir: string, into: string[] = []): string[] => {
  * deleted everything up to the next `*` + `/`, which silently removed real code
  * from the scan. A tiny scanner is the honest way; regex cannot see quoting.
  */
-/** How far a quoted run starting at `i` extends, past any backslash escapes. */
-const endOfQuote = (src: string, start: number): number => {
-  const quote = src[start]
-  let i = start + 1
-  while (i < src.length) {
-    if (src[i] === "\\") {
-      i += 2
-      continue
-    }
-    if (src[i] === quote) return i + 1
-    i += 1
-  }
-  return i
-}
-
-/** How far a comment starting at `i` extends. `-1` when `i` starts no comment. */
-const endOfComment = (src: string, i: number): number => {
-  if (src[i] !== "/") return -1
-  if (src[i + 1] === "/") {
-    const nl = src.indexOf("\n", i)
-    return nl === -1 ? src.length : nl
-  }
-  if (src[i + 1] === "*") {
-    const close = src.indexOf("*/", i + 2)
-    return close === -1 ? src.length : close + 2
-  }
-  return -1
-}
-
-const stripComments = (src: string): string => {
-  let out = ""
-  let i = 0
-  while (i < src.length) {
-    const c = src[i] as string
-    if (c === '"' || c === "'" || c === "`") {
-      const end = endOfQuote(src, i)
-      out += src.slice(i, end)
-      i = end
-      continue
-    }
-    const commentEnd = endOfComment(src, i)
-    if (commentEnd !== -1) {
-      i = commentEnd
-      continue
-    }
-    out += c
-    i += 1
-  }
-  return out
-}
 
 /**
  * Every way to register the hook, not just the spelling we happened to use.
@@ -114,7 +65,7 @@ const stripComments = (src: string): string => {
  * green.
  */
 const EXIT_HOOK =
-  /process\s*(\.\s*(on|once|addListener|prependListener|prependOnceListener)|\[\s*["'](on|once|addListener)["']\s*\])\s*\(\s*["`']exit["`']/
+  /process\s*(\.\s*[A-Za-z]*[lL]istener|\.\s*(on|once)|\[\s*["'`][A-Za-z]+["'`]\s*\])\s*\(\s*["`']exit["`']/
 
 describe("temp-dir cleanup is registered with the test runner", () => {
   test('no test file relies on `process.on("exit")`, which bun test never fires', () => {
@@ -143,6 +94,11 @@ describe("temp-dir cleanup is registered with the test runner", () => {
     expect(detect('process.once("exit", cleanup)')).toBe(true)
     expect(detect('process.addListener("exit", cleanup)')).toBe(true)
     expect(detect('process["on"]("exit", cleanup)')).toBe(true)
+    // every bracket spelling, not the three we happened to think of
+    expect(detect('process["prependListener"]("exit", cleanup)')).toBe(true)
+    expect(detect('process["prependOnceListener"]("exit", cleanup)')).toBe(true)
+    expect(detect("process[`on`]('exit', cleanup)")).toBe(true)
+    expect(detect('process.prependListener("exit", cleanup)')).toBe(true)
     expect(detect("afterAll(() => rmSync(d))")).toBe(false)
     // …and the comment-stripping does not become a blanket amnesty: a line that
     // merely FOLLOWS a comment is still code.
