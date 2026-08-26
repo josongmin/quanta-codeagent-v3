@@ -130,6 +130,54 @@ export const buildProMaxImageProvenanceCommand = (input: {
   ].join(" ")
 }
 
+/** One line's verdict: the record it names, or the fault that disqualifies it.
+ *
+ *  Split out of {@link parseProMaxImageProvenance} so the loop states only what
+ *  it COLLECTS and this states what a line has to satisfy. Every branch is a
+ *  measured failure, not defensive padding — see each message. */
+const readProvenanceLine = (
+  line: string,
+  seen: ReadonlySet<string>,
+): { readonly record: ProMaxImageProvenanceRecord } | { readonly fault: string } => {
+  // EXACTLY three fields. `image_name` is read out of the checkout's golden and
+  // printed unescaped, so a tab inside it shifts the digest column and a crafted
+  // golden supplies a pin the daemon never produced. Destructuring three names
+  // out of `split("\t")` silently discarded the rest, which is what made that
+  // invisible.
+  const fields = line.split("\t")
+  if (fields.length !== 3) {
+    return {
+      fault:
+        `image-provenance line has ${fields.length} tab-separated field(s), expected 3 — ` +
+        `an image name carrying a tab can shift the digest column: ${JSON.stringify(line.slice(0, 80))}`,
+    }
+  }
+  const [instanceId, imageName, repoDigest] = fields
+  if (instanceId === undefined || imageName === undefined) {
+    return { fault: `unreadable image-provenance line: ${JSON.stringify(line.slice(0, 80))}` }
+  }
+  // A repeated id means two different pins for one verdict; the receipt layer
+  // refuses that, and the parser must not hand it up in the first place.
+  if (seen.has(instanceId)) {
+    return {
+      fault: `${instanceId}: reported more than once — two pins cannot describe one verdict`,
+    }
+  }
+  if (repoDigest === undefined || repoDigest.trim() === "") {
+    return {
+      fault:
+        `${instanceId}: the daemon reported NO digest for ${imageName} — the grade ran against ` +
+        "an image that cannot be pinned, so it cannot be replayed",
+    }
+  }
+  if (!REPO_DIGEST.test(repoDigest.trim())) {
+    return {
+      fault: `${instanceId}: ${JSON.stringify(repoDigest.trim())} is not a repo@sha256 digest`,
+    }
+  }
+  return { record: { instanceId, imageName, repoDigest: repoDigest.trim() } }
+}
+
 /** Parse the program's output against the ASSIGNED set, fail-closed. */
 export const parseProMaxImageProvenance = (
   stdout: string,
@@ -141,43 +189,13 @@ export const parseProMaxImageProvenance = (
 
   for (const line of stdout.split("\n")) {
     if (line.trim() === "") continue
-    // EXACTLY three fields. `image_name` is read out of the checkout's golden
-    // and printed unescaped, so a tab inside it shifts the digest column and a
-    // crafted golden supplies a pin the daemon never produced. Destructuring
-    // three names out of `split("\t")` silently discarded the rest, which is
-    // what made that invisible.
-    const fields = line.split("\t")
-    if (fields.length !== 3) {
-      faults.push(
-        `image-provenance line has ${fields.length} tab-separated field(s), expected 3 — ` +
-          `an image name carrying a tab can shift the digest column: ${JSON.stringify(line.slice(0, 80))}`,
-      )
+    const verdict = readProvenanceLine(line, seen)
+    if ("fault" in verdict) {
+      faults.push(verdict.fault)
       continue
     }
-    const [instanceId, imageName, repoDigest] = fields
-    if (instanceId === undefined || imageName === undefined) {
-      faults.push(`unreadable image-provenance line: ${JSON.stringify(line.slice(0, 80))}`)
-      continue
-    }
-    // A repeated id means two different pins for one verdict; the receipt layer
-    // refuses that, and the parser must not hand it up in the first place.
-    if (seen.has(instanceId)) {
-      faults.push(`${instanceId}: reported more than once — two pins cannot describe one verdict`)
-      continue
-    }
-    seen.add(instanceId)
-    if (repoDigest === undefined || repoDigest.trim() === "") {
-      faults.push(
-        `${instanceId}: the daemon reported NO digest for ${imageName} — the grade ran against ` +
-          "an image that cannot be pinned, so it cannot be replayed",
-      )
-      continue
-    }
-    if (!REPO_DIGEST.test(repoDigest.trim())) {
-      faults.push(`${instanceId}: ${JSON.stringify(repoDigest.trim())} is not a repo@sha256 digest`)
-      continue
-    }
-    images.push({ instanceId, imageName, repoDigest: repoDigest.trim() })
+    seen.add(verdict.record.instanceId)
+    images.push(verdict.record)
   }
 
   for (const id of assignedInstanceIds) {

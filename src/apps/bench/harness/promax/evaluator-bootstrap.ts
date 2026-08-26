@@ -240,7 +240,16 @@ export const buildProMaxBootstrapSpec = (
  * Split out of {@link buildProMaxBootstrapPlan} so each phase has one owner and
  * neither grows past the size ratchet as probes are added.
  */
-const agentPhaseProbes = (spec: ProMaxEvaluatorBootstrapSpec): ProMaxBootstrapCommand[] => {
+/**
+ * The three GOLD-ABSENCE probes, split out of {@link agentPhaseProbes} — they
+ * were two thirds of it, and each carries the measurement that made it exist.
+ * Grouped because they answer ONE question ("is the answer key reachable from
+ * this box?") in three ways that a single `test` cannot: a symlink at the root
+ * survives teardown and then reads as absent, `test ! -e` is TRUE on EACCES so
+ * an unreadable campaign root reported CLEAN, and a stopped grader CONTAINER
+ * still holds the tree. Fail-closed, first, before anything is materialized.
+ */
+const goldAbsenceProbes = (spec: ProMaxEvaluatorBootstrapSpec): ProMaxBootstrapCommand[] => {
   const root = spec.checkoutRoot
   return [
     {
@@ -339,6 +348,12 @@ const agentPhaseProbes = (spec: ProMaxEvaluatorBootstrapSpec): ProMaxBootstrapCo
         "survive — a `g_*` container had the GOLDEN patch and the test patch copied into it, " +
         "and a stopped container is still readable with `docker cp`",
     },
+  ]
+}
+
+const agentPhaseProbes = (spec: ProMaxEvaluatorBootstrapSpec): ProMaxBootstrapCommand[] => {
+  return [
+    ...goldAbsenceProbes(spec),
     {
       step: "campaign-root",
       phase: "agent",
