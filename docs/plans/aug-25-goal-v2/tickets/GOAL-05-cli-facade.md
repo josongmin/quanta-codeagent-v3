@@ -67,5 +67,5 @@ set/edit/pause/resume/clear가 authority 전이표와 1:1이 되게 하고, 상�
 GOAL-04 rail + `bun test tests/unit/goal-cmd-hellgate.test.ts tests/unit/apps/cli`.
 
 ## 함정
-- `CLI_FEATURE_GATES`는 default-OFF gate를 미설정 시 "1"로 seed하는 역가 있음(memory) — `QUANTA_GOAL` 자체는 seed 대상에서 제외(default OFF 유지).
+- `CLI_FEATURE_GATES`는 default-OFF gate를 미설정 시 "1"로 seed하는 역가 있음(memory) — `QUANTA_GOAL` 자체는 seed 대상에서 제외. (2026-08-27 확정: GOAL-10 promotion 이후 `QUANTA_GOAL`은 **default ON**, `QUANTA_GOAL=0`이 공개 opt-out. 명시 내부 gate가 우선. README 결정 기록 참조.)
 - knob 3계통(runtime-config / knob-inventory / feature-gates) 모두에 등록해야 `knob-inventory` 테스트가 통과.

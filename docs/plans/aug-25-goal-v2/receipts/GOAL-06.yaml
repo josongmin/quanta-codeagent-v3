@@ -1,0 +1,32 @@
+ticket: GOAL-06
+kind: implementation + remediation audit
+recordedAt: 2026-08-27T02:40:00Z
+testedSourceSha: main 303bad5a4 → 90ad48022 (P1) → 48d020ac5 (P2) → 8418df17d (P3); receipts/tests commit S (this file)
+lineage: the merged lanes (9b21d2fd2) shipped the Codex controller; this receipt records the audit of that controller against tickets/GOAL-06 and the three remediation commits.
+violationsFound (probe-confirmed on main before remediation):
+  - rail 4 / stop condition: user maxTurns 5 with product cap 3 armed 5 autonomous attempts (`turnCap = budget.maxTurns ?? cap`; host wrote the cap INTO the user budget via amendBudget)
+  - rail 5: user-requested goal work consumed the product counter (turnsUsed was the cap counter)
+  - rail 13: authority accepted 25 autonomous begins under cap 20 (no recheck)
+  - rail 16: a goal without a stopping contract armed (15 s) and would consume the cap
+  - stop condition "no public unsafe override": QUANTA_GOAL_MAX_AUTONOMOUS_TURNS=999 → 999, QUANTA_GOAL_MAX_BACKOFF_MS unbounded
+  - structural: controller `resolveDelayMs?.(current) ?? delayMs` turned every policy skip into a base-quiet arm (cap advisory)
+  - rail 11: no activity epoch anywhere (dequeue only checked thread/status/revision)
+  - PTY 85/87: 4 real fire waits, one sub-clamp case, 122 s wall
+scope:
+  P1 (90ad48022): goal-wake-policy (autonomousAllowance, resolveProductAutonomousTurnCap, safePolicy clamps, validation-contract-missing skip, limitedBy on skip), authority beginAttempt recheck (hard-cap-exhausted / budget-exhausted), cell budgetLimitSource + budget.limitedBy + cap-aware derived status, store/ctx productAutonomousTurnCap (lower-only), host no cap-into-budget + one clamp warning, controller policy-skip binding, runtime-config clamps + knob text, tool message Record
+  P2 (48d020ac5): controller activityEpoch (attempt field, fire fence, typed stale skip), host lifecycle activityEpoch(), CLI meta activityEpoch, interactive-loop dequeue guard
+  P3 (8418df17d): controller status(), host GoalWakeStatus (armed / pending / idle(reason) / stopped), slot + slash-contract wakeStatus, /goal report `wake:` line, PTY rewritten to typed decisions with ONE real 15 s cycle (58 s wall), createGoalWakeController split under the god-fn ratchet
+  tests: goal-wake-policy (+6 rails), hard-cap (6), goal-wake-runtime-config (+1 clamp), goal-wake-hook (rewritten cap/warn/epoch/status + fixtures moved to 15 s + contract), goal-wake-controller (+3), goal-continuation-dequeue (new), goal-render-wake (new), web goal-wake-compose + goal-web-submit e2e fixtures given a contract, PTY
+rails:
+  - bun run typecheck ; PASS. bun run typecheck:tests ; PASS except tests/unit/zz-audit-r2-probe.test.ts (untracked, foreign bench probe)
+  - bun run lint:debt ; RED on foreign in-flight files only (tools/feature-catalog/{cli,surface-derive}.ts complexity; tests/unit/apps/bench/promax/zz-adv-r1-*.test.ts noConsole) — every file touched here is biome-clean
+  - bun test <objective/cli/apps-cli/host/goal hellgates/web-daemon/integration goal e2e> ; 3691 pass / 0 fail
+  - bun test tests/e2e-pty/cli-goal-pursuit-e2e.test.ts ; 9 / 0 in 58 s (single real 15 s cycle; typed `wake:` assertions elsewhere)
+  - bun test tests/unit/_arch tests/unit/god-code-ratchet.test.ts tests/unit/src-no-sketchy-code.test.ts ; 109 / 0 (after the captureWakeAttempt hoist)
+  - bun fc validate ; 1068 features, all evidence resolved ; bun run test:contract ; 10 / 0
+redOnInjection (25/25 RED):
+  P1: cap raisable / allowance ignores product / product counter = turnsUsed / contract gate removed / quiet clamp removed / backoff ceiling removed / authority no recheck / user work consumes cap / limit-source order / controller skip falls back / host writes cap into budget / host no clamp / runtime-config cap not clamped / (M8 re-targeted to completion-ops) → 14 RED
+  P2: fire ignores epoch / onActivity no epoch / stale callback silent / attempt epoch constant / dequeue ignores epoch / lifecycle epoch stub → 6 RED
+  P3: controller status never armed / host status ignores quiescence / pending rendered as armed / render drops reason / render armed without delay → 5 RED
+ticketRedRails: 1(policy ladder, existing) 2(cooldown, existing) 3 4 5 6(quiescence, existing) 7 8(registry, existing) 9(existing) 10(existing) 11 12 13 14(existing) 15(PTY typed) 16 17(existing hint/rearm) covered
+decisions: QUANTA_GOAL default ON confirmed as the GOAL-10 promotion outcome (README/ticket-05 wording aligned); the product cap is policy (never budget); a policy skip is binding.

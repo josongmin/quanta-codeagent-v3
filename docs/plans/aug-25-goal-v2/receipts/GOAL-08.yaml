@@ -1,0 +1,15 @@
+ticket: GOAL-08
+kind: self-audit receipt (implementation by the Codex lane: b0f2e1c87 "atomically submit web goal turns", merged via 9b21d2fd2)
+recordedAt: 2026-08-27T02:45:00Z
+testedSourceSha: main 8418df17d + this receipt's commit S
+rails (ticket "Verification" run verbatim on this checkout):
+  - bun test tests/unit/protocol tests/unit/kernel src/kernel/session/__tests__ tests/unit/apps/web-daemon tests/integration/goal-web-submit-daemon-e2e.test.ts ; 712 pass / 0 fail (65 files)
+  - bun run test:contract ; 10 / 0 (a run overlapping the PTY suite showed 7/3 once — contention, 10/0 on two solo re-runs)
+  - bun run typecheck ; PASS
+  - bun run lint:debt ; foreign-only regressions (see GOAL-06.yaml)
+  - note: tests/integration/goal-web-submit-daemon-e2e.test.ts and tests/unit/apps/web-daemon/goal-wake-compose.test.ts created goals WITHOUT a stopping contract; under GOAL-06 rail 16 those never wake, so the fixtures were given a criterion (90ad48022) — the e2e had been passing only because the cap was written into the user budget.
+redOnInjection:
+  - G08-M1 turn.submit ignores expectedSessionRevision -> 1 RED
+  - G08-M2 turn.submit ignores pendingApproval -> SURVIVED (the status check masked it) → added `kernel-turn-submit.test.ts` idle-status + pendingApproval case pinning the dedicated guard → 1 RED
+  - G08-M3 turn.submit ignores a non-empty draft -> 1 RED
+ticketRedRails: 1,2,3,4,5,7,8,9 covered by kernel-turn-submit / sdk turn-submit-authority / web goal-wake-compose / integration e2e; 12 (web mutations through the user capability + 4000-char + reread renderer) covered by web-daemon suites; 14 (static structural proof that the controller calls turn.submit) and 15 (session.objective.work provenance) NOT independently mutant-proven here — recorded as open gaps for the next round.

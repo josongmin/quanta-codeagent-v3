@@ -147,4 +147,31 @@ describe("turn.submit atomic goal continuation", () => {
     expect(state.pendingApproval?.approvalId).toBe("approval-1")
     expect(prompts).toEqual([])
   })
+
+  test("GOAL-08 rail 2 — the dedicated approval-pending guard refuses even an idle-status state (defence in depth, not the status check)", async () => {
+    const prompts: string[] = []
+    const state = {
+      ...initialState(),
+      status: "idle" as const,
+      pendingApproval: {
+        approvalId: "approval-2",
+        reason: "confirm",
+        requestedAt: clock.now().toISOString(),
+      },
+    }
+    let consumed = 0
+    await expect(
+      dispatchSessionCommand(state, submit(0), {
+        clock,
+        eventLog: new InMemorySessionEventLog(),
+        host: host(prompts),
+        consumeTurnSubmitProvenance: () => {
+          consumed += 1
+          return true
+        },
+      }),
+    ).rejects.toThrow(/turn_submit_approval_pending/)
+    expect(consumed).toBe(0)
+    expect(prompts).toEqual([])
+  })
 })

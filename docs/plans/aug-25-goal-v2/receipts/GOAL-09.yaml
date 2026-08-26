@@ -1,0 +1,13 @@
+ticket: GOAL-09
+kind: self-audit receipt (implementation by the Codex lane: bccb73b84 "require repeated blocker observations", merged via 9b21d2fd2)
+recordedAt: 2026-08-27T02:45:00Z
+testedSourceSha: main 8418df17d + this receipt's commit S
+rails (ticket "Verification" run verbatim on this checkout):
+  - bun test tests/unit/objective/blocker-observation.test.ts tests/unit/objective/authority.test.ts tests/unit/objective-tools-hellgate.test.ts tests/unit/goal-pursuit-prompt-hellgate.test.ts tests/integration/goal-continuation-live-e2e.test.ts ; 73 pass / 0 fail
+  - bun run typecheck ; PASS
+  - bun run lint:debt ; foreign-only regressions (see GOAL-06.yaml)
+redOnInjection:
+  - G09-M1 model/continuation addBlocker bypasses observation (direct blocker) -> 6 RED
+  - G09-M2 a replayed attemptId counts as a new distinct attempt -> 1 RED
+  - G09-M3 verified progress no longer clears transient observations -> 2 RED
+ticketRedRails: 1,2,5,6,7,8,9,10 covered by the shipped tests and the three mutants above; 3/4 (confirmed approval / user request blocks immediately) covered by the direct-blocker path for user/system actors; 11 (ninth observation evicts deterministically) and 12 (every producer has a wiring test) NOT independently re-proven here — recorded as open gaps for the next round.

@@ -1,6 +1,11 @@
 import { describe, expect, test } from "bun:test"
 import { prepareObjectiveSnapshotForAttach } from "@/host/runtime/objective-store-wire"
-import { asObjectiveAuthority, createObjectiveStore, type ProgressReceipt } from "@/objective"
+import {
+  asObjectiveAuthority,
+  createObjectiveStore,
+  evaluateGoalWakeFire,
+  type ProgressReceipt,
+} from "@/objective"
 import { encodeObjectiveSnapshot } from "@/runner/assemble/session-authorities"
 
 const receipt = (objectiveId: string, revision: number): ProgressReceipt => ({
@@ -80,5 +85,49 @@ describe("objective explicit attach replacement", () => {
       reason: "invalid-objective-snapshot",
     })
     expect(asObjectiveAuthority(live).readDomain("live")).toEqual(before)
+  })
+
+  test("GOAL-07 epoch fence — the detached previous thread's attach generation advances, so a stale wake armed before the attach is refused even after that thread is re-created", () => {
+    const live = asObjectiveAuthority(createObjectiveStore())
+    live.create("old", { goal: "A", successCriteria: ["c"] })
+    const before = live.readDomain("old")
+    const stale = {
+      threadId: "old",
+      objectiveId: before.state?.objective.objectiveId ?? "",
+      objectiveRevision: before.revision,
+      attachGeneration: before.attachGeneration ?? 0,
+      checkpointOrdinal: 0,
+      activityEpoch: 0,
+      attemptKey: "stale",
+    }
+    const persisted = asObjectiveAuthority(createObjectiveStore())
+    persisted.create("disk-B", { goal: "B", successCriteria: ["c"] })
+    const result = live.replaceDomainForAttach({
+      liveThreadId: "live",
+      previousLiveThreadId: "old",
+      persistedDomain: persisted.readDomain("disk-B"),
+    })
+    expect(result.ok).toBe(true)
+    // the previous thread is cleared AND its generation moved
+    expect(live.readDomain("old").state).toBeNull()
+    expect(live.readDomain("old").attachGeneration).toBe(1)
+    // re-create a goal on the old thread: the stale attempt still cannot fire
+    live.create("old", { goal: "A again", successCriteria: ["c"] })
+    const current = live.readDomain("old")
+    expect(current.attachGeneration).toBe(1)
+    expect(
+      evaluateGoalWakeFire({
+        enabled: true,
+        stopped: false,
+        expected: {
+          ...stale,
+          objectiveRevision: current.revision,
+          objectiveId: current.state?.objective.objectiveId ?? "",
+        },
+        current,
+        activityEpoch: 0,
+        stillQuiescent: true,
+      }),
+    ).toEqual({ arm: false, skipReason: "revision-changed" })
   })
 })

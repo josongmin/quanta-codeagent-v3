@@ -76,7 +76,7 @@ GOAL-00 index split + staged landing
   ```
 - 측정 선행 항목: reasoning token 포함관계(GOAL-04 전) · PTY 순서의존 red 원인(GOAL-00) · registry eviction(GOAL-06 전).
 - 잘라낸 것: SOTA verifier adapter(HTTP/eval/visual), 별도 telemetry 배치(각 티켓 decision-counter에 흡수), judge reject 모드, 별도 명령 엔진.
-- 최종 상태 보고 규칙: GOAL-10 전까지 "CLI 구조/행위 GREEN, promotion 미완료". default OFF 유지.
+- 최종 상태 보고 규칙: GOAL-10 전까지 "CLI 구조/행위 GREEN, promotion 미완료". default OFF 유지. **(2026-08-27: GOAL-10 promotion 완료 — `QUANTA_GOAL` default ON 확정, `QUANTA_GOAL=0` 공개 opt-out; 아래 결정 기록·실행 기록 참조.)**
 
 ## 원문 항목 → 티켓 매핑 (빠짐 대조, 2026-08-25 재검토)
 | 원문 항목 | 티켓 |
@@ -119,6 +119,21 @@ GOAL-00 index split + staged landing
 | registry entry 삭제(attach/clear) | 06(구조) | 07(attach 호출) | |
 | telemetry 이벤트 | armed/canceled/skipped/cooldown=06 · enqueue admitted/rejected/stale dequeue=06(CLI)/08(web) · attempt started/settled=04 · completion satisfied/rejected=02 · verifier batch applied/stale-source=03 · label allowlist 테스트=10 | | 이벤트는 소유 티켓이 추가, 10은 검사만 |
 | PTY 시나리오 | 각 티켓이 추가 | 10은 인덱스+누락분+mutant receipt | |
+
+## 실행 기록 — 2026-08-27 셀프어딧 (main 기준, 헬게이트)
+- 배경: `main`은 두 레인의 머지(`9b21d2fd2`)다. Codex 레인(`65f759203`, GOAL-04→10 + GOAL-10-RECEIPT)과 overlay 레인(`fa71870db`/`3c60751a2`/`f197dd889`, receipts 04/05A). 머지는 Codex 레인의 컨트롤러/파사드 형태를 취했고 overlay의 attempt slot·SETTLEMENT_OUTCOME·onPush 자기취소 fix를 흡수했다.
+- 어딧 방법: 티켓 rail을 코드에 대조하고 probe 스크립트(사용자예산 5/제품캡 3 → 5회 arm, authority `beginAttempt` 25회 accept, contract 없는 goal 15s arm, env 999 → 999)로 확증한 뒤 RED→GREEN→뮤턴트로 닫았다.
+- 닫은 위반(티켓 GOAL-06 rail 번호):
+  - rail 3/4/5 + stop condition "User configuration can exceed the product cap": 제품캡이 `amendBudget maxTurns:20`으로 **유저 예산에 기록**되고 `turnCap = budget.maxTurns ?? cap`이었다 → `autonomousAllowance = min(userRemaining, productRemaining)`(product는 durable `autonomousTurnsStarted`), host는 예산에 쓰지 않음. `90ad48022`.
+  - rail 13: authority `beginAttempt` 재검사 없음 → `hard-cap-exhausted`/`budget-exhausted` 거부 + `budget.limitedBy` 파생. `90ad48022`.
+  - rail 16: contract 없는 goal이 arm → policy typed skip `validation-contract-missing`. `90ad48022`.
+  - rail 7/"no public unsafe override": `QUANTA_GOAL_MAX_AUTONOMOUS_TURNS`/`_MAX_BACKOFF_MS` 상향 가능 → runtime-config·policy 이중 clamp(정책 상수와 동일성 테스트 핀), quiet<15s 경고 1회. `90ad48022`.
+  - 구조 결함: 컨트롤러가 정책 skip(undefined)에 `?? delayMs`로 기본 quiet를 붙여 **모든 정책 거부가 advisory** → skip 바인딩. `90ad48022`.
+  - rail 11: activityEpoch 부재 → 컨트롤러 epoch·fire 펜스·dequeue 드롭(continuation만). `48d020ac5`.
+  - PTY 85/87: sub-clamp 케이스·실제 사이클 4회(122s) → `/goal` 리포트 typed `wake:` 라인(armed/pending/idle(reason)/stopped/not composed)으로 단정, 실제 15s 사이클 1회, 58s. `8418df17d`.
+- 07/08/09 셀프어딧: 티켓 verification 명령 전부 GREEN(07: 621/0, 08: 712/0, 09: 73/0, contract 10/0). 뮤턴트 7개 중 2개 생존 → 전용 테스트 추가 후 RED(07 attach-generation 펜스, 08 approval-pending 전용 가드). receipts/GOAL-07~09.yaml.
+- 결정: `QUANTA_GOAL` default ON은 GOAL-10 promotion의 결과로 확정(계획서 "GOAL-10 전까지 OFF"와 정합). 티켓05 함정 문구·README 보고규칙에 병기.
+- 남은 non-Goal red(내 것 아님): lint:debt(`tools/feature-catalog/*` complexity, `tests/unit/apps/bench/promax/zz-adv-r1-*` console), typecheck:tests의 `tests/unit/zz-audit-r2-probe.test.ts`(미추적, bench 작업).
 
 ## 결정 기록
 - judge `reject` 모드 제거(shadow만). 원문은 "reject 유지 시 unavailable=거부"도 허용했으나 완료권이 authority로 가면 judge에 판정권이 없음.

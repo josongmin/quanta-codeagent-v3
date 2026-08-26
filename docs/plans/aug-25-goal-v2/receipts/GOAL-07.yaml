@@ -1,0 +1,11 @@
+ticket: GOAL-07
+kind: self-audit receipt (implementation by the Codex lane: 280419815 "make session attach objective-atomic", merged via 9b21d2fd2)
+recordedAt: 2026-08-27T02:45:00Z
+testedSourceSha: main 8418df17d + this receipt's commit S
+rails (ticket "Verification" run verbatim on this checkout):
+  - bun test tests/unit/session tests/unit/apps/cli/attach-objective.test.ts tests/unit/apps/web-daemon/thread-hydrate-hellgate.test.ts tests/unit/objective/attach-replace.test.ts ; 621 pass / 0 fail (51 files)
+  - bun run typecheck ; PASS
+  - bun run lint:debt ; foreign-only regressions (see GOAL-06.yaml)
+redOnInjection:
+  - G07-M1 attach generation of the DETACHED previous thread not bumped (authority.ts detachPreviousAttachedThread) -> SURVIVED against the shipped tests → added `attach-replace.test.ts` "epoch fence" case (previous thread cleared AND generation advanced; a stale attempt armed before the attach is refused by `evaluateGoalWakeFire` even after the thread is re-created) → 1 RED
+ticketRedRails: 1,2,3,4,5,9,11,12 covered by the shipped tests (attach-replace / attach-objective / thread-hydrate / session); 10/14 (old sessionEpoch queued work executes zero bodies) covered by the fire-fence generation check + the new epoch-fence test; 13 (wake cancel before transcript mutation race) NOT independently mutant-proven here — recorded as an open gap for the next round.
