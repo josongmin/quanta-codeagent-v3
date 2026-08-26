@@ -1,161 +1,181 @@
-# Scan-derived verdicts must carry their own evidence — structural plan (aug-26)
+# Scan-derived verdicts must carry their own evidence — structural plan (rev 2)
 
-## The single root cause
+Rev 1 was audited from four angles (adversarial, objective re-measurement,
+completeness, prior-art) and did not survive. Three of its evidence rows were
+wrong, its performance rationale was a misdiagnosis, its central mechanism had a
+measured degenerate equilibrium, and its safety story was inverted. This rev
+records the corrections in place rather than quietly restating the plan, because
+the errors are the most useful thing the audit produced.
 
-Four defect classes were found separately over the last two days:
+## What rev 1 got wrong
 
-- a repo scan anchored on the ambient cwd (4 sites; 1 inverted to green)
-- `loadFeaturesStrict(dir = "tools/feature-catalog/features")` — same shape one
-  layer down, in a LOADER, so every consumer inherited it
-- 10 `*.test.ts` files that no gate ever ran, three of which were documented as
-  running at CI
-- a ratchet whose scan takes 7.4s against a 5s timeout under load
-
-They are not four problems. Every one is the same one:
-
-> **A test derives a verdict from a scan, and the scan's REACH is neither typed
-> nor proven. So "I found no violations" and "I never looked" are the same
-> value — `[]` — and they are indistinguishable at the assertion.**
-
-Measured support for that being the root and not a story:
-
-| fact | value | how measured |
+| rev 1 claim | measured truth | consequence |
 |---|---|---|
-| test files that scan the repo | 118 | `grep -l readdirSync tests/**/*.test.ts` |
-| of those, defining their OWN recursive walker | 40 | + `grep -l 'const walk\|function walk\|const collect'` |
-| shared scan helpers that exist today | 0 | `ls tests/_helpers/` → only `expect-present.ts` |
-| cwd-anchored fs/shell sites | 4 of 3,362 | `repo-path-anchor-ratchet` detector |
-| of those that inverted to GREEN | 1 | `cli-feature-gates-drift` |
-| tests that assert on cwd or chdir | 4 | all 4 pass under a sandbox (paired) |
+| "shared scan helpers today: 0" | **1, with 54–60 consumers** — `tests/unit/_arch/slice-boundary-scanner.ts`, already repo-anchored, already floored | P1 was a greenfield build of something that exists. It becomes an extension. |
+| "4 cwd-anchored sites of 3,362" | **0 remaining**; 4 is the already-fixed count. Detector over history: 7 → 3 → 0 | the row described a fixed past as the present |
+| "40 own walkers" | 42 by brace-matched bodies, 170 by a looser grep, 91 files with their own `REPO_ROOT` | the worklist was never the number quoted |
+| "7.4s is a re-walk per test; memoisation fixes it" | `git ls-files` is **37ms of 1350ms**; the cost is 32MB of `readFileSync` and an O(chars) detector | P1 property 4 removes 2.7% of the problem, and P2's scope was derived from it |
+| "P2 must precede P3" | rev 1 itself then said a simultaneous paired control cancels load | the dependency dissolves; the strongest instrument was scheduled last behind a false gate |
+| "P2: build a per-test timing ratchet" | `tools/dev/unit-speed-budget.ts` already does it, gated at `ci.yml:80`, with its own `MIN_TESTCASES=1000` floor | P2 was a duplicate of a CI-wired system |
+| "make `floor` required and omission a type error" | of the same population, **56 of 81 already write `toBeGreaterThan(0)`** — floor:1 is the observed equilibrium, not a risk | a required parameter enforces a number, not a meaning |
+| P3 flips `test:unit` to the sandbox, safely | CI never calls `test:unit`; `ci.yml:71` runs `bun test tests/unit` directly | a default flip creates permanent dev/CI cwd divergence |
+| the sandbox adds a signal | `worktree-pollution-guard` watches the **repo root** only | under a sandboxed default it reports clean forever — the sandbox **masks** the signal it was sold as strengthening |
+| P3's acceptance: both suites "at the same time, on a quiet tree" | running two full suites simultaneously *is* the load; the recorded precedent is 4.7h / 232 timeout REDs | the acceptance criterion cannot be satisfied as written |
 
-So the anchor bug is small and mostly loud. The DUPLICATION is the large number,
-and it is what makes the class recur: 40 independent authors each decide where
-the root is, what to ignore, and what an empty result means.
+And the ratchet that motivated rev 1 was itself vacuous. `repo-path-anchor-ratchet`
+reported the tree clean while `tool-surface-manifest-hellgate` failed 3 of 36
+under a foreign cwd. Two regex defects: a nine-line comment between `execSync(`
+and its command string defeated `\s*`, and a `[^`"']*` capture truncated at the
+inner quote of `grep -rhoE 'name: …' src/tool …`. Both fixed; the detector now
+names that file and it passes 36/36 on both sides.
 
-## What "structural" means here, and what it rules out
+**That is the strongest evidence for the thesis and against rev 1's design.** The
+thesis holds: a scan-derived verdict that does not prove its reach is worthless.
+Rev 1's answer — a new helper with a caller-declared floor — would not have
+caught it, because the defect was in the detector's reach, not in an author's
+diligence.
 
-The fix landed on 2026-08-26 (`repo-path-anchor-ratchet`) is a REGEX GUARD. It
-detects the shape after someone writes it. It cannot follow a binding or a
-hand-rolled walker — a limit it states rather than hides. A guard is the right
-answer when the bad shape is unavoidable; it is the wrong answer when the bad
-shape can be made unrepresentable.
+## The revised thesis
 
-Here it can. The plan is therefore:
+> A scan's REACH must be a committed, ratcheted NUMBER — derived by measurement,
+> not chosen by the author — and it must be checked against GROUND TRUTH (running
+> from a foreign cwd), because a regex over source can always be blind in a way
+> no regex can detect.
 
-> **Make the scan's reach a value the consumer cannot discard.** A scan does not
-> return `string[]`. It returns evidence: the anchor it resolved, the count it
-> saw, and the floor it was constructed against. Below the floor it THROWS at
-> the scan, not at the assertion — so an empty scan can never reach a verdict.
+Two instruments, and neither replaces the other:
 
-The regex ratchet is then demoted from primary defense to migration guard, which
-is what it is actually good at.
-
----
-
-## P1 — the evidence-bearing scanner  *(no dependencies; do first)*
-
-`tests/_helpers/repo-scan.ts`:
-
-```ts
-export type ScanEvidence = {
-  readonly files: readonly string[]   // repo-relative, sorted
-  readonly anchor: string             // the resolved root, for failure messages
-  readonly floor: number              // what the caller declared it must exceed
-}
-export const repoScan = (opts: {
-  under: string                       // "src" | "tests" | "tools/…"
-  match: (rel: string) => boolean
-  floor: number                       // REQUIRED — no default, no zero
-}): ScanEvidence
-```
-
-Four properties, each of which kills one of the four defect classes:
-
-1. **The anchor is the module's own location, once.** `import.meta.dir` of the
-   helper, not of the caller, not the cwd. 40 decisions collapse to 1.
-2. **`floor` has no default.** Omitting it is a type error, so "I never looked"
-   cannot be spelled. Below it, `repoScan` throws naming the anchor it used —
-   which is the message that would have solved `cli-feature-gates-drift` in one
-   run instead of five methods.
-3. **`files` is only reachable through `ScanEvidence`.** A helper that returns a
-   bare array can be destructured and the provenance dropped; this cannot.
-4. **One `git ls-files` / walk per process, memoised.** That is also the fix for
-   the 7.4s-vs-5s timeout, which is a re-walk per test, not a slow walk.
-
-**Hellgate (RED before any implementation):**
-- `repoScan({under:"tests", match:…, floor:2000})` against an anchor pointing at
-  an EMPTY directory must THROW. Today the equivalent returns `[]` and every
-  downstream ratchet passes.
-- A call site that omits `floor` must fail `typecheck:tests`.
-- Red-on-injection: delete the floor check → the empty-anchor case goes green.
-
-**Migration:** the 40 own-walker files. Each is a mechanical replacement, and
-each one that had NO anti-vacuity floor gains one for free — that count is the
-burn-down metric, measured before the first edit.
-
-**Ratchet:** no test may define a recursive walker over the repo. Admit-list for
-the genuine exceptions (a test ABOUT walking), with a stated reason each.
-
-## P2 — timeout headroom  *(no dependencies; parallel with P1)*
-
-`capability-literal-ratchet` is 7.4s against a 5s timeout under load and 1.4s at
-rest. It passes today and fails tomorrow, and when it fails during the P3
-sandbox migration it will read as "the sandbox broke it".
-
-**This must land BEFORE P3 or P3's failure list is unreadable.** That ordering
-is the whole reason P2 exists as a phase rather than a cleanup.
-
-- Measure every test file's wall time at rest against its effective timeout.
-- Fix everything under 2× headroom. Most are re-walks that P1's memoisation
-  already removes — so P1 and P2 converge, and P2's residue is the real work.
-- Ratchet: a test at less than 2× headroom on a quiet tree fails.
-
-**Hellgate:** the measurement harness must report a KNOWN-slow test as slow. Run
-it against a deliberately-sleeping fixture first; a harness that reports "no
-slow tests" on a tree with a 4.9s test is the vacuous-measurement failure that
-already happened twice this session.
-
-## P3 — sandbox cwd as the default runner  *(depends on P2)*
-
-`tools/dev/sandboxed-test.ts` exists, is pinned by 26 tests, and works
-end-to-end (97/98, sandbox empty, 0 repo paths created). No `package.json`
-script points at it. The audit shrank its blocker considerably: the 4 tests that
-assert on cwd or `chdir` ALL pass under a sandbox.
-
-- **Hellgate (RED):** a fixture that writes a relative path must land in the
-  sandbox and NOT in the repo — asserted on both sides, so a runner that
-  silently ran at the repo root fails.
-- **Paired control, non-negotiable:** full suite under sandbox AND the same
-  scope at the repo root, at the same time, on a quiet tree. Only the DIFF is
-  evidence. Without it a load timeout is indistinguishable from a wiring bug —
-  which is exactly what the 7.4s case looked like an hour ago.
-- Wire `test:sandbox` as opt-in first; flip `test:unit` only after one clean
-  paired run.
-
-## P4 — cognitive complexity, 36 prod sites  *(independent; last)*
-
-Already 274 → 36, and the ratchet blocks new debt, so this is the only phase
-with no regression risk. The work is CLASSIFICATION, not lowering a number:
-each site is either a genuine split or a justified allowlist entry with a
-reason. Top: `trace-viewer.html` 35, `agent/converge/exercise.ts` 35,
-`agent/lsp-bridge/nav.ts` 34, `apps/cli/login-cmd.ts` 32.
+- **Derived floors** catch a scan that shrank. Cheap, runs everywhere, and unlike
+  rev 1's `floor` parameter it cannot be satisfied by writing `1`, because the
+  number comes from a baseline file the way `lint-debt-ceiling.json` does.
+- **The foreign-cwd run** catches a scan that never reached, including every
+  shape a regex cannot follow (bindings, hand-rolled walkers, shell-outs with the
+  path past an inner quote). It is the only thing that would have caught the two
+  live defects this audit found.
 
 ---
 
-## Order and parallelism
+## A — close the live vacuous-green in `tools/feature-catalog` *(no dependencies)*
+
+Reproduced, today, on main:
 
 ```
-P1 ─┐
-P2 ─┼─→ P3 ─→ final adversarial audit (≥3 rounds)
-P4 ─┘
+repo cwd     : validate: 1068 feature(s), all evidence resolved   exit=0
+foreign cwd  : validate:    0 feature(s), all evidence resolved   exit=0
 ```
 
-P1, P2, P4 are file-disjoint and run in parallel. P3 is gated on P2 for the
-reason stated above, and on a quiet tree for the paired control.
+Checking 1068 and checking 0 emit the same success. `loadFeaturesStrict`'s default
+was anchored on `import.meta.dir`, but `cli.ts:61`, `pm/check.ts:18` and
+`surface-derive.ts:41` each hardcode `FEATURES_DIR = "tools/feature-catalog/features"`
+and pass it explicitly — ten call sites in `cli.ts` alone — so the fix is
+overridden at every consumer. `loadFeatures` (non-strict), `loadProse` and
+`loadBaseline` still carry cwd-relative defaults, and `gatherYamlFiles` returns
+`[]` on ENOENT.
 
-## How each phase is allowed to claim done
+**And a test pins the defect as correct**: `tests/unit/feature-catalog-schema.test.ts:207`
+asserts `loadFeatures returns empty array when dir absent`. This must be replaced,
+not deleted — the honest form is that a MISSING catalog throws while an EMPTY one
+returns `[]`.
 
-Not "the tests pass". For every phase: a hellgate that was RED first, a
-red-on-injection proof that the new guard fires, and a paired control where the
-verdict could otherwise be explained by load or ordering. A phase that cannot
-produce all three reports as incomplete, not as done.
+**Hellgate (RED first):** `bun fc validate --strict` from a foreign cwd must exit
+non-zero. It exits 0 today.
+
+## B — make the detector's reach honest *(no dependencies)*
+
+The detector now covers `readFileSync`-family, `Bun.file`, `Glob`, and the four
+shell entry points. Measured blind spots remain: `Bun.Glob`/`new Glob` at the call
+position (13 uses in `tests/`), `globSync`, `opendirSync`, `readlinkSync`, `cpSync`,
+`watch`, and `Bun.$`. Its walk covers `tests/` only, while the live defect in A
+sits in `tools/` and `src/agent/prompt-graph/role-drift.ratchet.test.ts` and
+`src/tool/terminal-surface.test.ts` do repo scans from the ungated population.
+
+Each widening lands with the offender it exposes, or with an explicit note that it
+exposed none — a widening that finds nothing must say so rather than look like
+coverage.
+
+**Hellgate:** for every entry point added, a RED case from the real tree first.
+
+## C — the sandbox as a SECOND observation, never a default *(depends on B)*
+
+Rev 1's flip is withdrawn. `test:unit` stays as it is; CI keeps running at the
+repo root, where `worktree-pollution-guard` can see strays.
+
+- Add `test:sandbox` (opt-in) pointing at the existing, already-pinned
+  `tools/dev/sandboxed-test.ts`.
+- Acceptance is a **sequential** paired control, sharded: run shard *i* at the
+  root, then shard *i* in the sandbox, compare. Simultaneity was the error; the
+  control needs the same TREE and the same SHARD, not the same clock.
+- The diff is the deliverable — each differing file is classified genuine-cwd or
+  load, with the second re-run to settle it.
+
+**Hellgate (RED):** a fixture writing a relative path must land in the sandbox and
+NOT in the repo, asserted on both sides.
+
+## D — derived floors on the scanner that already exists *(depends on C's diff)*
+
+Extend `tests/unit/_arch/slice-boundary-scanner.ts` — 54–60 consumers, already
+anchored, whose only floor is `expect(files.length).toBeGreaterThan(0)`.
+
+- The floor is a number in a baseline JSON adjacent to the detector, the shape
+  this repo already uses (`lint-debt-ceiling.json`, `god-code/allowlist.json`,
+  `unit-speed-budget.json`), with a `--tighten` path and no way to raise it.
+- **Reach is measured with `git ls-files`, not a filesystem walk.** `tools/dev/.scratch`
+  is a gitignored twin of `src/` holding **4,394** `.ts` files; a walk-backed floor
+  can be satisfied entirely by scratch copies.
+- Two numbers, not one: the WALKED set proves the anchor, the MATCHED set proves
+  the predicate. A `match` that rotted after a refactor clears any floor on the
+  first.
+
+**The migration's proof obligation** — the part rev 1 omitted, and the reason this
+phase is last. A shared walker with a fixed skip policy NARROWS the scan for the
+6 hand-rollers that walk everything, and narrowing is self-ratifying here: 16
+scanning tests assert a ceiling over the scanned set, 11 without a floor, and
+`tools/dev/refresh-silent-catch-baseline.ts` rewrites baselines "only DECREASING"
+and runs at `ci.yml:121`. So each migrated file must show **set equality** of the
+scanned paths before and after, or record the diff with a reason. "The assertion
+still passes" is exactly the evidence that cannot distinguish a correct migration
+from the defect.
+
+## E — the 359 test files no gate runs *(no dependencies)*
+
+`src/**` 296, `apps/**` 46, `tools/**` 17. No script runs `bun test` over any of
+them. `gated-test-scope-ratchet` cannot see them: it walks `join(REPO_ROOT, "tests")`
+only, so its closed allowlist is closed over the wrong universe — the guard cited
+as a motivating defect has the defect.
+
+Either gate them or give each an `OUT_OF_BAND` entry naming its runner, and widen
+the ratchet's walk to the repo.
+
+## F — cognitive complexity classification *(independent, last)*
+
+36 prod sites behind a ratchet that blocks new debt. One correction: the headline
+site, `src/apps/bench/trace-viewer.html` at 35, is **outside** the gated 36 —
+`collectBiomeTargets` admits zero `.html` targets — so "the ratchet blocks new
+debt" is false for HTML and that gap is the first thing to close.
+
+---
+
+## Order
+
+```
+A ─┐
+B ─┼─→ C ─→ D
+E ─┤
+F ─┘
+```
+
+A, B, E, F are file-disjoint and parallel. C needs B so its diff is readable
+against an honest detector; D needs C's classified diff so the floors are derived
+from a reach that has been checked against ground truth.
+
+## There is no CI backstop
+
+`gh run list --workflow=ci.yml` returns HTTP 404, and the repo's own records put
+Actions billing failures from 2026-07-12 with every sampled job at `steps=0`. Every
+gate named here is enforced only by local runs. That is the argument for A and C
+being early and for the withdrawn default-flip staying withdrawn.
+
+## How a phase may claim done
+
+A hellgate that was RED first, a red-on-injection proof that the new guard fires,
+and a paired control where the verdict could otherwise be explained by load or
+ordering. A phase that cannot produce all three reports incomplete, not done.
