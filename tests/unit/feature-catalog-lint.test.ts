@@ -12,7 +12,7 @@ import {
 } from "../../tools/feature-catalog/lint"
 
 interface ReportOverrides {
-  readonly orphanAdrs?: readonly number[]
+  readonly orphanAdrs?: readonly (number | AuditReport["orphanAdrs"][number])[]
   readonly orphanSrcFiles?: readonly string[]
   readonly emptyStubs?: AuditReport["emptyStubs"]
   readonly counts?: Partial<AuditCounts>
@@ -28,7 +28,15 @@ function report(overrides: ReportOverrides = {}): AuditReport {
     totalSrcFiles: 0,
   }
   return {
-    orphanAdrs: (overrides.orphanAdrs ?? []).map((number) => ({ number, status: "Accepted" })),
+    orphanAdrs: (overrides.orphanAdrs ?? []).map((n) =>
+      typeof n === "number"
+        ? {
+            number: n,
+            path: `docs/decisions/${String(n).padStart(4, "0")}-x.md`,
+            status: "Accepted",
+          }
+        : n,
+    ),
     orphanSrcFiles: overrides.orphanSrcFiles ?? [],
     emptyStubs: overrides.emptyStubs ?? [],
     counts: { ...baseCounts, ...(overrides.counts ?? {}) },
@@ -37,7 +45,7 @@ function report(overrides: ReportOverrides = {}): AuditReport {
 
 const ZERO_BASELINE: FcBaseline = {
   empty_stubs_max: 0,
-  orphan_adrs_grandfathered: [],
+  orphan_adr_paths_grandfathered: [],
   updated_at: "1970-01-01T00:00:00.000Z",
 }
 
@@ -77,7 +85,7 @@ describe("runLint — orphan Accepted ADR ratchet", () => {
   test("ok when all orphans are grandfathered", () => {
     const r = runLint(report({ orphanAdrs: [44], counts: { orphanAdrs: 1 } }), {
       ...ZERO_BASELINE,
-      orphan_adrs_grandfathered: [44],
+      orphan_adr_paths_grandfathered: ["docs/decisions/0044-x.md"],
     })
     expect(r.ok).toBe(true)
   })
@@ -85,21 +93,47 @@ describe("runLint — orphan Accepted ADR ratchet", () => {
   test("fails on NEW orphan Accepted ADR (not grandfathered)", () => {
     const r = runLint(report({ orphanAdrs: [44, 88], counts: { orphanAdrs: 2 } }), {
       ...ZERO_BASELINE,
-      orphan_adrs_grandfathered: [44],
+      orphan_adr_paths_grandfathered: ["docs/decisions/0044-x.md"],
     })
     expect(r.ok).toBe(false)
     expect(r.errors[0]).toContain("ADR-0088")
     expect(r.errors[0]).not.toContain("ADR-0044")
   })
 
+  test("🔴 a NEW orphan REUSING a grandfathered ADR number is not forgiven", () => {
+    // Not hypothetical: 25 ADR numbers are used by more than one file in this
+    // repo (four separate files are ADR-0159). Grandfathering by NUMBER meant a
+    // brand-new Accepted ADR that happened to reuse one of the 18 forgiven
+    // numbers was silently absorbed — verified against the live tool: the orphan
+    // count went 32 -> 33 and `lint` still printed `ok`.
+    //
+    // Forgiveness is therefore keyed on the ADR's PATH, which is unique per file.
+    const r = runLint(
+      report({
+        orphanAdrs: [
+          { number: 159, path: "docs/decisions/0159-linux-sandbox.md", status: "Accepted" },
+          { number: 159, path: "docs/decisions/0159-brand-new.md", status: "Accepted" },
+        ],
+        counts: { orphanAdrs: 2 },
+      }),
+      {
+        ...ZERO_BASELINE,
+        orphan_adr_paths_grandfathered: ["docs/decisions/0159-linux-sandbox.md"],
+      },
+    )
+    expect(r.ok).toBe(false)
+    expect(r.errors[0]).toContain("0159-brand-new.md")
+    expect(r.errors[0]).not.toContain("0159-linux-sandbox.md")
+  })
+
   test("warns when grandfathered ADR was wired up — baseline should tighten", () => {
     const r = runLint(report({ orphanAdrs: [], counts: { orphanAdrs: 0 } }), {
       ...ZERO_BASELINE,
-      orphan_adrs_grandfathered: [44],
+      orphan_adr_paths_grandfathered: ["docs/decisions/0044-x.md"],
     })
     expect(r.ok).toBe(true)
     expect(r.warnings.some((w) => w.includes("now wired up"))).toBe(true)
-    expect(r.warnings.some((w) => w.includes("ADR-0044"))).toBe(true)
+    expect(r.warnings.some((w) => w.includes("0044-x.md"))).toBe(true)
   })
 })
 
@@ -117,7 +151,11 @@ describe("snapshotBaseline", () => {
       () => new Date("2026-05-23T00:00:00.000Z"),
     )
     expect(snap.empty_stubs_max).toBe(2)
-    expect(snap.orphan_adrs_grandfathered).toEqual([44, 88, 90])
+    expect(snap.orphan_adr_paths_grandfathered).toEqual([
+      "docs/decisions/0044-x.md",
+      "docs/decisions/0088-x.md",
+      "docs/decisions/0090-x.md",
+    ])
     expect(snap.updated_at).toBe("2026-05-23T00:00:00.000Z")
   })
 })
@@ -129,7 +167,7 @@ describe("loadFcBaseline / saveFcBaseline — round trip", () => {
       const path = join(dir, "baseline.json")
       const original: FcBaseline = {
         empty_stubs_max: 12,
-        orphan_adrs_grandfathered: [3, 7, 9],
+        orphan_adr_paths_grandfathered: ["a", "b", "c"],
         updated_at: "2026-05-23T00:00:00.000Z",
       }
       await saveFcBaseline(original, path)
@@ -143,7 +181,7 @@ describe("loadFcBaseline / saveFcBaseline — round trip", () => {
   test("returns strict-zero default for missing file", async () => {
     const loaded = await loadFcBaseline("/nonexistent/baseline.json")
     expect(loaded.empty_stubs_max).toBe(0)
-    expect(loaded.orphan_adrs_grandfathered).toEqual([])
+    expect(loaded.orphan_adr_paths_grandfathered).toEqual([])
   })
 
   test("preserves other top-level keys in baseline.json (no clobber)", async () => {
@@ -156,7 +194,7 @@ describe("loadFcBaseline / saveFcBaseline — round trip", () => {
         "utf8",
       )
       await saveFcBaseline(
-        { empty_stubs_max: 5, orphan_adrs_grandfathered: [1], updated_at: "now" },
+        { empty_stubs_max: 5, orphan_adr_paths_grandfathered: ["a"], updated_at: "now" },
         path,
       )
       const raw = JSON.parse(await readFile(path, "utf8")) as Record<string, unknown>

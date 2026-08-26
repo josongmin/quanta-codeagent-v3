@@ -371,7 +371,11 @@ async function collectAdrs(dir: string = resolve(ROOT, "docs/decisions")): Promi
     const number = Number(m[1])
     if (!Number.isFinite(number)) continue
     const text = await readFile(resolve(ROOT, dir, name), "utf8")
-    out.push({ number, path: `${dir}/${name}`, status: parseAdrStatus(text) })
+    // Repo-RELATIVE, because this path is the key of the grandfather ledger in
+    // baseline.json. `dir` is now absolute (anchored on ROOT), and an absolute
+    // path in a committed ledger would be machine-specific — it would forgive
+    // nothing on anyone else's checkout, so every orphan would read as new.
+    out.push({ number, path: relative(ROOT, join(dir, name)), status: parseAdrStatus(text) })
   }
   return out.sort((a, b) => a.number - b.number)
 }
@@ -400,7 +404,7 @@ async function cmdLint(argv: string[]): Promise<void> {
     await saveFcBaseline(next)
     console.log(
       `lint: baseline updated — empty_stubs_max=${next.empty_stubs_max}, ` +
-        `orphan_adrs_grandfathered=[${next.orphan_adrs_grandfathered.join(", ")}]`,
+        `orphan_adr_paths_grandfathered=[${next.orphan_adr_paths_grandfathered.join(", ")}]`,
     )
     return
   }

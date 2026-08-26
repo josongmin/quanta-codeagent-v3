@@ -25,7 +25,18 @@ export interface FcBaseline {
   readonly empty_stubs_max: number
   /** Accepted ADRs known to be orphaned at the time of the last ratchet —
    *  grandfather list. New orphans NOT in this list trigger lint failure. */
-  readonly orphan_adrs_grandfathered: readonly number[]
+  /**
+   * Orphan Accepted ADRs forgiven as pre-existing debt, keyed by repo-relative
+   * PATH.
+   *
+   * Keyed by path and not by number because ADR numbers COLLIDE here — 25 numbers
+   * are used by more than one file, four of them by ADR-0159. A number-keyed
+   * ledger forgave any brand-new ADR that happened to reuse a listed number, which
+   * is a ratchet that admits new violations silently. Verified against the live
+   * tool before the change: adding `0159-<new>.md` took the orphan count 32 -> 33
+   * and `lint` still printed `ok`.
+   */
+  readonly orphan_adr_paths_grandfathered: readonly string[]
   /** When the baseline was last written. */
   readonly updated_at: string
 }
@@ -48,8 +59,11 @@ export function runLint(report: AuditReport, baseline: FcBaseline): LintResult {
     )
   }
 
-  const grandfathered = new Set(baseline.orphan_adrs_grandfathered)
-  const newOrphans = report.orphanAdrs.filter((adr) => !grandfathered.has(adr.number))
+  const grandfathered = new Set(baseline.orphan_adr_paths_grandfathered)
+  // An ADR with no path cannot be matched against a path ledger, so it is never
+  // forgiven — the safe direction: an unidentifiable orphan fails loudly rather
+  // than being absorbed by a number that happens to be listed.
+  const newOrphans = report.orphanAdrs.filter((adr) => !grandfathered.has(adr.path ?? ""))
   if (newOrphans.length > 0) {
     errors.push(
       `orphan Accepted ADRs not in fc: ${newOrphans.map((adr) => formatAdr(adr)).join(", ")}. ` +
@@ -63,14 +77,14 @@ export function runLint(report: AuditReport, baseline: FcBaseline): LintResult {
         `Run \`bun fc lint --update-baseline\` to lock in the improvement.`,
     )
   }
-  const stillGrandfathered = report.orphanAdrs.filter((adr) => grandfathered.has(adr.number))
-  const removedFromOrphan = baseline.orphan_adrs_grandfathered.filter(
-    (n) => !report.orphanAdrs.some((adr) => adr.number === n),
+  const stillGrandfathered = report.orphanAdrs.filter((adr) => grandfathered.has(adr.path ?? ""))
+  const removedFromOrphan = baseline.orphan_adr_paths_grandfathered.filter(
+    (p) => !report.orphanAdrs.some((adr) => (adr.path ?? "") === p),
   )
   if (removedFromOrphan.length > 0) {
     warnings.push(
       `${removedFromOrphan.length} grandfathered orphan ADR(s) now wired up: ` +
-        `${removedFromOrphan.map((n) => `ADR-${String(n).padStart(4, "0")}`).join(", ")}. ` +
+        `${removedFromOrphan.join(", ")}. ` +
         `Run --update-baseline to remove them from the grandfather list.`,
     )
   }
@@ -90,9 +104,11 @@ export function snapshotBaseline(
 ): FcBaseline {
   return {
     empty_stubs_max: report.counts.emptyStubs,
-    orphan_adrs_grandfathered: [...new Set(report.orphanAdrs.map((adr) => adr.number))].sort(
-      (a, b) => a - b,
-    ),
+    orphan_adr_paths_grandfathered: [
+      ...new Set(report.orphanAdrs.map((adr) => adr.path ?? "")),
+      // localeCompare, not `a - b`: the ledger holds PATHS now, and subtracting
+      // two strings yields NaN, which leaves `sort` order-dependent on input.
+    ].sort((a, b) => a.localeCompare(b)),
     updated_at: now().toISOString(),
   }
 }
@@ -107,7 +123,7 @@ function formatAdr(adr: { readonly number: number; readonly path?: string }): st
 interface BaselineFileShape {
   fc?: {
     empty_stubs_max?: number
-    orphan_adrs_grandfathered?: readonly number[]
+    orphan_adr_paths_grandfathered?: readonly string[]
     updated_at?: string
   }
   [k: string]: unknown
@@ -115,7 +131,7 @@ interface BaselineFileShape {
 
 const DEFAULT_BASELINE: FcBaseline = {
   empty_stubs_max: 0,
-  orphan_adrs_grandfathered: [],
+  orphan_adr_paths_grandfathered: [],
   updated_at: "1970-01-01T00:00:00.000Z",
 }
 
@@ -137,15 +153,15 @@ export async function loadFcBaseline(
   if (
     fc === undefined ||
     typeof fc.empty_stubs_max !== "number" ||
-    !Array.isArray(fc.orphan_adrs_grandfathered) ||
+    !Array.isArray(fc.orphan_adr_paths_grandfathered) ||
     typeof fc.updated_at !== "string"
   ) {
     return DEFAULT_BASELINE
   }
   return {
     empty_stubs_max: fc.empty_stubs_max,
-    orphan_adrs_grandfathered: fc.orphan_adrs_grandfathered.filter(
-      (n): n is number => typeof n === "number",
+    orphan_adr_paths_grandfathered: fc.orphan_adr_paths_grandfathered.filter(
+      (p): p is string => typeof p === "string" && p.length > 0,
     ),
     updated_at: fc.updated_at,
   }
@@ -166,7 +182,7 @@ export async function saveFcBaseline(
   }
   raw.fc = {
     empty_stubs_max: fc.empty_stubs_max,
-    orphan_adrs_grandfathered: fc.orphan_adrs_grandfathered.slice(),
+    orphan_adr_paths_grandfathered: fc.orphan_adr_paths_grandfathered.slice(),
     updated_at: fc.updated_at,
   }
   await writeFile(path, `${JSON.stringify(raw, null, 2)}\n`, "utf8")
