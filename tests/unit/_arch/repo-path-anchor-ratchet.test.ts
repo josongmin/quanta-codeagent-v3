@@ -55,8 +55,6 @@ import { describe, expect, test } from "bun:test"
 import { readdirSync, readFileSync } from "node:fs"
 import { join } from "node:path"
 
-import { stripComments } from "./slice-boundary-scanner"
-
 const REPO_ROOT = join(import.meta.dir, "..", "..", "..")
 
 /**
@@ -75,7 +73,24 @@ const REPO_ROOT = join(import.meta.dir, "..", "..", "..")
  * offenders fixed. So this one is precise and states its gap.
  */
 const FS_ENTRY_POINTS =
-  /\b(readFileSync|readdirSync|existsSync|statSync|lstatSync|readFile|readdir|stat|createReadStream|Bun\.file|Glob)\s*\(\s*(?:\[\s*)?["'`]([^"'`\n]+)["'`]/g
+  /\b(readFileSync|readdirSync|existsSync|statSync|lstatSync|readFile|readdir|stat|createReadStream|globSync|opendirSync|opendir|readlinkSync|readlink|cpSync|watch|watchFile|Bun\.file|Glob)\s*\(\s*(?:\[\s*)?["'`]([^"'`\n]+)["'`]/g
+
+/**
+ * `Glob` takes the PATTERN in its constructor and the ROOT at the call — and the
+ * root is the part that resolves against the cwd.
+ *
+ * `FS_ENTRY_POINTS` already holds `Glob`, but only in the first-argument
+ * position, which catches a pattern that is
+ * itself repo-rooted (`new Glob("src/…")`, which only matches when launched
+ * from the repo root) and misses `new Bun.Glob("…").scanSync("src")` entirely —
+ * there the path is one call later. Both positions are real; each on its own is half the shape.
+ *
+ * Measured on this tree: every live `.scan`/`.scanSync` passes an anchored
+ * BINDING (`glob.scanSync(abs)` where `abs` came from `import.meta.url`), so
+ * this position exposed NO offender. It is here as prevention, and the cases
+ * below say so rather than dressing a synthetic fixture up as a find.
+ */
+const GLOB_SCAN_ENTRY_POINTS = /\.\s*(scan|scanSync)\s*\(\s*["'`]([^"'`\n]+)["'`]/g
 
 /**
  * Shell-outs hide the path inside the command string rather than as the argument.
@@ -90,9 +105,226 @@ const FS_ENTRY_POINTS =
 const SHELL_ENTRY_POINTS =
   /\b(execSync|spawnSync|Bun\.spawnSync|Bun\.spawn)\s*\(\s*(["'`])((?:\\.|(?!\2)[\s\S])*?)\2/g
 
+/**
+ * `Bun.$` is a shell-out with no argument list at all — the command is a TAGGED
+ * TEMPLATE, so `SHELL_ENTRY_POINTS` (which needs `name(` then a quote) cannot see
+ * it, and its cwd anchor is a `.cwd(dir)` METHOD rather than an options object.
+ *
+ * Measured on this tree: ZERO live uses. Nothing is imported as `$` from `"bun"`
+ * and the only `Bun.$` occurrences are two string literals naming it as data.
+ * This is prevention, and the two synthetic cases below are labelled as
+ * synthetic — a widening that finds nothing must say so rather than look like
+ * coverage.
+ *
+ * Two forms, and the bare one is GATED on the binding actually being imported
+ * from `"bun"`. Without that gate `` $` `` matches the tail of any template
+ * literal ending in a `$` — this repo has ~20 of them (`` `^${re}$` ``,
+ * `` "$& $` $$ $'" ``) and every one would be a false positive. The gate is what
+ * keeps this addition at zero.
+ */
+const BUN_SHELL_BINDING =
+  /\{[^}\n]*\$[^}\n]*\}\s*(?:from\s*["']bun["']|=\s*(?:await\s+)?(?:import|require)\s*\(\s*["']bun["'])/
+const BUN_SHELL_MEMBER = /\bBun\.\$\s*`((?:\\.|[^`])*)`/g
+const BUN_SHELL_BARE = /(?<![A-Za-z0-9_$.)\]}"'])\$\s*`((?:\\.|[^`])*)`/g
+
 const REPO_RELATIVE_ARG = /^(src|tests|tools|docs|scripts)(\/|$)/
 const REPO_RELATIVE_IN_COMMAND = /(^|\s)(src|tests|tools|docs|scripts)(\/|\s|$)/
+
+/**
+ * An explicit cwd IS an anchor — `execSync("rg … src", {cwd: REPO_ROOT})` is the
+ * FIXED form of this very defect, and flagging it would ask the author to undo
+ * the fix. Two spellings, because `Bun.$` anchors with a method:
+ * `` await $`…`.cwd(REPO_ROOT) ``.
+ *
+ * `.cwd(` requires a non-empty argument on purpose, so a nearby `process.cwd()`
+ * — which READS the ambient cwd rather than pinning one — cannot vouch for a
+ * call it has nothing to do with.
+ */
+const CWD_ANCHOR = /\bcwd\s*:|\.cwd\s*\(\s*[A-Za-z_$"'`]/
+
+/**
+ * Scoped to the 200 characters after the call so a `cwd:` belonging to some later
+ * spawn cannot vouch for this one.
+ */
+const hasCwdAnchor = (source: string, from: number): boolean =>
+  CWD_ANCHOR.test(source.slice(from, from + 200))
 const templatePlaceholder = (name: string): string => ["$", "{", name, "}"].join("")
+
+/**
+ * Comments removed, STRING LITERALS LEFT ALONE.
+ *
+ * The shared `stripComments` in `slice-boundary-scanner.ts` is two regexes over
+ * the whole file, so a `/**\u002a/`-shaped substring inside a *string* is a block
+ * comment to it. Measured:
+ *
+ *   stripComments('globSync("src/' + STARS + '/*.ts")')  →  'globSync("src*.ts")'
+ *
+ * `src/` + `**` + `/` + `*.ts` opens at the `/` + `*` and closes at the next
+ * `*` + `/`, and the `src/` prefix — the only thing `REPO_RELATIVE_ARG` matches
+ * on — is destroyed. That silently disarmed BOTH `globSync` and the `Glob`
+ * constructor position that has been in `FS_ENTRY_POINTS` since this ratchet was
+ * written, for the single most common way anyone writes a glob. A detector
+ * blinded by its own pre-processing is the same defect this file exists for, one
+ * layer down.
+ *
+ * The shared helper is deliberately NOT changed: 54–60 consumers depend on its
+ * current output, and broadening what they see is a separate, measured decision.
+ * This scanner keeps its two semantics exactly — block comments anywhere, and
+ * `//` comments only when they START a line, so a mid-line `//` inside a URL or a
+ * regex survives — and differs only in that it does not look inside a literal.
+ */
+/** From the opening quote to its match, escapes carried through verbatim. */
+const readStringLiteral = (src: string, open: number): string => {
+  const quote = src[open] as string
+  let out = quote
+  let i = open + 1
+  while (i < src.length) {
+    const ch = src[i] as string
+    if (ch === "\\") {
+      out += ch + (src[i + 1] ?? "")
+      i += 2
+      continue
+    }
+    out += ch
+    i++
+    if (ch === quote) break
+  }
+  return out
+}
+
+/**
+ * A `/` here opens a REGEX LITERAL rather than a division.
+ *
+ * Needed because a regex literal is allowed to contain quote characters, and
+ * this repo has them: `tools/feature-catalog/test-audit.ts` holds
+ * `/readFile(?:Sync)?\s*\(\s*["'`](?:\.\.\/)*src\//`. A scanner that took that
+ * `"` for the start of a string desynced for the rest of the file and reported
+ * the `readFileSync("src/...")` inside the JSDoc BELOW it as live code — a false
+ * positive, in the one directory this campaign is not allowed to touch.
+ *
+ * The classic previous-token heuristic: after an operator, a punctuator or one of
+ * the keywords, a `/` is a regex; after an identifier, a literal, `)` or `]` it is
+ * division. Only the last 32 characters are inspected, so this stays O(1) per
+ * slash.
+ */
+const REGEX_PRECEDERS = "(,=:[!&|?{};+-*%~^"
+const REGEX_KEYWORDS =
+  /\b(?:return|typeof|instanceof|in|of|new|delete|void|throw|case|do|else|yield|await)$/
+
+const opensRegexLiteral = (emitted: string): boolean => {
+  const tail = emitted.slice(-32).replace(/\s+$/, "")
+  if (tail === "") return true
+  return REGEX_PRECEDERS.includes(tail[tail.length - 1] as string) || REGEX_KEYWORDS.test(tail)
+}
+
+/**
+ * From the opening `/` to its match, honouring `\` escapes and `[...]` classes.
+ * A newline means it was not a regex after all, so only the `/` is consumed.
+ */
+const readRegexLiteral = (src: string, open: number): string => {
+  let i = open + 1
+  let inClass = false
+  while (i < src.length) {
+    const ch = src[i] as string
+    if (ch === "\\") {
+      i += 2
+      continue
+    }
+    if (ch === "\n") return "/"
+    if (ch === "[") inClass = true
+    else if (ch === "]") inClass = false
+    else if (ch === "/" && !inClass) return src.slice(open, i + 1)
+    i++
+  }
+  return "/"
+}
+
+/** The index just past a comment opening at `i`, or -1 if none opens there. */
+const skipComment = (src: string, i: number, atLineStart: boolean): number => {
+  if (src[i] !== "/") return -1
+  if (src[i + 1] === "*") {
+    const end = src.indexOf("*/", i + 2)
+    return end === -1 ? src.length : end + 2
+  }
+  // Only a LINE-LEADING `//`, matching the shared helper: a mid-line `//` inside
+  // a URL or a regex literal must survive.
+  if (src[i + 1] === "/" && atLineStart) {
+    const end = src.indexOf("\n", i)
+    return end === -1 ? src.length : end
+  }
+  return -1
+}
+
+const stripCommentsOutsideStrings = (src: string): string => {
+  let out = ""
+  let i = 0
+  let atLineStart = true
+  while (i < src.length) {
+    const past = skipComment(src, i, atLineStart)
+    if (past !== -1) {
+      i = past
+      continue
+    }
+    const c = src[i] as string
+    const token =
+      c === '"' || c === "'" || c === "`"
+        ? readStringLiteral(src, i)
+        : c === "/" && opensRegexLiteral(out)
+          ? readRegexLiteral(src, i)
+          : ""
+    if (token !== "") {
+      out += token
+      i += token.length
+      atLineStart = false
+      continue
+    }
+    out += c
+    atLineStart = c === "\n" || (atLineStart && (c === " " || c === "\t"))
+    i++
+  }
+  return out
+}
+
+/** `readFileSync("src/…")` and `glob.scanSync("src")` — the path IS the argument. */
+const pathArgumentSites = (source: string): readonly string[] => {
+  const out: string[] = []
+  for (const re of [FS_ENTRY_POINTS, GLOB_SCAN_ENTRY_POINTS]) {
+    for (const m of source.matchAll(re)) {
+      const arg = m[2] ?? ""
+      if (REPO_RELATIVE_ARG.test(arg)) out.push(`${m[1]}("${arg}")`)
+    }
+  }
+  return out
+}
+
+/** `execSync("rg … src")` — the path is a token inside the command string. */
+const shellCommandSites = (source: string): readonly string[] => {
+  const out: string[] = []
+  for (const m of source.matchAll(SHELL_ENTRY_POINTS)) {
+    const cmd = m[3] ?? ""
+    if (!REPO_RELATIVE_IN_COMMAND.test(cmd)) continue
+    if (hasCwdAnchor(source, m.index + m[0].length)) continue
+    out.push(`${m[1]}(\`${cmd.slice(0, 60)}…\`)`)
+  }
+  return out
+}
+
+/** ``await $`grep -r x src` `` — a tagged template, so there is no argument list. */
+const bunShellSites = (source: string): readonly string[] => {
+  const patterns = BUN_SHELL_BINDING.test(source)
+    ? [BUN_SHELL_MEMBER, BUN_SHELL_BARE]
+    : [BUN_SHELL_MEMBER]
+  const out: string[] = []
+  for (const re of patterns) {
+    for (const m of source.matchAll(re)) {
+      const cmd = m[1] ?? ""
+      if (!REPO_RELATIVE_IN_COMMAND.test(cmd)) continue
+      if (hasCwdAnchor(source, m.index + m[0].length)) continue
+      out.push(`$\`${cmd.slice(0, 60)}…\``)
+    }
+  }
+  return out
+}
 
 /**
  * Sites where a repo-root-relative literal reaches the filesystem or a shell.
@@ -116,44 +348,61 @@ export const cwdRelativeRepoReads = (rawSource: string): readonly string[] => {
   // lines of comment between `execSync(` and its `grep … src/tool …` string, so
   // the detector reported the whole tree clean while that file failed 3/36 under
   // a foreign cwd — the ratchet committing the exact defect it forbids.
-  //
-  // `stripComments` is the one in `slice-boundary-scanner.ts`, reused rather than
-  // rewritten: this ratchet's own subject is what happens when 40 authors each
-  // hand-roll the same primitive.
-  const source = stripComments(rawSource)
-  const out: string[] = []
-  for (const m of source.matchAll(FS_ENTRY_POINTS)) {
-    const arg = m[2] ?? ""
-    if (REPO_RELATIVE_ARG.test(arg)) out.push(`${m[1]}("${arg}")`)
-  }
-  for (const m of source.matchAll(SHELL_ENTRY_POINTS)) {
-    const cmd = m[3] ?? ""
-    if (!REPO_RELATIVE_IN_COMMAND.test(cmd)) continue
-    // An explicit `cwd:` IS an anchor — `execSync("rg … src", {cwd: REPO_ROOT})`
-    // is the fixed form of this very defect, and flagging it would ask the author
-    // to undo the fix. Scoped to the 200 characters after the call so a `cwd:`
-    // belonging to some later spawn cannot vouch for this one.
-    const after = source.slice(m.index + m[0].length, m.index + m[0].length + 200)
-    if (/\bcwd\s*:/.test(after)) continue
-    out.push(`${m[1]}(\`${cmd.slice(0, 60)}…\`)`)
-  }
-  return [...new Set(out)]
+  const source = stripCommentsOutsideStrings(rawSource)
+  return [
+    ...new Set([
+      ...pathArgumentSites(source),
+      ...shellCommandSites(source),
+      ...bunShellSites(source),
+    ]),
+  ]
 }
 
-/** Every `*.test.ts` under `tests/`. */
-const testFiles = (): readonly string[] => {
+/**
+ * The three populations that read this repo, and why it is three and not one.
+ *
+ * `tests/**` was the whole walk until 2026-08-26, and that was the same
+ * "clean vs I never looked" error one level up: the detector could be perfect and
+ * still report a clean tree, because the files doing the scanning were outside
+ * the scan.
+ *
+ *   - `tests/**\/*.test.ts` — 3,367 files, the original population.
+ *   - `tools/**\/*.ts` — 103 files, ALL of them, not only tests. The live
+ *     vacuous-green this campaign started from (`fc validate` checking 1,068
+ *     features at the repo root and 0 features from a foreign cwd, both exit 0)
+ *     is in `tools/feature-catalog`, which contains no `.test.ts` at all.
+ *   - `src/**\/*.test.ts` — 296 files that no `bun test` script covers and that
+ *     `gated-test-scope-ratchet` also cannot see. Two of them
+ *     (`prompt-graph/role-drift.ratchet.test.ts`, `tool/terminal-surface.test.ts`)
+ *     scan all of `src/` on every run.
+ *
+ * `.`-prefixed directories are skipped, which is load-bearing here rather than
+ * cosmetic: `tools/dev/.scratch` is a gitignored twin of `src/` holding 4,394
+ * `.ts` files, and walking it would trade a 400-file scan for a 4,800-file one
+ * whose findings are all about copies.
+ */
+const POPULATIONS = [
+  { root: "tests", suffix: ".test.ts", floor: 3000 },
+  { root: "tools", suffix: ".ts", floor: 80 },
+  { root: "src", suffix: ".test.ts", floor: 250 },
+] as const
+
+const filesUnder = (root: string, suffix: string): readonly string[] => {
   const out: string[] = []
   const walk = (dir: string): void => {
     for (const ent of readdirSync(dir, { withFileTypes: true })) {
       if (ent.name === "node_modules" || ent.name.startsWith(".")) continue
       const abs = join(dir, ent.name)
       if (ent.isDirectory()) walk(abs)
-      else if (abs.endsWith(".test.ts")) out.push(abs)
+      else if (abs.endsWith(suffix)) out.push(abs)
     }
   }
-  walk(join(REPO_ROOT, "tests"))
+  walk(join(REPO_ROOT, root))
   return out.sort()
 }
+
+const scannedFiles = (): readonly string[] =>
+  POPULATIONS.flatMap((p) => filesUnder(p.root, p.suffix)).sort()
 
 /**
  * Sites admitted deliberately. Empty today — the nine found on 2026-08-25/26
@@ -166,11 +415,16 @@ const testFiles = (): readonly string[] => {
 const ADMITTED: ReadonlySet<string> = new Set<string>()
 
 describe("repo-path anchoring", () => {
-  const files = testFiles()
+  const files = scannedFiles()
 
-  test("anti-vacuity: the scan sees the real test tree", () => {
-    // Without this the ceiling below passes for free the moment the walk breaks
-    // — which is precisely the failure mode this whole ratchet is about.
+  test("anti-vacuity: the scan sees all three real populations", () => {
+    // PER-ROOT, not a total. A single `> 2000` is satisfied by `tests/` alone, so
+    // it would pass unchanged if the `tools/` or `src/` walk silently returned
+    // nothing — which is precisely the failure mode this whole ratchet is about,
+    // committed by its own anti-vacuity check.
+    expect(
+      POPULATIONS.map((p) => `${p.root}: ${filesUnder(p.root, p.suffix).length >= p.floor}`),
+    ).toEqual(POPULATIONS.map((p) => `${p.root}: true`))
     expect(files.length).toBeGreaterThan(2000)
   })
 
@@ -272,6 +526,111 @@ describe("repo-path anchoring", () => {
 
     test("INNOCENT — a temp directory scan", () => {
       expect(cwdRelativeRepoReads("expect(readdirSync(out).length).toBe(0)")).toEqual([])
+    })
+
+    /**
+     * The 2026-08-27 widening, and what each entry point actually FOUND.
+     *
+     * Nine shapes were measured against the tree BEFORE the widening and every
+     * one of them was missed. Of the nine, exactly ZERO had a live offender: the
+     * `.scan`/`.scanSync` sites all pass an anchored binding, and `globSync`,
+     * `opendirSync`, `readlinkSync`, `cpSync`, `watch` and `Bun.$` have no live
+     * use with a repo-relative literal at all. So these fixtures are SYNTHETIC
+     * and are labelled as such — the widening is prevention, not a find, and
+     * saying otherwise would make a green here look like evidence it is not.
+     *
+     * Ground truth for each was still taken: every shape was injected into a real
+     * file in each of the three populations, the ratchet went red naming that
+     * file, and the injection was reverted.
+     */
+    test("🔴 SYNTHETIC — the call-position glob root, which the constructor position misses", () => {
+      // `new Bun.Glob(pattern)` holds the PATTERN; `.scanSync(root)` holds the
+      // PATH, and the path is the half that resolves against the cwd.
+      expect(cwdRelativeRepoReads('new Bun.Glob("**/*.ts").scanSync("src")')).toEqual([
+        'scanSync("src")',
+      ])
+      expect(cwdRelativeRepoReads('new Glob("**/*.ts").scan("tools/dev")')).toEqual([
+        'scan("tools/dev")',
+      ])
+    })
+
+    test("🔴 SYNTHETIC — the five fs entry points added alongside the read family", () => {
+      const shapes: Record<string, string> = {
+        globSync: 'globSync("src/**/*.ts")',
+        opendirSync: 'opendirSync("src/tool")',
+        readlinkSync: 'readlinkSync("src/link")',
+        cpSync: 'cpSync("tools/fixtures", dest, { recursive: true })',
+        watch: 'watch("src/apps/cli", () => {})',
+      }
+      expect(
+        Object.entries(shapes).map(([k, v]) => `${k}: ${cwdRelativeRepoReads(v).length}`),
+      ).toEqual(Object.keys(shapes).map((k) => `${k}: 1`))
+    })
+
+    test("🔴 SYNTHETIC — `Bun.$`, a shell-out with no argument list to look inside", () => {
+      expect(cwdRelativeRepoReads("await Bun.$`rg -l knob src --type ts`")).toHaveLength(1)
+      // The bare binding is gated on it actually coming from `"bun"`.
+      expect(
+        cwdRelativeRepoReads('import { $ } from "bun"\nawait $`grep -r needle src`'),
+      ).toHaveLength(1)
+      expect(
+        cwdRelativeRepoReads('const { $ } = await import("bun")\nawait $`grep -r needle src`'),
+      ).toHaveLength(1)
+    })
+
+    test("INNOCENT — a `$` that ends a template literal is not a shell-out", () => {
+      // Without the import gate this is what `` $` `` matches: the CLOSING
+      // backtick of any template ending in `$`. This repo has ~20, and each would
+      // have been a false positive — the thing that gets a ratchet's detector
+      // weakened rather than its offenders fixed.
+      const dollarEnd = ["`", "^", templatePlaceholder("re"), "$", "`"].join("")
+      expect(cwdRelativeRepoReads(`const anchored = ${dollarEnd}\nreaddirSync("src")`)).toEqual([
+        'readdirSync("src")',
+      ])
+      expect(cwdRelativeRepoReads("await Bun.$`rg -l knob docs`.cwd(REPO_ROOT)")).toEqual([])
+    })
+
+    test("INNOCENT — an anchored `.scanSync` binding, the live shape on this tree", () => {
+      // Every real `.scan`/`.scanSync` in the repo looks like this. Flagging it
+      // would be the false positive that discredits the widening on day one.
+      expect(cwdRelativeRepoReads("for (const rel of glob.scanSync(SRC_DIR)) {}")).toEqual([])
+    })
+
+    test("🔴 a glob pattern must survive comment-stripping", () => {
+      // The pre-processing defect this widening uncovered. The shared
+      // `stripComments` treats the `/` + `**` + `/` inside a glob STRING as a
+      // block comment and rewrites `src/` + `**` + `/*.ts` to `src*.ts`, deleting
+      // the `src/` prefix that `REPO_RELATIVE_ARG` matches on. That silently
+      // disarmed `globSync` and the `Glob` constructor position — which had been
+      // in `FS_ENTRY_POINTS` since this file was written — for the ordinary way
+      // everyone writes a glob.
+      expect(cwdRelativeRepoReads('globSync("src/**/*.ts")')).toEqual(['globSync("src/**/*.ts")'])
+      expect(cwdRelativeRepoReads('new Glob("tools/**/*.ts")')).toEqual(['Glob("tools/**/*.ts")'])
+    })
+
+    test("INNOCENT — a quote inside a REGEX literal must not desync the scanner", () => {
+      // Measured, not hypothetical: making the stripper string-aware without
+      // making it regex-aware produced exactly one false positive on the real
+      // tree — `tools/feature-catalog/test-audit.ts`, whose
+      // `/readFile(?:Sync)?…["'`]…src/` pattern opened a "string" at the `"` and
+      // left every JSDoc below it looking like live code.
+      const src = [
+        `const RE = /readFile(?:Sync)?\\s*\\(\\s*["'\`]src\\//`,
+        "/**",
+        ' * a test that reads source via `readFileSync("src/...")` must opt in',
+        " */",
+        "export const check = () => RE",
+      ].join("\n")
+      expect(cwdRelativeRepoReads(src)).toEqual([])
+    })
+
+    test("a comment is still stripped — the defect this detector was born from", () => {
+      // The regex-awareness above must not have reopened the original hole.
+      expect(cwdRelativeRepoReads('// readFileSync("src/apps/cli/index.ts")')).toEqual([])
+      expect(cwdRelativeRepoReads('/* readdirSync("tools/dev") */')).toEqual([])
+      expect(
+        cwdRelativeRepoReads('execSync(\n  /* nine\n   * lines\n   */\n  "grep -r x src/tool",\n)'),
+      ).toHaveLength(1)
     })
   })
 })
