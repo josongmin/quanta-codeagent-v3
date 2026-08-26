@@ -214,7 +214,13 @@ describe("checkout — the rendered git commands round-trip through a shell", ()
     argvRecorder(sb, "git", log)
     const ran = await sb.runStep("checkout")
     expect(ran.code, ran.stderr).toBe(0)
-    const declared = sb.plan.filter((c) => c.step === "checkout").map((c) => c.argv.slice(1))
+    // The step also carries a `test ! -L` refusal, and `test` is a shell
+    // BUILTIN — a PATH stub can never intercept it, so it cannot round-trip
+    // through a recorder. Excluded by command, the same rule the plan-wide
+    // property uses.
+    const declared = sb.plan
+      .filter((c) => c.step === "checkout" && !SHELL_BUILTINS.has(c.argv[0] as string))
+      .map((c) => c.argv.slice(1))
     const seen = recordedArgv(log)
     // THE boundary property: a shell parsing the rendered string yields back the
     // argv that was declared — no word splitting, no glob, no `$` expansion. The
@@ -290,7 +296,13 @@ describe("gold-teardown — the answer key is really removed", () => {
  * These two properties hold over EVERY command the plan declares, so a step
  * added later inherits them without anyone remembering to.
  */
-const BUILTIN_BACKED = new Set(["gold-absence"])
+/**
+ * Commands the SHELL resolves itself, so a PATH stub can never intercept them.
+ * Keyed by argv[0] rather than by step name: `test` backs both `gold-absence`
+ * and part of `gold-teardown`, and a step-name exemption silently widened the
+ * moment a step grew a second command.
+ */
+const SHELL_BUILTINS = new Set(["test", "[", "echo", ":", "true", "false"])
 
 describe("PROPERTY — every declared argv round-trips through a real shell", () => {
   // Spawns one real shell per declared command. Alone that is well under a
@@ -298,7 +310,9 @@ describe("PROPERTY — every declared argv round-trips through a real shell", ()
   // 5s default made it flake. The budget is stated rather than the work reduced.
   test("🔴 no token is split, globbed, or expanded on the way to the process", async () => {
     const sb = sandbox()
-    const plain = sb.plan.filter((c) => c.argv[0] !== "sh" && !BUILTIN_BACKED.has(c.step))
+    const plain = sb.plan.filter(
+      (c) => c.argv[0] !== "sh" && !SHELL_BUILTINS.has(c.argv[0] as string),
+    )
     expect(plain.length, "nothing to check — the plan shape drifted").toBeGreaterThanOrEqual(8)
     for (const [i, step] of plain.entries()) {
       const log = join(sb.root, `argv-${i}.txt`)

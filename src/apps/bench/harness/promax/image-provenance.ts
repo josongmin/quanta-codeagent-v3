@@ -51,7 +51,13 @@
 import { shq } from "../../remote/box-session/shell"
 
 /** A well-formed OCI content digest, as `RepoDigests` reports it. */
-const REPO_DIGEST = /@sha256:[0-9a-f]{64}$/
+/**
+ * ANCHORED AT BOTH ENDS. Without `^` any prefix passed — `"TOTALLY UNRELATED
+ * @sha256:<64 hex>"` was accepted as a pin, so the receipt could name one image
+ * and pin another. The sibling check in the receipt layer was already anchored;
+ * this one, the only place that sees the box's own bytes, was not.
+ */
+const REPO_DIGEST = /^[A-Za-z0-9][A-Za-z0-9._/:-]*@sha256:[0-9a-f]{64}$/
 
 /** Where the program is written on the box. Under the campaign root, so the
  *  chunk scrub and the campaign teardown both already cover the directory. */
@@ -135,9 +141,28 @@ export const parseProMaxImageProvenance = (
 
   for (const line of stdout.split("\n")) {
     if (line.trim() === "") continue
-    const [instanceId, imageName, repoDigest] = line.split("\t")
+    // EXACTLY three fields. `image_name` is read out of the checkout's golden
+    // and printed unescaped, so a tab inside it shifts the digest column and a
+    // crafted golden supplies a pin the daemon never produced. Destructuring
+    // three names out of `split("\t")` silently discarded the rest, which is
+    // what made that invisible.
+    const fields = line.split("\t")
+    if (fields.length !== 3) {
+      faults.push(
+        `image-provenance line has ${fields.length} tab-separated field(s), expected 3 — ` +
+          `an image name carrying a tab can shift the digest column: ${JSON.stringify(line.slice(0, 80))}`,
+      )
+      continue
+    }
+    const [instanceId, imageName, repoDigest] = fields
     if (instanceId === undefined || imageName === undefined) {
       faults.push(`unreadable image-provenance line: ${JSON.stringify(line.slice(0, 80))}`)
+      continue
+    }
+    // A repeated id means two different pins for one verdict; the receipt layer
+    // refuses that, and the parser must not hand it up in the first place.
+    if (seen.has(instanceId)) {
+      faults.push(`${instanceId}: reported more than once — two pins cannot describe one verdict`)
       continue
     }
     seen.add(instanceId)

@@ -57,7 +57,9 @@ const recorder = (opts: { gradeFails?: boolean } = {}) =>
   })
 
 const isGrade = (c: string) => c.includes("test_run.py") && c.includes("--pred")
-const isTeardown = (c: string) => c.includes("'rm'")
+/** The teardown is the command that REMOVES the checkout — matched by what it
+ *  does, not by its argv[0]. It is now an `sh -c` that refuses a symlink first. */
+const isTeardown = (c: string) => /'?rm'?\s+'?-rf'?/.test(c)
 /** The PASS-RATE read specifically. `cat` is also used to probe the predictions
  *  file before anything is materialized, so a bare `startsWith("cat ")` would
  *  match that earlier probe and make the ordering assertion below read backwards. */

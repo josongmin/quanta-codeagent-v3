@@ -206,9 +206,17 @@ describe("the REAL bootstrapBox callee carries it", () => {
       ssh: rec.ssh,
       log: () => {},
     })
-    // the absence probe is the FIRST thing the agent phase issues: the box is
-    // proven clean of the answer key before the agent is allowed to run.
-    expect(rec.commands[0]).toContain("/opt/quanta/promax/upstream")
+    // The box is proven clean of the answer key before the agent is allowed to
+    // run. The probe is no longer command #0 — a readability check on the
+    // campaign root runs ahead of it, because `test ! -e` answers CLEAN on
+    // EACCES and would otherwise assert nothing. What must hold is that the
+    // probe precedes every other kind of work.
+    const probeAt = rec.commands.findIndex((c: string) => c.includes("/opt/quanta/promax/upstream"))
+    expect(probeAt, "the absence probe never reached the box").toBeGreaterThan(-1)
+    const firstNonTest = rec.commands.findIndex((c: string) => !c.startsWith("'test'"))
+    expect(probeAt, "work was issued before the box was proven clean").toBeLessThan(
+      firstNonTest === -1 ? rec.commands.length : firstNonTest,
+    )
     // …and nothing gold-bearing ran: the checkout belongs to the grader phase.
     expect(rec.commands.some((c: string) => c.includes("git"))).toBe(false)
   })

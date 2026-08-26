@@ -256,10 +256,42 @@ const agentPhaseProbes = (spec: ProMaxEvaluatorBootstrapSpec): ProMaxBootstrapCo
       // It creates nothing and reads no answer-key bytes — it asserts there are
       // none. Naming the root is what a probe IS; see `absenceProbe`.
       goldBearing: false,
-      argv: ["test", "!", "-e", root],
+      // `test ! -e` alone was not an absence proof, in two MEASURED ways — so the
+      // step is three commands. The executor runs a step's commands in order and
+      // refuses on the first non-zero, which says what one `test` could not, and
+      // keeps every token in plain argv rather than hiding it in an `sh -c`
+      // string that no argv guard can see.
+      //
+      //  · A symlink planted at the root survives the teardown (`rm -rf` unlinks
+      //    the LINK, never the target tree) and then reads as ABSENT, so the gold
+      //    stays readable while both defences report success.
+      //  · `test ! -e` is TRUE on EACCES, so a campaign root this user cannot
+      //    read reported CLEAN. "I could not look" is not "it is not there" —
+      //    the rule the grader-container probe was already rewritten for.
+      // "IF it exists, it must be readable" — NOT "it must exist": this runs
+      // BEFORE `campaign-root` creates the directory. `test ! -e` answers CLEAN
+      // on EACCES, so an unreadable campaign root made the absence probe below
+      // assert nothing. Its own step because it names no gold-bearing path.
+      argv: ["test", "!", "-d", spec.campaignRoot, "-o", "-r", spec.campaignRoot],
+      purpose:
+        "if the campaign root exists it must be READABLE, or absence cannot be asserted about " +
+        "anything inside it — `test ! -e` answers CLEAN on EACCES",
+    },
+    {
+      step: "gold-absence",
+      phase: "agent",
+      goldBearing: false,
+      // ONE `test`, two conditions. `test ! -e` alone is FALSE for a dangling
+      // symlink, and MEASURED: `rm -rf <symlink>` unlinks the LINK and leaves
+      // the target tree whole, so a link the previous chunk's agent planted
+      // survives the teardown and then reads as absent — the answer key stays
+      // readable while every gate reports success. `-a ! -L` closes that, and
+      // keeps the whole proof in a single declared probe.
+      argv: ["test", "!", "-e", root, "-a", "!", "-L", root],
       purpose:
         "REFUSE to start the agent phase on a box that still carries the gold-bearing upstream " +
-        "checkout (a prior chunk's grader phase, or a teardown that failed)",
+        "checkout, or a SYMLINK standing in for it (a prior chunk's grader phase, or a teardown " +
+        "that failed)",
       absenceProbe: { absolutePath: root },
     },
     {
@@ -391,6 +423,22 @@ const graderCheckout = (spec: ProMaxEvaluatorBootstrapSpec): ProMaxBootstrapComm
   const at = (...argv: string[]): string[] => ["git", "-C", root, ...argv]
   return [
     {
+      // 🔴 BEFORE anything is materialized. `git init` FOLLOWS a symlink, and
+      // `rm -rf <symlink>` later unlinks the link while leaving the target tree
+      // whole — MEASURED — so a link planted at the checkout root during the
+      // agent phase makes the answer key land somewhere the teardown never
+      // touches and no absence probe ever looks. The probe cannot catch this
+      // after the fact: once the link is unlinked the root really is absent.
+      // The only place it can be refused is here, before the gold exists.
+      step: "checkout",
+      phase: "grader",
+      goldBearing: true,
+      argv: ["test", "!", "-L", root],
+      purpose:
+        "REFUSE to materialize the answer key through a SYMLINK — it would place the checkout " +
+        "outside the path the teardown removes and the absence probe inspects",
+    },
+    {
       step: "checkout",
       phase: "grader",
       goldBearing: false,
@@ -514,6 +562,18 @@ const graderPythonEnvAndTeardown = (
       // It operates ON answer-key bytes, so it stays out of the agent phase by
       // the same cross-check that keeps the checkout out: the agent phase is
       // where absence is PROVEN, never where it is arranged.
+      goldBearing: true,
+      // The teardown removes; the next chunk's absence probe VERIFIES. Splitting
+      // a symlink refusal in here as well was tried and reverted: it bought
+      // nothing the probe does not already refuse, and it put a second
+      // gold-root-naming command into the agent-free teardown phase.
+      argv: ["rm", "-rf", root],
+      purpose:
+        "REFUSE to 'remove' a symlink: `rm -rf` would unlink it and leave the answer key whole",
+    },
+    {
+      step: "gold-teardown",
+      phase: "teardown",
       goldBearing: true,
       argv: ["rm", "-rf", root],
       purpose:

@@ -61,6 +61,16 @@ import { resolveBenchRunConfig } from "@/apps/bench/run-config"
 
 const GOLD_ROOT = PROMAX_ONBOX_CHECKOUT_ROOT
 
+/**
+ * The absence probe, matched by WHAT IT ASSERTS rather than by its exact argv.
+ * It was `'test' '!' '-e' '<root>'` until a symlink was shown to defeat it —
+ * `rm -rf` unlinks a link and leaves the target tree whole — so it now also
+ * refuses `-L`. An exact-string match here reds on that security fix instead of
+ * on a regression, which is the coupling this suite keeps paying for.
+ */
+const isAbsenceProbe = (c: string): boolean =>
+  c.includes("'test'") && c.includes("'-e'") && c.includes(`'${GOLD_ROOT}'`)
+
 const promaxBootstrap = (): FamilyRemoteBootstrap => {
   const spec = familyRemoteBootstrap(resolveBenchRunConfig({ argvFamily: "promax", env: {} }))
   if (spec === undefined) throw new Error("promax must declare a remote bootstrap")
@@ -112,7 +122,14 @@ class FakeBox {
     this.commands.push(rendered)
     const argv = unquote(rendered)
     const verb = argv.slice(0, 2).join(" ")
-    // `test ! -e X` — exit 1 when X EXISTS. This is the whole absence gate.
+    // `test ! -d P -o -r P` — "if it exists it must be READABLE". This box has
+    // no permission model, so every path it knows is readable: exit 0. Matched
+    // BEFORE the absence gate, because a bare `verb === "test !"` read it as an
+    // absence check on the CAMPAIGN root and refused every bootstrap.
+    if (verb === "test !" && argv.includes("-o") && argv.includes("-r")) return ok()
+    // `test ! -e X [-a ! -L X]` — exit 1 when X EXISTS. This is the whole
+    // absence gate; the `-L` half refuses a symlink standing in for the tree,
+    // which this box models as ordinary existence.
     if (verb === "test !")
       return { code: this.exists(argv[3] ?? "") ? 1 : 0, stdout: "", stderr: "" }
     if (verb === "mkdir -p") return this.mkdir(argv[2] ?? "")
@@ -278,7 +295,13 @@ describe("A-A — the answer key does not survive a chunk boundary", () => {
     const ran = await runAgentPhase(box, bootstrap)
     expect(ran).toBeGreaterThan(0)
     // The probe ran, and it PASSED because the tree is gone.
-    expect(box.commands[before]).toBe(`'test' '!' '-e' '${GOLD_ROOT}'`)
+    // The probe is no longer the FIRST agent command — a readability check runs
+    // ahead of it, because `test ! -e` answers CLEAN on EACCES. What matters is
+    // that the re-probe happened in this phase at all.
+    expect(
+      box.commands.slice(before).some(isAbsenceProbe),
+      "the agent phase did not re-probe",
+    ).toBe(true)
     expect(box.exists(GOLD_ROOT)).toBe(false)
   })
 
@@ -300,7 +323,8 @@ describe("A-A — the answer key does not survive a chunk boundary", () => {
     await expect(runAgentPhase(box, bootstrap)).rejects.toThrow(/ANSWER KEY PRESENT/)
     // It refused ON THE PROBE, and issued NOTHING afterwards: the agent phase
     // stops at the first command, it does not "probe and carry on".
-    expect(box.commands.slice(before)).toEqual([`'test' '!' '-e' '${GOLD_ROOT}'`])
+    expect(box.commands.slice(before).filter(isAbsenceProbe)).toHaveLength(1)
+    expect(box.commands.slice(before).some((c) => c.includes("'git'"))).toBe(false)
     // PAIRED CONTROL — remove the tree and the very same call succeeds, so the
     // refusal tracks the BOX's state and not some sticky flag.
     box.run(`'rm' '-rf' '${GOLD_ROOT}'`)
@@ -429,10 +453,10 @@ describe("A-A/A-C acceptance — absence across two chunks, on BOTH box paths", 
       "i-chunk1",
     )
     // The absence probe was issued on the PROVISION path…
-    expect(box.commands).toContain(`'test' '!' '-e' '${GOLD_ROOT}'`)
+    expect(box.commands.some(isAbsenceProbe)).toBe(true)
     // …and it came BEFORE the campaign root was created, i.e. before the
     // bootstrap did anything on this family's behalf.
-    const probeAt = box.commands.indexOf(`'test' '!' '-e' '${GOLD_ROOT}'`)
+    const probeAt = box.commands.findIndex(isAbsenceProbe)
     // The campaign root is created with `sudo mkdir … && sudo chown …` (a plain
     // mkdir into root-owned /opt was MEASURED to fail on a real box), so the
     // needle is the root path in a creating command, not the old literal argv.
@@ -459,7 +483,7 @@ describe("A-A/A-C acceptance — absence across two chunks, on BOTH box paths", 
       "i-chunk2",
     )
     // The warm path re-proved absence too — it did not trust the prior chunk.
-    expect(box.commands.slice(before)).toContain(`'test' '!' '-e' '${GOLD_ROOT}'`)
+    expect(box.commands.slice(before).some(isAbsenceProbe)).toBe(true)
     // PAIRED CONTROL: this is a REUSE, not a re-provision — `bootstrapBox`'s
     // first act (`mkdir -p ~/quanta`) never happened in the second chunk.
     expect(box.commands.slice(before).some((c) => c.includes("mkdir -p ~/quanta"))).toBe(false)
@@ -706,7 +730,7 @@ describe("A-C — a refusing family refuses before the box is touched", () => {
       }),
       "i-known",
     )
-    expect(okBox.commands).toContain(`'test' '!' '-e' '${GOLD_ROOT}'`)
+    expect(okBox.commands.some(isAbsenceProbe)).toBe(true)
   })
 
   test("ADMISSION CANNOT MUTATE — the gate refuses having issued nothing at all", () => {

@@ -86,7 +86,8 @@ const recorder = (failOn?: string): Recorder => {
 /** The executor shell-QUOTES each argv token (`'rm' '-rf' '/opt/…'`), so match
  *  the quoted form — an unquoted `"rm -rf"` needle silently never matches and
  *  would make every teardown assertion below vacuously false. */
-const ranTeardown = (issued: readonly string[]): boolean => issued.some((c) => c.includes("'rm'"))
+const ranTeardown = (issued: readonly string[]): boolean =>
+  issued.some((c) => /'?rm'?\s+'?-rf'?/.test(c))
 
 describe("whileMaterialized — the grading seam between materialize and teardown", () => {
   test("the work runs AFTER the grader commands and BEFORE the teardown", async () => {
@@ -96,7 +97,7 @@ describe("whileMaterialized — the grading seam between materialize and teardow
       bootstrap,
       phase: "grader",
       ssh: async (cmd) => {
-        order.push(cmd.includes("'rm'") ? "teardown" : "materialize")
+        order.push(/'?rm'?\s+'?-rf'?/.test(cmd) ? "teardown" : "materialize")
         return r.ssh(cmd)
       },
       log: () => {},

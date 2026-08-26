@@ -252,9 +252,23 @@ describe("PMX-04 bootstrap — dedicated python env, docker readiness, disk, pla
     // the probe must be a DECLARED probe, not merely a command that happens to
     // mention the path.
     const probes = agent.filter((c) => c.absenceProbe !== undefined)
-    expect(probes).toHaveLength(1)
-    expect(probes[0]?.absenceProbe?.absolutePath).toBe(ROOT)
-    expect(probes[0]?.argv).toEqual(["test", "!", "-e", ROOT])
+    // The absence proof is now more than one command — a symlink at the root
+    // defeats both `test ! -e` and the teardown's `rm -rf`, so the refusal is
+    // split across declared probes. What must hold is that EVERY agent-phase
+    // command naming the gold root is a declared probe, and every probe names
+    // that root; the COUNT was never the property.
+    expect(probes.length).toBeGreaterThanOrEqual(1)
+    for (const probe of probes) {
+      expect(probe.absenceProbe?.absolutePath).toBe(ROOT)
+    }
+    // The PROPERTY, not the spelling: the probe names the root, asserts absence,
+    // and creates nothing. It was `["test","!","-e",ROOT]` until a symlink was
+    // shown to defeat both it and the teardown, so an argv-equality assertion
+    // here reds on the security fix rather than on a regression.
+    const probeCmd = (probes[0]?.argv ?? []).join(" ")
+    expect(probeCmd).toContain(ROOT)
+    expect(probeCmd).toMatch(/test\s+!\s+-e/)
+    expect(probeCmd).not.toMatch(/\bmkdir\b|\bgit\b|\brm\b/)
     const flat = agent
       .filter((c) => c.absenceProbe === undefined)
       .map((c) => c.argv.join(" "))
