@@ -1,13 +1,14 @@
-import { describe, expect, it } from "bun:test"
-import { mkdtempSync, readFileSync, unlinkSync, writeFileSync } from "node:fs"
-import { tmpdir } from "node:os"
-import { join } from "node:path"
-import { parseHunkSelection } from "@/apps/cli/repl/hunk-select"
-import { splitHunks } from "@/runner/diff-ops"
+/**
+ * Moved here 2026-08-27 from the REPO ROOT (`test-t05-audit.test.ts`), where it
+ * had sat since 2026-08-24 as the one test file living outside every directory
+ * any glob names — so nothing ran it and nothing linted it. The unused `node:fs`
+ * / `node:os` / `splitHunks` imports and the three dead fixture constants it
+ * arrived with are the evidence of the second half of that: they were removed in
+ * the same move. See `tests/unit/_arch/gated-test-scope-ratchet.test.ts`.
+ */
 
-const fresh = (): string => mkdtempSync(join(tmpdir(), "t05-audit-"))
-const B = ["line1", "line2", "line3", "line4", "line5"].join("\n")
-const A = ["line1", "L2X", "line3", "L4X", "line5"].join("\n")
+import { describe, expect, it } from "bun:test"
+import { parseHunkSelection } from "@/apps/cli/repl/hunk-select"
 
 describe("T05 Audit - parseHunkSelection pathological inputs", () => {
   const ids = ["h1", "h2", "h3", "h4", "h5"]

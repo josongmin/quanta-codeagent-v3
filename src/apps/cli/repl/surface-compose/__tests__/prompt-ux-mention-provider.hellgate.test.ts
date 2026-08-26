@@ -35,6 +35,15 @@ const liveSources = (): MentionLiveSources => ({
   mcpServers: [{ name: "github", tools: [{ name: "create_pr", description: "Open a PR" }] }],
   subagents: registry(),
   sessions: async () => [{ id: "abc-1", title: "Prior thread", cwd: "/w" }],
+  // B4 lineage scope (`mention-source-deps.ts`): the `@thread:` enumerator is
+  // FAIL-CLOSED without the caller's own thread id — absent it the lineage set
+  // is empty and ZERO thread candidates are produced. Production supplies it
+  // (`session-loop-options.ts` / `runtime-context-compose.ts` pass the
+  // bootstrapped `sessionId`), and the sibling fixture in
+  // `mention-provider-listers.hellgate.test.ts` already does. This one did not,
+  // so it has asserted a false expectation since the narrowing landed on
+  // 2026-08-10 — invisible because no gate ran `src/**`.
+  selfThreadId: "abc-1",
 })
 
 const env = (over: Record<string, string | undefined> = {}): NodeJS.ProcessEnv =>

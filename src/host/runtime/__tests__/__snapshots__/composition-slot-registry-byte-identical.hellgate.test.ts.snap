@@ -746,7 +746,7 @@ readFileState :: obj{mtimes=obj{},rangeHashes=undefined,contentDigests=undefined
 `;
 
 exports[`composition slot-registry — byte-identical hellgate fingerprint stable — objective tools: objective tools :: assembled 1`] = `
-"KEYS[24]: llm,registry,stream,promptSurfaceProfile,permission,messages,system,cwd,maxTurns,signal,searchPipeline,stickyModelStore,readFileState,modePolicy,budgetMeter,lspDiagnosticsHookEnabled,secretCheckToolEnabled,bgShellRegistry,contentCaptureEnabled,objective,activeSkillCursor,contextEventsForTurn,mentionInjector,compactionEventEmit
+"KEYS[25]: llm,registry,stream,promptSurfaceProfile,permission,messages,system,cwd,maxTurns,signal,searchPipeline,stickyModelStore,readFileState,modePolicy,budgetMeter,lspDiagnosticsHookEnabled,secretCheckToolEnabled,bgShellRegistry,contentCaptureEnabled,objective,objectiveVerifier,activeSkillCursor,contextEventsForTurn,mentionInjector,compactionEventEmit
 llm :: obj{model=str:"gpt-5.6-terra",provider=str:"chatgpt-oauth",surfaceId=str:"openai-responses",transportId=str:"chatgpt-oauth",authMode=str:"ChatGPT subscription",env=<ambient-env-bag>,fetchImpl=fn,nowMs=fn,maxTokens=undefined,streamTimeoutMs=obj{firstChunkMs=num,idleMs=num},serviceTier=undefined,reasoningEffort=undefined,reasoningSummary=bool:false,reasoningSummaryDetail=undefined,reasoningVerbosity=undefined,reasoningCarryover=bool:false,reasoningCarryoverStore=undefined,debugOAuth=bool:false,memTokenFallback=undefined}
 registry :: obj{tools=obj{},origin=undefined}
 stream :: obj{emit=fn}
@@ -766,7 +766,8 @@ lspDiagnosticsHookEnabled :: bool:false
 secretCheckToolEnabled :: bool:false
 bgShellRegistry :: obj{register=fn,adopt=fn,get=fn,awaitHandle=fn,kill=fn,listOwned=fn,killOwned=fn,killAll=fn,size=fn,oldestId=fn}
 contentCaptureEnabled :: bool:false
-objective :: obj{readDomain=fn,prepare=fn,commit=fn,restore=fn,restoreDomain=fn,set=fn,get=fn,updateStatus=fn,addBlocker=fn,clearBlocker=fn,setNextActions=fn,markCriterion=fn,recordUsage=fn,markUsageLimited=fn,list=fn,toSnapshot=fn,fromSnapshot=fn}
+objective :: obj{readDomain=fn,prepare=fn,commit=fn,restore=fn,restoreDomain=fn,replaceDomainForAttach=fn,knownThreadIds=fn,recordProgressReceipt=fn,create=fn,replace=fn,clear=fn,get=fn,setExplicitStatus=fn,amendBudget=fn,addBlocker=fn,clearBlocker=fn,setNextActions=fn,markCriterion=fn,markUsageLimited=fn,list=fn,toSnapshot=fn,fromSnapshot=fn}
+objectiveVerifier :: obj{verify=fn,reconcile=fn}
 activeSkillCursor :: obj{ids=arr[]}
 contextEventsForTurn :: fn
 mentionInjector :: fn
@@ -1491,7 +1492,7 @@ readFileState :: obj{mtimes=obj{},rangeHashes=undefined,contentDigests=undefined
 `;
 
 exports[`composition slot-registry — byte-identical hellgate fingerprint stable — combo: assembler caps (objective+mailbox+prompt-cache+edit-repair+pii): combo: assembler caps (objective+mailbox+prompt-cache+edit-repair+pii) :: assembled 1`] = `
-"KEYS[28]: llm,registry,stream,promptSurfaceProfile,permission,messages,system,cwd,maxTurns,signal,searchPipeline,stickyModelStore,subagentMailbox,readFileState,modePolicy,budgetMeter,lspDiagnosticsHookEnabled,secretCheckToolEnabled,bgShellRegistry,contentCaptureEnabled,objective,diagnosticsProvider,promptCacheObserver,redaction,activeSkillCursor,contextEventsForTurn,mentionInjector,compactionEventEmit
+"KEYS[29]: llm,registry,stream,promptSurfaceProfile,permission,messages,system,cwd,maxTurns,signal,searchPipeline,stickyModelStore,subagentMailbox,readFileState,modePolicy,budgetMeter,lspDiagnosticsHookEnabled,secretCheckToolEnabled,bgShellRegistry,contentCaptureEnabled,objective,objectiveVerifier,diagnosticsProvider,promptCacheObserver,redaction,activeSkillCursor,contextEventsForTurn,mentionInjector,compactionEventEmit
 llm :: obj{model=str:"gpt-5.6-terra",provider=str:"chatgpt-oauth",surfaceId=str:"openai-responses",transportId=str:"chatgpt-oauth",authMode=str:"ChatGPT subscription",env=<ambient-env-bag>,fetchImpl=fn,nowMs=fn,maxTokens=undefined,streamTimeoutMs=obj{firstChunkMs=num,idleMs=num},serviceTier=undefined,reasoningEffort=undefined,reasoningSummary=bool:false,reasoningSummaryDetail=undefined,reasoningVerbosity=undefined,reasoningCarryover=bool:false,reasoningCarryoverStore=undefined,debugOAuth=bool:false,memTokenFallback=undefined}
 registry :: obj{tools=obj{},origin=undefined}
 stream :: obj{emit=fn}
@@ -1512,7 +1513,8 @@ lspDiagnosticsHookEnabled :: bool:false
 secretCheckToolEnabled :: bool:false
 bgShellRegistry :: obj{register=fn,adopt=fn,get=fn,awaitHandle=fn,kill=fn,listOwned=fn,killOwned=fn,killAll=fn,size=fn,oldestId=fn}
 contentCaptureEnabled :: bool:false
-objective :: obj{readDomain=fn,prepare=fn,commit=fn,restore=fn,restoreDomain=fn,set=fn,get=fn,updateStatus=fn,addBlocker=fn,clearBlocker=fn,setNextActions=fn,markCriterion=fn,recordUsage=fn,markUsageLimited=fn,list=fn,toSnapshot=fn,fromSnapshot=fn}
+objective :: obj{readDomain=fn,prepare=fn,commit=fn,restore=fn,restoreDomain=fn,replaceDomainForAttach=fn,knownThreadIds=fn,recordProgressReceipt=fn,create=fn,replace=fn,clear=fn,get=fn,setExplicitStatus=fn,amendBudget=fn,addBlocker=fn,clearBlocker=fn,setNextActions=fn,markCriterion=fn,markUsageLimited=fn,list=fn,toSnapshot=fn,fromSnapshot=fn}
+objectiveVerifier :: obj{verify=fn,reconcile=fn}
 diagnosticsProvider :: obj{unavailableReason=fn,open=fn}
 promptCacheObserver :: obj{attributeBreakpoint=fn,record=fn,snapshot=fn,reset=fn}
 redaction :: obj{pii=obj{enabled=bool:true}}
