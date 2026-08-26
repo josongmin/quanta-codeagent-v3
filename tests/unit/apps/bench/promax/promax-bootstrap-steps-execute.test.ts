@@ -292,7 +292,9 @@ describe("python-env — `$HOME` expands, the venv root does not", () => {
     const step = sb.plan.filter((c) => c.step === "python-env")[0]
     const ran = await sb.run(step as never)
     expect(ran.code, `$HOME did not expand, or uv was not found: ${ran.stderr}`).toBe(0)
-    expect(recordedArgv(log)[0] ?? []).toEqual(["venv", "--python", "3.11", sb.venvRoot])
+    // `--clear` is part of the contract now: the venv is kept across chunks and
+    // `uv venv` refuses an existing one without it.
+    expect(recordedArgv(log)[0] ?? []).toEqual(["venv", "--clear", "--python", "3.11", sb.venvRoot])
   }, 30_000)
 })
 

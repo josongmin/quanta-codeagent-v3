@@ -137,3 +137,35 @@ describe("the rendered command actually runs", () => {
     }
   })
 })
+
+/**
+ * THE SCRIPT'S OWN DIRECTORY IS ATTACKER-OWNED.
+ *
+ * Shipping the program as a FILE removed the shell-quoting bug that discarded
+ * eight live runs — and introduced this: CPython puts the SCRIPT'S DIRECTORY on
+ * `sys.path[0]`, the script lives at `/opt/quanta/promax/image-provenance.py`,
+ * and that directory is created empty and CHOWNED TO THE BENCH USER during the
+ * agent phase. The agent's shell is unsandboxed as that user, nothing scrubs
+ * that directory (the chunk scrub touches `$HOME`; the teardown removes only
+ * `upstream`), and the script runs INSIDE the grader window with the answer key
+ * materialized.
+ *
+ * So one file — `json.py` next to the script — executes attacker code as the
+ * grader's python, with the gold readable, the pass-rate document writable, and
+ * the provenance stdout under its control. MEASURED end to end.
+ */
+describe("the provenance program cannot be hijacked by its own directory", () => {
+  test("🔴 a module planted beside the script does NOT shadow the stdlib", async () => {
+    const { existsSync, writeFileSync } = await import("node:fs")
+    const s = sandbox({ golden: [{ instance_id: "a-1" }], dockerPrints: DIGEST })
+    const canary = join(s.dir, "GRADER_RCE")
+    // the agent phase's one command
+    writeFileSync(
+      join(s.dir, "json.py"),
+      `open(${JSON.stringify(canary)}, "w").write("attacker code ran as the grader python")\n` +
+        "def load(fh):\n    return []\n",
+    )
+    await run(s, ["a-1"])
+    expect(existsSync(canary), "attacker code ran as the grader python").toBe(false)
+  })
+})

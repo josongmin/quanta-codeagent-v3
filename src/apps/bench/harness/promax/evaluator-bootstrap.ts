@@ -599,7 +599,14 @@ const graderPythonEnvAndTeardown = (
       // Via `sh -c` so `$HOME` expands: bootstrap argv is shq-QUOTED, so neither
       // `~` nor `$HOME` would expand on their own, and hardcoding `/home/ubuntu`
       // would bake in the AMI's user where nothing else does.
-      argv: ["sh", "-c", `"$HOME"/.local/bin/uv venv --python 3.11 ${shq(spec.venvRoot)}`],
+      // `--clear`, because this venv is deliberately KEPT across chunks (the
+      // teardown removes only `upstream`) and `uv venv` refuses an existing one:
+      // "A virtual environment already exists … Use `--clear`", exit 2 —
+      // MEASURED. Without it the grader phase threw on chunk 2 of every warm or
+      // pooled box, silently capping grading to one chunk per box. Rebuilding is
+      // also the safer half: chunk N's evaluator must not run inside an
+      // interpreter environment chunk N-1's agent could have written to.
+      argv: ["sh", "-c", `"$HOME"/.local/bin/uv venv --clear --python 3.11 ${shq(spec.venvRoot)}`],
       purpose: "a DEDICATED interpreter for the pinned evaluator, isolated from the agent's",
     },
     {

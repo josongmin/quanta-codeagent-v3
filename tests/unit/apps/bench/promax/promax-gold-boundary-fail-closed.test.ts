@@ -146,6 +146,21 @@ describe("the answer-key probe and teardown survive a hostile checkout path", ()
   })
 })
 
+describe("a warm box can be graded more than once", () => {
+  test("🔴 the venv step is idempotent — chunk 2 does not abort on an existing venv", async () => {
+    // The venv is kept ACROSS chunks by design (the teardown removes only
+    // `upstream`), but `uv venv <root>` without `--clear` refuses an existing
+    // one: `error: A virtual environment already exists … Use --clear`,
+    // MEASURED with uv 0.11.8. So the grader phase threw on chunk 2 of every
+    // warm or pooled box — fail-closed, but it silently capped grading to one
+    // chunk per box.
+    const s = sandbox()
+    const step = stepCommands("python-env", s)[0] as string
+    expect(step, "no venv step in the plan").toContain("uv venv")
+    expect(step, "the venv step is not idempotent").toContain("--clear")
+  })
+})
+
 describe("materializing the checkout is ATOMIC, not check-then-use", () => {
   test("🔴 a link planted AFTER any probe still cannot be materialized through", async () => {
     // The refusal used to be `test ! -L` followed by `git init` — two ssh

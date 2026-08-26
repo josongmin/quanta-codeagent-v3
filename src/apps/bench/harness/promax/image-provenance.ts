@@ -124,6 +124,22 @@ export const buildProMaxImageProvenanceCommand = (input: {
   const checkout = input.checkoutRoot.replace(/\/+$/, "")
   return [
     shq(input.venvPython),
+    // `-I` — ISOLATED. CPython puts the SCRIPT'S DIRECTORY on `sys.path[0]`, and
+    // this script lives in the campaign root, which the agent phase creates and
+    // CHOWNS to the bench user. The agent's shell is unsandboxed as that user,
+    // nothing scrubs that directory (the chunk scrub touches `$HOME`; the
+    // teardown removes only `upstream`), and this program runs INSIDE the grader
+    // window with the answer key materialized.
+    //
+    // So a `json.py` planted beside the script executed attacker code as the
+    // grader's python, with the gold readable, the pass-rate document writable
+    // and this program's own stdout — the provenance pins — under its control.
+    // MEASURED end to end.
+    //
+    // Isolated mode drops the script directory from `sys.path`, ignores
+    // `PYTHON*` env vars and the user site directory. The program uses only
+    // `json`, `subprocess` and `sys`, so it loses nothing.
+    "-I",
     shq(input.scriptPath),
     shq(`${checkout}/data/swe-bench-promax.json`),
     ...input.instanceIds.map(shq),
