@@ -23,14 +23,20 @@
  * keeps it usable from a hook, a script, or by hand, and keeps its own failure
  * mode ("printed too few paths") separate from a suite's.
  *
- * WHAT IT PROMISES, and what it does not. The contract is DO NOT MISS, not
- * "return a small set". Measured on this repo, a leaf module comes back with
- * ~240 of 3,730 test files while `src/storage/service.ts` comes back with
- * ~2,300 — and the second number is HONEST: barrel re-exports (`index.ts`
- * re-export walls) make most of the suite genuinely able to reach a core
- * module. Reading a large scope as a tool defect is the mistake; it is the real
- * blast radius, and knowing it beats guessing a directory and landing red.
- * Shrinking it means fewer barrels, not a cleverer resolver.
+ * WHAT IT PROMISES. The contract is DO NOT MISS. Size is secondary, and every
+ * narrowing is re-checked against the misses that motivated the tool — a
+ * smaller wrong answer is worth nothing.
+ *
+ * BARRELS. `import { x } from "@/tool"` does not mean "depends on everything
+ * @/tool re-exports", and treating it that way saturated the result: a core
+ * module came back with 3,327 of 3,730 test files. 818 of this repo's 841
+ * barrel edges are NAMED, so they resolve per SYMBOL — a consumer reaches only
+ * the module defining the name it asked for, and a barrel's own
+ * `export { … } from` no longer emits a whole-module edge. Measured: 3,327 →
+ * 1,382 and 2,327 → 1,736, with all five known cases still found. The remaining
+ * `export * from` sites keep the wide edge, since resolving them per symbol
+ * needs following into the target, and guessing would trade a true wide answer
+ * for a possibly-false narrow one.
  */
 
 import { readdirSync, readFileSync, statSync } from "node:fs"
@@ -101,12 +107,41 @@ const allSourceFiles = (): string[] => {
 const SPEC_RE = /(?:from|import)\s*\(?\s*["']([^"']+)["']/g
 const MOCK_MODULE_RE = /mock\.module\(\s*["']([^"']+)["']/g
 
+/** `require("…")` — few sites today, but a form left out is how a scope quietly
+ *  starts lying. */
+const REQUIRE_RE = /require\(\s*["']([^"']+)["']/g
+
+/** `import { a, b as c } from "spec"` — the NAMED bindings, which is what makes
+ *  per-symbol barrel resolution possible. Default / namespace / bare imports are
+ *  deliberately NOT matched: they pull the whole module, so they keep the coarse
+ *  edge. */
+const NAMED_IMPORT_RE = /import\s*\{([^}]*)\}\s*from\s*["']([^"']+)["']/g
+
+/** `export { a, b as c } from "spec"` in a barrel: visible name → defining module. */
+const NAMED_REEXPORT_RE = /export\s*(?:type\s*)?\{([^}]*)\}\s*from\s*["']([^"']+)["']/g
+
+/** `export * from "spec"`. Cannot be resolved per-symbol without following into
+ *  the target, so these keep the WIDE edge on purpose. */
+const STAR_REEXPORT_RE = /export\s*\*\s*from\s*["']([^"']+)["']/g
+
+/** The name a consumer sees: `a` from `a`, `c` from `b as c`. */
+const boundName = (clause: string): string =>
+  (
+    clause
+      .trim()
+      .split(/\s+as\s+/)
+      .pop() ?? ""
+  ).trim()
+
+/** The name the source module knows: `a` from `a`, `b` from `b as c`. */
+const sourceName = (clause: string): string => (clause.trim().split(/\s+as\s+/)[0] ?? "").trim()
+
 /** Extract dependency specifiers, including mock-only replacement edges.
  * Exported so the mock edge has a non-vacuous unit rail: in this tree most
  * mocked modules are also reachable through an ordinary import. */
 export const specifiersOfText = (text: string): string[] => {
   const out: string[] = []
-  for (const pattern of [SPEC_RE, MOCK_MODULE_RE]) {
+  for (const pattern of [SPEC_RE, MOCK_MODULE_RE, REQUIRE_RE]) {
     for (const match of text.matchAll(pattern)) {
       const specifier = match[1]
       if (specifier !== undefined) out.push(specifier)
@@ -115,14 +150,17 @@ export const specifiersOfText = (text: string): string[] => {
   return out
 }
 
-const specifiersOf = (rel: string): string[] => {
-  let text: string
+const readText = (rel: string): string | null => {
   try {
-    text = readFileSync(join(REPO_ROOT, rel), "utf8")
+    return readFileSync(join(REPO_ROOT, rel), "utf8")
   } catch {
-    return []
+    return null
   }
-  return specifiersOfText(text)
+}
+
+const specifiersOf = (rel: string): string[] => {
+  const text = readText(rel)
+  return text === null ? [] : specifiersOfText(text)
 }
 
 const CANDIDATE_SUFFIXES = ["", ".ts", ".tsx", "/index.ts", "/index.tsx"] as const
@@ -131,7 +169,11 @@ const CANDIDATE_SUFFIXES = ["", ".ts", ".tsx", "/index.ts", "/index.tsx"] as con
  *  (`node:fs`, `zod`) or something no candidate suffix names. `@/x` is the
  *  repo's `src/x` alias — the reason a purely textual search misses case 3 is
  *  that the alias hides the directory the guard actually lives in. */
-const resolveSpecifier = (fromFile: string, spec: string, known: Set<string>): string | null => {
+const resolveSpecifier = (
+  fromFile: string,
+  spec: string,
+  known: ReadonlySet<string>,
+): string | null => {
   const base = spec.startsWith("@/")
     ? join("src", spec.slice(2))
     : spec.startsWith(".")
@@ -160,19 +202,100 @@ interface VerificationGraph {
   readonly importedBy: ReadonlyMap<string, readonly string[]>
 }
 
+/** Barrel symbol tables: file → (visible name → defining module). Built first
+ *  because the edge pass below resolves consumers THROUGH them. */
+const buildReexportTables = (
+  files: readonly string[],
+  known: ReadonlySet<string>,
+): Map<string, Map<string, string>> => {
+  const tables = new Map<string, Map<string, string>>()
+  for (const file of files) {
+    const text = readText(file)
+    if (text === null || !text.includes("} from")) continue
+    let table: Map<string, string> | undefined
+    for (const match of text.matchAll(NAMED_REEXPORT_RE)) {
+      const spec = match[2]
+      if (spec === undefined) continue
+      const target = resolveSpecifier(file, spec, known)
+      if (target === null) continue
+      table ??= new Map<string, string>()
+      for (const clause of (match[1] ?? "").split(",")) {
+        const name = boundName(clause)
+        if (name.length > 0) table.set(name, target)
+      }
+    }
+    if (table !== undefined) tables.set(file, table)
+  }
+  return tables
+}
+
 const buildVerificationGraph = (): VerificationGraph => {
   const files = allSourceFiles()
   const known = new Set(files)
+  const reexports = buildReexportTables(files, known)
+
+  /** Follow `name` through barrels to the module that DEFINES it. Bounded so a
+   *  re-export cycle cannot spin; the bound is a graph fact, not a tuning knob. */
+  const throughBarrel = (target: string, name: string): string => {
+    let at = target
+    for (let hop = 0; hop < 16; hop++) {
+      const next = reexports.get(at)?.get(name)
+      if (next === undefined || next === at) return at
+      at = next
+    }
+    return at
+  }
+
   const importedBy = new Map<string, string[]>()
+  const addEdge = (target: string, importer: string): void => {
+    if (target === importer) return
+    const importers = importedBy.get(target)
+    if (importers === undefined) importedBy.set(target, [importer])
+    else importers.push(importer)
+  }
+
   for (const file of files) {
-    for (const spec of specifiersOf(file)) {
+    const text = readText(file)
+    if (text === null) continue
+
+    // NAMED imports reach only the module that defines the name asked for.
+    const namedSpecs = new Set<string>()
+    for (const match of text.matchAll(NAMED_IMPORT_RE)) {
+      const spec = match[2]
+      if (spec === undefined) continue
       const target = resolveSpecifier(file, spec, known)
-      if (target === null || target === file) continue
-      const importers = importedBy.get(target)
-      if (importers === undefined) importedBy.set(target, [file])
-      else importers.push(file)
+      if (target === null) continue
+      namedSpecs.add(spec)
+      addEdge(target, file)
+      for (const clause of (match[1] ?? "").split(",")) {
+        const name = sourceName(clause)
+        if (name.length > 0) addEdge(throughBarrel(target, name), file)
+      }
+    }
+
+    // A barrel's OWN `export { x } from "./M"` must not become a whole-module
+    // edge: that is what made every consumer of a barrel a dependent of every
+    // module it re-exports. Consumers reach M through `throughBarrel` instead.
+    const reexportSpecs = new Set<string>()
+    for (const match of text.matchAll(NAMED_REEXPORT_RE)) {
+      const spec = match[2]
+      if (spec !== undefined) reexportSpecs.add(spec)
+    }
+
+    // Everything else genuinely pulls the whole module.
+    for (const spec of specifiersOfText(text)) {
+      if (namedSpecs.has(spec) || reexportSpecs.has(spec)) continue
+      const target = resolveSpecifier(file, spec, known)
+      if (target !== null) addEdge(target, file)
+    }
+    for (const match of text.matchAll(STAR_REEXPORT_RE)) {
+      const spec = match[1]
+      if (spec === undefined) continue
+      const target = resolveSpecifier(file, spec, known)
+      if (target !== null) addEdge(target, file)
     }
   }
+
   return { known, testFiles: files.filter(isTestFile), importedBy }
 }
 

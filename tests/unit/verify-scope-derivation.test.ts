@@ -50,8 +50,12 @@ describe("verify-scope — derived from the change, not from intuition", () => {
     // module has to come back far smaller than the suite, or the tool is just a
     // slower way of saying "run everything".
     const leaf = deriveVerificationScope(["src/apps/bench/remote/box-session/chunk-artifacts.ts"])
+    // Compared against a CENTRAL module on the same graph rather than against a
+    // fraction I picked: a ratio would be a magic number, and the claim that
+    // matters is relative — reach must track how widely a module is depended on.
+    const central = deriveVerificationScope(["src/storage/service.ts"])
     expect(leaf.totalTestFiles).toBeGreaterThan(1000)
-    expect(leaf.tests.length).toBeLessThan(leaf.totalTestFiles / 4)
+    expect(leaf.tests.length).toBeLessThan(central.tests.length)
   })
 
   test("H5 the scope is a strict SUBSET even for a central module", () => {
@@ -79,6 +83,31 @@ describe("verify-scope — mock.module dependency extraction", () => {
   test("H8 ordinary static and dynamic imports remain visible", () => {
     expect(specifiersOfText('import { x } from "@/shared"\nawait import("./local")')).toEqual(
       expect.arrayContaining(["@/shared", "./local"]),
+    )
+  })
+})
+
+describe("verify-scope — barrel re-exports resolve per SYMBOL", () => {
+  test("H9 a named import through a barrel does not drag in its other modules", () => {
+    // 818 of this repo's 841 barrel edges are named re-exports. Treating them as
+    // whole-module dependencies saturated the answer — a core module came back
+    // with 3,327 of 3,730 test files, a number nobody would act on. Asserted
+    // against the same graph's own denominator, not a threshold.
+    const central = deriveVerificationScope(["src/permission/shell/vehicle.ts"])
+    expect(central.tests.length).toBeLessThan(central.totalTestFiles / 2)
+  })
+
+  test("H10 narrowing did NOT cost any known case", () => {
+    // The contract is DO NOT MISS, so every reduction is re-checked against the
+    // cases that motivated the tool. A smaller wrong answer is worth nothing.
+    expect(deriveVerificationScope(["src/agent/optional-ports.ts"]).tests).toContain(
+      "src/host/runtime/__tests__/composition-slot-registry-byte-identical.hellgate.test.ts",
+    )
+    expect(deriveVerificationScope(["src/tool/patch-mutation-safety.ts"]).tests).toContain(
+      "tests/unit/tool/apply-patch-preflight-content-authority-hellgate.test.ts",
+    )
+    expect(deriveVerificationScope(["src/storage/service.ts"]).tests).toContain(
+      "tests/unit/storage.test.ts",
     )
   })
 })
