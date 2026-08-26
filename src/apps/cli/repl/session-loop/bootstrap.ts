@@ -8,6 +8,7 @@ import type { AgentEvent } from "@/stream"
 import { ExternalPromptQueue } from "../external-prompt-queue"
 import { createHeartbeatBinder, heartbeatEnqueueHandler } from "../heartbeat-binder"
 import { type MidTurnCaptureHandle, maybeCreateMidTurnCaptureWire } from "../mid-turn-capture-wire"
+import type { CliPromptInput } from "../prompt-types"
 import { type SessionState, updateSessionState } from "../session-state"
 import { stripAutomationTickerHandler } from "./automation"
 import type { CloseStackController } from "./close-stack"
@@ -59,6 +60,9 @@ export interface SessionLoopBootstrap {
  *  so it wins the prompt-source race), the heartbeat-bound enqueue, and the
  *  mid-turn capture wrapper. Extracted from `bootstrapSessionLoop` to keep it
  *  under the god-fn ceiling; pure wiring, construction order preserved. */
+export const isIndependentPromptInput = (input: CliPromptInput): boolean =>
+  typeof input === "string" || input.goalContinuation === undefined
+
 const buildPromptPlumbing = (deps: RunSessionLoopDeps, state: LoopStateHolder) => {
   const { setup } = deps
   const { runtimeContext } = setup
@@ -67,7 +71,10 @@ const buildPromptPlumbing = (deps: RunSessionLoopDeps, state: LoopStateHolder) =
     // Independent ingress wins over a pending goal continuation. A real queued
     // prompt starts a turn whose settlement re-arms the quiet wake; otherwise
     // it remains visible to the controller's queued-input guard.
-    onPush: () => deps.goalWakeSlot?.current?.onActivity(),
+    onPush: (input) => {
+      if (!isIndependentPromptInput(input)) return
+      deps.goalWakeSlot?.current?.onActivity()
+    },
   })
   // ADR-0528 L2 (auto-reinject) — seed prompts BEFORE the interactive loop's
   // prompt-source race begins. One-shot never reads the queue (host only seeds

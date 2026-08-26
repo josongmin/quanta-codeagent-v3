@@ -6,10 +6,12 @@
  */
 
 import { describe, expect, test } from "bun:test"
-import { mkdtempSync, writeFileSync } from "node:fs"
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import { z } from "zod"
 import { buildInteractiveTurnAssembler } from "@/host/runtime/agent-config-assembler"
+import { RuntimeApprovalRequiredError } from "@/host/runtime/internal/context-binding/approval-support"
 import {
   beginObjectiveAttempt,
   createTurnUsageAccumulator,
@@ -27,9 +29,10 @@ import {
   type ObjectivePort,
   PROGRESS_TURN_OUTCOMES,
 } from "@/objective"
-import { LLMError } from "@/shared"
+import { loadSessionById, saveSessionById } from "@/session"
+import { __resetRuntimeConfig, LLMError } from "@/shared"
 import type { AgentEvent, StreamPort } from "@/stream"
-import { ToolRegistry } from "@/tool"
+import { type Tool, ToolRegistry } from "@/tool"
 
 type Step =
   | { readonly kind: "events"; readonly events: StreamEvent[] }
@@ -246,6 +249,84 @@ describe("GOAL-04 — runRuntimeTurn attributed settlement", () => {
     expect(receipts[0]?.turnOutcome).toBe("error")
   })
 
+  test("an approval pause durably settles once as `awaiting_approval` and returns the request", async () => {
+    const sessionsDir = mkdtempSync(join(tmpdir(), "goal04-approval-"))
+    const priorSessionsDir = process.env.QUANTA_SESSIONS_DIR
+    process.env.QUANTA_SESSIONS_DIR = sessionsDir
+    __resetRuntimeConfig()
+    const mutating: Tool = {
+      name: "write_thing",
+      description: "mutates",
+      inputSchema: z.object({ path: z.string() }) as z.ZodType<unknown>,
+      isReadOnly: () => false,
+      isConcurrencySafe: () => false,
+      execute: async function* () {
+        yield { type: "result", result: { ok: true, output: "never runs" } } as never
+      },
+    }
+    const llm = new ScriptedLLM([
+      {
+        kind: "events",
+        events: [
+          { type: "tool_use_start", id: "t1", name: "write_thing" },
+          { type: "tool_use_end", id: "t1", input: { path: "a.txt" } },
+          { type: "usage", inputTokens: 5, outputTokens: 3, model: "scripted" } as never,
+          { type: "message_stop", stop_reason: "tool_use" },
+        ],
+      },
+    ])
+    const meta = {
+      id: "goal04-approval",
+      title: "goal approval",
+      cwd: "/tmp",
+      createdAt: 1,
+      lastTouched: 1,
+      archived: false,
+    }
+    try {
+      await saveSessionById(meta, { reason: "seed", turns: 0, messages: [] })
+      const { authority, slot, base, claim } = setup({
+        llm,
+        registry: new ToolRegistry([mutating]),
+        permission: { mode: "default" },
+        onConfirm: async () => {
+          throw new RuntimeApprovalRequiredError({
+            approvalId: "ap-1",
+            reason: "write_thing needs approval",
+            requestedAt: "2026-08-26T00:00:00.000Z",
+          })
+        },
+      } as unknown as Partial<RuntimeBase>)
+      claim()
+      const result = await runRuntimeTurn({
+        base,
+        turnAssembler,
+        history: [],
+        prompt: "go",
+        state: undefined,
+        idMeta: meta,
+      })
+      expect(result.approvalRequest?.approvalId).toBe("ap-1")
+      expect(result.outcome.reason).toBe("awaiting_approval")
+      expect(authority.get("thread-1")?.attempts.started).toBeUndefined()
+      expect(authority.get("thread-1")?.budget.turnsUsed).toBe(1)
+      expect(authority.readDomain("thread-1").progressReceipts?.[0]?.turnOutcome).toBe(
+        "awaiting_approval",
+      )
+      expect(slot.status().kind).toBe("empty")
+      const saved = await loadSessionById(meta.id)
+      if (saved?.objective?.version !== 2) throw new Error("expected persisted v2 objective")
+      const persistedObjective = saved.objective.threads[0]?.objective
+      expect(persistedObjective?.progressReceipts?.[0]?.turnOutcome).toBe("awaiting_approval")
+      expect(persistedObjective?.attempts?.started).toBeUndefined()
+    } finally {
+      if (priorSessionsDir === undefined) delete process.env.QUANTA_SESSIONS_DIR
+      else process.env.QUANTA_SESSIONS_DIR = priorSessionsDir
+      __resetRuntimeConfig()
+      rmSync(sessionsDir, { recursive: true, force: true })
+    }
+  })
+
   test("terminal persistence failure AFTER settlement keeps the receipt and fail-stops the slot", async () => {
     const dir = mkdtempSync(join(tmpdir(), "goal04-persist-"))
     const notADir = join(dir, "file.txt")
@@ -298,6 +379,9 @@ describe("GOAL-04 — runRuntimeTurn attributed settlement", () => {
     expect(persisted).toBe(0)
     expect(authority.get("thread-1")?.budget.turnsUsed).toBe(0)
     expect(authority.get("thread-1")?.attempts.started).toBeUndefined()
+    expect(slot.status().kind).toBe("fail-stopped")
+    expect(slot.claim(attempt)).toBe(false)
+    slot.recover()
     // The explicit legacy opt-in (test adapters) still works.
     slot.claim(attempt)
     const legacy = await beginObjectiveAttempt({

@@ -532,7 +532,14 @@ describe("ONE writer owns Terminal persistence", () => {
           .filter((e) => e.isFile() && e.name.endsWith(".ts") && !e.name.endsWith(".test.ts"))
           .map((e) => relative(REPO_ROOT, join(e.parentPath, e.name))),
       )
-      .filter((p) => !p.includes("node_modules/"))
+      // Ignore `node_modules` AND every dot-directory. `tools/dev/.scratch/`
+      // is gitignored, holds whole COPIES of `src` (a pristine baseline extract
+      // and a before/after pair), and `readdirSync` does not know about
+      // `.gitignore` — so this scan counted four scratch copies of the two real
+      // writers and failed on a machine where nothing was wrong. A repo-wide
+      // source scan that walks ignored trees reds on whatever a developer
+      // happens to have on disk.
+      .filter((p) => !p.includes("node_modules/") && !p.split("/").some((s) => s.startsWith(".")))
       .sort()
 
   test("detectors are non-vacuous (they fire on the real thing, not on look-alikes)", () => {

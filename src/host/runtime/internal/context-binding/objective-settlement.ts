@@ -124,9 +124,10 @@ export const beginObjectiveAttempt = async (
     return undefined
   }
   if (deps.budgetMeter === undefined && deps.usageSource !== "legacy-stream-events") {
-    throw new Error(
-      "objective attempt requires a BudgetMeter (composition error: measured usage source missing)",
-    )
+    const reason =
+      "objective attempt requires a BudgetMeter (composition error: measured usage source missing)"
+    slot.failStop(reason)
+    throw new Error(reason)
   }
   const begun = capabilities.system.commit(attempt.threadId, {
     kind: "beginAttempt",

@@ -26,7 +26,10 @@ import { existsSync, readdirSync, readFileSync, rmSync, writeFileSync } from "no
 import { join } from "node:path"
 import { ALL_BENCH_SCHEMAS } from "@/config/knob-schema/schemas"
 
-const KNOBS_DIR = "src/runner/knobs/knobs"
+// Anchored on THIS file, not the ambient cwd: a bare relative root silently
+// resolves to nothing when the runner is launched from anywhere else, and this
+// ratchet's whole verdict comes from what the scan finds.
+const KNOBS_DIR = join(import.meta.dir, "..", "..", "..", "src/runner/knobs/knobs")
 
 /**
  * The knob files that are NOT schema-backed — cross-surface / non-bench knobs that

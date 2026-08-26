@@ -183,8 +183,11 @@ describe.skipIf(!PTY_AVAILABLE)("CLI /goal (Pursuing goal) e2e (PTY)", () => {
       // No user model prompt is submitted in this test. Seeing the marker
       // therefore proves the continuation's own resume sink woke the actual
       // prompt loop, rather than a user keystroke or an inline test stand-in.
+      // Repeat it on a second line: the raw terminal spinner can repaint the
+      // first column while a text delta arrives, so a single leading character
+      // is not a stable PTY oracle under host load. The second full line is.
       const c = await bootWithGoalContinuation({
-        cassette: `${replayEntry("GOAL_AUTONOMOUS_CONTINUATION")}\n`,
+        cassette: `${replayEntry("GOAL_AUTONOMOUS_CONTINUATION\nGOAL_AUTONOMOUS_CONTINUATION")}\n`,
         idleMs: 15_000,
       })
       await submitLine(c, "/goal continue through the real REPL queue")

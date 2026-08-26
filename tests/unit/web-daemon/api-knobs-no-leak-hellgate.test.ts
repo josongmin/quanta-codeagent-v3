@@ -11,6 +11,7 @@
 
 import { describe, expect, test } from "bun:test"
 import { readFileSync } from "node:fs"
+import { join } from "node:path"
 import {
   buildWebKnobCatalog,
   resolveCatalogValues,
@@ -52,7 +53,10 @@ describe("GET /api/knobs never leaks custom string values (ADR-0503 security)", 
   test("static lock: the /api/knobs handler ROUTES values through webSafeKnobValue", () => {
     // The route table moved out of `server.ts` into `server/fetch-handler.ts`
     // (god-function decomposition) — the `/api/knobs` handler lives there now.
-    const server = readFileSync("src/apps/web-daemon/server/fetch-handler.ts", "utf8")
+    const server = readFileSync(
+      join(import.meta.dir, "..", "..", "..", "src/apps/web-daemon/server/fetch-handler.ts"),
+      "utf8",
+    )
     const idx = server.indexOf('"/api/knobs"')
     expect(idx).toBeGreaterThan(0)
     // within the handler block, the value field must go through the redactor —

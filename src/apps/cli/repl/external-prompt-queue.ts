@@ -15,11 +15,13 @@ import type { CliPromptInput } from "./prompt-types"
  * synchronous so a goal quiet wake is invalidated before the prompt-source
  * race can begin an overlapping agent body. */
 export interface ExternalPromptQueueOpts {
-  readonly onPush?: () => void
+  /** Receives the accepted input so the host can distinguish independent
+   * ingress from the goal controller's own continuation. */
+  readonly onPush?: (input: CliPromptInput) => void
 }
 
 export class ExternalPromptQueue extends GenericExternalPromptQueue<CliPromptInput> {
-  readonly #onPush: (() => void) | undefined
+  readonly #onPush: ((input: CliPromptInput) => void) | undefined
 
   constructor(opts: ExternalPromptQueueOpts = {}) {
     super()
@@ -28,7 +30,7 @@ export class ExternalPromptQueue extends GenericExternalPromptQueue<CliPromptInp
 
   override push(prompt: CliPromptInput): void {
     try {
-      this.#onPush?.()
+      this.#onPush?.(prompt)
     } catch {
       // Notification is advisory only; it must never drop an external prompt.
     }

@@ -3,6 +3,7 @@ import { existsSync, readFileSync } from "node:fs"
 import { join } from "node:path"
 import { ExternalPromptQueue } from "@/apps/cli/repl/external-prompt-queue"
 import type { CliPromptInput } from "@/apps/cli/repl/prompt-types"
+import { isIndependentPromptInput } from "@/apps/cli/repl/session-loop/bootstrap"
 
 const REPO_ROOT = join(import.meta.dir, "..", "..", "..", "..")
 
@@ -114,5 +115,18 @@ describe("T06 / external prompt queue", () => {
     })
     q.push(prompt("still-delivered"))
     expect(await q.next()).toBe("still-delivered")
+  })
+
+  test("QUEUE-8: notification receives the exact input for ingress classification", () => {
+    const seen: CliPromptInput[] = []
+    const q = new ExternalPromptQueue({ onPush: (input) => seen.push(input) })
+    const continuation: CliPromptInput = {
+      text: "continue",
+      goalContinuation: { threadId: "t", objectiveRevision: 1, attemptKey: "a" },
+    }
+    q.push("plain")
+    q.push(continuation)
+    expect(seen).toEqual(["plain", continuation])
+    expect(seen.map(isIndependentPromptInput)).toEqual([true, false])
   })
 })

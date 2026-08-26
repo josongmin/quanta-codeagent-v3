@@ -99,6 +99,21 @@ const allSourceFiles = (): string[] => {
  *  string, and TypeScript cannot spell one that this misses without also being
  *  unreadable to the resolver below. */
 const SPEC_RE = /(?:from|import)\s*\(?\s*["']([^"']+)["']/g
+const MOCK_MODULE_RE = /mock\.module\(\s*["']([^"']+)["']/g
+
+/** Extract dependency specifiers, including mock-only replacement edges.
+ * Exported so the mock edge has a non-vacuous unit rail: in this tree most
+ * mocked modules are also reachable through an ordinary import. */
+export const specifiersOfText = (text: string): string[] => {
+  const out: string[] = []
+  for (const pattern of [SPEC_RE, MOCK_MODULE_RE]) {
+    for (const match of text.matchAll(pattern)) {
+      const specifier = match[1]
+      if (specifier !== undefined) out.push(specifier)
+    }
+  }
+  return out
+}
 
 const specifiersOf = (rel: string): string[] => {
   let text: string
@@ -107,12 +122,7 @@ const specifiersOf = (rel: string): string[] => {
   } catch {
     return []
   }
-  const out: string[] = []
-  for (const m of text.matchAll(SPEC_RE)) {
-    const spec = m[1]
-    if (spec !== undefined) out.push(spec)
-  }
-  return out
+  return specifiersOfText(text)
 }
 
 const CANDIDATE_SUFFIXES = ["", ".ts", ".tsx", "/index.ts", "/index.tsx"] as const
@@ -144,6 +154,34 @@ export interface VerificationScope {
   readonly totalTestFiles: number
 }
 
+interface VerificationGraph {
+  readonly known: ReadonlySet<string>
+  readonly testFiles: readonly string[]
+  readonly importedBy: ReadonlyMap<string, readonly string[]>
+}
+
+const buildVerificationGraph = (): VerificationGraph => {
+  const files = allSourceFiles()
+  const known = new Set(files)
+  const importedBy = new Map<string, string[]>()
+  for (const file of files) {
+    for (const spec of specifiersOf(file)) {
+      const target = resolveSpecifier(file, spec, known)
+      if (target === null || target === file) continue
+      const importers = importedBy.get(target)
+      if (importers === undefined) importedBy.set(target, [file])
+      else importers.push(file)
+    }
+  }
+  return { known, testFiles: files.filter(isTestFile), importedBy }
+}
+
+// The source tree cannot change coherently during one verifier process. Build
+// the graph during module initialization so each derived scope shares the same
+// snapshot and the first test/caller does not absorb all filesystem cold-start
+// latency inside its own timeout.
+const VERIFICATION_GRAPH = buildVerificationGraph()
+
 /**
  * The tests that can observe `changed`, plus the scanners that always run.
  *
@@ -152,26 +190,12 @@ export interface VerificationScope {
  * search because the graph is walked once for any number of changed files.
  */
 export const deriveVerificationScope = (changed: readonly string[]): VerificationScope => {
-  const files = allSourceFiles()
-  const known = new Set(files)
-  const testFiles = files.filter(isTestFile)
-
-  // imported → importers
-  const importedBy = new Map<string, string[]>()
-  for (const file of files) {
-    for (const spec of specifiersOf(file)) {
-      const target = resolveSpecifier(file, spec, known)
-      if (target === null || target === file) continue
-      const list = importedBy.get(target)
-      if (list === undefined) importedBy.set(target, [file])
-      else list.push(file)
-    }
-  }
+  const { known, testFiles, importedBy } = VERIFICATION_GRAPH
 
   // Flood outward from the changed set. A changed file that nothing imports is
   // still its own dependent, so a test file edited directly is in scope.
   const reached = new Set<string>()
-  const queue = changed.filter((c) => known.has(c))
+  const queue = changed.filter((file) => known.has(file))
   for (const c of queue) reached.add(c)
   while (queue.length > 0) {
     const next = queue.pop() as string

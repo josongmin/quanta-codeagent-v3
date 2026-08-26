@@ -18,6 +18,7 @@
 
 import { describe, expect, test } from "bun:test"
 import { readFileSync } from "node:fs"
+import { join } from "node:path"
 import { RUNTIME_CONFIG_KNOBS } from "@/shared/runtime-config-knobs"
 
 /** Slice the exported runtime-config loader out of runtime-config.ts source. */
@@ -56,7 +57,10 @@ const discoverFromLoadEnv = (body: string): ReadonlySet<string> => {
 }
 
 describe("runtime-config-knobs ↔ runtimeConfigFromEnv parity (ADR-0503 P3)", () => {
-  const src = readFileSync("src/shared/runtime-config.ts", "utf8")
+  const src = readFileSync(
+    join(import.meta.dir, "..", "..", "src/shared/runtime-config.ts"),
+    "utf8",
+  )
   const read = discoverFromLoadEnv(runtimeConfigFromEnvBody(src))
   const declared = new Set<string>(RUNTIME_CONFIG_KNOBS.map((k) => k.envKey))
 

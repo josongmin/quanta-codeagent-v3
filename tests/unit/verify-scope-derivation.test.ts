@@ -23,7 +23,7 @@
  */
 
 import { describe, expect, test } from "bun:test"
-import { deriveVerificationScope } from "../../tools/dev/verify-scope"
+import { deriveVerificationScope, specifiersOfText } from "../../tools/dev/verify-scope"
 
 describe("verify-scope — derived from the change, not from intuition", () => {
   test("H1 case 3: a transitive-only dependent is found (no textual mention exists)", () => {
@@ -66,5 +66,19 @@ describe("verify-scope — derived from the change, not from intuition", () => {
     const scope = deriveVerificationScope(["src/does/not/exist.ts"])
     expect(scope.tests).toEqual([])
     expect(scope.globals.length).toBeGreaterThan(0)
+  })
+})
+
+describe("verify-scope — mock.module dependency extraction", () => {
+  test("H7 mock-only replacement is a dependency edge", () => {
+    expect(specifiersOfText('mock.module("@/storage/service", () => ({}))')).toEqual([
+      "@/storage/service",
+    ])
+  })
+
+  test("H8 ordinary static and dynamic imports remain visible", () => {
+    expect(specifiersOfText('import { x } from "@/shared"\nawait import("./local")')).toEqual(
+      expect.arrayContaining(["@/shared", "./local"]),
+    )
   })
 })

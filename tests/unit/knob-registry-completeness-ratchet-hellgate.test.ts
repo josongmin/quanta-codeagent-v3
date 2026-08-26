@@ -294,7 +294,7 @@ const EXCEPTIONS: ReadonlyMap<string, string> = new Map<string, string>([
 const scan = (): { declared: Set<string>; orphans: Map<string, string> } => {
   const declared = new Set<string>()
   const reads = new Map<string, string>() // token -> first file:line
-  for (const file of walk("src")) {
+  for (const file of walk(join(import.meta.dir, "..", "..", "src"))) {
     const rel = file.replace(/^.*\/quanta-codeagent-v3\//, "")
     const text = readFileSync(file, "utf8")
     if (isDeclarationFile(file)) {
