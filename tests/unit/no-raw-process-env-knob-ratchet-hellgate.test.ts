@@ -85,9 +85,23 @@ const isExempt = (path: string): boolean =>
   path.includes("/runner/batch/eval/") ||
   path.includes("/apps/agent/eval/")
 
-const scan = (): { total: number; byFile: Record<string, number> } => {
+/**
+ * The repo root, anchored on THIS file.
+ *
+ * `walk("src")` resolved against the ambient cwd. Found by a paired control
+ * (`tools/dev/cwd-parity-check.ts`): 2 pass at the repo root, 1 pass / 1 fail
+ * from a foreign working directory. A hand-rolled walker seeded with a bare
+ * literal is the shape `tests/unit/_arch/repo-path-anchor-ratchet.test.ts`
+ * states it cannot follow, which is why ground truth and not the regex is what
+ * caught it.
+ */
+const REPO_ROOT = join(import.meta.dir, "..", "..")
+
+const scan = (): { total: number; byFile: Record<string, number>; files: number } => {
   const byFile: Record<string, number> = {}
-  for (const file of walk("src")) {
+  let files = 0
+  for (const file of walk(join(REPO_ROOT, "src"))) {
+    files++
     if (isExempt(file)) continue
     let n = 0
     for (const line of readFileSync(file, "utf8").split("\n")) {
@@ -100,7 +114,7 @@ const scan = (): { total: number; byFile: Record<string, number> } => {
     }
     if (n > 0) byFile[file.replace(/^.*src\//, "src/")] = n
   }
-  return { total: Object.values(byFile).reduce((a, b) => a + b, 0), byFile }
+  return { total: Object.values(byFile).reduce((a, b) => a + b, 0), byFile, files }
 }
 
 /** Baseline high-water mark (jun-07). May ONLY decrease as reads route through
@@ -140,7 +154,7 @@ const CEILING = 49
 
 describe("no-raw-process.env-knob ratchet (ADR-0503 P4)", () => {
   test(`raw process.env.QUANTA_* reads stay <= ${CEILING} (decreasing burn-down)`, () => {
-    const { total, byFile } = scan()
+    const { total, byFile, files } = scan()
     // biome-ignore lint/suspicious/noConsole: ratchet visibility
     console.log(`[no-raw-env] ${total}/${CEILING} raw process.env.QUANTA reads`)
     if (total > CEILING) {
@@ -154,6 +168,16 @@ describe("no-raw-process.env-knob ratchet (ADR-0503 P4)", () => {
           `is untestable). Top offenders:\n${offenders}`,
       )
     }
+    // Anti-vacuity, and NOT hypothetical for a ceiling ratchet: `total` of 0 is
+    // `<= CEILING` for every ceiling, so an empty scan is the easiest possible
+    // pass. Both halves are pinned — the walk must have READ the tree, and the
+    // count must be in the neighbourhood of the ceiling rather than collapsed.
+    expect(files, "the walk read no source files — the ceiling below is vacuous").toBeGreaterThan(
+      2500,
+    )
+    expect(total, "raw-env reads collapsed to near zero — verify, then TIGHTEN").toBeGreaterThan(
+      CEILING / 2,
+    )
     expect(total).toBeLessThanOrEqual(CEILING)
   }, 15_000)
 
