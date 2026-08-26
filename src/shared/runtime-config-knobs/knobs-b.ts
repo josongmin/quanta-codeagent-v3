@@ -31,14 +31,16 @@ export const KNOBS_B: readonly RuntimeConfigKnob[] = [
     kind: "int",
     default: 900000,
     group: "session",
-    describe: "Maximum autonomous goal retry backoff in milliseconds.",
+    describe:
+      "Maximum autonomous goal retry backoff in milliseconds. Ceiling 900000 (15 min); larger values are clamped, never honoured.",
   },
   {
     envKey: "QUANTA_GOAL_MAX_AUTONOMOUS_TURNS",
     kind: "int",
     default: 20,
     group: "session",
-    describe: "Product hard cap when a goal has no explicit max-turns budget.",
+    describe:
+      "Product hard cap on AUTONOMOUS goal attempts per objective generation (counts durable autonomous starts, independent of the user max-turns budget). Ceiling 20; can only be lowered.",
   },
   {
     envKey: "QUANTA_GOAL_JUDGE",

@@ -23,13 +23,65 @@ export const DEFAULT_GOAL_WAKE_POLICY: GoalWakePolicy = Object.freeze({
 export type GoalWakeDelaySkip =
   | "no-goal"
   | "not-active"
+  | "validation-contract-missing"
   | "autonomous-turn-cap"
   | "usage-limited"
   | "infra-cooldown"
 
+/** GOAL-06 — which counter forbids the next autonomous attempt. */
+export type BudgetLimitSource = "user-budget" | "product-hard-cap"
+
+/** A caller-supplied cap may only LOWER the product cap (never raise it). */
+export const resolveProductAutonomousTurnCap = (requested: number | undefined): number =>
+  requested === undefined || !Number.isFinite(requested) || requested < 0
+    ? GOAL_MAX_AUTONOMOUS_TURNS
+    : Math.min(Math.floor(requested), GOAL_MAX_AUTONOMOUS_TURNS)
+
+export interface AutonomousAllowance {
+  readonly userRemaining: number
+  readonly productRemaining: number
+  readonly allowed: boolean
+  readonly limitingSource?: BudgetLimitSource
+}
+
+/**
+ * Hard-cap rule (both counters are authority state):
+ *   userRemaining    = max(0, (userMaxTurns ?? ∞) - turnsUsed)
+ *   productRemaining = max(0, productCap - autonomousTurnsStarted)
+ *   allowed          = min(userRemaining, productRemaining) > 0
+ * The product counter is the durable GOAL-04 `autonomousTurnsStarted`: a
+ * user-requested goal turn moves `turnsUsed` but never the product counter.
+ */
+export const autonomousAllowance = (input: {
+  readonly userMaxTurns?: number | undefined
+  readonly turnsUsed: number
+  readonly autonomousTurnsStarted: number
+  readonly productCap?: number | undefined
+}): AutonomousAllowance => {
+  const cap = resolveProductAutonomousTurnCap(input.productCap)
+  const userRemaining =
+    input.userMaxTurns === undefined
+      ? Number.POSITIVE_INFINITY
+      : Math.max(0, input.userMaxTurns - input.turnsUsed)
+  const productRemaining = Math.max(0, cap - input.autonomousTurnsStarted)
+  const allowed = Math.min(userRemaining, productRemaining) > 0
+  return {
+    userRemaining,
+    productRemaining,
+    allowed,
+    ...(allowed
+      ? {}
+      : { limitingSource: productRemaining <= 0 ? "product-hard-cap" : "user-budget" }),
+  }
+}
+
 export type GoalWakeDelayDecision =
   | { readonly delayMs: number; readonly reason: "base" | "no-progress-backoff" }
-  | { readonly skip: GoalWakeDelaySkip; readonly retryAt?: number | undefined }
+  | {
+      readonly skip: GoalWakeDelaySkip
+      readonly retryAt?: number | undefined
+      readonly limitedBy?: BudgetLimitSource | undefined
+    }
 
 export interface GoalWakeSettlementHint {
   readonly infraUnavailableAtRevision?: number | undefined
@@ -49,15 +101,21 @@ const consecutiveNoProgress = (receipts: readonly ProgressReceipt[]): number => 
   return count
 }
 
-const safePolicy = (policy: GoalWakePolicy): GoalWakePolicy => ({
-  minQuietMs: Math.max(1, Math.floor(policy.minQuietMs)),
-  maxBackoffMs: Math.max(
-    Math.max(1, Math.floor(policy.minQuietMs)),
-    Math.floor(policy.maxBackoffMs),
-  ),
-  maxAutonomousTurns: Math.max(0, Math.floor(policy.maxAutonomousTurns)),
-  cooldownMs: Math.max(1, Math.floor(policy.cooldownMs)),
-})
+/** GOAL-06 — the public clamps: quiet ≥ 15 s, backoff ≤ 15 min, product cap
+ *  ≤ 20. No NODE_ENV bypass, hidden dev flag, or public unsafe override. */
+export const safePolicy = (policy: GoalWakePolicy): GoalWakePolicy => {
+  const minQuietMs = Number.isFinite(policy.minQuietMs)
+    ? Math.max(GOAL_QUIET_MIN_MS, Math.floor(policy.minQuietMs))
+    : GOAL_QUIET_MIN_MS
+  return {
+    minQuietMs,
+    maxBackoffMs: Number.isFinite(policy.maxBackoffMs)
+      ? Math.min(GOAL_MAX_BACKOFF_MS, Math.max(minQuietMs, Math.floor(policy.maxBackoffMs)))
+      : GOAL_MAX_BACKOFF_MS,
+    maxAutonomousTurns: resolveProductAutonomousTurnCap(policy.maxAutonomousTurns),
+    cooldownMs: Math.max(1, Math.floor(policy.cooldownMs)),
+  }
+}
 
 export const computeGoalWakeDelay = (
   domain: ObjectiveDomainSnapshot,
@@ -75,9 +133,20 @@ export const computeGoalWakeDelay = (
       : { skip: "not-active" }
   }
   if (objective.status !== "active") return { skip: "not-active" }
+  // GOAL-06 rail 16 — no stopping contract ⇒ no autonomous wake (and no cap consumed).
+  if ((domain.validationContract ?? "missing") === "missing") {
+    return { skip: "validation-contract-missing" }
+  }
   const normalized = safePolicy(policy)
-  const turnCap = objective.budget.maxTurns ?? normalized.maxAutonomousTurns
-  if (objective.budget.turnsUsed >= turnCap) return { skip: "autonomous-turn-cap" }
+  const allowance = autonomousAllowance({
+    userMaxTurns: objective.budget.maxTurns,
+    turnsUsed: objective.budget.turnsUsed,
+    autonomousTurnsStarted: objective.attempts.autonomousTurnsStarted,
+    productCap: normalized.maxAutonomousTurns,
+  })
+  if (!allowance.allowed) {
+    return { skip: "autonomous-turn-cap", limitedBy: allowance.limitingSource }
+  }
   if (
     hint.infraUnavailableAtRevision === domain.revision &&
     hint.observedAt !== undefined &&

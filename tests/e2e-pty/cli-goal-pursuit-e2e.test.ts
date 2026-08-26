@@ -197,6 +197,9 @@ describe.skipIf(!PTY_AVAILABLE)("CLI /goal (Pursuing goal) e2e (PTY)", () => {
       })
       await submitLine(c, "/goal continue through the real REPL queue")
       await c.waitFor("Goal created", T)
+      // GOAL-06 rail 16 — a goal without a stopping contract never wakes autonomously.
+      await submitLine(c, "/goal criterion add the replay marker is printed")
+      await c.waitFor("Criterion added.", T)
       await c.waitFor("GOAL_AUTONOMOUS_CONTINUATION", 20_000)
       expect(c.screen()).toContain("GOAL_AUTONOMOUS_CONTINUATION")
     },
@@ -233,6 +236,9 @@ describe.skipIf(!PTY_AVAILABLE)("CLI /goal (Pursuing goal) e2e (PTY)", () => {
       })
       await submitLine(c, "/goal pursue even with UI idle suppression disabled")
       await c.waitFor("Goal created", T)
+      // GOAL-06 rail 16 — a goal without a stopping contract never wakes autonomously.
+      await submitLine(c, "/goal criterion add the replay marker is printed")
+      await c.waitFor("Criterion added.", T)
       await c.waitFor("GOAL_QUIET_IS_NOT_UI_IDLE", 20_000)
       expect(c.screen()).toContain("GOAL_QUIET_IS_NOT_UI_IDLE")
     },
@@ -248,6 +254,9 @@ describe.skipIf(!PTY_AVAILABLE)("CLI /goal (Pursuing goal) e2e (PTY)", () => {
       })
       await submitLine(c, "/goal preserve an operator draft")
       await c.waitFor(/Goal created[\s\S]*ask before every edit/, 10_000)
+      // GOAL-06 rail 16 — a goal without a stopping contract never wakes autonomously.
+      await submitLine(c, "/goal criterion add the replay marker is printed")
+      await c.waitFor("Criterion added.", T)
       // Deliberately omit Enter. The raw key edge must cancel the goal timer;
       // waiting beyond the full quiet window proves the queued continuation
       // cannot win the prompt race and abort this draft.
@@ -280,6 +289,9 @@ describe.skipIf(!PTY_AVAILABLE)("CLI /goal (Pursuing goal) e2e (PTY)", () => {
       // prompt. Without this edge, a cooked `\r` can be discarded and turn this
       // into a vacuous autonomous-continuation test.
       await c.waitFor(/Goal created[\s\S]*ask before every edit/, 10_000)
+      // GOAL-06 rail 16 — a goal without a stopping contract never wakes autonomously.
+      await submitLine(c, "/goal criterion add the replay marker is printed")
+      await c.waitFor("Criterion added.", T)
       await submitLine(c, "start the foreground turn")
       await c.waitFor("FOREGROUND_TURN_STARTED", 10_000)
       await c.waitFor("FOREGROUND_TURN_SETTLED", 10_000)
@@ -315,6 +327,9 @@ describe.skipIf(!PTY_AVAILABLE)("CLI /goal (Pursuing goal) e2e (PTY)", () => {
       })
       await submitLine(c, "/goal wait for detached work to settle")
       await c.waitFor(/Goal created[\s\S]*ask before every edit/, 10_000)
+      // GOAL-06 rail 16 — a goal without a stopping contract never wakes autonomously.
+      await submitLine(c, "/goal criterion add the replay marker is printed")
+      await c.waitFor("Criterion added.", T)
       await submitLine(c, "start a turn that will move to the background")
       // The first replay delta can be painted underneath the terminal spinner,
       // so use a short real body-start interval rather than a fragile rendered

@@ -16,6 +16,8 @@ export interface ObjectiveStoreCtx {
   readonly cells: Map<string, Cell>
   /** H17 — when true a reached budget cap derives `"budget_limited"`. */
   readonly enforce: boolean
+  /** GOAL-06 — product autonomous attempt cap (≤ the product value; tests may lower it). */
+  readonly productAutonomousTurnCap: number
   /** The injected clock, already guarded: never throws, never non-finite. */
   readonly clockNow: () => number
   /** GOAL-01 — objective generation id minter (authority-owned). */

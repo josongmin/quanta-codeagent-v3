@@ -33,7 +33,7 @@ export const objectiveOps = (
   | "markUsageLimited"
   | "list"
 > => {
-  const { cells, enforce, clockNow, idFactory, mutate } = ctx
+  const { cells, enforce, clockNow, idFactory, mutate, productAutonomousTurnCap } = ctx
 
   const mint = (
     threadId: string,
@@ -53,7 +53,7 @@ export const objectiveOps = (
         t,
       )
       cells.set(threadId, cell)
-      return toObjective(cell, enforce, t)
+      return toObjective(cell, enforce, t, productAutonomousTurnCap)
     } catch {
       return null
     }
@@ -80,7 +80,9 @@ export const objectiveOps = (
       try {
         if (!isNonEmptyString(threadId)) return null
         const cell = cells.get(threadId)
-        return cell === undefined ? null : toObjective(cell, enforce, clockNow())
+        return cell === undefined
+          ? null
+          : toObjective(cell, enforce, clockNow(), ctx.productAutonomousTurnCap)
       } catch {
         return null
       }
@@ -124,7 +126,9 @@ export const objectiveOps = (
     list(): readonly Objective[] {
       try {
         const t = clockNow()
-        return Object.freeze([...cells.values()].map((c) => toObjective(c, enforce, t)))
+        return Object.freeze(
+          [...cells.values()].map((c) => toObjective(c, enforce, t, productAutonomousTurnCap)),
+        )
       } catch {
         return Object.freeze([])
       }

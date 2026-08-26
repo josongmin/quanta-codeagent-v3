@@ -108,7 +108,7 @@ describe("web goal wake composition", () => {
 
   test("authority revision drift invalidates the issued capability", async () => {
     const store = createObjectiveStore()
-    store.create("web-goal", { goal: "old" })
+    store.create("web-goal", { goal: "old", successCriteria: ["tests pass"] })
     const timer = fakeTimer()
     let admitted = true
     const fake = fakeSession(async (input) => {
@@ -133,7 +133,7 @@ describe("web goal wake composition", () => {
   test("attach and stop cancel pending timers", async () => {
     const store = createObjectiveStore()
     const authority = asObjectiveAuthority(store)
-    store.create("web-goal", { goal: "ship" })
+    store.create("web-goal", { goal: "ship", successCriteria: ["tests pass"] })
     const timer = fakeTimer()
     const fake = fakeSession(async () => ({ revision: 1, seq: 2, events: [] }))
     const handle = await composeWebGoalWake({

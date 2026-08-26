@@ -128,18 +128,23 @@ export type {
 } from "./goal-wake-host"
 export { DEFAULT_GOAL_QUIET_MS, startGoalWakeController } from "./goal-wake-host"
 export type {
+  AutonomousAllowance,
+  BudgetLimitSource,
   GoalWakeDelayDecision,
   GoalWakeDelaySkip,
   GoalWakePolicy,
   GoalWakeSettlementHint,
 } from "./goal-wake-policy"
 export {
+  autonomousAllowance,
   computeGoalWakeDelay,
   DEFAULT_GOAL_WAKE_POLICY,
   GOAL_INFRA_COOLDOWN_MS,
   GOAL_MAX_AUTONOMOUS_TURNS,
   GOAL_MAX_BACKOFF_MS,
   GOAL_QUIET_MIN_MS,
+  resolveProductAutonomousTurnCap,
+  safePolicy,
 } from "./goal-wake-policy"
 // GOAL-01 — generation identity + the domain-owned goal-text ceiling.
 export type { ObjectiveIdFactory } from "./identity"

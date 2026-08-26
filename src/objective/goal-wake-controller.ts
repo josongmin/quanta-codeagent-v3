@@ -358,8 +358,13 @@ export const createGoalWakeController = (deps: GoalWakeControllerDeps): GoalWake
     // `evaluateGoalWakeArm` proved this. Retaining this branch makes a future
     // change to that pure function fail safe rather than minting an invalid key.
     if (revision === null) return undefined
-    const resolvedDelay = deps.resolveDelayMs?.(current) ?? delayMs
-    if (!Number.isFinite(resolvedDelay) || resolvedDelay <= 0) return undefined
+    // GOAL-06 — a policy resolver that returns `undefined` is a typed SKIP
+    // (hard cap / contract missing / cooldown without retry): never fall back
+    // to the base quiet window, or the cap would be advisory.
+    const resolvedDelay = deps.resolveDelayMs === undefined ? delayMs : deps.resolveDelayMs(current)
+    if (resolvedDelay === undefined || !Number.isFinite(resolvedDelay) || resolvedDelay <= 0) {
+      return undefined
+    }
     return {
       attempt: makeAttempt(
         input,

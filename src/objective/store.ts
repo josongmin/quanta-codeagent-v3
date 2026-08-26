@@ -31,6 +31,7 @@ import type {
   ManualCompletionReceipt,
   VerifierCompletionReceipt,
 } from "./criteria/model"
+import { resolveProductAutonomousTurnCap } from "./goal-wake-policy"
 import { defaultObjectiveIdFactory, type ObjectiveIdFactory } from "./identity"
 import type { ObjectiveThreadSnapshot } from "./model"
 import type { GoalDefinition, Objective, ObjectivePort, WaitingOn } from "./types"
@@ -120,9 +121,12 @@ export const createObjectiveCoreStore = (opts?: {
    *  to ADR-0394 (this flag is the SSOT for whether the store enforces; the
    *  host wires it from `QUANTA_OBJECTIVE_BUDGET_ENFORCE`). */
   enforceBudget?: boolean
+  /** GOAL-06 — a LOWER product cap for tests; never raises the product value. */
+  productAutonomousTurnCap?: number
 }): ObjectiveCore => {
   const now = opts?.now ?? Date.now
   const enforce = opts?.enforceBudget === true
+  const productAutonomousTurnCap = resolveProductAutonomousTurnCap(opts?.productAutonomousTurnCap)
   const cells = new Map<string, Cell>()
 
   const clockNow = (): number => {
@@ -144,7 +148,7 @@ export const createObjectiveCoreStore = (opts?: {
       fn(cell)
       const t = clockNow()
       cell.updatedAt = t
-      return toObjective(cell, enforce, t)
+      return toObjective(cell, enforce, t, productAutonomousTurnCap)
     } catch {
       return null
     }
@@ -153,6 +157,7 @@ export const createObjectiveCoreStore = (opts?: {
   const ctx: ObjectiveStoreCtx = {
     cells,
     enforce,
+    productAutonomousTurnCap,
     clockNow,
     idFactory: opts?.idFactory ?? defaultObjectiveIdFactory,
     mutate,

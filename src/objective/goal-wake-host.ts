@@ -20,6 +20,7 @@
  * probe/`resume` shape). No `@/agent` core, no reactor internals.
  */
 
+import { logger } from "@/shared"
 import type { SystemObjectiveCommands } from "./capabilities"
 import { type ContinuationDeps, ContinuationSemaphore, runIdleContinuation } from "./continuation"
 import { createGoalWakeController, type GoalWakeAttempt } from "./goal-wake-controller"
@@ -28,6 +29,7 @@ import {
   DEFAULT_GOAL_WAKE_POLICY,
   type GoalWakePolicy,
   type GoalWakeSettlementHint,
+  safePolicy,
 } from "./goal-wake-policy"
 import type { ObjectiveDomainSnapshot } from "./model"
 
@@ -56,7 +58,8 @@ export interface StartGoalWakeOpts {
   readonly probes: GoalContinuationProbes
   /** Revisioned projection from the same authority `/goal` mutates. */
   readonly readDomain: (threadId: string) => ObjectiveDomainSnapshot
-  /** Actor-fixed system capability used only to install the product default turn cap. */
+  /** GOAL-06 — retained for callers; the product cap is POLICY (never written
+   *  into the user budget), so the host issues no system mutation any more. */
   readonly system?: SystemObjectiveCommands | undefined
   /** Goal-specific quiescence duration, independent of UI presence handling. */
   readonly quietWindowMs: number
@@ -65,6 +68,9 @@ export interface StartGoalWakeOpts {
   /** Full host projection, checked before arm. Fire-time checks are repeated
    * through `probes`, closing races after the timer is scheduled. */
   readonly isQuiescent?: (() => boolean) | undefined
+  /** GOAL-06 rail 7 — receives ONE bounded warning when the configured quiet
+   *  window is below the public 15 s minimum (default: `logger.warn`). */
+  readonly onClampWarning?: ((message: string) => void) | undefined
   /** Optional typed queue hand-off. The CLI uses this to retain the captured
    * revision through dequeue; legacy hosts may keep the plain resume sink. */
   readonly resumeAttempt?: (threadId: string, attempt: GoalWakeAttempt) => Promise<void>
@@ -88,27 +94,20 @@ export const startGoalWakeController = (opts: StartGoalWakeOpts): GoalWakeLifecy
   let threadId = initialThreadId
 
   const now = opts.now ?? Date.now
-  const policy: GoalWakePolicy = opts.policy ?? {
+  const requested: GoalWakePolicy = opts.policy ?? {
     ...DEFAULT_GOAL_WAKE_POLICY,
     minQuietMs: opts.quietWindowMs,
   }
-  const system = opts.system
-  const ensureDefaultTurnCap = (): void => {
-    if (system === undefined) return
-    const domain = opts.readDomain(threadId)
-    const objective = domain.state?.objective
-    if (objective === undefined || objective.budget.maxTurns !== undefined) return
-    system.commit(threadId, {
-      kind: "amendBudget",
-      budget: {
-        maxTurns: policy.maxAutonomousTurns,
-        ...(objective.budget.maxTokens !== undefined
-          ? { maxTokens: objective.budget.maxTokens }
-          : {}),
-      },
-    })
+  // GOAL-06 — the product cap is a POLICY value the controller and the
+  // authority check against `autonomousTurnsStarted`; it is never written into
+  // the user's `budget.maxTurns` (that would let a user budget override it).
+  const policy = safePolicy(requested)
+  if (policy.minQuietMs !== Math.floor(requested.minQuietMs)) {
+    const warn = opts.onClampWarning ?? ((message: string) => logger.warn(message))
+    warn(
+      `goal-wake: QUANTA_GOAL_QUIET_MS=${requested.minQuietMs} is below the public minimum; using ${policy.minQuietMs}ms`,
+    )
   }
-  ensureDefaultTurnCap()
   const continuationDeps: ContinuationDeps = {
     ...opts.probes,
     enabled: true,
@@ -122,7 +121,7 @@ export const startGoalWakeController = (opts: StartGoalWakeOpts): GoalWakeLifecy
 
   const controller = createGoalWakeController({
     enabled: true,
-    quietWindowMs: opts.quietWindowMs,
+    quietWindowMs: policy.minQuietMs,
     resolveDelayMs: (domain) => {
       const decision = computeGoalWakeDelay(domain, policy, settlementHint, now())
       if ("delayMs" in decision) return decision.delayMs
@@ -174,7 +173,6 @@ export const startGoalWakeController = (opts: StartGoalWakeOpts): GoalWakeLifecy
   })
 
   const resetForNextCheckpoint = (): void => {
-    ensureDefaultTurnCap()
     try {
       if (opts.isQuiescent?.() === false) {
         controller.cancel()

@@ -38,4 +38,13 @@ describe("goal wake runtime policy knobs", () => {
     expect(configured.goalMaxBackoffMs).toBe(120_000)
     expect(configured.goalMaxAutonomousTurns).toBe(7)
   })
+
+  test("GOAL-06 — the env knobs can only LOWER the product cap / backoff ceiling, never raise them", () => {
+    const raised = runtimeConfigFromEnv({
+      QUANTA_GOAL_MAX_BACKOFF_MS: "99999999",
+      QUANTA_GOAL_MAX_AUTONOMOUS_TURNS: "999",
+    })
+    expect(raised.goalMaxBackoffMs).toBe(900_000)
+    expect(raised.goalMaxAutonomousTurns).toBe(20)
+  })
 })

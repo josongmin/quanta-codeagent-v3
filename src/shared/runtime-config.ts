@@ -233,11 +233,18 @@ const parseCapabilitySlice = (env: RuntimeConfigEnv): Partial<RuntimeConfig> => 
       15_000,
       parsePositiveInt(env.QUANTA_GOAL_QUIET_MS, "QUANTA_GOAL_QUIET_MS") ?? 15_000,
     ),
-    goalMaxBackoffMs:
+    // GOAL-06 — both knobs may only LOWER the product values (15 min backoff
+    // ceiling, 20 autonomous attempts); `goal-wake-policy.ts` is the SSOT and
+    // clamps again, `goal-wake-runtime-config.test.ts` pins the two agree.
+    goalMaxBackoffMs: Math.min(
+      900_000,
       parsePositiveInt(env.QUANTA_GOAL_MAX_BACKOFF_MS, "QUANTA_GOAL_MAX_BACKOFF_MS") ?? 900_000,
-    goalMaxAutonomousTurns:
-      parsePositiveInt(env.QUANTA_GOAL_MAX_AUTONOMOUS_TURNS, "QUANTA_GOAL_MAX_AUTONOMOUS_TURNS") ??
+    ),
+    goalMaxAutonomousTurns: Math.min(
       20,
+      parsePositiveInt(env.QUANTA_GOAL_MAX_AUTONOMOUS_TURNS, "QUANTA_GOAL_MAX_AUTONOMOUS_TURNS") ??
+        20,
+    ),
     // Objective completion review is deliberately an enum, not a truthy flag:
     // unknown values fail closed to OFF and therefore cannot spend an LLM call.
     // GOAL-02 — the judge is telemetry only (`shadow`); the retired `reject`

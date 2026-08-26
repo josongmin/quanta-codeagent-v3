@@ -126,6 +126,9 @@ export interface ObjectiveBudget {
   readonly tokensUsed: number
   readonly maxTurns?: number
   readonly turnsUsed: number
+  /** GOAL-06 — DERIVED (enforcing store only): which counter limits the
+   *  objective — the product hard cap or the user budget. Absent otherwise. */
+  readonly limitedBy?: "user-budget" | "product-hard-cap"
 }
 
 /** The caps a definition or a same-ID budget amendment may set. */

@@ -21,6 +21,7 @@ import {
   type CriterionKind,
   normalizeCheckDeclaration,
 } from "../criteria/model"
+import { type BudgetLimitSource, GOAL_MAX_AUTONOMOUS_TURNS } from "../goal-wake-policy"
 import { completionSatisfied } from "../policy"
 import type { ObjectiveActor, ObjectiveMigrationSource } from "../provenance"
 import type {
@@ -102,6 +103,18 @@ export const budgetExhausted = (cell: Cell): boolean =>
   (cell.maxTokens !== undefined && cell.tokensUsed >= cell.maxTokens) ||
   (cell.maxTurns !== undefined && cell.turnsUsed >= cell.maxTurns)
 
+/** GOAL-06 — which counter limits the objective, if any. The product hard cap
+ *  (autonomous attempts started) is checked first: it can never be recovered
+ *  by an amendment, so it must be the source the renderer names. */
+export const budgetLimitSource = (
+  cell: Cell,
+  productCap: number = GOAL_MAX_AUTONOMOUS_TURNS,
+): BudgetLimitSource | undefined => {
+  if (cell.autonomousTurnsStarted >= productCap) return "product-hard-cap"
+  if (budgetExhausted(cell)) return "user-budget"
+  return undefined
+}
+
 /** H17 — is a transient usage/rate window currently active? True only when a
  *  finite `usageLimitedUntil` is set AND the injected clock has NOT yet passed
  *  it (`now < until`). Equality (`now === until`) is the RESET instant: the
@@ -124,10 +137,15 @@ export const usageWindowActive = (cell: Cell, now: number): boolean =>
  *  `budget_limited` is ever produced — budget stays informational and any usage
  *  window is inert). `now` is the injected clock reading so the usage window
  *  resets deterministically. */
-export const deriveStatus = (cell: Cell, enforce: boolean, now: number): ObjectiveStatus => {
+export const deriveStatus = (
+  cell: Cell,
+  enforce: boolean,
+  now: number,
+  productCap: number = GOAL_MAX_AUTONOMOUS_TURNS,
+): ObjectiveStatus => {
   if (cell.blockers.length > 0) return "blocked"
   if (enforce && usageWindowActive(cell, now)) return "usage_limited"
-  if (enforce && budgetExhausted(cell)) return "budget_limited"
+  if (enforce && budgetLimitSource(cell, productCap) !== undefined) return "budget_limited"
   // GOAL-02 — completion is a projection of TRUSTED evidence (user/system
   // attestation for a manual criterion, a bound passing verifier receipt for a
   // checked one), never of the bare `met` flag.
@@ -171,19 +189,25 @@ export const toCriterion = (c: CritCell): SuccessCriterion => {
   })
 }
 
-export const buildBudget = (cell: Cell): ObjectiveBudget => {
+export const buildBudget = (cell: Cell, limitedBy?: BudgetLimitSource): ObjectiveBudget => {
   const base = { tokensUsed: cell.tokensUsed, turnsUsed: cell.turnsUsed }
   return Object.freeze({
     ...base,
     ...(cell.maxTokens !== undefined ? { maxTokens: cell.maxTokens } : {}),
     ...(cell.maxTurns !== undefined ? { maxTurns: cell.maxTurns } : {}),
+    ...(limitedBy !== undefined ? { limitedBy } : {}),
   })
 }
 
 /** Project a cell to the frozen public `Objective`. Derives status here (with
  *  the injected clock reading `now`, for the usage-window reset) so no read can
  *  ever observe a status that contradicts blockers/criteria/budget/usage. */
-export const toObjective = (cell: Cell, enforce: boolean, now: number): Objective =>
+export const toObjective = (
+  cell: Cell,
+  enforce: boolean,
+  now: number,
+  productCap: number = GOAL_MAX_AUTONOMOUS_TURNS,
+): Objective =>
   Object.freeze({
     objectiveId: cell.objectiveId,
     threadId: cell.threadId,
@@ -191,8 +215,8 @@ export const toObjective = (cell: Cell, enforce: boolean, now: number): Objectiv
     createdBy: cell.createdBy,
     ...(cell.migrationSource !== undefined ? { migrationSource: cell.migrationSource } : {}),
     successCriteria: Object.freeze(cell.criteria.map(toCriterion)),
-    status: deriveStatus(cell, enforce, now),
-    budget: buildBudget(cell),
+    status: deriveStatus(cell, enforce, now, productCap),
+    budget: buildBudget(cell, enforce ? budgetLimitSource(cell, productCap) : undefined),
     blockers: Object.freeze(cell.blockers.map((b) => Object.freeze({ ...b }))),
     blockerObservations: Object.freeze(
       cell.blockerObservations.map((observation) =>

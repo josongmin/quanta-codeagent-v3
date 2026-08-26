@@ -45,7 +45,10 @@ describe("goal web submit daemon integration", () => {
     })
     const session: RuntimeSession = await runtime.createSession({})
     const objective = createObjectiveStore()
-    objective.create(session.sessionId, { goal: "finish the daemon goal" })
+    objective.create(session.sessionId, {
+      goal: "finish the daemon goal",
+      successCriteria: ["daemon goal done"],
+    })
     let timerCallback: (() => void) | undefined
     const wake = await composeWebGoalWake({
       session,

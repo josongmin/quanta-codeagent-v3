@@ -39,6 +39,7 @@ import type { CellProvenance } from "./core-store/cell"
 import type { ManualCompletionReceipt } from "./criteria/model"
 import { isVerifierReceipt } from "./criteria/model"
 import { checkPassed, MAX_CHECKS_PER_BATCH, type VerificationBatch } from "./criteria/ports"
+import { autonomousAllowance, resolveProductAutonomousTurnCap } from "./goal-wake-policy"
 import { defaultObjectiveIdFactory, MAX_GOAL_CHARS, normalizeGoalText } from "./identity"
 import type { ObjectiveDomainSnapshot, ValidationContract } from "./model"
 import {
@@ -92,6 +93,8 @@ interface MutationContext {
   readonly now: number
   readonly mintId: () => string
   readonly evidence: EvidenceContext
+  /** GOAL-06 — the effective product autonomous cap for this authority. */
+  readonly productAutonomousTurnCap: number
 }
 
 /** Outcome of applying one mutation to the core. `applied:false` ⇒ the op did
@@ -383,6 +386,25 @@ const DISPATCH: DispatchTable = {
     if (ctx.evidence.receipts.some((r) => r.attemptKey === m.attempt.attemptId)) {
       return refused(core, threadId, "attempt-replayed")
     }
+    // GOAL-06 — the AUTHORITY rechecks both counters atomically before the slot
+    // is consumed (the controller precheck is advisory). A user-requested attempt
+    // consumes no product-cap turn, so only the user budget bounds it.
+    const allowance = autonomousAllowance({
+      userMaxTurns: current.budget.maxTurns,
+      turnsUsed: current.budget.turnsUsed,
+      autonomousTurnsStarted: current.attempts.autonomousTurnsStarted,
+      productCap: ctx.productAutonomousTurnCap,
+    })
+    if (m.attempt.provenance === "autonomous-continuation" && !allowance.allowed) {
+      return refused(
+        core,
+        threadId,
+        allowance.limitingSource === "product-hard-cap" ? "hard-cap-exhausted" : "budget-exhausted",
+      )
+    }
+    if (m.attempt.provenance === "user-requested-goal-work" && allowance.userRemaining <= 0) {
+      return refused(core, threadId, "budget-exhausted")
+    }
     return applied(
       core.startAttempt(threadId, {
         attemptId: m.attempt.attemptId,
@@ -475,6 +497,9 @@ export const createObjectiveAuthority = (opts?: ObjectiveAuthorityOptions): Obje
       ...(opts?.now !== undefined ? { now: opts.now } : {}),
       ...(opts?.idFactory !== undefined ? { idFactory: opts.idFactory } : {}),
       ...(opts?.enforceBudget !== undefined ? { enforceBudget: opts.enforceBudget } : {}),
+      ...(opts?.productAutonomousTurnCap !== undefined
+        ? { productAutonomousTurnCap: opts.productAutonomousTurnCap }
+        : {}),
     }),
     opts,
   )
@@ -698,6 +723,7 @@ const createAuthorityRuntimeState = (
 ): AuthorityRuntimeState => {
   const nowFn = opts?.now ?? Date.now
   const mintId = opts?.idFactory ?? defaultObjectiveIdFactory
+  const productAutonomousTurnCap = resolveProductAutonomousTurnCap(opts?.productAutonomousTurnCap)
   const revisions = new Map<string, number>()
   const progress = new Map<string, readonly ProgressReceipt[]>()
   const attachGenerations = new Map<string, number>()
@@ -735,6 +761,7 @@ const createAuthorityRuntimeState = (
       now: safeClockNow(nowFn),
       mintId,
       evidence,
+      productAutonomousTurnCap,
     }
     const outcome = applyMutation(core, threadId, mutation, ctx)
     if (outcome.applied) {

@@ -104,6 +104,10 @@ export type CommitRejection =
   | "validation-contract-missing"
   /** GOAL-02/04 — a definition change while a durable attempt is unsettled. */
   | "attempt-in-flight"
+  /** GOAL-06 — an autonomous attempt beyond the product hard cap. */
+  | "hard-cap-exhausted"
+  /** GOAL-06 — an attempt beyond the user turn budget. */
+  | "budget-exhausted"
   /** Malformed command / unknown thread for a non-generation op. */
   | "invalid"
 
@@ -180,6 +184,8 @@ export interface ObjectiveAuthorityOptions {
   now?: (() => number) | undefined
   idFactory?: ObjectiveIdFactory | undefined
   enforceBudget?: boolean | undefined
+  /** GOAL-06 — a LOWER product autonomous cap (tests); never raises the product value. */
+  productAutonomousTurnCap?: number | undefined
   gateOn?: boolean | undefined
   confirmationAvailable?: boolean | undefined
   /**

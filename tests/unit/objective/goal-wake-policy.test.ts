@@ -28,11 +28,14 @@ const receipt = (ordinal: number, progress = false): ProgressReceipt => ({
 const domain = (input?: {
   turnsUsed?: number
   maxTurns?: number
+  autonomousTurnsStarted?: number
+  contract?: "missing" | "manual-only" | "checked"
   receipts?: readonly ProgressReceipt[]
   status?: "active" | "paused" | "usage_limited"
 }): ObjectiveDomainSnapshot => ({
   threadId: "t",
   revision: 1,
+  validationContract: input?.contract ?? "manual-only",
   state: {
     explicitStatus: input?.status === "paused" ? "paused" : "active",
     ...(input?.status === "usage_limited" ? { usageLimitedUntil: 20_000 } : {}),
@@ -51,7 +54,7 @@ const domain = (input?: {
       blockers: [],
       blockerObservations: [],
       nextActions: [],
-      attempts: { autonomousTurnsStarted: 0 },
+      attempts: { autonomousTurnsStarted: input?.autonomousTurnsStarted ?? 0 },
       createdAt: 1,
       updatedAt: 1,
     },
@@ -78,12 +81,64 @@ describe("goal wake delay policy", () => {
     ).toEqual({ delayMs: 15_000, reason: "base" })
   })
 
-  test("product cap applies only when objective maxTurns is absent", () => {
-    expect(computeGoalWakeDelay(domain({ turnsUsed: 3 }), policy)).toEqual({
+  test("rail 3 — no user budget: the product cap counts AUTONOMOUS starts, not turnsUsed", () => {
+    expect(computeGoalWakeDelay(domain({ autonomousTurnsStarted: 3 }), policy)).toEqual({
       skip: "autonomous-turn-cap",
+      limitedBy: "product-hard-cap",
     })
-    expect(computeGoalWakeDelay(domain({ turnsUsed: 3, maxTurns: 5 }), policy)).toMatchObject({
-      delayMs: 15_000,
+    // user-requested goal work moved turnsUsed but consumed no product-cap slot
+    expect(
+      computeGoalWakeDelay(domain({ turnsUsed: 3, autonomousTurnsStarted: 2 }), policy),
+    ).toMatchObject({ delayMs: 15_000 })
+  })
+
+  test("rail 4 — user max 5 / product cap 3 gives exactly 3 (budget never overrides the product cap)", () => {
+    expect(
+      computeGoalWakeDelay(
+        domain({ maxTurns: 5, turnsUsed: 3, autonomousTurnsStarted: 3 }),
+        policy,
+      ),
+    ).toEqual({ skip: "autonomous-turn-cap", limitedBy: "product-hard-cap" })
+    expect(
+      computeGoalWakeDelay(
+        domain({ maxTurns: 5, turnsUsed: 2, autonomousTurnsStarted: 2 }),
+        policy,
+      ),
+    ).toMatchObject({ delayMs: 15_000 })
+  })
+
+  test("rail 5 — user max 2 / product cap 20: one foreground goal turn leaves one autonomous turn", () => {
+    const wide: GoalWakePolicy = { ...policy, maxAutonomousTurns: 20 }
+    expect(
+      computeGoalWakeDelay(domain({ maxTurns: 2, turnsUsed: 1, autonomousTurnsStarted: 0 }), wide),
+    ).toMatchObject({ delayMs: 15_000 })
+    expect(
+      computeGoalWakeDelay(domain({ maxTurns: 2, turnsUsed: 2, autonomousTurnsStarted: 1 }), wide),
+    ).toEqual({ skip: "autonomous-turn-cap", limitedBy: "user-budget" })
+  })
+
+  test("rail 16 — a missing validation contract never arms (and consumes no cap)", () => {
+    expect(computeGoalWakeDelay(domain({ contract: "missing" }), policy)).toEqual({
+      skip: "validation-contract-missing",
+    })
+  })
+
+  test("policy clamps: the product cap cannot be raised above 20, quiet ≥ 15 s, backoff ≤ 15 min", () => {
+    const raised: GoalWakePolicy = {
+      minQuietMs: 50,
+      maxBackoffMs: 99_999_999,
+      maxAutonomousTurns: 999,
+      cooldownMs: 1,
+    }
+    expect(computeGoalWakeDelay(domain({ autonomousTurnsStarted: 20 }), raised)).toEqual({
+      skip: "autonomous-turn-cap",
+      limitedBy: "product-hard-cap",
+    })
+    expect(computeGoalWakeDelay(domain(), raised)).toEqual({ delayMs: 15_000, reason: "base" })
+    const receipts = Array.from({ length: 12 }, (_, index) => receipt(index))
+    expect(computeGoalWakeDelay(domain({ receipts }), raised)).toEqual({
+      delayMs: 900_000,
+      reason: "no-progress-backoff",
     })
   })
 
