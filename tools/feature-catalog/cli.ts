@@ -98,7 +98,11 @@ const {
 // every command read that as a clean catalog.
 import { REPO_ROOT as ANCHORED_ROOT, catalogPathsFor } from "./paths"
 
-const OUTPUT_MD = "docs/10.feature-catalog.md"
+// Anchored: `bun fc diff` is a hard CI gate (ci.yml:108) and this is the file it
+// compares against. Left cwd-relative it reported `docs/10.feature-catalog.md
+// differs from fresh render` from any other working directory — and `bun fc
+// build` would have WRITTEN the catalog into the wrong tree entirely.
+const OUTPUT_MD = resolve(ROOT, "docs/10.feature-catalog.md")
 
 function usage(): never {
   console.error(
@@ -959,24 +963,51 @@ async function cmdGrade(argv: string[]): Promise<void> {
 
 async function cmdStale(_argv: string[]): Promise<void> {
   const { execSync } = await import("node:child_process")
+  // Every verdict below comes from `git log`, so the precondition is checked ONCE
+  // and loudly instead of being swallowed 1,068 times. Outside a worktree the
+  // per-file catches turned 868 stale features into `stale: 0 feature(s)` with
+  // exit 0 — a report that cannot distinguish "nothing is stale" from "git never
+  // ran".
+  try {
+    execSync("git rev-parse --is-inside-work-tree", { cwd: ROOT, stdio: "pipe" })
+  } catch (err) {
+    throw new Error(
+      `feature catalog: ${ROOT} is not a git work tree — staleness is derived entirely ` +
+        `from git history, so there is no verdict to give here. (${
+          err instanceof Error ? err.message : String(err)
+        })`,
+    )
+  }
   const features = await loadFeaturesStrict(FEATURES_DIR)
   let staleCount = 0
   for (const { feature, path } of features) {
     if (feature.evidence.code.length === 0) continue
     try {
-      const yamlTime = execSync(`git log -1 --format=%ct -- "${path}" 2>/dev/null`, {
+      const yamlTime = execSync(`git log -1 --format=%ct -- "${path}"`, {
         encoding: "utf8",
+        cwd: ROOT,
       }).trim()
       if (!yamlTime) continue
       const yt = Number(yamlTime)
       let newestSrc = 0
       for (const code of feature.evidence.code) {
         try {
-          const t = execSync(`git log -1 --format=%ct -- "${code}" 2>/dev/null`, {
+          const t = execSync(`git log -1 --format=%ct -- "${code}"`, {
             encoding: "utf8",
+            cwd: ROOT,
           }).trim()
           if (t) newestSrc = Math.max(newestSrc, Number(t))
-        } catch {}
+        } catch (err) {
+          // `git log` on a tracked path with no commits prints nothing and exits
+          // 0; a THROW here means git itself failed, which is not "this file has
+          // no history". Swallowing it (with `2>/dev/null` hiding the reason) is
+          // what made `stale` report 0 of 868 features and exit 0 outside a
+          // worktree.
+          throw new Error(
+            `feature catalog: git failed for evidence path "${code}" — a git error is not ` +
+              `an absent history. (${err instanceof Error ? err.message : String(err)})`,
+          )
+        }
       }
       if (newestSrc > yt + 60 * 60 * 24 * 7) {
         const days = Math.floor((newestSrc - yt) / (60 * 60 * 24))
