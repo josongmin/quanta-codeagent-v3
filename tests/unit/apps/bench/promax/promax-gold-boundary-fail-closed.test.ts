@@ -204,7 +204,12 @@ describe("the checkout root cannot be redirected by its PARENT or by path shape"
     mkdirSync(real, { recursive: true })
     symlinkSync(real, s.campaign)
     const absence = await runStep("gold-absence", s)
-    const checkout = await runStep("checkout", s)
+    // The ATOMIC CREATE only — `runStep("checkout", …)` also runs
+    // `git fetch --no-tags origin <commit>` against GitHub, which made this a
+    // unit test with a real network call: 3.5–4.6s, a 1.8% timeout flake, and
+    // nothing it asserts depends on the fetch (measured — with the fetch failing
+    // fast the test drops to 0.05s and still passes).
+    const checkout = await sh(stepCommands("checkout", s)[0] as string)
     expect(absence === 0 && checkout === 0, "a symlinked campaign root passed both gates").toBe(
       false,
     )

@@ -28,7 +28,11 @@
  * anything, and it THROWS on `run-instances` / `docker pull` / `--upload`, so a
  * regression that reached provisioning fails this test instead of billing.
  */
+
 import { afterAll, describe, expect, test } from "bun:test"
+import { mkdtempSync, rmSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 import { DATASET_FAMILIES, type DatasetFamily } from "@/apps/bench/dataset-family-token"
 import { familyRemoteBootstrap } from "@/apps/bench/profiles/bootstrap"
 import { PROMAX_ONBOX_CHECKOUT_ROOT } from "@/apps/bench/profiles/promax-bootstrap"
@@ -58,6 +62,12 @@ import {
 import { assertFamilyAdmitsBox } from "@/apps/bench/remote/box-session/family-box-setup"
 import { DEFAULT_CHUNK_PATHS } from "@/apps/bench/remote/box-session/types"
 import { resolveBenchRunConfig } from "@/apps/bench/run-config"
+import { __resetRuntimeConfig } from "@/shared"
+
+const TEMPS: string[] = []
+afterAll(() => {
+  for (const d of TEMPS) rmSync(d, { recursive: true, force: true })
+})
 
 const GOLD_ROOT = PROMAX_ONBOX_CHECKOUT_ROOT
 
@@ -647,7 +657,25 @@ describe("A-B — the warm-box scrub covers every path the chunk writes", () => 
       forwardedBenchEnv: "",
       datasetFamily: "verified",
     }
-    await gradeChunkOnBox(session, params)
+    // REDIRECT the bench home. `gradeChunkOnBox` persists artifacts through
+    // `fullRemoteArtifactDir()`, so without this the test wrote
+    // `report-order.json` into the OPERATOR's live bench home — proven by mtime.
+    // `tests/setup.ts` fences `QUANTA_BENCH_RESULTS_DIR`; `QUANTA_BENCH_HOME`
+    // has no such fence, and on macOS the home is under `~/Library/…`, not
+    // `~/.quanta`, so checking only the latter misses it.
+    const benchHome = mkdtempSync(join(tmpdir(), "pmx-lifecycle-home-"))
+    TEMPS.push(benchHome)
+    const priorHome = process.env.QUANTA_BENCH_HOME
+    process.env.QUANTA_BENCH_HOME = benchHome
+    __resetRuntimeConfig()
+    try {
+      await gradeChunkOnBox(session, params)
+    } finally {
+      // RESTORE, not delete: deleting clobbers a value the operator exported.
+      if (priorHome === undefined) delete process.env.QUANTA_BENCH_HOME
+      else process.env.QUANTA_BENCH_HOME = priorHome
+      __resetRuntimeConfig()
+    }
 
     const scrubAt = events.findIndex(
       (e) => e.kind === "ssh" && e.cmd.startsWith("rm -f ") && e.cmd.includes("mkdir -p ~/observe"),

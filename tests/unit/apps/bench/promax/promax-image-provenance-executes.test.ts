@@ -16,7 +16,7 @@
  * So these run it: a real interpreter, a real shell, a stub `docker` on PATH, and
  * a real golden file on disk. Nothing here touches a box.
  */
-import { describe, expect, test } from "bun:test"
+import { afterAll, describe, expect, test } from "bun:test"
 import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -29,8 +29,15 @@ import {
 const DIGEST = `key4127/refactor-dockerhub@sha256:${"a".repeat(64)}`
 
 /** A sandbox with the program, a golden file, and a stub `docker` on PATH. */
+/** Removed together at the end; one sandbox per call was being left behind. */
+const TEMPS: string[] = []
+afterAll(() => {
+  for (const d of TEMPS) rmSync(d, { recursive: true, force: true })
+})
+
 const sandbox = (opts: { golden: unknown; dockerPrints: string; dockerExit?: number }) => {
   const dir = mkdtempSync(join(tmpdir(), "promax-prov-"))
+  TEMPS.push(dir)
   const scriptPath = join(dir, "image-provenance.py")
   writeFileSync(scriptPath, PROMAX_IMAGE_PROVENANCE_SCRIPT)
   const checkoutRoot = join(dir, "upstream")
@@ -105,22 +112,25 @@ describe("the rendered command actually runs", () => {
   test("🔴 an instance id carrying shell metacharacters cannot execute anything", async () => {
     // Instance ids are third-party data from the upstream corpus. The old
     // `JSON.stringify` form let `$(...)` through; `shq` does not.
-    const evil = 'a$(touch "' + "/tmp/PROMAX_PROV_PWNED" + '")b'
-    const s = sandbox({ golden: [{ instance_id: evil }], dockerPrints: DIGEST })
+    // INSIDE the sandbox. Hardcoding `/tmp/...` made the test delete a path
+    // outside its own temp root — it escaped an isolated TMPDIR and removed a
+    // real file there, proven twice. The sandbox has to exist first, so the
+    // golden is patched with the id once the canary path is known.
+    const s = sandbox({ golden: [], dockerPrints: DIGEST })
+    const canary = join(s.dir, "PROMAX_PROV_PWNED")
+    const evil = 'a$(touch "' + canary + '")b'
+    writeFileSync(s.goldenPath, JSON.stringify([{ instance_id: evil }]))
     try {
-      rmSync("/tmp/PROMAX_PROV_PWNED", { force: true })
+      rmSync(canary, { force: true })
       const r = await run(s, [evil])
       expect(r.stderr).not.toMatch(/SyntaxError/)
       // the id is carried as DATA — it comes back verbatim …
       expect(r.stdout).toContain(evil)
       // … and nothing was executed
-      expect(
-        await Bun.file("/tmp/PROMAX_PROV_PWNED").exists(),
-        "an instance id executed a command",
-      ).toBe(false)
+      expect(await Bun.file(canary).exists(), "an instance id executed a command").toBe(false)
     } finally {
       rmSync(s.dir, { recursive: true, force: true })
-      rmSync("/tmp/PROMAX_PROV_PWNED", { force: true })
+      rmSync(canary, { force: true })
     }
   })
 

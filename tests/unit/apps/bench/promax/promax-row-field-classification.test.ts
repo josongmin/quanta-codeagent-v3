@@ -21,9 +21,9 @@
  * is a pure resolver over local bytes.
  * ⚠️ LIVE-DATA: no report write; `~/.quanta/bench/results` is untouched.
  */
-import { describe, expect, test } from "bun:test"
+import { afterAll, describe, expect, test } from "bun:test"
 import { createHash } from "node:crypto"
-import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs"
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { homedir, tmpdir } from "node:os"
 import { join } from "node:path"
 import { loadFamilyCorpusRowsOrThrow } from "@/apps/bench/profiles/corpus-read"
@@ -42,6 +42,14 @@ import {
 import { projectProMaxRowForAgent } from "@/apps/bench/profiles/promax-projection"
 import { assertDatasetGradeableForFamily } from "@/apps/bench/remote/box-session/dataset-preflight"
 import { errMessage } from "@/shared"
+
+/** Every sandbox this file created, removed together at the end. Measured: this
+ *  file leaked one temp dir per call, monotonically, because nothing removed
+ *  them — a shape the exit-hook guard cannot see, since there is no hook. */
+const TEMPS: string[] = []
+afterAll(() => {
+  for (const d of TEMPS) rmSync(d, { recursive: true, force: true })
+})
 
 // ─────────────────────────────────────────────────────────────────────────────
 // fixtures
@@ -68,6 +76,7 @@ const upstreamRow = (over: Record<string, unknown> = {}): Record<string, unknown
 
 const writeJsonl = (name: string, rows: ReadonlyArray<Record<string, unknown>>): string => {
   const dir = mkdtempSync(join(tmpdir(), "pmx-a1-"))
+  TEMPS.push(dir)
   const path = join(dir, name)
   writeFileSync(path, rows.map((r) => JSON.stringify(r)).join("\n"))
   return path

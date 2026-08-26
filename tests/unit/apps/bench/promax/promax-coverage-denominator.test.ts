@@ -24,8 +24,8 @@
  * ⚠️ SPEND SAFETY. Pure functions, temp files, and the real family reader only —
  * no ssh, no Docker, no EC2, nothing that provisions or bills.
  */
-import { describe, expect, test } from "bun:test"
-import { mkdtempSync, writeFileSync } from "node:fs"
+import { afterAll, describe, expect, test } from "bun:test"
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { resolvePoolChunks } from "@/apps/bench/commands/pool"
@@ -48,6 +48,14 @@ import {
 } from "@/runner/batch/report-official-grade"
 import { nth } from "../../../../_helpers/expect-present"
 import { evaluatorMeta, OUTPUT_PATH, oracleSha256 } from "./promax-official-fixtures"
+
+/** Every sandbox this file created, removed together at the end. Measured: this
+ *  file leaked one temp dir per call, monotonically, because nothing removed
+ *  them — a shape the exit-hook guard cannot see, since there is no hook. */
+const TEMPS: string[] = []
+afterAll(() => {
+  for (const d of TEMPS) rmSync(d, { recursive: true, force: true })
+})
 
 const artifact = { path: OUTPUT_PATH, sha256: oracleSha256("doc"), byteLength: 3 }
 
@@ -83,6 +91,7 @@ const receiptOf = (
  *  merge on a constructed chunk proved nothing about production). */
 const datasetWith = (ids: readonly string[]): string => {
   const dir = mkdtempSync(join(tmpdir(), "pool-default-chunk-"))
+  TEMPS.push(dir)
   const path = join(dir, "wave.jsonl")
   writeFileSync(
     path,
