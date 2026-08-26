@@ -79,13 +79,23 @@ export const singlePidKillCalls = (text: string): string[] => {
 describe("single-PID kill ban — every escalatingKill passes a tree killer (D1 §6.1)", () => {
   test("NO src file calls escalatingKill with a single argument (orphan-leak ban)", () => {
     const offenders: Array<{ file: string; calls: string[] }> = []
+    let scanned = 0
     for (const file of tsFiles(SRC)) {
+      scanned++
       const text = readFileSync(file, "utf8")
       const calls = singlePidKillCalls(text)
       if (calls.length > 0) offenders.push({ file: file.slice(SRC.length + 1), calls })
     }
     // Any one-arg call is a regression (a new exec site that would orphan its
     // process tree). The current tree wires a killer at every site.
+    // Anti-vacuity. The verdict is `offenders === []`, so a walk that reads
+    // NOTHING is the same green as a clean tree. Proven vacuous before this line
+    // existed: the whole file passes 2/0 against an empty mirror of the repo's
+    // directory skeleton — a ban on orphan-leaking `escalatingKill` calls that
+    // could not fail.
+    expect(scanned, "the walk read no source files — the ban below is vacuous").toBeGreaterThan(
+      2500,
+    )
     expect(offenders).toEqual([])
   })
 

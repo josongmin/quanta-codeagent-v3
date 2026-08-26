@@ -36,8 +36,14 @@ describe("source integrity — no raw NUL (0x00) bytes", () => {
     // src+tests .ts (a raw NUL in a fixture string binary-flags the test file
     // just like source) AND docs .md (a raw NUL in an ADR — e.g. illustrating a
     // stripped control char — makes the doc binary; write it as `\x00`/`U+0000`).
+    // Anchored on THIS file: `walk("src")` resolved against the ambient cwd, so
+    // the scan silently read a different tree — or none — depending on where the
+    // runner was launched.
+    const REPO_ROOT = join(import.meta.dir, "..", "..")
+    let scanned = 0
     for (const root of ["src", "tests", "docs"]) {
-      for (const file of walk(root)) {
+      for (const file of walk(join(REPO_ROOT, root))) {
+        scanned++
         const buf = readFileSync(file)
         const idx = buf.indexOf(0)
         if (idx !== -1) offenders.push(`${file} (first NUL @ byte ${idx})`)
@@ -50,6 +56,9 @@ describe("source integrity — no raw NUL (0x00) bytes", () => {
           `\\x00 escape (same runtime value, text-clean source):\n${offenders.join("\n")}`,
       )
     }
+    // Anti-vacuity: `offenders === []` is also what an empty walk produces, and
+    // this file passes 1/0 against an empty mirror of the repo tree.
+    expect(scanned, "the walk read no files — the NUL check below is vacuous").toBeGreaterThan(4000)
     expect(offenders).toEqual([])
     // Generous wall-clock: this walks every src/tests/docs file. Under the full
     // parallel suite (2000+ files) CPU starvation can stretch a ~2s scan past
