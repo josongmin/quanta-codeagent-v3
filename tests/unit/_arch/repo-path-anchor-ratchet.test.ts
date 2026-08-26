@@ -52,7 +52,7 @@
  */
 
 import { describe, expect, test } from "bun:test"
-import { readdirSync, readFileSync } from "node:fs"
+import { readdirSync, readFileSync, statSync } from "node:fs"
 import { join } from "node:path"
 
 const REPO_ROOT = join(import.meta.dir, "..", "..", "..")
@@ -354,8 +354,100 @@ export const cwdRelativeRepoReads = (rawSource: string): readonly string[] => {
       ...pathArgumentSites(source),
       ...shellCommandSites(source),
       ...bunShellSites(source),
+      ...localWalkerSeedSites(source),
     ]),
   ]
+}
+
+/**
+ * A walker DEFINED IN THIS FILE, seeded with a bare repo-root literal.
+ *
+ * This is the shape that actually recurs, and it kept arriving after the entry
+ * points were closed. Three found in one night by the paired control, all after
+ * this ratchet reported the tree clean:
+ *
+ *   - `no-raw-process-env-knob-ratchet-hellgate` — `walk("src")`
+ *   - `gate-vocabulary-ratchet-hellgate` — `walk("src")`
+ *   - `no-timebomb-auth-fixtures-hellgate` — `walk("tests")`
+ *
+ * Following a binding in general needs name resolution, which a regex cannot do —
+ * and this file says so. But the LOCAL case does not: the walker is declared in
+ * the same source, its body contains a real filesystem entry point, and the seed
+ * is a literal at the call. Two passes over one file, no resolution required.
+ *
+ * Deliberately narrow. It matches only a same-file declaration whose body reaches
+ * the filesystem, so a helper IMPORTED from elsewhere is still the stated gap and
+ * still belongs to the foreign-cwd run. Widening it to any called name would
+ * reproduce the inverted design measured at 147 files, ~90 of them synthetic
+ * fixtures.
+ */
+// `[^{;\n]{0,120}` between the parameter list and the brace, because a real
+// declaration puts things there that a tighter pattern misses: the first version
+// required `(params)` then optionally `=>` then `{`, and
+// `function* walk(dir: string): Generator<string> {` — the exact shape of all
+// three offenders — has a RETURN TYPE in that gap. It matched nothing and the
+// lens was inert; only re-introducing a fixed offender revealed it.
+const WALKER_DECL =
+  /(?:function\s*\*?\s*|const\s+|let\s+)([A-Za-z_$][\w$]*)\s*(?:=\s*)?(?:\([^)]*\)|[\w$]+)[^{;\n]{0,120}\{/g
+const FS_IN_BODY = /\b(readdirSync|readdir|opendirSync|opendir|globSync|scanSync|scan)\s*\(/
+
+/**
+ * The walker RESOLVES its argument before touching disk, so the seed being
+ * repo-relative is fine.
+ *
+ * `tools/feature-catalog/cli.ts` does exactly this: `collectSrcFiles("src")`
+ * looks like the defect, but its inner walk calls
+ * `readdir(resolve(ROOT, dir), …)`. Flagging it would ask the author to change a
+ * call that is already correct — and the seed is repo-relative BY DESIGN there,
+ * because the returned paths are repo-relative too.
+ */
+const BODY_ANCHORS_ITS_ARG =
+  /\b(?:readdirSync|readdir|opendirSync|opendir|globSync|scanSync|scan)\s*\(\s*(?:resolve|join)\s*\(/
+
+/**
+ * A walker seed must be a real DIRECTORY under the repo root.
+ *
+ * Precision, not convenience. Without it this lens flagged two synthetic
+ * fixtures that merely start with `src/`:
+ * `scanToolSource("src/tool/__synthetic__/bad.ts")` (a path that has never
+ * existed — the file names a hypothetical tool for the guard to reason about)
+ * and `shellWith("src/b.ts\nsrc/a.ts\nREADME.md")` (fake `ls` OUTPUT handed to a
+ * stub shell). Neither is a filesystem read, and flagging them is how a detector
+ * gets weakened instead of its offenders fixed.
+ *
+ * A directory check is the right discriminator HERE specifically — a walker
+ * walks a directory — where a bare existence check was measured to be too weak
+ * for the general argument position.
+ */
+const seedsRealDirectory = (arg: string): boolean => {
+  try {
+    return statSync(join(REPO_ROOT, arg)).isDirectory()
+  } catch {
+    return false
+  }
+}
+
+export const localWalkerSeedSites = (
+  source: string,
+  isSeed: (arg: string) => boolean = seedsRealDirectory,
+): readonly string[] => {
+  const walkers = new Set<string>()
+  for (const m of source.matchAll(WALKER_DECL)) {
+    const name = m[1] ?? ""
+    // The body is bounded by scanning forward to the matching brace; a 4,000
+    // character window is far past any real walker and keeps this linear.
+    const body = source.slice(m.index + m[0].length, m.index + m[0].length + 4000)
+    if (FS_IN_BODY.test(body) && !BODY_ANCHORS_ITS_ARG.test(body)) walkers.add(name)
+  }
+  const out: string[] = []
+  for (const name of walkers) {
+    const call = new RegExp(`\\b${name}\\s*\\(\\s*["'\`]([^"'\`\\n]+)["'\`]`, "g")
+    for (const m of source.matchAll(call)) {
+      const arg = m[1] ?? ""
+      if (REPO_RELATIVE_ARG.test(arg) && isSeed(arg)) out.push(`${name}("${arg}")`)
+    }
+  }
+  return out
 }
 
 /**

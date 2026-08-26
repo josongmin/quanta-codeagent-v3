@@ -11,6 +11,10 @@ import { join } from "node:path"
  *
  * Enforcement: filesystem walk asserts zero .test.js under tests/.
  */
+/** Anchored on THIS file — the seeds below were bare `"tests"` and resolved
+ *  against the ambient cwd. Found by `tools/dev/cwd-parity-check.ts`. */
+const REPO_ROOT = join(import.meta.dir, "..", "..")
+
 function findTestJs(root: string, out: string[] = []): string[] {
   for (const entry of readdirSync(root, { withFileTypes: true })) {
     if (entry.name === "node_modules" || entry.name.startsWith(".")) continue
@@ -21,9 +25,31 @@ function findTestJs(root: string, out: string[] = []): string[] {
   return out
 }
 
+/** How many `.test.ts` the same walk reaches — the floor's only job is to prove
+ *  the traversal happened at all, so it mirrors findTestJs exactly but counts the
+ *  files that DO exist rather than the ones that must not. */
+function countTestTs(root: string): number {
+  let n = 0
+  for (const entry of readdirSync(root, { withFileTypes: true })) {
+    if (entry.name === "node_modules" || entry.name.startsWith(".")) continue
+    const full = join(root, entry.name)
+    if (entry.isDirectory()) n += countTestTs(full)
+    else if (entry.name.endsWith(".test.ts")) n++
+  }
+  return n
+}
+
 describe("no .test.js artifacts under tests/", () => {
   test("zero .test.js files exist", () => {
-    const victims = findTestJs("tests")
+    const victims = findTestJs(join(REPO_ROOT, "tests"))
+    // Anti-vacuity. The verdict is `victims === []`, so a walk that reads NOTHING
+    // is the same green as a clean tree — and this guard exists because 520
+    // orphan `.test.js` files once caused double execution, which is exactly the
+    // failure it must not miss. `findTestTs` counts what was actually reached.
+    expect(
+      countTestTs(join(REPO_ROOT, "tests")),
+      "the walk read no test files — the assertion below is vacuous",
+    ).toBeGreaterThan(2000)
     expect(victims).toEqual([])
   })
 
@@ -37,7 +63,7 @@ describe("no .test.js artifacts under tests/", () => {
       }
       return out
     }
-    const siblings = findTestTs("tests")
+    const siblings = findTestTs(join(REPO_ROOT, "tests"))
       .map((ts) => ts.replace(/\.test\.ts$/, ".test.js"))
       .filter((js) => {
         try {
