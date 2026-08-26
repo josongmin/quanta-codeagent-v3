@@ -322,6 +322,8 @@ export interface SlashContext {
         readonly threadId: string
         /** Surface event hook; it never mutates the objective. */
         readonly onMutation?: () => void
+        /** GOAL-06 — the wake controller's typed scheduling decision (report line). */
+        readonly wakeStatus?: () => import("@/objective").GoalWakeStatus | undefined
       }
     | undefined
   /** §9.6 — `/presets` opusplan-style sticky model-preset wire. The SAME live

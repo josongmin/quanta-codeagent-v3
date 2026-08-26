@@ -173,6 +173,9 @@ describe.skipIf(!PTY_AVAILABLE)("CLI /goal (Pursuing goal) e2e (PTY)", () => {
       await submitLine(c, "/goal")
       await c.waitFor("Goal: measure twice cut once", T)
       expect(c.screen()).toContain("active")
+      // default-ON preset: the wake controller is composed even on a bare goal,
+      // and the typed decision says why it will not wake (rail 16).
+      await c.waitFor("wake: idle (validation-contract-missing)", T)
     },
     T,
   )
@@ -239,8 +242,13 @@ describe.skipIf(!PTY_AVAILABLE)("CLI /goal (Pursuing goal) e2e (PTY)", () => {
       // GOAL-06 rail 16 — a goal without a stopping contract never wakes autonomously.
       await submitLine(c, "/goal criterion add the replay marker is printed")
       await c.waitFor("Criterion added.", T)
-      await c.waitFor("GOAL_QUIET_IS_NOT_UI_IDLE", 20_000)
-      expect(c.screen()).toContain("GOAL_QUIET_IS_NOT_UI_IDLE")
+      // GOAL-06 rail 7/15: the 50 ms quiet request is clamped to the public 15 s
+      // and armed independently of UI idle suppression — assert the TYPED
+      // decision the report renders instead of spending a second real cycle.
+      await submitLine(c, "/goal")
+      await c.waitFor(/wake: (armed in 15s|pending 15s quiet)/, 10_000)
+      await sleep(500)
+      expect(c.screen()).not.toContain("GOAL_QUIET_IS_NOT_UI_IDLE")
     },
     T,
   )
@@ -261,7 +269,14 @@ describe.skipIf(!PTY_AVAILABLE)("CLI /goal (Pursuing goal) e2e (PTY)", () => {
       // waiting beyond the full quiet window proves the queued continuation
       // cannot win the prompt race and abort this draft.
       await typeText(c, "unfinished operator draft")
-      await sleep(15_500)
+      await sleep(1_000)
+      expect(c.screen()).not.toContain("MUST_NOT_ABORT_PARTIAL_DRAFT")
+      // Erase the draft (no Enter ever happened) and read the typed decision:
+      // raw input cancelled the arm and nothing re-arms before a settled edge.
+      for (let i = 0; i < "unfinished operator draft".length; i += 1) c.send("\x7f")
+      await sleep(200)
+      await submitLine(c, "/goal")
+      await c.waitFor(/wake: pending 15s quiet/, 10_000)
       expect(c.screen()).not.toContain("MUST_NOT_ABORT_PARTIAL_DRAFT")
     },
     T,
@@ -301,7 +316,10 @@ describe.skipIf(!PTY_AVAILABLE)("CLI /goal (Pursuing goal) e2e (PTY)", () => {
       // asserting non-concurrent rendering, which cannot observe a stale queue.
       await sleep(500)
       expect(c.screen()).not.toContain("STALE_CONTINUATION_AFTER_FOREGROUND")
-      await c.waitFor("STALE_CONTINUATION_AFTER_FOREGROUND", 20_000)
+      // Typed decision: a FULL quiet window was re-armed from the settled edge.
+      await submitLine(c, "/goal")
+      await c.waitFor(/wake: (armed in 15s|pending 15s quiet)/, 10_000)
+      expect(c.screen()).not.toContain("STALE_CONTINUATION_AFTER_FOREGROUND")
     },
     T,
   )
@@ -338,9 +356,16 @@ describe.skipIf(!PTY_AVAILABLE)("CLI /goal (Pursuing goal) e2e (PTY)", () => {
       c.send("\x02")
       await c.waitFor("moved to background", 10_000)
 
-      await sleep(1_000)
+      await sleep(300)
       expect(c.screen()).not.toContain("BG_GOAL_CONTINUATION_AFTER_SETTLE")
-      await c.waitFor("BG_GOAL_CONTINUATION_AFTER_SETTLE", 22_000)
+      // Typed decision while the detached body is live: not quiescent.
+      await submitLine(c, "/goal")
+      await c.waitFor("wake: idle (not-quiescent)", 10_000)
+      // The body settles (13 × 150 ms) and a fresh quiet window arms.
+      await sleep(2_500)
+      await submitLine(c, "/goal")
+      await c.waitFor(/wake: (armed in 15s|pending 15s quiet)/, 10_000)
+      expect(c.screen()).not.toContain("BG_GOAL_CONTINUATION_AFTER_SETTLE")
     },
     T,
   )

@@ -124,6 +124,7 @@ export {
 export type {
   GoalContinuationProbes,
   GoalWakeLifecycle,
+  GoalWakeStatus,
   StartGoalWakeOpts,
 } from "./goal-wake-host"
 export { DEFAULT_GOAL_QUIET_MS, startGoalWakeController } from "./goal-wake-host"

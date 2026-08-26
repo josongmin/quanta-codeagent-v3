@@ -142,7 +142,7 @@ export const runGoalCommand = async (
   switch (args[0]) {
     case undefined:
     case "show":
-      ctx.out(renderGoalDomain(control.read(), ctx.now?.() ?? Date.now()))
+      ctx.out(renderGoalDomain(control.read(), ctx.now?.() ?? Date.now(), ctx.goal?.wakeStatus?.()))
       return 0
     case "pause":
     case "stop":

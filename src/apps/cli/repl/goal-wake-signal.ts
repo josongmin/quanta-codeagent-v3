@@ -1,3 +1,5 @@
+import type { GoalWakeStatus } from "@/objective"
+
 /**
  * Session-local bridge from surface events to the goal wake controller.
  *
@@ -18,6 +20,8 @@ export interface GoalWakeSignal {
   /** GOAL-06 rail 11 — raw-input epoch; a queued continuation whose captured
    *  epoch no longer matches is dropped at dequeue (the draft is untouched). */
   activityEpoch?(): number
+  /** GOAL-06 — typed scheduling decision for the `/goal` report. */
+  status?(): GoalWakeStatus
 }
 
 export interface GoalWakeSignalSlot {

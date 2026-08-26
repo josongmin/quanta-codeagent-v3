@@ -363,4 +363,37 @@ describe("goal wake host binding", () => {
     await Promise.resolve()
     expect(epochs).toEqual([2])
   })
+
+  test("status(): the typed scheduling decision the /goal report renders (armed delay / idle skip reason / stopped)", () => {
+    const store = createObjectiveStore()
+    store.create(TID, { goal: "bare" })
+    const timer = fakeTimeout()
+    let quiet = true
+    const wake = startGoalWakeController({
+      enabled: true,
+      threadId: TID,
+      quietWindowMs: 15_000,
+      probes: probes(store, async () => undefined),
+      readDomain: (id) => asObjectiveAuthority(store).readDomain(id),
+      isQuiescent: () => quiet,
+      setTimeoutFn: timer.set,
+      clearTimeoutFn: timer.clear,
+    })
+    expect(wake?.status()).toEqual({ kind: "idle", skipReason: "validation-contract-missing" })
+    store.replace(TID, { goal: "ship", successCriteria: ["c"] })
+    wake?.onGoalMutation()
+    expect(wake?.status()).toEqual({ kind: "armed", delayMs: 15_000 })
+    // raw input cancels the timer: the report says the next settled edge arms
+    wake?.onActivity()
+    expect(wake?.status()).toEqual({ kind: "pending", delayMs: 15_000 })
+    quiet = false
+    wake?.onGoalMutation()
+    expect(wake?.status()).toEqual({ kind: "idle", skipReason: "not-quiescent" })
+    quiet = true
+    store.setExplicitStatus(TID, "paused")
+    wake?.onGoalMutation()
+    expect(wake?.status()).toEqual({ kind: "idle", skipReason: "not-active" })
+    wake?.stop()
+    expect(wake?.status()).toEqual({ kind: "stopped" })
+  })
 })

@@ -27,6 +27,7 @@ import { createGoalWakeController, type GoalWakeAttempt } from "./goal-wake-cont
 import {
   computeGoalWakeDelay,
   DEFAULT_GOAL_WAKE_POLICY,
+  type GoalWakeDelaySkip,
   type GoalWakePolicy,
   type GoalWakeSettlementHint,
   safePolicy,
@@ -52,7 +53,19 @@ export interface GoalWakeLifecycle {
   stop(): void
   /** GOAL-06 rail 11 — the controller's raw-input epoch (carried on every attempt). */
   activityEpoch(): number
+  /** GOAL-06 — the typed scheduling decision the `/goal` report renders. */
+  status(): GoalWakeStatus
 }
+
+/** The wake decision as the surface renders it: never a predicted status —
+ *  an armed timer with its delay, or WHY nothing is armed, or stopped. */
+export type GoalWakeStatus =
+  | { readonly kind: "armed"; readonly delayMs: number }
+  /** No timer right now (raw input cancelled it) but the policy and the host
+   *  are ready: the next settled edge arms `delayMs`. */
+  | { readonly kind: "pending"; readonly delayMs: number }
+  | { readonly kind: "idle"; readonly skipReason: GoalWakeDelaySkip | "not-quiescent" }
+  | { readonly kind: "stopped" }
 
 export interface StartGoalWakeOpts {
   readonly enabled: boolean
@@ -212,5 +225,25 @@ export const startGoalWakeController = (opts: StartGoalWakeOpts): GoalWakeLifecy
     onTurnSettled: resetForNextCheckpoint,
     stop: () => controller.stop(),
     activityEpoch: () => controller.activityEpoch(),
+    status: (): GoalWakeStatus => {
+      const armed = controller.status()
+      if (armed.kind !== "idle") return armed
+      let quiet = true
+      try {
+        quiet = opts.isQuiescent?.() !== false
+      } catch (_error) {
+        quiet = false
+      }
+      if (!quiet) return { kind: "idle", skipReason: "not-quiescent" }
+      const decision = computeGoalWakeDelay(
+        opts.readDomain(threadId),
+        policy,
+        settlementHint,
+        now(),
+      )
+      return "skip" in decision
+        ? { kind: "idle", skipReason: decision.skip }
+        : { kind: "pending", delayMs: decision.delayMs }
+    },
   }
 }

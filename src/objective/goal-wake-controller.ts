@@ -127,7 +127,14 @@ export interface GoalWakeController {
   stop(): void
   /** GOAL-06 rail 11 — monotonic raw-input epoch (bumped by `onActivity`). */
   activityEpoch(): number
+  /** GOAL-06 — typed scheduling state: a pending timer (with its delay), idle, or stopped. */
+  status(): GoalWakeControllerStatus
 }
+
+export type GoalWakeControllerStatus =
+  | { readonly kind: "armed"; readonly delayMs: number }
+  | { readonly kind: "idle" }
+  | { readonly kind: "stopped" }
 
 const skip = (reason: GoalWakeSkipReason): GoalWakeDecision => ({ arm: false, skipReason: reason })
 
@@ -317,6 +324,59 @@ const dispatchClaimedAttempt = (
  * Build a single-timer controller. The constructor is intentionally effect-free:
  * nothing is read or scheduled until `arm`/`reset` is called.
  */
+const readDomainSafe = (
+  deps: GoalWakeControllerDeps,
+  threadId: string,
+): ObjectiveDomainSnapshot | null => {
+  try {
+    return deps.readDomain(threadId)
+  } catch (_error) {
+    return null
+  }
+}
+
+/** Arm-time capture: the pure fences + the policy delay (a `undefined` delay is
+ *  a typed SKIP — hard cap / contract missing / cooldown without retry — and
+ *  NEVER falls back to the base quiet window, or the cap would be advisory). */
+const captureWakeAttempt = (
+  deps: GoalWakeControllerDeps,
+  attempts: GoalWakeAttemptRegistry,
+  input: GoalWakeArm,
+  ctx: { readonly stopped: boolean; readonly epoch: number; readonly delayMs: number },
+): { readonly attempt: GoalWakeAttempt; readonly delayMs: number } | undefined => {
+  const current = readDomainSafe(deps, input.threadId)
+  const decision = evaluateGoalWakeArm({
+    enabled: deps.enabled,
+    stopped: ctx.stopped,
+    threadId: input.threadId,
+    checkpointOrdinal: input.checkpointOrdinal,
+    current,
+  })
+  if (!decision.arm || current?.state === null || current === null) {
+    if (current?.state === null || current === null) attempts.clearThread(input.threadId)
+    return undefined
+  }
+  const revision = wakeableRevision(current)
+  // `evaluateGoalWakeArm` proved this. Retaining this branch makes a future
+  // change to that pure function fail safe rather than minting an invalid key.
+  if (revision === null) return undefined
+  const resolvedDelay =
+    deps.resolveDelayMs === undefined ? ctx.delayMs : deps.resolveDelayMs(current)
+  if (resolvedDelay === undefined || !Number.isFinite(resolvedDelay) || resolvedDelay <= 0) {
+    return undefined
+  }
+  return {
+    attempt: makeAttempt(
+      input,
+      current.state.objective.objectiveId,
+      revision,
+      current.attachGeneration ?? 0,
+      ctx.epoch,
+    ),
+    delayMs: resolvedDelay,
+  }
+}
+
 export const createGoalWakeController = (deps: GoalWakeControllerDeps): GoalWakeController => {
   const attempts = deps.attempts ?? createInMemoryGoalWakeAttemptRegistry()
   const delayMs =
@@ -325,6 +385,7 @@ export const createGoalWakeController = (deps: GoalWakeControllerDeps): GoalWake
   let generation = 0
   let epoch = 0
   let pending: GoalWakeTimerHandle | undefined
+  let pendingDelayMs = 0
 
   const reportSkip = (attempt: GoalWakeAttempt, reason: GoalWakeSkipReason): void => {
     try {
@@ -345,51 +406,12 @@ export const createGoalWakeController = (deps: GoalWakeControllerDeps): GoalWake
     }
   }
 
-  const readCurrent = (threadId: string): ObjectiveDomainSnapshot | null => {
-    try {
-      return deps.readDomain(threadId)
-    } catch (_error) {
-      return null
-    }
-  }
-
+  const readCurrent = (threadId: string): ObjectiveDomainSnapshot | null =>
+    readDomainSafe(deps, threadId)
   const captureAttempt = (
     input: GoalWakeArm,
-  ): { readonly attempt: GoalWakeAttempt; readonly delayMs: number } | undefined => {
-    const current = readCurrent(input.threadId)
-    const decision = evaluateGoalWakeArm({
-      enabled: deps.enabled,
-      stopped,
-      threadId: input.threadId,
-      checkpointOrdinal: input.checkpointOrdinal,
-      current,
-    })
-    if (!decision.arm || current?.state === null || current === null) {
-      if (current?.state === null || current === null) attempts.clearThread(input.threadId)
-      return undefined
-    }
-    const revision = wakeableRevision(current)
-    // `evaluateGoalWakeArm` proved this. Retaining this branch makes a future
-    // change to that pure function fail safe rather than minting an invalid key.
-    if (revision === null) return undefined
-    // GOAL-06 — a policy resolver that returns `undefined` is a typed SKIP
-    // (hard cap / contract missing / cooldown without retry): never fall back
-    // to the base quiet window, or the cap would be advisory.
-    const resolvedDelay = deps.resolveDelayMs === undefined ? delayMs : deps.resolveDelayMs(current)
-    if (resolvedDelay === undefined || !Number.isFinite(resolvedDelay) || resolvedDelay <= 0) {
-      return undefined
-    }
-    return {
-      attempt: makeAttempt(
-        input,
-        current.state.objective.objectiveId,
-        revision,
-        current.attachGeneration ?? 0,
-        epoch,
-      ),
-      delayMs: resolvedDelay,
-    }
-  }
+  ): { readonly attempt: GoalWakeAttempt; readonly delayMs: number } | undefined =>
+    captureWakeAttempt(deps, attempts, input, { stopped, epoch, delayMs })
 
   const fireAttempt = (attempt: GoalWakeAttempt, callbackGeneration: number): void => {
     if (stopped) return
@@ -428,6 +450,7 @@ export const createGoalWakeController = (deps: GoalWakeControllerDeps): GoalWake
     try {
       const handle = deps.timer.set(() => fireAttempt(attempt, callbackGeneration), scheduleDelayMs)
       pending = handle
+      pendingDelayMs = scheduleDelayMs
       if (typeof handle === "object" && handle !== null) handle.unref?.()
       return attempt
     } catch (_error) {
@@ -466,5 +489,9 @@ export const createGoalWakeController = (deps: GoalWakeControllerDeps): GoalWake
       clearPending()
     },
     activityEpoch: (): number => epoch,
+    status: (): GoalWakeControllerStatus => {
+      if (stopped) return { kind: "stopped" }
+      return pending === undefined ? { kind: "idle" } : { kind: "armed", delayMs: pendingDelayMs }
+    },
   }
 }

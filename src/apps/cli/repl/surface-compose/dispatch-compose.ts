@@ -98,7 +98,10 @@ const buildGoalSlashSlot = (
     threadId: setup.sessionId,
     ...(core.goalWakeSlot === undefined
       ? {}
-      : { onMutation: () => core.goalWakeSlot?.current?.onGoalMutation() }),
+      : {
+          onMutation: () => core.goalWakeSlot?.current?.onGoalMutation(),
+          wakeStatus: () => core.goalWakeSlot?.current?.status?.(),
+        }),
   }
 }
 

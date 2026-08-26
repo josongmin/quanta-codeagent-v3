@@ -350,4 +350,27 @@ describe("goal wake controller lifecycle", () => {
       }),
     ).toEqual({ arm: true })
   })
+
+  test("status(): armed with the resolved delay while a timer is pending, idle after fire/cancel, stopped after stop", () => {
+    const timer = fakeTimer()
+    const controller = createGoalWakeController({
+      enabled: true,
+      quietWindowMs: 15_000,
+      resolveDelayMs: () => 30_000,
+      timer,
+      readDomain: () => domain(1),
+      stillQuiescent: () => true,
+      enqueue: () => {},
+    })
+    expect(controller.status()).toEqual({ kind: "idle" })
+    controller.arm({ threadId: "thread-1", checkpointOrdinal: 0 })
+    expect(controller.status()).toEqual({ kind: "armed", delayMs: 30_000 })
+    controller.cancel()
+    expect(controller.status()).toEqual({ kind: "idle" })
+    controller.reset({ threadId: "thread-1", checkpointOrdinal: 1 })
+    timer.fire()
+    expect(controller.status()).toEqual({ kind: "idle" })
+    controller.stop()
+    expect(controller.status()).toEqual({ kind: "stopped" })
+  })
 })

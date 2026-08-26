@@ -1,4 +1,4 @@
-import type { ObjectiveDomainSnapshot, SuccessCriterion } from "@/objective"
+import type { GoalWakeStatus, ObjectiveDomainSnapshot, SuccessCriterion } from "@/objective"
 
 const short = (value: string): string => (value.length <= 8 ? value : value.slice(0, 8))
 
@@ -14,7 +14,28 @@ const validationContract = (criteria: readonly SuccessCriterion[]): string => {
   return criteria.some((criterion) => criterion.kind === "checked") ? "checked" : "manual-only"
 }
 
-export const renderGoalDomain = (domain: ObjectiveDomainSnapshot, now = Date.now()): string => {
+const delayLabel = (ms: number): string => {
+  const seconds = Math.max(0, Math.round(ms / 1_000))
+  return seconds < 60 ? `${seconds}s` : `${Math.round(seconds / 60)}m`
+}
+
+/** GOAL-06 — one typed line for the wake decision; never a predicted status. */
+export const renderWakeStatus = (wake: GoalWakeStatus | undefined): string => {
+  if (wake === undefined)
+    return "wake: not composed (autonomous pursuit is not armed in this surface)"
+  if (wake.kind === "stopped") return "wake: stopped"
+  if (wake.kind === "armed") return `wake: armed in ${delayLabel(wake.delayMs)}`
+  if (wake.kind === "pending") {
+    return `wake: pending ${delayLabel(wake.delayMs)} quiet after this input settles`
+  }
+  return `wake: idle (${wake.skipReason})`
+}
+
+export const renderGoalDomain = (
+  domain: ObjectiveDomainSnapshot,
+  now = Date.now(),
+  wake?: GoalWakeStatus | undefined,
+): string => {
   const objective = domain.state?.objective
   if (objective === undefined) return "No goal set. Usage: /goal <objective>\n"
   const criteria = objective.successCriteria
@@ -49,6 +70,7 @@ export const renderGoalDomain = (domain: ObjectiveDomainSnapshot, now = Date.now
     (last === undefined
       ? "   last attempt: none\n"
       : `   last attempt: ${last.turnOutcome} · ${age(last.recordedAt, now)} (attempt ${short(last.attemptKey)})\n`) +
-    `last verified: ${verifiedAt === undefined ? "never" : age(verifiedAt, now)}   checkpoint: ${checkpoint}   source: ${source}\n`
+    `last verified: ${verifiedAt === undefined ? "never" : age(verifiedAt, now)}   checkpoint: ${checkpoint}   source: ${source}\n` +
+    `${renderWakeStatus(wake)}\n`
   )
 }
