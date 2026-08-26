@@ -83,6 +83,31 @@ const persist = (
   }
 }
 
+describe("a document that was NOT written is not reported as written", () => {
+  test("🔴 an unwritable pass-rate document refuses instead of citing itself", () => {
+    // `saveLocalArtifact` returns undefined when it writes nothing. The seam
+    // ignored that and returned the joined path anyway, then handed the SAME
+    // path to the receipt builder — so the receipt named a pass-rate document,
+    // with a sha256 and byte length, for bytes that are not at that path. That
+    // is unreplayable provenance, the one thing this lane's fail-closed rules
+    // exist to refuse.
+    const dir = mkdtempSync(join(tmpdir(), "promax-receipt-unwritable-"))
+    temps.push(dir)
+    process.env.QUANTA_BENCH_HOME = join(dir, "bench")
+    __resetRuntimeConfig()
+    expect(() =>
+      persistBoxGradeArtifacts({
+        datasetFamily: "promax",
+        artifactSuffix: "blank",
+        assignedInstanceIds: [ID],
+        // blank artifact text ⇒ saveLocalArtifact writes nothing
+        boxGrade: { artifactText: "", observation: observation() },
+        log: () => {},
+      }),
+    ).toThrow(/pass-rate|not written|could not/i)
+  })
+})
+
 describe("the grade receipt lands on disk with its provenance intact", () => {
   test("🔴 the WRITTEN receipt names the image digest", () => {
     const { receipt } = persist("promax")

@@ -40,6 +40,11 @@ const meta = (over: Partial<OfficialGradeEvaluatorMeta> = {}): OfficialGradeEval
     stdout: "",
     stderr: "",
     exitCode: 0,
+    // `null` is the declared shape for "the evaluator produced no artifact".
+    // Omitting the key entirely relied on the `as` cast below to compile, and a
+    // document serialized from it is one the parse door now (correctly) refuses
+    // as truncated.
+    outputArtifact: null,
     ...over,
   }) as OfficialGradeEvaluatorMeta
 

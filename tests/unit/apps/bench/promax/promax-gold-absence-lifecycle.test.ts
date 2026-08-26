@@ -126,13 +126,27 @@ class FakeBox {
     // no permission model, so every path it knows is readable: exit 0. Matched
     // BEFORE the absence gate, because a bare `verb === "test !"` read it as an
     // absence check on the CAMPAIGN root and refused every bootstrap.
-    if (verb === "test !" && argv.includes("-o") && argv.includes("-r")) return ok()
+    if (verb === "test !" && argv.includes("-o") && (argv.includes("-x") || argv.includes("-r"))) {
+      return ok()
+    }
+    // `test ! -L X` — "X is not a symlink". This box has no symlinks, so it is
+    // always true. Falling through to the absence branch below read it as
+    // "X does not exist" and refused every bootstrap on the campaign root.
+    if (verb === "test !" && argv[2] === "-L") return ok()
     // `test ! -e X [-a ! -L X]` — exit 1 when X EXISTS. This is the whole
     // absence gate; the `-L` half refuses a symlink standing in for the tree,
     // which this box models as ordinary existence.
     if (verb === "test !")
       return { code: this.exists(argv[3] ?? "") ? 1 : 0, stdout: "", stderr: "" }
     if (verb === "mkdir -p") return this.mkdir(argv[2] ?? "")
+    // `mkdir <x>` WITHOUT `-p` — the atomic create. It fails when the path is
+    // already occupied, which is what makes it a refusal rather than a probe.
+    if (argv[0] === "mkdir") {
+      const target = argv[1] ?? ""
+      return this.exists(target)
+        ? { code: 1, stdout: "", stderr: `mkdir: cannot create directory '${target}': File exists` }
+        : this.mkdir(target)
+    }
     if (verb === "rm -rf") return this.rm(argv[2] ?? "")
     // `git init -q <root>` — the moment the gold-bearing tree appears.
     if (verb === "git init") return this.gitInit(argv[3] ?? "")

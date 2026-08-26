@@ -175,6 +175,24 @@ export interface BuildProMaxBootstrapSpecInput {
   readonly minFreeDiskBytes?: number
 }
 
+/**
+ * An absolute, LITERAL on-box path — no `.`, no `..`, no doubled separators.
+ *
+ * Normalizing only the trailing slash let two spellings through, and both
+ * defeat a guard downstream:
+ *
+ *  · `<root>/.` — `test ! -L "<link>/."` exits 0, because it stats the target
+ *    rather than the link, so the checkout materializes THROUGH a symlink; and
+ *    `rm -rf "<link>/."` refuses outright ("." may not be removed), so the
+ *    teardown cannot clean up after it either.
+ *  · `<campaign>/../elsewhere/upstream` — satisfies the `startsWith` containment
+ *    check below as a STRING while landing outside the directory the disk gate
+ *    measures and the teardown removes, which is precisely what that check's
+ *    own error message claims to prevent.
+ *
+ * Refused at construction rather than escaped later: a path that means
+ * something other than it says cannot be made safe by quoting it.
+ */
 const requireAbsolute = (value: string, label: string): string => {
   if (typeof value !== "string" || !value.startsWith("/")) {
     throw new Error(
@@ -182,7 +200,16 @@ const requireAbsolute = (value: string, label: string): string => {
         "cwd-relative campaign path cannot be replayed from a report.",
     )
   }
-  return value.replace(/\/+$/, "")
+  const trimmed = value.replace(/\/+$/, "")
+  const segments = trimmed.split("/").slice(1)
+  if (segments.some((s) => s === "." || s === ".." || s === "")) {
+    throw new Error(
+      `bench: promax bootstrap ${label}="${value}" must be a LITERAL path — ".", ".." and empty ` +
+        "segments each make the path mean something other than it says, and the symlink refusal, " +
+        "the containment check and the teardown all read it literally.",
+    )
+  }
+  return trimmed
 }
 
 export const buildProMaxBootstrapSpec = (
@@ -281,10 +308,26 @@ const goldAbsenceProbes = (spec: ProMaxEvaluatorBootstrapSpec): ProMaxBootstrapC
       // BEFORE `campaign-root` creates the directory. `test ! -e` answers CLEAN
       // on EACCES, so an unreadable campaign root made the absence probe below
       // assert nothing. Its own step because it names no gold-bearing path.
-      argv: ["test", "!", "-d", spec.campaignRoot, "-o", "-r", spec.campaignRoot],
+      // `-x`, not `-r`. `test -e <root>/upstream` needs SEARCH permission on the
+      // parent; mode 0400 grants read and denies traversal, so a readability
+      // phrasing passed while the absence probe reported CLEAN with the answer
+      // key intact — MEASURED. The bench user owns this directory and
+      // `campaign-root` only ever chowns it, never chmods, so a `chmod 0400`
+      // from one chunk's agent survives into the next chunk's probe.
+      argv: ["test", "!", "-L", spec.campaignRoot],
       purpose:
-        "if the campaign root exists it must be READABLE, or absence cannot be asserted about " +
-        "anything inside it — `test ! -e` answers CLEAN on EACCES",
+        "REFUSE a SYMLINKED campaign root — `! -L` on the checkout alone left the parent free to " +
+        "redirect the whole tree, and a teardown under the link removes nothing the next chunk " +
+        "would see",
+    },
+    {
+      step: "gold-absence",
+      phase: "agent",
+      goldBearing: false,
+      argv: ["test", "!", "-d", spec.campaignRoot, "-o", "-x", spec.campaignRoot],
+      purpose:
+        "if the campaign root exists it must be TRAVERSABLE, or absence cannot be asserted " +
+        "about anything inside it — `test ! -e` answers CLEAN when the parent cannot be searched",
     },
     {
       step: "gold-absence",
@@ -448,10 +491,17 @@ const graderCheckout = (spec: ProMaxEvaluatorBootstrapSpec): ProMaxBootstrapComm
       step: "checkout",
       phase: "grader",
       goldBearing: true,
-      argv: ["test", "!", "-L", root],
+      // ATOMIC, not check-then-use. `test ! -L` and `git init` are two ssh
+      // round-trips, and a link planted in the window between them is followed
+      // by `git init` all the same — measured, the window is one RTT. `mkdir`
+      // without `-p` fails with EEXIST on a symlink (and on a directory), so the
+      // create IS the check: nothing can occupy the path afterwards without this
+      // command having failed first. `git init` into the directory it just made
+      // is what the next command does anyway.
+      argv: ["mkdir", root],
       purpose:
-        "REFUSE to materialize the answer key through a SYMLINK — it would place the checkout " +
-        "outside the path the teardown removes and the absence probe inspects",
+        "CREATE the checkout root atomically — `mkdir` fails on a symlink, so the answer key " +
+        "cannot be materialized through one planted after a separate probe had passed",
     },
     {
       step: "checkout",
@@ -582,14 +632,6 @@ const graderPythonEnvAndTeardown = (
       // a symlink refusal in here as well was tried and reverted: it bought
       // nothing the probe does not already refuse, and it put a second
       // gold-root-naming command into the agent-free teardown phase.
-      argv: ["rm", "-rf", root],
-      purpose:
-        "REFUSE to 'remove' a symlink: `rm -rf` would unlink it and leave the answer key whole",
-    },
-    {
-      step: "gold-teardown",
-      phase: "teardown",
-      goldBearing: true,
       argv: ["rm", "-rf", root],
       purpose:
         "remove the gold-bearing upstream checkout at the end of the grader phase, so the NEXT " +

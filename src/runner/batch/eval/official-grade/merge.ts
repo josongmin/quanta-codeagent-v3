@@ -35,9 +35,32 @@
  * chunk that produced it — the merge never fabricates a synthetic run.
  */
 import { buildOfficialGradeReceipt } from "./receipt"
+
+/**
+ * The union of every chunk's image pins, or `undefined` when no chunk carried
+ * any — so a campaign of graders that captured none serializes exactly as it
+ * did before this field existed. A repeated instance keeps its FIRST pin and
+ * the receipt builder refuses the duplicate if the two disagree.
+ */
+const mergedImages = (
+  receipts: readonly OfficialGradeReceipt[],
+): readonly OfficialGradeImageRef[] | undefined => {
+  const out: OfficialGradeImageRef[] = []
+  const seen = new Set<string>()
+  for (const receipt of receipts) {
+    for (const image of receipt.images ?? []) {
+      if (seen.has(image.instanceId)) continue
+      seen.add(image.instanceId)
+      out.push(image)
+    }
+  }
+  return out.length === 0 ? undefined : out
+}
+
 import type {
   OfficialGradeDisposition,
   OfficialGradeEvaluatorMeta,
+  OfficialGradeImageRef,
   OfficialGradeReceipt,
   OfficialGradeReceiptResult,
 } from "./types"
@@ -126,9 +149,16 @@ export const mergeOfficialGradeReceipts = (
   const worst = input.receipts.reduce((a, b) =>
     severity(b.evaluator) > severity(a.evaluator) ? b : a,
   )
+  // The pins from EVERY chunk, in assigned order, de-duplicated by instance.
+  // Dropping them made the CAMPAIGN receipt — the artifact downstream surfaces
+  // actually read — carry no provenance at all, while each per-chunk file had
+  // it. This header's own rule ("every rule that guards a single receipt guards
+  // the merged one too") could not hold for `image_ref_invalid` until now.
+  const images = mergedImages(input.receipts)
   return buildOfficialGradeReceipt({
     assignedInstanceIds: assigned,
     dispositions,
     evaluator: worst.evaluator,
+    ...(images === undefined ? {} : { images }),
   })
 }

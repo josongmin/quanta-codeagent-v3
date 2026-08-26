@@ -100,6 +100,26 @@ describe("the answer-key probe and teardown survive a hostile checkout path", ()
     expect(await runStep("gold-absence", s), "a dangling symlink read as CLEAN").not.toBe(0)
   })
 
+  test("🔴 a campaign root that cannot be TRAVERSED must not read as absent", async () => {
+    // `test -e <root>/upstream` needs SEARCH (`-x`) on the parent, not read.
+    // Mode 0400 grants `-r` and denies traversal, so a readability check phrased
+    // with `-r` passed while the absence probe reported CLEAN with the answer
+    // key intact — MEASURED. The bench user owns the campaign root, so
+    // `chmod 0400` is one command from the agent, and `campaign-root` only ever
+    // chowns, never chmods, so it survives into the next chunk.
+    const s = sandbox()
+    mkdirSync(join(s.checkout, "data"), { recursive: true })
+    writeFileSync(join(s.checkout, "data/swe-bench-promax.json"), '{"patch":"GOLD"}')
+    await sh(`chmod 0400 ${JSON.stringify(s.campaign)}`)
+    let probe: number
+    try {
+      probe = await runStep("gold-absence", s)
+    } finally {
+      await sh(`chmod 0755 ${JSON.stringify(s.campaign)}`)
+    }
+    expect(probe, "a non-traversable campaign root reported CLEAN").not.toBe(0)
+  })
+
   test("🔴 a checkout the probe cannot READ must not read as absent", async () => {
     // `test ! -e` returns true on EACCES. "I could not look" is not "it is not
     // there" — the same rule the grader-container probe was rewritten for.
@@ -123,6 +143,96 @@ describe("the answer-key probe and teardown survive a hostile checkout path", ()
     expect(await runStep("gold-absence", clean)).toBe(0)
     mkdirSync(clean.checkout, { recursive: true })
     expect(await runStep("gold-absence", clean)).not.toBe(0)
+  })
+})
+
+describe("materializing the checkout is ATOMIC, not check-then-use", () => {
+  test("🔴 a link planted AFTER any probe still cannot be materialized through", async () => {
+    // The refusal used to be `test ! -L` followed by `git init` — two ssh
+    // round-trips, so a link planted in between was followed all the same. The
+    // create must BE the check.
+    const s = sandbox()
+    const stash = join(s.root, "stash")
+    mkdirSync(stash, { recursive: true })
+    mkdirSync(s.campaign, { recursive: true })
+    // nothing probed yet; the link is already there when the create runs
+    symlinkSync(stash, s.checkout)
+    expect(await runStep("checkout", s), "the checkout was created through a link").not.toBe(0)
+    expect(existsSync(join(stash, ".git")), "a git tree landed in the link's target").toBe(false)
+  }, 30_000)
+
+  test("🔴 a leftover checkout directory is refused rather than re-used", async () => {
+    // A teardown that failed leaves the tree; re-initialising into it would
+    // grade against whatever survived.
+    const s = sandbox()
+    mkdirSync(join(s.checkout, "data"), { recursive: true })
+    expect(await runStep("checkout", s)).not.toBe(0)
+  }, 30_000)
+
+  test("PAIRED CONTROL: a clean campaign root still gets its checkout", async () => {
+    const s = sandbox()
+    mkdirSync(s.campaign, { recursive: true })
+    const plan = stepCommands("checkout", s)
+    // only the create — the git commands that follow need the network
+    expect(await sh(plan[0] as string), "the atomic create refused a clean box").toBe(0)
+    expect(existsSync(s.checkout)).toBe(true)
+  }, 30_000)
+})
+
+describe("the checkout root cannot be redirected by its PARENT or by path shape", () => {
+  test("🔴 a symlinked CAMPAIGN root is refused", async () => {
+    // `! -L` guarded the checkout root only. With the campaign root itself a
+    // link, the gold materializes at the target, `rm -rf <checkout>` removes a
+    // path under the link, and the next chunk reads CLEAN — measured.
+    const s = sandbox()
+    const real = join(s.root, "real-campaign")
+    mkdirSync(real, { recursive: true })
+    symlinkSync(real, s.campaign)
+    const absence = await runStep("gold-absence", s)
+    const checkout = await runStep("checkout", s)
+    expect(absence === 0 && checkout === 0, "a symlinked campaign root passed both gates").toBe(
+      false,
+    )
+  })
+
+  test("🔴 a checkout root spelled with `/.` is refused at CONSTRUCTION", () => {
+    // `requireAbsolute` normalized trailing slashes only, so `<root>/.` was
+    // accepted — and `test ! -L "<link>/."` exits 0 (it stats the target), while
+    // `rm -rf "<link>/."` refuses outright. The spelling has to die at the
+    // builder, not at the shell.
+    expect(() =>
+      buildProMaxBootstrapSpec({
+        campaignRoot: "/opt/quanta/promax",
+        checkoutRoot: "/opt/quanta/promax/upstream/.",
+        venvRoot: "/opt/quanta/promax/venv",
+        patchGenConcurrency: 1,
+      }),
+    ).toThrow()
+  })
+
+  test("🔴 a checkout root that escapes through `..` is refused at CONSTRUCTION", () => {
+    // `startsWith(campaignRoot + "/")` is a STRING prefix test, so this passed
+    // while the checkout lands outside the root the disk gate measured and the
+    // teardown removes — the exact thing that error message claims to prevent.
+    expect(() =>
+      buildProMaxBootstrapSpec({
+        campaignRoot: "/opt/quanta/promax",
+        checkoutRoot: "/opt/quanta/promax/../elsewhere/upstream",
+        venvRoot: "/opt/quanta/promax/venv",
+        patchGenConcurrency: 1,
+      }),
+    ).toThrow()
+  })
+
+  test("PAIRED CONTROL: the real roots still build", () => {
+    expect(() =>
+      buildProMaxBootstrapSpec({
+        campaignRoot: "/opt/quanta/promax",
+        checkoutRoot: "/opt/quanta/promax/upstream",
+        venvRoot: "/opt/quanta/promax/venv",
+        patchGenConcurrency: 1,
+      }),
+    ).not.toThrow()
   })
 })
 

@@ -515,13 +515,25 @@ export const persistBoxGradeArtifacts = (input: {
   readonly boxGrade: NonNullable<Awaited<ReturnType<typeof runFamilyBoxGrade>>>
   readonly log: (m: string) => void
 }): { readonly artifactPath: string | undefined; readonly receiptPath: string | undefined } => {
-  const artifactPath = join(fullRemoteArtifactDir(), `passrate-${input.artifactSuffix}.json`)
-  saveLocalArtifact(
-    artifactPath,
+  const written = saveLocalArtifact(
+    join(fullRemoteArtifactDir(), `passrate-${input.artifactSuffix}.json`),
     input.boxGrade.artifactText,
     input.log,
     "[full-remote] on-box grade document saved",
   )
+  // `saveLocalArtifact` returns undefined when it wrote nothing — blank content,
+  // or a write that threw. Returning the joined path regardless reported a file
+  // that is not there, and handed that path to the receipt builder, which then
+  // named a pass-rate document (with a sha256 and a byte length) for bytes at a
+  // path that holds none. Unreplayable provenance is exactly what this lane
+  // refuses everywhere else.
+  if (written === undefined) {
+    throw new Error(
+      "[full-remote] the on-box grade document could not be written locally, so no receipt can " +
+        "cite it. REFUSING to record a grade whose artifact is not on disk.",
+    )
+  }
+  const artifactPath = written
   // …and the RECEIPT beside it. The document says what the verdicts were; the
   // receipt says which evaluator bytes, which argv and which cwd produced them.
   // Without it the grade is a number with no provenance, and the receipt layer's

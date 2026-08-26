@@ -228,6 +228,9 @@ describe("python-floor — the interpreter that BUILDS the venv", () => {
 describe("checkout — the rendered git commands round-trip through a shell", () => {
   test("🔴 every git argv arrives exactly as declared", async () => {
     const sb = sandbox()
+    // the agent phase's `campaign-root` step creates this before the grader
+    // phase runs; the atomic `mkdir <checkout>` needs its parent to exist
+    mkdirSync(sb.campaignRoot, { recursive: true })
     const log = join(sb.root, "git-argv.txt")
     argvRecorder(sb, "git", log)
     const ran = await sb.runStep("checkout")
@@ -236,8 +239,11 @@ describe("checkout — the rendered git commands round-trip through a shell", ()
     // BUILTIN — a PATH stub can never intercept it, so it cannot round-trip
     // through a recorder. Excluded by command, the same rule the plan-wide
     // property uses.
+    // The GIT argv specifically. The step also opens with an atomic `mkdir`,
+    // which runs for real (it must, or the git commands have nowhere to go) and
+    // is therefore not routed through the recorder.
     const declared = sb.plan
-      .filter((c) => c.step === "checkout" && !SHELL_BUILTINS.has(c.argv[0] as string))
+      .filter((c) => c.step === "checkout" && c.argv[0] === "git")
       .map((c) => c.argv.slice(1))
     const seen = recordedArgv(log)
     // THE boundary property: a shell parsing the rendered string yields back the

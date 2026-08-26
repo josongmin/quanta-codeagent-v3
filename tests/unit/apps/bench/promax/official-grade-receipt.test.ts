@@ -391,3 +391,100 @@ describe("image pins on the receipt", () => {
     expect(r.ok).toBe(false)
   })
 })
+
+describe("the MERGED campaign receipt keeps its image pins", () => {
+  const DIGEST = (c: string) => `repo/x@sha256:${c.repeat(64)}`
+
+  const chunk = (id: string, c: string): OfficialGradeReceipt => {
+    const built = buildOfficialGradeReceipt({
+      assignedInstanceIds: [id],
+      dispositions: [dispo({ id, state: "resolved", reason: "official_resolved" })],
+      evaluator: evaluatorMeta(),
+      images: [{ instanceId: id, imageName: "repo/x", repoDigest: DIGEST(c) }],
+    })
+    return okReceipt(built)
+  }
+
+  test("🔴 merging two chunks preserves BOTH chunks' pins", async () => {
+    // The per-chunk receipt carried them; the CAMPAIGN receipt — the artifact
+    // every downstream surface reads — dropped them, so "wired end to end" held
+    // only for the single-chunk file.
+    const { mergeOfficialGradeReceipts } = await import("@/runner/batch/eval/official-grade")
+    const merged = mergeOfficialGradeReceipts({
+      receipts: [chunk("a__b-1", "a"), chunk("c__d-2", "b")],
+    })
+    expect(merged.ok, "the merge refused two valid receipts").toBe(true)
+    if (!merged.ok) return
+    expect(merged.receipt.images, "the merged receipt lost every image pin").toEqual([
+      { instanceId: "a__b-1", imageName: "repo/x", repoDigest: DIGEST("a") },
+      { instanceId: "c__d-2", imageName: "repo/x", repoDigest: DIGEST("b") },
+    ])
+  })
+
+  test("PAIRED CONTROL: merging receipts that carried none stays byte-identical", async () => {
+    const { mergeOfficialGradeReceipts } = await import("@/runner/batch/eval/official-grade")
+    const plain = (id: string) =>
+      okReceipt(build([id], [dispo({ id, state: "resolved", reason: "official_resolved" })]))
+    const merged = mergeOfficialGradeReceipts({ receipts: [plain("a__b-1"), plain("c__d-2")] })
+    expect(merged.ok).toBe(true)
+    if (!merged.ok) return
+    expect(Object.hasOwn(JSON.parse(serializeOfficialGradeReceipt(merged.receipt)), "images")).toBe(
+      false,
+    )
+  })
+})
+
+describe("a tampered `images` value is refused, not dropped", () => {
+  test("🔴 a non-array `images` fails the parse instead of vanishing", () => {
+    const doc = JSON.parse(
+      serializeOfficialGradeReceipt(
+        okReceipt(
+          build(
+            ["a__b-1"],
+            [dispo({ id: "a__b-1", state: "resolved", reason: "official_resolved" })],
+          ),
+        ),
+      ),
+    ) as Record<string, unknown>
+    doc.images = "TOTALLY NOT AN ARRAY"
+    const back = parseOfficialGradeReceipt(doc)
+    expect(back.ok, "a corrupted images value was silently discarded").toBe(false)
+  })
+})
+
+describe("evaluator metadata is validated all the way down", () => {
+  test("🔴 a receipt whose evaluator lost its outputArtifact is REFUSED at parse", () => {
+    // `validateEvaluator` checked id/commit/path/sha256/cwd/argv/streams but not
+    // `outputArtifact`, and the parser cast `doc.evaluator` unvalidated. A
+    // persisted receipt missing that key parsed `ok` and then crashed the report
+    // aggregator with "undefined is not an object" — a stack trace where an
+    // `evaluator_meta_invalid` belonged, which is the exact defect this
+    // function's own comment says it fixed one field higher up.
+    const doc = JSON.parse(
+      serializeOfficialGradeReceipt(
+        okReceipt(
+          build(
+            ["a__b-1"],
+            [dispo({ id: "a__b-1", state: "resolved", reason: "official_resolved" })],
+          ),
+        ),
+      ),
+    ) as { evaluator: Record<string, unknown> }
+    delete doc.evaluator.outputArtifact
+    const back = parseOfficialGradeReceipt(doc)
+    expect(back.ok, "an evaluator with no output artifact parsed clean").toBe(false)
+    if (back.ok) return
+    expect(back.failures.map((f) => f.code)).toContain("evaluator_meta_invalid")
+  })
+
+  test("PAIRED CONTROL: an explicit null outputArtifact is still legal", () => {
+    // `null` is the declared shape for "the evaluator produced no artifact" —
+    // absent is the corruption, null is a value.
+    const built = buildOfficialGradeReceipt({
+      assignedInstanceIds: ["a__b-1"],
+      dispositions: [dispo({ id: "a__b-1", state: "resolved", reason: "official_resolved" })],
+      evaluator: { ...evaluatorMeta(), outputArtifact: null },
+    })
+    expect(built.ok).toBe(true)
+  })
+})

@@ -206,6 +206,14 @@ const checkImages = (
   images: readonly OfficialGradeImageRef[] | undefined,
 ): OfficialGradeReceiptFailure[] => {
   if (images === undefined) return []
+  if (!Array.isArray(images)) {
+    return [
+      {
+        code: "image_ref_invalid",
+        message: `image pins must be an array, got ${JSON.stringify(images)?.slice(0, 60)}`,
+      },
+    ]
+  }
   const failures: OfficialGradeReceiptFailure[] = []
   const seen = new Set<string>()
   for (const image of images) {
@@ -389,6 +397,23 @@ const asArtifact = (value: unknown): RawArtifactRef | null => {
  * as construction. A document that drifted (unknown state, stray instance)
  * is refused on the way in, not absorbed.
  */
+/**
+ * `null` means "the evaluator produced no artifact" and is legal; ABSENT means
+ * the document was truncated or hand-edited. Only the PARSE door checks it —
+ * the TYPE makes the field required for every in-process caller, so a build-time
+ * check would only reject fixtures the compiler already accepts. Unchecked here,
+ * such a document parsed clean and then crashed the report aggregator on
+ * `out.path`: a stack trace where an `evaluator_meta_invalid` belonged.
+ */
+const evaluatorArtifactMissing = (doc: Record<string, unknown>): boolean => {
+  const meta = doc.evaluator
+  return (
+    meta !== null &&
+    typeof meta === "object" &&
+    !Object.hasOwn(meta as Record<string, unknown>, "outputArtifact")
+  )
+}
+
 export const parseOfficialGradeReceipt = (value: unknown): OfficialGradeReceiptResult => {
   if (value === null || typeof value !== "object" || Array.isArray(value)) {
     return {
@@ -404,6 +429,19 @@ export const parseOfficialGradeReceipt = (value: unknown): OfficialGradeReceiptR
         {
           code: "receipt_unparseable",
           message: "receipt document lacks `assignedInstanceIds` and `dispositions` arrays",
+        },
+      ],
+    }
+  }
+  if (evaluatorArtifactMissing(doc)) {
+    return {
+      ok: false,
+      failures: [
+        {
+          code: "evaluator_meta_invalid",
+          message:
+            "evaluator metadata has no `outputArtifact` key — `null` is the shape for 'produced " +
+            "none'; an absent key means the receipt was truncated or edited",
         },
       ],
     }
@@ -425,10 +463,12 @@ export const parseOfficialGradeReceipt = (value: unknown): OfficialGradeReceiptR
     assignedInstanceIds: doc.assignedInstanceIds as readonly string[],
     dispositions,
     evaluator: doc.evaluator as OfficialGradeEvaluatorMeta,
-    // round-trip: a serialized pin must survive parse, or a re-read receipt
-    // silently loses the provenance the original refused to grade without
-    ...(Array.isArray(doc.images)
-      ? { images: doc.images as readonly OfficialGradeImageRef[] }
-      : {}),
+    // Round-trip: a serialized pin must survive parse, or a re-read receipt
+    // silently loses the provenance the original refused to grade without. A
+    // present-but-not-an-array value is TAMPERED, not absent — dropping it was
+    // fail-OPEN in a function whose whole job is to re-run construction's
+    // fail-closed validation. `null` is passed through so the array check below
+    // refuses it rather than treating it as "no pins".
+    ...(doc.images === undefined ? {} : { images: doc.images as readonly OfficialGradeImageRef[] }),
   })
 }
