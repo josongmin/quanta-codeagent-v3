@@ -77,9 +77,15 @@ import { parseYaml, stringifyYaml } from "./yaml"
  * reachable without letting the ambient cwd decide anything.
  */
 const resolveRepoRoot = (): string => {
+  // Both spellings. Matching only the exact token meant `--repo-root=<abs>` was
+  // not recognised as an override AND was not rejected by four commands that do
+  // not validate their argv — so a fixture pointed at with the equals form ran
+  // green against the real 1,068-feature catalog, which is the "passed for the
+  // wrong reason" mode this flag exists to prevent.
+  const inline = process.argv.find((a) => a.startsWith("--repo-root="))
   const i = process.argv.indexOf("--repo-root")
-  if (i === -1) return ANCHORED_ROOT
-  const v = process.argv[i + 1]
+  if (inline === undefined && i === -1) return ANCHORED_ROOT
+  const v = inline?.slice("--repo-root=".length) ?? process.argv[i + 1]
   if (v === undefined || !isAbsolute(v)) {
     throw new Error(`--repo-root requires an ABSOLUTE path (got ${v ?? "nothing"})`)
   }
@@ -1496,7 +1502,9 @@ async function main(): Promise<void> {
   // stripped here so per-command arg validators never see it as an unknown flag.
   const raw = process.argv.slice(2)
   const rootAt = raw.indexOf("--repo-root")
-  const argv = rootAt === -1 ? raw : raw.filter((_, i) => i !== rootAt && i !== rootAt + 1)
+  const argv = raw
+    .filter((_, i) => rootAt === -1 || (i !== rootAt && i !== rootAt + 1))
+    .filter((a) => !a.startsWith("--repo-root="))
   const cmd = argv[0]
   const rest = argv.slice(1)
   switch (cmd) {

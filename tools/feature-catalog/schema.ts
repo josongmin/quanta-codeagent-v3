@@ -9,7 +9,12 @@ import { readdir, readFile } from "node:fs/promises"
 import { isAbsolute, join, relative } from "node:path"
 import { parseDocument } from "yaml"
 import { z } from "zod"
-import { FEATURES_DIR } from "./paths"
+// REPO_ROOT, not process.cwd(): these strings are ERROR MESSAGES, and a message
+// whose path is relative to wherever the process happened to start differs
+// between two runs of the same command over the same tree. Measured on a fixture
+// with a bad YAML under one `--repo-root`, from two working directories:
+// `../../../private/tmp/…/01-bogus.yaml` versus `../fcfix…/01-bogus.yaml`.
+import { FEATURES_DIR, REPO_ROOT } from "./paths"
 import { parseYaml } from "./yaml"
 
 export const Maturity = z.enum(["L1", "L2", "L3", "L4", "L5"])
@@ -490,7 +495,7 @@ function assertStandardYaml(text: string, path: string): void {
   const document = parseDocument(text, { uniqueKeys: true })
   if (document.errors.length === 0) return
   const details = document.errors.map((error) => error.message.split("\n")[0]).join("; ")
-  throw new Error(`YAML syntax failed at ${relative(process.cwd(), path)}: ${details}`)
+  throw new Error(`YAML syntax failed at ${relative(REPO_ROOT, path)}: ${details}`)
 }
 
 /**
@@ -508,14 +513,14 @@ export async function loadFeatures(dir: string = FEATURES_DIR): Promise<LoadedFe
       raw = parseYaml(text)
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)
-      throw new Error(`YAML parse failed at ${relative(process.cwd(), path)}: ${msg}`)
+      throw new Error(`YAML parse failed at ${relative(REPO_ROOT, path)}: ${msg}`)
     }
     const result = FeatureSchema.safeParse(raw)
     if (!result.success) {
       const issues = result.error.issues
         .map((i) => `  - ${i.path.join(".")}: ${i.message}`)
         .join("\n")
-      throw new Error(`Schema validation failed at ${relative(process.cwd(), path)}:\n${issues}`)
+      throw new Error(`Schema validation failed at ${relative(REPO_ROOT, path)}:\n${issues}`)
     }
     loaded.push({ feature: result.data, path })
   }
@@ -656,8 +661,8 @@ export async function loadFeaturesStrict(dir: string = FEATURES_DIR): Promise<Lo
     const prev = seen.get(feature.id)
     if (prev !== undefined) {
       throw new Error(
-        `Duplicate feature id "${feature.id}": ${relative(process.cwd(), prev)} and ${relative(
-          process.cwd(),
+        `Duplicate feature id "${feature.id}": ${relative(REPO_ROOT, prev)} and ${relative(
+          REPO_ROOT,
           path,
         )}`,
       )
@@ -665,7 +670,7 @@ export async function loadFeaturesStrict(dir: string = FEATURES_DIR): Promise<Lo
     seen.set(feature.id, path)
     if (!(feature.section in SECTION_NAMES)) {
       throw new Error(
-        `Unknown section ${feature.section} in ${relative(process.cwd(), path)} (id=${feature.id})`,
+        `Unknown section ${feature.section} in ${relative(REPO_ROOT, path)} (id=${feature.id})`,
       )
     }
   }

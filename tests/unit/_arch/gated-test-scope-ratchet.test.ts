@@ -80,12 +80,20 @@ const scripts = (): Readonly<Record<string, string>> => {
  * directories this ratchet was written for. Everywhere else the top-level
  * directory is the unit — `src`, `tools`, `apps` — and `"."` is the repo root.
  */
+/** Directories that hold sibling suites rather than tests of their own, so the
+ *  allowlist key must name the child and not the parent. */
+const CONTAINER_DIRS: ReadonlySet<string> = new Set(["tests", "apps"])
+
 export const gateKey = (rel: string): string => {
   if (rel === "" || rel === ".") return "."
   const parts = rel.split("/")
   const head = parts[0] as string
   const second = parts[1]
-  return head === "tests" && second !== undefined ? `tests/${second}` : head
+  // `tests` AND `apps` split two levels. With `apps` collapsed to one, the
+  // allowlist entry for `apps/web-frontend` also forgave `apps/tauri-shell`,
+  // which its runner (`cd apps/web-frontend && vitest run`) cannot reach — a new
+  // uncovered directory would have been admitted on someone else's justification.
+  return CONTAINER_DIRS.has(head) && second !== undefined ? `${head}/${second}` : head
 }
 
 /** A `bun test` argument reduced to a gate key — `undefined` for flags and for
@@ -215,10 +223,20 @@ const OUT_OF_BAND: Readonly<
     path: "tests/eval",
     why: "retrieval embedder/reranker evals hit LIVE provider APIs and cost money; run deliberately, never on a gate.",
   },
-  apps: {
+  "apps/web-frontend": {
     runner: "test:web-frontend",
     path: "apps/web-frontend",
-    why: "every file under apps/ is the vitest/jsdom SPA suite in apps/web-frontend — all 77 import `vitest`, which `bun test` cannot resolve (vitest lives only in that workspace's own node_modules, not the root's), and they need a DOM environment. Verified 2026-08-27: 732 tests green in 7s under `vitest run`, 0 under `bun test`.",
+    // CORRECTED 2026-08-27 after audit. The original entry said `bun test` runs
+    // 0 of these files because it cannot resolve `vitest`. That is false and was
+    // never measured: `bun test ./apps/` runs all 77 files, 732 tests, and 18
+    // FAIL — bun resolves vitest fine but supplies no DOM, and at least one of
+    // the failures is a genuine cwd-anchoring bug that the wrong justification
+    // would have hidden permanently.
+    //
+    // The real reason is the environment, not resolution: the suite needs
+    // jsdom, which `vitest run` provides and `bun test` does not. Verified the
+    // same day: 732 green in 7s under the named runner.
+    why: "the vitest/jsdom SPA suite — it needs a DOM environment, which `bun test` does not provide (it DOES load the files: 732 tests, 18 failures, all environment-shaped). `vitest run` is the only runner that can give a verdict: 732 green in 7s.",
   },
 }
 
