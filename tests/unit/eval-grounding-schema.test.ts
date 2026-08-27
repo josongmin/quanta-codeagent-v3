@@ -139,9 +139,14 @@ describe("grounding schema", () => {
     expect(parseGroundingCase(minimalCase()).id).toBe("sample")
   })
 
-  test("governed corpora stay at canary=28 and nightly=52", () => {
-    expect(loadGroundingCases({ suite: "canary" })).toHaveLength(28)
-    expect(loadGroundingCases({ suite: "nightly" })).toHaveLength(52)
+  // 28/52 → 30/54 (aug-26): `b3610af2a` added the fifth raw/summary pair,
+  // `pair-stale-objective-generation`, as the goal-control evidence case. The
+  // count is a DRIFT GUARD, not a ceiling — it moves only alongside a
+  // deliberate corpus change, and it went red for a day because the corpus
+  // landed without it.
+  test("governed corpora stay at canary=30 and nightly=54", () => {
+    expect(loadGroundingCases({ suite: "canary" })).toHaveLength(30)
+    expect(loadGroundingCases({ suite: "nightly" })).toHaveLength(54)
   })
 
   test("loader rejects malformed summary pair contracts fail-closed", () => {

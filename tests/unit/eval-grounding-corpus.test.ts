@@ -2,7 +2,10 @@ import { describe, expect, test } from "bun:test"
 import { loadGroundingCases } from "@/../src/apps/eval/grounding"
 
 describe("grounding corpus governance", () => {
-  test("canary ships four raw/summary pair groups", () => {
+  // four → five (aug-26): `pair-stale-objective-generation` landed with the
+  // goal-control evidence work. Both roles are still required per pair, so the
+  // count change cannot smuggle in a half-formed pair.
+  test("canary ships five raw/summary pair groups", () => {
     const cases = loadGroundingCases({ suite: "canary" })
     const pairs = new Map<string, Set<string>>()
     for (const groundingCase of cases) {
@@ -11,7 +14,7 @@ describe("grounding corpus governance", () => {
       roles.add(groundingCase.pairRole)
       pairs.set(groundingCase.pairId, roles)
     }
-    expect(pairs.size).toBe(4)
+    expect(pairs.size).toBe(5)
     for (const roles of pairs.values()) {
       expect([...roles].sort()).toEqual(["raw", "summary"])
     }
