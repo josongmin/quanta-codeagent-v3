@@ -38,10 +38,16 @@ import { describe, expect, test } from "bun:test"
 import { readFileSync } from "node:fs"
 import { join } from "node:path"
 
-import { floorlessGuards } from "@/../tools/dev/anti-vacuity-census"
+import { censusCorpusSize, floorlessGuards, isFloorless } from "@/../tools/dev/anti-vacuity-census"
 
 const REPO_ROOT = join(import.meta.dir, "..", "..", "..")
 const LEDGER = join(REPO_ROOT, "tools", "dev", "anti-vacuity-burndown.json")
+
+/** Extracted so the two directions are testable without a tree. */
+const addedEntries = (found: readonly string[], known: readonly string[]): readonly string[] =>
+  found.filter((f) => !known.includes(f)).sort()
+const staleEntries = (found: readonly string[], known: readonly string[]): readonly string[] =>
+  known.filter((f) => !found.includes(f)).sort()
 
 const ledger = (): readonly string[] => {
   const raw = JSON.parse(readFileSync(LEDGER, "utf8")) as { burndown?: readonly string[] }
@@ -52,27 +58,24 @@ describe("anti-vacuity burn-down", () => {
   const known = ledger()
   const found = floorlessGuards()
 
-  test("anti-vacuity: the census itself reached the tree", () => {
-    // This ratchet is an instance of the class it guards, so it needs the same
-    // proof. A census that returned nothing would make every assertion below
-    // pass — "no floorless guards" and "I never looked for any" are the same
-    // empty array.
-    expect(known.length, "the ledger is empty — regenerate it, do not delete it").toBeGreaterThan(0)
-    const sources = known.filter((f) => {
-      try {
-        return readFileSync(join(REPO_ROOT, f), "utf8").length > 0
-      } catch {
-        return false
-      }
-    })
+  test("anti-vacuity: the CENSUS reached the tree", () => {
+    // Rewritten after audit. The previous version floored `known` — a static JSON
+    // file — and never referenced `found` at all, so a census returning `[]` left
+    // it green. The comment claimed "a census that returned nothing would make
+    // every assertion below pass"; that was false in the other direction, and the
+    // assertion written to defend against it was inert for exactly that failure.
+    //
+    // What proves the census ran is that it SAW the corpus, not that it produced
+    // findings — a burn-down driven to zero must not red the suite (see the
+    // separate test below). So the floor is on the population the census walked.
     expect(
-      sources.length,
-      "no ledger entry resolves to a real file — the census is scanning the wrong tree",
-    ).toBeGreaterThan(known.length / 2)
+      censusCorpusSize(),
+      "the census walked no test files — every verdict below is over an empty scan",
+    ).toBeGreaterThan(3000)
   })
 
   test("🔴 no NEW guard derives a verdict from an unfloored scan", () => {
-    const added = found.filter((f) => !known.includes(f)).sort()
+    const added = addedEntries(found, known)
     expect(
       added,
       added.length === 0
@@ -89,7 +92,7 @@ describe("anti-vacuity burn-down", () => {
     // One-directional the other way. A file that gained a floor but stayed listed
     // is a permission nobody needs, and it would silently re-admit the file if the
     // floor were later deleted.
-    const stale = known.filter((f) => !found.includes(f)).sort()
+    const stale = staleEntries(found, known)
     expect(
       stale,
       stale.length === 0
@@ -100,20 +103,35 @@ describe("anti-vacuity burn-down", () => {
     ).toEqual([])
   })
 
-  test("🔴 the census does not accept `> 0` as a floor", () => {
-    // The whole precision of the rule. If `toBeGreaterThan(0)` counted, 56 of the
-    // 81 floors already in this repo would satisfy it and the ratchet would
-    // certify a tree that is mostly unprotected.
-    const withZeroFloor = known.filter((f) => {
-      try {
-        const src = readFileSync(join(REPO_ROOT, f), "utf8")
-        return /toBeGreaterThan(?:OrEqual)?\(\s*0\s*\)/.test(src)
-      } catch {
-        return false
-      }
-    })
-    // Not an assertion that none exist — an assertion that having one did NOT
-    // keep the file off the list.
-    expect(withZeroFloor.every((f) => known.includes(f))).toBe(true)
+  test("🔴 a `> 0` floor does not exempt a guard", () => {
+    // Rewritten after audit. The previous version was a TAUTOLOGY:
+    // `known.filter(P).every(f => known.includes(f))` is true for every P,
+    // including one that matches nothing, and it never touched the census. It
+    // passed under a mutation that made the census accept `> 0` — which silently
+    // removed six files from the list.
+    //
+    // This drives the real function instead: a scan with a `> 0` floor must still
+    // be listed, and the same scan with a measured floor must not. If `> 0` were
+    // accepted, 56 of the 81 floors already in this repo would satisfy the rule
+    // and the ratchet would certify a tree that is mostly unprotected.
+    const scanWith = (floor: string): string =>
+      `import { readdirSync } from "node:fs"\n` +
+      `test("x", () => {\n  const seen = readdirSync("src")\n  ${floor}\n` +
+      `  expect(seen.filter((f) => f.endsWith(".zzz"))).toEqual([])\n})\n`
+    expect(isFloorless(scanWith("expect(seen.length).toBeGreaterThan(0)"))).toBe(true)
+    expect(isFloorless(scanWith("expect(seen.length).toBeGreaterThan(2500)"))).toBe(false)
+    // A floor on something UNRELATED must not vouch for the scan. The binding is
+    // named `seen` and not `all` on purpose: `all` is itself one of the
+    // scan-shaped names the file-wide backstop accepts, so a fixture using it
+    // would pass for the wrong reason — which is how the first version of this
+    // case was written.
+    expect(isFloorless(scanWith("expect(elapsedMs).toBeGreaterThan(1)"))).toBe(true)
+  })
+
+  test("a completed burn-down is GREEN, not red", () => {
+    // The terminal state of the stated goal must not be a failing suite, or the
+    // last fix is punished. An empty ledger with an empty census is success.
+    expect(staleEntries([], [])).toEqual([])
+    expect(addedEntries([], [])).toEqual([])
   })
 })
