@@ -142,7 +142,21 @@ const keyForToken = (tok: string): string | undefined => {
  * gate will really run.
  */
 export const countTestFilesUnder = (token: string): number => {
-  const needle = token.replace(/^\.\//, "")
+  // A `./`-prefixed positional is ANCHORED at the repo root by bun; a bare one is
+  // a substring filter over the whole path. Measured, because the first version
+  // stripped the `./` and got this exactly backwards:
+  //
+  //   bun test ./tools/  → 17 files      countTestFilesUnder (old) → 19
+  //   bun test tools/    → 19 files      (also sweeps tests/unit/tools/)
+  //   bun test ./unit/   →  0 files      countTestFilesUnder (old) → 3014
+  //
+  // The last line is the one that mattered: mutating a gate positional to
+  // `./unit/` produced a gate running ZERO files while the guard reported 3,014
+  // and stayed green — the precise mutation class this check exists to catch.
+  // The three mutations it was originally proven against all happened to zero out
+  // under substring matching too, which is why the proof passed.
+  const anchored = token.startsWith("./")
+  const needle = anchored ? token.slice(2) : token
   let n = 0
   const walk = (dir: string): void => {
     for (const ent of readdirSync(dir, { withFileTypes: true })) {
@@ -151,7 +165,9 @@ export const countTestFilesUnder = (token: string): number => {
       if (ent.isDirectory()) walk(abs)
       else if (
         (abs.endsWith(".test.ts") || abs.endsWith(".test.tsx")) &&
-        abs.slice(REPO_ROOT.length + 1).includes(needle)
+        (anchored
+          ? abs.slice(REPO_ROOT.length + 1).startsWith(needle)
+          : abs.slice(REPO_ROOT.length + 1).includes(needle))
       ) {
         n++
       }

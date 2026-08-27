@@ -607,7 +607,18 @@ async function cmdGates(argv: string[]): Promise<void> {
 
 /** Run one read-only git command, or exit(1) naming the command that failed. */
 function gitOrExit(args: readonly string[], label: string): string {
-  const proc = Bun.spawnSync(["git", ...args], { stdout: "pipe", stderr: "pipe" })
+  // `cwd: ROOT`, and it is the whole correctness of this gate. Without it, git ran
+  // against whatever repository the caller was standing in: outside a work tree it
+  // failed loudly, but INSIDE ANY OTHER git tree it succeeded against the wrong
+  // repo and the gate inverted — `exit 1 / BLOCK` at the repo root became
+  // `exit 0 / ok` over a repository it never read. This runs at
+  // `.github/workflows/fc-gate.yml`, `ci.yml`, and as the first step of
+  // `test:ci` via `test:admission`.
+  //
+  // `stale`'s three git calls were anchored in an earlier pass; this one was
+  // missed because the sweep was scoped to the commands it was looking at rather
+  // than to every git call in the tool.
+  const proc = Bun.spawnSync(["git", ...args], { cwd: ROOT, stdout: "pipe", stderr: "pipe" })
   if (proc.exitCode !== 0) {
     const err = new TextDecoder().decode(proc.stderr)
     console.error(`check-changed: \`git ${args.join(" ")}\` failed (${label}): ${err.trim()}`)
