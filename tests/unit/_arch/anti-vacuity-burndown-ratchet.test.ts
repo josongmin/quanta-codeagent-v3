@@ -167,7 +167,7 @@ describe("anti-vacuity burn-down", () => {
       dead,
       dead.length === 0
         ? ""
-        : "the census no longer flags these — remove them from REFUTED:\n  " + dead.join("\n  "),
+        : `the census no longer flags these — remove them from REFUTED:\n  ${dead.join("\n  ")}`,
     ).toEqual([])
   })
 
