@@ -46,4 +46,42 @@ describe("biome target selection", () => {
     expect(targets).not.toContain("src/agent/loop.ts.from-worktree")
     expect(targets).not.toContain("src/agent/cache.ts.my-backup.ts")
   })
+
+  test("skips dot-directories, which hold gitignored COPIES of real modules", () => {
+    const root = mkdtempSync(join(tmpdir(), "biome-targets-"))
+    // Paired control: a NORMAL nested directory, so the dot-dir assertions below
+    // cannot be satisfied by an enumerator that returns nothing.
+    write(root, "src/agent/loop.ts", "export const loop = 1\n")
+    write(root, "tests/unit/keep.test.ts", "export {}\n")
+    // The real defect: `tools/dev/.scratch` is a gitignored 132MB copy of the
+    // repo. Enumerating a dot-dir counts scratch duplicates as lint targets and
+    // makes every debt ceiling machine-dependent.
+    write(root, "src/.scratch/copy.ts", "export const loop = 1\n")
+    write(root, "src/.scratch/nested/deep.ts", "export {}\n")
+    write(root, "tests/.cache/stale.test.ts", "export {}\n")
+
+    const targets = collectBiomeTargets(root)
+
+    expect(targets).not.toContain("src/.scratch/copy.ts")
+    expect(targets).not.toContain("src/.scratch/nested/deep.ts")
+    expect(targets).not.toContain("tests/.cache/stale.test.ts")
+    expect(targets.filter((t) => t.split("/").includes(".scratch"))).toEqual([])
+
+    // Anti-vacuity + paired control: the ordinary tree is still enumerated.
+    expect(targets).toContain("src/agent/loop.ts")
+    expect(targets).toContain("tests/unit/keep.test.ts")
+    expect(targets.length).toBeGreaterThan(0)
+  })
+
+  test("enumerates the default source roots, and only those", () => {
+    const root = mkdtempSync(join(tmpdir(), "biome-targets-"))
+    write(root, "src/agent/loop.ts", "export {}\n")
+    write(root, "tests/unit/keep.test.ts", "export {}\n")
+    write(root, "tools/dev/script.ts", "export {}\n")
+
+    expect(collectBiomeTargets(root)).toEqual(["src/agent/loop.ts", "tests/unit/keep.test.ts"])
+    // Pins that the root list is a PARAMETER, not the whole tree: `tools/` is
+    // reachable, it is simply not in the default universe.
+    expect(collectBiomeTargets(root, ["tools"])).toEqual(["tools/dev/script.ts"])
+  })
 })

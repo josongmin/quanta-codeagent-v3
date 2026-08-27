@@ -102,6 +102,14 @@ const walk = (repoRoot: string, relDir: string, out: string[]): void => {
     }
     const rel = normalizeRel(relative(repoRoot, abs))
     if (entryStat.isDirectory()) {
+      // Dot-directories are never shipped code, and at least one
+      // (`tools/dev/.scratch`) holds a gitignored COPY of the whole repo —
+      // 7,550 of the 7,802 files under `tools/` live there. Enumerating them
+      // would count scratch duplicates as lint targets, so the debt ceilings
+      // would depend on what an earlier session happened to leave on disk
+      // rather than on what is committed. `tools/dev/verify-scope.ts` skips
+      // them for the same reason.
+      if (name.startsWith(".")) continue
       walk(repoRoot, rel, out)
       continue
     }
