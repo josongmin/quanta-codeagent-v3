@@ -118,7 +118,9 @@ describe("the rendered command actually runs", () => {
     // golden is patched with the id once the canary path is known.
     const s = sandbox({ golden: [], dockerPrints: DIGEST })
     const canary = join(s.dir, "PROMAX_PROV_PWNED")
-    const evil = 'a$(touch "' + canary + '")b'
+    // Template literal, not concatenation: `$(` is SHELL substitution, not JS
+    // interpolation, so the produced string is byte-identical — verified.
+    const evil = `a$(touch "${canary}")b`
     writeFileSync(s.goldenPath, JSON.stringify([{ instance_id: evil }]))
     try {
       rmSync(canary, { force: true })
