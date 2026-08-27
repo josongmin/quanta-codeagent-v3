@@ -34,8 +34,11 @@ import {
   EVAL_HEADS,
   expandFlagCluster,
   FETCH_HEADS,
+  FILESYSTEM_FORMAT_HEADS,
   FIND_ACTION_FLAGS,
+  GIT_WHOLE_TREE_PATHSPECS,
   gitOperandTokens,
+  gitRestoreTouchesWorktree,
   INLINE_CODE_FLAGS,
   INTERPRETER_HEADS,
   isSecretStorePath,
@@ -56,8 +59,9 @@ export type ShellAssessmentKind = "safe-known" | "sensitive-known" | "hard-deny"
 
 export interface ShellAssessment {
   readonly kind: ShellAssessmentKind
-  /** The `HARD_DENY_RULES` name when `kind === "hard-deny"`, so the two
-   *  authorities name the same denial the same way. */
+  /** The rule name when the verdict names one — every `hard-deny`, and every
+   *  `sensitive-known` — so the two authorities name the same effect the same
+   *  way. */
   readonly rule?: string
   readonly reason: string
 }
@@ -66,6 +70,25 @@ const safe = (): ShellAssessment => ({ kind: "safe-known", reason: "no gated eff
 const unknown = (reason: string): ShellAssessment => ({ kind: "unknown", reason })
 const deny = (rule: string, reason: string): ShellAssessment => ({
   kind: "hard-deny",
+  rule,
+  reason,
+})
+/** An effect that is REAL and READ IN FULL but that `hard-deny`'s own
+ *  definition — "no mode may authorize" — does not fit.
+ *
+ *  BE PLAIN ABOUT THIS: `sensitive-known` is INERT today. Nothing produced it
+ *  before this function and the only consumer of an assessment,
+ *  `permission/policy.ts`, branches on `=== "hard-deny"`, so a
+ *  `sensitive-known` command is permitted exactly as `safe-known` is. It is
+ *  still the right label, for two reasons. First, the alternative labels are
+ *  both lies: `hard-deny` says no tier may ever revert a single file, and
+ *  `safe-known` says reverting one is "no effect that needs a gate" — the very
+ *  claim that let `git restore src/foo.ts` sail past while its `git checkout --`
+ *  twin was unappealable. Second, `RANK` already orders it above `safe-known`,
+ *  so the first policy layer that reads it inherits a correct corpus instead of
+ *  having to re-derive one. */
+const sensitive = (rule: string, reason: string): ShellAssessment => ({
+  kind: "sensitive-known",
   rule,
   reason,
 })
@@ -217,16 +240,47 @@ const GIT_DESTRUCTIVE: ReadonlyArray<{
     matches: (sub, flags) => sub === "clean" && (flags.has("-f") || flags.has("--force")),
   },
   {
-    // The `--` arm was DEAD until `gitOperandTokens` stopped dropping the
-    // end-of-options marker: every operand reader filtered `-`-leading tokens,
-    // so `git checkout -- src/foo.ts` — the spelling this rule's own
-    // description names, "restores files over uncommitted edits" — measured
-    // `safe-known` while `git checkout .` was `hard-deny`. The arm reads as a
-    // guard, so it is made into one rather than deleted.
+    // WHOLE-TREE discard only. `git checkout .` / `git checkout -- .` throw
+    // away every uncommitted edit in the tree, which is `git reset --hard`'s
+    // blast radius — the reason that one is hard-deny too.
+    //
+    // The single-path form `git checkout -- src/foo.ts` USED to land here, and
+    // that was wrong in a way this campaign keeps making: `hard-deny` is
+    // terminal, so no mode — however trusted, however explicit the user — could
+    // revert one file, while `git restore src/foo.ts`, git's own supported
+    // spelling of the identical effect, was fully allowed. An unappealable
+    // verdict that the next spelling walks around is not a safety property. It
+    // is now `sensitive-known`; see GIT_WORKTREE_DISCARD_PATH below.
     rule: "git-checkout-discard",
-    what: "restores files over uncommitted edits",
-    matches: (sub, _flags, operands) =>
-      sub === "checkout" && operands.some((o) => o === "--" || o === "."),
+    what: "discards every uncommitted edit in the working tree",
+    matches: (sub, flags, operands) =>
+      sub === "checkout" &&
+      (flags.has("-f") ||
+        flags.has("--force") ||
+        operands.some((o) => GIT_WHOLE_TREE_PATHSPECS.has(o))),
+  },
+  {
+    // `git restore .` and `git restore --worktree --staged .` — measured
+    // `safe-known`, i.e. the modern spelling of the effect the line above has
+    // denied since ADR-0100 was fully allowed. `--staged` ALONE is an
+    // index-only unstage and deliberately does NOT fire.
+    rule: "git-restore-discard",
+    what: "discards every uncommitted edit in the working tree",
+    matches: (sub, flags, operands) =>
+      sub === "restore" &&
+      gitRestoreTouchesWorktree(flags) &&
+      operands.some((o) => GIT_WHOLE_TREE_PATHSPECS.has(o)),
+  },
+  {
+    // `git switch --discard-changes main` — measured `safe-known`. git's own
+    // `-h` calls `-f, --force` "an alias for --discard-changes", so all three
+    // spellings are one rule. There is no pathspec form: switch discards the
+    // WHOLE tree or nothing.
+    rule: "git-switch-discard-changes",
+    what: "throws away every local modification while switching",
+    matches: (sub, flags) =>
+      sub === "switch" &&
+      (flags.has("--discard-changes") || flags.has("-f") || flags.has("--force")),
   },
   {
     rule: "git-commit-amend",
@@ -242,6 +296,48 @@ const GIT_DESTRUCTIVE: ReadonlyArray<{
 const gitOperands = (args: readonly ShellWord[]): string[] =>
   gitOperandTokens(args.map((a) => a.text))
 
+/**
+ * Named-path discards: the SAME effect as the whole-tree rules above, one file
+ * at a time. `sensitive-known`, not `hard-deny` — see {@link sensitive}.
+ *
+ * Kept as its own table so the two tiers cannot drift into each other: a rule
+ * here can never produce a terminal verdict, and a rule in `GIT_DESTRUCTIVE`
+ * can never produce a soft one.
+ *
+ * KNOWN GAP, stated rather than papered over: `git checkout src/foo.ts` — no
+ * `--`, one token — discards that file too, and is NOT covered. A ref and a
+ * pathspec are indistinguishable at this token (`git checkout main` is a branch
+ * switch and must stay `safe-known`), and only the repository can tell them
+ * apart. Covering it would mean labelling every `git checkout <branch>` a
+ * discard. `--` is git's own disambiguator and is what this table reads.
+ */
+const GIT_WORKTREE_DISCARD_PATH: ReadonlyArray<{
+  readonly rule: string
+  readonly matches: (
+    sub: string,
+    flags: ReadonlySet<string>,
+    operands: readonly string[],
+  ) => boolean
+  readonly what: string
+}> = [
+  {
+    // The `--` arm was DEAD until `gitOperandTokens` stopped dropping the
+    // end-of-options marker: every operand reader filtered `-`-leading tokens,
+    // so `git checkout -- src/foo.ts` never matched anything at all.
+    rule: "git-checkout-discard-path",
+    what: "restores named paths over uncommitted edits",
+    matches: (sub, _flags, operands) => sub === "checkout" && operands.includes("--"),
+  },
+  {
+    // `git restore src/foo.ts`. Whole-tree forms were already denied above, so
+    // anything reaching here names paths.
+    rule: "git-restore-discard-path",
+    what: "restores named paths over uncommitted edits",
+    matches: (sub, flags, operands) =>
+      sub === "restore" && gitRestoreTouchesWorktree(flags) && operands.length > 0,
+  },
+]
+
 const assessGit = (cmd: ShellCommandIr, _ctx: Ctx): ShellAssessment => {
   const args = cmd.args
   if (args.some((a) => !a.resolved)) {
@@ -255,6 +351,13 @@ const assessGit = (cmd: ShellCommandIr, _ctx: Ctx): ShellAssessment => {
   for (const rule of GIT_DESTRUCTIVE) {
     if (rule.matches(sub, flags, rest)) {
       return deny(rule.rule, `git ${sub}: ${rule.what}`)
+    }
+  }
+  // Strictly AFTER the terminal tier, so a whole-tree discard can never be
+  // downgraded by also naming a path.
+  for (const rule of GIT_WORKTREE_DISCARD_PATH) {
+    if (rule.matches(sub, flags, rest)) {
+      return sensitive(rule.rule, `git ${sub}: ${rule.what}`)
     }
   }
   return safe()
@@ -301,17 +404,13 @@ export const SIMPLE_DENIAL_RULES: readonly SimpleDenialRule[] = [
     // `diskutil` used to sit in this set with `matches: () => true`, which made
     // `diskutil list` and `diskutil info /` unrunnable at every tier. It is a
     // SUBCOMMAND dispatcher, not a formatter, and now has its own assessor.
+    // …and after it moved out, EVERY head left in this rule was a Linux
+    // spelling that does not exist on macOS (`which newfs mkfs` → neither
+    // found), so the rule was live and unable to fire while `newfs_hfs
+    // /dev/disk2s1` measured `safe-known`. The head list is now a shared,
+    // PROBED population — see FILESYSTEM_FORMAT_HEADS.
     rule: "mkfs-format-filesystem",
-    heads: new Set([
-      "mkfs",
-      "mkfs.ext2",
-      "mkfs.ext3",
-      "mkfs.ext4",
-      "mkfs.xfs",
-      "mkfs.btrfs",
-      "mkfs.vfat",
-      "newfs",
-    ]),
+    heads: FILESYSTEM_FORMAT_HEADS,
     what: "formats a filesystem",
   },
   {

@@ -28,6 +28,7 @@
 
 import { describe, expect, test } from "bun:test"
 import { decideBranchOnly } from "@/../src/permission/branch-only"
+import { gitOperandTokens } from "@/../src/permission/shell/rules"
 
 const denied = (v: ReturnType<typeof decideBranchOnly>): boolean => v.allowed === false
 
@@ -122,7 +123,13 @@ describe("HELLGATE: branch-only — bare destructive reset on a protected branch
 describe("git global options do not hide the subcommand", () => {
   const FORCE_PUSH_WITH_GLOBAL = [
     "git --namespace foo push origin +main",
-    "git --exec-path /x push origin +main",
+    // Removed from this list, NOT forgotten: `git --exec-path /x push …`.
+    // `--exec-path` is spelled `--exec-path[=<path>]` and consumes NO separated
+    // value — bare, it PRINTS the exec path and exits 0 without running the
+    // subcommand. Measured on git 2.50.1: `git --exec-path push origin +main`
+    // printed `…/libexec/git-core`, rc=0, and pushed nothing. It was in
+    // GIT_GLOBAL_VALUE_FLAGS anyway, which made the readers skip the real
+    // subcommand. See the inert-form control below.
     "git --super-prefix p/ push origin +main",
     "git --config-env k=V push origin +main",
     // the four that already worked — parity, so a regression on either half shows
@@ -138,6 +145,17 @@ describe("git global options do not hide the subcommand", () => {
     })
   }
 
+  test("`--exec-path` does not displace the subcommand — it IS the subcommand", () => {
+    // The reader must treat `--exec-path` as valueless, so the token after it
+    // is read as the subcommand and a force-push behind it is still seen.
+    // (git itself never runs that push, but an authority that reads `origin`
+    // as the subcommand is wrong about the line either way.)
+    expect(gitOperandTokens("--exec-path push origin +main".split(" "))[0]).toBe("push")
+    expect(
+      denied(decideBranchOnly("git --exec-path push origin +main", ["main"], "feature/x")),
+    ).toBe(true)
+  })
+
   test("PAIRED CONTROL — the same globals in front of a harmless subcommand stay allowed", () => {
     // The fix must consume the option's VALUE, not swallow the subcommand after
     // it: a `status`/`log` behind the same globals has to keep working.
@@ -151,9 +169,11 @@ describe("git global options do not hide the subcommand", () => {
   })
 
   test("PAIRED CONTROL — the `--flag=value` form still resolves the subcommand", () => {
-    expect(denied(decideBranchOnly("git --namespace=foo push origin +main", ["main"], "feature/x"))).toBe(
-      true,
+    expect(
+      denied(decideBranchOnly("git --namespace=foo push origin +main", ["main"], "feature/x")),
+    ).toBe(true)
+    expect(denied(decideBranchOnly("git --namespace=foo status", ["main"], "feature/x"))).toBe(
+      false,
     )
-    expect(denied(decideBranchOnly("git --namespace=foo status", ["main"], "feature/x"))).toBe(false)
   })
 })
