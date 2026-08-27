@@ -4,7 +4,9 @@ import { join } from "node:path"
 import allowlist from "../../tools/god-code/allowlist.json"
 import {
   APPROACHING_MODULE_BAND,
+  allowlistKeys,
   approachingBandBounds,
+  approachingCohortMax,
   detectGodFunctions,
   detectGodModules,
   GOD_FUNCTION_MAX_LINES,
@@ -43,12 +45,13 @@ describe("god-code ratchet (SE size metric)", () => {
   const currentFunctions = new Set(
     detectGodFunctions(files, GOD_FUNCTION_MAX_LINES).map((f) => f.key),
   )
-  // `new Set<string>(...)`: the `modules` allowlist is now empty (the last
-  // grandfathered god-module — src/lsp/adapters/base.ts — was split out), which
-  // TypeScript's JSON-import inference narrows to `never[]`; widen so the
-  // `.has(f)` membership test below still typechecks against string keys.
-  const allowModules = new Set<string>(allowlist.modules)
-  const allowFunctions = new Set<string>(allowlist.functions)
+  // Both grandfather lists are read through the TOTAL reader, not spread raw.
+  // (They are also both empty today — the last grandfathered god-module,
+  // src/lsp/adapters/base.ts, was split out — which TypeScript's JSON-import
+  // inference narrows to `never[]`; `allowlistKeys` returns `readonly string[]`,
+  // so the `.has(f)` membership tests below typecheck against string keys.)
+  const allowModules = new Set(allowlistKeys(allowlist.modules, "modules"))
+  const allowFunctions = new Set(allowlistKeys(allowlist.functions, "functions"))
 
   test("thresholds match the frozen allowlist (config drift guard)", () => {
     expect(allowlist.godModuleMaxLines).toBe(GOD_MODULE_MAX_LINES)
@@ -79,11 +82,54 @@ describe("god-code ratchet (SE size metric)", () => {
     expect(stale).toEqual([])
   })
 
-  test("allowlist entries are UNIQUE (a duplicate grandfather would silently double-count / mask a swap)", () => {
-    const dupes = (arr: readonly string[]): string[] =>
-      [...new Set(arr.filter((v, i) => arr.indexOf(v) !== i))].sort()
-    expect(dupes(allowlist.functions)).toEqual([])
-    expect(dupes(allowlist.modules)).toEqual([])
+  // Every DEGENERATE FORM of a grandfather list gets its own arm. A `Set.has`
+  // membership test is silent about an entry that can never match, so a dead
+  // entry reads like coverage in review while grandfathering nothing.
+  test("a degenerate allowlist ENTRY is refused at the read (one arm per form)", () => {
+    const rejected: readonly [string, unknown, "modules" | "functions"][] = [
+      ["not an array", {}, "modules"],
+      ["null instead of a list", null, "functions"],
+      ["a non-string entry", [123], "modules"],
+      ["an EMPTY-STRING entry (grandfathers nothing)", [""], "modules"],
+      ["a whitespace-only entry", ["   "], "modules"],
+      ["a whitespace-padded key (never matches)", [" src/a.ts"], "modules"],
+      ["a duplicate grandfather (masks a swap)", ["src/a.ts", "src/a.ts"], "modules"],
+      ["a function KEY in the module path list", ["src/a.ts::f"], "modules"],
+      ["a bare path in the function key list", ["src/a.ts"], "functions"],
+      ["a key with an empty file half", ["::f"], "functions"],
+      ["a key with an empty name half", ["src/a.ts::"], "functions"],
+    ]
+    for (const [form, raw, kind] of rejected) {
+      expect(() => allowlistKeys(raw, kind), form).toThrow(/god-code ratchet: allowlist\./)
+    }
+    // PAIRED CONTROL: the reader is not simply throwing on everything. Honest
+    // lists of BOTH kinds pass through unchanged, including the empty list the
+    // real allowlist holds today — an empty grandfather list is the ratchet's
+    // GOAL state, not a degenerate one.
+    expect(allowlistKeys([], "modules")).toEqual([])
+    expect(allowlistKeys([], "functions")).toEqual([])
+    expect(allowlistKeys(["src/a.ts", "src/b.ts"], "modules")).toEqual(["src/a.ts", "src/b.ts"])
+    expect(allowlistKeys(["src/a.ts::f"], "functions")).toEqual(["src/a.ts::f"])
+  })
+
+  // `max` is the RATCHET VALUE and is deliberately NOT bounded above: it must be
+  // free to move down, and a slack ceiling is a loose setting, not a degenerate
+  // one. Only the shape that DISARMS the comparison is refused — `length > NaN`
+  // is FALSE, so a non-numeric ceiling passes while measuring nothing.
+  test("a degenerate cohort MAX is refused, but a slack one is NOT (the ratchet must move)", () => {
+    for (const degenerate of [Number.NaN, "24", null, undefined, -1, 1.5, [24]]) {
+      expect(() => approachingCohortMax(degenerate), String(degenerate)).toThrow(
+        /max must be a non-negative integer/,
+      )
+    }
+    // PAIRED CONTROL — the guard is NOT satisfiable by freezing `max`. A wildly
+    // slack ceiling and a fully-tightened one are both ACCEPTED. If someone adds
+    // an upper sanity bound here, this arm goes red on purpose.
+    expect(approachingCohortMax(9999)).toBe(9999)
+    expect(approachingCohortMax(0)).toBe(0)
+    expect(approachingCohortMax(allowlist.approachingModuleCeiling.max)).toBe(
+      allowlist.approachingModuleCeiling.max,
+    )
   })
 
   // The cohort test below reads its band out of the very artifact it polices.
@@ -96,17 +142,57 @@ describe("god-code ratchet (SE size metric)", () => {
     // Paired control: the honest band is accepted and is what the JSON mirrors.
     expect(approachingBandBounds([...APPROACHING_MODULE_BAND])).toEqual([900, 999])
     expect(approachingBandBounds(allowlist.approachingModuleCeiling.band)).toEqual([900, 999])
+    // NOTE, deliberate and not a hole: no argument (or an explicit `undefined`)
+    // resolves to the CODE default, standard JS default-parameter semantics —
+    // it does not throw. A `band` key missing from the JSON therefore falls back
+    // to the honest hardcoded window rather than to a window of nothing, and is
+    // caught loudly by the drift-guard test above, which compares the JSON's
+    // `band` against APPROACHING_MODULE_BAND by value.
+    expect(approachingBandBounds()).toEqual([900, 999])
+    expect(approachingBandBounds(undefined)).toEqual([900, 999])
     // Every shape that used to disarm the ceiling now throws.
-    for (const degenerate of [[], [900], [900, 999, 1200], [999, 900], [900, 900]]) {
+    for (const degenerate of [
+      [],
+      [900],
+      [900, 999, 1200],
+      [999, 900],
+      [900, 900],
+      [Number.NaN, Number.NaN],
+      [900, Number.NaN],
+      [Number.NaN, 999],
+      [0, 1],
+      [900.5, 999.5],
+      [1200, 1500],
+      [-100, 999],
+      [900, Number.POSITIVE_INFINITY],
+      ["900", "999"],
+      [null, null],
+      [900, undefined],
+      {},
+      null,
+      "900,999",
+    ]) {
       expect(() => approachingBandBounds(degenerate)).toThrow(/band must be a \[lo, hi\] pair/)
     }
-    // ...and it was a REAL disarm: under the old defaulting read, an empty band
-    // selected zero of the >1000 files walked below.
-    const vacuous = files.filter((f) => {
-      const lines = f.text.split("\n").length
-      return lines >= 0 && lines <= 0
-    })
-    expect(vacuous).toEqual([])
+    // ...and it was a REAL disarm, not a theoretical one. Compare the two
+    // windows over the SAME corpus: the window the old defaulting read produced
+    // from `"band": []` (lo=hi=0) selects NOTHING, while the honest window
+    // selects a real cohort. That GAP is the disarm.
+    //
+    // The assertion this replaces was `lines >= 0 && lines <= 0` over the same
+    // corpus, which is UNSATISFIABLE (`"".split("\n").length === 1`, so
+    // `lines >= 1` always) and therefore returned `[]` for any corpus at all,
+    // including an empty one. It could not fail. Each of the three stops below
+    // is load-bearing: kill the walk, narrow the honest band to nothing, or let
+    // the degenerate window start matching, and this goes red.
+    const select = (lo: number, hi: number): readonly SourceFile[] =>
+      files.filter((f) => {
+        const lines = f.text.split("\n").length
+        return lines >= lo && lines <= hi
+      })
+    expect(files.length).toBeGreaterThan(1000) // the corpus is real
+    expect(select(...approachingBandBounds()).length).toBeGreaterThan(0) // honest band selects
+    expect(select(0, 0)).toEqual([]) // the disarmed window selects nothing
   })
 
   // aug-23 audit — COHORT ceiling. The 1000-line gate above caps an INDIVIDUAL
@@ -125,15 +211,16 @@ describe("god-code ratchet (SE size metric)", () => {
     // fail-closed reader in detect.ts rather than defaulting them to 0, which
     // would turn a malformed band into a cohort of nothing that always passes.
     const [lo, hi] = approachingBandBounds(band.band)
+    const max = approachingCohortMax(band.max)
     const approaching = files
       .map((f) => ({ file: f.path, lines: f.text.split("\n").length }))
       .filter((m) => m.lines >= lo && m.lines <= hi)
       .sort((a, b) => b.lines - a.lines)
     // Anti-vacuity: the walk must have actually read the tree.
     expect(files.length).toBeGreaterThan(1000)
-    if (approaching.length > band.max) {
+    if (approaching.length > max) {
       throw new Error(
-        `${approaching.length} modules are in the ${lo}-${hi} band (ceiling ${band.max}). ` +
+        `${approaching.length} modules are in the ${lo}-${hi} band (ceiling ${max}). ` +
           "Split one and LOWER the ceiling; never raise it. Closest to the hard gate:\n" +
           approaching
             .slice(0, 8)
@@ -141,6 +228,6 @@ describe("god-code ratchet (SE size metric)", () => {
             .join("\n"),
       )
     }
-    expect(approaching.length).toBeLessThanOrEqual(band.max)
+    expect(approaching.length).toBeLessThanOrEqual(max)
   })
 })

@@ -32,25 +32,131 @@ export const GOD_FUNCTION_MAX_LINES = 150
 export const APPROACHING_MODULE_BAND = [900, 999] as const
 
 /**
+ * RULE FOR THIS FILE: every value the ratchet reads out of `allowlist.json` goes
+ * through a TOTAL reader that refuses a degenerate value, and each degenerate
+ * form has its own test arm.
+ *
+ * The generative bug this closes is not "the band was empty" — it is that a
+ * guard validated the thing it policed but not the PARAMETERS it was handed. A
+ * parameter check written as `lo >= hi` is not total: it is FALSE for `NaN`, so
+ * `[NaN, NaN]` sailed through the very function written to refuse a window that
+ * selects nothing. Predicates here must ACCEPT-list what is legal
+ * (`Number.isInteger`, explicit ranges), never REJECT-list what is illegal.
+ */
+
+/** Renders NaN / Infinity honestly, which `JSON.stringify` flattens to `null`. */
+const show = (v: unknown): string =>
+  Array.isArray(v)
+    ? `[${v.map(show).join(", ")}]`
+    : typeof v === "number" || typeof v === "bigint"
+      ? String(v)
+      : JSON.stringify(v)
+
+/**
+ * A cohort band bound is a line count that brackets the hard god-module gate
+ * from BELOW: at or above `GOD_MODULE_MAX_LINES` a file is not "approaching"
+ * anything, it is already failed by `detectGodModules`. `Number.isInteger`
+ * carries the whole type check — it is false for `NaN`, `Infinity`, `900.5` and
+ * `"900"` alike, which a hand-rolled comparison chain is not.
+ */
+const isBandBound = (v: unknown): v is number =>
+  Number.isInteger(v) && (v as number) >= 1 && (v as number) < GOD_MODULE_MAX_LINES
+
+/**
  * Total, fail-closed read of the cohort band bounds.
  *
  * A JSON import widens `[900, 999]` to `number[]`, so callers used to read the
  * bounds with `band[0] ?? 0`. That defaulting is what made an empty band DISARM
  * the ceiling instead of tripping it: lo=hi=0 selects no file, so the cohort
- * check passed while measuring nothing. Refuse a band that is not a strictly
- * ordered pair rather than returning a window that silently matches nothing.
+ * check passed while measuring nothing. Refuse any band that is not a strictly
+ * ordered pair of in-range integers rather than returning a window that
+ * silently matches nothing.
  */
 export const approachingBandBounds = (
-  band: readonly number[] = APPROACHING_MODULE_BAND,
+  band: unknown = APPROACHING_MODULE_BAND,
 ): readonly [number, number] => {
-  const [lo, hi] = band
-  if (band.length !== 2 || typeof lo !== "number" || typeof hi !== "number" || lo >= hi) {
+  const pair: readonly unknown[] | undefined = Array.isArray(band) ? band : undefined
+  const lo = pair?.[0]
+  const hi = pair?.[1]
+  if (pair === undefined || pair.length !== 2 || !isBandBound(lo) || !isBandBound(hi) || lo >= hi) {
     throw new Error(
-      "god-code ratchet: approachingModuleCeiling.band must be a [lo, hi] pair with lo < hi; got " +
-        JSON.stringify(band),
+      "god-code ratchet: approachingModuleCeiling.band must be a [lo, hi] pair of integers with " +
+        `1 <= lo < hi < ${GOD_MODULE_MAX_LINES}; got ${show(band)}`,
     )
   }
   return [lo, hi]
+}
+
+/**
+ * Total read of the cohort CEILING.
+ *
+ * ⚠️ DELIBERATELY UNBOUNDED ABOVE — DO NOT ADD AN UPPER SANITY BOUND. `max` is
+ * the RATCHET VALUE. It must stay free to move DOWN as modules are split, and a
+ * slack value like 9999 is a loose setting, not a degenerate one; capping it
+ * from here would freeze the ratchet from the code side, which is exactly the
+ * authority the allowlist is supposed to keep. There is a test arm pinning 9999
+ * as ACCEPTED so this stays true.
+ *
+ * What it does refuse is the shape that DISARMS the comparison rather than
+ * merely loosening it: the cohort check is `approaching.length > max`, and that
+ * is FALSE for `max = NaN`. A non-numeric ceiling therefore PASSES while
+ * measuring nothing — the identical disarm `approachingBandBounds` exists to
+ * close, sitting on the sibling field. A non-negative integer admits every
+ * value the ratchet is legally allowed to hold, 0 and 9999 included.
+ */
+export const approachingCohortMax = (max: unknown): number => {
+  if (!Number.isInteger(max) || (max as number) < 0) {
+    throw new Error(
+      "god-code ratchet: approachingModuleCeiling.max must be a non-negative integer " +
+        `(intentionally NO upper bound — it is the ratchet value); got ${show(max)}`,
+    )
+  }
+  return max as number
+}
+
+const keyShapeProblem = (kind: AllowlistKind, s: string): string | undefined => {
+  if (kind === "functions") {
+    return s.includes("::") && !s.startsWith("::") && !s.endsWith("::")
+      ? undefined
+      : "entries must be `file::name` keys with both halves non-empty"
+  }
+  return s.includes("::") ? "entries must be file paths, not `file::name` keys" : undefined
+}
+
+const entryProblem = (kind: AllowlistKind, entry: unknown): string | undefined => {
+  if (typeof entry !== "string") return "entries must be strings"
+  if (entry.trim() === "") return "entries must be non-empty"
+  if (entry !== entry.trim())
+    return "entries must not be whitespace-padded (a padded key can never match)"
+  return keyShapeProblem(kind, entry)
+}
+
+export type AllowlistKind = "modules" | "functions"
+
+/**
+ * Total read of a grandfather list (`modules` / `functions`).
+ *
+ * Membership is tested with `Set.has(key)`, which is SILENT about an entry that
+ * can never match anything: `""`, `" src/a.ts"`, `123`, or a `file::name` key
+ * pasted into the path list. Such an entry is a grandfather that grandfathers
+ * nothing while reading, in review, like coverage — the same defect shape as
+ * `isGrandfathered("")` returning true, one level up. Refuse it at the read.
+ */
+export const allowlistKeys = (raw: unknown, kind: AllowlistKind): readonly string[] => {
+  if (!Array.isArray(raw))
+    throw new Error(`god-code ratchet: allowlist.${kind} must be an array; got ${show(raw)}`)
+  const seen = new Set<string>()
+  for (const entry of raw) {
+    const problem =
+      entryProblem(kind, entry) ??
+      (seen.has(entry as string)
+        ? "entries must be UNIQUE (a duplicate grandfather masks a swap)"
+        : undefined)
+    if (problem !== undefined)
+      throw new Error(`god-code ratchet: allowlist.${kind} ${problem}; got ${show(entry)}`)
+    seen.add(entry as string)
+  }
+  return raw as readonly string[]
 }
 
 export interface SourceFile {
