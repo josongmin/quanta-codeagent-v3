@@ -109,6 +109,37 @@ const makeRequireAuth = (config: WebDaemonServerConfig): RequireAuth => {
   }
 }
 
+/**
+ * The daemon port the CROSS-ORIGIN FENCE trusts for this request — i.e. the port
+ * the daemon serves its own SPA on, which is the one loopback port a browser may
+ * legitimately present as an `Origin`.
+ *
+ * Resolved from ONE threaded value, never from `process.env`. The live
+ * `Bun.serve` handle is preferred because it carries the port that was ACTUALLY
+ * bound; `config.port` (which `index.ts` resolves once from
+ * `overrides.port ?? QUANTA_WEB_PORT ?? 4096`) is the fallback for the window
+ * before the handle exists and for callers that hand us no server.
+ *
+ * The distinction is load-bearing in two shipped shapes, not hypothetical:
+ *   - `main({ port })` / `port: 0` — the config port was never in the env, so an
+ *     env-reading fence 403'd the daemon's own SPA;
+ *   - `index.ts`'s EADDRINUSE fallback re-serves with `port: 0`, so `config.port`
+ *     is 0 while the SPA is served on an OS-chosen port only the handle knows.
+ *
+ * This helper picks the SOURCE only; the fence itself normalises the value
+ * (`resolveFencePort` inside `./http`), so an unusable port — `0`, negative,
+ * non-integer — NARROWS the allowlist to Vite + Tauri rather than throwing (a
+ * throw here would be a 500 on every route) or widening. Normalising in both
+ * places would recreate the very two-sources-of-truth shape being repaired.
+ */
+const fencePortFor = (
+  config: WebDaemonServerConfig,
+  server: { readonly port?: number | null | undefined } | undefined,
+): number | undefined => {
+  const bound = typeof server?.port === "number" ? server.port : undefined
+  return bound ?? config.port
+}
+
 /** Auth-free status routes — `GET /health` and `GET /network`. */
 const tryStatusRoutes = (url: URL, req: Request, deps: FetchHandlerDeps): RouteResult => {
   const { config, registry, startedAt } = deps
@@ -417,7 +448,9 @@ const makeTryUpgrade = (config: WebDaemonServerConfig) => {
     // the HTTP side does not cover this path at all: any page could open
     // `ws://127.0.0.1:<port>/ws` on a tokenless daemon and drive `turn.run`.
     // `Origin` is browser-set and unforgeable; a non-browser client sends none.
-    if (!isAllowedOrigin(req.headers.get("origin"))) return crossOriginReject()
+    if (!isAllowedOrigin(req.headers.get("origin"), fencePortFor(config, server))) {
+      return crossOriginReject()
+    }
     if (config.authToken !== undefined) {
       const presented = extractToken(url, req.headers.get("authorization"))
       if (presented === undefined || !constantTimeEquals(presented, config.authToken)) {
@@ -490,15 +523,16 @@ export const buildFetchHandler = (deps: FetchHandlerDeps): FetchHandler => {
     // tauri://localhost, etc.) need this OR every POST/DELETE fails. A
     // disallowed origin still gets a 204 with NO ACAO, so the browser refuses
     // the real request on its own.
+    const fencePort = fencePortFor(config, srv)
     if (req.method === "OPTIONS") {
-      return handlePreflight(req)
+      return handlePreflight(req, fencePort)
     }
     // CROSS-ORIGIN FENCE — before ANY route, including the auth-free status
     // routes and the effectful `/auth/*` + `/config` handlers. Withholding the
     // ACAO is not sufficient: a simple-content-type POST is delivered without a
     // preflight, so the effect lands whether or not the page can read the
     // response. An absent `Origin` is allowed (non-browser callers).
-    if (!isAllowedOrigin(req.headers.get("origin"))) return crossOriginReject()
+    if (!isAllowedOrigin(req.headers.get("origin"), fencePort)) return crossOriginReject()
     const status = tryStatusRoutes(url, req, deps)
     if (status !== undefined) return status
     const read = tryReadRoutes(url, req, deps, requireAuth)

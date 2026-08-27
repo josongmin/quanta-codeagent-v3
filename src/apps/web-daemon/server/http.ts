@@ -102,18 +102,33 @@ export const handleConfigPost = async (req: Request): Promise<Response> => {
  *
  * So the allowlist is now the CLOSED set of origins the shipped frontends are
  * actually served from:
- *   - the daemon's OWN port (`QUANTA_WEB_PORT`, default 4096) — the SPA
- *     that `serveStaticSpa` hands out in production;
+ *   - the daemon's OWN port — the SPA that `serveStaticSpa` hands out in
+ *     production;
  *   - {@link DEV_SERVER_PORT} (5173) — pinned in BOTH
  *     `apps/web-frontend/vite.config.ts` (`server.port`) and
  *     `apps/tauri-shell/tauri.conf.json` (`build.devUrl`);
  *   - the two Tauri shell origins.
  * ...crossed with the three loopback spellings a browser emits (`localhost`,
- * `127.0.0.1`, `[::1]`) and both schemes. `QUANTA_WEB_PORT` is the same env the
- * daemon itself binds from (`apps/web-daemon/index.ts`), and the Tauri shell
- * sets it explicitly when it spawns the sidecar on a random free port
- * (`apps/tauri-shell/src/daemon.rs`), so this tracks the real port in both
- * shipped launch paths.
+ * `127.0.0.1`, `[::1]`) and both schemes.
+ *
+ * ── WHERE THE DAEMON PORT COMES FROM ──────────────────────────────────────
+ * NOT from `process.env` — no code below this comment reads the environment
+ * (`QUANTA_WEB_DIST`, further down in the static-SPA resolver, is the module's
+ * only env read and is unrelated to the fence). The port is THREADED
+ * in by the caller, which is what makes the fence track the port the SPA is
+ * really served from rather than a second, independently-resolved guess:
+ *   - `apps/web-daemon/index.ts` resolves the port ONCE
+ *     (`overrides.port ?? QUANTA_WEB_PORT ?? 4096`) into `config.port`;
+ *   - `server/fetch-handler.ts` prefers the LIVE `Bun.serve` handle's `.port`
+ *     (the actually-bound port) and falls back to `config.port`.
+ * That covers all four launch shapes: the default port, the Tauri shell's
+ * random `QUANTA_WEB_PORT` sidecar (`apps/tauri-shell/src/daemon.rs`), a
+ * PROGRAMMATIC `main({ port })` override (which never touches the env), and an
+ * OS-chosen port (`port: 0`, or `index.ts`'s EADDRINUSE fallback) — in the last
+ * case the bound port is known to the handle even though it was never in the
+ * config. An earlier version of this fence read `QUANTA_WEB_PORT` directly and
+ * therefore 403'd its OWN SPA in the last two shapes; the arms in
+ * `cross-origin-fence-hellgate.test.ts` pin each shape.
  *
  * ── WHAT THIS DOES *NOT* DO (measured, not aspirational) ──────────────────
  *   - It does not isolate the daemon from a page served on port 5173 itself.
@@ -122,10 +137,12 @@ export const handleConfigPost = async (req: Request): Promise<Response> => {
  *     the browser, so this stops BROWSER-driven cross-origin access only; any
  *     local process can still speak to the daemon directly with no `Origin` at
  *     all (see below).
- *   - `QUANTA_WEB_PORT=0` (OS-chosen port) is NOT resolvable here — the real
- *     bound port is only known to the listener — so a browser served by a
- *     port-0 daemon is refused. No shipped launch path uses 0; it is a
- *     library/test shape.
+ *   - A port that is not a usable TCP port (`0`, negative, non-integer, > 65535
+ *     — i.e. anything `resolveFencePort` refuses) contributes NO daemon-port
+ *     origins at all. `http://localhost:0` is not minted as an allowed origin;
+ *     the fence degrades to Vite + Tauri only rather than opening up. A daemon
+ *     that BINDS `port: 0` is unaffected: by request time the handle carries the
+ *     real OS-chosen port, and that is what the fence trusts.
  *   - A LAN-bound daemon (`QUANTA_WEB_BIND=0.0.0.0`, which the Tauri shell sets
  *     so phones can reach it) serves its SPA on a LAN origin like
  *     `http://192.168.1.5:<port>`. That origin is NOT loopback and is refused —
@@ -141,7 +158,6 @@ export const handleConfigPost = async (req: Request): Promise<Response> => {
  *  403 here — the remedy is to free 5173 (or point `QUANTA_WEB_PORT` at the
  *  port in use), and the refusal is a loud 403, never a silent wrong answer. */
 const DEV_SERVER_PORT = 5173
-const DEFAULT_DAEMON_PORT = 4096
 /** Loopback hosts as a BROWSER spells them in an `Origin`. Deliberately the
  *  three literal forms and nothing else: `2130706433`, `0x7f000001`,
  *  `[::ffff:127.0.0.1]` and `localhost.` are NOT emitted by browsers as origins
@@ -149,24 +165,32 @@ const DEFAULT_DAEMON_PORT = 4096
 const LOOPBACK_HOSTS = ["localhost", "127.0.0.1", "[::1]"] as const
 const TAURI_ORIGINS: ReadonlySet<string> = new Set(["tauri://localhost", "https://tauri.localhost"])
 
-/** Parse `QUANTA_WEB_PORT` the way `apps/web-daemon/index.ts` does, but
- *  TOTAL: an unparseable/out-of-range value falls back to the default instead
- *  of throwing, because this runs per-request on the serving path and a throw
- *  here would turn a misconfigured port into a 500 on every route. The daemon's
- *  own startup parse is the one that rejects bad input loudly. */
-const parseDaemonPort = (raw: string | undefined): number => {
-  if (raw === undefined || raw.length === 0) return DEFAULT_DAEMON_PORT
-  const n = Number(raw)
-  if (!Number.isInteger(n) || n < 0 || n > 65535) return DEFAULT_DAEMON_PORT
-  return n
+/**
+ * Normalise a threaded daemon port into "a port a browser can present in an
+ * Origin", or `null` when there is no such port.
+ *
+ * TOTAL by design: this runs on the serving path, so a nonsense value must
+ * degrade to a NARROWER allowlist (Vite + Tauri only), never to a throw (a 500
+ * on every route) and never to a wider one. `0` is refused specifically — it is
+ * the "let the OS choose" sentinel, not a reachable origin, and minting
+ * `http://localhost:0` would put six origins in the set that nothing can ever
+ * legitimately present. `index.ts`'s own startup parse is the one that rejects
+ * bad operator input loudly.
+ */
+const resolveFencePort = (port: number | null | undefined): number | null => {
+  if (port === undefined || port === null) return null
+  if (!Number.isInteger(port) || port < 1 || port > 65535) return null
+  return port
 }
 
 /** Every origin string a shipped frontend can present, for one daemon port.
  *  Built as EXACT strings (not a regex) so the match is an equality test and
- *  cannot be widened by a future pattern edit. */
-const buildAllowedOrigins = (daemonPort: number): ReadonlySet<string> => {
+ *  cannot be widened by a future pattern edit. A `null` daemon port contributes
+ *  nothing — the Vite + Tauri arms stand alone. */
+const buildAllowedOrigins = (daemonPort: number | null): ReadonlySet<string> => {
   const out = new Set<string>(TAURI_ORIGINS)
-  for (const port of [daemonPort, DEV_SERVER_PORT]) {
+  const ports = daemonPort === null ? [DEV_SERVER_PORT] : [daemonPort, DEV_SERVER_PORT]
+  for (const port of ports) {
     for (const host of LOOPBACK_HOSTS) {
       out.add(`http://${host}:${port}`)
       out.add(`https://${host}:${port}`)
@@ -180,33 +204,44 @@ const buildAllowedOrigins = (daemonPort: number): ReadonlySet<string> => {
   return out
 }
 
-/** Memoised on the RAW env value, so a test (or an operator) changing
- *  `QUANTA_WEB_PORT` is picked up, without rebuilding the set on every
- *  request. */
+/** Memoised on the RESOLVED port, so the set is rebuilt when (and only when)
+ *  the daemon port the caller threads in actually changes, rather than on every
+ *  request.
+ *
+ *  `resolveFencePort` is applied HERE and nowhere else. Normalising at the call
+ *  sites instead would be the same two-places-must-agree shape that produced the
+ *  bug this fence is being repaired for: the caller-facing predicate would mint
+ *  `http://localhost:0` while the request path did not. */
 let allowedOriginsCache:
-  | { readonly raw: string | undefined; readonly set: ReadonlySet<string> }
+  | { readonly port: number | null; readonly set: ReadonlySet<string> }
   | undefined
 
-const allowedOrigins = (): ReadonlySet<string> => {
-  const raw = process.env.QUANTA_WEB_PORT
-  if (allowedOriginsCache === undefined || allowedOriginsCache.raw !== raw) {
-    allowedOriginsCache = { raw, set: buildAllowedOrigins(parseDaemonPort(raw)) }
+const allowedOrigins = (daemonPort: number | null | undefined): ReadonlySet<string> => {
+  const port = resolveFencePort(daemonPort)
+  if (allowedOriginsCache === undefined || allowedOriginsCache.port !== port) {
+    allowedOriginsCache = { port, set: buildAllowedOrigins(port) }
   }
   return allowedOriginsCache.set
 }
 
 /** Test-only view of the resolved allowlist, so the fence's SET (not just its
  *  yes/no answers) can be asserted directly. */
-export const _allowedOriginsForTest = (): ReadonlySet<string> => allowedOrigins()
+export const _allowedOriginsForTest = (
+  daemonPort: number | null | undefined,
+): ReadonlySet<string> => allowedOrigins(daemonPort)
 
 /** `true` when this request may be served to a browser. An ABSENT `Origin`
  *  (curl, the CLI's own client, a same-origin fetch) is allowed — adding a
  *  header requirement there would be a breaking change for every non-browser
  *  caller and buys nothing, since the attack shape is a page in the user's
- *  browser. */
-export const isAllowedOrigin = (origin: string | null): boolean => {
+ *  browser. `daemonPort` is the caller-threaded port the daemon serves its own
+ *  SPA on (see the header comment); `null` ⇒ no daemon-port origin is allowed. */
+export const isAllowedOrigin = (
+  origin: string | null,
+  daemonPort: number | null | undefined,
+): boolean => {
   if (origin === null || origin === "") return true
-  return allowedOrigins().has(origin)
+  return allowedOrigins(daemonPort).has(origin)
 }
 
 /** CORS headers — the frontend dev server (`localhost:5173`) is a
@@ -215,7 +250,10 @@ export const isAllowedOrigin = (origin: string | null): boolean => {
  *  an allowed named origin is echoed (so credentialed requests would work if
  *  the frontend ever adds `credentials: "include"`), and an absent origin keeps
  *  the historical `*`. */
-export const corsHeaders = (req: Request | null): Record<string, string> => {
+export const corsHeaders = (
+  req: Request | null,
+  daemonPort: number | null | undefined,
+): Record<string, string> => {
   const origin = req?.headers.get("origin") ?? null
   const base = {
     "access-control-allow-methods": "GET, POST, OPTIONS, DELETE",
@@ -223,7 +261,7 @@ export const corsHeaders = (req: Request | null): Record<string, string> => {
     "access-control-max-age": "600",
     vary: "Origin",
   }
-  if (!isAllowedOrigin(origin)) return base
+  if (!isAllowedOrigin(origin, daemonPort)) return base
   return { ...base, "access-control-allow-origin": origin ?? "*" }
 }
 
@@ -237,15 +275,20 @@ export const crossOriginReject = (): Response =>
     headers: { "content-type": "application/json; charset=utf-8", vary: "Origin" },
   })
 
-export const handlePreflight = (req: Request): Response =>
-  new Response(null, { status: 204, headers: corsHeaders(req) })
+export const handlePreflight = (req: Request, daemonPort: number | null | undefined): Response =>
+  new Response(null, { status: 204, headers: corsHeaders(req, daemonPort) })
 
-export const jsonResponse = (status: number, body: unknown, req?: Request): Response =>
+/** JSON reply for a request that has ALREADY cleared the cross-origin fence
+ *  (the fence runs above every route in `buildFetchHandler`), so the ACAO here
+ *  is the historical `*` and carries no origin decision of its own — the one
+ *  place a decision is still needed pre-fence is `handlePreflight`, which takes
+ *  the port explicitly. */
+export const jsonResponse = (status: number, body: unknown): Response =>
   new Response(JSON.stringify(body), {
     status,
     headers: {
       "content-type": "application/json; charset=utf-8",
-      ...corsHeaders(req ?? null),
+      ...corsHeaders(null, null),
     },
   })
 

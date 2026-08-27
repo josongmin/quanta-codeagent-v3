@@ -294,6 +294,22 @@ const buildServerConfig = (args: {
   readonly controlRequestPorts: ControlRequestPorts | undefined
   readonly followerCoControl: FollowerCoControlDispatcher | undefined
 }): WebDaemonServerConfig => ({
+  // THE port resolution — done ONCE, here. Everything downstream reads
+  // `config.port` rather than re-deriving it, which matters because the two are
+  // NOT interchangeable: a programmatic `main({ port })` override never appears
+  // in `QUANTA_WEB_PORT`. The cross-origin fence in `server/http.ts` used to
+  // re-read that env itself and therefore 403'd the daemon's own SPA under an
+  // override; it now takes the port threaded from here (and, preferentially,
+  // the actually-bound port off the live `Bun.serve` handle — see
+  // `server/fetch-handler.ts` `fencePortFor`, which is what makes the
+  // EADDRINUSE `port: 0` fallback below still serve its own SPA).
+  //
+  // We deliberately do NOT mirror the resolved port back into
+  // `process.env.QUANTA_WEB_PORT`: that is a process-global write from a
+  // library-shaped boot path (tests and the CLI boot daemons in-process), it
+  // would make the fence depend on write ORDER rather than on a value, and it
+  // would still be wrong for the OS-picked-port shapes, where the bound port is
+  // not known until after the listener exists.
   port: args.overrides?.port ?? parsePort(process.env.QUANTA_WEB_PORT),
   ...args.network,
   runtimeFactory: args.runtimeFactory,

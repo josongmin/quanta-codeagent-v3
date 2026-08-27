@@ -31,17 +31,41 @@
  *   X-4  PAIRED CONTROL — a request with NO `Origin` header (curl, the CLI's
  *        own client, a same-origin fetch) is unaffected. This is the
  *        byte-identity arm: non-browser callers must not need a new header.
+ *   X-9  The daemon port the fence trusts is the THREADED one (config /
+ *        actually-bound), not `process.env.QUANTA_WEB_PORT`.
+ *
+ * ── HERMETICITY (this file reads NO ambient environment) ──────────────────
+ * An earlier revision resolved the daemon port from `process.env` inside the
+ * production fence, so these arms inherited whatever `QUANTA_WEB_PORT` the
+ * shell happened to carry. MEASURED on that revision: bare → 16 pass / 0 fail,
+ * but `QUANTA_WEB_PORT=5173` → 2 fail (X-3 + the size arm) and `=80` → 3 fail
+ * (X-3, X-7, size). The fix is structural rather than a `withPort` wrapper: the
+ * fence takes the port as an ARGUMENT, so every arm below names the port it is
+ * asserting about and nothing here can be perturbed from outside. The only
+ * block that touches the environment is X-9's e2e arm, which SETS a decoy
+ * `QUANTA_WEB_PORT` (saved/restored) precisely to prove the fence ignores it.
  */
 
-import { describe, expect, test } from "bun:test"
+import { afterAll, describe, expect, test } from "bun:test"
+import { main } from "@/apps/web-daemon"
 import { buildFetchHandler, type FetchHandlerDeps } from "@/apps/web-daemon/server/fetch-handler"
 import { _allowedOriginsForTest, isAllowedOrigin } from "@/apps/web-daemon/server/http"
+import type { WebDaemonHandle } from "@/apps/web-daemon/types"
+import { createStubRuntimeFactory } from "./fixture"
+
+/** The port `index.ts` resolves to when nothing overrides it. Named here as a
+ *  LITERAL rather than imported, so a change to the shipped default has to be
+ *  restated in this file instead of silently tracking. */
+const DEFAULT_DAEMON_PORT = 4096
 
 const calls: string[] = []
 
-const handler = () =>
+/** Build the real route table for a daemon whose resolved port is `daemonPort`.
+ *  `config.port` is the value `index.ts` threads down — the SAME field the
+ *  production fence reads. */
+const handlerFor = (daemonPort: number) =>
   buildFetchHandler({
-    config: { authToken: undefined },
+    config: { authToken: undefined, port: daemonPort },
     registry: { size: () => 0 },
     startedAt: 0,
     authRoutes: {
@@ -68,13 +92,20 @@ const call = async (
   method: string,
   path: string,
   origin?: string,
+  opts: { readonly daemonPort?: number; readonly boundPort?: number } = {},
 ): Promise<{ status: number; acao: string | null }> => {
-  const res = await handler()(
-    new Request(`http://127.0.0.1:4096${path}`, {
+  const daemonPort = opts.daemonPort ?? DEFAULT_DAEMON_PORT
+  // The second argument is the live `Bun.serve` handle. A bare `{}` is the
+  // "handle carries no port" case (⇒ the fence falls back to `config.port`);
+  // `boundPort` is the OS-picked / EADDRINUSE-fallback case, where the handle
+  // knows a port the config never did.
+  const srv = opts.boundPort === undefined ? {} : { port: opts.boundPort }
+  const res = await handlerFor(daemonPort)(
+    new Request(`http://127.0.0.1:${daemonPort}${path}`, {
       method,
       ...(origin === undefined ? {} : { headers: { origin } }),
     }),
-    {} as never,
+    srv as never,
   )
   // The route table's fall-through arm is `undefined`; every path exercised here
   // must produce a real Response, so an absent one is a failed assertion rather
@@ -121,8 +152,8 @@ describe("X — cross-origin fence", () => {
     const ALLOWED = [
       "http://localhost:5173",
       "http://127.0.0.1:5173",
-      "http://localhost:4096",
-      "http://[::1]:4096",
+      `http://localhost:${DEFAULT_DAEMON_PORT}`,
+      `http://[::1]:${DEFAULT_DAEMON_PORT}`,
       "tauri://localhost",
     ]
     for (const origin of ALLOWED) {
@@ -182,8 +213,8 @@ describe("X-5 the WS upgrade refuses a foreign origin", () => {
     origin?: string,
   ): Promise<{ status: number | null; acao: string | null; reached: boolean }> => {
     upgradeCalls = 0
-    const res = await handler()(
-      new Request(`http://127.0.0.1:4096${path}`, {
+    const res = await handlerFor(DEFAULT_DAEMON_PORT)(
+      new Request(`http://127.0.0.1:${DEFAULT_DAEMON_PORT}${path}`, {
         method: "GET",
         headers: { upgrade: "websocket", ...(origin === undefined ? {} : { origin }) },
       }),
@@ -272,7 +303,7 @@ describe("X-6 origin PARSING has no spoofing hole", () => {
   ]
 
   test("every spoofing shape is refused by the real export", () => {
-    const allowed = SPOOFS.filter((o) => isAllowedOrigin(o))
+    const allowed = SPOOFS.filter((o) => isAllowedOrigin(o, DEFAULT_DAEMON_PORT))
     expect(allowed).toEqual([])
   })
 })
@@ -281,15 +312,18 @@ describe("X-6 origin PARSING has no spoofing hole", () => {
  * X-7 — HELLGATE: the fence does not isolate the daemon from OTHER LOCAL
  * SERVERS.
  *
- * The docstring above `LOOPBACK_ORIGIN_RE` claims the allowlist is "exactly the
- * set the shipped frontends are served from". It is not: it is EVERY loopback
- * port. The daemon is tokenless by default, so a project's own `localhost:3000`
- * dev server — carrying, say, one compromised npm dependency in its browser
- * bundle — is an allowed origin and can read the full transcript and POST
- * /config. That is squarely "a page in the user's browser", the stated threat.
+ * The docstring above `LOOPBACK_ORIGIN_RE` claimed the allowlist was "exactly
+ * the set the shipped frontends are served from". It was not: it was EVERY
+ * loopback port. The daemon is tokenless by default, so a project's own
+ * `localhost:3000` dev server — carrying, say, one compromised npm dependency in
+ * its browser bundle — was an allowed origin and could read the full transcript
+ * and POST /config. That is squarely "a page in the user's browser", the stated
+ * threat.
  *
  * The allowlist must be the daemon's OWN port + the pinned Vite dev port +
- * Tauri, not every port.
+ * Tauri, not every port. Asserted here against a daemon on the DEFAULT port, so
+ * the portless `http://localhost` forms are foreign too (a daemon on :80 is a
+ * different question — see X-8's portless arm).
  */
 describe("X-7 HELLGATE — a foreign LOCAL origin is not an allowed origin", () => {
   const FOREIGN_LOCAL = [
@@ -303,7 +337,7 @@ describe("X-7 HELLGATE — a foreign LOCAL origin is not an allowed origin", () 
   ]
 
   test("a different local server's origin is refused by the export", () => {
-    const allowed = FOREIGN_LOCAL.filter((o) => isAllowedOrigin(o))
+    const allowed = FOREIGN_LOCAL.filter((o) => isAllowedOrigin(o, DEFAULT_DAEMON_PORT))
     expect(allowed).toEqual([])
   })
 
@@ -327,74 +361,287 @@ describe("X-7 HELLGATE — a foreign LOCAL origin is not an allowed origin", () 
  *     (`apps/tauri-shell/src/daemon.rs`), breaks in production while every
  *     default-port test stays green.
  * So this block pins all three shipped frontends AND pins that the daemon arm
- * TRACKS the env rather than a literal.
+ * TRACKS the threaded port rather than a literal.
  */
 describe("X-8 PAIRED CONTROL — the three shipped frontends still pass", () => {
-  const withPort = async <T>(value: string | undefined, fn: () => Promise<T>): Promise<T> => {
-    const prev = process.env.QUANTA_WEB_PORT
-    if (value === undefined) delete process.env.QUANTA_WEB_PORT
-    else process.env.QUANTA_WEB_PORT = value
-    try {
-      return await fn()
-    } finally {
-      if (prev === undefined) delete process.env.QUANTA_WEB_PORT
-      else process.env.QUANTA_WEB_PORT = prev
-    }
-  }
-
   test("Vite dev (5173), the daemon's default port (4096) and Tauri all pass", async () => {
-    await withPort(undefined, async () => {
-      const SHIPPED = [
-        "http://localhost:5173",
-        "http://127.0.0.1:5173",
+    const SHIPPED = [
+      "http://localhost:5173",
+      "http://127.0.0.1:5173",
+      `http://localhost:${DEFAULT_DAEMON_PORT}`,
+      `http://127.0.0.1:${DEFAULT_DAEMON_PORT}`,
+      `http://[::1]:${DEFAULT_DAEMON_PORT}`,
+      "tauri://localhost",
+      "https://tauri.localhost",
+    ]
+    const refused = SHIPPED.filter((o) => !isAllowedOrigin(o, DEFAULT_DAEMON_PORT))
+    expect(refused).toEqual([])
+    for (const origin of SHIPPED) {
+      const res = await call("GET", "/health", origin)
+      expect({ origin, status: res.status }).toEqual({ origin, status: 200 })
+    }
+  })
+
+  test("the daemon arm TRACKS the resolved port — a hardcoded 4096 fails here", () => {
+    // The Tauri-shell shape: a random free port handed to the sidecar.
+    expect(isAllowedOrigin("http://localhost:39117", 39117)).toBe(true)
+    expect(isAllowedOrigin("http://127.0.0.1:39117", 39117)).toBe(true)
+    // ...and the OLD default is no longer special once the daemon moved.
+    expect(isAllowedOrigin("http://localhost:4096", 39117)).toBe(false)
+    // The dev port is not port-dependent — it stays allowed.
+    expect(isAllowedOrigin("http://localhost:5173", 39117)).toBe(true)
+  })
+
+  test("an unusable port degrades to a NARROWER set, it does not throw or open up", () => {
+    // `resolveFencePort` is total. Whatever nonsense arrives — including the
+    // `port: 0` sentinel, which is "let the OS choose" and not an origin — the
+    // daemon arm simply drops out. Vite + Tauri survive; nothing widens.
+    for (const bad of [0, -1, 70000, Number.NaN, 4096.5]) {
+      expect({ bad, allowed: isAllowedOrigin("http://localhost:3000", bad) }).toEqual({
+        bad,
+        allowed: false,
+      })
+      expect({ bad, allowed: isAllowedOrigin("http://localhost:5173", bad) }).toEqual({
+        bad,
+        allowed: true,
+      })
+      expect({ bad, allowed: isAllowedOrigin("tauri://localhost", bad) }).toEqual({
+        bad,
+        allowed: true,
+      })
+    }
+    // ...and specifically: a port-0 daemon mints NO `:0` origins. This used to be
+    // a docstring claim the code did not implement (`parseDaemonPort` rejected
+    // only `n < 0`, so `:0` produced six allowed origins). Not browser-reachable,
+    // but a false statement in a list that advertises itself as measured.
+    for (const origin of ["http://localhost:0", "http://127.0.0.1:0", "http://[::1]:0"]) {
+      expect({ origin, allowed: isAllowedOrigin(origin, 0) }).toEqual({ origin, allowed: false })
+    }
+  })
+
+  test("a daemon on :80 is allowed under the PORTLESS origin a browser emits", () => {
+    expect(isAllowedOrigin("http://localhost", 80)).toBe(true)
+    expect(isAllowedOrigin("http://127.0.0.1", 80)).toBe(true)
+    // https is a DIFFERENT origin and port 80 says nothing about it.
+    expect(isAllowedOrigin("https://localhost", 80)).toBe(false)
+  })
+
+  test("a daemon on :443 is allowed under its portless https origin, and not http", () => {
+    expect(isAllowedOrigin("https://localhost", 443)).toBe(true)
+    expect(isAllowedOrigin("https://127.0.0.1", 443)).toBe(true)
+    expect(isAllowedOrigin("http://localhost", 443)).toBe(false)
+  })
+
+  /**
+   * The SET, not just its yes/no answers.
+   *
+   * Enumerated as LITERALS rather than recomputed from the same loop the
+   * production code uses — a mirror of `buildAllowedOrigins` would be green
+   * against any widening it shared. Previously this arm asserted `size === 14`,
+   * which is (a) not the invariant and (b) only true when the daemon port is
+   * outside {5173, 80, 443}: at 5173 the two arms collapse to 8, at 80/443 the
+   * portless spellings make 17. All three shapes are now stated outright.
+   */
+  const sorted = (o: Iterable<string>): string[] => [...o].sort()
+
+  test("the resolved allowlist is a CLOSED, exactly-enumerated set — default port", () => {
+    expect(sorted(_allowedOriginsForTest(DEFAULT_DAEMON_PORT))).toEqual(
+      sorted([
         "http://localhost:4096",
         "http://127.0.0.1:4096",
         "http://[::1]:4096",
+        "https://localhost:4096",
+        "https://127.0.0.1:4096",
+        "https://[::1]:4096",
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+        "http://[::1]:5173",
+        "https://localhost:5173",
+        "https://127.0.0.1:5173",
+        "https://[::1]:5173",
         "tauri://localhost",
         "https://tauri.localhost",
-      ]
-      const refused = SHIPPED.filter((o) => !isAllowedOrigin(o))
-      expect(refused).toEqual([])
-      for (const origin of SHIPPED) {
-        const res = await call("GET", "/health", origin)
-        expect({ origin, status: res.status }).toEqual({ origin, status: 200 })
+      ]),
+    )
+  })
+
+  test("...a daemon ON the Vite port collapses to ONE loopback arm, not a wider set", () => {
+    expect(sorted(_allowedOriginsForTest(5173))).toEqual(
+      sorted([
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+        "http://[::1]:5173",
+        "https://localhost:5173",
+        "https://127.0.0.1:5173",
+        "https://[::1]:5173",
+        "tauri://localhost",
+        "https://tauri.localhost",
+      ]),
+    )
+  })
+
+  test("...a daemon on :80 adds exactly the three portless http spellings", () => {
+    expect(sorted(_allowedOriginsForTest(80))).toEqual(
+      sorted([
+        "http://localhost:80",
+        "http://127.0.0.1:80",
+        "http://[::1]:80",
+        "https://localhost:80",
+        "https://127.0.0.1:80",
+        "https://[::1]:80",
+        "http://localhost",
+        "http://127.0.0.1",
+        "http://[::1]",
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+        "http://[::1]:5173",
+        "https://localhost:5173",
+        "https://127.0.0.1:5173",
+        "https://[::1]:5173",
+        "tauri://localhost",
+        "https://tauri.localhost",
+      ]),
+    )
+  })
+
+  test("...and an unusable port leaves ONLY Vite + Tauri — never everything", () => {
+    expect(sorted(_allowedOriginsForTest(null))).toEqual(
+      sorted([
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+        "http://[::1]:5173",
+        "https://localhost:5173",
+        "https://127.0.0.1:5173",
+        "https://[::1]:5173",
+        "tauri://localhost",
+        "https://tauri.localhost",
+      ]),
+    )
+  })
+})
+
+/**
+ * X-9 — HELLGATE: the fence tracked the WRONG PORT SOURCE, so a daemon could
+ * fence out its OWN SPA.
+ *
+ * MEASURED before the fix, with `QUANTA_WEB_PORT` UNSET and the daemon booted as
+ * `main({ port: 9000 })` — the programmatic-override shape used by the CLI's
+ * embedded daemon, every `main({ port: 0 })` test, and `index.ts`'s own
+ * EADDRINUSE fallback:
+ *
+ *   isAllowedOrigin("http://localhost:9000")  -> false
+ *   isAllowedOrigin("http://127.0.0.1:9000")  -> false
+ *   isAllowedOrigin("http://localhost:4096")  -> true    <-- the WRONG daemon
+ *
+ * `index.ts` resolved `overrides.port ?? QUANTA_WEB_PORT ?? 4096`; the fence
+ * independently re-read `QUANTA_WEB_PORT` only. So the daemon served its SPA on
+ * 9000, the browser put `Origin: http://localhost:9000` on every WS upgrade and
+ * every `POST /config`, and the daemon's own fence answered 403.
+ *
+ * The two arms below are the two halves of the fix — the threaded config port,
+ * and the actually-BOUND port when they differ — plus a live-daemon arm that
+ * proves it through the real `Bun.serve` handler with a DECOY env set.
+ */
+describe("X-9 HELLGATE — the fence follows the daemon's real port, not the env", () => {
+  test("the `main({ port })` override shape: the daemon's own SPA is allowed", async () => {
+    const OVERRIDE = 9000
+    expect(isAllowedOrigin(`http://localhost:${OVERRIDE}`, OVERRIDE)).toBe(true)
+    expect(isAllowedOrigin(`http://127.0.0.1:${OVERRIDE}`, OVERRIDE)).toBe(true)
+    expect(isAllowedOrigin(`http://[::1]:${OVERRIDE}`, OVERRIDE)).toBe(true)
+    // ANTI-LAZY: "allow the default too, just in case" would be a second daemon
+    // on the machine that is not this one.
+    expect(isAllowedOrigin(`http://localhost:${DEFAULT_DAEMON_PORT}`, OVERRIDE)).toBe(false)
+    // End-to-end through the real handler, not just the predicate.
+    const own = await call("GET", "/health", `http://localhost:${OVERRIDE}`, {
+      daemonPort: OVERRIDE,
+    })
+    expect(own.status).toBe(200)
+    const foreign = await call("GET", "/health", `http://localhost:${DEFAULT_DAEMON_PORT}`, {
+      daemonPort: OVERRIDE,
+    })
+    expect(foreign.status).toBe(403)
+  })
+
+  test("the OS-picked shape: the BOUND port wins over the requested one", async () => {
+    // `main` retries with `port: 0` when the requested port is in use, and every
+    // `main({ port: 0 })` caller lands here too: `config.port` is 0 (unusable)
+    // while the SPA is served on a port only the live handle knows.
+    const BOUND = 51234
+    const own = await call("GET", "/health", `http://localhost:${BOUND}`, {
+      daemonPort: 0,
+      boundPort: BOUND,
+    })
+    expect(own.status).toBe(200)
+    // ANTI-LAZY (allow-everything): another local server is still refused on the
+    // very same request shape.
+    const foreign = await call("GET", "/health", "http://localhost:3000", {
+      daemonPort: 0,
+      boundPort: BOUND,
+    })
+    expect(foreign.status).toBe(403)
+    // ANTI-LAZY (refuse-everything): Vite and Tauri still pass here.
+    for (const origin of ["http://localhost:5173", "tauri://localhost"]) {
+      const res = await call("GET", "/health", origin, { daemonPort: 0, boundPort: BOUND })
+      expect({ origin, status: res.status }).toEqual({ origin, status: 200 })
+    }
+  })
+
+  /**
+   * The live arm. Boots the REAL daemon through `main()` on an explicit port
+   * override while `QUANTA_WEB_PORT` carries a DECOY value, then drives it over
+   * a real socket. This is the only environment-touching block in the file, and
+   * the environment is the thing under test: the decoy's origin must be REFUSED
+   * and the daemon's own must be ALLOWED, which is exactly backwards from the
+   * measured pre-fix behaviour above.
+   */
+  describe("live daemon, decoy QUANTA_WEB_PORT", () => {
+    const booted: WebDaemonHandle[] = []
+    afterAll(async () => {
+      for (const h of booted) await h.stop()
+    })
+
+    /** Ask the OS for a port nobody is on, then give it back. */
+    const freePort = async (): Promise<number> => {
+      const probe = Bun.serve({ port: 0, hostname: "127.0.0.1", fetch: () => new Response("") })
+      const port = probe.port
+      await probe.stop(true)
+      // A loopback TCP listener always has one; an absent port here would mean
+      // the probe never bound, and picking a fallback would silently test a port
+      // we do not own.
+      if (port === undefined) throw new Error("probe listener reported no port")
+      return port
+    }
+
+    const statusFor = async (port: number, origin: string): Promise<number> => {
+      const res = await fetch(`http://127.0.0.1:${port}/health`, { headers: { origin } })
+      return res.status
+    }
+
+    test("its own SPA origin is allowed; the env's port is refused", async () => {
+      const port = await freePort()
+      const DECOY = port === 4096 ? 4097 : 4096
+      const prev = process.env.QUANTA_WEB_PORT
+      process.env.QUANTA_WEB_PORT = String(DECOY)
+      try {
+        const { factory } = createStubRuntimeFactory()
+        const handle = await main({ port, bind: "127.0.0.1", runtimeFactory: factory })
+        booted.push(handle)
+        // The override, not the env, is what got bound.
+        expect(handle.port).toBe(port)
+        // THE HELLGATE: the browser served this daemon's SPA sends this Origin.
+        expect(await statusFor(handle.port, `http://localhost:${handle.port}`)).toBe(200)
+        expect(await statusFor(handle.port, `http://127.0.0.1:${handle.port}`)).toBe(200)
+        // The env's port is some OTHER server; it must not be trusted.
+        expect(await statusFor(handle.port, `http://localhost:${DECOY}`)).toBe(403)
+        // PAIRED CONTROLS — not refuse-everything, not allow-everything.
+        expect(await statusFor(handle.port, "http://localhost:5173")).toBe(200)
+        expect(await statusFor(handle.port, "tauri://localhost")).toBe(200)
+        expect(await statusFor(handle.port, HOSTILE)).toBe(403)
+        expect(await statusFor(handle.port, "http://localhost:3000")).toBe(403)
+      } finally {
+        if (prev === undefined) delete process.env.QUANTA_WEB_PORT
+        else process.env.QUANTA_WEB_PORT = prev
       }
     })
-  })
-
-  test("the daemon arm TRACKS QUANTA_WEB_PORT — a hardcoded 4096 fails here", async () => {
-    await withPort("39117", async () => {
-      // The Tauri-shell shape: a random free port handed to the sidecar.
-      expect(isAllowedOrigin("http://localhost:39117")).toBe(true)
-      expect(isAllowedOrigin("http://127.0.0.1:39117")).toBe(true)
-      // ...and the OLD default is no longer special once the daemon moved.
-      expect(isAllowedOrigin("http://localhost:4096")).toBe(false)
-      // The dev port is not port-dependent — it stays allowed.
-      expect(isAllowedOrigin("http://localhost:5173")).toBe(true)
-    })
-  })
-
-  test("an unparseable QUANTA_WEB_PORT degrades to the default, it does not throw or open up", async () => {
-    await withPort("not-a-port", async () => {
-      expect(isAllowedOrigin("http://localhost:4096")).toBe(true)
-      expect(isAllowedOrigin("http://localhost:3000")).toBe(false)
-    })
-  })
-
-  test("a daemon on :80 is allowed under the PORTLESS origin a browser emits", async () => {
-    await withPort("80", async () => {
-      expect(isAllowedOrigin("http://localhost")).toBe(true)
-      expect(isAllowedOrigin("http://127.0.0.1")).toBe(true)
-      // https is a DIFFERENT origin and port 80 says nothing about it.
-      expect(isAllowedOrigin("https://localhost")).toBe(false)
-    })
-  })
-
-  test("the resolved allowlist is a CLOSED set, not a pattern", () => {
-    const set = _allowedOriginsForTest()
-    // 2 ports x 3 hosts x 2 schemes + 2 tauri = 14, with no port-80/443 extras
-    // at the default port. Pinning the SIZE is what makes a future widening
-    // (a regex creeping back in) visible rather than silent.
-    expect(set.size).toBe(14)
   })
 })
