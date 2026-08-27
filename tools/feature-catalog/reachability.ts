@@ -25,6 +25,8 @@
 import { readdir, readFile, stat } from "node:fs/promises"
 import { dirname, join, relative, resolve } from "node:path"
 
+import { parseModuleExports } from "../shared/ts-exports"
+
 const REPO_ROOT = resolve(import.meta.dir, "..", "..")
 const SRC = join(REPO_ROOT, "src")
 
@@ -316,13 +318,35 @@ const SIDE_EFFECT_KEYWORDS = new Set([
   "yield",
 ])
 
+/**
+ * Parse the symbol-level facts one module contributes to the graph.
+ *
+ * EXPORTS come from `tools/shared/ts-exports.ts` — the shared AST reader — and
+ * are computed over the RAW source, because a parser handles comments, string
+ * literals and regex literals correctly. The regex that used to live here did
+ * not: it hallucinated `resolveBenchRunConfig` out of the regex literal
+ * `/^export const resolveBenchRunConfig\b/` in
+ * `src/apps/bench/promax/campaign/owner-audit.ts`, it could not see
+ * `export function*` (no `\s` after `function`), and its block-comment strip
+ * ran before its line-comment strip, so the `//` comment at
+ * `src/apps/cli/internal.ts:718` containing `@/runner/assemble/*` opened a
+ * 576-character phantom comment that hid the very next `export type { Tooling }`.
+ *
+ * IMPORTS and the side-effect probe are still text-level. The `ownExports` /
+ * `reexports` split is preserved exactly — it is load-bearing for callers.
+ */
 export const parseSymbols = (raw: string): ParsedSymbols => {
   const s = stripComments(raw)
-  const ownExports = new Set<string>()
-  const reexports: Array<{ exposed: string; srcName: string; spec: string }> = []
-  const starSpecs: string[] = []
+  const exported = parseModuleExports(raw)
+  const ownExports = new Set<string>(exported.ownExports)
+  const reexports: Array<{ exposed: string; srcName: string; spec: string }> = [
+    ...exported.reexports,
+  ]
+  const starSpecs: string[] = [...exported.starSpecs]
   const namedImports: Array<{ name: string; spec: string }> = []
-  const wildcardSpecs: string[] = []
+  // `export * as ns from "spec"` exposes `ns` (already in ownExports) AND uses
+  // the whole target module — same as it always did.
+  const wildcardSpecs: string[] = [...exported.namespaceReexportSpecs]
   const exec = (re: RegExp, fn: (m: RegExpExecArray) => void): void => {
     re.lastIndex = 0
     let m = re.exec(s)
@@ -331,33 +355,6 @@ export const parseSymbols = (raw: string): ParsedSymbols => {
       m = re.exec(s)
     }
   }
-  // own declared exports
-  exec(
-    /export\s+(?:async\s+)?(?:const|let|var|function|class|abstract\s+class|type|interface|enum)\s+([A-Za-z0-9_$]+)/g,
-    (m) => ownExports.add(m[1] as string),
-  )
-  if (/export\s+default\b/.test(s)) ownExports.add("default")
-  // export * [as ns] from
-  exec(/export\s*\*\s*(?:as\s+([A-Za-z0-9_$]+)\s+)?from\s*["']([^"']+)["']/g, (m) => {
-    if (m[1]) {
-      ownExports.add(m[1])
-      wildcardSpecs.push(m[2] as string)
-    } else starSpecs.push(m[2] as string)
-  })
-  // export [type] { a, b as c } [from "spec"]  (incl. type-only re-export block)
-  exec(/export\s*(?:type\s+)?\{([^}]*)\}\s*(?:from\s*["']([^"']+)["'])?/g, (m) => {
-    const spec = m[2]
-    for (const piece of (m[1] as string).split(",")) {
-      const t = piece.trim()
-      if (!t || t === "type") continue
-      const mm = t.replace(/^type\s+/, "").split(/\s+as\s+/)
-      const srcName = (mm[0] as string).trim()
-      const exposed = (mm[1] ?? mm[0] ?? "").trim()
-      if (!srcName) continue
-      if (spec) reexports.push({ exposed, srcName, spec })
-      else ownExports.add(exposed) // locally-defined name exported here
-    }
-  })
   // import { a, b as c } from "spec"  (record ORIGINAL name)
   exec(/import\s*(?:type\s+)?\{([^}]*)\}\s*from\s*["']([^"']+)["']/g, (m) => {
     const spec = m[2] as string

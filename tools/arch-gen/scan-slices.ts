@@ -9,10 +9,19 @@
  *   - Matching `tests/unit/<slice>-*hellgate.test.ts` (or close variants)
  *     becomes testFile.
  *
- * Pure: only depends on `node:fs/promises` + `node:path`. No `@/*`.
+ * Plane-clean: `node:fs/promises` + `node:path` + the shared export reader. No
+ * `@/*`.
+ *
+ * Export extraction is NOT done here — it lives in `tools/shared/ts-exports.ts`
+ * so there is one answer to "what does this file export". The regex that used
+ * to live here stripped block comments first, so the LINE comment at
+ * `src/tool/index.ts:383` containing `resources/*` opened a phantom block that
+ * ate 12,016 characters and 237 export names before the regex ever ran.
  */
 import { readdir, readFile, stat } from "node:fs/promises"
 import path from "node:path"
+
+import { extractExportedSymbols } from "../shared/ts-exports"
 
 export interface SliceSummary {
   readonly slicePath: string
@@ -68,47 +77,14 @@ const joinSummary = (lines: ReadonlyArray<string>): string => {
   return joined.length > 240 ? `${joined.slice(0, 237)}...` : joined
 }
 
-const EXPORT_NAMED_RE = /^export\s+(?:type\s+)?\{([^}]+)\}(?:\s+from\s+["'][^"']+["'])?/gm
-const EXPORT_SINGLE_RE =
-  /^export\s+(?:declare\s+)?(?:async\s+)?(?:const|let|var|function|class|type|interface|enum|namespace)\s+([A-Za-z_$][\w$]*)/gm
-const EXPORT_STAR_AS_RE = /^export\s+\*\s+as\s+([A-Za-z_$][\w$]*)\s+from/gm
-
 /**
- * Parse top-level exports from a barrel `index.ts`.
+ * Top-level exports of a barrel `index.ts`, sorted.
  *
- * Catches:
- *   `export { a, b as c } from "./..."`
- *   `export type { Foo, Bar } from "./..."`
- *   `export const FOO = ...`
- *   `export function bar() ...`
- *   `export * as ns from "./..."`
+ * Delegates to the shared AST reader — see `tools/shared/ts-exports.ts` for why
+ * this must not be a regex.
  */
-export const extractExports = (source: string): ReadonlyArray<string> => {
-  const out = new Set<string>()
-  // Strip block comments to avoid false positives.
-  const stripped = source.replace(/\/\*[\s\S]*?\*\//g, "")
-
-  for (const m of stripped.matchAll(EXPORT_NAMED_RE)) {
-    const inner = m[1]
-    if (!inner) continue
-    for (const part of inner.split(",")) {
-      const name = part
-        .trim()
-        .replace(/^type\s+/, "")
-        .split(/\s+as\s+/)
-        .pop()
-        ?.trim()
-      if (name && /^[A-Za-z_$][\w$]*$/.test(name)) out.add(name)
-    }
-  }
-  for (const m of stripped.matchAll(EXPORT_SINGLE_RE)) {
-    if (m[1]) out.add(m[1])
-  }
-  for (const m of stripped.matchAll(EXPORT_STAR_AS_RE)) {
-    if (m[1]) out.add(m[1])
-  }
-  return [...out].sort((a, b) => a.localeCompare(b))
-}
+export const extractExports = (source: string): ReadonlyArray<string> =>
+  [...extractExportedSymbols(source)].sort((a, b) => a.localeCompare(b))
 
 /** Extract ADR-NNNN references from a doc-comment / index.ts header. */
 export const extractAdrReferences = (source: string): ReadonlyArray<string> => {

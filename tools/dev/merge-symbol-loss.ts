@@ -13,7 +13,8 @@
  * and CI has not run since billing was cut, so the only thing that actually
  * executes on this repo is `bun test`.
  *
- * THE SIGNAL (settled by measurement — do not redesign):
+ * THE SIGNAL (settled by measurement; the SHAPE is settled, the NUMBERS are
+ * a transcript that must be re-run rather than trusted):
  *
  *   Symbol-level, SCOPED TO FILES THE MERGE TOUCHED. For merge M with parents
  *   P1..Pn, for each `.ts` (non-`.test.ts`, non-`.d.ts`) path in
@@ -22,30 +23,43 @@
  *   parent's set and absent from the merge's. A file the merge deleted
  *   contributes ALL of its parent exports.
  *
- * That shape separates the real case from controls (measured on this history):
+ * That shape separates the real case from controls. RE-MEASURE, do not trust
+ * this table — it is a transcript, and history moves under it:
  *
- *   9b21d2fd2  lost=56   merge: reconcile parallel goal and verification lanes
- *   79857f28b  lost=0    Merge branch 'codex/true100-message-ids'
- *   615b9b586  lost=1    Merge branch 'codex/feeder-checkpoint-capture'
- *   528f01ae5  lost=0    Merge branch 'codex/rfc-def-skill-startup-render'
- *   fc199ad3f  lost=0    Merge branch 'codex/rfc12-1-plan-dag'
+ *   $ bun run tools/dev/merge-symbol-loss.ts \
+ *       9b21d2fd2 79857f28b 615b9b586 528f01ae5 fc199ad3f \
+ *     | grep -E '^[0-9a-f]{9}|^scanned'
+ *   9b21d2fd2  lost=74  excused=0  files=91  merge: reconcile parallel goal and verification lanes
+ *   79857f28b  lost=0  excused=0  files=24  Merge branch 'codex/true100-message-ids'
+ *   615b9b586  lost=0  excused=0  files=17  Merge branch 'codex/feeder-checkpoint-capture'
+ *   528f01ae5  lost=0  excused=0  files=44  Merge branch 'codex/rfc-def-skill-startup-render' into codex/def-integration
+ *   fc199ad3f  lost=0  excused=0  files=9  Merge branch 'codex/rfc12-1-plan-dag'
+ *   scanned 5 merge(s), 185 (parent,file) pair(s); 1 with unexcused symbol loss
  *
  * The UNSCOPED variant (diffing all of `src` between parent and merge) was
  * measured at 29–64 "losses" on every control merge — pure noise. It is not
  * implemented here on purpose.
  *
  * ESCAPE HATCH: a merge that MEANS to drop something can say so. If the commit
- * message names the lost path (full path or basename) or the lost symbol, that
- * loss is excused. Deliberate removal stays possible; SILENT removal does not.
+ * message names the lost path (full path, or a basename that identifies exactly
+ * one losing file) or the lost symbol, that loss is excused. Deliberate removal
+ * stays possible; SILENT removal does not. A basename SHARED by several losing
+ * files does not excuse any of them — otherwise "reconciled the two index.ts
+ * barrels" waves through every dropped export in every `index.ts` at once, and
+ * a confession about one file silences all of them.
  *
- * Export extraction uses the TypeScript compiler API (`typescript` is a
- * devDependency and is already imported by `tests/unit/_arch/slice-boundary-scanner.ts`),
- * so this is an AST fact, not a regex guess.
+ * Export extraction lives in `tools/shared/ts-exports.ts` — the one AST reader
+ * this repo has for "what does this file export" — so this is an AST fact, not
+ * a regex guess, and it cannot drift away from the other consumers of that
+ * question.
  */
 
 import { spawnSync } from "node:child_process"
 import { basename, join } from "node:path"
-import ts from "typescript"
+
+import { extractExportedSymbols } from "../shared/ts-exports"
+
+export { extractExportedSymbols } from "../shared/ts-exports"
 
 export const REPO_ROOT = join(import.meta.dir, "../..")
 
@@ -150,10 +164,15 @@ export const createGitReadPort = (cwd: string = REPO_ROOT): GitReadPort => ({
   parents: (sha) =>
     git(["rev-list", "--parents", "-n", "1", sha], cwd).trim().split(/\s+/).slice(1),
   message: (sha) => git(["log", "-1", "--format=%B", sha], cwd),
+  // `-z` is NOT a micro-optimisation. `core.quotePath` defaults ON, so plain
+  // `git diff --name-only` emits `"src/caf\303\251.ts"` — quotes, octal escapes
+  // and all — for any non-ASCII path. That spec then MISSES on `cat-file
+  // --batch` for BOTH the parent and the merge, so the file reads as zero
+  // exports on each side and every loss in it is silently invisible. `-z` emits
+  // raw NUL-separated bytes, which cat-file resolves.
   changedFiles: (from, to) =>
-    git(["diff", "--name-only", from, to], cwd)
-      .split("\n")
-      .map((l) => l.trim())
+    git(["diff", "-z", "--name-only", from, to], cwd)
+      .split("\0")
       .filter((l) => l.length > 0),
   readFiles: (sha, paths) => catFileBatch(cwd, sha, paths),
   listMerges: (rev, maxMerges) =>
@@ -171,91 +190,6 @@ export const createGitReadPort = (cwd: string = REPO_ROOT): GitReadPort => ({
 export const isScannedPath = (path: string): boolean =>
   path.endsWith(".ts") && !path.endsWith(".test.ts") && !path.endsWith(".d.ts")
 
-const collectBindingNames = (name: ts.BindingName, out: Set<string>): void => {
-  if (ts.isIdentifier(name)) {
-    out.add(name.text)
-    return
-  }
-  for (const element of name.elements) {
-    if (ts.isBindingElement(element)) collectBindingNames(element.name, out)
-  }
-}
-
-const isExported = (node: ts.Node): boolean =>
-  ts.canHaveModifiers(node) &&
-  (ts.getModifiers(node) ?? []).some((m) => m.kind === ts.SyntaxKind.ExportKeyword)
-
-const NAMED_DECLARATION_GUARDS = [
-  ts.isFunctionDeclaration,
-  ts.isClassDeclaration,
-  ts.isInterfaceDeclaration,
-  ts.isTypeAliasDeclaration,
-  ts.isEnumDeclaration,
-  ts.isModuleDeclaration,
-] as const
-
-/** `export { a, b as c }`, `export * as ns from`, `export default`. */
-const collectFromExportClause = (statement: ts.ExportDeclaration, out: Set<string>): void => {
-  const clause = statement.exportClause
-  if (clause === undefined) return // `export * from "..."` — no name to compare
-  if (ts.isNamespaceExport(clause)) {
-    out.add(clause.name.text)
-    return
-  }
-  for (const element of clause.elements) out.add(element.name.text)
-}
-
-/** `export function f`, `export class C`, `export type T`, … */
-const collectFromNamedDeclaration = (statement: ts.Statement, out: Set<string>): void => {
-  if (!NAMED_DECLARATION_GUARDS.some((is) => is(statement))) return
-  const name = (statement as ts.DeclarationStatement).name
-  if (name !== undefined && (ts.isIdentifier(name) || ts.isStringLiteral(name))) {
-    out.add(name.text)
-    return
-  }
-  const modifiers = ts.canHaveModifiers(statement) ? (ts.getModifiers(statement) ?? []) : []
-  if (modifiers.some((m) => m.kind === ts.SyntaxKind.DefaultKeyword)) out.add("default")
-}
-
-const collectFromStatement = (statement: ts.Statement, out: Set<string>): void => {
-  if (ts.isExportAssignment(statement)) {
-    out.add("default")
-    return
-  }
-  if (ts.isExportDeclaration(statement)) {
-    collectFromExportClause(statement, out)
-    return
-  }
-  if (!isExported(statement)) return
-  if (ts.isVariableStatement(statement)) {
-    for (const decl of statement.declarationList.declarations) collectBindingNames(decl.name, out)
-    return
-  }
-  collectFromNamedDeclaration(statement, out)
-}
-
-/**
- * Exported symbol NAMES declared by a TypeScript source. Names only — this
- * deliberately does not compare signatures or types; the settled signal is
- * presence/absence of a name.
- *
- * `export * from "..."` contributes nothing (it has no name to compare), so a
- * barrel that swaps a star re-export is invisible here. That is a known and
- * accepted blind spot of the name-level signal.
- */
-export const extractExportedSymbols = (source: string, fileName = "input.ts"): Set<string> => {
-  const names = new Set<string>()
-  const sourceFile = ts.createSourceFile(
-    fileName,
-    source,
-    ts.ScriptTarget.Latest,
-    /* setParentNodes */ false,
-    ts.ScriptKind.TS,
-  )
-  for (const statement of sourceFile.statements) collectFromStatement(statement, names)
-  return names
-}
-
 // ---------------------------------------------------------------------------
 // Escape hatch
 // ---------------------------------------------------------------------------
@@ -266,16 +200,62 @@ const escapeForRegex = (raw: string): string => raw.replace(/[.*+?^${}()|[\]\\]/
 export const messageNamesSymbol = (message: string, symbol: string): boolean =>
   new RegExp(`(^|[^A-Za-z0-9_$])${escapeForRegex(symbol)}([^A-Za-z0-9_$]|$)`).test(message)
 
-/** Does `message` name this file, by full repo-relative path or by basename? */
-export const messageNamesPath = (message: string, path: string): boolean =>
-  message.includes(path) || message.includes(basename(path))
+/**
+ * Characters that can sit INSIDE a path token. A mention only counts when it is
+ * bounded by something outside this set, so "reindex.ts" does not name
+ * `index.ts` and "budget-limits.ts.bak" does not name `budget-limits.ts`.
+ */
+const PATH_TOKEN_CHARS = "A-Za-z0-9_$./\\-"
+
+const namesToken = (message: string, token: string): boolean =>
+  new RegExp(`(^|[^${PATH_TOKEN_CHARS}])${escapeForRegex(token)}([^${PATH_TOKEN_CHARS}]|$)`).test(
+    message,
+  )
+
+/**
+ * Does `message` name this file — by full repo-relative path, or by a basename
+ * that unambiguously identifies it?
+ *
+ * `ambiguousBasenames` holds basenames that MORE THAN ONE losing file in the
+ * same merge shares. Without that check, a message reading "reconciled the two
+ * index.ts barrels" blanket-excused every dropped export in every `index.ts`
+ * the merge touched — a confession about one file silencing all of them. A
+ * shared basename must therefore be disambiguated by writing the full path;
+ * a distinctive one (`budget-limits.ts`) still works on its own.
+ */
+export const messageNamesPath = (
+  message: string,
+  path: string,
+  ambiguousBasenames: ReadonlySet<string> = new Set(),
+): boolean => {
+  if (namesToken(message, path)) return true
+  const base = basename(path)
+  return !ambiguousBasenames.has(base) && namesToken(message, base)
+}
 
 /**
  * The escape hatch. A merge that deliberately drops something says so in its
  * message; naming EITHER the file or the symbol excuses that loss.
  */
-export const isExcusedByMessage = (message: string, loss: SymbolLoss): boolean =>
-  messageNamesPath(message, loss.file) || messageNamesSymbol(message, loss.symbol)
+export const isExcusedByMessage = (
+  message: string,
+  loss: SymbolLoss,
+  ambiguousBasenames: ReadonlySet<string> = new Set(),
+): boolean =>
+  messageNamesPath(message, loss.file, ambiguousBasenames) ||
+  messageNamesSymbol(message, loss.symbol)
+
+/** Basenames shared by more than one losing file — these need a full path. */
+export const ambiguousBasenamesOf = (losses: readonly SymbolLoss[]): ReadonlySet<string> => {
+  const filesByBase = new Map<string, Set<string>>()
+  for (const loss of losses) {
+    const base = basename(loss.file)
+    const seen = filesByBase.get(base) ?? new Set<string>()
+    seen.add(loss.file)
+    filesByBase.set(base, seen)
+  }
+  return new Set([...filesByBase].filter(([, files]) => files.size > 1).map(([base]) => base))
+}
 
 // ---------------------------------------------------------------------------
 // Detection
@@ -396,8 +376,9 @@ export const scanMerge = (sha: string, port: GitReadPort): MergeScan => {
       found,
     )
   }
-  const excused = found.filter((l) => isExcusedByMessage(message, l))
-  const losses = found.filter((l) => !isExcusedByMessage(message, l))
+  const ambiguous = ambiguousBasenamesOf(found)
+  const excused = found.filter((l) => isExcusedByMessage(message, l, ambiguous))
+  const losses = found.filter((l) => !isExcusedByMessage(message, l, ambiguous))
 
   return {
     sha,
@@ -451,8 +432,23 @@ export const GRANDFATHERED_MERGES: ReadonlyMap<string, string> = new Map([
   ],
 ])
 
-/** Is this merge on the recorded baseline? Accepts abbreviated shas. */
+/**
+ * Shortest prefix accepted as a sha. Not a tuning knob: git itself refuses to
+ * abbreviate an object name below 4 hex digits (`core.abbrev` floor), so
+ * anything shorter is not an abbreviation, it is noise.
+ */
+const MIN_SHA_PREFIX = 4
+
+/**
+ * Is this merge on the recorded baseline? Accepts abbreviated shas.
+ *
+ * The empty string used to return TRUE here, because `known.startsWith("")` is
+ * always true — a baseline check that fails OPEN on the emptiest possible
+ * input. A non-sha now answers `false`, which is the safe direction: an
+ * unrecognised merge is enforced, not waived.
+ */
 export const isGrandfathered = (sha: string): boolean => {
+  if (sha.length < MIN_SHA_PREFIX || !/^[0-9a-f]+$/.test(sha)) return false
   for (const known of GRANDFATHERED_MERGES.keys()) {
     if (known === sha || known.startsWith(sha) || sha.startsWith(known)) return true
   }
