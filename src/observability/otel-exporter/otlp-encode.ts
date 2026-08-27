@@ -127,8 +127,23 @@ export const otlpStatusCode = (code: SpanStatusCode | undefined): number => {
  *  4xx classification, so one malformed span blackholes every later span for
  *  the life of the process. Degrading to `"0"` keeps the record exportable and
  *  visibly wrong instead of silently fatal. */
-export const nanos = (epochMs: number): string =>
-  Number.isFinite(epochMs) && epochMs >= 0 ? `${Math.trunc(epochMs * 1_000_000)}` : "0"
+/** Largest value an OTLP `fixed64` field can carry. */
+const UINT64_MAX = 18_446_744_073_709_551_615n
+
+export const nanos = (epochMs: number): string => {
+  if (!Number.isFinite(epochMs) || epochMs < 0) return "0"
+  // BigInt, not float64. A FINITE `epochMs` still breaks the uint64 shape once
+  // `epochMs * 1e6` crosses 1e21, where JS switches to exponential notation —
+  // measured on the float path: 1e15 -> "1e+21", and a value already in
+  // NANOSECONDS (the classic unit confusion) -> "1.756e+24". At MAX_VALUE the
+  // multiply overflows to Infinity, which is finite on INPUT, so a guard on the
+  // input alone waves through the exact token this function exists to prevent.
+  // A real epoch in nanos (~1.76e18) is itself past MAX_SAFE_INTEGER, so the
+  // product cannot be range-checked as a number either. BigInt is exact and
+  // always renders as decimal digits.
+  const n = BigInt(Math.trunc(epochMs)) * 1_000_000n
+  return n >= 0n && n <= UINT64_MAX ? n.toString() : "0"
+}
 
 /** Resource attributes shared by every span/metric of one process. `quanta.run.id`
  *  is attached when the operator sets a run id (env `QUANTA_OTEL_RUN_ID`) so the

@@ -306,7 +306,12 @@ const SIMPLE_DENIALS: ReadonlyArray<{
 ]
 
 const assessSimple = (cmd: ShellCommandIr): ShellAssessment | null => {
-  const head = cmd.head?.text
+  // BASENAME, not the raw text. `assessByHead` already strips the directory
+  // before dispatching; recomputing from `head.text` here meant every rule in
+  // this table was bypassed by spelling the command with a path
+  // (`/sbin/reboot`, `/bin/chmod -R 777 /` measured `safe-known`), including
+  // the B-14 unreadable-operand escalation added beside it.
+  const head = cmd.head?.text?.split("/").pop()
   if (head === undefined) return null
   const flags = flagsOf(cmd.args)
   const operands = operandsOf(cmd.args)

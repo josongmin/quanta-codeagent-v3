@@ -227,4 +227,9 @@ export const GIT_GLOBAL_VALUE_FLAGS: ReadonlySet<string> = new Set([
   "--namespace",
   "--super-prefix",
   "--config-env",
+  // Consumes a separated value on git >= 2.43. Verified against the installed
+  // git: `git --attr-source X rev-parse --git-dir` runs, i.e. X was eaten.
+  // Its absence let `git --attr-source HEAD push origin +main` past BOTH
+  // authorities.
+  "--attr-source",
 ])

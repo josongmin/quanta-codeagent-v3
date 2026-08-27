@@ -61,6 +61,34 @@ describe("T — OTLP timestamps are always uint64-shaped", () => {
     expect(nanos(1)).toBe("1000000")
   })
 
+  test("T-1 a FINITE input whose PRODUCT leaves the uint64 shape degrades too", () => {
+    // The first version of this guard checked only the INPUT. Measured on it:
+    //   1e15               -> "1e+21"            (float switches to exponential)
+    //   MAX_SAFE_INTEGER   -> "9.007…e+21"
+    //   1.756e18 (ns-as-ms)-> "1.756e+24"        (the classic unit confusion)
+    //   MAX_VALUE          -> "Infinity"         (finite on input, overflows in the multiply)
+    // Every one of those is a non-parseable token on a `fixed64` field, i.e.
+    // exactly the failure the guard exists to prevent, one input class over.
+    for (const [label, value] of [
+      ["1e15", 1e15],
+      ["MAX_SAFE_INTEGER", Number.MAX_SAFE_INTEGER],
+      ["nanos-passed-as-millis", 1.756e18],
+      ["MAX_VALUE", Number.MAX_VALUE],
+    ] as ReadonlyArray<readonly [string, number]>) {
+      const out = nanos(value)
+      expect({ label, uint64: UINT64_DECIMAL.test(out) }).toEqual({ label, uint64: true })
+    }
+  })
+
+  test("T-3 PAIRED CONTROL — a real epoch in nanos is past MAX_SAFE_INTEGER and must SURVIVE", () => {
+    // The obvious product guard (`n <= Number.MAX_SAFE_INTEGER`) rejects every
+    // real timestamp: 1.756e12 ms is 1.756e18 ns, three orders past the safe
+    // ceiling. This arm is why the implementation is BigInt and not a range
+    // check — it fails on any fix that clamps the legitimate range away.
+    expect(nanos(1_756_000_000_000)).toBe("1756000000000000000")
+    expect(Number(nanos(1_756_000_000_000))).toBeGreaterThan(Number.MAX_SAFE_INTEGER)
+  })
+
   test("T-3 PAIRED CONTROL — a negative epoch is still refused as a uint64", () => {
     // A negative timestamp is not a legal fixed64 either; it must not ride out
     // as "-5000000".

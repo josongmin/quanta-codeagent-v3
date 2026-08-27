@@ -64,6 +64,13 @@ export type ReplSlashCtx = Partial<{
   /** Optional cwd override for legacy/test slash dispatchers. Absent ⇒ the
    *  shell-entry ambient cwd (`process.cwd()`) is preserved. */
   cwd: string
+  /** ADR — `/ps` owned-background-shell panel. Declared HERE, not only on the
+   *  slash contract: the builder spread it (`procShellsSlot`) while this type
+   *  did not name it, so `projectSlashCtx` dropped it and `/ps` printed "not
+   *  wired" in every session — the same defect as `/attention`, and invisible
+   *  to the exhaustive `Record<keyof ReplSlashCtx, …>` precisely because the
+   *  key was absent from `keyof`. Absent ⇒ omitted ⇒ "not wired". */
+  procShells: () => readonly ProcPanelRow[]
   skills: () => Promise<SkillRow[]>
   /** RFC-06 F4 — `/reload-skills` authority-backed sync + revision hook. */
   reloadSkills: () => Promise<{ rows: SkillRow[]; revision?: number }>
@@ -783,6 +790,7 @@ type SlotProjector = (s: ReplSlashCtx) => Record<string, unknown>
 const SLOT_PROJECTORS: Readonly<Record<keyof ReplSlashCtx, SlotProjector>> = {
   // Not a contract-shape slot — see the note above.
   cwd: () => ({}),
+  procShells: (s) => opt("procShells", s.procShells),
   // `/side` is a FACTORY on the ctx and a VALUE in the contract shape: it is
   // built fresh per invocation so the starter sees the live transcript rather
   // than a snapshot captured when the REPL started.

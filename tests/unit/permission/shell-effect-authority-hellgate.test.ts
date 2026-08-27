@@ -441,3 +441,53 @@ describe("B-14 an unreadable operand on a GATED head is `unknown`, never safe", 
     expect(assessShellCommand("cat $FILE").kind).toBe("safe-known")
   })
 })
+
+/**
+ * B-15 — the two holes a jank audit found in B-12..B-14 itself.
+ *
+ * Both were MEASURED on the shipping authority after those arms landed green,
+ * which is the point: the arms above proved the shapes they named and nothing
+ * about the shapes one token away.
+ *
+ * (a) `--attr-source` consumes a separated value on modern git — verified
+ *     against the installed binary (`git --attr-source X rev-parse --git-dir`
+ *     runs, so X was eaten) — and was missing from the shared flag set. It let
+ *     `git --attr-source HEAD push origin +main` past BOTH this authority and
+ *     `decideBranchOnly`.
+ * (b) `assessSimple` recomputed its head from `cmd.head.text` instead of the
+ *     basename `assessByHead` had already stripped, so EVERY rule in the
+ *     `SIMPLE_DENIALS` table was bypassed by spelling the command with a path.
+ *     That includes the B-14 escalation added directly beside it.
+ */
+describe("B-15 the holes in B-12..B-14", () => {
+  test("a value-taking git global that was missing from the set is denied", () => {
+    const v = assessShellCommand("git --attr-source HEAD push origin +main")
+    expect({ kind: v.kind, rule: v.kind === "hard-deny" ? v.rule : null }).toEqual({
+      kind: "hard-deny",
+      rule: "git-push-force",
+    })
+  })
+
+  const ABSOLUTE_HEADS = [
+    "/sbin/reboot",
+    "/usr/sbin/shutdown -h now",
+    "/bin/chmod -R 777 /",
+    "/bin/dd if=/dev/zero of=/dev/sda",
+    "/sbin/mkfs.ext4 /dev/sda1",
+  ] as const
+  for (const cmd of ABSOLUTE_HEADS) {
+    test(`${cmd} is not assessed safe (absolute path is not a disguise)`, () => {
+      expect({ cmd, kind: assessShellCommand(cmd).kind }).not.toEqual({ cmd, kind: "safe-known" })
+    })
+  }
+
+  test("the B-14 escalation survives an absolute path too", () => {
+    expect(assessShellCommand("/bin/chmod -R 777 $ROOT").kind).not.toBe("safe-known")
+  })
+
+  test("PAIRED CONTROL — an absolute path to an UNGATED head stays safe", () => {
+    // The basename fix must not turn every absolute-path command into a gate.
+    expect(assessShellCommand("/bin/echo hello").kind).toBe("safe-known")
+    expect(assessShellCommand("/usr/bin/git -C /repo status").kind).toBe("safe-known")
+  })
+})
