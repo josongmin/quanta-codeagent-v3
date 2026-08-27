@@ -1,9 +1,17 @@
 // meta-test: package-script contract; it intentionally reads package.json rather than importing src/.
+
 import { describe, expect, test } from "bun:test"
+import { join } from "node:path"
 
 type PackageJson = { readonly scripts?: Record<string, string> }
 
-const packageJson = (await Bun.file("package.json").json()) as PackageJson
+/** Anchored on THIS file. `Bun.file("package.json")` resolved against the ambient
+ *  cwd, so from anywhere but the repo root the read failed and the whole file
+ *  died at module scope — found by the paired control: 4 pass at the root,
+ *  0 pass / 1 fail from a foreign working directory. */
+const packageJson = (await Bun.file(
+  join(import.meta.dir, "..", "..", "package.json"),
+).json()) as PackageJson
 
 describe("test:ci admission gate", () => {
   test("uses the live feature-catalog changed-file authority", () => {
