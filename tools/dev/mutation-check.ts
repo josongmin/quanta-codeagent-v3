@@ -52,7 +52,22 @@ export interface Mutation {
   readonly replace: string
   /** Hellgate test file, repo-relative. */
   readonly gate: string
-  /** Optional `-t` name filter so we run only the case this fix guards. */
+  /**
+   * `-t` name filter selecting THE ONE case this fix guards.
+   *
+   * Optional in the TYPE only — the drift-ratchet test builds partial fixtures —
+   * but REQUIRED in practice: {@link assertLeafAnchored} refuses an entry with
+   * no filter, because an absent filter runs the whole gate file and every
+   * unrelated failure in it reads as this mutant being killed.
+   *
+   * `bun test -t` is a REGEX matched against the FULL name — the enclosing
+   * `describe` text concatenated with the test text. A filter that reads like a
+   * description of the behaviour is therefore usually a substring of the
+   * describe, which selects EVERY test in that block. When a block contains
+   * ALLOW-direction paired controls (it should), a mutant that only breaks an
+   * allow-case still turns the filtered run red and reads as a kill. Anchor to
+   * the leaf test name, and remember the value is a regex (escape `(`, `)`).
+   */
   readonly only?: string
 }
 
@@ -274,7 +289,12 @@ export const MUTATIONS: readonly Mutation[] = [
     replace: `  const isDestructive = allToks.some((t) => t === "--hard" || t === "--merge" || t === "--keep")
   if (false && isDestructive && currentBranch && protectedBranches.includes(currentBranch)) {`,
     gate: "src/permission/__tests__/fail-closed-base.hellgate.test.ts",
-    only: "destructive reset on a protected branch",
+    // Anchored to the LEAF test, not the describe. The old filter was a
+    // substring of the enclosing describe name, so it selected all 6 of its
+    // tests — including two ALLOW-direction paired controls (FEATURE-branch
+    // reset, `--soft` on main) that this mutant does not touch. A failure
+    // anywhere in that block would have read as this mutant being killed.
+    only: "bare `git reset --hard HEAD~3` on main is DENIED",
   },
   {
     id: "t08-h3-lexical-traversal",
@@ -307,7 +327,10 @@ export const MUTATIONS: readonly Mutation[] = [
   const boundary = entryPath.endsWith("/") ? entryPath : \`\${entryPath}/\`
   return candidate.startsWith(boundary)`,
     gate: "src/permission/__tests__/fail-closed-base.hellgate.test.ts",
-    only: "lexical traversal cannot escape",
+    // Leaf-anchored: the old filter was the describe name verbatim (6 tests,
+    // two of them ALLOW-direction controls). This is the single case that
+    // exercises the reverted byte-prefix fail-open.
+    only: "`/repo/../etc/passwd` is DENIED despite byte-prefixing",
   },
   {
     id: "t08-h4-empty-writable-roots-deny",
@@ -320,7 +343,9 @@ export const MUTATIONS: readonly Mutation[] = [
     replace: `      const roots = perm.sandboxPolicy.writableRoots
       if (!roots || roots.length === 0) return true`,
     gate: "src/permission/__tests__/fail-closed-base.hellgate.test.ts",
-    only: "empty writableRoots is DENY",
+    // Leaf-anchored: the old filter matched the describe (3 tests, one of them
+    // an ALLOW-direction control). This is the arm the revert flips.
+    only: "workspace-write with EMPTY writableRoots denies a write",
   },
   {
     id: "t08-h5-custom-host-mode-defer",
@@ -351,7 +376,7 @@ interface Result {
   readonly note: string
 }
 
-const runGate = (gate: string, only?: string): { failed: boolean; raw: string } => {
+const runGate = (gate: string, only?: string): { failed: boolean; raw: string; ran: number } => {
   const args = ["test", join(repoRoot, gate)]
   if (only !== undefined) args.push("-t", only)
   const out = spawnSync("bun", args, {
@@ -365,7 +390,57 @@ const runGate = (gate: string, only?: string): { failed: boolean; raw: string } 
   // `N fail` line).
   const failMatch = raw.match(/(\d+) fail/)
   const failed = (out.status ?? 0) !== 0 || (failMatch !== null && Number(failMatch[1]) > 0)
-  return { failed, raw }
+  // Selection width: how many tests the `-t` filter actually ran. A missing
+  // summary line reads as -1 so the leaf-anchor guard treats it as "not one".
+  const passCount = Number(raw.match(/(\d+) pass/)?.[1] ?? Number.NaN)
+  const failCount = Number(failMatch?.[1] ?? Number.NaN)
+  const ran =
+    Number.isNaN(passCount) && Number.isNaN(failCount)
+      ? -1
+      : (Number.isNaN(passCount) ? 0 : passCount) + (Number.isNaN(failCount) ? 0 : failCount)
+  return { failed, raw, ran }
+}
+
+/**
+ * THE CLASS-CLOSING GUARD for over-broad `-t` filters, run BEFORE any mutation.
+ *
+ * Every entry's `only` must select EXACTLY ONE test. This is DERIVED — the
+ * width is measured by running the gate under the real filter — rather than a
+ * hand-kept list of "filters we already checked", because a hand-kept list is
+ * the defect this whole rail keeps re-finding. Entry 15 cannot repeat the bug:
+ * an over-broad filter now fails the run at pre-flight instead of quietly
+ * inflating a mutant into a proof.
+ *
+ * `ran !== 1` covers both directions: a filter matching a describe (too wide)
+ * and a filter matching nothing at all after a test rename (too narrow), which
+ * would otherwise read as an unkillable green.
+ */
+export const assertLeafAnchored = (mutations: readonly Mutation[]): void => {
+  const problems: string[] = []
+  for (const m of mutations) {
+    if (m.only === undefined) {
+      problems.push(
+        `[${m.id}] has NO \`only\` filter — the whole of ${m.gate} runs, so ANY ` +
+          `failure in that file reads as this mutant being killed. Anchor it to one leaf test.`,
+      )
+      continue
+    }
+    const { ran } = runGate(m.gate, m.only)
+    if (ran === 1) {
+      console.log(`✓ leaf-anchored (selects 1): ${m.id}`)
+      continue
+    }
+    problems.push(
+      `[${m.id}] \`only\` selected ${ran === -1 ? "an unreadable count" : `${ran} tests`}, ` +
+        `must select exactly 1. Filter: ${JSON.stringify(m.only)} over ${m.gate}. ` +
+        `\`-t\` is a REGEX over describe+test — anchor it to the LEAF test name.`,
+    )
+  }
+  if (problems.length > 0) {
+    console.error(`\n✗ over-broad (or dead) mutation filters — refusing to mutate:`)
+    for (const p of problems) console.error(`  ${p}`)
+    process.exit(2)
+  }
 }
 
 /**
@@ -425,6 +500,12 @@ const main = async (): Promise<void> => {
     baselineGates.set(gate, true)
     console.log(`✓ baseline green: ${gate}`)
   }
+
+  // Pre-flight, on the UNMUTATED tree: every filter must select exactly one
+  // test. Runs after the baseline (so a red gate is reported as a red gate, not
+  // as a bad filter) and before the first revert.
+  console.log("\n── leaf-anchor pre-flight (every `only` must select exactly 1 test) ──")
+  assertLeafAnchored(selected)
 
   const results: Result[] = []
   for (const m of selected) {

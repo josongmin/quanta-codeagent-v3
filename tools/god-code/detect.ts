@@ -71,10 +71,18 @@ const isBandBound = (v: unknown): v is number =>
  * check passed while measuring nothing. Refuse any band that is not a strictly
  * ordered pair of in-range integers rather than returning a window that
  * silently matches nothing.
+ *
+ * ⚠️ `band` IS REQUIRED AND HAS NO DEFAULT — do not reintroduce one.
+ * This reader briefly carried `band: unknown = APPROACHING_MODULE_BAND`, which
+ * made it refuse `[NaN, NaN]` while silently ACCEPTING the ABSENCE of its own
+ * input: an `allowlist.json` with no `band` key resolved to the hardcoded
+ * window and the ceiling went on measuring, from code, a value the allowlist no
+ * longer supplied. That is the exact defect this reader exists to close — a
+ * guard that validates its SUBJECT but not its own INPUT — and it disagreed
+ * with its sibling {@link approachingCohortMax}, which refuses `undefined`.
+ * A missing key is now a FAILURE, not a fallback; the caller passes the value.
  */
-export const approachingBandBounds = (
-  band: unknown = APPROACHING_MODULE_BAND,
-): readonly [number, number] => {
+export const approachingBandBounds = (band: unknown): readonly [number, number] => {
   const pair: readonly unknown[] | undefined = Array.isArray(band) ? band : undefined
   const lo = pair?.[0]
   const hi = pair?.[1]

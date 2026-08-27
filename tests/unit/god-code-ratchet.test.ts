@@ -142,16 +142,28 @@ describe("god-code ratchet (SE size metric)", () => {
     // Paired control: the honest band is accepted and is what the JSON mirrors.
     expect(approachingBandBounds([...APPROACHING_MODULE_BAND])).toEqual([900, 999])
     expect(approachingBandBounds(allowlist.approachingModuleCeiling.band)).toEqual([900, 999])
-    // NOTE, deliberate and not a hole: no argument (or an explicit `undefined`)
-    // resolves to the CODE default, standard JS default-parameter semantics —
-    // it does not throw. A `band` key missing from the JSON therefore falls back
-    // to the honest hardcoded window rather than to a window of nothing, and is
-    // caught loudly by the drift-guard test above, which compares the JSON's
-    // `band` against APPROACHING_MODULE_BAND by value.
-    expect(approachingBandBounds()).toEqual([900, 999])
-    expect(approachingBandBounds(undefined)).toEqual([900, 999])
+    // A MISSING `band` key is a FAILURE, not a silent fallback. The reader used
+    // to carry `band: unknown = APPROACHING_MODULE_BAND`, so it refused
+    // `[NaN, NaN]` while ACCEPTING the absence of its own input — a guard
+    // validating its subject but not its input, which is the very defect it
+    // exists to close, and a disagreement with its sibling
+    // `approachingCohortMax`, which has always refused `undefined`. The default
+    // is gone; both readers now treat absence identically.
+    //
+    // If someone reintroduces the default parameter, these two arms go red.
+    expect(() => approachingBandBounds(undefined)).toThrow(/band must be a \[lo, hi\] pair/)
+    const bandKeyDeleted: { band?: unknown } = {}
+    expect(() => approachingBandBounds(bandKeyDeleted.band)).toThrow(
+      /band must be a \[lo, hi\] pair/,
+    )
+    // PAIRED CONTROL, same asymmetry from the other side: the sibling reader
+    // agrees about `undefined`, and BOTH still accept their honest values.
+    expect(() => approachingCohortMax(undefined)).toThrow(/max must be a non-negative integer/)
+    expect(approachingBandBounds([...APPROACHING_MODULE_BAND])).toEqual([900, 999])
+    expect(approachingCohortMax(24)).toBe(24)
     // Every shape that used to disarm the ceiling now throws.
     for (const degenerate of [
+      undefined,
       [],
       [900],
       [900, 999, 1200],
@@ -191,7 +203,7 @@ describe("god-code ratchet (SE size metric)", () => {
         return lines >= lo && lines <= hi
       })
     expect(files.length).toBeGreaterThan(1000) // the corpus is real
-    expect(select(...approachingBandBounds()).length).toBeGreaterThan(0) // honest band selects
+    expect(select(...approachingBandBounds([...APPROACHING_MODULE_BAND])).length).toBeGreaterThan(0) // honest band selects
     expect(select(0, 0)).toEqual([]) // the disarmed window selects nothing
   })
 
