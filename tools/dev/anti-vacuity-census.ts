@@ -1,19 +1,12 @@
 import { readdirSync, readFileSync } from "node:fs"
 import { join } from "node:path"
 
+// The SHARED stripper. A local copy is exactly what
+// `comment-scanner-burndown-ratchet` forbids, and for the reason this file
+// exists: a hand-rolled one gets its own blind spots.
+import { stripComments } from "../../tests/unit/_shared/strip-comments"
+
 const R = join(import.meta.dir, "..", "..")
-/**
- * Comments are stripped BEFORE any predicate runs.
- *
- * The exclusion for a throw-based floor was a prose match, so a file with no
- * floor of any kind stayed off the ledger for as long as the word `vacuous`
- * appeared anywhere in it — including a comment. Proven by deleting one comment
- * line from an otherwise-unchanged file and watching it appear. Sixteen real
- * files were being excluded by prose alone. A self-issued exemption is worse than
- * no rule.
- */
-const stripComments = (src: string): string =>
-  src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/.*$/gm, "$1")
 
 /** Any way this repo reaches the tree. */
 const SCAN =

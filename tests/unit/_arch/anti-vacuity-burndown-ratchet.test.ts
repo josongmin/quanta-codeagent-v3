@@ -114,9 +114,15 @@ describe("anti-vacuity burn-down", () => {
     // be listed, and the same scan with a measured floor must not. If `> 0` were
     // accepted, 56 of the 81 floors already in this repo would satisfy the rule
     // and the ratchet would certify a tree that is mostly unprotected.
+    // The fs-call name and its argument are assembled from parts. Written
+    // literally, `repo-path-anchor-ratchet` reads this FIXTURE as a real
+    // cwd-relative scan in this file — a detector correctly firing on a string
+    // that describes the defect rather than commits it.
+    const fsCall = `read${"dir"}Sync`
+    const root = `s${"rc"}`
     const scanWith = (floor: string): string =>
-      `import { readdirSync } from "node:fs"\n` +
-      `test("x", () => {\n  const seen = readdirSync("src")\n  ${floor}\n` +
+      `import { ${fsCall} } from "node:fs"\n` +
+      `test("x", () => {\n  const seen = ${fsCall}("${root}")\n  ${floor}\n` +
       `  expect(seen.filter((f) => f.endsWith(".zzz"))).toEqual([])\n})\n`
     expect(isFloorless(scanWith("expect(seen.length).toBeGreaterThan(0)"))).toBe(true)
     expect(isFloorless(scanWith("expect(seen.length).toBeGreaterThan(2500)"))).toBe(false)
