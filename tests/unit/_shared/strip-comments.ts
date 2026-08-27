@@ -112,13 +112,27 @@ const skipComment = (src: string, i: number, atLineStart: boolean): number => {
   return -1
 }
 
-export const stripComments = (src: string): string => {
+/**
+ * Replace a comment with the same number of NEWLINES and spaces, so every later
+ * character keeps its line and column. A guard that reports `file:line` needs
+ * this; one that only asks "does this text contain X" does not.
+ */
+const blanked = (text: string): string => text.replace(/[^\n]/g, " ")
+
+export interface StripCommentsOptions {
+  /** Keep line and column numbers by blanking comments instead of removing
+   *  them. Off by default: most callers only search the result. */
+  readonly preservePositions?: boolean
+}
+
+export const stripComments = (src: string, options: StripCommentsOptions = {}): string => {
   let out = ""
   let i = 0
   let atLineStart = true
   while (i < src.length) {
     const past = skipComment(src, i, atLineStart)
     if (past !== -1) {
+      if (options.preservePositions === true) out += blanked(src.slice(i, past))
       i = past
       continue
     }

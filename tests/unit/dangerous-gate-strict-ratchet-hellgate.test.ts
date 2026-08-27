@@ -41,6 +41,7 @@
 import { describe, expect, test } from "bun:test"
 import { readdirSync, readFileSync } from "node:fs"
 import { join } from "node:path"
+import { stripComments } from "./_shared/strip-comments"
 
 const SRC_ROOT = join(import.meta.dir, "../../src")
 const SRC = readFileSync(join(SRC_ROOT, "shared/runtime-config.ts"), "utf8")
@@ -229,23 +230,20 @@ const readAllSrc = (): ReadonlyArray<readonly [path: string, text: string]> => {
  */
 /** Replace a matched comment with equal-length whitespace (newlines preserved) so
  *  line/column geometry is unchanged but the comment TEXT is gone. */
-const blank = (m: string): string => m.replace(/[^\n]/g, " ")
-
 /**
- * Single-pass tokenizer: a `g`-flag regex whose alternation prefers (in order)
- * STRING/TEMPLATE literals, then line comments, then block comments. Because a
- * string literal is matched as ONE token, a `//` or `/​*` INSIDE a string (e.g. a
- * `https://` URL) is consumed by the string arm and never seen as a comment —
- * exactly the `://` false-strip we must avoid. Only the comment arms are blanked;
- * everything else (including real code calls) passes through verbatim.
+ * The shared scanner, positions preserved so every `file:line` this suite
+ * reports stays true.
+ *
+ * The local tokenizer it replaces was quoting-aware and REGEX-BLIND: `/[/*]/`
+ * and `/[*​/]/` are valid JS character classes, and the alternation read the
+ * first as a comment opener and blanked everything to the second. MEASURED —
+ * two such lines around `env.QUANTA_TLS_MITM === "true"` in
+ * `src/agent/dispatch.ts` left this fence green.
  */
-const TOKEN = /"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|`(?:[^`\\]|\\.)*`|\/\/[^\n]*|\/\*[\s\S]*?\*\//g
-
-const stripComments = (src: string): string =>
-  src.replace(TOKEN, (m) => (m.startsWith("//") || m.startsWith("/*") ? blank(m) : m))
+const stripSrc = (src: string): string => stripComments(src, { preservePositions: true })
 
 /** Comment-stripped view of every src file — what every src-wide assertion scans. */
-const ALL_SRC = readAllSrc().map(([p, text]) => [p, stripComments(text)] as const)
+const ALL_SRC = readAllSrc().map(([p, text]) => [p, stripSrc(text)] as const)
 
 /** Escape a string for use as a literal inside a RegExp. */
 const esc = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")

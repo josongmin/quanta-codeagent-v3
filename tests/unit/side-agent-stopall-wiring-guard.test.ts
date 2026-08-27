@@ -39,6 +39,7 @@
 import { describe, expect, test } from "bun:test"
 import { readdirSync, readFileSync } from "node:fs"
 import { join } from "node:path"
+import { stripComments } from "./_shared/strip-comments"
 
 const SRC_ROOT = join(import.meta.dir, "../../src")
 
@@ -59,8 +60,9 @@ const DEAD_BRANCH_OPENER = /\b(?:if|while)\s*\(\s*(?:false|0)\s*[)&]/
 /** Strip line + block comments so a comment that merely MENTIONS the call can
  *  never satisfy (or trip) the guard. Conservative: `//` preceded by `:` (URLs
  *  like `https://`) is kept. */
-const stripComments = (text: string): string =>
-  text.replace(/\/\*[\s\S]*?\*\//g, " ").replace(/(^|[^:])\/\/[^\n]*/gm, "$1")
+// The shared scanner. The local one blanked a phantom span, so an `if (false)`
+// wrapped in two string constants hid a real teardown regression — the side-agent
+// daemons leaking on every session end, with this guard green. MEASURED.
 
 /** True when `full` (a `.ts` file) holds a real `.stopAll(` call site. The
  *  defining slice (`src/side-agent/**`) does not count as a PRODUCTION reader:

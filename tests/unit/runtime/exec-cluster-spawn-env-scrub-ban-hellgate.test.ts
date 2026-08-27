@@ -41,6 +41,7 @@
 import { describe, expect, test } from "bun:test"
 import { readFileSync } from "node:fs"
 import { join } from "node:path"
+import { stripComments } from "../_shared/strip-comments"
 
 const SRC = join(import.meta.dir, "..", "..", "..", "src")
 
@@ -77,10 +78,15 @@ const BUILT_ARGV_ALLOW = [
 
 /** Strip block + line comments so doc-comment MENTIONS of `Bun.spawn(...)`
  *  (`Bun.spawn(["git", …])`, `Bun.spawn({ env })`) are not mistaken for real
- *  call sites. Crude but sufficient: the cluster files contain no `//` / `/*`
- *  inside string literals that would confuse this. */
-export const stripComments = (text: string): string =>
-  text.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/[^\n]*/g, "")
+ *  call sites.
+ *
+ *  The local version claimed "crude but sufficient: the cluster files contain
+ *  no `//` / `/*` inside string literals that would confuse this" — an
+ *  assumption about OTHER files, which nothing enforced. MEASURED: two string
+ *  constants planted around a real unscrubbed `Bun.spawn` in
+ *  `src/runtime/shell.ts` left this guard green. It fences an API-key leak, so
+ *  it uses the shared quoting- and regex-aware scanner. */
+export { stripComments }
 
 /**
  * Extract every `Bun.spawn(` call's argument text (balanced to the matching
