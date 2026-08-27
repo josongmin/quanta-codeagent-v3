@@ -30,6 +30,7 @@ import {
   EGRESS_HEADS,
   EVAL_HEADS,
   expandFlagCluster,
+  GIT_GLOBAL_VALUE_FLAGS,
   FETCH_HEADS,
   FIND_ACTION_FLAGS,
   INLINE_CODE_FLAGS,
@@ -224,22 +225,6 @@ const GIT_DESTRUCTIVE: ReadonlyArray<{
     matches: (sub, flags) => sub === "commit" && flags.has("--amend"),
   },
 ]
-
-/** git GLOBAL options that consume a SEPARATED value (`git -C <dir> push`).
- *  `operandsOf` drops only the flag word, so the value landed in the operand
- *  list and displaced the subcommand: `git -C /repo push origin +main` read as
- *  subcommand `/repo`, which matches no `GIT_DESTRUCTIVE` rule. The `--flag=v`
- *  spelling carries its value inline and needs no entry here. */
-const GIT_GLOBAL_VALUE_FLAGS: ReadonlySet<string> = new Set([
-  "-C",
-  "-c",
-  "--git-dir",
-  "--work-tree",
-  "--exec-path",
-  "--namespace",
-  "--super-prefix",
-  "--config-env",
-])
 
 /** Operands of a git invocation with the global-option values consumed, so
  *  `[0]` is the SUBCOMMAND rather than whatever a global option carried. */

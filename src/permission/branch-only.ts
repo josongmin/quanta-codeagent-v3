@@ -16,6 +16,8 @@
  * thresholds. Returns `{allowed: true} | {allowed: false, reason}`.
  */
 
+import { GIT_GLOBAL_VALUE_FLAGS } from "./shell/rules"
+
 /** Canonical protected-branch list for ci-bot. Operator can override per
  *  mode policy. */
 export const DEFAULT_PROTECTED_BRANCHES: readonly string[] = Object.freeze([
@@ -42,11 +44,17 @@ const gitSubcommand = (toks: readonly string[]): string | null => {
   let i = 1
   while (i < toks.length) {
     const t = toks[i]
-    if (t === "-c" || t === "--git-dir" || t === "--work-tree" || t === "-C") {
+    // A value-taking global consumes the NEXT token too. This list used to be
+    // four entries hardcoded here, so `git --namespace foo push origin +main`
+    // returned subcommand `foo`, `push` never matched, and a force-push to a
+    // protected branch was ALLOWED. It is now the shared set the structural
+    // authority (`shell/assess.ts`) reads, so the two cannot drift again.
+    if (t !== undefined && GIT_GLOBAL_VALUE_FLAGS.has(t)) {
       i += 2
       continue
     }
-    if (t?.startsWith("--git-dir=") || t?.startsWith("--work-tree=")) {
+    // `--flag=value` carries its value inline: skip ONE token, not two.
+    if (t?.startsWith("--") === true && t.includes("=")) {
       i += 1
       continue
     }

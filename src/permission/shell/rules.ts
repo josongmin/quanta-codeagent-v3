@@ -203,3 +203,28 @@ export const LITERAL_PRODUCER_HEADS: ReadonlySet<string> = new Set(["echo", "pri
 /** Heads that take their operands from STDIN rather than argv. A destructive
  *  payload behind one of these has targets the authority cannot see. */
 export const STDIN_OPERAND_HEADS: ReadonlySet<string> = new Set(["xargs"])
+
+/**
+ * git GLOBAL options that consume a SEPARATED value (`git -C <dir> push …`).
+ *
+ * SHARED SSOT. Two authorities need it and both got it wrong independently:
+ * a naive "drop tokens starting with `-`" leaves the option's VALUE sitting
+ * where the subcommand should be, so `git -C /repo push origin +main` reads as
+ * subcommand `/repo` and matches no destructive rule. `assess.ts` fixed four
+ * of these and `branch-only.ts` a different four; force-pushing a protected
+ * branch behind `--namespace` was allowed by the latter until this list was
+ * lifted here.
+ *
+ * The `--flag=value` spelling carries its value inline and needs no entry —
+ * consumers must still handle it, but by skipping ONE token, not two.
+ */
+export const GIT_GLOBAL_VALUE_FLAGS: ReadonlySet<string> = new Set([
+  "-C",
+  "-c",
+  "--git-dir",
+  "--work-tree",
+  "--exec-path",
+  "--namespace",
+  "--super-prefix",
+  "--config-env",
+])

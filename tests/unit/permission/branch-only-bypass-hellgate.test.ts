@@ -103,3 +103,57 @@ describe("HELLGATE: branch-only — bare destructive reset on a protected branch
     expect(v.allowed).toBe(true)
   })
 })
+
+/**
+ * A git GLOBAL option that consumes a separated value must not displace the
+ * subcommand.
+ *
+ * `gitSubcommand` skipped four of them (`-c`, `-C`, `--git-dir`,
+ * `--work-tree`), so the VALUE of any other value-taking global became
+ * `toks[i]` and was returned as the subcommand. `push` then never matched and
+ * the protected-branch rules never ran:
+ *
+ *   git --namespace foo push origin +main   -> subcommand "foo"  -> ALLOWED
+ *
+ * Measured on the shipping authority. The sibling structural authority
+ * (`assessShellCommand`) denies all of these, so before this fix the two
+ * disagreed about the same command line.
+ */
+describe("git global options do not hide the subcommand", () => {
+  const FORCE_PUSH_WITH_GLOBAL = [
+    "git --namespace foo push origin +main",
+    "git --exec-path /x push origin +main",
+    "git --super-prefix p/ push origin +main",
+    "git --config-env k=V push origin +main",
+    // the four that already worked — parity, so a regression on either half shows
+    "git -C /repo push origin +main",
+    "git -c protocol.version=2 push origin +main",
+    "git --git-dir /repo/.git push origin +main",
+    "git --work-tree /repo push origin +main",
+  ] as const
+
+  for (const cmd of FORCE_PUSH_WITH_GLOBAL) {
+    test(`${cmd} is denied`, () => {
+      expect(denied(decideBranchOnly(cmd, ["main"], "feature/x"))).toBe(true)
+    })
+  }
+
+  test("PAIRED CONTROL — the same globals in front of a harmless subcommand stay allowed", () => {
+    // The fix must consume the option's VALUE, not swallow the subcommand after
+    // it: a `status`/`log` behind the same globals has to keep working.
+    for (const cmd of [
+      "git --namespace foo status",
+      "git --exec-path /x log -1",
+      "git -C /repo status",
+    ]) {
+      expect(denied(decideBranchOnly(cmd, ["main"], "feature/x"))).toBe(false)
+    }
+  })
+
+  test("PAIRED CONTROL — the `--flag=value` form still resolves the subcommand", () => {
+    expect(denied(decideBranchOnly("git --namespace=foo push origin +main", ["main"], "feature/x"))).toBe(
+      true,
+    )
+    expect(denied(decideBranchOnly("git --namespace=foo status", ["main"], "feature/x"))).toBe(false)
+  })
+})
