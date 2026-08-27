@@ -57,6 +57,7 @@
     "lint:fix": "bun run tools/dev/run-biome.ts check --write",
     "lint:debt": "bun run tools/dev/lint-debt-ceiling.ts",
     "audit:merge-symbol-loss": "bun run tools/dev/merge-symbol-loss.ts",
+    "audit:merge-symbol-loss": "bun run tools/dev/merge-symbol-loss.ts",
     "format": "bun run tools/dev/run-biome.ts format --write",
     "build": "bun build --compile --minify src/apps/cli/index.ts --outfile dist/agent",
     "install:cli": "bash tools/bin/install-quanta-cli.sh",
