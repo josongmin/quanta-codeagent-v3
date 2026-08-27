@@ -86,17 +86,118 @@ export const handleConfigPost = async (req: Request): Promise<Response> => {
  *
  * The daemon binds loopback and (by default) carries no token, so `Origin` is
  * the only thing separating the user's own frontend from a page they happen to
- * be visiting. Echoing the request's own `Origin` — the previous behaviour —
+ * be visiting. Echoing the request's own `Origin` — the original behaviour —
  * made that separation vacuous: any site could read `/threads/<id>/events`.
  *
- * The allowlist is LOOPBACK + TAURI, on any port, because that is exactly the
- * set the shipped frontends are served from (`localhost:5173` in Vite dev, the
- * daemon's own port in production, `tauri://localhost` in the desktop shell). A
- * hostile page cannot forge `Origin` — the browser sets it — and a non-browser
+ * ── WHY THE PORT IS PART OF THE ALLOWLIST ─────────────────────────────────
+ * The allowlist used to be LOOPBACK-on-ANY-PORT, described as "exactly the set
+ * the shipped frontends are served from". That description was false, and the
+ * gap it hid is not academic: because the daemon is TOKENLESS by default, every
+ * other web server on the machine was an allowed origin. A project's own
+ * `localhost:3000` dev server — carrying one compromised npm dependency in its
+ * browser bundle — or any locally-installed app's web UI could
+ * `fetch("http://127.0.0.1:4096/threads/<id>/events")` for the whole transcript
+ * and `POST /config`. That is squarely "a page in the user's browser", which is
+ * the threat this fence exists for.
+ *
+ * So the allowlist is now the CLOSED set of origins the shipped frontends are
+ * actually served from:
+ *   - the daemon's OWN port (`QUANTA_WEB_PORT`, default 4096) — the SPA
+ *     that `serveStaticSpa` hands out in production;
+ *   - {@link DEV_SERVER_PORT} (5173) — pinned in BOTH
+ *     `apps/web-frontend/vite.config.ts` (`server.port`) and
+ *     `apps/tauri-shell/tauri.conf.json` (`build.devUrl`);
+ *   - the two Tauri shell origins.
+ * ...crossed with the three loopback spellings a browser emits (`localhost`,
+ * `127.0.0.1`, `[::1]`) and both schemes. `QUANTA_WEB_PORT` is the same env the
+ * daemon itself binds from (`apps/web-daemon/index.ts`), and the Tauri shell
+ * sets it explicitly when it spawns the sidecar on a random free port
+ * (`apps/tauri-shell/src/daemon.rs`), so this tracks the real port in both
+ * shipped launch paths.
+ *
+ * ── WHAT THIS DOES *NOT* DO (measured, not aspirational) ──────────────────
+ *   - It does not isolate the daemon from a page served on port 5173 itself.
+ *     Whatever runs on the Vite dev port is trusted by construction.
+ *   - It is not a substitute for `QUANTA_WEB_AUTH_TOKEN`. `Origin` is set by
+ *     the browser, so this stops BROWSER-driven cross-origin access only; any
+ *     local process can still speak to the daemon directly with no `Origin` at
+ *     all (see below).
+ *   - `QUANTA_WEB_PORT=0` (OS-chosen port) is NOT resolvable here — the real
+ *     bound port is only known to the listener — so a browser served by a
+ *     port-0 daemon is refused. No shipped launch path uses 0; it is a
+ *     library/test shape.
+ *   - A LAN-bound daemon (`QUANTA_WEB_BIND=0.0.0.0`, which the Tauri shell sets
+ *     so phones can reach it) serves its SPA on a LAN origin like
+ *     `http://192.168.1.5:<port>`. That origin is NOT loopback and is refused —
+ *     as it already was before this change. Unchanged here, flagged as a known
+ *     gap in the LAN-phone path rather than silently widened.
+ *
+ * A hostile page cannot forge `Origin` — the browser sets it — and a non-browser
  * caller sends none at all, which is why absence is allowed rather than refused.
  */
-const LOOPBACK_ORIGIN_RE = /^https?:\/\/(?:localhost|127\.0\.0\.1|\[::1\])(?::\d+)?$/
+/** Vite dev-server port. Pinned in `apps/web-frontend/vite.config.ts` and in
+ *  `apps/tauri-shell/tauri.conf.json`'s `devUrl`. NOTE: that Vite config sets
+ *  `strictPort: false`, so a dev whose 5173 is already taken gets 5174 and a
+ *  403 here — the remedy is to free 5173 (or point `QUANTA_WEB_PORT` at the
+ *  port in use), and the refusal is a loud 403, never a silent wrong answer. */
+const DEV_SERVER_PORT = 5173
+const DEFAULT_DAEMON_PORT = 4096
+/** Loopback hosts as a BROWSER spells them in an `Origin`. Deliberately the
+ *  three literal forms and nothing else: `2130706433`, `0x7f000001`,
+ *  `[::ffff:127.0.0.1]` and `localhost.` are NOT emitted by browsers as origins
+ *  and are refused (pinned by the X-6 spoofing arms). */
+const LOOPBACK_HOSTS = ["localhost", "127.0.0.1", "[::1]"] as const
 const TAURI_ORIGINS: ReadonlySet<string> = new Set(["tauri://localhost", "https://tauri.localhost"])
+
+/** Parse `QUANTA_WEB_PORT` the way `apps/web-daemon/index.ts` does, but
+ *  TOTAL: an unparseable/out-of-range value falls back to the default instead
+ *  of throwing, because this runs per-request on the serving path and a throw
+ *  here would turn a misconfigured port into a 500 on every route. The daemon's
+ *  own startup parse is the one that rejects bad input loudly. */
+const parseDaemonPort = (raw: string | undefined): number => {
+  if (raw === undefined || raw.length === 0) return DEFAULT_DAEMON_PORT
+  const n = Number(raw)
+  if (!Number.isInteger(n) || n < 0 || n > 65535) return DEFAULT_DAEMON_PORT
+  return n
+}
+
+/** Every origin string a shipped frontend can present, for one daemon port.
+ *  Built as EXACT strings (not a regex) so the match is an equality test and
+ *  cannot be widened by a future pattern edit. */
+const buildAllowedOrigins = (daemonPort: number): ReadonlySet<string> => {
+  const out = new Set<string>(TAURI_ORIGINS)
+  for (const port of [daemonPort, DEV_SERVER_PORT]) {
+    for (const host of LOOPBACK_HOSTS) {
+      out.add(`http://${host}:${port}`)
+      out.add(`https://${host}:${port}`)
+      // A browser OMITS the default port for the scheme, so a daemon on 80/443
+      // presents a portless origin. Requires root to bind, hence rare — but the
+      // omission is what the browser does, not something we get to opt out of.
+      if (port === 80) out.add(`http://${host}`)
+      if (port === 443) out.add(`https://${host}`)
+    }
+  }
+  return out
+}
+
+/** Memoised on the RAW env value, so a test (or an operator) changing
+ *  `QUANTA_WEB_PORT` is picked up, without rebuilding the set on every
+ *  request. */
+let allowedOriginsCache:
+  | { readonly raw: string | undefined; readonly set: ReadonlySet<string> }
+  | undefined
+
+const allowedOrigins = (): ReadonlySet<string> => {
+  const raw = process.env.QUANTA_WEB_PORT
+  if (allowedOriginsCache === undefined || allowedOriginsCache.raw !== raw) {
+    allowedOriginsCache = { raw, set: buildAllowedOrigins(parseDaemonPort(raw)) }
+  }
+  return allowedOriginsCache.set
+}
+
+/** Test-only view of the resolved allowlist, so the fence's SET (not just its
+ *  yes/no answers) can be asserted directly. */
+export const _allowedOriginsForTest = (): ReadonlySet<string> => allowedOrigins()
 
 /** `true` when this request may be served to a browser. An ABSENT `Origin`
  *  (curl, the CLI's own client, a same-origin fetch) is allowed — adding a
@@ -105,7 +206,7 @@ const TAURI_ORIGINS: ReadonlySet<string> = new Set(["tauri://localhost", "https:
  *  browser. */
 export const isAllowedOrigin = (origin: string | null): boolean => {
   if (origin === null || origin === "") return true
-  return LOOPBACK_ORIGIN_RE.test(origin) || TAURI_ORIGINS.has(origin)
+  return allowedOrigins().has(origin)
 }
 
 /** CORS headers — the frontend dev server (`localhost:5173`) is a
