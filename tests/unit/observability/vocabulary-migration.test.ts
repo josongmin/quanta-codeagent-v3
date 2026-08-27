@@ -135,10 +135,21 @@ interface LiteralHit {
   kind: "quanta" | "gen_ai"
 }
 
-const scanForLiterals = (): LiteralHit[] => {
+/** The scan RESULT, not just its hits: `scanned` is what every arm below
+ *  floors on. `hits.length === 0` is the verdict a healthy tree and a scan that
+ *  read NOTHING both produce, so an arm that only checks the hits is green on
+ *  an empty walk having asserted nothing. */
+interface LiteralScan {
+  readonly hits: LiteralHit[]
+  readonly scanned: number
+}
+
+const scanForLiterals = (): LiteralScan => {
   const hits: LiteralHit[] = []
+  let scanned = 0
   for (const file of allSrcFiles()) {
     if (VOCABULARY_OWNER_FILES.has(file)) continue
+    scanned += 1
     const text = withoutSymbolDescriptions(readFileSync(file, "utf8"))
     // Iterate both regexes independently — they have disjoint prefixes so a
     // match in one cannot mask the other.
@@ -151,7 +162,7 @@ const scanForLiterals = (): LiteralHit[] => {
       if (key !== undefined) hits.push({ file, key, kind: "gen_ai" })
     }
   }
-  return hits
+  return { hits, scanned }
 }
 
 // ---------------------------------------------------------------------------
@@ -160,26 +171,31 @@ const scanForLiterals = (): LiteralHit[] => {
 
 describe("Wave D — vocabulary namespace integrity", () => {
   test("every quanta.* key starts with the canonical prefix", () => {
-    for (const k of ALL_ATTR_KEYS) {
-      if (k.startsWith("quanta.")) {
-        expect(/^quanta\.[a-z_]+(\.[a-z0-9_]+)+$/.test(k)).toBe(true)
-      }
+    // The set under test is the FILTERED subset, not ALL_ATTR_KEYS — a filter
+    // that matched nothing (a namespace rename) would run the body zero times
+    // and pass. Floor the subset this arm is about.
+    const keys = ALL_ATTR_KEYS.filter((k) => k.startsWith("quanta."))
+    expect(keys.length).toBeGreaterThan(0)
+    for (const k of keys) {
+      expect(/^quanta\.[a-z_]+(\.[a-z0-9_]+)+$/.test(k)).toBe(true)
     }
   })
 
   test("every gen_ai.* key starts with the canonical prefix", () => {
-    for (const k of ALL_ATTR_KEYS) {
-      if (k.startsWith("gen_ai.")) {
-        expect(/^gen_ai\.[a-z_]+(\.[a-z0-9_]+)*$/.test(k)).toBe(true)
-      }
+    const keys = ALL_ATTR_KEYS.filter((k) => k.startsWith("gen_ai."))
+    expect(keys.length).toBeGreaterThan(0)
+    for (const k of keys) {
+      expect(/^gen_ai\.[a-z_]+(\.[a-z0-9_]+)*$/.test(k)).toBe(true)
     }
   })
 
   test("vocabulary keys are unique (no aliasing accidents)", () => {
+    expect(ALL_ATTR_KEYS.length).toBeGreaterThan(0)
     expect(new Set(ALL_ATTR_KEYS).size).toBe(ALL_ATTR_KEYS.length)
   })
 
   test("ATTR_KEY_SET membership agrees with ALL_ATTR_KEYS", () => {
+    expect(ALL_ATTR_KEYS.length).toBeGreaterThan(0)
     for (const k of ALL_ATTR_KEYS) expect(ATTR_KEY_SET.has(k)).toBe(true)
   })
 })
@@ -220,7 +236,9 @@ describe("Wave D — new keys added by this slice", () => {
 
 describe("Wave D — single source of truth (orphan literal scan)", () => {
   test("no raw quanta.* attribute-key literal exists outside the vocabulary module", () => {
-    const hits = scanForLiterals().filter((h) => h.kind === "quanta")
+    const scan = scanForLiterals()
+    expect(scan.scanned).toBeGreaterThan(0) // ANTI-VACUITY FLOOR
+    const hits = scan.hits.filter((h) => h.kind === "quanta")
     // The schema label `quanta.trajectory.v1` is whitelisted via
     // VOCABULARY_OWNER_FILES; any remaining hit is a real migration miss.
     if (hits.length > 0) {
@@ -233,7 +251,9 @@ describe("Wave D — single source of truth (orphan literal scan)", () => {
   })
 
   test("no raw gen_ai.* attribute-key literal exists outside the vocabulary module", () => {
-    const hits = scanForLiterals().filter((h) => h.kind === "gen_ai")
+    const scan = scanForLiterals()
+    expect(scan.scanned).toBeGreaterThan(0) // ANTI-VACUITY FLOOR
+    const hits = scan.hits.filter((h) => h.kind === "gen_ai")
     if (hits.length > 0) {
       const report = hits
         .map((h) => `  ${h.file.slice(SRC_ROOT.length + 1)}: "${h.key}"`)
@@ -250,7 +270,9 @@ describe("Wave D — single source of truth (orphan literal scan)", () => {
     // declared vocabulary key. Today the scan should return zero, so the
     // loop simply runs zero times — the assertion is structurally meaningful
     // regardless.
-    for (const h of scanForLiterals()) {
+    const scan = scanForLiterals()
+    expect(scan.scanned).toBeGreaterThan(0) // ANTI-VACUITY FLOOR
+    for (const h of scan.hits) {
       expect(ATTR_KEY_SET.has(h.key)).toBe(true)
     }
   })

@@ -29,6 +29,10 @@
  *   R-7  PAIRED CONTROL — a 2xx batch is cleared and never re-sent.
  *   R-8  A batch that cannot even be SERIALIZED is dropped, not re-queued
  *        forever (same blackhole, one layer up).
+ *   R-11 The harness's own `maxBufferSize: 3` is the cap IN FORCE — it used to
+ *        be silently raised to `batchSize` (1,000,000) by the
+ *        `Math.max(maxBufferSize, batchSize)` floor, so the knob named a bound
+ *        no arm ran under.
  */
 
 import { describe, expect, test } from "bun:test"
@@ -63,7 +67,13 @@ const harness = (respond: (attempt: number) => Response): Harness => {
   const exporter = otelHttpExporter({
     endpoint: "http://collector.invalid",
     flushIntervalMs: 0, // no timer — the test drives every flush
-    batchSize: 1_000_000, // never auto-flush on size
+    // The cap is floored at `Math.max(maxBufferSize, batchSize)`, so the
+    // `batchSize: 1_000_000` this harness used to carry silently raised the cap
+    // to 1,000,000 and the `3` asserted NOTHING. A tiny cap is only expressible
+    // with a tiny batch size — so batchSize IS the cap here, and every arm
+    // below records at most 1 span, well under it, so none auto-flushes on
+    // size. R-11 is the arm that proves the 3 is really in force.
+    batchSize: 3,
     maxBufferSize: 3,
     now: () => clock,
     warn: (m) => warns.push(m),
@@ -171,6 +181,31 @@ describe("R — retry classification", () => {
     await h.flush()
     expect(h.posts.length).toBe(1)
     expect(h.warns).toEqual([])
+  })
+
+  test("R-11 the harness's declared cap of 3 is the cap actually IN FORCE", async () => {
+    // The knob this arm exists for: `maxBufferSize: 3` used to sit beside
+    // `batchSize: 1_000_000`, and the exporter floors the cap at
+    // `Math.max(maxBufferSize, batchSize)` — so the real cap was 1,000,000 and
+    // every arm above ran with an UNBOUNDED buffer while naming a bound of 3.
+    //
+    // The discriminator: a wedged (503) stream re-queues its unsent snapshot at
+    // the FRONT, ahead of records that arrived meanwhile. With the cap really
+    // at 3, the oldest overflow is evicted and the next POST carries the NEWEST
+    // three; with the cap silently at 1,000,000 it carries all five.
+    const h = harness(() => res(503))
+    for (const n of ["s1", "s2", "s3", "s4", "s5"]) h.record(n)
+    await h.flush() // the size-triggered flush (batchSize 3) is in flight
+    h.advance(60_000)
+    await h.flush()
+
+    const carried = (i: number): string[] =>
+      ["s1", "s2", "s3", "s4", "s5"].filter((n) => (h.posts[i]?.body ?? "").includes(`"${n}"`))
+    // batchSize 3 really fired at the third record...
+    expect(carried(0)).toEqual(["s1", "s2", "s3"])
+    // ...and the re-queue + cap dropped the two OLDEST of the five (documented
+    // drop-oldest policy), which is only possible if the cap is 3.
+    expect(carried(1)).toEqual(["s3", "s4", "s5"])
   })
 
   test("R-8 an unserializable batch is dropped, not re-queued forever", async () => {

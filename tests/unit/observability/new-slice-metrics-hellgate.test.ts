@@ -158,7 +158,14 @@ describe("HELL-OT-02 — narrow ports live in their slice and never import @/obs
 
     test(`no file under src/${slice}/ runtime-imports @/observability`, () => {
       const offenders: string[] = []
-      for (const { path, text } of readSliceFiles(slice)) {
+      const files = readSliceFiles(slice)
+      // ANTI-VACUITY FLOOR — this arm's OWN. `offenders.length === 0` is also
+      // what an empty scan produces, so without this the arm is green on a
+      // renamed/emptied slice dir having read nothing. The neighbouring
+      // "metric-port.ts exists" arm is NOT a floor for this one: arms fail
+      // independently.
+      expect(files.length).toBeGreaterThan(0)
+      for (const { path, text } of files) {
         if (importsObservability(text)) offenders.push(path)
       }
       if (offenders.length > 0) {
@@ -264,6 +271,12 @@ describe("HELL-OT-05 — only vocabulary.ts + new-slice-instruments.ts reference
   test("no other src/ file contains a raw literal for any of the 6 keys", () => {
     const all: string[] = []
     walkSrc(SRC_ROOT, all)
+    // ANTI-VACUITY FLOOR — an empty walk yields zero offenders, i.e. green
+    // having scanned nothing. Floored on the two files this arm is ABOUT (the
+    // authorised owners), so a walk that stops short of src/observability/ is
+    // caught too, not just a walk that returns [].
+    expect(all.length).toBeGreaterThan(0)
+    expect(all.filter((f) => AUTHORISED.has(f)).sort()).toEqual([...AUTHORISED].sort())
     const offenders: Array<{ file: string; key: string }> = []
     for (const f of all) {
       if (AUTHORISED.has(f)) continue

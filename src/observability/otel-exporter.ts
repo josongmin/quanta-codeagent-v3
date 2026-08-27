@@ -28,8 +28,10 @@
  *     ever instantiated → byte-identical to the no-op tracer/sink path).
  *   - **No-throw**. Every public method swallows network / serialization
  *     errors and logs to the optional `warn` sink. The buffer is NOT drained
- *     on failure so the next flush retries — but we also NEVER let an
- *     observability path break a tool call.
+ *     on failure so the next flush retries — except on the FORCED flush
+ *     `teardown()` runs, where there IS no next flush: that failure discards
+ *     the batch and says so, rather than promising a retry nothing will run.
+ *     Either way we NEVER let an observability path break a tool call.
  *   - **Caller-injected `fetch` + `now` + `setInterval`-shaped scheduler**.
  *     Test seam: the hellgate drives the exporter with a fake fetch + fake
  *     clock + manual-tick scheduler so we can assert batch-size flush, time-
@@ -58,13 +60,7 @@
 import { errMessage } from "@/shared"
 import type { MetricSink } from "./metrics/port"
 import type { ExportMetric, ExportSpan } from "./otel-exporter/otlp-encode"
-import { serializeMetrics, serializeSpans } from "./otel-exporter/otlp-encode"
-import {
-  backoffMs,
-  classifyPostStatus,
-  type PostOutcome,
-  parseRetryAfterMs,
-} from "./otel-exporter/retry-policy"
+import { buildOtlpTransport } from "./otel-exporter/transport"
 
 // Re-exported from its own module (the retry policy moved out when it pushed
 // this file into the god-code cohort). Kept on the original path because the
@@ -198,8 +194,6 @@ const DEFAULT_SERVICE_NAME = "quanta-codeagent"
 const DEFAULT_BATCH_SIZE = 64
 const DEFAULT_FLUSH_INTERVAL_MS = 5000
 const DEFAULT_MAX_BUFFER_SIZE = 10_000
-const TRACES_PATH = "/v1/traces"
-const METRICS_PATH = "/v1/metrics"
 
 // ────────────────────────────────────────────────────────────────────────────
 // OTLP/JSON serialization helpers — minimal field set per spec.
@@ -211,238 +205,9 @@ const METRICS_PATH = "/v1/metrics"
 // Factory
 // ────────────────────────────────────────────────────────────────────────────
 
-/**
- * The OTLP transport: resolve headers, POST one envelope, and the two buffer
- * flushes built on it.
- *
- * The flush logic is the reason this is worth naming. It takes the whole buffer
- * out BY IDENTITY and clears it, so records arriving during the awaited POST
- * land in the now-empty buffer; on failure the unsent snapshot is re-queued
- * AHEAD of the newcomers and the cap re-applied. Indexing by front-count
- * instead would drop unsent records beyond the documented drop-oldest policy
- * whenever `boundedPush` evicted from the front mid-flush (audit R1 D-F1).
- *
- * Extracted from {@link otelHttpExporter} (god-function burndown).
- */
-/**
- * The classified POST, hoisted out of {@link buildOtlpTransport}.
- *
- * Extracted because the transport crossed the 150-line god-FUNCTION ceiling
- * when retry classification landed. It is a clean seam: this half needs only
- * the endpoint, the fetch impl, the header resolver and a warn sink — none of
- * the buffers, gates or drop counters the flush half owns.
- */
-const makeClassifiedPost = (
-  opts: OtelExporterOpts,
-  deps: {
-    readonly fetchImpl: typeof fetch
-    readonly endpoint: string
-    readonly safeWarn: (message: string) => void
-  },
-): ((path: string, body: unknown) => Promise<PostOutcome>) => {
-  const { fetchImpl, endpoint, safeWarn } = deps
-  const resolveHeaders = async (): Promise<Record<string, string>> => {
-    const staticHeaders = { ...(opts.headers ?? {}) }
-    if (opts.getHeaders === undefined) return staticHeaders
-    try {
-      const dynamic = await opts.getHeaders()
-      return { ...staticHeaders, ...dynamic }
-    } catch (e) {
-      safeWarn(`[otel-exporter] getHeaders: ${errMessage(e)} (falling back to static headers)`)
-      return staticHeaders
-    }
-  }
-
-  /** POST one envelope to `${endpoint}${path}`, CLASSIFIED.
-   *
-   *  Three outcomes, not two — see {@link classifyPostStatus}. The caller
-   *  clears the buffer on `ok`, discards the batch on `drop`, and re-queues +
-   *  backs off on `retry`. A serialization failure is a `drop`: the same
-   *  records will fail to stringify on every future flush, so re-queueing them
-   *  is the same permanent blackhole as retrying a 400, one layer up. */
-  const post = async (path: string, body: unknown): Promise<PostOutcome> => {
-    let serialized: string
-    try {
-      serialized = JSON.stringify(body)
-    } catch (e) {
-      return { kind: "drop", reason: `serialize failed (${errMessage(e)})` }
-    }
-    const dynamicHeaders = await resolveHeaders()
-    try {
-      const res = await fetchImpl(`${endpoint}${path}`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          ...dynamicHeaders,
-        },
-        body: serialized,
-      })
-      if (res.ok) return { kind: "ok" }
-      if (classifyPostStatus(res.status) === "drop") {
-        return { kind: "drop", reason: `HTTP ${res.status}` }
-      }
-      return {
-        kind: "retry",
-        retryAfterMs: parseRetryAfterMs(res.headers?.get?.("retry-after")),
-        reason: `HTTP ${res.status}`,
-      }
-      // A transport throw (DNS, ECONNREFUSED, TLS, abort) is indistinguishable
-      // from "the collector is restarting" — always retryable. It does NOT warn
-      // here: the caller's `onRetry` logs every retry class through ONE latched
-      // line, so this path is neither silent nor a per-attempt firehose.
-    } catch (e) {
-      return { kind: "retry", retryAfterMs: undefined, reason: errMessage(e) }
-    }
-  }
-  return post
-}
-
-const buildOtlpTransport = (
-  opts: OtelExporterOpts,
-  ctx: {
-    readonly fetchImpl: typeof fetch
-    readonly endpoint: string
-    readonly serviceName: string
-    readonly runId: string | undefined
-    readonly maxBufferSize: number
-    readonly spanBuffer: ExportSpan[]
-    readonly metricBuffer: ExportMetric[]
-    readonly overflowWarned: { span: boolean; metric: boolean }
-    readonly safeWarn: (message: string) => void
-  },
-): {
-  readonly flushSpans: (force?: boolean) => Promise<void>
-  readonly flushMetrics: (force?: boolean) => Promise<void>
-} => {
-  const {
-    fetchImpl,
-    endpoint,
-    serviceName,
-    runId,
-    maxBufferSize,
-    spanBuffer,
-    metricBuffer,
-    overflowWarned,
-    safeWarn,
-  } = ctx
-  const post = makeClassifiedPost(opts, { fetchImpl, endpoint, safeWarn })
-
-  const now = opts.now ?? Date.now
-  /** Per-stream retry gate. `attempts` is CONSECUTIVE retryable failures (reset
-   *  by a success or a drop); `notBeforeMs` is the wall-clock instant the next
-   *  attempt is allowed. Spans and metrics back off independently — a wedged
-   *  metrics pipeline must not stall traces. */
-  const gates = {
-    span: { attempts: 0, notBeforeMs: 0 },
-    metric: { attempts: 0, notBeforeMs: 0 },
-  }
-  /** Records discarded as permanently-rejected, per stream. Surfaced in the
-   *  warn line so a drop is COUNTED and visible, never silent. */
-  const dropped = { span: 0, metric: 0 }
-  /** Records re-queued for retry, per stream, plus a per-STREAK warn latch. A
-   *  retry is the failure class an operator most needs to see (a collector
-   *  503ing for an hour is otherwise invisible until the buffer cap warns), but
-   *  a line per attempt would relocate the DoS to the logger — so the latch
-   *  logs once per consecutive-failure streak and is re-armed by the next
-   *  success or drop, exactly like the overflow latch. */
-  const retried = { span: 0, metric: 0 }
-  const retryWarned = { span: false, metric: false }
-
-  /**
-   * One drain, shared by both streams (they differ only in buffer, path,
-   * serializer and label).
-   *
-   * `force` bypasses the backoff gate — used by `teardown`, where a skipped
-   * attempt is not "we'll get it next tick" but permanent loss at exit.
-   */
-  const makeFlush = <T>(args: {
-    readonly stream: "span" | "metric"
-    readonly buffer: T[]
-    readonly path: string
-    readonly serialize: (batch: ReadonlyArray<T>) => Record<string, unknown>
-  }): ((force?: boolean) => Promise<void>) => {
-    const { stream, buffer, path, serialize } = args
-    const gate = gates[stream]
-
-    /** Landed. Clear the backoff and re-arm the overflow warn latch. */
-    const onOk = (): void => {
-      gate.attempts = 0
-      gate.notBeforeMs = 0
-      retryWarned[stream] = false
-      if (buffer.length < maxBufferSize) overflowWarned[stream] = false
-    }
-
-    /** PERMANENT. Discard the batch rather than re-queue it: re-queueing is
-     *  what turned one rejected batch into a blackhole for every later record.
-     *  Loud, counted, and bounded — the pipeline keeps running. */
-    const onDrop = (count: number, reason: string): void => {
-      gate.attempts = 0
-      gate.notBeforeMs = 0
-      retryWarned[stream] = false
-      dropped[stream] += count
-      safeWarn(
-        `[otel-exporter] POST ${path} → ${reason} — permanent, dropping ${count} ${stream}(s); ${dropped[stream]} dropped total`,
-      )
-    }
-
-    /** Re-queue the unsent snapshot ahead of any newcomers, re-apply the cap
-     *  (drop-oldest) so the buffer cannot grow unbounded, and arm the backoff
-     *  so repeated flushes do not hammer an unhealthy collector. */
-    const onRetry = (snapshot: T[], retryAfterMs: number | undefined, reason: string): void => {
-      gate.attempts += 1
-      const delayMs = retryAfterMs ?? backoffMs(gate.attempts)
-      gate.notBeforeMs = now() + delayMs
-      retried[stream] += snapshot.length
-      buffer.unshift(...snapshot)
-      if (buffer.length > maxBufferSize) {
-        buffer.splice(0, buffer.length - maxBufferSize)
-      }
-      if (retryWarned[stream]) return
-      retryWarned[stream] = true
-      safeWarn(
-        `[otel-exporter] POST ${path} → ${reason} — retryable, re-queued ${snapshot.length} ${stream}(s), next attempt in ${delayMs}ms; ${retried[stream]} retried total (repeats on this streak are not logged)`,
-      )
-    }
-
-    return async (force = false): Promise<void> => {
-      if (buffer.length === 0) return
-      // Backed off — leave the buffer intact and let a later flush carry it.
-      if (!force && now() < gate.notBeforeMs) return
-      // Take the whole buffer out by identity and clear it. Records that arrive
-      // DURING the awaited POST land in the now-empty buffer; the success path
-      // must never index by front-count, because boundedPush may have evicted the
-      // in-flight entries from the front mid-flush — that would drop UNSENT
-      // records beyond the documented drop-oldest overflow policy (audit R1 D-F1).
-      const snapshot = buffer.splice(0, buffer.length)
-      const outcome = await post(path, serialize(snapshot))
-      if (outcome.kind === "ok") return onOk()
-      if (outcome.kind === "drop") return onDrop(snapshot.length, outcome.reason)
-      return onRetry(snapshot, outcome.retryAfterMs, outcome.reason)
-    }
-  }
-
-  const flushSpans = makeFlush({
-    stream: "span",
-    buffer: spanBuffer,
-    path: TRACES_PATH,
-    serialize: (batch) => serializeSpans(batch, serviceName, runId),
-  })
-
-  const flushMetrics = makeFlush({
-    stream: "metric",
-    buffer: metricBuffer,
-    path: METRICS_PATH,
-    serialize: (batch) => serializeMetrics(batch, serviceName, runId),
-  })
-
-  // Serialize concurrent flushes — a fire-and-forget batch-size flush and an
-  // awaited explicit flush can collide. The upstream OTLP/HTTP exporter has
-  // the same invariant: at most one in-flight POST per stream. We use a
-  // simple Promise queue: when a flush is in-flight, the next caller awaits
-  // the same promise; new buffer entries arriving DURING the in-flight flush
-  // are picked up by the NEXT flush.
-  return { flushSpans, flushMetrics }
-}
+// The transport (classified POST + the two buffer drains, incl. the FORCED
+// teardown flush) lives in `./otel-exporter/transport` — see that module's
+// header for the buffer-by-identity invariant and the four flush outcomes.
 
 /** Construct an OTLP/HTTP exporter. The returned instance buffers spans +
  *  metrics in memory, flushes on `batchSize` reach OR every
@@ -506,12 +271,6 @@ export const otelHttpExporter = (opts: OtelExporterOpts): OtelExporter => {
     return true
   }
 
-  /** Resolve the per-POST header set. Static {@link OtelExporterOpts.headers}
-   *  is the base; when {@link OtelExporterOpts.getHeaders} is present its
-   *  awaited result is merged ON TOP (dynamic keys override static). A
-   *  throw/rejection from the dynamic port is swallowed (no-throw) and we fall
-   *  back to the static headers — a rotating-token endpoint blip degrades to
-   *  "send with last static creds", never drops the batch. */
   const { flushSpans, flushMetrics } = buildOtlpTransport(opts, {
     fetchImpl,
     endpoint,
@@ -588,7 +347,8 @@ export const otelHttpExporter = (opts: OtelExporterOpts): OtelExporter => {
         intervalHandle = undefined
       }
       // FORCE: at teardown a backed-off stream has no "next tick" to wait for,
-      // so a skipped attempt is permanent loss rather than deferred delivery.
+      // so a skipped attempt is permanent loss, not deferred delivery — and a
+      // FAILED forced flush is reported as a DISCARD for the same reason.
       await flushAll(true)
     },
   }

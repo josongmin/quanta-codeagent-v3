@@ -321,3 +321,119 @@ describe("C — at most one in-flight POST per stream", () => {
     expect(bodies[1] ?? "").toContain("s2")
   })
 })
+
+/**
+ * X — a FORCED (final) flush reports LOSS, not deferral.
+ *
+ * MEASURED on `3bc009fa8` with the repro below (two spans, collector 503ing,
+ * `teardown()` only):
+ *
+ *   posts: 1
+ *   [otel-exporter] POST /v1/traces → HTTP 503 — retryable, re-queued 2 span(s),
+ *   next attempt in 0ms; 2 retried total (repeats on this streak are not logged)
+ *
+ * `force` exists because "a skipped attempt at exit is loss, not deferral" —
+ * and the line shipped in the same commit reports the OTHER half of that same
+ * loss AS deferral: it names a next attempt that no timer will ever run (the
+ * interval is already cleared) and re-queues into a buffer nothing drains.
+ * `V-1` pins the status, path, batch size and running total, never the delay
+ * clause, so nothing held it.
+ *
+ * Worse in the streak case (X-3): `onRetry`'s per-streak latch is already
+ * armed by the time teardown runs, so the final failure is not merely
+ * mislabelled — it is SILENT.
+ *
+ *   X-1  A failed FORCED flush produces an operator-visible line that names the
+ *        status, stream and count and does NOT promise a next attempt.
+ *   X-2  PAIRED CONTROL — a NON-forced failure keeps the deferral line, so the
+ *        fix cannot be "always say discarding".
+ *   X-3  The final line is not swallowed by the retry-streak latch.
+ *   X-4  BOTH streams report it (a fix that only handles spans fails here).
+ *   X-5  PAIRED CONTROL — a teardown whose flush SUCCEEDS says nothing.
+ *   X-6  PAIRED CONTROL — a permanent (4xx) failure at teardown keeps the
+ *        existing drop line rather than being reclassified.
+ */
+describe("X — a forced (teardown) flush reports LOSS, not deferral", () => {
+  /** The deferral shape: a line that tells the operator to expect another
+   *  attempt. At exit there is none — the interval is already cleared. */
+  const promisesRetry = (line: string): boolean =>
+    /next attempt in \d+ms/.test(line) || line.includes("re-queued")
+
+  test("X-1 a failed teardown flush does NOT promise a next attempt, and names the loss", async () => {
+    const h = harness(() => res(503))
+    h.recordSpan("s1")
+    h.recordSpan("s2")
+    await h.teardown()
+
+    // Something reached the operator at all...
+    expect(h.warns.length).toBeGreaterThan(0)
+    // ...and nothing it says promises delivery that cannot happen.
+    expect(h.warns.filter(promisesRetry)).toEqual([])
+    const text = h.warns.join("\n")
+    expect(text).toContain("503") // WHICH failure
+    expect(text).toContain("/v1/traces") // WHICH stream
+    expect(text).toContain("2 span(s)") // HOW MUCH is gone
+    expect(text).toMatch(/discard|lost|dropped/i) // ...and that it IS gone
+  })
+
+  test("X-2 PAIRED CONTROL — a NON-forced failure keeps the deferral line", async () => {
+    const h = harness(() => res(503))
+    h.recordSpan("s1")
+    h.recordSpan("s2")
+    await h.flush() // an ordinary flush: there really IS a next attempt
+
+    expect(h.warns.filter(promisesRetry).length).toBe(1)
+    expect(h.warns.join("\n")).toContain("re-queued 2 span(s)")
+    expect(h.warns.join("\n")).toMatch(/next attempt in \d+ms/)
+  })
+
+  test("X-3 the final line is NOT swallowed by the retry-streak latch", async () => {
+    // The latch is armed by the ordinary flush below. Without a distinct final
+    // line, teardown's failure is not merely mislabelled — it is SILENT.
+    const h = harness(() => res(503))
+    h.recordSpan("s1")
+    await h.flush()
+    expect(h.warns.length).toBe(1)
+
+    await h.teardown()
+    expect(h.spanPosts()).toBe(2) // the forced attempt really happened
+    expect(h.warns.length).toBe(2) // ...and it was reported
+    expect(promisesRetry(h.warns[1] ?? "")).toBe(false)
+  })
+
+  test("X-4 BOTH streams report the final loss", async () => {
+    const h = harness(() => res(503))
+    h.recordSpan("s1")
+    h.recordMetric("m1")
+    await h.teardown()
+
+    expect(h.warns.filter(promisesRetry)).toEqual([])
+    const text = h.warns.join("\n")
+    expect({
+      traces: text.includes("/v1/traces"),
+      metrics: text.includes("/v1/metrics"),
+    }).toEqual({ traces: true, metrics: true })
+    expect(text).toContain("1 span(s)")
+    expect(text).toContain("1 metric(s)")
+  })
+
+  test("X-5 PAIRED CONTROL — a teardown whose flush SUCCEEDS says nothing", async () => {
+    // The fix cannot be "warn at every teardown".
+    const h = harness(() => res(200))
+    h.recordSpan("s1")
+    h.recordMetric("m1")
+    await h.teardown()
+    expect(h.warns).toEqual([])
+    expect({ spans: h.spanPosts(), metrics: h.metricPosts() }).toEqual({ spans: 1, metrics: 1 })
+  })
+
+  test("X-6 PAIRED CONTROL — a permanent 4xx at teardown keeps the DROP line", async () => {
+    // A 400 was already honest (it neither re-queues nor promises anything);
+    // the fix must not reclassify it into the new bucket.
+    const h = harness(() => res(400))
+    h.recordSpan("s1")
+    await h.teardown()
+    expect(h.warns.length).toBe(1)
+    expect(h.warns[0] ?? "").toContain("permanent, dropping 1 span(s)")
+  })
+})

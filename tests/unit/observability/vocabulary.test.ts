@@ -35,19 +35,30 @@ const genAiKeys = (): string[] => {
 }
 
 describe("vocabulary — namespace shape", () => {
+  // ANTI-VACUITY FLOOR for every loop below: `quantaKeys()` / `genAiKeys()`
+  // are DERIVED by walking the const tree, so a collector that returned []
+  // (a renamed sub-tree, a walk that stopped at the first nested object) would
+  // make each loop body run zero times and every arm here green having checked
+  // nothing. Each arm floors its OWN set — one arm's floor is not another's.
   test("every quanta.* key matches the namespace regex", () => {
-    for (const k of quantaKeys()) {
+    const keys = quantaKeys()
+    expect(keys.length).toBeGreaterThan(0)
+    for (const k of keys) {
       expect(k).toMatch(QUANTA_KEY_RE)
     }
   })
 
   test("every gen_ai.* key matches the namespace regex", () => {
-    for (const k of genAiKeys()) {
+    const keys = genAiKeys()
+    expect(keys.length).toBeGreaterThan(0)
+    for (const k of keys) {
       expect(k).toMatch(GEN_AI_KEY_RE)
     }
   })
 
   test("no quanta.* key starts with gen_ai. and vice versa", () => {
+    expect(quantaKeys().length).toBeGreaterThan(0)
+    expect(genAiKeys().length).toBeGreaterThan(0)
     for (const k of quantaKeys()) expect(k.startsWith("gen_ai.")).toBe(false)
     for (const k of genAiKeys()) expect(k.startsWith("quanta.")).toBe(false)
   })
@@ -55,6 +66,7 @@ describe("vocabulary — namespace shape", () => {
   test("every key is snake_case after the namespace prefix", () => {
     // strict: only lowercase letters, digits, underscore and dot as separator
     const snake = /^[a-z][a-z0-9_.]*$/
+    expect(ALL_ATTR_KEYS.length).toBeGreaterThan(0)
     for (const k of ALL_ATTR_KEYS) {
       expect(k).toMatch(snake)
       // no camelCase fragments — uppercase letters are forbidden
@@ -64,6 +76,7 @@ describe("vocabulary — namespace shape", () => {
 
   test("no duplicate keys across the whole vocabulary", () => {
     const all = [...quantaKeys(), ...genAiKeys()]
+    expect(all.length).toBeGreaterThan(0)
     const unique = new Set(all)
     expect(unique.size).toBe(all.length)
   })
@@ -130,6 +143,7 @@ describe("vocabulary — frozen surface", () => {
   })
 
   test("ATTR_KEY_SET membership matches ALL_ATTR_KEYS exactly", () => {
+    expect(ALL_ATTR_KEYS.length).toBeGreaterThan(0)
     expect(ATTR_KEY_SET.size).toBe(ALL_ATTR_KEYS.length)
     for (const k of ALL_ATTR_KEYS) expect(ATTR_KEY_SET.has(k)).toBe(true)
   })
@@ -143,6 +157,7 @@ describe("vocabulary — frozen surface", () => {
 
 describe("vocabulary — isAttrKey predicate", () => {
   test("returns true for every declared key", () => {
+    expect(ALL_ATTR_KEYS.length).toBeGreaterThan(0)
     for (const k of ALL_ATTR_KEYS) expect(isAttrKey(k)).toBe(true)
   })
 
