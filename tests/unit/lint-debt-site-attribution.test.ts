@@ -46,13 +46,16 @@ const evaluate = (args: {
   scopeOfFile?: (file: string) => "prod" | "tests"
 }) =>
   evaluateCeilings({
-    counts: args.counts ?? new Map(),
-    scopedCounts: args.scopedCounts ?? new Map(),
+    counts: args.counts ?? new Map<string, number>(),
+    scopedCounts: args.scopedCounts ?? new Map<string, number>(),
     ceiling: args.ceiling,
     worstComplexity: 0,
     worstSite: "<none>",
-    sitesByRule: args.sitesByRule,
-    scopeOfFile: args.scopeOfFile,
+    // Spread rather than assign: under `exactOptionalPropertyTypes` an explicit
+    // `undefined` is NOT the same as an absent key, and "absent" is precisely
+    // what A-2 is about.
+    ...(args.sitesByRule === undefined ? {} : { sitesByRule: args.sitesByRule }),
+    ...(args.scopeOfFile === undefined ? {} : { scopeOfFile: args.scopeOfFile }),
   })
 
 describe("A — a breached lint ceiling names its sites", () => {

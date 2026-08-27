@@ -164,8 +164,46 @@ const HARD_DENY_RULES: readonly HardDenyRule[] = [
   {
     name: "git-checkout-discard",
     description:
-      "`git checkout -- <path>` / `git checkout .` / `git checkout <ref> -- <path>` — restores files from index or a ref, silently overwriting any working-tree edits. No reflog entry for the discarded changes.",
-    pattern: /\bgit\b[\s\S]{0,500}?\bcheckout\b[\s\S]{0,500}?(?:\s--\s|\s\.(?=\s|$)|\s--$)/,
+      "`git checkout .` — restores the WHOLE working tree from the index or a ref, discarding every uncommitted edit. `git reset --hard`'s blast radius, with no reflog entry for what was lost.",
+    // NARROWED, and the narrowing is the point.
+    //
+    // This rule used to carry a `\s--\s` alternative, which made
+    // `git checkout -- src/foo.ts` — the CANONICAL "undo my edit to this one
+    // file" — an unappealable hard-deny. A later commit softened exactly that
+    // case to `sensitive-known` in the STRUCTURAL authority
+    // (`shell/assess.ts`, rule `git-checkout-discard-path`) and claimed the
+    // commands were "permitted in practice, exactly as `git restore` has been
+    // all along". They were not: `policy.ts` runs THIS regex corpus BEFORE it
+    // consults the assessor, and returns on the first match. So one rule
+    // identity was giving two answers — `inspect.ts` printed
+    // `HARD_DENY matched 1 rule(s): git-checkout-discard` for a command the
+    // assessor was simultaneously labelling `sensitive-known` — and the
+    // spelling tax the softening set out to delete was still live:
+    //
+    //     assess=sensitive-known hardDenied=YES :: git checkout -- src/foo.ts
+    //     assess=sensitive-known hardDenied=no  :: git restore src/foo.ts
+    //
+    // The named-path forms are now the assessor's business at its own tier.
+    // What stays HERE is the WHOLE-TREE form, whose blast radius no mode may
+    // authorize. `git checkout -- .` still matches (the `.` is the pathspec).
+    //
+    // The old `\s--$` alternative went with it, because it denied a command
+    // that has NO EFFECT. Measured on git 2.50.1, a trailing `--` with no
+    // pathspec discards nothing at all:
+    //
+    //     $ echo CHANGED > f.txt
+    //     $ git checkout --          # also `git checkout HEAD --`, `… main --`
+    //     M	f.txt
+    //     $ cat f.txt
+    //     CHANGED                    # vs `git checkout HEAD -- f.txt` → `a`
+    //
+    // Keeping it would have left the SAME same-identity contradiction in
+    // place under a different spelling: the regex refusing a no-op while
+    // `git-checkout-discard-path` called it `sensitive-known`.
+    //
+    // Pinned in both directions by
+    // `tests/unit/permission/hard-deny-authority-agreement-hellgate.test.ts`.
+    pattern: /\bgit\b[\s\S]{0,500}?\bcheckout\b[\s\S]{0,500}?\s\.(?=\s|$)/,
   },
   {
     name: "git-commit-amend",

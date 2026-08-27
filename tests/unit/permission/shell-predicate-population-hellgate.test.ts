@@ -58,6 +58,7 @@ import { beforeAll, describe, expect, test } from "bun:test"
 import { execFileSync } from "node:child_process"
 import { existsSync, readdirSync, statSync } from "node:fs"
 import { decideBranchOnly } from "@/permission/branch-only"
+import { hardDenyReason } from "@/permission/policy"
 import { assessShellCommand, initShellEffectParser } from "@/permission/shell"
 import { SIMPLE_DENIAL_RULES } from "@/permission/shell/assess"
 import {
@@ -72,6 +73,7 @@ import {
   gitOperandTokens,
   gitValueFlagProbe,
 } from "@/permission/shell/rules"
+import type { ToolAction } from "@/permission/types"
 
 beforeAll(async () => {
   await initShellEffectParser()
@@ -82,6 +84,27 @@ const verdictOf = (cmd: string) => {
   const a = assessShellCommand(cmd)
   return { kind: a.kind, rule: a.kind === "hard-deny" ? a.rule : undefined }
 }
+
+/**
+ * THE OPERATOR-FACING ENTRY POINT, not the structural authority alone.
+ *
+ * Every arm below used to assert `assessShellCommand` and nothing else, and
+ * that is precisely how the fourth instance of this campaign's defect shipped:
+ * `git checkout -- <path>` was softened to `sensitive-known` in the STRUCTURAL
+ * table while `policy.ts` still ran the REGEX corpus first, so the operator
+ * kept getting an unappealable denial the structural table no longer issued.
+ * A single `expect(hardDenyReason(...)).toBeNull()` would have caught it.
+ *
+ * `hardDenyReason` is what a real dispatch calls, so it folds BOTH authorities:
+ * `HARD_DENY` regexes first, `assessShellCommand().kind === "hard-deny"` second.
+ */
+const bashAction = (cmd: string): ToolAction => ({
+  tool: "bash",
+  input: { command: cmd },
+  isReadOnly: false,
+  shellCommand: cmd,
+})
+const operatorHardDenied = (cmd: string): boolean => hardDenyReason(bashAction(cmd)) !== null
 
 /* ------------------------------------------------------------------------- *
  * P-1 — diskutil is a subcommand, not a head
@@ -289,6 +312,10 @@ describe("P-3 worktree discards are covered in both tiers", () => {
     test(`DENY ${cmd}`, () => {
       expect({ cmd, ...verdictOf(cmd) }).toEqual({ cmd, kind: "hard-deny", rule })
     })
+    test(`DENY reaches the OPERATOR — ${cmd}`, () => {
+      // The structural verdict above is not what a dispatch calls. This is.
+      expect({ cmd, hardDenied: operatorHardDenied(cmd) }).toEqual({ cmd, hardDenied: true })
+    })
   }
 
   /**
@@ -299,12 +326,27 @@ describe("P-3 worktree discards are covered in both tiers", () => {
    * `git restore src/foo.ts`, git's supported spelling of the identical effect,
    * was fully allowed. That is not a safety property, it is a spelling tax.
    *
-   * `sensitive-known` is INERT today — nothing else produces it and
-   * `permission/policy.ts`, the only consumer, branches on `=== "hard-deny"` —
-   * so these commands are permitted in practice, exactly as `git restore` has
-   * been all along. It is still the right label: `safe-known` would assert
-   * "no effect that needs a gate" about discarding a user's edits, which is the
-   * false claim that produced this hole.
+   * `sensitive-known` is INERT in the STRUCTURAL seam — `policy.ts` branches on
+   * `=== "hard-deny"` there and nothing else consumes the label yet. It is
+   * still the right label: `safe-known` would assert "no effect that needs a
+   * gate" about discarding a user's edits, which is the false claim that
+   * produced this hole.
+   *
+   * WHAT THIS ARM GOT WRONG FOR ONE ITERATION. The sentence that used to stand
+   * here — "so these commands are permitted in practice, exactly as
+   * `git restore` has been all along" — was FALSE and this test could not see
+   * it, because it only ever asked `assessShellCommand`. `policy.ts:82` runs
+   * the REGEX corpus BEFORE it consults the assessor at `:97`, and
+   * `policy-rules.ts`'s `git-checkout-discard` still carried a `\s--\s`
+   * alternative, so the softening never reached the operator. Measured:
+   * `hardDenyReason("git checkout -- src/foo.ts")` was NON-null while
+   * `hardDenyReason("git restore src/foo.ts")` was null — the exact spelling
+   * tax the change set out to delete, still there, under a rule name
+   * (`git-checkout-discard`) the assessor was simultaneously answering
+   * `git-checkout-discard-path` for.
+   *
+   * So each arm now asserts the OPERATOR-FACING fold as well. That is the
+   * assertion that would have caught it.
    */
   const NAMED_PATH: ReadonlyArray<readonly [string, string]> = [
     ["git checkout -- src/foo.ts", "git-checkout-discard-path"],
@@ -320,6 +362,12 @@ describe("P-3 worktree discards are covered in both tiers", () => {
     test(`SENSITIVE ${cmd}`, () => {
       const a = assessShellCommand(cmd)
       expect({ cmd, kind: a.kind, rule: a.rule }).toEqual({ cmd, kind: "sensitive-known", rule })
+    })
+    test(`SENSITIVE is NOT a hard deny to the operator — ${cmd}`, () => {
+      // `sensitive-known` means "an effect a policy layer should weigh", which
+      // is the opposite of "no mode may authorize". If the operator-facing
+      // fold still refuses it, the label is a lie and the spelling tax is live.
+      expect({ cmd, hardDenied: operatorHardDenied(cmd) }).toEqual({ cmd, hardDenied: false })
     })
   }
 
@@ -342,7 +390,6 @@ describe("P-3 worktree discards are covered in both tiers", () => {
     "git checkout -b feature/x",
     "git checkout -B feature/x main",
     "git switch main",
-    "git switch -c feature/x",
     "git restore --staged .",
     "git restore --staged src/foo.ts",
     "git restore -S -- src/foo.ts",
@@ -353,7 +400,51 @@ describe("P-3 worktree discards are covered in both tiers", () => {
   ] as const
   for (const cmd of ORDINARY) {
     test(`PAIRED CONTROL — safe ${cmd}`, () => {
-      expect({ cmd, kind: kindOf(cmd) }).toEqual({ cmd, kind: "safe-known" })
+      expect({ cmd, kind: kindOf(cmd), hardDenied: operatorHardDenied(cmd) }).toEqual({
+        cmd,
+        kind: "safe-known",
+        hardDenied: false,
+      })
+    })
+  }
+
+  /**
+   * FOUND BY ADDING `hardDenyReason` TO THE ARMS ABOVE, and pinned rather than
+   * quietly fixed or quietly dropped.
+   *
+   * `git switch -c feature/x` used to sit in ORDINARY asserting only
+   * `assessShellCommand`, which answers `safe-known`. Through the OPERATOR the
+   * command is hard-denied — by `git-config-injection`, whose pattern is
+   * `/\bgit\b[\s\S]*?\s-c[\s=]/` and which therefore cannot tell git's
+   * GLOBAL `-c <key>=<value>` from a SUBCOMMAND's own `-c` flag. Measured:
+   *
+   *   git switch -c feature/x    regexRule=git-config-injection  assess=safe-known
+   *   git branch -c old new      regexRule=git-config-injection  assess=safe-known
+   *   git checkout -b feature/x  regexRule=null                  assess=safe-known
+   *   git switch -C feature/x    regexRule=null                  assess=safe-known
+   *
+   * This is the BENIGN-WIDENING direction, not the contradiction this
+   * iteration is about: the two authorities name DIFFERENT rules (the assessor
+   * names none), so `hard-deny-authority-agreement-hellgate.test.ts` correctly
+   * ignores it. It is left alone on purpose — narrowing the pattern to require
+   * an `=` would newly ALLOW `git -c core.fsmonitor status` and friends, which
+   * is a security change that needs its own measurement and its own fixture
+   * review, not a drive-by in a test about `checkout`.
+   *
+   * Pinned as a POSITIVE so it cannot be forgotten: whoever fixes
+   * `git-config-injection` gets a RED here and has to come read this note.
+   */
+  const REGEX_OVER_DENIES_UNDER_A_DIFFERENT_RULE = [
+    "git switch -c feature/x",
+    "git branch -c old-name new-name",
+  ] as const
+  for (const cmd of REGEX_OVER_DENIES_UNDER_A_DIFFERENT_RULE) {
+    test(`KNOWN over-denial (git-config-injection, not a contradiction) — ${cmd}`, () => {
+      expect({ cmd, kind: kindOf(cmd), hardDenied: operatorHardDenied(cmd) }).toEqual({
+        cmd,
+        kind: "safe-known",
+        hardDenied: true,
+      })
     })
   }
 })
@@ -481,6 +572,11 @@ describe("P-4 both git-global consumers resolve the same subcommand", () => {
 
 const DISKUTIL_BIN = "/usr/sbin/diskutil"
 const hasDiskutil = existsSync(DISKUTIL_BIN)
+/** Same visibility rule as P-7's gate: `test.skipIf` prints no reason, so the
+ *  reason goes in a test NAME that always runs. */
+const DISKUTIL_ENV_REASON = hasDiskutil
+  ? `ready — ${DISKUTIL_BIN}`
+  : `SKIPPED — no ${DISKUTIL_BIN} (not macOS)`
 
 const diskutilHelp = (args: readonly string[]): string => {
   try {
@@ -534,6 +630,12 @@ const unclassified = (verbs: readonly string[], known: ReadonlySet<string>): str
 const GROUP_ALIASES = new Set(DISKUTIL_GROUPS.flatMap((g) => g.aliases))
 
 describe("P-5 the diskutil verb population is derived from the binary", () => {
+  test(`diskutil probe environment — ${DISKUTIL_ENV_REASON}`, () => {
+    expect(DISKUTIL_ENV_REASON.startsWith(hasDiskutil ? "ready" : "SKIPPED")).toBe(true)
+    // biome-ignore lint/suspicious/noConsole: visible skip — `test.skipIf` prints no reason
+    if (!hasDiskutil) console.warn(`P-5 diskutil probes ${DISKUTIL_ENV_REASON}`)
+  })
+
   test.skipIf(!hasDiskutil)("every TOP-LEVEL verb the binary prints is classified", () => {
     const verbs = classicVerbs(diskutilHelp([]))
     // Guard against a parser that silently matched nothing — the failure mode
@@ -645,7 +747,51 @@ const installedFormatters = (): string[] =>
     )
   })
 
+/**
+ * The LINUX half of the population, which no scan of THIS machine can reach.
+ *
+ * The macOS arms below probe `/sbin` and find the six `newfs_*`. That says
+ * nothing about the boxes this agent actually shells into, and the rules file
+ * claimed its Linux spellings "are pinned by hand and stay" — a claim made
+ * without ever looking at an image. Two of the seven formatters a stock
+ * `debian:12` installs were missing, so `mkfs.cramfs /dev/sda1` read
+ * `safe-known` there and the machine-probe arm above would have gone RED on
+ * any Debian host.
+ *
+ * SECOND-HAND: measured by the audit that reported the gap with
+ * `docker run --rm --platform linux/amd64 debian:12` +
+ * `ls /sbin /usr/sbin /bin /usr/bin | grep -E '^(mkfs|newfs)' | sort -u`, NOT
+ * re-derived here — the Docker daemon on this machine is down (`docker info`
+ * → "Cannot connect to the Docker daemon"). Pinned as a literal so it is
+ * checkable by anyone who can run that one line, and so the two additions
+ * cannot be dropped again by a set that looks tidy on macOS.
+ */
+const DEBIAN_12_FORMATTERS = [
+  "mkfs",
+  "mkfs.bfs",
+  "mkfs.cramfs",
+  "mkfs.ext2",
+  "mkfs.ext3",
+  "mkfs.ext4",
+  "mkfs.minix",
+] as const
+
 describe("P-6 filesystem-formatter heads are probed, not remembered", () => {
+  test("every formatter a stock debian:12 installs is a head — and the rule FIRES", () => {
+    // Runs on every platform, because it asserts through `assessShellCommand`
+    // rather than through the filesystem. That is the point: the Linux
+    // population is unreachable by a probe HERE, so the only thing that can
+    // guard it is a pinned corpus run through the real assessor.
+    expect(unclassified([...DEBIAN_12_FORMATTERS], FILESYSTEM_FORMAT_HEADS)).toEqual([])
+    for (const head of DEBIAN_12_FORMATTERS) {
+      expect({ head, ...verdictOf(`${head} /dev/sda1`) }).toEqual({
+        head,
+        kind: "hard-deny",
+        rule: "mkfs-format-filesystem",
+      })
+    }
+  })
+
   test("every formatter installed on this machine is a head of the rule", () => {
     const found = installedFormatters()
     // On macOS this is the six `newfs_*` in /sbin. On a Linux box it would be
@@ -700,6 +846,51 @@ describe("P-6 filesystem-formatter heads are probed, not remembered", () => {
  *      does not behave as claimed is red even if both lists agree.
  */
 
+/**
+ * ENVIRONMENT GATE for the arms that SHELL OUT to git.
+ *
+ * P-5 gates every `diskutil` arm on `existsSync("/usr/sbin/diskutil")`. P-7
+ * gated nothing, and it needs TWO conditions, not one: the binary must exist
+ * AND the suite must be running inside a git work tree, because every probe is
+ * `git <flag> <sentinel> rev-parse --is-inside-work-tree` and that answers
+ * `true` only from inside one.
+ *
+ * MEASURED with git removed from PATH: NINE hard failures —
+ *
+ *   (fail) `-C` really does eat the next token on the installed git
+ *   (fail) `-c` … `--git-dir` … `--work-tree` … `--namespace` …
+ *   (fail) `--config-env` … `--attr-source` …
+ *   (fail) `--super-prefix` is still absent from the installed git
+ *   (fail) PAIRED CONTROL — the probe distinguishes …
+ *
+ * — every one of which reads as a PERMISSION REGRESSION and none of which is.
+ * The cause is a missing binary. Note that `--super-prefix is still absent`
+ * fails in the WRONG DIRECTION too: with no git at all the probe returns no
+ * "unknown option" text, so a test whose whole job is to notice a flag coming
+ * BACK reports a problem when nothing came back.
+ *
+ * The 3 arms that pass without git (`membership is EXACTLY the pinned list`,
+ * `--exec-path is pinned OUT`, `the two provenance tiers partition the set`)
+ * are pure and stay ungated — measured, not assumed.
+ */
+const GIT_ENV: { readonly ok: boolean; readonly reason: string } = (() => {
+  try {
+    execFileSync("git", ["--version"], { encoding: "utf8", stdio: "pipe" })
+  } catch {
+    return { ok: false, reason: "SKIPPED — no `git` on PATH" }
+  }
+  try {
+    const out = execFileSync("git", ["rev-parse", "--is-inside-work-tree"], {
+      encoding: "utf8",
+      stdio: "pipe",
+    }).trim()
+    if (out !== "true") return { ok: false, reason: "SKIPPED — not inside a git work tree" }
+  } catch {
+    return { ok: false, reason: "SKIPPED — not inside a git work tree" }
+  }
+  return { ok: true, reason: "ready — git on PATH, inside a work tree" }
+})()
+
 const gitProbe = (args: readonly string[]): { rc: number; out: string } => {
   try {
     const out = execFileSync("git", [...args], {
@@ -718,6 +909,21 @@ const gitProbe = (args: readonly string[]): { rc: number; out: string } => {
 }
 
 describe("P-7 the git global value-flag population cannot shrink silently", () => {
+  // THE SKIP IS VISIBLE. `test.skipIf` alone reports "(skip)" with no reason,
+  // which is how a permanently-skipped arm survives for months. This one
+  // always RUNS and carries the reason in its own name, so a reader of the
+  // output sees why the probes did or did not execute.
+  test(`git probe environment — ${GIT_ENV.reason}`, () => {
+    expect({ gated: !GIT_ENV.ok, reason: GIT_ENV.reason }).toEqual({
+      gated: !GIT_ENV.ok,
+      reason: GIT_ENV.ok ? "ready — git on PATH, inside a work tree" : GIT_ENV.reason,
+    })
+    if (!GIT_ENV.ok) {
+      // biome-ignore lint/suspicious/noConsole: visible skip — `test.skipIf` prints no reason
+      console.warn(`P-7 git probes ${GIT_ENV.reason} — flag membership is still pinned below.`)
+    }
+  })
+
   /** PINNED LITERAL — deliberately NOT derived from the set under test.
    *  To extend it: probe the candidate with
    *  `git <flag> <sentinel> rev-parse --is-inside-work-tree`; it consumes a
@@ -766,17 +972,20 @@ describe("P-7 the git global value-flag population cannot shrink silently", () =
   })
 
   for (const flag of GIT_VALUE_FLAGS_VERIFIED_ON_INSTALLED_GIT) {
-    test(`\`${flag}\` really does eat the next token on the installed git`, () => {
-      const sentinel = gitValueFlagProbe(flag)
-      // A flag claiming "verified" with no probe recipe is not verified.
-      expect({ flag, sentinel: sentinel !== undefined }).toEqual({ flag, sentinel: true })
-      const { out } = gitProbe([flag, sentinel ?? "", "rev-parse", "--is-inside-work-tree"])
-      expect({ flag, out }).toEqual({ flag, out: "true" })
-    })
+    test.skipIf(!GIT_ENV.ok)(
+      `\`${flag}\` really does eat the next token on the installed git`,
+      () => {
+        const sentinel = gitValueFlagProbe(flag)
+        // A flag claiming "verified" with no probe recipe is not verified.
+        expect({ flag, sentinel: sentinel !== undefined }).toEqual({ flag, sentinel: true })
+        const { out } = gitProbe([flag, sentinel ?? "", "rev-parse", "--is-inside-work-tree"])
+        expect({ flag, out }).toEqual({ flag, out: "true" })
+      },
+    )
   }
 
   for (const flag of GIT_VALUE_FLAGS_ABSENT_ON_INSTALLED_GIT) {
-    test(`\`${flag}\` is still absent from the installed git`, () => {
+    test.skipIf(!GIT_ENV.ok)(`\`${flag}\` is still absent from the installed git`, () => {
       // Retained for older gits. If it ever comes BACK, re-probe it and move
       // it to the verified tier rather than assuming this note still holds.
       const { rc, out } = gitProbe([flag, "zzz", "rev-parse", "--is-inside-work-tree"])
@@ -788,19 +997,22 @@ describe("P-7 the git global value-flag population cannot shrink silently", () =
     })
   }
 
-  test("PAIRED CONTROL — the probe distinguishes, it does not answer `true` to all", () => {
-    // If the discriminator returned `true` unconditionally, every arm above
-    // would pass for any flag whatsoever.
-    for (const flag of GIT_GLOBAL_FLAGS_TAKING_NO_SEPARATED_VALUE) {
-      expect({
-        flag,
-        out: gitProbe([flag, "zzz", "rev-parse", "--is-inside-work-tree"]).out,
-      }).not.toEqual({ flag, out: "true" })
-    }
-    expect(
-      gitProbe(["--not-a-real-global", "zzz", "rev-parse", "--is-inside-work-tree"]).out,
-    ).not.toBe("true")
-    // …and the baseline it is measured against is itself real.
-    expect(gitProbe(["rev-parse", "--is-inside-work-tree"]).out).toBe("true")
-  })
+  test.skipIf(!GIT_ENV.ok)(
+    "PAIRED CONTROL — the probe distinguishes, it does not answer `true` to all",
+    () => {
+      // If the discriminator returned `true` unconditionally, every arm above
+      // would pass for any flag whatsoever.
+      for (const flag of GIT_GLOBAL_FLAGS_TAKING_NO_SEPARATED_VALUE) {
+        expect({
+          flag,
+          out: gitProbe([flag, "zzz", "rev-parse", "--is-inside-work-tree"]).out,
+        }).not.toEqual({ flag, out: "true" })
+      }
+      expect(
+        gitProbe(["--not-a-real-global", "zzz", "rev-parse", "--is-inside-work-tree"]).out,
+      ).not.toBe("true")
+      // …and the baseline it is measured against is itself real.
+      expect(gitProbe(["rev-parse", "--is-inside-work-tree"]).out).toBe("true")
+    },
+  )
 })

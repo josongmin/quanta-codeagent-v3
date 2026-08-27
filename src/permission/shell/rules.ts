@@ -548,21 +548,52 @@ export const DISKUTIL_LEADING_MODIFIERS: ReadonlySet<string> = new Set(["quiet"]
  * `/sbin`; `/usr/sbin` has none). The population hellgate re-runs that scan and
  * fails if the machine has a formatter this set does not name.
  *
- * The Linux/util-linux spellings CANNOT be probed from here — no such binary is
- * installed — so they are pinned by hand and stay: a sandbox or container image
- * this agent shells into may well have them. To extend that half, run
- * `ls /sbin /usr/sbin /bin /usr/bin | grep -E '^mkfs'` on the target image.
+ * The Linux/util-linux half CANNOT be probed from here — no such binary is
+ * installed on macOS — but "cannot probe from here" is not "pinned by hand and
+ * stays". That claim shipped, and it was wrong: the hand-written list was
+ * MISSING two of the seven formatters a stock Debian 12 actually installs.
+ *
+ * Ground truth, `docker run --rm --platform linux/amd64 debian:12` with
+ * `ls /sbin /usr/sbin /bin /usr/bin | grep -E '^(mkfs|newfs)' | sort -u`:
+ *
+ *     mkfs  mkfs.bfs  mkfs.cramfs  mkfs.ext2  mkfs.ext3  mkfs.ext4  mkfs.minix
+ *
+ * `mkfs.bfs` and `mkfs.cramfs` were absent, so `mkfs.cramfs /dev/sda1` read
+ * `safe-known` on every Linux box this agent shells into, and P-6 of
+ * `shell-predicate-population-hellgate.test.ts` — which scans those four
+ * directories and fails on a formatter the set does not name — would have gone
+ * RED on any Debian host. Note the shape of the miss: the list had the ext
+ * family and the "modern" filesystems somebody thought of, and lacked the two
+ * legacy ones nobody would think of. That is the same generative defect as the
+ * rest of this file — a population enumerated from memory instead of from the
+ * image.
+ *
+ * SECOND-HAND PROVENANCE, stated rather than implied: the Debian list above was
+ * measured by the audit that reported this gap, NOT re-derived here. The Docker
+ * daemon on this machine is not running (`docker info` → "Cannot connect to the
+ * Docker daemon at unix:///Users/…/docker.sock"), so the command could not be
+ * re-run. It is re-derivable in one line on any Linux host, and P-6 re-derives
+ * it automatically the moment this suite runs on one.
+ *
+ * The non-Debian Linux spellings below (`xfs`, `btrfs`, `vfat`, `fat`) are from
+ * the same hand-written origin and remain UNVERIFIED against any image; they
+ * are retained because a head that no binary answers to costs nothing, while a
+ * missing one is a live hole.
  */
 export const FILESYSTEM_FORMAT_HEADS: ReadonlySet<string> = new Set([
-  // Linux / util-linux — pinned, not probed (absent on this machine).
-  "mkfs",
-  "mkfs.ext2",
-  "mkfs.ext3",
-  "mkfs.ext4",
+  // Linux / util-linux. The seven marked `debian:12` are the ones a stock
+  // image actually installs (second-hand measurement, see the note above);
+  // the rest are hand-written and unverified against any image.
+  "mkfs", // debian:12
+  "mkfs.bfs", // debian:12 — WAS MISSING
+  "mkfs.cramfs", // debian:12 — WAS MISSING
+  "mkfs.ext2", // debian:12
+  "mkfs.ext3", // debian:12
+  "mkfs.ext4", // debian:12
+  "mkfs.minix", // debian:12
   "mkfs.xfs",
   "mkfs.btrfs",
   "mkfs.vfat",
-  "mkfs.minix",
   "mkfs.fat",
   // BSD generic. Not on macOS either, but it is the FreeBSD/NetBSD spelling.
   "newfs",

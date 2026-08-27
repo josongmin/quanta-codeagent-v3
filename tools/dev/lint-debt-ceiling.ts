@@ -75,7 +75,7 @@ const ceilingPath = join(repoRoot, "tools/dev/lint-debt-ceiling.json")
 /** Where a diagnostic lives. `prod` is what ships. */
 type Scope = "prod" | "tests"
 
-type Ceiling = {
+export type Ceiling = {
   readonly note?: string
   readonly rules: Readonly<Record<string, number>>
   /** Rules pinned per scope instead of by one repo-wide total. A rule appears

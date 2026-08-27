@@ -318,15 +318,24 @@ export const PERMISSION_RULE_FIXTURES: Readonly<Record<string, RuleFixture>> = {
     ],
   },
   "git-checkout-discard": {
-    mustBlock: [
+    // WHOLE-TREE discards only. A NAMED PATH is not this rule's business: the
+    // structural authority classifies `git checkout -- <path>` as
+    // `git-checkout-discard-path`, a SOFT (`sensitive-known`) tier that asks
+    // the operator, and `git restore <path>` — the identical operation in
+    // modern spelling — has always been permitted. While this regex also fired,
+    // the two authorities carried near-identical rule names and returned
+    // opposite verdicts for the same command, so the softening that shipped in
+    // `assess.ts` never reached an operator: `policy.ts` runs this corpus
+    // BEFORE it consults the assessor.
+    mustBlock: ["git checkout .", "git checkout -- .", "cd /tmp && git checkout ."],
+    mustAllow: [
+      // The three that MOVED here (2026-08-28), and the reason they are kept
+      // rather than deleted: as `mustAllow` they are the over-match control
+      // that pins the narrowing. A regex that widens back to named paths
+      // reddens here, which is what makes the fix hold.
       "git checkout -- file.txt",
-      "git checkout .",
-      "git checkout -- .",
       "git checkout HEAD -- src/file.ts",
       "git checkout main -- packages/x/index.ts",
-      "cd /tmp && git checkout .",
-    ],
-    mustAllow: [
       "git checkout main",
       "git checkout -b feature/x",
       "git checkout -B feature/x main",
