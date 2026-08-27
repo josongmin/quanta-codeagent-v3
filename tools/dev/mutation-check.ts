@@ -37,7 +37,7 @@ import { fileURLToPath } from "node:url"
 const repoRoot = dirname(dirname(dirname(fileURLToPath(import.meta.url))))
 
 /** One mutation: revert a single production fix and prove its hellgate dies. */
-interface Mutation {
+export interface Mutation {
   /** Stable id (also used as the cli substring filter). */
   readonly id: string
   /** Severity from the bugbash audit (CRITICAL/HIGH/MED). */
@@ -61,22 +61,25 @@ interface Mutation {
  *   T02 4ac7bf3f · T03 c8a7bce5 · T05 c500bd93 · T08 75411b0d
  *   R1 35d8be1a  · R2 9721a021  · regression-guards d169d2e7 / 4e7596ad
  */
-const MUTATIONS: readonly Mutation[] = [
+export const MUTATIONS: readonly Mutation[] = [
   // ── T03 kernel cancel ──────────────────────────────────────────────────
   {
     id: "t03-reducer-cancel-not-inert",
     severity: "CRITICAL",
     guards: "T03 L5 C-1 — reducer turn.cancel is no longer an inert no-op",
     src: "src/kernel/session/reducer.ts",
-    find: `      const hasActiveTurn = state.status === "running" || state.status === "awaiting_approval"
-      if (!hasActiveTurn) {
-        return { state, hostAction: { kind: "cancel_turn" }, events: [] }
-      }`,
+    // Pin repoint (drift repair): the cancel handler was extracted into its own
+    // top-level reducer function, so the SAME two statements now sit at 2-space
+    // indent instead of 6. Text drift only — the fix is intact.
+    find: `  const hasActiveTurn = state.status === "running" || state.status === "awaiting_approval"
+  if (!hasActiveTurn) {
+    return { state, hostAction: { kind: "cancel_turn" }, events: [] }
+  }`,
     // Pre-T03 shape: the cancel handler returned an inert no-op for EVERY state.
-    replace: `      const hasActiveTurn = state.status === "running" || state.status === "awaiting_approval"
-      if (hasActiveTurn || !hasActiveTurn) {
-        return { state, hostAction: { kind: "none" } as never, events: [] }
-      }`,
+    replace: `  const hasActiveTurn = state.status === "running" || state.status === "awaiting_approval"
+  if (hasActiveTurn || !hasActiveTurn) {
+    return { state, hostAction: { kind: "none" } as never, events: [] }
+  }`,
     gate: "src/kernel/session/__tests__/kernel-cancel.hellgate.test.ts",
     only: "turn.cancel is no longer an inert no-op",
   },
@@ -112,30 +115,24 @@ const MUTATIONS: readonly Mutation[] = [
     severity: "HIGH",
     guards: "R2 H1 — turn.cancel in the controller-registration window (pre-host append)",
     src: "src/kernel/session/scheduler.ts",
-    find: `    let preRegisteredController: AbortController | undefined
-    if (command.type === "turn.run") {
-      preRegisteredController = new AbortController()
-      activeTurnControllers.set(state.sessionId, preRegisteredController)
-    }
-    try {
-      await appendEvents(ctx.eventLog, immediateEvents)
-      await notifyCommitted(ctx, { state: nextState, events: immediateEvents })
-    } catch (e) {
-      // Persistence failed before runTurn could adopt the controller — drop it
-      // so the pre-registration doesn't leak a stale entry.
-      if (
-        preRegisteredController !== undefined &&
-        activeTurnControllers.get(state.sessionId) === preRegisteredController
-      ) {
-        activeTurnControllers.delete(state.sessionId)
+    // Pin repoint (drift repair): the awaited append + its drop-the-controller
+    // compensation were extracted into `commitOrDropController`, the dispatch
+    // block moved one nesting level deeper (4sp -> 6sp), and `turn.submit`
+    // joined `turn.run` as a pre-registering command. What is pinned is still
+    // the SAME load-bearing ordering: pre-register, THEN await persistence.
+    find: `      let preRegisteredController: AbortController | undefined
+      if (command.type === "turn.run" || command.type === "turn.submit") {
+        preRegisteredController = new AbortController()
+        activeTurnControllers.set(state.sessionId, preRegisteredController)
       }
-      throw e
-    }`,
-    // Pre-R2 order: register only AFTER the awaited append — a window
+      await commitOrDropController(`,
+    // Pre-R2 order: never pre-register, so registration happens only later
+    // inside `runTurn` (i.e. AFTER the awaited append) — a window in which
     // turn.cancel finds NO controller, falls to lease.runWith, throws.
-    replace: `    let preRegisteredController: AbortController | undefined
-    await appendEvents(ctx.eventLog, immediateEvents)
-    await notifyCommitted(ctx, { state: nextState, events: immediateEvents })`,
+    // `commitOrDropController` receives `undefined` and its compensation arm
+    // is a no-op, exactly as before the fix existed.
+    replace: `      const preRegisteredController: AbortController | undefined = undefined
+      await commitOrDropController(`,
     gate: "src/kernel/session/__tests__/kernel-cancel.hellgate.test.ts",
     only: "turn.cancel during the pre-host event-log-write window",
   },
@@ -267,12 +264,15 @@ const MUTATIONS: readonly Mutation[] = [
     severity: "HIGH",
     guards: "T08 L8 H1 — destructive reset on a protected branch is DENIED (no ref needed)",
     src: "src/permission/branch-only.ts",
-    find: `    const isDestructive = allToks.some((t) => t === "--hard" || t === "--merge" || t === "--keep")
-    if (isDestructive && currentBranch && protectedBranches.includes(currentBranch)) {`,
+    // Pin repoint (drift repair): the reset rules were extracted from the
+    // `decideBranchOnly` switch into a top-level `resetVerdict` helper, so the
+    // SAME two statements now sit at 2-space indent instead of 4.
+    find: `  const isDestructive = allToks.some((t) => t === "--hard" || t === "--merge" || t === "--keep")
+  if (isDestructive && currentBranch && protectedBranches.includes(currentBranch)) {`,
     // Pre-fix: only an explicit protected-branch REF target was denied, so a
     // bare `git reset --hard HEAD~3` on main fell through to allow.
-    replace: `    const isDestructive = allToks.some((t) => t === "--hard" || t === "--merge" || t === "--keep")
-    if (false && isDestructive && currentBranch && protectedBranches.includes(currentBranch)) {`,
+    replace: `  const isDestructive = allToks.some((t) => t === "--hard" || t === "--merge" || t === "--keep")
+  if (false && isDestructive && currentBranch && protectedBranches.includes(currentBranch)) {`,
     gate: "src/permission/__tests__/fail-closed-base.hellgate.test.ts",
     only: "destructive reset on a protected branch",
   },
@@ -448,4 +448,6 @@ const main = async (): Promise<void> => {
   }
 }
 
-await main()
+if (import.meta.main) {
+  await main()
+}
