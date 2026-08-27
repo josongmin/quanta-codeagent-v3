@@ -24,7 +24,13 @@
  */
 
 import { describe, expect, test } from "bun:test"
-import { type ExportSpan, nanos, serializeSpans } from "@/observability/otel-exporter/otlp-encode"
+import {
+  type ExportMetric,
+  type ExportSpan,
+  nanos,
+  serializeMetrics,
+  serializeSpans,
+} from "@/observability/otel-exporter/otlp-encode"
 
 const UINT64_DECIMAL = /^\d+$/
 
@@ -104,4 +110,104 @@ describe("T — OTLP timestamps are always uint64-shaped", () => {
     // the record, which would trade one lie for another.
     expect(json).toContain("probe")
   })
+})
+
+/**
+ * T-5..T-8 — the METRICS half.
+ *
+ * The span envelope was pinned above; the metric envelope was not, and it is a
+ * strictly larger surface: `serializeMetrics` writes timestamps from THREE
+ * separate object literals (the shared `dp`, and the histogram branch's own
+ * hand-rolled dataPoint), so "the encoder is total" has to be proved at the
+ * ENVELOPE, not at the helper. A datapoint timestamp that leaves the uint64
+ * shape is the same fatal shape as a span's: the collector rejects the whole
+ * `resourceMetrics` envelope, and `flushMetrics` re-queues a rejected batch at
+ * the FRONT of the buffer forever.
+ *
+ *   T-5  No `*UnixNano` field anywhere in the metric envelope can be a
+ *        non-uint64 token, for ANY metric kind.
+ *   T-6  ...including a value that is not a number at all (the runtime shape a
+ *        `number`-typed field does not actually prevent).
+ *   T-7  PAIRED CONTROL — a legitimate timestamp is passed through UNCHANGED,
+ *        so the guard cannot be satisfied by stamping "0" on everything.
+ *   T-8  PAIRED CONTROL — start/time stay EQUAL within a datapoint (the DELTA
+ *        window invariant the encoder documents).
+ */
+
+/** Every `*UnixNano` leaf in an arbitrary OTLP envelope, by deep walk — so a
+ *  timestamp added to a NEW branch later is covered without editing this test. */
+const unixNanoLeaves = (node: unknown, path = "$"): ReadonlyArray<[string, unknown]> => {
+  if (Array.isArray(node)) {
+    return node.flatMap((v, i) => unixNanoLeaves(v, `${path}[${i}]`))
+  }
+  if (node !== null && typeof node === "object") {
+    return Object.entries(node as Record<string, unknown>).flatMap(([k, v]) =>
+      k.endsWith("UnixNano")
+        ? [[`${path}.${k}`, v] as [string, unknown]]
+        : unixNanoLeaves(v, `${path}.${k}`),
+    )
+  }
+  return []
+}
+
+const KINDS = ["counter", "histogram", "gauge"] as const
+
+const metricWith = (kind: (typeof KINDS)[number], timeEpochMs: unknown): ExportMetric =>
+  ({ name: "probe.metric", kind, value: 1, attributes: {}, timeEpochMs }) as unknown as ExportMetric
+
+describe("T-5..T-8 — OTLP metric datapoint timestamps are total too", () => {
+  const HOSTILE: ReadonlyArray<readonly [string, unknown]> = [
+    ["NaN", Number.NaN],
+    ["Infinity", Number.POSITIVE_INFINITY],
+    ["-Infinity", Number.NEGATIVE_INFINITY],
+    ["undefined", undefined],
+    ["null", null],
+    ["negative", -5],
+    ["1e15 (product leaves uint64 shape)", 1e15],
+    ["nanos-passed-as-millis", 1.756e18],
+    ["MAX_VALUE", Number.MAX_VALUE],
+    ["MAX_SAFE_INTEGER", Number.MAX_SAFE_INTEGER],
+    ["a caller-supplied STRING", "1756000000000"],
+    ["an exponential STRING", "1e+21"],
+    ["an object", { toString: () => "Infinity" }],
+  ]
+
+  for (const kind of KINDS) {
+    for (const [label, value] of HOSTILE) {
+      test(`T-5/T-6 ${kind}: ${label} cannot reach the serialized envelope`, () => {
+        const payload = serializeMetrics([metricWith(kind, value)], "quanta", undefined)
+        const leaves = unixNanoLeaves(payload)
+        // The branch must actually HAVE timestamps — a walk that found none
+        // would pass vacuously.
+        expect({ kind, found: leaves.length > 0 }).toEqual({ kind, found: true })
+        const bad = leaves.filter(
+          ([, v]) => typeof v !== "string" || !UINT64_DECIMAL.test(v as string),
+        )
+        expect({ kind, label, bad }).toEqual({ kind, label, bad: [] })
+        const json = JSON.stringify(payload)
+        expect(json).not.toContain("NaN")
+        expect(json).not.toContain("Infinity")
+        // The metric must still be exported — degrading a field must not
+        // silently drop the record.
+        expect(json).toContain("probe.metric")
+      })
+    }
+
+    test(`T-7 PAIRED CONTROL ${kind}: a legitimate timestamp is UNCHANGED`, () => {
+      const payload = serializeMetrics([metricWith(kind, 1_756_000_000_000)], "quanta", undefined)
+      const leaves = unixNanoLeaves(payload)
+      expect(leaves.length).toBeGreaterThan(0)
+      for (const [path, v] of leaves) {
+        expect({ path, v }).toEqual({ path, v: "1756000000000000000" })
+      }
+    })
+
+    test(`T-8 PAIRED CONTROL ${kind}: start and time stay equal in a datapoint`, () => {
+      const payload = serializeMetrics([metricWith(kind, 1_756_000_000_000)], "quanta", undefined)
+      const json = JSON.stringify(payload)
+      const starts = [...json.matchAll(/"startTimeUnixNano":"(\d+)"/g)].map((m) => m[1])
+      const times = [...json.matchAll(/"timeUnixNano":"(\d+)"/g)].map((m) => m[1])
+      expect({ kind, starts, times }).toEqual({ kind, starts, times: starts })
+    })
+  }
 })
