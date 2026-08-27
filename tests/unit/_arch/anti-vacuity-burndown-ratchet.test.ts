@@ -74,8 +74,32 @@ describe("anti-vacuity burn-down", () => {
     ).toBeGreaterThan(3000)
   })
 
+  /**
+   * Candidates the census flags that ground truth REFUTED.
+   *
+   * The census is a candidate detector, not a verdict. Each entry here was run
+   * against a mirror in which the tree it scans was empty and went RED, so it is
+   * protected by something the regex cannot see — a positive assertion
+   * (`expect(entries).toContain(…)`), a non-empty expected list, or a floor
+   * expressed in a shape no pattern matches. Listing them keeps the ledger an
+   * honest statement of remaining debt instead of a 20%-wrong one.
+   *
+   * This list may only shrink or be re-justified; each entry names the evidence.
+   */
+  const REFUTED: ReadonlySet<string> = new Set([
+    // scans src/, and its verdict is `toContain` — an empty scan fails it
+    "src/agent/prompt-graph/role-drift.ratchet.test.ts",
+    "src/runner/batch/eval/repro-grounding.test.ts",
+    "src/tool/terminal-surface.test.ts",
+    // verdict compares against a non-empty expected set, so empty ≠ clean
+    "tests/unit/audit-ratchet/error-message-canonical-hellgate.test.ts",
+    "tests/unit/slice-boundary-config-parity.test.ts",
+    "tests/unit/surface-coupling-ratchet.test.ts",
+    "tests/unit/terminal-defaults-ratchet.test.ts",
+  ])
+
   test("🔴 no NEW guard derives a verdict from an unfloored scan", () => {
-    const added = addedEntries(found, known)
+    const added = addedEntries(found, known).filter((f) => !REFUTED.has(f))
     expect(
       added,
       added.length === 0
@@ -132,6 +156,19 @@ describe("anti-vacuity burn-down", () => {
     // would pass for the wrong reason — which is how the first version of this
     // case was written.
     expect(isFloorless(scanWith("expect(elapsedMs).toBeGreaterThan(1)"))).toBe(true)
+  })
+
+  test("every REFUTED entry is still refuted — ground truth, not a permanent excuse", () => {
+    // An entry earns its place by going RED on an empty mirror. If the census
+    // stops flagging it at all, the exemption is dead weight and must go, or it
+    // silently re-admits the file when the census changes again.
+    const dead = [...REFUTED].filter((f) => !found.includes(f)).sort()
+    expect(
+      dead,
+      dead.length === 0
+        ? ""
+        : "the census no longer flags these — remove them from REFUTED:\n  " + dead.join("\n  "),
+    ).toEqual([])
   })
 
   test("a completed burn-down is GREEN, not red", () => {
