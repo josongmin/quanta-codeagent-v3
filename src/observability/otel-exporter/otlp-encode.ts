@@ -117,8 +117,18 @@ export const otlpStatusCode = (code: SpanStatusCode | undefined): number => {
 
 /** Convert epoch millis → string of unix nanos. OTLP requires nanos as a
  *  STRING to avoid 64-bit precision loss in JSON (per spec). We multiply once
- *  by 1e6 and convert to string. */
-export const nanos = (epochMs: number): string => `${Math.trunc(epochMs * 1_000_000)}`
+ *  by 1e6 and convert to string.
+ *
+ *  TOTAL BY CONSTRUCTION. `start_time_unix_nano` / `end_time_unix_nano` are
+ *  `fixed64`, so a non-finite or negative input must never reach the wire: the
+ *  unguarded form emitted the literal tokens `"NaN"` / `"Infinity"`, which a
+ *  spec-strict collector rejects for the WHOLE `resourceSpans` envelope — and
+ *  `flushSpans` re-queues a rejected batch at the front of the buffer with no
+ *  4xx classification, so one malformed span blackholes every later span for
+ *  the life of the process. Degrading to `"0"` keeps the record exportable and
+ *  visibly wrong instead of silently fatal. */
+export const nanos = (epochMs: number): string =>
+  Number.isFinite(epochMs) && epochMs >= 0 ? `${Math.trunc(epochMs * 1_000_000)}` : "0"
 
 /** Resource attributes shared by every span/metric of one process. `quanta.run.id`
  *  is attached when the operator sets a run id (env `QUANTA_OTEL_RUN_ID`) so the
