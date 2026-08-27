@@ -125,6 +125,22 @@ const ripgrepDefiners =
       // `signal` lets the setup-window abort interrupt a blocking rg.
       { encoding: "utf8", timeout: 8_000, ...(signal !== undefined ? { signal } : {}) },
     )
+    // A MISSING BINARY is not "this symbol has no definers".
+    //
+    // `res.error` covers two unrelated things: a transient failure (timeout, the
+    // abort signal) where an empty result is a documented, bounded loss — and
+    // ENOENT, meaning ripgrep is not installed at all, in which case EVERY symbol
+    // resolves to zero definers for the whole run and the retrieval quality drop
+    // is invisible. The first stays lossy; the second is an environment fact and
+    // must be loud.
+    const code = (res.error as NodeJS.ErrnoException | undefined)?.code
+    if (code === "ENOENT") {
+      throw new Error(
+        "owner-sibling resolve: `rg` (ripgrep) is not installed — every definer lookup would " +
+          "silently return no results, so retrieval would degrade with no signal. Install " +
+          "ripgrep or inject a definer lookup.",
+      )
+    }
     if (res.error || typeof res.stdout !== "string") return []
     return res.stdout
       .split("\n")
