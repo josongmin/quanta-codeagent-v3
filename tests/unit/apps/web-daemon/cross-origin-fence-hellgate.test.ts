@@ -49,7 +49,7 @@
 import { afterAll, describe, expect, test } from "bun:test"
 import { main } from "@/apps/web-daemon"
 import { buildFetchHandler, type FetchHandlerDeps } from "@/apps/web-daemon/server/fetch-handler"
-import { _allowedOriginsForTest, isAllowedOrigin } from "@/apps/web-daemon/server/http"
+import { _allowedOriginsForTest, corsHeaders, isAllowedOrigin } from "@/apps/web-daemon/server/http"
 import type { WebDaemonHandle } from "@/apps/web-daemon/types"
 import { createStubRuntimeFactory } from "./fixture"
 
@@ -643,5 +643,70 @@ describe("X-9 HELLGATE — the fence follows the daemon's real port, not the env
         else process.env.QUANTA_WEB_PORT = prev
       }
     })
+  })
+})
+
+/**
+ * X-10 — the CORS headers match what the docstring PROMISES.
+ *
+ * The `corsHeaders` docstring claimed an echoed origin means "credentialed
+ * requests would work if the frontend ever adds `credentials: \"include\"`".
+ * Measured 2026-08-28, that is false in both halves:
+ *
+ *     "http://localhost:5173" => {…,"access-control-allow-origin":"http://localhost:5173"}
+ *     "http://evil.test"      => {…}                       (no ACAO — correct)
+ *     null                    => {…,"access-control-allow-origin":"*"}
+ *
+ * No `access-control-allow-credentials` is emitted, and a browser DISCARDS a
+ * credentialed response that lacks it — so a frontend following the docstring
+ * would ship `credentials: "include"` and watch every request fail with a CORS
+ * error that names the missing header, not the missing plan.
+ *
+ * The pin runs in BOTH directions on purpose. Granting credentials here is not
+ * a one-line header: this allowlist admits `tauri://localhost` and every LAN
+ * interface the daemon binds, and ACAO cannot be `*` alongside credentials at
+ * all. So the arm fails if the echo is lost (breaking the dev server) AND if
+ * ACAC appears (a much larger grant than it looks, made without re-reading the
+ * allowlist above).
+ */
+describe("X-10 — CORS headers, as documented", () => {
+  const reqWith = (origin: string | null): Request =>
+    new Request("http://127.0.0.1:4096/x", origin === null ? {} : { headers: { origin } })
+
+  test("X-10a an ALLOWED origin is echoed, never collapsed to `*`", () => {
+    const h = corsHeaders(reqWith("http://localhost:5173"), 4096)
+    expect(h["access-control-allow-origin"]).toBe("http://localhost:5173")
+  })
+
+  test("X-10b a DISALLOWED origin gets no ACAO at all", () => {
+    const h = corsHeaders(reqWith("http://evil.test"), 4096)
+    expect(h["access-control-allow-origin"]).toBeUndefined()
+    // PAIRED CONTROL — refusing the ACAO is not refusing the whole header set;
+    // `vary: Origin` must still be present or a shared cache will serve the
+    // allowed origin's response to the hostile one.
+    expect(h.vary).toBe("Origin")
+  })
+
+  test("X-10c an ABSENT origin keeps the historical `*`", () => {
+    // curl and the CLI's own client send no Origin. CORS does not apply to
+    // them, so `*` is inert rather than permissive — but it is what non-browser
+    // callers have always received and removing it is a breaking change.
+    expect(corsHeaders(reqWith(null), 4096)["access-control-allow-origin"]).toBe("*")
+  })
+
+  test("X-10d HELLGATE — credentialed CORS is NOT granted, for any origin", () => {
+    for (const origin of [
+      "http://localhost:5173",
+      "http://localhost:4096",
+      "tauri://localhost",
+      "http://evil.test",
+      null,
+    ]) {
+      const h = corsHeaders(reqWith(origin), 4096)
+      expect({ origin, acac: h["access-control-allow-credentials"] }).toEqual({
+        origin,
+        acac: undefined,
+      })
+    }
   })
 })

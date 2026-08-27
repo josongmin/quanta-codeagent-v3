@@ -247,9 +247,19 @@ export const isAllowedOrigin = (
 /** CORS headers — the frontend dev server (`localhost:5173`) is a
  *  different origin from the daemon (`localhost:4096`), so browser
  *  fetches need preflight + ACAO. A DISALLOWED origin gets no ACAO at all;
- *  an allowed named origin is echoed (so credentialed requests would work if
- *  the frontend ever adds `credentials: "include"`), and an absent origin keeps
- *  the historical `*`. */
+ *  an allowed named origin is ECHOED rather than collapsed to `*`, and an
+ *  absent origin (curl, the CLI's own client) keeps the historical `*`, where
+ *  CORS does not apply and the value is inert.
+ *
+ *  Echoing is what a NAMED origin requires — `*` and a specific origin are not
+ *  interchangeable to a browser — and nothing more. It does NOT enable
+ *  `credentials: "include"`: that additionally needs
+ *  `access-control-allow-credentials`, which is deliberately absent. Granting
+ *  it is not a one-line header. This allowlist admits `tauri://localhost` and
+ *  every LAN interface the daemon binds, so credentialed access would hand a
+ *  page on any of them the user's authenticated session, and the absent-origin
+ *  `*` above is illegal alongside credentials at all. Pinned in both directions
+ *  by X-10 in `cross-origin-fence-hellgate.test.ts`. */
 export const corsHeaders = (
   req: Request | null,
   daemonPort: number | null | undefined,
