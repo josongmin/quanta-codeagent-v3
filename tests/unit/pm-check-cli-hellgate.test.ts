@@ -20,12 +20,16 @@
  */
 
 import { describe, expect, test } from "bun:test"
+import { join } from "node:path"
 import { spawnSync } from "node:child_process"
 import { FEATURES_DIR as ANCHORED_FEATURES_DIR } from "../../tools/feature-catalog/paths"
 import { loadFeaturesStrict } from "../../tools/feature-catalog/schema"
 import { checkFeatureDoD } from "../../tools/pm/definition-of-done"
 
-const REPO = "/Users/songmin/quanta-codeagent-v3"
+// ANCHORED on this file, never a machine path: a hardcoded absolute repo root
+// makes the whole file hard-red in a worktree or on any other checkout, which
+// is exactly the portability trap the `FEATURES_DIR` anchoring below fixes.
+const REPO = join(import.meta.dir, "..", "..")
 // ANCHORED, not cwd-relative: `loadFeatures` now REFUSES a relative path,
 // because a repo path built from the ambient cwd resolves to nothing outside
 // the repo root and an empty catalog is indistinguishable from a clean one

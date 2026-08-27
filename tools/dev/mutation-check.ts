@@ -363,10 +363,23 @@ const runGate = (gate: string, only?: string): { failed: boolean; raw: string } 
   return { failed, raw }
 }
 
+/**
+ * The pin check, SEPARATED from the write so a guard can call it.
+ *
+ * `applyRevert` used to inline this, which meant the drift ratchet had to
+ * re-implement `split(find).length - 1` locally — a test auditing its own copy
+ * of the rule, which is the anti-pattern the ratchet exists to close. Both now
+ * call this.
+ *
+ * Returns the occurrence count; the caller decides what 0 or >1 means.
+ */
+export const findOccurrences = (source: string, find: string): number =>
+  source.split(find).length - 1
+
 const applyRevert = (m: Mutation): string => {
   const abs = join(repoRoot, m.src)
   const original = readFileSync(abs, "utf8")
-  const count = original.split(m.find).length - 1
+  const count = findOccurrences(original, m.find)
   if (count === 0) {
     throw new Error(
       `[${m.id}] find-string NOT PRESENT in ${m.src} — fix drifted (rename/move). ` +

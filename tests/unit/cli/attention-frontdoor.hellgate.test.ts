@@ -377,6 +377,15 @@ describe("A4-6 every declared ctx slot survives projectSlashCtx", () => {
     const projected = projectSlashCtx(ctx as never)
     const dropped = keys.filter((k) => !Object.hasOwn(projected, k))
     expect(dropped).toEqual([])
+    // Presence is not enough: a projector wired to the WRONG key keeps the key
+    // set intact. Each slot carries a distinct sentinel, so identity catches a
+    // cross-wire that neither the compile guard nor `Object.hasOwn` can see.
+    // `side` is exempt by construction — the ctx holds a FACTORY and the
+    // contract shape holds its RESULT.
+    const crossWired = keys.filter(
+      (k) => k !== "side" && projected[k] !== (ctx[k] as unknown),
+    )
+    expect(crossWired).toEqual([])
   })
 
   test("ANTI-VACUITY — the key list is the real one, so the test cannot pass by listing nothing", async () => {

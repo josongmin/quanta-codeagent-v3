@@ -42,7 +42,7 @@
 import { describe, expect, test } from "bun:test"
 import { existsSync, readFileSync } from "node:fs"
 import { join } from "node:path"
-import { MUTATIONS, type Mutation } from "../../../tools/dev/mutation-check"
+import { findOccurrences, MUTATIONS, type Mutation } from "../../../tools/dev/mutation-check"
 
 const REPO_ROOT = join(import.meta.dir, "..", "..", "..")
 
@@ -66,7 +66,8 @@ const findDrifts = (entries: readonly Mutation[]): readonly Drift[] => {
       drifts.push({ id: m.id, src: m.src, problem: "TARGET FILE MISSING" })
       continue
     }
-    const occurrences = readFileSync(abs, "utf8").split(m.find).length - 1
+    // SAME function the tool runs, not a copy of the rule.
+    const occurrences = findOccurrences(readFileSync(abs, "utf8"), m.find)
     if (occurrences !== 1) {
       drifts.push({
         id: m.id,

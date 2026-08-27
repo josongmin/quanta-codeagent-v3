@@ -144,3 +144,81 @@ describe("X — cross-origin fence", () => {
     expect(res.acao).toBe("*")
   })
 })
+
+/**
+ * X-5 — the WS UPGRADE half.
+ *
+ * Why a WebSocket needs its own arms: it is EXEMPT from the same-origin policy,
+ * so none of the CORS answers above constrain it. On a tokenless daemon any page
+ * can open `ws://127.0.0.1:<port>/ws` and drive `turn.run`.
+ *
+ * MEASURED, and worth stating precisely because it is easy to get backwards:
+ * deleting the `isAllowedOrigin` call from `makeTryUpgrade` does NOT turn these
+ * arms red. That is not a hole in this block — `buildFetchHandler` runs the same
+ * fence at the top of the handler, before ANY route, and the upgrade is only
+ * reached through `serveUpgradeOrStatic` at the very bottom. So the in-upgrade
+ * check is defense-in-depth, and the arms below pin the OBSERVABLE behaviour
+ * (refused before `server.upgrade` is called) rather than which of the two
+ * checks produced it. Delete BOTH and they go red.
+ */
+describe("X-5 the WS upgrade refuses a foreign origin", () => {
+  // Past the fence, `makeTryUpgrade` calls `server.upgrade`. The stub records
+  // whether it was reached: that is the observable that separates "the fence
+  // refused" from "the fence let it through", and it is what the mutant this
+  // block exists for would flip.
+  let upgradeCalls = 0
+  const srv = {
+    upgrade: (): boolean => {
+      upgradeCalls += 1
+      return true
+    },
+  }
+
+  const upgrade = async (
+    path: string,
+    origin?: string,
+  ): Promise<{ status: number | null; acao: string | null; reached: boolean }> => {
+    upgradeCalls = 0
+    const res = await handler()(
+      new Request(`http://127.0.0.1:4096${path}`, {
+        method: "GET",
+        headers: { upgrade: "websocket", ...(origin === undefined ? {} : { origin }) },
+      }),
+      srv as never,
+    )
+    // `undefined` means Bun consumed the request after a successful upgrade.
+    const r = res === undefined ? null : res
+    return {
+      status: r === null ? null : r.status,
+      acao: r === null ? null : r.headers.get("access-control-allow-origin"),
+      reached: upgradeCalls > 0,
+    }
+  }
+
+  for (const path of ["/", "/ws"]) {
+    test(`${path} with a hostile Origin is refused, and hands out no ACAO`, async () => {
+      const r = await upgrade(path, HOSTILE)
+      expect({ path, status: r.status }).toEqual({ path, status: 403 })
+      expect(r.acao).toBeNull()
+      // The refusal happens BEFORE the upgrade, not after it.
+      expect({ path, reached: r.reached }).toEqual({ path, reached: false })
+    })
+  }
+
+  test("PAIRED CONTROL — an allowed origin is NOT refused by the fence", async () => {
+    // It must get past the origin check. What happens after (the real
+    // `server.upgrade`) is Bun's, and this stub cannot perform it — so the only
+    // assertion that belongs here is "not the fence's 403".
+    for (const origin of ["http://localhost:5173", "tauri://localhost"]) {
+      const r = await upgrade("/ws", origin)
+      expect({ origin, refused: r.status === 403 }).toEqual({ origin, refused: false })
+      expect({ origin, reached: r.reached }).toEqual({ origin, reached: true })
+    }
+  })
+
+  test("PAIRED CONTROL — no Origin header still reaches the upgrade path", async () => {
+    const r = await upgrade("/ws", undefined)
+    expect(r.status).not.toBe(403)
+    expect(r.reached).toBe(true)
+  })
+})
