@@ -27,12 +27,15 @@ import {
 } from "./path-effect"
 import {
   DELETE_HEADS,
+  DISKUTIL_DESTRUCTIVE_VERBS,
+  DISKUTIL_LEADING_MODIFIERS,
+  DISKUTIL_VERB_GROUPS,
   EGRESS_HEADS,
   EVAL_HEADS,
   expandFlagCluster,
-  GIT_GLOBAL_VALUE_FLAGS,
   FETCH_HEADS,
   FIND_ACTION_FLAGS,
+  gitOperandTokens,
   INLINE_CODE_FLAGS,
   INTERPRETER_HEADS,
   isSecretStorePath,
@@ -214,6 +217,12 @@ const GIT_DESTRUCTIVE: ReadonlyArray<{
     matches: (sub, flags) => sub === "clean" && (flags.has("-f") || flags.has("--force")),
   },
   {
+    // The `--` arm was DEAD until `gitOperandTokens` stopped dropping the
+    // end-of-options marker: every operand reader filtered `-`-leading tokens,
+    // so `git checkout -- src/foo.ts` — the spelling this rule's own
+    // description names, "restores files over uncommitted edits" — measured
+    // `safe-known` while `git checkout .` was `hard-deny`. The arm reads as a
+    // guard, so it is made into one rather than deleted.
     rule: "git-checkout-discard",
     what: "restores files over uncommitted edits",
     matches: (sub, _flags, operands) =>
@@ -226,21 +235,12 @@ const GIT_DESTRUCTIVE: ReadonlyArray<{
   },
 ]
 
-/** Operands of a git invocation with the global-option values consumed, so
- *  `[0]` is the SUBCOMMAND rather than whatever a global option carried. */
-const gitOperands = (args: readonly ShellWord[]): string[] => {
-  const out: string[] = []
-  for (let i = 0; i < args.length; i += 1) {
-    const a = args[i]
-    if (a === undefined) continue
-    if (a.text.startsWith("-")) {
-      if (GIT_GLOBAL_VALUE_FLAGS.has(a.text)) i += 1
-      continue
-    }
-    out.push(a.text)
-  }
-  return out
-}
+/** Operands of a git invocation, read by the SHARED {@link gitOperandTokens}
+ *  so this authority and `decideBranchOnly` cannot resolve a different
+ *  subcommand for the same command line. `assessGit` has already refused
+ *  anything unresolved, so the raw texts ARE the argv the shell will see. */
+const gitOperands = (args: readonly ShellWord[]): string[] =>
+  gitOperandTokens(args.map((a) => a.text))
 
 const assessGit = (cmd: ShellCommandIr, _ctx: Ctx): ShellAssessment => {
   const args = cmd.args
@@ -260,14 +260,47 @@ const assessGit = (cmd: ShellCommandIr, _ctx: Ctx): ShellAssessment => {
   return safe()
 }
 
-/** Rules that need only the head + resolved argv, expressed as data. */
-const SIMPLE_DENIALS: ReadonlyArray<{
+/**
+ * A rule that needs only the head + resolved argv, expressed as DATA.
+ *
+ * THE SHAPE IS THE INVARIANT. `assessSimple` matches on the READABLE SUBSET of
+ * a command's operands, which is sound only while every rule's fold is MONOTONE
+ * in that subset — adding an operand may switch a rule ON, never OFF. That held
+ * only by accident: all four predicates happened to be `() => true` or
+ * `operands.some(...)`. A future rule folding with `operands.every(...)` or
+ * `operands.length === 0` would turn an operand we simply COULD NOT READ into a
+ * FALSE `hard-deny` — by this file's header, an effect no mode may authorize —
+ * and nothing would fail.
+ *
+ * So a rule no longer receives the arrays at all. It declares SETS and a
+ * PER-OPERAND predicate, and the seam owns every fold, folding both with
+ * `some` — which is monotone for ANY predicate whatsoever. `every` and
+ * `length === 0` are not expressible here, so the invariant is enforced by the
+ * type instead of asserted by a comment.
+ * `tests/unit/permission/shell-predicate-population-hellgate.test.ts` pins the
+ * declared key set, so widening this interface is a test failure too.
+ */
+export interface SimpleDenialRule {
   readonly rule: string
   readonly heads: ReadonlySet<string>
-  readonly matches: (flags: ReadonlySet<string>, operands: readonly string[]) => boolean
+  /** Fires only when at least one of these flags is present. Omitted = no flag
+   *  condition. A SET rather than a predicate for the same reason: a rule
+   *  written `!flags.has(x)` is anti-monotone in the readable FLAG set exactly
+   *  as `every` is in the operand set, and `flagsOf` also drops what it cannot
+   *  resolve. */
+  readonly anyFlag?: ReadonlySet<string>
+  /** Fires only when at least one READABLE operand satisfies this. Omitted = no
+   *  operand condition. Receives ONE operand — never the array, never an
+   *  index — so no rule can observe how much of the command was read. */
+  readonly anyOperand?: (operand: string) => boolean
   readonly what: string
-}> = [
+}
+
+export const SIMPLE_DENIAL_RULES: readonly SimpleDenialRule[] = [
   {
+    // `diskutil` used to sit in this set with `matches: () => true`, which made
+    // `diskutil list` and `diskutil info /` unrunnable at every tier. It is a
+    // SUBCOMMAND dispatcher, not a formatter, and now has its own assessor.
     rule: "mkfs-format-filesystem",
     heads: new Set([
       "mkfs",
@@ -278,32 +311,76 @@ const SIMPLE_DENIALS: ReadonlyArray<{
       "mkfs.btrfs",
       "mkfs.vfat",
       "newfs",
-      "diskutil",
     ]),
-    matches: () => true,
     what: "formats a filesystem",
   },
   {
     rule: "dd-write-to-dev",
     heads: new Set(["dd"]),
-    matches: (_f, operands) => operands.some((o) => o.startsWith("of=/dev/")),
+    anyOperand: (o) => o.startsWith("of=/dev/"),
     what: "writes directly to a block device",
   },
   {
     rule: "shutdown-reboot-halt-command",
     heads: new Set(["shutdown", "reboot", "halt", "poweroff"]),
-    matches: () => true,
     what: "halts the machine",
   },
   {
     rule: "chmod-recursive-system-root",
     heads: new Set(["chmod", "chown"]),
-    matches: (flags, operands) =>
-      (flags.has("-R") || flags.has("--recursive")) &&
-      operands.some((o) => o.startsWith("/") && isCatastrophicDeleteTarget(o)),
+    anyFlag: new Set(["-R", "--recursive"]),
+    anyOperand: (o) => o.startsWith("/") && isCatastrophicDeleteTarget(o),
     what: "recursively rewrites permissions on a system root",
   },
 ]
+
+/** THE fold, and the only one. Both conditions are `some` over what was
+ *  readable, so a partial read can only ever ADD a hit. */
+const simpleDenialFires = (
+  rule: SimpleDenialRule,
+  flags: ReadonlySet<string>,
+  operands: readonly string[],
+): boolean => {
+  const flagHit = rule.anyFlag === undefined || [...rule.anyFlag].some((f) => flags.has(f))
+  const operandHit =
+    rule.anyOperand === undefined || operands.some((o) => rule.anyOperand?.(o) === true)
+  return flagHit && operandHit
+}
+
+/* ------------------------------------------------------------------------- *
+ * diskutil
+ * ------------------------------------------------------------------------- */
+
+/** `diskutil [quiet] <verb> …` and `diskutil [quiet] <group> <verb> …`.
+ *
+ *  The verb decides, not the head: `list`/`info` are reads and must stay
+ *  runnable, `eraseDisk`/`apfs deleteContainer` destroy a volume. A verb this
+ *  authority could not READ is `unknown` — neither the old blanket `hard-deny`
+ *  (which is what made a read unappealable) nor `safe`, which would be a
+ *  positive assertion about a verb nobody saw. */
+const assessDiskutil = (cmd: ShellCommandIr): ShellAssessment => {
+  const operands = operandsOf(cmd.args)
+  const lead = operands[0]
+  const start =
+    lead?.resolved === true && DISKUTIL_LEADING_MODIFIERS.has(lead.text.toLowerCase()) ? 1 : 0
+  const verbWord = operands[start]
+  // Bare `diskutil` (or `diskutil quiet`) prints usage and touches nothing.
+  if (verbWord === undefined) return safe()
+  if (!verbWord.resolved) return unknown("diskutil: the verb is not statically resolvable")
+  const verb = verbWord.text.toLowerCase()
+  const denial = deny(
+    "diskutil-destructive-verb",
+    `diskutil ${verbWord.text}: erases a volume, container or partition map`,
+  )
+  const group = DISKUTIL_VERB_GROUPS.get(verb)
+  if (group === undefined) return DISKUTIL_DESTRUCTIVE_VERBS.has(verb) ? denial : safe()
+  const subWord = operands[start + 1]
+  if (subWord === undefined) return safe()
+  if (!subWord.resolved) {
+    return unknown(`diskutil ${verbWord.text}: the verb is not statically resolvable`)
+  }
+  return group.has(subWord.text.toLowerCase()) ? denial : safe()
+}
 
 const assessSimple = (cmd: ShellCommandIr): ShellAssessment | null => {
   // BASENAME, not the raw text. `assessByHead` already strips the directory
@@ -319,8 +396,8 @@ const assessSimple = (cmd: ShellCommandIr): ShellAssessment | null => {
   // real hit — this seam only ever widens denial, so a partial read may deny
   // but may never absolve.
   const texts = operands.filter((o) => o.resolved).map((o) => o.text)
-  for (const rule of SIMPLE_DENIALS) {
-    if (rule.heads.has(head) && rule.matches(flags, texts)) {
+  for (const rule of SIMPLE_DENIAL_RULES) {
+    if (rule.heads.has(head) && simpleDenialFires(rule, flags, texts)) {
       return deny(rule.rule, `${head}: ${rule.what}`)
     }
   }
@@ -331,7 +408,7 @@ const assessSimple = (cmd: ShellCommandIr): ShellAssessment | null => {
   // Every sibling assessor (delete/find/git/interpreter) already answers
   // `unknown` in this position. Scoped to gated heads so an ordinary `$VAR`
   // on an ungated head stays `safe`.
-  if (operands.some((o) => !o.resolved) && SIMPLE_DENIALS.some((r) => r.heads.has(head))) {
+  if (operands.some((o) => !o.resolved) && SIMPLE_DENIAL_RULES.some((r) => r.heads.has(head))) {
     return unknown(`${head}: an operand is not statically resolvable`)
   }
   return null
@@ -392,6 +469,7 @@ const assessByHead = (name: string, cmd: ShellCommandIr, ctx: Ctx): ShellAssessm
   if (name === "find") return assessFind(cmd, ctx)
   if (DELETE_HEADS.has(name)) return assessDelete(cmd, ctx)
   if (name === "git") return assessGit(cmd, ctx)
+  if (name === "diskutil") return assessDiskutil(cmd)
   return assessSimple(cmd) ?? safe()
 }
 

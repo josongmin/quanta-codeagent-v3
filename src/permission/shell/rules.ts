@@ -233,3 +233,111 @@ export const GIT_GLOBAL_VALUE_FLAGS: ReadonlySet<string> = new Set([
   // authorities.
   "--attr-source",
 ])
+
+/**
+ * The ONE reader of a git argv. Returns the non-flag operands with every global
+ * option's value consumed, so `[0]` is the SUBCOMMAND.
+ *
+ * SSOT for the same reason {@link GIT_GLOBAL_VALUE_FLAGS} is: two authorities
+ * (`shell/assess.ts` and `permission/branch-only.ts`) each grew their own copy,
+ * each got a DIFFERENT subset right, and the gap between them was a
+ * protected-branch force-push that one denied and the other allowed. Sharing
+ * the flag LIST was not enough — the FOLD diverged too, and the divergence was
+ * a third live hole: `branch-only` returned the first `-`-leading token as the
+ * subcommand, so a VALUELESS global hid the push entirely
+ * (`git --no-pager push origin +main` was ALLOWED; measured on the installed
+ * git 2.50.1, which accepts `--no-pager`, `--paginate`/`-p`,
+ * `--literal-pathspecs`, `--no-optional-locks` and friends before a
+ * subcommand). One function now, so there is nothing left to diverge.
+ */
+export const gitOperandTokens = (tokens: readonly string[]): string[] => {
+  const out: string[] = []
+  for (let i = 0; i < tokens.length; i += 1) {
+    const t = tokens[i]
+    if (t === undefined) continue
+    // `--` ENDS OPTION PARSING, and everything after it is a pathspec. Every
+    // reader dropped it because it starts with `-`, which is what made
+    // `git-checkout-discard`'s `o === "--"` arm DEAD CODE: the canonical
+    // "throw away my uncommitted edits" spelling, `git checkout -- src/foo.ts`,
+    // read as `safe-known` while its `git checkout .` twin was `hard-deny`.
+    // Only meaningful once a subcommand has been emitted — git's own global
+    // parser does not accept a bare `--` ahead of one.
+    if (t === "--" && out.length > 0) {
+      out.push(...tokens.slice(i))
+      return out
+    }
+    if (t.startsWith("-")) {
+      // `--flag=value` carries its value inline: skip ONE token, not two.
+      if (GIT_GLOBAL_VALUE_FLAGS.has(t)) i += 1
+      continue
+    }
+    out.push(t)
+  }
+  return out
+}
+
+/**
+ * `diskutil` verbs that DESTROY a volume, a container, or a partition map.
+ *
+ * Enumerated from `/usr/sbin/diskutil` on this machine (macOS 15, Darwin
+ * 24.6.0): the top-level list from bare `diskutil`, the APFS verbs from
+ * `diskutil apfs`, the CoreStorage verbs from `diskutil coreStorage`.
+ *
+ * The head used to be listed WHOLESALE under `mkfs-format-filesystem` with
+ * `matches: () => true`, so `diskutil list` and `diskutil info /` — pure reads
+ * — carried `hard-deny`, the one verdict this authority defines as "an effect
+ * NO MODE MAY AUTHORIZE". A read that no tier can run is not a safety property.
+ *
+ * Deliberately EXCLUDED, because `hard-deny` is unappealable and these are not
+ * unrecoverable erasures: `repairDisk`/`repairVolume`/`verify*` (diagnose and
+ * repair, not erase), `resizeVolume` (nondestructive on APFS), `addPartition`
+ * (consumes free space), `mount`/`unmount`/`eject`/`rename`, and the whole
+ * `apfs` crypto/snapshot family. They stay `safe-known` and remain subject to
+ * the ordinary policy layers.
+ *
+ * Verbs are matched CASE-INSENSITIVELY because the real binary is:
+ * `diskutil erasedisk` and `diskutil ERASEDISK` both print the eraseDisk usage.
+ * Arbitrary abbreviation is NOT accepted (`diskutil eraseD` →
+ * 'did not recognize verb "eraseD"'), so only the documented group spellings
+ * (`ap[fs]`, `coreStorage|CS`) are aliased below.
+ */
+export const DISKUTIL_DESTRUCTIVE_VERBS: ReadonlySet<string> = new Set([
+  "erasedisk",
+  "erasevolume",
+  "eraseoptical",
+  "reformat",
+  "zerodisk",
+  "randomdisk",
+  "secureerase",
+  "partitiondisk",
+  "splitpartition",
+  "mergepartitions",
+])
+
+/** Destructive `diskutil apfs <verb>` verbs. `create`/`createContainer` are
+ *  here because they REFORMAT the disks they are handed. */
+const DISKUTIL_APFS_DESTRUCTIVE_VERBS: ReadonlySet<string> = new Set([
+  "deletecontainer",
+  "deletevolume",
+  "deletevolumegroup",
+  "erasevolume",
+  "create",
+  "createcontainer",
+])
+
+/** Destructive `diskutil coreStorage <verb>` verbs. */
+const DISKUTIL_CORESTORAGE_DESTRUCTIVE_VERBS: ReadonlySet<string> = new Set(["delete"])
+
+/** `diskutil <group> <verb>` groups, under every spelling the binary accepts.
+ *  Lowercased keys — the lookup lowercases too. */
+export const DISKUTIL_VERB_GROUPS: ReadonlyMap<string, ReadonlySet<string>> = new Map([
+  ["apfs", DISKUTIL_APFS_DESTRUCTIVE_VERBS],
+  ["ap", DISKUTIL_APFS_DESTRUCTIVE_VERBS],
+  ["corestorage", DISKUTIL_CORESTORAGE_DESTRUCTIVE_VERBS],
+  ["cs", DISKUTIL_CORESTORAGE_DESTRUCTIVE_VERBS],
+])
+
+/** A leading modifier `diskutil` accepts BEFORE the verb — `diskutil quiet
+ *  eraseDisk` prints the eraseDisk usage, so skipping it is required, not
+ *  cosmetic. */
+export const DISKUTIL_LEADING_MODIFIERS: ReadonlySet<string> = new Set(["quiet"])

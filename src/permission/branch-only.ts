@@ -16,7 +16,7 @@
  * thresholds. Returns `{allowed: true} | {allowed: false, reason}`.
  */
 
-import { GIT_GLOBAL_VALUE_FLAGS } from "./shell/rules"
+import { gitOperandTokens } from "./shell/rules"
 
 /** Canonical protected-branch list for ci-bot. Operator can override per
  *  mode policy. */
@@ -37,30 +37,20 @@ const tokenize = (cmd: string): string[] =>
     .split(/\s+/)
     .filter((t) => t.length > 0)
 
-/** Does this token list look like `git <subcmd>` (allowing `-c key=val` flags
- *  between git and the subcommand)? Returns the subcommand name or `null`. */
+/** Does this token list look like `git <subcmd>` (allowing global flags between
+ *  `git` and the subcommand)? Returns the subcommand name or `null`.
+ *
+ *  Delegates to the SHARED {@link gitOperandTokens}. Sharing only the value-flag
+ *  LIST with `shell/assess.ts` left the FOLD to diverge, and it did: this
+ *  function returned the first `-`-leading token it did not recognize AS the
+ *  subcommand, so every VALUELESS git global hid the operation behind it —
+ *  `git --no-pager push origin +main` and `git -p push origin main` were
+ *  ALLOWED here while the structural authority called them `hard-deny`. One
+ *  reader now, so `--no-pager`, `--literal-pathspecs`, `--bare` and the rest
+ *  need no enumeration to be handled. */
 const gitSubcommand = (toks: readonly string[]): string | null => {
   if (toks.length < 2 || toks[0] !== "git") return null
-  let i = 1
-  while (i < toks.length) {
-    const t = toks[i]
-    // A value-taking global consumes the NEXT token too. This list used to be
-    // four entries hardcoded here, so `git --namespace foo push origin +main`
-    // returned subcommand `foo`, `push` never matched, and a force-push to a
-    // protected branch was ALLOWED. It is now the shared set the structural
-    // authority (`shell/assess.ts`) reads, so the two cannot drift again.
-    if (t !== undefined && GIT_GLOBAL_VALUE_FLAGS.has(t)) {
-      i += 2
-      continue
-    }
-    // `--flag=value` carries its value inline: skip ONE token, not two.
-    if (t?.startsWith("--") === true && t.includes("=")) {
-      i += 1
-      continue
-    }
-    return t ?? null
-  }
-  return null
+  return gitOperandTokens(toks.slice(1))[0] ?? null
 }
 
 /** Is `refspec` a (qualified) reference to one of the protected branches?
