@@ -21,11 +21,17 @@
  */
 
 import { describe, expect, test } from "bun:test"
+import { FEATURES_DIR as ANCHORED_FEATURES_DIR } from "../../tools/feature-catalog/paths"
 import { loadFeaturesStrict } from "../../tools/feature-catalog/schema"
 import baseline from "../../tools/pm/baseline.json"
 import { checkFeatureDoD } from "../../tools/pm/definition-of-done"
 
-const FEATURES_DIR = "tools/feature-catalog/features"
+// ANCHORED, not cwd-relative: `loadFeatures` now REFUSES a relative path,
+// because a repo path built from the ambient cwd resolves to nothing outside
+// the repo root and an empty catalog is indistinguishable from a clean one
+// (`2845e206c`). The anchored constant is the SSOT both the tool and this test
+// must read.
+const FEATURES_DIR = ANCHORED_FEATURES_DIR
 
 describe("Definition-of-Done ratchet (tools/pm)", () => {
   const baselineSet = new Set(baseline as string[])

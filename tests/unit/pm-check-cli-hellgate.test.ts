@@ -21,11 +21,17 @@
 
 import { describe, expect, test } from "bun:test"
 import { spawnSync } from "node:child_process"
+import { FEATURES_DIR as ANCHORED_FEATURES_DIR } from "../../tools/feature-catalog/paths"
 import { loadFeaturesStrict } from "../../tools/feature-catalog/schema"
 import { checkFeatureDoD } from "../../tools/pm/definition-of-done"
 
 const REPO = "/Users/songmin/quanta-codeagent-v3"
-const FEATURES_DIR = "tools/feature-catalog/features"
+// ANCHORED, not cwd-relative: `loadFeatures` now REFUSES a relative path,
+// because a repo path built from the ambient cwd resolves to nothing outside
+// the repo root and an empty catalog is indistinguishable from a clean one
+// (`2845e206c`). The anchored constant is the SSOT both the tool and this test
+// must read.
+const FEATURES_DIR = ANCHORED_FEATURES_DIR
 
 /** Run the REAL CLI composition root as a subprocess (the path CI/pre-push runs). */
 const runCheck = (...args: string[]) =>
