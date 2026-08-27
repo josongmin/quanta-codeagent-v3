@@ -14,6 +14,7 @@
 import { describe, expect, test } from "bun:test"
 import { readdirSync, readFileSync, statSync } from "node:fs"
 import { join } from "node:path"
+import { FEATURES_DIR } from "../../tools/feature-catalog/paths"
 import {
   computeReachability,
   computeSymbolReachability,
@@ -22,7 +23,16 @@ import {
 const r = await computeReachability()
 const sym = await computeSymbolReachability()
 
-const FEAT = "tools/feature-catalog/features"
+/**
+ * Anchored on the catalog module itself — the same SSOT the tooling uses.
+ *
+ * This was the bare literal `"tools/feature-catalog/features"`, the exact string
+ * that made `fc validate --strict` report `0 feature(s), all evidence resolved`
+ * and exit 0 from a foreign cwd. The tooling was fixed; this copy of the literal
+ * in a TEST was not, and the paired control found it: 4 pass at the repo root,
+ * 2 pass / 2 fail from a foreign working directory.
+ */
+const FEAT = FEATURES_DIR
 const walkYaml = (d: string): string[] => {
   const out: string[] = []
   for (const n of readdirSync(d)) {
@@ -64,7 +74,11 @@ describe("fc reachability — import-graph ground truth", () => {
 
   test("REACH-03 RATCHET: every L4+ feature's src evidence.code is reachable", () => {
     const offenders: string[] = []
-    for (const y of walkYaml(FEAT)) {
+    // Anti-vacuity: both ratchets below collect offenders and assert the list is
+    // empty, so a walk that reads no YAML satisfies them for free.
+    const yamls = walkYaml(FEAT)
+    expect(yamls.length, "no feature YAML read — the ratchet below is vacuous").toBeGreaterThan(500)
+    for (const y of yamls) {
       const s = readFileSync(y, "utf8")
       if (!l4plus(s)) continue
       const src = srcEvidence(s)
@@ -83,7 +97,11 @@ describe("fc reachability — import-graph ground truth", () => {
     // helper re-exported from a barrel but never called by any tool (git-budget).
     const isDead = (c: string): boolean => !r.reached.has(c) || sym.deadApi.has(c)
     const offenders: string[] = []
-    for (const y of walkYaml(FEAT)) {
+    // Anti-vacuity: both ratchets below collect offenders and assert the list is
+    // empty, so a walk that reads no YAML satisfies them for free.
+    const yamls = walkYaml(FEAT)
+    expect(yamls.length, "no feature YAML read — the ratchet below is vacuous").toBeGreaterThan(500)
+    for (const y of yamls) {
       const s = readFileSync(y, "utf8")
       if (!l4plus(s)) continue
       const src = srcEvidence(s)
