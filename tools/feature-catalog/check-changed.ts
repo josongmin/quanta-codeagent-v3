@@ -41,6 +41,14 @@ const EXEMPT_PATTERNS: readonly RegExp[] = [
   // bench cassettes for debugging; they are not user-facing surfaces.
   /^tools\/trajectory-timeline\.ts$/,
   /^tools\/trajectory-viewer\//,
+  // `tools/dev/` is the build/test harness the repo runs ON itself — typecheck,
+  // biome wrapper, lint-debt ceiling, worktree-pollution guard, sandboxed-test,
+  // unit-speed budget, cwd-parity control. None of it ships in a binary and none
+  // of it has ever been catalogued (0 of ~20 files appear in any `evidence.code`),
+  // so requiring an fc entry for the NEXT one only makes that one arbitrary.
+  // Deliberately NOT `^tools\//`: tools/pm, tools/god-code and tools/arch-gen ARE
+  // catalogued features (they encode product policy) and must stay gated.
+  /^tools\/dev\//,
 ]
 
 /** True ⇒ this src file is exempt from the "must be in fc" rule. */

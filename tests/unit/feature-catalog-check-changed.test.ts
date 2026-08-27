@@ -58,6 +58,18 @@ describe("isExemptFromFc", () => {
     expect(isExemptFromFc(".claude/worktrees/agent-abc/src/foo.ts")).toBe(true)
     expect(isExemptFromFc("tools/feature-catalog/audit.ts")).toBe(true)
   })
+  test("tools/dev/ (the repo's own build+test harness) is exempt, but catalogued tools are NOT", () => {
+    // Paired control. The exemption exists because no `tools/dev/` file has ever
+    // been in fc evidence — it is the harness the repo runs on itself, not a
+    // shipped feature. It must NOT widen to `tools/`: tools/pm/check.ts,
+    // tools/god-code/detect.ts and tools/arch-gen/main.ts are real fc entries,
+    // and exempting them would silently retire a live gate.
+    expect(isExemptFromFc("tools/dev/cwd-parity-check.ts")).toBe(true)
+    expect(isExemptFromFc("tools/dev/typecheck.ts")).toBe(true)
+    expect(isExemptFromFc("tools/pm/check.ts")).toBe(false)
+    expect(isExemptFromFc("tools/god-code/detect.ts")).toBe(false)
+    expect(isExemptFromFc("tools/arch-gen/main.ts")).toBe(false)
+  })
   test("non-.ts files are exempt (covered by extension check)", () => {
     expect(isExemptFromFc("src/foo.json")).toBe(true)
     expect(isExemptFromFc("README.md")).toBe(true)
