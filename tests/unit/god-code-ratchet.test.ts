@@ -3,6 +3,8 @@ import { readdirSync, readFileSync, statSync } from "node:fs"
 import { join } from "node:path"
 import allowlist from "../../tools/god-code/allowlist.json"
 import {
+  APPROACHING_MODULE_BAND,
+  approachingBandBounds,
   detectGodFunctions,
   detectGodModules,
   GOD_FUNCTION_MAX_LINES,
@@ -51,6 +53,10 @@ describe("god-code ratchet (SE size metric)", () => {
   test("thresholds match the frozen allowlist (config drift guard)", () => {
     expect(allowlist.godModuleMaxLines).toBe(GOD_MODULE_MAX_LINES)
     expect(allowlist.godFunctionMaxLines).toBe(GOD_FUNCTION_MAX_LINES)
+    // The cohort band is detector CONFIG like the two thresholds above, so it
+    // gets the same code twin + drift guard. (`max` is deliberately NOT pinned:
+    // it is the ratchet value and must be able to move down.)
+    expect(allowlist.approachingModuleCeiling.band).toEqual([...APPROACHING_MODULE_BAND])
   })
 
   test(`NO NEW god-MODULE (>${GOD_MODULE_MAX_LINES} lines) — split it, do not allowlist`, () => {
@@ -80,6 +86,29 @@ describe("god-code ratchet (SE size metric)", () => {
     expect(dupes(allowlist.modules)).toEqual([])
   })
 
+  // The cohort test below reads its band out of the very artifact it polices.
+  // The old reader defaulted a missing bound to 0 (`band[0] ?? 0`), so setting
+  // `"band": []` gave lo=hi=0, matched no file, and the ceiling PASSED while
+  // measuring nothing — mutation-proven: 7 pass / 0 fail with an empty band.
+  // The bounds now come from code and a degenerate band is refused, not
+  // silently collapsed to an empty window.
+  test("a degenerate cohort band FAILS CLOSED instead of silently emptying the cohort", () => {
+    // Paired control: the honest band is accepted and is what the JSON mirrors.
+    expect(approachingBandBounds([...APPROACHING_MODULE_BAND])).toEqual([900, 999])
+    expect(approachingBandBounds(allowlist.approachingModuleCeiling.band)).toEqual([900, 999])
+    // Every shape that used to disarm the ceiling now throws.
+    for (const degenerate of [[], [900], [900, 999, 1200], [999, 900], [900, 900]]) {
+      expect(() => approachingBandBounds(degenerate)).toThrow(/band must be a \[lo, hi\] pair/)
+    }
+    // ...and it was a REAL disarm: under the old defaulting read, an empty band
+    // selected zero of the >1000 files walked below.
+    const vacuous = files.filter((f) => {
+      const lines = f.text.split("\n").length
+      return lines >= 0 && lines <= 0
+    })
+    expect(vacuous).toEqual([])
+  })
+
   // aug-23 audit — COHORT ceiling. The 1000-line gate above caps an INDIVIDUAL
   // module, but nothing capped the population walking up to it: a file may grow
   // to 999 freely, so every split this campaign lands is undone by the next
@@ -91,12 +120,11 @@ describe("god-code ratchet (SE size metric)", () => {
   // One-directional, same contract as the allowlist: a new entrant fails the
   // build — split one and LOWER the number. It never gets raised.
   test("the 900-999 approaching cohort does not grow", () => {
-    // JSON import widens the tuple to `number[]`; pin it so the bounds are total.
     const band = allowlist.approachingModuleCeiling
-    // JSON import widens the tuple to `number[]`; read the bounds totally
-    // rather than asserting a tuple type the import cannot carry.
-    const lo = band.band[0] ?? 0
-    const hi = band.band[1] ?? 0
+    // JSON import widens the tuple to `number[]`; read the bounds through the
+    // fail-closed reader in detect.ts rather than defaulting them to 0, which
+    // would turn a malformed band into a cohort of nothing that always passes.
+    const [lo, hi] = approachingBandBounds(band.band)
     const approaching = files
       .map((f) => ({ file: f.path, lines: f.text.split("\n").length }))
       .filter((m) => m.lines >= lo && m.lines <= hi)

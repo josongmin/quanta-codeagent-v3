@@ -22,6 +22,37 @@ import ts from "typescript"
 export const GOD_MODULE_MAX_LINES = 1000
 export const GOD_FUNCTION_MAX_LINES = 150
 
+/**
+ * Inclusive line-count window for the COHORT ceiling: how many src modules are
+ * allowed to sit just below `GOD_MODULE_MAX_LINES`. Lives here, beside the two
+ * thresholds it brackets, so the band is CODE and the allowlist copy of it is a
+ * mirror a drift guard can compare against — the ratchet's `max` stays in the
+ * allowlist because it must be able to move; these bounds must not.
+ */
+export const APPROACHING_MODULE_BAND = [900, 999] as const
+
+/**
+ * Total, fail-closed read of the cohort band bounds.
+ *
+ * A JSON import widens `[900, 999]` to `number[]`, so callers used to read the
+ * bounds with `band[0] ?? 0`. That defaulting is what made an empty band DISARM
+ * the ceiling instead of tripping it: lo=hi=0 selects no file, so the cohort
+ * check passed while measuring nothing. Refuse a band that is not a strictly
+ * ordered pair rather than returning a window that silently matches nothing.
+ */
+export const approachingBandBounds = (
+  band: readonly number[] = APPROACHING_MODULE_BAND,
+): readonly [number, number] => {
+  const [lo, hi] = band
+  if (band.length !== 2 || typeof lo !== "number" || typeof hi !== "number" || lo >= hi) {
+    throw new Error(
+      "god-code ratchet: approachingModuleCeiling.band must be a [lo, hi] pair with lo < hi; got " +
+        JSON.stringify(band),
+    )
+  }
+  return [lo, hi]
+}
+
 export interface SourceFile {
   readonly path: string
   readonly text: string
