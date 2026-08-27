@@ -21,6 +21,7 @@ import { describe, expect, test } from "bun:test"
 import { readFile } from "node:fs/promises"
 import { join } from "node:path"
 import { Glob } from "bun"
+import ts from "typescript"
 import { extractExports } from "../../../tools/arch-gen/scan-slices"
 import { extractExportedSymbols } from "../../../tools/dev/merge-symbol-loss"
 import { parseSymbols } from "../../../tools/feature-catalog/reachability"
@@ -197,12 +198,126 @@ const tsExportsConsumers = async (): Promise<readonly string[]> => {
   return found.sort()
 }
 
+/* ── AST readers used by the structural arms ─────────────────────────────── */
+
+/**
+ * Every regex in `source` whose PATTERN mentions `export`, read from the AST so
+ * the spelling of the regex is irrelevant.
+ *
+ * WHY AST. The previous detector was the shape literal `/\/\^?export\\?s/`,
+ * which is a hand-written list of one spelling wearing the costume of a rule.
+ * Measured 2026-08-28 against five ways to write the same private export reader:
+ * it CAUGHT `/^export\s+(?:const|function)/` and MISSED `/^\s*export\s+/`,
+ * `/\bexport\s+const\b/`, `/^ *export +(const|let)/` and
+ * `new RegExp("^export\\s+")`. One in five. Reading `RegularExpressionLiteral`
+ * nodes and `RegExp(...)` arguments catches all five and does not care how the
+ * character class is spelled.
+ *
+ * THE ONE EXEMPTION, and why it is not a shape list: a regex that mentions BOTH
+ * `export` and `from` is reading a module SPECIFIER (`export … from "x"`), not
+ * an export NAME. `tools/feature-catalog/reachability.ts` legitimately carries
+ * exactly one such regex for the IMPORT side, which is a different question
+ * from "what does this file export" and is not the SSOT's job.
+ *
+ * WHAT THIS STILL CANNOT SEE, stated plainly rather than implied away: a
+ * reimplementation that uses no regex at all — `source.split("\n").filter((l) =>
+ * l.startsWith("export "))` — is INVISIBLE to this arm. That gap is uncovered.
+ * The binding arm below is what makes such a consumer fail, and only if it also
+ * stops importing the SSOT.
+ */
+const exportNameRegexes = (source: string): string[] => {
+  const sf = ts.createSourceFile("x.ts", source, ts.ScriptTarget.Latest, true)
+  const hits: string[] = []
+  const consider = (pattern: string, rendered: string): void => {
+    if (!/export/.test(pattern)) return
+    if (/from/.test(pattern)) return // specifier reader, not an export-name reader
+    hits.push(rendered)
+  }
+  const visit = (n: ts.Node): void => {
+    if (ts.isRegularExpressionLiteral(n)) consider(n.text, n.text)
+    if (
+      (ts.isNewExpression(n) || ts.isCallExpression(n)) &&
+      ts.isIdentifier(n.expression) &&
+      n.expression.text === "RegExp"
+    ) {
+      const arg = n.arguments?.[0]
+      if (arg && ts.isStringLiteralLike(arg))
+        consider(arg.text, `RegExp(${JSON.stringify(arg.text)})`)
+    }
+    ts.forEachChild(n, visit)
+  }
+  visit(sf)
+  return hits
+}
+
+/**
+ * The VALUE names `source` binds from the SSOT module — types excluded.
+ *
+ * Type-only bindings are excluded deliberately: a consumer that keeps
+ * `import type { ModuleExports } from "../shared/ts-exports"` while rolling its
+ * own reader still contains the string `ts-exports`, which is precisely how the
+ * old assertion managed to be unfalsifiable. Binding a FUNCTION is the thing
+ * that cannot be faked by a leftover import line.
+ */
+const valueNamesOf = (
+  elements: readonly (ts.ImportSpecifier | ts.ExportSpecifier)[],
+): readonly string[] =>
+  elements.filter((el) => !el.isTypeOnly).map((el) => (el.propertyName ?? el.name).text)
+
+const bindsSsot = (spec: ts.Expression | undefined): boolean =>
+  spec !== undefined && ts.isStringLiteral(spec) && /\/shared\/ts-exports$/.test(spec.text)
+
+/** The clause of one statement, IF that statement binds from the SSOT module. */
+const ssotClauseNames = (st: ts.Statement): readonly string[] => {
+  if (ts.isImportDeclaration(st)) {
+    const clause = st.importClause
+    if (!bindsSsot(st.moduleSpecifier) || !clause || clause.isTypeOnly) return []
+    const bindings = clause.namedBindings
+    return bindings && ts.isNamedImports(bindings) ? valueNamesOf(bindings.elements) : []
+  }
+  if (!ts.isExportDeclaration(st)) return []
+  const clause = st.exportClause
+  if (!bindsSsot(st.moduleSpecifier) || st.isTypeOnly || !clause || !ts.isNamedExports(clause)) {
+    return []
+  }
+  return valueNamesOf(clause.elements)
+}
+
+const ssotValueBindings = (source: string): string[] => {
+  const sf = ts.createSourceFile("x.ts", source, ts.ScriptTarget.Latest, true)
+  return [...new Set(sf.statements.flatMap((st) => ssotClauseNames(st)))]
+}
+
+/** The SSOT's own exported VALUES, derived from the SSOT source — never listed. */
+const ssotValueExports = (source: string): Set<string> => {
+  const sf = ts.createSourceFile("ts-exports.ts", source, ts.ScriptTarget.Latest, true)
+  const names = new Set<string>()
+  const exported = (n: ts.Node): boolean =>
+    ts.canHaveModifiers(n) &&
+    (ts.getModifiers(n) ?? []).some((m) => m.kind === ts.SyntaxKind.ExportKeyword)
+  for (const st of sf.statements) {
+    if (ts.isVariableStatement(st) && exported(st)) {
+      for (const d of st.declarationList.declarations) {
+        if (ts.isIdentifier(d.name)) names.add(d.name.text)
+      }
+    }
+    if (ts.isFunctionDeclaration(st) && exported(st) && st.name) names.add(st.name.text)
+  }
+  return names
+}
+
 describe("export extraction SSOT — one implementation only", () => {
   // ANTI-VACUITY FLOOR — not the population, a check that the derivation did not
   // collapse. If the glob breaks or the import shape changes, `consumers` goes
   // empty and every `for` loop below passes while measuring nothing. These three
   // are known to import the SSOT today; losing one is a real event that should
   // fail loudly rather than silently shrink what is policed.
+  //
+  // Each loop arm below ALSO carries its own floor. This sibling test is not
+  // enough: it fails on its own while the loops stay green having asserted
+  // nothing, so a reader sees "1 fail" and three passes over an empty set.
+  // Measured 2026-08-28 by forcing the derivation to `[]` — both loop arms below
+  // reported `1 pass`, one of them with zero expect() calls.
   test("the derived consumer set is non-empty and covers every known consumer", async () => {
     const consumers = await tsExportsConsumers()
     expect(consumers).toContain("tools/arch-gen/scan-slices.ts")
@@ -212,15 +327,39 @@ describe("export extraction SSOT — one implementation only", () => {
     expect(consumers.length).toBeGreaterThanOrEqual(3)
   })
 
-  test("no consumer carries its own export regex", async () => {
+  test("no consumer carries its own export-name regex", async () => {
+    const consumers = await tsExportsConsumers()
+    expect(consumers.length).toBeGreaterThanOrEqual(3) // OWN floor — see above.
     const offenders: string[] = []
-    for (const rel of await tsExportsConsumers()) {
-      const source = await readSrc(rel)
+    for (const rel of consumers) {
       // A private export-name regex is exactly what drifted. The SSOT module is
       // the only place allowed to decide what an export is.
-      if (/\/\^?export\\?s/.test(source)) offenders.push(`${rel}: own export regex`)
+      for (const hit of exportNameRegexes(await readSrc(rel))) offenders.push(`${rel}: ${hit}`)
     }
     expect(offenders.join("\n")).toBe("")
+  })
+
+  test("PAIRED CONTROL: the detector catches every spelling of a private export regex", () => {
+    // The five spellings measured against the old shape literal, which caught
+    // the first and missed the rest. All five must be seen.
+    const spellings = [
+      String.raw`const R = /^export\s+(?:const|function)/`,
+      String.raw`const R = /^\s*export\s+/`,
+      String.raw`const R = /\bexport\s+const\b/`,
+      "const R = /^ *export +(const|let)/", // no escapes here, so no String.raw
+      String.raw`const R = new RegExp("^export\\s+")`,
+    ]
+    const missed = spellings.filter((src) => exportNameRegexes(src).length === 0)
+    expect(missed).toEqual([])
+  })
+
+  test("PAIRED CONTROL: the detector does NOT fire on a module-specifier regex", () => {
+    // Without this, the arm above would still pass if the detector flagged every
+    // regex in existence — and it would red the one legitimate import-side
+    // scanner in `reachability.ts`.
+    const specifierReader = String.raw`const R = /(?:import\s[\s\S]*?from\s+|export\s[\s\S]*?from\s+)["']([^"']+)["']/g`
+    expect(exportNameRegexes(specifierReader)).toEqual([])
+    expect(exportNameRegexes("const R = /^\\s*$/")).toEqual([])
   })
 
   test("reachability reads exports from the RAW source, never the stripped copy", async () => {
@@ -233,10 +372,43 @@ describe("export extraction SSOT — one implementation only", () => {
     expect(source).not.toContain("parseModuleExports(s)")
   })
 
-  test("every consumer reaches the SSOT by import, not by reimplementation", async () => {
-    for (const rel of await tsExportsConsumers()) {
-      const source = await readSrc(rel)
-      expect(source).toContain("ts-exports")
+  test("every consumer BINDS a reader function from the SSOT, not merely its path", async () => {
+    // WHAT THIS REPLACED. The arm used to be `expect(source).toContain("ts-exports")`
+    // over a population selected by `/from\s+"[^"]*\/shared\/ts-exports"/`. Every
+    // member necessarily contained the substring, so the assertion restated its
+    // own selection predicate and NO edit to any consumer could redden it.
+    //
+    // The falsifiable question is which SYMBOL the consumer binds: a consumer
+    // that keeps a type-only import (or an unused path) while reimplementing the
+    // reader is still a member of the population, but binds no reader function
+    // and fails here.
+    const readers = ssotValueExports(await readSrc(SSOT_MODULE))
+    expect(readers.size).toBeGreaterThan(0) // the SSOT itself must export values
+    const consumers = await tsExportsConsumers()
+    expect(consumers.length).toBeGreaterThanOrEqual(3) // OWN floor — see above.
+    const detached: string[] = []
+    for (const rel of consumers) {
+      const bound = ssotValueBindings(await readSrc(rel))
+      if (!bound.some((name) => readers.has(name))) {
+        detached.push(
+          `${rel}: binds ${JSON.stringify(bound)} from the SSOT, none of which is a reader ` +
+            `(${[...readers].sort().join(", ")}) — it reaches the module by path only`,
+        )
+      }
     }
+    expect(detached.join("\n")).toBe("")
+  })
+
+  test("PAIRED CONTROL: a type-only consumer is REPORTED as not binding a reader", () => {
+    // The exact shape the old tautology waved through: the path is still there,
+    // the reader is not.
+    const readers = new Set(["parseModuleExports", "extractExportedSymbols"])
+    const typeOnly = 'import type { ModuleExports } from "../shared/ts-exports"'
+    expect(ssotValueBindings(typeOnly).some((n) => readers.has(n))).toBe(false)
+    // ...and the honest shapes are still accepted, so this is not a blanket red.
+    const real = 'import { extractExportedSymbols } from "../shared/ts-exports"'
+    expect(ssotValueBindings(real).some((n) => readers.has(n))).toBe(true)
+    const reexport = 'export { parseModuleExports } from "../shared/ts-exports"'
+    expect(ssotValueBindings(reexport).some((n) => readers.has(n))).toBe(true)
   })
 })

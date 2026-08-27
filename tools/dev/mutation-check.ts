@@ -20,8 +20,16 @@
  * revert is applied, so a drifted src (the fix moved/renamed) is a hard error
  * rather than a silent no-op that would falsely read as "blind spot".
  *
- * Run:  bun run tools/dev/mutation-check.ts            # all critical hellgates
- *       bun run tools/dev/mutation-check.ts <id-substr> # one entry by id
+ * Run:  bun run mutation-check              # all critical hellgates
+ *       bun run mutation-check <id-substr>  # one entry by id
+ *
+ * ⚠️ THIS TOOL IS MANUAL. Nothing in `bun test` and nothing in CI runs it, so
+ * its guards are only as real as the last time a human typed the command. The
+ * checks that CAN be enforced without spawning — every entry has an `only`, its
+ * `gate` file exists, its `only` compiles as a regex, its `find` string is
+ * present exactly once — are exported as pure functions and asserted by
+ * `tests/unit/_arch/mutation-check-drift-ratchet.test.ts`, which does run.
+ * Prefer adding a check there over adding one here.
  *
  * SAFETY: this script MUTATES tracked source files in place and restores them.
  * It refuses to run if any target src file already has uncommitted changes that
@@ -30,7 +38,7 @@
  */
 
 import { spawnSync } from "node:child_process"
-import { readFileSync, writeFileSync } from "node:fs"
+import { existsSync, readFileSync, writeFileSync } from "node:fs"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
 
@@ -402,45 +410,132 @@ const runGate = (gate: string, only?: string): { failed: boolean; raw: string; r
 }
 
 /**
- * THE CLASS-CLOSING GUARD for over-broad `-t` filters, run BEFORE any mutation.
+ * STATIC PRE-FLIGHT — the part of the leaf-anchor rule that needs NO spawning.
  *
- * Every entry's `only` must select EXACTLY ONE test. This is DERIVED — the
- * width is measured by running the gate under the real filter — rather than a
- * hand-kept list of "filters we already checked", because a hand-kept list is
- * the defect this whole rail keeps re-finding. Entry 15 cannot repeat the bug:
- * an over-broad filter now fails the run at pre-flight instead of quietly
- * inflating a mutant into a proof.
+ * WHY THIS IS SPLIT OUT. The width measurement below ({@link assertLeafAnchored})
+ * costs one `bun test` spawn per entry (14 entries today; a single filtered gate
+ * spawn measured 2.4-2.7s on 2026-08-28, so the pre-flight is tens of seconds),
+ * which is why it lives in a tool and not in the suite — and a guard that lives
+ * only in a tool, on a repo whose CI has been billing-blocked for weeks, RUNS
+ * NOWHERE. Measured: gutting the width guard to `if (ran >= 0)` left the only
+ * test covering this file at 5 pass / 0 fail — it SURVIVED. So the checks that
+ * are PURE are pulled out here, where
+ * `tests/unit/_arch/mutation-check-drift-ratchet.test.ts` calls them and
+ * `bun test` enforces them on every run.
  *
- * `ran !== 1` covers both directions: a filter matching a describe (too wide)
- * and a filter matching nothing at all after a test rename (too narrow), which
- * would otherwise read as an unkillable green.
+ * What is pure, and therefore actually enforced:
+ *   1. every entry HAS an `only` filter (an absent filter runs the whole gate
+ *      file, so ANY failure in it reads as this mutant being killed),
+ *   2. every entry's `gate` file EXISTS — this used to be reported as an
+ *      over-broad `only`, naming the wrong input entirely, and
+ *   3. every `only` COMPILES as a regex (`-t` takes a regex; one that throws or
+ *      matches nothing is an unkillable green).
+ *
+ * `gateExists` is injected so the ratchet can push synthetic entries through
+ * THIS function rather than through a re-implementation of the rule.
  */
-export const assertLeafAnchored = (mutations: readonly Mutation[]): void => {
-  const problems: string[] = []
+export interface MutationStaticProblem {
+  readonly id: string
+  /** Which field of the entry is actually at fault. Attribution is the point. */
+  readonly field: "only" | "gate"
+  readonly problem: string
+}
+
+export const findStaticProblems = (
+  mutations: readonly Mutation[],
+  gateExists: (gate: string) => boolean = (gate) => existsSync(join(repoRoot, gate)),
+): readonly MutationStaticProblem[] => {
+  const problems: MutationStaticProblem[] = []
   for (const m of mutations) {
+    if (!gateExists(m.gate)) {
+      // ATTRIBUTION. The width check cannot tell "no such file" from "the filter
+      // matched nothing" — both produce no `N pass` summary line — so it blamed
+      // `only` and told you to anchor a filter that was never the problem.
+      problems.push({
+        id: m.id,
+        field: "gate",
+        problem: `gate file DOES NOT EXIST: ${m.gate} — the gate moved or was renamed. Repoint \`gate\`.`,
+      })
+    }
     if (m.only === undefined) {
-      problems.push(
-        `[${m.id}] has NO \`only\` filter — the whole of ${m.gate} runs, so ANY ` +
+      problems.push({
+        id: m.id,
+        field: "only",
+        problem:
+          `has NO \`only\` filter — the whole of ${m.gate} runs, so ANY ` +
           `failure in that file reads as this mutant being killed. Anchor it to one leaf test.`,
-      )
+      })
       continue
     }
+    try {
+      new RegExp(m.only)
+    } catch (err) {
+      problems.push({
+        id: m.id,
+        field: "only",
+        problem:
+          `\`only\` is not a valid regex (${String(err)}) — \`bun test -t\` takes a REGEX, ` +
+          `so this selects nothing and every mutant under it reads as green: ${JSON.stringify(m.only)}`,
+      })
+    }
+  }
+  return problems
+}
+
+const reportProblems = (problems: readonly string[]): never => {
+  console.error(`\n✗ over-broad (or dead) mutation filters — refusing to mutate:`)
+  for (const p of problems) console.error(`  ${p}`)
+  process.exit(2)
+}
+
+/**
+ * WIDTH MEASUREMENT — every entry's `only` must select EXACTLY ONE test.
+ *
+ * ⚠️ THIS CHECK IS MANUAL. It spawns `bun test` once per entry and is reached
+ * ONLY from {@link main} — i.e. only when a human runs `bun run mutation-check`
+ * or types the tool's path. Nothing in `bun test` and nothing in CI calls it.
+ * Do not read its existence as coverage; the falsifiable half of the rule is
+ * {@link findStaticProblems}, which the drift ratchet does run.
+ *
+ * The width cannot be made cheap. `bun test` has no dry-run/list mode (checked
+ * `bun test --help`, 1.3.14), and reading test names statically is UNSOUND in
+ * this repo because gate files generate names at runtime — e.g.
+ * `tests/unit/_arch/ts-exports-ssot.test.ts` builds `AST: ${fx.name}` in a loop
+ * — so a static reader would measure a template string, not a test name.
+ *
+ * `ran !== 1` covers both directions: a filter matching a describe (too wide),
+ * and a filter matching nothing after a test rename (too narrow), which would
+ * otherwise read as an unkillable green.
+ *
+ * KNOWN AND DELIBERATELY OPEN: width 1 does not prove the RIGHT test. A filter
+ * can select exactly one UNRELATED leaf and pass here (measured: the
+ * `hostMutationVerdict full/read-only/undefined` leaf selects 1 over the
+ * empty-`writableRoots` entry's gate). That is FAIL-LOUD, not fail-silent — an
+ * unrelated test does not touch the reverted `src`, so it stays green under the
+ * revert and the entry is reported as a BLIND SPOT (exit 1). Closing it would
+ * need per-test coverage attribution; a name/shape check would just be the
+ * hand-written list this rail exists to delete.
+ */
+export const assertLeafAnchored = (mutations: readonly Mutation[]): void => {
+  const statics = findStaticProblems(mutations)
+  const problems: string[] = statics.map((p) => `[${p.id}] (${p.field}) ${p.problem}`)
+  const brokenIds = new Set(statics.map((p) => p.id))
+  for (const m of mutations) {
+    // Do not spawn for an entry already known bad: running a filter against a
+    // missing gate is exactly what produced the misattributed message.
+    if (m.only === undefined || brokenIds.has(m.id)) continue
     const { ran } = runGate(m.gate, m.only)
     if (ran === 1) {
       console.log(`✓ leaf-anchored (selects 1): ${m.id}`)
       continue
     }
     problems.push(
-      `[${m.id}] \`only\` selected ${ran === -1 ? "an unreadable count" : `${ran} tests`}, ` +
+      `[${m.id}] (only) \`only\` selected ${ran === -1 ? "an unreadable count" : `${ran} tests`}, ` +
         `must select exactly 1. Filter: ${JSON.stringify(m.only)} over ${m.gate}. ` +
         `\`-t\` is a REGEX over describe+test — anchor it to the LEAF test name.`,
     )
   }
-  if (problems.length > 0) {
-    console.error(`\n✗ over-broad (or dead) mutation filters — refusing to mutate:`)
-    for (const p of problems) console.error(`  ${p}`)
-    process.exit(2)
-  }
+  if (problems.length > 0) reportProblems(problems)
 }
 
 /**
@@ -486,6 +581,14 @@ const main = async (): Promise<void> => {
     console.error(`no mutation matches "${filter}"`)
     process.exit(2)
   }
+
+  // STATIC pre-flight FIRST. A missing gate file makes `bun test` exit 1, which
+  // the baseline loop below would report as "baseline FAILED" and the width
+  // check would report as an over-broad `only` — two wrong names for the same
+  // input. Naming it here, before any spawn, is also the half of this rail that
+  // `bun test` enforces (see findStaticProblems).
+  const statics = findStaticProblems(selected)
+  if (statics.length > 0) reportProblems(statics.map((p) => `[${p.id}] (${p.field}) ${p.problem}`))
 
   // Sanity: every gate must be GREEN at HEAD before we mutate anything.
   console.log("── baseline (HEAD, no mutation) ──")

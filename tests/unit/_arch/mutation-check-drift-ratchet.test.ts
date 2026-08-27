@@ -21,12 +21,32 @@
  *
  * WHAT THIS ASSERTS
  * -----------------
- * Statically -- no source file is ever written -- for EVERY entry:
+ * Statically -- no source file is ever written, nothing is spawned -- for EVERY
+ * entry:
  *   1. the target `src` file EXISTS, and
- *   2. the `find` string occurs in it EXACTLY ONCE.
+ *   2. the `find` string occurs in it EXACTLY ONCE, and
+ *   3. the `gate` file EXISTS, and
+ *   4. the entry HAS an `only` filter, and
+ *   5. that `only` COMPILES as a regex.
  * Uniqueness matters as much as presence: the tool's `String.replace` swaps
  * only the FIRST match, so a pin that became ambiguous would mutate the wrong
  * site and prove nothing.
+ *
+ * 3/4/5 come from the tool's own `findStaticProblems`, not a copy of the rule.
+ * They live here because the tool's pre-flight is MANUAL: measured 2026-08-28,
+ * gutting its width guard to `if (ran >= 0)` left this file at 5 pass / 0 fail
+ * -- the guard SURVIVED, because nothing in `bun test` reached it. Everything
+ * about the entry list that can be checked without spawning is checked here
+ * instead.
+ *
+ * WHAT THIS DELIBERATELY DOES NOT COVER: selection WIDTH -- that `only` selects
+ * exactly one test -- because measuring it costs one `bun test` spawn per entry
+ * (14 entries today, one filtered gate spawn measured 2.4-2.7s each) and `bun
+ * test` has no dry-run mode to make it cheap. That
+ * check stays in the tool and is labelled MANUAL there. Nor does width prove
+ * the RIGHT test was selected; a wrong-but-narrow filter is fail-loud (the
+ * unrelated test stays green under the revert => reported BLIND SPOT), which is
+ * why it is left open rather than papered over with a name-shape rule.
  *
  * ANTI-VACUITY
  * ------------
@@ -42,7 +62,12 @@
 import { describe, expect, test } from "bun:test"
 import { existsSync, readFileSync } from "node:fs"
 import { join } from "node:path"
-import { findOccurrences, MUTATIONS, type Mutation } from "../../../tools/dev/mutation-check"
+import {
+  findOccurrences,
+  findStaticProblems,
+  MUTATIONS,
+  type Mutation,
+} from "../../../tools/dev/mutation-check"
 
 const REPO_ROOT = join(import.meta.dir, "..", "..", "..")
 
@@ -91,11 +116,16 @@ describe("mutation-check proof rail -- pinned find-strings have not drifted", ()
   })
 
   test("every entry names a src file that EXISTS", () => {
+    // OWN floor. A sibling test asserting non-emptiness does not stop THIS loop
+    // from passing over an empty list on a machine where the import resolved to
+    // nothing -- each loop carries its own.
+    expect(MUTATIONS.length).toBeGreaterThan(0)
     const missing = MUTATIONS.filter((m) => !existsSync(join(REPO_ROOT, m.src))).map((m) => m.src)
     expect(missing).toEqual([])
   })
 
   test("every entry's `find` occurs EXACTLY ONCE in its target src file", () => {
+    expect(MUTATIONS.length).toBeGreaterThan(0) // OWN floor -- see above.
     const drifts = findDrifts(MUTATIONS)
     expect(
       drifts.length === 0
@@ -136,5 +166,107 @@ describe("mutation-check proof rail -- pinned find-strings have not drifted", ()
     }
     const drifts = findDrifts([renamedAway])
     expect(drifts.map((d) => d.problem)).toEqual(["TARGET FILE MISSING"])
+  })
+})
+
+/**
+ * The pure half of the tool's pre-flight, hoisted into `bun test`.
+ *
+ * `findStaticProblems` is the tool's OWN function -- these arms run the same
+ * code the tool runs, not a re-implementation of it. The paired controls inject
+ * `gateExists` so a synthetic entry can name a gate that does not exist without
+ * this test needing a fixture file on disk.
+ */
+describe("mutation-check proof rail -- the entry list survives static pre-flight", () => {
+  const allExist = (): boolean => true
+
+  test("every entry passes the tool's static pre-flight", () => {
+    expect(MUTATIONS.length).toBeGreaterThan(0) // OWN floor.
+    const problems = findStaticProblems(MUTATIONS)
+    expect(
+      problems.length === 0
+        ? "clean"
+        : `${problems.length} entr(ies) fail the tool's OWN static pre-flight:\n` +
+            problems.map((p) => `  ${p.id}  [${p.field}]  ${p.problem}`).join("\n"),
+    ).toBe("clean")
+  })
+
+  test("every entry HAS an `only` filter (absent => the whole gate file runs)", () => {
+    expect(MUTATIONS.length).toBeGreaterThan(0) // OWN floor.
+    const unfiltered = MUTATIONS.filter((m) => m.only === undefined).map((m) => m.id)
+    expect(unfiltered).toEqual([])
+  })
+
+  test("PAIRED CONTROL: an entry with NO `only` is REPORTED, attributed to `only`", () => {
+    const noFilter: Mutation = {
+      id: "synthetic-no-only",
+      severity: "CRITICAL",
+      guards: "paired control -- proves the absent-filter arm can fail",
+      src: "tools/dev/mutation-check.ts",
+      find: "irrelevant",
+      replace: "irrelevant",
+      gate: "tests/unit/_arch/mutation-check-drift-ratchet.test.ts",
+      // `only` deliberately omitted.
+    }
+    const problems = findStaticProblems([noFilter], allExist)
+    expect(problems.map((p) => p.id)).toEqual(["synthetic-no-only"])
+    expect(problems[0]?.field).toBe("only")
+    expect(problems[0]?.problem).toContain("NO `only` filter")
+  })
+
+  test("PAIRED CONTROL: a MISSING gate is attributed to `gate`, not to `only`", () => {
+    // THE MISATTRIBUTION THIS CLOSES. The width check reads a missing gate and a
+    // filter that matched nothing identically -- neither prints a summary line --
+    // so it used to say "`only` selected an unreadable count ... anchor it to the
+    // LEAF test name" about an entry whose `only` was perfectly good and whose
+    // gate file simply did not exist. The field must name the real input.
+    const goneGate: Mutation = {
+      id: "synthetic-missing-gate",
+      severity: "HIGH",
+      guards: "paired control -- a renamed gate must not read as a bad filter",
+      src: "tools/dev/mutation-check.ts",
+      find: "irrelevant",
+      replace: "irrelevant",
+      gate: "src/permission/__tests__/renamed-away.hellgate.test.ts",
+      only: "a perfectly good leaf test name",
+    }
+    const problems = findStaticProblems([goneGate], (gate) => gate !== goneGate.gate)
+    expect(problems.map((p) => p.field)).toEqual(["gate"])
+    expect(problems[0]?.problem).toContain("gate file DOES NOT EXIST")
+    expect(problems[0]?.problem).not.toContain("LEAF test name")
+  })
+
+  test("PAIRED CONTROL: an `only` that is not a valid regex is REPORTED", () => {
+    // `-t` compiles its argument. An entry whose filter throws selects nothing,
+    // and "selects nothing" is an unkillable green for every mutant under it.
+    const badRegex: Mutation = {
+      id: "synthetic-uncompilable-only",
+      severity: "MED",
+      guards: "paired control -- proves the regex arm can fail",
+      src: "tools/dev/mutation-check.ts",
+      find: "irrelevant",
+      replace: "irrelevant",
+      gate: "tests/unit/_arch/mutation-check-drift-ratchet.test.ts",
+      only: "unbalanced ( paren",
+    }
+    const problems = findStaticProblems([badRegex], allExist)
+    expect(problems.map((p) => p.field)).toEqual(["only"])
+    expect(problems[0]?.problem).toContain("not a valid regex")
+  })
+
+  test("PAIRED CONTROL: a well-formed entry produces NO problems (no blanket red)", () => {
+    // Without this, every arm above would still pass if `findStaticProblems`
+    // returned a problem for literally everything.
+    const clean: Mutation = {
+      id: "synthetic-clean",
+      severity: "MED",
+      guards: "paired control -- the checker must also be able to say yes",
+      src: "tools/dev/mutation-check.ts",
+      find: "irrelevant",
+      replace: "irrelevant",
+      gate: "tests/unit/_arch/mutation-check-drift-ratchet.test.ts",
+      only: "hostMutationVerdict\\(.custom.\\) === .defer.",
+    }
+    expect(findStaticProblems([clean], allExist)).toEqual([])
   })
 })
