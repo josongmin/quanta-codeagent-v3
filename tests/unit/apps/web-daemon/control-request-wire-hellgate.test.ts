@@ -96,7 +96,10 @@ describe("web control-request END-TO-END — frame → port → drain → LIVE c
     expect(permission.mode).toBe("default")
 
     // Client sends the frame; the server peeks + enqueues.
-    const req = peekControlRequest(frame({ kind: "set_permission_mode", mode: "bypass" }))
+    // `acceptEdits`, not `bypass`: the wire allowlist deliberately EXCLUDES the
+    // escalating mode (see the refusal arm below). What this test proves — a
+    // frame reaching the live cell mid-session — is unchanged by the choice.
+    const req = peekControlRequest(frame({ kind: "set_permission_mode", mode: "acceptEdits" }))
     expect(req).not.toBeNull()
     if (req === null) throw new Error("unreachable")
     handle.enqueue(req)
@@ -106,8 +109,8 @@ describe("web control-request END-TO-END — frame → port → drain → LIVE c
     const applied = drainControlRequests(handle.port, handle.context, handle.applier)
 
     // The effect LANDED on the host: the live gate cell actually changed.
-    expect(permission.mode).toBe("bypass")
-    expect(applied).toEqual([{ kind: "permission-mode-set", mode: "bypass" }])
+    expect(permission.mode).toBe("acceptEdits")
+    expect(applied).toEqual([{ kind: "permission-mode-set", mode: "acceptEdits" }])
     expect(handle.pendingCount()).toBe(0)
   })
 
@@ -196,9 +199,42 @@ describe("web control-request port — safety invariants", () => {
       },
     })
     handle.enqueue({ kind: "set_model", model: "anything" }) // triggers observe (throws, swallowed)
-    handle.enqueue({ kind: "set_permission_mode", mode: "bypass" })
+    handle.enqueue({ kind: "set_permission_mode", mode: "acceptEdits" })
     // The drain must not throw and the permission effect must still land.
     expect(() => drainControlRequests(handle.port, handle.context, handle.applier)).not.toThrow()
-    expect(permission.mode).toBe("bypass")
+    expect(permission.mode).toBe("acceptEdits")
+  })
+})
+
+/**
+ * The escalating mode is not reachable from the wire.
+ *
+ * This file previously used `bypass` as its convenient "not default" value,
+ * which is exactly how the defect stayed invisible: the module header promised
+ * "a model-issued `bypass` is never silently honored" while the allowlist the
+ * composition supplied was the full SSOT union, `bypass` included. A page on a
+ * tokenless daemon could open the (then Origin-unchecked) socket and turn the
+ * approval gate off. The transport still CARRIES the frame — refusal belongs to
+ * the planner, not the peek — so the fence is asserted at the drain.
+ */
+describe("web control-request — `bypass` is refused at the planner", () => {
+  test("a bypass frame leaves the LIVE cell untouched and applies nothing", () => {
+    const permission = liveCell()
+    const handle = createWebControlRequestPort({ permission })
+    handle.enqueue({ kind: "set_permission_mode", mode: "bypass" })
+    const applied = drainControlRequests(handle.port, handle.context, handle.applier)
+    expect(permission.mode).toBe("default")
+    expect(applied.filter((e) => e.kind === "permission-mode-set")).toEqual([])
+  })
+
+  test("PAIRED CONTROL — the non-escalating modes still land, so this is a fence, not an off switch", () => {
+    for (const mode of ["acceptEdits", "auto", "default"] as const) {
+      const permission = liveCell()
+      permission.mode = "default"
+      const handle = createWebControlRequestPort({ permission })
+      handle.enqueue({ kind: "set_permission_mode", mode })
+      drainControlRequests(handle.port, handle.context, handle.applier)
+      expect({ mode, landed: permission.mode as string }).toEqual({ mode, landed: mode as string })
+    }
   })
 })

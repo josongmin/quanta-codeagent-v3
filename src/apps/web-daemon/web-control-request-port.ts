@@ -47,7 +47,12 @@ import type {
   ControlRequestContext,
   ControlRequestPort,
 } from "@/agent/control-request"
-import { ALL_PERMISSION_MODES, isPermissionMode, type PermissionContext } from "@/permission"
+import {
+  ALL_PERMISSION_MODES,
+  isPermissionMode,
+  type PermissionContext,
+  type PermissionMode,
+} from "@/permission"
 
 /**
  * Upper bound on PENDING control requests. A client that floods the daemon with
@@ -57,6 +62,16 @@ import { ALL_PERMISSION_MODES, isPermissionMode, type PermissionContext } from "
  * real interactive burst.
  */
 export const MAX_PENDING_CONTROL_REQUESTS = 64
+
+/** The permission modes a CONTROL REQUEST may select. A strict subset of the
+ *  closed `ALL_PERMISSION_MODES` union: everything except `bypass`, which turns
+ *  the approval gate off entirely and must originate from the operator's own
+ *  surface rather than from a frame on the wire. Derived from the SSOT so a new
+ *  mode is admitted by default and only the escalating one is subtracted —
+ *  a hand-written literal would silently drop a future mode instead. */
+export const WEB_CONTROL_PERMISSION_MODES: readonly PermissionMode[] = ALL_PERMISSION_MODES.filter(
+  (m) => m !== "bypass",
+)
 
 /**
  * The handle the composition root wires: `port` + `applier` + `context` go onto
@@ -167,10 +182,14 @@ export const createWebControlRequestPort = (
   }
 
   const context: ControlRequestContext = {
-    // Permission modes: the CLOSED SSOT set is ALWAYS the allowlist (the axis is
-    // a privilege boundary — the planner fail-closes on an ABSENT permission
-    // allowlist, so we MUST supply it for the mode effect to ever land).
-    permissionModes: ALL_PERMISSION_MODES,
+    // Permission modes: the planner fail-closes on an ABSENT allowlist, so one
+    // MUST be supplied for the mode effect to land at all — but supplying the
+    // full SSOT set made this file's own header false ("a model-issued `bypass`
+    // is never silently honored"), because the set it required CONTAINED
+    // `bypass`. The allowlist NARROWS the closed union to the modes that are not
+    // a privilege escalation; `bypass` is reachable only from the operator's own
+    // surface, never from a control request over the wire.
+    permissionModes: WEB_CONTROL_PERMISSION_MODES,
     ...(deps.modelAllowlist !== undefined ? { modelAllowlist: deps.modelAllowlist } : {}),
     ...(deps.thinkingLevels !== undefined ? { thinkingLevels: deps.thinkingLevels } : {}),
     // `usage` is read at MINT time; the planner shallow-copies it defensively.

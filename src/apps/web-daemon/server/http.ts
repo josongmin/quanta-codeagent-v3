@@ -81,18 +81,60 @@ export const handleConfigPost = async (req: Request): Promise<Response> => {
   return jsonResponse(200, { ok: true, applied })
 }
 
+/**
+ * Origins a BROWSER may drive this daemon from.
+ *
+ * The daemon binds loopback and (by default) carries no token, so `Origin` is
+ * the only thing separating the user's own frontend from a page they happen to
+ * be visiting. Echoing the request's own `Origin` — the previous behaviour —
+ * made that separation vacuous: any site could read `/threads/<id>/events`.
+ *
+ * The allowlist is LOOPBACK + TAURI, on any port, because that is exactly the
+ * set the shipped frontends are served from (`localhost:5173` in Vite dev, the
+ * daemon's own port in production, `tauri://localhost` in the desktop shell). A
+ * hostile page cannot forge `Origin` — the browser sets it — and a non-browser
+ * caller sends none at all, which is why absence is allowed rather than refused.
+ */
+const LOOPBACK_ORIGIN_RE = /^https?:\/\/(?:localhost|127\.0\.0\.1|\[::1\])(?::\d+)?$/
+const TAURI_ORIGINS: ReadonlySet<string> = new Set(["tauri://localhost", "https://tauri.localhost"])
+
+/** `true` when this request may be served to a browser. An ABSENT `Origin`
+ *  (curl, the CLI's own client, a same-origin fetch) is allowed — adding a
+ *  header requirement there would be a breaking change for every non-browser
+ *  caller and buys nothing, since the attack shape is a page in the user's
+ *  browser. */
+export const isAllowedOrigin = (origin: string | null): boolean => {
+  if (origin === null || origin === "") return true
+  return LOOPBACK_ORIGIN_RE.test(origin) || TAURI_ORIGINS.has(origin)
+}
+
 /** CORS headers — the frontend dev server (`localhost:5173`) is a
  *  different origin from the daemon (`localhost:4096`), so browser
- *  fetches need preflight + ACAO. Loopback-only dev; loose `*` is fine.
- *  When `Origin` is set we echo it (so credentialed requests would work
- *  if the frontend ever adds `credentials: "include"`). */
-export const corsHeaders = (req: Request | null): Record<string, string> => ({
-  "access-control-allow-origin": req?.headers.get("origin") ?? "*",
-  "access-control-allow-methods": "GET, POST, OPTIONS, DELETE",
-  "access-control-allow-headers": "authorization, content-type",
-  "access-control-max-age": "600",
-  vary: "Origin",
-})
+ *  fetches need preflight + ACAO. A DISALLOWED origin gets no ACAO at all;
+ *  an allowed named origin is echoed (so credentialed requests would work if
+ *  the frontend ever adds `credentials: "include"`), and an absent origin keeps
+ *  the historical `*`. */
+export const corsHeaders = (req: Request | null): Record<string, string> => {
+  const origin = req?.headers.get("origin") ?? null
+  const base = {
+    "access-control-allow-methods": "GET, POST, OPTIONS, DELETE",
+    "access-control-allow-headers": "authorization, content-type",
+    "access-control-max-age": "600",
+    vary: "Origin",
+  }
+  if (!isAllowedOrigin(origin)) return base
+  return { ...base, "access-control-allow-origin": origin ?? "*" }
+}
+
+/** Refusal for a browser origin outside the allowlist. Deliberately a REFUSAL
+ *  and not merely a withheld ACAO: a `POST` with a simple content-type is sent
+ *  without a preflight, so the side effect (`/auth/logout`, `/config`) lands
+ *  even when the page cannot read the reply. */
+export const crossOriginReject = (): Response =>
+  new Response(JSON.stringify({ error: "cross_origin_forbidden" }), {
+    status: 403,
+    headers: { "content-type": "application/json; charset=utf-8", vary: "Origin" },
+  })
 
 export const handlePreflight = (req: Request): Response =>
   new Response(null, { status: 204, headers: corsHeaders(req) })

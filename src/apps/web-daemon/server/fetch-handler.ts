@@ -34,7 +34,14 @@ import type { WebDaemonServerConfig } from "../server"
 import type { SessionRegistry } from "../session-registry"
 import type { WebDaemonHealth } from "../types"
 import { authReject, constantTimeEquals, extractToken } from "./auth"
-import { handleConfigPost, handlePreflight, jsonResponse, serveStaticSpa } from "./http"
+import {
+  crossOriginReject,
+  handleConfigPost,
+  handlePreflight,
+  isAllowedOrigin,
+  jsonResponse,
+  serveStaticSpa,
+} from "./http"
 import { collectReachableIps, formatHost } from "./net"
 import type { WSData } from "./ws-data"
 
@@ -406,6 +413,11 @@ const makeTryUpgrade = (config: WebDaemonServerConfig) => {
   return (req: Request, server: Server<WSData>): Response | undefined => {
     const url = new URL(req.url)
     if (url.pathname !== "/" && url.pathname !== "/ws") return undefined
+    // A WebSocket is EXEMPT from the same-origin policy, so the CORS fence on
+    // the HTTP side does not cover this path at all: any page could open
+    // `ws://127.0.0.1:<port>/ws` on a tokenless daemon and drive `turn.run`.
+    // `Origin` is browser-set and unforgeable; a non-browser client sends none.
+    if (!isAllowedOrigin(req.headers.get("origin"))) return crossOriginReject()
     if (config.authToken !== undefined) {
       const presented = extractToken(url, req.headers.get("authorization"))
       if (presented === undefined || !constantTimeEquals(presented, config.authToken)) {
@@ -475,10 +487,18 @@ export const buildFetchHandler = (deps: FetchHandlerDeps): FetchHandler => {
   return (req, srv) => {
     const url = new URL(req.url)
     // CORS preflight — cross-origin frontends (Vite dev on :5173, Tauri
-    // tauri://localhost, etc.) need this OR every POST/DELETE fails.
+    // tauri://localhost, etc.) need this OR every POST/DELETE fails. A
+    // disallowed origin still gets a 204 with NO ACAO, so the browser refuses
+    // the real request on its own.
     if (req.method === "OPTIONS") {
       return handlePreflight(req)
     }
+    // CROSS-ORIGIN FENCE — before ANY route, including the auth-free status
+    // routes and the effectful `/auth/*` + `/config` handlers. Withholding the
+    // ACAO is not sufficient: a simple-content-type POST is delivered without a
+    // preflight, so the effect lands whether or not the page can read the
+    // response. An absent `Origin` is allowed (non-browser callers).
+    if (!isAllowedOrigin(req.headers.get("origin"))) return crossOriginReject()
     const status = tryStatusRoutes(url, req, deps)
     if (status !== undefined) return status
     const read = tryReadRoutes(url, req, deps, requireAuth)
