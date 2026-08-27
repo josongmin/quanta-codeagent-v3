@@ -183,6 +183,44 @@ export const SCOPES: readonly Scope[] = ["prod", "tests"]
  *  halves can never collide with a rule that merely contains the separator. */
 export const scopeKey = (rule: string, scope: Scope): string => `${rule}\u0000${scope}`
 
+/** `rule` → (`file` → count), so a breached ceiling can name the sites instead
+ *  of only the number. */
+export type SitesByRule = ReadonlyMap<string, ReadonlyMap<string, number>>
+
+/** How many files a breach lists before it stops. A regression is usually one
+ *  or two sites; a rule that fires in fifty files is a config change, and the
+ *  first few plus the count say that just as well as fifty lines would. */
+export const SITE_LIST_CAP = 5
+
+/** The `— in <file> (n), <file> (n)` suffix for one rule's breach line.
+ *
+ *  WHY THIS EXISTS. The gate used to print `lint/suspicious/noConsole: 75 > 69`
+ *  and stop. Measured 2026-08-28, attributing that number to a file took six
+ *  separate measurements — re-deriving the tool's own target set, re-running
+ *  biome with the JSON reporter, and grouping by path by hand — and the answer
+ *  turned out to be a scratch file a subagent had left in `tests/unit/`, which
+ *  no amount of reading the diff would have shown. The count is the gate; the
+ *  sites are what makes it actionable, and the scan already holds them.
+ *
+ *  `sites` is optional so the pure comparison keeps its existing signature and
+ *  its existing output byte-for-byte when a caller does not supply them. */
+export const siteSuffix = (
+  sites: SitesByRule | undefined,
+  rule: string,
+  scope?: Scope,
+  scopeOfFile?: (file: string) => Scope,
+): string => {
+  const byFile = sites?.get(rule)
+  if (byFile === undefined || byFile.size === 0) return ""
+  const rows = [...byFile]
+    .filter(([file]) => scope === undefined || scopeOfFile?.(file) === scope)
+    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+  if (rows.length === 0) return ""
+  const shown = rows.slice(0, SITE_LIST_CAP).map(([file, n]) => `${file} (${n})`)
+  const rest = rows.length - shown.length
+  return ` — in ${shown.join(", ")}${rest > 0 ? `, and ${rest} more file(s)` : ""}`
+}
+
 /**
  * Compare a scan against a ceiling file. Pure, and exported so the comparison
  * itself can be pinned by tests.
@@ -201,8 +239,17 @@ export const evaluateCeilings = (args: {
   readonly ceiling: Ceiling
   readonly worstComplexity: number
   readonly worstSite: string
+  /** Optional. Present ⇒ every breach line names its files; absent ⇒ output is
+   *  unchanged, which is what keeps the existing pins on this function valid. */
+  readonly sitesByRule?: SitesByRule
+  /** Required alongside `sitesByRule` to attribute a SCOPED breach, which must
+   *  list only the files in the breaching scope. */
+  readonly scopeOfFile?: (file: string) => Scope
 }): CeilingVerdict => {
   const { counts, scopedCounts, ceiling, worstComplexity, worstSite } = args
+  const { sitesByRule, scopeOfFile } = args
+  const where = (rule: string, scope?: Scope): string =>
+    siteSuffix(sitesByRule, rule, scope, scopeOfFile)
   const pinned = ceiling.rules
   const scopedPinned = ceiling.scopedRules ?? {}
 
@@ -222,9 +269,11 @@ export const evaluateCeilings = (args: {
         const observed = scopedCounts.get(scopeKey(rule, scope)) ?? 0
         const cap = scoped[scope]
         if (cap === undefined) {
-          unpinned.push(`  ${observed}× ${rule} [${scope}]  (scope absent from the ceiling ⇒ 0)`)
+          unpinned.push(
+            `  ${observed}× ${rule} [${scope}]  (scope absent from the ceiling ⇒ 0)${where(rule, scope)}`,
+          )
         } else if (observed > cap) {
-          regressions.push(`  ${rule} [${scope}]: ${observed} > ${cap}`)
+          regressions.push(`  ${rule} [${scope}]: ${observed} > ${cap}${where(rule, scope)}`)
         } else if (observed < cap) {
           drops.push(`${rule}[${scope}] ${cap}→${observed}`)
         }
@@ -233,10 +282,10 @@ export const evaluateCeilings = (args: {
     }
     const cap = pinned[rule]
     if (cap === undefined) {
-      unpinned.push(`  ${n}× ${rule}  (not in the ceiling file ⇒ ceiling 0)`)
+      unpinned.push(`  ${n}× ${rule}  (not in the ceiling file ⇒ ceiling 0)${where(rule)}`)
       continue
     }
-    if (n > cap) regressions.push(`  ${rule}: ${n} > ${cap}`)
+    if (n > cap) regressions.push(`  ${rule}: ${n} > ${cap}${where(rule)}`)
     else if (n < cap) drops.push(`${rule} ${cap}→${n}`)
   }
   for (const [rule, cap] of Object.entries(pinned)) {
@@ -297,10 +346,18 @@ if (import.meta.main) {
   /** `${rule}\u0000${scope}` → count, for the rules pinned per scope. */
   const scopedCounts = new Map<string, number>()
 
+  /** rule → file → count, so a breach can name its sites. Built in the SAME
+   *  pass as `counts`, so the two can never describe different scans. */
+  const sitesByRule = new Map<string, Map<string, number>>()
+
   for (const d of diagnostics) {
     const category = d.category
     if (typeof category !== "string" || category === "") continue
     counts.set(category, (counts.get(category) ?? 0) + 1)
+    const byFile = sitesByRule.get(category) ?? new Map<string, number>()
+    const file = pathOf(d)
+    byFile.set(file, (byFile.get(file) ?? 0) + 1)
+    sitesByRule.set(category, byFile)
     const k = scopeKey(category, scopeOfPath(pathOf(d)))
     scopedCounts.set(k, (scopedCounts.get(k) ?? 0) + 1)
     if (category !== COMPLEXITY_RULE) continue
@@ -326,7 +383,15 @@ if (import.meta.main) {
   const pinned = ceiling.rules
   const scopedPinned = ceiling.scopedRules ?? {}
 
-  const verdict = evaluateCeilings({ counts, scopedCounts, ceiling, worstComplexity, worstSite })
+  const verdict = evaluateCeilings({
+    counts,
+    scopedCounts,
+    ceiling,
+    worstComplexity,
+    worstSite,
+    sitesByRule,
+    scopeOfFile: scopeOfPath,
+  })
   if (verdict.doublePinned.length > 0) {
     console.error(
       "lint-debt: these rules are pinned in BOTH `rules` and `scopedRules` — pick one:\n  " +
