@@ -71,5 +71,12 @@ export const parseRetryAfterMs = (raw: string | null | undefined): number | unde
 /** Outcome of one POST attempt. */
 export type PostOutcome =
   | { readonly kind: "ok" }
-  | { readonly kind: "retry"; readonly retryAfterMs: number | undefined }
+  | {
+      readonly kind: "retry"
+      readonly retryAfterMs: number | undefined
+      /** Human-readable cause (`HTTP 503`, `ECONNREFUSED`) for the operator-
+       *  facing warn. A retry that cannot name its cause is a retry an operator
+       *  cannot act on — the regression this field exists to prevent. */
+      readonly reason: string
+    }
   | { readonly kind: "drop"; readonly reason: string }

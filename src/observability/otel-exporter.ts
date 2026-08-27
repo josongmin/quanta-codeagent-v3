@@ -284,12 +284,14 @@ const makeClassifiedPost = (
       return {
         kind: "retry",
         retryAfterMs: parseRetryAfterMs(res.headers?.get?.("retry-after")),
+        reason: `HTTP ${res.status}`,
       }
       // A transport throw (DNS, ECONNREFUSED, TLS, abort) is indistinguishable
-      // from "the collector is restarting" — always retryable.
+      // from "the collector is restarting" — always retryable. It does NOT warn
+      // here: the caller's `onRetry` logs every retry class through ONE latched
+      // line, so this path is neither silent nor a per-attempt firehose.
     } catch (e) {
-      safeWarn(`[otel-exporter] POST ${path}: ${errMessage(e)}`)
-      return { kind: "retry", retryAfterMs: undefined }
+      return { kind: "retry", retryAfterMs: undefined, reason: errMessage(e) }
     }
   }
   return post
@@ -337,6 +339,14 @@ const buildOtlpTransport = (
   /** Records discarded as permanently-rejected, per stream. Surfaced in the
    *  warn line so a drop is COUNTED and visible, never silent. */
   const dropped = { span: 0, metric: 0 }
+  /** Records re-queued for retry, per stream, plus a per-STREAK warn latch. A
+   *  retry is the failure class an operator most needs to see (a collector
+   *  503ing for an hour is otherwise invisible until the buffer cap warns), but
+   *  a line per attempt would relocate the DoS to the logger — so the latch
+   *  logs once per consecutive-failure streak and is re-armed by the next
+   *  success or drop, exactly like the overflow latch. */
+  const retried = { span: 0, metric: 0 }
+  const retryWarned = { span: false, metric: false }
 
   /**
    * One drain, shared by both streams (they differ only in buffer, path,
@@ -358,6 +368,7 @@ const buildOtlpTransport = (
     const onOk = (): void => {
       gate.attempts = 0
       gate.notBeforeMs = 0
+      retryWarned[stream] = false
       if (buffer.length < maxBufferSize) overflowWarned[stream] = false
     }
 
@@ -367,6 +378,7 @@ const buildOtlpTransport = (
     const onDrop = (count: number, reason: string): void => {
       gate.attempts = 0
       gate.notBeforeMs = 0
+      retryWarned[stream] = false
       dropped[stream] += count
       safeWarn(
         `[otel-exporter] POST ${path} → ${reason} — permanent, dropping ${count} ${stream}(s); ${dropped[stream]} dropped total`,
@@ -376,13 +388,20 @@ const buildOtlpTransport = (
     /** Re-queue the unsent snapshot ahead of any newcomers, re-apply the cap
      *  (drop-oldest) so the buffer cannot grow unbounded, and arm the backoff
      *  so repeated flushes do not hammer an unhealthy collector. */
-    const onRetry = (snapshot: T[], retryAfterMs: number | undefined): void => {
+    const onRetry = (snapshot: T[], retryAfterMs: number | undefined, reason: string): void => {
       gate.attempts += 1
-      gate.notBeforeMs = now() + (retryAfterMs ?? backoffMs(gate.attempts))
+      const delayMs = retryAfterMs ?? backoffMs(gate.attempts)
+      gate.notBeforeMs = now() + delayMs
+      retried[stream] += snapshot.length
       buffer.unshift(...snapshot)
       if (buffer.length > maxBufferSize) {
         buffer.splice(0, buffer.length - maxBufferSize)
       }
+      if (retryWarned[stream]) return
+      retryWarned[stream] = true
+      safeWarn(
+        `[otel-exporter] POST ${path} → ${reason} — retryable, re-queued ${snapshot.length} ${stream}(s), next attempt in ${delayMs}ms; ${retried[stream]} retried total (repeats on this streak are not logged)`,
+      )
     }
 
     return async (force = false): Promise<void> => {
@@ -398,7 +417,7 @@ const buildOtlpTransport = (
       const outcome = await post(path, serialize(snapshot))
       if (outcome.kind === "ok") return onOk()
       if (outcome.kind === "drop") return onDrop(snapshot.length, outcome.reason)
-      return onRetry(snapshot, outcome.retryAfterMs)
+      return onRetry(snapshot, outcome.retryAfterMs, outcome.reason)
     }
   }
 
@@ -524,8 +543,9 @@ export const otelHttpExporter = (opts: OtelExporterOpts): OtelExporter => {
   let intervalHandle: IntervalHandle | undefined
   if (flushIntervalMs > 0) {
     intervalHandle = setIntervalImpl(() => {
-      // The interval callback runs flushAll but does not await it — failures
-      // are logged via safeWarn inside `post`.
+      // The interval callback runs flushAll but does not await it. Failures are
+      // no-throw and surface through `safeWarn` on the flush paths: `onDrop`
+      // per permanent batch, `onRetry` once per consecutive-failure streak.
       void flushAll()
     }, flushIntervalMs)
   }
