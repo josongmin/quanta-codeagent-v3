@@ -64,7 +64,12 @@ const readStringLiteral = (src: string, open: number): string => {
  * division. Only the last 32 characters are inspected, so this stays O(1) per
  * slash.
  */
-const REGEX_PRECEDERS = "(,=:[!&|?{};+-*%~^"
+// `>` is here for `=>`: an arrow's body may open with a regex, and omitting it
+// read `() => /[/*]/` as division — which reopened the character-class evasion
+// in the one position a lambda makes natural. `)` is deliberately ABSENT: after
+// a closing paren a `/` is division far more often than not (`(a + b) / c`), and
+// guessing the other way would corrupt ordinary arithmetic.
+const REGEX_PRECEDERS = "(,=:[!&|?{};+-*%~^>"
 const REGEX_KEYWORDS =
   /\b(?:return|typeof|instanceof|in|of|new|delete|void|throw|case|do|else|yield|await)$/
 
@@ -103,9 +108,14 @@ const skipComment = (src: string, i: number, atLineStart: boolean): number => {
     const end = src.indexOf("*/", i + 2)
     return end === -1 ? src.length : end + 2
   }
-  // Only a LINE-LEADING `//`, matching the shared helper: a mid-line `//` inside
-  // a URL or a regex literal must survive.
-  if (src[i + 1] === "/" && atLineStart) {
+  // ANY `//`, not just a line-leading one. The restriction was there to protect
+  // a `//` inside a URL or a regex — but this scanner consumes strings and regex
+  // literals BEFORE it ever reaches here, so those are already safe, and leaving
+  // trailing comments in place was the bigger hole: 7,582 of them exist, five
+  // carry a `/*` that opens a phantom span, and 166 carry an apostrophe that
+  // desyncs the state machine. MEASURED — a trailing `// keyed under cache/*`
+  // hid a real security-fence violation two lines below it.
+  if (src[i + 1] === "/") {
     const end = src.indexOf("\n", i)
     return end === -1 ? src.length : end
   }
@@ -120,8 +130,19 @@ const skipComment = (src: string, i: number, atLineStart: boolean): number => {
 const blanked = (text: string): string => text.replace(/[^\n]/g, " ")
 
 export interface StripCommentsOptions {
-  /** Keep line and column numbers by blanking comments instead of removing
-   *  them. Off by default: most callers only search the result. */
+  /**
+   * Blank comments instead of deleting them — ON BY DEFAULT.
+   *
+   * Deleting SPLICES the characters either side together, and the result is not
+   * merely ugly, it is WRONG: `registry.stop/* legacy *​/All()` becomes
+   * `registry.stopAll()`, synthesising a call site that does not exist, and
+   * `if (fal/* x *​/se)` becomes `if (false)`, synthesising a dead branch. Both
+   * measured against guards that search for exactly those strings. Blanking
+   * also keeps every line and column, so `file:line` stays true.
+   *
+   * Pass `false` only when the caller genuinely wants the whitespace gone and
+   * cannot be confused by a splice.
+   */
   readonly preservePositions?: boolean
 }
 
@@ -138,7 +159,7 @@ const readLiteral = (src: string, i: number, emitted: string): string => {
 }
 
 export const stripComments = (src: string, options: StripCommentsOptions = {}): string => {
-  const keep = options.preservePositions === true
+  const keep = options.preservePositions !== false
   let out = ""
   let i = 0
   let atLineStart = true

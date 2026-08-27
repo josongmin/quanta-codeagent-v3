@@ -44,9 +44,14 @@ const observation = (): FamilyBoxGradeObservation => ({
 })
 
 const temps: string[] = []
+const priorBenchHome = process.env.QUANTA_BENCH_HOME
 afterAll(() => {
   for (const d of temps) rmSync(d, { recursive: true, force: true })
-  delete process.env.QUANTA_BENCH_HOME
+  // RESTORE, not delete: bun runs every file in one process, so a deleted
+  // variable is deleted for every file scheduled afterwards — including the
+  // fence `tests/setup.ts` installs.
+  if (priorBenchHome === undefined) delete process.env.QUANTA_BENCH_HOME
+  else process.env.QUANTA_BENCH_HOME = priorBenchHome
   __resetRuntimeConfig()
 })
 

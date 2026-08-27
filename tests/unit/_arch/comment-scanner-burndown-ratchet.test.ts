@@ -37,12 +37,36 @@ import { fileURLToPath } from "node:url"
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), "../../..")
 
 /**
+ * EVERY root, not just the ones the first version looked at. It scanned
+ * `tests` and `tools` only, leaving ~7,000 files unexamined — and three real
+ * naive strippers already live in them, one of them inside a guard test.
+ */
+const ROOTS = ["src", "tests", "tools"] as const
+
+/**
  * A LOCAL comment stripper written with regex replaces — the defeatable shape.
  * Matched on the raw text on purpose: this guard must not depend on the very
  * helper whose correctness is in question.
  */
-const NAIVE_STRIPPER =
-  /replace\(\s*\/\\\/\\\*|\.replace\(\/\(\^\|\[\^:\]\)\\\/\\\/|\.replace\(\/\\\/\\\/\[\^/
+/**
+ * A file that STRIPS COMMENTS ITSELF, in any spelling.
+ *
+ * Matching the three regex spellings we happened to have written was
+ * decorative: hoisting the pattern to a `const`, building it with `new
+ * RegExp`, or spelling `/*` as `[/][*]` each walked straight past it —
+ * MEASURED, all three left the ratchet green.
+ *
+ * So the detector matches the CONCEPT instead: a file that names a
+ * comment-stripping helper of its own AND does not import the shared one. That
+ * is the thing being burned down, and it does not care how the regex is
+ * spelled. A file may still evade by naming its helper something unrelated —
+ * this catches carelessness and drift, not a determined author, and says so.
+ */
+const DECLARES_OWN_STRIPPER = /(?:const|function|let)\s+[\w$]*[Ss]trip[A-Za-z]*Comment/
+const IMPORTS_SHARED = /from\s+["'][^"']*_shared\/strip-comments["']/
+
+const carriesOwnStripper = (src: string): boolean =>
+  DECLARES_OWN_STRIPPER.test(src) && !IMPORTS_SHARED.test(src)
 
 const scan = (dir: string, into: string[] = []): string[] => {
   for (const entry of readdirSync(dir)) {
@@ -55,9 +79,8 @@ const scan = (dir: string, into: string[] = []): string[] => {
 }
 
 const naiveStripperSites = (): readonly string[] =>
-  ["tests", "tools"]
-    .flatMap((root) => scan(join(REPO, root)))
-    .filter((f) => NAIVE_STRIPPER.test(readFileSync(join(REPO, f), "utf8")))
+  ROOTS.flatMap((root) => scan(join(REPO, root)))
+    .filter((f) => carriesOwnStripper(readFileSync(join(REPO, f), "utf8")))
     .sort()
 
 /**
@@ -66,30 +89,39 @@ const naiveStripperSites = (): readonly string[] =>
  * and delete its line; a new entry means a new copy of a known-broken helper.
  */
 const REMAINING: readonly string[] = [
+  "src/agent/converge/purity.test.ts",
+  "src/agent/repro-test/select.ts",
+  "src/apps/bench/composition-root-dispatch.test.ts",
+  "src/apps/bench/promax/campaign/owner-audit.ts",
+  "src/observability/coverage/v8-source.ts",
+  "src/runner/batch/eval/python-source-text.ts",
+  "src/runner/batch/eval/verification-owner-test-expectations.ts",
+  "src/shared/public-issue-text.ts",
   "tests/integration/admissibility-deny-steer-hell.test.ts",
   "tests/integration/cli-attention-navigation.test.ts",
+  "tests/unit/_arch/repo-path-anchor-ratchet.test.ts",
   "tests/unit/_arch/slice-boundary-scanner.ts",
+  "tests/unit/_shared/strip-comments.ts",
   "tests/unit/activity/activity-store-constructor-owner-ratchet.test.ts",
   "tests/unit/agent-import-cycle-hellgate.test.ts",
   "tests/unit/agent-import-cycle.test.ts",
-  "tests/unit/apps/bench/promax/promax-gate-run-tool.test.ts",
+  "tests/unit/apps/bench/promax/promax-bootstrap-phase-reachability.test.ts",
   "tests/unit/apps/cli/cli-feature-config-hellgate.test.ts",
   "tests/unit/apps/headless/headless-second-consumer-hellgate.test.ts",
+  "tests/unit/compiled-binary-asset-ratchet.test.ts",
   "tests/unit/dataset-family-profile-ssot.test.ts",
+  "tests/unit/deny-reason-authority-ratchet-hellgate.test.ts",
   "tests/unit/integrations/github/slice-fence-static-hellgate-r3.test.ts",
-  "tests/unit/no-benchmark-overfit-steer-ratchet.test.ts",
   "tests/unit/objective/authority-boundary-ratchet.test.ts",
   "tests/unit/objective/constructor-owner-ratchet.test.ts",
   "tests/unit/observability/new-slice-metrics-hellgate.test.ts",
-  "tests/unit/regression-oracle.test.ts",
   "tests/unit/runner/session-authorities-task-registry-identity.test.ts",
+  "tests/unit/runtime-config-knobs-parity-hellgate.test.ts",
   "tests/unit/skill/runtime/f4-discovery-owner-ratchet.test.ts",
-  "tests/unit/skill/skill-invocation-authority-hellgate.test.ts",
-  "tests/unit/web-frontend-protocol-drift-contract-hellgate.test.ts",
-  "tools/arch-gen/scan-slices.ts",
+  "tools/feature-catalog/reachability.ts",
+  "tools/feature-catalog/yaml.ts",
   "tools/leaderboard-dashboard/family-union-ssot.test.ts",
   "tools/leaderboard-dashboard/projectors/structural.test.ts",
-  "tools/feature-catalog/reachability.ts",
   "tools/slice-graph/build-graph.ts",
 ]
 
@@ -108,12 +140,21 @@ describe("the comment-scanner burn-down", () => {
     expect(stale, "these were converted; delete their entries so the ceiling drops").toEqual([])
   })
 
-  test("ANTI-VACUITY: the detector fires on the shapes it names", () => {
-    const hit = (s: string) => NAIVE_STRIPPER.test(s)
-    expect(hit('src.replace(/\\/\\*[\\s\\S]*?\\*\\//g, "")')).toBe(true)
-    expect(hit('t.replace(/(^|[^:])\\/\\/[^\\n]*/g, "$1")')).toBe(true)
-    expect(hit("line.replace(/\\/\\/[^\\n]*$/, '')")).toBe(true)
-    expect(hit('import { stripComments } from "../_shared/strip-comments"')).toBe(false)
+  test("ANTI-VACUITY: the detector fires on every spelling, not the ones we wrote", () => {
+    const hit = carriesOwnStripper
+    // the canonical form…
+    expect(hit('const stripComments = (s: string) => s.replace(/x/g, "")')).toBe(true)
+    // …and the four respellings that walked past the previous detector
+    expect(hit('const RE = /x/g\nconst stripComments = (s: string) => s.replace(RE, "")')).toBe(
+      true,
+    )
+    expect(hit('const stripComments = (s: string) => s.replace(new RegExp("x"), "")')).toBe(true)
+    expect(hit("function stripBlockComments(s: string) { return s }")).toBe(true)
+    expect(hit("let stripCommentsOutsideStrings = (s: string) => s")).toBe(true)
+    // a file that USES the shared one is not carrying its own
+    expect(hit('import { stripComments } from "../_shared/strip-comments"\nstripComments(x)')).toBe(
+      false,
+    )
   })
 
   test("ANTI-VACUITY: the scan reaches a real, populated set of files", () => {

@@ -124,3 +124,85 @@ describe("temp-dir cleanup is registered with the test runner", () => {
     )
   })
 })
+
+/**
+ * A TEST FILE MAY NOT DISARM THE FENCES FOR EVERY FILE AFTER IT.
+ *
+ * bun runs every test file in ONE process — measured, same `process.pid` across
+ * files — so `delete process.env.X` in an `afterAll` leaves X undefined for
+ * every file bun schedules afterwards. `tests/setup.ts` installs
+ * `QUANTA_BENCH_RESULTS_DIR` as the fence against writing the operator's live
+ * results corpus (the aug-22 incident). Deleting it does not tidy up: it turns
+ * the fence off for the rest of the run, and the file that then writes a report
+ * is somewhere else entirely.
+ *
+ * MEASURED before the fix: a sibling's hooks saw both `QUANTA_BENCH_RESULTS_DIR`
+ * and `QUANTA_BENCH_HOME` undefined for its entire run.
+ */
+describe("no test file deletes a shared environment fence", () => {
+  const FENCED = ["QUANTA_BENCH_RESULTS_DIR", "QUANTA_BENCH_HOME", "QUANTA_HOME"] as const
+
+  /**
+   * A delete the file never UNDOES.
+   *
+   * Two shapes are legitimate and must not be flagged, because flagging them
+   * teaches the next reader to ignore this guard:
+   *
+   *  · `if (prior === undefined) delete process.env.X` — the correct restore,
+   *    putting back exactly what was there, including nothing;
+   *  · an unconditional delete during SETUP, paired with a saved value the
+   *    file restores in a hook. Six files use the first, one uses the second.
+   *
+   * What is left is a file that removes a shared fence and walks away — and bun
+   * runs every file in one process, so that fence stays off.
+   */
+  const deletes = (src: string, name: string): boolean =>
+    src
+      .split("\n")
+      .some(
+        (line) =>
+          new RegExp(
+            `delete\\s+process\\.env(?:\\.${name}\\b|\\[\\s*["'\`]${name}["'\`]\\s*\\])`,
+          ).test(line) && !/\bif\s*\(|\?\?|:\s*delete\b/.test(line),
+      ) &&
+    // …and the file never RESTORES it — assigning a saved value back, as
+    // opposed to merely setting it to a fresh sandbox path during setup. The
+    // difference is the identifier: a restore reads from a `prior`/`saved`
+    // binding, a setup assignment does not. A looser check ("any assignment
+    // exists") marked the real defect as fine, because the file assigns the
+    // variable in every test.
+    !new RegExp(
+      `process\\.env\\.${name}\\s*=\\s*\\w*(?:prior|saved|orig|before|previous)\\w*`,
+      "i",
+    ).test(src)
+
+  test("🔴 a fenced variable is RESTORED, never deleted outright", () => {
+    const offenders = ROOTS.flatMap((root) => testFiles(root))
+      .filter((f) => f !== SELF)
+      .flatMap((f) => {
+        const src = stripComments(readFileSync(f, "utf8"))
+        return FENCED.filter((name) => deletes(src, name)).map((name) => `${f} → ${name}`)
+      })
+    expect(
+      offenders,
+      "restore the prior value instead — bun shares one process across every test file",
+    ).toEqual([])
+  })
+
+  test("ANTI-VACUITY: the detector fires on both spellings", () => {
+    expect(deletes("delete process.env.QUANTA_BENCH_HOME", "QUANTA_BENCH_HOME")).toBe(true)
+    expect(deletes('delete process.env["QUANTA_BENCH_HOME"]', "QUANTA_BENCH_HOME")).toBe(true)
+    // the CONDITIONAL form is a correct restore, not a finding
+    expect(
+      deletes("if (prior === undefined) delete process.env.QUANTA_BENCH_HOME", "QUANTA_BENCH_HOME"),
+    ).toBe(false)
+    // an unconditional delete during setup is fine when the file restores later
+    expect(
+      deletes("delete process.env.QUANTA_HOME\nprocess.env.QUANTA_HOME = savedHome", "QUANTA_HOME"),
+    ).toBe(false)
+    // …but not when nothing puts it back
+    expect(deletes("delete process.env.QUANTA_HOME\nconst x = 1", "QUANTA_HOME")).toBe(true)
+    // restoring is what we want, and must not be flagged
+    expect(deletes("process.env.QUANTA_BENCH_HOME = prior", "QUANTA_BENCH_HOME")).toBe(false)
+  })
+})

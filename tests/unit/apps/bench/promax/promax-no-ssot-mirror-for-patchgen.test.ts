@@ -30,6 +30,20 @@ import {
 import { DEFAULT_CHUNK_PATHS } from "@/apps/bench/remote/box-session/types"
 import { __resetRuntimeConfig } from "@/shared/runtime-config"
 
+/**
+ * RESTORE, never delete. `tests/setup.ts` installs `QUANTA_BENCH_RESULTS_DIR`
+ * as the FENCE against writing the operator's live results corpus — the aug-22
+ * incident — and bun runs every test file in ONE process, so deleting it here
+ * disarms that fence for every file scheduled afterwards. MEASURED: a sibling
+ * file's hooks saw both variables `undefined` for its entire run.
+ */
+const restoreEnv = (prior: Readonly<Record<string, string | undefined>>): void => {
+  for (const [key, value] of Object.entries(prior)) {
+    if (value === undefined) delete process.env[key]
+    else process.env[key] = value
+  }
+}
+
 describe("the SSOT mirror is skipped for a patch-gen-only report", () => {
   test("🔴 a family that grades on-box does NOT mirror its bench report", () => {
     expect(shouldMirrorReportToSsot("promax")).toBe(false)
@@ -73,10 +87,13 @@ describe("the SSOT mirror is skipped for a patch-gen-only report", () => {
  */
 describe("WIRING — the transport actually consults the predicate", () => {
   const temps: string[] = []
+  const priorEnv: Record<string, string | undefined> = {
+    QUANTA_BENCH_RESULTS_DIR: process.env.QUANTA_BENCH_RESULTS_DIR,
+    QUANTA_BENCH_HOME: process.env.QUANTA_BENCH_HOME,
+  }
   afterAll(() => {
     for (const d of temps) rmSync(d, { recursive: true, force: true })
-    delete process.env.QUANTA_BENCH_RESULTS_DIR
-    delete process.env.QUANTA_BENCH_HOME
+    restoreEnv(priorEnv)
     __resetRuntimeConfig()
   })
 
