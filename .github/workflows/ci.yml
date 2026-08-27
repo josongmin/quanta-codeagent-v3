@@ -69,6 +69,16 @@ jobs:
         run: >-
           bun run tools/dev/worktree-pollution-guard.ts --
           bun test tests/unit --reporter=junit --reporter-outfile=.cache/unit-junit.xml
+      - name: cwd parity (a guard must give the same verdict from any directory)
+        # Runs each arch/meta guard from the repo root AND from a throwaway working
+        # directory, and fails only on the DIFFERENCE -- a single-arm run cannot
+        # tell cwd dependence from load. Scoped to the guard population because
+        # that is where the defect is lethal: a guard whose scan silently reads
+        # nothing reports "no violations" and the gate goes green over an empty
+        # scan. Five such guards were found this way on 2026-08-27, three of them
+        # ratchets. ~30s for 17 files.
+        run: bun run test:cwd-parity:arch
+
       - name: unit speed budget (slowest single test, one-directional)
         # The old gate asserted the WHOLE suite finished in <8000ms. That number
         # predates a ~36k-test suite and could not pass on any machine, so it only
