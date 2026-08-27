@@ -30,8 +30,22 @@
  * weaker of the two implementations the repo already had, extracted without
  * noticing the better one existed, and still defeated by the second shape above.
  */
-/** From the opening quote to its match, escapes carried through verbatim. */
+/**
+ * From the opening quote to its match, escapes carried through verbatim.
+ *
+ * A TEMPLATE literal is read with `${…}` awareness, because a substitution is
+ * CODE and may contain another template. Scanning backtick-to-backtick treated
+ * the inner template's opener as the outer's closer and desynced everything
+ * after it — MEASURED: `` `session ${`${tag}/*`} #${n}` `` swallowed the next
+ * two lines whole, and it was the last surviving way to hide a violation from
+ * every guard built on this scanner.
+ */
 const readStringLiteral = (src: string, open: number): string => {
+  const quote = src[open] as string
+  return quote === "`" ? readTemplate(src, open) : readPlainString(src, open)
+}
+
+const readPlainString = (src: string, open: number): string => {
   const quote = src[open] as string
   let out = quote
   let i = open + 1
@@ -45,6 +59,50 @@ const readStringLiteral = (src: string, open: number): string => {
     out += ch
     i++
     if (ch === quote) break
+  }
+  return out
+}
+
+/** The `${…}` at `open`, balanced, recursing through nested literals. */
+const readSubstitution = (src: string, open: number): string => {
+  let out = "${"
+  let i = open + 2
+  let depth = 1
+  while (i < src.length && depth > 0) {
+    const ch = src[i] as string
+    if (ch === '"' || ch === "'" || ch === "`") {
+      const nested = readStringLiteral(src, i)
+      out += nested
+      i += nested.length
+      continue
+    }
+    if (ch === "{") depth += 1
+    else if (ch === "}") depth -= 1
+    out += ch
+    i += 1
+  }
+  return out
+}
+
+const readTemplate = (src: string, open: number): string => {
+  let out = "`"
+  let i = open + 1
+  while (i < src.length) {
+    const ch = src[i] as string
+    if (ch === "\\") {
+      out += ch + (src[i + 1] ?? "")
+      i += 2
+      continue
+    }
+    if (ch === "$" && src[i + 1] === "{") {
+      const sub = readSubstitution(src, i)
+      out += sub
+      i += sub.length
+      continue
+    }
+    out += ch
+    i += 1
+    if (ch === "`") break
   }
   return out
 }
@@ -102,7 +160,7 @@ const readRegexLiteral = (src: string, open: number): string => {
 }
 
 /** The index just past a comment opening at `i`, or -1 if none opens there. */
-const skipComment = (src: string, i: number, atLineStart: boolean): number => {
+const skipComment = (src: string, i: number): number => {
   if (src[i] !== "/") return -1
   if (src[i + 1] === "*") {
     const end = src.indexOf("*/", i + 2)
@@ -162,9 +220,8 @@ export const stripComments = (src: string, options: StripCommentsOptions = {}): 
   const keep = options.preservePositions !== false
   let out = ""
   let i = 0
-  let atLineStart = true
   while (i < src.length) {
-    const past = skipComment(src, i, atLineStart)
+    const past = skipComment(src, i)
     if (past !== -1) {
       if (keep) out += blanked(src.slice(i, past))
       i = past
@@ -174,12 +231,9 @@ export const stripComments = (src: string, options: StripCommentsOptions = {}): 
     if (token !== "") {
       out += token
       i += token.length
-      atLineStart = false
       continue
     }
-    const c = src[i] as string
-    out += c
-    atLineStart = c === "\n" || (atLineStart && (c === " " || c === "\t"))
+    out += src[i] as string
     i += 1
   }
   return out
