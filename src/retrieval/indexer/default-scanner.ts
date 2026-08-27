@@ -192,6 +192,9 @@ interface WalkContext {
   readonly stack: string[]
   readonly cycleDetected: Set<string>
   readonly cycleSink: (path: string) => void
+  /** Called with the REL path of a directory whose `readdir` failed. Its files
+   *  were never observed, so they must not be diffed as deletions. */
+  readonly unreadableSink: (relDir: string) => void
 }
 
 /** Yield the file visits in ONE directory, pushing its subdirectories onto the
@@ -205,6 +208,12 @@ async function* visitDirectory(
   try {
     entries = await fsp.readdir(dir, { withFileTypes: true })
   } catch {
+    // NOT the same as "this directory is empty". Every file under here is now
+    // UNOBSERVED, and `DeltaTracker.diff` defines deleted as tracked-but-not-
+    // observed — so swallowing this silently made a transient EACCES/EMFILE
+    // purge live files from the corpus AND the vector store. Report it so the
+    // scan is honest and the driver can withhold the deletions.
+    ctx.unreadableSink(toPosix(relative(ctx.root, dir)))
     return
   }
   for (const ent of entries) {
@@ -231,6 +240,7 @@ async function* walk(
   globRe: RegExp,
   cycleDetected: Set<string>,
   cycleSink: (path: string) => void,
+  unreadableSink: (relDir: string) => void,
 ): AsyncGenerator<FileVisit, void, void> {
   const ctx: WalkContext = {
     root,
@@ -241,6 +251,7 @@ async function* walk(
     stack: [root],
     cycleDetected,
     cycleSink,
+    unreadableSink,
   }
   while (ctx.stack.length > 0) {
     if (signal?.aborted) return
@@ -313,6 +324,9 @@ interface DoScanOutcome {
   readonly chunksByPath: Map<string, readonly FileChunk[]>
   readonly skipped: Map<string, SkipReason>
   readonly aborted: boolean
+  /** REL paths of directories whose `readdir` failed this pass. Files beneath
+   *  them were never observed, so the driver must not diff them as deletions. */
+  readonly unreadableDirs: readonly string[]
 }
 
 /** Single scan pass — walks, reads, chunks. Pure of corpus / tracker
@@ -327,9 +341,19 @@ const doScan = async (
   const chunksByPath = new Map<string, readonly FileChunk[]>()
   const skipped = new Map<string, SkipReason>()
   const cycleSet = new Set<string>()
+  const unreadableDirs = new Set<string>()
   let aborted = false
-  for await (const visit of walk(opts.root, matcher, signal, globRe, cycleSet, (p) =>
-    skipped.set(p, "symlink_cycle"),
+  for await (const visit of walk(
+    opts.root,
+    matcher,
+    signal,
+    globRe,
+    cycleSet,
+    (p) => skipped.set(p, "symlink_cycle"),
+    (relDir) => {
+      unreadableDirs.add(relDir)
+      skipped.set(relDir === "" ? "." : relDir, "permission_denied")
+    },
   )) {
     if (signal?.aborted) {
       aborted = true
@@ -356,7 +380,23 @@ const doScan = async (
     if (chunks.length > 0) chunksByPath.set(visit.relPath, chunks)
   }
   if (signal?.aborted) aborted = true
-  return { snapshot, chunksByPath, skipped, aborted }
+  return { snapshot, chunksByPath, skipped, aborted, unreadableDirs: [...unreadableDirs] }
+}
+
+/** Deletions the scan is ENTITLED to apply. A path under a directory we could
+ *  not read was never observed, and unobserved is not gone — withholding it
+ *  costs a stale entry until the next clean pass, whereas applying it destroys
+ *  corpus and vector-store rows for files that still exist. */
+const deletionsOutsideUnreadableDirs = (
+  deleted: readonly string[],
+  unreadableDirs: readonly string[],
+): readonly string[] => {
+  if (unreadableDirs.length === 0) return deleted
+  // `""` is the ROOT — if the root itself became unreadable, nothing observed
+  // this pass is evidence of anything.
+  if (unreadableDirs.includes("")) return []
+  const prefixes = unreadableDirs.map((d) => `${d}/`)
+  return deleted.filter((p) => !prefixes.some((pre) => p.startsWith(pre)))
 }
 
 const applyUpserts = async (
@@ -448,7 +488,11 @@ class DefaultIndexer implements CodebaseIndexer {
     try {
       const out = await doScan(this.opts, scanOpts.signal)
       if (out.aborted) return err({ kind: "aborted" as const })
-      const parts = this.st.tracker.diff(out.snapshot)
+      const raw = this.st.tracker.diff(out.snapshot)
+      const parts = {
+        ...raw,
+        deleted: deletionsOutsideUnreadableDirs(raw.deleted, out.unreadableDirs),
+      }
       const changed =
         mode === "initial" ? Array.from(out.snapshot.keys()) : [...parts.added, ...parts.modified]
       // Apply upserts BEFORE updating tracker state so an upsert failure
