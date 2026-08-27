@@ -141,6 +141,10 @@ const keyForToken = (tok: string): string | undefined => {
  * `./` stripped reproduces that, and it is the only way the count means what the
  * gate will really run.
  */
+/** Bun's selection rule for one positional, as a predicate over a repo-relative path. */
+const tokenMatcher = (token: string): ((rel: string) => boolean) =>
+  token.startsWith("./") ? (rel) => rel.startsWith(token.slice(2)) : (rel) => rel.includes(token)
+
 export const countTestFilesUnder = (token: string): number => {
   // A `./`-prefixed positional is ANCHORED at the repo root by bun; a bare one is
   // a substring filter over the whole path. Measured, because the first version
@@ -155,20 +159,14 @@ export const countTestFilesUnder = (token: string): number => {
   // and stayed green — the precise mutation class this check exists to catch.
   // The three mutations it was originally proven against all happened to zero out
   // under substring matching too, which is why the proof passed.
-  const anchored = token.startsWith("./")
-  const needle = anchored ? token.slice(2) : token
+  const selects = tokenMatcher(token)
   let n = 0
   const walk = (dir: string): void => {
     for (const ent of readdirSync(dir, { withFileTypes: true })) {
       if (ent.name === "node_modules" || ent.name.startsWith(".")) continue
       const abs = join(dir, ent.name)
       if (ent.isDirectory()) walk(abs)
-      else if (
-        (abs.endsWith(".test.ts") || abs.endsWith(".test.tsx")) &&
-        (anchored
-          ? abs.slice(REPO_ROOT.length + 1).startsWith(needle)
-          : abs.slice(REPO_ROOT.length + 1).includes(needle))
-      ) {
+      else if (isTestFile(ent.name) && selects(abs.slice(REPO_ROOT.length + 1))) {
         n++
       }
     }
