@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import { composeWebGoalWake } from "@/apps/web-daemon/goal-wake-compose"
-import { asObjectiveAuthority, createObjectiveStore } from "@/objective"
+import { asObjectiveAuthority, createObjectiveAttemptSlot, createObjectiveStore } from "@/objective"
 import type { SessionEvent, SessionSnapshotLite } from "@/protocol/session"
 import type { RuntimeSession } from "@/sdk/runtime"
 import { capabilitiesFor } from "../../../support/session-fixtures"
@@ -148,5 +148,38 @@ describe("web goal wake composition", () => {
     handle?.stop()
     expect(timer.clearCount()).toBeGreaterThanOrEqual(2)
     expect(fake.unsubscribed()).toBe(1)
+  })
+
+  test("GOAL-08 round 3 — a FAIL-STOPPED daemon attempt slot never arms the wake (no refused-fire loop); recover arms", async () => {
+    const store = createObjectiveStore()
+    store.create("web-goal", { goal: "ship", successCriteria: ["c"] })
+    const slot = createObjectiveAttemptSlot()
+    slot.failStop("terminal persistence failed")
+    let submits = 0
+    const fake = fakeSession(async () => {
+      submits += 1
+      return { revision: 0, seq: 0, events: [] }
+    })
+    const timer = fakeTimer()
+    let armed = 0
+    const handle = await composeWebGoalWake({
+      session: fake.session,
+      runtime: { objectiveAuthority: store, objectiveAttemptSlot: slot },
+      env: { QUANTA_GOAL: "1", QUANTA_GOAL_QUIET_MS: "15000" },
+      setTimeoutFn: (fn) => {
+        armed += 1
+        return timer.set(fn)
+      },
+      clearTimeoutFn: timer.clear,
+    })
+    expect(handle).toBeDefined()
+    expect(armed).toBe(0)
+    timer.fire()
+    await flush()
+    expect(submits).toBe(0)
+    slot.recover()
+    handle?.onAttachSettled()
+    expect(armed).toBe(1)
+    handle?.stop()
   })
 })

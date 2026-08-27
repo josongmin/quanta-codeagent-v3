@@ -28,4 +28,16 @@ describe("GOAL-06 — /goal report wake line", () => {
     expect(renderGoalDomain(domain, 1, undefined)).toContain("wake: not composed")
     expect(renderGoalDomain(domain, 1)).toContain("wake: not composed")
   })
+
+  test("GOAL-08 round 3 — a fail-stopped attempt slot renders its reason", () => {
+    const authority = createObjectiveAuthority({ now: () => 1 })
+    authority.create("t", { goal: "ship", successCriteria: ["c"] })
+    expect(
+      renderGoalDomain(authority.readDomain("t"), 1, {
+        kind: "idle",
+        skipReason: "attempt-slot-fail-stopped",
+        detail: "disk full",
+      }),
+    ).toContain("wake: idle (attempt-slot-fail-stopped: disk full)")
+  })
 })

@@ -28,7 +28,9 @@ export const renderWakeStatus = (wake: GoalWakeStatus | undefined): string => {
   if (wake.kind === "pending") {
     return `wake: pending ${delayLabel(wake.delayMs)} quiet after this input settles`
   }
-  return `wake: idle (${wake.skipReason})`
+  return wake.detail === undefined
+    ? `wake: idle (${wake.skipReason})`
+    : `wake: idle (${wake.skipReason}: ${wake.detail})`
 }
 
 export const renderGoalDomain = (

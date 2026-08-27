@@ -19,7 +19,6 @@ import {
   buildTurnSubmit,
   type CommandBuildDeps,
   SessionClosedError,
-  SessionProtocolValidationError,
 } from "@/protocol/session"
 import {
   attachSessionTransport,
@@ -49,14 +48,13 @@ interface CreateRuntimeSessionArgs {
 }
 
 /** GOAL-08 — the ONE attributed goal-turn path: mint the one-use wire
- *  capability, claim the host's attempt slot BEFORE dispatch (so the host
- *  turn-runner begins/settles the attempt), release the claim on a typed
- *  pre-run refusal. `user-requested-goal-work` charges the user turn budget
- *  only; the autonomous kind consumes the product hard-cap counter. */
+ *  capability and dispatch. The host attempt slot is claimed by the KERNEL
+ *  inside the serialized dispatch (scheduler `claimGoalAttemptForTurn`), never
+ *  here: a claim made before `dispatch` could be taken by a user turn already
+ *  queued ahead (round-3 hellgate). `user-requested-goal-work` charges the
+ *  user turn budget only; the autonomous kind consumes the product hard cap. */
 const buildAttributedGoalTurnSubmitter =
   (deps: {
-    readonly sessionId: string
-    readonly hostSession: SessionHost
     readonly turnSubmitAuthority: ReturnType<typeof createTurnSubmitAuthority>
     readonly engine: SessionEngineDeps
     readonly commandDeps: CommandBuildDeps
@@ -78,20 +76,6 @@ const buildAttributedGoalTurnSubmitter =
       validateCurrent: input.validateCurrent,
       kind,
     })
-    const claimed =
-      deps.hostSession.claimGoalAttempt?.({
-        threadId: deps.sessionId,
-        objectiveId: input.objectiveId,
-        startedRevision: input.objectiveRevision,
-        attemptId: capability.provenance.attemptId,
-        provenance:
-          kind === "goal-continuation" ? "autonomous-continuation" : "user-requested-goal-work",
-        executionMode: kind === "goal-continuation" ? "background" : "foreground",
-      }) === true
-    if (!claimed) {
-      capability.revoke()
-      throw new SessionProtocolValidationError("goal_attempt_claim_refused")
-    }
     try {
       return await dispatch(
         deps.engine,
@@ -105,7 +89,6 @@ const buildAttributedGoalTurnSubmitter =
       )
     } catch (error) {
       capability.revoke()
-      deps.hostSession.releaseGoalAttempt?.()
       throw error
     }
   }
@@ -166,8 +149,6 @@ export const createRuntimeSession = (args: CreateRuntimeSessionArgs): RuntimeSes
   const commandDeps: CommandBuildDeps = { sessionId, clock: args.kernel.clock }
 
   const submitAttributedGoalTurn = buildAttributedGoalTurnSubmitter({
-    sessionId,
-    hostSession: args.hostSession,
     turnSubmitAuthority,
     engine,
     commandDeps,

@@ -240,9 +240,12 @@ export interface GoalAttemptClaim {
 
 export interface SessionHost {
   describe(): SessionHostDescription
-  /** GOAL-08 — claim the attributed-attempt slot BEFORE a goal turn is
-   *  dispatched so the host turn-runner settles it (budget, receipts, hard-cap
-   *  counter). Absent / false ⇒ the surface must not run the goal turn. */
+  /** GOAL-08 — claim the attributed-attempt slot for the goal turn that is
+   *  about to run. Called by the KERNEL scheduler inside the serialized
+   *  dispatch (after the reducer guards + capability, before the turn runs) so
+   *  no other queued turn can take the claim; the host turn-runner then takes
+   *  and settles it (budget, receipts, hard-cap counter). Absent / false ⇒ the
+   *  turn is refused (`goal_attempt_claim_refused`). */
   claimGoalAttempt?(attempt: GoalAttemptClaim): boolean
   /** Release a claim the dispatch never consumed (typed pre-run refusal). */
   releaseGoalAttempt?(): void

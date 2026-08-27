@@ -84,4 +84,23 @@ describe("GOAL-06 rail 11 — dequeue epoch guard", () => {
     const again = slot.status()
     if (again.kind === "claimed") expect(again.attempt.provenance).toBe("autonomous-continuation")
   })
+
+  test("GOAL-08 round 3 — a fail-stopped or occupied slot refuses the claim (the loop must then DROP the continuation)", () => {
+    const authority = createObjectiveAuthority({ now: () => 1 })
+    authority.create("t", { goal: "g", successCriteria: ["c"] })
+    const prompt = normalizeCliPromptInput({
+      text: "continue",
+      goalContinuation: {
+        threadId: "t",
+        objectiveRevision: authority.readDomain("t").revision,
+        attemptKey: "k",
+      },
+    })
+    const stopped = createObjectiveAttemptSlot()
+    stopped.failStop("disk full")
+    expect(claimGoalAttempt(stopped, authority, prompt)).toBe(false)
+    const occupied = createObjectiveAttemptSlot()
+    expect(claimGoalAttempt(occupied, authority, prompt)).toBe(true)
+    expect(claimGoalAttempt(occupied, authority, prompt)).toBe(false)
+  })
 })

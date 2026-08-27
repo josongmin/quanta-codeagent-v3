@@ -28,13 +28,34 @@ const submit = (revision: number): SessionCommand => ({
   provenance,
 })
 
-const host = (prompts: string[]): SessionHost => ({
+interface HostOpts {
+  /** `"absent"` ⇒ the host does not implement the claim seam at all. */
+  readonly claim?: boolean | "absent"
+  readonly trace?: string[]
+}
+
+const claimSeam = (opts: HostOpts): Pick<SessionHost, "claimGoalAttempt" | "releaseGoalAttempt"> =>
+  opts.claim === "absent"
+    ? {}
+    : {
+        claimGoalAttempt: (attempt) => {
+          opts.trace?.push(`claim:${attempt.provenance}:${attempt.attemptId}`)
+          return opts.claim !== false
+        },
+        releaseGoalAttempt: () => {
+          opts.trace?.push("release")
+        },
+      }
+
+const host = (prompts: string[], opts: HostOpts = {}): SessionHost => ({
   describe: () => ({
     sessionId: "turn-submit",
     permissionMode: "default",
     capabilityManifest: manifest,
   }),
+  ...claimSeam(opts),
   runTurn: async ({ prompt }) => {
+    opts.trace?.push(`run:${prompt}`)
     prompts.push(prompt)
     return {
       outcome: { reason: "completed", turns: 1, messages: [] },
@@ -53,6 +74,127 @@ const initialState = () =>
     permissionMode: "default",
     capabilityManifest: manifest,
   })
+
+describe("GOAL-08 round 3 — the goal claim is made INSIDE the serialized dispatch", () => {
+  test("order: guards → capability → claim → runTurn; the claim carries the wire provenance", async () => {
+    const prompts: string[] = []
+    const trace: string[] = []
+    await dispatchSessionCommand(initialState(), submit(0), {
+      clock,
+      eventLog: new InMemorySessionEventLog(),
+      host: host(prompts, { trace }),
+      consumeTurnSubmitProvenance: (received) => received.attemptId === "host-secret",
+    })
+    expect(trace).toEqual(["claim:autonomous-continuation:host-secret", "run:pursue the goal"])
+  })
+
+  test("a reducer refusal (stale revision) never reaches the claim", async () => {
+    const trace: string[] = []
+    await expect(
+      dispatchSessionCommand(initialState(), submit(7), {
+        clock,
+        eventLog: new InMemorySessionEventLog(),
+        host: host([], { trace }),
+        consumeTurnSubmitProvenance: () => true,
+      }),
+    ).rejects.toBeDefined()
+    expect(trace).toEqual([])
+  })
+
+  test("a host WITHOUT the claim seam refuses the goal turn typed, after consuming the capability, before any host work", async () => {
+    const prompts: string[] = []
+    let consumed = 0
+    await expect(
+      dispatchSessionCommand(initialState(), submit(0), {
+        clock,
+        eventLog: new InMemorySessionEventLog(),
+        host: host(prompts, { claim: "absent" }),
+        consumeTurnSubmitProvenance: () => {
+          consumed += 1
+          return true
+        },
+      }),
+    ).rejects.toThrow(/goal_attempt_claim_refused/)
+    expect(prompts).toEqual([])
+    expect(consumed).toBe(1)
+  })
+
+  test("a host that refuses the claim (slot occupied / fail-stopped) refuses the turn before any host work", async () => {
+    const prompts: string[] = []
+    const trace: string[] = []
+    await expect(
+      dispatchSessionCommand(initialState(), submit(0), {
+        clock,
+        eventLog: new InMemorySessionEventLog(),
+        host: host(prompts, { claim: false, trace }),
+        consumeTurnSubmitProvenance: () => true,
+      }),
+    ).rejects.toThrow(/goal_attempt_claim_refused/)
+    expect(prompts).toEqual([])
+    expect(trace).toEqual(["claim:autonomous-continuation:host-secret"])
+  })
+
+  test("a persistence failure AFTER the claim releases it (no leak into the next attributed turn)", async () => {
+    const prompts: string[] = []
+    const trace: string[] = []
+    const log = new InMemorySessionEventLog()
+    const failing = Object.assign(Object.create(Object.getPrototypeOf(log)), log, {
+      append: () => {
+        throw new Error("disk full")
+      },
+    }) as InMemorySessionEventLog
+    await expect(
+      dispatchSessionCommand(initialState(), submit(0), {
+        clock,
+        eventLog: failing,
+        host: host(prompts, { trace }),
+        consumeTurnSubmitProvenance: () => true,
+      }),
+    ).rejects.toThrow(/disk full/)
+    expect(prompts).toEqual([])
+    expect(trace).toEqual(["claim:autonomous-continuation:host-secret", "release"])
+  })
+
+  test("lens 4 — the one-use attemptId never reaches the event stream (raw subscribers cannot replay it)", async () => {
+    const result = await dispatchSessionCommand(initialState(), submit(0), {
+      clock,
+      eventLog: new InMemorySessionEventLog(),
+      host: host([]),
+      consumeTurnSubmitProvenance: (received) => received.attemptId === "host-secret",
+    })
+    expect(result.events.length).toBeGreaterThan(0)
+    expect(JSON.stringify(result.events)).not.toContain("host-secret")
+    expect(JSON.stringify(result.state)).not.toContain("host-secret")
+  })
+
+  test("turn.run (a plain user turn) never claims", async () => {
+    const trace: string[] = []
+    const prompts: string[] = []
+    const drafted = await dispatchSessionCommand(
+      initialState(),
+      {
+        sessionId: "turn-submit",
+        commandId: "draft",
+        issuedAt: clock.now().toISOString(),
+        type: "input.append",
+        text: "user text",
+      },
+      { clock, eventLog: new InMemorySessionEventLog(), host: host(prompts, { trace }) },
+    )
+    await dispatchSessionCommand(
+      drafted.state,
+      {
+        sessionId: "turn-submit",
+        commandId: "run",
+        issuedAt: clock.now().toISOString(),
+        type: "turn.run",
+      },
+      { clock, eventLog: new InMemorySessionEventLog(), host: host(prompts, { trace }) },
+    )
+    expect(prompts).toEqual(["user text"])
+    expect(trace).toEqual(["run:user text"])
+  })
+})
 
 describe("turn.submit atomic goal continuation", () => {
   test("valid host capability starts one complete turn without a draft append", async () => {

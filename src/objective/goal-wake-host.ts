@@ -21,6 +21,7 @@
  */
 
 import { logger } from "@/shared"
+import type { ObjectiveAttemptSlotStatus } from "./attempt"
 import type { SystemObjectiveCommands } from "./capabilities"
 import { type ContinuationDeps, ContinuationSemaphore, runIdleContinuation } from "./continuation"
 import { createGoalWakeController, type GoalWakeAttempt } from "./goal-wake-controller"
@@ -64,12 +65,23 @@ export type GoalWakeStatus =
   /** No timer right now (raw input cancelled it) but the policy and the host
    *  are ready: the next settled edge arms `delayMs`. */
   | { readonly kind: "pending"; readonly delayMs: number }
-  | { readonly kind: "idle"; readonly skipReason: GoalWakeDelaySkip | "not-quiescent" }
+  | {
+      readonly kind: "idle"
+      readonly skipReason: GoalWakeDelaySkip | "not-quiescent" | "attempt-slot-fail-stopped"
+      /** Operator-facing detail (the fail-stop reason). */
+      readonly detail?: string | undefined
+    }
   | { readonly kind: "stopped" }
 
 export interface StartGoalWakeOpts {
   readonly enabled: boolean
   readonly threadId: string | undefined
+  /** GOAL-04/08 — the surface's attributed-attempt slot status. A FAIL-STOPPED
+   *  slot (terminal persistence failure after a paid call) is terminal until a
+   *  new objective generation: the controller must not arm (a fire would only
+   *  be refused at claim time, forever, every quiet window) and `/goal` shows
+   *  the reason. Absent ⇒ the surface has no slot ⇒ no gate. */
+  readonly attemptSlotStatus?: (() => ObjectiveAttemptSlotStatus) | undefined
   readonly probes: GoalContinuationProbes
   /** Revisioned projection from the same authority `/goal` mutates. */
   readonly readDomain: (threadId: string) => ObjectiveDomainSnapshot
@@ -96,6 +108,30 @@ export interface StartGoalWakeOpts {
 /** Goal pursuit's own quiet period. It is intentionally independent of the
  * UI idle-suppression window (`QUANTA_IDLE_MS`). */
 export const DEFAULT_GOAL_QUIET_MS = 15_000
+
+/** GOAL-08 round 3 — a FAIL-STOPPED attempt slot (terminal persistence
+ *  failure after a paid call) is terminal until a new objective generation:
+ *  the wake must not arm (a fire would only be refused at claim time, every
+ *  quiet window, forever) and the status line carries the reason. */
+const readFailStoppedSlot = (
+  read: (() => ObjectiveAttemptSlotStatus) | undefined,
+): { readonly reason: string } | undefined => {
+  try {
+    const status = read?.()
+    return status?.kind === "fail-stopped" ? { reason: status.reason } : undefined
+  } catch (_error) {
+    return undefined
+  }
+}
+
+const failStoppedStatus = (
+  read: (() => ObjectiveAttemptSlotStatus) | undefined,
+): GoalWakeStatus | undefined => {
+  const stopped = readFailStoppedSlot(read)
+  return stopped === undefined
+    ? undefined
+    : { kind: "idle", skipReason: "attempt-slot-fail-stopped", detail: stopped.reason }
+}
 
 /**
  * Build the event-driven goal wake controller. One timer is
@@ -138,6 +174,7 @@ export const startGoalWakeController = (opts: StartGoalWakeOpts): GoalWakeLifecy
     enabled: true,
     quietWindowMs: policy.minQuietMs,
     resolveDelayMs: (domain) => {
+      if (readFailStoppedSlot(opts.attemptSlotStatus) !== undefined) return undefined // binding
       const decision = computeGoalWakeDelay(domain, policy, settlementHint, now())
       if ("delayMs" in decision) return decision.delayMs
       return decision.retryAt === undefined ? undefined : Math.max(1, decision.retryAt - now())
@@ -228,6 +265,8 @@ export const startGoalWakeController = (opts: StartGoalWakeOpts): GoalWakeLifecy
     status: (): GoalWakeStatus => {
       const armed = controller.status()
       if (armed.kind !== "idle") return armed
+      const stoppedSlot = failStoppedStatus(opts.attemptSlotStatus)
+      if (stoppedSlot !== undefined) return stoppedSlot
       let quiet = true
       try {
         quiet = opts.isQuiescent?.() !== false

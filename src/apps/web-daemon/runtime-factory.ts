@@ -38,7 +38,7 @@ import {
 } from "@/host/runtime"
 import { resolveGatedObjectiveAuthority } from "@/host/runtime/objective-store-wire"
 import { pickProvider, tryCreateLLM } from "@/llm"
-import { applyGoalPreset } from "@/objective"
+import { applyGoalPreset, type ObjectiveAttemptSlot, type ObjectivePort } from "@/objective"
 import { getDefaultPermissionStore, type PermissionStore } from "@/permission"
 import { createRuntimeFromAgentConfigBase } from "@/sdk/runtime"
 import { errMessage, gateDisabled, gateOn, logger } from "@/shared"
@@ -239,6 +239,20 @@ const loadDefaultPermissionStore = async (): Promise<PermissionStore | undefined
  * handle (ADR-0415). The widened return type is structurally a `RuntimeFacade`
  * so `WebDaemonConfig.runtimeFactory` accepts it unchanged.
  */
+/** GOAL-08 — the objective authority plus the SAME attributed-attempt slot the
+ *  session host claims; the wake composer reads the slot's fail-stop status
+ *  (binding skip + `/goal` reason). Both absent when TOOLS is off. */
+const objectivePorts = (
+  objective: ObjectivePort | undefined,
+  objectiveAttemptSlot: unknown,
+): { objectiveAuthority?: ObjectivePort; objectiveAttemptSlot?: ObjectiveAttemptSlot } => ({
+  ...(objective !== undefined ? { objectiveAuthority: objective } : {}),
+  ...(isObjectiveAttemptSlotValue(objectiveAttemptSlot) ? { objectiveAttemptSlot } : {}),
+})
+
+const isObjectiveAttemptSlotValue = (v: unknown): v is ObjectiveAttemptSlot =>
+  typeof v === "object" && v !== null && typeof (v as ObjectiveAttemptSlot).status === "function"
+
 export const buildProductionRuntimeFactory = (): (() => Promise<ObservableRuntimeFacade>) => {
   const env = process.env as Record<string, string | undefined>
   applyGoalPreset(env, !gateDisabled(env, "QUANTA_GOAL"))
@@ -353,7 +367,7 @@ export const buildProductionRuntimeFactory = (): (() => Promise<ObservableRuntim
       // snapshot undefined ⇒ transcript omits `objective` (byte-identical
       // default-OFF). Passed directly (like `canvasUsage`) — the helper's
       // undefined-skip removes the need for a guard ternary here.
-      objectiveAuthority: objective,
+      ...objectivePorts(objective, base.objectiveAttemptSlot),
       canvasUsage,
       canvasToolDiff,
       canvasArtifact,

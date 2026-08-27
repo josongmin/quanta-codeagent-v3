@@ -1,6 +1,6 @@
 import type { AgentConfig } from "@/agent"
 import { startAutomationEngineTicker } from "@/agent/loop-helpers"
-import type { ObjectivePort } from "@/objective"
+import type { ObjectiveAttemptSlot, ObjectivePort } from "@/objective"
 import {
   buildPursuitContinuationPrompt,
   createObjectiveCapabilities,
@@ -66,6 +66,7 @@ export interface InteractiveSetupArgs {
   readonly notifyCwdBasename: string | undefined
   readonly contextWarning: (() => string) | undefined
   readonly objectiveStore: ObjectivePort | undefined
+  readonly objectiveAttemptSlot: ObjectiveAttemptSlot | undefined
   readonly goalWakeSlot: GoalWakeSignalSlot | undefined
   readonly activeTurnRef: AgentConfig["activeTurnRef"]
   readonly activeIdentityModeState: IdentityModeCell | undefined
@@ -100,6 +101,7 @@ export const wireInteractiveSetup = async (
     notifyCwdBasename,
     contextWarning,
     objectiveStore,
+    objectiveAttemptSlot,
     goalWakeSlot,
     activeTurnRef,
     activeIdentityModeState,
@@ -147,6 +149,7 @@ export const wireInteractiveSetup = async (
     setup,
     closeStack,
     objectiveStore,
+    objectiveAttemptSlot,
     goalWakeSlot,
     activeTurnRef,
     externalPromptQueue,
@@ -265,6 +268,7 @@ const armGoalWake = (args: {
   readonly setup: SessionSetupResult
   readonly closeStack: Array<CloseStackEntry>
   readonly objectiveStore: ObjectivePort | undefined
+  readonly objectiveAttemptSlot: ObjectiveAttemptSlot | undefined
   readonly goalWakeSlot: GoalWakeSignalSlot | undefined
   readonly activeTurnRef: AgentConfig["activeTurnRef"]
   readonly externalPromptQueue: ExternalPromptQueue
@@ -310,6 +314,7 @@ const armGoalWake = (args: {
   const hostIsQuiescent = (): boolean => isQuiescent(quiescenceSnapshot())
   const objectiveCapabilities =
     objectiveStore === undefined ? undefined : createObjectiveCapabilities(objectiveStore)
+  const attemptSlot = args.objectiveAttemptSlot
   const goalWake =
     objectiveStore !== undefined && objectiveCapabilities !== undefined
       ? startGoalWakeController({
@@ -325,6 +330,9 @@ const armGoalWake = (args: {
           readDomain: (tid) => objectiveCapabilities.read.readDomain(tid),
           system: objectiveCapabilities.system,
           isQuiescent: hostIsQuiescent,
+          // GOAL-08 round 3 — a fail-stopped attempt slot is a binding skip
+          // (never arm) and is reported on the `/goal` wake line.
+          ...(attemptSlot !== undefined ? { attemptSlotStatus: () => attemptSlot.status() } : {}),
           resumeAttempt: async (tid, attempt) => {
             const domain = objectiveCapabilities.read.readDomain(tid)
             const criteria = domain.state?.objective.successCriteria ?? []

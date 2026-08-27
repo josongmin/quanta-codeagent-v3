@@ -38,6 +38,14 @@ export const claimGoalAttempt = (
   })
 }
 
+const describeUnclaimable = (slot: ObjectiveAttemptSlot | undefined): string => {
+  if (slot === undefined) return "no attempt slot"
+  const status = slot.status()
+  if (status.kind === "fail-stopped") return `attempt slot fail-stopped: ${status.reason}`
+  if (status.kind === "claimed") return "attempt slot already claimed"
+  return "objective not claimable"
+}
+
 export const isStaleGoalContinuation = (
   prompt: ReturnType<typeof normalizeCliPromptInput>,
   objectiveStore: InteractiveBranchCtx["objectiveStore"],
@@ -155,7 +163,20 @@ export const runInteractiveLoop = async (
       goalWakeSlot?.current?.onGoalMutation()
       continue
     }
-    claimGoalAttempt(objectiveAttemptSlot, objectiveStore, prompt)
+    if (
+      prompt.goalContinuation !== undefined &&
+      !claimGoalAttempt(objectiveAttemptSlot, objectiveStore, prompt)
+    ) {
+      // GOAL-08 round 3 — a goal turn whose attempt cannot be claimed (slot
+      // fail-stopped / occupied / objective gone) must NOT run unattributed:
+      // that would be an unmetered autonomous turn outside the hard cap.
+      // Drop it, say so, and let the wake host decide (it reports the reason).
+      process.stderr.write(
+        `goal: continuation dropped — attempt not claimable (${describeUnclaimable(objectiveAttemptSlot)})\n`,
+      )
+      goalWakeSlot?.current?.onGoalMutation()
+      continue
+    }
     // Ticket 18 (V1) — discoverable turn-start hint. Painted ONLY when the
     // Ctrl+B detach is actually wired for THIS turn (portal present + WEAVE
     // guard satisfied) so the affordance never advertises a no-op key.

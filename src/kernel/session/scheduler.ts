@@ -84,6 +84,34 @@ const validateTurnSubmitProvenance = (
   }
 }
 
+/** GOAL-08 (round 3) — claim the host's attributed-attempt slot for THIS
+ *  turn, inside the serialized dispatch: after the reducer guards (idle /
+ *  revision / approval) and the one-use capability were accepted, right
+ *  before this same turn runs. Claiming any earlier (e.g. at the SDK verb,
+ *  before `dispatch`) lets a user turn already queued ahead start first and
+ *  `take()` the claim — the user's own turn would be charged as the goal
+ *  attempt. Returns the release for a turn that fails to start after the
+ *  claim; `undefined` for a turn that carries no goal provenance. */
+const claimGoalAttemptForTurn = (
+  state: KernelSessionState,
+  command: SessionCommand,
+  ctx: KernelDispatchContext,
+): (() => void) | undefined => {
+  if (command.type !== "turn.submit") return undefined
+  const provenance = command.provenance
+  const autonomous = provenance.kind === "goal-continuation"
+  const claimed = ctx.host.claimGoalAttempt?.({
+    threadId: state.sessionId,
+    objectiveId: provenance.objectiveId,
+    startedRevision: provenance.objectiveRevision,
+    attemptId: provenance.attemptId,
+    provenance: autonomous ? "autonomous-continuation" : "user-requested-goal-work",
+    executionMode: autonomous ? "background" : "foreground",
+  })
+  if (claimed !== true) throw new SessionProtocolValidationError("goal_attempt_claim_refused")
+  return () => ctx.host.releaseGoalAttempt?.()
+}
+
 /** Run the HOST-side effect a command carries, if it carries one, and say
  *  whether the kernel state must then be re-read from the host.
  *
@@ -282,40 +310,49 @@ export const dispatchSessionCommand = async (
     }
     const reduced = reduceSessionCommand(state, command, emittedAt)
     validateTurnSubmitProvenance(command, ctx)
-    // `reduced.events` is read BEFORE `reduced.state`: an unrecognised command
-    // type makes the reducer return nothing, and the resulting TypeError names
-    // the field the original read first.
-    const immediateEvents = [...reduced.events]
-    const projected = await applyHostProjection(
-      ctx,
-      command,
-      { ...reduced.state, seq: state.seq + immediateEvents.length },
-      immediateEvents,
-    )
-    // Audit R2 H1: register the turn-owned cancel controller BEFORE the awaited
-    // event-log persistence so a turn.cancel dispatched during that window —
-    // which cannot acquire the held single-writer lease — reaches a LIVE target
-    // via the fast-path instead of contending on the lease (which throws
-    // lease-held while the turn proceeds uncancelled).
-    let preRegisteredController: AbortController | undefined
-    if (command.type === "turn.run" || command.type === "turn.submit") {
-      preRegisteredController = new AbortController()
-      activeTurnControllers.set(state.sessionId, preRegisteredController)
+    const releaseGoalClaim = claimGoalAttemptForTurn(state, command, ctx)
+    try {
+      // `reduced.events` is read BEFORE `reduced.state`: an unrecognised command
+      // type makes the reducer return nothing, and the resulting TypeError names
+      // the field the original read first.
+      const immediateEvents = [...reduced.events]
+      const projected = await applyHostProjection(
+        ctx,
+        command,
+        { ...reduced.state, seq: state.seq + immediateEvents.length },
+        immediateEvents,
+      )
+      // Audit R2 H1: register the turn-owned cancel controller BEFORE the awaited
+      // event-log persistence so a turn.cancel dispatched during that window —
+      // which cannot acquire the held single-writer lease — reaches a LIVE target
+      // via the fast-path instead of contending on the lease (which throws
+      // lease-held while the turn proceeds uncancelled).
+      let preRegisteredController: AbortController | undefined
+      if (command.type === "turn.run" || command.type === "turn.submit") {
+        preRegisteredController = new AbortController()
+        activeTurnControllers.set(state.sessionId, preRegisteredController)
+      }
+      await commitOrDropController(
+        ctx,
+        state.sessionId,
+        projected.state,
+        projected.events,
+        preRegisteredController,
+      )
+      return await routeDispatchResult({
+        state: projected.state,
+        command,
+        ctx,
+        reduced,
+        events: projected.events,
+        turnController: preRegisteredController,
+      })
+    } catch (error) {
+      // A claim the turn never consumed (commit / host failure before the
+      // runner took it) must not leak into the next attributed turn. After a
+      // take the slot is already empty ⇒ no-op; a fail-stop is preserved.
+      releaseGoalClaim?.()
+      throw error
     }
-    await commitOrDropController(
-      ctx,
-      state.sessionId,
-      projected.state,
-      projected.events,
-      preRegisteredController,
-    )
-    return await routeDispatchResult({
-      state: projected.state,
-      command,
-      ctx,
-      reduced,
-      events: projected.events,
-      turnController: preRegisteredController,
-    })
   })
 }

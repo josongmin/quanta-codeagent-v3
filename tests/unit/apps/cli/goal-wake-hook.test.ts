@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import {
   asObjectiveAuthority,
+  createObjectiveAttemptSlot,
   createObjectiveCapabilities,
   createObjectiveStore,
   type GoalContinuationProbes,
@@ -395,5 +396,36 @@ describe("goal wake host binding", () => {
     expect(wake?.status()).toEqual({ kind: "idle", skipReason: "not-active" })
     wake?.stop()
     expect(wake?.status()).toEqual({ kind: "stopped" })
+  })
+
+  test("GOAL-08 round 3 — a FAIL-STOPPED attempt slot is a binding skip with the reason on the status line; recover re-arms", () => {
+    const store = createObjectiveStore()
+    store.create(TID, { goal: "ship", successCriteria: ["c"] })
+    const timer = fakeTimeout()
+    const slot = createObjectiveAttemptSlot()
+    slot.failStop("objective attempt start not durable: disk full")
+    const wake = startGoalWakeController({
+      enabled: true,
+      threadId: TID,
+      quietWindowMs: 15_000,
+      probes: probes(store, async () => undefined),
+      readDomain: (id) => asObjectiveAuthority(store).readDomain(id),
+      isQuiescent: () => true,
+      attemptSlotStatus: () => slot.status(),
+      setTimeoutFn: timer.set,
+      clearTimeoutFn: timer.clear,
+    })
+    wake?.onTurnSettled()
+    wake?.onGoalMutation()
+    expect(timer.delays()).toEqual([])
+    expect(wake?.status()).toEqual({
+      kind: "idle",
+      skipReason: "attempt-slot-fail-stopped",
+      detail: "objective attempt start not durable: disk full",
+    })
+    slot.recover()
+    wake?.onTurnSettled()
+    expect(timer.delays()).toEqual([15_000])
+    expect(wake?.status()).toEqual({ kind: "armed", delayMs: 15_000 })
   })
 })

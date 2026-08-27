@@ -3,6 +3,7 @@ import {
   buildPursuitContinuationPrompt,
   createObjectiveCapabilities,
   DEFAULT_GOAL_WAKE_POLICY,
+  type ObjectiveAttemptSlot,
   type ObjectivePort,
   type ObjectiveReadPort,
   startGoalWakeController,
@@ -19,6 +20,8 @@ export interface WebGoalWakeHandle {
 
 export interface WebGoalWakeRuntimePorts {
   readonly objectiveAuthority?: ObjectivePort
+  /** The daemon base's attributed-attempt slot (fail-stop gate for the wake). */
+  readonly objectiveAttemptSlot?: ObjectiveAttemptSlot
   readonly activeTurnRef?: ActiveTurnRefHolder
 }
 
@@ -92,6 +95,7 @@ export const composeWebGoalWake = async (args: {
   const capabilities = createObjectiveCapabilities(authorityPort)
   const { read, system } = capabilities
   const threadId = args.session.sessionId
+  const attemptSlot = args.runtime.objectiveAttemptSlot
   const view: LiveSessionView = { snapshot: await args.session.snapshot(), attaching: false }
   let observedObjectiveRevision = read.readDomain(threadId).revision
   let stopped = false
@@ -110,6 +114,7 @@ export const composeWebGoalWake = async (args: {
     },
     readDomain: (id) => read.readDomain(id),
     isQuiescent: () => quiescent(view, args.runtime.activeTurnRef),
+    ...(attemptSlot !== undefined ? { attemptSlotStatus: () => attemptSlot.status() } : {}),
     ...(args.setTimeoutFn !== undefined ? { setTimeoutFn: args.setTimeoutFn } : {}),
     ...(args.clearTimeoutFn !== undefined ? { clearTimeoutFn: args.clearTimeoutFn } : {}),
     resumeAttempt: async (id, attempt) => {

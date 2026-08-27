@@ -21,7 +21,11 @@ const makeHost = (opts: { claim?: boolean; throwOnRun?: boolean } = {}) => {
   const prompts: string[] = []
   let released = 0
   const host: SessionHost = {
-    describe: () => ({ sessionId: "goal-attr", permissionMode: "default", capabilityManifest: manifest }),
+    describe: () => ({
+      sessionId: "goal-attr",
+      permissionMode: "default",
+      capabilityManifest: manifest,
+    }),
     runTurn: async ({ prompt }) => {
       prompts.push(prompt)
       if (opts.throwOnRun) throw new Error("host exploded")
@@ -87,8 +91,8 @@ describe("GOAL-08 — goal turn attribution through the session host", () => {
     expect(prompts).toEqual([])
   })
 
-  test("a dispatch that is refused after the claim releases the slot", async () => {
-    const { host, released, prompts } = makeHost()
+  test("a dispatch the reducer refuses (stale revision) never claims at all", async () => {
+    const { host, claims, released, prompts } = makeHost()
     const runtime = await createRuntime({ host: { createSessionHost: async () => host } })
     const session = await runtime.createSession({})
     const submit = session.turn.submitGoalContinuation
@@ -103,7 +107,8 @@ describe("GOAL-08 — goal turn attribution through the session host", () => {
       }),
     ).rejects.toBeDefined()
     expect(prompts).toEqual([])
-    expect(released()).toBe(1)
+    expect(claims).toHaveLength(0)
+    expect(released()).toBe(0)
   })
 
   test("rail 15 — submitGoalWork mints USER-REQUESTED provenance; a raw turn.submit cannot self-assert it", async () => {
@@ -119,7 +124,10 @@ describe("GOAL-08 — goal turn attribution through the session host", () => {
       objectiveRevision: 2,
       validateCurrent: () => true,
     })
-    expect(claims[0]).toMatchObject({ provenance: "user-requested-goal-work", objectiveId: "obj-1" })
+    expect(claims[0]).toMatchObject({
+      provenance: "user-requested-goal-work",
+      objectiveId: "obj-1",
+    })
     // raw wire command with a self-asserted provenance: no capability ⇒ refused
     await expect(
       session.dispatch({
