@@ -220,6 +220,61 @@ at an inner quote) while a live offender sat in `tool-surface-manifest-hellgate`
 and the parity harness reproduced a bug its own sibling tool had already been
 fixed for. Neither was found by review — both by running against ground truth.
 
+## Second execution round — what auditing the fixes found (2026-08-27)
+
+Two adversarial rounds ran against the work above. Both found real defects IN IT,
+which is the part worth recording.
+
+**The audit's method beat mine.** It built an empty mirror of the repo's
+directory skeleton — every directory, zero files — dropped byte-identical copies
+of guards at their real depths, and ran them. A guard reporting "no violations"
+there has proven it cannot tell clean from never-looked. **Eight guards passed
+100% green.** Reproduced independently, then fixed with derived floors; all eight
+now fail on the mirror and pass on the real tree.
+
+Three of them read `git ls-files` and CHECK ITS EXIT CODE, which looks like
+diligence and is not: `git ls-files` exits 0 with no output when nothing matches.
+`capability-literal-ratchet` is the sharpest case — it has five matcher positive
+controls, all of which passed while the corpus was empty. **A detector control is
+not a corpus floor.**
+
+**The fc campaign kept finding more of itself.** After `adrExists` was fixed, the
+audit found `collectAdrs` eleven lines away with the identical
+`catch { return [] }` (572 records vs 0, no throw), plus `readDependsOn` and
+`collectSrcFiles`. Then `stale` (868 features reported as 0, exit 0) and `diff`
+— a hard CI gate. Then five `relative(process.cwd(), …)` in `schema.ts`, and a
+fourth copy of the bare `"tools/feature-catalog/features"` literal living in a
+TEST. Eight commands are now byte-identical across the repo root and a foreign
+cwd; there is one place that decides where the catalog is.
+
+**My own instruments were the worst offenders.** The parity harness produced
+silent FALSE NEGATIVES on the exact class it exists to catch: `parseCounters`
+read the first counter line so an earlier one masked the tail; `armsDiffer`
+ignored the pass count so a file that could not LOAD was invisible if it also had
+a failing test — **and the paired test pinned that blindness as intended**;
+`classify` never checked which arm failed, so a coinflip fixture produced 25%
+false findings. The local-walker lens added to the anchor ratchet was INERT on
+arrival because its declaration pattern rejected a return-type annotation — the
+shape of all three offenders it was written for — and looked green.
+
+**One floor was removed after audit.** `total > CEILING / 2` on
+no-raw-process-env encodes nothing: the documented burn-down contract lowers the
+ceiling to each new floor, making it `total > total / 2`. Its only live effect was
+to red a real burn-down. Kept the measured `files > 2500` beside it.
+
+**And a justification nobody had measured.** The `apps/` allowlist entry claimed
+`bun test` runs 0 of the 77 web-frontend files. It runs all 77 — 732 tests, 18
+failures, one of them a real cwd bug the wrong reason would have hidden
+permanently.
+
+### The recurring shape, stated plainly
+
+Every defect in both rounds is the same sentence: **a verdict derived from a scan,
+where the scan's failure and the scan's success produce the same value.** `[]`,
+`0`, `false`, exit 0. The fix is never a better detector — it is a floor that
+makes the two distinguishable, and the floor has to be a MEASUREMENT, because an
+author-chosen one converges on `> 0` (measured: 56 of 81 in this repo).
+
 ## How a phase may claim done
 
 A hellgate that was RED first, a red-on-injection proof that the new guard fires,
