@@ -173,7 +173,7 @@ describe("no-raw-process.env-knob ratchet (ADR-0503 P4)", () => {
     // pass. Both halves are pinned — the walk must have READ the tree, and the
     // count must be in the neighbourhood of the ceiling rather than collapsed.
     expect(files, "the walk read no source files — the ceiling below is vacuous").toBeGreaterThan(
-      2500,
+      2984,
     )
     // A `total > CEILING / 2` floor was tried here and REMOVED after audit. The
     // burn-down contract documented above lowers the ceiling to each new floor,

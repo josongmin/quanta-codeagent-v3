@@ -58,7 +58,7 @@ describe("source integrity — no raw NUL (0x00) bytes", () => {
     }
     // Anti-vacuity: `offenders === []` is also what an empty walk produces, and
     // this file passes 1/0 against an empty mirror of the repo tree.
-    expect(scanned, "the walk read no files — the NUL check below is vacuous").toBeGreaterThan(4000)
+    expect(scanned, "the walk read no files — the NUL check below is vacuous").toBeGreaterThan(8876)
     expect(offenders).toEqual([])
     // Generous wall-clock: this walks every src/tests/docs file. Under the full
     // parallel suite (2000+ files) CPU starvation can stretch a ~2s scan past

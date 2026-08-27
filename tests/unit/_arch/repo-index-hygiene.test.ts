@@ -163,7 +163,7 @@ const readIndex = (): readonly IndexEntry[] => {
   // is clean" from "git listed nothing", and all three verdicts below would pass
   // over the empty set. Proven: this file passed 7/0 against an empty mirror of
   // the repo's directory skeleton before this floor existed.
-  if (entries.length < 3000) {
+  if (entries.length < 12695) {
     throw new Error(
       `git ls-files -s returned ${entries.length} entr(ies) — far below the real index. ` +
         `The hygiene verdicts would be derived from a listing that never happened.`,

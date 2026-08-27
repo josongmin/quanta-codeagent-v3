@@ -94,7 +94,7 @@ describe("single-PID kill ban — every escalatingKill passes a tree killer (D1 
     // directory skeleton — a ban on orphan-leaking `escalatingKill` calls that
     // could not fail.
     expect(scanned, "the walk read no source files — the ban below is vacuous").toBeGreaterThan(
-      2500,
+      3250,
     )
     expect(offenders).toEqual([])
   })

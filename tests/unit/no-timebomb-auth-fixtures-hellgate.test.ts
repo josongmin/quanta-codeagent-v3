@@ -100,7 +100,7 @@ describe("no time-bomb auth fixtures (regression guard)", () => {
     // NOTHING produces the same green as a clean tree — "no time bombs" and
     // "I never looked" are the same value without this.
     expect(files, "the walk read no test files — the assertion below is vacuous").toBeGreaterThan(
-      2000,
+      3054,
     )
     if (hits.length > 0) {
       const detail = hits.map((h) => `  ${h.file}:${h.line}  expires_at:"${h.date}"`).join("\n")

@@ -119,7 +119,7 @@ function listTrackedTestFiles(): string[] {
   // check is not a floor. The five matcher controls below prove the DETECTOR
   // works while the corpus is empty — which is exactly how this file passed 6/0
   // against an empty mirror of the repo tree.
-  if (files.length < 2000) {
+  if (files.length < 3244) {
     throw new Error(
       `git ls-files returned ${files.length} tracked test file(s) — far below the real tree; ` +
         `the literal ban would pass over nothing.`,

@@ -49,7 +49,7 @@ describe("no .test.js artifacts under tests/", () => {
     expect(
       countTestTs(join(REPO_ROOT, "tests")),
       "the walk read no test files — the assertion below is vacuous",
-    ).toBeGreaterThan(2000)
+    ).toBeGreaterThan(3054)
     expect(victims).toEqual([])
   })
 

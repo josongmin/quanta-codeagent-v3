@@ -127,7 +127,7 @@ describe("gate-vocabulary ratchet — raw comparisons only ever decrease", () =>
     expect(
       files,
       "the walk read no source files — a ceiling of 0 passes over nothing",
-    ).toBeGreaterThan(2500)
+    ).toBeGreaterThan(2984)
     if (total > RAW_GATE_CEILING) {
       const offenders = Object.entries(byFile)
         .sort((a, b) => b[1] - a[1])

@@ -68,7 +68,7 @@ function listTrackedFiles(): string[] {
   // the exit check above is not a floor. The verdict is "no backup artifacts",
   // which an empty listing satisfies for free — proven, 2/0 against an empty
   // mirror of the repo tree.
-  if (files.length < 3000) {
+  if (files.length < 7804) {
     throw new Error(
       `git ls-files returned ${files.length} tracked path(s) under ${SCOPED_PREFIXES.join(", ")} ` +
         `— far below the real tree; the backup-artifact verdict would pass over nothing.`,
