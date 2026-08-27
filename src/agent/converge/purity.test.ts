@@ -20,6 +20,18 @@ const CORE_DIR = join(import.meta.dir)
 const coreFiles = (): string[] =>
   readdirSync(CORE_DIR).filter((f) => f.endsWith(".ts") && !f.endsWith(".test.ts"))
 
+/** Anti-vacuity: both verdicts below are `toEqual([])` over this listing, so an
+ *  empty slice satisfies them for free — proven, 4/0 against an empty mirror of
+ *  the repo's directory skeleton. */
+const assertSliceIsReal = (files: readonly string[]): void => {
+  if (files.length < 3) {
+    throw new Error(
+      `converge slice listed ${files.length} source file(s) — the purity verdicts below ` +
+        `would pass over nothing.`,
+    )
+  }
+}
+
 /** Pure detector — reused by the red-on-injection self-test below. */
 const forbiddenImports = (source: string): string[] => {
   const hits: string[] = []
@@ -39,6 +51,7 @@ describe("@/agent/converge — surface-neutral purity guard", () => {
       const imports = forbiddenImports(readFileSync(join(CORE_DIR, f), "utf8"))
       if (imports.length > 0) offenders.push({ file: f, imports })
     }
+    assertSliceIsReal(coreFiles())
     expect(offenders).toEqual([])
   })
 
@@ -64,6 +77,7 @@ describe("@/agent/converge — surface-neutral purity guard", () => {
       expect(code.includes("process.")).toBe(false) // pure/leaf: no ambient env / IO in code
     }
     const jsSiblings = readdirSync(CORE_DIR).filter((f) => f.endsWith(".js"))
+    assertSliceIsReal(coreFiles())
     expect(jsSiblings).toEqual([]) // a .js next to .ts shadows the source (the jul stale-build bug)
   })
 

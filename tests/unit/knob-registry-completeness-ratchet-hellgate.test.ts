@@ -365,6 +365,15 @@ describe("knob-registry completeness ratchet (ADR-0503 P0)", () => {
           `Declare it, or add to EXCEPTIONS with a reason:\n${list}`,
       )
     }
+    // The floor this file LOGGED but never asserted. `ORPHAN_CEILING` is 0, so
+    // `orphans.size <= 0` is satisfied by a scan that read nothing — and the
+    // log line printed `declared=0 orphans=0/0` while passing 2/0 against an
+    // empty mirror of the repo tree. The registry count is the only thing that
+    // separates "every read is declared" from "no read was seen".
+    expect(
+      declared.size,
+      "no knob declarations found — the completeness verdict is over an empty scan",
+    ).toBeGreaterThan(400)
     expect(orphans.size).toBeLessThanOrEqual(ORPHAN_CEILING)
   }, 15_000)
 

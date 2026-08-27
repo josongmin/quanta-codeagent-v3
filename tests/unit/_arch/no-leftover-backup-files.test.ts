@@ -59,11 +59,22 @@ function listTrackedFiles(): string[] {
       `git ls-files failed (exit ${out.exitCode}): ${new TextDecoder().decode(out.stderr)}`,
     )
   }
-  return new TextDecoder()
+  const files = new TextDecoder()
     .decode(out.stdout)
     .split("\n")
     .map((l) => l.trim())
     .filter((l) => l.length > 0)
+  // Anti-vacuity: `git ls-files` exits 0 with no output when nothing matches, so
+  // the exit check above is not a floor. The verdict is "no backup artifacts",
+  // which an empty listing satisfies for free — proven, 2/0 against an empty
+  // mirror of the repo tree.
+  if (files.length < 3000) {
+    throw new Error(
+      `git ls-files returned ${files.length} tracked path(s) under ${SCOPED_PREFIXES.join(", ")} ` +
+        `— far below the real tree; the backup-artifact verdict would pass over nothing.`,
+    )
+  }
+  return files
 }
 
 function isBackupArtifact(path: string): boolean {

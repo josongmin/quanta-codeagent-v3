@@ -110,11 +110,22 @@ function listTrackedTestFiles(): string[] {
       `git ls-files failed (exit ${out.exitCode}): ${new TextDecoder().decode(out.stderr)}`,
     )
   }
-  return new TextDecoder()
+  const files = new TextDecoder()
     .decode(out.stdout)
     .split("\n")
     .map((l) => l.trim())
     .filter((l) => l.endsWith(".ts"))
+  // Anti-vacuity: `git ls-files` exits 0 with no output on no match, so the exit
+  // check is not a floor. The five matcher controls below prove the DETECTOR
+  // works while the corpus is empty — which is exactly how this file passed 6/0
+  // against an empty mirror of the repo tree.
+  if (files.length < 2000) {
+    throw new Error(
+      `git ls-files returned ${files.length} tracked test file(s) — far below the real tree; ` +
+        `the literal ban would pass over nothing.`,
+    )
+  }
+  return files
 }
 
 describe("arch: capability-manifest literals go through the SSOT fixture", () => {
