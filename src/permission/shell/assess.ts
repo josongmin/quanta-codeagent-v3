@@ -225,13 +225,45 @@ const GIT_DESTRUCTIVE: ReadonlyArray<{
   },
 ]
 
+/** git GLOBAL options that consume a SEPARATED value (`git -C <dir> push`).
+ *  `operandsOf` drops only the flag word, so the value landed in the operand
+ *  list and displaced the subcommand: `git -C /repo push origin +main` read as
+ *  subcommand `/repo`, which matches no `GIT_DESTRUCTIVE` rule. The `--flag=v`
+ *  spelling carries its value inline and needs no entry here. */
+const GIT_GLOBAL_VALUE_FLAGS: ReadonlySet<string> = new Set([
+  "-C",
+  "-c",
+  "--git-dir",
+  "--work-tree",
+  "--exec-path",
+  "--namespace",
+  "--super-prefix",
+  "--config-env",
+])
+
+/** Operands of a git invocation with the global-option values consumed, so
+ *  `[0]` is the SUBCOMMAND rather than whatever a global option carried. */
+const gitOperands = (args: readonly ShellWord[]): string[] => {
+  const out: string[] = []
+  for (let i = 0; i < args.length; i += 1) {
+    const a = args[i]
+    if (a === undefined) continue
+    if (a.text.startsWith("-")) {
+      if (GIT_GLOBAL_VALUE_FLAGS.has(a.text)) i += 1
+      continue
+    }
+    out.push(a.text)
+  }
+  return out
+}
+
 const assessGit = (cmd: ShellCommandIr, _ctx: Ctx): ShellAssessment => {
   const args = cmd.args
   if (args.some((a) => !a.resolved)) {
     return unknown("git: an argument is not statically resolvable")
   }
   const flags = flagsOf(args)
-  const operands = operandsOf(args).map((o) => o.text)
+  const operands = gitOperands(args)
   const sub = operands[0]
   if (sub === undefined) return safe()
   const rest = operands.slice(1)
@@ -293,12 +325,24 @@ const assessSimple = (cmd: ShellCommandIr): ShellAssessment | null => {
   if (head === undefined) return null
   const flags = flagsOf(cmd.args)
   const operands = operandsOf(cmd.args)
-  if (operands.some((o) => !o.resolved)) return null
-  const texts = operands.map((o) => o.text)
+  // Match on what we CAN read. A rule that fires on the readable subset is a
+  // real hit — this seam only ever widens denial, so a partial read may deny
+  // but may never absolve.
+  const texts = operands.filter((o) => o.resolved).map((o) => o.text)
   for (const rule of SIMPLE_DENIALS) {
     if (rule.heads.has(head) && rule.matches(flags, texts)) {
       return deny(rule.rule, `${head}: ${rule.what}`)
     }
+  }
+  // B-14 — an operand we could not read, on a head this table GATES, is
+  // `unknown`, never `safe`. Returning `null` here reached `assessByHead`'s
+  // `?? safe()`, which is a POSITIVE safety assertion about a command whose
+  // target was never read (`chmod -R 777 $ROOT`, `dd if=/dev/zero of=$OUT`).
+  // Every sibling assessor (delete/find/git/interpreter) already answers
+  // `unknown` in this position. Scoped to gated heads so an ordinary `$VAR`
+  // on an ungated head stays `safe`.
+  if (operands.some((o) => !o.resolved) && SIMPLE_DENIALS.some((r) => r.heads.has(head))) {
+    return unknown(`${head}: an operand is not statically resolvable`)
   }
   return null
 }
@@ -329,7 +373,12 @@ const stdinOperandVerdict = (
 /** `sh -c '<script>'` — the payload IS shell, so re-parse it rather than
  *  treating the whole script as one opaque word. */
 const shellPayloadVerdict = (name: string, cmd: ShellCommandIr, ctx: Ctx): ShellAssessment => {
-  const idx = cmd.args.findIndex((a) => a.resolved && a.text === "-c")
+  // B-12 — `-lc` / `-ec` / `-lic` are ONE POSIX cluster carrying `-c`. Matching
+  // the exact text let a login/errexit shell smuggle its whole script past this
+  // re-parse (`bash -lc 'cd / && rm -rf *'` measured `safe-known` while the
+  // `sh -c` twin was `hard-deny`). `flagsOf` already expands clusters two
+  // functions up; this lookup is the one place that did not.
+  const idx = cmd.args.findIndex((a) => a.resolved && expandFlagCluster(a.text).includes("-c"))
   if (idx === -1) return safe()
   const payload = cmd.args[idx + 1]
   if (payload === undefined || !payload.resolved) {

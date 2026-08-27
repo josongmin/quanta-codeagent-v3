@@ -347,3 +347,97 @@ describe("B-11 grammar drift guard", () => {
     expect(unaccounted).toEqual([])
   })
 })
+
+/**
+ * B-12..B-14 — bypasses found by the aug-26 adversarial audit. Each was
+ * MEASURED against the shipping authority (grammar initialized) and each
+ * returned `safe-known` while its one-token-different sibling was `hard-deny`.
+ * The asymmetry IS the bug: the authority already knows the effect, it just
+ * fails to see the command.
+ */
+describe("B-12 clustered interpreter flags do not hide the `-c` payload", () => {
+  // `-lc` / `-ec` are ONE POSIX cluster. `flagsOf` expands clusters everywhere
+  // else in the authority; the `-c` payload lookup matched the exact text, so a
+  // login/errexit shell smuggled its whole script past the re-parse.
+  const CLUSTERED = [
+    "bash -lc 'cd / && rm -rf *'",
+    "sh -ec 'cd / && rm -rf *'",
+    "bash -lic 'cd / && rm -rf *'",
+  ] as const
+  for (const cmd of CLUSTERED) {
+    test(`${cmd} is not assessed safe`, () => {
+      expect({ cmd, kind: assessShellCommand(cmd).kind }).not.toEqual({ cmd, kind: "safe-known" })
+    })
+  }
+
+  test("the clustered form reaches the SAME named denial as the plain form", () => {
+    const plain = assessShellCommand("sh -c 'cd / && rm -rf *'")
+    const clustered = assessShellCommand("bash -lc 'cd / && rm -rf *'")
+    expect(plain.kind).toBe("hard-deny")
+    expect(clustered.kind).toBe(plain.kind)
+    expect(
+      clustered.kind === "hard-deny" && plain.kind === "hard-deny" ? clustered.rule : null,
+    ).toBe(plain.kind === "hard-deny" ? plain.rule : null)
+  })
+
+  test("PAIRED CONTROL — a clustered shell running something harmless stays safe", () => {
+    expect(assessShellCommand("bash -lc 'echo hello'").kind).toBe("safe-known")
+  })
+})
+
+describe("B-13 a git global option does not displace the subcommand", () => {
+  // `operandsOf` drops tokens starting with `-`, so the VALUE of a separated
+  // global option (`-C <dir>`, `-c <k=v>`) became `operands[0]` and the real
+  // subcommand moved to `rest`. No GIT_DESTRUCTIVE rule could match.
+  const SHIFTED = [
+    "git -C /repo push origin +main",
+    "git -c protocol.version=2 push origin +main",
+    "git --git-dir /repo/.git push origin +main",
+    "git --work-tree /repo push origin +main",
+  ] as const
+  for (const cmd of SHIFTED) {
+    test(`${cmd} is not assessed safe`, () => {
+      expect({ cmd, kind: assessShellCommand(cmd).kind }).not.toEqual({ cmd, kind: "safe-known" })
+    })
+  }
+
+  test("the shifted form reaches the SAME named denial as the plain form", () => {
+    const plain = assessShellCommand("git push origin +main")
+    const shifted = assessShellCommand("git -C /repo push origin +main")
+    expect(plain.kind).toBe("hard-deny")
+    expect(shifted.kind).toBe("hard-deny")
+    expect(shifted.kind === "hard-deny" ? shifted.rule : null).toBe(
+      plain.kind === "hard-deny" ? plain.rule : null,
+    )
+  })
+
+  test("PAIRED CONTROL — a global option in front of a harmless subcommand stays safe", () => {
+    expect(assessShellCommand("git -C /repo status").kind).toBe("safe-known")
+    expect(assessShellCommand("git -c user.name=x log -1").kind).toBe("safe-known")
+  })
+})
+
+describe("B-14 an unreadable operand on a GATED head is `unknown`, never safe", () => {
+  // B-5 already holds for delete/find/git/interpreter heads. The SIMPLE_DENIALS
+  // table (mkfs / chmod -R / dd / shred …) returned `null`, which `assessByHead`
+  // turns into `safe()` — a POSITIVE safety assertion about a command whose
+  // target could not be read.
+  const UNREADABLE_ON_GATED_HEAD = [
+    "chmod -R 777 $ROOT",
+    "chown -R root $ROOT",
+    "dd if=/dev/zero of=$OUT",
+    "mkfs.ext4 $DEV",
+  ] as const
+  for (const cmd of UNREADABLE_ON_GATED_HEAD) {
+    test(`${cmd} is not assessed safe`, () => {
+      expect({ cmd, kind: assessShellCommand(cmd).kind }).not.toEqual({ cmd, kind: "safe-known" })
+    })
+  }
+
+  test("PAIRED CONTROL — an unreadable operand on an UNGATED head stays safe", () => {
+    // The escalation is scoped to heads the denial table actually gates; it must
+    // not turn every `$VAR` in the corpus into an approval prompt.
+    expect(assessShellCommand("echo $MSG").kind).toBe("safe-known")
+    expect(assessShellCommand("cat $FILE").kind).toBe("safe-known")
+  })
+})
