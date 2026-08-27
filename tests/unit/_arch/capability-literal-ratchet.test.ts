@@ -129,6 +129,16 @@ function listTrackedTestFiles(): string[] {
 }
 
 describe("arch: capability-manifest literals go through the SSOT fixture", () => {
+  // BUDGET, not decoration. Measured on a full `bun test tests/unit tests/meta
+  // tests/adversarial` run (39,118 arms, 3,034 files): this arm took 15,645ms
+  // against bun's 5,000ms default and FAILED — reporting a guard violation
+  // when the truth was that a repo-wide scan did not finish in time. Exactly
+  // four arms in the whole suite exceed 2,500ms, and all four are repo-wide
+  // source scans; unloaded this one passes in well under a second. A false
+  // accusation is worse than a slow test: it trains the reader to discount the
+  // gate, and it cost a real misattribution on 2026-08-28 before the four were
+  // re-run serially and all passed. A genuine hang is still bounded by the
+  // outer `timeout` on the suite command.
   test("no test file inlines a full CapabilityManifest literal (use capabilitiesFor)", () => {
     const offenders = listTrackedTestFiles()
       .filter((p) => !EXEMPT_PATHS.has(p))
@@ -142,7 +152,7 @@ describe("arch: capability-manifest literals go through the SSOT fixture", () =>
             `(exempt: host-capability-derivation witness):\n  ${offenders.join("\n  ")}`
         : "",
     ).toEqual([])
-  })
+  }, 60_000)
 
   // ── red-on-injection: the detector must FIRE on a raw literal and stay
   // SILENT on a `capabilitiesFor(...)` call and on mere property access. ──

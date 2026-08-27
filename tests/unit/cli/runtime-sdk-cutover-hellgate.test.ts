@@ -54,6 +54,16 @@ const importedModules = (file: string, source: string): readonly string[] => {
 }
 
 describe("CLI runtime SDK cutover source gates", () => {
+  // BUDGET, not decoration. Measured on a full `bun test tests/unit tests/meta
+  // tests/adversarial` run (39,118 arms, 3,034 files): this arm took 7,722ms
+  // against bun's 5,000ms default and FAILED — reporting a guard violation
+  // when the truth was that a repo-wide scan did not finish in time. Exactly
+  // four arms in the whole suite exceed 2,500ms, and all four are repo-wide
+  // source scans; unloaded this one passes in well under a second. A false
+  // accusation is worse than a slow test: it trains the reader to discount the
+  // gate, and it cost a real misattribution on 2026-08-28 before the four were
+  // re-run serially and all passed. A genuine hang is still bounded by the
+  // outer `timeout` on the suite command.
   test("app surfaces no longer import raw compat owners or runner side ports directly", () => {
     const offenders: Array<{ path: string; needle: string }> = []
     const files = walkTs(APPS_ROOT)
@@ -67,7 +77,7 @@ describe("CLI runtime SDK cutover source gates", () => {
       }
     }
     expect(offenders).toEqual([])
-  })
+  }, 60_000)
 
   test("import scanner rejects static and dynamic forbidden-import injections", () => {
     for (const forbidden of FORBIDDEN_IMPORTS) {

@@ -586,6 +586,16 @@ export const registerSliceBoundarySuite = (config: SliceBoundaryConfig): void =>
       }
     })
 
+    // BUDGET, not decoration. Measured on a full `bun test tests/unit tests/meta
+    // tests/adversarial` run (39,118 arms, 3,034 files): this arm took 5,547ms
+    // against bun's 5,000ms default and FAILED — reporting a guard violation
+    // when the truth was that a repo-wide scan did not finish in time. Exactly
+    // four arms in the whole suite exceed 2,500ms, and all four are repo-wide
+    // source scans; unloaded this one passes in well under a second. A false
+    // accusation is worse than a slow test: it trains the reader to discount the
+    // gate, and it cost a real misattribution on 2026-08-28 before the four were
+    // re-run serially and all passed. A genuine hang is still bounded by the
+    // outer `timeout` on the suite command.
     test("no `node:process` named imports", () => {
       const violations: string[] = []
       for (const f of files) {
@@ -598,7 +608,7 @@ export const registerSliceBoundarySuite = (config: SliceBoundaryConfig): void =>
           `@/${config.slice} must not use named imports from "node:process":\n\n${violations.join("\n")}`,
         )
       }
-    })
+    }, 60_000)
 
     if (config.requireSliceBarrel) {
       test(`slice barrel exists (src/${config.slice}/index.ts)`, () => {
