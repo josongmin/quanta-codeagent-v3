@@ -17,6 +17,18 @@ import { readdirSync, readFileSync, statSync } from "node:fs"
 import { join } from "node:path"
 import { stripComments } from "./_shared/strip-comments"
 
+/**
+ * Anchored on THIS file. The roots were bare `"src"` / `"tests"` / `"tools"`,
+ * resolved against the ambient cwd — found by the paired control in
+ * `tools/dev/cwd-parity-check.ts`: 3 pass at the repo root, 1 pass / 2 fail from
+ * a foreign working directory.
+ *
+ * The walk goes over ABSOLUTE paths and stores REPO-RELATIVE ones, because
+ * `isTestAdjacent` and the two `toContain` assertions below are written against
+ * repo-relative paths and would silently stop matching if the list turned
+ * absolute — trading a cwd bug for a quieter one.
+ */
+const REPO_ROOT = join(import.meta.dir, "..", "..")
 const ROOTS = ["src", "tests", "tools"] as const
 
 /** This file carries the pattern in string literals, on purpose, to prove the
@@ -29,10 +41,10 @@ const isTestAdjacent = (full: string): boolean =>
   full.startsWith("tests/") || full.endsWith(".test.ts") || full.includes("/__tests__/")
 
 const testFiles = (dir: string, into: string[] = []): string[] => {
-  for (const entry of readdirSync(dir)) {
+  for (const entry of readdirSync(join(REPO_ROOT, dir))) {
     if (entry === "node_modules" || entry.startsWith(".")) continue
     const full = join(dir, entry)
-    if (statSync(full).isDirectory()) testFiles(full, into)
+    if (statSync(join(REPO_ROOT, full)).isDirectory()) testFiles(full, into)
     // NOT just `*.test.ts`: the helper modules beside the tests are where the
     // temp dirs are actually created — `_bootstrap-exec-harness.ts` owns every
     // sandbox in the promax suite — and an exit hook planted there leaked 34
@@ -71,7 +83,7 @@ describe("temp-dir cleanup is registered with the test runner", () => {
   test('no test file relies on `process.on("exit")`, which bun test never fires', () => {
     const offenders = ROOTS.flatMap((root) => testFiles(root))
       .filter((f) => f !== SELF)
-      .filter((f) => EXIT_HOOK.test(stripComments(readFileSync(f, "utf8"))))
+      .filter((f) => EXIT_HOOK.test(stripComments(readFileSync(join(REPO_ROOT, f), "utf8"))))
     expect(
       offenders,
       "these files register cleanup bun test will never run — use `afterAll` instead",
