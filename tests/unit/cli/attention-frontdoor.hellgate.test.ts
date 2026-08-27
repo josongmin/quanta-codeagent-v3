@@ -263,3 +263,147 @@ describe("RFC-01 A4 — focus-next-attention KEY_ACTION", () => {
     expect(await run(true)).toBe("q")
   })
 })
+
+/**
+ * 5. SSOT PROJECTOR — the front-door receipt above hands `ctx.attention` to the
+ *    command DIRECTLY, which is exactly why the live REPL path could be broken
+ *    while this file stayed green: `dispatchReplSlash` and `buildLiveSlashContext`
+ *    both funnel through `projectSlashCtx`, and that projector enumerated its
+ *    keys by hand and never listed `attention`. Measured before the fix: the
+ *    builder assigned the slot, the projector dropped it, so `/attention`
+ *    printed "not wired in this surface" for list/next/answer in every session
+ *    — while the bound `focus-next-attention` chord worked, because it reads
+ *    `slashCtx.attention` without going through the projector.
+ *
+ *    The sibling slot landed in the same commit (`skillActions`) carries the
+ *    projector line and a comment naming this trap. This pins the pair.
+ */
+describe("A4-5 the SSOT projector carries the /attention wire", () => {
+  test("a present attention slot survives projectSlashCtx", async () => {
+    const { projectSlashCtx } = await import("@/apps/cli/repl/slash-surface")
+    const sentinel = { list: () => [], next: () => undefined, answer: () => undefined }
+    const projected = projectSlashCtx({ attention: sentinel } as never)
+    expect(Object.hasOwn(projected, "attention")).toBe(true)
+    expect(projected.attention).toBe(sentinel)
+  })
+
+  test("PAIRED CONTROL — an absent attention slot stays omitted (OFF byte-identity)", async () => {
+    const { projectSlashCtx } = await import("@/apps/cli/repl/slash-surface")
+    expect(Object.hasOwn(projectSlashCtx({} as never), "attention")).toBe(false)
+    expect(Object.hasOwn(projectSlashCtx(undefined), "attention")).toBe(false)
+  })
+
+  test("the projector carries the sibling slot the same commit wired, so the pair cannot drift", async () => {
+    const { projectSlashCtx } = await import("@/apps/cli/repl/slash-surface")
+    const both = projectSlashCtx({ attention: {}, skillActions: {} } as never)
+    expect([Object.hasOwn(both, "attention"), Object.hasOwn(both, "skillActions")]).toEqual([
+      true,
+      true,
+    ])
+  })
+})
+
+/**
+ * 6. EXHAUSTIVE PROJECTION — the class fix, not just the `attention` instance.
+ *
+ * `projectLegacySlots` / `projectAdr0291Slots` enumerated their keys BY HAND,
+ * so a slot could be declared on `ReplSlashCtx`, assigned by the builder, and
+ * silently dropped by the projector — with nothing failing. That is how
+ * `/attention` shipped "not wired" in every session.
+ *
+ * This pins the invariant behaviourally: every key a caller can put on the ctx
+ * survives the projection. The production construction is
+ * `Record<keyof ReplSlashCtx, SlotProjector>`, which additionally makes an
+ * omission a COMPILE error naming the missing key — but a compile guard cannot
+ * catch a projector wired to the WRONG key, and this can.
+ *
+ * `cwd` is the one deliberate exclusion: `dispatchReplSlash` reads it directly
+ * (`slashCtx?.cwd ?? process.cwd()`) and passes it as its own argument, so it is
+ * not part of the contract-shape projection.
+ */
+describe("A4-6 every declared ctx slot survives projectSlashCtx", () => {
+  const NOT_PROJECTED = new Set(["cwd"])
+
+  test("a fully-populated ctx loses no slot", async () => {
+    const { projectSlashCtx } = await import("@/apps/cli/repl/slash-surface")
+    // `side` is a FACTORY on the ctx and a VALUE in the contract shape, so it is
+    // the one slot whose projected value legitimately differs from its input.
+    const sentinel = (k: string) => ({ __slot: k })
+    const keys = [
+      "skills",
+      "reloadSkills",
+      "idle",
+      "repoRules",
+      "imageQueue",
+      "rewindSession",
+      "mcp",
+      "cost",
+      "planSnapshot",
+      "history",
+      "branchSearch",
+      "side",
+      "debug",
+      "why",
+      "inspect",
+      "replay",
+      "effort",
+      "brief",
+      "contextUsage",
+      "agents",
+      "attention",
+      "skillActions",
+      "activityStore",
+      "itemStreamSink",
+      "radar",
+      "radarPruneOlderThanMs",
+      "planEdit",
+      "composerEdit",
+      "forkSession",
+      "perToolCheckpoint",
+      "profile",
+      "identity",
+      "stickyModel",
+      "focusChain",
+      "textInbox",
+      "hunkUndo",
+      "activityItems",
+      "projectsKb",
+      "mcpResources",
+      "browserNet",
+      "automation",
+    ] as const
+    const ctx: Record<string, unknown> = {}
+    for (const k of keys) ctx[k] = k === "side" ? () => sentinel(k) : sentinel(k)
+    const projected = projectSlashCtx(ctx as never)
+    const dropped = keys.filter((k) => !Object.hasOwn(projected, k))
+    expect(dropped).toEqual([])
+  })
+
+  test("ANTI-VACUITY — the key list is the real one, so the test cannot pass by listing nothing", async () => {
+    const { readFileSync } = await import("node:fs")
+    const { join } = await import("node:path")
+    // ANCHORED ON THIS FILE, never on the ambient cwd: a repo path built from
+    // `process.cwd()` resolves to nothing when the suite runs from a foreign
+    // working directory, and an empty read is indistinguishable from a clean
+    // one — which would make this anti-vacuity arm itself vacuous.
+    const REPO_ROOT = join(import.meta.dir, "..", "..", "..")
+    const src = readFileSync(join(REPO_ROOT, "src/apps/cli/repl/slash-surface.ts"), "utf8")
+    const block = src.slice(
+      src.indexOf("export type ReplSlashCtx = Partial<{"),
+      src.indexOf("export interface BuildReplSlashCtxArgs"),
+    )
+    const declared = [...block.matchAll(/^ {2}([a-zA-Z][A-Za-z0-9_]*)\??:/gm)].map((m) => m[1])
+    expect(declared.length).toBeGreaterThan(30)
+    const { projectSlashCtx } = await import("@/apps/cli/repl/slash-surface")
+    const ctx: Record<string, unknown> = {}
+    for (const k of declared) {
+      if (k === undefined || NOT_PROJECTED.has(k)) continue
+      ctx[k] = k === "side" ? () => ({ v: k }) : { v: k }
+    }
+    const projected = projectSlashCtx(ctx as never)
+    const missing = declared.filter(
+      (k) => k !== undefined && !NOT_PROJECTED.has(k) && !Object.hasOwn(projected, k),
+    )
+    expect(missing).toEqual([])
+  })
+})

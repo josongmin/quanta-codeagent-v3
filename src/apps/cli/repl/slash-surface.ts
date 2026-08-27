@@ -760,55 +760,74 @@ export const buildReplSlashCtx = (args: BuildReplSlashCtxArgs): ReplSlashCtx => 
 
 /** Project the pre-ADR-0291 slots. Extracted so each function stays under
  *  biome's cognitive-complexity ceiling. */
-const projectLegacySlots = (s: ReplSlashCtx): Record<string, unknown> => ({
-  ...opt("skills", s.skills),
-  ...opt("reloadSkills", s.reloadSkills),
-  ...opt("idle", s.idle),
-  ...opt("repoRules", s.repoRules),
-  // #18 — expose the image queue on the contract ctx so `/paste` can enqueue a
-  // clipboard image (the SAME instance `/image` mutates). Absent ⇒ slot omitted
-  // ⇒ `/paste` degrades to the "save to disk + /image add" hint (byte-identical).
-  ...opt("imageQueue", s.imageQueue),
-  ...opt("rewindSession", s.rewindSession),
-  ...opt("mcp", s.mcp),
-  ...opt("cost", s.cost),
-  ...opt("planSnapshot", s.planSnapshot),
-  ...opt("history", s.history),
-  ...opt("branchSearch", s.branchSearch),
-  ...(s.side !== undefined ? { side: s.side() } : {}),
-  ...opt("debug", s.debug),
-  ...opt("why", s.why),
-  ...opt("inspect", s.inspect),
-  ...opt("replay", s.replay),
-  ...opt("effort", s.effort),
-  ...opt("brief", s.brief),
-  ...opt("contextUsage", s.contextUsage),
-  ...opt("agents", s.agents),
-  // RFC-06 F5 — `/skill` copy/reveal/enable/disable wire (SSOT projector so the
-  // live REPL path carries it, not just the builder). Absent ⇒ "not wired".
-  ...opt("skillActions", s.skillActions),
-  ...opt("activityStore", s.activityStore),
-  ...opt("itemStreamSink", s.itemStreamSink),
-  // jul-03 CLI-surfacing — one presence-gated helper (shared with the builder).
-  ...spreadSurfacedSlots(s),
-  ...opt("radar", s.radar),
-  ...opt("radarPruneOlderThanMs", s.radarPruneOlderThanMs),
-})
+/** One slot's contribution to the contract shape. Absent ⇒ `{}` ⇒ the key is
+ *  omitted, which is what every "not wired in this surface" message reads. */
+type SlotProjector = (s: ReplSlashCtx) => Record<string, unknown>
 
-/** Project the ADR-0291 slots. 1:1 spread; presence-gated for
- *  exactOptionalPropertyTypes. */
-const projectAdr0291Slots = (s: ReplSlashCtx): Record<string, unknown> => ({
-  ...opt("planEdit", s.planEdit),
-  ...opt("composerEdit", s.composerEdit),
-  ...opt("forkSession", s.forkSession),
-  ...opt("perToolCheckpoint", s.perToolCheckpoint),
-  ...opt("profile", s.profile),
-  ...opt("identity", s.identity),
-  ...opt("stickyModel", s.stickyModel),
-  ...opt("focusChain", s.focusChain),
-  ...opt("textInbox", s.textInbox),
-  ...opt("hunkUndo", s.hunkUndo),
-})
+/**
+ * EXHAUSTIVE BY CONSTRUCTION. Typed `Record<keyof ReplSlashCtx, …>`, so a slot
+ * declared on the ctx and left out of this table is a COMPILE error that NAMES
+ * the missing key (`Property 'attention' is missing in type …`).
+ *
+ * This replaces a hand-enumerated spread. Under that shape a slot could be
+ * declared on the ctx, assigned by the builder, and silently dropped here with
+ * nothing failing — which is exactly how `/attention` shipped printing "not
+ * wired" in every session while the `focus-next-attention` chord, which reads
+ * `slashCtx.attention` without going through this projection, worked fine.
+ *
+ * `cwd` is the ONE deliberate non-projection: `dispatchReplSlash` reads it
+ * directly (`slashCtx?.cwd ?? process.cwd()`) and passes it as its own
+ * argument, so it is not part of the contract shape. It still needs an entry
+ * here — the table is total, and "excluded" has to be stated, not omitted.
+ */
+const SLOT_PROJECTORS: Readonly<Record<keyof ReplSlashCtx, SlotProjector>> = {
+  // Not a contract-shape slot — see the note above.
+  cwd: () => ({}),
+  // `/side` is a FACTORY on the ctx and a VALUE in the contract shape: it is
+  // built fresh per invocation so the starter sees the live transcript rather
+  // than a snapshot captured when the REPL started.
+  side: (s) => (s.side !== undefined ? { side: s.side() } : {}),
+  skills: (s) => opt("skills", s.skills),
+  reloadSkills: (s) => opt("reloadSkills", s.reloadSkills),
+  idle: (s) => opt("idle", s.idle),
+  repoRules: (s) => opt("repoRules", s.repoRules),
+  imageQueue: (s) => opt("imageQueue", s.imageQueue),
+  rewindSession: (s) => opt("rewindSession", s.rewindSession),
+  mcp: (s) => opt("mcp", s.mcp),
+  cost: (s) => opt("cost", s.cost),
+  planSnapshot: (s) => opt("planSnapshot", s.planSnapshot),
+  history: (s) => opt("history", s.history),
+  branchSearch: (s) => opt("branchSearch", s.branchSearch),
+  debug: (s) => opt("debug", s.debug),
+  why: (s) => opt("why", s.why),
+  inspect: (s) => opt("inspect", s.inspect),
+  replay: (s) => opt("replay", s.replay),
+  effort: (s) => opt("effort", s.effort),
+  brief: (s) => opt("brief", s.brief),
+  contextUsage: (s) => opt("contextUsage", s.contextUsage),
+  agents: (s) => opt("agents", s.agents),
+  attention: (s) => opt("attention", s.attention),
+  skillActions: (s) => opt("skillActions", s.skillActions),
+  activityStore: (s) => opt("activityStore", s.activityStore),
+  itemStreamSink: (s) => opt("itemStreamSink", s.itemStreamSink),
+  radar: (s) => opt("radar", s.radar),
+  radarPruneOlderThanMs: (s) => opt("radarPruneOlderThanMs", s.radarPruneOlderThanMs),
+  activityItems: (s) => opt("activityItems", s.activityItems),
+  projectsKb: (s) => opt("projectsKb", s.projectsKb),
+  mcpResources: (s) => opt("mcpResources", s.mcpResources),
+  browserNet: (s) => opt("browserNet", s.browserNet),
+  automation: (s) => opt("automation", s.automation),
+  planEdit: (s) => opt("planEdit", s.planEdit),
+  composerEdit: (s) => opt("composerEdit", s.composerEdit),
+  forkSession: (s) => opt("forkSession", s.forkSession),
+  perToolCheckpoint: (s) => opt("perToolCheckpoint", s.perToolCheckpoint),
+  profile: (s) => opt("profile", s.profile),
+  identity: (s) => opt("identity", s.identity),
+  stickyModel: (s) => opt("stickyModel", s.stickyModel),
+  focusChain: (s) => opt("focusChain", s.focusChain),
+  textInbox: (s) => opt("textInbox", s.textInbox),
+  hunkUndo: (s) => opt("hunkUndo", s.hunkUndo),
+}
 
 /** Map the surface-owned {@link ReplSlashCtx} into the contract shape that
  *  {@link runSlashCommand} expects. Extracted from {@link dispatchReplSlash}
@@ -823,7 +842,9 @@ const projectAdr0291Slots = (s: ReplSlashCtx): Record<string, unknown> => ({
  *  between the two files. */
 export const projectSlashCtx = (slashCtx: ReplSlashCtx | undefined): Record<string, unknown> => {
   if (slashCtx === undefined) return {}
-  return { ...projectLegacySlots(slashCtx), ...projectAdr0291Slots(slashCtx) }
+  const out: Record<string, unknown> = {}
+  for (const project of Object.values(SLOT_PROJECTORS)) Object.assign(out, project(slashCtx))
+  return out
 }
 
 /** Try to handle `input` as an in-REPL slash command. Returns true iff the
