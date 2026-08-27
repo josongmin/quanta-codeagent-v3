@@ -19,6 +19,7 @@
  */
 import { readFile, writeFile } from "node:fs/promises"
 import type { AuditReport } from "./audit"
+import { BASELINE_PATH } from "./paths"
 
 export interface FcBaseline {
   /** Max empty stubs allowed. Grows only by explicit --update-baseline. */
@@ -137,14 +138,18 @@ const DEFAULT_BASELINE: FcBaseline = {
 
 /** Read `baseline.json` and pull the `fc` sub-object. Missing file or missing
  *  sub-object → DEFAULT_BASELINE (zero cap — strict). */
-export async function loadFcBaseline(
-  path = "tools/feature-catalog/baseline.json",
-): Promise<FcBaseline> {
+export async function loadFcBaseline(path: string = BASELINE_PATH): Promise<FcBaseline> {
   let text: string
   try {
     text = await readFile(path, "utf8")
   } catch (err) {
     const code = (err as NodeJS.ErrnoException).code
+    // ENOENT → the EMPTY baseline, which forgives nothing. That is the correct
+    // direction (a missing ledger must not grandfather anything), and it is why
+    // the cwd-relative default was so quiet: from a foreign working directory the
+    // read failed, the ledger read as empty, and `lint` reported all 19
+    // grandfathered orphans as NEW errors — the same command disagreeing with
+    // itself over the same tree. Anchored on the module.
     if (code === "ENOENT") return DEFAULT_BASELINE
     throw err
   }
@@ -171,7 +176,10 @@ export async function loadFcBaseline(
  *  Atomic: read-modify-write the whole file. */
 export async function saveFcBaseline(
   fc: FcBaseline,
-  path = "tools/feature-catalog/baseline.json",
+  // Anchored for the same reason as the loader, and it matters more here: a
+  // cwd-relative default WRITES the ledger into whatever tree the caller happens
+  // to be standing in.
+  path: string = BASELINE_PATH,
 ): Promise<void> {
   let raw: BaselineFileShape = {}
   try {

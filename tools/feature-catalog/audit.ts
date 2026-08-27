@@ -71,7 +71,12 @@ export function runAudit(input: AuditInputs): AuditReport {
   const referencedSrc = collectReferencedSrc(input.features)
 
   const orphanAdrs = input.adrs
-    .filter((a) => a.status === "Accepted" && !isReferencedAdr(a, input.adrs, referencedAdrs))
+    // Case-insensitive: `accepted` appears 29 times against `Accepted` 461, and a
+    // case-sensitive compare silently excluded all 29 from the orphan check.
+    .filter(
+      (a) =>
+        a.status.toLowerCase() === "accepted" && !isReferencedAdr(a, input.adrs, referencedAdrs),
+    )
     .slice()
     .sort((a, b) => a.number - b.number || (a.path ?? "").localeCompare(b.path ?? ""))
 
@@ -172,10 +177,38 @@ function parseAdrReference(ref: string | number): number | null {
  *  block. Looks for the first `- **Status**: X` or `- **상태**: X` line.
  *  Returns the first non-whitespace token after the colon, or `""` if absent.
  *  Pure — caller provides the file contents. */
+/**
+ * The ADR's status word, across every spelling this repo actually uses.
+ *
+ * The original pattern accepted only `- **Status**:` / `- **상태**:`. Measured
+ * against the real tree: **258 of 573 ADRs matched nothing**, because three more
+ * spellings are in live use —
+ *
+ *   `- Status: Accepted`        (0227-spinner-stall-detection.md)
+ *   `**Status:** Accepted`      (0411-bash-output-cap-delegation.md)
+ *   `Status: Accepted`          (0551-cassette-is-a-secrets-bearing-artifact.md)
+ *
+ * An unparsed status returned `""`, which compares as "not Accepted", so 45% of
+ * the corpus could never be flagged as an orphan Accepted ADR no matter what it
+ * said. The guard was reading fewer than half the files it reported on.
+ *
+ * The 30-line window is also gone: it was not the cause (zero of the 258 had a
+ * status further down) and it is a second silent truncation waiting to matter.
+ */
 export function parseAdrStatus(markdown: string): string {
-  for (const line of markdown.split("\n").slice(0, 30)) {
-    const m = /^- \*\*(?:Status|상태)\*\*:\s*(\S+)/.exec(line)
-    if (m) return m[1] ?? ""
+  const lines = markdown.split("\n")
+  for (const [i, line] of lines.entries()) {
+    const inline = /^\s*(?:[-*]\s*)?\*{0,2}(?:Status|상태)\*{0,2}\s*:\*{0,2}\s*(\S+)/i.exec(line)
+    if (inline) return (inline[1] ?? "").replace(/[*_`]/g, "").replace(/[.,;:]+$/, "")
+    // `## Status` on its own line, value on the next non-empty one — 37 ADRs use
+    // this heading form and matched none of the inline spellings.
+    if (/^#{1,6}\s*(?:Status|상태)\s*$/i.test(line)) {
+      for (const next of lines.slice(i + 1, i + 4)) {
+        const v = next.trim().replace(/^[-*]\s*/, "")
+        if (v.length > 0)
+          return (v.split(/[\s(]/)[0] ?? "").replace(/[*_`]/g, "").replace(/[.,;:]+$/, "")
+      }
+    }
   }
   return ""
 }

@@ -33,6 +33,26 @@
     "empty_stubs_max": 0,
     "updated_at": "2026-08-27T00:00:00.000Z",
     "l3_reachability_grandfathered": [],
-    "orphan_adr_paths_grandfathered": []
+    "orphan_adr_paths_grandfathered": [
+      "docs/decisions/0166-burnrate-alerts.md",
+      "docs/decisions/0172-coverage-c8-swap.md",
+      "docs/decisions/0172-foundry-phase-2.md",
+      "docs/decisions/0173-secret-detection-secretlint-swap.md",
+      "docs/decisions/0190-test-harness-consolidation.md",
+      "docs/decisions/0193-plane-clean-enforcement.md",
+      "docs/decisions/0195-dead-sibling-cleanup.md",
+      "docs/decisions/0200-stream-idle-timeout.md",
+      "docs/decisions/0244-side-chat-session-isolation.md",
+      "docs/decisions/0300-per-tool-granular-registry.md",
+      "docs/decisions/0338-llm-surface-transport-and-openai-checkpoint-seams.md",
+      "docs/decisions/0344-context-grounding-benchmark-and-gate.md",
+      "docs/decisions/0347-composition-registry-wire.md",
+      "docs/decisions/0366-codex-r2-metrics-relocation-and-histogram-retry.md",
+      "docs/decisions/0371-agent-dispatch-staleness-pattern.md",
+      "docs/decisions/0390-auto-sweep-wal-knob-wire.md",
+      "docs/decisions/0413-file-mention-kind-sync-additive.md",
+      "docs/decisions/0413-memory-learning-default-on-via-session-factory.md",
+      "docs/decisions/0538-channelized-instruction-graph-compiler.md"
+    ]
   }
 }

@@ -122,9 +122,31 @@ describe("parseAdrStatus", () => {
   test("returns empty string when absent", () => {
     expect(parseAdrStatus("# ADR-0001\n\nBody without status.\n")).toBe("")
   })
-  test("only looks at first 30 lines", () => {
+  // Replaces `only looks at first 30 lines`, which pinned a silent truncation as
+  // correct. Measured on the real corpus: the old pattern matched only
+  // `- **Status**:` and left 258 of 573 ADRs with `""`, which compares as "not
+  // Accepted" — so 45% of the tree could never be flagged as an orphan Accepted
+  // ADR whatever it said. Widening the parser exposed 19 real orphans that had
+  // been invisible.
+  test("🔴 a status past line 30 is still found — the window was a silent truncation", () => {
     const body = `# ADR\n${"\n".repeat(40)}- **Status**: Accepted\n`
-    expect(parseAdrStatus(body)).toBe("")
+    expect(parseAdrStatus(body)).toBe("Accepted")
+  })
+
+  test("🔴 every spelling in live use parses", () => {
+    // Each of these is a real file: 0227, 0411, 0551, 0334 respectively.
+    expect(parseAdrStatus("# ADR\n\n- Status: Accepted\n")).toBe("Accepted")
+    expect(parseAdrStatus("# ADR\n\n**Status:** Accepted (2026-05-28)\n")).toBe("Accepted")
+    expect(parseAdrStatus("# ADR\n\nStatus: Accepted (2026-08-24)\n")).toBe("Accepted")
+    expect(parseAdrStatus("# ADR\n\n## Status\n\nAccepted\n")).toBe("Accepted")
+    expect(parseAdrStatus("# ADR\n\n- **상태**: Accepted\n")).toBe("Accepted")
+    // Trailing punctuation is not part of the word — `Accepted.` appeared 10 times.
+    expect(parseAdrStatus("# ADR\n\n- Status: Accepted.\n")).toBe("Accepted")
+  })
+
+  test("a file with no status anywhere still returns empty", () => {
+    // The honest negative: widening must not start inventing a status.
+    expect(parseAdrStatus("# ADR\n\nSome prose with no status field.\n")).toBe("")
   })
 })
 
