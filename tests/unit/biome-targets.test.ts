@@ -1,5 +1,5 @@
-import { describe, expect, test } from "bun:test"
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs"
+import { afterAll, describe, expect, test } from "bun:test"
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 
@@ -15,9 +15,28 @@ const write = (root: string, rel: string, body = ""): void => {
   writeFileSync(abs, body, "utf8")
 }
 
+// Every fixture tree is registered here and removed in `afterAll`. A leaked
+// `mkdtemp` root is not a private mess: this repo has a recorded incident where
+// accumulated temp fixtures made `ls /tmp` slow enough to turn UNRELATED tests
+// red. Four roots per run, once per suite invocation, adds up fast.
+// (macOS: `tmpdir()` here is `/tmp`, a symlink whose real path is
+// `/private/tmp`; `rmSync` follows the path it was handed either way.)
+const fixtureRoots: string[] = []
+
+const makeRoot = (): string => {
+  const root = mkdtempSync(join(tmpdir(), "biome-targets-"))
+  fixtureRoots.push(root)
+  return root
+}
+
+afterAll(() => {
+  for (const root of fixtureRoots) rmSync(root, { recursive: true, force: true })
+  fixtureRoots.length = 0
+})
+
 describe("biome target selection", () => {
   test("excludes JS twins when sibling TypeScript is authoritative", () => {
-    const root = mkdtempSync(join(tmpdir(), "biome-targets-"))
+    const root = makeRoot()
     write(root, "src/agent/loop.ts", "export const loop = 1\n")
     write(root, "src/agent/loop.js", "export const loop = 1\n")
 
@@ -27,7 +46,7 @@ describe("biome target selection", () => {
   })
 
   test("keeps real JS authority files and excludes known noise paths", () => {
-    const root = mkdtempSync(join(tmpdir(), "biome-targets-"))
+    const root = makeRoot()
     write(root, "src/apps/cli/config-assemble.js", "export const x = 1\n")
     write(root, "tests/unit/foo.test.ts", "export {}\n")
     write(root, "tests/unit/foo.test.js", "export {}\n")
@@ -48,7 +67,7 @@ describe("biome target selection", () => {
   })
 
   test("skips dot-directories, which hold gitignored COPIES of real modules", () => {
-    const root = mkdtempSync(join(tmpdir(), "biome-targets-"))
+    const root = makeRoot()
     // Paired control: a NORMAL nested directory, so the dot-dir assertions below
     // cannot be satisfied by an enumerator that returns nothing.
     write(root, "src/agent/loop.ts", "export const loop = 1\n")
@@ -74,7 +93,7 @@ describe("biome target selection", () => {
   })
 
   test("enumerates the default source roots, and only those", () => {
-    const root = mkdtempSync(join(tmpdir(), "biome-targets-"))
+    const root = makeRoot()
     write(root, "src/agent/loop.ts", "export {}\n")
     write(root, "tests/unit/keep.test.ts", "export {}\n")
     write(root, "tools/dev/script.ts", "export {}\n")

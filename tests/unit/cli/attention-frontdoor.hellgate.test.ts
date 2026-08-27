@@ -30,6 +30,8 @@
 
 import { describe, expect, test } from "bun:test"
 import { EventEmitter } from "node:events"
+import { readFileSync } from "node:fs"
+import { join } from "node:path"
 import { bindBrokerUserInputPort, questionOwnerFor } from "@/agent/user-question"
 import { ACTION_SET } from "@/apps/cli/keybindings/types"
 import { type ReadLineTestIO, readLine } from "@/apps/cli/raw-line-reader"
@@ -306,16 +308,23 @@ describe("A4-5 the SSOT projector carries the /attention wire", () => {
 /**
  * 6. EXHAUSTIVE PROJECTION — the class fix, not just the `attention` instance.
  *
- * `projectLegacySlots` / `projectAdr0291Slots` enumerated their keys BY HAND,
- * so a slot could be declared on `ReplSlashCtx`, assigned by the builder, and
- * silently dropped by the projector — with nothing failing. That is how
- * `/attention` shipped "not wired" in every session.
+ * `projectSlashCtx` used to enumerate its keys BY HAND, so a slot could be
+ * declared on `ReplSlashCtx`, assigned by the builder, and silently dropped by
+ * the projector — with nothing failing. That is how `/attention` shipped "not
+ * wired" in every session.
  *
  * This pins the invariant behaviourally: every key a caller can put on the ctx
  * survives the projection. The production construction is
  * `Record<keyof ReplSlashCtx, SlotProjector>`, which additionally makes an
  * omission a COMPILE error naming the missing key — but a compile guard cannot
  * catch a projector wired to the WRONG key, and this can.
+ *
+ * ONE list, parsed from the source. A hand-written copy of these ~41 names used
+ * to sit in the arm below, strictly subsumed by this parse and rotting in
+ * silence: `procShells` was declared on `ReplSlashCtx` AND wired in
+ * `SLOT_PROJECTORS` and never reached the literal, so that arm kept passing
+ * while covering one slot fewer than it claimed. A list that can only ever be a
+ * subset of a list derived in the same file is not a second opinion.
  *
  * `cwd` is the one deliberate exclusion: `dispatchReplSlash` reads it directly
  * (`slashCtx?.cwd ?? process.cwd()`) and passes it as its own argument, so it is
@@ -324,95 +333,66 @@ describe("A4-5 the SSOT projector carries the /attention wire", () => {
 describe("A4-6 every declared ctx slot survives projectSlashCtx", () => {
   const NOT_PROJECTED = new Set(["cwd"])
 
-  test("a fully-populated ctx loses no slot", async () => {
+  // ANCHORED ON THIS FILE, never on the ambient cwd: a repo path built from
+  // `process.cwd()` resolves to nothing when the suite runs from a foreign
+  // working directory, and an empty read is indistinguishable from a clean one
+  // — which would make the anti-vacuity arm itself vacuous.
+  const REPO_ROOT = join(import.meta.dir, "..", "..", "..")
+  const src = readFileSync(join(REPO_ROOT, "src/apps/cli/repl/slash-surface.ts"), "utf8")
+  const block = src.slice(
+    src.indexOf("export type ReplSlashCtx = Partial<{"),
+    src.indexOf("export interface BuildReplSlashCtxArgs"),
+  )
+  const declared = [...block.matchAll(/^ {2}([a-zA-Z][A-Za-z0-9_]*)\??:/gm)].flatMap((m) =>
+    m[1] === undefined ? [] : [m[1]],
+  )
+  const projectable = declared.filter((k) => !NOT_PROJECTED.has(k))
+
+  test("ANTI-VACUITY — the slot list is parsed from the real source, so no arm can pass by listing nothing", () => {
+    // Measured 2026-08-28: 43 declared, 42 projectable. Floor at ~90% of the
+    // corpus, so losing more than a handful of slots fails HERE rather than
+    // quietly shrinking what the arm below covers. The old `> 30` floor passed
+    // with a quarter of `ReplSlashCtx` unparsed.
+    expect(declared.length).toBeGreaterThan(38)
+    // The parse resolves real names, not whitespace: the slot whose omission
+    // caused this file's defect and the slot the hand-written copy had already
+    // lost must both be in it.
+    expect(declared).toContain("attention")
+    expect(declared).toContain("procShells")
+  })
+
+  test("a fully-populated ctx loses no slot, and no slot is cross-wired", async () => {
     const { projectSlashCtx } = await import("@/apps/cli/repl/slash-surface")
     // `side` is a FACTORY on the ctx and a VALUE in the contract shape, so it is
     // the one slot whose projected value legitimately differs from its input.
     const sentinel = (k: string) => ({ __slot: k })
-    const keys = [
-      "skills",
-      "reloadSkills",
-      "idle",
-      "repoRules",
-      "imageQueue",
-      "rewindSession",
-      "mcp",
-      "cost",
-      "planSnapshot",
-      "history",
-      "branchSearch",
-      "side",
-      "debug",
-      "why",
-      "inspect",
-      "replay",
-      "effort",
-      "brief",
-      "contextUsage",
-      "agents",
-      "attention",
-      "skillActions",
-      "activityStore",
-      "itemStreamSink",
-      "radar",
-      "radarPruneOlderThanMs",
-      "planEdit",
-      "composerEdit",
-      "forkSession",
-      "perToolCheckpoint",
-      "profile",
-      "identity",
-      "stickyModel",
-      "focusChain",
-      "textInbox",
-      "hunkUndo",
-      "activityItems",
-      "projectsKb",
-      "mcpResources",
-      "browserNet",
-      "automation",
-    ] as const
     const ctx: Record<string, unknown> = {}
-    for (const k of keys) ctx[k] = k === "side" ? () => sentinel(k) : sentinel(k)
+    for (const k of projectable) ctx[k] = k === "side" ? () => sentinel(k) : sentinel(k)
     const projected = projectSlashCtx(ctx as never)
-    const dropped = keys.filter((k) => !Object.hasOwn(projected, k))
+
+    const dropped = projectable.filter((k) => !Object.hasOwn(projected, k))
     expect(dropped).toEqual([])
     // Presence is not enough: a projector wired to the WRONG key keeps the key
     // set intact. Each slot carries a distinct sentinel, so identity catches a
     // cross-wire that neither the compile guard nor `Object.hasOwn` can see.
     // `side` is exempt by construction — the ctx holds a FACTORY and the
     // contract shape holds its RESULT.
-    const crossWired = keys.filter(
-      (k) => k !== "side" && projected[k] !== (ctx[k] as unknown),
-    )
+    const crossWired = projectable.filter((k) => k !== "side" && projected[k] !== ctx[k])
     expect(crossWired).toEqual([])
   })
 
-  test("ANTI-VACUITY — the key list is the real one, so the test cannot pass by listing nothing", async () => {
-    const { readFileSync } = await import("node:fs")
-    const { join } = await import("node:path")
-    // ANCHORED ON THIS FILE, never on the ambient cwd: a repo path built from
-    // `process.cwd()` resolves to nothing when the suite runs from a foreign
-    // working directory, and an empty read is indistinguishable from a clean
-    // one — which would make this anti-vacuity arm itself vacuous.
-    const REPO_ROOT = join(import.meta.dir, "..", "..", "..")
-    const src = readFileSync(join(REPO_ROOT, "src/apps/cli/repl/slash-surface.ts"), "utf8")
-    const block = src.slice(
-      src.indexOf("export type ReplSlashCtx = Partial<{"),
-      src.indexOf("export interface BuildReplSlashCtxArgs"),
-    )
-    const declared = [...block.matchAll(/^ {2}([a-zA-Z][A-Za-z0-9_]*)\??:/gm)].map((m) => m[1])
-    expect(declared.length).toBeGreaterThan(30)
+  test("`side` is projected as the factory's RESULT, which is why it is exempt above", async () => {
     const { projectSlashCtx } = await import("@/apps/cli/repl/slash-surface")
-    const ctx: Record<string, unknown> = {}
-    for (const k of declared) {
-      if (k === undefined || NOT_PROJECTED.has(k)) continue
-      ctx[k] = k === "side" ? () => ({ v: k }) : { v: k }
-    }
-    const projected = projectSlashCtx(ctx as never)
-    const missing = declared.filter(
-      (k) => k !== undefined && !NOT_PROJECTED.has(k) && !Object.hasOwn(projected, k),
-    )
-    expect(missing).toEqual([])
+    const built = { __slot: "side" }
+    const projected = projectSlashCtx({ side: () => built } as never)
+    expect(projected.side).toBe(built)
+  })
+
+  test("`cwd` is deliberately NOT projected — the dispatcher passes it as its own argument", async () => {
+    const { projectSlashCtx } = await import("@/apps/cli/repl/slash-surface")
+    const projected = projectSlashCtx({ cwd: "/somewhere", attention: {} } as never)
+    expect(Object.hasOwn(projected, "cwd")).toBe(false)
+    // Paired control: the projector really did run over this ctx.
+    expect(Object.hasOwn(projected, "attention")).toBe(true)
   })
 })

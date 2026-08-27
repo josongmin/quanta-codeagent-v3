@@ -583,13 +583,15 @@ export const toAgentFleetRow = (
   ...(r.mailboxLabel !== undefined ? { mailboxLabel: r.mailboxLabel } : {}),
 })
 
-/** jul-03 CLI-surfacing — the S2/A3/B4/S1/B2 read-only ctx slots. Extracted so
- *  BOTH the builder ({@link buildReplSlashCtx}) and the live-path projector
- *  ({@link projectLegacySlots}) spread ONE presence-gated set (keeps each under
- *  biome's cognitive-complexity budget; no drift between the two spread sites).
+/** jul-03 CLI-surfacing — the S2/A3/B4/S1/B2 read-only ctx slots, grouped so
+ *  {@link buildReplSlashCtx} spreads ONE presence-gated set and stays under
+ *  biome's cognitive-complexity budget. It had a SECOND caller once — a
+ *  hand-enumerated live-path projector — and this comment described keeping the
+ *  two in sync; that function is gone, the live path funnels through
+ *  {@link projectSlashCtx}, and these five slots are projected individually
+ *  there like every other slot. One call site remains, in the builder.
  *  The input allows `| undefined` on each field (the builder passes destructured
- *  args, the projector passes a `Partial` ctx) — both erased by the presence
- *  spread under `exactOptionalPropertyTypes`. */
+ *  args) — erased by the presence spread under `exactOptionalPropertyTypes`. */
 type SurfacedSlots = Pick<
   ReplSlashCtx,
   "activityItems" | "projectsKb" | "mcpResources" | "browserNet" | "automation"
@@ -598,11 +600,19 @@ type SurfacedSlots = Pick<
  * Presence-spread: `{ [key]: value }` when `value` is defined, else `{}`.
  *
  * ONE unit standing in for the ~45 `...(x !== undefined ? { k: x } : {})`
- * ternaries the two projectors below used to spell out. Under
- * `exactOptionalPropertyTypes` an unwired slot must be an ABSENT KEY (not a key
- * holding `undefined`) — that is the whole rule, and repeating it per slot was
- * the entirety of both functions' cognitive-complexity score. Spread order is
- * preserved at the call sites, so key order in the built ctx is unchanged.
+ * ternaries that {@link buildReplSlashCtx} and the two hand-enumerated projectors
+ * it has since replaced used to spell out. Under `exactOptionalPropertyTypes` an
+ * unwired slot must be an ABSENT KEY (not a key holding `undefined`) — that is
+ * the whole rule, and repeating it per slot was the entirety of those functions'
+ * cognitive-complexity score.
+ *
+ * Key ORDER is NOT something this preserves, and an earlier version of this
+ * comment claimed it did. The ctx {@link buildReplSlashCtx} returns still follows
+ * its own literal spread order, but {@link projectSlashCtx} emits in
+ * {@link SLOT_PROJECTORS} declaration order — `side` is declared 14th on
+ * `ReplSlashCtx` and projected 2nd. Nothing reads that order: every consumer
+ * reaches slots by name, and the one test that walks a built ctx (`HELL-WIRE-18`)
+ * checks each VALUE, never the sequence.
  */
 const opt = <K extends string, V>(key: K, value: V | undefined): { [P in K]?: V } =>
   value === undefined ? ({} as { [P in K]?: V }) : ({ [key]: value } as { [P in K]?: V })
@@ -765,8 +775,6 @@ export const buildReplSlashCtx = (args: BuildReplSlashCtxArgs): ReplSlashCtx => 
   }
 }
 
-/** Project the pre-ADR-0291 slots. Extracted so each function stays under
- *  biome's cognitive-complexity ceiling. */
 /** One slot's contribution to the contract shape. Absent ⇒ `{}` ⇒ the key is
  *  omitted, which is what every "not wired in this surface" message reads. */
 type SlotProjector = (s: ReplSlashCtx) => Record<string, unknown>

@@ -334,7 +334,12 @@ export const MUTATIONS: readonly Mutation[] = [
     replace: `    case "custom":
       return "allow"`,
     gate: "src/permission/__tests__/fail-closed-base.hellgate.test.ts",
-    only: "custom",
+    // `-t` is a REGEX over the FULL name (describe + test). Bare "custom" also
+    // matched the enclosing describe, selecting all 3 of its tests — including
+    // one that never touches the `custom` arm — so an unrelated failure could
+    // read as this mutant being killed. Pinned to the single test that asserts
+    // the mutated branch; parens escaped because the filter is a regex.
+    only: "hostMutationVerdict\\(.custom.\\) === .defer.",
   },
 ]
 
