@@ -140,10 +140,7 @@ describe("S-PROBE-5: description contains 'ast-grep'", () => {
 // ════════════════════════════════════════════════════════════════════════════
 
 describe("S-BIN-1: execute with real args but no binary -> ok:false", () => {
-  test("yields ok:false when ast-grep binary is absent", async () => {
-    if (astGrepAvailable) {
-      return
-    }
+  test.skipIf(astGrepAvailable)("yields ok:false when ast-grep binary is absent", async () => {
     // Red-on-injection: remove the probeAstGrep guard → the tool attempts to
     // exec ast-grep, which fails with a non-zero exit and the error falls
     // through to an unexpected code path; ok may become true; test fails.
@@ -153,10 +150,7 @@ describe("S-BIN-1: execute with real args but no binary -> ok:false", () => {
 })
 
 describe("S-BIN-2: error message contains installation guidance", () => {
-  test("output mentions 'brew' or 'cargo' or 'install'", async () => {
-    if (astGrepAvailable) {
-      return
-    }
+  test.skipIf(astGrepAvailable)("output mentions 'brew' or 'cargo' or 'install'", async () => {
     // Red-on-injection: strip the installation-hint string in probeAstGrep →
     // output is an empty or generic error; users get no actionable guidance;
     // this test fails.
@@ -166,10 +160,7 @@ describe("S-BIN-2: error message contains installation guidance", () => {
 })
 
 describe("S-BIN-3: result shape is {ok:false, output:string} not a throw", () => {
-  test("binary-absent path returns object, does not throw", async () => {
-    if (astGrepAvailable) {
-      return
-    }
+  test.skipIf(astGrepAvailable)("binary-absent path returns object, does not throw", async () => {
     // Red-on-injection: replace the probeError yield with a bare `throw` →
     // the generator propagates an uncaught exception; callers crash; this
     // test fails because threw becomes true.
@@ -193,10 +184,7 @@ describe("S-BIN-3: result shape is {ok:false, output:string} not a throw", () =>
 // ════════════════════════════════════════════════════════════════════════════
 
 describe("S-FMT-1: output line format matches /^.+:\\d+: .+/", () => {
-  test("each match line is file:lineno: text", async () => {
-    if (!astGrepAvailable) {
-      return
-    }
+  test.skipIf(!astGrepAvailable)("each match line is file:lineno: text", async () => {
     const file = join(tmpDir, "fmt1-sample.ts")
     writeFileSync(file, "console.log('hello');\n")
 
@@ -216,10 +204,7 @@ describe("S-FMT-1: output line format matches /^.+:\\d+: .+/", () => {
 })
 
 describe("S-FMT-2: line numbers are 1-indexed", () => {
-  test("first line of file produces line number 1, not 0", async () => {
-    if (!astGrepAvailable) {
-      return
-    }
+  test.skipIf(!astGrepAvailable)("first line of file produces line number 1, not 0", async () => {
     const file = join(tmpDir, "fmt2-sample.ts")
     // Match is on line 1 (first line)
     writeFileSync(file, "console.log('first');\nfoo();\n")
@@ -237,10 +222,7 @@ describe("S-FMT-2: line numbers are 1-indexed", () => {
 })
 
 describe("S-FMT-3: multiple matches each appear on separate output lines", () => {
-  test("3 matches → at least 3 non-empty output lines", async () => {
-    if (!astGrepAvailable) {
-      return
-    }
+  test.skipIf(!astGrepAvailable)("3 matches → at least 3 non-empty output lines", async () => {
     const file = join(tmpDir, "fmt3-sample.ts")
     writeFileSync(file, "console.log('a');\nconsole.log('b');\nconsole.log('c');\n")
 
@@ -257,10 +239,7 @@ describe("S-FMT-3: multiple matches each appear on separate output lines", () =>
 })
 
 describe("S-FMT-4: file path in output matches the path passed in", () => {
-  test("output lines contain the exact file path supplied", async () => {
-    if (!astGrepAvailable) {
-      return
-    }
+  test.skipIf(!astGrepAvailable)("output lines contain the exact file path supplied", async () => {
     const file = join(tmpDir, "fmt4-sample.ts")
     writeFileSync(file, "console.log('x');\n")
 
@@ -280,10 +259,7 @@ describe("S-FMT-4: file path in output matches the path passed in", () => {
 // ════════════════════════════════════════════════════════════════════════════
 
 describe("S-ZERO-1: pattern matching nothing → ok:true with empty/no-match output", () => {
-  test("zero matches returns ok:true and empty-ish output", async () => {
-    if (!astGrepAvailable) {
-      return
-    }
+  test.skipIf(!astGrepAvailable)("zero matches returns ok:true and empty-ish output", async () => {
     const file = join(tmpDir, "zero-sample.ts")
     writeFileSync(file, "const x = 1;\n")
 
@@ -301,10 +277,7 @@ describe("S-ZERO-1: pattern matching nothing → ok:true with empty/no-match out
 })
 
 describe("S-ZERO-2: zero matches does not throw", () => {
-  test("execute completes without throwing on zero matches", async () => {
-    if (!astGrepAvailable) {
-      return
-    }
+  test.skipIf(!astGrepAvailable)("execute completes without throwing on zero matches", async () => {
     const file = join(tmpDir, "zero2-sample.ts")
     writeFileSync(file, "const y = 2;\n")
 
@@ -325,58 +298,58 @@ describe("S-ZERO-2: zero matches does not throw", () => {
 // ════════════════════════════════════════════════════════════════════════════
 
 describe("S-CAP-1: 60-match file → output has at most 50 match lines", () => {
-  test("result output contains ≤50 match lines when 60 exist", async () => {
-    if (!astGrepAvailable) {
-      return
-    }
-    const lines = Array.from({ length: 60 }, (_, i) => `console.log(${i});`)
-    const file = join(tmpDir, "cap-60.js")
-    writeFileSync(file, `${lines.join("\n")}\n`)
+  test.skipIf(!astGrepAvailable)(
+    "result output contains ≤50 match lines when 60 exist",
+    async () => {
+      const lines = Array.from({ length: 60 }, (_, i) => `console.log(${i});`)
+      const file = join(tmpDir, "cap-60.js")
+      writeFileSync(file, `${lines.join("\n")}\n`)
 
-    const result = await runTool({ pattern: "console.log($A)", path: file }, tmpDir)
-    expect(result.ok).toBe(true)
+      const result = await runTool({ pattern: "console.log($A)", path: file }, tmpDir)
+      expect(result.ok).toBe(true)
 
-    // Red-on-injection: remove the `.slice(0, MAX_MATCHES)` call → all 60 lines
-    // appear, this count check fails (60 > 50).
-    const matchLines = result.output.split("\n").filter((l) => l.includes("console.log"))
-    expect(matchLines.length).toBeLessThanOrEqual(50)
-  })
+      // Red-on-injection: remove the `.slice(0, MAX_MATCHES)` call → all 60 lines
+      // appear, this count check fails (60 > 50).
+      const matchLines = result.output.split("\n").filter((l) => l.includes("console.log"))
+      expect(matchLines.length).toBeLessThanOrEqual(50)
+    },
+  )
 })
 
 describe("S-CAP-2: cap hit → output contains a 'more' indicator", () => {
-  test("'... N more matches' appears when 60 matches exist (cap=50)", async () => {
-    if (!astGrepAvailable) {
-      return
-    }
-    const lines = Array.from({ length: 60 }, (_, i) => `console.log(${i});`)
-    const file = join(tmpDir, "cap-60b.js")
-    writeFileSync(file, `${lines.join("\n")}\n`)
+  test.skipIf(!astGrepAvailable)(
+    "'... N more matches' appears when 60 matches exist (cap=50)",
+    async () => {
+      const lines = Array.from({ length: 60 }, (_, i) => `console.log(${i});`)
+      const file = join(tmpDir, "cap-60b.js")
+      writeFileSync(file, `${lines.join("\n")}\n`)
 
-    const result = await runTool({ pattern: "console.log($A)", path: file }, tmpDir)
-    expect(result.ok).toBe(true)
+      const result = await runTool({ pattern: "console.log($A)", path: file }, tmpDir)
+      expect(result.ok).toBe(true)
 
-    // Red-on-injection: remove the `more` suffix in execute() → users have no
-    // indication that results were truncated; silent data loss; test fails.
-    expect(result.output).toMatch(/\.\.\. \d+ more matches/)
-  })
+      // Red-on-injection: remove the `more` suffix in execute() → users have no
+      // indication that results were truncated; silent data loss; test fails.
+      expect(result.output).toMatch(/\.\.\. \d+ more matches/)
+    },
+  )
 })
 
 describe("S-CAP-3: 5 matches → no 'more' indicator", () => {
-  test("output has no 'more matches' text when only 5 matches exist", async () => {
-    if (!astGrepAvailable) {
-      return
-    }
-    const lines = Array.from({ length: 5 }, (_, i) => `console.log(${i});`)
-    const file = join(tmpDir, "cap-5.js")
-    writeFileSync(file, `${lines.join("\n")}\n`)
+  test.skipIf(!astGrepAvailable)(
+    "output has no 'more matches' text when only 5 matches exist",
+    async () => {
+      const lines = Array.from({ length: 5 }, (_, i) => `console.log(${i});`)
+      const file = join(tmpDir, "cap-5.js")
+      writeFileSync(file, `${lines.join("\n")}\n`)
 
-    const result = await runTool({ pattern: "console.log($A)", path: file }, tmpDir)
-    expect(result.ok).toBe(true)
+      const result = await runTool({ pattern: "console.log($A)", path: file }, tmpDir)
+      expect(result.ok).toBe(true)
 
-    // Red-on-injection: always append the "more matches" suffix regardless of
-    // count → output incorrectly reports truncation; this test fails.
-    expect(result.output).not.toMatch(/more matches/)
-  })
+      // Red-on-injection: always append the "more matches" suffix regardless of
+      // count → output incorrectly reports truncation; this test fails.
+      expect(result.output).not.toMatch(/more matches/)
+    },
+  )
 })
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -384,10 +357,7 @@ describe("S-CAP-3: 5 matches → no 'more' indicator", () => {
 // ════════════════════════════════════════════════════════════════════════════
 
 describe("S-PATH-1: path=undefined → searches current dir, no crash", () => {
-  test("omitting path argument does not crash or throw", async () => {
-    if (!astGrepAvailable) {
-      return
-    }
+  test.skipIf(!astGrepAvailable)("omitting path argument does not crash or throw", async () => {
     // Red-on-injection: make path required (remove optional()) → the schema
     // rejects the call; execute throws; this test fails.
     let threw = false
@@ -406,50 +376,50 @@ describe("S-PATH-1: path=undefined → searches current dir, no crash", () => {
 })
 
 describe("S-PATH-2: path=specific file → only that file's matches returned", () => {
-  test("when path is a single file, output only mentions that file", async () => {
-    if (!astGrepAvailable) {
-      return
-    }
-    const fileA = join(tmpDir, "path2-a.ts")
-    const fileB = join(tmpDir, "path2-b.ts")
-    writeFileSync(fileA, "console.log('from-a');\n")
-    writeFileSync(fileB, "console.log('from-b');\n")
+  test.skipIf(!astGrepAvailable)(
+    "when path is a single file, output only mentions that file",
+    async () => {
+      const fileA = join(tmpDir, "path2-a.ts")
+      const fileB = join(tmpDir, "path2-b.ts")
+      writeFileSync(fileA, "console.log('from-a');\n")
+      writeFileSync(fileB, "console.log('from-b');\n")
 
-    // Pass only fileA
-    const result = await runTool({ pattern: "console.log($A)", path: fileA }, tmpDir)
-    expect(result.ok).toBe(true)
+      // Pass only fileA
+      const result = await runTool({ pattern: "console.log($A)", path: fileA }, tmpDir)
+      expect(result.ok).toBe(true)
 
-    // Red-on-injection: ignore the path argument and always search cwd →
-    // output contains both files; "path2-b.ts" appears; this assertion fails.
-    expect(result.output).not.toContain("path2-b.ts")
-    expect(result.output).toContain("path2-a.ts")
-  })
+      // Red-on-injection: ignore the path argument and always search cwd →
+      // output contains both files; "path2-b.ts" appears; this assertion fails.
+      expect(result.output).not.toContain("path2-b.ts")
+      expect(result.output).toContain("path2-a.ts")
+    },
+  )
 })
 
 describe("S-PATH-3: path=nonexistent → ok:false or empty, no throw or crash", () => {
-  test("nonexistent path returns a result object without throwing", async () => {
-    if (!astGrepAvailable) {
-      return
-    }
-    // Red-on-injection: remove the `r.exitCode > 1` guard in execute() →
-    // JSON.parse("") throws SyntaxError, propagating out of the generator;
-    // callers crash; threw becomes true; test fails.
-    let threw = false
-    let result: { ok: boolean; output: string } | null = null
-    try {
-      result = await runTool(
-        { pattern: "console.log($A)", path: "/tmp/no-such-dir-xyzzy-scenario-99/file.ts" },
-        tmpDir,
-      )
-    } catch {
-      threw = true
-    }
-    expect(threw).toBe(false)
-    expect(result).not.toBeNull()
-    // Either ok:false with error, or ok:true with empty/no-match
-    expect(typeof present(result, "result").ok).toBe("boolean")
-    expect(typeof present(result, "result").output).toBe("string")
-  })
+  test.skipIf(!astGrepAvailable)(
+    "nonexistent path returns a result object without throwing",
+    async () => {
+      // Red-on-injection: remove the `r.exitCode > 1` guard in execute() →
+      // JSON.parse("") throws SyntaxError, propagating out of the generator;
+      // callers crash; threw becomes true; test fails.
+      let threw = false
+      let result: { ok: boolean; output: string } | null = null
+      try {
+        result = await runTool(
+          { pattern: "console.log($A)", path: "/tmp/no-such-dir-xyzzy-scenario-99/file.ts" },
+          tmpDir,
+        )
+      } catch {
+        threw = true
+      }
+      expect(threw).toBe(false)
+      expect(result).not.toBeNull()
+      // Either ok:false with error, or ok:true with empty/no-match
+      expect(typeof present(result, "result").ok).toBe("boolean")
+      expect(typeof present(result, "result").output).toBe("string")
+    },
+  )
 })
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -457,30 +427,27 @@ describe("S-PATH-3: path=nonexistent → ok:false or empty, no throw or crash", 
 // ════════════════════════════════════════════════════════════════════════════
 
 describe("S-LANG-1: language='typescript' with .ts file → valid results", () => {
-  test("explicit typescript language produces ok:true on a TS file", async () => {
-    if (!astGrepAvailable) {
-      return
-    }
-    const file = join(tmpDir, "lang1-sample.ts")
-    writeFileSync(file, "console.log('ts');\n")
+  test.skipIf(!astGrepAvailable)(
+    "explicit typescript language produces ok:true on a TS file",
+    async () => {
+      const file = join(tmpDir, "lang1-sample.ts")
+      writeFileSync(file, "console.log('ts');\n")
 
-    // Red-on-injection: break the --lang argument construction (e.g. add a
-    // spurious space) → ast-grep rejects the flag; exitCode > 1; ok:false;
-    // this test fails.
-    const result = await runTool(
-      { pattern: "console.log($A)", path: file, language: "typescript" },
-      tmpDir,
-    )
-    expect(result.ok).toBe(true)
-    expect(typeof result.output).toBe("string")
-  })
+      // Red-on-injection: break the --lang argument construction (e.g. add a
+      // spurious space) → ast-grep rejects the flag; exitCode > 1; ok:false;
+      // this test fails.
+      const result = await runTool(
+        { pattern: "console.log($A)", path: file, language: "typescript" },
+        tmpDir,
+      )
+      expect(result.ok).toBe(true)
+      expect(typeof result.output).toBe("string")
+    },
+  )
 })
 
 describe("S-LANG-2: language='nonexistentlang999' → ok:false with error, no throw", () => {
-  test("bogus language returns ok:false and does not throw", async () => {
-    if (!astGrepAvailable) {
-      return
-    }
+  test.skipIf(!astGrepAvailable)("bogus language returns ok:false and does not throw", async () => {
     const file = join(tmpDir, "lang2-sample.ts")
     writeFileSync(file, "console.log('lang2');\n")
 

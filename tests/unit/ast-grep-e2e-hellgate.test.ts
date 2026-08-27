@@ -83,32 +83,27 @@ describe("E2E-1: probe failure → ok:false with install hint", () => {
   // run exactly once (it is never cached to `true`) and return the error string.
   // We do NOT call this test skipIf so it always exercises the failure path.
 
-  test("execute yields ok:false when ast-grep binary is absent", async () => {
-    if (astGrepAvailable) {
-      return
-    }
+  test.skipIf(astGrepAvailable)(
+    "execute yields ok:false when ast-grep binary is absent",
+    async () => {
+      const result = await run(astGrepTool, { pattern: "console.log($A)" }, tmpDir)
 
-    const result = await run(astGrepTool, { pattern: "console.log($A)" }, tmpDir)
+      // Red-on-injection: remove the probeAstGrep guard in index.ts → the tool
+      // would attempt to run ast-grep and crash or return a different error.
+      expect(result.ok).toBe(false)
 
-    // Red-on-injection: remove the probeAstGrep guard in index.ts → the tool
-    // would attempt to run ast-grep and crash or return a different error.
-    expect(result.ok).toBe(false)
-
-    // Red-on-injection: change the install-hint string in index.ts to ""
-    // → this assertion fails, exposing silent loss of the hint.
-    expect(result.output).toMatch(/ast-grep not installed/)
-    expect(result.output).toMatch(/brew install ast-grep/)
-  })
+      // Red-on-injection: change the install-hint string in index.ts to ""
+      // → this assertion fails, exposing silent loss of the hint.
+      expect(result.output).toMatch(/ast-grep not installed/)
+      expect(result.output).toMatch(/brew install ast-grep/)
+    },
+  )
 })
 
 // ─── E2E-2: real pattern search finds 2 matches ──────────────────────────────
 
 describe("E2E-2: real pattern search finds matches (skipIf !astGrepAvailable)", () => {
-  it("finds 2 console.log matches in a temp JS file", async () => {
-    if (!astGrepAvailable) {
-      return
-    }
-
+  it.skipIf(!astGrepAvailable)("finds 2 console.log matches in a temp JS file", async () => {
     const file = join(tmpDir, "e2e2-sample.js")
     writeFileSync(file, "console.log('hello');\nfoo.bar();\nconsole.log('world');\n")
 
@@ -132,11 +127,7 @@ describe("E2E-2: real pattern search finds matches (skipIf !astGrepAvailable)", 
 // ─── E2E-3: 50-match cap fires ───────────────────────────────────────────────
 
 describe("E2E-3: 50-match cap fires when file has 60 matches (skipIf !astGrepAvailable)", () => {
-  it("output contains cap message OR ≤50 match lines", async () => {
-    if (!astGrepAvailable) {
-      return
-    }
-
+  it.skipIf(!astGrepAvailable)("output contains cap message OR ≤50 match lines", async () => {
     // Build a file with exactly 60 console.log lines
     const lines = Array.from({ length: 60 }, (_, i) => `console.log(${i});`)
     const file = join(tmpDir, "e2e3-many-matches.js")
@@ -162,11 +153,7 @@ describe("E2E-3: 50-match cap fires when file has 60 matches (skipIf !astGrepAva
 // ─── E2E-4: nonexistent path → no crash ──────────────────────────────────────
 
 describe("E2E-4: nonexistent path → does not throw (skipIf !astGrepAvailable)", () => {
-  it("returns a {ok, output} object without throwing", async () => {
-    if (!astGrepAvailable) {
-      return
-    }
-
+  it.skipIf(!astGrepAvailable)("returns a {ok, output} object without throwing", async () => {
     // Red-on-injection: remove the `r.exitCode > 1` guard → an error exit
     // code would fall through to JSON.parse("") and throw, crashing the test.
     const result = await run(
@@ -184,11 +171,7 @@ describe("E2E-4: nonexistent path → does not throw (skipIf !astGrepAvailable)"
 // ─── E2E-5: language override respected ──────────────────────────────────────
 
 describe("E2E-5: language override flag does not crash (skipIf !astGrepAvailable)", () => {
-  it("accepts language:'rust' without throwing", async () => {
-    if (!astGrepAvailable) {
-      return
-    }
-
+  it.skipIf(!astGrepAvailable)("accepts language:'rust' without throwing", async () => {
     // Red-on-injection: remove the `--lang` branch in execute() → language is
     // silently ignored (no crash, but the flag is not forwarded; this test
     // verifies the non-crash contract at minimum).
