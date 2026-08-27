@@ -125,33 +125,41 @@ export interface StripCommentsOptions {
   readonly preservePositions?: boolean
 }
 
+/**
+ * The literal starting at `i`, verbatim — a string or a regex — or `""` when
+ * `i` starts neither. Split out so the scan loop reads as the three cases it
+ * actually has: a comment, a literal to carry through, an ordinary character.
+ */
+const readLiteral = (src: string, i: number, emitted: string): string => {
+  const c = src[i] as string
+  if (c === '"' || c === "'" || c === "`") return readStringLiteral(src, i)
+  if (c === "/" && opensRegexLiteral(emitted)) return readRegexLiteral(src, i)
+  return ""
+}
+
 export const stripComments = (src: string, options: StripCommentsOptions = {}): string => {
+  const keep = options.preservePositions === true
   let out = ""
   let i = 0
   let atLineStart = true
   while (i < src.length) {
     const past = skipComment(src, i, atLineStart)
     if (past !== -1) {
-      if (options.preservePositions === true) out += blanked(src.slice(i, past))
+      if (keep) out += blanked(src.slice(i, past))
       i = past
       continue
     }
-    const c = src[i] as string
-    const token =
-      c === '"' || c === "'" || c === "`"
-        ? readStringLiteral(src, i)
-        : c === "/" && opensRegexLiteral(out)
-          ? readRegexLiteral(src, i)
-          : ""
+    const token = readLiteral(src, i, out)
     if (token !== "") {
       out += token
       i += token.length
       atLineStart = false
       continue
     }
+    const c = src[i] as string
     out += c
     atLineStart = c === "\n" || (atLineStart && (c === " " || c === "\t"))
-    i++
+    i += 1
   }
   return out
 }
