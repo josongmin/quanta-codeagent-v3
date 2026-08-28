@@ -1,11 +1,14 @@
 import { extname } from "node:path"
 import { errMessage, logger } from "@/shared"
-import {
-  type DiagnosticsProvider,
-  type DiagnosticsSession,
-  diagnosticsTool,
-  type Tool,
-} from "@/tool"
+// Direct files, not the `@/tool` BARREL. The barrel re-exports all of
+// `src/tool` (973 lines, 76 exports), and this one import is what pulled 284
+// files under `src/tool` into the bunfig preload closure — via
+// `tests/setup.ts` → `@/agent/lsp-bridge` → here. That made it impossible to
+// build a test mirror with `src/tool` emptied, because the preload died before
+// any guard ran.
+import type { DiagnosticsProvider, DiagnosticsSession } from "@/tool/diagnostics"
+import { diagnosticsTool } from "@/tool/diagnostics"
+import type { Tool } from "@/tool/types/tool-contract"
 import { attachLspDiagnosticsHook, type LspDiagnosticsHookHandle } from "../lsp-diagnostics-hook"
 import type { AgentConfig } from "../types"
 import { isAvailable } from "./availability"

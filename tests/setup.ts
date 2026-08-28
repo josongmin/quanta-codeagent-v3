@@ -2,8 +2,12 @@
 import { afterEach, beforeEach } from "bun:test"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { __setBranchRunAgentForTest } from "@/agent/branch-search-runner"
-import { __setLspAvailabilityOverrideForTest } from "@/agent/lsp-bridge"
+// The LEAF, not the runner: the runner reaches `@/agent/loop` and from there
+// `@/tool`, which put 284 files into this preload's runtime closure.
+import { __setBranchRunAgentForTest } from "@/agent/branch-search-runner/run-agent-override"
+// The leaf, not the `@/agent/lsp-bridge` barrel: the barrel reaches
+// `diagnostics.ts` and from there all of `src/tool`.
+import { __setLspAvailabilityOverrideForTest } from "@/agent/lsp-bridge/availability"
 import { __resetSpanSink } from "@/observability"
 import { __resetDefaultMetricSink } from "@/observability/metrics/in-memory-registry"
 import {
