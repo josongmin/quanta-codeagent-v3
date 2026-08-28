@@ -1,0 +1,61 @@
+#!/bin/sh
+# Pre-commit hook — makes the ONE failure class that keeps reaching main
+# impossible to commit, without blocking on anything else.
+#
+# WHY NOT "run the full precommit gate here". Two things rule it out.
+#
+#   1. Cost. `bun run precommit` is ~50s (two full biome scans over ~7,200
+#      files, plus tsc). At the commit rate in this repo that is minutes per
+#      hour of waiting, and a hook that expensive is a hook that gets
+#      `--no-verify`d — which is strictly worse than no hook, because then
+#      nobody even reads its output.
+#   2. Correctness. More than one session works in THIS working tree at once.
+#      A whole-tree gate would fail A's commit because B is midway through
+#      editing an unrelated file. False blocks train people to bypass.
+#
+# So this hook is scoped to the STAGED paths and to the classes that are purely
+# mechanical: the formatter and the import-order assist. Those are exactly what
+# landed on main on two consecutive days — biome exits 0 on WARN, so the ~220
+# warnings a normal run prints look identical to a clean one, and an ERROR-level
+# `format` / `assist/source/organizeImports` hides in that noise.
+#
+# It FIXES those and re-stages, and it BLOCKS on anything else biome still
+# reports, printing biome's own diagnosis. It never rewrites semantics behind
+# the committer's back: the linter is disabled for the write pass, so an unused
+# import or a restricted import is REPORTED, never silently removed.
+#
+# The full sweep is still `bun run precommit` / `bun run prepush`.
+# Escape hatch: `git commit --no-verify`.
+
+set -e
+
+BIOME="./node_modules/.bin/biome"
+[ -x "$BIOME" ] || exit 0   # no toolchain in this checkout ⇒ never block a commit
+
+# Staged, still-present files biome can process. NUL-separated: a path may
+# contain spaces, and a truncated path would silently drop from the check.
+STAGED=$(git diff --cached --name-only --diff-filter=ACMR -z \
+  | tr '\0' '\n' \
+  | grep -E '\.(ts|tsx|js|jsx|mjs|cjs|json|jsonc)$' || true)
+
+[ -n "$STAGED" ] || exit 0
+
+# Pass 1 — mechanical only: formatter + assist (organizeImports). Linter OFF, so
+# nothing semantic is rewritten.
+echo "$STAGED" | tr '\n' '\0' | xargs -0 "$BIOME" check \
+  --write --linter-enabled=false --formatter-enabled=true --assist-enabled=true \
+  >/dev/null 2>&1 || true
+
+# Re-stage ONLY the paths that were already staged — never `git add -u`, which
+# would sweep in another session's in-flight edits.
+echo "$STAGED" | tr '\n' '\0' | xargs -0 git add --
+
+# Pass 2 — the verdict. Anything still reported is not mechanical: an unused
+# import, a slice-boundary violation, a real lint error. Show biome's own output.
+if ! echo "$STAGED" | tr '\n' '\0' | xargs -0 "$BIOME" check; then
+  echo ""
+  echo "pre-commit: biome still reports problems in the staged files (above)."
+  echo "  These are NOT auto-fixable — they change behaviour, so fix them by hand."
+  echo "  Full sweep: bun run precommit   |   bypass once: git commit --no-verify"
+  exit 1
+fi
