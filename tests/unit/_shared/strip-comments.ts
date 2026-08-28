@@ -63,7 +63,24 @@ const readPlainString = (src: string, open: number): string => {
   return out
 }
 
-/** The `${…}` at `open`, balanced, recursing through nested literals. */
+/**
+ * The `${…}` at `open`, balanced, recursing through nested literals.
+ *
+ * A substitution is CODE, so it can hold a REGEX literal as well as a string —
+ * and this repo's own shell-quote idiom is exactly that:
+ *
+ *     `'${s.replace(/'/g, "'\\''")}'`
+ *
+ * Reading only quotes made the `'` inside `/'/g` open a string that never
+ * closed, so the balancing `}` was never found and the ENTIRE REST OF THE FILE
+ * came back verbatim — every comment in it surviving into the scan. MEASURED
+ * across 14,638 files: 84,260 characters of comment text in 53 files, and a
+ * live forgery through `tools/feature-catalog/reachability.ts` (a trailing
+ * comment in a file carrying that idiom resurrected four dead modules).
+ *
+ * The template fix that introduced this closed one desync and opened another;
+ * regex literals are read here for the same reason they are read at top level.
+ */
 const readSubstitution = (src: string, open: number): string => {
   let out = "${"
   let i = open + 2
@@ -74,6 +91,12 @@ const readSubstitution = (src: string, open: number): string => {
       const nested = readStringLiteral(src, i)
       out += nested
       i += nested.length
+      continue
+    }
+    if (ch === "/" && opensRegexLiteral(out)) {
+      const re = readRegexLiteral(src, i)
+      out += re
+      i += re.length
       continue
     }
     if (ch === "{") depth += 1
