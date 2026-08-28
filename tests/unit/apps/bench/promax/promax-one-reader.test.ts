@@ -69,12 +69,21 @@ const alloc = (prefix: string): string => {
 const BENCH_HOME = mkdtempSync(join(tmpdir(), "pmx-one-reader-home-"))
 TEMP_DIRS.push(BENCH_HOME)
 const PRIOR_BENCH_HOME = process.env.QUANTA_BENCH_HOME
+// The token-budget store is governed by its OWN knob, not by
+// `QUANTA_BENCH_HOME` — `token-budget.ts:137` resolves
+// `quantaHomePath("bench-token-budget")` unless this is set. So the bench-home
+// redirect alone still left `~/.quanta/bench-token-budget` and its
+// `.lease-state` sibling in the operator's home. Measured.
+const PRIOR_TOKEN_BUDGET_DIR = process.env.QUANTA_BENCH_TOKEN_BUDGET_DIR
 process.env.QUANTA_BENCH_HOME = BENCH_HOME
+process.env.QUANTA_BENCH_TOKEN_BUDGET_DIR = join(BENCH_HOME, "token-budget")
 __resetRuntimeConfig()
 
 afterAll(() => {
   if (PRIOR_BENCH_HOME === undefined) delete process.env.QUANTA_BENCH_HOME
   else process.env.QUANTA_BENCH_HOME = PRIOR_BENCH_HOME
+  if (PRIOR_TOKEN_BUDGET_DIR === undefined) delete process.env.QUANTA_BENCH_TOKEN_BUDGET_DIR
+  else process.env.QUANTA_BENCH_TOKEN_BUDGET_DIR = PRIOR_TOKEN_BUDGET_DIR
   __resetRuntimeConfig()
   for (const dir of TEMP_DIRS) rmSync(dir, { recursive: true, force: true })
 })

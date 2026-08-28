@@ -27,12 +27,35 @@
  * extends it to the family's APPLICABILITY: a selector the mode cannot honor is
  * refused rather than half-applied.
  */
-import { describe, expect, test } from "bun:test"
+import { afterAll, describe, expect, test } from "bun:test"
+import { mkdtempSync, rmSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 import {
   assertFamilySelectorHonored,
   BENCH_EXECUTION_MODES,
   MODE_HONORS_FAMILY,
 } from "@/apps/bench/family-mode-honor"
+import { __resetRuntimeConfig } from "@/shared"
+
+/**
+ * REDIRECT the bench home. These cases drive real code that resolves
+ * `benchRunsRoot()`, so every run left two empty `run-<ts>/` directories in the
+ * OPERATOR's home — measured, the count moved by exactly 2 per run of this file.
+ *
+ * RESTORED, not deleted: bun shares one process across every test file, so a
+ * deleted variable stays deleted for everything scheduled afterwards.
+ */
+const BENCH_HOME = mkdtempSync(join(tmpdir(), "family-selector-home-"))
+const PRIOR_BENCH_HOME = process.env.QUANTA_BENCH_HOME
+process.env.QUANTA_BENCH_HOME = BENCH_HOME
+__resetRuntimeConfig()
+afterAll(() => {
+  if (PRIOR_BENCH_HOME === undefined) delete process.env.QUANTA_BENCH_HOME
+  else process.env.QUANTA_BENCH_HOME = PRIOR_BENCH_HOME
+  __resetRuntimeConfig()
+  rmSync(BENCH_HOME, { recursive: true, force: true })
+})
 
 describe("a family selector the mode cannot honor is refused", () => {
   test("custom-corpus + EXPLICIT family ⇒ refuses", () => {
