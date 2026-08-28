@@ -29,6 +29,7 @@
 
 import { hardDenyReason } from "./policy"
 import { HARD_DENY_RULES, normalizeShellForDeny } from "./policy-rules"
+import { assessShellCommand, shellEffectParserReady } from "./shell"
 import type {
   HITLTier,
   PermissionContext,
@@ -106,8 +107,24 @@ export interface PermissionInspection {
    *  triggered then). */
   readonly hardDenyMatched: boolean
   /** Matched rule descriptors (name + description ONLY — no regex). Empty
-   *  when no shellCommand or no match. */
+   *  when no shellCommand or no match.
+   *
+   *  UNION of BOTH hard-deny authorities, exactly as `hardDenyMatched` is —
+   *  the regex catalog AND `assessShellCommand`. It was the regex half alone
+   *  once, and every structural-only denial (`git push origin :feature/x`,
+   *  `git switch -f main`) then reached the operator as
+   *  `HARD_DENY rule '(unknown rule)'` beside an axis trace claiming no
+   *  pattern matched. One array, two consumers, one truth. */
   readonly hardDenyRules: readonly MatchedHardDenyRule[]
+  /** Was the STRUCTURAL authority armed when this record was built?
+   *
+   *  `assessShellCommand` needs a grammar that is loaded ASYNCHRONOUSLY
+   *  (`initShellEffectParser`), and `inspectPermission` is SYNCHRONOUS. Before
+   *  the load lands every assessment is `unknown`, so `hardDenyRules` — and
+   *  the hard-deny gate itself — silently collapse to the regex catalog. That
+   *  silent collapse is indistinguishable from "nothing dangerous here", so it
+   *  is reported rather than inferred. */
+  readonly structuralAuthorityReady: boolean
   /** Per-mode decision matrix — END verdict including HITL overlay. */
   readonly modePolicy: ModePolicyMatrix
   /** The 5-axis pipeline trace, in precedence order, ready for rendering. */
@@ -147,6 +164,28 @@ const matchHardDenyRules = (command: string | undefined): readonly MatchedHardDe
     }
   }
   return out
+}
+
+/** The STRUCTURAL authority's descriptor for a command, or `null`.
+ *
+ *  `policy.ts` folds the two hard-deny authorities as a UNION (regex first,
+ *  then `assessShellCommand`), so an inspector that enumerates only the regex
+ *  catalog under-reports every denial the grammar alone can see — a
+ *  `+refspec` force-push, a `:branch` delete, a `git switch -f`. The rule NAME
+ *  is shared vocabulary by design (`shell/rules.ts` reuses the catalog's
+ *  names), so the description is taken from the catalog when the name is in it
+ *  and falls back to the assessment's own prose when it is not.
+ *
+ *  Security: `name` + `description` only, same contract as the regex half —
+ *  `assessShellCommand` never produces a regex source to leak. */
+const structuralHardDenyRule = (command: string | undefined): MatchedHardDenyRule | null => {
+  if (command === undefined || command.length === 0) return null
+  const assessment = assessShellCommand(command)
+  if (assessment.kind !== "hard-deny") return null
+  const name = assessment.rule
+  if (name === undefined) return null
+  const catalogued = HARD_DENY_RULES.find((r) => r.name === name)
+  return { name, description: catalogued?.description ?? assessment.reason }
 }
 
 /** Replay the base `evaluate(action, ctx)` for one mode + return its verdict.
@@ -193,6 +232,7 @@ const buildPipeline = (
   ctx: PermissionContext,
   tier: HITLTier | undefined,
   hardDenyHits: readonly MatchedHardDenyRule[],
+  structuralReady: boolean,
 ): readonly AxisStep[] => {
   const out: AxisStep[] = []
 
@@ -224,6 +264,15 @@ const buildPipeline = (
       axis: "hard-deny",
       outcome: "n/a",
       reason: "No shell command supplied — HARD_DENY gate not triggered",
+    })
+  } else if (!structuralReady) {
+    // EXPLICIT BRANCH, not a silent degrade. Only one of the two authorities
+    // was consulted, so "nothing matched" is a claim this trace cannot make.
+    out.push({
+      axis: "hard-deny",
+      outcome: "n/a",
+      reason:
+        "No HARD_DENY pattern matched — but the STRUCTURAL authority is not initialized, so only the regex catalog was consulted",
     })
   } else {
     out.push({
@@ -334,7 +383,16 @@ export const inspectPermission = (
   meta: InspectToolMeta = {},
 ): PermissionInspection => {
   const isReadOnly = meta.isReadOnly === true
-  const hardDenyRules = matchHardDenyRules(meta.shellCommand)
+  // BOTH authorities, same union `hardDenyMatched` (and `policy.ts`) already
+  // computes. A rule the grammar names and the catalog does not is appended,
+  // never duplicated: the two vocabularies deliberately share names.
+  const regexRules = matchHardDenyRules(meta.shellCommand)
+  const structuralRule = structuralHardDenyRule(meta.shellCommand)
+  const hardDenyRules: readonly MatchedHardDenyRule[] =
+    structuralRule === null || regexRules.some((r) => r.name === structuralRule.name)
+      ? regexRules
+      : [...regexRules, structuralRule]
+  const structuralAuthorityReady = shellEffectParserReady()
 
   // Cross-check that our description-only matcher and the runtime gate
   // agree — we mirror `hardDenyReason`'s short-circuit so a future regex
@@ -352,7 +410,7 @@ export const inspectPermission = (
   const tier = meta.hitlTier
   const mapped = meta.isReadOnly !== undefined || meta.hitlTier !== undefined
   const modePolicy = buildModeMatrix(probeAction, tier)
-  const pipeline = buildPipeline(probeAction, ctx, tier, hardDenyRules)
+  const pipeline = buildPipeline(probeAction, ctx, tier, hardDenyRules, structuralAuthorityReady)
 
   const out: PermissionInspection = {
     tool,
@@ -360,6 +418,7 @@ export const inspectPermission = (
     isReadOnly,
     hardDenyMatched,
     hardDenyRules,
+    structuralAuthorityReady,
     modePolicy,
     pipeline,
     ...(tier !== undefined ? { hitlTier: tier } : {}),

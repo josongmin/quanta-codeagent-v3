@@ -75,12 +75,21 @@
  */
 
 import { describe, expect, test } from "bun:test"
+import {
+  type AxisStep,
+  finalDecisionFor,
+  inspectPermission,
+  type PermissionInspection,
+} from "@/permission/inspect"
 import { HARD_DENY_RULES, hardDenyReason } from "@/permission/policy"
 import { normalizeShellForDeny } from "@/permission/policy-rules"
 import {
+  __resetShellEffectParserForTest,
   assessShellCommand,
+  assessShellCommandWith,
   initShellEffectParser,
   type ShellAssessmentKind,
+  shellEffectParserReady,
 } from "@/permission/shell"
 import type { ToolAction } from "@/permission/types"
 import { PERMISSION_RULE_FIXTURES } from "../permission-rules.fixtures"
@@ -448,5 +457,255 @@ describe("A-3 the discriminator reports the defect and nothing else", () => {
     expect(HARD_DENY_RULES.length).toBeGreaterThanOrEqual(11)
     expect(regexRuleFor("rm -rf /")).toBe("rm-recursive-force-system-root")
     expect(assessShellCommand("git checkout -- src/foo.ts").rule).toBe("git-checkout-discard-path")
+  })
+})
+
+/* ------------------------------------------------------------------------- *
+ * A-4 — THE RENDERED SURFACE: the same union, or the operator is told a lie
+ * ------------------------------------------------------------------------- */
+
+/**
+ * ITERATION 6 OF THE SAME GENERATIVE DEFECT, one layer out.
+ *
+ * `inspect.ts` computes `hardDenyMatched` as the UNION of both authorities —
+ * and computes `hardDenyRules`, the ARRAY, from the REGEX HALF ONLY
+ * (`matchHardDenyRules` walks `HARD_DENY_RULES` and nothing else). Two
+ * consumers read that array, and on a structural-only denial both of them
+ * contradict the verdict printed beside them, on one screen:
+ *
+ *   `finalDecisionFor`  ->  "HARD_DENY rule '(unknown rule)' matches …"
+ *   `buildPipeline`     ->  axis hard-deny: n/a,
+ *                           "No HARD_DENY pattern matched the supplied command"
+ *
+ * Measured before the fix, through `inspectPermission`:
+ *
+ *   git push origin +main:main        assess=hard-deny(git-push-force)
+ *                                     matched=true rules=[] -> '(unknown rule)'
+ *   git push --delete origin feature/x   ditto
+ *   git push origin :feature/x           ditto
+ *   git push origin :a :b                ditto
+ *
+ * The operator is refused, told the refusal has no rule and told no pattern
+ * matched. The rule EXISTS — `git-push-force` is in `HARD_DENY_RULES`; the
+ * structural authority named it and the array never asked.
+ */
+describe("A-4 the inspector's rule ARRAY is the same union as its own verdict", () => {
+  const inspectFor = (cmd: string): PermissionInspection =>
+    inspectPermission(
+      "bash",
+      { mode: "default" },
+      { isReadOnly: false, hitlTier: "always-confirm", shellCommand: cmd },
+    )
+
+  const denyAxisOf = (cmd: string): AxisStep | undefined =>
+    inspectFor(cmd).pipeline.find((s) => s.axis === "hard-deny")
+
+  /** The four spellings the regex catalogue cannot see and the grammar can:
+   *  a `+refspec` force-push and the three delete-a-remote-branch forms. */
+  const STRUCTURAL_ONLY_PUSHES = [
+    "git push origin +main:main",
+    "git push --delete origin feature/x",
+    "git push origin :feature/x",
+    "git push origin :a :b",
+  ] as const
+
+  test("the four structural-only push denials name their rule instead of '(unknown rule)'", () => {
+    const rendered = STRUCTURAL_ONLY_PUSHES.map((cmd) => {
+      const insp = inspectFor(cmd)
+      const decision = finalDecisionFor(insp, "default")
+      return {
+        cmd,
+        operator: operatorHardDenied(cmd),
+        matched: insp.hardDenyMatched,
+        ruleNames: insp.hardDenyRules.map((r) => r.name),
+        reason: decision.kind === "deny" ? decision.reason : `NOT-A-DENY:${decision.kind}`,
+      }
+    })
+    expect(rendered).toEqual(
+      STRUCTURAL_ONLY_PUSHES.map((cmd) => ({
+        cmd,
+        operator: true,
+        matched: true,
+        ruleNames: ["git-push-force"],
+        reason: "HARD_DENY rule 'git-push-force' matches the supplied command",
+      })),
+    )
+  })
+
+  test("the four structural-only push denials render a DENY axis, not 'no matching pattern'", () => {
+    // The second consumer of the same array. `buildPipeline` prints
+    // `outcome: n/a` + "No HARD_DENY pattern matched" beside a decision that
+    // says the command is refused — the axis trace an operator reads to learn
+    // WHY, telling them the gate did not fire.
+    for (const cmd of STRUCTURAL_ONLY_PUSHES) {
+      const step = denyAxisOf(cmd)
+      expect({
+        cmd,
+        outcome: step?.outcome,
+        mentionsRule: step?.reason.includes("git-push-force"),
+      }).toEqual({ cmd, outcome: "deny", mentionsRule: true })
+    }
+  })
+
+  test("CORPUS-WIDE — every operator hard-deny carries at least one named rule", () => {
+    // The same 219-command derived corpus the other two arms are judged on.
+    // Neither authority picked these cases.
+    const unnamed = CORPUS.filter(
+      (cmd) => operatorHardDenied(cmd) && inspectFor(cmd).hardDenyRules.length === 0,
+    )
+    expect({ deniedWithNoNamedRule: unnamed }).toEqual({ deniedWithNoNamedRule: [] })
+  })
+
+  test("CORPUS-WIDE — '(unknown rule)' is never rendered, in any mode", () => {
+    const lies = CORPUS.flatMap((cmd) => {
+      const insp = inspectFor(cmd)
+      return (["default", "acceptEdits", "bypass", "auto"] as const).flatMap((mode) => {
+        const d = finalDecisionFor(insp, mode)
+        return d.kind === "deny" && d.reason.includes("(unknown rule)") ? [`${cmd} @${mode}`] : []
+      })
+    })
+    expect({ unknownRuleRenderings: lies }).toEqual({ unknownRuleRenderings: [] })
+  })
+
+  test("CORPUS-WIDE — the axis trace never says 'no pattern matched' about a denied command", () => {
+    const contradictions = CORPUS.flatMap((cmd) => {
+      if (!operatorHardDenied(cmd)) return []
+      const step = denyAxisOf(cmd)
+      if (step === undefined) return [`${cmd} :: NO hard-deny axis step at all`]
+      return step.outcome === "deny" ? [] : [`${cmd} :: axis=${step.outcome} :: ${step.reason}`]
+    })
+    expect({ axisContradictions: contradictions }).toEqual({ axisContradictions: [] })
+  })
+
+  test("NON-VACUITY — the structural-only population is REAL in this corpus", () => {
+    // Without this, all four arms above are satisfied by a corpus in which
+    // every denial happens to have a regex rule, and the union is never
+    // exercised.
+    const structuralOnly = CORPUS.filter(
+      (cmd) => regexRuleFor(cmd) === null && operatorHardDenied(cmd),
+    )
+    expect(structuralOnly.length).toBeGreaterThan(0)
+    // ...and each one is named by the STRUCTURAL authority's own rule name, so
+    // the array is a union of the two vocabularies rather than a stub that
+    // pushes a placeholder to satisfy `length > 0`.
+    for (const cmd of structuralOnly) {
+      const expected = assessShellCommand(cmd).rule
+      expect({ cmd, names: inspectFor(cmd).hardDenyRules.map((r) => r.name) }).toEqual({
+        cmd,
+        names: expect.arrayContaining([expected]),
+      })
+    }
+  })
+
+  test("SECURITY CONTRACT — an appended structural descriptor is still name+description ONLY", () => {
+    // The array grew a new producer. The no-regex-literals contract that
+    // governs it did not change.
+    for (const cmd of STRUCTURAL_ONLY_PUSHES) {
+      for (const rule of inspectFor(cmd).hardDenyRules) {
+        expect(Object.keys(rule).sort()).toEqual(["description", "name"])
+        expect(rule.description.length).toBeGreaterThan(0)
+        expect(rule.description).not.toMatch(/\\b|\\s|\(\?:/)
+      }
+    }
+  })
+
+  test("PAIRED CONTROL — a permitted command still names NO rule, and no axis deny", () => {
+    // The fix must not turn the array into "always non-empty".
+    for (const cmd of ["git status", "ls -la ./src", "git restore src/foo.ts"]) {
+      const insp = inspectFor(cmd)
+      expect({ cmd, rules: insp.hardDenyRules.length, matched: insp.hardDenyMatched }).toEqual({
+        cmd,
+        rules: 0,
+        matched: false,
+      })
+      expect(denyAxisOf(cmd)?.outcome).toBe("n/a")
+    }
+  })
+
+  test("PAIRED CONTROL — a regex-only denial is UNCHANGED (no duplicate, same head)", () => {
+    // `rm -rf /` is denied by the regex catalogue alone. Appending the
+    // structural half must not duplicate a name nor reorder the array.
+    const insp = inspectFor("rm -rf /")
+    const names = insp.hardDenyRules.map((r) => r.name)
+    expect(names[0]).toBe("rm-recursive-force-system-root")
+    expect(new Set(names).size).toBe(names.length)
+  })
+})
+
+/* ------------------------------------------------------------------------- *
+ * A-5 — THE TRAP: the structural half is ASYNC-ARMED and the inspector is not
+ * ------------------------------------------------------------------------- */
+
+/**
+ * `inspectPermission` is SYNCHRONOUS; `assessShellCommand` only works after
+ * `initShellEffectParser()` has been awaited. Before that the grammar is
+ * `null`, every assessment is `unknown`, and the union quietly collapses back
+ * to the regex catalogue — the exact pre-fix behaviour, with no diff to blame.
+ * That is how this defect returns, so it gets its own arm: the degrade must be
+ * ABSENT (structural half gone) and OBSERVABLE (a flag on the record and an
+ * explicit branch in the axis trace), never silent.
+ */
+describe("A-5 the not-armed structural authority degrades OBSERVABLY, not silently", () => {
+  const inspectFor = (cmd: string): PermissionInspection =>
+    inspectPermission(
+      "bash",
+      { mode: "default" },
+      { isReadOnly: false, hitlTier: "always-confirm", shellCommand: cmd },
+    )
+
+  test("the not-ready parse path answers `unknown` — proven through the injected seam", () => {
+    // No global mutation: `assessShellCommandWith` is the module's own seam for
+    // exactly this. Proves the degrade is a real code path, not a hypothesis.
+    expect(assessShellCommandWith("git push origin :feature/x", { parse: () => null }).kind).toBe(
+      "unknown",
+    )
+  })
+
+  test("with the grammar dropped: structural half ABSENT, and the record SAYS so", async () => {
+    expect(shellEffectParserReady()).toBe(true)
+    const armed = inspectFor("git push origin :feature/x")
+    expect({
+      ready: armed.structuralAuthorityReady,
+      names: armed.hardDenyRules.map((r) => r.name),
+      matched: armed.hardDenyMatched,
+    }).toEqual({ ready: true, names: ["git-push-force"], matched: true })
+
+    __resetShellEffectParserForTest()
+    try {
+      expect(shellEffectParserReady()).toBe(false)
+      const bare = inspectFor("git push origin :feature/x")
+      // ABSENT: the structural half is gone — the whole gate is, which is why
+      // this cannot be allowed to be silent.
+      expect({
+        ready: bare.structuralAuthorityReady,
+        names: bare.hardDenyRules.map((r) => r.name),
+        matched: bare.hardDenyMatched,
+      }).toEqual({ ready: false, names: [], matched: false })
+      // OBSERVABLE: the axis trace takes an EXPLICIT not-armed branch instead
+      // of asserting the confident "No HARD_DENY pattern matched".
+      const step = bare.pipeline.find((s) => s.axis === "hard-deny")
+      expect(step?.reason).not.toBe("No HARD_DENY pattern matched the supplied command")
+      expect(step?.reason.toLowerCase()).toContain("structural")
+
+      // PAIRED CONTROL — the reset removed ONLY the structural half. The regex
+      // catalogue still denies, still names its rule, still renders a deny axis.
+      const regexOnly = inspectFor("rm -rf /")
+      expect({
+        matched: regexOnly.hardDenyMatched,
+        names: regexOnly.hardDenyRules.map((r) => r.name),
+        axis: regexOnly.pipeline.find((s) => s.axis === "hard-deny")?.outcome,
+      }).toEqual({
+        matched: true,
+        names: ["rm-recursive-force-system-root"],
+        axis: "deny",
+      })
+    } finally {
+      await initShellEffectParser()
+    }
+    // Restored for every arm that runs after this one.
+    expect(shellEffectParserReady()).toBe(true)
+    expect(inspectFor("git push origin :feature/x").hardDenyRules.map((r) => r.name)).toEqual([
+      "git-push-force",
+    ])
   })
 })
