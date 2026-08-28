@@ -3,9 +3,9 @@
  * as the workflows.
  *
  * The manifest (`tools/dev/gate-manifest.ts`) exists because the gate set lived
- * ONLY in `.github/workflows/*.yml` and GitHub Actions has not started a job in
- * this repo since billing was cut, so nothing between "write the code" and
- * "push" ran it. A local copy of a remote list is the classic stale artifact:
+ * ONLY as steps inside `.github/workflows/*.yml`, which is not a runnable local
+ * command — so the pre-commit answer was reconstructed from memory every time.
+ * A local copy of a remote list is the classic stale artifact:
  * without this test, the manifest would drift the first time someone added a CI
  * step, and `prepush: ok` would then be a claim over a smaller universe than the
  * merge gate — the precise "confident number over a universe nobody checked"

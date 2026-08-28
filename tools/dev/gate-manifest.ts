@@ -1,14 +1,20 @@
 /**
  * SSOT for what "precommit" and "prepush" mean in this repo.
  *
- * WHY THIS FILE EXISTS. There are no git hooks here (`core.hooksPath` is the
- * default and `.git/hooks` holds only samples) and there were no `precommit` /
- * `prepush` scripts, so the ONLY place the gate set was written down was
- * `.github/workflows/*.yml` — and GitHub Actions has not started a job in this
- * repo since billing was cut. The gates were therefore reachable by nobody:
- * measured, `bun run lint` went RED on two consecutive days from commits that
- * landed `assist/source/organizeImports` and `format` ERRORS, because nothing
- * between "write the code" and "push" ever ran it.
+ * WHY THIS FILE EXISTS. Development here happens LOCALLY, and there was no
+ * local command for the gate set. The list existed only as steps inside
+ * `.github/workflows/*.yml` — a shape you cannot run, cannot compose, and
+ * cannot see the total of. So the answer to "am I about to break the build?"
+ * was a from-memory reconstruction, every time, by every session.
+ *
+ * That is independent of whether CI is running: a green pipeline still reports
+ * AFTER the commit exists, and the thing wanted here is a verdict BEFORE it.
+ *
+ * Measured cost of not having it: `bun run lint` went RED on two consecutive
+ * days from commits that landed `assist/source/organizeImports` and `format`
+ * ERRORS. biome exits 0 on WARN, so the ~221 warnings a normal run prints look
+ * identical to a clean one — the failure is invisible unless the command is
+ * actually run and its EXIT CODE read.
  *
  * NOT A SECOND AUTHORITY. Every gate below shells out to the SAME
  * `bun run <script>` a developer and a workflow run — never a reimplementation.
