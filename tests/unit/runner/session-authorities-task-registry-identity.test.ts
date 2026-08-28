@@ -74,6 +74,7 @@ import { join, relative } from "node:path"
 import { buildSubagentConfigCore } from "@/runner/assemble"
 import { buildSessionAuthorities } from "@/runner/assemble/session-authorities"
 import { createAgentTool, TaskRegistry } from "@/subagent"
+import { assertScanPopulation } from "../_shared/scan-population"
 
 const REPO_ROOT = join(import.meta.dir, "..", "..", "..")
 const SRC_DIR = join(REPO_ROOT, "src")
@@ -139,6 +140,15 @@ const scanMints = (srcRoot: string): Record<string, number> => {
 }
 
 describe("RFC-01 A2 — TaskRegistry constructor-owner drift-guard (mint-counting)", () => {
+  test("ANTI-VACUITY: the walk reaches a real, populated `src/` tree", () => {
+    // Mint-counting over an empty walk counts zero mints, and zero satisfies
+    // "no competing constructor" for free.
+    assertScanPopulation([...walk(SRC_DIR)], SRC_DIR, {
+      min: 500,
+      collectable: (n) => n.endsWith(".ts") && !n.endsWith(".d.ts") && !n.endsWith(".test.ts"),
+    })
+  })
+
   test("production `new TaskRegistry(` sites + per-file counts EXACTLY match the pinned set", () => {
     const scanned = scanMints(SRC_DIR)
     // Exact map equality catches BOTH a new competing constructor (a key not in

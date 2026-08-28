@@ -22,6 +22,7 @@
 import { describe, expect, test } from "bun:test"
 import { readdirSync, readFileSync, statSync } from "node:fs"
 import { join } from "node:path"
+import { assertScanPopulation } from "../../_shared/scan-population"
 
 const REPO_ROOT = join(import.meta.dir, "..", "..", "..", "..")
 const WEB_DAEMON_DIR = join(REPO_ROOT, "src", "apps", "web-daemon")
@@ -45,6 +46,14 @@ const stripComments = (src: string): string =>
 const DISCOVERY_RE = /\bdiscover(?:System)?Skills\b/
 
 describe("RFC-06 F4 — discovery-owner ratchet", () => {
+  test("ANTI-VACUITY: the web-daemon walk reaches a real, populated tree", () => {
+    // `expect(offenders).toEqual([])` is satisfied by a walk that read nothing.
+    assertScanPopulation(listTsFiles(WEB_DAEMON_DIR), WEB_DAEMON_DIR, {
+      min: 10,
+      collectable: (n) => n.endsWith(".ts"),
+    })
+  })
+
   test("no file under src/apps/web-daemon/ references discoverSkills / discoverSystemSkills", () => {
     const offenders = listTsFiles(WEB_DAEMON_DIR)
       .filter((f) => DISCOVERY_RE.test(stripComments(readFileSync(f, "utf8"))))

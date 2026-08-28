@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test"
 import { readdirSync, readFileSync, statSync } from "node:fs"
 import { extname, join, relative } from "node:path"
 import { scanConsoleCalls } from "./_arch/slice-boundary-scanner"
+import { assertScanPopulation } from "./_shared/scan-population"
 
 const REPO_ROOT = join(import.meta.dir, "..", "..")
 const SRC_DIR = join(REPO_ROOT, "src")
@@ -110,6 +111,15 @@ const scanConsoleFile = (file: string): readonly Match[] => {
 const collectConsoleMatches = (): readonly Match[] => walkTsFiles(SRC_DIR).flatMap(scanConsoleFile)
 
 describe("terminal defaults ratchet", () => {
+  test("ANTI-VACUITY: the walk reaches a real, populated `src/` tree", () => {
+    // The ratchet pins a debt COUNT of zero. Zero matches over a tree that was
+    // never read is indistinguishable from zero over a clean one.
+    assertScanPopulation(walkTsFiles(SRC_DIR), SRC_DIR, {
+      min: 500,
+      collectable: (n) => n.endsWith(".ts"),
+    })
+  })
+
   test("no new non-app files own process stdio or process.exit", () => {
     const files = new Set(collectMatches().map((match) => match.relPath))
     const unexpected = [...files]

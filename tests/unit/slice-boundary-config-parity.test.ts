@@ -80,6 +80,16 @@ const wiredSlices = (): Set<string> => {
 }
 
 describe("slice-boundary config <-> entrypoint parity", () => {
+  test("ANTI-VACUITY: the entrypoint listing found real slice-boundary files", () => {
+    // Parity is asserted between the config keys and the files on disk. An
+    // empty listing turns the per-file loop into a loop over nothing, and the
+    // set comparison then reports whatever the config alone says.
+    expect(
+      entrypointFileNames().length,
+      "no `<slice>-slice-boundary.test.ts` file was found next to this test",
+    ).toBeGreaterThan(1)
+  })
+
   test("every registered config has a WIRED entrypoint (no inert/dead config)", () => {
     const configs = new Set(Object.keys(SLICE_BOUNDARY_CONFIGS))
     const wired = wiredSlices()

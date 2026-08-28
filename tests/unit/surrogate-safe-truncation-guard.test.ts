@@ -45,6 +45,7 @@ import { join, relative } from "node:path"
 import ts from "typescript"
 import { sliceTailWholeChars, sliceWholeChars } from "@/shared"
 import { stripIllegalXmlChars } from "@/tool/document/authoring"
+import { assertScanPopulation } from "./_shared/scan-population"
 
 const REPO_ROOT = join(import.meta.dir, "../..")
 
@@ -443,6 +444,18 @@ const collectAllCapSlices = (): CapSliceSite[] => {
 }
 
 describe("PART 2 — static ratchet: no NEW naive cap-slice on a string", () => {
+  test("ANTI-VACUITY: the walk reaches a real, populated `src/` tree", () => {
+    // A cap-slice ratchet over an empty file list finds no naive slice anywhere.
+    assertScanPopulation(listTsFiles(SRC_DIR), SRC_DIR, {
+      min: 500,
+      collectable: (n) =>
+        n.endsWith(".ts") &&
+        !n.endsWith(".d.ts") &&
+        !n.includes(".from-worktree") &&
+        !n.includes(".my-backup"),
+    })
+  })
+
   test("every raw cap-slice is allowlisted (hash/id) or burn-down — no new unlisted site", () => {
     const sites = collectAllCapSlices()
     const violations = sites.filter(

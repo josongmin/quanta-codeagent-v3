@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import { readdirSync, readFileSync } from "node:fs"
 import { join } from "node:path"
+import { assertScanPopulation } from "../_shared/scan-population"
 
 const REPO_ROOT = join(import.meta.dir, "..", "..", "..")
 
@@ -15,14 +16,30 @@ const REPO_ROOT = join(import.meta.dir, "..", "..", "..")
 // SSOT invariant — owner-sibling resolution + repair-seed evidence packet +
 // false-red telemetry are all wired — is unchanged by the file split.
 const DRIVER_DIR = join(REPO_ROOT, "src/runner/batch/eval/driver")
+/** Enumerated ONCE: the floor and the blob read the same list, so a lane that
+ *  goes unread cannot pass the floor and vanish from the text. */
+const laneFiles = (): string[] =>
+  readdirSync(DRIVER_DIR)
+    .filter((f) => f.endsWith(".ts") && !f.endsWith(".test.ts"))
+    .map((f) => join(DRIVER_DIR, f))
+
 const DRIVER_SRC = [
   readFileSync(join(REPO_ROOT, "src/runner/batch/eval/driver.ts"), "utf8"),
-  ...readdirSync(DRIVER_DIR)
-    .filter((f) => f.endsWith(".ts") && !f.endsWith(".test.ts"))
-    .map((f) => readFileSync(join(DRIVER_DIR, f), "utf8")),
+  ...laneFiles().map((f) => readFileSync(f, "utf8")),
 ].join("\n")
 
 describe("runner closure-repair driver parity", () => {
+  test("ANTI-VACUITY: the driver lane slice was actually read", () => {
+    // Every assertion below is a `toContain` on the concatenated blob. A lane
+    // that went unread simply is not in the text — and the parity it carries
+    // reads as unwired, or, for a `not.toContain`, as clean.
+    assertScanPopulation(laneFiles(), DRIVER_DIR, {
+      min: 2,
+      topLevelOnly: true,
+      collectable: (f) => f.endsWith(".ts") && !f.endsWith(".test.ts"),
+    })
+  })
+
   test("wires owner-sibling resolution into the closure bundle and repair seed", () => {
     // Owner-sibling resolution (driver/candidate-family-ports.ts +
     // driver/attempt-context.ts): resolve the owning siblings, read their source

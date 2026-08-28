@@ -29,6 +29,7 @@ import { describe, expect, test } from "bun:test"
 import { readdirSync, readFileSync, statSync } from "node:fs"
 import { join, relative } from "node:path"
 import type { AgentConfig } from "@/agent"
+import { assertScanPopulation } from "./_shared/scan-population"
 
 const REPO_ROOT = join(import.meta.dir, "..", "..")
 const SRC_ROOT = join(REPO_ROOT, "src")
@@ -90,6 +91,16 @@ const format = (hits: readonly Hit[]): string =>
   hits.map((h) => `  ${h.file}:${h.line}  [${h.needle}]`).join("\n")
 
 describe("retrieval bridge deleted ratchet (ADR-0553)", () => {
+  test("ANTI-VACUITY: the src walk reaches a real, populated tree", () => {
+    // The ratchet asserts a bridge is GONE. A walk that lost a subtree finds no
+    // survivor there and reports exactly the deletion it wants to see.
+    assertScanPopulation(walkTs(SRC_ROOT), SRC_ROOT, {
+      min: 500,
+      skipDirs: ["__snapshots__"],
+      collectable: (n) => n.endsWith(".ts") || n.endsWith(".tsx"),
+    })
+  })
+
   test("(a)+(b) no src/ file references the retired bridge / gate / slot (0 hits)", () => {
     const hits = scanSources(loadSrc())
     if (hits.length > 0) {

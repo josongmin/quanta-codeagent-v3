@@ -24,9 +24,15 @@
  * moves — which is exactly when nobody is looking at the guard. So the floor
  * has to be a convention with a ratchet, not something to remember.
  *
- * MEASURED at the time of writing: 141 scanning guards, 38 with no floor at
- * all. The three fixed that night had zero floors before the fix — the
- * predictor was checked against them, not fitted to them.
+ * MEASURED at the time of writing: 141 scanning guards, 48 with no floor at all.
+ * The three fixed that night had zero floors before the fix — the predictor was
+ * checked against them, not fitted to them. Of the 48, thirty were real repo
+ * scans and all thirty now carry a floor, each shown red under an injection that
+ * empties or truncates its own walk; the other sixteen enumerate a directory the
+ * test itself created and are classified below.
+ *
+ * NEEDS_FLOOR is therefore EMPTY, which is the interesting state: the next
+ * floorless scanner to appear has nowhere to hide.
  */
 import { describe, expect, test } from "bun:test"
 import { readdirSync, readFileSync, statSync } from "node:fs"
@@ -84,17 +90,9 @@ const withoutFloor = (): readonly string[] =>
  * Neither list may grow silently, and a floor that appears must delete its line.
  */
 const NEEDS_FLOOR: readonly string[] = [
-  "tests/unit/retrieval-bridge-deleted-ratchet.test.ts",
-  "tests/unit/retrieval/budget-probe-hellgate.test.ts",
-  "tests/unit/runner/closure-repair-driver-parity.test.ts",
-  "tests/unit/runner/session-authorities-task-registry-identity.test.ts",
-  "tests/unit/runner/verify-select-driver-parity.test.ts",
-  "tests/unit/session-turn-driver-thin-surface-hellgate.test.ts",
-  "tests/unit/skill/runtime/f4-discovery-owner-ratchet.test.ts",
-  "tests/unit/slice-boundary-config-parity.test.ts",
-  "tests/unit/surrogate-safe-truncation-guard.test.ts",
-  "tests/unit/terminal-defaults-ratchet.test.ts",
-  "tests/unit/wire-batch-mode-focus-fork-otel-hellgate.test.ts",
+  // EMPTY — burned down. Do not re-add: a new scanner takes a floor, or takes a
+  // NOT_A_REPO_SCAN classification with a reason. Adding a line here is the
+  // papering this file exists to prevent.
 ]
 
 /** Enumerates a test-created directory, not the repo. Reason required. */

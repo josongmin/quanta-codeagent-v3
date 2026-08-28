@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import { existsSync, readdirSync, readFileSync } from "node:fs"
 import { join } from "node:path"
+import { assertScanPopulation } from "../_shared/scan-population"
 
 const REPO_ROOT = join(import.meta.dir, "..", "..", "..")
 // The runner core driver was split (jul-02 god-file reduction) into `./driver/*`
@@ -11,11 +12,14 @@ const REPO_ROOT = join(import.meta.dir, "..", "..", "..")
 // X" parity assertions still resolve against the runner-core-owned code, unchanged
 // in intent by the file split.
 const DRIVER_DIR = join(REPO_ROOT, "src/runner/batch/eval/driver")
+const runnerLaneFiles = (): string[] =>
+  readdirSync(DRIVER_DIR)
+    .filter((f) => f.endsWith(".ts"))
+    .map((f) => join(DRIVER_DIR, f))
+
 const DRIVER_SRC = [
   readFileSync(join(REPO_ROOT, "src/runner/batch/eval/driver.ts"), "utf8"),
-  ...readdirSync(DRIVER_DIR)
-    .filter((f) => f.endsWith(".ts"))
-    .map((f) => readFileSync(join(DRIVER_DIR, f), "utf8")),
+  ...runnerLaneFiles().map((f) => readFileSync(f, "utf8")),
 ].join("\n")
 // The app bench driver was split (refactor/bench-driver-lanes) into
 // `src/apps/bench/eval/driver/*.ts` lane modules — pure code motion. The
@@ -26,16 +30,35 @@ const DRIVER_SRC = [
 // parity assertions still resolve against the app-owned code, unchanged in
 // intent by the file split (mirrors the runner-side DRIVER_SRC glob above).
 const APP_DRIVER_DIR = join(REPO_ROOT, "src/apps/bench/eval/driver")
-const APP_DRIVER_SRC = [
-  readFileSync(join(REPO_ROOT, "src/apps/bench/eval/driver.ts"), "utf8"),
-  ...(existsSync(APP_DRIVER_DIR)
+const appLaneFiles = (): string[] =>
+  existsSync(APP_DRIVER_DIR)
     ? readdirSync(APP_DRIVER_DIR)
         .filter((f) => f.endsWith(".ts") && !f.endsWith(".test.ts"))
-        .map((f) => readFileSync(join(APP_DRIVER_DIR, f), "utf8"))
-    : []),
+        .map((f) => join(APP_DRIVER_DIR, f))
+    : []
+
+const APP_DRIVER_SRC = [
+  readFileSync(join(REPO_ROOT, "src/apps/bench/eval/driver.ts"), "utf8"),
+  ...appLaneFiles().map((f) => readFileSync(f, "utf8")),
 ].join("\n")
 
 describe("runner verify-select and patch-budget driver parity", () => {
+  test("ANTI-VACUITY: both driver lane slices were actually read", () => {
+    // `existsSync(DIR) ? … : []` was written for the pre-split tree; the dir
+    // exists now, so that branch means "read nothing" and every `not.toContain`
+    // below is satisfied for free.
+    assertScanPopulation(runnerLaneFiles(), DRIVER_DIR, {
+      min: 2,
+      topLevelOnly: true,
+      collectable: (f) => f.endsWith(".ts"),
+    })
+    assertScanPopulation(appLaneFiles(), APP_DRIVER_DIR, {
+      min: 2,
+      topLevelOnly: true,
+      collectable: (f) => f.endsWith(".ts") && !f.endsWith(".test.ts"),
+    })
+  })
+
   test("the verify-select orchestrator still executes the knob instead of silently ignoring it", () => {
     // The per-instance verify-select ORCHESTRATOR is the app driver's
     // `runSelectionPhase` (the runner core's dead duplicate was deleted — the

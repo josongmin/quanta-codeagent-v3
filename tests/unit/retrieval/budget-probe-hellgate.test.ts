@@ -36,6 +36,7 @@ import {
   createBudgetProbeFromLedger,
   createStaticBudgetProbe,
 } from "@/retrieval/budget-probe"
+import { assertScanPopulation } from "../_shared/scan-population"
 
 /** Minimal ledger duck — matches the documented bridge shape. */
 const mockLedger = (totalUsd: number) => ({
@@ -91,6 +92,23 @@ const collectOffenders = (roots: readonly string[]): readonly string[] => {
   const offenders: string[] = []
   for (const r of roots) collectFromDir(r, offenders)
   return offenders
+}
+
+/** The same traversal `collectFromDir` performs, returning what it VISITED
+ *  rather than what offended — `safeReaddir` swallows a failed read and returns
+ *  `[]`, so "no offender" and "no file opened" are otherwise the same answer. */
+const visitedUnder = (dir: string, out: string[] = []): string[] => {
+  for (const name of safeReaddir(dir)) {
+    const full = join(dir, name)
+    const s = safeStat(full)
+    if (s === undefined) continue
+    if (s.isDirectory()) {
+      visitedUnder(full, out)
+      continue
+    }
+    if (name.endsWith(".ts")) out.push(full)
+  }
+  return out
 }
 
 describe("budget-probe hellgate (12 cases)", () => {
@@ -159,7 +177,14 @@ describe("budget-probe hellgate (12 cases)", () => {
   test("HELL-BP-09 default-OFF — no agent/runner/apps imports @/retrieval/budget-probe", () => {
     const roots = ["src/agent", "src/runner", "src/apps"]
     const repoRoot = join(import.meta.dir, "..", "..", "..")
-    const offenders = collectOffenders(roots.map((r) => join(repoRoot, r)))
+    const absRoots = roots.map((r) => join(repoRoot, r))
+    for (const root of absRoots) {
+      assertScanPopulation(visitedUnder(root), root, {
+        min: 10,
+        collectable: (n) => n.endsWith(".ts"),
+      })
+    }
+    const offenders = collectOffenders(absRoots)
     expect(offenders).toEqual([])
   })
 

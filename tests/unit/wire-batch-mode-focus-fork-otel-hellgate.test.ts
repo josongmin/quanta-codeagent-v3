@@ -40,6 +40,7 @@ import {
 } from "@/observability/metrics/wire-new-slices"
 import { createShellSnapshotPort } from "@/runtime/shell-snapshot"
 import { headlessSpawner } from "@/runtime/shell-snapshot/headless-stub"
+import { assertScanPopulation } from "./_shared/scan-population"
 
 // ───────────────────────────────────────────────────────────────────────────
 // Helpers
@@ -122,15 +123,24 @@ describe("Wire 3 ADR-0219 — focus-chain reinject already wired in loop.ts", ()
     // monolithic loop.ts into the `src/agent/loop/` slice; read the whole loop
     // surface (shim + slice) so the tombstone pins the wire wherever it lives.
     const agentDir = join(import.meta.dir, "..", "..", "src", "agent")
-    const loopParts = [readFileSync(join(agentDir, "loop.ts"), "utf8")]
-    try {
-      for (const f of readdirSync(join(agentDir, "loop")).sort()) {
-        if (f.endsWith(".ts")) loopParts.push(readFileSync(join(agentDir, "loop", f), "utf8"))
-      }
-    } catch {
-      // pre-decomposition tree: the shim is the whole surface.
-    }
-    const loopSrc = loopParts.join("\n")
+    // The catch below was written for the pre-decomposition tree. The slice
+    // exists now, so it no longer means "not yet split" — it means the slice
+    // went unread, and every `toContain` on a wire that lives there would then
+    // report the wire as missing. Enumerated once, asserted, then read.
+    const loopDir = join(agentDir, "loop")
+    const sliceFiles = readdirSync(loopDir)
+      .sort()
+      .filter((f) => f.endsWith(".ts"))
+      .map((f) => join(loopDir, f))
+    assertScanPopulation(sliceFiles, loopDir, {
+      min: 5,
+      topLevelOnly: true,
+      collectable: (f) => f.endsWith(".ts"),
+    })
+    const loopSrc = [
+      readFileSync(join(agentDir, "loop.ts"), "utf8"),
+      ...sliceFiles.map((f) => readFileSync(f, "utf8")),
+    ].join("\n")
     expect(loopSrc).toContain("cfg.focusChain")
     expect(loopSrc).toContain("tracker.tickTurn()")
     expect(loopSrc).toContain("tracker.getInjection()")

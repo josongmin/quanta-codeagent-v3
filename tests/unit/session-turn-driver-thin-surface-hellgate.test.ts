@@ -15,6 +15,7 @@
 import { describe, expect, test } from "bun:test"
 import { existsSync, readdirSync, readFileSync } from "node:fs"
 import { join } from "node:path"
+import { assertScanPopulation } from "./_shared/scan-population"
 
 const REPO_ROOT = join(import.meta.dir, "..", "..")
 const read = (p: string): string => readFileSync(join(REPO_ROOT, p), "utf8")
@@ -22,19 +23,29 @@ const read = (p: string): string => readFileSync(join(REPO_ROOT, p), "utf8")
 // `session-loop.ts` into a `session-loop/*.ts` lane; aggregate the entrypoint +
 // every lane so the "drives THROUGH the shared driver" pin follows the code.
 const SESSION_LOOP_REL = "src/apps/cli/repl/session-loop"
+/** Enumerated ONCE: the floor and the aggregate read the same list. */
+const sessionLoopSliceFiles = (): string[] =>
+  readdirSync(join(REPO_ROOT, SESSION_LOOP_REL)).filter((f) => f.endsWith(".ts"))
+
 const readSessionLoopAggregate = (): string =>
-  [
-    `${SESSION_LOOP_REL}.ts`,
-    ...readdirSync(join(REPO_ROOT, SESSION_LOOP_REL))
-      .filter((f) => f.endsWith(".ts"))
-      .map((f) => `${SESSION_LOOP_REL}/${f}`),
-  ]
+  [`${SESSION_LOOP_REL}.ts`, ...sessionLoopSliceFiles().map((f) => `${SESSION_LOOP_REL}/${f}`)]
     .map(read)
     .join("\n")
 
 const DRIVER = "src/runner/orchestrate/session-turn-driver.ts"
 
 describe("session turn-driver thin-surface hellgate (ADR-0303)", () => {
+  test("ANTI-VACUITY: the session-loop slice was actually read", () => {
+    // The aggregate is one concatenated blob; a slice file that went unread is
+    // simply absent from it, and the surface it holds reads as thin.
+    const dir = join(REPO_ROOT, SESSION_LOOP_REL)
+    assertScanPopulation(
+      sessionLoopSliceFiles().map((f) => join(dir, f)),
+      dir,
+      { min: 2, topLevelOnly: true, collectable: (f) => f.endsWith(".ts") },
+    )
+  })
+
   test("the shared driver lives in @/runner and owns the approval-resolution loop", () => {
     expect(existsSync(join(REPO_ROOT, DRIVER))).toBe(true)
     const src = read(DRIVER)
