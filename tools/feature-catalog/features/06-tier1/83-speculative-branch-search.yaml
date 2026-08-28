@@ -38,6 +38,11 @@ evidence:
     - src/agent/branch-search/seed.ts
     - src/agent/branch-search/tool.ts
     - src/agent/branch-search-runner.ts
+    # Leaf split of the runner: the candidate-fork override CELL. It lives alone
+    # because `tests/setup.ts` (a bunfig preload, so it runs before every test
+    # file in the repo) needs exactly one symbol from it and must not drag the
+    # whole runner's import graph in behind it.
+    - src/agent/branch-search-runner/run-agent-override.ts
     - src/runner/knobs/knobs/branch-search.ts
   adrs: [84]
   tests:

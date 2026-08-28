@@ -83,7 +83,7 @@ const modelSwitch = (): WebModelSwitchHandle => {
     ids: () => ["boot-model", "gpt-5.6-terra"],
     refresh: async () => {},
     current: async () => "boot-model",
-    applyModel: () => {},
+    applyModel: async () => ({ ok: true }) as const,
   } satisfies WebModelSwitchHandle
 }
 
@@ -109,18 +109,20 @@ const lines = (spy: ReturnType<typeof spyOn> | undefined): string[] =>
 
 /** Enqueue `reqs` on the REAL port and run the REAL drain through the REAL
  *  applier — the same three collaborators the loop wires per turn. */
-const drive = (reqs: readonly { readonly kind: "set_model"; readonly model: string }[]): void => {
+const drive = async (
+  reqs: readonly { readonly kind: "set_model"; readonly model: string }[],
+): Promise<void> => {
   const ports = mintInboundPorts({ ...ENV }, liveCell(), modelSwitch())
   const control = ports.controlRequest
   if (control === undefined) throw new Error("control-request port not wired")
   for (const r of reqs) control.enqueue(r)
-  drainControlRequests(control.port, control.context, control.applier)
+  await drainControlRequests(control.port, control.context, control.applier)
 }
 
 describe("MR-08 · web control-request logging is bounded", () => {
-  test("BOUNDED-1: a 200k-char model id produces a SHORT warn line", () => {
+  test("BOUNDED-1: a 200k-char model id produces a SHORT warn line", async () => {
     const hostile = "z".repeat(200_000)
-    drive([{ kind: "set_model", model: hostile }])
+    await drive([{ kind: "set_model", model: hostile }])
     const warns = lines(warnSpy).filter((l) => l.includes("web control-request rejected"))
     expect(warns.length).toBe(1)
     const line = warns[0] as string
@@ -135,7 +137,7 @@ describe("MR-08 · web control-request logging is bounded", () => {
     expect(line.length).toBeLessThan(220)
   })
 
-  test("BOUNDED-2: 64 hostile frames cannot flood the log with 64 payloads", () => {
+  test("BOUNDED-2: 64 hostile frames cannot flood the log with 64 payloads", async () => {
     // The queue is bounded at MAX_PENDING_CONTROL_REQUESTS, but each retained
     // frame still logged its own full-size line. Total volume is the thing being
     // bounded here, not just per-line length.
@@ -143,7 +145,7 @@ describe("MR-08 · web control-request logging is bounded", () => {
       kind: "set_model" as const,
       model: `${"y".repeat(50_000)}${i}`,
     }))
-    drive(frames)
+    await drive(frames)
     const warns = lines(warnSpy).filter((l) => l.includes("web control-request rejected"))
     expect(warns.length).toBeGreaterThan(0)
     const total = warns.reduce((n, l) => n + l.length, 0)
@@ -151,8 +153,8 @@ describe("MR-08 · web control-request logging is bounded", () => {
     expect(total).toBeLessThan(64 * 400)
   })
 
-  test("BOUNDED-3: ANSI/OSC in a rejected id never reaches the log line", () => {
-    drive([{ kind: "set_model", model: "\u001b[2J\u001b]0;pwned\u0007gpt-4o" }])
+  test("BOUNDED-3: ANSI/OSC in a rejected id never reaches the log line", async () => {
+    await drive([{ kind: "set_model", model: "\u001b[2J\u001b]0;pwned\u0007gpt-4o" }])
     const line = lines(warnSpy).find((l) => l.includes("web control-request rejected")) as string
     expect(line).toBeDefined()
     expect(line).not.toContain("\u001b")
@@ -160,17 +162,17 @@ describe("MR-08 · web control-request logging is bounded", () => {
     expect(line).not.toContain("pwned")
   })
 
-  test("CONTROL-1: an ordinary short id is still legible in the warn", () => {
+  test("CONTROL-1: an ordinary short id is still legible in the warn", async () => {
     // Paired control — the cap must not make the log useless for the case an
     // operator actually debugs (a client asking for a model this host does not
     // have). The id itself has to be readable.
-    drive([{ kind: "set_model", model: "gpt-4o-mini" }])
+    await drive([{ kind: "set_model", model: "gpt-4o-mini" }])
     const line = lines(warnSpy).find((l) => l.includes("web control-request rejected")) as string
     expect(line).toContain("gpt-4o-mini")
     expect(line).not.toContain("…")
   })
 
-  test("CONTROL-2: the un-gated `thinking` axis is capped, the ALLOWLISTED model axis is not", () => {
+  test("CONTROL-2: the un-gated `thinking` axis is capped, the ALLOWLISTED model axis is not", async () => {
     // `thinkingLevels` is never supplied by this composition, and the planner
     // treats an absent allowlist as "the host opted out of gating this axis" — so
     // `set_thinking` carries an UNVALIDATED client string all the way to the
@@ -184,7 +186,7 @@ describe("MR-08 · web control-request logging is bounded", () => {
     if (control === undefined) throw new Error("control-request port not wired")
     control.enqueue({ kind: "set_thinking", level: "w".repeat(100_000) })
     control.enqueue({ kind: "set_model", model: "gpt-5.6-terra" })
-    drainControlRequests(control.port, control.context, control.applier)
+    await drainControlRequests(control.port, control.context, control.applier)
     const applied = lines(infoSpy).filter((l) => l.includes("web control-request applied"))
     const thinking = applied.find((l) => l.startsWith("web control-request applied: thinking="))
     expect(thinking).toBeDefined()

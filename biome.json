@@ -1220,6 +1220,7 @@
         "!tests/unit/host/effective-model-projection-hellgate.test.ts",
         "!tests/unit/llm/port-identity-capability-guard.test.ts",
         "!tests/unit/llm/boot-selection-producers.hellgate.test.ts",
+        "!tests/integration/model-routing-roots-contract.test.ts",
         "!tests/unit/mcp-governance-live-wire-hellgate.test.ts",
         "!tests/unit/radar/radar-e2e-hellgate.test.ts",
         "!tests/unit/status-pills-goal-chip-hellgate.test.ts",
