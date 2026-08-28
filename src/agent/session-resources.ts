@@ -1,4 +1,3 @@
-import { effectiveModelOf } from "./effective-model"
 import {
   attrs,
   GEN_AI_ATTRS,
@@ -18,6 +17,7 @@ import type { RedactionHit, RedactionOrigin } from "@/security"
 import type { RunContext } from "@/shared"
 import { type Tool, ToolRegistry } from "@/tool"
 import { type CloseoutGuardState, createCloseoutGuardState } from "./closeout-guard"
+import { effectiveModelOf } from "./effective-model"
 import { createLocalizePhaseState, type LocalizePhaseState } from "./localize-phase-guard"
 import type { PersistDeps } from "./memory"
 import type { AgentRecorder } from "./metrics"

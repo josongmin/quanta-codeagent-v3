@@ -123,8 +123,8 @@ describe("untrusted model ids cannot drive the terminal", () => {
 
   test("THE SEAM — the banner sanitizes even if a hostile value reaches it directly", () => {
     const banner = bannerFor(HOSTILE)
-    expect(banner).not.toContain(ESC + "[")
-    expect(banner).not.toContain(ESC + "]")
+    expect(banner).not.toContain(`${ESC}[`)
+    expect(banner).not.toContain(`${ESC}]`)
     expect(banner).not.toContain(BEL)
     // The box keeps its own line count: no forged row underneath it.
     expect(banner.split("\n").some((l) => l.trimStart().startsWith("Approve destructive"))).toBe(

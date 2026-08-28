@@ -1217,6 +1217,8 @@
         "!tests/unit/goal-pursuit-chain-hellgate.test.ts",
         "!tests/unit/goal-ticker-concurrency-hellgate.test.ts",
         "!tests/unit/host/mcp-health-shared.hellgate.test.ts",
+        "!tests/unit/host/effective-model-projection-hellgate.test.ts",
+        "!tests/unit/llm/port-identity-capability-guard.test.ts",
         "!tests/unit/mcp-governance-live-wire-hellgate.test.ts",
         "!tests/unit/radar/radar-e2e-hellgate.test.ts",
         "!tests/unit/status-pills-goal-chip-hellgate.test.ts",

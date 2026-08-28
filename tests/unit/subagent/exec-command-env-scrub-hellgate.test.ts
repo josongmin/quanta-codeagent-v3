@@ -15,7 +15,7 @@
  */
 import { describe, expect, test } from "bun:test"
 import { readFileSync } from "node:fs"
-import { dirname, join, resolve } from "node:path"
+import { dirname, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 import { stripComments } from "../_shared/strip-comments"
 

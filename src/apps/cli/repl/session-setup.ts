@@ -48,8 +48,8 @@ import { maybeRunEnvProbeWire } from "./env-probe-wire"
 import type { IndicatorUsageObserver } from "./factories/indicator-stream-port"
 import { composeCliRuntimeContext } from "./runtime-context-compose"
 import { readSessionRuntimeConfig } from "./session-runtime-config"
-import { resolveStickyModelBoot } from "./sticky-model-boot"
 import { buildSpinnerStallLiveWire, SPINNER_STALL_ENV_GATE } from "./spinner-stall-live-wire"
+import { resolveStickyModelBoot } from "./sticky-model-boot"
 /** Track D — DebugTracerHandle. Surface owns the live state + the
  *  swap-in/out side effect (mutable proxy port in the stream tee).
  *  The slash adapter consumes ONLY {@link DebugCmdState} I/O — it never

@@ -32,8 +32,8 @@ import {
   type KernelSessionState,
   type SessionHost,
 } from "@/kernel/session"
-import type { CapabilityManifest } from "@/protocol/session"
 import type { Message } from "@/llm"
+import type { CapabilityManifest } from "@/protocol/session"
 import { capabilitiesFor } from "../../support/session-fixtures"
 
 /** Through the SSOT fixture, per `tests/unit/_arch/capability-literal-ratchet`:
