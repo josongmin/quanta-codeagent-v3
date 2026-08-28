@@ -168,6 +168,11 @@ evidence:
     # against, and both are pinned by boot-selection-producers.hellgate.
     - src/apps/bench/boot-llm-wire.ts
     - src/host/runtime/agent-arg-builder/boot-port-wire.ts
+    # MR-02 — the ModelRoutingAuthority itself: ONE owner of the five decisions
+    # (storage key, explicit-pin precedence, persisted-pick vetting, candidate
+    # seeding, session scoping) the three roots each used to make for
+    # themselves. Same "which model actually runs" story this entry owns.
+    - src/agent/model-routing/authority.ts
   adrs: [517, 462]
   tests:
     unit:

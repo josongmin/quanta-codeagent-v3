@@ -44,10 +44,11 @@ const REPO = resolve(dirname(fileURLToPath(import.meta.url)), "../../..")
 
 /** A guard that ENUMERATES repo files and asserts over what it finds. */
 const SCANS_THE_REPO =
-  /readdirSync|globSync|new Glob\(|listSliceTsFiles|collectBiomeTargets|tsFilesUnder/
+  /readdirSync|globSync|\bGlob\(|\breaddir\s*\(|globby|fast-glob|listSliceTsFiles|collectBiomeTargets|tsFilesUnder/
 
 /**
  * A POPULATION FLOOR: some assertion that the scan actually reached something.
+ * Tested against COMMENT-STRIPPED source — a claim in prose is not a floor.
  * Deliberately generous — a bare `expect(files.length).toBeGreaterThan(0)`
  * counts. The point is not the floor's strength, it is that the author
  * considered the empty case at all.
@@ -72,7 +73,9 @@ const scanningGuards = (): readonly string[] =>
     .sort()
 
 const withoutFloor = (): readonly string[] =>
-  scanningGuards().filter((f) => !HAS_FLOOR.test(readFileSync(join(REPO, f), "utf8")))
+  scanningGuards().filter(
+    (f) => !HAS_FLOOR.test(stripComments(readFileSync(join(REPO, f), "utf8"))),
+  )
 
 /**
  * The detector is deliberately OVER-BROAD: it fires on any enumeration, because
@@ -97,6 +100,8 @@ const NEEDS_FLOOR: readonly string[] = [
 
 /** Enumerates a test-created directory, not the repo. Reason required. */
 const NOT_A_REPO_SCAN: Readonly<Record<string, string>> = {
+  "tests/unit/skill/playbook/spec-to-test-hellgate.test.ts":
+    "mkdtemp sandbox the generated driver ran in; asserted as an exact filename set",
   "src/connectors/custom-3p/__tests__/jsonl-store-atomic-hellgate.test.ts":
     "siblings of a file the test itself wrote into a temp dir",
   "src/migration/__tests__/import-log-fsync-hellgate.test.ts":
@@ -119,12 +124,34 @@ const NOT_A_REPO_SCAN: Readonly<Record<string, string>> = {
     "the lease dir the test created; `import.meta.dir` here is a subprocess import path, not a scan root",
   "tests/unit/bugbash-fix-drivers.test.ts": "the run dir the driver produced",
   "tests/unit/cli/hunk-receipt-frontdoor.test.ts": "receipt dir the test wrote",
+  "tests/unit/config-migration-persist-atomic-hellgate.test.ts":
+    "mkdtemp project dir the test wrote; checks no partial/tmp residue survives",
+  "tests/unit/config-migration-persist-harden-hellgate.test.ts":
+    "mkdtemp project dir the test wrote; residue check",
+  "tests/unit/dataset-reap-mirror-temps.test.ts":
+    "mkdtemp mirror root the reaper under test just cleaned",
+  "tests/unit/edit-write-atomic-default-e2e.hellgate.test.ts":
+    "mkdtemp dir; asserts no atomic-write temp file is left behind",
   "tests/unit/eval-generator-validation.test.ts":
     "generator output dir; asserted against exact counts",
+  "tests/unit/exfil-rails-glob.test.ts": "mkdtemp fixture tree built to exercise glob rails",
+  "tests/unit/external-config-migration-skills-memory-hellgate.test.ts":
+    "mkdtemp external-config home the migration under test populated",
+  "tests/unit/glob-rules-hellgate.test.ts": "mkdtemp workspace built per case, including symlinks",
   "tests/unit/memory/durable-store-default-hellgate.test.ts":
     "scratch cwd, asserted empty on purpose",
+  "tests/unit/migration-import-roundtrip-hellgate.test.ts":
+    "mkdtemp sessions root written by the import under test",
+  "tests/unit/output-spill-async-hellgate.test.ts": "the spill dir the run under test produced",
+  "tests/unit/project-env-astropy-real-e2e.test.ts": "mkdtemp checkout the e2e provisioned",
+  "tests/unit/repro-artifact-e2e.test.ts": "mkdtemp instance dir the repro run wrote",
   "tests/unit/runner/batch/failure-facts.test.ts":
     "the run dir, checking no `.tmp` residue survives",
+  "tests/unit/runner/knobs/persist-atomic-merge-hellgate.test.ts":
+    "mkdtemp knob dir; asserts no merge temp survives",
+  "tests/unit/session-registry-env-swap-hellgate.test.ts": "mkdtemp registry root per env swap",
+  "tests/unit/subagent-persistence-jsonl-hellgate.test.ts":
+    "mkdtemp base dir the persistence layer under test wrote",
 }
 
 const CLASSIFIED = new Set([...NEEDS_FLOOR, ...Object.keys(NOT_A_REPO_SCAN)])
@@ -165,10 +192,21 @@ describe("a scanning guard states what it examined", () => {
   test("ANTI-VACUITY: the detectors fire on the shapes they name", () => {
     expect(SCANS_THE_REPO.test("const files = readdirSync(SRC)")).toBe(true)
     expect(SCANS_THE_REPO.test("const files = new Glob('**/*.ts')")).toBe(true)
+    // Recall holes found by adversarial audit: the async form and the
+    // `new`-less Bun.Glob spelling were both invisible to the first detector.
+    expect(SCANS_THE_REPO.test("const files = await readdir(SRC)")).toBe(true)
+    expect(SCANS_THE_REPO.test("const g = Bun.Glob('**/*.ts')")).toBe(true)
+    // …without swallowing an unrelated identifier that merely ENDS in Glob.
+    expect(SCANS_THE_REPO.test("expect(pathLooksLikeGlob(x)).toBe(true)")).toBe(false)
     expect(SCANS_THE_REPO.test("const x = 1")).toBe(false)
     expect(HAS_FLOOR.test("assertScanPopulation(files, SRC)")).toBe(true)
     expect(HAS_FLOOR.test("expect(files.length).toBeGreaterThan(0)")).toBe(true)
     expect(HAS_FLOOR.test('test("ANTI-VACUITY: the scan reaches files")')).toBe(true)
     expect(HAS_FLOOR.test("expect(offenders).toEqual([])")).toBe(false)
+    // …and a floor cannot be a claim in prose. `withoutFloor` strips comments
+    // before testing, or "// anti-vacuity: n/a" would satisfy this file forever.
+    // Three real guards were passing on a comment alone when this was added.
+    expect(HAS_FLOOR.test(stripComments("// anti-vacuity: not needed here\n"))).toBe(false)
+    expect(HAS_FLOOR.test(stripComments("/** ANTI-VACUITY: see above */\n"))).toBe(false)
   })
 })

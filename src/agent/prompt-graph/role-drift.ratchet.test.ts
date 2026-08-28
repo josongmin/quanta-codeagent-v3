@@ -15,6 +15,7 @@
 import { describe, expect, test } from "bun:test"
 import { readFileSync } from "node:fs"
 import { join } from "node:path"
+import { assertScanPopulation } from "../../../tests/unit/_shared/scan-population"
 
 // `<seniority> [<up-to-2 words>] engineer` — requires a seniority prefix so
 // role tokens are caught while bare "software engineer" tone phrases are not.
@@ -30,6 +31,19 @@ const SCAN = "**/*.{ts,tsx}"
 const isTest = (p: string) => /\.(test|spec)\.[a-z]+$/.test(p) || /\/__\w+__\//.test(p)
 
 describe("role-drift ratchet — seniority ROLE word is single-sourced in shared.ts", () => {
+  test("ANTI-VACUITY: the glob reaches a real, populated `src/` tree", () => {
+    // The file already pins that the SSOT is non-empty. That is the other half:
+    // an SSOT full of role words still reports zero offenders if the scan that
+    // looks for them enumerated nothing.
+    assertScanPopulation(
+      [...new Bun.Glob(SCAN).scanSync(SRC_DIR)]
+        .filter((rel) => !isTest(rel))
+        .map((rel) => join(SRC_DIR, rel)),
+      SRC_DIR,
+      { min: 500, collectable: (n) => /\.(ts|tsx)$/.test(n) && !/\.(test|spec)\./.test(n) },
+    )
+  })
+
   test("no file outside shared.ts inlines a `<seniority> … engineer` role phrase", () => {
     const offenders: string[] = []
     for (const rel of new Bun.Glob(SCAN).scanSync(SRC_DIR)) {
