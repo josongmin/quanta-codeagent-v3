@@ -32,7 +32,7 @@ import {
   resolveRequestModel,
   UnroutableModelError,
 } from "@/agent/model-routing"
-import type { LLMPort, Provider } from "@/llm"
+import type { LLMPort } from "@/llm"
 import { isPlausibleModelSlug } from "@/llm/model-catalog"
 import { AGENT_PROMPT_MODES } from "@/shared"
 import {
