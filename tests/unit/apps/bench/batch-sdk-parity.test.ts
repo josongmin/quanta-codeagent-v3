@@ -6,6 +6,7 @@ import type { LLMPort, StreamEvent, StreamInput } from "@/llm"
 import { __resetRuntimeConfig } from "@/shared/runtime-config"
 import { runInstance } from "../../../../src/apps/bench/eval/index"
 import type { Instance } from "../../../../src/apps/bench/types"
+import { assertScanPopulation } from "../../_shared/scan-population"
 
 const REPO_ROOT = join(import.meta.dir, "..", "..", "..", "..")
 const originalBenchHome = process.env.QUANTA_BENCH_HOME
@@ -46,6 +47,18 @@ describe("T5 batch SDK parity", () => {
             .map((f) => readFileSync(join(APP_DRIVER_DIR, f), "utf8"))
         : []),
     ].join("\n")
+
+    // `existsSync(APP_DRIVER_DIR) ? … : []` was written for the pre-split tree.
+    // The dir exists now, so the fallback no longer means "not yet split", it
+    // means "read nothing" — and every `not.toContain` below is satisfied for
+    // free by an empty read.
+    assertScanPopulation(
+      readdirSync(APP_DRIVER_DIR)
+        .filter((f) => f.endsWith(".ts") && !f.endsWith(".test.ts"))
+        .map((f) => join(APP_DRIVER_DIR, f)),
+      APP_DRIVER_DIR,
+      { topLevelOnly: true, collectable: (n) => n.endsWith(".ts") && !n.endsWith(".test.ts") },
+    )
 
     expect(source).toContain('from "@/sdk/runtime"')
     expect(source).toContain("await createRuntime(")

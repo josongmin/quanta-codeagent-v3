@@ -32,6 +32,7 @@
 import { describe, expect, test } from "bun:test"
 import { readdirSync, readFileSync, statSync } from "node:fs"
 import { join } from "node:path"
+import { assertScanPopulation } from "../unit/_shared/scan-population"
 
 const SRC = join(import.meta.dir, "..", "..", "src")
 
@@ -58,6 +59,16 @@ const filesContaining = (needle: RegExp, excludeSubstr: string[] = []): string[]
   })
 
 describe("R2B → WIRED — RFC06-4 hunk-mutation CAS undo journal (RFC-def Surface A)", () => {
+  test("ANTI-VACUITY: the src collection is real and complete", () => {
+    // Every assertion below counts files CONTAINING a symbol. A collection that
+    // lost a subtree reports zero occurrences there and reads as "the seam is
+    // dead" — the exact conclusion this file exists to draw.
+    assertScanPopulation(ALL_SRC, SRC, {
+      min: 500,
+      collectable: (n) => n.endsWith(".ts") && !n.endsWith(".test.ts"),
+    })
+  })
+
   // These three assertions were dead-seam FINDINGS (the seam existed but had no
   // production caller). RFC-def Surface A (`/undo`) CLOSED the gap: the CLI
   // composition root now builds a durable journal store under `QUANTA_HUNK_UNDO`,

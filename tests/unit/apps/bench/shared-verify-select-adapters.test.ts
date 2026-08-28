@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import { existsSync, readdirSync, readFileSync } from "node:fs"
 import { join } from "node:path"
+import { assertScanPopulation } from "../../_shared/scan-population"
 
 const REPO_ROOT = join(import.meta.dir, "..", "..", "..", "..")
 // The app bench driver was split (refactor/bench-driver-lanes) into
@@ -33,6 +34,28 @@ const SHARED_DRIVER_SRC = [
 ].join("\n")
 
 describe("apps bench driver shared verify-select adapters", () => {
+  test("ANTI-VACUITY: both driver slices were actually read", () => {
+    // `existsSync(APP_DRIVER_DIR) ? … : []` was written for the pre-split tree.
+    // The dir exists now, so that fallback no longer means "not yet split" — it
+    // means "read nothing", and every `toContain` below would then be asserted
+    // against the barrel alone while the wiring it pins sits unread in the lane
+    // modules. Same for a `not.toContain`, which an empty read satisfies for free.
+    const app = readdirSync(APP_DRIVER_DIR)
+      .filter((f) => f.endsWith(".ts") && !f.endsWith(".test.ts"))
+      .map((f) => join(APP_DRIVER_DIR, f))
+    assertScanPopulation(app, APP_DRIVER_DIR, {
+      topLevelOnly: true,
+      collectable: (n) => n.endsWith(".ts") && !n.endsWith(".test.ts"),
+    })
+    const shared = readdirSync(DRIVER_DIR)
+      .filter((f) => f.endsWith(".ts"))
+      .map((f) => join(DRIVER_DIR, f))
+    assertScanPopulation(shared, DRIVER_DIR, {
+      topLevelOnly: true,
+      collectable: (n) => n.endsWith(".ts"),
+    })
+  })
+
   test("apps driver routes verify-select ownership through the shared runner driver", () => {
     expect(APP_DRIVER_SRC).toContain('from "@/runner/batch/eval/driver"')
     expect(APP_DRIVER_SRC).toContain("computeEffectiveProofRequired")

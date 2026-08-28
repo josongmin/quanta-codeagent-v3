@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import { readdirSync, readFileSync } from "node:fs"
 import { resolve } from "node:path"
+import { assertScanPopulation } from "../../_shared/scan-population"
 
 /**
  * CLI-06 (ADR-0307) — REPL host slim-down hellgate.
@@ -69,6 +70,16 @@ const countExportingModules = (helper: string): number => {
 }
 
 describe("CLI-06 — repl.ts host slim-down (ADR-0307)", () => {
+  test("ANTI-VACUITY: the factories directory was actually enumerated", () => {
+    // `countExportingModules` returns 0 over an empty factory list, and 0 reads
+    // as "exactly one owner" for every helper below.
+    assertScanPopulation(factoryFiles(), FACTORIES_DIR, {
+      min: 3,
+      topLevelOnly: true,
+      collectable: (n) => n.endsWith(".ts") && n !== "index.ts",
+    })
+  })
+
   // NOTE: the host's "stay slim / declarative" intent is enforced by the
   // structural guards below (each helper exported by exactly one factory, no
   // sister-app imports, CliFeatureConfig threading) — not by a raw LOC ceiling.

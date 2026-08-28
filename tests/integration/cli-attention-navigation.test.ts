@@ -65,6 +65,7 @@ import {
   type UserInputOutcome,
   type UserInputRequester,
 } from "@/tool"
+import { assertScanPopulation } from "../unit/_shared/scan-population"
 
 // ── shared real-rail helpers ────────────────────────────────────────────────
 
@@ -498,12 +499,22 @@ describe("RFC-01 A5 — TaskRegistry constructor completeness (source scan)", ()
     const stripComments = (s: string): string =>
       s.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/[^\n]*/g, "$1")
     const hits: string[] = []
+    const scanned: string[] = []
     for await (const rel of glob.scan(root)) {
       if (rel.endsWith(".test.ts")) continue
+      scanned.push(root + rel)
       const text = stripComments(await Bun.file(root + rel).text())
       if (CALL.test(text)) hits.push(rel.replace(/\\/g, "/"))
     }
     hits.sort()
+
+    // An exact-set drift guard reads a scan that returned nothing as "every
+    // KNOWN site was consolidated away" — the success it is watching for. So
+    // what the glob actually reached is asserted before `hits` means anything.
+    assertScanPopulation(scanned, root, {
+      min: 500,
+      collectable: (n) => n.endsWith(".ts") && !n.endsWith(".test.ts"),
+    })
 
     // KNOWN sites, each classified. TARGET = the single authority builder; the
     // two surface roots + two fallback mints are A2's pending consolidation.

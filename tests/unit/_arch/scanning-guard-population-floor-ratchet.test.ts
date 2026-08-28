@@ -47,7 +47,7 @@ const SCANS_THE_REPO =
  * considered the empty case at all.
  */
 const HAS_FLOOR =
-  /toBeGreaterThan|toBeGreaterThanOrEqual|assertWalkFloor|ANTI[- ]VACUITY|NON[- ]VACUITY|anti-vacuity/i
+  /assertScanPopulation|toBeGreaterThan|toBeGreaterThanOrEqual|assertWalkFloor|ANTI[- ]VACUITY|NON[- ]VACUITY|anti-vacuity/i
 
 const testFiles = (dir: string, into: string[] = []): string[] => {
   for (const entry of readdirSync(dir)) {
@@ -84,12 +84,6 @@ const withoutFloor = (): readonly string[] =>
  * Neither list may grow silently, and a floor that appears must delete its line.
  */
 const NEEDS_FLOOR: readonly string[] = [
-  "tests/adversarial/aug02-feeder-deferred-status.test.ts",
-  "tests/integration/cli-attention-navigation.test.ts",
-  "tests/unit/activity/activity-store-constructor-owner-ratchet.test.ts",
-  "tests/unit/apps/bench/batch-sdk-parity.test.ts",
-  "tests/unit/apps/bench/shared-verify-select-adapters.test.ts",
-  "tests/unit/apps/cli/repl-host-slim-hellgate.test.ts",
   "tests/unit/apps/cli/repl-orphan-resolution-hellgate.test.ts",
   "tests/unit/apps/cli/session-cmd-shim-removal-hellgate.test.ts",
   "tests/unit/audit-ratchet/error-message-canonical-hellgate.test.ts",
@@ -183,6 +177,7 @@ describe("a scanning guard states what it examined", () => {
     expect(SCANS_THE_REPO.test("const files = readdirSync(SRC)")).toBe(true)
     expect(SCANS_THE_REPO.test("const files = new Glob('**/*.ts')")).toBe(true)
     expect(SCANS_THE_REPO.test("const x = 1")).toBe(false)
+    expect(HAS_FLOOR.test("assertScanPopulation(files, SRC)")).toBe(true)
     expect(HAS_FLOOR.test("expect(files.length).toBeGreaterThan(0)")).toBe(true)
     expect(HAS_FLOOR.test('test("ANTI-VACUITY: the scan reaches files")')).toBe(true)
     expect(HAS_FLOOR.test("expect(offenders).toEqual([])")).toBe(false)
