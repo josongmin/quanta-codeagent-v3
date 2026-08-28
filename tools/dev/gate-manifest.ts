@@ -48,7 +48,7 @@ export const GATES: readonly Gate[] = [
     id: "typecheck",
     stage: "precommit",
     run: "bun run typecheck:all",
-    why: "src + tests type errors; the local runner SKIPS on an unchanged content hash, so CI and a dirty tree can disagree",
+    why: "src + tests type errors (full tree). The local runner skips on an unchanged CONTENT hash — sound, and it writes no stamp on failure, so a red always re-runs",
   },
   {
     id: "lint",
