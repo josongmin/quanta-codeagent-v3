@@ -378,6 +378,20 @@ export interface GradeChunkVerdicts {
  *  loudly + (a fetch-retry, not a whole-grade discard). */
 export type ReportTextStatus = "empty" | "unparseable" | "ok"
 
+/**
+ * Where the detached bench run records its own SESSION id, beside its exit
+ * sentinel.
+ *
+ * The bench is launched under `setsid`, so it is its own session leader and its
+ * session id is knowable at launch. Recording it is what lets the grade — much
+ * later, over a different ssh connection — ask "is ANYTHING from that run still
+ * on this box", instead of only "is the one command line we launched still
+ * running". Derived from the exit-sentinel path (itself derived from `runLog`)
+ * so the three files are one naming decision, not three.
+ */
+export const runSidPathFor = (runExitPath: string): string =>
+  runExitPath.replace(/run\.exit$/, "run.sid")
+
 /** Box-side directory used as an ATOMIC grade lock (`mkdir` is atomic + fails if
  *  it exists). Held for the duration of one chunk's grade so a reused box can
  *  never run two grades at once. */

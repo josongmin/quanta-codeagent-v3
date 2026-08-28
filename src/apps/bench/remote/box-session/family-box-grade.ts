@@ -33,6 +33,8 @@ import {
 } from "../../harness/promax/image-provenance"
 import { resolveDatasetFamilyProfile } from "../../profiles/registry"
 import type { FamilyBoxGradeVerdicts, FamilyRemoteBootstrap } from "../../profiles/types"
+import { runExitPathFor } from "./chunk-scrub"
+import { assertDetachedRunSessionReaped } from "./detached-poll"
 import { executeFamilyRemoteBootstrap } from "./family-bootstrap-exec"
 import type { BoxSession, ChunkPaths } from "./types"
 
@@ -369,6 +371,40 @@ const awaitAgentExit = async (input: {
   }
 }
 
+/**
+ * PREFLIGHT 1b — THE RUN'S WHOLE SESSION, not just the command line we launched.
+ *
+ * {@link assertNoLiveBenchProcess} asks ONE question: is `apps/bench/cli.ts run`
+ * still running. That is a single command line, and the agent has an unsandboxed
+ * shell as the bench user for the whole of its own phase. A reader it leaves
+ * behind —
+ *
+ *     setsid sh -c 'while :; do cat …/upstream/data/*.json && break; sleep 0.2; done > /tmp/.k'
+ *
+ * — carries a different command line, outlives the agent phase, is invisible to
+ * that pgrep, and reads the answer key the instant the grader phase materializes
+ * it. The gate answered "the agent is gone" and the clone went ahead.
+ *
+ * The bench is launched as its own SESSION leader and the launcher records that
+ * session id, so the question that CAN be asked is the one the boundary actually
+ * needs: is anything from THIS RUN still on the box. The proof itself lives with
+ * the module that created the session ({@link assertDetachedRunSessionReaped}) —
+ * including the scope limit, which is stated there and is not closed by it.
+ */
+const assertRunSessionReaped = async (input: FamilyBoxGradeInput): Promise<void> => {
+  await assertDetachedRunSessionReaped({
+    ssh: input.ssh,
+    log: input.log,
+    subject: input.family,
+    refusal: "REFUSING to materialize the answer key beside processes we cannot account for.",
+    runExit: runExitPathFor(input.paths),
+    settleMs: AGENT_KILL_SETTLE_MS,
+    // The shared timer-clearing sleep, for the reason spelled out in
+    // `awaitAgentExit`: a raw `new Promise(setTimeout)` leaks its timer.
+    sleep: input.sleep ?? ((ms: number) => abortableSleep(ms)),
+  })
+}
+
 export interface FamilyBoxGradeInput {
   readonly ssh: BoxSession["ssh"]
   readonly log: (m: string) => void
@@ -634,6 +670,8 @@ export const runFamilyBoxGrade = async (
   // cwd-relative path cannot be replayed from a receipt. This is the one place
   // that knows the box's home, so it is the one place that can honour both.
   await assertNoLiveBenchProcess(input)
+  // …and then the run's WHOLE session, which the command-line probe cannot see.
+  await assertRunSessionReaped(input)
 
   const predictionsText = await readGradablePredictions(input)
   if (predictionsText === undefined) return undefined

@@ -14,7 +14,7 @@ import {
 } from "@/runner/batch/eval/no-progress-watchdog"
 import type { SpawnResult } from "../backend"
 import { defaultSleep, shq } from "./shell"
-import { BOX_DIED_DURING_RUN_ERROR } from "./types"
+import { BOX_DIED_DURING_RUN_ERROR, runSidPathFor } from "./types"
 
 /** Poll cadence for the detached run. The box does the work; we just re-check. */
 const RUN_POLL_INTERVAL_MS = 15_000
@@ -88,8 +88,237 @@ const isInstanceStillLive = async (
   return LIVE_INSTANCE_STATES.has(state)
 }
 
-const detachedLaunchCommand = (benchCmd: string, runLog: string, runExit: string): string =>
-  `rm -f ${runExit}; setsid bash -c ${shq(`${benchCmd} > ${runLog} 2>&1; echo $? > ${runExit}`)} </dev/null >/dev/null 2>&1 & echo LAUNCHED`
+/** How long the launcher waits for the new session to record its own id before
+ *  calling the launch a failure. The write is one `ps` and one redirect, so this
+ *  is generous; it exists because the record happens INSIDE the detached child
+ *  and is therefore concurrent with the launcher's own return. */
+const SID_RECORD_POLLS = 50
+const SID_RECORD_POLL_SECONDS = "0.1"
+
+/**
+ * Launch the bench DETACHED, and record the session it now owns.
+ *
+ * `setsid` makes the bench its own session leader — that is what keeps an ssh
+ * teardown's SIGHUP away from it, and it is also what makes the run REAPABLE
+ * later: everything the run spawns inherits that session unless it deliberately
+ * leaves. The grade's gold boundary needs to ask "is ANYTHING from this run
+ * still on the box", and it cannot ask without knowing which session to name.
+ *
+ * The id is read from INSIDE the new session (`ps -o sid= -p $$`, where `$$` is
+ * the session leader itself) rather than from `ps -o sid= -p $!` in the
+ * launching shell. `$!` is the `setsid` process, which — depending on whether
+ * the launching shell put the job in its own process group — either IS the
+ * leader or has already forked and exited; and reading its sid can race the
+ * `setsid()` call itself, in which case the value recorded is the SSH SESSION's
+ * id. Naming the wrong session is worse than naming none, so the value is taken
+ * where it is unambiguous.
+ *
+ * The launcher then WAITS for the file and fails the launch if it never lands:
+ * a run whose session was never recorded can never be proven reaped, and the
+ * grade refuses such a box outright. Failing here instead surfaces it at launch,
+ * before an hour of paid patch-gen.
+ */
+const detachedLaunchCommand = (benchCmd: string, runLog: string, runExit: string): string => {
+  const runSid = runSidPathFor(runExit)
+  const inner = `ps -o sid= -p $$ | tr -d ' ' > ${runSid}; ${benchCmd} > ${runLog} 2>&1; echo $? > ${runExit}`
+  return (
+    `rm -f ${runExit} ${runSid}; setsid bash -c ${shq(inner)} </dev/null >/dev/null 2>&1 & ` +
+    `n=0; while [ $n -lt ${SID_RECORD_POLLS} ] && [ ! -s ${runSid} ]; do ` +
+    `n=$((n+1)); sleep ${SID_RECORD_POLL_SECONDS}; done; ` +
+    `[ -s ${runSid} ] || { echo "no session id recorded at ${runSid}" >&2; exit 3; }; echo LAUNCHED`
+  )
+}
+
+/**
+ * What proving the detached run's session EMPTY needs.
+ *
+ * `subject` and `refusal` are the CALLER's words: this module can prove a
+ * session empty, but it does not know why anyone wants that, and a generic
+ * module that hardcodes one caller's consequence ("the answer key") is a
+ * sentence that goes stale the moment a second caller appears. `settleMs` is
+ * likewise the caller's own kill-ladder settle window rather than a second
+ * constant here — a signalled process gets one grace period on this box, not two
+ * competing ones.
+ */
+export interface DetachedRunSessionInput {
+  readonly ssh: (cmd: string) => Promise<SpawnResult>
+  readonly log: (m: string) => void
+  /** what the caller calls this run in its own diagnostics. */
+  readonly subject: string
+  /** the consequence sentence every refusal ends with. */
+  readonly refusal: string
+  /** the run's exit sentinel — the sid file sits beside it. */
+  readonly runExit: string
+  readonly settleMs: number
+  readonly sleep: (ms: number) => Promise<void>
+}
+
+/**
+ * The session id the launch recorded, or a REFUSAL.
+ *
+ * A missing / unreadable / non-numeric `run.sid` refuses rather than proceeding:
+ * a run whose session was never recorded can never be proven reaped, and "we
+ * could not check" is not "there is nothing there".
+ */
+const readRunSessionId = async (input: DetachedRunSessionInput): Promise<string> => {
+  const sidPath = runSidPathFor(input.runExit)
+  const read = await input.ssh(`cat ${sidPath}`)
+  if (read.code === 255) {
+    throw new Error(
+      `[full-remote] ${input.subject}: the box became unreachable while reading the run's ` +
+        `recorded session id at ${sidPath}, so whether anything from the run is still on it ` +
+        `could not be established. ${input.refusal} (${read.stderr.trim() || "ssh exit 255"})`,
+    )
+  }
+  const sid = read.stdout.trim()
+  if (read.code !== 0 || sid === "") {
+    throw new Error(
+      `[full-remote] ${input.subject}: the run recorded NO session id at ${sidPath} (exit ` +
+        `${read.code}${read.stderr.trim() === "" ? "" : `: ${read.stderr.trim()}`}). Without it ` +
+        `the run's leftovers can be neither enumerated nor reaped. ${input.refusal}`,
+    )
+  }
+  if (!/^[1-9][0-9]*$/.test(sid)) {
+    throw new Error(
+      `[full-remote] ${input.subject}: the recorded session id at ${sidPath} is not a session id ` +
+        `(${JSON.stringify(sid.slice(0, 40))}), so the run's leftovers cannot be enumerated. ` +
+        `${input.refusal}`,
+    )
+  }
+  return sid
+}
+
+/**
+ * How many processes of the run's session are still on the box.
+ *
+ * `pgrep -s <sid>` exits 0 and PRINTS them, exits 1 when the session is empty,
+ * and exits 2/3/127 when it could not run — and all three of the latter print
+ * nothing. Reading "it failed" as "the session is empty" is the same collapse
+ * the sibling gold-boundary probes already refuse, so it is refused here too.
+ * An exit 0 that printed no pid is a shape `pgrep` cannot emit, which means the
+ * answer came from something other than `pgrep`; that is refused as well.
+ */
+const probeRunSessionSurvivors = async (
+  input: DetachedRunSessionInput,
+  sid: string,
+): Promise<number> => {
+  const probe = await input.ssh(`pgrep -s ${sid}`)
+  if (probe.code === 255) {
+    throw new Error(
+      `[full-remote] ${input.subject}: the box became unreachable while checking session ${sid} ` +
+        "for surviving processes, so whether the run left anything behind could not be " +
+        `established. ${input.refusal} (${probe.stderr.trim() || "ssh exit 255"})`,
+    )
+  }
+  if (probe.code === 1) return 0
+  const pids = probe.stdout
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line !== "")
+  if (probe.code !== 0 || pids.length === 0) {
+    throw new Error(
+      `[full-remote] ${input.subject}: could not enumerate session ${sid} (exit ${probe.code}` +
+        `${probe.stderr.trim() === "" ? "" : `: ${probe.stderr.trim()}`}), so whether the run ` +
+        `left anything behind could not be established. ${input.refusal}`,
+    )
+  }
+  return pids.length
+}
+
+/**
+ * Reap the run's session by PROCESS GROUP.
+ *
+ * `kill -- -<pgid>` rather than a pid list: a survivor is by definition
+ * something we did not launch by name, and its children are not in our list
+ * either. The groups come from the BOX (`ps -o pgid= -s <sid>`), so a survivor
+ * that forked is taken along with its parent, and a survivor that moved to its
+ * own process group inside the session is still covered.
+ *
+ * The self-check guards a destructive command: if the recorded id somehow names
+ * the CALLER's own ssh session (a mis-recorded launch, a recycled pid), reaping
+ * it would kill the connection mid-check. That refuses instead.
+ */
+const reapRunSession = async (
+  input: DetachedRunSessionInput,
+  sid: string,
+  force: boolean,
+): Promise<void> => {
+  const signal = force ? "-9 " : ""
+  const reaped = await input.ssh(
+    `own=$(ps -o sid= -p $$ | tr -d ' '); ` +
+      `[ "$own" = "${sid}" ] && { echo SELF >&2; exit 9; }; ` +
+      `for g in $(ps -o pgid= -s ${sid} 2>/dev/null | tr -d ' ' | sort -u); do ` +
+      `kill ${signal}-- -"$g" 2>/dev/null; done; exit 0`,
+  )
+  if (reaped.code === 255) {
+    throw new Error(
+      `[full-remote] ${input.subject}: the box became unreachable while reaping session ${sid}. ` +
+        `${input.refusal}`,
+    )
+  }
+  if (reaped.code !== 0) {
+    throw new Error(
+      `[full-remote] ${input.subject}: could not reap session ${sid} (exit ${reaped.code}` +
+        `${reaped.stderr.trim() === "" ? "" : `: ${reaped.stderr.trim()}`}) — nothing was ` +
+        `signalled. ${input.refusal}`,
+    )
+  }
+}
+
+/**
+ * PROVE the detached run's whole SESSION is empty — reaping it if it is not, and
+ * RE-PROBING rather than assuming a signal worked.
+ *
+ * A caller that only asks "is the command line I launched still running" gets
+ * one command line. That is what {@link detachedLaunchCommand} put on the box;
+ * it is not what the box is now running. Anything the run spawned — including
+ * anything an unsandboxed agent left behind during it — inherits this session,
+ * whatever it is called and whatever it is doing, and only the session id can
+ * name it.
+ *
+ * The ladder is deliberately the same shape as the caller's own: reap, settle,
+ * escalate, settle, and only then refuse. A refusal that comes after an attempt
+ * to fix the situation is the honest one; refusing without trying is what threw
+ * away completed runs before.
+ *
+ * SCOPE — the residual hole, stated rather than implied closed:
+ *
+ *   A process that starts its OWN new session (`setsid`, a daemonizing
+ *   double-fork) LEAVES this session, and this proof cannot see it. What is
+ *   covered is what the run spawned; what is not covered is what deliberately
+ *   detached from it.
+ *
+ *   Closing THAT would mean enumerating the box's LEGITIMATE baseline — sshd,
+ *   `systemd --user` and its transient units, agetty, the pool's own probes —
+ *   and refusing everything else. That enumeration cannot be written honestly
+ *   without a real box in front of you, and a guessed whitelist false-positives
+ *   on the baseline and refuses healthy, paid runs. So no whitelist is invented
+ *   here, and this function claims exactly what it proves: the run's own session
+ *   is empty.
+ */
+export const assertDetachedRunSessionReaped = async (
+  input: DetachedRunSessionInput,
+): Promise<void> => {
+  const sid = await readRunSessionId(input)
+  let survivors = await probeRunSessionSurvivors(input, sid)
+  if (survivors === 0) return
+  for (const force of [false, true]) {
+    input.log(
+      `[full-remote] ${input.subject}: ${survivors} process(es) from the run's own session ${sid} ` +
+        "are still on the box after the bench command itself is gone. Reaping the session" +
+        `${force ? " (SIGKILL)" : ""}, then re-checking.`,
+    )
+    await reapRunSession(input, sid, force)
+    await input.sleep(input.settleMs)
+    survivors = await probeRunSessionSurvivors(input, sid)
+    if (survivors === 0) return
+  }
+  throw new Error(
+    `[full-remote] ${input.subject}: ${survivors} process(es) from the run's session ${sid} ` +
+      `survived being reaped — a detached reader left behind is exactly what this looks like. ` +
+      `${input.refusal}`,
+  )
+}
 
 const parseableJsonProbe = (path: string): string =>
   `[ -s ${path} ] && python3 -c ${shq("import json,sys; json.load(open(sys.argv[1]))")} ${path} >/dev/null 2>&1`
