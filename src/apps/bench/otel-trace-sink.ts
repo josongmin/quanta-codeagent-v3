@@ -35,7 +35,7 @@
  * Default port 4318 = the OTLP/HTTP convention.
  */
 
-import { errMessage } from "@/shared"
+import { errMessage, logger } from "@/shared"
 import { fileSpanSink, noopSpanSink, resolveSpanSink, type SpanSinkPort } from "./span-sink"
 
 const DEFAULT_PORT = 4318
@@ -447,7 +447,21 @@ export const runTraceSink = (
   // durable sink, and free the port. Idempotent.
   const stop = async (): Promise<void> => {
     clearInterval(flushTimer)
-    await spanSink.flush().catch(() => {})
+    // The LAST drain. `flush` detaches the buffer before it uploads, so a
+    // failure here is permanent — there is no later batch to retry with, which
+    // is exactly what the sink's own `catch` used to assume. Marked `final` so
+    // the sink reports the loss instead of resolving quietly, and the count is
+    // surfaced here rather than swallowed by a bare `.catch(() => {})`.
+    await spanSink.flush({ final: true }).catch((e: unknown) => {
+      logger.warn("bench.otel-trace-sink.final_flush_failed", { error: errMessage(e) })
+    })
+    const dropped = spanSink.droppedLines?.() ?? 0
+    if (dropped > 0) {
+      logger.warn("bench.otel-trace-sink.spans_lost_on_stop", {
+        droppedLines: dropped,
+        detail: "accepted but never uploaded; the final drain has no later batch",
+      })
+    }
     server.stop()
   }
   return { port, uiUrl, stop }

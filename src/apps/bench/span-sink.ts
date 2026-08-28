@@ -21,6 +21,7 @@
  */
 import { appendFileSync, mkdirSync } from "node:fs"
 import { dirname } from "node:path"
+import { errMessage, logger } from "@/shared"
 import { type RemoteBackend, s3Backend } from "@/shared/remote-store"
 
 /** The seam every trace-sink persistence target implements. */
@@ -28,8 +29,15 @@ export interface SpanSinkPort {
   /** Persist ONE already-JSON-serialized span line. MUST NOT throw. */
   write(line: string): void
   /** Flush any buffered spans to the durable backend (e.g. a final S3 put on
-   *  shutdown). MUST NOT throw. No-op for synchronous adapters. */
-  flush(): Promise<void>
+   *  shutdown). MUST NOT throw. No-op for synchronous adapters.
+   *
+   *  `final` marks the LAST drain — the buffer is detached before the upload,
+   *  so a failure there is permanent rather than something a later batch
+   *  retries, and the sink says so instead of resolving quietly. */
+  flush(opts?: { readonly final?: boolean }): Promise<void>
+  /** Spans accepted and never uploaded. `0` ⇒ nothing was lost. Absent on
+   *  adapters that cannot lose anything. */
+  droppedLines?(): number
 }
 
 /** Default: ring only, nothing durable. */
@@ -89,17 +97,35 @@ export const s3SpanSink = (
     })()
     await init
   }
-  const flush = async (): Promise<void> => {
+  /**
+   * Spans this sink accepted and then FAILED to upload. Counted because the
+   * buffer is detached (`buf.length = 0`) BEFORE the put, so a failed batch is
+   * already gone from memory — there is nothing left to retry with.
+   */
+  let droppedLines = 0
+  const flush = async (opts: { readonly final?: boolean } = {}): Promise<void> => {
     if (buf.length === 0) return
+    const lines = buf.length
     const body = `${buf.join("\n")}\n`
     buf.length = 0
     await ensureSeq()
     const part = String(seq++).padStart(6, "0")
     try {
       await backend.put(`${prefix}/spans-${part}.jsonl`, body)
-    } catch {
-      // S3 hiccup — drop this batch rather than crash ingestion; the ring still
-      // serves the live view and the next batch retries the upload.
+    } catch (e) {
+      droppedLines += lines
+      // The old comment said "the next batch retries the upload". For a
+      // mid-run hiccup that is true enough — the ring still serves the live
+      // view. For the FINAL drain there is no next batch, so the same silent
+      // `catch` turned permanent loss into a successful `stop()`. Say which
+      // one this was, and how much went with it.
+      const when = opts.final === true ? "FINAL drain — no later batch can retry" : "mid-run"
+      logger.warn("bench.span-sink.upload_failed", {
+        lines,
+        droppedLines,
+        when,
+        error: errMessage(e),
+      })
     }
   }
   return {
@@ -108,6 +134,8 @@ export const s3SpanSink = (
       if (buf.length >= flushN) void flush()
     },
     flush,
+    /** Total spans accepted and never uploaded. `0` ⇒ nothing was lost. */
+    droppedLines: () => droppedLines,
   }
 }
 

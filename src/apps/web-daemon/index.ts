@@ -447,9 +447,23 @@ export const main = async (overrides?: Partial<WebDaemonConfig>): Promise<WebDae
   }
 
   const shutdown = async (sig: NodeJS.Signals): Promise<void> => {
+    // TWO independent teardowns. They were one `try`, so a throw from
+    // `handle.stop()` skipped the OTel teardown entirely and the `finally` still
+    // exited 0 — the trace buffer went with the process, silently. Each now owns
+    // its own try/finally so neither can cancel the other.
     try {
       await handle.stop()
-      await otelExport.teardown() // final flush + restore sink (awaited — no loss)
+    } catch (e) {
+      process.stderr.write(`web-daemon: server stop failed during shutdown: ${errMessage(e)}\n`)
+    }
+    try {
+      // The comment here used to say "final flush + restore sink (awaited — no
+      // loss)". That is no longer true: a forced flush that fails now DISCARDS
+      // its batch, so the honest claim is that the attempt is awaited, not that
+      // nothing is lost. `teardown` reports what it dropped.
+      await otelExport.teardown()
+    } catch (e) {
+      process.stderr.write(`web-daemon: otel teardown failed during shutdown: ${errMessage(e)}\n`)
     } finally {
       // Exit code 0 — graceful shutdown is the happy path.
       void sig
