@@ -15,6 +15,12 @@
  * offending test). Swallowing that and re-printing a summary would be a second
  * authority on what went wrong.
  *
+ * `--quiet` therefore CAPTURES rather than discards, and replays the tail of a
+ * FAILED gate under the summary. The first version discarded it, and the first
+ * real `--quiet` run produced "6 of 18 FAILED" with no way to tell which
+ * failures were mine and which belonged to another session editing the same
+ * tree — a summary that costs a full re-run to act on is worse than noise.
+ *
  * Usage:
  *   bun run precommit
  *   bun run prepush
@@ -44,7 +50,13 @@ const stage: GateStage = stageArg
 const bail = wants("--bail")
 const quiet = wants("--quiet")
 
-const runGate = (gate: Gate): { readonly ok: boolean; readonly ms: number } => {
+/** How much of a captured failure to replay. Enough for a stack + the gate
+ *  script's own verdict lines, short of pasting a whole suite log back. */
+const REPLAY_TAIL_LINES = 40
+
+const runGate = (
+  gate: Gate,
+): { readonly ok: boolean; readonly ms: number; readonly output: string } => {
   const started = Bun.nanoseconds()
   const proc = Bun.spawnSync({
     // Through the shell: several gates carry a `--` pass-through the argv form
@@ -55,14 +67,20 @@ const runGate = (gate: Gate): { readonly ok: boolean; readonly ms: number } => {
     stdout: quiet ? "pipe" : "inherit",
     stderr: quiet ? "pipe" : "inherit",
   })
-  return { ok: proc.exitCode === 0, ms: (Bun.nanoseconds() - started) / 1e6 }
+  const decode = (b: Uint8Array | undefined | null): string =>
+    b === undefined || b === null ? "" : new TextDecoder().decode(b)
+  return {
+    ok: proc.exitCode === 0,
+    ms: (Bun.nanoseconds() - started) / 1e6,
+    output: quiet ? `${decode(proc.stdout)}${decode(proc.stderr)}` : "",
+  }
 }
 
-const results: { gate: Gate; ok: boolean; ms: number }[] = []
+const results: { gate: Gate; ok: boolean; ms: number; output: string }[] = []
 for (const gate of gatesForStage(stage)) {
   if (!quiet) console.log(`\n──── ${stage}: ${gate.id} — ${gate.run}`)
-  const { ok, ms } = runGate(gate)
-  results.push({ gate, ok, ms })
+  const { ok, ms, output } = runGate(gate)
+  results.push({ gate, ok, ms, output })
   if (!ok && bail) break
 }
 
@@ -77,4 +95,10 @@ if (failed.length === 0) {
 }
 console.error(`\n${stage}: ${failed.length} of ${results.length} gate(s) FAILED:`)
 for (const r of failed) console.error(`  ${r.gate.id} — ${r.gate.why}`)
+for (const r of failed) {
+  const tail = r.output.trimEnd().split("\n").slice(-REPLAY_TAIL_LINES)
+  if (tail.length === 0 || tail[0] === "") continue
+  console.error(`\n──── ${r.gate.id} (last ${tail.length} line(s) of its own output)`)
+  for (const line of tail) console.error(`  ${line}`)
+}
 process.exit(1)
