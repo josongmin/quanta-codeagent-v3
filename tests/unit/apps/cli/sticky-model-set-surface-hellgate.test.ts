@@ -9,8 +9,8 @@
  * over a tmp file (the documented file-coupling contract).
  */
 
-import { describe, expect, test } from "bun:test"
-import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs"
+import { afterEach, describe, expect, test } from "bun:test"
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import {
@@ -25,6 +25,27 @@ import {
 } from "../../../../src/apps/cli/repl/ctx-adapters/sticky-model-adapter"
 import { SURFACE_SLASH_COMMANDS } from "../../../../src/apps/cli/slash/registry-surface"
 import type { SlashContext } from "../../../../src/apps/cli/slash-contract"
+
+/**
+ * Scratch-dir registry (MR-08).
+ *
+ * The four file-coupling cases below each called `mkdtempSync` and NOTHING ever
+ * removed the result, so every run of this file stranded 3-4 directories under
+ * `/private/tmp`. That is not cosmetic in this repo: unbounded `/tmp` growth has
+ * previously taken `ls /tmp`-shaped tests over their timeout, turning an
+ * unrelated suite red for reasons no one could attribute. Registering here and
+ * removing in `afterEach` means even a FAILING case cleans up (a `rmSync` at the
+ * end of each test body would not).
+ */
+const scratch: string[] = []
+const mkScratch = (prefix: string): string => {
+  const dir = mkdtempSync(join(tmpdir(), prefix))
+  scratch.push(dir)
+  return dir
+}
+afterEach(() => {
+  for (const dir of scratch.splice(0)) rmSync(dir, { recursive: true, force: true })
+})
 
 const stickyCmd = () => {
   const c = SURFACE_SLASH_COMMANDS.find((x) => x.name === "/sticky-model")
@@ -160,7 +181,7 @@ describe("ADR-0462 follow-up — /sticky-model SET surface hellgate", () => {
 
   // ── file coupling (the consume-side contract) ─────────────────────────────
   test("CASE-12: two fs-store instances over one file — SET is observed by a fresh reader", async () => {
-    const dir = mkdtempSync(join(tmpdir(), "sticky-set-"))
+    const dir = mkScratch("sticky-set-")
     const path = join(dir, "sticky-model.json")
     const setSide = buildStickyModelAdapter({ store: fsBackedStickyModelStore({ path }) })
     const consumeSide = fsBackedStickyModelStore({ path })
@@ -207,7 +228,7 @@ describe("ADR-0462 follow-up — /sticky-model SET surface hellgate", () => {
 
   // ── corrupt-file backup (B) ───────────────────────────────────────────────
   test("CASE-17: set on a CORRUPT file preserves the bytes to .corrupt.bak before overwrite", async () => {
-    const dir = mkdtempSync(join(tmpdir(), "sticky-corrupt-"))
+    const dir = mkScratch("sticky-corrupt-")
     const path = join(dir, "sticky-model.json")
     writeFileSync(path, "{ this is not json ::::")
     const a = buildStickyModelAdapter({ store: fsBackedStickyModelStore({ path }) })
@@ -219,7 +240,7 @@ describe("ADR-0462 follow-up — /sticky-model SET surface hellgate", () => {
   })
 
   test("CASE-18: set on a VALID file does NOT spawn a .corrupt.bak", async () => {
-    const dir = mkdtempSync(join(tmpdir(), "sticky-valid-"))
+    const dir = mkScratch("sticky-valid-")
     const path = join(dir, "sticky-model.json")
     const a = buildStickyModelAdapter({ store: fsBackedStickyModelStore({ path }) })
     await a.set("plan", "opus")

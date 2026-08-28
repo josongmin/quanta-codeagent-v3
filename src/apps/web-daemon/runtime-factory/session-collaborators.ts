@@ -337,6 +337,19 @@ export const resolveWebLivePosture = async (
  *    elicitation tool ADAPTED onto the web user-input round-trip (needs
  *    `userInput` for a channel). Either gate OFF ⇒ empty ⇒ not registered.
  */
+/**
+ * Echo budget for a control-request log line (MR-08).
+ *
+ * Wider than `summarizeUntrustedId`'s 24-char default because the string being
+ * bounded here is a SENTENCE that CONTAINS the untrusted id, not the id itself:
+ * the planner's reason reads `model "<RAW>" not recognized`, so a 24-char budget
+ * cut the trailing `not recognized` off an otherwise ordinary rejection and left
+ * the operator with a truncated line for a benign typo. 120 keeps every realistic
+ * rejection whole while still turning a 200 000-character payload into one short
+ * line.
+ */
+const CONTROL_REJECTION_LOG_PREFIX = 120
+
 export const mintInboundPorts = (
   env: Record<string, string | undefined>,
   permission: PermissionContext,
@@ -385,7 +398,9 @@ export const mintInboundPorts = (
             // operator's log — over the network, unauthenticated by this port.
             // The operator needs to IDENTIFY the id, not receive it: prefix +
             // true length + a digest that correlates repeats.
-            logger.warn(`web control-request rejected: ${summarizeUntrustedId(effect.value)}`)
+            logger.warn(
+              `web control-request rejected: ${summarizeUntrustedId(effect.value, CONTROL_REJECTION_LOG_PREFIX)}`,
+            )
             return
           }
           // The APPLIED axes are not uniformly trusted either. `model` cleared the
@@ -396,7 +411,9 @@ export const mintInboundPorts = (
           // planner treats an absent allowlist as "the host opted out of gating
           // this axis" — so its value is still whatever the client sent.
           const value =
-            effect.kind === "thinking" ? summarizeUntrustedId(effect.value) : effect.value
+            effect.kind === "thinking"
+              ? summarizeUntrustedId(effect.value, CONTROL_REJECTION_LOG_PREFIX)
+              : effect.value
           logger.info(`web control-request applied: ${effect.kind}=${value}`)
         },
         ...(modelSwitch !== undefined

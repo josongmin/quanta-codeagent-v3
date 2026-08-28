@@ -28,15 +28,10 @@ import {
 } from "@/agent/tool-profile"
 import type { AgentArgs, IdentityModeToken, ToolProfileToken } from "@/host/runtime/agent-args"
 import type { AssembleRequest } from "@/host/runtime/agent-config-assembler"
-import { type LLMPort, resolveBootSelection, tryCreateLLM } from "@/llm"
 import { type CapabilityNegotiator, defaultNegotiator, fullNegotiator } from "@/mcp"
 import { metrics } from "@/observability"
 import { buildAutorunEligibility } from "@/permission"
-import {
-  buildSearchPipelineFromEnv,
-  decorateSwappableModelPort,
-  wireInteractiveKnobs,
-} from "@/runner/assemble"
+import { buildSearchPipelineFromEnv, wireInteractiveKnobs } from "@/runner/assemble"
 import type { Surface } from "@/runner/knobs"
 import {
   type LocalEnvSelection,
@@ -47,6 +42,7 @@ import {
 import { type AutomationEngineSlot, assembleAutomation } from "@/scheduler/runtime-wire"
 import { logger } from "@/shared"
 import type { AgentEvent, StreamPort } from "@/stream"
+import { buildHeadlessBootPort } from "./agent-arg-builder/boot-port-wire"
 import { installCommandHooksIntoBase } from "./agent-arg-builder/command-hooks-wire"
 import {
   buildBaseRegistry,
@@ -74,6 +70,10 @@ import {
 import { createArtifactPreviewResolver } from "./artifact-preview-resolver"
 import { type BaseSlotContext, foldBaseSlots } from "./base-slot-registry"
 
+// MR-01 / MR-E5 — `ProviderKeyMissingError` moved to the boot-port wire WITH the
+// code that throws it, and is RE-EXPORTED here so every existing consumer (the
+// `@/host/runtime` barrel, the CLI / agent exit mappers) keeps its import path.
+export { ProviderKeyMissingError } from "./agent-arg-builder/boot-port-wire"
 export { installCommandHooksIntoBase } from "./agent-arg-builder/command-hooks-wire"
 // ADR-0303 god-module split — re-export the relocated composition-root clusters'
 // COMPLETE public surface so every `@/host/runtime/agent-arg-builder` importer
@@ -103,19 +103,6 @@ export {
   resolvePermissionProfileManager,
   resolvePolicyMergeStrategy,
 } from "./agent-arg-builder/permission-profile"
-
-/** ADR-0303 — thrown by {@link buildBaseFromArgs} when no API key resolves for
- *  the selected provider. The host launcher composition layer must NOT own
- *  `process.exit` (terminal-defaults invariant); it throws this typed error and
- *  the surface entry maps `exitCode` onto its own exit. `exitCode = 2` preserves
- *  the prior POSIX behavior (missing-credentials). */
-export class ProviderKeyMissingError extends Error {
-  readonly exitCode = 2
-  constructor(message: string) {
-    super(message)
-    this.name = "ProviderKeyMissingError"
-  }
-}
 
 /** ADR-0196 — pick the MCP capability negotiator from env. `QUANTA_MCP_CAPS=full`
  *  swaps to {@link fullNegotiator} which advertises `{tools, elicitation, tasks}`.
@@ -653,43 +640,11 @@ export const buildBaseFromArgs = (
   // describing — the two agree by construction (same seed, same key).
   const env =
     p.provider !== undefined ? { ...process.env, QUANTA_PROVIDER: p.provider } : process.env
-  // MR-01 — ONE authority for provider + boot model (`@/llm`
-  // `resolveBootSelection`): `--model` > `QUANTA_MODEL` > canonical
-  // DEFAULT_MODEL[provider]. INTENDED BEHAVIOUR CHANGE: this root previously
-  // NEVER read `QUANTA_MODEL`, so `QUANTA_MODEL=x quanta -p "…"` booted the
-  // provider default while the very same variable was authoritative in the
-  // interactive REPL and in bench. It is honored here now.
-  const boot = resolveBootSelection({
-    env,
-    ...(p.provider !== undefined ? { providerArg: p.provider } : {}),
-    ...(p.model !== undefined ? { modelArg: p.model } : {}),
-  })
-  const provider = boot.provider
-  const bareLlm: LLMPort | null = tryCreateLLM(provider, { model: boot.modelId }, env)
-  if (bareLlm === null) {
-    // ADR-0303 — this is host-layer launcher composition, NOT a surface, so it
-    // must NOT own `process.exit` (terminal-defaults invariant). Throw a typed
-    // error carrying the POSIX exit code; the surface entry (apps/agent `runMain`
-    // / apps/cli batch) maps `exitCode` onto its own `process.exit`.
-    throw new ProviderKeyMissingError(
-      `no API key for provider '${provider}'. Set OPENAI_API_KEY or ANTHROPIC_API_KEY (or --provider <other>).`,
-    )
-  }
-  // MR-E5 — the BOOT port carries the same always-on safety net a SWAPPED model
-  // already had on this very root (`model-switch-wire.ts` decorates every
-  // candidate port). Without this the irony was exact: the model you switched TO
-  // kept bounded retry / the empty-stream breaker / the progress heartbeat, while
-  // the DEFAULT model ran BARE — a transient 429 was a hard turn failure on
-  // `quanta -p`. `decorateSwappableModelPort` (not `composeLLMCore`) is the right
-  // wrapper here: `composeLLMCore` also wires `FallbackLLM` + `withLiveUsage`,
-  // which need fallback model ids and a TTY notion this host-layer root has
-  // neither of. Identity is preserved through the wrapper
-  // (`forwardPortIdentity`), so `model` / `provider` / `contextWindowKey` /
-  // `listModels` still forward to every downstream slot.
-  const llm: LLMPort = decorateSwappableModelPort({
-    inner: bareLlm,
-    ...(signal !== undefined ? { signal } : {}),
-  })
+  // MR-01 + MR-E5 — the boot provider/model resolution AND the always-on wrapper
+  // stack live in `./agent-arg-builder/boot-port-wire` (ONE cohesive unit: "what
+  // does this root boot on, and through what port"). Throws
+  // `ProviderKeyMissingError` when no key resolves for the selected provider.
+  const { provider, llm } = buildHeadlessBootPort({ env, p, signal })
   // Minimal stream — error events surface via the shared logger so a wrapper
   // failure is diagnosable even when a runner doesn't replace the stream (the
   // host layer must not write `process.stderr` directly — terminal ownership is

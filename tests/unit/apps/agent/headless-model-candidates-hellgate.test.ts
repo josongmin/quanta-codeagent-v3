@@ -130,12 +130,23 @@ describe("headless composition root — the model switch's second half", () => {
     const base = buildBase({ stickyModel: true })
     const port = base.modelCandidates?.[0]?.port
 
-    // The boot port IS a bare adapter on this root; a candidate must be the
-    // wrapped one (bounded retry + empty-stream breaker + progress heartbeat),
-    // so it must NOT be an adapter instance itself.
-    expect(base.llm instanceof OpenAIResponsesAdapter).toBe(true)
+    // A candidate must be the WRAPPED port (bounded retry + empty-stream breaker
+    // + progress heartbeat), so it must NOT be an adapter instance itself.
     expect(port instanceof OpenAIResponsesAdapter).toBe(false)
     expect(port?.model).toBe("gpt-4o")
+    // MR-E5 — this line used to read `expect(base.llm instanceof
+    // OpenAIResponsesAdapter).toBe(true)`, pinning the ASYMMETRY that was the
+    // defect: on this same root a SWAPPED model was decorated while the BOOT
+    // model ran bare, so a transient 429 was a hard turn failure on `quanta -p`.
+    // The boot port is decorated now too; both halves carry the same net.
+    expect(base.llm instanceof OpenAIResponsesAdapter).toBe(false)
+    // NON-VACUITY: `OpenAIResponsesAdapter` is still the class a BARE port on
+    // this provider would be, so the two `false`s above are real negatives and
+    // not an import that stopped matching anything.
+    expect(
+      new OpenAIResponsesAdapter({ apiKey: "sk-test-invariant-b", model: "gpt-4o" }) instanceof
+        OpenAIResponsesAdapter,
+    ).toBe(true)
   })
 
   test("CONTROL: no pick on disk ⇒ the slot is ABSENT (byte-identical default)", async () => {

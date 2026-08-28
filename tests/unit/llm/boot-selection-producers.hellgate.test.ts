@@ -2,9 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import { mkdtempSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { resolveBenchBootSelection } from "@/apps/bench/run-main"
-import { readSessionRuntimeConfig } from "@/apps/cli/repl/session-runtime-config"
-import { resolveServeStdioBoot } from "@/apps/cli/serve-stdio-cmd"
+import { resolveBenchBootSelection } from "@/apps/bench/boot-llm-wire"
 import { buildProductionRuntimeFactory, resolveWebBootLLM } from "@/apps/web-daemon/runtime-factory"
 import { buildBaseFromArgs } from "@/host/runtime/agent-arg-builder"
 import { DEFAULT_MODEL } from "@/llm"
@@ -15,18 +13,23 @@ import { __resetRuntimeConfig } from "@/shared"
  * used to answer "which provider + which model + is it pinned?" on its own now
  * routes through the ONE authority (`@/llm` `resolveBootSelection`).
  *
- * These drive the REAL production line for each root, never a re-spelling of
- * the precedence: `readSessionRuntimeConfig()` / `buildBaseFromArgs()` are the
- * roots themselves, and the three remaining roots resolve their boot on exactly
- * one exported line (`resolveWebBootLLM` / `resolveServeStdioBoot` /
+ * THIS FILE covers the three NON-`apps/cli` roots (headless / web / bench). The
+ * two CLI-slice roots live in `tests/unit/apps/cli/mr01-boot-selection-producers
+ * .hellgate.test.ts` — biome's ADR-0024 slice isolation forbids importing
+ * `@/apps/cli/**` internals from a test outside `tests/unit/apps/cli/**`.
+ *
+ * These drive the REAL production line for each root, never a re-spelling of the
+ * precedence: `buildBaseFromArgs()` is the root itself, and web / bench resolve
+ * their boot on exactly one exported line (`resolveWebBootLLM` /
  * `resolveBenchBootSelection`) which the surrounding root calls and nothing else
- * duplicates. Breaking any of those five lines reddens a case here (see the
+ * duplicates. Breaking any of those lines reddens a case here (see the
  * RED-on-injection log in the campaign report).
  *
  * ── The behaviour delta each root is pinned against ──────────────────────────
  * THREE of the five silently IGNORED `QUANTA_MODEL` before this change
  * (headless `quanta -p`, `quanta web`, `quanta serve --stdio`) while the same
- * variable was authoritative in the REPL and in bench. Every "honours
+ * variable was authoritative in the REPL and in bench. Two of those three are
+ * covered here. Every "honours
  * QUANTA_MODEL" case below is therefore an INTENDED behaviour change, and each
  * carries a paired control (unset ⇒ the canonical provider default) so it can
  * never pass vacuously.
@@ -98,35 +101,6 @@ const bag = (
   QUANTA_PREFS_HOME: join(scratch, "prefs"),
   CODEX_HOME: join(scratch, "codex"),
   ...extra,
-})
-
-// ─────────────────── ROOT 1 — CLI `readSessionRuntimeConfig` ───────────────────
-
-describe("MR-01 producer — apps/cli/repl/session-runtime-config", () => {
-  test("QUANTA_MODEL is the boot model AND sets modelPinnedExplicitly", () => {
-    process.env.QUANTA_MODEL = "mr01-cli-pin"
-    const cfg = readSessionRuntimeConfig()
-    expect(cfg.provider).toBe("openai")
-    expect(cfg.model).toBe("mr01-cli-pin")
-    expect(cfg.modelPinnedExplicitly).toBe(true)
-  })
-
-  test("PAIRED CONTROL: unset ⇒ canonical default, NOT pinned", () => {
-    const cfg = readSessionRuntimeConfig()
-    expect(cfg.model).toBe(DEFAULT_MODEL.openai)
-    expect(cfg.modelPinnedExplicitly).toBe(false)
-  })
-
-  test("whitespace-only QUANTA_MODEL no longer boots a whitespace model id", () => {
-    // The pre-MR-01 root read the model with `process.env[k] ?? fallback` and the
-    // pin with a SEPARATE `.trim().length > 0`, so `QUANTA_MODEL="  "` booted a
-    // port whose model id was literally `"  "` while `pinned` said false. One
-    // resolution now answers both.
-    process.env.QUANTA_MODEL = "   "
-    const cfg = readSessionRuntimeConfig()
-    expect(cfg.model).toBe(DEFAULT_MODEL.openai)
-    expect(cfg.modelPinnedExplicitly).toBe(false)
-  })
 })
 
 // ──────────────── ROOT 2 — headless `buildBaseFromArgs` (host layer) ────────────
@@ -204,36 +178,9 @@ describe("MR-01 producer — apps/web-daemon/runtime-factory", () => {
   })
 })
 
-// ───────────────── ROOT 4 — `serve --stdio` `resolveServeStdioBoot` ─────────────
-
-describe("MR-01 producer — apps/cli/serve-stdio-cmd", () => {
-  test("INTENDED CHANGE: QUANTA_MODEL is now honoured by `serve --stdio`", () => {
-    const boot = resolveServeStdioBoot(bag({ QUANTA_MODEL: "mr01-serve-pin" }), {
-      model: undefined,
-    })
-    expect(boot.modelId).toBe("mr01-serve-pin")
-    expect(boot.source).toBe("env")
-    expect(boot.pinned).toBe(true)
-  })
-
-  test("PRESERVED: --model still wins over QUANTA_MODEL (no existing invocation moves)", () => {
-    const boot = resolveServeStdioBoot(bag({ QUANTA_MODEL: "mr01-serve-env" }), {
-      model: "mr01-serve-flag",
-    })
-    expect(boot.modelId).toBe("mr01-serve-flag")
-    expect(boot.source).toBe("flag")
-  })
-
-  test("PAIRED CONTROL: neither ⇒ canonical DEFAULT_MODEL[provider]", () => {
-    const boot = resolveServeStdioBoot(bag(), { model: undefined })
-    expect(boot.modelId).toBe(DEFAULT_MODEL.openai)
-    expect(boot.pinned).toBe(false)
-  })
-})
-
 // ───────────────────── ROOT 5 — bench `resolveBenchBootSelection` ───────────────
 
-describe("MR-01 producer — apps/bench/run-main", () => {
+describe("MR-01 producer — apps/bench boot-llm-wire (the `run-main` keystone's boot line)", () => {
   const withArgv = <T>(argv: readonly string[], fn: () => T): T => {
     const prev = process.argv
     process.argv = ["bun", "bench", ...argv]

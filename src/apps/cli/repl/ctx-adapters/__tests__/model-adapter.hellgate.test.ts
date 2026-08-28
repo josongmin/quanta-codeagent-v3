@@ -17,13 +17,13 @@ import type { AgentMode } from "@/agent"
 import { inMemoryStickyModelStore } from "@/agent/sticky-model"
 import { buildModelAdapter } from "../model-adapter"
 
-const build = (over?: { mode?: AgentMode; current?: () => string }) => {
+const build = (over?: { mode?: AgentMode; current?: () => string; ids?: readonly string[] }) => {
   const store = inMemoryStickyModelStore()
   const adapter = buildModelAdapter({
     store,
     bootModel: "gpt-5",
     currentMode: () => over?.mode ?? "default",
-    candidateIds: () => ["gpt-5", "gpt-4o", "future-xyz"],
+    candidateIds: () => over?.ids ?? ["gpt-5", "gpt-4o", "future-xyz"],
     ...(over?.current !== undefined ? { currentModel: over.current } : {}),
   })
   return { store, adapter }
@@ -46,6 +46,27 @@ describe("model-adapter — candidate projection from the metadata SSOT", () => 
     expect(gpt4o?.recommended).toBeUndefined()
     expect(gpt4o?.contextWindow).toBe(128_000)
     expect(gpt4o?.hint).toContain("lower cost")
+  })
+
+  test("FAMILY-FALLBACK id gets a window but NO hint (the exact-metadata rule)", () => {
+    // The rule `deriveHint` exists for: both metadata resolvers fall back to a
+    // per-FAMILY entry, so a live-catalog id no table knows (`gpt-5.4-mini`,
+    // `gpt-5.3-codex-spark`) resolved through the `gpt-5` family and every picker
+    // row printed the same "most capable" — a badge that is actively WRONG on a
+    // mini/spark model. A hint is a claim about the SPECIFIC model, so it is
+    // emitted only for an exact metadata entry; the window/output columns keep the
+    // family estimate, which is merely approximate rather than false.
+    //
+    // Measured: `gpt-5.4-mini` → exact=false, family=true, window=400000. The
+    // suite previously covered only exact-tabled ids and a fully un-tabled one, so
+    // reverting the guard left it green — this is the case that discriminates.
+    const { adapter } = build({ ids: ["gpt-5", "gpt-5.4-mini"] })
+    const mini = adapter.candidates().find((m) => m.id === "gpt-5.4-mini")
+    expect(mini).toBeDefined()
+    expect(mini?.contextWindow).toBe(400_000)
+    expect(mini?.hint).toBeUndefined()
+    // Paired control: the EXACT-tabled sibling in the same family still gets one.
+    expect(adapter.candidates().find((m) => m.id === "gpt-5")?.hint).toBe("most capable")
   })
 
   test("un-tabled id degrades: bare id, no window/hint fields", () => {

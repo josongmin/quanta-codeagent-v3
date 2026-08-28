@@ -146,8 +146,8 @@ export const vetPersistedPicks = (
     if (!isStickyModelKeyInScope(parsed, provider)) continue
     if (!isPlausibleModelSlug(id)) {
       logger.warn(
-        `sticky-model: ignoring an implausible persisted model id at key ` +
-          `${summarizeUntrustedId(key)} (${id.length} chars) — it will not seed this session`,
+        `sticky-model: ignoring an implausible persisted model id ${summarizeUntrustedId(id)} ` +
+          `at key ${summarizeUntrustedId(key)} — it will not seed this session`,
       )
       continue
     }

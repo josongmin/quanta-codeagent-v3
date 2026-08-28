@@ -34,6 +34,13 @@
  */
 
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test"
+import { mkdtemp, rm } from "node:fs/promises"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
+import { chatgptTokenPath, writeToken } from "@/auth/chatgpt-oauth"
+import { AnthropicAdapter } from "@/llm/adapters/anthropic"
+import { __resetCatalogCacheForTest, ChatGPTOAuthAdapter } from "@/llm/adapters/chatgpt-oauth"
+import { OpenAIAdapter } from "@/llm/adapters/openai"
 import { OpenAIResponsesAdapter } from "@/llm/adapters/openai-responses"
 import { buildModelCatalogWire, MODEL_CATALOG_PROBE_TIMEOUT_MS } from "@/llm/model-catalog"
 import type { LLMPort } from "@/llm/ports"
@@ -49,7 +56,7 @@ const abortError = (reason: unknown): unknown =>
 
 interface StubTransport {
   /** Shape-compatible with `ResponsesFetchLike`. */
-  readonly fetchImpl: (url: string, init?: RequestInit) => Promise<Response>
+  readonly fetchImpl: (url: string | URL | Request, init?: RequestInit) => Promise<Response>
   /** The signal each request was given — `undefined` when the adapter passed
    *  NONE, which is the defect this suite exists to catch. */
   readonly signals: (AbortSignal | undefined)[]
@@ -317,5 +324,90 @@ describe("model-catalog probe — deadline + cancellation (MR-07)", () => {
     } finally {
       warn.mockRestore()
     }
+  })
+})
+
+/**
+ * PER-ADAPTER coverage (MR-07 requirement 1: "thread the signal through all FOUR
+ * adapters"). The suite above drives `OpenAIResponsesAdapter` because that is the
+ * surface a plain `OPENAI_API_KEY` session actually boots; these cases close the
+ * other three, each at the strongest seam that adapter exposes.
+ */
+describe("every adapter's listModels puts the signal on its real request", () => {
+  test("ADAPTER-CANCEL-01 — openai chat-completions (SDK `fetch` seam)", async () => {
+    const t = hungTransport()
+    const adapter = new OpenAIAdapter({
+      apiKey: "sk-test-key",
+      model: "gpt-4o",
+      fetchImpl: t.fetchImpl,
+    })
+    const probe = adapter.listModels?.(AbortSignal.timeout(60))
+    expect(probe).toBeDefined()
+    // `settlesWithin` (not a bare await) so a signal-dropping adapter fails with
+    // THIS message instead of the harness's generic 5s timeout.
+    expect(await settlesWithin(probe as Promise<unknown>, 2_000)).toBe("settled")
+    expect(t.signals[0], "the SDK was given no signal to forward").toBeDefined()
+    expect(t.aborted, "the abort never reached the transport").toBe(true)
+  })
+
+  test("ADAPTER-CANCEL-02 — chatgpt-oauth (`/codex/models` fetchImpl seam)", async () => {
+    // Hermetic: a scratch `QUANTA_PREFS_HOME`, never the developer's ~/.quanta.
+    const dir = await mkdtemp(join(tmpdir(), "mr07-cgo-"))
+    try {
+      __resetCatalogCacheForTest()
+      const now = Date.parse("2026-08-29T12:00:00.000Z")
+      // A token that is still FRESH, so `ensureFreshToken` is a disk read and the
+      // only network call in the probe is the `/codex/models` GET under test.
+      await writeToken(chatgptTokenPath(dir), {
+        access_token: "at-fresh",
+        refresh_token: "rt-mr07",
+        expires_at: new Date(now + 3_600_000).toISOString(),
+        account_id: "acct-mr07",
+        plan_type: "pro",
+      })
+      const t = hungTransport()
+      const adapter = new ChatGPTOAuthAdapter({
+        model: "gpt-5",
+        env: { QUANTA_PREFS_HOME: dir },
+        fetchImpl: t.fetchImpl,
+        nowMs: () => now,
+      })
+
+      const probe = adapter.listModels?.(AbortSignal.timeout(60))
+      expect(probe).toBeDefined()
+      expect(await settlesWithin(probe as Promise<unknown>, 2_000)).toBe("settled")
+      expect(t.signals[0], "the /codex/models fetch got no signal").toBeDefined()
+      expect(t.aborted).toBe(true)
+    } finally {
+      __resetCatalogCacheForTest()
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  test("ADAPTER-CANCEL-03 — anthropic hands the signal to the SDK request options", () => {
+    // HONEST LIMITATION, stated rather than papered over: `AnthropicAdapter`
+    // builds its `Anthropic` client internally and exposes NO `fetch`/transport
+    // injection seam (unlike both OpenAI adapters), so there is no way to observe
+    // the real socket from a unit test without widening the adapter's config —
+    // out of scope for MR-07. This asserts the one thing that IS observable and
+    // that the injection actually breaks: the adapter passes `{ signal }` as the
+    // SDK's `RequestOptions`. The SDK's own typed contract
+    // (`Core.RequestOptions.signal`) carries it to the request from there.
+    const adapter = new AnthropicAdapter({ apiKey: "sk-ant-test", model: "claude-sonnet-4-6" })
+    const client = (adapter as unknown as { client: { models: { list: unknown } } }).client
+    const calls: unknown[][] = []
+    ;(client.models as { list: (...a: unknown[]) => unknown }).list = (...a: unknown[]) => {
+      calls.push(a)
+      return Promise.resolve({ data: [] })
+    }
+    const ac = new AbortController()
+    void adapter.listModels?.(ac.signal)
+
+    expect(calls).toHaveLength(1)
+    expect(calls[0]?.[0]).toEqual({ limit: 100 })
+    expect(
+      (calls[0]?.[1] as { signal?: AbortSignal } | undefined)?.signal,
+      "anthropic dropped the signal before the SDK",
+    ).toBe(ac.signal)
   })
 })

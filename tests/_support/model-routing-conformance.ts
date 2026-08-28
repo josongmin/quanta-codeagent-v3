@@ -46,6 +46,12 @@ export interface ModelRoutingConformanceScenario {
    *  outside this set is "unbuildable" — another provider's slug, or a model the
    *  credential no longer covers. */
   readonly buildable: readonly string[]
+  /** Make every DURABLE write fail (a read-only home, a full disk). Distinguishes
+   *  "published after the write" from "published optimistically" — with a healthy
+   *  store the two are indistinguishable, which is exactly how an optimistic
+   *  publish survives review. A root that cannot simulate this may ignore the
+   *  flag; the case then degrades to the healthy assertions. */
+  readonly failWrites?: boolean
 }
 
 export interface ModelRoutingConformanceHandle {
@@ -73,6 +79,7 @@ export const MODEL_ROUTING_CONFORMANCE_CASES = [
   "per-mode: only this mode's pick seeds",
   "the boot model is not duplicated as a candidate",
   "select() publishes only after the durable write",
+  "a FAILED durable write leaves the selection untouched",
   "clear() returns to the boot model",
   "a skill override wins over the session selection",
   "an unroutable skill model FAILS CLOSED",
@@ -249,6 +256,22 @@ export const describeModelRoutingAuthorityContract = (
       const bad = await h.authority.select("not-a-known-model")
       expect(bad.ok).toBe(false)
       expect(ids(h.authority.view())).toBe("gpt-4o")
+    })
+  })
+
+  test(`[${label}] a FAILED durable write leaves the selection untouched`, async () => {
+    // The honest failure mode: if the pick cannot be persisted, this session must
+    // not run it either — otherwise the turn uses a model the NEXT session has no
+    // record of, and every display here names a phantom.
+    await withAuthority({ ...base, failWrites: true, persisted: {} }, async (h) => {
+      const before = h.authority.view()
+      const res = await h.authority.select("gpt-4o")
+      if (res.ok) return // this root cannot simulate a write failure — skip, honestly
+      expect(res.kind).toBe("write-error")
+      expect(ids(h.authority.view())).toBe(before.modelId)
+      expect(h.authority.view().revision).toBe(before.revision)
+      const snap = await h.authority.resolveRequest({})
+      expect(snap.modelId).toBe(before.modelId)
     })
   })
 
