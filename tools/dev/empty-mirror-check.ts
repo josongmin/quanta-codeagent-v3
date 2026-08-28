@@ -172,6 +172,33 @@ const guardsUnder = (roots: readonly string[]): readonly string[] => {
   return out.sort()
 }
 
+/**
+ * Only a guard that reads the FILESYSTEM under `tests/` or `src/` can be judged
+ * by these mirrors, and saying so is what keeps the gate honest.
+ *
+ * Two populations are green in both arms without being vacuous, and lumping them
+ * in would make this a 12-false-positive gate that gets switched off:
+ *
+ *   - a pure unit test (`cwd-parity-check`, `expect-present-helper`,
+ *     `sandboxed-test-runner`) never reads the corpus, so an empty one changes
+ *     nothing. It has no scan to be vacuous about.
+ *   - a `git ls-files`-backed guard (`repo-index-hygiene`,
+ *     `no-leftover-backup-files`) reads the real index through the symlinked
+ *     `.git`, which NEITHER mirror empties. Its corpus is untouched here, so this
+ *     instrument cannot speak to it — a stated limit, not a pass. Those two carry
+ *     derived floors (12,695 and 7,804 against 14,106 and 8,672) verified by hand.
+ */
+const FS_SCAN =
+  /\breaddirSync\s*\(|\breaddir\s*\(|\bBun\.Glob\b|\bnew Glob\b|\bglobSync\s*\(|\bopendirSync\s*\(/
+
+export const scansFilesystem = (rel: string): boolean => {
+  try {
+    return FS_SCAN.test(readFileSync(join(REPO_ROOT, rel), "utf8"))
+  } catch {
+    return false
+  }
+}
+
 const ledgerEntries = (): readonly string[] =>
   (JSON.parse(readFileSync(LEDGER, "utf8")) as { burndown?: readonly string[] }).burndown ?? []
 
@@ -179,27 +206,31 @@ if (import.meta.main) {
   const argv = process.argv.slice(2)
   const useLedger = argv.includes("--ledger")
   const roots = argv.filter((a) => !a.startsWith("--"))
-  const guards = useLedger
+  const selected = useLedger
     ? ledgerEntries()
     : guardsUnder(roots.length > 0 ? roots : ["tests/unit/_arch"])
+  const guards = selected.filter(scansFilesystem)
+  const skipped = selected.length - guards.length
 
   if (guards.length === 0) {
     console.error("empty-mirror: no guards selected — refusing to report over nothing.")
     process.exit(1)
   }
   const known = new Set(ledgerEntries())
-  console.error(`empty-mirror: ${guards.length} guard(s), two arms each`)
+  console.error(
+    `empty-mirror: ${guards.length} filesystem-scanning guard(s), two arms each ` +
+      `(${skipped} of ${selected.length} skipped: no filesystem scan, or git-index backed)`,
+  )
 
-  const arms: readonly [MirrorArm, string][] = [
-    ["empty-tests", buildMirror(["tests", "docs"])],
-    ["empty-src", buildMirror(["src", "docs"])],
-  ]
+  const emptyTests = buildMirror(["tests", "docs"])
+  const emptySrc = buildMirror(["src", "docs"])
+  const arms: readonly string[] = [emptyTests, emptySrc]
   const vacuous: string[] = []
   const errored: string[] = []
   try {
     for (const [i, rel] of guards.entries()) {
-      const a = runInMirror(arms[0][1], rel)
-      const b = runInMirror(arms[1][1], rel)
+      const a = runInMirror(emptyTests, rel)
+      const b = runInMirror(emptySrc, rel)
       if (a === "error" && b === "error") {
         errored.push(rel)
         continue
@@ -209,7 +240,7 @@ if (import.meta.main) {
       console.error(`  [${i + 1}/${guards.length}] VACUOUS ${rel} (green with an empty corpus)`)
     }
   } finally {
-    for (const [, dir] of arms) rmSync(dir, { recursive: true, force: true })
+    for (const dir of arms) rmSync(dir, { recursive: true, force: true })
   }
 
   // A guard that could not run in EITHER arm proved nothing; that is a broken

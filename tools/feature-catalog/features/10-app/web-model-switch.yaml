@@ -89,6 +89,7 @@ evidence:
       - tests/unit/host/effective-model-projection-hellgate.test.ts
       - tests/unit/kernel/session-model-echo-staleness-hellgate.test.ts
       - apps/web-frontend/src/components/slash-model-switch.test.ts
+      - tests/unit/agent/sticky-model-write-order-hellgate.test.ts
     integration:
       - tests/integration/model-switch-ws-daemon-e2e.test.ts
     contract: []
@@ -119,6 +120,16 @@ notes: |
   model — the daemon sessions in these tests are the hermetic stub, so the drain is
   invoked explicitly (one hop short of the loop's own `pollControlRequests` tick,
   which the CLI side measures live).
+
+  aug-28 — WRITE ORDER. `applyModel` is fire-and-forget by contract, so two
+  `set_model` frames in one drain start two overlapping store writes. Unordered,
+  their durable effects and their promise resolutions can land in OPPOSITE orders
+  (a slow `rename(2)` is enough), leaving the FILE naming one model and the session
+  cell the other: this session runs B, the next boots A, and nothing reports a
+  conflict. `sessionScopedStickyModelStore` now serializes the write-through, so
+  the last frame enqueued is last on disk AND last in the cell. Natural fs timing
+  did not reproduce it (0/25); the guard forces the interleaving, because a green
+  race is not evidence.
 
   aug-28 — the browser's CONFIRMATION now waits for the switch. `/model <id>` sent
   the frame and immediately re-read the `/model` readout under a line saying

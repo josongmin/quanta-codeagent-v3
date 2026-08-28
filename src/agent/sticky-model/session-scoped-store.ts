@@ -49,18 +49,43 @@ export const sessionScopedStickyModelStore = (args: {
   readonly seed?: Readonly<Record<string, string>>
 }): StickyModelStore => {
   const cell = new Map<string, string>(Object.entries(args.seed ?? {}))
+  /**
+   * WRITE ORDER (aug-28). Each write-through awaits the previous one, so the last
+   * call enqueued is the last one on disk AND the last one in the cell.
+   *
+   * Two writes can overlap: the web `applyModel` is FIRE-AND-FORGET by contract
+   * (the control-request applier is sync and must not throw), so two `set_model`
+   * frames in one drain start two writes at once. Unordered, their durable effects
+   * and their promise resolutions can land in OPPOSITE orders — a slow `rename(2)`
+   * is enough — and then the file names one model while the cell names the other:
+   * this session runs B, the next session boots A, and nothing reports a conflict.
+   * MEASURED: natural fs timing did not reproduce it in 25 runs, a forced
+   * interleaving produced `disk=A cell=B` immediately (the guard uses the forced
+   * one, because a green race is not evidence).
+   *
+   * ORDERING, not locking: a rejected write still leaves the cell untouched, and a
+   * throwing inner store cannot wedge the chain (the tail is reset either way).
+   */
+  let writeChain: Promise<unknown> = Promise.resolve()
+  const serialized = async <T>(work: () => Promise<T>): Promise<T> => {
+    const run = writeChain.then(work, work)
+    writeChain = run.catch(() => undefined)
+    return await run
+  }
   return {
     get: async (input: StickyModelKey): Promise<string | undefined> =>
       readStickyModelFrom((k) => cell.get(k), input),
     set: async (
       input: StickyModelKey & { readonly modelId: string },
     ): Promise<StickyModelSetResult> => {
-      const res = await args.inner.set(input)
-      // Only reflect a pick the durable write ACCEPTED — otherwise this session
-      // would run a model the next one has no record of, and the displays (which
-      // read this same cell through the adapter) would claim a phantom.
-      if (res.ok) cell.set(stickyModelKeyOf(input), input.modelId)
-      return res
+      return await serialized(async () => {
+        const res = await args.inner.set(input)
+        // Only reflect a pick the durable write ACCEPTED — otherwise this session
+        // would run a model the next one has no record of, and the displays (which
+        // read this same cell through the adapter) would claim a phantom.
+        if (res.ok) cell.set(stickyModelKeyOf(input), input.modelId)
+        return res
+      })
     },
     unset: async (input: StickyModelKey): Promise<StickyModelSetResult> => {
       // Durable removal FIRST, cell second — the exact mirror of `set` above, and
@@ -69,9 +94,11 @@ export const sessionScopedStickyModelStore = (args: {
       // back to the boot model while the file still holds the pick, so the next
       // session would silently resurrect it — the "did my clear work?" ambiguity
       // this whole decorator exists to avoid.
-      const res = await args.inner.unset(input)
-      if (res.ok) cell.delete(stickyModelKeyOf(input))
-      return res
+      return await serialized(async () => {
+        const res = await args.inner.unset(input)
+        if (res.ok) cell.delete(stickyModelKeyOf(input))
+        return res
+      })
     },
     // The cell is already this session's truth, so the sync read is exact (no IO,
     // no staleness window) — the reason the decorator can back every display.
