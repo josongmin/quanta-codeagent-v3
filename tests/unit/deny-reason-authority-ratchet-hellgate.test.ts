@@ -26,6 +26,21 @@ const blank = (m: string): string => m.replace(/[^\n]/g, " ")
 const stripComments = (src: string): string =>
   src.replace(TOKEN, (m) => (m.startsWith("//") || m.startsWith("/*") ? blank(m) : m))
 
+/** Does this subtree hold a `.ts` at all? A direct disk probe, deliberately not
+ *  reusing the walk under test. */
+const hasTsOnDisk = (dir: string): boolean => {
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    if (entry.name === "__tests__" || entry.name.startsWith(".")) continue
+    const full = join(dir, entry.name)
+    if (entry.isDirectory()) {
+      if (hasTsOnDisk(full)) return true
+      continue
+    }
+    if (entry.name.endsWith(".ts") && !entry.name.endsWith(".test.ts")) return true
+  }
+  return false
+}
+
 const collectAgentTs = (): string[] => {
   const out: string[] = []
   const walk = (dir: string): void => {
@@ -52,6 +67,33 @@ const collectAgentTs = (): string[] => {
 }
 
 describe("deny-reason authority ratchet", () => {
+  test("ANTI-VACUITY: the walk reaches a real, populated `src/agent` tree", () => {
+    // This ratchet reports the same value — no offenders — whether the tree is
+    // clean or whether `collectAgentTs()` returned nothing. A count alone is not
+    // enough either: losing one subtree is invisible to it, measured on the
+    // sibling PEP fence. So both are asserted.
+    const files = collectAgentTs()
+    expect(files.length, "the walk found no agent sources at all").toBeGreaterThan(100)
+    const walked = new Set(
+      files.map((f) => relative(SRC_AGENT, f).split("/")[0] ?? "").filter((s) => s !== ""),
+    )
+    // Only subtrees that HOLD collectable source. A directory of `.md`, or one
+    // holding nothing this walk collects, is legitimately absent from the
+    // enumeration — demanding it would red on a clean tree, and a guard that
+    // reds on a clean tree is a guard people disable.
+    const onDisk = readdirSync(SRC_AGENT, { withFileTypes: true })
+      .filter((e) => e.isDirectory() && e.name !== "__tests__" && !e.name.startsWith("."))
+      .map((e) => e.name)
+      // Probed INDEPENDENTLY of the walk under test. Deriving this from
+      // `collectAgentTs()` would be circular: a walk that loses a subtree loses
+      // it from the expectation too, and the check passes vacuously.
+      .filter((name) => hasTsOnDisk(join(SRC_AGENT, name)))
+    expect(
+      onDisk.filter((name) => !walked.has(name)),
+      "these subtrees hold agent source on disk but the walk enumerated none of them",
+    ).toEqual([])
+  })
+
   test("only deny-reason-wire.ts may construct structuredDenyReason directly inside src/agent", () => {
     const offenders = collectAgentTs().filter((path) => {
       if (path === ALLOWED_OWNER) return false

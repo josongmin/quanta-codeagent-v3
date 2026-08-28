@@ -33,6 +33,7 @@ import { describe, expect, test } from "bun:test"
 import {
   type StickyModelKey,
   type StickyModelStore,
+  StickyModelWriteError,
   sessionScopedStickyModelStore,
 } from "@/agent/sticky-model"
 
@@ -104,10 +105,12 @@ describe("concurrent sticky writes keep the cell and the durable store in step",
       peek: () => undefined,
       load: async () => ({ ok: true, snapshot: {} }),
       unset: async () => ({ ok: true }) as const,
-      set: async () =>
-        ({ ok: false, error: new Error("disk full") as never }) as unknown as { ok: false },
+      set: async () => ({
+        ok: false as const,
+        error: new StickyModelWriteError("/tmp/nope/sticky-model.json", "disk full"),
+      }),
     }
-    const store = sessionScopedStickyModelStore({ inner: failing as StickyModelStore, seed: {} })
+    const store = sessionScopedStickyModelStore({ inner: failing, seed: {} })
     const res = await store.set({ ...KEY, modelId: "A" })
     expect(res.ok).toBe(false)
     expect(store.peek(KEY)).toBeUndefined()
