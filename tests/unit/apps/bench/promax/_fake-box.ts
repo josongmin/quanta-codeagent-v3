@@ -17,7 +17,8 @@
 
 import { PROMAX_V1_SNAPSHOT } from "@/apps/bench/promax/provenance/frozen-snapshot"
 import type { SpawnResult } from "@/apps/bench/remote/backend"
-import { DEFAULT_CHUNK_PATHS } from "@/apps/bench/remote/box-session/types"
+import { runExitPathFor } from "@/apps/bench/remote/box-session/chunk-scrub"
+import { DEFAULT_CHUNK_PATHS, runSidPathFor } from "@/apps/bench/remote/box-session/types"
 
 export type Reply = { code: number; stdout: string; stderr: string }
 export const ok = (stdout = ""): Reply => ({ code: 0, stdout, stderr: "" })
@@ -30,6 +31,9 @@ const PINNED_DIGESTS: ReadonlyArray<readonly [string, string]> = [
   ["src/evaluation/test_run.py", PROMAX_V1_SNAPSHOT.evaluator_sha256],
 ]
 
+/** Where the launcher records the detached run's session id. */
+const RUN_SID_PATH = runSidPathFor(runExitPathFor(DEFAULT_CHUNK_PATHS))
+
 export interface FakeBoxOpts {
   /** JSONL the box's patch-gen pass left in `preds`. */
   readonly predictions?: string
@@ -39,6 +43,8 @@ export interface FakeBoxOpts {
   readonly imageProvenance?: string
   /** answer for the grade invocation itself. */
   readonly grade?: Reply
+  /** the session id the launcher recorded for the detached bench run. */
+  readonly runSid?: string
   /** replaces the whole responder for commands this returns non-undefined for. */
   readonly override?: (cmd: string) => Reply | undefined
 }
@@ -73,7 +79,17 @@ const CASES: ReadonlyArray<{
   // fixtures grade after patch-gen. Leaving it to the catch-all `ok()` produced
   // exit 0 with empty stdout, a shape the real command cannot emit, and the
   // classifier now (correctly) refuses it.
+  // The SESSION survivor probe, modelled BEFORE the generic `pgrep` row — the
+  // two ask different questions (`-s <sid>`: anything left in the bench's own
+  // session; `-f <cmdline>`: the bench command itself) and collapsing them into
+  // one row is exactly the modelling mistake this fixture exists to prevent.
+  // Default: nothing survives.
+  { when: (c) => c.includes("pgrep -s"), reply: () => fail(1) },
   { when: (c) => c.includes("pgrep"), reply: () => fail(1) },
+  {
+    when: (c) => c.startsWith("cat ") && c.includes(RUN_SID_PATH),
+    reply: (_c, o) => ok(`${o.runSid ?? "4242"}\n`),
+  },
   { when: (c) => c.includes('printf %s "$HOME"'), reply: () => ok("/home/ubuntu") },
   { when: (c) => c.includes("--version"), reply: () => ok("Python 3.11.14\n") },
   {

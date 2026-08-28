@@ -23,8 +23,11 @@ import type { ExportMetric, ExportSpan } from "./otlp-encode"
 import { serializeMetrics, serializeSpans } from "./otlp-encode"
 import { backoffMs, classifyPostStatus, type PostOutcome, parseRetryAfterMs } from "./retry-policy"
 
-export const TRACES_PATH = "/v1/traces"
-export const METRICS_PATH = "/v1/metrics"
+// Module-private. The split promoted these to exports; nothing outside this
+// file has ever read them, and an export is a promise to a caller that does
+// not exist.
+const TRACES_PATH = "/v1/traces"
+const METRICS_PATH = "/v1/metrics"
 
 /** The slice of `OtelExporterOpts` the transport reads. Declared structurally
  *  rather than imported so this module does not depend back on its host (the

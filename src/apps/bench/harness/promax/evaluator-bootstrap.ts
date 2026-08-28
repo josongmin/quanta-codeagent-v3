@@ -562,9 +562,13 @@ const graderVerifyHashes = (spec: ProMaxEvaluatorBootstrapSpec): ProMaxBootstrap
 
 /**
  * ---- GRADER PHASE, part 3 + TEARDOWN ---- the dedicated evaluator interpreter,
- * then the answer key UNMADE. The venv deliberately survives (it holds no
- * answer-key bytes and rebuilding one per chunk is cost without a defence);
- * only the gold-bearing checkout is removed.
+ * then the answer key UNMADE. The venv PATH survives across chunks, but its
+ * CONTENTS are rebuilt every time (`uv venv --clear`) — an earlier version of
+ * this comment called rebuilding "cost without a defence", which is no longer
+ * true: the venv root is agent-writable, and `python -I` drops the script
+ * directory and `PYTHON*` env vars but does NOT imply `-S`, so a planted
+ * `sitecustomize.py` or `.pth` inside the venv would still load. `--clear` is
+ * what removes it. The two are one defence, not two conveniences.
  */
 const graderPythonEnvAndTeardown = (
   spec: ProMaxEvaluatorBootstrapSpec,
@@ -625,9 +629,10 @@ const graderPythonEnvAndTeardown = (
     },
     // ---- TEARDOWN ---- what the grader phase materialized, UNMADE.
     //
-    // The venv is deliberately NOT removed: it holds no answer-key bytes, and
-    // rebuilding an interpreter per chunk is cost without a defence. Only the
-    // checkout — which IS the answer key — goes.
+    // The venv PATH is not removed here — it is rebuilt from scratch at the
+    // start of every grader phase instead (`uv venv --clear`), which is what
+    // clears anything the previous chunk's agent planted inside it. Only the
+    // checkout — which IS the answer key — is torn down here.
     {
       step: "gold-teardown",
       phase: "teardown",

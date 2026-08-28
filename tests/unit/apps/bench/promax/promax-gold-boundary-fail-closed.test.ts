@@ -209,6 +209,12 @@ describe("the checkout root cannot be redirected by its PARENT or by path shape"
     // unit test with a real network call: 3.5–4.6s, a 1.8% timeout flake, and
     // nothing it asserts depends on the fetch (measured — with the fetch failing
     // fast the test drops to 0.05s and still passes).
+    //
+    // HONEST SCOPE: this conjunct is INERT for this assertion. `mkdir` succeeds
+    // through a symlinked PARENT either way, so `absence === 0 && checkout === 0`
+    // reduces to `absence !== 0` — the absence probe is what refuses here. It is
+    // kept because a future change that made the create refuse a symlinked
+    // parent should not silently pass this test on the other half.
     const checkout = await sh(stepCommands("checkout", s)[0] as string)
     expect(absence === 0 && checkout === 0, "a symlinked campaign root passed both gates").toBe(
       false,

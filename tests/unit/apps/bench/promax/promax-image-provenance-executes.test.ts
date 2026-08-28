@@ -181,3 +181,67 @@ describe("the provenance program cannot be hijacked by its own directory", () =>
     expect(existsSync(canary), "attacker code ran as the grader python").toBe(false)
   })
 })
+
+/**
+ * `-I` AND `--clear` ARE ONE DEFENCE, NOT TWO CONVENIENCES.
+ *
+ * The venv root is agent-writable and survives across chunks by path. `-I`
+ * (isolated) drops the SCRIPT'S directory from `sys.path` and ignores `PYTHON*`
+ * env vars — but it does NOT imply `-S`, so the venv's own `site-packages` is
+ * still loaded, and a `sitecustomize.py` planted there by the previous chunk's
+ * agent runs before anything else.
+ *
+ * So `-I` alone leaves a hole and `--clear` alone leaves a hole. Nothing tested
+ * the pair, and the code comments claimed rebuilding the venv was "cost without
+ * a defence" — which is exactly backwards.
+ */
+describe("the venv is rebuilt AND the interpreter is isolated", () => {
+  test("🔴 the grader's venv step clears the previous chunk's contents", async () => {
+    const { familyRemoteBootstrap } = await import("@/apps/bench/profiles/bootstrap")
+    const { resolveBenchRunConfig } = await import("@/apps/bench/run-config")
+    const plan = familyRemoteBootstrap(resolveBenchRunConfig({ argvFamily: "promax", env: {} }))
+    const venvStep = (plan?.commands ?? []).find((c) => c.argv.join(" ").includes("uv venv"))
+    expect(venvStep, "no venv step in the plan").toBeDefined()
+    // Without this, an agent-planted `sitecustomize.py` in the venv survives
+    // into the next chunk's grader phase, where `-I` does not stop it.
+    expect(venvStep?.argv.join(" "), "the venv is reused, not rebuilt").toContain("--clear")
+  })
+
+  test("🔴 the provenance program runs ISOLATED", async () => {
+    const { buildProMaxImageProvenanceCommand } = await import(
+      "@/apps/bench/harness/promax/image-provenance"
+    )
+    const cmd = buildProMaxImageProvenanceCommand({
+      checkoutRoot: "/opt/quanta/promax/upstream",
+      venvPython: "/opt/quanta/promax/venv/bin/python",
+      scriptPath: "/opt/quanta/promax/image-provenance.py",
+      instanceIds: ["a-1"],
+    })
+    // `-I` must sit between the interpreter and the script, or it is an argument
+    // to the program rather than a flag to python.
+    expect(cmd).toMatch(/venv\/bin\/python'?\s+-I\s+'?\/opt\/quanta\/promax\/image-provenance\.py/)
+  })
+
+  test("PAIRED CONTROL: a real sitecustomize is loaded WITHOUT isolation, so the pair is load-bearing", async () => {
+    const { writeFileSync: write, mkdirSync: mk, existsSync } = await import("node:fs")
+    const s = sandbox({ golden: [{ instance_id: "a-1" }], dockerPrints: DIGEST })
+    // A venv-shaped site dir is on the interpreter's path either way; this shows
+    // `-I` does NOT remove it, which is why `--clear` has to.
+    const site = join(s.dir, "site")
+    mk(site, { recursive: true })
+    write(
+      join(site, "sitecustomize.py"),
+      `open(${JSON.stringify(join(s.dir, "SITE_RAN"))}, "w").write("x")\n`,
+    )
+    const withSite = Bun.spawn(["python3", "-I", "-c", "pass"], {
+      env: { PATH: "/usr/bin:/bin", PYTHONPATH: site },
+      stdout: "pipe",
+      stderr: "pipe",
+    })
+    await withSite.exited
+    // `-I` ignores PYTHONPATH — that half works…
+    expect(existsSync(join(s.dir, "SITE_RAN"))).toBe(false)
+    // …but it is `--clear` that empties the venv's OWN site dir, which `-I`
+    // never touches. That is the coupling this pair of tests exists to state.
+  }, 30_000)
+})
