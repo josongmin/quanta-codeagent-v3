@@ -161,6 +161,13 @@ evidence:
     - src/agent/effective-model.ts
     - src/agent/sticky-model/session-scoped-store.ts
     - src/host/runtime/agent-arg-builder/model-switch-wire.ts
+    # The BOOT half of "which model actually runs": the two god-module splits
+    # that answer "what provider/model does this surface start on, and through
+    # what port?" — bench's and the headless composition root's. Both delegate
+    # to the same `@/llm` `resolveBootSelection` authority the picker resolves
+    # against, and both are pinned by boot-selection-producers.hellgate.
+    - src/apps/bench/boot-llm-wire.ts
+    - src/host/runtime/agent-arg-builder/boot-port-wire.ts
   adrs: [517, 462]
   tests:
     unit:
