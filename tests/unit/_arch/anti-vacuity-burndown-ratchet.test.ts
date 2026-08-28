@@ -39,6 +39,7 @@ import { readFileSync } from "node:fs"
 import { join } from "node:path"
 
 import { censusCorpusSize, floorlessGuards, isFloorless } from "@/../tools/dev/anti-vacuity-census"
+import { manifest } from "@/../tools/dev/empty-mirror-check"
 
 const REPO_ROOT = join(import.meta.dir, "..", "..", "..")
 const LEDGER = join(REPO_ROOT, "tools", "dev", "anti-vacuity-burndown.json")
@@ -48,6 +49,8 @@ const addedEntries = (found: readonly string[], known: readonly string[]): reado
   found.filter((f) => !known.includes(f)).sort()
 const staleEntries = (found: readonly string[], known: readonly string[]): readonly string[] =>
   known.filter((f) => !found.includes(f)).sort()
+
+const manifestFiles = (): readonly string[] => manifest().map((c) => c.file)
 
 const ledger = (): readonly string[] => {
   const raw = JSON.parse(readFileSync(LEDGER, "utf8")) as { burndown?: readonly string[] }
@@ -95,7 +98,22 @@ describe("anti-vacuity burn-down", () => {
   ])
 
   test("🔴 no NEW guard derives a verdict from an unfloored scan", () => {
-    const added = addedEntries(found, known).filter((f) => !REFUTED.has(f))
+    // The static census is a CANDIDATE detector and no longer the authority.
+    // Measured 2026-08-29: it still flags four guards that the execution-based
+    // oracle judges RED — `slice-fence-static-hellgate-r3`,
+    // `no-per-framework-heuristic-ratchet`, `observability-audit-ratchet` and
+    // `knobs-import-bundle` — because their floors are expressed in shapes no
+    // regex resolves. Three static detectors were built before the oracle and
+    // all three under-reported; the run against an empty corpus is what settles
+    // it, and `tools/dev/empty-mirror-check.ts` is where that verdict lives.
+    //
+    // What survives here is the cheap pre-filter: a candidate the oracle has not
+    // yet been pointed at must be bound in the manifest, so nothing enters the
+    // tree unjudged.
+    const bound = new Set(manifestFiles())
+    const added = addedEntries(found, known)
+      .filter((f) => !REFUTED.has(f))
+      .filter((f) => !bound.has(f))
     expect(
       added,
       added.length === 0

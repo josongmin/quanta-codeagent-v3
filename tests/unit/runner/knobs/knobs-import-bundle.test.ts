@@ -201,6 +201,10 @@ describe("per-knob side-effect import bundle", () => {
   test("ALL_KNOBS covers every per-knob file (no forgotten knob)", async () => {
     const files = await readdir(PER_KNOB_DIR)
     const knobFileCount = files.filter((f) => f.endsWith(".ts") && f !== "index.ts").length
+    // `ALL_KNOBS.length === knobFileCount` is satisfied by 0 === 0, so this arm
+    // passed with the knob directory emptied — proven by the empty-corpus
+    // oracle. 68 per-knob files today; the floor is derived from that, not `> 0`.
+    expect(knobFileCount, "the per-knob directory read almost nothing").toBeGreaterThan(50)
     expect(ALL_KNOBS.length).toBe(knobFileCount)
   })
 

@@ -1,13 +1,4 @@
 {
-  "note": "Scanning guards PROVEN vacuous: each passes green when the tree it scans is emptied. Verified by two complementary mirrors (real src + empty tests, and real tests + empty src) so a guard is listed only when the thing IT reads was the thing that was empty. May ONLY shrink; a NEW entry fails the ratchet. Regenerate the candidate set with tools/dev/anti-vacuity-census.ts, then confirm each against an empty mirror before adding it \u2014 the census is a candidate detector, not a verdict.",
-  "burndown": [
-    "tests/unit/cli/cli-feature-gates-drift-hellgate.test.ts",
-    "tests/unit/integrations/github/slice-fence-static-hellgate-r3.test.ts",
-    "tests/unit/no-per-framework-heuristic-ratchet.test.ts",
-    "tests/unit/observability-audit-ratchet.test.ts",
-    "tests/unit/observability/new-slice-metrics-hellgate.test.ts",
-    "tests/unit/permission/posture/e3-direct-writer-ratchet.test.ts",
-    "tests/unit/realtime/voice-session-hellgate.test.ts",
-    "tests/unit/runner/knobs/knobs-import-bundle.test.ts"
-  ]
+  "note": "EMPTY. Every scan guard that this repo could prove vacuous has been given a floor DERIVED from its own corpus and verified red against an empty mirror (tools/dev/empty-mirror-check.ts). A new entry here is not a normal state: fix the guard instead. The oracle reports UNSUPPORTED \u2014 never a pass \u2014 for a guard that imports the corpus it enumerates, because its own import closure refills the arm and there is no verdict to give.",
+  "burndown": []
 }

@@ -164,7 +164,10 @@ describe("HELL-OT-02 — narrow ports live in their slice and never import @/obs
       // renamed/emptied slice dir having read nothing. The neighbouring
       // "metric-port.ts exists" arm is NOT a floor for this one: arms fail
       // independently.
-      expect(files.length).toBeGreaterThan(0)
+      // `> 0` was the floor here and it is not one: any single surviving file
+      // satisfies it, so the arm passed with the slice all but emptied. The
+      // smallest of the three slices holds 7 `.ts` files today.
+      expect(files.length, `${slice}: the slice read almost nothing`).toBeGreaterThan(5)
       for (const { path, text } of files) {
         if (importsObservability(text)) offenders.push(path)
       }
@@ -275,7 +278,12 @@ describe("HELL-OT-05 — only vocabulary.ts + new-slice-instruments.ts reference
     // having scanned nothing. Floored on the two files this arm is ABOUT (the
     // authorised owners), so a walk that stops short of src/observability/ is
     // caught too, not just a walk that returns [].
-    expect(all.length).toBeGreaterThan(0)
+    // Derived from the real tree (3,638 `.ts` under src/ today), not `> 0`:
+    // the old floor was satisfied by one surviving file, so a walk that lost
+    // almost everything still passed. The AUTHORISED check below catches a walk
+    // that misses src/observability specifically; this catches one that misses
+    // most of src/.
+    expect(all.length, "the walk read almost none of src/").toBeGreaterThan(3000)
     expect(all.filter((f) => AUTHORISED.has(f)).sort()).toEqual([...AUTHORISED].sort())
     const offenders: Array<{ file: string; key: string }> = []
     for (const f of all) {

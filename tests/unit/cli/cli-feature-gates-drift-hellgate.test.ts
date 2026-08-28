@@ -35,19 +35,56 @@ const GATES = CLI_FEATURE_GATE_NAMES
  *  somewhere in the consuming source. */
 const REPO_ROOT = join(import.meta.dir, "..", "..", "..")
 
+/**
+ * How many `.ts` files the consumer search can actually see.
+ *
+ * The floor this guard never had. Its verdict is `orphans === []`, and a search
+ * that reaches NO files finds no consumers either — every gate would read as
+ * consumed and the guard would pass over a `src/` that is not there. Proven by
+ * the empty-corpus oracle: with `src/` emptied this file was green.
+ */
+const searchableSourceFiles = (): number => {
+  const out = execSync(`rg --files --type ts ${SEARCH_ROOT}`, { encoding: "utf8", cwd: REPO_ROOT })
+  return out.split("\n").filter((l) => l.trim().length > 0).length
+}
+
+/**
+ * The tree the search runs over, resolved from THIS file.
+ *
+ * Absolute, not the bare `src` it used to pass with `cwd: REPO_ROOT`. That form
+ * pinned the search to the real repository no matter which tree the test itself
+ * was loaded from, so the guard could not notice its own corpus being absent —
+ * it was reading a different `src/` than the one under test.
+ */
+const SEARCH_ROOT = join(REPO_ROOT, "src")
+
 const isConsumedSomewhere = (knob: string): boolean => {
-  try {
-    const out = execSync(
-      `rg -l --fixed-strings ${knob} src --type ts -g '!apps/cli/index.ts' -g '!apps/cli/cli-feature-gates.ts'`,
-      // Anchored on this file, not on the ambient cwd: `rg … src` resolves
-      // relative to wherever the runner happens to be, so under a sandboxed
-      // working directory it matched nothing and every gate read as unconsumed.
-      { encoding: "utf8", cwd: REPO_ROOT },
+  const proc = Bun.spawnSync(
+    [
+      "rg",
+      "-l",
+      "--fixed-strings",
+      knob,
+      SEARCH_ROOT,
+      "--type",
+      "ts",
+      "-g",
+      "!apps/cli/index.ts",
+      "-g",
+      "!apps/cli/cli-feature-gates.ts",
+    ],
+    { cwd: REPO_ROOT },
+  )
+  // exit 1 is "no matches" and is a real answer. Anything else — a bad path, rg
+  // missing (127), a crash — is NOT "unconsumed", and the old `catch { return
+  // false }` reported all three as the same thing.
+  if (proc.exitCode !== 0 && proc.exitCode !== 1) {
+    throw new Error(
+      `rg failed with exit ${proc.exitCode} searching for "${knob}" — that is not the same ` +
+        `as finding no consumer. ${new TextDecoder().decode(proc.stderr).trim()}`,
     )
-    return out.trim().length > 0
-  } catch {
-    return false // rg exit 1 ⇒ no matches
   }
+  return new TextDecoder().decode(proc.stdout).trim().length > 0
 }
 
 describe("CLI_FEATURE_GATES drift guard", () => {
@@ -56,6 +93,12 @@ describe("CLI_FEATURE_GATES drift guard", () => {
   })
 
   test("every seeded CLI gate has a real consumer in src/ (no stale/typo seed)", () => {
+    // Anti-vacuity, derived from the real tree (3,600+ `.ts` under src/ today).
+    // Without it the assertion below passes over a search that reached nothing.
+    expect(
+      searchableSourceFiles(),
+      "the consumer search reached no source files — every gate would read as consumed",
+    ).toBeGreaterThan(3000)
     const orphans = GATES.filter((g) => !isConsumedSomewhere(g))
     // Any entry here is a gate the CLI seeds to "1" that NOTHING reads — either a
     // typo or a feature whose consumer was removed. Delete it from the list (or

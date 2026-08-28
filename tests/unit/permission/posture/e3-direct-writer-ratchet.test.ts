@@ -49,6 +49,14 @@ const filesMatching = (needle: string): string[] =>
   SOURCES.filter((f) => f.text.includes(needle)).map((f) => f.rel)
 
 describe("RFC-05 E3 — direct permission-mode writer completeness ratchet", () => {
+  test("anti-vacuity: the walk read src/", () => {
+    // Every arm below is `filesMatching(needle) === []`, and a walk that reads
+    // NOTHING matches nothing — so all of them passed over an absent `src/`.
+    // Proven by the empty-corpus oracle before this floor existed. Derived from
+    // the real tree: 3,638 `.ts` under src/ today.
+    expect(SOURCES.length, "the walk read almost none of src/").toBeGreaterThan(3000)
+  })
+
   test("the legacy permission-mode STATE CELL is fully deleted (no direct owners)", () => {
     // The stateful `let current` cell factory + every reference to it. On the
     // frozen (pre-cutover) base this is > 0 (defined in session-state.ts,

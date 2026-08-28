@@ -414,6 +414,12 @@ describe("HELL-RTV-11 default-OFF byte-identical", () => {
       "apps/cli/repl/voice-live-wire.ts", // the composition-root dep assembly
     ])
     const offenders: string[] = []
+    // Anti-vacuity: every verdict in this arm is `offenders === []`, and a glob
+    // that matches NOTHING yields no offenders — the arm was green with `src/`
+    // emptied. Derived from the real tree (3,638 `.ts` under src/ today).
+    let scanned = 0
+    for await (const _ of new Glob("**/*.ts").scan(root)) scanned++
+    expect(scanned, "the glob matched almost no source files").toBeGreaterThan(3000)
     for await (const file of glob.scan(root)) {
       if (file.includes("voice-session/")) continue // the slice itself
       if (allowed.has(file)) continue // the opt-in surface

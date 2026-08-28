@@ -106,14 +106,29 @@ describe("empty-corpus oracle", () => {
   })
 
   describe("manifest", () => {
-    test("anti-vacuity: the manifest and the ledger are both non-empty reads", () => {
-      // Both are JSON on disk, so an unreadable or renamed file would make every
-      // assertion below pass over an empty array.
+    test("anti-vacuity: the manifest is a non-empty read", () => {
+      // The manifest is what the oracle iterates, so an unreadable or renamed
+      // file would make every assertion below pass over an empty array. The
+      // LEDGER is deliberately not floored here — it is now empty, and that is
+      // the goal state rather than a broken read.
       expect(manifest().length).toBeGreaterThan(0)
-      expect(ledgerEntries().length).toBeGreaterThan(0)
     })
 
-    test("🔴 every ledger entry is bound to a corpus root", () => {
+    test("🔴 the burn-down ledger is EMPTY — zero tolerance", () => {
+      // It reached zero on 2026-08-29 and the exception mechanism is retired. A
+      // new entry is not a normal state: fix the guard, or if the oracle cannot
+      // judge it, it reports UNSUPPORTED and says why.
+      const left = ledgerEntries()
+      expect(
+        left,
+        left.length === 0
+          ? ""
+          : "the anti-vacuity ledger is not an accepted mechanism any more — give these a " +
+              `floor derived from their corpus instead:\n  ${left.join("\n  ")}`,
+      ).toEqual([])
+    })
+
+    test("every ledger entry, if any, is bound to a corpus root", () => {
       // The hole this closes: a guard in the burn-down with no declared corpus
       // is never run by the oracle, so it stays on the list forever while
       // appearing to be under a gate.

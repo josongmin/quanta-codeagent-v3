@@ -52,6 +52,7 @@
  * cannot fail is worth nothing, and this one has been wrong three times.
  */
 
+import type { Dirent } from "node:fs"
 import {
   cpSync,
   existsSync,
@@ -72,7 +73,14 @@ const MANIFEST = join(REPO_ROOT, "tools", "dev", "anti-vacuity-cases.json")
 const LEDGER = join(REPO_ROOT, "tools", "dev", "anti-vacuity-burndown.json")
 
 /** Roots a guard may declare as the corpus its assertions consume. */
-export const CORPUS_ROOTS = ["src", "src/tool", "tests/unit", "tools", "docs"] as const
+export const CORPUS_ROOTS = [
+  "src",
+  "src/tool",
+  "src/runner/knobs/knobs",
+  "tests/unit",
+  "tools",
+  "docs",
+] as const
 export type CorpusRoot = (typeof CORPUS_ROOTS)[number]
 
 export type Verdict = "red" | "green" | "infra" | "no-tests"
@@ -231,6 +239,48 @@ export const runInMirror = (mirror: string, rel: string): Verdict => {
 /** One guard, bound to the corpus root its assertions actually consume. */
 export type GuardCase = { readonly file: string; readonly corpus: CorpusRoot }
 
+/**
+ * How many CORPUS files survived in the blanked root.
+ *
+ * The mirror keeps a guard's own transitive imports so it can start; when the
+ * guard imports the very tree it enumerates, that exemption refills the corpus.
+ * Measuring it is what turns a silent false negative into a stated limit.
+ */
+const corpusOverlap = (mirror: string, root: CorpusRoot): number => {
+  let n = 0
+  const walk = (dir: string): void => {
+    let entries: Dirent[]
+    try {
+      entries = readdirSync(dir, { withFileTypes: true })
+    } catch {
+      return
+    }
+    for (const e of entries) {
+      if (e.name === "node_modules" || e.name.startsWith(".")) continue
+      const p = join(dir, e.name)
+      if (e.isDirectory()) walk(p)
+      else if (isCorpus(p)) n++
+    }
+  }
+  walk(join(mirror, root))
+  return n
+}
+
+/**
+ * The arm is unjudgeable when the guard's own imports kept most of the corpus.
+ *
+ * A FRACTION, not a count: `src` holds 3,638 files and several guards
+ * legitimately import a few hundred while still noticing the rest vanish — an
+ * absolute limit of 20 marked five sound guards unsupported, including three
+ * that had just been verified red. What actually breaks the arm is the guard
+ * enumerating a directory it also imports wholesale, which leaves the RATIO near
+ * one.
+ */
+const OVERLAP_FRACTION = 0.9
+
+/** The same count against the REAL tree, so the ratio has a denominator. */
+const realCorpusSize = (root: CorpusRoot): number => corpusOverlap(REPO_ROOT, root)
+
 export const manifest = (): readonly GuardCase[] =>
   (JSON.parse(readFileSync(MANIFEST, "utf8")) as { cases?: readonly GuardCase[] }).cases ?? []
 
@@ -295,6 +345,7 @@ if (import.meta.main) {
   const known = new Set(ledgerEntries())
   const vacuous: string[] = []
   const unusable: string[] = []
+  const unsupported: string[] = []
   let checked = 0
 
   for (const [root, group] of byRoot) {
@@ -313,6 +364,19 @@ if (import.meta.main) {
       for (const c of group) {
         checked++
         const mirror = buildMirror(root, c.file)
+        // A guard that IMPORTS most of the corpus it scans cannot be judged this
+        // way: its own import closure refills the tree. `knobs-import-bundle`
+        // imports 68 per-knob modules and then asserts about the 68 files it
+        // enumerated, so the mirror keeps 67 of them and the arm is not empty.
+        // Saying "not vacuous" there would be a lie — the oracle simply has no
+        // verdict, and an overlap it cannot see through must be reported, never
+        // silently counted as a pass.
+        const overlap = corpusOverlap(mirror, root)
+        if (overlap > realCorpusSize(root) * OVERLAP_FRACTION) {
+          unsupported.push(`${c.file} (${overlap} corpus files kept by its own imports)`)
+          rmSync(mirror, { recursive: true, force: true })
+          continue
+        }
         const v = runInMirror(mirror, c.file)
         rmSync(mirror, { recursive: true, force: true })
         if (v === "red") continue
@@ -329,10 +393,11 @@ if (import.meta.main) {
   }
 
   const unlisted = vacuous.filter((v) => !known.has(v))
+  for (const u of unsupported) say(`  UNSUPPORTED ${u}`)
   say(
     `empty-mirror: ${checked} checked across ${byRoot.size} corpus root(s); ` +
       `${vacuous.length} vacuous (${unlisted.length} unlisted), ` +
-      `${unusable.length} without a verdict.`,
+      `${unusable.length} without a verdict, ${unsupported.length} unsupported.`,
   )
   for (const u of unlisted) say(`  UNLISTED ${u}`)
   for (const u of unusable) say(`  NO VERDICT ${u}`)
