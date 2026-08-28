@@ -1,46 +1,55 @@
 /**
- * Ground truth for vacuity: run a guard against a tree where the thing it scans
- * is EMPTY, and require it to go red.
+ * Ground truth for vacuity: run a guard against a tree whose corpus is EMPTY,
+ * and require it to notice.
  *
- * ## Why this exists rather than another detector
+ * ## Why an oracle and not another detector
  *
- * Three adversarial rounds over the 2026-08-26/27 campaign each found defects in
- * the fixes, and the pattern never varied: the static detector under-reported,
- * and the lens written to catch that shipped inert while green. A regex over
- * source cannot settle whether a guard would notice an empty corpus. Running it
- * against one can.
+ * Three adversarial rounds over 2026-08-26/27 each found defects in the fixes,
+ * and the pattern never varied: the static detector under-reported, and the lens
+ * written to catch that shipped inert while green. A regex over source cannot
+ * settle whether a guard would notice an empty corpus. Running it against one
+ * can — provided the run itself is trustworthy, which is what most of this file
+ * is about.
  *
- * It also converts a habit into a gate. Every floor added during that campaign
- * was verified by hand against an empty mirror, by someone remembering to. This
- * does it on every run, which is the difference between a practice and a rule.
+ * ## The one design decision that makes it possible
  *
- * ## The criterion, and why it is two mirrors
+ * `bunfig.toml` preloads `tests/setup.ts`, and that file reaches production
+ * modules to call its reset hooks. Measured: its runtime closure is 2,301 files
+ * under `src/`, **291 of them under `src/tool`** — which is the corpus several
+ * guards scan. So a mirror that empties `src/tool` while keeping the real bunfig
+ * cannot start: the preload dies with `Cannot find module '@/tool'`.
  *
- * A guard is vacuous when it reports "no violations" over a corpus it never
- * read. To show that, the tree IT scans has to be the empty one — and which tree
- * that is cannot be read off the source (the whole reason the detector
- * under-reports). So two complementary mirrors are built:
+ * Two earlier engines tried to work around that and failed the same way. A
+ * static import closure restored 281 of the 291; an execution-driven fixpoint
+ * (restore whatever bun says is missing, repeat) took 107 seconds to restore
+ * 281. In both, the arm stopped being empty for exactly the guards it existed to
+ * judge.
  *
- *   A. real `src/` + `tools/`, EMPTY `tests/` and `docs/`
- *   B. real `tests/` + `tools/`, EMPTY `src/` and `docs/`
+ * The mirror therefore does NOT use the repo's bunfig. It writes its own with no
+ * preload, so the corpus and the runtime are independent. Emptying `src/tool`
+ * then empties `src/tool`, and nothing has to be healed back. `tests/setup.ts`
+ * resets process-global state BETWEEN tests; a mirror runs one guard in a fresh
+ * process, so there is no accumulated state for it to reset.
  *
- * A guard GREEN in both has been shown a corpus of nothing whichever tree it
- * reads, and passed. A guard RED in either one noticed. This is conservative in
- * the safe direction: it never calls a guard vacuous that isn't, and it can miss
- * one that scans only `tools/` or `docs/` — stated rather than implied, and the
- * reason `tools/` stays real is that both mirrors need the tooling to load.
+ * ## What counts as evidence
  *
- * ## What makes the mirrors usable at all
+ * Four outcomes, kept apart on purpose — collapsing them is the exact defect
+ * this tool hunts:
  *
- * The first attempt emptied `tests/` outright and every guard died at preload:
- * `tests/setup.ts` imports `@/…` modules, so an empty tree kills the runner
- * before a verdict exists, and "everything is red" is as useless as "everything
- * is green". Each mirror therefore keeps the preloads, the shared helpers and
- * the directory skeleton, and empties only the FILES the guards scan.
+ *   - `red`      the guard ASSERTED and failed. It noticed.
+ *   - `green`    the guard asserted and passed over an empty corpus.
+ *   - `infra`    the run never produced a verdict (module resolution, timeout,
+ *                crash). Proves nothing either way. An earlier version read the
+ *                `1 fail` from an unresolved import as "noticed", which inverted
+ *                the verdict for four of six arms.
+ *   - `no-tests` bun started and executed zero tests. Also not evidence.
  *
- * Usage:
- *   bun run tools/dev/empty-mirror-check.ts tests/unit/_arch tests/meta
- *   bun run tools/dev/empty-mirror-check.ts --ledger
+ * ## The control
+ *
+ * Before any guard is judged, the SAME mirror runs a canary that must go RED
+ * with the corpus emptied. If it does not, the mirror cannot tell an empty
+ * corpus from a full one and every verdict from it is discarded. An oracle that
+ * cannot fail is worth nothing, and this one has been wrong three times.
  */
 
 import {
@@ -52,57 +61,28 @@ import {
   readFileSync,
   realpathSync,
   rmSync,
+  statSync,
+  writeFileSync,
 } from "node:fs"
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 
 const REPO_ROOT = join(import.meta.dir, "..", "..")
+const MANIFEST = join(REPO_ROOT, "tools", "dev", "anti-vacuity-cases.json")
 const LEDGER = join(REPO_ROOT, "tools", "dev", "anti-vacuity-burndown.json")
 
-/** Preloads and shared helpers a guard needs before it can produce any verdict. */
-const KEEP_UNDER_TESTS = [
-  "preload-clean-source-js.ts",
-  "setup.ts",
-  "_shared",
-  "_helpers",
-  "support",
-  "_support",
-  "helpers",
-] as const
+/** Roots a guard may declare as the corpus its assertions consume. */
+export const CORPUS_ROOTS = ["src", "src/tool", "tests/unit", "tools", "docs"] as const
+export type CorpusRoot = (typeof CORPUS_ROOTS)[number]
 
-export type MirrorArm = "empty-tests" | "empty-src"
-export type GuardVerdict = "red" | "green" | "error"
+export type Verdict = "red" | "green" | "infra" | "no-tests"
 
-/** Every directory under `root`, relative to the repo, so a walk finds the shape. */
-const dirsUnder = (root: string): readonly string[] => {
-  const out: string[] = []
-  const walk = (rel: string): void => {
-    out.push(rel)
-    for (const ent of readdirSync(join(REPO_ROOT, rel), { withFileTypes: true })) {
-      if (!ent.isDirectory() || ent.name === "node_modules" || ent.name.startsWith(".")) continue
-      walk(join(rel, ent.name))
-    }
-  }
-  if (existsSync(join(REPO_ROOT, root))) walk(root)
-  return out
-}
+/** The mirror's own bunfig — no preload. See the header for why. */
+const MIRROR_BUNFIG = "[test]\ncoverage = false\n"
 
-/**
- * Build one mirror.
- *
- * Both `src/` and `tests/` are MATERIALISED as real directories — never
- * symlinked — and one of them is left empty. Symlinking was a defect and a
- * serious one: a guard resolves its own location with `import.meta.dir`, which
- * follows the symlink back to the REAL repository, so an anchored guard read the
- * real tree while the mirror reported on nothing. Anchored guards are precisely
- * what this campaign produced, so the instrument was blind to its own subject.
- * Caught by `tool-context-isp-ratchet` passing 3/3 with `src/tool` holding zero
- * files — impossible, since it floors at 200, and the tell that the number came
- * from somewhere else.
- *
- * Everything else at the repo root stays a symlink: `node_modules`, `.git`, the
- * config files. Those are not corpus.
- */
+/** A `.test.ts` is a GUARD and must survive; everything else under a root is corpus. */
+const isCorpus = (rel: string): boolean => !rel.endsWith(".test.ts")
+
 const copyTree = (from: string, to: string, keep: (rel: string) => boolean): void => {
   const walk = (rel: string): void => {
     for (const ent of readdirSync(join(from, rel), { withFileTypes: true })) {
@@ -120,155 +100,124 @@ const copyTree = (from: string, to: string, keep: (rel: string) => boolean): voi
   walk("")
 }
 
-export /**
- * ONE mirror, and the corpus roots are the only thing emptied.
+/**
+ * A mirror of the repo with one corpus root emptied of everything but guards.
  *
- * Two earlier designs failed against measurement and are recorded so the next
- * attempt does not repeat them:
- *
- *  1. Symlink every root except the emptied one. A guard resolves its own
- *     location with `import.meta.dir`, which follows the symlink back to the
- *     REAL repository — so an anchored guard read the real tree while the mirror
- *     reported on nothing. Anchored guards are what this campaign produced, so
- *     the instrument was blind to its own subject.
- *  2. Empty `src/` outright. `tests/setup.ts` is a bunfig preload that imports
- *     `@/agent`, `@/observability`, `@/shared`; following that closure to keep
- *     the runner alive drags in 2,745 files including 311 under `src/tool`, so
- *     the arm stops being empty for exactly the guards that scan there.
- *
- * What works is narrower and honest about it: materialise the whole repo, then
- * empty ONLY the leaf directories a guard actually scans, leaving every module
- * the preload needs in place. The guard sees an empty corpus; the runtime does
- * not.
+ * `src` and `tests` are MATERIALISED, never symlinked: a guard resolves its own
+ * location with `import.meta.dir`, which follows a symlink back to the real
+ * repository — so an anchored guard would read the real tree while the mirror
+ * reported on nothing. That defect returned twice in this file's history, which
+ * is why it is stated here rather than left to the reader.
  */
 /**
- * One arm per root a guard might scan, coarse to fine.
+ * The modules ONE guard imports, transitively — kept alive when the corpus is
+ * emptied.
  *
- * `src` and `tests` whole are here because several guards walk an entire root —
- * `self-skip-reports-as-pass` walks both — and blanking only `tests/unit` left
- * enough of `tests/` behind to clear its floor, so the arm reported green over a
- * corpus that was mostly intact. The finer roots are here because a guard
- * scanning only `src/tool` is unaffected by blanking `tests`, and would look
- * sound in a coarse-only sweep.
+ * Several guards both SCAN a root and IMPORT from it: `knobs-import-bundle`
+ * imports 68 modules under `src/runner/knobs` and then asserts something about
+ * the set it scanned. Emptying `src` wholesale kills those imports, the run
+ * produces no verdict, and `infra` is correctly not counted as noticing — but
+ * then the guard can never be judged at all.
+ *
+ * So the blank keeps exactly the guard's own import closure and nothing else.
+ * That is a handful of files against a corpus of thousands, and crucially it is
+ * per-guard: a file `knobs-import-bundle` imports is not kept for a guard that
+ * only scans. Unlike the whole-preload closure this replaces (2,301 files, 291
+ * under src/tool), it cannot silently refill the corpus, and if it ever did the
+ * canary would fail and the verdicts would be discarded.
  */
-// `tests` whole is NOT an arm: the bunfig preload lives there, so blanking it
-// kills the runner and every guard errors — an arm where nothing runs measures
-// nothing. `tests/unit` is the largest slice that can be blanked while the
-// preload survives.
-const CORPUS_ROOTS = [
-  "src",
-  "src/tool",
-  "src/agent",
-  "src/apps",
-  "src/runner",
-  "tests/unit",
-] as const
-
-/**
- * Modules restored into a blanked root so the runner can start, discovered by
- * RUNNING rather than by following imports.
- *
- * Static closure was tried and does not work here: `tests/setup.ts` imports
- * `@/agent`, `@/observability` and `@/shared`, and those barrels transitively
- * re-export essentially all of `src/tool` — 300 of the 311 files under it. The
- * arm meant to blank `src/tool` kept 300 of its files, so it measured nothing.
- *
- * So the closure is found by fixpoint instead: blank the root, run, and if bun
- * says `Cannot find module 'X'`, restore X and try again. Whatever the preload
- * genuinely needs is a handful of files; everything else stays blank. Bounded
- * at 40 rounds so a resolution loop cannot hang the gate.
- */
-const RESTORE_ROUNDS = 400
-
-const moduleToRel = (spec: string): string | undefined => {
-  const base = spec.replace(/^@\//, "src/").replace(/\.js$/, "")
-  for (const cand of [`${base}.ts`, join(base, "index.ts"), base]) {
-    if (cand.endsWith(".ts") && existsSync(join(REPO_ROOT, cand))) return cand
+const importClosure = (entry: string): ReadonlySet<string> => {
+  const seen = new Set<string>()
+  const resolve = (spec: string, from: string): string | undefined => {
+    const base = spec.startsWith("@/")
+      ? spec.replace(/^@\//, "src/")
+      : spec.startsWith(".")
+        ? join(dirname(from), spec)
+        : undefined
+    if (base === undefined) return undefined
+    // Any extension, not just `.ts`: this repo imports assets
+    // (`import md from "./add-tests/SKILL.md" with { type: "text" }`), and
+    // dropping them from the closure left the guard unable to start — an `infra`
+    // verdict that looks like a tool limitation and is really a missing file.
+    // `${base}.ts` and `index.ts` FIRST: `@/realtime` resolves to a directory,
+    // and returning the directory itself made the closure keep a folder instead
+    // of the barrel, so the import still failed. `base` last covers asset
+    // imports (`./add-tests/SKILL.md`), which have their own extension.
+    for (const cand of [`${base}.ts`, join(base, "index.ts"), base]) {
+      const abs = join(REPO_ROOT, cand)
+      if (!existsSync(abs)) continue
+      if (statSync(abs).isDirectory()) continue
+      return cand
+    }
+    return undefined
   }
-  return undefined
+  const specifiersIn = (src: string): readonly string[] => {
+    const out: string[] = []
+    for (const m of src.matchAll(/from\s*\(?\s*["'`]([^"'`]+)["'`]/g)) out.push(m[1] ?? "")
+    for (const m of src.matchAll(/import\s*\(\s*["'`]([^"'`]+)["'`]/g)) out.push(m[1] ?? "")
+    return out
+  }
+  const readOrEmpty = (rel: string): string => {
+    try {
+      return readFileSync(join(REPO_ROOT, rel), "utf8")
+    } catch {
+      return ""
+    }
+  }
+  const visit = (rel: string): void => {
+    if (seen.has(rel)) return
+    seen.add(rel)
+    const src = readOrEmpty(rel)
+    // `from "…"` covers `import`, `export … from` (a barrel's re-exports) and the
+    // dynamic form. Missing the re-export shape left `@/runner/knobs`'s 68
+    // registrations out of the closure, so the guard could not start and read as
+    // `infra` — an unjudgeable guard, not a sound one.
+    for (const spec of specifiersIn(src)) {
+      const next = resolve(spec, rel)
+      if (next !== undefined) visit(next)
+    }
+  }
+  visit(entry)
+  return seen
 }
 
-/** Restore just enough of a blanked root that `bun test` can start at all. */
-export const healMirror = (dir: string, probe: string): void => {
-  for (let round = 0; round < RESTORE_ROUNDS; round++) {
-    const proc = Bun.spawnSync(["bun", "test", probe], {
-      cwd: dir,
-      stdout: "pipe",
-      stderr: "pipe",
-      env: { ...process.env, FORCE_COLOR: "0", PWD: dir },
-      timeout: 60_000,
-    })
-    const out = `${proc.stdout.toString()}${proc.stderr.toString()}`
-    // The importer matters: bun reports `Cannot find module './apply-patch' from
-    // '<mirror>/src/tool/index.ts'`, and a relative specifier can only be
-    // resolved against THAT file. Resolving it against a guessed root failed on
-    // the first relative import and stalled the loop one module in.
-    const m = /Cannot find module ['"]([^'"]+)['"](?: from ['"]([^'"]+)['"])?/.exec(out)
-    const missing = m?.[1]
-    if (missing === undefined) return
-    const importer = m?.[2]
-    const rel = missing.startsWith(".")
-      ? importer === undefined
-        ? undefined
-        : moduleToRel(join(dirname(importer.replace(`${dir}/`, "")), missing))
-      : moduleToRel(missing)
-    if (rel === undefined) return
-    mkdirSync(dirname(join(dir, rel)), { recursive: true })
-    cpSync(join(REPO_ROOT, rel), join(dir, rel))
-  }
-}
-
-const copyRepo = (to: string, blank: readonly string[]): void => {
-  for (const name of readdirSync(REPO_ROOT)) {
-    // `src` and `tests` are ALWAYS materialised, whichever root is being blanked.
-    // Symlinking either one sends a guard's `import.meta.dir` back to the real
-    // repository, so it reads the real corpus and the arm measures nothing. This
-    // is the third time that defect has come back in this file — the first two
-    // through a symlink-everything design, this one through a condition that let
-    // the un-blanked root stay a link.
-    if (name === "src" || name === "tests") continue
-    Bun.spawnSync(["ln", "-sfn", join(REPO_ROOT, name), join(to, name)])
-  }
-  for (const root of ["src", "tests"]) {
-    copyTree(join(REPO_ROOT, root), join(to, root), (rel) => {
-      const full = join(root, rel)
-      // Three things survive a blanked root:
-      //   - a `.test.ts`, which is a GUARD and must be there to be judged;
-      //   - anything the bunfig preload imports, transitively, without which the
-      //     runner cannot start and the arm measures nothing. Blanking
-      //     `src/tool` broke `@/tool` for `tests/setup.ts` and killed four of six
-      //     arms outright.
-      // The preload closure is a few dozen files against a corpus of thousands,
-      // so the arm is still empty for every guard that scans the blanked tree —
-      // and where it is not, the guard's own floor is what settles it.
-      if (!blank.some((b) => full === b || full.startsWith(`${b}/`))) return true
-      // Only guards survive the blank; whatever the runtime needs is restored
-      // afterwards by `healMirror`, one measured module at a time.
-      return full.endsWith(".test.ts")
-    })
-  }
-}
-
-export const buildMirror = (blank: readonly string[], probe?: string): string => {
-  // `realpathSync`, because on macOS `mkdtempSync` returns `/tmp/…` while every
-  // path bun prints is `/private/tmp/…`. Stripping the mirror prefix from an
-  // importer path silently did nothing, so a relative specifier resolved against
-  // the wrong directory and the heal loop stalled one module in — with no error,
-  // because `moduleToRel` then found the file in the REAL repo and reported it
-  // as already present.
+export const buildMirror = (blank: CorpusRoot, guard?: string): string => {
   const dir = realpathSync(mkdtempSync(join(tmpdir(), "quanta-empty-mirror-")))
-  copyRepo(dir, blank)
-  if (probe !== undefined) healMirror(dir, probe)
+  const materialised = new Set(["src", "tests", blank.split("/")[0] as string])
+  const needed = guard === undefined ? new Set<string>() : importClosure(guard)
+  for (const name of readdirSync(REPO_ROOT)) {
+    if (materialised.has(name) || name === "bunfig.toml") continue
+    Bun.spawnSync(["ln", "-sfn", join(REPO_ROOT, name), join(dir, name)])
+  }
+  for (const root of materialised) {
+    copyTree(join(REPO_ROOT, root), join(dir, root), (rel) => {
+      const full = join(root, rel)
+      const inBlank = full === blank || full.startsWith(`${blank}/`)
+      return !inBlank || !isCorpus(full) || needed.has(full)
+    })
+  }
+  writeFileSync(join(dir, "bunfig.toml"), MIRROR_BUNFIG)
   return dir
 }
 
-/** Run one guard inside one mirror. */
-export const runInMirror = (mirror: string, rel: string): GuardVerdict => {
-  const target = join(mirror, rel)
-  if (!existsSync(target)) {
-    mkdirSync(dirname(target), { recursive: true })
-    cpSync(join(REPO_ROOT, rel), target)
-  }
+/**
+ * Classify one run's output.
+ *
+ * By INSPECTING THE OUTPUT, not the exit code: bun folds an unresolved import, a
+ * timeout and a genuine assertion failure into the same non-zero exit and the
+ * same `1 fail` counter, and telling them apart is the whole point.
+ */
+export const classifyOutput = (out: string): Verdict => {
+  if (/Cannot find module|Failed to resolve/.test(out)) return "infra"
+  if (/timed out after/.test(out)) return "infra"
+  const ran = /Ran (\d+) tests?/.exec(out)
+  if (ran !== null && ran[1] === "0") return "no-tests"
+  if (/^\s*[1-9]\d*\s+fail\s*$/m.test(out)) return "red"
+  if (/^\s*[1-9]\d*\s+pass\s*$/m.test(out)) return "green"
+  return "infra"
+}
+
+export const runInMirror = (mirror: string, rel: string): Verdict => {
   const proc = Bun.spawnSync(["bun", "test", rel], {
     cwd: mirror,
     stdout: "pipe",
@@ -276,148 +225,116 @@ export const runInMirror = (mirror: string, rel: string): GuardVerdict => {
     env: { ...process.env, FORCE_COLOR: "0", PWD: mirror },
     timeout: 120_000,
   })
-  const out = `${proc.stdout.toString()}${proc.stderr.toString()}`
-  // A module-resolution failure is NOT the guard noticing an empty corpus. Bun
-  // folds an unresolved import into the same `1 fail` a real assertion failure
-  // produces, and reading that as "noticed" is the defect this whole tool exists
-  // to find, committed by the tool: blanking `src/tool` makes `tests/setup.ts`
-  // fail to import `@/tool`, so EVERY guard went red for a reason that has
-  // nothing to do with what it scanned. Four of six arms were doing this.
-  if (/Cannot find module/.test(out)) return "error"
-  if (/^\s*[1-9]\d*\s+fail\s*$/m.test(out)) return "red"
-  if (/^\s*\d+\s+pass\s*$/m.test(out)) return "green"
-  return "error"
+  return classifyOutput(`${proc.stdout.toString()}${proc.stderr.toString()}`)
 }
 
-/**
- * A filesystem-scanning guard must go RED in at least one arm.
- *
- * The first rule here was "green in BOTH arms", which sounded conservative and
- * was simply wrong: a guard that reads only `src/` is legitimately green in the
- * empty-TESTS arm, so requiring both made it unfalsifiable. A probe with no floor
- * at all — `readdirSync(join(REPO_ROOT, "src"))` then `toEqual([])` — was green /
- * red and therefore "not vacuous", which is the opposite of the truth.
- *
- * The right question is whether the guard NOTICED an empty corpus, and it can
- * only notice in the arm where its own tree was emptied. So: red in at least one
- * arm means it noticed; green in both means it never did. Both are computed the
- * same way; only the reading changed.
- *
- * The false-positive risk moves to guards whose corpus is neither `src/` nor
- * `tests/` — a `tools/`-only scanner is green in both while being perfectly
- * sound. `ts-exports-ssot` is exactly that (it globs `tools/**` for its
- * consumers), and it is why the ledger has an admit list rather than the rule
- * being absolute.
- */
-export const noticedEmptyCorpus = (a: GuardVerdict, b: GuardVerdict): boolean =>
-  a === "red" || b === "red"
+/** One guard, bound to the corpus root its assertions actually consume. */
+export type GuardCase = { readonly file: string; readonly corpus: CorpusRoot }
 
-const guardsUnder = (roots: readonly string[]): readonly string[] => {
-  const out: string[] = []
-  const walk = (rel: string): void => {
-    for (const ent of readdirSync(join(REPO_ROOT, rel), { withFileTypes: true })) {
-      if (ent.name === "node_modules" || ent.name.startsWith(".")) continue
-      const next = join(rel, ent.name)
-      if (ent.isDirectory()) walk(next)
-      else if (next.endsWith(".test.ts")) out.push(next)
-    }
-  }
-  for (const r of roots) if (existsSync(join(REPO_ROOT, r))) walk(r)
-  return out.sort()
-}
+export const manifest = (): readonly GuardCase[] =>
+  (JSON.parse(readFileSync(MANIFEST, "utf8")) as { cases?: readonly GuardCase[] }).cases ?? []
 
-/**
- * Only a guard that reads the FILESYSTEM under `tests/` or `src/` can be judged
- * by these mirrors, and saying so is what keeps the gate honest.
- *
- * Two populations are green in both arms without being vacuous, and lumping them
- * in would make this a 12-false-positive gate that gets switched off:
- *
- *   - a pure unit test (`cwd-parity-check`, `expect-present-helper`,
- *     `sandboxed-test-runner`) never reads the corpus, so an empty one changes
- *     nothing. It has no scan to be vacuous about.
- *   - a `git ls-files`-backed guard (`repo-index-hygiene`,
- *     `no-leftover-backup-files`) reads the real index through the symlinked
- *     `.git`, which NEITHER mirror empties. Its corpus is untouched here, so this
- *     instrument cannot speak to it — a stated limit, not a pass. Those two carry
- *     derived floors (12,695 and 7,804 against 14,106 and 8,672) verified by hand.
- */
-const FS_SCAN =
-  /\breaddirSync\s*\(|\breaddir\s*\(|\bBun\.Glob\b|\bnew Glob\b|\bglobSync\s*\(|\bopendirSync\s*\(/
-
-export const scansFilesystem = (rel: string): boolean => {
-  try {
-    return FS_SCAN.test(readFileSync(join(REPO_ROOT, rel), "utf8"))
-  } catch {
-    return false
-  }
-}
-
-const ledgerEntries = (): readonly string[] =>
+export const ledgerEntries = (): readonly string[] =>
   (JSON.parse(readFileSync(LEDGER, "utf8")) as { burndown?: readonly string[] }).burndown ?? []
 
-if (import.meta.main) {
-  const argv = process.argv.slice(2)
-  const useLedger = argv.includes("--ledger")
-  const roots = argv.filter((a) => !a.startsWith("--"))
-  const selected = useLedger
-    ? ledgerEntries()
-    : guardsUnder(roots.length > 0 ? roots : ["tests/unit/_arch"])
-  const guards = selected.filter(scansFilesystem)
-  const skipped = selected.length - guards.length
+/**
+ * The canary, written INTO the mirror rather than kept in the tree.
+ *
+ * It cannot drift with the repo and cannot be silenced by an allowlist. Its only
+ * job is to prove the mirror distinguishes an empty corpus from a full one; if
+ * it comes back anything but red, every verdict from that mirror is discarded.
+ */
+const CANARY = "tests/unit/_arch/zz-empty-mirror-canary.test.ts"
 
-  if (guards.length === 0) {
-    console.error("empty-mirror: no guards selected — refusing to report over nothing.")
+const canarySource = (root: string): string =>
+  [
+    `import { describe, expect, test } from "bun:test"`,
+    `import { readdirSync } from "node:fs"`,
+    `import { join } from "node:path"`,
+    `const REPO_ROOT = join(import.meta.dir, "..", "..", "..")`,
+    `const walk = (d: string): string[] => {`,
+    `  const out: string[] = []`,
+    `  for (const e of readdirSync(d, { withFileTypes: true })) {`,
+    `    if (e.name.startsWith(".") || e.name === "node_modules") continue`,
+    `    const p = join(d, e.name)`,
+    `    if (e.isDirectory()) out.push(...walk(p))`,
+    `    else if (!p.endsWith(".test.ts")) out.push(p)`,
+    `  }`,
+    `  return out`,
+    `}`,
+    `describe("canary", () => {`,
+    `  test("the corpus is present", () => {`,
+    `    expect(walk(join(REPO_ROOT, "${root}")).length).toBeGreaterThan(5)`,
+    `  })`,
+    `})`,
+    ``,
+  ].join("\n")
+
+export const canaryHolds = (mirror: string, root: CorpusRoot): boolean => {
+  const path = join(mirror, CANARY)
+  mkdirSync(dirname(path), { recursive: true })
+  writeFileSync(path, canarySource(root))
+  const verdict = runInMirror(mirror, CANARY)
+  rmSync(path, { force: true })
+  return verdict === "red"
+}
+
+/** This is a CLI: its findings ARE its output. One seam, one suppression. */
+// biome-ignore lint/suspicious/noConsole: the tool reports to the operator
+const say = (line: string): void => console.error(line)
+
+if (import.meta.main) {
+  const cases = manifest()
+  if (cases.length === 0) {
+    say("empty-mirror: the manifest is empty — refusing to report over nothing.")
     process.exit(1)
   }
+  const byRoot = new Map<CorpusRoot, GuardCase[]>()
+  for (const c of cases) byRoot.set(c.corpus, [...(byRoot.get(c.corpus) ?? []), c])
+
   const known = new Set(ledgerEntries())
-  console.error(
-    `empty-mirror: ${guards.length} filesystem-scanning guard(s), two arms each ` +
-      `(${skipped} of ${selected.length} skipped: no filesystem scan, or git-index backed)`,
-  )
-
-  // One arm per corpus root: the guard must notice at least one of them being
-  // emptied. Which root it reads cannot be told from the source — that is the
-  // whole reason the static census under-reports — so every root is tried.
-  const arms = CORPUS_ROOTS.map((root) => ({ root, dir: buildMirror([root]) }))
   const vacuous: string[] = []
-  const errored: string[] = []
-  try {
-    for (const [i, rel] of guards.entries()) {
-      // Heal each arm FOR THIS GUARD before judging it: the modules the runtime
-      // needs differ per guard, and an arm that cannot start is not evidence.
-      const verdicts = arms.map((a) => {
-        healMirror(a.dir, rel)
-        return runInMirror(a.dir, rel)
-      })
-      const usable = verdicts.filter((v) => v !== "error")
-      // An arm whose runtime could not start proves nothing in either direction,
-      // so it is discarded rather than counted as a pass or a failure.
-      if (usable.length === 0) {
-        errored.push(rel)
-        continue
+  const unusable: string[] = []
+  let checked = 0
+
+  for (const [root, group] of byRoot) {
+    // One mirror PER GUARD: the kept import closure is that guard's, so sharing a
+    // mirror across guards would refill the corpus with another guard's imports.
+    const canaryMirror = buildMirror(root)
+    try {
+      if (!canaryHolds(canaryMirror, root)) {
+        say(
+          `empty-mirror: the ${root} mirror FAILED its canary — it cannot tell an empty ` +
+            `corpus from a full one, so its ${group.length} verdict(s) are worthless.`,
+        )
+        process.exit(1)
       }
-      if (usable.some((v) => v === "red")) continue
-      vacuous.push(rel)
-      console.error(
-        `  [${i + 1}/${guards.length}] VACUOUS ${rel} — green with every corpus root emptied`,
-      )
+      rmSync(canaryMirror, { recursive: true, force: true })
+      for (const c of group) {
+        checked++
+        const mirror = buildMirror(root, c.file)
+        const v = runInMirror(mirror, c.file)
+        rmSync(mirror, { recursive: true, force: true })
+        if (v === "red") continue
+        if (v === "green") {
+          vacuous.push(c.file)
+          say(`  VACUOUS ${c.file} — green with ${root} emptied`)
+        } else {
+          unusable.push(`${c.file} (${v})`)
+        }
+      }
+    } finally {
+      rmSync(canaryMirror, { recursive: true, force: true })
     }
-  } finally {
-    for (const a of arms) rmSync(a.dir, { recursive: true, force: true })
   }
 
-  // A guard that could not run in EITHER arm proved nothing; that is a broken
-  // probe, not a clean guard, and it must not read as success.
-  if (errored.length > 0) {
-    console.error(`empty-mirror: ${errored.length} guard(s) failed to run in both arms:`)
-    for (const e of errored) console.error(`  ${e}`)
-  }
   const unlisted = vacuous.filter((v) => !known.has(v))
-  console.error(
-    `empty-mirror: ${guards.length} checked; ${vacuous.length} vacuous ` +
-      `(${unlisted.length} not in the burn-down ledger), ${errored.length} unrunnable.`,
+  say(
+    `empty-mirror: ${checked} checked across ${byRoot.size} corpus root(s); ` +
+      `${vacuous.length} vacuous (${unlisted.length} unlisted), ` +
+      `${unusable.length} without a verdict.`,
   )
-  for (const u of unlisted) console.error(`  UNLISTED ${u}`)
-  process.exit(unlisted.length === 0 && errored.length === 0 ? 0 : 1)
+  for (const u of unlisted) say(`  UNLISTED ${u}`)
+  for (const u of unusable) say(`  NO VERDICT ${u}`)
+  process.exit(unlisted.length === 0 && unusable.length === 0 ? 0 : 1)
 }

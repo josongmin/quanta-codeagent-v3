@@ -1,0 +1,16 @@
+{
+  "note": "Every legacy scan guard bound to the corpus root its ASSERTIONS consume. The empty-mirror oracle empties exactly that root and requires the guard to go red. A guard whose corpus is a directory it created itself does not belong here — it has no repo corpus to be vacuous about. Parity with tools/dev/anti-vacuity-burndown.json is enforced by tests/unit/_arch/anti-vacuity-burndown-ratchet.test.ts.",
+  "cases": [
+    { "file": "tests/unit/cli/cli-feature-gates-drift-hellgate.test.ts", "corpus": "src" },
+    {
+      "file": "tests/unit/integrations/github/slice-fence-static-hellgate-r3.test.ts",
+      "corpus": "src"
+    },
+    { "file": "tests/unit/no-per-framework-heuristic-ratchet.test.ts", "corpus": "src" },
+    { "file": "tests/unit/observability-audit-ratchet.test.ts", "corpus": "src" },
+    { "file": "tests/unit/observability/new-slice-metrics-hellgate.test.ts", "corpus": "src" },
+    { "file": "tests/unit/permission/posture/e3-direct-writer-ratchet.test.ts", "corpus": "src" },
+    { "file": "tests/unit/realtime/voice-session-hellgate.test.ts", "corpus": "src" },
+    { "file": "tests/unit/runner/knobs/knobs-import-bundle.test.ts", "corpus": "src" }
+  ]
+}

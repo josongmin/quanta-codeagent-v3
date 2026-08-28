@@ -8,7 +8,6 @@
     "tests/unit/observability/new-slice-metrics-hellgate.test.ts",
     "tests/unit/permission/posture/e3-direct-writer-ratchet.test.ts",
     "tests/unit/realtime/voice-session-hellgate.test.ts",
-    "tests/unit/runner/knobs/knobs-import-bundle.test.ts",
-    "tests/unit/runtime/shell-snapshot-prune-by-size-hellgate.test.ts"
+    "tests/unit/runner/knobs/knobs-import-bundle.test.ts"
   ]
 }
