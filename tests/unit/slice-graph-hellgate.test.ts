@@ -1,7 +1,7 @@
 /**
- * tests/unit/slice-graph-hellgate.test.ts — 15-case hellgate for the
+ * tests/unit/slice-graph-hellgate.test.ts — 18-case hellgate for the
  * slice-graph tool (ADR-0190 fence enforcement). Three buckets:
- *   A. buildSliceGraph parsing semantics (5)
+ *   A. buildSliceGraph parsing semantics (8, incl. 5a–5c: comments are not code)
  *   B. validateGraph rule-matching (6)
  *   C. Real-graph audit over `<repo>/src` (4)
  *
@@ -68,6 +68,63 @@ describe("A. buildSliceGraph parsing", () => {
     const g = await buildSliceGraph({ roots: [root] })
     expect(g.edges).toHaveLength(0)
     expect(g.slices).toContain("agent")
+  })
+
+  /**
+   * A FENCE A COMMENT CAN TRIP IS NOT A FENCE.
+   *
+   * `build-graph.ts` used to carry its own stripper that removed only
+   * LINE-LEADING `//`, so a TRAILING comment survived into `IMPORT_RE` and its
+   * prose was read as a cross-slice import — enough to forge a `violations`
+   * entry against a file that imports nothing of the sort. The identical
+   * defect in `tools/feature-catalog/reachability.ts` was measured on the real
+   * tree: one appended comment moved `reachable` 3002 → 3006.
+   */
+  test("5a. A TRAILING comment forges no edge", async () => {
+    const root = makeTmpSrc()
+    writeFile(
+      root,
+      "observability/a.ts",
+      'const x = 1 // import { y } from "@/agent"\nexport { x }\n',
+    )
+    const g = await buildSliceGraph({ roots: [root] })
+    expect(g.edges).toHaveLength(0)
+    expect(g.sources).toHaveLength(0)
+  })
+
+  /**
+   * The same stripper was wrong in the OTHER direction: it removed block
+   * comments FIRST, so a `//` line containing a `/*` opened a phantom span that
+   * swallowed the real `import` below it and HID the edge from the fence.
+   * MEASURED on the real tree: 36 specifiers in 4 files, `src/tool/index.ts`
+   * losing 29 of its own barrel re-exports.
+   */
+  test("5b. A `//` line naming a glob does not hide the import below it", async () => {
+    const root = makeTmpSrc()
+    writeFile(
+      root,
+      "observability/b.ts",
+      // The trailing doc comment is load-bearing. The naive stripper's block
+      // pass is lazy, so the opener it hallucinates on line 1 spans to the NEXT
+      // block-comment CLOSER anywhere in the file; a fixture without one leaves
+      // the span unclosed and the naive stripper passes for free. Every real
+      // module has one. Verified by injection.
+      '// forwarded under @/agent/*\nimport type { X } from "@/agent"\n/** a later doc comment */\n',
+    )
+    const g = await buildSliceGraph({ roots: [root] })
+    expect(g.edges).toHaveLength(1)
+    expect(g.edges[0]).toMatchObject({ from: "observability", to: "agent", count: 1 })
+  })
+
+  test("5c. A comment opener inside a string or a regex class is not a comment", async () => {
+    const root = makeTmpSrc()
+    writeFile(
+      root,
+      "agent/c.ts",
+      'const GLOB = "/*"\nimport { a } from "@/llm"\n/** a later doc comment */\nconst CLASS = /[/*]/\nimport { b } from "@/tool"\n/** and another */\n',
+    )
+    const g = await buildSliceGraph({ roots: [root] })
+    expect(g.edges.map((e) => e.to).sort()).toEqual(["llm", "tool"])
   })
 })
 

@@ -8,11 +8,18 @@
  * (`./...`, `../...`) collapse to the same slice as the importer and do NOT
  * contribute cross-slice edges.
  *
- * Plane-clean: this file imports ONLY `node:fs/promises` + `node:path`. It
- * does NOT import any `@/*` slice, satisfying its own architectural invariant
- * (the slice-graph tool sits OUTSIDE the slice layering — it observes, does
- * not participate). The validator + reporter live in sibling files and inherit
- * the same constraint.
+ * Plane-clean: this file imports node built-ins plus the shared comment
+ * scanner (`tests/unit/_shared/strip-comments`). It does NOT import any `@/*`
+ * slice, satisfying its own architectural invariant (the slice-graph tool sits
+ * OUTSIDE the slice layering — it observes, does not participate). The
+ * validator + reporter live in sibling files and inherit the same constraint.
+ *
+ * The scanner MUST be the shared one. The local stripper this file used to
+ * carry removed only LINE-LEADING `//`, so a trailing comment survived into
+ * `IMPORT_RE` and FORGED a cross-slice edge out of prose — a fence a comment
+ * could trip. Its block-comment-first pass was wrong in the other direction
+ * too: a `//` line containing `/*` opened a phantom span that swallowed real
+ * `import` statements, hiding genuine edges from the fence.
  *
  * Output shape:
  *   - `slices`: every slice name observed as either source or destination.
@@ -27,6 +34,8 @@
 
 import { readdir, readFile, stat } from "node:fs/promises"
 import { join, relative, resolve } from "node:path"
+
+import { stripComments } from "../../tests/unit/_shared/strip-comments"
 
 export interface SliceGraphEdge {
   readonly from: string
@@ -106,9 +115,6 @@ const walk = async (dir: string): Promise<string[]> => {
   }
   return out
 }
-
-const stripComments = (src: string): string =>
-  src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "")
 
 const IMPORT_RE =
   /(?:^|\s)(?:import\s[\s\S]*?from\s+|import\s+|export\s[\s\S]*?from\s+)["']([^"']+)["']/g

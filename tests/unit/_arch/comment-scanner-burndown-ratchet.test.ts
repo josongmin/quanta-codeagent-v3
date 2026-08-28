@@ -116,11 +116,9 @@ const REMAINING: readonly string[] = [
   "tests/unit/runner/session-authorities-task-registry-identity.test.ts",
   "tests/unit/runtime-config-knobs-parity-hellgate.test.ts",
   "tests/unit/skill/runtime/f4-discovery-owner-ratchet.test.ts",
-  "tools/feature-catalog/reachability.ts",
   "tools/feature-catalog/yaml.ts",
   "tools/leaderboard-dashboard/family-union-ssot.test.ts",
   "tools/leaderboard-dashboard/projectors/structural.test.ts",
-  "tools/slice-graph/build-graph.ts",
 ]
 
 describe("the comment-scanner burn-down", () => {

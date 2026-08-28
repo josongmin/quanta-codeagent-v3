@@ -18,13 +18,19 @@
  * blind spot (a file barrel-re-exported but whose symbols are never used reads
  * as reached) is covered by {@link computeSymbolReachability} below.
  *
- * Plane-clean: imports ONLY node built-ins (mirrors slice-graph tooling). Bun-
- * runnable: `bun tools/feature-catalog/reachability.ts [--unreached] [--check <file>] [--symbols]`.
+ * Slice-clean: imports NO `@/*` slice — only node built-ins, the sibling
+ * `tools/shared` export reader, and the shared comment scanner
+ * (`tests/unit/_shared/strip-comments`). The scanner has to be the shared one:
+ * a local line-leading-`//` stripper left TRAILING comments in the text handed
+ * to the specifier regex, so a comment naming a module forged an import edge
+ * and marked dead code reached. Bun-runnable: `bun
+ * tools/feature-catalog/reachability.ts [--unreached] [--check <file>] [--symbols]`.
  */
 
 import { readdir, readFile, stat } from "node:fs/promises"
 import { dirname, join, relative, resolve } from "node:path"
 
+import { stripComments } from "../../tests/unit/_shared/strip-comments"
 import { parseModuleExports } from "../shared/ts-exports"
 
 const REPO_ROOT = resolve(import.meta.dir, "..", "..")
@@ -136,14 +142,15 @@ const walk = async (dir: string): Promise<string[]> => {
   return out
 }
 
-const stripComments = (s: string): string =>
-  s.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "")
-
 // import … from "x" | import "x" | export … from "x" | import("x")
 const SPEC_RE =
   /(?:import\s[\s\S]*?from\s+|export\s[\s\S]*?from\s+|import\s*\(\s*|import\s+)["']([^"']+)["']/g
 
-const specifiers = (src: string): string[] => {
+/** Every import/re-export/dynamic-import specifier in one module's source.
+ *  Exported PURE (no fs) so the comment-scanner contract is unit-testable: the
+ *  binding `computeReachability` calls below IS this one, so a test that proves
+ *  a comment forges nothing here proves it for the graph. */
+export const specifiers = (src: string): string[] => {
   const out: string[] = []
   const s = stripComments(src)
   SPEC_RE.lastIndex = 0

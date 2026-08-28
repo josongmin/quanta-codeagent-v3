@@ -9,6 +9,7 @@
  *   REACH-02  reached ⊊ allFiles (some files genuinely unreachable; not all-or-nothing)
  *   REACH-03  RATCHET — every L4+ feature with src evidence.code is code-reachable
  *             (a new unreachable-L4+ feature = an overclaim = this fails)
+ *   REACH-05  WIRING PROOF — the graph is built by the SHARED comment scanner
  */
 
 import { describe, expect, test } from "bun:test"
@@ -65,6 +66,39 @@ describe("fc reachability — import-graph ground truth", () => {
     expect(r.reached.has("src/apps/cli/index.ts")).toBe(true)
     expect(r.reached.has("src/agent/loop.ts")).toBe(true)
     expect(r.reached.has("src/apps/cli/repl/surface-compose.ts")).toBe(true)
+  })
+
+  /**
+   * WIRING PROOF for the shared comment scanner, on the REAL tree.
+   *
+   * The parser-level cases (PARSE-08..11) prove the scanner is correct; this
+   * proves `computeReachability` is the thing USING it. Anchored on the exact
+   * edges the old line-leading-`//` stripper destroyed: `src/tool/index.ts`
+   * carries a `//` line containing a `/*`, and because that stripper removed
+   * block comments FIRST, the `/*` opened a phantom span that swallowed 29 of
+   * the barrel's own `export … from` statements. MEASURED: restoring them moved
+   * 24 modules — the whole `tool/plan` + `tool/mcp_tasks` sub-trees included —
+   * out of the UNREACHABLE list (3002 → 3026 reached).
+   *
+   * A regression to any line-leading-only stripper turns this RED, because
+   * these edges vanish again.
+   */
+  test("REACH-05 WIRING: barrel edges hidden by a phantom comment span are live", () => {
+    const barrel = new Set(r.adj.get("src/tool/index.ts") ?? [])
+    for (const target of [
+      "src/tool/plan/index.ts",
+      "src/tool/registry.ts",
+      "src/tool/origin.ts",
+      "src/tool/worktree/index.ts",
+    ]) {
+      expect(barrel.has(target), `src/tool/index.ts lost its edge to ${target}`).toBe(true)
+      expect(r.reached.has(target), `${target} fell back out of the reached set`).toBe(true)
+    }
+    // …and the same failure mode one directory over: a `//` comment naming the
+    // glob `@/runner/assemble/*` used to hide the import on the next line.
+    expect(
+      new Set(r.adj.get("src/apps/cli/internal.ts") ?? []).has("src/runner/assemble/tooling.ts"),
+    ).toBe(true)
   })
 
   test("REACH-02: reached is a non-trivial strict subset of all files", () => {
