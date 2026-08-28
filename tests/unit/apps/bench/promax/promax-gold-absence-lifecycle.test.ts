@@ -30,7 +30,7 @@
  */
 
 import { afterAll, describe, expect, test } from "bun:test"
-import { mkdtempSync, rmSync } from "node:fs"
+import { mkdirSync, mkdtempSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { DATASET_FAMILIES, type DatasetFamily } from "@/apps/bench/dataset-family-token"
@@ -64,7 +64,15 @@ import { DEFAULT_CHUNK_PATHS } from "@/apps/bench/remote/box-session/types"
 import { resolveBenchRunConfig } from "@/apps/bench/run-config"
 import { __resetRuntimeConfig } from "@/shared"
 
-const TEMPS: string[] = []
+/**
+ * Paths these cases hand to production code. They were real `/tmp` literals —
+ * `instances.jsonl` is genuinely READ (an isolated TMPDIR run logs
+ * `corpus-read: /tmp/instances.jsonl: ENOENT`), so the suite reached outside
+ * its own sandbox for a file an operator might have had.
+ */
+const SANDBOX = mkdtempSync(join(tmpdir(), "pmx-lifecycle-sandbox-"))
+
+const TEMPS: string[] = [SANDBOX]
 afterAll(() => {
   for (const d of TEMPS) rmSync(d, { recursive: true, force: true })
 })
@@ -461,9 +469,9 @@ const boxWire = (box: FakeBox, bootstrapped: boolean): BoxWire => {
 }
 
 const attachCfg = (over: Record<string, unknown>) => ({
-  repoDir: "/tmp/fake-repo",
+  repoDir: join(SANDBOX, "fake-repo"),
   authJson: "{}",
-  datasetPath: "/tmp/ds.jsonl",
+  datasetPath: join(SANDBOX, "ds.jsonl"),
   // agentless-v1 does not require live LSP grounding ⇒ the clean reuse path.
   preset: "agentless-v1",
   sleep: async () => {},
@@ -629,7 +637,7 @@ describe("A-B — the warm-box scrub covers every path the chunk writes", () => 
       iid: "i-order",
       ip: "203.0.113.9",
       host: "ubuntu@203.0.113.9",
-      keyPath: "/tmp/key.pem",
+      keyPath: join(SANDBOX, "key.pem"),
       region: "ap-northeast-2",
       spawn,
       log: () => {},
@@ -647,7 +655,7 @@ describe("A-B — the warm-box scrub covers every path the chunk writes", () => 
       terminate: async () => {},
     }
     const params: GradeChunkParams = {
-      datasetPath: "/tmp/instances.jsonl",
+      datasetPath: join(SANDBOX, "instances.jsonl"),
       authJson: JSON.stringify({ access_token: "A", expires_at: "2099-01-01T00:00:00Z" }),
       preset: "agentless-v1",
       model: "gpt-5.4",
@@ -663,7 +671,12 @@ describe("A-B — the warm-box scrub covers every path the chunk writes", () => 
     // `tests/setup.ts` fences `QUANTA_BENCH_RESULTS_DIR`; `QUANTA_BENCH_HOME`
     // has no such fence, and on macOS the home is under `~/Library/…`, not
     // `~/.quanta`, so checking only the latter misses it.
-    const benchHome = mkdtempSync(join(tmpdir(), "pmx-lifecycle-home-"))
+    // A FIXED name, not `mkdtempSync`. The SSOT mirror encodes the full source
+    // path in its filename, so a randomized home turned "one temp dir per run"
+    // into "one JSON per run in the shared results dir", which nothing removes.
+    // A stable path overwrites in place.
+    const benchHome = join(tmpdir(), "pmx-lifecycle-home")
+    mkdirSync(benchHome, { recursive: true })
     TEMPS.push(benchHome)
     const priorHome = process.env.QUANTA_BENCH_HOME
     process.env.QUANTA_BENCH_HOME = benchHome

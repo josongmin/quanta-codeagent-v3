@@ -45,6 +45,7 @@ import { createFullRemoteBackend } from "@/apps/bench/remote/full"
 import { runPool } from "@/apps/bench/remote/pool"
 import { readSwebenchTasks } from "@/apps/bench/run-main-helpers"
 import { planMicrochunks } from "@/apps/bench/slicing/microchunk"
+import { __resetRuntimeConfig } from "@/shared"
 import { createSpawnRecorder, ok, whenArgsInclude, whenCmd } from "../../../bench-spawn-testkit"
 import { buildSyntheticProMaxCorpus, PROMAX_LANGUAGE_COUNTS } from "./promax-corpus-fixture"
 
@@ -54,7 +55,27 @@ const alloc = (prefix: string): string => {
   TEMP_DIRS.push(dir)
   return dir
 }
+/**
+ * REDIRECT the bench home. These cases drive real code that resolves
+ * `benchRunsRoot()` and the token-budget store, so without this every run left
+ * two empty `run-<ts>/` directories plus `~/.quanta/bench-token-budget` in the
+ * OPERATOR's home — measured, 7,892 of them accumulated there, and the count
+ * moved by exactly 2 per run of this file.
+ *
+ * RESTORED, not deleted: bun shares one process across every test file, so a
+ * deleted variable stays deleted for everything scheduled afterwards —
+ * including the fence `tests/setup.ts` installs.
+ */
+const BENCH_HOME = mkdtempSync(join(tmpdir(), "pmx-one-reader-home-"))
+TEMP_DIRS.push(BENCH_HOME)
+const PRIOR_BENCH_HOME = process.env.QUANTA_BENCH_HOME
+process.env.QUANTA_BENCH_HOME = BENCH_HOME
+__resetRuntimeConfig()
+
 afterAll(() => {
+  if (PRIOR_BENCH_HOME === undefined) delete process.env.QUANTA_BENCH_HOME
+  else process.env.QUANTA_BENCH_HOME = PRIOR_BENCH_HOME
+  __resetRuntimeConfig()
   for (const dir of TEMP_DIRS) rmSync(dir, { recursive: true, force: true })
 })
 

@@ -101,11 +101,23 @@ const writeDatasetJsonl = (prefix: string, rows: readonly Record<string, unknown
   return path
 }
 
+/**
+ * A SANDBOXED dataset path. This was `/tmp/ds.jsonl`, written at MODULE SCOPE —
+ * so merely importing this file wrote into the real `/tmp`, outside any
+ * isolated `TMPDIR`, measured by the file's mtime moving. Same class as the
+ * canary this suite already fixed elsewhere.
+ */
+const DATASET_DIR = mkdtempSync(join(tmpdir(), "bench-full-remote-ds-"))
+const DATASET_PATH = join(DATASET_DIR, "ds.jsonl")
+afterAll(() => {
+  rmSync(DATASET_DIR, { recursive: true, force: true })
+})
+
 const writeDatasetJsonlAtPath = (path: string, rows: readonly Record<string, unknown>[]): void => {
   writeFileSync(path, `${rows.map((row) => JSON.stringify(row)).join("\n")}\n`)
 }
 
-writeDatasetJsonlAtPath("/tmp/ds.jsonl", [
+writeDatasetJsonlAtPath(DATASET_PATH, [
   { instance_id: "psf__requests-5414", patch: PY_FIX_PATCH },
   { instance_id: "django__django-12345", patch: PY_FIX_PATCH },
 ])
@@ -232,7 +244,7 @@ describe("full-remote executor (injected spawn — no real box/token)", () => {
   const baseCfg = {
     repoDir: "/tmp/fake-repo",
     authJson: FULL_AUTH,
-    datasetPath: "/tmp/ds.jsonl",
+    datasetPath: DATASET_PATH,
     instanceIds: ["psf__requests-5414"],
     singleBoxGuardDir: DEFAULT_SINGLE_BOX_GUARD_DIR,
     tokenBudgetDir: TOKEN_BUDGET_DIR,
@@ -704,7 +716,7 @@ describe("full-remote executor (injected spawn — no real box/token)", () => {
         await createFullRemoteBackend({
           repoDir: "/tmp/fake-repo",
           authJson: ${JSON.stringify(FULL_AUTH)},
-          datasetPath: "/tmp/ds.jsonl",
+          datasetPath: ${JSON.stringify(DATASET_PATH)},
           instanceIds: ["psf__requests-5414"],
           spawn,
           onDemand: true,
