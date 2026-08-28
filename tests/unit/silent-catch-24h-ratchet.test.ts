@@ -161,6 +161,20 @@ describe("R3 audit-H — bare-catch count must EQUAL baseline (R5 tightened)", (
   for (const [file, baseline] of Object.entries(BARE_CATCH_BASELINE)) {
     test(`${file} bare-catch count === ${baseline}`, () => {
       const observed = countBareCatches(file)
+      // MACHINE-READABLE CONTRACT LINE. `tools/dev/refresh-silent-catch-baseline.ts`
+      // parses exactly this shape out of `bun test` output; it is the only way
+      // that script can learn an observed count without re-implementing the
+      // scan (and drifting from it).
+      //
+      // Emitted UNCONDITIONALLY and BEFORE the assertions, so the steady state
+      // and the improvement are as visible to the script as the regression is.
+      // The script's docstring has specified this line since it landed, and
+      // this file never emitted it: with nothing to parse, every bucket read as
+      // "not reported", `planTighten` returned an empty plan, and the CI
+      // `--check` step printed a pass it had measured nothing to support.
+      // `process.stdout.write` rather than `console.log` — `lint/suspicious/
+      // noConsole` is a pinned ceiling and this line is diagnostics, not debt.
+      process.stdout.write(`[silent-catch] id=${file} observed=${observed} baseline=${baseline}\n`)
       if (observed > baseline) {
         throw new Error(
           `Silent-catch regression in ${file}: ${observed} bare-catches ` +

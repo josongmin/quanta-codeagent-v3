@@ -22,6 +22,18 @@
  *   A-3  a SCOPED breach lists only files in the BREACHING scope
  *   A-4  the list is capped, and the elision is counted, not silent
  *   A-5  PAIRED CONTROL — a rule under its ceiling stays silent
+ *   A-6  an unpinned rule is attributed too
+ *   A-7  the SCOPED breach is decided by the classifier PAIRED with the sites
+ *
+ * A-7 IS THE ONE THAT PINS THE TYPE. `SiteAttribution` exists to delete the
+ * half-wired state — sites supplied, classifier forgotten — that printed a bare
+ * number on every scoped breach and said nothing about it. A type-level
+ * invariant cannot be asserted at runtime, so A-7 pins it by CONSEQUENCE, with
+ * a classifier INVERTED relative to the tool's own `src/` = prod rule: only a
+ * reader that takes the classifier from the pair can name the right file.
+ * Measured: with `siteSuffix` switched to the module-level `scopeOfPath`
+ * instead of `sites.scopeOfFile` — the exact shape half-wiring returns as —
+ * A-1..A-6 all stay green and A-7 is the only arm that reddens.
  */
 
 import { describe, expect, test } from "bun:test"
@@ -44,7 +56,9 @@ const sites = (
   rows: Record<string, Record<string, number>>,
   scopeOfFile: (file: string) => "prod" | "tests" = bySrcPrefix,
 ): SiteAttribution => ({
-  byRule: new Map(Object.entries(rows).map(([rule, files]) => [rule, new Map(Object.entries(files))])),
+  byRule: new Map(
+    Object.entries(rows).map(([rule, files]) => [rule, new Map(Object.entries(files))]),
+  ),
   scopeOfFile,
 })
 
@@ -155,6 +169,39 @@ describe("A — a breached lint ceiling names its sites", () => {
     // synthetic `worstComplexity: 999` drops alongside it; the arm is about the
     // RULE, so pin that entry rather than the whole list.)
     expect(v.drops).toContain("lint/suspicious/noConsole 69→68")
+  })
+
+  test("A-7 a SCOPED breach is attributed by the classifier PAIRED with the sites", () => {
+    // The classifier here is INVERTED relative to `bySrcPrefix`, so the
+    // `[tests]` breach may name ONLY `src/a.ts`. Any reader that does not take
+    // the classifier out of the SiteAttribution value — dropped, defaulted, or
+    // reintroduced as a second optional argument nobody passes — names the
+    // other file, or (the documented pre-fix behaviour) nothing at all.
+    const scoped = "lint/style/noNonNullAssertion"
+    const inverted = (file: string): "prod" | "tests" =>
+      file.startsWith("src/") ? "tests" : "prod"
+    const v = evaluate({
+      counts: new Map([[scoped, 8]]),
+      scopedCounts: new Map([
+        [scopeKey(scoped, "prod"), 0],
+        [scopeKey(scoped, "tests"), 3],
+      ]),
+      ceiling: {
+        rules: {},
+        scopedRules: { [scoped]: { prod: 0, tests: 2 } },
+        worstComplexity: 999,
+      },
+      sitesByRule: sites({ [scoped]: { "src/a.ts": 3, "tests/unit/c.test.ts": 5 } }, inverted),
+    })
+    expect(v.regressions).toHaveLength(1)
+    const line = v.regressions[0] ?? ""
+    // PRESENT and NON-EMPTY — half-wiring's failure mode was the empty suffix,
+    // which reads as a normal bare count line and announces nothing.
+    expect(line).toContain(" — in ")
+    expect(line.split(" — in ")[1] ?? "").not.toBe("")
+    // ...and it is the PAIRED classifier's answer, not the module default's.
+    expect(line).toContain("src/a.ts (3)")
+    expect(line).not.toContain("tests/unit/c.test.ts")
   })
 
   test("A-6 an UNPINNED rule is attributed too — that is the harder one to find", () => {
