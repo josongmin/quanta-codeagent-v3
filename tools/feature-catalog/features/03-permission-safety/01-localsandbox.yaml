@@ -25,6 +25,11 @@ evidence:
   code:
     - src/runtime/sandbox.ts
     - src/runtime/index.ts
+    # The spawn-time env allowlist + the PURE scrubber that applies it. Split
+    # out of sandbox.ts so `@/subagent` (which may not import `@/runtime`) can
+    # scrub the env it hands a spawned child; `sandbox.ts` keeps the
+    # `process.env`-reading one-argument form and re-exports the allowlist.
+    - src/shared/env-scrub.ts
   adrs: [6]
   tests:
     unit: ["tests/unit/cli-session-commands.test.ts", "tests/unit/cli/os-sandbox-default-byte-identical-hellgate.test.ts", "tests/unit/cli/os-sandbox-wire-hellgate.test.ts", "tests/unit/runtime/guarded-spawn.test.ts", "tests/unit/runtime/kill-escalation-and-worktree-retry.test.ts", "tests/unit/sandbox-buildargv.test.ts", "tests/unit/sandbox.test.ts", "tests/unit/session-security-regression.test.ts", "tests/unit/shell-disclaim.test.ts", "tests/unit/shell.test.ts", "tests/unit/tool/shell-exec-events-abort.test.ts", "tests/unit/tool/shell-exec-events-byte-identical.test.ts", "tests/unit/tool/shell-exec-events-stderr.test.ts", "tests/unit/tool/shell-exec-events.test.ts"]
