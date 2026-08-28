@@ -15,8 +15,8 @@
 
 import { describe, expect, test } from "bun:test"
 import { readdirSync, readFileSync } from "node:fs"
-import { relative } from "node:path"
 import { join } from "node:path"
+import { assertScanPopulation } from "../_shared/scan-population"
 
 const SRC = join(import.meta.dir, "../../../src")
 
@@ -65,23 +65,11 @@ describe("single-PEP fence — tool.execute() only from allowlisted sites [P2-T3
     // guards were found inert exactly that way in one night, each of them
     // passing its own suite. So the population is asserted before the absence of
     // violations means anything.
-    const files = walk(SRC)
-    expect(files.length, "the walk found no source files at all").toBeGreaterThan(500)
-    // A COUNT cannot see a subtree loss — measured: skipping `agent/` entirely
-    // left a count-only floor green while the very directory holding
-    // `dispatch.ts` went unscanned. So the floor is per-subtree: every immediate
-    // child of `src/` that still holds a `.ts` on disk must appear in the walk.
-    const walked = new Set(
-      files.map((f) => relative(SRC, f).split("/")[0] ?? "").filter((s) => s !== ""),
-    )
-    const onDisk = readdirSync(SRC, { withFileTypes: true })
-      .filter((e) => e.isDirectory() && e.name !== "__tests__" && e.name !== "node_modules")
-      .map((e) => e.name)
-      .filter((name) => walk(join(SRC, name)).length > 0)
-    expect(
-      onDisk.filter((name) => !walked.has(name)),
-      "these subtrees hold source on disk but the walk enumerated none of them",
-    ).toEqual([])
+    // A COUNT alone cannot see a subtree loss — measured: skipping `agent/`
+    // entirely left a count-only floor green while the very directory holding
+    // `dispatch.ts` went unscanned. `assertScanPopulation` asserts both, and
+    // probes the disk independently of the walk under test.
+    assertScanPopulation(walk(SRC), SRC, { min: 500 })
   })
 
   test("no un-allowlisted site consumes a tool's execute() generator (gate bypass guard)", () => {

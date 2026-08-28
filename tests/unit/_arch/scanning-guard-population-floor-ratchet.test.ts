@@ -69,47 +69,40 @@ const withoutFloor = (): readonly string[] =>
   scanningGuards().filter((f) => !HAS_FLOOR.test(readFileSync(join(REPO, f), "utf8")))
 
 /**
- * The burn-down. Every entry is a guard that reports PASS when its population
- * is empty. The list may only SHRINK: add a floor and delete the line.
+ * The detector is deliberately OVER-BROAD: it fires on any enumeration, because
+ * a rule narrow enough to tell a repo scan from a fixture scan by regex has both
+ * false positives and false negatives (both were measured while writing this).
+ * Recall is what matters for a ratchet; precision is bought back by making every
+ * flagged file take a POSITION. There are exactly two:
+ *
+ *   · NEEDS_FLOOR      — a real repo scan, still floorless. Burn it down with
+ *                        `assertScanPopulation` and delete the line.
+ *   · NOT_A_REPO_SCAN  — enumerates a directory the test itself created, where
+ *                        an empty result is the assertion rather than a hole.
+ *                        Requires a written reason; the reason is the point.
+ *
+ * Neither list may grow silently, and a floor that appears must delete its line.
  */
-const REMAINING: readonly string[] = [
-  "src/connectors/custom-3p/__tests__/jsonl-store-atomic-hellgate.test.ts",
-  "src/migration/__tests__/import-log-fsync-hellgate.test.ts",
-  "src/storage/__tests__/atomic-write-fsync-hellgate.test.ts",
+const NEEDS_FLOOR: readonly string[] = [
   "tests/adversarial/aug02-feeder-deferred-status.test.ts",
   "tests/integration/cli-attention-navigation.test.ts",
-  "tests/integration/memory-default-on-e2e-hellgate.test.ts",
-  "tests/integration/notebook-edit-agent-loop-e2e.test.ts",
-  "tests/integration/tool-spill-e2e.test.ts",
   "tests/unit/activity/activity-store-constructor-owner-ratchet.test.ts",
   "tests/unit/agent-import-cycle.test.ts",
-  "tests/unit/agent-state-silent-reset-hellgate.test.ts",
   "tests/unit/apps/bench/batch-sdk-parity.test.ts",
-  "tests/unit/apps/bench/promax/promax-bundle-assembly.test.ts",
-  "tests/unit/apps/bench/promax/promax-prepare-tool.test.ts",
   "tests/unit/apps/bench/shared-verify-select-adapters.test.ts",
   "tests/unit/apps/cli/repl-host-slim-hellgate.test.ts",
   "tests/unit/apps/cli/repl-orphan-resolution-hellgate.test.ts",
   "tests/unit/apps/cli/session-cmd-shim-removal-hellgate.test.ts",
   "tests/unit/audit-ratchet/error-message-canonical-hellgate.test.ts",
-  "tests/unit/bench-microchunk-hellgate.test.ts",
-  "tests/unit/bench-token-budget-lease.test.ts",
-  "tests/unit/bugbash-fix-drivers.test.ts",
   "tests/unit/cli/cli-knob-readsite-domain-hellgate.test.ts",
-  "tests/unit/cli/hunk-receipt-frontdoor.test.ts",
   "tests/unit/cli/terminal-chrome-hellgate.test.ts",
-  "tests/unit/deny-reason-authority-ratchet-hellgate.test.ts",
-  "tests/unit/eval-generator-validation.test.ts",
   "tests/unit/identity-mid-session-rebuilder-owner-wire-hellgate.test.ts",
   "tests/unit/kernel/knob-schema-ssot-lock-ratchet.test.ts",
   "tests/unit/memory/cross-session-inject-removed-ratchet.test.ts",
-  "tests/unit/memory/durable-store-default-hellgate.test.ts",
   "tests/unit/objective/constructor-owner-ratchet.test.ts",
-  "tests/unit/permission/single-pep-fence-hellgate.test.ts",
   "tests/unit/quanta-home-root-ssot-ratchet-hellgate.test.ts",
   "tests/unit/retrieval-bridge-deleted-ratchet.test.ts",
   "tests/unit/retrieval/budget-probe-hellgate.test.ts",
-  "tests/unit/runner/batch/failure-facts.test.ts",
   "tests/unit/runner/closure-repair-driver-parity.test.ts",
   "tests/unit/runner/session-authorities-task-registry-identity.test.ts",
   "tests/unit/runner/verify-select-driver-parity.test.ts",
@@ -123,26 +116,71 @@ const REMAINING: readonly string[] = [
   "tests/unit/wire-batch-mode-focus-fork-otel-hellgate.test.ts",
 ]
 
+/** Enumerates a test-created directory, not the repo. Reason required. */
+const NOT_A_REPO_SCAN: Readonly<Record<string, string>> = {
+  "src/connectors/custom-3p/__tests__/jsonl-store-atomic-hellgate.test.ts":
+    "siblings of a file the test itself wrote into a temp dir",
+  "src/migration/__tests__/import-log-fsync-hellgate.test.ts":
+    "leftover `.tmp.` entries in a temp dir the test created",
+  "src/storage/__tests__/atomic-write-fsync-hellgate.test.ts":
+    "temp dir the test wrote; the assertion is an exact set",
+  "tests/integration/memory-default-on-e2e-hellgate.test.ts": "mkdtemp home the test created",
+  "tests/integration/notebook-edit-agent-loop-e2e.test.ts":
+    "temp dir, checking no `.quanta-tmp-` residue survives",
+  "tests/integration/tool-spill-e2e.test.ts": "the spill dir the run under test produced",
+  "tests/unit/agent-state-silent-reset-hellgate.test.ts":
+    "temp dir; asserted with toEqual on an exact filename set",
+  "tests/unit/apps/bench/promax/promax-bundle-assembly.test.ts":
+    "the bundle output dir the test just assembled",
+  "tests/unit/apps/bench/promax/promax-prepare-tool.test.ts":
+    "prepared output dir; asserted as an exact set",
+  "tests/unit/bench-microchunk-hellgate.test.ts":
+    "chunk output dir; asserted against an exact count",
+  "tests/unit/bench-token-budget-lease.test.ts":
+    "the lease dir the test created; `import.meta.dir` here is a subprocess import path, not a scan root",
+  "tests/unit/bugbash-fix-drivers.test.ts": "the run dir the driver produced",
+  "tests/unit/cli/hunk-receipt-frontdoor.test.ts": "receipt dir the test wrote",
+  "tests/unit/eval-generator-validation.test.ts":
+    "generator output dir; asserted against exact counts",
+  "tests/unit/memory/durable-store-default-hellgate.test.ts":
+    "scratch cwd, asserted empty on purpose",
+  "tests/unit/runner/batch/failure-facts.test.ts":
+    "the run dir, checking no `.tmp` residue survives",
+}
+
+const CLASSIFIED = new Set([...NEEDS_FLOOR, ...Object.keys(NOT_A_REPO_SCAN)])
+
 describe("a scanning guard states what it examined", () => {
   test("🔴 no NEW scanning guard ships without a population floor", () => {
-    const unlisted = withoutFloor().filter((f) => !REMAINING.includes(f))
+    const unlisted = withoutFloor().filter((f) => !CLASSIFIED.has(f))
     expect(
       unlisted,
-      "this guard passes when it examines nothing — assert its population is non-empty",
+      "this enumerates without a floor: either give it one (`assertScanPopulation`) " +
+        "or classify it in NOT_A_REPO_SCAN with a reason",
     ).toEqual([])
   })
 
   test("🔴 the list only shrinks — a guard that gained a floor loses its line", () => {
     const live = new Set(withoutFloor())
     expect(
-      REMAINING.filter((f) => !live.has(f)),
+      NEEDS_FLOOR.filter((f) => !live.has(f)),
       "these gained a floor; delete their entries so the ceiling drops",
+    ).toEqual([])
+    expect(
+      Object.keys(NOT_A_REPO_SCAN).filter((f) => !live.has(f)),
+      "these no longer enumerate without a floor; drop the classification",
     ).toEqual([])
   })
 
   test("ANTI-VACUITY: the scan finds a real, populated set of guards", () => {
     // without this the ratchet is itself an instance of the defect it names
     expect(scanningGuards().length).toBeGreaterThan(100)
+    // A classification with an empty reason is papering, which is the same
+    // failure this file exists to name, one level up.
+    expect(
+      Object.entries(NOT_A_REPO_SCAN).filter(([, why]) => why.trim().length < 20),
+      "every classified entry states WHY its population cannot be empty by mistake",
+    ).toEqual([])
   })
 
   test("ANTI-VACUITY: the detectors fire on the shapes they name", () => {

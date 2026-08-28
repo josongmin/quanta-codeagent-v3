@@ -30,7 +30,8 @@ export const assertScanPopulation = (
     readonly skipDirs?: readonly string[]
   } = {},
 ): void => {
-  const collectable = opts.collectable ?? ((n: string) => n.endsWith(".ts") && !n.endsWith(".test.ts"))
+  const collectable =
+    opts.collectable ?? ((n: string) => n.endsWith(".ts") && !n.endsWith(".test.ts"))
   const skip = new Set(["node_modules", "__tests__", ...(opts.skipDirs ?? [])])
   const isSkipped = (name: string): boolean => skip.has(name) || name.startsWith(".")
 
