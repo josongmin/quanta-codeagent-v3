@@ -6,25 +6,40 @@
 import { expect, test } from "bun:test"
 import { readdirSync, readFileSync } from "node:fs"
 import { resolve } from "node:path"
+import { assertScanPopulation } from "./_shared/scan-population"
 
 // The `bootstrap-session.ts` god-MODULE split moved the rebuilder wire out of the
 // entrypoint into `bootstrap-session/session-state-ports.ts`. The pin is unchanged
 // — only the path it reads: aggregate the entrypoint + every stage so the contract
 // follows the code, and so relocating the wire again cannot silently un-pin it.
 const BOOTSTRAP_DIR = resolve(import.meta.dir, "../../src/host/bootstrap")
+/** The slice is read as ONE concatenated blob, so a slice file that went
+ *  unread simply is not in the text — and every `toContain` on the wire it
+ *  holds then fails as "not wired", while every `not.toContain` passes. */
+const bootstrapSliceFiles = (): string[] => {
+  const dir = resolve(BOOTSTRAP_DIR, "bootstrap-session")
+  return readdirSync(dir)
+    .filter((f) => f.endsWith(".ts"))
+    .map((f) => resolve(dir, f))
+}
+
 const bootstrapSource = (): string =>
-  [
-    resolve(BOOTSTRAP_DIR, "bootstrap-session.ts"),
-    ...readdirSync(resolve(BOOTSTRAP_DIR, "bootstrap-session"))
-      .filter((f) => f.endsWith(".ts"))
-      .map((f) => resolve(BOOTSTRAP_DIR, "bootstrap-session", f)),
-  ]
+  [resolve(BOOTSTRAP_DIR, "bootstrap-session.ts"), ...bootstrapSliceFiles()]
     .map((f) => readFileSync(f, "utf8"))
     .join("\n")
 
 const hasCanonicalRebuilderWire = (source: string): boolean =>
   /createSystemPromptRebuilder\s*\(\s*\{/.test(source) &&
   /systemSource\.set\(rebuilder\.rebuild\(\)\)/.test(source)
+
+test("ANTI-VACUITY: the bootstrap-session slice was actually enumerated", () => {
+  const dir = resolve(BOOTSTRAP_DIR, "bootstrap-session")
+  assertScanPopulation(bootstrapSliceFiles(), dir, {
+    min: 2,
+    topLevelOnly: true,
+    collectable: (f) => f.endsWith(".ts"),
+  })
+})
 
 test("HELL-0302-OWNER-01: bootstrap uses the canonical rebuilder and persists its result", () => {
   expect(hasCanonicalRebuilderWire(bootstrapSource())).toBe(true)

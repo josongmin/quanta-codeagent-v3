@@ -25,6 +25,7 @@ import { describe, expect, test } from "bun:test"
 import { existsSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { ALL_BENCH_SCHEMAS } from "@/config/knob-schema/schemas"
+import { assertScanPopulation } from "../_shared/scan-population"
 
 // Anchored on THIS file, not the ambient cwd: a bare relative root silently
 // resolves to nothing when the runner is launched from anywhere else, and this
@@ -62,6 +63,21 @@ const idOf = (file: string): string => file.replace(/\.ts$/, "")
 const schemaIds = (): Set<string> => new Set(ALL_BENCH_SCHEMAS.map((s) => s.id))
 
 describe("knob=schema SSOT lock (drift-back prevention)", () => {
+  test("ANTI-VACUITY: the knob directory was actually enumerated", () => {
+    // Every lock below iterates `knobFiles()`. An empty list makes each one a
+    // loop over nothing, and a lock that checks nothing reports the same PASS
+    // as a lock nothing violates.
+    assertScanPopulation(
+      knobFiles().map((f) => join(KNOBS_DIR, f)),
+      KNOBS_DIR,
+      {
+        min: 5,
+        topLevelOnly: true,
+        collectable: (f) => f.endsWith(".ts") && !f.endsWith(".test.ts") && f !== "index.ts",
+      },
+    )
+  })
+
   test("1. every schema-backed knob file DERIVES from its schema (no hand-written Knob)", () => {
     const ids = schemaIds()
     const violations: string[] = []

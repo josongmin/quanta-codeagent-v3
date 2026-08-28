@@ -46,6 +46,7 @@ import { fourSectionPreset } from "@/agent/prompt-sections"
 import type { Message } from "@/llm"
 import { type Phase1Port, Stage1Store } from "@/memory"
 import { buildSessionMemoryAutoWires } from "@/runner/session-memory-auto"
+import { assertScanPopulation } from "../_shared/scan-population"
 
 const REPO_ROOT = join(import.meta.dir, "..", "..", "..")
 const SRC_ROOT = join(REPO_ROOT, "src")
@@ -232,6 +233,16 @@ const PRODUCTION_SHAPED_JSONL = [
 const B_HEADER = "## Cross-session memory (auto)"
 
 describe("cross-session inject removed ratchet (ADR-0556)", () => {
+  test("ANTI-VACUITY: the src walk reaches a real, populated tree", () => {
+    // The ratchet asserts a token was REMOVED. A walk that lost a subtree finds
+    // no occurrences there and reports exactly the removal it wants to see.
+    assertScanPopulation(walkTs(SRC_ROOT), SRC_ROOT, {
+      min: 500,
+      skipDirs: ["__snapshots__"],
+      collectable: (n) => n.endsWith(".ts") || n.endsWith(".tsx"),
+    })
+  })
+
   test("(a) no src/ file references the retired injector / mirror / gate / knobs (0 hits; 4 constant-false contract keys)", () => {
     const { hits, sanctioned } = scanSources(loadSrc())
     if (hits.length > 0) {

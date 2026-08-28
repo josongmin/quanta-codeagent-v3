@@ -29,6 +29,7 @@
 import { describe, expect, test } from "bun:test"
 import { readdirSync, readFileSync, statSync } from "node:fs"
 import { join, relative } from "node:path"
+import { assertScanPopulation } from "../_shared/scan-population"
 
 const REPO_ROOT = join(import.meta.dir, "..", "..", "..")
 const SRC_DIR = join(REPO_ROOT, "src")
@@ -86,6 +87,14 @@ const findUnauthorizedOwners = (srcRoot: string, allowed: ReadonlySet<string>): 
 }
 
 describe("RFC-03 C2 — objective authority constructor-owner ratchet", () => {
+  test("ANTI-VACUITY: the walk reaches a real, populated `src/` tree", () => {
+    // "No unauthorized constructor" and "no file was read" are the same result.
+    assertScanPopulation([...walk(SRC_DIR)], SRC_DIR, {
+      min: 500,
+      collectable: (n) => n.endsWith(".ts") && !n.endsWith(".d.ts") && !n.endsWith(".test.ts"),
+    })
+  })
+
   test("no surface/command-local objective constructor outside the authority builder", () => {
     const unauthorized = findUnauthorizedOwners(SRC_DIR, ALLOWED_OWNERS)
     if (unauthorized.length > 0) {
