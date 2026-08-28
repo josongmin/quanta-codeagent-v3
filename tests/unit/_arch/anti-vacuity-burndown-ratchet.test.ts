@@ -88,14 +88,10 @@ describe("anti-vacuity burn-down", () => {
    */
   const REFUTED: ReadonlySet<string> = new Set([
     // scans src/, and its verdict is `toContain` — an empty scan fails it
-    "src/agent/prompt-graph/role-drift.ratchet.test.ts",
     "src/runner/batch/eval/repro-grounding.test.ts",
     "src/tool/terminal-surface.test.ts",
     // verdict compares against a non-empty expected set, so empty ≠ clean
-    "tests/unit/audit-ratchet/error-message-canonical-hellgate.test.ts",
-    "tests/unit/slice-boundary-config-parity.test.ts",
     "tests/unit/surface-coupling-ratchet.test.ts",
-    "tests/unit/terminal-defaults-ratchet.test.ts",
   ])
 
   test("🔴 no NEW guard derives a verdict from an unfloored scan", () => {

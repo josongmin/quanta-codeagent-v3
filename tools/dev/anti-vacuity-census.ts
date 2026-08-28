@@ -24,17 +24,6 @@ const VERDICT =
   /\.toEqual\(\s*\[\s*\]\s*\)|\.toBeLessThanOrEqual\(|\.toHaveLength\(\s*0\s*\)|\.toBe\(\s*0\s*\)|\.toBeFalsy\(\s*\)|\.toEqual\(\s*new Set\(\s*\)\s*\)|\.length\s*>\s*0\s*\)\s*\{?\s*throw|\.size\s*>\s*0\s*\)\s*\{?\s*throw/
 
 /**
- * A numeric floor, in the shape biome actually emits.
- *
- * The original required `)` immediately after the digits, so every floor long
- * enough for the formatter to wrap — which is every
- * `expect(x, "message").toBeGreaterThan(N)` — got a trailing comma and was
- * invisible. Three guards fixed during this campaign were kept off the ledger
- * only because the prose regex happened to match their assertion message.
- */
-const NUMERIC_FLOOR = /\.toBeGreaterThan(?:OrEqual)?\(\s*([1-9]\d*)\s*,?\s*\)/
-
-/**
  * A floor asserted by throwing rather than by `expect`.
  *
  * Now requires a real `throw` near the phrase, not the phrase alone — the whole
@@ -47,7 +36,15 @@ const NUMERIC_FLOOR = /\.toBeGreaterThan(?:OrEqual)?\(\s*([1-9]\d*)\s*,?\s*\)/
  *
  * This is the file-wide backstop, and it is narrowed by NAME on purpose: the
  * whole point is to accept a corpus floor while still rejecting the latency
- * floor that started this.
+ * floor that started this. A bare `toBeGreaterThan(N)` anywhere in the block is
+ * NOT enough and used to be the last hole — an `expect(elapsedMs)
+ * .toBeGreaterThan(1)` sitting beside a scan exempted the scan.
+ *
+ * The trailing `,?` is not cosmetic: the original required `)` immediately after
+ * the digits, so every floor long enough for the formatter to wrap — which is
+ * every `expect(x, "message").toBeGreaterThan(N)` — got a trailing comma and was
+ * invisible. Three guards fixed during that campaign stayed off the ledger only
+ * because the prose regex happened to match their assertion message.
  */
 const SCAN_FLOOR =
   /(?:\b(?:files?|entries|paths?|matches|scanned|declared|all|found|sources?|tracked|dirs?|count)\w*(?:\.(?:length|size))?|\.(?:length|size)|count\w*\([^)]*\))\s*(?:,[\s\S]{0,120}?)?\)?\s*\)?\s*\.toBeGreaterThan(?:OrEqual)?\(\s*([1-9]\d*)\s*,?\s*\)/
@@ -59,6 +56,15 @@ const SCAN_FLOOR =
  */
 const WRAPPED_SCAN_FLOOR =
   /expect\(\s*\n[\s\S]{0,200}?(?:count\w*\(|\.(?:length|size)\b|\bfiles?\b|\bentries\b|\bscanned\b|\bdeclared\b)[\s\S]{0,200}?\n\s*\)\s*\.toBeGreaterThan(?:OrEqual)?\(\s*([1-9]\d*)\s*,?\s*\)/
+
+/**
+ * The canonical floor helper. Strictly stronger than a numeric floor: it asserts
+ * a minimum AND that every subtree holding a collectable file on disk
+ * contributed at least one, probed independently of the walk under test — so a
+ * partial walk, a wrong subtree, or a matcher that stopped matching all red. It
+ * is not a `>0`-grade escape hatch, which is why it counts.
+ */
+const HELPER_FLOOR = /\bassertScanPopulation\s*\(/
 
 const THROW_FLOOR =
   /throw new Error\((?:[^)]|\)(?!\s*$))*?(?:vacuous|read no |far below|would pass over|never happened)/is
@@ -90,37 +96,12 @@ const walk = (d: string): void => {
     const p = join(d, e.name)
     if (e.isDirectory()) walk(p)
     else if (p.endsWith(".test.ts")) {
-      const s = stripComments(readFileSync(p, "utf8"))
-      if (!SCAN.test(s) || !VERDICT.test(s)) continue
-      if (TEMP_ONLY(s)) continue
-      // The floor must live in a block that actually SCANS. A file-wide check let
-      // an unrelated `expect(ms).toBeGreaterThan(1)` in a different test exempt
-      // every scan in the file — a floor on latency vouching for a corpus.
-      // Two passes, and the second is what keeps the precision.
-      //
-      // Block-scoping alone was too strict: a floor asserted in a `describe`-level
-      // helper, or in a sibling `test` that shares the same scan, is real and the
-      // per-block view cannot see it. It reported 70 files including three that
-      // had been given derived floors hours earlier.
-      //
-      // File-scoping alone was too loose: an unrelated `expect(ms).toBeGreaterThan(1)`
-      // in a different test exempted every scan in the file — a latency floor
-      // vouching for a corpus.
-      //
-      // So a file is listed only when NO scanning block carries a floor AND the
-      // file has no floor asserted on a scan-shaped quantity anywhere. The second
-      // condition is what a reader would check by eye.
-      const unflooredBlock = blocks(s).some(
-        (b) => SCAN.test(b) && !NUMERIC_FLOOR.test(b) && !THROW_FLOOR.test(b),
-      )
-      if (
-        unflooredBlock &&
-        !SCAN_FLOOR.test(s) &&
-        !WRAPPED_SCAN_FLOOR.test(s) &&
-        !THROW_FLOOR.test(s)
-      ) {
-        out.push(p.slice(R.length + 1))
-      }
+      // Delegates to `isFloorless`. This body used to restate the whole rule —
+      // the SCAN/VERDICT gates, TEMP_ONLY, and the block/file two-pass — and the
+      // copies drifted the moment a floor shape was added: the shape reached
+      // `hasScanFloor` while this census kept reporting the file as floorless.
+      // One definition, so teaching it once is teaching it everywhere.
+      if (isFloorless(readFileSync(p, "utf8"))) out.push(p.slice(R.length + 1))
     }
   }
 }
@@ -160,7 +141,10 @@ const walk = (d: string): void => {
  * scan exempted the scan. A floor only counts when it is on the thing scanned.
  */
 const hasScanFloor = (text: string): boolean =>
-  SCAN_FLOOR.test(text) || WRAPPED_SCAN_FLOOR.test(text) || THROW_FLOOR.test(text)
+  HELPER_FLOOR.test(text) ||
+  SCAN_FLOOR.test(text) ||
+  WRAPPED_SCAN_FLOOR.test(text) ||
+  THROW_FLOOR.test(text)
 
 export const isFloorless = (rawSource: string): boolean => {
   const s = stripComments(rawSource)
@@ -199,5 +183,6 @@ export const floorlessGuards = (): readonly string[] => {
 }
 
 if (import.meta.main) {
+  // biome-ignore lint/suspicious/noConsole: the CLI form of this file IS its output
   console.log(JSON.stringify(floorlessGuards(), null, 2))
 }
