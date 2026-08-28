@@ -79,6 +79,22 @@ jobs:
         # ratchets. ~30s for 17 files.
         run: bun run test:cwd-parity:arch
 
+      - name: non-vacuity oracle (a guard must notice its corpus vanishing)
+        # Runs each scan guard against a mirror with the corpus its assertions
+        # consume emptied, and fails unless the guard goes RED. This is ground
+        # truth: three static detectors were built before it and all three
+        # under-reported while reporting green. A guard that imports the tree it
+        # enumerates is reported UNSUPPORTED with the overlap count, never as a
+        # pass. ~36s.
+        run: bun run test:non-vacuity
+
+      - name: preload runtime closure (no production slices in every test)
+        # The bunfig preload loaded 1,259 files of src/ — 284 under src/tool —
+        # before every test file, which made a mirror with src/tool emptied
+        # impossible to start and blocked the oracle above. Inspects a real bun
+        # child's module set, not the source text. ~1s.
+        run: bun test tests/meta/preload-runtime-closure-hellgate.test.ts
+
       - name: unit speed budget (slowest single test, one-directional)
         # The old gate asserted the WHOLE suite finished in <8000ms. That number
         # predates a ~36k-test suite and could not pass on any machine, so it only
