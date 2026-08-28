@@ -377,9 +377,13 @@ export interface BuildReplSlashCtxArgs {
   /** ADR-0462 — `/sticky-model`: fs-backed per-mode model store. Absent ⇒
    *  the `/sticky-model` slot is omitted (slash prints "not wired"). */
   stickyModelStore?: StickyModelStore | undefined
-  /** ADR-0462 — known model ids for `<modelId>` tab-completion (current model +
-   *  configured candidates, deduped by the caller). Convenience only. */
-  stickyModelCandidateIds?: readonly string[] | undefined
+  /** ADR-0462 — the switchable model ids for `<modelId>` completion AND (aug-28)
+   *  `/sticky-model`'s validation gate. A GETTER so a probe-discovered model is
+   *  offered/accepted without re-composing the surface. */
+  stickyModelCandidateIds?: (() => readonly string[]) | undefined
+  /** ADR-0462 / aug-28 — the session's provider, so `/sticky-model` writes the same
+   *  `<provider>:<mode>` key `/model` writes and the loop reads. */
+  stickyModelProvider?: string | undefined
   /** ADR-0291 — `/focus-chain`: authoritative session-owned tracker slot. */
   focusChain?: { readonly tracker: FocusChainPort; readonly reinjectEveryN?: number } | undefined
   /** Back-compat alias for older tests/callers; prefer `focusChain`. */
@@ -495,6 +499,7 @@ const maybeStickyModel = (
   if (args.stickyModelStore === undefined) return undefined
   return buildStickyModelAdapter({
     store: args.stickyModelStore,
+    ...(args.stickyModelProvider !== undefined ? { provider: args.stickyModelProvider } : {}),
     ...(args.stickyModelCandidateIds !== undefined
       ? { candidateIds: args.stickyModelCandidateIds }
       : {}),

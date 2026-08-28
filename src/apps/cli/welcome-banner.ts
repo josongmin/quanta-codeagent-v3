@@ -22,6 +22,7 @@
  *    `help-keybind-truth.hellgate`.
  */
 
+import { escapeBodyForLine, sanitizeLogText } from "@/shared"
 import { cyan, dim, gray, green, magenta, renderBox, yellow } from "@/ui/ui-helpers"
 import pkg from "../../../package.json" with { type: "json" }
 import { KB_CANCEL_TURN, KB_MODE_CYCLE, KB_QUIT } from "./keybind-truth"
@@ -87,6 +88,12 @@ export const buildWelcomeInfo = (
   setup: WelcomeSetupView,
   home: string | undefined,
   gates?: WelcomeGateView,
+  /** aug-27 — the model this session will ACTUALLY run when a persisted
+   *  `/model` pick overrides the boot model (the host resolves it from the sticky
+   *  snapshot; see `repl/sticky-model-boot.ts`). Absent ⇒ `setup.model`, so every
+   *  caller that has no sticky store is byte-identical. Passing it is what keeps
+   *  the banner from announcing a model the first turn will not use. */
+  effectiveModel?: string,
 ): WelcomeBannerInfo => {
   let effort: string | undefined
   try {
@@ -96,7 +103,7 @@ export const buildWelcomeInfo = (
   }
   return {
     provider: setup.provider,
-    model: setup.model,
+    model: effectiveModel !== undefined && effectiveModel.length > 0 ? effectiveModel : setup.model,
     mode: setup.mode,
     ...(effort !== undefined ? { effort } : {}),
     cwd: setup.cwd,
@@ -144,7 +151,12 @@ const affordanceRows = (info: WelcomeBannerInfo): string[] => {
 export const renderWelcomeBanner = (info: WelcomeBannerInfo): string => {
   const version = info.version ?? QUANTA_VERSION
 
-  const modelSegments = [green(info.model), gray(info.provider)]
+  // aug-28 SECURITY — `info.model` can be the persisted sticky pick, i.e. an
+  // UNTRUSTED string from a file any local process can write, painted at the very
+  // first frame with no user interaction. Sanitize + fold newlines so it cannot
+  // clear the screen, retitle the terminal, or break out of the box to forge a
+  // prompt line (measured PoC did all three).
+  const modelSegments = [green(escapeBodyForLine(sanitizeLogText(info.model))), gray(info.provider)]
   if (info.effort !== undefined && info.effort.length > 0) {
     modelSegments.push(dim(`effort ${info.effort}`))
   }

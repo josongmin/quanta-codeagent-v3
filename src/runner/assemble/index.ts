@@ -32,6 +32,7 @@ export {
   type CredentialSourceInput,
   composeLLMCore,
   DEFAULT_MODEL,
+  decorateSwappableModelPort,
   type EnvLike,
   type LlmAssembleInput,
   type LlmTransportSelection,

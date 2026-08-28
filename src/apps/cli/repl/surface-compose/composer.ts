@@ -46,6 +46,13 @@ export const composeSurfaceWires = (
     composerHandle: mutable.composerHandle,
     textInbox: mutable.textInbox,
     runtimeFacadeCompose,
+    // aug-28 — the `/model` adapter the live dispatcher installs. Exposed so a
+    // wiring proof can read what the PICKER actually offers (its `candidates()`)
+    // instead of re-deriving it from a hand-built slot; the surface itself does
+    // not consume this field.
+    ...(mutable.modelWire.modelAdapter !== undefined
+      ? { modelAdapter: mutable.modelWire.modelAdapter }
+      : {}),
     setReplaceMessages: mutable.setReplaceMessages,
     ...(mutable.sessionSwitchWire === undefined
       ? {}

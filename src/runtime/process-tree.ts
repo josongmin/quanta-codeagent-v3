@@ -14,6 +14,19 @@
  * NEVER throws into a caller (an already-dead pid is fine), so it can be wired
  * straight into `escalatingKill`'s kill/grace closures without a guard.
  *
+ * ROOT-PID VALIDITY is enforced HERE, in the primitive — callers need no guard
+ * of their own (they used to hand-roll one, and one of the four forgot). A
+ * `rootPid` that is not a POSITIVE INTEGER is refused before the walk starts.
+ * MEASURED, with the shipped `parsePsTable` against a live `ps -A -o pid=,ppid=`:
+ * `signalTree(0)` reached **596 of 596 process-table rows** — pid 1 (launchd) and
+ * the measuring process INCLUDED. Because the ppid-walk climbs to launchd, pid 0
+ * is not merely "the caller's process group"; it enumerates the WHOLE process
+ * table, and `safeSend` swallows every error, so the self-nuke would be SILENT.
+ * Negative roots are the POSIX signal-a-process-GROUP form, which this ppid-walk
+ * adapter was deliberately never designed to deliver (see the (A) fast-path note
+ * below). Bun keeps `proc.pid` positive after exit (measured), so no live path is
+ * known to reach 0 — this is DEFENCE IN DEPTH, not a patched live exploit.
+ *
  * We ship ONLY the portable **ppid-walk** adapter (RFC §2.1 (B)): a
  * process-group/negative-pgid fast-path (A) is deliberately NOT shipped because
  * we cannot confirm Bun.spawn establishes group leadership (no `detached`
@@ -59,7 +72,9 @@ export type ProcessTableProvider = () => readonly ProcessRow[]
 export type SignalSender = (pid: number, signal: TreeSignal) => void
 
 /** Kill a process AND all of its descendants. Idempotent + no-throw — an
- *  already-dead tree is a successful no-op. */
+ *  already-dead tree is a successful no-op. A `rootPid` that is not a POSITIVE
+ *  INTEGER is refused (logged, not thrown) by the primitive itself, so no caller
+ *  needs its own `pid > 0` guard. */
 export interface ProcessTreeKiller {
   signalTree(rootPid: number, signal: TreeSignal): void
 }
@@ -100,6 +115,23 @@ export const createPpidWalkKiller = (deps: PpidWalkDeps): ProcessTreeKiller => {
   }
 
   const signalTree = (rootPid: number, signal: TreeSignal): void => {
+    // Refuse a root that is not a positive integer BEFORE any enumeration or
+    // signal. pid 0 would signal the entire process table (measured: 596/596
+    // rows incl. launchd and self); a negative pid is the POSIX process-GROUP
+    // form this adapter does not implement; NaN/±Infinity/fractional pids are
+    // meaningless to `process.kill`. Refusal is REPORTED, never thrown, so the
+    // no-throw teardown contract holds. Reporting goes through this module's
+    // ordinary `logger.warn` channel — the same one as the neighbouring
+    // `read_descendants_failed` warn — which is NOT unconditionally visible:
+    // `writeStderr` is a no-op until the composition root installs a terminal-IO
+    // sink, and repeated warns on one label are rate-limited. So treat this as
+    // "diagnosable where logging is wired", not as a guaranteed alarm; the
+    // load-bearing part is the REFUSAL itself, which is unconditional.
+    if (!Number.isInteger(rootPid) || rootPid <= 0) {
+      logger.warn("process-tree.invalid_root_pid", { rootPid, signal })
+      return
+    }
+
     const descendantsBefore = readDescendants(rootPid, readTable)
 
     // Root first among signals — stop new forks before signalling descendants.

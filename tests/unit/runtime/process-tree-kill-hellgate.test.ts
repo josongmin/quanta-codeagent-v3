@@ -27,6 +27,66 @@ const fakeTable: ProcessTableProvider = () => [
   { pid: 600, ppid: 500 },
 ]
 
+/**
+ * F1 — the ROOT-PID VALIDITY guard lives in the PRIMITIVE, not in the callers.
+ *
+ * MEASURED BLAST RADIUS (live `ps -A -o pid=,ppid=` through the shipped
+ * `parsePsTable` + `createPpidWalkKiller`, recording sendSignal): `signalTree(0)`
+ * signalled **596 of 596 process-table rows** — pid 1 (launchd) and the measuring
+ * process itself INCLUDED. The ppid-walk reaches launchd, so pid 0 does not mean
+ * "the caller's process group" (the older, understated comment): it enumerates
+ * the ENTIRE process table. `safeSend` swallows every error, so it is SILENT.
+ *
+ * Three of the four `signalTree` call sites hand-rolled a `pid > 0` guard;
+ * `runner/batch/eval/exec.ts` checked only `pid === undefined`, so 0 passed. The
+ * fix puts the guard in `signalTree` itself so all four are correct BY
+ * CONSTRUCTION. Red-on-injection: delete the guard and `readTable` is consulted
+ * for pid 0, making the "table never read" assertions below fail.
+ *
+ * HONEST CLASSIFICATION (do not inflate): Bun keeps `proc.pid` POSITIVE after
+ * exit (measured: 28496 live, 28496 after `await proc.exited`), so no live call
+ * path is known to reach 0. This is DEFENCE IN DEPTH, not a live exploit.
+ */
+describe("F1 — signalTree validates rootPid in the primitive", () => {
+  /** A killer whose table provider RECORDS whether it was consulted at all. */
+  const probe = () => {
+    const signalled: number[] = []
+    let tableReads = 0
+    const killer = createPpidWalkKiller({
+      readTable: () => {
+        tableReads++
+        return fakeTable()
+      },
+      sendSignal: (pid) => {
+        signalled.push(pid)
+      },
+    })
+    return { killer, signalled, reads: () => tableReads }
+  }
+
+  // Every non-positive / non-integral root is refused. 0 is the catastrophic one
+  // (whole process table); negatives are the POSIX "signal a process GROUP" form,
+  // which this ppid-walk killer has never been designed to deliver.
+  for (const bad of [0, -1, -100, Number.NaN, 1.5, Number.POSITIVE_INFINITY]) {
+    test(`rootPid ${String(bad)} is refused: no signal sent, table never read`, () => {
+      const { killer, signalled, reads } = probe()
+      killer.signalTree(bad, "SIGKILL")
+      expect(signalled).toEqual([]) // nothing signalled — not even the root
+      expect(reads()).toBe(0) // the ppid-walk never even enumerated
+    })
+  }
+
+  // PAIRED CONTROL — the guard must not be satisfied the lazy way (refusing
+  // everything / short-circuiting the killer). A VALID root still reaps its
+  // whole tree, and the table is still read TWICE (pre- and post-root snapshot).
+  test("PAIRED CONTROL: a valid rootPid still walks and signals the whole tree", () => {
+    const { killer, signalled, reads } = probe()
+    killer.signalTree(100, "SIGTERM")
+    expect(signalled).toEqual([100, 200, 300])
+    expect(reads()).toBe(2) // pre-root + post-root snapshots both taken
+  })
+})
+
 describe("createPpidWalkKiller — whole-tree signal (D1)", () => {
   test("signals the root FIRST, then every descendant (BFS), and nothing outside the tree", () => {
     const signalled: Array<{ pid: number; signal: string }> = []
@@ -187,12 +247,16 @@ describe("escalatingKill wired with a ProcessTreeKiller (D1 wiring)", () => {
     disarm()
   })
 
-  test("pid 0 NEVER routes through signalTree (would signal the caller's group)", () => {
-    // POSIX `process.kill(0, …)` signals EVERY process in the CALLER's process
-    // group — signalTree(0) would self-terminate the agent. A child whose pid is
-    // 0 (defensive; Bun never yields it for a live child) MUST fall back to the
-    // single-PID proc.kill(), matching the pty-backend's explicit `pid > 0`
-    // guard. Red-on-injection: drop `&& proc.pid > 0` and signalTree(0) fires.
+  test("pid 0 NEVER routes through signalTree (falls back to single-PID kill)", () => {
+    // The blast radius is BIGGER than the old "the caller's process group" note
+    // claimed: the ppid-walk climbs to launchd, so signalTree(0) enumerates the
+    // WHOLE process table (measured on live `ps`: 596 of 596 rows, pid 1 and the
+    // measuring process included) and `safeSend` swallows every error, so it is
+    // silent. `signalTree` now refuses a non-positive root itself, so this test
+    // no longer guards against a self-nuke — it pins the FALLBACK CHOICE: a
+    // 0-pid child must degrade to the legacy single-PID proc.kill() (some
+    // teardown) rather than to the tree killer's refusal (NO teardown).
+    // Red-on-injection: drop `&& proc.pid > 0` and directKills goes to 0.
     const calls: Array<{ pid: number; signal: string }> = []
     const killer: ProcessTreeKiller = {
       signalTree: (pid, signal) => calls.push({ pid, signal }),

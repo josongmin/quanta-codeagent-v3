@@ -1,4 +1,4 @@
-import { afterEach, beforeAll, beforeEach, describe, expect, mock, test } from "bun:test"
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, mock, test } from "bun:test"
 import {
   createPermissionStore,
   type PermissionStore,
@@ -456,14 +456,22 @@ beforeAll(async () => {
   rawInternalModule = await import("../../../../src/apps/cli/internal")
   await installDefaultInternalMock()
 
-  // Stub @/agent — buildSystemPrompt + RetryingLLM are reached by setupSession.
+  // Stub @/agent — ONLY `buildSystemPrompt` (setupSession reaches it and we do not
+  // want a real prompt build here).
+  //
+  // aug-28: this used to ALSO replace `RetryingLLM` with `class { generate }`. That
+  // was both unnecessary — the inner port is already stubbed by the `buildLLM` mock
+  // above, and `RetryingLLM` only WRAPS it — and actively harmful: `mock.module` is
+  // PROCESS-GLOBAL, bun's `mock.restore()` does not undo it, and (measured) mocking
+  // a BARREL also poisons deep imports of the same symbol (`@/agent/retry`). So the
+  // shape-less stub leaked into every later file in the run, where a composition
+  // root that legitimately builds a `RetryingLLM` at compose time (the `/model`
+  // candidate ports) silently produced a port with no `model`/`stream` — surfacing
+  // as an unrelated failure two directories away. Keep barrel mocks minimal.
   const origAgent = await import("@/agent")
   await mock.module("@/agent", () => ({
     ...origAgent,
     buildSystemPrompt: () => "stub-system-prompt",
-    RetryingLLM: class {
-      generate = async (): Promise<{ content: never[] }> => ({ content: [] })
-    },
   }))
 
   // Stub status bar — installStatusBar would mutate TTY otherwise.
@@ -499,6 +507,19 @@ afterEach(() => {
 })
 afterEach(async () => {
   await installDefaultInternalMock()
+})
+
+// aug-28 — best-effort restore when this FILE is done. MEASURED CAVEAT: bun's
+// `mock.restore()` resets FUNCTION mocks but does NOT undo `mock.module`, and
+// module mocks are PROCESS-GLOBAL — so this file's `@/agent` replacement (whose
+// `RetryingLLM` stub carries no `stream`/identity) still leaks into every later
+// file in the same `bun test` process. That leak surfaced far away as "the picked
+// model has no `.model`" when a composition root legitimately built a
+// `RetryingLLM` at compose time. Until bun can undo a module mock, production code
+// that must survive this imports the class from its DEEP module (`@/agent/retry`)
+// rather than the mocked barrel — see `src/runner/assemble/llm.ts`.
+afterAll(() => {
+  mock.restore()
 })
 
 // Spy on process.on + remember handlers so SIGINT registration is observable

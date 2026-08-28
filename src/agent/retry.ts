@@ -222,6 +222,19 @@ export class RetryingLLM implements LLMPort {
   readonly surfaceId?: LlmSurfaceId
   readonly transportId?: LlmTransportId
   readonly authMode?: string
+  /** aug-27 — forward the CONTEXT-WINDOW key too. This class is on EVERY CLI
+   *  stack, and it never copied this field, so an adapter that pinned
+   *  `<model>-1m` (the granted 1M-token beta window, ADR-0505) had it eaten here:
+   *  compaction then resolved the 200k default and folded history ~4x too early.
+   *  Surfaced by the decorator capability guard
+   *  (`tests/unit/llm/port-identity-capability-guard.test.ts`). */
+  readonly contextWindowKey?: string
+  /** aug-27 — forward the wrapped port's model-catalog probe. The CLI ALWAYS
+   *  wraps its adapter in this class, so a dropped `listModels` here made the
+   *  `/model` picker blind to the account's real model list (it could only ever
+   *  offer the boot model). Re-bound to `inner` (the adapters implement it as a
+   *  `this`-reading method), and absent when the inner port has none. */
+  readonly listModels?: () => Promise<readonly string[]>
   private readonly inner: LLMPort
   private readonly maxRetries: number
   private readonly baseDelayMs: number
@@ -238,12 +251,18 @@ export class RetryingLLM implements LLMPort {
     if (innerModel !== undefined) this.model = innerModel
     const innerProvider = opts.inner.provider
     if (innerProvider !== undefined) this.provider = innerProvider
+    const innerWindowKey = opts.inner.contextWindowKey
+    if (innerWindowKey !== undefined) this.contextWindowKey = innerWindowKey
     const innerSurfaceId = opts.inner.surfaceId
     if (innerSurfaceId !== undefined) this.surfaceId = innerSurfaceId
     const innerTransportId = opts.inner.transportId
     if (innerTransportId !== undefined) this.transportId = innerTransportId
     const innerAuthMode = opts.inner.authMode
     if (innerAuthMode !== undefined) this.authMode = innerAuthMode
+    const innerListModels = opts.inner.listModels
+    if (innerListModels !== undefined) {
+      this.listModels = async () => await innerListModels.call(opts.inner)
+    }
     this.maxRetries = opts.maxRetries ?? DEFAULT_MAX_RETRIES
     this.baseDelayMs = opts.baseDelayMs ?? DEFAULT_BASE_DELAY_MS
     const signal = opts.signal

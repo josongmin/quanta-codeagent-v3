@@ -429,31 +429,62 @@ describe("session envelope hell — malformed trailing line surfaced, never sile
 /* Scenario 5 — streaming 10,000 records, memory-bounded               */
 /* ------------------------------------------------------------------ */
 
+/**
+ * Write `n` `token_count` records to `path` as ONE append stream.
+ *
+ * Uses the lower-level `encodeSessionLine` rather than `appendEnvelope` — it
+ * skips the per-write open()/close() ceremony by batching into one open, and
+ * the on-disk shape is byte-identical (the same encoded lines, same order,
+ * concatenated).
+ *
+ * CHUNKED, not one awaited `fh.write()` per record. Measured on this file:
+ * 10,000 awaited single-line writes cost ~8.8s of pure FIXTURE SETUP while the
+ * thing actually under test — `iterateSessionFile` streaming the result back —
+ * costs ~1.0s. The scenario therefore blew the 5s default `bun test` timeout
+ * (the CI pyramid's `bun test tests/integration` passes no `--timeout`) on
+ * setup that asserts nothing. Chunking is the fix rather than a longer timeout:
+ * the read side, which is what "memory bounded" refers to, is untouched, and
+ * CHUNK_LINES bounds the writer's own peak buffer too instead of materialising
+ * one 10k-line string.
+ *
+ * Lives OUTSIDE the test body deliberately: inlined, its loop + flush branch
+ * pushed the test's cognitive complexity past the lint-debt ceiling, and the
+ * ceiling may only go down.
+ */
+const CHUNK_LINES = 1_000
+
+const writeTokenCountFixture = async (path: string, n: number): Promise<void> => {
+  const fh = await open(path, "a")
+  try {
+    let chunk = ""
+    for (let i = 0; i < n; i += 1) {
+      const ev: EventMsgRecord = {
+        type: "event_msg",
+        schema_version: SESSION_ENVELOPE_VERSION,
+        ts: isoAt(i),
+        turn_id: `t-${i % 32}`,
+        kind: "token_count",
+        input_tokens: i,
+        output_tokens: i,
+      }
+      chunk += encodeSessionLine(ev)
+      if ((i + 1) % CHUNK_LINES === 0) {
+        await fh.write(chunk)
+        chunk = ""
+      }
+    }
+    if (chunk !== "") await fh.write(chunk)
+  } finally {
+    await fh.close()
+  }
+}
+
 describe("session envelope hell — streaming 10,000 records with running counter only", () => {
   test("exact 10,000 read-back; we never materialise the full array", async () => {
     const sessionId = "stream-10k"
     const N = 10_000
-    // Use the lower-level appendSessionLine + encodeSessionLine for speed —
-    // skips the per-write open()/close() ceremony of appendEnvelope by
-    // batching into one open. Equivalent on-disk shape.
     const path = sessionEnvelopePath(sessionId)
-    const fh = await open(path, "a")
-    try {
-      for (let i = 0; i < N; i += 1) {
-        const ev: EventMsgRecord = {
-          type: "event_msg",
-          schema_version: SESSION_ENVELOPE_VERSION,
-          ts: isoAt(i),
-          turn_id: `t-${i % 32}`,
-          kind: "token_count",
-          input_tokens: i,
-          output_tokens: i,
-        }
-        await fh.write(encodeSessionLine(ev))
-      }
-    } finally {
-      await fh.close()
-    }
+    await writeTokenCountFixture(path, N)
 
     let count = 0
     let okCount = 0

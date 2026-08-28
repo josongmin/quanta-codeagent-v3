@@ -55,6 +55,7 @@
  */
 
 import { errMessage, LLMError, type LLMProvider, logger } from "@/shared"
+import { forwardPortIdentity } from "./port-identity"
 import type { LLMPort } from "./ports"
 import { defaultHashRequest } from "./replay/jsonl-store"
 import type { StreamEvent, StreamInput } from "./types"
@@ -282,12 +283,7 @@ export const withEmptyStreamCircuitBreaker = (
   }
 
   const port: LLMPort = {
-    ...(inner.model !== undefined ? { model: inner.model } : {}),
-    ...(inner.contextWindowKey !== undefined ? { contextWindowKey: inner.contextWindowKey } : {}),
-    ...(inner.provider !== undefined ? { provider: inner.provider } : {}),
-    ...(inner.surfaceId !== undefined ? { surfaceId: inner.surfaceId } : {}),
-    ...(inner.transportId !== undefined ? { transportId: inner.transportId } : {}),
-    ...(inner.authMode !== undefined ? { authMode: inner.authMode } : {}),
+    ...forwardPortIdentity(inner),
     stream(input: StreamInput): AsyncIterable<StreamEvent> {
       const route = keyOf(input)
       // DECAYED read: a route that latched at K but whose last empty was longer

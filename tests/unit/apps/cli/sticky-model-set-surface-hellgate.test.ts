@@ -76,8 +76,17 @@ describe("ADR-0462 follow-up — /sticky-model SET surface hellgate", () => {
   test("CASE-4: adapter surfaces store write failure as typed write-error (never throws)", async () => {
     const failing: StickyModelStore = {
       get: async () => undefined,
+      // The port's sync read (aug-28) — REQUIRED, so a double cannot silently
+      // omit the method every display now consumes.
+      peek: () => undefined,
       load: async () => ({ ok: true as const, snapshot: {} }),
       set: async () => ({
+        ok: false as const,
+        error: new StickyModelWriteError("/tmp/sticky.json", "disk full"),
+      }),
+      // The port's REMOVAL (aug-28) — REQUIRED for the same reason `peek` is: the
+      // only front door for undoing a pick runs through it.
+      unset: async () => ({
         ok: false as const,
         error: new StickyModelWriteError("/tmp/sticky.json", "disk full"),
       }),
@@ -174,7 +183,9 @@ describe("ADR-0462 follow-up — /sticky-model SET surface hellgate", () => {
     const store = inMemoryStickyModelStore()
     const adapter = buildStickyModelAdapter({
       store,
-      candidateIds: ["opus-4", "sonnet-4", "haiku-4"],
+      // aug-28 — a GETTER (the catalog grows when the lazy probe runs, so a
+      // compose-time array froze `/sticky-model` out of probe-discovered models).
+      candidateIds: () => ["opus-4", "sonnet-4", "haiku-4"],
     })
     const ctx = mkCtx({ stickyModel: adapter }).ctx
     const hints = stickyCmd().complete?.(["plan"], "s", ctx) ?? []

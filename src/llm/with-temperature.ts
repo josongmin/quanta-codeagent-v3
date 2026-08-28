@@ -1,3 +1,4 @@
+import { forwardPortIdentity } from "./port-identity"
 import type { LLMPort } from "./ports"
 import type { StreamEvent, StreamInput } from "./types"
 
@@ -25,12 +26,7 @@ import type { StreamEvent, StreamInput } from "./types"
 export const withTemperature = (inner: LLMPort, temperature: number): LLMPort => ({
   // Delegate the descriptive surface verbatim — the decorator changes only the
   // sampling temperature, never the identity of the underlying port.
-  ...(inner.model !== undefined ? { model: inner.model } : {}),
-  ...(inner.contextWindowKey !== undefined ? { contextWindowKey: inner.contextWindowKey } : {}),
-  ...(inner.provider !== undefined ? { provider: inner.provider } : {}),
-  ...(inner.surfaceId !== undefined ? { surfaceId: inner.surfaceId } : {}),
-  ...(inner.transportId !== undefined ? { transportId: inner.transportId } : {}),
-  ...(inner.authMode !== undefined ? { authMode: inner.authMode } : {}),
+  ...forwardPortIdentity(inner),
   stream(input: StreamInput): AsyncIterable<StreamEvent> {
     // Caller-set temperature wins (per-call override > per-port default);
     // otherwise inject the wrapped value. No other field is mutated.

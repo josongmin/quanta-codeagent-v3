@@ -24,18 +24,26 @@
  * (approvalRequired ⇒ false, commit ⇒ ok) and [CLI-H1-2] (objectiveStore defined).
  */
 
-import { describe, expect, test } from "bun:test"
+import { afterEach, describe, expect, test } from "bun:test"
 import { defaultConversationCheckpointStore } from "@/agent/conversation-checkpoint"
 import { createSurfaceState } from "@/apps/cli/repl/surface-compose"
 import { composeSurfaceWires } from "@/apps/cli/repl/surface-compose/composer"
 import { asObjectiveAuthority, type ObjectivePort } from "@/objective"
+import {
+  cleanupHermeticQuantaHomes,
+  hermeticQuantaHomeEnv,
+} from "../../../_support/hermetic-quanta-home"
 import { makeFakeSessionSetup } from "./_cli-fakes"
 
+afterEach(cleanupHermeticQuantaHomes)
+
+/** Scratch Quanta home per case — `env = {}` would resolve to the developer's
+ *  real `~/.quanta` (see the helper's header). */
 const compose = (env: NodeJS.ProcessEnv = {}) => {
   const setup = makeFakeSessionSetup()
   const convStore = defaultConversationCheckpointStore()
   const state = createSurfaceState({ imageQueue: undefined, rewindState: undefined, history: [] })
-  return composeSurfaceWires(setup, state, env, { convStore })
+  return composeSurfaceWires(setup, state, hermeticQuantaHomeEnv(env), { convStore })
 }
 
 const authorityOf = (port: ObjectivePort) => asObjectiveAuthority(port)

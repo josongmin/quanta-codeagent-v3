@@ -1,4 +1,5 @@
 import type { AgentConfig } from "@/agent"
+import { effectiveModelOf } from "@/agent/effective-model"
 import { isIdentityMode } from "@/agent/identity"
 import { isToolProfileName } from "@/agent/tool-profile"
 import type {
@@ -356,7 +357,14 @@ const buildSessionHostDescription = (
     return posture !== undefined ? { posture } : {}
   })(),
   messages: [...args.options.history],
-  ...(base.llm.model !== undefined ? { modelSlug: base.llm.model } : {}),
+  // aug-28 — the EFFECTIVE model, not the boot one: this projection is what the
+  // attach pill, the SDK `session.model` and the web `/state`+`/status` readouts
+  // all render, and every one of them kept naming the boot model after a `/model`
+  // or `set_model` switch. See `@/agent/effective-model`.
+  ...((): { modelSlug?: string } => {
+    const slug = effectiveModelOf(base)
+    return slug !== undefined ? { modelSlug: slug } : {}
+  })(),
 })
 
 const createRuntimeSessionHost = (args: {

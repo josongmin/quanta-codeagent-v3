@@ -27,6 +27,9 @@ export interface SessionRuntimeConfig {
   readonly homeDir: string
   readonly provider: Provider
   readonly model: string
+  /** aug-28 — true when `QUANTA_MODEL` (the `--model` surface) named the model for
+   *  this invocation, so the surface skips the persisted sticky pick. */
+  readonly modelPinnedExplicitly: boolean
   readonly mode: PermissionMode
   readonly sandboxProfile: ReviewerSandboxProfile
   readonly maxTurns: number
@@ -69,6 +72,11 @@ export const readSessionRuntimeConfig = (): SessionRuntimeConfig => {
     homeDir: process.env.HOME ?? "",
     provider,
     model: env("QUANTA_MODEL", DEFAULT_MODEL[provider]),
+    // aug-28 — did the OPERATOR pin the model for THIS invocation? A persisted
+    // `/model` pick must not silently override an explicit pin: `QUANTA_MODEL=x
+    // quanta "…"` in CI, cron or a git hook otherwise ran whatever a human last
+    // picked interactively, with no display (the one-shot path paints no banner).
+    modelPinnedExplicitly: (process.env.QUANTA_MODEL ?? "").trim().length > 0,
     mode: env("QUANTA_PERMISSION", "default") as PermissionMode,
     sandboxProfile: parseCliReviewerSandboxProfile(process.env.QUANTA_SANDBOX),
     maxTurns: Number(env("QUANTA_MAX_TURNS", "40")),

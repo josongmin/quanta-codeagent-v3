@@ -11,6 +11,7 @@ import type {
 import type { ModeCycleStore } from "../../mode-cycle"
 import type { ConvCheckpointSlashState } from "../../rewind-conv-cmd"
 import type { SessionIoState } from "../../session-cmd"
+import type { SlashContext } from "../../slash-commands"
 import type { TextInbox } from "../../text-inbox"
 import type { BackgroundTurnPortal } from "../background-turn-portal"
 import type { ContextUsageHolder } from "../context-usage-snapshot"
@@ -36,6 +37,10 @@ export interface ReplSurfaceWires {
   readonly composerHandle: ComposerHandle
   readonly textInbox: TextInbox
   readonly runtimeFacadeCompose: RuntimeFacadeComposeOptions
+  /** aug-28 — the `/model` adapter (absent when no sticky store is wired). The
+   *  dispatcher installs it as the live `ctx.model`; exposing it here lets a
+   *  wiring proof assert what the picker OFFERS without hand-building the slot. */
+  readonly modelAdapter?: SlashContext["model"]
   readonly setReplaceMessages: (fn: (msgs: ReadonlyArray<Message>) => Promise<void>) => void
   readonly setSwitchSession?: SessionSwitchWire["setSwitchSession"]
   readonly setSideConversationStart: (

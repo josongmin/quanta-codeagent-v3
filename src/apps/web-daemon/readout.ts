@@ -25,17 +25,26 @@
  * composition root threads the accessor): `/agents` (subagent TaskRegistry),
  * `/plan` (session plan store), `/skills` (disk discovery), `/memory`
  * (durable store, read-only), `/cost` (server-side turn-usage fold), `/context`
- * (onPromptAssembled usage holder). SKIPPED with honest copy naming what is
- * missing on THIS surface: `/mcp` (the daemon composes no MCP bridge), `/why`
- * (needs the session JSONL recorder + a one-shot LLM meta-query — this channel
- * is read-only and makes no LLM calls), `/branches` (branch_search is not
- * composed on the web surface).
+ * (onPromptAssembled usage holder), `/doctor` (store-health report), `/mcp` (the
+ * live MCP server rows, once the root threads the accessor — this list was stale:
+ * `/mcp` moved from SKIPPED to source-backed and the docblock kept saying "the
+ * daemon composes no MCP bridge"), `/model` (the sticky-model store + provider
+ * catalog behind `set_model`). SKIPPED with honest copy naming what is missing on
+ * THIS surface: `/why` (needs the session JSONL recorder + a one-shot LLM
+ * meta-query — this channel is read-only and makes no LLM calls), `/branches`
+ * (branch_search is not composed on the web surface).
+ *
+ * The three lists below are the SSOT for that vocabulary in both directions: the
+ * browser palette must offer exactly their union (guarded by
+ * `tests/unit/apps/web-daemon/readout-slug-parity-hellgate.test.ts`), which is why
+ * this prose can only ever be a summary of them — trust the tuples, not the text.
  */
 import type { ContextUsageBreakdown } from "@/agent/context/usage-breakdown"
 import type { Plan, TodoItem } from "@/agent/plan/types"
 import type { CapabilityManifest, SessionSnapshotLite, SessionStateView } from "@/protocol/session"
 import type { StoreHealthReport } from "@/session"
 import { errMessage } from "@/shared"
+import { renderWebModelReadout } from "./web-model-switch"
 
 export interface ReadoutResult {
   /** Normalized command name (alias-resolved, e.g. `caps` → `capabilities`). */
@@ -121,6 +130,12 @@ export interface WebReadoutSources {
   /** P4 (jul-11, UUX-4-14) — live MCP server list + health, now that the daemon
    *  composes MCP from @/host/mcp-composition. Absent ⇒ honest missing line. */
   readonly mcp?: () => readonly McpServerRow[]
+  /** aug-27 — the model READ half of the web model switch: the effective model
+   *  (persisted pick, else boot) + every candidate the daemon can swap to. The
+   *  accessor AWAITS the provider-catalog probe, so opening this readout is what
+   *  populates the list (the daemon pays no boot-time network call). The WRITE
+   *  half is the `controlRequest` `set_model` frame. Absent ⇒ honest missing line. */
+  readonly model?: () => Promise<{ readonly current: string; readonly ids: readonly string[] }>
   /** Injectable clock for deterministic age rendering under test. */
   readonly now?: () => number
 }
@@ -137,6 +152,7 @@ export const SOURCE_BACKED_READOUTS = [
   "context",
   "doctor",
   "mcp",
+  "model",
 ] as const
 
 /** Readouts this surface deliberately does NOT serve, with the honest reason
@@ -152,6 +168,18 @@ const SKIPPED_READOUT_COPY: Readonly<Record<string, string>> = {
 }
 
 export const SKIPPED_READOUTS: readonly string[] = Object.keys(SKIPPED_READOUT_COPY)
+
+/** The readouts served straight from the session SNAPSHOT (no injected accessor).
+ *  Explicit (aug-28) because it is the third leg of this surface's readout
+ *  vocabulary — the browser palette must offer exactly
+ *  `SOURCE_BACKED ∪ SNAPSHOT_SERVED ∪ SKIPPED`, and a hand-copied literal in the
+ *  frontend had already drifted. Load-bearing, not decorative: {@link renderReadout}
+ *  dispatches through {@link SNAPSHOT_RENDERERS}, whose `Record` over this tuple is
+ *  compile-time exhaustive. */
+export const SNAPSHOT_SERVED_READOUTS = ["state", "capabilities"] as const
+
+/** Aliases the route accepts for a canonical readout name. */
+export const READOUT_ALIASES: Readonly<Record<string, string>> = { caps: "capabilities" }
 
 /** Copy for a source-backed readout whose accessor is absent at runtime —
  *  names the exact missing composition piece (never a bare "not wired"). */
@@ -173,6 +201,10 @@ const MISSING_SOURCE_COPY: Readonly<Record<(typeof SOURCE_BACKED_READOUTS)[numbe
   doctor:
     "/doctor: session-store health probe not composed " +
     "(the doctor accessor was not threaded on this daemon)",
+  model:
+    "/model: the model switch was not composed on this daemon " +
+    "(no sticky-model store + candidate catalog were threaded, so there is " +
+    "nothing to list and set_model would not land)",
   mcp:
     "/mcp: no MCP servers configured for this daemon " +
     "(no .mcp.json entries, or the mcp accessor was not threaded)",
@@ -335,18 +367,24 @@ const renderContext = (view: ContextUsageBreakdown | undefined): string => {
  * Source-backed rendering happens in {@link resolveReadout}; this pure form is
  * the sources-absent projection of the same contract.
  */
+/** The snapshot-served renderers, keyed by {@link SNAPSHOT_SERVED_READOUTS}. A full
+ *  `Record` over the tuple, so adding a name to that list without a renderer here
+ *  is a COMPILE error (same drift-guard shape as {@link LIVE_READOUTS}). */
+const SNAPSHOT_RENDERERS: Readonly<
+  Record<(typeof SNAPSHOT_SERVED_READOUTS)[number], (s: SessionSnapshotLite) => string>
+> = {
+  state: (s) => renderState(s.state),
+  capabilities: (s) => renderCapabilities(s.capabilities),
+}
+
 export const renderReadout = (name: string, snapshot: SessionSnapshotLite): ReadoutResult => {
-  const n = name.trim().toLowerCase()
-  if (n === "capabilities" || n === "caps") {
-    return {
-      name: "capabilities",
-      output: renderCapabilities(snapshot.capabilities),
-      isError: false,
-      wired: true,
-    }
-  }
-  if (n === "state") {
-    return { name: "state", output: renderState(snapshot.state), isError: false, wired: true }
+  const raw = name.trim().toLowerCase()
+  const n = READOUT_ALIASES[raw] ?? raw
+  const snapshotRenderer = (
+    SNAPSHOT_RENDERERS as Record<string, ((s: SessionSnapshotLite) => string) | undefined>
+  )[n]
+  if (snapshotRenderer !== undefined) {
+    return { name: n, output: snapshotRenderer(snapshot), isError: false, wired: true }
   }
   const skipped = SKIPPED_READOUT_COPY[n]
   if (skipped !== undefined) {
@@ -443,6 +481,7 @@ const LIVE_READOUTS: Readonly<Record<(typeof SOURCE_BACKED_READOUTS)[number], Li
   context: (s) => (s.context === undefined ? undefined : renderContext(s.context())),
   doctor: (s) => (s.doctor === undefined ? undefined : mapAwaited(s.doctor(), renderDoctor)),
   mcp: (s) => (s.mcp === undefined ? undefined : renderMcp(s.mcp())),
+  model: (s) => (s.model === undefined ? undefined : mapAwaited(s.model(), renderWebModelReadout)),
 }
 
 /** Narrow an arbitrary readout name onto the table. A unit because it is the

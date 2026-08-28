@@ -137,6 +137,18 @@ export interface SlashContext {
         ) => Promise<
           | "ok"
           | { readonly kind: "invalid-mode"; readonly known: readonly string[] }
+          /** aug-28 — the id is not in the switchable set (nothing could run it). */
+          | { readonly kind: "unknown-model"; readonly known: readonly string[] }
+          | { readonly kind: "write-error"; readonly message: string }
+        >
+        /** aug-28 — `/sticky-model <mode> --clear`: REMOVE that mode's pick so the
+         *  session falls back to its boot model. The store had no removal at all
+         *  before, which made every pick permanent across sessions. Idempotent. */
+        readonly clear: (
+          mode: string,
+        ) => Promise<
+          | "ok"
+          | { readonly kind: "invalid-mode"; readonly known: readonly string[] }
           | { readonly kind: "write-error"; readonly message: string }
         >
       }
@@ -193,9 +205,24 @@ export interface SlashContext {
           | { readonly kind: "invalid-mode"; readonly known: readonly string[] }
           | { readonly kind: "write-error"; readonly message: string }
         >
+        /** aug-28 — `/model --clear`: REMOVE the pick for the CURRENT provider+mode
+         *  (the key `set` writes) so the session runs its boot model again. There
+         *  was NO way to un-set a pick before — one `/model <id>` persisted into
+         *  every later session for that provider+mode. Idempotent. */
+        readonly clear: () => Promise<
+          | "ok"
+          | { readonly kind: "invalid-mode"; readonly known: readonly string[] }
+          | { readonly kind: "write-error"; readonly message: string }
+        >
         readonly effortSupport: (
           id: string,
         ) => import("@/llm/provider-metadata").ModelEffortSupport | undefined
+        /** aug-27 — OPTIONAL provider-catalog probe the command AWAITS before it
+         *  lists or resolves an id, so the sync `candidates()` can reflect an
+         *  async lookup (the live model set this account may run). No-throw and
+         *  memoized by the wire; absent ⇒ the seeded candidates are the whole
+         *  set (byte-identical to the pre-probe listing). */
+        readonly refresh?: () => Promise<void>
       }
     | undefined
   /** C3 (jun-4-brief-mode RFC) — brief-mode session-posture wire. `get` returns

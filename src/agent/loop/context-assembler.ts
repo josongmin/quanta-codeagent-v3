@@ -624,6 +624,10 @@ export const emitPromptAssembled = (
       // active; `model` stays the real active id for reporting.
       max: resolveModelWindow(resolveWindowModel(config.llm, activeModel))?.contextWindow ?? 0,
       model: activeModel,
+      // aug-28 — publish the KEY the window was resolved from, so a display that
+      // needs the compaction threshold uses the same resolution instead of
+      // re-deriving it from `model` (which is the real id, not the 1M window pin).
+      windowModel: resolveWindowModel(config.llm, activeModel),
       // ADR-0538 Phase 3 — forward the fired-atom manifest (additive; absent when
       // no atom manifest was emitted, byte-identical to the pre-ADR-0538 snapshot).
       ...(policy.firedAtomIds !== undefined ? { firedAtomIds: policy.firedAtomIds } : {}),

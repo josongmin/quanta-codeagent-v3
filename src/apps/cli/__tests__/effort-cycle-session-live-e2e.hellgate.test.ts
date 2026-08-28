@@ -119,7 +119,7 @@ const liveWire = (
     store: inMemoryStickyModelStore(),
     bootModel,
     currentMode: () => "default",
-    candidateIds,
+    candidateIds: () => candidateIds,
   })
   const wire: EffortCycleWire = {
     currentModel: () => adapter.current(),

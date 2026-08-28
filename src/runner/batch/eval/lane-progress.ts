@@ -11,6 +11,7 @@
  * emit without importing an app; the CLI renderer in `src/apps/bench` subscribes.
  */
 import type { LLMPort } from "@/llm"
+import { forwardPortIdentity } from "@/llm/port-identity"
 import type { StreamEvent, StreamInput } from "@/llm/types"
 
 export interface LaneProgressEvent {
@@ -75,12 +76,7 @@ export const laneProgress = new LaneProgressBus()
 export const laneProgressPort = (inner: LLMPort, lane: string): LLMPort => {
   let turn = 0
   return {
-    ...(inner.model !== undefined ? { model: inner.model } : {}),
-    ...(inner.contextWindowKey !== undefined ? { contextWindowKey: inner.contextWindowKey } : {}),
-    ...(inner.provider !== undefined ? { provider: inner.provider } : {}),
-    ...(inner.surfaceId !== undefined ? { surfaceId: inner.surfaceId } : {}),
-    ...(inner.transportId !== undefined ? { transportId: inner.transportId } : {}),
-    ...(inner.authMode !== undefined ? { authMode: inner.authMode } : {}),
+    ...forwardPortIdentity(inner),
     stream(input: StreamInput): AsyncIterable<StreamEvent> {
       turn += 1
       const n = turn

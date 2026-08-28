@@ -35,4 +35,23 @@ export interface LLMPort {
   /** Streams a single assistant turn. The caller reconstructs the assistant
    *  message from the emitted events (see {@link assembleMessage}). */
   stream(input: StreamInput): AsyncIterable<StreamEvent>
+  /**
+   * OPTIONAL model-catalog probe — the model ids THIS credential/account is
+   * actually allowed to run. Used by the `/model` picker so its candidate set is
+   * the provider's live truth instead of a hand-maintained slug list that drifts
+   * (the exact drift `MODEL_CONTEXT_WINDOWS` already shows: it has no
+   * `gpt-5.6-terra` entry while that is the live default).
+   *
+   * Contract:
+   *   - an adapter MAY cache (the chatgpt-oauth adapter reuses its 5-minute
+   *     `/codex/models` memo; the anthropic adapter does a bare `/v1/models`),
+   *     and every CALLER should memoize — the CLI's catalog wire probes once per
+   *     session;
+   *   - it MAY throw (auth expired, offline) — every caller must treat a
+   *     rejection as "no catalog" and degrade, never as a session error;
+   *   - absent ⇒ the caller keeps whatever candidate set it was seeded with
+   *     (boot model + operator-configured ids). Adding this never breaks an
+   *     existing `LLMPort` (test doubles omit it).
+   */
+  listModels?: () => Promise<readonly string[]>
 }

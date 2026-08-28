@@ -1,4 +1,4 @@
-import { resolveAgentMode } from "@/agent"
+import type { AgentMode } from "@/agent"
 import type { StickyModelStore } from "@/agent/sticky-model"
 import { type ModelCandidate, type Provider, type StreamEvent, tryCreateLLM } from "@/llm"
 import { PATCH_SENTINELS } from "@/patch/types"
@@ -84,13 +84,21 @@ export const buildRetryCandidates = (
  * version had no test driving `composeSurfaceWires`, so the `currentMode`
  * fix could silently revert to `() => "default"` and stay green).
  *
- * Binds the SET to the SAME mode derivation the consume side reads (skill-gate
- * `readStickyModelForMode` → `resolveAgentMode(config.mode, config.planMode)`;
- * on this CLI surface `config.mode` is unset and `config.planMode === planMode`),
- * so under `--plan` the SET lands on the `'plan'` key the loop will read (else
- * `'default'`). Binding to the literal `"default"` (or the mode-cycle/posture
- * store, which drives permissionMode not config.mode) would phantom under
- * `--plan`. Absent store ⇒ adapter omitted ⇒ `/model` prints "not wired".
+ * Binds the SET to the SAME mode derivation the consume side reads: the caller
+ * passes `sticky-model-boot#liveAgentMode`, which mirrors the loop's
+ * `resolveLiveAgentMode` — the LIVE `agentModeState` cell (the shift+tab mode
+ * cycle, CLI-seeded default-ON) wins, then `mode`/`planMode`.
+ *
+ * aug-28 CORRECTION: this docblock previously asserted that the consume side was
+ * `resolveAgentMode(config.mode, config.planMode)` and that "the mode-cycle store
+ * drives permissionMode not config.mode". Both halves became false when §17
+ * packet M wired `agentModeState` from that very store, and the mismatch made a
+ * `/model` pick a silent no-op the moment the operator changed rung (and under
+ * `--plan`). Absent store ⇒ adapter omitted ⇒ `/model` prints "not wired".
+ *
+ * The candidate ids arrive as a LIVE getter over the surface's model-catalog
+ * wire (aug-27) — the same list threaded onto `AgentConfig.modelCandidates`, so
+ * every id the picker offers provably has a port on the consume side.
  *
  * NO `currentModel` getter is supplied (residual, ticket-14 finding #2). The
  * adapter's `current()` is SYNCHRONOUS, but the ONLY cross-session source of an
@@ -107,16 +115,33 @@ export const buildRetryCandidates = (
 export const buildModelAdapterWire = (args: {
   readonly stickyStore: { readonly store: StickyModelStore } | undefined
   readonly bootModel: string
-  readonly planMode: boolean
-  readonly candidateIds: readonly string[]
+  /** THE live agent-mode getter (`sticky-model-boot#liveAgentMode`) — the SAME
+   *  precedence the loop's `resolveLiveAgentMode` uses (live cell ⇒ planMode).
+   *  Passing the derivation in (rather than re-deriving from `planMode` here) is
+   *  what stops the write key and the read key from drifting when the operator
+   *  presses shift+tab. */
+  readonly currentMode: () => AgentMode
+  /** The session's provider — part of the sticky key (see `StickyModelKey`). */
+  readonly provider?: string
+  /** LIVE candidate ids — a GETTER, not a snapshot, so ids the provider-catalog
+   *  probe adds after boot appear in the picker (a boot-time array copy would
+   *  freeze the list at "boot model + QUANTA_RETRY_MODELS", which is exactly the
+   *  state where `/model` can list but never switch). */
+  readonly candidateIds: () => readonly string[]
+  /** Awaited by `/model` before it lists or resolves, so the FIRST `/model` pays
+   *  the catalog round-trip and later ones read the adapter's memo. Absent ⇒ no
+   *  probe (the seeded ids are the whole candidate set). */
+  readonly refresh?: () => Promise<void>
 }): { modelAdapter?: SlashContext["model"] } => {
   if (args.stickyStore === undefined) return {}
   return {
     modelAdapter: buildModelAdapter({
       store: args.stickyStore.store,
       bootModel: args.bootModel,
-      currentMode: () => resolveAgentMode(undefined, args.planMode),
+      currentMode: args.currentMode,
+      ...(args.provider !== undefined ? { provider: args.provider } : {}),
       candidateIds: args.candidateIds,
+      ...(args.refresh !== undefined ? { refresh: args.refresh } : {}),
     }),
   }
 }

@@ -26,7 +26,7 @@ const projectReplSlashCtxToContract = (c: ReplSlashCtx): Record<string, unknown>
   projectSlashCtx(c)
 
 /** Live inputs consumed by the surface-owned slash dispatcher. */
-type SurfaceDispatchArgs = {
+export type SurfaceDispatchArgs = {
   readonly sessionCwd: string
   readonly slashCtx: ReplSlashCtx
   readonly convCheckpointSlot: ConvCheckpointSlashState | undefined
@@ -129,7 +129,37 @@ const optionalSlashSlot = <K extends keyof SlashContext>(
 ): Partial<Pick<SlashContext, K>> =>
   value === undefined ? {} : ({ [key]: value } as Pick<SlashContext, K>)
 
-const buildLiveSlashContext = (args: SurfaceDispatchArgs): SlashContext => {
+/**
+ * aug-27 — re-stamp `/why`'s header model from the LIVE picker.
+ *
+ * `WhySlashState.model` is a STRING captured when the surface was composed (the
+ * boot model). A `/model` pick changes what the turns actually run, so left alone
+ * that header names a model the session is no longer using — the same false-claim
+ * class the welcome banner had. The live slash context is rebuilt per dispatch, so
+ * stamping it here keeps the panel honest without making the contract field a
+ * thunk (which every consumer would have to learn).
+ *
+ * Returns a SPREAD-READY fragment: `{}` when either half is absent (no picker on
+ * this surface, or no `/why` slot) ⇒ the projected value stands, byte-identical.
+ * Exported because the effect is only VISIBLE in a rendered `/why` panel, which
+ * needs a session that recorded tool calls — so the unit proof is here, at the
+ * seam, and the dispatch call site is the one-line consumer.
+ */
+export const restampWhyModel = (
+  why: SlashContext["why"] | undefined,
+  /** Narrowed to the ONE thing this needs off the picker slot (least privilege —
+   *  and it keeps the seam callable from a test without a full adapter). */
+  modelAdapter: { readonly current: () => string } | undefined,
+): Partial<Pick<SlashContext, "why">> =>
+  why === undefined || modelAdapter === undefined
+    ? {}
+    : { why: { ...why, model: modelAdapter.current() } }
+
+/** Exported (aug-28) so a wiring proof can read the context the DISPATCHER
+ *  actually builds — the `/why` model re-stamp and the `model` slot install are
+ *  otherwise only observable through a rendered panel that needs a session with
+ *  recorded tool calls. */
+export const buildLiveSlashContext = (args: SurfaceDispatchArgs): SlashContext => {
   const retry = args.retry?.()
   const automation = args.automation?.()
   return {
@@ -138,6 +168,7 @@ const buildLiveSlashContext = (args: SurfaceDispatchArgs): SlashContext => {
     cwd: args.sessionCwd,
     ...projectReplSlashCtxToContract(args.slashCtx),
     ...optionalSlashSlot("model", args.modelAdapter),
+    ...restampWhyModel(args.slashCtx.why, args.modelAdapter),
     ...optionalSlashSlot("convCheckpoint", args.convCheckpointSlot),
     sessionIo: args.sessionIo,
     ...optionalSlashSlot("contextUsage", args.contextUsage),

@@ -1,3 +1,4 @@
+import { effectiveModelOf } from "./effective-model"
 import {
   attrs,
   GEN_AI_ATTRS,
@@ -211,7 +212,10 @@ export const emitWorkMetrics = (
   ) {
     return
   }
-  const metrics = collector.finalize(cfg.llm.model)
+  // aug-28 — tag the rollup with the model that ACTUALLY ran this turn. `cfg` here
+  // is the loop's BASE config (the per-turn swap lives on `turnLlm`), so this used
+  // to attribute a switched session's whole spend to the boot model.
+  const metrics = collector.finalize(effectiveModelOf(cfg))
   cfg.workMetricsSink.emit(metrics, { turnId })
 }
 

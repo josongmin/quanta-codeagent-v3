@@ -207,6 +207,35 @@ const completionEventsForTurn = (args: {
   ]
 }
 
+/**
+ * Refresh the session's MODEL echo from the host at a turn terminal (aug-28).
+ *
+ * `KernelSessionState.modelSlug` was captured ONCE — from `host.describe()` at
+ * session creation — and it is the single source for four user-facing reports:
+ * `SessionStateView.modelSlug` (the web `/state` readout's `model` row and the CLI
+ * attach pill), `turn.completed.modelSlug` (the daemon's cumulative `/cost` fold),
+ * and the SDK's `session.model`. Once `/model` and the web `set_model` frame became
+ * real per-turn swaps, every one of those kept naming the model the session STARTED
+ * with. For `/cost` that is worse than missing: a switched session's whole spend was
+ * attributed to a model that never ran, and it looks like data.
+ *
+ * `host.describe()` reports the EFFECTIVE model (see `@/agent/effective-model`), and
+ * a TURN TERMINAL is the honest moment to read it: the claim these reports make is
+ * "the model this turn ran on". Sync + pure — `describe()` is a projection, so this
+ * costs a field read, and the reconcile mirrors `reconcileSessionPostureState`
+ * (which does the same for permission/identity/tool-profile/posture echoes).
+ *
+ * Absent on the host ⇒ the field is left exactly as it was (never overwritten with
+ * a literal `undefined`, which `exactOptionalPropertyTypes` would reject anyway).
+ */
+export const reconcileTurnModelEcho = <T extends KernelSessionState>(
+  state: T,
+  ctx: KernelDispatchContext,
+): T => {
+  const live = ctx.host.describe().modelSlug
+  return live === undefined || live.length === 0 ? state : { ...state, modelSlug: live }
+}
+
 export const onTurnCompleted = async (args: {
   readonly state: KernelSessionState
   readonly command: TurnExecutionCommand
@@ -234,14 +263,17 @@ export const onTurnCompleted = async (args: {
     ...(args.result.tokenUsage !== undefined ? { lastTokenUsage: args.result.tokenUsage } : {}),
   }
   const completionEvents = completionEventsForTurn({
-    state: completedState,
+    // The model echo is refreshed HERE (before the events are built) so
+    // `turn.completed.modelSlug` and the `session.state.updated` view it carries
+    // both name the model this turn actually ran on.
+    state: reconcileTurnModelEcho(completedState, args.ctx),
     command: args.command,
     artifacts,
     ctx: args.ctx,
   })
   const seq = completionEvents.at(-1)?.seq ?? completedState.seq
   const nextState: KernelSessionState = {
-    ...completedState,
+    ...reconcileTurnModelEcho(completedState, args.ctx),
     seq,
   }
   // B1 — persist-BUT-still-deliver: a durable-log throw here must not lose the

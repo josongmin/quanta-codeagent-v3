@@ -87,9 +87,14 @@ describe("R1-stopgap — side-agent fork kill routes through the tree-killer", (
   })
 
   test("degrades to single-PID when pid is missing (pid>0 guard, no self-signal)", () => {
-    // pid undefined ⇒ escalatingKill's `pid > 0` guard forbids signalTree (a
-    // signalTree(0) would nuke the caller's own process group) and falls back to
-    // the child's own kill — byte-identical to the legacy safe path.
+    // pid undefined ⇒ escalatingKill's `pid > 0` test selects the single-PID
+    // path. On the hazard: signalTree(0) does NOT merely "nuke the caller's
+    // process group" — the ppid-walk climbs to launchd, so it enumerates the
+    // WHOLE process table (measured on live `ps`: 596 of 596 rows, pid 1 and the
+    // measuring process included), silently, since safeSend swallows errors.
+    // signalTree now refuses a non-positive root itself; what this test pins is
+    // that the fallback is the child's own kill — byte-identical to the legacy
+    // safe path — and not the tree killer's refusal, which is no teardown.
     const cp = makeFakeCp(undefined)
     const { killer, calls } = spyKiller()
     const h = wrapChild(cp as never, killer)

@@ -8,12 +8,12 @@ stream :: obj{emit=fn}
 promptSurfaceProfile :: obj{envPosture=str:"frozen",promptPack=str:"interactive",verifyStrategy=str:"none"}
 permission :: obj{mode=str:"acceptEdits"}
 messages :: arr[]
-system :: str[20762]
+system :: str[20803]
 cwd :: str:<cwd>
 maxTurns :: num
 signal :: obj{}
 searchPipeline :: obj{search=fn}
-stickyModelStore :: obj{store=obj{get=fn,set=fn,load=fn}}
+stickyModelStore :: obj{store=obj{get=fn,set=fn,unset=fn,peek=fn,load=fn}}
 readFileState :: obj{mtimes=obj{},rangeHashes=undefined,contentDigests=undefined,rangeDedupCap=num}"
 `;
 
@@ -25,12 +25,12 @@ stream :: obj{emit=fn}
 promptSurfaceProfile :: obj{envPosture=str:"frozen",promptPack=str:"interactive",verifyStrategy=str:"none"}
 permission :: obj{mode=str:"acceptEdits"}
 messages :: arr[]
-system :: str[20762]
+system :: str[20803]
 cwd :: str:<cwd>
 maxTurns :: num
 signal :: obj{}
 searchPipeline :: obj{search=fn}
-stickyModelStore :: obj{store=obj{get=fn,set=fn,load=fn}}
+stickyModelStore :: obj{store=obj{get=fn,set=fn,unset=fn,peek=fn,load=fn}}
 readFileState :: obj{mtimes=obj{},rangeHashes=undefined,contentDigests=undefined,rangeDedupCap=num}
 modePolicy :: obj{mode=str:"interactive",permission=obj{kind=str:"reviewer-backed"},termination=obj{kind=str:"user-stop"},sandbox=obj{kind=str:"user-cwd"},output=obj{kind=str:"stdout-chat"},externalDeps=obj{kind=str:"host"},toolSurface=obj{kind=str:"full"},promptPack=obj{kind=str:"assistant"},memory=obj{kind=str:"persistent"},observation=obj{kind=str:"stream-only"},network=obj{kind=str:"open"},gitWrite=obj{kind=str:"free"},secrets=obj{kind=str:"host-env"}}
 budgetMeter :: obj{dials=obj{maxTurns=num,maxRetries=num,maxConsecutiveFailures=num},caps=obj{},exhaustion=str:"stop",clock=fn,startedAtMs=num,turns=num,modelCalls=num,toolCalls=num,shellCommands=num,testRuns=num,inputTokens=num,outputTokens=num,reasoningTokens=num,filesChanged=num,patchBytes=num,retries=num,consecutiveFailures=num,costUsdAccum=num,costUsdThisTurn=num,providerRateLimitRemainingPct=undefined}
@@ -52,12 +52,12 @@ stream :: obj{emit=fn}
 promptSurfaceProfile :: obj{envPosture=str:"frozen",promptPack=str:"interactive",verifyStrategy=str:"none"}
 permission :: obj{mode=str:"acceptEdits"}
 messages :: arr[]
-system :: str[20910]
+system :: str[20951]
 cwd :: str:<cwd>
 maxTurns :: num
 signal :: obj{}
 searchPipeline :: obj{search=fn}
-stickyModelStore :: obj{store=obj{get=fn,set=fn,load=fn}}
+stickyModelStore :: obj{store=obj{get=fn,set=fn,unset=fn,peek=fn,load=fn}}
 readFileState :: obj{mtimes=obj{},rangeHashes=undefined,contentDigests=undefined,rangeDedupCap=num}"
 `;
 
@@ -69,12 +69,12 @@ stream :: obj{emit=fn}
 promptSurfaceProfile :: obj{envPosture=str:"frozen",promptPack=str:"interactive",verifyStrategy=str:"none"}
 permission :: obj{mode=str:"acceptEdits"}
 messages :: arr[]
-system :: str[20910]
+system :: str[20951]
 cwd :: str:<cwd>
 maxTurns :: num
 signal :: obj{}
 searchPipeline :: obj{search=fn}
-stickyModelStore :: obj{store=obj{get=fn,set=fn,load=fn}}
+stickyModelStore :: obj{store=obj{get=fn,set=fn,unset=fn,peek=fn,load=fn}}
 readFileState :: obj{mtimes=obj{},rangeHashes=undefined,contentDigests=undefined,rangeDedupCap=num}
 modePolicy :: obj{mode=str:"interactive",permission=obj{kind=str:"reviewer-backed"},termination=obj{kind=str:"user-stop"},sandbox=obj{kind=str:"user-cwd"},output=obj{kind=str:"stdout-chat"},externalDeps=obj{kind=str:"host"},toolSurface=obj{kind=str:"full"},promptPack=obj{kind=str:"assistant"},memory=obj{kind=str:"persistent"},observation=obj{kind=str:"stream-only"},network=obj{kind=str:"open"},gitWrite=obj{kind=str:"free"},secrets=obj{kind=str:"host-env"}}
 budgetMeter :: obj{dials=obj{maxTurns=num,maxRetries=num,maxConsecutiveFailures=num},caps=obj{},exhaustion=str:"stop",clock=fn,startedAtMs=num,turns=num,modelCalls=num,toolCalls=num,shellCommands=num,testRuns=num,inputTokens=num,outputTokens=num,reasoningTokens=num,filesChanged=num,patchBytes=num,retries=num,consecutiveFailures=num,costUsdAccum=num,costUsdThisTurn=num,providerRateLimitRemainingPct=undefined}
@@ -96,12 +96,12 @@ stream :: obj{emit=fn}
 promptSurfaceProfile :: obj{envPosture=str:"frozen",promptPack=str:"interactive",verifyStrategy=str:"none"}
 permission :: obj{mode=str:"acceptEdits"}
 messages :: arr[]
-system :: str[20762]
+system :: str[20803]
 cwd :: str:<cwd>
 maxTurns :: num
 signal :: obj{}
 searchPipeline :: obj{search=fn}
-stickyModelStore :: obj{store=obj{get=fn,set=fn,load=fn}}
+stickyModelStore :: obj{store=obj{get=fn,set=fn,unset=fn,peek=fn,load=fn}}
 readFileState :: obj{mtimes=obj{},rangeHashes=undefined,contentDigests=undefined,rangeDedupCap=num}"
 `;
 
@@ -113,12 +113,12 @@ stream :: obj{emit=fn}
 promptSurfaceProfile :: obj{envPosture=str:"frozen",promptPack=str:"interactive",verifyStrategy=str:"none"}
 permission :: obj{mode=str:"acceptEdits"}
 messages :: arr[]
-system :: str[20762]
+system :: str[20803]
 cwd :: str:<cwd>
 maxTurns :: num
 signal :: obj{}
 searchPipeline :: obj{search=fn}
-stickyModelStore :: obj{store=obj{get=fn,set=fn,load=fn}}
+stickyModelStore :: obj{store=obj{get=fn,set=fn,unset=fn,peek=fn,load=fn}}
 readFileState :: obj{mtimes=obj{},rangeHashes=undefined,contentDigests=undefined,rangeDedupCap=num}
 modePolicy :: obj{mode=str:"interactive",permission=obj{kind=str:"reviewer-backed"},termination=obj{kind=str:"user-stop"},sandbox=obj{kind=str:"user-cwd"},output=obj{kind=str:"stdout-chat"},externalDeps=obj{kind=str:"host"},toolSurface=obj{kind=str:"full"},promptPack=obj{kind=str:"assistant"},memory=obj{kind=str:"persistent"},observation=obj{kind=str:"stream-only"},network=obj{kind=str:"open"},gitWrite=obj{kind=str:"free"},secrets=obj{kind=str:"host-env"}}
 budgetMeter :: obj{dials=obj{maxTurns=num,maxRetries=num,maxConsecutiveFailures=num},caps=obj{},exhaustion=str:"stop",clock=fn,startedAtMs=num,turns=num,modelCalls=num,toolCalls=num,shellCommands=num,testRuns=num,inputTokens=num,outputTokens=num,reasoningTokens=num,filesChanged=num,patchBytes=num,retries=num,consecutiveFailures=num,costUsdAccum=num,costUsdThisTurn=num,providerRateLimitRemainingPct=undefined}
@@ -140,12 +140,12 @@ stream :: obj{emit=fn}
 promptSurfaceProfile :: obj{envPosture=str:"frozen",promptPack=str:"interactive",verifyStrategy=str:"none"}
 permission :: obj{mode=str:"acceptEdits"}
 messages :: arr[]
-system :: str[20762]
+system :: str[20803]
 cwd :: str:<cwd>
 maxTurns :: num
 signal :: obj{}
 searchPipeline :: obj{search=fn}
-stickyModelStore :: obj{store=obj{get=fn,set=fn,load=fn}}
+stickyModelStore :: obj{store=obj{get=fn,set=fn,unset=fn,peek=fn,load=fn}}
 automationEngine :: obj{engine=obj{schedule=fn,list=fn,cancel=fn,next=fn,markRun=fn,claim=fn,finalize=fn,runs=arr[],inbox=arr[]},handler=fn,tickIntervalMs=num,onTick=fn}
 readFileState :: obj{mtimes=obj{},rangeHashes=undefined,contentDigests=undefined,rangeDedupCap=num}"
 `;
@@ -158,12 +158,12 @@ stream :: obj{emit=fn}
 promptSurfaceProfile :: obj{envPosture=str:"frozen",promptPack=str:"interactive",verifyStrategy=str:"none"}
 permission :: obj{mode=str:"acceptEdits"}
 messages :: arr[]
-system :: str[20762]
+system :: str[20803]
 cwd :: str:<cwd>
 maxTurns :: num
 signal :: obj{}
 searchPipeline :: obj{search=fn}
-stickyModelStore :: obj{store=obj{get=fn,set=fn,load=fn}}
+stickyModelStore :: obj{store=obj{get=fn,set=fn,unset=fn,peek=fn,load=fn}}
 automationEngine :: obj{engine=obj{schedule=fn,list=fn,cancel=fn,next=fn,markRun=fn,claim=fn,finalize=fn,runs=arr[],inbox=arr[]},handler=fn,tickIntervalMs=num,onTick=fn}
 readFileState :: obj{mtimes=obj{},rangeHashes=undefined,contentDigests=undefined,rangeDedupCap=num}
 modePolicy :: obj{mode=str:"interactive",permission=obj{kind=str:"reviewer-backed"},termination=obj{kind=str:"user-stop"},sandbox=obj{kind=str:"user-cwd"},output=obj{kind=str:"stdout-chat"},externalDeps=obj{kind=str:"host"},toolSurface=obj{kind=str:"full"},promptPack=obj{kind=str:"assistant"},memory=obj{kind=str:"persistent"},observation=obj{kind=str:"stream-only"},network=obj{kind=str:"open"},gitWrite=obj{kind=str:"free"},secrets=obj{kind=str:"host-env"}}
@@ -186,12 +186,12 @@ stream :: obj{emit=fn}
 promptSurfaceProfile :: obj{envPosture=str:"frozen",promptPack=str:"interactive",verifyStrategy=str:"none"}
 permission :: obj{mode=str:"acceptEdits"}
 messages :: arr[]
-system :: str[20762]
+system :: str[20803]
 cwd :: str:<cwd>
 maxTurns :: num
 signal :: obj{}
 searchPipeline :: obj{search=fn}
-stickyModelStore :: obj{store=obj{get=fn,set=fn,load=fn}}
+stickyModelStore :: obj{store=obj{get=fn,set=fn,unset=fn,peek=fn,load=fn}}
 readFileState :: obj{mtimes=obj{},rangeHashes=undefined,contentDigests=undefined,rangeDedupCap=num}"
 `;
 
@@ -203,12 +203,12 @@ stream :: obj{emit=fn}
 promptSurfaceProfile :: obj{envPosture=str:"frozen",promptPack=str:"interactive",verifyStrategy=str:"none"}
 permission :: obj{mode=str:"acceptEdits"}
 messages :: arr[]
-system :: str[20762]
+system :: str[20803]
 cwd :: str:<cwd>
 maxTurns :: num
 signal :: obj{}
 searchPipeline :: obj{search=fn}
-stickyModelStore :: obj{store=obj{get=fn,set=fn,load=fn}}
+stickyModelStore :: obj{store=obj{get=fn,set=fn,unset=fn,peek=fn,load=fn}}
 readFileState :: obj{mtimes=obj{},rangeHashes=undefined,contentDigests=undefined,rangeDedupCap=num}
 modePolicy :: obj{mode=str:"interactive",permission=obj{kind=str:"reviewer-backed"},termination=obj{kind=str:"user-stop"},sandbox=obj{kind=str:"user-cwd"},output=obj{kind=str:"stdout-chat"},externalDeps=obj{kind=str:"host"},toolSurface=obj{kind=str:"full"},promptPack=obj{kind=str:"assistant"},memory=obj{kind=str:"persistent"},observation=obj{kind=str:"stream-only"},network=obj{kind=str:"open"},gitWrite=obj{kind=str:"free"},secrets=obj{kind=str:"host-env"}}
 budgetMeter :: obj{dials=obj{maxTurns=num,maxRetries=num,maxConsecutiveFailures=num},caps=obj{},exhaustion=str:"stop",clock=fn,startedAtMs=num,turns=num,modelCalls=num,toolCalls=num,shellCommands=num,testRuns=num,inputTokens=num,outputTokens=num,reasoningTokens=num,filesChanged=num,patchBytes=num,retries=num,consecutiveFailures=num,costUsdAccum=num,costUsdThisTurn=num,providerRateLimitRemainingPct=undefined}
@@ -230,13 +230,13 @@ stream :: obj{emit=fn}
 promptSurfaceProfile :: obj{envPosture=str:"frozen",promptPack=str:"interactive",verifyStrategy=str:"none"}
 permission :: obj{mode=str:"acceptEdits"}
 messages :: arr[]
-system :: str[20762]
+system :: str[20803]
 cwd :: str:<cwd>
 maxTurns :: num
 signal :: obj{}
 networkProxy :: obj{enabled=bool:true,allowlist=arr[str:"api.github.com",str:"github.com",str:"raw.githubusercontent.com",str:"objects.githubusercontent.com",str:"codeload.github.com",str:"registry.npmjs.org",str:"registry.yarnpkg.com",str:"pypi.org",str:"files.pythonhosted.org",str:"*.githubusercontent.com"]}
 searchPipeline :: obj{search=fn}
-stickyModelStore :: obj{store=obj{get=fn,set=fn,load=fn}}
+stickyModelStore :: obj{store=obj{get=fn,set=fn,unset=fn,peek=fn,load=fn}}
 readFileState :: obj{mtimes=obj{},rangeHashes=undefined,contentDigests=undefined,rangeDedupCap=num}"
 `;
 
@@ -248,13 +248,13 @@ stream :: obj{emit=fn}
 promptSurfaceProfile :: obj{envPosture=str:"frozen",promptPack=str:"interactive",verifyStrategy=str:"none"}
 permission :: obj{mode=str:"acceptEdits"}
 messages :: arr[]
-system :: str[20762]
+system :: str[20803]
 cwd :: str:<cwd>
 maxTurns :: num
 signal :: obj{}
 networkProxy :: obj{enabled=bool:true,allowlist=arr[str:"api.github.com",str:"github.com",str:"raw.githubusercontent.com",str:"objects.githubusercontent.com",str:"codeload.github.com",str:"registry.npmjs.org",str:"registry.yarnpkg.com",str:"pypi.org",str:"files.pythonhosted.org",str:"*.githubusercontent.com"]}
 searchPipeline :: obj{search=fn}
-stickyModelStore :: obj{store=obj{get=fn,set=fn,load=fn}}
+stickyModelStore :: obj{store=obj{get=fn,set=fn,unset=fn,peek=fn,load=fn}}
 readFileState :: obj{mtimes=obj{},rangeHashes=undefined,contentDigests=undefined,rangeDedupCap=num}
 modePolicy :: obj{mode=str:"interactive",permission=obj{kind=str:"reviewer-backed"},termination=obj{kind=str:"user-stop"},sandbox=obj{kind=str:"user-cwd"},output=obj{kind=str:"stdout-chat"},externalDeps=obj{kind=str:"host"},toolSurface=obj{kind=str:"full"},promptPack=obj{kind=str:"assistant"},memory=obj{kind=str:"persistent"},observation=obj{kind=str:"stream-only"},network=obj{kind=str:"open"},gitWrite=obj{kind=str:"free"},secrets=obj{kind=str:"host-env"}}
 budgetMeter :: obj{dials=obj{maxTurns=num,maxRetries=num,maxConsecutiveFailures=num},caps=obj{},exhaustion=str:"stop",clock=fn,startedAtMs=num,turns=num,modelCalls=num,toolCalls=num,shellCommands=num,testRuns=num,inputTokens=num,outputTokens=num,reasoningTokens=num,filesChanged=num,patchBytes=num,retries=num,consecutiveFailures=num,costUsdAccum=num,costUsdThisTurn=num,providerRateLimitRemainingPct=undefined}
@@ -276,12 +276,12 @@ stream :: obj{emit=fn}
 promptSurfaceProfile :: obj{envPosture=str:"frozen",promptPack=str:"interactive",verifyStrategy=str:"none"}
 permission :: obj{mode=str:"acceptEdits"}
 messages :: arr[]
-system :: str[20762]
+system :: str[20803]
 cwd :: str:<cwd>
 maxTurns :: num
 signal :: obj{}
 searchPipeline :: obj{search=fn}
-stickyModelStore :: obj{store=obj{get=fn,set=fn,load=fn}}
+stickyModelStore :: obj{store=obj{get=fn,set=fn,unset=fn,peek=fn,load=fn}}
 prewarm :: obj{enabled=bool:true,now=fn}
 readFileState :: obj{mtimes=obj{},rangeHashes=undefined,contentDigests=undefined,rangeDedupCap=num}"
 `;
@@ -294,12 +294,12 @@ stream :: obj{emit=fn}
 promptSurfaceProfile :: obj{envPosture=str:"frozen",promptPack=str:"interactive",verifyStrategy=str:"none"}
 permission :: obj{mode=str:"acceptEdits"}
 messages :: arr[]
-system :: str[20762]
+system :: str[20803]
 cwd :: str:<cwd>
 maxTurns :: num
 signal :: obj{}
 searchPipeline :: obj{search=fn}
-stickyModelStore :: obj{store=obj{get=fn,set=fn,load=fn}}
+stickyModelStore :: obj{store=obj{get=fn,set=fn,unset=fn,peek=fn,load=fn}}
 prewarm :: obj{enabled=bool:true,now=fn}
 readFileState :: obj{mtimes=obj{},rangeHashes=undefined,contentDigests=undefined,rangeDedupCap=num}
 modePolicy :: obj{mode=str:"interactive",permission=obj{kind=str:"reviewer-backed"},termination=obj{kind=str:"user-stop"},sandbox=obj{kind=str:"user-cwd"},output=obj{kind=str:"stdout-chat"},externalDeps=obj{kind=str:"host"},toolSurface=obj{kind=str:"full"},promptPack=obj{kind=str:"assistant"},memory=obj{kind=str:"persistent"},observation=obj{kind=str:"stream-only"},network=obj{kind=str:"open"},gitWrite=obj{kind=str:"free"},secrets=obj{kind=str:"host-env"}}
@@ -322,12 +322,12 @@ stream :: obj{emit=fn}
 promptSurfaceProfile :: obj{envPosture=str:"frozen",promptPack=str:"interactive",verifyStrategy=str:"none"}
 permission :: obj{mode=str:"acceptEdits"}
 messages :: arr[]
-system :: str[20762]
+system :: str[20803]
 cwd :: str:<cwd>
 maxTurns :: num
 signal :: obj{}
 searchPipeline :: obj{search=fn}
-stickyModelStore :: obj{store=obj{get=fn,set=fn,load=fn}}
+stickyModelStore :: obj{store=obj{get=fn,set=fn,unset=fn,peek=fn,load=fn}}
 lspPrewarm :: obj{enabled=bool:true}
 readFileState :: obj{mtimes=obj{},rangeHashes=undefined,contentDigests=undefined,rangeDedupCap=num}"
 `;
@@ -340,12 +340,12 @@ stream :: obj{emit=fn}
 promptSurfaceProfile :: obj{envPosture=str:"frozen",promptPack=str:"interactive",verifyStrategy=str:"none"}
 permission :: obj{mode=str:"acceptEdits"}
 messages :: arr[]
-system :: str[20762]
+system :: str[20803]
 cwd :: str:<cwd>
 maxTurns :: num
 signal :: obj{}
 searchPipeline :: obj{search=fn}
-stickyModelStore :: obj{store=obj{get=fn,set=fn,load=fn}}
+stickyModelStore :: obj{store=obj{get=fn,set=fn,unset=fn,peek=fn,load=fn}}
 lspPrewarm :: obj{enabled=bool:true}
 readFileState :: obj{mtimes=obj{},rangeHashes=undefined,contentDigests=undefined,rangeDedupCap=num}
 modePolicy :: obj{mode=str:"interactive",permission=obj{kind=str:"reviewer-backed"},termination=obj{kind=str:"user-stop"},sandbox=obj{kind=str:"user-cwd"},output=obj{kind=str:"stdout-chat"},externalDeps=obj{kind=str:"host"},toolSurface=obj{kind=str:"full"},promptPack=obj{kind=str:"assistant"},memory=obj{kind=str:"persistent"},observation=obj{kind=str:"stream-only"},network=obj{kind=str:"open"},gitWrite=obj{kind=str:"free"},secrets=obj{kind=str:"host-env"}}
@@ -368,12 +368,12 @@ stream :: obj{emit=fn}
 promptSurfaceProfile :: obj{envPosture=str:"frozen",promptPack=str:"interactive",verifyStrategy=str:"none"}
 permission :: obj{mode=str:"acceptEdits"}
 messages :: arr[]
-system :: str[20762]
+system :: str[20803]
 cwd :: str:<cwd>
 maxTurns :: num
 signal :: obj{}
 searchPipeline :: obj{search=fn}
-stickyModelStore :: obj{store=obj{get=fn,set=fn,load=fn}}
+stickyModelStore :: obj{store=obj{get=fn,set=fn,unset=fn,peek=fn,load=fn}}
 shadowVerify :: obj{verify=fn}
 runLedger :: obj{start=fn,touch=fn,settle=fn,get=fn,list=fn,running=fn,waiting=fn,toSnapshot=fn,fromSnapshot=fn}
 approvalStateMachine :: obj{request=fn,settle=fn,expire=fn,cancel=fn,get=fn,list=fn,pending=fn,toSnapshot=fn,fromSnapshot=fn,bindObjective=fn}
@@ -389,12 +389,12 @@ stream :: obj{emit=fn}
 promptSurfaceProfile :: obj{envPosture=str:"frozen",promptPack=str:"interactive",verifyStrategy=str:"none"}
 permission :: obj{mode=str:"acceptEdits"}
 messages :: arr[]
-system :: str[20762]
+system :: str[20803]
 cwd :: str:<cwd>
 maxTurns :: num
 signal :: obj{}
 searchPipeline :: obj{search=fn}
-stickyModelStore :: obj{store=obj{get=fn,set=fn,load=fn}}
+stickyModelStore :: obj{store=obj{get=fn,set=fn,unset=fn,peek=fn,load=fn}}
 shadowVerify :: obj{verify=fn}
 runLedger :: obj{start=fn,touch=fn,settle=fn,get=fn,list=fn,running=fn,waiting=fn,toSnapshot=fn,fromSnapshot=fn}
 approvalStateMachine :: obj{request=fn,settle=fn,expire=fn,cancel=fn,get=fn,list=fn,pending=fn,toSnapshot=fn,fromSnapshot=fn,bindObjective=fn}
@@ -420,12 +420,12 @@ stream :: obj{emit=fn}
 promptSurfaceProfile :: obj{envPosture=str:"frozen",promptPack=str:"interactive",verifyStrategy=str:"none"}
 permission :: obj{mode=str:"acceptEdits"}
 messages :: arr[]
-system :: str[20762]
+system :: str[20803]
 cwd :: str:<cwd>
 maxTurns :: num
 signal :: obj{}
 searchPipeline :: obj{search=fn}
-stickyModelStore :: obj{store=obj{get=fn,set=fn,load=fn}}
+stickyModelStore :: obj{store=obj{get=fn,set=fn,unset=fn,peek=fn,load=fn}}
 permissionPatternStore :: obj{allowed=obj{},baseline=obj{}}
 readFileState :: obj{mtimes=obj{},rangeHashes=undefined,contentDigests=undefined,rangeDedupCap=num}"
 `;
@@ -438,12 +438,12 @@ stream :: obj{emit=fn}
 promptSurfaceProfile :: obj{envPosture=str:"frozen",promptPack=str:"interactive",verifyStrategy=str:"none"}
 permission :: obj{mode=str:"acceptEdits"}
 messages :: arr[]
-system :: str[20762]
+system :: str[20803]
 cwd :: str:<cwd>
 maxTurns :: num
 signal :: obj{}
 searchPipeline :: obj{search=fn}
-stickyModelStore :: obj{store=obj{get=fn,set=fn,load=fn}}
+stickyModelStore :: obj{store=obj{get=fn,set=fn,unset=fn,peek=fn,load=fn}}
 permissionPatternStore :: obj{allowed=obj{},baseline=obj{}}
 readFileState :: obj{mtimes=obj{},rangeHashes=undefined,contentDigests=undefined,rangeDedupCap=num}
 modePolicy :: obj{mode=str:"interactive",permission=obj{kind=str:"reviewer-backed"},termination=obj{kind=str:"user-stop"},sandbox=obj{kind=str:"user-cwd"},output=obj{kind=str:"stdout-chat"},externalDeps=obj{kind=str:"host"},toolSurface=obj{kind=str:"full"},promptPack=obj{kind=str:"assistant"},memory=obj{kind=str:"persistent"},observation=obj{kind=str:"stream-only"},network=obj{kind=str:"open"},gitWrite=obj{kind=str:"free"},secrets=obj{kind=str:"host-env"}}
@@ -466,12 +466,12 @@ stream :: obj{emit=fn}
 promptSurfaceProfile :: obj{envPosture=str:"frozen",promptPack=str:"interactive",verifyStrategy=str:"none"}
 permission :: obj{mode=str:"acceptEdits"}
 messages :: arr[]
-system :: str[20762]
+system :: str[20803]
 cwd :: str:<cwd>
 maxTurns :: num
 signal :: obj{}
 searchPipeline :: obj{search=fn}
-stickyModelStore :: obj{store=obj{get=fn,set=fn,load=fn}}
+stickyModelStore :: obj{store=obj{get=fn,set=fn,unset=fn,peek=fn,load=fn}}
 permissionPatternStore :: obj{allowed=obj{},baseline=obj{}}
 readFileState :: obj{mtimes=obj{},rangeHashes=undefined,contentDigests=undefined,rangeDedupCap=num}"
 `;
@@ -484,12 +484,12 @@ stream :: obj{emit=fn}
 promptSurfaceProfile :: obj{envPosture=str:"frozen",promptPack=str:"interactive",verifyStrategy=str:"none"}
 permission :: obj{mode=str:"acceptEdits"}
 messages :: arr[]
-system :: str[20762]
+system :: str[20803]
 cwd :: str:<cwd>
 maxTurns :: num
 signal :: obj{}
 searchPipeline :: obj{search=fn}
-stickyModelStore :: obj{store=obj{get=fn,set=fn,load=fn}}
+stickyModelStore :: obj{store=obj{get=fn,set=fn,unset=fn,peek=fn,load=fn}}
 permissionPatternStore :: obj{allowed=obj{},baseline=obj{}}
 readFileState :: obj{mtimes=obj{},rangeHashes=undefined,contentDigests=undefined,rangeDedupCap=num}
 modePolicy :: obj{mode=str:"interactive",permission=obj{kind=str:"reviewer-backed"},termination=obj{kind=str:"user-stop"},sandbox=obj{kind=str:"user-cwd"},output=obj{kind=str:"stdout-chat"},externalDeps=obj{kind=str:"host"},toolSurface=obj{kind=str:"full"},promptPack=obj{kind=str:"assistant"},memory=obj{kind=str:"persistent"},observation=obj{kind=str:"stream-only"},network=obj{kind=str:"open"},gitWrite=obj{kind=str:"free"},secrets=obj{kind=str:"host-env"}}
@@ -512,12 +512,12 @@ stream :: obj{emit=fn}
 promptSurfaceProfile :: obj{envPosture=str:"frozen",promptPack=str:"interactive",verifyStrategy=str:"none"}
 permission :: obj{mode=str:"acceptEdits"}
 messages :: arr[]
-system :: str[20762]
+system :: str[20803]
 cwd :: str:<cwd>
 maxTurns :: num
 signal :: obj{}
 searchPipeline :: obj{search=fn}
-stickyModelStore :: obj{store=obj{get=fn,set=fn,load=fn}}
+stickyModelStore :: obj{store=obj{get=fn,set=fn,unset=fn,peek=fn,load=fn}}
 fileHistory :: obj{record=fn}
 readFileState :: obj{mtimes=obj{},rangeHashes=undefined,contentDigests=undefined,rangeDedupCap=num}"
 `;
@@ -530,12 +530,12 @@ stream :: obj{emit=fn}
 promptSurfaceProfile :: obj{envPosture=str:"frozen",promptPack=str:"interactive",verifyStrategy=str:"none"}
 permission :: obj{mode=str:"acceptEdits"}
 messages :: arr[]
-system :: str[20762]
+system :: str[20803]
 cwd :: str:<cwd>
 maxTurns :: num
 signal :: obj{}
 searchPipeline :: obj{search=fn}
-stickyModelStore :: obj{store=obj{get=fn,set=fn,load=fn}}
+stickyModelStore :: obj{store=obj{get=fn,set=fn,unset=fn,peek=fn,load=fn}}
 fileHistory :: obj{record=fn}
 readFileState :: obj{mtimes=obj{},rangeHashes=undefined,contentDigests=undefined,rangeDedupCap=num}
 modePolicy :: obj{mode=str:"interactive",permission=obj{kind=str:"reviewer-backed"},termination=obj{kind=str:"user-stop"},sandbox=obj{kind=str:"user-cwd"},output=obj{kind=str:"stdout-chat"},externalDeps=obj{kind=str:"host"},toolSurface=obj{kind=str:"full"},promptPack=obj{kind=str:"assistant"},memory=obj{kind=str:"persistent"},observation=obj{kind=str:"stream-only"},network=obj{kind=str:"open"},gitWrite=obj{kind=str:"free"},secrets=obj{kind=str:"host-env"}}
@@ -558,12 +558,12 @@ stream :: obj{emit=fn}
 promptSurfaceProfile :: obj{envPosture=str:"frozen",promptPack=str:"interactive",verifyStrategy=str:"none"}
 permission :: obj{mode=str:"acceptEdits"}
 messages :: arr[]
-system :: str[20762]
+system :: str[20803]
 cwd :: str:<cwd>
 maxTurns :: num
 signal :: obj{}
 searchPipeline :: obj{search=fn}
-stickyModelStore :: obj{store=obj{get=fn,set=fn,load=fn}}
+stickyModelStore :: obj{store=obj{get=fn,set=fn,unset=fn,peek=fn,load=fn}}
 artifactRegistry :: obj{register=fn,get=fn,list=fn,destroy=fn}
 artifactPreviewResolver :: obj{resolve=fn}
 readFileState :: obj{mtimes=obj{},rangeHashes=undefined,contentDigests=undefined,rangeDedupCap=num}"
@@ -577,12 +577,12 @@ stream :: obj{emit=fn}
 promptSurfaceProfile :: obj{envPosture=str:"frozen",promptPack=str:"interactive",verifyStrategy=str:"none"}
 permission :: obj{mode=str:"acceptEdits"}
 messages :: arr[]
-system :: str[20762]
+system :: str[20803]
 cwd :: str:<cwd>
 maxTurns :: num
 signal :: obj{}
 searchPipeline :: obj{search=fn}
-stickyModelStore :: obj{store=obj{get=fn,set=fn,load=fn}}
+stickyModelStore :: obj{store=obj{get=fn,set=fn,unset=fn,peek=fn,load=fn}}
 artifactRegistry :: obj{register=fn,get=fn,list=fn,destroy=fn}
 artifactPreviewResolver :: obj{resolve=fn}
 readFileState :: obj{mtimes=obj{},rangeHashes=undefined,contentDigests=undefined,rangeDedupCap=num}
@@ -606,12 +606,12 @@ stream :: obj{emit=fn}
 promptSurfaceProfile :: obj{envPosture=str:"frozen",promptPack=str:"interactive",verifyStrategy=str:"none"}
 permission :: obj{mode=str:"acceptEdits"}
 messages :: arr[]
-system :: str[20762]
+system :: str[20803]
 cwd :: str:<cwd>
 maxTurns :: num
 signal :: obj{}
 searchPipeline :: obj{search=fn}
-stickyModelStore :: obj{store=obj{get=fn,set=fn,load=fn}}
+stickyModelStore :: obj{store=obj{get=fn,set=fn,unset=fn,peek=fn,load=fn}}
 readFileState :: obj{mtimes=obj{},rangeHashes=undefined,contentDigests=undefined,rangeDedupCap=num}"
 `;
 
@@ -623,12 +623,12 @@ stream :: obj{emit=fn}
 promptSurfaceProfile :: obj{envPosture=str:"frozen",promptPack=str:"interactive",verifyStrategy=str:"none"}
 permission :: obj{mode=str:"acceptEdits"}
 messages :: arr[]
-system :: str[20762]
+system :: str[20803]
 cwd :: str:<cwd>
 maxTurns :: num
 signal :: obj{}
 searchPipeline :: obj{search=fn}
-stickyModelStore :: obj{store=obj{get=fn,set=fn,load=fn}}
+stickyModelStore :: obj{store=obj{get=fn,set=fn,unset=fn,peek=fn,load=fn}}
 readFileState :: obj{mtimes=obj{},rangeHashes=undefined,contentDigests=undefined,rangeDedupCap=num}
 modePolicy :: obj{mode=str:"interactive",permission=obj{kind=str:"reviewer-backed"},termination=obj{kind=str:"user-stop"},sandbox=obj{kind=str:"user-cwd"},output=obj{kind=str:"stdout-chat"},externalDeps=obj{kind=str:"host"},toolSurface=obj{kind=str:"full"},promptPack=obj{kind=str:"assistant"},memory=obj{kind=str:"persistent"},observation=obj{kind=str:"stream-only"},network=obj{kind=str:"open"},gitWrite=obj{kind=str:"free"},secrets=obj{kind=str:"host-env"}}
 budgetMeter :: obj{dials=obj{maxTurns=num,maxRetries=num,maxConsecutiveFailures=num},caps=obj{},exhaustion=str:"stop",clock=fn,startedAtMs=num,turns=num,modelCalls=num,toolCalls=num,shellCommands=num,testRuns=num,inputTokens=num,outputTokens=num,reasoningTokens=num,filesChanged=num,patchBytes=num,retries=num,consecutiveFailures=num,costUsdAccum=num,costUsdThisTurn=num,providerRateLimitRemainingPct=undefined}
@@ -650,11 +650,11 @@ stream :: obj{emit=fn}
 promptSurfaceProfile :: obj{envPosture=str:"frozen",promptPack=str:"interactive",verifyStrategy=str:"none"}
 permission :: obj{mode=str:"acceptEdits"}
 messages :: arr[]
-system :: str[20762]
+system :: str[20803]
 cwd :: str:<cwd>
 maxTurns :: num
 signal :: obj{}
-stickyModelStore :: obj{store=obj{get=fn,set=fn,load=fn}}
+stickyModelStore :: obj{store=obj{get=fn,set=fn,unset=fn,peek=fn,load=fn}}
 readFileState :: obj{mtimes=obj{},rangeHashes=undefined,contentDigests=undefined,rangeDedupCap=num}"
 `;
 
@@ -666,11 +666,11 @@ stream :: obj{emit=fn}
 promptSurfaceProfile :: obj{envPosture=str:"frozen",promptPack=str:"interactive",verifyStrategy=str:"none"}
 permission :: obj{mode=str:"acceptEdits"}
 messages :: arr[]
-system :: str[20762]
+system :: str[20803]
 cwd :: str:<cwd>
 maxTurns :: num
 signal :: obj{}
-stickyModelStore :: obj{store=obj{get=fn,set=fn,load=fn}}
+stickyModelStore :: obj{store=obj{get=fn,set=fn,unset=fn,peek=fn,load=fn}}
 readFileState :: obj{mtimes=obj{},rangeHashes=undefined,contentDigests=undefined,rangeDedupCap=num}
 modePolicy :: obj{mode=str:"interactive",permission=obj{kind=str:"reviewer-backed"},termination=obj{kind=str:"user-stop"},sandbox=obj{kind=str:"user-cwd"},output=obj{kind=str:"stdout-chat"},externalDeps=obj{kind=str:"host"},toolSurface=obj{kind=str:"full"},promptPack=obj{kind=str:"assistant"},memory=obj{kind=str:"persistent"},observation=obj{kind=str:"stream-only"},network=obj{kind=str:"open"},gitWrite=obj{kind=str:"free"},secrets=obj{kind=str:"host-env"}}
 budgetMeter :: obj{dials=obj{maxTurns=num,maxRetries=num,maxConsecutiveFailures=num},caps=obj{},exhaustion=str:"stop",clock=fn,startedAtMs=num,turns=num,modelCalls=num,toolCalls=num,shellCommands=num,testRuns=num,inputTokens=num,outputTokens=num,reasoningTokens=num,filesChanged=num,patchBytes=num,retries=num,consecutiveFailures=num,costUsdAccum=num,costUsdThisTurn=num,providerRateLimitRemainingPct=undefined}
@@ -692,12 +692,12 @@ stream :: obj{emit=fn}
 promptSurfaceProfile :: obj{envPosture=str:"default",promptPack=str:"interactive",verifyStrategy=str:"none"}
 permission :: obj{mode=str:"acceptEdits"}
 messages :: arr[]
-system :: str[19851]
+system :: str[19892]
 cwd :: str:<cwd>
 maxTurns :: num
 signal :: obj{}
 searchPipeline :: obj{search=fn}
-stickyModelStore :: obj{store=obj{get=fn,set=fn,load=fn}}
+stickyModelStore :: obj{store=obj{get=fn,set=fn,unset=fn,peek=fn,load=fn}}
 readFileState :: obj{mtimes=obj{},rangeHashes=undefined,contentDigests=undefined,rangeDedupCap=num}"
 `;
 
@@ -709,12 +709,12 @@ stream :: obj{emit=fn}
 promptSurfaceProfile :: obj{envPosture=str:"default",promptPack=str:"interactive",verifyStrategy=str:"none"}
 permission :: obj{mode=str:"acceptEdits"}
 messages :: arr[]
-system :: str[19851]
+system :: str[19892]
 cwd :: str:<cwd>
 maxTurns :: num
 signal :: obj{}
 searchPipeline :: obj{search=fn}
-stickyModelStore :: obj{store=obj{get=fn,set=fn,load=fn}}
+stickyModelStore :: obj{store=obj{get=fn,set=fn,unset=fn,peek=fn,load=fn}}
 readFileState :: obj{mtimes=obj{},rangeHashes=undefined,contentDigests=undefined,rangeDedupCap=num}
 modePolicy :: obj{mode=str:"interactive",permission=obj{kind=str:"reviewer-backed"},termination=obj{kind=str:"user-stop"},sandbox=obj{kind=str:"user-cwd"},output=obj{kind=str:"stdout-chat"},externalDeps=obj{kind=str:"host"},toolSurface=obj{kind=str:"full"},promptPack=obj{kind=str:"assistant"},memory=obj{kind=str:"persistent"},observation=obj{kind=str:"stream-only"},network=obj{kind=str:"open"},gitWrite=obj{kind=str:"free"},secrets=obj{kind=str:"host-env"}}
 budgetMeter :: obj{dials=obj{maxTurns=num,maxRetries=num,maxConsecutiveFailures=num},caps=obj{},exhaustion=str:"stop",clock=fn,startedAtMs=num,turns=num,modelCalls=num,toolCalls=num,shellCommands=num,testRuns=num,inputTokens=num,outputTokens=num,reasoningTokens=num,filesChanged=num,patchBytes=num,retries=num,consecutiveFailures=num,costUsdAccum=num,costUsdThisTurn=num,providerRateLimitRemainingPct=undefined}
@@ -736,12 +736,12 @@ stream :: obj{emit=fn}
 promptSurfaceProfile :: obj{envPosture=str:"frozen",promptPack=str:"interactive",verifyStrategy=str:"none"}
 permission :: obj{mode=str:"acceptEdits"}
 messages :: arr[]
-system :: str[20762]
+system :: str[20803]
 cwd :: str:<cwd>
 maxTurns :: num
 signal :: obj{}
 searchPipeline :: obj{search=fn}
-stickyModelStore :: obj{store=obj{get=fn,set=fn,load=fn}}
+stickyModelStore :: obj{store=obj{get=fn,set=fn,unset=fn,peek=fn,load=fn}}
 readFileState :: obj{mtimes=obj{},rangeHashes=undefined,contentDigests=undefined,rangeDedupCap=num}"
 `;
 
@@ -753,12 +753,12 @@ stream :: obj{emit=fn}
 promptSurfaceProfile :: obj{envPosture=str:"frozen",promptPack=str:"interactive",verifyStrategy=str:"none"}
 permission :: obj{mode=str:"acceptEdits"}
 messages :: arr[]
-system :: str[20762]
+system :: str[20803]
 cwd :: str:<cwd>
 maxTurns :: num
 signal :: obj{}
 searchPipeline :: obj{search=fn}
-stickyModelStore :: obj{store=obj{get=fn,set=fn,load=fn}}
+stickyModelStore :: obj{store=obj{get=fn,set=fn,unset=fn,peek=fn,load=fn}}
 readFileState :: obj{mtimes=obj{},rangeHashes=undefined,contentDigests=undefined,rangeDedupCap=num}
 modePolicy :: obj{mode=str:"interactive",permission=obj{kind=str:"reviewer-backed"},termination=obj{kind=str:"user-stop"},sandbox=obj{kind=str:"user-cwd"},output=obj{kind=str:"stdout-chat"},externalDeps=obj{kind=str:"host"},toolSurface=obj{kind=str:"full"},promptPack=obj{kind=str:"assistant"},memory=obj{kind=str:"persistent"},observation=obj{kind=str:"stream-only"},network=obj{kind=str:"open"},gitWrite=obj{kind=str:"free"},secrets=obj{kind=str:"host-env"}}
 budgetMeter :: obj{dials=obj{maxTurns=num,maxRetries=num,maxConsecutiveFailures=num},caps=obj{},exhaustion=str:"stop",clock=fn,startedAtMs=num,turns=num,modelCalls=num,toolCalls=num,shellCommands=num,testRuns=num,inputTokens=num,outputTokens=num,reasoningTokens=num,filesChanged=num,patchBytes=num,retries=num,consecutiveFailures=num,costUsdAccum=num,costUsdThisTurn=num,providerRateLimitRemainingPct=undefined}
@@ -782,12 +782,12 @@ stream :: obj{emit=fn}
 promptSurfaceProfile :: obj{envPosture=str:"frozen",promptPack=str:"interactive",verifyStrategy=str:"none"}
 permission :: obj{mode=str:"acceptEdits"}
 messages :: arr[]
-system :: str[20762]
+system :: str[20803]
 cwd :: str:<cwd>
 maxTurns :: num
 signal :: obj{}
 searchPipeline :: obj{search=fn}
-stickyModelStore :: obj{store=obj{get=fn,set=fn,load=fn}}
+stickyModelStore :: obj{store=obj{get=fn,set=fn,unset=fn,peek=fn,load=fn}}
 subagentMailbox :: obj{send=fn,read=fn,peek=fn,ack=fn,list=fn,pendingFor=fn,toSnapshot=fn,fromSnapshot=fn}
 readFileState :: obj{mtimes=obj{},rangeHashes=undefined,contentDigests=undefined,rangeDedupCap=num}"
 `;
@@ -800,12 +800,12 @@ stream :: obj{emit=fn}
 promptSurfaceProfile :: obj{envPosture=str:"frozen",promptPack=str:"interactive",verifyStrategy=str:"none"}
 permission :: obj{mode=str:"acceptEdits"}
 messages :: arr[]
-system :: str[20762]
+system :: str[20803]
 cwd :: str:<cwd>
 maxTurns :: num
 signal :: obj{}
 searchPipeline :: obj{search=fn}
-stickyModelStore :: obj{store=obj{get=fn,set=fn,load=fn}}
+stickyModelStore :: obj{store=obj{get=fn,set=fn,unset=fn,peek=fn,load=fn}}
 subagentMailbox :: obj{send=fn,read=fn,peek=fn,ack=fn,list=fn,pendingFor=fn,toSnapshot=fn,fromSnapshot=fn}
 readFileState :: obj{mtimes=obj{},rangeHashes=undefined,contentDigests=undefined,rangeDedupCap=num}
 modePolicy :: obj{mode=str:"interactive",permission=obj{kind=str:"reviewer-backed"},termination=obj{kind=str:"user-stop"},sandbox=obj{kind=str:"user-cwd"},output=obj{kind=str:"stdout-chat"},externalDeps=obj{kind=str:"host"},toolSurface=obj{kind=str:"full"},promptPack=obj{kind=str:"assistant"},memory=obj{kind=str:"persistent"},observation=obj{kind=str:"stream-only"},network=obj{kind=str:"open"},gitWrite=obj{kind=str:"free"},secrets=obj{kind=str:"host-env"}}
@@ -828,12 +828,12 @@ stream :: obj{emit=fn}
 promptSurfaceProfile :: obj{envPosture=str:"frozen",promptPack=str:"interactive",verifyStrategy=str:"none"}
 permission :: obj{mode=str:"acceptEdits"}
 messages :: arr[]
-system :: str[20762]
+system :: str[20803]
 cwd :: str:<cwd>
 maxTurns :: num
 signal :: obj{}
 searchPipeline :: obj{search=fn}
-stickyModelStore :: obj{store=obj{get=fn,set=fn,load=fn}}"
+stickyModelStore :: obj{store=obj{get=fn,set=fn,unset=fn,peek=fn,load=fn}}"
 `;
 
 exports[`composition slot-registry — byte-identical hellgate fingerprint stable — stale-read guard off: stale-read guard off :: assembled 1`] = `
@@ -844,12 +844,12 @@ stream :: obj{emit=fn}
 promptSurfaceProfile :: obj{envPosture=str:"frozen",promptPack=str:"interactive",verifyStrategy=str:"none"}
 permission :: obj{mode=str:"acceptEdits"}
 messages :: arr[]
-system :: str[20762]
+system :: str[20803]
 cwd :: str:<cwd>
 maxTurns :: num
 signal :: obj{}
 searchPipeline :: obj{search=fn}
-stickyModelStore :: obj{store=obj{get=fn,set=fn,load=fn}}
+stickyModelStore :: obj{store=obj{get=fn,set=fn,unset=fn,peek=fn,load=fn}}
 modePolicy :: obj{mode=str:"interactive",permission=obj{kind=str:"reviewer-backed"},termination=obj{kind=str:"user-stop"},sandbox=obj{kind=str:"user-cwd"},output=obj{kind=str:"stdout-chat"},externalDeps=obj{kind=str:"host"},toolSurface=obj{kind=str:"full"},promptPack=obj{kind=str:"assistant"},memory=obj{kind=str:"persistent"},observation=obj{kind=str:"stream-only"},network=obj{kind=str:"open"},gitWrite=obj{kind=str:"free"},secrets=obj{kind=str:"host-env"}}
 budgetMeter :: obj{dials=obj{maxTurns=num,maxRetries=num,maxConsecutiveFailures=num},caps=obj{},exhaustion=str:"stop",clock=fn,startedAtMs=num,turns=num,modelCalls=num,toolCalls=num,shellCommands=num,testRuns=num,inputTokens=num,outputTokens=num,reasoningTokens=num,filesChanged=num,patchBytes=num,retries=num,consecutiveFailures=num,costUsdAccum=num,costUsdThisTurn=num,providerRateLimitRemainingPct=undefined}
 lspDiagnosticsHookEnabled :: bool:false
@@ -870,12 +870,12 @@ stream :: obj{emit=fn}
 promptSurfaceProfile :: obj{envPosture=str:"frozen",promptPack=str:"interactive",verifyStrategy=str:"none"}
 permission :: obj{mode=str:"acceptEdits"}
 messages :: arr[]
-system :: str[20762]
+system :: str[20803]
 cwd :: str:<cwd>
 maxTurns :: num
 signal :: obj{}
 searchPipeline :: obj{search=fn}
-stickyModelStore :: obj{store=obj{get=fn,set=fn,load=fn}}
+stickyModelStore :: obj{store=obj{get=fn,set=fn,unset=fn,peek=fn,load=fn}}
 readFileState :: obj{mtimes=obj{},rangeHashes=undefined,contentDigests=undefined,rangeDedupCap=num}"
 `;
 
@@ -887,12 +887,12 @@ stream :: obj{emit=fn}
 promptSurfaceProfile :: obj{envPosture=str:"frozen",promptPack=str:"interactive",verifyStrategy=str:"none"}
 permission :: obj{mode=str:"acceptEdits"}
 messages :: arr[]
-system :: str[20762]
+system :: str[20803]
 cwd :: str:<cwd>
 maxTurns :: num
 signal :: obj{}
 searchPipeline :: obj{search=fn}
-stickyModelStore :: obj{store=obj{get=fn,set=fn,load=fn}}
+stickyModelStore :: obj{store=obj{get=fn,set=fn,unset=fn,peek=fn,load=fn}}
 readFileState :: obj{mtimes=obj{},rangeHashes=undefined,contentDigests=undefined,rangeDedupCap=num}
 modePolicy :: obj{mode=str:"interactive",permission=obj{kind=str:"reviewer-backed"},termination=obj{kind=str:"user-stop"},sandbox=obj{kind=str:"user-cwd"},output=obj{kind=str:"stdout-chat"},externalDeps=obj{kind=str:"host"},toolSurface=obj{kind=str:"full"},promptPack=obj{kind=str:"assistant"},memory=obj{kind=str:"persistent"},observation=obj{kind=str:"stream-only"},network=obj{kind=str:"open"},gitWrite=obj{kind=str:"free"},secrets=obj{kind=str:"host-env"}}
 budgetMeter :: obj{dials=obj{maxTurns=num,maxRetries=num,maxConsecutiveFailures=num},caps=obj{},exhaustion=str:"stop",clock=fn,startedAtMs=num,turns=num,modelCalls=num,toolCalls=num,shellCommands=num,testRuns=num,inputTokens=num,outputTokens=num,reasoningTokens=num,filesChanged=num,patchBytes=num,retries=num,consecutiveFailures=num,costUsdAccum=num,costUsdThisTurn=num,providerRateLimitRemainingPct=undefined}
@@ -915,12 +915,12 @@ stream :: obj{emit=fn}
 promptSurfaceProfile :: obj{envPosture=str:"frozen",promptPack=str:"interactive",verifyStrategy=str:"none"}
 permission :: obj{mode=str:"acceptEdits"}
 messages :: arr[]
-system :: str[20762]
+system :: str[20803]
 cwd :: str:<cwd>
 maxTurns :: num
 signal :: obj{}
 searchPipeline :: obj{search=fn}
-stickyModelStore :: obj{store=obj{get=fn,set=fn,load=fn}}
+stickyModelStore :: obj{store=obj{get=fn,set=fn,unset=fn,peek=fn,load=fn}}
 readFileState :: obj{mtimes=obj{},rangeHashes=undefined,contentDigests=undefined,rangeDedupCap=num}"
 `;
 
@@ -932,12 +932,12 @@ stream :: obj{emit=fn}
 promptSurfaceProfile :: obj{envPosture=str:"frozen",promptPack=str:"interactive",verifyStrategy=str:"none"}
 permission :: obj{mode=str:"acceptEdits"}
 messages :: arr[]
-system :: str[20762]
+system :: str[20803]
 cwd :: str:<cwd>
 maxTurns :: num
 signal :: obj{}
 searchPipeline :: obj{search=fn}
-stickyModelStore :: obj{store=obj{get=fn,set=fn,load=fn}}
+stickyModelStore :: obj{store=obj{get=fn,set=fn,unset=fn,peek=fn,load=fn}}
 readFileState :: obj{mtimes=obj{},rangeHashes=undefined,contentDigests=undefined,rangeDedupCap=num}
 modePolicy :: obj{mode=str:"interactive",permission=obj{kind=str:"reviewer-backed"},termination=obj{kind=str:"user-stop"},sandbox=obj{kind=str:"user-cwd"},output=obj{kind=str:"stdout-chat"},externalDeps=obj{kind=str:"host"},toolSurface=obj{kind=str:"full"},promptPack=obj{kind=str:"assistant"},memory=obj{kind=str:"persistent"},observation=obj{kind=str:"stream-only"},network=obj{kind=str:"open"},gitWrite=obj{kind=str:"free"},secrets=obj{kind=str:"host-env"}}
 budgetMeter :: obj{dials=obj{maxTurns=num,maxRetries=num,maxConsecutiveFailures=num},caps=obj{},exhaustion=str:"stop",clock=fn,startedAtMs=num,turns=num,modelCalls=num,toolCalls=num,shellCommands=num,testRuns=num,inputTokens=num,outputTokens=num,reasoningTokens=num,filesChanged=num,patchBytes=num,retries=num,consecutiveFailures=num,costUsdAccum=num,costUsdThisTurn=num,providerRateLimitRemainingPct=undefined}
@@ -960,12 +960,12 @@ stream :: obj{emit=fn}
 promptSurfaceProfile :: obj{envPosture=str:"frozen",promptPack=str:"interactive",verifyStrategy=str:"none"}
 permission :: obj{mode=str:"acceptEdits"}
 messages :: arr[]
-system :: str[20762]
+system :: str[20803]
 cwd :: str:<cwd>
 maxTurns :: num
 signal :: obj{}
 searchPipeline :: obj{search=fn}
-stickyModelStore :: obj{store=obj{get=fn,set=fn,load=fn}}
+stickyModelStore :: obj{store=obj{get=fn,set=fn,unset=fn,peek=fn,load=fn}}
 readFileState :: obj{mtimes=obj{},rangeHashes=undefined,contentDigests=undefined,rangeDedupCap=num}"
 `;
 
@@ -977,12 +977,12 @@ stream :: obj{emit=fn}
 promptSurfaceProfile :: obj{envPosture=str:"frozen",promptPack=str:"interactive",verifyStrategy=str:"none"}
 permission :: obj{mode=str:"acceptEdits"}
 messages :: arr[]
-system :: str[20762]
+system :: str[20803]
 cwd :: str:<cwd>
 maxTurns :: num
 signal :: obj{}
 searchPipeline :: obj{search=fn}
-stickyModelStore :: obj{store=obj{get=fn,set=fn,load=fn}}
+stickyModelStore :: obj{store=obj{get=fn,set=fn,unset=fn,peek=fn,load=fn}}
 readFileState :: obj{mtimes=obj{},rangeHashes=undefined,contentDigests=undefined,rangeDedupCap=num}
 modePolicy :: obj{mode=str:"interactive",permission=obj{kind=str:"reviewer-backed"},termination=obj{kind=str:"user-stop"},sandbox=obj{kind=str:"user-cwd"},output=obj{kind=str:"stdout-chat"},externalDeps=obj{kind=str:"host"},toolSurface=obj{kind=str:"full"},promptPack=obj{kind=str:"assistant"},memory=obj{kind=str:"persistent"},observation=obj{kind=str:"stream-only"},network=obj{kind=str:"open"},gitWrite=obj{kind=str:"free"},secrets=obj{kind=str:"host-env"}}
 budgetMeter :: obj{dials=obj{maxTurns=num,maxRetries=num,maxConsecutiveFailures=num},caps=obj{},exhaustion=str:"stop",clock=fn,startedAtMs=num,turns=num,modelCalls=num,toolCalls=num,shellCommands=num,testRuns=num,inputTokens=num,outputTokens=num,reasoningTokens=num,filesChanged=num,patchBytes=num,retries=num,consecutiveFailures=num,costUsdAccum=num,costUsdThisTurn=num,providerRateLimitRemainingPct=undefined}
@@ -1005,12 +1005,12 @@ stream :: obj{emit=fn}
 promptSurfaceProfile :: obj{envPosture=str:"frozen",promptPack=str:"interactive",verifyStrategy=str:"none"}
 permission :: obj{mode=str:"acceptEdits"}
 messages :: arr[]
-system :: str[20762]
+system :: str[20803]
 cwd :: str:<cwd>
 maxTurns :: num
 signal :: obj{}
 searchPipeline :: obj{search=fn}
-stickyModelStore :: obj{store=obj{get=fn,set=fn,load=fn}}
+stickyModelStore :: obj{store=obj{get=fn,set=fn,unset=fn,peek=fn,load=fn}}
 readFileState :: obj{mtimes=obj{},rangeHashes=undefined,contentDigests=undefined,rangeDedupCap=num}"
 `;
 
@@ -1022,12 +1022,12 @@ stream :: obj{emit=fn}
 promptSurfaceProfile :: obj{envPosture=str:"frozen",promptPack=str:"interactive",verifyStrategy=str:"none"}
 permission :: obj{mode=str:"acceptEdits"}
 messages :: arr[]
-system :: str[20762]
+system :: str[20803]
 cwd :: str:<cwd>
 maxTurns :: num
 signal :: obj{}
 searchPipeline :: obj{search=fn}
-stickyModelStore :: obj{store=obj{get=fn,set=fn,load=fn}}
+stickyModelStore :: obj{store=obj{get=fn,set=fn,unset=fn,peek=fn,load=fn}}
 readFileState :: obj{mtimes=obj{},rangeHashes=undefined,contentDigests=undefined,rangeDedupCap=num}
 modePolicy :: obj{mode=str:"interactive",permission=obj{kind=str:"reviewer-backed"},termination=obj{kind=str:"user-stop"},sandbox=obj{kind=str:"user-cwd"},output=obj{kind=str:"stdout-chat"},externalDeps=obj{kind=str:"host"},toolSurface=obj{kind=str:"full"},promptPack=obj{kind=str:"assistant"},memory=obj{kind=str:"persistent"},observation=obj{kind=str:"stream-only"},network=obj{kind=str:"open"},gitWrite=obj{kind=str:"free"},secrets=obj{kind=str:"host-env"}}
 budgetMeter :: obj{dials=obj{maxTurns=num,maxRetries=num,maxConsecutiveFailures=num},caps=obj{},exhaustion=str:"stop",clock=fn,startedAtMs=num,turns=num,modelCalls=num,toolCalls=num,shellCommands=num,testRuns=num,inputTokens=num,outputTokens=num,reasoningTokens=num,filesChanged=num,patchBytes=num,retries=num,consecutiveFailures=num,costUsdAccum=num,costUsdThisTurn=num,providerRateLimitRemainingPct=undefined}
@@ -1050,12 +1050,12 @@ stream :: obj{emit=fn}
 promptSurfaceProfile :: obj{envPosture=str:"frozen",promptPack=str:"interactive",verifyStrategy=str:"none"}
 permission :: obj{mode=str:"acceptEdits"}
 messages :: arr[]
-system :: str[20762]
+system :: str[20803]
 cwd :: str:<cwd>
 maxTurns :: num
 signal :: obj{}
 searchPipeline :: obj{search=fn}
-stickyModelStore :: obj{store=obj{get=fn,set=fn,load=fn}}
+stickyModelStore :: obj{store=obj{get=fn,set=fn,unset=fn,peek=fn,load=fn}}
 readFileState :: obj{mtimes=obj{},rangeHashes=undefined,contentDigests=undefined,rangeDedupCap=num}"
 `;
 
@@ -1067,12 +1067,12 @@ stream :: obj{emit=fn}
 promptSurfaceProfile :: obj{envPosture=str:"frozen",promptPack=str:"interactive",verifyStrategy=str:"none"}
 permission :: obj{mode=str:"acceptEdits"}
 messages :: arr[]
-system :: str[20762]
+system :: str[20803]
 cwd :: str:<cwd>
 maxTurns :: num
 signal :: obj{}
 searchPipeline :: obj{search=fn}
-stickyModelStore :: obj{store=obj{get=fn,set=fn,load=fn}}
+stickyModelStore :: obj{store=obj{get=fn,set=fn,unset=fn,peek=fn,load=fn}}
 readFileState :: obj{mtimes=obj{},rangeHashes=undefined,contentDigests=undefined,rangeDedupCap=num}
 modePolicy :: obj{mode=str:"interactive",permission=obj{kind=str:"reviewer-backed"},termination=obj{kind=str:"user-stop"},sandbox=obj{kind=str:"user-cwd"},output=obj{kind=str:"stdout-chat"},externalDeps=obj{kind=str:"host"},toolSurface=obj{kind=str:"full"},promptPack=obj{kind=str:"assistant"},memory=obj{kind=str:"persistent"},observation=obj{kind=str:"stream-only"},network=obj{kind=str:"open"},gitWrite=obj{kind=str:"free"},secrets=obj{kind=str:"host-env"}}
 budgetMeter :: obj{dials=obj{maxTurns=num,maxRetries=num,maxConsecutiveFailures=num},caps=obj{},exhaustion=str:"stop",clock=fn,startedAtMs=num,turns=num,modelCalls=num,toolCalls=num,shellCommands=num,testRuns=num,inputTokens=num,outputTokens=num,reasoningTokens=num,filesChanged=num,patchBytes=num,retries=num,consecutiveFailures=num,costUsdAccum=num,costUsdThisTurn=num,providerRateLimitRemainingPct=undefined}
@@ -1094,12 +1094,12 @@ stream :: obj{emit=fn}
 promptSurfaceProfile :: obj{envPosture=str:"frozen",promptPack=str:"interactive",verifyStrategy=str:"none"}
 permission :: obj{mode=str:"acceptEdits"}
 messages :: arr[]
-system :: str[20762]
+system :: str[20803]
 cwd :: str:<cwd>
 maxTurns :: num
 signal :: obj{}
 searchPipeline :: obj{search=fn}
-stickyModelStore :: obj{store=obj{get=fn,set=fn,load=fn}}
+stickyModelStore :: obj{store=obj{get=fn,set=fn,unset=fn,peek=fn,load=fn}}
 toolProfile :: obj{resolver=obj{resolve=fn},defaultName=str:"minimal"}
 readFileState :: obj{mtimes=obj{},rangeHashes=undefined,contentDigests=undefined,rangeDedupCap=num}"
 `;
@@ -1112,12 +1112,12 @@ stream :: obj{emit=fn}
 promptSurfaceProfile :: obj{envPosture=str:"frozen",promptPack=str:"interactive",verifyStrategy=str:"none"}
 permission :: obj{mode=str:"acceptEdits"}
 messages :: arr[]
-system :: str[20762]
+system :: str[20803]
 cwd :: str:<cwd>
 maxTurns :: num
 signal :: obj{}
 searchPipeline :: obj{search=fn}
-stickyModelStore :: obj{store=obj{get=fn,set=fn,load=fn}}
+stickyModelStore :: obj{store=obj{get=fn,set=fn,unset=fn,peek=fn,load=fn}}
 toolProfile :: obj{resolver=obj{resolve=fn},defaultName=str:"minimal"}
 readFileState :: obj{mtimes=obj{},rangeHashes=undefined,contentDigests=undefined,rangeDedupCap=num}
 modePolicy :: obj{mode=str:"interactive",permission=obj{kind=str:"reviewer-backed"},termination=obj{kind=str:"user-stop"},sandbox=obj{kind=str:"user-cwd"},output=obj{kind=str:"stdout-chat"},externalDeps=obj{kind=str:"host"},toolSurface=obj{kind=str:"full"},promptPack=obj{kind=str:"assistant"},memory=obj{kind=str:"persistent"},observation=obj{kind=str:"stream-only"},network=obj{kind=str:"open"},gitWrite=obj{kind=str:"free"},secrets=obj{kind=str:"host-env"}}
@@ -1140,12 +1140,12 @@ stream :: obj{emit=fn}
 promptSurfaceProfile :: obj{envPosture=str:"frozen",promptPack=str:"interactive",verifyStrategy=str:"none"}
 permission :: obj{mode=str:"acceptEdits"}
 messages :: arr[]
-system :: str[20762]
+system :: str[20803]
 cwd :: str:<cwd>
 maxTurns :: num
 signal :: obj{}
 searchPipeline :: obj{search=fn}
-stickyModelStore :: obj{store=obj{get=fn,set=fn,load=fn}}
+stickyModelStore :: obj{store=obj{get=fn,set=fn,unset=fn,peek=fn,load=fn}}
 focusChain :: obj{tracker=obj{setTodos=fn,tickTurn=fn,getInjection=fn,peekInjection=fn,getDriftWarning=fn,markDone=fn,snapshotTodos=fn,currentTurn=fn},reinjectEveryN=num}
 readFileState :: obj{mtimes=obj{},rangeHashes=undefined,contentDigests=undefined,rangeDedupCap=num}"
 `;
@@ -1158,12 +1158,12 @@ stream :: obj{emit=fn}
 promptSurfaceProfile :: obj{envPosture=str:"frozen",promptPack=str:"interactive",verifyStrategy=str:"none"}
 permission :: obj{mode=str:"acceptEdits"}
 messages :: arr[]
-system :: str[20762]
+system :: str[20803]
 cwd :: str:<cwd>
 maxTurns :: num
 signal :: obj{}
 searchPipeline :: obj{search=fn}
-stickyModelStore :: obj{store=obj{get=fn,set=fn,load=fn}}
+stickyModelStore :: obj{store=obj{get=fn,set=fn,unset=fn,peek=fn,load=fn}}
 focusChain :: obj{tracker=obj{setTodos=fn,tickTurn=fn,getInjection=fn,peekInjection=fn,getDriftWarning=fn,markDone=fn,snapshotTodos=fn,currentTurn=fn},reinjectEveryN=num}
 readFileState :: obj{mtimes=obj{},rangeHashes=undefined,contentDigests=undefined,rangeDedupCap=num}
 modePolicy :: obj{mode=str:"interactive",permission=obj{kind=str:"reviewer-backed"},termination=obj{kind=str:"user-stop"},sandbox=obj{kind=str:"user-cwd"},output=obj{kind=str:"stdout-chat"},externalDeps=obj{kind=str:"host"},toolSurface=obj{kind=str:"full"},promptPack=obj{kind=str:"assistant"},memory=obj{kind=str:"persistent"},observation=obj{kind=str:"stream-only"},network=obj{kind=str:"open"},gitWrite=obj{kind=str:"free"},secrets=obj{kind=str:"host-env"}}
@@ -1186,12 +1186,12 @@ stream :: obj{emit=fn}
 promptSurfaceProfile :: obj{envPosture=str:"frozen",promptPack=str:"interactive",verifyStrategy=str:"none"}
 permission :: obj{mode=str:"acceptEdits"}
 messages :: arr[]
-system :: str[20762]
+system :: str[20803]
 cwd :: str:<cwd>
 maxTurns :: num
 signal :: obj{}
 searchPipeline :: obj{search=fn}
-stickyModelStore :: obj{store=obj{get=fn,set=fn,load=fn}}
+stickyModelStore :: obj{store=obj{get=fn,set=fn,unset=fn,peek=fn,load=fn}}
 conversationCheckpoint :: obj{store=obj{record=fn,list=fn,restore=fn,prune=fn,clear=fn,cloneSnapshot=fn,lineageOf=fn}}
 fork :: obj{forker=obj{fork=fn}}
 forkSession :: obj{forker=obj{fork=fn,listBranches=fn,resolveParent=fn}}
@@ -1206,12 +1206,12 @@ stream :: obj{emit=fn}
 promptSurfaceProfile :: obj{envPosture=str:"frozen",promptPack=str:"interactive",verifyStrategy=str:"none"}
 permission :: obj{mode=str:"acceptEdits"}
 messages :: arr[]
-system :: str[20762]
+system :: str[20803]
 cwd :: str:<cwd>
 maxTurns :: num
 signal :: obj{}
 searchPipeline :: obj{search=fn}
-stickyModelStore :: obj{store=obj{get=fn,set=fn,load=fn}}
+stickyModelStore :: obj{store=obj{get=fn,set=fn,unset=fn,peek=fn,load=fn}}
 conversationCheckpoint :: obj{store=obj{record=fn,list=fn,restore=fn,prune=fn,clear=fn,cloneSnapshot=fn,lineageOf=fn}}
 fork :: obj{forker=obj{fork=fn}}
 forkSession :: obj{forker=obj{fork=fn,listBranches=fn,resolveParent=fn}}
@@ -1236,12 +1236,12 @@ stream :: obj{emit=fn}
 promptSurfaceProfile :: obj{envPosture=str:"frozen",promptPack=str:"interactive",verifyStrategy=str:"none"}
 permission :: obj{mode=str:"acceptEdits"}
 messages :: arr[]
-system :: str[20762]
+system :: str[20803]
 cwd :: str:<cwd>
 maxTurns :: num
 signal :: obj{}
 searchPipeline :: obj{search=fn}
-stickyModelStore :: obj{store=obj{get=fn,set=fn,load=fn}}
+stickyModelStore :: obj{store=obj{get=fn,set=fn,unset=fn,peek=fn,load=fn}}
 delegation :: obj{delegator=obj{delegate=fn,listModes=fn,describeMode=fn},modes=arr[str:"explore"]}
 readFileState :: obj{mtimes=obj{},rangeHashes=undefined,contentDigests=undefined,rangeDedupCap=num}"
 `;
@@ -1254,12 +1254,12 @@ stream :: obj{emit=fn}
 promptSurfaceProfile :: obj{envPosture=str:"frozen",promptPack=str:"interactive",verifyStrategy=str:"none"}
 permission :: obj{mode=str:"acceptEdits"}
 messages :: arr[]
-system :: str[20762]
+system :: str[20803]
 cwd :: str:<cwd>
 maxTurns :: num
 signal :: obj{}
 searchPipeline :: obj{search=fn}
-stickyModelStore :: obj{store=obj{get=fn,set=fn,load=fn}}
+stickyModelStore :: obj{store=obj{get=fn,set=fn,unset=fn,peek=fn,load=fn}}
 delegation :: obj{delegator=obj{delegate=fn,listModes=fn,describeMode=fn},modes=arr[str:"explore"]}
 readFileState :: obj{mtimes=obj{},rangeHashes=undefined,contentDigests=undefined,rangeDedupCap=num}
 modePolicy :: obj{mode=str:"interactive",permission=obj{kind=str:"reviewer-backed"},termination=obj{kind=str:"user-stop"},sandbox=obj{kind=str:"user-cwd"},output=obj{kind=str:"stdout-chat"},externalDeps=obj{kind=str:"host"},toolSurface=obj{kind=str:"full"},promptPack=obj{kind=str:"assistant"},memory=obj{kind=str:"persistent"},observation=obj{kind=str:"stream-only"},network=obj{kind=str:"open"},gitWrite=obj{kind=str:"free"},secrets=obj{kind=str:"host-env"}}
@@ -1282,13 +1282,13 @@ stream :: obj{emit=fn}
 promptSurfaceProfile :: obj{envPosture=str:"frozen",promptPack=str:"interactive",verifyStrategy=str:"none"}
 permission :: obj{mode=str:"acceptEdits"}
 messages :: arr[]
-system :: str[20910]
+system :: str[20951]
 cwd :: str:<cwd>
 maxTurns :: num
 signal :: obj{}
 searchPipeline :: obj{search=fn}
 identityModeVariant :: obj{registry=obj{variantFor=fn}}
-stickyModelStore :: obj{store=obj{get=fn,set=fn,load=fn}}
+stickyModelStore :: obj{store=obj{get=fn,set=fn,unset=fn,peek=fn,load=fn}}
 readFileState :: obj{mtimes=obj{},rangeHashes=undefined,contentDigests=undefined,rangeDedupCap=num}"
 `;
 
@@ -1300,13 +1300,13 @@ stream :: obj{emit=fn}
 promptSurfaceProfile :: obj{envPosture=str:"frozen",promptPack=str:"interactive",verifyStrategy=str:"none"}
 permission :: obj{mode=str:"acceptEdits"}
 messages :: arr[]
-system :: str[20910]
+system :: str[20951]
 cwd :: str:<cwd>
 maxTurns :: num
 signal :: obj{}
 searchPipeline :: obj{search=fn}
 identityModeVariant :: obj{registry=obj{variantFor=fn}}
-stickyModelStore :: obj{store=obj{get=fn,set=fn,load=fn}}
+stickyModelStore :: obj{store=obj{get=fn,set=fn,unset=fn,peek=fn,load=fn}}
 readFileState :: obj{mtimes=obj{},rangeHashes=undefined,contentDigests=undefined,rangeDedupCap=num}
 modePolicy :: obj{mode=str:"interactive",permission=obj{kind=str:"reviewer-backed"},termination=obj{kind=str:"user-stop"},sandbox=obj{kind=str:"user-cwd"},output=obj{kind=str:"stdout-chat"},externalDeps=obj{kind=str:"host"},toolSurface=obj{kind=str:"full"},promptPack=obj{kind=str:"assistant"},memory=obj{kind=str:"persistent"},observation=obj{kind=str:"stream-only"},network=obj{kind=str:"open"},gitWrite=obj{kind=str:"free"},secrets=obj{kind=str:"host-env"}}
 budgetMeter :: obj{dials=obj{maxTurns=num,maxRetries=num,maxConsecutiveFailures=num},caps=obj{},exhaustion=str:"stop",clock=fn,startedAtMs=num,turns=num,modelCalls=num,toolCalls=num,shellCommands=num,testRuns=num,inputTokens=num,outputTokens=num,reasoningTokens=num,filesChanged=num,patchBytes=num,retries=num,consecutiveFailures=num,costUsdAccum=num,costUsdThisTurn=num,providerRateLimitRemainingPct=undefined}
@@ -1328,12 +1328,12 @@ stream :: obj{emit=fn}
 promptSurfaceProfile :: obj{envPosture=str:"frozen",promptPack=str:"batch",verifyStrategy=str:"none"}
 permission :: obj{mode=str:"acceptEdits"}
 messages :: arr[]
-system :: str[20954]
+system :: str[20995]
 cwd :: str:<cwd>
 maxTurns :: num
 signal :: obj{}
 searchPipeline :: obj{search=fn}
-stickyModelStore :: obj{store=obj{get=fn,set=fn,load=fn}}
+stickyModelStore :: obj{store=obj{get=fn,set=fn,unset=fn,peek=fn,load=fn}}
 readFileState :: obj{mtimes=obj{},rangeHashes=undefined,contentDigests=undefined,rangeDedupCap=num}"
 `;
 
@@ -1345,12 +1345,12 @@ stream :: obj{emit=fn}
 promptSurfaceProfile :: obj{envPosture=str:"frozen",promptPack=str:"batch",verifyStrategy=str:"none"}
 permission :: obj{mode=str:"acceptEdits"}
 messages :: arr[]
-system :: str[20954]
+system :: str[20995]
 cwd :: str:<cwd>
 maxTurns :: num
 signal :: obj{}
 searchPipeline :: obj{search=fn}
-stickyModelStore :: obj{store=obj{get=fn,set=fn,load=fn}}
+stickyModelStore :: obj{store=obj{get=fn,set=fn,unset=fn,peek=fn,load=fn}}
 readFileState :: obj{mtimes=obj{},rangeHashes=undefined,contentDigests=undefined,rangeDedupCap=num}
 modePolicy :: obj{mode=str:"batch",permission=obj{kind=str:"auto",policy=str:"acceptEdits"},termination=obj{kind=str:"verdict"},sandbox=obj{kind=str:"per-instance"},output=obj{kind=str:"structured"},externalDeps=obj{kind=str:"hermetic"},toolSurface=obj{kind=str:"bench"},promptPack=obj{kind=str:"benchmark"},memory=obj{kind=str:"disabled"},observation=obj{kind=str:"full-trajectory"},network=obj{kind=str:"denied"},gitWrite=obj{kind=str:"snapshot-only"},secrets=obj{kind=str:"none"}}
 budgetMeter :: obj{dials=obj{maxTurns=num,maxWallClockMs=num,maxModelCalls=num,maxToolCalls=num,maxShellCommands=num,maxTestRuns=num,maxCostUsd=num,maxRetries=num,maxConsecutiveFailures=num},caps=obj{},exhaustion=str:"stop",clock=fn,startedAtMs=num,turns=num,modelCalls=num,toolCalls=num,shellCommands=num,testRuns=num,inputTokens=num,outputTokens=num,reasoningTokens=num,filesChanged=num,patchBytes=num,retries=num,consecutiveFailures=num,costUsdAccum=num,costUsdThisTurn=num,providerRateLimitRemainingPct=undefined}
@@ -1373,12 +1373,12 @@ stream :: obj{emit=fn}
 promptSurfaceProfile :: obj{envPosture=str:"frozen",promptPack=str:"interactive",verifyStrategy=str:"none"}
 permission :: obj{mode=str:"acceptEdits"}
 messages :: arr[]
-system :: str[20762]
+system :: str[20803]
 cwd :: str:<cwd>
 maxTurns :: num
 signal :: obj{}
 searchPipeline :: obj{search=fn}
-stickyModelStore :: obj{store=obj{get=fn,set=fn,load=fn}}
+stickyModelStore :: obj{store=obj{get=fn,set=fn,unset=fn,peek=fn,load=fn}}
 shadowVerify :: obj{verify=fn}
 runLedger :: obj{start=fn,touch=fn,settle=fn,get=fn,list=fn,running=fn,waiting=fn,toSnapshot=fn,fromSnapshot=fn}
 approvalStateMachine :: obj{request=fn,settle=fn,expire=fn,cancel=fn,get=fn,list=fn,pending=fn,toSnapshot=fn,fromSnapshot=fn,bindObjective=fn}
@@ -1398,12 +1398,12 @@ stream :: obj{emit=fn}
 promptSurfaceProfile :: obj{envPosture=str:"frozen",promptPack=str:"interactive",verifyStrategy=str:"none"}
 permission :: obj{mode=str:"acceptEdits"}
 messages :: arr[]
-system :: str[20762]
+system :: str[20803]
 cwd :: str:<cwd>
 maxTurns :: num
 signal :: obj{}
 searchPipeline :: obj{search=fn}
-stickyModelStore :: obj{store=obj{get=fn,set=fn,load=fn}}
+stickyModelStore :: obj{store=obj{get=fn,set=fn,unset=fn,peek=fn,load=fn}}
 shadowVerify :: obj{verify=fn}
 runLedger :: obj{start=fn,touch=fn,settle=fn,get=fn,list=fn,running=fn,waiting=fn,toSnapshot=fn,fromSnapshot=fn}
 approvalStateMachine :: obj{request=fn,settle=fn,expire=fn,cancel=fn,get=fn,list=fn,pending=fn,toSnapshot=fn,fromSnapshot=fn,bindObjective=fn}
@@ -1433,13 +1433,13 @@ stream :: obj{emit=fn}
 promptSurfaceProfile :: obj{envPosture=str:"frozen",promptPack=str:"interactive",verifyStrategy=str:"none"}
 permission :: obj{mode=str:"acceptEdits"}
 messages :: arr[]
-system :: str[20762]
+system :: str[20803]
 cwd :: str:<cwd>
 maxTurns :: num
 signal :: obj{}
 networkProxy :: obj{enabled=bool:true,allowlist=arr[str:"api.github.com",str:"github.com",str:"raw.githubusercontent.com",str:"objects.githubusercontent.com",str:"codeload.github.com",str:"registry.npmjs.org",str:"registry.yarnpkg.com",str:"pypi.org",str:"files.pythonhosted.org",str:"*.githubusercontent.com"]}
 searchPipeline :: obj{search=fn}
-stickyModelStore :: obj{store=obj{get=fn,set=fn,load=fn}}
+stickyModelStore :: obj{store=obj{get=fn,set=fn,unset=fn,peek=fn,load=fn}}
 automationEngine :: obj{engine=obj{schedule=fn,list=fn,cancel=fn,next=fn,markRun=fn,claim=fn,finalize=fn,runs=arr[],inbox=arr[]},handler=fn,tickIntervalMs=num,onTick=fn}
 readFileState :: obj{mtimes=obj{},rangeHashes=undefined,contentDigests=undefined,rangeDedupCap=num}"
 `;
@@ -1452,13 +1452,13 @@ stream :: obj{emit=fn}
 promptSurfaceProfile :: obj{envPosture=str:"frozen",promptPack=str:"interactive",verifyStrategy=str:"none"}
 permission :: obj{mode=str:"acceptEdits"}
 messages :: arr[]
-system :: str[20762]
+system :: str[20803]
 cwd :: str:<cwd>
 maxTurns :: num
 signal :: obj{}
 networkProxy :: obj{enabled=bool:true,allowlist=arr[str:"api.github.com",str:"github.com",str:"raw.githubusercontent.com",str:"objects.githubusercontent.com",str:"codeload.github.com",str:"registry.npmjs.org",str:"registry.yarnpkg.com",str:"pypi.org",str:"files.pythonhosted.org",str:"*.githubusercontent.com"]}
 searchPipeline :: obj{search=fn}
-stickyModelStore :: obj{store=obj{get=fn,set=fn,load=fn}}
+stickyModelStore :: obj{store=obj{get=fn,set=fn,unset=fn,peek=fn,load=fn}}
 automationEngine :: obj{engine=obj{schedule=fn,list=fn,cancel=fn,next=fn,markRun=fn,claim=fn,finalize=fn,runs=arr[],inbox=arr[]},handler=fn,tickIntervalMs=num,onTick=fn}
 readFileState :: obj{mtimes=obj{},rangeHashes=undefined,contentDigests=undefined,rangeDedupCap=num}
 modePolicy :: obj{mode=str:"interactive",permission=obj{kind=str:"reviewer-backed"},termination=obj{kind=str:"user-stop"},sandbox=obj{kind=str:"user-cwd"},output=obj{kind=str:"stdout-chat"},externalDeps=obj{kind=str:"host"},toolSurface=obj{kind=str:"full"},promptPack=obj{kind=str:"assistant"},memory=obj{kind=str:"persistent"},observation=obj{kind=str:"stream-only"},network=obj{kind=str:"open"},gitWrite=obj{kind=str:"free"},secrets=obj{kind=str:"host-env"}}
@@ -1481,12 +1481,12 @@ stream :: obj{emit=fn}
 promptSurfaceProfile :: obj{envPosture=str:"frozen",promptPack=str:"interactive",verifyStrategy=str:"none"}
 permission :: obj{mode=str:"acceptEdits"}
 messages :: arr[]
-system :: str[20762]
+system :: str[20803]
 cwd :: str:<cwd>
 maxTurns :: num
 signal :: obj{}
 searchPipeline :: obj{search=fn}
-stickyModelStore :: obj{store=obj{get=fn,set=fn,load=fn}}
+stickyModelStore :: obj{store=obj{get=fn,set=fn,unset=fn,peek=fn,load=fn}}
 subagentMailbox :: obj{send=fn,read=fn,peek=fn,ack=fn,list=fn,pendingFor=fn,toSnapshot=fn,fromSnapshot=fn}
 readFileState :: obj{mtimes=obj{},rangeHashes=undefined,contentDigests=undefined,rangeDedupCap=num}"
 `;
@@ -1499,12 +1499,12 @@ stream :: obj{emit=fn}
 promptSurfaceProfile :: obj{envPosture=str:"frozen",promptPack=str:"interactive",verifyStrategy=str:"none"}
 permission :: obj{mode=str:"acceptEdits"}
 messages :: arr[]
-system :: str[20762]
+system :: str[20803]
 cwd :: str:<cwd>
 maxTurns :: num
 signal :: obj{}
 searchPipeline :: obj{search=fn}
-stickyModelStore :: obj{store=obj{get=fn,set=fn,load=fn}}
+stickyModelStore :: obj{store=obj{get=fn,set=fn,unset=fn,peek=fn,load=fn}}
 subagentMailbox :: obj{send=fn,read=fn,peek=fn,ack=fn,list=fn,pendingFor=fn,toSnapshot=fn,fromSnapshot=fn}
 readFileState :: obj{mtimes=obj{},rangeHashes=undefined,contentDigests=undefined,rangeDedupCap=num}
 modePolicy :: obj{mode=str:"interactive",permission=obj{kind=str:"reviewer-backed"},termination=obj{kind=str:"user-stop"},sandbox=obj{kind=str:"user-cwd"},output=obj{kind=str:"stdout-chat"},externalDeps=obj{kind=str:"host"},toolSurface=obj{kind=str:"full"},promptPack=obj{kind=str:"assistant"},memory=obj{kind=str:"persistent"},observation=obj{kind=str:"stream-only"},network=obj{kind=str:"open"},gitWrite=obj{kind=str:"free"},secrets=obj{kind=str:"host-env"}}
@@ -1532,12 +1532,12 @@ stream :: obj{emit=fn}
 promptSurfaceProfile :: obj{envPosture=str:"frozen",promptPack=str:"interactive",verifyStrategy=str:"none"}
 permission :: obj{mode=str:"acceptEdits"}
 messages :: arr[]
-system :: str[20762]
+system :: str[20803]
 cwd :: str:<cwd>
 maxTurns :: num
 signal :: obj{}
 searchPipeline :: obj{search=fn}
-stickyModelStore :: obj{store=obj{get=fn,set=fn,load=fn}}
+stickyModelStore :: obj{store=obj{get=fn,set=fn,unset=fn,peek=fn,load=fn}}
 toolProfile :: obj{resolver=obj{resolve=fn},defaultName=str:"minimal"}
 focusChain :: obj{tracker=obj{setTodos=fn,tickTurn=fn,getInjection=fn,peekInjection=fn,getDriftWarning=fn,markDone=fn,snapshotTodos=fn,currentTurn=fn},reinjectEveryN=num}
 shadowVerify :: obj{verify=fn}
@@ -1557,12 +1557,12 @@ stream :: obj{emit=fn}
 promptSurfaceProfile :: obj{envPosture=str:"frozen",promptPack=str:"interactive",verifyStrategy=str:"none"}
 permission :: obj{mode=str:"acceptEdits"}
 messages :: arr[]
-system :: str[20762]
+system :: str[20803]
 cwd :: str:<cwd>
 maxTurns :: num
 signal :: obj{}
 searchPipeline :: obj{search=fn}
-stickyModelStore :: obj{store=obj{get=fn,set=fn,load=fn}}
+stickyModelStore :: obj{store=obj{get=fn,set=fn,unset=fn,peek=fn,load=fn}}
 toolProfile :: obj{resolver=obj{resolve=fn},defaultName=str:"minimal"}
 focusChain :: obj{tracker=obj{setTodos=fn,tickTurn=fn,getInjection=fn,peekInjection=fn,getDriftWarning=fn,markDone=fn,snapshotTodos=fn,currentTurn=fn},reinjectEveryN=num}
 shadowVerify :: obj{verify=fn}

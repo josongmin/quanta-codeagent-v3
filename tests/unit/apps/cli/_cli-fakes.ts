@@ -292,4 +292,9 @@ export const makeFakeSessionSetup = (
   playbookCliFlag: undefined,
   featureCfg: makeFakeFeatureCfg(),
   ...overrides,
+  // The boot model AFTER the sticky-model boot resolution (a REQUIRED field on
+  // `SessionSetupResult`). After the spread so an override still wins, with the
+  // fake's own `model` as the default — a fake whose two model fields disagree
+  // would make every display/loop assertion ambiguous.
+  effectiveBootModel: overrides.effectiveBootModel ?? overrides.model ?? "test-model",
 })

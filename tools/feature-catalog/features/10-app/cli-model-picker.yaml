@@ -16,12 +16,12 @@ config_refs:
   cli: ['/model', '/model <id>']
 surface_integration:
   cli: full
-  web: missing
+  web: full
   method: audited
-  verified: "2026-06-09"
+  verified: "2026-08-27"
   evidence:
-    cli: "live in interactive CLI — modelCmd imported+registered in registry-surface.ts:55/:889 (reached via index.ts → slash-commands.ts → registry-surface), buildModelAdapter wired through surface-compose.ts:201 buildModelAdapterWire (reached via index.ts → repl → surface-compose); e2e hellgate exercises the registered command end-to-end"
-    web: "CLI slash command; no model-picker web handler and the SlashPalette server-routed prefill stub does not execute"
+    cli: "live in interactive CLI — modelCmd imported+registered in registry-surface.ts (reached via index.ts → slash-commands.ts → registry-surface), and the ctx slot is now filled from the SURFACE-owned store (core-state.ts → mutable-wires buildModelAdapterWire) rather than the headless-only runtimeContext slot. aug-27 measured on a real pty against a live chatgpt-oauth account: `/model` lists all 7 catalog models (was 1 + \"not wired in this surface\"), and after `/model gpt-5.4` the per-turn resolve reports base=gpt-5.6-terra sticky=gpt-5.4 TURN-RAN-ON=gpt-5.4"
+    web: "aug-27: the web surface now has the SAME two halves through its own door — `set_model` (control request) writes the SAME sticky store and `GET /readout/model` lists the SAME candidate catalog (see the `web-model-switch` entry). This CLI slash command itself is still CLI-only (the SlashPalette server-routed prefill stub does not execute), and the web has no picker WIDGET yet — a client calls the readout + sends the frame."
 purpose: |
   The `/model` mode-implicit interactive picker + the model↔effort coherence fix.
   Distinct from `/sticky-model` (ADR-0462), which takes an explicit
@@ -57,20 +57,110 @@ purpose: |
   `SlashContext.model` slot. `current()` = host getter (wins) → per-mode SYNC
   SHADOW (this adapter's own `set()` updates it, so an in-surface set is reflected
   IMMEDIATELY — the sticky store is async, a sync getter could only return a
-  Promise) → boot model. `candidates()` = boot + retry ids, deduped, enriched from
-  the provider-metadata SSOT (window/output/recommended/hint, `deriveHint` derived
-  purely from `reasoning`+window — no drifting hardcoded table). `set(id)` persists
+  Promise) → boot model. `candidates()` = a LIVE getter over the surface's
+  candidate ids (aug-27: boot + `QUANTA_RETRY_MODELS` + every id the provider
+  catalog probe added), deduped, enriched from the provider-metadata SSOT
+  (window/output/recommended/hint; `deriveHint` fires ONLY for an id with an EXACT
+  metadata entry — a family-fallback id gets NO hint, since the family badge
+  ("most capable") is actively wrong on a live `-mini`/`-spark` slug). `set(id)` persists
   via the SAME `StickyModelStore` the loop's CONSUME side reads (ADR-0462), keyed
   to the CURRENT mode (mode-implicit), returning a typed outcome
   (`ok`|`invalid-mode`|`write-error`) — never throws. So `/model` and
   `/sticky-model` agree on one store. Registered in `registry-surface.ts` and wired
   via `surface-compose.ts` `buildModelAdapterWire`, both reachable from
   `index.ts` — the command is live in the interactive CLI.
+
+  aug-27 WIRING FIX — the command was registered but UNREACHABLE on the primary
+  surface, in three stacked half-wires: (1) `mutable-wires` read the sticky store
+  off `runtimeContext.stickyModelStore()`, a slot only the HEADLESS composition
+  root fills (`resolveStickyModelStore`), so the interactive CLI's `ctx.model` was
+  omitted and `/model` printed "not wired in this surface"; (2) candidates came
+  from `QUANTA_RETRY_MODELS` alone (unset by default) so the picker offered only
+  the boot model and `pickModel` rejected everything else; (3) the CLI never set
+  `AgentConfig.modelCandidates`, the list `skill-gate#resolveSkillTurnOverride`
+  resolves a picked id to a PORT out of — so even a stored pick was a silent
+  no-op. Now: `core-state.ts` mints BOTH halves and `runtime-compose.ts` threads
+  the SAME instances down as `stickyModelStore` + `modelCandidates` (both new
+  PASS_THROUGH compose keys).
+
+  aug-28 CORRECTION — this entry described the store as "an in-memory
+  `StickyModelStore`, session-scoped on purpose, since the adapter's `current()` is
+  sync while the store port is async". Both halves of that are now wrong. The store
+  is `fsBackedStickyModelStore` wrapped in `sessionScopedStickyModelStore`, so a
+  pick PERSISTS for the next session while this session still reads its own cell
+  (a pick made elsewhere lands at the next boot, never mid-turn). And the sync/async
+  argument no longer holds: `StickyModelStore.peek` is the port's REQUIRED sync
+  read, so `current()` reads the store itself instead of a private shadow copy.
+
+  aug-28 — `/model --clear` (and `/sticky-model <mode> --clear`). There was no way
+  to UNSET a pick: the port had `get`/`set`/`load`/`peek` and `set` rejected an
+  empty id, so once an operator ran `/model gpt-4o` that preference was permanent
+  for that provider+mode across every future session, escapable only by hand-editing
+  the JSON or by an explicit `QUANTA_MODEL` pin (which overrides one invocation).
+  `StickyModelStore.unset` is REQUIRED (a new impl cannot forget it), idempotent
+  (an absent key is a success and the fs impl writes nothing, so a first-run clear
+  does not conjure the file), no-throw, backs corrupt bytes to `.corrupt.bak` before
+  truncating to `{}`, and never unlinks. The session-scoped decorator clears its
+  in-memory cell ONLY when the durable removal succeeded.
+
+  aug-28 — ONE key for BOTH front doors. `/sticky-model` writes the same store, and
+  it was left writing the bare mode after the provider joined the key: measured end
+  to end, the command printed `default → boot-model`, the file held
+  `{"default":"boot-model"}`, and `readStickyModelForMode` returned `undefined` — a
+  success line over an inert write. It is provider-keyed now, and reads accept the
+  legacy bare key as a FALLBACK (`stickyModelReadKeys`) so every
+  `sticky-model.json` written before the change is still honored; a scoped entry
+  wins over a bare one for the same mode.
+
+  aug-28 — the OTHER surfaces that had a store but no candidates. The headless /
+  one-shot root (`buildBaseFromArgs`) resolved `stickyModelStore` unconditionally
+  and never set `modelCandidates`, so a skill-declared `model:` override (and, under
+  `--sticky-model`, a CLI pick) was read every turn and silently discarded for want
+  of a port. `resolveModelSwitchSlots` now holds both halves together. And the
+  OpenAI adapters gained `listModels` — including `openai-responses`, which is what
+  a default `OPENAI_API_KEY` session actually boots (`resolveOpenAISurface` returns
+  `"responses"` for the default base URL), so implementing only the
+  chat-completions one would have left the common BYOK session with a picker that
+  could list nothing but the boot model.
+
+  `@/llm/model-catalog` (shared wire — it lives in `@/llm`, not a surface, because
+  the web daemon's `set_model` needs the SAME candidate set and the slice fence
+  forbids it importing `@/apps/cli`): ONE live `ModelCandidate[]` shared by
+  reference with `AgentConfig.modelCandidates`. Seeded synchronously (boot port +
+  retry candidates); `refresh()` — awaited by `/model` before it lists or resolves
+  — probes `LLMPort.listModels` ONCE per session and pushes each newly-discovered
+  slug that a port can be built for. Fail-open: no probe surface, a rejected probe
+  (expired auth/offline), or an unbuildable id ⇒ the seeded set stands. A slug with
+  no buildable port is DROPPED rather than offered-then-silently-ignored.
+
+  `LLMPort.listModels` + `src/llm/port-identity.ts`: the probe is the provider's
+  own catalog (chatgpt-oauth reuses its 5-minute `/codex/models` memo — the same
+  truth Codex uses), so the candidate set never drifts like a hardcoded slug list
+  would (`MODEL_CONTEXT_WINDOWS` has no `gpt-5.6-terra` entry while that IS the
+  live default). `forwardPortIdentity` exists because EVERY port decorator
+  re-spelled the identity copy inline and therefore ate the new capability: the
+  CLI's spinner-stall wrapper dropped `listModels`, so the interactive surface saw
+  a probe-less port. Every SPREAD-shaped decorator (13 of them) now forwards the
+  whole non-stream surface through that one helper. The two CLASS-shaped ports,
+  `RetryingLLM` and `FallbackLLM`, still declare and assign each identity field by
+  HAND — a helper spread cannot fill a class's readonly fields — which is exactly
+  why the capability CENSUS guard
+  (`tests/unit/llm/port-identity-capability-guard.test.ts`) enumerates them
+  explicitly instead of trusting the helper: they are the two places a new
+  capability can still be silently eaten. Three ports were caught dropping
+  `contextWindowKey` (resolving a granted 1M window as 200k): those two classes,
+  plus the responses-continuation wrapper.
 evidence:
   code:
     - src/apps/cli/slash/model-picker.ts
     - src/apps/cli/slash/model-cmd.ts
     - src/apps/cli/repl/ctx-adapters/model-adapter.ts
+    - src/llm/model-catalog.ts
+    - src/apps/cli/repl/sticky-model-boot.ts
+    - src/llm/port-identity.ts
+    - src/agent/effective-model.ts
+    - src/agent/sticky-model/session-scoped-store.ts
+    - src/host/runtime/agent-arg-builder/model-switch-wire.ts
   adrs: [517, 462]
   tests:
     unit:
@@ -78,9 +168,20 @@ evidence:
       - src/apps/cli/__tests__/model-cmd-e2e.hellgate.test.ts
       - src/apps/cli/__tests__/model-compose-wire.hellgate.test.ts
       - src/apps/cli/repl/ctx-adapters/__tests__/model-adapter.hellgate.test.ts
+      - tests/unit/apps/cli/repl/model-switch-wire-hellgate.test.ts
+      - tests/unit/apps/cli/repl/model-persistence-hellgate.test.ts
+      - tests/unit/llm/port-identity-capability-guard.test.ts
+      - tests/unit/apps/cli/repl/model-clear-hellgate.test.ts
+      - tests/unit/llm/openai-list-models-hellgate.test.ts
+      - tests/unit/apps/agent/headless-model-candidates-hellgate.test.ts
+      - tests/unit/cli/model-id-render-injection-hellgate.test.ts
+      - tests/unit/_arch/real-quanta-home-escape-ratchet.test.ts
     integration: []
     contract: []
 knobs:
+  - name: '/model --clear'
+    where: 'registry-surface.ts modelCmd (CLEAR_FLAG) ⇒ StickyModelStore.unset'
+    purpose: 'drop the saved pick for the current provider+mode and go back to the boot model (idempotent; surgical — sibling modes and providers survive)'
   - name: '/model'
     where: 'registry-surface.ts modelCmd (no-arg = list current + candidates)'
     purpose: 'render the current sticky model + every candidate with inline context/output/recommended/capability metadata'
@@ -100,10 +201,41 @@ notes: |
   not-wired path exit 0 / unknown model exit 1 / wrong arity exit 1 / write-error
   surfaced (no throw) / tab-complete prefix filter inert past arg0 / modelCmd
   registered in SURFACE_SLASH_COMMANDS. model-adapter.hellgate: current() host-
-  getter-wins → sync-shadow → boot fallback / shadow keyed per-mode (no cross-mode
-  leak) / candidates() dedupe + metadata enrich + recommended on boot model /
+  getter-wins → the store's sync `peek` → boot fallback (aug-28: was a private
+  per-mode shadow map, deleted once the port gained `peek`) / the read is keyed per
+  provider+mode (no cross-mode leak) / candidates() dedupe + metadata enrich + recommended on boot model /
   set() invalid-mode + empty-id reject (no write) / store-write-error surfaced.
   model-compose-wire.hellgate: buildModelAdapterWire binds the slot from the same
-  sticky store. Mode-implicit /model is DISTINCT from /sticky-model's explicit
+  sticky store. model-switch-wire.hellgate (aug-27): drives the REAL
+  `composeSurfaceWires` + `wires.dispatchSlash("/model")` and reads the consume
+  side through the real loop helpers — slot present (not "not wired") / a
+  catalog-probed model is pickable / the pick reaches `readStickyModelForMode` AND
+  resolves to that model's PORT / picker list ≡ `modelCandidates` / rejected probe
+  degrades / unbuildable slug never offered / both compose keys still in
+  PASS_THROUGH_COMPOSE_KEYS + the patch survives the snapshot rebuild.
+  RED-on-injection measured for all three wires (revert store ⇒ 6 red, revert
+  probe ⇒ 3 red, revert modelCandidates ⇒ 2 red).
+  model-persistence.hellgate (aug-27): a pick SURVIVES the session coherently —
+  the write lands on disk; session 2 can RUN it on turn 1 (a PORT exists without
+  any `/model` call, via the eager `extraIds` seed); the picker marks it current
+  (a sync `peek` of a store seeded from the boot snapshot); the BANNER announces
+  it; the mode axis matches the loop under `--plan`; an explicit `--model` /
+  `QUANTA_MODEL` pin BEATS the stored pick; a pick made under another PROVIDER is
+  invisible here; and the loop keys off the store SLOT's provider rather than
+  `config.llm.provider` (one authority for the write key and the read key);
+  paired controls for no-file and a CORRUPT file; plus a hermeticity guard that the
+  store path follows the injected env.
+  RED-on-injection: drop the eager seed ⇒ 2 red, drop the sync read ⇒ 2 red, drop
+  the slot-provider preference ⇒ 1 red.
+  port-identity-capability-guard (aug-27): every production port DECORATOR (13
+  spread-shaped ones via the helper, plus the `RetryingLLM` / `FallbackLLM` classes
+  that hand-roll the same fields) forwards the WHOLE
+  non-stream surface, `listModels` callable through the wrapper (bound receiver),
+  with a paired control that a port WITHOUT the capability never gains a fake one.
+  This guard exists because the defect it pins actually happened mid-campaign (the
+  CLI spinner-stall wrapper ate `listModels`, so `/model` could only list the boot
+  model) — and on its first run it caught TWO MORE live holes: `RetryingLLM` (on
+  every CLI stack) and `FallbackLLM` were dropping `contextWindowKey`, i.e. a
+  granted 1M-token window resolved as 200k for compaction. Mode-implicit /model is DISTINCT from /sticky-model's explicit
   2-arg form; both reuse one StickyModelStore so the loop's consume side observes
-  either (ADR-0462). Web surface unwired (deferred — no web model-picker handler).
+  either (ADR-0462). The web surface has its own door now — see `web-model-switch`.

@@ -49,6 +49,10 @@ export interface SegmentedUsageView {
   readonly total: number
   readonly max: number
   readonly model?: string
+  /** aug-28 — the window-resolution key behind {@link max} (see
+   *  `ContextUsageBreakdown.windowModel`). The pre-compaction warning derives its
+   *  threshold from THIS, not from {@link model}. */
+  readonly windowModel?: string
   /**
    * S3 (jul-03) — OpenAI-Responses-ONLY reasoning-token split (portion of the
    * turn's OUTPUT tokens the model spent on hidden reasoning). Rendered as a

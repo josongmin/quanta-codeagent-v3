@@ -53,6 +53,7 @@
  * to the turn-indicator being enabled, i.e. an interactive TTY).
  */
 
+import { forwardPortIdentity } from "../port-identity"
 import type { LLMPort } from "../ports"
 import type { StreamEvent, StreamInput } from "../types"
 
@@ -77,11 +78,7 @@ export interface LiveUsageKnobs {
 /** Copy the optional passthrough identity fields from an inner port. Keeps the
  *  decorated port indistinguishable from the inner for telemetry / renderer. */
 const passthroughFields = (inner: LLMPort): Omit<LLMPort, "stream"> => ({
-  ...(inner.model !== undefined ? { model: inner.model } : {}),
-  ...(inner.provider !== undefined ? { provider: inner.provider } : {}),
-  ...(inner.surfaceId !== undefined ? { surfaceId: inner.surfaceId } : {}),
-  ...(inner.transportId !== undefined ? { transportId: inner.transportId } : {}),
-  ...(inner.authMode !== undefined ? { authMode: inner.authMode } : {}),
+  ...forwardPortIdentity(inner),
 })
 
 /**

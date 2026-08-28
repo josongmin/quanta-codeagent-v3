@@ -121,6 +121,19 @@ export interface RuntimeFacadeComposeOptions {
    *  omitted ⇒ `wireOptionalAgentPorts` defaults the SSOT resolver (which returns
    *  the caller fallback verbatim), byte-identical to the no-preset path. */
   readonly roleModelResolver?: AgentConfig["roleModelResolver"]
+  /** `/model` (aug-27) — the surface-owned per-mode sticky-model store. Patched
+   *  onto the runtime-context state so the per-turn `AgentConfig` carries
+   *  `stickyModelStore` and `skill-gate#readStickyModelForMode` reads the SAME
+   *  store the surface's `/model` writes. Absent ⇒ slot omitted ⇒ no sticky read
+   *  (byte-identical). The headless `apps/agent` surface sets this on its base
+   *  directly via `resolveStickyModelStore`; the interactive CLI rides here. */
+  readonly stickyModelStore?: AgentConfig["stickyModelStore"]
+  /** `/model` (aug-27) — the id→port candidate list a model pick is resolved
+   *  against (`skill-gate#resolveSkillTurnOverride`, `subagent-runner-overrides`).
+   *  The CLI threads its LIVE array (grown by the provider catalog probe) so a
+   *  pick made after boot still finds a port. Absent ⇒ slot omitted ⇒ every
+   *  sticky / skill model override is a silent no-op (the pre-wire behavior). */
+  readonly modelCandidates?: AgentConfig["modelCandidates"]
 }
 
 /** S1 (jul-04) — the write-only net-capture sink the CLI threads through
@@ -258,6 +271,8 @@ export const PASS_THROUGH_COMPOSE_KEYS = [
   "browserNet",
   "objective",
   "roleModelResolver",
+  "stickyModelStore",
+  "modelCandidates",
 ] as const satisfies readonly (keyof RuntimeFacadeComposeOptions & keyof RuntimeContextPatch)[]
 
 const applyRuntimeFacadeComposeOptions = (

@@ -35,6 +35,7 @@
 
 import { errMessage, logger } from "@/shared"
 import { isStreamEventContentful } from "./empty-stream-breaker"
+import { forwardPortIdentity } from "./port-identity"
 import type { LLMPort } from "./ports"
 import type { StreamEvent, StreamInput } from "./types"
 
@@ -152,12 +153,7 @@ export const withStreamProgressTrace = (
   }
 
   const port: LLMPort = {
-    ...(inner.model !== undefined ? { model: inner.model } : {}),
-    ...(inner.contextWindowKey !== undefined ? { contextWindowKey: inner.contextWindowKey } : {}),
-    ...(inner.provider !== undefined ? { provider: inner.provider } : {}),
-    ...(inner.surfaceId !== undefined ? { surfaceId: inner.surfaceId } : {}),
-    ...(inner.transportId !== undefined ? { transportId: inner.transportId } : {}),
-    ...(inner.authMode !== undefined ? { authMode: inner.authMode } : {}),
+    ...forwardPortIdentity(inner),
     stream(input: StreamInput): AsyncIterable<StreamEvent> {
       async function* iterate(): AsyncIterable<StreamEvent> {
         const start = now()

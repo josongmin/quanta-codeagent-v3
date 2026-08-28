@@ -1,4 +1,12 @@
-import { createAutoClassifierPort, RetryingLLM } from "@/agent"
+import { createAutoClassifierPort } from "@/agent"
+// aug-28 — narrow import (this module needs one class, not the barrel).
+// MEASURED CAVEAT, so nobody mistakes this for a mock-proofing trick: in bun,
+// `mock.module("@/agent", …)` poisons a DEEP import of the same symbol too, and
+// `mock.restore()` does not undo a module mock. A test that stubbed `RetryingLLM`
+// on the barrel therefore leaked a shape-less class into every later file in the
+// run; the fix was to stop stubbing it there (see
+// `tests/unit/apps/cli/session-setup-hellgate.test.ts`), not to dodge it here.
+import { RetryingLLM } from "@/agent/retry"
 import type { EndpointSecretRef, OpenAIEndpointOptions } from "@/config"
 import {
   type CreateLLMOptions,
@@ -239,6 +247,50 @@ export const composeLLMCore = (input: ComposeLlmInput): LLMPort => {
   const traceMs = runtimeConfig().llmStreamTraceMs
   finalLLM = withStreamProgressTrace(finalLLM, traceMs !== undefined ? { intervalMs: traceMs } : {})
   return finalLLM
+}
+
+/**
+ * aug-28 — decorate a SWAPPABLE model port (a `/model` / sticky / skill pick) with
+ * the same ALWAYS-ON safety + observability wrappers the boot port carries.
+ *
+ * WHY THIS EXISTS. `modelCandidates` ports were minted as BARE adapters, and the
+ * loop REPLACES `config.llm` with the picked one for the whole turn
+ * (`skill-gate#resolveSkillTurnOverride`). So a `/model` pick silently dropped:
+ * bounded retry/backoff (a transient 429 became a hard turn failure), the
+ * consecutive-empty circuit breaker (the silent token-burn guard), and the stream
+ * progress heartbeat. One picked model and the session lost its whole safety net.
+ *
+ * WHAT IS INCLUDED — exactly the wrappers {@link composeLLMCore} applies
+ * unconditionally, in the same order (inner → outer):
+ *   `RetryingLLM` → `withEmptyStreamCircuitBreaker` → `withStreamProgressTrace`.
+ *
+ * WHAT IS DELIBERATELY EXCLUDED, and why:
+ *   - `FallbackLLM`: a fallback chain silently re-routes to ANOTHER model. The
+ *     operator just named the model they want; quietly answering from a different
+ *     one is the opposite of the request.
+ *   - the `auto`-mode permission classifier: it is attached to the SESSION port by
+ *     the composition root and needs the live permission context; a swapped port
+ *     must not mint a second classifier.
+ *   - `withLiveUsage`: the surface attaches it to the port it renders from.
+ *   - the Responses-continuation wrapper: it is applied by the runtime binding to
+ *     `config.llm` only, and it DROPS `contextWindowKey`/`listModels` — a swapped
+ *     port is better off without it (it keeps its window key).
+ */
+export const decorateSwappableModelPort = (args: {
+  readonly inner: LLMPort
+  readonly signal?: AbortSignal
+}): LLMPort => {
+  const retrying = new RetryingLLM({
+    inner: args.inner,
+    ...(args.signal !== undefined ? { signal: args.signal } : {}),
+  })
+  const breakerK = runtimeConfig().llmEmptyStreamBreakerK
+  const breaker = withEmptyStreamCircuitBreaker(
+    retrying,
+    breakerK !== undefined ? { maxConsecutiveEmpty: breakerK } : {},
+  )
+  const traceMs = runtimeConfig().llmStreamTraceMs
+  return withStreamProgressTrace(breaker, traceMs !== undefined ? { intervalMs: traceMs } : {})
 }
 
 // ─────────────────── H7 — rotating cloud credentials (knob-read) ────────────

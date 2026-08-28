@@ -157,7 +157,13 @@ export const buildSurfaceDispatchWire = (
       streamInput: core.lastStreamInput(),
       retryEnabled: core.retryEnabled,
       candidates: core.retryCandidates,
-      currentModelId: setup.model,
+      // aug-28 — the model the most-recent turn ACTUALLY ran (see `retry-with.ts`'s
+      // own doc for that field). With a persisted `/model` pick, `setup.model` is
+      // the BOOT model, so the alternatives list offered the model you were already
+      // on and the emitted `model_route_changed` named the wrong `fromModel`. Read
+      // through the surface's one effective-model getter; `retry` is a thunk, so
+      // this is evaluated per invocation and follows an in-session switch.
+      currentModelId: core.effectiveModel(),
       messages: [...state.history],
       signal: setup.abort.signal,
       onEvent: renderRetryEvent,

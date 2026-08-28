@@ -80,7 +80,16 @@ export const buildNotifyAndContextWarning = (args: {
           // per-config override is plumbed to the display, so the resolver
           // applies the env override then the model-window derivation then the
           // 120k legacy default — identical precedence to the compaction wire.
-          const compactThreshold = resolveCompactionLimitTokens(undefined, view?.model)
+          // aug-28 — resolve from the WINDOW KEY the producer used for `max`, not
+          // from `view.model`. `model` is deliberately the real active id, so with
+          // the 1M beta on it yielded the 200k-family threshold while compaction
+          // used 923k: the warning latched at ~110k and never cleared, claiming
+          // "auto-summary imminent" at 700%+ of a threshold 8x away. Falls back to
+          // `model` when the producer published no key (byte-identical).
+          const compactThreshold = resolveCompactionLimitTokens(
+            undefined,
+            view?.windowModel ?? view?.model,
+          )
           return renderContextWarning(toWarningView(view, compactThreshold))
         }
       : undefined

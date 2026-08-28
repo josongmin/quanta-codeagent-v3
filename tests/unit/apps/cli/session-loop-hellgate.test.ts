@@ -303,6 +303,9 @@ const buildSetup = async (
   const result = {
     provider: "anthropic" as never,
     model: "test-model",
+    // REQUIRED on `SessionSetupResult`: the boot model after sticky-model boot
+    // resolution. Same value as `model` here (this fake persists no pick).
+    effectiveBootModel: "test-model",
     mode: "default" as never,
     cwd: "/tmp/test-cwd",
     slog: { info: () => undefined, warn: () => undefined, error: () => undefined } as never,

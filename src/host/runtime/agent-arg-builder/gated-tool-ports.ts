@@ -67,6 +67,20 @@ export interface CompositionSeams {
    *  This drives the REAL `buildGatedToolPorts` registration + dispatch path
    *  against a deterministic fake — no Chrome, no network. */
   appshotPort?: AppshotPort
+  /** aug-28 — the sticky-model store's FILE, for tests that must not read the
+   *  developer's real `~/.quanta/sticky-model.json`.
+   *
+   *  WHY A SEAM AND NOT `QUANTA_CONFIG_DIR`: the config dir is embedded in the
+   *  rendered system prompt, so moving it changes the assembled base — which is
+   *  exactly what a byte-identical fingerprint test cannot tolerate. This seam
+   *  moves ONLY the sticky file. Absent (production, and every host) ⇒ the path
+   *  is derived from the composition root's env (`stickyModelPathFrom`), i.e.
+   *  byte-identical to the default.
+   *
+   *  It matters because the pick in that file now seeds a `modelCandidates` PORT
+   *  (see `model-switch-wire.ts`): a suite that reads the real file would derive
+   *  a different base on a machine where someone has used `/model`. */
+  stickyModelPath?: string
 }
 
 /** N6 — resolve the spread-ready `ptySession` slot (`{}` when the knob is OFF

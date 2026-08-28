@@ -25,6 +25,7 @@
 
 import type { EffortLevel } from "@/agent"
 import type { ModelEffortSupport, ReasoningEffort } from "@/llm/provider-metadata"
+import { escapeBodyForLine, sanitizeLogText } from "@/shared"
 
 /**
  * The structural metadata a single candidate line renders from. Every field
@@ -71,13 +72,20 @@ const formatTokenCount = (n: number): string => {
  */
 export const formatModelLine = (meta: ModelLineMeta, current: boolean): string => {
   const marker = current ? "*" : " "
+  // aug-28 SECURITY — the id can originate from a provider response or from the
+  // shared sticky file, and this line goes straight to the terminal. Sanitize +
+  // fold newlines so a hostile slug cannot emit CSI/OSC sequences or forge extra
+  // rows (a measured PoC printed a fake "* claude-opus-trusted" current-model row).
+  // The admission predicate already rejects such ids upstream; this is the
+  // defense-in-depth at the seam that actually writes to the tty.
+  const safeId = escapeBodyForLine(sanitizeLogText(meta.id))
   const segments: string[] = []
   if (meta.contextWindow !== undefined) segments.push(`${formatTokenCount(meta.contextWindow)} ctx`)
   if (meta.maxOutput !== undefined) segments.push(`${formatTokenCount(meta.maxOutput)} out`)
   if (meta.recommended === true) segments.push("(recommended)")
   if (meta.hint !== undefined && meta.hint.trim() !== "") segments.push(meta.hint.trim())
   const tail = segments.length > 0 ? `  ${segments.join(" · ")}` : ""
-  return ` ${marker} ${meta.id.padEnd(20)}${tail}\n`
+  return ` ${marker} ${safeId.padEnd(20)}${tail}\n`
 }
 
 /** Thrown by {@link pickModel} when the requested id matches no candidate. The

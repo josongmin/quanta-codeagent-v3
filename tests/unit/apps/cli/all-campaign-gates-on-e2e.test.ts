@@ -45,7 +45,7 @@
  * CLI composition). NO production code is touched.
  */
 
-import { describe, expect, test } from "bun:test"
+import { afterEach, describe, expect, test } from "bun:test"
 import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -92,6 +92,10 @@ import {
   type ToolEvent,
   ToolRegistry,
 } from "@/tool"
+import {
+  cleanupHermeticQuantaHomes,
+  hermeticQuantaHomeEnv,
+} from "../../../_support/hermetic-quanta-home"
 import { makeFakeFeatureCfg, makeFakeSessionSetup } from "./_cli-fakes"
 
 // ── the ALL-ON campaign gate world ──────────────────────────────────────────
@@ -258,7 +262,12 @@ const composeAllOn = async (
     ...(over.restoreFrom !== undefined ? { restoredObjective: over.restoreFrom } : {}),
   })
   const state = createSurfaceState({ imageQueue: undefined, rewindState: undefined, history: [] })
-  const wires = composeSurfaceWires(setup, state, process.env, {
+  // `process.env` verbatim would root the surface's sticky-model store at the
+  // DEVELOPER's real `~/.quanta` — this suite turns every campaign gate ON, so a
+  // local `/model` pick could change its outcome and a dispatched set could write
+  // there. Keep every other env key (the gates are read from it) and re-point ONLY
+  // the Quanta home.
+  const wires = composeSurfaceWires(setup, state, hermeticQuantaHomeEnv(process.env), {
     convStore: defaultConversationCheckpointStore(),
   })
   return { bundle, lp, setup, wires }
@@ -272,6 +281,7 @@ const freshSkillAuthority = (): Promise<SkillRuntimeAuthority> =>
  * ========================================================================== */
 
 describe("aug-22 ALL-GATES-ON — the whole campaign assembles live, no gate interaction breaks it", () => {
+  afterEach(cleanupHermeticQuantaHomes)
   test("A0 · composing with EVERY gate on does not throw (simultaneous assembly)", async () => {
     await withGates(ALL_GATES, async () => {
       const skills = await freshSkillAuthority()

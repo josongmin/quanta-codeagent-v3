@@ -20,8 +20,8 @@
  */
 
 import { describe, expect, test } from "bun:test"
-import { join } from "node:path"
 import { spawnSync } from "node:child_process"
+import { join } from "node:path"
 import { FEATURES_DIR as ANCHORED_FEATURES_DIR } from "../../tools/feature-catalog/paths"
 import { loadFeaturesStrict } from "../../tools/feature-catalog/schema"
 import { checkFeatureDoD } from "../../tools/pm/definition-of-done"

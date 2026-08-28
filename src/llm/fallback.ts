@@ -175,6 +175,15 @@ export class FallbackLLM implements LLMPort {
   readonly surfaceId?: LlmSurfaceId
   readonly transportId?: LlmTransportId
   readonly authMode?: string
+  /** aug-27 — the PRIMARY provider's CONTEXT-WINDOW key (same "report the
+   *  primary" rule as `model`): without it a fallback chain lost the `<model>-1m`
+   *  window pin (ADR-0505) and compaction resolved the 200k default instead of the
+   *  granted 1M. Surfaced by the decorator capability guard. */
+  readonly contextWindowKey?: string
+  /** aug-27 — the PRIMARY provider's model-catalog probe (same "report the
+   *  primary" rule as `model`/`provider` above): a `/model` listing describes the
+   *  account this chain streams from FIRST. Absent if the primary has none. */
+  readonly listModels?: () => Promise<readonly string[]>
 
   constructor(opts: FallbackLLMOptions) {
     if (opts.providers.length === 0) {
@@ -187,12 +196,19 @@ export class FallbackLLM implements LLMPort {
     if (primaryModel !== undefined) this.model = primaryModel
     const primaryProvider = opts.providers[0]?.provider
     if (primaryProvider !== undefined) this.provider = primaryProvider
+    const primaryWindowKey = opts.providers[0]?.contextWindowKey
+    if (primaryWindowKey !== undefined) this.contextWindowKey = primaryWindowKey
     const primarySurfaceId = opts.providers[0]?.surfaceId
     if (primarySurfaceId !== undefined) this.surfaceId = primarySurfaceId
     const primaryTransportId = opts.providers[0]?.transportId
     if (primaryTransportId !== undefined) this.transportId = primaryTransportId
     const primaryAuthMode = opts.providers[0]?.authMode
     if (primaryAuthMode !== undefined) this.authMode = primaryAuthMode
+    const primary = opts.providers[0]
+    const primaryListModels = primary?.listModels
+    if (primary !== undefined && primaryListModels !== undefined) {
+      this.listModels = async () => await primaryListModels.call(primary)
+    }
     this.signal = opts.signal
     this.isFallbackTrigger = opts.isFallbackTrigger ?? isFallbackTrigger
     this.metrics = opts.metrics ?? NOOP_FALLBACK_METRICS

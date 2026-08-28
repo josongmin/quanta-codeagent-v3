@@ -73,6 +73,25 @@ export const buildRuntimeFacadeCompose = (
   // tools, no ungated `config.objective` (exactOptionalPropertyTypes).
   ...(core.objectiveStore !== undefined ? { objective: core.objectiveStore } : {}),
   roleModelResolver: buildPresetRoleModelResolver(core.presetResolver),
+  // `/model` (aug-27) — thread the surface's model-switch pair DOWN onto the
+  // per-turn `AgentConfig`, the two halves the loop needs to honor a pick:
+  //   - `stickyModelStore`: `skill-gate#readStickyModelForMode` reads the SAME
+  //     store `/model` writes, so the pick applies from the next turn;
+  //   - `modelCandidates`: the LIVE array (shared by reference) the loop
+  //     resolves that id to a PORT out of. Before this, the interactive CLI set
+  //     neither, so a `/model` (or a skill `model:` override) could not reach
+  //     the wire at all — the id had no port and the swap silently no-opped.
+  stickyModelStore: {
+    ...core.stickyModel,
+    provider: setup.provider,
+    // aug-28 — the SYNC "what the next turn will run" every display consumes
+    // (see `@/agent/effective-model`): `describe().modelSlug`, and through it the
+    // attach pill, the SDK's `session.model` and the web `/state`+`/status` rows.
+    // Read straight off the store (`peek`) with the SAME key the pick was written
+    // under, so it cannot report a model the loop is not about to run.
+    effectiveModel: (): string | undefined => core.pickedModel(),
+  },
+  modelCandidates: core.modelCatalog.candidates,
   ...radarOptions(setup, env, core),
   onPromptAssembled: core.contextUsageHolder.sink,
   ...stateHookOptions(core),

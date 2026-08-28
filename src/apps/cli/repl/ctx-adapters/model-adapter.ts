@@ -3,14 +3,16 @@
  *
  * Projects the surface's model facts onto the `SlashContext.model` slot the
  * `/model` picker consumes:
- *   - `current()`       — the active sticky model for the CURRENT mode, falling
- *                         back to the boot model when no per-mode entry is set.
- *                         Backed by a per-mode SYNC SHADOW this adapter's own
- *                         `set()` updates, so an in-surface `/model` set is
- *                         reflected IMMEDIATELY (the sticky store is ASYNC, so a
- *                         store-reading getter could only return a Promise — a
- *                         sync getter cannot read it). The shadow is keyed to the
- *                         mode the set targeted, so it never leaks across modes.
+ *   - `current()`       — the active sticky model for the CURRENT provider+mode,
+ *                         falling back to the boot model when no entry is set.
+ *                         Read straight off the store via `peek` (aug-28), the
+ *                         port's SYNC read. It used to be a per-mode shadow map
+ *                         this adapter maintained from its own `set()` calls,
+ *                         because the port was async-only — and that copy went
+ *                         stale for any pick that did not travel through this
+ *                         adapter (a persisted one, another surface, a
+ *                         `/sticky-model` set), so the picker marked a model the
+ *                         loop was not running.
  *   - `candidates()`    — the selectable ids (boot model + retry candidates),
  *                         each enriched with render metadata from the
  *                         provider-metadata SSOT (window/output/recommended/hint).
@@ -18,20 +20,29 @@
  *   - `set(id)`         — persist via the SAME `StickyModelStore` the loop reads,
  *                         keyed to the CURRENT mode (mode-implicit). Mirrors the
  *                         `/sticky-model` set path's typed outcome.
+ *   - `clear()`         — REMOVE that same key's pick (aug-28), so the session goes
+ *                         back to the boot model. There was no way to un-set a
+ *                         pick at all before: `/model gpt-4o` once meant gpt-4o
+ *                         forever, in every later session, unless the user
+ *                         hand-edited `~/.quanta/sticky-model.json`.
  *   - `effortSupport()` — resolve the model's reasoning-effort metadata so the
  *                         command can clamp the session effort (Codex
  *                         `validateEffort`).
  *
  * REUSES the sticky-model store rather than minting a parallel persistence
- * surface, so `/model` and `/sticky-model` agree and the loop's consume side
- * (ADR-0462) observes either. The CURRENT-mode binding is supplied by the host
+ * surface, so `/model` and `/sticky-model` agree, the loop's consume side
+ * (ADR-0462) observes either, and there is exactly ONE source for "the active
+ * model" that this adapter and `stickyModelStore.effectiveModel` (the value
+ * `describe().modelSlug` publishes to the attach pill / SDK / web readouts) both
+ * read. The CURRENT-mode binding is supplied by the host
  * (a getter — the active posture can change via shift+tab between turns), so a
  * `/model` always targets the mode the next turn will actually run in.
  */
 
 import type { AgentMode } from "@/agent"
-import type { StickyModelStore } from "@/agent/sticky-model"
+import type { StickyModelKey, StickyModelStore } from "@/agent/sticky-model"
 import {
+  MODEL_EFFORT_SUPPORT,
   type ModelEffortSupport,
   resolveModelEffortSupport,
   resolveModelWindow,
@@ -46,6 +57,13 @@ export type ModelSetOutcome =
   | { readonly kind: "invalid-mode"; readonly known: readonly string[] }
   | { readonly kind: "write-error"; readonly message: string }
 
+/** Typed CLEAR outcome (aug-28). Structurally the SAME union as
+ *  {@link ModelSetOutcome} — a clear can fail for exactly the two reasons a set
+ *  can (an impossible mode, or the durable write refusing) — spelled as its own
+ *  name so the command's render sites read honestly and the two can diverge later
+ *  without a silent widening. */
+export type ModelClearOutcome = ModelSetOutcome
+
 /** The `SlashContext.model` slot shape (kept in sync with `slash-contract.ts`
  *  structurally — the contract uses inline types to avoid importing this CLI
  *  internal). */
@@ -53,7 +71,17 @@ export interface ModelAdapter {
   readonly current: () => string
   readonly candidates: () => readonly ModelLineMeta[]
   readonly set: (id: string) => Promise<ModelSetOutcome>
+  /** aug-28 — REMOVE the pick for the CURRENT provider+mode (the same key
+   *  {@link set} writes), so the session falls back to the boot model. Required,
+   *  not optional: `/model --clear` is the only front door for undoing a pick, and
+   *  a surface that wires `set` without it strands the user with a permanent
+   *  preference. */
+  readonly clear: () => Promise<ModelClearOutcome>
   readonly effortSupport: (id: string) => ModelEffortSupport | undefined
+  /** Present when the surface wired a catalog probe: awaited by `/model` BEFORE
+   *  it lists or resolves an id, so `candidates()` (sync, by contract) can still
+   *  reflect an ASYNC provider lookup. No-throw + memoized by the wire. */
+  readonly refresh?: () => Promise<void>
 }
 
 const isAgentMode = (m: string): m is AgentMode =>
@@ -66,6 +94,14 @@ const isAgentMode = (m: string): m is AgentMode =>
  * `undefined` (omit the hint) when neither signal is present.
  */
 const deriveHint = (id: string): string | undefined => {
+  // aug-27 — EXACT metadata only. Both resolvers fall back to a per-FAMILY
+  // entry, so a live-catalog id no table knows (`gpt-5.4-mini`,
+  // `gpt-5.3-codex-spark`) resolved through the `gpt-5` family and every row in
+  // the picker printed the same "most capable" — a badge that is actively wrong
+  // on a mini/spark model. A hint is a CLAIM about the specific model, so it is
+  // emitted only when the SSOT has that exact id; the window/output columns keep
+  // using the family fallback (a conservative size estimate is still useful).
+  if (MODEL_EFFORT_SUPPORT[id] === undefined) return undefined
   const support = resolveModelEffortSupport(id)
   const window = resolveModelWindow(id)
   // Non-reasoning small-output models read as the "fast / lower cost" tier; the
@@ -88,7 +124,12 @@ const deriveHint = (id: string): string | undefined => {
  *                      "recommended" default badge AND the `current()` anchor
  *                      when no `currentModel` getter is supplied.
  *  - `currentMode`   — a GETTER for the active posture (mode-implicit set target).
- *  - `candidateIds`  — selectable ids (boot model + retry candidates), deduped.
+ *  - `candidateIds`  — GETTER over the selectable ids (boot model + retry
+ *                      candidates + anything the catalog probe added). A getter
+ *                      rather than an array because the probe grows the list
+ *                      after boot; reading it per call keeps the picker and
+ *                      `AgentConfig.modelCandidates` in agreement.
+ *  - `refresh`       — OPTIONAL async catalog probe `/model` awaits first.
  *  - `currentModel`  — OPTIONAL getter for the effective model the NEXT turn will
  *                      run (the host already resolves this per turn via the
  *                      sticky resolver). When supplied it WINS for `current()` (so
@@ -104,15 +145,27 @@ export const buildModelAdapter = (args: {
   readonly store: StickyModelStore
   readonly bootModel: string
   readonly currentMode: () => AgentMode
-  readonly candidateIds: readonly string[]
+  /** The session's provider — part of the sticky key (see `StickyModelKey`). */
+  readonly provider?: string
+  readonly candidateIds: () => readonly string[]
   readonly currentModel?: () => string
+  readonly refresh?: () => Promise<void>
 }): ModelAdapter => {
-  const ids = [...new Set([args.bootModel, ...args.candidateIds].filter((s) => s.length > 0))]
-  // Per-mode SYNC shadow of the last in-surface set. The async sticky store IS
-  // the durable source of truth (and the loop's consume side reads it); this
-  // shadow is purely so a SYNC `current()` reflects a SET this surface just made,
-  // keyed to the mode it targeted (no cross-mode leak).
-  const shadow = new Map<AgentMode, string>()
+  const ids = (): readonly string[] => [
+    ...new Set([args.bootModel, ...args.candidateIds()].filter((s) => s.length > 0)),
+  ]
+  // aug-28 — the sync read is THE STORE's (`peek`), not a shadow map this adapter
+  // maintains. It used to keep its own per-mode copy, updated by its own `set()`
+  // and seeded from the boot snapshot, purely because `current()` is sync and the
+  // store port was async-only. That copy was a second source of truth for the one
+  // fact four displays report: any pick that did not travel through THIS adapter
+  // (a persisted pick, another surface, a `/sticky-model` set) left it stale, and
+  // the picker then marked a model the loop was not running. `peek` moved the sync
+  // read onto the port, so the store answers every reader identically.
+  const liveKey = (): StickyModelKey => ({
+    mode: args.currentMode(),
+    ...(args.provider !== undefined ? { provider: args.provider } : {}),
+  })
   const lineMeta = (id: string): ModelLineMeta => {
     const window = resolveModelWindow(id)
     const hint = deriveHint(id)
@@ -127,8 +180,9 @@ export const buildModelAdapter = (args: {
     }
   }
   return {
-    current: () => args.currentModel?.() ?? shadow.get(args.currentMode()) ?? args.bootModel,
-    candidates: () => ids.map(lineMeta),
+    current: () => args.currentModel?.() ?? args.store.peek(liveKey()) ?? args.bootModel,
+    candidates: () => ids().map(lineMeta),
+    ...(args.refresh !== undefined ? { refresh: args.refresh } : {}),
     set: async (id: string): Promise<ModelSetOutcome> => {
       const mode = args.currentMode()
       if (!isAgentMode(mode)) {
@@ -137,13 +191,36 @@ export const buildModelAdapter = (args: {
       if (id.trim() === "") {
         return { kind: "write-error", message: "modelId must be non-empty" }
       }
-      const res = await args.store.set({ mode, modelId: id })
-      if (res.ok) {
-        // Reflect the set in the sync shadow for the mode it targeted, so a
-        // following `current()` (no host getter) sees it immediately.
-        shadow.set(mode, id)
-        return "ok"
+      const res = await args.store.set({
+        mode,
+        modelId: id,
+        // Key by provider too (see `StickyModelKey`): a pick is only meaningful
+        // for the provider it was made under.
+        ...(args.provider !== undefined ? { provider: args.provider } : {}),
+      })
+      // No local bookkeeping on success: the store the write went through is the
+      // one `current()` reads (`peek`), so the set is visible on the next paint by
+      // construction rather than by two places remembering to agree.
+      if (res.ok) return "ok"
+      return { kind: "write-error", message: res.error.message }
+    },
+    clear: async (): Promise<ModelClearOutcome> => {
+      const mode = args.currentMode()
+      if (!isAgentMode(mode)) {
+        return { kind: "invalid-mode", known: AGENT_PROMPT_MODES }
       }
+      // The SAME key `set` writes (mode + provider), so a clear can only ever undo
+      // a pick this surface could have made — a sibling mode's or another
+      // provider's preference is a different key and is left alone.
+      const res = await args.store.unset({
+        mode,
+        ...(args.provider !== undefined ? { provider: args.provider } : {}),
+      })
+      // Again NO local bookkeeping: `current()` reads the store's `peek`, so the
+      // removal shows up on the next paint by construction. A shadow copy here is
+      // exactly the defect this adapter shed — it would keep announcing the cleared
+      // model.
+      if (res.ok) return "ok"
       return { kind: "write-error", message: res.error.message }
     },
     effortSupport: (id: string): ModelEffortSupport | undefined => resolveModelEffortSupport(id),

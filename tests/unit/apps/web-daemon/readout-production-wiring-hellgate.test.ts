@@ -16,7 +16,11 @@ import { afterAll, describe, expect, test } from "bun:test"
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { resolveReadout, type WebReadoutSources } from "@/apps/web-daemon/readout"
+import {
+  resolveReadout,
+  SOURCE_BACKED_READOUTS,
+  type WebReadoutSources,
+} from "@/apps/web-daemon/readout"
 import { buildProductionRuntimeFactory } from "@/apps/web-daemon/runtime-factory"
 import type { SessionSnapshotLite } from "@/protocol/session"
 import { makeSnapshotLite } from "../../../support/session-fixtures"
@@ -95,8 +99,33 @@ describe("production runtime factory — readout sources are LIVE on the facade"
     expect(context.wired).toBe(true)
     expect(context.output).toContain("no prompt assembled yet")
 
+    // model (aug-28) — the model switch's READ half: effective model + the ids
+    // `set_model` accepts. The stub catalog is offline here, so the list is just
+    // the boot model; `wired` + the header prove the accessor was THREADED.
+    const model = await resolveReadout("model", SNAP, sources)
+    expect(model.wired).toBe(true)
+    expect(model.output).toContain("model  ")
+
     // cost is deliberately NOT on the facade — it is the server-owned fold.
     expect(sources.cost).toBeUndefined()
+
+    // CENSUS (aug-28) — every source-backed readout is either WIRED here or listed
+    // as a documented exception. This replaces the hand-enumeration above as the
+    // completeness authority: the `model` readout shipped while this file's list
+    // was not extended, so a wired-but-unthreaded readout was invisible. Readout
+    // #13 cannot slip the same way.
+    const DOCUMENTED_UNWIRED: Readonly<Record<string, string>> = {
+      // The server folds turn usage itself; the facade deliberately has no accessor.
+      cost: "server-owned fold in startWebDaemon",
+      // Composed only when a .mcp.json exists; this hermetic boot has none.
+      mcp: "no .mcp.json in the hermetic temp cwd",
+    }
+    const unwired: string[] = []
+    for (const name of SOURCE_BACKED_READOUTS) {
+      const r = await resolveReadout(name, SNAP, sources)
+      if (!r.wired && DOCUMENTED_UNWIRED[name] === undefined) unwired.push(name)
+    }
+    expect(unwired).toEqual([])
   })
 
   test("QUANTA_MEMORY=off degrades ONLY the memory readout (honest copy)", async () => {

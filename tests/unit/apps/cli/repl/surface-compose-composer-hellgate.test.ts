@@ -1,8 +1,12 @@
-import { describe, expect, test } from "bun:test"
+import { afterEach, describe, expect, test } from "bun:test"
 import { defaultConversationCheckpointStore } from "@/agent/conversation-checkpoint"
 import { createSurfaceState } from "@/apps/cli/repl/surface-compose"
 import { composeSurfaceWires } from "@/apps/cli/repl/surface-compose/composer"
 import type { RuntimeSideConversationResult } from "@/sdk/runtime"
+import {
+  cleanupHermeticQuantaHomes,
+  hermeticQuantaHomeEnv,
+} from "../../../../_support/hermetic-quanta-home"
 import { makeFakeSessionSetup } from "../_cli-fakes"
 
 const sideResult: RuntimeSideConversationResult = {
@@ -13,11 +17,21 @@ const sideResult: RuntimeSideConversationResult = {
   toolsAvailable: 0,
 }
 
+afterEach(cleanupHermeticQuantaHomes)
+
+/** `env = {}` is NOT hermetic: `quantaHomeDirFrom({})` resolves to the
+ *  developer's real `~/.quanta`, and the composed surface both READS a persisted
+ *  `/model` pick from there at boot and would WRITE one on a set. Every case here
+ *  gets a scratch home instead (see the helper's header for the measurement). */
 const compose = (env: NodeJS.ProcessEnv = {}) => {
   const setup = makeFakeSessionSetup()
   const convStore = defaultConversationCheckpointStore()
   const state = createSurfaceState({ imageQueue: undefined, rewindState: undefined, history: [] })
-  return { setup, convStore, wires: composeSurfaceWires(setup, state, env, { convStore }) }
+  return {
+    setup,
+    convStore,
+    wires: composeSurfaceWires(setup, state, hermeticQuantaHomeEnv(env), { convStore }),
+  }
 }
 
 describe("REPL surface composer — live composition root", () => {

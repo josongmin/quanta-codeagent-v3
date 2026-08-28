@@ -43,6 +43,7 @@ import type { CanvasUsageSourceHandle } from "../canvas-usage-source"
 import { WEB_INLINE_APPROVAL_GATE } from "../server/approval-continuation"
 import type { SubagentSourceHandle } from "../subagent-source"
 import type { WebControlRequestPortHandle } from "../web-control-request-port"
+import type { WebModelSwitchHandle } from "../web-model-switch"
 import type { WebUserInputPortHandle } from "../web-user-input-port"
 import type { buildFollowerCoControlSlot } from "./session-collaborators"
 import { observabilitySlots } from "./session-observability"
@@ -81,6 +82,32 @@ const turnActivitySlot = (
   activeTurnRef !== undefined ? { activeTurnRef } : {}
 
 /**
+ * aug-27 — the model-switch pair (mirrors {@link turnActivitySlot}).
+ *
+ * `stickyModelStore` is what `skill-gate#readStickyModelForMode` reads at the top
+ * of every turn; `modelCandidates` is the LIVE array (shared by reference with the
+ * catalog wire, so a lazily-probed model is selectable next turn) that
+ * `resolveSkillTurnOverride` resolves that pick to a PORT out of. BOTH or NEITHER:
+ * the store alone writes a pick the swap cannot apply, the candidates alone have
+ * nothing to select — which is the state where `set_model` looked accepted and
+ * changed nothing. A helper (not an inline ternary) keeps `buildAgentConfigBase`
+ * under biome's cognitive-complexity cap.
+ */
+const modelSwitchSlots = (
+  modelSwitch: WebModelSwitchHandle | undefined,
+): Partial<Pick<AgentConfig, "stickyModelStore" | "modelCandidates">> =>
+  modelSwitch !== undefined
+    ? {
+        stickyModelStore: {
+          store: modelSwitch.store,
+          provider: modelSwitch.provider,
+          effectiveModel: modelSwitch.effectiveModel,
+        },
+        modelCandidates: modelSwitch.candidates,
+      }
+    : {}
+
+/**
  * Assemble the {@link RuntimeAgentConfigBase} for a web-daemon session from the
  * per-session collaborators the factory just minted. Extracted from the factory
  * closure to keep it under the god-FN cap (mirrors {@link mintSessionCollaborators}
@@ -106,6 +133,7 @@ export const buildAgentConfigBase = async ({
   subagentSource,
   userInput,
   controlRequest,
+  modelSwitch,
   follower,
   activeTurnRef,
   observability,
@@ -130,6 +158,12 @@ export const buildAgentConfigBase = async ({
   readonly subagentSource: SubagentSourceHandle | undefined
   readonly userInput: WebUserInputPortHandle | undefined
   readonly controlRequest: WebControlRequestPortHandle | undefined
+  /** aug-27 — the model switch. Its store lands on `base.stickyModelStore` (read
+   *  by `skill-gate#readStickyModelForMode` every turn) and its LIVE candidate
+   *  array on `base.modelCandidates` (where `resolveSkillTurnOverride` resolves a
+   *  picked id to a PORT). Both halves are required: the store alone writes a pick
+   *  the swap cannot apply, the candidates alone have nothing to select. */
+  readonly modelSwitch?: WebModelSwitchHandle | undefined
   readonly follower: ReturnType<typeof buildFollowerCoControlSlot>
   readonly activeTurnRef?: ActiveTurnRefHolder | undefined
   readonly observability: {
@@ -239,6 +273,8 @@ export const buildAgentConfigBase = async ({
           },
         }
       : {}),
+    // aug-27 — see {@link modelSwitchSlots}: the two halves the loop consumes.
+    ...modelSwitchSlots(modelSwitch),
     // T02 — wire the conversation-action port + active-turn ref so a web
     // follower's steer lands as a mid-turn injection (the loop polls the port).
     ...(follower !== undefined ? { conversationActionPort: follower.surface.port } : {}),

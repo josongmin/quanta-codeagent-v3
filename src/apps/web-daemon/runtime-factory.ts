@@ -37,7 +37,7 @@ import {
   type InteractiveTurnAssemblerRequest,
 } from "@/host/runtime"
 import { resolveGatedObjectiveAuthority } from "@/host/runtime/objective-store-wire"
-import { pickProvider, tryCreateLLM } from "@/llm"
+import { type Provider, pickProvider, tryCreateLLM } from "@/llm"
 import { applyGoalPreset, type ObjectiveAttemptSlot, type ObjectivePort } from "@/objective"
 import { getDefaultPermissionStore, type PermissionStore } from "@/permission"
 import { createRuntimeFromAgentConfigBase } from "@/sdk/runtime"
@@ -59,6 +59,7 @@ import {
   resolveWebLivePosture,
 } from "./runtime-factory/session-collaborators"
 import { wireSessionObservability } from "./runtime-factory/session-observability"
+import { createWebModelSwitch } from "./web-model-switch"
 
 /**
  * PUBLIC SURFACE (unchanged). `ObservableRuntimeFacade` /
@@ -98,6 +99,11 @@ const assembleWebRuntimeParts = async (
   // tests can inject a temp store; `resolveWebLivePosture` only consumes it when
   // BOTH QUANTA_POSTURE_SELECTOR and QUANTA_POSTURE_DURABLE_RESUME are on.
   loadPermissionStore: () => Promise<PermissionStore | undefined>,
+  /** aug-27 — the env-picked provider, needed to BUILD a port per candidate model
+   *  (`tryCreateLLM(provider, {model}, env)`). Resolved once by the caller
+   *  alongside `llm`, so this closure never re-picks it (a second pick could
+   *  disagree with the port it was handed). */
+  provider: Provider,
 ) => {
   const cwd = process.cwd()
   const abort = new AbortController()
@@ -162,6 +168,12 @@ const assembleWebRuntimeParts = async (
   // OUT-OF-BAND INBOUND port cluster (agent-state tap + user-input mirror +
   // T02 follower + ADR-0496 control-request + gated ask_user). Each keeps its
   // original gate; see {@link mintInboundPorts}.
+  // aug-27 — the model switch: the sticky store the loop reads per turn + the
+  // live id→port candidate list. Minted UNGATED (inert until a pick exists) so a
+  // pick made on the CLI applies here too — one user, one model preference over
+  // one file (ADR-0462). It feeds three consumers: the control-request
+  // `set_model` effect, the per-turn base slots, and the `/model` readout.
+  const modelSwitch = createWebModelSwitch({ env, provider, llm })
   const {
     agentState,
     subagentSource,
@@ -170,7 +182,7 @@ const assembleWebRuntimeParts = async (
     activeTurnRef,
     controlRequest,
     askUserTools,
-  } = mintInboundPorts(env, permission)
+  } = mintInboundPorts(env, permission, modelSwitch)
   // P4 (jul-11, UUX-4-14) — compose MCP from the surface-shared assembly
   // (@/host/mcp-composition). No .mcp.json ⇒ empty (byte-identical). Bridged
   // tools join the registry; clients stop on shutdown; the /mcp readout goes
@@ -203,6 +215,7 @@ const assembleWebRuntimeParts = async (
     follower,
     activeTurnRef,
     controlRequest,
+    modelSwitch,
     askUserTools,
     mcpTools,
     mcpClients,
@@ -253,6 +266,71 @@ const objectivePorts = (
 const isObjectiveAttemptSlotValue = (v: unknown): v is ObjectiveAttemptSlot =>
   typeof v === "object" && v !== null && typeof (v as ObjectiveAttemptSlot).status === "function"
 
+/**
+ * The optional-live-port getter payload for the session facade.
+ *
+ * Extracted from the factory closure (aug-27) so `buildProductionRuntimeFactory`
+ * stays under the god-FN cap. Pure projection: it reads the already-minted parts
+ * and returns the record `defineOptionalFacadeGetters` installs — every value
+ * that is `undefined` is SKIPPED by that helper, which is what keeps each gate's
+ * default-OFF path byte-identical (no getter ⇒ no sink ⇒ no route).
+ */
+const buildFacadeGetters = (
+  parts: Awaited<ReturnType<typeof assembleWebRuntimeParts>>,
+  base: { readonly objectiveAttemptSlot?: unknown },
+): Parameters<typeof defineOptionalFacadeGetters>[1] =>
+  ({
+    // RFC-03 C2 (web-parity persistence seam) — expose the SESSION-STABLE
+    // objective authority (minted once per session under QUANTA_OBJECTIVE_TOOLS) as
+    // a NON-obs, plain value getter for TRANSCRIPT PERSISTENCE only. The daemon's
+    // `webObjectiveSnapshot` reads THIS field — NOT the obs-gated `objective`
+    // getter (which `attachObservabilityPorts` proxies off the wire handle and
+    // returns undefined under obs-off) — so the durable goal persists whenever
+    // TOOLS is on, independent of observability. It is NOT an observability
+    // emitter port ⇒ exposing it emits no obs frame (obs stream byte-identical).
+    // Absent when TOOLS is off: `objective` is undefined and
+    // `defineOptionalFacadeGetters` SKIPS undefined values ⇒ no getter ⇒
+    // snapshot undefined ⇒ transcript omits `objective` (byte-identical
+    // default-OFF). Passed directly (like `canvasUsage`) — the helper's
+    // undefined-skip removes the need for a guard ternary here.
+    ...objectivePorts(parts.objective, base.objectiveAttemptSlot),
+    canvasUsage: parts.canvasUsage,
+    canvasToolDiff: parts.canvasToolDiff,
+    canvasArtifact: parts.canvasArtifact,
+    artifactRegistry: parts.artifactRegistry,
+    artifactPreviewResolver: parts.artifactPreviewResolver,
+    agentState: parts.agentState,
+    // QUANTA_WEB_SUBAGENTS — expose the source so `index.ts` threads it into
+    // the server config; `server.ts` installs the topic broadcast. Absent ⇒
+    // getter reads undefined ⇒ no install (byte-identical).
+    ...(parts.subagentSource !== undefined ? { subagentSource: parts.subagentSource } : {}),
+    ...(parts.userInput !== undefined ? { userInput: parts.userInput } : {}),
+    // QUANTA_CONTROL_REQUEST — expose the control-request port so the daemon's
+    // server can `enqueue(req)` a peeked `controlRequest` frame. Absent ⇒ no
+    // enqueue target (byte-identical).
+    ...(parts.controlRequest !== undefined ? { controlRequest: parts.controlRequest } : {}),
+    ...(parts.follower !== undefined ? { followerCoControl: parts.follower.dispatcher } : {}),
+    activeTurnRef: parts.activeTurnRef,
+    // UUX-1-11 — read-only readout accessor bundle over the SAME live
+    // collaborators the parts bundle holds (fleet registry / plan store / skills /
+    // durable memory store / usage holder). The server threads it into the
+    // `GET /readout/:name` route.
+    readoutSources: buildReadoutSources({
+      taskRegistry: parts.taskRegistry,
+      planStore: parts.planStore,
+      // RFC-06 F4 — the `/skills` readout reads the shared authority's active
+      // projection (no independent discovery scan). Absent ⇒ honest missing line.
+      skillAuthority: parts.skillAuthority,
+      memoryStore: parts.memoryStore,
+      usageHolder: parts.usageHolder,
+      // aug-27 — the `/model` readout's source: the SAME switch the control
+      // request writes through, so the list a client sees is exactly the set
+      // `set_model` will accept (no second candidate authority).
+      modelSwitch: parts.modelSwitch,
+      ...(parts.mcpAccessor !== undefined ? { mcp: parts.mcpAccessor } : {}),
+    }),
+  }) as Parameters<typeof defineOptionalFacadeGetters>[1]
+
 export const buildProductionRuntimeFactory = (): (() => Promise<ObservableRuntimeFacade>) => {
   const env = process.env as Record<string, string | undefined>
   applyGoalPreset(env, !gateDisabled(env, "QUANTA_GOAL"))
@@ -266,37 +344,32 @@ export const buildProductionRuntimeFactory = (): (() => Promise<ObservableRuntim
   }
 
   return async (): Promise<ObservableRuntimeFacade> => {
+    const parts = await assembleWebRuntimeParts(env, llm, loadDefaultPermissionStore, provider)
     const {
       cwd,
       abort,
       permission,
       postureControl,
       questionGuard,
-      taskRegistry,
       subagent,
       planStore,
-      memoryStore,
       usageHolder,
-      canvasUsage,
-      skillAuthority,
       skillsWithAuthority,
       objective,
       observability,
       canvasToolDiff,
-      canvasArtifact,
       artifactRegistry,
-      artifactPreviewResolver,
       agentState,
       subagentSource,
       userInput,
       follower,
       activeTurnRef,
       controlRequest,
+      modelSwitch,
       askUserTools,
       mcpTools,
       mcpClients,
-      mcpAccessor,
-    } = await assembleWebRuntimeParts(env, llm, loadDefaultPermissionStore)
+    } = parts
     const base = await buildAgentConfigBase({
       env,
       llm,
@@ -318,6 +391,10 @@ export const buildProductionRuntimeFactory = (): (() => Promise<ObservableRuntim
       subagentSource,
       userInput,
       controlRequest,
+      // aug-27 — the model-switch pair (sticky store + live candidates). Passing
+      // it is what makes `set_model` land: the port's applier persists the pick,
+      // and THESE base slots are what the loop reads to actually run it.
+      modelSwitch,
       follower,
       activeTurnRef,
       observability,
@@ -353,53 +430,7 @@ export const buildProductionRuntimeFactory = (): (() => Promise<ObservableRuntim
     // byte-identical). ADR-0440 canvas usage/tool-diff/artifact; A2 registry +
     // preview resolver; QUANTA_WEB_AGENT_STATE agent-state + inbound; ADR-0496 A1
     // control-request; T02 follower.
-    defineOptionalFacadeGetters(facade, {
-      // RFC-03 C2 (web-parity persistence seam) — expose the SESSION-STABLE
-      // objective authority (minted once above under QUANTA_OBJECTIVE_TOOLS) as a
-      // NON-obs, plain value getter for TRANSCRIPT PERSISTENCE only. The daemon's
-      // `webObjectiveSnapshot` reads THIS field — NOT the obs-gated `objective`
-      // getter (which `attachObservabilityPorts` proxies off the wire handle and
-      // returns undefined under obs-off) — so the durable goal persists whenever
-      // TOOLS is on, independent of observability. It is NOT an observability
-      // emitter port ⇒ exposing it emits no obs frame (obs stream byte-identical).
-      // Absent when TOOLS is off: `objective` is undefined and
-      // `defineOptionalFacadeGetters` SKIPS undefined values ⇒ no getter ⇒
-      // snapshot undefined ⇒ transcript omits `objective` (byte-identical
-      // default-OFF). Passed directly (like `canvasUsage`) — the helper's
-      // undefined-skip removes the need for a guard ternary here.
-      ...objectivePorts(objective, base.objectiveAttemptSlot),
-      canvasUsage,
-      canvasToolDiff,
-      canvasArtifact,
-      artifactRegistry,
-      artifactPreviewResolver,
-      agentState,
-      // QUANTA_WEB_SUBAGENTS — expose the source so `index.ts` threads it into
-      // the server config; `server.ts` installs the topic broadcast. Absent ⇒
-      // getter reads undefined ⇒ no install (byte-identical).
-      ...(subagentSource !== undefined ? { subagentSource } : {}),
-      ...(userInput !== undefined ? { userInput } : {}),
-      // QUANTA_CONTROL_REQUEST — expose the control-request port so the daemon's
-      // server can `enqueue(req)` a peeked `controlRequest` frame. Absent ⇒ no
-      // enqueue target (byte-identical).
-      ...(controlRequest !== undefined ? { controlRequest } : {}),
-      ...(follower !== undefined ? { followerCoControl: follower.dispatcher } : {}),
-      activeTurnRef,
-      // UUX-1-11 — read-only readout accessor bundle over the SAME live
-      // collaborators wired above (fleet registry / plan store / skills config /
-      // durable memory store / usage holder). The server threads it into the
-      // `GET /readout/:name` route.
-      readoutSources: buildReadoutSources({
-        taskRegistry,
-        planStore,
-        // RFC-06 F4 — the `/skills` readout reads the shared authority's active
-        // projection (no independent discovery scan). Absent ⇒ honest missing line.
-        skillAuthority,
-        memoryStore,
-        usageHolder,
-        ...(mcpAccessor !== undefined ? { mcp: mcpAccessor } : {}),
-      }),
-    })
+    defineOptionalFacadeGetters(facade, buildFacadeGetters(parts, base))
     return facade
   }
 }

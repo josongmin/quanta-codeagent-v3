@@ -21,6 +21,8 @@ import {
   applyLocalEnv,
   DEFAULT_ENV_ALLOWLIST,
   defaultPpidWalkKiller,
+  escalatingKill,
+  type KillableChild,
   type LocalEnvSelection,
   scrubEnv,
 } from "@/runtime"
@@ -35,24 +37,33 @@ export interface ExecResult {
 // (`bash -c "<testCmd>"` → pytest → workers). `proc.kill()` signals only the
 // `bash` root, so a surviving child holds the stdout/stderr pipe open and the
 // `new Response(proc.stdout).text()` await HANGS past the deadline — leaking the
-// tree and stalling the whole grading run. Tree-kill on timeout (SIGTERM, then
-// SIGKILL after a grace) — the same primitive the agent's bash bg-registry uses.
+// tree and stalling the whole grading run. So the deadline tree-kills.
+//
+// This used to hand-roll its own SIGTERM→SIGKILL escalation over a bare
+// `signalTree`, and the comment here claimed it was "the same primitive the
+// agent's bash bg-registry uses" — it was NOT: `bash-bg-registry.ts` calls
+// `escalatingKill(proc, BG_TREE_KILLER)`, while this file bypassed
+// `escalatingKill` entirely. The copy had DIVERGED from the canonical one on
+// four points: no positive-pid guard (only `pid === undefined`), no `reaped`
+// latch, no `unref` on the grace timer, and its own duplicate grace constant.
+// The `reaped` omission was the load-bearing one — `guarded-spawn.ts` documents
+// that signalling a long-dead pid risks SIGKILL-ing a RECYCLED pid two seconds
+// later, and this armed exactly that with nothing to stop it.
+//
+// It now genuinely uses the same primitive, so all four properties (and any
+// future fix to them) come for free, and this file is no longer a hand-rolled
+// `signalTree` caller invisible to the single-PID-kill ban.
 const BENCH_TREE_KILLER = defaultPpidWalkKiller()
-const TREE_SIGKILL_GRACE_MS = 2_000
 
-/** Arm a deadline that tree-kills `proc` (SIGTERM → SIGKILL escalation). Returns
- *  the cleanup that cancels both timers. No-op when `proc.pid` is undefined. */
-const armTreeKillTimeout = (proc: { pid?: number }, timeoutMs: number): (() => void) => {
-  let kill9: ReturnType<typeof setTimeout> | undefined
-  const term = setTimeout(() => {
-    const pid = proc.pid
-    if (pid === undefined) return
-    BENCH_TREE_KILLER.signalTree(pid, "SIGTERM")
-    kill9 = setTimeout(() => BENCH_TREE_KILLER.signalTree(pid, "SIGKILL"), TREE_SIGKILL_GRACE_MS)
-  }, timeoutMs)
+/** Arm a deadline that tree-kills `proc` via the canonical escalating kill
+ *  (SIGTERM, then SIGKILL after {@link KILL_GRACE_MS}). Returns the cleanup that
+ *  cancels the deadline AND disarms any pending SIGKILL grace timer. */
+const armTreeKillTimeout = (proc: KillableChild, timeoutMs: number): (() => void) => {
+  const { kill, disarm } = escalatingKill(proc, BENCH_TREE_KILLER)
+  const deadline = setTimeout(kill, timeoutMs)
   return () => {
-    clearTimeout(term)
-    if (kill9 !== undefined) clearTimeout(kill9)
+    clearTimeout(deadline)
+    disarm()
   }
 }
 

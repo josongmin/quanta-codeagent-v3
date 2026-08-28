@@ -3,17 +3,21 @@
  * `/mode` (extracted from `registry-surface.ts` to keep that module under the
  * god-module ceiling).
  *
+ * aug-28 — `/sticky-model <mode> --clear` drops a mode's pick (the store had no
+ * removal before, so a pick was permanent across every future session).
+ *
  * These are the session-posture config switches (tool profile, identity mode,
  * per-mode sticky model, permission posture). They are pure `ctx`-slot renders
  * — each prints "not wired in this surface" + exit 0 when its slot is absent —
  * and share no state, only the `SlashCommand` shape. None are part of the
  * surface public API; the assembler in `registry-surface.ts` imports them by
  * name into `buildSurfaceSlashCommands`. Sibling of the `/focus-chain`,
- * `/effort`, `/brief` config cluster in `focus-effort-brief.ts`. Pure code
- * motion: bodies are byte-identical to the pre-split file.
+ * `/effort`, `/brief` config cluster in `focus-effort-brief.ts`. Originally pure
+ * code motion (bodies byte-identical to the pre-split file); `/sticky-model` has
+ * since grown the `--clear` branch below.
  */
 
-import type { SlashCommand } from "../../slash-contract"
+import type { SlashCommand, SlashContext } from "../../slash-contract"
 
 export const profileCmd: SlashCommand = {
   name: "/profile",
@@ -77,6 +81,35 @@ export const identityCmd: SlashCommand = {
   },
 }
 
+/** THE spelling of `/sticky-model`'s clear verb — the SAME flag `/model` uses, in
+ *  this command's existing `<mode> <modelId>` slot: `/sticky-model <mode> --clear`.
+ *  One spelling across both commands, and a flag (not a bare `clear`) because a
+ *  bare word in the `<modelId>` position is indistinguishable from a model id. */
+const STICKY_CLEAR_FLAG = "--clear"
+
+/** `--clear` path — drop `mode`'s pick (aug-28). Until the store grew a removal,
+ *  a per-mode pick was permanent for every future session and the only escape was
+ *  hand-editing `~/.quanta/sticky-model.json`. Idempotent: clearing a mode with no
+ *  pick prints the same line and exits 0. */
+const runStickyClear = async (
+  sticky: NonNullable<SlashContext["stickyModel"]>,
+  mode: string,
+  out: (s: string) => void,
+  err: (s: string) => void,
+): Promise<number> => {
+  const res = await sticky.clear(mode)
+  if (res === "ok") {
+    out(`/sticky-model: ${mode} → (cleared; the session's boot model applies)\n`)
+    return 0
+  }
+  err(
+    res.kind === "invalid-mode"
+      ? `/sticky-model: unknown mode '${mode}'; known = ${res.known.join(", ")}\n`
+      : `/sticky-model: clear failed — ${res.message}\n`,
+  )
+  return 1
+}
+
 export const stickyModelCmd: SlashCommand = {
   name: "/sticky-model",
   describe: "Show or set the per-mode sticky model (ADR-0462)",
@@ -92,15 +125,24 @@ export const stickyModelCmd: SlashCommand = {
       if (entries.length === 0) ctx.out("/sticky-model: no per-mode models set\n")
       else for (const [mode, modelId] of entries) ctx.out(`/sticky-model: ${mode} = ${modelId}\n`)
       ctx.out(`/sticky-model: modes = ${ctx.stickyModel.modes().join(", ")}\n`)
-      ctx.out("/sticky-model: usage = /sticky-model <mode> <modelId>\n")
+      ctx.out(
+        "/sticky-model: usage = /sticky-model <mode> <modelId> " +
+          `| /sticky-model <mode> ${STICKY_CLEAR_FLAG} (drop that mode's pick)\n`,
+      )
       return 0
     }
     if (args.length !== 2) {
-      ctx.err(`/sticky-model: usage = /sticky-model <mode> <modelId> (got ${args.length} arg(s))\n`)
+      ctx.err(
+        `/sticky-model: usage = /sticky-model <mode> <modelId>|${STICKY_CLEAR_FLAG} ` +
+          `(got ${args.length} arg(s))\n`,
+      )
       return 1
     }
     const mode = args[0] as string
     const modelId = args[1] as string
+    if (modelId === STICKY_CLEAR_FLAG) {
+      return runStickyClear(ctx.stickyModel, mode, ctx.out, ctx.err)
+    }
     const res = await ctx.stickyModel.set(mode, modelId)
     if (res === "ok") {
       ctx.out(`/sticky-model: ${mode} → ${modelId}\n`)
@@ -108,6 +150,13 @@ export const stickyModelCmd: SlashCommand = {
     }
     if (res.kind === "invalid-mode") {
       ctx.err(`/sticky-model: unknown mode '${mode}'; known = ${res.known.join(", ")}\n`)
+      return 1
+    }
+    if (res.kind === "unknown-model") {
+      // aug-28 — fail-closed instead of persisting an id no turn can run. Before
+      // this, a typo persisted globally and every later session ANNOUNCED that
+      // model (banner, status line, `/model`, `/why`) while running the boot one.
+      ctx.err(`/sticky-model: unknown model '${modelId}'; switchable = ${res.known.join(", ")}\n`)
       return 1
     }
     ctx.err(`/sticky-model: write failed — ${res.message}\n`)
@@ -125,10 +174,17 @@ export const stickyModelCmd: SlashCommand = {
         .map((m) => ({ value: m, kind: "argument" as const }))
     }
     if (args.length === 1) {
-      return ctx.stickyModel
-        .candidates()
-        .filter((id) => id.toLowerCase().startsWith(seed))
-        .map((id) => ({ value: id, kind: "argument" as const }))
+      // `--clear` completes in the `<modelId>` slot — an undo nothing suggests is
+      // an undo most operators never find.
+      return [
+        ...ctx.stickyModel
+          .candidates()
+          .filter((id) => id.toLowerCase().startsWith(seed))
+          .map((id) => ({ value: id, kind: "argument" as const })),
+        ...(STICKY_CLEAR_FLAG.startsWith(seed)
+          ? [{ value: STICKY_CLEAR_FLAG, kind: "argument" as const }]
+          : []),
+      ]
     }
     return []
   },

@@ -64,7 +64,11 @@ const runtimeOptionalSlots = (
   const toolProfileState = setup.runtimeContext.toolProfileState()
   const identityModeState = setup.runtimeContext.identityModeState()
   const focusChain = setup.runtimeContext.focusChain()
-  const stickyModelStore = setup.runtimeContext.stickyModelStore()
+  // aug-27 — prefer the SURFACE-owned sticky store (`core-state`); fall back to
+  // the runtime-context slot for any composition that supplies one there. The
+  // CLI overlay never did, which is why `/sticky-model` (and `/model`) printed
+  // "not wired in this surface" on the primary surface.
+  const stickyModelStore = core.stickyModel ?? setup.runtimeContext.stickyModelStore()
   return {
     ...(toolProfileState === undefined ? {} : { toolProfileState }),
     ...(identityModeState === undefined
@@ -75,9 +79,12 @@ const runtimeOptionalSlots = (
       ? {}
       : {
           stickyModelStore: stickyModelStore.store,
-          stickyModelCandidateIds: [
-            ...new Set([setup.model, ...core.retryCandidates.map((candidate) => candidate.id)]),
-          ],
+          // aug-28 — a GETTER (was a compose-time snapshot, which froze
+          // `/sticky-model` out of every probe-discovered model).
+          stickyModelCandidateIds: () => core.modelCatalog.ids(),
+          // The provider half of the key — same authority as `/model`'s adapter
+          // and the `stickyModelStore` slot, so all three write what the loop reads.
+          stickyModelProvider: setup.provider,
         }),
   }
 }

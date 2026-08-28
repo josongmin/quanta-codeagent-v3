@@ -11,8 +11,14 @@
  * store).
  */
 
-import type { AgentMode } from "../prompt"
-import type { StickyModelLoadResult, StickyModelSetResult, StickyModelStore } from "./port"
+import {
+  readStickyModelFrom,
+  type StickyModelKey,
+  type StickyModelLoadResult,
+  type StickyModelSetResult,
+  type StickyModelStore,
+  stickyModelKeyOf,
+} from "./port"
 
 /** Construct an in-memory {@link StickyModelStore}. `seed` is an optional
  *  initial snapshot — useful for tests that want a pre-populated store
@@ -28,12 +34,22 @@ export const inMemoryStickyModelStore = (
     }
   }
   return {
-    async get(input: { mode: AgentMode }): Promise<string | undefined> {
-      return data.get(input.mode)
+    async get(input: StickyModelKey): Promise<string | undefined> {
+      return readStickyModelFrom((k) => data.get(k), input)
     },
-    async set(input: { mode: AgentMode; modelId: string }): Promise<StickyModelSetResult> {
-      data.set(input.mode, input.modelId)
+    async set(input: StickyModelKey & { modelId: string }): Promise<StickyModelSetResult> {
+      data.set(stickyModelKeyOf(input), input.modelId)
       return { ok: true }
+    },
+    async unset(input: StickyModelKey): Promise<StickyModelSetResult> {
+      // `Map.delete` on an absent key is already the no-op the port promises, so
+      // there is no "was it there?" branch to get wrong — the post-state is what
+      // the caller asked for either way.
+      data.delete(stickyModelKeyOf(input))
+      return { ok: true }
+    },
+    peek(input: StickyModelKey): string | undefined {
+      return readStickyModelFrom((k) => data.get(k), input)
     },
     async load(): Promise<StickyModelLoadResult> {
       const snapshot: Record<string, string> = {}

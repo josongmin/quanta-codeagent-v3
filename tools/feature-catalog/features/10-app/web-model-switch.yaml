@@ -1,0 +1,149 @@
+id: web-model-switch
+title: "web-daemon model switch — set_model becomes a REAL effect + a /model readout (aug-27)"
+section: 10
+subsystem: web-daemon surface — live model switching (control-request write half + readout read half)
+order: 518
+maturity: L3
+status: new
+ui_surfaces: [web]
+modes: [daemon]
+monitoring: n-a
+configurable: integrated
+owners: ["@songmin"]
+labels: ["surface:web", "absorbed:claude-code"]
+depends_on: [control-request-surface, cli-model-picker, sticky-model-per-mode]
+config_refs:
+  env: ["QUANTA_CONTROL_REQUEST"]
+surface_integration:
+  cli: na
+  web: full
+  method: audited
+  verified: "2026-08-28"
+  evidence:
+    cli: "na — this entry IS the web door; the CLI's own `/model` wire is `cli-model-picker`. (aug-28 correction: this said `cli: full`, which read as 'this feature ships on the CLI surface'. What is actually shared is the candidate/port catalog `@/llm/model-catalog`, which lives in `@/llm` rather than a surface precisely because the biome slice fence forbids the daemon importing `@/apps/cli`.)"
+    web: "WIRED: runtime-factory.ts mints createWebModelSwitch (ungated — inert until a pick exists), passes it into mintInboundPorts (⇒ the control port's applyModel + live allowlist), into buildAgentConfigBase (⇒ base.stickyModelStore + base.modelCandidates) and into buildReadoutSources (⇒ GET /readout/model). MEASURED aug-27 against a live anthropic account: GET /readout/model on a REAL booted daemon returned the account's 10-model catalog with the current one marked; a real-socket controlRequest set_model then persisted the pick and the loop's own readStickyModelForMode + resolveSkillTurnOverride resolved it to that model's PORT."
+purpose: |
+  Make `set_model` on the web surface actually change the model.
+
+  The control-request channel (ADR-0496) shipped with `set_permission_mode`
+  load-bearing and `set_model` an explicit OBSERVABILITY-ONLY echo — the port's
+  own doc said "no live model-swap cell on the daemon today". A browser/IDE
+  client could send the frame, watch it acknowledged, and keep talking to the old
+  model: the "promised, but the runtime does not keep it" shape.
+
+  `web-model-switch.ts` supplies the two halves the LOOP actually consumes, the
+  same pair the CLI's `/model` uses:
+    - `stickyModelStore` — the per-mode pick `skill-gate#readStickyModelForMode`
+      reads at the top of EVERY turn. Deliberately the SAME on-disk file the CLI
+      writes (`~/.quanta/sticky-model.json`): one user, one model preference, and
+      ADR-0462 documents two store instances over one file as supported usage. So
+      a `/model` pick made in the CLI applies to the web session too.
+    - `modelCandidates` — the LIVE id→PORT array `resolveSkillTurnOverride`
+      resolves the picked id against. Without it the store write lands and the
+      swap finds no port, silently running the boot model.
+
+  WRITE half: the port gained `applyModel` (the real leg, fired alongside the
+  existing echo the client renders) and a `modelAllowlist` that may be a GETTER —
+  the candidate set grows when the lazy provider-catalog probe runs, and the
+  control context is read per drain, so a just-discovered model is accepted
+  without re-minting the port. Off-catalog ids stay fail-closed at the planner.
+  The applier is sync + NO-THROW (a thrown applier abandons the whole drain): the
+  write is fire-and-forget with its own error logging, so an unwritable store
+  degrades to "not persisted", never to a dead turn.
+
+  READ half: `GET /readout/model` (the out-of-band readout route, which works
+  mid-turn because it takes no session lease) lists the effective model + every
+  candidate + how to switch. Its accessor AWAITS the catalog probe, so opening the
+  panel is what pays the one provider round-trip — daemon boot stays network-free.
+
+  aug-28 — REPORTING the switch, not just applying it. `host.describe().modelSlug`
+  now publishes the EFFECTIVE model (`@/agent/effective-model`), and the kernel
+  refreshes that echo at the TURN TERMINAL. Both halves were needed: the echo is the
+  single source for the `/state` readout's `model` row, the CLI attach pill, the SDK's
+  `session.model`, and — via `turn.completed.modelSlug` — the daemon's cumulative
+  `/cost` fold. It was captured ONCE at session creation, so a switched session's
+  entire spend was attributed to a model that never ran. That one looks like data,
+  which is worse than a missing field.
+
+  The candidate set is the provider's LIVE catalog (`LLMPort.listModels`), never a
+  hand-maintained slug list: `MODEL_CONTEXT_WINDOWS` has no `gpt-5.6-terra` entry
+  while that IS the live default, which is exactly the drift a static list ships.
+evidence:
+  code:
+    - src/apps/web-daemon/web-model-switch.ts
+    - src/apps/web-daemon/web-control-request-port.ts
+    - src/apps/web-daemon/runtime-factory.ts
+    - src/apps/web-daemon/runtime-factory/agent-config-base.ts
+    - src/apps/web-daemon/runtime-factory/session-collaborators.ts
+    - src/apps/web-daemon/runtime-factory/readout-sources.ts
+    - src/apps/web-daemon/readout.ts
+    - src/llm/model-catalog.ts
+    - src/agent/effective-model.ts
+    - apps/web-frontend/src/components/slash-llm-config.ts
+    - apps/web-frontend/src/components/slash-readout.ts
+  adrs: [496, 462, 517]
+  tests:
+    unit:
+      - tests/unit/apps/web-daemon/model-switch-wire-hellgate.test.ts
+      - tests/unit/apps/web-daemon/readout-slug-parity-hellgate.test.ts
+      - tests/unit/host/effective-model-projection-hellgate.test.ts
+      - tests/unit/kernel/session-model-echo-staleness-hellgate.test.ts
+      - apps/web-frontend/src/components/slash-model-switch.test.ts
+    integration:
+      - tests/integration/model-switch-ws-daemon-e2e.test.ts
+    contract: []
+knobs:
+  - name: "controlRequest { kind: set_model }"
+    where: "web-control-request-port.ts applyModel ⇒ web-model-switch store write"
+    purpose: "persist the per-mode model pick so the next turn runs it (was an echo-only no-op)"
+  - name: "GET /readout/model"
+    where: "readout.ts LIVE_READOUTS.model ⇒ readout-sources modelSwitch accessor"
+    purpose: "list the effective model + the candidate set set_model will accept (awaits the lazy provider-catalog probe)"
+deliberate_hold: null
+notes: |
+  Hellgate coverage. model-switch-wire.hellgate (unit): the FACTORY leg (the base
+  carries BOTH slots when the switch is composed — `modelSwitch` is an OPTIONAL
+  builder arg, so forgetting it type-checks and silently leaves the loop inert) +
+  paired control / frame→peek→enqueue→drain→store→PORT resolve / LIVE allowlist
+  (an id rejected before the probe is accepted after it, same port instance) /
+  fail-closed off-catalog / no-throw on an unwritable store AND on a synchronously
+  throwing applier / the READ half through the REAL `resolveReadout` route with the
+  honest missing-source control. model-switch-ws-daemon-e2e (integration): the same
+  chain over a REAL WebSocket into a REAL `startWebDaemon` — plus the two controls
+  (off-catalog rejected; NO control ports wired ⇒ the frame never reaches the port).
+  RED-on-injection measured for all three web legs (drop `applyModel` ⇒ 4 red; drop
+  the base `modelCandidates` ⇒ the factory case red; drop the readout source ⇒ the
+  readout case red).
+
+  HONEST GAP: no test drives a full LLM-driven WEB turn that then runs the picked
+  model — the daemon sessions in these tests are the hermetic stub, so the drain is
+  invoked explicitly (one hop short of the loop's own `pollControlRequests` tick,
+  which the CLI side measures live).
+
+  aug-28 — the browser's CONFIRMATION now waits for the switch. `/model <id>` sent
+  the frame and immediately re-read the `/model` readout under a line saying
+  "reading back the effective model" — but the switch is applied out of band (the
+  frame is drained on the loop's next control tick, then the store write is
+  fire-and-forget), so that first read reported the OLD model nearly every time:
+  the UI told the operator their switch had failed while it was landing a moment
+  later. It now polls the readout (20 × 150ms, bounded by ATTEMPTS so a test can
+  inject a no-op delay) and, if the id still is not effective, says exactly that —
+  which is a real outcome, since an off-catalog id IS rejected server-side. The
+  match is anchored on the readout's `model  <id>` LINE, not "the body contains the
+  slug": every switchable id is listed as a candidate, so a substring check would
+  report success for a switch that never happened (pinned as its own case).
+
+  aug-28 UPDATE to the second half of that gap. It said "the web UI also has no
+  model PICKER widget yet: a client must call the readout + send the frame itself".
+  The browser now has a real front door — `slash-llm-config.ts` `/model` lists via
+  the daemon's `/model` readout and switches by sending the `set_model` control
+  frame, then re-reads the readout as an honest confirmation (the channel acks
+  nothing, and an off-catalog id is rejected server-side). Before that it was a
+  server-routed prefill stub that never executed, so `/model <id>` in the browser
+  printed no error and changed nothing. What is still absent is a graphical PICKER
+  (a click-to-choose list); the slash command is the whole UI. The daemon/browser
+  readout vocabularies are now guarded against drift by
+  `tests/unit/apps/web-daemon/readout-slug-parity-hellgate.test.ts` — that hole was
+  real: this campaign added the `/model` readout server-side and left the browser's
+  hand-copied list untouched, making a working readout unreachable from the only UI
+  that consumes it.

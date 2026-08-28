@@ -101,6 +101,12 @@ const buildHarness = (opts?: {
               current.value = id
               return "ok" as const
             },
+            // aug-28 — the `--clear` half of the wire. The fake mirrors the real
+            // adapter's post-state: no pick ⇒ `current()` reports the boot model.
+            clear: async () => {
+              current.value = opts?.initialModel ?? "gpt-5"
+              return "ok" as const
+            },
             effortSupport,
           },
         }
@@ -321,7 +327,7 @@ describe("/model real adapter under --plan (buildModelAdapter + real effort)", (
     const modelAdapter = buildModelAdapter({
       store,
       bootModel: "gpt-5",
-      candidateIds: ["gpt-5", "gpt-4o"],
+      candidateIds: () => ["gpt-5", "gpt-4o"],
       currentMode: () => "plan", // resolveAgentMode(undefined, /*planMode*/ true)
     })
     const effortStore = createEffortStore("high")

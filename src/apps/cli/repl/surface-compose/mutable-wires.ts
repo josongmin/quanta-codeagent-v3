@@ -13,6 +13,7 @@ import { createItemStore } from "../item-store"
 import { createPlaybookTriggerSurfaceSeam } from "../playbook-trigger-surface-seam"
 import type { SessionSetupResult } from "../session-setup"
 import { createSessionSwitchWire } from "../session-switch-wire"
+import { liveAgentMode } from "../sticky-model-boot"
 import type { SurfaceCoreState } from "./core-state"
 import { buildKbSlashSlot } from "./kb-slot"
 import type { SurfaceState } from "./turn-sinks"
@@ -97,12 +98,27 @@ export const buildMutableSurfaceWires = (
       ? undefined
       : () => setup.mcpResourceCapture?.snapshot() ?? []
   const modelWire = buildModelAdapterWire({
-    stickyStore: setup.runtimeContext.stickyModelStore(),
+    // aug-27 — the SURFACE-owned store, not `runtimeContext.stickyModelStore()`:
+    // the interactive CLI's runtime overlay never carried that slot (only the
+    // headless `apps/agent` composition root resolves one), so reading it here
+    // was always `undefined` ⇒ adapter omitted ⇒ `/model` printed "not wired in
+    // this surface". The surface mints the store in `core-state` and threads the
+    // SAME instance down onto the per-turn config (`runtime-compose.ts`), so the
+    // slash write and the loop's read are one cell.
+    stickyStore: core.stickyModel,
     bootModel: setup.model,
-    planMode: setup.planMode,
-    candidateIds: [
-      ...new Set([setup.model, ...core.retryCandidates.map((candidate) => candidate.id)]),
-    ],
+    provider: setup.provider,
+    // THE live-mode getter, minted once in `core-state`: it mirrors the loop's
+    // `resolveLiveAgentMode` (the shift+tab posture wins over `--plan`), and the
+    // sticky key contains the mode — so the adapter's WRITE key and the slot's
+    // `effectiveModel` READ key have to be the same function, not two
+    // identical-looking constructions that can drift apart.
+    currentMode: core.liveMode,
+    candidateIds: () => core.modelCatalog.ids(),
+    refresh: core.modelCatalog.refresh,
+    // A resumed session's persisted pick needs no seed here any more: the store
+    // this adapter reads through (`peek`) is itself seeded from the boot snapshot,
+    // so `current()` is right on the FIRST paint.
   })
   const modelAdapter = modelWire.modelAdapter
   if (modelAdapter !== undefined) {

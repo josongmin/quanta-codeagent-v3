@@ -29,21 +29,30 @@ import {
   type Ceiling,
   evaluateCeilings,
   SITE_LIST_CAP,
-  type SitesByRule,
+  type SiteAttribution,
   scopeKey,
 } from "../../tools/dev/lint-debt-ceiling"
 
 const RULE = "lint/suspicious/noConsole"
 
-const sites = (rows: Record<string, Record<string, number>>): SitesByRule =>
-  new Map(Object.entries(rows).map(([rule, files]) => [rule, new Map(Object.entries(files))]))
+/** Default classifier: `src/` is prod, everything else is tests — the same rule
+ *  the tool applies. Passed as part of the ATTRIBUTION value, never beside it,
+ *  because the two being separable is what A-7 exists to prevent. */
+const bySrcPrefix = (file: string): "prod" | "tests" => (file.startsWith("src/") ? "prod" : "tests")
+
+const sites = (
+  rows: Record<string, Record<string, number>>,
+  scopeOfFile: (file: string) => "prod" | "tests" = bySrcPrefix,
+): SiteAttribution => ({
+  byRule: new Map(Object.entries(rows).map(([rule, files]) => [rule, new Map(Object.entries(files))])),
+  scopeOfFile,
+})
 
 const evaluate = (args: {
   counts?: ReadonlyMap<string, number>
   scopedCounts?: ReadonlyMap<string, number>
   ceiling: Ceiling
-  sitesByRule?: SitesByRule
-  scopeOfFile?: (file: string) => "prod" | "tests"
+  sitesByRule?: SiteAttribution
 }) =>
   evaluateCeilings({
     counts: args.counts ?? new Map<string, number>(),
@@ -54,8 +63,7 @@ const evaluate = (args: {
     // Spread rather than assign: under `exactOptionalPropertyTypes` an explicit
     // `undefined` is NOT the same as an absent key, and "absent" is precisely
     // what A-2 is about.
-    ...(args.sitesByRule === undefined ? {} : { sitesByRule: args.sitesByRule }),
-    ...(args.scopeOfFile === undefined ? {} : { scopeOfFile: args.scopeOfFile }),
+    ...(args.sitesByRule === undefined ? {} : { sites: args.sitesByRule }),
   })
 
 describe("A — a breached lint ceiling names its sites", () => {
@@ -108,7 +116,6 @@ describe("A — a breached lint ceiling names its sites", () => {
       sitesByRule: sites({
         [scoped]: { "src/a.ts": 3, "src/b.ts": 1, "tests/unit/c.test.ts": 5 },
       }),
-      scopeOfFile: (f) => (f.startsWith("src/") ? "prod" : "tests"),
     })
     expect(v.regressions).toEqual([
       "  lint/style/noNonNullAssertion [tests]: 5 > 2 — in tests/unit/c.test.ts (5)",

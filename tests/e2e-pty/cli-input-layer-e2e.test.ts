@@ -15,7 +15,30 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { drivePtyCli, PTY_AVAILABLE, type PtyCli } from "./pty-harness"
 
-const BOOT = "Ctrl+C quit" // welcome-banner footer ⇒ REPL is at the prompt
+/**
+ * READINESS — the reader's own prompt glyph, NOT the welcome banner.
+ *
+ * This was `"Ctrl+C quit"`, a welcome-BANNER footer string. The banner is
+ * printed by the REPL *before* it calls `readLine`, and `readLine` attaches its
+ * `keypress` listener and paints the input band only after that — so a test
+ * that treated the banner as "ready" wrote to the PTY while nothing was
+ * consuming it, and the bytes were dropped. Every test in this file that sends
+ * input immediately after boot was exposed; which one went red varied run to
+ * run, which is exactly why it read as load.
+ *
+ * `› ` (U+203A, `prompt-pipeline.ts`) is painted by `machine.redraw()`, which
+ * runs AFTER `stdin.on("keypress", …)` in `raw-line-reader.ts` — so seeing it
+ * proves the listener is attached. The four sibling e2e-pty files already waited
+ * on a reader-painted string (`"ask before every edit"`, the mode pill); this
+ * file was the only one keyed to the banner, and the only one that flaked.
+ *
+ * Measured on a quiet machine, 12 boots per arm:
+ *   ctrl+C after the BANNER footer   → 6/12 no exit (RED)
+ *   ctrl+C after the mode pill       → 0/12
+ *   ctrl+C after the prompt glyph    → 0/12
+ *   `send("/help\r")` after the banner → 4/12 RED;  after the prompt glyph → 0/15
+ */
+const BOOT = /\u203a/
 const T = 30_000
 
 describe.skipIf(!PTY_AVAILABLE)("CLI input-layer e2e (PTY)", () => {

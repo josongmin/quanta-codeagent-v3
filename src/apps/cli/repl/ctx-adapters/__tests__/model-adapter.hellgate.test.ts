@@ -23,7 +23,7 @@ const build = (over?: { mode?: AgentMode; current?: () => string }) => {
     store,
     bootModel: "gpt-5",
     currentMode: () => over?.mode ?? "default",
-    candidateIds: ["gpt-5", "gpt-4o", "future-xyz"],
+    candidateIds: () => ["gpt-5", "gpt-4o", "future-xyz"],
     ...(over?.current !== undefined ? { currentModel: over.current } : {}),
   })
   return { store, adapter }
@@ -64,7 +64,7 @@ describe("model-adapter — candidate projection from the metadata SSOT", () => 
       store,
       bootModel: "gpt-5",
       currentMode: () => "default",
-      candidateIds: ["gpt-5", "gpt-5", "gpt-4o"], // dup boot + dup
+      candidateIds: () => ["gpt-5", "gpt-5", "gpt-4o"], // dup boot + dup
     })
     const ids = adapter.candidates().map((m) => m.id)
     expect(ids).toEqual(["gpt-5", "gpt-4o"])
@@ -101,7 +101,7 @@ describe("model-adapter — current()", () => {
       store,
       bootModel: "gpt-5",
       currentMode: () => mode,
-      candidateIds: ["gpt-5", "gpt-4o"],
+      candidateIds: () => ["gpt-5", "gpt-4o"],
     })
     // Set under `default` — only the default-mode shadow is populated.
     await adapter.set("gpt-4o")

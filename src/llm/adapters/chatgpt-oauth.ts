@@ -398,6 +398,23 @@ export class ChatGPTOAuthAdapter implements LLMPort {
     return { model: fallback, swappedFrom: wanted }
   }
 
+  /**
+   * `LLMPort.listModels` — the slugs THIS ChatGPT account may run, straight from
+   * the same `/codex/models` probe (and the same 5-minute memo) the stream path
+   * uses to validate its configured model. This is what makes the `/model`
+   * picker's candidate set the provider's live truth rather than a static list.
+   *
+   * Throws on auth/network failure (the shared adapter contract); callers treat
+   * a rejection as "no catalog" and keep their seeded candidates.
+   */
+  async listModels(): Promise<readonly string[]> {
+    const token = await this.ensureFreshToken()
+    const cfg = resolveOAuthConfig(this.env)
+    const baseURL = cfg.apiBase.endsWith("/codex") ? cfg.apiBase : `${cfg.apiBase}/codex`
+    const catalog = await this.fetchModelCatalog(baseURL, token, cfg)
+    return catalog.models.map((m) => m.model)
+  }
+
   /** Best-effort purge of an invalidated quanta-managed token. Returns
    *  `true` when our copy was deleted, `false` when there was nothing to
    *  delete OR the token is owned by another tool (Codex) — in that case

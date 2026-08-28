@@ -13,6 +13,7 @@
 
 import { createHash } from "node:crypto"
 import { errMessage, logger } from "@/shared"
+import { forwardPortIdentity } from "../port-identity"
 import type { LLMPort } from "../ports"
 import type { StreamEvent, StreamInput } from "../types"
 import { defaultHashRequest } from "./jsonl-store"
@@ -425,17 +426,11 @@ export function recordingLlmPort(opts: RecordingLlmOpts): LLMPort {
   const hashFn = opts.hashRequest ?? ((req: StreamInput) => defaultHashRequest(req, "exact"))
   const missingRef = { reported: false }
   return {
-    ...(opts.inner.model !== undefined ? { model: opts.inner.model } : {}),
-    // Forward contextWindowKey like every other decorator (with-temperature,
-    // with-recording-lane, …) — a recording wrap must not silently drop the
-    // 1m-context window key a downstream decorator may read.
-    ...(opts.inner.contextWindowKey !== undefined
-      ? { contextWindowKey: opts.inner.contextWindowKey }
-      : {}),
-    ...(opts.inner.provider !== undefined ? { provider: opts.inner.provider } : {}),
-    ...(opts.inner.surfaceId !== undefined ? { surfaceId: opts.inner.surfaceId } : {}),
-    ...(opts.inner.transportId !== undefined ? { transportId: opts.inner.transportId } : {}),
-    ...(opts.inner.authMode !== undefined ? { authMode: opts.inner.authMode } : {}),
+    // aug-28 — ONE forwarder (see `@/llm/port-identity`). The inline copy this
+    // replaces already forwarded `contextWindowKey` (its comment says why) but
+    // still dropped `listModels`; routing through the helper means the NEXT port
+    // capability cannot be dropped here either.
+    ...forwardPortIdentity(opts.inner),
     stream: (input: StreamInput): AsyncIterable<StreamEvent> =>
       recordingStreamImpl(input, { opts, now, hashFn, missingRef }),
   }

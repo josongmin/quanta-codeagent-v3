@@ -87,6 +87,7 @@
 
 import type { HistorySanitizationPort } from "@/memory/history-sanitization"
 import { LLMError } from "@/shared"
+import { forwardPortIdentity } from "../port-identity"
 import type { LLMPort } from "../ports"
 import type { Message, StreamEvent, StreamInput } from "../types"
 import {
@@ -226,11 +227,7 @@ export const withImageSanitizationRetry = (
   }
 
   return {
-    ...(inner.model !== undefined ? { model: inner.model } : {}),
-    ...(inner.provider !== undefined ? { provider: inner.provider } : {}),
-    ...(inner.surfaceId !== undefined ? { surfaceId: inner.surfaceId } : {}),
-    ...(inner.transportId !== undefined ? { transportId: inner.transportId } : {}),
-    ...(inner.authMode !== undefined ? { authMode: inner.authMode } : {}),
+    ...forwardPortIdentity(inner),
     async *stream(input: StreamInput): AsyncIterable<StreamEvent> {
       // Attempt loop. `attempt === 0` is the original call; subsequent
       // iterations are post-sanitize retries. Recovery decision is delegated

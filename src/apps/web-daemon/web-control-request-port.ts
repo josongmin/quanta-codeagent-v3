@@ -107,11 +107,24 @@ export interface WebControlRequestPortDeps {
   /**
    * Optional model allowlist. When present, a `set_model` request is validated
    * against it (off-list ⇒ rejected). Absent ⇒ the planner accepts any model
-   * (host opted out of gating that axis) — but with no {@link onSetModel} sink
-   * the effect is a documented observability-only no-op (no live model-swap cell
-   * on the daemon today; see the module note).
+   * (host opted out of gating that axis).
+   *
+   * Accepts a GETTER (aug-27) as well as a fixed array: the daemon's candidate
+   * set grows when the provider-catalog probe runs (lazily, on the `/model`
+   * readout), and the context is read per drain — so a getter admits a
+   * just-discovered model without re-minting the port. A fixed array keeps the
+   * old semantics verbatim.
    */
-  readonly modelAllowlist?: readonly string[]
+  readonly modelAllowlist?: readonly string[] | (() => readonly string[])
+  /**
+   * aug-27 — the REAL `set_model` leg: persist the pick so the next turn runs it
+   * (`web-model-switch.ts` writes the sticky store the loop reads). Absent ⇒ the
+   * effect stays the historical observability-only echo, which is what made a
+   * client's `set_model` look accepted while every turn kept the old model.
+   * MUST NOT throw (a thrown applier abandons the whole control drain) — the web
+   * impl is a fire-and-forget write with its own error logging.
+   */
+  readonly applyModel?: (model: string) => void
   /** Optional thinking-level allowlist (same posture as {@link modelAllowlist}). */
   readonly thinkingLevels?: readonly string[]
   /**
@@ -123,10 +136,10 @@ export interface WebControlRequestPortDeps {
   readonly usage?: ContextUsageSnapshot
   /**
    * Optional observability sink for the NON-permission axes (model / thinking /
-   * usage / rejected). The web surface has no live model/thinking swap CELL
-   * today, so these are surfaced (not silently dropped) for the browser/log
-   * rather than mutating runtime state. Absent ⇒ those effects are no-ops
-   * (planned + bounded, but landing nowhere) — honest, not faked.
+   * usage / rejected). It STILL fires for `set_model` alongside
+   * {@link applyModel} (the echo is what a client renders); `thinking` / `usage`
+   * have no live cell on this surface yet, so for them this remains the honest
+   * "surfaced, not faked" path. Absent ⇒ no echo.
    */
   readonly observe?: (effect: {
     readonly kind: "model" | "thinking" | "usage" | "rejected"
@@ -175,13 +188,29 @@ export const createWebControlRequestPort = (
       if (!isPermissionMode(mode)) return
       deps.permission.mode = mode
     },
-    setModel: (model) => safeObserve("model", model),
+    setModel: (model) => {
+      safeObserve("model", model)
+      // The load-bearing half (aug-27). Ordered AFTER the echo so a client sees
+      // the acknowledgement even if the host's write path is slow; `applyModel`
+      // is no-throw by contract, so it cannot abandon the drain.
+      deps.applyModel?.(model)
+    },
     setThinking: (level) => safeObserve("thinking", level),
     reportUsage: (usage) => safeObserve("usage", JSON.stringify(usage)),
     onRejected: (reason) => safeObserve("rejected", reason),
   }
 
-  const context: ControlRequestContext = {
+  // A getter dep is normalized to one thunk; a fixed array is wrapped so the
+  // context below has exactly one shape to read.
+  const allowlist = deps.modelAllowlist
+  const modelAllow: (() => readonly string[]) | undefined =
+    allowlist === undefined
+      ? undefined
+      : typeof allowlist === "function"
+        ? allowlist
+        : () => allowlist
+
+  const baseContext: ControlRequestContext = {
     // Permission modes: the planner fail-closes on an ABSENT allowlist, so one
     // MUST be supplied for the mode effect to land at all — but supplying the
     // full SSOT set made this file's own header false ("a model-issued `bypass`
@@ -190,11 +219,23 @@ export const createWebControlRequestPort = (
     // a privilege escalation; `bypass` is reachable only from the operator's own
     // surface, never from a control request over the wire.
     permissionModes: WEB_CONTROL_PERMISSION_MODES,
-    ...(deps.modelAllowlist !== undefined ? { modelAllowlist: deps.modelAllowlist } : {}),
     ...(deps.thinkingLevels !== undefined ? { thinkingLevels: deps.thinkingLevels } : {}),
     // `usage` is read at MINT time; the planner shallow-copies it defensively.
     ...(deps.usage !== undefined ? { usage: deps.usage } : {}),
   }
+
+  // The allowlist is a real GETTER on the object (NOT a spread of one — a spread
+  // would copy the value at mint time and freeze the list), so each drain reads
+  // the CURRENT candidate set.
+  const context: ControlRequestContext =
+    modelAllow === undefined
+      ? baseContext
+      : {
+          ...baseContext,
+          get modelAllowlist(): readonly string[] {
+            return modelAllow()
+          },
+        }
 
   return {
     port,

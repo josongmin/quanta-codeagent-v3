@@ -21,7 +21,7 @@
  * rendered frame, then exit BEFORE submitting a turn — so no LLM call is made.
  */
 import { dlopen, FFIType, ptr } from "bun:ffi"
-import { closeSync, read as fsRead, mkdtempSync, writeSync } from "node:fs"
+import { closeSync, read as fsRead, mkdtempSync, rmSync, writeSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
@@ -114,7 +114,16 @@ export const drivePtyCli = (opts: DrivePtyOpts = {}): PtyCli => {
   const masterFd = master[0] as number
   const slaveFd = slave[0] as number
 
-  const cwd = opts.cwd ?? mkdtempSync(join(tmpdir(), "e2e-pty-cwd-"))
+  /** Scratch dirs THIS call created — removed by `kill()`. A caller-supplied
+   *  `cwd` (fixture files live there) and the real HOME are never listed. */
+  const ownedScratchDirs: string[] = []
+  const cwd =
+    opts.cwd ??
+    ((): string => {
+      const d = mkdtempSync(join(tmpdir(), "e2e-pty-cwd-"))
+      ownedScratchDirs.push(d)
+      return d
+    })()
   // aug-23 audit — HERMETIC HOME. This used to forward `process.env.HOME`, so
   // the CLI under test resolved the DEVELOPER's `~/.quanta`: real OAuth
   // credentials under `auth/`, a real `permission-state.json`, and whatever
@@ -131,7 +140,11 @@ export const drivePtyCli = (opts: DrivePtyOpts = {}): PtyCli => {
   const home =
     opts.useRealHome === true
       ? (process.env.HOME ?? "/tmp")
-      : mkdtempSync(join(tmpdir(), "e2e-pty-home-"))
+      : ((): string => {
+          const d = mkdtempSync(join(tmpdir(), "e2e-pty-home-"))
+          ownedScratchDirs.push(d)
+          return d
+        })()
   const command = opts.command ?? (["bun", CLI_ENTRY] as const)
   const child = Bun.spawn([...command, ...(opts.args ?? [])], {
     cwd,
@@ -198,6 +211,20 @@ export const drivePtyCli = (opts: DrivePtyOpts = {}): PtyCli => {
         closeSync(masterFd)
       } catch {
         // already closed
+      }
+      // aug-28 — remove the scratch dirs this harness MADE. It minted a temp HOME
+      // (and usually a temp cwd) per boot and never removed either, so every run of
+      // the six pty suites left dozens behind: measured 828 `e2e-pty-home-*` dirs in
+      // `/private/tmp` (38k entries total), and unbounded `/tmp` growth has already
+      // taken `ls /tmp`-shaped tests over their timeout in this repo. Only dirs the
+      // harness created are touched — a caller-supplied `cwd` is left alone, and a
+      // `useRealHome` run has no scratch home to remove.
+      for (const dir of ownedScratchDirs) {
+        try {
+          rmSync(dir, { recursive: true, force: true })
+        } catch {
+          // best-effort: a still-open child handle must not fail the test
+        }
       }
     },
     waitFor: async (pattern, timeoutMs = 12_000) => {

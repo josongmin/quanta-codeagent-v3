@@ -7,13 +7,16 @@
  * spawn faults, missing program.
  *
  * Verified 2026-06-10 with debugpy 1.8.21. AUTO-SKIPS when python3+debugpy are
- * absent so CI without the toolchain stays green. This battery caught the
- * launch-sequencing deadlock + the presentation-pseudo-var noise the fakes hid.
+ * absent so CI without the toolchain stays green, and is OPT-IN behind
+ * `QUANTA_REAL_TOOLCHAIN_E2E` (`bun run test:real-toolchain`) — see the lane
+ * note above the gate below. This battery caught the launch-sequencing deadlock
+ * + the presentation-pseudo-var noise the fakes hid.
  */
 import { describe, expect, test } from "bun:test"
 import { mkdirSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import { gateOn } from "@/shared"
 import { makeDebugInspectTool } from "@/tool/debug/tool"
 import type { ToolContext, ToolEvent, ToolResult } from "@/tool/types"
 
@@ -27,7 +30,17 @@ const hasDebugpy = (): boolean => {
     return false
   }
 }
-const D = hasDebugpy() ? describe : describe.skip
+// REAL-ON-DEMAND LANE. Toolchain presence alone used to be the gate, so on a
+// developer machine that HAS the toolchain these ran inside the ordinary unit
+// suite and blew the per-test speed budget (`tools/dev/unit-speed-budget.json`,
+// 8,529ms; measured here at 10,131ms / 9,469ms), a ceiling that may only go
+// DOWN. The `-real-e2e.test.ts` sibling `runtime-rust-real-e2e.test.ts` already
+// required `QUANTA_REAL_TOOLCHAIN_E2E`; this file did not, so the suffix meant
+// two different things. Same suffix, same lane now: a VISIBLE skip by default,
+// run by `bun run test:real-toolchain`. CI coverage is unchanged — the runner
+// has none of these toolchains, so these describes already skipped there.
+const D =
+  gateOn(process.env, "QUANTA_REAL_TOOLCHAIN_E2E") && hasDebugpy() ? describe : describe.skip
 
 /** Write a program to a fresh temp dir, run debug_inspect, return the result. */
 const debugProgram = async (
@@ -333,7 +346,10 @@ const hasClang = (): boolean => {
   }
 }
 const LLDB = lldbDapPath()
-const DL = LLDB !== undefined && hasClang() ? describe : describe.skip
+const DL =
+  gateOn(process.env, "QUANTA_REAL_TOOLCHAIN_E2E") && LLDB !== undefined && hasClang()
+    ? describe
+    : describe.skip
 
 DL("debug_inspect — REAL lldb-dap e2e (C, second language)", () => {
   const compile = (src: string): { dir: string; bin: string; csrc: string } => {
@@ -441,7 +457,10 @@ const hasCargo = (): boolean => {
     return false
   }
 }
-const DR = LLDB !== undefined && hasCargo() ? describe : describe.skip
+const DR =
+  gateOn(process.env, "QUANTA_REAL_TOOLCHAIN_E2E") && LLDB !== undefined && hasCargo()
+    ? describe
+    : describe.skip
 
 DR("debug_inspect — REAL Rust e2e via lldb-dap (third language)", () => {
   test("stops in a Rust fn, reports stack + locals (realpath source matching)", async () => {
@@ -525,7 +544,8 @@ const hasNode = (): boolean => {
     return false
   }
 }
-const DNODE = hasNode() ? describe : describe.skip
+const DNODE =
+  gateOn(process.env, "QUANTA_REAL_TOOLCHAIN_E2E") && hasNode() ? describe : describe.skip
 
 DNODE("debug_inspect — REAL Node e2e via CDP (node --inspect-brk)", () => {
   test("stops in a node program and reports the stack + local over CDP", async () => {

@@ -331,6 +331,30 @@ export class SessionClient {
     }
   }
 
+  /**
+   * aug-28 — send a `controlRequest` frame (ADR-0496): the OUT-OF-BAND INBOUND
+   * channel the daemon peeks BEFORE the session bridge, exactly like
+   * {@link sendPlanInputAnswer}. This is how a client changes the MODEL: the
+   * daemon's control port persists the pick and the next turn runs it.
+   *
+   * Returns `false` when the socket is not open, so the caller can say so instead
+   * of showing a success it cannot back (the daemon sends no ack frame — the
+   * honest confirmation is re-reading `GET /readout/model`).
+   */
+  sendControlRequest(request: { readonly kind: string; readonly [k: string]: unknown }): boolean {
+    if (this.#ws === null || this.#ws.readyState !== READYSTATE_OPEN) {
+      this.#log("warn", `[SessionClient] dropping controlRequest ${request.kind} — socket not open`)
+      return false
+    }
+    try {
+      this.#ws.send(JSON.stringify({ kind: "controlRequest", request }))
+      return true
+    } catch (err) {
+      this.#log("warn", `[SessionClient] controlRequest send failed: ${String(err)}`)
+      return false
+    }
+  }
+
   /** Last server-minted session id, or `null` until the handshake settles. */
   get sessionId(): string | null {
     return this.#sessionId

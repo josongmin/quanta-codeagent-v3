@@ -301,6 +301,50 @@ const sessionSetupDeps: Parameters<typeof setupSession>[0] = {
  *  `setupSession` → `composePromptPipeline` → `runOneTurn` → `installTurnCancel`
  *  → `SessionState` → `runSessionLoop`. The host owns slashCtx composition +
  *  per-turn render sinks; byte-identical default behavior. */
+/**
+ * jun-10 — the welcome banner: the interactive surface's FIRST paint (the
+ * Claude-Code-style entry box). Interactive + TTY only: one-shot (`argPrompt`),
+ * piped and eval launches never see it (byte-identical). Writes to stderr like
+ * every other surface chrome — stdout stays the agent stream.
+ *
+ * Extracted from `runRepl` (aug-27) so that function stays under the god-FN cap:
+ * the banner is now the only place that resolves three host-owned facts (the two
+ * affordance gates, the strict envelope posture, and the effective model), and
+ * that cluster reads better named than inlined.
+ *
+ * UUX-2-23/5-18 — the banner itself is a PURE renderer; the gate states are
+ * computed HERE (the same env truthiness the composers use), except the security
+ * posture, which must come from the frozen strict runtime-config authority
+ * (`gateOn` accepts "true"/"on", which would make the banner claim envelope
+ * protection while the dispatch seam stayed disabled).
+ */
+export const paintWelcomeBanner = (setup: Awaited<ReturnType<typeof setupSession>>): void => {
+  if (setup.argPrompt !== undefined || setup.stderrIsTTY !== true) return
+  process.stderr.write(
+    `${renderWelcomeBanner(
+      buildWelcomeInfo(
+        setup,
+        setup.homeDir.length > 0 ? setup.homeDir : undefined,
+        {
+          modeCycle: gateOn(process.env, "QUANTA_MODE_CYCLE"),
+          atMention: gateOn(process.env, "QUANTA_AT_AUTOCOMPLETE"),
+          untrustedEnvelope: runtimeConfig().untrustedEnvelope,
+        },
+        // aug-28 — announce the EFFECTIVE model (a `/model` pick persists to
+        // `~/.quanta/sticky-model.json` and the loop applies it from turn 1, so a
+        // banner pinned to the boot model is a false claim on every resumed
+        // session). Resolved ONCE in `setupSession` and shared with the status-bar
+        // preamble and the repointable status-line source. The banner used to
+        // resolve it here itself, which is how it became the ONLY first-paint
+        // surface telling the truth: measured over a real pty, the banner named the
+        // persisted pick while the status bar named the boot model IN THE SAME
+        // FRAME — and the status bar paints once at boot, so it never corrected.
+        setup.effectiveBootModel,
+      ),
+    )}\n`,
+  )
+}
+
 export const runRepl = async (): Promise<void> => {
   await maybePickSession()
   const convStore = defaultConversationCheckpointStore()
@@ -313,29 +357,7 @@ export const runRepl = async (): Promise<void> => {
     history: setup.history,
   })
   try {
-    // jun-10 — welcome banner: the interactive surface's FIRST paint (the
-    // Claude-Code-style entry box). Interactive + TTY only: one-shot
-    // (`argPrompt`), piped and eval launches never see it (byte-identical).
-    // stderr, like every other surface chrome — stdout stays the agent stream.
-    if (setup.argPrompt === undefined && setup.stderrIsTTY === true) {
-      // UUX-2-23/5-18 — the banner is a PURE renderer; the host computes the
-      // gate states here (same env truthiness the composers use). Both
-      // affordance gates are CLI-seeded default-ON (cli-feature-gates.ts), so
-      // an operator only loses the line by explicitly opting out.
-      process.stderr.write(
-        `${renderWelcomeBanner(
-          buildWelcomeInfo(setup, setup.homeDir.length > 0 ? setup.homeDir : undefined, {
-            modeCycle: gateOn(process.env, "QUANTA_MODE_CYCLE"),
-            atMention: gateOn(process.env, "QUANTA_AT_AUTOCOMPLETE"),
-            // Security posture must come from the frozen, strict runtime-config
-            // authority. `gateOn` accepts loose spellings such as "true"/"on",
-            // which would make the banner claim envelope protection while the
-            // dispatch seam remains disabled.
-            untrustedEnvelope: runtimeConfig().untrustedEnvelope,
-          }),
-        )}\n`,
-      )
-    }
+    paintWelcomeBanner(setup)
     // H13 — gated external-config migration notice (default-OFF behind
     // QUANTA_MIGRATE_CONFIG). Detects competitor (Claude Code / Cursor) config
     // under ~ + cwd, converts it to the quanta shape, throttles a re-offer, and

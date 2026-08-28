@@ -314,7 +314,12 @@ describe("D4 model-derived threshold through the real loop", () => {
     // In-memory sticky store pinned to the 1M model for the active mode.
     const stickyStore = {
       get: async () => "sonnet-1m",
+      // The port's REQUIRED sync read (aug-28): same answer as `get`, so the
+      // displays and the turn cannot disagree.
+      peek: () => "sonnet-1m",
       set: async () => ({ ok: true as const }),
+      // The port's REQUIRED removal (aug-28) — `/model --clear`'s back half.
+      unset: async () => ({ ok: true as const }),
       load: async () => ({ ok: true as const, snapshot: {} }),
     }
     // Rich transcript so findBoundary HAS a prefix: if a compaction DID fire

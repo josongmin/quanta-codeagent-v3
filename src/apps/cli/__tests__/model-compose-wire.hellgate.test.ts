@@ -1,5 +1,13 @@
 /**
- * Hellgate — `/model` compose-seam mode-binding (ticket 14, §11.6).
+ * Hellgate — `/model` compose-seam mode-binding (ticket 14, §11.6; corrected aug-28).
+ *
+ * aug-28 CORRECTION. This file used to drive `planMode` and assert the key, which
+ * encoded a FALSE premise: the loop's consume side is `resolveLiveAgentMode`, which
+ * prefers the LIVE `agentModeState` cell (the CLI's shift+tab mode cycle, seeded
+ * default-ON) over `planMode`. So the wire now takes THE mode getter
+ * (`sticky-model-boot#liveAgentMode`) and these cases pin BOTH arms: the live cell
+ * wins when present, `planMode` decides when it is absent. Driving `planMode`
+ * alone could not fail for the reason the old test names claimed.
  *
  * PINS the REAL FIX (R1-3): the surface-compose model-adapter wire binds the
  * SET to the SAME mode derivation the loop's consume side reads
@@ -17,16 +25,17 @@
  */
 import { describe, expect, test } from "bun:test"
 import { inMemoryStickyModelStore } from "@/agent/sticky-model"
+import { liveAgentMode } from "../repl/sticky-model-boot"
 import { buildModelAdapterWire } from "../repl/surface-compose"
 
 describe("model compose wire — mode-implicit SET binding (REAL FIX R1-3)", () => {
-  test("under planMode:true a SET lands on the 'plan' key (NOT 'default')", async () => {
+  test("under planMode:true (no live cell) a SET lands on the 'plan' key (NOT 'default')", async () => {
     const store = inMemoryStickyModelStore()
     const wire = buildModelAdapterWire({
       stickyStore: { store },
       bootModel: "gpt-5",
-      planMode: true,
-      candidateIds: ["gpt-5", "gpt-4o"],
+      currentMode: liveAgentMode({ planMode: true }),
+      candidateIds: () => ["gpt-5", "gpt-4o"],
     })
     const adapter = wire.modelAdapter
     expect(adapter).toBeDefined()
@@ -45,8 +54,8 @@ describe("model compose wire — mode-implicit SET binding (REAL FIX R1-3)", () 
     const wire = buildModelAdapterWire({
       stickyStore: { store },
       bootModel: "gpt-5",
-      planMode: false,
-      candidateIds: ["gpt-5", "gpt-4o"],
+      currentMode: liveAgentMode({ planMode: false }),
+      candidateIds: () => ["gpt-5", "gpt-4o"],
     })
     const out = await wire.modelAdapter?.set("gpt-4o")
     expect(out).toBe("ok")
@@ -58,11 +67,46 @@ describe("model compose wire — mode-implicit SET binding (REAL FIX R1-3)", () 
     const wire = buildModelAdapterWire({
       stickyStore: undefined,
       bootModel: "gpt-5",
-      planMode: false,
-      candidateIds: ["gpt-5"],
+      currentMode: liveAgentMode({ planMode: false }),
+      candidateIds: () => ["gpt-5"],
     })
     expect(wire.modelAdapter).toBeUndefined()
     expect("modelAdapter" in wire).toBe(false)
+  })
+
+  test("aug-28 — the LIVE cell wins over planMode: shift+tab to PLAN keys the SET 'plan'", async () => {
+    const store = inMemoryStickyModelStore()
+    // A session launched WITHOUT --plan whose operator pressed shift+tab onto the
+    // PLAN rung: `planMode` is false, but the loop reads `agentModeState`, so the
+    // write must key `plan` — the old static derivation keyed `default` and the
+    // pick silently never applied.
+    const cell = { current: () => ({ agentMode: "plan" as const }) }
+    const wire = buildModelAdapterWire({
+      stickyStore: { store },
+      bootModel: "gpt-5",
+      currentMode: liveAgentMode({ planMode: false, agentModeCell: cell }),
+      candidateIds: () => ["gpt-5", "gpt-4o"],
+    })
+    expect(await wire.modelAdapter?.set("gpt-4o")).toBe("ok")
+    expect(await store.get({ mode: "plan" })).toBe("gpt-4o")
+    expect(await store.get({ mode: "default" })).toBeUndefined()
+  })
+
+  test("aug-28 — and the reverse: --plan with the cell on the DEFAULT rung keys 'default'", async () => {
+    const store = inMemoryStickyModelStore()
+    // The `--plan` launch case that used to key `plan` while the loop read the
+    // cycle's rung. (The surface now also SEEDS the rung from `--plan`, so in
+    // production these agree; this pins the resolver's precedence itself.)
+    const cell = { current: () => ({ agentMode: "default" as const }) }
+    const wire = buildModelAdapterWire({
+      stickyStore: { store },
+      bootModel: "gpt-5",
+      currentMode: liveAgentMode({ planMode: true, agentModeCell: cell }),
+      candidateIds: () => ["gpt-5", "gpt-4o"],
+    })
+    expect(await wire.modelAdapter?.set("gpt-4o")).toBe("ok")
+    expect(await store.get({ mode: "default" })).toBe("gpt-4o")
+    expect(await store.get({ mode: "plan" })).toBeUndefined()
   })
 
   test("candidateIds flow through to the picker candidates() verbatim", () => {
@@ -70,8 +114,8 @@ describe("model compose wire — mode-implicit SET binding (REAL FIX R1-3)", () 
     const wire = buildModelAdapterWire({
       stickyStore: { store },
       bootModel: "gpt-5",
-      planMode: false,
-      candidateIds: ["gpt-5", "gpt-4o"],
+      currentMode: liveAgentMode({ planMode: false }),
+      candidateIds: () => ["gpt-5", "gpt-4o"],
     })
     const ids = wire.modelAdapter?.candidates().map((m) => m.id)
     expect(ids).toEqual(["gpt-5", "gpt-4o"])

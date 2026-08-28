@@ -48,6 +48,7 @@ import { maybeRunEnvProbeWire } from "./env-probe-wire"
 import type { IndicatorUsageObserver } from "./factories/indicator-stream-port"
 import { composeCliRuntimeContext } from "./runtime-context-compose"
 import { readSessionRuntimeConfig } from "./session-runtime-config"
+import { resolveStickyModelBoot } from "./sticky-model-boot"
 import { buildSpinnerStallLiveWire, SPINNER_STALL_ENV_GATE } from "./spinner-stall-live-wire"
 /** Track D — DebugTracerHandle. Surface owns the live state + the
  *  swap-in/out side effect (mutable proxy port in the stream tee).
@@ -119,6 +120,17 @@ export interface SetupSessionDeps extends SessionBootstrapDeps {
 export interface SessionSetupResult {
   readonly provider: SessionBootstrapResult["provider"]
   readonly model: string
+  /** aug-28 — the operator pinned the model for THIS invocation (`QUANTA_MODEL` /
+   *  `--model`), so the surface must NOT let a persisted `/model` pick override it.
+   *  Optional so a bootstrap double that predates the flag still compiles (absent
+   *  ⇒ treated as "not pinned", the pre-aug-28 behavior). */
+  readonly modelPinnedExplicitly?: boolean
+  /** aug-28 — the model this session will ACTUALLY run on turn 1: the persisted
+   *  `/model` pick when there is a runnable one, else {@link model}. Resolved ONCE
+   *  in setup so every first-paint surface (status-bar preamble, status-line
+   *  source, welcome banner) reports the same thing; they used to resolve it
+   *  independently, and two of them resolved it not at all. */
+  readonly effectiveBootModel: string
   readonly mode: PermissionMode
   readonly cwd: string
   readonly slog: StructuredLogger
@@ -408,10 +420,26 @@ const setupBoot = async (
   const shortCwd = boot.cwd.startsWith(runtime.homeDir)
     ? `~${boot.cwd.slice(runtime.homeDir.length)}`
     : boot.cwd
+  // aug-28 — THE effective boot model: the persisted `/model` pick when there is a
+  // runnable one, else the boot model. Computed ONCE here and consumed by every
+  // first-paint surface (the status-bar preamble, the repointable status-line
+  // source, and the welcome banner), because they are separate producers reading
+  // the same fact. MEASURED over a real pty before this existed: the banner said
+  // the pick while the status bar said the boot model, in the same frame — and the
+  // status bar paints exactly once at boot, so it never corrected itself.
+  const effectiveBootModel = resolveStickyModelBoot({
+    planMode: boot.features.planMode,
+    env: runtime.env,
+    provider: boot.provider,
+    // Same precedence as the surface: an explicit `QUANTA_MODEL` pin means THIS
+    // session runs that model, so no display may announce a stored preference.
+    ...(runtime.modelPinnedExplicitly ? { explicitPin: true } : {}),
+  }).effectiveModel(boot.model)
   return {
     deps,
     options,
     runtime,
+    effectiveBootModel,
     featureCfg,
     uninstallOperatorNoticeSink,
     boot,
@@ -426,9 +454,9 @@ const setupBoot = async (
 /** The status surfaces — status bar, turn summary, debug/timeline streams,
  *  context-usage holder, background capture and the turn indicator. */
 const setupStatus = (ctx: Awaited<ReturnType<typeof setupBoot>>) => {
-  const { deps, runtime, featureCfg, boot, shortCwd } = ctx
+  const { deps, runtime, featureCfg, boot, shortCwd, effectiveBootModel } = ctx
   const statusDefault =
-    `${boot.provider} · ${boot.model} · ${boot.mode} · ${shortCwd}` +
+    `${boot.provider} · ${effectiveBootModel} · ${boot.mode} · ${shortCwd}` +
     "    Esc Esc · cancel    Ctrl+C · exit"
   const statusBar = installStatusBar(statusDefault)
 
@@ -573,7 +601,7 @@ const setupModel = async (
   // (anchored at the boot model), re-pointed by surface-compose once the
   // `/model` adapter exists. Minted unconditionally (cheap) so the wiring in
   // surface-compose never has to branch on the statusline gate.
-  const liveModelSource = createLiveModelSource(boot.model)
+  const liveModelSource = createLiveModelSource(ctx.effectiveBootModel)
   if (statusLineCfg !== undefined) {
     const costPanel = boot.costPanel as CostPanel | undefined
     const statusView = buildSessionStatusView({
@@ -641,6 +669,7 @@ export const setupSession = async (
   const {
     runtime,
     featureCfg,
+    effectiveBootModel,
     uninstallOperatorNoticeSink,
     boot,
     skillAuthority,
@@ -679,6 +708,8 @@ export const setupSession = async (
     postureControl: boot.postureControl,
     llm: sessionLlm,
     planMode: boot.features.planMode,
+    modelPinnedExplicitly: runtime.modelPinnedExplicitly === true,
+    effectiveBootModel,
     providerRateLimitRemainingPercent:
       boot.budgetMeter !== undefined
         ? () => boot.budgetMeter?.providerRateLimitRemainingPercent()

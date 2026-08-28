@@ -1,3 +1,4 @@
+import { LLMError } from "@/shared"
 import type { LLMPort } from "../ports"
 import { resolveDeliverableReasoningEffort } from "../reasoning-effort"
 import {
@@ -9,6 +10,7 @@ import {
   prepareResponsesContinuationRequest,
   type ResponsesFetchLike,
   type ResponsesReasoningCarryoverStore,
+  responsesStatusToKind,
   streamResponsesSurface,
 } from "../responses-stream"
 import type { StreamEvent, StreamInput } from "../types"
@@ -44,6 +46,19 @@ interface OpenAIResponsesConfig extends AdapterStreamTimeoutConfig {
 }
 
 const RESPONSES_PATH = "/responses"
+
+/** The model-catalog path on the same base URL the Responses wire uses. The
+ *  `/v1/models` shape is shared by OpenAI and every OpenAI-compatible endpoint,
+ *  so ONE constant covers the public vendor and a `QUANTA_LLM_ENDPOINT` base. */
+const MODELS_PATH = "/models"
+
+/** The shape we read off a `GET /v1/models` body. Everything else on the payload
+ *  (`object`, `created`, `owned_by`, provider extensions) is ignored — the port
+ *  contract is "the ids only". Declared as the MINIMUM we depend on so an
+ *  endpoint that returns extra fields is not a parse failure. */
+interface ModelsListBody {
+  readonly data?: readonly { readonly id?: unknown }[]
+}
 
 export class OpenAIResponsesAdapter implements LLMPort {
   readonly model: string
@@ -140,5 +155,69 @@ export class OpenAIResponsesAdapter implements LLMPort {
       continuationStore,
       ...carryover,
     })
+  }
+
+  /**
+   * `LLMPort.listModels` — the model ids THIS key may run, from `GET /v1/models`
+   * on the SAME base URL and through the SAME (possibly guarded) `fetchImpl` the
+   * Responses stream uses. This surface — not chat-completions — is what a plain
+   * `OPENAI_API_KEY` session actually boots (`factory#resolveOpenAISurface`
+   * returns `responses` for the default/absent base URL), so WITHOUT a probe here
+   * `/model` on a BYOK-OpenAI session could only ever offer the boot model plus
+   * `QUANTA_RETRY_MODELS`.
+   *
+   * Reuses the adapter's own transport deliberately: an operator-configured
+   * endpoint's baseURL, its SSRF-guarded fetch and its endpoint-scoped key all
+   * govern the probe exactly as they govern the turn wire. A second fetch path
+   * here would have egressed the probe to the public vendor endpoint.
+   *
+   * Throws a typed {@link LLMError} per the port contract — a transport fault
+   * (classified by {@link responsesStatusToKind} for a non-OK status, so a 401
+   * reads as `auth` and a 429 as `rate_limit`) and an unreadable/mis-shaped body
+   * both REJECT rather than resolve to `[]`: "we could not ask" and "this account
+   * has no models" are different facts, and the caller
+   * (`model-catalog.ts#probeCatalog`) already degrades a rejection to "no catalog"
+   * while logging it. Non-string / missing ids inside a well-formed array are
+   * skipped (one junk entry must not lose the whole catalog).
+   */
+  async listModels(): Promise<readonly string[]> {
+    const url = `${this.baseURL}${MODELS_PATH}`
+    let res: Response
+    try {
+      res = await this.fetchImpl(url, {
+        method: "GET",
+        headers: { accept: "application/json", authorization: `Bearer ${this.apiKey}` },
+      })
+    } catch (e) {
+      // Network/DNS/abort/guard-refusal — same classification the turn wire uses.
+      throw LLMError.fromSdkError("openai", e)
+    }
+    if (!res.ok) {
+      const detail = await res.text().catch(() => "")
+      throw new LLMError(
+        `openai models probe failed: ${res.status} ${res.statusText}` +
+          (detail !== "" ? ` — ${detail.slice(0, 200)}` : ""),
+        {
+          kind: responsesStatusToKind(res.status),
+          statusCode: res.status,
+          provider: "openai",
+        },
+      )
+    }
+    let body: ModelsListBody
+    try {
+      body = (await res.json()) as ModelsListBody
+    } catch (e) {
+      throw LLMError.fromSdkError("openai", e)
+    }
+    if (!Array.isArray(body.data)) {
+      throw new LLMError("openai models probe returned no `data` array", {
+        kind: "bad_request",
+        provider: "openai",
+      })
+    }
+    return body.data
+      .map((m) => m?.id)
+      .filter((id): id is string => typeof id === "string" && id !== "")
   }
 }

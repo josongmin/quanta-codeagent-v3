@@ -234,7 +234,20 @@ const buildFor = (
     dials: {},
     ...partial,
   }
-  const base = buildBaseFromArgs(p)
+  // aug-28 HERMETIC STICKY FILE. A pick in `~/.quanta/sticky-model.json` now
+  // seeds a `modelCandidates` PORT on the base (see
+  // `agent-arg-builder/model-switch-wire.ts`), so a `stickyModel: true` row read
+  // from the developer's real home would fingerprint DIFFERENTLY on any machine
+  // where someone has used `/model` — the fingerprint must depend on the code
+  // under test, never on the developer's config. `QUANTA_CONFIG_DIR` is NOT the
+  // lever (the config dir is embedded in the rendered system prompt, so moving it
+  // changes the very bytes this test pins); the seam moves ONLY the sticky file,
+  // and it points at a FIXED non-existent path so the read is empty and
+  // machine-independent (`readStickyModelSnapshotSync` treats ENOENT as "no
+  // preference").
+  const base = buildBaseFromArgs(p, undefined, undefined, {
+    stickyModelPath: "/nonexistent/quanta-hellgate/sticky-model.json",
+  })
   const assembled = assembleAgentConfig(
     { mode: p.mode, base, ...(p.dials !== undefined ? { dials: p.dials } : {}) },
     process.env,

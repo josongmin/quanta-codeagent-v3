@@ -49,6 +49,7 @@
  */
 
 import type { LLMPort, StreamEvent, StreamInput } from "@/llm"
+import { forwardPortIdentity } from "@/llm/port-identity"
 import {
   createDefaultStallDetector,
   DEFAULT_SPINNER_STALL_THRESHOLD_MS,
@@ -151,14 +152,11 @@ export const buildSpinnerStallLiveWire = (
   return {
     wrapLlm(llm: LLMPort): LLMPort {
       return {
-        // Conditional metadata forwarding (withImageSanitizationRetry
-        // precedent + contextWindowKey, exactOptional-honest).
-        ...(llm.model !== undefined ? { model: llm.model } : {}),
-        ...(llm.contextWindowKey !== undefined ? { contextWindowKey: llm.contextWindowKey } : {}),
-        ...(llm.provider !== undefined ? { provider: llm.provider } : {}),
-        ...(llm.surfaceId !== undefined ? { surfaceId: llm.surfaceId } : {}),
-        ...(llm.transportId !== undefined ? { transportId: llm.transportId } : {}),
-        ...(llm.authMode !== undefined ? { authMode: llm.authMode } : {}),
+        // ONE forwarder for the whole non-stream surface (aug-27). The inline
+        // copy this replaces dropped `listModels`, so `/model`'s catalog probe
+        // never reached the interactive surface — the picker could list only the
+        // boot model. A new port field must not default to being eaten here.
+        ...forwardPortIdentity(llm),
         stream: (input: StreamInput): AsyncIterable<StreamEvent> => wrapStream(llm, input),
       }
     },

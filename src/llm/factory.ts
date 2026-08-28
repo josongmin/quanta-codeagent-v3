@@ -8,6 +8,7 @@ import { OpenAIAdapter } from "./adapters/openai"
 import { OpenAIResponsesAdapter } from "./adapters/openai-responses"
 import { resolveContext1M } from "./context-1m"
 import type { CredentialSource } from "./credential-helper"
+import { forwardPortIdentity } from "./port-identity"
 import type { LLMPort } from "./ports"
 import { type BedrockAdapterOptions, BedrockProviderAdapter } from "./providers/bedrock-adapter"
 import type {
@@ -483,7 +484,9 @@ export const createLLM = (provider: Provider, opts: CreateLLMOptions, env: EnvLi
     )
     if (Number.isFinite(delayMs) && delayMs > 0) {
       return {
-        ...(inner.model !== undefined ? { model: inner.model } : {}),
+        // aug-28 — ONE forwarder (see `./port-identity`): even this e2e-only delay
+        // wrapper must not be a place where a port capability quietly disappears.
+        ...forwardPortIdentity(inner),
         async *stream(input) {
           for await (const ev of inner.stream(input)) {
             await new Promise((r) => setTimeout(r, delayMs))

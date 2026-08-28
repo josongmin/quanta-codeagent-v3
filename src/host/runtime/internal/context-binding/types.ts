@@ -187,6 +187,12 @@ export interface RuntimeContextSnapshot {
   /** §9.6 `/presets` — surface role→model resolver on the snapshot so the
    *  compose PASS_THROUGH patch carries it onto the base (mirrors `objective`). */
   readonly roleModelResolver?: AgentConfig["roleModelResolver"]
+  /** `/model` (aug-27) — the id→port model-candidate list, surfaced on the
+   *  snapshot so the compose PASS_THROUGH patch carries it onto the base (mirrors
+   *  `roleModelResolver`), whence `assembleAgentConfig`'s `...req.base` spread
+   *  puts it on `AgentConfig.modelCandidates` — the list the loop resolves a
+   *  sticky / skill model pick to a PORT out of. */
+  readonly modelCandidates?: AgentConfig["modelCandidates"]
 }
 
 /** S1 (jul-04) — structural mirror of `@/tool/browser`'s `BrowserNetSink`, kept
@@ -240,6 +246,7 @@ export type RuntimeContextPatch = Partial<
     | "browserNet"
     | "objective"
     | "roleModelResolver"
+    | "modelCandidates"
   >
 >
 

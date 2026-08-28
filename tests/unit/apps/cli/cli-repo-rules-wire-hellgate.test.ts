@@ -286,7 +286,11 @@ describe("F1a — shipping CLI repo-rules reach the model", () => {
       setup as never,
       stub({ history: [] }) as never,
       undefined as never,
-      stub({}) as never,
+      // The `/model` wire slots must be spelled OWN here: this stub answers any
+      // unnamed property with a no-op FUNCTION, which the sticky-model branch
+      // would read as a present store and then call `modelCatalog.ids()` on a
+      // function. Naming them keeps the permissive default from faking a wire.
+      stub({ stickyModel: undefined, modelCatalog: { ids: () => [] } }) as never,
       stub({}) as never,
       { QUANTA_RULE_INDICATOR: "1" },
     )

@@ -122,6 +122,17 @@ export const readStickyModelForMode = async (config: AgentConfig): Promise<strin
   if (config.stickyModelStore === undefined) return undefined
   return config.stickyModelStore.store.get({
     mode: resolveLiveAgentMode(config),
+    // aug-28 — the pick is keyed by PROVIDER as well as mode: a model id only
+    // means anything for its own provider, and `tryCreateLLM` validates the
+    // credential, never the slug — so an anthropic pick read back in an openai
+    // session used to produce a real-looking port that failed on every turn.
+    // The SLOT's provider wins (the surface that owns the store set it, so the
+    // read key provably matches the write key); `config.llm.provider` is the
+    // fallback for a host that wired only a store. Absent both ⇒ legacy bare key.
+    ...((): { provider?: string } => {
+      const provider = config.stickyModelStore?.provider ?? config.llm.provider
+      return provider !== undefined ? { provider } : {}
+    })(),
   })
 }
 

@@ -573,6 +573,10 @@ const buildOptionalSnapshotFields = (
   // it onto `AgentConfig.roleModelResolver` (mirrors `objective`). Absent ⇒ omitted
   // ⇒ optional-ports defaults the SSOT resolver (caller-fallback verbatim).
   ...whenDefined("roleModelResolver", base.roleModelResolver),
+  // `/model` (aug-27) — round-trip the model-candidate list so the compose
+  // PASS_THROUGH patch that set it on the base is readable back off the snapshot
+  // (mirrors `roleModelResolver`; the loop reads it off the assembled config).
+  ...whenDefined("modelCandidates", base.modelCandidates),
 })
 
 export const buildSnapshot = (base: RuntimeBase): RuntimeContextSnapshot => ({

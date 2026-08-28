@@ -20,6 +20,7 @@ import type { TaskRegistry } from "@/subagent"
 import { buildSkillsReadoutSource } from "../authority-readouts"
 import type { CanvasUsageSourceHandle } from "../canvas-usage-source"
 import type { AgentFleetReadoutRow, MemoryReadoutEntry, WebReadoutSources } from "../readout"
+import type { WebModelSwitchHandle } from "../web-model-switch"
 
 /** UUX-1-11 — project a subagent `TaskRecord` onto the narrow readout row
  *  (structural copy; the readout renderer never imports `@/subagent`). */
@@ -79,8 +80,11 @@ export const buildReadoutSources = (args: {
   readonly skillAuthority: SkillRuntimeAuthority | undefined
   readonly memoryStore: PersistentStorePort | undefined
   readonly usageHolder: CanvasUsageSourceHandle
+  /** aug-27 — the model switch (sticky store + lazy provider catalog). Present ⇒
+   *  the `/model` readout lists what `set_model` can actually select. */
+  readonly modelSwitch?: WebModelSwitchHandle | undefined
 }): WebReadoutSources => {
-  const { taskRegistry, planStore, skillAuthority, memoryStore, usageHolder } = args
+  const { taskRegistry, planStore, skillAuthority, memoryStore, usageHolder, modelSwitch } = args
   return {
     ...(taskRegistry !== undefined
       ? { agents: () => taskRegistry.list().map(toAgentFleetReadoutRow) }
@@ -101,5 +105,16 @@ export const buildReadoutSources = (args: {
     // async probe (no SlashContext needed), so the `/doctor` readout is ALWAYS
     // available on this daemon (CLI parity for the store-health check).
     doctor: () => checkSessionStoreHealth(),
+    // aug-27 — READ half of the web model switch. The probe is AWAITED here (not
+    // at daemon boot) so listing costs one lazy provider round-trip at the moment
+    // a client asks, and a rejected probe still renders the seeded candidates.
+    ...(modelSwitch !== undefined
+      ? {
+          model: async (): Promise<{ current: string; ids: readonly string[] }> => {
+            await modelSwitch.refresh()
+            return { current: await modelSwitch.current(), ids: modelSwitch.ids() }
+          },
+        }
+      : {}),
   }
 }

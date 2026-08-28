@@ -112,12 +112,22 @@ export interface EscalatingKill {
 export const escalatingKill = (proc: KillableChild, killer?: ProcessTreeKiller): EscalatingKill => {
   // Route a single signal either through the whole-tree killer (when wired AND
   // the child has a POSITIVE pid) or the legacy single-PID `proc.kill()`. Both
-  // are no-op-safe after the child exits. The `pid > 0` guard is load-bearing:
-  // `signalTree(0)` would `process.kill(0, …)` the CALLER's whole process group
-  // (POSIX pid 0 = every process in the caller's group), self-terminating the
-  // agent. Bun.spawn always yields a positive pid for a live child, so this is a
-  // defensive backstop — and it matches the explicit `pid > 0` guard the
-  // pty-backend already applies (the three spawn sites must agree).
+  // are no-op-safe after the child exits.
+  //
+  // The `pid > 0` test here is now a FALLBACK SELECTOR, not the safety guard.
+  // `signalTree` itself refuses any non-positive/non-integral root (see
+  // process-tree.ts), so every call site is safe by construction. What this test
+  // still buys is that a pid-less/0-pid child degrades to the LEGACY single-PID
+  // `proc.kill()` — some teardown — rather than to the tree killer's refusal,
+  // which would be NO teardown at all.
+  //
+  // On the hazard it used to describe: the old comment called signalTree(0) "the
+  // CALLER's whole process group", which UNDERSTATES it. Measured with the
+  // shipped parsePsTable against a live `ps`: the ppid-walk climbs to launchd, so
+  // signalTree(0) reached 596 of 596 process-table rows — pid 1 and the measuring
+  // process included — and `safeSend` swallows every error, so it is SILENT.
+  // Bun.spawn always yields a positive pid for a live child (and KEEPS it
+  // positive after exit — measured), so this remains defence in depth.
   const useTree = killer !== undefined && typeof proc.pid === "number" && proc.pid > 0
   const sigterm = (): void => {
     if (useTree) (killer as ProcessTreeKiller).signalTree(proc.pid as number, "SIGTERM")

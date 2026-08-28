@@ -44,6 +44,13 @@ describe("GOAL-08 round 3 — interactive loop gates the turn on the claim", () 
     const compose = readSrc("src/apps/web-daemon/goal-wake-compose.ts")
     expect(compose).toContain("attemptSlotStatus: () => attemptSlot.status()")
     const factory = readSrc("src/apps/web-daemon/runtime-factory.ts")
-    expect(factory).toContain("objectivePorts(objective, base.objectiveAttemptSlot)")
+    // BOTH args stay pinned (the authority AND the base's attempt slot) — only the
+    // receiver qualifier is tolerated: aug-27 extracted the facade-getter payload
+    // into a helper that reads the minted parts bundle (`parts.objective`) to keep
+    // `buildProductionRuntimeFactory` under the god-FN cap. Dropping either
+    // argument still reds this.
+    expect(factory).toMatch(
+      /objectivePorts\(\s*(?:parts\.)?objective,\s*base\.objectiveAttemptSlot\s*\)/,
+    )
   })
 })

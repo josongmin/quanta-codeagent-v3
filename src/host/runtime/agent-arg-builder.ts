@@ -5,11 +5,6 @@ import { defaultFocusChainTracker, type FocusChainPort } from "@/agent/focus-cha
 import type { ForkSessionPort } from "@/agent/fork-session"
 import { defaultCheckpointBaseWire } from "@/agent/fork-session-wire"
 import { defaultIdentityProvider } from "@/agent/identity"
-import {
-  fsBackedStickyModelStore,
-  inMemoryStickyModelStore,
-  type StickyModelStore,
-} from "@/agent/sticky-model"
 import { createSubagentRunner } from "@/agent/subagent-runner"
 import {
   AGENT_MODES,
@@ -59,6 +54,10 @@ import {
   resolvePermissionPatternSlice,
 } from "./agent-arg-builder/gated-tool-ports"
 import { resolveIdentityFromEnv } from "./agent-arg-builder/identity-wire"
+import {
+  type ModelSwitchInputs,
+  resolveModelSwitchSlots,
+} from "./agent-arg-builder/model-switch-wire"
 import { resolveObservabilitySlots } from "./agent-arg-builder/observability-wire"
 import { resolvePermissionProfileWiring } from "./agent-arg-builder/permission-profile"
 import {
@@ -87,6 +86,10 @@ export {
   resolveFileHistorySlice,
   resolvePermissionPatternSlice,
 } from "./agent-arg-builder/gated-tool-ports"
+// aug-28 — the model switch's two halves moved together into one sibling module
+// (see its header); re-exported here so every existing importer of
+// `resolveStickyModelStore` resolves it unchanged.
+export { resolveStickyModelStore } from "./agent-arg-builder/model-switch-wire"
 export { resolveObservabilityWire } from "./agent-arg-builder/observability-wire"
 export {
   buildProfileDefinitionRegistry,
@@ -248,30 +251,6 @@ export const resolveIdentitySystemPrompt = (
     system: buildSystemPromptForRunMode({ runMode, cwd, envPosture }),
     promptSurfaceProfile: promptSurfaceProfileForRunMode(runMode, { envPosture }),
   }
-}
-
-/** ADR-0236 / jun-11 (#4) — wire the sticky-model store slot. The default is now
- *  an IN-MEMORY store so `/model` switches the model IN-SESSION out of the box
- *  (no `--sticky-model` flag required — previously this returned `undefined`, so
- *  `buildModelAdapterWire` returned `{}` and `/model` printed "not wired"). The
- *  store is INERT until set: an empty store's `get()` returns `undefined`, so the
- *  per-turn model resolver (`skill-gate#readStickyModelForMode`) falls back to the
- *  boot model — byte-identical for any surface that never calls `/model`
- *  (headless / one-shot included). `--sticky-model` upgrades to the fs-backed
- *  store (`~/.quanta/sticky-model.json`) for cross-session PERSISTENCE.
- *
- *  Exported for unit testing. Return type keeps `| undefined` so existing
- *  call-site undefined-guards stay valid (the default simply never returns it). */
-export const resolveStickyModelStore = (
-  stickyModel: boolean | undefined,
-): { readonly store: StickyModelStore } | undefined => {
-  // fs-backed construction is IO-free (it only computes its path; all fs access
-  // is deferred to get/set/load), so it cannot throw here — a read-only fs or
-  // corrupt home dir surfaces as a TYPED result at the call site (get/load
-  // degrade to the global default; set returns a `StickyModelWriteError` that
-  // `/sticky-model` renders). In-memory set/get round-trips in process and is
-  // dropped on exit (no persistence) — exactly the session-scoped default.
-  return { store: stickyModel === true ? fsBackedStickyModelStore() : inMemoryStickyModelStore() }
 }
 
 /** ADR-0236 — wire the tool-profile resolver slot when the CLI passes
@@ -478,6 +457,12 @@ const resolveBaseSlotState = (
    *  disposer, and the `searchPipeline` slot all reference the SAME instance —
    *  never a second `buildSearchPipelineFromEnv` call with its own indexer). */
   searchWire: ReturnType<typeof buildSearchPipelineFromEnv>,
+  /** aug-28 — the boot port + provider + the root's cancellation signal, for the
+   *  `modelCandidates` slot (the OTHER half of the model switch; it needs the boot
+   *  port to exclude the boot model and the provider/env to build candidate
+   *  ports). Threaded in rather than re-derived so this resolver stays a pure
+   *  projection of what the caller already resolved. */
+  modelSwitch: ModelSwitchInputs,
 ): {
   readonly system: string
   // Non-undefined (mirrors `resolveIdentitySystemPrompt`'s return) so the seed
@@ -507,7 +492,15 @@ const resolveBaseSlotState = (
   // ADR-0236 — composition-root mega-wire slots. All default-OFF: each helper
   // returns `undefined` when the operator did NOT opt in; spread conditionally
   // so `exactOptionalPropertyTypes` does NOT see a literal `undefined`.
-  const stickyModelStore = resolveStickyModelStore(p.stickyModel)
+  // aug-28 (findings L4 / #11) — BOTH halves of the per-turn model switch, in
+  // ONE call so they can never again ship one-without-the-other: the store the
+  // loop reads every turn, and the `modelCandidates` list that makes that read
+  // actionable (see `agent-arg-builder/model-switch-wire.ts`).
+  const { stickyModelStore, modelCandidatesSlot } = resolveModelSwitchSlots({
+    ...modelSwitch,
+    stickyModel: p.stickyModel,
+    env,
+  })
   const toolProfile = resolveToolProfile(p.toolProfile)
   const focusChain = resolveFocusChain(p.focusChainEvery)
   // ADR-0279 — automation engine composition-root wire. Returns `null`
@@ -609,6 +602,7 @@ const resolveBaseSlotState = (
       fileHistorySinkSlot: fileHistorySinkSlot(fileHistorySlice),
       artifactRegistry,
       artifactPreviewResolver,
+      modelCandidatesSlot,
     },
   }
 }
@@ -706,7 +700,12 @@ export const buildBaseFromArgs = (
     permissionPatternSlice,
     fileHistorySlice,
     slotCtx,
-  } = resolveBaseSlotState(env, p, cwd, searchWire)
+  } = resolveBaseSlotState(env, p, cwd, searchWire, {
+    llm,
+    provider,
+    signal,
+    stickyModelPath: seams?.stickyModelPath,
+  })
   const { automationSlot, artifactRegistry } = slotCtx
   // ADR-0303 slot-registry refactor — the REQUIRED base fields are the seed (in
   // their exact prior literal order); the ~18 default-OFF conditional slots are

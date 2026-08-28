@@ -53,7 +53,7 @@ import {
   buildSubagentConfigCore,
   parseEnvFlag,
 } from "@/runner/assemble"
-import { gateOn } from "@/shared"
+import { gateOn, logger } from "@/shared"
 import { TaskRegistry } from "@/subagent"
 import type { Tool } from "@/tool"
 import { askUserTool } from "@/tool/ask-user"
@@ -69,6 +69,7 @@ import {
   createWebControlRequestPort,
   type WebControlRequestPortHandle,
 } from "../web-control-request-port"
+import type { WebModelSwitchHandle } from "../web-model-switch"
 import { createWebUserInputPort, type WebUserInputPortHandle } from "../web-user-input-port"
 
 /**
@@ -329,7 +330,8 @@ export const resolveWebLivePosture = async (
  *    no conversation-action port wired.
  *  - `controlRequest` (ADR-0496 A1, QUANTA_CONTROL_REQUEST) — binds the
  *    load-bearing `set_permission_mode` effect to THIS session's live
- *    `permission` cell. Gate OFF ⇒ no slot (the loop never polls; a stray
+ *    `permission` cell, and (aug-27, when a `modelSwitch` is passed) `set_model`
+ *    to the sticky store the loop reads per turn + the live candidate allowlist. Gate OFF ⇒ no slot (the loop never polls; a stray
  *    `controlRequest` frame falls through as unknown).
  *  - `askUserTools` (A1 jul-03, QUANTA_ASK_USER) — the structured `ask_user`
  *    elicitation tool ADAPTED onto the web user-input round-trip (needs
@@ -338,6 +340,12 @@ export const resolveWebLivePosture = async (
 export const mintInboundPorts = (
   env: Record<string, string | undefined>,
   permission: PermissionContext,
+  /** aug-27 — the surface's model switch. Its `applyModel` makes the
+   *  control-request `set_model` a REAL effect (persist ⇒ next turn runs it) and
+   *  its `ids` getter is the live allowlist, so a model discovered by the lazy
+   *  catalog probe is accepted without re-minting this port. Absent ⇒ `set_model`
+   *  keeps its historical observability-only echo (byte-identical). */
+  modelSwitch?: WebModelSwitchHandle,
 ): {
   readonly agentState: AgentStateSourceHandle | undefined
   readonly subagentSource: SubagentSourceHandle | undefined
@@ -360,8 +368,33 @@ export const mintInboundPorts = (
   const activeTurnRef = needsTurnActivity ? createTurnActivity().activeTurnRef : undefined
   const follower = buildFollowerCoControlSlot(env, activeTurnRef)
   const controlRequest = isControlRequestEnabled(env)
-    ? createWebControlRequestPort({ permission })
+    ? createWebControlRequestPort({
+        permission,
+        // aug-28 — the AUDIT/HONESTY channel. Production wired NO `observe`, so a
+        // successful `set_model`, an off-allowlist REJECTION, and a failed store
+        // write were byte-identical from outside: total silence (the drain also
+        // discards the effect list and the server sends no ack frame). At minimum
+        // the daemon must SAY what it did with a control request.
+        observe: (effect) => {
+          if (effect.kind === "rejected") {
+            logger.warn(`web control-request rejected: ${effect.value}`)
+            return
+          }
+          logger.info(`web control-request applied: ${effect.kind}=${effect.value}`)
+        },
+        ...(modelSwitch !== undefined
+          ? { applyModel: modelSwitch.applyModel, modelAllowlist: () => modelSwitch.ids() }
+          : {}),
+      })
     : undefined
+  // aug-28 — WARM the catalog when the control port exists. The probe is lazy and
+  // only `GET /readout/model` awaited it, so a client that sent `set_model` for a
+  // real catalog model WITHOUT first fetching the readout was rejected by the
+  // planner (the allowlist held only the seeded ids) — and that rejection was
+  // invisible. Fire-and-forget: `refresh()` is no-throw and memoized on success.
+  if (controlRequest !== undefined && modelSwitch !== undefined) {
+    void modelSwitch.refresh()
+  }
   const askUserTools: Tool[] =
     gateOn(env, "QUANTA_ASK_USER") && userInput !== undefined
       ? [askUserTool(createWebAskUserPort(userInput.port)) as Tool]

@@ -112,6 +112,20 @@ export interface ContextUsageBreakdown {
   readonly max: number
   /** Model id, if known. */
   readonly model?: string
+  /**
+   * aug-28 — the CONTEXT-WINDOW RESOLUTION KEY the producer used for {@link max}
+   * (`emit-helpers#resolveWindowModel`: the adapter's `<model>-1m` pin when the
+   * 1M beta is active, else the model id).
+   *
+   * It exists because a DISPLAY must not re-derive the window from {@link model}:
+   * that is deliberately the real model id, so `resolveCompactionLimitTokens(…,
+   * model)` returns the 200k-family threshold while compaction itself uses the 1M
+   * key — the pre-compaction warning then latched on at ~110k and never cleared
+   * for the remaining 800k, announcing "auto-summary imminent" at 700%+ of a
+   * threshold that was 8x away. Absent ⇒ a consumer falls back to `model`
+   * (byte-identical to the pre-aug-28 behavior for every non-1M session).
+   */
+  readonly windowModel?: string
 }
 
 export interface BuildBreakdownInput {
@@ -121,6 +135,8 @@ export interface BuildBreakdownInput {
   /** Maximum context window for the active model. */
   readonly max: number
   readonly model?: string
+  /** See {@link ContextUsageBreakdown.windowModel}. */
+  readonly windowModel?: string
 }
 
 /** Wrap a category's concatenated text as one synthetic `Message` (a single
@@ -170,6 +186,7 @@ export function buildUsageBreakdown(
     total,
     max: input.max > 0 ? input.max : 0,
     ...(input.model !== undefined ? { model: input.model } : {}),
+    ...(input.windowModel !== undefined ? { windowModel: input.windowModel } : {}),
   }
 }
 
@@ -223,6 +240,10 @@ export interface PromptAssembledSnapshot {
   /** Active model's context window in tokens (0 ⇒ unknown). */
   readonly max: number
   readonly model?: string
+  /** aug-28 — the window-resolution key behind {@link max} (see
+   *  {@link ContextUsageBreakdown.windowModel}). Published so a DISPLAY can derive
+   *  the compaction threshold with the same resolution the loop used. */
+  readonly windowModel?: string
   /** ADR-0538 Phase 3 — the compiled fired-atom manifest for this turn, forwarded
    *  from `promptPolicy` (additive observability). `firedAtomIds` is the flat
    *  fired-variant list; `byChannel` groups them by the 8 prompt channels. Absent
@@ -262,5 +283,8 @@ export function snapshotToBreakdownInput(snap: PromptAssembledSnapshot): BuildBr
     sections: snapshotToSections(snap),
     max: snap.max,
     ...(snap.model !== undefined ? { model: snap.model } : {}),
+    // aug-28 — carry the window key through, or the DISPLAY re-derives the
+    // compaction threshold from the real model id and disagrees with the loop.
+    ...(snap.windowModel !== undefined ? { windowModel: snap.windowModel } : {}),
   }
 }

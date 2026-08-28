@@ -267,6 +267,9 @@ describe("merge symbol-loss detector — export extraction", () => {
       export * as ns from "./x"
       export default function m() {}
     `)
+    // `m` is deliberately ABSENT: a default export is named `default` whatever
+    // form it takes, so `export default function m() {}` and `export default m`
+    // expose the same thing, and converting between them is not a loss.
     expect([...names].sort()).toEqual([
       "D",
       "E",
@@ -275,10 +278,10 @@ describe("merge symbol-loss detector — export extraction", () => {
       "a",
       "b",
       "c",
+      "default",
       "h",
       "j",
       "l",
-      "m",
       "ns",
       "renamed",
     ])

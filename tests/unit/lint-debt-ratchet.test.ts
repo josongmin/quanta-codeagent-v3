@@ -21,6 +21,21 @@
  * so the test can never drift from what `bun run lint:debt` reports. A
  * reimplementation would be a second authority, which is the failure mode the
  * ratchet itself exists to prevent.
+ *
+ * WHERE THE SPAWNING CASE LIVES NOW
+ * ---------------------------------
+ * The case that actually runs `lint:debt` moved to
+ * `tests/integration/lint-debt-ratchet-e2e.test.ts`. It shells out to biome over
+ * ~7,200 files and measures 9–21s, which blows the PER-TEST unit speed budget
+ * (`tools/dev/unit-speed-budget.json`, 8529ms) — a ceiling that may only go
+ * down, and whose own remedy text is "move it to tests/integration or fake the
+ * slow dependency". Faking was not an option (see the paragraph above: a second
+ * authority is the failure mode), so it moved.
+ *
+ * REACHABILITY IS PRESERVED, not traded away: `bun run test` — the documented
+ * pre-push gate (tests/README.md) — is unit + integration, and the CI pyramid
+ * runs `bun test tests/integration` as a blocking step. What this file keeps is
+ * the ratchet's DECISION LOGIC, which is pure and fast.
  */
 
 import { describe, expect, test } from "bun:test"
@@ -30,25 +45,6 @@ import { evaluateCeilings, scopeKey, scopeOfPath } from "@/../tools/dev/lint-deb
 const REPO_ROOT = new URL("../../", import.meta.url).pathname
 
 describe("lint-debt ceiling — reachable from the unit suite", () => {
-  test(
-    "`lint:debt` passes (no new lint debt; fix the site, never raise the ceiling)",
-    () => {
-      const run = Bun.spawnSync({
-        cmd: ["bun", "run", "tools/dev/lint-debt-ceiling.ts"],
-        cwd: REPO_ROOT,
-      })
-      const stdout = new TextDecoder().decode(run.stdout)
-      const stderr = new TextDecoder().decode(run.stderr)
-      // Surface the script's own diagnosis on failure — the ceiling file names
-      // the offending rule and both numbers, which is what the fixer needs.
-      expect({ exitCode: run.exitCode, report: `${stdout}${stderr}`.trim() }).toEqual({
-        exitCode: 0,
-        report: expect.stringContaining("lint-debt:") as unknown as string,
-      })
-    },
-    { timeout: 180_000 },
-  )
-
   /**
    * `scopeOfPath` decides which ceiling a diagnostic is measured against, and
    * for `noNonNullAssertion` the two ceilings are 0 and 593 — so a

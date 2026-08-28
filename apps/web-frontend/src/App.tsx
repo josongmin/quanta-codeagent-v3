@@ -899,6 +899,11 @@ export const App = (): JSX.Element => {
           getMessages: () => messagesRef.current,
           sendUserTurn: (text: string) => sendTurn(text, []),
         },
+        // aug-28 — the OUT-OF-BAND control-request door. `/model <id>` rides this
+        // (a `POST /config {QUANTA_MODEL}` changed nothing: the daemon resolves its
+        // slug at boot and never reads that env). Same socket the plan-input
+        // answers use.
+        sendControlRequest: (request) => client.sendControlRequest(request),
         endpoint:
           resolvedConnection === null
             ? null
@@ -912,6 +917,7 @@ export const App = (): JSX.Element => {
     [
       resetTranscript,
       focusImageAttachment,
+      client,
       resolvedConnection,
       appendClientMessage,
       getSlashContext,

@@ -12,6 +12,7 @@
  */
 
 import { describe, expect, test } from "bun:test"
+import { inMemoryStickyModelStore } from "@/agent/sticky-model"
 import { buildModelAdapter } from "../../../src/apps/cli/repl/ctx-adapters/model-adapter"
 import {
   buildSessionStatusView,
@@ -34,15 +35,18 @@ describe("statusline live modelId (UUX-1-17)", () => {
   })
 
   test("chain: /model set → adapter.current() → next statusline view", async () => {
-    const store = {
-      set: async () => ({ ok: true }) as const,
-      get: async () => undefined,
-    }
+    // The REAL in-memory store, not a hand fake. aug-28: this was
+    // `{ set: async () => ({ok:true}), get: async () => undefined }` — a double
+    // that ACCEPTED a write and then reported no preference, which only passed
+    // because the adapter kept its own shadow copy of the pick. The adapter now
+    // delegates the sync read to the store (`peek`), so a store that forgets its
+    // own writes is exactly the thing this chain must not tolerate.
+    const store = inMemoryStickyModelStore()
     const adapter = buildModelAdapter({
-      store: store as never,
+      store,
       bootModel: "boot-model",
       currentMode: () => "default" as never,
-      candidateIds: ["boot-model", "other-model"],
+      candidateIds: () => ["boot-model", "other-model"],
     })
     const live = createLiveModelSource("boot-model")
     // The surface-compose wiring: point the live source at the adapter.

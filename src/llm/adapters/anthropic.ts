@@ -186,6 +186,28 @@ export class AnthropicAdapter implements LLMPort {
     }
   }
 
+  /**
+   * `LLMPort.listModels` — the model ids this API key may run, from Anthropic's
+   * own `/v1/models` (`client.models.list`, newest first). This is what keeps the
+   * `/model` picker's candidate set the provider's live truth instead of a
+   * hand-maintained slug list that drifts as models roll out.
+   *
+   * `limit: 100` is one page over a catalog of ~20 — no pagination loop needed
+   * (and a truncated page would only mean a shorter picker list, never a wrong
+   * one). Throws a typed {@link LLMError} on auth/network failure, per the port
+   * contract; callers treat a rejection as "no catalog" and keep their seeded
+   * candidates. No adapter-level cache: the CLI's catalog wire memoizes the
+   * probe for the session, so this runs once per session.
+   */
+  async listModels(): Promise<readonly string[]> {
+    try {
+      const page = await this.client.models.list({ limit: 100 })
+      return page.data.map((m) => m.id)
+    } catch (e) {
+      throw LLMError.fromSdkError("anthropic", e)
+    }
+  }
+
   async *stream(input: StreamInput): AsyncIterable<StreamEvent> {
     // index -> block kind, so we know whether content_block_stop closes a tool.
     const open = new Map<

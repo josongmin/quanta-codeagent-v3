@@ -78,6 +78,14 @@ export interface BaseSlotContext {
    *  duck-typed `AppshotArtifactSink` widening drops get/list/destroy). */
   readonly artifactRegistry: ReturnType<typeof createArtifactRegistry> | undefined
   readonly artifactPreviewResolver: NonNullable<Base["artifactPreviewResolver"]> | undefined
+  /** aug-28 — spread-ready `modelCandidates` slot (`{}` when there is no
+   *  persisted pick to offer a port for). See
+   *  `agent-arg-builder/model-candidates-wire.ts`: this is the OTHER half of the
+   *  per-turn model switch, and the half this root never wired — the loop read
+   *  `stickyModelStore` every turn and then discarded the pick for want of a
+   *  port. APPENDED LAST in the resolver array below so every pre-existing key's
+   *  insertion position is untouched. */
+  readonly modelCandidatesSlot: Partial<Base>
 }
 
 /** One base-slot resolver: projects the pre-resolved `ctx` into AT MOST one
@@ -130,6 +138,11 @@ export const BASE_SLOT_RESOLVERS: readonly BaseSlotResolver[] = [
     ctx.artifactPreviewResolver !== undefined
       ? { artifactPreviewResolver: ctx.artifactPreviewResolver }
       : {},
+  // 18. aug-28 — `modelCandidates`, the id→PORT half of the model switch
+  // (spread-ready `{}` when no persisted pick can be offered). LAST on purpose:
+  // appending keeps every earlier slot's insertion position — and therefore the
+  // byte-identical key order — exactly as it was.
+  (ctx) => ctx.modelCandidatesSlot,
 ]
 
 /**

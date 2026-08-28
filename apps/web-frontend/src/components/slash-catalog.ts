@@ -21,7 +21,7 @@ import {
 } from "./SlashPalette"
 import { buildAuthSlashCommands } from "./slash-auth"
 import { buildLlmConfigSlashCommands, type RetryWithDeps } from "./slash-llm-config"
-import { buildReadoutSlashCommands } from "./slash-readout"
+import { buildReadoutSlashCommands, fetchReadoutBody, readReadoutBody } from "./slash-readout"
 
 export interface SlashCatalogDeps {
   readonly clearTranscript: () => void
@@ -35,6 +35,10 @@ export interface SlashCatalogDeps {
   /** P2 (jul-11) — /retry-with needs the live transcript + send path. Optional:
    *  absent (tests/offline hosts) ⇒ the entry is simply not offered. */
   readonly retryWith?: RetryWithDeps
+  /** aug-28 — the OUT-OF-BAND control-request sender (`SessionClient`), the only
+   *  door that actually switches the model. Absent (offline/tests) ⇒ `/model <id>`
+   *  says it cannot switch instead of silently doing nothing. */
+  readonly sendControlRequest?: (request: { kind: string; [k: string]: unknown }) => boolean
 }
 
 export const assembleSlashCommands = (deps: SlashCatalogDeps): readonly SlashCommand[] => {
@@ -64,9 +68,7 @@ export const assembleSlashCommands = (deps: SlashCatalogDeps): readonly SlashCom
         }
       : {}),
   }
-  const llmCommands = buildLlmConfigSlashCommands(sharedEndpoint)
-  const authCommands = buildAuthSlashCommands(sharedEndpoint)
-  const readoutCommands = buildReadoutSlashCommands({
+  const readoutEndpoint = {
     httpUrl,
     ...(token !== undefined ? { token } : {}),
     appendSystem: (text: string): void => {
@@ -75,7 +77,23 @@ export const assembleSlashCommands = (deps: SlashCatalogDeps): readonly SlashCom
     onError: (msg: string): void => {
       deps.appendClientMessage("error", msg)
     },
+  }
+  const llmCommands = buildLlmConfigSlashCommands({
+    ...sharedEndpoint,
+    // aug-28 — `/model` with no argument shows the DAEMON's `/model` readout
+    // (effective model + the ids `set_model` accepts) instead of the palette
+    // keeping a second model vocabulary; with an argument it sends the control
+    // frame and reads the same readout back as the honest confirmation.
+    showReadout: (name: string) => fetchReadoutBody(readoutEndpoint, name),
+    // aug-28 — the non-printing read `/model <id>` polls while the out-of-band
+    // switch lands (see `awaitModelApplied`).
+    readReadout: (name: string) => readReadoutBody(readoutEndpoint, name),
+    ...(deps.sendControlRequest !== undefined
+      ? { sendControlRequest: deps.sendControlRequest }
+      : {}),
   })
+  const authCommands = buildAuthSlashCommands(sharedEndpoint)
+  const readoutCommands = buildReadoutSlashCommands(readoutEndpoint)
 
   // Live builders own their slugs: drop the base stubs they replace so
   // first-match resolution can never hit a dead stub in front of a live

@@ -187,6 +187,27 @@ export const scopeKey = (rule: string, scope: Scope): string => `${rule}\u0000${
  *  of only the number. */
 export type SitesByRule = ReadonlyMap<string, ReadonlyMap<string, number>>
 
+/** The scan's site index PAIRED with the scope classifier that reads it.
+ *
+ *  WHY A PAIR AND NOT TWO OPTIONAL ARGUMENTS. The first version took
+ *  `sitesByRule?` and `scopeOfFile?` separately and its docstring said the
+ *  second was "required alongside" the first. Nothing enforced that, and the
+ *  failure was SILENT in the worst possible direction — measured:
+ *
+ *      scope given WITH scopeOfFile   : " — in src/a.ts (9)"
+ *      scope given WITHOUT scopeOfFile: ""              <-- the pre-fix bug, back
+ *      no scope at all                : " — in src/a.ts (9), tests/b.test.ts (2)"
+ *
+ *  A caller who wired the sites and forgot the classifier got a bare number on
+ *  every SCOPED breach: exactly the defect this attribution was added to
+ *  delete, reintroduced by half-wiring it, with no error anywhere. Making the
+ *  two one value removes the half-wired state from the type system, so it needs
+ *  no runtime check and no docstring promise. */
+export type SiteAttribution = {
+  readonly byRule: SitesByRule
+  readonly scopeOfFile: (file: string) => Scope
+}
+
 /** How many files a breach lists before it stops. A regression is usually one
  *  or two sites; a rule that fires in fifty files is a config change, and the
  *  first few plus the count say that just as well as fifty lines would. */
@@ -205,15 +226,14 @@ export const SITE_LIST_CAP = 5
  *  `sites` is optional so the pure comparison keeps its existing signature and
  *  its existing output byte-for-byte when a caller does not supply them. */
 export const siteSuffix = (
-  sites: SitesByRule | undefined,
+  sites: SiteAttribution | undefined,
   rule: string,
   scope?: Scope,
-  scopeOfFile?: (file: string) => Scope,
 ): string => {
-  const byFile = sites?.get(rule)
+  const byFile = sites?.byRule.get(rule)
   if (byFile === undefined || byFile.size === 0) return ""
   const rows = [...byFile]
-    .filter(([file]) => scope === undefined || scopeOfFile?.(file) === scope)
+    .filter(([file]) => scope === undefined || sites?.scopeOfFile(file) === scope)
     .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
   if (rows.length === 0) return ""
   const shown = rows.slice(0, SITE_LIST_CAP).map(([file, n]) => `${file} (${n})`)
@@ -240,16 +260,14 @@ export const evaluateCeilings = (args: {
   readonly worstComplexity: number
   readonly worstSite: string
   /** Optional. Present ⇒ every breach line names its files; absent ⇒ output is
-   *  unchanged, which is what keeps the existing pins on this function valid. */
-  readonly sitesByRule?: SitesByRule
-  /** Required alongside `sitesByRule` to attribute a SCOPED breach, which must
-   *  list only the files in the breaching scope. */
-  readonly scopeOfFile?: (file: string) => Scope
+   *  unchanged, which is what keeps the existing pins on this function valid.
+   *  It is ONE value rather than two optional ones so the half-wired state that
+   *  silently dropped scoped attribution cannot be expressed — see
+   *  {@link SiteAttribution}. */
+  readonly sites?: SiteAttribution
 }): CeilingVerdict => {
   const { counts, scopedCounts, ceiling, worstComplexity, worstSite } = args
-  const { sitesByRule, scopeOfFile } = args
-  const where = (rule: string, scope?: Scope): string =>
-    siteSuffix(sitesByRule, rule, scope, scopeOfFile)
+  const where = (rule: string, scope?: Scope): string => siteSuffix(args.sites, rule, scope)
   const pinned = ceiling.rules
   const scopedPinned = ceiling.scopedRules ?? {}
 
@@ -389,8 +407,7 @@ if (import.meta.main) {
     ceiling,
     worstComplexity,
     worstSite,
-    sitesByRule,
-    scopeOfFile: scopeOfPath,
+    sites: { byRule: sitesByRule, scopeOfFile: scopeOfPath },
   })
   if (verdict.doublePinned.length > 0) {
     console.error(

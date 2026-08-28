@@ -378,6 +378,35 @@ export class OpenAIAdapter implements LLMPort {
     this.maxTokens = config.maxTokens ?? 8192
   }
 
+  /**
+   * `LLMPort.listModels` — the model ids THIS key/org may actually run, from
+   * OpenAI's own `GET /v1/models` (`client.models.list`). Same role as the
+   * Anthropic adapter's probe: it keeps the `/model` picker's candidate set the
+   * provider's live truth instead of the boot model plus whatever
+   * `QUANTA_RETRY_MODELS` happens to name — on an `OPENAI_API_KEY` session that
+   * left the picker with nothing to pick.
+   *
+   * Goes through `this.client` — the SAME SDK client the stream path uses — so a
+   * configured `baseURL` (an OpenAI-compatible endpoint) and the RFC05-2 guarded
+   * `fetch` govern the probe exactly as they govern the chat wire. No second HTTP
+   * path, no second credential read, no new dependency.
+   *
+   * ONE page: for every real account the first page IS the catalog, and a
+   * truncated page would only ever mean a shorter picker list, never a wrong one.
+   * Throws a typed {@link LLMError} on auth/network failure per the port contract
+   * (`LLMPort.listModels`); the CALLER degrades — `model-catalog.ts#probeCatalog`
+   * treats a rejection as "no catalog" and keeps its seeded candidates. No
+   * adapter-level cache: callers memoize the probe for the session.
+   */
+  async listModels(): Promise<readonly string[]> {
+    try {
+      const page = await this.client.models.list()
+      return page.data.map((m) => m.id)
+    } catch (e) {
+      throw LLMError.fromSdkError("openai", e)
+    }
+  }
+
   private async openRawStream(input: StreamInput): Promise<AsyncIterable<RawChunk>> {
     const promptCacheRetention =
       input.promptCacheRetention === "in-memory" ? "in_memory" : input.promptCacheRetention

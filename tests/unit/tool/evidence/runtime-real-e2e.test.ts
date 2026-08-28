@@ -5,12 +5,15 @@
  * variable values that explain the failure (e.g. `result = 10` when the test
  * expected 99). This is the last LIVE section of the keystone.
  *
- * AUTO-SKIPS without python3 + debugpy. Verified 2026-06-10.
+ * AUTO-SKIPS without python3 + debugpy, and is OPT-IN behind
+ * `QUANTA_REAL_TOOLCHAIN_E2E` (`bun run test:real-toolchain`) — see the lane
+ * note above the gates below. Verified 2026-06-10.
  */
 import { describe, expect, test } from "bun:test"
 import { existsSync, mkdirSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import { gateOn } from "@/shared"
 import { defaultRuntimePort } from "@/tool/evidence"
 import { buildEvidence } from "@/tool/evidence/builder"
 import { detectToolchain, runToolchain } from "@/tool/testrun"
@@ -34,7 +37,17 @@ const lldbDap = (): boolean => {
     return false
   }
 }
-const D = hasDebugpy() ? describe : describe.skip
+// REAL-ON-DEMAND LANE. Toolchain presence alone used to be the gate, so on a
+// developer machine that HAS the toolchain these ran inside the ordinary unit
+// suite and blew the per-test speed budget (`tools/dev/unit-speed-budget.json`,
+// 8,529ms; measured here at 10,131ms / 9,469ms), a ceiling that may only go
+// DOWN. The `-real-e2e.test.ts` sibling `runtime-rust-real-e2e.test.ts` already
+// required `QUANTA_REAL_TOOLCHAIN_E2E`; this file did not, so the suffix meant
+// two different things. Same suffix, same lane now: a VISIBLE skip by default,
+// run by `bun run test:real-toolchain`. CI coverage is unchanged — the runner
+// has none of these toolchains, so these describes already skipped there.
+const REAL_E2E = gateOn(process.env, "QUANTA_REAL_TOOLCHAIN_E2E")
+const D = REAL_E2E && hasDebugpy() ? describe : describe.skip
 const buildSources = (_dir: string) => ({
   detect: (c: string) =>
     detectToolchain(c, { fileExists: async (n: string) => existsSync(join(c, n)) }),
@@ -80,7 +93,7 @@ D("defaultRuntimePort — REAL debugpy runtime capture in the evidence packet", 
 })
 
 // ── RUST runtime via lldb-dap (cargo test --no-run → test binary under lldb) ──
-const DR = has("cargo", "--version") && lldbDap() ? describe : describe.skip
+const DR = REAL_E2E && has("cargo", "--version") && lldbDap() ? describe : describe.skip
 DR("defaultRuntimePort — REAL Rust runtime capture (cargo + lldb-dap)", () => {
   test("buildEvidence captures the failing Rust test's locals (result=10)", async () => {
     const dir = realpathSync(mkdtempSync(join(tmpdir(), "rt-rs-")))
@@ -122,7 +135,7 @@ DR("defaultRuntimePort — REAL Rust runtime capture (cargo + lldb-dap)", () => 
 // ── GO runtime via dlv dap (over the TCP transport — its first real consumer) ──
 const dlvOk = (): boolean =>
   has("dlv", "version") || has(`${process.env.HOME}/go/bin/dlv`, "version")
-const DG = has("go", "version") && dlvOk() ? describe : describe.skip
+const DG = REAL_E2E && has("go", "version") && dlvOk() ? describe : describe.skip
 DG("defaultRuntimePort — REAL Go runtime capture (dlv dap over TCP)", () => {
   test("buildEvidence captures the failing Go test's locals via the TCP DAP transport", async () => {
     const dir = realpathSync(mkdtempSync(join(tmpdir(), "rt-go-")))

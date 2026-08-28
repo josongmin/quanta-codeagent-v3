@@ -56,7 +56,37 @@ const READOUT_COMMANDS: readonly {
   { slug: "doctor", description: "Session-store health check (live)" },
 ]
 
-const fetchReadout = async (ep: ReadoutEndpoint, name: string): Promise<void> => {
+/** Fetch one readout and print its body (or an honest error) into the transcript.
+ *  Exported (aug-28) so the `/model` command can share the SAME route + rendering
+ *  instead of the palette carrying a second model vocabulary. */
+/**
+ * Fetch a readout body and RETURN it, without printing (aug-28).
+ *
+ * Split out of {@link fetchReadoutBody} because `/model <id>` needs to READ the
+ * readout, not show it: the model switch is applied out-of-band (a control frame
+ * the loop drains on its next tick, then a fire-and-forget store write), so the
+ * first read-back after a switch reports the OLD model almost every time. A
+ * command that printed that would be telling the operator the switch failed.
+ * `undefined` on any failure — the caller decides what to say.
+ */
+export const readReadoutBody = async (
+  ep: ReadoutEndpoint,
+  name: string,
+): Promise<string | undefined> => {
+  try {
+    const res = await fetch(`${ep.httpUrl.replace(/\/+$/, "")}/readout/${name}`, {
+      headers: ep.token !== undefined ? { authorization: `Bearer ${ep.token}` } : {},
+    })
+    const body = (await res.json().catch(() => null)) as { output?: unknown } | null
+    return body !== null && typeof body.output === "string" && body.output.length > 0
+      ? body.output
+      : undefined
+  } catch {
+    return undefined
+  }
+}
+
+export const fetchReadoutBody = async (ep: ReadoutEndpoint, name: string): Promise<void> => {
   try {
     const res = await fetch(`${ep.httpUrl.replace(/\/+$/, "")}/readout/${name}`, {
       headers: ep.token !== undefined ? { authorization: `Bearer ${ep.token}` } : {},
@@ -81,7 +111,7 @@ export const buildReadoutSlashCommands = (ep: ReadoutEndpoint): readonly SlashCo
     description: c.description,
     kind: "readout",
     action: async () => {
-      await fetchReadout(ep, c.slug)
+      await fetchReadoutBody(ep, c.slug)
       return ""
     },
   }))

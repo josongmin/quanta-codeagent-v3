@@ -65,6 +65,7 @@ evidence:
       - tests/unit/side-agent-process-registry-hellgate.test.ts
       - tests/unit/side-agent-assembler-process-wire-hellgate.test.ts
     integration:
+      - tests/integration/side-agent-process-wire-e2e.test.ts
       - tests/integration/side-agent-process-os-fork-e2e.test.ts
       - tests/integration/side-agent-process-llm-charter-e2e.test.ts
       - tests/integration/side-agent-ipc-kill-mid-result-e2e.test.ts

@@ -60,7 +60,19 @@ export interface WireSlotsComposeConfig {
    * activates an fs-backed store at composition root). Absent ⇒ slot
    * omitted; the global default model wins for every mode.
    */
-  stickyModelStore?: { readonly store: import("../sticky-model").StickyModelStore }
+  stickyModelStore?: {
+    readonly store: import("../sticky-model").StickyModelStore
+    /** aug-28 — the PROVIDER half of the sticky key (`<provider>:<mode>`), supplied
+     *  by the surface that owns the store. Kept HERE rather than derived from
+     *  `config.llm.provider` so the write key and the read key have ONE authority:
+     *  a port whose provider field is absent would otherwise read a different key
+     *  than the surface wrote, and the pick would silently not apply. */
+    readonly provider?: string
+    /** aug-28 — SYNC "what the next turn will run", published by the surface that
+     *  owns the store (see `@/agent/effective-model`). Absent ⇒ consumers report
+     *  the boot model, exactly as before. */
+    readonly effectiveModel?: () => string | undefined
+  }
   /**
    * ADR-0236 / ADR-0213 — tool-profile preset resolver (composition-root
    * wire). Caller-side slot — the admissibility gate (Wave-B follow-up)

@@ -54,7 +54,21 @@
  * with the right request — and that the drain of THAT enqueued request flips the
  * live gate cell. To make the flip OBSERVABLE the way production is, we read it
  * through the REAL permission `evaluate()` gate (a mutating tool action goes from
- * `ask` under `default` to `allow` under `bypass`), not just by peeking the cell.
+ * `ask` under `default` to `allow` under `acceptEdits`), not just by peeking the
+ * cell.
+ *
+ * WHY `acceptEdits` AND NOT `bypass` FOR THE HEADLINE
+ * ---------------------------------------------------
+ * `bypass` turns the approval gate off entirely, and the port's allowlist
+ * (`WEB_CONTROL_PERMISSION_MODES`) deliberately SUBTRACTS it: a frame off the
+ * wire may narrow to a non-escalating mode, never escalate. This file used to
+ * drive the headline with `bypass` — i.e. it pinned the escalation as the
+ * feature — so the fence landing turned a security fix into a red. The wire
+ * property being proven is unchanged (`ask` → `allow` on the live cell);
+ * `acceptEdits` produces the identical observation without being the escalation.
+ * Case (1b) then pins the fence AT THIS SAME TRANSPORT BOUNDARY, which the unit
+ * hellgate (`tests/unit/apps/web-daemon/control-request-bypass-fence-hellgate.test.ts`,
+ * allowlist SHAPE only) cannot reach.
  *
  * NON-VACUOUS
  * -----------
@@ -163,8 +177,8 @@ const liveProxy = (): PermissionContext => {
 }
 
 /** A mutating tool action (isReadOnly:false, no shellCommand ⇒ no HARD_DENY). The
- *  real gate answers `ask` under `default` and `allow` under `bypass` — so the
- *  gate's VERDICT is the ground-truth observation of the live-cell flip. */
+ *  real gate answers `ask` under `default` and `allow` under `acceptEdits` — so
+ *  the gate's VERDICT is the ground-truth observation of the live-cell flip. */
 const mutatingAction: ToolAction = {
   tool: "danger",
   input: {},
@@ -174,7 +188,7 @@ const mutatingAction: ToolAction = {
 
 /** Read the flip THROUGH the real permission gate (production semantics), not by
  *  peeking the cell: a mutating action is `ask` under `default`, `allow` under
- *  `bypass`. */
+ *  `acceptEdits`. */
 const gateDecision = (permission: PermissionContext): PermissionDecision =>
   evaluate(mutatingAction, permission)
 
@@ -270,7 +284,7 @@ const until = async (
 const yieldLoop = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 25))
 
 describe("control-request-surface — a controlRequest frame flips the live gate through the REAL daemon WS", () => {
-  test("(1) a set_permission_mode frame over the real socket enqueues + drains ⇒ the LIVE gate flips default→bypass", async () => {
+  test("(1) a set_permission_mode frame over the real socket enqueues + drains ⇒ the LIVE gate flips default→acceptEdits", async () => {
     const permission = liveProxy()
     const { handle } = observablePort(permission)
     const daemon = await boot({ controlRequestPorts: { handle } })
@@ -283,7 +297,9 @@ describe("control-request-surface — a controlRequest frame flips the live gate
     expect(gateDecision(permission).kind).toBe("ask")
 
     // The headline: the client sends a real set_permission_mode control frame.
-    client.ws.send(controlFrame({ kind: "set_permission_mode", mode: "bypass" }))
+    // `acceptEdits`, not `bypass` — see "WHY acceptEdits AND NOT bypass" above;
+    // the observable (`ask` → `allow`) is identical.
+    client.ws.send(controlFrame({ kind: "set_permission_mode", mode: "acceptEdits" }))
 
     // Ground-truth #1: the frame crossed the wire, hit `ws-handlers.ts`
     // consumeControlRequestFrame → peekControlRequest → enqueue, so the REAL port
@@ -294,14 +310,46 @@ describe("control-request-surface — a controlRequest frame flips the live gate
     // The turn loop's drain: plan + apply the enqueued request ⇒ the applier
     // writes the live cell.
     const applied = drain(handle)
-    expect(applied).toEqual([{ kind: "permission-mode-set", mode: "bypass" }])
+    expect(applied).toEqual([{ kind: "permission-mode-set", mode: "acceptEdits" }])
     expect(handle.pendingCount()).toBe(0) // fully drained
 
     // Ground-truth #2 (the LOAD-BEARING effect): the live gate now ALLOWS the
     // same mutating action it asked about before — the flip landed on the cell
     // the per-turn gate reads.
-    expect(permission.mode).toBe("bypass")
+    expect(permission.mode).toBe("acceptEdits")
     expect(gateDecision(permission).kind).toBe("allow")
+  })
+
+  test("(1b) FENCE — the SAME wire carrying `bypass` is REJECTED at the drain; the live cell never escalates", async () => {
+    // The paired control for (1). Everything is identical except the mode, so a
+    // green here can only mean the allowlist refused the escalation — not that
+    // the frame failed to arrive (the `pendingCount` assertion below proves it
+    // crossed the socket and reached the real port exactly as (1)'s did).
+    const permission = liveProxy()
+    const { handle } = observablePort(permission)
+    const daemon = await boot({ controlRequestPorts: { handle } })
+
+    const client = connect(daemon)
+    await client.open
+    await yieldLoop()
+
+    expect(gateDecision(permission).kind).toBe("ask")
+
+    client.ws.send(controlFrame({ kind: "set_permission_mode", mode: "bypass" }))
+
+    // Reached the real port — the refusal is the PLANNER's, not a lost frame.
+    expect(await until(() => handle.pendingCount() > 0)).toBe(true)
+
+    const applied = drain(handle)
+    expect(applied).toEqual([
+      { kind: "rejected", reason: 'permission mode "bypass" not recognized' },
+    ])
+    expect(handle.pendingCount()).toBe(0)
+
+    // The load-bearing assertion: the live cell the per-turn gate reads is
+    // untouched, so a mutating action still ASKS.
+    expect(permission.mode).toBe("default")
+    expect(gateDecision(permission).kind).toBe("ask")
   })
 
   test("(2) a set_model + set_thinking frame over the real socket reaches the observe-only sink", async () => {
@@ -350,8 +398,11 @@ describe("control-request-surface — a controlRequest frame flips the live gate
     await client.open
     await yieldLoop()
 
-    // Send the EXACT frame case (1) used. With the gate off it must not enqueue.
-    client.ws.send(controlFrame({ kind: "set_permission_mode", mode: "bypass" }))
+    // Send the EXACT frame case (1) used — `acceptEdits`, a mode the allowlist
+    // ACCEPTS. Using `bypass` here would confound the control: the drain would be
+    // empty either way (gate-off OR fenced), so a green would no longer be
+    // evidence that the CONFIG severance is what stopped it.
+    client.ws.send(controlFrame({ kind: "set_permission_mode", mode: "acceptEdits" }))
 
     // A generous window: even after the frame is fully processed, NOTHING was
     // enqueued (the port we built was never handed to the daemon).
@@ -430,12 +481,12 @@ describe("control-request-surface — a controlRequest frame flips the live gate
  * a `controlRequest` envelope. That mirrors the two ways case (1) can silently
  * break — either `peekControlRequest` stops recognizing the envelope, or the
  * frame is routed past `consumeControlRequestFrame`. The assertion insists the
- * gate STILL flips to `bypass`, which it cannot when the peek returns null and
- * nothing is enqueued (so the drain is empty and the applier never writes the
+ * gate STILL flips to `acceptEdits`, which it cannot when the peek returns null
+ * and nothing is enqueued (so the drain is empty and the applier never writes the
  * cell), so flipping `.skip` → `.only`-style makes this RED — proving case (1)'s
- * `permission.mode === "bypass"` / gate `allow` assertion is not vacuous (the cell
- * only ever flips when the real socket path actually reaches the real port AND
- * the enqueued request is drained).
+ * `permission.mode === "acceptEdits"` / gate `allow` assertion is not vacuous (the
+ * cell only ever flips when the real socket path actually reaches the real port
+ * AND the enqueued request is drained).
  */
 describe("control-request-surface — red-on-injection evidence (severed peek/enqueue ⇒ no flip)", () => {
   test.skip("INJECTION: a non-controlRequest frame ⇒ the gate never flips (case 1 would go RED)", async () => {
@@ -448,16 +499,16 @@ describe("control-request-surface — red-on-injection evidence (severed peek/en
     await yieldLoop()
 
     // NOT a `controlRequest` envelope ⇒ `peekControlRequest` returns null ⇒
-    // nothing enqueued. (The neutered peek/enqueue path.) The `bypass` mode below
-    // is what a WORKING path would apply — here it must NEVER land.
-    client.ws.send(JSON.stringify({ kind: "notAControlRequest", mode: "bypass" }))
+    // nothing enqueued. (The neutered peek/enqueue path.) The `acceptEdits` mode
+    // below is what a WORKING path would apply — here it must NEVER land.
+    client.ws.send(JSON.stringify({ kind: "notAControlRequest", mode: "acceptEdits" }))
 
     // Nothing enqueued ⇒ the drain is a no-op ⇒ the cell stays `default`. This
     // assertion MUST fail (the gate never flips) ⇒ the test is RED, proving case
     // (1)'s positive flip assertion has real teeth.
     await until(() => handle.pendingCount() > 0, { timeoutMs: 500 })
     drain(handle)
-    expect(permission.mode).toBe("bypass")
+    expect(permission.mode).toBe("acceptEdits")
     expect(gateDecision(permission).kind).toBe("allow")
   })
 })
