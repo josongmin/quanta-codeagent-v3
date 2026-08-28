@@ -145,6 +145,18 @@ export const GATES: readonly Gate[] = [
     why: "a guard that passes only because it resolved a repo path from the ambient cwd",
   },
   {
+    id: "non-vacuity-oracle",
+    stage: "prepush",
+    run: "bun run test:non-vacuity",
+    why: "a guard that reports no violations over a corpus it never read — run against a mirror with that corpus emptied, because three static detectors reported green while inert",
+  },
+  {
+    id: "preload-runtime-closure",
+    stage: "prepush",
+    run: "bun test tests/meta/preload-runtime-closure-hellgate.test.ts",
+    why: "the bunfig preload dragging production slices into every test — it was 1,259 files of src/, and it made the non-vacuity mirror impossible to start",
+  },
+  {
     id: "pm-dod-ratchet",
     stage: "prepush",
     run: "bun run pm:gate",
