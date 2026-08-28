@@ -1,10 +1,11 @@
-import { describe, expect, test } from "bun:test"
+import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import { escalatingKill, KILL_GRACE_MS, type KillableChild } from "@/runtime"
 import {
   createPpidWalkKiller,
   type ProcessTableProvider,
   type ProcessTreeKiller,
 } from "@/runtime/process-tree"
+import { __resetLoggerRateLimit, __resetRuntimeConfig, setTerminalIo } from "@/shared"
 
 /**
  * D1 — ProcessTreeKiller (jun-7-naive-impl-hardening §2.1).
@@ -84,6 +85,83 @@ describe("F1 — signalTree validates rootPid in the primitive", () => {
     killer.signalTree(100, "SIGTERM")
     expect(signalled).toEqual([100, 200, 300])
     expect(reads()).toBe(2) // pre-root + post-root snapshots both taken
+  })
+})
+
+/**
+ * F1b — the REFUSAL must also be REPORTED. (Written for this campaign: the
+ * `Number.isInteger`/`<= 0` refusal shipped with an arm; the
+ * `process-tree.invalid_root_pid` warn beside it shipped with NONE.)
+ *
+ * MEASURED HOLE (the reason this block exists): deleting the
+ * `logger.warn("process-tree.invalid_root_pid", …)` line from `signalTree` left
+ * every owning test file GREEN — 52 pass / 0 fail across
+ * process-tree-kill / single-pid-kill-ban / parse-ps-table /
+ * kill-escalation-and-worktree-retry. The refusal half of the guard was armed;
+ * the reporting half was free to be deleted in silence.
+ *
+ * WHY THAT MATTERS more here than for an ordinary warn: `signalTree` is a
+ * no-throw, no-return best-effort teardown. A refused root produces NO signal,
+ * NO exception and NO return value — the warn is the ONLY externally observable
+ * difference between "refused a bad pid" and "reaped a tree that had nothing in
+ * it". Lose the warn and a caller passing a bad root gets a teardown that does
+ * absolutely nothing, indistinguishable from success. (The module docstring is
+ * honest that this channel is only visible where terminal IO is wired — that is
+ * exactly what this test wires.)
+ *
+ * The label is asserted VERBATIM because it is a grep contract: the leaky
+ * bucket in `logger.ts` is keyed per label, and operators grep for it.
+ */
+describe("F1b — the invalid-root refusal is REPORTED, not silent", () => {
+  let captured: string[] = []
+
+  beforeEach(() => {
+    captured = []
+    setTerminalIo({ stdout: () => {}, stderr: (chunk) => captured.push(chunk) })
+    // The warn bucket is keyed per LABEL, so the F1 loop above would otherwise
+    // rate-limit these away depending on file execution order.
+    __resetLoggerRateLimit()
+    __resetRuntimeConfig()
+  })
+
+  afterEach(() => {
+    setTerminalIo(null)
+  })
+
+  /** A killer whose effects are inert — this block is about the DIAGNOSTIC. */
+  const inertKiller = () => createPpidWalkKiller({ readTable: fakeTable, sendSignal: () => {} })
+
+  const stderrText = (): string => captured.join("")
+
+  // Non-finite roots are in this list deliberately. MEASURED against the tree as
+  // it landed: the logger JSON-serialises its meta, so `NaN` and `+Infinity`
+  // BOTH rendered as `{"rootPid":null}` — the two values the `Number.isInteger`
+  // half of the guard exists to reject were exactly the two the warn could not
+  // name, and were indistinguishable from each other in the log. `signalTree`
+  // now stringifies a non-finite root; drop that and the NaN/Infinity arms here
+  // go RED while the 0/-1/1.5 arms stay green.
+  for (const bad of [0, -1, Number.NaN, 1.5, Number.POSITIVE_INFINITY]) {
+    test(`rootPid ${String(bad)} is refused AUDIBLY (label + offending pid on stderr)`, () => {
+      inertKiller().signalTree(bad, "SIGKILL")
+      const out = stderrText()
+      // Verbatim label — it is the grep contract and the rate-limit bucket key.
+      expect(out).toContain("process-tree.invalid_root_pid")
+      // The offending root must be IN the line: a label with no pid cannot tell
+      // an operator which caller passed the bad root, and `null` cannot tell
+      // NaN from Infinity.
+      expect(out).toContain(String(bad))
+      expect(out).not.toContain('"rootPid":null')
+      // And the signal, so the line says what teardown was skipped.
+      expect(out).toContain("SIGKILL")
+    })
+  }
+
+  // PAIRED CONTROL — the happy path must stay SILENT. A "fix" that warns on
+  // every call (or unconditionally) would satisfy the arms above and drown the
+  // signal; this fails it.
+  test("PAIRED CONTROL: a valid rootPid emits NO invalid_root_pid warn", () => {
+    inertKiller().signalTree(100, "SIGTERM")
+    expect(stderrText()).not.toContain("process-tree.invalid_root_pid")
   })
 })
 

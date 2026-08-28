@@ -128,7 +128,16 @@ export const createPpidWalkKiller = (deps: PpidWalkDeps): ProcessTreeKiller => {
     // "diagnosable where logging is wired", not as a guaranteed alarm; the
     // load-bearing part is the REFUSAL itself, which is unconditional.
     if (!Number.isInteger(rootPid) || rootPid <= 0) {
-      logger.warn("process-tree.invalid_root_pid", { rootPid, signal })
+      // `rootPid` is rendered as a STRING when it is not finite. MEASURED: the
+      // logger JSON-serialises its meta, and `JSON.stringify` maps both `NaN`
+      // and `±Infinity` to `null` — so the two inputs the `Number.isInteger`
+      // half of this guard exists to catch were the two the warn could not
+      // NAME, both arriving as an indistinguishable `{"rootPid":null}`. Finite
+      // roots (0, -1, 1.5) stay NUMBERS so the common case keeps its type.
+      logger.warn("process-tree.invalid_root_pid", {
+        rootPid: Number.isFinite(rootPid) ? rootPid : String(rootPid),
+        signal,
+      })
       return
     }
 
