@@ -86,6 +86,19 @@ describe("population floor", () => {
     }
   })
 
+  test("INJECTION: a NESTED subtree loss is red, which a one-level claim cannot see", () => {
+    const root = build()
+    try {
+      mkdirSync(join(root, "alpha", "deep"), { recursive: true })
+      writeFileSync(join(root, "alpha", "deep", "mod.ts"), "export const d = 3\n")
+      // `alpha` is still reached, and the count is still high — the exact hole
+      // measured on the PEP fence when `src/agent/loop` was dropped.
+      expect(() => assertScanPopulation(walk(root), root)).toThrow(/alpha\/deep/)
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
   test("the on-disk probe does not reuse the walk: a walk blind to a subtree still reds", () => {
     const root = build()
     try {

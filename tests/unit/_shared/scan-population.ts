@@ -68,16 +68,33 @@ export const assertScanPopulation = (
     return false
   }
 
-  const reached = new Set(
-    files.map((f) => relative(root, f).split("/")[0] ?? "").filter((s) => s !== ""),
-  )
-  const onDisk = readdirSync(root, { withFileTypes: true })
-    .filter((e) => e.isDirectory() && !isSkipped(e.name))
-    .map((e) => e.name)
-    .filter((name) => holdsCollectable(join(root, name)))
+  // RECURSIVE, not one level. A claim about immediate children keeps `agent`
+  // "reached" while every file under `agent/loop/` goes unscanned — measured on
+  // the PEP fence, where dropping that nested slice left a one-level floor green
+  // and the count (3337 files, floor 500) nowhere near the threshold. The same
+  // defect as a count floor, one level down.
+  const reached = new Set<string>()
+  for (const f of files) {
+    const rel = relative(root, f)
+    if (rel.startsWith("..")) continue
+    const parts = rel.split("/")
+    for (let i = 1; i < parts.length; i++) reached.add(parts.slice(0, i).join("/"))
+  }
+
+  const missed: string[] = []
+  const probe = (dir: string, rel: string): void => {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      if (!entry.isDirectory() || isSkipped(entry.name)) continue
+      const childRel = rel === "" ? entry.name : `${rel}/${entry.name}`
+      if (!holdsCollectable(join(dir, entry.name))) continue
+      if (reached.has(childRel)) probe(join(dir, entry.name), childRel)
+      else missed.push(childRel)
+    }
+  }
+  probe(root, "")
 
   expect(
-    onDisk.filter((name) => !reached.has(name)),
+    missed,
     `these subtrees of ${root} hold collectable files on disk but the scan enumerated none of them`,
   ).toEqual([])
 }
