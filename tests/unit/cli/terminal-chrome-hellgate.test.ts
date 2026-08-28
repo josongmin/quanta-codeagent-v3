@@ -30,6 +30,7 @@ import {
 } from "../../../src/apps/cli/terminal-chrome"
 import { createTimelinePanel } from "../../../src/apps/cli/timeline-panel"
 import type { AgentEvent } from "../../../src/stream"
+import { assertScanPopulation } from "../_shared/scan-population"
 
 const ESC_CHAR = String.fromCharCode(27)
 const DEC_SAVE = `${ESC_CHAR}7`
@@ -138,6 +139,13 @@ describe("SCO cursor save/restore grep-gate (src/apps/cli)", () => {
     const rawSco = new RegExp(`${ESC_CHAR}\\[[su]`)
     const offenders: string[] = []
     const entries = readdirSync(root, { recursive: true }) as string[]
+    // `expect(offenders).toEqual([])` is satisfied by an empty listing, so what
+    // the listing reached is asserted first.
+    assertScanPopulation(
+      entries.filter((r) => String(r).endsWith(".ts")).map((r) => join(root, String(r))),
+      root,
+      { min: 50, collectable: (n) => n.endsWith(".ts") },
+    )
     for (const rel of entries) {
       const relStr = String(rel)
       if (!relStr.endsWith(".ts")) continue

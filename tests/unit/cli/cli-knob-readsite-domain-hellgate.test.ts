@@ -46,6 +46,7 @@ import { describe, expect, test } from "bun:test"
 import { readdirSync, readFileSync, statSync } from "node:fs"
 import { join } from "node:path"
 import { CLI_KNOBS } from "@/apps/cli/cli-knobs"
+import { assertScanPopulation } from "../_shared/scan-population"
 
 /** QUANTA_* token extractors — IDENTICAL to the completeness ratchet (a real read
  *  is ALWAYS quoted, env-dot, or a destructure; a bare const ref is skipped). */
@@ -121,6 +122,16 @@ const scanCliReadSites = (): Map<string, string> => {
 }
 
 describe("cli-knob read-site domain ratchet (ADR-0527)", () => {
+  test("ANTI-VACUITY: the CLI walk reaches a real, populated tree", () => {
+    // An empty walk yields an empty read-site map, and an empty map satisfies
+    // "every CLI read-site is declared" for free.
+    const cliRoot = join(import.meta.dir, "..", "..", "..", "src/apps/cli")
+    assertScanPopulation([...walk(cliRoot)], cliRoot, {
+      min: 50,
+      collectable: (n) => n.endsWith(".ts"),
+    })
+  })
+
   test("every CLI_KNOBS entry has at least one read-site under src/apps/cli/", () => {
     const cliReads = scanCliReadSites()
     const wrongHomed = CLI_KNOBS.filter((k) => !cliReads.has(k.envKey))

@@ -32,6 +32,7 @@ import {
   type BuildMcpSurfaceOpts,
   buildMcpSurfaceInfo,
 } from "../../../../src/apps/cli/repl/mcp-surface-wire"
+import { assertScanPopulation } from "../../_shared/scan-population"
 
 const REPO_ROOT = join(import.meta.dir, "..", "..", "..", "..")
 const REPL_DIR = join(REPO_ROOT, "src", "apps", "cli", "repl")
@@ -85,6 +86,11 @@ describe("repl orphan resolution — deleted modules", () => {
       .readdirSync(REPL_DIR)
       .filter((n) => n.endsWith(".ts"))
       .sort()
+    assertScanPopulation(
+      entries.map((n) => join(REPL_DIR, n)),
+      REPL_DIR,
+      { min: 5, topLevelOnly: true, collectable: (n) => n.endsWith(".ts") },
+    )
     expect(entries).toContain("mcp-surface-wire.ts")
   })
 

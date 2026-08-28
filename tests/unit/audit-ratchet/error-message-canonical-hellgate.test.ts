@@ -44,6 +44,7 @@
 import { describe, expect, test } from "bun:test"
 import { readdirSync, readFileSync, statSync } from "node:fs"
 import { extname, join, relative } from "node:path"
+import { assertScanPopulation } from "../_shared/scan-population"
 
 const REPO_ROOT = join(import.meta.dir, "..", "..", "..")
 const SRC_DIR = join(REPO_ROOT, "src")
@@ -241,6 +242,15 @@ const scanForRawStringCall = (): readonly Match[] => {
 }
 
 describe("error-message canonical ratchet (R2 audit-H)", () => {
+  test("ANTI-VACUITY: the walk reaches a real, populated `src/` tree", () => {
+    // Every scan below reports matches. Zero matches over a tree that was never
+    // read is indistinguishable from zero matches over a canonical one.
+    assertScanPopulation(walkTsFiles(SRC_DIR), SRC_DIR, {
+      min: 500,
+      collectable: (n) => n.endsWith(".ts"),
+    })
+  })
+
   test(
     "no `(e as Error).message` outside the in-flight allowlist",
     () => {

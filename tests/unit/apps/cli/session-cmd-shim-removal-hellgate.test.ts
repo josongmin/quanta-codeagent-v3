@@ -10,6 +10,7 @@ import {
   createCliImportHandlerWithRoot,
 } from "../../../../src/apps/cli/session-import-handler"
 import { resolveCliSessionListEnv } from "../../../../src/apps/cli/session-list-env"
+import { assertScanPopulation } from "../../_shared/scan-population"
 
 /**
  * CLI-05 (ADR-0305) — hellgate suite for the `session-commands.ts` shim
@@ -86,6 +87,18 @@ const walkTs = (root: string): string[] => {
 // =============================================================================
 
 describe("CLI-05: structural — shim is gone", () => {
+  test("ANTI-VACUITY: the src walk reaches a real, populated tree", () => {
+    // `safeReaddir` swallows a failed read and returns `[]`. The offender loop
+    // below then finds no dead import in a tree it never opened, and the shim
+    // reads as removed — the exact verdict this file exists to establish.
+    const srcRoot = join(REPO_ROOT, "src")
+    assertScanPopulation(walkTs(srcRoot), srcRoot, {
+      min: 500,
+      skipDirs: [...SKIP_DIRS],
+      collectable: (n) => n.endsWith(".ts"),
+    })
+  })
+
   test("HELL-01: src/apps/cli/session-commands.ts does NOT exist", () => {
     const p = join(REPO_ROOT, "src/apps/cli/session-commands.ts")
     expect(existsSync(p)).toBe(false)

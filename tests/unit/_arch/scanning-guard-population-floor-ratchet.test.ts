@@ -84,11 +84,6 @@ const withoutFloor = (): readonly string[] =>
  * Neither list may grow silently, and a floor that appears must delete its line.
  */
 const NEEDS_FLOOR: readonly string[] = [
-  "tests/unit/apps/cli/repl-orphan-resolution-hellgate.test.ts",
-  "tests/unit/apps/cli/session-cmd-shim-removal-hellgate.test.ts",
-  "tests/unit/audit-ratchet/error-message-canonical-hellgate.test.ts",
-  "tests/unit/cli/cli-knob-readsite-domain-hellgate.test.ts",
-  "tests/unit/cli/terminal-chrome-hellgate.test.ts",
   "tests/unit/identity-mid-session-rebuilder-owner-wire-hellgate.test.ts",
   "tests/unit/kernel/knob-schema-ssot-lock-ratchet.test.ts",
   "tests/unit/memory/cross-session-inject-removed-ratchet.test.ts",
