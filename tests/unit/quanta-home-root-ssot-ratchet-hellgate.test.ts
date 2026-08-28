@@ -23,6 +23,7 @@
 import { describe, expect, test } from "bun:test"
 import { readdirSync, readFileSync, statSync } from "node:fs"
 import { join } from "node:path"
+import { assertScanPopulation } from "./_shared/scan-population"
 
 const SRC = join(import.meta.dir, "..", "..", "src")
 
@@ -78,6 +79,16 @@ const scanRawHomeSites = (srcRoot: string): string[] => {
 }
 
 describe("quanta home root SSOT ratchet", () => {
+  test("ANTI-VACUITY: the walk reaches a real, populated `src/` tree", () => {
+    // An empty walk and a clean tree produce the same verdict here: no
+    // un-owned home-root reads. A count alone would not do — losing one subtree
+    // leaves it high while the offending directory goes unscanned.
+    assertScanPopulation([...walk(SRC)], SRC, {
+      min: 500,
+      collectable: (n) => n.endsWith(".ts") && !n.endsWith(".d.ts") && !n.endsWith(".test.ts"),
+    })
+  })
+
   test('no NEW raw `homedir(), ".quanta"` outside the allowlist', () => {
     const sites = scanRawHomeSites(SRC)
     const offenders = sites.filter((f) => !ALLOWLIST.has(f))

@@ -57,6 +57,7 @@ import { describe, expect, test } from "bun:test"
 import { readdirSync, readFileSync, statSync } from "node:fs"
 import { join, relative } from "node:path"
 import ts from "typescript"
+import { assertScanPopulation } from "./_shared/scan-population"
 
 const REPO_ROOT = join(import.meta.dir, "../..")
 const TOOL_DIR = join(REPO_ROOT, "src", "tool")
@@ -272,6 +273,14 @@ const ALLOWLIST: ReadonlyArray<{
 const ALLOW_BY_FILE = new Map(ALLOWLIST.map((e) => [e.file, e]))
 
 describe("tool NO-THROW contract — static ratchet", () => {
+  test("ANTI-VACUITY: the walk reaches a real, populated `src/tool` tree", () => {
+    // "No offending await" and "no file was read" are the same result.
+    assertScanPopulation(listToolTsFiles(TOOL_DIR), TOOL_DIR, {
+      min: 20,
+      collectable: (n) => n.endsWith(".ts") && !n.endsWith(".d.ts") && !n.includes(".test."),
+    })
+  })
+
   test("no UNLISTED tool has an unguarded injected-port await in its iterator body", () => {
     const findings = scanToolTree()
     const offenders = findings.filter((f) => !ALLOW_BY_FILE.has(f.file))

@@ -20,6 +20,10 @@ import { join, relative } from "node:path"
  * @param opts.collectable  does this filename count? must match the caller's
  *                          own filter, or a subtree of `.md` reads as lost
  * @param opts.skipDirs     directory names the caller's walk deliberately omits
+ * @param opts.topLevelOnly  the walk does NOT recurse. The subtree claim is
+ *                           replaced by its non-recursive equivalent: every
+ *                           collectable file sitting directly in `root` must
+ *                           appear. Same shape, one level.
  */
 export const assertScanPopulation = (
   files: readonly string[],
@@ -28,6 +32,7 @@ export const assertScanPopulation = (
     readonly min?: number
     readonly collectable?: (name: string) => boolean
     readonly skipDirs?: readonly string[]
+    readonly topLevelOnly?: boolean
   } = {},
 ): void => {
   const collectable =
@@ -38,6 +43,18 @@ export const assertScanPopulation = (
   expect(files.length, `the scan of ${root} reached no files at all`).toBeGreaterThanOrEqual(
     opts.min ?? 1,
   )
+
+  if (opts.topLevelOnly === true) {
+    const reachedNames = new Set(files.map((f) => relative(root, f)))
+    const onDiskNames = readdirSync(root, { withFileTypes: true })
+      .filter((e) => e.isFile() && collectable(e.name))
+      .map((e) => e.name)
+    expect(
+      onDiskNames.filter((name) => !reachedNames.has(name)),
+      `these files sit directly in ${root} but the scan did not enumerate them`,
+    ).toEqual([])
+    return
+  }
 
   const holdsCollectable = (dir: string): boolean => {
     for (const entry of readdirSync(dir, { withFileTypes: true })) {

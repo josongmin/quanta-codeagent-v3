@@ -66,6 +66,7 @@ import { describe, expect, test } from "bun:test"
 import { readdirSync, readFileSync, statSync } from "node:fs"
 import { join } from "node:path"
 import ts from "typescript"
+import { assertScanPopulation } from "./_shared/scan-population"
 
 const AGENT_DIR = join(import.meta.dir, "..", "..", "src", "agent")
 
@@ -373,6 +374,19 @@ export const findTopLevelUsage = (
 }
 
 describe("agent module import cycles", () => {
+  test("ANTI-VACUITY: the enumeration reaches the real `src/agent` top level", () => {
+    // This guard reports "no cycles" identically whether the graph is acyclic or
+    // whether `listAgentFiles()` returned nothing — and it HAS been inert before:
+    // its third assertion once visited a set of lines fully disjoint from the
+    // violating ones, 0 of 30. The scan is deliberately non-recursive, so the
+    // floor is too: every `.ts` sitting directly in `src/agent/` must appear.
+    assertScanPopulation(
+      listAgentFiles().map((n) => join(AGENT_DIR, n)),
+      AGENT_DIR,
+      { min: 5, topLevelOnly: true, collectable: (n) => n.endsWith(".ts") },
+    )
+  })
+
   const files = listAgentFiles()
   const fileSet = new Set<string>(files)
   // Build the parsed-imports table once.

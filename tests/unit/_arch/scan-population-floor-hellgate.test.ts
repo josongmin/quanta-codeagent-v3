@@ -66,6 +66,26 @@ describe("population floor", () => {
     }
   })
 
+  test("topLevelOnly: a non-recursive scan that missed a sibling file is red", () => {
+    const root = build()
+    try {
+      writeFileSync(join(root, "a.ts"), "export const a = 1\n")
+      writeFileSync(join(root, "b.ts"), "export const b = 2\n")
+      // A recursive floor would be wrong here — the scan is not supposed to
+      // descend — but "missed one of its own peers" is the same defect.
+      expect(() =>
+        assertScanPopulation([join(root, "a.ts"), join(root, "b.ts")], root, {
+          topLevelOnly: true,
+        }),
+      ).not.toThrow()
+      expect(() =>
+        assertScanPopulation([join(root, "a.ts")], root, { topLevelOnly: true }),
+      ).toThrow(/b\.ts|did not enumerate/)
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
   test("the on-disk probe does not reuse the walk: a walk blind to a subtree still reds", () => {
     const root = build()
     try {

@@ -31,6 +31,7 @@
 import { describe, expect, test } from "bun:test"
 import { readdirSync, readFileSync } from "node:fs"
 import { resolve } from "node:path"
+import { assertScanPopulation } from "./_shared/scan-population"
 
 const REPO_ROOT = resolve(import.meta.dir, "../..")
 
@@ -141,6 +142,21 @@ const fileContents = (relPath: string): string =>
     : readFileSync(resolve(REPO_ROOT, relPath), "utf8")
 
 describe("R3 audit-H — pinned labels survive on every audited catch site", () => {
+  test("ANTI-VACUITY: the loop surface enumeration reaches the real slice", () => {
+    // `loopSurfaceFiles()` swallows a failed `readdirSync` on purpose — the
+    // pre-decomposition tree had no slice dir. That same swallow now hides a
+    // rename or a permission error, and the ratchet would read the shim alone
+    // and report every pinned label intact over a surface that lost its slice.
+    // So the slice is asserted present and fully enumerated, independently.
+    const dir = resolve(REPO_ROOT, "src/agent/loop")
+    const slice = loopSurfaceFiles().filter((f) => f.startsWith(`${dir}/`))
+    assertScanPopulation(slice, dir, {
+      min: 5,
+      topLevelOnly: true,
+      collectable: (n) => n.endsWith(".ts"),
+    })
+  })
+
   for (const { file, labels } of PINNED_LABELS) {
     for (const label of labels) {
       test(`${file} still emits logger.warn(\`${label}: ...\`)`, () => {
