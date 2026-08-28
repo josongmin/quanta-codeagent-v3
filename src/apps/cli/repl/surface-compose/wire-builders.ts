@@ -3,6 +3,7 @@ import type { StickyModelStore } from "@/agent/sticky-model"
 import { type ModelCandidate, type Provider, type StreamEvent, tryCreateLLM } from "@/llm"
 import { PATCH_SENTINELS } from "@/patch/types"
 import { InMemoryRadarStore, JsonlFileRadarStore, type RadarStore } from "@/radar"
+import { decorateSwappableModelPort } from "@/runner/assemble"
 import {
   loadSessionById,
   type SavedSession,
@@ -54,7 +55,25 @@ export const buildRadarStore = (env: NodeJS.ProcessEnv): RadarStore | undefined 
  *  via {@link tryCreateLLM}; a candidate whose provider key is missing is
  *  dropped (null) rather than crashing the surface. Returns `[]` when the env
  *  knob is unset/empty ⇒ the slot is omitted ⇒ `/retry-with` prints
- *  "no model candidates configured" (default-OFF). */
+ *  "no model candidates configured" (default-OFF).
+ *
+ *  MR-07 — every port is DECORATED ({@link decorateSwappableModelPort}), not a
+ *  bare adapter. These candidates are no longer `/retry-with`-only: `core-state`
+ *  hands them to `buildModelCatalogWire` as `seeded`, whose ports are taken
+ *  VERBATIM (the catalog only mints its own for probe-discovered ids). So a
+ *  `/model` pick of a `QUANTA_RETRY_MODELS` id used to swap the whole turn onto an
+ *  UNDECORATED adapter — no bounded retry (a transient 429 became a hard turn
+ *  failure), no empty-stream circuit breaker (the silent token-burn guard), no
+ *  progress heartbeat — while a probe-discovered pick of the identical shape got
+ *  all three from the catalog's `buildPort`. That is the hole in INVARIANT B
+ *  (`model-catalog.ts`); routing through the SAME helper the catalog's `buildPort`
+ *  uses closes it at the one place these ports are minted.
+ *
+ *  No `signal` is passed: this builder's signature takes none (the surface's
+ *  teardown signal is not in scope here), and `decorateSwappableModelPort` treats
+ *  it as optional — the wrappers are applied identically, only `RetryingLLM`'s
+ *  backoff loses early-abort-on-teardown. Ordering ("current model first, dedup")
+ *  and the null-port drop are unchanged. */
 export const buildRetryCandidates = (
   env: NodeJS.ProcessEnv,
   provider: Provider,
@@ -71,8 +90,8 @@ export const buildRetryCandidates = (
   const ordered = [currentModelId, ...ids.filter((id) => id !== currentModelId)]
   const out: ModelCandidate[] = []
   for (const id of ordered) {
-    const port = tryCreateLLM(provider, { model: id }, env)
-    if (port !== null) out.push({ id, port })
+    const inner = tryCreateLLM(provider, { model: id }, env)
+    if (inner !== null) out.push({ id, port: decorateSwappableModelPort({ inner }) })
   }
   return out
 }

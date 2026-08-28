@@ -18,7 +18,13 @@ import { existsSync } from "node:fs"
 import { mkdir, mkdtemp, rm } from "node:fs/promises"
 import { join } from "node:path"
 import { BUDGET_PRESETS } from "@/agent"
-import { DEFAULT_MODEL, type LLMPort, type Provider, pickProvider, tryCreateLLM } from "@/llm"
+import {
+  type BootSelection,
+  type LLMPort,
+  type Provider,
+  resolveBootSelection,
+  tryCreateLLM,
+} from "@/llm"
 import {
   loadSelectedInstances,
   mapWithConcurrency,
@@ -569,6 +575,29 @@ const runDatasetMode = async (
   await finalizeObserve(obs, results)
 }
 
+/**
+ * MR-01 — bench's BOOT provider + model, through the ONE authority (`@/llm`
+ * `resolveBootSelection`): `--model` (argv) > `QUANTA_MODEL` > canonical
+ * `DEFAULT_MODEL[provider]`.
+ *
+ * NO behaviour change for bench — this precedence is exactly what the
+ * hand-rolled `argValue("--model") ?? process.env.QUANTA_MODEL ??
+ * DEFAULT_MODEL[provider]` chain did — with two honest edges tightened: an
+ * empty / whitespace-only `--model` or `QUANTA_MODEL` is now UNSET (it used to
+ * boot a port with a literal `""` model id), and the slug table is no longer
+ * re-read here.
+ *
+ * Exported so the MR-01 producer hellgate drives the REAL line; `resolveLLM`
+ * calls exactly this and nothing else resolves a bench boot model.
+ */
+export const resolveBenchBootSelection = (): BootSelection => {
+  const modelArg = argValue("--model")
+  return resolveBootSelection({
+    env: process.env,
+    ...(modelArg !== undefined ? { modelArg } : {}),
+  })
+}
+
 /** Resolve provider/model/LLM; exits 0 with guidance when the key is absent
  *  (shared by both modes). `noun` tailors the message. The exit is routed
  *  through the injectable `exitFn`; in production this is `process.exit`
@@ -582,12 +611,9 @@ const resolveLLM = (
   llm: LLMPort
   freshLlm: (ctx?: { instanceId?: string; runId?: string }) => LLMPort
 } | null => {
-  const provider = pickProvider(process.env)
-  // `--model` > `QUANTA_MODEL` > canonical DEFAULT_MODEL[provider] (the factory
-  // fills the default when `model` is omitted). Provider pick, key lookup, and
-  // OPENAI_BASE_URL handling all live in the shared factory now (OCP/DIP).
-  const modelArg = argValue("--model") ?? process.env.QUANTA_MODEL
-  const model = modelArg ?? DEFAULT_MODEL[provider]
+  const boot = resolveBenchBootSelection()
+  const provider = boot.provider
+  const model = boot.modelId
   const trajectory = resolveBenchTrajectoryMode()
   if (trajectory.kind === "replay" && trajectory.onMiss === "throw") {
     // `freshLlm` builds an INDEPENDENT replay port (fresh `used` set) per call —
@@ -612,7 +638,11 @@ const resolveLLM = (
   const llm = tryCreateLLM(
     provider,
     {
-      ...(modelArg !== undefined ? { model: modelArg } : {}),
+      // MR-01 — always pass the RESOLVED id. The prior `...(modelArg !== undefined
+      // ? {model: modelArg} : {})` spread relied on the factory re-deriving the
+      // same `DEFAULT_MODEL[provider]` value the line above had already computed
+      // — two derivations of one answer. Same value, one authority.
+      model,
       reasoningSummary,
       reasoningSummaryDetail,
     },

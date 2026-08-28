@@ -35,8 +35,15 @@ export const forwardPortIdentity = (inner: LLMPort): Omit<LLMPort, "stream"> => 
     ...(inner.surfaceId !== undefined ? { surfaceId: inner.surfaceId } : {}),
     ...(inner.transportId !== undefined ? { transportId: inner.transportId } : {}),
     ...(inner.authMode !== undefined ? { authMode: inner.authMode } : {}),
-    // `.call(inner)` — see the header: the adapters' `listModels` is a class
+    // `.call(inner, …)` — see the header: the adapters' `listModels` is a class
     // method reading `this`, so the receiver must be re-bound, not copied.
-    ...(list !== undefined ? { listModels: async () => await list.call(inner) } : {}),
+    // MR-07: the `signal` ARGUMENT must ride through too. A zero-arg closure
+    // still type-checks against `(signal?) => …` (fewer params is assignable),
+    // so dropping it here would compile and silently make every probe
+    // uncancellable behind every decorator — the `/model` and `GET
+    // /readout/model` wedge this campaign closed.
+    ...(list !== undefined
+      ? { listModels: async (signal?: AbortSignal) => await list.call(inner, signal) }
+      : {}),
   }
 }

@@ -198,10 +198,17 @@ export class AnthropicAdapter implements LLMPort {
    * contract; callers treat a rejection as "no catalog" and keep their seeded
    * candidates. No adapter-level cache: the CLI's catalog wire memoizes the
    * probe for the session, so this runs once per session.
+   *
+   * MR-07 — `signal` goes to the SDK request itself (`RequestOptions.signal`), so
+   * an aborted probe tears the HTTP request down instead of merely releasing the
+   * awaiting caller. The SDK rejects with an abort error, which
+   * `LLMError.fromSdkError` classifies and the caller degrades to "no catalog".
+   * `undefined` is an accepted value for the SDK's `signal` field, so an
+   * unsignalled probe is byte-identical to the previous call.
    */
-  async listModels(): Promise<readonly string[]> {
+  async listModels(signal?: AbortSignal): Promise<readonly string[]> {
     try {
-      const page = await this.client.models.list({ limit: 100 })
+      const page = await this.client.models.list({ limit: 100 }, { signal })
       return page.data.map((m) => m.id)
     } catch (e) {
       throw LLMError.fromSdkError("anthropic", e)

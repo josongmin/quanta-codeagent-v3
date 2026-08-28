@@ -397,10 +397,15 @@ export class OpenAIAdapter implements LLMPort {
    * (`LLMPort.listModels`); the CALLER degrades — `model-catalog.ts#probeCatalog`
    * treats a rejection as "no catalog" and keeps its seeded candidates. No
    * adapter-level cache: callers memoize the probe for the session.
+   *
+   * MR-07 — `signal` is handed to the SDK request (`RequestOptions.signal`), so an
+   * aborted probe cancels the real HTTP request rather than orphaning it. The SDK
+   * rejects; `LLMError.fromSdkError` types it and the caller degrades. `undefined`
+   * is an accepted value for that field ⇒ an unsignalled probe is unchanged.
    */
-  async listModels(): Promise<readonly string[]> {
+  async listModels(signal?: AbortSignal): Promise<readonly string[]> {
     try {
-      const page = await this.client.models.list()
+      const page = await this.client.models.list({ signal })
       return page.data.map((m) => m.id)
     } catch (e) {
       throw LLMError.fromSdkError("openai", e)

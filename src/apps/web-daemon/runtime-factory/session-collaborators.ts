@@ -53,7 +53,7 @@ import {
   buildSubagentConfigCore,
   parseEnvFlag,
 } from "@/runner/assemble"
-import { gateOn, logger } from "@/shared"
+import { gateOn, logger, summarizeUntrustedId } from "@/shared"
 import { TaskRegistry } from "@/subagent"
 import type { Tool } from "@/tool"
 import { askUserTool } from "@/tool/ask-user"
@@ -377,10 +377,27 @@ export const mintInboundPorts = (
         // the daemon must SAY what it did with a control request.
         observe: (effect) => {
           if (effect.kind === "rejected") {
-            logger.warn(`web control-request rejected: ${effect.value}`)
+            // MR-08 — `value` on a rejection is the planner's reason, and that
+            // reason EMBEDS the client's raw string (`model "<…>" not
+            // recognized`). `logger.warn` strips control characters but caps
+            // nothing, and a client may queue MAX_PENDING_CONTROL_REQUESTS (64)
+            // frames, so an unbounded id was an unbounded write into the
+            // operator's log — over the network, unauthenticated by this port.
+            // The operator needs to IDENTIFY the id, not receive it: prefix +
+            // true length + a digest that correlates repeats.
+            logger.warn(`web control-request rejected: ${summarizeUntrustedId(effect.value)}`)
             return
           }
-          logger.info(`web control-request applied: ${effect.kind}=${effect.value}`)
+          // The APPLIED axes are not uniformly trusted either. `model` cleared the
+          // catalog allowlist and `usage` is this host's own snapshot, so both are
+          // echoed whole (an operator debugging a model switch needs the exact
+          // slug, and a truncated usage JSON is useless). `thinking` is NOT gated
+          // in this composition — `thinkingLevels` is never supplied, and the
+          // planner treats an absent allowlist as "the host opted out of gating
+          // this axis" — so its value is still whatever the client sent.
+          const value =
+            effect.kind === "thinking" ? summarizeUntrustedId(effect.value) : effect.value
+          logger.info(`web control-request applied: ${effect.kind}=${value}`)
         },
         ...(modelSwitch !== undefined
           ? { applyModel: modelSwitch.applyModel, modelAllowlist: () => modelSwitch.ids() }

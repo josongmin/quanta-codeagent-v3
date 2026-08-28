@@ -149,6 +149,12 @@ const DRIVEN = [
   "OPENAI_API_KEY",
   "ANTHROPIC_API_KEY",
   "QUANTA_PROVIDER",
+  // MR-01 — `buildBaseFromArgs` now resolves its boot model through the ONE
+  // authority (`resolveBootSelection`), which READS `QUANTA_MODEL`. Before that
+  // this root ignored the key entirely, so it was safe to leave ambient; now an
+  // exported `QUANTA_MODEL` in the developer's shell would change the `llm ::`
+  // fingerprint. Stripped like every other driven knob.
+  "QUANTA_MODEL",
   "QUANTA_IDENTITY",
   "QUANTA_IDENTITY_MODE",
   "QUANTA_MCP_CAPS",

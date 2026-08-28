@@ -32,6 +32,8 @@
  * live remote-control channel into a running one.
  */
 
+import { errMessage } from "@/shared"
+import { StickyModelWriteError } from "./fs-backed-store"
 import {
   readStickyModelFrom,
   type StickyModelKey,
@@ -40,6 +42,36 @@ import {
   type StickyModelStore,
   stickyModelKeyOf,
 } from "./port"
+
+/**
+ * The path named in a {@link StickyModelWriteError} minted for an inner store
+ * that THREW. The decorator deliberately does not know where its inner store
+ * persists — it wraps a port, not a file — so the error names the seam instead of
+ * inventing a path it cannot verify.
+ */
+const INNER_STORE_SEAM = "<inner sticky-model store>"
+
+/**
+ * Convert an inner store that BROKE ITS CONTRACT into the typed result the port
+ * promises (MR-08).
+ *
+ * `port.ts` is explicit: "every store method returns Promises that RESOLVE with a
+ * typed result rather than reject". This decorator honoured that only as far as
+ * its inner store did — an inner `set`/`unset` that THREW propagated straight out
+ * of the returned promise, so a caller written against the documented no-throw
+ * surface (`const res = await store.set(...); if (!res.ok) …`) got an unhandled
+ * rejection instead of an `ok:false` branch it already had code for.
+ *
+ * The fs impl never throws today, so this is INERT against the production wiring
+ * — which is precisely the argument for pinning it: the contract is what the
+ * decorator's other consumers (test doubles, the SDK's in-memory host, whatever
+ * store the routing lane wires next) are written against, and "inert until
+ * somebody swaps the impl" is how a contract violation ships unnoticed.
+ */
+const asTypedFailure = (cause: unknown): StickyModelSetResult => ({
+  ok: false,
+  error: new StickyModelWriteError(INNER_STORE_SEAM, errMessage(cause), { cause }),
+})
 
 export const sessionScopedStickyModelStore = (args: {
   /** The durable store writes go through to (the fs-backed one in production). */
@@ -65,6 +97,13 @@ export const sessionScopedStickyModelStore = (args: {
    *
    * ORDERING, not locking: a rejected write still leaves the cell untouched, and a
    * throwing inner store cannot wedge the chain (the tail is reset either way).
+   *
+   * MR-08: the `work` handed to `serialized` no longer throws at all — `set`/
+   * `unset` convert an inner throw into a typed `ok:false` before returning — so
+   * the `.catch` on the tail and the `then(work, work)` two-arg form are now
+   * belt-and-braces rather than the only thing keeping the chain alive. They stay:
+   * the chain must survive a future member that forgets, and a wedged chain would
+   * silently hang every later `/model` in the session.
    */
   let writeChain: Promise<unknown> = Promise.resolve()
   const serialized = async <T>(work: () => Promise<T>): Promise<T> => {
@@ -79,7 +118,15 @@ export const sessionScopedStickyModelStore = (args: {
       input: StickyModelKey & { readonly modelId: string },
     ): Promise<StickyModelSetResult> => {
       return await serialized(async () => {
-        const res = await args.inner.set(input)
+        let res: StickyModelSetResult
+        try {
+          res = await args.inner.set(input)
+        } catch (cause: unknown) {
+          // A THROWN inner failure is the same event as a returned `ok:false` —
+          // the pick did not become durable — so it takes the same exit, and the
+          // cell stays untouched below for the same reason.
+          return asTypedFailure(cause)
+        }
         // Only reflect a pick the durable write ACCEPTED — otherwise this session
         // would run a model the next one has no record of, and the displays (which
         // read this same cell through the adapter) would claim a phantom.
@@ -95,7 +142,12 @@ export const sessionScopedStickyModelStore = (args: {
       // session would silently resurrect it — the "did my clear work?" ambiguity
       // this whole decorator exists to avoid.
       return await serialized(async () => {
-        const res = await args.inner.unset(input)
+        let res: StickyModelSetResult
+        try {
+          res = await args.inner.unset(input)
+        } catch (cause: unknown) {
+          return asTypedFailure(cause)
+        }
         if (res.ok) cell.delete(stickyModelKeyOf(input))
         return res
       })

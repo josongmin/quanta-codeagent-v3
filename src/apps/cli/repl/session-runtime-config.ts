@@ -1,13 +1,11 @@
+import { type Provider, resolveBootSelection } from "@/llm"
 import type { PermissionMode, ReviewerSandboxProfile } from "@/permission"
 import {
   argvImages,
   argvPrompt,
-  DEFAULT_MODEL,
   env,
   newSessionFlag,
   observeDir,
-  type Provider,
-  pickProvider,
   playbookTriggerFlag,
   resolveMcpConfigPath,
   titleFlag,
@@ -55,7 +53,12 @@ export interface SessionRuntimeConfig {
 /** Consolidate the session surface's process/env/argv reads into one typed
  *  config object so bootstrap and host wiring consume plain data. */
 export const readSessionRuntimeConfig = (): SessionRuntimeConfig => {
-  const provider = pickProvider()
+  // MR-01 — ONE authority for provider + boot model + "did the operator pin it"
+  // (`@/llm` `resolveBootSelection`). The interactive CLI has NO `--model` flag
+  // (MEASURED: `grep '"--model"' src/apps/cli` hits only `serve --stdio`), so no
+  // `modelArg` is threaded here — `QUANTA_MODEL` IS this surface's pin surface
+  // and the SSOT reads it off the env view.
+  const boot = resolveBootSelection({ env: process.env })
   // jun-10 — normalize the positional prompt "" → undefined HERE (the SSOT
   // seam): `argvPrompt()` returns the joined positionals, which is `""` on a
   // bare `quanta` launch, but the field is typed `string | undefined` and the
@@ -70,13 +73,17 @@ export const readSessionRuntimeConfig = (): SessionRuntimeConfig => {
     stderrIsTTY: process.stderr.isTTY,
     cwd: process.cwd(),
     homeDir: process.env.HOME ?? "",
-    provider,
-    model: env("QUANTA_MODEL", DEFAULT_MODEL[provider]),
+    provider: boot.provider,
+    model: boot.modelId,
     // aug-28 — did the OPERATOR pin the model for THIS invocation? A persisted
     // `/model` pick must not silently override an explicit pin: `QUANTA_MODEL=x
     // quanta "…"` in CI, cron or a git hook otherwise ran whatever a human last
     // picked interactively, with no display (the one-shot path paints no banner).
-    modelPinnedExplicitly: (process.env.QUANTA_MODEL ?? "").trim().length > 0,
+    // MR-01 — this used to be a SECOND, separately-spelled `QUANTA_MODEL` read
+    // that disagreed with the line above it: `QUANTA_MODEL=" "` booted a port
+    // whose model id was literally `" "` while `pinned` said false. Both now
+    // come from the one resolution.
+    modelPinnedExplicitly: boot.pinned,
     mode: env("QUANTA_PERMISSION", "default") as PermissionMode,
     sandboxProfile: parseCliReviewerSandboxProfile(process.env.QUANTA_SANDBOX),
     maxTurns: Number(env("QUANTA_MAX_TURNS", "40")),

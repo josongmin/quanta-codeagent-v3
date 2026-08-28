@@ -329,11 +329,19 @@ export class ChatGPTOAuthAdapter implements LLMPort {
    *  Without this probe, we'd hardcode a slug the backend rejects for the
    *  ChatGPT-account auth path — the exact RCA of the
    *  "'gpt-5-codex' model is not supported when using Codex with a ChatGPT
-   *  account" 400. */
+   *  account" 400.
+   *
+   *  MR-07 — `signal` (when the caller has one) rides on the `RequestInit`, so an
+   *  aborted `listModels` probe cancels the REAL `/codex/models` request instead
+   *  of leaving it holding the socket. Only the NETWORK path is cancellable: a
+   *  cache hit returns before the signal is ever consulted (correct — there is no
+   *  request to cancel), and an aborted fetch throws, so nothing partial is ever
+   *  memoized into `modelCatalogCache`. */
   private async fetchModelCatalog(
     baseURL: string,
     token: TokenRecord,
     cfg: ReturnType<typeof resolveOAuthConfig>,
+    signal?: AbortSignal,
   ): Promise<ModelCatalog> {
     const key = token.account_id ?? "default"
     const cached = modelCatalogCache.get(key)
@@ -350,7 +358,10 @@ export class ChatGPTOAuthAdapter implements LLMPort {
 
     const res = await this.fetchImpl(
       `${baseURL}${MODELS_PATH}?client_version=${encodeURIComponent(MODELS_CLIENT_VERSION)}`,
-      { method: "GET", headers },
+      // Conditional spread: `RequestInit.signal` is `AbortSignal | null` (no
+      // `undefined`) under `exactOptionalPropertyTypes`, and the unsignalled
+      // stream-path call must send a byte-identical init.
+      { method: "GET", headers, ...(signal !== undefined ? { signal } : {}) },
     )
     if (!res.ok) {
       const text = await res.text().catch(() => "")
@@ -406,12 +417,20 @@ export class ChatGPTOAuthAdapter implements LLMPort {
    *
    * Throws on auth/network failure (the shared adapter contract); callers treat
    * a rejection as "no catalog" and keep their seeded candidates.
+   *
+   * MR-07 — `signal` is threaded to the `/codex/models` fetch, so an aborted probe
+   * cancels the live request. NOT threaded into `ensureFreshToken()`: that path is
+   * a disk read plus (only on an expired token) the OAuth refresh endpoint, which
+   * has its own credential-rotation semantics — cancelling a refresh mid-flight
+   * risks tearing a token the whole session depends on, and the catalog probe is
+   * not the right owner of that decision. So the deadline bounds the catalog GET;
+   * a hung token REFRESH is out of scope here.
    */
-  async listModels(): Promise<readonly string[]> {
+  async listModels(signal?: AbortSignal): Promise<readonly string[]> {
     const token = await this.ensureFreshToken()
     const cfg = resolveOAuthConfig(this.env)
     const baseURL = cfg.apiBase.endsWith("/codex") ? cfg.apiBase : `${cfg.apiBase}/codex`
-    const catalog = await this.fetchModelCatalog(baseURL, token, cfg)
+    const catalog = await this.fetchModelCatalog(baseURL, token, cfg, signal)
     return catalog.models.map((m) => m.model)
   }
 

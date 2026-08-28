@@ -33,12 +33,14 @@
 import { type AgentMode, resolveAgentMode } from "@/agent"
 import {
   defaultStickyModelPath,
+  isStickyModelKeyInScope,
+  parseStickyModelStorageKey,
   readStickyModelSnapshotSync,
   stickyModelKeyOf,
   stickyModelPathFrom,
 } from "@/agent/sticky-model"
 import { isPlausibleModelSlug } from "@/llm/model-catalog"
-import { logger } from "@/shared"
+import { logger, summarizeUntrustedId } from "@/shared"
 
 /**
  * The sticky-model file this surface reads AND writes — resolved from the
@@ -106,6 +108,20 @@ export interface StickyModelBootView {
  *
  * Returns only the entries that pass both, so ONE filter feeds the store seed, the
  * candidate-port seed and the current-mode resolution.
+ *
+ * MR-08 — the KEY is now VETTED, not merely classified. The two string tests this
+ * used to run (`key.includes(":")`, `key.startsWith(`${provider}:`)`) answer
+ * "whose is it?" and never "is it a key at all?", so a hostile KEY sailed through
+ * on the strength of a plausible VALUE: a file holding
+ * `{"anthropic:<ESC>[2J<ESC>]0;pwned<BEL>default": "claude-sonnet-4-6"}` seeded
+ * the session cell and `/sticky-model` printed it raw, clearing the operator's
+ * screen and setting the terminal title. Key length was unbounded too. The scope
+ * question is now answered by `parseStickyModelStorageKey` +
+ * `isStickyModelKeyInScope` (`@/agent/sticky-model`), which decide it against the
+ * CLOSED mode/provider unions — so the semantics for every VALID key are exactly
+ * what they were (a scoped key is in scope only for its own provider, a legacy
+ * bare key for any), and everything else is dropped with a warn that names a
+ * digest rather than echoing the payload.
  */
 export const vetPersistedPicks = (
   snapshot: Readonly<Record<string, string>>,
@@ -113,12 +129,25 @@ export const vetPersistedPicks = (
 ): Readonly<Record<string, string>> => {
   const out: Record<string, string> = {}
   for (const [key, id] of Object.entries(snapshot)) {
-    const scoped = key.includes(":")
-    if (scoped && (provider === undefined || !key.startsWith(`${provider}:`))) continue
+    const parsed = parseStickyModelStorageKey(key)
+    if (parsed.kind === "invalid") {
+      // NOT `continue`-in-silence: an unparseable key means SOMETHING wrote this
+      // file that this store did not, and the operator is the only one who can act
+      // on that. The raw key is deliberately NOT echoed — it is the attack payload
+      // (see the codec's header: a key carrying ANSI/OSC + a newline used to reach
+      // `/sticky-model`'s listing verbatim), so the warn carries a bounded,
+      // sanitized digest instead.
+      logger.warn(
+        `sticky-model: ignoring an unparseable persisted key ${summarizeUntrustedId(key)} — ` +
+          `${parsed.reason}`,
+      )
+      continue
+    }
+    if (!isStickyModelKeyInScope(parsed, provider)) continue
     if (!isPlausibleModelSlug(id)) {
       logger.warn(
-        `sticky-model: ignoring an implausible persisted model id at key "${key}" ` +
-          `(${id.length} chars) — it will not seed this session`,
+        `sticky-model: ignoring an implausible persisted model id at key ` +
+          `${summarizeUntrustedId(key)} (${id.length} chars) — it will not seed this session`,
       )
       continue
     }

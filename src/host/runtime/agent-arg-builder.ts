@@ -28,11 +28,15 @@ import {
 } from "@/agent/tool-profile"
 import type { AgentArgs, IdentityModeToken, ToolProfileToken } from "@/host/runtime/agent-args"
 import type { AssembleRequest } from "@/host/runtime/agent-config-assembler"
-import { type LLMPort, pickProvider, tryCreateLLM } from "@/llm"
+import { type LLMPort, resolveBootSelection, tryCreateLLM } from "@/llm"
 import { type CapabilityNegotiator, defaultNegotiator, fullNegotiator } from "@/mcp"
 import { metrics } from "@/observability"
 import { buildAutorunEligibility } from "@/permission"
-import { buildSearchPipelineFromEnv, wireInteractiveKnobs } from "@/runner/assemble"
+import {
+  buildSearchPipelineFromEnv,
+  decorateSwappableModelPort,
+  wireInteractiveKnobs,
+} from "@/runner/assemble"
 import type { Surface } from "@/runner/knobs"
 import {
   type LocalEnvSelection,
@@ -643,17 +647,26 @@ export const buildBaseFromArgs = (
   // partial so prompt/search/artifact wires all agree on the same workspace.
   const cwd = p.cwd ?? process.cwd()
   // QUANTA_PROVIDER drives the factory pick; an explicit `--provider` flag must
-  // still win, so seed it into the env view the factory reads.
+  // still win, so seed it into the env view the factory reads. The seed stays
+  // (the search wire / registry / slot resolvers all read THIS env view); the
+  // MR-01 call below ALSO passes `providerArg` so the SSOT call is self-
+  // describing — the two agree by construction (same seed, same key).
   const env =
     p.provider !== undefined ? { ...process.env, QUANTA_PROVIDER: p.provider } : process.env
-  const provider = pickProvider(env)
-  // model omitted ⇒ factory fills canonical DEFAULT_MODEL[provider].
-  const llm: LLMPort | null = tryCreateLLM(
-    provider,
-    p.model !== undefined ? { model: p.model } : {},
+  // MR-01 — ONE authority for provider + boot model (`@/llm`
+  // `resolveBootSelection`): `--model` > `QUANTA_MODEL` > canonical
+  // DEFAULT_MODEL[provider]. INTENDED BEHAVIOUR CHANGE: this root previously
+  // NEVER read `QUANTA_MODEL`, so `QUANTA_MODEL=x quanta -p "…"` booted the
+  // provider default while the very same variable was authoritative in the
+  // interactive REPL and in bench. It is honored here now.
+  const boot = resolveBootSelection({
     env,
-  )
-  if (llm === null) {
+    ...(p.provider !== undefined ? { providerArg: p.provider } : {}),
+    ...(p.model !== undefined ? { modelArg: p.model } : {}),
+  })
+  const provider = boot.provider
+  const bareLlm: LLMPort | null = tryCreateLLM(provider, { model: boot.modelId }, env)
+  if (bareLlm === null) {
     // ADR-0303 — this is host-layer launcher composition, NOT a surface, so it
     // must NOT own `process.exit` (terminal-defaults invariant). Throw a typed
     // error carrying the POSIX exit code; the surface entry (apps/agent `runMain`
@@ -662,6 +675,21 @@ export const buildBaseFromArgs = (
       `no API key for provider '${provider}'. Set OPENAI_API_KEY or ANTHROPIC_API_KEY (or --provider <other>).`,
     )
   }
+  // MR-E5 — the BOOT port carries the same always-on safety net a SWAPPED model
+  // already had on this very root (`model-switch-wire.ts` decorates every
+  // candidate port). Without this the irony was exact: the model you switched TO
+  // kept bounded retry / the empty-stream breaker / the progress heartbeat, while
+  // the DEFAULT model ran BARE — a transient 429 was a hard turn failure on
+  // `quanta -p`. `decorateSwappableModelPort` (not `composeLLMCore`) is the right
+  // wrapper here: `composeLLMCore` also wires `FallbackLLM` + `withLiveUsage`,
+  // which need fallback model ids and a TTY notion this host-layer root has
+  // neither of. Identity is preserved through the wrapper
+  // (`forwardPortIdentity`), so `model` / `provider` / `contextWindowKey` /
+  // `listModels` still forward to every downstream slot.
+  const llm: LLMPort = decorateSwappableModelPort({
+    inner: bareLlm,
+    ...(signal !== undefined ? { signal } : {}),
+  })
   // Minimal stream — error events surface via the shared logger so a wrapper
   // failure is diagnosable even when a runner doesn't replace the stream (the
   // host layer must not write `process.stderr` directly — terminal ownership is

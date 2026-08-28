@@ -36,7 +36,7 @@ import type { SessionBootstrapDeps, SessionRuntimeConfigShape } from "@/host/boo
 import { resolveGatedObjectiveAuthority } from "@/host/runtime/objective-store-wire"
 import { createSessionStdioTransport } from "@/ipc/session"
 import type { ImageBlock, LLMPort, Message } from "@/llm"
-import { DEFAULT_MODEL, pickProvider, tryCreateLLM } from "@/llm"
+import { type BootSelection, resolveBootSelection, tryCreateLLM } from "@/llm"
 import {
   type ActionAssessment,
   type ApprovalDecision,
@@ -209,6 +209,27 @@ interface ServeStdioArgs {
   readonly model: string | undefined
   readonly permissionMode: PermissionMode
 }
+
+/**
+ * MR-01 — the served session's BOOT provider + model, through the ONE authority.
+ *
+ * INTENDED BEHAVIOUR CHANGE: `--model` was previously an ABSOLUTE pin and
+ * `QUANTA_MODEL` was ignored on this surface. It is now the documented middle
+ * rung — `--model` > `QUANTA_MODEL` > canonical `DEFAULT_MODEL[provider]` —
+ * matching the REPL, headless, web and bench roots. `--model` still wins over
+ * the env, so no existing `serve --stdio --model <id>` invocation changes.
+ *
+ * Exported so the MR-01 producer hellgate drives the REAL line (`serveOverStdio`
+ * calls exactly this; no other boot-model resolution exists on this surface).
+ */
+export const resolveServeStdioBoot = (
+  env: Record<string, string | undefined>,
+  args: { readonly model: string | undefined },
+): BootSelection =>
+  resolveBootSelection({
+    env,
+    ...(args.model !== undefined ? { modelArg: args.model } : {}),
+  })
 
 /** Read a `--flag <value>` pair from argv. Returns undefined when absent. */
 const flagValue = (argv: readonly string[], flag: string): string | undefined => {
@@ -419,9 +440,9 @@ const serveOverStdio = async (io: ServeStdioCmdIo, args: ServeStdioArgs): Promis
   // path above.
   const { openHeadlessRuntimeSession, RecordingStream } = await import("@/apps/headless")
 
-  const provider = pickProvider(process.env)
-  // `--model` > canonical DEFAULT_MODEL[provider] (mirrors the bench resolver).
-  const model = args.model ?? DEFAULT_MODEL[provider]
+  const boot = resolveServeStdioBoot(process.env, args)
+  const provider = boot.provider
+  const model = boot.modelId
   // `tryCreateLLM` returns null on a MISSING API key (never throws). NO-THROW
   // boundary: surface on stderr (NEVER stdout — the protocol channel) + exit 64.
   const llm = tryCreateLLM(provider, { model }, process.env)

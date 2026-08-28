@@ -41,6 +41,8 @@
  *     whitelisting at the alerting layer, not sanitize.
  */
 
+import { sliceWholeChars } from "./slice-whole-chars"
+
 // biome-ignore lint/suspicious/noControlCharactersInRegex: the sanitizer deliberately matches OSC/DCS/APC escapes to strip them.
 const ANSI_OSC_DCS_APC_RE = /\u001b\][\s\S]*?(?:\u0007|\u001b\\)|\u001b[PX^_][\s\S]*?\u001b\\/g
 // biome-ignore lint/suspicious/noControlCharactersInRegex: deliberately matches CSI escapes to strip them.
@@ -89,3 +91,65 @@ export const sanitizeLogText = (s: string): string =>
  *  duplicated in @/agent/subagent-mailbox/peer-inbox.ts + @/tool/subagent-mailbox,
  *  two slices that cannot cross-import, so @/shared is the only legal home). */
 export const escapeBodyForLine = (body: string): string => body.replace(/\r\n|\r|\n/g, "\\n")
+
+/**
+ * Default number of leading characters of an untrusted identifier that
+ * {@link summarizeUntrustedId} echoes. Long enough that an operator recognizes
+ * the model slug / storage key they just typed, short enough that a hostile
+ * value cannot use the log as a delivery channel for a payload.
+ */
+export const UNTRUSTED_ID_LOG_PREFIX_LENGTH = 24
+
+/**
+ * Non-cryptographic 32-bit FNV-1a digest, rendered as 8 lowercase hex chars.
+ *
+ * Its ONLY job is correlation: two log lines carrying the same digest name the
+ * same rejected id, so an operator can tell "the client is retrying one bad
+ * value" apart from "the client is spraying". It is deliberately NOT a crypto
+ * hash — this module's header promises a pure, dependency-free sanitize layer,
+ * and pulling `node:crypto` in for an operator-visible correlation tag would buy
+ * collision resistance nobody here relies on. Never use it for anything that
+ * needs to be unguessable.
+ */
+const fnv1a32Hex = (s: string): string => {
+  let h = 0x811c9dc5
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i) & 0xff
+    // The FNV prime, 16777619. `Math.imul` keeps the product in int32 instead
+    // of the float rounding a plain `h * 0x01000193` would introduce past 2^53.
+    h = Math.imul(h, 0x01000193) >>> 0
+  }
+  return h.toString(16).padStart(8, "0")
+}
+
+/**
+ * Render an UNTRUSTED identifier (a model slug from a network client, a storage
+ * key from a file any local process can write) for a log line.
+ *
+ * WHY THIS EXISTS. {@link sanitizeLogText} already neutralizes the FORGE vectors
+ * — a hostile id cannot inject a line, clear the screen or set the terminal
+ * title. What it does not do is bound LENGTH. The measured shape was the web
+ * daemon's `logger.warn(`web control-request rejected: ${effect.value}`)`, where
+ * `value` is the planner's `model "<RAW CLIENT STRING>" not recognized`: a client
+ * can queue up to `MAX_PENDING_CONTROL_REQUESTS` (64) frames, each carrying an
+ * arbitrarily long model string, and every one of them landed in the operator's
+ * log verbatim. The operator needs to IDENTIFY the offending id, not to receive
+ * it — so the echo is a sanitized prefix, the true length, and a digest that
+ * correlates repeats.
+ *
+ * The reported length is that of the RAW input, not of the sanitized prefix:
+ * "we dropped 900 000 characters" is the operationally interesting fact, and
+ * quoting the post-strip length would understate an escape-heavy payload.
+ *
+ * The prefix is cut with {@link sliceWholeChars} so the truncation itself cannot
+ * introduce a lone surrogate.
+ */
+export const summarizeUntrustedId = (
+  raw: string,
+  prefixLength: number = UNTRUSTED_ID_LOG_PREFIX_LENGTH,
+): string => {
+  const safe = sanitizeLogText(raw)
+  const head = sliceWholeChars(safe, prefixLength)
+  const elided = head.length < safe.length ? "…" : ""
+  return `"${head}${elided}" (${raw.length} chars, fnv1a:${fnv1a32Hex(raw)})`
+}

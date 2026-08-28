@@ -37,7 +37,7 @@ import {
   type InteractiveTurnAssemblerRequest,
 } from "@/host/runtime"
 import { resolveGatedObjectiveAuthority } from "@/host/runtime/objective-store-wire"
-import { type Provider, pickProvider, tryCreateLLM } from "@/llm"
+import { type LLMPort, type Provider, resolveBootSelection, tryCreateLLM } from "@/llm"
 import { applyGoalPreset, type ObjectiveAttemptSlot, type ObjectivePort } from "@/objective"
 import { getDefaultPermissionStore, type PermissionStore } from "@/permission"
 import { createRuntimeFromAgentConfigBase } from "@/sdk/runtime"
@@ -331,17 +331,39 @@ const buildFacadeGetters = (
     }),
   }) as Parameters<typeof defineOptionalFacadeGetters>[1]
 
-export const buildProductionRuntimeFactory = (): (() => Promise<ObservableRuntimeFacade>) => {
-  const env = process.env as Record<string, string | undefined>
-  applyGoalPreset(env, !gateDisabled(env, "QUANTA_GOAL"))
-  const provider = pickProvider(env)
-  const llm = tryCreateLLM(provider, {}, env)
+/**
+ * MR-01 — the web daemon's BOOT provider + model, resolved through the ONE
+ * authority (`@/llm` `resolveBootSelection`) and turned into a port.
+ *
+ * INTENDED BEHAVIOUR CHANGE: this root used to call `tryCreateLLM(provider, {},
+ * env)` — an EMPTY options bag — so `QUANTA_MODEL` was ignored ENTIRELY and
+ * `QUANTA_MODEL=x quanta web` booted the provider default while the same
+ * variable was authoritative in the interactive REPL and in bench. The daemon
+ * has no `--model` flag, so `QUANTA_MODEL` is its only model surface and it is
+ * honored now.
+ *
+ * Exported (rather than inlined in {@link buildProductionRuntimeFactory}) so the
+ * MR-01 producer hellgate can drive the REAL line: the factory below calls
+ * exactly this, and nothing else resolves a boot model for the daemon.
+ */
+export const resolveWebBootLLM = (
+  env: Record<string, string | undefined>,
+): { provider: Provider; model: string; llm: LLMPort } => {
+  const boot = resolveBootSelection({ env })
+  const llm = tryCreateLLM(boot.provider, { model: boot.modelId }, env)
   if (llm === null) {
     throw new Error(
-      `web-daemon: LLM provider "${provider}" not configured ` +
+      `web-daemon: LLM provider "${boot.provider}" not configured ` +
         `(set ANTHROPIC_API_KEY / OPENAI_API_KEY, or run /login for chatgpt-oauth)`,
     )
   }
+  return { provider: boot.provider, model: boot.modelId, llm }
+}
+
+export const buildProductionRuntimeFactory = (): (() => Promise<ObservableRuntimeFacade>) => {
+  const env = process.env as Record<string, string | undefined>
+  applyGoalPreset(env, !gateDisabled(env, "QUANTA_GOAL"))
+  const { provider, llm } = resolveWebBootLLM(env)
 
   return async (): Promise<ObservableRuntimeFacade> => {
     const parts = await assembleWebRuntimeParts(env, llm, loadDefaultPermissionStore, provider)

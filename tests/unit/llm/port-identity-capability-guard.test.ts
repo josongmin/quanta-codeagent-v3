@@ -40,8 +40,16 @@ import { laneLabeledPort } from "@/llm/with-recording-lane"
 import { withTemperature } from "@/llm/with-temperature"
 import { laneProgressPort } from "@/runner/batch/eval/lane-progress"
 
-/** A port that exposes EVERY optional field, so a dropped one is observable. */
-const fullPort = (): LLMPort & { listModelsCalls: number } => {
+/** A port that exposes EVERY optional field, so a dropped one is observable.
+ *  MR-07 — it also RECORDS the `AbortSignal` its `listModels` was handed, so a
+ *  decorator that forwards the method but silently drops the ARGUMENT (a zero-arg
+ *  closure still type-checks against `(signal?) => …`) is caught here. That drop
+ *  would make the `/model` catalog probe uncancellable again behind every
+ *  decorator — the exact wedge MR-07 closed. */
+const fullPort = (): LLMPort & {
+  listModelsCalls: number
+  lastSignal: AbortSignal | undefined
+} => {
   const self = {
     model: "inner-model",
     contextWindowKey: "inner-model-1m",
@@ -50,11 +58,13 @@ const fullPort = (): LLMPort & { listModelsCalls: number } => {
     transportId: "public" as const,
     authMode: "Anthropic BYOK",
     listModelsCalls: 0,
+    lastSignal: undefined as AbortSignal | undefined,
     // A `this`-reading METHOD on purpose: the real adapters implement it that
     // way, so a decorator that copies the function value (instead of re-binding
     // the receiver) breaks at call time, not at wrap time.
-    async listModels(): Promise<readonly string[]> {
+    async listModels(signal?: AbortSignal): Promise<readonly string[]> {
       self.listModelsCalls += 1
+      self.lastSignal = signal
       return ["inner-model", "other-model"]
     },
     async *stream(_input: StreamInput): AsyncIterable<StreamEvent> {
@@ -153,6 +163,11 @@ describe("LLMPort decorators preserve the whole capability surface", () => {
     // The receiver survives: calling through the copy hits the inner method.
     expect(await copy.listModels?.()).toEqual(["inner-model", "other-model"])
     expect(inner.listModelsCalls).toBe(1)
+    // MR-07 — the cancellation signal must reach the inner method, not be
+    // swallowed by the re-binding closure.
+    const ac = new AbortController()
+    await copy.listModels?.(ac.signal)
+    expect(inner.lastSignal, "the forwarder dropped the AbortSignal").toBe(ac.signal)
   })
 
   for (const [name, wrap] of DECORATORS) {
@@ -171,6 +186,13 @@ describe("LLMPort decorators preserve the whole capability surface", () => {
       // merely present — a copied method reference would throw or read undefined.
       expect(await wrapped.listModels?.()).toEqual(["inner-model", "other-model"])
       expect(inner.listModelsCalls).toBe(1)
+      // MR-07 — and the `signal` ARGUMENT must ride through. Two independent
+      // checks because either alone is weak: arity catches a zero-arg closure at
+      // the shape level, pass-through catches a 1-arg closure that ignores it.
+      expect(wrapped.listModels?.length, `${name} dropped the listModels signal param`).toBe(1)
+      const ac = new AbortController()
+      await wrapped.listModels?.(ac.signal)
+      expect(inner.lastSignal, `${name} swallowed the AbortSignal`).toBe(ac.signal)
     })
   }
 

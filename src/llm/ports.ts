@@ -51,7 +51,23 @@ export interface LLMPort {
    *     rejection as "no catalog" and degrade, never as a session error;
    *   - absent ⇒ the caller keeps whatever candidate set it was seeded with
    *     (boot model + operator-configured ids). Adding this never breaks an
-   *     existing `LLMPort` (test doubles omit it).
+   *     existing `LLMPort` (test doubles omit it);
+   *   - it MUST honour `signal` (MR-07): the probe is awaited on BLOCKING,
+   *     user-facing paths — the CLI's `/model` picker (`slash/model-cmd`) and the
+   *     daemon's `GET /readout/model` route — and the base URL is
+   *     env-overridable, so a hung endpoint used to wedge both forever. The
+   *     signal MUST reach the REAL HTTP request (the SDK call's `signal` /
+   *     `fetch`'s `RequestInit.signal`); a caller-side race alone would return
+   *     control while leaving a live request holding the socket. The abort
+   *     surfaces as a REJECTION (an `AbortError`/typed `LLMError`), which the
+   *     caller already degrades to "no catalog" — see
+   *     `model-catalog.ts#probeCatalog`, which composes its own
+   *     `AbortSignal.timeout` deadline with any caller signal.
+   *
+   * A DECORATOR must forward this method with its argument intact (see
+   * `port-identity.ts#forwardPortIdentity`, and the two class-shaped ports —
+   * `RetryingLLM`, `FallbackLLM` — that hand-roll the identity copy); dropping
+   * the parameter silently makes every probe uncancellable again.
    */
-  listModels?: () => Promise<readonly string[]>
+  listModels?: (signal?: AbortSignal) => Promise<readonly string[]>
 }

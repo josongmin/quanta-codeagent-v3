@@ -233,8 +233,11 @@ export class RetryingLLM implements LLMPort {
    *  wraps its adapter in this class, so a dropped `listModels` here made the
    *  `/model` picker blind to the account's real model list (it could only ever
    *  offer the boot model). Re-bound to `inner` (the adapters implement it as a
-   *  `this`-reading method), and absent when the inner port has none. */
-  readonly listModels?: () => Promise<readonly string[]>
+   *  `this`-reading method), and absent when the inner port has none.
+   *  MR-07 — the `signal` parameter is forwarded VERBATIM: a zero-arg closure
+   *  still satisfies the optional-param type, so dropping it would compile while
+   *  making the catalog probe uncancellable on every CLI stack. */
+  readonly listModels?: (signal?: AbortSignal) => Promise<readonly string[]>
   private readonly inner: LLMPort
   private readonly maxRetries: number
   private readonly baseDelayMs: number
@@ -261,7 +264,8 @@ export class RetryingLLM implements LLMPort {
     if (innerAuthMode !== undefined) this.authMode = innerAuthMode
     const innerListModels = opts.inner.listModels
     if (innerListModels !== undefined) {
-      this.listModels = async () => await innerListModels.call(opts.inner)
+      this.listModels = async (signal?: AbortSignal) =>
+        await innerListModels.call(opts.inner, signal)
     }
     this.maxRetries = opts.maxRetries ?? DEFAULT_MAX_RETRIES
     this.baseDelayMs = opts.baseDelayMs ?? DEFAULT_BASE_DELAY_MS

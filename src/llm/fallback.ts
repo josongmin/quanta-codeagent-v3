@@ -182,8 +182,11 @@ export class FallbackLLM implements LLMPort {
   readonly contextWindowKey?: string
   /** aug-27 — the PRIMARY provider's model-catalog probe (same "report the
    *  primary" rule as `model`/`provider` above): a `/model` listing describes the
-   *  account this chain streams from FIRST. Absent if the primary has none. */
-  readonly listModels?: () => Promise<readonly string[]>
+   *  account this chain streams from FIRST. Absent if the primary has none.
+   *  MR-07 — the `signal` parameter is forwarded VERBATIM (a zero-arg closure
+   *  would still compile against the optional-param type while silently making
+   *  the probe uncancellable). */
+  readonly listModels?: (signal?: AbortSignal) => Promise<readonly string[]>
 
   constructor(opts: FallbackLLMOptions) {
     if (opts.providers.length === 0) {
@@ -207,7 +210,8 @@ export class FallbackLLM implements LLMPort {
     const primary = opts.providers[0]
     const primaryListModels = primary?.listModels
     if (primary !== undefined && primaryListModels !== undefined) {
-      this.listModels = async () => await primaryListModels.call(primary)
+      this.listModels = async (signal?: AbortSignal) =>
+        await primaryListModels.call(primary, signal)
     }
     this.signal = opts.signal
     this.isFallbackTrigger = opts.isFallbackTrigger ?? isFallbackTrigger

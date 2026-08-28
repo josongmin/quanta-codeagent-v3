@@ -6,10 +6,18 @@ export {
   fsBackedStickyModelStore,
   readStickyModelSnapshotSync,
   STICKY_MODEL_FILENAME,
+  STICKY_MODEL_LOCK_SUFFIX,
   StickyModelLoadCorruptionError,
   StickyModelWriteError,
+  stickyModelLockPathOf,
   stickyModelPathFrom,
 } from "./fs-backed-store"
+export {
+  isStickyModelKeyInScope,
+  parseStickyModelStorageKey,
+  STICKY_MODEL_KEY_MAX_LENGTH,
+  type StickyModelStorageKey,
+} from "./key-codec"
 export type {
   StickyModelKey,
   StickyModelLoadResult,

@@ -179,14 +179,25 @@ export class OpenAIResponsesAdapter implements LLMPort {
    * (`model-catalog.ts#probeCatalog`) already degrades a rejection to "no catalog"
    * while logging it. Non-string / missing ids inside a well-formed array are
    * skipped (one junk entry must not lose the whole catalog).
+   *
+   * MR-07 — `signal` is put on the `RequestInit` handed to `fetchImpl`, so an
+   * aborted probe cancels the REAL request (this is the surface a plain
+   * `OPENAI_API_KEY` session boots, and its base URL is env-overridable, so a hung
+   * endpoint used to wedge `/model` and `GET /readout/model` forever). `fetch`
+   * then rejects with an `AbortError`, which the catch below classifies exactly
+   * like any other transport fault. Spread CONDITIONALLY:
+   * `RequestInit.signal` is `AbortSignal | null` (no `undefined`) under
+   * `exactOptionalPropertyTypes`, and an unsignalled probe must send a
+   * byte-identical init object.
    */
-  async listModels(): Promise<readonly string[]> {
+  async listModels(signal?: AbortSignal): Promise<readonly string[]> {
     const url = `${this.baseURL}${MODELS_PATH}`
     let res: Response
     try {
       res = await this.fetchImpl(url, {
         method: "GET",
         headers: { accept: "application/json", authorization: `Bearer ${this.apiKey}` },
+        ...(signal !== undefined ? { signal } : {}),
       })
     } catch (e) {
       // Network/DNS/abort/guard-refusal — same classification the turn wire uses.

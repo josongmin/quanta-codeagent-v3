@@ -3,6 +3,8 @@ export { OpenAIAdapter } from "./adapters/openai"
 export { OpenAIResponsesAdapter } from "./adapters/openai-responses"
 export type { AssembledTurn } from "./assemble"
 export { assembleFromEvents, determinePhases, hasToolUse } from "./assemble"
+export type { BootModelSource, BootSelection, BootSelectionInput } from "./boot-selection"
+export { resolveBootSelection } from "./boot-selection"
 export type {
   CloudKind,
   CredentialHelperErrorCode,

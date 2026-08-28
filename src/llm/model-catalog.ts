@@ -47,8 +47,9 @@
  *    capped, and dedup is a Set (an unbounded hostile catalog blocked the event
  *    loop for ~67s at 100k slugs with the old `array.some` dedup).
  *
- * FAIL-OPEN by contract: no `listModels`, a rejected probe, an unbuildable id, or
- * an implausible slug all leave the seeded set standing. `/model` then lists what
+ * FAIL-OPEN by contract: no `listModels`, a rejected probe, a probe that blew its
+ * {@link MODEL_CATALOG_PROBE_TIMEOUT_MS} deadline, an unbuildable id, or an
+ * implausible slug all leave the seeded set standing. `/model` then lists what
  * it has; it never errors the session because a catalog lookup failed. Every drop
  * is LOGGED (a silently short menu reads as "my account has one model").
  */
@@ -62,6 +63,34 @@ import type { LLMPort } from "./ports"
  *  catalog (the biggest observed is ~10), and it bounds both the port-building
  *  loop and the retained adapter objects when the endpoint is hostile or buggy. */
 export const MAX_PROBED_MODEL_IDS = 200
+
+/**
+ * MR-07 — hard deadline on ONE catalog probe.
+ *
+ * WHY A DEADLINE AT ALL: `refresh()` is awaited on two BLOCKING, user-facing
+ * paths — the CLI's `/model` picker (`slash/model-cmd#…await model.refresh?.()`)
+ * and the daemon's `GET /readout/model` route
+ * (`runtime-factory/readout-sources`) — and the probe's base URL is
+ * env-overridable (`QUANTA_LLM_ENDPOINT` / `OPENAI_BASE_URL`). With no deadline a
+ * hung endpoint (TCP open, no bytes) wedged BOTH forever: a probe confirmed
+ * `refresh()` still pending at 500ms against a hung `listModels`.
+ *
+ * WHY 10s: this is ONE non-streaming GET of a small JSON page
+ * (`/v1/models`, `/codex/models`) — sub-second on every healthy provider — so 10s
+ * is >10x headroom for a cold TLS handshake on a bad link, and it still fits the
+ * repo's established band for a blocking non-stream network probe
+ * (`lsp/adapters/base/config#DEFAULT_REQUEST_TIMEOUT_MS` 8s,
+ * `runtime/shell-snapshot` 10s, `agent/tier1/objective-judge-observer` 10s).
+ * Deliberately NOT the stream timeouts (60s+): nobody is watching tokens arrive
+ * here, an operator is staring at a picker that has not opened.
+ *
+ * It is a CEILING, not a budget: expiry is fail-open (see {@link probeCatalog}) —
+ * the seeded candidate set stands and one `logger.warn` is emitted, exactly as a
+ * rejected probe already degrades. And because the deadline is delivered as an
+ * `AbortSignal` that reaches the real HTTP request, a timeout CANCELS the
+ * request rather than orphaning it behind a caller-side race.
+ */
+export const MODEL_CATALOG_PROBE_TIMEOUT_MS = 10_000
 
 /** Upper bound on a model id. Provider slugs are short (`gpt-5.6-terra`,
  *  `claude-haiku-4-5-20251001`); anything longer is not a slug we can render in a
@@ -104,16 +133,35 @@ export interface ModelCatalogWire {
   readonly probeSucceeded: () => boolean
 }
 
-/** One catalog probe, isolated: resolves to the provider's slugs, or `[]` for any
- *  failure mode (no probe surface, rejection, non-array). `ok` distinguishes "the
- *  provider says there are none" from "we could not ask". */
+/**
+ * One catalog probe, isolated: resolves to the provider's slugs, or `[]` for any
+ * failure mode (no probe surface, rejection, TIMEOUT, non-array). `ok`
+ * distinguishes "the provider says there are none" from "we could not ask".
+ *
+ * MR-07 — the probe is now DEADLINED and CANCELLABLE. The signal handed to
+ * `listModels` is:
+ *   - `AbortSignal.timeout(MODEL_CATALOG_PROBE_TIMEOUT_MS)` alone when the wire
+ *     has no caller signal, and
+ *   - `AbortSignal.any([caller, timeout])` when it does — COMPOSED, never
+ *     replaced: a session teardown must still cancel a probe that is nowhere near
+ *     its own deadline, and the deadline must still fire on a session that never
+ *     aborts.
+ * The adapters put that signal on the real request, so expiry cancels the HTTP
+ * call. Either abort arrives here as a REJECTION and falls into the SAME catch
+ * that already handles auth/offline: one `logger.warn`, `ok:false`, seeded
+ * candidates stand. A timeout is therefore not a distinct code path — it is
+ * byte-identical degradation to a rejected probe, by construction.
+ */
 const probeCatalog = async (
   llm: LLMPort,
+  callerSignal?: AbortSignal,
 ): Promise<{ readonly ok: boolean; readonly slugs: readonly string[] }> => {
   const list = llm.listModels
   if (list === undefined) return { ok: false, slugs: [] }
+  const deadline = AbortSignal.timeout(MODEL_CATALOG_PROBE_TIMEOUT_MS)
+  const signal = callerSignal === undefined ? deadline : AbortSignal.any([callerSignal, deadline])
   try {
-    const slugs = await list.call(llm)
+    const slugs = await list.call(llm, signal)
     const usable = (Array.isArray(slugs) ? slugs : []).filter(
       (s): s is string => typeof s === "string",
     )
@@ -152,6 +200,15 @@ export const buildModelCatalogWire = (args: {
    *  boot port. Absent ⇒ the bare legacy factory, which is correct only for a
    *  host that composes nothing (tests, simple embedders). */
   readonly buildPort?: (id: string) => LLMPort | null
+  /** MR-07 — OPTIONAL session-scoped abort signal, COMPOSED with (never
+   *  replacing) the probe's own {@link MODEL_CATALOG_PROBE_TIMEOUT_MS} deadline.
+   *  A surface that owns a teardown signal passes it so a shutdown cancels an
+   *  in-flight probe immediately instead of holding a socket for the rest of the
+   *  deadline. Absent ⇒ the deadline alone bounds the probe (byte-identical to a
+   *  session that simply never aborts). Deliberately a WIRE-level option and not
+   *  a `refresh(signal)` parameter: `refresh` memoizes a SHARED promise, so a
+   *  per-call signal would let one caller cancel another caller's probe. */
+  readonly signal?: AbortSignal
   readonly env: NodeJS.ProcessEnv
 }): ModelCatalogWire => {
   const live: ModelCandidate[] = []
@@ -186,7 +243,7 @@ export const buildModelCatalogWire = (args: {
   let probed: Promise<void> | undefined
   let succeeded = false
   const runProbe = async (): Promise<void> => {
-    const { ok, slugs } = await probeCatalog(args.llm)
+    const { ok, slugs } = await probeCatalog(args.llm, args.signal)
     for (const id of slugs) admit(id)
     succeeded = ok
     // Memoize SUCCESS only: a transient auth/network failure must not cache

@@ -94,7 +94,12 @@ export type {
   LlmContinuationObservation,
   LlmRequestObservation,
 } from "./llm-route-types"
-export { escapeBodyForLine, sanitizeLogText } from "./log-sanitize"
+export {
+  escapeBodyForLine,
+  sanitizeLogText,
+  summarizeUntrustedId,
+  UNTRUSTED_ID_LOG_PREFIX_LENGTH,
+} from "./log-sanitize"
 export type { LogCallSite, Logger, LogLevel } from "./logger"
 export {
   __resetLoggerRateLimit,
