@@ -50,6 +50,7 @@ import {
 } from "../../../../src/runner/batch/report"
 import type { InstanceResult } from "../../../../src/runner/batch/types"
 import { __resetRuntimeConfig } from "../../../../src/shared/runtime-config"
+import { assertScanPopulation } from "../../_shared/scan-population"
 
 const REPO_ROOT = join(import.meta.dir, "..", "..", "..", "..")
 const read = (path: string): string => readFileSync(join(REPO_ROOT, path), "utf8")
@@ -102,6 +103,17 @@ const sourceFiles = (roots: readonly string[]): string[] => {
     }
   }
   for (const root of roots) walk(join(REPO_ROOT, root))
+  // Each caller below filters this listing and asserts the survivors. An empty
+  // or truncated listing yields an empty filter, which every one of them reads
+  // as "no offending writer".
+  for (const root of roots) {
+    const abs = join(REPO_ROOT, root)
+    assertScanPopulation(
+      out.filter((rel) => rel.startsWith(`${root}/`)).map((rel) => join(REPO_ROOT, rel)),
+      abs,
+      { min: 5, collectable: (n) => n.endsWith(".ts") && !n.endsWith(".test.ts") },
+    )
+  }
   return out.sort()
 }
 

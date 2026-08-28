@@ -19,6 +19,7 @@
 import { describe, expect, test } from "bun:test"
 import { readdir, readFile } from "node:fs/promises"
 import { join } from "node:path"
+import { assertScanPopulation } from "./_shared/scan-population"
 
 // Repo-anchored on this file, not the ambient cwd — this fence walks real
 // source in the checkout.
@@ -38,6 +39,14 @@ async function* walkTs(dir: string): AsyncGenerator<string> {
 }
 
 describe("memory-fence-no-llm-import-hellgate — static scan", () => {
+  test("ANTI-VACUITY: the memory walk reaches a real, populated tree", async () => {
+    // A fence reports "no offending import" identically over a clean tree and
+    // over one it never opened.
+    const files: string[] = []
+    for await (const f of walkTs(MEMORY_ROOT)) files.push(f)
+    assertScanPopulation(files, MEMORY_ROOT, { min: 5, collectable: (n) => n.endsWith(".ts") })
+  })
+
   test("no .ts file under src/memory/ imports from @/llm", async () => {
     const offenders: { path: string; line: number; text: string }[] = []
     for await (const file of walkTs(MEMORY_ROOT)) {

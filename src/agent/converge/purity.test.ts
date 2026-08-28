@@ -14,6 +14,7 @@
 import { describe, expect, test } from "bun:test"
 import { readdirSync, readFileSync } from "node:fs"
 import { join } from "node:path"
+import { assertScanPopulation } from "../../../tests/unit/_shared/scan-population"
 
 const CORE_DIR = join(import.meta.dir)
 
@@ -21,15 +22,18 @@ const coreFiles = (): string[] =>
   readdirSync(CORE_DIR).filter((f) => f.endsWith(".ts") && !f.endsWith(".test.ts"))
 
 /** Anti-vacuity: both verdicts below are `toEqual([])` over this listing, so an
- *  empty slice satisfies them for free — proven, 4/0 against an empty mirror of
- *  the repo's directory skeleton. */
+ *  empty slice satisfies them for free. The canonical floor also catches a
+ *  SIBLING that went unlisted, which a bare count cannot. */
 const assertSliceIsReal = (files: readonly string[]): void => {
-  if (files.length < 3) {
-    throw new Error(
-      `converge slice listed ${files.length} source file(s) — the purity verdicts below ` +
-        `would pass over nothing.`,
-    )
-  }
+  assertScanPopulation(
+    files.map((f) => join(CORE_DIR, f)),
+    CORE_DIR,
+    {
+      min: 3,
+      topLevelOnly: true,
+      collectable: (f) => f.endsWith(".ts") && !f.endsWith(".test.ts"),
+    },
+  )
 }
 
 /** Pure detector — reused by the red-on-injection self-test below. */
