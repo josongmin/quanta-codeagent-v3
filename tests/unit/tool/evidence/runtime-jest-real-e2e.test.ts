@@ -14,6 +14,7 @@ import { describe, expect, test } from "bun:test"
 import { mkdtempSync, realpathSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import { gateOn } from "@/shared"
 import { defaultRuntimePort } from "@/tool/evidence"
 import { buildEvidence } from "@/tool/evidence/builder"
 import { runToolchain, type Toolchain } from "@/tool/testrun"
@@ -54,7 +55,17 @@ const installJestProject = (): string | null => {
 }
 
 const dir = has("npm", "--version") ? installJestProject() : null
-const D = dir !== null ? describe : describe.skip
+const REAL_E2E = gateOn(process.env, "QUANTA_REAL_TOOLCHAIN_E2E")
+
+// REAL-ON-DEMAND LANE. Toolchain presence alone was the gate, so on a developer
+// machine that HAS the toolchain these ran inside the ordinary unit suite and
+// their cost tracks whatever else the box is doing (measured: 3,455ms idle,
+// 9,387ms at load average 68 — past the 8,529ms per-test speed budget, a ceiling
+// that may only go DOWN). Same suffix, same lane as their `-real-e2e` siblings:
+// a VISIBLE skip by default, run by `bun run test:real-toolchain`. CI coverage
+// is unchanged — the runner has none of these toolchains, so these describes
+// already skipped there.
+const D = REAL_E2E && dir !== null ? describe : describe.skip
 
 D("defaultRuntimePort — REAL jest (T-02: failure+static localize, runtime degrades)", () => {
   test("jest failure localizes via the ● parser; runtime degrades to null (transform)", async () => {

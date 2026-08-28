@@ -12,6 +12,7 @@ import { mkdtempSync, realpathSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { evidenceLspStatic } from "@/agent/lsp-bridge"
+import { gateOn } from "@/shared"
 import { defaultRuntimePort } from "@/tool/evidence"
 import { buildEvidence } from "@/tool/evidence/builder"
 import type { Toolchain } from "@/tool/testrun"
@@ -51,7 +52,17 @@ const writeCpp = (): string => {
   return dir
 }
 
-const DRUN = cxx() && lldbDap() ? describe : describe.skip
+const REAL_E2E = gateOn(process.env, "QUANTA_REAL_TOOLCHAIN_E2E")
+
+// REAL-ON-DEMAND LANE. Toolchain presence alone was the gate, so on a developer
+// machine that HAS the toolchain these ran inside the ordinary unit suite and
+// their cost tracks whatever else the box is doing (measured: 3,455ms idle,
+// 9,387ms at load average 68 — past the 8,529ms per-test speed budget, a ceiling
+// that may only go DOWN). Same suffix, same lane as their `-real-e2e` siblings:
+// a VISIBLE skip by default, run by `bun run test:real-toolchain`. CI coverage
+// is unchanged — the runner has none of these toolchains, so these describes
+// already skipped there.
+const DRUN = REAL_E2E && cxx() && lldbDap() ? describe : describe.skip
 DRUN("defaultRuntimePort — REAL C++ runtime (clang++ -g → lldb-dap)", () => {
   test("compiles + captures the failing assert's local over DAP", async () => {
     const dir = writeCpp()
@@ -75,7 +86,7 @@ DRUN("defaultRuntimePort — REAL C++ runtime (clang++ -g → lldb-dap)", () => 
   }, 60_000)
 })
 
-const DSTATIC = has("clangd", "--version") ? describe : describe.skip
+const DSTATIC = REAL_E2E && has("clangd", "--version") ? describe : describe.skip
 DSTATIC("evidenceLspStatic — REAL clangd (Tier-2 C++ static)", () => {
   test("returns hover/type info at the C++ failure site", async () => {
     const dir = writeCpp()

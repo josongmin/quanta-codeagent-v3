@@ -11,6 +11,7 @@ import { describe, expect, test } from "bun:test"
 import { mkdirSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import { gateOn } from "@/shared"
 import { makeRunTestsTool } from "@/tool/testrun/tool"
 import type { ToolContext, ToolEvent, ToolResult } from "@/tool/types"
 
@@ -31,7 +32,17 @@ const run = async (cwd: string): Promise<ToolResult> => {
   return r
 }
 
-const Dgo = has("go", "version") ? describe : describe.skip
+const REAL_E2E = gateOn(process.env, "QUANTA_REAL_TOOLCHAIN_E2E")
+
+// REAL-ON-DEMAND LANE. Toolchain presence alone was the gate, so on a developer
+// machine that HAS the toolchain these ran inside the ordinary unit suite and
+// their cost tracks whatever else the box is doing (measured: 3,455ms idle,
+// 9,387ms at load average 68 — past the 8,529ms per-test speed budget, a ceiling
+// that may only go DOWN). Same suffix, same lane as their `-real-e2e` siblings:
+// a VISIBLE skip by default, run by `bun run test:real-toolchain`. CI coverage
+// is unchanged — the runner has none of these toolchains, so these describes
+// already skipped there.
+const Dgo = REAL_E2E && has("go", "version") ? describe : describe.skip
 Dgo("run_tests — REAL go test -json", () => {
   test("detects go, runs, reports the failing test by name + file:line", async () => {
     const dir = realpathSync(mkdtempSync(join(tmpdir(), "tr-go-")))
@@ -53,7 +64,7 @@ Dgo("run_tests — REAL go test -json", () => {
   }, 60_000)
 })
 
-const Drs = has("cargo", "--version") ? describe : describe.skip
+const Drs = REAL_E2E && has("cargo", "--version") ? describe : describe.skip
 Drs("run_tests — REAL cargo test", () => {
   test("detects rust, runs, reports the failing test + file:line", async () => {
     const dir = realpathSync(mkdtempSync(join(tmpdir(), "tr-rs-")))
@@ -83,7 +94,7 @@ Drs("run_tests — REAL cargo test", () => {
   }, 120_000)
 })
 
-const Dpy = has("python3", "--version") ? describe : describe.skip
+const Dpy = REAL_E2E && has("python3", "--version") ? describe : describe.skip
 Dpy("run_tests — REAL python unittest", () => {
   test("detects python, runs, reports the failing test + message", async () => {
     const dir = realpathSync(mkdtempSync(join(tmpdir(), "tr-py-")))
