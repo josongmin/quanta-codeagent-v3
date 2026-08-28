@@ -6,7 +6,9 @@
  * only consume the `PtyTable` port. The public facade re-exports this module
  * to preserve the established `@/subagent` API.
  */
+
 import type { Subprocess } from "bun"
+import { scrubEnv } from "@/runtime/sandbox"
 import { abortableSleep, errMessage } from "@/shared"
 import { legacyKillHandle, type MakeProcKill, type ProcKillHandle } from "./exec-kill"
 import type { ExecCommandInput, ExecCommandOutput } from "./tools-6"
@@ -177,20 +179,29 @@ const prepareExec = (input: ExecCommandInput, deps: ExecCommandDeps): PreparedEx
     }
   }
 
-  const env =
-    input.env !== undefined
-      ? ({ ...(process.env as Record<string, string | undefined>), ...input.env } as Record<
-          string,
-          string | undefined
-        >)
-      : undefined
+  // SCRUBBED, and never inherit-by-omission. The command below is
+  // `bash -lc <input.command>` with the command text supplied by the MODEL, and
+  // this env was built two ways that are both the shapes the exec-cluster ban
+  // forbids: absent ⇒ the `env` key was omitted and Bun handed over
+  // `process.env` wholesale; present ⇒ `{ ...process.env, ...input.env }` raw.
+  // Either way every `*_API_KEY` this process holds reached a process whose
+  // argv the model chose. The ban never covered this file — its scan list named
+  // five cluster files and this was not one of them.
+  //
+  // `scrubEnv()` is allowlist-based, so the child gets what a shell legitimately
+  // needs and nothing else; the caller's own `input.env` still layers on top,
+  // which is the only part that was ever intentional.
+  const env: Record<string, string | undefined> = {
+    ...scrubEnv(),
+    ...(input.env ?? {}),
+  }
   try {
     const proc = Bun.spawn(["bash", "-lc", input.command], {
       cwd,
       stdin: "pipe",
       stdout: "pipe",
       stderr: "pipe",
-      ...(env !== undefined ? { env } : {}),
+      env,
     }) as Subprocess<"pipe", "pipe", "pipe">
     return { kind: "ready", proc, table, wantPty }
   } catch (e: unknown) {

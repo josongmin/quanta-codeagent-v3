@@ -134,13 +134,15 @@ const ALLOWLIST: readonly Ruled[] = [
  * this list EXACTLY, so a new leak goes red AND landing the fix goes red until
  * the entry is deleted. Never move a call here to make a suite green.
  */
-const KNOWN_OPEN_LEAKS: readonly Ruled[] = [
-  {
-    file: "subagent/exec-command.ts",
-    match: '["bash", "-lc", input.command]',
-    why: "OPEN DEFECT (found aug-28 by this derivation, not in scope of the round that found it): `exec_command` runs a MODEL-SUPPLIED shell line and passes `env` only when `input.env` is set — absent ⇒ inherit-by-omission, present ⇒ `{ ...process.env, ...input.env }`. Both are the banned shapes; the parent's `*_API_KEY` reaches the child. FIX = route through `scrubEnv`/`spawnScrubbed`, then delete this entry.",
-  },
-]
+/**
+ * Leaks this ban has SEEN and not yet closed. Two-way: a new one is red, and so
+ * is a stale entry once the real fix lands — which is how the single entry that
+ * lived here got retired. `subagent/exec-command.ts` ran a MODEL-SUPPLIED
+ * `bash -lc` with `env` omitted on one branch (inherit-by-omission) and
+ * `{ ...process.env, ...input.env }` on the other; it now routes through
+ * `scrubEnv()`, and its own hellgate holds that.
+ */
+const KNOWN_OPEN_LEAKS: readonly Ruled[] = []
 
 // ─── AST scanning ────────────────────────────────────────────────────────────
 
