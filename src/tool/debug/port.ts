@@ -4,7 +4,9 @@
  * Tools depend on the PORT, never on `Bun.spawn`, so they test against a
  * scripted in-memory adapter (closed-port DI, same posture as the PTY slice).
  */
+
 import { type AddressInfo, createServer, Socket } from "node:net"
+import { scrubEnv } from "@/runtime/sandbox"
 import { errMessage } from "@/shared"
 import type { CdpTransport } from "./cdp-client"
 import type { DapTransport } from "./dap-client"
@@ -31,7 +33,13 @@ export const defaultDebugAdapterPort: DebugAdapterPort = {
     if (cmd === undefined) throw new Error("debug adapter: empty command")
     const child = Bun.spawn([cmd, ...args], {
       ...(spec.cwd !== undefined ? { cwd: spec.cwd } : {}),
-      env: spec.env !== undefined ? { ...process.env, ...spec.env } : process.env,
+      // SCRUBBED. The argv here is `["node", "--inspect-brk=…", program, …args]`
+      // with `program` and `args` supplied by the TOOL INPUT, so the parent's
+      // `*_API_KEY` / `*_TOKEN` / `AWS_*` reached a child the model named. This
+      // escaped the exec-cluster ban because the argv head is `node`, not a
+      // shell binary — the ban's own header enumerates its deliberate
+      // exclusions and this file was not among them.
+      env: { ...scrubEnv(), ...(spec.env ?? {}) },
       stdin: "pipe",
       stdout: "pipe",
       stderr: "pipe",
@@ -174,7 +182,7 @@ export const spawnTcpDebugAdapter = async (spec: TcpAdapterSpawnSpec): Promise<D
   if (cmd === undefined) throw new Error("debug adapter: empty TCP command")
   const child = Bun.spawn([cmd, ...args], {
     ...(spec.cwd !== undefined ? { cwd: spec.cwd } : {}),
-    env: spec.env !== undefined ? { ...process.env, ...spec.env } : process.env,
+    env: { ...scrubEnv(), ...(spec.env ?? {}) },
     stdout: "ignore",
     stderr: "ignore",
   })
@@ -244,7 +252,7 @@ export const spawnNodeCdpInspector = async (spec: NodeCdpSpawnSpec): Promise<Cdp
   if (cmd === undefined) throw new Error("cdp: empty node command")
   const child = Bun.spawn([cmd, ...args], {
     ...(spec.cwd !== undefined ? { cwd: spec.cwd } : {}),
-    env: spec.env !== undefined ? { ...process.env, ...spec.env } : process.env,
+    env: { ...scrubEnv(), ...(spec.env ?? {}) },
     stdout: "ignore",
     stderr: "ignore",
   })

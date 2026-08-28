@@ -128,7 +128,11 @@ describe("temp-dir cleanup is registered with the test runner", () => {
     // the file came back verbatim, comments and all. MEASURED: 84,260
     // characters across 53 files, and a live import forgery through the
     // reachability tool.
-    const sq = "const q = (s) => `'${s.replace(/'/g, \"x\")}'`\n// gone\nconst kept = 1\n"
+    const sq = [
+      "const q = (s) => `'$",
+      "{s.replace(/'/g, 'x')}'`",
+      "\n// gone\nconst kept = 1\n",
+    ].join("")
     expect(stripComments(sq)).not.toContain("gone")
     expect(stripComments(sq)).toContain("kept")
   })
