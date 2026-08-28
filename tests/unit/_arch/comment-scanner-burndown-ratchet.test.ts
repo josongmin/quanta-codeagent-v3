@@ -89,6 +89,7 @@ const naiveStripperSites = (): readonly string[] =>
  * and delete its line; a new entry means a new copy of a known-broken helper.
  */
 const REMAINING: readonly string[] = [
+  "tests/unit/runtime/single-pid-kill-ban-hellgate.test.ts",
   "src/agent/converge/purity.test.ts",
   "src/agent/repro-test/select.ts",
   "src/apps/bench/composition-root-dispatch.test.ts",
@@ -100,7 +101,6 @@ const REMAINING: readonly string[] = [
   "tests/integration/admissibility-deny-steer-hell.test.ts",
   "tests/integration/cli-attention-navigation.test.ts",
   "tests/unit/_arch/repo-path-anchor-ratchet.test.ts",
-  "tests/unit/_arch/slice-boundary-scanner.ts",
   "tests/unit/_shared/strip-comments.ts",
   "tests/unit/activity/activity-store-constructor-owner-ratchet.test.ts",
   "tests/unit/agent-import-cycle-hellgate.test.ts",

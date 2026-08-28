@@ -1,7 +1,13 @@
 import { describe, expect, test } from "bun:test"
-import { readdirSync, readFileSync } from "node:fs"
+import { readdirSync } from "node:fs"
 import { dirname, join, relative, resolve } from "node:path"
-import { extractImports, listSliceTsFiles } from "./_arch/slice-boundary-scanner"
+import {
+  assertWalkFloor,
+  extractImports,
+  listSliceTsFiles,
+  readWalkedFiles,
+  type WalkCoverage,
+} from "./_arch/slice-boundary-scanner"
 
 const REPO_ROOT = join(import.meta.dir, "..", "..")
 const APPS_DIR = join(REPO_ROOT, "src", "apps")
@@ -60,25 +66,47 @@ const targetSurfaceFor = (fromFile: string, spec: string): string | null => {
   return APP_NAMES.has(surface) ? surface : null
 }
 
-const collectCrossSurfaceImports = (): readonly string[] => {
+/**
+ * Enumerate, read, and report — with the read TOCTOU-safe and the coverage
+ * handed back so the caller can assert a floor.
+ *
+ * `readWalkedFiles` skips a file that vanished between the walk and the read
+ * (this tree churns under concurrent sessions, and an ENOENT here used to be an
+ * unhandled throw). That skip is scoped to walk-derived paths only — a constant
+ * path would still throw — but the moment ANY skip exists, "read nothing,
+ * report no edges" becomes a way to be green, so every arm below asserts
+ * {@link assertWalkFloor} on this coverage before it concludes anything.
+ */
+const collectCrossSurfaceImports = (): {
+  readonly edges: readonly string[]
+  readonly coverage: WalkCoverage
+} => {
   const found: string[] = []
-  for (const file of listSliceTsFiles(APPS_DIR, false)) {
+  const enumerated = listSliceTsFiles(APPS_DIR, false)
+  const { files, coverage } = readWalkedFiles(APPS_DIR, enumerated, false)
+  for (const { file, src } of files) {
     const rel = toPosix(relative(APPS_DIR, file))
     const fromSurface = rel.split("/")[0] ?? ""
     if (!APP_NAMES.has(fromSurface)) continue
-    const imports = extractImports(readFileSync(file, "utf8"))
-    for (const { spec } of imports) {
+    for (const { spec } of extractImports(src)) {
       const toSurface = targetSurfaceFor(file, spec)
       if (toSurface === null || toSurface === fromSurface) continue
       found.push(`${rel} -> ${spec}`)
     }
   }
-  return found
+  return { edges: found, coverage }
+}
+
+/** The scan plus its floor, asserted. Every arm goes through this. */
+const scanned = (arm: string): readonly string[] => {
+  const { edges, coverage } = collectCrossSurfaceImports()
+  assertWalkFloor(coverage, `surface-coupling ratchet — ${arm}`)
+  return edges
 }
 
 describe("surface coupling ratchet", () => {
   test("no new runtime imports cross app surfaces", () => {
-    const unexpected = [...new Set(collectCrossSurfaceImports())]
+    const unexpected = [...new Set(scanned("new cross-surface imports"))]
       .sort()
       .filter((edge) => !ALLOWED_CROSS_SURFACE_IMPORTS.has(edge))
 
@@ -102,9 +130,25 @@ describe("surface coupling ratchet", () => {
     // UNSANCTIONED cross-surface imports". A new edge fails here AND in the
     // `no new runtime imports` test above unless it is added (with justification)
     // to ALLOWED_CROSS_SURFACE_IMPORTS.
-    const unsanctioned = [...new Set(collectCrossSurfaceImports())].filter(
+    const unsanctioned = [...new Set(scanned("debt ceiling"))].filter(
       (edge) => !ALLOWED_CROSS_SURFACE_IMPORTS.has(edge),
     )
     expect(unsanctioned.length).toBe(0)
+  })
+
+  test("FLOOR: the scan covered every surface under src/apps, not merely some files", () => {
+    // "No unexpected edges" is only evidence if the walk actually reached every
+    // surface. A global `read > 0` does not establish that — losing all of
+    // `apps/cli/**` still leaves thousands of files and looks perfectly healthy.
+    // MEASURED: with `src/apps/agent` silently dropped from the walk, the two
+    // arms above stayed GREEN pre-floor. So: every surface directory that exists
+    // must be a subtree that was BOTH enumerated AND read. `assertWalkFloor`
+    // enforces this inside every arm above; this arm makes the coverage visible.
+    const { coverage } = collectCrossSurfaceImports()
+    assertWalkFloor(coverage, "surface-coupling ratchet — floor")
+    const covered = new Set(coverage.readSubtrees.keys())
+    const uncovered = [...APP_NAMES].filter((name) => !covered.has(name))
+    expect(uncovered, "these src/apps surfaces contributed ZERO read files").toEqual([])
+    expect(coverage.read.length).toBeGreaterThan(0)
   })
 })

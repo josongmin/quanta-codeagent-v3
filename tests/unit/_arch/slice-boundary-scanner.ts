@@ -5,7 +5,7 @@
  */
 
 import { describe, expect, test } from "bun:test"
-import { readdirSync, readFileSync, statSync } from "node:fs"
+import { readdirSync, readFileSync, type Stats, statSync } from "node:fs"
 import { join, relative } from "node:path"
 import ts from "typescript"
 
@@ -75,28 +75,274 @@ const isScannableSliceFile = (name: string, includeBackupArtifacts: boolean): bo
   return true
 }
 
-export const listSliceTsFiles = (dir: string, includeBackupArtifacts: boolean): string[] => {
-  const out: string[] = []
-  for (const name of readdirSync(dir)) {
-    const full = join(dir, name)
-    const st = statSync(full)
-    if (st.isDirectory()) {
-      // Test-only directories: a `__tests__/` sub-tree holds TEST files that
-      // legitimately exercise cross-slice CONTRACTS end-to-end (importing a
-      // peer slice's tool under test is what the test IS). These are not
-      // production slice members, so — like the god-code / no-raw-nul walkers —
-      // they must not be scanned under the production purity rules.
-      if (name === "__tests__") continue
-      out.push(...listSliceTsFiles(full, includeBackupArtifacts))
-    } else if (st.isFile() && isScannableSliceFile(name, includeBackupArtifacts)) {
-      out.push(full)
-    }
+const isEnoent = (err: unknown): boolean =>
+  typeof err === "object" && err !== null && (err as { code?: unknown }).code === "ENOENT"
+
+/**
+ * PROVENANCE, CARRIED BY THE ARRAY — not by the path string.
+ *
+ * A guard that enumerates and then reads has a TOCTOU window, and this repo
+ * churns constantly: a file listed by the walk can be gone microseconds later.
+ * At MODULE scope (`core-no-vscode-leak-ratchet.test.ts` reads inside an IIFE)
+ * that ENOENT is an UNHANDLED ERROR, so bun never registers the file's arms —
+ * MEASURED: three arms became `0 pass, 1 error`. One vanished file erased the
+ * whole guard rather than failing one assertion.
+ *
+ * The skip that fixes it must be SCOPED. ENOENT on a path a LIVE WALK produced
+ * means the file really did vanish; ENOENT on a CONSTANT or FIXTURE path
+ * (`surfaces/vscode/src/provider.ts`, a slice barrel, a named owner module)
+ * means the guard is pointed at nothing and MUST fail loudly — swallowing those
+ * makes the ratchet wholly vacuous.
+ *
+ * So provenance rides on the ARRAY IDENTITY the walk returned, registered here.
+ * A hand-built array of constants is not a member and every read of it is
+ * strict. Rebuilding a walk result (`[...files]`, `files.filter(...)`) also
+ * drops membership — deliberately, because the safe default is to throw.
+ */
+const WALK_RESULTS = new WeakSet<readonly string[]>()
+
+/** Is this exact array the one a live walk handed back? */
+export const isWalkDerived = (files: readonly string[]): boolean => WALK_RESULTS.has(files)
+
+/** `readdirSync`, or `null` when a WALK-DERIVED sub-directory vanished mid-walk.
+ *  The ROOT is a CONSTANT the caller chose: its absence is a real defect — a
+ *  guard aimed at a slice that no longer exists must go red, not report clean
+ *  over an empty set — so a root ENOENT is re-thrown. */
+const readdirOrSkip = (dir: string, isRoot: boolean): readonly string[] | null => {
+  try {
+    return readdirSync(dir)
+  } catch (err) {
+    if (isRoot || !isEnoent(err)) throw err
+    return null
   }
-  return out.sort()
 }
 
-export const stripComments = (src: string): string =>
-  src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "")
+/** `statSync`, or `null` when the entry was deleted between `readdirSync` and
+ *  `statSync` — the same TOCTOU one level up, and walk-derived, so skippable. */
+const statOrSkip = (full: string): Stats | null => {
+  try {
+    return statSync(full)
+  } catch (err) {
+    if (!isEnoent(err)) throw err
+    return null
+  }
+}
+
+/** Descend into `name`, or return the files it contributes. `__tests__/`
+ *  sub-trees hold TEST files that legitimately exercise cross-slice CONTRACTS
+ *  end-to-end (importing a peer slice's tool under test is what the test IS).
+ *  They are not production slice members, so — like the god-code / no-raw-nul
+ *  walkers — they are pruned before descent. */
+const walkEntry = (
+  dir: string,
+  name: string,
+  includeBackupArtifacts: boolean,
+): readonly string[] => {
+  const full = join(dir, name)
+  const st = statOrSkip(full)
+  if (st === null) return []
+  if (st.isDirectory()) {
+    if (name === "__tests__") return []
+    return walkSliceTsFiles(full, includeBackupArtifacts, false)
+  }
+  return st.isFile() && isScannableSliceFile(name, includeBackupArtifacts) ? [full] : []
+}
+
+function walkSliceTsFiles(dir: string, includeBackupArtifacts: boolean, isRoot: boolean): string[] {
+  const names = readdirOrSkip(dir, isRoot)
+  if (names === null) return []
+  const out: string[] = []
+  for (const name of names) out.push(...walkEntry(dir, name, includeBackupArtifacts))
+  return out
+}
+
+export const listSliceTsFiles = (dir: string, includeBackupArtifacts: boolean): string[] => {
+  const out = walkSliceTsFiles(dir, includeBackupArtifacts, true).sort()
+  WALK_RESULTS.add(out)
+  return out
+}
+
+/** First path segment under `root` — the SUBTREE a file belongs to. Root-level
+ *  files share the `"."` bucket. This is the unit the floor below defends: a
+ *  guard that quietly stopped seeing `src/agent/**` is the failure that a bare
+ *  "we read more than zero files" floor cannot detect. */
+const subtreeOf = (root: string, file: string): string => {
+  const rel = relative(root, file)
+  const head = rel.split("/")[0]
+  return head === undefined || head === rel ? "." : head
+}
+
+const tally = (root: string, files: readonly string[]): Map<string, number> => {
+  const counts = new Map<string, number>()
+  for (const f of files) {
+    const key = subtreeOf(root, f)
+    counts.set(key, (counts.get(key) ?? 0) + 1)
+  }
+  return counts
+}
+
+export interface WalkCoverage {
+  readonly root: string
+  readonly includeBackupArtifacts: boolean
+  readonly enumerated: readonly string[]
+  readonly read: readonly string[]
+  /** Enumerated, then gone by the time the read ran. */
+  readonly vanished: readonly string[]
+  readonly enumeratedSubtrees: ReadonlyMap<string, number>
+  readonly readSubtrees: ReadonlyMap<string, number>
+}
+
+export interface WalkedFile {
+  readonly file: string
+  readonly src: string
+}
+
+export interface WalkedReadResult {
+  readonly files: readonly WalkedFile[]
+  readonly coverage: WalkCoverage
+}
+
+/**
+ * Read every enumerated file, skipping only what genuinely vanished.
+ *
+ * Skipping is enabled ONLY when `files` is the array a live walk returned (see
+ * {@link WALK_RESULTS}). Pass any other array — a constant list, a filtered
+ * copy — and every read is strict, so a missing fixture still throws.
+ *
+ * Does NOT assert. The floor is a separate call so it can run INSIDE a test
+ * arm: asserting here would re-create the very defect this fixes, since a
+ * throw at module scope takes down every arm in the file.
+ */
+export const readWalkedFiles = (
+  root: string,
+  files: readonly string[],
+  includeBackupArtifacts = false,
+): WalkedReadResult => {
+  const skippable = isWalkDerived(files)
+  const out: WalkedFile[] = []
+  const read: string[] = []
+  const vanished: string[] = []
+  for (const file of files) {
+    let src: string
+    try {
+      src = readFileSync(file, "utf8")
+    } catch (err) {
+      if (skippable && isEnoent(err)) {
+        vanished.push(file)
+        continue
+      }
+      throw err
+    }
+    out.push({ file, src })
+    read.push(file)
+  }
+  return {
+    files: out,
+    coverage: {
+      root,
+      includeBackupArtifacts,
+      enumerated: files,
+      read,
+      vanished,
+      enumeratedSubtrees: tally(root, files),
+      readSubtrees: tally(root, read),
+    },
+  }
+}
+
+/**
+ * THE FLOOR. The moment a skip exists, "read nothing, pass" becomes a way to be
+ * green, so every arm that consumes the enumerator asserts this before it
+ * concludes anything.
+ *
+ * A global `enumerated > 0` is not enough: it survives losing an entire
+ * subtree, which is the realistic shape of the failure (a racing `rm -rf`, a
+ * `readdirSync` that came back short, a walk that started descending the wrong
+ * tree). So the floor is checked per TOP-LEVEL SUBTREE of the walk root, from
+ * both directions:
+ *
+ *   1. WALK vs DISK — every immediate child directory of `root` that still
+ *      holds a scannable file must appear in the enumeration. Catches the walk
+ *      itself dropping a subtree, which no enumeration-derived check can see.
+ *      The re-probe only runs for subtrees that are ABSENT, so it costs nothing
+ *      in the normal case, and a subtree that vanished outright probes empty —
+ *      no false red.
+ *   2. READ vs WALK — every subtree the walk DID enumerate must contribute at
+ *      least one successfully read file. Catches a subtree lost entirely to
+ *      ENOENT skips.
+ *
+ * Plus non-vacuity: something was enumerated and something was read.
+ */
+/** Non-vacuity: something was enumerated, and something survived to be read. */
+const vacuityProblems = (coverage: WalkCoverage): string[] => {
+  if (coverage.enumerated.length === 0) {
+    return [`the walk of ${coverage.root} enumerated NO files`]
+  }
+  if (coverage.read.length === 0) {
+    return [`all ${coverage.enumerated.length} enumerated files vanished before they could be read`]
+  }
+  return []
+}
+
+/** FLOOR 1 — WALK vs DISK. Catches the walk itself dropping a subtree, which no
+ *  enumeration-derived check can see: the files are absent from BOTH the
+ *  enumerated and the read set. The re-probe runs only for subtrees ABSENT from
+ *  the enumeration, so it costs nothing normally, and a subtree that vanished
+ *  outright probes empty — no false red. */
+const walkVsDiskProblems = (coverage: WalkCoverage): string[] => {
+  let children: readonly string[]
+  try {
+    children = readdirSync(coverage.root, { withFileTypes: true })
+      .filter((e) => e.isDirectory() && e.name !== "__tests__")
+      .map((e) => e.name)
+  } catch (err) {
+    if (!isEnoent(err)) throw err
+    return [`the walk root ${coverage.root} no longer exists`]
+  }
+  const problems: string[] = []
+  for (const child of children) {
+    if (coverage.enumeratedSubtrees.has(child)) continue
+    const probe = walkSliceTsFiles(
+      join(coverage.root, child),
+      coverage.includeBackupArtifacts,
+      false,
+    )
+    if (probe.length > 0) {
+      problems.push(
+        `subtree "${child}/" holds ${probe.length} scannable file(s) on disk but the walk enumerated NONE of them`,
+      )
+    }
+  }
+  return problems
+}
+
+/** FLOOR 2 — READ vs WALK. Catches a subtree lost entirely to ENOENT skips. */
+const readVsWalkProblems = (coverage: WalkCoverage): string[] => {
+  const problems: string[] = []
+  for (const [subtree, enumerated] of coverage.enumeratedSubtrees) {
+    if ((coverage.readSubtrees.get(subtree) ?? 0) === 0) {
+      problems.push(
+        `subtree "${subtree}/" enumerated ${enumerated} file(s) but NONE were read (all vanished)`,
+      )
+    }
+  }
+  return problems
+}
+
+export const assertWalkFloor = (coverage: WalkCoverage, label: string): void => {
+  const problems = [
+    ...vacuityProblems(coverage),
+    ...walkVsDiskProblems(coverage),
+    ...readVsWalkProblems(coverage),
+  ]
+  if (problems.length === 0) return
+  throw new Error(
+    `FLOOR VIOLATION — ${label} scanned a tree it did not actually cover, so a green ` +
+      `result here proves nothing:\n\n${problems.map((p) => `- ${p}`).join("\n")}\n\n` +
+      `root=${coverage.root} enumerated=${coverage.enumerated.length} ` +
+      `read=${coverage.read.length} vanished=${coverage.vanished.length}`,
+  )
+}
 
 const parseSourceFile = (src: string): ts.SourceFile =>
   ts.createSourceFile(
@@ -287,23 +533,29 @@ export const extractTypeOnlyModuleRefs = (src: string): Array<{ line: number; sp
   return out
 }
 
-export const scanLines = (src: string, pattern: RegExp): Array<{ line: number; hit: string }> => {
-  const out: Array<{ line: number; hit: string }> = []
-  const stripped = stripComments(src)
-  const lines = stripped.split("\n")
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i] ?? ""
-    if (line.length === 0) continue
-    const re = pattern.global ? pattern : new RegExp(pattern.source, `${pattern.flags}g`)
-    re.lastIndex = 0
-    let m: RegExpExecArray | null
-    // biome-ignore lint/suspicious/noAssignInExpressions: stdlib regex API
-    while ((m = re.exec(line)) !== null) {
-      out.push({ line: i + 1, hit: m[0] })
-    }
-  }
-  return out
-}
+/**
+ * DELETED, not converted: `scanLines` and the local `stripComments` it was the
+ * sole consumer of.
+ *
+ * The local stripper was the naive two-regex form, defeated by a `/*` inside a
+ * string literal or a regex character class. MEASURED against a real
+ * `process.env` violation: the bare source gave `scanLines` 1 hit; wrapping it
+ * in `const A = "/*"` … `const B = "*​/"` — and, separately, in `const A = /[/*]/`
+ * … `const B = /[*​/]/` — gave 0 hits both times, i.e. the guard reported clean
+ * over a violation it was looking straight at.
+ *
+ * The obvious repair was to import the shared quoting- AND regex-literal-aware
+ * scanner from `tests/unit/_shared/strip-comments.ts`. But converting it would
+ * have been work on DEAD CODE: `scanLines` had ZERO callers anywhere in the
+ * repo (`grep -rn scanLines tests src tools` matched only its own definition),
+ * and `stripComments` here had exactly one caller — `scanLines`. Nothing else
+ * in the repo imported either symbol from this module. Both are gone; every
+ * live scan in this file is AST-based (`collectAstHits`), which never had the
+ * comment-stripping problem in the first place.
+ *
+ * This is why `tests/unit/_arch/slice-boundary-scanner.ts` no longer appears in
+ * the burn-down list in `comment-scanner-burndown-ratchet.test.ts`.
+ */
 
 const isDeniedImport = (
   spec: string,
@@ -459,6 +711,18 @@ export const registerSliceBoundarySuite = (config: SliceBoundaryConfig): void =>
   describe(`@/${config.slice} — architecture guard`, () => {
     const files = listSliceTsFiles(dir, includeBackup)
 
+    /**
+     * ONE read pass for ONE arm, with the floor asserted before the arm is
+     * allowed to draw a conclusion. Every arm below goes through this — a
+     * vanished file no longer takes the read site down, and in exchange no arm
+     * may reach "no violations" over a tree it did not actually cover.
+     */
+    const scanned = (arm: string): readonly WalkedFile[] => {
+      const { files: read, coverage } = readWalkedFiles(dir, files, includeBackup)
+      assertWalkFloor(coverage, `@/${config.slice} — ${arm}`)
+      return read
+    }
+
     test("at least one file in the slice (sanity)", () => {
       expect(files.length).toBeGreaterThan(0)
     })
@@ -467,8 +731,7 @@ export const registerSliceBoundarySuite = (config: SliceBoundaryConfig): void =>
       "no file imports from any `apps/**` (surface isolation, incl. type-position)",
       () => {
         const violations: string[] = []
-        for (const f of files) {
-          const src = readFileSync(f, "utf8")
+        for (const { file: f, src } of scanned("surface isolation")) {
           // Runtime imports (value `import`/`export … from`, dynamic `import()`)…
           for (const { line, spec } of extractImports(src)) {
             if (isSurfaceSpec(spec)) {
@@ -499,8 +762,8 @@ export const registerSliceBoundarySuite = (config: SliceBoundaryConfig): void =>
 
     test("no file imports from the slice deny-list", () => {
       const violations: string[] = []
-      for (const f of files) {
-        for (const { line, spec } of extractImports(readFileSync(f, "utf8"))) {
+      for (const { file: f, src } of scanned("deny-list")) {
+        for (const { line, spec } of extractImports(src)) {
           if (isDeniedImport(spec, deny, allow)) {
             violations.push(`${relative(dir, f)}:${line}  import "${spec}"`)
           }
@@ -513,9 +776,9 @@ export const registerSliceBoundarySuite = (config: SliceBoundaryConfig): void =>
 
     test("no file reads process.env or process.argv (must take plain config)", () => {
       const violations: string[] = []
-      for (const f of files) {
+      for (const { file: f, src } of scanned("process.env / argv")) {
         if (isEnvAllowed(envAllow, dir, f)) continue
-        for (const { line, hit } of scanProcessEnvArgv(readFileSync(f, "utf8"))) {
+        for (const { line, hit } of scanProcessEnvArgv(src)) {
           violations.push(`${relative(dir, f)}:${line}  ${hit}`)
         }
       }
@@ -528,10 +791,10 @@ export const registerSliceBoundarySuite = (config: SliceBoundaryConfig): void =>
 
     test("no file touches process.stdin / process.stdout / process.stderr", () => {
       const violations: string[] = []
-      for (const f of files) {
+      for (const { file: f, src } of scanned("process stdio")) {
         const leaf = leafName(dir, f)
         if (stdioAllow.has(leaf)) continue
-        for (const { line, hit } of scanProcessStdio(readFileSync(f, "utf8"))) {
+        for (const { line, hit } of scanProcessStdio(src)) {
           violations.push(`${relative(dir, f)}:${line}  ${hit}`)
         }
       }
@@ -544,10 +807,10 @@ export const registerSliceBoundarySuite = (config: SliceBoundaryConfig): void =>
 
     test("no file calls console.log / error / warn / info / debug / dir / trace", () => {
       const violations: string[] = []
-      for (const f of files) {
+      for (const { file: f, src } of scanned("console.*")) {
         const leaf = leafName(dir, f)
         if (consoleAllow.has(leaf)) continue
-        for (const { line, hit } of scanConsoleCalls(readFileSync(f, "utf8"))) {
+        for (const { line, hit } of scanConsoleCalls(src)) {
           violations.push(`${relative(dir, f)}:${line}  ${hit}`)
         }
       }
@@ -558,8 +821,8 @@ export const registerSliceBoundarySuite = (config: SliceBoundaryConfig): void =>
 
     test("no alt-runtime ENV/argv (Bun / Deno / import.meta.env / globalThis.process.*)", () => {
       const violations: string[] = []
-      for (const f of files) {
-        for (const { line, hit } of scanAltRuntimeEnvArgv(readFileSync(f, "utf8"))) {
+      for (const { file: f, src } of scanned("alt-runtime ENV/argv")) {
+        for (const { line, hit } of scanAltRuntimeEnvArgv(src)) {
           violations.push(`${relative(dir, f)}:${line}  ${hit}`)
         }
       }
@@ -572,8 +835,8 @@ export const registerSliceBoundarySuite = (config: SliceBoundaryConfig): void =>
 
     test("no surface-coupled node modules (node:readline / tty / repl)", () => {
       const violations: string[] = []
-      for (const f of files) {
-        for (const { line, spec } of extractImports(readFileSync(f, "utf8"))) {
+      for (const { file: f, src } of scanned("node surface modules")) {
+        for (const { line, spec } of extractImports(src)) {
           if (NODE_SURFACE_MODULES.has(spec)) {
             violations.push(`${relative(dir, f)}:${line}  import "${spec}"`)
           }
@@ -598,8 +861,8 @@ export const registerSliceBoundarySuite = (config: SliceBoundaryConfig): void =>
     // outer `timeout` on the suite command.
     test("no `node:process` named imports", () => {
       const violations: string[] = []
-      for (const f of files) {
-        for (const { line, hit } of scanNodeProcessNamedImports(readFileSync(f, "utf8"))) {
+      for (const { file: f, src } of scanned("node:process named imports")) {
+        for (const { line, hit } of scanNodeProcessNamedImports(src)) {
           violations.push(`${relative(dir, f)}:${line}  ${hit}`)
         }
       }

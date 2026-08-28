@@ -5,12 +5,13 @@
  */
 
 import { describe, expect, test } from "bun:test"
-import { readFileSync } from "node:fs"
 import { relative } from "node:path"
 import { getSliceBoundaryConfig } from "./_arch/slice-boundary-configs"
 import {
+  assertWalkFloor,
   extractTypeOnlyModuleRefs,
   listSliceTsFiles,
+  readWalkedFiles,
   registerSliceBoundarySuite,
   sliceDir,
 } from "./_arch/slice-boundary-scanner"
@@ -42,10 +43,28 @@ const isLlmBarrelSpec = (spec: string): boolean => spec === "@/llm"
 describe("@/protocol — leaf slice must not up-import the @/llm barrel (type-position)", () => {
   const dir = sliceDir("protocol")
 
+  /**
+   * Enumerate + read with the mid-run-deletion TOCTOU closed, and THE FLOOR
+   * asserted before the arm may conclude "no violations".
+   *
+   * `readWalkedFiles` skips only a WALK-DERIVED path that vanished; that skip
+   * makes "read nothing, pass" reachable, so `assertWalkFloor` demands the read
+   * set still cover every sub-directory of `src/protocol/` that the walk saw
+   * (and every one that is on disk) — a bare non-zero count would not notice
+   * `protocol/session/**` dropping out, which is exactly the subtree this guard
+   * exists to police.
+   */
+  const scanned = (arm: string) => {
+    const enumerated = listSliceTsFiles(dir, false)
+    const { files, coverage } = readWalkedFiles(dir, enumerated, false)
+    assertWalkFloor(coverage, `@/protocol leaf barrel guard — ${arm}`)
+    return { files, coverage }
+  }
+
   test("no protocol file type-imports the `@/llm` barrel (use `@/llm/types` leaf)", () => {
     const violations: string[] = []
-    for (const f of listSliceTsFiles(dir, false)) {
-      for (const { line, spec } of extractTypeOnlyModuleRefs(readFileSync(f, "utf8"))) {
+    for (const { file: f, src } of scanned("llm barrel").files) {
+      for (const { line, spec } of extractTypeOnlyModuleRefs(src)) {
         if (isLlmBarrelSpec(spec)) {
           violations.push(`${relative(dir, f)}:${line}  type-import "${spec}"`)
         }
@@ -69,5 +88,14 @@ describe("@/protocol — leaf slice must not up-import the @/llm barrel (type-po
     expect(isLlmBarrelSpec("@/llm/types")).toBe(false)
     expect(isLlmBarrelSpec("@/shared")).toBe(false)
     expect(isLlmBarrelSpec("@/llm/adapters/anthropic")).toBe(false)
+  })
+
+  test("FLOOR: the leaf scan covered every sub-tree of src/protocol", () => {
+    const { coverage } = scanned("floor")
+    expect(coverage.read.length).toBeGreaterThan(0)
+    const unread = [...coverage.enumeratedSubtrees.keys()].filter(
+      (s) => (coverage.readSubtrees.get(s) ?? 0) === 0,
+    )
+    expect(unread, "enumerated but entirely unread sub-trees of src/protocol").toEqual([])
   })
 })
