@@ -39,26 +39,26 @@ describe("T5 batch SDK parity", () => {
     // so aggregate the barrel + every `driver/*.ts` lane source (dir absent
     // pre-split ⇒ just the barrel).
     const APP_DRIVER_DIR = join(REPO_ROOT, "src/apps/bench/eval/driver")
+    // Enumerated ONCE: the floor below and the source blob read the same list,
+    // so a lane that goes unread cannot pass the floor and vanish from the blob.
+    const laneFiles = existsSync(APP_DRIVER_DIR)
+      ? readdirSync(APP_DRIVER_DIR)
+          .filter((f) => f.endsWith(".ts") && !f.endsWith(".test.ts"))
+          .map((f) => join(APP_DRIVER_DIR, f))
+      : []
     const source = [
       readFileSync(join(REPO_ROOT, "src/apps/bench/eval/driver.ts"), "utf8"),
-      ...(existsSync(APP_DRIVER_DIR)
-        ? readdirSync(APP_DRIVER_DIR)
-            .filter((f) => f.endsWith(".ts") && !f.endsWith(".test.ts"))
-            .map((f) => readFileSync(join(APP_DRIVER_DIR, f), "utf8"))
-        : []),
+      ...laneFiles.map((f) => readFileSync(f, "utf8")),
     ].join("\n")
 
     // `existsSync(APP_DRIVER_DIR) ? … : []` was written for the pre-split tree.
     // The dir exists now, so the fallback no longer means "not yet split", it
     // means "read nothing" — and every `not.toContain` below is satisfied for
     // free by an empty read.
-    assertScanPopulation(
-      readdirSync(APP_DRIVER_DIR)
-        .filter((f) => f.endsWith(".ts") && !f.endsWith(".test.ts"))
-        .map((f) => join(APP_DRIVER_DIR, f)),
-      APP_DRIVER_DIR,
-      { topLevelOnly: true, collectable: (n) => n.endsWith(".ts") && !n.endsWith(".test.ts") },
-    )
+    assertScanPopulation(laneFiles, APP_DRIVER_DIR, {
+      topLevelOnly: true,
+      collectable: (n) => n.endsWith(".ts") && !n.endsWith(".test.ts"),
+    })
 
     expect(source).toContain('from "@/sdk/runtime"')
     expect(source).toContain("await createRuntime(")

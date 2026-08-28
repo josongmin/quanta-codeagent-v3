@@ -12,13 +12,18 @@ const REPO_ROOT = join(import.meta.dir, "..", "..", "..", "..")
 // `.not.toContain` guards below still hold across the aggregate because the
 // lane modules sit one level deeper (`./repair/…`, `../…`), never `./…`.
 const APP_DRIVER_DIR = join(REPO_ROOT, "src/apps/bench/eval/driver")
-const APP_DRIVER_SRC = [
-  readFileSync(join(REPO_ROOT, "src/apps/bench/eval/driver.ts"), "utf8"),
-  ...(existsSync(APP_DRIVER_DIR)
+/** The lane files, enumerated ONCE — the floor below and the source blob read
+ *  the same list, so a lost lane cannot pass the floor and vanish from the blob. */
+const appLaneFiles = (): string[] =>
+  existsSync(APP_DRIVER_DIR)
     ? readdirSync(APP_DRIVER_DIR)
         .filter((f) => f.endsWith(".ts") && !f.endsWith(".test.ts"))
-        .map((f) => readFileSync(join(APP_DRIVER_DIR, f), "utf8"))
-    : []),
+        .map((f) => join(APP_DRIVER_DIR, f))
+    : []
+
+const APP_DRIVER_SRC = [
+  readFileSync(join(REPO_ROOT, "src/apps/bench/eval/driver.ts"), "utf8"),
+  ...appLaneFiles().map((f) => readFileSync(f, "utf8")),
 ].join("\n")
 // The runner core driver was split (jul-02) into `./driver/*` submodules (pure
 // code motion). The regression-oracle / repo-regression-discovery adapter wiring
@@ -26,11 +31,14 @@ const APP_DRIVER_SRC = [
 // which import via `../` since they sit one level deeper. Aggregate the barrel +
 // all submodule sources so the SSOT invariant is unchanged by the file split.
 const DRIVER_DIR = join(REPO_ROOT, "src/runner/batch/eval/driver")
+const sharedLaneFiles = (): string[] =>
+  readdirSync(DRIVER_DIR)
+    .filter((f) => f.endsWith(".ts"))
+    .map((f) => join(DRIVER_DIR, f))
+
 const SHARED_DRIVER_SRC = [
   readFileSync(join(REPO_ROOT, "src/runner/batch/eval/driver.ts"), "utf8"),
-  ...readdirSync(DRIVER_DIR)
-    .filter((f) => f.endsWith(".ts"))
-    .map((f) => readFileSync(join(DRIVER_DIR, f), "utf8")),
+  ...sharedLaneFiles().map((f) => readFileSync(f, "utf8")),
 ].join("\n")
 
 describe("apps bench driver shared verify-select adapters", () => {
@@ -40,17 +48,11 @@ describe("apps bench driver shared verify-select adapters", () => {
     // means "read nothing", and every `toContain` below would then be asserted
     // against the barrel alone while the wiring it pins sits unread in the lane
     // modules. Same for a `not.toContain`, which an empty read satisfies for free.
-    const app = readdirSync(APP_DRIVER_DIR)
-      .filter((f) => f.endsWith(".ts") && !f.endsWith(".test.ts"))
-      .map((f) => join(APP_DRIVER_DIR, f))
-    assertScanPopulation(app, APP_DRIVER_DIR, {
+    assertScanPopulation(appLaneFiles(), APP_DRIVER_DIR, {
       topLevelOnly: true,
       collectable: (n) => n.endsWith(".ts") && !n.endsWith(".test.ts"),
     })
-    const shared = readdirSync(DRIVER_DIR)
-      .filter((f) => f.endsWith(".ts"))
-      .map((f) => join(DRIVER_DIR, f))
-    assertScanPopulation(shared, DRIVER_DIR, {
+    assertScanPopulation(sharedLaneFiles(), DRIVER_DIR, {
       topLevelOnly: true,
       collectable: (n) => n.endsWith(".ts"),
     })
