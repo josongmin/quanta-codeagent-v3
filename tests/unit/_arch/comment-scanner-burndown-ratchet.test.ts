@@ -103,8 +103,6 @@ const REMAINING: readonly string[] = [
   "tests/unit/_arch/repo-path-anchor-ratchet.test.ts",
   "tests/unit/_shared/strip-comments.ts",
   "tests/unit/activity/activity-store-constructor-owner-ratchet.test.ts",
-  "tests/unit/agent-import-cycle-hellgate.test.ts",
-  "tests/unit/agent-import-cycle.test.ts",
   "tests/unit/apps/bench/promax/promax-bootstrap-phase-reachability.test.ts",
   "tests/unit/apps/cli/cli-feature-config-hellgate.test.ts",
   "tests/unit/apps/headless/headless-second-consumer-hellgate.test.ts",

@@ -2,22 +2,34 @@
  * Static guard against module-init deadlocks in `src/agent/*.ts`.
  *
  * ## Background
- * `src/agent/` has a known value-level import cycle, tolerated because the
- * cross-edge values (`runAgent`, `createSubagentRunner`, `buildBranchSearch
- * Tool`, `buildSessionFeatures`) are ONLY referenced at runtime — never
- * evaluated at module top-level. The cycle as a single strongly-connected
- * component is:
+ * `src/agent/` has known value-level import cycles, tolerated because the
+ * cross-edge values are ONLY referenced at runtime — never evaluated at module
+ * top-level. Referencing a cycle-partner's binding while the module body is
+ * still running is an ESM circular-init TDZ crash / deadlock; this test seals
+ * that invariant for every ring on {@link WHITELIST}.
  *
- *   { features.ts, loop.ts, subagent-runner.ts, branch-search-runner.ts }
+ * ## KNOWN SCOPE GAP — read before trusting a green run
+ * The graph below is built over the FLAT `src/agent/*.ts` listing only:
+ * {@link resolveRelTarget} maps any specifier containing a `/`
+ * (`./loop/entry`, `./tier1/subagent`) to `null`, i.e. an external node that
+ * can never close a ring. The historical
+ * `{features, loop, subagent-runner, branch-search-runner}` SCC is therefore
+ * NOT dissolved — it is INVISIBLE. The value ring is intact today:
  *
- * Conceptually this is two overlapping rings sharing the loop↔features edge:
+ *   subagent-runner.ts  --runAgent-->              loop.ts (14-line barrel)
+ *   loop.ts             --re-export-->             loop/entry.ts
+ *   loop/entry.ts       --createRunAgentContext--> loop/session-bootstrap.ts
+ *   loop/session-bootstrap.ts --buildSessionFeatures--> features.ts
+ *   features.ts         --createSubagentRunner-->  tier1/subagent.ts
+ *   tier1/subagent.ts   --createSubagentRunner-->  subagent-runner.ts
  *
- *   (1) features.ts → subagent-runner.ts → loop.ts → features.ts
- *   (2) features.ts → branch-search-runner.ts → loop.ts → features.ts
- *
- * Tarjan collapses them into one SCC; we whitelist the SCC, not each ring.
- * Future ESM-aware bundlers (or a stray module-top-level call) could turn the
- * cycle into a deadlock — this test seals the invariant.
+ * Every hop is a VALUE edge. Two barrel/subdirectory hops (`./loop/*`,
+ * `./tier1/*`) are all that keep it out of this analysis, so assertions (a)
+ * and (b) pass vacuously for that ring and assertion (c) never scans it.
+ * Widening the walk to recurse into `src/agent/ ** / *.ts` is the real fix and
+ * is deliberately NOT done here (it re-surfaces the ring and needs its own
+ * reviewed whitelist entry) — but do not read a green run as "src/agent has
+ * only the two whitelisted cycles".
  *
  * ## What this test enforces
  * - Build the value-import graph of `src/agent/*.ts` (TS-files only, not
@@ -30,7 +42,10 @@
  *         relax the guard), OR
  *     (c) any edge inside a whitelisted SCC's ring uses the imported symbol
  *         at module top-level (synchronous, outside a function body) — that
- *         IS the deadlock condition.
+ *         IS the deadlock condition. Scanned with the TypeScript AST; see
+ *         {@link findTopLevelUsage} for why a regex/brace-depth scanner was
+ *         removed (it silently stopped scanning at the first `from`-less
+ *         top-level `export` and was inert on all four whitelisted files).
  *
  * ## What counts as a "value edge"
  * - `import type { ... } from "./x"`         — IGNORED (type-only, erased).
@@ -50,6 +65,7 @@
 import { describe, expect, test } from "bun:test"
 import { readdirSync, readFileSync, statSync } from "node:fs"
 import { join } from "node:path"
+import ts from "typescript"
 
 const AGENT_DIR = join(import.meta.dir, "..", "..", "src", "agent")
 
@@ -63,11 +79,11 @@ const AGENT_DIR = join(import.meta.dir, "..", "..", "src", "agent")
  *    barrel. Safe because every reference lives in a function body.
  *
  *  NOTE: the historical `{branch-search-runner, features, loop, subagent-
- *  runner}` SCC was eliminated by splitting `features.ts` into per-subsystem
- *  builders under `src/agent/tier1/*` (refactor: features → tier1/). Because
- *  `features.ts` now only imports value-symbols from the `./tier1/` sub-
- *  directory — which this analysis treats as external nodes — the return
- *  edges that closed the ring are gone and the SCC dissolved. */
+ *  runner}` SCC is absent from this list because the `features.ts → tier1/*`
+ *  split and the `loop.ts → loop/entry.ts` barrel put every return edge behind
+ *  a subdirectory hop, which this flat analysis treats as an external node.
+ *  The ring itself still exists in the real module graph — see "KNOWN SCOPE
+ *  GAP" in the file header. It is out of scope, not gone. */
 const WHITELIST: ReadonlyArray<ReadonlyArray<string>> = [
   ["conversation-action.ts", "steering.ts"],
   // RFC04 MCP hot-reload: mcp-reload-source re-uses mcp-bridge's converters
@@ -212,7 +228,7 @@ const listAgentFiles = (): string[] => {
 /** Tarjan's SCC: returns SCCs of size ≥ 2 only (we don't care about
  *  self-loops here; none exist in TS imports anyway). Each SCC's nodes are
  *  sorted alphabetically for deterministic comparison. */
-const findSCCs = (nodes: string[], edges: Map<string, Set<string>>): string[][] => {
+export const findSCCs = (nodes: string[], edges: Map<string, Set<string>>): string[][] => {
   let index = 0
   const idx = new Map<string, number>()
   const low = new Map<string, number>()
@@ -251,81 +267,110 @@ const findSCCs = (nodes: string[], edges: Map<string, Set<string>>): string[][] 
   return sccs.sort((a, b) => a.join(",").localeCompare(b.join(",")))
 }
 
-/** Heuristic top-level-usage scanner. For each `name` we want to ensure it is
- *  NOT referenced at module top-level (outside any function/class/arrow body).
- *  We approximate by tracking brace depth: depth 0 = module top-level. Within
- *  a depth-0 statement, a token match for `name` followed by `(` is a
- *  module-top-level call (the deadlock condition). A bare reference at depth
- *  0 (e.g. `export const X = name`) is also flagged — referencing the binding
- *  at module-eval still forces the other module to finish initializing.
- *  Type-position usage (after `:` until the next `=` / `,` / `;` / `)` at the
- *  same depth) is ignored.
- *
- *  This is approximate (no AST) but is good enough for a guardrail: false
- *  positives can be addressed by giving the binding a private alias used
- *  only inside a function body. */
-/** Strip both `/* ... *\/` block comments and `// ...` line comments while
- *  preserving line numbers (each stripped char is replaced with a space; only
- *  newlines survive). Critical: naive per-line stripping misses doc-comments
- *  that span lines, leading to false-positive hits on doc-comment tokens. */
-const stripComments = (src: string): string[] => {
-  const noBlock = src.replace(/\/\*[\s\S]*?\*\//g, (m) => m.replace(/[^\n]/g, " "))
-  return noBlock.split(/\r?\n/).map((l) => l.replace(/\/\/.*$/, "").trim())
-}
-
 /** Translate name decorations (`default:X` / `*:ns`) back to the local binding
  *  identifier visible in the source. */
-const toLocalName = (n: string): string => {
+export const toLocalName = (n: string): string => {
   if (n.startsWith("default:")) return n.slice("default:".length)
   if (n.startsWith("*:")) return n.slice("*:".length)
   return n
 }
 
-/** Update brace/paren/bracket depth across one line's characters. Returns the
- *  depth AFTER the line. */
-const advanceDepth = (line: string, depth: number): number => {
-  let d = depth
-  for (const ch of line) {
-    if (ch === "{" || ch === "(" || ch === "[") d++
-    else if (ch === "}" || ch === ")" || ch === "]") d = Math.max(0, d - 1)
-  }
-  return d
+/** ── module-top-level usage scanner (TypeScript AST) ────────────────────────
+ *
+ *  For each `name` we must ensure it is NOT *evaluated* while the module body
+ *  runs — that is the ESM circular-init TDZ deadlock condition. Anything that
+ *  only runs later (a function/arrow/method body, an instance field
+ *  initializer) is safe.
+ *
+ *  HISTORY — why this is an AST walk and not a regex/brace-depth heuristic.
+ *  The previous implementation tracked an `inImport` latch that was set on
+ *  ANY depth-0 line starting with `import` or `export`, and cleared only on a
+ *  line carrying a quoted module specifier after `from`. A `from`-less
+ *  top-level `export` (`export const f = (`, `export interface X {`,
+ *  `export type T =`, `export { a, b }`) therefore latched the scanner ON for
+ *  the ENTIRE REST OF THE FILE, so every statement after it was skipped and
+ *  the assertion below was inert. Measured on the four whitelisted files the
+ *  latch fired at conversation-action.ts:64, steering.ts:40, mcp-bridge.ts:80
+ *  and mcp-reload-source.ts:43 — i.e. the guard scanned only the file preamble
+ *  in every single case, and a planted `const __eager = mcpToolToTool` at the
+ *  bottom of mcp-reload-source.ts was invisible.
+ *
+ *  The latch existed to stop symbol names on the continuation lines of a
+ *  multi-line `import { … } from "…"` block from being reported. The AST gives
+ *  that for free: import/export *declarations* are skipped as whole nodes, so
+ *  multi-line imports stay correctly excluded without any cross-line state. */
+
+/** Bodies that evaluate at CALL time, never at module init. */
+const isLazyContainer = (n: ts.Node): boolean =>
+  ts.isFunctionDeclaration(n) ||
+  ts.isFunctionExpression(n) ||
+  ts.isArrowFunction(n) ||
+  ts.isMethodDeclaration(n) ||
+  ts.isGetAccessorDeclaration(n) ||
+  ts.isSetAccessorDeclaration(n) ||
+  ts.isConstructorDeclaration(n) ||
+  // Instance field initializers run at construction time, not module init.
+  (ts.isPropertyDeclaration(n) &&
+    !(n.modifiers ?? []).some((m) => m.kind === ts.SyntaxKind.StaticKeyword))
+
+/** Declaration forms whose identifier mentions are BINDINGS or re-export
+ *  specifiers — never a module-init evaluation. `export { foo }` (with or
+ *  without a `from` clause) creates a live binding; it does not read `foo`. */
+const isBindingOnly = (n: ts.Node): boolean =>
+  ts.isImportDeclaration(n) ||
+  ts.isImportEqualsDeclaration(n) ||
+  ts.isExportDeclaration(n) ||
+  ts.isTypeAliasDeclaration(n) ||
+  ts.isInterfaceDeclaration(n) ||
+  ts.isModuleDeclaration(n) ||
+  ts.isTypeNode(n)
+
+/** True when this identifier is a genuine value *reference*, not a property
+ *  key, a member name, or the name half of a declaration.
+ *
+ *  Table-driven on the parent's slot rather than a per-kind `if` chain: every
+ *  non-reference position is either a `propertyName` / `label` / qualified-name
+ *  `right` slot, or the `name` slot of a declaration. The single `name`-slot
+ *  exception is a shorthand property (`const o = { foo }`), which DOES read the
+ *  binding at module init. */
+const isReferencePosition = (id: ts.Identifier): boolean => {
+  const p: ts.Node | undefined = id.parent
+  if (!p) return true
+  const slots = p as { name?: ts.Node; propertyName?: ts.Node; label?: ts.Node; right?: ts.Node }
+  if (slots.propertyName === id || slots.label === id) return false
+  if (ts.isQualifiedName(p) && slots.right === id) return false
+  if (slots.name !== id) return true
+  return ts.isShorthandPropertyAssignment(p)
 }
 
-const findTopLevelUsage = (src: string, names: string[]): { name: string; line: number }[] => {
+export const findTopLevelUsage = (
+  src: string,
+  names: string[],
+): { name: string; line: number }[] => {
   if (names.length === 0) return []
-  const stripped = stripComments(src)
-  const localNames = names.map(toLocalName)
+  const wanted = new Set(names.map(toLocalName).filter((n) => n.length > 0))
+  if (wanted.size === 0) return []
+  const sf = ts.createSourceFile(
+    "scan.ts",
+    src,
+    ts.ScriptTarget.Latest,
+    /* setParentNodes */ true,
+    ts.ScriptKind.TS,
+  )
   const hits: { name: string; line: number }[] = []
-  let depth = 0
-  let inImport = false
-  let inExportType = false
-  for (let i = 0; i < stripped.length; i++) {
-    const line = stripped[i] ?? ""
-    if (depth === 0 && /^(import|export)\b/.test(line)) {
-      inImport = true
-      inExportType = /^export\s+type\b/.test(line)
+  const visit = (node: ts.Node): void => {
+    if (isBindingOnly(node) || isLazyContainer(node)) return
+    if (ts.isIdentifier(node) && wanted.has(node.text) && isReferencePosition(node)) {
+      hits.push({
+        name: node.text,
+        line: sf.getLineAndCharacterOfPosition(node.getStart(sf)).line + 1,
+      })
     }
-    const before = depth
-    depth = advanceDepth(line, depth)
-    if (inImport && /\bfrom\b/.test(line) && /["'][^"']+["']/.test(line)) {
-      inImport = false
-      inExportType = false
-      continue
-    }
-    if (inImport || inExportType) continue
-    // Flag only when statement lives entirely at module top-level (depth 0
-    // before AND after) — avoids false-positives on `const f = () => { ... }`.
-    if (before !== 0 || depth !== 0) continue
-    for (const n of localNames) {
-      const re = new RegExp(`(^|[^\\w.])${escapeReg(n)}(?![\\w$])`)
-      if (re.test(line)) hits.push({ name: n, line: i + 1 })
-    }
+    node.forEachChild(visit)
   }
+  sf.forEachChild(visit)
   return hits
 }
-
-const escapeReg = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
 
 describe("agent module import cycles", () => {
   const files = listAgentFiles()

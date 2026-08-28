@@ -39,108 +39,40 @@
  *   18. Token-boundary: `obj.foo` must NOT trigger (preceded by `.`)
  *   19. Default-import binding `default:X` → scan strips prefix and finds `X`
  *   20. Namespace-import binding `*:ns` → scan strips prefix and finds `ns`
+ *   21. LATCH REGRESSION — a `from`-less top-level `export` (`export const f =
+ *      (`) must NOT blind the scanner to the rest of the file. This is the
+ *      defect that made the sibling's assertion (c) inert: `inImport` was set
+ *      on any depth-0 `import|export` line and cleared only by a quoted module
+ *      specifier after `from`, so `export const …` swallowed every following
+ *      line. Measured before the fix on the four whitelisted files, the latch
+ *      fired at conversation-action.ts:64, steering.ts:40, mcp-bridge.ts:80,
+ *      mcp-reload-source.ts:43 — and the set of eager-reference lines the old
+ *      scanner reached was fully DISJOINT from the lines that actually carry
+ *      module-init references (0 of 10 / 8 / 7 / 5).
+ *   22. LATCH REGRESSION — `export interface`/`export type` preamble likewise
+ *      must not swallow a later eager usage.
+ *   23. Multi-line `import { … } from "…"` continuation lines still produce NO
+ *      hits (what the latch legitimately protected — the fix must not trade
+ *      one defect for the other).
+ *   24. `export { foo }` with NO `from` clause is a live re-export BINDING, not
+ *      a module-init read → NOT flagged, and does not swallow the file.
+ *   25. Multi-line `export type T = …` union does not swallow the file.
+ *   26. Eager usage in a STATIC class field IS flagged; the same usage in an
+ *      instance field / method body is NOT.
  */
 import { describe, expect, test } from "bun:test"
 
 // ─────────────────────────────────────────────────────────────────────────────
-// VERBATIM COPY of the two algorithms under test. Kept private to this file
-// so the hellgate is self-contained AND it pins the exact shape currently
-// under audit — if the sibling test drifts the algorithms, this file's copy
-// stays as the recorded reference and the divergence is intentionally
-// visible at code-review time.
+// SINGLE SOURCE OF TRUTH. This file used to carry a VERBATIM COPY of
+// `findSCCs` / `findTopLevelUsage`. That copy is why the `inImport`-latch
+// defect survived: the scanner existed in two places, so "fixed in one place"
+// meant "still broken in the other", and the hellgate — the very battery whose
+// job is to prove the guard binds — was asserting against its own stale twin.
+// The primitives are now IMPORTED from the sibling. ESM caches the module, so
+// the sibling's two real-source `describe`s register exactly once per process
+// regardless of load order; running this file alone simply also runs them.
 // ─────────────────────────────────────────────────────────────────────────────
-
-const findSCCs = (nodes: string[], edges: Map<string, Set<string>>): string[][] => {
-  let index = 0
-  const idx = new Map<string, number>()
-  const low = new Map<string, number>()
-  const onStack = new Set<string>()
-  const stack: string[] = []
-  const sccs: string[][] = []
-
-  const strongconnect = (v: string): void => {
-    idx.set(v, index)
-    low.set(v, index)
-    index++
-    stack.push(v)
-    onStack.add(v)
-    for (const w of edges.get(v) ?? new Set<string>()) {
-      if (!idx.has(w)) {
-        strongconnect(w)
-        low.set(v, Math.min(low.get(v) ?? 0, low.get(w) ?? 0))
-      } else if (onStack.has(w)) {
-        low.set(v, Math.min(low.get(v) ?? 0, idx.get(w) ?? 0))
-      }
-    }
-    if ((low.get(v) ?? 0) === (idx.get(v) ?? 0)) {
-      const comp: string[] = []
-      let w: string | undefined
-      do {
-        w = stack.pop()
-        if (w === undefined) break
-        onStack.delete(w)
-        comp.push(w)
-      } while (w !== v)
-      if (comp.length >= 2) sccs.push(comp.sort())
-    }
-  }
-
-  for (const v of nodes) if (!idx.has(v)) strongconnect(v)
-  return sccs.sort((a, b) => a.join(",").localeCompare(b.join(",")))
-}
-
-const stripComments = (src: string): string[] => {
-  const noBlock = src.replace(/\/\*[\s\S]*?\*\//g, (m) => m.replace(/[^\n]/g, " "))
-  return noBlock.split(/\r?\n/).map((l) => l.replace(/\/\/.*$/, "").trim())
-}
-
-const toLocalName = (n: string): string => {
-  if (n.startsWith("default:")) return n.slice("default:".length)
-  if (n.startsWith("*:")) return n.slice("*:".length)
-  return n
-}
-
-const advanceDepth = (line: string, depth: number): number => {
-  let d = depth
-  for (const ch of line) {
-    if (ch === "{" || ch === "(" || ch === "[") d++
-    else if (ch === "}" || ch === ")" || ch === "]") d = Math.max(0, d - 1)
-  }
-  return d
-}
-
-const escapeReg = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
-
-const findTopLevelUsage = (src: string, names: string[]): { name: string; line: number }[] => {
-  if (names.length === 0) return []
-  const stripped = stripComments(src)
-  const localNames = names.map(toLocalName)
-  const hits: { name: string; line: number }[] = []
-  let depth = 0
-  let inImport = false
-  let inExportType = false
-  for (let i = 0; i < stripped.length; i++) {
-    const line = stripped[i] ?? ""
-    if (depth === 0 && /^(import|export)\b/.test(line)) {
-      inImport = true
-      inExportType = /^export\s+type\b/.test(line)
-    }
-    const before = depth
-    depth = advanceDepth(line, depth)
-    if (inImport && /\bfrom\b/.test(line) && /["'][^"']+["']/.test(line)) {
-      inImport = false
-      inExportType = false
-      continue
-    }
-    if (inImport || inExportType) continue
-    if (before !== 0 || depth !== 0) continue
-    for (const n of localNames) {
-      const re = new RegExp(`(^|[^\\w.])${escapeReg(n)}(?![\\w$])`)
-      if (re.test(line)) hits.push({ name: n, line: i + 1 })
-    }
-  }
-  return hits
-}
+import { findSCCs, findTopLevelUsage } from "./agent-import-cycle.test"
 
 // Small builder: declarative edge list → adjacency map.
 const buildGraph = (edges: ReadonlyArray<readonly [string, string]>): Map<string, Set<string>> => {
@@ -273,15 +205,16 @@ describe("HELLGATE — findTopLevelUsage catches synthetic deadlock conditions",
     expect(hits.some((h) => h.name === "foo" && h.line === 3)).toBe(true)
   })
 
-  test("[10] bare module-top-level reference (non-export statement) is flagged", () => {
-    // Documented limitation of the scanner: lines starting with `export` are
-    // treated as part of an import/export statement until a `from "..."`
-    // terminator is seen — so `export const X = foo` is NOT flagged. The bare
-    // top-level reference must come from a non-`export`/`import` statement.
-    // Below: a top-level `const X = foo` (no `export`) IS caught.
-    const src = ['import { foo } from "./x"', "", "const X = foo"].join("\n")
-    const hits = findTopLevelUsage(src, ["foo"])
-    expect(hits.some((h) => h.line === 3)).toBe(true)
+  test("[10] bare module-top-level reference is flagged, with or without `export`", () => {
+    // Pre-fix this was a "documented limitation": a line starting with
+    // `export` latched the import state machine, so `export const X = foo` was
+    // never scanned. Both forms are real module-init reads and both must be
+    // flagged now.
+    const bare = ['import { foo } from "./x"', "", "const X = foo"].join("\n")
+    expect(findTopLevelUsage(bare, ["foo"]).some((h) => h.line === 3)).toBe(true)
+
+    const exported = ['import { foo } from "./x"', "", "export const X = foo"].join("\n")
+    expect(findTopLevelUsage(exported, ["foo"]).some((h) => h.line === 3)).toBe(true)
   })
 
   test("[11] reference INSIDE a function body is NOT flagged", () => {
@@ -374,6 +307,121 @@ describe("HELLGATE — findTopLevelUsage catches synthetic deadlock conditions",
     const src = ['import * as ns from "./x"', "", "ns.fn()"].join("\n")
     const hits = findTopLevelUsage(src, ["*:ns"])
     expect(hits.some((h) => h.name === "ns" && h.line === 3)).toBe(true)
+  })
+})
+
+// ─────────────────────────────────────────────────────────────────────────────
+// LATCH REGRESSION BATTERY. Every case below FAILS against the pre-fix
+// `inImport` state machine and PASSES against the AST scanner. Cases 23/24/25
+// are the paired control: they pin what the latch legitimately protected, so
+// the fix cannot be "delete the latch and accept the false positives".
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("HELLGATE — a `from`-less export must not blind the rest of the file", () => {
+  test("[21] eager usage AFTER `export const f = (` is still flagged", () => {
+    // Shape of mcp-reload-source.ts: `export const disambiguateMcpToolNames = (`
+    // at L43 latched the old scanner ON for the remaining 109 lines.
+    const src = [
+      'import { foo } from "./x"',
+      "",
+      "export const f = (",
+      "  a: number,",
+      "): number => a + 1",
+      "",
+      "const eager = foo",
+      "void eager",
+    ].join("\n")
+    const hits = findTopLevelUsage(src, ["foo"])
+    expect(hits).toEqual([{ name: "foo", line: 7 }])
+  })
+
+  test("[22] eager usage AFTER `export interface` / `export type` preamble is flagged", () => {
+    // Shape of conversation-action.ts (`export type ConversationAction =` @L64)
+    // and mcp-bridge.ts (`export type ElicitationPrompterFactory = …` @L80).
+    const src = [
+      'import { foo } from "./x"',
+      "",
+      "export interface Opts {",
+      "  a: number",
+      "}",
+      "",
+      'export type Kind = "a" | "b"',
+      "",
+      "foo()",
+    ].join("\n")
+    const hits = findTopLevelUsage(src, ["foo"])
+    expect(hits).toEqual([{ name: "foo", line: 9 }])
+  })
+
+  test("[23] PAIRED CONTROL — multi-line `import { … } from` stays fully skipped", () => {
+    // This is what `inImport` legitimately protected. The AST skips the whole
+    // ImportDeclaration node, so continuation lines cannot produce hits — and
+    // a real eager use after the block still must.
+    const src = [
+      "import {",
+      "  foo,",
+      "  bar,",
+      '} from "./x"',
+      "",
+      "export const ok = () => foo()",
+    ].join("\n")
+    expect(findTopLevelUsage(src, ["foo", "bar"])).toEqual([])
+
+    const withEager = [...src.split("\n"), "", "const eager = bar", "void eager"].join("\n")
+    expect(findTopLevelUsage(withEager, ["foo", "bar"])).toEqual([{ name: "bar", line: 8 }])
+  })
+
+  test("[24] PAIRED CONTROL — `export { foo }` with no `from` is a binding, not a read", () => {
+    // steering.ts:40 is exactly this shape. A re-export creates a live binding;
+    // it never evaluates `foo` at module init, so it must NOT be flagged — and
+    // it must not swallow the file either.
+    const src = [
+      'import { foo } from "./x"',
+      "",
+      "export { foo }",
+      "",
+      "export const ok = () => foo()",
+    ].join("\n")
+    expect(findTopLevelUsage(src, ["foo"])).toEqual([])
+
+    const withEager = [...src.split("\n"), "", "const eager = foo", "void eager"].join("\n")
+    expect(findTopLevelUsage(withEager, ["foo"])).toEqual([{ name: "foo", line: 7 }])
+  })
+
+  test("[25] PAIRED CONTROL — multi-line `export type` union does not swallow the file", () => {
+    const src = [
+      'import { foo } from "./x"',
+      "",
+      "export type Kind =",
+      '  | { kind: "a" }',
+      '  | { kind: "b" }',
+      "",
+      "foo()",
+    ].join("\n")
+    expect(findTopLevelUsage(src, ["foo"])).toEqual([{ name: "foo", line: 7 }])
+  })
+
+  test("[26] static class field IS eager; instance field and method body are NOT", () => {
+    const eager = [
+      'import { foo } from "./x"',
+      "",
+      "export class C {",
+      "  static readonly v = foo",
+      "}",
+    ].join("\n")
+    expect(findTopLevelUsage(eager, ["foo"])).toEqual([{ name: "foo", line: 4 }])
+
+    const lazy = [
+      'import { foo } from "./x"',
+      "",
+      "export class C {",
+      "  readonly v = foo",
+      "  m() {",
+      "    return foo()",
+      "  }",
+      "}",
+    ].join("\n")
+    expect(findTopLevelUsage(lazy, ["foo"])).toEqual([])
   })
 })
 
