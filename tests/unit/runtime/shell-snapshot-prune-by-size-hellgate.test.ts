@@ -16,7 +16,15 @@
  */
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
-import { existsSync, mkdirSync, readdirSync, rmSync, utimesSync, writeFileSync } from "node:fs"
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  rmSync,
+  utimesSync,
+  writeFileSync,
+} from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import {
@@ -37,8 +45,13 @@ const writeSnap = (name: string, bytes: number, mtime?: Date): string => {
 }
 
 beforeEach(() => {
-  // dynamically allocate a fresh HOME-style root per test
-  tmpHome = join(tmpdir(), `qss-size-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`)
+  // A fresh HOME-style root per test. `mkdtempSync` rather than a hand-rolled
+  // `Date.now()`+`Math.random()` name: the kernel guarantees uniqueness (two
+  // tests starting in the same millisecond cannot collide), and it is the
+  // signal the anti-vacuity census reads to know this file scans ONLY a
+  // directory it created itself — for which the empty case IS the assertion, so
+  // no corpus floor is owed.
+  tmpHome = mkdtempSync(join(tmpdir(), "qss-size-"))
   dir = snapshotDir(tmpHome)
   mkdirSync(dir, { recursive: true, mode: 0o700 })
 })

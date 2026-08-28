@@ -76,6 +76,8 @@ const RULES: readonly Rule[] = [
       "apps/cli/fetch-rules-wire.ts":
         "Injection-first: `process.env` is ONLY the default for the injected `env` param (tests pass a fake env); the gate is read off that param via `gateOn(env, ...)`, never a module-level process.env. Same DI-boundary posture as config-migration-notice.ts.",
       "apps/bench/index.ts": "bench CLI has its own dotenv shim; same bootstrap posture as the CLI",
+      "apps/bench/boot-llm-wire.ts":
+        "God-code split of apps/bench/run-main.ts (already allowlisted, at the 1000-line god-MODULE ceiling) — the BOOT question moved here verbatim: `env: process.env` handed to the launch-time provider/model resolution, plus the two QUANTA_BENCH_REASONING_* launch reads. All are call-time arguments into functions that take an env parameter; downstream receives resolved values. Same bench-bootstrap posture as apps/bench/run-main.ts.",
       "apps/bench/run-main.ts":
         "Bench local-run composition root extracted verbatim from apps/bench/index.ts (already allowlisted) — owns the same dotenv shim + QUANTA_BENCH_* / QUANTA_SWEBENCH_* launch-time reads; downstream logic receives resolved values. Same bench-bootstrap posture as apps/bench/index.ts.",
       "apps/bench/run-args.ts":

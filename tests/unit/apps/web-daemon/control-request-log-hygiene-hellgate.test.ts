@@ -29,10 +29,15 @@
  */
 
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test"
+import { mkdtempSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 import { drainControlRequests } from "@/agent/control-request"
+import { createModelRoutingSession } from "@/agent/model-routing"
 import { inMemoryStickyModelStore } from "@/agent/sticky-model"
 import { mintInboundPorts } from "@/apps/web-daemon/runtime-factory/session-collaborators"
 import type { WebModelSwitchHandle } from "@/apps/web-daemon/web-model-switch"
+import type { LLMPort } from "@/llm"
 import type { PermissionContext } from "@/permission"
 import { logger } from "@/shared"
 
@@ -54,8 +59,23 @@ const liveCell = (): PermissionContext => {
  *  Present so an off-catalog id takes the REJECTED branch — without a switch the
  *  planner treats the absent allowlist as "this host opted out of gating models"
  *  and every id is accepted, which is a different wire from the one under test. */
-const modelSwitch = (): WebModelSwitchHandle =>
-  ({
+const modelSwitch = (): WebModelSwitchHandle => {
+  // MR-02 — the handle now carries THE routing owner alongside the loose
+  // migration-window members. Built from the same factory production uses so
+  // this fixture cannot drift from the real shape.
+  const port = {} as unknown as LLMPort
+  const session = createModelRoutingSession({
+    env: {},
+    path: join(mkdtempSync(join(tmpdir(), "ctrl-req-log-")), "sticky-model.json"),
+    provider: "openai",
+    bootModelId: "boot-model",
+    bootPort: port,
+    mode: () => "default",
+    pinned: false,
+    buildPort: () => port,
+  })
+  return {
+    routing: session.authority,
     store: inMemoryStickyModelStore(),
     provider: "openai",
     effectiveModel: () => "boot-model",
@@ -64,7 +84,8 @@ const modelSwitch = (): WebModelSwitchHandle =>
     refresh: async () => {},
     current: async () => "boot-model",
     applyModel: () => {},
-  }) satisfies WebModelSwitchHandle
+  } satisfies WebModelSwitchHandle
+}
 
 /** Only the control-request gate is armed — every other inbound surface in
  *  `mintInboundPorts` stays default-OFF, so this test drives exactly one wire. */

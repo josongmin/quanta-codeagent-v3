@@ -222,6 +222,51 @@ const pinnedByFile = (): Map<string, Map<string, number>> => {
 
 // ---------------------------------------------------------------------------
 
+/**
+ * Read ONLY the `sources` array out of a bun sourcemap.
+ *
+ * NOT `JSON.parse` of the whole file, for a measured reason: bun copies each
+ * source's text into `sourcesContent` WITHOUT re-escaping it, so a source file
+ * whose own comment contains a literal backslash-x (this repo has one — a
+ * sticky-model boot-vetting docstring quoting an ANSI-injection payload
+ * `\x07`) lands in the map as the JSON escape `\x`, which is not a legal
+ * escape. `JSON.parse` then throws "Invalid escape character x" and the ratchet
+ * dies on a defect in a COMMENT, nowhere near what it guards.
+ *
+ * `sources` is a flat array of paths, so a bracket scan that respects string
+ * literals reads it exactly, skips the ~45MB of `sourcesContent` entirely, and
+ * cannot be broken by anything a source file happens to contain.
+ */
+const readMapSources = (mapPath: string): readonly string[] => {
+  const raw = readFileSync(mapPath, "utf8")
+  const key = '"sources"'
+  const at = raw.indexOf(key)
+  if (at === -1) throw new Error(`sourcemap has no "sources" key: ${mapPath}`)
+  const open = raw.indexOf("[", at)
+  if (open === -1) throw new Error(`sourcemap "sources" is not an array: ${mapPath}`)
+  let inString = false
+  let escaped = false
+  for (let i = open + 1; i < raw.length; i += 1) {
+    const c = raw[i]
+    if (escaped) {
+      escaped = false
+      continue
+    }
+    if (c === "\\") {
+      escaped = true
+      continue
+    }
+    if (c === '"') {
+      inString = !inString
+      continue
+    }
+    if (!inString && c === "]") {
+      return JSON.parse(raw.slice(open, i + 1)) as readonly string[]
+    }
+  }
+  throw new Error(`sourcemap "sources" array is unterminated: ${mapPath}`)
+}
+
 describe("compiled-binary asset ratchet", () => {
   test("the scan is not vacuous", () => {
     const { hits, filesScanned } = scanSrc()
@@ -327,7 +372,7 @@ describe("compiled-binary asset ratchet", () => {
         expect(build.exitCode).toBe(0)
 
         const mapPath = join(out, "index.js.map")
-        const map = JSON.parse(readFileSync(mapPath, "utf8")) as { sources: readonly string[] }
+        const map = { sources: readMapSources(mapPath) }
         // Sources are relative to the OUTDIR. macOS hands back `/var/…` for a
         // tmpdir whose real path is `/private/var/…`, and bun may base the walk
         // on either — so resolve against both and union. The size guard below
