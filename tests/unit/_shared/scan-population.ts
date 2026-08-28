@@ -25,6 +25,27 @@ import { join, relative } from "node:path"
  *                           collectable file sitting directly in `root` must
  *                           appear. Same shape, one level.
  */
+interface CoverageProbe {
+  readonly reached: ReadonlySet<string>
+  readonly isSkipped: (name: string) => boolean
+  readonly holdsCollectable: (dir: string) => boolean
+}
+
+/** Directories under `dir` that hold a collectable file but contributed nothing
+ *  to the scan — recursive, and probed from DISK rather than from the walk. */
+const missingSubtrees = (dir: string, rel: string, p: CoverageProbe): string[] => {
+  const out: string[] = []
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    if (!entry.isDirectory() || p.isSkipped(entry.name)) continue
+    const abs = join(dir, entry.name)
+    if (!p.holdsCollectable(abs)) continue
+    const childRel = rel === "" ? entry.name : `${rel}/${entry.name}`
+    if (p.reached.has(childRel)) out.push(...missingSubtrees(abs, childRel, p))
+    else out.push(childRel)
+  }
+  return out
+}
+
 export const assertScanPopulation = (
   files: readonly string[],
   root: string,
@@ -81,17 +102,11 @@ export const assertScanPopulation = (
     for (let i = 1; i < parts.length; i++) reached.add(parts.slice(0, i).join("/"))
   }
 
-  const missed: string[] = []
-  const probe = (dir: string, rel: string): void => {
-    for (const entry of readdirSync(dir, { withFileTypes: true })) {
-      if (!entry.isDirectory() || isSkipped(entry.name)) continue
-      const childRel = rel === "" ? entry.name : `${rel}/${entry.name}`
-      if (!holdsCollectable(join(dir, entry.name))) continue
-      if (reached.has(childRel)) probe(join(dir, entry.name), childRel)
-      else missed.push(childRel)
-    }
-  }
-  probe(root, "")
+  const missed = missingSubtrees(root, "", {
+    reached,
+    isSkipped,
+    holdsCollectable,
+  })
 
   expect(
     missed,
