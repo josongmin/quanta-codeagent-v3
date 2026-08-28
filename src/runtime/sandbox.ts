@@ -1,5 +1,5 @@
 import type { Subprocess } from "bun"
-import { QuantaError } from "@/shared"
+import { DEFAULT_ENV_ALLOWLIST, QuantaError, scrubEnvFrom } from "@/shared"
 import { escalatingKill, withSpawnedChild } from "./guarded-spawn"
 import { type ProxyEnvInput, withProxyEnv } from "./network-proxy"
 import { defaultPpidWalkKiller } from "./process-tree"
@@ -83,70 +83,18 @@ export class SandboxPolicyError extends QuantaError {
 const DEFAULT_TIMEOUT_MS = 120_000
 const TRUNCATION_MARKER = "\n…[output truncated by sandbox maxOutputBytes]"
 
-/** Minimal, non-sensitive variables a child generally needs to function.
- *  Deliberately excludes anything that could carry credentials. This is the
- *  SINGLE source of truth for the env allowlist — `runShell`'s scrubbed mode
- *  (src/runtime/shell.ts) imports {@link scrubEnv}, it does NOT keep its own
- *  copy of this list (ADR-0006: one Local-honored guarantee, one definition). */
-// Locale/identity, plus the infra vars a real edit→build→test loop needs:
-// corp proxy + custom-CA (npm/bun/git/pip fail behind a MITM proxy without
-// them), TMPDIR (pytest/tsc/bun temp), and an active venv.
-//
-// S5 [HIGH] env-policy → `sandbox.v2`: `NODE_OPTIONS` and
-// `NODE_EXTRA_CA_CERTS` were REMOVED. `NODE_OPTIONS=--require=/evil.js`
-// (or `--import`) is arbitrary code-exec injected into EVERY scrubbed
-// node/bun child, and `NODE_EXTRA_CA_CERTS` lets an attacker-controlled CA
-// silently MITM https from those children — both defeat the scrub. So the
-// allowlist no longer claims "NONE can carry code/credentials": it now
-// carries ONLY non-credential, non-code-exec vars. `SSL_CERT_FILE`/
-// `SSL_CERT_DIR` are RETAINED on purpose — they add CA trust via a file
-// path (needed behind a corp MITM proxy) but, unlike `NODE_OPTIONS`, cannot
-// inject code into the runtime. The default-deny posture (no
-// `*_API_KEY`/`*_TOKEN`/`*_SECRET`) is unchanged. Case-sensitive: tools
-// read both `HTTP_PROXY` and lowercase `http_proxy`, so both are listed.
-// NOTE for the bench agent: the env-policy version literal lives in
-// `src/apps/bench/runner.ts` (ENV_POLICY_VERSION) — bump it to `sandbox.v2`
-// to record that this allowlist change governs the run.
-export const DEFAULT_ENV_ALLOWLIST = [
-  "PATH",
-  "HOME",
-  "LANG",
-  "LC_ALL",
-  "TZ",
-  "TERM",
-  "TMPDIR",
-  "HTTP_PROXY",
-  "HTTPS_PROXY",
-  "NO_PROXY",
-  "http_proxy",
-  "https_proxy",
-  "no_proxy",
-  "SSL_CERT_FILE",
-  "SSL_CERT_DIR",
-  "VIRTUAL_ENV",
-  // Python-specific: PYTHONPATH is needed for SWE-bench repos where the package
-  // is not installed but added to sys.path at runtime. Without it, pytest fails
-  // with ModuleNotFoundError silently (the agent sees a test failure but not why).
-  // PYTEST_ADDOPTS carries per-repo pytest flags (e.g. -p no:warnings) needed by
-  // some repos' CI configs. Both are non-secret, non-code-exec env vars.
-  "PYTHONPATH",
-  "PYTEST_ADDOPTS",
-]
+export { DEFAULT_ENV_ALLOWLIST }
 
-/** Build the scrubbed environment: ONLY allowlisted names, copied from the
- *  parent if present. The parent's full env (API keys, tokens, …) never
- *  leaks — absent names are simply omitted. Exported so every shell-spawning
- *  path (LocalSandbox AND runShell's scrubbed mode) shares one implementation. */
+/** Scrub THIS process's environment down to `allowlist`.
+ *
+ *  The PURE half (`scrubEnvFrom`, `@/shared/env-scrub`) takes the bag, because
+ *  `@/subagent` may not import `@/runtime` and `@/shared` may not read
+ *  `process.env`. This one-argument form supplies the ambient read on the side
+ *  of the fence allowed to have it, so every existing caller here stays
+ *  byte-identical. */
 export const scrubEnv = (
   allowlist: readonly string[] = DEFAULT_ENV_ALLOWLIST,
-): Record<string, string> => {
-  const out: Record<string, string> = {}
-  for (const name of allowlist) {
-    const value = process.env[name]
-    if (value !== undefined) out[name] = value
-  }
-  return out
-}
+): Record<string, string> => scrubEnvFrom(process.env, allowlist)
 
 /** Resolve a jail directory to an absolute, normalized path. A relative jail
  *  is resolved against the current process cwd (callers SHOULD pass absolute).

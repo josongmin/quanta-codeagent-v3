@@ -8,8 +8,7 @@
  */
 
 import type { Subprocess } from "bun"
-import { scrubEnv } from "@/runtime/sandbox"
-import { abortableSleep, errMessage } from "@/shared"
+import { abortableSleep, errMessage, scrubEnvFrom } from "@/shared"
 import { legacyKillHandle, type MakeProcKill, type ProcKillHandle } from "./exec-kill"
 import type { ExecCommandInput, ExecCommandOutput } from "./tools-6"
 
@@ -188,11 +187,15 @@ const prepareExec = (input: ExecCommandInput, deps: ExecCommandDeps): PreparedEx
   // argv the model chose. The ban never covered this file — its scan list named
   // five cluster files and this was not one of them.
   //
-  // `scrubEnv()` is allowlist-based, so the child gets what a shell legitimately
-  // needs and nothing else; the caller's own `input.env` still layers on top,
-  // which is the only part that was ever intentional.
+  // `scrubEnvFrom` is allowlist-based, so the child gets what a shell
+  // legitimately needs and nothing else; the caller's own `input.env` still
+  // layers on top, which is the only part that was ever intentional. The bag is
+  // passed EXPLICITLY: the scrubber is a pure `@/shared` leaf (that slice may
+  // not read `process.env`), and this file is one of the two the subagent
+  // slice's `envAllowFiles` carve-out admits precisely because propagating env
+  // to a spawned child is its job.
   const env: Record<string, string | undefined> = {
-    ...scrubEnv(),
+    ...scrubEnvFrom(process.env),
     ...(input.env ?? {}),
   }
   try {

@@ -48,9 +48,13 @@ describe("the subagent exec path scrubs the environment", () => {
   })
 
   test("🔴 it routes through the shared scrubber", () => {
-    // `scrubEnv()` is allowlist-based: the child receives what a shell needs and
-    // nothing else, so a credential cannot ride along by default.
-    expect(source()).toMatch(/scrubEnv\s*\(/)
+    // `scrubEnvFrom(process.env)` is allowlist-based: the child receives what a
+    // shell needs and nothing else, so a credential cannot ride along by
+    // default. The scrubber moved to `@/shared` (this slice may not import
+    // `@/runtime`, and `@/shared` may not read `process.env`, so the pure form
+    // takes the bag) — the property asserted is unchanged: the spawn env is
+    // BUILT by the shared scrubber, not inherited.
+    expect(source()).toMatch(/scrubEnvFrom\s*\(\s*process\.env\s*\)/)
   })
 
   test("ANTI-VACUITY: the detectors fire on the shapes they name", () => {
@@ -58,6 +62,9 @@ describe("the subagent exec path scrubs the environment", () => {
     expect(/\?\s*\{\s*env\s*\}\s*:\s*\{\s*\}/.test("...(env !== undefined ? { env } : {})")).toBe(
       true,
     )
-    expect(/\.\.\.\(?\s*process\.env/.test("const e = scrubEnv()")).toBe(false)
+    expect(/\.\.\.\(?\s*process\.env/.test("const e = scrubEnvFrom(process.env)")).toBe(false)
+    // …and the positive detector matches the real call shape, not just any name.
+    expect(/scrubEnvFrom\s*\(\s*process\.env\s*\)/.test("...scrubEnvFrom(process.env),")).toBe(true)
+    expect(/scrubEnvFrom\s*\(\s*process\.env\s*\)/.test("...scrubEnv(),")).toBe(false)
   })
 })
