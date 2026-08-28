@@ -329,17 +329,66 @@ const hasScrubbedEnv = (call: ts.CallExpression): boolean => {
 
 /** Does this call run a user-command shell (`["bash","-lc",cmd]`,
  *  `disclaimedShellArgv("bash", cmd)`, `[...POSIX_SHELL_ARGV(cmd)]`)? */
-const isUserCommandShell = (call: ts.CallExpression): boolean => {
-  const argv = call.arguments[0]
-  if (argv === undefined) return false
+/** The initializer a local `const`/`let` binds, when the name resolves inside
+ *  this file. Needed because `const argv = ["bash","-lc",cmd]` before the spawn
+ *  is an ordinary refactor, and requiring the array AT THE CALL SITE let that
+ *  one-line change walk the whole derivation — measured. */
+const localInitializer = (id: ts.Identifier, file: ts.SourceFile): ts.Expression | undefined => {
+  let found: ts.Expression | undefined
+  const visit = (node: ts.Node): void => {
+    if (
+      found === undefined &&
+      ts.isVariableDeclaration(node) &&
+      ts.isIdentifier(node.name) &&
+      node.name.text === id.text &&
+      node.initializer !== undefined
+    ) {
+      found = node.initializer
+      return
+    }
+    if (found === undefined) ts.forEachChild(node, visit)
+  }
+  visit(file)
+  return found
+}
+
+/** The head token of an argv array, resolving a `const SH = "bash"` head. */
+/** `"/bin/bash"` is `bash`. Comparing the whole token let an absolute path walk
+ *  straight past the derivation — measured. */
+const namesShell = (token: string): boolean =>
+  SHELL_BINARIES.has(token) || SHELL_BINARIES.has(token.slice(token.lastIndexOf("/") + 1))
+
+const argvHeadIsShell = (argv: ts.ArrayLiteralExpression, file: ts.SourceFile): boolean => {
+  const head = argv.elements[0]
+  if (head === undefined) return false
+  if (ts.isStringLiteral(head)) return namesShell(head.text)
+  if (ts.isIdentifier(head)) {
+    const init = localInitializer(head, file)
+    return init !== undefined && ts.isStringLiteral(init) && namesShell(init.text)
+  }
+  // A spread (`[...argv]`, `[...BASE, cmd]`) hides its head. Treating that as a
+  // shell was tried and REVERTED: it pulled in six spawners that are not shells
+  // at all — `browser/cdp/defaults.ts`, the two voice recorders,
+  // `shell-snapshot/bun-spawner.ts` — each of which forwards an argv its own
+  // caller built. A ban that flags a Chrome launch as an unscrubbed shell is a
+  // ban people turn off. The residual is stated in the header instead: a
+  // spread-headed argv is outside this derivation.
+  return false
+}
+
+const isUserCommandShell = (call: ts.CallExpression, file: ts.SourceFile): boolean => {
+  const raw = call.arguments[0]
+  if (raw === undefined) return false
+  // Follow a variable to its initializer first: the array need not be written
+  // at the call site to be the same argv.
+  const argv = ts.isIdentifier(raw) ? (localInitializer(raw, file) ?? raw) : raw
   if (ts.isCallExpression(argv) || ts.isArrayLiteralExpression(argv)) {
     for (const id of valueIdentifiers(argv)) {
       if (SHELL_ARGV_BUILDERS.has(id.text)) return true
     }
   }
   if (!ts.isArrayLiteralExpression(argv)) return false
-  const head = argv.elements[0]
-  return head !== undefined && ts.isStringLiteral(head) && SHELL_BINARIES.has(head.text)
+  return argvHeadIsShell(argv, file)
 }
 
 // ─── Derivation (defect 1) ───────────────────────────────────────────────────
@@ -378,7 +427,8 @@ export const deriveClusterFiles = (): ClusterFile[] => {
     const sf = parse(text)
     const calls = spawnCalls(sf)
     if (calls.length === 0) continue
-    const member = rel === FUNNEL || IMPORTS_FUNNEL.test(text) || calls.some(isUserCommandShell)
+    const member =
+      rel === FUNNEL || IMPORTS_FUNNEL.test(text) || calls.some((c) => isUserCommandShell(c, sf))
     if (member) out.push({ file: rel, sf, calls })
   }
   return out.sort((a, b) => a.file.localeCompare(b.file))
