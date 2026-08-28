@@ -2,215 +2,466 @@
  * ★ PERMANENT GUARD — EXEC-CLUSTER SPAWN ENV-SCRUB BAN (R-D3, RFC jun-7 Phase-2).
  *
  * THE BUG CLASS THIS LOCKS DOWN:
- *   A spawn site in the exec cluster (`shell.ts`, `bash-bg-registry.ts`,
- *   `sandbox.ts`, `command-hooks/sandbox-exec.ts`, `host/runtime/pty-backend.ts`)
- *   that runs a user-command SHELL (`bash -lc <cmd>` / an interactive PTY shell)
- *   leaks the PARENT process env — including `*_API_KEY` / `*_TOKEN` / `*_SECRET`
- *   — into the child UNLESS it passes an `env:` that was produced by the shared
- *   scrubber (`scrubEnv` / `buildPtyEnv` / `applyLocalEnv`). There are TWO leak
- *   shapes:
+ *   A spawn site in the exec cluster that runs a user-command SHELL
+ *   (`bash -lc <cmd>` / an interactive PTY shell) leaks the PARENT process env
+ *   — including `*_API_KEY` / `*_TOKEN` / `*_SECRET` — into the child UNLESS it
+ *   passes an `env:` that was produced by the shared scrubber (`scrubEnv` /
+ *   `buildPtyEnv` / `applyLocalEnv`). There are TWO leak shapes:
  *     (1) a RAW `{ ...process.env }` spread — explicit full-inherit leak;
  *     (2) an `env:`-ABSENT spawn — Bun then SNAPSHOTS the parent env
  *         (inherit-by-omission), the silent leak the `R-D3` audit flagged.
- *   This guard makes BOTH a RED test: every `Bun.spawn(...)` that runs a
- *   user-command shell MUST pass an `env:` AND that env MUST route through
- *   `scrubEnv` / `buildPtyEnv` / `applyLocalEnv`.
+ *   Both are a RED test here.
  *
- * SCOPE / ALLOWLIST (each entry documented with a reason):
- *   The cluster also spawns benign ARGV-TOOLS that are NOT user-command shells
- *   and legitimately do not (or cannot) take a scrubbed `env:`:
- *     - `pty-backend.ts` `Bun.spawn(["tmux", ...args] …)` — a `tmux` subcommand
- *       runner (argv-array, no shell); it queries/controls tmux, runs no model
- *       command, and inherits the operator env on purpose.
- *     - `sandbox.ts` `Bun.spawn([this.dockerBin, "version"] …)` — the docker
- *       availability PROBE; argv-tool, runs no user command.
- *     - `sandbox.ts` `Bun.spawn(argv …)` inside `DockerSandbox.run` — the
- *       `docker run …` host process; the CONTAINER env is governed by docker's
- *       own `--env NAME` allowlist flags (built in `buildArgv`), NOT by the host
- *       spawn's `env`, so a scrubbed host `env:` would be the wrong mechanism.
- *   The `buildPtyEnv` opt-out branch (`QUANTA_PTY_INHERIT_ENV`) is NOT
- *   separately allowlisted: it lives INSIDE `buildPtyEnv`, so the spawn site
- *   still routes through the scrubber token and stays clean by construction.
+ * ─── WHY THIS FILE WAS REWRITTEN (two MEASURED defects, aug-28) ───────────────
  *
- * RED-ON-INJECTION (bottom): a synthetic exec-cluster `Bun.spawn(["bash","-lc",
- * c], {})` (no env) AND a `Bun.spawn(argv, { env: { ...process.env } })` are
- * BOTH flagged by the predicate; `{ env: scrubEnv() }` is clean. Then GREEN on
- * the current cluster.
+ * DEFECT 1 — THE SCOPE LIST WAS STALE, so the ban scanned where the code no
+ * longer is. It hardcoded five file paths:
+ *   `runtime/shell.ts`, `runtime/bash-bg-registry.ts`, `runtime/sandbox.ts`,
+ *   `agent/command-hooks/sandbox-exec.ts`, `host/runtime/pty-backend.ts`.
+ * MEASURED on the tree it was guarding: across all five, exactly ONE real
+ * `Bun.spawn(` survives — `pty-backend.ts`'s `["tmux", …]` runner — and that one
+ * is itself allowlisted. The cluster had moved behind the `spawnScrubbed` PORT
+ * (`src/runtime/scrubbed-spawn.ts`), which the list never named. RED PROOF: a
+ * literal `Bun.spawn(["bash","-lc","echo pwn"], {})` appended to
+ * `src/runtime/scrubbed-spawn.ts` left this guard GREEN (3 pass / 0 fail).
+ * (The jun-08 test-quality audit had already recorded the same blind spot.)
+ *   FIX: the population is DERIVED by measurement on every run — see
+ *   {@link deriveClusterFiles}. A file cannot fall out of scope by being
+ *   renamed, split, or replaced by a port.
+ *
+ * DEFECT 2 — FILE-GLOBAL IDENTIFIER RESOLUTION whitewashed real leaks. The old
+ * `assignmentRhs` matched `(?:const|let|var)\s+<ident>\s*=` ANYWHERE in the
+ * file, so ANY scrubbed binding named `env` cleared EVERY spawn in that file.
+ * MEASURED, identical injected call `Bun.spawn(cmd, { env: process.env })`:
+ *   A — `host/runtime/pty-backend.ts` (no file-level `const env`) → FLAGGED ✓
+ *   B — `src/runtime/sandbox.ts` (has `const env = asScrubbedEnv(scrubEnv(…))`
+ *       at line 213, in a DIFFERENT method) → NOT FLAGGED ✗  (guard green)
+ * The B result is why an earlier control looked clean. Note the resolution did
+ * not even need a same-named identifier in the leak: `process.env` contributes
+ * the bare word `env` through the PROPERTY name, and the file-global scan
+ * happily bound it.
+ *   FIX: resolution runs on the TypeScript AST (`ts.createSourceFile`, the tool
+ *   several `_arch` guards already use), against the NEAREST PRECEDING
+ *   declaration in the ENCLOSING SCOPE CHAIN, and only for identifiers in VALUE
+ *   position (a `.env` property name is not an identifier reference). A binding
+ *   that is a parameter, a destructured element, or declared after the use is
+ *   OPAQUE — fail-closed, not scrubbed.
+ *
+ * ─── SCOPE / ALLOWLIST ───────────────────────────────────────────────────────
+ * Every {@link ALLOWLIST} entry carries its reason AND is itself ratcheted: a
+ * test asserts each entry still matches a live spawn call, so the allowlist
+ * cannot rot the way the scope list did. (Three entries that named spawns in
+ * `sandbox.ts` were removed by that rule — `sandbox.ts` has no `Bun.spawn` at
+ * all today; it routes through the port.)
+ *
+ * MEASURED-AND-CLASSIFIED, deliberately outside the derivation:
+ *   - `runner/batch/**`, `apps/bench/**` — the bench/eval harness. Excluded by
+ *     the SCOPE paragraph of `src/runtime/scrubbed-spawn.ts`, which names those
+ *     directories as NON-exec-cluster consumers of `scrubEnv`. `eval/exec.ts`
+ *     is scrubbed anyway (`execEnv` → `applyLocalEnv(scrubEnv(), …)`);
+ *     `corpus/dataset.ts` passes a raw `env: process.env` to `bash -c` —
+ *     reported separately, not silently adopted here.
+ *   - `runtime/shell-snapshot/bun-spawner.ts` — spawns `zsh -i -c` /
+ *     `bash -i -c`, but the argv is built by `{bash,zsh}-capture.ts` to CAPTURE
+ *     the operator's own interactive shell; no model/user command is run and
+ *     the operator env is the subject of the snapshot.
+ *   - `runtime/node-repl/default-kernel.ts` (`node -i`) and the
+ *     `runtime/os-sandbox/*` exec adapters (env passed through from the caller)
+ *     — not shells; a different charter.
  */
 
 import { describe, expect, test } from "bun:test"
-import { readFileSync } from "node:fs"
-import { join } from "node:path"
-import { stripComments } from "../_shared/strip-comments"
+import { readdirSync, readFileSync, statSync } from "node:fs"
+import { join, relative, sep } from "node:path"
+import ts from "typescript"
 
 const SRC = join(import.meta.dir, "..", "..", "..", "src")
 
-/** The exec-cluster files this guard scans (R-D3 scope). */
-const CLUSTER_FILES = [
-  "runtime/shell.ts",
-  "runtime/bash-bg-registry.ts",
-  "runtime/sandbox.ts",
-  "agent/command-hooks/sandbox-exec.ts",
-  "host/runtime/pty-backend.ts",
-]
+/** The exec-cluster spawn PORT. Membership anchor for the derivation and the
+ *  anti-vacuity floor: if this file stops being derived, the derivation broke. */
+const FUNNEL = "runtime/scrubbed-spawn.ts"
 
-/** The scrubber producers — an `env:` value MUST reference one of these to be
- *  considered routed. `withProxyEnv(...)` / `applyLocalEnv(...)` compose OVER a
- *  scrubber base, so they are accepted only when the base token also appears in
- *  the env expression (the production sites all do — they wrap `scrubEnv()`). */
+/** An import of the funnel, by ANY spelling. MEASURED: matching only the alias
+ *  form (`@/runtime/scrubbed-spawn`) missed every sibling that imports it
+ *  RELATIVELY — `src/runtime/sandbox.ts` says `from "./scrubbed-spawn"`, and a
+ *  leak injected there stayed green because the file was never derived into the
+ *  population at all. Match the module basename. */
+const IMPORTS_FUNNEL = /from\s+["'][^"']*scrubbed-spawn["']/
+
+/** The scrubber producers — an `env:` value MUST reach one of these to count as
+ *  routed. `withProxyEnv(...)` / `applyLocalEnv(...)` compose OVER a scrubber
+ *  base, so they are accepted only when a base token is also reachable. */
 const SCRUBBER_TOKENS = ["scrubEnv", "buildPtyEnv", "applyLocalEnv"]
 
-/** Benign non-shell ARGV-TOOL spawns that are allowlisted by an argv head
- *  substring appearing in the spawn call text. Each has a reason (see header). */
-const ARGV_TOOL_ALLOW = [
-  '["tmux"', // pty-backend tmux subcommand runner
-  '[this.dockerBin, "version"]', // sandbox docker availability probe
-]
+/** Shell binaries whose argv-literal head marks a spawn as a user-command
+ *  shell. `node`/`python` are NOT here — see the header's classification. */
+const SHELL_BINARIES = new Set(["bash", "sh", "zsh", "dash", "ksh"])
 
-/** Allowlist by a stable substring of the spawn-call text for argv that is built
- *  elsewhere (not a literal in the call). DockerSandbox.run: container env is
- *  governed by docker's `--env NAME` flags, not the host spawn env. */
-const BUILT_ARGV_ALLOW = [
-  // `DockerSandbox.run` spawns `argv` from `buildArgv`; the spawn options are
-  // exactly `{ stdout: "pipe", stderr: "pipe" }` with NO env by design.
-  'Bun.spawn(argv, { stdout: "pipe", stderr: "pipe" })',
-]
+/** Helpers that BUILD a user-command shell argv (`["bash","-lc",cmd]`). */
+const SHELL_ARGV_BUILDERS = new Set(["disclaimedShellArgv", "POSIX_SHELL_ARGV"])
 
-/** Strip block + line comments so doc-comment MENTIONS of `Bun.spawn(...)`
- *  (`Bun.spawn(["git", …])`, `Bun.spawn({ env })`) are not mistaken for real
- *  call sites.
- *
- *  The local version claimed "crude but sufficient: the cluster files contain
- *  no `//` / `/*` inside string literals that would confuse this" — an
- *  assumption about OTHER files, which nothing enforced. MEASURED: two string
- *  constants planted around a real unscrubbed `Bun.spawn` in
- *  `src/runtime/shell.ts` left this guard green. It fences an API-key leak, so
- *  it uses the shared quoting- and regex-aware scanner. */
-export { stripComments }
+/** Directories whose spawns are governed by a different, documented scope
+ *  decision (see the header). Excluded from the derivation, never from the
+ *  reporting in the header. */
+const EXCLUDED_ROOTS = ["runner/batch/", "apps/bench/"]
+
+interface Ruled {
+  /** Cluster-relative path (`runtime/scrubbed-spawn.ts`). */
+  readonly file: string
+  /** A stable substring of the spawn call's text. */
+  readonly match: string
+  /** Why this call is not a leak. Every entry is asserted to still match. */
+  readonly why: string
+}
+
+/** Benign / type-enforced spawn calls. NOT a place to park a real leak. */
+const ALLOWLIST: readonly Ruled[] = [
+  {
+    file: "host/runtime/pty-backend.ts",
+    match: '["tmux"',
+    why: "tmux subcommand runner: argv-array (no shell), runs no model command, inherits the operator env on purpose.",
+  },
+  {
+    file: FUNNEL,
+    match: "argv as string[]",
+    why: "`bunScrubbedSpawner` IS the chokepoint: its `env` parameter is the branded `ScrubbedEnv`, minted only by `asScrubbedEnv`, so a leak here is a tsc error rather than a scan hit (pinned by scrubbed-spawn-brand-hellgate.test.ts). The brand arrives destructured from `options`, which this scanner is deliberately fail-closed about.",
+  },
+]
 
 /**
- * Extract every `Bun.spawn(` call's argument text (balanced to the matching
- * close paren) from `text`. Pure. Used to inspect the options object of each
- * spawn site without a full TS parse.
+ * GENUINE, UNFIXED leaks the aug-28 derivation surfaced — recorded, not
+ * forgiven. This is a TWO-WAY ratchet: the ban asserts the offender set equals
+ * this list EXACTLY, so a new leak goes red AND landing the fix goes red until
+ * the entry is deleted. Never move a call here to make a suite green.
  */
-export const bunSpawnCalls = (rawText: string): string[] => {
-  const text = stripComments(rawText)
-  const calls: string[] = []
-  const NEEDLE = "Bun.spawn("
-  let i = text.indexOf(NEEDLE)
-  while (i !== -1) {
-    let depth = 0
-    let j = i + NEEDLE.length - 1 // points at the opening "("
-    for (; j < text.length; j++) {
-      const ch = text[j]
-      if (ch === "(") depth++
-      else if (ch === ")") {
-        depth--
-        if (depth === 0) break
-      }
+const KNOWN_OPEN_LEAKS: readonly Ruled[] = [
+  {
+    file: "subagent/exec-command.ts",
+    match: '["bash", "-lc", input.command]',
+    why: "OPEN DEFECT (found aug-28 by this derivation, not in scope of the round that found it): `exec_command` runs a MODEL-SUPPLIED shell line and passes `env` only when `input.env` is set — absent ⇒ inherit-by-omission, present ⇒ `{ ...process.env, ...input.env }`. Both are the banned shapes; the parent's `*_API_KEY` reaches the child. FIX = route through `scrubEnv`/`spawnScrubbed`, then delete this entry.",
+  },
+]
+
+// ─── AST scanning ────────────────────────────────────────────────────────────
+
+const parse = (text: string): ts.SourceFile =>
+  ts.createSourceFile("scan.ts", text, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS)
+
+/** Every real `Bun.spawn(...)` CallExpression. Comments and string literals are
+ *  excluded BY PARSING — a doc-comment mention is not a node. */
+const spawnCalls = (sf: ts.SourceFile): ts.CallExpression[] => {
+  const out: ts.CallExpression[] = []
+  const visit = (n: ts.Node): void => {
+    if (
+      ts.isCallExpression(n) &&
+      ts.isPropertyAccessExpression(n.expression) &&
+      ts.isIdentifier(n.expression.expression) &&
+      n.expression.expression.text === "Bun" &&
+      n.expression.name.text === "spawn"
+    ) {
+      out.push(n)
     }
-    calls.push(text.slice(i, j + 1))
-    i = text.indexOf(NEEDLE, j + 1)
+    n.forEachChild(visit)
   }
-  return calls
+  sf.forEachChild(visit)
+  return out
 }
 
-/** A spawn call is ALLOWLISTED (benign argv-tool / docker host process) iff its
- *  text matches an argv-tool head OR a built-argv allow snippet. */
-const isAllowlisted = (call: string): boolean =>
-  ARGV_TOOL_ALLOW.some((s) => call.includes(s)) || BUILT_ARGV_ALLOW.some((s) => call.includes(s))
+/** A scope for `var`-free (const/let) resolution purposes. */
+const isScope = (n: ts.Node): boolean =>
+  ts.isSourceFile(n) ||
+  ts.isBlock(n) ||
+  ts.isModuleBlock(n) ||
+  ts.isCaseBlock(n) ||
+  ts.isForStatement(n) ||
+  ts.isForInStatement(n) ||
+  ts.isForOfStatement(n)
 
-/** Extract the env-value EXPRESSION from a spawn call's `env: <expr>` (up to the
- *  next top-level `,` or `}`), or `undefined` when there is no `env:` key. A
- *  SHORTHAND property (`env,` / `env}` — the variable IS the value) resolves to
- *  the identifier `"env"`. */
-const envValueOf = (call: string): string | undefined => {
-  // Shorthand: `{ ..., env, ... }` or `{ ..., env }` — the property is the var.
-  if (/[,{]\s*env\s*[,}]/.test(call)) return "env"
-  const m = /\benv\s*:\s*/.exec(call)
-  if (m === null) return undefined
-  const start = m.index + m[0].length
-  let depth = 0
-  for (let k = start; k < call.length; k++) {
-    const ch = call[k]
-    if (ch === "{" || ch === "(" || ch === "[") depth++
-    else if (ch === "}" || ch === ")" || ch === "]") {
-      if (depth === 0) return call.slice(start, k).trim()
-      depth--
-    } else if (ch === "," && depth === 0) return call.slice(start, k).trim()
-  }
-  return call.slice(start).trim()
+const enclosingScope = (n: ts.Node): ts.Node | undefined => {
+  let p: ts.Node | undefined = n.parent
+  while (p !== undefined && !isScope(p)) p = p.parent
+  return p
 }
 
-/** The assignment RHS of a bare `const/let/var <ident> = <rhs>` in the file, or
- *  undefined. The RHS is captured BALANCED (it MAY span lines —
- *  `const env = withProxyEnv(\n  scrubEnv(...),\n)` ) so a multi-line compose
- *  chain is followed. Capture runs from `=` to a top-level statement
- *  terminator (`;`/newline at depth 0) honoring `()[]{}` nesting. */
-const assignmentRhs = (ident: string, fileText: string): string | undefined => {
-  const m = new RegExp(`(?:const|let|var)\\s+${ident}\\s*=\\s*`).exec(fileText)
-  if (m === null) return undefined
-  const start = m.index + m[0].length
-  let depth = 0
-  for (let k = start; k < fileText.length; k++) {
-    const ch = fileText[k]
-    if (ch === "(" || ch === "[" || ch === "{") depth++
-    else if (ch === ")" || ch === "]" || ch === "}") depth--
-    else if ((ch === "\n" || ch === ";") && depth === 0) return fileText.slice(start, k)
+const scopeDeclCache = new WeakMap<ts.Node, ts.VariableDeclaration[]>()
+
+/** Variable declarations whose OWN enclosing scope is `scope` (not a nested
+ *  function's locals). Memoized — a file is scanned many times. */
+const declarationsIn = (scope: ts.Node): ts.VariableDeclaration[] => {
+  const cached = scopeDeclCache.get(scope)
+  if (cached !== undefined) return cached
+  const out: ts.VariableDeclaration[] = []
+  const visit = (n: ts.Node): void => {
+    if (ts.isVariableDeclaration(n) && enclosingScope(n) === scope) out.push(n)
+    n.forEachChild(visit)
   }
-  return fileText.slice(start)
+  scope.forEachChild(visit)
+  scopeDeclCache.set(scope, out)
+  return out
+}
+
+/** Names bound by a declaration name node (identifier or binding pattern). */
+const boundNames = (name: ts.BindingName, out: Set<string> = new Set()): Set<string> => {
+  if (ts.isIdentifier(name)) out.add(name.text)
+  else for (const el of name.elements) if (!ts.isOmittedExpression(el)) boundNames(el.name, out)
+  return out
+}
+
+/** `"opaque"` = the name IS bound here but the value cannot be followed
+ *  (parameter, destructured element, declared after the use). Fail-closed: an
+ *  opaque binding STOPS the outward walk, so an outer scrubbed binding of the
+ *  same name can never whitewash an inner one. */
+type Binding = ts.Expression | "opaque" | undefined
+
+const resolveBinding = (name: string, use: ts.Node): Binding => {
+  const useStart = use.pos
+  for (let n: ts.Node | undefined = use.parent; n !== undefined; n = n.parent) {
+    if (ts.isFunctionLike(n) && n.parameters.some((p) => boundNames(p.name).has(name))) {
+      return "opaque"
+    }
+    if (!isScope(n)) continue
+    const here = declarationsIn(n).filter((d) => boundNames(d.name).has(name))
+    if (here.length === 0) continue
+    const preceding = here.filter((d) => d.end <= useStart)
+    if (preceding.length === 0) return "opaque" // declared, but not before the use
+    const nearest = preceding[preceding.length - 1] as ts.VariableDeclaration
+    if (!ts.isIdentifier(nearest.name)) return "opaque" // destructured
+    return nearest.initializer ?? "opaque"
+  }
+  return undefined
+}
+
+/** Identifiers in VALUE position inside `expr` — a property NAME (`process.env`,
+ *  `{ env: x }`) is not a reference and must not be resolved as one. Shorthand
+ *  property names ARE references and are kept. */
+const valueIdentifiers = (expr: ts.Node): ts.Identifier[] => {
+  const out: ts.Identifier[] = []
+  const visit = (n: ts.Node): void => {
+    if (ts.isIdentifier(n)) {
+      const p = n.parent
+      const isPropName =
+        (ts.isPropertyAccessExpression(p) && p.name === n) ||
+        (ts.isPropertyAssignment(p) && p.name === n) ||
+        (ts.isQualifiedName(p) && p.right === n) ||
+        ts.isBindingElement(p)
+      if (!isPropName) out.push(n)
+      return
+    }
+    n.forEachChild(visit)
+  }
+  if (ts.isIdentifier(expr)) out.push(expr)
+  else expr.forEachChild(visit)
+  return out
 }
 
 /**
- * Does this env expression route through a scrubber producer? Directly (it
- * mentions a scrubber token) OR transitively — a BARE IDENTIFIER whose
- * assignment chain reaches a scrubber token. Compose wrappers
- * (`withProxyEnv(applyLocalEnv(scrubEnv()))`) are followed by chasing the bare
- * identifiers they wrap (`const env = withProxyEnv(localEnvBase, …)` →
- * `localEnvBase` → `applyLocalEnv` ✓). Bounded by a `seen` set (no cycle hang).
+ * Does this env expression reach a scrubber producer? Directly (its text names
+ * one) or transitively through bindings resolved in the SAME SCOPE CHAIN.
+ * Bounded by `seen` (no cycle hang).
  */
-const expressionIsScrubbed = (expr: string, fileText: string, seen: Set<string>): boolean => {
-  if (SCRUBBER_TOKENS.some((t) => expr.includes(t))) return true
-  // Collect every bare identifier in the expression and follow each assignment.
-  for (const ident of expr.match(/[A-Za-z_$][\w$]*/g) ?? []) {
-    if (seen.has(ident)) continue
-    seen.add(ident)
-    const rhs = assignmentRhs(ident, fileText)
-    if (rhs !== undefined && expressionIsScrubbed(rhs, fileText, seen)) return true
+const expressionIsScrubbed = (expr: ts.Node, seen: Set<ts.Node>): boolean => {
+  if (seen.has(expr)) return false
+  seen.add(expr)
+  const text = expr.getText()
+  if (SCRUBBER_TOKENS.some((t) => text.includes(t))) return true
+  for (const id of valueIdentifiers(expr)) {
+    const bound = resolveBinding(id.text, id)
+    if (bound === undefined || bound === "opaque") continue
+    if (expressionIsScrubbed(bound, seen)) return true
   }
   return false
 }
 
-/**
- * Is the env routed through a scrubber producer? `env:` must be present (incl.
- * shorthand) AND its value must reach a scrubber token directly or through the
- * compose chain. A raw `{ ...process.env }` spread (no scrubber identifier in
- * the chain) ⇒ not scrubbed.
- */
-const hasScrubbedEnv = (call: string, fileText: string): boolean => {
-  const value = envValueOf(call)
-  if (value === undefined) return false
-  return expressionIsScrubbed(value, fileText, new Set())
+/** The object-literal arguments of a spawn call (`Bun.spawn(opts)` and
+ *  `Bun.spawn(argv, opts)` are both real Bun shapes). */
+const optionObjects = (call: ts.CallExpression): ts.ObjectLiteralExpression[] =>
+  call.arguments.filter(ts.isObjectLiteralExpression)
+
+const isEnvName = (n: ts.PropertyName): boolean =>
+  (ts.isIdentifier(n) || ts.isStringLiteral(n)) && n.text === "env"
+
+/** The `env` value of one option object, ignoring spreads. A shorthand
+ *  (`{ env }`) resolves to the identifier itself, so scope resolution starts at
+ *  the USE site. */
+const envPropOf = (obj: ts.ObjectLiteralExpression): ts.Node | undefined => {
+  for (const prop of obj.properties) {
+    if (ts.isShorthandPropertyAssignment(prop) && prop.name.text === "env") return prop.name
+    if (ts.isPropertyAssignment(prop) && isEnvName(prop.name)) return prop.initializer
+  }
+  return undefined
+}
+
+/** `env` reached through a SPREAD option bag — `...(env !== undefined ? { env }
+ *  : {})` is the live shape in `subagent/exec-command.ts`. A conditionally
+ *  present env counts as present, and must then be scrubbed. */
+const envInSpread = (obj: ts.ObjectLiteralExpression): ts.Node | undefined => {
+  let found: ts.Node | undefined
+  const dig = (n: ts.Node): void => {
+    if (found !== undefined) return
+    if (ts.isObjectLiteralExpression(n)) found = envPropOf(n) ?? envInSpread(n)
+    if (found === undefined) n.forEachChild(dig)
+  }
+  for (const prop of obj.properties) if (ts.isSpreadAssignment(prop)) dig(prop.expression)
+  return found
 }
 
 /**
- * Pure predicate: return the LEAKY `Bun.spawn` calls in `text` — those that run
- * a user-command shell but DON'T route env through the scrubber. A call is a
- * violation iff it is NOT allowlisted AND NOT scrubbed (covers both the raw
- * `{ ...process.env }` spread and the `env:`-absent inherit-by-omission).
+ * The `env` value expression of a spawn call, or `undefined` when there is no
+ * `env` at all (inherit-by-omission).
  */
-export const leakySpawnCalls = (text: string): string[] =>
-  bunSpawnCalls(text).filter((call) => !isAllowlisted(call) && !hasScrubbedEnv(call, text))
+const envExpression = (call: ts.CallExpression): ts.Node | undefined => {
+  for (const obj of optionObjects(call)) {
+    const found = envPropOf(obj) ?? envInSpread(obj)
+    if (found !== undefined) return found
+  }
+  return undefined
+}
+
+/** Is the env routed through a scrubber producer? `env` must be present AND
+ *  reach a scrubber token through the scope-resolved chain. */
+const hasScrubbedEnv = (call: ts.CallExpression): boolean => {
+  const value = envExpression(call)
+  if (value === undefined) return false
+  return expressionIsScrubbed(value, new Set())
+}
+
+/** Does this call run a user-command shell (`["bash","-lc",cmd]`,
+ *  `disclaimedShellArgv("bash", cmd)`, `[...POSIX_SHELL_ARGV(cmd)]`)? */
+const isUserCommandShell = (call: ts.CallExpression): boolean => {
+  const argv = call.arguments[0]
+  if (argv === undefined) return false
+  if (ts.isCallExpression(argv) || ts.isArrayLiteralExpression(argv)) {
+    for (const id of valueIdentifiers(argv)) {
+      if (SHELL_ARGV_BUILDERS.has(id.text)) return true
+    }
+  }
+  if (!ts.isArrayLiteralExpression(argv)) return false
+  const head = argv.elements[0]
+  return head !== undefined && ts.isStringLiteral(head) && SHELL_BINARIES.has(head.text)
+}
+
+// ─── Derivation (defect 1) ───────────────────────────────────────────────────
+
+const tsFilesUnder = (dir: string, out: string[] = []): string[] => {
+  for (const entry of readdirSync(dir)) {
+    const p = join(dir, entry)
+    if (statSync(p).isDirectory()) tsFilesUnder(p, out)
+    else if (p.endsWith(".ts") && !p.includes(".test.")) out.push(p)
+  }
+  return out
+}
+
+export interface ClusterFile {
+  readonly file: string
+  readonly sf: ts.SourceFile
+  readonly calls: readonly ts.CallExpression[]
+}
+
+/**
+ * MEASURE the exec cluster instead of listing it. A file is a member iff it has
+ * a real `Bun.spawn(` AND one of:
+ *   - it IS the {@link FUNNEL};
+ *   - it imports the funnel (a declared exec-cluster member);
+ *   - it builds a user-command shell argv at the spawn site.
+ * Renames, splits and port moves are followed automatically — the failure mode
+ * that made this guard vacuous cannot recur.
+ */
+export const deriveClusterFiles = (): ClusterFile[] => {
+  const out: ClusterFile[] = []
+  for (const abs of tsFilesUnder(SRC)) {
+    const rel = relative(SRC, abs).split(sep).join("/")
+    if (EXCLUDED_ROOTS.some((r) => rel.startsWith(r))) continue
+    const text = readFileSync(abs, "utf8")
+    if (!text.includes("Bun.spawn(")) continue
+    const sf = parse(text)
+    const calls = spawnCalls(sf)
+    if (calls.length === 0) continue
+    const member = rel === FUNNEL || IMPORTS_FUNNEL.test(text) || calls.some(isUserCommandShell)
+    if (member) out.push({ file: rel, sf, calls })
+  }
+  return out.sort((a, b) => a.file.localeCompare(b.file))
+}
+
+const ruleMatches = (rules: readonly Ruled[], file: string, callText: string): boolean =>
+  rules.some((r) => r.file === file && callText.includes(r.match))
+
+export interface Offender {
+  readonly file: string
+  readonly call: string
+}
+
+/** The leaky calls of one derived cluster file (allowlist applied). */
+const offendersIn = (entry: ClusterFile): Offender[] =>
+  entry.calls
+    .filter((c) => !ruleMatches(ALLOWLIST, entry.file, c.getText()) && !hasScrubbedEnv(c))
+    .map((c) => ({ file: entry.file, call: c.getText().replace(/\s+/g, " ") }))
+
+/**
+ * Pure predicate over a source TEXT — the injection surface. Returns the leaky
+ * `Bun.spawn` calls: not allowlisted (by argv-tool head) and not scrubbed.
+ * Kept text-in/text-out so a synthetic snippet can be measured directly.
+ */
+export const leakySpawnCalls = (text: string): string[] => {
+  const sf = parse(text)
+  return spawnCalls(sf)
+    .filter((c) => !ALLOWLIST.some((r) => c.getText().includes(r.match)) && !hasScrubbedEnv(c))
+    .map((c) => c.getText())
+}
+
+// ─── Tests ───────────────────────────────────────────────────────────────────
 
 describe("exec-cluster spawn env-scrub ban — every shell spawn routes through the scrubber (R-D3)", () => {
+  const cluster = deriveClusterFiles()
+
+  test("ANTI-VACUITY: the derived population is real, and contains the known spawner", () => {
+    // A ban that scans nothing passes by construction — defect 1. The floor is
+    // deliberately above the legacy list's TRUE content (which was 1 call, and
+    // that one allowlisted).
+    expect(cluster.length).toBeGreaterThanOrEqual(2)
+    expect(cluster.map((c) => c.file)).toContain(FUNNEL)
+    // MEASURED today: 3 files / 3 calls (`runtime/scrubbed-spawn.ts`,
+    // `host/runtime/pty-backend.ts`, `subagent/exec-command.ts`). The floor is
+    // set at the POST-FIX population (2/2) on purpose: fixing the recorded open
+    // leak removes its raw spawn, and a floor pinned to today's count would
+    // punish the fix instead of the rot.
+    const totalCalls = cluster.reduce((n, c) => n + c.calls.length, 0)
+    expect(totalCalls).toBeGreaterThanOrEqual(2)
+    // Defect-1 regression pin: the derivation MUST reach past the five paths the
+    // stale list named — `scrubbed-spawn.ts` was invisible to it.
+    const LEGACY_LIST = [
+      "runtime/shell.ts",
+      "runtime/bash-bg-registry.ts",
+      "runtime/sandbox.ts",
+      "agent/command-hooks/sandbox-exec.ts",
+      "host/runtime/pty-backend.ts",
+    ]
+    expect(cluster.filter((c) => !LEGACY_LIST.includes(c.file)).length).toBeGreaterThanOrEqual(1)
+  })
+
   test("NO exec-cluster spawn leaks parent env (raw spread OR env-absent)", () => {
-    const offenders: Array<{ file: string; calls: string[] }> = []
-    for (const rel of CLUSTER_FILES) {
-      const text = readFileSync(join(SRC, rel), "utf8")
-      const calls = leakySpawnCalls(text)
-      if (calls.length > 0) offenders.push({ file: rel, calls })
+    const offenders = cluster.flatMap(offendersIn)
+    // TWO-WAY ratchet against KNOWN_OPEN_LEAKS: a new leak is red, and so is a
+    // stale entry after the real fix lands.
+    const expected = KNOWN_OPEN_LEAKS.map((r) => r.file).sort()
+    expect(offenders.map((o) => o.file).sort()).toEqual(expected)
+    for (const o of offenders) {
+      expect(
+        ruleMatches(KNOWN_OPEN_LEAKS, o.file, o.call),
+        `unrecorded leaky spawn in ${o.file}: ${o.call}`,
+      ).toBe(true)
     }
-    expect(offenders).toEqual([])
+  })
+
+  test("the ALLOWLIST cannot rot: every entry still matches a live spawn call", () => {
+    // The scope list went stale silently; the allowlist must not. Three entries
+    // naming `sandbox.ts` spawns were deleted by this rule.
+    for (const rule of [...ALLOWLIST, ...KNOWN_OPEN_LEAKS]) {
+      const entry = cluster.find((c) => c.file === rule.file)
+      expect(entry, `rule names a file outside the derived cluster: ${rule.file}`).toBeDefined()
+      const hit = (entry?.calls ?? []).some((c) => c.getText().includes(rule.match))
+      expect(hit, `rule matches no live spawn call: ${rule.file} :: ${rule.match}`).toBe(true)
+      expect(rule.why.length).toBeGreaterThan(40)
+    }
   })
 
   test("red-on-injection: env-absent AND raw-process.env spawns are flagged; scrubbed is clean", () => {
@@ -236,11 +487,86 @@ describe("exec-cluster spawn env-scrub ban — every shell spawn routes through 
     ).toEqual(["Bun.spawn(a, { env: childEnv })"])
     // Allowlisted argv-tool — not flagged even without env.
     expect(leakySpawnCalls('Bun.spawn(["tmux", ...args], { stdout: "pipe" })')).toEqual([])
+    // A CONDITIONAL env spread is `present` — and must still be scrubbed.
+    expect(
+      leakySpawnCalls(
+        "const env = { ...process.env }\nBun.spawn(a, { ...(env !== undefined ? { env } : {}) })",
+      ),
+    ).toEqual(["Bun.spawn(a, { ...(env !== undefined ? { env } : {}) })"])
   })
 
-  test("balanced extraction handles nested parens / object literals", () => {
+  test("DEFECT 2 — identifier resolution is SCOPE-LOCAL, not file-global", () => {
+    // The measured A/B pair, as source text. A: no `const env` anywhere.
+    const A = "const child = Bun.spawn(cmd, { env: process.env })"
+    expect(leakySpawnCalls(A)).toEqual(["Bun.spawn(cmd, { env: process.env })"])
+    // B: an UNRELATED scrubbed `const env` elsewhere in the file. The old
+    // file-global `assignmentRhs` bound `process.env`'s property word `env` to
+    // it and returned []. It must not.
+    const B = [
+      "export const other = () => {",
+      "  const env = scrubEnv({})",
+      "  return env",
+      "}",
+      "export const leak = (cmd: string[]) => Bun.spawn(cmd, { env: process.env })",
+    ].join("\n")
+    expect(leakySpawnCalls(B)).toEqual(["Bun.spawn(cmd, { env: process.env })"])
+    // Same shape, `env: env` — a real reference to a binding in ANOTHER scope is
+    // not visible from the spawn site either.
+    const C = [
+      "export const other = () => {",
+      "  const env = scrubEnv({})",
+      "  return env",
+      "}",
+      "export const leak = (cmd: string[], env: NodeJS.ProcessEnv) => Bun.spawn(cmd, { env })",
+    ].join("\n")
+    expect(leakySpawnCalls(C)).toEqual(["Bun.spawn(cmd, { env })"])
+    // PAIRED CONTROL — the SAME-scope scrubbed binding still resolves clean, so
+    // the fix is scope-awareness and not a blanket "identifiers never resolve".
+    const D = [
+      "export const ok = (cmd: string[]) => {",
+      "  const env = scrubEnv({})",
+      "  return Bun.spawn(cmd, { env })",
+      "}",
+    ].join("\n")
+    expect(leakySpawnCalls(D)).toEqual([])
+    // And an ENCLOSING-scope scrubbed binding resolves clean too (real nesting).
+    const E = [
+      "const env = buildPtyEnv({})",
+      "export const ok = (cmd: string[]) => Bun.spawn(cmd, { env })",
+    ].join("\n")
+    expect(leakySpawnCalls(E)).toEqual([])
+    // A LATER declaration in the same scope must not clean an earlier spawn.
+    const F = [
+      "export const leak = (cmd: string[]) => {",
+      "  const spawned = Bun.spawn(cmd, { env })",
+      "  const env = scrubEnv({})",
+      "  return [spawned, env]",
+      "}",
+    ].join("\n")
+    expect(leakySpawnCalls(F)).toEqual(["Bun.spawn(cmd, { env })"])
+  })
+
+  test("comment MENTIONS never flag — line-leading AND trailing (both directions)", () => {
+    const CALL = 'Bun.spawn(["bash","-lc",c], {})'
+    // The docstring's claim, verified in both directions. The trailing case is
+    // the one an earlier round measured as a FALSE POSITIVE, back when comment
+    // handling was a line-leading-only regex; parsing removes the whole class.
+    expect(leakySpawnCalls(`// ${CALL}\nconst a = 1`)).toEqual([])
+    expect(leakySpawnCalls(`const a = 1 // ${CALL}`)).toEqual([])
+    expect(leakySpawnCalls(`/* ${CALL} */\nconst a = 1`)).toEqual([])
+    expect(leakySpawnCalls(`/**\n * ${CALL}\n */\nconst a = 1`)).toEqual([])
+    expect(leakySpawnCalls(`const a = 1 // don't do this: ${CALL}`)).toEqual([])
+    // A STRING holding the call text is not a call site either.
+    expect(leakySpawnCalls(`const doc = ${JSON.stringify(CALL)}`)).toEqual([])
+    // …and the same text as CODE still flags — the control that keeps the four
+    // assertions above from passing vacuously.
+    expect(leakySpawnCalls(CALL)).toEqual([CALL])
+  })
+
+  test("extraction handles nested parens / object literals", () => {
     const text = "Bun.spawn(argv, { env: withProxyEnv(scrubEnv(), {}) })"
-    expect(bunSpawnCalls(text)).toEqual(["Bun.spawn(argv, { env: withProxyEnv(scrubEnv(), {}) })"])
     expect(leakySpawnCalls(text)).toEqual([]) // composed over scrubEnv ⇒ clean
+    const nested = "Bun.spawn(argv, { env: withProxyEnv(process.env, {}) })"
+    expect(leakySpawnCalls(nested)).toEqual([nested]) // composed over a LEAK ⇒ red
   })
 })
