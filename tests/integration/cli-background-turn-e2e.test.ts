@@ -192,6 +192,26 @@ const realAgentBody =
 
 // ── the e2e ──────────────────────────────────────────────────────────────────
 
+/**
+ * Wait for the turn to be BLOCKED inside the paused LLM, rather than guessing a
+ * duration. The two sites below used `setTimeout(…, 10)` and then pressed Ctrl+B
+ * on the assumption the body had started; on a loaded machine it had not, and
+ * `llm.calls` was 0. Measured before the fix: 1 pass in 5 runs, in isolation.
+ *
+ * The condition IS the precondition the test states in prose — "the real turn
+ * actually started" — so it is waited on directly and fails with that sentence
+ * if it never becomes true.
+ */
+const untilTurnStarted = async (llm: { readonly calls: number }): Promise<void> => {
+  const deadline = Date.now() + 5_000
+  while (llm.calls < 1) {
+    if (Date.now() > deadline) {
+      throw new Error("the real turn never reached the LLM within 5s (llm.calls stayed 0)")
+    }
+    await new Promise((r) => setTimeout(r, 1))
+  }
+}
+
 describe("cli-background-turn — real runAgent body detached→rejoined through the portal", () => {
   beforeEach(() => __resetRuntimeConfig())
   afterEach(() => __resetRuntimeConfig())
@@ -234,7 +254,7 @@ describe("cli-background-turn — real runAgent body detached→rejoined through
 
     // Let the runner start the body + install the FSM, then press Ctrl+B while
     // the real runAgent turn is BLOCKED inside the (paused) LLM stream.
-    await new Promise((r) => setTimeout(r, 10))
+    await untilTurnStarted(llm)
     expect(llm.calls).toBeGreaterThanOrEqual(1) // the real turn actually started
     fake.press({ ctrl: true, name: "b" })
 
@@ -321,7 +341,7 @@ describe("cli-background-turn — real runAgent body detached→rejoined through
       ),
     )
 
-    await new Promise((r) => setTimeout(r, 10))
+    await untilTurnStarted(llm)
     fake.press({ ctrl: true, name: "b" })
     await withTimeout(runP, 10_000, "runOneTurn-background-cancel")
     expect(detachedId).toBeDefined()
