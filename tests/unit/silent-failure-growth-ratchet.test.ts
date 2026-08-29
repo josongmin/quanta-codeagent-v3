@@ -256,7 +256,21 @@ const BARE_CATCH_BASELINE = 1147
 // --porcelain").catch(() => undefined)` (git-status probe → undefined ⇒ fail-CLOSED
 // "treat as dirty", never a stranded path). Each undefined is consumed as "signal
 // absent". Ceiling 165 → 171.
-const NULLISH_PROMISE_SWALLOW_BASELINE = 171
+// Re-measured 2026-08-29 (live prod 172 > 171 — the ceiling was BREACHED). Both
+// sites added since the last reconciliation were AUDITED, not bumped past:
+//   - agent/loop/skill-gate.ts `resolveActiveModelId` — routing an unroutable
+//     skill override while answering a COMPACTION-THRESHOLD question. The whole
+//     point of the call site is that a threshold question must never kill a
+//     turn, and the undefined is consumed one line down (`snapshot?.port ??
+//     config.llm`), so the degrade to the base model is the documented answer,
+//     not a dropped work path.
+//   - agent/sticky-model/session-scoped-store.ts `serialized` — the swallow is
+//     on the CHAIN TAIL only. The caller still awaits `run`, which rejects
+//     normally; without the tail catch a single rejection becomes an unhandled
+//     rejection AND wedges every later `/model` in the session. Swallowing the
+//     tail is what keeps the failure visible on the branch that has a caller.
+// Ceiling 171 → 172.
+const NULLISH_PROMISE_SWALLOW_BASELINE = 172
 
 /**
  * Forms C–F: ceiling baselines (one-directional `<=`) re-measured 2026-06-10 on
