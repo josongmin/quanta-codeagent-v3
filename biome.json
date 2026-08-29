@@ -1197,6 +1197,7 @@
         "!tests/integration/github-webhook-multi-secret-hellgate.test.ts",
         "!tests/integration/activity-spine-real-loop-e2e.test.ts",
         "!tests/integration/cli-attention-navigation.test.ts",
+        "!tests/integration/cli-cost-accounting-e2e.test.ts",
         "!tests/integration/cli-background-turn-e2e.test.ts",
         "!tests/integration/completion-notify-live-e2e.test.ts",
         "!tests/integration/crash-resume-hellgate.test.ts",
