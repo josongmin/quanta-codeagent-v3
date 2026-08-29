@@ -261,6 +261,10 @@ const buildChildInheritedConfig = (
   const childEffort = resolveChildEffort(req)
   return {
     ...({ depth: childDepthOf(parent) } as { depth: number }),
+    // MR-03 — the session's accountant is SHARED, not copied: a subagent's
+    // spend has to land in the same counters as its parent's, or the parent's
+    // totals stay correct-looking and short by the whole child.
+    ...(parent.usageAccounting !== undefined ? { usageAccounting: parent.usageAccounting } : {}),
     mailboxAgentId: mailboxIds.agentId,
     mailboxParentId: mailboxIds.parentId,
     ...(req.taskId !== undefined ? { subagentTaskId: req.taskId } : {}),

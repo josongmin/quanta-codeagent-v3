@@ -1,6 +1,14 @@
 import type { LLMPort, StreamEvent, ToolChoice } from "@/llm"
 import { applyMeasuredUsageLimit } from "@/objective"
 import { costUsd } from "@/observability"
+import { MODEL_RATE_CARD, PRICING_VERSION } from "@/observability/pricing"
+import {
+  type NormalizedUsage,
+  normalizeUsage,
+  priceUsage,
+  type UsageCost,
+  type UsageProvenance,
+} from "@/observability/usage-accounting"
 import type { PromptPolicySnapshot, TurnPolicySnapshot } from "@/shared"
 import { errMessage, LLMError, logger, runtimeConfig } from "@/shared"
 import type { BudgetBreach } from "../budget-ledger"
@@ -34,6 +42,20 @@ type UsageSinkCtx = {
    *  by default: no ledger / no breach ⇒ stays `[]` ⇒ the advisory sink is a
    *  no-op (default-OFF byte-identical). */
   readonly breachSlot: { breaches: ReadonlyArray<BudgetBreach> }
+  /** MR-03 — lineage of the agent that made THIS call, derived once from the
+   *  emitting config so every sink stamps the same answer. */
+  readonly provenance: UsageProvenance
+  /** MR-03 — the same usage in canonical disjoint buckets. Normalized ONCE
+   *  here so no sink re-derives it (and re-derives it differently). */
+  readonly normalized: NormalizedUsage
+  /**
+   * MR-03 — the itemized cost of {@link normalized}, priced through the single
+   * formula. Deliberately SEPARATE from `eventCostUsd` for now: that value
+   * feeds the budget meter and must keep its exact current behaviour (it has
+   * never included cache-write), so collapsing the two is MR-05's job, done
+   * with the meter's tests in hand rather than as a side effect here.
+   */
+  readonly eventCost: UsageCost
 }
 
 /** One usage-event consumer. Adding a downstream (a new meter, ledger, gauge)
@@ -45,12 +67,16 @@ type UsageSink = (c: UsageSinkCtx) => void
 
 const USAGE_SINKS: readonly UsageSink[] = [
   // Surface stream event — the `/context` gauge & usage readouts.
-  ({ config, ev }) =>
+  ({ config, ev, provenance }) =>
     config.stream.emit({
       type: "usage",
       inputTokens: ev.inputTokens,
       outputTokens: ev.outputTokens,
       model: ev.model,
+      // MR-03 — who spent it. A subagent emits onto the parent's stream, so
+      // without these two fields the surface cannot separate root from child.
+      agentId: provenance.agentId,
+      agentKind: provenance.agentKind,
       ...(ev.cacheReadTokens !== undefined ? { cacheReadTokens: ev.cacheReadTokens } : {}),
       ...(ev.cacheCreationTokens !== undefined
         ? { cacheCreationTokens: ev.cacheCreationTokens }
@@ -91,6 +117,22 @@ const USAGE_SINKS: readonly UsageSink[] = [
       at: Date.now(),
     })
     if (result !== undefined) breachSlot.breaches = result.breaches
+  },
+  // MR-03 — the session's usage accountant. Absent ⇒ no-op (default-OFF,
+  // byte-identical). This is the sink every cost SURFACE will read from, so it
+  // records the canonical normalized usage and the priced cost rather than a
+  // surface-specific projection. Children share the parent's instance, so a
+  // subagent's spend lands in the same counters instead of falling out of them.
+  ({ config, normalized, provenance, eventCost }) => {
+    const accounting = config.usageAccounting
+    if (accounting === undefined) return
+    accounting.record({
+      callId: nextCallId(accounting, provenance),
+      at: Date.now(),
+      usage: normalized,
+      cost: eventCost,
+      provenance,
+    })
   },
   // Turn work-metrics collector.
   ({ collector, ev }) =>
@@ -144,6 +186,46 @@ const USAGE_SINKS: readonly UsageSink[] = [
   },
 ]
 
+/**
+ * Per-accountant call sequence, so every admitted record gets a distinct id.
+ *
+ * Scoped to the ACCOUNTING PORT rather than the config: a subagent gets its own
+ * config but shares its parent's accountant, so keying on the port makes the
+ * sequence session-global and keeps parent and child ids from colliding.
+ *
+ * This makes ids unique; it does not make `emitUsage` deduplicating. The port's
+ * `callId` idempotency defends against a record being submitted twice from
+ * ELSEWHERE — a resumed session replaying persisted records, or a shadow
+ * reconciliation feeding the same call down two paths. One stream event still
+ * means one admitted call.
+ */
+const callSeq = new WeakMap<object, { n: number }>()
+
+const nextCallId = (accounting: object, provenance: UsageProvenance): string => {
+  const seq = callSeq.get(accounting) ?? { n: 0 }
+  seq.n += 1
+  callSeq.set(accounting, seq)
+  return `${provenance.sessionId}:${provenance.agentId}:${seq.n}`
+}
+
+/**
+ * Derive who is spending from the emitting config's own lineage.
+ *
+ * `depth` is the authority: it is set at spawn (`childDepthOf(parent)`) and
+ * persisted, so it survives resume. A root config has no depth; anything
+ * deeper is a subagent. The mailbox ids supply stable names.
+ */
+const provenanceOf = (config: AgentConfig): UsageProvenance => {
+  const depth = config.depth ?? 0
+  return {
+    sessionId: config.sessionId ?? "",
+    agentId: config.mailboxAgentId ?? "root",
+    agentKind: depth > 0 ? "subagent" : "root",
+    depth,
+    ...(config.mailboxParentId !== undefined ? { parentAgentId: config.mailboxParentId } : {}),
+  }
+}
+
 export const emitUsage = (
   config: AgentConfig,
   ev: Extract<StreamEvent, { type: "usage" }>,
@@ -151,6 +233,16 @@ export const emitUsage = (
   collector: TurnWorkMetricsCollector | undefined,
   taskSpend: { tokens: number } | undefined,
 ): void => {
+  const provenance = provenanceOf(config)
+  const normalized = normalizeUsage({
+    model: ev.model,
+    inputTokens: ev.inputTokens,
+    outputTokens: ev.outputTokens,
+    ...(ev.cacheReadTokens !== undefined ? { cacheReadTokens: ev.cacheReadTokens } : {}),
+    // The adapter's cache-CREATION bucket is the canonical cache-WRITE bucket.
+    ...(ev.cacheCreationTokens !== undefined ? { cacheWriteTokens: ev.cacheCreationTokens } : {}),
+    ...(ev.reasoningTokens !== undefined ? { reasoningTokens: ev.reasoningTokens } : {}),
+  })
   const ctx: UsageSinkCtx = {
     config,
     ev,
@@ -162,6 +254,9 @@ export const emitUsage = (
     // ALBB-21 — fresh per-event breach handoff slot (record sink writes, advisory
     // sink reads). Starts empty so the advisory sink is a no-op when no cap crosses.
     breachSlot: { breaches: [] },
+    provenance,
+    normalized,
+    eventCost: priceUsage(normalized, MODEL_RATE_CARD, { pricingVersion: PRICING_VERSION }),
   }
   for (const sink of USAGE_SINKS) sink(ctx)
 }

@@ -14,6 +14,7 @@ import type { LLMPort, ResponsesContinuationStore } from "@/llm"
 import type { LlmProvider } from "@/llm/providers"
 import type { CodeActionPort, FormatPort, RenameApplyPort, SignatureHelpPort } from "@/lsp"
 import type { ObjectivePort, ObjectiveVerificationPort } from "@/objective"
+import type { UsageAccountingPort } from "@/observability/usage-accounting"
 import type { OsSandbox } from "@/runtime/os-sandbox"
 import type { RedactionConfig } from "@/security"
 import type { AppshotArtifactSink, AppshotSlot } from "@/tool"
@@ -374,6 +375,19 @@ export interface WireSlotsSessionConfig {
    * surfacing, post-turn telemetry exporter) can read this slot directly.
    */
   budgetLedger?: BudgetLedger
+  /**
+   * MR-02/03 — the session's usage-accounting authority. ONE instance per
+   * session, inherited by every subagent config so a child's spend lands in
+   * the same counters as its parent's. Absent ⇒ `emitUsage`'s accounting sink
+   * is a no-op and the loop is byte-identical for every legacy caller
+   * (RFC §1.2 default-OFF); the composition root decides whether to wire one.
+   *
+   * Distinct from `budgetLedger` (cross-RUN, persisted, breach policy) and from
+   * `budgetMeter` (per-RUN caps): this is the per-SESSION source of truth every
+   * cost SURFACE reads, so the status line, `/cost`, and the dashboards stop
+   * each deriving their own total from whichever feed they were wired to.
+   */
+  usageAccounting?: UsageAccountingPort
   /**
    * ADR-0398 — Objective port slot (ADR-0394 substrate consumer wire).
    *

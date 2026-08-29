@@ -392,6 +392,13 @@ export type AgentEvent =
       // real provider datum and is forwarded verbatim, distinct from omission.
       reasoningTokens?: number
       model: string
+      // MR-03 — provenance. A subagent's usage arrives on the PARENT's stream
+      // (the child inherits it), so without a discriminator two spends that
+      // cost different money to different agents are indistinguishable here.
+      // OPTIONAL: omitted when the emitting config carries no lineage, keeping
+      // the event byte-identical for every legacy producer.
+      agentId?: string
+      agentKind?: "root" | "subagent"
     }
   // Live output-token progress for the in-flight response — the rising
   // "· N tokens" the CLI spinner renders (Claude-Code parity). Mirrors the

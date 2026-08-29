@@ -45,6 +45,7 @@ import { emitUsage } from "@/agent/loop/emit-helpers"
 import { buildChildConfig } from "@/agent/subagent-runner-child-config"
 import type { AgentConfig } from "@/agent/types"
 import type { StreamEvent } from "@/llm"
+import { createUsageAccounting } from "@/observability/usage-accounting"
 import type { AgentEvent } from "@/stream/types"
 
 type UsageEv = Extract<StreamEvent, { type: "usage" }>
@@ -64,6 +65,7 @@ const makeParent = () => {
   const events: AgentEvent[] = []
   const budgetMeter = new BudgetMeter({})
   const budgetLedger = defaultBudgetLedger()
+  const usageAccounting = createUsageAccounting()
   const config = {
     llm: { stream: async function* () {} },
     registry: { get: () => undefined, specs: () => [], isReadOnly: () => true },
@@ -77,8 +79,9 @@ const makeParent = () => {
     sessionId: "sess-1",
     budgetMeter,
     budgetLedger,
+    usageAccounting,
   } as unknown as AgentConfig
-  return { config, events, budgetMeter, budgetLedger }
+  return { config, events, budgetMeter, budgetLedger, usageAccounting }
 }
 
 const emit = (config: AgentConfig, ev: UsageEv) =>
@@ -127,15 +130,35 @@ describe("RED #1 — a subagent's spend reaches the session's accounting", () =>
 
   test("the child inherits the session's cost accounting, not just the stream", () => {
     const { config } = makeParent()
+    expect(childOf(config).usageAccounting).toBe(config.usageAccounting)
+  })
+
+  /**
+   * SCOPE NOTE. This rail originally asserted the child inherits `budgetMeter`
+   * and `budgetLedger`, because at MR-00 those WERE the accounting. MR-02/03
+   * moved the session's source of truth to `usageAccounting`, so the
+   * requirement — a subagent's spend reaches the session's accounting — is now
+   * tested against that authority above, with the same 600-token arithmetic.
+   *
+   * The legacy meters are NOT retrofitted: they keep their own semantics
+   * (per-run caps, cross-run persisted ledger) until MR-05 reconciles them
+   * against the authority. The test below holds that remaining gap open rather
+   * than letting the re-point quietly retire it.
+   */
+  test("the per-run meter and cross-run ledger reconcile with the authority", () => {
+    const { config, budgetMeter } = makeParent()
     const child = childOf(config)
-    // REDs: `buildChildConfig` builds the child field-by-field with no
-    // `...parent` spread, so these accounting slots are simply absent.
-    expect(child.budgetMeter).toBe(config.budgetMeter)
-    expect(child.budgetLedger).toBe(config.budgetLedger)
+    emit(config, usage({ inputTokens: 100, cacheReadTokens: 0 }))
+    emit(child, usage({ inputTokens: 500, cacheReadTokens: 0 }))
+
+    const authority = config.usageAccounting?.snapshot()
+    expect(authority?.freshInputTokens).toBe(600) // the authority already sees both
+    // REDs until MR-05: the meter is fed per-config and the child has none.
+    expect(budgetMeter.snapshot().inputTokens).toBe(600)
   })
 
   test("a subagent's spend reaches the session's counters", () => {
-    const { config, events, budgetMeter } = makeParent()
+    const { config, events } = makeParent()
     const child = childOf(config)
 
     emit(config, usage({ inputTokens: 100, cacheReadTokens: 0 })) // root turn
@@ -144,8 +167,14 @@ describe("RED #1 — a subagent's spend reaches the session's accounting", () =>
     // Both land on the parent stream — the surface sees the full 600 …
     const streamed = events.filter((e) => e.type === "usage") as ReadonlyArray<UsageEv>
     expect(streamed.map((e) => e.inputTokens)).toEqual([100, 500])
-    // … but the counters see only the root's 100. REDs at 100.
-    expect(budgetMeter.snapshot().inputTokens).toBe(600)
+    // … and so does the session's accountant, because the child shares it.
+    const snap = config.usageAccounting?.snapshot()
+    expect(snap?.freshInputTokens).toBe(600)
+    // Split, not just summed — "how much did the subagents cost" is the whole
+    // question, and it must be answerable without re-deriving anything.
+    expect(snap?.byKind.root.freshInputTokens).toBe(100)
+    expect(snap?.byKind.subagent.freshInputTokens).toBe(500)
+    expect(snap?.byAgent.get("child-1")?.freshInputTokens).toBe(500)
   })
 })
 
