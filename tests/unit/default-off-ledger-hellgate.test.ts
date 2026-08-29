@@ -5,6 +5,7 @@ import {
   type DefaultOffLedger,
   loadDefaultOffLedger,
 } from "../../tools/feature-catalog/default-off-ledger-checker"
+import { loadFeatures } from "../../tools/feature-catalog/schema"
 
 const ROOT = join(import.meta.dir, "..", "..")
 const LEDGER_PATH = join(ROOT, "tools/feature-catalog/default-off-ledger.yaml")
@@ -12,10 +13,19 @@ const CATALOG_DIR = join(ROOT, "tools/feature-catalog/features")
 
 const clone = (ledger: DefaultOffLedger): DefaultOffLedger => structuredClone(ledger)
 
+// The corpus is identical for every arm below and costs ~600ms to read, so it
+// is read ONCE and injected. Six arms re-reading it put this file at ~3s in
+// isolation and over the 15s per-test budget under suite load — it timed out in
+// two of eight shards while passing alone every time.
+const catalogOnce = loadFeatures(CATALOG_DIR)
+const opts = async (): Promise<{ readonly catalog: Awaited<typeof catalogOnce> }> => ({
+  catalog: await catalogOnce,
+})
+
 describe("DOF-00 default-off authority ledger hellgate", () => {
   test("anti-vacuum: both live CLI seed authorities and the catalog denominator are populated", async () => {
     const ledger = await loadDefaultOffLedger(LEDGER_PATH)
-    const report = await checkDefaultOffLedger(ledger, { catalogDir: CATALOG_DIR })
+    const report = await checkDefaultOffLedger(ledger, await opts())
 
     expect(report.runtimeCliSeedCount).toBe(31)
     expect(report.eligibleFeatureIds.length).toBeGreaterThanOrEqual(150)
@@ -34,7 +44,7 @@ describe("DOF-00 default-off authority ledger hellgate", () => {
     const missing = clone(ledger)
     const removed = missing.rows.shift()
     if (removed === undefined) throw new Error("fixture ledger must contain a row")
-    expect((await checkDefaultOffLedger(missing, { catalogDir: CATALOG_DIR })).errors).toContain(
+    expect((await checkDefaultOffLedger(missing, await opts())).errors).toContain(
       `missing eligible row: ${removed.feature_id}`,
     )
 
@@ -42,7 +52,7 @@ describe("DOF-00 default-off authority ledger hellgate", () => {
     const first = duplicate.rows[0]
     if (first === undefined) throw new Error("fixture ledger must contain a row")
     duplicate.rows.push(structuredClone(first))
-    expect((await checkDefaultOffLedger(duplicate, { catalogDir: CATALOG_DIR })).errors).toContain(
+    expect((await checkDefaultOffLedger(duplicate, await opts())).errors).toContain(
       `duplicate feature_id: ${first.feature_id}`,
     )
   })
@@ -57,7 +67,7 @@ describe("DOF-00 default-off authority ledger hellgate", () => {
     first.effective_default.web = "maybe"
 
     expect(
-      checkDefaultOffLedger(invalid as unknown as DefaultOffLedger, { catalogDir: CATALOG_DIR }),
+      checkDefaultOffLedger(invalid as unknown as DefaultOffLedger, await opts()),
     ).rejects.toThrow(/"effective_default"[\s\S]*"web"/)
   })
 
@@ -68,7 +78,7 @@ describe("DOF-00 default-off authority ledger hellgate", () => {
     if (known === undefined) throw new Error("fixture ledger must contain a CLI-on row")
     known.effective_default.cli = "off"
 
-    const report = await checkDefaultOffLedger(mutated, { catalogDir: CATALOG_DIR })
+    const report = await checkDefaultOffLedger(mutated, await opts())
     expect(report.errors).toEqual([
       `runtime CLI default mismatch: ${known.feature_id} expected on, ledger has off`,
     ])
@@ -92,7 +102,7 @@ describe("DOF-00 default-off authority ledger hellgate", () => {
     if (victim === undefined) throw new Error("fixture ledger must contain a wired row")
     victim.activation = "unwired"
 
-    const report = await checkDefaultOffLedger(mutated, { catalogDir: CATALOG_DIR })
+    const report = await checkDefaultOffLedger(mutated, await opts())
     expect(report.errors).toContain(
       `reachability=wired contradicts activation=unwired (a wired feature has a live consumer): ${victim.feature_id}`,
     )

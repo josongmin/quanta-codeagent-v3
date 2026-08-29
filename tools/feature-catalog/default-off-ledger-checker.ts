@@ -7,7 +7,7 @@ import {
   type DefaultOffLedgerRow,
   DefaultOffLedgerSchema,
 } from "./default-off-ledger-schema"
-import { loadFeatures } from "./schema"
+import { type LoadedFeature, loadFeatures } from "./schema"
 
 export type { DefaultOffLedger, DefaultOffLedgerRow } from "./default-off-ledger-schema"
 
@@ -22,6 +22,14 @@ export interface DefaultOffLedgerReport {
 
 export interface CheckDefaultOffLedgerOptions {
   readonly catalogDir?: string
+  /**
+   * A catalog already loaded by the caller. Reading it costs ~600ms, and a
+   * caller that checks several ledger variants against the SAME corpus — every
+   * red-on-injection arm does — would otherwise pay that per arm. Passed in
+   * rather than memoised so nothing can serve a stale corpus after the files
+   * on disk change.
+   */
+  readonly catalog?: readonly LoadedFeature[]
 }
 
 const uniqueSorted = (values: readonly string[]): string[] => [...new Set(values)].sort()
@@ -166,7 +174,7 @@ export async function checkDefaultOffLedger(
   options: CheckDefaultOffLedgerOptions = {},
 ): Promise<DefaultOffLedgerReport> {
   const ledger = DefaultOffLedgerSchema.parse(input)
-  const catalog = await loadFeatures(options.catalogDir)
+  const catalog = options.catalog ?? (await loadFeatures(options.catalogDir))
   const catalogIds = new Set(catalog.map(({ feature }) => feature.id))
   const labelIds = catalog
     .filter(({ feature }) => feature.labels?.includes(ledger.scope.catalog_label))
