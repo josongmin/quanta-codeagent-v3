@@ -136,6 +136,20 @@ describe("empty-corpus oracle", () => {
     }, 120_000)
   })
 
+  /** Every path under `root` the per-file walk would have refused to copy. */
+  const skippablePaths = (dir: string, root: string): string[] => {
+    const out: string[] = []
+    const walk = (rel: string): void => {
+      for (const e of readdirSync(join(dir, rel), { withFileTypes: true })) {
+        const next = join(rel, e.name)
+        if (e.name === "node_modules" || e.name.startsWith(".")) out.push(next)
+        else if (e.isDirectory()) walk(next)
+      }
+    }
+    walk(root)
+    return out
+  }
+
   describe("mirror construction", () => {
     // An audit ran 16 mutations against the oracle. Six SURVIVED, and every one
     // of them was on the mirror-construction path — which this file did not
@@ -180,18 +194,7 @@ describe("empty-corpus oracle", () => {
       // oracles wearing one name.
       const dir = mirrorOf("src")
       try {
-        const strays: string[] = []
-        const walk = (rel: string): void => {
-          for (const e of readdirSync(join(dir, rel), { withFileTypes: true })) {
-            const next = rel === "" ? e.name : join(rel, e.name)
-            if (e.name === "node_modules" || e.name.startsWith(".")) {
-              strays.push(next)
-              continue
-            }
-            if (e.isDirectory()) walk(next)
-          }
-        }
-        for (const root of ["src", "tests"]) walk(root)
+        const strays = ["src", "tests"].flatMap((root) => skippablePaths(dir, root))
         expect(strays, "the clone kept paths the walk would never have copied").toEqual([])
       } finally {
         rmSync(dir, { recursive: true, force: true })
