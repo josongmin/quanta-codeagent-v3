@@ -186,8 +186,20 @@ const importClosure = (entry: string): ReadonlySet<string> => {
     // lines were enough.
     const src = raw.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/.*$/gm, "$1")
     const out: string[] = []
-    for (const m of src.matchAll(/from\s*\(?\s*["'`]([^"'`]+)["'`]/g)) out.push(m[1] ?? "")
-    for (const m of src.matchAll(/import\s*\(\s*["'`]([^"'`]+)["'`]/g)) out.push(m[1] ?? "")
+    // Anchored to a real import STATEMENT, not to the text `from "…"` anywhere.
+    // A scanning guard quotes module specifiers inside its own assertions —
+    // `expect(text.includes('import type { PermissionMode } from "@/permission"'))`
+    // — and treating those as imports resurrected the barrel they name. Measured:
+    // that one string kept 102 corpus files alive in the mirror, which is enough
+    // to fail the canary and make the guard unjudgeable.
+    for (const m of src.matchAll(/^\s*(?:import|export)\b[^;\n]*?\bfrom\s*["'`]([^"'`]+)["'`]/gm)) {
+      out.push(m[1] ?? "")
+    }
+    for (const m of src.matchAll(/^\s*(?:import|export)\s+["'`]([^"'`]+)["'`]/gm)) {
+      out.push(m[1] ?? "")
+    }
+    // A dynamic `import("…")` is a real edge wherever it appears.
+    for (const m of src.matchAll(/\bimport\s*\(\s*["'`]([^"'`]+)["'`]/g)) out.push(m[1] ?? "")
     return out
   }
   const readOrEmpty = (rel: string): string => {
@@ -280,12 +292,18 @@ export type GuardCase = { readonly file: string; readonly corpus: CorpusRoot }
  * Measuring it is what turns a silent false negative into a stated limit.
  */
 /**
- * Every `.ts` left in the blanked root, GUARDS INCLUDED.
+ * Corpus files left in the blanked root — guards EXCLUDED, deliberately.
  *
- * `isCorpus` excludes `.test.ts` so guards survive the blank — correct for
- * deciding what to delete, wrong for measuring what remains. Using it here made
- * the 299 `src/**\/*.test.ts` files invisible: a mirror holding 300 real source
- * files reported an overlap of 1.
+ * Two wrong answers were tried here. Counting only non-test files hid the 299
+ * `src/**\/*.test.ts` that survive the blank, so a mirror holding 300 real `.ts`
+ * reported an overlap of 1. Counting every `.ts` overcorrected: guards are kept
+ * ON PURPOSE (they are what is being judged), and including them put every
+ * `src`-rooted guard over the threshold — measured, the real corpus remainder is
+ * 0–102 files while the guard count is a constant 299.
+ *
+ * What the threshold is about is how much of the CORPUS the guard's own imports
+ * resurrected, so guards are excluded and the 299 are reported separately by the
+ * canary, which fails if the blanked root is not actually empty.
  */
 const corpusOverlap = (mirror: string, root: CorpusRoot): number => {
   let n = 0
@@ -300,7 +318,7 @@ const corpusOverlap = (mirror: string, root: CorpusRoot): number => {
       if (e.name === "node_modules" || e.name.startsWith(".")) continue
       const p = join(dir, e.name)
       if (e.isDirectory()) walk(p)
-      else if (p.endsWith(".ts")) n++
+      else if (p.endsWith(".ts") && isCorpus(p)) n++
     }
   }
   walk(join(mirror, root))

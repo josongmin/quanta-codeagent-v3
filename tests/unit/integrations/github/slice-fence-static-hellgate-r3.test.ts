@@ -30,7 +30,7 @@
  */
 
 import { describe, expect, test } from "bun:test"
-import { readdirSync, readFileSync, statSync } from "node:fs"
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs"
 import { join, resolve } from "node:path"
 
 // Repo-anchored on this file, not the ambient cwd — this fence reads real
@@ -114,8 +114,26 @@ const SLICE_FILES: readonly SliceFile[] = listSliceFiles().map((f) => ({
   ...f,
   content: stripComments(f.content),
 }))
-const CLI_LIB_TEXT = stripComments(readFileSync(CLI_LIB, "utf8"))
-const CLI_ADAPTERS_TEXT = stripComments(readFileSync(CLI_ADAPTERS, "utf8"))
+/**
+ * Read LAZILY, and a missing file is an assertion failure rather than a crash.
+ *
+ * These were module-scope `readFileSync` calls, so a corpus file that is not
+ * there killed the file before a single test ran — bun reports that as
+ * `1 fail`, indistinguishable from a real violation, and an empty-corpus oracle
+ * credited the crash as "the guard noticed". It noticed nothing; it never
+ * executed. Naming the absence is what makes the difference visible.
+ */
+const readSlice = (abs: string): string => {
+  if (!existsSync(abs)) {
+    throw new Error(
+      `${abs.slice(REPO_ROOT.length + 1)} is missing — this guard's verdict is derived ` +
+        `from its contents, so there is nothing to check rather than nothing wrong.`,
+    )
+  }
+  return stripComments(readFileSync(abs, "utf8"))
+}
+const CLI_LIB_TEXT = (): string => readSlice(CLI_LIB)
+const CLI_ADAPTERS_TEXT = (): string => readSlice(CLI_ADAPTERS)
 
 describe("ADR-0311 hellgate R3 — slice fence (static)", () => {
   test("slice dir is non-empty (sanity)", () => {
@@ -224,13 +242,13 @@ describe("ADR-0311 hellgate R3 — slice fence (static)", () => {
   })
 
   test("CLI lib (`from-pr-cmd.ts`) is port-only — no node:fs / Bun.spawn / @/security", () => {
-    for (const re of NODE_FS_BANNED) expect(re.test(CLI_LIB_TEXT)).toBe(false)
-    expect(BUN_SPAWN_RE.test(CLI_LIB_TEXT)).toBe(false)
-    expect(PROCESS_ENV_RE.test(CLI_LIB_TEXT)).toBe(false)
-    expect(/from\s+["']@\/security/.test(CLI_LIB_TEXT)).toBe(false)
+    for (const re of NODE_FS_BANNED) expect(re.test(CLI_LIB_TEXT())).toBe(false)
+    expect(BUN_SPAWN_RE.test(CLI_LIB_TEXT())).toBe(false)
+    expect(PROCESS_ENV_RE.test(CLI_LIB_TEXT())).toBe(false)
+    expect(/from\s+["']@\/security/.test(CLI_LIB_TEXT())).toBe(false)
     // The CLI lib MUST only import from `@/integrations/github` and `@/reactor`.
     const RE = /from\s+["']([^"']+)["']/g
-    for (const m of CLI_LIB_TEXT.matchAll(RE)) {
+    for (const m of CLI_LIB_TEXT().matchAll(RE)) {
       const spec = m[1] ?? ""
       const ok =
         spec === "@/integrations/github" ||
@@ -245,14 +263,14 @@ describe("ADR-0311 hellgate R3 — slice fence (static)", () => {
   test("CLI adapters file IS the only place that imports node:fs / @/security", () => {
     // Inverse fence: adapters file SHOULD import node:fs/promises and
     // @/security/redaction (otherwise the redact wire is broken).
-    expect(/from\s+["']node:fs\/promises["']/.test(CLI_ADAPTERS_TEXT)).toBe(true)
-    expect(/from\s+["']@\/security\/redaction["']/.test(CLI_ADAPTERS_TEXT)).toBe(true)
+    expect(/from\s+["']node:fs\/promises["']/.test(CLI_ADAPTERS_TEXT())).toBe(true)
+    expect(/from\s+["']@\/security\/redaction["']/.test(CLI_ADAPTERS_TEXT())).toBe(true)
     // And adapters MUST not pull trunk modules.
     for (const banned of FORBIDDEN_TRUNK_PREFIXES) {
       // `@/apps` is itself the adapters' own surface — skip self-reference.
       if (banned === "@/apps") continue
       const re = new RegExp(`from\\s+["']${banned.replace(/[/]/g, "\\/")}(?:\\/|["'])`)
-      expect(re.test(CLI_ADAPTERS_TEXT)).toBe(false)
+      expect(re.test(CLI_ADAPTERS_TEXT())).toBe(false)
     }
   })
 
