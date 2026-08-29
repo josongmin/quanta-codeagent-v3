@@ -13,6 +13,11 @@ export type {
   UsageRejection,
 } from "./port"
 export { type PriceUsageOpts, priceUsage } from "./price"
+export {
+  type CostSurfaceView,
+  costSurfaceView,
+  type ModelCostLine,
+} from "./projection"
 export type {
   ModelPrice,
   NormalizedUsage,

@@ -39,6 +39,7 @@ import { TurnWorkMetricsCollector } from "@/agent/work-metrics-collector"
 import { type CostPanel, createCostPanel } from "@/apps/cli/cost-panel"
 import type { StreamEvent } from "@/llm"
 import { Metrics } from "@/observability/metrics"
+import { createUsageAccounting } from "@/observability/usage-accounting"
 import { GEN_AI_ATTRS } from "@/observability/vocabulary"
 
 type UsageEv = Extract<StreamEvent, { type: "usage" }>
@@ -74,12 +75,22 @@ const foldPanelFromCounters = (
 }
 
 /** One session: a root turn plus a subagent turn, driven through the shipped
- *  `emitUsage` fan-out, then read back from every surface that shows cost. */
+ *  `emitUsage` fan-out, then read back from every surface that shows cost.
+ *
+ *  MR-04 — the panel now PROJECTS the session's accountant instead of folding
+ *  the OTel counter delta, so the replicated fold below is gone from this path.
+ *  It survives only in the root-only control, which still exercises the legacy
+ *  feed until MR-07 deletes it. */
 const runSession = () => {
   const metrics = new Metrics()
   const budgetLedger = defaultBudgetLedger()
   const collector = new TurnWorkMetricsCollector()
-  const panel = createCostPanel({ model: MODEL, now: () => 1_700_000_000_000 })
+  const usageAccounting = createUsageAccounting()
+  const panel = createCostPanel({
+    model: MODEL,
+    now: () => 1_700_000_000_000,
+    accounting: usageAccounting,
+  })
   const recorder = new AgentRecorder(metrics)
 
   const config = {
@@ -95,6 +106,7 @@ const runSession = () => {
     sessionId: "sess-1",
     metrics,
     budgetLedger,
+    usageAccounting,
   } as unknown as AgentConfig
 
   const child = buildChildConfig(config, { prompt: "x" } as never, process.cwd(), {
@@ -113,10 +125,7 @@ const runSession = () => {
     undefined,
   )
 
-  const prev = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0 }
-  foldPanelFromCounters(panel, metrics.snapshot().counters, prev)
-
-  return { panel, budgetLedger, collector, metrics }
+  return { panel, budgetLedger, collector, metrics, usageAccounting }
 }
 
 describe("every CLI cost surface reports the same total", () => {
@@ -125,8 +134,10 @@ describe("every CLI cost surface reports the same total", () => {
 
     // One diagnostic object so the failure names WHICH surfaces drifted and by
     // how much, instead of failing on the first mismatch and hiding the rest.
+    const { usageAccounting } = runSession()
     const reported = {
       truth: TRUE_TOTAL_USD,
+      authority: round(usageAccounting.snapshot().totalUsd),
       costPanel: round(panel.snapshot().totalCostUsd ?? 0),
       statusLine: round(panel.snapshot().totalCostUsd ?? 0), // same snapshot source
       ledger: round(budgetLedger.snapshot().totalCost),
@@ -134,11 +145,26 @@ describe("every CLI cost surface reports the same total", () => {
     }
     expect(reported).toEqual({
       truth: TRUE_TOTAL_USD,
+      authority: TRUE_TOTAL_USD,
       costPanel: TRUE_TOTAL_USD,
       statusLine: TRUE_TOTAL_USD,
       ledger: TRUE_TOTAL_USD,
       workMetrics: TRUE_TOTAL_USD,
     })
+  })
+
+  test("the panel and the status line report the subagent's spend", () => {
+    // Isolated from the surfaces still awaiting MR-05, so a regression in the
+    // panel's projection shows up HERE as a fresh failure instead of hiding
+    // inside a test that is red for an unrelated reason.
+    const { panel, usageAccounting } = runSession()
+    expect(round(usageAccounting.snapshot().totalUsd)).toBe(TRUE_TOTAL_USD)
+    expect(round(panel.snapshot().totalCostUsd ?? 0)).toBe(TRUE_TOTAL_USD)
+    // The panel's own per-model view comes from the same snapshot, so it sees
+    // the child's tokens too — the counter feed it used to read never did.
+    expect(panel.byModel().find((b) => b.model === MODEL)?.inputTokens).toBe(
+      PARENT_INPUT + CHILD_INPUT,
+    )
   })
 
   test("the panel and the ledger agree on a turn that used the prompt cache", () => {

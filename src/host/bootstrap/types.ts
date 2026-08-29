@@ -412,6 +412,9 @@ export interface SessionBootstrapDeps {
   readonly buildCostPanelOrUndefined: (
     featureCfg: SessionFeatureConfig,
     model: string,
+    /** MR-04 — the session's usage-accounting authority. Supplied ⇒ the panel
+     *  projects it instead of folding its own counter delta. */
+    accounting?: import("@/observability/usage-accounting").UsageAccountingPort,
   ) => BootstrapCostPanel | undefined
   readonly buildBranchProgressOrUndefined: (
     featureCfg: SessionFeatureConfig,

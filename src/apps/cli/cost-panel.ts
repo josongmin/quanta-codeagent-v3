@@ -23,6 +23,11 @@
  */
 
 import { costUsd } from "@/observability"
+import {
+  type CostSurfaceView,
+  costSurfaceView,
+  type UsageAccountingPort,
+} from "@/observability/usage-accounting"
 import { dim, gray, renderBox } from "@/ui/ui-helpers"
 
 export interface CostPanelState {
@@ -110,6 +115,20 @@ export interface CostPanelOptions {
   /** Initial model id stamped on the state. Required (caller already knows
    *  the active model when assembling the REPL stack). */
   model: string
+  /**
+   * MR-04 — the session's usage-accounting authority.
+   *
+   * When present the panel PROJECTS it: every token and dollar it reports comes
+   * from that one snapshot, and `incrementTurn`'s own accumulation is inert. It
+   * is the reason the status line, `/cost`, and the dashboards stop being able
+   * to disagree — and the reason subagent spend appears at all, since the
+   * counter feed the panel used to read never saw a child.
+   *
+   * Turn COUNT stays panel-local. A turn is a UI concept and a turn can contain
+   * several model calls, so it is not something the accountant can answer;
+   * `incrementTurn` keeps advancing it even in projected mode.
+   */
+  accounting?: UsageAccountingPort
 }
 
 // ── formatters ──────────────────────────────────────────────────────────
@@ -256,6 +275,7 @@ const panelState = (opts: CostPanelOptions) => {
     PATCH_KEYS,
     applyPatch,
     sortedModelEntries,
+    accounting: opts.accounting,
   }
 }
 
@@ -268,13 +288,39 @@ type PanelCtx = ReturnType<typeof panelState>
 const accountingOps = (
   ctx: PanelCtx,
 ): Pick<CostPanel, "snapshot" | "byModel" | "update" | "incrementTurn"> => {
-  const { enabled, state, bucketFor, accumulateCost, applyPatch, sortedModelEntries } = ctx
+  const { enabled, state, applyPatch, sortedModelEntries, accounting } = ctx
+  /** The authority's current numbers, or `undefined` when unwired. */
+  const projected = (): CostSurfaceView | undefined =>
+    accounting === undefined ? undefined : costSurfaceView(accounting.snapshot())
+
   return {
-    snapshot: () => ({ ...state }),
+    snapshot: () => {
+      const view = projected()
+      if (view === undefined) return { ...state }
+      // `turns` and `model` remain panel-local: one is a UI concept the
+      // accountant does not model, the other is the session's label.
+      return {
+        ...state,
+        inputTokens: view.promptTokens,
+        outputTokens: view.outputTokens,
+        cacheReadTokens: view.cacheReadTokens,
+        // `null` only when nothing has been spent yet — the panel's contract
+        // for "no known-model cost has landed", preserved.
+        totalCostUsd: view.calls === 0 ? null : view.totalUsd,
+      }
+    },
 
     byModel: () => {
       if (!enabled) return []
-      return sortedModelEntries().map(([model, b]) => ({ model, ...b }))
+      const view = projected()
+      if (view === undefined) return sortedModelEntries().map(([model, b]) => ({ model, ...b }))
+      return view.byModel.map((line) => ({
+        model: line.model,
+        inputTokens: line.promptTokens,
+        outputTokens: line.outputTokens,
+        cacheReadTokens: line.cacheReadTokens,
+        costUsd: line.totalUsd,
+      }))
     },
 
     update: (patch) => {
@@ -284,34 +330,45 @@ const accountingOps = (
 
     incrementTurn: (usage) => {
       if (!enabled) return
-      const inTok = Math.max(0, usage.inputTokens ?? 0)
-      const outTok = Math.max(0, usage.outputTokens ?? 0)
-      const cacheTok = Math.max(0, usage.cacheReadTokens ?? 0)
       state.turns += 1
-      state.inputTokens += inTok
-      state.outputTokens += outTok
-      state.cacheReadTokens += cacheTok
-      // Resolve cost ONCE: caller-provided > derived via pricing > null. Used
-      // for BOTH the aggregate and the per-model bucket so they never diverge.
-      // MR-05 — price and bucket by the model THIS usage ran on.
-      const usageModel =
-        usage.model !== undefined && usage.model.length > 0 ? usage.model : state.model
-      const rawCost =
-        usage.costUsd !== undefined ? usage.costUsd : costUsd(usageModel, inTok, outTok, cacheTok)
-      // Clamp a finite negative cost to 0 — symmetric with the Math.max(0, …)
-      // token clamps above. A negative bill (from a buggy/hostile upstream cost)
-      // must never drive the cumulative total below zero.
-      const turnCost = rawCost !== null && Number.isFinite(rawCost) ? Math.max(0, rawCost) : rawCost
-      accumulateCost(turnCost)
-      // §23.5 — attribute to the model active at this turn.
-      const b = bucketFor(usageModel)
-      b.inputTokens += inTok
-      b.outputTokens += outTok
-      b.cacheReadTokens += cacheTok
-      if (turnCost !== null && Number.isFinite(turnCost)) {
-        b.costUsd = (b.costUsd ?? 0) + turnCost
-      }
+      // Projected mode: the accountant owns every token and dollar, so the turn
+      // count above is the only thing left for this panel to advance.
+      if (accounting === undefined) accumulateLegacyTurn(ctx, usage)
     },
+  }
+}
+
+/** The pre-MR-04 accumulation path: fold one turn's counter DELTA into the
+ *  panel's own state. Reached only when no accounting authority is wired, and
+ *  deleted outright once the authority is the only feed (MR-07). Kept whole and
+ *  separate rather than interleaved with the projected branch, so the two feeds
+ *  never half-mix. */
+const accumulateLegacyTurn = (ctx: PanelCtx, usage: CostPanelUsageDelta): void => {
+  const { state, bucketFor, accumulateCost } = ctx
+  const inTok = Math.max(0, usage.inputTokens ?? 0)
+  const outTok = Math.max(0, usage.outputTokens ?? 0)
+  const cacheTok = Math.max(0, usage.cacheReadTokens ?? 0)
+  state.inputTokens += inTok
+  state.outputTokens += outTok
+  state.cacheReadTokens += cacheTok
+  // Resolve cost ONCE: caller-provided > derived via pricing > null. Used
+  // for BOTH the aggregate and the per-model bucket so they never diverge.
+  // MR-05 — price and bucket by the model THIS usage ran on.
+  const usageModel = usage.model !== undefined && usage.model.length > 0 ? usage.model : state.model
+  const rawCost =
+    usage.costUsd !== undefined ? usage.costUsd : costUsd(usageModel, inTok, outTok, cacheTok)
+  // Clamp a finite negative cost to 0 — symmetric with the Math.max(0, …)
+  // token clamps above. A negative bill (from a buggy/hostile upstream cost)
+  // must never drive the cumulative total below zero.
+  const turnCost = rawCost !== null && Number.isFinite(rawCost) ? Math.max(0, rawCost) : rawCost
+  accumulateCost(turnCost)
+  // §23.5 — attribute to the model active at this turn.
+  const b = bucketFor(usageModel)
+  b.inputTokens += inTok
+  b.outputTokens += outTok
+  b.cacheReadTokens += cacheTok
+  if (turnCost !== null && Number.isFinite(turnCost)) {
+    b.costUsd = (b.costUsd ?? 0) + turnCost
   }
 }
 

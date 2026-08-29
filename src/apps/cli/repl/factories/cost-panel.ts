@@ -1,3 +1,4 @@
+import type { UsageAccountingPort } from "@/observability/usage-accounting"
 import { type CostPanel, createCostPanel } from "../../cost-panel"
 import type { CliFeatureConfig } from "../cli-feature-config"
 
@@ -11,7 +12,16 @@ import type { CliFeatureConfig } from "../cli-feature-config"
 export const buildCostPanelOrUndefined = (
   featureCfg: CliFeatureConfig,
   model: string,
+  accounting?: UsageAccountingPort,
 ): CostPanel | undefined => {
   if (!featureCfg.costPanel.enabled) return undefined
-  return createCostPanel({ enabled: true, model })
+  // MR-04 — with an authority the panel PROJECTS it and the delta fold above
+  // becomes dead weight; without one it keeps accumulating from the counter
+  // delta exactly as before. The composition root decides which, so the
+  // switchover is one wire rather than a rewrite of every surface.
+  return createCostPanel({
+    enabled: true,
+    model,
+    ...(accounting !== undefined ? { accounting } : {}),
+  })
 }
