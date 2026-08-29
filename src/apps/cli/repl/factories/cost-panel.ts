@@ -13,15 +13,18 @@ export const buildCostPanelOrUndefined = (
   featureCfg: CliFeatureConfig,
   model: string,
   accounting?: UsageAccountingPort,
+  /** `false` ⇒ shadow: the authority is handed over so `/cost` can print a
+   *  reconciliation receipt, but the panel still renders the legacy feed. */
+  accountingAuthoritative = true,
 ): CostPanel | undefined => {
   if (!featureCfg.costPanel.enabled) return undefined
-  // MR-04 — with an authority the panel PROJECTS it and the delta fold above
-  // becomes dead weight; without one it keeps accumulating from the counter
-  // delta exactly as before. The composition root decides which, so the
-  // switchover is one wire rather than a rewrite of every surface.
+  // MR-04/MR-08 — an authority in `on` makes the panel PROJECT it; in `shadow`
+  // the same object arrives but only feeds the receipt; with none the panel
+  // accumulates from the counter delta exactly as before. The composition root
+  // decides which, so the switchover is one wire rather than a rewrite.
   return createCostPanel({
     enabled: true,
     model,
-    ...(accounting !== undefined ? { accounting } : {}),
+    ...(accounting !== undefined ? { accounting, accountingAuthoritative } : {}),
   })
 }

@@ -134,7 +134,10 @@ const buildProjectingCostPanel = (
   deps.buildCostPanelOrUndefined(
     featureCfg,
     runtime.model,
-    usageAccountingIsAuthoritative(runtime.env) ? usageAccounting : undefined,
+    // Handed over in BOTH shadow and on — shadow needs it to produce the
+    // receipt. Whether the panel RENDERS from it is the second argument.
+    usageAccounting,
+    usageAccountingIsAuthoritative(runtime.env),
   )
 
 /** Session teardown: stop the MCP fleet, THEN close the session egress proxy on

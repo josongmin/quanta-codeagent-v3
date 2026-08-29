@@ -273,6 +273,85 @@ describe("every CLI cost surface reports the same total", () => {
     expect(panel.renderDetailed()).not.toContain("By agent:")
   })
 
+  test("SHADOW: the panel renders the legacy feed and prints a reconciliation receipt", () => {
+    // Hell-audit finding: `reconcileUsageAccounting` had ZERO production
+    // callers, so shadow mode recorded into an authority nobody read and
+    // produced no evidence — the entire reason the middle position exists was
+    // unreachable. This drives the mode end to end.
+    const metrics = new Metrics()
+    const usageAccounting = createUsageAccounting()
+    const panel = createCostPanel({
+      model: MODEL,
+      now: () => 1_700_000_000_000,
+      accounting: usageAccounting,
+      accountingAuthoritative: false, // shadow
+    })
+    const config = {
+      llm: { stream: async function* () {} },
+      registry: { get: () => undefined, specs: () => [], isReadOnly: () => true },
+      stream: { emit: () => undefined },
+      permission: { mode: "acceptEdits" },
+      messages: [],
+      system: "t",
+      cwd: process.cwd(),
+      maxTurns: 1,
+      signal: new AbortController().signal,
+      sessionId: "sess-1",
+      metrics,
+      usageAccounting,
+    } as unknown as AgentConfig
+    const child = buildChildConfig(config, { prompt: "x" } as never, process.cwd(), {
+      agentId: "child-1",
+      parentId: "root",
+    } as never)
+
+    emitUsage(config, usage(PARENT_INPUT), new AgentRecorder(metrics), undefined, undefined)
+    emitUsage(child, usage(CHILD_INPUT), undefined, undefined, undefined)
+    const prev = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0 }
+    foldPanelFromCounters(panel, metrics.snapshot().counters, prev)
+
+    // The panel still shows the LEGACY number — shadow changes nothing a user
+    // was already looking at.
+    expect(round(panel.snapshot().totalCostUsd ?? 0)).toBe(0.25)
+    // …and the receipt names the divergence the authority can see.
+    const detailed = panel.renderDetailed()
+    expect(detailed).toContain("usage-accounting shadow")
+    expect(detailed).toContain("DIVERGES")
+  })
+
+  test("SHADOW on an agreeing session reports agreement, with a call count", () => {
+    // Paired control: no subagent, so the two feeds see the same calls.
+    const metrics = new Metrics()
+    const usageAccounting = createUsageAccounting()
+    const panel = createCostPanel({
+      model: MODEL,
+      now: () => 1_700_000_000_000,
+      accounting: usageAccounting,
+      accountingAuthoritative: false,
+    })
+    const config = {
+      llm: { stream: async function* () {} },
+      registry: { get: () => undefined, specs: () => [], isReadOnly: () => true },
+      stream: { emit: () => undefined },
+      permission: { mode: "acceptEdits" },
+      messages: [],
+      system: "t",
+      cwd: process.cwd(),
+      maxTurns: 1,
+      signal: new AbortController().signal,
+      sessionId: "sess-1",
+      metrics,
+      usageAccounting,
+    } as unknown as AgentConfig
+    emitUsage(config, usage(PARENT_INPUT), new AgentRecorder(metrics), undefined, undefined)
+    const prev = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0 }
+    foldPanelFromCounters(panel, metrics.snapshot().counters, prev)
+
+    const detailed = panel.renderDetailed()
+    expect(detailed).toContain("agrees across 1 calls")
+    expect(detailed).not.toContain("DIVERGES")
+  })
+
   test("the panel and the ledger agree on a turn that used the prompt cache", () => {
     // Root-only, so subagent coverage is NOT the variable here — this isolates
     // the SECOND way the surfaces drift apart: the panel prices cache reads via
