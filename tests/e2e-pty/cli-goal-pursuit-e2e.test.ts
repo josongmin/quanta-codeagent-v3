@@ -13,7 +13,7 @@
  * Gated on `PTY_AVAILABLE` (visible skip on a Bun build without openpty).
  */
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { drivePtyCli, PTY_AVAILABLE, type PtyCli } from "./pty-harness"
@@ -110,11 +110,15 @@ describe.skipIf(!PTY_AVAILABLE)("CLI /goal (Pursuing goal) e2e (PTY)", () => {
     readonly goalEnforce?: boolean
     readonly idleSuppress?: boolean
     readonly backgroundTurn?: boolean
+    /** GOAL-04 rail 11 — id-mode argv (`--new-session` / `--resume <id>`) so a
+     *  test can restart the PROCESS against the same durable session. */
+    readonly argv?: readonly string[]
   }): Promise<PtyCli> => {
     const cassettePath = join(cwd, "goal-continuation.jsonl")
     writeFileSync(cassettePath, args.cassette)
     const c = drivePtyCli({
       ...(cliCommand === undefined ? {} : { command: cliCommand }),
+      ...(args.argv === undefined ? {} : { args: args.argv }),
       cwd,
       env: {
         QUANTA_SESSIONS_DIR: sessionsDir,
@@ -369,4 +373,77 @@ describe.skipIf(!PTY_AVAILABLE)("CLI /goal (Pursuing goal) e2e (PTY)", () => {
     },
     T,
   )
+
+  /** Poll the durable session bytes until `pred` holds (the per-turn save is
+   *  asynchronous to the streamed output). Returns false on timeout so the
+   *  caller asserts rather than hanging. */
+  const waitForDurableGoal = async (
+    pred: (raw: string) => boolean,
+    timeoutMs = 20_000,
+  ): Promise<boolean> => {
+    const deadline = Date.now() + timeoutMs
+    while (Date.now() < deadline) {
+      const file = readdirSync(sessionsDir).find((name) => name.endsWith(".json"))
+      if (file !== undefined && pred(readFileSync(join(sessionsDir, file), "utf8"))) return true
+      await sleep(100)
+    }
+    return false
+  }
+
+  test("GOAL-04 rail 11 — the objective survives a real PROCESS RESTART, and a clear survives it too", async () => {
+    // The durable objective snapshot rides the PER-TURN save, so the goal is
+    // created AND a turn is run before the process dies (a kill, not a
+    // graceful exit: this is the crash-restart shape the rail is about).
+    const first = await bootWithGoalContinuation({
+      cassette: `${replayEntry("first-run-marker")}\n`,
+      idleMs: 15_000,
+      argv: ["--new-session"],
+    })
+    await submitLine(first, "/goal survive the restart")
+    await first.waitFor("Goal created", T)
+    await submitLine(first, "say something")
+    await first.waitFor("first-run-marker", T)
+    // The snapshot rides the per-turn SAVE, which lands after the streamed
+    // marker — wait for the durable bytes, then kill. (This is the rail: the
+    // goal is on disk before any restart, not merely in memory.)
+    expect(await waitForDurableGoal((raw) => raw.includes("survive the restart"))).toBe(true)
+    first.kill()
+    await Promise.race([first.exited, sleep(3_000)])
+    cli = undefined
+
+    const ids = readdirSync(sessionsDir)
+      .filter((name) => name.endsWith(".json"))
+      .map((name) => name.slice(0, -".json".length))
+    expect(ids).toHaveLength(1)
+    const sessionId = ids[0] as string
+
+    // RESTART: a brand-new process reopens the SAME durable session.
+    const second = await bootWithGoalContinuation({
+      cassette: `${replayEntry("second-run-marker")}\n`,
+      idleMs: 15_000,
+      argv: ["--resume", sessionId],
+    })
+    await submitLine(second, "/goal")
+    const restored = await second.waitFor("Goal: survive the restart", T)
+    expect(restored).toContain("active")
+
+    // ... and a CLEAR is durable across the next restart (GOAL-10 item 7).
+    await submitLine(second, "/goal clear")
+    await second.waitFor("Goal cleared.", T)
+    await submitLine(second, "say something else")
+    await second.waitFor("second-run-marker", T)
+    expect(await waitForDurableGoal((raw) => !raw.includes("survive the restart"))).toBe(true)
+    second.kill()
+    await Promise.race([second.exited, sleep(3_000)])
+    cli = undefined
+
+    const third = await bootWithGoalContinuation({
+      cassette: `${replayEntry("third-run-marker")}\n`,
+      idleMs: 15_000,
+      argv: ["--resume", sessionId],
+    })
+    await submitLine(third, "/goal")
+    await third.waitFor("No goal set.", T)
+    expect(third.screen()).not.toContain("Goal: survive the restart")
+  }, 180_000)
 })
