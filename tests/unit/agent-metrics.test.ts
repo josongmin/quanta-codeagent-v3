@@ -27,6 +27,10 @@ describe("METRIC name table", () => {
       tokensInput: "gen_ai.usage.input_tokens",
       tokensOutput: "gen_ai.usage.output_tokens",
       cacheRead: "gen_ai.usage.cache_read_input_tokens",
+      // MR-06 — both keys existed in the canonical vocabulary with no live
+      // emit site; the recorder now exports them from the priced record.
+      cacheWrite: "gen_ai.usage.cache_creation_input_tokens",
+      costUsd: "quanta.work.cost_usd",
       // ADR-0452 — session-startup prewarm + TTFM (canonical quanta.startup.*).
       ttfm: "quanta.startup.time_to_first_message_ms",
       prewarmDuration: "quanta.startup.prewarm_duration_ms",
