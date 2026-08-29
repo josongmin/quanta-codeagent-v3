@@ -170,6 +170,22 @@ export const beginObjectiveAttempt = async (
   }
 }
 
+/** GOAL-05A rail 16 — what a settled attempt announces. Bounded and text-free
+ *  (no goal text, no prompt, no attempt key beyond the id the receipt already
+ *  carries): a surface renders it, a counter labels it. */
+export interface ObjectiveSettlementNotice {
+  readonly threadId: string
+  readonly objectiveId: string
+  readonly attemptId: string
+  readonly provenance: ObjectiveAttemptContext["provenance"]
+  readonly turnOutcome: ProgressTurnOutcome
+  readonly tokensUsed: number
+  /** The revision AFTER the settlement commit. */
+  readonly objectiveRevision: number
+  readonly receiptCount: number
+  readonly remainingCriterionIds: readonly string[]
+}
+
 export interface SettleObjectiveAttemptDeps {
   readonly attributed: AttributedAttempt
   readonly outcome: AgentOutcome | { readonly reason: StopReason }
@@ -177,6 +193,10 @@ export interface SettleObjectiveAttemptDeps {
   readonly verifier: ObjectiveVerificationPort | undefined
   readonly judge: ObjectiveJudgeObserverPort | undefined
   readonly now?: () => number
+  /** GOAL-05A rail 16 — announce the SETTLED attempt. Fires only after the
+   *  authority accepted the settlement (a refused one fail-stops instead), and
+   *  a throwing sink can never destabilize settlement. Absent ⇒ byte-identical. */
+  readonly onSettled?: ((notice: ObjectiveSettlementNotice) => void) | undefined
 }
 
 /** Settle exactly once. Never throws (a settlement refusal is logged and the
@@ -220,12 +240,40 @@ export const settleObjectiveAttempt = async (deps: SettleObjectiveAttemptDeps): 
     attributed.slot.failStop(reason, attributed.attempt.objectiveId)
     return
   }
+  emitSettlementNotice(deps, measured)
   if (deps.judge !== undefined) {
     try {
       await deps.judge.evaluate({ read: capabilities.read, threadId: attempt.threadId })
     } catch (e) {
       logger.warn(`objective.settlement.judge: ${errMessage(e)}`)
     }
+  }
+}
+
+/** Read the POST-commit facts and hand them to the sink. Reads the authority
+ *  again on purpose: the notice must describe what was actually recorded, not
+ *  the pre-commit snapshot the caller happened to hold. */
+const emitSettlementNotice = (deps: SettleObjectiveAttemptDeps, tokensUsed: number): void => {
+  const sink = deps.onSettled
+  if (sink === undefined) return
+  const { attempt, capabilities } = deps.attributed
+  try {
+    const domain = capabilities.read.readDomain(attempt.threadId)
+    const receipts = domain.progressReceipts ?? []
+    const last = receipts.at(-1)
+    sink({
+      threadId: attempt.threadId,
+      objectiveId: attempt.objectiveId,
+      attemptId: attempt.attemptId,
+      provenance: attempt.provenance,
+      turnOutcome: last?.turnOutcome ?? SETTLEMENT_OUTCOME[deps.outcome.reason],
+      tokensUsed,
+      objectiveRevision: domain.revision,
+      receiptCount: receipts.length,
+      remainingCriterionIds: last?.remainingCriterionIds ?? [],
+    })
+  } catch (error) {
+    logger.warn(`objective.settlement.notice: ${errMessage(error)}`)
   }
 }
 

@@ -88,6 +88,9 @@ export interface RuntimeFacadeComposeOptions {
    *  before a goal-attributed turn and the runtime takes at turn start. Slice-
    *  opaque here (`unknown`) — the runtime narrows it. Absent ⇒ no attribution. */
   readonly objectiveAttemptSlot?: unknown
+  /** GOAL-05A rail 16 — surface sink for the post-settlement checkpoint notice
+   *  (slice-opaque; the runtime narrows it). Absent ⇒ nothing is announced. */
+  readonly objectiveSettlementSink?: unknown
   /** ADR-0400 shadow-verify port. When set, the loop registers the
    *  `shadow_verify` LLM tool (CLI parity with the web surface). */
   readonly shadowVerify?: AgentConfig["shadowVerify"]
@@ -268,6 +271,7 @@ export const PASS_THROUGH_COMPOSE_KEYS = [
   "conversationActionPort",
   "activeTurnRef",
   "objectiveAttemptSlot",
+  "objectiveSettlementSink",
   "radar",
   "browserNet",
   "objective",

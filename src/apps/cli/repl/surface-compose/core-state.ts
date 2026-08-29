@@ -38,6 +38,7 @@ import { createBrowserNetHolder } from "../../slash/browser-net-cmd"
 import type { SlashContext } from "../../slash-commands"
 import { BG_TURN_ENV_GATE, createBackgroundTurnPortal } from "../background-turn-portal"
 import { createConversationActionSurface, createTurnActivity } from "../conversation-action-surface"
+import { buildGoalCheckpointSink } from "../goal-checkpoint-line"
 import { createGoalWakeSignalSlot } from "../goal-wake-signal"
 
 import { buildPerToolCheckpointWire } from "../per-tool-checkpoint-wire"
@@ -260,6 +261,12 @@ export const buildSurfaceCoreState = (
   // GOAL-04 — the host-owned attributed-attempt slot exists only when goal
   // pursuit is composed (the wake controller claims it before each attributed turn).
   const objectiveAttemptSlot = goalPursuit ? createObjectiveAttemptSlot() : undefined
+  // GOAL-05A rail 16 — announce each settled attributed turn on this surface.
+  // Composed with the slot (same gate): no goal pursuit ⇒ no sink ⇒ silent,
+  // byte-identical.
+  const objectiveSettlementSink = goalPursuit
+    ? buildGoalCheckpointSink((line) => process.stderr.write(line))
+    : undefined
   const goalWakeSlot = goalPursuit ? createGoalWakeSignalSlot() : undefined
   const conversationActions =
     isEnvTruthy(env.QUANTA_CONVERSATION_ACTIONS) && turnActivity !== undefined
@@ -314,6 +321,7 @@ export const buildSurfaceCoreState = (
     conversationActions,
     turnActivity,
     objectiveAttemptSlot,
+    objectiveSettlementSink,
     goalWakeSlot,
     interruptedTurnBuffer,
     inboundMode,

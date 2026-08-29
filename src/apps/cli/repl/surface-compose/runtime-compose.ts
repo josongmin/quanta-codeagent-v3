@@ -55,6 +55,9 @@ const actionOptions = (core: SurfaceCoreState): Partial<RuntimeFacadeComposeOpti
   ...(core.objectiveAttemptSlot === undefined
     ? {}
     : { objectiveAttemptSlot: core.objectiveAttemptSlot }),
+  ...(core.objectiveSettlementSink === undefined
+    ? {}
+    : { objectiveSettlementSink: core.objectiveSettlementSink }),
   ...(core.interruptedTurnBuffer === undefined
     ? {}
     : { interruptedTurnBuffer: core.interruptedTurnBuffer }),

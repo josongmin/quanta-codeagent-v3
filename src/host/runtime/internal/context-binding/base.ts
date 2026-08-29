@@ -556,6 +556,7 @@ const buildOptionalSnapshotFields = (
   ...whenDefined("conversationActionPort", base.conversationActionPort),
   ...whenDefined("activeTurnRef", base.activeTurnRef),
   ...whenDefined("objectiveAttemptSlot", base.objectiveAttemptSlot),
+  ...whenDefined("objectiveSettlementSink", base.objectiveSettlementSink),
   ...whenDefined("shadowVerify", base.shadowVerify),
   ...whenDefined("radar", base.radar),
   ...whenDefined("dreamTrigger", base.dreamTrigger),

@@ -446,4 +446,23 @@ describe.skipIf(!PTY_AVAILABLE)("CLI /goal (Pursuing goal) e2e (PTY)", () => {
     await third.waitFor("No goal set.", T)
     expect(third.screen()).not.toContain("Goal: survive the restart")
   }, 180_000)
+
+  test("GOAL-05A rail 16 — a settled autonomous turn ANNOUNCES itself without being asked", async () => {
+    const c = await bootWithGoalContinuation({
+      cassette: `${replayEntry("checkpoint-marker")}\n`,
+      idleMs: 15_000,
+    })
+    await submitLine(c, "/goal ship the checkpoint")
+    await c.waitFor("Goal created", T)
+    await submitLine(c, "/goal criterion add the marker is printed")
+    await c.waitFor("Criterion added.", T)
+    // The autonomous continuation fires on its own and settles.
+    await c.waitFor("checkpoint-marker", 60_000)
+    // ...and the operator learns the outcome WITHOUT typing /goal.
+    const screen = await c.waitFor(/goal: (completed|error|max_turns) ·/, 30_000)
+    expect(screen).toMatch(/goal: \w+ · \d+ tok · .* · rev \d+ · \d+ receipts/)
+    // Text-free: the goal text never rides the checkpoint line.
+    const checkpointLine = (screen.match(/goal: \w+ · \d+ tok[^\n]*/) ?? [""])[0]
+    expect(checkpointLine).not.toContain("ship the checkpoint")
+  }, 180_000)
 })

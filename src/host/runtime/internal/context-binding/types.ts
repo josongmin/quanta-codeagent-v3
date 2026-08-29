@@ -80,6 +80,10 @@ export type RuntimeBase = RuntimeAgentConfigBase & {
    *  mints its own. */
   /** GOAL-04 — host-owned attributed-attempt slot (slice-opaque; the runtime narrows it). */
   objectiveAttemptSlot?: unknown
+  /** GOAL-05A rail 16 — surface sink for the post-settlement checkpoint notice.
+   *  Slice-opaque (`unknown`); the runtime narrows it. Absent ⇒ nothing is
+   *  announced (byte-identical). */
+  objectiveSettlementSink?: unknown
   objective?: unknown
   /** §9.6 `/presets` — surface-owned role→model resolver threaded DOWN from the
    *  CLI compose seam (mirrors `objective`). Carried on the base so
@@ -168,6 +172,8 @@ export interface RuntimeContextSnapshot {
   readonly activeTurnRef?: AgentConfig["activeTurnRef"]
   /** GOAL-04 — host-owned attributed-attempt slot (slice-opaque). */
   readonly objectiveAttemptSlot?: unknown
+  /** GOAL-05A rail 16 — post-settlement checkpoint sink (slice-opaque). */
+  readonly objectiveSettlementSink?: unknown
   readonly shadowVerify?: AgentConfig["shadowVerify"]
   /** ADR-0231 (wire phase) — radar proposal-queue producer block, folded onto
    *  the built `AgentConfig.radar` so the loop samples at each COMPLETED turn. */
@@ -243,6 +249,7 @@ export type RuntimeContextPatch = Partial<
     | "conversationActionPort"
     | "activeTurnRef"
     | "objectiveAttemptSlot"
+    | "objectiveSettlementSink"
     | "shadowVerify"
     | "radar"
     | "browserNet"

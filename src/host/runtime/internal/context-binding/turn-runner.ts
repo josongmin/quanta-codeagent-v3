@@ -19,6 +19,7 @@ import {
   type AttributedAttempt,
   beginObjectiveAttempt,
   failStopAfterSettlement,
+  type ObjectiveSettlementNotice,
   settleObjectiveAttempt,
 } from "./objective-settlement"
 import { buildRewindCaptureHook } from "./rewind-capture-wire"
@@ -140,6 +141,8 @@ type SettledRun =
 const runAgentSettled = async (args: {
   readonly cfg: AgentConfig
   readonly attributed: AttributedAttempt | undefined
+  /** GOAL-05A rail 16 — the surface's post-settlement sink (slice-opaque). */
+  readonly settlementSink?: unknown
 }): Promise<SettledRun> => {
   const { cfg, attributed } = args
   const stream: AgentConfig["stream"] =
@@ -160,6 +163,9 @@ const runAgentSettled = async (args: {
           budgetMeter: cfg.budgetMeter,
           verifier: cfg.objectiveVerifier,
           judge: cfg.objectiveJudgeObserver,
+          // GOAL-05A rail 16 — announce the settled attempt on the surface that
+          // wired a sink (the base slot is slice-opaque here).
+          ...(isSettlementSink(args.settlementSink) ? { onSettled: args.settlementSink } : {}),
         })
   let outcome: AgentOutcome
   try {
@@ -204,6 +210,9 @@ const persistTurnOrFailStop = async (
     throw error
   }
 }
+
+const isSettlementSink = (v: unknown): v is (notice: ObjectiveSettlementNotice) => void =>
+  typeof v === "function"
 
 export const runRuntimeTurn = async (args: {
   readonly base: RuntimeBase
@@ -250,7 +259,11 @@ export const runRuntimeTurn = async (args: {
         ? () => persistObjectiveSnapshotNow(args.base.objective, args.idMeta?.id)
         : undefined,
   })
-  const ran = await runAgentSettled({ cfg, attributed })
+  const ran = await runAgentSettled({
+    cfg,
+    attributed,
+    settlementSink: args.base.objectiveSettlementSink,
+  })
   if (ran.kind === "approval") {
     await persistApprovalSettlement(attributed, args.base.objective, args.idMeta)
     return {

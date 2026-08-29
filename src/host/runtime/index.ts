@@ -55,6 +55,8 @@ export {
   buildCapabilityManifest,
   deriveCapabilityManifest,
 } from "./capabilities"
+/** GOAL-05A rail 16 — the post-settlement checkpoint notice a surface renders. */
+export type { ObjectiveSettlementNotice } from "./internal/context-binding/objective-settlement"
 export {
   bunKeyringExec,
   composeTokenStore,
