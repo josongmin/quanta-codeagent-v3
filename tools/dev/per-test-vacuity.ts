@@ -9,7 +9,7 @@
 import type { Dirent } from "node:fs"
 import { cpSync, existsSync, lstatSync, mkdirSync, readdirSync, rmSync, unlinkSync } from "node:fs"
 import { dirname, join } from "node:path"
-import { stripComments } from "../../tests/unit/_shared/strip-comments"
+import { stripComments } from "../../src/shared/source-text"
 import { buildMirror, classifyOutput, importClosure } from "./empty-mirror-check"
 
 const REPO = join(import.meta.dir, "..", "..")
