@@ -184,7 +184,7 @@ export const GATES: readonly Gate[] = [
     id: "contract",
     stage: "prepush",
     run: "bun test tests/contract",
-    why: "real docker + language servers + python/lancedb; skips politely without them",
+    why: 'real docker + language servers + python/lancedb. LOCALLY THIS PASSES BY SKIPPING: the ci.yml job sets REQUIRE_CONTRACT=1 at the JOB level ("absent dependency = hard fail, never a silent skip") and the manifest pins the command string, not the env — so a local PASS here means "nothing was missing that I checked", not "the contracts hold"',
   },
   {
     id: "rest-suites",

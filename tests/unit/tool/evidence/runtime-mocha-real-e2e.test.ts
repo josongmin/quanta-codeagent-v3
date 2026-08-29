@@ -57,8 +57,15 @@ const installMochaProject = (): string | null => {
   return r.exitCode === 0 ? dir : null
 }
 
-const dir = has("npm", "--version") ? installMochaProject() : null
 const REAL_E2E = gateOn(process.env, "QUANTA_REAL_TOOLCHAIN_E2E")
+
+// The install is behind the LANE GATE, not just behind `has("npm")`.
+// Measured: at module scope it ran on every `bun test tests/unit` — a real
+// `npm i mocha` costing ~8s and leaving a temp dir behind, on a run where every
+// test in this file SKIPPED. Module-load time is invisible to
+// `tools/dev/unit-speed-budget.ts` (which reads per-test durations), so the cost
+// the lane gate was introduced to remove was still being paid, unmeasured.
+const dir = REAL_E2E && has("npm", "--version") ? installMochaProject() : null
 
 // REAL-ON-DEMAND LANE. Toolchain presence alone was the gate, so on a developer
 // machine that HAS the toolchain these ran inside the ordinary unit suite and
