@@ -52,6 +52,9 @@ type UsageSinkCtx = {
   /** The itemized cost of {@link normalized}. Every sink that needs a dollar
    *  figure reads THIS one. */
   readonly eventCost: UsageCost
+  /** Identity of this model call, shared by every sink that records it, so the
+   *  accountant and the OTel export describe the SAME call rather than two. */
+  readonly callId: string
 }
 
 /** One usage-event consumer. Adding a downstream (a new meter, ledger, gauge)
@@ -82,8 +85,10 @@ const USAGE_SINKS: readonly UsageSink[] = [
       // explicit `0` split; omission stays omitted (Anthropic byte-identical).
       ...(ev.reasoningTokens !== undefined ? { reasoningTokens: ev.reasoningTokens } : {}),
     }),
-  // Run recorder token tally.
-  ({ recorder, ev }) => recorder?.tokensUsed(ev.inputTokens, ev.outputTokens, ev.cacheReadTokens),
+  // MR-06 — OTel export. The token counters stay provider-shaped (semconv);
+  // what comes from the canonical record is the pair that had no live emit site
+  // at all: cache-WRITE and the priced cost.
+  ({ recorder, ev, eventCost }) => recorder?.usageRecorded(ev, eventCost),
   // Autonomous-safety cost cap (L0): tick tokens AND the pre-priced USD into the
   // per-run meter (the same single seam). Unpriced model ⇒ skip the cost tick so
   // the cap stays a no-op rather than billing $0 falsely. `maxCostUsd` is only
@@ -128,11 +133,11 @@ const USAGE_SINKS: readonly UsageSink[] = [
   // records the canonical normalized usage and the priced cost rather than a
   // surface-specific projection. Children share the parent's instance, so a
   // subagent's spend lands in the same counters instead of falling out of them.
-  ({ config, normalized, provenance, eventCost }) => {
+  ({ config, normalized, provenance, eventCost, callId }) => {
     const accounting = config.usageAccounting
     if (accounting === undefined) return
     accounting.record({
-      callId: nextCallId(accounting, provenance),
+      callId,
       at: Date.now(),
       usage: normalized,
       cost: eventCost,
@@ -261,6 +266,7 @@ export const emitUsage = (
     provenance,
     normalized,
     eventCost: priceUsage(normalized, MODEL_RATE_CARD, { pricingVersion: PRICING_VERSION }),
+    callId: nextCallId(config.usageAccounting ?? config, provenance),
   }
   for (const sink of USAGE_SINKS) sink(ctx)
 }

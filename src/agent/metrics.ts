@@ -1,5 +1,6 @@
 import type { PrewarmOutcome } from "@/llm"
 import { GEN_AI_ATTRS, type Metrics, QUANTA_ATTRS } from "@/observability"
+import type { UsageCost } from "@/observability/usage-accounting"
 import type { PersistStats, RecallStats } from "./memory-stats"
 
 /**
@@ -37,6 +38,13 @@ export const METRIC = {
   tokensInput: GEN_AI_ATTRS.usage.inputTokens,
   tokensOutput: GEN_AI_ATTRS.usage.outputTokens,
   cacheRead: GEN_AI_ATTRS.usage.cacheReadInputTokens,
+  // MR-06 — both keys existed in the canonical vocabulary with no live emit
+  // site: nothing ever incremented cache-CREATION, and the derived USD cost
+  // never reached the registry at all, so a dashboard could only get it by
+  // re-running pricing on the token counters (which silently re-pays for
+  // unknown-model cases the pricer refuses).
+  cacheWrite: GEN_AI_ATTRS.usage.cacheCreationInputTokens,
+  costUsd: QUANTA_ATTRS.work.costUsd,
   // ADR-0452 — session-startup prewarm + TTFM. Canonical `quanta.startup.*`
   // keys (vocabulary.ts) so any surface reads the same well-known names.
   ttfm: QUANTA_ATTRS.startup.timeToFirstMessageMs,
@@ -89,6 +97,44 @@ export class AgentRecorder {
    * OTel GenAI semconv strings, so a CLI status line / Tauri sidebar reads
    * the same names regardless of provider.
    */
+  /**
+   * MR-06 — export one model call to the OTel counters.
+   *
+   * The token counters stay PROVIDER-SHAPED on purpose. `gen_ai.usage.*` is
+   * OpenTelemetry GenAI semconv, and those keys are defined in the provider's
+   * own terms — `input_tokens` is what the provider reported, which for OpenAI
+   * already contains the cached portion and for Anthropic does not. Exporting
+   * the canonical disjoint buckets under those names would misreport against
+   * the semconv and silently break every consumer that re-prices from them:
+   * measured, feeding normalized input into a consumer that carves cache out
+   * again turned a $1.60 turn into $0.60.
+   *
+   * What DOES come from the canonical record is the pair that had no live emit
+   * site at all — cache-WRITE, whose counter existed in the vocabulary with
+   * nothing incrementing it, and the derived cost, which never reached the
+   * registry so dashboards had to re-run pricing on the counters to get it.
+   *
+   * Unknown-priced spend does not touch the cost counter. An estimate belongs
+   * on a surface that can mark it as one; a counter cannot carry that
+   * qualification, and a silently-estimated dashboard total is precisely the
+   * failure being undone here.
+   */
+  usageRecorded(
+    reported: {
+      readonly inputTokens: number
+      readonly outputTokens: number
+      readonly cacheReadTokens?: number
+      readonly cacheCreationTokens?: number
+    },
+    cost: UsageCost,
+  ): void {
+    this.tokensUsed(reported.inputTokens, reported.outputTokens, reported.cacheReadTokens)
+    if (reported.cacheCreationTokens !== undefined) {
+      this.metrics.counter(METRIC.cacheWrite).inc(reported.cacheCreationTokens)
+    }
+    if (cost.pricingKnown) this.metrics.counter(METRIC.costUsd).inc(cost.totalUsd)
+  }
+
   tokensUsed(input: number, output: number, cacheRead?: number): void {
     this.metrics.counter(METRIC.tokensInput).inc(input)
     this.metrics.counter(METRIC.tokensOutput).inc(output)
