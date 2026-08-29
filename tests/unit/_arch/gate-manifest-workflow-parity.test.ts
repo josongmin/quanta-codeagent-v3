@@ -35,6 +35,7 @@ import {
   GATING_WORKFLOWS,
   gatesForStage,
   NON_GATING_WORKFLOWS,
+  REQUIRED_GATE_IDS,
   WORKFLOW_EXEMPT,
 } from "../../../tools/dev/gate-manifest"
 
@@ -75,6 +76,16 @@ const workflowSteps = (): readonly WorkflowStep[] => {
       if (usesMatch !== null) {
         const cmd = `uses ${usesMatch[1] ?? ""}`
         out.push({ file, raw: line, lines: [cmd] })
+        continue
+      }
+      // A third-party `uses:` step BLOCKS a job exactly as `run:` does. The
+      // parser saw only `run:`, so `uses: evil/blocking-action@v1` was invisible.
+      // Local (`./…`) and the setup actions the exempt list already admits are
+      // handled through the same universe as everything else.
+      const u = /^\s*(?:- )?uses: (\S+)/.exec(line)
+      if (u !== null) {
+        const spec = `uses: ${u[1]}`
+        out.push({ file, raw: spec, lines: [spec] })
         continue
       }
       const m = /^(\s*)(?:- )?run:(.*)$/.exec(line)
@@ -121,6 +132,19 @@ const workflowSteps = (): readonly WorkflowStep[] => {
 /** A workflow command with CI-only noise removed, so it can be compared to the
  *  manifest's local spelling. `bun fc check-changed origin/<base>` and the local
  *  `bun run test:admission` are the same gate with a different default base. */
+/**
+ * A line inside an exempt step that still has to be judged.
+ *
+ * The first fix used `/^bun\b/`, which closed only the `bun run …` shape. Six
+ * injections beside `bun fc gates || true` all shipped un-gated, including the
+ * manifest's OWN idiom `QUANTA_X=1 bun run …`, plus `npm run`, `bunx`, `yarn`,
+ * `sh tools/…` and `./scripts/…`. Anything that looks like an invocation counts;
+ * shell scaffolding (`{`, `echo …`, `done`, `fi`, a bare variable assignment)
+ * does not.
+ */
+const LOOKS_LIKE_A_COMMAND =
+  /^(?:[A-Z_][A-Z0-9_]*=\S*\s+)*(?:bun|bunx|npm|npx|yarn|pnpm|node|deno|sh|bash|python3?|make|\.\/|tools\/|scripts\/)/
+
 const normalize = (cmd: string): string =>
   cmd
     // A trailing shell comment is not part of the command, and `isExempt` is a
@@ -133,12 +157,25 @@ const normalize = (cmd: string): string =>
     .replace(/\s+/g, " ")
     .trim()
 
-const isExempt = (cmd: string): boolean => WORKFLOW_EXEMPT.some((e) => cmd.includes(e.match))
+const isExempt = (cmd: string, file: string): boolean =>
+  WORKFLOW_EXEMPT.some((e) => (e.file === "*" || e.file === file) && cmd.includes(e.match))
 
 describe("gate manifest ↔ workflow parity", () => {
   const steps = workflowSteps()
   const normalized = steps.flatMap((st) => st.lines.map(normalize))
   const manifestRuns = new Set(GATES.map((g) => normalize(g.run)))
+
+  test("a REQUIRED gate may not disappear (delete + exempt in one commit)", () => {
+    // The disjointness arm below only forbids a gate and an exemption for the
+    // same command COEXISTING. Doing both in one commit satisfied everything:
+    // direction ① saw the workflow step as exempt, direction ② had no gate left
+    // to compare, and the count floor still cleared. This is the ratchet that
+    // shape needs.
+    const have = new Set(GATES.map((g) => g.id))
+    const gone = REQUIRED_GATE_IDS.filter((id) => !have.has(id))
+    expect({ gone }).toEqual({ gone: [] })
+    expect(REQUIRED_GATE_IDS.length).toBeGreaterThanOrEqual(16) // anti-vacuity
+  })
 
   test("an exemption may not retire a gate (the two sets are disjoint)", () => {
     // `isExempt` is a SUBSTRING match, so `{ match: "bun run lint" }` would both
@@ -147,6 +184,10 @@ describe("gate manifest ↔ workflow parity", () => {
     const clashes = GATES.filter((g) =>
       WORKFLOW_EXEMPT.some((e) => normalize(g.run).includes(e.match)),
     ).map((g) => g.id)
+    // …and every exemption must name a workflow that exists, or "*".
+    const files = new Set([...GATING_WORKFLOWS, ...NON_GATING_WORKFLOWS.map((w) => w.file), "*"])
+    const badScope = WORKFLOW_EXEMPT.filter((e) => !files.has(e.file)).map((e) => e.match)
+    expect({ badScope }).toEqual({ badScope: [] })
     expect({ clashes }).toEqual({ clashes: [] })
     for (const e of WORKFLOW_EXEMPT) {
       expect({ match: e.match, why: e.why.length > 10 }).toEqual({ match: e.match, why: true })
@@ -253,11 +294,11 @@ describe("gate manifest ↔ workflow parity", () => {
       // still a candidate gate and must be listed or exempt on its own line.
       // Injected proof of the old hole: `bun run probe` placed beside
       // `bun fc gates || true` in the step-summary block shipped un-gated.
-      const stepExempt = isExempt(st.raw)
+      const stepExempt = isExempt(st.raw, st.file)
       for (const line of st.lines) {
         const c = normalize(line)
-        if (stepExempt && !/^bun\b/.test(c)) continue
-        if (!isExempt(c) && !manifestRuns.has(c) && !missing.includes(c)) missing.push(c)
+        if (stepExempt && !LOOKS_LIKE_A_COMMAND.test(c)) continue
+        if (!isExempt(c, st.file) && !manifestRuns.has(c) && !missing.includes(c)) missing.push(c)
       }
     }
     expect({ missing }).toEqual({ missing: [] })

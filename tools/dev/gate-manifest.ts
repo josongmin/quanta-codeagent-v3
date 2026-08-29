@@ -52,6 +52,13 @@ export interface Gate {
    */
   readonly consumes?: string
   /**
+   * Set when this gate can PASS by finding nothing to check on this host. The
+   * summary then marks it, and the run's closing line counts it separately —
+   * because a green that includes a gate which verified nothing poisons every
+   * other number beside it. The string says what makes it host-dependent.
+   */
+  readonly hostDependent?: string
+  /**
    * Set ONLY for a gate no workflow runs. The string is the justification the
    * parity test prints, so an unrunnable-in-CI gate stays visible rather than
    * silently expanding the local-only set.
@@ -231,22 +238,86 @@ export const gatesForStage = (stage: GateStage): readonly Gate[] =>
  * parity test's universe stays closed — a new workflow step is either a gate or
  * an admitted exemption, never silently neither.
  */
-export const WORKFLOW_EXEMPT: readonly { readonly match: string; readonly why: string }[] = [
-  { match: "bun install --frozen-lockfile", why: "dependency install" },
+export const WORKFLOW_EXEMPT: readonly {
+  readonly match: string
+  /** The workflow the exemption is granted IN. An unscoped exemption is a hole:
+   *  "advisory maturity-promotion audit, explicitly warn-only" is true of the
+   *  `|| true` step in fc-gate.yml, and an audit used it to smuggle a genuinely
+   *  BLOCKING `run: bun fc gates` into ci.yml unnoticed. */
+  readonly file: string
+  readonly why: string
+}[] = [
+  // The setup actions every job needs. Named ONE BY ONE, not by a `uses:`
+  // wildcard: a third-party action blocks a job exactly as a `run:` does, and an
+  // audit shipped `uses: evil/blocking-action@v1` past this guard while it saw
+  // only `run:` steps. A new action is now a deliberate line here.
+  { file: "*", match: "uses: actions/checkout@", why: "checkout — required by every job" },
+  { file: "*", match: "uses: oven-sh/setup-bun@", why: "the bun toolchain itself" },
+  { file: "*", match: "uses: actions/cache@", why: "tsbuildinfo cache; cannot change a verdict" },
+  { file: "*", match: "uses: actions/setup-python@", why: "contract-job python runtime" },
   {
+    file: "ci.yml",
+    match: "uses: actions/upload-artifact@",
+    why: "eval job (non-blocking) publishes its report",
+  },
+  { file: "*", match: "bun install --frozen-lockfile", why: "dependency install" },
+  {
+    file: "*",
     match: "bun add -g pyright typescript typescript-language-server",
     why: "contract-job toolchain",
   },
-  { match: "docker version", why: "contract-job sanity probe" },
-  { match: "python -m pip install", why: "contract-job lancedb runtime" },
-  { match: "mkdir -p .eval-corpus", why: "eval job (non-blocking, needs a key)" },
+  { file: "*", match: "docker version", why: "contract-job sanity probe" },
+  { file: "*", match: "python -m pip install", why: "contract-job lancedb runtime" },
+  { file: "ci.yml", match: "mkdir -p .eval-corpus", why: "eval job (non-blocking, needs a key)" },
   {
+    file: "ci.yml",
     match: "writeSyntheticCorpus",
     why: "eval job (non-blocking, needs a key) — the synthetic-corpus writer inside that step's shell block",
   },
-  { match: "bun run src/apps/bench/index.ts", why: "eval job (non-blocking, needs a key)" },
-  { match: "bun run agent:batch", why: "nightly regression job (non-blocking)" },
-  { match: "bun run agent:ci-bot", why: "PR-bot job (not a merge gate)" },
-  { match: "GITHUB_STEP_SUMMARY", why: "fc gates audit — warn-only, surfaced in the step summary" },
-  { match: "bun fc gates", why: "advisory maturity-promotion audit, explicitly warn-only" },
+  {
+    file: "ci.yml",
+    match: "bun run src/apps/bench/index.ts",
+    why: "eval job (non-blocking, needs a key)",
+  },
+  { file: "*", match: "bun run agent:batch", why: "nightly regression job (non-blocking)" },
+  { file: "*", match: "bun run agent:ci-bot", why: "PR-bot job (not a merge gate)" },
+  {
+    file: "fc-gate.yml",
+    match: "GITHUB_STEP_SUMMARY",
+    why: "fc gates audit — warn-only, surfaced in the step summary",
+  },
+  {
+    file: "fc-gate.yml",
+    match: "bun fc gates",
+    why: "advisory maturity-promotion audit, explicitly warn-only",
+  },
+]
+
+/**
+ * Gate ids that may NEVER leave this manifest.
+ *
+ * Deleting a gate and adding a `WORKFLOW_EXEMPT` entry for the same command in
+ * one commit satisfied every other check: direction ① saw the workflow step as
+ * exempt, direction ② had no manifest gate left to compare, and the count floor
+ * still cleared. This list is the ratchet that shape needs — it can grow when a
+ * gate is added, and shrinking it is a deliberate, reviewable edit rather than a
+ * side effect of an exemption.
+ */
+export const REQUIRED_GATE_IDS: readonly string[] = [
+  "typecheck",
+  "lint",
+  "lint-debt",
+  "fc-check-changed",
+  "fc-validate",
+  "fc-diff",
+  "fc-lint",
+  "fc-reachability",
+  "unit",
+  "unit-speed-budget",
+  "integration",
+  "e2e-pty",
+  "contract",
+  "rest-suites",
+  "pm-dod-ratchet",
+  "real-toolchain-e2e",
 ]

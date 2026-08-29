@@ -29,7 +29,7 @@
  *   bun run tools/dev/unit-speed-budget.ts <xml> --tighten  # lock in a win
  */
 
-import { existsSync, readFileSync, writeFileSync } from "node:fs"
+import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
 
@@ -122,25 +122,44 @@ const budget = JSON.parse(readFileSync(budgetPath, "utf8")) as Budget
 const confirmStandalone = (c: Case): { readonly ms: number; readonly how: string } => {
   if (c.file === undefined) return { ms: c.ms, how: "no file in junit — screen number stands" }
   const out = join(repoRoot, ".cache", "unit-speed-confirm.xml")
+  // DELETE FIRST, and require the re-run to have written it. Without this the
+  // re-run's junit is read whether or not this run produced it: an audit planted
+  // a file dated 2020 and the gate reported "3ms re-measured alone" over a
+  // 99,000ms case and exited 0 — the exact stale-input false green this whole
+  // change exists to remove, reintroduced in its newest code.
+  rmSync(out, { force: true })
+  const startedNs = Bun.nanoseconds()
   const run = Bun.spawnSync({
     cmd: ["bun", "test", c.file, "--reporter=junit", `--reporter-outfile=${out}`],
     cwd: repoRoot,
     stdout: "ignore",
     stderr: "ignore",
   })
+  const wallMs = (Bun.nanoseconds() - startedNs) / 1e6
   let xmlText: string
   try {
     xmlText = readFileSync(out, "utf8")
   } catch {
     return { ms: c.ms, how: `re-run wrote no junit (exit ${run.exitCode}) — screen number stands` }
   }
+  rmSync(out, { force: true })
   let worst = -1
   for (const tag of xmlText.match(/<testcase\b[^>]*>/g) ?? []) {
     const t = Number(/\btime="([^"]*)"/.exec(tag)?.[1])
     if (Number.isFinite(t)) worst = Math.max(worst, t * 1000)
   }
   if (worst < 0) return { ms: c.ms, how: "re-run parsed no cases — screen number stands" }
-  return { ms: worst, how: `re-measured alone in ${c.file}` }
+  // The FILE's wall time counts too. junit `time` is per-test and excludes module
+  // load, so a file whose cost is at module scope confirms at ~1ms: a probe with
+  // `Bun.spawnSync(["sleep","4"])` at module scope took 4.06s wall and reported
+  // `time="0.001336"`. Taking the max means a downgrade can only happen when the
+  // file is genuinely cheap to run, not merely cheap to attribute.
+  return worst >= wallMs
+    ? { ms: worst, how: `re-measured alone in ${c.file}` }
+    : {
+        ms: wallMs,
+        how: `re-measured alone in ${c.file} (wall time — its cost is at module scope)`,
+      }
 }
 
 const topList = (): string =>
@@ -150,19 +169,22 @@ const topList = (): string =>
     .join("\n")
 
 if (process.argv.includes("--tighten")) {
-  // Deliberately NOT tightening to the in-suite number: it is contention-inflated,
-  // so locking it in would pin a ceiling that only this machine's load produced.
   if (slowest.ms > budget.slowestMs) {
     console.error(
       "unit-speed-budget: refusing to --tighten a REGRESSION (the budget only goes down)",
     )
     process.exit(1)
   }
-  writeFileSync(
-    budgetPath,
-    `${JSON.stringify({ ...budget, slowestMs: Math.ceil(slowest.ms) }, null, 2)}\n`,
+  // Tighten to the CONFIRMED number, never the in-suite one. The comment here
+  // used to say "deliberately NOT tightening to the in-suite number" while the
+  // line below did exactly that — a ceiling pinned from whatever load the box
+  // happened to be under.
+  const confirmedSlowest = confirmStandalone(slowest)
+  const next = Math.ceil(Math.max(confirmedSlowest.ms, slowest.ms > 0 ? 0 : 0))
+  writeFileSync(budgetPath, `${JSON.stringify({ ...budget, slowestMs: next }, null, 2)}\n`)
+  console.log(
+    `unit-speed-budget: tightened ${budget.slowestMs} → ${next}ms (${confirmedSlowest.how})`,
   )
-  console.log(`unit-speed-budget: tightened ${budget.slowestMs} → ${Math.ceil(slowest.ms)}ms`)
   process.exit(0)
 }
 

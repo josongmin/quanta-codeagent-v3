@@ -1,0 +1,40 @@
+#!/bin/sh
+# Pre-push hook — the missing half.
+#
+# `bun run precommit` / `bun run prepush` were added because the gate set existed
+# only as steps inside workflow YAML, i.e. as no runnable local command. A hook
+# then made the CHEAP half automatic. The heavy half stayed a documentation
+# string: an audit found that of 21 gates, zero ran without someone typing the
+# command — so the campaign's own premise ("reachable by nobody") had become true
+# again of exactly the gates that catch the most.
+#
+# COST, STATED HONESTLY. This is minutes, not seconds: a ~39,000-case unit suite,
+# ~360 integration files, a PTY suite, the contract tier. That is the right price
+# at PUSH time — pushes are rare, commits are not — and it is the same work the
+# merge gate would do afterwards, moved to before. `--bail` stops at the first
+# failing gate so a broken push costs one gate, not all of them.
+#
+# NOT the same scope as pre-commit. That one is deliberately narrow (staged paths,
+# mechanical fixes only) because several sessions share this working tree and a
+# whole-tree gate would fail one session's commit over another's half-written
+# file. A push is a deliberate act on the whole tree, so the whole tree is the
+# right unit here — and if the tree is dirty with someone else's work, that is
+# information the pusher wants.
+#
+# Escape hatch, and it is a real one: `git push --no-verify`.
+
+set -e
+
+# No bun in this checkout ⇒ never block a push on a missing toolchain.
+command -v bun >/dev/null 2>&1 || exit 0
+
+echo "pre-push: running the full gate set (bun run prepush --bail)."
+echo "          minutes, not seconds — bypass once with: git push --no-verify"
+
+if ! bun run prepush --bail; then
+  echo ""
+  echo "pre-push: the gate set is RED (the failing gate printed its own diagnosis above)."
+  echo "  Re-run one gate:  bun run gates:list   then run its command directly"
+  echo "  Bypass once:      git push --no-verify"
+  exit 1
+fi

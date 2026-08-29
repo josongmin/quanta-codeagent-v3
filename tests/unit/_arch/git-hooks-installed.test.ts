@@ -93,17 +93,24 @@ describe("git pre-commit hook is installed and does what it claims", () => {
       writeFileSync(join(sandbox, ".gitignore"), "")
       git("config", "core.hooksPath", ".githooks")
 
-      // A file the hook's MECHANICAL pass cannot repair. `--linter-enabled=false`
-      // means pass 1 only formats and organises imports; a syntax error survives
-      // it and pass 2 must refuse. (An unused import is deliberately NOT used
-      // here: measured, this config reports it at WARN, exit 0 — the probe has to
-      // be something biome actually errors on, or the arm proves nothing.)
+      // A LINT error on syntactically VALID code, not a syntax error.
+      //
+      // A syntax-error probe proves too little: an audit turned pass 2 into
+      // `biome check --linter-enabled=false` — disabling every rule the hook's own
+      // docstring names ("an unused import, a slice-boundary violation, a real
+      // lint error") — and the arm stayed green, because unparseable TypeScript is
+      // rejected with the linter off too. An unused import is seen ONLY by the
+      // linter, so it separates the two.
+      //
       // Under `tests/`, because the hook asks `collectBiomeTargets` which staged
       // paths this repo actually lints and that walks `src/` and `tests/` only.
       // A probe at the sandbox root would be OUT of scope, the hook would
       // correctly do nothing, and the refusal arm would fail for the wrong reason.
       mkdirSync(join(sandbox, "tests"))
-      writeFileSync(join(sandbox, "tests", "probe.ts"), "export const x = = 1\n")
+      writeFileSync(
+        join(sandbox, "tests", "probe.ts"),
+        'import { readFileSync } from "node:fs"\nexport const x = 1\n',
+      )
       git("add", "tests/probe.ts")
       const refused = git("commit", "-m", "must not land")
       const head = git("rev-parse", "--verify", "HEAD")
