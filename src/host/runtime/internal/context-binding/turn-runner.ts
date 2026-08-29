@@ -1,4 +1,5 @@
 import { type AgentConfig, type AgentOutcome, runAgent, type StopReason } from "@/agent"
+import { emitObjectiveSettlementDecision } from "@/agent/objective-decision"
 import {
   buildObjectiveSnapshotProvider,
   persistObjectiveSnapshotNow,
@@ -154,6 +155,7 @@ const runAgentSettled = async (args: {
             cfg.stream.emit(event)
           },
         }
+  const surfaceSink = isSettlementSink(args.settlementSink) ? args.settlementSink : undefined
   const settle = (outcome: AgentOutcome | { readonly reason: StopReason }): Promise<void> =>
     attributed === undefined
       ? Promise.resolve()
@@ -163,9 +165,18 @@ const runAgentSettled = async (args: {
           budgetMeter: cfg.budgetMeter,
           verifier: cfg.objectiveVerifier,
           judge: cfg.objectiveJudgeObserver,
-          // GOAL-05A rail 16 — announce the settled attempt on the surface that
-          // wired a sink (the base slot is slice-opaque here).
-          ...(isSettlementSink(args.settlementSink) ? { onSettled: args.settlementSink } : {}),
+          // GOAL-05A rail 16 + P1-4 — one settled attempt, two consumers: the
+          // surface line the operator reads, and the reserved `objective`
+          // decision counter. The counter goes FIRST so a throwing surface sink
+          // cannot cost us the metric.
+          onSettled: (notice) => {
+            emitObjectiveSettlementDecision(
+              cfg.decisionEmitter,
+              notice,
+              "turns" in outcome ? outcome.turns : 0,
+            )
+            surfaceSink?.(notice)
+          },
         })
   let outcome: AgentOutcome
   try {

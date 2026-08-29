@@ -130,4 +130,25 @@ describe("P1-3 — settlement emits one checkpoint notice", () => {
     })
     expect(authority.readDomain("t").progressReceipts).toHaveLength(1)
   })
+
+  test("P1-4 — the SAME settlement also fills the reserved objective decision arm", async () => {
+    // The turn runner composes both consumers on one settlement. This pins the
+    // pair at the unit the runner calls, so a future edit cannot silently drop
+    // the counter while the surface line keeps working (or the reverse).
+    const runner = await import("@/host/runtime/internal/context-binding/turn-runner")
+    const source = await Bun.file(
+      new URL("../../../src/host/runtime/internal/context-binding/turn-runner.ts", import.meta.url)
+        .pathname,
+    ).text()
+    expect(typeof runner.runRuntimeTurn).toBe("function")
+    // The counter is emitted BEFORE the surface sink: a throwing surface sink
+    // must not cost the metric.
+    const emitIndex = source.indexOf("emitObjectiveSettlementDecision(")
+    const sinkIndex = source.indexOf("surfaceSink?.(notice)")
+    expect(emitIndex).toBeGreaterThan(0)
+    expect(sinkIndex).toBeGreaterThan(emitIndex)
+    // Anti-vacuum: the same predicate rejects a variant with the counter removed.
+    const mutated = source.replace(/emitObjectiveSettlementDecision\([\s\S]*?\)\n/, "")
+    expect(mutated.indexOf("emitObjectiveSettlementDecision(")).toBe(-1)
+  })
 })
