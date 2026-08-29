@@ -50,6 +50,9 @@ export interface BaseSlotContext {
   /** The search wire (`null` when off); only its `.pipeline` is projected. */
   readonly searchWire: { pipeline: NonNullable<Base["searchPipeline"]> } | null
   readonly identityModeVariant: NonNullable<Base["identityModeVariant"]> | undefined
+  /** MR-02 (final) — THE routing owner (`modelRouting`). Appended LAST in the
+   *  resolver array so no pre-existing key's insertion position moves. */
+  readonly modelRouting: NonNullable<Base["modelRouting"]> | undefined
   readonly stickyModelStore: NonNullable<Base["stickyModelStore"]> | undefined
   readonly toolProfile: NonNullable<Base["toolProfile"]> | undefined
   readonly focusChain: NonNullable<Base["focusChain"]> | undefined
@@ -143,6 +146,7 @@ export const BASE_SLOT_RESOLVERS: readonly BaseSlotResolver[] = [
   // appending keeps every earlier slot's insertion position — and therefore the
   // byte-identical key order — exactly as it was.
   (ctx) => ctx.modelCandidatesSlot,
+  (ctx) => (ctx.modelRouting !== undefined ? { modelRouting: ctx.modelRouting } : {}),
 ]
 
 /**

@@ -34,6 +34,10 @@
 
 export interface EffectiveModelSource {
   readonly llm: { readonly model?: string | undefined }
+  /** MR-02 (final) — THE routing owner, when the host wired one. */
+  readonly modelRouting?:
+    | { readonly view: () => { readonly modelId: string; readonly source: string } }
+    | undefined
   readonly stickyModelStore?:
     | {
         readonly effectiveModel?: (() => string | undefined) | undefined
@@ -42,6 +46,12 @@ export interface EffectiveModelSource {
 }
 
 export const effectiveModelOf = (cfg: EffectiveModelSource): string | undefined => {
+  // MR-02 (final) — the ROUTING AUTHORITY first. It is the owner; the slot getter
+  // below is the compatibility shape for a host that wired only the pieces.
+  const routed = cfg.modelRouting?.view()
+  if (routed !== undefined && routed.source === "session" && routed.modelId.length > 0) {
+    return routed.modelId
+  }
   const live = cfg.stickyModelStore?.effectiveModel?.()
   return live !== undefined && live.length > 0 ? live : cfg.llm.model
 }

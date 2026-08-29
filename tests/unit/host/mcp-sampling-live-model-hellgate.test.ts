@@ -47,7 +47,7 @@ describe("MR-06 · MCP sampling follows the live model", () => {
     expect(out.ok).toBe(true)
     if (!out.ok) return
     expect(out.result.model).toBe("boot-model")
-    expect(out.result.content.text).toContain("from boot-model")
+    expect((out.result.content as { text: string }).text).toContain("from boot-model")
   })
 
   test("2. a THUNK is resolved PER REQUEST — a mid-session switch is honoured", async () => {
@@ -66,6 +66,6 @@ describe("MR-06 · MCP sampling follows the live model", () => {
     // The port that STREAMED and the model REPORTED are the new one — capturing at
     // mint would have kept both on `boot-model`.
     expect(after.result.model).toBe("gpt-4o")
-    expect(after.result.content.text).toContain("from gpt-4o")
+    expect((after.result.content as { text: string }).text).toContain("from gpt-4o")
   })
 })

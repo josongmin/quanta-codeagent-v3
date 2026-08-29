@@ -30,7 +30,15 @@ const baseConfig = (opts: {
     modelCandidates: (opts.candidates ?? []).map((id) => ({ id, port: port(id) })),
     stickyModelStore:
       opts.sticky !== undefined
-        ? { store: { get: () => opts.sticky, set: () => {}, clear: () => {} } }
+        ? {
+            store: {
+              get: () => opts.sticky,
+              peek: () => opts.sticky,
+              set: () => {},
+              unset: () => {},
+              clear: () => {},
+            },
+          }
         : undefined,
     mode: "default",
   }) as unknown as AgentConfig

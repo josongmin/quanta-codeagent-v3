@@ -12,6 +12,7 @@ export {
   type ModelRoutingSession,
   type ModelRoutingSessionArgs,
 } from "./boot-snapshot"
+export { type ModelRoutingConfigSlice, modelRoutingFor } from "./from-config"
 export { resolveInitialSelection, resolveRequestModel } from "./precedence"
 export {
   type ModelOption,

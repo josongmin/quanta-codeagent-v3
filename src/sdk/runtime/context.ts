@@ -127,6 +127,7 @@ export interface RuntimeFacadeComposeOptions {
    *  store the surface's `/model` writes. Absent ⇒ slot omitted ⇒ no sticky read
    *  (byte-identical). The headless `apps/agent` surface sets this on its base
    *  directly via `resolveStickyModelStore`; the interactive CLI rides here. */
+  readonly modelRouting?: AgentConfig["modelRouting"]
   readonly stickyModelStore?: AgentConfig["stickyModelStore"]
   /** `/model` (aug-27) — the id→port candidate list a model pick is resolved
    *  against (`skill-gate#resolveSkillTurnOverride`, `subagent-runner-overrides`).
@@ -271,6 +272,7 @@ export const PASS_THROUGH_COMPOSE_KEYS = [
   "browserNet",
   "objective",
   "roleModelResolver",
+  "modelRouting",
   "stickyModelStore",
   "modelCandidates",
 ] as const satisfies readonly (keyof RuntimeFacadeComposeOptions & keyof RuntimeContextPatch)[]

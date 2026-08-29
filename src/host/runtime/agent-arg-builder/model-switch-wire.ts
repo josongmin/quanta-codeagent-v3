@@ -216,6 +216,10 @@ export const resolveModelSwitchSlots = (
     readonly env: NodeJS.ProcessEnv
   },
 ): {
+  /** MR-02 (final) — THE routing owner, published onto the base as `modelRouting`.
+   *  Absent on the in-memory default path (nothing persists, nothing is read back,
+   *  so there is no session to own). */
+  readonly routing?: import("@/agent/model-routing").ModelRoutingAuthority
   readonly stickyModelStore: NonNullable<Base["stickyModelStore"]> | undefined
   readonly modelCandidatesSlot: Partial<Base>
 } => {
@@ -256,6 +260,7 @@ export const resolveModelSwitchSlots = (
     ...(args.signal !== undefined ? { signal: args.signal } : {}),
   })
   return {
+    routing: session.authority,
     stickyModelStore: {
       store: session.store,
       provider: args.provider,

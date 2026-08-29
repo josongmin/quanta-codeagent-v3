@@ -487,7 +487,11 @@ const resolveBaseSlotState = (
   // ONE call so they can never again ship one-without-the-other: the store the
   // loop reads every turn, and the `modelCandidates` list that makes that read
   // actionable (see `agent-arg-builder/model-switch-wire.ts`).
-  const { stickyModelStore, modelCandidatesSlot } = resolveModelSwitchSlots({
+  const {
+    stickyModelStore,
+    modelCandidatesSlot,
+    routing: modelRouting,
+  } = resolveModelSwitchSlots({
     ...modelSwitch,
     stickyModel: p.stickyModel,
     env,
@@ -579,6 +583,7 @@ const resolveBaseSlotState = (
       // The SAME wire the caller built (registry + disposer + pipeline share it).
       searchWire,
       identityModeVariant,
+      modelRouting,
       stickyModelStore,
       toolProfile,
       focusChain,

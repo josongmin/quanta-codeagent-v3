@@ -70,7 +70,7 @@ const chain = async (base: RuntimeAgentConfigBase): Promise<string> => {
     .createSessionHost({})
   const kernelState = createKernelSessionState(host.describe())
   const view = toSessionStateView(kernelState)
-  const result = renderReadout("state", { state: view } as never, {})
+  const result = renderReadout("state", { state: view } as never)
   return result.output
 }
 

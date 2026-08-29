@@ -60,6 +60,16 @@ export interface WireSlotsComposeConfig {
    * activates an fs-backed store at composition root). Absent ⇒ slot
    * omitted; the global default model wins for every mode.
    */
+  /**
+   * MR-02 (final) — THE model-routing owner for this session.
+   *
+   * The loop reads model decisions through `modelRoutingFor(config)`, which
+   * returns THIS when present. The three slots below (`stickyModelStore` +
+   * `modelCandidates`) remain the compatibility shape for hosts and tests that
+   * wire the pieces directly; `from-config.ts` builds an authority over them in
+   * ONE place so the turn path still has exactly one implementation of the rules.
+   */
+  modelRouting?: import("../model-routing").ModelRoutingAuthority
   stickyModelStore?: {
     readonly store: import("../sticky-model").StickyModelStore
     /** aug-28 — the PROVIDER half of the sticky key (`<provider>:<mode>`), supplied

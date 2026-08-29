@@ -184,7 +184,12 @@ describe("ALBB-07 claim 2 — reactive salvage targets the ACTIVE model window",
     activePort.stream = base.stream.bind(base)
     const stickyStore = {
       get: async () => "cand-gpt-4o",
+      // `peek` is a REQUIRED port method and the routing view is SYNC, so a double
+      // that answers only `get` reads as "no preference" and the swap silently
+      // vanishes. The cast below is what let this shape compile.
+      peek: () => "cand-gpt-4o",
       set: async () => ({ ok: true as const }),
+      unset: async () => ({ ok: true as const }),
       load: async () => ({ ok: true as const, entries: {} }),
     } as unknown as import("@/agent/sticky-model").StickyModelStore
 

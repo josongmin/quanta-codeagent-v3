@@ -123,6 +123,49 @@ purpose: |
   chat-completions one would have left the common BYOK session with a picker that
   could list nothing but the boot model.
 
+  aug-29 MR-00..MR-09 — the switch became ONE OWNER. Three composition roots each
+  assembled the same five decisions (storage key, explicit-pin precedence,
+  persisted-pick vetting, candidate-port seeding, session scoping) and a
+  cross-surface audit found eight defects, every one of them two roots disagreeing
+  about one of those five. `@/agent/model-routing` now holds the contract
+  (`ModelRoutingAuthority`), the precedence tables, and one factory
+  (`createModelRoutingSession`) that the CLI, the web daemon and the headless root
+  all call; `tests/_support/model-routing-conformance.ts` is the shared acceptance
+  suite each of them runs, and `tests/integration/model-routing-roots-contract.ts`
+  asserts the three answer the SAME file identically.
+
+  Two model FACTS are now distinct in the type system, which was the other root
+  cause: `ModelSelectionView` is the SELECTED model (what the next request will
+  run — the picker marker, the status line, `describe().modelSlug`) and
+  `ModelRequestSnapshot` is the EXECUTED model (what a request actually ran on —
+  `llm_request`, `turn.completed.modelSlug`, token/cost attribution). Reporting one
+  as the other is how a switched session's spend got attributed to a model that
+  never ran. Consequences landed: `llm_request` reads the streaming port; the
+  kernel's completion echo prefers REQUEST EVIDENCE (`lastLlmRequest.model`) over a
+  live re-read, so a switch that lands mid-turn cannot rewrite the finished turn;
+  work metrics keep PER-MODEL buckets and sum each at its own price; subagents
+  inherit the parent's effective model; MCP sampling resolves its port per request.
+
+  The control-request boundary is genuinely async (MR-03): the drain runs at the
+  top of a turn, so `set_model` is AWAITED before that turn reads its selection —
+  measured before the change, the turn ran the boot model and the store was still
+  empty when the turn ENDED. A refused durable write is now echoed as `rejected`
+  rather than `model-set`.
+
+  aug-29 MR-02 FINAL — `AgentConfig.modelRouting` is the slot the turn path reads.
+  The loop asked THREE slots in three functions (`readStickyModelForMode`,
+  `resolveActiveModelId`, `resolveSkillTurnOverride`), each re-deriving the
+  `<provider>:<mode>` key, the precedence and the port lookup; three copies of a key
+  rule is how the write key and the read key drifted apart one layer up. Every one
+  now goes through `modelRoutingFor(config)`. `stickyModelStore` + `modelCandidates`
+  remain the COMPATIBILITY shape for hosts and tests that wire the pieces directly
+  — `model-routing/from-config.ts` builds an authority over them in ONE place
+  (memoized per config object, so a revision is stable across reads), so the legacy
+  path is a construction detail rather than a second code path through the turn.
+  Fail-closed is scoped to an explicit SKILL requirement; a session selection with
+  no candidate still degrades to the boot port, which is the long-standing advisory
+  behaviour a bare-store host depends on.
+
   `@/llm/model-catalog` (shared wire — it lives in `@/llm`, not a surface, because
   the web daemon's `set_model` needs the SAME candidate set and the slice fence
   forbids it importing `@/apps/cli`): ONE live `ModelCandidate[]` shared by
@@ -161,6 +204,12 @@ evidence:
     - src/agent/effective-model.ts
     - src/agent/sticky-model/session-scoped-store.ts
     - src/host/runtime/agent-arg-builder/model-switch-wire.ts
+    - src/agent/model-routing/types.ts
+    - src/agent/model-routing/authority.ts
+    - src/agent/model-routing/boot-snapshot.ts
+    - src/agent/model-routing/from-config.ts
+    - src/llm/boot-selection.ts
+    - src/agent/sticky-model/key-codec.ts
     # The BOOT half of "which model actually runs": the two god-module splits
     # that answer "what provider/model does this surface start on, and through
     # what port?" — bench's and the headless composition root's. Both delegate
@@ -188,7 +237,18 @@ evidence:
       - tests/unit/apps/agent/headless-model-candidates-hellgate.test.ts
       - tests/unit/cli/model-id-render-injection-hellgate.test.ts
       - tests/unit/_arch/real-quanta-home-escape-ratchet.test.ts
-    integration: []
+      - tests/unit/agent/model-routing-contract.test.ts
+      - tests/unit/agent/model-routing-authority.test.ts
+      - tests/unit/agent/model-routing-single-slot-hellgate.test.ts
+      - tests/unit/agent/work-metrics-per-model-cost-hellgate.test.ts
+      - tests/unit/agent/subagent-inherits-effective-model-hellgate.test.ts
+      - tests/unit/cli/mode-resolver-parity-hellgate.test.ts
+      - tests/unit/host/mcp-sampling-live-model-hellgate.test.ts
+    integration:
+      - tests/integration/model-routing-roots-contract.test.ts
+      - tests/integration/model-switch-turn-boundary-race.test.ts
+      - tests/integration/executed-model-reporting-hellgate.test.ts
+      - tests/integration/model-echo-host-kernel-readout-e2e.test.ts
     contract: []
 knobs:
   - name: '/model --clear'

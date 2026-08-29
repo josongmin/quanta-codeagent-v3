@@ -136,6 +136,67 @@ export const admitPersistedPicks = (
   return new Map<ModelRoutingMode, string>([...legacy, ...scoped])
 }
 
+/**
+ * Capture the model for ONE request (extracted from the authority factory so the
+ * factory stays under the god-function cap, and so the RESOLUTION — precedence,
+ * one discovery attempt, the fail-closed split — reads as its own unit).
+ */
+const resolveRequestSnapshot = async (deps: {
+  readonly args: ModelRoutingAuthorityArgs
+  readonly mode: ModelRoutingMode
+  readonly selected: string | undefined
+  readonly skillModel: string | undefined
+  readonly portFor: (id: string) => LLMPort | undefined
+  readonly revision: number
+}): Promise<ModelRequestSnapshot> => {
+  const { args, mode, revision } = deps
+  const chosen = resolveRequestModel({
+    bootModelId: args.bootModelId,
+    ...(deps.selected !== undefined ? { selectedModelId: deps.selected } : {}),
+    ...(deps.skillModel !== undefined ? { skillModel: deps.skillModel } : {}),
+  })
+  let port = deps.portFor(chosen.modelId)
+  if (port === undefined && chosen.source === "skill") {
+    // One discovery attempt before failing closed, and ONLY for a skill override.
+    // The happy path must never pay a probe round-trip on the first request of
+    // every session; but a skill naming a model the provider DOES list should not
+    // be refused merely because nobody opened a picker first.
+    await args.catalog.refresh()
+    port = deps.portFor(chosen.modelId)
+  }
+  if (port === undefined) {
+    // FAIL-CLOSED, but ONLY for a SKILL override. A skill that declares `model:`
+    // is stating a requirement; running the base model instead voids that contract
+    // with no warning on any channel — the measured prior behaviour.
+    //
+    // A SESSION selection that cannot resolve degrades instead: admission already
+    // refuses to adopt an unrunnable pick, so reaching here means a host wired a
+    // bare store with no matching candidate — the long-standing advisory path.
+    if (chosen.source === "skill") {
+      throw new UnroutableModelError(chosen.modelId, args.catalog.ids())
+    }
+    return {
+      modelId: args.bootModelId,
+      provider: args.provider,
+      port: args.bootPort,
+      mode,
+      source: "boot",
+      selectionRevision: revision,
+    }
+  }
+  // Captured, not re-read: everything downstream (llm_request, the completion
+  // echo, cost attribution) reports THIS, so a selection made while the request is
+  // in flight cannot retroactively rewrite what ran.
+  return {
+    modelId: chosen.modelId,
+    provider: args.provider,
+    port,
+    mode,
+    source: chosen.source,
+    selectionRevision: revision,
+  }
+}
+
 export const createModelRoutingAuthority = (
   args: ModelRoutingAuthorityArgs,
 ): ModelRoutingAuthority => {
@@ -242,38 +303,14 @@ export const createModelRoutingAuthority = (
       await write(mode ?? args.mode(), undefined),
     resolveRequest: async (input): Promise<ModelRequestSnapshot> => {
       const mode = args.mode()
-      const sel = selectedFor(mode)
-      const chosen = resolveRequestModel({
-        bootModelId: args.bootModelId,
-        ...(sel !== undefined ? { selectedModelId: sel } : {}),
-        ...(input.skillModel !== undefined ? { skillModel: input.skillModel } : {}),
-      })
-      let port = portFor(chosen.modelId)
-      if (port === undefined && chosen.source === "skill") {
-        // One discovery attempt before failing closed, and ONLY for a skill
-        // override. The happy path must never pay a probe round-trip on the first
-        // request of every session; but a skill naming a model the provider does
-        // list should not be refused merely because nobody opened a picker first.
-        await args.catalog.refresh()
-        port = portFor(chosen.modelId)
-      }
-      if (port === undefined) {
-        // FAIL-CLOSED. A skill that declares `model:` is stating a requirement;
-        // running the base model instead voids that contract with no warning on
-        // any channel, which is precisely the measured prior behaviour.
-        throw new UnroutableModelError(chosen.modelId, args.catalog.ids())
-      }
-      // Captured, not re-read: everything downstream (llm_request, the completion
-      // echo, cost attribution) reports THIS, so a selection made while the
-      // request is in flight cannot retroactively rewrite what ran.
-      return {
-        modelId: chosen.modelId,
-        provider: args.provider,
-        port,
+      return await resolveRequestSnapshot({
+        args,
         mode,
-        source: chosen.source,
-        selectionRevision: revision,
-      }
+        selected: selectedFor(mode),
+        skillModel: input.skillModel,
+        portFor,
+        revision,
+      })
     },
   }
 }

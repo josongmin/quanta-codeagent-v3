@@ -137,6 +137,7 @@ export interface RuntimeContextSnapshot {
   readonly permissionModeState?: PermissionModeSessionState
   readonly agentModeState?: AgentConfig["agentModeState"]
   readonly focusChain?: AgentConfig["focusChain"]
+  readonly modelRouting?: AgentConfig["modelRouting"]
   readonly stickyModelStore?: AgentConfig["stickyModelStore"]
   readonly decisionEmitter?: AgentConfig["decisionEmitter"]
   readonly admissibility?: AgentConfig["admissibility"]
@@ -212,6 +213,7 @@ export type RuntimeContextPatch = Partial<
     | "identityModeState"
     | "agentModeState"
     | "focusChain"
+    | "modelRouting"
     | "stickyModelStore"
     | "decisionEmitter"
     | "admissibility"

@@ -1043,7 +1043,7 @@ compactionEventEmit :: fn"
 `;
 
 exports[`composition slot-registry — byte-identical hellgate fingerprint stable — sticky model flag: sticky model flag :: base 1`] = `
-"KEYS[13]: llm,registry,stream,promptSurfaceProfile,permission,messages,system,cwd,maxTurns,signal,searchPipeline,stickyModelStore,readFileState
+"KEYS[14]: llm,registry,stream,promptSurfaceProfile,permission,messages,system,cwd,maxTurns,signal,searchPipeline,stickyModelStore,modelRouting,readFileState
 llm :: obj{model=str:"gpt-5.6-terra",provider=str:"openai",surfaceId=str:"openai-responses",transportId=str:"public",authMode=str:"OpenAI BYOK",listModels=fn,stream=fn}
 registry :: obj{tools=obj{},origin=undefined}
 stream :: obj{emit=fn}
@@ -1056,11 +1056,12 @@ maxTurns :: num
 signal :: obj{}
 searchPipeline :: obj{search=fn}
 stickyModelStore :: obj{store=obj{get=fn,set=fn,unset=fn,peek=fn,load=fn},provider=str:"openai",effectiveModel=fn}
+modelRouting :: obj{view=fn,list=fn,select=fn,clear=fn,resolveRequest=fn}
 readFileState :: obj{mtimes=obj{},rangeHashes=undefined,contentDigests=undefined,rangeDedupCap=num}"
 `;
 
 exports[`composition slot-registry — byte-identical hellgate fingerprint stable — sticky model flag: sticky model flag :: assembled 1`] = `
-"KEYS[23]: llm,registry,stream,promptSurfaceProfile,permission,messages,system,cwd,maxTurns,signal,searchPipeline,stickyModelStore,readFileState,modePolicy,budgetMeter,lspDiagnosticsHookEnabled,secretCheckToolEnabled,bgShellRegistry,contentCaptureEnabled,activeSkillCursor,contextEventsForTurn,mentionInjector,compactionEventEmit
+"KEYS[24]: llm,registry,stream,promptSurfaceProfile,permission,messages,system,cwd,maxTurns,signal,searchPipeline,stickyModelStore,modelRouting,readFileState,modePolicy,budgetMeter,lspDiagnosticsHookEnabled,secretCheckToolEnabled,bgShellRegistry,contentCaptureEnabled,activeSkillCursor,contextEventsForTurn,mentionInjector,compactionEventEmit
 llm :: obj{model=str:"gpt-5.6-terra",provider=str:"openai",surfaceId=str:"openai-responses",transportId=str:"public",authMode=str:"OpenAI BYOK",listModels=fn,stream=fn}
 registry :: obj{tools=obj{},origin=undefined}
 stream :: obj{emit=fn}
@@ -1073,6 +1074,7 @@ maxTurns :: num
 signal :: obj{}
 searchPipeline :: obj{search=fn}
 stickyModelStore :: obj{store=obj{get=fn,set=fn,unset=fn,peek=fn,load=fn},provider=str:"openai",effectiveModel=fn}
+modelRouting :: obj{view=fn,list=fn,select=fn,clear=fn,resolveRequest=fn}
 readFileState :: obj{mtimes=obj{},rangeHashes=undefined,contentDigests=undefined,rangeDedupCap=num}
 modePolicy :: obj{mode=str:"interactive",permission=obj{kind=str:"reviewer-backed"},termination=obj{kind=str:"user-stop"},sandbox=obj{kind=str:"user-cwd"},output=obj{kind=str:"stdout-chat"},externalDeps=obj{kind=str:"host"},toolSurface=obj{kind=str:"full"},promptPack=obj{kind=str:"assistant"},memory=obj{kind=str:"persistent"},observation=obj{kind=str:"stream-only"},network=obj{kind=str:"open"},gitWrite=obj{kind=str:"free"},secrets=obj{kind=str:"host-env"}}
 budgetMeter :: obj{dials=obj{maxTurns=num,maxRetries=num,maxConsecutiveFailures=num},caps=obj{},exhaustion=str:"stop",clock=fn,startedAtMs=num,turns=num,modelCalls=num,toolCalls=num,shellCommands=num,testRuns=num,inputTokens=num,outputTokens=num,reasoningTokens=num,filesChanged=num,patchBytes=num,retries=num,consecutiveFailures=num,costUsdAccum=num,costUsdThisTurn=num,providerRateLimitRemainingPct=undefined}
@@ -1525,7 +1527,7 @@ compactionEventEmit :: fn"
 `;
 
 exports[`composition slot-registry — byte-identical hellgate fingerprint stable — combo: base flags + env gates together: combo: base flags + env gates together :: base 1`] = `
-"KEYS[21]: llm,registry,stream,promptSurfaceProfile,permission,messages,system,cwd,maxTurns,signal,searchPipeline,stickyModelStore,toolProfile,focusChain,shadowVerify,runLedger,approvalStateMachine,hooks,artifactRegistry,artifactPreviewResolver,readFileState
+"KEYS[22]: llm,registry,stream,promptSurfaceProfile,permission,messages,system,cwd,maxTurns,signal,searchPipeline,stickyModelStore,toolProfile,focusChain,shadowVerify,runLedger,approvalStateMachine,hooks,artifactRegistry,artifactPreviewResolver,modelRouting,readFileState
 llm :: obj{model=str:"gpt-5.6-terra",provider=str:"openai",surfaceId=str:"openai-responses",transportId=str:"public",authMode=str:"OpenAI BYOK",listModels=fn,stream=fn}
 registry :: obj{tools=obj{},origin=undefined}
 stream :: obj{emit=fn}
@@ -1546,11 +1548,12 @@ approvalStateMachine :: obj{request=fn,settle=fn,expire=fn,cancel=fn,get=fn,list
 hooks :: obj{handlers=obj{},logger=undefined,opts=obj{}}
 artifactRegistry :: obj{register=fn,get=fn,list=fn,destroy=fn}
 artifactPreviewResolver :: obj{resolve=fn}
+modelRouting :: obj{view=fn,list=fn,select=fn,clear=fn,resolveRequest=fn}
 readFileState :: obj{mtimes=obj{},rangeHashes=undefined,contentDigests=undefined,rangeDedupCap=num}"
 `;
 
 exports[`composition slot-registry — byte-identical hellgate fingerprint stable — combo: base flags + env gates together: combo: base flags + env gates together :: assembled 1`] = `
-"KEYS[31]: llm,registry,stream,promptSurfaceProfile,permission,messages,system,cwd,maxTurns,signal,searchPipeline,stickyModelStore,toolProfile,focusChain,shadowVerify,runLedger,approvalStateMachine,hooks,artifactRegistry,artifactPreviewResolver,readFileState,modePolicy,budgetMeter,lspDiagnosticsHookEnabled,secretCheckToolEnabled,bgShellRegistry,contentCaptureEnabled,activeSkillCursor,contextEventsForTurn,mentionInjector,compactionEventEmit
+"KEYS[32]: llm,registry,stream,promptSurfaceProfile,permission,messages,system,cwd,maxTurns,signal,searchPipeline,stickyModelStore,toolProfile,focusChain,shadowVerify,runLedger,approvalStateMachine,hooks,artifactRegistry,artifactPreviewResolver,modelRouting,readFileState,modePolicy,budgetMeter,lspDiagnosticsHookEnabled,secretCheckToolEnabled,bgShellRegistry,contentCaptureEnabled,activeSkillCursor,contextEventsForTurn,mentionInjector,compactionEventEmit
 llm :: obj{model=str:"gpt-5.6-terra",provider=str:"openai",surfaceId=str:"openai-responses",transportId=str:"public",authMode=str:"OpenAI BYOK",listModels=fn,stream=fn}
 registry :: obj{tools=obj{},origin=undefined}
 stream :: obj{emit=fn}
@@ -1571,6 +1574,7 @@ approvalStateMachine :: obj{request=fn,settle=fn,expire=fn,cancel=fn,get=fn,list
 hooks :: obj{handlers=obj{},logger=undefined,opts=obj{}}
 artifactRegistry :: obj{register=fn,get=fn,list=fn,destroy=fn}
 artifactPreviewResolver :: obj{resolve=fn}
+modelRouting :: obj{view=fn,list=fn,select=fn,clear=fn,resolveRequest=fn}
 readFileState :: obj{mtimes=obj{},rangeHashes=undefined,contentDigests=undefined,rangeDedupCap=num}
 modePolicy :: obj{mode=str:"interactive",permission=obj{kind=str:"reviewer-backed"},termination=obj{kind=str:"user-stop"},sandbox=obj{kind=str:"user-cwd"},output=obj{kind=str:"stdout-chat"},externalDeps=obj{kind=str:"host"},toolSurface=obj{kind=str:"full"},promptPack=obj{kind=str:"assistant"},memory=obj{kind=str:"persistent"},observation=obj{kind=str:"stream-only"},network=obj{kind=str:"open"},gitWrite=obj{kind=str:"free"},secrets=obj{kind=str:"host-env"}}
 budgetMeter :: obj{dials=obj{maxTurns=num,maxRetries=num,maxConsecutiveFailures=num},caps=obj{},exhaustion=str:"stop",clock=fn,startedAtMs=num,turns=num,modelCalls=num,toolCalls=num,shellCommands=num,testRuns=num,inputTokens=num,outputTokens=num,reasoningTokens=num,filesChanged=num,patchBytes=num,retries=num,consecutiveFailures=num,costUsdAccum=num,costUsdThisTurn=num,providerRateLimitRemainingPct=undefined}

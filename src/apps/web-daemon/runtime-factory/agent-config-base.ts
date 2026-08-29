@@ -95,9 +95,12 @@ const turnActivitySlot = (
  */
 const modelSwitchSlots = (
   modelSwitch: WebModelSwitchHandle | undefined,
-): Partial<Pick<AgentConfig, "stickyModelStore" | "modelCandidates">> =>
+): Partial<Pick<AgentConfig, "stickyModelStore" | "modelCandidates" | "modelRouting">> =>
   modelSwitch !== undefined
     ? {
+        // MR-02 (final) — THE routing owner; the two slots below are the
+        // compatibility shape (see `model-routing/from-config.ts`).
+        modelRouting: modelSwitch.routing,
         stickyModelStore: {
           store: modelSwitch.store,
           provider: modelSwitch.provider,

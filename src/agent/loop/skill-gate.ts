@@ -3,7 +3,7 @@ import { supportsAdaptiveThinking } from "@/llm"
 import { runtimeConfig } from "@/shared"
 import { effortToTokenBudget } from "../effort"
 import { READ_ONLY_EXPLORATION } from "../exploration-ladder"
-import { resolveLiveAgentMode } from "../mode"
+import { modelRoutingFor } from "../model-routing"
 import type { SkillGate, SkillTurnOverride } from "../turn-context"
 import type { AgentConfig } from "../types"
 
@@ -118,22 +118,22 @@ export type ResolvedTurnOverride = {
   explicitOff: boolean
 }
 
+/**
+ * The SESSION's selected model for this turn, or `undefined` when nothing is
+ * selected.
+ *
+ * MR-02 final step — asks the ROUTING AUTHORITY (`modelRoutingFor`), which is the
+ * loop's single door to every model decision. This function used to compose the
+ * `<provider>:<mode>` key and read `config.stickyModelStore` itself, one of three
+ * places in the loop doing that; three copies of a key rule is exactly how the
+ * write key and the read key drifted apart before.
+ *
+ * Kept as a named export because callers outside the turn path (tests, the
+ * compaction threshold) ask this specific question.
+ */
 export const readStickyModelForMode = async (config: AgentConfig): Promise<string | undefined> => {
-  if (config.stickyModelStore === undefined) return undefined
-  return config.stickyModelStore.store.get({
-    mode: resolveLiveAgentMode(config),
-    // aug-28 — the pick is keyed by PROVIDER as well as mode: a model id only
-    // means anything for its own provider, and `tryCreateLLM` validates the
-    // credential, never the slug — so an anthropic pick read back in an openai
-    // session used to produce a real-looking port that failed on every turn.
-    // The SLOT's provider wins (the surface that owns the store set it, so the
-    // read key provably matches the write key); `config.llm.provider` is the
-    // fallback for a host that wired only a store. Absent both ⇒ legacy bare key.
-    ...((): { provider?: string } => {
-      const provider = config.stickyModelStore?.provider ?? config.llm.provider
-      return provider !== undefined ? { provider } : {}
-    })(),
-  })
+  const view = modelRoutingFor(config).view()
+  return view.source === "session" ? view.modelId : undefined
 }
 
 /**
@@ -154,10 +154,14 @@ export const resolveActiveModelId = async (
   config: AgentConfig,
   override: SkillTurnOverride | undefined,
 ): Promise<string> => {
-  const stickyModelId = await readStickyModelForMode(config)
-  const id = override?.model ?? stickyModelId
-  const port = id !== undefined ? config.modelCandidates?.find((c) => c.id === id)?.port : undefined
-  const model = (port ?? config.llm).model
+  // Through the authority, so the compaction threshold is derived from the SAME
+  // resolution the turn will stream on. Fail-closed on a skill miss is not this
+  // caller's business — a threshold question must never kill a turn — so an
+  // unroutable override degrades to the base model here, exactly as before.
+  const snapshot = await modelRoutingFor(config)
+    .resolveRequest(override?.model !== undefined ? { skillModel: override.model } : {})
+    .catch(() => undefined)
+  const model = (snapshot?.port ?? config.llm).model
   return model !== undefined && model !== "" ? model : "unknown"
 }
 
@@ -166,10 +170,24 @@ export const resolveSkillTurnOverride = (
   override: SkillTurnOverride | undefined,
   stickyModelId?: string,
 ): ResolvedTurnOverride => {
-  const resolvePort = (id: string | undefined): LLMPort | undefined =>
-    id !== undefined ? config.modelCandidates?.find((c) => c.id === id)?.port : undefined
+  // MR-02 — the PORT comes from the authority's resolution, not from a local
+  // candidate scan. `stickyModelId` is still accepted (callers pass what
+  // `readStickyModelForMode` gave them) but it is now only a hint: the authority
+  // owns precedence, so a caller cannot accidentally out-rank a skill override by
+  // passing a sticky id.
+  const routing = modelRoutingFor(config)
+  const selected = routing.view()
+  const requested =
+    override?.model ??
+    (stickyModelId !== undefined && stickyModelId.length > 0
+      ? stickyModelId
+      : selected.source === "session"
+        ? selected.modelId
+        : undefined)
   const swapped =
-    override?.model !== undefined ? resolvePort(override.model) : resolvePort(stickyModelId)
+    requested !== undefined && requested !== config.llm.model
+      ? config.modelCandidates?.find((c) => c.id === requested)?.port
+      : undefined
   const llm = swapped ?? config.llm
   const overrideEffort = override?.effort
   const skillHasEffortSignal = overrideEffort !== undefined

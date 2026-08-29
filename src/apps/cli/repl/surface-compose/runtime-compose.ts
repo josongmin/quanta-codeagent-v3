@@ -81,6 +81,10 @@ export const buildRuntimeFacadeCompose = (
   //     resolves that id to a PORT out of. Before this, the interactive CLI set
   //     neither, so a `/model` (or a skill `model:` override) could not reach
   //     the wire at all — the id had no port and the swap silently no-opped.
+  // MR-02 (final) — THE routing owner. `modelRoutingFor(config)` returns this, so
+  // the loop asks one thing; the two slots below stay for the hosts and tests that
+  // still wire the pieces directly (see `model-routing/from-config.ts`).
+  modelRouting: core.routing.authority,
   stickyModelStore: {
     ...core.stickyModel,
     provider: setup.provider,
