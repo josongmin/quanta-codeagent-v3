@@ -153,7 +153,7 @@ const copyTree = (from: string, to: string, keep: (rel: string) => boolean): voi
  * under src/tool), it cannot silently refill the corpus, and if it ever did the
  * canary would fail and the verdicts would be discarded.
  */
-const importClosure = (entry: string): ReadonlySet<string> => {
+export const importClosure = (entry: string): ReadonlySet<string> => {
   const seen = new Set<string>()
   const resolve = (spec: string, from: string): string | undefined => {
     const base = spec.startsWith("@/")
@@ -234,6 +234,50 @@ const importClosure = (entry: string): ReadonlySet<string> => {
   return seen
 }
 
+/**
+ * Delete the corpus from a cloned root, keeping guards and the staged closure.
+ *
+ * The clone is a byte-identical copy, so blanking happens after the fact. Removal
+ * is cheap — the files it deletes are the ones the mirror must not have — and it
+ * uses the SAME predicate the per-file walk uses, so the two paths cannot drift.
+ */
+const pruneCorpus = (
+  dir: string,
+  root: string,
+  blank: CorpusRoot,
+  needed: ReadonlySet<string>,
+): void => {
+  const walk = (rel: string): void => {
+    let entries: Dirent[]
+    try {
+      entries = readdirSync(join(dir, rel), { withFileTypes: true })
+    } catch {
+      return
+    }
+    for (const e of entries) {
+      const next = rel === "" ? e.name : join(rel, e.name)
+      // The walk below NEVER copies these, so the clone must not keep them: two
+      // mirror-construction paths that disagree about what is in the tree are two
+      // different oracles. `src/.env` is the live case — invisible under the walk,
+      // corpus under the clone, and surviving a blank that skipped it.
+      if (e.name === "node_modules" || e.name.startsWith(".")) {
+        rmSync(join(dir, next), { recursive: true, force: true })
+        continue
+      }
+      if (e.isDirectory()) {
+        walk(next)
+        continue
+      }
+      const full = join(root, next)
+      const inBlank = full === blank || full.startsWith(`${blank}/`)
+      if (inBlank && isCorpus(full) && !needed.has(full)) {
+        rmSync(join(dir, next), { force: true })
+      }
+    }
+  }
+  walk("")
+}
+
 export const buildMirror = (blank: CorpusRoot, guard?: string): string => {
   const dir = realpathSync(mkdtempSync(join(tmpdir(), "quanta-empty-mirror-")))
   const materialised = new Set(["src", "tests", blank.split("/")[0] as string])
@@ -242,7 +286,17 @@ export const buildMirror = (blank: CorpusRoot, guard?: string): string => {
     if (materialised.has(name) || name === "bunfig.toml") continue
     Bun.spawnSync(["ln", "-sfn", join(REPO_ROOT, name), join(dir, name)])
   }
+  // `cp -Rc` first: APFS clonefile copies 3,737 files in ~1.8s by sharing blocks,
+  // where the per-file walk below takes tens of seconds. A 136-guard sweep is one
+  // mirror per guard, so this is the difference between a gate that finishes and
+  // one nobody runs. Falls through to the walk when clonefile is unavailable
+  // (a non-APFS volume, another OS) rather than assuming it worked.
   for (const root of materialised) {
+    const cloned = Bun.spawnSync(["cp", "-Rc", join(REPO_ROOT, root), join(dir, root)])
+    if (cloned.exitCode === 0) {
+      pruneCorpus(join(dir, root), root, blank, needed)
+      continue
+    }
     copyTree(join(REPO_ROOT, root), join(dir, root), (rel) => {
       const full = join(root, rel)
       const inBlank = full === blank || full.startsWith(`${blank}/`)
@@ -313,7 +367,7 @@ export type GuardCase = { readonly file: string; readonly corpus: CorpusRoot }
  * resurrected, so guards are excluded and the 299 are reported separately by the
  * canary, which fails if the blanked root is not actually empty.
  */
-const corpusOverlap = (mirror: string, root: CorpusRoot): number => {
+export const corpusOverlap = (mirror: string, root: CorpusRoot): number => {
   let n = 0
   const walk = (dir: string): void => {
     let entries: Dirent[]
@@ -350,10 +404,10 @@ const corpusOverlap = (mirror: string, root: CorpusRoot): number => {
  * empty. Everything above it is reported UNSUPPORTED with its number, which is a
  * statement of what the instrument cannot see rather than a verdict.
  */
-const OVERLAP_FRACTION = 0.25
+export const OVERLAP_FRACTION = 0.25
 
 /** The same count against the REAL tree, so the ratio has a denominator. */
-const realCorpusSize = (root: CorpusRoot): number => corpusOverlap(REPO_ROOT, root)
+export const realCorpusSize = (root: CorpusRoot): number => corpusOverlap(REPO_ROOT, root)
 
 export const manifest = (): readonly GuardCase[] =>
   (JSON.parse(readFileSync(MANIFEST, "utf8")) as { cases?: readonly GuardCase[] }).cases ?? []

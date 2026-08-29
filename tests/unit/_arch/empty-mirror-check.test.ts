@@ -170,6 +170,34 @@ describe("empty-corpus oracle", () => {
       }
     }, 180_000)
 
+    test("🔴 no dotfile or node_modules survives — the two build paths agree", () => {
+      // The mirror is built by `cp -Rc` (APFS clonefile) when it is available and
+      // by a per-file walk when it is not. The walk NEVER copies a dotfile or a
+      // `node_modules`; the clone copies everything. Left unreconciled the two
+      // produce different trees, and the difference is corpus: `src/.env` is real,
+      // is corpus by `isCorpus`, and survived a blank under the clone path only.
+      // A mirror whose contents depend on which filesystem it was built on is two
+      // oracles wearing one name.
+      const dir = mirrorOf("src")
+      try {
+        const strays: string[] = []
+        const walk = (rel: string): void => {
+          for (const e of readdirSync(join(dir, rel), { withFileTypes: true })) {
+            const next = rel === "" ? e.name : join(rel, e.name)
+            if (e.name === "node_modules" || e.name.startsWith(".")) {
+              strays.push(next)
+              continue
+            }
+            if (e.isDirectory()) walk(next)
+          }
+        }
+        for (const root of ["src", "tests"]) walk(root)
+        expect(strays, "the clone kept paths the walk would never have copied").toEqual([])
+      } finally {
+        rmSync(dir, { recursive: true, force: true })
+      }
+    }, 180_000)
+
     test("🔴 the mirror uses its OWN bunfig with no preload", () => {
       // M14: pointing the mirror at the repo's bunfig survived. That is the
       // decision the whole engine rests on — the repo's preload loads production

@@ -50,6 +50,16 @@ const FORBIDDEN_PATTERNS: ReadonlyArray<RegExp> = [
   /\.from-worktree$/,
 ]
 
+/**
+ * The floor BOTH halves of the offender list are held to.
+ *
+ * Measured against 8,776 tracked paths under the scoped prefixes, so it leaves
+ * ~970 of headroom: a developer mid-`git rm` (files gone from the tree, still in
+ * the index) stays green, while a tree the run cannot actually see — a sparse
+ * checkout, an unmaterialised worktree, a mis-anchored root — does not.
+ */
+const CORPUS_FLOOR = 7804
+
 function listTrackedFiles(): string[] {
   const out = Bun.spawnSync(["git", "ls-files", "--", ...SCOPED_PREFIXES], {
     cwd: REPO_ROOT,
@@ -68,7 +78,7 @@ function listTrackedFiles(): string[] {
   // the exit check above is not a floor. The verdict is "no backup artifacts",
   // which an empty listing satisfies for free — proven, 2/0 against an empty
   // mirror of the repo tree.
-  if (files.length < 7804) {
+  if (files.length < CORPUS_FLOOR) {
     throw new Error(
       `git ls-files returned ${files.length} tracked path(s) under ${SCOPED_PREFIXES.join(", ")} ` +
         `— far below the real tree; the backup-artifact verdict would pass over nothing.`,
@@ -85,11 +95,22 @@ describe("arch: no leftover backup/worktree files", () => {
   test("no tracked .bak/.orig/.my-backup/.from-worktree files exist under src/tests/tools", () => {
     const tracked = listTrackedFiles()
 
-    const offenders = tracked
-      .filter(isBackupArtifact)
-      // A deletion pending a commit (rm'd in working tree, still in index)
-      // is in-flight cleanup, not a recurrence.
-      .filter((p) => existsSync(resolve(REPO_ROOT, p)))
+    // The offender list is `tracked ∩ present`, and only the first half has a
+    // floor. `existsSync` NARROWS, so a working tree the run cannot see — a sparse
+    // checkout, a worktree whose files are not materialised, a mis-anchored
+    // REPO_ROOT — empties the list and the verdict reads "no backup artifacts".
+    // Measured: with the index intact and the tree blanked, this file passed 2/0.
+    // Flooring the intersection is what makes the two states differ.
+    const present = tracked.filter((p) => existsSync(resolve(REPO_ROOT, p)))
+    if (present.length < CORPUS_FLOOR) {
+      throw new Error(
+        `only ${present.length} of ${tracked.length} tracked path(s) exist on disk — the ` +
+          `working tree this run can see is far below the real one, so an empty offender ` +
+          `list would mean "nothing was looked at" rather than "nothing was found".`,
+      )
+    }
+
+    const offenders = present.filter(isBackupArtifact)
 
     expect(
       offenders,

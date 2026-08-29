@@ -1,6 +1,10 @@
 {
-  "note": "Every legacy scan guard bound to the corpus root its ASSERTIONS consume. The empty-mirror oracle empties exactly that root and requires the guard to go red. A guard whose corpus is a directory it created itself does not belong here \u2014 it has no repo corpus to be vacuous about. Parity with tools/dev/anti-vacuity-burndown.json is enforced by tests/unit/_arch/anti-vacuity-burndown-ratchet.test.ts.",
+  "note": "Every legacy scan guard bound to the corpus root its ASSERTIONS consume. The empty-mirror oracle empties exactly that root and requires the guard to go red. A guard whose corpus is a directory it created itself does not belong here — it has no repo corpus to be vacuous about. Parity with tools/dev/anti-vacuity-burndown.json is enforced by tests/unit/_arch/anti-vacuity-burndown-ratchet.test.ts.",
   "cases": [
+    {
+      "file": "tests/unit/_arch/no-leftover-backup-files.test.ts",
+      "corpus": "src"
+    },
     {
       "file": "tests/unit/cli/cli-feature-gates-drift-hellgate.test.ts",
       "corpus": "src"
