@@ -106,7 +106,12 @@ describe("empty-corpus oracle", () => {
       try {
         mkdirSync(join(dir, "tests", "unit", "_arch"), { recursive: true })
         mkdirSync(join(dir, "src"), { recursive: true })
-        for (let i = 0; i < 20; i++) {
+        // The canary's floor is a SHARE of the real corpus (10%), not a fixed
+        // count — a guard's own imports legitimately leave a few dozen files
+        // behind, and an absolute floor of 5 called that "corpus present" and
+        // made the guard unjudgeable. So a fixture proving the canary can say
+        // "not empty" has to be comparable to the real tree.
+        for (let i = 0; i < 2000; i++) {
           writeFileSync(join(dir, "src", `f${i}.ts`), "export {}\n")
         }
         writeFileSync(join(dir, "bunfig.toml"), "[test]\ncoverage = false\n")
