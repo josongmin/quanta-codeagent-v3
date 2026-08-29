@@ -444,8 +444,15 @@ const handleTurnRun = (
   command: Extract<SessionCommand, { type: "turn.run" }>,
   emittedAt: string,
 ): ReducerResult => {
+  // GOAL P0-1 — the post-approval resume. A `turn.run` normally re-runs the
+  // draft the pause preserved; a `turn.submit` leaves no draft, so before this
+  // the approved goal work died here as `empty_turn_input` and the daemon
+  // logged it as a benign duplicate. The kernel now re-runs exactly what it
+  // paused (host-owned record; a client cannot set or forge it).
+  const resumed = state.pausedTurn
   if (!hasDraftTurnInput(state)) {
-    throw new SessionProtocolValidationError("empty_turn_input")
+    if (resumed === undefined) throw new SessionProtocolValidationError("empty_turn_input")
+    return startTurn(state, command, emittedAt, resumed.prompt, resumed.images)
   }
   return startTurn(state, command, emittedAt, state.draftInput, state.draftImages)
 }

@@ -167,4 +167,33 @@ describe("goal wake delay policy", () => {
       retryAt: 20_000,
     })
   })
+
+  test("GOAL P0-1 — an approval PAUSE is not a stall: it never widens the quiet window", () => {
+    const paused: ProgressReceipt = { ...receipt(1), turnOutcome: "awaiting_approval" }
+    // One awaiting_approval receipt ⇒ still the base window.
+    expect(computeGoalWakeDelay(domain({ receipts: [paused] }), policy, {}, 1_000)).toEqual({
+      delayMs: 15_000,
+      reason: "base",
+    })
+    // Even a run of them: the operator being slow to approve must not walk the
+    // goal up the backoff ladder toward its hard cap.
+    const many = [paused, { ...paused, attemptKey: "a2" }, { ...paused, attemptKey: "a3" }]
+    expect(computeGoalWakeDelay(domain({ receipts: many }), policy, {}, 1_000)).toEqual({
+      delayMs: 15_000,
+      reason: "base",
+    })
+    // Paired control: a genuine no-progress error receipt STILL backs off, and
+    // an approval pause in front of it does not reset that ladder either.
+    expect(
+      computeGoalWakeDelay(domain({ receipts: [receipt(1), receipt(2)] }), policy, {}, 1_000),
+    ).toEqual({ delayMs: 60_000, reason: "no-progress-backoff" })
+    expect(
+      computeGoalWakeDelay(
+        domain({ receipts: [receipt(1), receipt(2), paused] }),
+        policy,
+        {},
+        1_000,
+      ),
+    ).toEqual({ delayMs: 15_000, reason: "base" })
+  })
 })

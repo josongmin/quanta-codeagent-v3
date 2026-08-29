@@ -142,3 +142,57 @@ describe("/goal work — GOAL-08 rail 15 (user-requested provenance)", () => {
     expect(h.err.join("")).toContain("attempt slot fail-stopped (disk full)")
   })
 })
+
+describe("GOAL-04 rail 4 — /goal verify costs the operator nothing", () => {
+  const verifyHarness = (passed: boolean) => {
+    let sequence = 0
+    const authority = createObjectiveAuthority({ idFactory: () => `goal-${++sequence}` })
+    const out: string[] = []
+    const err: string[] = []
+    let verifyCalls = 0
+    const verifier = {
+      verify: async () => {
+        verifyCalls += 1
+        return passed
+          ? ({ kind: "verified", applied: 1 } as never)
+          : ({ kind: "stale-source" } as never)
+      },
+      reconcile: async () => ({ kind: "reconciled" }) as never,
+    }
+    const control = buildGoalControl(authority, "thread", undefined, verifier as never)
+    const ctx: SlashContext = {
+      cwd: "/tmp",
+      out: (text) => out.push(text),
+      err: (text) => err.push(text),
+      objectiveEditor: control,
+      now: () => 10_000,
+    }
+    return { authority, ctx, out, err, verifyCalls: () => verifyCalls }
+  }
+
+  test("verification runs through the verifier port and charges NO turn and NO tokens", async () => {
+    const h = verifyHarness(true)
+    await goalCmd.run(["ship the thing"], h.ctx)
+    const before = h.authority.get("thread")?.budget
+    expect(before).toEqual({ tokensUsed: 0, turnsUsed: 0 })
+    expect(await goalCmd.run(["verify"], h.ctx)).toBe(0)
+    expect(h.verifyCalls()).toBe(1)
+    // The rail: a verification is NOT an agent turn. Neither counter moves, and
+    // no attempt is opened or recorded.
+    const after = h.authority.get("thread")
+    expect(after?.budget).toEqual({ tokensUsed: 0, turnsUsed: 0 })
+    expect(after?.attempts.autonomousTurnsStarted).toBe(0)
+    expect(after?.attempts.started).toBeUndefined()
+    expect(h.authority.readDomain("thread").progressReceipts ?? []).toHaveLength(0)
+  })
+
+  test("a REFUSED verification is equally free (a stale source cannot charge the goal)", async () => {
+    const h = verifyHarness(false)
+    await goalCmd.run(["ship the thing"], h.ctx)
+    expect(await goalCmd.run(["verify"], h.ctx)).toBe(1)
+    const after = h.authority.get("thread")
+    expect(after?.budget).toEqual({ tokensUsed: 0, turnsUsed: 0 })
+    expect(after?.attempts.autonomousTurnsStarted).toBe(0)
+    expect(h.authority.readDomain("thread").progressReceipts ?? []).toHaveLength(0)
+  })
+})

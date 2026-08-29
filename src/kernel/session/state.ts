@@ -2,6 +2,7 @@ import type { ImageBlock, Message } from "@/llm"
 import type {
   ArtifactRef,
   CapabilityManifest,
+  GoalContinuationProvenance,
   PendingApprovalView,
   PostureProjectionView,
   SessionSnapshotLite,
@@ -46,6 +47,24 @@ export interface KernelSessionState {
    *  when the host wired a posture control (absent ⇒ byte-identical). */
   readonly posture?: PostureProjectionView
   readonly pendingApproval: PendingApprovalView | null
+  /** GOAL P0-1 — the turn that is paused at an approval, kept so the resume can
+   *  re-run EXACTLY it and re-attribute it.
+   *
+   *  A `turn.run` resume works today only because the draft survives the pause;
+   *  a `turn.submit` (the goal path) never writes a draft, so its resume used to
+   *  die on `empty_turn_input` and the approved work was silently dropped. This
+   *  record is the submit-path analogue of that surviving draft, plus the goal
+   *  provenance so the resumed body is attributed instead of running free.
+   *
+   *  KERNEL-INTERNAL: never projected by `toSessionStateView` (a client cannot
+   *  read or forge it), and cleared at every terminal. */
+  readonly pausedTurn?:
+    | {
+        readonly prompt: string
+        readonly images: readonly ImageBlock[]
+        readonly provenance?: GoalContinuationProvenance | undefined
+      }
+    | undefined
   readonly transcript: KernelTranscriptState
   readonly artifacts: readonly ArtifactRef[]
   readonly capabilityManifest: CapabilityManifest

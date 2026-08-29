@@ -88,8 +88,14 @@ export interface GoalWakeSettlementHint {
   readonly observedAt?: number | undefined
 }
 
+/** GOAL P0-1 — an `awaiting_approval` settlement is a PAUSE, not a stall: the
+ *  body stopped to ask the operator, and the resumed body carries the progress.
+ *  Counting it as no-progress doubled the quiet window on every approval and
+ *  walked an approval-gated goal into its hard cap. */
 const madeProgress = (receipt: ProgressReceipt): boolean =>
-  receipt.criterionTransitions.length > 0 || receipt.verifierReceiptRefs.length > 0
+  receipt.turnOutcome === "awaiting_approval" ||
+  receipt.criterionTransitions.length > 0 ||
+  receipt.verifierReceiptRefs.length > 0
 
 const consecutiveNoProgress = (receipts: readonly ProgressReceipt[]): number => {
   let count = 0

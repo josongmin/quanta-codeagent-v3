@@ -101,8 +101,21 @@ const claimGoalAttemptForTurn = (
   command: SessionCommand,
   ctx: KernelDispatchContext,
 ): (() => void) | undefined => {
-  if (command.type !== "turn.submit") return undefined
-  const provenance = command.provenance
+  const provenance =
+    command.type === "turn.submit"
+      ? command.provenance
+      : // GOAL P0-1 — the post-approval resume is a bare `turn.run`, so the
+        // provenance comes from the paused-turn record the kernel itself wrote.
+        // A fresh attemptId keeps the resumed body a DISTINCT attempt (progress
+        // receipts dedupe on it) while the objective identity/revision fence
+        // stays the one the operator approved.
+        command.type === "turn.run" && state.pausedTurn?.provenance !== undefined
+        ? {
+            ...state.pausedTurn.provenance,
+            attemptId: `${state.pausedTurn.provenance.attemptId}#resume-${state.revision}`,
+          }
+        : undefined
+  if (provenance === undefined) return undefined
   const autonomous = provenance.kind === "goal-continuation"
   const claimed = ctx.host.claimGoalAttempt?.({
     threadId: state.sessionId,

@@ -474,4 +474,78 @@ describe("goal wake host binding", () => {
     expect(timer.delays().at(-1)).toBe(15_000)
     expect(wake?.status()).toEqual({ kind: "armed", delayMs: 15_000 })
   })
+
+  test("GOAL-04 rail 9 — a pause DURING an attributed turn still records the cost, and the settled turn does NOT re-arm", () => {
+    const store = createObjectiveStore()
+    const authority = asObjectiveAuthority(store)
+    store.create(TID, { goal: "ship", successCriteria: ["c"] })
+    const timer = fakeTimeout()
+    const wake = startGoalWakeController({
+      enabled: true,
+      threadId: TID,
+      quietWindowMs: 15_000,
+      probes: probes(store, async () => undefined),
+      readDomain: (id) => authority.readDomain(id),
+      isQuiescent: () => true,
+      setTimeoutFn: timer.set,
+      clearTimeoutFn: timer.clear,
+    })
+    expect(timer.delays()).toEqual([15_000]) // active goal ⇒ armed
+    const system = createObjectiveCapabilities(authority).system
+    const domain = authority.readDomain(TID)
+    const objectiveId = domain.state?.objective.objectiveId ?? ""
+    expect(
+      system.commit(TID, {
+        kind: "beginAttempt",
+        attempt: {
+          objectiveId,
+          attemptId: "a1",
+          provenance: "autonomous-continuation",
+          executionMode: "background",
+          startedRevision: domain.revision,
+        },
+      }).ok,
+    ).toBe(true)
+
+    // The operator pauses WHILE the turn is in flight.
+    store.setExplicitStatus(TID, "paused")
+
+    // The in-flight attempt still settles and its measured cost lands.
+    expect(
+      system.commit(TID, {
+        kind: "settleAttempt",
+        settlement: {
+          objectiveId,
+          attemptId: "a1",
+          startedRevision: domain.revision,
+          tokensUsed: 123,
+          turnsUsed: 0,
+          outcome: "completed",
+          executionMode: "background",
+          criterionIdsBefore: [],
+          verifierReceiptIdsBefore: [],
+          recordedAt: 2,
+        },
+      }).ok,
+    ).toBe(true)
+    expect(authority.get(TID)?.budget.tokensUsed).toBe(123)
+    expect(authority.get(TID)?.budget.turnsUsed).toBe(1)
+    expect(authority.readDomain(TID).progressReceipts).toHaveLength(1)
+
+    // ...and the settled turn must NOT re-arm while the goal is paused.
+    const armsBefore = timer.delays().length
+    wake?.onTurnSettled()
+    wake?.onGoalMutation()
+    expect(timer.delays().length).toBe(armsBefore)
+    expect(wake?.status()).toEqual({ kind: "idle", skipReason: "not-active" })
+
+    // Resuming re-arms — the suppression is the pause, not a dead controller.
+    // The delay is 30 s, not 15 s: the settled attempt produced a receipt with
+    // NO criterion transition, so the no-progress ladder (GOAL-06) doubled the
+    // window. Both facts are pinned here on purpose.
+    store.setExplicitStatus(TID, "active")
+    wake?.onGoalMutation()
+    expect(timer.delays().length).toBe(armsBefore + 1)
+    expect(wake?.status()).toEqual({ kind: "armed", delayMs: 30_000 })
+  })
 })

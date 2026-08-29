@@ -79,4 +79,36 @@ describe("goal status renderer", () => {
     expect(text).toContain("last verified: 1m ago")
     expect(text).toContain(`checkpoint: rev ${currentRevision} · 1 receipts`)
   })
+
+  test("GOAL-05 rail 12 — checkpoint/last-verified are DERIVED, with no separate storage", () => {
+    const authority = createObjectiveAuthority({ now: () => 1_000, idFactory: () => "goal-2" })
+    authority.create("t", { goal: "ship", successCriteria: ["manual only"] })
+    // No receipts, no verifier evidence yet ⇒ both fields must read as absent,
+    // not as a stale stored value.
+    const empty = renderGoalDomain(authority.readDomain("t"), 2_000)
+    expect(empty).toContain("checkpoint: none")
+    expect(empty).toContain("last verified: never")
+    expect(empty).toContain("source: unverified")
+
+    // A receipt is the ONLY input for the checkpoint line: adding one moves it.
+    const revision = authority.readDomain("t").revision
+    expect(
+      authority.recordProgressReceipt("t", {
+        objectiveId: "goal-2",
+        attemptKey: "attempt-9",
+        objectiveRevisionBefore: revision,
+        objectiveRevisionAfter: revision,
+        turnOutcome: "completed",
+        criterionTransitions: [],
+        verifierReceiptRefs: [],
+        remainingCriterionIds: [],
+        recordedAt: 1_500,
+      }),
+    ).toBe(true)
+    const withReceipt = renderGoalDomain(authority.readDomain("t"), 2_000)
+    expect(withReceipt).toContain(`checkpoint: rev ${revision} · 1 receipts`)
+    // Still never verified: a progress receipt is NOT verifier evidence.
+    expect(withReceipt).toContain("last verified: never")
+    expect(withReceipt).toContain("source: unverified")
+  })
 })

@@ -125,6 +125,28 @@ const approvalEventsForTurn = (args: {
   },
 ]
 
+/** The turn to re-run after an approval: a `turn.submit` carries its own text
+ *  and goal provenance; a `turn.run` re-runs the draft it started from. A
+ *  resume that pauses AGAIN keeps the original provenance (the resume command
+ *  is a bare `turn.run`, so it cannot carry it itself). */
+const pausedTurnOf = (
+  state: KernelSessionState,
+  command: TurnExecutionCommand,
+): KernelSessionState["pausedTurn"] =>
+  command.type === "turn.submit"
+    ? {
+        prompt: command.text,
+        images: [...(command.images ?? [])],
+        ...(command.provenance !== undefined ? { provenance: command.provenance } : {}),
+      }
+    : {
+        prompt: state.pausedTurn?.prompt ?? state.draftInput,
+        images: state.pausedTurn?.images ?? [...state.draftImages],
+        ...(state.pausedTurn?.provenance !== undefined
+          ? { provenance: state.pausedTurn.provenance }
+          : {}),
+      }
+
 export const onApprovalRequested = async (args: {
   readonly state: KernelSessionState
   readonly command: TurnExecutionCommand
@@ -144,6 +166,11 @@ export const onApprovalRequested = async (args: {
     pendingApproval: approval,
     messages: [...args.result.messages],
     transcript: clearStreamingAssistantText(summarizeTranscript(args.result.messages)),
+    // GOAL P0-1 — remember WHAT was paused. A `turn.run` resume survives on the
+    // draft; a `turn.submit` (the goal path) has none, so without this the
+    // approved work is dropped with `empty_turn_input`. The goal provenance
+    // rides along so the resumed body is attributed, not free.
+    pausedTurn: pausedTurnOf(args.state, args.command),
   }
   const approvalEvents = approvalEventsForTurn({
     state: nextState,
@@ -272,6 +299,7 @@ export const onTurnCompleted = async (args: {
     draftInput: "",
     draftImages: [],
     pendingApproval: null,
+    pausedTurn: undefined,
     transcript: clearStreamingAssistantText(summarizeTranscript(args.result.messages)),
     artifacts: [...args.state.artifacts, ...artifacts],
     ...terminalStopFields({
@@ -380,6 +408,7 @@ export const onTurnAborted = async (args: {
     seq: args.state.seq + 2,
     status: "idle",
     pendingApproval: null,
+    pausedTurn: undefined,
     ...(settled !== undefined
       ? {
           messages: [...settled.messages],
@@ -480,6 +509,7 @@ export const onTurnErrored = async (args: {
     draftInput: "",
     draftImages: [],
     pendingApproval: null,
+    pausedTurn: undefined,
     transcript: clearStreamingAssistantText(summarizeTranscript(args.result.messages)),
     ...terminalStopFields({ reason: "error" }),
   }
