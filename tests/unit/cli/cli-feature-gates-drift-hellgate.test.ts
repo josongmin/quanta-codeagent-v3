@@ -68,10 +68,19 @@ const isConsumedSomewhere = (knob: string): boolean => {
       SEARCH_ROOT,
       "--type",
       "ts",
+      // `**/` is load-bearing. A glob containing a slash is ANCHORED at the
+      // search root, and the root is absolute, so `!apps/cli/index.ts` matched
+      // nothing rg ever emits — it prints `<root>/src/apps/cli/…`. Both
+      // exclusions were therefore no-ops, and the DECLARING module
+      // (`cli-feature-gates.ts`, which contains every gate name verbatim) matched
+      // every search. `isConsumedSomewhere` returned true unconditionally, so a
+      // seeded gate that nothing reads was reported as consumed — the exact
+      // defect this file exists to catch. Measured: 8 hits with the exclusions,
+      // 8 without.
       "-g",
-      "!apps/cli/index.ts",
+      "!**/apps/cli/index.ts",
       "-g",
-      "!apps/cli/cli-feature-gates.ts",
+      "!**/apps/cli/cli-feature-gates.ts",
     ],
     { cwd: REPO_ROOT },
   )
