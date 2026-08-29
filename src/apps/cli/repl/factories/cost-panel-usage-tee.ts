@@ -1,4 +1,19 @@
 /**
+ * MR-07 — SUPERSEDED, NOT YET REMOVABLE.
+ *
+ * This tee exists to tell the panel which model the last usage event ran on,
+ * because the panel's legacy feed (an OTel counter delta) carries no model. The
+ * usage-accounting authority answers that question properly — it buckets by
+ * model per call, with no last-writer-wins approximation — so in
+ * `QUANTA_USAGE_ACCOUNTING_V2=on` nothing here is read.
+ *
+ * It stays because the knob defaults to `off`, and in `off`/`shadow` the panel
+ * still folds the counter delta and still needs this. Deleting it now would
+ * leave the default path with no model at all. The removal is GATED on the
+ * default flipping to `on`, together with `foldCostPanelDelta` — they are one
+ * feed and should go in one piece.
+ */
+/**
  * MR-05 — teach the CLI cost panel WHICH model each turn ran on.
  *
  * THE DEFECT. `CostPanel.state.model` is seeded once at session start

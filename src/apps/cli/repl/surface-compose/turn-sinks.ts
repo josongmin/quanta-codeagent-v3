@@ -33,6 +33,13 @@ export const createSurfaceState = (args: {
   costDeltaPrev: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0 },
 })
 
+/**
+ * MR-07 — SUPERSEDED, NOT YET REMOVABLE. The panel projects the usage-accounting
+ * authority when one is wired, and then this fold's `incrementTurn` only
+ * advances the turn count. It stays because the knob defaults to `off`, where
+ * this remains the panel's ONLY feed. Removal is gated on the default flipping
+ * to `on`, and takes `cost-panel-usage-tee` with it — one feed, one deletion.
+ */
 const foldCostPanelDelta = (
   panel: {
     incrementTurn: (delta: {

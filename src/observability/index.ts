@@ -13,12 +13,6 @@ export {
   renderDashboardMarkdown,
   renderDashboardText,
 } from "./cost-dashboard"
-export {
-  buildLlmCostMetricsSink,
-  emitLlmCostToOtel,
-  type LlmCostLabels,
-  type LlmCostSink,
-} from "./llm-cost-emit"
 export { log, StructuredLogger } from "./logger"
 export { buildMemoryTelemetry, MEMORY_TELEMETRY_KEYS } from "./memory-telemetry"
 export { Metrics, metrics } from "./metrics"
