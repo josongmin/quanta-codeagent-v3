@@ -34,6 +34,32 @@ const forbiddenBatchValueImport = (txt: string): boolean =>
     .filter((l) => /^import\s+(?!type\b)[^"']*from\s+["']@\/runner\/batch/.test(l))
     .some((l) => !l.includes(DERIVE_IMPORT))
 
+/**
+ * The per-knob modules, with a floor on the listing itself.
+ *
+ * Both bans below are LOOP BODIES over this listing, and an empty directory runs
+ * them zero times: the tests then pass having asserted nothing, which reads
+ * exactly like "no per-knob file imports batch" and "no per-knob file imports a
+ * sibling". Measured against the real corpus (68 modules), the two tests make 68
+ * and 67 `expect()` calls; against a present-but-empty directory they made ZERO
+ * and both passed.
+ *
+ * The floor is 60, derived from that corpus rather than written as `> 0`, so a
+ * listing that reaches a fraction of the tree fails here instead of reporting
+ * clean. One helper for both, so the floor cannot be added to one ban and
+ * forgotten on the other — which is how the second one was still vacuous after
+ * the first was fixed.
+ */
+const perKnobModules = async (): Promise<string[]> => {
+  const modules = (await readdir(PER_KNOB_DIR)).filter((f) => f.endsWith(".ts"))
+  expect(
+    modules.length,
+    `only ${modules.length} per-knob module(s) were listed — the ban that consumes ` +
+      `this listing would pass over a walk that never happened`,
+  ).toBeGreaterThanOrEqual(60)
+  return modules
+}
+
 describe("hellgate / cross-slice — runner/knobs DOES NOT import runner/batch (value-level)", () => {
   test("framework core files have no value-level batch import", async () => {
     const cores = [
@@ -56,19 +82,7 @@ describe("hellgate / cross-slice — runner/knobs DOES NOT import runner/batch (
   })
 
   test("per-knob files have no value-level batch import EXCEPT the deriveKnob SSOT", async () => {
-    const files = await readdir(PER_KNOB_DIR)
-    // The verdict is a LOOP BODY, and an empty listing runs it zero times: the
-    // test then passes having asserted nothing, which reads exactly like "no
-    // per-knob file imports batch at value level". The floor is derived from the
-    // real corpus (68 modules today), not a token `> 0`, so a walk that reaches
-    // a fraction of the tree fails here instead of reporting clean.
-    const modules = files.filter((f) => f.endsWith(".ts"))
-    expect(
-      modules.length,
-      `only ${modules.length} per-knob module(s) were listed — the ban below would ` +
-        `pass over a listing that never happened`,
-    ).toBeGreaterThanOrEqual(60)
-    for (const f of modules) {
+    for (const f of await perKnobModules()) {
       const txt = await readSrc(join(PER_KNOB_DIR, f))
       // The ONLY permitted runner/batch value import is the `deriveKnob` SSOT
       // (knob=schema unification); any other batch value import is still banned.
@@ -79,9 +93,7 @@ describe("hellgate / cross-slice — runner/knobs DOES NOT import runner/batch (
 
 describe("hellgate / cross-slice — per-knob files do NOT import each other", () => {
   test("each per-knob file imports no other per-knob file under src/runner/knobs/knobs/", async () => {
-    const files = await readdir(PER_KNOB_DIR)
-    const knobFiles = files.filter((f) => f.endsWith(".ts") && f !== "index.ts")
-    for (const f of knobFiles) {
+    for (const f of (await perKnobModules()).filter((f) => f !== "index.ts")) {
       const txt = await readSrc(join(PER_KNOB_DIR, f))
       // Match any value or type import that points into the SAME directory.
       const siblingImport = /from\s+["']\.\/(?!\.\.\/)/g
