@@ -64,7 +64,7 @@ describe("R2B → WIRED — RFC06-4 hunk-mutation CAS undo journal (RFC-def Surf
     // lost a subtree reports zero occurrences there and reads as "the seam is
     // dead" — the exact conclusion this file exists to draw.
     assertScanPopulation(ALL_SRC, SRC, {
-      min: 500,
+      id: "tests/adversarial/aug02-feeder-deferred-status.test.ts#SRC",
       collectable: (n) => n.endsWith(".ts") && !n.endsWith(".test.ts"),
     })
   })

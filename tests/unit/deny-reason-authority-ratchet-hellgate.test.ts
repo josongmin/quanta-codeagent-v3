@@ -61,7 +61,9 @@ describe("deny-reason authority ratchet", () => {
     // Both claims, and the disk is probed independently of the walk under test:
     // deriving the expectation from `collectAgentTs()` would make a lost subtree
     // vanish from both sides of the comparison.
-    assertScanPopulation(collectAgentTs(), SRC_AGENT, { min: 100 })
+    assertScanPopulation(collectAgentTs(), SRC_AGENT, {
+      id: "tests/unit/deny-reason-authority-ratchet-hellgate.test.ts#SRC-AGENT",
+    })
   })
 
   test("only deny-reason-wire.ts may construct structuredDenyReason directly inside src/agent", () => {

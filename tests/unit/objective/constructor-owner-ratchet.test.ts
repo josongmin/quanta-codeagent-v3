@@ -90,7 +90,7 @@ describe("RFC-03 C2 — objective authority constructor-owner ratchet", () => {
   test("ANTI-VACUITY: the walk reaches a real, populated `src/` tree", () => {
     // "No unauthorized constructor" and "no file was read" are the same result.
     assertScanPopulation([...walk(SRC_DIR)], SRC_DIR, {
-      min: 500,
+      id: "tests/unit/objective/constructor-owner-ratchet.test.ts#SRC-DIR",
       collectable: (n) => n.endsWith(".ts") && !n.endsWith(".d.ts") && !n.endsWith(".test.ts"),
     })
   })

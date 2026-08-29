@@ -29,7 +29,7 @@ const assertSliceIsReal = (files: readonly string[]): void => {
     files.map((f) => join(CORE_DIR, f)),
     CORE_DIR,
     {
-      min: 3,
+      id: "src/agent/converge/purity.test.ts#src-agent-converge",
       topLevelOnly: true,
       collectable: (f) => f.endsWith(".ts") && !f.endsWith(".test.ts"),
     },

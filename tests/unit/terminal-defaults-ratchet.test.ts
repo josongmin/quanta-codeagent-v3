@@ -115,7 +115,7 @@ describe("terminal defaults ratchet", () => {
     // The ratchet pins a debt COUNT of zero. Zero matches over a tree that was
     // never read is indistinguishable from zero over a clean one.
     assertScanPopulation(walkTsFiles(SRC_DIR), SRC_DIR, {
-      min: 500,
+      id: "tests/unit/terminal-defaults-ratchet.test.ts#SRC-DIR",
       collectable: (n) => n.endsWith(".ts"),
     })
   })

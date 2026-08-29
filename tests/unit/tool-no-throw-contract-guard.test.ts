@@ -276,7 +276,7 @@ describe("tool NO-THROW contract — static ratchet", () => {
   test("ANTI-VACUITY: the walk reaches a real, populated `src/tool` tree", () => {
     // "No offending await" and "no file was read" are the same result.
     assertScanPopulation(listToolTsFiles(TOOL_DIR), TOOL_DIR, {
-      min: 20,
+      id: "tests/unit/tool-no-throw-contract-guard.test.ts#TOOL-DIR",
       collectable: (n) => n.endsWith(".ts") && !n.endsWith(".d.ts") && !n.includes(".test."),
     })
   })

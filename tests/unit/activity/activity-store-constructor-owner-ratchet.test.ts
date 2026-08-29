@@ -93,7 +93,7 @@ describe("RFC-04 D4 — ActivityStore constructor-owner ratchet", () => {
   test("ANTI-VACUITY: the walk reaches a real, populated `src/` tree", () => {
     // "No unauthorized constructor" and "no file was read" are the same result.
     assertScanPopulation([...walk(SRC_DIR)], SRC_DIR, {
-      min: 500,
+      id: "tests/unit/activity/activity-store-constructor-owner-ratchet.test.ts#SRC-DIR",
       collectable: (n) => n.endsWith(".ts") && !n.endsWith(".d.ts") && !n.endsWith(".test.ts"),
     })
   })

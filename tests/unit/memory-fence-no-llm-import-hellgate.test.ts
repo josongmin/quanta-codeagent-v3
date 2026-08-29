@@ -44,7 +44,10 @@ describe("memory-fence-no-llm-import-hellgate — static scan", () => {
     // over one it never opened.
     const files: string[] = []
     for await (const f of walkTs(MEMORY_ROOT)) files.push(f)
-    assertScanPopulation(files, MEMORY_ROOT, { min: 5, collectable: (n) => n.endsWith(".ts") })
+    assertScanPopulation(files, MEMORY_ROOT, {
+      id: "tests/unit/memory-fence-no-llm-import-hellgate.test.ts#MEMORY-ROOT",
+      collectable: (n) => n.endsWith(".ts"),
+    })
   })
 
   test("no .ts file under src/memory/ imports from @/llm", async () => {

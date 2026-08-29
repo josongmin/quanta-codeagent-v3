@@ -180,7 +180,7 @@ describe("budget-probe hellgate (12 cases)", () => {
     const absRoots = roots.map((r) => join(repoRoot, r))
     for (const root of absRoots) {
       assertScanPopulation(visitedUnder(root), root, {
-        min: 10,
+        id: `tests/unit/retrieval/budget-probe-hellgate.test.ts#${root}`,
         collectable: (n) => n.endsWith(".ts"),
       })
     }

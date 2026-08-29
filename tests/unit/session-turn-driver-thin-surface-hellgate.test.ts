@@ -42,7 +42,11 @@ describe("session turn-driver thin-surface hellgate (ADR-0303)", () => {
     assertScanPopulation(
       sessionLoopSliceFiles().map((f) => join(dir, f)),
       dir,
-      { min: 2, topLevelOnly: true, collectable: (f) => f.endsWith(".ts") },
+      {
+        id: "tests/unit/session-turn-driver-thin-surface-hellgate.test.ts#session-loop-slice",
+        topLevelOnly: true,
+        collectable: (f) => f.endsWith(".ts"),
+      },
     )
   })
 

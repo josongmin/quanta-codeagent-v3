@@ -144,7 +144,7 @@ describe("RFC-01 A2 — TaskRegistry constructor-owner drift-guard (mint-countin
     // Mint-counting over an empty walk counts zero mints, and zero satisfies
     // "no competing constructor" for free.
     assertScanPopulation([...walk(SRC_DIR)], SRC_DIR, {
-      min: 500,
+      id: "tests/unit/runner/session-authorities-task-registry-identity.test.ts#SRC-DIR",
       collectable: (n) => n.endsWith(".ts") && !n.endsWith(".d.ts") && !n.endsWith(".test.ts"),
     })
   })

@@ -93,7 +93,7 @@ describe("CLI-05: structural — shim is gone", () => {
     // reads as removed — the exact verdict this file exists to establish.
     const srcRoot = join(REPO_ROOT, "src")
     assertScanPopulation(walkTs(srcRoot), srcRoot, {
-      min: 500,
+      id: "tests/unit/apps/cli/session-cmd-shim-removal-hellgate.test.ts#srcRoot",
       skipDirs: [...SKIP_DIRS],
       collectable: (n) => n.endsWith(".ts"),
     })

@@ -48,12 +48,12 @@ describe("runner verify-select and patch-budget driver parity", () => {
     // exists now, so that branch means "read nothing" and every `not.toContain`
     // below is satisfied for free.
     assertScanPopulation(runnerLaneFiles(), DRIVER_DIR, {
-      min: 2,
+      id: "tests/unit/runner/verify-select-driver-parity.test.ts#DRIVER-DIR",
       topLevelOnly: true,
       collectable: (f) => f.endsWith(".ts"),
     })
     assertScanPopulation(appLaneFiles(), APP_DRIVER_DIR, {
-      min: 2,
+      id: "tests/unit/runner/verify-select-driver-parity.test.ts#APP-DRIVER-DIR",
       topLevelOnly: true,
       collectable: (f) => f.endsWith(".ts") && !f.endsWith(".test.ts"),
     })

@@ -58,11 +58,18 @@ const WRAPPED_SCAN_FLOOR =
   /expect\(\s*\n[\s\S]{0,200}?(?:count\w*\(|\.(?:length|size)\b|\bfiles?\b|\bentries\b|\bscanned\b|\bdeclared\b)[\s\S]{0,200}?\n\s*\)\s*\.toBeGreaterThan(?:OrEqual)?\(\s*([1-9]\d*)\s*,?\s*\)/
 
 /**
- * The canonical floor helper. Strictly stronger than a numeric floor: it asserts
- * a minimum AND that every subtree holding a collectable file on disk
- * contributed at least one, probed independently of the walk under test — so a
- * partial walk, a wrong subtree, or a matcher that stopped matching all red. It
- * is not a `>0`-grade escape hatch, which is why it counts.
+ * The canonical floor helper. Stronger than a numeric floor: reach is the
+ * intersection of the scan with `git ls-files` (an untracked or gitignored twin
+ * is not evidence the corpus was read), coverage is recursive over the tracked
+ * set, and the number itself comes from `tools/dev/scan-reach-baseline.json`
+ * rather than from whatever the author typed. It is not a `>0`-grade escape
+ * hatch, which is why it counts here.
+ *
+ * WHAT IT DOES NOT PROVE, corrected after an audit found this comment claiming
+ * otherwise. A bare call floors the WALKED set only. "A matcher that stopped
+ * matching" is caught by the SECOND number (`matched`, floored from the same
+ * baseline), and at the time of writing NO guard passes one — so crediting a
+ * bare call as predicate coverage was false. Reach coverage is what it grants.
  */
 const HELPER_FLOOR = /\bassertScanPopulation\s*\(/
 

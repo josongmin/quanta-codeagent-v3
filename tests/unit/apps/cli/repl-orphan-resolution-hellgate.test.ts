@@ -89,7 +89,11 @@ describe("repl orphan resolution — deleted modules", () => {
     assertScanPopulation(
       entries.map((n) => join(REPL_DIR, n)),
       REPL_DIR,
-      { min: 5, topLevelOnly: true, collectable: (n) => n.endsWith(".ts") },
+      {
+        id: "tests/unit/apps/cli/repl-orphan-resolution-hellgate.test.ts#src-apps-cli-repl",
+        topLevelOnly: true,
+        collectable: (n) => n.endsWith(".ts"),
+      },
     )
     expect(entries).toContain("mcp-surface-wire.ts")
   })

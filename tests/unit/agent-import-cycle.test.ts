@@ -383,7 +383,11 @@ describe("agent module import cycles", () => {
     assertScanPopulation(
       listAgentFiles().map((n) => join(AGENT_DIR, n)),
       AGENT_DIR,
-      { min: 5, topLevelOnly: true, collectable: (n) => n.endsWith(".ts") },
+      {
+        id: "tests/unit/agent-import-cycle.test.ts#src-agent-toplevel",
+        topLevelOnly: true,
+        collectable: (n) => n.endsWith(".ts"),
+      },
     )
   })
 

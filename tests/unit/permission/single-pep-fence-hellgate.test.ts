@@ -69,7 +69,9 @@ describe("single-PEP fence — tool.execute() only from allowlisted sites [P2-T3
     // entirely left a count-only floor green while the very directory holding
     // `dispatch.ts` went unscanned. `assertScanPopulation` asserts both, and
     // probes the disk independently of the walk under test.
-    assertScanPopulation(walk(SRC), SRC, { min: 500 })
+    assertScanPopulation(walk(SRC), SRC, {
+      id: "tests/unit/permission/single-pep-fence-hellgate.test.ts#SRC",
+    })
   })
 
   test("no un-allowlisted site consumes a tool's execute() generator (gate bypass guard)", () => {

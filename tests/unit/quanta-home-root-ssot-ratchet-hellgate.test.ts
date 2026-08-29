@@ -84,7 +84,7 @@ describe("quanta home root SSOT ratchet", () => {
     // un-owned home-root reads. A count alone would not do — losing one subtree
     // leaves it high while the offending directory goes unscanned.
     assertScanPopulation([...walk(SRC)], SRC, {
-      min: 500,
+      id: "tests/unit/quanta-home-root-ssot-ratchet-hellgate.test.ts#SRC",
       collectable: (n) => n.endsWith(".ts") && !n.endsWith(".d.ts") && !n.endsWith(".test.ts"),
     })
   })

@@ -49,10 +49,12 @@ describe("apps bench driver shared verify-select adapters", () => {
     // against the barrel alone while the wiring it pins sits unread in the lane
     // modules. Same for a `not.toContain`, which an empty read satisfies for free.
     assertScanPopulation(appLaneFiles(), APP_DRIVER_DIR, {
+      id: "tests/unit/apps/bench/shared-verify-select-adapters.test.ts#APP-DRIVER-DIR",
       topLevelOnly: true,
       collectable: (n) => n.endsWith(".ts") && !n.endsWith(".test.ts"),
     })
     assertScanPopulation(sharedLaneFiles(), DRIVER_DIR, {
+      id: "tests/unit/apps/bench/shared-verify-select-adapters.test.ts#DRIVER-DIR",
       topLevelOnly: true,
       collectable: (n) => n.endsWith(".ts"),
     })

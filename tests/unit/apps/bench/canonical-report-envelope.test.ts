@@ -111,7 +111,10 @@ const sourceFiles = (roots: readonly string[]): string[] => {
     assertScanPopulation(
       out.filter((rel) => rel.startsWith(`${root}/`)).map((rel) => join(REPO_ROOT, rel)),
       abs,
-      { min: 5, collectable: (n) => n.endsWith(".ts") && !n.endsWith(".test.ts") },
+      {
+        id: `tests/unit/apps/bench/canonical-report-envelope.test.ts#${root}`,
+        collectable: (n) => n.endsWith(".ts") && !n.endsWith(".test.ts"),
+      },
     )
   }
   return out.sort()

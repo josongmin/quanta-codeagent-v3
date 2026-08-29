@@ -237,7 +237,7 @@ describe("cross-session inject removed ratchet (ADR-0556)", () => {
     // The ratchet asserts a token was REMOVED. A walk that lost a subtree finds
     // no occurrences there and reports exactly the removal it wants to see.
     assertScanPopulation(walkTs(SRC_ROOT), SRC_ROOT, {
-      min: 500,
+      id: "tests/unit/memory/cross-session-inject-removed-ratchet.test.ts#SRC-ROOT",
       skipDirs: ["__snapshots__"],
       collectable: (n) => n.endsWith(".ts") || n.endsWith(".tsx"),
     })

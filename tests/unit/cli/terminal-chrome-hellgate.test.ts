@@ -144,7 +144,10 @@ describe("SCO cursor save/restore grep-gate (src/apps/cli)", () => {
     assertScanPopulation(
       entries.filter((r) => String(r).endsWith(".ts")).map((r) => join(root, String(r))),
       root,
-      { min: 50, collectable: (n) => n.endsWith(".ts") },
+      {
+        id: "tests/unit/cli/terminal-chrome-hellgate.test.ts#src-apps-cli",
+        collectable: (n) => n.endsWith(".ts"),
+      },
     )
     for (const rel of entries) {
       const relStr = String(rel)

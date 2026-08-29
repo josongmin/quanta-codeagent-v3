@@ -49,7 +49,7 @@ describe("RFC-06 F4 — discovery-owner ratchet", () => {
   test("ANTI-VACUITY: the web-daemon walk reaches a real, populated tree", () => {
     // `expect(offenders).toEqual([])` is satisfied by a walk that read nothing.
     assertScanPopulation(listTsFiles(WEB_DAEMON_DIR), WEB_DAEMON_DIR, {
-      min: 10,
+      id: "tests/unit/skill/runtime/f4-discovery-owner-ratchet.test.ts#WEB-DAEMON-DIR",
       collectable: (n) => n.endsWith(".ts"),
     })
   })

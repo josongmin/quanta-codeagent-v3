@@ -56,6 +56,7 @@ describe("T5 batch SDK parity", () => {
     // means "read nothing" — and every `not.toContain` below is satisfied for
     // free by an empty read.
     assertScanPopulation(laneFiles, APP_DRIVER_DIR, {
+      id: "tests/unit/apps/bench/batch-sdk-parity.test.ts#APP-DRIVER-DIR",
       topLevelOnly: true,
       collectable: (n) => n.endsWith(".ts") && !n.endsWith(".test.ts"),
     })

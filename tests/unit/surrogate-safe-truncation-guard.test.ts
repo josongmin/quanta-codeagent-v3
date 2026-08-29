@@ -447,7 +447,7 @@ describe("PART 2 — static ratchet: no NEW naive cap-slice on a string", () => 
   test("ANTI-VACUITY: the walk reaches a real, populated `src/` tree", () => {
     // A cap-slice ratchet over an empty file list finds no naive slice anywhere.
     assertScanPopulation(listTsFiles(SRC_DIR), SRC_DIR, {
-      min: 500,
+      id: "tests/unit/surrogate-safe-truncation-guard.test.ts#SRC-DIR",
       collectable: (n) =>
         n.endsWith(".ts") &&
         !n.endsWith(".d.ts") &&

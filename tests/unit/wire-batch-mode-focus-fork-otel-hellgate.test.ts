@@ -133,7 +133,7 @@ describe("Wire 3 ADR-0219 — focus-chain reinject already wired in loop.ts", ()
       .filter((f) => f.endsWith(".ts"))
       .map((f) => join(loopDir, f))
     assertScanPopulation(sliceFiles, loopDir, {
-      min: 5,
+      id: "tests/unit/wire-batch-mode-focus-fork-otel-hellgate.test.ts#loopDir",
       topLevelOnly: true,
       collectable: (f) => f.endsWith(".ts"),
     })

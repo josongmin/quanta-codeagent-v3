@@ -1,7 +1,7 @@
 import { expect } from "bun:test"
 import { appendFileSync, existsSync } from "node:fs"
 import { join, relative, resolve } from "node:path"
-import { type ScanReach, readScanReachBaseline } from "../../../tools/dev/scan-reach-baseline"
+import { readScanReachBaseline, type ScanReach } from "../../../tools/dev/scan-reach-baseline"
 
 /**
  * A guard that examined NOTHING reports the same value as a clean repo: no
@@ -86,6 +86,13 @@ export interface ScanPopulationOptions {
    * full, and a floor on the walk alone clears it.
    */
   readonly matched?: readonly string[]
+  /**
+   * TEST SEAM — point the floor at a different baseline file. Only the helper's
+   * own hellgate uses it, so its fixtures do not have to be pinned in the real
+   * baseline. A guard that set this would be reading floors nobody reviews, and
+   * that is visible in a diff.
+   */
+  readonly baselinePath?: string
 }
 
 /**
@@ -99,8 +106,8 @@ const record = (opts: ScanPopulationOptions, walked: number): void => {
   appendFileSync(sink, `${JSON.stringify(line)}\n`)
 }
 
-const floorFor = (id: string): ScanReach => {
-  const pinned = readScanReachBaseline().scans[id]
+const floorFor = (id: string, path?: string): ScanReach => {
+  const pinned = readScanReachBaseline(path).scans[id]
   if (pinned === undefined) {
     throw new Error(
       `assertScanPopulation: no reach floor pinned for "${id}". Add it to ` +
@@ -138,7 +145,7 @@ const missingSubtrees = (
 export const assertScanPopulation = (
   files: readonly string[],
   root: string,
-  opts: ScanPopulationOptions = {},
+  opts: ScanPopulationOptions,
 ): void => {
   const collectable =
     opts.collectable ?? ((n: string) => n.endsWith(".ts") && !n.endsWith(".test.ts"))
@@ -148,7 +155,7 @@ export const assertScanPopulation = (
 
   const reachedFiles = files.map((f) => resolve(f)).filter((f) => tracked.has(f))
   record(opts, reachedFiles.length)
-  const pinned = floorFor(opts.id)
+  const pinned = floorFor(opts.id, opts.baselinePath)
   expect(
     reachedFiles.length,
     `the scan of ${abs} reached ${reachedFiles.length} TRACKED files ` +

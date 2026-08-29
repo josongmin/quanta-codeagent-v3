@@ -40,7 +40,10 @@ describe("role-drift ratchet — seniority ROLE word is single-sourced in shared
         .filter((rel) => !isTest(rel))
         .map((rel) => join(SRC_DIR, rel)),
       SRC_DIR,
-      { min: 500, collectable: (n) => /\.(ts|tsx)$/.test(n) && !/\.(test|spec)\./.test(n) },
+      {
+        id: "src/agent/prompt-graph/role-drift.ratchet.test.ts#src",
+        collectable: (n) => /\.(ts|tsx)$/.test(n) && !/\.(test|spec)\./.test(n),
+      },
     )
   })
 

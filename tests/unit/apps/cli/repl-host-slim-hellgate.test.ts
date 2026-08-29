@@ -74,7 +74,7 @@ describe("CLI-06 — repl.ts host slim-down (ADR-0307)", () => {
     // `countExportingModules` returns 0 over an empty factory list, and 0 reads
     // as "exactly one owner" for every helper below.
     assertScanPopulation(factoryFiles(), FACTORIES_DIR, {
-      min: 3,
+      id: "tests/unit/apps/cli/repl-host-slim-hellgate.test.ts#FACTORIES-DIR",
       topLevelOnly: true,
       collectable: (n) => n.endsWith(".ts") && n !== "index.ts",
     })

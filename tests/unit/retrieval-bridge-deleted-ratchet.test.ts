@@ -95,7 +95,7 @@ describe("retrieval bridge deleted ratchet (ADR-0553)", () => {
     // The ratchet asserts a bridge is GONE. A walk that lost a subtree finds no
     // survivor there and reports exactly the deletion it wants to see.
     assertScanPopulation(walkTs(SRC_ROOT), SRC_ROOT, {
-      min: 500,
+      id: "tests/unit/retrieval-bridge-deleted-ratchet.test.ts#SRC-ROOT",
       skipDirs: ["__snapshots__"],
       collectable: (n) => n.endsWith(".ts") || n.endsWith(".tsx"),
     })

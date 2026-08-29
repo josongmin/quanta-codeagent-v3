@@ -127,7 +127,7 @@ describe("cli-knob read-site domain ratchet (ADR-0527)", () => {
     // "every CLI read-site is declared" for free.
     const cliRoot = join(import.meta.dir, "..", "..", "..", "src/apps/cli")
     assertScanPopulation([...walk(cliRoot)], cliRoot, {
-      min: 50,
+      id: "tests/unit/cli/cli-knob-readsite-domain-hellgate.test.ts#cliRoot",
       collectable: (n) => n.endsWith(".ts"),
     })
   })

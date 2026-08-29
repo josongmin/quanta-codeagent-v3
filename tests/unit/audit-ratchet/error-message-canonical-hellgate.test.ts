@@ -246,7 +246,7 @@ describe("error-message canonical ratchet (R2 audit-H)", () => {
     // Every scan below reports matches. Zero matches over a tree that was never
     // read is indistinguishable from zero matches over a canonical one.
     assertScanPopulation(walkTsFiles(SRC_DIR), SRC_DIR, {
-      min: 500,
+      id: "tests/unit/audit-ratchet/error-message-canonical-hellgate.test.ts#SRC-DIR",
       collectable: (n) => n.endsWith(".ts"),
     })
   })

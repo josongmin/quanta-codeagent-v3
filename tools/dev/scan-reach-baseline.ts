@@ -51,6 +51,39 @@ export interface ReachVerdict {
   readonly unpinned: readonly string[]
   /** The scan grew; a `--tighten` can lock it in. */
   readonly drops: readonly string[]
+  /**
+   * A row nobody reported. Either the guard was deleted and the row is dead
+   * weight, or — the case that matters — the guard stopped running and its
+   * floor now defends nothing while still reading as coverage.
+   */
+  readonly stale: readonly string[]
+}
+
+/** One scan's `walked` number against its pin. */
+const walkedVerdict = (id: string, seen: ScanReach, pinned: ScanReach): [string, string] | null => {
+  if (seen.walked < pinned.walked)
+    return ["reg", `${id}: walked ${seen.walked} < floor ${pinned.walked}`]
+  if (seen.walked > pinned.walked)
+    return ["drop", `${id}: walked ${seen.walked} > floor ${pinned.walked}`]
+  return null
+}
+
+/** One scan's `matched` number against its pin. Absent on both sides is fine;
+ *  present on exactly one is a contradiction the guard has to resolve. */
+const matchedVerdict = (
+  id: string,
+  seen: ScanReach,
+  pinned: ScanReach,
+): [string, string] | null => {
+  if (pinned.matched === undefined) return null
+  if (seen.matched === undefined) {
+    return ["reg", `${id}: a matched floor is pinned but the guard reported none`]
+  }
+  if (seen.matched < pinned.matched)
+    return ["reg", `${id}: matched ${seen.matched} < floor ${pinned.matched}`]
+  if (seen.matched > pinned.matched)
+    return ["drop", `${id}: matched ${seen.matched} > floor ${pinned.matched}`]
+  return null
 }
 
 /** Observations are `id → measured reach`, produced by running the guards. */
@@ -58,32 +91,22 @@ export const verdictFor = (
   observed: ReadonlyMap<string, ScanReach>,
   baseline: ScanReachBaseline,
 ): ReachVerdict => {
-  const regressions: string[] = []
+  const bucket: Record<string, string[]> = { reg: [], drop: [] }
   const unpinned: string[] = []
-  const drops: string[] = []
   for (const [id, seen] of observed) {
     const pinned = baseline.scans[id]
     if (pinned === undefined) {
       unpinned.push(`${id}: reach ${seen.walked} observed with no pinned floor`)
       continue
     }
-    if (seen.walked < pinned.walked) {
-      regressions.push(`${id}: walked ${seen.walked} < floor ${pinned.walked}`)
-    } else if (seen.walked > pinned.walked) {
-      drops.push(`${id}: walked ${seen.walked} > floor ${pinned.walked}`)
-    }
-    if (pinned.matched !== undefined) {
-      const m = seen.matched
-      if (m === undefined) {
-        regressions.push(`${id}: a matched floor is pinned but the guard reported none`)
-      } else if (m < pinned.matched) {
-        regressions.push(`${id}: matched ${m} < floor ${pinned.matched}`)
-      } else if (m > pinned.matched) {
-        drops.push(`${id}: matched ${m} > floor ${pinned.matched}`)
-      }
+    for (const v of [walkedVerdict(id, seen, pinned), matchedVerdict(id, seen, pinned)]) {
+      if (v !== null) bucket[v[0]]?.push(v[1])
     }
   }
-  return { regressions, unpinned, drops }
+  const stale = Object.keys(baseline.scans)
+    .filter((id) => !observed.has(id))
+    .map((id) => `${id}: pinned but no guard reported it`)
+  return { regressions: bucket.reg ?? [], unpinned, drops: bucket.drop ?? [], stale }
 }
 
 /** Rewrite the baseline at the measured reach. Refuses while anything is BELOW
@@ -99,10 +122,94 @@ export const tighten = (
       `scan-reach: refusing to --tighten while a scan is BELOW its floor (floors only go UP):\n  ${regressions.join("\n  ")}`,
     )
   }
+  // Rewrites only rows that ALREADY exist, the shape `lint-debt --tighten` uses:
+  // a tightener that can add pins is a tightener that can bless a brand-new scan
+  // nobody reviewed, which is the hole the closed universe exists to close.
   const scans: Record<string, ScanReach> = { ...baseline.scans }
   for (const [id, seen] of observed) {
-    scans[id] = seen.matched === undefined ? { walked: seen.walked } : { walked: seen.walked, matched: seen.matched }
+    if (scans[id] === undefined) continue
+    scans[id] =
+      seen.matched === undefined
+        ? { walked: seen.walked }
+        : { walked: seen.walked, matched: seen.matched }
   }
   const sorted = Object.fromEntries(Object.entries(scans).sort(([a], [b]) => a.localeCompare(b)))
   writeFileSync(path, `${JSON.stringify({ note: baseline.note, scans: sorted }, null, 2)}\n`)
+}
+
+// ── CLI ──────────────────────────────────────────────────────────────────────
+//
+// `bun run scan-reach [--tighten]` runs the guards with recording on, harvests
+// what each scan actually reached, and reports the verdict. Recording is opt-in
+// via `QUANTA_SCAN_REACH_RECORD` so a normal test run neither writes nor depends
+// on it.
+
+/** A scan seen more than once takes its SMALLEST reach: the floor has to hold on
+ *  the run that saw least, not on the luckiest one. */
+const mergeReach = (
+  prev: ScanReach | undefined,
+  seen: { readonly walked: number; readonly matched?: number },
+): ScanReach => {
+  const walked = prev === undefined ? seen.walked : Math.min(prev.walked, seen.walked)
+  const both = [prev?.matched, seen.matched].filter((m): m is number => m !== undefined)
+  return both.length === 0 ? { walked } : { walked, matched: Math.min(...both) }
+}
+
+const harvest = (sink: string): Map<string, ScanReach> => {
+  const observed = new Map<string, ScanReach>()
+  for (const line of readFileSync(sink, "utf8").split("\n")) {
+    if (line === "") continue
+    const r = JSON.parse(line) as { id: string; walked: number; matched?: number }
+    const prev = observed.get(r.id)
+    observed.set(r.id, mergeReach(prev, r))
+  }
+  return observed
+}
+
+if (import.meta.main) {
+  const sink = `${process.env.TMPDIR ?? "/tmp"}/quanta-scan-reach-${process.pid}.jsonl`
+  writeFileSync(sink, "")
+  const consumers = Bun.spawnSync(
+    ["git", "grep", "-l", "assertScanPopulation", "--", "tests", "src"],
+    { stdout: "pipe" },
+  )
+  const files = new TextDecoder()
+    .decode(consumers.stdout)
+    .split("\n")
+    .filter(
+      (f) => f !== "" && !f.includes("_shared/scan-population") && !f.includes("floor-hellgate"),
+    )
+  const run = Bun.spawnSync(["bun", "test", ...files], {
+    env: { ...process.env, QUANTA_SCAN_REACH_RECORD: sink },
+    stdout: "pipe",
+    stderr: "pipe",
+  })
+  const observed = harvest(sink)
+  if (observed.size === 0) {
+    // biome-ignore lint/suspicious/noConsole: the CLI reports to the operator
+    console.error(
+      "scan-reach: the guards recorded NO reach at all — the run is the measurement, " +
+        "so a silent zero here would pin every floor at nothing.",
+    )
+    process.exit(1)
+  }
+  const baseline = readScanReachBaseline()
+  const { regressions, unpinned, drops, stale } = verdictFor(observed, baseline)
+  const say = (line: string): void => {
+    // biome-ignore lint/suspicious/noConsole: the CLI reports to the operator
+    console.error(line)
+  }
+  if (process.argv.includes("--tighten")) {
+    tighten(observed, baseline)
+    say(`scan-reach: tightened ${observed.size} scans (${drops.length} had grown)`)
+    process.exit(0)
+  }
+  if (regressions.length > 0 || unpinned.length > 0 || stale.length > 0) {
+    say("scan-reach: the committed reach and the measured reach disagree.")
+    say("A shrunken scan is fixed at the scan, never by lowering the number.")
+    for (const r of [...regressions, ...unpinned, ...stale]) say(`  ${r}`)
+    process.exit(1)
+  }
+  for (const d of drops) say(`scan-reach: ${d} — \`bun run scan-reach --tighten\` locks it in`)
+  say(`scan-reach: ${observed.size} scans at or above their floors (test run exit ${run.exitCode})`)
 }

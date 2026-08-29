@@ -164,6 +164,12 @@ export const GATES: readonly Gate[] = [
     why: "a guard that passes only because it resolved a repo path from the ambient cwd",
   },
   {
+    id: "scan-reach",
+    stage: "prepush",
+    run: "bun run scan-reach",
+    why: "a scanning guard whose corpus shrank under it — the floors are measured numbers in tools/dev/scan-reach-baseline.json, so a scan that quietly stopped reaching fails instead of reporting clean",
+  },
+  {
     id: "non-vacuity-oracle",
     stage: "prepush",
     run: "bun run test:non-vacuity",

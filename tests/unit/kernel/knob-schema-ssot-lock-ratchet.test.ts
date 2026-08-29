@@ -71,7 +71,7 @@ describe("knob=schema SSOT lock (drift-back prevention)", () => {
       knobFiles().map((f) => join(KNOBS_DIR, f)),
       KNOBS_DIR,
       {
-        min: 5,
+        id: "tests/unit/kernel/knob-schema-ssot-lock-ratchet.test.ts#src-runner-knobs-knobs",
         topLevelOnly: true,
         collectable: (f) => f.endsWith(".ts") && !f.endsWith(".test.ts") && f !== "index.ts",
       },

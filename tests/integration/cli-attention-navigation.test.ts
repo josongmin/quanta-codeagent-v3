@@ -512,7 +512,7 @@ describe("RFC-01 A5 — TaskRegistry constructor completeness (source scan)", ()
     // KNOWN site was consolidated away" — the success it is watching for. So
     // what the glob actually reached is asserted before `hits` means anything.
     assertScanPopulation(scanned, root, {
-      min: 500,
+      id: "tests/integration/cli-attention-navigation.test.ts#root",
       collectable: (n) => n.endsWith(".ts") && !n.endsWith(".test.ts"),
     })
 

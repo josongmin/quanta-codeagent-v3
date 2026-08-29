@@ -151,7 +151,7 @@ describe("R3 audit-H — pinned labels survive on every audited catch site", () 
     const dir = resolve(REPO_ROOT, "src/agent/loop")
     const slice = loopSurfaceFiles().filter((f) => f.startsWith(`${dir}/`))
     assertScanPopulation(slice, dir, {
-      min: 5,
+      id: "tests/unit/silent-catch-24h-ratchet.test.ts#dir",
       topLevelOnly: true,
       collectable: (n) => n.endsWith(".ts"),
     })

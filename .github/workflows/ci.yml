@@ -88,6 +88,17 @@ jobs:
         # pass. ~36s.
         run: bun run test:non-vacuity
 
+      - name: scanning guards still reach their committed corpus
+        # Every scanning guard's reach is a MEASURED number committed in
+        # tools/dev/scan-reach-baseline.json, and a scan that reached less than
+        # its floor fails here. Reach is the intersection of the scan with
+        # `git ls-files`, because a walk accepts untracked files as proof it read
+        # the corpus — measured: the walk-backed form of this floor passed with
+        # every real source file deleted and a gitignored twin left standing.
+        # An unpinned scan fails too: the closed universe is what stops a new
+        # guard shipping with no reach at all.
+        run: bun run scan-reach
+
       - name: preload runtime closure (no production slices in every test)
         # The bunfig preload loaded 1,259 files of src/ — 284 under src/tool —
         # before every test file, which made a mirror with src/tool emptied

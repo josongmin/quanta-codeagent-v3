@@ -1,4 +1,128 @@
 {
-  "note": "Committed REACH floors for scanning guards. Floors only go UP. `reach < floor` is a REGRESSION (the scan shrank, so every verdict under it is worthless); an unpinned scan FAILS rather than defaulting. Lock in growth with `bun run scan-reach --tighten` — never hand-lower a number without saying why in the diff. `walked` proves the anchor, `matched` proves the predicate.",
-  "scans": {}
+  "note": "Committed REACH floors for the repo's scanning guards, one row per scan. Floors only go UP. `reach < floor` is a REGRESSION: the scan shrank, so every verdict derived from it is worthless until that is explained. A scan with no row FAILS rather than defaulting \u2014 a closed universe is the only thing that stops a new guard shipping with no reach at all. Lock in growth with `bun run scan-reach --tighten`, which refuses while any scan is below its floor and rewrites only rows that already exist. `walked` proves the anchor (the scan reached a real corpus); `matched` proves the predicate (the guard's own matcher still selects something) \u2014 a matcher that rotted selects nothing while the walk stays full.",
+  "scans": {
+    "src/agent/converge/purity.test.ts#src-agent-converge": {
+      "walked": 10
+    },
+    "src/agent/prompt-graph/role-drift.ratchet.test.ts#src": {
+      "walked": 3343
+    },
+    "tests/adversarial/aug02-feeder-deferred-status.test.ts#SRC": {
+      "walked": 3343
+    },
+    "tests/integration/cli-attention-navigation.test.ts#root": {
+      "walked": 3343
+    },
+    "tests/unit/activity/activity-store-constructor-owner-ratchet.test.ts#SRC-DIR": {
+      "walked": 3338
+    },
+    "tests/unit/agent-import-cycle.test.ts#src-agent-toplevel": {
+      "walked": 157
+    },
+    "tests/unit/apps/bench/batch-sdk-parity.test.ts#APP-DRIVER-DIR": {
+      "walked": 5
+    },
+    "tests/unit/apps/bench/canonical-report-envelope.test.ts#src": {
+      "walked": 3343
+    },
+    "tests/unit/apps/bench/canonical-report-envelope.test.ts#tools": {
+      "walked": 95
+    },
+    "tests/unit/apps/bench/shared-verify-select-adapters.test.ts#APP-DRIVER-DIR": {
+      "walked": 5
+    },
+    "tests/unit/apps/bench/shared-verify-select-adapters.test.ts#DRIVER-DIR": {
+      "walked": 16
+    },
+    "tests/unit/apps/cli/repl-host-slim-hellgate.test.ts#FACTORIES-DIR": {
+      "walked": 12
+    },
+    "tests/unit/apps/cli/repl-orphan-resolution-hellgate.test.ts#src-apps-cli-repl": {
+      "walked": 53
+    },
+    "tests/unit/apps/cli/session-cmd-shim-removal-hellgate.test.ts#srcRoot": {
+      "walked": 3642
+    },
+    "tests/unit/audit-ratchet/error-message-canonical-hellgate.test.ts#SRC-DIR": {
+      "walked": 3642
+    },
+    "tests/unit/cli/cli-knob-readsite-domain-hellgate.test.ts#cliRoot": {
+      "walked": 352
+    },
+    "tests/unit/cli/terminal-chrome-hellgate.test.ts#src-apps-cli": {
+      "walked": 352
+    },
+    "tests/unit/deny-reason-authority-ratchet-hellgate.test.ts#SRC-AGENT": {
+      "walked": 726
+    },
+    "tests/unit/identity-mid-session-rebuilder-owner-wire-hellgate.test.ts#dir": {
+      "walked": 6
+    },
+    "tests/unit/kernel/knob-schema-ssot-lock-ratchet.test.ts#src-runner-knobs-knobs": {
+      "walked": 67
+    },
+    "tests/unit/memory-fence-no-llm-import-hellgate.test.ts#MEMORY-ROOT": {
+      "walked": 49
+    },
+    "tests/unit/memory-fence-stays-clean-hellgate.test.ts#MEMORY-ROOT": {
+      "walked": 49
+    },
+    "tests/unit/memory/cross-session-inject-removed-ratchet.test.ts#SRC-ROOT": {
+      "walked": 3642
+    },
+    "tests/unit/objective/constructor-owner-ratchet.test.ts#SRC-DIR": {
+      "walked": 3338
+    },
+    "tests/unit/permission/single-pep-fence-hellgate.test.ts#SRC": {
+      "walked": 3343
+    },
+    "tests/unit/quanta-home-root-ssot-ratchet-hellgate.test.ts#SRC": {
+      "walked": 3338
+    },
+    "tests/unit/retrieval-bridge-deleted-ratchet.test.ts#SRC-ROOT": {
+      "walked": 3642
+    },
+    "tests/unit/retrieval/budget-probe-hellgate.test.ts#/Users/songmin/quanta-codeagent-v3/src/agent": {
+      "walked": 834
+    },
+    "tests/unit/retrieval/budget-probe-hellgate.test.ts#/Users/songmin/quanta-codeagent-v3/src/apps": {
+      "walked": 754
+    },
+    "tests/unit/retrieval/budget-probe-hellgate.test.ts#/Users/songmin/quanta-codeagent-v3/src/runner": {
+      "walked": 341
+    },
+    "tests/unit/runner/closure-repair-driver-parity.test.ts#DRIVER-DIR": {
+      "walked": 14
+    },
+    "tests/unit/runner/session-authorities-task-registry-identity.test.ts#SRC-DIR": {
+      "walked": 3338
+    },
+    "tests/unit/runner/verify-select-driver-parity.test.ts#APP-DRIVER-DIR": {
+      "walked": 5
+    },
+    "tests/unit/runner/verify-select-driver-parity.test.ts#DRIVER-DIR": {
+      "walked": 16
+    },
+    "tests/unit/session-turn-driver-thin-surface-hellgate.test.ts#session-loop-slice": {
+      "walked": 14
+    },
+    "tests/unit/silent-catch-24h-ratchet.test.ts#dir": {
+      "walked": 27
+    },
+    "tests/unit/skill/runtime/f4-discovery-owner-ratchet.test.ts#WEB-DAEMON-DIR": {
+      "walked": 52
+    },
+    "tests/unit/surrogate-safe-truncation-guard.test.ts#SRC-DIR": {
+      "walked": 3637
+    },
+    "tests/unit/terminal-defaults-ratchet.test.ts#SRC-DIR": {
+      "walked": 3642
+    },
+    "tests/unit/tool-no-throw-contract-guard.test.ts#TOOL-DIR": {
+      "walked": 305
+    },
+    "tests/unit/wire-batch-mode-focus-fork-otel-hellgate.test.ts#loopDir": {
+      "walked": 27
+    }
+  }
 }

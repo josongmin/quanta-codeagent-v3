@@ -34,7 +34,7 @@ describe("runner closure-repair driver parity", () => {
     // that went unread simply is not in the text — and the parity it carries
     // reads as unwired, or, for a `not.toContain`, as clean.
     assertScanPopulation(laneFiles(), DRIVER_DIR, {
-      min: 2,
+      id: "tests/unit/runner/closure-repair-driver-parity.test.ts#DRIVER-DIR",
       topLevelOnly: true,
       collectable: (f) => f.endsWith(".ts") && !f.endsWith(".test.ts"),
     })

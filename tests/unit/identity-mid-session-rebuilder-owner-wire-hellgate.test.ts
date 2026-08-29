@@ -35,7 +35,7 @@ const hasCanonicalRebuilderWire = (source: string): boolean =>
 test("ANTI-VACUITY: the bootstrap-session slice was actually enumerated", () => {
   const dir = resolve(BOOTSTRAP_DIR, "bootstrap-session")
   assertScanPopulation(bootstrapSliceFiles(), dir, {
-    min: 2,
+    id: "tests/unit/identity-mid-session-rebuilder-owner-wire-hellgate.test.ts#dir",
     topLevelOnly: true,
     collectable: (f) => f.endsWith(".ts"),
   })
