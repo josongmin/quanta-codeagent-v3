@@ -261,17 +261,7 @@ const buildChildInheritedConfig = (
   const childEffort = resolveChildEffort(req)
   return {
     ...({ depth: childDepthOf(parent) } as { depth: number }),
-    // MR-03 — the session's accountant is SHARED, not copied: a subagent's
-    // spend has to land in the same counters as its parent's, or the parent's
-    // totals stay correct-looking and short by the whole child.
-    ...(parent.usageAccounting !== undefined ? { usageAccounting: parent.usageAccounting } : {}),
-    // MR-05 — the run's cost ceiling and the cross-run ledger are SHARED too.
-    // Left un-inherited, a run could exceed its `maxCostUsd` simply by doing
-    // the spending inside a subagent, and the ledger's daily cap had the same
-    // hole. Turn-scoped meter semantics stay with the root (see
-    // `turn-iteration`), so sharing the meter shares spend, not turn boundaries.
-    ...(parent.budgetMeter !== undefined ? { budgetMeter: parent.budgetMeter } : {}),
-    ...(parent.budgetLedger !== undefined ? { budgetLedger: parent.budgetLedger } : {}),
+    ...inheritedCostAccounting(parent),
     mailboxAgentId: mailboxIds.agentId,
     mailboxParentId: mailboxIds.parentId,
     ...(req.taskId !== undefined ? { subagentTaskId: req.taskId } : {}),
@@ -313,6 +303,31 @@ export interface ChildControlWiring {
   readonly childSteerDrain?: NonNullable<AgentConfig["childSteerDrain"]>
   readonly steerFinalization?: NonNullable<AgentConfig["steerFinalization"]>
 }
+
+/**
+ * The cost slots a subagent SHARES with its parent rather than getting its own
+ * copy of. All three are session- or run-scoped, and leaving any of them
+ * un-inherited puts the child's spend somewhere the parent's numbers cannot
+ * see it:
+ *
+ *   - `usageAccounting` — the session's source of truth for every cost
+ *     surface. Un-shared, the parent's totals stay correct-looking and short by
+ *     the whole child.
+ *   - `budgetMeter` — the RUN's cost ceiling. Un-shared, a run walks past
+ *     `maxCostUsd` simply by doing the spending inside a subagent. Only SPEND
+ *     is shared: turn boundaries stay with the root (see `turn-iteration`), or
+ *     a child turn would reset the parent's per-turn guard mid-turn.
+ *   - `budgetLedger` — the cross-run daily cap, which had the same hole.
+ *
+ * Each is spread conditionally because the slots are optional under
+ * `exactOptionalPropertyTypes`: an absent parent slot must stay ABSENT on the
+ * child, not become an explicit `undefined`.
+ */
+const inheritedCostAccounting = (parent: AgentConfig): Partial<AgentConfig> => ({
+  ...(parent.usageAccounting !== undefined ? { usageAccounting: parent.usageAccounting } : {}),
+  ...(parent.budgetMeter !== undefined ? { budgetMeter: parent.budgetMeter } : {}),
+  ...(parent.budgetLedger !== undefined ? { budgetLedger: parent.budgetLedger } : {}),
+})
 
 /** Assemble the child-only config; intentionally omits parent durable state. */
 export const buildChildConfig = (
