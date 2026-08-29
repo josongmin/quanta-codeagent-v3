@@ -34,6 +34,18 @@ export interface GoalControl {
   resume(): GoalControlOutcome
   clear(): GoalControlOutcome
   addCriterion(text: string): GoalControlOutcome
+  /** GOAL P0-2 — the operator's manual attestation. A MANUAL criterion has no
+   *  other satisfier: the model's `met:true` is refused as
+   *  `manual-attestation-required` and a checked criterion needs a verifier
+   *  receipt, so without this a manual-only stopping contract can never be
+   *  met and the goal pursues until its budget or hard cap runs out. */
+  attestCriterion(selector: string): GoalControlOutcome
+  /** GOAL P0-3 — release a DURABLE started attempt that never settled (a crash,
+   *  or a settlement whose persistence failed). While one is held the authority
+   *  refuses `replace`/`clear` with `attempt-in-flight`, so without this verb a
+   *  stuck goal can never be edited or deleted. The reserved turn is NOT
+   *  refunded: the turn really ran; this only frees the lock. */
+  abandonAttempt(): GoalControlOutcome & { readonly hadAttempt: boolean }
   addCheck(text: string, argv: readonly string[]): GoalControlOutcome
   setBudget(budget: {
     maxTokens?: number | undefined
@@ -116,6 +128,37 @@ export const buildGoalControl = (
     resume: () => setStatus("active"),
     clear: () => commit({ kind: "clear" }),
     addCriterion: (text) => replaceWith([...criterionDeclarations(read()), { text }]),
+    abandonAttempt: () => {
+      const domain = read()
+      if (domain.state === null) {
+        return { kind: "rejected", reason: "objective-missing", domain, hadAttempt: false }
+      }
+      const hadAttempt = domain.state.objective.attempts.started !== undefined
+      // Nothing in flight ⇒ do not issue a mutation at all: the authority
+      // reports an unapplied commit and the surface would render that as a
+      // failure for what is simply "there was nothing to free".
+      if (!hadAttempt) return { kind: "ok", domain, hadAttempt: false }
+      const outcome = commit({ kind: "abandonAttempt" })
+      return { ...outcome, hadAttempt }
+    },
+    attestCriterion: (selector) => {
+      const criteria = read().state?.objective.successCriteria ?? []
+      const index = Number.parseInt(selector, 10)
+      const target =
+        criteria.find((criterion) => criterion.id === selector) ??
+        (Number.isInteger(index) && index >= 1 && index <= criteria.length
+          ? criteria[index - 1]
+          : undefined)
+      if (target === undefined) {
+        return { kind: "rejected", reason: "unknown-criterion", domain: read() }
+      }
+      // A checked criterion is verifier-owned; the authority refuses the
+      // attestation anyway, but refusing here names the reason precisely.
+      if (target.kind === "checked") {
+        return { kind: "rejected", reason: "checked-criterion-needs-verify", domain: read() }
+      }
+      return commit({ kind: "markCriterion", criterionId: target.id, met: true })
+    },
     addCheck: (text, argv) =>
       replaceWith([
         ...criterionDeclarations(read()),

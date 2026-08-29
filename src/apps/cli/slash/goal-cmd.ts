@@ -81,14 +81,33 @@ const handleCriterion = (
   control: GoalControl,
 ): number => {
   const text = args.slice(2).join(" ").trim()
+  // GOAL P0-2 — `done` is the operator's manual attestation; without it a
+  // manual-only stopping contract is unsatisfiable (the model may not attest).
+  if (args[1] === "done") {
+    return text === ""
+      ? fail(ctx, `${name} criterion done: requires <index|id>`)
+      : reportMutation(ctx, "Criterion attested.", control.attestCriterion(text))
+  }
   return args[1] !== "add" || text === ""
-    ? fail(ctx, `${name} criterion add: requires <description>`)
+    ? fail(ctx, `${name} criterion add|done: requires <description|index>`)
     : reportMutation(ctx, "Criterion added.", control.addCriterion(text))
 }
 
 /** GOAL-08 rail 15 — `/goal work <instruction>`: ONE foreground turn with
  *  host-minted user-requested provenance (charges the user turn budget, never
  *  the autonomous hard cap). Plain chat never receives this provenance. */
+/** GOAL P0-3 — free a stuck attributed attempt so the goal is editable again.
+ *  Says plainly when there was nothing to free (a success line over a no-op
+ *  would be the "inert write" shape this repo treats as a defect). */
+const handleAbandon = (ctx: SlashContext, control: GoalControl): number => {
+  const outcome = control.abandonAttempt()
+  if (outcome.kind === "ok" && !outcome.hadAttempt) {
+    ctx.out("Goal: no attempt was in flight.\n")
+    return 0
+  }
+  return reportMutation(ctx, "Attempt abandoned (the reserved turn is not refunded).", outcome)
+}
+
 const handleWork = (args: readonly string[], ctx: SlashContext, name: GoalName): number => {
   const instruction = args.slice(1).join(" ").trim()
   if (instruction === "") return fail(ctx, `${name} work: requires <instruction>`)
@@ -179,6 +198,8 @@ export const runGoalCommand = async (
       return reportMutation(ctx, "Goal verification applied.", await control.verify())
     case "work":
       return handleWork(args, ctx, invokedAs)
+    case "abandon":
+      return handleAbandon(ctx, control)
     default:
       return handleCreate(args, ctx, invokedAs, control)
   }
@@ -187,7 +208,7 @@ export const runGoalCommand = async (
 export const goalCmd: SlashCommand = {
   name: "/goal",
   describe:
-    "Create or control the durable goal (show | edit | pause | resume | clear | criterion | check | budget | verify)",
+    "Create or control the durable goal (show | edit | pause | resume | clear | criterion add|done | check | budget | verify | work | abandon)",
   category: "session",
   run: (args, ctx) => runGoalCommand(args, ctx),
 }
