@@ -1,6 +1,7 @@
 import { expect } from "bun:test"
-import { existsSync } from "node:fs"
+import { appendFileSync, existsSync } from "node:fs"
 import { join, relative, resolve } from "node:path"
+import { type ScanReach, readScanReachBaseline } from "../../../tools/dev/scan-reach-baseline"
 
 /**
  * A guard that examined NOTHING reports the same value as a clean repo: no
@@ -63,8 +64,14 @@ const trackedUnder = (root: string): ReadonlySet<string> => {
 }
 
 export interface ScanPopulationOptions {
-  /** Floor on the count of TRACKED files the scan reached. Defaults to 1. */
-  readonly min?: number
+  /**
+   * This scan's identity in `tools/dev/scan-reach-baseline.json`, which is where
+   * its floor lives. An inline number would be a number the author picked; the
+   * observed equilibrium for such a parameter in this repo is `1`. An id with no
+   * pinned row FAILS rather than defaulting — a closed universe is the only
+   * thing that stops a new guard shipping with no reach at all.
+   */
+  readonly id: string
   /** Does this filename count? Must match the caller's own filter, or a subtree
    *  of `.md` reads as lost. */
   readonly collectable?: (name: string) => boolean
@@ -79,8 +86,29 @@ export interface ScanPopulationOptions {
    * full, and a floor on the walk alone clears it.
    */
   readonly matched?: readonly string[]
-  /** Floor on `matched`. Required whenever `matched` is given. */
-  readonly minMatched?: number
+}
+
+/**
+ * The measured reach, appended for `bun run scan-reach` to harvest. Recording is
+ * opt-in so a normal test run neither writes nor depends on it.
+ */
+const record = (opts: ScanPopulationOptions, walked: number): void => {
+  const sink = process.env.QUANTA_SCAN_REACH_RECORD
+  if (sink === undefined || sink === "") return
+  const line = { id: opts.id, walked, matched: opts.matched?.length }
+  appendFileSync(sink, `${JSON.stringify(line)}\n`)
+}
+
+const floorFor = (id: string): ScanReach => {
+  const pinned = readScanReachBaseline().scans[id]
+  if (pinned === undefined) {
+    throw new Error(
+      `assertScanPopulation: no reach floor pinned for "${id}". Add it to ` +
+        `tools/dev/scan-reach-baseline.json (\`bun run scan-reach --tighten\` writes the ` +
+        `measured value) — an unpinned scan is exactly the hole this floor exists to close.`,
+    )
+  }
+  return pinned
 }
 
 const isSkippedName = (name: string, skip: ReadonlySet<string>): boolean =>
@@ -119,11 +147,14 @@ export const assertScanPopulation = (
   const tracked = trackedUnder(abs)
 
   const reachedFiles = files.map((f) => resolve(f)).filter((f) => tracked.has(f))
+  record(opts, reachedFiles.length)
+  const pinned = floorFor(opts.id)
   expect(
     reachedFiles.length,
     `the scan of ${abs} reached ${reachedFiles.length} TRACKED files ` +
-      `(it returned ${files.length} paths in total — untracked ones are not reach)`,
-  ).toBeGreaterThanOrEqual(opts.min ?? 1)
+      `(it returned ${files.length} paths in total — untracked ones are not reach). ` +
+      `Floor for "${opts.id}" is ${pinned.walked}, from tools/dev/scan-reach-baseline.json`,
+  ).toBeGreaterThanOrEqual(pinned.walked)
 
   if (opts.topLevelOnly === true) {
     const reachedNames = new Set(reachedFiles.map((f) => relative(abs, f)))
@@ -147,16 +178,21 @@ export const assertScanPopulation = (
   }
 
   if (opts.matched !== undefined) {
-    if (opts.minMatched === undefined) {
+    if (pinned.matched === undefined) {
       throw new Error(
-        "assertScanPopulation: `matched` was given without `minMatched` — a second " +
-          "number that is never compared is not a second number",
+        `assertScanPopulation: "${opts.id}" reported a matched set but pins no matched ` +
+          `floor — a second number that is never compared is not a second number`,
       )
     }
     expect(
       opts.matched.length,
-      `the guard's own matcher selected ${opts.matched.length} of ${reachedFiles.length} ` +
+      `the matcher for "${opts.id}" selected ${opts.matched.length} of ${reachedFiles.length} ` +
         `reached files — a matcher that rotted selects nothing while the walk stays full`,
-    ).toBeGreaterThanOrEqual(opts.minMatched)
+    ).toBeGreaterThanOrEqual(pinned.matched)
+  } else if (pinned.matched !== undefined) {
+    throw new Error(
+      `assertScanPopulation: "${opts.id}" pins a matched floor of ${pinned.matched} but the ` +
+        `guard passed no matched set — the pinned number would never be checked`,
+    )
   }
 }

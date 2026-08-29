@@ -1,0 +1,4 @@
+{
+  "note": "Committed REACH floors for scanning guards. Floors only go UP. `reach < floor` is a REGRESSION (the scan shrank, so every verdict under it is worthless); an unpinned scan FAILS rather than defaulting. Lock in growth with `bun run scan-reach --tighten` — never hand-lower a number without saying why in the diff. `walked` proves the anchor, `matched` proves the predicate.",
+  "scans": {}
+}

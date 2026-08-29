@@ -358,7 +358,9 @@ export interface SlashContext {
         /** GOAL-06 — the wake controller's typed scheduling decision (report line). */
         readonly wakeStatus?: () => import("@/objective").GoalWakeStatus | undefined
         /** GOAL-08 rail 15 — `/goal work`: enqueue ONE foreground turn carrying
-         *  host-minted `user-requested-goal-work` provenance. `false` ⇒ not wired. */
+         *  host-minted `user-requested-goal-work` provenance. Returns a TYPED
+         *  outcome: `{ok:false, reason}` names the refusal at command time (no
+         *  active goal / fail-stopped attempt slot), never a silent drop. */
         readonly enqueueWork?: (instruction: string) => GoalWorkEnqueueResult
       }
     | undefined
