@@ -10,7 +10,7 @@
 import { describe, expect, test } from "bun:test"
 import type { SessionHost } from "@/kernel/session"
 import type { ObjectiveAttemptContext } from "@/objective"
-import { SessionProtocolValidationError } from "@/protocol/session"
+import { SessionRevisionConflictError } from "@/protocol/session"
 import { createRuntime } from "@/sdk/runtime"
 import { capabilitiesFor } from "../../support/session-fixtures"
 
@@ -28,7 +28,6 @@ const makeHost = (opts: { claim?: boolean; throwOnRun?: boolean } = {}) => {
     }),
     runTurn: async ({ prompt }) => {
       prompts.push(prompt)
-      if (opts.throwOnRun) throw new Error("host exploded")
       return {
         outcome: { reason: "completed", turns: 1, messages: [] },
         messages: [{ role: "user", content: [{ type: "text", text: prompt }] }],
@@ -38,8 +37,8 @@ const makeHost = (opts: { claim?: boolean; throwOnRun?: boolean } = {}) => {
       claims.push(attempt)
       return opts.claim ?? true
     },
-    releaseGoalAttempt: () => {
-      released += 1
+    releaseGoalAttempt: (attemptId) => {
+      if (claims.some((c) => c.attemptId === attemptId)) released += 1
     },
     close: async () => undefined,
   }
@@ -105,7 +104,7 @@ describe("GOAL-08 — goal turn attribution through the session host", () => {
         objectiveRevision: 1,
         validateCurrent: () => true,
       }),
-    ).rejects.toBeDefined()
+    ).rejects.toBeInstanceOf(SessionRevisionConflictError)
     expect(prompts).toEqual([])
     expect(claims).toHaveLength(0)
     expect(released()).toBe(0)
@@ -144,6 +143,6 @@ describe("GOAL-08 — goal turn attribution through the session host", () => {
           attemptId: "forged-attempt",
         },
       }),
-    ).rejects.toBeInstanceOf(SessionProtocolValidationError)
+    ).rejects.toThrow(/invalid_turn_submit_provenance/)
   })
 })

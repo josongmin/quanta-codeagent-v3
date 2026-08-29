@@ -112,7 +112,8 @@ describe("/goal work — GOAL-08 rail 15 (user-requested provenance)", () => {
       goal: {
         port: h.authority,
         threadId: "thread",
-        enqueueWork: (instruction) => queued.push(instruction) === 1,
+        enqueueWork: (instruction) =>
+          queued.push(instruction) === 1 ? { ok: true } : { ok: false, reason: "dup" },
       },
     }
     expect(await goalCmd.run(["work", "fix", "the", "flake"], ctx)).toBe(0)
@@ -126,9 +127,18 @@ describe("/goal work — GOAL-08 rail 15 (user-requested provenance)", () => {
     expect(h.err.join("")).toContain("not wired")
     const ctx: SlashContext = {
       ...h.ctx,
-      goal: { port: h.authority, threadId: "thread", enqueueWork: () => false },
+      goal: {
+        port: h.authority,
+        threadId: "thread",
+        enqueueWork: () => ({
+          ok: false,
+          reason: "attempt slot fail-stopped (disk full); start a new goal to recover",
+        }),
+      },
     }
     expect(await goalCmd.run(["work"], ctx)).toBe(1)
     expect(await goalCmd.run(["work", "x"], ctx)).toBe(1)
+    // the typed refusal reason reaches the user at command time
+    expect(h.err.join("")).toContain("attempt slot fail-stopped (disk full)")
   })
 })

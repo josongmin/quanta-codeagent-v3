@@ -255,7 +255,7 @@ const loadDefaultPermissionStore = async (): Promise<PermissionStore | undefined
 /** GOAL-08 — the objective authority plus the SAME attributed-attempt slot the
  *  session host claims; the wake composer reads the slot's fail-stop status
  *  (binding skip + `/goal` reason). Both absent when TOOLS is off. */
-const objectivePorts = (
+export const objectivePorts = (
   objective: ObjectivePort | undefined,
   objectiveAttemptSlot: unknown,
 ): { objectiveAuthority?: ObjectivePort; objectiveAttemptSlot?: ObjectiveAttemptSlot } => ({

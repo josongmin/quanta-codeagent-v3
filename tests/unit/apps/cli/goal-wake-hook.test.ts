@@ -411,7 +411,7 @@ describe("goal wake host binding", () => {
       probes: probes(store, async () => undefined),
       readDomain: (id) => asObjectiveAuthority(store).readDomain(id),
       isQuiescent: () => true,
-      attemptSlotStatus: () => slot.status(),
+      attemptSlot: slot,
       setTimeoutFn: timer.set,
       clearTimeoutFn: timer.clear,
     })
@@ -426,6 +426,52 @@ describe("goal wake host binding", () => {
     slot.recover()
     wake?.onTurnSettled()
     expect(timer.delays()).toEqual([15_000])
+    expect(wake?.status()).toEqual({ kind: "armed", delayMs: 15_000 })
+  })
+
+  test("GOAL-08 round 4 — a NEW objective generation lifts the fail-stop (same generation keeps it); a timer armed before the fail-stop never fires through", async () => {
+    const store = createObjectiveStore()
+    const authority = asObjectiveAuthority(store)
+    store.create(TID, { goal: "ship", successCriteria: ["c"] })
+    const oldId = authority.get(TID)?.objectiveId ?? ""
+    const timer = fakeTimeout()
+    const slot = createObjectiveAttemptSlot()
+    let resumed = 0
+    const wake = startGoalWakeController({
+      enabled: true,
+      threadId: TID,
+      quietWindowMs: 15_000,
+      probes: probes(store, async () => undefined),
+      readDomain: (id) => authority.readDomain(id),
+      isQuiescent: () => true,
+      attemptSlot: slot,
+      resumeAttempt: async () => {
+        resumed += 1
+      },
+      setTimeoutFn: timer.set,
+      clearTimeoutFn: timer.clear,
+    })
+    expect(timer.delays()).toEqual([15_000]) // healthy: the initial checkpoint armed
+    // fail-stop lands while the timer is pending (attributed to the OLD generation)
+    slot.failStop("objective settlement not durable: disk full", oldId)
+    expect(wake?.status()).toEqual({
+      kind: "idle",
+      skipReason: "attempt-slot-fail-stopped",
+      detail: "objective settlement not durable: disk full",
+    })
+    timer.fire()
+    await new Promise((r) => setTimeout(r, 0))
+    expect(resumed).toBe(0) // fire-time gate: no launch into a claim refusal
+    // same generation edge ⇒ still fail-stopped
+    wake?.onGoalMutation()
+    expect(slot.status().kind).toBe("fail-stopped")
+    // a NEW generation (clear + create) lifts it on the next edge and arms
+    authority.clear(TID)
+    wake?.onGoalMutation()
+    store.create(TID, { goal: "ship v2", successCriteria: ["c"] })
+    wake?.onGoalMutation()
+    expect(slot.status().kind).toBe("empty")
+    expect(timer.delays().at(-1)).toBe(15_000)
     expect(wake?.status()).toEqual({ kind: "armed", delayMs: 15_000 })
   })
 })

@@ -25,17 +25,23 @@ class GatedLLM implements LLMPort {
   readonly seen: string[] = []
   private gate: Promise<void> = Promise.resolve()
   private open: () => void = () => {}
+  /** Resolves when the NEXT stream() call has entered (deterministic sync point). */
+  entered: Promise<void> = Promise.resolve()
+  private markEntered: () => void = () => {}
   hold(): void {
     this.gate = new Promise<void>((resolve) => {
       this.open = resolve
+    })
+    this.entered = new Promise<void>((resolve) => {
+      this.markEntered = resolve
     })
   }
   releaseGate(): void {
     this.open()
   }
   async *stream(input: StreamInput): AsyncIterable<StreamEvent> {
-    const last = input.messages.at(-1)
-    this.seen.push(typeof last?.content === "string" ? last.content : JSON.stringify(last?.content))
+    this.seen.push(JSON.stringify(input.messages))
+    this.markEntered()
     await this.gate
     yield { type: "text_delta", delta: "ok" } satisfies StreamEvent
     yield { type: "usage", inputTokens: 1, outputTokens: 1, model: "gated" } as never
@@ -92,11 +98,11 @@ describe("GOAL-08 round 3 — a queued user turn cannot take the goal claim", ()
     llm.hold()
     await session.input.append("X")
     const x = session.turn.run()
-    await new Promise((r) => setTimeout(r, 30))
-    // A: a plain user turn queued behind X.
+    await llm.entered // X is inside the LLM call (past its turn-runner take)
+    // A: a plain user turn queued behind X (enqueue chains on the tail + X's
+    // in-flight window, so the order X → A.append → A.run → B is fixed).
     const aAppend = session.input.append("A", {}, { enqueue: true })
     const a = session.turn.run({}, { enqueue: true })
-    await new Promise((r) => setTimeout(r, 10))
     // B: the goal turn, claimed + queued behind A.
     const domain = authority.readDomain(session.sessionId)
     const b = submit({
@@ -115,19 +121,27 @@ describe("GOAL-08 round 3 — a queued user turn cannot take the goal claim", ()
       (e: unknown) => `refused:${(e as Error).message}`,
     )
 
-    const o = authority.get(session.sessionId)
-    const receipts = authority.readDomain(session.sessionId).progressReceipts ?? []
-    // The user's turn A must NEVER be charged as the goal attempt.
-    const attributedTurns = receipts.length
-    if (bOutcome === "ran") {
-      expect(o?.attempts.autonomousTurnsStarted).toBe(1)
-      expect(attributedTurns).toBe(1)
-      expect(llm.seen.at(-1)).toContain("B goal")
-    } else {
-      // B was refused (revision moved by A): then NOTHING was attributed.
-      expect(o?.attempts.autonomousTurnsStarted).toBe(0)
-      expect(attributedTurns).toBe(0)
-    }
+    // B's expectedSessionRevision was read while X ran; A moved it ⇒ B is
+    // refused with a typed revision conflict, and NOTHING may be attributed:
+    // the user's turn A must never have taken B's claim.
+    expect(bOutcome).toMatch(/^refused:.*revision/i)
+    expect(authority.get(session.sessionId)?.attempts.autonomousTurnsStarted).toBe(0)
+    expect(authority.readDomain(session.sessionId).progressReceipts ?? []).toHaveLength(0)
     expect(slot.status().kind).toBe("empty")
+
+    // Two-sided: a goal turn submitted at a CURRENT revision is attributed —
+    // the claim mechanism is live, it just binds to the right turn.
+    const fresh = authority.readDomain(session.sessionId)
+    await submit({
+      text: "C goal",
+      expectedSessionRevision: (await session.snapshot()).revision,
+      objectiveId: fresh.state?.objective.objectiveId ?? "",
+      objectiveRevision: fresh.revision,
+      validateCurrent: () => true,
+    })
+    expect(authority.get(session.sessionId)?.attempts.autonomousTurnsStarted).toBe(1)
+    expect(authority.readDomain(session.sessionId).progressReceipts ?? []).toHaveLength(1)
+    expect(llm.seen.some((m) => m.includes("C goal"))).toBe(true)
+    expect(llm.seen.some((m) => m.includes("B goal"))).toBe(false)
   }, 20_000)
 })

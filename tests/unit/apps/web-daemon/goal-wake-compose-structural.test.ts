@@ -12,9 +12,11 @@ import { join } from "node:path"
 const SOURCE = join(import.meta.dir, "../../../../src/apps/web-daemon/goal-wake-compose.ts")
 
 const usesAtomicSubmitOnly = (source: string): boolean =>
-  /submitGoalContinuation/.test(source) &&
+  /await submit\.call\(args\.session\.turn,/.test(source) &&
   !/\.input\s*\.append\s*\(/.test(source) &&
-  !/\.turn\s*\.run\s*\(/.test(source)
+  !/\.turn\s*\.run\s*\(/.test(source) &&
+  !/session\.dispatch\s*\(/.test(source) &&
+  !/"input\.append"|"turn\.run"/.test(source)
 
 describe("GOAL-08 rail 14 — controller calls turn.submit, never split append/run", () => {
   test("the shipped composition passes the predicate", () => {
@@ -29,5 +31,15 @@ describe("GOAL-08 rail 14 — controller calls turn.submit, never split append/r
     expect(split).not.toBe(shipped)
     expect(usesAtomicSubmitOnly(split)).toBe(false)
     expect(usesAtomicSubmitOnly("const x = 1")).toBe(false)
+  })
+
+  test("anti-vacuum: a raw-dispatch variant (split wire command next to the helper) fails too", () => {
+    const shipped = readFileSync(SOURCE, "utf8")
+    const raw = shipped.replace(
+      /await submit\.call\(args\.session\.turn,/,
+      'await args.session.dispatch({ type: "input.append" } as never); await submit.call(args.session.turn,',
+    )
+    expect(raw).not.toBe(shipped)
+    expect(usesAtomicSubmitOnly(raw)).toBe(false)
   })
 })

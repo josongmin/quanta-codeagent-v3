@@ -142,11 +142,38 @@ const recoverOnNewGeneration = (
   const stopped = readFailStoppedSlot(slot)
   if (stopped === undefined || slot === undefined) return
   const liveId = live.state?.objective.objectiveId
-  if (liveId === undefined || liveId === stopped.objectiveId) return
+  // Unknown generation (legacy fail-stop without an objectiveId) is never
+  // auto-lifted: the durability question cannot be tied to a generation.
+  if (liveId === undefined || stopped.objectiveId === undefined) return
+  if (liveId === stopped.objectiveId) return
   try {
     slot.recover()
   } catch (_error) {
     // A slot that cannot recover stays fail-stopped (still reported).
+  }
+}
+
+/** Fire-time gate: a timer armed BEFORE a fail-stop must not launch into a
+ *  claim refusal — reject typed so the attempt reservation releases. */
+const assertAttemptSlotLaunchable = (slot: WakeAttemptSlot | undefined): void => {
+  const stopped = readFailStoppedSlot(slot)
+  if (stopped !== undefined) {
+    throw new Error(`goal wake not launched: attempt slot fail-stopped: ${stopped.reason}`)
+  }
+}
+
+/** Exact revision fence between timer fire and queue hand-off (closes
+ *  active→active edits); the CLI rechecks the same metadata at dequeue. */
+const assertWakeStillFresh = (
+  current: ObjectiveDomainSnapshot,
+  objectiveRevision: number,
+): void => {
+  if (
+    current.state === null ||
+    current.state.objective.status !== "active" ||
+    current.revision !== objectiveRevision
+  ) {
+    throw new Error("goal wake became stale before queue hand-off")
   }
 }
 
@@ -225,14 +252,7 @@ export const startGoalWakeController = (opts: StartGoalWakeOpts): GoalWakeLifecy
           // revision fence closes active→active edits between timer fire and
           // queue hand-off; the CLI keeps the same metadata to recheck at
           // dequeue immediately before the agent body starts.
-          const current = opts.readDomain(id)
-          if (
-            current.state === null ||
-            current.state.objective.status !== "active" ||
-            current.revision !== attempt.objectiveRevision
-          ) {
-            throw new Error("goal wake became stale before queue hand-off")
-          }
+          assertWakeStillFresh(opts.readDomain(id), attempt.objectiveRevision)
           if (opts.resumeAttempt !== undefined) {
             await opts.resumeAttempt(id, attempt)
             return
@@ -240,14 +260,7 @@ export const startGoalWakeController = (opts: StartGoalWakeOpts): GoalWakeLifecy
           await opts.probes.resume(id)
         },
       }
-      // Fire-time gate: a timer armed BEFORE the fail-stop must not fire into
-      // a claim refusal (typed rejection ⇒ the reservation releases).
-      const stoppedAtFire = readFailStoppedSlot(opts.attemptSlot)
-      if (stoppedAtFire !== undefined) {
-        throw new Error(
-          `goal wake not launched: attempt slot fail-stopped: ${stoppedAtFire.reason}`,
-        )
-      }
+      assertAttemptSlotLaunchable(opts.attemptSlot) // fire-time gate (typed rejection)
       const outcome = await runIdleContinuation(attempt.threadId, guardedDeps)
       // A second guard can reject after the controller's fire-time decision.
       // Treat that as a rejected enqueue so the attempt reservation releases

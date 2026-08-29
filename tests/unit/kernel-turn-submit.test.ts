@@ -34,39 +34,52 @@ interface HostOpts {
   readonly trace?: string[]
 }
 
-const claimSeam = (opts: HostOpts): Pick<SessionHost, "claimGoalAttempt" | "releaseGoalAttempt"> =>
+/** Emulates the real slot: one claim, taken by runTurn, released only while
+ *  still held AND for the same attemptId (the kernel releases in `finally`). */
+const claimSeam = (
+  opts: HostOpts,
+  held: { id: string | undefined },
+): Pick<SessionHost, "claimGoalAttempt" | "releaseGoalAttempt"> =>
   opts.claim === "absent"
     ? {}
     : {
         claimGoalAttempt: (attempt) => {
           opts.trace?.push(`claim:${attempt.provenance}:${attempt.attemptId}`)
-          return opts.claim !== false
+          if (opts.claim === false) return false
+          held.id = attempt.attemptId
+          return true
         },
-        releaseGoalAttempt: () => {
+        releaseGoalAttempt: (attemptId) => {
+          if (held.id !== attemptId) return
+          held.id = undefined
           opts.trace?.push("release")
         },
       }
 
-const host = (prompts: string[], opts: HostOpts = {}): SessionHost => ({
-  describe: () => ({
-    sessionId: "turn-submit",
-    permissionMode: "default",
-    capabilityManifest: manifest,
-  }),
-  ...claimSeam(opts),
-  runTurn: async ({ prompt }) => {
-    opts.trace?.push(`run:${prompt}`)
-    prompts.push(prompt)
-    return {
-      outcome: { reason: "completed", turns: 1, messages: [] },
-      messages: [
-        { role: "user", content: [{ type: "text", text: prompt }] },
-        { role: "assistant", content: [{ type: "text", text: "done" }] },
-      ],
-    }
-  },
-  close: async () => undefined,
-})
+const host = (prompts: string[], opts: HostOpts = {}): SessionHost => {
+  const held: { id: string | undefined } = { id: undefined }
+  return {
+    describe: () => ({
+      sessionId: "turn-submit",
+      permissionMode: "default",
+      capabilityManifest: manifest,
+    }),
+    ...claimSeam(opts, held),
+    runTurn: async ({ prompt }) => {
+      held.id = undefined // the turn-runner takes the claim at turn start
+      opts.trace?.push(`run:${prompt}`)
+      prompts.push(prompt)
+      return {
+        outcome: { reason: "completed", turns: 1, messages: [] },
+        messages: [
+          { role: "user", content: [{ type: "text", text: prompt }] },
+          { role: "assistant", content: [{ type: "text", text: "done" }] },
+        ],
+      }
+    },
+    close: async () => undefined,
+  }
+}
 
 const initialState = () =>
   createKernelSessionState({
@@ -97,7 +110,7 @@ describe("GOAL-08 round 3 — the goal claim is made INSIDE the serialized dispa
         host: host([], { trace }),
         consumeTurnSubmitProvenance: () => true,
       }),
-    ).rejects.toBeDefined()
+    ).rejects.toBeInstanceOf(SessionRevisionConflictError)
     expect(trace).toEqual([])
   })
 

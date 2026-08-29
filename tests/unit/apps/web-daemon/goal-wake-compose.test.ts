@@ -174,12 +174,15 @@ describe("web goal wake composition", () => {
     })
     expect(handle).toBeDefined()
     expect(armed).toBe(0)
-    timer.fire()
-    await flush()
-    expect(submits).toBe(0)
+    // recover ⇒ the next edge arms; fail-stop AFTER the arm ⇒ the pending
+    // timer fires into the fire-time gate (no submit) instead of a refusal
     slot.recover()
     handle?.onAttachSettled()
     expect(armed).toBe(1)
+    slot.failStop("terminal persistence failed", store.get("web-goal")?.objectiveId)
+    timer.fire()
+    await flush()
+    expect(submits).toBe(0)
     handle?.stop()
   })
 })
