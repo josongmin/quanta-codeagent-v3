@@ -286,16 +286,23 @@ const corpusOverlap = (mirror: string, root: CorpusRoot): number => {
 }
 
 /**
- * The arm is unjudgeable when the guard's own imports kept most of the corpus.
+ * The arm is unjudgeable when the guard's own imports kept too much of the corpus.
  *
- * A FRACTION, not a count: `src` holds 3,638 files and several guards
- * legitimately import a few hundred while still noticing the rest vanish — an
- * absolute limit of 20 marked five sound guards unsupported, including three
- * that had just been verified red. What actually breaks the arm is the guard
- * enumerating a directory it also imports wholesale, which leaves the RATIO near
- * one.
+ * A FRACTION, measured. The first version used an absolute count of 20, which
+ * marked five sound guards unsupported including three just verified red. The
+ * second used 0.9, which an audit showed was far too loose: four manifest cases
+ * are judged with **76% of `src/` still present**, kept alive by their own import
+ * closures. A guard passing over a three-quarters-full tree is what a SOUND guard
+ * does — reading that as "it noticed" is the same collapse of two states this
+ * whole tool exists to prevent.
+ *
+ * Measured across the manifest today: 0.0% for four cases, 75.9–76.2% for four,
+ * 98.5% for the one already reported UNSUPPORTED. There is no threshold between
+ * 76% and 98% that is principled, so the bar is set where an arm is still mostly
+ * empty. Everything above it is reported UNSUPPORTED with its number, which is a
+ * statement of what the instrument cannot see rather than a verdict.
  */
-const OVERLAP_FRACTION = 0.9
+const OVERLAP_FRACTION = 0.25
 
 /** The same count against the REAL tree, so the ratio has a denominator. */
 const realCorpusSize = (root: CorpusRoot): number => corpusOverlap(REPO_ROOT, root)
@@ -420,5 +427,21 @@ if (import.meta.main) {
   )
   for (const u of unlisted) say(`  UNLISTED ${u}`)
   for (const u of unusable) say(`  NO VERDICT ${u}`)
-  process.exit(unlisted.length === 0 && unusable.length === 0 ? 0 : 1)
+  // UNSUPPORTED is not a pass. It says the instrument could not look, and a run
+  // where most cases are unjudgeable must not read as a clean sweep — that
+  // collapse of "clean" and "I never looked" is the defect this tool exists to
+  // find. It is a CEILING rather than zero-tolerance because the overlap is a
+  // property of the guard's imports, not something a single commit can fix: the
+  // number may go down, never up.
+  const UNSUPPORTED_CEILING = 5
+  if (unsupported.length > UNSUPPORTED_CEILING) {
+    say(
+      `empty-mirror: ${unsupported.length} guards are unjudgeable (ceiling ` +
+        `${UNSUPPORTED_CEILING}). Their own imports refill the corpus, so this run ` +
+        `proves nothing about them — decouple the guard from the tree it enumerates.`,
+    )
+  }
+  const clean =
+    unlisted.length === 0 && unusable.length === 0 && unsupported.length <= UNSUPPORTED_CEILING
+  process.exit(clean ? 0 : 1)
 }
