@@ -48,8 +48,25 @@ export const usageAccountingIsAuthoritative = (env: Record<string, string | unde
 /** What the legacy feed believes, in the authority's own terms. */
 export interface LegacyCostReading {
   readonly totalUsd: number
-  readonly promptTokens: number
   readonly outputTokens: number
+  /**
+   * Total prompt tokens — cached and fresh — or OMITTED when the legacy feed
+   * cannot express that provider-neutrally.
+   *
+   * This is optional because of a false alarm the shadow receipt actually
+   * produced: the CLI's legacy feed reads `gen_ai.usage.input_tokens`, which is
+   * PROVIDER-SHAPED. OpenAI's already contains the cached portion and
+   * Anthropic's does not, so on an Anthropic session with cache reads the
+   * legacy number and the authority's prompt total differ by exactly the cache
+   * reads — and the receipt cried DIVERGES on a session where the two feeds
+   * agreed perfectly. A receipt that fires on healthy sessions teaches the
+   * operator to ignore it, which costs more than not having one.
+   *
+   * A caller supplies this only when its number means "all prompt tokens" for
+   * every provider it might see. Dollars and output tokens carry the coverage
+   * signal regardless: a call one feed missed shows up in both.
+   */
+  readonly promptTokens?: number
 }
 
 /** One line of "these two disagree, by this much". */
@@ -90,7 +107,7 @@ export const reconcileUsageAccounting = (
       delta: snapshot.totalUsd - legacy.totalUsd,
     })
   }
-  if (authorityPrompt !== legacy.promptTokens) {
+  if (legacy.promptTokens !== undefined && authorityPrompt !== legacy.promptTokens) {
     deltas.push({
       field: "promptTokens",
       authority: authorityPrompt,

@@ -403,9 +403,13 @@ const shadowReceiptLines = (
   return [
     "",
     formatReconciliationReceipt(
+      // `promptTokens` is deliberately NOT supplied: this panel's legacy input
+      // count comes from `gen_ai.usage.input_tokens`, which is provider-shaped,
+      // so comparing it to the authority's provider-neutral prompt total
+      // reports a divergence on every Anthropic session that used the cache.
+      // Dollars and output tokens carry the signal without the false alarm.
       reconcileUsageAccounting(accounting.snapshot(), {
         totalUsd: state.totalCostUsd ?? 0,
-        promptTokens: state.inputTokens,
         outputTokens: state.outputTokens,
       }),
     ),

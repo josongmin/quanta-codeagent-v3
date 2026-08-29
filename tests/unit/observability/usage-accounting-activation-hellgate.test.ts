@@ -132,6 +132,26 @@ describe("the shadow receipt reports what it can and admits what it cannot", () 
     expect(formatReconciliationReceipt(receipt)).toContain("agrees across 1 calls")
   })
 
+  test("prompt tokens are compared only when the caller can express them neutrally", () => {
+    // FALSE-ALARM REGRESSION. The CLI's legacy input count is
+    // `gen_ai.usage.input_tokens`, which is provider-shaped: OpenAI's already
+    // contains the cached portion, Anthropic's does not. Comparing it to the
+    // authority's provider-neutral prompt total made the receipt shout
+    // DIVERGES on Anthropic sessions where the two feeds agreed perfectly —
+    // measured, 1.4M vs 1.0M on a cache-heavy turn with no subagent. A receipt
+    // that fires on healthy sessions teaches the operator to ignore it.
+    const snap = authorityWith([{ input: 1_000_000, output: 0 }])
+    const omitted = reconcileUsageAccounting(snap, { totalUsd: 3, outputTokens: 0 })
+    expect(omitted.agrees).toBe(true)
+    // …and a caller that CAN supply a neutral number still gets it checked.
+    const supplied = reconcileUsageAccounting(snap, {
+      totalUsd: 3,
+      outputTokens: 0,
+      promptTokens: 999_999,
+    })
+    expect(supplied.agrees).toBe(false)
+  })
+
   test("a legacy feed that missed a subagent shows up as a token AND dollar delta", () => {
     // The exact production failure: the legacy counter feed saw the root turn
     // and not the child's, so it is short by the child on both axes.

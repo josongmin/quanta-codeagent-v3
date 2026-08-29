@@ -59,6 +59,10 @@ const foldPanelFromCounters = (
   panel: Pick<CostPanel, "incrementTurn">,
   counters: Record<string, number>,
   prev: { inputTokens: number; outputTokens: number; cacheReadTokens: number },
+  // The model the turn actually ran on. Hardcoding it here priced an Anthropic
+  // turn at gpt rates and produced a $1.60-vs-$3.12 "divergence" that was this
+  // fixture's, not production's — the shipped fold reads it off the usage event.
+  model: string = MODEL,
 ): void => {
   const curIn = counters[GEN_AI_ATTRS.usage.inputTokens] ?? 0
   const curOut = counters[GEN_AI_ATTRS.usage.outputTokens] ?? 0
@@ -67,7 +71,7 @@ const foldPanelFromCounters = (
     inputTokens: Math.max(0, curIn - prev.inputTokens),
     outputTokens: Math.max(0, curOut - prev.outputTokens),
     cacheReadTokens: Math.max(0, curCache - prev.cacheReadTokens),
-    model: MODEL,
+    model,
   })
   prev.inputTokens = curIn
   prev.outputTokens = curOut
@@ -317,6 +321,53 @@ describe("every CLI cost surface reports the same total", () => {
     const detailed = panel.renderDetailed()
     expect(detailed).toContain("usage-accounting shadow")
     expect(detailed).toContain("DIVERGES")
+  })
+
+  test("SHADOW does not cry wolf on an Anthropic session that used the cache", () => {
+    // The false alarm this closes: the legacy input counter is provider-shaped,
+    // so an Anthropic turn with cache reads made the receipt report a
+    // divergence the feeds did not actually have. Both providers must read
+    // "agrees" on a healthy session, or the receipt is noise.
+    for (const model of ["gpt-5.4", "claude-sonnet-4-6"]) {
+      const metrics = new Metrics()
+      const usageAccounting = createUsageAccounting()
+      const panel = createCostPanel({
+        model,
+        now: () => 1_700_000_000_000,
+        accounting: usageAccounting,
+        accountingAuthoritative: false,
+      })
+      const config = {
+        llm: { stream: async function* () {} },
+        registry: { get: () => undefined, specs: () => [], isReadOnly: () => true },
+        stream: { emit: () => undefined },
+        permission: { mode: "acceptEdits" },
+        messages: [],
+        system: "t",
+        cwd: process.cwd(),
+        maxTurns: 1,
+        signal: new AbortController().signal,
+        sessionId: "sess-1",
+        metrics,
+        usageAccounting,
+      } as unknown as AgentConfig
+      emitUsage(
+        config,
+        {
+          type: "usage",
+          model,
+          inputTokens: 1_000_000,
+          outputTokens: 0,
+          cacheReadTokens: 400_000,
+        } as UsageEv,
+        new AgentRecorder(metrics),
+        undefined,
+        undefined,
+      )
+      const prev = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0 }
+      foldPanelFromCounters(panel, metrics.snapshot().counters, prev, model)
+      expect(panel.renderDetailed()).toContain("agrees across 1 calls")
+    }
   })
 
   test("SHADOW on an agreeing session reports agreement, with a call count", () => {
