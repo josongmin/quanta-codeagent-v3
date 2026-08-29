@@ -57,8 +57,18 @@ describe("hellgate / cross-slice — runner/knobs DOES NOT import runner/batch (
 
   test("per-knob files have no value-level batch import EXCEPT the deriveKnob SSOT", async () => {
     const files = await readdir(PER_KNOB_DIR)
-    for (const f of files) {
-      if (!f.endsWith(".ts")) continue
+    // The verdict is a LOOP BODY, and an empty listing runs it zero times: the
+    // test then passes having asserted nothing, which reads exactly like "no
+    // per-knob file imports batch at value level". The floor is derived from the
+    // real corpus (68 modules today), not a token `> 0`, so a walk that reaches
+    // a fraction of the tree fails here instead of reporting clean.
+    const modules = files.filter((f) => f.endsWith(".ts"))
+    expect(
+      modules.length,
+      `only ${modules.length} per-knob module(s) were listed — the ban below would ` +
+        `pass over a listing that never happened`,
+    ).toBeGreaterThanOrEqual(60)
+    for (const f of modules) {
       const txt = await readSrc(join(PER_KNOB_DIR, f))
       // The ONLY permitted runner/batch value import is the `deriveKnob` SSOT
       // (knob=schema unification); any other batch value import is still banned.

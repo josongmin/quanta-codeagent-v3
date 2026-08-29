@@ -21,7 +21,7 @@ const SCAN =
  * "no violations" in a way an empty scan satisfies for free.
  */
 const VERDICT =
-  /\.toEqual\(\s*\[\s*\]\s*\)|\.toBeLessThanOrEqual\(|\.toHaveLength\(\s*0\s*\)|\.toBe\(\s*0\s*\)|\.toBeFalsy\(\s*\)|\.toEqual\(\s*new Set\(\s*\)\s*\)|\.length\s*>\s*0\s*\)\s*\{?\s*throw|\.size\s*>\s*0\s*\)\s*\{?\s*throw/
+  /\.toEqual\(\s*\[\s*\]\s*\)|\.toStrictEqual\(\s*\[\s*\]\s*\)|\.toBeLessThanOrEqual\(|\.toBeLessThan\(|\.toHaveLength\(\s*0\s*\)|\.toBe\(\s*0\s*\)|\.toBe\(\s*false\s*\)|\.toBeFalsy\(\s*\)|\.toEqual\(\s*new Set\(\s*\)\s*\)|\.toEqual\(\s*new Map\(\s*\)\s*\)|\.toEqual\(\s*\{\s*\}\s*\)|\.length\s*>\s*0\s*\)\s*\{?\s*throw|\.size\s*>\s*0\s*\)\s*\{?\s*throw/
 
 /**
  * A floor asserted by throwing rather than by `expect`.

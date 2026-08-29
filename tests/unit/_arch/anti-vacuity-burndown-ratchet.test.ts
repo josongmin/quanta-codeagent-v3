@@ -172,6 +172,38 @@ describe("anti-vacuity burn-down", () => {
     expect(isFloorless(scanWith("expect(elapsedMs).toBeGreaterThan(1)"))).toBe(true)
   })
 
+  test("🔴 every zero-verdict SPELLING is recognised, not just `toEqual([])`", () => {
+    // The census only looks at files that both SCAN and state a zero-verdict, so
+    // a spelling missing from that second gate removes the file from the
+    // population entirely — no floor is demanded and nothing reports it. Measured
+    // 2026-08-30: five spellings were missing, and 18 scanning guards used one of
+    // them. `cross-slice-cycle` was among them and was genuinely vacuous — its
+    // ban is a LOOP BODY over `readdir`, so an empty listing ran it zero times
+    // and the test passed having asserted nothing. Proven by paired control:
+    // with the listing forced empty it failed with the floor and passed 10/10
+    // without it.
+    //
+    // The oracle cannot replace this gate. It judges a FILE, and that file has
+    // another test that throws on a blanked tree, so the whole file reads red
+    // while the vacuous test inside it is invisible.
+    const fsCall = `read${"dir"}Sync`
+    const root = `s${"rc"}`
+    const scanEndingIn = (verdict: string): string =>
+      `import { ${fsCall} } from "node:fs"\n` +
+      `test("x", () => {\n  const seen = ${fsCall}("${root}")\n` +
+      `  ${verdict}\n})\n`
+    for (const verdict of [
+      'expect(seen.filter((f) => f.endsWith(".zzz"))).toEqual([])',
+      'expect(seen.filter((f) => f.endsWith(".zzz"))).toStrictEqual([])',
+      'expect(seen.some((f) => f.endsWith(".zzz"))).toBe(false)',
+      'expect(seen.filter((f) => f.endsWith(".zzz")).length).toBeLessThan(1)',
+      'expect(new Map(seen.filter((f) => f.endsWith(".zzz")).map((f) => [f, 1]))).toEqual(new Map())',
+      'expect(Object.fromEntries(seen.filter((f) => f.endsWith(".zzz")).map((f) => [f, 1]))).toEqual({})',
+    ]) {
+      expect(isFloorless(scanEndingIn(verdict)), verdict).toBe(true)
+    }
+  })
+
   test("every REFUTED entry is still refuted — ground truth, not a permanent excuse", () => {
     // An entry earns its place by going RED on an empty mirror. If the census
     // stops flagging it at all, the exemption is dead weight and must go, or it
