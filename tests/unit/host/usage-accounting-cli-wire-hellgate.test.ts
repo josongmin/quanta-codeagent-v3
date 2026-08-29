@@ -21,7 +21,7 @@ import {
 } from "../../_support/bootstrap-fake-deps"
 
 const bootWith = async (env: Record<string, string | undefined>) => {
-  const result = await bootstrapSession(makeFakeDeps(), makeRuntime({ env }))
+  const result = await bootstrapSession(makeFakeDeps(), makeRuntime({ env }), {})
   if (isSessionBootstrapError(result)) throw new Error("bootstrap failed in fixture")
   return result
 }
