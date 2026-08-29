@@ -12,5 +12,6 @@ redOnInjection:
   - G09-M3 verified progress no longer clears transient observations -> 2 RED
   - G09-M4 (round 2) criteria-ops eviction `shift()` removed -> 1 RED (blocker-observation.test.ts "capped at eight and evicts the oldest": rail 11)
   - G09-M5 (round 2) tool `addBlocker` drops `attemptId` (src/tool/objective/index.ts, the ONLY model-side producer) -> 1 RED (objective-tools-hellgate "promotes only after three distinct host-attributed attempts", real registry entry: rail 12)
+docAudit (2026-08-30): `observeBlocker`는 mutation kind가 아니라 actor 라우팅이고, `dependencyRef`는 host 파생이 아니라 모델 문자열의 JSON.stringify다(티켓 콜아웃 참조). 등록된 생산자는 0. 이 receipt의 73/0은 오늘도 정확히 일치한다.
 ticketRedRails: 1,2,5,6,7,8,9,10 covered by the shipped tests and the mutants above; 3/4 covered by the direct-blocker path for user/system actors; 11 and 12 closed in round 2 (producers: the objective tool via the registry — the only model-facing one; user/system actors add blockers directly and are covered by authority.test.ts).
 round2: 2026-08-27 — all ticket rails covered; no open gap.

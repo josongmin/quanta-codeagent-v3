@@ -1,5 +1,9 @@
 # GOAL-00R — Current-head baseline, owner freeze, and pre-existing PTY isolation
 
+
+> **구현 대조 (2026-08-30, 코드 확인)** — 절차 티켓이라 코드 대조 대상은 Entry snapshot뿐이다.
+> 그 SHA들(`93d1e40ee`/`412269e76`/`b4f1b5286`)과 `PTY 9/9`는 착수 시점 값이다: 현재 PTY 배터리는 **10 케이스**이고 HEAD는 여러 세대 앞이다. 스냅샷으로만 읽을 것.
+
 ## Purpose
 
 Create a reproducible execution baseline before changing Goal v2. The former staged-slice workflow is historical: commit `1624c7c` is not the current worktree and must not drive new edits or receipts.

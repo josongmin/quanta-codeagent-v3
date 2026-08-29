@@ -27,5 +27,6 @@ redOnInjection:
   - M5 gate-off model create allowed                          -> policy+capabilities 1 RED
   - M6 authority ignores the policy verdict                   -> policy+capabilities 10 RED
   - restore: byte-identical
+docAudit (2026-08-30): "observer는 telemetry 전용이고 GOAL-04까지 production 호출 없음" → 실제로는 **GOAL-03**에서 배선됐다(`maybeWireObjectiveJudgeObserver` → `capability-wire-registry.ts` → `agent-config-assembler.ts`). telemetry 전용이라는 성질 자체는 유효(`QUANTA_GOAL_JUDGE=off|shadow`). "legacy `reject`는 경고 1회와 함께 off로 파싱"은 미구현 — `runtime-config.ts`는 조용한 삼항이다.
 ticketRedRails: 1-11 covered (policy.test.ts / completion-policy / capabilities / observer / tool hellgates); 12 (attempt-in-flight) deferred to GOAL-04 (durable attempt store lands there)
 deviations: README "GOAL-02 실행 기록"

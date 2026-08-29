@@ -1,5 +1,14 @@
 # GOAL-03 — Read-only verifier runtime and source-evidence reconciliation
 
+
+> **구현 대조 (2026-08-30, 코드 확인)** — 이 티켓의 **읽기전용 실행 계약 절반이 미구현**이다.
+> - `maybeWireObjectiveVerifier`(`src/host/runtime/objective-verifier-wire.ts`)가 `perCallWrap` 없이 runner를 만든다 ⇒ `wrapSandboxArgv`가 통과되어 **샌드박스 없이 spawn**. readable-root allowlist / network deny / 격리 temp / CPU·메모리·fan-out·출력 바이트 캡 전부 없음(벽시계 타임아웃만).
+> - 소스 쓰기는 **차단이 아니라 사후 감지**다(`settleRun`의 digest 비교). 실제로 `tests/integration/objective-verifier-real-command-e2e.test.ts`의 변조 커맨드는 성공한다.
+> - receipt는 명세한 필드를 commit에서 버린다 — 남는 건 `source/objectiveId/checkId/objectiveRevision/sourceDigest/{exitCode,passed}/verifiedAt`뿐(`src/objective/criteria/model.ts`). `posture` 없음.
+> - `sandbox-unavailable`은 `criteria/ports.ts`에 어휘로만 있고 이 경로에서 emit되지 않는다. `/goal stale` 서브커맨드 없음. attempt당 1회 검증 게이트 없음. `freshness-unresolved`는 fail-closed가 아니라 반대로 코딩돼 있다(`objective-settlement.ts`).
+> - 이름 변화: `completion-ops`가 아니라 `authority.ts`가 batch를 검증/적용 · 모델 도구는 `objective_verify` · non-git 초과는 `cap-exceeded`.
+> - RED 4/12/13/15와 E2E 3번은 존재하지 않는 동작을 기술한다. rail 15 테스트는 제목만 그렇고 본문은 HITL 경로를 만들지 않는다.
+
 **Priority:** P0 · **Depends on:** GOAL-02 · **Owner:** verifier host adapter
 
 **Receipt:** docs/plans/aug-25-goal-v2/receipts/GOAL-03.yaml

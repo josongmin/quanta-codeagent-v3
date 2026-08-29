@@ -38,7 +38,7 @@ evidence:
   code:
     - src/host/runtime/objective-verifier-wire.ts
     - src/host/runtime/objective-store-wire.ts
-    - src/runtime/shell.ts
+    - src/runtime/run-argv.ts
     - src/objective/authority.ts
     - src/objective/criteria/model.ts
     - src/objective/core-store/completion-ops.ts
@@ -55,11 +55,11 @@ evidence:
 knobs:
   - name: QUANTA_GOAL
     where: src/objective/goal-preset.ts
-    default: 'unset (OFF)'
+    default: 'true (ON)'  # promoted 2026-08-27; QUANTA_GOAL=0 is the public opt-out
     purpose: Public preset that exposes the verifier through goal control.
   - name: QUANTA_OBJECTIVE_TOOLS
     where: src/host/runtime/objective-store-wire.ts
-    default: 'unset (OFF)'
+    default: 'inherits QUANTA_GOAL (ON)'
     purpose: Advanced authority/tool gate required for verifier attachment.
 deliberate_hold: null
 notes: |

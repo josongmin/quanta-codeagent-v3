@@ -1,5 +1,13 @@
 # GOAL-04 — Attributed turn settlement and durable outcome ordering
 
+
+> **구현 대조 (2026-08-30, 코드 확인)** — 귀속·정산은 명세대로이고 형태가 둘 다르다.
+> - 런타임 입력의 `objectiveAttempt?: {...}`는 **capability 객체** `objectiveAttemptSlot`(claim/take/release/failStop/recover/status)로 구현됐다(`src/objective/attempt.ts`).
+> - `settlement_uncertain`은 `{kind:"fail-stopped", reason, objectiveId}`로, `ObjectiveAuthorityState`라는 이름은 존재하지 않는다(조합은 `core-store/completion-ops.ts` 내부).
+> - **rail 4(`/goal verify`가 에이전트 턴을 소모하지 않음)는 주인이 없다**: GOAL-05로 이월했다고 적혔으나 GOAL-05 티켓에 그 rail이 없고, main에 이를 단언하는 테스트도 없다. rail 5는 GOAL-08 round2/3이 닫았다.
+> - rail 9(일시정지가 비용은 기록하되 재무장은 막는다)는 테스트가 없다. rail 16은 attempt key를 빌더에 넣지 않은 채 단언해 사실상 공허하다.
+> - E2E 1번은 절반만 실재한다: PTY 재시작 케이스는 **평범한 foreground 턴**을 감싸며, "started slot이 소비된 채 남고 body가 재생되지 않는다"는 유닛(`attempt-lifecycle.test.ts`)에만 있다.
+
 **Priority:** P0 · **Depends on:** GOAL-03 · **Owner:** runtime turn transaction
 
 **Receipt:** docs/plans/aug-25-goal-v2/receipts/GOAL-04.yaml

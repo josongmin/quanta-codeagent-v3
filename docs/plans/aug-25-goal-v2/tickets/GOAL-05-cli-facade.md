@@ -1,5 +1,13 @@
 # GOAL-05 — CLI facade: /goal 단일 control, preset gate, status renderer
 
+
+> **구현 대조 (2026-08-30, 코드 확인)** — 대부분 구현됐고 두 가지가 다르다.
+> - `currentSourceStale`과 렌더러 `(stale!)` 마커는 **미구현**(`src/apps/cli/slash/goal-render.ts`는 `source: <digest>|unverified`만 출력). RED 9의 후반부는 검증 불가.
+> - RED 8("`QUANTA_GOAL` 미설정 ⇒ `/goal` 미등록")은 2026-08-27 default-ON 승격으로 **반전**됐다. 현재 테스트(`tests/unit/cli/objective-frontdoor.hellgate.test.ts`)는 "미설정이면 등록된다"를 단언한다.
+> - 파일 배치: 05A가 계획한 `src/apps/cli/goal/{goal-args,goal-control,goal-render}.ts`는 머지 `9b21d2fd2`에서 사라졌다. 실물은 `slash/goal-cmd.ts`(파싱+리포트) · `slash/goal-render.ts`(렌더러) · `slash/objective.ts`의 `buildGoalControl`(컨트롤). `--keep-contract`는 없다.
+> - 게이트는 `cli-feature-gates.ts`가 아니라 `src/objective/goal-preset.ts`(`applyGoalPreset`) + `knobs-b.ts`가 소유한다.
+> - E2E 체인 중 PTY에 있는 것은 set / 렌더 / criterion add / clear+재기동뿐 — `check add`,`verify`,`pause`,`resume`,`edit`는 PTY에 없다.
+
 **Priority:** P1 · **Depends on:** GOAL-04 · **크기:** ~30 tool-use, main-direct
 
 **구현 상태 (2026-08-25):** 완료. `/goal`과 deprecated `/objective`가 `GoalControl` 및

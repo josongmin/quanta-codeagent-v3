@@ -1,5 +1,13 @@
 # GOAL-07 — Transactional attach/fork and session-epoch fence
 
+
+> **구현 대조 (2026-08-30, 코드 확인)** — 이 티켓의 **Epoch fence / Transaction 섹션은 구현되지 않았다.**
+> - `sessionEpoch`, `WakeLifecyclePort` 는 repo 전체에 존재하지 않는다(grep 0). 실제 fence는 objective별 `attachGeneration` 카운터(`src/objective/authority.ts`)다.
+> - `src/session/attach-session.ts`는 114줄 선형 절차다 — prepare-all/역순 롤백/fatal fail-stop/wake-cancel 단계가 없다. 순서 보장 7단계는 웹 데몬(`src/apps/web-daemon/server/thread-hydrate.ts`)에 있고, 이는 티켓이 금지한 "두 번째 코디네이터" 형태다.
+> - commit 후 "검증 unknown 표시 + bounded reconcile" 없음.
+> - 따라서 RED 3~7(롤백)과 10/14의 epoch 절반은 검증 대상 자체가 없다. rail 12(fork)는 `cloneObjectiveForFork`가 구현돼 있으나 테스트 참조가 0이다.
+> - GOAL-04/06이 "GOAL-07이 sessionEpoch를 추가하면"이라 적은 문장들도 같은 이유로 무효다.
+
 **Priority:** P1 · **Depends on:** GOAL-06 · **Owner:** existing session attach transaction
 
 **Receipt:** docs/plans/aug-25-goal-v2/receipts/GOAL-07.yaml

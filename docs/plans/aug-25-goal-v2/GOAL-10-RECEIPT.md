@@ -1,8 +1,10 @@
 # GOAL-10 verification receipt
 
-Date: 2026-08-26
+Date: 2026-08-26 · **superseded in part — see the addendum at the bottom (2026-08-30)**
 
-Branch: `codex/goal-v2-main-integration`
+Branch: `codex/goal-v2-main-integration` (landed on `main`; the goal lane was
+reconciled by merge `9b21d2fd2`, and five further audit rounds landed through
+2026-08-29: `294111f92`, `8d450b010`, `9d43617c9`)
 
 ## Result
 
@@ -60,3 +62,40 @@ front-door goal E2E.
 
 The final commit SHA is reported after this receipt and the verified tree are
 committed; a commit cannot contain its own SHA without changing that SHA.
+
+## Addendum — 2026-08-30 doc↔code re-audit
+
+This receipt is a point-in-time record; the rail table below was true on
+2026-08-26 and several lines have since moved. Re-measured on `main`:
+
+| Line in the table above | 2026-08-30 |
+|---|---|
+| `god-code-ratchet + _arch` 73 pass | **266 pass / 0 fail** (25 files) — the suite ~3.6×'d |
+| `bun test tests/unit` 38329 pass / 2987 files | not re-measured; the tree holds **3066** unit files (a concurrent session was committing during the audit, so a single-process full-suite number would not be attributable) |
+| `bun test tests/integration` 3122 pass / 353 files | not re-measured; **363** integration files |
+| `lint && lint:debt` PASS, 221 diagnostics | **NOT reproducible**: `lint:debt` exits 1 with a prod `noExcessiveCognitiveComplexity` regression (37 > 36) plus unpinned `format`/`parse` hits. Attributed to files this plan never touched (`search-index-backend.ts`, `node-repl/default-kernel.ts`, `cli/internal.ts`, `agent/loop/skill-gate.ts`) |
+| compiled `dist/agent` PTY battery 9 pass | the battery is **10** cases since `9d43617c9` (process-restart); the compiled-binary parity run has **not** been repeated against the 10-case suite |
+| `fc validate` 1068 features | **1069**, and all four `fc` rails still PASS |
+
+"Regressions found and closed" stops at the 2026-08-26 set. Rounds 2–5
+(2026-08-27 → 08-29) closed eleven more probe-confirmed defects — unattributed
+web/SDK goal turns, a queued user turn TAKING the goal claim, the CLI ignoring a
+refused claim, an invisible fail-stop refuse loop, a `turn.cancel` claim leak,
+`recover()` having no caller, `/goal work` accept-then-drop, a daemon-killing
+handler throw, an ack emitted before every real gate, an unregistered socket
+starting a billed turn, and a non-hermetic e2e writing the developer's own
+149 MB thread DB. They are recorded in `receipts/GOAL-08.yaml` rounds 3–5 and
+summarised in `README.md` 실행 기록.
+
+"Remaining boundary" holds with one correction: say autonomous goal **pursuit**
+is outside the claim. Since the default-ON promotion the stdio/SDK door does
+build objective authority and expose the `objective_*` tools
+(`src/apps/cli/serve-stdio-cmd.ts`); what it has no front door for is the wake
+controller — `startGoalWakeController` still has exactly two production callers
+(`interactive-setup.ts`, `goal-wake-compose.ts`).
+
+What this receipt claimed as delivered scope but the code does not have:
+`tests/smoke/goal/`, the telemetry decision-counter set and its label-allowlist
+test, and 9 of the 14 PTY battery items. Those are tracked in `README.md`
+"현재 상태 — 열린 항목 (2026-08-30)".
+

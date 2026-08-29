@@ -7,7 +7,7 @@ maturity: L3
 status: new
 ui_surfaces: [cli, web]
 monitoring: partial
-modes: [interactive, ide]
+modes: [interactive, ide, daemon]
 configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:core", "codex-parity"]
@@ -25,9 +25,9 @@ surface_integration:
   cli: full
   web: full
   method: audited
-  verified: "2026-08-26"
+  verified: "2026-08-30"
   evidence:
-    cli: "Real PTY boots the source or installed CLI, proves default-ON command discovery, explicit QUANTA_GOAL=0 opt-out, goal create/show, autonomous queue execution, draft/background/foreground quiescence fences, and goal-only quiet-window behavior."
+    cli: "Real PTY boots the source or installed CLI, proves default-ON command discovery, explicit QUANTA_GOAL=0 opt-out, goal create/show, autonomous queue execution, draft/background/foreground quiescence fences, and goal-only quiet-window behavior; a real process kill plus resume-by-id proves the objective — and a clear — survive a restart."
     web: "Web-daemon composition submits a one-use, authority-validated goal-continuation capability through RuntimeSession.turn.submitGoalContinuation; an integration test proves concurrent user input stays outside the autonomous turn. A real WebSocket client also asks for ONE user-requested goal turn with a `goalWork` frame (peeked before the session bridge, host-minted user-requested-goal-work provenance): a real-daemon e2e proves it charges the user turn budget and mints a receipt without touching the autonomous hard cap, and that every refusal is answered on the same socket."
 purpose: |
   The complete goal preset is enabled by default in CLI and web-daemon roots:
@@ -74,6 +74,12 @@ evidence:
     - src/apps/web-daemon/goal-wake-compose.ts
     - src/apps/web-daemon/goal-work-compose.ts
     - src/apps/web-daemon/goal-work-frame.ts
+    - src/apps/web-daemon/server.ts
+    - src/objective/attempt.ts
+    - src/kernel/session/scheduler.ts
+    - src/kernel/session/ports.ts
+    - src/host/runtime/internal/context-binding/objective-settlement.ts
+    - apps/web-frontend/src/ws/client.ts
     - src/runner/orchestrate/session-turn-driver.ts
     - src/sdk/runtime/session/turn-submit-authority.ts
   adrs: [394]
@@ -100,11 +106,11 @@ evidence:
       - tests/e2e-pty/cli-goal-pursuit-e2e.test.ts
 knobs:
   - name: QUANTA_GOAL
-    where: src/objective/goal-preset.ts
+    where: src/shared/runtime-config-knobs/knobs-b.ts (the preset in src/objective/goal-preset.ts seeds the three internal gates from it)
     default: 'true (ON)'
     purpose: Default-ON public preset for full goal-control behavior; QUANTA_GOAL=0 disables it and explicit internal overrides win.
   - name: QUANTA_OBJECTIVE_TOOLS
-    where: src/objective/goal-preset.ts
+    where: src/host/runtime/objective-store-wire.ts (read site; seeded by src/objective/goal-preset.ts)
     default: 'inherits QUANTA_GOAL (ON)'
     purpose: Advanced internal gate for objective authority and tool exposure; an explicit value overrides the public preset.
   - name: QUANTA_GOAL_ENFORCE
@@ -127,6 +133,10 @@ knobs:
     where: src/shared/runtime-config.ts
     default: '20'
     purpose: Advanced hard cap when the objective has no lower explicit max-turns budget.
+  - name: QUANTA_GOAL_JUDGE
+    where: src/shared/runtime-config.ts
+    default: 'off'
+    purpose: Advanced shadow-only completion judge (enum; "shadow" observes, anything else is off). It can never mutate objective state — the authority owns completion.
 deliberate_hold: null
 notes: |
   Evidence is intentionally limited to interactive CLI and web-daemon/IDE

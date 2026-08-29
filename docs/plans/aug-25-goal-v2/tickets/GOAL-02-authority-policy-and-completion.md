@@ -1,5 +1,13 @@
 # GOAL-02 — Exhaustive authority policy and deterministic completion
 
+
+> **구현 대조 (2026-08-30, 코드 확인)** — 정책표·완료 판정은 구현됐고 세 가지가 다르다.
+> - `MutationVerdict`는 `"allow" | "approval" | { deny: CommitRejection }`로 진화했다(deny가 타입코드를 실음).
+> - "legacy `reject`는 경고 1회와 함께 off로 파싱"은 **미구현** — `src/shared/runtime-config.ts`는 조용한 삼항이다.
+> - "shadow judge는 GOAL-04까지 production 미호출"은 **GOAL-03에서 이미 배선**됐다(`maybeWireObjectiveJudgeObserver` → `capability-wire-registry.ts`). telemetry 전용인 성질은 유지.
+> - 이 티켓의 RED가 가리키는 `tests/unit/agent/objective-completion-admission.test.ts`와 그 대상 모듈(`src/agent/tier1/objective-completion-admission.ts`)은 GOAL-02에서 삭제됐다 — 대체 커버리지는 `tests/unit/objective/policy.test.ts`.
+> - rail 12의 "pause가 re-arm을 억제한다" 절반은 GOAL-04/06으로 넘어갔고 전용 테스트가 없다.
+
 **Priority:** P0 · **Depends on:** GOAL-01 · **Owner:** objective policy
 
 **Receipt:** docs/plans/aug-25-goal-v2/receipts/GOAL-02.yaml

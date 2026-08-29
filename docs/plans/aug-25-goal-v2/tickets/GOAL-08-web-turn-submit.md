@@ -1,5 +1,13 @@
 # GOAL-08 — Atomic turn.submit, admission port, and web goal controls
 
+
+> **구현 대조 (2026-08-30, 코드 확인)** — 원자적 `turn.submit`은 구현됐고, 주변 명세가 다르다.
+> - `session.objective.work` 커맨드는 만들지 않았다. 웹 `/goal work`는 커넥션 레이어 out-of-band 프레임 `{kind:"goalWork", text, requestId?}`(`src/apps/web-daemon/goal-work-frame.ts`)로 host 동사 `turn.submitGoalWork`를 부른다 — 커널 리듀서에 닿지 않는다. 사유는 `receipts/GOAL-08.yaml` round5.
+> - `GoalContinuationAdmissionPort`는 존재하지 않는다. 실물은 `createTurnSubmitAuthority`(issue/consume/revoke)와 커널의 `consumeTurnSubmitProvenance` + `claimGoalAttemptForTurn`으로 쪼개져 있다.
+> - provenance는 `{kind, objectiveId, objectiveRevision, attemptId}` 4필드뿐 — 프롬프트 digest/ordinal/epoch 바인딩 없음. 커맨드는 `text`/`images`를 직접 싣고(`expectedSessionRevision`도 추가됨) 커널이 그 텍스트를 실행한다.
+> - **승인 재개가 미귀속이다**: `src/apps/web-daemon/server/approval-continuation.ts`가 맨 `session.turn.run`을 enqueue한다 ⇒ goal provenance도 claim도 없다. 티켓 자신의 stop condition 위반이며 열린 결함으로 README "현재 상태"에 등재.
+> - **웹 objective 컨트롤 생산자 0**: `session.objective.mutate`는 커널까지 살아 있으나 프론트에서 아무도 발행하지 않는다. 관측 pane은 읽기 전용이고 next-wake 사유를 보여주지 않는다.
+
 **Priority:** P1 · **Depends on:** GOAL-05A and GOAL-07 · **Owner:** session protocol/kernel plus web composition
 
 **Receipt:** docs/plans/aug-25-goal-v2/receipts/GOAL-08.yaml

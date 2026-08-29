@@ -1,5 +1,13 @@
 # GOAL-01 — Domain v2, snapshot migration, and public mutator closure
 
+
+> **구현 대조 (2026-08-30, 코드 확인)** — 도메인은 명세대로 랜딩했고 이름이 여럿 다르다.
+> - `OBJECTIVE_MUTATION_KINDS` → `OBJECTIVE_OPERATION_KINDS`(`src/objective/mutations.ts`) · `ObjectiveReadPort`에 `getRevision` 없음(`get/list/readDomain`) · 명세된 6개 이름있는 capability(`VerifierCommitPort` 등)는 존재하지 않고 actor-keyed `ObjectiveCapabilities` 하나로 통합됐다(`src/objective/capabilities.ts`).
+> - mutation union에 티켓에 없는 `markCriterionVerified`·`abandonAttempt`가 추가돼 있다.
+> - "CLI·모델·웹이 같은 한도를 **import**한다"는 미구현 — `slash/goal-cmd.ts`와 `tool/objective/index.ts`가 4000을 각자 리터럴로 재선언한다.
+> - mutator closure는 타입이 아니라 allowlist 라쳇으로만 강제된다: `ObjectivePort`가 아직 11개 직접 writer를 노출한다(`src/objective/types.ts`).
+> - RED 10/12/13은 부분 커버(스테일 revision 재커밋, CLI·웹 경계의 4000자 케이스, 스냅샷 버전 parity 테스트가 각각 없음).
+
 **Priority:** P0 · **Depends on:** GOAL-00R · **Owner:** objective domain/schema
 
 **Receipt:** docs/plans/aug-25-goal-v2/receipts/GOAL-01.yaml

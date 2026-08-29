@@ -12,7 +12,21 @@ Codex 공개 계약(durable objective, verifiable stopping condition, `/goal edi
 checkpoint 보고, 장시간 실행)만 parity 대상. CAS/blocker hysteresis/verifier receipt/budget state는
 Quanta 안전 확장으로 분리 표기한다.
 
-## 코드 대조 결과 (2026-08-25, 직접 확인)
+## 코드 대조 결과 — 2026-08-25 **착수 시점 baseline** (현재 코드 설명 아님)
+> 이 표는 티켓을 쓰기 전 결함 조사 기록이다. GOAL-01~10이 대부분을 해소했으므로 **현재 상태로 읽지 말 것**.
+> 2026-08-30 재대조에서 확인된 해소분(근거 경로도 함께 이동/삭제됨):
+> `objective-completion-admission.ts`(judge admit) → 파일 삭제, judge는 `QUANTA_GOAL_JUDGE=shadow` 텔레메트리 전용(`src/shared/runtime-config.ts`) ·
+> `goal-continuation-hook.ts` + `startGoalContinuationTicker`(setInterval) → 삭제, edge-armed `startGoalWakeController`(`src/objective/goal-wake-host.ts`) ·
+> `objective-progress.ts`(receipt가 delta 아님) → 삭제, `src/objective/progress-receipt.ts` + `authority.buildSettlementReceipt` ·
+> GOAL_QUIET_MS 하한 없음 → 15s 이중 clamp(`runtime-config.ts` + `goal-wake-policy.ts`) ·
+> verifier 실행 경로 부재 → `src/host/runtime/objective-verifier-wire.ts`(`runArgv`) ·
+> `/objective`만 편집 가능 → `/goal`이 11개 서브커맨드 단일 facade(`slash/goal-cmd.ts`) ·
+> planModeActive 정적 → 매 fire 재평가(`interactive-setup.ts`) ·
+> `continuation` actor writer 0 → `capabilities.ts`가 실제 writer 보유 ·
+> wake registry unbounded → thread당 1키 + eviction(`goal-wake-controller.ts`) ·
+> rehydrate가 legacy `completed` 유지 → 폐기(`core-store/rehydrate.ts`).
+> 게이트 참조 수(32/21/16/10/5/4)는 2026-08-25 스냅샷이며 현재 34/17/13/12/5/4.
+
 | 주장 | 근거 | 판정 |
 |---|---|---|
 | judge unavailable=admit (mode 무관) | `src/agent/tier1/objective-completion-admission.ts:317-327` | 확증. catalog yaml:143-146에 설계로 명시돼 있음 → 정책 반전 |
@@ -40,6 +54,38 @@ Quanta 안전 확장으로 분리 표기한다.
 rail 재실행: arch+ratchet 69/0 · typecheck src/tests pass · goal 유닛 9파일 116/0 ·
 PTY `cli-goal-pursuit-e2e` 8 pass/1 fail (`uses its own quiet window…`, `No matching recording`;
 단독 `-t` 재실행 2/2 pass → 순서의존, 원인 미측정).
+
+## 구현 대조 감사 (2026-08-30) — 티켓 명세 vs 실제 코드
+
+3바퀴 병렬 어딧(receipts / tickets / README+catalog) 후 각 주장을 직접 프로브로 확인했다.
+**티켓은 명세 원본이라 고쳐 쓰지 않고, 각 티켓 상단에 "구현 대조" 콜아웃을 달았다.** 요약:
+
+| 티켓 | 실제와 다른 핵심 | 근거 |
+|---|---|---|
+| GOAL-03 | **샌드박스 절반이 미구현**: verifier는 `perCallWrap` 없이 실행 → readable-root allowlist / network deny / 자원 캡 없음. 소스 쓰기는 사후 digest 비교로 *감지*할 뿐 차단하지 않는다. receipt가 저장하기로 한 필드(타임아웃 플래그·duration·stdout digest·runner version·posture)도 commit에서 버려진다. `sandbox-unavailable`은 어휘만 존재 | `objective-verifier-wire.ts` `maybeWireObjectiveVerifier`, `criteria/model.ts`, `criteria/ports.ts` |
+| GOAL-05 | `currentSourceStale` / 렌더러 `(stale!)` 마커 미구현. RED 8번("`QUANTA_GOAL` 미설정 → `/goal` 미등록")은 default-ON 승격으로 **반전**됐고 테스트가 반대를 단언한다 | `slash/goal-render.ts`, `objective-frontdoor.hellgate.test.ts` |
+| GOAL-06 | CLI의 `attachingOrClosing`은 **상시 false**(`armGoalWake`가 넘기지 않음) → 8개 quiescence 저장소 중 attach/close만 미투영. 렌더러가 `limitedBy`(제한 주체)를 버린다. fire 순서에 reconcile 단계 없음 | `interactive-setup.ts`, `goal-wake-host.ts`, `goal-wake-controller.ts` |
+| GOAL-07 | **`sessionEpoch`·`WakeLifecyclePort`·역순 롤백 전부 미구현**(grep 0). 실제는 objective별 `attachGeneration` 카운터 + 114줄 선형 `attach-session.ts`이고, 순서 보장 7단계는 웹 데몬(`server/thread-hydrate.ts`)에 있다 | `src/objective/authority.ts`, `src/session/attach-session.ts` |
+| GOAL-08 | `session.objective.work` 커맨드·`GoalContinuationAdmissionPort`·프롬프트 digest 바인딩 미구현(대신 out-of-band `goalWork` 프레임 + `turnSubmitAuthority`/`consumeTurnSubmitProvenance` 분리, provenance 4필드). **웹 objective 컨트롤(mutate/verify) 생산자 0** | `goal-work-frame.ts`, `turn-submit-authority.ts`, `apps/web-frontend/**` |
+| GOAL-09 | `observeBlocker`는 mutation kind가 아니라 actor 라우팅. `dependencyKey`(host 파생)가 아니라 **모델이 준 문자열의 `JSON.stringify`**이고 레지스트리 조회가 없다 — 티켓 자신의 stop condition("prose가 의존성을 식별") 위반. `occurrenceEvidenceId` 미구현, 등록된 생산자 0 | `blocker-observation.ts`, `policy.ts`, `tool/objective/index.ts` |
+| GOAL-10 | `tests/smoke/goal/` 없음, **텔레메트리 섹션 전부 미구현**(decision counter 0, label allowlist 테스트 0). PTY 배터리 14항목 중 약 5항목만 존재 | `tests/smoke/`, `tests/e2e-pty/cli-goal-pursuit-e2e.test.ts` |
+
+반증된 어딧 주장(문서에 반영하지 않음): "웹 런타임이 `activeTurnRef`를 채우지 않는다" — `runtime-factory.ts`가 파사드에 노출한다.
+
+## 현재 상태 — 열린 항목 (2026-08-30)
+
+안전 rail(귀속·하드캡·CAS·verifier receipt·quiescence)은 닫혀 있다. 남은 것은 아래가 전부다.
+
+1. **정산 후 체크포인트 리포트 방출** (GOAL-05A rail 16). 데이터 모델은 있고 `/goal`이 on-demand로 렌더하지만 **자동 방출 훅이 없다** — 유저가 `/goal`을 쳐야만 진행 상황을 본다. 05A가 "06/10으로 이월"이라 적었으나 둘 다 지키지 않은 죽은 이월. ROI 높음(agent-state 가시성 북극성 직결, 배선만 남음).
+2. **웹 approval 재개가 미귀속**. 승인 후 재개는 `session.turn.run`(맨 턴)이라 goal provenance도 claim도 없다 — goal 턴이 승인에서 멈췄다 재개되면 예산·하드캡·receipt에 안 잡힌다. GOAL-08 자신의 stop condition 위반. ROI 높음(정확성).
+3. **텔레메트리** (GOAL-10). armed/skip(reason)·enqueue admitted/rejected·attempt started/settled·completion satisfied/rejected 카운터와 label allowlist 테스트가 전무. ROI 중간~높음("왜 안 깨어났나"를 세는 수단이 `/goal` 한 줄뿐).
+4. **PTY 배터리 결손** (GOAL-05 E2E / GOAL-10 1~14). `check add → verify → pause → resume → edit`, 예산 소진, no-progress 간격 증가, blocker 2/3→3/3, zero-criteria 완료 거절, attach B가 PTY에 없다. ROI 중간(표면 회귀의 유일한 실경로).
+5. **제품 예산 상한 부재**. `PRODUCT_BUDGET_CEILING`/`clampBudgetLimit`이 머지 `9b21d2fd2`에서 사라진 뒤 복귀 안 함 — 유저가 `maxTurns`를 무한정 넣을 수 있다(자율 하드캡 20은 무관하게 유지). ROI 중간(`merge-symbol-loss-ratchet`이 사건을 고정).
+6. **GOAL-03 샌드박스 절반**. 위 표 참조. ROI 중간~높음이지만 "설치 슬롯 계약" 결정으로 이월된 상태 — 되살리려면 결정부터.
+7. **`tests/smoke/goal/`** (GOAL-10). ROI 낮음~중간, 운영 측정.
+8. **headless/batch goal 추적 없음**. GOAL-10 receipt가 명시적으로 claim 밖으로 뒀다(단, stdio door는 default-ON 승격 이후 objective *authority*는 노출한다 — 자율 *추적*만 없다). ROI 낮음.
+9. **번들 웹 UI에 goal-work 버튼 없음**. 프레임·클라이언트 메서드(`sendGoalWork`)는 있고 호출하는 컴포넌트가 없다. ROI 낮음(UX 결정).
+
 
 ## 순서와 의존
 ```
@@ -142,6 +188,6 @@ GOAL-00 index split + staged landing
 
 ## 결정 기록
 - judge `reject` 모드 제거(shadow만). 원문은 "reject 유지 시 unavailable=거부"도 허용했으나 완료권이 authority로 가면 judge에 판정권이 없음.
-- budget 변경은 user/system 전용 `setBudget` mutation으로 same-ID amend한다. criterion/check 변경만
+- budget 변경은 user/system 전용 `amendBudget` mutation으로 same-ID amend한다(CLI facade의 메서드 이름만 `setBudget`; mutation kind는 `amendBudget` — `src/objective/mutations.ts`). criterion/check 변경만
   `replace`로 새 objectiveId를 발급하고 이전 completion/verifier/progress 증거를 폐기한다.
 - fork는 paused clone.

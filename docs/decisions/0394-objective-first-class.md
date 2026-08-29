@@ -1,6 +1,8 @@
 # ADR-0394 — Objective as a first-class per-thread object
 
-**Status:** Accepted (2026-05-28)
+**Status:** Accepted (2026-05-28) · **Slice moved:** the objective slice now
+lives at `src/objective/` (not `src/agent/objective/` as written below); the
+barrel rule still holds. Noted 2026-08-30 by the goal-plan doc↔code audit.
 **Slice:** `src/agent/objective/` (new, self-contained) + hellgate.
 **Wave scope:** MODEL ONLY — the typed model, the closed port, and the
 in-memory store. NOT wired into the agent loop, dispatch, prompt, features,

@@ -25,3 +25,4 @@ notRun:
   - bun run lint                                          # repo-wide; lint:debt ran
   - bun fc validate / bun fc diff                         # GOAL-00R touches no catalog
 decisionsFrozen: see README.md "결정 기록" (verifier posture = workspace-write + digest invariance; receipt rail may run in a git worktree at S; reconcile precheck)
+docAudit (2026-08-30): 이 baseline의 rail 수치는 착수 시점 값이다. 현재: god-code/_arch 266/0(그때의 cohort ratchet red는 해소), PTY 9→10 케이스, test:contract 7→10, fc 1069. `src/apps/cli/run-main.ts`는 존재하지 않는다(있는 건 `src/apps/bench/run-main.ts`).

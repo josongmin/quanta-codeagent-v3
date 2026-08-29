@@ -1,5 +1,13 @@
 # GOAL-06 — Bounded event-driven wake controller and hard product cap
 
+
+> **구현 대조 (2026-08-30, 코드 확인)** — 핵심 안전 rail은 구현됐고 세 가지가 다르다.
+> - CLI의 `attachingOrClosing`은 **상시 false**다: `armGoalWake` 호출부가 그 함수를 넘기지 않아 `?? false`로 떨어진다(`src/apps/cli/repl/session-loop/interactive-setup.ts`). 8개 quiescence 저장소 중 attach/close만 실투영이 아니다. 웹 데몬은 투영한다.
+> - fire 순서에 **reconcile 단계가 없다**(fire → 재독+quiescence → `tryClaim` → enqueue). `freshness-unresolved`는 wake skip 사유가 아니다.
+> - 렌더러는 요청 한도/양쪽 카운터/제한 주체를 보여주지 않는다 — host가 `limitedBy`를 버린다(`goal-wake-host.ts`).
+> - skip 어휘 재명명: `budget-limited`→`autonomous-turn-cap`(+`limitedBy`), paused/blocked/completed→`not-active`, non-quiescent→`GoalWakeStatus`의 `not-quiescent`, fatal→`attempt-slot-fail-stopped`.
+> - PTY 시간 예산 ≤90s는 2026-08-29 재시작 케이스 추가로 초과한다(실측 63s, 타임아웃 예산은 그보다 큼).
+
 **Priority:** P0 · **Depends on:** GOAL-04 · **Owner:** goal wake controller/policy
 
 **Receipt:** docs/plans/aug-25-goal-v2/receipts/GOAL-06.yaml

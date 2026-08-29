@@ -1,5 +1,12 @@
 # GOAL-09 — Typed dependency blockers and transient-observation hysteresis
 
+
+> **구현 대조 (2026-08-30, 코드 확인)** — 히스테리시스(3회 distinct attempt)는 진짜이고, **의존성 식별 절반이 명세와 반대**다.
+> - `observeBlocker`는 mutation kind가 아니다. 하나의 `addBlocker` mutation(+선택적 `attemptId`/`target`)을 actor로 라우팅한다(`src/objective/blocker-observation.ts`). `mutations.ts`/`policy.ts`의 관련 주석은 아직 옛 설명을 담고 있다.
+> - `dependencyKey`(host 파생)는 없다. 실제 `dependencyRef`는 **모델이 준 문자열들의 `JSON.stringify`**이고 레지스트리 조회가 없다 — 티켓의 stop condition("prose/hash가 의존성을 식별하면 중단") 위반.
+> - `occurrenceEvidenceId` 미구현 ⇒ RED 6(occurrence vs attempt 구분)은 표현 자체가 불가능하다.
+> - 5개 레지스트리 생산자 중 검증되는 것은 0이다. 승인 채널은 raw `addBlocker`에 자유 문자열을 넣고(`src/agent/approval-state-machine/store.ts`), attention/subagent는 objective를 참조조차 하지 않는다. 유일한 `target.ref` 생산자는 모델(`src/tool/objective/index.ts`)이다. 단 `attemptId`는 host가 찍는다.
+
 **Priority:** P1 · **Depends on:** GOAL-02, GOAL-04, and GOAL-06 · **Owner:** objective blocker policy
 
 **Receipt:** docs/plans/aug-25-goal-v2/receipts/GOAL-09.yaml
