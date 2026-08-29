@@ -32,11 +32,21 @@ set -e
 BIOME="./node_modules/.bin/biome"
 [ -x "$BIOME" ] || exit 0   # no toolchain in this checkout ⇒ never block a commit
 
-# Staged, still-present files biome can process. NUL-separated: a path may
-# contain spaces, and a truncated path would silently drop from the check.
+# Staged, still-present files THIS REPO ACTUALLY LINTS.
+#
+# The scope comes from `collectBiomeTargets` — the same SSOT `bun run lint`
+# uses — not from an extension list of this hook's own. An extension list was a
+# second authority and it disagreed with the first on its first real commit:
+# `tools/dev/unit-speed-budget.ts` is not a biome target, so `bun run lint`
+# never judges its `console.*` calls, while raw biome calls 8 of them ERRORS.
+# The hook refused a commit the project's own gate would have passed — the
+# shape that teaches `--no-verify`.
+#
+# NUL-separated throughout: a path may contain spaces, and a truncated path
+# silently drops from the check.
 STAGED=$(git diff --cached --name-only --diff-filter=ACMR -z \
-  | tr '\0' '\n' \
-  | grep -E '\.(ts|tsx|js|jsx|mjs|cjs|json|jsonc)$' || true)
+  | bun run "$(git rev-parse --show-toplevel)/tools/dev/biome-staged.ts" 2>/dev/null \
+  | tr '\0' '\n' || true)
 
 [ -n "$STAGED" ] || exit 0
 

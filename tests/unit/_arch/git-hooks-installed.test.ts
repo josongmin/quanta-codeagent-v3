@@ -75,6 +75,15 @@ describe("git pre-commit hook is installed and does what it claims", () => {
         mode: 0o755,
       })
       symlinkSync(join(REPO_ROOT, "node_modules"), join(sandbox, "node_modules"))
+      // The REAL scope helper + its SSOT, so the sandbox exercises the same
+      // "which staged paths does this repo lint" decision production makes.
+      mkdirSync(join(sandbox, "tools", "dev"), { recursive: true })
+      for (const f of ["biome-staged.ts", "biome-targets.ts"]) {
+        writeFileSync(
+          join(sandbox, "tools", "dev", f),
+          readFileSync(join(REPO_ROOT, "tools", "dev", f), "utf8"),
+        )
+      }
       writeFileSync(join(sandbox, "biome.json"), readFileSync(join(REPO_ROOT, "biome.json")))
       // REQUIRED, and the paired control below is what caught its absence: the
       // repo's biome.json sets `vcs.useIgnoreFile`, so with no `.gitignore`
@@ -89,8 +98,13 @@ describe("git pre-commit hook is installed and does what it claims", () => {
       // it and pass 2 must refuse. (An unused import is deliberately NOT used
       // here: measured, this config reports it at WARN, exit 0 — the probe has to
       // be something biome actually errors on, or the arm proves nothing.)
-      writeFileSync(join(sandbox, "probe.ts"), "export const x = = 1\n")
-      git("add", "probe.ts")
+      // Under `tests/`, because the hook asks `collectBiomeTargets` which staged
+      // paths this repo actually lints and that walks `src/` and `tests/` only.
+      // A probe at the sandbox root would be OUT of scope, the hook would
+      // correctly do nothing, and the refusal arm would fail for the wrong reason.
+      mkdirSync(join(sandbox, "tests"))
+      writeFileSync(join(sandbox, "tests", "probe.ts"), "export const x = = 1\n")
+      git("add", "tests/probe.ts")
       const refused = git("commit", "-m", "must not land")
       const head = git("rev-parse", "--verify", "HEAD")
       expect({
@@ -101,11 +115,11 @@ describe("git pre-commit hook is installed and does what it claims", () => {
       // PAIRED CONTROL — the same file without the unused import commits, and
       // the hook's mechanical pass fixes its formatting on the way through. Without
       // this arm a hook that refused EVERYTHING would satisfy the assertion above.
-      writeFileSync(join(sandbox, "probe.ts"), "export const x   =    1\n")
-      git("add", "probe.ts")
+      writeFileSync(join(sandbox, "tests", "probe.ts"), "export const x   =    1\n")
+      git("add", "tests/probe.ts")
       const accepted = git("commit", "-m", "lands")
       expect(accepted.exitCode).toBe(0)
-      expect(readFileSync(join(sandbox, "probe.ts"), "utf8")).toBe("export const x = 1\n")
+      expect(readFileSync(join(sandbox, "tests", "probe.ts"), "utf8")).toBe("export const x = 1\n")
     } finally {
       rmSync(sandbox, { recursive: true, force: true })
     }
