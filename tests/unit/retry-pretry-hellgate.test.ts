@@ -85,11 +85,22 @@ describe("withRetryPRetry — B. retry then succeed", () => {
     const d1 = s1 - s0
     const d2 = s2 - s1
     const d3 = s3 - s2
-    // With factor=2, jitter off, minTimeout=8, maxTimeout=64:
-    //   d1 ≈ 8 (post-attempt 1), d2 ≈ 16, d3 ≈ 32. Allow generous slack
-    //   for scheduler noise but assert MONOTONIC non-decreasing.
-    expect(d2 + 4).toBeGreaterThanOrEqual(d1) // +4 slack
-    expect(d3 + 4).toBeGreaterThanOrEqual(d2)
+    // With factor=2, jitter off, minTimeout=8, maxTimeout=64 the SCHEDULE is
+    // 8 / 16 / 32. Each observed gap is asserted against its own floor, not
+    // against its neighbour.
+    //
+    // Monotonicity was the wrong invariant: a loaded scheduler stretches one
+    // sleep and not the next, so `d2 >= d1` breaks while the backoff is
+    // perfectly correct — measured, it failed in two of eight suite shards and
+    // passed in isolation every time. A floor cannot break that way, because
+    // load only ever ADDS: `setTimeout(8)` can take 60ms, never 3ms.
+    //
+    // It still catches the thing the test is for. A backoff stuck at its
+    // initial delay leaves d3 near 8, far under 32.
+    const EARLY_MS = 2 // timers may fire marginally early
+    expect(d1).toBeGreaterThanOrEqual(8 - EARLY_MS)
+    expect(d2).toBeGreaterThanOrEqual(16 - EARLY_MS)
+    expect(d3).toBeGreaterThanOrEqual(32 - EARLY_MS)
   })
 
   test("4. jitter on → delays vary across runs (not byte-identical)", async () => {
