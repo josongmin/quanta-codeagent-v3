@@ -127,12 +127,17 @@ export const pollPeerInbox = (cfg: AgentConfig): Message | null => {
  * The gate is load-bearing: a wired slot with `QUANTA_CONTROL_REQUEST` off is a
  * strict no-op — the port is not even queried.
  */
-export const pollControlRequests = (cfg: AgentConfig): void => {
+export const pollControlRequests = async (cfg: AgentConfig): Promise<void> => {
   const slot = cfg.controlRequest
   if (slot === undefined) return
   if (!isControlRequestEnabled(slot.env)) return
   try {
-    drainControlRequests(slot.port, slot.context, slot.applier)
+    // AWAITED (MR-03). The drain runs at the TOP of a turn and `set_model` writes
+    // durably; not waiting meant the very same turn read a selection the write had
+    // not reached, ran the OLD model, and then had its end-of-turn echo report the
+    // NEW one. Measured through the real loop: the turn ran the boot model and the
+    // store was still empty when the turn ENDED.
+    await drainControlRequests(slot.port, slot.context, slot.applier)
   } catch (e) {
     // Defense-in-depth: `drainControlRequests` is already NO-THROW, but a future
     // regression must never crash the turn seam.

@@ -13,9 +13,11 @@
  *       → @/tool          (a 973-line barrel re-exporting all of src/tool)
  *     → @/agent/lsp-bridge → lsp-bridge/diagnostics → @/tool
  *
- * Measured before the cut: **1,259 files of `src/` loaded by the preload, 284 of
- * them under `src/tool` and 25 under `src/agent/loop`**. After importing the
- * leaves instead: **71 files, 0 and 0**.
+ * Measured before the cut: **1,202 files of `src/` loaded by the preload, 270 of
+ * them under `src/tool` and 27 under `src/agent/loop`**. After importing the
+ * leaves instead: **67 files, 0 and 0**. (An earlier commit message said
+ * 1,259/284/25 → 71; those came from a static import walk that counted comments
+ * and type-only edges. These are from the runtime, re-measured three times.)
  *
  * ## Why it is worth a gate rather than a comment
  *
@@ -124,11 +126,63 @@ describe("preload runtime closure", () => {
   })
 
   test("the total stays under a one-directional ceiling", () => {
-    // 71 measured after the cut, from 1,259 before. The ceiling is headroom for
+    // 67 measured after the cut, from 1,202 before. The ceiling is headroom for
     // ordinary drift, not for a barrel: a single re-added barrel import is worth
     // hundreds and blows straight through it.
     expect(loaded.length).toBeLessThanOrEqual(120)
   })
+
+  test("🔴 the preload still DOES its job — the reset hooks are wired and effective", () => {
+    // A ceiling on module count makes the cheapest way to go greener "delete the
+    // hooks". Measured: removing both setter imports AND both reset calls from
+    // `tests/setup.ts` left this gate at 5 pass — a gate that rewards gutting the
+    // thing it guards. So the hooks are asserted present, by name.
+    const setup = readFileSyncSafe(join(REPO_ROOT, "tests", "setup.ts"))
+    expect(setup.length, "tests/setup.ts is missing — it IS the preload").toBeGreaterThan(500)
+    for (const hook of [
+      "__setBranchRunAgentForTest",
+      "__setLspAvailabilityOverrideForTest",
+      "__resetSpanSink",
+      "__resetRuntimeConfig",
+    ]) {
+      expect(setup.includes(hook), `tests/setup.ts no longer calls ${hook}`).toBe(true)
+    }
+  })
+
+  test("🔴 the moved cell still resets — a silent no-op setter passes everything else", () => {
+    // The wiring proof the relocation shipped without. Making the setter ignore
+    // `null` — exactly what a careless refactor across the new module boundary
+    // produces — left this gate AND all four branch-search suites green. Nothing
+    // in the repo noticed that the preload's `afterEach(… (null))` had stopped
+    // clearing the slot.
+    //
+    // Driven through the same import path `tests/setup.ts` uses, so a re-export
+    // that silently becomes a different binding fails here too.
+    const probe = `
+      import { __setBranchRunAgentForTest, branchRunAgentOverride }
+        from "@/agent/branch-search-runner/run-agent-override"
+      const sentinel = (() => undefined) as never
+      __setBranchRunAgentForTest(sentinel)
+      if (branchRunAgentOverride() !== sentinel) throw new Error("set did not take")
+      __setBranchRunAgentForTest(null)
+      if (branchRunAgentOverride() !== null) throw new Error("reset did not clear")
+      process.stdout.write("RESET-OK\\n")
+    `
+    const dir = mkdtempSync(join(REPO_ROOT, "tests", "zz-reset-probe-"))
+    try {
+      const file = join(dir, "probe.ts")
+      writeFileSync(file, probe)
+      const proc = Bun.spawnSync(["bun", "run", file], {
+        cwd: REPO_ROOT,
+        stdout: "pipe",
+        stderr: "pipe",
+      })
+      const out = `${proc.stdout.toString()}${proc.stderr.toString()}`
+      expect(out, "the override cell does not round-trip set→clear").toContain("RESET-OK")
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  }, 60_000)
 
   test("🔴 the override cell is a leaf — no value imports", () => {
     // The property the preload depends on. `run-agent-override.ts` may reference

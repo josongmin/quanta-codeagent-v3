@@ -44,8 +44,12 @@ const lldbDap = (): boolean => {
 // DOWN. The `-real-e2e.test.ts` sibling `runtime-rust-real-e2e.test.ts` already
 // required `QUANTA_REAL_TOOLCHAIN_E2E`; this file did not, so the suffix meant
 // two different things. Same suffix, same lane now: a VISIBLE skip by default,
-// run by `bun run test:real-toolchain`. CI coverage is unchanged — the runner
-// has none of these toolchains, so these describes already skipped there.
+// run by `bun run test:real-toolchain`. CI still runs this lane —
+// `.github/workflows/ci.yml` has an explicit `QUANTA_REAL_TOOLCHAIN_E2E=1 bun run
+// test:real-toolchain` step, added after an audit measured that ubuntu-latest DOES
+// ship node, go, cargo, python3 and npm (only clangd, lldb-dap, dlv and debugpy are
+// absent), so gating without that step silently dropped 8 cases from the blocking
+// merge gate.
 const REAL_E2E = gateOn(process.env, "QUANTA_REAL_TOOLCHAIN_E2E")
 const D = REAL_E2E && hasDebugpy() ? describe : describe.skip
 const buildSources = (_dir: string) => ({

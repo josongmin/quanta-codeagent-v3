@@ -14,19 +14,51 @@
  */
 import { describe, expect, test } from "bun:test"
 import type { AgentMode } from "@/agent"
+import { createModelRoutingAuthority } from "@/agent/model-routing/authority"
 import { inMemoryStickyModelStore } from "@/agent/sticky-model"
 import { buildModelAdapter } from "../model-adapter"
 
-const build = (over?: { mode?: AgentMode; current?: () => string; ids?: readonly string[] }) => {
+/** MR-02 — the adapter now reads and mutates through the ROUTING AUTHORITY, not
+ *  the store. It used to poke the store directly, which made it a second owner of
+ *  the selection: `/model --clear` cleared the store while the authority still
+ *  held the pick and `current()` kept announcing it. The harness therefore builds
+ *  a REAL authority over an in-memory store, so these cases exercise the same
+ *  precedence/validation path production does. */
+const build = (over?: {
+  mode?: AgentMode
+  current?: () => string
+  ids?: readonly string[]
+  modeRef?: { value: AgentMode }
+}) => {
   const store = inMemoryStickyModelStore()
-  const adapter = buildModelAdapter({
+  const ids = over?.ids ?? ["gpt-5", "gpt-4o", "future-xyz"]
+  const modeOf = (): AgentMode => over?.modeRef?.value ?? over?.mode ?? "default"
+  const ports = new Map(
+    ids.filter((id) => id !== "gpt-5").map((id) => [id, { model: id } as never]),
+  )
+  const routing = createModelRoutingAuthority({
     store,
+    catalog: {
+      candidates: [...ports].map(([id, port]) => ({ id, port })),
+      ids: () => ids,
+      refresh: async () => undefined,
+    },
+    provider: "openai",
+    bootModelId: "gpt-5",
+    bootPort: { model: "gpt-5" } as never,
+    mode: modeOf,
+    pinned: false,
+    admitted: new Map(),
+  })
+  const adapter = buildModelAdapter({
+    routing,
     bootModel: "gpt-5",
-    currentMode: () => over?.mode ?? "default",
-    candidateIds: () => over?.ids ?? ["gpt-5", "gpt-4o", "future-xyz"],
+    currentMode: modeOf,
+    provider: "openai",
+    candidateIds: () => ids,
     ...(over?.current !== undefined ? { currentModel: over.current } : {}),
   })
-  return { store, adapter }
+  return { store, adapter, routing }
 }
 
 describe("model-adapter — candidate projection from the metadata SSOT", () => {
@@ -80,13 +112,7 @@ describe("model-adapter — candidate projection from the metadata SSOT", () => 
   })
 
   test("candidate ids are deduped with the boot model first", () => {
-    const store = inMemoryStickyModelStore()
-    const adapter = buildModelAdapter({
-      store,
-      bootModel: "gpt-5",
-      currentMode: () => "default",
-      candidateIds: () => ["gpt-5", "gpt-5", "gpt-4o"], // dup boot + dup
-    })
+    const { adapter } = build({ ids: ["gpt-5", "gpt-5", "gpt-4o"] }) // dup boot + dup
     const ids = adapter.candidates().map((m) => m.id)
     expect(ids).toEqual(["gpt-5", "gpt-4o"])
   })
@@ -115,27 +141,21 @@ describe("model-adapter — current()", () => {
     expect(adapter.current()).toBe("gpt-4o") // sync shadow reflects the set
   })
 
-  test("current() shadow keyed to active mode (no cross-mode leak)", async () => {
-    let mode: AgentMode = "default"
-    const store = inMemoryStickyModelStore()
-    const adapter = buildModelAdapter({
-      store,
-      bootModel: "gpt-5",
-      currentMode: () => mode,
-      candidateIds: () => ["gpt-5", "gpt-4o"],
-    })
-    // Set under `default` — only the default-mode shadow is populated.
+  test("current() is keyed to the active mode (no cross-mode leak)", async () => {
+    const modeRef: { value: AgentMode } = { value: "default" }
+    const { adapter } = build({ modeRef, ids: ["gpt-5", "gpt-4o"] })
+    // Set under `default` — only the default-mode selection is populated.
     await adapter.set("gpt-4o")
     expect(adapter.current()).toBe("gpt-4o")
-    // Switch the active mode to `plan` — that key has no shadow ⇒ boot anchor,
+    // Switch the active mode to `plan` — that key has no selection ⇒ boot anchor,
     // NOT the default-mode set (no cross-mode leak).
-    mode = "plan"
+    modeRef.value = "plan"
     expect(adapter.current()).toBe("gpt-5")
-    // A set under `plan` populates only the plan shadow.
+    // A set under `plan` populates only the plan selection.
     await adapter.set("gpt-4o")
     expect(adapter.current()).toBe("gpt-4o")
-    // Back to default — its own earlier shadow is intact.
-    mode = "default"
+    // Back to default — its own earlier selection is intact.
+    modeRef.value = "default"
     expect(adapter.current()).toBe("gpt-4o")
   })
 })
@@ -145,10 +165,10 @@ describe("model-adapter — set() persists to the sticky store (mode-implicit)",
     const { store, adapter } = build({ mode: "plan" })
     const out = await adapter.set("gpt-4o")
     expect(out).toBe("ok")
-    const got = await store.get({ mode: "plan" })
+    const got = await store.get({ mode: "plan", provider: "openai" })
     expect(got).toBe("gpt-4o")
     // A different mode is untouched.
-    expect(await store.get({ mode: "default" })).toBeUndefined()
+    expect(await store.get({ mode: "default", provider: "openai" })).toBeUndefined()
   })
 
   test("empty id ⇒ write-error (consume side treats empty as 'no override')", async () => {

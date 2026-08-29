@@ -54,7 +54,17 @@ import type {
  *  CLI elicitation prompter that services inbound `elicitation/create`. */
 export interface SamplingHandlerDeps {
   /** The `@/llm` port a `sampling/createMessage` delegates to. */
-  readonly llm: LLMPort
+  /**
+   * The `@/llm` port a `sampling/createMessage` delegates to.
+   *
+   * MR-06 — a THUNK is accepted so the handler follows the session's live model
+   * selection. POLICY (decided, not inferred): MCP sampling runs on whatever model
+   * the session is currently running, because a server asking "complete this on my
+   * behalf" is asking the AGENT, and an operator who switched models expects the
+   * switch to hold everywhere. A fixed port is still accepted — a host with no
+   * routing (headless, tests) passes one and behaves exactly as before.
+   */
+  readonly llm: LLMPort | (() => LLMPort)
   /** HITL consent gate. Reuses the MCP elicitation prompter seam — its
    *  `promptBoolean` asks the user a yes/no "allow this server to run a model?"
    *  question. The headless default prompter declines, so an unattended run is
@@ -187,7 +197,12 @@ export const createLlmSamplingHandler = (deps: SamplingHandlerDeps): SamplingHan
     // 2. Delegate to the LLM, drain, assemble. Any LLM / assembly failure is
     //    mapped to a typed decline — the port contract is total (no throws).
     try {
-      const result = await runCompletion(deps.llm, req, signal)
+      // Resolved PER REQUEST, not captured at mint: a session that switches models
+      // mid-run must not keep sampling on the model it booted with. The reported
+      // `model` in the result comes from this same port, so the answer names what
+      // actually ran.
+      const llm = typeof deps.llm === "function" ? deps.llm() : deps.llm
+      const result = await runCompletion(llm, req, signal)
       return { ok: true, result }
     } catch {
       return DECLINE_ERROR

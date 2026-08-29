@@ -2,13 +2,10 @@ import type { SkillScopeView, WorkingState } from "@/agent"
 import type { ConversationCheckpointStore } from "@/agent/conversation-checkpoint"
 import { type InboundMode, parseInboundMode } from "@/agent/inbound-mode"
 import { createInterruptedTurnBuffer } from "@/agent/interrupted-turn"
+import { createModelRoutingSession, type ModelRoutingSession } from "@/agent/model-routing"
 import { createShadowVerify } from "@/agent/shadow-verify"
 import { createShadowVerifyAdapters } from "@/agent/shadow-verify-adapters"
-import {
-  fsBackedStickyModelStore,
-  type StickyModelStore,
-  sessionScopedStickyModelStore,
-} from "@/agent/sticky-model"
+import type { StickyModelStore } from "@/agent/sticky-model"
 import { resolveGatedObjectiveAuthority } from "@/host/runtime/objective-store-wire"
 import {
   createObjectiveCheckRunner,
@@ -21,13 +18,13 @@ import {
   type StreamInput,
   tryCreateLLM,
 } from "@/llm"
-import { buildModelCatalogWire, type ModelCatalogWire } from "@/llm/model-catalog"
+import type { ModelCatalogWire } from "@/llm/model-catalog"
 import { createObjectiveAttemptSlot, createObjectiveCapabilities } from "@/objective"
 import type { RadarStore } from "@/radar"
 import { decorateSwappableModelPort } from "@/runner/assemble"
 import { isApprovedDecision } from "@/runner/orchestrate"
 import type { RuntimeFacadeComposeOptions } from "@/sdk/runtime"
-import { gateOn, logger } from "@/shared"
+import { gateOn } from "@/shared"
 import { defaultShadowOdb, type ShadowOdb } from "@/storage"
 import {
   createModeCycleStore,
@@ -45,13 +42,7 @@ import { createGoalWakeSignalSlot } from "../goal-wake-signal"
 
 import { buildPerToolCheckpointWire } from "../per-tool-checkpoint-wire"
 import type { SessionSetupResult } from "../session-setup"
-import {
-  liveAgentMode,
-  resolveStickyModelBoot,
-  type StickyModelBootView,
-  stickyModelFilePath,
-  vetRunnablePicks,
-} from "../sticky-model-boot"
+import { liveAgentMode, stickyModelFilePath } from "../sticky-model-boot"
 import { isEnvTruthy } from "./kb-slot"
 import { buildRadarStore, buildRetryCandidates } from "./wire-builders"
 
@@ -130,100 +121,47 @@ const buildModelSwitchWire = (
   agentModeCell: ModeCycleStore | undefined,
 ): {
   readonly stickyModel: { readonly store: StickyModelStore }
-  readonly stickyBoot: StickyModelBootView
+  readonly routing: ModelRoutingSession
   readonly catalog: ModelCatalogWire
 } => {
-  // ONE path for both halves (see `stickyModelFilePath`): the boot READ and the
-  // store the slash command WRITES through. Derived from the injected `env`, so a
-  // test-injected `QUANTA_CONFIG_DIR` moves both and no suite can touch the
-  // developer's real `~/.quanta/sticky-model.json`.
-  const stickyPath = stickyModelFilePath(env)
-  // aug-28 PRECEDENCE — an EXPLICIT per-invocation pin (`QUANTA_MODEL` / `--model`)
-  // beats a stored preference. Without this, `QUANTA_MODEL=x quanta "…"` in CI,
-  // cron or a git hook silently ran whatever a human last picked with `/model`
-  // (and the one-shot path paints no banner, so nothing said so). The pick is not
-  // erased — it simply does not seed THIS session; `/model` still works in-session
-  // and still persists.
-  const stickyBoot = resolveStickyModelBoot({
-    planMode: setup.planMode,
-    path: stickyPath,
+  // MR-02 — the SHARED routing session. Everything this function used to do by
+  // hand (path resolution, boot-snapshot admission, per-key runnability vetting,
+  // eager candidate seeding, the session-scope wrapper, explicit-pin precedence)
+  // now lives in ONE owner that the web daemon and the headless root call too, and
+  // the shared conformance suite is what proves the three answer identically. The
+  // defects that motivated it were all assembly-order mistakes, and only removing
+  // the assembly from the roots can prevent the next one.
+  const session = createModelRoutingSession({
+    env,
+    path: stickyModelFilePath(env),
     provider: setup.provider,
-    // aug-28 — an explicit per-invocation pin beats the stored preference (see the
-    // resolver). ONE rule, shared with the welcome banner.
-    ...(setup.modelPinnedExplicitly === true ? { explicitPin: true } : {}),
-    ...(agentModeCell !== undefined ? { agentModeCell } : {}),
-  })
-  // The distinct ids across ALL vetted keys (any mode) — the eager candidate seed.
-  const persistedIds = [...new Set(Object.values(stickyBoot.snapshot))]
-  // Build the catalog FIRST: whether a persisted pick is runnable is decided by
-  // whether a port for it exists, which only the catalog knows.
-  const catalog = buildModelCatalogWire({
-    provider: setup.provider,
-    bootModel: setup.model,
-    llm: setup.llm,
-    seeded: retryCandidates,
+    bootModelId: setup.model,
+    bootPort: setup.llm,
+    // The LIVE mode: the shift+tab cycle's posture wins over `--plan`, mirroring
+    // the loop's `resolveLiveAgentMode`, so the write key and the read key cannot
+    // drift apart on a rung change.
+    mode: liveAgentMode({
+      planMode: setup.planMode,
+      ...(agentModeCell !== undefined ? { agentModeCell } : {}),
+    }),
+    // aug-28 PRECEDENCE — an EXPLICIT per-invocation pin (`QUANTA_MODEL` /
+    // `--model`) beats a stored preference. Without it, `QUANTA_MODEL=x quanta "…"`
+    // in CI, cron or a git hook silently ran whatever a human last picked with
+    // `/model`, and the one-shot path paints no banner so nothing said so.
+    pinned: setup.modelPinnedExplicitly === true,
     // INVARIANT B — the surface builds the ports, so a picked model carries the
     // same always-on wrappers the boot port has (bounded retry, empty-stream
-    // breaker, progress heartbeat). Before this, a `/model` pick swapped the turn
-    // onto a BARE adapter: a transient 429 became a hard turn failure and the
-    // silent-token-burn breaker could never trip.
+    // breaker, progress heartbeat) instead of streaming through a bare adapter.
     buildPort: (id: string) => {
       const inner = tryCreateLLM(setup.provider, { model: id }, env)
       return inner === null
         ? null
         : decorateSwappableModelPort({ inner, signal: setup.abort.signal })
     },
-    // EVERY persisted pick for this provider, so a PORT exists before the first
-    // turn (the catalog probe is lazy — it only runs when `/model` is invoked,
-    // which a resumed session need never do). aug-28: this seeded ONLY the current
-    // mode's pick, and the mode cycle is default-ON — so one shift+tab put the loop
-    // on a pick with no port, silently running the boot model while the picker,
-    // status line and `/why` all named the pick.
-    ...(persistedIds.length > 0 ? { extraIds: persistedIds } : {}),
-    env,
+    seeded: retryCandidates,
+    signal: setup.abort.signal,
   })
-
-  // aug-28 — a persisted pick whose PORT could not be built (another provider's
-  // slug, or a model this credential no longer has) must NOT seed the session: the
-  // loop would fall back to the boot model while the picker, banner and status line
-  // all announced the pick. `catalog.ids()` is the switchable truth.
-  //
-  // PER KEY, not all-or-nothing: this used to replace the WHOLE snapshot with `{}`
-  // when the current mode's pick was unrunnable, which erased a perfectly good
-  // pick for another mode from the store seed, from `/sticky-model list` and from
-  // every display — punishing an entry that had nothing to do with the failure.
-  const switchable = catalog.ids()
-  const runnableSnapshot = vetRunnablePicks(stickyBoot.snapshot, switchable, (key, id) => {
-    logger.warn(
-      `sticky-model: persisted pick "${id}" (key "${key}") is not switchable in this session ` +
-        `(no port for provider "${setup.provider}") — that entry is ignored`,
-    )
-  })
-  const vettedModelId =
-    stickyBoot.modelId !== undefined && switchable.includes(stickyBoot.modelId)
-      ? stickyBoot.modelId
-      : undefined
-  const stickyBootVetted: StickyModelBootView = {
-    snapshot: runnableSnapshot,
-    modelId: vettedModelId,
-    effectiveModel: (bootModel: string): string => vettedModelId ?? bootModel,
-  }
-
-  return {
-    // SESSION-SCOPED reads, write-through persistence (see the decorator's
-    // header): the loop reads THIS session's cell — seeded from the boot snapshot
-    // — so another surface's pick cannot land mid-session and the picker/status
-    // line/banner can never disagree with the turn. Writes still reach disk, so
-    // the pick survives for the next session.
-    stickyModel: {
-      store: sessionScopedStickyModelStore({
-        inner: fsBackedStickyModelStore({ path: stickyPath }),
-        seed: stickyBootVetted.snapshot,
-      }),
-    },
-    stickyBoot: stickyBootVetted,
-    catalog,
-  }
+  return { stickyModel: { store: session.store }, routing: session, catalog: session.catalog }
 }
 
 const goalPursuitEnabled = (
@@ -251,7 +189,7 @@ const buildModelSurface = (
   const retryCandidates = buildRetryCandidates(env, setup.provider, setup.model)
   const {
     stickyModel,
-    stickyBoot,
+    routing,
     catalog: modelCatalog,
   } = buildModelSwitchWire(setup, env, retryCandidates, modeStore)
   const liveMode = liveAgentMode({
@@ -261,21 +199,15 @@ const buildModelSurface = (
   return {
     retryCandidates,
     stickyModel,
-    stickyBoot,
+    routing,
     modelCatalog,
     liveMode,
-    // THE live pick for the current provider+mode. ONE authority, because every
-    // display that re-derived this independently got it wrong somewhere: the status
-    // bar and the status-line seed named the boot model while the banner named the
-    // pick (measured in the same frame over a real pty), and `/retry-with` reported
-    // the boot model as "what the last turn ran".
-    //
-    // `undefined` deliberately means "no preference" — that is what the
-    // `stickyModelStore.effectiveModel` slot publishes, and `effectiveModelOf`
-    // falls back to `config.llm.model`. A getter that eagerly answered the boot
+    // THE live pick for the current provider+mode, straight off the routing
+    // authority. `undefined` deliberately means "no preference" — that is what the
+    // `stickyModelStore.effectiveModel` slot must publish, since `effectiveModelOf`
+    // supplies the boot fallback itself and a getter that eagerly answered the boot
     // model would be claiming a preference nobody set.
-    pickedModel: (): string | undefined =>
-      stickyModel.store.peek({ mode: liveMode(), provider: setup.provider }),
+    pickedModel: routing.selectedModel,
   }
 }
 
@@ -288,7 +220,7 @@ export const buildSurfaceCoreState = (
   let workingStateGet: (() => WorkingState | undefined) | undefined
   let skillScopeGet: (() => SkillScopeView | undefined) | undefined
   let lastStreamInput: StreamInput | undefined
-  const { retryCandidates, stickyModel, stickyBoot, modelCatalog, liveMode, pickedModel } =
+  const { retryCandidates, stickyModel, routing, modelCatalog, liveMode, pickedModel } =
     buildModelSurface(setup, env, mode.store)
   const shadowOdb: ShadowOdb | undefined = isEnvTruthy(env.QUANTA_SHADOW)
     ? defaultShadowOdb()
@@ -369,7 +301,7 @@ export const buildSurfaceCoreState = (
     pickedModel,
     effectiveModel: (): string => pickedModel() ?? setup.model,
     stickyModel,
-    stickyBoot,
+    routing,
     modelCatalog,
     setLastStreamInput: (input: StreamInput) => {
       lastStreamInput = input

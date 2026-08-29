@@ -58,10 +58,12 @@ describe("MR-00 · initial selection: pin > runnable persisted pick > boot", () 
     // An empty string is "no preference", not a model name — it must never win, or
     // a display renders an empty model and the turn resolves nothing.
     { name: "empty pick is no preference", pinned: false, pick: "", expect: [boot, "boot"] },
-    // A pick EQUAL to the boot model is reported as `boot`: same id, but the
-    // source is what tells a report "nothing was selected" from "this exact model
-    // was chosen", and it is what keeps the boot port from being duplicated.
-    { name: "pick === boot ⇒ source boot", pinned: false, pick: boot, expect: [boot, "boot"] },
+    // A pick EQUAL to the boot model is still a SESSION choice. The boot model is
+    // not a fixed identity across sessions (change `QUANTA_MODEL` and it moves), so
+    // "chose today's default" and "chose nothing" must stay distinguishable or
+    // tomorrow's session silently runs something else. Invariant A is unaffected:
+    // the port for it is the boot port by identity.
+    { name: "pick === boot ⇒ still session", pinned: false, pick: boot, expect: [boot, "session"] },
   ]
   for (const c of cases) {
     test(c.name, () => {

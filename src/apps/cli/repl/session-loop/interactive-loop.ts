@@ -38,6 +38,11 @@ export const claimGoalAttempt = (
   })
 }
 
+const describeGoalPrompt = (prompt: ReturnType<typeof normalizeCliPromptInput>): string =>
+  prompt.goalContinuation?.provenance === "user-requested-goal-work"
+    ? "your /goal work turn"
+    : "autonomous continuation"
+
 const describeUnclaimable = (slot: ObjectiveAttemptSlot | undefined): string => {
   if (slot === undefined) return "no attempt slot"
   const status = slot.status()
@@ -159,7 +164,13 @@ export const runInteractiveLoop = async (
     ) {
       // A queued continuation is data, not proof. Drop an old revision before
       // it can start an agent body, then let the current authority state arm a
-      // fresh quiet-window attempt if it remains active.
+      // fresh quiet-window attempt if it remains active. A USER's /goal work
+      // that lost the race is announced (an autonomous one is not news).
+      if (prompt.goalContinuation?.provenance === "user-requested-goal-work") {
+        process.stderr.write(
+          "goal: your /goal work turn was dropped — the goal changed before it started\n",
+        )
+      }
       goalWakeSlot?.current?.onGoalMutation()
       continue
     }
@@ -172,7 +183,7 @@ export const runInteractiveLoop = async (
       // that would be an unmetered autonomous turn outside the hard cap.
       // Drop it, say so, and let the wake host decide (it reports the reason).
       process.stderr.write(
-        `goal: continuation dropped — attempt not claimable (${describeUnclaimable(objectiveAttemptSlot)})\n`,
+        `goal: ${describeGoalPrompt(prompt)} dropped — attempt not claimable (${describeUnclaimable(objectiveAttemptSlot)})\n`,
       )
       goalWakeSlot?.current?.onGoalMutation()
       continue

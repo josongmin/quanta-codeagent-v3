@@ -118,7 +118,7 @@ export const syncQueuedTurnInputs = async (args: {
   // applier; it appends NOTHING to `wm` (these mutate runtime state, not the
   // transcript). Default-OFF: no slot / gate off ⇒ the port is never polled
   // (byte-identical), sibling of the peer-inbox drain above.
-  pollControlRequests(args.cfg)
+  await pollControlRequests(args.cfg)
   const actionOutcome = await pollConversationAction(args.cfg, args.taskRegistry)
   if (actionOutcome.kind === "finish_aborted") {
     // §11.5 — capture the partial turn into the session buffer so a later

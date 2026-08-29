@@ -644,7 +644,7 @@ export const buildBaseFromArgs = (
   // stack live in `./agent-arg-builder/boot-port-wire` (ONE cohesive unit: "what
   // does this root boot on, and through what port"). Throws
   // `ProviderKeyMissingError` when no key resolves for the selected provider.
-  const { provider, llm } = buildHeadlessBootPort({ env, p, signal })
+  const { provider, llm, pinned } = buildHeadlessBootPort({ env, p, signal })
   // Minimal stream — error events surface via the shared logger so a wrapper
   // failure is diagnosable even when a runner doesn't replace the stream (the
   // host layer must not write `process.stderr` directly — terminal ownership is
@@ -687,6 +687,7 @@ export const buildBaseFromArgs = (
     llm,
     provider,
     signal,
+    pinned,
     stickyModelPath: seams?.stickyModelPath,
   })
   const { automationSlot, artifactRegistry } = slotCtx

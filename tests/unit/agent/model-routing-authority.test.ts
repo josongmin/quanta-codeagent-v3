@@ -18,7 +18,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { createModelRoutingSession } from "@/agent/model-routing"
-import { createModelRoutingAuthority } from "@/agent/model-routing/authority"
+import { admitPersistedPicks, createModelRoutingAuthority } from "@/agent/model-routing/authority"
 import {
   fsBackedStickyModelStore,
   readStickyModelSnapshotSync,
@@ -80,7 +80,7 @@ const realAuthority = (scenario: ModelRoutingConformanceScenario) => {
       bootPort,
       mode: () => scenario.mode,
       pinned: scenario.pinned,
-      persisted,
+      admitted: admitPersistedPicks(persisted, scenario.provider),
     }),
     bootPort,
   }
@@ -98,15 +98,24 @@ describeModelRoutingAuthorityContract("authority", async (scenario) =>
 describeModelRoutingAuthorityContract("session-factory", async (scenario) => {
   const dir = mkdtempSync(join(tmpdir(), "mr02-session-"))
   dirs.push(dir)
-  const path =
-    scenario.failWrites === true
-      ? (writeFileSync(join(dir, "blocker"), "not a dir", "utf8"),
-        join(dir, "blocker", "sticky-model.json"))
-      : join(dir, "sticky-model.json")
-  if (scenario.failWrites !== true) writeFileSync(path, JSON.stringify(scenario.persisted), "utf8")
-  else writeFileSync(join(dir, "seed.json"), "{}", "utf8")
+  // A read-only home is the production shape of a failing durable write: the fs
+  // store's mkdir/atomic-write fails and it returns a typed `{ok:false}`.
+  let path = join(dir, "sticky-model.json")
+  if (scenario.failWrites === true) {
+    writeFileSync(join(dir, "blocker"), "not a dir", "utf8")
+    path = join(dir, "blocker", "sticky-model.json")
+  } else {
+    writeFileSync(path, JSON.stringify(scenario.persisted), "utf8")
+  }
 
-  const bootPort = fakePort(scenario.bootModelId)
+  // Production discovers non-persisted candidates through the provider probe, so
+  // the harness exposes `buildable` that way rather than injecting them as if the
+  // catalog already knew them — otherwise the factory would be tested against a
+  // catalog shape it never has.
+  const bootPort = {
+    ...fakePort(scenario.bootModelId),
+    listModels: async (): Promise<readonly string[]> => scenario.buildable,
+  } as unknown as LLMPort
   const session = createModelRoutingSession({
     env: {} as NodeJS.ProcessEnv,
     path,
@@ -148,7 +157,7 @@ describe("MR-02 · the authority's durable half", () => {
       bootPort,
       mode: () => "default",
       pinned: false,
-      persisted: {},
+      admitted: new Map(),
     })
     expect((await authority.select("gpt-4o")).ok).toBe(true)
     expect(readStickyModelSnapshotSync({ path })["openai:default"]).toBe("gpt-4o")
@@ -186,7 +195,7 @@ describe("MR-02 · the authority's durable half", () => {
       bootPort,
       mode: () => mode,
       pinned: false,
-      persisted,
+      admitted: admitPersistedPicks(persisted, "openai"),
     })
     // In `default` nothing is picked; the plan pick must not leak across.
     expect(authority.view().modelId).toBe("boot-model")

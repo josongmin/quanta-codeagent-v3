@@ -332,7 +332,7 @@ const armGoalWake = (args: {
           isQuiescent: hostIsQuiescent,
           // GOAL-08 round 3 — a fail-stopped attempt slot is a binding skip
           // (never arm) and is reported on the `/goal` wake line.
-          ...(attemptSlot !== undefined ? { attemptSlotStatus: () => attemptSlot.status() } : {}),
+          ...(attemptSlot !== undefined ? { attemptSlot } : {}),
           resumeAttempt: async (tid, attempt) => {
             const domain = objectiveCapabilities.read.readDomain(tid)
             const criteria = domain.state?.objective.successCriteria ?? []

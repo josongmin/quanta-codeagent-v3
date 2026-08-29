@@ -215,8 +215,8 @@ const wireSwitch = async () => {
   return { llm, modelSwitch, handle, cfg }
 }
 
-const drain = (handle: WebControlRequestPortHandle): ControlEffect[] =>
-  drainControlRequests(handle.port, handle.context, handle.applier)
+const drain = async (handle: WebControlRequestPortHandle): Promise<ControlEffect[]> =>
+  await drainControlRequests(handle.port, handle.context, handle.applier)
 
 describe("web daemon set_model over a REAL socket changes the model the loop runs", () => {
   test("frame → enqueue → drain ⇒ the pick is PERSISTED and resolves to that model's PORT", async () => {
@@ -229,7 +229,7 @@ describe("web daemon set_model over a REAL socket changes the model the loop run
     ws.send(controlFrame({ kind: "set_model", model: "gpt-4o" }))
     expect(await until(() => w.handle.pendingCount() > 0)).toBe(true)
 
-    const effects = drain(w.handle)
+    const effects = await drain(w.handle)
     expect(effects).toEqual([{ kind: "model-set", model: "gpt-4o" }])
 
     // The write is fire-and-forget, so poll the thing the LOOP actually reads (the
@@ -252,7 +252,7 @@ describe("web daemon set_model over a REAL socket changes the model the loop run
 
     ws.send(controlFrame({ kind: "set_model", model: "not-in-the-catalog" }))
     expect(await until(() => w.handle.pendingCount() > 0)).toBe(true)
-    expect(drain(w.handle)[0]?.kind).toBe("rejected")
+    expect((await drain(w.handle))[0]?.kind).toBe("rejected")
     await yieldLoop()
     expect(await readStickyModelForMode(w.cfg)).toBeUndefined()
   })
@@ -267,7 +267,7 @@ describe("web daemon set_model over a REAL socket changes the model the loop run
     ws.send(controlFrame({ kind: "set_model", model: "gpt-4o" }))
     await yieldLoop()
     expect(w.handle.pendingCount()).toBe(0)
-    expect(drain(w.handle)).toEqual([])
+    expect(await drain(w.handle)).toEqual([])
     expect(await readStickyModelForMode(w.cfg)).toBeUndefined()
   })
 })

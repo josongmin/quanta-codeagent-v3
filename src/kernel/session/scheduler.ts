@@ -90,8 +90,12 @@ const validateTurnSubmitProvenance = (
  *  before this same turn runs. Claiming any earlier (e.g. at the SDK verb,
  *  before `dispatch`) lets a user turn already queued ahead start first and
  *  `take()` the claim — the user's own turn would be charged as the goal
- *  attempt. Returns the release for a turn that fails to start after the
- *  claim; `undefined` for a turn that carries no goal provenance. */
+ *  attempt. Returns the (attemptId-keyed) release the dispatch runs in its
+ *  `finally`: a claim the turn-runner never took — pre-aborted turn (a
+ *  `turn.cancel` in the commit window RETURNS, it does not throw), commit
+ *  failure, host failure before start — must not leak, or the next plain
+ *  user turn would take it and be charged as the goal attempt while every
+ *  later goal turn is refused. `undefined` for a turn without provenance. */
 const claimGoalAttemptForTurn = (
   state: KernelSessionState,
   command: SessionCommand,
@@ -109,7 +113,7 @@ const claimGoalAttemptForTurn = (
     executionMode: autonomous ? "background" : "foreground",
   })
   if (claimed !== true) throw new SessionProtocolValidationError("goal_attempt_claim_refused")
-  return () => ctx.host.releaseGoalAttempt?.()
+  return () => ctx.host.releaseGoalAttempt?.(provenance.attemptId)
 }
 
 /** Run the HOST-side effect a command carries, if it carries one, and say
@@ -347,12 +351,11 @@ export const dispatchSessionCommand = async (
         events: projected.events,
         turnController: preRegisteredController,
       })
-    } catch (error) {
-      // A claim the turn never consumed (commit / host failure before the
-      // runner took it) must not leak into the next attributed turn. After a
-      // take the slot is already empty ⇒ no-op; a fail-stop is preserved.
+    } finally {
+      // Every path on which the turn-runner never took the claim releases it
+      // (keyed by attemptId: after a take the slot is empty ⇒ no-op; another
+      // claim or a fail-stop is never touched).
       releaseGoalClaim?.()
-      throw error
     }
   })
 }

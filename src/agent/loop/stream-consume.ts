@@ -393,6 +393,9 @@ const runSamplingScope = (args: {
     // deterministic span ids are unchanged (this call moved, not its payload).
     emitLlmRequest(
       config,
+      // The port that will actually stream this turn — NOT `config.llm` (the boot
+      // port), which is what made this event name the wrong model after a switch.
+      turnLlm.llm,
       finalizeTurnPolicy({
         promptPolicy: ctx.promptPolicy,
         toolChoice,

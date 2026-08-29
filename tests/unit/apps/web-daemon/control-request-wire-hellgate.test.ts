@@ -52,7 +52,7 @@ const liveCell = (): PermissionContext => {
 }
 
 describe("peekControlRequest — decode contract", () => {
-  test("well-formed frames ⇒ typed requests", () => {
+  test("well-formed frames ⇒ typed requests", async () => {
     expect(peekControlRequest(frame({ kind: "set_permission_mode", mode: "acceptEdits" }))).toEqual(
       { kind: "set_permission_mode", mode: "acceptEdits" },
     )
@@ -69,7 +69,7 @@ describe("peekControlRequest — decode contract", () => {
     })
   })
 
-  test("non-controlRequest / malformed frames ⇒ null (fall through to the bridge)", () => {
+  test("non-controlRequest / malformed frames ⇒ null (fall through to the bridge)", async () => {
     for (const raw of [
       JSON.stringify({ kind: "planInputAnswer", promptId: "p" }),
       JSON.stringify({ kind: "followerVerb", verb: { kind: "steer-turn" } }),
@@ -90,7 +90,7 @@ describe("peekControlRequest — decode contract", () => {
 })
 
 describe("web control-request END-TO-END — frame → port → drain → LIVE cell", () => {
-  test("LOAD-BEARING: set_permission_mode frame flips the LIVE permission cell mid-session", () => {
+  test("LOAD-BEARING: set_permission_mode frame flips the LIVE permission cell mid-session", async () => {
     const permission = liveCell()
     const handle = createWebControlRequestPort({ permission })
     expect(permission.mode).toBe("default")
@@ -106,7 +106,7 @@ describe("web control-request END-TO-END — frame → port → drain → LIVE c
     expect(handle.pendingCount()).toBe(1)
 
     // The loop drains + applies against the LIVE allowlists (the REAL planner).
-    const applied = drainControlRequests(handle.port, handle.context, handle.applier)
+    const applied = await drainControlRequests(handle.port, handle.context, handle.applier)
 
     // The effect LANDED on the host: the live gate cell actually changed.
     expect(permission.mode).toBe("acceptEdits")
@@ -114,19 +114,19 @@ describe("web control-request END-TO-END — frame → port → drain → LIVE c
     expect(handle.pendingCount()).toBe(0)
   })
 
-  test("FAIL-CLOSED: an unknown permission mode is REJECTED ⇒ the live cell is UNCHANGED", () => {
+  test("FAIL-CLOSED: an unknown permission mode is REJECTED ⇒ the live cell is UNCHANGED", async () => {
     const permission = liveCell()
     const handle = createWebControlRequestPort({ permission })
     // "sudo" is not a PermissionMode — the planner rejects it (privilege boundary).
     const req = peekControlRequest(frame({ kind: "set_permission_mode", mode: "sudo" }))
     if (req === null) throw new Error("unreachable")
     handle.enqueue(req)
-    const applied = drainControlRequests(handle.port, handle.context, handle.applier)
+    const applied = await drainControlRequests(handle.port, handle.context, handle.applier)
     expect(permission.mode).toBe("default") // untouched
     expect(applied).toEqual([{ kind: "rejected", reason: 'permission mode "sudo" not recognized' }])
   })
 
-  test("model allowlist gating: off-list model ⇒ rejected; on-list ⇒ observed (no live cell)", () => {
+  test("model allowlist gating: off-list model ⇒ rejected; on-list ⇒ observed (no live cell)", async () => {
     const permission = liveCell()
     const observed: Array<{ kind: string; value: string }> = []
     const handle = createWebControlRequestPort({
@@ -136,7 +136,7 @@ describe("web control-request END-TO-END — frame → port → drain → LIVE c
     })
     handle.enqueue({ kind: "set_model", model: "gpt-z" }) // off-list
     handle.enqueue({ kind: "set_model", model: "gpt-y" }) // on-list
-    const applied = drainControlRequests(handle.port, handle.context, handle.applier)
+    const applied = await drainControlRequests(handle.port, handle.context, handle.applier)
     expect(applied[0]?.kind).toBe("rejected")
     expect(applied[1]).toEqual({ kind: "model-set", model: "gpt-y" })
     // Model is a NON-permission axis: no live cell mutation, surfaced honestly.
@@ -145,7 +145,7 @@ describe("web control-request END-TO-END — frame → port → drain → LIVE c
     expect(observed).toContainEqual({ kind: "rejected", value: 'model "gpt-z" not recognized' })
   })
 
-  test("get_context_usage: usage snapshot returned as a DEFENSIVE copy (observed)", () => {
+  test("get_context_usage: usage snapshot returned as a DEFENSIVE copy (observed)", async () => {
     const permission = liveCell()
     const observed: Array<{ kind: string; value: string }> = []
     const usage = { inputTokens: 10, totalTokens: 12 }
@@ -155,7 +155,7 @@ describe("web control-request END-TO-END — frame → port → drain → LIVE c
       observe: (e) => observed.push(e),
     })
     handle.enqueue({ kind: "get_context_usage" })
-    const applied = drainControlRequests(handle.port, handle.context, handle.applier)
+    const applied = await drainControlRequests(handle.port, handle.context, handle.applier)
     expect(applied[0]?.kind).toBe("usage")
     if (applied[0]?.kind === "usage") {
       expect(applied[0].usage).toEqual(usage)
@@ -168,7 +168,7 @@ describe("web control-request END-TO-END — frame → port → drain → LIVE c
 })
 
 describe("web control-request port — safety invariants", () => {
-  test("BOUNDED: a flooding client cannot grow the pending queue past the cap", () => {
+  test("BOUNDED: a flooding client cannot grow the pending queue past the cap", async () => {
     const handle = createWebControlRequestPort({ permission: liveCell() })
     for (let i = 0; i < MAX_PENDING_CONTROL_REQUESTS + 20; i++) {
       handle.enqueue({ kind: "set_permission_mode", mode: "default" })
@@ -176,7 +176,7 @@ describe("web control-request port — safety invariants", () => {
     expect(handle.pendingCount()).toBe(MAX_PENDING_CONTROL_REQUESTS)
   })
 
-  test("latest-wins: when full, the OLDEST is dropped so the freshest intent survives", () => {
+  test("latest-wins: when full, the OLDEST is dropped so the freshest intent survives", async () => {
     const permission = liveCell()
     const handle = createWebControlRequestPort({ permission })
     // Fill with a benign default, then push one MORE that is the real intent.
@@ -184,13 +184,13 @@ describe("web control-request port — safety invariants", () => {
       handle.enqueue({ kind: "set_permission_mode", mode: "default" })
     }
     handle.enqueue({ kind: "set_permission_mode", mode: "acceptEdits" }) // drops oldest
-    const applied = drainControlRequests(handle.port, handle.context, handle.applier)
+    const applied = await drainControlRequests(handle.port, handle.context, handle.applier)
     // The freshest request is the LAST applied ⇒ the final live mode is acceptEdits.
     expect(applied.at(-1)).toEqual({ kind: "permission-mode-set", mode: "acceptEdits" })
     expect(permission.mode).toBe("acceptEdits")
   })
 
-  test("NO-THROW: a throwing observe sink does not derail the drain (permission still lands)", () => {
+  test("NO-THROW: a throwing observe sink does not derail the drain (permission still lands)", async () => {
     const permission = liveCell()
     const handle = createWebControlRequestPort({
       permission,
@@ -201,7 +201,10 @@ describe("web control-request port — safety invariants", () => {
     handle.enqueue({ kind: "set_model", model: "anything" }) // triggers observe (throws, swallowed)
     handle.enqueue({ kind: "set_permission_mode", mode: "acceptEdits" })
     // The drain must not throw and the permission effect must still land.
-    expect(() => drainControlRequests(handle.port, handle.context, handle.applier)).not.toThrow()
+    // The drain is async now, so the "does not throw" claim is about the PROMISE:
+    // a rejected drain would fail the await below and the permission assertion
+    // would never run.
+    await drainControlRequests(handle.port, handle.context, handle.applier)
     expect(permission.mode).toBe("acceptEdits")
   })
 })
@@ -218,22 +221,22 @@ describe("web control-request port — safety invariants", () => {
  * the planner, not the peek — so the fence is asserted at the drain.
  */
 describe("web control-request — `bypass` is refused at the planner", () => {
-  test("a bypass frame leaves the LIVE cell untouched and applies nothing", () => {
+  test("a bypass frame leaves the LIVE cell untouched and applies nothing", async () => {
     const permission = liveCell()
     const handle = createWebControlRequestPort({ permission })
     handle.enqueue({ kind: "set_permission_mode", mode: "bypass" })
-    const applied = drainControlRequests(handle.port, handle.context, handle.applier)
+    const applied = await drainControlRequests(handle.port, handle.context, handle.applier)
     expect(permission.mode).toBe("default")
     expect(applied.filter((e) => e.kind === "permission-mode-set")).toEqual([])
   })
 
-  test("PAIRED CONTROL — the non-escalating modes still land, so this is a fence, not an off switch", () => {
+  test("PAIRED CONTROL — the non-escalating modes still land, so this is a fence, not an off switch", async () => {
     for (const mode of ["acceptEdits", "auto", "default"] as const) {
       const permission = liveCell()
       permission.mode = "default"
       const handle = createWebControlRequestPort({ permission })
       handle.enqueue({ kind: "set_permission_mode", mode })
-      drainControlRequests(handle.port, handle.context, handle.applier)
+      await drainControlRequests(handle.port, handle.context, handle.applier)
       expect({ mode, landed: permission.mode as string }).toEqual({ mode, landed: mode as string })
     }
   })

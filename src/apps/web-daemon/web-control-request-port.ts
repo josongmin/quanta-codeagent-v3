@@ -42,6 +42,7 @@
 
 import type {
   ContextUsageSnapshot,
+  ControlApplyResult,
   ControlEffectApplier,
   ControlRequest,
   ControlRequestContext,
@@ -121,10 +122,12 @@ export interface WebControlRequestPortDeps {
    * (`web-model-switch.ts` writes the sticky store the loop reads). Absent ⇒ the
    * effect stays the historical observability-only echo, which is what made a
    * client's `set_model` look accepted while every turn kept the old model.
-   * MUST NOT throw (a thrown applier abandons the whole control drain) — the web
-   * impl is a fire-and-forget write with its own error logging.
+   * MUST NOT throw (a thrown applier abandons the whole control drain). MR-03: it
+   * is AWAITED, and its typed result decides whether the client's echo says
+   * `model-set` or `rejected` — a switch the store refused must not read as
+   * success.
    */
-  readonly applyModel?: (model: string) => void
+  readonly applyModel?: (model: string) => Promise<ControlApplyResult>
   /** Optional thinking-level allowlist (same posture as {@link modelAllowlist}). */
   readonly thinkingLevels?: readonly string[]
   /**
@@ -188,12 +191,21 @@ export const createWebControlRequestPort = (
       if (!isPermissionMode(mode)) return
       deps.permission.mode = mode
     },
-    setModel: (model) => {
+    setModel: async (model) => {
       safeObserve("model", model)
-      // The load-bearing half (aug-27). Ordered AFTER the echo so a client sees
-      // the acknowledgement even if the host's write path is slow; `applyModel`
-      // is no-throw by contract, so it cannot abandon the drain.
-      deps.applyModel?.(model)
+      // AWAITED (MR-03). This used to be fire-and-forget, "ordered after the echo
+      // so a client sees the acknowledgement even if the host's write path is
+      // slow" — which is exactly the defect: the drain runs at the TOP of a turn,
+      // so the same turn then read a selection the write had not reached yet and
+      // ran the OLD model, while the end-of-turn echo (reading a by-then-updated
+      // cell) reported the NEW one. Measured through the real loop: the turn ran
+      // the boot model and the store was still empty when the turn ENDED.
+      //
+      // `applyModel` is no-throw by contract; a rejection here becomes a typed
+      // `rejected` effect, so the client's echo stops claiming a switch that the
+      // store refused.
+      const res = await deps.applyModel?.(model)
+      return res ?? { ok: true }
     },
     setThinking: (level) => safeObserve("thinking", level),
     reportUsage: (usage) => safeObserve("usage", JSON.stringify(usage)),

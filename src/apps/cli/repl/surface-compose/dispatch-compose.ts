@@ -108,11 +108,24 @@ export const buildGoalSlashSlot = (
             const slot = core.goalWakeSlot
             const sink = slot?.enqueueWork
             const store = core.objectiveStore
-            if (slot === undefined || sink === undefined || store === undefined) return false
+            if (slot === undefined || sink === undefined || store === undefined) {
+              return { ok: false, reason: "goal pursuit is not composed in this surface" }
+            }
             const domain = createObjectiveCapabilities(store).read.readDomain(
               setup.sessionId as string,
             )
-            if (domain.state === null || domain.state.objective.status !== "active") return false
+            if (domain.state === null || domain.state.objective.status !== "active") {
+              return { ok: false, reason: "the goal is not active" }
+            }
+            // A fail-stopped attempt slot would refuse the claim at dequeue —
+            // say so NOW instead of "queued" followed by a drop.
+            const attemptSlot = core.objectiveAttemptSlot?.status()
+            if (attemptSlot?.kind === "fail-stopped") {
+              return {
+                ok: false,
+                reason: `attempt slot fail-stopped (${attemptSlot.reason}); start a new goal to recover`,
+              }
+            }
             sink({
               text: instruction,
               goalContinuation: {
@@ -125,7 +138,7 @@ export const buildGoalSlashSlot = (
                   : {}),
               },
             })
-            return true
+            return { ok: true }
           },
         }),
   }

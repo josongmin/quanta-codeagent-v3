@@ -38,6 +38,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import type { AgentConfig } from "@/agent"
+import { effectiveModelOf } from "@/agent/effective-model"
 import { readStickyModelForMode, resolveSkillTurnOverride } from "@/agent/loop/skill-gate"
 import { stickyModelKeyOf } from "@/agent/sticky-model"
 import { type AssembleRequestPartial, buildBaseFromArgs } from "@/host/runtime/agent-arg-builder"
@@ -103,6 +104,48 @@ const buildBase = (over: Partial<AssembleRequestPartial> = {}): AgentConfig => {
 }
 
 describe("headless composition root — the model switch's second half", () => {
+  test("MR-02 D1: an explicit `--model` pin BEATS a persisted pick", async () => {
+    // Measured before MR-02: `quanta -p --model gpt-5 --sticky-model` with a pick
+    // on disk RAN the pick. The CLI had honoured the pin since aug-28; this root
+    // had no notion of one, so the same operator gesture meant opposite things on
+    // two surfaces. The pick is not erased — it just does not seed this session.
+    const dir = hermeticHome()
+    writePick(dir, OPENAI_DEFAULT_KEY, "gpt-4o-mini")
+    const cfg = buildBase({ model: "gpt-5-pinned", stickyModel: true })
+    expect(await readStickyModelForMode(cfg)).toBeUndefined()
+    expect(effectiveModelOf(cfg)).toBe("gpt-5-pinned")
+    // Paired control: WITHOUT the pin the very same file seeds the session.
+    const unpinned = buildBase({ stickyModel: true })
+    expect(await readStickyModelForMode(unpinned)).toBe("gpt-4o-mini")
+  })
+
+  test("MR-02 D2: the slot publishes provider + effectiveModel, so reports name the PICK", async () => {
+    // Without these two fields `effectiveModelOf` falls back to `config.llm.model`,
+    // and that value is what `describe().modelSlug` (⇒ attach pill, SDK
+    // `session.model`, web `/state`), `turn.completed.modelSlug` and the
+    // work-metrics cost tag all publish. Measured: the pick RAN while all four
+    // named the boot model.
+    const dir = hermeticHome()
+    writePick(dir, OPENAI_DEFAULT_KEY, "gpt-4o-mini")
+    const cfg = buildBase({ stickyModel: true })
+    expect(cfg.stickyModelStore?.provider).toBe("openai")
+    expect(typeof cfg.stickyModelStore?.effectiveModel).toBe("function")
+    expect(effectiveModelOf(cfg)).toBe("gpt-4o-mini")
+  })
+
+  test("MR-02 D3: the store is SESSION-SCOPED — an out-of-band write cannot land mid-run", async () => {
+    // The fs store was used RAW here while the candidate list was frozen at mint,
+    // so another process's `/model` arrived mid-run with no port for it and the
+    // turn silently reverted to the boot model. A batch row is the victim.
+    const dir = hermeticHome()
+    writePick(dir, OPENAI_DEFAULT_KEY, "gpt-4o-mini")
+    const cfg = buildBase({ stickyModel: true })
+    expect(await readStickyModelForMode(cfg)).toBe("gpt-4o-mini")
+    writePick(dir, OPENAI_DEFAULT_KEY, "gpt-4.1-nano")
+    // This session keeps running what it started with; the new pick is the NEXT
+    // session's business.
+    expect(await readStickyModelForMode(cfg)).toBe("gpt-4o-mini")
+  })
   test("PRODUCER: a persisted pick reaches the base as BOTH a store and a candidate PORT", async () => {
     const dir = hermeticHome()
     writePick(dir, OPENAI_DEFAULT_KEY, "gpt-4o")

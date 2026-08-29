@@ -40,7 +40,7 @@
  */
 
 import type { AgentMode } from "@/agent"
-import type { StickyModelKey, StickyModelStore } from "@/agent/sticky-model"
+import type { ModelRoutingAuthority } from "@/agent/model-routing"
 import {
   MODEL_EFFORT_SUPPORT,
   type ModelEffortSupport,
@@ -119,7 +119,12 @@ const deriveHint = (id: string): string | undefined => {
 
 /**
  * Build the `/model` adapter.
- *  - `store`         — the sticky-model store (SAME instance the loop reads).
+ *  - `routing`       — THE model-routing authority (MR-02). Every read and every
+ *                      mutation goes through it. This adapter used to poke the
+ *                      sticky STORE directly, which made it a second owner of the
+ *                      selection: `/model --clear` cleared the store while the
+ *                      authority still held the pick, and `current()` kept
+ *                      reporting a model the session had just dropped.
  *  - `bootModel`     — the model the session started with. It is the surface's
  *                      "recommended" default badge AND the `current()` anchor
  *                      when no `currentModel` getter is supplied.
@@ -142,7 +147,7 @@ const deriveHint = (id: string): string | undefined => {
  *                      return a Promise — a sync `current()` cannot use it.
  */
 export const buildModelAdapter = (args: {
-  readonly store: StickyModelStore
+  readonly routing: ModelRoutingAuthority
   readonly bootModel: string
   readonly currentMode: () => AgentMode
   /** The session's provider — part of the sticky key (see `StickyModelKey`). */
@@ -162,10 +167,6 @@ export const buildModelAdapter = (args: {
   // (a persisted pick, another surface, a `/sticky-model` set) left it stale, and
   // the picker then marked a model the loop was not running. `peek` moved the sync
   // read onto the port, so the store answers every reader identically.
-  const liveKey = (): StickyModelKey => ({
-    mode: args.currentMode(),
-    ...(args.provider !== undefined ? { provider: args.provider } : {}),
-  })
   const lineMeta = (id: string): ModelLineMeta => {
     const window = resolveModelWindow(id)
     const hint = deriveHint(id)
@@ -180,7 +181,7 @@ export const buildModelAdapter = (args: {
     }
   }
   return {
-    current: () => args.currentModel?.() ?? args.store.peek(liveKey()) ?? args.bootModel,
+    current: () => args.currentModel?.() ?? args.routing.view().modelId,
     candidates: () => ids().map(lineMeta),
     ...(args.refresh !== undefined ? { refresh: args.refresh } : {}),
     set: async (id: string): Promise<ModelSetOutcome> => {
@@ -191,18 +192,16 @@ export const buildModelAdapter = (args: {
       if (id.trim() === "") {
         return { kind: "write-error", message: "modelId must be non-empty" }
       }
-      const res = await args.store.set({
-        mode,
-        modelId: id,
-        // Key by provider too (see `StickyModelKey`): a pick is only meaningful
-        // for the provider it was made under.
-        ...(args.provider !== undefined ? { provider: args.provider } : {}),
-      })
-      // No local bookkeeping on success: the store the write went through is the
-      // one `current()` reads (`peek`), so the set is visible on the next paint by
-      // construction rather than by two places remembering to agree.
+      // Through the AUTHORITY: it validates against the live catalog (probing once
+      // if the id has not been discovered yet) and publishes the selection only
+      // after the durable write settles. `current()` reads the same authority, so
+      // the set is visible on the next paint by construction rather than by two
+      // places remembering to agree.
+      const res = await args.routing.select(id, mode)
       if (res.ok) return "ok"
-      return { kind: "write-error", message: res.error.message }
+      return res.kind === "unknown-model"
+        ? { kind: "write-error", message: `unknown model — known: ${res.known.join(", ")}` }
+        : { kind: "write-error", message: res.message }
     },
     clear: async (): Promise<ModelClearOutcome> => {
       const mode = args.currentMode()
@@ -212,16 +211,12 @@ export const buildModelAdapter = (args: {
       // The SAME key `set` writes (mode + provider), so a clear can only ever undo
       // a pick this surface could have made — a sibling mode's or another
       // provider's preference is a different key and is left alone.
-      const res = await args.store.unset({
-        mode,
-        ...(args.provider !== undefined ? { provider: args.provider } : {}),
-      })
-      // Again NO local bookkeeping: `current()` reads the store's `peek`, so the
-      // removal shows up on the next paint by construction. A shadow copy here is
-      // exactly the defect this adapter shed — it would keep announcing the cleared
-      // model.
+      const res = await args.routing.clear(mode)
       if (res.ok) return "ok"
-      return { kind: "write-error", message: res.error.message }
+      return {
+        kind: "write-error",
+        message: res.ok === false && res.kind === "write-error" ? res.message : "clear rejected",
+      }
     },
     effortSupport: (id: string): ModelEffortSupport | undefined => resolveModelEffortSupport(id),
   }

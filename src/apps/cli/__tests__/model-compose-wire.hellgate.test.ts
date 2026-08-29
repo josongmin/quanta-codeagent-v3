@@ -25,6 +25,7 @@
  */
 import { describe, expect, test } from "bun:test"
 import { inMemoryStickyModelStore } from "@/agent/sticky-model"
+import { fakeModelRouting } from "../../../../tests/_support/fake-model-routing"
 import { liveAgentMode } from "../repl/sticky-model-boot"
 import { buildModelAdapterWire } from "../repl/surface-compose"
 
@@ -33,6 +34,12 @@ describe("model compose wire — mode-implicit SET binding (REAL FIX R1-3)", () 
     const store = inMemoryStickyModelStore()
     const wire = buildModelAdapterWire({
       stickyStore: { store },
+      routing: fakeModelRouting({
+        bootModelId: "gpt-5",
+        ids: ["gpt-5", "gpt-4o"],
+        mode: liveAgentMode({ planMode: true }),
+        store,
+      }).routing,
       bootModel: "gpt-5",
       currentMode: liveAgentMode({ planMode: true }),
       candidateIds: () => ["gpt-5", "gpt-4o"],
@@ -44,28 +51,35 @@ describe("model compose wire — mode-implicit SET binding (REAL FIX R1-3)", () 
     expect(out).toBe("ok")
 
     // The fix: the SET targets the SAME mode the loop reads under --plan.
-    expect(await store.get({ mode: "plan" })).toBe("gpt-4o")
+    expect(await store.get({ mode: "plan", provider: "openai" })).toBe("gpt-4o")
     // And NOT the 'default' key (the reverted `() => "default"` failure mode).
-    expect(await store.get({ mode: "default" })).toBeUndefined()
+    expect(await store.get({ mode: "default", provider: "openai" })).toBeUndefined()
   })
 
   test("under planMode:false a SET lands on the 'default' key", async () => {
     const store = inMemoryStickyModelStore()
     const wire = buildModelAdapterWire({
       stickyStore: { store },
+      routing: fakeModelRouting({
+        bootModelId: "gpt-5",
+        ids: ["gpt-5", "gpt-4o"],
+        mode: liveAgentMode({ planMode: true }),
+        store,
+      }).routing,
       bootModel: "gpt-5",
       currentMode: liveAgentMode({ planMode: false }),
       candidateIds: () => ["gpt-5", "gpt-4o"],
     })
     const out = await wire.modelAdapter?.set("gpt-4o")
     expect(out).toBe("ok")
-    expect(await store.get({ mode: "default" })).toBe("gpt-4o")
-    expect(await store.get({ mode: "plan" })).toBeUndefined()
+    expect(await store.get({ mode: "default", provider: "openai" })).toBe("gpt-4o")
+    expect(await store.get({ mode: "plan", provider: "openai" })).toBeUndefined()
   })
 
   test("absent sticky store ⇒ adapter omitted (slot absent ⇒ `/model` not wired)", () => {
     const wire = buildModelAdapterWire({
       stickyStore: undefined,
+      routing: fakeModelRouting({ bootModelId: "gpt-5", ids: ["gpt-5"] }).routing,
       bootModel: "gpt-5",
       currentMode: liveAgentMode({ planMode: false }),
       candidateIds: () => ["gpt-5"],
@@ -83,13 +97,19 @@ describe("model compose wire — mode-implicit SET binding (REAL FIX R1-3)", () 
     const cell = { current: () => ({ agentMode: "plan" as const }) }
     const wire = buildModelAdapterWire({
       stickyStore: { store },
+      routing: fakeModelRouting({
+        bootModelId: "gpt-5",
+        ids: ["gpt-5", "gpt-4o"],
+        mode: liveAgentMode({ planMode: true }),
+        store,
+      }).routing,
       bootModel: "gpt-5",
       currentMode: liveAgentMode({ planMode: false, agentModeCell: cell }),
       candidateIds: () => ["gpt-5", "gpt-4o"],
     })
     expect(await wire.modelAdapter?.set("gpt-4o")).toBe("ok")
-    expect(await store.get({ mode: "plan" })).toBe("gpt-4o")
-    expect(await store.get({ mode: "default" })).toBeUndefined()
+    expect(await store.get({ mode: "plan", provider: "openai" })).toBe("gpt-4o")
+    expect(await store.get({ mode: "default", provider: "openai" })).toBeUndefined()
   })
 
   test("aug-28 — and the reverse: --plan with the cell on the DEFAULT rung keys 'default'", async () => {
@@ -100,19 +120,31 @@ describe("model compose wire — mode-implicit SET binding (REAL FIX R1-3)", () 
     const cell = { current: () => ({ agentMode: "default" as const }) }
     const wire = buildModelAdapterWire({
       stickyStore: { store },
+      routing: fakeModelRouting({
+        bootModelId: "gpt-5",
+        ids: ["gpt-5", "gpt-4o"],
+        mode: liveAgentMode({ planMode: true }),
+        store,
+      }).routing,
       bootModel: "gpt-5",
       currentMode: liveAgentMode({ planMode: true, agentModeCell: cell }),
       candidateIds: () => ["gpt-5", "gpt-4o"],
     })
     expect(await wire.modelAdapter?.set("gpt-4o")).toBe("ok")
-    expect(await store.get({ mode: "default" })).toBe("gpt-4o")
-    expect(await store.get({ mode: "plan" })).toBeUndefined()
+    expect(await store.get({ mode: "default", provider: "openai" })).toBe("gpt-4o")
+    expect(await store.get({ mode: "plan", provider: "openai" })).toBeUndefined()
   })
 
   test("candidateIds flow through to the picker candidates() verbatim", () => {
     const store = inMemoryStickyModelStore()
     const wire = buildModelAdapterWire({
       stickyStore: { store },
+      routing: fakeModelRouting({
+        bootModelId: "gpt-5",
+        ids: ["gpt-5", "gpt-4o"],
+        mode: liveAgentMode({ planMode: true }),
+        store,
+      }).routing,
       bootModel: "gpt-5",
       currentMode: liveAgentMode({ planMode: false }),
       candidateIds: () => ["gpt-5", "gpt-4o"],

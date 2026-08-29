@@ -75,7 +75,12 @@ const fakeWm = () => {
 describe("control-request drain — WIRE activation", () => {
   test("WIRING: syncQueuedTurnInputs drains the port ⇒ set_model reaches the applier", async () => {
     const models: string[] = []
-    const applier: ControlEffectApplier = { setModel: (m) => models.push(m) }
+    const applier: ControlEffectApplier = {
+      setModel: (m) => {
+        models.push(m)
+        return { ok: true } as const
+      },
+    }
     const ctx: ControlRequestContext = { modelAllowlist: ["gpt-x", "gpt-y"] }
     const req: ControlRequest = { kind: "set_model", model: "gpt-y" }
     const cfg = buildCfg({

@@ -247,8 +247,12 @@ export interface SessionHost {
    *  and settles it (budget, receipts, hard-cap counter). Absent / false ⇒ the
    *  turn is refused (`goal_attempt_claim_refused`). */
   claimGoalAttempt?(attempt: GoalAttemptClaim): boolean
-  /** Release a claim the dispatch never consumed (typed pre-run refusal). */
-  releaseGoalAttempt?(): void
+  /** Release the claim identified by `attemptId` IF the slot still holds it —
+   *  called by the kernel in a `finally` after the turn dispatch so every path
+   *  on which the turn-runner never took the claim (pre-aborted turn, commit
+   *  failure, host failure before start) releases it. After a take the slot is
+   *  empty (no-op); a different claim or a fail-stop is never touched. */
+  releaseGoalAttempt?(attemptId: string): void
   runTurn(args: {
     readonly history: readonly Message[]
     readonly prompt: string

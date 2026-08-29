@@ -1,11 +1,19 @@
 import { extname } from "node:path"
 import { errMessage, logger } from "@/shared"
-// Direct files, not the `@/tool` BARREL. The barrel re-exports all of
-// `src/tool` (973 lines, 76 exports), and this one import is what pulled 284
-// files under `src/tool` into the bunfig preload closure — via
-// `tests/setup.ts` → `@/agent/lsp-bridge` → here. That made it impossible to
-// build a test mirror with `src/tool` emptied, because the preload died before
-// any guard ran.
+// Direct files, not the `@/tool` BARREL, which re-exports all of `src/tool`
+// (973 lines, 76 exports).
+//
+// HONEST ATTRIBUTION, measured after an audit: this change contributes ZERO to
+// the bunfig preload closure. The path that mattered was `tests/setup.ts`
+// importing the `@/agent/lsp-bridge` BARREL, and that import was changed to the
+// leaf in the same commit — so by the time this file is reached, it no longer is.
+// Reverting just this hunk leaves the preload gate green and an `src/tool`-empty
+// mirror bootable.
+//
+// It is kept because the coupling is real for every OTHER consumer of this
+// module and would become load-bearing again the moment anything preloaded
+// reaches here. But no gate enforces that, so this comment is a note and not a
+// forcing function — which is exactly what an earlier version of it claimed to be.
 import type { DiagnosticsProvider, DiagnosticsSession } from "@/tool/diagnostics"
 import { diagnosticsTool } from "@/tool/diagnostics"
 import type { Tool } from "@/tool/types/tool-contract"

@@ -114,7 +114,7 @@ export const composeWebGoalWake = async (args: {
     },
     readDomain: (id) => read.readDomain(id),
     isQuiescent: () => quiescent(view, args.runtime.activeTurnRef),
-    ...(attemptSlot !== undefined ? { attemptSlotStatus: () => attemptSlot.status() } : {}),
+    ...(attemptSlot !== undefined ? { attemptSlot } : {}),
     ...(args.setTimeoutFn !== undefined ? { setTimeoutFn: args.setTimeoutFn } : {}),
     ...(args.clearTimeoutFn !== undefined ? { clearTimeoutFn: args.clearTimeoutFn } : {}),
     resumeAttempt: async (id, attempt) => {

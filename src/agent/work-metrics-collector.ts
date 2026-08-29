@@ -25,6 +25,7 @@
 
 import {
   buildWorkMetrics,
+  costUsd,
   type FileDiffStat,
   parseNumstat,
   type WorkMetrics,
@@ -48,6 +49,14 @@ export class TurnWorkMetricsCollector {
   private tokensInput = 0
   private tokensOutput = 0
   private cacheReadTokens: number | undefined = undefined
+  /** MR-05 — per-MODEL token buckets. A turn can span several models (a `/model`
+   *  switch between requests, a skill override for one step, a provider fallback),
+   *  and cost is only correct when each request is priced with the model that
+   *  actually ran it. */
+  private readonly byModel = new Map<
+    string,
+    { tokensInput: number; tokensOutput: number; cacheReadTokens?: number }
+  >()
   // Per-file running totals. Indexed by path so a same-file second emit
   // (e.g. a numstat row landing twice via two `git diff` calls) accumulates
   // rather than duplicates.
@@ -83,15 +92,53 @@ export class TurnWorkMetricsCollector {
     this.linesRead += lines
   }
 
-  /** Fold one usage report from a model stream. `cacheReadTokens` is summed
-   *  lazily — when never observed it stays `undefined` (preserves the
-   *  optional contract on the emitted {@link WorkMetrics}). */
-  recordUsage(u: { tokensInput: number; tokensOutput: number; cacheReadTokens?: number }): void {
+  /**
+   * Fold one usage report from a model stream. `cacheReadTokens` is summed lazily
+   * — when never observed it stays `undefined` (preserves the optional contract on
+   * the emitted {@link WorkMetrics}).
+   *
+   * MR-05 — `model` is the model THAT REQUEST ran on, reported by the adapter that
+   * streamed it. Kept in a PER-MODEL bucket, because one turn can legitimately span
+   * several: a `/model` switch between requests, a skill override for one step, a
+   * provider fallback. Costing the whole turn at one model — which is what
+   * `finalize(effectiveModelOf(cfg))` did, reading a LIVE selection at turn close —
+   * priced every request at whatever happened to be selected when the turn ended.
+   * Absent `model` ⇒ the tokens still land in the totals, just uncosted.
+   */
+  recordUsage(u: {
+    tokensInput: number
+    tokensOutput: number
+    cacheReadTokens?: number
+    model?: string
+  }): void {
     this.tokensInput += u.tokensInput
     this.tokensOutput += u.tokensOutput
     if (u.cacheReadTokens !== undefined) {
       this.cacheReadTokens = (this.cacheReadTokens ?? 0) + u.cacheReadTokens
     }
+    if (u.model === undefined || u.model.length === 0) return
+    const bucket = this.byModel.get(u.model) ?? { tokensInput: 0, tokensOutput: 0 }
+    bucket.tokensInput += u.tokensInput
+    bucket.tokensOutput += u.tokensOutput
+    if (u.cacheReadTokens !== undefined) {
+      bucket.cacheReadTokens = (bucket.cacheReadTokens ?? 0) + u.cacheReadTokens
+    }
+    this.byModel.set(u.model, bucket)
+  }
+
+  /** Cost summed over the per-model buckets, or `null` when no bucket has a known
+   *  price. Each bucket is priced with ITS OWN model, then added — the only way a
+   *  multi-model turn can report a true total. */
+  private costFromBuckets(): number | null {
+    let total = 0
+    let known = false
+    for (const [model, b] of this.byModel) {
+      const cost = costUsd(model, b.tokensInput, b.tokensOutput, b.cacheReadTokens ?? 0)
+      if (cost === null) continue
+      known = true
+      total += cost
+    }
+    return known ? total : null
   }
 
   /** Fold `git diff --numstat` stdout into the per-file running totals. Empty
@@ -138,6 +185,26 @@ export class TurnWorkMetricsCollector {
         linesRead: this.linesRead,
         tokensInput: this.tokensInput,
         tokensOutput: this.tokensOutput,
+      }
+      if (this.cacheReadTokens !== undefined) out.cacheReadTokens = this.cacheReadTokens
+      // Even with no caller-supplied label, the per-request buckets can price the
+      // turn — the adapter reported which model each usage came from.
+      const cost = this.costFromBuckets()
+      if (cost !== null) out.estimatedCostUsd = cost
+      return out
+    }
+    const bucketCost = this.costFromBuckets()
+    if (bucketCost !== null) {
+      // MR-05 — the per-model sum WINS over a single-model estimate. `model` here
+      // is the caller's best label for the turn; pricing every request at it is
+      // exactly the misattribution this replaces.
+      const out: WorkMetrics = {
+        diffMap,
+        agentActions: this.agentActions,
+        linesRead: this.linesRead,
+        tokensInput: this.tokensInput,
+        tokensOutput: this.tokensOutput,
+        estimatedCostUsd: bucketCost,
       }
       if (this.cacheReadTokens !== undefined) out.cacheReadTokens = this.cacheReadTokens
       return out

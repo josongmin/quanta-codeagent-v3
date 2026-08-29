@@ -66,10 +66,24 @@ const workflowSteps = (): readonly WorkflowStep[] => {
     const lines = readFileSync(join(WORKFLOW_DIR, file), "utf8").split("\n")
     for (let i = 0; i < lines.length; i += 1) {
       const line = lines[i] ?? ""
-      const m = /^(\s*)(?:- )?run: (.*)$/.exec(line)
+      const m = /^(\s*)(?:- )?run:(.*)$/.exec(line)
       if (m === null) continue
       const indent = (m[1] ?? "").length
       const head = (m[2] ?? "").trim()
+      // `run:` with the value on the NEXT line is a plain multi-line scalar —
+      // valid YAML, valid in Actions, and invisible to a `run: (.*)$` regex. An
+      // injected `run:\n  bun run probe` shipped past this test un-gated.
+      if (head === "") {
+        const next = (lines[i + 1] ?? "").trim()
+        if (next !== "" && !next.startsWith("-") && !next.startsWith("#")) {
+          out.push({ file, raw: next, lines: [next] })
+          i += 1
+          continue
+        }
+      }
+      // Block indicators this parser does NOT fold (`|-`, `>`, `>+`, …) must fail
+      // CLOSED: keep the marker as the command so the containment test names it,
+      // rather than silently reading an empty step.
       if (head !== ">-" && head !== "|") {
         out.push({ file, raw: head, lines: [head] })
         continue
@@ -110,10 +124,26 @@ describe("gate manifest ↔ workflow parity", () => {
   const normalized = steps.flatMap((st) => st.lines.map(normalize))
   const manifestRuns = new Set(GATES.map((g) => normalize(g.run)))
 
+  test("an exemption may not retire a gate (the two sets are disjoint)", () => {
+    // `isExempt` is a SUBSTRING match, so `{ match: "bun run lint" }` would both
+    // exempt the lint step AND silently cover `lint:debt`. Deleting the gate then
+    // left this file green. Nothing asserted the sets were disjoint.
+    const clashes = GATES.filter((g) =>
+      WORKFLOW_EXEMPT.some((e) => normalize(g.run).includes(e.match)),
+    ).map((g) => g.id)
+    expect({ clashes }).toEqual({ clashes: [] })
+    for (const e of WORKFLOW_EXEMPT) {
+      expect({ match: e.match, why: e.why.length > 10 }).toEqual({ match: e.match, why: true })
+    }
+  })
+
   test("anti-vacuity: the workflow parse actually read commands", () => {
     // Floors, not exact counts: a new workflow step must not fail this test, it
     // must fail the containment tests below with a NAME.
-    expect(steps.length).toBeGreaterThan(15)
+    // Derived from the real corpus (31 steps across the two gating workflows at
+    // the time of writing), not a token `> 0`: a parser regression that halved
+    // coverage used to sail through the old `> 15`.
+    expect(steps.length).toBeGreaterThanOrEqual(28)
     expect(normalized.some((c) => c === "bun run lint")).toBe(true)
     expect(normalized.some((c) => c.includes("tests/contract"))).toBe(true)
   })
@@ -141,11 +171,16 @@ describe("gate manifest ↔ workflow parity", () => {
   test("① every blocking workflow step is a manifest gate (or an admitted exemption)", () => {
     const missing: string[] = []
     for (const st of steps) {
-      // Exempt AS A STEP first — a multi-line setup script's fragments are not
-      // commands a manifest could name.
-      if (isExempt(st.raw)) continue
+      // Exempt AS A STEP, because a multi-line setup script's fragments (`{`,
+      // `echo ""`, `done`) are not commands any manifest could name — BUT an
+      // exempt step is not a hiding place. Every `bun …` invocation inside it is
+      // still a candidate gate and must be listed or exempt on its own line.
+      // Injected proof of the old hole: `bun run probe` placed beside
+      // `bun fc gates || true` in the step-summary block shipped un-gated.
+      const stepExempt = isExempt(st.raw)
       for (const line of st.lines) {
         const c = normalize(line)
+        if (stepExempt && !/^bun\b/.test(c)) continue
         if (!isExempt(c) && !manifestRuns.has(c) && !missing.includes(c)) missing.push(c)
       }
     }

@@ -39,10 +39,12 @@ const foldCostPanelDelta = (
       inputTokens: number
       outputTokens: number
       cacheReadTokens: number
+      model?: string
     }) => void
   },
   snap: { counters: Record<string, number> },
   prev: CostPanelDeltaBaseline,
+  model: string | undefined,
 ): void => {
   const curIn = snap.counters[GEN_AI_ATTRS.usage.inputTokens] ?? 0
   const curOut = snap.counters[GEN_AI_ATTRS.usage.outputTokens] ?? 0
@@ -53,7 +55,14 @@ const foldCostPanelDelta = (
   prev.inputTokens = curIn
   prev.outputTokens = curOut
   prev.cacheReadTokens = curCache
-  panel.incrementTurn({ inputTokens: dIn, outputTokens: dOut, cacheReadTokens: dCache })
+  panel.incrementTurn({
+    inputTokens: dIn,
+    outputTokens: dOut,
+    cacheReadTokens: dCache,
+    // MR-05 — attribute to the model that actually streamed this turn. Absent
+    // (no usage event carried one) ⇒ the panel falls back to its seeded label.
+    ...(model !== undefined ? { model } : {}),
+  })
 }
 
 const foldCostPanelIfWired = (
@@ -63,14 +72,16 @@ const foldCostPanelIfWired = (
           inputTokens: number
           outputTokens: number
           cacheReadTokens: number
+          model?: string
         }) => void
       }
     | undefined,
   metrics: { snapshot: () => { counters: Record<string, number> } } | undefined,
   prev: CostPanelDeltaBaseline,
+  model: string | undefined,
 ): void => {
   if (panel === undefined || metrics === undefined) return
-  foldCostPanelDelta(panel, metrics.snapshot(), prev)
+  foldCostPanelDelta(panel, metrics.snapshot(), prev, model)
 }
 
 const snapshotAndFlushLifecyclePills = (
@@ -128,7 +139,12 @@ export const composeTurnSinks = (
       const snap = metrics.snapshot()
       slog.info("metrics.snapshot", { snapshot: snap })
       process.stderr.write(`${renderDashboardText(buildCostDashboard(snap, { model }))}\n`)
-      foldCostPanelIfWired(setup.costPanel, metrics, state.costDeltaPrev)
+      foldCostPanelIfWired(
+        setup.costPanel,
+        metrics,
+        state.costDeltaPrev,
+        setup.lastUsageModel.get(),
+      )
     },
     renderAndResetSummary: (outcome): void => {
       state.history = outcome.messages

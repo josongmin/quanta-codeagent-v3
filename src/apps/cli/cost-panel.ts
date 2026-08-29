@@ -48,9 +48,20 @@ export interface CostPanelUsageDelta {
   outputTokens: number
   cacheReadTokens?: number
   /** Pre-computed USD cost for THIS turn. When omitted we derive it via
-   *  `costUsd(state.model, ...)` so the panel still produces a value when
-   *  the caller only hands us tokens. */
+   *  `costUsd(model, ...)` so the panel still produces a value when the caller
+   *  only hands us tokens. */
   costUsd?: number | null
+  /**
+   * The model THIS usage ran on (MR-05), as reported by the adapter that streamed
+   * it. Absent ⇒ `state.model`, the session's boot label.
+   *
+   * The panel used to have no way to learn a model at all: `state.model` was set
+   * once at session start and NOTHING in production ever called `update({model})`
+   * — grep found zero callers. So after a `/model` switch every turn was priced
+   * with the boot model's rates and bucketed under its name, which is worse than a
+   * missing number because it looks like data.
+   */
+  model?: string
 }
 
 /** §23.5 — per-model cumulative bucket. One per distinct model id seen across
@@ -282,15 +293,18 @@ const accountingOps = (
       state.cacheReadTokens += cacheTok
       // Resolve cost ONCE: caller-provided > derived via pricing > null. Used
       // for BOTH the aggregate and the per-model bucket so they never diverge.
+      // MR-05 — price and bucket by the model THIS usage ran on.
+      const usageModel =
+        usage.model !== undefined && usage.model.length > 0 ? usage.model : state.model
       const rawCost =
-        usage.costUsd !== undefined ? usage.costUsd : costUsd(state.model, inTok, outTok, cacheTok)
+        usage.costUsd !== undefined ? usage.costUsd : costUsd(usageModel, inTok, outTok, cacheTok)
       // Clamp a finite negative cost to 0 — symmetric with the Math.max(0, …)
       // token clamps above. A negative bill (from a buggy/hostile upstream cost)
       // must never drive the cumulative total below zero.
       const turnCost = rawCost !== null && Number.isFinite(rawCost) ? Math.max(0, rawCost) : rawCost
       accumulateCost(turnCost)
       // §23.5 — attribute to the model active at this turn.
-      const b = bucketFor(state.model)
+      const b = bucketFor(usageModel)
       b.inputTokens += inTok
       b.outputTokens += outTok
       b.cacheReadTokens += cacheTok

@@ -134,6 +134,45 @@ describe("the session model echo follows a mid-session switch", () => {
     )
   })
 
+  test("3b. MR-04 — a switch that lands MID-TURN does not rewrite the finished turn", async () => {
+    // The sharp edge the earlier reconcile had: it re-read the LIVE selection at
+    // the terminal, so a `set_model` that arrived while the turn was streaming
+    // made `turn.completed.modelSlug` name the model the NEXT turn will run. That
+    // value feeds the daemon's cumulative `/cost` fold, so the finished turn's
+    // spend was attributed to a model that never ran.
+    //
+    // Request evidence (`lastLlmRequest.model`, which MR-04 made carry the port
+    // that actually streamed) wins over the live selection.
+    const sessionId = "s3b"
+    const cell = { model: "gpt-4o" }
+    const host = switchableHost(sessionId, cell)
+    const seed = createKernelSessionState(host.describe())
+    // The turn RAN on gpt-4o and said so in its request event…
+    const withEvidence: KernelSessionState = {
+      ...seed,
+      lastLlmRequest: { model: "gpt-4o" },
+    }
+    // …while a later selection moved the live answer on to gpt-5.
+    cell.model = "gpt-5"
+    const res = await runTurn(withEvidence, host, sessionId, "t1")
+    expect(res.state.modelSlug).toBe("gpt-4o")
+    const completed = res.events.find((e) => e.type === "turn.completed")
+    expect((completed as { modelSlug?: string } | undefined)?.modelSlug).toBe("gpt-4o")
+  })
+
+  test("3c. no request evidence (a turn that never reached the provider) ⇒ the live selection", async () => {
+    // An approval-gated or immediately-aborted turn produces no `llm_request`, so
+    // there is nothing executed to report; the selection is the best available
+    // claim and must still be published rather than leaving a stale value.
+    const sessionId = "s3c"
+    const cell = { model: "boot-model" }
+    const host = switchableHost(sessionId, cell)
+    const state = createKernelSessionState(host.describe())
+    cell.model = "gpt-4o"
+    const res = await runTurn(state, host, sessionId, "t1")
+    expect(res.state.modelSlug).toBe("gpt-4o")
+  })
+
   test("4. paired control — NO switch ⇒ the echo is unchanged (byte-identical)", async () => {
     const sessionId = "s4"
     const cell = { model: "boot-model" }

@@ -1,4 +1,4 @@
-import type { StreamEvent, ToolChoice } from "@/llm"
+import type { LLMPort, StreamEvent, ToolChoice } from "@/llm"
 import { applyMeasuredUsageLimit } from "@/objective"
 import { costUsd } from "@/observability"
 import type { PromptPolicySnapshot, TurnPolicySnapshot } from "@/shared"
@@ -97,6 +97,11 @@ const USAGE_SINKS: readonly UsageSink[] = [
     collector?.recordUsage({
       tokensInput: ev.inputTokens,
       tokensOutput: ev.outputTokens,
+      // MR-05 — the model THIS request ran on, as reported by the adapter that
+      // streamed it. Costing the whole turn at one label (a live selection read at
+      // turn close) priced every request at whatever was selected when the turn
+      // ended, which is wrong the moment a turn spans two models.
+      ...(ev.model !== undefined ? { model: ev.model } : {}),
       ...(ev.cacheReadTokens !== undefined ? { cacheReadTokens: ev.cacheReadTokens } : {}),
     }),
   // Per-task spend accumulator (guards against NaN / negative token counts).
@@ -270,14 +275,36 @@ export const finalizeTurnPolicy = (args: {
   promptCacheKeyPresent: args.promptCacheKey !== undefined && args.promptCacheKey.length > 0,
 })
 
-export const emitLlmRequest = (config: AgentConfig, policy: TurnPolicySnapshot): void => {
+/**
+ * Announce the request the turn is ABOUT to make.
+ *
+ * MR-04 — every identity field comes from the port that will actually STREAM
+ * (`turnLlm.llm`), never from `config.llm`.
+ *
+ * `config.llm` is the BOOT port. Once a sticky pick, a `/model` switch or a skill
+ * `model:` override could swap the port per turn, this event kept naming the boot
+ * model for the rest of the session — and it is not a debug field: the CLI prints
+ * it (`— llm request (<model>) —`), the debug tracer shows it, the session JSONL
+ * records it, and the headless `stream-json` surface publishes it as
+ * `turn.llm.request.model`. Measured through the real loop: the picked port
+ * streamed while this said `boot-model`.
+ *
+ * The caller already holds the resolved port (`runSamplingScope` receives
+ * `turnLlm`), so this takes it explicitly rather than re-deriving it — a
+ * re-derivation is what would drift again.
+ */
+export const emitLlmRequest = (
+  config: AgentConfig,
+  llm: LLMPort,
+  policy: TurnPolicySnapshot,
+): void => {
   config.stream.emit({
     type: "llm_request",
-    model: configuredModel(config.llm),
-    ...(config.llm.provider !== undefined ? { provider: config.llm.provider } : {}),
-    ...(config.llm.surfaceId !== undefined ? { surfaceId: config.llm.surfaceId } : {}),
-    ...(config.llm.transportId !== undefined ? { transportId: config.llm.transportId } : {}),
-    ...(config.llm.authMode !== undefined ? { authMode: config.llm.authMode } : {}),
+    model: configuredModel(llm),
+    ...(llm.provider !== undefined ? { provider: llm.provider } : {}),
+    ...(llm.surfaceId !== undefined ? { surfaceId: llm.surfaceId } : {}),
+    ...(llm.transportId !== undefined ? { transportId: llm.transportId } : {}),
+    ...(llm.authMode !== undefined ? { authMode: llm.authMode } : {}),
     policy,
   })
 }

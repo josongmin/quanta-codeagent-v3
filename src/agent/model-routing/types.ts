@@ -169,13 +169,23 @@ export interface ModelRoutingAuthority {
    *  probe; no-throw (a rejected probe degrades to the seeded set). */
   list(): Promise<readonly ModelOption[]>
 
-  /** Choose the model for subsequent requests. Resolves only AFTER the durable
-   *  write settles — `view()` and `list()` reflect it on return, or the result is
-   *  `ok:false` and nothing moved. */
-  select(modelId: string): Promise<ModelSelectionResult>
+  /**
+   * Choose the model for subsequent requests. Resolves only AFTER the durable
+   * write settles — `view()` and `list()` reflect it on return, or the result is
+   * `ok:false` and nothing moved.
+   *
+   * `mode` targets a posture OTHER than the live one (`/sticky-model <mode> <id>`,
+   * the explicit-mode escape hatch). Omitted ⇒ the live mode, which is what
+   * `/model` and `set_model` mean. It is a parameter rather than a second door
+   * because a surface writing the store directly is how the authority ended up
+   * with a second owner: `/model --clear` cleared the store while the authority's
+   * own selection still held the pick, and the display kept reporting it.
+   */
+  select(modelId: string, mode?: ModelRoutingMode): Promise<ModelSelectionResult>
 
-  /** Drop the selection and fall back to the boot model. Idempotent. */
-  clear(): Promise<ModelSelectionResult>
+  /** Drop the selection and fall back to the boot model. Idempotent. `mode` as in
+   *  {@link select}. */
+  clear(mode?: ModelRoutingMode): Promise<ModelSelectionResult>
 
   /**
    * Capture the model for ONE request, at request start. The returned snapshot is

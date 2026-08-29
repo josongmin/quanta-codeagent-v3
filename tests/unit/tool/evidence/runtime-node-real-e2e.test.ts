@@ -31,9 +31,12 @@ const REAL_E2E = gateOn(process.env, "QUANTA_REAL_TOOLCHAIN_E2E")
 // their cost tracks whatever else the box is doing (measured: 3,455ms idle,
 // 9,387ms at load average 68 — past the 8,529ms per-test speed budget, a ceiling
 // that may only go DOWN). Same suffix, same lane as their `-real-e2e` siblings:
-// a VISIBLE skip by default, run by `bun run test:real-toolchain`. CI coverage
-// is unchanged — the runner has none of these toolchains, so these describes
-// already skipped there.
+// a VISIBLE skip by default, run by `bun run test:real-toolchain`. CI still runs
+// this lane — `.github/workflows/ci.yml` has an explicit
+// `QUANTA_REAL_TOOLCHAIN_E2E=1 bun run test:real-toolchain` step, added after an
+// audit measured that ubuntu-latest DOES ship node, go, cargo, python3 and npm
+// (only clangd, lldb-dap, dlv and debugpy are absent), so gating without that
+// step silently dropped 8 cases from the blocking merge gate.
 const D = REAL_E2E && has("node", "--version") ? describe : describe.skip
 
 // A node:test file that self-runs inline (one process). `result` is 10 (0+1+2+3+4),

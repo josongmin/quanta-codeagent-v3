@@ -35,9 +35,15 @@ export const resolveInitialSelection = (input: {
   readonly persistedPick?: string | undefined
 }): { readonly modelId: string; readonly source: Exclude<ModelSelectionSource, "skill"> } => {
   const pick = input.persistedPick
-  if (input.pinned || pick === undefined || pick.length === 0 || pick === input.bootModelId) {
+  if (input.pinned || pick === undefined || pick.length === 0) {
     return { modelId: input.bootModelId, source: "boot" }
   }
+  // A pick EQUAL to the boot model is still a SESSION choice, not "no preference".
+  // The boot model is not a fixed identity across sessions — change `QUANTA_MODEL`
+  // and it moves — so "the user chose gpt-5.6-terra, which happens to be today's
+  // default" and "the user chose nothing" must stay distinguishable, or tomorrow's
+  // session silently runs a different model than the one they picked. It costs
+  // nothing here: the port for it is the boot port by identity (invariant A).
   return { modelId: pick, source: "session" }
 }
 

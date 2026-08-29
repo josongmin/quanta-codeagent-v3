@@ -126,7 +126,7 @@ export const beginObjectiveAttempt = async (
   if (deps.budgetMeter === undefined && deps.usageSource !== "legacy-stream-events") {
     const reason =
       "objective attempt requires a BudgetMeter (composition error: measured usage source missing)"
-    slot.failStop(reason)
+    slot.failStop(reason, attempt.objectiveId)
     throw new Error(reason)
   }
   const begun = capabilities.system.commit(attempt.threadId, {
@@ -146,7 +146,7 @@ export const beginObjectiveAttempt = async (
     await deps.persistStart?.()
   } catch (e) {
     const reason = `objective attempt start not durable: ${errMessage(e)}`
-    slot.failStop(reason)
+    slot.failStop(reason, attempt.objectiveId)
     throw new Error(reason)
   }
   return {
@@ -217,7 +217,7 @@ export const settleObjectiveAttempt = async (deps: SettleObjectiveAttemptDeps): 
   if (!res.ok) {
     const reason = `objective attempt settlement refused (${res.reason})`
     logger.warn(`objective.settlement: ${reason}`)
-    attributed.slot.failStop(reason)
+    attributed.slot.failStop(reason, attributed.attempt.objectiveId)
     return
   }
   if (deps.judge !== undefined) {
@@ -231,5 +231,8 @@ export const settleObjectiveAttempt = async (deps: SettleObjectiveAttemptDeps): 
 
 /** Terminal persistence failed AFTER settlement: the durable state is uncertain. */
 export const failStopAfterSettlement = (attributed: AttributedAttempt, error: unknown): void => {
-  attributed.slot.failStop(`objective settlement not durable: ${errMessage(error)}`)
+  attributed.slot.failStop(
+    `objective settlement not durable: ${errMessage(error)}`,
+    attributed.attempt.objectiveId,
+  )
 }

@@ -116,11 +116,11 @@ const wire = (
     stickyModelStore: { store: modelSwitch.store, provider: modelSwitch.provider },
     modelCandidates: modelSwitch.candidates,
   } as unknown as AgentConfig
-  const send = (request: unknown): ReturnType<typeof drainControlRequests> => {
+  const send = async (request: unknown): ReturnType<typeof drainControlRequests> => {
     const decoded = peekControlRequest(frame(request))
     if (decoded === null) throw new Error("frame did not decode")
     handle.enqueue(decoded)
-    return drainControlRequests(handle.port, handle.context, handle.applier)
+    return await drainControlRequests(handle.port, handle.context, handle.applier)
   }
   return { env, llm, modelSwitch, handle, cfg, send }
 }
@@ -205,7 +205,7 @@ describe("web-daemon set_model — the effect LANDS (aug-27)", () => {
     const w = wire(async () => ["boot-model", "gpt-4o"])
     await w.modelSwitch.refresh() // the /model readout's probe (lazy in prod)
 
-    const effects = w.send({ kind: "set_model", model: "gpt-4o" })
+    const effects = await w.send({ kind: "set_model", model: "gpt-4o" })
     expect(effects).toEqual([{ kind: "model-set", model: "gpt-4o" }])
     // The store — the SAME file+instance the loop reads.
     expect(await untilSticky(w.cfg, "gpt-4o")).toBe("gpt-4o")
@@ -257,7 +257,7 @@ describe("web-daemon set_model — the effect LANDS (aug-27)", () => {
     const decoded = peekControlRequest(frame({ kind: "set_model", model: "gpt-4o" }))
     if (decoded === null) throw new Error("decode")
     controlRequest.enqueue(decoded)
-    const effects = drainControlRequests(
+    const effects = await drainControlRequests(
       controlRequest.port,
       controlRequest.context,
       controlRequest.applier,
@@ -281,7 +281,7 @@ describe("web-daemon set_model — the effect LANDS (aug-27)", () => {
     const d2 = peekControlRequest(frame({ kind: "set_model", model: "gpt-4o" }))
     if (d2 === null || bare.controlRequest === undefined) throw new Error("decode/mint")
     bare.controlRequest.enqueue(d2)
-    drainControlRequests(
+    await drainControlRequests(
       bare.controlRequest.port,
       bare.controlRequest.context,
       bare.controlRequest.applier,
@@ -293,21 +293,21 @@ describe("web-daemon set_model — the effect LANDS (aug-27)", () => {
   test("2: LIVE allowlist — a model discovered by the lazy probe is accepted (not frozen at mint)", async () => {
     const w = wire(async () => ["boot-model", "gpt-4o"])
     // BEFORE the probe the id is off-list: fail-closed, nothing written.
-    expect(w.send({ kind: "set_model", model: "gpt-4o" })[0]?.kind).toBe("rejected")
+    expect((await w.send({ kind: "set_model", model: "gpt-4o" }))[0]?.kind).toBe("rejected")
     await settle()
     expect(await readStickyModelForMode(w.cfg)).toBeUndefined()
 
     // AFTER the probe the SAME port instance accepts it — the context reads the
     // candidate ids per drain instead of copying them at mint time.
     await w.modelSwitch.refresh()
-    expect(w.send({ kind: "set_model", model: "gpt-4o" })[0]?.kind).toBe("model-set")
+    expect((await w.send({ kind: "set_model", model: "gpt-4o" }))[0]?.kind).toBe("model-set")
     expect(await untilSticky(w.cfg, "gpt-4o")).toBe("gpt-4o")
   })
 
   test("3: FAIL-CLOSED — an off-catalog id is rejected and NOTHING is persisted", async () => {
     const w = wire(async () => ["boot-model"])
     await w.modelSwitch.refresh()
-    const effects = w.send({ kind: "set_model", model: "some-unlisted-model" })
+    const effects = await w.send({ kind: "set_model", model: "some-unlisted-model" })
     expect(effects[0]?.kind).toBe("rejected")
     await settle()
     expect(await readStickyModelForMode(w.cfg)).toBeUndefined()
@@ -323,16 +323,14 @@ describe("web-daemon set_model — the effect LANDS (aug-27)", () => {
     await w.modelSwitch.refresh()
     // The ECHO is OPTIMISTIC and that is deliberate, not an oversight: the applier
     // is SYNC by contract (a throwing applier abandons the whole drain) while the
-    // write is async, so at echo time nothing can know the disk will refuse. Pin
-    // the asymmetry explicitly so it stays a decision instead of becoming a
-    // surprise, and pin what keeps it honest for the operator: the READ half
-    // reports the boot model, and the browser's `/model` re-reads that readout
-    // right after switching precisely so an unpersisted pick cannot masquerade.
-    let effects: ReturnType<typeof drainControlRequests> = []
-    expect(() => {
-      effects = w.send({ kind: "set_model", model: "gpt-4o" })
-    }).not.toThrow()
-    expect(effects).toEqual([{ kind: "model-set", model: "gpt-4o" }])
+    // write is async. MR-03 CHANGED THIS: the applier is awaited and returns a
+    // typed result, so a refused write is echoed as `rejected` instead of
+    // `model-set`. The old comment here recorded the opposite as a deliberate
+    // asymmetry — it was deliberate only because a sync applier could not express
+    // "not yet", which is exactly what MR-03 removed.
+    const effects = await w.send({ kind: "set_model", model: "gpt-4o" })
+    expect(effects).toHaveLength(1)
+    expect(effects[0]?.kind).toBe("rejected")
     await settle()
     // The pick did NOT persist (honest) — and the surface is still alive.
     expect(await readStickyModelForMode(w.cfg)).toBeUndefined()
@@ -380,6 +378,45 @@ describe("web-daemon set_model — the effect LANDS (aug-27)", () => {
     expect(resolved.llm.model).toBe("gpt-4o")
   })
 
+  test("6a: A HOSTILE persisted id never reaches the readouts (MR-02, was raw)", () => {
+    // Measured before MR-02: the daemon seeded its session cell from the RAW file,
+    // so an ANSI/OSC-laden id came straight back out of `effectiveModel()` — and
+    // that value is what `describe().modelSlug` publishes to the `/state` readout,
+    // the SDK's `session.model` and the `quanta attach` pill, which renders it
+    // UNESCAPED to a terminal.
+    const ESC = String.fromCharCode(27)
+    const dir = mkdtempSync(join(tmpdir(), "web-model-hostile-"))
+    scratchDirs.push(dir)
+    writeFileSync(
+      join(dir, "sticky-model.json"),
+      JSON.stringify({ "openai:default": `${ESC}[2Jevil\nApprove destructive action? [y/N]` }),
+      "utf8",
+    )
+    const w = wire(undefined, { configDir: dir })
+    expect(w.modelSwitch.effectiveModel()).toBeUndefined()
+    const offered = w.modelSwitch.ids().join("|")
+    expect(offered).not.toContain(ESC)
+    expect(offered).not.toContain("Approve destructive")
+  })
+
+  test("6b: a LEGACY bare-mode pick is both claimed AND runnable (MR-02, was claimed-only)", async () => {
+    // The other half of the same seeding bug: reads accepted the legacy bare key
+    // but the eager candidate seed read only the SCOPED one, so every display
+    // named the pick while the turn ran the boot model. Any user who ran `/model`
+    // before the provider joined the key hit this on their first web session.
+    const dir = mkdtempSync(join(tmpdir(), "web-model-legacy-"))
+    scratchDirs.push(dir)
+    writeFileSync(join(dir, "sticky-model.json"), JSON.stringify({ default: "gpt-4o" }), "utf8")
+    const w = wire(undefined, { configDir: dir })
+    expect(w.modelSwitch.effectiveModel()).toBe("gpt-4o")
+    // …and a PORT exists for it, so the loop really runs it.
+    expect(w.modelSwitch.ids()).toContain("gpt-4o")
+    expect(await readStickyModelForMode(w.cfg)).toBe("gpt-4o")
+    const resolved = resolveSkillTurnOverride(w.cfg, undefined, "gpt-4o")
+    expect(resolved.llm).not.toBe(w.llm)
+    expect(resolved.llm.model).toBe("gpt-4o")
+  })
+
   test("5b: the READ half degrades honestly (no candidates / no effective model)", () => {
     // Both branches are reachable in production: a rejected probe on a provider
     // with no `listModels` leaves the ids empty, and a daemon whose boot port
@@ -393,7 +430,7 @@ describe("web-daemon set_model — the effect LANDS (aug-27)", () => {
     expect(listed).toContain("set_model")
   })
 
-  test("4b: NO-THROW — even a SYNCHRONOUSLY throwing applyModel only bails the drain", () => {
+  test("4b: NO-THROW — even a SYNCHRONOUSLY throwing applyModel only bails the drain", async () => {
     const handle = createWebControlRequestPort({
       permission: liveCell(),
       applyModel: () => {
@@ -406,17 +443,16 @@ describe("web-daemon set_model — the effect LANDS (aug-27)", () => {
     handle.enqueue(decoded)
     // `drainControlRequests` catches a thrown applier and returns cleanly (it
     // records nothing for that request) — the turn must not die on a control frame.
-    let applied: ReturnType<typeof drainControlRequests> = []
-    expect(() => {
-      applied = drainControlRequests(handle.port, handle.context, handle.applier)
-    }).not.toThrow()
+    // The drain is async now, so "does not throw" is a claim about the PROMISE:
+    // a rejected drain would fail this await and the assertion below would not run.
+    const applied = await drainControlRequests(handle.port, handle.context, handle.applier)
     expect(applied).toEqual([])
   })
 
   test("5: READ half — the readout lists exactly what set_model accepts, marking the current", async () => {
     const w = wire(async () => ["boot-model", "gpt-4o"])
     await w.modelSwitch.refresh()
-    w.send({ kind: "set_model", model: "gpt-4o" })
+    await w.send({ kind: "set_model", model: "gpt-4o" })
     expect(await untilSticky(w.cfg, "gpt-4o")).toBe("gpt-4o")
 
     const ids = w.modelSwitch.ids()
@@ -428,7 +464,7 @@ describe("web-daemon set_model — the effect LANDS (aug-27)", () => {
     for (const id of ids) {
       const fresh = wire(async () => ids)
       await fresh.modelSwitch.refresh()
-      expect(fresh.send({ kind: "set_model", model: id })[0]?.kind).toBe("model-set")
+      expect((await fresh.send({ kind: "set_model", model: id }))[0]?.kind).toBe("model-set")
     }
   })
 

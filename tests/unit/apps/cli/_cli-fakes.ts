@@ -297,4 +297,8 @@ export const makeFakeSessionSetup = (
   // fake's own `model` as the default — a fake whose two model fields disagree
   // would make every display/loop assertion ambiguous.
   effectiveBootModel: overrides.effectiveBootModel ?? overrides.model ?? "test-model",
+  // MR-05 — the cost panel's model source. A fake session has streamed nothing, so
+  // the honest answer is "no usage observed yet" and the panel falls back to its
+  // seeded label, exactly as a real session does before its first turn.
+  lastUsageModel: overrides.lastUsageModel ?? { get: () => undefined },
 })

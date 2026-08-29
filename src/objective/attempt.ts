@@ -63,7 +63,13 @@ export interface ObjectiveAttemptStart {
 export type ObjectiveAttemptSlotStatus =
   | { readonly kind: "empty" }
   | { readonly kind: "claimed"; readonly attempt: ObjectiveAttemptContext }
-  | { readonly kind: "fail-stopped"; readonly reason: string }
+  | {
+      readonly kind: "fail-stopped"
+      readonly reason: string
+      /** The objective generation the failed attempt belonged to; a NEW
+       *  generation (different objectiveId) is what lifts the fail-stop. */
+      readonly objectiveId?: string | undefined
+    }
 
 /**
  * Single-occupancy host side channel between the surface (claims) and the
@@ -79,7 +85,7 @@ export interface ObjectiveAttemptSlot {
   /** Drop a claim the turn never consumed (the surface, when the turn did not start). */
   release(): void
   /** Mark the session fail-stopped (durable uncertainty). Terminal until `recover`. */
-  failStop(reason: string): void
+  failStop(reason: string, objectiveId?: string): void
   /** Explicit operator recovery (a new objective generation was started). */
   recover(): void
   status(): ObjectiveAttemptSlotStatus
@@ -88,6 +94,7 @@ export interface ObjectiveAttemptSlot {
 export const createObjectiveAttemptSlot = (): ObjectiveAttemptSlot => {
   let claimed: ObjectiveAttemptContext | undefined
   let failStop: string | undefined
+  let failStopObjectiveId: string | undefined
   return {
     claim(attempt) {
       if (failStop !== undefined || claimed !== undefined) return false
@@ -102,15 +109,19 @@ export const createObjectiveAttemptSlot = (): ObjectiveAttemptSlot => {
     release() {
       claimed = undefined
     },
-    failStop(reason) {
+    failStop(reason, objectiveId) {
       failStop = reason
+      failStopObjectiveId = objectiveId
       claimed = undefined
     },
     recover() {
       failStop = undefined
+      failStopObjectiveId = undefined
     },
     status() {
-      if (failStop !== undefined) return { kind: "fail-stopped", reason: failStop }
+      if (failStop !== undefined) {
+        return { kind: "fail-stopped", reason: failStop, objectiveId: failStopObjectiveId }
+      }
       return claimed === undefined ? { kind: "empty" } : { kind: "claimed", attempt: claimed }
     },
   }

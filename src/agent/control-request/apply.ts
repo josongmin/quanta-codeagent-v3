@@ -26,12 +26,35 @@ import type {
 } from "./types"
 import { planControlRequest } from "./types"
 
-/** Host callbacks that LAND each applied control. Every method is optional — a
- *  host that does not support an axis simply omits it (the effect is planned +
- *  returned for observability but no-ops). NO-THROW expectation: a callback that
- *  throws is caught by {@link drainControlRequests}. */
+/**
+ * Outcome of ONE applied control (MR-03).
+ *
+ * Typed, because the previous fire-and-forget shape could not tell the client the
+ * truth: `set_model` echoed `model-set` the instant the frame was planned, while
+ * the durable write was still in flight and might fail. The operator saw success
+ * over a switch that never happened.
+ */
+export type ControlApplyResult =
+  | { readonly ok: true }
+  | { readonly ok: false; readonly reason: string }
+
+/**
+ * Host callbacks that LAND each applied control. Every method is optional — a host
+ * that does not support an axis simply omits it (the effect is planned + returned
+ * for observability but no-ops).
+ *
+ * ASYNC (MR-03). `setModel` in particular must be able to make the turn WAIT: the
+ * drain runs at the top of a turn, and the measured failure was that the write
+ * had not landed by the time the same turn read the selection — the turn ran the
+ * OLD model while the end-of-turn echo, reading a by-then-updated cell, reported
+ * the NEW one. A synchronous applier cannot express "not yet", so the boundary
+ * itself had to become async.
+ *
+ * NO-THROW expectation: a callback that throws is caught by
+ * {@link drainControlRequests} and treated as a rejection.
+ */
 export interface ControlEffectApplier {
-  readonly setModel?: (model: string) => void
+  readonly setModel?: (model: string) => Promise<ControlApplyResult> | ControlApplyResult
   readonly setPermissionMode?: (mode: string) => void
   readonly setThinking?: (level: string) => void
   readonly reportUsage?: (usage: ContextUsageSnapshot) => void
@@ -40,26 +63,32 @@ export interface ControlEffectApplier {
 
 /** Route ONE planned effect to the matching applier callback. Pure dispatch —
  *  exhaustive over the {@link ControlEffect} union. */
-export const applyControlEffect = (effect: ControlEffect, applier: ControlEffectApplier): void => {
+export const applyControlEffect = async (
+  effect: ControlEffect,
+  applier: ControlEffectApplier,
+): Promise<ControlApplyResult> => {
   switch (effect.kind) {
     case "model-set":
-      applier.setModel?.(effect.model)
-      return
+      // AWAITED: the caller must not report a switch the durable write has not
+      // accepted, and the turn about to start must not read a selection that is
+      // still being written.
+      return applier.setModel === undefined ? { ok: true } : await applier.setModel(effect.model)
     case "permission-mode-set":
       applier.setPermissionMode?.(effect.mode)
-      return
+      return { ok: true }
     case "thinking-set":
       applier.setThinking?.(effect.level)
-      return
+      return { ok: true }
     case "usage":
       applier.reportUsage?.(effect.usage)
-      return
+      return { ok: true }
     case "rejected":
       applier.onRejected?.(effect.reason)
-      return
+      return { ok: true }
     default: {
       const _exhaustive: never = effect
       void _exhaustive
+      return { ok: true }
     }
   }
 }
@@ -74,11 +103,11 @@ export const MAX_CONTROL_REQUESTS_PER_DRAIN = 64
  * order) for observability/tests. BOUNDED + NO-THROW: a thrown `next()` or a
  * thrown applier callback ends the drain with what was applied so far.
  */
-export const drainControlRequests = (
+export const drainControlRequests = async (
   port: ControlRequestPort,
   ctx: ControlRequestContext,
   applier: ControlEffectApplier,
-): ControlEffect[] => {
+): Promise<ControlEffect[]> => {
   const applied: ControlEffect[] = []
   for (let i = 0; i < MAX_CONTROL_REQUESTS_PER_DRAIN; i++) {
     let req: ReturnType<ControlRequestPort["next"]>
@@ -89,14 +118,20 @@ export const drainControlRequests = (
     }
     if (req === null) break
     const effect = planControlRequest(req, ctx)
+    let result: ControlApplyResult
     try {
-      applyControlEffect(effect, applier)
-    } catch {
+      result = await applyControlEffect(effect, applier)
+    } catch (e) {
       // a thrown applier callback must not derail the turn — record nothing for
       // this one and stop (the host's apply path is broken; bail conservatively).
+      void e
       break
     }
-    applied.push(effect)
+    // An apply that FAILED is reported as a rejection, not as the effect it
+    // attempted. The client's echo is the only signal it gets, so echoing
+    // `model-set` for a write the store refused is the lie MR-03 exists to remove.
+    applied.push(result.ok ? effect : { kind: "rejected", reason: result.reason })
+    if (!result.ok) applier.onRejected?.(result.reason)
   }
   return applied
 }

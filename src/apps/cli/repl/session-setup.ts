@@ -45,6 +45,7 @@ import { BG_TURN_ENV_GATE } from "./background-turn-portal"
 import { type CliFeatureConfig, readCliFeatureConfig } from "./cli-feature-config"
 import { type ContextUsageHolder, createContextUsageHolder } from "./context-usage-snapshot"
 import { maybeRunEnvProbeWire } from "./env-probe-wire"
+import { buildCostPanelUsageTee } from "./factories/cost-panel-usage-tee"
 import type { IndicatorUsageObserver } from "./factories/indicator-stream-port"
 import { composeCliRuntimeContext } from "./runtime-context-compose"
 import { readSessionRuntimeConfig } from "./session-runtime-config"
@@ -281,6 +282,9 @@ export interface SessionSetupResult {
     | import("@/runner/hunk-mutation-journal").HunkMutationJournalStore
     | undefined
   readonly costPanel: CostPanel | undefined
+  /** MR-05 — the model of the most recent `usage` event, for cost attribution.
+   *  See `factories/cost-panel-usage-tee.ts` (including its honest limit). */
+  readonly lastUsageModel: import("./factories/cost-panel-usage-tee").LastUsageModelCell
   readonly branchProgress: BranchProgressTracker | undefined
   readonly planStore: PlanStore | undefined
   readonly abort: AbortController
@@ -460,9 +464,14 @@ const setupStatus = (ctx: Awaited<ReturnType<typeof setupBoot>>) => {
     "    Esc Esc · cancel    Ctrl+C · exit"
   const statusBar = installStatusBar(statusDefault)
 
+  // MR-05 — record WHICH model each `usage` event came from, so the cost panel can
+  // price and bucket a turn by the model that actually ran it instead of the boot
+  // label it was seeded with (nothing in production ever updated that label). A
+  // pure pass-through tee: no event added, dropped, reordered or delayed.
+  const { stream: costModelStream, lastUsageModel } = buildCostPanelUsageTee(boot.stream)
   const { collector: turnSummary, stream: summaryStream } = deps.buildTurnSummaryAndStream(
     featureCfg,
-    boot.stream,
+    costModelStream,
   )
   // Track D — interpose the debug tracer BEFORE the indicator so the
   // debug emit sees the same upstream events the indicator does. When
@@ -512,6 +521,7 @@ const setupStatus = (ctx: Awaited<ReturnType<typeof setupBoot>>) => {
   return {
     statusDefault,
     statusBar,
+    lastUsageModel,
     turnSummary,
     summaryStream,
     debugStream,
@@ -655,17 +665,21 @@ const toolingSlashSlots = (
   projectsKbStore: tooling.projectsKbStore,
 })
 
-export const setupSession = async (
-  deps: SetupSessionDeps,
-  options: {
-    readonly convStore?: ConversationCheckpointStore
-    readonly responsesStore?: ResponsesContinuationStore
-  } = {},
-): Promise<SessionSetupResult> => {
-  const p0 = await setupBoot(deps, options)
-  const p1 = setupStatus({ ...p0 })
-  const p2 = await setupInteraction({ ...p0, ...p1 })
-  const p3 = await setupModel({ ...p0, ...p1, ...p2 })
+/**
+ * Fold the four setup phases into the {@link SessionSetupResult} the REPL consumes.
+ *
+ * Split out of {@link setupSession} so the phase ORCHESTRATION (four ordered
+ * awaits) and the RESULT ASSEMBLY (one wide literal, ~90 fields) are separate
+ * units — the combined function had grown past the god-function cap, and the two
+ * halves change for entirely different reasons: a new phase is a pipeline change,
+ * a new field is a projection change.
+ */
+const assembleSetupResult = (
+  parts: Awaited<ReturnType<typeof setupBoot>> &
+    ReturnType<typeof setupStatus> &
+    Awaited<ReturnType<typeof setupInteraction>> &
+    Awaited<ReturnType<typeof setupModel>>,
+): SessionSetupResult => {
   const {
     runtime,
     featureCfg,
@@ -689,8 +703,9 @@ export const setupSession = async (
     hunkUndoStore,
     pills,
     liveModelSource,
+    lastUsageModel,
     mut,
-  } = { ...p0, ...p1, ...p2, ...p3 }
+  } = parts
   return {
     provider: boot.provider,
     model: boot.model,
@@ -773,6 +788,7 @@ export const setupSession = async (
     permissionStore,
     hunkUndoStore,
     costPanel: boot.costPanel as CostPanel | undefined,
+    lastUsageModel,
     branchProgress: boot.branchProgress as BranchProgressTracker | undefined,
     planStore: boot.planStore,
     abort: boot.abort,
@@ -809,4 +825,18 @@ export const setupSession = async (
     playbookCliFlag: boot.playbookCliFlag,
     featureCfg,
   }
+}
+
+export const setupSession = async (
+  deps: SetupSessionDeps,
+  options: {
+    readonly convStore?: ConversationCheckpointStore
+    readonly responsesStore?: ResponsesContinuationStore
+  } = {},
+): Promise<SessionSetupResult> => {
+  const p0 = await setupBoot(deps, options)
+  const p1 = setupStatus({ ...p0 })
+  const p2 = await setupInteraction({ ...p0, ...p1 })
+  const p3 = await setupModel({ ...p0, ...p1, ...p2 })
+  return assembleSetupResult({ ...p0, ...p1, ...p2, ...p3 })
 }

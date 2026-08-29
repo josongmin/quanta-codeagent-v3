@@ -74,8 +74,19 @@ export interface ModelRoutingAuthorityArgs {
   /** The operator named a model for THIS invocation (`--model` / `QUANTA_MODEL`),
    *  so a persisted pick must not seed the session. */
   readonly pinned: boolean
-  /** The boot snapshot of the durable file, read synchronously by the root. */
-  readonly persisted: Readonly<Record<string, string>>
+  /**
+   * The ADMITTED picks, `mode → modelId`, already filtered by
+   * {@link admitPersistedPicks}.
+   *
+   * Admitted by the CALLER rather than here, and that is deliberate: the factory
+   * also needs the admitted set (it seeds the session cell and the eager candidate
+   * ports from it), and running the filter twice meant two places that had to stay
+   * in step. They did — but only because both happened to call the same function,
+   * which a guard could not detect: removing admission from one of them left the
+   * other still filtering, so the defect it was supposed to catch stayed invisible.
+   * One computation, one consumer chain.
+   */
+  readonly admitted: ReadonlyMap<ModelRoutingMode, string>
   /** Optional metadata for `list()` rows. Absent ⇒ bare ids (a picker degrades to
    *  the id rather than printing a claim it cannot support). */
   readonly describeOption?: (id: string) => Omit<ModelOption, "id" | "isBootModel" | "isSelected">
@@ -128,7 +139,7 @@ export const admitPersistedPicks = (
 export const createModelRoutingAuthority = (
   args: ModelRoutingAuthorityArgs,
 ): ModelRoutingAuthority => {
-  const admitted = admitPersistedPicks(args.persisted, args.provider)
+  const admitted = args.admitted
   const runnable = (id: string): boolean =>
     id === args.bootModelId || args.catalog.ids().includes(id)
 
@@ -167,7 +178,7 @@ export const createModelRoutingAuthority = (
       modelId: sel ?? args.bootModelId,
       provider: args.provider,
       mode,
-      source: sel !== undefined && sel !== args.bootModelId ? "session" : "boot",
+      source: sel !== undefined ? "session" : "boot",
       revision,
     }
   }
@@ -205,17 +216,30 @@ export const createModelRoutingAuthority = (
         ...(args.describeOption?.(id) ?? {}),
       }))
     },
-    select: async (modelId: string): Promise<ModelSelectionResult> => {
+    select: async (modelId: string, mode?: ModelRoutingMode): Promise<ModelSelectionResult> => {
       const id = modelId.trim()
+      // REFRESH FIRST. The catalog knows the boot model, the operator's configured
+      // extras and any persisted pick eagerly; everything else arrives from the
+      // lazy provider probe. Leaving that to the caller made "can I pick this?"
+      // depend on whether the surface happened to list first — `/model gpt-4o`
+      // typed straight out is a perfectly ordinary thing to do, and it was
+      // rejected as unknown. The probe is memoized on success and deadline-bounded
+      // (`MODEL_CATALOG_PROBE_TIMEOUT_MS`), so this costs one round-trip per
+      // session at most, and a failed probe still leaves the seeded set usable.
+      if (id.length > 0 && !args.catalog.ids().includes(id)) await args.catalog.refresh()
       const known = args.catalog.ids()
       if (id.length === 0 || !known.includes(id)) {
         // Fail CLOSED: an id nothing can run must not persist, or every later
         // session announces a model no turn could execute.
         return { ok: false, kind: "unknown-model", known }
       }
-      return await write(args.mode(), id === args.bootModelId ? undefined : id)
+      // The boot model is PERSISTED like any other choice (see
+      // `resolveInitialSelection`): treating it as a clear would lose the
+      // distinction the moment the session's boot model changes.
+      return await write(mode ?? args.mode(), id)
     },
-    clear: async (): Promise<ModelSelectionResult> => await write(args.mode(), undefined),
+    clear: async (mode?: ModelRoutingMode): Promise<ModelSelectionResult> =>
+      await write(mode ?? args.mode(), undefined),
     resolveRequest: async (input): Promise<ModelRequestSnapshot> => {
       const mode = args.mode()
       const sel = selectedFor(mode)
@@ -224,7 +248,15 @@ export const createModelRoutingAuthority = (
         ...(sel !== undefined ? { selectedModelId: sel } : {}),
         ...(input.skillModel !== undefined ? { skillModel: input.skillModel } : {}),
       })
-      const port = portFor(chosen.modelId)
+      let port = portFor(chosen.modelId)
+      if (port === undefined && chosen.source === "skill") {
+        // One discovery attempt before failing closed, and ONLY for a skill
+        // override. The happy path must never pay a probe round-trip on the first
+        // request of every session; but a skill naming a model the provider does
+        // list should not be refused merely because nobody opened a picker first.
+        await args.catalog.refresh()
+        port = portFor(chosen.modelId)
+      }
       if (port === undefined) {
         // FAIL-CLOSED. A skill that declares `model:` is stating a requirement;
         // running the base model instead voids that contract with no warning on

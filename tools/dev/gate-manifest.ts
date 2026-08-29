@@ -41,6 +41,17 @@ export interface Gate {
   /** One line: what breaks if this gate is absent. */
   readonly why: string
   /**
+   * This gate CONSUMES a file the named gate produces. When the producer fails,
+   * the consumer is reported SKIPPED — never PASS.
+   *
+   * Measured hole this closes: `bun test` does NOT write `--reporter-outfile`
+   * when a run aborts, and the runner does not bail, so `unit-speed-budget`
+   * happily rendered a verdict over the PREVIOUS run's junit — a file dated
+   * 2020 was accepted without comment. `MIN_TESTCASES` cannot catch it, because
+   * a stale FULL run has 39k cases.
+   */
+  readonly consumes?: string
+  /**
    * Set ONLY for a gate no workflow runs. The string is the justification the
    * parity test prints, so an unrunnable-in-CI gate stays visible rather than
    * silently expanding the local-only set.
@@ -123,6 +134,7 @@ export const GATES: readonly Gate[] = [
   {
     id: "unit-speed-budget",
     stage: "prepush",
+    consumes: "unit",
     run: "bun run tools/dev/unit-speed-budget.ts .cache/unit-junit.xml",
     why: "no SINGLE unit test may exceed the pinned ceiling; consumes the junit the `unit` gate writes",
   },
@@ -155,6 +167,12 @@ export const GATES: readonly Gate[] = [
     stage: "prepush",
     run: "bun test tests/meta/preload-runtime-closure-hellgate.test.ts",
     why: "the bunfig preload dragging production slices into every test — it was 1,259 files of src/, and it made the non-vacuity mirror impossible to start",
+  },
+  {
+    id: "real-toolchain-e2e",
+    stage: "prepush",
+    run: "QUANTA_REAL_TOOLCHAIN_E2E=1 bun run test:real-toolchain",
+    why: "the `*-real-e2e.test.ts` lane — 43 cases that run in NO other gate, because the env gate that keeps them out of the unit speed budget also kept them out of every gate",
   },
   {
     id: "pm-dod-ratchet",
@@ -222,6 +240,10 @@ export const WORKFLOW_EXEMPT: readonly { readonly match: string; readonly why: s
   { match: "docker version", why: "contract-job sanity probe" },
   { match: "python -m pip install", why: "contract-job lancedb runtime" },
   { match: "mkdir -p .eval-corpus", why: "eval job (non-blocking, needs a key)" },
+  {
+    match: "writeSyntheticCorpus",
+    why: "eval job (non-blocking, needs a key) — the synthetic-corpus writer inside that step's shell block",
+  },
   { match: "bun run src/apps/bench/index.ts", why: "eval job (non-blocking, needs a key)" },
   { match: "bun run agent:batch", why: "nightly regression job (non-blocking)" },
   { match: "bun run agent:ci-bot", why: "PR-bot job (not a merge gate)" },

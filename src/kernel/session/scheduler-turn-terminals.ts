@@ -232,6 +232,26 @@ export const reconcileTurnModelEcho = <T extends KernelSessionState>(
   state: T,
   ctx: KernelDispatchContext,
 ): T => {
+  // MR-04 — REQUEST EVIDENCE FIRST, the live selection only as a fallback.
+  //
+  // This used to re-read `host.describe().modelSlug` at the terminal, which is the
+  // SELECTED model — what the NEXT turn will run. When a switch lands while a turn
+  // is in flight (the web `set_model` frame is drained at the top of a turn, and a
+  // CLI `/model` can be typed during tool execution), that is a different model
+  // than the one that just ran, and this echo feeds `turn.completed.modelSlug` →
+  // the daemon's cumulative `/cost` fold, `SessionStateView.modelSlug` → the web
+  // `/state` readout and the attach pill, and the SDK's `session.model`. Reporting
+  // the next selection as the completed turn's model attributes that turn's spend
+  // to a model that never ran.
+  //
+  // `lastLlmRequest.model` is the EXECUTED model: it comes from the `llm_request`
+  // event, which MR-04 made carry the port that actually streamed. Absent (a turn
+  // that never reached the provider — an approval-gated or immediately-aborted
+  // one) ⇒ fall back to the live selection, which is the best available claim.
+  const executed = state.lastLlmRequest?.model
+  if (executed !== undefined && executed.length > 0) {
+    return state.modelSlug === executed ? state : { ...state, modelSlug: executed }
+  }
   const live = ctx.host.describe().modelSlug
   return live === undefined || live.length === 0 ? state : { ...state, modelSlug: live }
 }

@@ -2,6 +2,7 @@ import type { LLMPort } from "@/llm"
 import type { Role } from "@/llm/role-model-override"
 import { QuantaError } from "@/shared"
 import type { SubagentRequest } from "../subagent/types"
+import { effectiveModelOf } from "./effective-model"
 import { type EffortLevel, parseEffort } from "./effort"
 import type { AgentConfig } from "./types"
 
@@ -53,16 +54,35 @@ const swapToCandidate = (
  *   3. neither               — `parent.llm` verbatim (byte-identical default)
  */
 export const resolveChildLlm = (parent: AgentConfig, req: SubagentRequest): LLMPort => {
-  const parentModel = parent.llm.model
+  // MR-06 — the parent's EFFECTIVE model, not `parent.llm.model` (the BOOT port).
+  //
+  // `parent` is the session base; its `llm` is the port the session booted on. So a
+  // child spawned after a `/model` switch inherited the model the parent had
+  // ABANDONED — and the obs projection reported that same boot id as the child's
+  // `resolvedModel`, so the divergence was consistent and therefore invisible. The
+  // role resolver also received the wrong `parentModel`, which is the input its
+  // "fall through to the parent" rule is built on.
+  const parentModel = effectiveModelOf(parent)
+  const parentPort =
+    parentModel === parent.llm.model ? parent.llm : childPortFor(parent, parentModel)
   if (req.model !== undefined && req.model.length > 0) {
     return swapToCandidate(parent, req.model, "model")
   }
   if (req.role !== undefined && req.role.length > 0 && parent.roleModelResolver !== undefined) {
     const resolved = parent.roleModelResolver.resolve(req.role as Role, parentModel ?? "")
-    if (resolved.length === 0 || resolved === parentModel) return parent.llm
+    if (resolved.length === 0 || resolved === parentModel) return parentPort
     return swapToCandidate(parent, resolved, "role")
   }
-  return parent.llm
+  return parentPort
+}
+
+/** The parent's effective port: its candidate when the session has switched, else
+ *  the boot port. Falls back to `parent.llm` rather than failing closed — an
+ *  inherited model is not a REQUIREMENT the way an explicit `req.model` is, so a
+ *  missing candidate should degrade to the parent's own port, not kill the child. */
+const childPortFor = (parent: AgentConfig, modelId: string | undefined): LLMPort => {
+  if (modelId === undefined || modelId.length === 0) return parent.llm
+  return parent.modelCandidates?.find((c) => c.id === modelId)?.port ?? parent.llm
 }
 
 /** ADR-0451 — derive the child's `sessionEffort` thunk from `req.effort`.

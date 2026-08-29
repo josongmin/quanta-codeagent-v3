@@ -7,6 +7,12 @@ import type { SideCmdSlashState } from "./side-cmd"
 import type { VoiceSlashDeps } from "./voice-cmd"
 import type { VoiceLiveCtx } from "./voice-live-cmd"
 
+/** GOAL-08 rail 15 — `/goal work` enqueue outcome: a typed refusal names the
+ *  reason at command time (never "queued" then silently dropped). */
+export type GoalWorkEnqueueResult =
+  | { readonly ok: true }
+  | { readonly ok: false; readonly reason: string }
+
 export interface SlashContext {
   readonly out: (s: string) => void
   readonly err: (s: string) => void
@@ -353,7 +359,7 @@ export interface SlashContext {
         readonly wakeStatus?: () => import("@/objective").GoalWakeStatus | undefined
         /** GOAL-08 rail 15 — `/goal work`: enqueue ONE foreground turn carrying
          *  host-minted `user-requested-goal-work` provenance. `false` ⇒ not wired. */
-        readonly enqueueWork?: (instruction: string) => boolean
+        readonly enqueueWork?: (instruction: string) => GoalWorkEnqueueResult
       }
     | undefined
   /** §9.6 — `/presets` opusplan-style sticky model-preset wire. The SAME live

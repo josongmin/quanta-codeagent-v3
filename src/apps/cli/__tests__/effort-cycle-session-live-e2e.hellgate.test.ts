@@ -35,7 +35,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { createEffortStore, type EffortLevel } from "@/agent"
-import { inMemoryStickyModelStore } from "@/agent/sticky-model"
+import { fakeModelRouting } from "../../../../tests/_support/fake-model-routing"
 import { loadKeybindings } from "../keybindings/load"
 import type { KeybindingMap } from "../keybindings/types"
 import { type ReadLineTestIO, readLine } from "../raw-line-reader"
@@ -116,7 +116,7 @@ const liveWire = (
 } => {
   const store = createEffortStore()
   const adapter = buildModelAdapter({
-    store: inMemoryStickyModelStore(),
+    routing: fakeModelRouting({ bootModelId: bootModel, ids: candidateIds }).routing,
     bootModel,
     currentMode: () => "default",
     candidateIds: () => candidateIds,

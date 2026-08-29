@@ -40,7 +40,7 @@
  * from a real client → Bun's `websocket.message()` → the daemon's real
  * `ws-handlers.ts` handler → real `consumeControlRequestFrame` → real
  * `peekControlRequest` → the REAL `WebControlRequestPortHandle.enqueue`. We then
- * DRAIN the enqueued request with the REAL `drainControlRequests(handle.port,
+ * DRAIN the enqueued request with the REAL `await drainControlRequests(handle.port,
  * handle.context, handle.applier)` — byte-for-byte the call the turn loop's
  * `pollControlRequests` makes each turn — so the applier lands its effect on the
  * REAL live `permission.mode` cell.
@@ -223,8 +223,8 @@ const observablePort = (
  *  does: pull every pending request off the port, plan each against the live
  *  allowlists, and apply the effect via the applier (mutating the live cell for
  *  `set_permission_mode`). Returns the applied effects for assertions. */
-const drain = (handle: WebControlRequestPortHandle): ControlEffect[] =>
-  drainControlRequests(handle.port, handle.context, handle.applier)
+const drain = async (handle: WebControlRequestPortHandle): Promise<ControlEffect[]> =>
+  await drainControlRequests(handle.port, handle.context, handle.applier)
 
 // ── boot a real daemon (optionally with the control-request port wired) ────────
 const boot = async (extra: Partial<WebDaemonServerConfig>): Promise<WebDaemonHandle> => {
@@ -309,7 +309,7 @@ describe("control-request-surface — a controlRequest frame flips the live gate
 
     // The turn loop's drain: plan + apply the enqueued request ⇒ the applier
     // writes the live cell.
-    const applied = drain(handle)
+    const applied = await drain(handle)
     expect(applied).toEqual([{ kind: "permission-mode-set", mode: "acceptEdits" }])
     expect(handle.pendingCount()).toBe(0) // fully drained
 
@@ -340,7 +340,7 @@ describe("control-request-surface — a controlRequest frame flips the live gate
     // Reached the real port — the refusal is the PLANNER's, not a lost frame.
     expect(await until(() => handle.pendingCount() > 0)).toBe(true)
 
-    const applied = drain(handle)
+    const applied = await drain(handle)
     expect(applied).toEqual([
       { kind: "rejected", reason: 'permission mode "bypass" not recognized' },
     ])
@@ -371,7 +371,7 @@ describe("control-request-surface — a controlRequest frame flips the live gate
 
     // Drain: plan + apply ⇒ the observe sink SAW each effect (the applier routes
     // model/thinking to `safeObserve`, not the live permission cell).
-    const applied = drain(handle)
+    const applied = await drain(handle)
     expect(applied).toEqual([
       { kind: "model-set", model: "gpt-5" },
       { kind: "thinking-set", level: "high" },
@@ -411,7 +411,7 @@ describe("control-request-surface — a controlRequest frame flips the live gate
 
     // And even if the loop DID drain, there is nothing to apply ⇒ the gate stays
     // at `default` (asks), byte-identical to the legacy surface.
-    expect(drain(handle)).toEqual([])
+    expect(await drain(handle)).toEqual([])
     expect(permission.mode).toBe("default")
     expect(gateDecision(permission).kind).toBe("ask")
   })
@@ -438,7 +438,7 @@ describe("control-request-surface — a controlRequest frame flips the live gate
     expect(await until(() => handle.pendingCount() > 0, { timeoutMs: 400 })).toBe(false)
     expect(handle.pendingCount()).toBe(0)
     // Nothing to drain ⇒ the gate is untouched.
-    expect(drain(handle)).toEqual([])
+    expect(await drain(handle)).toEqual([])
     expect(permission.mode).toBe("default")
   })
 
@@ -465,7 +465,7 @@ describe("control-request-surface — a controlRequest frame flips the live gate
 
     // But the drain plans it as `rejected` (off the closed SSOT allowlist) ⇒ the
     // applier NEVER mutates the live cell.
-    const applied = drain(handle)
+    const applied = await drain(handle)
     expect(applied).toHaveLength(1)
     expect(applied[0]?.kind).toBe("rejected")
     expect(permission.mode).toBe("default")
@@ -507,7 +507,7 @@ describe("control-request-surface — red-on-injection evidence (severed peek/en
     // assertion MUST fail (the gate never flips) ⇒ the test is RED, proving case
     // (1)'s positive flip assertion has real teeth.
     await until(() => handle.pendingCount() > 0, { timeoutMs: 500 })
-    drain(handle)
+    await drain(handle)
     expect(permission.mode).toBe("acceptEdits")
     expect(gateDecision(permission).kind).toBe("allow")
   })

@@ -64,7 +64,7 @@ export interface HeadlessBootPortInput {
  */
 export const buildHeadlessBootPort = (
   input: HeadlessBootPortInput,
-): { provider: Provider; llm: LLMPort } => {
+): { provider: Provider; llm: LLMPort; pinned: boolean } => {
   const boot = resolveBootSelection({
     env: input.env,
     ...(input.p.provider !== undefined ? { providerArg: input.p.provider } : {}),
@@ -78,6 +78,10 @@ export const buildHeadlessBootPort = (
   }
   return {
     provider: boot.provider,
+    // MR-02 — published, not re-derived downstream: an explicit per-invocation
+    // model must beat a persisted `/model` pick, and the ONE place that knows
+    // whether the operator named a model is the boot resolution right above.
+    pinned: boot.pinned,
     llm: decorateSwappableModelPort({
       inner: bare,
       ...(input.signal !== undefined ? { signal: input.signal } : {}),

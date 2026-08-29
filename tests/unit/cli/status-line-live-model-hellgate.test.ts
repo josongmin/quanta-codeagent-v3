@@ -12,12 +12,12 @@
  */
 
 import { describe, expect, test } from "bun:test"
-import { inMemoryStickyModelStore } from "@/agent/sticky-model"
 import { buildModelAdapter } from "../../../src/apps/cli/repl/ctx-adapters/model-adapter"
 import {
   buildSessionStatusView,
   createLiveModelSource,
 } from "../../../src/apps/cli/status-line-driver"
+import { fakeModelRouting } from "../../_support/fake-model-routing"
 
 describe("statusline live modelId (UUX-1-17)", () => {
   test("the view thunk re-reads the model source on EVERY call", () => {
@@ -35,15 +35,18 @@ describe("statusline live modelId (UUX-1-17)", () => {
   })
 
   test("chain: /model set → adapter.current() → next statusline view", async () => {
-    // The REAL in-memory store, not a hand fake. aug-28: this was
-    // `{ set: async () => ({ok:true}), get: async () => undefined }` — a double
-    // that ACCEPTED a write and then reported no preference, which only passed
-    // because the adapter kept its own shadow copy of the pick. The adapter now
-    // delegates the sync read to the store (`peek`), so a store that forgets its
-    // own writes is exactly the thing this chain must not tolerate.
-    const store = inMemoryStickyModelStore()
+    // The REAL routing authority over a REAL in-memory store, not a hand fake.
+    // aug-28: this was `{ set: async () => ({ok:true}), get: async () => undefined }`
+    // — a double that ACCEPTED a write and then reported no preference, which only
+    // passed because the adapter kept its own shadow copy of the pick. MR-02 moved
+    // both the read and the write onto the authority, so a collaborator that
+    // forgets its own writes is exactly what this chain must not tolerate.
+    const { routing } = fakeModelRouting({
+      bootModelId: "boot-model",
+      ids: ["boot-model", "other-model"],
+    })
     const adapter = buildModelAdapter({
-      store,
+      routing,
       bootModel: "boot-model",
       currentMode: () => "default" as never,
       candidateIds: () => ["boot-model", "other-model"],

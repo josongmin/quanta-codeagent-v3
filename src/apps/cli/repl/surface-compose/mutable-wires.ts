@@ -106,6 +106,7 @@ export const buildMutableSurfaceWires = (
     // slash write and the loop's read are one cell.
     stickyStore: core.stickyModel,
     bootModel: setup.model,
+    routing: core.routing.authority,
     provider: setup.provider,
     // THE live-mode getter, minted once in `core-state`: it mirrors the loop's
     // `resolveLiveAgentMode` (the shift+tab posture wins over `--plan`), and the

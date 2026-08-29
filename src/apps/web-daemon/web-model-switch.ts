@@ -26,16 +26,10 @@
  */
 
 import { type AgentMode, resolveAgentMode } from "@/agent"
-import {
-  fsBackedStickyModelStore,
-  readStickyModelSnapshotSync,
-  type StickyModelStore,
-  sessionScopedStickyModelStore,
-  stickyModelKeyOf,
-  stickyModelPathFrom,
-} from "@/agent/sticky-model"
+import type { ControlApplyResult } from "@/agent/control-request"
+import { createModelRoutingSession, type ModelRoutingAuthority } from "@/agent/model-routing"
+import type { StickyModelStore } from "@/agent/sticky-model"
 import { type LLMPort, type ModelCandidate, type Provider, tryCreateLLM } from "@/llm"
-import { buildModelCatalogWire } from "@/llm/model-catalog"
 import { decorateSwappableModelPort } from "@/runner/assemble"
 import { errMessage, logger } from "@/shared"
 
@@ -63,7 +57,11 @@ export interface WebModelSwitchHandle {
    *  in. Synchronous + NO-THROW by contract (the control-effect applier cannot
    *  await and must never throw); the write is fire-and-forget and observed on
    *  the next turn's store read. */
-  readonly applyModel: (model: string) => void
+  readonly applyModel: (model: string) => Promise<ControlApplyResult>
+  /** MR-02 — THE routing owner. The loose members above are migration-window
+   *  plumbing for `AgentConfig.stickyModelStore` / `modelCandidates`; new callers
+   *  should reach for this. */
+  readonly routing: ModelRoutingAuthority
 }
 
 /**
@@ -86,69 +84,71 @@ export const createWebModelSwitch = (args: {
   readonly llm: LLMPort
 }): WebModelSwitchHandle => {
   const bootModel = args.llm.model ?? ""
-  // ONE path for the write and the boot read, derived from the INJECTED env (see
-  // `stickyModelPathFrom`): the default resolver reads the FROZEN global runtime
-  // config, so a daemon whose `QUANTA_CONFIG_DIR` resolved later would write to a
-  // different file than it reads.
-  const path = stickyModelPathFrom(args.env)
-  const persistedSnapshot = readStickyModelSnapshotSync({ path })
-  // SESSION-SCOPED reads + write-through persistence (same decorator the CLI uses):
-  // a pick made on another surface applies to the NEXT daemon session, never
-  // mid-session, so `/readout/model` and the turn can never disagree.
-  const store = sessionScopedStickyModelStore({
-    inner: fsBackedStickyModelStore({ path }),
-    seed: persistedSnapshot,
-  })
-  // A pick already on disk (from the CLI, or a previous daemon run) needs its
-  // PORT before the first turn: the catalog probe is lazy and a client may never
-  // open the model panel, so without this the store read would return an id the
-  // swap cannot resolve and the turn would silently run the boot model. The
-  // snapshot read is the SYNC one for exactly this reason (the store port is
-  // async and this mint is not).
-  const persisted =
-    persistedSnapshot[stickyModelKeyOf({ mode: webAgentMode(), provider: args.provider })]
-  const catalog = buildModelCatalogWire({
+  // MR-02 — the SHARED routing session owns every decision this function used to
+  // make by hand, and three of them were wrong here:
+  //   - the session cell was seeded from the RAW file, so a hostile persisted id
+  //     reached `describe().modelSlug`, the `/state` readout and the `quanta
+  //     attach` pill verbatim (the pill renders it unescaped);
+  //   - the eager candidate seed read the SCOPED key only while every read
+  //     accepted the legacy bare key, so a pre-migration `/model` pick was CLAIMED
+  //     by the readout and the SDK while the turn ran the boot model;
+  //   - nothing here honoured an explicit boot pin.
+  // The factory does all of it, identically to the CLI and the headless root, and
+  // the shared conformance suite is what proves "identically".
+  const session = createModelRoutingSession({
+    env: args.env as NodeJS.ProcessEnv,
     provider: args.provider,
-    bootModel,
-    llm: args.llm,
-    seeded: [],
-    // INVARIANT B (see `@/llm/model-catalog`) — the daemon builds the ports so a
-    // picked model keeps bounded retry + the empty-stream breaker + the progress
-    // heartbeat instead of streaming through a bare adapter.
+    bootModelId: bootModel,
+    bootPort: args.llm,
+    mode: webAgentMode,
+    // The daemon has no per-invocation model flag today, so nothing pins it. When
+    // one is added it comes from `resolveBootSelection(...).pinned`, not a literal.
+    pinned: false,
+    // INVARIANT B — the daemon builds the ports so a picked model keeps bounded
+    // retry + the empty-stream breaker + the progress heartbeat instead of
+    // streaming through a bare adapter.
     buildPort: (id: string) => {
       const inner = tryCreateLLM(args.provider, { model: id }, args.env as NodeJS.ProcessEnv)
       return inner === null ? null : decorateSwappableModelPort({ inner })
     },
-    ...(persisted !== undefined ? { extraIds: [persisted] } : {}),
-    env: args.env as NodeJS.ProcessEnv,
   })
+  const store = session.store
   return {
     store,
     provider: args.provider,
-    // Straight off the store, with the SAME key `applyModel` writes under — so the
-    // readouts cannot report a model this switch is not about to run.
-    effectiveModel: (): string | undefined =>
-      store.peek({ mode: webAgentMode(), provider: args.provider }),
-    candidates: catalog.candidates,
-    ids: () => catalog.ids(),
-    refresh: catalog.refresh,
-    current: async (): Promise<string> => {
-      const picked = await store.get({ mode: webAgentMode(), provider: args.provider })
-      return picked !== undefined && picked.length > 0 ? picked : bootModel
-    },
-    applyModel: (model: string): void => {
-      void store
-        .set({ mode: webAgentMode(), provider: args.provider, modelId: model })
-        .then((res) => {
-          if (!res.ok) {
-            logger.warn(`web-daemon set_model: sticky write failed — ${errMessage(res.error)}`)
-          }
-        })
-        .catch((e: unknown) => {
-          // The port contract says `set` never rejects; belt-and-braces so a
-          // future impl change cannot surface as an unhandled rejection.
-          logger.warn(`web-daemon set_model: sticky write threw — ${errMessage(e)}`)
-        })
+    routing: session.authority,
+    // The SELECTED model (undefined when nothing is selected) — `effectiveModelOf`
+    // supplies the boot fallback, so answering the boot model here would claim a
+    // preference nobody set.
+    effectiveModel: session.selectedModel,
+    candidates: session.candidates,
+    ids: session.ids,
+    refresh: session.refresh,
+    current: async (): Promise<string> => session.authority.view().modelId,
+    applyModel: async (model: string): Promise<ControlApplyResult> => {
+      // AWAITED (MR-03): the control drain runs at the TOP of a turn, so the write
+      // has to land before that turn reads the selection. Fire-and-forget here
+      // meant the turn ran the OLD model while the end-of-turn echo — reading a
+      // by-then-updated cell — reported the NEW one, and the client's poll said
+      // "applied". Through the AUTHORITY, which validates against the live catalog
+      // and publishes only after the durable write settles.
+      try {
+        const res = await session.authority.select(model)
+        if (res.ok) return { ok: true }
+        const reason =
+          res.kind === "write-error"
+            ? `sticky write failed — ${res.message}`
+            : `model not in this session's catalog`
+        logger.warn(`web-daemon set_model: not applied — ${reason}`)
+        return { ok: false, reason }
+      } catch (e: unknown) {
+        // The authority's mutations are no-throw by contract; belt-and-braces so a
+        // future impl change surfaces as an honest rejection, never as a thrown
+        // applier (which would abandon the whole drain).
+        const reason = errMessage(e)
+        logger.warn(`web-daemon set_model: apply threw — ${reason}`)
+        return { ok: false, reason }
+      }
     },
   }
 }

@@ -1,4 +1,5 @@
 import type { AgentMode } from "@/agent"
+import type { ModelRoutingAuthority } from "@/agent/model-routing"
 import type { StickyModelStore } from "@/agent/sticky-model"
 import { type ModelCandidate, type Provider, type StreamEvent, tryCreateLLM } from "@/llm"
 import { PATCH_SENTINELS } from "@/patch/types"
@@ -133,6 +134,8 @@ export const buildRetryCandidates = (
  */
 export const buildModelAdapterWire = (args: {
   readonly stickyStore: { readonly store: StickyModelStore } | undefined
+  /** MR-02 — THE routing authority the `/model` adapter reads and mutates through. */
+  readonly routing: ModelRoutingAuthority
   readonly bootModel: string
   /** THE live agent-mode getter (`sticky-model-boot#liveAgentMode`) — the SAME
    *  precedence the loop's `resolveLiveAgentMode` uses (live cell ⇒ planMode).
@@ -155,7 +158,7 @@ export const buildModelAdapterWire = (args: {
   if (args.stickyStore === undefined) return {}
   return {
     modelAdapter: buildModelAdapter({
-      store: args.stickyStore.store,
+      routing: args.routing,
       bootModel: args.bootModel,
       currentMode: args.currentMode,
       ...(args.provider !== undefined ? { provider: args.provider } : {}),

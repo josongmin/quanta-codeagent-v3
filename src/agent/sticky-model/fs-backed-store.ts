@@ -192,7 +192,9 @@ const mutateUnderLock = async (
       ok: false,
       error: new StickyModelWriteError(
         path,
-        `another process holds ${JSON.stringify(lockPath)} (stale after ${LOCK_STALE_MS}ms)`,
+        `the write lock ${JSON.stringify(lockPath)} could not be taken — a peer held it for the ` +
+          `whole acquisition budget, or the lock file itself could not be created. A holder is ` +
+          `presumed dead and reclaimed after ${LOCK_STALE_MS}ms`,
       ),
     }
   }

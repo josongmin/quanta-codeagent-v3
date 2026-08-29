@@ -124,6 +124,17 @@ jobs:
         # it is the likeliest place for a stray file to be written next to the
         # repo rather than into the harness's temp HOME.
         run: bun run tools/dev/worktree-pollution-guard.ts -- bun run e2e:pty
+      - name: real-toolchain e2e (opt-in lane — visible skips without the toolchain)
+        # The `*-real-e2e.test.ts` lane is gated on QUANTA_REAL_TOOLCHAIN_E2E so it
+        # cannot blow the per-test unit speed budget on a developer machine that
+        # happens to have clang/lldb-dap/cargo/debugpy installed. That gating
+        # REMOVED coverage from this job until this step existed: an audit measured
+        # 8 cases that ubuntu-latest actually runs (node, go, cargo, python3 and npm
+        # are all preinstalled — only clangd, lldb-dap, dlv and debugpy are not), so
+        # "the runner has none of these toolchains" was true of 24 arms and false of
+        # 8. With the env set, the arms whose toolchain is absent degrade to VISIBLE
+        # skips, which is the posture every other gate in this file already has.
+        run: QUANTA_REAL_TOOLCHAIN_E2E=1 bun run test:real-toolchain
       - name: feature-catalog — validate + diff + ratchet
         # Hard-gates on:
         #   validate     — every evidence file/ADR/test exists

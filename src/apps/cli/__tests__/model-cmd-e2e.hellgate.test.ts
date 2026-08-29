@@ -23,9 +23,9 @@
 import { describe, expect, test } from "bun:test"
 import type { EffortLevel } from "@/agent"
 import { createEffortStore, EFFORT_LEVELS } from "@/agent"
-import { inMemoryStickyModelStore } from "@/agent/sticky-model"
 import type { ModelEffortSupport } from "@/llm/provider-metadata"
 import { ALL_REASONING_EFFORTS } from "@/llm/provider-metadata"
+import { fakeModelRouting } from "../../../../tests/_support/fake-model-routing"
 import { buildModelAdapter } from "../repl/ctx-adapters/model-adapter"
 import { modelCmd } from "../slash/model-cmd"
 import type { ModelLineMeta } from "../slash/model-picker"
@@ -322,10 +322,14 @@ describe("/model slash drift-guard (registered exactly once in SURFACE layer)", 
 // so a store read could only return a Promise).
 describe("/model real adapter under --plan (buildModelAdapter + real effort)", () => {
   const buildPlanHarness = () => {
-    const store = inMemoryStickyModelStore()
+    const { routing, store } = fakeModelRouting({
+      bootModelId: "gpt-5",
+      ids: ["gpt-5", "gpt-4o"],
+      mode: () => "plan",
+    })
     // No `currentModel` getter — surface-compose does NOT supply one.
     const modelAdapter = buildModelAdapter({
-      store,
+      routing,
       bootModel: "gpt-5",
       candidateIds: () => ["gpt-5", "gpt-4o"],
       currentMode: () => "plan", // resolveAgentMode(undefined, /*planMode*/ true)
@@ -370,8 +374,8 @@ describe("/model real adapter under --plan (buildModelAdapter + real effort)", (
     expect(code).toBe(0)
     // REAL FIX #2 — the SET landed on the PLAN key (the consume side reads it
     // under --plan), NOT a literal "default" key.
-    expect(await h.store.get({ mode: "plan" })).toBe("gpt-4o")
-    expect(await h.store.get({ mode: "default" })).toBeUndefined()
+    expect(await h.store.get({ mode: "plan", provider: "openai" })).toBe("gpt-4o")
+    expect(await h.store.get({ mode: "default", provider: "openai" })).toBeUndefined()
     // REAL FIX #1 — current() reflects the set immediately via the sync shadow.
     expect(h.modelAdapter.current()).toBe("gpt-4o")
   })

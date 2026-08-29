@@ -1,4 +1,4 @@
 {
-  "note": "EMPTY. Every scan guard that this repo could prove vacuous has been given a floor DERIVED from its own corpus and verified red against an empty mirror (tools/dev/empty-mirror-check.ts). A new entry here is not a normal state: fix the guard instead. The oracle reports UNSUPPORTED \u2014 never a pass \u2014 for a guard that imports the corpus it enumerates, because its own import closure refills the arm and there is no verdict to give.",
+  "note": "EMPTY, and that is a statement about the 8 guards in tools/dev/anti-vacuity-cases.json \u2014 NOT about the repo. Measured 2026-08-29: 143 test files scan the tree and derive a zero-verdict from it, so the oracle covers about 5%. A partial sweep over the other 135 found 16 more vacuous guards before it was interrupted, so the real remaining count is at least that. Widening the manifest is the open work; this ledger is the exception mechanism for the covered set and it is retired.",
   "burndown": []
 }

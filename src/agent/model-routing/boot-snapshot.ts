@@ -19,7 +19,7 @@
  */
 
 import type { LLMPort, ModelCandidate, Provider } from "@/llm"
-import { buildModelCatalogWire } from "@/llm/model-catalog"
+import { buildModelCatalogWire, type ModelCatalogWire } from "@/llm/model-catalog"
 import {
   fsBackedStickyModelStore,
   readStickyModelSnapshotSync,
@@ -69,6 +69,10 @@ export interface ModelRoutingSession {
   readonly ids: () => readonly string[]
   /** Awaited by a picker before it lists: runs the lazy provider probe once. */
   readonly refresh: () => Promise<void>
+  /** The catalog wire itself, for a surface that still passes it around during the
+   *  migration window (the CLI's picker adapter). New code should use the
+   *  authority's `list()` instead. */
+  readonly catalog: ModelCatalogWire
   /** The SELECTED model, or `undefined` when nothing is selected.
    *
    *  `undefined` — not the boot model — because this feeds
@@ -97,18 +101,29 @@ export const createModelRoutingSession = (args: ModelRoutingSessionArgs): ModelR
   const path = args.path ?? stickyModelPathFrom(args.env)
   const persisted = readStickyModelSnapshotSync({ path })
   const admitted = admitPersistedPicks(persisted, args.provider)
-  /** Canonical `<provider>:<mode>` seed for the session cell. Re-keyed from the
-   *  admitted map so a legacy bare entry is adopted under the key the loop reads,
-   *  and a rejected entry simply is not there. */
+  /**
+   * Canonical `<provider>:<mode>` seed for the session cell. Re-keyed from the
+   * admitted map so a legacy bare entry is adopted under the key the loop reads,
+   * and a rejected entry simply is not there.
+   *
+   * EMPTY under an explicit pin. The authority applies the pin itself, but during
+   * the migration window the loop still reads the STORE (`stickyModelStore`), so a
+   * seeded cell would hand it the pick regardless — measured: `quanta -p --model
+   * gpt-5 --sticky-model` with a pick on disk still ran the pick. The pick is not
+   * erased; it simply does not seed THIS session, exactly as the pin rule says.
+   */
   const seed: Record<string, string> = {}
-  for (const [mode, id] of admitted) seed[`${args.provider}:${mode}`] = id
+  if (!args.pinned) for (const [mode, id] of admitted) seed[`${args.provider}:${mode}`] = id
 
   const catalog = buildModelCatalogWire({
     provider: args.provider,
     bootModel: args.bootModelId,
     llm: args.bootPort,
     seeded: args.seeded ?? [],
-    extraIds: [...new Set(admitted.values())],
+    // A pinned session will not adopt any of them, so building their ports up
+    // front is work nobody asked for; `select()` probes on demand if the operator
+    // switches in-session anyway.
+    extraIds: args.pinned ? [] : [...new Set(admitted.values())],
     buildPort: args.buildPort,
     ...(args.signal !== undefined ? { signal: args.signal } : {}),
     env: args.env,
@@ -127,12 +142,13 @@ export const createModelRoutingSession = (args: ModelRoutingSessionArgs): ModelR
     bootPort: args.bootPort,
     mode: args.mode,
     pinned: args.pinned,
-    persisted,
+    admitted,
     ...(args.describeOption !== undefined ? { describeOption: args.describeOption } : {}),
   })
 
   return {
     authority,
+    catalog,
     store,
     candidates: catalog.candidates,
     ids: () => catalog.ids(),

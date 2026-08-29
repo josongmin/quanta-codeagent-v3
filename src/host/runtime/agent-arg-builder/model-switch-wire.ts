@@ -61,11 +61,11 @@
  */
 
 import { type AgentMode, resolveAgentMode } from "@/agent"
+import { createModelRoutingSession } from "@/agent/model-routing"
 import {
   fsBackedStickyModelStore,
   inMemoryStickyModelStore,
   type StickyModelStore,
-  stickyModelPathFrom,
 } from "@/agent/sticky-model"
 import type { AssembleRequest } from "@/host/runtime/agent-config-assembler"
 import { type LLMPort, type Provider, tryCreateLLM } from "@/llm"
@@ -200,6 +200,10 @@ export interface ModelSwitchInputs {
   readonly llm: LLMPort
   readonly provider: Provider
   readonly signal: AbortSignal | undefined
+  /** MR-01/MR-02 — the operator named a model for THIS invocation, published by
+   *  `buildHeadlessBootPort` from `resolveBootSelection(...).pinned`. Carried on
+   *  the bundle rather than re-derived here so the pin rule has ONE author. */
+  readonly pinned: boolean
   /** Hermetic override for the sticky FILE (`CompositionSeams.stickyModelPath`).
    *  Absent ⇒ derived from `env`. */
   readonly stickyModelPath?: string | undefined
@@ -212,24 +216,54 @@ export const resolveModelSwitchSlots = (
     readonly env: NodeJS.ProcessEnv
   },
 ): {
-  readonly stickyModelStore: { readonly store: StickyModelStore } | undefined
+  readonly stickyModelStore: NonNullable<Base["stickyModelStore"]> | undefined
   readonly modelCandidatesSlot: Partial<Base>
 } => {
-  // `stickyModelPathFrom(env)` — NOT the port's frozen-config default: this root
-  // HOLDS an env bag, and the read that seeds the candidate below must hit the
-  // same file the store writes (see that helper's header).
-  const stickyModelStore = resolveStickyModelStore(
-    args.stickyModel,
-    args.stickyModelPath ?? stickyModelPathFrom(args.env),
-  )
+  // The IN-MEMORY default is not a routing session: nothing is persisted, nothing
+  // is read back, and there is no file to admit from. Keep that path byte-identical
+  // — a store so `/model`-shaped hosts can switch in-session, and no candidates.
+  if (args.stickyModel !== true) {
+    return { stickyModelStore: resolveStickyModelStore(false), modelCandidatesSlot: {} }
+  }
+
+  // MR-02 — `--sticky-model` now goes through the SHARED routing session, the same
+  // one the CLI and the web daemon use. Three defects measured on this root before
+  // that, all of them assembly-order mistakes this factory removes:
+  //   D1 a persisted pick OVERRODE an explicit `--model`;
+  //   D2 the slot carried neither `provider` nor `effectiveModel`, so `describe()`,
+  //      the SDK's `session.model`, `turn.completed.modelSlug` and the work-metrics
+  //      cost tag all named the BOOT model while the pick actually ran;
+  //   D3 the fs store was used RAW (no session scope) against a candidate list
+  //      frozen at mint, so another process's `/model` landed mid-run and, having
+  //      no port, silently reverted the turn to the boot model.
+  const session = createModelRoutingSession({
+    env: args.env,
+    ...(args.stickyModelPath !== undefined ? { path: args.stickyModelPath } : {}),
+    provider: args.provider,
+    bootModelId: args.llm.model ?? "",
+    bootPort: args.llm,
+    mode: oneShotAgentMode,
+    pinned: args.pinned,
+    buildPort: (id: string) => {
+      const inner = tryCreateLLM(args.provider, { model: id }, args.env)
+      return inner === null
+        ? null
+        : decorateSwappableModelPort({
+            inner,
+            ...(args.signal !== undefined ? { signal: args.signal } : {}),
+          })
+    },
+    ...(args.signal !== undefined ? { signal: args.signal } : {}),
+  })
   return {
-    stickyModelStore,
-    modelCandidatesSlot: resolveModelCandidatesSlot({
-      llm: args.llm,
+    stickyModelStore: {
+      store: session.store,
       provider: args.provider,
-      stickyModelStore,
-      env: args.env,
-      signal: args.signal,
-    }),
+      effectiveModel: session.selectedModel,
+    },
+    // EMPTY ⇒ omit the key (never `{ modelCandidates: [] }`): nothing to swap to is
+    // exactly what an absent slot says to the loop.
+    modelCandidatesSlot:
+      session.candidates.length > 0 ? { modelCandidates: session.candidates } : {},
   }
 }

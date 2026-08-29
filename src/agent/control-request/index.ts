@@ -2,6 +2,7 @@
 
 export {
   applyControlEffect,
+  type ControlApplyResult,
   type ControlEffectApplier,
   drainControlRequests,
   MAX_CONTROL_REQUESTS_PER_DRAIN,

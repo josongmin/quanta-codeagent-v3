@@ -96,7 +96,8 @@ const handleWork = (args: readonly string[], ctx: SlashContext, name: GoalName):
   if (enqueue === undefined) {
     return fail(ctx, `${name} work: not wired in this surface (goal pursuit is not composed)`)
   }
-  if (!enqueue(instruction)) return fail(ctx, `${name} work: the goal is not active`)
+  const enqueued = enqueue(instruction)
+  if (!enqueued.ok) return fail(ctx, `${name} work: ${enqueued.reason}`)
   ctx.out("Goal work queued — one foreground turn with user-requested goal provenance.\n")
   return 0
 }

@@ -456,8 +456,11 @@ const createRuntimeSessionHost = (args: {
       isObjectiveAttemptSlot(base.objectiveAttemptSlot)
         ? base.objectiveAttemptSlot.claim(attempt)
         : false,
-    releaseGoalAttempt: () => {
-      if (isObjectiveAttemptSlot(base.objectiveAttemptSlot)) base.objectiveAttemptSlot.release()
+    releaseGoalAttempt: (attemptId) => {
+      const slot = base.objectiveAttemptSlot
+      if (!isObjectiveAttemptSlot(slot)) return
+      const status = slot.status()
+      if (status.kind === "claimed" && status.attempt.attemptId === attemptId) slot.release()
     },
     resolveApproval: async ({ approvalId, decision, scope, steer, selectedHunks }) => {
       // ADR-0512 P3 — forward the escalation's once/session scope + corrective

@@ -215,6 +215,13 @@ beforeEach(() => {
   // Deterministic baseline: a fake key so the LLM is real; keep memory/subagent
   // light so unrelated wires don't add noise.
   process.env.OPENAI_API_KEY = "sk-test-hellgate-fixed"
+  // PIN THE PROVIDER. `pickProvider` probes the developer's OAuth home when no
+  // provider is named, so this fingerprint recorded whichever vendor the box
+  // happened to be logged into. That was latent while the provider only affected
+  // the `llm ::` line's own fields; MR-02 put the provider STRING into the
+  // `stickyModelStore ::` line too, which would have made the snapshot flip
+  // between a logged-in and a logged-out machine.
+  process.env.QUANTA_PROVIDER = "openai"
   process.env.QUANTA_MEMORY = "off"
   process.env.QUANTA_SUBAGENT = "0"
   __resetRuntimeConfig()
