@@ -5,8 +5,21 @@
  * so prices can be re-derived after table drift. Unknown model ⇒ `null`
  * (not an error) — cost is best-effort evidence, never authoritative.
  */
+import { normalizeUsage } from "./usage-accounting/normalize"
+import { priceUsage } from "./usage-accounting/price"
+import type { ModelPrice } from "./usage-accounting/types"
+
 export const PRICING_VERSION = "pricing.v3" as const
 
+/**
+ * Derive the billing provider from the model name. Kept inside observability so
+ * the fix needs no cross-slice change: the model string already reaches every
+ * cost callsite (`costUsd(model, …)`). `gpt`/`o1`/`o3`-prefixed → openai,
+ * `claude`-prefixed → anthropic. Unknown prefixes default to anthropic, the
+ * additive (and historically assumed) semantics — but unknown *models* still
+ * return null from `costUsd` regardless, so this only matters for known models.
+ */
+export { providerOf } from "./usage-accounting/normalize"
 /**
  * Provider determines how the reported `inputTokens` (prompt) usage field
  * relates to `cacheReadTokens`. This is NOT cosmetic — it changes the cost math:
@@ -17,46 +30,10 @@ export const PRICING_VERSION = "pricing.v3" as const
  *   cache_read is a SUBSET of the reported input. Adding it again double-counts
  *   the cached tokens — the bug this module previously had.
  */
-export type Provider = "openai" | "anthropic"
-
-/**
- * Derive the billing provider from the model name. Kept inside observability so
- * the fix needs no cross-slice change: the model string already reaches every
- * cost callsite (`costUsd(model, …)`). `gpt`/`o1`/`o3`-prefixed → openai,
- * `claude`-prefixed → anthropic. Unknown prefixes default to anthropic, the
- * additive (and historically assumed) semantics — but unknown *models* still
- * return null from `costUsd` regardless, so this only matters for known models.
- */
-export const providerOf = (model: string): Provider => {
-  const m = model.toLowerCase()
-  if (m.startsWith("gpt") || m.startsWith("o1") || m.startsWith("o3")) return "openai"
-  return "anthropic"
-}
-
-/** USD per 1,000,000 tokens. */
-export interface ModelPrice {
-  /** Input (prompt) tokens, $/1M. */
-  inPerM: number
-  /** Output (completion) tokens, $/1M. */
-  outPerM: number
-  /**
-   * Cache-READ tokens, $/1M. Provider-documented discounted rate:
-   *   - OpenAI gpt-4o family ≈ 0.5× input rate.
-   *   - OpenAI gpt-5 family ≈ 0.1× input rate (per the gpt-5.x pricing page).
-   *   - Anthropic cache read ≈ 0.1× input rate.
-   * Always set explicitly per model so the discount is auditable.
-   */
-  cacheReadPerM: number
-  /**
-   * Cache-CREATION (write) tokens, $/1M. Anthropic bills a one-time premium
-   * (≈ 1.25× input) to WRITE the prompt cache; OpenAI does not bill cache
-   * creation separately (the field is omitted). {@link costUsd} does NOT read
-   * this field — it is part of the single rate-card SSOT consumed by the
-   * cross-run cost ledger (`@/agent/budget-ledger`), which DOES bill the
-   * cache-creation bucket. Kept here so there is ONE rate table, not two.
-   */
-  cacheWritePerM?: number
-}
+/** USD per 1,000,000 tokens. Canonical definition lives with the pricing
+ *  formula; re-exported here so existing `@/observability/pricing` importers
+ *  keep working. */
+export type { ModelPrice, Provider } from "./usage-accounting/types"
 
 /**
  * Public list prices, $/1M tokens. Sources (captured 2026-05-19 unless noted):
@@ -118,8 +95,6 @@ const TABLE: Readonly<Record<string, ModelPrice>> = Object.assign(
  */
 export const MODEL_RATE_CARD: Readonly<Record<string, ModelPrice>> = TABLE
 
-const PER_TOKEN = 1_000_000
-
 /**
  * USD cost for a known model, or `null` for an unknown model.
  *
@@ -153,34 +128,18 @@ export const costUsd = (
   // kept so the unknown-model contract survives even if TABLE is later changed
   // back to a plain object literal.
   if (!Object.hasOwn(TABLE, model)) return null
-  const price = TABLE[model]
-  if (price === undefined) return null
 
-  // Defensive NEGATIVE clamp (negatives only — NaN/Infinity deliberately pass
-  // through as non-finite so a downstream check can DETECT a bad usage report
-  // rather than trust a wrong dollar figure; see the pricing-hellgate
-  // "Infinity / NaN … do not silently produce a bogus finite cost" contract).
-  // A negative token count, by contrast, yields a positive FINITE cost that
-  // would slip past the budget meter's `tick` guard (which no-ops `n < 0`)
-  // while the token counters drop it — diverging cost from tokens. Clamping
-  // negatives to 0 keeps cost consistent with the token counters for every
-  // caller. `x < 0 ? 0 : x` preserves NaN (NaN<0 is false ⇒ NaN) and Infinity.
-  const inTok = inputTokens < 0 ? 0 : inputTokens
-  const outTok = outputTokens < 0 ? 0 : outputTokens
-  const cacheTok = cacheReadTokens < 0 ? 0 : cacheReadTokens
-
-  const outCost = (outTok * price.outPerM) / PER_TOKEN
-
-  let inCost: number
-  if (providerOf(model) === "openai") {
-    // prompt_tokens already includes cached_tokens → carve out, don't add.
-    // Clamp keeps the non-cached portion non-negative for malformed events.
-    const cached = Math.min(cacheTok, inTok)
-    const fresh = inTok - cached
-    inCost = (fresh * price.inPerM + cached * price.cacheReadPerM) / PER_TOKEN
-  } else {
-    // anthropic: input_tokens excludes cache reads → additive, discounted rate.
-    inCost = (inTok * price.inPerM + cacheTok * price.cacheReadPerM) / PER_TOKEN
-  }
-  return inCost + outCost
+  // No `fallbackModel`: this entry point's contract is `null` for an unknown
+  // model, so it must never be handed stand-in rates. Callers that prefer a
+  // flagged ESTIMATE over "unpriceable" (the cross-run ledger) call
+  // `priceUsage` directly with a fallback and read `pricingKnown`.
+  const cost = priceUsage(
+    normalizeUsage({ model, inputTokens, outputTokens, cacheReadTokens }),
+    TABLE,
+    { pricingVersion: PRICING_VERSION },
+  )
+  // `cacheWriteTokens` is structurally absent from this signature, so the
+  // cache-write bucket is always 0 here. Cache-write-aware callers use
+  // `priceUsage` directly — that is the whole reason the formula moved.
+  return cost.totalUsd
 }
