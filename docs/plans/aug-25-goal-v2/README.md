@@ -74,6 +74,8 @@ PTY `cli-goal-pursuit-e2e` 8 pass/1 fail (`uses its own quiet window…`, `No ma
 
 ## 현재 상태 — 열린 항목 (2026-08-30)
 
+> 실행 계획(각 항목의 근거·프로브 실측치·헬게이트 RED 정의·크기·순서): [`NEXT-PLAN.md`](NEXT-PLAN.md)
+
 안전 rail(귀속·하드캡·CAS·verifier receipt·quiescence)은 닫혀 있다. 남은 것은 아래가 전부다.
 
 1. **정산 후 체크포인트 리포트 방출** (GOAL-05A rail 16). 데이터 모델은 있고 `/goal`이 on-demand로 렌더하지만 **자동 방출 훅이 없다** — 유저가 `/goal`을 쳐야만 진행 상황을 본다. 05A가 "06/10으로 이월"이라 적었으나 둘 다 지키지 않은 죽은 이월. ROI 높음(agent-state 가시성 북극성 직결, 배선만 남음).
