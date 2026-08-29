@@ -66,6 +66,17 @@ const workflowSteps = (): readonly WorkflowStep[] => {
     const lines = readFileSync(join(WORKFLOW_DIR, file), "utf8").split("\n")
     for (let i = 0; i < lines.length; i += 1) {
       const line = lines[i] ?? ""
+      // A `uses:` step runs code exactly as a `run:` step does — a local
+      // composite action or a reusable workflow — and was invisible here, so a
+      // blocking gate could be added as `uses: ./.github/actions/x` and never
+      // classified. Captured under its own token so the containment test names
+      // it rather than silently accepting it.
+      const usesMatch = /^\s*(?:- )?uses:\s*(\.[^\s]+)\s*$/.exec(line)
+      if (usesMatch !== null) {
+        const cmd = `uses ${usesMatch[1] ?? ""}`
+        out.push({ file, raw: line, lines: [cmd] })
+        continue
+      }
       const m = /^(\s*)(?:- )?run:(.*)$/.exec(line)
       if (m === null) continue
       const indent = (m[1] ?? "").length
@@ -112,6 +123,11 @@ const workflowSteps = (): readonly WorkflowStep[] => {
  *  `bun run test:admission` are the same gate with a different default base. */
 const normalize = (cmd: string): string =>
   cmd
+    // A trailing shell comment is not part of the command, and `isExempt` is a
+    // SUBSTRING match — so `run: bun run brand-new-gate # docker version`
+    // exempted itself by naming an exempt command in a comment. Measured: that
+    // step shipped past this test un-gated.
+    .replace(/\s+#.*$/, "")
     .replace(/\$\{\{[^}]*\}\}/g, "<expr>")
     .replace(/^bun fc check-changed .*$/, "bun run test:admission")
     .replace(/\s+/g, " ")
@@ -135,6 +151,66 @@ describe("gate manifest ↔ workflow parity", () => {
     for (const e of WORKFLOW_EXEMPT) {
       expect({ match: e.match, why: e.why.length > 10 }).toEqual({ match: e.match, why: true })
     }
+  })
+
+  /**
+   * Conditions that are part of a step's DESIGN rather than a way to switch it
+   * off. Each is a real scheduling decision — a PR-only check, a scheduled-only
+   * suite — and each is paired with the step it belongs to so a condition cannot
+   * be moved onto a different step and inherit the excuse.
+   */
+  const CONDITION_ALLOWED: readonly { readonly step: string; readonly why: string }[] = [
+    {
+      step: "silent-catch baseline gate",
+      why: "read-only --check on PRs; the write mode is a scheduled job",
+    },
+    {
+      step: "check-changed",
+      why: "compares against the PR base, so it has nothing to diff on a schedule",
+    },
+    { step: "fc check-changed", why: "same — PR-only by construction" },
+    {
+      step: "contract suite",
+      why: "docker + eval-labelled or scheduled only; deliberately not a per-PR gate",
+    },
+  ]
+
+  test("🔴 no MANIFEST gate is neutered in place with continue-on-error or if:", () => {
+    // The parity checks assert PRESENCE, never blocking-ness. An audit turned the
+    // non-vacuity gate off with `continue-on-error: true` and both directions
+    // stayed green — the manifest kept claiming "this blocks a push" while the
+    // workflow no longer did, and `bun run prepush` still ran it locally so the
+    // divergence was invisible from both sides.
+    //
+    // Scoped to steps that carry a MANIFEST gate: a condition on a step nobody
+    // registered is a scheduling decision, and forbidding those outright would
+    // flag five legitimate PR-only / schedule-only steps and get the rule
+    // deleted rather than followed.
+    const offenders: string[] = []
+    for (const file of GATING_WORKFLOWS) {
+      const lines = readFileSync(join(WORKFLOW_DIR, file), "utf8").split("\n")
+      for (const [i, line] of lines.entries()) {
+        const conditional =
+          /^\s*continue-on-error\s*:\s*true\s*$/.test(line) || /^\s*if\s*:/.test(line)
+        if (!conditional) continue
+        const before = lines.slice(0, i).reverse()
+        const nameLine = before.find((l) => /^\s*-\s*name\s*:/.test(l)) ?? ""
+        const stepName = nameLine.replace(/^\s*-\s*name\s*:\s*/, "").trim()
+        // The step's own `run:` — look forward too, since `if:` may precede it.
+        const body = [...before.slice(0, 8), ...lines.slice(i, i + 8)].join("\n")
+        const carriesGate = GATES.some((g) => body.includes(g.run))
+        if (!carriesGate) continue
+        if (CONDITION_ALLOWED.some((a) => stepName.includes(a.step))) continue
+        offenders.push(`${file}: ${stepName || `line ${i + 1}`} — ${line.trim()}`)
+      }
+    }
+    expect(
+      offenders,
+      offenders.length === 0
+        ? ""
+        : "a step carrying a manifest gate is conditional or non-blocking, so the " +
+            `manifest's claim that it blocks a push is false:\n  ${offenders.join("\n  ")}`,
+    ).toEqual([])
   })
 
   test("anti-vacuity: the workflow parse actually read commands", () => {

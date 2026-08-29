@@ -178,7 +178,13 @@ const importClosure = (entry: string): ReadonlySet<string> => {
     }
     return undefined
   }
-  const specifiersIn = (src: string): readonly string[] => {
+  const specifiersIn = (raw: string): readonly string[] => {
+    // Comments first. This is a text scan, so `// from "@/foo"` counted as an
+    // import and the closure kept `@/foo` alive — meaning comment lines could
+    // pad a guard's kept-corpus until it crossed the overlap threshold and was
+    // excused as UNSUPPORTED. Measured on the nearest live case: 244 comment
+    // lines were enough.
+    const src = raw.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/.*$/gm, "$1")
     const out: string[] = []
     for (const m of src.matchAll(/from\s*\(?\s*["'`]([^"'`]+)["'`]/g)) out.push(m[1] ?? "")
     for (const m of src.matchAll(/import\s*\(\s*["'`]([^"'`]+)["'`]/g)) out.push(m[1] ?? "")
@@ -235,6 +241,14 @@ export const buildMirror = (blank: CorpusRoot, guard?: string): string => {
  * same `1 fail` counter, and telling them apart is the whole point.
  */
 export const classifyOutput = (out: string): Verdict => {
+  // bun's own `N error` counter is the authority for "the run died", not the
+  // wording of the exception. Matching only `Cannot find module` credited a
+  // module-scope `ENOENT: no such file or directory` as RED — the guard "noticed"
+  // by crashing before a single assertion ran. Three live manifest cases were
+  // certified sound that way, and a fourth with identical structure read INFRA
+  // purely because its message differed.
+  if (/^\s*[1-9]\d*\s+error\s*$/m.test(out)) return "infra"
+  if (/# Unhandled error between tests/.test(out)) return "infra"
   if (/Cannot find module|Failed to resolve/.test(out)) return "infra"
   if (/timed out after/.test(out)) return "infra"
   const ran = /Ran (\d+) tests?/.exec(out)
@@ -265,6 +279,14 @@ export type GuardCase = { readonly file: string; readonly corpus: CorpusRoot }
  * guard imports the very tree it enumerates, that exemption refills the corpus.
  * Measuring it is what turns a silent false negative into a stated limit.
  */
+/**
+ * Every `.ts` left in the blanked root, GUARDS INCLUDED.
+ *
+ * `isCorpus` excludes `.test.ts` so guards survive the blank — correct for
+ * deciding what to delete, wrong for measuring what remains. Using it here made
+ * the 299 `src/**\/*.test.ts` files invisible: a mirror holding 300 real source
+ * files reported an overlap of 1.
+ */
 const corpusOverlap = (mirror: string, root: CorpusRoot): number => {
   let n = 0
   const walk = (dir: string): void => {
@@ -278,7 +300,7 @@ const corpusOverlap = (mirror: string, root: CorpusRoot): number => {
       if (e.name === "node_modules" || e.name.startsWith(".")) continue
       const p = join(dir, e.name)
       if (e.isDirectory()) walk(p)
-      else if (isCorpus(p)) n++
+      else if (p.endsWith(".ts")) n++
     }
   }
   walk(join(mirror, root))
@@ -397,6 +419,16 @@ if (import.meta.main) {
         // Saying "not vacuous" there would be a lie — the oracle simply has no
         // verdict, and an overlap it cannot see through must be reported, never
         // silently counted as a pass.
+        // The canary belongs on THIS mirror, not on a guard-less one built
+        // earlier. The per-guard mirror keeps that guard's import closure, so it
+        // can be far fuller than the one the canary was run against — measured:
+        // the canary REJECTS the mirror used for `voice-session-hellgate`, and
+        // the oracle never asked.
+        if (!canaryHolds(mirror, root)) {
+          unsupported.push(`${c.file} (its mirror failed the canary — corpus not empty enough)`)
+          rmSync(mirror, { recursive: true, force: true })
+          continue
+        }
         const overlap = corpusOverlap(mirror, root)
         if (overlap > realCorpusSize(root) * OVERLAP_FRACTION) {
           unsupported.push(`${c.file} (${overlap} corpus files kept by its own imports)`)

@@ -26,17 +26,43 @@
  */
 
 import { describe, expect, test } from "bun:test"
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import {
+  lstatSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
 import {
+  buildMirror,
   CORPUS_ROOTS,
   canaryHolds,
   classifyOutput,
   ledgerEntries,
   manifest,
 } from "@/../tools/dev/empty-mirror-check"
+
+/** Files under a mirrored root, split by guard vs corpus. */
+const corpusFiles = (dir: string): { nonTest: number; tests: number } => {
+  let nonTest = 0
+  let tests = 0
+  const walk = (d: string): void => {
+    for (const e of readdirSync(d, { withFileTypes: true })) {
+      if (e.name === "node_modules" || e.name.startsWith(".")) continue
+      const p = join(d, e.name)
+      if (e.isDirectory()) walk(p)
+      else if (p.endsWith(".test.ts")) tests++
+      else if (p.endsWith(".ts")) nonTest++
+    }
+  }
+  walk(dir)
+  return { nonTest, tests }
+}
 
 describe("empty-corpus oracle", () => {
   describe("verdict classification", () => {
@@ -103,6 +129,55 @@ describe("empty-corpus oracle", () => {
         rmSync(dir, { recursive: true, force: true })
       }
     }, 120_000)
+  })
+
+  describe("mirror construction", () => {
+    // An audit ran 16 mutations against the oracle. Six SURVIVED, and every one
+    // of them was on the mirror-construction path — which this file did not
+    // execute at all (`grep -c buildMirror` was 0). The two properties the
+    // header argues hardest for, materialise-don't-symlink and use-our-own-bunfig,
+    // were both unpinned.
+    const mirrorOf = (root: "src") => buildMirror(root)
+
+    test("🔴 the blanked root is EMPTY of corpus, and guards survive", () => {
+      // M1: inverting `isCorpus` (delete the guards, keep the corpus) survived.
+      const dir = mirrorOf("src")
+      try {
+        const kept = corpusFiles(join(dir, "src"))
+        expect(kept.nonTest, "corpus files survived the blank").toBe(0)
+        expect(kept.tests, "the guards were deleted instead of the corpus").toBeGreaterThan(100)
+      } finally {
+        rmSync(dir, { recursive: true, force: true })
+      }
+    }, 180_000)
+
+    test("🔴 src and tests are MATERIALISED, never symlinked", () => {
+      // M5: re-symlinking `tests` survived. It is the defect the header says
+      // "returned twice in this file's history" — a guard's `import.meta.dir`
+      // follows the link back to the real repo and reads the real corpus.
+      const dir = mirrorOf("src")
+      try {
+        for (const root of ["src", "tests"]) {
+          expect(lstatSync(join(dir, root)).isSymbolicLink(), `${root} is a symlink`).toBe(false)
+        }
+      } finally {
+        rmSync(dir, { recursive: true, force: true })
+      }
+    }, 180_000)
+
+    test("🔴 the mirror uses its OWN bunfig with no preload", () => {
+      // M14: pointing the mirror at the repo's bunfig survived. That is the
+      // decision the whole engine rests on — the repo's preload loads production
+      // slices, so a mirror using it cannot have those slices emptied.
+      const dir = mirrorOf("src")
+      try {
+        const cfg = readFileSync(join(dir, "bunfig.toml"), "utf8")
+        expect(lstatSync(join(dir, "bunfig.toml")).isSymbolicLink()).toBe(false)
+        expect(cfg).not.toContain("preload")
+      } finally {
+        rmSync(dir, { recursive: true, force: true })
+      }
+    }, 180_000)
   })
 
   describe("manifest", () => {
