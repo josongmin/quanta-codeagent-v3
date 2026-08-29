@@ -1,0 +1,118 @@
+/**
+ * Activation + shadow reconciliation for usage accounting (MR-08).
+ *
+ * The authority replaces how several surfaces get their numbers, so it ships
+ * behind a three-position knob rather than a boolean:
+ *
+ *   - `off`    — no authority is constructed. Every surface keeps the feed it
+ *                had, and the loop is byte-identical. The default.
+ *   - `shadow` — the authority records everything, and NOTHING reads from it.
+ *                The surfaces keep their existing feed, and a reconciliation
+ *                receipt reports where the two disagree. This is how the claim
+ *                "the new numbers are the right ones" gets evidence on real
+ *                sessions before anyone's status line depends on it.
+ *   - `on`     — the surfaces project the authority.
+ *
+ * Shadow exists because the interesting failures here are not crashes, they are
+ * plausible wrong totals. A mode that runs the new accounting beside the old
+ * one and reports the delta is the only way to see those before switching.
+ */
+import { createUsageAccounting } from "./authority"
+import type { UsageAccountingPort, UsageAccountingSnapshot } from "./port"
+
+export type UsageAccountingMode = "off" | "shadow" | "on"
+
+/** Env knob: `QUANTA_USAGE_ACCOUNTING_V2`. Unset or unrecognized ⇒ `off`, so a
+ *  typo degrades to the byte-identical path rather than half-activating. */
+export const usageAccountingMode = (
+  env: Record<string, string | undefined>,
+): UsageAccountingMode => {
+  const raw = env.QUANTA_USAGE_ACCOUNTING_V2?.trim().toLowerCase()
+  if (raw === "on") return "on"
+  if (raw === "shadow") return "shadow"
+  return "off"
+}
+
+/** The session's authority, or `undefined` in `off`. Both `shadow` and `on`
+ *  construct one — they differ in who READS it, not in whether it records. */
+export const createSessionUsageAccounting = (
+  env: Record<string, string | undefined>,
+): UsageAccountingPort | undefined =>
+  usageAccountingMode(env) === "off" ? undefined : createUsageAccounting()
+
+/** `true` when surfaces should PROJECT the authority. False in `shadow`, where
+ *  it records but nothing reads it. */
+export const usageAccountingIsAuthoritative = (env: Record<string, string | undefined>): boolean =>
+  usageAccountingMode(env) === "on"
+
+/** What the legacy feed believes, in the authority's own terms. */
+export interface LegacyCostReading {
+  readonly totalUsd: number
+  readonly promptTokens: number
+  readonly outputTokens: number
+}
+
+/** One line of "these two disagree, by this much". */
+export interface UsageReconciliationDelta {
+  readonly field: "totalUsd" | "promptTokens" | "outputTokens"
+  readonly authority: number
+  readonly legacy: number
+  readonly delta: number
+}
+
+export interface UsageReconciliationReceipt {
+  readonly agrees: boolean
+  readonly deltas: readonly UsageReconciliationDelta[]
+  /** Calls the authority admitted. A receipt over zero calls proves nothing;
+   *  callers should say so rather than reading `agrees: true` as evidence. */
+  readonly calls: number
+}
+
+/** Compare the authority against whatever the legacy feed reported.
+ *
+ *  Dollar comparison is to the cent, because sub-cent float noise is not a
+ *  disagreement worth reporting and would bury the real ones. Token counts are
+ *  integers and must match exactly — a token delta means the two feeds saw a
+ *  different set of CALLS, which is the failure mode that matters here (a
+ *  subagent reaching one and not the other), not a rounding difference. */
+export const reconcileUsageAccounting = (
+  snapshot: UsageAccountingSnapshot,
+  legacy: LegacyCostReading,
+): UsageReconciliationReceipt => {
+  const authorityPrompt = snapshot.freshInputTokens + snapshot.cacheReadTokens
+  const cents = (n: number) => Math.round(n * 100)
+  const deltas: UsageReconciliationDelta[] = []
+  if (cents(snapshot.totalUsd) !== cents(legacy.totalUsd)) {
+    deltas.push({
+      field: "totalUsd",
+      authority: snapshot.totalUsd,
+      legacy: legacy.totalUsd,
+      delta: snapshot.totalUsd - legacy.totalUsd,
+    })
+  }
+  if (authorityPrompt !== legacy.promptTokens) {
+    deltas.push({
+      field: "promptTokens",
+      authority: authorityPrompt,
+      legacy: legacy.promptTokens,
+      delta: authorityPrompt - legacy.promptTokens,
+    })
+  }
+  if (snapshot.outputTokens !== legacy.outputTokens) {
+    deltas.push({
+      field: "outputTokens",
+      authority: snapshot.outputTokens,
+      legacy: legacy.outputTokens,
+      delta: snapshot.outputTokens - legacy.outputTokens,
+    })
+  }
+  return { agrees: deltas.length === 0, deltas, calls: snapshot.calls }
+}
+
+/** One-line human summary for a log or a `/cost` footer. */
+export const formatReconciliationReceipt = (receipt: UsageReconciliationReceipt): string => {
+  if (receipt.calls === 0) return "usage-accounting shadow: no calls recorded (nothing compared)"
+  if (receipt.agrees) return `usage-accounting shadow: agrees across ${receipt.calls} calls`
+  const parts = receipt.deltas.map((d) => `${d.field} ${d.authority} vs ${d.legacy}`)
+  return `usage-accounting shadow: DIVERGES over ${receipt.calls} calls — ${parts.join("; ")}`
+}

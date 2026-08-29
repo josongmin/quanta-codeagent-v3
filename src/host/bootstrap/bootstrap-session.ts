@@ -47,6 +47,7 @@ import {
   buildRouteEventForwarder,
 } from "@/host/bootstrap/route-event-forwarder"
 import type { ImageBlock } from "@/llm"
+import { usageAccountingIsAuthoritative } from "@/observability/usage-accounting"
 import type { IdentityModeSessionState, ToolProfileSessionState } from "@/runner/assemble"
 import type { PermissionModeSessionState } from "@/runner/assemble/session-authorities"
 import { errMessage } from "@/shared"
@@ -161,6 +162,7 @@ const assembleBootstrapResult = async (
       lifecycleQuestionBroker,
       lifecycleAttention,
       budgetMeter,
+      usageAccounting,
       tooling,
       mcpSurface,
       registrySnapshotRef,
@@ -194,7 +196,15 @@ const assembleBootstrapResult = async (
     } = await buildPromptState(deps, runtime, cwd)
     const onShellEvent = deps.composeShellEvent(features.metrics, runtime.stdoutIsTTY)
     const workMetricsSink = deps.buildWorkMetricsSink(features.metrics !== undefined)
-    const costPanel = deps.buildCostPanelOrUndefined(featureCfg, runtime.model)
+    // MR-08 — the panel PROJECTS the authority only in `on`. In `shadow` the
+    // authority still records (so a receipt can compare it against the legacy
+    // feed on real sessions) but nothing renders from it, which is the whole
+    // point of having a mode between off and on.
+    const costPanel = deps.buildCostPanelOrUndefined(
+      featureCfg,
+      runtime.model,
+      usageAccountingIsAuthoritative(runtime.env) ? usageAccounting : undefined,
+    )
     const branchProgress = deps.buildBranchProgressOrUndefined(featureCfg)
     const planStore = deps.buildPlanStoreOrUndefined(featureCfg)
     const sessionConfigPort = buildSessionConfigPort({
@@ -227,6 +237,7 @@ const assembleBootstrapResult = async (
       features,
       tooling,
       budgetMeter,
+      usageAccounting,
       mcpSurface,
       lifecyclePills,
       lifecycleTaskRegistry,

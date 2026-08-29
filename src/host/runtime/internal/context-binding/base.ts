@@ -337,6 +337,10 @@ const buildBootstrapBaseShape = (
     // sites feed it; the write-guard reads `() => meter.remainingPercent()`
     // (threaded into buildTooling). Absent ⇒ slot omitted (byte-identical).
     ...whenDefined("budgetMeter", args.boot.budgetMeter),
+    // MR-08 — the same authority the cost surfaces project. Setting it here is
+    // what makes `emitUsage`'s accounting sink live; absent (mode `off`) it
+    // stays unset and the sink is a no-op.
+    ...whenDefined("usageAccounting", args.boot.usageAccounting),
     ...whenDefined(
       "searchPipeline",
       args.includeSearchPipeline === true ? args.boot.tooling.searchPipeline : undefined,

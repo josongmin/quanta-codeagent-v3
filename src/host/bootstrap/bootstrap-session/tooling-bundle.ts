@@ -25,6 +25,11 @@ import {
 } from "@/agent/turn-registry-snapshot"
 import { createMcpToolReloadController } from "@/host/runtime/mcp-tool-reload"
 import type { StructuredLogger } from "@/observability"
+import {
+  createSessionUsageAccounting,
+  type UsageAccountingPort,
+} from "@/observability/usage-accounting"
+
 import type {
   BootstrapFeatures,
   SessionBootstrapDeps,
@@ -131,6 +136,7 @@ export const buildToolingBundle = (
     SessionBootstrapDeps["buildLifecycleBundle"]
   >["attentionReader"]
   readonly budgetMeter: BudgetMeter | undefined
+  readonly usageAccounting: UsageAccountingPort | undefined
   readonly tooling: ReturnType<SessionBootstrapDeps["buildTooling"]>
   readonly mcpSurface: ReturnType<SessionBootstrapDeps["buildMcpSurfaceInfo"]>
   readonly registrySnapshotRef: AgentConfig["registrySnapshotRef"] | undefined
@@ -169,6 +175,12 @@ export const buildToolingBundle = (
   const hasCostCap = Object.keys(costDials).length > 0
   const budgetMeter =
     writeGuardActive || hasCostCap ? new BudgetMeter({ dials: costDials }) : undefined
+  // MR-08 — the session's usage-accounting authority, minted ONLY when the
+  // operator opted in via `QUANTA_USAGE_ACCOUNTING_V2`. One per session: the
+  // loop's `emitUsage` records into it and the cost surfaces project it, so
+  // both halves have to see the SAME object — which is why it is created here,
+  // at the composition root, rather than by either side.
+  const usageAccounting = createSessionUsageAccounting(runtime.env)
 
   const tooling = deps.buildTooling(
     features.mcpTools,
@@ -213,6 +225,7 @@ export const buildToolingBundle = (
     lifecycleQuestionBroker,
     lifecycleAttention,
     budgetMeter,
+    usageAccounting,
     tooling,
     mcpSurface,
     registrySnapshotRef,

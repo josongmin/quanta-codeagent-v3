@@ -557,6 +557,13 @@ export interface SessionBootstrapResult {
    *  hermetic-test result constructors that predate this field stay valid;
    *  the live bootstrap always sets it (`undefined` when the guard is off). */
   readonly budgetMeter?: AgentConfig["budgetMeter"]
+  /** MR-08 — the session's usage-accounting authority, minted at the
+   *  composition root when `QUANTA_USAGE_ACCOUNTING_V2` is `shadow` or `on`.
+   *  Carried on the result because BOTH halves need the same object: the
+   *  runtime overlay sets it on `AgentConfig` so `emitUsage` records into it,
+   *  and the cost surfaces project it. Absent ⇒ `off`, and the accounting sink
+   *  is a no-op. Optional so result constructors that predate it stay valid. */
+  readonly usageAccounting?: AgentConfig["usageAccounting"]
   readonly mcpSurface: BootstrapMcpSurface | undefined
   readonly lifecyclePills: BootstrapLifecyclePills
   readonly lifecycleTaskRegistry: TaskRegistry | undefined

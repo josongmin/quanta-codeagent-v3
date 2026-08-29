@@ -81,6 +81,7 @@ export const buildCapabilityWires = (helpers: {
   readonly maybeWireSideAgent: (cfg: AgentConfig, config: CapabilityWireContext["config"]) => void
   readonly maybeWireWriteBudget: (cfg: AgentConfig, config: CapabilityWireContext["config"]) => void
   readonly maybeWireBudgetLedger: (cfg: AgentConfig, env: CapabilityWireContext["env"]) => void
+  readonly maybeWireUsageAccounting: (cfg: AgentConfig, env: CapabilityWireContext["env"]) => void
 }): readonly CapabilityWire[] => {
   const wires: readonly CapabilityWire[] = [
     { name: "browser", dependsOn: [], apply: (c, x) => helpers.maybeWireBrowser(c, x.env) },
@@ -171,6 +172,14 @@ export const buildCapabilityWires = (helpers: {
       name: "budgetLedger",
       dependsOn: [],
       apply: (c, x) => helpers.maybeWireBudgetLedger(c, x.env),
+    },
+    // MR-08 — the session's usage-accounting authority. No dependency edges:
+    // it reads only the env knob and owns its own state, so ordering against
+    // the other cost wires is irrelevant.
+    {
+      name: "usageAccounting",
+      dependsOn: [],
+      apply: (c, x) => helpers.maybeWireUsageAccounting(c, x.env),
     },
   ]
   assertWireOrder(wires)

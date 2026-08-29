@@ -90,6 +90,7 @@ import {
   withCacheMetrics,
 } from "@/observability/codex-r2-metrics"
 import { defaultPromptCacheObserver } from "@/observability/prompt-cache"
+import { createSessionUsageAccounting } from "@/observability/usage-accounting"
 import { getBashBgRegistry } from "@/runtime/bash-bg-registry"
 import { CI_BOT_DEFAULT_ALLOWLIST } from "@/runtime/network-allowlist"
 import type { RuntimeAgentConfigBase } from "@/sdk/runtime"
@@ -493,6 +494,22 @@ const envCostDialOverrides = (env: AssemblerEnv): Partial<BudgetDials> => {
   }
 }
 
+/** MR-08 — mint the session's usage-accounting authority when the operator has
+ *  opted in (`QUANTA_USAGE_ACCOUNTING_V2=shadow|on`).
+ *
+ *  `shadow` and `on` both construct one; they differ in who READS it, which is
+ *  a surface decision rather than this one. `off` — the default, and anything
+ *  unrecognized — leaves the slot unset, so `emitUsage`'s accounting sink is a
+ *  no-op and the loop stays byte-identical for every legacy caller.
+ *
+ *  Caller-override-safe: a config that already carries an authority keeps it,
+ *  so a host that minted one for its own surfaces remains its owner. */
+const maybeWireUsageAccounting = (cfg: AgentConfig, env: AssemblerEnv): void => {
+  if (cfg.usageAccounting !== undefined) return
+  const accounting = createSessionUsageAccounting(env)
+  if (accounting !== undefined) cfg.usageAccounting = accounting
+}
+
 /** ADR-0136 activation — mint ONE per-session cross-run `BudgetLedger` when it
  *  is opted in (`QUANTA_BUDGET_LEDGER=1`) AND at least one HARD USD cap is set
  *  (`QUANTA_BUDGET_LEDGER_SESSION_USD` / `QUANTA_BUDGET_LEDGER_DAILY_USD`). BOTH
@@ -851,6 +868,7 @@ export const CAPABILITY_WIRES = buildCapabilityWires({
   maybeWireSideAgent,
   maybeWireWriteBudget,
   maybeWireBudgetLedger,
+  maybeWireUsageAccounting,
 })
 
 export const assembleAgentConfig = (req: AssembleRequest, env: AssemblerEnv): AgentConfig => {
