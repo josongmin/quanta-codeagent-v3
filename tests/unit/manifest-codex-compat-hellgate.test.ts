@@ -442,7 +442,7 @@ describe("lenient parser + normalizer fix the discover.ts silent tool-drop", () 
     // / normalizer ever altered a native parse, this fails.
     const root = join(import.meta.dir, "..", "..", "src", "skill", "system-skills")
     const dirs = readdirSync(root, { withFileTypes: true }).filter((d) => d.isDirectory())
-    expect(dirs.length).toBeGreaterThan(5) // guard: the corpus is real
+    let parsed = 0
     for (const d of dirs) {
       let md: string
       try {
@@ -450,6 +450,7 @@ describe("lenient parser + normalizer fix the discover.ts silent tool-drop", () 
       } catch {
         continue // not every dir is a skill dir
       }
+      parsed++
       disarmCompat()
       const off = parseSkillMarkdown(md)
       armCompat()
@@ -460,6 +461,18 @@ describe("lenient parser + normalizer fix the discover.ts silent tool-drop", () 
         expect(on.value.body).toBe(off.value.body)
       }
     }
+    // The floor belongs on what was PARSED, not on what was listed. It used to
+    // read `dirs.length > 5`, and the loop's real work is behind a
+    // `catch { continue }` that swallows a missing SKILL.md — so with the skill
+    // files gone but their directories standing, the listing still cleared the
+    // floor, every read threw, every iteration skipped, and the test passed
+    // having compared nothing. Measured: 67 `expect()` calls against the real
+    // corpus, ONE against the blanked one, green both times.
+    expect(
+      parsed,
+      `only ${parsed} of ${dirs.length} skill dir(s) yielded a SKILL.md — the ` +
+        `armed-vs-unarmed comparison below ran on almost nothing`,
+    ).toBeGreaterThanOrEqual(20)
   })
 
   test("rr2 lenient parse yields kebab `allowed-tools` block-list; normalizer renames it", () => {

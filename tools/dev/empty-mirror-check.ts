@@ -71,7 +71,7 @@ import { dirname, join } from "node:path"
 // The SHARED stripper. A local copy is what `comment-scanner-burndown-ratchet`
 // forbids, and for exactly the reason above: a hand-rolled one gets its own
 // blind spots, and this file had them.
-import { stripComments } from "../../tests/unit/_shared/strip-comments"
+import { stripComments } from "../../src/shared/source-text"
 
 const REPO_ROOT = join(import.meta.dir, "..", "..")
 const MANIFEST = join(REPO_ROOT, "tools", "dev", "anti-vacuity-cases.json")
@@ -85,6 +85,14 @@ export const CORPUS_ROOTS = [
   "tests/unit",
   "tools",
   "docs",
+  // `.github/workflows` is a repo corpus like any other — four guards read it
+  // from disk and state a zero-verdict over it — but it sits behind a dotfile,
+  // which the mirror symlinked wholesale. A guard reading it therefore saw the
+  // REAL tree no matter which root was blanked, so the oracle had no lens on it
+  // at all. Measured 2026-08-30: all four are sound (two red, two throw), so
+  // this closes a blind spot rather than fixing a defect — the point is that the
+  // next guard added there can be judged.
+  ".github/workflows",
 ] as const
 export type CorpusRoot = (typeof CORPUS_ROOTS)[number]
 
@@ -387,7 +395,16 @@ export type GuardCase = { readonly file: string; readonly corpus: CorpusRoot }
  * resurrected, so guards are excluded and the 299 are reported separately by the
  * canary, which fails if the blanked root is not actually empty.
  */
-export const corpusOverlap = (mirror: string, root: CorpusRoot): number => {
+export /*
+ * Counts the SAME set the canary counts — every non-`.test.ts` file, not only
+ * `.ts`. The two had drifted, and the drift was silent until `.github/workflows`
+ * became a corpus root: its files are `.yml`, so the overlap metric reported a
+ * real corpus size of ZERO for a directory the canary happily found seven files
+ * in. Measured before the change: aligning them leaves all nine manifest
+ * verdicts identical, so this costs nothing and removes a metric that reads 0
+ * for any corpus that is not TypeScript.
+ */
+const corpusOverlap = (mirror: string, root: CorpusRoot): number => {
   let n = 0
   const walk = (dir: string): void => {
     let entries: Dirent[]
@@ -400,7 +417,7 @@ export const corpusOverlap = (mirror: string, root: CorpusRoot): number => {
       if (e.name === "node_modules" || e.name.startsWith(".")) continue
       const p = join(dir, e.name)
       if (e.isDirectory()) walk(p)
-      else if (p.endsWith(".ts") && isCorpus(p)) n++
+      else if (isCorpus(p)) n++
     }
   }
   walk(join(mirror, root))
