@@ -45,4 +45,10 @@ export interface WSData {
    *  at WS upgrade. `open()` swaps the live session onto it (hydrate). Absent ⇒
    *  no swap (byte-identical: the client joins the current live session). */
   threadId: string | undefined
+  /** GOAL-08 rail 15 — set by `open()` once `buildRegisteredSession` has
+   *  completed. The pre-bridge `goalWork` verb STARTS A BILLED TURN, so unlike
+   *  the other out-of-band frames it refuses to act on a connection that is not
+   *  yet a registered session (Bun can deliver `message` while the async
+   *  `open()` is still awaiting registration). */
+  registered?: boolean
 }

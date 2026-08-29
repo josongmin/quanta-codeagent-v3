@@ -22,10 +22,11 @@ import {
   prepareObjectiveSnapshotForAttach,
 } from "@/host/runtime/objective-store-wire"
 import type { SupportedReadModels } from "@/protocol/session"
-import type { RuntimeSession } from "@/sdk/runtime"
+import type { RuntimeFacade, RuntimeSession } from "@/sdk/runtime"
 import { loadSessionById, type PersistedObjectiveSnapshot } from "@/session"
 import { errMessage, logger } from "@/shared"
 import { composeWebGoalWake, type WebGoalWakeHandle } from "./goal-wake-compose"
+import { composeWebGoalWork, type WebGoalWorkHandler } from "./goal-work-compose"
 import type { CostReadoutTotals, WebReadoutSources } from "./readout"
 import { setupApprovalContinuation } from "./server/approval-continuation"
 import { type CanvasArtifactFeed, setupCanvasArtifactBridge } from "./server/canvas-artifact-bridge"
@@ -150,6 +151,13 @@ export interface WebDaemonServerConfig extends WebDaemonConfig {
    * wired, byte-identical). Populated by `./index.ts` from the session facade.
    */
   readonly followerCoControl?: FollowerCoControlDispatcher
+  /**
+   * GOAL-08 rail 15 (web half) — the user-requested goal-work handler. Absent
+   * (no objective authority / no host verb) ⇒ a `goalWork` frame falls through
+   * to the session bridge, byte-identical. Composed by `startWebDaemon` over
+   * the shared session (`composeWebGoalWork`).
+   */
+  readonly goalWork?: WebGoalWorkHandler
 }
 
 /**
@@ -302,6 +310,41 @@ const webObjectiveSnapshot = (
  *  pane reflect the live + reopened goal. Gate OFF ⇒ observabilityPorts undefined ⇒
  *  config returned unchanged (byte-identical). Module-scope to keep startWebDaemon
  *  under the god ceiling. */
+/** GOAL-06 + GOAL-08 rail 15 — the two goal surfaces the daemon composes over
+ *  the SHARED session and the runtime's objective ports: the autonomous wake
+ *  controller, and the user-requested `/goal work` verb (same objective
+ *  authority, same attributed-attempt slot the session host claims). Either is
+ *  `undefined` when its preconditions are absent ⇒ that surface is inert and
+ *  byte-identical. Hoisted so `startWebDaemon` stays under the god-fn cap. */
+/** Tear the two goal surfaces down together: cancel the autonomous wake, then
+ *  DRAIN in-flight user goal turns (bounded inside `settled()` — a turn that
+ *  never settles must not wedge `stop()`). */
+const stopGoalSurfaces = async (surfaces: {
+  goalWake: WebGoalWakeHandle | undefined
+  goalWork: WebGoalWorkHandler | undefined
+}): Promise<void> => {
+  surfaces.goalWake?.stop()
+  await surfaces.goalWork?.settled()
+}
+
+const composeGoalSurfaces = async (
+  runtime: RuntimeFacade,
+  sharedSession: RuntimeSession,
+): Promise<{
+  goalWake: WebGoalWakeHandle | undefined
+  goalWork: WebGoalWorkHandler | undefined
+}> => ({
+  goalWake: await composeWebGoalWake({
+    session: sharedSession,
+    runtime: runtime as Parameters<typeof composeWebGoalWake>[0]["runtime"],
+    env: process.env,
+  }),
+  goalWork: composeWebGoalWork({
+    session: sharedSession,
+    runtime: runtime as Parameters<typeof composeWebGoalWork>[0]["runtime"],
+  }),
+})
+
 export const bindObjectivePaneThread = (
   config: WebDaemonServerConfig,
   sessionId: string,
@@ -358,11 +401,7 @@ export const startWebDaemon = async (config: WebDaemonServerConfig): Promise<Web
   // join the same session instead of minting a fresh one — see the
   // `buildRegisteredSession` comment above.
   const sharedSession = await runtime.createSession(config.sessionConfig)
-  const goalWake = await composeWebGoalWake({
-    session: sharedSession,
-    runtime: runtime as Parameters<typeof composeWebGoalWake>[0]["runtime"],
-    env: process.env,
-  })
+  const { goalWake, goalWork } = await composeGoalSurfaces(runtime, sharedSession)
   const registry = createSessionRegistry()
   const startedAt = performance.now()
 
@@ -430,7 +469,10 @@ export const startWebDaemon = async (config: WebDaemonServerConfig): Promise<Web
   }
 
   const { server, boundPort, boundHost } = buildDaemonListener({
-    config: bindObjectivePaneThread(config, sharedSession.sessionId),
+    config: {
+      ...bindObjectivePaneThread(config, sharedSession.sessionId),
+      ...(goalWork !== undefined ? { goalWork } : {}),
+    },
     registry,
     startedAt,
     threadStore,
@@ -457,7 +499,7 @@ export const startWebDaemon = async (config: WebDaemonServerConfig): Promise<Web
       // for the client to ack on a socket we already removed handlers
       // from. Force-stopping first delivers the close frame from Bun
       // BEFORE we tear down our adapter state.
-      goalWake?.stop()
+      await stopGoalSurfaces({ goalWake, goalWork })
       await server.stop(true)
       await registry.closeAll()
       if (unsubPersist !== null) {

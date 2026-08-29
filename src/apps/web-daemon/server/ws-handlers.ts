@@ -21,6 +21,7 @@ import type { RuntimeSession } from "@/sdk/runtime"
 import { errMessage, logger } from "@/shared"
 import { peekControlRequest } from "../control-request-frame"
 import { peekFollowerVerb } from "../follower-verb-frame"
+import { peekGoalWork } from "../goal-work-frame"
 import type { WebDaemonServerConfig } from "../server"
 import type { RegisteredSession, SessionRegistry } from "../session-registry"
 import { SUBAGENT_WS_TOPIC } from "../subagent-source"
@@ -210,6 +211,61 @@ const consumeFollowerVerbFrame = (
 }
 
 /**
+ * GOAL-08 rail 15 (web half) — peek + CONSUME a `goalWork` frame: ONE
+ * user-requested goal turn on the live session (the web `/goal work`). Returns
+ * `true` when the frame was a well-formed request (⇒ do NOT forward it to the
+ * bridge), else `false`. No handler composed ⇒ always `false` and the frame
+ * reaches the bridge (byte-identical).
+ *
+ * Every outcome — including a refusal — is answered on the REQUESTING socket
+ * (`goalWorkResult`): a request that cannot be claimed is never accepted and
+ * then silently dropped.
+ */
+export const consumeGoalWorkFrame = (
+  ws: Pick<ServerWebSocket<WSData>, "send"> & { readonly data?: Pick<WSData, "registered"> },
+  config: Pick<WebDaemonServerConfig, "goalWork">,
+  raw: string,
+): boolean => {
+  const handler = config.goalWork
+  if (handler === undefined) return false
+  const request = peekGoalWork(raw)
+  if (request === null) return false
+  const answer = (result: Record<string, unknown>): void => {
+    // A dead socket must not take the daemon down with it.
+    try {
+      ws.send(
+        JSON.stringify({
+          kind: "goalWorkResult",
+          ...(request.requestId !== undefined ? { requestId: request.requestId } : {}),
+          ...result,
+        }),
+      )
+    } catch (error) {
+      logger.warn("web-daemon: goalWorkResult send failed", { error: errMessage(error) })
+    }
+  }
+  // This verb STARTS A BILLED TURN. A connection that is not yet a registered
+  // session (Bun delivers `message` while the async `open()` is still awaiting
+  // registration) is told to retry rather than served.
+  if (ws.data !== undefined && ws.data.registered !== true) {
+    answer({
+      ok: false,
+      reason: "the session is not ready yet — retry after the connect handshake",
+    })
+    return true
+  }
+  // NO-THROW at the Bun boundary: `request` reads live domain state, and a
+  // throw out of `message()` takes the WHOLE daemon down (every peer with it).
+  try {
+    handler.request(request.text, answer)
+  } catch (error) {
+    logger.warn("web-daemon: goal work request failed", { error: errMessage(error) })
+    answer({ ok: false, reason: `goal work failed: ${errMessage(error)}` })
+  }
+  return true
+}
+
+/**
  * The whole INBOUND TEXT-FRAME pipeline: every connection-layer consumer that
  * gets a look at a string frame BEFORE the session bridge does, in the ONE
  * order that matters. Returns `true` when some consumer took the frame (⇒ the
@@ -255,6 +311,9 @@ const consumeInboundTextFrame = (
   // T02 — a follower verb from a 2nd client, routed to the co-control
   // dispatcher (approvals ride approval.respond via the coordinator).
   if (consumeFollowerVerbFrame(config, followerApproval, raw)) return true
+  // GOAL-08 rail 15 — the web `/goal work` verb (one user-requested goal turn,
+  // answered on this socket). Absent handler ⇒ falls through unchanged.
+  if (consumeGoalWorkFrame(ws, config, raw)) return true
   return false
 }
 
@@ -295,6 +354,7 @@ export const buildWebSocketHandlers = (deps: WsHandlerDeps): WsHandlers => {
       if (config.subagentSource !== undefined) ws.subscribe(SUBAGENT_WS_TOPIC)
       try {
         await buildRegisteredSession(registry, ws, adapter, sharedSession)
+        ws.data.registered = true
         // P1 Phase 2 — swap the live session onto the opened thread (hydrate
         // from its lossless SavedSession). No thread / no handler ⇒ join the
         // current live session unchanged. Never fatal: a swap failure logs but

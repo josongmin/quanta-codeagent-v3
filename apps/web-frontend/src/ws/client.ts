@@ -187,6 +187,26 @@ const peekHeartbeatPhase = (rec: Record<string, unknown>): "ping" | "pong" | nul
 /* SessionClient                                                       */
 /* ------------------------------------------------------------------ */
 
+/** The daemon's ack for a {@link SessionClient.sendGoalWork} request. */
+export type GoalWorkResultFrame =
+  | { readonly ok: true; readonly status: "accepted" }
+  | { readonly ok: false; readonly reason: string }
+
+/** NO-THROW decode of a `goalWorkResult` frame (an unknown shape ⇒ null).
+ *  `status` is READ off the wire, never synthesized: a daemon that stopped
+ *  sending it is a shape change this client must not paper over. */
+const decodeGoalWorkResult = (parsed: unknown): GoalWorkResultFrame | null => {
+  if (parsed === null || typeof parsed !== "object") return null
+  const frame = parsed as Record<string, unknown>
+  if (frame.ok === true) {
+    return frame.status === "accepted" ? { ok: true, status: "accepted" } : null
+  }
+  if (frame.ok === false && typeof frame.reason === "string") {
+    return { ok: false, reason: frame.reason }
+  }
+  return null
+}
+
 export class SessionClient {
   readonly #eventHandlers = new Map<SessionEventType, Set<EventHandler<SessionEventType>>>()
   readonly #wildcardEventHandlers = new Set<(event: SessionEvent) => void>()
@@ -235,6 +255,8 @@ export class SessionClient {
   #lastObservability: ObservabilityMessage | null = null
   /** Last canvas message, replayed to late `onCanvas` subscribers. */
   #lastCanvas: CanvasMessage | null = null
+  /** GOAL-08 rail 15 — `goalWorkResult` subscribers (accept + late refusal). */
+  readonly #goalWorkHandlers = new Set<(result: GoalWorkResultFrame) => void>()
   /** Last agent-state message, replayed to late `onAgentState` subscribers. */
   #lastAgentState: AgentStateMessage | null = null
   /** Heartbeat timers (injectable seam). `#pingHandle` schedules the next */
@@ -341,6 +363,55 @@ export class SessionClient {
    * of showing a success it cannot back (the daemon sends no ack frame — the
    * honest confirmation is re-reading `GET /readout/model`).
    */
+  /**
+   * GOAL-08 rail 15 (web half) — ask the live session for ONE user-requested
+   * goal turn (`/goal work`). Out-of-band frame the daemon peeks BEFORE the
+   * session bridge; the host verb is the only minter of
+   * `user-requested-goal-work` provenance, so this charges the USER turn budget
+   * and never the autonomous hard cap.
+   *
+   * Returns `false` when the socket is not open. Unlike `sendControlRequest`
+   * the daemon DOES ack this one: subscribe with {@link onGoalWorkResult} for
+   * the accept/refusal (a refusal names its reason — no silent drop).
+   */
+  sendGoalWork(text: string): boolean {
+    if (this.#ws === null || this.#ws.readyState !== READYSTATE_OPEN) {
+      this.#log("warn", "[SessionClient] dropping goalWork — socket not open")
+      return false
+    }
+    try {
+      this.#ws.send(JSON.stringify({ kind: "goalWork", text }))
+      return true
+    } catch (err) {
+      this.#log("warn", `[SessionClient] goalWork send failed: ${String(err)}`)
+      return false
+    }
+  }
+
+  /** Fan a decoded `goalWorkResult` out to subscribers (a malformed frame is
+   *  ignored; a throwing subscriber never breaks the socket). */
+  #emitGoalWorkResult(parsed: unknown): void {
+    const result = decodeGoalWorkResult(parsed)
+    if (result === null) return
+    // Iterate a COPY (sibling parity): a subscriber that unsubscribes — or
+    // subscribes — during dispatch must not mutate the set being walked.
+    for (const handler of [...this.#goalWorkHandlers]) {
+      try {
+        handler(result)
+      } catch (err) {
+        this.#log("warn", `[SessionClient] goalWorkResult handler threw: ${String(err)}`)
+      }
+    }
+  }
+
+  /** Subscribe to `goalWorkResult` acks/refusals. Returns an unsubscribe. */
+  onGoalWorkResult(handler: (result: GoalWorkResultFrame) => void): () => void {
+    this.#goalWorkHandlers.add(handler)
+    return () => {
+      this.#goalWorkHandlers.delete(handler)
+    }
+  }
+
   sendControlRequest(request: { readonly kind: string; readonly [k: string]: unknown }): boolean {
     if (this.#ws === null || this.#ws.readyState !== READYSTATE_OPEN) {
       this.#log("warn", `[SessionClient] dropping controlRequest ${request.kind} — socket not open`)
@@ -702,6 +773,10 @@ export class SessionClient {
           }
         }
       }
+      return
+    }
+    if (kind === "goalWorkResult") {
+      this.#emitGoalWorkResult(parsed)
       return
     }
     if (kind === "rejected") {

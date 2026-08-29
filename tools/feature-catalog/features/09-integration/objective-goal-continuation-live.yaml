@@ -28,7 +28,7 @@ surface_integration:
   verified: "2026-08-26"
   evidence:
     cli: "Real PTY boots the source or installed CLI, proves default-ON command discovery, explicit QUANTA_GOAL=0 opt-out, goal create/show, autonomous queue execution, draft/background/foreground quiescence fences, and goal-only quiet-window behavior."
-    web: "Web-daemon composition submits a one-use, authority-validated goal-continuation capability through RuntimeSession.turn.submitGoalContinuation; an integration test proves concurrent user input stays outside the autonomous turn."
+    web: "Web-daemon composition submits a one-use, authority-validated goal-continuation capability through RuntimeSession.turn.submitGoalContinuation; an integration test proves concurrent user input stays outside the autonomous turn. A real WebSocket client also asks for ONE user-requested goal turn with a `goalWork` frame (peeked before the session bridge, host-minted user-requested-goal-work provenance): a real-daemon e2e proves it charges the user turn budget and mints a receipt without touching the autonomous hard cap, and that every refusal is answered on the same socket."
 purpose: |
   The complete goal preset is enabled by default in CLI and web-daemon roots:
   objective tools, budget enforcement, and bounded autonomous continuation.
@@ -72,6 +72,8 @@ evidence:
     - src/apps/cli/repl/session-loop/session-switch.ts
     - src/apps/cli/repl/runtime-context-compose.ts
     - src/apps/web-daemon/goal-wake-compose.ts
+    - src/apps/web-daemon/goal-work-compose.ts
+    - src/apps/web-daemon/goal-work-frame.ts
     - src/runner/orchestrate/session-turn-driver.ts
     - src/sdk/runtime/session/turn-submit-authority.ts
   adrs: [394]
@@ -83,9 +85,16 @@ evidence:
       - tests/unit/objective/attempt-lifecycle.test.ts
       - tests/unit/apps/cli/repl/session-switch-hellgate.test.ts
       - tests/unit/sdk/turn-submit-authority.test.ts
+      - tests/unit/sdk/goal-turn-attribution.test.ts
+      - tests/unit/apps/web-daemon/goal-work-frame.test.ts
+      - tests/unit/apps/web-daemon/goal-work-server-wire-hellgate.test.ts
+      - tests/unit/apps/web-daemon/objective-ports.test.ts
+      - tests/unit/host/objective-settlement-measured-usage.test.ts
     integration:
       - tests/integration/goal-continuation-live-e2e.test.ts
       - tests/integration/goal-web-submit-daemon-e2e.test.ts
+      - tests/integration/goal-work-web-daemon-e2e.test.ts
+      - tests/integration/goal-work-ws-daemon-e2e.test.ts
       - tests/integration/objective-verifier-real-command-e2e.test.ts
     contract:
       - tests/e2e-pty/cli-goal-pursuit-e2e.test.ts
