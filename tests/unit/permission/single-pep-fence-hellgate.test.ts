@@ -69,8 +69,16 @@ describe("single-PEP fence — tool.execute() only from allowlisted sites [P2-T3
     // entirely left a count-only floor green while the very directory holding
     // `dispatch.ts` went unscanned. `assertScanPopulation` asserts both, and
     // probes the disk independently of the walk under test.
-    assertScanPopulation(walk(SRC), SRC, {
+    //
+    // TWO numbers. The walk proves the anchor; `matched` proves the DETECTOR.
+    // `TOOL_EXECUTE` is a regex over source text, so a refactor that changed how
+    // this repo spells a tool call would leave the walk full, the offender list
+    // empty, and the fence reporting clean over a pattern that no longer matches
+    // anything. The committed matched floor is what notices that.
+    const files = walk(SRC)
+    assertScanPopulation(files, SRC, {
       id: "tests/unit/permission/single-pep-fence-hellgate.test.ts#SRC",
+      matched: files.filter((f) => TOOL_EXECUTE.test(readFileSync(f, "utf8"))),
     })
   })
 

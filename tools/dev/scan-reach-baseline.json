@@ -74,7 +74,8 @@
       "walked": 3338
     },
     "tests/unit/permission/single-pep-fence-hellgate.test.ts#SRC": {
-      "walked": 3343
+      "walked": 3343,
+      "matched": 6
     },
     "tests/unit/quanta-home-root-ssot-ratchet-hellgate.test.ts#SRC": {
       "walked": 3338
