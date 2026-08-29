@@ -93,14 +93,33 @@ const isCorpus = (rel: string): boolean => !rel.endsWith(".test.ts")
 
 const copyTree = (from: string, to: string, keep: (rel: string) => boolean): void => {
   const walk = (rel: string): void => {
-    for (const ent of readdirSync(join(from, rel), { withFileTypes: true })) {
+    // A directory that vanishes mid-copy is not a corpus finding.
+    //
+    // This repo has several sessions working at once, and a test that creates a
+    // scratch directory under `tests/` can remove it while the mirror is being
+    // built. Letting the ENOENT escape killed a full 143-guard sweep partway
+    // through — and a gate that dies on a race is a gate that gets disabled.
+    // Skipping the entry is right: the mirror is a snapshot, and a path that no
+    // longer exists is not part of it.
+    let entries: Dirent[]
+    try {
+      entries = readdirSync(join(from, rel), { withFileTypes: true })
+    } catch {
+      return
+    }
+    for (const ent of entries) {
       if (ent.name === "node_modules" || ent.name.startsWith(".")) continue
       const next = rel === "" ? ent.name : join(rel, ent.name)
       if (ent.isDirectory()) {
         mkdirSync(join(to, next), { recursive: true })
         walk(next)
       } else if (keep(next)) {
-        cpSync(join(from, next), join(to, next))
+        try {
+          cpSync(join(from, next), join(to, next))
+        } catch {
+          // Same race, one level down: the file went away between the listing
+          // and the copy.
+        }
       }
     }
   }
