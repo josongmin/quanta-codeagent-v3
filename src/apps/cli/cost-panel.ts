@@ -375,7 +375,40 @@ const accumulateLegacyTurn = (ctx: PanelCtx, usage: CostPanelUsageDelta): void =
 /** Presentation + teardown. Rendering reads the accounting state and never
  *  mutates it. */
 const renderOps = (ctx: PanelCtx): Pick<CostPanel, "render" | "renderDetailed" | "dispose"> => {
-  const { enabled, now, state, perModel, sortedModelEntries } = ctx
+  const { enabled, now, state, sortedModelEntries, accounting } = ctx
+  /**
+   * Per-model rows for `/cost`, from whichever feed owns the numbers.
+   *
+   * This used to read `perModel` directly, which is the LEGACY internal map —
+   * so in projected mode it was empty and the breakdown silently never
+   * rendered, even though `byModel()` next door projected it correctly. Two
+   * readers of "the per-model numbers" is exactly the split this campaign is
+   * closing; there is one here now.
+   */
+  const modelRows = (): readonly {
+    model: string
+    inputTokens: number
+    outputTokens: number
+    cacheReadTokens: number
+    costUsd: number | null
+  }[] => {
+    if (accounting === undefined) {
+      return sortedModelEntries().map(([model, b]) => ({
+        model,
+        inputTokens: b.inputTokens,
+        outputTokens: b.outputTokens,
+        cacheReadTokens: b.cacheReadTokens,
+        costUsd: b.costUsd ?? null,
+      }))
+    }
+    return costSurfaceView(accounting.snapshot()).byModel.map((l) => ({
+      model: l.model,
+      inputTokens: l.promptTokens,
+      outputTokens: l.outputTokens,
+      cacheReadTokens: l.cacheReadTokens,
+      costUsd: l.totalUsd,
+    }))
+  }
   return {
     render: () => {
       if (!enabled) return renderDisabled()
@@ -405,18 +438,30 @@ const renderOps = (ctx: PanelCtx): Pick<CostPanel, "render" | "renderDetailed" |
       // §23.5 — append a per-model breakdown ONLY for heterogeneous sessions
       // (>1 distinct model). A single-model session renders byte-identical to
       // the pre-feature box (no extra rows).
-      if (perModel.size > 1) {
+      const rows = modelRows()
+      if (rows.length > 1) {
         lines.push("")
         lines.push("By model:")
-        for (const [model, b] of sortedModelEntries()) {
+        for (const b of rows) {
           // Include cache-read so the per-model rows reconcile against the
           // aggregate `Cache read:` row above (parity with the box totals).
           lines.push(
-            `  ${model}: ${b.inputTokens.toLocaleString("en-US")} in / ` +
+            `  ${b.model}: ${b.inputTokens.toLocaleString("en-US")} in / ` +
               `${b.outputTokens.toLocaleString("en-US")} out / ` +
               `${b.cacheReadTokens.toLocaleString("en-US")} cache · ${formatUsd(b.costUsd)}`,
           )
         }
+      }
+      // The question this whole box exists to answer once a session spawns:
+      // how much of the bill was the subagents? Rendered ONLY when a subagent
+      // actually spent something, so a plain session's box is unchanged.
+      const kinds =
+        accounting === undefined ? undefined : costSurfaceView(accounting.snapshot()).byKind
+      if (kinds !== undefined && kinds.subagent > 0) {
+        lines.push("")
+        lines.push("By agent:")
+        lines.push(`  root: ${formatUsd(kinds.root)}`)
+        lines.push(`  subagents: ${formatUsd(kinds.subagent)}`)
       }
       return renderBox(lines, {
         title: "session cost",

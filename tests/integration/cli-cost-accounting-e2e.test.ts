@@ -182,6 +182,97 @@ describe("every CLI cost surface reports the same total", () => {
     )
   })
 
+  test("/cost renders the per-model rows and the agent split from the authority", () => {
+    // Hell-audit findings, both wired-but-inert in my own work:
+    //   1. `renderDetailed` read the LEGACY per-model map directly, which is
+    //      empty in projected mode — so the "By model:" block silently never
+    //      rendered, even though `byModel()` next door projected it fine. Two
+    //      readers of the same numbers is the split this campaign is closing.
+    //   2. The root/subagent breakdown was computed by the projection and
+    //      displayed nowhere, which leaves the box unable to answer the exact
+    //      question that started this: how much of the bill was the subagents?
+    const { panel, usageAccounting } = runSession()
+    const detailed = panel.renderDetailed()
+
+    // The session ran one model, so no "By model:" block — that threshold is
+    // unchanged. Add a second model and it must appear.
+    expect(usageAccounting.snapshot().byModel.size).toBe(1)
+    expect(detailed).not.toContain("By model:")
+
+    // The subagent split IS present, because a subagent really spent money.
+    expect(detailed).toContain("By agent:")
+    expect(detailed).toContain("subagents:")
+    expect(detailed).toContain("$1.25") // the child's share of the $1.50
+    expect(detailed).toContain("$0.25") // the root's
+  })
+
+  test("a two-model session renders BOTH rows from the authority", () => {
+    // The case that actually distinguishes the two feeds: in projected mode the
+    // legacy per-model map is empty, so a reader that consults it renders no
+    // rows at all while `byModel()` next door has them. A single-model session
+    // cannot tell those apart — it renders no block either way.
+    const usageAccounting = createUsageAccounting()
+    const panel = createCostPanel({
+      model: MODEL,
+      now: () => 1_700_000_000_000,
+      accounting: usageAccounting,
+    })
+    const config = {
+      llm: { stream: async function* () {} },
+      registry: { get: () => undefined, specs: () => [], isReadOnly: () => true },
+      stream: { emit: () => undefined },
+      permission: { mode: "acceptEdits" },
+      messages: [],
+      system: "t",
+      cwd: process.cwd(),
+      maxTurns: 1,
+      signal: new AbortController().signal,
+      sessionId: "sess-1",
+      usageAccounting,
+    } as unknown as AgentConfig
+    emitUsage(config, usage(PARENT_INPUT), undefined, undefined, undefined)
+    emitUsage(
+      config,
+      { ...usage(PARENT_INPUT), model: "claude-sonnet-4-6" } as UsageEv,
+      undefined,
+      undefined,
+      undefined,
+    )
+
+    const detailed = panel.renderDetailed()
+    expect(detailed).toContain("By model:")
+    expect(detailed).toContain(MODEL)
+    expect(detailed).toContain("claude-sonnet-4-6")
+  })
+
+  test("a root-only session's box gains no agent split", () => {
+    // Rendered only when a subagent actually spent something, so an ordinary
+    // session's `/cost` is unchanged.
+    const metrics = new Metrics()
+    const usageAccounting = createUsageAccounting()
+    const panel = createCostPanel({
+      model: MODEL,
+      now: () => 1_700_000_000_000,
+      accounting: usageAccounting,
+    })
+    const config = {
+      llm: { stream: async function* () {} },
+      registry: { get: () => undefined, specs: () => [], isReadOnly: () => true },
+      stream: { emit: () => undefined },
+      permission: { mode: "acceptEdits" },
+      messages: [],
+      system: "t",
+      cwd: process.cwd(),
+      maxTurns: 1,
+      signal: new AbortController().signal,
+      sessionId: "sess-1",
+      metrics,
+      usageAccounting,
+    } as unknown as AgentConfig
+    emitUsage(config, usage(PARENT_INPUT), new AgentRecorder(metrics), undefined, undefined)
+    expect(panel.renderDetailed()).not.toContain("By agent:")
+  })
+
   test("the panel and the ledger agree on a turn that used the prompt cache", () => {
     // Root-only, so subagent coverage is NOT the variable here — this isolates
     // the SECOND way the surfaces drift apart: the panel prices cache reads via
