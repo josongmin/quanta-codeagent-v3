@@ -43,6 +43,7 @@ import {
   CORPUS_ROOTS,
   canaryHolds,
   classifyOutput,
+  importClosure,
   ledgerEntries,
   manifest,
 } from "@/../tools/dev/empty-mirror-check"
@@ -214,6 +215,36 @@ describe("empty-corpus oracle", () => {
         rmSync(dir, { recursive: true, force: true })
       }
     }, 180_000)
+  })
+
+  describe("import closure", () => {
+    test("🔴 a barrel's re-exports survive a `/*` written inside a LINE comment", () => {
+      // `src/tool/index.ts` documents the globs `resources/*` and `prompts/*` in
+      // a line comment. Under the naive strip-blocks-then-lines pair, that `/*`
+      // opened a comment the scan closed 12,016 characters later, deleting the
+      // re-export of `./mcp_tasks` with everything else in between. The closure
+      // then kept the barrel without what it points at, and ten guards died with
+      // `Cannot find module` before running — reported as unjudgeable by the tool
+      // that had broken them.
+      const closure = importClosure("src/tool/index.ts")
+      expect(closure.has("src/tool/index.ts")).toBe(true)
+      expect(
+        closure.has("src/tool/mcp_tasks/index.ts"),
+        "the re-export after the prose `/*` was eaten — the comment stripper is not quoting-aware",
+      ).toBe(true)
+    })
+
+    test("🔴 a re-export list longer than 400 chars is still followed", () => {
+      // The runaway guard used to be a character ceiling, and it silently
+      // truncated every barrel above it: promax re-exports `./gate-run` after an
+      // 852-char specifier list. A specifier list cannot contain `;`, so the
+      // statement's own end is the bound.
+      const closure = importClosure("src/apps/bench/harness/promax/index.ts")
+      expect(
+        closure.has("src/apps/bench/harness/promax/gate-run.ts"),
+        "the closure stopped mid-statement — the bound is a character count again",
+      ).toBe(true)
+    })
   })
 
   describe("manifest", () => {

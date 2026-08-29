@@ -68,6 +68,11 @@ import {
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 
+// The SHARED stripper. A local copy is what `comment-scanner-burndown-ratchet`
+// forbids, and for exactly the reason above: a hand-rolled one gets its own
+// blind spots, and this file had them.
+import { stripComments } from "../../tests/unit/_shared/strip-comments"
+
 const REPO_ROOT = join(import.meta.dir, "..", "..")
 const MANIFEST = join(REPO_ROOT, "tools", "dev", "anti-vacuity-cases.json")
 const LEDGER = join(REPO_ROOT, "tools", "dev", "anti-vacuity-burndown.json")
@@ -184,7 +189,14 @@ export const importClosure = (entry: string): ReadonlySet<string> => {
     // pad a guard's kept-corpus until it crossed the overlap threshold and was
     // excused as UNSUPPORTED. Measured on the nearest live case: 244 comment
     // lines were enough.
-    const src = raw.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/.*$/gm, "$1")
+    // The SHARED stripper, quoting- and regex-literal-aware. The naive pair it
+    // replaces (block comments, then line comments) is defeated by a `/*` inside
+    // ordinary prose: `src/tool/index.ts` documents the globs `resources/*` and
+    // `prompts/*` in a LINE comment, which opened a block the scan closed 12,016
+    // characters later — deleting the re-export of `./mcp_tasks` along with the
+    // rest. Ten guards then died with `Cannot find module` before their first
+    // assertion and were counted as unjudgeable by the tool that broke them.
+    const src = stripComments(raw)
     const out: string[] = []
     // Anchored to a real import STATEMENT, not to the text `from "…"` anywhere.
     // A scanning guard quotes module specifiers inside its own assertions —
@@ -197,9 +209,17 @@ export const importClosure = (entry: string): ReadonlySet<string> => {
     // `@/agent/observation/metrics` re-exports `./failure-taxonomy` in a
     // multi-line block, so the closure kept the barrel but not what it pointed
     // at, and four guards died with `Cannot find module` before running.
-    // Bounded to 400 chars so an unterminated brace cannot swallow the file.
+    // The bound is a SEMICOLON, not a character count. A 400-char ceiling was the
+    // runaway guard, and it silently truncated every barrel longer than that:
+    // `src/apps/bench/harness/promax/index.ts` re-exports `./gate-run` after an
+    // 852-char specifier list, so the closure kept the barrel and not the module,
+    // and four guards died with `Cannot find module` before their first assertion.
+    // Measured across `src/`, the longest real import header is 5,295 chars. A
+    // specifier list cannot contain `;`, so excluding it bounds the match at the
+    // end of the statement however long the list is; the 8,000 ceiling is only a
+    // backstop for a file with no semicolons at all.
     for (const m of src.matchAll(
-      /^[ \t]*(?:import|export)\b(?:(?!\bfrom\b)[\s\S]){0,400}?\bfrom\s*["'`]([^"'`]+)["'`]/gm,
+      /^[ \t]*(?:import|export)\b(?:(?!\bfrom\b)[^;]){0,8000}?\bfrom\s*["'`]([^"'`]+)["'`]/gm,
     )) {
       out.push(m[1] ?? "")
     }
