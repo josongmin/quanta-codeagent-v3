@@ -11,7 +11,7 @@ modes: [headless, batch]
 configurable: n-a
 owners: ["@songmin"]
 labels: ["surface:cli"]
-depends_on: [assert-never-exhaustiveness, byte-stable-string-comparator, errors-helper-fix, llm-cost-emit-sink, memory-telemetry-adapter]
+depends_on: [assert-never-exhaustiveness, byte-stable-string-comparator, errors-helper-fix, memory-telemetry-adapter]
 surface_integration:
   cli: missing
   web: missing

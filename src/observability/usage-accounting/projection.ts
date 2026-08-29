@@ -8,6 +8,7 @@
  * exists to prevent, and the only durable fix is that there is one place where
  * a snapshot becomes numbers.
  */
+import { byteCompare } from "@/shared/byte-compare"
 import type { UsageAccountingSnapshot, UsageAggregate } from "./port"
 
 /** One model's line in a per-model breakdown, newest-heaviest first. */
@@ -61,7 +62,11 @@ const lineOf = (model: string, a: UsageAggregate): ModelCostLine => ({
 
 /** Project a snapshot into renderable numbers. Per-model lines are ordered by
  *  spend descending, then by model name, so the ordering is stable across
- *  renders and does not jitter as a session progresses. */
+ *  renders and does not jitter as a session progresses.
+ *
+ *  The name tiebreak is a BYTE compare, not `localeCompare`: locale/ICU
+ *  collation varies by machine, which would make the rendered order — and any
+ *  replay of it — machine-dependent. */
 export const costSurfaceView = (snap: UsageAccountingSnapshot): CostSurfaceView => ({
   totalUsd: snap.totalUsd,
   estimatedUsd: snap.estimatedUsd,
@@ -73,6 +78,6 @@ export const costSurfaceView = (snap: UsageAccountingSnapshot): CostSurfaceView 
   calls: snap.calls,
   byModel: [...snap.byModel]
     .map(([model, agg]) => lineOf(model, agg))
-    .sort((a, b) => b.totalUsd - a.totalUsd || a.model.localeCompare(b.model)),
+    .sort((a, b) => b.totalUsd - a.totalUsd || byteCompare(a.model, b.model)),
   byKind: { root: snap.byKind.root.totalUsd, subagent: snap.byKind.subagent.totalUsd },
 })

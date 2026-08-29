@@ -13,7 +13,7 @@ config_refs:
   env: [QUANTA_BENCH_LSP, QUANTA_BENCH_SUBAGENT, QUANTA_BENCH_SKILLS]
 owners: ["@songmin"]
 labels: ["surface:bench"]
-depends_on: [llm-cost-emit-sink, memory-telemetry-adapter, otel-span-tree]
+depends_on: [memory-telemetry-adapter, otel-span-tree]
 surface_integration:
   cli: na
   web: na

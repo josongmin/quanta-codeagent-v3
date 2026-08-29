@@ -11,7 +11,7 @@ modes: [n-a]
 configurable: partial
 owners: ["@songmin"]
 labels: ["surface:ipc"]
-depends_on: [assert-never-exhaustiveness, awf-tool-matcher, byte-stable-string-comparator, errors-helper-fix, llm-cost-emit-sink]
+depends_on: [assert-never-exhaustiveness, awf-tool-matcher, byte-stable-string-comparator, errors-helper-fix]
 surface_integration:
   cli: full
   web: na

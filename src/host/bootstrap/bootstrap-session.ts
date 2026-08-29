@@ -117,6 +117,26 @@ const buildSessionConfigPort = (cells: {
  *  seed images, startup logs, resume resolution, prompt state, session config
  *  port, and the MCP shutdown hook. This is the verbatim body of the inner
  *  `try` block; the caller wraps it in the MCP/proxy-cleanup `catch`. */
+/**
+ * Build the cost panel, handing it the authority ONLY when the knob says `on`.
+ *
+ * In `shadow` the authority still records — that is the point, so a
+ * reconciliation receipt can compare it against the legacy feed on real
+ * sessions — but nothing renders from it, so the panel keeps folding the
+ * counter delta and the user sees exactly what they saw before.
+ */
+const buildProjectingCostPanel = (
+  deps: SessionBootstrapDeps,
+  runtime: SessionRuntimeConfigShape,
+  featureCfg: SessionFeatureConfig,
+  usageAccounting: SessionBootstrapResult["usageAccounting"],
+): ReturnType<SessionBootstrapDeps["buildCostPanelOrUndefined"]> =>
+  deps.buildCostPanelOrUndefined(
+    featureCfg,
+    runtime.model,
+    usageAccountingIsAuthoritative(runtime.env) ? usageAccounting : undefined,
+  )
+
 /** Session teardown: stop the MCP fleet, THEN close the session egress proxy on
  *  the SAME hook (the proxy exists ONLY to gate those clients' children, so its
  *  lifetime is exactly the MCP fleet's — no-op when the proxy is OFF, byte-identical;
@@ -196,15 +216,7 @@ const assembleBootstrapResult = async (
     } = await buildPromptState(deps, runtime, cwd)
     const onShellEvent = deps.composeShellEvent(features.metrics, runtime.stdoutIsTTY)
     const workMetricsSink = deps.buildWorkMetricsSink(features.metrics !== undefined)
-    // MR-08 — the panel PROJECTS the authority only in `on`. In `shadow` the
-    // authority still records (so a receipt can compare it against the legacy
-    // feed on real sessions) but nothing renders from it, which is the whole
-    // point of having a mode between off and on.
-    const costPanel = deps.buildCostPanelOrUndefined(
-      featureCfg,
-      runtime.model,
-      usageAccountingIsAuthoritative(runtime.env) ? usageAccounting : undefined,
-    )
+    const costPanel = buildProjectingCostPanel(deps, runtime, featureCfg, usageAccounting)
     const branchProgress = deps.buildBranchProgressOrUndefined(featureCfg)
     const planStore = deps.buildPlanStoreOrUndefined(featureCfg)
     const sessionConfigPort = buildSessionConfigPort({

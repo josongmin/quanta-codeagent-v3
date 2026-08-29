@@ -522,6 +522,16 @@ export const HOST: readonly KnobInventoryEntry[] = [
     readSite: "host/bootstrap/bootstrap-session/tooling-bundle.ts",
   },
   {
+    envKey: "QUANTA_USAGE_ACCOUNTING_V2",
+    kind: "enum",
+    default: "off",
+    group: "host-gate",
+    home: "runtime-config",
+    describe:
+      "Usage-accounting authority: off (default) | shadow | on. `shadow` records into the authority while every surface keeps its existing feed, so a reconciliation receipt can compare the two on real sessions; `on` makes the cost surfaces project it. Unrecognized values degrade to off.",
+    readSite: "observability/usage-accounting/activation.ts",
+  },
+  {
     envKey: "QUANTA_BUDGET_LEDGER",
     kind: "bool",
     default: false,
