@@ -316,13 +316,30 @@ const NO_CONFIRM_SURFACE =
 /** Clip a proposed goal for the one-line approval dialog. */
 const clipGoal = (goal: string): string => (goal.length > 160 ? `${goal.slice(0, 157)}…` : goal)
 
+/** P3-7a — the EXECUTABLE half of a proposal, named in the approval summary.
+ *
+ *  A model-declared `check` is a command this machine later RUNS to decide the
+ *  goal is done, and today the verifier passes no sandbox policy of its own
+ *  (NEXT-PLAN P3-7). The operator was shown `Set goal: <text>` and nothing
+ *  else, so the one thing actually worth approving was invisible. Each argv is
+ *  rendered verbatim (clipped like the goal) — never summarised into a count,
+ *  which would hide exactly what matters. */
+const clipArgv = (argv: readonly string[]): string => clipGoal(argv.join(" "))
+
+const checkLines = (mutation: Extract<ModelObjectiveMutation, { kind: "create" }>): string =>
+  (mutation.definition.criteria ?? [])
+    .flatMap((criterion) =>
+      criterion.check === undefined ? [] : [`\n  runs: ${clipArgv(criterion.check.argv)}`],
+    )
+    .join("")
+
 /** RFC-03 C3 — build the operator-facing proposal from the closed mutation. */
 const buildApprovalRequest = (mutation: ModelObjectiveMutation): ObjectiveApprovalRequest => {
   if (mutation.kind === "create") {
     return {
       operation: "create",
       goal: mutation.definition.goal,
-      summary: `Set goal: ${clipGoal(mutation.definition.goal)}`,
+      summary: `Set goal: ${clipGoal(mutation.definition.goal)}${checkLines(mutation)}`,
     }
   }
   return { operation: mutation.kind, summary: `Objective ${mutation.kind}` }
