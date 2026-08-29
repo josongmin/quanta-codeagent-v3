@@ -326,15 +326,23 @@ describe("budget-ledger / E. LRU cap", () => {
     expect(l.snapshot().events).toBe(10)
   })
 
-  test("HELL-23: LRU drops OLDEST first (the surviving slice is the 5 newest)", () => {
+  test("HELL-23: LRU drops OLDEST first (the retained slice is the 5 newest)", () => {
+    // MR-05 — this test guards EVICTION ORDER. It used to read that order off
+    // `perSession`, which worked only while aggregates were recomputed from
+    // the retained slice. Aggregates are lifetime now (clause #6), so the
+    // retained log is where order is observable; `serialize()` emits exactly
+    // that slice. Both halves are asserted so the change is explicit rather
+    // than implied by a weakened assertion.
     const l = ledgerOf({ maxEvents: 5 })
     // Distinct sessions so we can verify which survived.
     for (let i = 0; i < 8; i++) {
       l.record(usageOf({ sessionId: `s-${i}`, at: 1_000_000 + i, inputTokens: 100_000 }))
     }
-    const sessions = [...l.snapshot().perSession.keys()].sort()
-    // Sessions 3..7 should be the survivors (oldest 0,1,2 dropped).
-    expect(sessions).toEqual(["s-3", "s-4", "s-5", "s-6", "s-7"])
+    const retained = (JSON.parse(l.serialize()) as { events: { sessionId: string }[] }).events
+    expect(retained.map((e) => e.sessionId)).toEqual(["s-3", "s-4", "s-5", "s-6", "s-7"])
+    // …and the spend of the evicted three is still on the books.
+    expect([...l.snapshot().perSession.keys()].sort()).toHaveLength(8)
+    expect(l.snapshot().events).toBe(5)
   })
 })
 

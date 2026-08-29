@@ -49,6 +49,23 @@ export const childDepthOf = (parent: Pick<AgentConfig, "depth">): number => {
   return d + 1
 }
 
+/**
+ * Is this config the run's ROOT agent, or a spawned descendant?
+ *
+ * One rule, one place. `depth` is assigned at spawn (`childDepthOf`) and
+ * persisted, so it survives a resume — a rehydrated child this process never
+ * spawned still answers correctly, which is why the question is asked of depth
+ * and not of anything more incidental like the presence of a mailbox id.
+ *
+ * Two call sites depend on agreeing exactly: usage provenance (which agent
+ * spent this) and the run's turn accounting (only root turns advance the run's
+ * turn count and reset its per-turn cost guard). They were separate copies of
+ * `depth > 0` until the second one shipped; a shared predicate is what keeps a
+ * later change from moving one and not the other.
+ */
+export const isRootAgent = (config: Pick<AgentConfig, "depth">): boolean =>
+  (config.depth ?? 0) === 0
+
 /** The two derived predicates (§4.2), both reading the SAME session cap
  *  `maxDescendantDepth` (= the max descendant depth a spawn may create), so the
  *  exposure gate and the runtime admission never diverge in a static policy:

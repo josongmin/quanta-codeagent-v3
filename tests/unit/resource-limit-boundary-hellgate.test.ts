@@ -199,18 +199,32 @@ describe("D. BudgetLedger.maxEvents boundary", () => {
     expect(l.snapshot().events).toBe(4)
   })
 
-  test("D11: record maxEvents + 1 → snapshot.events = maxEvents; aggregations re-folded without oldest", () => {
+  test("D11: record maxEvents + 1 → snapshot.events = maxEvents; SPEND is not evicted", () => {
+    // MR-05 — this test used to assert the evicted model DISAPPEARED from the
+    // breakdown, because aggregates were recomputed from the retained slice.
+    // That is the behaviour ledger contract clause #6 now supersedes: bounding
+    // the event log must not un-bill spend, since the same aggregates are what
+    // breach thresholds are compared against, and a cap compared to a shrinking
+    // total can be crossed without ever firing.
+    //
+    // What D11 still guards is the BOUNDARY: the retained count stops at
+    // maxEvents. The cost half is now asserted the other way round.
     const l = defaultBudgetLedger({ maxEvents: 4 })
-    // First event has a DISTINCT model so we can detect its disappearance.
+    // First event has a DISTINCT model so we can follow it across eviction.
     l.record(usageOf({ model: "gpt-5", at: 1_700_000_000_000 }))
     for (let i = 1; i < 5; i++) {
       l.record(usageOf({ model: "claude-opus-4-7", at: 1_700_000_000_000 + i }))
     }
     const snap = l.snapshot()
-    expect(snap.events).toBe(4)
-    // The first (gpt-5) event was evicted; the perModel map should NOT carry it.
-    expect(snap.perModel.has("gpt-5")).toBe(false)
+    expect(snap.events).toBe(4) // the retained window really is capped
+    // …and the evicted event's spend is still on the books, under its own model.
+    expect(snap.perModel.has("gpt-5")).toBe(true)
     expect(snap.perModel.has("claude-opus-4-7")).toBe(true)
+    expect(snap.totalCost).toBeCloseTo(
+      (snap.perModel.get("gpt-5")?.totalCost ?? 0) +
+        (snap.perModel.get("claude-opus-4-7")?.totalCost ?? 0),
+      9,
+    )
   })
 
   test("D12: maxEvents = 1 → single event lifecycle", () => {

@@ -1,6 +1,5 @@
 import type { LLMPort, StreamEvent, ToolChoice } from "@/llm"
 import { applyMeasuredUsageLimit } from "@/objective"
-import { costUsd } from "@/observability"
 import { MODEL_RATE_CARD, PRICING_VERSION } from "@/observability/pricing"
 import {
   type NormalizedUsage,
@@ -15,6 +14,7 @@ import type { BudgetBreach } from "../budget-ledger"
 import type { CancelSubagentOutcome, ResponseQueuedReason } from "../control-op-handler"
 import type { AgentRecorder } from "../metrics"
 import type { RecoveryReason } from "../recovery"
+import { isRootAgent } from "../spawn-depth"
 import type { AgentConfig } from "../types"
 import type { TurnWorkMetricsCollector } from "../work-metrics-collector"
 
@@ -24,15 +24,16 @@ import type { TurnWorkMetricsCollector } from "../work-metrics-collector"
 export { isSessionApprovalRequiredError } from "../dispatch-helpers"
 
 /** The priced context one usage event is fanned out to every downstream sink
- *  with. `eventCostUsd` is priced ONCE here (pricing SSOT) and shared so no sink
- *  re-prices; `null` ⇒ unpriced model (cost tick skipped). */
+ *  with. `eventCost` is priced ONCE here through the single formula and shared,
+ *  so no sink re-prices — and no two sinks can reach different totals for the
+ *  same event, which is exactly what used to happen when the meter read one
+ *  implementation and the ledger another. */
 type UsageSinkCtx = {
   readonly config: AgentConfig
   readonly ev: Extract<StreamEvent, { type: "usage" }>
   readonly recorder: AgentRecorder | undefined
   readonly collector: TurnWorkMetricsCollector | undefined
   readonly taskSpend: { tokens: number } | undefined
-  readonly eventCostUsd: number | null
   /** ALBB-21 — a single-slot handoff between the L4 record sink (producer) and
    *  the budget-breach advisory sink (consumer). The record sink writes the
    *  ledger's returned breach list here; the later advisory sink reads it and
@@ -48,13 +49,8 @@ type UsageSinkCtx = {
   /** MR-03 — the same usage in canonical disjoint buckets. Normalized ONCE
    *  here so no sink re-derives it (and re-derives it differently). */
   readonly normalized: NormalizedUsage
-  /**
-   * MR-03 — the itemized cost of {@link normalized}, priced through the single
-   * formula. Deliberately SEPARATE from `eventCostUsd` for now: that value
-   * feeds the budget meter and must keep its exact current behaviour (it has
-   * never included cache-write), so collapsing the two is MR-05's job, done
-   * with the meter's tests in hand rather than as a side effect here.
-   */
+  /** The itemized cost of {@link normalized}. Every sink that needs a dollar
+   *  figure reads THIS one. */
   readonly eventCost: UsageCost
 }
 
@@ -93,10 +89,19 @@ const USAGE_SINKS: readonly UsageSink[] = [
   // the cap stays a no-op rather than billing $0 falsely. `maxCostUsd` is only
   // set on autonomous modes (batch/daemon/ci-bot); interactive accrues but never
   // gates (human-paced, by design).
-  ({ config, ev, eventCostUsd }) => {
+  ({ config, ev, eventCost }) => {
     config.budgetMeter?.tick("input_tokens", ev.inputTokens)
     config.budgetMeter?.tick("output_tokens", ev.outputTokens)
-    if (eventCostUsd !== null) config.budgetMeter?.tick("cost_usd", eventCostUsd)
+    // MR-05 — the meter now ticks the SAME priced figure the accountant records,
+    // which is the whole point of there being one formula. Two consequences,
+    // both deliberate:
+    //   - cache-WRITE is now billed to the meter. `costUsd` has no parameter
+    //     for it, so every cache-creation token used to be free to the cost
+    //     cap while the ledger billed it — an autonomous run could exceed its
+    //     ceiling by whatever it spent warming caches.
+    //   - an unpriced model still skips the tick rather than billing $0, so an
+    //     unknown model leaves the cap inert instead of falsely reassuring it.
+    if (eventCost.pricingKnown) config.budgetMeter?.tick("cost_usd", eventCost.totalUsd)
   },
   // L4 cross-run cost ledger (default-OFF: no `budgetLedger` ⇒ no-op). Maps the
   // provider's cache-CREATION tokens onto the ledger's cache-write bucket (which
@@ -220,7 +225,7 @@ const provenanceOf = (config: AgentConfig): UsageProvenance => {
   return {
     sessionId: config.sessionId ?? "",
     agentId: config.mailboxAgentId ?? "root",
-    agentKind: depth > 0 ? "subagent" : "root",
+    agentKind: isRootAgent(config) ? "root" : "subagent",
     depth,
     ...(config.mailboxParentId !== undefined ? { parentAgentId: config.mailboxParentId } : {}),
   }
@@ -250,7 +255,6 @@ export const emitUsage = (
     collector,
     taskSpend,
     // Priced once via the pricing SSOT (the only place `ev.model` is available).
-    eventCostUsd: costUsd(ev.model, ev.inputTokens, ev.outputTokens, ev.cacheReadTokens ?? 0),
     // ALBB-21 — fresh per-event breach handoff slot (record sink writes, advisory
     // sink reads). Starts empty so the advisory sink is a no-op when no cap crosses.
     breachSlot: { breaches: [] },

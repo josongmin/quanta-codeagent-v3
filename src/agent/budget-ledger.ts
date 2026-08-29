@@ -54,13 +54,21 @@
  *      session can re-fire breaches. Documented in the ADR's "Alternatives
  *      rejected" — repeating-on-every-record was rejected (noise; the loop
  *      decides whether to re-emit).
- *   6. LRU eviction: when the retained event count exceeds `maxEvents`, the
- *      OLDEST events drop. Aggregates (`perModel`, `perSession`, `perDay`)
- *      are recomputed from the RETAINED slice — they DECREASE as events
- *      drop. This is intentional: a long-running session that wraps past
- *      `maxEvents` reflects only the live window. Callers that need
- *      lifetime totals must either raise the cap or persist via
- *      `serialize()` BEFORE eviction (documented in clause #7).
+ *   6. LRU eviction bounds MEMORY, not the accounting (MR-05, superseding the
+ *      original clause). When the retained event count exceeds `maxEvents`
+ *      the OLDEST events drop out of the log, and every aggregate
+ *      (`totalCost`, `perModel`, `perSession`, `perDay`) keeps its LIFETIME
+ *      value. `snapshot().events` reports what is retained — the drill-down
+ *      window — so the two remain distinguishable.
+ *
+ *      The original contract recomputed aggregates from the retained slice
+ *      and called the resulting decrease intentional. It was not survivable:
+ *      a session that had really spent $30 reported $12 once eviction
+ *      started, and because breach thresholds are compared against those
+ *      same aggregates, a hard ceiling could be crossed with NO breach at
+ *      all — the crossing evidence had been dropped before the comparison.
+ *      A run past its cost ceiling kept spending. Bounding a log must never
+ *      be able to un-bill spend or un-trip a limit.
  *   7. HYDRATE SAFETY: `hydrate` with non-JSON / wrong-shape input resets
  *      the ledger to empty and SILENTLY returns. Document the trade-off:
  *      we prefer a known-empty state to a thrown error on a corrupt disk
@@ -72,6 +80,7 @@
  *      reproducible across machines and matches typical billing windows.
  */
 
+import { normalizeUsage } from "@/observability/usage-accounting"
 import { DEFAULT_MODEL_PRICING, type ModelPricing } from "./budget-ledger-pricing"
 
 export { DEFAULT_MODEL_PRICING, type ModelPricing } from "./budget-ledger-pricing"
@@ -160,6 +169,18 @@ export interface BudgetPolicy {
 export interface RecordResult {
   readonly cost: number
   readonly breaches: ReadonlyArray<BudgetBreach>
+  /**
+   * MR-05 — `false` when the event's model had no rate-card entry and the
+   * stand-in rate was used (clause #4's fail-safe-LOUD fallback).
+   *
+   * The fallback itself stays: unpriced spend that renders as $0 or vanishes
+   * is worse than an estimate, and two hellgates deliberately pin that. What
+   * was missing is that the estimate was INDISTINGUISHABLE from a measurement
+   * — a $18 guess and a $18 measurement came back identical, so no surface
+   * could mark one as approximate. This flag is that distinction, and nothing
+   * more: it does not change a single dollar.
+   */
+  readonly pricingKnown: boolean
 }
 
 /** Public ledger surface. */
@@ -239,6 +260,19 @@ interface SerializedLedger {
   readonly firedBreaches: ReadonlyArray<string>
 }
 
+/** Fold one event's cost into a running aggregate keyed by model. */
+const foldInto = (agg: MutableCost, cost: MutableCost): void => {
+  agg.inputCost += cost.inputCost
+  agg.outputCost += cost.outputCost
+  agg.cacheReadCost += cost.cacheReadCost
+  agg.cacheWriteCost += cost.cacheWriteCost
+  agg.totalCost += cost.totalCost
+  agg.inputTokens += cost.inputTokens
+  agg.outputTokens += cost.outputTokens
+  agg.cacheReadTokens += cost.cacheReadTokens
+  agg.cacheWriteTokens += cost.cacheWriteTokens
+}
+
 /** Internal: empty cost line for the running aggregator. Mutable so the
  *  aggregator can `+=` into it; we freeze before exposing externally. */
 type MutableCost = {
@@ -314,55 +348,43 @@ const emptyCost = (model: string): MutableCost => ({
 })
 
 /** Compute the per-event cost using the resolved pricing (with fallback). */
+const positive = (n: number | undefined): number =>
+  n !== undefined && Number.isFinite(n) && n > 0 ? n : 0
+
+/**
+ * MR-05 — normalize BEFORE pricing, so the ledger and every other cost path
+ * apply the same provider rule.
+ *
+ * The ledger used to add cache reads on top of the reported input for every
+ * provider. That is right for Anthropic, whose `input_tokens` excludes them,
+ * and wrong for OpenAI, whose `prompt_tokens` already contains them — so one
+ * gpt-5.4 call with cache reads cost $2.60 here and $1.60 on the pricing path
+ * the budget meter reads, inside a single `emitUsage`. Normalizing first makes
+ * the buckets disjoint for both providers and leaves this function with
+ * nothing provider-specific left to get wrong.
+ *
+ * `inputTokens` in the breakdown is now the FRESH input; for Anthropic that is
+ * unchanged, and for OpenAI it no longer double-counts the cached portion.
+ */
 const computeEventCost = (event: UsageEvent, pricing: ModelPricing): MutableCost => {
   const c = emptyCost(event.model)
-  c.inputTokens =
-    Number.isFinite(event.inputTokens) && event.inputTokens > 0 ? event.inputTokens : 0
-  c.outputTokens =
-    Number.isFinite(event.outputTokens) && event.outputTokens > 0 ? event.outputTokens : 0
-  c.cacheReadTokens =
-    event.cacheReadTokens !== undefined &&
-    Number.isFinite(event.cacheReadTokens) &&
-    event.cacheReadTokens > 0
-      ? event.cacheReadTokens
-      : 0
-  c.cacheWriteTokens =
-    event.cacheWriteTokens !== undefined &&
-    Number.isFinite(event.cacheWriteTokens) &&
-    event.cacheWriteTokens > 0
-      ? event.cacheWriteTokens
-      : 0
+  const n = normalizeUsage({
+    model: event.model,
+    inputTokens: event.inputTokens,
+    outputTokens: event.outputTokens,
+    ...(event.cacheReadTokens !== undefined ? { cacheReadTokens: event.cacheReadTokens } : {}),
+    ...(event.cacheWriteTokens !== undefined ? { cacheWriteTokens: event.cacheWriteTokens } : {}),
+  })
+  c.inputTokens = positive(n.freshInputTokens)
+  c.outputTokens = positive(n.outputTokens)
+  c.cacheReadTokens = positive(n.cacheReadTokens)
+  c.cacheWriteTokens = positive(n.cacheWriteTokens)
   c.inputCost = tokensToUsd(c.inputTokens, pricing.inputPerM)
   c.outputCost = tokensToUsd(c.outputTokens, pricing.outputPerM)
   c.cacheReadCost = tokensToUsd(c.cacheReadTokens, pricing.cacheReadPerM)
   c.cacheWriteCost = tokensToUsd(c.cacheWriteTokens, pricing.cacheWritePerM)
   c.totalCost = c.inputCost + c.outputCost + c.cacheReadCost + c.cacheWriteCost
   return c
-}
-
-/** Fold one event's cost into a running aggregate keyed by model. */
-const foldInto = (agg: MutableCost, cost: MutableCost): void => {
-  agg.inputCost += cost.inputCost
-  agg.outputCost += cost.outputCost
-  agg.cacheReadCost += cost.cacheReadCost
-  agg.cacheWriteCost += cost.cacheWriteCost
-  agg.totalCost += cost.totalCost
-  agg.inputTokens += cost.inputTokens
-  agg.outputTokens += cost.outputTokens
-  agg.cacheReadTokens += cost.cacheReadTokens
-  agg.cacheWriteTokens += cost.cacheWriteTokens
-}
-
-const unfoldFrom = (agg: MutableCost, cost: MutableCost): void => {
-  agg.inputCost -= cost.inputCost
-  agg.outputCost -= cost.outputCost
-  agg.cacheReadCost -= cost.cacheReadCost
-  agg.cacheWriteCost -= cost.cacheWriteCost
-  agg.totalCost -= cost.totalCost
-  agg.inputTokens -= cost.inputTokens
-  agg.outputTokens -= cost.outputTokens
-  agg.cacheReadTokens -= cost.cacheReadTokens
-  agg.cacheWriteTokens -= cost.cacheWriteTokens
 }
 
 const AGGREGATE_EPSILON = 1e-12
@@ -526,6 +548,9 @@ const ledgerTables = (opts?: BudgetLedgerOpts) => {
   const mut = {
     start: 0,
     totalCost: 0,
+    /** Events dropped from the retained log. Non-zero ⇒ the log is no longer
+     *  the full history, so nothing may be rebuilt FROM it. */
+    evicted: 0,
   }
   const policy = opts?.policy ?? {}
   const pricingOverride = opts?.pricing ?? {}
@@ -548,6 +573,7 @@ const ledgerTables = (opts?: BudgetLedgerOpts) => {
   const perDay = new Map<string, MutableCost>()
 
   const resolvePricing = (model: string): ModelPricing => pricing[model] ?? safeFallback
+  const pricingIsKnown = (model: string): boolean => pricing[model] !== undefined
 
   const activeLength = (): number => events.length - mut.start
   return {
@@ -557,6 +583,7 @@ const ledgerTables = (opts?: BudgetLedgerOpts) => {
     pricingOverride,
     maxEvents,
     pricing,
+    pricingIsKnown,
     fallback,
     safeFallback,
     events,
@@ -598,25 +625,6 @@ const ledgerBuckets = (ctx: ReturnType<typeof ledgerTables>) => {
     foldInto(ensureBucket(perDay, entry.dayKey, entry.event.model), entry.cost)
   }
 
-  const removeEntry = (entry: RetainedEvent): void => {
-    mut.totalCost -= entry.cost.totalCost
-    const modelAgg = perModel.get(entry.event.model)
-    if (modelAgg !== undefined) {
-      unfoldFrom(modelAgg, entry.cost)
-      maybeDropBucket(perModel, entry.event.model, modelAgg)
-    }
-    const sessionAgg = perSession.get(entry.event.sessionId)
-    if (sessionAgg !== undefined) {
-      unfoldFrom(sessionAgg, entry.cost)
-      maybeDropBucket(perSession, entry.event.sessionId, sessionAgg)
-    }
-    const dayAgg = perDay.get(entry.dayKey)
-    if (dayAgg !== undefined) {
-      unfoldFrom(dayAgg, entry.cost)
-      maybeDropBucket(perDay, entry.dayKey, dayAgg)
-    }
-  }
-
   const compactPrefixIfNeeded = (): void => {
     if (mut.start === 0) return
     // Wait until the dead prefix is meaningfully amortized before shifting the
@@ -637,6 +645,25 @@ const ledgerBuckets = (ctx: ReturnType<typeof ledgerTables>) => {
     return entry.cost
   }
 
+  /** Remove ONE scope's lifetime aggregate from the running totals. Used only
+   *  by a scoped `clear` after eviction, where a rebuild is no longer safe. */
+  const dropScopeAggregate = (scope: { session?: string; day?: string }): void => {
+    if (scope.session !== undefined) {
+      const agg = perSession.get(scope.session)
+      if (agg !== undefined) {
+        mut.totalCost -= agg.totalCost
+        perSession.delete(scope.session)
+      }
+    }
+    if (scope.day !== undefined) {
+      const agg = perDay.get(scope.day)
+      if (agg !== undefined) {
+        mut.totalCost -= agg.totalCost
+        perDay.delete(scope.day)
+      }
+    }
+  }
+
   const resetState = (): void => {
     events.length = 0
     mut.start = 0
@@ -649,7 +676,7 @@ const ledgerBuckets = (ctx: ReturnType<typeof ledgerTables>) => {
     ensureBucket,
     maybeDropBucket,
     applyEntry,
-    removeEntry,
+    dropScopeAggregate,
     compactPrefixIfNeeded,
     pushEvent,
     resetState,
@@ -669,7 +696,6 @@ const ledgerViews = (ctx: ReturnType<typeof ledgerTables> & ReturnType<typeof le
     perSession,
     perDay,
     activeLength,
-    removeEntry,
     compactPrefixIfNeeded,
   } = ctx
 
@@ -689,12 +715,24 @@ const ledgerViews = (ctx: ReturnType<typeof ledgerTables> & ReturnType<typeof le
     })
   }
 
+  /**
+   * MR-05 — drop the OLDEST retained events past the cap, and leave every
+   * aggregate alone.
+   *
+   * This used to unfold each evicted event out of the running totals, which
+   * meant retention was applied to the ACCOUNTING and not just to the log: a
+   * session that really spent $30 reported $12 once eviction started, and a
+   * $20 hard ceiling never fired because the cap was compared against the
+   * shrunken total. A run that had crossed its cost ceiling kept spending.
+   *
+   * `maxEvents` now bounds memory only. `snapshot().events` still reports what
+   * is RETAINED — the drill-down window — while the costs are lifetime.
+   */
   const evictIfOver = (): void => {
     while (activeLength() > maxEvents) {
-      const evicted = events[mut.start]
-      if (evicted === undefined) break
-      removeEntry(evicted)
+      if (events[mut.start] === undefined) break
       mut.start += 1
+      mut.evicted += 1
     }
     compactPrefixIfNeeded()
   }
@@ -751,6 +789,7 @@ const recordOps = (ctx: LedgerCtx): Pick<BudgetLedger, "record" | "snapshot" | "
     perSession,
     perDay,
     pushEvent,
+    pricingIsKnown,
     buildSnapshot,
     evictIfOver,
     checkBreaches,
@@ -763,14 +802,16 @@ const recordOps = (ctx: LedgerCtx): Pick<BudgetLedger, "record" | "snapshot" | "
       // matches the no-op `breaches: []` posture (ADR-0162 contract: the
       // 2-field shape is REQUIRED on every return, even the swallow path).
       if (typeof event?.model !== "string" || typeof event?.sessionId !== "string") {
-        return { cost: 0, breaches: [] }
+        // A malformed event was never priced at all, so it is not a known
+        // price — the honest answer, not a convenient default.
+        return { cost: 0, breaches: [], pricingKnown: false }
       }
       // Compute cost BEFORE pushing so the per-event histogram label is
       // the event's own model (same pricing resolution path the aggregator
       // takes, including the safe-LOUD unknown-model fallback).
       const cost = pushEvent(event).totalCost
       evictIfOver()
-      return { cost, breaches: checkBreaches(event) }
+      return { cost, breaches: checkBreaches(event), pricingKnown: pricingIsKnown(event.model) }
     },
 
     snapshot() {
@@ -810,6 +851,7 @@ const stateOps = (ctx: LedgerCtx): Pick<BudgetLedger, "clear" | "serialize" | "h
     fired,
     activeLength,
     applyEntry,
+    dropScopeAggregate,
     pushEvent,
     resetState,
     evictIfOver,
@@ -826,11 +868,30 @@ const stateOps = (ctx: LedgerCtx): Pick<BudgetLedger, "clear" | "serialize" | "h
       const active = events.slice(mut.start)
       const survivors = clearScoped(active, fired, scope)
       const removed = active.length - survivors.length
-      resetState()
-      for (const entry of survivors) {
-        events.push(entry)
-        applyEntry(entry)
+      // Nothing evicted ⇒ the retained log IS the whole history, so rebuilding
+      // from the survivors is exact and every cross-scope breakdown stays right.
+      if (mut.evicted === 0) {
+        resetState()
+        for (const entry of survivors) {
+          events.push(entry)
+          applyEntry(entry)
+        }
+        return removed
       }
+      // Once anything has been evicted, rebuilding would silently discard every
+      // OTHER scope's evicted spend — reintroducing through `clear` exactly the
+      // loss that eviction no longer causes. So drop the cleared scope's own
+      // lifetime aggregate and leave the rest standing.
+      //
+      // The honest limit: the cleared scope's contribution to the OTHER
+      // breakdowns (`perModel`, and the opposite scope axis) cannot be unwound,
+      // because the events backing it may be gone. A scoped clear resets that
+      // scope's ledger and its breach memory; it is not a retroactive
+      // un-billing across every axis.
+      dropScopeAggregate(scope)
+      events.length = 0
+      mut.start = 0
+      for (const entry of survivors) events.push(entry)
       return removed
     },
 

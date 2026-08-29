@@ -32,8 +32,13 @@
  *     ⇒ "an unknown model is never silently priced" REDs.
  */
 import { describe, expect, test } from "bun:test"
+import { BudgetMeter } from "@/agent/budget/meter"
 import { defaultBudgetLedger } from "@/agent/budget-ledger"
-import { costUsd, MODEL_RATE_CARD } from "@/observability/pricing"
+import { emitUsage } from "@/agent/loop/emit-helpers"
+import type { AgentConfig } from "@/agent/types"
+import type { StreamEvent as LlmStreamEvent } from "@/llm"
+import { costUsd, MODEL_RATE_CARD, PRICING_VERSION } from "@/observability/pricing"
+import { normalizeUsage, priceUsage } from "@/observability/usage-accounting"
 
 /** Price one usage shape through the LEDGER formula, isolated per call so no
  *  aggregate or breach memory leaks between cases. */
@@ -88,36 +93,72 @@ describe("RED #4 — one usage record must cost the same on every pricing path",
 })
 
 describe("RED #5 — cache-write tokens are billed, and billed once", () => {
-  test("cache-write is billed identically on both pricing paths", () => {
-    // sonnet: cacheWritePerM $3.75 ⇒ 100k cache-write = $0.375. The ledger
-    // charges it; `costUsd` cannot even express it (no parameter), so it
-    // reports $0 for usage that really costs money.
+  /**
+   * SCOPE CORRECTION (recorded deliberately). The first draft asked `costUsd`
+   * and the ledger to agree on cache-write. `costUsd` has no cache-write
+   * PARAMETER — it is a four-argument total-cost wrapper — so that draft
+   * demanded something its signature cannot express, and "fixing" it would
+   * have meant changing a compatibility shim's contract to satisfy a test.
+   *
+   * The real defect was one layer down and genuinely live: `emitUsage` priced
+   * the budget meter through `costUsd`, so every cache-creation token was FREE
+   * to the run's cost ceiling while the ledger billed it. An autonomous run
+   * could walk past its cap by however much it spent warming caches. That is
+   * what these tests hold now.
+   */
+  test("the unified formula bills cache-write, and the ledger agrees with it", () => {
+    // sonnet cacheWritePerM $3.75 ⇒ 100k = $0.375.
     const shape = {
       model: "claude-sonnet-4-6",
       inputTokens: 0,
       outputTokens: 0,
       cacheWriteTokens: 100_000,
     }
-    expect(ledgerCost(shape)).toBeCloseTo(0.375, 9) // the truth, priced by the card
-    expect(observabilityCost(shape)).toBeCloseTo(0.375, 9) // REDs: costUsd has no cacheWrite arg
+    const usage = normalizeUsage(shape)
+    const priced = priceUsage(usage, MODEL_RATE_CARD, { pricingVersion: PRICING_VERSION })
+    expect(priced.cacheWriteUsd).toBeCloseTo(0.375, 9)
+    expect(ledgerCost(shape)).toBeCloseTo(priced.totalUsd, 9)
   })
 
-  test("every model carrying a cache-write rate can express cache-write cost", () => {
-    const unpriceable: string[] = []
-    for (const [model, rate] of Object.entries(MODEL_RATE_CARD)) {
-      if (rate.cacheWritePerM === undefined) continue
-      const withWrite = ledgerCost({
-        model,
+  test("the run's cost ceiling sees cache-write", () => {
+    // Driven through the shipped fan-out: if the meter is priced by anything
+    // that cannot express cache-write, this is 0 and a cap never notices.
+    const meter = new BudgetMeter({})
+    const config = {
+      llm: { stream: async function* () {} },
+      registry: { get: () => undefined, specs: () => [], isReadOnly: () => true },
+      stream: { emit: () => undefined },
+      permission: { mode: "acceptEdits" },
+      messages: [],
+      system: "t",
+      cwd: process.cwd(),
+      maxTurns: 1,
+      signal: new AbortController().signal,
+      sessionId: "s",
+      budgetMeter: meter,
+    } as unknown as AgentConfig
+
+    emitUsage(
+      config,
+      {
+        type: "usage",
+        model: "claude-sonnet-4-6",
         inputTokens: 0,
         outputTokens: 0,
-        cacheWriteTokens: 1_000_000,
-      })
-      const viaObservability = observabilityCost({ model, inputTokens: 0, outputTokens: 0 })
-      if (round(withWrite) !== round(viaObservability ?? -1)) {
-        unpriceable.push(`${model}: ledger=${withWrite} observability=${viaObservability}`)
-      }
-    }
-    expect(unpriceable).toEqual([])
+        cacheCreationTokens: 100_000,
+      } as Extract<LlmStreamEvent, { type: "usage" }>,
+      undefined,
+      undefined,
+      undefined,
+    )
+    expect(meter.snapshot().costUsd).toBeCloseTo(0.375, 9)
+  })
+
+  // PAIRED CONTROL — a provider that does not bill cache creation stays at $0,
+  // so the fix cannot be "bill everyone for cache-write".
+  test("PAIRED CONTROL: a provider with no cache-write rate bills $0 (must stay green)", () => {
+    const shape = { model: "gpt-5.4", inputTokens: 0, outputTokens: 0, cacheWriteTokens: 100_000 }
+    expect(ledgerCost(shape)).toBe(0)
   })
 })
 

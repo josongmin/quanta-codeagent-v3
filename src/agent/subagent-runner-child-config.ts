@@ -265,6 +265,13 @@ const buildChildInheritedConfig = (
     // spend has to land in the same counters as its parent's, or the parent's
     // totals stay correct-looking and short by the whole child.
     ...(parent.usageAccounting !== undefined ? { usageAccounting: parent.usageAccounting } : {}),
+    // MR-05 — the run's cost ceiling and the cross-run ledger are SHARED too.
+    // Left un-inherited, a run could exceed its `maxCostUsd` simply by doing
+    // the spending inside a subagent, and the ledger's daily cap had the same
+    // hole. Turn-scoped meter semantics stay with the root (see
+    // `turn-iteration`), so sharing the meter shares spend, not turn boundaries.
+    ...(parent.budgetMeter !== undefined ? { budgetMeter: parent.budgetMeter } : {}),
+    ...(parent.budgetLedger !== undefined ? { budgetLedger: parent.budgetLedger } : {}),
     mailboxAgentId: mailboxIds.agentId,
     mailboxParentId: mailboxIds.parentId,
     ...(req.taskId !== undefined ? { subagentTaskId: req.taskId } : {}),

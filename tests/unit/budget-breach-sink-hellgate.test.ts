@@ -24,9 +24,14 @@ import type { AgentEvent } from "@/stream"
 
 /** A ledger stub whose `record` returns a scripted `RecordResult`. Every other
  *  method is an inert guard — the sink must consult ONLY `record`'s return. */
-const ledgerReturning = (result: RecordResult): BudgetLedger =>
+/** MR-05 — `RecordResult` now states whether the model's own rates were used.
+ *  These doubles are exercising the BREACH sink, so they default to a priced
+ *  model; the flag is supplied here rather than made optional on the contract,
+ *  because "was this a measurement or an estimate" is something every real
+ *  record can answer. */
+const ledgerReturning = (result: Omit<RecordResult, "pricingKnown">): BudgetLedger =>
   ({
-    record: (): RecordResult => result,
+    record: (): RecordResult => ({ ...result, pricingKnown: true }),
     snapshot: () => {
       throw new Error("snapshot must not be called by the sink")
     },

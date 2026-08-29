@@ -41,6 +41,10 @@
  */
 import { describe, expect, test } from "bun:test"
 import { type BudgetLedgerOpts, defaultBudgetLedger, type UsageEvent } from "@/agent/budget-ledger"
+import { emitUsage } from "@/agent/loop/emit-helpers"
+import { buildChildConfig } from "@/agent/subagent-runner-child-config"
+import type { AgentConfig } from "@/agent/types"
+import type { StreamEvent as LlmStreamEvent } from "@/llm"
 
 const SONNET_INPUT_PER_M = 3 // $3/M in — one event below is exactly $3.
 const EVENT_COST = 3
@@ -110,26 +114,96 @@ describe("RED #7 — retention bounds memory, never the accounting", () => {
   })
 })
 
-describe("RED #2 — spend is attributable to the agent that incurred it", () => {
-  test("spend is attributable to the agent that incurred it", () => {
-    // A root turn and a subagent turn, same session. Today `UsageEvent` has no
-    // field to tell them apart, so this cast documents the shape MR-02 adds —
-    // and the snapshot has no per-agent rollup to read it back from.
-    const ledger = defaultBudgetLedger()
-    ledger.record({ ...event(0), agentId: "root", agentKind: "root" } as UsageEvent)
-    ledger.record({ ...event(1), agentId: "child-1", agentKind: "subagent" } as UsageEvent)
+describe("a scoped clear cannot un-bill a scope it was not asked to clear", () => {
+  const spendIn = (ledger: ReturnType<typeof defaultBudgetLedger>, session: string, n: number) => {
+    for (let i = 0; i < n; i++) ledger.record(event(i, { sessionId: session }))
+  }
 
-    const snap = ledger.snapshot() as ReturnType<typeof ledger.snapshot> & {
-      perAgent?: ReadonlyMap<string, { totalCost: number }>
-    }
-    expect(snap.totalCost).toBe(2 * EVENT_COST) // both events are billed to the session
-    // REDs: `perAgent` does not exist — subagent spend cannot be separated out.
-    expect(snap.perAgent?.get("child-1")?.totalCost).toBe(EVENT_COST)
-    expect(snap.perAgent?.get("root")?.totalCost).toBe(EVENT_COST)
+  test("clearing one session leaves another session's evicted spend on the books", () => {
+    // The hazard this closes: with aggregates now lifetime, rebuilding them
+    // from the retained survivors — which is what a scoped clear used to do —
+    // would silently drop every OTHER scope's evicted spend, putting the loss
+    // back in through `clear` after eviction stopped causing it.
+    const ledger = defaultBudgetLedger({ maxEvents: 3 })
+    spendIn(ledger, "keep", 6) // $18, mostly evicted
+    ledger.record(event(99, { sessionId: "drop" })) // $3
+    expect(ledger.snapshot().totalCost).toBeCloseTo(21, 9)
+
+    ledger.clear({ session: "drop" })
+    expect(ledger.snapshot().perSession.get("keep")?.totalCost).toBeCloseTo(18, 9)
+    expect(ledger.snapshot().totalCost).toBeCloseTo(18, 9)
   })
 
-  // PAIRED CONTROL — session-level rollup already works, so the RED above is
-  // about the MISSING agent dimension, not about recording at all.
+  // PAIRED CONTROL — with nothing evicted the retained log IS the full history,
+  // so the exact rebuild still runs and the cleared scope leaves no residue in
+  // the cross-scope breakdowns either.
+  test("PAIRED CONTROL: with no eviction a scoped clear is exact (must stay green)", () => {
+    const ledger = defaultBudgetLedger()
+    spendIn(ledger, "keep", 2) // $6
+    ledger.record(event(99, { sessionId: "drop" })) // $3
+    ledger.clear({ session: "drop" })
+    expect(ledger.snapshot().totalCost).toBeCloseTo(6, 9)
+    expect(ledger.snapshot().perModel.get("claude-sonnet-4-6")?.totalCost).toBeCloseTo(6, 9)
+    expect(ledger.snapshot().perSession.has("drop")).toBe(false)
+  })
+})
+
+describe("RED #2 — spend is attributable to the agent that incurred it", () => {
+  /**
+   * SCOPE CORRECTION (recorded deliberately). The first draft demanded a
+   * `perAgent` roll-up from the LEDGER. That was the wrong owner. The ledger is
+   * the CROSS-RUN accountant: it aggregates by model, session, and UTC day, it
+   * persists, and it enforces daily caps. Agent lineage is a within-session
+   * concept it deliberately does not model, and bolting it on would have given
+   * the codebase two attribution stores to keep in sync — the exact shape of
+   * the bug this campaign exists to remove.
+   *
+   * Attribution lives on the session's usage-accounting authority, and is
+   * tested there (`usage-accounting-authority.test.ts`, `byAgent` / `byKind`)
+   * and end to end through the shipped `emitUsage`
+   * (`usage-accounting-wire-hellgate.test.ts`).
+   *
+   * What the LEDGER owes is the property that made the missing attribution
+   * dangerous in the first place: a subagent's spend must reach it at all, so a
+   * run cannot walk past its cost ceiling by doing the spending inside a child.
+   * That is what this test holds.
+   */
+  test("a subagent's spend reaches the cross-run ledger", () => {
+    const ledger = defaultBudgetLedger()
+    const parent = {
+      llm: { stream: async function* () {} },
+      registry: { get: () => undefined, specs: () => [], isReadOnly: () => true },
+      stream: { emit: () => undefined },
+      permission: { mode: "acceptEdits" },
+      messages: [],
+      system: "t",
+      cwd: process.cwd(),
+      maxTurns: 1,
+      signal: new AbortController().signal,
+      sessionId: "s",
+      budgetLedger: ledger,
+    } as unknown as AgentConfig
+    const child = buildChildConfig(parent, { prompt: "x" } as never, process.cwd(), {
+      agentId: "child-1",
+      parentId: "root",
+    } as never)
+    expect(child.budgetLedger).toBe(ledger) // shared, not copied
+
+    const usage = (inputTokens: number) =>
+      ({
+        type: "usage",
+        model: "claude-sonnet-4-6",
+        inputTokens,
+        outputTokens: 0,
+      }) as Extract<LlmStreamEvent, { type: "usage" }>
+    emitUsage(parent, usage(1_000_000), undefined, undefined, undefined) // $3
+    emitUsage(child, usage(1_000_000), undefined, undefined, undefined) // $3
+
+    expect(ledger.snapshot().totalCost).toBeCloseTo(2 * EVENT_COST, 9)
+  })
+
+  // PAIRED CONTROL — session-level rollup works, so the test above is about
+  // the CHILD reaching the ledger, not about recording at all.
   test("PAIRED CONTROL: session-level rollup already works (must stay green)", () => {
     const ledger = defaultBudgetLedger()
     ledger.record(event(0))

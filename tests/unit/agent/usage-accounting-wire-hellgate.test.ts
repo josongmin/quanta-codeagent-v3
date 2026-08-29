@@ -15,7 +15,9 @@
  *      door.
  */
 import { describe, expect, test } from "bun:test"
+import { BudgetMeter } from "@/agent/budget/meter"
 import { emitUsage } from "@/agent/loop/emit-helpers"
+import { isRootAgent } from "@/agent/spawn-depth"
 import { buildChildConfig } from "@/agent/subagent-runner-child-config"
 import type { AgentConfig } from "@/agent/types"
 import type { StreamEvent } from "@/llm"
@@ -99,6 +101,46 @@ describe("provenance is derived from lineage", () => {
     expect(snap.byAgent.get("restored-child")?.calls).toBe(1)
     expect(accounting.recent()[0]?.provenance.depth).toBe(2)
     expect(accounting.recent()[0]?.provenance.parentAgentId).toBe("root")
+  })
+})
+
+describe("one rule decides root vs subagent, and both call sites use it", () => {
+  test("isRootAgent answers from persisted depth", () => {
+    expect(isRootAgent({})).toBe(true) // no depth ⇒ genuine root
+    expect(isRootAgent({ depth: 0 })).toBe(true)
+    expect(isRootAgent({ depth: 1 })).toBe(false)
+    expect(isRootAgent({ depth: 3 })).toBe(false) // a resumed deep child
+  })
+
+  test("usage provenance agrees with the predicate", () => {
+    const accounting = createUsageAccounting()
+    for (const depth of [undefined, 0, 1, 2]) {
+      const acct = createUsageAccounting()
+      const { config } = makeConfig({
+        usageAccounting: acct,
+        ...(depth !== undefined ? { depth } : {}),
+      } as Partial<AgentConfig>)
+      emit(config, usage(10))
+      const kind = isRootAgent({ ...(depth !== undefined ? { depth } : {}) }) ? "root" : "subagent"
+      expect(acct.snapshot().byKind[kind].calls).toBe(1)
+    }
+    expect(accounting.snapshot().calls).toBe(0) // the shared fixture stayed untouched
+  })
+
+  test("only a ROOT turn advances the run's turn accounting", () => {
+    // The meter is shared with subagents so their SPEND counts against the
+    // run's ceiling. Turn boundaries are not shared: a child turn that ticked
+    // here would reset the parent's per-turn cost guard mid-turn and inflate
+    // `turns` against the root's maxTurns. This pins the asymmetry at the
+    // predicate both sites read.
+    const meter = new BudgetMeter({})
+    const tickIfRoot = (cfg: Pick<AgentConfig, "depth">) => {
+      if (isRootAgent(cfg)) meter.tick("turn")
+    }
+    tickIfRoot({}) // root turn
+    tickIfRoot({ depth: 1 }) // subagent turn
+    tickIfRoot({ depth: 2 }) // deeper subagent turn
+    expect(meter.snapshot().turns).toBe(1)
   })
 })
 

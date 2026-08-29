@@ -37,6 +37,7 @@ const compactNowFailSoft = async (
   }
 }
 
+import { isRootAgent } from "../spawn-depth"
 import { latestUserTextFromWm, observeEffortClassifierPrompt } from "./context-assembler"
 import {
   pollControlRequests,
@@ -523,7 +524,13 @@ export const prepareTurnIteration = async (args: {
     return "aborted"
   }
   if (args.localizePhaseState !== undefined) args.localizePhaseState.turn = args.turn - 1
-  args.cfg.budgetMeter?.tick("turn")
+  // MR-05 — the per-RUN meter is now SHARED with subagents so their spend
+  // counts against the run's cost ceiling (a run could otherwise walk past its
+  // cap by spawning). Turn boundaries are not shared: only the root's turns
+  // define the run's turn count and reset its per-turn cost guard, so a child
+  // turn must not tick here or it would clear the parent's runaway-turn
+  // accumulator mid-turn and inflate `turns` against the root's `maxTurns`.
+  if (isRootAgent(args.cfg)) args.cfg.budgetMeter?.tick("turn")
   await applySteerBarrierMessages(args.cfg, args.wm)
   setActiveTurnHeader(args.cfg, args.sessionId)
   const queuedInputs = await syncQueuedTurnInputs(args)

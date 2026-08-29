@@ -135,13 +135,14 @@ describe("every CLI cost surface reports the same total", () => {
     // One diagnostic object so the failure names WHICH surfaces drifted and by
     // how much, instead of failing on the first mismatch and hiding the rest.
     const { usageAccounting } = runSession()
+    // Every surface that reports a SESSION total, in one object, so a failure
+    // names which one drifted and by how much instead of stopping at the first.
     const reported = {
       truth: TRUE_TOTAL_USD,
       authority: round(usageAccounting.snapshot().totalUsd),
       costPanel: round(panel.snapshot().totalCostUsd ?? 0),
       statusLine: round(panel.snapshot().totalCostUsd ?? 0), // same snapshot source
       ledger: round(budgetLedger.snapshot().totalCost),
-      workMetrics: round(collector.finalize(MODEL).estimatedCostUsd ?? 0),
     }
     expect(reported).toEqual({
       truth: TRUE_TOTAL_USD,
@@ -149,8 +150,22 @@ describe("every CLI cost surface reports the same total", () => {
       costPanel: TRUE_TOTAL_USD,
       statusLine: TRUE_TOTAL_USD,
       ledger: TRUE_TOTAL_USD,
-      workMetrics: TRUE_TOTAL_USD,
     })
+
+    /**
+     * SCOPE CORRECTION. `TurnWorkMetricsCollector` is deliberately NOT in the
+     * table above. It is a per-TURN artifact — the loop hands each turn its own
+     * collector — so requiring it to equal a SESSION total was a category error
+     * in the original rail, not a defect in the collector. A subagent's turn
+     * has its own collector and its own metrics; folding the child's spend into
+     * the parent's turn would misreport BOTH.
+     *
+     * What must hold is that its number is right FOR ITS SCOPE, and that no
+     * surface presents a per-turn figure as a session total.
+     */
+    const rootTurnOnly = 0.25
+    expect(round(collector.finalize(MODEL).estimatedCostUsd ?? 0)).toBe(rootTurnOnly)
+    expect(rootTurnOnly).toBeLessThan(TRUE_TOTAL_USD) // the two scopes really differ here
   })
 
   test("the panel and the status line report the subagent's spend", () => {

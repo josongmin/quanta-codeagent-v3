@@ -50,10 +50,17 @@ describe("HELLGATE L4a — ledger pricing derives from the @/observability SSOT"
     }
   })
 
-  test("ledger cacheRead is billed at the SSOT-derived rate (additive model)", () => {
-    // The ledger bills input + cacheRead as SEPARATE additive buckets; the RATES
-    // come from the shared SSOT card. Assert the total equals the additive
-    // computation using the derived per-component rates.
+  test("ledger cacheRead follows the PROVIDER's convention, and matches the SSOT total", () => {
+    // MR-05 — this test used to assert the additive computation for BOTH
+    // models. Additive is right for Anthropic, whose `input_tokens` excludes
+    // cache reads. It is wrong for OpenAI, whose `prompt_tokens` already
+    // contains them, so the old expectation pinned a double-bill: one gpt-5.4
+    // call cost $2.60 here and $1.60 on the path the budget meter read, inside
+    // a single `emitUsage`.
+    //
+    // The assertion is now stronger than the one it replaces: the ledger total
+    // must equal the SSOT total for every model, cache reads included. That
+    // makes agreement the property under test instead of one formula's shape.
     for (const model of ["gpt-5.4", "claude-sonnet-4-6"]) {
       const ledger = defaultBudgetLedger()
       const { cost } = ledger.record({
@@ -64,12 +71,32 @@ describe("HELLGATE L4a — ledger pricing derives from the @/observability SSOT"
         cacheReadTokens: 400_000,
         at: 0,
       })
-      const rates = DEFAULT_MODEL_PRICING[model]
-      const cacheReadRate = rates?.cacheReadPerM
-      expect(cacheReadRate).toBeGreaterThan(0)
-      const expected =
-        (1_000_000 * (rates?.inputPerM ?? 0) + 400_000 * (cacheReadRate as number)) / 1_000_000
-      expect(cost).toBeCloseTo(expected, 6)
+      expect(DEFAULT_MODEL_PRICING[model]?.cacheReadPerM).toBeGreaterThan(0)
+      expect(cost).toBeCloseTo(costUsd(model, 1_000_000, 0, 400_000) ?? -1, 6)
     }
+    // Pin the two conventions explicitly, so a regression that flattens them
+    // back to one formula fails by name rather than by a drifting total.
+    const openai = defaultBudgetLedger()
+    expect(
+      openai.record({
+        model: "gpt-5.4",
+        sessionId: "s",
+        inputTokens: 1_000_000,
+        outputTokens: 0,
+        cacheReadTokens: 400_000,
+        at: 0,
+      }).cost,
+    ).toBeCloseTo(1.6, 6) // 600k fresh @ $2.50 + 400k cached @ $0.25
+    const anthropic = defaultBudgetLedger()
+    expect(
+      anthropic.record({
+        model: "claude-sonnet-4-6",
+        sessionId: "s",
+        inputTokens: 1_000_000,
+        outputTokens: 0,
+        cacheReadTokens: 400_000,
+        at: 0,
+      }).cost,
+    ).toBeCloseTo(3.12, 6) // 1M fresh @ $3 + 400k cached @ $0.30
   })
 })
