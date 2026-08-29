@@ -169,16 +169,29 @@ const harvest = (sink: string): Map<string, ScanReach> => {
 if (import.meta.main) {
   const sink = `${process.env.TMPDIR ?? "/tmp"}/quanta-scan-reach-${process.pid}.jsonl`
   writeFileSync(sink, "")
-  const consumers = Bun.spawnSync(
-    ["git", "grep", "-l", "assertScanPopulation", "--", "tests", "src"],
-    { stdout: "pipe" },
+  // The guards that CALL the helper, plus the tests that reach it through a
+  // shared suite. `slice-boundary-scanner.ts` is not a test file and its 49
+  // entrypoints never name the helper, so a list built from the direct string
+  // alone leaves 49 pinned rows reporting nothing — which the STALE check then
+  // fails on, correctly and unhelpfully.
+  const grep = (pattern: string): readonly string[] =>
+    new TextDecoder()
+      .decode(
+        Bun.spawnSync(["git", "grep", "-l", pattern, "--", "tests", "src"], { stdout: "pipe" })
+          .stdout,
+      )
+      .split("\n")
+      .filter((f) => f !== "")
+  const direct = grep("assertScanPopulation")
+  const indirect = direct
+    .filter((f) => !f.endsWith(".test.ts"))
+    .flatMap((mod) => grep(`from "[^"]*${mod.replace(/^.*\//, "").replace(/\.ts$/, "")}"`))
+  const files = [...new Set([...direct, ...indirect])].filter(
+    (f) =>
+      f.endsWith(".test.ts") &&
+      !f.includes("_shared/scan-population") &&
+      !f.includes("floor-hellgate"),
   )
-  const files = new TextDecoder()
-    .decode(consumers.stdout)
-    .split("\n")
-    .filter(
-      (f) => f !== "" && !f.includes("_shared/scan-population") && !f.includes("floor-hellgate"),
-    )
   const run = Bun.spawnSync(["bun", "test", ...files], {
     env: { ...process.env, QUANTA_SCAN_REACH_RECORD: sink },
     stdout: "pipe",

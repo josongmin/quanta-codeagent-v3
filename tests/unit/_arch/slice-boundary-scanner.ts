@@ -4,10 +4,11 @@
  * thin evidence/catalog entrypoints only.
  */
 
-import { describe, expect, test } from "bun:test"
+import { describe, test } from "bun:test"
 import { readdirSync, readFileSync, type Stats, statSync } from "node:fs"
 import { join, relative } from "node:path"
 import ts from "typescript"
+import { assertScanPopulation } from "../_shared/scan-population"
 
 const REPO_ROOT = join(import.meta.dir, "../../..")
 
@@ -723,8 +724,18 @@ export const registerSliceBoundarySuite = (config: SliceBoundaryConfig): void =>
       return read
     }
 
-    test("at least one file in the slice (sanity)", () => {
-      expect(files.length).toBeGreaterThan(0)
+    test("the slice's committed reach (phase D)", () => {
+      // `toBeGreaterThan(0)` was the whole floor here, for 49 slices and every
+      // ceiling arm below them. It is satisfied by one surviving file, and
+      // measured: 12 of the 49 slices have a single top-level bucket, so the
+      // per-subtree floor degenerates to the same claim for them. Every arm
+      // under it asserts an EMPTY violation list, which a shrunken scan
+      // satisfies for free.
+      //
+      // The number now comes from tools/dev/scan-reach-baseline.json, measured
+      // per slice, and reach is what git tracks — not what a walk happened to
+      // find.
+      assertScanPopulation(files, dir, { id: `slice-boundary:${config.slice}` })
     })
 
     registerSurfaceIsolationGuard(

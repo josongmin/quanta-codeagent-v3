@@ -1,6 +1,153 @@
 {
   "note": "Committed REACH floors for the repo's scanning guards, one row per scan. Floors only go UP. `reach < floor` is a REGRESSION: the scan shrank, so every verdict derived from it is worthless until that is explained. A scan with no row FAILS rather than defaulting \u2014 a closed universe is the only thing that stops a new guard shipping with no reach at all. Lock in growth with `bun run scan-reach --tighten`, which refuses while any scan is below its floor and rewrites only rows that already exist. `walked` proves the anchor (the scan reached a real corpus); `matched` proves the predicate (the guard's own matcher still selects something) \u2014 a matcher that rotted selects nothing while the walk stays full.",
   "scans": {
+    "slice-boundary:activity": {
+      "walked": 12
+    },
+    "slice-boundary:agent": {
+      "walked": 725
+    },
+    "slice-boundary:artifact": {
+      "walked": 3
+    },
+    "slice-boundary:attention": {
+      "walked": 3
+    },
+    "slice-boundary:auth": {
+      "walked": 18
+    },
+    "slice-boundary:browser": {
+      "walked": 25
+    },
+    "slice-boundary:capability": {
+      "walked": 5
+    },
+    "slice-boundary:codemode": {
+      "walked": 5
+    },
+    "slice-boundary:config": {
+      "walked": 28
+    },
+    "slice-boundary:connectors": {
+      "walked": 21
+    },
+    "slice-boundary:git": {
+      "walked": 23
+    },
+    "slice-boundary:host": {
+      "walked": 77
+    },
+    "slice-boundary:integrations": {
+      "walked": 13
+    },
+    "slice-boundary:ipc": {
+      "walked": 26
+    },
+    "slice-boundary:kernel": {
+      "walked": 16
+    },
+    "slice-boundary:llm": {
+      "walked": 90
+    },
+    "slice-boundary:lsp": {
+      "walked": 34
+    },
+    "slice-boundary:mcp": {
+      "walked": 61
+    },
+    "slice-boundary:media": {
+      "walked": 13
+    },
+    "slice-boundary:memory": {
+      "walked": 45
+    },
+    "slice-boundary:migration": {
+      "walked": 17
+    },
+    "slice-boundary:objective": {
+      "walked": 32
+    },
+    "slice-boundary:observability": {
+      "walked": 82
+    },
+    "slice-boundary:patch": {
+      "walked": 8
+    },
+    "slice-boundary:permission": {
+      "walked": 62
+    },
+    "slice-boundary:plugin-isolation": {
+      "walked": 7
+    },
+    "slice-boundary:protocol": {
+      "walked": 24
+    },
+    "slice-boundary:radar": {
+      "walked": 7
+    },
+    "slice-boundary:reactor": {
+      "walked": 6
+    },
+    "slice-boundary:realtime": {
+      "walked": 19
+    },
+    "slice-boundary:remote": {
+      "walked": 10
+    },
+    "slice-boundary:retrieval": {
+      "walked": 113
+    },
+    "slice-boundary:rules": {
+      "walked": 11
+    },
+    "slice-boundary:runner": {
+      "walked": 321
+    },
+    "slice-boundary:runtime": {
+      "walked": 86
+    },
+    "slice-boundary:scheduler": {
+      "walked": 18
+    },
+    "slice-boundary:sdk": {
+      "walked": 23
+    },
+    "slice-boundary:security": {
+      "walked": 25
+    },
+    "slice-boundary:session": {
+      "walked": 24
+    },
+    "slice-boundary:shared": {
+      "walked": 64
+    },
+    "slice-boundary:side-agent": {
+      "walked": 6
+    },
+    "slice-boundary:skill": {
+      "walked": 97
+    },
+    "slice-boundary:storage": {
+      "walked": 16
+    },
+    "slice-boundary:stream": {
+      "walked": 15
+    },
+    "slice-boundary:subagent": {
+      "walked": 24
+    },
+    "slice-boundary:tool": {
+      "walked": 305
+    },
+    "slice-boundary:ui": {
+      "walked": 2
+    },
+    "slice-boundary:voice": {
+      "walked": 10
+    },
+    "slice-boundary:workflow": {
+      "walked": 8
+    },
     "src/agent/converge/purity.test.ts#src-agent-converge": {
       "walked": 10
     },
