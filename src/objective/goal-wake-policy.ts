@@ -29,7 +29,7 @@ export type GoalWakeDelaySkip =
   | "infra-cooldown"
 
 /** GOAL-06 — which counter forbids the next autonomous attempt. */
-export type BudgetLimitSource = "user-budget" | "product-hard-cap"
+export type BudgetLimitSource = "user-budget" | "product-hard-cap" | "product-budget-ceiling"
 
 /** A caller-supplied cap may only LOWER the product cap (never raise it). */
 export const resolveProductAutonomousTurnCap = (requested: number | undefined): number =>

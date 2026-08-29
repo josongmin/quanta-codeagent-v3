@@ -14,6 +14,7 @@
 
 import { randomUUID } from "node:crypto"
 import type { ObjectiveAttemptState, StartedObjectiveAttempt } from "../attempt"
+import { effectiveBudgetLimit, PRODUCT_BUDGET_CEILING } from "../budget-limits"
 import {
   type CheckSpec,
   type CompletionReceipt,
@@ -100,8 +101,7 @@ export const finiteNonNegInt = (v: unknown): number | undefined => {
  *  (reaching the cap is exhaustion). A cap that is `undefined` never triggers;
  *  no caps at all ⇒ never exhausted. Pure function of the cell. */
 export const budgetExhausted = (cell: Cell): boolean =>
-  (cell.maxTokens !== undefined && cell.tokensUsed >= cell.maxTokens) ||
-  (cell.maxTurns !== undefined && cell.turnsUsed >= cell.maxTurns)
+  budgetLimitSource(cell) !== undefined && budgetLimitSource(cell) !== "product-hard-cap"
 
 /** GOAL-06 — which counter limits the objective, if any. The product hard cap
  *  (autonomous attempts started) is checked first: it can never be recovered
@@ -111,7 +111,13 @@ export const budgetLimitSource = (
   productCap: number = GOAL_MAX_AUTONOMOUS_TURNS,
 ): BudgetLimitSource | undefined => {
   if (cell.autonomousTurnsStarted >= productCap) return "product-hard-cap"
-  if (budgetExhausted(cell)) return "user-budget"
+  // GOAL P2-1 — the declared budget is stored verbatim; the bound that applies
+  // is min(declared, product ceiling), and the SOURCE is reported so a surface
+  // can say whether raising the budget would help at all.
+  const turns = effectiveBudgetLimit(cell.maxTurns, PRODUCT_BUDGET_CEILING.maxTurns)
+  if (cell.turnsUsed >= turns.limit) return turns.boundBy
+  const tokens = effectiveBudgetLimit(cell.maxTokens, PRODUCT_BUDGET_CEILING.maxTokens)
+  if (cell.tokensUsed >= tokens.limit) return tokens.boundBy
   return undefined
 }
 

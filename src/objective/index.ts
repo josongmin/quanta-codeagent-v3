@@ -27,6 +27,7 @@ export {
   isObjectiveAuthority,
   objectiveMutationDispatchKeys,
 } from "./authority"
+export { effectiveBudgetLimit, PRODUCT_BUDGET_CEILING } from "./budget-limits"
 export type {
   CommitOptions,
   ContinuationObjectiveMutation,
