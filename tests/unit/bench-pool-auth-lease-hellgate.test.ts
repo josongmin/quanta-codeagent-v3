@@ -180,6 +180,151 @@ const poolCfg = (
   ...over,
 })
 
+type Deferred<T> = {
+  readonly promise: Promise<T>
+  resolve(value: T): void
+}
+
+const deferred = <T>(): Deferred<T> => {
+  let resolvePromise: ((value: T) => void) | undefined
+  const promise = new Promise<T>((resolve) => {
+    resolvePromise = resolve
+  })
+  return {
+    promise,
+    resolve(value) {
+      if (resolvePromise === undefined) throw new Error("deferred resolver was not initialized")
+      resolvePromise(value)
+    },
+  }
+}
+
+type MaxBoxesSignals = {
+  readonly events: string[]
+  readonly gradeBlocked: Deferred<void>
+  readonly gradeInFlight: Deferred<void>
+  readonly capRefusedWhileGrading: Deferred<string>
+  readonly secondBoxLaunched: Deferred<string>
+  gradeIsInFlight: boolean
+  launches: number
+}
+
+const runIdFromGradeArgs = (args: readonly string[]): string =>
+  lastArg(args).match(/~\/runs\/([^/]+)\/instances\.jsonl/)?.[1] ?? "x"
+
+const blockFirstGrade = async (
+  args: readonly string[],
+  options: Parameters<SpawnFn>[2],
+  signals: MaxBoxesSignals,
+): Promise<void> => {
+  if (!args.some((arg) => arg.includes("cli.ts run"))) return
+  const runId = runIdFromGradeArgs(args)
+  if (runId === "c1") {
+    signals.events.push("grade:c1:start")
+    signals.gradeIsInFlight = true
+    signals.gradeInFlight.resolve()
+    await signals.gradeBlocked.promise
+    signals.events.push("grade:c1:done")
+  }
+  options?.onData?.(`[PASS] ${runId}__inst-1 (turns=2)\n`)
+}
+
+const maxBoxesInfrastructureResponse = (
+  args: readonly string[],
+  signals: MaxBoxesSignals,
+): SpawnResult | undefined => {
+  if (args.includes("get-parameter")) return spawnOk(`${RESOLVED_AMI}\n`)
+  if (args.includes("run-instances")) {
+    signals.launches += 1
+    signals.events.push(`launch:${signals.launches}`)
+    if (signals.launches > 1) signals.secondBoxLaunched.resolve("second-box-launched")
+    return spawnOk(`i-box-${signals.launches}`)
+  }
+  if (args.includes("describe-instances")) return spawnOk("1.2.3.4")
+  if (args.includes("terminate-instances")) {
+    signals.events.push("terminate")
+    return spawnOk("")
+  }
+  return undefined
+}
+
+/** Scripted pool responder. It never invokes Docker, AWS, or a network socket:
+ * every reachable command gets a local deterministic result. */
+const maxBoxesSpawn =
+  (signals: MaxBoxesSignals): SpawnFn =>
+  async (cmd, args, options) => {
+    if (cmd === "curl") return spawnOk("9.9.9.9")
+    if (cmd === "ssh") {
+      await blockFirstGrade(args, options, signals)
+      return defaultSshResponse(args, undefined)
+    }
+    return maxBoxesInfrastructureResponse(args, signals) ?? spawnOk("")
+  }
+
+const recordingMaxBoxesProvider = (
+  manager: AuthLeaseManager,
+  signals: MaxBoxesSignals,
+): PoolAuthProvider => {
+  const base = createLeasePoolAuthProvider(manager, () => authJsonFor("solo"))
+  return {
+    acquire: (request) => {
+      const lease = base.acquire(request)
+      if (lease === null) {
+        signals.events.push(`lease:refused:${request.runId}`)
+        if (signals.gradeIsInFlight) {
+          signals.capRefusedWhileGrading.resolve("cap-refused-while-c1-grades")
+        }
+        return null
+      }
+      signals.events.push(`lease:granted:${request.runId}`)
+      return {
+        accountLabel: lease.accountLabel,
+        readAuthJson: () => lease.readAuthJson(),
+        release: (result) => {
+          signals.events.push(`lease:released:${request.runId}`)
+          lease.release(result)
+        },
+      }
+    },
+    canEventuallySchedule: () => base.canEventuallySchedule(),
+    nextReadyAt: () => base.nextReadyAt(),
+  }
+}
+
+const createMaxBoxesScenario = () => {
+  const signals: MaxBoxesSignals = {
+    events: [],
+    gradeBlocked: deferred<void>(),
+    gradeInFlight: deferred<void>(),
+    capRefusedWhileGrading: deferred<string>(),
+    secondBoxLaunched: deferred<string>(),
+    gradeIsInFlight: false,
+    launches: 0,
+  }
+  const manager = new AuthLeaseManager(
+    [{ label: "solo", authFile: "/s.json", maxParallel: 24, maxBoxes: 1 }],
+    { now: () => 1_000_000 },
+  )
+  const provider = recordingMaxBoxesProvider(manager, signals)
+  const runPromise = runPool(
+    [
+      { runId: "c1", datasetPath: "/tmp/c1.jsonl" },
+      { runId: "c2", datasetPath: "/tmp/c2.jsonl" },
+    ],
+    poolCfg(maxBoxesSpawn(signals), provider, {
+      workers: 2,
+      allowExtraWorkers: true,
+      allowExtraBoxes: true,
+      keepWarm: false,
+      reuseWarm: false,
+      sleep: async () => {
+        await new Promise((resolve) => setTimeout(resolve, 0))
+      },
+    }),
+  )
+  return { manager, signals, runPromise }
+}
+
 /** Await `p`, but fail LOUDLY (with the event trace) instead of hanging if the
  *  awaited signal never arrives. The timer is cleared on settle so a passing
  *  test never leaves a pending timer behind. The bound is generous on purpose:
@@ -391,134 +536,26 @@ describe("T-3 pool account-aware scheduler", () => {
    * launched" — never on counting microtasks, so CPU load cannot flip it.
    */
   test("maxBoxes caps CONCURRENT account leases: no second box launches while the account's only box-lease is grading", async () => {
-    const events: string[] = []
-    const ok = (s: string): SpawnResult => ({ code: 0, stdout: s, stderr: "" })
-    let launches = 0
-    // Gate c1's grade open so the account's single box-lease is provably HELD
-    // while we observe whether a second worker can slip past the cap.
-    let releaseGrade!: () => void
-    const gradeBlocked = new Promise<void>((resolve) => {
-      releaseGrade = resolve
-    })
-    let resolveGradeInFlight!: () => void
-    const gradeInFlight = new Promise<void>((resolve) => {
-      resolveGradeInFlight = resolve
-    })
-    // Signal A: the account REFUSED a lease while c1 holds the only box-slot.
-    let resolveCapRefusal!: (tag: string) => void
-    const capRefusedWhileGrading = new Promise<string>((resolve) => {
-      resolveCapRefusal = resolve
-    })
-    // Signal B: a second box launched anyway ⇒ the cap leaked.
-    let resolveSecondLaunch!: (tag: string) => void
-    const secondBoxLaunched = new Promise<string>((resolve) => {
-      resolveSecondLaunch = resolve
-    })
-    let gradeIsInFlight = false
-    const fn: SpawnFn = async (cmd, args, o) => {
-      if (cmd === "curl") return ok("9.9.9.9")
-      if (cmd === "ssh" && args.some((a) => a.includes("cli.ts run"))) {
-        const runId =
-          (args[args.length - 1] ?? "").match(/~\/runs\/([^/]+)\/instances\.jsonl/)?.[1] ?? "x"
-        if (runId === "c1") {
-          events.push("grade:c1:start")
-          gradeIsInFlight = true
-          resolveGradeInFlight()
-          await gradeBlocked
-          events.push("grade:c1:done")
-        }
-        o?.onData?.(`[PASS] ${runId}__inst-1 (turns=2)\n`)
-      }
-      if (cmd === "ssh") {
-        const c = args[args.length - 1] ?? ""
-        if (c.includes("READY")) return ok("READY")
-        if (c.includes("run.exit")) return ok("0\n==XQ-RUN-EXIT-XQ==\n")
-        if (c.includes("mkdir ~/.pool-grade.lock")) return ok("LOCKED")
-        if (c.includes("rmdir ~/.pool-grade.lock")) return ok("")
-        const r = c.match(/cat ~\/runs\/([^/]+)\/report\.json/)
-        if (r) return ok(JSON.stringify({ resolved_ids: [`x__${r[1]}-1`] }))
-        return ok("")
-      }
-      if (args.includes("get-parameter")) return ok(`${RESOLVED_AMI}\n`)
-      if (args.includes("run-instances")) {
-        launches += 1
-        events.push(`launch:${launches}`)
-        if (launches > 1) resolveSecondLaunch("second-box-launched")
-        return ok(`i-box-${launches}`)
-      }
-      if (args.includes("describe-instances")) return ok("1.2.3.4")
-      if (args.includes("terminate-instances")) {
-        events.push("terminate")
-        return ok("")
-      }
-      return ok("")
-    }
-    const mgr = new AuthLeaseManager(
-      // maxParallel deliberately >> the 8 slots one chunk requests, so ONLY
-      // maxBoxes can refuse the second chunk. See NON-VACUITY above.
-      [{ label: "solo", authFile: "/s.json", maxParallel: 24, maxBoxes: 1 }],
-      {
-        now: () => 1_000_000,
-      },
-    )
-    const base = createLeasePoolAuthProvider(mgr, () => authJsonFor("solo"))
-    // Recording decorator: turns the cap into an OBSERVABLE signal (a refusal
-    // while c1's grade is in flight) instead of something we can only infer from
-    // the absence of an event after N microtasks.
-    const provider: PoolAuthProvider = {
-      acquire: (req) => {
-        const lease = base.acquire(req)
-        if (lease === null) {
-          events.push(`lease:refused:${req.runId}`)
-          if (gradeIsInFlight) resolveCapRefusal("cap-refused-while-c1-grades")
-          return null
-        }
-        events.push(`lease:granted:${req.runId}`)
-        return {
-          accountLabel: lease.accountLabel,
-          readAuthJson: () => lease.readAuthJson(),
-          release: (result) => {
-            events.push(`lease:released:${req.runId}`)
-            lease.release(result)
-          },
-        }
-      },
-      canEventuallySchedule: () => base.canEventuallySchedule(),
-      nextReadyAt: () => base.nextReadyAt(),
-    }
-    const runPromise = runPool(
-      [
-        { runId: "c1", datasetPath: "/tmp/c1.jsonl" },
-        { runId: "c2", datasetPath: "/tmp/c2.jsonl" },
-      ],
-      poolCfg(fn, provider, {
-        workers: 2,
-        allowExtraWorkers: true,
-        // Opt OUT of the live-box launch-window governor so the ONLY thing that
-        // can hold worker 2 back is the account's maxBoxes cap.
-        allowExtraBoxes: true,
-        keepWarm: false,
-        reuseWarm: false,
-        sleep: async () => {
-          await new Promise((resolve) => setTimeout(resolve, 0))
-        },
-      }),
-    )
+    const { manager, signals, runPromise } = createMaxBoxesScenario()
     // If runPool blows up early, surface THAT error rather than a timeout.
     const runFinishedEarly = runPromise.then(() => "run-finished-before-c1-graded")
-    await withTestDeadline(gradeInFlight, "c1's grade to start", events)
+    await withTestDeadline(signals.gradeInFlight.promise, "c1's grade to start", signals.events)
     const verdict = await withTestDeadline(
-      Promise.race([capRefusedWhileGrading, secondBoxLaunched, runFinishedEarly]),
+      Promise.race([
+        signals.capRefusedWhileGrading.promise,
+        signals.secondBoxLaunched.promise,
+        runFinishedEarly,
+      ]),
       "the account cap to refuse worker 2 (or a second box to race past it)",
-      events,
+      signals.events,
     )
     // Snapshot the observations BEFORE unblocking, then always unblock — a red
     // assertion must never wedge the still-running pool.
-    const launchesWhileHeld = events.filter((e) => e.startsWith("launch:"))
-    const boxesWhileHeld = mgr.snapshot()[0]?.activeBoxes
-    const slotsWhileHeld = mgr.snapshot()[0]?.activeSlots
-    releaseGrade()
-    const out = await withTestDeadline(runPromise, "run completion", events)
+    const launchesWhileHeld = signals.events.filter((event) => event.startsWith("launch:"))
+    const boxesWhileHeld = manager.snapshot()[0]?.activeBoxes
+    const slotsWhileHeld = manager.snapshot()[0]?.activeSlots
+    signals.gradeBlocked.resolve()
+    const out = await withTestDeadline(runPromise, "run completion", signals.events)
 
     // TEETH 1 — the cap actually refused, and it refused BECAUSE of maxBoxes:
     // slots were still available (8 of 24 used) yet the box budget was spent.
@@ -529,12 +566,14 @@ describe("T-3 pool account-aware scheduler", () => {
     expect(launchesWhileHeld).toEqual(["launch:1"])
     // TEETH 3 — the lease RELEASE is what opens the cap (T-3: released on
     // success), so the second launch may only follow c1's release.
-    expect(events.indexOf("lease:released:c1")).toBeGreaterThanOrEqual(0)
-    expect(events.indexOf("launch:2")).toBeGreaterThan(events.indexOf("lease:released:c1"))
+    expect(signals.events.indexOf("lease:released:c1")).toBeGreaterThanOrEqual(0)
+    expect(signals.events.indexOf("launch:2")).toBeGreaterThan(
+      signals.events.indexOf("lease:released:c1"),
+    )
     // TEETH 4 — and the run still completes with no chunk lost and no leak.
     expect(out.every((r) => !r.lost)).toBe(true)
-    expect(mgr.snapshot()[0]?.activeSlots).toBe(0)
-    expect(mgr.snapshot()[0]?.activeBoxes).toBe(0)
+    expect(manager.snapshot()[0]?.activeSlots).toBe(0)
+    expect(manager.snapshot()[0]?.activeBoxes).toBe(0)
   }, 30_000)
 })
 
