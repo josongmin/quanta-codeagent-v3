@@ -37,21 +37,6 @@
       "floorLines": [
         "520: expect(files.length).toBeGreaterThan(2000)"
       ]
-    },
-    {
-      "file": "tests/unit/observability/new-slice-metrics-hellgate.test.ts",
-      "klass": "D-multi-root-or-multi-scan",
-      "enumerators": [
-        "readdirSync"
-      ],
-      "recursive": true,
-      "absolutePaths": true,
-      "derived": false,
-      "roots": 2,
-      "floorLines": [
-        "168: expect(files.length, `${slice}: the slice read almost nothing`).toBeGreaterThan(5)",
-        "284: expect(all.length, \"the walk read almost none of src/\").toBeGreaterThan(3000)"
-      ]
     }
   ]
 }

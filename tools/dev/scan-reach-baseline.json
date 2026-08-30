@@ -520,6 +520,21 @@
     },
     "tests/unit/apps/bench/promax/promax-port-contract-unsuppressed.test.ts#PROFILES": {
       "walked": 20
+    },
+    "tests/unit/observability/new-slice-metrics-hellgate.test.ts#AGENT/ERROR-ROUTING": {
+      "walked": 7
+    },
+    "tests/unit/observability/new-slice-metrics-hellgate.test.ts#AGENT/GIT-DIRECTIVES": {
+      "walked": 9
+    },
+    "tests/unit/observability/new-slice-metrics-hellgate.test.ts#AGENT/STREAM-TIMEOUT": {
+      "walked": 8
+    },
+    "tests/unit/observability/new-slice-metrics-hellgate.test.ts#RUNTIME/SHELL-SNAPSHOT": {
+      "walked": 10
+    },
+    "tests/unit/observability/new-slice-metrics-hellgate.test.ts#SRC": {
+      "walked": 3357
     }
   }
 }
