@@ -165,6 +165,39 @@ export const resolveActiveModelId = async (
   return model !== undefined && model !== "" ? model : "unknown"
 }
 
+const requestedTurnModel = (
+  override: SkillTurnOverride | undefined,
+  stickyModelId: string | undefined,
+  sessionModelId: string | undefined,
+): string | undefined =>
+  override?.model ??
+  (stickyModelId !== undefined && stickyModelId.length > 0 ? stickyModelId : sessionModelId)
+
+const llmForRequestedModel = (config: AgentConfig, requested: string | undefined): LLMPort =>
+  requested !== undefined && requested !== config.llm.model
+    ? (config.modelCandidates?.find((candidate) => candidate.id === requested)?.port ?? config.llm)
+    : config.llm
+
+const overrideWithSkillEffort = (
+  llm: LLMPort,
+  effort: SkillTurnOverride["effort"],
+): ResolvedTurnOverride => {
+  if (effort === undefined) return { llm, explicitOff: false }
+  const budget = typeof effort === "number" ? effort : effortToTokenBudget(effort)
+  return budget !== undefined && budget > 0
+    ? { llm, budgetTokens: budget, explicitOff: false }
+    : { llm, explicitOff: true }
+}
+
+const withSessionEffort = (
+  config: AgentConfig,
+  resolved: ResolvedTurnOverride,
+): ResolvedTurnOverride => {
+  const level = config.sessionEffort?.()
+  const budget = level !== undefined ? effortToTokenBudget(level) : undefined
+  return budget !== undefined && budget > 0 ? { ...resolved, budgetTokens: budget } : resolved
+}
+
 export const resolveSkillTurnOverride = (
   config: AgentConfig,
   override: SkillTurnOverride | undefined,
@@ -177,35 +210,13 @@ export const resolveSkillTurnOverride = (
   // passing a sticky id.
   const routing = modelRoutingFor(config)
   const selected = routing.view()
-  const requested =
-    override?.model ??
-    (stickyModelId !== undefined && stickyModelId.length > 0
-      ? stickyModelId
-      : selected.source === "session"
-        ? selected.modelId
-        : undefined)
-  const swapped =
-    requested !== undefined && requested !== config.llm.model
-      ? config.modelCandidates?.find((c) => c.id === requested)?.port
-      : undefined
-  const llm = swapped ?? config.llm
-  const overrideEffort = override?.effort
-  const skillHasEffortSignal = overrideEffort !== undefined
-  const skillBudget = !skillHasEffortSignal
-    ? undefined
-    : typeof overrideEffort === "number"
-      ? overrideEffort
-      : effortToTokenBudget(overrideEffort)
-  if (skillHasEffortSignal) {
-    return skillBudget !== undefined && skillBudget > 0
-      ? { llm, budgetTokens: skillBudget, explicitOff: false }
-      : { llm, explicitOff: true }
-  }
-  const sessionLevel = config.sessionEffort?.()
-  const sessionBudget = sessionLevel !== undefined ? effortToTokenBudget(sessionLevel) : undefined
-  return sessionBudget !== undefined && sessionBudget > 0
-    ? { llm, budgetTokens: sessionBudget, explicitOff: false }
-    : { llm, explicitOff: false }
+  const sessionModelId = selected.source === "session" ? selected.modelId : undefined
+  const llm = llmForRequestedModel(
+    config,
+    requestedTurnModel(override, stickyModelId, sessionModelId),
+  )
+  const skillResolved = overrideWithSkillEffort(llm, override?.effort)
+  return override?.effort !== undefined ? skillResolved : withSessionEffort(config, skillResolved)
 }
 
 export const applyEffortClassifierFloor = (
