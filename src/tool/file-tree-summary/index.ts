@@ -453,6 +453,56 @@ export const inferNextAction = (
   return undefined
 }
 
+type ScopeFileScan = { files: string[] } | { error: string }
+
+const scanScopeFiles = async (
+  scopeRoot: string,
+  jailRoot: string,
+  signal: AbortSignal,
+): Promise<ScopeFileScan> => {
+  const parts = ["rg", "--files", "--color=never"]
+  for (const ignoreFile of collectIgnoreFiles(scopeRoot, jailRoot)) {
+    parts.push("--ignore-file", sq(ignoreFile))
+  }
+  const result = await runShell(parts.join(" "), { cwd: scopeRoot, signal })
+  if (result.exitCode > 1 || result.timedOut) {
+    return { error: result.stderr.trim() || `rg --files failed (exit ${result.exitCode})` }
+  }
+  return {
+    files: result.stdout
+      .trimEnd()
+      .split("\n")
+      .filter((line) => line.length > 0),
+  }
+}
+
+const extractPurposeSummaries = async (
+  agg: TreeAgg,
+  cwd: string,
+  signal: AbortSignal,
+): Promise<Map<string, string> | undefined> => {
+  const targetFiles = agg.renderedFiles.slice(0, SUMMARY_FILE_CAP)
+  if (targetFiles.length === 0) return undefined
+  const parts = [
+    "rg",
+    "--no-heading",
+    "--line-number",
+    "--color=never",
+    "-m",
+    "5",
+    "--max-filesize",
+    "1M",
+    "-e",
+    sq(PURPOSE_RE),
+    "--",
+    ...targetFiles.map(sq),
+  ]
+  const result = await runShell(parts.join(" "), { cwd, signal })
+  return result.exitCode <= 1 && !result.timedOut
+    ? parsePurposeRows(result.stdout.trimEnd())
+    : undefined
+}
+
 export const fileTreeSummaryTool: Tool<Input> = {
   name: "file_tree_summary",
   description:
@@ -489,39 +539,21 @@ export const fileTreeSummaryTool: Tool<Input> = {
 
     yield { type: "progress", message: `summarizing tree (depth ${maxDepth})…` }
 
-    // ripgrep --files lists every non-ignored file, one per line, relative to
-    // cwd. When a scope path is provided we `cd` into that scope so the rows
-    // stay scope-relative instead of turning absolute.
-    const parts = ["rg", "--files", "--color=never"]
-    // Honor .quantaignore / .cursorignore / .cursorindexignore when present in
-    // the scope root. Each valid, existing file is appended as --ignore-file
-    // in declaration order. Missing files and jail-escaping symlinks are
-    // silently skipped (invariant: no ignore files → argv byte-identical to
-    // before this change).
     const scopeRoot = jailedPath ?? ctx.cwd
-    const scanCwd = scopeRoot
-    for (const ignoreFile of collectIgnoreFiles(scopeRoot, ctx.cwd)) {
-      parts.push("--ignore-file", sq(ignoreFile))
-    }
-    const r = await runShell(parts.join(" "), { cwd: scanCwd, signal: ctx.signal })
-
-    if (r.exitCode > 1 || r.timedOut) {
+    const scan = await scanScopeFiles(scopeRoot, ctx.cwd, ctx.signal)
+    if ("error" in scan) {
       yield {
         type: "result",
-        result: { ok: false, output: r.stderr.trim() || `rg --files failed (exit ${r.exitCode})` },
+        result: { ok: false, output: scan.error },
       }
       return
     }
-    const files = r.stdout
-      .trimEnd()
-      .split("\n")
-      .filter((l) => l.length > 0)
-    if (files.length === 0) {
+    if (scan.files.length === 0) {
       yield { type: "result", result: { ok: true, output: "(no files)" } }
       return
     }
 
-    const agg = aggregate(files, maxDepth, maxFiles)
+    const agg = aggregate(scan.files, maxDepth, maxFiles)
 
     // Recency ranking: ONE git-log call, placed AFTER the rg --files block.
     // Failure (non-git dir, no commits, etc.) silently falls back to "alpha".
@@ -539,27 +571,7 @@ export const fileTreeSummaryTool: Tool<Input> = {
     let summaries: Map<string, string> | undefined
     if (input.summarize === true) {
       yield { type: "progress", message: "extracting per-file purpose…" }
-      const targetFiles = agg.renderedFiles.slice(0, SUMMARY_FILE_CAP)
-      if (targetFiles.length > 0) {
-        const purposeParts = [
-          "rg",
-          "--no-heading",
-          "--line-number",
-          "--color=never",
-          "-m",
-          "5",
-          "--max-filesize",
-          "1M",
-          "-e",
-          sq(PURPOSE_RE),
-          "--",
-          ...targetFiles.map(sq),
-        ]
-        const pr = await runShell(purposeParts.join(" "), { cwd: scanCwd, signal: ctx.signal })
-        if (pr.exitCode <= 1 && !pr.timedOut) {
-          summaries = parsePurposeRows(pr.stdout.trimEnd())
-        }
-      }
+      summaries = await extractPurposeSummaries(agg, scopeRoot, ctx.signal)
     }
 
     const nextAction = inferNextAction(agg, maxDepth, maxFiles)
