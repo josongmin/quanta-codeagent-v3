@@ -119,6 +119,23 @@ const DEGENERATE: ReadonlyArray<readonly [string, string]> = [
   ["huge-single-line", `x${"y".repeat(50_000)}`],
 ]
 
+const assertWellFormedResult = (result: TestRunResult, name: string, label: string): void => {
+  expect(result.runner, label).toBe(name)
+  expect(Array.isArray(result.failed), label).toBe(true)
+  expect(typeof result.ok, label).toBe("boolean")
+  // A count must never be NaN or negative: those flow into the tool's rendered
+  // summary, where `NaN passed` reads as a broken tool rather than an unparsed
+  // runner.
+  expect(Number.isInteger(result.passed), `${label} passed=${result.passed}`).toBe(true)
+  expect(result.passed, label).toBeGreaterThanOrEqual(0)
+  for (const failure of result.failed) {
+    expect(typeof failure.name, label).toBe("string")
+    if (failure.line !== undefined) {
+      expect(Number.isFinite(failure.line), `${label} line=${failure.line}`).toBe(true)
+    }
+  }
+}
+
 describe("test-output parsers NEVER throw", () => {
   const cases: ReadonlyArray<readonly [string, string]> = [
     ...DEGENERATE,
@@ -143,20 +160,7 @@ describe("test-output parsers NEVER throw", () => {
             `${name} threw on "${label}" — parse.ts promises NEVER-throws: ${String(err)}`,
           )
         }
-        expect(result.runner, label).toBe(name)
-        expect(Array.isArray(result.failed), label).toBe(true)
-        expect(typeof result.ok, label).toBe("boolean")
-        // A count must never be NaN or negative: those flow into the tool's
-        // rendered summary, where `NaN passed` is worse than a wrong number
-        // because it reads as a broken tool rather than an unparsed runner.
-        expect(Number.isInteger(result.passed), `${label} passed=${result.passed}`).toBe(true)
-        expect(result.passed, label).toBeGreaterThanOrEqual(0)
-        for (const f of result.failed) {
-          expect(typeof f.name, label).toBe("string")
-          if (f.line !== undefined) {
-            expect(Number.isFinite(f.line), `${label} line=${f.line}`).toBe(true)
-          }
-        }
+        assertWellFormedResult(result, name, label)
       }
     })
   }
