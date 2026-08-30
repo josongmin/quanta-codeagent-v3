@@ -636,6 +636,88 @@ const buildFullRetryPrepared = (
   }),
 })
 
+const postResponsesBody = async (
+  config: ResponsesStreamConfig,
+  controller: AbortController,
+  body: Record<string, unknown>,
+): Promise<Response> => {
+  let firstChunkTimer: ReturnType<typeof setTimeout> | undefined
+  try {
+    firstChunkTimer = setTimeout(() => {
+      controller.abort(
+        buildResponsesFirstChunkTimeoutError(config.timeoutMs.firstChunkMs, config.provider),
+      )
+    }, config.timeoutMs.firstChunkMs)
+    config.input.turnTimingCapture?.markRequestSent()
+    return await config.fetchImpl(config.url, {
+      method: "POST",
+      headers: config.headers,
+      body: JSON.stringify(body),
+      signal: controller.signal,
+    })
+  } finally {
+    if (firstChunkTimer !== undefined) clearTimeout(firstChunkTimer)
+  }
+}
+
+const streamResponseContent = async function* (
+  config: ResponsesStreamConfig,
+  prepared: ResponsesPreparedRequest,
+  controller: AbortController,
+  response: Response,
+): AsyncIterable<StreamEvent> {
+  await assertResponsesResponseOk(response, config)
+  if (response.body === null) {
+    throw new LLMError(`${config.provider} responses stream has no body`, {
+      kind: "stream_corrupt",
+      provider: config.provider,
+    })
+  }
+  captureResponseHeaders(response, config)
+
+  const { acc, callbacks } = buildResponsesStreamAccumulator(config)
+  const rawFrames = parseResponsesSSEFrames(response.body) as AsyncIterable<{
+    readonly event?: string
+    readonly data: string
+  }> & { controller?: AbortController }
+  rawFrames.controller = controller
+  const guardedFrames = withStreamTimeout(rawFrames, {
+    firstChunkMs: config.timeoutMs.firstChunkMs,
+    idleMs: config.timeoutMs.idleMs,
+    provider: config.provider,
+    ...(config.input.signal !== undefined ? { signal: config.input.signal } : {}),
+    ...(config.input.onChunk !== undefined ? { onChunk: config.input.onChunk } : {}),
+  })
+
+  let sawContentEvent = false
+  let terminalStopReason: string | undefined
+  try {
+    for await (const event of parseResponsesEvents(guardedFrames, {
+      provider: config.provider,
+      fallbackModel: config.model,
+      ...(config.reasoningCarryover === true ? { reasoningCarryover: true } : {}),
+      ...callbacks,
+    })) {
+      if (event.type === "message_stop") terminalStopReason = event.stop_reason
+      else sawContentEvent = true
+      yield event
+    }
+  } catch (error) {
+    if (config.continuationStore !== undefined && prepared.routeKey !== undefined) {
+      config.continuationStore.clear(prepared.routeKey)
+    }
+    throw error
+  }
+
+  assertResponsesNonEmptyStreamOrThrow(config, prepared, {
+    sawContentEvent,
+    completed: acc.completed,
+    terminalStopReason,
+  })
+  persistResponsesReasoningCarryover(config, prepared, acc.capturedReasoning)
+  persistResponsesContinuation(config, prepared, acc.completed, acc.outputItems, acc.resumable)
+}
+
 export async function* streamResponsesSurface(
   config: ResponsesStreamConfig,
 ): AsyncIterable<StreamEvent> {
@@ -647,30 +729,9 @@ export async function* streamResponsesSurface(
   const disableResumeOnStatuses = config.disableResumeOnStatuses
 
   try {
-    const postBody = async (body: Record<string, unknown>): Promise<Response> => {
-      let firstChunkTimer: ReturnType<typeof setTimeout> | undefined
-      try {
-        firstChunkTimer = setTimeout(() => {
-          request.controller.abort(
-            buildResponsesFirstChunkTimeoutError(config.timeoutMs.firstChunkMs, config.provider),
-          )
-        }, config.timeoutMs.firstChunkMs)
-
-        config.input.turnTimingCapture?.markRequestSent()
-        return await config.fetchImpl(config.url, {
-          method: "POST",
-          headers: config.headers,
-          body: JSON.stringify(body),
-          signal: request.controller.signal,
-        })
-      } finally {
-        if (firstChunkTimer !== undefined) clearTimeout(firstChunkTimer)
-      }
-    }
-
     yield prepared.continuationEvent
 
-    let res = await postBody(prepared.body)
+    let res = await postResponsesBody(config, request.controller, prepared.body)
     if (
       !res.ok &&
       prepared.resumedFromResponseId !== undefined &&
@@ -692,79 +753,9 @@ export async function* streamResponsesSurface(
         statusCode: res.status,
       })
       prepared = buildFullRetryPrepared(prepared, config, res.status)
-      res = await postBody(prepared.body)
+      res = await postResponsesBody(config, request.controller, prepared.body)
     }
-
-    await assertResponsesResponseOk(res, config)
-    if (res.body === null) {
-      throw new LLMError(`${config.provider} responses stream has no body`, {
-        kind: "stream_corrupt",
-        provider: config.provider,
-      })
-    }
-    captureResponseHeaders(res, config)
-
-    const { acc, callbacks } = buildResponsesStreamAccumulator(config)
-    const rawFrames = parseResponsesSSEFrames(res.body) as AsyncIterable<{
-      readonly event?: string
-      readonly data: string
-    }> & {
-      controller?: AbortController
-    }
-    rawFrames.controller = request.controller
-    const guardedFrames = withStreamTimeout(rawFrames, {
-      firstChunkMs: config.timeoutMs.firstChunkMs,
-      idleMs: config.timeoutMs.idleMs,
-      provider: config.provider,
-      ...(config.input.signal !== undefined ? { signal: config.input.signal } : {}),
-      ...(config.input.onChunk !== undefined ? { onChunk: config.input.onChunk } : {}),
-    })
-
-    // jun-20 throttle-swallow fix — track whether ANY content event was yielded
-    // (a `for await` instead of `yield*` so we observe the stream, not just relay
-    // it). The prepare/continuation event was already yielded above (line ~447);
-    // this counts CONTENT (text/tool/reasoning/completion) events only.
-    let sawContentEvent = false
-    // jun-20 audit fix — capture the TERMINAL stop_reason. A swallowed-throttle
-    // empty stream terminates via the normal end (`stop_reason:"end_turn"`,
-    // openai-responses-wire.ts:750); an INTENTIONAL early terminator
-    // (`response.incomplete` → content_filter / max_tokens / error) carries a
-    // DIFFERENT stop_reason and must NOT be reclassified as a retryable throttle.
-    let terminalStopReason: string | undefined
-    try {
-      for await (const ev of parseResponsesEvents(guardedFrames, {
-        provider: config.provider,
-        fallbackModel: config.model,
-        // H15 — pass the capture gate THROUGH to the wire. Default-OFF ⇒ omitted
-        // (the wire's `onOutputItemDone` payload is the legacy 2-field shape and
-        // `reasoningItem` is never surfaced ⇒ byte-identical).
-        ...(config.reasoningCarryover === true ? { reasoningCarryover: true } : {}),
-        ...callbacks,
-      })) {
-        // `message_stop` is the synthetic stream-terminator the parser emits even
-        // for a 0-content stream — it is NOT content. Only a real content event
-        // (text / tool_call / thinking / …) marks the turn as non-empty, so the
-        // empty/truncated-throttle guard below fires on a prepare+stop-only stream.
-        // We also remember its stop_reason so an intentional non-end_turn terminator
-        // (content_filter / max_tokens) is excluded from the throttle reclassification.
-        if (ev.type === "message_stop") terminalStopReason = ev.stop_reason
-        else sawContentEvent = true
-        yield ev
-      }
-    } catch (error) {
-      if (config.continuationStore !== undefined && prepared.routeKey !== undefined) {
-        config.continuationStore.clear(prepared.routeKey)
-      }
-      throw error
-    }
-
-    assertResponsesNonEmptyStreamOrThrow(config, prepared, {
-      sawContentEvent,
-      completed: acc.completed,
-      terminalStopReason,
-    })
-    persistResponsesReasoningCarryover(config, prepared, acc.capturedReasoning)
-    persistResponsesContinuation(config, prepared, acc.completed, acc.outputItems, acc.resumable)
+    yield* streamResponseContent(config, prepared, request.controller, res)
   } catch (error) {
     if (
       request.controller.signal.aborted &&
