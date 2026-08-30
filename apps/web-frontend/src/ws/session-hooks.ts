@@ -1072,6 +1072,41 @@ export const useSendApprovalDecision = (
 }
 
 /**
+ * Sends `session.objective.mutate` — the browser's only route to a durable goal.
+ *
+ * The host binds this command to the USER actor, which is what makes it work at
+ * all: a model `create` is refused `actor-forbidden` with the propose gate off
+ * and `approval-unavailable` with it on, because the web daemon composes no
+ * confirmation surface. The command has been in this package's generated union
+ * since it shipped, with no caller — `/goal <text>` is that caller.
+ *
+ * `expectedObjectiveRevision` is deliberately omitted: it is optional on the
+ * wire, and the host binds the CURRENT revision when it is absent. A browser
+ * that has no revision to send must not invent one.
+ *
+ * Returns `false` when there is no session yet, so the caller can SAY the write
+ * did not leave rather than pretending it did.
+ */
+export const useSendObjectiveMutate = (
+  client: SessionClient,
+  sessionId: string | null,
+): ((mutation: unknown) => boolean) =>
+  useCallback(
+    (mutation: unknown) => {
+      if (sessionId === null) return false
+      client.send({
+        sessionId,
+        commandId: makeCommandId(),
+        issuedAt: new Date().toISOString(),
+        type: "session.objective.mutate",
+        mutation,
+      } as SessionCommand)
+      return true
+    },
+    [client, sessionId],
+  )
+
+/**
  * Sends `session.permission.set` — switches the live permission mode (default /
  * acceptEdits / bypass / auto). The daemon wires `permission.mode` as a live
  * getter/setter, so the next turn's gate honors the switch (real, not a

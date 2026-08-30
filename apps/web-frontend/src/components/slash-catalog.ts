@@ -22,6 +22,7 @@ import {
 import { buildAuthSlashCommands } from "./slash-auth"
 import { buildLlmConfigSlashCommands, type RetryWithDeps } from "./slash-llm-config"
 import { buildReadoutSlashCommands, fetchReadoutBody, readReadoutBody } from "./slash-readout"
+import { buildGoalSlashCommands } from "./slash-goal"
 
 export interface SlashCatalogDeps {
   readonly clearTranscript: () => void
@@ -39,6 +40,12 @@ export interface SlashCatalogDeps {
    *  door that actually switches the model. Absent (offline/tests) ⇒ `/model <id>`
    *  says it cannot switch instead of silently doing nothing. */
   readonly sendControlRequest?: (request: { kind: string; [k: string]: unknown }) => boolean
+  /** The `session.objective.mutate` sender — the ONLY route by which a browser
+   *  can create a goal (a model `create` is refused on this surface). Absent
+   *  (offline/tests) ⇒ `/goal <text>` says it cannot set instead of pretending. */
+  readonly sendObjectiveMutate?: (mutation: unknown) => boolean
+  /** The out-of-band `goalWork` sender. Absent ⇒ `/goal work` says so. */
+  readonly sendGoalWork?: (text: string) => boolean
 }
 
 export const assembleSlashCommands = (deps: SlashCatalogDeps): readonly SlashCommand[] => {
@@ -94,11 +101,38 @@ export const assembleSlashCommands = (deps: SlashCatalogDeps): readonly SlashCom
   })
   const authCommands = buildAuthSlashCommands(sharedEndpoint)
   const readoutCommands = buildReadoutSlashCommands(readoutEndpoint)
+  // `/goal` is owned by the richer builder (the `/model` precedent): one slug
+  // that shows the daemon readout, sets the objective, and asks for a goal turn
+  // — rather than a read-only row plus a second goal vocabulary elsewhere.
+  const goalCommands = buildGoalSlashCommands({
+    ...readoutEndpoint,
+    onError: (msg: string): void => {
+      deps.appendClientMessage("error", msg)
+    },
+    sendObjectiveMutate:
+      deps.sendObjectiveMutate ??
+      ((): boolean => {
+        deps.appendClientMessage(
+          "error",
+          "/goal: not wired on this host (no session command sender was threaded)",
+        )
+        return false
+      }),
+    sendGoalWork:
+      deps.sendGoalWork ??
+      ((): boolean => {
+        deps.appendClientMessage(
+          "error",
+          "/goal work: not wired on this host (no goalWork sender was threaded)",
+        )
+        return false
+      }),
+  })
 
   // Live builders own their slugs: drop the base stubs they replace so
   // first-match resolution can never hit a dead stub in front of a live
   // command. (Guarded by the invariant test's duplicate-slug check.)
-  const connected = [...llmCommands, ...authCommands, ...readoutCommands]
+  const connected = [...llmCommands, ...authCommands, ...readoutCommands, ...goalCommands]
   const ownedSlugs = new Set(connected.map((c) => c.slug))
   const baseMinusOwned = base.filter((c) => !ownedSlugs.has(c.slug))
   return [...baseMinusOwned, ...connected]

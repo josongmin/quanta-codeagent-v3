@@ -48,6 +48,11 @@ const READOUT_FILE = "apps/web-frontend/src/components/slash-readout.ts"
 /** The llm-config builder owns richer entries whose slug may ALSO be a readout
  *  name (`/model` lists via the readout and switches via a control frame). */
 const LLM_CONFIG_FILE = "apps/web-frontend/src/components/slash-llm-config.ts"
+/** Same shape as the llm-config builder: `/goal` shows the daemon readout, and
+ *  also sets the objective (`session.objective.mutate`) and asks for one goal
+ *  turn (`goalWork`) — so one slug owns all three instead of a read-only row
+ *  plus a second goal vocabulary somewhere else. */
+const GOAL_FILE = "apps/web-frontend/src/components/slash-goal.ts"
 
 const slugsIn = (file: string, listName?: string): readonly string[] => {
   const source = readFileSync(join(ROOT, file), "utf8")
@@ -62,6 +67,7 @@ const slugsIn = (file: string, listName?: string): readonly string[] => {
 const frontendSlugs = (): readonly string[] => [
   ...slugsIn(READOUT_FILE, "READOUT_COMMANDS"),
   ...slugsIn(LLM_CONFIG_FILE),
+  ...slugsIn(GOAL_FILE),
 ]
 
 describe("web readout vocabulary — daemon and frontend cannot drift", () => {
@@ -75,6 +81,7 @@ describe("web readout vocabulary — daemon and frontend cannot drift", () => {
     expect(slugs).toContain("state") // a snapshot-served one (readout builder)
     expect(slugs).toContain("agents") // a source-backed one (readout builder)
     expect(slugs).toContain("model") // owned by the llm-config builder
+    expect(slugs).toContain("goal") // owned by the goal builder
   })
 
   test("every readout the DAEMON answers is offered by the frontend palette", () => {

@@ -59,6 +59,7 @@ import {
   useConnectionState,
   useSendApprovalDecision,
   useSendCancel,
+  useSendObjectiveMutate,
   useSendPermissionMode,
   useSendTurn,
   useServerAutoContinues,
@@ -385,6 +386,22 @@ export const App = (): JSX.Element => {
   const sendApprovalDecision = useSendApprovalDecision(client, learnedSessionId)
   const sendCancel = useSendCancel(client, learnedSessionId)
   const onSetPermission = useSendPermissionMode(client, learnedSessionId)
+  // `/goal <text>` — the browser's only door to a durable goal (USER actor).
+  const sendObjectiveMutate = useSendObjectiveMutate(client, learnedSessionId)
+  // `/goal work` is answered ASYNCHRONOUSLY on the same socket, and the daemon
+  // now answers every case including the refusals it used to drop. Without this
+  // subscriber the browser would send the request and show nothing either way —
+  // the exact silence the daemon half was just fixed to stop producing.
+  useEffect(
+    () =>
+      client.onGoalWorkResult((result) => {
+        appendClientMessage(
+          result.ok ? "system" : "error",
+          result.ok ? "goal work: accepted" : `goal work refused: ${result.reason}`,
+        )
+      }),
+    [client, appendClientMessage],
+  )
   // ADR-0540 W1-B — when the daemon declares the `serverAutoContinues`
   // capability marker, IT re-issues the post-approval `turn.run`; the client
   // must not (marker false / legacy daemon ⇒ client-owned continuation,
@@ -904,6 +921,13 @@ export const App = (): JSX.Element => {
         // slug at boot and never reads that env). Same socket the plan-input
         // answers use.
         sendControlRequest: (request) => client.sendControlRequest(request),
+        // `/goal <text>` — the ONLY route by which a browser can create an
+        // objective: the host binds this command to the USER actor, and a model
+        // `create` is refused on this surface in either gate posture.
+        sendObjectiveMutate: (mutation) => sendObjectiveMutate(mutation),
+        // `/goal work <text>` — one attributed goal turn. The accept/refusal
+        // arrives asynchronously on `goalWorkResult` (subscribed below).
+        sendGoalWork: (text) => client.sendGoalWork(text),
         endpoint:
           resolvedConnection === null
             ? null
@@ -923,6 +947,7 @@ export const App = (): JSX.Element => {
       getSlashContext,
       openKnobsPanel,
       sendTurn,
+      sendObjectiveMutate,
     ],
   )
 
