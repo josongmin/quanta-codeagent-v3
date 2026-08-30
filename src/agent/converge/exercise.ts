@@ -149,6 +149,97 @@ export interface ExerciseVerdict {
   readonly evidence?: string
 }
 
+/** Result facts are indexed before calls are interpreted: a result can arrive
+ * after its call, so evidence must not depend on stream ordering. */
+type ObservedResultIndex = {
+  readonly byCallId: ReadonlyMap<string, boolean>
+  readonly ptyReadObserved: boolean
+}
+
+const indexObservedResults = (events: readonly AgentEvent[]): ObservedResultIndex => {
+  const byCallId = new Map<string, boolean>()
+  let ptyReadObserved = false
+
+  for (const event of events) {
+    if (event.type !== "tool_result") continue
+    const observed = resultObservedOutput(event)
+    byCallId.set(event.id, observed)
+    if (event.name === PTY_READ && observed) ptyReadObserved = true
+  }
+  return { byCallId, ptyReadObserved }
+}
+
+/** Container execution has its own paired-call contract: an exercise command
+ * only proves L0 when that exact call has an observed result. */
+const inspectContainerExerciseEvidence = (
+  events: readonly AgentEvent[],
+  resultObservedById: ReadonlyMap<string, boolean>,
+): ExerciseVerdict | undefined => {
+  for (const event of events) {
+    if (event.type !== "tool_call" || event.name !== CONTAINER_EXEC) continue
+    const command = containerExecCommand(event)
+    if (
+      command !== undefined &&
+      isExerciseCommand(command) &&
+      resultObservedById.get(event.id) === true
+    ) {
+      return {
+        exercised: true,
+        evidence: `container_exec ran the deliverable and observed its output: \`${command.trim().slice(0, 160)}\``,
+      }
+    }
+  }
+  return undefined
+}
+
+/** A pty session needs a write, a deliverable signal, and a read. This helper
+ * deliberately gathers only the first signal, preserving the report's stable
+ * evidence line while keeping the parent verdict decision small. */
+type PtyExerciseSignals = {
+  readonly anyPtyWrite: boolean
+  readonly exerciseSignal: string | undefined
+}
+
+const inspectPtyExerciseSignals = (events: readonly AgentEvent[]): PtyExerciseSignals => {
+  let anyPtyWrite = false
+  let exerciseSignal: string | undefined
+
+  for (const event of events) {
+    if (event.type !== "tool_call" || !event.name.startsWith("pty_")) continue
+    if (event.name === PTY_WRITE) {
+      anyPtyWrite = true
+      const data = ptyWriteData(event)
+      if (data !== undefined && isExerciseCommand(data)) {
+        exerciseSignal ??= `pty_write \`${data.trim().slice(0, 120)}\``
+      }
+      continue
+    }
+    const paneCommand = ptyPaneCommand(event)
+    if (paneCommand !== undefined && isExerciseCommand(paneCommand)) {
+      exerciseSignal ??= `pane running \`${paneCommand.trim().slice(0, 120)}\``
+    }
+  }
+  return { anyPtyWrite, exerciseSignal }
+}
+
+const ptyExerciseVerdict = (
+  signals: PtyExerciseSignals,
+  ptyReadObserved: boolean,
+): ExerciseVerdict | undefined => {
+  if (!signals.anyPtyWrite || signals.exerciseSignal === undefined || !ptyReadObserved)
+    return undefined
+  return {
+    exercised: true,
+    evidence: `pty_* session ran the deliverable (${signals.exerciseSignal}) and observed its response (pty_read)`,
+  }
+}
+
+const noExerciseVerdict = (): ExerciseVerdict => ({
+  exercised: false,
+  evidence:
+    "no end-to-end exercise found: the trajectory only installed/built/inspected artifacts (or drove a shell without running the deliverable) — the deliverable was never run and observed against the task's success criterion",
+})
+
 /**
  * Inspect the recorded event stream for evidence of an END-TO-END exercise of the deliverable.
  *
@@ -160,63 +251,10 @@ export interface ExerciseVerdict {
  * Fail-closed throughout: install/build/probe/scaffolding and bare-shell chatter never satisfy it.
  */
 export const inspectExerciseEvidence = (events: readonly AgentEvent[]): ExerciseVerdict => {
-  const resultObservedById = new Map<string, boolean>()
-  let ptyReadObserved = false
+  const observed = indexObservedResults(events)
+  const containerVerdict = inspectContainerExerciseEvidence(events, observed.byCallId)
+  if (containerVerdict !== undefined) return containerVerdict
 
-  for (const ev of events) {
-    if (ev.type === "tool_result") {
-      resultObservedById.set(ev.id, resultObservedOutput(ev))
-      if (ev.name === PTY_READ && resultObservedOutput(ev)) ptyReadObserved = true
-    }
-  }
-
-  // PTY exercise needs THREE things: we drove the pane (a pty_write), we observed a response (a
-  // pty_read with output), and what we drove is the DELIVERABLE — signalled by EITHER a pty_write
-  // that TYPED an exercise command, OR a pane started running an exercise command (a REPL/server of
-  // the produced program). A bare `bash`/`python3` pane driven with `ls`/`print(1)` yields neither
-  // signal ⇒ fail-closed, not an exercise.
-  let anyPtyWrite = false
-  let ptyExerciseSignal: string | undefined
-  for (const ev of events) {
-    if (ev.type !== "tool_call") continue
-    if (ev.name.startsWith("pty_")) {
-      if (ev.name === PTY_WRITE) {
-        anyPtyWrite = true
-        const data = ptyWriteData(ev)
-        if (data !== undefined && isExerciseCommand(data))
-          ptyExerciseSignal ??= `pty_write \`${data.trim().slice(0, 120)}\``
-      } else {
-        const paneCmd = ptyPaneCommand(ev)
-        if (paneCmd !== undefined && isExerciseCommand(paneCmd))
-          ptyExerciseSignal ??= `pane running \`${paneCmd.trim().slice(0, 120)}\``
-      }
-      continue
-    }
-    if (ev.name === CONTAINER_EXEC) {
-      const command = containerExecCommand(ev)
-      if (command === undefined) continue
-      if (!isExerciseCommand(command)) continue
-      if (resultObservedById.get(ev.id) === true) {
-        return {
-          exercised: true,
-          evidence: `container_exec ran the deliverable and observed its output: \`${command.trim().slice(0, 160)}\``,
-        }
-      }
-    }
-  }
-
-  // (B) interactive exercise: drove the DELIVERABLE (typed an exercise command OR a deliverable
-  // pane) AND observed a response — never a bare-shell round-trip.
-  if (anyPtyWrite && ptyExerciseSignal !== undefined && ptyReadObserved) {
-    return {
-      exercised: true,
-      evidence: `pty_* session ran the deliverable (${ptyExerciseSignal}) and observed its response (pty_read)`,
-    }
-  }
-
-  return {
-    exercised: false,
-    evidence:
-      "no end-to-end exercise found: the trajectory only installed/built/inspected artifacts (or drove a shell without running the deliverable) — the deliverable was never run and observed against the task's success criterion",
-  }
+  const ptyVerdict = ptyExerciseVerdict(inspectPtyExerciseSignals(events), observed.ptyReadObserved)
+  return ptyVerdict ?? noExerciseVerdict()
 }
