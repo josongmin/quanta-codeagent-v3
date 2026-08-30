@@ -238,6 +238,18 @@ export { buildEmbedder, buildMemoryConfig, buildStore } from "./memory-compose"
  *  `./internal`. */
 export { DEFAULT_MODEL, parseRecallTiers }
 
+const subagentFeatureKnobs = (
+  enabled: boolean,
+  env: Readonly<Record<string, string | undefined>>,
+) => ({
+  enable6Tools: enabled && (readCliKnob("QUANTA_SUBAGENT_6TOOLS", "bool", env) ?? true),
+  maxConcurrent: readCliKnob("QUANTA_SUBAGENT_MAX_CONCURRENT", "int", env),
+  enableBatchSpawn: enabled && (readCliKnob("QUANTA_SUBAGENT_BATCH", "bool", env) ?? true),
+  enableIntrospect: enabled && (readCliKnob("QUANTA_SUBAGENT_INTROSPECT", "bool", env) ?? true),
+  enableWorkflow: enabled && (readCliKnob("QUANTA_WORKFLOW", "bool", env) ?? false),
+  enableSpawnAgentsCsv: enabled && (readCliKnob("QUANTA_SPAWN_AGENTS_CSV", "bool", env) ?? false),
+})
+
 /**
  * Resolve the `subagent` config block from env (Tier 1 capability, ADR-0011).
  * Default ON: `QUANTA_SUBAGENT` unset ⇒ enabled, so the `agent`/`task_output`/
@@ -270,34 +282,27 @@ export const buildSubagentConfig = (
   // (or QUANTA_SUBAGENT=0) disables. exec_command's model-supplied cwd is jailed
   // to the workspace by the loop assembly; dangerous commands still pass the
   // permission/HITL gate.
-  const enable6Tools = enabled && (readCliKnob("QUANTA_SUBAGENT_6TOOLS", "bool", env) ?? true)
-  const conc = readCliKnob("QUANTA_SUBAGENT_MAX_CONCURRENT", "int", env)
   // Companions to the parallel-worker router: `spawn_batch` (fan a prompt list
   // out in one call) + `list_agents` (see the spawned workers). Default-ON under
   // QUANTA_SUBAGENT; `QUANTA_SUBAGENT_BATCH=0` / `QUANTA_SUBAGENT_INTROSPECT=0`
   // disable individually. Zero-adapter: both ride the existing runner/registry.
-  const enableBatchSpawn = enabled && (readCliKnob("QUANTA_SUBAGENT_BATCH", "bool", env) ?? true)
-  const enableIntrospect =
-    enabled && (readCliKnob("QUANTA_SUBAGENT_INTROSPECT", "bool", env) ?? true)
   // §25.1 — `run_workflow` (LLM-authored declarative orchestration). DEFAULT-OFF
   // (gateOn ⇒ must be explicitly QUANTA_WORKFLOW=on/1): it fans out a tree of
   // subagents, so it opts in rather than riding the default subagent-ON seed.
-  const enableWorkflow = enabled && (readCliKnob("QUANTA_WORKFLOW", "bool", env) ?? false)
   // GAP7-4 — `spawn_agents_on_csv` (CSV batch fan-out). DEFAULT-OFF (opt-in: it
   // spawns one child per row, so it does not ride the default subagent-ON seed).
-  const enableSpawnAgentsCsv =
-    enabled && (readCliKnob("QUANTA_SPAWN_AGENTS_CSV", "bool", env) ?? false)
+  const features = subagentFeatureKnobs(enabled, env)
   return buildSubagentConfigCore({
     enabled,
     ...(depth !== undefined ? { maxDepth: depth } : {}),
     ...(taskRegistry !== undefined ? { taskRegistry } : {}),
     ...(activityStore !== undefined ? { activityStore } : {}),
-    ...(enable6Tools ? { enable6Tools: true } : {}),
-    ...(conc !== undefined ? { maxConcurrent: conc } : {}),
-    ...(enableBatchSpawn ? { enableBatchSpawn: true } : {}),
-    ...(enableIntrospect ? { enableIntrospect: true } : {}),
-    ...(enableWorkflow ? { enableWorkflow: true } : {}),
-    ...(enableSpawnAgentsCsv ? { enableSpawnAgentsCsv: true } : {}),
+    ...(features.enable6Tools ? { enable6Tools: true } : {}),
+    ...(features.maxConcurrent !== undefined ? { maxConcurrent: features.maxConcurrent } : {}),
+    ...(features.enableBatchSpawn ? { enableBatchSpawn: true } : {}),
+    ...(features.enableIntrospect ? { enableIntrospect: true } : {}),
+    ...(features.enableWorkflow ? { enableWorkflow: true } : {}),
+    ...(features.enableSpawnAgentsCsv ? { enableSpawnAgentsCsv: true } : {}),
   })
 }
 
