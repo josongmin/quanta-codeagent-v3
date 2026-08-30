@@ -83,8 +83,13 @@ export const buildReadoutSources = (args: {
   /** aug-27 — the model switch (sticky store + lazy provider catalog). Present ⇒
    *  the `/model` readout lists what `set_model` can actually select. */
   readonly modelSwitch?: WebModelSwitchHandle | undefined
+  /** ADR-0493 (G2b-01 wire) — the daemon env the thin-client route gate reads;
+   *  threaded to the skills source so each row carries its RESOLVED route on
+   *  this (web = thin) surface. Absent ⇒ gate off ⇒ byte-identical rows. */
+  readonly env?: Record<string, string | undefined>
 }): WebReadoutSources => {
-  const { taskRegistry, planStore, skillAuthority, memoryStore, usageHolder, modelSwitch } = args
+  const { taskRegistry, planStore, skillAuthority, memoryStore, usageHolder, modelSwitch, env } =
+    args
   return {
     ...(taskRegistry !== undefined
       ? { agents: () => taskRegistry.list().map(toAgentFleetReadoutRow) }
@@ -96,7 +101,9 @@ export const buildReadoutSources = (args: {
     // it removed). So the web panel converges with the prompt/ToolSearch/
     // invocation/CLI set — a disabled skill vanishes here too. Absent authority
     // (skills off / fail-open) ⇒ honest missing-source line.
-    ...(skillAuthority !== undefined ? { skills: buildSkillsReadoutSource(skillAuthority) } : {}),
+    ...(skillAuthority !== undefined
+      ? { skills: buildSkillsReadoutSource(skillAuthority, env) }
+      : {}),
     ...(memoryStore !== undefined
       ? { memory: async () => (await memoryStore.all()).map(toMemoryReadoutEntry) }
       : {}),

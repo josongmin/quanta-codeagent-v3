@@ -25,8 +25,9 @@
  */
 
 import { join } from "node:path"
+import { resolveThinClientRoute } from "@/agent/thin-client-dispatch"
 import { buildSkillRuntimeAuthority } from "@/runner/assemble/session-authorities"
-import { errMessage, logger, quantaHomeDirFrom } from "@/shared"
+import { errMessage, logger, quantaHomeDirFrom, type ThinClientRoute } from "@/shared"
 import type { SkillRuntimeAuthority } from "@/skill"
 
 /** The narrow structural row the web `/skills` readout renders (mirror of the
@@ -35,6 +36,10 @@ import type { SkillRuntimeAuthority } from "@/skill"
 export interface SkillReadoutRow {
   readonly name: string
   readonly description: string
+  /** ADR-0493 — the RESOLVED thin-client route for this skill on THIS (web)
+   *  surface. Present ONLY when it routes away from "local" (gate ON + a valid
+   *  frontmatter tag), so default-OFF rows are byte-identical. */
+  readonly route?: ThinClientRoute
 }
 
 /**
@@ -49,14 +54,30 @@ export interface SkillReadoutRow {
  * match the readout renderer's own ordering (stable panel output).
  */
 export const buildSkillsReadoutSource =
-  (authority: SkillRuntimeAuthority): (() => Promise<readonly SkillReadoutRow[]>) =>
+  (
+    authority: SkillRuntimeAuthority,
+    /** ADR-0493 (G2b-01 wire) — the daemon env the route gate reads. Absent
+     *  (legacy callers/tests) ⇒ gate cannot be on ⇒ every row resolves "local"
+     *  (byte-identical rows, no `route` field). */
+    env: Record<string, string | undefined> = {},
+  ): (() => Promise<readonly SkillReadoutRow[]>) =>
   async (): Promise<readonly SkillReadoutRow[]> => {
     // Management-read boundary — re-read the durable disabled set + republish the
     // projections at the persisted revision (never mutates the durable store), so
     // the web panel converges with a cross-process disable.
     const view = await authority.sync()
     return view.active
-      .map((s) => ({ name: s.name, description: s.description }))
+      .map((s) => {
+        // ADR-0493 — resolve the skill's EFFECTIVE thin-client route for this
+        // (web = thin) surface. Gate OFF / tag absent ⇒ "local" ⇒ the field is
+        // OMITTED, so the default row shape stays byte-identical.
+        const route = resolveThinClientRoute(s, "web", env)
+        return {
+          name: s.name,
+          description: s.description,
+          ...(route !== "local" ? { route } : {}),
+        }
+      })
       .sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))
   }
 

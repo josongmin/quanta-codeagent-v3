@@ -199,6 +199,9 @@ const assembleWebRuntimeParts = async (
   // live. NEVER throws (a broken config never crashes daemon boot).
   const { tools: mcpTools, clients: mcpClients, mcpAccessor } = await loadDaemonMcp(env, llm)
   return {
+    // ADR-0493 (G2b-01 wire) — the daemon env, exposed so the readout-source
+    // assembly can resolve each skill's thin-client route under the gate.
+    env,
     cwd,
     abort,
     permission,
@@ -336,6 +339,9 @@ const buildFacadeGetters = (
       skillAuthority: parts.skillAuthority,
       memoryStore: parts.memoryStore,
       usageHolder: parts.usageHolder,
+      // ADR-0493 (G2b-01) — thread the live env so the `/skills` rows carry each
+      // skill's RESOLVED thin-client route (gate OFF ⇒ byte-identical rows).
+      env: parts.env,
       // aug-27 — the `/model` readout's source: the SAME switch the control
       // request writes through, so the list a client sees is exactly the set
       // `set_model` will accept (no second candidate authority).
