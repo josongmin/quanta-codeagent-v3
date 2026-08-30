@@ -12,6 +12,13 @@ import { runAgent } from "@/agent"
 import { InMemoryStore } from "@/memory"
 import { baseConfig, FakeLLM, text } from "./_harness"
 
+const lastUserMessageText = (messages: FakeLLM["seenMessages"][number] | undefined): string => {
+  const tail = messages?.at(-1)
+  return tail?.role === "user"
+    ? tail.content.map((block) => (block.type === "text" ? block.text : "")).join("")
+    : ""
+}
+
 describe("memory citation end-to-end (loop surface)", () => {
   test("recall places ≥1 record → AgentOutcome.memoryCitations is populated with reminder_tail rows", async () => {
     // Seed the store with two records relevant to the user prompt so recall
@@ -70,11 +77,7 @@ describe("memory citation end-to-end (loop surface)", () => {
     // tail text the LLM actually saw (citation iff placed-in-prompt).
     const turnMessages = llm.seenMessages[0]
     if (!turnMessages) throw new Error("seenMessages[0] missing")
-    const tail = turnMessages.at(-1)
-    const tailText =
-      tail?.role === "user"
-        ? tail.content.map((b) => (b.type === "text" ? b.text : "")).join("")
-        : ""
+    const tailText = lastUserMessageText(turnMessages)
     expect(tailText).toContain("<system-reminder>")
     // The post-recall block uses the entry text; verify each cited record's
     // text fragment shows up in the rendered tail.
