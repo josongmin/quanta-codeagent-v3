@@ -240,9 +240,17 @@ export const resolveJailed = (requested: string, jailRoot: string): JailedPath =
 }
 
 export const readFile = async (path: string, baseDir?: string): Promise<string> => {
-  const file = Bun.file(resolvePath(path, baseDir))
-  if (!(await file.exists())) throw new Error(`File not found: ${path}`)
-  return file.text()
+  try {
+    // Do not stat this BunFile before reading it: exists() caches its size.
+    // An atomic rename between exists() and text() then reads the NEW inode
+    // using the OLD byte count, truncating a valid published JSON snapshot.
+    return await Bun.file(resolvePath(path, baseDir)).text()
+  } catch (error) {
+    if (typeof error === "object" && error !== null && "code" in error && error.code === "ENOENT") {
+      throw new Error(`File not found: ${path}`)
+    }
+    throw error
+  }
 }
 
 export const writeFile = async (path: string, content: string, baseDir?: string): Promise<void> => {

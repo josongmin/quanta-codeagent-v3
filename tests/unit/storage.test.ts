@@ -1,7 +1,9 @@
-import { afterAll, describe, expect, test } from "bun:test"
+import { afterAll, describe, expect, spyOn, test } from "bun:test"
 import { mkdtempSync, rmSync } from "node:fs"
+import { rename } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { isAbsolute, join, resolve } from "node:path"
+import { loadSessionById, saveSessionById, staticSessionRootProvider } from "@/session"
 import { __resetRuntimeConfig } from "@/shared"
 import {
   FsJailError,
@@ -14,6 +16,43 @@ import {
 } from "@/storage"
 
 const dir = mkdtempSync(join(tmpdir(), "storage-test-"))
+
+/** Force atomic publication at the old exists→text TOCTOU boundary. Publication
+ * runs even after the fix removes exists(), so this rail cannot pass vacuously.
+ * All bytes and renames remain real; only the scheduling point is controlled. */
+const publishDuringRead = async <T>(
+  path: string,
+  publish: () => Promise<void>,
+  read: () => Promise<T>,
+): Promise<T> => {
+  const realFile = Bun.file.bind(Bun)
+  let published = false
+  const fileSpy = spyOn(Bun, "file").mockImplementation((...args: Parameters<typeof Bun.file>) => {
+    const file = realFile(...args)
+    if (args[0] !== path) return file
+    return new Proxy(file, {
+      get(target, property) {
+        if (property === "text")
+          return async () => {
+            if (!published) {
+              published = true
+              await publish()
+            }
+            return target.text()
+          }
+        const value = Reflect.get(target, property, target)
+        return typeof value === "function" ? value.bind(target) : value
+      },
+    })
+  })
+  try {
+    const value = await read()
+    expect(published).toBe(true)
+    return value
+  } finally {
+    fileSpy.mockRestore()
+  }
+}
 
 afterAll(() => {
   rmSync(dir, { recursive: true, force: true })
@@ -99,6 +138,49 @@ describe("writeFile / readFile round-trip", () => {
   test("readFile rejects with a 'File not found' error for a missing file", async () => {
     const missing = join(dir, "nope.txt")
     await expect(readFile(missing)).rejects.toThrow(`File not found: ${missing}`)
+  })
+
+  test("an atomic rename during read returns complete JSON, never old-size truncated new bytes", async () => {
+    const path = join(dir, "published.json")
+    const staged = join(dir, "published.next.json")
+    const oldBody = JSON.stringify({ book: "old" })
+    const newBody = JSON.stringify({ book: "new".repeat(10_000) })
+    await writeFile(path, oldBody)
+    await writeFile(staged, newBody)
+    const body = await publishDuringRead(
+      path,
+      () => rename(staged, path),
+      () => readFile(path),
+    )
+    expect(body).toBe(newBody)
+    expect(JSON.parse(body)).toEqual({ book: "new".repeat(10_000) })
+  })
+
+  test("session loader survives a larger snapshot published by the real atomic session writer", async () => {
+    const provider = staticSessionRootProvider(join(dir, "sessions"))
+    const meta = {
+      id: "atomic-book",
+      title: "book",
+      cwd: dir,
+      createdAt: 1,
+      lastTouched: 1,
+      archived: false,
+    }
+    await saveSessionById(meta, { reason: "test", turns: 1, messages: [] }, provider)
+    const messages = [
+      { role: "user" as const, content: [{ type: "text" as const, text: "book".repeat(1_000) }] },
+    ]
+    const loaded = await publishDuringRead(
+      join(dir, "sessions", "atomic-book.json"),
+      () => saveSessionById(meta, { reason: "test", turns: 2, messages }, provider),
+      () => loadSessionById(meta.id, provider),
+    )
+    expect(loaded?.turns).toBe(2)
+    expect(loaded?.messages).toEqual(messages)
+  })
+
+  test("readFile preserves non-ENOENT I/O errors instead of reporting a missing file", async () => {
+    await expect(readFile(dir)).rejects.toMatchObject({ code: "EISDIR" })
   })
 
   test("a relative path is resolved against baseDir, not process.cwd()", async () => {
