@@ -517,6 +517,9 @@
     "tests/unit/apps/bench/promax/promax-bootstrap-phase-reachability.test.ts#SRC": {
       "walked": 3656,
       "matched": 2
+    },
+    "tests/unit/apps/bench/promax/promax-port-contract-unsuppressed.test.ts#PROFILES": {
+      "walked": 20
     }
   }
 }

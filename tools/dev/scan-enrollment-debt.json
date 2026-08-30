@@ -2,7 +2,6 @@
   "note": "Scanning guards that state a zero-verdict but pin no MEASURED reach — their floor, if any, is a number written at the call site, which cannot see a subtree disappear. Enforced by tests/unit/_arch/scan-enrollment-ratchet.test.ts. `unenrolled` may only SHRINK: a new guard must call assertScanPopulation (tests/unit/_shared/scan-population.ts) and pin its reach in tools/dev/scan-reach-baseline.json, and a guard that enrolls must be removed from here. `failsClosed` is NOT debt either — it names enumerations that need no reach floor because an EMPTY walk turns their verdict red by itself, and each entry's file must call `assertFailsClosedOnEmpty`, which executes that claim instead of asserting it in a comment. `externalCorpus` is NOT debt — it names guards the helper can never measure because their corpus is not the repo, and each entry is checked against the host path it claims. `expectedIds` records, per enrolled file, the baseline ids that file must REPORT at runtime; `bun run scan-reach` refuses when one is missing. NO TOTALS ARE WRITTEN HERE. A hand-maintained count drifts the moment one side moves — this note said '56 unenrolled of 86' while the arrays said 54 of 87 — so the number is whatever the arrays are.",
   "unenrolled": [
     "tests/unit/_arch/repo-path-anchor-ratchet.test.ts",
-    "tests/unit/apps/bench/promax/promax-port-contract-unsuppressed.test.ts",
     "tests/unit/apps/bench/terminal/tb-2-0-retirement.test.ts",
     "tests/unit/observability/new-slice-metrics-hellgate.test.ts"
   ],
@@ -473,6 +472,9 @@
     ],
     "tests/unit/apps/bench/promax/promax-bootstrap-phase-reachability.test.ts": [
       "tests/unit/apps/bench/promax/promax-bootstrap-phase-reachability.test.ts#SRC"
+    ],
+    "tests/unit/apps/bench/promax/promax-port-contract-unsuppressed.test.ts": [
+      "tests/unit/apps/bench/promax/promax-port-contract-unsuppressed.test.ts#PROFILES"
     ]
   }
 }
