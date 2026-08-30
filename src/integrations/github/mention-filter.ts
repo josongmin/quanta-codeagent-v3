@@ -140,23 +140,24 @@ const stripInlineCode = (line: string): string => {
   // Replace `...` with whitespace of equal length so column offsets stay
   // stable (we don't use offsets externally yet, but it keeps the substring
   // search aligned with the original line).
+  const firstTick = line.indexOf("`")
+  if (firstTick < 0) return line
+
   let out = ""
-  let i = 0
-  while (i < line.length) {
-    if (line[i] === "`") {
-      const end = line.indexOf("`", i + 1)
-      if (end < 0) {
-        out += line.slice(i) // unmatched — keep literal
-        break
-      }
-      out += " ".repeat(end - i + 1)
-      i = end + 1
-      continue
+  let copiedUntil = 0
+  let tick = firstTick
+  while (tick >= 0) {
+    const end = line.indexOf("`", tick + 1)
+    if (end < 0) {
+      out += line.slice(copiedUntil) // unmatched — keep literal
+      return out
     }
-    out += line[i]
-    i += 1
+    out += line.slice(copiedUntil, tick)
+    out += " ".repeat(end - tick + 1)
+    copiedUntil = end + 1
+    tick = line.indexOf("`", copiedUntil)
   }
-  return out
+  return out + line.slice(copiedUntil)
 }
 
 /**

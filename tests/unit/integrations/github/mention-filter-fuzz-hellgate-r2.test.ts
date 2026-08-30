@@ -41,25 +41,26 @@ const smallBody = hugeBody(SMALL_BODY_BYTES)
 const largeBody = hugeBody(LARGE_BODY_BYTES)
 
 /**
- * Minimum scan cost over `repeats` runs of an ALREADY-ALLOCATED body.
+ * Minimum process CPU cost over `repeats` runs of an ALREADY-ALLOCATED body.
  *
  * Load-robustness comes from three properties, in order of importance:
- *  1. the whole measurement is SYNCHRONOUS — a congested event loop (the
- *     full-suite failure mode) cannot interleave anything into it;
- *  2. contention and GC can only ADD time to a run, so the MINIMUM over K runs
- *     is the estimator closest to the algorithm's real cost;
+ *  1. `process.cpuUsage` measures CPU consumed by THIS process, so host
+ *     preemption by a VM/compiler cannot inflate one input size selectively;
+ *  2. in-process GC can only ADD work to a run, so the MINIMUM over K runs is
+ *     the estimator closest to the algorithm's real cost;
  *  3. the body is built by the caller and warmed once here, so neither the
  *     multi-MB string allocation nor JIT warm-up is inside a timed window.
  * Every repeat re-asserts the match, so a regression that "gets fast" by not
  * scanning cannot pass.
  */
-const minScanCostMs = (body: string, repeats = 7): number => {
+const minScanCpuCostMs = (body: string, repeats = 7): number => {
   expect(matchMention(body, ["@quanta"]).matched).toBe(true) // warm-up, untimed
   let min = Number.POSITIVE_INFINITY
   for (let i = 0; i < repeats; i++) {
-    const startNs = Bun.nanoseconds()
+    const startUsage = process.cpuUsage()
     const m = matchMention(body, ["@quanta"])
-    const ms = (Bun.nanoseconds() - startNs) / 1e6
+    const usage = process.cpuUsage(startUsage)
+    const ms = (usage.user + usage.system) / 1_000
     expect(m.matched).toBe(true)
     if (ms < min) min = ms
   }
@@ -179,15 +180,16 @@ describe("ADR-0314 hellgate R2 — mention-filter fuzz", () => {
       // scan must not creep into the fence walk, the inline-code strip or the
       // boundary search.
       //
-      // So: measure WORK SCALING with an estimator congestion cannot corrupt in
-      // the failing direction (see `minScanCostMs`). A 16x input step separates
+      // So: measure WORK SCALING with an estimator host congestion cannot
+      // corrupt in the failing direction (see `minScanCpuCostMs`). A 16x input
+      // step separates
       // the classes widely: linear ⇒ ratio ≈ 16, quadratic ⇒ ≈ 256,
       // catastrophic ⇒ never returns (the backstop above). The ceiling sits at
       // 64 — measured worst case on a loaded box is ~23, and quadratic is 4x
       // above the ceiling — so a constant-factor slowdown (a slow machine, a
       // congested suite) can never red this, and no super-linear class survives.
-      const small = minScanCostMs(smallBody)
-      const large = minScanCostMs(largeBody)
+      const small = minScanCpuCostMs(smallBody)
+      const large = minScanCpuCostMs(largeBody)
       expect(large / small).toBeLessThan(SCALE_STEP * 4)
     },
     HUGE_BODY_BACKSTOP_MS,

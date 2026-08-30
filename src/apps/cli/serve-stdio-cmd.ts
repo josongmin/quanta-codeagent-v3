@@ -428,13 +428,23 @@ export const runServeStdioCmd = async (
     return EXIT_USAGE
   }
 
-  return await serveOverStdio(io, parsed)
+  // Arm lifecycle delivery BEFORE the first async assembly boundary. The
+  // bridge can synchronously emit a response while `flushInbound()` runs; a
+  // parent is then entitled to send SIGTERM immediately. Registering the
+  // handler only after that flush left a signal-death race.
+  const shutdown = new Promise<void>((resolve) => io.onShutdown(resolve))
+
+  return await serveOverStdio(io, parsed, shutdown)
 }
 
 /** Assemble the real deps, open the runtime session with the stdio transport
  *  injected, and block until stdin EOF / SIGTERM. Split out so
  *  {@link runServeStdioCmd} owns only the help + gate + arg fast paths. */
-const serveOverStdio = async (io: ServeStdioCmdIo, args: ServeStdioArgs): Promise<number> => {
+const serveOverStdio = async (
+  io: ServeStdioCmdIo,
+  args: ServeStdioArgs,
+  shutdown: Promise<void>,
+): Promise<number> => {
   // The reusable session opener lives in `@/apps/headless` (the SECOND
   // consumer). Dynamic import keeps the heavy bootstrap off the gate-off fast
   // path above.
@@ -529,15 +539,7 @@ const serveOverStdio = async (io: ServeStdioCmdIo, args: ServeStdioArgs): Promis
 
   // Block until stdin EOF / SIGTERM, then gracefully close (releases the
   // JsonlSessionEventLog lock + reaps any child PTYs) and exit 0.
-  await new Promise<void>((resolve) => {
-    let done = false
-    const shutdown = (): void => {
-      if (done) return
-      done = true
-      resolve()
-    }
-    io.onShutdown(shutdown)
-  })
+  await shutdown
 
   // Graceful teardown: detach the transport bridge FIRST (stop accepting frames)
   // then close the session (host close → event-log lock release + child reap).
