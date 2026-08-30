@@ -34,32 +34,64 @@
  * hellgate snapshots in `web-fetch-hellgate.test.ts` stay green.
  */
 
-import TurndownService from "turndown"
+import type TurndownService from "turndown"
+import type { Rule, TurndownOptions } from "turndown"
 
-/** Configured singleton — exposed so callers can register custom rules
- *  (e.g. preserve `<code class="language-X">`, table-conversion plugin) in
- *  a future ADR. NOT a per-call instance; turndown reuses parsed-DOM and
- *  rule state between calls without leaking. */
-export const turndown: TurndownService = new TurndownService({
+type TurndownConstructor = new (options?: TurndownOptions) => TurndownService
+
+const TURNDOWN_OPTIONS = {
   headingStyle: "atx",
   codeBlockStyle: "fenced",
   bulletListMarker: "-",
   emDelimiter: "_",
   strongDelimiter: "**",
   linkStyle: "inlined",
-})
+} as const satisfies TurndownOptions
 
-// Strip security/noise elements entirely — their text content is NOT
-// surfaced to the model. `noscript` and `iframe` are not security-critical
-// here (we already require text/html content-type) but they reliably emit
-// junk text that wastes context.
-turndown.remove(["script", "style", "noscript", "iframe"])
+let configuredTurndown: TurndownService | undefined
+
+const getTurndown = (): TurndownService => {
+  if (configuredTurndown !== undefined) return configuredTurndown
+  // Literal synchronous require preserves htmlToMarkdown's synchronous public
+  // contract while keeping turndown + its domino DOM out of sessions that never
+  // fetch HTML. The configured instance remains one process-wide singleton.
+  const Turndown = require("turndown") as TurndownConstructor
+  const service = new Turndown(TURNDOWN_OPTIONS)
+  service.remove(["script", "style", "noscript", "iframe"])
+  configuredTurndown = service
+  return service
+}
+
+/** Configured singleton — exposed so callers can register custom rules
+ *  (e.g. preserve `<code class="language-X">`, table-conversion plugin) in
+ *  a future ADR. NOT a per-call instance; turndown reuses parsed-DOM and
+ *  rule state between calls without leaking. */
+export const turndown: TurndownService = {
+  turndown: (html) => getTurndown().turndown(html),
+  remove(filter) {
+    getTurndown().remove(filter)
+    return turndown
+  },
+  addRule(key: string, rule: Rule) {
+    getTurndown().addRule(key, rule)
+    return turndown
+  },
+  keep(filter) {
+    getTurndown().keep(filter)
+    return turndown
+  },
+  use(plugin) {
+    getTurndown().use(plugin)
+    return turndown
+  },
+  escape: (text) => getTurndown().escape(text),
+}
 
 /** Convert an HTML string to Markdown using the configured turndown
  *  singleton. Pure / no I/O. Matches the byte-shape of the prior inline
  *  9-stage converter: 3+ consecutive newlines collapse to exactly 2,
  *  leading + trailing whitespace trimmed. */
 export const htmlToMarkdown = (html: string): string => {
-  const md = turndown.turndown(html)
+  const md = getTurndown().turndown(html)
   return md.replace(/\n{3,}/g, "\n\n").trim()
 }

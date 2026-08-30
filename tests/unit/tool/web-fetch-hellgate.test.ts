@@ -13,8 +13,43 @@
  */
 
 import { describe, expect, test } from "bun:test"
+import { join } from "node:path"
 import type { ToolContext, ToolEvent, ToolResult } from "@/tool/types"
 import { htmlToMarkdown, turndown, WEB_FETCH_MAX_BYTES_CEILING, webFetchTool } from "@/tool/web"
+
+test("production runtime import does not initialize the optional HTML DOM converter", async () => {
+  const runtimeFactory = join(import.meta.dir, "../../../src/apps/web-daemon/runtime-factory.ts")
+  const converter = join(import.meta.dir, "../../../src/tool/web/html-to-markdown.ts")
+  const child = Bun.spawn(
+    [
+      process.execPath,
+      "-e",
+      `const loaded = () => Object.keys(require.cache).filter(p => p.includes("/turndown/") || p.includes("/@mixmark-io/domino/"));
+       const { buildProductionRuntimeFactory } = await import(${JSON.stringify(runtimeFactory)});
+       const afterRuntimeImport = loaded();
+       const { htmlToMarkdown } = await import(${JSON.stringify(converter)});
+       const markdown = htmlToMarkdown("<h1>lazy</h1>");
+       console.log(JSON.stringify({ factoryType: typeof buildProductionRuntimeFactory, afterRuntimeImport, afterUse: loaded(), markdown }));`,
+    ],
+    { cwd: join(import.meta.dir, "../../.."), stdout: "pipe", stderr: "pipe" },
+  )
+  const [stdout, stderr, code] = await Promise.all([
+    new Response(child.stdout).text(),
+    new Response(child.stderr).text(),
+    child.exited,
+  ])
+  expect({ code, stderr }).toEqual({ code: 0, stderr: "" })
+  const result = JSON.parse(stdout) as {
+    factoryType: string
+    afterRuntimeImport: string[]
+    afterUse: string[]
+    markdown: string
+  }
+  expect(result.factoryType).toBe("function")
+  expect(result.afterRuntimeImport).toEqual([])
+  expect(result.afterUse.length).toBeGreaterThan(1)
+  expect(result.markdown).toContain("# lazy")
+})
 
 /* ------------------------------------------------------------------ */
 /* harness                                                             */

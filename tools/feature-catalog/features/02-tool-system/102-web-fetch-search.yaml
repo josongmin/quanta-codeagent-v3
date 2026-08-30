@@ -24,7 +24,10 @@ purpose: |
   Two read-only web tools delivered as a single slice. (1) `web_fetch` —
   fetch an HTTPS URL and return the body (HTML→Markdown); always-on, no
   provider required, factory binds globalThis.fetch unless a fake fetcher
-  is injected for tests. Security: TLS-required (non-`https:` protocols
+  is injected for tests. The synchronous HTML conversion facade initializes
+  turndown and its DOM only on the first HTML response, so sessions that never
+  fetch HTML do not pay that optional parser's startup cost. Security:
+  TLS-required (non-`https:` protocols
   rejected at URL-parse boundary, same posture as Claude Code WebFetch);
   static SSRF deny-list of 9 ranges covering loopback / RFC1918 private /
   link-local / IPv6 loopback / ULA (literal-host match, NO DNS resolution
