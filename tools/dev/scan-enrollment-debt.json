@@ -17,7 +17,6 @@
     "tests/unit/realtime/voice-session-hellgate.test.ts",
     "tests/unit/runtime-config-no-dead-knob-ratchet.test.ts",
     "tests/unit/runtime/exec-cluster-spawn-env-scrub-ban-hellgate.test.ts",
-    "tests/unit/slice-boundary-config-parity.test.ts",
     "tests/unit/tool-surface-manifest-hellgate.test.ts"
   ],
   "externalCorpus": [
@@ -437,6 +436,9 @@
     "tests/unit/no-benchmark-overfit-steer-ratchet.test.ts": [
       "tests/unit/no-benchmark-overfit-steer-ratchet.test.ts#BATCH-DRIVER-LANES",
       "tests/unit/no-benchmark-overfit-steer-ratchet.test.ts#BENCH-DRIVER-LANES"
+    ],
+    "tests/unit/slice-boundary-config-parity.test.ts": [
+      "tests/unit/slice-boundary-config-parity.test.ts#UNIT-ENTRYPOINTS"
     ]
   }
 }

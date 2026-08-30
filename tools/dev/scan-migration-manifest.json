@@ -125,20 +125,6 @@
       ]
     },
     {
-      "file": "tests/unit/slice-boundary-config-parity.test.ts",
-      "klass": "A-recursive-walk",
-      "enumerators": [
-        "readdirSync"
-      ],
-      "recursive": true,
-      "absolutePaths": false,
-      "derived": false,
-      "roots": 1,
-      "floorLines": [
-        "90: ).toBeGreaterThan(1)"
-      ]
-    },
-    {
       "file": "tests/unit/tool-surface-manifest-hellgate.test.ts",
       "klass": "A-recursive-walk",
       "enumerators": [],

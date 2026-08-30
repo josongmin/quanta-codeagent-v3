@@ -445,6 +445,9 @@
     },
     "tests/unit/no-benchmark-overfit-steer-ratchet.test.ts#BENCH-DRIVER-LANES": {
       "walked": 5
+    },
+    "tests/unit/slice-boundary-config-parity.test.ts#UNIT-ENTRYPOINTS": {
+      "walked": 1722
     }
   }
 }
