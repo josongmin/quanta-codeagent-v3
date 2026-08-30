@@ -461,25 +461,79 @@ const admit = (
 ): TerminalAdmission => {
   const duplicateTrialIds = duplicateIdsOf(trials)
   const rejections = rejectionsOf(trials)
+  const metrics = admissionMetrics(trials, defects, k)
+  const reasons = admissionReasons(duplicateTrialIds, rejections, metrics, k)
+  const complete =
+    metrics.observedTaskCount === EXPECTED_TASK_COUNT &&
+    metrics.shortTasks === 0 &&
+    metrics.missingReward === 0 &&
+    metrics.malformed === 0 &&
+    metrics.noAgentActivity === 0 &&
+    defects.length === 0
+  const standardConfig = metrics.overridden.length === 0
+  const verdict = admissionVerdict(duplicateTrialIds, rejections, complete, standardConfig)
+  return {
+    verdict,
+    complete,
+    standardConfig,
+    promotable: verdict === "official" && metrics.rewardedWithoutTrajectory === 0,
+    k,
+    expectedTaskCount: EXPECTED_TASK_COUNT,
+    observedTaskCount: metrics.observedTaskCount,
+    expectedTrials: metrics.expectedTrials,
+    admittedTrials: metrics.admittedTrials,
+    duplicateTrialIds,
+    rejections,
+    reasons,
+  }
+}
 
+interface AdmissionMetrics {
+  readonly observedTaskCount: number
+  readonly expectedTrials: number
+  readonly admittedTrials: number
+  readonly shortTasks: number
+  readonly missingReward: number
+  readonly malformed: number
+  readonly noAgentActivity: number
+  readonly overridden: readonly TerminalTrialRecord[]
+  readonly rewardedWithoutTrajectory: number
+  readonly defectCount: number
+}
+
+const admissionMetrics = (
+  trials: readonly TerminalTrialRecord[],
+  defects: readonly TerminalTrialDefect[],
+  k: number,
+): AdmissionMetrics => {
   const perTask = new Map<string, number>()
   for (const trial of trials) perTask.set(trial.taskId, (perTask.get(trial.taskId) ?? 0) + 1)
+  return {
+    observedTaskCount: perTask.size,
+    expectedTrials: EXPECTED_TASK_COUNT * k,
+    admittedTrials: trials.length,
+    shortTasks: [...perTask.values()].filter((count) => count !== k).length,
+    missingReward: trials.filter((t) => t.outcome === "missing_reward").length,
+    malformed: trials.filter((t) => t.outcome === "malformed_result").length,
+    // Same class as `missing_reward` / `malformed_result`: not a scoreable model
+    // result. The dangerous one, though — Harbor reports an unattempted trial as a
+    // perfectly normal completed trial, so without this a whole campaign of them
+    // would be admitted as a legitimate 0%.
+    noAgentActivity: trials.filter((t) => t.outcome === "no_agent_activity").length,
+    overridden: trials.filter((t) => t.configOverrides.length > 0),
+    rewardedWithoutTrajectory: trials.filter(
+      (t) => isSuccess(t.reward) && t.trajectoryPath === undefined,
+    ).length,
+    defectCount: defects.length,
+  }
+}
 
-  const expectedTrials = EXPECTED_TASK_COUNT * k
-  const admittedTrials = trials.length
-  const shortTasks = [...perTask.values()].filter((count) => count !== k).length
-  const missingReward = trials.filter((t) => t.outcome === "missing_reward").length
-  const malformed = trials.filter((t) => t.outcome === "malformed_result").length
-  // Same class as `missing_reward` / `malformed_result`: not a scoreable model
-  // result. The dangerous one, though — Harbor reports an unattempted trial as a
-  // perfectly normal completed trial, so without this a whole campaign of them
-  // would be admitted as a legitimate 0%.
-  const noAgentActivity = trials.filter((t) => t.outcome === "no_agent_activity").length
-  const overridden = trials.filter((t) => t.configOverrides.length > 0)
-  const rewardedWithoutTrajectory = trials.filter(
-    (t) => isSuccess(t.reward) && t.trajectoryPath === undefined,
-  ).length
-
+const admissionReasons = (
+  duplicateTrialIds: readonly string[],
+  rejections: readonly TerminalRejection[],
+  metrics: AdmissionMetrics,
+  k: number,
+): string[] => {
   const reasons: string[] = []
   if (duplicateTrialIds.length > 0) reasons.push(`duplicate-trial-ids:${duplicateTrialIds.length}`)
   for (const rejection of new Set(rejections.map((r) => r.kind))) {
@@ -487,60 +541,42 @@ const admit = (
       `${rejection.replaceAll("_", "-")}:${rejections.filter((r) => r.kind === rejection).length}`,
     )
   }
-  if (perTask.size !== EXPECTED_TASK_COUNT) {
-    reasons.push(`tasks:${perTask.size}/${EXPECTED_TASK_COUNT}`)
+  if (metrics.observedTaskCount !== EXPECTED_TASK_COUNT) {
+    reasons.push(`tasks:${metrics.observedTaskCount}/${EXPECTED_TASK_COUNT}`)
   }
-  if (admittedTrials !== expectedTrials) {
-    reasons.push(`admitted-trials:${admittedTrials}/${expectedTrials}`)
+  if (metrics.admittedTrials !== metrics.expectedTrials) {
+    reasons.push(`admitted-trials:${metrics.admittedTrials}/${metrics.expectedTrials}`)
   }
-  if (shortTasks > 0) reasons.push(`tasks-not-at-k${k}:${shortTasks}`)
-  if (missingReward > 0) reasons.push(`missing-reward:${missingReward}`)
-  if (malformed > 0) reasons.push(`malformed-result:${malformed}`)
-  if (noAgentActivity > 0) reasons.push(`no-agent-activity:${noAgentActivity}`)
-  if (defects.length > 0) reasons.push(`unreadable-trial-records:${defects.length}`)
-  if (overridden.length > 0) {
-    reasons.push(`nonstandard-config:${overridden.length} (${overridden[0]?.configOverrides[0]})`)
+  if (metrics.shortTasks > 0) reasons.push(`tasks-not-at-k${k}:${metrics.shortTasks}`)
+  if (metrics.missingReward > 0) reasons.push(`missing-reward:${metrics.missingReward}`)
+  if (metrics.malformed > 0) reasons.push(`malformed-result:${metrics.malformed}`)
+  if (metrics.noAgentActivity > 0) reasons.push(`no-agent-activity:${metrics.noAgentActivity}`)
+  if (metrics.defectCount > 0) reasons.push(`unreadable-trial-records:${metrics.defectCount}`)
+  if (metrics.overridden.length > 0) {
+    reasons.push(
+      `nonstandard-config:${metrics.overridden.length} (${metrics.overridden[0]?.configOverrides[0]})`,
+    )
   }
-  if (rewardedWithoutTrajectory > 0) {
-    reasons.push(`rewarded-trials-without-trajectory:${rewardedWithoutTrajectory}`)
+  if (metrics.rewardedWithoutTrajectory > 0) {
+    reasons.push(`rewarded-trials-without-trajectory:${metrics.rewardedWithoutTrajectory}`)
   }
+  return reasons
+}
 
-  // Deliberately MINIMAL and non-redundant: "89 tasks" plus "every task at
-  // exactly k" already implies "89*k admitted trials", so adding the count as a
-  // third clause would make each of the three individually deletable without a
-  // test noticing. `admittedTrials` is still REPORTED (and shows up in
-  // `reasons`) — it is just not a second way to derive the same fact.
-  const complete =
-    perTask.size === EXPECTED_TASK_COUNT &&
-    shortTasks === 0 &&
-    missingReward === 0 &&
-    malformed === 0 &&
-    noAgentActivity === 0 &&
-    defects.length === 0
-  const standardConfig = overridden.length === 0
+const admissionVerdict = (
+  duplicateTrialIds: readonly string[],
+  rejections: readonly TerminalRejection[],
+  complete: boolean,
+  standardConfig: boolean,
+): TerminalVerdict => {
   const rejected = duplicateTrialIds.length > 0 || rejections.length > 0
-  const verdict: TerminalVerdict = rejected
+  return rejected
     ? "rejected"
     : !complete
       ? "incomplete"
       : standardConfig
         ? "official"
         : "nonstandard"
-
-  return {
-    verdict,
-    complete,
-    standardConfig,
-    promotable: verdict === "official" && rewardedWithoutTrajectory === 0,
-    k,
-    expectedTaskCount: EXPECTED_TASK_COUNT,
-    observedTaskCount: perTask.size,
-    expectedTrials,
-    admittedTrials,
-    duplicateTrialIds,
-    rejections,
-    reasons,
-  }
 }
 
 // ── the report ───────────────────────────────────────────────────────────────
