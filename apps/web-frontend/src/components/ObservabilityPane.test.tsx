@@ -80,27 +80,38 @@ describe("ObservabilityPane — honest approvals (UUX-2-08)", () => {
 })
 
 describe("ObservabilityPane — goal authority projection", () => {
-  it("renders validation, remaining criteria, budget, and stale evidence", () => {
+  // The fixture below could not be constructed before this packet: the mirror's
+  // flat `SuccessCriterion` allowed a `checked` criterion with no `check` and a
+  // completion receipt with no actor — objects the daemon can never send. It now
+  // mirrors the daemon's discriminated shape, so the compiler refuses them.
+  it("renders validation, remaining criteria, and budget", () => {
     const objective: Objective = {
       objectiveId: "goal-1",
-      createdBy: "user",
       threadId: "thread-1",
       goal: "ship safely",
+      createdBy: "user",
       successCriteria: [
-        { kind: "checked", id: "tests", text: "tests pass", met: false },
+        {
+          kind: "checked",
+          id: "tests",
+          text: "tests pass",
+          met: false,
+          check: { id: "check-1", kind: "command", argv: ["bun", "test"] },
+        },
         {
           kind: "manual",
           id: "docs",
           text: "docs updated",
           met: true,
-          completion: { source: "manual" },
+          completion: { source: "manual", actor: "user" },
         },
       ],
       status: "active",
       budget: { turnsUsed: 2, maxTurns: 5, tokensUsed: 100, maxTokens: 500 },
       blockers: [],
+      blockerObservations: [],
       nextActions: [],
-      verificationState: "stale",
+      attempts: { autonomousTurnsStarted: 0 },
       createdAt: 1,
       updatedAt: 2,
     }
@@ -109,6 +120,58 @@ describe("ObservabilityPane — goal authority projection", () => {
     expect(html).toContain("Remaining:")
     expect(html).toContain("tests")
     expect(html).toContain("2/5 turns")
-    expect(html).toContain("Verified source is stale")
+  })
+
+  it("names the bound that stopped the goal, which the wire was already carrying", () => {
+    const objective: Objective = {
+      objectiveId: "goal-2",
+      threadId: "thread-1",
+      goal: "ship safely",
+      createdBy: "user",
+      successCriteria: [],
+      status: "budget_limited",
+      budget: {
+        turnsUsed: 20,
+        maxTurns: 20,
+        tokensUsed: 1,
+        limitedBy: "product-hard-cap",
+      },
+      blockers: [],
+      blockerObservations: [],
+      nextActions: [],
+      attempts: { autonomousTurnsStarted: 20 },
+      createdAt: 1,
+      updatedAt: 2,
+    }
+    const html = renderToStaticMarkup(<ObservabilityPane state={{ ...emptyState, objective }} />)
+    expect(html).toContain("limited by: product-hard-cap")
+  })
+
+  it("shows how close a blocked dependency is to promoting", () => {
+    const objective: Objective = {
+      objectiveId: "goal-3",
+      threadId: "thread-1",
+      goal: "ship safely",
+      createdBy: "user",
+      successCriteria: [],
+      status: "active",
+      budget: { turnsUsed: 1, tokensUsed: 1 },
+      blockers: [],
+      blockerObservations: [
+        {
+          observationId: "obs-1",
+          dependencyRef: "approval:deploy",
+          waitingOn: "user",
+          distinctAttemptIds: ["a1", "a2"],
+          lastObservedAt: 5,
+        },
+      ],
+      nextActions: [],
+      attempts: { autonomousTurnsStarted: 2 },
+      createdAt: 1,
+      updatedAt: 2,
+    }
+    const html = renderToStaticMarkup(<ObservabilityPane state={{ ...emptyState, objective }} />)
+    expect(html).toContain("2/3 attempts")
   })
 })

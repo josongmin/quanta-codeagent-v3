@@ -1143,15 +1143,26 @@ describe("wire-protocol field-shape drift: copy field shapes === canonical daemo
   //
   // Same scanner, different canonical root. Interface-name matching means the
   // criterion union is out of scope until it is expressed as interfaces.
-  const CANONICAL_OBJECTIVE_PATHS = ["src/objective/types.ts"] as const
+  // `provenance.ts` rides along because `types.ts` IMPORTS `ObjectiveActor` from
+  // it: without the alias in scope the canonical side prints a bare name while
+  // the copy expands its own, and the comparison is a false red.
+  const CANONICAL_OBJECTIVE_PATHS = [
+    "src/objective/types.ts",
+    "src/objective/provenance.ts",
+  ] as const
 
   const APPROVED_OBJECTIVE_NARROWINGS: Readonly<Record<string, ApprovedFieldNarrowing>> = {}
+
+  // NOTE the different copy file: the session arm reads the GENERATED bundle,
+  // but the objective mirror is hand-written in `types/protocol.ts` — which is
+  // exactly why it had no guard and exactly what this arm exists to watch.
+  const HAND_WRITTEN_MIRROR = "apps/web-frontend/src/types/protocol.ts"
 
   let objectiveReportMemo: FieldShapeDriftReport | undefined
   const objectiveReport = (): FieldShapeDriftReport => {
     if (objectiveReportMemo !== undefined) return objectiveReportMemo
     const copy = parseProtocolSources([
-      { source: readText(FRONTEND_PROTOCOL_PATH), label: "web-frontend-protocol-copy" },
+      { source: readText(join(REPO_ROOT, HAND_WRITTEN_MIRROR)), label: HAND_WRITTEN_MIRROR },
     ])
     const canonical = parseProtocolSources(
       CANONICAL_OBJECTIVE_PATHS.map((path) => ({

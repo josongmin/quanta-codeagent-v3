@@ -158,10 +158,24 @@ const ObjectiveCard = memo(({ objective }: { objective: Objective | null }): JSX
           <dd className="inline">
             {objective.budget.turnsUsed}/{objective.budget.maxTurns ?? "∞"} turns ·{" "}
             {objective.budget.tokensUsed}/{objective.budget.maxTokens ?? "∞"} tokens
+            {objective.budget.limitedBy === undefined
+              ? null
+              : ` · limited by: ${objective.budget.limitedBy}`}
           </dd>
         </div>
-        {objective.verificationState === "stale" ? (
-          <div className="text-warn">Verified source is stale</div>
+        {/* Replaced a `verificationState === "stale"` branch that could never
+            render: the field existed nowhere in the daemon. There is no persistent
+            stale state to show — the verifier reconciles a stale digest away by
+            invalidating the criterion — so what belongs here is the bound that
+            actually stopped the goal, which the wire has been carrying all along. */}
+        {objective.blockerObservations.length > 0 ? (
+          <div>
+            <dt className="inline text-ink-tertiary">Observing: </dt>
+            <dd className="inline">
+              {objective.blockerObservations[0]?.distinctAttemptIds.length ?? 0}/3 attempts on one
+              dependency
+            </dd>
+          </div>
         ) : null}
       </dl>
       {objective.blockers.length > 0 ? (

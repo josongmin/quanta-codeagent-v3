@@ -147,20 +147,66 @@ export interface RunEntry {
   readonly error?: string
 }
 
+// The field order and union order below mirror `src/objective/types.ts` exactly,
+// because a guard now compares them (`[objective-mirror]` in
+// tests/unit/web-frontend-protocol-drift-contract-hellgate.test.ts). Before it
+// existed this block declared two fields — `verifiedSourceDigest` and
+// `verificationState` — that have never existed anywhere in `src/`, and the pane
+// rendered a "stale" branch that could not light up; meanwhile the emitter ships
+// `objective.get()` WHOLE, so the fields below marked "already on the wire" were
+// arriving and being thrown away by this type.
 export type ObjectiveStatus =
   | "active"
   | "paused"
   | "usage_limited"
   | "budget_limited"
-  | "blocked"
   | "completed"
+  | "blocked"
 
-export interface SuccessCriterion {
-  readonly kind: "manual" | "checked"
+export type ObjectiveActor = "model" | "user" | "system" | "verifier" | "continuation"
+
+/** Discriminated, as the daemon's is: only a CHECKED criterion carries a check,
+ *  and only it can be completed by a verifier. The previous flat shape let this
+ *  package construct criteria the daemon can never send. */
+export interface ManualCriterion {
+  readonly kind: "manual"
   readonly id: string
   readonly text: string
   readonly met: boolean
-  readonly completion?: { readonly source: "manual" | "verifier" }
+  readonly completion?: ManualCompletionReceipt | undefined
+}
+
+export interface CheckedCriterion {
+  readonly kind: "checked"
+  readonly id: string
+  readonly text: string
+  readonly met: boolean
+  readonly check: CheckSpec
+  readonly completion?: VerifierCompletionReceipt | undefined
+}
+
+export type SuccessCriterion = ManualCriterion | CheckedCriterion
+
+/** Narrowed on purpose: this package renders these, never constructs them, and
+ *  the daemon owns their full shape. */
+export interface CheckSpec {
+  readonly id: string
+  readonly kind: "command"
+  readonly argv: readonly string[]
+}
+
+export interface ManualCompletionReceipt {
+  readonly source: "manual"
+  readonly actor: ObjectiveActor
+}
+
+export interface VerifierCompletionReceipt {
+  readonly source: "verifier"
+  readonly checkId: string
+  readonly verifiedAt: number
+  /** The digest the verifier ran against — the real field the phantom
+   *  `verifiedSourceDigest` above was a guess at. */
+  readonly sourceDigest: string
 }
 
 export interface Blocker {
@@ -170,25 +216,43 @@ export interface Blocker {
   readonly since: number
 }
 
+/** Already on the wire: evidence that one dependency blocked distinct attempts. */
+export interface BlockerObservation {
+  readonly observationId: string
+  readonly dependencyRef: string
+  readonly waitingOn: WaitingOnTarget
+  readonly distinctAttemptIds: readonly string[]
+  readonly lastObservedAt: number
+}
+
+/** Already on the wire: the attributed-attempt accounting. */
+export interface ObjectiveAttemptState {
+  readonly autonomousTurnsStarted: number
+  readonly started?: { readonly attemptId: string; readonly startedAt: number }
+}
+
 export interface ObjectiveBudget {
   readonly maxTokens?: number
   readonly tokensUsed: number
   readonly maxTurns?: number
   readonly turnsUsed: number
+  /** Already on the wire: WHICH bound applies, so a surface can say whether
+   *  raising the budget could help at all. */
+  readonly limitedBy?: "user-budget" | "product-hard-cap" | "product-budget-ceiling"
 }
 
 export interface Objective {
   readonly objectiveId: string
-  readonly createdBy: "user" | "model" | "system" | "continuation"
-  readonly verifiedSourceDigest?: string
-  readonly verificationState?: "current" | "stale"
   readonly threadId: string
   readonly goal: string
+  readonly createdBy: ObjectiveActor
   readonly successCriteria: readonly SuccessCriterion[]
   readonly status: ObjectiveStatus
   readonly budget: ObjectiveBudget
   readonly blockers: readonly Blocker[]
+  readonly blockerObservations: readonly BlockerObservation[]
   readonly nextActions: readonly string[]
+  readonly attempts: ObjectiveAttemptState
   readonly createdAt: number
   readonly updatedAt: number
 }
