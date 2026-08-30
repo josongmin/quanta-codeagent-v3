@@ -82,6 +82,7 @@ export type {
   SessionEventEnvelope,
   SessionEventType,
   SessionStateUpdatedEvent,
+  CostSurfaceViewWire,
   StopCategoryWire,
   TokenUsage,
   ToolCompletedEvent,

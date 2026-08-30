@@ -21,6 +21,8 @@ export { type PriceUsageOpts, priceUsage } from "./price"
 export {
   type CostSurfaceView,
   costSurfaceView,
+  type CostSurfaceViewWireShape,
+  costSurfaceViewWire,
   type ModelCostLine,
 } from "./projection"
 export type {

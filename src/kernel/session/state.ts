@@ -2,6 +2,7 @@ import type { ImageBlock, Message } from "@/llm"
 import type {
   ArtifactRef,
   CapabilityManifest,
+  CostSurfaceViewWire,
   GoalContinuationProvenance,
   PendingApprovalView,
   PostureProjectionView,
@@ -79,6 +80,9 @@ export interface KernelSessionState {
   /** Token usage from the most recent `turn.completed`. Cumulative tally is
    *  the UI's concern; the kernel only holds the latest. */
   readonly lastTokenUsage?: KernelTokenUsage
+  /** A7 — cumulative cost view from the host's last turn terminal, echoed on
+   *  the next `turn.completed`. */
+  readonly lastCostView?: CostSurfaceViewWire
   /** Most recent request-route observation emitted by the running/completed
    *  turn. Mirrors `turn.llm.request` so snapshot-only consumers can inspect
    *  the last effective request without replaying the event log. */

@@ -22,6 +22,7 @@ import type { FollowerCoControlDispatcher } from "@/agent/thread-follower"
 import type { ArtifactRegistry } from "@/artifact"
 import type { ArtifactPreviewResolver } from "@/host/runtime"
 import type { ObjectivePort } from "@/objective"
+import type { UsageAccountingPort } from "@/observability/usage-accounting"
 import type { RuntimeFacade } from "@/sdk/runtime"
 import type { AgentStateSourceHandle } from "../agent-state-source"
 import type { CanvasArtifactSourceHandle } from "../canvas-artifact-source"
@@ -59,6 +60,13 @@ export interface ObservableRuntimeFacade extends RuntimeFacade {
    * is off ⇒ the snapshot is undefined ⇒ the transcript omits `objective`.
    */
   readonly objectiveAuthority?: ObjectivePort
+  /**
+   * A7 — the session's usage-accounting authority, READ-ONLY, for the daemon's
+   * cost projection (`/cost` readout, and the model label). The SAME instance
+   * the base threads to the loop's emitUsage sink; the daemon never writes it.
+   * Absent ⇒ the kill switch was thrown (accounting off).
+   */
+  readonly usageAccounting?: UsageAccountingPort
   readonly runLedger?: RunLedgerPort
   readonly approvalStateMachine?: ApprovalStateMachinePort
   readonly shadowVerify?: ShadowVerifyPort

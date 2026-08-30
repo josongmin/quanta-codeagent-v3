@@ -153,7 +153,29 @@ export const assertScanPopulation = (
   const abs = resolve(root)
   const tracked = trackedUnder(abs)
 
-  const reachedFiles = files.map((f) => resolve(f)).filter((f) => tracked.has(f))
+  // Reach is a SET of files the guard would actually collect.
+  //
+  // Three ways it used to be padded, each measured: the same tracked path handed
+  // in five times counted five times (14 real files met a floor of 70); a file
+  // the guard's own `collectable` rejects counted anyway, so a `.md` beside the
+  // `.ts` the scan is about filled the floor; and a path under a `skipDirs`
+  // subtree counted even though the walker never descends there. A floor met by
+  // files the verdict does not consume measures a population the guard does not
+  // read.
+  const skippedByPolicy = (abs_: string): boolean =>
+    relative(abs, abs_)
+      .split("/")
+      .slice(0, -1)
+      .some((seg) => isSkippedName(seg, skip))
+  const reachedFiles = [
+    ...new Set(
+      files
+        .map((f) => resolve(f))
+        .filter((f) => tracked.has(f))
+        .filter((f) => collectable(f.slice(f.lastIndexOf("/") + 1)))
+        .filter((f) => !skippedByPolicy(f)),
+    ),
+  ]
   record(opts, reachedFiles.length)
   const pinned = floorFor(opts.id, opts.baselinePath)
   expect(
@@ -191,10 +213,23 @@ export const assertScanPopulation = (
           `floor — a second number that is never compared is not a second number`,
       )
     }
+    // The matched set must be drawn from what was REACHED, and counted once
+    // each. Comparing lengths alone accepted any five strings — five copies of
+    // one name, or names of files the scan never returned — so a predicate proof
+    // could be met without the predicate selecting anything real.
+    const reachedSet = new Set(reachedFiles)
+    const matchedAbs = [...new Set(opts.matched.map((m) => resolve(m)))]
+    const strangers = matchedAbs.filter((m) => !reachedSet.has(m))
     expect(
-      opts.matched.length,
-      `the matcher for "${opts.id}" selected ${opts.matched.length} of ${reachedFiles.length} ` +
-        `reached files — a matcher that rotted selects nothing while the walk stays full`,
+      strangers,
+      `the matched set for "${opts.id}" names ${strangers.length} path(s) the scan never ` +
+        `reached — a second number drawn from outside the first is not a second number`,
+    ).toEqual([])
+    expect(
+      matchedAbs.length,
+      `the matcher for "${opts.id}" selected ${matchedAbs.length} of ${reachedFiles.length} ` +
+        `reached files (distinct, and drawn from the reached set) — a matcher that rotted ` +
+        `selects nothing while the walk stays full`,
     ).toBeGreaterThanOrEqual(pinned.matched)
   } else if (pinned.matched !== undefined) {
     throw new Error(

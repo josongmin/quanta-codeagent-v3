@@ -1094,14 +1094,15 @@ export const useSendObjectiveMutate = (
   useCallback(
     (mutation: unknown) => {
       if (sessionId === null) return false
-      client.send({
+      // The CLIENT decides whether the frame left — a session id only means we
+      // know where to address it.
+      return client.send({
         sessionId,
         commandId: makeCommandId(),
         issuedAt: new Date().toISOString(),
         type: "session.objective.mutate",
         mutation,
       } as SessionCommand)
-      return true
     },
     [client, sessionId],
   )
@@ -1159,10 +1160,17 @@ const renderRejectedFrame = (frame: SessionRejectedFrame): string => {
       return `turn rejected: revision conflict (${String(frame.expectedRevision)} != ${String(frame.actualRevision)})`
     case "duplicate_command":
       return "turn rejected: duplicate command"
-    case "protocol_validation":
-      return frame.issue === undefined
-        ? "turn rejected: protocol validation"
+    case "protocol_validation": {
+      if (frame.issue === undefined) return "turn rejected: protocol validation"
+      // An objective mutation is not a turn, and the authority's own tag
+      // (`attempt-in-flight`, `invalid-transition`, `objective-missing`, …) is
+      // the answer the operator needs — so it is preserved verbatim rather than
+      // reworded.
+      const objective = "objective:"
+      return frame.issue.startsWith(objective)
+        ? `goal change refused: ${frame.issue.slice(objective.length)}`
         : `turn rejected: ${frame.issue}`
+    }
   }
 }
 

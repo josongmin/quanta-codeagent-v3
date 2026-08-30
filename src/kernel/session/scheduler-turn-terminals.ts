@@ -221,6 +221,7 @@ const completionEventsForTurn = (args: {
         : {}),
       ...(args.state.modelSlug !== undefined ? { modelSlug: args.state.modelSlug } : {}),
       ...(args.state.lastTokenUsage !== undefined ? { tokenUsage: args.state.lastTokenUsage } : {}),
+      ...(args.state.lastCostView !== undefined ? { costView: args.state.lastCostView } : {}),
     },
     {
       eventId: crypto.randomUUID(),
@@ -309,6 +310,7 @@ export const onTurnCompleted = async (args: {
         : {}),
     }),
     ...(args.result.tokenUsage !== undefined ? { lastTokenUsage: args.result.tokenUsage } : {}),
+    ...(args.result.costView !== undefined ? { lastCostView: args.result.costView } : {}),
   }
   const completionEvents = completionEventsForTurn({
     // The model echo is refreshed HERE (before the events are built) so
@@ -416,6 +418,7 @@ export const onTurnAborted = async (args: {
           draftImages: [],
           transcript: clearStreamingAssistantText(summarizeTranscript(settled.messages)),
           ...(settled.tokenUsage !== undefined ? { lastTokenUsage: settled.tokenUsage } : {}),
+          ...(settled.costView !== undefined ? { lastCostView: settled.costView } : {}),
         }
       : {
           transcript: clearStreamingAssistantText(args.state.transcript),

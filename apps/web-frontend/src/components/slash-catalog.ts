@@ -106,6 +106,9 @@ export const assembleSlashCommands = (deps: SlashCatalogDeps): readonly SlashCom
   // — rather than a read-only row plus a second goal vocabulary elsewhere.
   const goalCommands = buildGoalSlashCommands({
     ...readoutEndpoint,
+    // The non-printing read, so a control verb can wait for the END STATE
+    // instead of reporting optimistically — the same seam `/model` uses.
+    readReadout: (name: string) => readReadoutBody(readoutEndpoint, name),
     onError: (msg: string): void => {
       deps.appendClientMessage("error", msg)
     },

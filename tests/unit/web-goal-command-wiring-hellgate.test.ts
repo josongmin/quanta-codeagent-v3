@@ -27,10 +27,11 @@ const read = (file: string): string => readFileSync(join(ROOT, file), "utf8")
 const APP = "apps/web-frontend/src/App.tsx"
 const CATALOG = "apps/web-frontend/src/components/slash-catalog.ts"
 const HOOKS = "apps/web-frontend/src/ws/session-hooks.ts"
+const GOAL_BUILDER = "apps/web-frontend/src/components/slash-goal.ts"
 
 describe("web /goal — the parse is non-degenerate", () => {
   test("all three files exist and are substantial", () => {
-    for (const file of [APP, CATALOG, HOOKS]) {
+    for (const file of [APP, CATALOG, HOOKS, GOAL_BUILDER]) {
       expect(read(file).length).toBeGreaterThan(1_000)
     }
   })
@@ -60,6 +61,54 @@ describe("web /goal — the composition root threads live senders", () => {
     // The daemon answers every case now, including the ones it used to drop.
     // Without a subscriber the browser would send and show nothing either way.
     expect(read(APP)).toContain("client.onGoalWorkResult")
+  })
+})
+
+describe("web /goal — the control verbs are threaded, not stubbed", () => {
+  test("the catalogue gives the goal builder a READER, so the read-back can poll", () => {
+    // Without it the builder must report optimistically — the exact posture
+    // `/model` was moved off when its first read-back kept reporting the old
+    // model. The `/model` builder already receives `readReadoutBody`; the goal
+    // builder has to as well, from the same endpoint.
+    const catalog = read(CATALOG)
+    const goalCall = catalog.slice(catalog.indexOf("buildGoalSlashCommands({"))
+
+    expect(goalCall).toContain("readReadout")
+    expect(goalCall.slice(0, goalCall.indexOf("})"))).toMatch(/readReadoutBody\(/)
+  })
+
+  test("the builder owns the control verbs, not just show/set/work", () => {
+    const builder = read(GOAL_BUILDER)
+
+    for (const mutation of [
+      '"setExplicitStatus"',
+      '"clear"',
+      '"replace"',
+      '"create"',
+    ]) {
+      expect(builder).toContain(mutation)
+    }
+  })
+
+  test("the send truth is forwarded: the hook returns what the client reports", () => {
+    const hooks = read(HOOKS)
+    const start = hooks.indexOf("export const useSendObjectiveMutate")
+    const end = hooks.indexOf("export const useSendPermissionMode")
+    const body = hooks.slice(start, end)
+
+    // The defect this pins: the hook returned a bare `true` on the strength of
+    // having a session id, while `client.send` silently drops on a closed or
+    // pre-handshake socket.
+    expect(body).toMatch(/return client\.send\(/)
+    expect(body).not.toMatch(/\n\s*return true\b/)
+  })
+
+  test("an objective refusal is not called a rejected TURN", () => {
+    const hooks = read(HOOKS)
+
+    expect(hooks).toContain("goal change refused")
+    // The generic copy survives for everything that really is a turn.
+    expect(hooks).toContain("turn rejected: ")
   })
 })
 

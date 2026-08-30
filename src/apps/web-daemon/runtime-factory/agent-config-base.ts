@@ -30,6 +30,7 @@ import {
   type ObjectiveAttemptSlot,
   type ObjectivePort,
 } from "@/objective"
+import type { UsageAccountingPort } from "@/observability/usage-accounting"
 import type { PermissionContext } from "@/permission"
 import type { PostureControl } from "@/permission/posture/control"
 import type { buildSkillsConfigCore, buildSubagentConfigCore } from "@/runner/assemble"
@@ -143,6 +144,7 @@ export const buildAgentConfigBase = async ({
   objective,
   postureControl,
   questionGuard,
+  usageAccounting,
 }: {
   readonly env: Record<string, string | undefined>
   readonly llm: LLMPort
@@ -195,6 +197,12 @@ export const buildAgentConfigBase = async ({
   // RFC-05 E5 — the live `request_user_input` availability reader over that SAME
   // authority's bound `askOutsidePlan`. Absent ⇒ question available by default.
   readonly questionGuard?: QuestionAvailabilityReader | undefined
+  /** A7 — the session's usage-accounting authority (minted at the daemon
+   *  root). Landing it on the base makes the assembler ADOPT this instance
+   *  (caller-override), so loop-recorded spend and the daemon's /cost readout
+   *  share ONE book. Absent ⇒ the kill switch was thrown at the root; the
+   *  assembler resolves the same env, so off stays off everywhere. */
+  readonly usageAccounting?: UsageAccountingPort | undefined
 }): Promise<RuntimeAgentConfigBase> => {
   const webEnvPosture = resolveCliDefaultEnvPosture(env)
   // WS4 R7/R8 — the web/Tauri surface runs on the user's OWN cwd
@@ -229,6 +237,7 @@ export const buildAgentConfigBase = async ({
       envPosture: webEnvPosture,
     }),
     ...(repoRules !== undefined ? { repoRules } : {}),
+    ...(usageAccounting !== undefined ? { usageAccounting } : {}),
     cwd,
     maxTurns: 200,
     signal: abort.signal,

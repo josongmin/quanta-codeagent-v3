@@ -30,6 +30,7 @@ import { composeWebGoalWork, type WebGoalWorkHandler } from "./goal-work-compose
 import type { CostReadoutTotals, WebReadoutSources } from "./readout"
 import { buildDaemonReadoutSources } from "./readout-compose"
 import { setupApprovalContinuation } from "./server/approval-continuation"
+import { costSurfaceViewWire } from "@/observability/usage-accounting"
 import { type CanvasArtifactFeed, setupCanvasArtifactBridge } from "./server/canvas-artifact-bridge"
 import { buildFetchHandler } from "./server/fetch-handler"
 import { setupFollowerApproval } from "./server/follower-approval"
@@ -161,46 +162,6 @@ export interface WebDaemonServerConfig extends WebDaemonConfig {
   readonly goalWork?: WebGoalWorkHandler
 }
 
-/**
- * UUX-1-11 — server-side cumulative usage fold for the `/cost` readout. The
- * daemon-native usage truth is the `turn.completed` SessionEvent (tokenUsage +
- * modelSlug), so the aggregator subscribes the shared session and folds every
- * completed turn — the same numbers any attached client's usage footer sums.
- * Read-only + additive: a session without usage-reporting turns yields honest
- * zeros ("no completed turns yet"), never a fabricated estimate.
- */
-const attachCostAggregator = (
-  session: RuntimeSession,
-): { totals: () => CostReadoutTotals; unsub: () => void } => {
-  let turns = 0
-  let promptTokens = 0
-  let completionTokens = 0
-  let totalTokens = 0
-  let costMicroUsd = 0
-  let modelSlug: string | undefined
-  const unsub = session.subscribe((event) => {
-    if (event.type !== "turn.completed") return
-    turns += 1
-    if (event.tokenUsage !== undefined) {
-      promptTokens += event.tokenUsage.promptTokens ?? 0
-      completionTokens += event.tokenUsage.completionTokens ?? 0
-      totalTokens += event.tokenUsage.totalTokens ?? 0
-      costMicroUsd += event.tokenUsage.costMicroUsd ?? 0
-    }
-    if (event.modelSlug !== undefined && event.modelSlug.length > 0) modelSlug = event.modelSlug
-  })
-  return {
-    totals: () => ({
-      turns,
-      promptTokens,
-      completionTokens,
-      totalTokens,
-      costMicroUsd,
-      ...(modelSlug !== undefined ? { modelSlug } : {}),
-    }),
-    unsub,
-  }
-}
 
 /**
  * god-code split — the `Bun.serve` listener construction (fetch + websocket
@@ -441,8 +402,35 @@ export const startWebDaemon = async (config: WebDaemonServerConfig): Promise<Web
   // a test stub facade simply degrades every readout to the honest
   // missing-source line. `/cost` is folded HERE from the shared session's
   // `turn.completed` events — a daemon-owned source, present for any facade.
-  const costAggregator = attachCostAggregator(sharedSession)
-  let costAggregatorUnsub: (() => void) | null = costAggregator.unsub
+  // A7 — the daemon's cost surface is a PROJECTION of the session's usage
+  // authority (the same instance the loop records into via the base
+  // threading). The old independent turn.completed fold is gone; the ONLY
+  // event-derived number left is the TURN COUNT — an event tally, not a usage
+  // sum. The cumulative snapshot itself rides `turn.completed.costView`,
+  // attached by the HOST, so every client replaces rather than folds.
+  let costTurns = 0
+  // Duck-read like readoutSources: the base RuntimeFacade type does not know
+  // daemon-only getters; a facade without one degrades to the honest off shape.
+  const costAuthority = (
+    runtime as { usageAccounting?: import("@/observability/usage-accounting").UsageAccountingPort }
+  ).usageAccounting
+  const costTotals = (): CostReadoutTotals => {
+    if (costAuthority === undefined) {
+      return { turns: costTurns, promptTokens: 0, completionTokens: 0, totalTokens: 0, costMicroUsd: 0 }
+    }
+    const wire = costSurfaceViewWire(costAuthority)
+    return {
+      turns: costTurns,
+      promptTokens: wire.promptTokens,
+      completionTokens: wire.outputTokens,
+      totalTokens: wire.promptTokens + wire.outputTokens,
+      costMicroUsd: Math.round(wire.totalUsd * 1_000_000),
+      ...(wire.modelSlug !== undefined ? { modelSlug: wire.modelSlug } : {}),
+    }
+  }
+  let costAggregatorUnsub: (() => void) | null = sharedSession.subscribe((event) => {
+    if (event.type === "turn.completed") costTurns += 1
+  })
   // P1 Phase 1 — persist the LOSSLESS Message[] transcript to the @/session
   // store (for a later live thread swap), gate-symmetric with the sqlite
   // archive (`threadStore !== null` ⇔ QUANTA_WEB_DB on). Off ⇒ no writes.
@@ -466,7 +454,7 @@ export const startWebDaemon = async (config: WebDaemonServerConfig): Promise<Web
   const readoutSources = buildDaemonReadoutSources({
     runtime,
     threadId: sharedSession.sessionId,
-    cost: costAggregator.totals,
+    cost: costTotals,
   })
 
   const { server, boundPort, boundHost } = buildDaemonListener({

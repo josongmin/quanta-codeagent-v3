@@ -14,6 +14,7 @@ import {
   type ObjectivePort,
   type UserObjectiveMutation,
 } from "@/objective"
+import { costSurfaceViewWire } from "@/observability/usage-accounting"
 import { isPermissionMode } from "@/permission"
 import type { PostureControl } from "@/permission/posture/control"
 import type {
@@ -197,7 +198,14 @@ const runSessionHostTurn = async (deps: {
         }),
       ),
   )
-  return toSessionHostTurnResult(result)
+  // A7 — the CUMULATIVE cost snapshot rides the turn terminal. Attached HERE
+  // because the host owns the authority; the kernel just carries it, and every
+  // client REPLACES its cost state with the view instead of folding deltas.
+  const accounting = base.usageAccounting
+  return {
+    ...toSessionHostTurnResult(result),
+    ...(accounting !== undefined ? { costView: costSurfaceViewWire(accounting) } : {}),
+  }
 }
 
 /** RFC-03 C3 — validate the wire-decoded objective mutation defensively. The

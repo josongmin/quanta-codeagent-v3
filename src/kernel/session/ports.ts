@@ -3,6 +3,7 @@ import type { ImageBlock, Message } from "@/llm"
 import type {
   ArtifactRef,
   CapabilityManifest,
+  CostSurfaceViewWire,
   GoalContinuationProvenance,
   ObjectiveCommandOutcome,
   PendingApprovalView,
@@ -71,6 +72,11 @@ export interface SessionHostTurnResult {
   /** Token usage for THIS turn (not cumulative). When absent the
    *  scheduler omits the field on `turn.completed`. */
   readonly tokenUsage?: SessionHostTurnUsage
+  /** A7 — the session's CUMULATIVE cost view at this turn's close (the host's
+   *  usage authority, projected). The scheduler copies it onto
+   *  `turn.completed.costView`; absent ⇒ the field is omitted (host without
+   *  an authority — accounting off — stays byte-identical). */
+  readonly costView?: CostSurfaceViewWire
 }
 
 /**

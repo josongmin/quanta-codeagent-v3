@@ -87,3 +87,44 @@ export const costSurfaceView = (snap: UsageAccountingSnapshot): CostSurfaceView 
     .sort((a, b) => b.totalUsd - a.totalUsd || byteCompare(a.model, b.model)),
   byKind: { root: snap.byKind.root.totalUsd, subagent: snap.byKind.subagent.totalUsd },
 })
+
+/**
+ * A7 — the flat wire shape of a cumulative view (structurally identical to the
+ * protocol's `CostSurfaceViewWire`, produced HERE so the host adapter and the
+ * web daemon share ONE mapping instead of each hand-building the literal).
+ */
+export interface CostSurfaceViewWireShape {
+  readonly totalUsd: number
+  readonly estimatedUsd: number
+  readonly unpricedCalls: number
+  readonly promptTokens: number
+  readonly outputTokens: number
+  readonly cacheReadTokens: number
+  readonly cacheWriteTokens: number
+  readonly calls: number
+  readonly rootUsd: number
+  readonly subagentUsd: number
+  readonly modelSlug?: string
+}
+
+/** Project an authority into the flat cumulative wire shape. */
+export const costSurfaceViewWire = (port: {
+  snapshot(): UsageAccountingSnapshot
+  recent(limit?: number): readonly { readonly usage: { readonly model: string } }[]
+}): CostSurfaceViewWireShape => {
+  const view = costSurfaceView(port.snapshot())
+  const modelSlug = port.recent(1)[0]?.usage.model
+  return {
+    totalUsd: view.totalUsd,
+    estimatedUsd: view.estimatedUsd,
+    unpricedCalls: view.unpricedCalls,
+    promptTokens: view.promptTokens,
+    outputTokens: view.outputTokens,
+    cacheReadTokens: view.cacheReadTokens,
+    cacheWriteTokens: view.cacheWriteTokens,
+    calls: view.calls,
+    rootUsd: view.byKind.root,
+    subagentUsd: view.byKind.subagent,
+    ...(modelSlug !== undefined ? { modelSlug } : {}),
+  }
+}

@@ -39,6 +39,7 @@ const stubReadout = (output: string) => {
 }
 
 const harness = (over: Partial<GoalSlashDeps> = {}) => {
+  const readBody = { current: "" }
   const system: string[] = []
   const errors: string[] = []
   const mutations: unknown[] = []
@@ -56,11 +57,15 @@ const harness = (over: Partial<GoalSlashDeps> = {}) => {
       work.push(text)
       return true
     },
+    // Required since the control verbs landed: a write reports the END STATE it
+    // observed, so the builder cannot be constructed without a reader.
+    readReadout: async () => readBody.current,
+    delay: async () => undefined,
     ...over,
   }
   const commands = buildGoalSlashCommands(deps)
   const goal = commands.find((c) => c.slug === "goal")
-  return { system, errors, mutations, work, goal }
+  return { system, errors, mutations, work, readBody, goal }
 }
 
 const run = async (cmd: SlashCommand | undefined, rest: string): Promise<string> => {
@@ -85,8 +90,9 @@ describe("/goal — the browser can read the goal", () => {
 
 describe("/goal <text> — the browser can SET the goal", () => {
   it("sends session.objective.mutate carrying a create for the typed text", async () => {
-    stubReadout("goal   ship the release\n")
-    const { goal, mutations } = harness()
+    stubReadout("goal   ship the release\nstatus active\n")
+    const { goal, mutations, readBody } = harness()
+    readBody.current = "goal   ship the release\nstatus active\n"
 
     await run(goal, "ship the release")
 
@@ -99,7 +105,8 @@ describe("/goal <text> — the browser can SET the goal", () => {
 
   it("reads the goal back so the operator sees what actually landed", async () => {
     const calls = stubReadout("goal   ship the release\nstatus active\n")
-    const { goal, system } = harness()
+    const { goal, system, readBody } = harness()
+    readBody.current = "goal   ship the release\nstatus active\n"
 
     await run(goal, "ship the release")
 

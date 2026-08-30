@@ -308,19 +308,38 @@ export class SessionClient {
     this.#setState({ kind: "closed" })
   }
 
-  send(command: SessionCommand): void {
+  /**
+   * Send one session command. Returns whether the frame ACTUALLY left: a closed
+   * socket, an unsettled handshake and a throwing `send` are all `false`.
+   *
+   * It used to return `void`, and the three drops above were reported only to a
+   * log line nobody reads. A caller that wanted to tell an operator "sent" had to
+   * guess — `useSendObjectiveMutate` guessed `true` whenever a session id
+   * existed, so `/goal pause` could report success for a frame that never left
+   * the browser. Every pre-existing caller ignores the return value, so widening
+   * it costs them nothing and needs no objective-specific transport.
+   */
+  send(command: SessionCommand): boolean {
     if (this.#ws === null || this.#ws.readyState !== READYSTATE_OPEN) {
       this.#log("warn", `[SessionClient] dropping command type=${command.type} — socket not open`)
-      return
+      return false
     }
     if (this.#state.kind !== "connected") {
       this.#log(
         "warn",
         `[SessionClient] dropping command type=${command.type} — handshake not ready`,
       )
-      return
+      return false
     }
-    this.#ws.send(encodeCommandFrame(command))
+    try {
+      this.#ws.send(encodeCommandFrame(command))
+      return true
+    } catch (err) {
+      // A dead socket must not take the caller down, and must not be reported as
+      // a delivery either.
+      this.#log("warn", `[SessionClient] command send failed type=${command.type}: ${String(err)}`)
+      return false
+    }
   }
 
   /**

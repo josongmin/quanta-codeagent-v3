@@ -195,6 +195,88 @@ describe("population floor", () => {
     ).toThrow(/pins no matched floor/)
   })
 
+  test("🔴 REPEATING a path does not count twice", () => {
+    // Reach was `files.filter(tracked).length`, so the same tracked path handed
+    // in five times counted five times. Measured against the real tree before
+    // this closed: 14 distinct files under `eval/repair` satisfied a floor of 70.
+    // A guard that enumerates a directory twice — a `for` over two roots that
+    // overlap, a walker joined with its own parent — inflates its own floor and
+    // then meets it forever.
+    const fx = build()
+    const two = walk(fx.root)
+    expect(() =>
+      assertScanPopulation([...two, ...two, ...two], fx.root, {
+        id: "fx",
+        baselinePath: fx.pin(6),
+      }),
+    ).toThrow(/reached 2 TRACKED/)
+  })
+
+  test("🔴 a file the guard would NOT collect does not count as reach", () => {
+    // `collectable` decided coverage and nothing else, so reach could be filled
+    // with files the verdict never consumes: a `.md` beside the `.ts` the scan is
+    // about, or a subtree the walker skips. The floor then measures a population
+    // the guard does not read.
+    const fx = build()
+    const withNote = [...walk(fx.root), join(fx.root, "docs", "note.md")]
+    expect(() =>
+      assertScanPopulation(withNote, fx.root, {
+        id: "fx",
+        collectable: (n) => n.endsWith(".ts"),
+        baselinePath: fx.pin(3),
+      }),
+    ).toThrow(/reached 2 TRACKED/)
+  })
+
+  test("🔴 a SKIPPED directory does not count as reach either", () => {
+    const fx = build()
+    stage(fx.root)
+    const withBeta = walk(fx.root)
+    expect(() =>
+      assertScanPopulation(withBeta, fx.root, {
+        id: "fx",
+        skipDirs: ["beta"],
+        baselinePath: fx.pin(2),
+      }),
+    ).toThrow(/reached 1 TRACKED/)
+  })
+
+  test("🔴 PREDICATE: matched must be a subset of what was actually reached", () => {
+    // The second number was compared by LENGTH only, so any five strings met a
+    // matched floor of five — including five copies of one name, or names of
+    // files the scan never returned. A predicate proof that accepts arbitrary
+    // strings proves nothing about the predicate.
+    const fx = build()
+    const files = walk(fx.root)
+    expect(() =>
+      assertScanPopulation(files, fx.root, {
+        id: "fx",
+        matched: ["nope-1", "nope-2"],
+        baselinePath: fx.pin(2, 2),
+      }),
+    ).toThrow(/never reached/)
+    expect(() =>
+      assertScanPopulation(files, fx.root, {
+        id: "fx",
+        matched: [files[0] as string, files[0] as string],
+        baselinePath: fx.pin(2, 2),
+      }),
+    ).toThrow(/selected 1 of 2/)
+  })
+
+  test("PAIRED CONTROL — a real matched subset still passes", () => {
+    // Without this, "refuse every matched set" satisfies the case above.
+    const fx = build()
+    const files = walk(fx.root)
+    expect(() =>
+      assertScanPopulation(files, fx.root, {
+        id: "fx",
+        matched: files,
+        baselinePath: fx.pin(2, 2),
+      }),
+    ).not.toThrow()
+  })
+
   test("CLOSED UNIVERSE: an unpinned scan fails rather than defaulting to 1", () => {
     const fx = build()
     expect(() =>

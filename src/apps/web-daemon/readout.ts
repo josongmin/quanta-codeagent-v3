@@ -219,7 +219,10 @@ const renderGoalReadout = (domain: ObjectiveDomainSnapshot, now: number): string
     .slice(0, 3)
     .map((blocker) => `  - [${blocker.waitingOn}] ${blocker.reason}`)
   return (
-    `goal   ${objective.goal}\n` +
+    // ONE line, always: a goal may contain newlines, and a wrapped goal would put
+    // arbitrary operator text where the next field belongs — which is how a
+    // reader ends up parsing a criterion as the status.
+    `goal   ${objective.goal.replace(/\s+/g, " ").trim()}\n` +
     `status ${objective.status} · rev ${domain.revision} · validation ${domain.validationContract}\n` +
     `criteria ${met}/${criteria.length} met` +
     (remaining.length === 0 ? "\n" : `   remaining: ${remaining.join(", ")}\n`) +

@@ -79,6 +79,37 @@ export interface TurnCompletedEvent extends SessionEventEnvelope<"turn.completed
   readonly assistantText?: string
   readonly tokenUsage?: TokenUsage
   readonly modelSlug?: string
+  /** A7 — the session's CUMULATIVE cost view at this turn's close, projected
+   *  from the usage authority. A SNAPSHOT: consumers REPLACE their state with
+   *  it, never add (the per-turn `tokenUsage` delta above stays for legacy
+   *  folds; a snapshot-aware consumer prefers this and must not do both).
+   *  Absent ⇒ the host has no authority (accounting off) ⇒ byte-identical. */
+  readonly costView?: CostSurfaceViewWire
+}
+
+/**
+ * A7 — the session's CUMULATIVE cost view, projected from the daemon's usage
+ * authority after each completed turn.
+ *
+ * Wire posture: a SNAPSHOT, not a delta — a consumer REPLACES its state with
+ * it, never adds. Declared structurally, flat numbers only, so the frontend
+ * generator carries it without a narrowing-manifest entry.
+ */
+export interface CostSurfaceViewWire {
+  readonly totalUsd: number
+  /** Portion of `totalUsd` priced by a stand-in rate (estimate, not measure). */
+  readonly estimatedUsd: number
+  /** Calls the authority could not price at all — totals are a FLOOR when > 0. */
+  readonly unpricedCalls: number
+  readonly promptTokens: number
+  readonly outputTokens: number
+  readonly cacheReadTokens: number
+  readonly cacheWriteTokens: number
+  readonly calls: number
+  readonly rootUsd: number
+  readonly subagentUsd: number
+  /** Model of the newest recorded call, when any. */
+  readonly modelSlug?: string
 }
 
 export interface TurnOutputDeltaEvent extends SessionEventEnvelope<"turn.output.delta"> {

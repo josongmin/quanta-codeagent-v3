@@ -45,6 +45,10 @@ import { errMessage, gateDisabled, gateOn, logger } from "@/shared"
 import { buildWebSkillAuthority } from "./authority-readouts"
 import { createCanvasToolDiffSource } from "./canvas-tool-diff-source"
 import { buildAgentConfigBase } from "./runtime-factory/agent-config-base"
+import {
+  createUsageAccounting,
+  resolveUsageAccounting,
+} from "@/observability/usage-accounting"
 import { loadDaemonMcp } from "./runtime-factory/daemon-mcp"
 import {
   attachObservabilityPorts,
@@ -145,6 +149,15 @@ const assembleWebRuntimeParts = async (
   // mint that lived INSIDE `wireSessionObservability`, which left `base.objective`
   // undefined whenever observability was OFF (cross-turn goal amnesia).
   const objective = resolveGatedObjectiveAuthority(env, { confirmationAvailable: false })
+  // A7 — the session's usage-accounting authority, minted at THIS root (the
+  // third composition root, after the assembler and the CLI bundle) so the
+  // daemon can PROJECT it: the /cost readout and the cumulative wire frame
+  // read the SAME instance the loop records into. Threaded onto the base;
+  // the assembler's wire ADOPTS a caller-supplied authority (override-safe).
+  // The knob resolves ONCE here; its warning prints here, once.
+  const usageResolution = resolveUsageAccounting(env)
+  if (usageResolution.warning !== undefined) logger.warn(usageResolution.warning)
+  const usageAccounting = usageResolution.mode === "on" ? createUsageAccounting() : undefined
   // ADR-0415 — per-session observability wire. Gate OFF ⇒ noop handle +
   // undefined bus ⇒ `observabilitySlots` returns `{}` (byte-identical legacy).
   // Threading the live bus + promoted ports onto the session config makes the
@@ -204,6 +217,7 @@ const assembleWebRuntimeParts = async (
     skillAuthority,
     skillsWithAuthority,
     objective,
+    usageAccounting,
     observability,
     canvasToolDiff,
     canvasArtifact,
@@ -294,6 +308,8 @@ const buildFacadeGetters = (
     // default-OFF). Passed directly (like `canvasUsage`) — the helper's
     // undefined-skip removes the need for a guard ternary here.
     ...objectivePorts(parts.objective, base.objectiveAttemptSlot),
+    // A7 — the read-only cost authority for the daemon's projection surfaces.
+    ...(parts.usageAccounting !== undefined ? { usageAccounting: parts.usageAccounting } : {}),
     canvasUsage: parts.canvasUsage,
     canvasToolDiff: parts.canvasToolDiff,
     canvasArtifact: parts.canvasArtifact,
@@ -425,6 +441,9 @@ export const buildProductionRuntimeFactory = (): (() => Promise<ObservableRuntim
       // ADOPTS the SAME port (no per-turn re-mint ⇒ durable goal + live snapshot +
       // a real out-of-band `session.objective.mutate`).
       objective,
+      // A7 — same-instance threading: the assembler ADOPTS a caller authority,
+      // so the daemon's readout/emitter and the loop's sink share one book.
+      usageAccounting: parts.usageAccounting,
       // RFC-05 E4/E5 — thread the front-door control + question guard onto the
       // config base so the host `session.posture.set` projection applies the FULL
       // lossless patch through the SAME live authority the gate reads (absent when
