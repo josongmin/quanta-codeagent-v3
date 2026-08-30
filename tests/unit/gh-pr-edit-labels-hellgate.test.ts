@@ -173,7 +173,7 @@ describe("gh_pr_edit_labels (hellgate)", () => {
   })
 
   test("HELL-14: env fence — the gh runner allowlist excludes provider keys", async () => {
-    // The default runner scrubs env to CI_ENV_ALLOWLIST_LOCAL; assert provider
+    // The default runner scrubs env to CI_ENV_ALLOWLIST (@/shared SSOT); assert provider
     // keys are NOT in that allowlist (the structural fence the runner applies).
     const mod = await import("@/runtime")
     const scrubbed = mod.scrubEnv(["PATH", "GH_TOKEN"])

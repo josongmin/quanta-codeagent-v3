@@ -38,7 +38,6 @@ evidence:
     - src/permission/branch-only.ts
     - src/permission/index.ts
     - src/apps/agent/mode-presets/ci-bot.ts
-    - src/apps/agent/mode-presets/ci-bot-policy.ts
     - src/agent/run-mode/types.ts
     - src/agent/run-mode/presets.ts
   adrs: []

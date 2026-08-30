@@ -69,10 +69,23 @@ const armTreeKillTimeout = (proc: KillableChild, timeoutMs: number): (() => void
 
 export interface ExecOptions {
   readonly localEnv?: LocalEnvSelection
+  /** EXTRA names layered onto {@link DEFAULT_ENV_ALLOWLIST} for this call —
+   *  for children that need daemon-endpoint selection vars (e.g. the
+   *  `DOCKER_HOST`/TLS set, mirroring `tool/container-exec/docker-run.ts`).
+   *  Names only widen the allowlist; the scrub still governs, so provider
+   *  credentials (`OPENAI_API_KEY`/tokens) can never ride through unless a
+   *  caller explicitly allowlists them — don't. */
+  readonly extraEnvAllowlist?: readonly string[]
 }
 
-const execEnv = (options: ExecOptions | undefined): NodeJS.ProcessEnv =>
-  applyLocalEnv(scrubEnv(), options?.localEnv, DEFAULT_ENV_ALLOWLIST)
+const execEnv = (options: ExecOptions | undefined): NodeJS.ProcessEnv => {
+  const extra = options?.extraEnvAllowlist
+  const allowlist =
+    extra === undefined || extra.length === 0
+      ? DEFAULT_ENV_ALLOWLIST
+      : [...DEFAULT_ENV_ALLOWLIST, ...extra]
+  return applyLocalEnv(scrubEnv(allowlist), options?.localEnv, allowlist)
+}
 
 /**
  * Minimal `bash -c` exec via Bun.spawn with a hard timeout. C9: children are

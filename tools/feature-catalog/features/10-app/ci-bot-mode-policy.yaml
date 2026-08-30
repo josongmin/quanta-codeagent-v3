@@ -38,7 +38,6 @@ purpose: |
 evidence:
   code:
     - src/apps/agent/mode-presets/ci-bot.ts
-    - src/apps/agent/mode-presets/ci-bot-policy.ts
   adrs: []
   tests:
     unit:
@@ -49,8 +48,10 @@ evidence:
 knobs: []
 deliberate_hold: null
 notes: |
-  Two-file split: `ci-bot-policy.ts` owns the structural policy bits
-  (toolSurface / promptPack / gitWrite + readers the dispatch seam
-  consults); `ci-bot.ts` owns the actual mode runner (composes the
-  policy + spawns the agent). The split keeps the policy unit-testable
-  in isolation from runtime spawn.
+  aug-30 audit G5-02: the former two-file split (`ci-bot-policy.ts` +
+  `ci-bot.ts`) was a dead parallel implementation — the policy file's
+  `buildCiBotWiring`/`CI_ENV_ALLOWLIST` had zero runtime callers while
+  the dispatched runner kept its own diverged copies. `ci-bot-policy.ts`
+  is deleted; `ci-bot.ts` is the single wiring, and the CI env allowlist
+  it scrubs with is the SSOT `CI_ENV_ALLOWLIST` in `@/shared/env-scrub`
+  (shared with `tool/gh/runner.ts`'s default runner).

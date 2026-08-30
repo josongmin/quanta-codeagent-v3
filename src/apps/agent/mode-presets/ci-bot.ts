@@ -28,7 +28,7 @@ import type { AgentConfig } from "@/agent"
 import type { LLMPort, Message } from "@/llm"
 import { DEFAULT_PROTECTED_BRANCHES, decideBranchOnly, type PermissionContext } from "@/permission"
 import { scrubEnv } from "@/runtime"
-import { gateOn, logger } from "@/shared"
+import { CI_ENV_ALLOWLIST, gateOn, logger } from "@/shared"
 import { StdoutStream, type StreamPort } from "@/stream"
 import { defaultGitRunner, type GitRunner, gitTools, ToolRegistry } from "@/tool"
 import { createCiFindingStore } from "@/tool/ci-finding"
@@ -48,24 +48,10 @@ import {
   resolveModePresetSystemPrompt,
 } from "./system"
 
-/** Env names allowed into the `gh` subprocess. Mirrors the audited
- *  `DEFAULT_ENV_ALLOWLIST` (PATH/HOME/LANG/TZ/…) PLUS the gh-specific tokens
- *  the CLI needs to authenticate against the PR API. Every other env var
- *  (operator secrets, downstream tokens) is stripped at the spawn boundary. */
-const CI_ENV_ALLOWLIST_LOCAL: readonly string[] = [
-  "PATH",
-  "HOME",
-  "LANG",
-  "LC_ALL",
-  "TZ",
-  "TMPDIR",
-  // gh-specific — only these auth tokens are exposed to the subprocess.
-  "GH_TOKEN",
-  "GITHUB_TOKEN",
-  // git over https needs SSL roots when running in a minimal CI image.
-  "SSL_CERT_FILE",
-  "SSL_CERT_DIR",
-]
+// Env names allowed into the `gh` subprocess: the SSOT `CI_ENV_ALLOWLIST`
+// (`@/shared/env-scrub`). Audit G5-02 — this file used to keep its own local
+// copy, which had silently diverged from tool/gh/runner.ts's; every other env
+// var (operator secrets, downstream tokens) is stripped at the spawn boundary.
 
 /** Bundle of the ci-bot tool surface + a `gh` runner. By default the `tools`
  *  registry contains the git tools plus READ-ONLY GitHub PR/CI inspection tools.
@@ -93,7 +79,7 @@ const spawnGh = async (
 ): Promise<{ stdout: string; stderr: string; exitCode: number }> => {
   const proc = Bun.spawn([...argv], {
     cwd: repoCwd,
-    env: scrubEnv(CI_ENV_ALLOWLIST_LOCAL),
+    env: scrubEnv(CI_ENV_ALLOWLIST),
     stdout: "pipe",
     stderr: "pipe",
   })

@@ -53,9 +53,22 @@ export const foldSandboxStatus = (
 }
 
 /** Explicit restrictive CLI profiles are an enforcement contract, not a
- *  best-effort preference. */
+ *  best-effort preference. `workspace-write-net` included: it promises the
+ *  workspace FS fence just like `workspace-write` — only network differs. */
 const requiresFullSandboxEnforcement = (profile: string): boolean =>
-  profile === "read-only" || profile === "workspace-write"
+  profile === "read-only" || profile === "workspace-write" || profile === "workspace-write-net"
+
+/** The one degradation a profile's own contract already absorbs: landlock-cli
+ *  cannot enforce network POLICY, but `workspace-write-net` ALLOWS network —
+ *  so a wrapper that did apply the FS fence lost nothing the profile promised.
+ *  Never tolerated when the wrapper itself was not applied. */
+const isToleratedPartialDegrade = (
+  profile: string,
+  wrapped: { readonly sandboxApplied: boolean; readonly degradeReason?: string | undefined },
+): boolean =>
+  profile === "workspace-write-net" &&
+  wrapped.sandboxApplied &&
+  wrapped.degradeReason === "landlock-network-policy-not-enforced"
 
 /** Throw when a profile that PROMISES enforcement did not actually get it. */
 export const assertSandboxEnforced = (
@@ -64,7 +77,8 @@ export const assertSandboxEnforced = (
 ): void => {
   if (
     requiresFullSandboxEnforcement(profile) &&
-    (!wrapped.sandboxApplied || wrapped.degradeReason !== undefined)
+    (!wrapped.sandboxApplied || wrapped.degradeReason !== undefined) &&
+    !isToleratedPartialDegrade(profile, wrapped)
   ) {
     throw new SandboxUnavailableError(
       `QUANTA_SANDBOX=${profile} cannot be enforced: ` +

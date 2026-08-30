@@ -18,10 +18,11 @@
  * We parse that (with a tolerant fallback over `*.json` reports) into
  * `{ resolved, log }`.
  *
- * ── Self-contained, like runner.ts ────────────────────────────────────────
- * Process spawning is a tiny local Bun.spawn helper (NOT an import of
- * @/runtime) and is injectable (`PySwebenchOpts.spawn`/`.probe`) so tests stay
- * hermetic — no real Python, no Docker, no network required.
+ * ── Process boundary ──────────────────────────────────────────────────────
+ * Process spawning delegates to the canonical hardened bench exec
+ * (`./eval/exec` — tree-kill deadline + scrubbed child env, G3-02) and is
+ * injectable (`PySwebenchOpts.spawn`/`.probe`) so tests stay hermetic — no
+ * real Python, no Docker, no network required.
  *
  * ── Availability + fallback ───────────────────────────────────────────────
  * `isPythonSwebenchAvailable()` probes `python -c "import swebench"` (then
@@ -38,7 +39,13 @@ import type { GradeBreakdown } from "@/runner/batch/types"
 import { abortableSleep, abortReasonOf, errMessage, logger, runtimeConfig } from "@/shared"
 import { benchWorkRoot } from "./corpus/paths"
 import type { DatasetFamily } from "./dataset-family-token"
-import { type HarnessConfig, harnessFlags, resolveHarnessConfig } from "./harness"
+import { execArgv } from "./eval/exec"
+import {
+  DOCKER_CLIENT_ENV_EXTRA,
+  type HarnessConfig,
+  harnessFlags,
+  resolveHarnessConfig,
+} from "./harness"
 import type { Instance } from "./types"
 
 export interface SpawnResult {
@@ -50,28 +57,14 @@ export interface SpawnResult {
 /** Injectable process boundary: argv (no shell), cwd, timeout → result. */
 export type Spawn = (argv: string[], cwd: string, timeoutMs: number) => Promise<SpawnResult>
 
-/** Default argv spawn via Bun.spawn (no shell ⇒ no injection). Local copy of
- *  runner.ts's pattern — intentionally NOT imported (bench stays self-
- *  contained per RFC §3.1). */
-export const defaultSpawn: Spawn = async (argv, cwd, timeoutMs) => {
-  const proc = Bun.spawn(argv, {
-    cwd,
-    stdout: "pipe",
-    stderr: "pipe",
-    env: process.env,
-  })
-  const timer = setTimeout(() => proc.kill(), timeoutMs)
-  try {
-    const [stdout, stderr] = await Promise.all([
-      new Response(proc.stdout).text(),
-      new Response(proc.stderr).text(),
-    ])
-    const code = await proc.exited
-    return { code, stdout, stderr }
-  } finally {
-    clearTimeout(timer)
-  }
-}
+/** Default argv spawn (no shell ⇒ no injection) — the canonical hardened
+ *  `execArgv` (tree-kill deadline + scrubbed child env; G3-02 consolidation —
+ *  the local Bun.spawn copy bare-killed the root while `run_evaluation` fans
+ *  out into a docker tree, and leaked the parent env, `OPENAI_API_KEY`
+ *  included). The docker extras keep daemon-endpoint vars flowing to the
+ *  python harness child; provider credentials stay fenced. */
+export const defaultSpawn: Spawn = (argv, cwd, timeoutMs) =>
+  execArgv(argv, cwd, timeoutMs, { extraEnvAllowlist: DOCKER_CLIENT_ENV_EXTRA })
 
 /**
  * Canonical SWE-bench **Verified** dataset id. This tool's identity is a

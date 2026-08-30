@@ -1,100 +1,97 @@
 /**
- * ci-bot preset wiring — RFC may-22 Phase 5 contract test.
+ * CI env-allowlist SSOT — producer-side wiring proof (audit G5-02).
  *
- * Pins the bundle that the apps/agent assembler hands to runAgent when
- * mode = "ci-bot":
- *   - tool list contains git + gh
- *   - protected-branch + network-allowlist defaults are present
- *   - propositional gitWrite check rejects pushes to main
- *   - env allowlist excludes user secrets (OPENAI_API_KEY etc)
+ * History: this file used to pin `ci-bot-policy.ts` — a DEAD parallel
+ * implementation of `buildCiBotWiring` whose `CI_ENV_ALLOWLIST` had zero
+ * runtime callers, while the LIVE paths (mode-presets/ci-bot.ts spawnGh and
+ * tool/gh/runner.ts defaultGhRunner) each kept their own hand-rolled,
+ * already-diverged allowlist. A green run here proved nothing about the env
+ * actually granted to `gh` subprocesses.
+ *
+ * Now it pins the RUNTIME path:
+ *   1. behavioral: `defaultGhRunner` really spawns under the SSOT scrub —
+ *      an SSOT member flows through, a non-member secret is stripped;
+ *   2. SSOT membership: tokens present, provider secrets absent;
+ *   3. drift guard: the two live spawn sites consume `CI_ENV_ALLOWLIST` from
+ *      `@/shared` and declare NO local copy; the dead ci-bot-policy.ts stays
+ *      deleted. Reintroducing a divergent copy turns this red.
+ *
+ * The live tool-surface / branch-only behavior of `buildCiBotWiring` is
+ * covered by tests/unit/apps/agent/mode-presets/ci-bot.test.ts.
  */
-import { describe, expect, test } from "bun:test"
-import { buildCiBotWiring, CI_ENV_ALLOWLIST } from "@/../src/apps/agent/mode-presets/ci-bot-policy"
+import { afterAll, beforeAll, describe, expect, test } from "bun:test"
+import { existsSync, readFileSync } from "node:fs"
+import { fileURLToPath } from "node:url"
+import { defaultGhRunner } from "@/../src/tool/gh"
 
-describe("buildCiBotWiring — tool surface", () => {
-  test("includes git + gh tools", () => {
-    const w = buildCiBotWiring()
-    const names = w.tools.map((t) => t.name)
-    // git
-    expect(names).toContain("git_commit")
-    expect(names).toContain("git_branch_switch")
-    expect(names).toContain("git_status")
-    // gh
-    expect(names).toContain("gh_pr_view")
-    expect(names).toContain("gh_pr_comment")
-    expect(names).toContain("gh_pr_create")
+const repoPath = (rel: string): string =>
+  fileURLToPath(new URL(`../../../../${rel}`, import.meta.url))
+
+describe("CI env allowlist — runtime scrub (defaultGhRunner)", () => {
+  const CANARY_SECRET = "QUANTA_TEST_CI_CANARY_SECRET"
+  let savedSecret: string | undefined
+  let savedSslCertFile: string | undefined
+
+  beforeAll(() => {
+    savedSecret = process.env[CANARY_SECRET]
+    savedSslCertFile = process.env.SSL_CERT_FILE
+    process.env[CANARY_SECRET] = "must-not-leak"
+    process.env.SSL_CERT_FILE = "/tmp/ci-canary-roots.pem"
+  })
+  afterAll(() => {
+    if (savedSecret === undefined) delete process.env[CANARY_SECRET]
+    else process.env[CANARY_SECRET] = savedSecret
+    if (savedSslCertFile === undefined) delete process.env.SSL_CERT_FILE
+    else process.env.SSL_CERT_FILE = savedSslCertFile
   })
 
-  test("does NOT include host-leak tools (no `bash` in ci-bot tool set)", () => {
-    const w = buildCiBotWiring()
-    const names = w.tools.map((t) => t.name)
-    expect(names).not.toContain("bash")
-    expect(names).not.toContain("write")
+  test("spawned child sees SSOT members (SSL_CERT_FILE) but NOT non-member secrets", async () => {
+    // /usr/bin/env prints the child's actual environment — this exercises the
+    // REAL spawn path (Bun.spawn + scrubEnv(CI_ENV_ALLOWLIST)), not a copy of
+    // the list. Before the SSOT unification this failed: runner.ts's local
+    // allowlist dropped SSL_CERT_FILE (divergence from ci-bot.ts's local list).
+    const r = await defaultGhRunner(["/usr/bin/env"], repoPath("."), 10_000)
+    expect(r.code).toBe(0)
+    expect(r.stdout).toContain("SSL_CERT_FILE=/tmp/ci-canary-roots.pem")
+    expect(r.stdout).not.toContain(CANARY_SECRET)
+    expect(r.stdout).not.toContain("must-not-leak")
   })
 })
 
-describe("buildCiBotWiring — defaults", () => {
-  test("network allowlist contains api.github.com + npm registry", () => {
-    const w = buildCiBotWiring()
-    expect(w.networkAllowlist).toContain("api.github.com")
-    expect(w.networkAllowlist).toContain("registry.npmjs.org")
-  })
-
-  test("protected branches contain main/master/develop/production", () => {
-    const w = buildCiBotWiring()
-    expect(w.protectedBranches).toContain("main")
-    expect(w.protectedBranches).toContain("master")
-    expect(w.protectedBranches).toContain("develop")
-    expect(w.protectedBranches).toContain("production")
-  })
-
-  test("CI_ENV_ALLOWLIST membership: GH_TOKEN + PATH present, user secrets absent", () => {
-    // NOTE: this is a static-data membership check on the exported constant,
-    // NOT a runtime env-isolation test. Runtime scrubbing using this list is
-    // tested by sandbox.test.ts (parent-var scrub) and the spawner suites.
+describe("CI env allowlist — SSOT membership", () => {
+  test("GH tokens + runtime essentials present, user secrets absent", async () => {
+    // Dynamic import so the OTHER tests in this file still execute (and show
+    // their own red) when the SSOT export does not exist yet.
+    const { CI_ENV_ALLOWLIST } = await import("@/../src/shared/env-scrub")
     expect(CI_ENV_ALLOWLIST).toContain("GH_TOKEN")
     expect(CI_ENV_ALLOWLIST).toContain("GITHUB_TOKEN")
     expect(CI_ENV_ALLOWLIST).toContain("PATH")
+    expect(CI_ENV_ALLOWLIST).toContain("SSL_CERT_FILE")
     expect(CI_ENV_ALLOWLIST).not.toContain("OPENAI_API_KEY")
     expect(CI_ENV_ALLOWLIST).not.toContain("ANTHROPIC_API_KEY")
     expect(CI_ENV_ALLOWLIST).not.toContain("CLAUDE_API_KEY")
+    expect(Object.isFrozen(CI_ENV_ALLOWLIST)).toBe(true)
   })
 })
 
-describe("buildCiBotWiring — gitWrite propositional helper", () => {
-  test("isGitWriteAllowed rejects git push to main", () => {
-    const w = buildCiBotWiring()
-    expect(w.isGitWriteAllowed("git push origin main")).toBe(false)
-    expect(w.isGitWriteAllowed("git push origin feature/x")).toBe(true)
+describe("CI env allowlist — divergent-copy drift guard", () => {
+  const LIVE_SPAWN_SITES = [
+    "src/apps/agent/mode-presets/ci-bot.ts",
+    "src/tool/gh/runner.ts",
+  ] as const
+
+  test.each([...LIVE_SPAWN_SITES])("%s consumes the @/shared SSOT, no local allowlist", (rel) => {
+    const src = readFileSync(repoPath(rel), "utf8")
+    // No hand-rolled copy: a local array that grants GH_TOKEN is a divergent
+    // allowlist reintroduction (this is exactly what drifted before G5-02).
+    expect(src).not.toContain("CI_ENV_ALLOWLIST_LOCAL")
+    expect(src).not.toMatch(/=\s*(?:Object\.freeze\()?\s*\[[^\]]*"GH_TOKEN"/)
+    // The live spawn site scrubs with the imported SSOT constant.
+    expect(src).toMatch(/import\s*\{[^}]*\bCI_ENV_ALLOWLIST\b[^}]*\}\s*from\s*"@\/shared"/)
+    expect(src).toContain("scrubEnv(CI_ENV_ALLOWLIST)")
   })
 
-  test("branchOnlyReason returns a string when denied, undefined when allowed", () => {
-    const w = buildCiBotWiring()
-    const denied = w.branchOnlyReason("git push origin main")
-    expect(denied).toBeDefined()
-    if (denied) expect(denied).toContain("main")
-    expect(w.branchOnlyReason("git status")).toBeUndefined()
-  })
-
-  test("currentBranch=main + bare `git push` is rejected", () => {
-    const w = buildCiBotWiring()
-    expect(w.isGitWriteAllowed("git push", "main")).toBe(false)
-    expect(w.isGitWriteAllowed("git push", "feature/x")).toBe(true)
-  })
-})
-
-describe("buildCiBotWiring — operator extensions", () => {
-  test("extraAllowedHosts append (dedupe with defaults)", () => {
-    const w = buildCiBotWiring({ extraAllowedHosts: ["my-internal.example.com", "api.github.com"] })
-    expect(w.networkAllowlist).toContain("my-internal.example.com")
-    expect(w.networkAllowlist).toContain("api.github.com")
-    // dedupe: api.github.com appears once
-    expect(w.networkAllowlist.filter((h) => h === "api.github.com").length).toBe(1)
-  })
-
-  test("extraProtectedBranches append", () => {
-    const w = buildCiBotWiring({ extraProtectedBranches: ["release-1.0"] })
-    expect(w.protectedBranches).toContain("release-1.0")
-    expect(w.isGitWriteAllowed("git push origin release-1.0")).toBe(false)
+  test("dead parallel implementation ci-bot-policy.ts stays deleted", () => {
+    expect(existsSync(repoPath("src/apps/agent/mode-presets/ci-bot-policy.ts"))).toBe(false)
   })
 })

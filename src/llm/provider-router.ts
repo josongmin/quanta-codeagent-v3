@@ -124,8 +124,13 @@ export interface RouterInput {
 }
 
 /** Detect the active `CLAUDE_CODE_USE_*` provider (if any). Returns at most
- *  one — if multiple are truthy, throws {@link ProviderConflictError}. */
-const detectClaudeUseEnv = (env: RouterEnv): LlmProvider | undefined => {
+ *  one — if multiple are truthy, throws {@link ProviderConflictError}.
+ *
+ *  EXPORTED as the SSOT for the quartet (G7-02 wiring): the production
+ *  precedence ladder (`@/llm/providers/registry.resolveProvider`) delegates its
+ *  `CLAUDE_CODE_USE_*` layer here so the detection grammar AND the conflict
+ *  policy live in ONE place — the router and the registry can never diverge. */
+export const detectClaudeUseEnv = (env: RouterEnv): LlmProvider | undefined => {
   const active: LlmProvider[] = []
   if (isTruthy(env[CLAUDE_USE_ENV_KEYS.bedrock])) active.push("bedrock")
   if (isTruthy(env[CLAUDE_USE_ENV_KEYS.vertex])) active.push("vertex")

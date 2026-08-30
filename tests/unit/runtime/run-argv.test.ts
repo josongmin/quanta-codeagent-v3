@@ -3,10 +3,12 @@
  * `runShell`, bounded kill/timeout. No shell, no join.
  */
 
-import { describe, expect, test } from "bun:test"
+import { afterEach, describe, expect, test } from "bun:test"
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import { __resetShellSandbox, installShellSandbox, SandboxUnavailableError } from "@/runtime"
+import type { SandboxProfile } from "@/runtime/os-sandbox/types"
 import { runArgv } from "@/runtime/run-argv"
 import type { ScrubbedSpawner } from "@/runtime/scrubbed-spawn"
 import { runShell } from "@/runtime/shell"
@@ -125,5 +127,91 @@ describe("GOAL-03 — runArgv", () => {
 
   test("an empty argv is a TypeError (never a bare spawn)", async () => {
     await expect(runArgv([], { cwd, timeoutMs: 1 })).rejects.toBeInstanceOf(TypeError)
+  })
+})
+
+describe("G8-04 — degraded sandbox slot FAILS CLOSED for every restrictive profile", () => {
+  afterEach(() => {
+    __resetShellSandbox()
+  })
+
+  /** Spawner that, IF EVER CALLED, records the call — a fail-closed path must
+   *  never reach it when enforcement was promised but not delivered. */
+  const makeSentinelSpawner = (): { spawner: ScrubbedSpawner; calls: (readonly string[])[] } => {
+    const calls: (readonly string[])[] = []
+    const spawner: ScrubbedSpawner = (argv) => {
+      calls.push(argv)
+      return {
+        pid: 1,
+        stdout: new ReadableStream({ start: (c) => c.close() }),
+        stderr: new ReadableStream({ start: (c) => c.close() }),
+        exited: Promise.resolve(0),
+        kill: () => undefined,
+      }
+    }
+    return { spawner, calls }
+  }
+
+  const installSlot = (
+    profile: SandboxProfile,
+    wrapped: { sandboxApplied: boolean; degradeReason?: string; prefix?: readonly string[] },
+  ): void => {
+    installShellSandbox({
+      policy: { profile },
+      config: {},
+      wrap: async (argv) => ({
+        argv: [...(wrapped.prefix ?? []), ...argv],
+        sandboxApplied: wrapped.sandboxApplied,
+        ...(wrapped.degradeReason !== undefined ? { degradeReason: wrapped.degradeReason } : {}),
+      }),
+    })
+  }
+
+  test("workspace-write-net + FULL degradation (no wrapper at all) REFUSES the spawn", async () => {
+    // Simulates darwin-without-sandbox-exec / linux-without-bwrap: the slot's
+    // wrap returns honest passthrough. The profile still PROMISES a workspace
+    // FS fence, so the spawn must be refused — not run unfenced.
+    installSlot("workspace-write-net", {
+      sandboxApplied: false,
+      degradeReason: "sandbox-exec-missing",
+    })
+    const { spawner, calls } = makeSentinelSpawner()
+    await expect(
+      runArgv(["bash", "-lc", "echo unfenced"], { cwd, timeoutMs: 1_000, spawner }),
+    ).rejects.toBeInstanceOf(SandboxUnavailableError)
+    expect(calls.length).toBe(0)
+  })
+
+  test("paired control: read-only under the same degradation keeps refusing", async () => {
+    installSlot("read-only", { sandboxApplied: false, degradeReason: "sandbox-exec-missing" })
+    const { spawner, calls } = makeSentinelSpawner()
+    await expect(
+      runArgv(["bash", "-lc", "echo unfenced"], { cwd, timeoutMs: 1_000, spawner }),
+    ).rejects.toBeInstanceOf(SandboxUnavailableError)
+    expect(calls.length).toBe(0)
+  })
+
+  test("paired control: healthy workspace-write-net still runs, WRAPPED", async () => {
+    installSlot("workspace-write-net", {
+      sandboxApplied: true,
+      prefix: ["sandbox-exec", "-p", "x"],
+    })
+    const { spawner, calls } = makeSentinelSpawner()
+    const res = await runArgv(["bash", "-lc", "echo ok"], { cwd, timeoutMs: 1_000, spawner })
+    expect(res.exitCode).toBe(0)
+    expect(calls.length).toBe(1)
+    expect(calls[0]?.slice(0, 3)).toEqual(["sandbox-exec", "-p", "x"])
+  })
+
+  test("paired control: the network-only landlock partial degrade stays TOLERATED on workspace-write-net (net is allowed there)", async () => {
+    installSlot("workspace-write-net", {
+      sandboxApplied: true,
+      degradeReason: "landlock-network-policy-not-enforced",
+      prefix: ["landlock-cli", "--"],
+    })
+    const { spawner, calls } = makeSentinelSpawner()
+    const res = await runArgv(["bash", "-lc", "echo ok"], { cwd, timeoutMs: 1_000, spawner })
+    expect(res.exitCode).toBe(0)
+    expect(calls.length).toBe(1)
   })
 })

@@ -9,9 +9,10 @@
  * resolve to `{ ok: false, … }` so the caller (bench CLI) can report + exit.
  */
 import { errMessage, runtimeConfig } from "@/shared"
+import { execArgv } from "../eval/exec"
 import { hostArch } from "./arch"
 import { type HarnessConfig, harnessFlags, resolveHarnessConfig } from "./config"
-import { type DockerSpawn, listSwebenchImages } from "./images"
+import { DOCKER_CLIENT_ENV_EXTRA, type DockerSpawn, listSwebenchImages } from "./images"
 
 /** Local Spawn type (same shape as python-swebench's; declared here to avoid a
  *  cross-file import cycle between prepare.ts and python-swebench.ts). */
@@ -55,20 +56,13 @@ export interface PrepareImagesResult {
   log: string
 }
 
-const defaultSpawn: Spawn = async (argv, cwd, timeoutMs) => {
-  const proc = Bun.spawn(argv, { cwd, stdout: "pipe", stderr: "pipe", env: process.env })
-  const timer = setTimeout(() => proc.kill(), timeoutMs)
-  try {
-    const [stdout, stderr] = await Promise.all([
-      new Response(proc.stdout).text(),
-      new Response(proc.stderr).text(),
-    ])
-    const code = await proc.exited
-    return { code, stdout, stderr }
-  } finally {
-    clearTimeout(timer)
-  }
-}
+/** Default argv spawn — the canonical hardened `execArgv` (tree-kill deadline
+ *  + scrubbed child env; G3-02 consolidation — the local copy bare-killed the
+ *  root while `prepare_images` fans out into docker builds, and leaked the
+ *  parent env). The docker extras keep daemon-endpoint vars flowing to the
+ *  python child; provider credentials stay fenced. */
+const defaultSpawn: Spawn = (argv, cwd, timeoutMs) =>
+  execArgv(argv, cwd, timeoutMs, { extraEnvAllowlist: DOCKER_CLIENT_ENV_EXTRA })
 
 /** Python interpreter candidates, override-first (mirrors python-swebench.ts). */
 const pythonCandidates = (): readonly string[] => {

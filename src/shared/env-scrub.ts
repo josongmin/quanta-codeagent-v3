@@ -67,6 +67,40 @@ export const DEFAULT_ENV_ALLOWLIST = [
   "PYTEST_ADDOPTS",
 ]
 
+/** CI-scoped env allowlist for `gh` / CI subprocess spawns. THE single source
+ *  of truth (audit G5-02): before this constant existed there were THREE
+ *  hand-rolled copies (mode-presets/ci-bot-policy.ts — dead, zero runtime
+ *  callers; mode-presets/ci-bot.ts spawnGh; tool/gh/runner.ts defaultGhRunner)
+ *  and the live two had already diverged (one granted SSL roots + TZ, the
+ *  other GITHUB_* run context). This list is their union: every name a `gh`
+ *  invocation needs, nothing that can carry an operator credential.
+ *
+ *  Deliberately NARROWER than {@link DEFAULT_ENV_ALLOWLIST} (no proxy vars,
+ *  no VIRTUAL_ENV/PYTHON*) and WIDER only by the GitHub names: the ONLY
+ *  tokens exposed are GH_TOKEN/GITHUB_TOKEN — provider creds
+ *  (OPENAI_API_KEY / ANTHROPIC_API_KEY / …) never flow to `gh`. */
+export const CI_ENV_ALLOWLIST: readonly string[] = Object.freeze([
+  // runtime essentials (subset of DEFAULT_ENV_ALLOWLIST)
+  "PATH",
+  "HOME",
+  "TMPDIR",
+  "LANG",
+  "LC_ALL",
+  "TZ",
+  // GitHub auth — the only tokens a gh subprocess may see.
+  "GH_TOKEN",
+  "GITHUB_TOKEN",
+  // GitHub Actions run context (non-secret identifiers).
+  "GITHUB_REPOSITORY",
+  "GITHUB_REF",
+  "GITHUB_SHA",
+  "GITHUB_ACTIONS",
+  "GITHUB_RUN_ID",
+  // git/gh over https need SSL roots when running in a minimal CI image.
+  "SSL_CERT_FILE",
+  "SSL_CERT_DIR",
+])
+
 /** Build the scrubbed environment: ONLY allowlisted names, copied from `env`
  *  if present. The source env's other entries (API keys, tokens, …) never
  *  leak — absent names are simply omitted.

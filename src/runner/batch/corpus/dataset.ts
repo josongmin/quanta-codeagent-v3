@@ -13,8 +13,11 @@
  * harness. The adapter preserves the upstream gold `patch` as metadata for
  * evaluator sanity checks, but it is never included in the agent prompt.
  *
- * Dependency-light per the bench brief / RFC §3.1: git runs via a tiny local
- * Bun.spawn `exec` (a copy of runner.ts's shape — NOT an import of it).
+ * Git runs via the CANONICAL hardened bench exec (`../eval/exec`): tree-kill
+ * deadline (jun-26) + C9 scrubbed child env. This file used to carry its own
+ * "self-contained" Bun.spawn copy per the bench brief / RFC §3.1, but that
+ * copy diverged from both hardenings (G3-02) — the exact drift class the
+ * canonical helper's own header documents.
  */
 
 import { createHash, randomUUID } from "node:crypto"
@@ -24,6 +27,7 @@ import { join } from "node:path"
 import { errMessage } from "@/shared"
 import { quantaHomeDir } from "@/shared/quanta-home"
 import { runtimeConfig } from "@/shared/runtime-config"
+import { exec } from "../eval/exec"
 import type { Instance } from "../types"
 import { buildProjectEnvUvRunArgv } from "./project-env"
 import type { RepoCheckoutSpec } from "./public-task"
@@ -57,28 +61,9 @@ export interface ExecResult {
  *  hermetic and bench avoids an @/runtime dependency. */
 export type Exec = (cmd: string, cwd: string, timeoutMs: number) => Promise<ExecResult>
 
-/** Default `bash -c` exec via Bun.spawn with a hard timeout. Local copy of
- *  runner.ts's helper (intentionally NOT imported — bench stays self-
- *  contained per RFC §3.1). */
-export const defaultExec: Exec = async (cmd, cwd, timeoutMs) => {
-  const proc = Bun.spawn(["bash", "-c", cmd], {
-    cwd,
-    stdout: "pipe",
-    stderr: "pipe",
-    env: process.env,
-  })
-  const timer = setTimeout(() => proc.kill(), timeoutMs)
-  try {
-    const [stdout, stderr] = await Promise.all([
-      new Response(proc.stdout).text(),
-      new Response(proc.stderr).text(),
-    ])
-    const code = await proc.exited
-    return { code, stdout, stderr }
-  } finally {
-    clearTimeout(timer)
-  }
-}
+/** Default `bash -c` exec — the canonical hardened helper (tree-kill deadline
+ *  + scrubbed child env), not a local Bun.spawn copy (G3-02 consolidation). */
+export const defaultExec: Exec = (cmd, cwd, timeoutMs) => exec(cmd, cwd, timeoutMs)
 
 const str = (v: unknown): string | undefined => (typeof v === "string" ? v : undefined)
 const DEFAULT_REPO_BASE_URL = "https://github.com/"

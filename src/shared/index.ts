@@ -36,7 +36,7 @@ export {
   parseEnvFlag,
   readBool,
 } from "./env-flag"
-export { DEFAULT_ENV_ALLOWLIST, scrubEnvFrom } from "./env-scrub"
+export { CI_ENV_ALLOWLIST, DEFAULT_ENV_ALLOWLIST, scrubEnvFrom } from "./env-scrub"
 export { classify } from "./error-classifier"
 export type { HeaderLookup, LLMErrorKind, LLMProvider } from "./errors"
 export {

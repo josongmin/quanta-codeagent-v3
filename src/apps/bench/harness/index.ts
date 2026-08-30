@@ -35,6 +35,7 @@ export {
 } from "./config"
 export {
   classifyImage,
+  DOCKER_CLIENT_ENV_EXTRA,
   type DockerSpawn,
   defaultDockerSpawn,
   groupByTier,

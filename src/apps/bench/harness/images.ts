@@ -7,6 +7,7 @@
  * mutates Docker state and NEVER throws (daemon down / parse error ⇒ []).
  */
 import { errMessage } from "@/shared"
+import { execArgv } from "../eval/exec"
 import { hostArch } from "./arch"
 
 export type ImageTier = "base" | "env" | "instance"
@@ -59,29 +60,32 @@ const DOCKER_TRANSFER_TIMEOUT_MS = 1_200_000
 const dockerTimeoutMsFor = (argv: readonly string[]): number =>
   argv[0] === "pull" || argv[0] === "push" ? DOCKER_TRANSFER_TIMEOUT_MS : DOCKER_QUERY_TIMEOUT_MS
 
-/** Default `docker` spawn via Bun.spawn (no shell). The timeout is chosen per
- *  verb ({@link dockerTimeoutMsFor}) — a hung daemon must not wedge the caller,
- *  and a multi-GB pull must not be killed for being a multi-GB pull. Swallows a
- *  spawn throw into a non-zero result so {@link listSwebenchImages} upholds its
- *  never-throw contract end-to-end. */
+/** Env names the docker-facing bench children need ON TOP of the scrubbed
+ *  default allowlist: daemon endpoint selection + TLS auth, never provider
+ *  credentials. Mirrors `tool/container-exec/docker-run.ts`'s
+ *  `DOCKER_ENV_ALLOWLIST` (same fence, additive form). Shared with
+ *  `prepare.ts` / `python-swebench.ts`, whose python children reach the
+ *  daemon through the docker SDK's `DOCKER_HOST` handling. */
+export const DOCKER_CLIENT_ENV_EXTRA: readonly string[] = Object.freeze([
+  "DOCKER_HOST",
+  "DOCKER_CONFIG",
+  "DOCKER_CONTEXT",
+  "DOCKER_CERT_PATH",
+  "DOCKER_TLS_VERIFY",
+])
+
+/** Default `docker` spawn — delegates to the canonical hardened `execArgv`
+ *  (tree-kill deadline + scrubbed child env with the docker extras; G3-02
+ *  consolidation — the local Bun.spawn copy bare-killed and leaked the parent
+ *  env). The timeout is chosen per verb ({@link dockerTimeoutMsFor}) — a hung
+ *  daemon must not wedge the caller, and a multi-GB pull must not be killed
+ *  for being a multi-GB pull. Swallows a spawn throw into a non-zero result so
+ *  {@link listSwebenchImages} upholds its never-throw contract end-to-end. */
 export const defaultDockerSpawn: DockerSpawn = async (argv) => {
   try {
-    const proc = Bun.spawn(["docker", ...argv], {
-      stdout: "pipe",
-      stderr: "pipe",
-      env: process.env,
+    return await execArgv(["docker", ...argv], ".", dockerTimeoutMsFor(argv), {
+      extraEnvAllowlist: DOCKER_CLIENT_ENV_EXTRA,
     })
-    const timer = setTimeout(() => proc.kill(), dockerTimeoutMsFor(argv))
-    try {
-      const [stdout, stderr] = await Promise.all([
-        new Response(proc.stdout).text(),
-        new Response(proc.stderr).text(),
-      ])
-      const code = await proc.exited
-      return { code, stdout, stderr }
-    } finally {
-      clearTimeout(timer)
-    }
   } catch (e) {
     return { code: -1, stdout: "", stderr: errMessage(e) }
   }

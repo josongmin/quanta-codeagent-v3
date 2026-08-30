@@ -6,15 +6,22 @@
  * Selection precedence (deterministic, byte-stable):
  *
  *   1. Explicit `id` arg (caller wins).
- *   2. `ANTHROPIC_BEDROCK_BASE_URL` → `bedrock`.
- *   3. `ANTHROPIC_VERTEX_BASE_URL`  → `vertex`.
- *   4. `ANTHROPIC_FOUNDRY_BASE_URL` OR `ANTHROPIC_FOUNDRY_RESOURCE` OR
- *      `QUANTA_USE_FOUNDRY=1` OR `CLAUDE_CODE_USE_FOUNDRY=1` → `foundry`.
+ *   2. `CLAUDE_CODE_USE_{BEDROCK,VERTEX,FOUNDRY,MANTLE}` truthy → that
+ *      transport (ADR-0163 Phase A, delegated to `@/llm/provider-router`'s
+ *      `detectClaudeUseEnv` — the quartet SSOT). TWO truthy keys at once throw
+ *      a typed `ProviderConflictError` (ADR-0163 negative invariant 1: never
+ *      "pick bedrock because alphabetical"). Per ADR-0163 this layer BEATS the
+ *      `ANTHROPIC_*_BASE_URL` keys below.
+ *   3. `ANTHROPIC_BEDROCK_BASE_URL` → `bedrock`.
+ *   4. `ANTHROPIC_VERTEX_BASE_URL`  → `vertex`.
+ *   5. `ANTHROPIC_FOUNDRY_BASE_URL` OR `ANTHROPIC_FOUNDRY_RESOURCE` OR
+ *      `QUANTA_USE_FOUNDRY=1` → `foundry`.
  *      The Foundry signal expanded in ADR-0172 — the SDK accepts EITHER a
  *      `resource` name (synthesises the URL) or a full `baseURL`, so either
- *      env triggers selection. The two `*_USE_*` boolean switches are the
- *      Claude-CLI mirror; `QUANTA_USE_FOUNDRY` is the quanta-native spelling.
- *   5. Fallback → `default` (= public `api.anthropic.com`).
+ *      env triggers selection. `QUANTA_USE_FOUNDRY` is the quanta-native
+ *      spelling; the Claude-CLI `CLAUDE_CODE_USE_FOUNDRY` mirror is handled
+ *      at layer 2 above.
+ *   6. Fallback → `default` (= public `api.anthropic.com`).
  *
  * Unknown ids do NOT throw at `resolveProvider()` time — instead we return a
  * factory that throws `provider-unsupported` lazily on first call. This lets
@@ -27,6 +34,7 @@
  */
 
 import { isTruthyEnv } from "../provider-metadata"
+import { detectClaudeUseEnv } from "../provider-router"
 import { BedrockProviderAdapter } from "./bedrock-adapter"
 import { DefaultProviderAdapter } from "./default-adapter"
 import { FoundryProviderAdapter } from "./foundry-adapter"
@@ -77,7 +85,9 @@ export const FOUNDRY_EXTRA_ENV_KEYS = {
   resource: "ANTHROPIC_FOUNDRY_RESOURCE",
   /** quanta-native boolean switch. */
   quantaUse: "QUANTA_USE_FOUNDRY",
-  /** Claude-CLI mirror — Refugee path; same value space ("1" / "true" / "yes"). */
+  /** Claude-CLI mirror — Refugee path; same value space ("1" / "true" / "yes").
+   *  Consumed at the ladder's layer 2 via the router's `detectClaudeUseEnv`
+   *  (the quartet SSOT), not by the foundry layer below. */
   claudeUse: "CLAUDE_CODE_USE_FOUNDRY",
 } as const
 
@@ -89,7 +99,9 @@ export const FOUNDRY_EXTRA_ENV_KEYS = {
 export const MANTLE_EXTRA_ENV_KEYS = {
   /** quanta-native boolean switch. */
   quantaUse: "QUANTA_USE_MANTLE",
-  /** Claude-CLI mirror — same value space ("1" / "true" / "yes"). */
+  /** Claude-CLI mirror — same value space ("1" / "true" / "yes"). Consumed at
+   *  the ladder's layer 2 via the router's `detectClaudeUseEnv` (the quartet
+   *  SSOT), not by the mantle layer below. */
   claudeUse: "CLAUDE_CODE_USE_MANTLE",
 } as const
 
@@ -136,7 +148,18 @@ export const resolveProvider = (explicit?: string, env: ProviderEnv = {}): Resol
     return { id: trimmed, factory: unsupportedFactory(trimmed) }
   }
 
-  // Layer 2-4 — env precedence. Order is fixed (bedrock → vertex → foundry).
+  // Layer 2 — CLAUDE_CODE_USE_* quartet (ADR-0163 Phase A). Delegated to the
+  // provider router's `detectClaudeUseEnv` — the quartet SSOT — so the truthy
+  // grammar AND the provider-conflict policy live in ONE place. Two truthy
+  // keys throw `ProviderConflictError` (never a silent alphabetical pick).
+  // Per ADR-0163 precedence this layer beats the `ANTHROPIC_*_BASE_URL` keys.
+  const claudeUse = detectClaudeUseEnv(env)
+  if (claudeUse !== undefined && claudeUse in FACTORIES) {
+    const id = claudeUse as ProviderId
+    return { id, factory: FACTORIES[id] }
+  }
+
+  // Layer 3-5 — env precedence. Order is fixed (bedrock → vertex → foundry).
   // Presence (non-empty string), not value, gates selection — the actual
   // URL is consumed by the adapter SDK, not by us.
   const bedrockUrl = env[PROVIDER_ENV_KEYS.bedrock]
@@ -151,22 +174,22 @@ export const resolveProvider = (explicit?: string, env: ProviderEnv = {}): Resol
   //   - `ANTHROPIC_FOUNDRY_BASE_URL`     non-empty  (ADR-0139 legacy)
   //   - `ANTHROPIC_FOUNDRY_RESOURCE`     non-empty  (SDK resource-name path)
   //   - `QUANTA_USE_FOUNDRY`             truthy     (quanta-native switch)
-  //   - `CLAUDE_CODE_USE_FOUNDRY`        truthy     (Claude-CLI mirror)
-  // routes to Foundry. The boolean switches use the canonical truthy grammar
-  // consumed via `isTruthyEnv` — the SSOT in `provider-metadata.ts` (which owns
-  // the accepted-spelling set; audit L6 M11). The registry no longer
-  // hand-rolls a local copy; `provider-metadata` is a plane-clean leaf (it
-  // imports only `provider-types`), so importing it does not create a cycle
-  // nor drag a transitive dependency.
+  // routes to Foundry. (The Claude-CLI `CLAUDE_CODE_USE_FOUNDRY` mirror is
+  // caught at layer 2 above by the router delegation — reading it here again
+  // would be a second, drift-prone consumer of the same key.) The boolean
+  // switch uses the canonical truthy grammar consumed via `isTruthyEnv` — the
+  // SSOT in `provider-metadata.ts` (which owns the accepted-spelling set;
+  // audit L6 M11). The registry no longer hand-rolls a local copy;
+  // `provider-metadata` is a plane-clean leaf (it imports only
+  // `provider-types`), so importing it does not create a cycle nor drag a
+  // transitive dependency.
   const foundryUrl = env[PROVIDER_ENV_KEYS.foundry]
   const foundryResource = env[FOUNDRY_EXTRA_ENV_KEYS.resource]
   const foundryQuantaUse = env[FOUNDRY_EXTRA_ENV_KEYS.quantaUse]
-  const foundryClaudeUse = env[FOUNDRY_EXTRA_ENV_KEYS.claudeUse]
   if (
     (foundryUrl !== undefined && foundryUrl.length > 0) ||
     (foundryResource !== undefined && foundryResource.length > 0) ||
-    isTruthyEnv(foundryQuantaUse) ||
-    isTruthyEnv(foundryClaudeUse)
+    isTruthyEnv(foundryQuantaUse)
   ) {
     return { id: "foundry", factory: FACTORIES.foundry }
   }
@@ -174,19 +197,14 @@ export const resolveProvider = (explicit?: string, env: ProviderEnv = {}): Resol
   // Mantle signal (ADR-0172 W12) — mirrors the Foundry expansion. Any of:
   //   - `ANTHROPIC_MANTLE_BASE_URL`  non-empty  (canonical key)
   //   - `QUANTA_USE_MANTLE`          truthy     (quanta-native switch)
-  //   - `CLAUDE_CODE_USE_MANTLE`     truthy     (Claude-CLI mirror)
-  // routes to Mantle. Placed AFTER foundry so a more-specific transport wins.
+  // routes to Mantle (the `CLAUDE_CODE_USE_MANTLE` mirror is layer 2 above).
+  // Placed AFTER foundry so a more-specific transport wins.
   const mantleUrl = env[PROVIDER_ENV_KEYS.mantle]
   const mantleQuantaUse = env[MANTLE_EXTRA_ENV_KEYS.quantaUse]
-  const mantleClaudeUse = env[MANTLE_EXTRA_ENV_KEYS.claudeUse]
-  if (
-    (mantleUrl !== undefined && mantleUrl.length > 0) ||
-    isTruthyEnv(mantleQuantaUse) ||
-    isTruthyEnv(mantleClaudeUse)
-  ) {
+  if ((mantleUrl !== undefined && mantleUrl.length > 0) || isTruthyEnv(mantleQuantaUse)) {
     return { id: "mantle", factory: FACTORIES.mantle }
   }
 
-  // Layer 5 — fallback to the public api.anthropic.com path.
+  // Layer 6 — fallback to the public api.anthropic.com path.
   return { id: "default", factory: FACTORIES.default }
 }
