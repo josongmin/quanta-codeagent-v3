@@ -409,6 +409,9 @@
     },
     "tests/unit/runtime/single-pid-kill-ban-hellgate.test.ts#SRC": {
       "walked": 3651
+    },
+    "tests/unit/runagent-callsite-authority-fence-hellgate.test.ts#SRC": {
+      "walked": 3352
     }
   }
 }

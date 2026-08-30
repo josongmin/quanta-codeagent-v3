@@ -22,7 +22,6 @@
     "tests/unit/observability/vocabulary-migration.test.ts",
     "tests/unit/orphan-orchestrator-ratchet.test.ts",
     "tests/unit/realtime/voice-session-hellgate.test.ts",
-    "tests/unit/runagent-callsite-authority-fence-hellgate.test.ts",
     "tests/unit/runtime-config-no-dead-knob-ratchet.test.ts",
     "tests/unit/runtime/exec-cluster-spawn-env-scrub-ban-hellgate.test.ts",
     "tests/unit/slice-boundary-config-parity.test.ts",
@@ -416,6 +415,9 @@
     ],
     "tests/unit/runtime/single-pid-kill-ban-hellgate.test.ts": [
       "tests/unit/runtime/single-pid-kill-ban-hellgate.test.ts#SRC"
+    ],
+    "tests/unit/runagent-callsite-authority-fence-hellgate.test.ts": [
+      "tests/unit/runagent-callsite-authority-fence-hellgate.test.ts#SRC"
     ]
   }
 }
