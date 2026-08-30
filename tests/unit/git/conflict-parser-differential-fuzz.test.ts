@@ -34,6 +34,27 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { type ConflictBlock, parseConflicts } from "@/git"
 
+const assertSequentialBlocks = (
+  blocks: readonly ConflictBlock[],
+  expected: ReadonlyArray<{ ours: string; theirs: string }>,
+  count: number,
+): void => {
+  expect(blocks.length).toBe(count)
+  for (let index = 0; index < count; index++) {
+    const block = blocks[index]
+    const expectedBlock = expected[index]
+    if (!block || !expectedBlock) throw new Error("missing expected block")
+    expect(block.ours).toBe(expectedBlock.ours)
+    expect(block.theirs).toBe(expectedBlock.theirs)
+  }
+  for (let index = 1; index < count; index++) {
+    const previous = blocks[index - 1]
+    const current = blocks[index]
+    if (!previous || !current) throw new Error("missing sequential block")
+    expect(current.startOffset).toBeGreaterThan(previous.endOffset)
+  }
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Seeded PRNG — SplitMix32 (deterministic, no global state)
 // ─────────────────────────────────────────────────────────────────────────────
@@ -509,20 +530,8 @@ describe("conflict-parser differential fuzz — PART 2: constructed adversarial"
       const src = parts.join("")
       const r = parseConflicts(src)
       expect(r.diagnostics).toEqual([])
-      expect(r.blocks.length).toBe(n)
-      for (let k = 0; k < n; k++) {
-        const b = r.blocks[k] as ConflictBlock
-        const exp = expected[k]
-        if (!exp) throw new Error("missing expected block")
-        expect(b.ours).toBe(exp.ours)
-        expect(b.theirs).toBe(exp.theirs)
-      }
       // Blocks must be strictly increasing in offset.
-      for (let k = 1; k < n; k++) {
-        const prev = r.blocks[k - 1] as ConflictBlock
-        const cur = r.blocks[k] as ConflictBlock
-        expect(cur.startOffset).toBeGreaterThan(prev.endOffset)
-      }
+      assertSequentialBlocks(r.blocks, expected, n)
     })
   }
 
