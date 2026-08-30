@@ -89,9 +89,6 @@ export interface CostPanel {
    *  (deterministic). Empty when disabled or before any turn. A
    *  heterogeneous-model session is no longer collapsed to the last model. */
   byModel(): readonly ModelCostBucket[]
-  /** Patch any field — used by the REPL to push the active model id when
-   *  it changes mid-session (e.g. `/retry-with`). */
-  update(patch: Partial<CostPanelState>): void
   /** Fold a single-turn usage delta into the cumulative state. Increments
    *  `turns` by 1. `cacheReadTokens` defaults to 0. When `costUsd` is
    *  omitted we derive it from the current model + the new token counts;
@@ -217,6 +214,14 @@ const panelState = (opts: CostPanelOptions) => {
     string,
     { inputTokens: number; outputTokens: number; cacheReadTokens: number; costUsd: number | null }
   >()
+  /**
+   * Per-model buckets are keyed on the model the PROVIDER reported, which is
+   * untrusted text. The key stays verbatim so accounting stays exact; every
+   * RENDER path runs it through `sanitizeModel` instead. `state.model` was
+   * already sanitized at construction, but the per-model rows were not — an id
+   * carrying ANSI escapes reached `/cost` output intact, and the projected
+   * breakdown made that block render where it previously never did.
+   */
   const bucketFor = (
     model: string,
   ): {
@@ -238,34 +243,6 @@ const panelState = (opts: CostPanelOptions) => {
     state.totalCostUsd = (state.totalCostUsd ?? 0) + turnCost
   }
 
-  // Single typed-key assigner — biome's cognitive-complexity budget rejects
-  // the 7-arm `if (patch.X !== undefined) state.X = patch.X` ladder, but a
-  // closed key list driving Object.assign is structurally one decision and
-  // keeps the type-safety (every state field name is statically listed).
-  const PATCH_KEYS = [
-    "sessionStart",
-    "turns",
-    "inputTokens",
-    "outputTokens",
-    "cacheReadTokens",
-    "totalCostUsd",
-    "model",
-  ] as const satisfies ReadonlyArray<keyof CostPanelState>
-
-  const applyPatch = (patch: Partial<CostPanelState>): void => {
-    for (const k of PATCH_KEYS) {
-      const v = patch[k]
-      if (v === undefined) continue
-      // Each branch assigns a same-typed value to the corresponding field.
-      // The `as never` cast avoids a TS variance complaint on the union;
-      // the closed key list keeps the operation safe at runtime.
-      ;(state[k] as unknown) = v
-    }
-    // Model id may arrive via a mid-session patch (e.g. /retry-with) — keep the
-    // same control-byte defense as construction so render() can't be poisoned.
-    state.model = sanitizeModel(state.model)
-  }
-
   // Deterministic model ordering — byte compare (avoids locale drift).
   const sortedModelEntries = (): Array<
     [
@@ -285,8 +262,6 @@ const panelState = (opts: CostPanelOptions) => {
     perModel,
     bucketFor,
     accumulateCost,
-    PATCH_KEYS,
-    applyPatch,
     sortedModelEntries,
     accounting: opts.accounting,
     authoritative: opts.accountingAuthoritative ?? true,
@@ -301,8 +276,8 @@ type PanelCtx = ReturnType<typeof panelState>
  *  that advance them. */
 const accountingOps = (
   ctx: PanelCtx,
-): Pick<CostPanel, "snapshot" | "byModel" | "update" | "incrementTurn"> => {
-  const { enabled, state, applyPatch, sortedModelEntries, accounting, authoritative } = ctx
+): Pick<CostPanel, "snapshot" | "byModel" | "incrementTurn"> => {
+  const { enabled, state, sortedModelEntries, accounting, authoritative } = ctx
   /** The authority's current numbers, or `undefined` when unwired. */
   const projected = (): CostSurfaceView | undefined =>
     accounting === undefined || !authoritative ? undefined : costSurfaceView(accounting.snapshot())
@@ -327,19 +302,15 @@ const accountingOps = (
     byModel: () => {
       if (!enabled) return []
       const view = projected()
-      if (view === undefined) return sortedModelEntries().map(([model, b]) => ({ model, ...b }))
+      if (view === undefined)
+        return sortedModelEntries().map(([model, b]) => ({ model: sanitizeModel(model), ...b }))
       return view.byModel.map((line) => ({
-        model: line.model,
+        model: sanitizeModel(line.model),
         inputTokens: line.promptTokens,
         outputTokens: line.outputTokens,
         cacheReadTokens: line.cacheReadTokens,
         costUsd: line.totalUsd,
       }))
-    },
-
-    update: (patch) => {
-      if (!enabled) return
-      applyPatch(patch)
     },
 
     incrementTurn: (usage) => {
@@ -458,7 +429,7 @@ const renderOps = (ctx: PanelCtx): Pick<CostPanel, "render" | "renderDetailed" |
   }[] => {
     if (accounting === undefined || !authoritative) {
       return sortedModelEntries().map(([model, b]) => ({
-        model,
+        model: sanitizeModel(model),
         inputTokens: b.inputTokens,
         outputTokens: b.outputTokens,
         cacheReadTokens: b.cacheReadTokens,
@@ -466,7 +437,7 @@ const renderOps = (ctx: PanelCtx): Pick<CostPanel, "render" | "renderDetailed" |
       }))
     }
     return costSurfaceView(accounting.snapshot()).byModel.map((l) => ({
-      model: l.model,
+      model: sanitizeModel(l.model),
       inputTokens: l.promptTokens,
       outputTokens: l.outputTokens,
       cacheReadTokens: l.cacheReadTokens,

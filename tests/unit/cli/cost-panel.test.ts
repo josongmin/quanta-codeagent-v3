@@ -100,13 +100,15 @@ describe("createCostPanel: accumulation across turns", () => {
     expect(s.turns).toBe(2)
   })
 
-  test("update() can patch the active model id mid-session", () => {
+  test("a turn is priced by the model IT ran on, not the session label", () => {
+    // The model rides on the usage delta — that is the shipped seam, and the
+    // reason a turn that switches models is priced correctly. `update()` used
+    // to be the way to express this in tests, but production never called it,
+    // so the test was exercising a path no session took.
     const panel = make({ model: "claude-sonnet-4-6" })
     panel.incrementTurn({ inputTokens: 1000, outputTokens: 200 })
-    panel.update({ model: "gpt-4o-mini" })
-    expect(panel.snapshot().model).toBe("gpt-4o-mini")
-    // Subsequent turn uses NEW model's pricing.
-    panel.incrementTurn({ inputTokens: 1000, outputTokens: 100 })
+    // Subsequent turn uses the OTHER model's pricing.
+    panel.incrementTurn({ inputTokens: 1000, outputTokens: 100, model: "gpt-4o-mini" })
     // gpt-4o-mini: $0.15 in / $0.60 out per 1M ⇒ 0.00015 + 0.00006 = 0.00021
     // Combined with the sonnet turn (0.006): ≈ 0.00621
     const s = panel.snapshot()
@@ -193,8 +195,7 @@ describe("createCostPanel.renderDetailed(): boxed /cost form", () => {
 describe("createCostPanel: disabled instance is fully no-op", () => {
   test("enabled=false ⇒ render + renderDetailed return ''", () => {
     const panel = make({ enabled: false })
-    panel.incrementTurn({ inputTokens: 1000, outputTokens: 200, costUsd: 0.5 })
-    panel.update({ model: "gpt-4o" })
+    panel.incrementTurn({ inputTokens: 1000, outputTokens: 200, costUsd: 0.5, model: "gpt-4o" })
     // mutations are dropped when disabled — state stays pristine.
     expect(panel.snapshot().turns).toBe(0)
     expect(panel.snapshot().inputTokens).toBe(0)
@@ -222,9 +223,13 @@ describe("createCostPanel.byModel(): per-model attribution (§23.5)", () => {
   test("heterogeneous session attributes tokens/cost to the active model per turn", () => {
     const panel = make({ model: "claude-sonnet-4-6" })
     panel.incrementTurn({ inputTokens: 1000, outputTokens: 200, costUsd: 0.5 })
-    panel.update({ model: "gpt-4o-mini" })
-    panel.incrementTurn({ inputTokens: 2000, outputTokens: 400, costUsd: 0.25 })
-    panel.incrementTurn({ inputTokens: 100, outputTokens: 50, costUsd: 0.05 })
+    panel.incrementTurn({
+      inputTokens: 2000,
+      outputTokens: 400,
+      costUsd: 0.25,
+      model: "gpt-4o-mini",
+    })
+    panel.incrementTurn({ inputTokens: 100, outputTokens: 50, costUsd: 0.05, model: "gpt-4o-mini" })
     const buckets = panel.byModel()
     expect(buckets.length).toBe(2)
     // sorted by model id (byte) — 'claude…' < 'gpt…'
@@ -240,8 +245,12 @@ describe("createCostPanel.byModel(): per-model attribution (§23.5)", () => {
   test("heterogeneous session ⇒ renderDetailed includes a 'By model' section", () => {
     const panel = make({ model: "claude-sonnet-4-6" })
     panel.incrementTurn({ inputTokens: 1000, outputTokens: 200, costUsd: 0.5 })
-    panel.update({ model: "gpt-4o-mini" })
-    panel.incrementTurn({ inputTokens: 2000, outputTokens: 400, costUsd: 0.25 })
+    panel.incrementTurn({
+      inputTokens: 2000,
+      outputTokens: 400,
+      costUsd: 0.25,
+      model: "gpt-4o-mini",
+    })
     const body = stripAnsi(panel.renderDetailed())
     expect(body).toContain("By model:")
     expect(body).toContain("claude-sonnet-4-6:")
@@ -275,11 +284,16 @@ describe("createCostPanel: audit hardening", () => {
     expect(CONTROL.test(panel.render())).toBe(false)
   })
 
-  test("model id is sanitized on mid-session update() too", () => {
+  test("a hostile model id on a usage delta is sanitized in the per-model row", () => {
+    // The model on a usage event is provider-supplied text, and the per-model
+    // rows print it. Sanitization is at the RENDER boundary now (the bucket key
+    // stays verbatim so the accounting stays exact).
     const panel = make({ model: "ok" })
-    panel.update({ model: "x\x1b[31mRED" })
+    panel.incrementTurn({ inputTokens: 10, outputTokens: 0, model: "x\x1b[31mRED" })
+    const row = panel.byModel().find((b) => b.model.startsWith("x"))
     // only the ESC byte is stripped; the literal "[31m" text remains
-    expect(panel.snapshot().model).toBe("x[31mRED")
+    expect(row?.model).toBe("x[31mRED")
+    expect(panel.renderDetailed()).not.toContain("\x1b[31m")
   })
 
   test("negative caller cost is clamped to 0 (no negative bill)", () => {
@@ -307,12 +321,12 @@ describe("createCostPanel: audit hardening", () => {
       cacheReadTokens: 500,
       costUsd: 0.5,
     })
-    panel.update({ model: "gpt-4o-mini" })
     panel.incrementTurn({
       inputTokens: 2000,
       outputTokens: 400,
       cacheReadTokens: 800,
       costUsd: 0.25,
+      model: "gpt-4o-mini",
     })
     const body = stripAnsi(panel.renderDetailed())
     expect(body).toMatch(/claude-sonnet-4-6:.*500 cache/)

@@ -403,6 +403,67 @@ describe("every CLI cost surface reports the same total", () => {
     expect(detailed).not.toContain("DIVERGES")
   })
 
+  test("a hostile model id cannot inject terminal escapes into /cost", () => {
+    // The model on a usage event is PROVIDER-supplied text. `state.model` was
+    // sanitized at construction, but the per-model bucket keys never were — and
+    // those keys are what the "By model:" rows print. Measured before the fix:
+    // an id carrying an ANSI escape reached the rendered box verbatim, inside
+    // the panel's own border. Projected mode made that block render where it
+    // previously never did, which is what turned a latent hole into a live one.
+    const ESC = String.fromCharCode(27)
+    const hostile = `evil${ESC}[31mMODEL`
+    const usageAccounting = createUsageAccounting()
+    const panel = createCostPanel({
+      model: MODEL,
+      now: () => 1_700_000_000_000,
+      accounting: usageAccounting,
+    })
+    const config = {
+      llm: { stream: async function* () {} },
+      registry: { get: () => undefined, specs: () => [], isReadOnly: () => true },
+      stream: { emit: () => undefined },
+      permission: { mode: "acceptEdits" },
+      messages: [],
+      system: "t",
+      cwd: process.cwd(),
+      maxTurns: 1,
+      signal: new AbortController().signal,
+      sessionId: "sess-1",
+      usageAccounting,
+    } as unknown as AgentConfig
+    emitUsage(config, usage(PARENT_INPUT), undefined, undefined, undefined)
+    emitUsage(
+      config,
+      { ...usage(PARENT_INPUT), model: hostile } as UsageEv,
+      undefined,
+      undefined,
+      undefined,
+    )
+
+    // The accounting keeps the id verbatim — the books must stay exact …
+    expect(usageAccounting.snapshot().byModel.has(hostile)).toBe(true)
+    // … and every RENDER path strips it.
+    expect(panel.renderDetailed()).not.toContain(ESC)
+    expect(panel.byModel().some((b) => b.model.includes(ESC))).toBe(false)
+    // The row is still there, just declawed — not silently dropped.
+    expect(panel.renderDetailed()).toContain("evil")
+
+    // The LEGACY feed renders per-model rows too, from its own map, and needs
+    // the same defense — the fix is at the render boundary, so both arms must
+    // be exercised or one of them can regress unnoticed.
+    const legacy = createCostPanel({ model: MODEL, now: () => 1_700_000_000_000 })
+    legacy.incrementTurn({ inputTokens: 1_000, outputTokens: 0, cacheReadTokens: 0, model: MODEL })
+    legacy.incrementTurn({
+      inputTokens: 1_000,
+      outputTokens: 0,
+      cacheReadTokens: 0,
+      model: hostile,
+    })
+    expect(legacy.renderDetailed()).not.toContain(ESC)
+    expect(legacy.byModel().some((b) => b.model.includes(ESC))).toBe(false)
+    expect(legacy.renderDetailed()).toContain("evil")
+  })
+
   test("the panel and the ledger agree on a turn that used the prompt cache", () => {
     // Root-only, so subagent coverage is NOT the variable here — this isolates
     // the SECOND way the surfaces drift apart: the panel prices cache reads via

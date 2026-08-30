@@ -48,12 +48,15 @@ const GPT_4O = "gpt-4o" //            $2.50 in / $10 out / $1.25 cache (openai)
 
 type Delta = { model: string; inputTokens: number; outputTokens: number; cacheReadTokens?: number }
 
-/** Drive a panel through `deltas`, switching the active model BEFORE each turn
- *  and supplying NO explicit costUsd so the live pricing derivation runs. */
+/** Drive a panel through `deltas`, carrying each turn's model ON the usage
+ *  delta — the shipped seam — and supplying NO explicit costUsd so the live
+ *  pricing derivation runs. (This used to switch the model via `update()`
+ *  first; production never called that, so the helper was driving a path no
+ *  session takes.) */
 const driveDerived = (panel: CostPanel, deltas: Delta[]): void => {
   for (const d of deltas) {
-    panel.update({ model: d.model })
     panel.incrementTurn({
+      model: d.model,
       inputTokens: d.inputTokens,
       outputTokens: d.outputTokens,
       cacheReadTokens: d.cacheReadTokens ?? 0,
