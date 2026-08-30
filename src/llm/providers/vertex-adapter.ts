@@ -30,6 +30,7 @@ import {
   mapRawEvent,
   type OpenSlots,
   type RawEvent,
+  type UsageAccumulator,
 } from "../adapters/anthropic"
 import { resolveAdapterStreamTimeouts } from "../adapters/shared"
 import type { CredentialSource } from "../credential-helper"
@@ -220,9 +221,12 @@ export class VertexProviderAdapter implements LlmProvider {
       ...(input.onChunk ? { onChunk: input.onChunk } : {}),
     })
     const open: OpenSlots = new Map()
+    // ONE accumulator per stream (mirrors anthropic.ts): `message_start`
+    // absorbs input/cache counts that the terminal `message_delta` reads back.
+    const usage: UsageAccumulator = { model: this.model }
     try {
       for await (const ev of guarded) {
-        yield* mapRawEvent(ev, open, { model: this.model })
+        yield* mapRawEvent(ev, open, usage)
       }
     } catch (e) {
       if (e instanceof ProviderError) throw e
