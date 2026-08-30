@@ -46,42 +46,73 @@ const allocBudgetDir = (): string => {
   return dir
 }
 
+const spawnOk = (stdout: string): SpawnResult => ({ code: 0, stdout, stderr: "" })
+const lastArg = (args: readonly string[]): string => args[args.length - 1] ?? ""
+
+const sshControlResponse = (command: string): SpawnResult | undefined => {
+  if (command.includes("READY")) return spawnOk("READY")
+  if (command.includes("run.exit") || command.includes("XQ-RUN-EXIT-XQ")) {
+    return spawnOk("0\n==XQ-RUN-EXIT-XQ==\n")
+  }
+  if (command.includes("mkdir ~/.pool-grade.lock")) return spawnOk("LOCKED")
+  if (command.includes("rmdir ~/.pool-grade.lock")) return spawnOk("")
+  return undefined
+}
+
+const sshReportResponse = (command: string): SpawnResult | undefined => {
+  const report = command.match(/cat ~\/runs\/([^/]+)\/report\.json/)
+  return report === null
+    ? undefined
+    : spawnOk(JSON.stringify({ resolved_ids: [`x__${report[1]}-1`] }))
+}
+
+const sshTailResponse = (
+  command: string,
+  rateLimited: ReadonlySet<string> | undefined,
+): SpawnResult | undefined => {
+  const tail = command.match(/tail -\d+ ~\/runs\/([^/]+)\/run\.log/)
+  return tail !== null && rateLimited?.has(tail[1] ?? "")
+    ? spawnOk("[FAIL][generation_error] z__z-1 (turns=2)")
+    : undefined
+}
+
+const defaultSshResponse = (
+  args: readonly string[],
+  rateLimited: ReadonlySet<string> | undefined,
+): SpawnResult => {
+  const command = lastArg(args)
+  return (
+    sshControlResponse(command) ??
+    sshReportResponse(command) ??
+    sshTailResponse(command, rateLimited) ??
+    spawnOk("")
+  )
+}
+
+const infrastructureResponse = (args: readonly string[]): SpawnResult | undefined => {
+  if (args.includes("get-parameter")) return spawnOk(`${RESOLVED_AMI}\n`)
+  if (args.includes("run-instances")) return spawnOk("i-box")
+  if (args.includes("describe-instances")) return spawnOk("1.2.3.4")
+  return undefined
+}
+
 /** mock spawn: every box healthy, one resolved verdict per chunk; optional 429
  *  marker per runId. Records every call so we can inspect ship order + tokens. */
 const mockSpawn = (opts: { rateLimited?: Set<string>; eventLog?: string[] } = {}) => {
   const calls: Array<{ cmd: string; args: string[]; input?: string }> = []
-  const ok = (s: string): SpawnResult => ({ code: 0, stdout: s, stderr: "" })
-  const routeSsh = (args: string[]): SpawnResult => {
-    const cmd = args[args.length - 1] ?? ""
-    if (cmd.includes("READY")) return ok("READY")
-    if (cmd.includes("run.exit") || cmd.includes("XQ-RUN-EXIT-XQ"))
-      return ok("0\n==XQ-RUN-EXIT-XQ==\n")
-    if (cmd.includes("mkdir ~/.pool-grade.lock")) return ok("LOCKED")
-    if (cmd.includes("rmdir ~/.pool-grade.lock")) return ok("")
-    const r = cmd.match(/cat ~\/runs\/([^/]+)\/report\.json/)
-    if (r) return ok(JSON.stringify({ resolved_ids: [`x__${r[1]}-1`] }))
-    const t = cmd.match(/tail -\d+ ~\/runs\/([^/]+)\/run\.log/)
-    if (t && opts.rateLimited?.has(t[1] ?? ""))
-      return ok("[FAIL][generation_error] z__z-1 (turns=2)")
-    return ok("")
-  }
   const fn: SpawnFn = async (cmd, args, o): Promise<SpawnResult> => {
     calls.push({ cmd, args: [...args], ...(o?.input !== undefined ? { input: o.input } : {}) })
-    if (cmd === "curl") return ok("9.9.9.9")
+    if (cmd === "curl") return spawnOk("9.9.9.9")
     if (cmd === "ssh" && args.some((a) => a.includes("cli.ts run"))) {
-      const runId =
-        (args[args.length - 1] ?? "").match(/~\/runs\/([^/]+)\/instances\.jsonl/)?.[1] ?? "unknown"
+      const runId = lastArg(args).match(/~\/runs\/([^/]+)\/instances\.jsonl/)?.[1] ?? "unknown"
       o?.onData?.(`[PASS] ${runId}__inst-1 (turns=2)\n`)
     }
-    if (args.includes("get-parameter")) return ok(`${RESOLVED_AMI}\n`)
-    if (args.includes("run-instances")) opts.eventLog?.push("launch")
-    return cmd === "ssh"
-      ? routeSsh([...args])
-      : args.includes("run-instances")
-        ? ok("i-box")
-        : args.includes("describe-instances")
-          ? ok("1.2.3.4")
-          : ok("")
+    const infrastructure = infrastructureResponse(args)
+    if (infrastructure !== undefined) {
+      if (args.includes("run-instances")) opts.eventLog?.push("launch")
+      return infrastructure
+    }
+    return cmd === "ssh" ? defaultSshResponse(args, opts.rateLimited) : spawnOk("")
   }
   return { fn, calls }
 }
