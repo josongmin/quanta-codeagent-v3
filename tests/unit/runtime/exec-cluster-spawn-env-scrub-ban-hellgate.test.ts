@@ -74,6 +74,7 @@ import { describe, expect, test } from "bun:test"
 import { readdirSync, readFileSync, statSync } from "node:fs"
 import { join, relative, sep } from "node:path"
 import ts from "typescript"
+import { assertScanPopulation } from "../_shared/scan-population"
 
 const SRC = join(import.meta.dir, "..", "..", "..", "src")
 
@@ -401,6 +402,7 @@ const tsFilesUnder = (dir: string, out: string[] = []): string[] => {
   }
   return out
 }
+const EXEC_CLUSTER_SRC_FILES = tsFilesUnder(SRC)
 
 export interface ClusterFile {
   readonly file: string
@@ -419,7 +421,7 @@ export interface ClusterFile {
  */
 export const deriveClusterFiles = (): ClusterFile[] => {
   const out: ClusterFile[] = []
-  for (const abs of tsFilesUnder(SRC)) {
+  for (const abs of EXEC_CLUSTER_SRC_FILES) {
     const rel = relative(SRC, abs).split(sep).join("/")
     if (EXCLUDED_ROOTS.some((r) => rel.startsWith(r))) continue
     const text = readFileSync(abs, "utf8")
@@ -464,6 +466,11 @@ export const leakySpawnCalls = (text: string): string[] => {
 
 describe("exec-cluster spawn env-scrub ban — every shell spawn routes through the scrubber (R-D3)", () => {
   const cluster = deriveClusterFiles()
+  assertScanPopulation(EXEC_CLUSTER_SRC_FILES, SRC, {
+    collectable: (name) => name.endsWith(".ts") && !name.includes(".test."),
+    id: "tests/unit/runtime/exec-cluster-spawn-env-scrub-ban-hellgate.test.ts#SRC",
+    matched: cluster.map(({ file }) => join(SRC, file)),
+  })
 
   test("ANTI-VACUITY: the derived population is real, and contains the known spawner", () => {
     // A ban that scans nothing passes by construction — defect 1. The floor is

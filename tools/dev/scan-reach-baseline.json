@@ -484,6 +484,10 @@
     },
     "tests/unit/orphan-orchestrator-ratchet.test.ts#DRIVER": {
       "walked": 14
+    },
+    "tests/unit/runtime/exec-cluster-spawn-env-scrub-ban-hellgate.test.ts#SRC": {
+      "walked": 3357,
+      "matched": 3
     }
   }
 }
